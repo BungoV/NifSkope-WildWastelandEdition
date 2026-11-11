@@ -160,7 +160,11 @@ const Key kClouds14[] = { { "coverage", 0.0f, 1.0f, &WwWeatherRecx::coverage },
 	{ "dropletRadius", WwCloudRecx14::kRadiusMin, WwCloudRecx14::kRadiusMax, &WwWeatherRecx::dropletRadius },
 	{ "iceFraction", 0.0f, 1.0f, &WwWeatherRecx::iceFraction },
 	{ "evolution", WwCloudRecx14::kEvolutionMin, WwCloudRecx14::kEvolutionMax, &WwWeatherRecx::evolution },
-	{ "precipitationBase", 0.0f, WwCloudRecx14::kPrecipBaseMax, &WwWeatherRecx::precipitationBase } };
+	{ "precipitationBase", 0.0f, WwCloudRecx14::kPrecipBaseMax, &WwWeatherRecx::precipitationBase },
+	// MODULES1 10c: the cloud shadow law's inputs (weatherrecx.h)
+	{ "shadowOpacity", 0.0f, 1.0f, &WwWeatherRecx::shadowOpacity }, { "shadowStrength", 0.0f, 8.0f, &WwWeatherRecx::shadowStrength },
+	{ "shadowLayerDensity", 25.0f, 400.0f, &WwWeatherRecx::shadowLayerDensity },
+	{ "shadowDeck", 200.0f, 20000.0f, &WwWeatherRecx::shadowDeck } };
 // lane WEATHERRECX1: the 1.3 blocks (SPEC.md ranges)
 const Key kWind[] = { { "speed", 0.0f, 60.0f, &WwWeatherRecx::windSpeed },
 	{ "direction", 0.0f, 360.0f, &WwWeatherRecx::windDirection }, { "gusts", 0.0f, 80.0f, &WwWeatherRecx::gusts },
@@ -459,7 +463,9 @@ QString keyOf( const WwWeatherRecx & r )
 		x += QStringLiteral( " recordRed=0x%1" ).arg( r.recordRed, 0, 16 );
 	// lane CLOUDRECX1: the 1.4 clouds values (only when one is set: the text above is as before otherwise)
 	const struct { const char * n; float v; } c14[] = { { "liquidWater", r.liquidWater }, { "dropletRadius", r.dropletRadius },
-		{ "iceFraction", r.iceFraction }, { "evolution", r.evolution }, { "precipitationBase", r.precipitationBase } };
+		{ "iceFraction", r.iceFraction }, { "evolution", r.evolution }, { "precipitationBase", r.precipitationBase },
+		{ "shadowOpacity", r.shadowOpacity }, { "shadowStrength", r.shadowStrength },
+		{ "shadowLayerDensity", r.shadowLayerDensity }, { "shadowDeck", r.shadowDeck } };
 	for ( const auto & m : c14 )
 		if ( m.v >= 0.0f )
 			x += QStringLiteral( " %1=%2" ).arg( QLatin1String( m.n ), f4( m.v ) );
@@ -510,6 +516,10 @@ const Input kInputs[] = {
 	{ "type", &WwWeatherRecx::type, WwRecClouds,
 		[]( const WwWeatherGen::Out & o, double ) { return WwWeatherGen::cloudTypeNumber( o.cloudType ); } },
 	// lane CLOUDRECX1 (1.4): no generated rung (the type's defaults, cloudrecx14math.h, stand in: today's picture)
+	{ "shadowOpacity", &WwWeatherRecx::shadowOpacity, WwRecClouds, nullptr },	// MODULES1 10c: no generated rung (cloudfusionlaw.h)
+	{ "shadowStrength", &WwWeatherRecx::shadowStrength, WwRecClouds, nullptr },
+	{ "shadowLayerDensity", &WwWeatherRecx::shadowLayerDensity, WwRecClouds, nullptr },
+	{ "shadowDeck", &WwWeatherRecx::shadowDeck, WwRecClouds, nullptr },
 	{ "liquidWater", &WwWeatherRecx::liquidWater, WwRecClouds, nullptr },
 	{ "dropletRadius", &WwWeatherRecx::dropletRadius, WwRecClouds, nullptr },
 	{ "iceFraction", &WwWeatherRecx::iceFraction, WwRecClouds, nullptr },
@@ -713,7 +723,9 @@ WwWeatherRecx resolveOne( const Who & w, const QStringList & roots, const QStrin
 			const bool v14 = !wwCloudRecx14Red();	// lane CLOUDRECX1: the 1.4 keys (the red: the 1.3 block, they are unknown)
 			if ( v14 )
 				known << QStringLiteral( "liquidWater" ) << QStringLiteral( "dropletRadius" ) << QStringLiteral( "iceFraction" )
-					  << QStringLiteral( "evolution" ) << QStringLiteral( "precipitationBase" );
+					  << QStringLiteral( "evolution" ) << QStringLiteral( "precipitationBase" )
+					  << QStringLiteral( "shadowOpacity" ) << QStringLiteral( "shadowStrength" )
+					  << QStringLiteral( "shadowLayerDensity" ) << QStringLiteral( "shadowDeck" );
 			b.unknownKeys( known );
 			const Obj bc{ typeWords( b.o, b.where ), b.where };	// lane CLOUD5: clouds.type words -> numbers
 			if ( v14 ) {

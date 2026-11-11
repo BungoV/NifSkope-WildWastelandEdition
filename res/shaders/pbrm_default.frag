@@ -133,6 +133,8 @@ in vec2 texCoord;
 flat in vec4 A;
 in vec4 C;
 in float rawVertexAlpha;	// the vertex color's own alpha (fo4_default.vert)
+in float wwFarSkyVis;	// MODULES1 10c: a far draw's baked sky factor (fo4_default.vert), 1 elsewhere
+in float wwFarAo;	// MODULES1 10c: a far draw's baked AO (fo4_default.vert farVcAo), 1 elsewhere
 flat in vec4 D;
 
 in mat3 btnMatrix;
@@ -580,6 +582,7 @@ void main()
 
 	// --- ambient + environment ---
 	// AO belongs on ambient only: applying it to a direct lobe double-darkens contact shadows.
+	s.ao *= clamp( wwFarSkyVis, 0.0, 1.0 );	// MODULES1 10c: the far bake's sky occlusion on the ambient (1 elsewhere)
 	vec3 preAmbDiff = outDiff;	// what the block below adds is the ambient's diffuse
 	vec3 preAmbSpec = outSpec;	// lane SPECOCC1: what the block below adds is the cube reflection
 	if ( sceneMode >= 1 && hasStudioCube ) {
@@ -768,7 +771,7 @@ void main()
 	}
 	// lane AO1: the ambient obscurance on the whole lit colour, before the fog
 	if ( cellOn )
-		color.rgb *= cellAoFactor();
+		color.rgb *= cellAoShared( wwFarAo );	// MODULES1 10c: near (screen) and far (baked) through one rule
 	// a cell-lit draw fogs here, once (the interior's fog, or the Lookdev weather's outdoors)
 	if ( cellOn && ( fogOn || wwApOn() ) )	// lane SKYA: the sky's aerial perspective with the fog off too
 		color.rgb = wwFog( max( color.rgb, vec3( 0.0 ) ), -ViewDir );

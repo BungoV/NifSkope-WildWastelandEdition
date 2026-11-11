@@ -45,6 +45,10 @@ struct WwWeatherRecx
 	/* lane CLOUDRECX1 (SPEC.md 1.4 clouds; red WW_CLOUD_RECX14_RED=1 = the 1.3 reader: none of these read). < 0 = not set */
 	float liquidWater = -1.0f, dropletRadius = -1.0f;	//!< g/m^3, um (the weather's main cloud)
 	float iceFraction = -1.0f, evolution = -1.0f, precipitationBase = -1.0f;	//!< 0..1, minutes, metres above sea level
+	/* MODULES1 10c: the cloud shadow law's inputs (clouds.shadowOpacity 0..1, shadowStrength 0..8, shadowLayerDensity
+	 * percent 25..400 (the exponent on a layer's alpha = 100 / percent), shadowDeck metres 200..20000: the highest
+	 * layer's sheet). < 0 = not set: cloudfusionlaw.h's constants. Read by cloudshadow.cpp; red WW_CLOUDSHADOW_RED=norecx */
+	float shadowOpacity = -1.0f, shadowStrength = -1.0f, shadowLayerDensity = -1.0f, shadowDeck = -1.0f;
 	float layerLwc[32], layerRadius[32], layerIce[32], layerAnvil[32], layerType[32];	//!< per layer; < 0 = not set
 	bool densityLegacy = false;	//!< clouds.density came from a file (1.4: the legacy alias, warned)
 	float densityGen = -1.0f;	//!< the density the generated rung (or the file's legacy key) gave, before the 1.4 factor

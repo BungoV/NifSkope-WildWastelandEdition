@@ -495,7 +495,18 @@ vec3 wwAirTailNearJ( vec2 uv, vec4 v )
 	return wwAirTailJ( v, wwVolTex( vec3( uv, ( wwAirTailF( v.a, volSlices.y, volSlices.z ) - 0.5 ) / volSlices.z ), true ) );
 }
 
+/* MODULES1 10c: the lit-decal programs (WW_FX_DECALLIT) take the one-tail shape without WW_CELL_FOGLEAK too: the
+ * old shape inlined a second whole tail (wwVolAirAtFar) and fo4_effectdecalcsm passed the instruction limit with the
+ * leak red set. Same law there: the far grid's tail takes no sun shadow (WW_AIR_FARTAILSH false). Offline red
+ * WW_AIR_TWOTAILS = the old shape (it must refuse) */
 #ifdef WW_CELL_FOGLEAK
+#define WW_AIR_ONETAIL
+#define WW_AIR_FARTAILSH ( ( volAirFlags & 256 ) != 0 )
+#elif defined( WW_FX_DECALLIT ) && !defined( WW_AIR_TWOTAILS )
+#define WW_AIR_ONETAIL
+#define WW_AIR_FARTAILSH false
+#endif
+#ifdef WW_AIR_ONETAIL
 /* lane FOGLEAK1 (fix 4, the loader's WW_CELL_FOGLEAK only): the far grid's closed-form tail took no sun shadow
  * (wwVolAirAtFar), the near grid's did. Both grids' heads below end where their tail starts, and ONE tail takes the
  * sun's shadow for either (one wwAirTailShadow call site: a second inlined copy would tip the programs at the limit).
@@ -569,7 +580,7 @@ vec4 wwVolAirAtUv( vec3 posView, vec2 uv )	// lane VOLPART1: uv = the column (a 
 	float tau = abs( dz ) < 0.5 ? volAirMed.x * len * wwAirCol( z0, z0 + 1.0, gT ) : volAirMed.x * len * wwAirCol( min( z0, z1 ), max( z0, z1 ), gT ) / abs( dz );
 	float Tt = exp( -( tau + wwAirRainTau( posView * ( far / d ), posView ) ) );	// lane RAINFOG2: + the rain fog
 #ifdef WW_SUNSHADOW
-	if ( !farGrid || ( volAirFlags & 256 ) != 0 )
+	if ( !farGrid || WW_AIR_FARTAILSH )
 		J *= wwAirTailShadow( posView / max( length( posView ), 1e-12 ), far, d, tau );
 #endif
 	if ( ( volAirFlags & 4 ) != 0 ) {

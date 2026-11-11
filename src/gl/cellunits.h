@@ -91,6 +91,8 @@ constexpr int AirLampRays = 91;	// lane MODULES1 route (b): the lamps' shadowed 
 constexpr int FxDepth = 83;	// lane WATERFIX7: a particle's soft-depth read of the opaque pass (sampler2D; was 9, a TexCache unit)
 constexpr int WaterFlowAtlas = 67;	// lane WATERFLOWBAKE1: its sparse tiles (usampler2D R32UI; was 11, under Bloom)	// lane WATERWETBAKE1: its sparse tiles (usampler2D R8UI; 47 in the lane)
 
+constexpr int CloudSheetBase = 95;	// lane MODULES1 10c: the cloud shadow map's sheets, a cloud layer's texture each (sampler2D x 8: 95-102)
+constexpr int CloudSheetBlend = 103;	// lane MODULES1 10c: their blend targets during a weather change (sampler2D x 8: 103-110)
 constexpr int kAll[] = { Shadow, Bloom, Lut, Gi, Lights, Csm, Ao, Ssr, GiSlot, Room, FarSlot, FarRec, FarPlaced, AoDecal,
 	AirVol, AirInject, AirCluster, AirGbuf, AirTile, GiHalf, GiHalfKey, TerrShadow, ContactShadow, Ssgi, LightCluster,
 	CardData, CardFrames, ReflProbe, ReflGbufAlb, ReflGbufNd, AirNoise, AtmoAp, AtmoTrans, ContactGbuf, GiAir, CardDepth,
@@ -100,7 +102,10 @@ constexpr int kAll[] = { Shadow, Bloom, Lut, Gi, Lights, Csm, Ao, Ssr, GiSlot, R
 	LandShoreIndex, LandShoreAtlas, WaterFlowIndex, WaterFlowAtlas, WaterOceanB, WaterOceanC, WaterSkyIndex, WaterSkyAtlas, AirTerrain,
 	LandLodDiff, LandLodOuter, LandLodNoise, LandLodDetail, WaterOceanD,
 	LandWaterInfo, LandWaterInfo + 1, LandWaterInfo + 2, UnderDepthMs, FxDepth, DdgiAtlas, Restir, FarStream, PrecipRoof, RainCover,
-	AirLampAtlas, AirLampTable, AirLampRays, AirLampNow, AirLampHist, AirStbn };
+	AirLampAtlas, AirLampTable, AirLampRays, AirLampNow, AirLampHist, AirStbn, AirEnvHist,
+	CloudSheetBase, CloudSheetBase + 1, CloudSheetBase + 2, CloudSheetBase + 3, CloudSheetBase + 4, CloudSheetBase + 5,
+	CloudSheetBase + 6, CloudSheetBase + 7, CloudSheetBlend, CloudSheetBlend + 1, CloudSheetBlend + 2, CloudSheetBlend + 3,
+	CloudSheetBlend + 4, CloudSheetBlend + 5, CloudSheetBlend + 6, CloudSheetBlend + 7 };
 
 constexpr bool distinct()
 {

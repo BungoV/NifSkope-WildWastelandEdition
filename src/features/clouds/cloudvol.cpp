@@ -1342,6 +1342,8 @@ bool wwCloudVolDraw( Scene * scene, const WwCloudVolView & view, QStringList & d
 			? QStringLiteral( "volclouds:low(2d layers lit by the model, %1 %2 %3)" ).arg( double( c[0] ), 0, 'g', 4 )
 				.arg( double( c[1] ), 0, 'g', 4 ).arg( double( c[2] ), 0, 'g', 4 )
 			: QStringLiteral( "volclouds:low(no physical sky: the weather's colour)" ) );
+		// MODULES1 10c: where the Fusion Shaders cloud model is active on this tier
+		drew.last() += QStringLiteral( " fusion=2d_layers(scatter: the clouds: line; shadow sheets: the cloudshadow: line)" );
 		return false;
 	}
 	if ( view.capture )
@@ -1628,6 +1630,8 @@ bool wwCloudVolDraw( Scene * scene, const WwCloudVolView & view, QStringList & d
 		: refusal( s, why );
 	if ( ok && wwCloudFlyTier() > 0 )	// lane CLOUD4
 		s.last += QStringLiteral( " fly=" ) + wwCloudFlySummary();
+	if ( ok )	// MODULES1 10c: the volume tiers have no counterpart in the Fusion Shaders cloud model
+		s.last += QStringLiteral( " fusion=none(the volume tiers have no Fusion Shaders counterpart: left as they are)" );
 	drew << s.last;
 	return ok;
 }

@@ -23,6 +23,7 @@ BSD License - see nifskope.h
 #include "features/sky/atmosphere.h"	// lane ATMO1: the physical sky
 #include "features/weather/weatherrecx.h"	// lane WX1: the weather .recx night block
 #include "features/weather/weathergen.h"	// lane WEATHERRECX1: the generated rung's inputs
+#include "features/clouds/cloudfusionlaw.h"	// MODULES1 10c: the 2D layers' scatter law
 #include "features/clouds/cloudmap.h"	// lane CLOUD1: the cloud map
 #include "features/clouds/cloudvol.h"	// lane CLOUD2: the volume clouds
 #include "features/clouds/cloudlightning.h"	// lane CLOUD6f: the storm share of the lightning
@@ -3284,6 +3285,50 @@ void drawClouds( Scene * scene, const SkyFrame & f, float mul, QStringList & dre
 	 * Low base's shell; red WW_LOOKDEV_RED=cloudnoap = the un-hazed layer that met the horizon band with a seam */
 	const float apDeckR = WwAtmoMath::kRb + wwCloudLayerDeckKm();
 	const bool apOn = atf.valid && atf.trans != 0 && atf.camR < apDeckR && !wwLookdevRed( "cloudnoap" );
+	/* MODULES1 10c: the Fusion Shaders cloud scatter law on the layers (cloudfusionlaw.h, lookdev_clouds.frag
+	 * ldFsOn): the key light's direction and elevation gate, the weather class's response (during a change the two
+	 * classes by the change's share). A share of the layer's own lit colour: no light is added that the layer did
+	 * not have. Red WW_LOOKDEV_RED=cloudnoscatter = the layer as before. */
+	WwCloudFusionLaw::Scatter fs;
+	float fsTo[3] = { 0.0f, 0.0f, 1.0f };
+	QString fsCls;
+	const bool fsRed = wwLookdevRed( "cloudnoscatter" );
+	{
+		float disc[3];
+		wwLookdevShadowLight( fsTo, disc );
+		const float len = std::sqrt( fsTo[0] * fsTo[0] + fsTo[1] * fsTo[1] + fsTo[2] * fsTo[2] );
+		for ( int c = 0; c < 3; c++ )
+			fsTo[c] = len > 0.0f ? fsTo[c] / len : ( c == 2 ? 1.0f : 0.0f );
+		WwWeatherGen::In gin[2];
+		quint32 gid[2] = {};
+		float gpct = 1.0f;
+		const int gn = wwLookdevWeatherGen( gin, gid, gpct );
+		WwCloudFusionLaw::ScatterRow row = WwCloudFusionLaw::scatterRow( nullptr );
+		fsCls = QStringLiteral( "none" );
+		if ( gn >= 1 ) {
+			const char * c0 = WwWeatherGen::classify( gin[0].edid, gin[0].flags, gin[0].precipType, gin[0].thunder );
+			row = WwCloudFusionLaw::scatterRow( c0 );
+			fsCls = QString::fromLatin1( c0 );
+			if ( gn >= 2 ) {
+				const char * c1 = WwWeatherGen::classify( gin[1].edid, gin[1].flags, gin[1].precipType, gin[1].thunder );
+				const WwCloudFusionLaw::ScatterRow old = WwCloudFusionLaw::scatterRow( c1 );
+				const float p = std::clamp( gpct, 0.0f, 1.0f );
+				row.scale = old.scale + ( row.scale - old.scale ) * p;
+				row.warmth = old.warmth + ( row.warmth - old.warmth ) * p;
+				fsCls += QChar( '<' ) + QString::fromLatin1( c1 );
+			}
+		}
+		fs = WwCloudFusionLaw::scatter( float( std::asin( std::clamp( fsTo[2], -1.0f, 1.0f ) ) * 57.29577951 ), row );
+	}
+	const bool fsOn = !fsRed && fs.rim + fs.body > 0.0f;
+	auto scatterUniforms = [&]( NifSkopeOpenGLContext::Program * prog, bool on ) {
+		prog->uni1i( "ldFsOn", on ? 1 : 0 );	// every draw: a program keeps its uniforms between draws
+		if ( !on )
+			return;
+		prog->uni4f( "ldFsSun", FloatVector4( fsTo[0], fsTo[1], fsTo[2], WwCloudFusionLaw::kScatterG ) );
+		prog->uni4f( "ldFsRb", FloatVector4( fs.rim, fs.body, WwCloudFusionLaw::kScatterCeiling, 0.0f ) );
+		prog->uni3f( "ldFsTint", fs.tint[0], fs.tint[1], fs.tint[2] );
+	};
 	auto apUniforms = [&]( NifSkopeOpenGLContext::Program * prog, bool on ) {
 		prog->uni1i( "ldApOn", on ? 1 : 0 );	// every draw: a program keeps its uniforms between draws
 		if ( !on )
@@ -3341,6 +3386,7 @@ void drawClouds( Scene * scene, const SkyFrame & f, float mul, QStringList & dre
 		prog->uni1b( "probe", true );
 		flashUniforms( prog, false );
 		apUniforms( prog, false );
+		scatterUniforms( prog, false );
 		prog->uni2f( "probeUV", s.probeUV[0], s.probeUV[1] );
 		const float a = layerUniforms( prog, s.w, s.probeLayer, -1.0f );
 		static const float quad[12] = { -1, -1, 0, 1, -1, 0, -1, 1, 0, 1, 1, 0 };
@@ -3407,6 +3453,7 @@ void drawClouds( Scene * scene, const SkyFrame & f, float mul, QStringList & dre
 		prog->uni1f( "texBlend", fade ? pct : 0.0f );
 		flashUniforms( prog, lsky.on );
 		apUniforms( prog, apOn );
+		scatterUniforms( prog, fsOn );
 		if ( fade )	// lane WEATHERBLEND3: the same one scroll (red cloudtwo: the new weather's own)
 			prog->uni2f( "uvOffset2", cloudScroll( s, s.w, i, 0, secs ), cloudScroll( s, s.w, i, 1, secs ) );
 		const float * attrs[8] = { m.pos.constData(), m.col.constData(), nullptr, nullptr, nullptr, nullptr, nullptr,
@@ -3424,6 +3471,15 @@ void drawClouds( Scene * scene, const SkyFrame & f, float mul, QStringList & dre
 	if ( !drawn.isEmpty() )	// lane WXBAND: the layers' aerial perspective and its deck
 		drew.last() += apOn ? QStringLiteral( " ap=on(deck=%1km)" ).arg( double( apDeckR - WwAtmoMath::kRb ), 0, 'f', 2 )
 			: QStringLiteral( " ap=off" );
+	if ( !drawn.isEmpty() )	// MODULES1 10c: the layers' scatter law and what fed it
+		drew.last() += fsRed ? QStringLiteral( " scatter=off(red=cloudnoscatter)" )
+			: QStringLiteral( " scatter=%1(fusion:rim=%2,body=%3,g=%4,cap=%5,gate=%6,class=%7:scale=%8:warmth=%9" )
+				.arg( fsOn ? QStringLiteral( "on" ) : QStringLiteral( "off" ) ).arg( double( fs.rim ), 0, 'f', 3 )
+				.arg( double( fs.body ), 0, 'f', 3 ).arg( double( WwCloudFusionLaw::kScatterG ), 0, 'f', 2 )
+				.arg( double( WwCloudFusionLaw::kScatterCeiling ), 0, 'f', 2 ).arg( double( fs.gate ), 0, 'f', 3 )
+				.arg( fsCls ).arg( double( fs.scale ), 0, 'f', 2 ).arg( double( fs.warmth ), 0, 'f', 2 )
+			+ QStringLiteral( ",tint=%1/%2/%3,of=the_layer's_own_lit_colour)" ).arg( double( fs.tint[0] ), 0, 'f', 2 )
+				.arg( double( fs.tint[1] ), 0, 'f', 2 ).arg( double( fs.tint[2] ), 0, 'f', 2 );
 }
 
 } // namespace
@@ -3583,6 +3639,7 @@ void drawStars( Scene * scene, const SkyFrame & f, QStringList & drew )
 	skyState( r, true, false );
 	prog->uni1i( "Tex", 0 );
 	prog->uni1b( "probe", false );
+	prog->uni1i( "ldFsOn", 0 );	// MODULES1 10c: the stars take no cloud scatter (the program keeps its uniforms)
 	// lane WX1: night.stars of the weather's .recx, a multiple of the weather's star colour
 	const WwWeatherRecx & wx = wwWeatherRecx();
 	const float starK = wx.on && wx.stars >= 0.0f ? wx.stars : 1.0f;

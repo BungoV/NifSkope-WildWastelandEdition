@@ -1,3 +1,64 @@
+## MODULES1 round 10c (2026-11-11): the Fusion Shaders cloud model's remaining parts (a sheet per layer, sun-disc taps, hex tiling, the density exponent, the 2D layers' light, the weather file's shadow keys), far baked AO on the PBR far draws, a refused red links again, the leak fade on lit mist cards
+
+Changed, not checked (no build, no window in this round; every touched shader program linked offline through the
+driver in a hidden GL context: four sweep sets: base 483 of 483, Ray-traced GI 322 of 322, leak 322 of 322, retired baked GI 483 of 483). bungo: "I asked for my fusion shaders cloud model".
+
+- **1a. One shadow sheet per cloud layer.** In the 2D-clouds mode the cloud shadow map now lays one sheet per drawn
+  cloud layer at that layer's deck height; a map texel walks the sun line up to each sheet (parallax), and a receiver
+  takes only the sheets above it (the map's height ramp). The sheets are anchored to the world, as in the Fusion
+  Shaders model, not to the eye like the drawn dome. Plain math in `src/features/clouds/cloudsheetmath.h`, shader
+  branch in `res/shaders/features/clouds/cloud_shadowmap.frag`, texture units CloudSheetBase 95..102 and
+  CloudSheetBlend 103..110 (`src/gl/cellunits.h`). Red (WW_CLOUDSHADOW_RED, live, comma list): `bandsheets` = round
+  10b's band law.
+- **1b. Sun-disc penumbra taps.** Each sheet is read over the sun's disc at the sheet's distance, so a high deck
+  throws a softer edge than a low one. Red `notaps`.
+- **1c. Hex tiling.** The layer textures are read through a hex tiling, so the sheet does not repeat in a grid over
+  the far map. Red `nohex`.
+- **1d. The density exponent is applied** (the constant was already in `cloudfusionlaw.h`). Red `nodensity`.
+  Red `noscroll` holds the sheets still.
+- **1e. The 2D layers' light.** The drawn 2D cloud layers take the Fusion Shaders scatter: a rim at the cloud's edge
+  and a body tint, by the phase toward the key light, times the layer's own lit luminance, under a cap, gated by the
+  key light's elevation (the moon at night), scaled by the weather's class (clear 1, storm 0.5, radstorm 0).
+  `res/shaders/features/clouds/lookdev_clouds.frag`, `src/gl/lookdevstage.cpp`, constants in `cloudfusionlaw.h`.
+  Red `WW_LOOKDEV_RED=cloudnoscatter`. Fusion Shaders ships that pass switched off and reads scene luma; here it is on
+  and reads the layer's own colour.
+- **1f. The weather file feeds the shadow, both ends.** Four number keys in a weather .recx `clouds` block:
+  `shadowOpacity` 0..1, `shadowStrength` 0..8, `shadowLayerDensity` 25..400 (percent), `shadowDeck` 200..20000 (m).
+  They are physical additions: read under `physicalWeather` only; absent = the constants. Reader
+  `src/features/weather/weatherrecx.*`, writer `src/features/weather/weathertranslate.py` (the keys go under
+  `_added`). Red `norecx` (WW_CLOUDSHADOW_RED) = the file's keys not read. The 107 shipped weather files were NOT
+  replaced: they differ from this tree's translator output in more than the new keys, and the written values are the
+  constants, so a file without the keys draws the same. Spec: formats branch `cloudshadow-recx-20261111` (not merged).
+- **Lines.** `cloudshadow:` ends with `sheets=n/nc[layer@km:alpha] taps= hex= exponent=(applied|red) step= penumbra=
+  parallax= anchor=world above_receiver= values=...(file|default) reds= rejected=`, or `sheets=0(band_law_of_10b:<why>)`.
+  `clouds:drawn=` ends with `scatter=on|off(...)`. `volclouds:` says `fusion=2d_layers(...)` on the 2D tier and
+  `fusion=none(the volume tiers have no Fusion Shaders counterpart: left as they are)` on the volume tiers.
+- **2. Far baked AO on the PBR far draws.** The PBR programs have no vertex shader of their own (pbrm_* =
+  fo4_default.vert + pbrm_default.frag), so the vertex half was already shared; `pbrm_default.frag` now takes the far
+  bake's AO through the one AO rule (`cellAoShared`) and the far bake's sky factor on the ambient, and the renderer
+  hands the PBR far draws the same type. Both debug maxima apply (WW_LODL_AO_MAX, WW_LODL_SKY_MAX: debug keys only).
+  Red `WW_LODL_AO_RED=nopbr`. The `far baked ao vc:` line now says: far ground carries sky occlusion only, no baked
+  contact AO; and one more line names the PBR far draws.
+- **4. A red of a live feature links again.** fo4_effectdecalcsm with the Ray-traced GI and WW_CELL_FOGLEAK=0 was
+  refused by the driver (too many instructions). The leak-off fog path keeps one tail of the fog law in that variant
+  (`res/shaders/features/air/lookdev_fog.glsl`): 56486 instructions (none) and 56920 (ubo) of 65536. The old shape is
+  the offline define WW_AIR_TWOTAILS and still refuses. The shipping variants (with the leak) are binary equal to the
+  commit before when item 5 is put back (WW_FX_DECAL_NOKEEP; stamp and source hash aside, 4 of 4 binaries).
+- **5. The leak fade reaches lit mist cards.** With the room item 4 freed, the lit-decal programs take the mist
+  cards' leak-fade term (`res/shaders/features/air/cell_volpart.glsl`, +384 instructions; offline way back
+  WW_FX_DECAL_NOKEEP). Tightest program after it: fo4_effectdecalcsm 57322 of 65536 (ubo, with the leak). Red as in round 10b:
+  `WW_CELL_FXLOCAL_RED=noleakfade`.
+- **Known refusals of the retired baked-GI mode** (WW_CELL_PRT, the red of the old baked GI): round 10b listed
+  fo4_effectdecal and fo4_effectdecalcsm (none and ubo) as refused there. Item 4's path covers that mode too, so all
+  four link now; fo4_effectdecalcsm there is the tightest program of all sets, 65210 of 65536 (ubo, 0.5 % left), so
+  any new read in the lit decals can make it refuse again. Left as it is (a retired mode).
+- **Fixed on the way:** round 10b's texture unit AirEnvHist was missing from the unit list `kAll` in
+  `src/gl/cellunits.h` (tests/spells/cell_units_check.py failed on it; it passes now).
+- Offline checks: `tests/features/clouds/cloudsheets/build.sh` (38 bars, the red arm caught); the reader's six bars
+  (absent, fixture, clamp, no switch, every other value equal, red) in the lane notes; syntax check of every edited
+  source and every includer of a changed header. Not shown by a number: equality with round 10b under `bandsheets`
+  and the `norecx` red are by reading the code (the old block is untouched when no sheet is set).
+
 ## AIRPERF1 round 6 (2026-11-11): far water and far tree cards in the traced set, a BLAS per part
 
 Changed, not checked (no build in this round; offline: tests/cellstreamrule/run.sh 26 checks, 20 reds; the kernels

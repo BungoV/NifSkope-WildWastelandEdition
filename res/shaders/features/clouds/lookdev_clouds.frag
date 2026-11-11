@@ -39,6 +39,14 @@ uniform vec4 ldLtCam;	// the camera, world x, y km, height km; w = the deck's he
 uniform int ldApOn;
 uniform sampler2D ldTrans;	// the sky's transmittance LUT
 uniform vec2 ldApR;	// km from the planet's centre: the camera, the deck's base
+/* MODULES1 10c: the Fusion Shaders cloud scatter law on the layer (cloudfusionlaw.h): a lobe toward the key light,
+ * a rim term on the cover's edge + a body term on the cover, capped, as a share of the layer's own lit luminance
+ * x the tint (no light of its own; the layer's blend weighs it by the alpha). ldFsOn 0 (red
+ * WW_LOOKDEV_RED=cloudnoscatter, the light under the gate, a class with no response): the layer as before */
+uniform int ldFsOn;
+uniform vec4 ldFsSun;	// toward the key light (world), the lobe's g
+uniform vec4 ldFsRb;	// rim, body, the cap
+uniform vec3 ldFsTint;
 
 out vec4 fragColor;
 
@@ -61,6 +69,13 @@ void main()
 		}
 	}
 	float a = t.a * vcol.a * alpha;
+	if ( ldFsOn != 0 ) {
+		float edge = clamp( length( 2.0 * vec2( dFdx( a ), dFdy( a ) ) ) * 8.0, 0.0, 1.0 );
+		float g = ldFsSun.w, dn = 1.0 + g * g - 2.0 * g * dot( normalize( wdir ), ldFsSun.xyz );
+		float phase = ( 1.0 - g * g ) / ( 12.566371 * dn * sqrt( max( dn, 1e-6 ) ) );
+		float lum = dot( srgbToLinear( t.rgb ) * vcol.rgb * colLin, vec3( 0.2126, 0.7152, 0.0722 ) ) * skyScale;
+		c += ldFsTint * ( lum * min( ( ldFsRb.x * edge + ldFsRb.y * a ) * phase, ldFsRb.z ) );
+	}
 	if ( ldApOn != 0 ) {
 		vec3 d = normalize( wdir );
 		float r0 = ldApR.x, R1 = ldApR.y, mu = d.z;

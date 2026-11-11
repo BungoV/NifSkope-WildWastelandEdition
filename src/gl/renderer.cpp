@@ -2259,6 +2259,7 @@ bool Renderer::setupProgramPBRM( const NifModel * nif, Program * prog, Shape * m
 	if ( prog->uniLocation( "landSplatDbg" ) >= 0 )	// lane ALLON2: the layer-edge guard, its red and its probe
 		prog->uni1i( "landSplatDbg", wwLandSplatDbg() );
 	wwCellGrassUniforms( scene, mesh->id() );	// lane GRASSMB1: the grass fade, zero on every other shape
+	CellFarInst::vcAoUniform( prog, CellFarInst::vcAoType( mesh->getName() ) );	// MODULES1 10c: the PBR far draws too
 	if ( prog->uniLocation( "landShoreIndex" ) >= 0 )	// lane WATERWETBAKE1: the cell programs (the Wet shore row)
 		wwCellLandShoreUniforms( scene, wwCellIsTerrainShape( mesh ) );
 	if ( prog->uniLocation( "rainWet" ) >= 0 ) {	// lane FO76WEATHER1: rain wetness (gl/cellprecip.h)

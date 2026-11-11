@@ -401,7 +401,20 @@ void vcAoUniform( NifSkopeOpenGLContext::Program * prog, int type )
 	WW_SWITCH_STATIC( float, aoMax, key01( "WW_LODL_AO_MAX" ) );
 	WW_SWITCH_STATIC( float, skyMax, key01( "WW_LODL_SKY_MAX" ) );
 	WW_SWITCH_STATIC( bool, albedo, wwEnv( "WW_LODL_AO_RED" ).trimmed() == "albedo" );
+	// MODULES1 10c: the PBR far draws (pbrm_* programs: fo4_default.vert + pbrm_default.frag) take the same path;
+	// red WW_LODL_AO_RED=nopbr: type 0 there (the grey stays in the vertex colour, as before 10c)
+	WW_SWITCH_STATIC( bool, noPbr, wwEnv( "WW_LODL_AO_RED" ).trimmed() == "nopbr" );
+	const bool pbr = std::string_view( prog->name ).rfind( "pbrm_", 0 ) == 0;
+	if ( pbr && noPbr )
+		type = 0;
 	prog->uni4f( "farVcAo", FloatVector4( aoMax, skyMax, float( type ), albedo ? 1.0f : 0.0f ) );
+	static int pbrSaid = -1;
+	if ( pbr && pbrSaid != ( noPbr ? 0 : 1 ) ) {
+		pbrSaid = noPbr ? 0 : 1;
+		std::fprintf( stderr, "far baked ao vc: PBR far draws (%s): %s\n", std::string( prog->name ).c_str(),
+			noPbr ? "RED WW_LODL_AO_RED=nopbr (the grey stays in the vertex colour)"
+			: "the same farVcAo path and the same two debug maxima as the legacy far draws" );
+	}
 	if ( type <= 0 )
 		return;
 	static int seen = 0;
@@ -414,7 +427,8 @@ void vcAoUniform( NifSkopeOpenGLContext::Program * prog, int type )
 	said[1] = skyMax;
 	said[2] = albedo ? 1.0f : 0.0f;
 	std::fprintf( stderr, "far baked ao vc: rule %s; drawn so far: flat far copy %s (its grey -> the AO rule x max %.3f, "
-		"WW_LODL_AO_MAX), far ground %s (its mask sheet's B, one sky-AO byte -> the sky occlusion x max %.3f, WW_LODL_SKY_MAX), "
+		"WW_LODL_AO_MAX), far ground %s (far ground carries sky occlusion only, no baked contact AO: its mask sheet's B "
+		"-> the sky occlusion x max %.3f, WW_LODL_SKY_MAX), "
 		"instanced rows without the stream %s (mesh grey x row grey -> the AO rule x max %.3f)\n",
 		albedo ? "RED albedo (the grey stays in the vertex colour)" : "shared (cell_ao.glsl cellAoShared / the far sky occlusion)",
 		( seen & 1 ) ? "yes" : "not yet", double( aoMax ), ( seen & 2 ) ? "yes" : "not yet", double( skyMax ),

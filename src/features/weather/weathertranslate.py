@@ -39,6 +39,10 @@ UNIT = 0.0142875	# m per game unit
 VIS_MIN, VIS_MAX = 100.0, 400000.0	# weatherrecx.cpp kVisMin / kVisMax
 HH_MIN, HH_MAX = 20.0, 20000.0
 RAIN_SHARE = 0.35	# radstorm_rain: heavy convective rain, 3.75 g/m3 -> ~25 mm/h
+# MODULES1 10c: the cloud shadow law's inputs, our additions to the clouds block (`_added`; the record has none).
+# The values are the reader's defaults (src/features/clouds/cloudfusionlaw.h): a file with them draws as one without.
+# shadowDeck: 110000 world units x 0.0142875 m. Reader red WW_CLOUDSHADOW_RED=norecx.
+CLOUD_SHADOW = (('shadowOpacity', 1.0), ('shadowStrength', 1.0), ('shadowLayerDensity', 100.0), ('shadowDeck', 1571.625))
 HAZE_ALBEDO = {'clean': (0.97, 0.97, 0.97), 'maritime': (0.99, 0.99, 0.99), 'urban': (0.82, 0.82, 0.82),
                'dust': (0.97, 0.92, 0.80), 'smoke': (0.86, 0.84, 0.80), 'glowing': (0.88, 0.97, 0.82)}	# weathergen.h
 GLOW_MARGIN = 0.05	# haze_albedo: a glowing haze's G above R and B at least this much (bungo 11-08: radstorms are green)
@@ -206,6 +210,13 @@ def translate(w, f):
                                     rate, e['clouds']['liquidWater'] * RAIN_SHARE, e['clouds']['liquidWater'],
                                     RAIN_SHARE))
         diag['rainAdded'] = rate
+    cl = e.get('clouds')
+    if isinstance(cl, dict):
+        for k, x in CLOUD_SHADOW:
+            cl[k] = x
+        cl['_added'] = [k for k, _ in CLOUD_SHADOW]
+        der['clouds.shadow'] = ('added: the cloud shadow law (opacity 0..1, strength = the exponent, shadowLayerDensity '
+                                'percent on each layer alpha, shadowDeck m = the highest layer sheet); the reader defaults')
     d = f.get('data', {})
     der['wind'] = 'record DATA wind speed %s dir %s turbulence %s (generated rung speeds)' % (
         d.get('windSpeed'), d.get('windDir'), d.get('windTurb'))

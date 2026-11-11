@@ -17,6 +17,17 @@ uniform vec2 csSize;	// texels across
 uniform int csMode;
 uniform int csSteps;	// per band (volume mode)
 uniform vec3 csFs;	// csMode 3 (cloudfusionlaw.h): opacity, strength, half the sheet's height km
+/* MODULES1 10c: the sheets of the Fusion Shaders cloud shadow model (cloudsheetmath.h is the host half). One sheet a
+ * weather cloud layer, flat at its altitude; csSheetN 0 = 10b's one plane per band (red bandsheets). */
+#define CS_SHEETS 8
+uniform int csSheetN;
+uniform vec4 csSheetP;	// taps, hex (1 / 0), tan of the sun's radius, the receivers' reference height km (the penumbra's)
+uniform vec4 csSheetA[CS_SHEETS];	// uv per world unit, row-major 2x2
+uniform vec4 csSheetB[CS_SHEETS];	// uv at the zenith + the scroll, the altitude km, the sheet's alpha
+uniform vec4 csSheetC[CS_SHEETS];	// the blend target's share, hex cells per tile
+uniform sampler2D csSheetTex[CS_SHEETS];
+uniform sampler2D csSheetTex2[CS_SHEETS];
+uniform float csUnitKm;	// km a world unit
 
 out vec4 fragColor;
 
@@ -25,6 +36,21 @@ vec3 csLine( vec2 ab, float h )
 {
 	float lam = ( h - ab.y * csE2.z ) / csS.z;
 	return ab.x * csE1 + ab.y * csE2 + lam * csS;
+}
+
+float csSheetAlpha( int i, vec2 st, float mip )
+{
+	float a = textureLod( csSheetTex[i], st, mip ).a;
+	if ( csSheetC[i].x > 0.0 )
+		a = mix( a, textureLod( csSheetTex2[i], st, mip ).a, csSheetC[i].x );
+	return a;
+}
+
+vec2 csSheetHash( vec2 s )
+{
+	s = fract( s * vec2( 1271.5151, 3337.8237 ) );
+	s += dot( s, s.yx + 19.19 );
+	return fract( ( s.xx + s.yy ) * s.yx );
 }
 
 void main()
@@ -56,6 +82,86 @@ void main()
 				od += kCvSigma * d * dh / csS.z;
 			}
 		}
+	} else if ( csMode == 3 && csSheetN > 0 ) {
+		/* MODULES1 10c: one sheet a layer. This texel's sun line meets sheet i at csLine( ab, altitude ): the
+		 * parallax. The sun's disc is a tap pattern on the sheet (radius = the distance along the ray x tan of the
+		 * sun's radius, stretched along the azimuth by 1 / sun z); hex tiling breaks the texture's repeat. The
+		 * light kept is the product of (1 - cover); a receiver above a sheet is not shadowed by it through the
+		 * map's height ramp (x = the highest contributing sheet, the ramp runs down to the lowest). */
+		float kept = 1.0, lo = 1e4;
+		int taps = clamp( int( csSheetP.x + 0.5 ), 1, 16 );
+		bool hex = csSheetP.y > 0.5;
+		vec2 az = dot( csS.xy, csS.xy ) > 1e-10 ? normalize( csS.xy ) : vec2( 1.0, 0.0 );
+		vec2 ac = vec2( -az.y, az.x );
+		float sz = max( csS.z, 1e-3 );
+		float texelWorld = csFit.w / sz / csUnitKm;
+		floorKm = 1e4;
+		for ( int i = 0; i < csSheetN; i++ ) {
+			float altKm = csSheetB[i].z;
+			floorKm = min( floorKm, altKm - csFs.z );
+			vec2 hit = csLine( ab, altKm ).xy / csUnitKm;
+			float t = max( altKm - csSheetP.w, 0.0 ) / csUnitKm / sz;
+			float rAcross = t * csSheetP.z, rAlong = rAcross / sz;
+			mat2 m = mat2( csSheetA[i].x, csSheetA[i].z, csSheetA[i].y, csSheetA[i].w );
+			ivec2 ts = textureSize( csSheetTex[i], 0 );
+			float maxDim = float( max( ts.x, ts.y ) );
+			float uvPerWorld = sqrt( abs( determinant( m ) ) );
+			float spacing = 2.0 * rAlong * sqrt( 1.0 / float( taps ) );
+			float footUv = max( texelWorld, spacing ) * uvPerWorld;
+			float maxMip = log2( max( maxDim, 1.0 ) );
+			float mip = clamp( log2( max( footUv, 1e-8 ) * maxDim ), 0.0, maxMip );
+			vec2 uvC = m * hit + csSheetB[i].xy;
+			vec2 uvAlong = m * ( az * rAlong ), uvAcross = m * ( ac * rAcross );
+			vec2 o0 = vec2( 0.0 ), o1 = vec2( 0.0 ), o2 = vec2( 0.0 );
+			vec3 w = vec3( 1.0, 0.0, 0.0 );
+			float mean = 0.0;
+			if ( hex ) {
+				vec2 p = uvC * csSheetC[i].y;
+				vec2 s = vec2( p.x, -0.57735027 * p.x + 1.15470054 * p.y );
+				vec2 c = floor( s ), f = s - c;
+				float bz = 1.0 - f.x - f.y;
+				vec2 c0, c1, c2;
+				if ( bz > 0.0 ) {
+					c0 = c;
+					c1 = c + vec2( 0.0, 1.0 );
+					c2 = c + vec2( 1.0, 0.0 );
+					w = vec3( bz, f.y, f.x );
+				} else {
+					c0 = c + vec2( 1.0 );
+					c1 = c + vec2( 1.0, 0.0 );
+					c2 = c + vec2( 0.0, 1.0 );
+					w = vec3( -bz, 1.0 - f.y, 1.0 - f.x );
+				}
+				o0 = csSheetHash( c0 );
+				o1 = csSheetHash( c1 );
+				o2 = csSheetHash( c2 );
+				w /= max( length( w ), 1e-6 );
+				mean = csSheetAlpha( i, uvC, maxMip );
+			}
+			float cover = 0.0;
+			vec2 dir = vec2( 1.0, 0.0 );
+			for ( int k = 0; k < taps; k++ ) {
+				float r = taps > 1 ? sqrt( ( float( k ) + 0.5 ) / float( taps ) ) : 0.0;
+				vec2 st = uvC + uvAlong * ( r * dir.x ) + uvAcross * ( r * dir.y );
+				dir = vec2( dir.x * -0.73736887 - dir.y * 0.67549029, dir.x * 0.67549029 + dir.y * -0.73736887 );
+				float a;
+				if ( hex )
+					a = clamp( mean + dot( w, vec3( csSheetAlpha( i, st + o0, mip ), csSheetAlpha( i, st + o1, mip ),
+						csSheetAlpha( i, st + o2, mip ) ) - mean ), 0.0, 1.0 );
+				else
+					a = csSheetAlpha( i, st, mip );
+				cover += clamp( a * csSheetB[i].w, 0.0, 1.0 );
+			}
+			cover = clamp( cover / float( taps ), 0.0, 1.0 );
+			if ( cover <= 0.0 )
+				continue;
+			kept *= 1.0 - cover;
+			zTop = max( zTop, altKm + csFs.z );
+			lo = min( lo, altKm - csFs.z );
+		}
+		zBot = lo;
+		float mask = pow( 1.0 - clamp( ( 1.0 - kept ) * csFs.x, 0.0, 1.0 ), csFs.y );
+		od = -log( max( mask, 1e-4 ) );
 	} else if ( csMode == 3 ) {
 		/* MODULES1 10b-7: the sheets law. Each band's cover is a flat sheet at the band's middle; the light kept is
 		 * the product of (1 - cover); the mask is 1 - saturate((1 - kept) x opacity), then mask ^ strength. */

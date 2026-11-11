@@ -61,8 +61,9 @@ uniform bool volVeil;
 /* MODULES1 10b-3 (bungo: the same sky visibility as the air): the air's env strata (its froxel history: stratum 4 =
  * env rgb + leak fade, stratum 5 = sun gate, open-field share, 1 = valid), fetched nearest at the card's own froxel,
  * through the air's own law airAmbKeep. volEnvGrid = columns, rows, slices, 1 = held (0: no strata, the keep is 1, as
- * the air's with no leak fix). Red WW_CELL_FXLOCAL_RED=noleakfade. Not in the lit-decal programs (at the limit). */
-#ifndef WW_FX_DECALLIT
+ * the air's with no leak fix). Red WW_CELL_FXLOCAL_RED=noleakfade. MODULES1 10c: the lit-decal programs (the mist
+ * cards) take it too (measured room: 8.6k instructions under the limit); offline way back WW_FX_DECAL_NOKEEP. */
+#if !( defined( WW_FX_DECALLIT ) && defined( WW_FX_DECAL_NOKEEP ) )
 uniform sampler3D volEnvHist;
 uniform vec4 volEnvGrid;
 float vpAmbKeep( vec3 posView )
@@ -323,7 +324,7 @@ void vpLight( vec3 posView, vec3 P, vec3 dW, float z, vec3 N, float w, out vec3 
 		const vec3 axes[6] = vec3[6]( vec3( 1, 0, 0 ), vec3( -1, 0, 0 ), vec3( 0, 1, 0 ), vec3( 0, -1, 0 ), vec3( 0, 0, 1 ), vec3( 0, 0, -1 ) );
 		vec3 Am[6];
 		float keepA = 1.0;
-#ifndef WW_FX_DECALLIT
+#if !( defined( WW_FX_DECALLIT ) && defined( WW_FX_DECAL_NOKEEP ) )
 		keepA = vpAmbKeep( posView );
 #endif
 		for ( int a = 0; a < 6; a++ )
