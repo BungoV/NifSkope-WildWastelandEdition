@@ -51,6 +51,9 @@ bool wwCellWaterOn();
 void wwCellWaterSetOn( bool on );
 //! With fo4_water.prog bound for `block`: the record, the sky, the textures. False = draw it the old way.
 bool wwCellWaterUniforms( Scene * scene, int block, int firstTextureUnit );
+/*! DEBUGVIEW1 item 5: once a frame (wwEndlessSeaFollow): the water draws of the last frame per tier (near, far map,
+ *  endless sea), each tier's far fade distance and the far colour law; one "water tiers:" line when they change */
+void wwCellWaterTierFrame();
 //! the water just set up writes linear light into the cell view's HDR frame (the renderer marks its
 //! pixels for the one tone map, cellhdr.h). False for its probes and its reflection-ray pass (raw data).
 bool wwCellWaterWritesLinear();

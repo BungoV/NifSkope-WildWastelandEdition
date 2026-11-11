@@ -588,6 +588,10 @@ void main()
 	s.ao *= clamp( wwFarSkyVis, 0.0, 1.0 );	// MODULES1 10c: the far bake's sky occlusion on the ambient (1 elsewhere)
 	vec3 preAmbDiff = outDiff;	// what the block below adds is the ambient's diffuse
 	vec3 preAmbSpec = outSpec;	// lane SPECOCC1: what the block below adds is the cube reflection
+#ifdef WW_DV
+	wwDvSun = preAmbDiff;	// lane DEBUGVIEW1: outdoors the key light's direct terms (the cascades and the air in)
+	wwDvSpec = preAmbSpec;
+#endif
 	if ( sceneMode >= 1 && hasStudioCube ) {
 		// Studio: the irradiance cube is the radiance average, so Lambert takes it without 1/PI.
 		// FO76's roughness->lod law m = r*(10-4r) over the 7 filtered levels (f76_default.frag:188).
@@ -683,9 +687,16 @@ void main()
 			giE = max( giE - farW * farGP, vec3( 0.0 ) );
 		}
 		vec3 giDiff = rho * keepInd * giE;
+#ifdef WW_DV
+		wwDvGi = giDiff;
+#endif
 		if ( cellInterior ) {
 			outDiff = cDiff + giDiff;
 			outSpec = cSpec;
+#ifdef WW_DV
+			wwDvSun = vec3( 0.0 );	// indoors the sun is the block below's alone
+			wwDvSpec = vec3( 0.0 );
+#endif
 			cE += giE;
 			if ( cellHasDalc && cellGiAmb == 0 ) {
 				outDiff += cellAmbient( sw.N, Pw ) * rho * keepInd * s.ao;	// P picks the Ambient Only volume
@@ -705,6 +716,10 @@ void main()
 				vec3 sunC = cellDirColor * ( cellInterior ? 1.0 : airSunT );	// FOGSUN1: outdoors the sun through the air
 				outDiff += dD * sunC * M_PI;
 				outSpec += dS * sunC * M_PI;
+#ifdef WW_DV
+				wwDvSun = dD * sunC * M_PI;
+				wwDvSpec = dS * sunC * M_PI;
+#endif
 				cE += sunC * max( dot( sw.N, normalize( cellDirTo ) ), 0.0 );
 			}
 			// the material's cubemap, lit by the light reaching this point (a dark corner reflects dark);
@@ -726,6 +741,9 @@ void main()
 				                    mix( cellCubeMat.x * sg.r, landLodK.y, landLodV ), envReflection );
 			}
 			outSpec += cubeK * cE;
+#ifdef WW_DV
+			wwDvRefl = cubeK * cE;
+#endif
 		} else if ( cellGiSky ) {
 			// the grid's sky stands in for the weather's unshadowed ambient by its valid share,
 			// and takes the material's AO as that ambient did
@@ -775,6 +793,9 @@ void main()
 	// lane AO1: the ambient obscurance on the whole lit colour, before the fog
 	if ( cellOn )
 		color.rgb *= cellAoShared( wwFarAo );	// MODULES1 10c: near (screen) and far (baked) through one rule
+#ifdef WW_DV
+	vec3 wwDvLit = max( color.rgb, vec3( 0.0 ) );	// lane DEBUGVIEW1: the lit colour before the fog
+#endif
 	// a cell-lit draw fogs here, once (the interior's fog, or the Lookdev weather's outdoors)
 	if ( cellOn && ( fogOn || wwApOn() ) )	// lane SKYA: the sky's aerial perspective with the fog off too
 		color.rgb = wwFog( max( color.rgb, vec3( 0.0 ) ), -ViewDir );
@@ -833,6 +854,26 @@ void main()
 	}
 	if ( cellOn && ( cellProbe == 60 || cellProbe == 61 ) )
 		fragColor = cellSsrProbeOut( cellSsrScene );
+#endif
+#ifdef WW_DV
+	if ( cellOn && wwDebugView != 0 ) {	// lane DEBUGVIEW1: one pass or term in place of the pixel (debug_view.glsl)
+		wwDvAmb = max( outDiff - wwDvSun, vec3( 0.0 ) );	// PBR: the ambient, the GI and the lamps, one sum
+		if ( !cellInterior )
+			wwDvRefl = max( outSpec - wwDvSpec, vec3( 0.0 ) );	// outdoors the environment and the lamps' specular
+		float dvSh = 1.0, dvCl = 1.0;
+#ifdef WW_SUNSHADOW
+		dvSh = wwSunShadowGeo( -ViewDir );
+		dvCl = ussCloudT( -ViewDir );
+#endif
+		vec3 dvT = vec3( 1.0 ), dvIn = vec3( 0.0 );
+		if ( fogOn || wwApOn() ) {
+			dvIn = max( wwFog( vec3( 0.0 ), -ViewDir ), vec3( 0.0 ) );
+			dvT = clamp( wwFog( vec3( 1.0 ), -ViewDir ) - dvIn, 0.0, 1.0 );
+		}
+		fragColor = vec4( wwDvSurface( s.base, cellWorldDir( s.N ), 1.0 - s.rough, s.metal, wwFarAo, cellAoFactor(),
+			dvSh, dvCl, pbrEmitLin, dvT, dvIn, wwDvLit, cellHdr, length( ViewDir ) * length( cellRow[0].xyz ), wwDvOwner ),
+			fragColor.a );
+	}
 #endif
 	/* a blended-ground pass (src/cellsplat.h): the RAW vertex alpha (C.a may be overridden) is this pass's share;
 	 * an opaque base is scaled by it, a layer is added at it (SRC_ALPHA, ONE). */

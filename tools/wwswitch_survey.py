@@ -72,6 +72,7 @@ OVERRIDES = {
     'WW_CELL_RT_PRESET': ('shaders', 'the RT quality preset: Medium+ is the loader define WW_CELL_RESTIR (Shader::load via rtddgiRestirShaderDefine) and turns the volume on; rtddgiRestirPass and the cube pass read it every frame (RESTIRDI1)'),
     'WW_CELL_RESTIR_RED': ('live', 'restirRedBits read every frame by rtddgiRestirPass: the kernel red bits (RESTIRDI1)'),
     'WW_CELL_LIT_PROBE': ('shaders', 'st() re-reads it on a live set (a uniform); a probe also adds the loader define WW_CELL_VIEWS (Shader::load via wwCellViewsShaderDefine), so a set reloads the shaders (FO4CELLGI1)'),
+    'WW_DEBUG_VIEW': ('shaders', 'DEBUGVIEW1: wwDebugViewId re-reads the pin per frame (a uniform); a view on adds the loader define WW_DEBUG_VIEWS (Shader::load via wwDebugViewShaderDefine), so a set reloads the shaders, no reopen (as WW_CELL_PASS)'),
     'WW_CELL_PASS': ('shaders', 'st() re-reads the pin on a live set (a uniform); a Pass also adds the loader define WW_CELL_VIEWS (Shader::load via wwCellViewsShaderDefine), so a set reloads the shaders (FO4CELLGI1)'),
     'WW_CELL_VIEWS_RED': ('shaders', 'read at every shader load by wwCellViewsShaderDefine: =1 keeps the probe and pass views in every cell program (FO4CELLGI1)'),
     'WW_CELL_AIRZONE': ('shaders', 'the zones read is a #define every shader gets at load (Shader::load via wwAirZoneShaderDefine); the gi blocks merge at the GI build (AIRZONE1)'),

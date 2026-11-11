@@ -247,7 +247,8 @@ struct SetState
 	unsigned frame = 0;
 	float airAmb = 0.3f;
 	bool pinPar = false, pinDist = false;
-	double dist = 14000.0;
+	double dist = 24000.0;	// DEBUGVIEW1 item 4: bungo 11-11, his FO4CS setting (~24k; FO4CS code default 14000 = red WW_SHADOW_DIST_RED=1)
+	const char * distSrc = "default";
 	double pinElev = 0, pinAz = 0;
 	int view = 0;
 	bool sync = false;
@@ -342,11 +343,18 @@ SetState & ss()
 		}
 		bool dok = false;
 		const double de = wwEnvStr( "WW_SHADOW_DISTANCE" ).toDouble( &dok );
+		// DEBUGVIEW1 item 4: the default reach is bungo's FO4CS fCascadeShadowDistanceUnits (~24k); FO4CS's code default is 14000 (the red)
+		const bool distRed = wwEnvInt( "WW_SHADOW_DIST_RED" ) == 1;
+		const double distDef = distRed ? 14000.0 : 24000.0;
+		s.dist = distDef;
+		s.distSrc = distRed ? "red 14000 (WW_SHADOW_DIST_RED; FO4CS code default)" : "bungo 11-11 (FO4CS user setting ~24k; FO4CS code default 14000)";
 		if ( dok ) {
 			s.dist = std::clamp( de, 2000.0, 24000.0 );
 			s.pinDist = true;
-		} else if ( !wwHarnessRun() ) {
-			s.dist = std::clamp( q.value( QLatin1StringView( kDistanceKey ), 14000.0 ).toDouble(), 2000.0, 24000.0 );
+			s.distSrc = "WW_SHADOW_DISTANCE";
+		} else if ( !wwHarnessRun() && q.contains( QLatin1StringView( kDistanceKey ) ) ) {
+			s.dist = std::clamp( q.value( QLatin1StringView( kDistanceKey ), distDef ).toDouble(), 2000.0, 24000.0 );
+			s.distSrc = "saved Shadow Distance setting";
 		}
 		const QStringList pin = wwEnvStr( "WW_SUNPATH_PIN" ).split( QChar( ',' ), Qt::SkipEmptyParts );
 		if ( pin.size() == 2 ) {
@@ -1725,12 +1733,16 @@ void wwShadowSetAirAmbientShare( float a ) { ss().airAmb = std::clamp( a, 0.05f,
 
 double wwShadowDistance() { return ss().dist; }
 
+const char * wwShadowDistanceSource() { return ss().distSrc; }
+
 void wwShadowSetDistance( double d )
 {
 	SetState & s = ss();
 	s.dist = std::clamp( d, 2000.0, 24000.0 );
-	if ( !s.pinDist )
+	if ( !s.pinDist ) {
 		QSettings().setValue( QLatin1StringView( kDistanceKey ), s.dist );
+		s.distSrc = "Shadow Distance setting";
+	}
 }
 
 int wwShadowCascadeTier() { return ss().cascade; }

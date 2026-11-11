@@ -32,6 +32,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "renderer.h"
 #include "features/shared/cellpasstime.h"	// lane PERF2: the draws' CPU setup time
+#include "features/overlays/debugview.h"	// lane DEBUGVIEW1: the farowner view's owner
 #include "features/near/celldrawstate.h"	// lane PERF3
 #include "features/near/celldrawpacket.h"	// lane GAPPERF-BINDLESS
 #include "features/near/cellbindless.h"	// lane BINDLESS2
@@ -2298,6 +2299,8 @@ bool Renderer::setupProgramPBRM( const NifModel * nif, Program * prog, Shape * m
 	wwCellGrassUniforms( scene, mesh->id() );	// lane GRASSMB1: the grass fade, zero on every other shape
 	CellFarInst::vcAoUniform( prog, CellFarInst::vcAoType( mesh->getName() ) );	// MODULES1 10c: the PBR far draws too
 	wwLodViewUniform( prog, mesh );	// lane LODLIVE1
+	if ( wwDebugViewId() && prog->uniLocation( "wwDvOwner" ) >= 0 )	// lane DEBUGVIEW1: who drew the shape
+		prog->uni1i( "wwDvOwner", wwDebugViewOwner( scene, mesh ) );
 	if ( prog->uniLocation( "landShoreIndex" ) >= 0 )	// lane WATERWETBAKE1: the cell programs (the Wet shore row)
 		wwCellLandShoreUniforms( scene, wwCellIsTerrainShape( mesh ) );
 	if ( prog->uniLocation( "rainWet" ) >= 0 ) {	// lane FO76WEATHER1: rain wetness (gl/cellprecip.h)
@@ -2527,6 +2530,8 @@ bool Renderer::setupProgramCE1( const NifModel * nif, Program * prog, Shape * me
 		wwCellGrassUniforms( scene, mesh->id() );	// lane GRASSMB1: the grass fade, zero on every other shape
 		CellFarInst::vcAoUniform( prog, CellFarInst::vcAoType( mesh->getName() ) );	// MODULES1 10b-2: zero on every other shape
 		wwLodViewUniform( prog, mesh );	// lane LODLIVE1
+		if ( wwDebugViewId() && prog->uniLocation( "wwDvOwner" ) >= 0 )	// lane DEBUGVIEW1: who drew the shape
+			prog->uni1i( "wwDvOwner", wwDebugViewOwner( scene, mesh ) );
 		if ( prog->uniLocation( "fgMode" ) >= 0 )	// lane FARDRAW1: a live-ground twin's grid, layers and decals
 			CellFarGround::uniforms( scene, prog );
 		if ( prog->uniLocation( "landShoreIndex" ) >= 0 )	// lane WATERWETBAKE1: the cell programs (the Wet shore row)

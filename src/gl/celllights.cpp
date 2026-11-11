@@ -75,6 +75,7 @@ BSD License - see nifskope.h
 #include "features/lights/celllights_p.h"	// lane MODULES1 (lights): the state the lamps share
 #include "features/exposure/physunits.h"	// lane PHYSUNITS1: real units
 #include "gl/dalcfit.h"	// lane SKYLIGHT1: the up / down poles read exactly
+#include "features/overlays/debugview.h"	// lane DEBUGVIEW1: a debug view is a probe pass
 
 //! lane PHYSUNITS1: an interior's ambient, directional and fog factor (its lamps' median x Game Light Brightness); 1 else
 static float physInteriorK( const WwCellLighting * L )
@@ -685,7 +686,9 @@ bool wwCellProbePass( Scene * scene )
 	if ( s.red & 4096 )
 		return false;	// WW_CELL_LIT_RED=probefx: the effects write over the probes
 	// MODULES1 R6-8: a shadow debug view is a probe pass too (no effects over it, no linear frame, no post chain)
-	return ( s.probe > 0 || s.fogProbe > 0 || ( scene && wwCellPassFor( scene->nifModel ) > 0 ) || wwShadowViewPass( scene ) )
+	// DEBUGVIEW1: so is a debug view (the pixel is a term, not light: no linear frame, no effects over it, no post)
+	return ( s.probe > 0 || s.fogProbe > 0 || ( scene && wwCellPassFor( scene->nifModel ) > 0 ) || wwShadowViewPass( scene )
+	         || wwDebugViewId() != 0 )
 		&& wwCellLightsWanted( scene );
 }
 
@@ -2138,6 +2141,8 @@ void wwCellLightsUniforms( Scene * scene )
 	rec.b( prog, "cellInterior", !outdoor );	// lane INTSKY1: a sunlit interior shades as outdoors
 	rec.f3( prog, "cellCenter", L->center[0], L->center[1], L->center[2] );
 	rec.i( prog, "cellProbe", s.measuring ? 6 : s.probe );
+	if ( const int dv = wwDebugViewId() )
+		rec.i( prog, "wwDebugView", dv );	// lane DEBUGVIEW1: only while a view is on (off: no call)
 	// a harness reads a dark linear frame through 8 bits; the imagespace's own measure stays x 1
 	WW_SWITCH_STATIC( float, probeGain, wwEnvIsSet( "WW_CELL_LIT_PROBE_GAIN" )
 		? std::max( wwEnv( "WW_CELL_LIT_PROBE_GAIN" ).toFloat(), 0.0f ) : 1.0f );

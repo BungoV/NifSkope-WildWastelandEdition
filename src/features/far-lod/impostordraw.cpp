@@ -9,6 +9,7 @@ BSD License - see nifskope.h
 
 #include "gamemanager.h"
 #include "gl/celllights.h"
+#include "features/clouds/cloudshadow.h"	// lane DEBUGVIEW1 item 2: the cards' sun under the clouds
 #include "features/exposure/cellhdr.h"
 #include "features/shared/cellpasstime.h"
 #include "gl/cellunits.h"
@@ -203,6 +204,16 @@ bool bindSheet( Scene * scene, NifSkopeOpenGLContext::Program * prog,
 static bool wwCardLightRed()
 {
 	WW_SWITCH_STATIC( bool, red, !wwSwitchEcho( "far cards take the hour's light", wwEnv( "WW_CELL_FARLOD_RED" ) != "cardlight" ) );
+	return red;
+}
+
+/* lane DEBUGVIEW1 item 2 (bungo's glowing far trees under CommonwealthOvercast): the card's sun is cut by the clouds' shadow
+ * and the air's transmittance as the near trees' (impostor_oct.frag cardCloudT); before, it was never cut. Red
+ * WW_CELL_FARLOD_RED=cardsun: the uncut sun. */
+static bool wwCardSunRed()
+{
+	WW_SWITCH_STATIC( bool, red, !wwSwitchEcho( "far cards' sun through the clouds' shadow and the air (DEBUGVIEW1; red WW_CELL_FARLOD_RED=cardsun)",
+		wwEnv( "WW_CELL_FARLOD_RED" ) != "cardsun" ) );
 	return red;
 }
 
@@ -690,6 +701,8 @@ bool ImpostorDraw::drawCard( Scene * scene, const ImpostorCardSet & set,
 		wwLookdevFogUniforms( scene );
 		wwCellLightsUniforms( scene );
 		prog->uni1b( "cardLightRed", wwCardLightRed() );
+		prog->uni1b( "cardSunRed", wwCardSunRed() );	// lane DEBUGVIEW1 item 2
+		wwCloudShadowUniforms( scene, prog, false, 0.0f );
 	}
 	if ( batch.on && fresh ) {
 		batch.prog = prog;
@@ -1229,6 +1242,8 @@ bool ImpostorDraw::drawCardsInstanced( Scene * scene, const QVector< InstCard > 
 		wwLookdevFogUniforms( scene );
 		wwCellLightsUniforms( scene );
 		prog->uni1b( "cardLightRed", wwCardLightRed() );
+		prog->uni1b( "cardSunRed", wwCardSunRed() );	// lane DEBUGVIEW1 item 2
+		wwCloudShadowUniforms( scene, prog, false, 0.0f );
 	}
 	prog->uni1i( "cardData", WwCellUnit::CardData );
 	prog->uni1i( "cardFrames", WwCellUnit::CardFrames );

@@ -143,6 +143,8 @@ void wwShadowSetParMask( int mask );
 //! the air tail's ambient share (celllights.cpp, from the weather's DALC and sun; 0.3 until set)
 void wwShadowSetAirAmbientShare( float a );
 double wwShadowDistance();
+//! DEBUGVIEW1 item 4: where the Shadow Distance came from (the env pin, his saved setting, the default, the red)
+const char * wwShadowDistanceSource();
 void wwShadowSetDistance( double d );
 //! fix 10-22: a terrain shadow sweep is owed, running or uploading (the live driver's pictures wait for it)
 bool wwTerrainShadowPending();

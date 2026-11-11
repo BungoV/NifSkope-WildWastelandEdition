@@ -308,6 +308,7 @@ HEADERS += \
 	src/features/shadows/contactlines.h \
 	src/features/lights/celllampshadow.h \
 	src/features/lights/lightmeas.h \
+	src/features/overlays/debugview.h \
 	src/gl/celllooks.h \
 	src/features/lights/cellnifxlights.h \
 	src/features/ao/cellaodecalgl.h \
@@ -667,6 +668,7 @@ SOURCES += \
 	src/features/gi/cellssgi.cpp \
 	src/features/lights/celllampshadow.cpp \
 	src/features/lights/lightmeas.cpp \
+	src/features/overlays/debugview.cpp \
 	src/gl/celllooks.cpp \
 	src/features/lights/cellnifxlights.cpp \
 	src/features/ao/cellaodecalgl.cpp \

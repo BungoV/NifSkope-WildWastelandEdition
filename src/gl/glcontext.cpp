@@ -56,6 +56,7 @@ int rtddgiCellCascades();	// lane RTXCASCADE1: src/features/gi/rtddgicell.h (WW_
 bool rtddgiRestirShaderDefine();	// lane RESTIRDI1: src/features/gi/rtddgicell.cpp (the RT quality row Medium+ / WW_CELL_RT_PRESET)
 bool wwAirZoneShaderDefine();	// lane AIRZONE1: src/features/air/cellairzone.cpp (the Air zones row / WW_CELL_AIRZONE)
 bool wwCellViewsShaderDefine();	// lane FO4CELLGI1: src/gl/celllights.cpp (WW_CELL_VIEWS, the probe and pass views)
+bool wwDebugViewShaderDefine();	// lane DEBUGVIEW1: src/features/overlays/debugview.cpp (WW_DEBUG_VIEW, Show > Debug view)
 bool wwFogLeakShaderDefine();	// lane FOGLEAK1: src/features/air/cellvolair.cpp (WW_CELL_FOGLEAK, the fog leak fix; off by default)
 bool wwAirBounceShaderDefine();	// lane AIRBOUNCE1: src/features/air/cellvolair.cpp (WW_CELL_AIR_BOUNCE_LAMPS, the lamps' floor bounce; off by default)
 bool wwAirSkyViewShaderDefine();	// lane DARKAIR1: src/features/air/cellvolair.cpp (WW_CELL_AIR_SKYVIEW, the air's sky visibility; on since DARKAIR2, 0 compiles it out)
@@ -579,6 +580,9 @@ bool NifSkopeOpenGLContext::Shader::load( const QString & filepath )
 		// lane FO4CELLGI1: fo4_default.frag's probe and pass views only while one is asked; not static: a set reloads the shaders
 		if ( wwCellViewsShaderDefine() && data.startsWith( "#version" ) && data.contains( "_CELL_VIEWS" ) )
 			data.insert( data.indexOf( '\n' ) + 1, "#define WW_CELL_VIEWS 1\n" );
+		// lane DEBUGVIEW1: the debug views (debug_view.glsl) only while one is on; not static: a set reloads the shaders
+		if ( wwDebugViewShaderDefine() && data.startsWith( "#version" ) && data.contains( "_DEBUG_VIEWS" ) )
+			data.insert( data.indexOf( '\n' ) + 1, "#define WW_DEBUG_VIEWS 1\n" );
 		// lane FOGLEAK1: the fog leak fix (cell_volair.frag WW_AIR_LEAK, lookdev_fog.glsl's far tail); not static: read per load
 		if ( wwFogLeakShaderDefine() && data.startsWith( "#version" ) && data.contains( "_CELL_FOGLEAK" ) )
 			data.insert( data.indexOf( '\n' ) + 1, "#define WW_CELL_FOGLEAK 1\n" );

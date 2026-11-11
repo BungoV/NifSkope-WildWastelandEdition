@@ -630,6 +630,32 @@ void main()
 	vec3 s = sqrt( lin );
 	vec3 outC = ( cellOn && cellIsOn ) ? ( cellIsLinear ? lin : cellImageSpace( s ) ) : tonemap( s );
 	fragColor = vec4( outC, 1.0 );
+#ifdef WW_DV
+	if ( cellOn && wwDebugView != 0 ) {	// lane DEBUGVIEW1: the water's views (src/features/overlays/debugview.h)
+		int dvOwn = waterSeam.z > 0.5 ? 7 : wwDvOwner == 6 ? 6 : 5;	// endless sea, far water, near water
+		float dvSkyFar = 1.0;
+#if defined( WW_WATER_SKYFAR ) || defined( WW_WATER_SKYVIS )
+		dvSkyFar = skyFarV;
+#endif
+		int v = wwDebugView;
+		vec3 o = vec3( 0.0 );
+		if ( v == WW_DV_WATER )
+			o = wwDvOwnerColour( dvOwn ) * ( 0.5 + 0.5 * dfade );	// brighter = further into the far colour swap
+		else if ( v == WW_DV_WATERREFL )
+			o = vec3( clamp( F, 0.0, 1.0 ), clamp( dvSkyFar, 0.0, 1.0 ), dfade );
+		else if ( v == WW_DV_WATERHEIGHT )
+			o = wwDvRamp( degrees( asin( clamp( -V.z, -1.0, 1.0 ) ) ) * 0.5 );	// 0 .. 2 degrees under the level
+		else if ( v == WW_DV_NORMALS )
+			o = normalize( N ) * 0.5 + 0.5;
+		else if ( v == WW_DV_FAROWNER )
+			o = wwDvOwnerColour( dvOwn );
+		else if ( v == WW_DV_EXPOSURE )
+			o = wwDvAbs( lin );
+		else if ( v == WW_DV_DEPTH )
+			o = wwDvDepth( dist );
+		fragColor = vec4( o, 1.0 );
+	}
+#endif
 
 #ifndef WW_WATER_NOPROBE	// lane WATERFIX7: the looks' shipping twins leave the probes to their probe twins (*p.prog)
 	if ( waterProbe > 0 ) {

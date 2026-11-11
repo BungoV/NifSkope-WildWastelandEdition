@@ -32,6 +32,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "glview.h"
 #include "wwswitch.h"	// the WW_* switch store
+#include "features/overlays/debugview.h"	// lane DEBUGVIEW1: the live debug views
 #include "filebuf.hpp"	// MODULES1: FileBuffer::trimMappedViews
 #include "wwflyfix.h"	// FLYFIX1's free-camera rules (their old way is a test twin now)
 #include "cellspeed.h"
@@ -3680,7 +3681,9 @@ void GLView::paintGL()
 
 	// Setup projection mode
 	const bool shView = wwShadowViewPass( scene );	// MODULES1 R6-8: a shadow debug view: no jitter, no post chain
-	wwGameTaaArmJitter( !shView );
+	const bool dvView = wwDebugViewId() != 0;	// lane DEBUGVIEW1: a debug view: the same, the far cards kept, the clear black
+	wwDebugViewFrame();
+	wwGameTaaArmJitter( !shView && !dvView );
 	glProjection();
 	wwGameTaaArmJitter( false );
 
@@ -3793,10 +3796,11 @@ void GLView::paintGL()
 	if ( perspectiveMode ) {
 		// Lookdev: the lookdev cube background replaces the (FO76+) skybox
 		bool	colorBufCleared = false;
-		if ( shView ) {	// MODULES1 R6-8: the sky is a flat neutral under a shadow debug view
+		if ( shView || dvView ) {	// MODULES1 R6-8: the sky is a flat neutral under a shadow debug view (black under a debug view)
 			GLfloat pc[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
 			glGetFloatv( GL_COLOR_CLEAR_VALUE, pc );
-			glClearColor( 0.5f, 0.5f, 0.5f, 1.0f );
+			const float g = shView ? 0.5f : 0.0f;
+			glClearColor( g, g, g, 1.0f );
 			glClear( GL_COLOR_BUFFER_BIT );
 			glClearColor( pc[0], pc[1], pc[2], pc[3] );
 			colorBufCleared = true;
@@ -4031,13 +4035,13 @@ void GLView::paintGL()
 					if ( !wwGameTaaInputsRan() )	// the before-tone-map resolve ran it already
 						wwTaaInputsPass( scene );	// inert unless asked for (gl/taainputs.h)
 				}
-				if ( !shView )	// R6-8: no depth of field or motion blur over a shadow debug view
+				if ( !shView && !dvView )	// R6-8: no depth of field or motion blur over a shadow debug view
 					wwCellPostApply( scene );
 				PassTime::subBegin( PassTime::PostFlare );	// the post zone's parts
-				if ( !shView )
+				if ( !shView && !dvView )
 					wwCellLensFlareDraw( scene );	// the lights' flares, a screen pass; inert when off
 				PassTime::subEnd( PassTime::PostFlare );
-				if ( !shView ) {
+				if ( !shView && !dvView ) {
 					PassTime::Swap taaT( PassTime::Post, PassTime::Taa );	// blits + vectors + resolve + copy-back
 					wwGameTaaResolve( scene );
 				}
