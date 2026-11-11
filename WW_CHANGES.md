@@ -1,3 +1,22 @@
+## FARWATER1 (2026-11-11): far water at the horizon mirrors the deck, not the clear sky
+
+Changed, not checked live (no build, no window). Offline: CPU twin (notes/farwater1/tools/twin.py, 0 fails), syntax
+check of cellwater.cpp and debugview.cpp (rc=0), shader link sweeps (161 programs: base 483, WW_DEBUG_VIEWS 483,
+WW_DEBUG_VIEWS + RTDDGI + fog leak 322, RTDDGI 322, leak 322, PRT 483, all link); off identity against HEAD: 468 of 483
+binaries equal but the source hash, the 15 that differ are the five fo4_waterlook* programs (on purpose).
+
+- **Cause.** water_refl.glsl wwWaterCloudSky: `cov *= smoothstep( 0.0, 0.08, R.z )`. For flat water R.z = the eye's
+  height / distance, so past 12.5 x the eye's height (245k u at bungo's 19589 u) the clouds dropped out of the
+  reflection and the far water (F -> 1) mirrored the WTHR gradient, which at R.z 0 is 0.65 x (0.25 horizon + 0.75 lower)
+  + 0.35 upper: the deep blue band. It is eye-relative, so it moves with the camera. The far map water and the endless
+  sea use one program, but their WATRs (normals, ssr byte) spread R.z differently, so the band showed as blocks.
+- **Fix (ships on).** Under R.z 0.08 the cover goes to the bands' mean cover (the deck the drawn sky shows at the
+  horizon), R.z <= 0 included, and the gradient goes to the horizon row (fo4_water.frag, WW_WATER_REFL programs).
+  Identical for R.z >= 0.08. Every tier, no distance cut. Red: `WW_CELL_WATER_REFL_RED=grazing` (bit 32).
+- **Log.** The `water tiers:` line also names the reflection source per tier (march + sky + clouds / sky + clouds) and
+  the grazing-sky rule (or the red).
+- **Debug view** `watersky` (23): the sky each tier mirrors before the march, x / (1 + x); tiers by `farowner`.
+
 ## DEBUGVIEW1 (2026-11-11): live debug views, the far cards' sun under the clouds, shadow distance, sea curve
 
 Changed, not checked live (no build, no window). Offline: syntax check of every edited .cpp and every includer of the

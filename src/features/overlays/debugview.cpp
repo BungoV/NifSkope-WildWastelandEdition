@@ -38,6 +38,7 @@ const DvView kViews[] = {
 	{ "overdraw", "black: owed (needs an additive pass with the depth test off)" },
 	{ "specular", "cellLit's sun specular (fo4_default) / pbrm_default's direct specular" },
 	{ "reflection", "the environment / reflection term (cubeK x the cube) of cellLit and pbrm_default" },
+	{ "watersky", "fo4_waterlook: the sky each water tier mirrors before the march (x / (1 + x)); tiers by farowner; surfaces black" },
 };
 constexpr int kCount = int( sizeof( kViews ) / sizeof( kViews[0] ) );
 

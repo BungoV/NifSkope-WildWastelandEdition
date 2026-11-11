@@ -25,6 +25,7 @@
 #define WW_DV_OVERDRAW 20
 #define WW_DV_SPECULAR 21
 #define WW_DV_REFLECTION 22
+#define WW_DV_WATERSKY 23
 
 uniform int wwDebugView;	// the view's id, 0 off
 uniform int wwDvOwner;		// who drew the shape (renderer.cpp): 0 near object, 1 near land, 2 far terrain, 3 far objects, 6 far water

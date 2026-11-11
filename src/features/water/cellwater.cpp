@@ -402,6 +402,7 @@ namespace {
 struct WaterTierTally {
 	int n[3] = { 0, 0, 0 };
 	float fade[3] = { 0.0f, 0.0f, 0.0f };
+	int ssr[3] = { 0, 0, 0 };	// FARWATER1: the draws with the march's reflections bound
 };
 WaterTierTally g_waterTierNow;
 QString g_waterTierSaid;
@@ -413,17 +414,25 @@ void wwCellWaterTierFrame()
 	g_waterTierNow = WaterTierTally();
 	if ( t.n[0] + t.n[1] + t.n[2] == 0 && g_waterTierSaid.isEmpty() )
 		return;
+	const auto reflSrc = []( const WaterTierTally & a, int k ) {
+		return a.n[k] == 0 ? QStringLiteral( "none" ) : a.ssr[k] == a.n[k] ? QStringLiteral( "march + sky + clouds" )
+			: a.ssr[k] == 0 ? QStringLiteral( "sky + clouds" ) : QStringLiteral( "march on %1 of %2 + sky + clouds" ).arg( a.ssr[k] ).arg( a.n[k] );
+	};
 	WW_SWITCH_STATIC( QByteArray, rr, wwEnv( "WW_CELL_WATER_REFL_RED" ).trimmed() );
 	const bool nearLaw = wwCellWaterLookOn() && ( wwLookOn( WwLook::WaterRefl ) || wwLookOn( WwLook::WaterClear ) )
 		&& rr != "farcolour";
 	const QString line = QStringLiteral( "water tiers: near %1 draws, far map %2, endless sea %3 (far water draws %4); "
 		"far fade 8192 -> %5 / %6 / %7 u from the eye per tier (the WATR's own distance, eye-relative: the band moves "
-		"with the camera); far colour: %8; program %9" )
+		"with the camera); far colour: %8; program %9; reflection per tier: near %10, far map %11, endless sea %12; "
+		"grazing sky (R.z < 0.08, flat water past 12.5 x the eye's height): %13" )
 		.arg( t.n[0] ).arg( t.n[1] ).arg( t.n[2] ).arg( t.n[1] + t.n[2] )
 		.arg( double( t.fade[0] ), 0, 'f', 0 ).arg( double( t.fade[1] ), 0, 'f', 0 ).arg( double( t.fade[2] ), 0, 'f', 0 )
 		.arg( nearLaw ? QStringLiteral( "the near law to the horizon (one shading for every tier)" )
 			: QStringLiteral( "the game's far swap past the fade (red farcolour or the looks off)" ) )
-		.arg( QLatin1StringView( wwCellWaterProgram() ) );
+		.arg( QLatin1StringView( wwCellWaterProgram() ) )
+		.arg( reflSrc( t, 0 ) ).arg( reflSrc( t, 1 ) ).arg( reflSrc( t, 2 ) )
+		.arg( rr == "grazing" ? QStringLiteral( "the clear WTHR gradient, the clouds faded out (red WW_CELL_WATER_REFL_RED=grazing)" )
+			: QStringLiteral( "the WTHR horizon row under the clouds' mean cover, the deck the drawn sky shows (FARWATER1)" ) );
 	if ( line == g_waterTierSaid )
 		return;
 	g_waterTierSaid = line;
@@ -614,6 +623,8 @@ bool wwCellWaterUniforms( Scene * scene, int block, int unit )
 	fn->glBindTexture( GL_TEXTURE_2D, ssrOn ? ssrFin : 0 );
 	prog->uni1i_l( prog->uniLocation( "waterSsrFin" ), unit++ );
 	prog->uni1b( "waterSsrOn", ssrOn );
+	if ( ssrOn )	// FARWATER1: the "water tiers:" line's reflection source per tier
+		g_waterTierNow.ssr[dit->endless.contains( block ) ? 2 : dit->farMask.contains( block ) ? 1 : 0]++;
 	unit += wwCellWaterInfoUniforms( scene, unit );	// lane WATERDATA1: units 7..9 when the program reads them (WATERFLOWBAKE1's flow: cell units 66/67)
 	{	// lane SHORE2: per draw; the red keeps SHORE1's quads whole
 		WW_SWITCH_STATIC( bool, maskRed, wwSwitchEcho( "far water dry mask red", wwEnv( "WW_CELL_FARWATER_RED" ).trimmed() == "nomask" ) );
@@ -684,7 +695,7 @@ bool wwCellWaterUniforms( Scene * scene, int block, int unit )
 		prog->uni1b( "waterReflOn", reflOn );
 		prog->uni1b( "waterGlintOn", glintOn );
 		prog->uni1i( "waterReflRed", rr == "record" ? 1 : rr == "farcolour" ? 2 : rr == "sharp" ? 4
-			: rr == "cloudedge" ? 16 : 0 );	// lane SKYSEA1: cloudedge = the cloud map's hard square edge in the water
+			: rr == "cloudedge" ? 16 : rr == "grazing" ? 32 : 0 );	// FARWATER1: grazing = the clear sky at the horizon	// lane SKYSEA1: cloudedge = the cloud map's hard square edge in the water
 		static bool edgeSaid = false;
 		if ( reflOn && !edgeSaid ) {
 			edgeSaid = true;

@@ -395,6 +395,11 @@ void main()
 	vec3 R = reflect( V, Ns );
 	vec3 sky = mix( waterSky[0].rgb, waterSky[1].rgb, clamp( R.z + 0.75, 0.0, 1.0 ) );
 	sky = mix( sky, waterSky[2].rgb, clamp( R.z * 1.9 + 0.35, 0.0, 1.0 ) );
+#ifdef WW_WATER_REFL	// lane FARWATER1: at grazing the reflected ray meets the horizon, so the WTHR horizon row, not the gradient's
+	// 0.65 x the lower/horizon mix + 0.35 x the upper there (red WW_CELL_WATER_REFL_RED=grazing)
+	if ( ( waterReflRed & 32 ) == 0 )
+		sky = mix( waterSky[0].rgb, sky, smoothstep( 0.0, 0.08, R.z ) );
+#endif
 #ifdef WW_WATER_SKYFAR	// lane WATERSKYVISFAR1: the baked sky visibility of the far water (1 under water)
 	float skyFarV = under ? 1.0 : wwWaterSkyFar( P );
 #ifndef WW_WATER_SKYVIS	// lane WATERREBASE1: with the near grid compiled, its read carries the far byte (one factor)
@@ -653,6 +658,13 @@ void main()
 			o = wwDvAbs( lin );
 		else if ( v == WW_DV_DEPTH )
 			o = wwDvDepth( dist );
+		else if ( v == WW_DV_WATERSKY ) {	// lane FARWATER1: the sky this tier mirrors (before the march), x / (1 + x)
+#ifdef WW_WATER_REFL
+			o = reflSky / ( vec3( 1.0 ) + max( reflSky, vec3( 0.0 ) ) );
+#else
+			o = sky / ( vec3( 1.0 ) + max( sky, vec3( 0.0 ) ) );
+#endif
+		}
 		fragColor = vec4( o, 1.0 );
 	}
 #endif
