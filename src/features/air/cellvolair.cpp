@@ -12,6 +12,7 @@ BSD License - see nifskope.h
 #include "features/air/airbouncelamp.h"	// lane AIRBOUNCE1: the lamps' floor-bounce law
 #include "features/air/airmslamp.h"	// lane AIRMS1: the lamps' multiple-scattering law
 #include "features/air/airlampatlas.h"	// lane MODULES1 route (a): the lamps' shadows in the air
+#include "features/lights/cellclustergl.h"	// lane AIRPERF1 A6: the surfaces' light lists' echo (what the air walks)
 #include "features/air/airfarspread.h"	// lane AIRPERF1 A4: the far grid's refresh over its frames
 #include "features/gi/rtddgicell.h"	// lane MODULES1 route (b): the lamps' shadows traced on the volume's BVH
 #include "features/sky/atmomath.h"	// lane CLOUD6e: kUnitKm, the cloud map's units
@@ -3063,9 +3064,30 @@ static void vaPassInner( Scene * scene, bool run )
 		.arg( !gndLampOn ? QStringLiteral( "off" ) : gndLampRed ? QStringLiteral( "off(red)" ) : QStringLiteral( "on" ) );
 	// the optimisation's echo: the mode, the clusters (all / non-empty / mean list over the non-empty), the CPU build,
 	// the depth skip (0 off, 1 on, 2 the red)
-	const QString optNote = QStringLiteral( "opt=%1 clusters=%2 nonempty=%3 meanlist=%4 buildms=%5 depthskip=%6 zsource=%7 farclamp=%8 temporal=%9" )
-		.arg( s.opt ).arg( clOn ? cl.ncx * cl.ncy * cl.ncz : 0 ).arg( clOn ? cl.nonEmpty : 0 )
-		.arg( clOn && cl.nonEmpty ? double( cl.refs ) / double( cl.nonEmpty ) : 0.0, 0, 'f', 2 ).arg( clMs, 0, 'f', 3 )
+	/* lane AIRPERF1 A6: the list numbers are those of the lists the air WALKS. With the surfaces' clustered lists on
+	 * (volSurfClusters) the air builds none of its own, and this line printed clusters=0 nonempty=0 meanlist=0.00 as
+	 * if it looped every light: now lists=surfaces(...) with the surfaces' own numbers (their build's echo; nonempty is
+	 * refs / mean list, to the echo's one decimal). lists=air: the air's own clusters; lists=flat: every light a froxel */
+	int lsClusters = clOn ? cl.ncx * cl.ncy * cl.ncz : 0, lsNonEmpty = clOn ? cl.nonEmpty : 0;
+	double lsMean = clOn && cl.nonEmpty ? double( cl.refs ) / double( cl.nonEmpty ) : 0.0;
+	QString listTag = clOn ? QStringLiteral( "air" ) : QStringLiteral( "flat(%1 lights a froxel)" ).arg( cellLightCountV );
+	if ( surfCl ) {
+		static const QRegularExpression re( QStringLiteral( "cell cluster: (\\d+)x(\\d+) tiles of \\d+ px x (\\d+) slices, (\\d+) lights, "
+			"refs (\\d+), mean list ([0-9.]+), max list (\\d+), clusters over the cap (\\d+)" ) );
+		const QRegularExpressionMatch m = re.match( wwCellClusterEcho() );
+		listTag = QStringLiteral( "surfaces(no echo yet)" );
+		if ( m.hasMatch() ) {
+			lsClusters = m.captured( 1 ).toInt() * m.captured( 2 ).toInt() * m.captured( 3 ).toInt();
+			lsMean = m.captured( 6 ).toDouble();
+			lsNonEmpty = lsMean > 0.0 ? int( m.captured( 5 ).toDouble() / lsMean + 0.5 ) : 0;
+			listTag = QStringLiteral( "surfaces(tiles=%1x%2x%3 lights=%4 refs=%5 maxlist=%6 overcap=%7)" ).arg( m.captured( 1 ), m.captured( 2 ),
+				m.captured( 3 ), m.captured( 4 ), m.captured( 5 ), m.captured( 7 ), m.captured( 8 ) );
+		}
+	}
+	const QString optNote = QStringLiteral( "opt=%1 lists=" ).arg( s.opt ) + listTag
+		+ QStringLiteral( " clusters=%2 nonempty=%3 meanlist=%4 buildms=%5 depthskip=%6 zsource=%7 farclamp=%8 temporal=%9" )
+		.arg( lsClusters ).arg( lsNonEmpty )
+		.arg( lsMean, 0, 'f', 2 ).arg( clMs, 0, 'f', 3 )
 		.arg( depthOn ? ( ( s.red & 8192 ) ? 2 : 1 ) : 0 )
 		.arg( !tileOn ? QStringLiteral( "none" ) : zDepth ? QStringLiteral( "depth" ) : QStringLiteral( "colour" ) )
 		.arg( g.tileValid && !( s.red & 2097152 ) ? 1 : 0 )
