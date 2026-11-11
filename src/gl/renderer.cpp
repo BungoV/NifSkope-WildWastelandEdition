@@ -796,7 +796,15 @@ bool envOn( const char * sw, const char * red )
 {
 	return qgetenv( sw ).trimmed() != "0" && qgetenv( red ).trimmed() != "1" && qgetenv( "WW_PERF3_RED" ).trimmed() != "1";
 }
-bool drawGlOn() { static const bool on = envOn( "WW_DRAW_GLCACHE", "WW_DRAW_GLCACHE_RED" ); return on; }
+bool drawGlOn()
+{
+	/* MODULES1 R7 item 7: read again on every set (sets land between paints, where no draw scope is open; it was read
+	 * once per process). Red WW_R7LIVE_RED=1 (launch): the first value stays. */
+	static const bool once = envOn( "WW_DRAW_GLCACHE", "WW_DRAW_GLCACHE_RED" );
+	static const bool stuck = qgetenv( "WW_R7LIVE_RED" ).trimmed() == "1";
+	WW_SWITCH_STATIC( bool, on, wwSwitchEcho( "draw gl cache (WW_DRAW_GLCACHE, live)", envOn( "WW_DRAW_GLCACHE", "WW_DRAW_GLCACHE_RED" ) ) );
+	return stuck ? once : on;
+}
 }
 
 WwDrawGlScope::WwDrawGlScope()

@@ -5664,7 +5664,11 @@ void GLView::wwCellStreamEvict()
 	static std::uint32_t nextEvict = 0;
 	static std::uint32_t paintSec[4] = { 0, 0, 0, 0 };
 	static std::uint32_t paints = 0;
-	static const std::uint32_t keep = std::uint32_t( cellStreamTexKeepSec() );
+	/* MODULES1 R7 item 7: both keeps follow a live set of WW_CELL_STREAM_TEXKEEP / _GEOKEEP (their readers re-read, but
+	 * the first value was held here). Red WW_R7LIVE_RED=1 (launch): the first values stay. */
+	static const std::uint32_t keepOnce = std::uint32_t( cellStreamTexKeepSec() );
+	static const bool keepStuck = qgetenv( "WW_R7LIVE_RED" ).trimmed() == "1";
+	const std::uint32_t keep = keepStuck ? keepOnce : std::uint32_t( cellStreamTexKeepSec() );
 	if ( !clock.isValid() )
 		clock.start();
 	const std::uint32_t sec = std::uint32_t( clock.elapsed() / 1000 ) + 1U;
@@ -5672,7 +5676,14 @@ void GLView::wwCellStreamEvict()
 	// cached meshes by the same rule (undrawn for the keep and by the last 3 paints), on the
 	// cache's paint counter; red WW_STREAM1_RED=geokeep leaves them to the cache's own ~1800 paints
 	static GeoKeepClock geoClock;
-	static const std::uint32_t geoKeep = std::uint32_t( cellStreamGeoKeepSec() );
+	static const std::uint32_t geoKeepOnce = std::uint32_t( cellStreamGeoKeepSec() );
+	const std::uint32_t geoKeep = keepStuck ? geoKeepOnce : std::uint32_t( cellStreamGeoKeepSec() );
+	static std::uint32_t keepSaid = ~0U;
+	if ( keepSaid != keep * 1000U + geoKeep ) {
+		keepSaid = keep * 1000U + geoKeep;
+		fprintf( stderr, "stream keep: an undrawn texture stays %u s, an undrawn mesh %u s%s\n", keep, geoKeep,
+			keepStuck ? " (RED WW_R7LIVE_RED: the first values, a live set changes nothing)" : " (WW_CELL_STREAM_TEXKEEP / _GEOKEEP, live)" );
+	}
 	static const bool geoRed = PassTime::stream1Red( "geokeep" );
 	if ( NifSkopeOpenGLContext * cx = scene ? scene->renderer : nullptr; cx && !geoRed ) {
 		if ( const std::uint32_t since = geoClock.paint( sec, cx->wwCacheEpoch(), geoKeep ) )

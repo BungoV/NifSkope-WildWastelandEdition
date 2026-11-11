@@ -1182,8 +1182,12 @@ bool envOn( const char * sw, const char * red )
 }
 bool wwCellAoLean()
 {
-	static const bool on = envOn( "WW_CELL_AO_LEAN", "WW_CELL_AO_LEAN_RED" );
-	return on;
+	/* MODULES1 R7 item 7: read again on every set (it was read once per process, so the stage table's "reopen" never
+	 * reached it). Red WW_R7LIVE_RED=1 (launch): the first value stays. */
+	static const bool once = envOn( "WW_CELL_AO_LEAN", "WW_CELL_AO_LEAN_RED" );
+	static const bool stuck = qgetenv( "WW_R7LIVE_RED" ).trimmed() == "1";
+	WW_SWITCH_STATIC( bool, on, wwSwitchEcho( "cell ao lean (WW_CELL_AO_LEAN, live)", envOn( "WW_CELL_AO_LEAN", "WW_CELL_AO_LEAN_RED" ) ) );
+	return stuck ? once : on;
 }
 
 // this frame's opaque pass and depth pyramid, for the reflections' march (ao.h)
