@@ -514,7 +514,10 @@ int main( int argc, char * argv[] )
 			{ "WW_SUNPATH", "1" }, { "WW_ATMO", "ultra" }, { "WW_CELL_RT_PRESET", "ultra" }, { "WW_CELL_SSGI_QUALITY", "ultra" },
 			{ "WW_TAA2", "ultra" }, { "WW_CELL_WATER_PRESET", "ultra" }, { "WW_CELL_LAMPSHADOW", "ultra" },
 			{ "WW_CELL_AIR_FAR", "4" }, { "WW_CELL_AO_METHOD", "xegtao" }, { "WW_CELL_AO_QUALITY", "ultra" },
-			{ "WW_CLOUDVOL", "ultra" }, { "WW_CELL_AIR_GRID", "ultra" } };	// part 18 audit: a harness pins clouds 0 and the grid Low otherwise
+			{ "WW_CLOUDVOL", "ultra" }, { "WW_CELL_AIR_GRID", "ultra" },
+			// MODULES1 R6-12: the atmosphere's other rows at their SHIPPED values (a harness pinned them Off, so the
+			// Scene panel read Aerial Perspective / Sun and Sky Light / Night Sky / Sky Light in GI = Off in a flight)
+			{ "WW_ATMO_AP", "1" }, { "WW_ATMO_SUN", "full" }, { "WW_ATMO_NIGHT", "1" }, { "WW_ATMO_GI", "1" } };	// part 18 audit: a harness pins clouds 0 and the grid Low otherwise
 		QByteArray set, kept;
 		for ( const auto & kv : kAllOn ) {
 			const char * k = kv[0];

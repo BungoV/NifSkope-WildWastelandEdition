@@ -41,6 +41,7 @@ BSD License - see nifskope.h
 #include "cellmodsource.h"	// lane SKYTOP1: the active load order
 #include "cellstream.h"	// lane WEATHERBLEND6: the streamed camera's cell, for the region walk
 #include "features/exposure/physunits.h"	// lane PHYSUNITS1: real units
+#include "features/exposure/physcamera.h"	// MODULES1 R6-12: the camera's adaptation floor (the gameplay moon)
 #include "features/weather/wxoverride.h"	// lane MODULES1 item 12: live weather overrides
 
 #include <QBuffer>
@@ -972,7 +973,8 @@ LdLight currentLight()
 		atmoKey += 4096 * ( 1 + int( moonAlphaNow( s ) * 10.0f ) );
 	const WwSunPathKey sunKey = wwSunPathKey();
 	const unsigned long long wx = wwWeatherRecx().stamp;
-	const QString mr = wwEnvStr( "WW_MOON_RED" ).trimmed().toLower();
+	// MODULES1 R6-12: the gameplay moon's pin moves the light too (live)
+	const QString mr = wwEnvStr( "WW_MOON_RED" ).trimmed().toLower() + QLatin1Char( '|' ) + wwEnvStr( "WW_MOON_GAME" ).trimmed();
 	if ( gen != s.gen || hour != s.hour || sun != s.sun || atmoSun != atmoKey || !( sunPath == sunKey ) || wxStamp != wx
 		|| mr != moonRed || physSky != wwPhysSkyOn() || wxOv != wwWxOvStamp() ) {
 		physSky = wwPhysSkyOn();
@@ -1116,6 +1118,10 @@ LdLight computeLight()
 		L.keys = wwTodKeys( s.hour, s.tnam );
 	}
 	// lane TERRSHADOW1: Sun Path = Real replaces the direction (one sun for every producer); the colours keep the clock
+	{	// MODULES1 R6-6: the real path is read on the game's clock (its horizon hours are the sky clock's A and D)
+		const WwSkyClock gc = wwSkyClock( s.hour, s.tnam, s.gmst );
+		wwSunPathGameHorizon( gc.A, gc.D );
+	}
 	wwSunPathApply( s.hour, s.gameDay, L.sunDir, L.discPos );
 	if ( !s.haveWeather ) {
 		neutral( L.sun, L.amb, L.dalc );
@@ -1191,10 +1197,46 @@ LdLight computeLight()
 	/* lane PHYSUNITS1: real units: the key is the top-of-atmosphere sun (moon) over pi, the air's transmittance on it
 	 * (atmosphere.cpp); rKey = that at 45 degrees (T ~ 0.8) over the weather's key, the two crossfaded as the keys are */
 	const bool phys = wwPhysSkyOn();
+	/* MODULES1 R6-12 (bungo 11-10: "It's night time, I can't see anything", "the moon seems underpowered a bit, for
+	 * gameplay purposes"): ONE gameplay factor on the moon's illuminance at its source (the key, and through it the
+	 * sky's unit, the ambient, the fog and the GI). The real full moon (0.32 lux) leaves the land at ~0.007 cd/m2, and
+	 * the camera does not adapt under 1 cd/m2 (EV100 3 less the key, at any night), so the night drew 7 EV under
+	 * middle grey. The factor makes the night as dark against the day as the weather record says: the record's Night
+	 * sunlight over its Day sunlight (linear) x the sun over the moon x the camera's floor over its daylight
+	 * luminance (the exposure ratio between a metered day and the floor). CommonwealthClear: x8.1 (2.6 lux).
+	 * WW_MOON_GAME=<factor> pins it (live); red WW_MOON_RED=physical: x1, the real moon. */
+	float moonGame = 1.0f;
+	if ( phys && !wwMoonRed( "physical" ) ) {
+		const float vd = weatherKeyOf( WwTodDay ), vn = weatherKeyOf( WwTodNight );
+		if ( vd > 1e-9f && vn > 0.0f )
+			moonGame = ( vn / vd ) * ( wwphys::kSunToaLux / wwphys::kMoonToaLux ) * ( wwphys::kAdaptFloorCdm2 / wwphys::kKeyDaylightCdm2 );
+		bool ok = false;
+		const float pin = wwEnvStr( "WW_MOON_GAME" ).trimmed().toFloat( &ok );
+		if ( ok && pin > 0.0f )
+			moonGame = pin;
+		moonGame = std::clamp( moonGame, 1.0f, 64.0f );	// never under the real moon
+		static QString saidGame;
+		const QString line = QStringLiteral( "moon light game: factor x%1%2 (record night/day key %3, sun/moon %4, camera floor/daylight %5); full moon above the air %6 lux, x phase and weather %7 = %8 lux applied (red WW_MOON_RED=physical: x1; the land's luminance and the EV: the phys camera line)" )
+			.arg( double( moonGame ), 0, 'f', 2 ).arg( ok && pin > 0.0f ? QStringLiteral( " (PINNED WW_MOON_GAME)" ) : QString() )
+			.arg( vd > 1e-9f ? double( vn / vd ) : 0.0, 0, 'f', 4 ).arg( double( wwphys::kSunToaLux / wwphys::kMoonToaLux ), 0, 'f', 0 )
+			.arg( double( wwphys::kAdaptFloorCdm2 / wwphys::kKeyDaylightCdm2 ), 0, 'g', 3 )
+			.arg( double( wwphys::kMoonToaLux * moonGame ), 0, 'f', 2 ).arg( double( moonK ), 0, 'f', 3 )
+			.arg( double( wwphys::kMoonToaLux * moonGame * moonK ), 0, 'f', 3 );
+		if ( line != saidGame ) {
+			saidGame = line;
+			fprintf( stderr, "%s\n", qPrintable( line ) );
+		}
+	} else if ( phys ) {
+		static bool saidRed = false;
+		if ( !saidRed ) {
+			saidRed = true;
+			fprintf( stderr, "moon light game: RED WW_MOON_RED=physical: x1, the real moon (%.2f lux above the air)\n", double( wwphys::kMoonToaLux ) );
+		}
+	}
 	auto keyLumOf = [&]( int tod ) {
 		if ( !phys )
 			return weatherKeyOf( tod );
-		return ( tod == WwTodNight ? wwphys::kMoonToaLux : wwphys::kSunToaLux ) / wwphys::kPi;
+		return ( tod == WwTodNight ? wwphys::kMoonToaLux * moonGame : wwphys::kSunToaLux ) / wwphys::kPi;
 	};
 	float rKey = 1.0f;
 	if ( phys ) {
@@ -2338,6 +2380,7 @@ SkyFrame skyFrame()
 	SkyFrame f;
 	f.c = wwSkyClock( s.hour, s.tnam, s.gmst );
 	// lane TERRSHADOW1: Sun Path = Real moves the drawn disc and glare with the light (one sun); Off leaves the clock's
+	wwSunPathGameHorizon( f.c.A, f.c.D );	// MODULES1 R6-6
 	if ( wwSunPathMode() == 1 )
 		wwSunPathApply( s.hour, s.gameDay, f.c.lightDir, f.c.sunPos );
 	if ( !s.haveWeather )
@@ -3301,6 +3344,14 @@ void skyBodiesLine( const SkyFrame & f )
 			.arg( std::asin( std::clamp( double( v[2] ) / l, -1.0, 1.0 ) ) / wwskydisc::kRad, 0, 'f', 1 );
 	};
 	const WwSkyClock raw = wwSkyClock( s.hour, s.tnam, s.gmst );
+	{	// MODULES1 R6-6: which clock each body used, once per change
+		static QString saidClock;
+		const QString cl = wwSunPathClockEcho();
+		if ( cl != saidClock ) {
+			saidClock = cl;
+			fprintf( stderr, "%s\n", qPrintable( cl ) );
+		}
+	}
 	float body[3], lens[3], tint[3];
 	sunBodyDir( s, body );
 	const WwLens * lensRec = nullptr;

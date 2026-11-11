@@ -1740,6 +1740,7 @@ WwSunPathKey wwSunPathKey()
 	WwSunPathKey k;
 	k.mode = s.sunPath;
 	k.pin = s.sunPin;
+	k.realClock = s.sunPath == 1 && wwEnvStr( "WW_SUNPATH_RED" ).trimmed() == QLatin1String( "realclock" );
 	if ( s.sunPin ) {
 		k.elev = s.pinElev;
 		k.az = s.pinAz;
@@ -1773,7 +1774,7 @@ wwephem::Date ephemDate( double hour, double gameDay, double & lon, double * lat
 }
 }	// namespace
 
-double wwSunPathReal( double hour, double gameDay, double out[3] )
+static double sunPathRealRaw( double hour, double gameDay, double out[3] )
 {
 	const SetState & s = ss();
 	if ( s.sunPin ) {
@@ -1801,6 +1802,107 @@ double wwSunPathReal( double hour, double gameDay, double out[3] )
 	out[2] = std::sin( phi ) * std::sin( decl ) + std::cos( phi ) * std::cos( decl ) * std::cos( H );
 	norm3( out );
 	return std::asin( std::clamp( out[2], -1.0, 1.0 ) ) / kDeg;
+}
+
+/* ---- MODULES1 R6-6 (bungo 11-10: at 6:30 the sun's disc is under the horizon and the light comes from 21 degrees up):
+ * the real path ran on the real clock of the place and date (Boston, 23 October: sunrise 7:05), while the game's
+ * day starts by its climate record (the sky clock's A: the game's own disc is on the horizon then). At 6:30 the real
+ * sun was at -4 degrees, so the one light was the crossfade toward the moon (116 / 21) and the disc was not drawn.
+ * Now the real sky is read on the game's clock: game hours A..D map to the real sunrise..sunset of that day, the
+ * night to the real night; the arc (azimuths, noon height) stays the real one. Red WW_SUNPATH_RED=realclock. ---- */
+namespace {
+struct SunClock
+{
+	double gameRise = -1.0, gameSet = -1.0;
+	double key[4] = { -1e9, 0.0, 0.0, 0.0 };	// the day, the place and the reds the real crossings were found for
+	double realRise = -1.0, realSet = -1.0;
+	double lastIn = -1.0, lastOut = -1.0, lastElev = 0.0;
+	bool lastOn = false;
+};
+SunClock & sunClock()
+{
+	static SunClock c;
+	return c;
+}
+
+//! the hour of the real sky the game hour shows
+double sunClockHour( double hour, double gameDay )
+{
+	SunClock & c = sunClock();
+	c.lastOn = false;
+	if ( ss().sunPin || c.gameRise < 0.0 || !( c.gameSet > c.gameRise )
+		|| wwEnvStr( "WW_SUNPATH_RED" ).trimmed() == QLatin1String( "realclock" ) )
+		return hour;
+	const wwplace::Place & p = wwSkyPlaceNow();
+	const double key[4] = { std::floor( gameDay ), p.latDeg, p.lonDeg, ( wwLookOn( WwLook::Ephemeris ) ? 1.0 : 0.0 )
+		+ ( wwEnvStr( "WW_SKY_EPHEM_RED" ) == QLatin1String( "june" ) ? 2.0 : 0.0 ) };
+	if ( !std::equal( key, key + 4, c.key ) ) {
+		std::copy( key, key + 4, c.key );
+		c.realRise = c.realSet = -1.0;
+		double o[3], prev = sunPathRealRaw( 0.0, gameDay, o );
+		for ( int i = 1; i <= 240; i++ ) {
+			const double h = i * 0.1, e = sunPathRealRaw( h, gameDay, o );
+			if ( ( prev < 0.0 ) != ( e < 0.0 ) ) {
+				const double x = h - 0.1 + 0.1 * prev / ( prev - e );
+				if ( prev < 0.0 && c.realRise < 0.0 )
+					c.realRise = x;
+				else if ( prev >= 0.0 && c.realSet < 0.0 )
+					c.realSet = x;
+			}
+			prev = e;
+		}
+	}
+	if ( !( c.realRise >= 0.0 && c.realSet > c.realRise ) )
+		return hour;	// no sunrise or sunset that day: nothing to align
+	double h = std::fmod( hour, 24.0 );
+	if ( h < 0.0 )
+		h += 24.0;
+	double out;
+	if ( h >= c.gameRise && h <= c.gameSet ) {
+		out = c.realRise + ( h - c.gameRise ) / ( c.gameSet - c.gameRise ) * ( c.realSet - c.realRise );
+	} else {
+		const double tt = h > c.gameSet ? h - c.gameSet : h + 24.0 - c.gameSet;
+		out = c.realSet + tt / ( 24.0 - ( c.gameSet - c.gameRise ) ) * ( 24.0 - ( c.realSet - c.realRise ) );
+		if ( out >= 24.0 )
+			out -= 24.0;
+	}
+	c.lastOn = true;
+	return out;
+}
+}	// namespace
+
+void wwSunPathGameHorizon( double riseHour, double setHour )
+{
+	SunClock & c = sunClock();
+	c.gameRise = riseHour;
+	c.gameSet = setHour;
+}
+
+double wwSunPathReal( double hour, double gameDay, double out[3] )
+{
+	const double h = sunClockHour( hour, gameDay );
+	const double e = sunPathRealRaw( h, gameDay, out );
+	SunClock & c = sunClock();
+	c.lastIn = hour;
+	c.lastOut = h;
+	c.lastElev = e;
+	return e;
+}
+
+QString wwSunPathClockEcho()
+{
+	const SunClock & c = sunClock();
+	const SetState & s = ss();
+	if ( s.sunPath != 1 )
+		return QStringLiteral( "sky bodies sources: sun disc, body, lens, light = the engine's clock (the climate's sunrise and sunset, Sun Path off)" );
+	if ( s.sunPin )
+		return QStringLiteral( "sky bodies sources: sun disc, body, lens, light = the pinned sun (WW_SUNPATH)" );
+	if ( !c.lastOn )
+		return QStringLiteral( "sky bodies sources: sun disc, body, lens = the real path on the REAL clock (%1); light = that sun, crossfaded to the night light from 0 to -6 deg; engine = the climate's clock, not drawn" )
+			.arg( wwEnvStr( "WW_SUNPATH_RED" ).trimmed() == QLatin1String( "realclock" ) ? QStringLiteral( "RED WW_SUNPATH_RED=realclock" )
+				: QStringLiteral( "no game horizon or no sunrise that day" ) );
+	return QStringLiteral( "sky bodies sources: sun disc, body, lens = the real path on the GAME's clock (game horizon %1 / %2 h = real sunrise %3 / sunset %4 h); light = that sun, crossfaded to the night light from 0 to -6 deg; engine = the climate's clock, not drawn; red WW_SUNPATH_RED=realclock" )
+		.arg( c.gameRise, 0, 'f', 2 ).arg( c.gameSet, 0, 'f', 2 ).arg( c.realRise, 0, 'f', 2 ).arg( c.realSet, 0, 'f', 2 );
 }
 
 bool wwSunPathApply( double hour, double gameDay, float sunDir[3], float disc[3] )

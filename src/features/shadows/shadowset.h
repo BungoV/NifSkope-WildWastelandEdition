@@ -54,7 +54,7 @@ void wwSunPathSetMode( int mode );
 struct WwSunPathKey
 {
 	int mode = -1;
-	bool pin = false, ephem = false, june = false;
+	bool pin = false, ephem = false, june = false, realClock = false;	// realClock: MODULES1 R6-6's red
 	double elev = 0.0, az = 0.0;
 	bool operator==( const WwSunPathKey & ) const = default;
 };
@@ -62,6 +62,11 @@ WwSunPathKey wwSunPathKey();
 
 //! (D) the real sun, TO the sun, world (x east, y north, z up), unit; returns the elevation in degrees
 double wwSunPathReal( double hour, double gameDay, double out[3] );
+/*! MODULES1 R6-6: the hours the game's own sun disc is on the horizon (the sky clock's A and D, from the climate's
+ *  TNAM). The real path is read on the game's clock: its sunrise and sunset land on these hours. */
+void wwSunPathGameHorizon( double riseHour, double setHour );
+//! R6-6: one telemetry line: which clock the drawn sun, the light and the engine's point use
+QString wwSunPathClockEcho();
 /*! (D) with Sun Path = Real: replaces the shaded light direction (TO the light) and the disc, crossfading to
  *  `sunDir`'s own night light between 0 and -6 degrees of elevation. False (nothing changed) on Engine. */
 bool wwSunPathApply( double hour, double gameDay, float sunDir[3], float disc[3] );
