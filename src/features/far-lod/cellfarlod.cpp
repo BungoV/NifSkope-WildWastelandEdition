@@ -980,8 +980,19 @@ QString cellFarLodAppend( NifModel * nif, const QModelIndex & iRoot, const EsmWo
 			WwWaterRecord sea = def;
 			const bool haveSea = haveDef
 				|| ( world.seaWaterType() != 0 && world.waterRecord( world.seaWaterType(), sea ) );
+			// lane STREAMGN1: the far water rings' footprint (union of the rings), where the sheet starts
+			int drawn[4] = { 0, 0, -1, -1 };
+			for ( const LodlFarWater & w : wr ) {
+				if ( w.x1 < w.x0 || w.y1 < w.y0 )
+					continue;
+				const bool first = drawn[2] < drawn[0];
+				drawn[0] = first ? w.x0 : std::min( drawn[0], w.x0 );
+				drawn[1] = first ? w.y0 : std::min( drawn[1], w.y0 );
+				drawn[2] = first ? w.x1 : std::max( drawn[2], w.x1 );
+				drawn[3] = first ? w.y1 : std::max( drawn[3], w.y1 );
+			}
 			if ( haveSea )	// lane FARSEA1: the endless sea past the bake, at the worldspace's sea level
-				say( wwEndlessSeaAppend( nif, iFar, sea, world.defaultWaterHeight(), lodlPath )
+				say( wwEndlessSeaAppend( nif, iFar, sea, world.defaultWaterHeight(), lodlPath, drawn )
 					+ QStringLiteral( "; sea record %1 from %2" ).arg( world.seaWaterType(), 8, 16, QChar( '0' ) )
 						.arg( haveDef ? QStringLiteral( "the worldspace's own default" ) : world.seaWaterFrom() ) );
 			else

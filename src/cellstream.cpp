@@ -27,6 +27,7 @@
 #include "features/water/cellwater.h"
 #include "gl/glnode.h"
 #include "gl/glproperty.h"
+#include "gl/glcontroller.h"	// lane STREAMGN1: the controllers synced at a cell's hookup
 #include "gl/glscene.h"
 #include "gl/glshape.h"
 #include "gl/texpool.h"	// lane PERFFIX4: the streaming texture pool's budgets
@@ -217,6 +218,8 @@ public:
 	CellRefTable baseRefs;
 	CellPickTable basePicks;
 	bool dirty = false;
+	QElapsedTimer sinceRebuild;   //!< lane STREAMGN1: a filling block is lit at most this often (kLitEarlyMs)
+	int litEarly = 0;
 	CellStreamStats st;
 	QString red;
 	double budgetMs = 4.0;
@@ -1015,6 +1018,46 @@ bool Stream::write( StreamCell & c, double budget )
 	return hooked;
 }
 
+namespace
+{
+struct CardSync
+{
+	int owners = 0, ctrls = 0, missing = 0, active = 0;
+};
+
+/*! lane STREAMGN1: a cell's controllers read again at its hookup, so a streamed card animates as the open's did. A
+ *  copied branch's scene objects are made with its parent, before every controller, interpolator and data block of the
+ *  copy is written; in recycled, quietly reset blocks they kept what they read then. Each node and property with a
+ *  Controller chain syncs its list, every controller re-reads flags, interpolator and data, then takes the sequence.
+ *  Red WW_CELL_STREAM_RED=nocardsync leaves it out. */
+void syncControllers( const NifModel * nif, Scene * scene, IControllable * o, CardSync & s )
+{
+	const QModelIndex iFirst = nif->getBlockIndex( nif->getLink( o->index(), "Controller" ) );
+	if ( !iFirst.isValid() )
+		return;
+	s.owners++;
+	auto chain = [&]( auto && each ) {
+		int guard = 0;
+		for ( QModelIndex i = iFirst; i.isValid() && nif->blockInherits( i, "NiTimeController" ) && guard++ < 64;
+			i = nif->getBlockIndex( nif->getLink( i, "Next Controller" ) ) )
+			each( i );
+	};
+	bool missing = false;
+	chain( [&]( const QModelIndex & i ) { missing |= !o->findController( i ); } );
+	if ( missing ) {
+		s.missing++;
+		o->update( nif, o->index() );
+	}
+	chain( [&]( const QModelIndex & i ) {
+		s.ctrls++;
+		o->update( nif, i );
+		if ( Controller * ct = o->findController( i ) )
+			s.active += ct->active ? 1 : 0;
+	} );
+	o->setSequence( scene->animGroup );
+}
+}
+
 bool Stream::attach( StreamCell & c, const QElapsedTimer & t, double budget )
 {
 	// lane CELLSTREAM1: the containers' links a few a slice, then the hookup itself (one step: no half-shown cell)
@@ -1031,6 +1074,29 @@ bool Stream::attach( StreamCell & c, const QElapsedTimer & t, double budget )
 	if ( !c.lref ) {	// lane LARGEREF2: a unit's far rows go by lrPublish
 		showFar( c.x, c.y, false );   // the near ground replaces the far tile in the same step: no overlap
 		farHide( c, true );   // lane FARHOLE2: and the far objects, cards and rings past 0 it holds
+	}
+	if ( red != QLatin1String( "nocardsync" ) && scene ) {	// lane STREAMGN1: syncControllers
+		CardSync s;
+		QSet<IControllable *> seen;
+		for ( auto it = c.nodes.cbegin(); it != c.nodes.cend(); ++it ) {
+			Node * n = it.value().data();
+			if ( !n )
+				continue;
+			if ( !seen.contains( n ) ) {
+				seen.insert( n );
+				syncControllers( nif, scene, n, s );
+			}
+			for ( Property * pr : n->propertyList() )
+				if ( pr && !seen.contains( pr ) ) {
+					seen.insert( pr );
+					syncControllers( nif, scene, pr, s );
+				}
+		}
+		if ( s.ctrls > 0 ) {
+			std::fprintf( stderr, "cell stream: controllers synced at the hookup of %d,%d: %d owners, %d controllers (%d active), %d lists rebuilt\n",
+				c.x, c.y, s.owners, s.ctrls, s.active, s.missing );
+			std::fflush( stderr );
+		}
 	}
 	c.st = CellState::Attached;
 	if ( gridMode == LodPreview::Off ) {	// lane PERFLOAD1 P8: a cell attached under the near grid's OFF stays hidden
@@ -1783,16 +1849,36 @@ bool Stream::tick( Scene * sc, const Vector3 & eye )
 	}
 	const double msWrite = msOf( t ) - msWrite0;
 	double msRebuild0 = 0.0, msRebuild = 0.0;
-	if ( dirty && !worker.joinable() && toReset.empty() ) {
-		bool writingAny = false;
-		for ( const auto & kv : cells )
-			writingAny |= want( kv.first ) && kv.second.st != CellState::Attached;
-		if ( !writingAny ) {
+	if ( dirty && toReset.empty() ) {
+		/* lane STREAMGN1: a filling block is lit as it fills, not only when whole (the first open waited 90 s for its
+		 * 36th cell; its cards took no lamp light till then). The chunk worker writes only its own chunk, so this
+		 * rebuild may run beside it; never while a cell is half written. Red WW_CELL_STREAM_RED=nolitearly. */
+		constexpr qint64 kLitEarlyMs = 750;
+		int wanted = 0, attached = 0;
+		bool midWrite = false;
+		for ( const auto & kv : cells ) {
+			if ( !want( kv.first ) )
+				continue;
+			wanted++;
+			attached += kv.second.st == CellState::Attached ? 1 : 0;
+			midWrite |= kv.second.st == CellState::Writing;
+		}
+		const bool whole = attached == wanted && !worker.joinable();
+		const bool early = !whole && attached < wanted && attached > 0 && !midWrite && red != QLatin1String( "nolitearly" )
+			&& ( !sinceRebuild.isValid() || sinceRebuild.elapsed() >= kLitEarlyMs );
+		if ( whole || early ) {
 			g_phase = "rebuild";
 			msRebuild0 = msOf( t );
 			rebuild();
 			msRebuild = msOf( t ) - msRebuild0;
 			changed = true;
+			sinceRebuild.start();
+			if ( early ) {
+				litEarly++;
+				std::fprintf( stderr, "cell stream: lit early %d: rebuild with %d of %d wanted cells attached (centre %d,%d), %.1f ms\n",
+					litEarly, attached, wanted, ccx, ccy, msRebuild );
+				std::fflush( stderr );
+			}
 		}
 	}
 	if ( paused && pausedFill && !dirty ) {   // lane AIRPERF1 r4: the held block is whole: from here nothing is built

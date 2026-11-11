@@ -190,7 +190,7 @@ bool EsmWorld::load( const QString & esmPath, quint32 worldspaceFormID, QString 
 			landParent = esm->mapFormID( w, wnam );
 			indexParentLand();
 		}
-		std::fprintf( stderr, "esm world: %s parent %08X use land data %d -> parent land for %d of %d cells%s\n",
+		std::fprintf( stderr, "esm world: %s parent %08X use land data %d -> parent land at %d grid positions, own cells %d%s\n",
 			qPrintable( wsEdid ), wnam, int( pnam & 1 ), int( parentLandGroups.size() ), int( cellIndex.size() ),
 			wnam && ( pnam & 1 ) && !landParent ? " (RED WW_CELL_PARENTLAND_RED: none)" : "" );
 		if ( cellIndex.isEmpty() ) {
@@ -1349,7 +1349,9 @@ void EsmWorld::indexParentLand()
 						const int cx = int( f.readInt32() ), cy = int( f.readInt32() );
 						const QPair<int, int> k( cx, cy );
 						const ESMFile::ESMRecord * cg = r->next ? esm->findRecord( r->next ) : nullptr;
-						if ( cellIndex.contains( k ) && cg && cg->type == GRUP && cg->flags == r->formID )
+						/* Every parent position, not only the child's own cells: the game looks the parent's land up at
+						 * any grid of a use-land child world, CELL record or not (STREAMGN1). */
+						if ( cg && cg->type == GRUP && cg->flags == r->formID )
 							parentLandGroups.insert( k, r->next );
 						break;
 					}

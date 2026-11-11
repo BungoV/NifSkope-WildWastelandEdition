@@ -17,6 +17,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <vector>
 
 namespace
@@ -55,7 +56,7 @@ float wwEndlessSeaSeam()
 }
 
 QString wwEndlessSeaAppend( NifModel * nif, const QModelIndex & parent, const WwWaterRecord & rec, float defaultZ,
-	const QString & lodlPath )
+	const QString & lodlPath, const int * drawnCells )
 {
 	QElapsedTimer clock;
 	clock.start();
@@ -185,7 +186,22 @@ QString wwEndlessSeaAppend( NifModel * nif, const QModelIndex & parent, const Ww
 	addLink( nif, parent, QStringLiteral( "Children" ), block );
 
 	wwCellWaterShape( nif, block, rec, false );
-	wwCellWaterEndless( nif, block, box, seaZ, farU, seaId );
+	// lane STREAMGN1: the sheet's inner edge = the bake box cut to the far water rings' footprint (header)
+	float seam[4] = { box[0], box[1], box[2], box[3] };
+	const bool cut = drawnCells && wwEnv( "WW_ENDLESS_SEA_RED" ).trimmed() != "bakebox"
+		&& drawnCells[0] <= drawnCells[2] && drawnCells[1] <= drawnCells[3];
+	if ( cut ) {
+		seam[0] = std::max( box[0], float( drawnCells[0] ) * 4096.0f );
+		seam[1] = std::max( box[1], float( drawnCells[1] ) * 4096.0f );
+		seam[2] = std::min( box[2], float( drawnCells[2] + 1 ) * 4096.0f );
+		seam[3] = std::min( box[3], float( drawnCells[3] + 1 ) * 4096.0f );
+	}
+	std::fprintf( stderr, "endless sea: inner edge %s: cells %d,%d..%d,%d (bake box %d,%d..%d,%d)\n",
+		cut ? "the far water rings' footprint" : drawnCells ? "the bake box (RED bakebox)" : "the bake box (no rings given)",
+		int( std::floor( seam[0] / 4096.0f ) ), int( std::floor( seam[1] / 4096.0f ) ),
+		int( std::floor( seam[2] / 4096.0f ) ) - 1, int( std::floor( seam[3] / 4096.0f ) ) - 1, minX, minY, maxX, maxY );
+	std::fflush( stderr );
+	wwCellWaterEndless( nif, block, seam, seaZ, farU, seaId );
 	const double toKm = 1.0 / 70000.0;
 	return QStringLiteral( "endless sea: rings %1 (%2 u .. %3 u, x%4 a ring, %5 segments, %6 vertices, %7 triangles), "
 		"far sheet %3 u (%8 km)%9, seam band %10 u (%11 km), coverage mask: bake box cells %12,%13..%14,%15 = %16 cells, "

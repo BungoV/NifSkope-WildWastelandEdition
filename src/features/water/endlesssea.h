@@ -35,8 +35,11 @@ struct WwWaterRecord;
  *    WW_ENDLESS_SEA_CURVE=1        the earth's curvature: the rim drops d^2 / 2R (R = 6371 km; built with the cell) */
 
 //! Appends the sheet under `parent` and registers it; returns its census line (rings, rim, seam band, coverage).
+//! lane STREAMGN1: `drawnCells` (x0, y0, x1, y1, cells, inclusive) = the far water rings' footprint; the sheet starts
+//! at its edge, not at the bake box's (past the outer ring the box held no water: a land-coloured wedge).
+//! Red WW_ENDLESS_SEA_RED=bakebox: the old inner edge.
 QString wwEndlessSeaAppend( NifModel * nif, const QModelIndex & parent, const WwWaterRecord & rec, float defaultZ,
-	const QString & lodlPath );
+	const QString & lodlPath, const int * drawnCells = nullptr );
 //! The Endless sea row and its red.
 bool wwEndlessSeaOn();
 //! The seam band, world units (0 = no fade).
