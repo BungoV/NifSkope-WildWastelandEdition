@@ -1047,6 +1047,7 @@
 { "WW_LIGHTNING_FREQ_RED", 0, "src/features/clouds/cloudvol.cpp:887 lightningFreqLaw | re-read per frame or per call (a)" },
 { "WW_LIGHTNING_SKY", 0, "src/features/clouds/cloudvol.cpp:902 lightningSkyOn | re-read per frame or per call (a)" },
 { "WW_LIGHTNING_SKY_RED", 0, "src/features/clouds/cloudvol.cpp:899 lightningSkyOn | re-read per frame or per call (a)" },
+{ "WW_LIGHT_MEAS", 0, "src/features/lights/lightmeas.cpp:141 wwLightMeasFrame | re-read per frame or per call (a)" },
 { "WW_LIVEFX_DEBUG", 0, "src/loadingscreen.cpp:479 convert | re-read per frame or per call (a)" },
 { "WW_LIVEFX_DUMP", 2, "src/nifskope_ui.cpp:7767 NifSkope::createWindow | createWindow: picks which harness the window runs" },
 { "WW_LIVEFX_TEST", 2, "src/nifskope_ui.cpp:7671 NifSkope::createWindow | createWindow: picks which harness the window runs" },
