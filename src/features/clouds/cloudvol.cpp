@@ -601,6 +601,7 @@ struct CvRedo
 	Bands b{};
 	Cam cam{};
 	float keyW[3] = {}, keyK = 0.0f, amb[3] = {};
+	float deckAp[4] = { 0.0f, 1.0f, 1.0f, 0.0f };	// SKYLIGHT1 round 2: cloud_march.frag cvDeckAp
 	int tier = 0, hw = 1, hh = 1, mw = 1, mh = 1, stride = 1, cur = 0, prev = 1;
 	float phase[2] = {}, frameNo = 0.0f;
 	int blueSlice = 0;	// lane CLOUD5 round 2: the blue noise slice of this 16-frame refresh cycle
@@ -689,6 +690,7 @@ bool marchPass( Renderer * r, CvGpu & g, const CvRedo & d, const WwAtmoFrame & f
 	p->uni3f( "cvAmb", d.amb[0], d.amb[1], d.amb[2] );
 	p->uni1f( "cvAmbOn", 1.0f );
 	p->uni1f( "cvApOn", 1.0f );
+	p->uni4f( "cvDeckAp", FloatVector4( d.deckAp[0], d.deckAp[1], d.deckAp[2], d.deckAp[3] ) );	// SKYLIGHT1 round 2
 	p->uni1f( "cvFrame", d.frameNo );
 	p->uni1f( "cvMaxKm", pr.maxKm );
 	p->uni1f( "cvSlab", 0.0f );
@@ -1353,6 +1355,29 @@ bool wwCloudDeckThrough( float mu0, float out[4] )
 	return true;
 }
 
+float wwCloudDeckOnAxes( float ax[6][3], int up, const float sunHorizC[3], float mu0, float rhoG, bool pi, const char * who )
+{
+	WW_SWITCH_STATIC( bool, deckRed, wwEnvStr( "WW_SKY_CLOUDDECK_RED" ).trimmed() == QLatin1StringView( "1" ) );
+	float dk[4];
+	if ( deckRed || mu0 <= 0.0f || !wwCloudDeckThrough( mu0, dk ) )
+		return 0.0f;
+	const WwCloudDeck::Through t = { dk[0], dk[1], dk[2], dk[3] };
+	WW_SWITCH_STATIC( bool, floorRed, wwEnvStr( "WW_SKY_CLOUDDECK_RED" ).trimmed() == QLatin1StringView( "floor" ) );
+	const float x = WwCloudDeck::overAxes( ax, up, t, sunHorizC, rhoG, pi, floorRed );
+	// the line on change only (per caller; the stage's light is read many times a frame): cover, through, x and up to 1e-3
+	static QHash<const void *, quint64> said;
+	auto q = []( float v ) { return quint64( std::clamp( std::lround( double( v ) * 1000.0 ), 0L, 65535L ) ); };
+	const quint64 key = q( dk[0] ) | q( dk[1] ) << 16 | q( dk[2] ) << 32 | q( x * 0.1f ) << 48;
+	if ( said.value( who, ~quint64( 0 ) ) != key ) {
+		said.insert( who, key );
+		fprintf( stderr, "sky deck: %s cover %.3f tau %.2f sun through %.3f sky through %.3f -> up x%.3f = %.4f %.4f %.4f floor=%s"
+			" (red WW_SKY_CLOUDDECK_RED=1, =floor)\n", who, double( dk[0] ), double( dk[3] ), double( dk[1] ), double( dk[2] ),
+			double( x ), double( ax[up][0] ), double( ax[up][1] ), double( ax[up][2] ),
+			floorRed ? "clear sky (red)" : "clear sky x (1 - cover)" );
+	}
+	return x;
+}
+
 bool wwCloudVolBindDensity( Scene * scene, int firstUnit )
 {
 	if ( !scene || !scene->renderer || cs().tier < 2 )
@@ -1494,6 +1519,14 @@ bool wwCloudVolDraw( Scene * scene, const WwCloudVolView & view, QStringList & d
 	std::copy( keyW, keyW + 3, d.keyW );
 	d.keyK = keyK;
 	std::copy( amb, amb + 3, d.amb );
+	{	// SKYLIGHT1 round 2: the deck over the eye lights the air in front of it (cloud_march.frag cvDeckAp); red apdeck
+		float dk[4];
+		const bool on = !red( "apdeck" ) && keyW[2] > 0.0f && wwCloudDeckThrough( keyW[2], dk );
+		d.deckAp[0] = on ? dk[0] : 0.0f;
+		d.deckAp[1] = on ? dk[1] : 1.0f;
+		d.deckAp[2] = on ? dk[2] : 1.0f;
+		d.deckAp[3] = on ? 1.0f : 0.0f;
+	}
 	d.tier = s.tier;
 	d.hw = hw;
 	d.hh = hh;
@@ -1688,6 +1721,20 @@ bool wwCloudVolDraw( Scene * scene, const WwCloudVolView & view, QStringList & d
 		: refusal( s, why );
 	if ( ok && wwCloudFlyTier() > 0 )	// lane CLOUD4
 		s.last += QStringLiteral( " fly=" ) + wwCloudFlySummary();
+	if ( ok ) {	// SKYLIGHT1 round 2: the path drawing the volume, the cover it reads and where the bands sit
+		const float he = m.halfExtent * kUnitKm;
+		s.last += QStringLiteral( " path=%1 cover=low %2 mid %3 (map texels x%4) heights=%5 base %6 km square=%7,%8 km +-%9"
+								  " apdeck=%10" )
+			.arg( wwCloudFlyTier() > 0 ? QStringLiteral( "cloud_fly(march + fly grid)" ) : QStringLiteral( "cloud_march" ) )
+			.arg( double( m.band[0].coverage ), 0, 'f', 3 ).arg( double( m.band[1].coverage ), 0, 'f', 3 )
+			.arg( double( m.band[0].coverK ), 0, 'f', 3 )
+			.arg( wwCloudFlyWorldHeights() ? QStringLiteral( "world" ) : QStringLiteral( "eye" ) )
+			.arg( double( m.band[0].baseZ * kUnitKm ), 0, 'f', 2 )
+			.arg( double( m.centerX * kUnitKm ), 0, 'f', 1 ).arg( double( m.centerY * kUnitKm ), 0, 'f', 1 ).arg( double( he ), 0, 'f', 0 )
+			.arg( d.deckAp[3] > 0.5f ? QStringLiteral( "cover %1 key through %2 sky through %3" ).arg( double( d.deckAp[0] ), 0, 'f', 3 )
+					.arg( double( d.deckAp[1] ), 0, 'f', 3 ).arg( double( d.deckAp[2] ), 0, 'f', 3 )
+				: red( "apdeck" ) ? QStringLiteral( "RED" ) : QStringLiteral( "none" ) );
+	}
 	if ( ok )	// MODULES1 10c: the volume tiers have no counterpart in the Fusion Shaders cloud model
 		s.last += QStringLiteral( " fusion=none(the volume tiers have no Fusion Shaders counterpart: left as they are)" );
 	drew << s.last;

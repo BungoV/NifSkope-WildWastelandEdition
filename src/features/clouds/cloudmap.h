@@ -38,6 +38,7 @@ struct WwCloudBandInfo
 	float typeSpread = 0.0f;
 	float depthZ = 0.0f;
 	float ice = 0.0f;	//!< lane CLOUDRECX1: clouds.iceFraction (weather or the band's layers), 0 = the droplet phase (today)
+	float coverK = 1.0f;	//!< SKYLIGHT1 round 2: the map's texels x this (a .recx / live coverage over the layers' own), 1 = none
 };
 
 /*! lane CLOUDRECX1 (SPEC.md 1.4 clouds): what the march takes from the weather .recx besides the bands; every field's

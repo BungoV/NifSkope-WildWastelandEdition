@@ -5,6 +5,7 @@
 #include "features/weather/weatherrecx.h"	// MODULES1 10c: the weather .recx clouds block feeds the law
 #include "features/clouds/cloudmap.h"
 #include "features/clouds/cloudvol.h"
+#include "features/clouds/cloudfly.h"	// SKYLIGHT1 round 3: where the bands sit (the anchor line)
 #include "features/sky/atmomath.h"
 #include "gl/cellunits.h"
 #include "gl/celluniform.h"	// lane CELLUNI2
@@ -819,6 +820,26 @@ void wwCloudShadowPass( Scene * scene )
 		.arg( mode == 3 ? QStringLiteral( "fusion(sheets,opacity=%1,strength=%2)" )
 				.arg( double( law.opacity ), 0, 'f', 2 ).arg( double( law.strength ), 0, 'f', 2 )
 			: mode == 2 ? QStringLiteral( "beer(red)" ) : QStringLiteral( "beer(volume_march,sigma=%1/km)" ).arg( double( kSigma ), 0, 'f', 0 ) ) + sheets.note );
+	{	/* SKYLIGHT1 round 3 (bungo: a dark area around him, shadows vanish as he nears them): where the field the shadow
+		 * is cast from lies on the world, on every change of 0.1 km. The volume mode reads the cloud map (its square laid
+		 * on the world, cloudmap.cpp laid=world), the sheets the same layers by the same fit; the bands' heights are
+		 * metres above sea level unless heights=eye. */
+		const double uk = double( WwAtmoMath::kUnitKm );
+		const QString a = QStringLiteral( "anchor: field=%1 cloud map square %2,%3 km +-%4 km heights=%5 low base %6 km cover %7 "
+			"density %8 | shadow map %9 km around the eye %10,%11 km (outside: far_t %12)" )
+			.arg( mode == 1 ? QStringLiteral( "cloud_density(map laid on the world)" ) : mode == 3 ? QStringLiteral( "sheets(world fit)" )
+				: QStringLiteral( "map(red beer)" ) )
+			.arg( double( m.centerX ) * uk, 0, 'f', 1 ).arg( double( m.centerY ) * uk, 0, 'f', 1 ).arg( double( m.halfExtent ) * uk, 0, 'f', 0 )
+			.arg( wwCloudFlyWorldHeights() ? QStringLiteral( "world" ) : QStringLiteral( "eye" ) )
+			.arg( double( m.band[0].baseZ ) * uk, 0, 'f', 2 ).arg( double( m.band[0].coverage ), 0, 'f', 3 )
+			.arg( double( m.band[0].density ), 0, 'f', 2 ).arg( g.fit.extentKm, 0, 'f', 1 )
+			.arg( eyeKm[0], 0, 'f', 1 ).arg( eyeKm[1], 0, 'f', 1 ).arg( double( g.far[0] ), 0, 'f', 3 );
+		static QString saidA;
+		if ( a != saidA ) {
+			saidA = a;
+			std::fprintf( stderr, "cloudshadow %s\n", qPrintable( a ) );
+		}
+	}
 }
 
 void wwCloudShadowUniforms( Scene * scene, NifSkopeOpenGLContext::Program * prog, bool volume, float airAmb )

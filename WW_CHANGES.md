@@ -19,6 +19,21 @@ edited file and every includer of the changed headers (16 sources, rc=0).
 - **3. The volume clouds sit on the world.** The cloud map's square stays where it was laid (laid again past 24 km;
   red `WW_CLOUDMAP_RED=eyesquare`), and Fly-through Clouds ships Low (world heights; new settings key). Twin: a cloud
   6 km away is 3.46x wider than at 20 km (red 1.00x). Log `cloudmap: square=world@...`.
+- **4. The deck reaches the land the viewer draws.** The Physical Light Units master ships Off, so physFinish never ran
+  and the deck never touched the ambient. The vanilla stage DALC (the land, far LOD and probes) now goes through the
+  deck in `currentLight()` (`src/gl/lookdevstage.cpp`), and so does the GI miss sky (`src/features/gi/rtddgicell.cpp`).
+  Log `sky deck: stage DALC ...` and `sky deck: GI miss sky ...`. The up floor is the clear sky x (1 - cover) instead
+  of the whole clear sky, so Cloud Density moves the light (twin, cover 0.95: density 0 / 1 / 4 / 10 -> up x1.00 /
+  1.44 / 1.08 / 0.74, sun on the ground x1.00 / 0.005 / 0.005 / 0.007). Red `WW_SKY_CLOUDDECK_RED=floor`.
+- **5. The air under the deck is the deck's grey, not the clear sky's blue.** `cloud_march.frag` scales the clear-sky
+  in-scatter under the deck (`cvDeckAp`). Red `WW_CLOUDVOL_RED=apdeck`. Log `lookdev sky: ... volclouds ... apdeck=`.
+- **6. The cloud override and density reach the drawn clouds; clouds and shadows stay on the world.** The map texels
+  take the override's cover (red `WW_CLOUDMAP_RED=coveralpha`); a harness no longer pins Fly-through Clouds to eye
+  heights (red `WW_CLOUDFLY_RED=harnessoff`); each layer is laid on the world by its zenith-cap fit instead of the dome
+  projected around the square's centre, which made a dense patch over the anchor fading outward (the dark area around
+  the eye, shadows that left as he walked in; red `WW_CLOUDMAP_RED=domeproj`). Moving-eye twin: over 60 km and two
+  re-anchors a texel's uv drifts 1e-6 and its shadow's 0 (old: uv 2.9..12.6, alpha 0..0.16). Logs `cloudfly: tier=`,
+  `cloudmap: ... laid=world ... density=`, `cloudshadow anchor: ...`, `light meas: ... | cloud field: ...`.
 
 ## NIGHTHAZE1 (2026-11-11): the brown night haze, the air's filters, select all in a cell view
 

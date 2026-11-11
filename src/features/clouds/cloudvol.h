@@ -73,6 +73,12 @@ bool wwCloudVolLowColour( float out[3] );
  *  deck this frame. Memoised (tables per band shape, columns per coverage and mu0). GL thread. */
 bool wwCloudDeckThrough( float mu0, float out[4] );
 
+/*! SKYLIGHT1 round 2: the deck over six sky axes (clouddeckmath.h overAxes; up = the index a face looking up reads),
+ *  every reader of the sky's ambient through this one call: the stage's DALC (vanilla and physical) and the GI's miss sky.
+ *  pi: the axes are a record DALC (read over pi). Prints "sky deck: <who> ..." on change. Returns up after / before,
+ *  0 = no deck (none this frame, the sun down, or the red WW_SKY_CLOUDDECK_RED=1). GL thread. */
+float wwCloudDeckOnAxes( float ax[6][3], int up, const float sunHorizC[3], float mu0, float rhoG, bool pi, const char * who );
+
 /*! lane LIGHTNING2 (LIGHTNINGSKY1): the storm's flash for the rest of the frame, the same strike, level and colour as the
  *  volume's (one schedule on the clouds' clock, gl/cloudlightning.h). Switch WW_LIGHTNING_SKY (live, on), red
  *  WW_LIGHTNING_SKY_RED = the volume clouds alone (CLOUD6f).

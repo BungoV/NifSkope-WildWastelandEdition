@@ -1041,7 +1041,28 @@ LdLight currentLight()
 		atmoSun = atmoKey;
 		sunPath = sunKey;
 	}
-	return memo;
+	/* SKYLIGHT1 round 2 (build 68, CommonwealthOvercast: stage DALC up stayed 0.528897, no "sky deck:" line): the deck sat
+	 * in physFinish, which runs only under the Physical Light Units master, and that ships Off. The DALC the land, the far
+	 * LOD (cellExtDalc) and the probes read is the weather's, so the deck goes on it here (out of the memo: the cloud map
+	 * moves without the stage's keys). The sunlight scale reads the image space, which reads this light: that read takes
+	 * the light without the deck (as before), not a loop. Red WW_SKY_CLOUDDECK_RED=1. */
+	if ( wwPhysSkyOn() )
+		return memo;
+	static bool busy = false;
+	if ( busy )
+		return memo;
+	busy = true;
+	LdLight L = memo;
+	const float len = std::sqrt( L.sunDir[0] * L.sunDir[0] + L.sunDir[1] * L.sunDir[1] + L.sunDir[2] * L.sunDir[2] );
+	const float mu = len > 0.0f ? L.sunDir[2] / len : 0.0f;
+	if ( mu > 0.0f ) {
+		const float ks = wwLookdevSunlightScale() * mu;
+		const float sH[3] = { L.sun[0] * ks, L.sun[1] * ks, L.sun[2] * ks };
+		const float rho = wwWeatherRecx().groundAlbedo >= 0.0f ? wwWeatherRecx().groundAlbedo : 0.15f;
+		wwCloudDeckOnAxes( L.dalc, 5, sH, mu, rho, true, "stage DALC (weather units, the land + far LOD + probes; up = [5])" );
+	}
+	busy = false;
+	return L;
 }
 
 /* lane PHYSUNITS1: the light in real units. The key came through the air from the top of the atmosphere (airKey), else
@@ -1121,28 +1142,10 @@ void physFinish( LdLight & L, float rKey, bool airKey )
 		 * key x sunlight scale x mu) as diffuse light and the clear sky's through (clouddeckmath.h). Up = that; the down face
 		 * the ground's bounce of it; the sides under the deck (0.396 + rho / 2) x up (CIE overcast sky, Ev / Eh, + the ground's
 		 * half), blended by the cover. Red WW_SKY_CLOUDDECK_RED=1: the clear sky's ambient. */
-		WW_SWITCH_STATIC( bool, deckRed, wwEnvStr( "WW_SKY_CLOUDDECK_RED" ).trimmed() == QLatin1StringView( "1" ) );
-		float dk[4];
-		if ( !deckRed && len > 0.0f && n[2] > 0.0f && wwCloudDeckThrough( n[2], dk ) ) {
-			const float rho = skyAl, ks = wwLookdevSunlightScale() * n[2];
-			const WwCloudDeck::Through t = { dk[0], dk[1], dk[2], dk[3] };
-			const float clearUp = lumOf( out[4] );
-			for ( int c = 0; c < 3; c++ ) {
-				const float upD = WwCloudDeck::upC( t, L.sun[c] * ks, out[4][c], rho, false );
-				const float add = upD - out[4][c];
-				for ( int a = 0; a < 4; a++ )
-					out[a][c] = ( 1.0f - t.cover ) * out[a][c] + t.cover * ( 0.396f + 0.5f * rho ) * upD;
-				out[4][c] = upD;
-				out[5][c] += rho * add;
-			}
-			static int saidDk = -1;
-			const int k = int( std::lround( dk[0] * 100.0f ) ) * 1000 + int( std::lround( dk[1] * 100.0f ) );
-			if ( k != saidDk ) {
-				saidDk = k;
-				fprintf( stderr, "sky deck: cover %.3f tau %.2f sun through %.3f sky through %.3f -> up x%.3f of the clear sky's"
-					" (red WW_SKY_CLOUDDECK_RED=1)\n", double( dk[0] ), double( dk[3] ), double( dk[1] ), double( dk[2] ),
-					double( lumOf( out[4] ) / std::max( clearUp, 1e-9f ) ) );
-			}
+		if ( len > 0.0f && n[2] > 0.0f ) {	// SKYLIGHT1 round 2: the one deck call (cloudvol.cpp wwCloudDeckOnAxes)
+			const float ks = wwLookdevSunlightScale() * n[2];	// 1 under real units
+			const float sH[3] = { L.sun[0] * ks, L.sun[1] * ks, L.sun[2] * ks };
+			wwCloudDeckOnAxes( out, 4, sH, n[2], skyAl, false, "stage (physical units, face order; up = [4])" );
 		}
 		for ( int a = 0; a < 6; a++ )	// out is by the face; the readers take the weather's order (wwPhysAxesRed)
 			std::copy( out[a], out[a] + 3, L.dalc[axRed ? a : ( a ^ 1 )] );

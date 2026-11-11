@@ -35,6 +35,9 @@ uniform vec4 cvPhasePrm;	// the droplet phase (gHG, gD, alpha, wD)
 uniform vec3 cvAmb;	// the sky's mean radiance at the clouds, scene units
 uniform float cvAmbOn;
 uniform float cvApOn;
+/* SKYLIGHT1 round 2 (bungo: the overcast sky does not look overcast): the deck over the eye (cloudvol.cpp
+ * wwCloudDeckThrough): x cover, y the key's diffuse transmission, z the clear sky's, w 1 = on. 0 = the red apdeck. */
+uniform vec4 cvDeckAp;
 uniform float cvFrame;	// the jitter's frame (0 = fixed)
 uniform float cvMaxKm;	// the march's reach along the ray
 uniform float cvSlab;	// > 0: a uniform slab of this density in the Low band (the dark-core gate)
@@ -369,7 +372,17 @@ void main()
 		float r1 = length( pe ), mu1 = dot( pe, d ) / r1;
 		vec3 ta = atTrans( cvTrans, kRb + o.z, d.z ), tb = atTrans( cvTrans, r1, mu1 );
 		vec3 tair = clamp( ta / max( tb, vec3( 1e-6 ) ), 0.0, 1.0 );
-		L = L * tair + cvSky( d ) * ( 1.0 - tair ) * ( 1.0 - T );
+		/* SKYLIGHT1 round 2: the air in front of the deck, seen from under it, is lit by the deck's diffuse light, not
+		 * by the clear sun: the clear sky's in-scatter x (key tKey + sky tSky) / (key + sky) per colour, blended by the
+		 * cover (clouddeckmath.h apUnder, the twin). At the overcast spot it was ~60 % of the 15-40 deg sky. */
+		vec3 ap = cvSky( d );
+		if ( cvDeckAp.w > 0.5 && o.z < lo ) {
+			vec3 keyH = cvKeyK * atTrans( cvTrans, kRb + o.z, cvKeyW.z ) * max( cvKeyW.z, 0.0 ) / kPi;
+			vec3 clr = keyH + cvAmb;
+			vec3 und = keyH * cvDeckAp.y + cvAmb * cvDeckAp.z;
+			ap *= ( 1.0 - cvDeckAp.x ) + cvDeckAp.x * clamp( und / max( clr, vec3( 1e-9 ) ), 0.0, 1.0 );
+		}
+		L = L * tair + ap * ( 1.0 - tair ) * ( 1.0 - T );
 	}
 	cvOut = vec4( L, T );
 	cvDepth = vec4( dm );

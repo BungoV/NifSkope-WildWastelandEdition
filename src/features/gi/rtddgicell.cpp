@@ -19,6 +19,7 @@
 #include "features/sky/atmosphere.h"	// MODULES1 round 10: the one night sky's factor (WwNightSky)
 #include "features/sky/atmomath.h"    // FIX1101A: giSkyFromPhysical
 #include "features/weather/weatherrecx.h"   // MODULES1: the ground albedo for the GI sky's -Z
+#include "features/clouds/cloudvol.h"   // SKYLIGHT1 round 2: the deck on the miss sky
 #include "gl/celllights.h"
 #include "gl/cellunits.h"
 #include "gl/celluniform.h"	// lane PERFFIX1: the volume's unit bound without asking the driver
@@ -1997,6 +1998,13 @@ static void volumeFrame( Scene * scene, Cell & c, const CellSpec * spIn, bool du
 				const bool ground = absMode == 2 && k > 0.0f && !rtddgiGroundRed();
 				if ( ground )
 					WwAtmoMath::giSkyGround( sky.sun, sky.sunTo[2], rho, mixed );
+				/* SKYLIGHT1 round 2: the miss sky is the clear physical sky; on near land it replaces a share of the DALC,
+				 * so it takes the same deck (key x mu on a level face, the sky's own units). Red WW_SKY_CLOUDDECK_RED=1. */
+				if ( absMode == 2 && k > 0.0f ) {
+					const float mu = std::max( sky.sunTo[2], 0.0f );
+					const float sH[3] = { sky.sun[0] * mu, sky.sun[1] * mu, sky.sun[2] * mu };
+					wwCloudDeckOnAxes( mixed, 4, sH, mu, rho, false, "GI miss sky (rtddgi, face order; up = [4])" );
+				}
 				static float saidK = -1.0f, saidG = -1.0f;
 				if ( std::fabs( k * nsk.gain - saidK ) > 1e-5f || std::fabs( mixed[5][1] - saidG ) > 1e-6f ) {
 					saidK = k * nsk.gain;
