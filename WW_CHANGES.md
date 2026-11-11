@@ -1,3 +1,16 @@
+## MODULES1 round 7 (2026-11-11): bungo's build 62 flight
+- **R7-1 lit effect cards and particles dark beside a lamp:** outdoors they take the surfaces' sun, the weather's
+  ambient and the lamps at their own spot. Red `WW_CELL_FXLOCAL_RED=base`. Telemetry `cell fx local: ...`.
+- **Night sky:** Physical Light Units Off: the drawn sky crossfades to the weather record's night dome colours by
+  the night share. On: the record's sky level is added to the physical night sky and to the ambient, so the night
+  stays readable. Stars in both. Red `WW_NIGHTSKY_RED=physical`. Telemetry `night sky: ...`, `nightsky=` in the sky echo.
+- **Item 2 one-frame light flashes:** a surface fragment off the traced depth (2 % + 2 units) took every lamp
+  unshadowed for that frame; it now keeps its pixel's lamp shadow ratio (effects, particles, water and the air keep
+  1.0). Red `WW_CELL_RESTIR_MISS_RED=1`. Telemetry `restir ratio miss: ...`.
+- **Item 5 white far tower pink with the sun behind it:** under Physical Light Units the sky's six ambient axes went
+  in mirrored (every face read the opposite side's sky; the ground took 15 % of its sky). They now go in the
+  weather's order. Red `WW_PHYSUNITS_AXES_RED=1`. Telemetry `phys light: ... axes=...`; `cell ambient:` up above down by day.
+
 ## MODULES1 round 6 (2026-11-11): bungo's build 61 flight
 - **R6-1 far trees glowing white when back-lit:** the far tree MESHES' leaf back light was added to the root of the
   lit colour in the viewport light's unit. Under the cell's sun it is now albedo x sun x (N.-L x power)^2 x the sun's
