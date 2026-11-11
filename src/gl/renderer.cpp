@@ -2486,6 +2486,7 @@ bool Renderer::setupProgramCE1( const NifModel * nif, Program * prog, Shape * me
 			setupMemo().stamps.erase( prog );	// per shape: the next shape's scene globals run again (PERF1's memo)
 		}
 		wwCellGrassUniforms( scene, mesh->id() );	// lane GRASSMB1: the grass fade, zero on every other shape
+		CellFarInst::vcAoUniform( prog, CellFarInst::vcAoType( mesh->getName() ) );	// MODULES1 10b-2: zero on every other shape
 		if ( prog->uniLocation( "fgMode" ) >= 0 )	// lane FARDRAW1: a live-ground twin's grid, layers and decals
 			CellFarGround::uniforms( scene, prog );
 		if ( prog->uniLocation( "landShoreIndex" ) >= 0 )	// lane WATERWETBAKE1: the cell programs (the Wet shore row)

@@ -160,6 +160,13 @@ QString wwVolPartSummary();
 //! 1 a volumetric lit card | 2 its soft fade is on (drawn with no depth test: the fade is the occlusion)
 void wwVolPartFxSet( int flags );
 int wwVolPartFx();
+/*! MODULES1 10b-3: the air's env strata (leak fade, open-field share) at up to three world points, read back from the
+ *  froxel history after the air pass (one texel each; on a new set, then every 600 frames). Say( i ) = what the air
+ *  kept of the flat ambient there and what a lit card keeps (the same texel through the same law, or 1 under the red
+ *  WW_CELL_FXLOCAL_RED=noleakfade / with no strata). FxSoftSay = the volumetric cards' depth soft fade since the last ask. */
+void wwVolAirEnvProbeSet( const float ( *world )[3], int n );
+QString wwVolAirEnvProbeSay( int i );
+QString wwVolPartFxSoftSay();
 //! gates only: WW_CELL_VOLPART_HIDE=1, no volumetric particle or card drawn (the plate)
 bool wwVolPartHidden();
 //! lane MUSGI1: the game's fake fog / shaft cards (cell buckets named "FakeAir ...", gl/fakeair.h) hide while our

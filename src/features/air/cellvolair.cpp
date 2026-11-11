@@ -1259,6 +1259,23 @@ int vaLeakBits( const WwCellLighting * L, int leakRed )
 	const bool live = L && L->interior && wwCellAsOutdoor( L ) && wwEnv( "WW_CELL_AIR_INTLEAK_RED" ).trimmed() != "1";
 	return live ? leakRed : ( leakRed | 1 | 2 | 4 | 8 | 16 );
 }
+
+// MODULES1 10b-3: the env strata's read-back at the cards cellfxlit.cpp names (wwVolAirEnvProbeSet / Say)
+struct VaEnvProbe
+{
+	int n = 0;
+	bool dirty = false, held = false, cardOn = false;
+	float world[3][3] = {};
+	int state[3] = { 0, 0, 0 };	// 0 not read yet, 1 outside the air's grid, 2 read, 3 read: no walk stored there
+	int cell[3][3] = {};
+	float fade[3] = {}, r[3] = {};
+};
+VaEnvProbe & vaEnvProbe()
+{
+	static VaEnvProbe p;
+	return p;
+}
+int vpFxSoftSeen = 0;	// the volumetric cards set up since the last ask: 1 one with the soft fade on, 2 one with it off
 }	// namespace
 
 // lane AIRBOUNCE1: the lamps' floor bounce in the air (src/gl/glcontext.cpp injects WW_CELL_AIR_BOUNCE; read per load)
@@ -3219,6 +3236,40 @@ static void vaPassInner( Scene * scene, bool run )
 		+ apNote	// lane AIRPERF1
 		+ QStringLiteral( ")" );
 
+	{	// MODULES1 10b-3: the env strata at the cards cellfxlit.cpp named (one texel each: a new set, then every 600 frames)
+		VaEnvProbe & ep = vaEnvProbe();
+		ep.held = temporal && g.histStrata == 6 && g.hist[g.histCur] != 0;
+		if ( ep.n > 0 && ep.held && ( ep.dirty || g.frame % 600u == 0u ) ) {
+			ep.dirty = false;
+			const Transform & pv = scene->view;
+			fn->glPixelStorei( GL_PACK_ALIGNMENT, 4 );
+			fn->glBindFramebuffer( GL_READ_FRAMEBUFFER, g.fbo );
+			for ( int i = 0; i < ep.n; i++ ) {
+				const Vector3 q = pv * Vector3( ep.world[i][0], ep.world[i][1], ep.world[i][2] );
+				const float d = q.length();
+				ep.state[i] = 1;
+				if ( !( q[2] < 0.0f ) || d <= nearD )
+					continue;
+				const float pu = 0.5f + 0.5f * p00 * q[0] / -q[2], pv2 = 0.5f + 0.5f * p11 * q[1] / -q[2];
+				const float fk = std::log( d / nearD ) / logRatio * float( kSlices );
+				if ( pu < 0.0f || pu >= 1.0f || pv2 < 0.0f || pv2 >= 1.0f || fk >= float( kSlices ) )
+					continue;
+				const int x = std::min( int( pu * float( cols ) ), cols - 1 ), y = std::min( int( pv2 * float( rows ) ), rows - 1 );
+				const int k = std::min( int( fk ), kSlices - 1 );
+				float h0[4] = { 0.0f, 0.0f, 0.0f, 0.0f }, h1[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+				fn->glFramebufferTextureLayer( GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, g.hist[g.histCur], 0, 4 * kSlices + k );
+				fn->glReadPixels( x, y, 1, 1, GL_RGBA, GL_FLOAT, h0 );
+				fn->glFramebufferTextureLayer( GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, g.hist[g.histCur], 0, 5 * kSlices + k );
+				fn->glReadPixels( x, y, 1, 1, GL_RGBA, GL_FLOAT, h1 );
+				ep.cell[i][0] = x;
+				ep.cell[i][1] = y;
+				ep.cell[i][2] = k;
+				ep.fade[i] = h0[3];
+				ep.r[i] = h1[1];
+				ep.state[i] = h1[2] > 0.9999f ? 2 : 3;
+			}
+		}
+	}
 	/* WW_CELL_AIR_DUMP=<file>: int32 cols rows slices; the injected and the integrated volumes (cols x rows RGBA float
 	 * per layer, layer 0 first, bottom row first); <file>.txt the numbers an independent rebuild needs */
 	if ( !s.dump.isEmpty() ) {
@@ -3321,6 +3372,16 @@ void wwVolAirUniforms( Scene * scene )
 	if ( terrLoc >= 0 ) {
 		u.bind( WwCellUnit::AirTerrain, GL_TEXTURE_2D_ARRAY, terr ? g.terr : 0 );
 		prog->uni1i_l( terrLoc, WwCellUnit::AirTerrain );
+	}
+	// MODULES1 10b-3: the env strata the air kept, for a lit card's sky share (cell_volpart.glsl vpAmbKeep)
+	const int envLoc = prog->uniLocation( "volEnvHist" );
+	if ( envLoc >= 0 ) {
+		const bool envRed = wwEnvStr( "WW_CELL_FXLOCAL_RED" ).split( ',' ).contains( QStringLiteral( "noleakfade" ) );
+		const bool env = on && g.histOk && g.histStrata == 6 && g.hist[g.histCur] != 0 && !envRed;
+		u.bind( WwCellUnit::AirEnvHist, GL_TEXTURE_3D, env ? g.hist[g.histCur] : 0 );
+		prog->uni1i_l( envLoc, WwCellUnit::AirEnvHist );
+		prog->uni4f( "volEnvGrid", FloatVector4( float( g.histCols ), float( g.histRows ), float( g.histSlices ), env ? 1.0f : 0.0f ) );
+		vaEnvProbe().cardOn = env;
 	}
 	// lane WEATHERBLEND4: the air's drift noise, for the sun's column and the puffs (lookdev_fog.glsl wwAirDriftAt)
 	const int noiseLoc = prog->uniLocation( "volAirNoise" );
@@ -3610,11 +3671,63 @@ int vpFxFlags = 0;	// the effect card being set up: 1 a volumetric card, 2 its s
 void wwVolPartFxSet( int flags )
 {
 	vpFxFlags = flags;
+	if ( flags & 1 )
+		vpFxSoftSeen |= ( flags & 2 ) ? 1 : 2;
 }
 
 int wwVolPartFx()
 {
 	return vpFxFlags;
+}
+
+QString wwVolPartFxSoftSay()
+{
+	const int seen = vpFxSoftSeen;
+	vpFxSoftSeen = 0;
+	// one rule for every volumetric card (renderer.cpp): the scene depth grabbed and no red (WW_CELL_VOLPART_RED nosoft)
+	return QStringLiteral( "depth soft fade (the card reads the scene's depth, drawn with no depth test): %1" )
+		.arg( seen == 1 ? QStringLiteral( "ON for every volumetric card set up" ) : seen == 2 ? QStringLiteral( "OFF for every volumetric card set up" )
+			: seen == 3 ? QStringLiteral( "ON for some, OFF for some" ) : QStringLiteral( "no volumetric card set up yet" ) );
+}
+
+void wwVolAirEnvProbeSet( const float ( *world )[3], int n )
+{
+	VaEnvProbe & ep = vaEnvProbe();
+	n = std::clamp( n, 0, 3 );
+	bool same = n == ep.n;
+	for ( int i = 0; i < n && same; i++ )
+		for ( int c = 0; c < 3; c++ )
+			same = same && world[i][c] == ep.world[i][c];
+	if ( same )
+		return;
+	ep.n = n;
+	ep.dirty = true;
+	for ( int i = 0; i < n; i++ ) {
+		ep.state[i] = 0;
+		for ( int c = 0; c < 3; c++ )
+			ep.world[i][c] = world[i][c];
+	}
+}
+
+QString wwVolAirEnvProbeSay( int i )
+{
+	const VaEnvProbe & ep = vaEnvProbe();
+	if ( i < 0 || i >= ep.n )
+		return QString();
+	if ( !ep.held )
+		return QStringLiteral( "ambient kept: air 1.00, card 1.00 (the air holds no env strata this frame)" );
+	if ( ep.state[i] == 0 )
+		return QStringLiteral( "ambient kept: not read yet" );
+	if ( ep.state[i] == 1 )
+		return QStringLiteral( "ambient kept: outside the air's grid, card 1.00" );
+	// the shader's airAmbKeep (cell_airmed.glsl) on the texel both the froxel and the card read
+	const float keep = ep.state[i] == 3 ? 1.0f : ep.r[i] >= 0.0f ? 1.0f - ep.fade[i] + ep.fade[i] * ep.r[i] : 1.0f - ep.fade[i];
+	return QStringLiteral( "ambient kept (x the weather ambient after the GI's sky share): air %1, card %2 (froxel %3,%4,%5: leak fade %6, open-field share %7%8%9)" )
+		.arg( double( keep ), 0, 'f', 2 ).arg( double( ep.cardOn ? keep : 1.0f ), 0, 'f', 2 )
+		.arg( ep.cell[i][0] ).arg( ep.cell[i][1] ).arg( ep.cell[i][2] )
+		.arg( double( ep.fade[i] ), 0, 'f', 2 ).arg( double( ep.r[i] ), 0, 'f', 2 )
+		.arg( ep.state[i] == 3 ? QStringLiteral( ", no walk stored" ) : QString() )
+		.arg( ep.cardOn ? QString() : QStringLiteral( "; the card does not read the strata: RED WW_CELL_FXLOCAL_RED=noleakfade or none bound" ) );
 }
 
 bool wwVolPartHidden()

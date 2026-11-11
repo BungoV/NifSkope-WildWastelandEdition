@@ -12,6 +12,8 @@
 
 #include <QDebug>
 #include <QElapsedTimer>
+#include <QOpenGLContext>
+#include <QOpenGLExtraFunctions>
 
 #include <algorithm>
 #include <cmath>
@@ -199,13 +201,127 @@ QString wwEndlessSeaAppend( NifModel * nif, const QModelIndex & parent, const Ww
 		.arg( double( kSnap ), 0, 'f', 0 ).arg( clock.elapsed() );
 }
 
+namespace
+{
+
+/* MODULES1 10b-6: the sheet's own draw counter. One sample query a frame round the first draw of the sheet; its
+ * result is read without waiting on a later frame. Red: WW_ENDLESS_SEA_RED=nocount (no query, no line). */
+struct SeaDraw
+{
+	const void * nif = nullptr;
+	int block = -1;		// the sheet's block this frame (-1 none)
+	unsigned int query = 0;
+	bool open = false, pending = false, busy = false;
+	int drawsFrame = 0;	// draws of the sheet since the last frame step
+	long long trisFrame = 0, trisPending = 0;
+	int drawsPending = 0;
+	long long saidTris = -2, saidPix = -2;
+	int saidState = -1;	// 0 not sent, 1 sent and hidden, 2 sent and drawn, 3 sent, counter busy
+};
+
+SeaDraw & seaDraw()
+{
+	static SeaDraw d;
+	return d;
+}
+
+constexpr unsigned int kSamplesPassed = 0x8914, kCurrentQuery = 0x8865, kQueryResult = 0x8866, kQueryReady = 0x8867;
+
+void seaDrawSay( SeaDraw & d, int state, long long tris, long long pix, int draws )
+{
+	const bool pixMoved = pix >= 0 && ( d.saidPix < 0 || std::llabs( pix - d.saidPix ) * 10 > std::max( d.saidPix, 1LL ) );
+	if ( state == d.saidState && tris == d.saidTris && !pixMoved )
+		return;
+	d.saidState = state;
+	d.saidTris = tris;
+	d.saidPix = pix;
+	static const char * const names[4] = { "not sent (the sheet did not reach its draw call this frame)",
+		"sent, hidden (no pixel passed the depth test)", "sent, drawn", "sent, pixels not counted (the pass census holds the sample counter)" };
+	qInfo().noquote() << QStringLiteral( "endless sea draw: %1; triangles sent %2 in %3 draws, pixels passed %4 (first draw of the frame)" )
+		.arg( QLatin1String( names[state] ) ).arg( tris ).arg( draws )
+		.arg( pix >= 0 ? QString::number( pix ) : QStringLiteral( "n/a" ) );
+}
+
+//! Once a frame: reads the last query when it is ready and says what changed.
+void seaDrawStep( SeaDraw & d, const void * nif, int block )
+{
+	QOpenGLContext * ctx = QOpenGLContext::currentContext();
+	QOpenGLExtraFunctions * f = ctx ? ctx->extraFunctions() : nullptr;
+	if ( d.pending && f ) {
+		unsigned int ready = 0;
+		f->glGetQueryObjectuiv( d.query, kQueryReady, &ready );
+		if ( ready ) {
+			unsigned int pix = 0;
+			f->glGetQueryObjectuiv( d.query, kQueryResult, &pix );
+			d.pending = false;
+			seaDrawSay( d, pix > 0 ? 2 : 1, d.trisPending, qint64( pix ), d.drawsPending );
+		}
+	}
+	if ( d.block >= 0 && d.nif == nif ) {
+		if ( d.drawsFrame == 0 )
+			seaDrawSay( d, 0, 0, -1, 0 );
+		else if ( d.busy )
+			seaDrawSay( d, 3, d.trisFrame, -1, d.drawsFrame );
+		else if ( !d.pending && d.query ) {
+			d.pending = true;
+			d.trisPending = d.trisFrame;
+			d.drawsPending = d.drawsFrame;
+		}
+	}
+	d.nif = nif;
+	d.block = block;
+	d.drawsFrame = 0;
+	d.trisFrame = 0;
+	d.busy = false;
+}
+
+}
+
+void wwEndlessSeaDrawBegin( Scene * scene, int block, long long triangles )
+{
+	SeaDraw & d = seaDraw();
+	if ( d.block < 0 || block != d.block || !scene || scene->nifModel != d.nif )
+		return;
+	d.drawsFrame++;
+	d.trisFrame += triangles;
+	if ( d.drawsFrame > 1 || d.pending || wwEnv( "WW_ENDLESS_SEA_RED" ).trimmed() == "nocount" )
+		return;
+	QOpenGLContext * ctx = QOpenGLContext::currentContext();
+	QOpenGLExtraFunctions * f = ctx ? ctx->extraFunctions() : nullptr;
+	if ( !f )
+		return;
+	int cur = 0;
+	f->glGetQueryiv( kSamplesPassed, kCurrentQuery, &cur );
+	if ( cur != 0 ) {	// the pass census (cellpasstime.cpp) counts samples now: two cannot be open at once
+		d.busy = true;
+		return;
+	}
+	if ( !d.query )
+		f->glGenQueries( 1, &d.query );
+	f->glBeginQuery( kSamplesPassed, d.query );
+	d.open = true;
+}
+
+void wwEndlessSeaDrawEnd()
+{
+	SeaDraw & d = seaDraw();
+	if ( !d.open )
+		return;
+	d.open = false;
+	if ( QOpenGLContext * ctx = QOpenGLContext::currentContext() )
+		ctx->extraFunctions()->glEndQuery( kSamplesPassed );
+}
+
 void wwEndlessSeaFollow( Scene * scene, const Transform & view )
 {
-	if ( !scene || !scene->nifModel || !wwEndlessSeaOn() )
+	if ( !scene || !scene->nifModel || !wwEndlessSeaOn() ) {
+		seaDrawStep( seaDraw(), nullptr, -1 );
 		return;
+	}
 	float box[4], seaZ = 0.0f, reach = 0.0f;
 	quint32 seaId = 0;
 	const int b = wwCellWaterEndlessBlock( scene->nifModel, box, seaZ, reach, seaId );
+	seaDrawStep( seaDraw(), scene->nifModel, b );
 	if ( b < 0 )
 		return;
 	Node * n = scene->findNode( scene->nifModel, scene->nifModel->getBlockIndex( b ) );

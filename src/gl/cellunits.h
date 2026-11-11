@@ -70,6 +70,7 @@ constexpr int WaterOceanC = 69;	// lane WATERLOOK1: its slope moments (sampler2D
 constexpr int WaterSkyIndex = 70;	// lane WATERSKYVISFAR1: the .lodl sky plane's tile index (usampler2D R32UI)
 constexpr int WaterSkyAtlas = 71;	// its sparse tiles (usampler2D R8UI)
 constexpr int LandLodDiff = 72;	// lane LANDSPEC2/3: the near ground's band, the 4 x 4 level-4 LOD diffuse chunks (sampler2DArray; 74-75 free)
+constexpr int AirEnvHist = 74;	// MODULES1 10b-3: the air's env strata for a lit card's sky share (sampler3D, cell_volpart.glsl)
 constexpr int LandLodOuter = 73;	// lane LANDSPEC6: the band's outer window past the page (sampler2DArray, the chunks' mip 1)
 constexpr int LandLodNoise = 76;	// Textures\Terrain\Noise.dds
 constexpr int LandLodDetail = 77;	// Textures\Terrain\DetailNormals.dds

@@ -64,6 +64,9 @@ struct WwAtmoFrame
 const WwAtmoFrame & wwAtmoFrame();
 //! MODULES1 M8: the drawn sky's colour just above the horizon, scene units (false with no sky drawn)
 bool wwAtmoHorizon( float out[3] );
+//! MODULES1 10b-4: the drawn sky's night floor (the airglow x the night sky's floor gain) at the zenith, scene units,
+//! as the last sky frame drew it; unit = scene units per unit floor. False with no sky drawn or no floor.
+bool wwAtmoNightFloorScene( float out[3], float * unit );
 /*! MODULES1 round 10 (bungo 11-11: "our physical sky is meant to be used day and night"): ONE night sky, the physical
  *  one, shown brighter by one readable-night factor. The stage (lookdevstage.cpp computeLight) sets it per light; every
  *  reader of the sky's scattered light takes the same gain: the drawn sky and the probes' capture (wwAtmoDrawSky), the

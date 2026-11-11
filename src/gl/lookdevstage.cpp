@@ -1198,7 +1198,44 @@ void nightFinish( LdLight & L, WwNightSky ns, bool phys )
 			}
 		}
 	}
-	wwAtmoNightSkyGot( WwNsAmbient, ns.lightK * ( ns.mode == 0 ? ns.gain : 1.0f ), lumOf( L.dalc[up] ) );
+	/* MODULES1 10b-4 (bungo: sky physical day AND night, light never from painted record colours): with the key under
+	 * the horizon the physical night sky is its floor alone (the airglow x the floor gain, as the sky draws it). The
+	 * master-Off axes took the record's rows there; now they cross to that floor by the night share: +Z gathers
+	 * pi L, -Z the ground's bounce rho x +Z, a side half of each. The record's rows: red WW_NIGHTSKY_RED=record. */
+	float floorUnit = 0.0f, fs[3] = { 0.0f, 0.0f, 0.0f };
+	const bool floorOnly = !phys && ns.mode == 0 && !have && ns.share > 0.0f && wwAtmoNightFloorScene( fs, &floorUnit );
+	if ( floorOnly ) {
+		const float rho = wwWeatherRecx().groundAlbedo >= 0.0f ? wwWeatherRecx().groundAlbedo : 0.15f;
+		for ( int c = 0; c < 3; c++ ) {
+			const float upE = 3.14159265f * fs[c];
+			float m = 0.0f;
+			for ( int a = 0; a < 6; a++ ) {	// by the face (4 = up, 5 = down); the readers take the weather's order
+				const float want = a == 4 ? upE : a == 5 ? rho * upE : 0.5f * ( 1.0f + rho ) * upE;
+				float & d = L.dalc[axRed ? a : ( a ^ 1 )][c];
+				d += ( want - d ) * ns.share;
+				m += d;
+			}
+			L.amb[c] += ( m / 6.0f - L.amb[c] ) * ns.share;
+		}
+	}
+	{
+		static int said = -1;
+		const int nowSaid = floorOnly ? 1 + int( std::lround( ns.share * 20.0f ) ) : 0;
+		if ( nowSaid != said && !phys && ns.mode == 0 ) {
+			said = nowSaid;
+			qInfo().noquote() << ( floorOnly
+				? QStringLiteral( "night sky: moon down: floor: the master-Off ambient axes take the physical night sky's floor"
+					" (airglow x floor gain %1, unit %2) by the night share %3: +Z %4 %5 %6 (level %7); the record's rows are the"
+					" red WW_NIGHTSKY_RED=record" )
+					.arg( double( ns.floorGain ), 0, 'g', 4 ).arg( double( floorUnit ), 0, 'g', 4 ).arg( double( ns.share ), 0, 'f', 2 )
+					.arg( double( L.dalc[up][0] ), 0, 'g', 4 ).arg( double( L.dalc[up][1] ), 0, 'g', 4 ).arg( double( L.dalc[up][2] ), 0, 'g', 4 )
+					.arg( double( lumOf( L.dalc[up] ) ), 0, 'g', 4 )
+				: QStringLiteral( "night sky: ambient axes: %1" ).arg( have ? QStringLiteral( "the key is up: the physical sky x factor" )
+					: ns.share > 0.0f ? QStringLiteral( "moon down, no sky frame yet: the record's rows this frame" )
+					: QStringLiteral( "day: no night share" ) ) );
+		}
+	}
+	wwAtmoNightSkyGot( WwNsAmbient, floorOnly ? floorUnit : ns.lightK * ( ns.mode == 0 ? ns.gain : 1.0f ), lumOf( L.dalc[up] ) );
 }
 
 LdLight computeLight()

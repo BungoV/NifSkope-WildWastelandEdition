@@ -3,6 +3,7 @@
 #include "cellfarhide.h"
 #include "cellmesh.h"
 #include "features/far-lod/lodpreview.h"	// lane PERFLOAD1 P8: the LOD preview's tint (attribute 9, y)
+#include "features/far-lod/lodinative.h"	// MODULES1 10b-2: the far AO row and the channel view
 #include "wwswitch.h"
 #include "features/shared/cellpasstime.h"
 #include "gl/cellunits.h"	// lane FIX1101A lodch: the far stream's unit
@@ -375,6 +376,51 @@ Ctx * ctxOf()
 namespace CellFarInst
 {
 
+int vcAoType( const QString & shapeName )
+{
+	if ( !shapeName.startsWith( QLatin1String( "FarLOD " ) ) )
+		return 0;
+	const int t = shapeName.startsWith( QLatin1String( "FarLOD terrain r" ) ) ? 2
+		: shapeName.startsWith( QLatin1String( "FarLOD r" ) ) ? 1 : 0;
+	if ( !t )
+		return 0;
+	WW_SWITCH_STATIC( bool, view, lodlChannelFromEnv() != LodlChannel::None );
+	// the far ground's grey is its mask sheet's B only with the Far LOD AO row on (btdterrain.cpp ringMaskCh)
+	return view || ( t == 2 && !lodlAoOn() ) ? 0 : t;
+}
+
+void vcAoUniform( NifSkopeOpenGLContext::Program * prog, int type )
+{
+	if ( !prog || prog->uniLocation( "farVcAo" ) < 0 )
+		return;
+	auto key01 = []( const char * name ) {
+		bool ok = false;
+		const float v = wwEnvStr( name ).trimmed().toFloat( &ok );
+		return ok ? std::clamp( v, 0.0f, 1.0f ) : 1.0f;
+	};
+	WW_SWITCH_STATIC( float, aoMax, key01( "WW_LODL_AO_MAX" ) );
+	WW_SWITCH_STATIC( float, skyMax, key01( "WW_LODL_SKY_MAX" ) );
+	WW_SWITCH_STATIC( bool, albedo, wwEnv( "WW_LODL_AO_RED" ).trimmed() == "albedo" );
+	prog->uni4f( "farVcAo", FloatVector4( aoMax, skyMax, float( type ), albedo ? 1.0f : 0.0f ) );
+	if ( type <= 0 )
+		return;
+	static int seen = 0;
+	static float said[3] = { -1.0f, -1.0f, -1.0f };
+	const int bit = 1 << ( type - 1 );
+	if ( ( seen & bit ) && said[0] == aoMax && said[1] == skyMax && said[2] == ( albedo ? 1.0f : 0.0f ) )
+		return;
+	seen |= bit;
+	said[0] = aoMax;
+	said[1] = skyMax;
+	said[2] = albedo ? 1.0f : 0.0f;
+	std::fprintf( stderr, "far baked ao vc: rule %s; drawn so far: flat far copy %s (its grey -> the AO rule x max %.3f, "
+		"WW_LODL_AO_MAX), far ground %s (its mask sheet's B, one sky-AO byte -> the sky occlusion x max %.3f, WW_LODL_SKY_MAX), "
+		"instanced rows without the stream %s (mesh grey x row grey -> the AO rule x max %.3f)\n",
+		albedo ? "RED albedo (the grey stays in the vertex colour)" : "shared (cell_ao.glsl cellAoShared / the far sky occlusion)",
+		( seen & 1 ) ? "yes" : "not yet", double( aoMax ), ( seen & 2 ) ? "yes" : "not yet", double( skyMax ),
+		( seen & 4 ) ? "yes" : "not yet", double( aoMax ) );
+}
+
 bool draw( NifSkopeOpenGLContext * r, Scene * scene, const CellMeshInst & d, NifSkopeOpenGLContext::Program * prog,
 	const Transform & viewTrans, int splatPass )
 {
@@ -483,12 +529,21 @@ bool draw( NifSkopeOpenGLContext * r, Scene * scene, const CellMeshInst & d, Nif
 				said[1] = skyMax;
 				said[2] = albedo ? 1.0f : 0.0f;
 				std::fprintf( stderr, "far baked ao: max %.3f (WW_LODL_AO_MAX), sky occlusion max %.3f (WW_LODL_SKY_MAX), rule %s; "
-					"the far rows with the AO + sky stream (the flat copy and the far ground keep the AO baked in their colours)\n",
+					"the far rows with the AO + sky stream (the flat copy, the far ground and the rows without the stream: line `far baked ao vc:`)\n",
 					double( aoMax ), double( skyMax ), albedo ? "RED albedo (the vertex colour)" : "shared (cell_ao.glsl cellAoShared: the whole lit colour)" );
 			}
 		}
 	}
+	// MODULES1 10b-2: rows without the stream carry the AO as mesh grey x row grey (lodinative.cpp), unless a channel view
+	bool rowsAo = false;
+	if ( !k->streamTex ) {
+		WW_SWITCH_STATIC( bool, view, lodlChannelFromEnv() != LodlChannel::None );
+		rowsAo = !view && lodlAoOn();
+	}
+	vcAoUniform( prog, rowsAo ? 3 : 0 );
 	submit( r, *cp, *k, cmds );
+	if ( rowsAo )
+		vcAoUniform( prog, 0 );
 	if ( k->streamTex )
 		prog->uni1i( "farStreamOn", 0 );
 	prog->uni1i( "farInst", 0 );

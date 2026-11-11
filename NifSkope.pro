@@ -292,6 +292,7 @@ HEADERS += \
 	src/features/clouds/cloudvol.h \
 	src/features/clouds/cloudshadow.h \
 	src/features/clouds/cloudshadowmath.h \
+	src/features/clouds/cloudfusionlaw.h \
 	src/features/clouds/cloudfly.h \
 	src/features/clouds/cloudflymath.h \
 	src/features/clouds/cloudvolmath.h \

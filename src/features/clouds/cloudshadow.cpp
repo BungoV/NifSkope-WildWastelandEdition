@@ -1,5 +1,6 @@
 #include "features/clouds/cloudshadow.h"
 #include "features/clouds/cloudshadowmath.h"
+#include "features/clouds/cloudfusionlaw.h"	// MODULES1 10b-7: the map mode's law and its constants
 #include "features/clouds/cloudmap.h"
 #include "features/clouds/cloudvol.h"
 #include "features/sky/atmomath.h"
@@ -61,6 +62,8 @@ struct CsState
 	quint64 liveGen = 0;
 	int tier = 0;
 	bool pinned = false;
+	bool follow = false;	// MODULES1 10b-1: no stored step, the row follows the clouds' own step
+	int chosen = 0;	// the row's own step (1..4), 0 = none; the step in use is never under the clouds' own
 	QString last;
 	std::atomic<float> gi{ 1.0f };
 };
@@ -72,6 +75,7 @@ CsState & cs()
 		s.init = true;
 		s.liveGen = wwSwitchGen();
 		s.pinned = false;
+		s.follow = false;
 		const QString e = wwEnvStr( "WW_CLOUDSHADOW" ).trimmed().toLower();
 		if ( !e.isEmpty() ) {
 			bool ok = false;
@@ -87,11 +91,18 @@ CsState & cs()
 			/* MODULES1 round 10 (bungo 11-11: "Cloud shadows always need to be on"): with no saved choice and no pin
 			 * the row starts at the clouds' own step (Volume Clouds Low or Off, the 2D layers: Low, the Cloud Map's
 			 * field; Medium and up: the same step). It was Off: red WW_CLOUDSHADOW_DEFAULT_RED=1. A saved choice stays. */
-			const int def = wwEnvStr( "WW_CLOUDSHADOW_DEFAULT_RED" ).trimmed() == QLatin1StringView( "1" ) ? 0
-				: std::clamp( wwCloudVolTier(), 1, 4 );
-			s.tier = std::clamp( QSettings().value( QLatin1StringView( kKey ), def ).toInt(), 0, 4 );
+			/* MODULES1 10b-1: a stored 0 no longer means Off. The row's lowest choice is "Follows Clouds": stored 0 (an
+			 * Off saved by an older build included) and no stored value both follow the clouds' own step, every frame.
+			 * Off is left only as the pin WW_CLOUDSHADOW=off, a harness scope, or the red (stored 0 = Off again). */
+			s.tier = std::clamp( QSettings().value( QLatin1StringView( kKey ), 0 ).toInt(), 0, 4 );
+			s.follow = s.tier == 0 && wwEnvStr( "WW_CLOUDSHADOW_DEFAULT_RED" ).trimmed() != QLatin1StringView( "1" );
+			s.chosen = s.tier;
 		}
 	}
+	if ( s.follow )
+		s.tier = std::clamp( wwCloudVolTier(), 1, 4 );
+	else if ( !s.pinned && s.chosen > 0 && wwEnvStr( "WW_CLOUDSHADOW_DEFAULT_RED" ).trimmed() != QLatin1StringView( "1" ) )
+		s.tier = std::max( s.chosen, std::clamp( wwCloudVolTier(), 1, 4 ) );	// a chosen step is a floor: at least the clouds' own
 	return s;
 }
 
@@ -326,6 +337,14 @@ void wwCloudShadowSetTier( int tier )
 		return;
 	s.tier = std::clamp( tier, 0, 4 );
 	QSettings().setValue( QLatin1StringView( kKey ), s.tier );
+	s.follow = s.tier == 0 && wwEnvStr( "WW_CLOUDSHADOW_DEFAULT_RED" ).trimmed() != QLatin1StringView( "1" );
+	s.chosen = s.tier;
+}
+
+int wwCloudShadowChoice()
+{
+	const CsState & s = cs();
+	return s.pinned ? s.tier : s.follow ? 0 : s.chosen;
 }
 
 bool wwCloudShadowPinned()
@@ -465,7 +484,10 @@ void wwCloudShadowPass( Scene * scene )
 							: QStringLiteral( "refused(cloud_shadowmap.prog did not link)" ) );
 	}
 	// the volume's density at Medium and up (it needs the Volume Clouds row at Medium or up), else the map's coverage
-	int mode = 2;
+	/* MODULES1 10b-7: the map mode's law is the Fusion Shaders sheets law (mode 3, cloudfusionlaw.h); the old Beer
+	 * law of the map mode (mode 2) is the red WW_CLOUDSHADOW_RED=beer. The volume mode has no counterpart there. */
+	const bool beerRed = red( "beer" );
+	int mode = beerRed ? 2 : 3;
 	if ( pr.steps > 0 && wwCloudVolBindDensity( scene, WwCellUnit::CloudBuildShape ) )
 		mode = 1;
 	else
@@ -516,6 +538,7 @@ void wwCloudShadowPass( Scene * scene )
 	p->uni4f( "csFit", FloatVector4( float( bf.a0 ), float( bf.b0 ), float( bf.extentKm ), float( bf.texelKm() ) ) );
 	p->uni2f( "csSize", float( n ), float( n ) );
 	p->uni1i( "csMode", mode );
+	p->uni3f( "csFs", WwCloudFusionLaw::kOpacity, WwCloudFusionLaw::kStrength, WwCloudFusionLaw::kSheetThinKm );
 	p->uni1i( "csSteps", std::max( pr.steps, 1 ) );
 	const int slot = g.qcur;
 	const bool timing = !g.pending[slot];
@@ -552,9 +575,16 @@ void wwCloudShadowPass( Scene * scene )
 		std::max( m.band[1].topZ - m.band[1].baseZ, 0.0f ) * WwAtmoMath::kUnitKm };
 	const float dens[2] = { m.band[0].layers > 0 ? m.band[0].density : 0.0f, m.band[1].layers > 0 ? m.band[1].density : 0.0f };
 	g.far[0] = float( M::bandFarT( cov, thick, dens, cb.s[2], kSigma ) );
+	if ( mode == 3 ) {	// past the map: the same sheets law on the bands' mean cover
+		float kept = 1.0f;
+		for ( int i = 0; i < 2; i++ )
+			if ( dens[i] > 0.0f && thick[i] > 0.0f )
+				kept *= 1.0f - std::clamp( cov[i], 0.0f, 1.0f );
+		g.far[0] = WwCloudFusionLaw::mask( kept );
+	}
 	g.far[1] = 0.1f;
 	g.far[2] = pr.tail ? 1.0f : 0.0f;
-	status( s, QStringLiteral( "on tier=%1 mode=%2 size=%3 side_km=%4 texel_m=%5 sun=%6,%7,%8 far_t=%9 gi=%10 mem_mb=%11%12%13 field=%14 light=key(sun_by_day,moon_by_night) receivers=terrain,objects,far_lod,water,effects,air" )
+	status( s, QStringLiteral( "on tier=%1 mode=%2 size=%3 side_km=%4 texel_m=%5 sun=%6,%7,%8 far_t=%9 gi=%10 mem_mb=%11%12%13 field=%14 choice=%15 law=%16 light=key(sun_by_day,moon_by_night) receivers=terrain,objects,far_lod,water,effects,air" )
 		.arg( QLatin1StringView( tierName( s.tier ) ) ).arg( mode == 1 ? QStringLiteral( "volume" ) : QStringLiteral( "map" ) )
 		.arg( n ).arg( g.fit.extentKm, 0, 'f', 1 ).arg( g.fit.texelKm() * 1000.0, 0, 'f', 1 )
 		.arg( cb.s[0], 0, 'f', 3 ).arg( cb.s[1], 0, 'f', 3 ).arg( cb.s[2], 0, 'f', 3 ).arg( double( g.far[0] ), 0, 'f', 3 )
@@ -562,7 +592,12 @@ void wwCloudShadowPass( Scene * scene )
 		.arg( redV ? QStringLiteral( " red=vertical" ) : QString() )
 		.arg( red( "fullmove" ) ? QStringLiteral( " red=fullmove" ) : QStringLiteral( " sliced=%1" ).arg( g.swaps ) )
 		// MODULES1 round 10: the field the map was built from (the 2D layers and their shadows are one field)
-		.arg( mode == 1 ? QStringLiteral( "cloud_density" ) : QStringLiteral( "cloud_map_2d_layers" ) ) );
+		.arg( mode == 1 ? QStringLiteral( "cloud_density" ) : QStringLiteral( "cloud_map_2d_layers" ) )
+		// MODULES1 10b-1 / 10b-7: who chose the step, and which law darkened the map
+		.arg( s.pinned ? QStringLiteral( "pinned" ) : s.follow ? QStringLiteral( "follows(clouds_step)" ) : QStringLiteral( "explicit(row_step=%1,never_under_clouds_step)" ).arg( s.chosen ) )
+		.arg( mode == 3 ? QStringLiteral( "fusion(sheets,opacity=%1,strength=%2)" )
+				.arg( double( WwCloudFusionLaw::kOpacity ), 0, 'f', 2 ).arg( double( WwCloudFusionLaw::kStrength ), 0, 'f', 2 )
+			: mode == 2 ? QStringLiteral( "beer(red)" ) : QStringLiteral( "beer(volume_march,sigma=%1/km)" ).arg( double( kSigma ), 0, 'f', 0 ) ) );
 }
 
 void wwCloudShadowUniforms( Scene * scene, NifSkopeOpenGLContext::Program * prog, bool volume, float airAmb )

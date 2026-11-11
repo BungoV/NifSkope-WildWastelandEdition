@@ -1,3 +1,38 @@
+## MODULES1 round 10b (2026-11-11): cloud shadows follow the clouds, the Fusion Shaders shadow law, far baked AO in the vertex colour by the AO rule, a mist card's leak fade, the moon-down ambient, the endless sea's draw line
+
+Changed, not checked (no build, no window in this round; every touched shader program linked offline through the
+driver). bungo: "Cloud shadows always need to be on", "I asked for my fusion shaders cloud model", far baked AO "needs
+to behave through regular AO rules", mist cards "the same sky visibility", "Were the cards actually using the depth
+buffer?".
+
+- **1. Cloud Shadows has no Off in its row.** Render > Scene > Cloud Shadows: Follows Clouds / Low / Medium / High /
+  Ultra. A stored 0 (an Off saved by an older build too) and no stored value follow the clouds' own step every frame.
+  Low..Ultra stay as chosen. Off is left as the pin `WW_CLOUDSHADOW=off`, a harness scope, or the red
+  `WW_CLOUDSHADOW_DEFAULT_RED=1` (stored 0 = Off). The `cloud shadows:` line gained `choice=` and `law=`.
+- **7. The cloud shadow map's law is the Fusion Shaders sheets law** (map mode, csMode 3): the light kept = the
+  product over the bands of (1 - cover), mask = 1 - saturate((1 - kept) x opacity), then mask ^ strength; constants in
+  ONE header, src/features/clouds/cloudfusionlaw.h (opacity 1, strength 1). Red `WW_CLOUDSHADOW_RED=beer` = the map
+  mode's old Beer law (40 /km x thickness). The volume mode (a march through the cloud density) has no counterpart
+  there and is unchanged. Not ported: one sheet per layer at the deck's height, the sun-disc taps, the hex tiling,
+  the density exponent, the 2D layers' lighting, a .recx clouds block.
+- **2. Far baked AO held in a vertex colour goes through the AO rule** (fo4_default.vert `farVcAo`): the flat far
+  copy's grey -> `wwFarAo` x `WW_LODL_AO_MAX`; instanced rows without the stream (mesh grey x row grey) -> the same;
+  the far ground's grey (its mask sheet's B, ONE sky-AO byte) -> `wwFarSkyVis` x `WW_LODL_SKY_MAX`. The colour is
+  then white. Red `WW_LODL_AO_RED=albedo`. Line `far baked ao vc:`. A contact-AO plane of its own for the far ground
+  needs a lodgen rebake that writes two planes; the PBR far draws have no such path.
+- **3. A lit mist card keeps the ambient the air keeps.** One law, `airAmbKeep` (cell_airmed.glsl), for the air's
+  froxel and the card: the card fetches the air's env strata (leak fade, open-field share) at its own froxel
+  (`volEnvHist`, unit 74). Outside the leak fix's live cases (WW_CELL_FOGLEAK=1, an interior drawn as outdoors) the
+  air's terms are 1 and the card's too. Not in the lit-decal programs. Red `WW_CELL_FXLOCAL_RED=noleakfade`.
+  `cell fx local:` says, per card, the ambient kept by the air and by the card (a one-texel read-back on a new card
+  set, then every 600 frames) and whether the volumetric cards' depth soft fade is on.
+- **4. Night with the moon down:** the master-Off ambient axes cross to the physical night sky's floor (airglow x the
+  floor gain, as the sky draws it) by the night share: +Z = pi x floor, -Z = ground albedo x +Z, a side half of each.
+  The record's rows: red `WW_NIGHTSKY_RED=record`. Line `night sky: moon down: floor:`.
+- **6. Endless sea:** line `endless sea draw:` on change: not sent / sent, hidden / sent, drawn, with the triangles
+  sent and the pixels that passed (one sample query round the sheet's first draw of the frame). Red
+  `WW_ENDLESS_SEA_RED=nocount`.
+
 ## AIRPERF1 round 5 (2026-11-11): far objects in the traced set, a warmed hand-over, late soups, the saved row
 
 Changed, not checked (no build in this round; offline: tests/cellstreamrule/run.sh 20 checks, 14 reds, syntax check).

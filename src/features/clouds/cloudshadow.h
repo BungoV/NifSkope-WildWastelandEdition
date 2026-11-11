@@ -6,7 +6,8 @@
  * wwCloudVolBindDensity) or, at Low or without the volume, from CLOUD1's map coverage. Receivers: ww_sunshadow.glsl
  * ussCloudT, multiplied into wwSunShadow (surfaces), the air froxels' sun term (cell_volair airCloudShadow) and, at
  * Ultra, the far air tail; the probe GI's sun is scaled by the clouds over the eye (probesky.cpp).
- * Row Render > Scene > Cloud Shadows: Off / Low / Medium / High / Ultra, ships Off. Needs the Cloud Map row on.
+ * Row Render > Scene > Cloud Shadows: Follows Clouds / Low / Medium / High / Ultra, ships Follows Clouds (MODULES1
+ * 10b-1: no Off in the row; Off = the pin WW_CLOUDSHADOW=off or a harness scope). Needs the Cloud Map row on.
  * Pin WW_CLOUDSHADOW (tier name or 0..4), red WW_CLOUDSHADOW_RED = vertical | noinject | everyframe | nogi | fullmove
  * (lane PERFFIX3: a moved fit rebuilds the whole map in one frame, not size/16 rows a frame into a back map). */
 
@@ -16,8 +17,10 @@
 
 class Scene;
 
-//! the row: 0 Off / 1 Low / 2 Medium / 3 High / 4 Ultra
+//! the step in use: 0 Off (pin or harness only) / 1 Low / 2 Medium / 3 High / 4 Ultra
 int wwCloudShadowTier();
+//! the row's choice: 0 Follows Clouds / 1 Low / 2 Medium / 3 High / 4 Ultra
+int wwCloudShadowChoice();
 void wwCloudShadowSetTier( int tier );	//!< refused while WW_CLOUDSHADOW pins it
 bool wwCloudShadowPinned();
 

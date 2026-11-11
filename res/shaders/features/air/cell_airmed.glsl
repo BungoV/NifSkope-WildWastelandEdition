@@ -286,6 +286,14 @@ vec3 volCubeScatter( vec3 E[6], vec3 dW )
 	return 0.25 * max( fl + 3.0 * volGi.w * l1, vec3( 0.0 ) ) * volGi.rgb;
 }
 
+/* MODULES1 10b-3: what the flat ambient keeps where the ray-traced volume covers the point (the air's leak fix): fade =
+ * the volume's cover, r = its open-field share there (< 0: none, the volume's own read replaces the covered part). ONE
+ * law for the air's froxel (cell_volair.frag) and a lit card (cell_volpart.glsl vpAmbKeep): the same sky share. */
+float airAmbKeep( float fade, float r )
+{
+	return r >= 0.0 ? 1.0 - fade + fade * r : 1.0 - fade;
+}
+
 /* the haze's colour from the records (owner's ruling 10-14): the game's own fog colour at this distance and height
  * (the WTHR / lighting template near, far and high colours by hour, wwFogEval) mixed toward the fog-sun colour as the
  * game mixes it (fDirectionalFogPower), at unit luminance; the physical light keeps its brightness and direction.

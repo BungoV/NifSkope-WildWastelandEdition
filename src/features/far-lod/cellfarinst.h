@@ -12,6 +12,7 @@
 #include "features/far-lod/farswayslice.h"
 
 struct CellMeshInst;
+class QString;
 class Scene;
 class Transform;
 
@@ -57,6 +58,12 @@ bool tileBounds( const CellMeshInst & d, const float clipFromModel[16], const fl
  * by default (the old rule: own program); the red wins over it. */
 bool bindlessTwinAllowed();
 bool bindlessUniformRow();
+/*! MODULES1 10b-2: far draws whose baked AO sits in the vertex colour (fo4_default.vert farVcAo). vcAoType: 0 none,
+ *  1 the flat far copy ("FarLOD r<i> ..."), 2 the far ground ("FarLOD terrain r<i> ..."), from the shape's name; 0
+ *  under a WW_LODL_CHANNEL view (the colours are data then). vcAoUniform sets the draw's type (3 = instanced rows
+ *  without the stream) with the live maxima WW_LODL_AO_MAX / WW_LODL_SKY_MAX and the red WW_LODL_AO_RED=albedo. */
+int vcAoType( const QString & shapeName );
+void vcAoUniform( NifSkopeOpenGLContext::Program * prog, int type );
 //! The rows a ring's commands read under a program (twin of ww_bindless.glsl's wwDrawIdx for an instanced draw)
 struct RowAudit
 {

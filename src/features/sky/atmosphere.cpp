@@ -1315,6 +1315,36 @@ void wwAtmoNightSkyGot( int who, float unit, float level )
 		double( g_nsLevel[WwNsClouds] ), dv );
 }
 
+//! the night floor per unit sun irradiance: atmosphere.cpp medium()'s atFloor, atmo_sky.frag's slant shell
+static void nightFloorRgb( float fl[3] )
+{
+	fl[0] = fl[1] = fl[2] = 0.0f;
+	if ( red( "nofloor" ) )
+		return;
+	if ( g_airglow <= 1.0f || red( "glowgrey" ) ) {
+		for ( int c = 0; c < 3; c++ )
+			fl[c] = kNightFloor[c] * g_airglow;
+	} else {
+		const float ex = kNightFloorLum * ( g_airglow - 1.0f );
+		for ( int c = 0; c < 3; c++ )
+			fl[c] = kNightFloor[c] + ex * kGreenLine5577[c];
+	}
+}
+
+bool wwAtmoNightFloorScene( float out[3], float * unit )
+{
+	const WwAtmoFrame & f = g_frame;
+	if ( !f.valid || as().tier <= 0 || f.sunK <= 0.0f )
+		return false;
+	float fl[3];
+	nightFloorRgb( fl );
+	for ( int c = 0; c < 3; c++ )
+		out[c] = f.sunK * fl[c] * g_night.floorGain;
+	if ( unit )
+		*unit = f.sunK * g_night.floorGain;
+	return out[0] + out[1] + out[2] > 0.0f;
+}
+
 bool wwAtmoHorizon( float out[3] )
 {
 	const WwAtmoFrame & f = g_frame;
@@ -1349,17 +1379,8 @@ bool wwAtmoHorizon( float out[3] )
 					acc[c] += double( f.moonK ) * L[c];
 			}
 		}
-		float fl[3] = { 0.0f, 0.0f, 0.0f };
-		if ( !red( "nofloor" ) ) {	// atmosphere.cpp medium()'s atFloor, atmo_sky.frag's slant shell
-			if ( g_airglow <= 1.0f || red( "glowgrey" ) ) {
-				for ( int c = 0; c < 3; c++ )
-					fl[c] = kNightFloor[c] * g_airglow;
-			} else {
-				const float ex = kNightFloorLum * ( g_airglow - 1.0f );
-				for ( int c = 0; c < 3; c++ )
-					fl[c] = kNightFloor[c] + ex * kGreenLine5577[c];
-			}
-		}
+		float fl[3];
+		nightFloorRgb( fl );
 		float tr[3];
 		cpuTrans( f.camR - kRb, vz, hq, red( "noozone" ), tr, g_ozone );
 		const float vr = 1.0f / std::sqrt( std::max( 1.0f - 0.97226f * ( 1.0f - vz * vz ), 0.02f ) );

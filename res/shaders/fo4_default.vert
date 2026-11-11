@@ -79,6 +79,11 @@ out float wwFarSkyVis;
  * WW_LODL_AO_RED=albedo (the AO multiplied into the vertex colour, as before). Set with farStreamOn. */
 out float wwFarAo;
 uniform vec3 farBakeK;
+/* MODULES1 10b-2: the far draws whose baked AO is a grey in the vertex colour. x the AO's maximum strength, y the sky
+ * occlusion's, z the draw: 0 none, 1 the flat far copy (the grey is the AO: wwFarAo), 2 the far ground (the grey is
+ * its mask sheet's B, a sky AO: wwFarSkyVis), 3 instanced rows without the stream (mesh grey x row grey is the AO).
+ * w 1 = red WW_LODL_AO_RED=albedo (the grey stays in the colour). The colour is then white. */
+uniform vec4 farVcAo;
 #ifdef WW_FAR_SPLAT
 /* lane FARLOOK1101 (FARSHIMMER2): a far row whose projected box is under S px on an axis draws widened to S about its
  * projected centre at alpha 1 / (kx * ky) (exact ink: the area grows by kx * ky). farSplat = (S px, pass: 1 opaque =
@@ -125,8 +130,17 @@ void main()
 			wwFarAo = farBakeK.z > 0.5 ? 1.0 : ao;
 			vc.rgb *= ( farBakeK.z > 0.5 ? ao : 1.0 ) * e;
 			wwFarSkyVis = 1.0 - ( 1.0 - ch.g ) * farBakeK.y;
+		} else if ( farVcAo.z > 2.5 && farVcAo.w < 0.5 ) {
+			wwFarAo = 1.0 - ( 1.0 - clamp( vc.r * farInstExtra.y, 0.0, 1.0 ) ) * farVcAo.x;
+			vc.rgb = vec3( 1.0 );
 		} else
 		vc.rgb *= vec3( farInstExtra.yz, e );
+	} else if ( farVcAo.z > 0.5 && farVcAo.w < 0.5 ) {
+		if ( farVcAo.z < 1.5 )
+			wwFarAo = 1.0 - ( 1.0 - vc.r ) * farVcAo.x;
+		else
+			wwFarSkyVis = 1.0 - ( 1.0 - vc.r ) * farVcAo.y;
+		vc.rgb = vec3( 1.0 );
 	}
 	if ( wwGrassWind2.w > 0.5 ) {
 		float L = length( b );

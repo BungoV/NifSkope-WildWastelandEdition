@@ -1129,9 +1129,9 @@ vec3 airRest( vec3 posView, vec3 dirView, float z, float sA, float sB, out vec3 
 			A[a] = cellAmbient( axes[a], P ) * ( ( replace ? 1.0 - share[a] : 1.0 ) * skyV );
 #ifdef WW_AIR_LEAK
 		if ( airLeakR >= 0.0 )	// lane FOGENV1: the flat ambient x the volume's open-field share where it covers
-			Jenv += volCubeScatter( A, dW ) * ( 1.0 - leakFade + leakFade * airLeakR );
+			Jenv += volCubeScatter( A, dW ) * airAmbKeep( leakFade, airLeakR );
 		else
-			Jenv += volCubeScatter( A, dW ) * ( 1.0 - leakFade ) + Jddgi;	// lane FOGLEAK1 fix 1: the volume where it covers
+			Jenv += volCubeScatter( A, dW ) * airAmbKeep( leakFade, airLeakR ) + Jddgi;	// lane FOGLEAK1 fix 1: the volume where it covers
 #else
 		Jenv += volCubeScatter( A, dW );
 #endif

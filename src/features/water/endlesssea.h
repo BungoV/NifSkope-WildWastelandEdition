@@ -43,6 +43,10 @@ bool wwEndlessSeaOn();
 float wwEndlessSeaSeam();
 //! Once a frame before the scene's transform: the sheet moves to the camera's 2048 u step.
 void wwEndlessSeaFollow( Scene * scene, const Transform & view );
+//! MODULES1 10b-6: round the sheet's draw (bsshape.cpp): the triangles sent and the pixels that passed the depth
+//! test, said as `endless sea draw:` when they change. A no-op for every other shape.
+void wwEndlessSeaDrawBegin( Scene * scene, int block, long long triangles );
+void wwEndlessSeaDrawEnd();
 //! The rim's distance from the camera while the sheet draws, else 0 (the far plane reaches it).
 float wwEndlessSeaReach( Scene * scene );
 

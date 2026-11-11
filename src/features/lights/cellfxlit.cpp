@@ -13,6 +13,7 @@ BSD License - see nifskope.h
 #include "gl/lookdevstage.h"	// lane LIGHTS3: a region's emittance at the clock
 #include "gl/celllooks.h"	// lane LIGHTS4: the emittance rows, read at draw time
 #include "gl/fxroomrule.h"	// lane HAZECARD1
+#include "features/air/cellvolair.h"	// MODULES1 10b-3: the air's env strata at the cards
 
 #include <QFile>
 #include <QHash>
@@ -214,6 +215,8 @@ void wwCellFxLitPick( const void * nif )
 				dark++;
 		}
 		QString three;
+		float probeAt[3][3] = {};
+		int probeN = 0;
 		{
 			std::sort( cards.begin(), cards.end(), []( const Card & a, const Card & b ) { return a.e > b.e; } );
 			const int lit = int( cards.size() ) - dark;
@@ -233,7 +236,14 @@ void wwCellFxLitPick( const void * nif )
 				three += QStringLiteral( ", as a slab of air %1,%2,%3 (a lump's surface share took up to %4,%5,%6)" )
 					.arg( double( 0.25f * c.rgb[0] ), 0, 'g', 3 ).arg( double( 0.25f * c.rgb[1] ), 0, 'g', 3 ).arg( double( 0.25f * c.rgb[2] ), 0, 'g', 3 )
 					.arg( double( c.rgb[0] ), 0, 'g', 3 ).arg( double( c.rgb[1] ), 0, 'g', 3 ).arg( double( c.rgb[2] ), 0, 'g', 3 );
+				// MODULES1 10b-3: the card's sky share beside the air's at the same point (the env strata's read-back)
+				three += QStringLiteral( "; " ) + wwVolAirEnvProbeSay( probeN );
+				for ( int k = 0; k < 3; k++ )
+					probeAt[probeN][k] = m.center[k];
+				probeN++;
 			}
+			wwVolAirEnvProbeSet( probeAt, probeN );
+			three += QStringLiteral( " | " ) + wwVolPartFxSoftSay();
 			three += QStringLiteral( " (lamp shadow, the ambient's share 1 - GI sky share and the final colour are per pixel on the GPU)" );
 		}
 		static QString said;

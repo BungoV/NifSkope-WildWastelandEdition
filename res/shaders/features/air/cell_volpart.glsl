@@ -58,6 +58,33 @@ uniform int volTerms;			// the air's mask (WW_CELL_AIR_TERMS): 1 directional, 2 
 /* FARCITYWASH1-PART: the air's veil (cell_volair.frag airVeilK, the same law and guards) on the puff's sky-lit share,
  * so a daytime puff sits at the air's level around it; lamps keep theirs. Red WW_CELL_AIR_RED=veilphys: off. */
 uniform bool volVeil;
+/* MODULES1 10b-3 (bungo: the same sky visibility as the air): the air's env strata (its froxel history: stratum 4 =
+ * env rgb + leak fade, stratum 5 = sun gate, open-field share, 1 = valid), fetched nearest at the card's own froxel,
+ * through the air's own law airAmbKeep. volEnvGrid = columns, rows, slices, 1 = held (0: no strata, the keep is 1, as
+ * the air's with no leak fix). Red WW_CELL_FXLOCAL_RED=noleakfade. Not in the lit-decal programs (at the limit). */
+#ifndef WW_FX_DECALLIT
+uniform sampler3D volEnvHist;
+uniform vec4 volEnvGrid;
+float vpAmbKeep( vec3 posView )
+{
+	if ( volEnvGrid.w < 0.5 )
+		return 1.0;
+	float d = length( posView );
+	vec4 c = projectionMatrix * vec4( posView, 1.0 );
+	if ( d <= volSlices.x || c.w <= 0.0 || any( greaterThan( abs( c.xy ), vec2( c.w ) ) ) )
+		return 1.0;
+	ivec3 n = ivec3( volEnvGrid.xyz + 0.5 );
+	float f = log( d / volSlices.x ) / volSlices.y * float( n.z );
+	if ( f >= float( n.z ) )
+		return 1.0;
+	ivec2 xc = clamp( ivec2( ( c.xy / c.w * 0.5 + 0.5 ) * vec2( n.xy ) ), ivec2( 0 ), n.xy - 1 );
+	int xk = clamp( int( f ), 0, n.z - 1 );
+	vec4 h1 = texelFetch( volEnvHist, ivec3( xc, 5 * n.z + xk ), 0 );
+	if ( h1.z <= 0.9999 )
+		return 1.0;
+	return airAmbKeep( texelFetch( volEnvHist, ivec3( xc, 4 * n.z + xk ), 0 ).a, h1.y );
+}
+#endif
 // MODULES1 R7-1: the sun a puff takes: the surfaces' (cell_fxlaw.glsl vpSun) under the local law, else the game's base
 bool vpLocal()
 {
@@ -295,8 +322,12 @@ void vpLight( vec3 posView, vec3 P, vec3 dW, float z, vec3 N, float w, out vec3 
 		bool replace = cellGiOn && ( cellInterior ? cellGiAmb == 1 : cellGiSky );
 		const vec3 axes[6] = vec3[6]( vec3( 1, 0, 0 ), vec3( -1, 0, 0 ), vec3( 0, 1, 0 ), vec3( 0, -1, 0 ), vec3( 0, 0, 1 ), vec3( 0, 0, -1 ) );
 		vec3 Am[6];
+		float keepA = 1.0;
+#ifndef WW_FX_DECALLIT
+		keepA = vpAmbKeep( posView );
+#endif
 		for ( int a = 0; a < 6; a++ )
-			Am[a] = cellAmbient( axes[a], P ) * ( replace ? 1.0 - share[a] : 1.0 );
+			Am[a] = cellAmbient( axes[a], P ) * ( ( replace ? 1.0 - share[a] : 1.0 ) * keepA );
 #ifdef PC_LOOK
 		skyThin += pcLook == 1 ? pcDropCube( Am, dW ) : volCubeScatter( Am, dW );
 #else

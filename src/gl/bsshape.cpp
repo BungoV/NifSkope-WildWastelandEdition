@@ -6,6 +6,7 @@
 #include "features/far-ground/cellfarground.h"
 #include "features/lights/cellfxlit.h"
 #include "features/water/cellwater.h"	// lane WATER1
+#include "features/water/endlesssea.h"	// MODULES1 10b-6: the sheet's draw counter
 #include "features/near/cellcull.h"	// lane SUNCELL1
 #include "gl/celllooks.h"	// lane DECALS1: the Decal distance fade row
 #include "features/air/cellvolair.h"	// lane VOLPART1: volumetric lit effect cards
@@ -538,6 +539,8 @@ void BSShape::drawShapes( NodeList * secondPass )
 		}
 	}
 	// lane SUNCELL1: a welded cell shape draws only the placements that touch the camera's frustum (gl/cellcull.h)
+	if ( !selectionFlags && numTriangles > 0 )
+		wwEndlessSeaDrawBegin( scene, id(), (long long) numTriangles );	// MODULES1 10b-6: a no-op but for the sea sheet
 	static std::vector<std::uint32_t> cullRanges;
 	if ( !selectionFlags )
 		GpuDrivenB::learn( this, shader );	// step B: the state this draw runs with
@@ -639,6 +642,7 @@ void BSShape::drawShapes( NodeList * secondPass )
 			}
 		}
 	}
+	wwEndlessSeaDrawEnd();
 	WwBl::poolEnd( context->fn );	// lane BINDLESS2: the shape's own vertex array again
 	if ( singleSample )
 		glEnable( GL_MULTISAMPLE );
@@ -690,6 +694,7 @@ bool BSShape::wwMdiDraw( const void * hint, const std::vector<std::uint32_t> * r
 		return int( vrs ) | ( int( ssr ) << 1 ) | ( int( s->bslsp && s->bslsp->greyscaleColor ) << 2 );
 	};
 	const int leadHead = head( this );
+	const int leadVcAo = CellFarInst::vcAoType( name );	// MODULES1 10b-2: a run shares one farVcAo
 	const bool leadLand = wwCellLandIs( nif, id() ), leadTerr = wwCellIsTerrainShape( this );
 	const bool cullPass = !wwCellProbePass( scene ) && !wwCellAlbedoProbePass( scene );
 	const bool fadeLook = cullPass && wwLookOn( WwLook::DecalFade );
@@ -717,6 +722,8 @@ bool BSShape::wwMdiDraw( const void * hint, const std::vector<std::uint32_t> * r
 			|| scene->hiddenTris.contains( f->nodeId ) || head( f ) != leadHead )
 			break;
 		if ( !scene->hasOption( Scene::ShowMarkers ) && f->name.contains( QLatin1StringView( "EditorMarker" ) ) )
+			break;
+		if ( CellFarInst::vcAoType( f->name ) != leadVcAo )
 			break;
 		const int fid = f->id();
 		if ( wwCellWaterWanted( scene, fid ) || wwCellWaterIsShape( nif, fid ) || CellFarGround::twinFor( nif, fid ) != 0

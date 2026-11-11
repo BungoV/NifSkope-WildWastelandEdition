@@ -16,6 +16,7 @@ uniform vec4 csFit;	// a0, b0 (km, the map's centre in light space), the side km
 uniform vec2 csSize;	// texels across
 uniform int csMode;
 uniform int csSteps;	// per band (volume mode)
+uniform vec3 csFs;	// csMode 3 (cloudfusionlaw.h): opacity, strength, half the sheet's height km
 
 out vec4 fragColor;
 
@@ -55,6 +56,26 @@ void main()
 				od += kCvSigma * d * dh / csS.z;
 			}
 		}
+	} else if ( csMode == 3 ) {
+		/* MODULES1 10b-7: the sheets law. Each band's cover is a flat sheet at the band's middle; the light kept is
+		 * the product of (1 - cover); the mask is 1 - saturate((1 - kept) x opacity), then mask ^ strength. */
+		float kept = 1.0;
+		for ( int b = 1; b >= 0; b-- ) {
+			float base = cvBands.baseKm[b], top = cvBands.topKm[b];
+			if ( cvBands.density[b] <= 0.0 || top <= base )
+				continue;
+			float mid = 0.5 * ( base + top );
+			vec4 m = cvMapAt( csLine( ab, mid ).xy );
+			float c = clamp( b == 0 ? m.r : m.g, 0.0, 1.0 );
+			if ( c <= 0.0 )
+				continue;
+			kept *= 1.0 - c;
+			if ( zTop < 0.0 )
+				zTop = mid + csFs.z;
+			zBot = mid - csFs.z;
+		}
+		float mask = pow( 1.0 - clamp( ( 1.0 - kept ) * csFs.x, 0.0, 1.0 ), csFs.y );
+		od = -log( max( mask, 1e-4 ) );
 	} else {
 		for ( int b = 1; b >= 0; b-- ) {
 			float base = cvBands.baseKm[b], top = cvBands.topKm[b];

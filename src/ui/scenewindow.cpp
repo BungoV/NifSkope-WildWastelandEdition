@@ -244,8 +244,8 @@ SceneWindow::SceneWindow( QWidget * mainWindow, std::function<void()> repaint, s
 	// lane CLOUD3: the clouds' shadows on the ground, in the fog and in the GI's sun; ships Off
 	cloudShadowsBox = new QComboBox( tree );
 	cloudShadowsBox->setObjectName( QStringLiteral( "cloudShadows" ) );
-	cloudShadowsBox->addItems( { tr( "Off" ), tr( "Low" ), tr( "Medium" ), tr( "High" ), tr( "Ultra" ) } );
-	cloudShadowsBox->setCurrentIndex( std::clamp( wwCloudShadowTier(), 0, 4 ) );
+	cloudShadowsBox->addItems( { tr( "Follows Clouds" ), tr( "Low" ), tr( "Medium" ), tr( "High" ), tr( "Ultra" ) } );
+	cloudShadowsBox->setCurrentIndex( std::clamp( wwCloudShadowChoice(), 0, 4 ) );
 	wwMatchFieldStyle( cloudShadowsBox );
 	row( tr( "Cloud Shadows" ), cloudShadowsBox, true );
 	// lane CLOUD4: a camera at cloud height flies through the volume clouds; ships Off
