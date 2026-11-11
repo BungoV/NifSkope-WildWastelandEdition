@@ -1909,6 +1909,14 @@ void wwCellLightsUniforms( Scene * scene )
 		}
 	}
 	prof.at( 17, "sun" );
+	/* MODULES1 R7-1 (bungo: the fog cards take "either darkness or colored lights" around them): a blended lit effect
+	 * card or particle outdoors takes the surfaces' sun / moon (vpSun, shadowed in the shader) and the weather's
+	 * ambient (cellDalc) in place of the game's one Effect Lighting colour: at Foggy 22:00 that base was 0.08-0.13
+	 * against a moon of 0.002, a white bank in a dark street. Additive cards keep the base (cellDirColor).
+	 * Red WW_CELL_FXLOCAL_RED=base (live): the game's base for every lit effect again. */
+	WW_SWITCH_STATIC( bool, fxLocalRed, wwEnvStr( "WW_CELL_FXLOCAL_RED" ).split( ',' ).contains( QStringLiteral( "base" ) ) );
+	bool fxLocalHere = false;
+	float fxSunLocal[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
 	/* lane SUNCELL1 final: a lit effect or lit particle outdoors (fo4_effectcell / particles_cell) takes the game's
 	 * base term: the game's lit-effect setup puts pow(directional colour, 2.2) x the light's fade x
 	 * the imagespace Sunlight Scale (the imagespace HDR data's 7th float, HNAM's 7th float) in
@@ -1952,6 +1960,10 @@ void wwCellLightsUniforms( Scene * scene )
 			float dif[4] = {}, amb[4] = {};
 			wwLookdevLight( dirTo, dif, amb );
 			float fxCol[3] = { dif[0], dif[1], dif[2] };
+			for ( int c = 0; c < 3; c++ )
+				fxSunLocal[c] = std::max( dif[c], 0.0f ) * sunScale;	// R7-1: the surfaces' sun, before the effect row
+			fxLocalHere = !fxLocalRed;
+			fxSunLocal[3] = fxLocalHere ? 1.0f : 0.0f;
 			if ( !fxColorRed )
 				wwLookdevEffectLight( fxCol );	// the Effect Lighting row
 			WwLookdevIs is;
@@ -1977,6 +1989,17 @@ void wwCellLightsUniforms( Scene * scene )
 			if ( line != fxSunLast ) {
 				fprintf( stderr, "%s\n", qPrintable( line ) );
 				fxSunLast = line;
+			}
+			static QString fxLocLast;
+			const QString loc = QStringLiteral( "cell fx local: blended lit effect cards and particles take %1 (surfaces' sun %2,%3,%4 linear, "
+					"shadowed; the game's Effect Lighting base %5,%6,%7 stays on additive cards)" )
+				.arg( fxLocalHere ? QStringLiteral( "the surfaces' sun + the weather ambient at the card + its lamps" )
+					: QStringLiteral( "the game's base + lamps, no ambient, RED WW_CELL_FXLOCAL_RED=base" ) )
+				.arg( double( fxSunLocal[0] ), 0, 'f', 5 ).arg( double( fxSunLocal[1] ), 0, 'f', 5 ).arg( double( fxSunLocal[2] ), 0, 'f', 5 )
+				.arg( double( dirColor[0] ), 0, 'f', 5 ).arg( double( dirColor[1] ), 0, 'f', 5 ).arg( double( dirColor[2] ), 0, 'f', 5 );
+			if ( loc != fxLocLast ) {
+				fprintf( stderr, "%s\n", qPrintable( loc ) );
+				fxLocLast = loc;
 			}
 		} else if ( outdoor && fxProg ) {
 			static bool fxSunSaid = false;
@@ -2006,12 +2029,14 @@ void wwCellLightsUniforms( Scene * scene )
 			}
 		}
 	}
+	if ( prog->uniLocation( "vpSun" ) >= 0 )
+		rec.f4( prog, "vpSun", FloatVector4( fxSunLocal[0], fxSunLocal[1], fxSunLocal[2], fxSunLocal[3] ) );
 	prof.at( 18, "fxsun" );
 	/* An exterior's ambient is the weather's DALC, uploaded in the interior's form so cellAmbient is one law
 	 * indoors and out. The axis is the light's TRAVEL direction (Z- lights an up-facing normal). */
 	bool extDalc = false;
 	float ambLum = -1.0f;	// lane SHADOWPAR1: the DALC's mean luminance (linear) for the air tail's ambient share
-	if ( outdoor && hasDir && wwLookdevActive() && extProg ) {
+	if ( outdoor && ( hasDir || fxLocalHere ) && wwLookdevActive() && ( extProg || fxLocalHere ) ) {	// R7-1: the cards' ambient
 		WW_SWITCH_STATIC( QByteArray, extRed, wwEnv( "WW_CELL_EXTAMB_RED" ).trimmed() );
 		float w[6][3];
 		if ( extRed != "flat" && wwLookdevDalc( w ) ) {
@@ -2060,6 +2085,10 @@ void wwCellLightsUniforms( Scene * scene )
 				saidFlat = true;
 			}
 		}
+	}
+	if ( fxLocalHere ) {	// R7-1: cellDalc is uploaded for the card's own read; the surface-only paths and the air's share stay as they were
+		extDalc = false;
+		ambLum = -1.0f;
 	}
 	prof.at( 19, "extamb" );
 	rec.b( prog, "cellExtDalc", extDalc );

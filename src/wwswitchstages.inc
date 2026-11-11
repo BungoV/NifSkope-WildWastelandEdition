@@ -387,6 +387,7 @@
 { "WW_CELL_FXLIT_PICK", 0, "src/features/lights/cellfxlit.cpp:55 st | init-once state, re-read when a live set moves its prefix (b)" },
 { "WW_CELL_FXLIT_RED", 0, "src/features/lights/cellfxlit.cpp:56 st | init-once state, re-read when a live set moves its prefix (b)" },
 { "WW_CELL_FXLIT_SCALE_RED", 0, "src/gl/celllights.cpp:1907 wwCellLightsUniforms | re-read per frame or per call (a)" },
+{ "WW_CELL_FXLOCAL_RED", 0, "src/gl/celllights.cpp wwCellLightsUniforms | re-read per frame or per call (a)" },
 { "WW_CELL_FXRES", 0, "src/features/particles/cellfxres.cpp:43 cfg | re-read per frame or per call (a)" },
 { "WW_CELL_FXRES_CENSUS", 0, "src/features/particles/cellfxres.cpp:61 cfg | re-read per frame or per call (a)" },
 { "WW_CELL_FXRES_EDGE", 0, "src/features/particles/cellfxres.cpp:58 cfg | re-read per frame or per call (a)" },

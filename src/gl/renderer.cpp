@@ -2853,9 +2853,17 @@ bool Renderer::setupProgramCE1( const NifModel * nif, Program * prog, Shape * me
 				const qint64 key = ( qint64( quintptr( mesh ) ) << 1 ) | ( red ? 1 : 0 );
 				if ( !saidPuff.contains( key ) && saidPuff.size() < 4096 ) {
 					saidPuff.insert( key );
-					fprintf( stderr, "cell effects puff: shape %d uv u %.2f..%.2f v %.2f..%.2f -> %s%s\n", mesh->id(),
+					// MODULES1 R7-1: the fake volumetric's inputs per card: shape from its normal map (else the card's facing),
+					// thickness from its alpha (the material's here; x texture x vertex alpha per pixel)
+					static int nmYes = 0, nmNo = 0;
+					static double alphaSum = 0.0;
+					( esp->hasNormalMap ? nmYes : nmNo )++;
+					alphaSum += double( esp->getAlpha() );
+					fprintf( stderr, "cell effects puff: shape %d uv u %.2f..%.2f v %.2f..%.2f -> %s%s | normal map %s, material alpha %.2f "
+						"(so far %d cards with a normal map, %d without: facing; mean material alpha %.2f)\n", mesh->id(),
 						double( u0 ), double( u1 ), double( v0 ), double( v1 ), sprite || u0 > u1 ? "ball (one sprite)" : "slab (tiled or atlas cell)",
-						red ? " | red WW_FX_PUFF_SLAB_RED: ball for every card" : "" );
+						red ? " | red WW_FX_PUFF_SLAB_RED: ball for every card" : "", esp->hasNormalMap ? "yes" : "no", double( esp->getAlpha() ),
+						nmYes, nmNo, alphaSum / double( nmYes + nmNo ) );
 				}
 			}
 			if ( wwEnv( "WW_CELL_PARTICLES_AIR_RED" ).trimmed() == "1" && prog->uniLocation( "cellGiAirOn" ) >= 0 )

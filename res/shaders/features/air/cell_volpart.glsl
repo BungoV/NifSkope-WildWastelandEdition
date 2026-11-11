@@ -58,16 +58,29 @@ uniform int volTerms;			// the air's mask (WW_CELL_AIR_TERMS): 1 directional, 2 
 /* FARCITYWASH1-PART: the air's veil (cell_volair.frag airVeilK, the same law and guards) on the puff's sky-lit share,
  * so a daytime puff sits at the air's level around it; lamps keep theirs. Red WW_CELL_AIR_RED=veilphys: off. */
 uniform bool volVeil;
+// MODULES1 R7-1: the sun a puff takes: the surfaces' (cell_fxlaw.glsl vpSun) under the local law, else the game's base
+bool vpLocal()
+{
+	return fxLocalOn() && !cellInterior;
+}
+vec3 vpSunColour()
+{
+	return vpLocal() ? vpSun.rgb : cellDirColor;
+}
+bool vpHasSun()
+{
+	return vpLocal() ? any( greaterThan( vpSun.rgb, vec3( 0.0 ) ) ) : cellHasDir;
+}
 float vpVeilK( vec3 Jenv, float t, float z )
 {
-	if ( !volVeil || cellInterior || !( cellOn && cellHasDir ) || ( volTerms & 1 ) == 0 )
+	if ( !volVeil || cellInterior || !( cellOn && vpHasSun() ) || ( volTerms & 1 ) == 0 )
 		return 1.0;
 	float hb;
 	vec3 fc;
 	wwFogEval( t, z, hb, fc );
 	const vec3 lumK = vec3( 0.2126, 0.7152, 0.0722 );
 	float rec = dot( max( fc, vec3( 0.0 ) ), lumK );
-	float open = 0.25 * dot( cellDirColor, lumK ) + dot( Jenv, lumK );
+	float open = 0.25 * dot( vpSunColour(), lumK ) + dot( Jenv, lumK );
 	return open > rec && open > 1e-8 ? rec / open : 1.0;
 }
 
@@ -204,11 +217,11 @@ void vpLight( vec3 posView, vec3 P, vec3 dW, float z, vec3 N, float w, out vec3 
 #endif
 	if ( ( volPartRed & 1 ) != 0 )
 		N = cellWorldDir( vec3( 0.0, 0.0, 1.0 ) );	// red flat: every pixel faces the eye's axis
-	if ( ( volTerms & 1 ) != 0 && cellHasDir ) {
+	if ( ( volTerms & 1 ) != 0 && vpHasSun() ) {
 		vec3 to = normalize( cellDirTo );
 		float vis = ( !cellInterior && volCsm && ( volPartRed & 64 ) == 0 ) ? wwSunShadow( posView ) : 1.0;
 		// lane WEATHERBLEND4: the sun's column through the drifting air (lookdev_fog.glsl wwAirDriftSunK)
-		vec3 e = vpTint( cellDirColor ) * vis * pow( airTupSun( z, to.z ), wwAirDriftSunK( posView, z, to.z, airMed.w ) );	// FIX1101A: airTupSun
+		vec3 e = vpTint( vpSunColour() ) * vis * pow( airTupSun( z, to.z ), wwAirDriftSunK( posView, z, to.z, airMed.w ) );	// FIX1101A: airTupSun
 		skyThin += e * vpPhase( dot( to, dW ) );
 		skyThick += e * vpWrap( dot( N, to ), w ) * vpPhaseN( dot( to, dW ) );
 #ifdef PC_LOOK
@@ -255,7 +268,7 @@ void vpLight( vec3 posView, vec3 P, vec3 dW, float z, vec3 N, float w, out vec3 
 		}
 	}
 	bool wantGi = ( volTerms & 4 ) != 0 && cellGiOn;
-	bool ambDalc = cellInterior ? cellHasDalc : cellExtDalc;
+	bool ambDalc = cellInterior ? cellHasDalc : ( cellExtDalc || vpLocal() );	// R7-1: the weather's ambient at the card
 	bool wantAmb = ( volTerms & 8 ) != 0 && ambDalc && !( cellInterior && cellGiAmb == 2 );
 	if ( wantGi || wantAmb ) {
 	vec3 E[6];
@@ -303,7 +316,7 @@ void vpLight( vec3 posView, vec3 P, vec3 dW, float z, vec3 N, float w, out vec3 
 // the lit factor at this pixel (linear), in place of cellFxLit
 vec3 vpLit( vec3 posView, vec3 Nview, float a )
 {
-	if ( ( fxLitMode & 8 ) != 0 || ( !cellInterior && !cellHasDir ) )
+	if ( ( fxLitMode & 8 ) != 0 || ( !cellInterior && !cellHasDir && !vpLocal() ) )
 		return vec3( 1.0 );	// self-lit, as cellFxLit
 	float m = ( volPartRed & 2 ) != 0 ? 1.0 : 1.0 - clamp( a, 0.0, 1.0 );
 	vec3 thin, thick;

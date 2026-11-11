@@ -178,6 +178,34 @@ void wwCellFxLitPick( const void * nif )
 		for ( int k = 0; k < 4; k++ )
 			m.scale[k] = it->noOffset.value( m.light[k], 1.0f );
 	}
+	{	/* MODULES1 R7-1 telemetry, one line per cell change: the lit effect models, the lights they sample, and the
+		 * lamp light at each model's centre (luminance, the game's falloff, no shadow; an estimate, the shader lights
+		 * per pixel): its range and how many models no lamp reaches (those show the sun + ambient alone) */
+		float lo = 1e30f, hi = 0.0f;
+		int dark = 0;
+		for ( const WwFxLitModel & m : it->models ) {
+			float e = 0.0f;
+			for ( const WwCellLight & l : L->lights ) {
+				const float dx = l.pos[0] - m.center[0], dy = l.pos[1] - m.center[1], dz = l.pos[2] - m.center[2];
+				const float q = std::sqrt( dx * dx + dy * dy + dz * dz ) / std::max( l.radius, 0.001f );
+				if ( q < 1.0f )
+					e += ( 0.2126f * l.color[0] + 0.7152f * l.color[1] + 0.0722f * l.color[2] ) * std::pow( 1.0f - q * q, 2.2f );
+			}
+			lo = std::min( lo, e );
+			hi = std::max( hi, e );
+			if ( e <= 0.0f )
+				dark++;
+		}
+		static QString said;
+		const QString now = QStringLiteral( "cell fx local: %1 lit effect models (%2 cards + particle systems) sample %3 lights; lamp light at "
+				"their centres %4 .. %5 (linear luminance, estimate), %6 reached by no lamp" )
+			.arg( it->models.size() ).arg( it->shapeModel.size() ).arg( L->lights.size() )
+			.arg( double( it->models.isEmpty() ? 0.0f : lo ), 0, 'g', 4 ).arg( double( hi ), 0, 'g', 4 ).arg( dark );
+		if ( now != said ) {
+			said = now;
+			fprintf( stderr, "%s\n", qPrintable( now ) );
+		}
+	}
 	if ( s.dump.isEmpty() )
 		return;
 	QFile f( s.dump );

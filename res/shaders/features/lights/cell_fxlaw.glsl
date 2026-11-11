@@ -9,6 +9,16 @@
 uniform vec2 fxLaw;
 uniform float cellFxEmitK;	// lane PHYSUNITS1: an unlit additive effect's cd/m2 per unit (0 = unset = 1)
 uniform float cellFxUnlitK;	// lane PHYSUNITS1: an unlit blended effect on the light's scale (0 = 1)
+/* MODULES1 R7-1: the local light of a lit effect card / particle outdoors. rgb = the surfaces' sun or moon this frame
+ * (the weather's Sunlight row x the surfaces' scale), a > 0.5 = the local law is on: the card's base is that sun under
+ * its shadow + the weather's ambient at the card (cellDalc), in place of the game's one Effect Lighting colour, which
+ * knows neither the hour's ambient nor a shadow. Additive cards keep the game's base. Red WW_CELL_FXLOCAL_RED=base. */
+uniform vec4 vpSun;
+float fxLocalVis = 1.0;	// the sun's shadow at the card, set by the caller before cellFxLit
+bool fxLocalOn()
+{
+	return vpSun.a > 0.5;
+}
 
 // the unlit effects' unit: an unlit effect's linear colour x this (1 while the law's units are off or unset)
 float fxLawUnit( bool additive )

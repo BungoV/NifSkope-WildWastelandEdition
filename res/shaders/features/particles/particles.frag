@@ -81,9 +81,11 @@ vec3 cellFxLight( int i, vec3 P )
 vec3 cellFxLit( vec3 P )
 {
 	// lane SUNCELL1 final: an exterior with no weather loaded has no sun to light it -- self-lit, as before
-	if ( ( fxLitMode & 8 ) != 0 || ( !cellInterior && !cellHasDir ) )
+	// MODULES1 R7-1: a blended lit particle outdoors takes the local light: the surfaces' sun + the ambient at it
+	bool loc = fxLocalOn() && !cellInterior && !fxAdditive;
+	if ( ( fxLitMode & 8 ) != 0 || ( !cellInterior && !cellHasDir && !loc ) )
 		return vec3( 1.0 );
-	vec3 E = cellHasDir ? cellDirColor : vec3( 0.0 );
+	vec3 E = loc ? vpSun.rgb * fxLocalVis + cellAmbient( vec3( 0.0, 0.0, 1.0 ), P ) : cellHasDir ? cellDirColor : vec3( 0.0 );
 	if ( ( fxLitMode & 2 ) != 0 ) {
 		// flat on purpose: an effect's light has no hemisphere clip, which the cluster lists cull by
 		for ( int i = 0; i < cellLightCount; i++ )

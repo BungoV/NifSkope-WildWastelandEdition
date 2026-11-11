@@ -140,9 +140,11 @@ vec3 cellFxLight( int i, vec3 P )
 vec3 cellFxLit( vec3 P )
 {
 	// lane SUNCELL1 final: an exterior with no weather loaded has no sun to light it -- self-lit, as before
-	if ( ( fxLitMode & 8 ) != 0 || ( !cellInterior && !cellHasDir ) )
+	// MODULES1 R7-1: a blended lit card outdoors takes the local light: the surfaces' sun under its shadow + the ambient
+	bool loc = fxLocalOn() && !cellInterior && !fxAdditive;
+	if ( ( fxLitMode & 8 ) != 0 || ( !cellInterior && !cellHasDir && !loc ) )
 		return vec3( 1.0 );
-	vec3 E = cellHasDir ? cellDirColor : vec3( 0.0 );
+	vec3 E = loc ? vpSun.rgb * fxLocalVis + cellAmbient( vec3( 0.0, 0.0, 1.0 ), P ) : cellHasDir ? cellDirColor : vec3( 0.0 );
 	if ( ( fxLitMode & 2 ) != 0 ) {
 		// flat on purpose: an effect's light has no hemisphere clip, which the cluster lists cull by
 		for ( int i = 0; i < cellLightCount; i++ )
@@ -497,6 +499,10 @@ void main()
 		vec3 lin = ( fxRed & 4 ) != 0 ? max( color.rgb, vec3( 0.0 ) ) : pow( max( color.rgb, vec3( 0.0 ) ), vec3( 2.2 ) );
 		if ( fxLitMode != 0 ) {	// lane FXLIT1: a lit effect, in linear light, before the fog
 			vec3 P = cellWorldPos( -ViewDir );
+#ifndef WW_FX_DECALLIT
+			if ( volPart == 0 && volCsm && fxLocalOn() && !cellInterior && !fxAdditive )
+				fxLocalVis = wwSunShadow( -ViewDir );	// R7-1: the plain lit card's sun, shadowed as the puff's
+#endif
 			vec3 m = cellFxLit( P );
 			if ( cellProbe >= 70 && cellProbe <= 74 ) {
 				// its probes, opaque: 70 the model, 71 / 72 the position (as probes 2 / 3), 73 / 74 the multiplier / 4
