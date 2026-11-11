@@ -16,6 +16,7 @@ BSD License - see nifskope.h
 #include "model/nifmodel.h"
 
 #include "cellview.h"
+#include "cellstream.h"	// lane AIRPERF1 r4: the Cell Streaming row
 #include "cellsplat.h"
 #include "cellgroundlegend.h"	// lane DUNESAND3
 #include "features/far-lod/cellfarlod.h"
@@ -561,6 +562,15 @@ void CellWorkspacePanel::buildUi()
 	} );
 	connect( nearGridGroup, &QActionGroup::triggered, this, [this]( QAction * a ) {
 		LodPreview::setGrid( a->data().toInt() );
+		if ( glView )
+			glView->update();
+	} );
+	// lane AIRPERF1 r4: Cell Streaming, off and back on in the running view with no reopen (off: the loaded cells stay,
+	// nothing loads or unloads; on: the block follows the camera again). WW_CELL_STREAM pins it; this session only
+	QAction * cellStreamRow = tick( showMenu, tr( "Cell Streaming" ), "CellWorkspaceCellStream", cellStreamRowOn() );
+	cellStreamRow->setEnabled( !cellStreamPinned() );
+	connect( cellStreamRow, &QAction::toggled, this, [this]( bool on ) {
+		cellStreamSetRow( on );
 		if ( glView )
 			glView->update();
 	} );
@@ -1370,6 +1380,7 @@ void CellWorkspacePanel::buildUi()
 		kid( "", tr( "LOD tint" ), "CellWorkspaceLodTint" );
 		kid( "", tr( "LOD ring" ), "CellWorkspaceLodRing" );
 		kid( "", tr( "Near grid" ), "CellWorkspaceNearGrid" );
+		kid( "CellWorkspaceCellStream", tr( "Cell Streaming" ) );	// lane AIRPERF1 r4
 		look( WwLook::BtoSway, tr( "Game trees sway" ) );
 		// LATE ITEM 25 (bungo 11-01): no menu row for the bake's channels: our LOD rendering always draws them
 		// (WwLook::FarLodAo / FarLodSky stay in the table only for the debug pins WW_LODL_AO=0 / WW_LODL_SKY=0)

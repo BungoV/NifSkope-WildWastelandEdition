@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+export WW_CELL_STREAM="${WW_CELL_STREAM:-0}"	# AIRPERF1 r4: this harness opens a fixed block (streaming is the default now)
 # fargrid1_gates.sh -- the gates of lane FARGRID1, the far air grid (src/features/air/cellvolair.cpp, WW_CELL_AIR_FAR / "Far Air").
 # Judged by fargrid1_gates.py (pictures + the "cell air:" echo), never by the code under test.
 #

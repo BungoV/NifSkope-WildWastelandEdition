@@ -1,4 +1,5 @@
 #!/bin/bash
+export WW_CELL_STREAM="${WW_CELL_STREAM:-0}"	# AIRPERF1 r4: this harness opens a fixed block (streaming is the default now)
 #
 # THE AIR'S GROUND LAYER FROM .recx FILES (lane VOLAIR1, 2026-10-14; src/recx.h, docs/RECX.md, src/features/air/cellvolair.cpp
 # VaLayer). Not judged by eye. Sanctuary in Lookdev (CommonwealthFoggy, 18:00, day 4, the Fog row on, the sky rows

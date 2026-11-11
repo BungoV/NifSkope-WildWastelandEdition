@@ -35,6 +35,7 @@ BSD License - see nifskope.h
 #include "features/far-lod/lodgen.h"
 #include "nativeemit.h"
 #include "features/gi/probeplace.h"		// lane PRTPPLACE
+#include "features/gi/rttraceset.h"		// lane AIRPERF1 r4: a streamed cell's soup for the ray-traced GI
 #include "features/gi/probebake.h"		// lane PRTPBAKE
 #include "features/gi/pgiwrite.h"
 #include "features/gi/probegi.h"
@@ -2944,10 +2945,14 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 		liveForget( nif );	// lane LIVESET1: the old document's live context (and the world it holds) goes first
 	// lane CELLSTREAM1: an exterior view streams its cells round the camera (src/cellstream.h); this open builds
 	// the document, the far field and the lighting, and hands the world to the streamer instead of welding a block
-	const bool rtSoup = !chunk && cellRtSoupWanted();	// lane PRTOFF1: the ray-traced GI's soup (a welded block, no stream)
+	const bool rtSoup = !chunk && cellRtSoupWanted();	// lane PRTOFF1: the ray-traced GI's soup
+	/* lane AIRPERF1 r4: the Ray-traced GI no longer stops the stream: every streamed cell gathers its own soup and the
+	 * traced set follows the loaded cells (features/gi/rttraceset.h). Red WW_CELL_RTSET_WELD_RED=1 = the welded block */
+	const bool rtWeld = rtSoup && rtTraceSetWeldRed();
 	const bool streamInit = !chunk && !spec.interior && spec.overlay == CellOverlay::None && !bakeExterior
 		&& !spec.probes && wwEnvIsEmpty( "WW_CELL_PROBES" )
-		&& !cellGiFromWanted() && !rtSoup && cellStreamWanted();
+		&& !cellGiFromWanted() && !rtWeld && cellStreamWanted();
+	const bool chunkSoup = chunk && chunk->wantSoup;	// lane AIRPERF1 r4
 
 	QElapsedTimer clock;
 	clock.start();
@@ -4251,7 +4256,9 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 	 * blended glass and decals are dropped per shape. */
 	const QString probeOut = QString::fromLocal8Bit( wwEnv( "WW_CELL_PROBES" ) );
 	const bool probeAsked = !probeOut.isEmpty() || spec.probes;   // the env, or the PRTP band's Place
-	const bool probing = probeAsked || rtSoup;   // lane PRTOFF1: or the ray-traced GI's soup (no bake, no probes written)
+	// lane PRTOFF1: or the ray-traced GI's soup (no bake, no probes written); AIRPERF1 r4: of a fixed block's open, or
+	// of one streamed cell (the open of a streamed view gathers none: its cells are the stream's)
+	const bool probing = probeAsked || ( rtSoup && !streamInit ) || chunkSoup;
 	ProbeSoup probeSoup;
 	int soupRefs = 0, soupShapesDropped = 0;
 	/* the bake's albedo, one per soup triangle -- the band's Bake, or
@@ -4264,7 +4271,7 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 	 * is the surfaces' own colour, not a flat grey 0.5 (covered shade read 1.05-1.2x open shade in the probe census).
 	 * Albedo only: the smooth normals (VNM1) stay a bake's. WW_SOUPALB_RED=grey (any value) = the old grey soup;
 	 * read at the open (a reopen applies it). */
-	const bool soupAlb = baking || ( rtSoup && wwEnvIsEmpty( "WW_SOUPALB_RED" ) );
+	const bool soupAlb = baking || ( ( rtSoup || chunkSoup ) && wwEnvIsEmpty( "WW_SOUPALB_RED" ) );
 	ProbeAlbedo probeAlb( dataRoot );
 	/* WW_CELL_BAKE_ALBEDO=tri|hit|cube: where the surfels' albedo and normal come from (ProbeBakeSpec::albedoWay);
 	 * hit and cube need every triangle's UVs, colors, normals and maps in the soup.
@@ -6564,7 +6571,7 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 	std::shared_ptr<const ProbeVolumes> volGi;   // lane VOLFIT1: the Space rooms for the GI (WW_CELL_VOLUMES_GI=1); shared with the kept sky spec
 	bool volGiOn = false;
 	if ( probing ) {
-		if ( !spec.interior ) {
+		if ( !spec.interior && !( chunk && chunk->largeRef ) ) {	// AIRPERF1 r4: a large-ref unit has no ground of its own
 			// the ground is part of what a column ray meets, painted or not
 			QFile landDumpFile;   // WW_CELL_BAKE_LAND_DUMP: the land (heights + raw VNML)
 			if ( !landDump.isEmpty() && baking ) {
@@ -6707,6 +6714,8 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 				probeSoup.waterApart = baking;   // the far ring's water, kind 0
 			}
 		}
+	}
+	if ( probing && !chunk ) {	// lane AIRPERF1 r4: a streamed cell places no probes, its soup goes to the traced set
 		ProbePlaceSpec ps;
 		int ownCells[4] = { 0, 0, -1, -1 };   // the probed cells x0, y0, x1, y1 (exterior only)
 		if ( spec.interior ) {
@@ -7243,6 +7252,8 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 	// ---- emit
 	CellSpeed::mark( "ground, water, lights, probes" );
 	if ( chunk ) {	// lane CELLSTREAM1: a streamed cell stops here; src/cellstream.cpp writes it in slices
+		if ( chunkSoup )	// lane AIRPERF1 r4: what the ray-traced GI traces of this cell
+			chunk->soup = rtTraceSetIntern( std::move( probeSoup ) );
 		cellPublishLighting( nullptr, world, spec, lightRefs, primRefs, origin, &chunk->lights, &lightStartOff, &nifxFix );
 		chunk->buckets = std::make_shared<CellChunkBuckets>();
 		chunk->buckets->keys = buckets.keys();

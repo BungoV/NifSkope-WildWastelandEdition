@@ -1,4 +1,5 @@
 #!/bin/bash
+export WW_CELL_STREAM="${WW_CELL_STREAM:-0}"	# AIRPERF1 r4: this harness opens a fixed block (streaming is the default now)
 #
 # THE BAKE RELIT BY THE CELL'S LIGHTS (lane PRTPGI, 2026-10-01; src/features/gi/probegi.h).
 #

@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+export WW_CELL_STREAM="${WW_CELL_STREAM:-0}"	# AIRPERF1 r4: this harness opens a fixed block (streaming is the default now)
 # cell_probes.sh -- place PRTP probes in one cell block and photograph them
 # (lane PRTPPLACE, 2026-09-30).
 #

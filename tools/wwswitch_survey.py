@@ -18,6 +18,10 @@ RANK = {'tool': 0, 'live': 1, 'shaders': 2, 'reopen': 3, 'relaunch': 4}
 
 # name -> (stage, why). Names a rule gets wrong, or the harness depends on; checked by hand.
 OVERRIDES = {
+    'WW_CELL_STREAM': ('live', 'AIRPERF1 r4: live in a streamed view (cellStreamLiveOn: hold / follow); a view opened fixed (0 at the open) stays fixed until reopened'),
+    'WW_CELL_STREAM_ROW_RED': ('live', 'AIRPERF1 r4: cellStreamLiveOn re-reads it per tick'),
+    'WW_CELL_RTSET_RED': ('live', 'AIRPERF1 r4: rtTraceSetRed re-reads it per call'),
+    'WW_CELL_RTSET_WELD_RED': ('reopen', 'AIRPERF1 r4: read at the open by cellBuild (the welded block, no stream)'),
     'WW_BOLT_DEBUG': ('live', '(b) live (R7 item 7): controllers.cpp reads it at every bolt build; it feeds no cell data'),
     'WW_STREAM1_TEXCHECK': ('live', '(b) live (R7 item 7): texLoadDDS re-reads it per set (WW_SWITCH_STATIC + echo); it feeds no cell data'),
     'WW_TEX_CENSUS': ('live', '(b) live (R7 item 7): texLoadDDS re-reads it per set; it feeds no cell data'),

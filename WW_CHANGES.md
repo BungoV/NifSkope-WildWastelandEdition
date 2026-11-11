@@ -1,3 +1,33 @@
+## AIRPERF1 round 4 (2026-11-11): cell streaming always on, a Cell Streaming row, the Ray-traced GI follows the stream
+
+Changed, not checked (no build in this round). bungo: "as I move the camera, the 5x5 area does not load new cells",
+"The streaming is always on, I can switch it off if I want to during runtime", "and then back on"; on the Ray-traced
+GI's dark square that stayed at the spawn: "Why does it not follow me?".
+
+- **A. Streaming is the default in every exterior view**, also one opened by a spec (WW_CELL_OPEN). The rule is
+  src/cellstreamrule.h openRule (unit-tested); `WW_CELL_STREAM=0` at the open = a fixed block. 39 harness scripts
+  that open a fixed block now say so on their line 2 (`export WW_CELL_STREAM="${WW_CELL_STREAM:-0}"`). Red
+  `WW_CELL_STREAM_RED=specfixed` = the rule before. Line `cell stream: <why on or off>` at the open.
+- **B. View > Cell Streaming** (and its panel row in the LOD group), default on, this session only: off = the block
+  stays where it is (cells already being loaded finish, then nothing loads or unloads), on = the block follows the
+  camera again from the camera's cell, no reopen. `WW_CELL_STREAM=0|1` set live does the same and greys the row.
+  Lines `cell stream: off (...)`, `cell stream: on (...)`, and `cell stream: centre X,Y (camera cell ex,ey), N x N
+  cells` at every change of the centre. Red `WW_CELL_STREAM_ROW_RED=1` (live) = the row and the live pin hold nothing.
+- **C. The Ray-traced GI no longer stops the stream.** Each streamed cell gathers its own triangle soup on the
+  stream worker; src/features/gi/rttraceset.* merges the loaded cells' soups plus the far terrain of the ring round
+  them (cut where cells are loaded) on a worker and publishes the result as the traced soup, at most once per 1.5 s
+  (rttracesetrule.h). The volume and its cascades then build on the new set while the old volume stays drawn, and
+  swap when it is up (rtddgicell.cpp handover); the cascades' scroll box is the new set's box, so it follows the
+  camera. Lines `cell stream: traced set handed over: ...`, `rtddgi traced set: gen G, ... centre X,Y, camera cell
+  ex,ey in set yes|no, ... cells: ...`, `rtddgi cell: handover ...` / `handover done`. Reds: `WW_CELL_RTSET_WELD_RED=1`
+  (at the open: the welded block, no stream, as before), `WW_CELL_RTSET_RED=parked` (the set is never published
+  again: the dark square stays), `=nofar` (no far terrain in the set), `=drop` (the volume is dropped at every new set).
+- Not in this round (follow-ups): one acceleration structure per cell in a two-level structure inside the tracing
+  session (today each publish builds the whole set's structure once, on a worker), far objects in the traced set
+  (terrain only), a wider faded edge (today the cascades' one-probe-cell edge fade), the row stored in the settings.
+- New files: src/cellstreamrule.h, src/features/gi/rttraceset.cpp, rttraceset.h, rttracesetrule.h (NifSkope.pro),
+  tests/cellstreamrule (offline unit with reds).
+
 ## MODULES1 round 10 (2026-11-11): one physical night sky, 2D clouds lit by it, a Medium moon, the horizon gap fill, far baked AO by the AO rule, cloud shadows on
 Changed, not checked in a window (no build in this round). bungo: "our physical sky is meant to be used day and night",
 "Why are you showing me vanilla sky and clouds and moon".

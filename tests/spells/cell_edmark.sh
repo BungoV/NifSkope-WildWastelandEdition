@@ -1,4 +1,5 @@
 #!/bin/bash
+export WW_CELL_STREAM="${WW_CELL_STREAM:-0}"	# AIRPERF1 r4: this harness opens a fixed block (streaming is the default now)
 #
 # lane BAKEBLOCK1 (block rule): the cell alone (n=1) on purpose -- an edit-mark view test, no bake; a bake there
 #   would load the 5x5 + far LOD by itself (tests/features/gi/cell_bakeblock.sh).

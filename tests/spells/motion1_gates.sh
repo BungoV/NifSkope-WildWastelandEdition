@@ -1,4 +1,5 @@
 #!/bin/bash
+export WW_CELL_STREAM="${WW_CELL_STREAM:-0}"	# AIRPERF1 r4: this harness opens a fixed block (streaming is the default now)
 #
 # LANE MOTION1 (2026-10-04): THE CAMERA PATH, THE GAME'S TEMPORAL AA, THE SUN CASCADES IN MOTION.
 # src/gl/campath.h (WW_RENDER_PATH / --path), src/features/post/gametaa.h (the Temporal AA row), src/gl/sunshadow.h.

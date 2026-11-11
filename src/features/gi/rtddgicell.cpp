@@ -11,6 +11,7 @@
 #include "features/gi/rtddgi.h"
 #include "features/gi/rtddgimath.h"
 #include "features/gi/rtddgi/rtddgi_gpu.h"
+#include "features/gi/rttraceset.h"   // lane AIRPERF1 r4: the traced set follows the streamed cells
 #include "version.h"
 #include "wwswitch.h"
 #include "features/sky/atmosphere.h"	// MODULES1 round 10: the one night sky's factor (WwNightSky)
@@ -271,6 +272,7 @@ struct Cell
 	int guiView = 0;
 	const void * nif = nullptr;
 	quint64 key = 0;
+	quint64 setGen = 0;   // lane AIRPERF1 r4: the traced set's generation this volume was built (or is building) from
 	std::shared_ptr<Build> pending, live;
 	QString refused;
 	int sets = 0, busy = 0;
@@ -842,7 +844,8 @@ bool upload( Cell & c, Renderer * r, const RtDdgiLive & L )
 /* RTXCASCADE2: `from` = cascade 0's built volume for a coarse cascade (it opens on that BLAS: one BLAS for every cascade;
  * the worker holds it until the open returns, so a drop of cascade 0 meanwhile cannot free the scene under it) */
 void startBuild( Cell & c, const ProbeSoup & soup, const WwCellLighting & lights, const ProbeSkyLight & sky, const WwCellGi * G,
-	const float eye[3], const CellSpec & sp, int paths, std::shared_ptr<Build> from = nullptr )
+	const float eye[3], const CellSpec & sp, int paths, std::shared_ptr<Build> from = nullptr,
+	std::shared_ptr<const ProbeSoup> shared = nullptr )   // AIRPERF1 r4: the traced set's own builder copy (no copy here)
 {
 	auto b = std::make_shared<Build>();
 	b->spec = sp;
@@ -881,7 +884,8 @@ void startBuild( Cell & c, const ProbeSoup & soup, const WwCellLighting & lights
 	const bool share = !( paths & kPathReadback );
 	QElapsedTimer t;
 	t.start();
-	auto soupCopy = std::make_shared<ProbeSoup>( soup );   // the kept soup may be replaced while the worker reads
+	// the kept soup may be replaced while the worker reads
+	std::shared_ptr<const ProbeSoup> soupCopy = shared ? shared : std::make_shared<const ProbeSoup>( soup );
 	b->msCopy = double( t.nsecsElapsed() ) / 1e6;
 	c.pending = b;
 	std::thread( [b, soupCopy, lights, sky = skyUsed, spec, share, from]() {
@@ -1857,7 +1861,9 @@ static void volumeFrame( Scene * scene, Cell & c, const CellSpec * spIn, bool du
 			dropLive( c, r );
 			c.key = 0;
 		}
-		refuse( c, QStringLiteral( "no relit cell in this view: the volume traces the soup the Precomputed Radiance Transfer relight keeps" ) );
+		refuse( c, rtTraceSetFollows() ? QStringLiteral( "no traced set yet: the streamed cells' soups are still being gathered "
+			"(lines 'rtddgi traced set:')" )
+			: QStringLiteral( "no relit cell in this view: the volume traces the soup the Precomputed Radiance Transfer relight keeps" ) );
 		return;
 	}
 	/* FIX1101A LATE ITEM 17 (bungo 11-01: "places like Concord museum, they have a sky, but it's fake, doesn't provide
@@ -2037,8 +2043,21 @@ static void volumeFrame( Scene * scene, Cell & c, const CellSpec * spIn, bool du
 		key = fnv( key, &G->voxel, sizeof G->voxel );
 		key = fnv( key, &G->pad, sizeof G->pad );
 	}
+	/* lane AIRPERF1 r4: in a streamed view the traced geometry follows the loaded cells (features/gi/rttraceset.h). Each
+	 * published set is a new generation and part of the key. Two holds keep the volume from being built twice for one
+	 * crossing: a coarse cascade waits for cascade 0's new build (it opens on that BLAS), and a change that arrives
+	 * while the set is about to publish (the streamed cells' lights come a moment before their geometry) waits for it */
+	const bool setFollows = rtTraceSetActive( nif );
+	const quint64 setGen = setFollows ? rtTraceSetGen( nif ) : 0;
+	key = fnv( key, &setGen, sizeof setGen );
+	if ( setFollows && c.nif == nif && c.live && key != c.key && !rtTraceSetRed( "drop" ) ) {
+		if ( ( c.level > 0 && cell().pending ) || ( setGen == c.setGen && rtTraceSetPending( nif ) ) )
+			key = c.key;
+	}
 	QString rebuildWhy = skyRebuild ? QStringLiteral( "the soup, lights, sky, spec, reds or GI grid moved" )
 		: QStringLiteral( "the soup, local lights, spec, reds or GI grid moved" );
+	if ( setFollows && setGen != c.setGen )
+		rebuildWhy = QStringLiteral( "the traced set moved with the stream (generation %1 to %2)" ).arg( c.setGen ).arg( setGen );
 	int cells[3] = { 0, 0, 0 };
 	bool moved = false;
 	if ( due && key == c.key && c.nif == nif && c.live )
@@ -2053,15 +2072,34 @@ static void volumeFrame( Scene * scene, Cell & c, const CellSpec * spIn, bool du
 	}
 	if ( key != c.key || c.nif != nif ) {
 		const bool had = c.pending || c.live;
-		dropLive( c, r );
+		/* lane AIRPERF1 r4: a streamed view hands over: the built volume stays drawn (and keeps scrolling with the
+		 * camera) while the new set's volume builds; it is freed when the new one is up (below). Dropping it here left
+		 * the view without GI at every cell crossing. Red WW_CELL_RTSET_RED=drop = the drop */
+		const bool handover = setFollows && c.nif == nif && c.live && !rtTraceSetRed( "drop" );
+		if ( handover ) {
+			if ( c.pending ) {
+				std::lock_guard<std::mutex> lk3( c.pending->m );
+				c.pending->cancel = true;
+				if ( c.pending->done )
+					c.pending->live.close();
+			}
+			c.pending.reset();
+		} else {
+			dropLive( c, r );
+		}
 		c.key = key;
 		c.nif = nif;
+		c.setGen = setGen;
 		c.refused.clear();
+		// RTXCASCADE2: one BLAS. AIRPERF1 r4: during a handover a coarse cascade is held until cascade 0's build is up
 		startBuild( c, *soup, lights, sky, G, eye, sp, paths,
-			c.level > 0 && !( paths & kPathPerCascade ) ? cell().live : nullptr );   // RTXCASCADE2: one BLAS
+			c.level > 0 && !( paths & kPathPerCascade ) ? cell().live : nullptr,
+			setFollows ? rtTraceSetBuildSoup( nif, soup ) : nullptr );
 		if ( c.pending )
 			c.pending->lightKey = lightKey;
-		say( c.tag + QStringLiteral( "%1 (%2 triangles)" ).arg( had ? QStringLiteral( "rebuilding: " ) + rebuildWhy : QStringLiteral( "building" ) )
+		say( c.tag + QStringLiteral( "%1 (%2 triangles)" ).arg( !had ? QStringLiteral( "building" )
+			: ( handover ? QStringLiteral( "handover (the built volume stays drawn until the new one is up): " )
+				: QStringLiteral( "rebuilding: " ) ) + rebuildWhy )
 			.arg( qint64( nTris / 9 ) ) );
 	}
 	if ( c.pending ) {
@@ -2070,6 +2108,14 @@ static void volumeFrame( Scene * scene, Cell & c, const CellSpec * spIn, bool du
 		if ( b->done ) {
 			c.pending.reset();
 			if ( b->ok ) {
+				if ( c.live ) {   // lane AIRPERF1 r4: the handover: the old volume's GL side and session go now
+					freeGl( c, r );
+					c.live.reset();
+					c.sets = c.busy = 0;
+					c.syncSignals = c.syncWaits = 0;
+					c.stopped = c.dumped = c.censusBuilt = false;
+					say( c.tag + QStringLiteral( "handover done: the volume of traced set generation %1 is drawn" ).arg( c.setGen ) );
+				}
 				c.live = b;
 				c.interopWhy.clear();
 				if ( !( b->paths & kPathReadback ) ) {
@@ -2368,6 +2414,13 @@ void rtddgiCellFrame( Scene * scene )
 	std::vector<Deferred> * defer = n > 1 && !( cellRedPaths() & kPathPerCascade ) ? &jobs : nullptr;
 	volumeFrame( scene, cell(), nullptr, true, false, defer );   // M3's volume, cascade 0
 	cascadesFrame( scene, defer );                               // RTXCASCADE1: nothing while WW_CELL_RTDDGI_CASCADES is 1
+	if ( scene && scene->nifModel && rtTraceSetActive( scene->nifModel ) ) {   // lane AIRPERF1 r4: the far ring's reach
+		bool building = false;
+		for ( int l = 0; l < std::max( n, 1 ); l++ )
+			building = building || bool( cascCell( l ).pending );
+		rtTraceSetFrame( scene->nifModel,
+			float( double( cellSpecNow().reach ) * rtddgi::cascadeScale( std::max( n, 1 ) - 1 ) ), building );
+	}
 	if ( !jobs.empty() && scene && scene->renderer )
 		groupStep( scene->renderer, jobs );   // cascade 0's, when cascadesFrame left early
 }

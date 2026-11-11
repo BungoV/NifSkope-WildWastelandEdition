@@ -6,6 +6,11 @@
 #include "features/far-lod/cellfarhide.h"	// lane FARHOLE2: the far field leaves room for every loaded cell
 #include "features/far-lod/cellfarlod.h"	// lane LARGEREF4: the far build's map for the large refs
 #include "cellmesh.h"
+#include "cellstreamrule.h"	// lane AIRPERF1 r4: when a view streams
+#include "features/gi/probeplace.h"	// lane AIRPERF1 r4: the far terrain's soup
+#include "features/gi/rttraceset.h"	// lane AIRPERF1 r4: the ray-traced GI's traced set follows the loaded cells
+#include "features/gi/rttracesetrule.h"
+#include <array>
 #include "cellsplat.h"
 #include "esmdata.h"		// lane WEATHERBLEND6: the camera cell's regions
 #include "features/far-ground/landlodspec.h"	// lane LANDSPEC6: streamCentre
@@ -215,6 +220,16 @@ public:
 	int sliceNodes = 0;           //!< node blocks taken in this slice, still to be wired
 	float shift = 2048.0f;
 	bool fixedCentre = false;     //!< lane LANDSPEC6: a fixed world's block never shifts (red WW_LANDSPEC_RED=fixedfollow)
+	//! lane AIRPERF1 r4: the Cell Streaming row (or WW_CELL_STREAM=0 set live) holds the block at the eye it had:
+	//! the cells it was loading finish (pausedFill), then nothing loads or unloads
+	bool paused = false, pausedFill = false, saidPaused = false;
+	Vector3 pausedEye;
+	int saidCx = INT_MIN, saidCy = INT_MIN;
+	//! lane AIRPERF1 r4: the ray-traced GI's traced set (features/gi/rttraceset.h): handed over after each rebuild()
+	bool traceDirty = false, traceOn = false;
+	int traceRing = -1;
+	QHash<int, std::array<int, 4>> traceSpan;   //!< a far terrain shape's cells (x0, y0, x1, y1), by block
+	void traceSync( int ring, int ex, int ey );
 	//! lane LANDSPEC7: a fixed world builds no cell round the eye past WCTR +- 2: the block never moves there, and the
 	//! game never loads those cells (red WW_LANDSPEC_RED=fixedopen: the prefetch row is built)
 	bool noPrefetch = false;
@@ -247,6 +262,8 @@ public:
 	~Stream() override
 	{
 		farHideForget();
+		if ( traceOn )
+			rtTraceSetForget( nif );   // lane AIRPERF1 r4
 		if ( worker.joinable() )
 			worker.join();
 		if ( reaper.joinable() )
@@ -457,6 +474,8 @@ void Stream::pumpWorker( const Vector3 & eye )
 	}
 	if ( worker.joinable() )
 		return;
+	if ( paused && !pausedFill )
+		return;   // lane AIRPERF1 r4: Cell Streaming off: no build starts
 	// lane CELLSTREAM1: leaving cells go, their blocks reset and built cells are written before the next build
 	// starts: the builder's heap traffic stalls the main thread's model edits by up to tens of ms
 	if ( unloadWaiting || !toReset.empty() || !toClear.empty() || !toFree.empty() )
@@ -492,6 +511,7 @@ void Stream::pumpWorker( const Vector3 & eye )
 	job->cx = best->x;
 	job->cy = best->y;
 	job->largeRef = best->lref;	// lane LARGEREF2
+	job->wantSoup = rtTraceSetFollows();	// lane AIRPERF1 r4: the cell's soup for the ray-traced GI
 	// the enable facts of the 5x5 the cell is wanted in (the fixed block's rule)
 	const bool now = want( keyOf( *best ) );
 	const int fx = now ? ccx : ex, fy = now ? ccy : ey;
@@ -1205,7 +1225,103 @@ void Stream::rebuild()
 	wwCellLightsPublish( nif, L );
 	wwCellFxLitPick( nif );
 	dirty = false;
+	traceDirty = true;   // lane AIRPERF1 r4: the traced set follows (tick)
 	st.rebuildMaxMs = std::max( st.rebuildMaxMs, msOf( t ) );
+}
+
+/*! lane AIRPERF1 r4: the loaded cells' soups and the far terrain round them go to the ray-traced GI's traced set
+ *  (features/gi/rttraceset.h), which merges and publishes them off the main thread. The far terrain is what is drawn
+ *  out there (the far LOD's terrain shapes), cut to the cells within `ring` of the block's centre that no loaded cell
+ *  covers, so a ray leaving the loaded cells meets ground and not an uncut sky (red WW_CELL_RTSET_RED=nofar). */
+void Stream::traceSync( int ring, int ex, int ey )
+{
+	QElapsedTimer t;
+	t.start();
+	std::vector<RtTraceUnit> units;
+	std::set<Key> loaded;
+	int noSoup = 0;
+	for ( const auto & kv : cells ) {
+		const StreamCell & c = kv.second;
+		if ( c.st != CellState::Attached || !c.chunk || !c.chunk->ok )
+			continue;
+		if ( !c.lref )
+			loaded.insert( Key( c.x, c.y ) );
+		if ( !c.chunk->soup ) {
+			noSoup++;
+			continue;
+		}
+		RtTraceUnit u;
+		u.x = c.x;
+		u.y = c.y;
+		u.lref = c.lref;
+		u.soup = c.chunk->soup;
+		units.push_back( std::move( u ) );
+	}
+	std::shared_ptr<ProbeSoup> farSoup;
+	std::set<Key> farCells;
+	int farShapes = 0;
+	if ( scene && !rtTraceSetRed( "nofar" ) ) {
+		static const quint8 dirt[3] = { 40, 32, 23 };   // the fixed block's stated dirt tone (sRGB 110, 100, 85), linear
+		farSoup = std::make_shared<ProbeSoup>();
+		for ( Shape * sh : scene->shapes ) {
+			if ( !sh )
+				continue;
+			const QString bn = sh->getName();
+			if ( !bn.startsWith( QLatin1String( "FarLOD terrain" ) ) && !bn.startsWith( QLatin1String( "FarLOD_terrain" ) ) )
+				continue;
+			const int b = nif->getBlockNumber( sh->index() );
+			const QSharedPointer<CellMesh> cm = cellMeshFor( nif, sh->index() );
+			if ( b < 0 || ( cm && cm->inst ) )
+				continue;
+			const QVector<Vector3> & V = cm ? cm->verts : sh->verts;
+			const QVector<Triangle> & T = cm ? cm->triangles : sh->triangles;
+			if ( V.isEmpty() || T.isEmpty() )
+				continue;
+			const Transform w = sh->restWorldTrans();
+			auto sp = traceSpan.find( b );
+			if ( sp == traceSpan.end() ) {   // once a shape: the cells it reaches
+				float lo[2] = { 3.4e38f, 3.4e38f }, hi[2] = { -3.4e38f, -3.4e38f };
+				for ( const Vector3 & v : V ) {
+					const Vector3 p = w * v;
+					lo[0] = std::min( lo[0], p[0] );
+					lo[1] = std::min( lo[1], p[1] );
+					hi[0] = std::max( hi[0], p[0] );
+					hi[1] = std::max( hi[1], p[1] );
+				}
+				sp = traceSpan.insert( b, std::array<int, 4> { cellOf( lo[0] ), cellOf( lo[1] ), cellOf( hi[0] ), cellOf( hi[1] ) } );
+			}
+			const std::array<int, 4> & s4 = sp.value();
+			if ( s4[2] < ccx - ring || s4[0] > ccx + ring || s4[3] < ccy - ring || s4[1] > ccy + ring )
+				continue;
+			farShapes++;
+			const int nV = int( V.size() );
+			for ( const Triangle & tr : T ) {
+				const int i0 = tr[0], i1 = tr[1], i2 = tr[2];
+				if ( i0 == i1 || i1 == i2 || i0 == i2 || i0 >= nV || i1 >= nV || i2 >= nV )
+					continue;
+				const Vector3 pa = w * V[i0], pb = w * V[i1], pc = w * V[i2];
+				const int x = cellOf( ( pa[0] + pb[0] + pc[0] ) / 3.0f ), y = cellOf( ( pa[1] + pb[1] + pc[1] ) / 3.0f );
+				if ( !rttracesetrule::inRing( x, y, ccx, ccy, ring ) || loaded.count( Key( x, y ) ) )
+					continue;
+				const float fa[3] = { pa[0], pa[1], pa[2] }, fb[3] = { pb[0], pb[1], pb[2] }, fc[3] = { pc[0], pc[1], pc[2] };
+				farSoup->addTri( fa, fb, fc, dirt );
+				farCells.insert( Key( x, y ) );
+			}
+		}
+		if ( farSoup->tris.empty() )
+			farSoup.reset();
+	}
+	const qint64 farTris = farSoup ? qint64( farSoup->triCount() ) : 0;
+	const int nUnits = int( units.size() );
+	rtTraceSetSync( nif, std::move( units ), ccx, ccy, ex, ey, ring, farSoup, int( farCells.size() ), noSoup );
+	traceDirty = false;
+	traceRing = ring;
+	traceOn = true;
+	std::fprintf( stderr, "cell stream: traced set handed over: %d units of %d loaded cells (%d without a soup), far terrain %lld "
+		"triangles in %d cells from %d shapes (ring %d round centre %d,%d), camera cell %d,%d, gather %.2f ms\n", nUnits,
+		int( loaded.size() ), noSoup, static_cast<long long>( farTris ), int( farCells.size() ), farShapes, ring, ccx, ccy, ex, ey,
+		msOf( t ) );
+	std::fflush( stderr );
 }
 
 bool Stream::busy() const
@@ -1250,9 +1366,34 @@ bool Stream::tick( Scene * sc, const Vector3 & eye )
 			LodPreview::setFrozenEye( fe );
 		gridEye = Vector3( fe[0], fe[1], fe[2] );
 	}
+	// lane AIRPERF1 r4: Cell Streaming off (the row, or WW_CELL_STREAM=0 set live) holds the block where it is
+	const bool liveOn = cellStreamLiveOn();
+	if ( !liveOn && !paused ) {
+		paused = pausedFill = true;
+		pausedEye = gridEye;
+		std::fprintf( stderr, "cell stream: off (%s): the block stays at centre %d,%d; the cells it was loading finish, then "
+			"nothing loads or unloads\n", cellStreamPinned() ? "WW_CELL_STREAM=0" : "the Cell Streaming row", ccx, ccy );
+		std::fflush( stderr );
+	} else if ( liveOn && paused ) {
+		paused = pausedFill = false;
+		std::fprintf( stderr, "cell stream: on (%s): follows the camera again from centre %d,%d, camera cell %d,%d\n",
+			cellStreamPinned() ? "WW_CELL_STREAM=1" : "the Cell Streaming row", ccx, ccy, cellOf( eye[0] ), cellOf( eye[1] ) );
+		std::fflush( stderr );
+	}
+	if ( paused )
+		gridEye = pausedEye;
 	nearGrid( eye );
 	if ( !fixedCentre )	// lane LANDSPEC6: the game skips every grid shift in a fixed world
 		shiftCentre( gridEye );
+	if ( ccx != saidCx || ccy != saidCy || paused != saidPaused ) {   // lane AIRPERF1 r4: the block's centre, on every move
+		saidCx = ccx;
+		saidCy = ccy;
+		saidPaused = paused;
+		std::fprintf( stderr, "cell stream: centre %d,%d (camera cell %d,%d), %d x %d cells%s\n", ccx, ccy, cellOf( eye[0] ),
+			cellOf( eye[1] ), 2 * gridHalf + 1, 2 * gridHalf + 1, paused ? ", held (streaming off)"
+				: fixedCentre ? ", a fixed world's block" : "" );
+		std::fflush( stderr );
+	}
 	if ( texCentre != Key( ccx, ccy ) )	// lane STREAMTEX1: a crossing (the first tick: the open's census)
 		texCensus();
 	wanted.clear();
@@ -1276,7 +1417,7 @@ bool Stream::tick( Scene * sc, const Vector3 & eye )
 	cam.eye[1] = eye[1];
 	for ( int dy = -gridHalf; dy <= gridHalf; dy++ )
 		for ( int dx = -gridHalf; dx <= gridHalf; dx++ )
-			if ( !noPrefetch && !wanted.count( Key( gx + dx, gy + dy ) ) )
+			if ( !noPrefetch && !paused && !wanted.count( Key( gx + dx, gy + dy ) ) )	// AIRPERF1 r4: no prefetch while held
 				prefetch.insert( Key( gx + dx, gy + dy ) );
 
 	// lane LARGEREF2: the units the layer draws (a ref listed by an attached cell whose own cell is not attached)
@@ -1407,6 +1548,28 @@ bool Stream::tick( Scene * sc, const Vector3 & eye )
 			changed = true;
 		}
 	}
+	if ( paused && pausedFill && !dirty ) {   // lane AIRPERF1 r4: the held block is whole: from here nothing is built
+		bool whole = true;
+		for ( const auto & kv : cells )
+			whole = whole && ( !want( kv.first ) || kv.second.st == CellState::Attached );
+		if ( whole ) {
+			pausedFill = false;
+			std::fprintf( stderr, "cell stream: off: the held block is whole (centre %d,%d), no build starts until it is on\n", ccx, ccy );
+			std::fflush( stderr );
+		}
+	}
+	// lane AIRPERF1 r4: the ray-traced GI's traced set is the loaded cells and the far terrain round them
+	if ( rtTraceSetFollows() ) {
+		const int ring = rtTraceSetRing( nif, gridHalf );
+		if ( !dirty && ( traceDirty || ring != traceRing || !traceOn ) ) {
+			g_phase = "traceset";
+			traceSync( ring, ex, ey );
+		}
+		rtTraceSetTick( nif, ex, ey );
+	} else if ( traceOn ) {
+		rtTraceSetForget( nif );   // the row went off: the kept soup stays as it is, nothing follows
+		traceOn = false;
+	}
 
 	g_phase = "idle";
 	const double msIdle0 = msOf( t );
@@ -1480,12 +1643,49 @@ QString keyList( const std::vector<Key> & keys )
 
 } // namespace
 
+/* lane AIRPERF1 r4: every exterior view streams, opened by a spec (WW_CELL_OPEN) or not; a harness that needs a
+ * fixed block says WW_CELL_STREAM=0 (cellstreamrule.h; red WW_CELL_STREAM_RED=specfixed = the rule before). The census
+ * walk opens exterior blocks itself and must weld them. */
 bool cellStreamWanted()
 {
-	if ( wwEnvIsSet( "WW_CELL_STREAM" ) )
-		return wwEnvInt( "WW_CELL_STREAM" ) != 0;
-	// a harness's fixed block stays fixed; the census walk opens exterior blocks itself and must weld them
-	return wwEnvIsEmpty( "WW_CELL_OPEN" ) && wwEnvIsEmpty( "WW_CELL_CENSUS_TEST" );
+	const int rule = cellstreamrule::openRule( wwEnvIsSet( "WW_CELL_STREAM" ), wwEnvInt( "WW_CELL_STREAM" ),
+		!wwEnvIsEmpty( "WW_CELL_OPEN" ), !wwEnvIsEmpty( "WW_CELL_CENSUS_TEST" ),
+		wwEnvStr( "WW_CELL_STREAM_RED" ) == QLatin1String( "specfixed" ) );
+	static int said = -1;
+	if ( rule != said ) {
+		said = rule;
+		std::fprintf( stderr, "cell stream: %s\n", cellstreamrule::openWords( rule ) );
+		std::fflush( stderr );
+	}
+	return cellstreamrule::openOn( rule );
+}
+
+static bool g_cellStreamRow = true;   // this session's row; a new launch starts on
+
+bool cellStreamRowOn()
+{
+	return g_cellStreamRow;
+}
+
+void cellStreamSetRow( bool on )
+{
+	if ( on == g_cellStreamRow )
+		return;
+	g_cellStreamRow = on;
+	std::fprintf( stderr, "cell stream: the Cell Streaming row %s%s\n", on ? "on" : "off",
+		cellStreamPinned() ? " (WW_CELL_STREAM is set: the pin decides)" : "" );
+	std::fflush( stderr );
+}
+
+bool cellStreamPinned()
+{
+	return wwEnvIsSet( "WW_CELL_STREAM" );
+}
+
+bool cellStreamLiveOn()
+{
+	return cellstreamrule::liveOn( wwEnvIsSet( "WW_CELL_STREAM" ), wwEnvInt( "WW_CELL_STREAM" ), g_cellStreamRow,
+		wwEnvInt( "WW_CELL_STREAM_ROW_RED" ) > 0 );
 }
 
 void cellStreamStart( NifModel * nif, std::shared_ptr<CellStreamSeed> seed )

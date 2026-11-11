@@ -1,4 +1,5 @@
 #!/bin/bash
+export WW_CELL_STREAM="${WW_CELL_STREAM:-0}"	# AIRPERF1 r4: this harness opens a fixed block (streaming is the default now)
 #
 # THE PROBES' SKY FROM THE SKY THE VIEW DRAWS (lane SKYPIC1, 2026-10-11; src/features/gi/probesky.h, PRTP_PLAN 2as, deck C9).
 #

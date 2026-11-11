@@ -1,4 +1,5 @@
 #!/bin/bash
+export WW_CELL_STREAM="${WW_CELL_STREAM:-0}"	# AIRPERF1 r4: this harness opens a fixed block (streaming is the default now)
 #
 # VOLUMETRIC AIR, OPTION B (lane VOLAIR1, 2026-10-13; WW_CELL_VOLAIR_FOGBLEND, test only, no menu row).
 # Option A (the default) draws the real light only (colour x T + L). B=1 also draws the game's fog colour over the

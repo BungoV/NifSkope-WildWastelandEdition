@@ -1,4 +1,5 @@
 #!/bin/bash
+export WW_CELL_STREAM="${WW_CELL_STREAM:-0}"	# AIRPERF1 r4: this harness opens a fixed block (streaming is the default now)
 #
 # WHICH SHAPES OF A REAL CELL THE PROBE BAKE TAKES FOR GLASS (lane BAKE4, 2026-10-02).
 #

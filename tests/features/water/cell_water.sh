@@ -1,4 +1,5 @@
 #!/bin/bash
+export WW_CELL_STREAM="${WW_CELL_STREAM:-0}"	# AIRPERF1 r4: this harness opens a fixed block (streaming is the default now)
 #
 # THE CELL WATER (lane WATER1, 2026-10-04; src/features/water/cellwater.h, res/shaders/features/water/fo4_water.frag, src/features/gi/probebake.cpp).
 #

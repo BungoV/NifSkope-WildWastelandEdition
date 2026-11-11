@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+export WW_CELL_STREAM="${WW_CELL_STREAM:-0}"	# AIRPERF1 r4: this harness opens a fixed block (streaming is the default now)
 # shadowpar1_gates.sh -- the gates of lane SHADOWPAR1: the sun shadows at FO4CS's level (gl/shadowset.h WwShadowPar),
 # judged by shadowpar1_gates.py from pictures + echoes, never by the code under test.
 #

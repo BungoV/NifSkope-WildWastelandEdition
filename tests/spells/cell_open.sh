@@ -1,4 +1,5 @@
 #!/bin/bash
+export WW_CELL_STREAM="${WW_CELL_STREAM:-0}"	# AIRPERF1 r4: this harness opens a fixed block (streaming is the default now)
 #
 # Opening a WHOLE EXTERIOR CELL -- `.wwcell` / `WW_CELL_OPEN`, the Creation
 # Kit view bungo asked for on 2026-09-19 ("I think a prerequisite would be, to

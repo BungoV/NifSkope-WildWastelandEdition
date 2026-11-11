@@ -1,4 +1,5 @@
 #!/bin/bash
+export WW_CELL_STREAM="${WW_CELL_STREAM:-0}"	# AIRPERF1 r4: this harness opens a fixed block (streaming is the default now)
 #
 # THE EFFECT DECALS TAKE THE LIGHT OF THE SURFACE UNDER THEM (lane DECALLIT1, 2026-10-14; src/gl/celllights.h
 # wwIsCellDecalProgramName, res/shaders/fo4_effectdecal.frag).
