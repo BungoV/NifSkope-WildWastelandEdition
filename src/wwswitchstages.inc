@@ -387,6 +387,7 @@
 { "WW_CELL_FOGSCALE_RED", 0, "src/gl/celllights.cpp:1224 wwCellLightsUniforms | re-read per frame or per call (a)" },
 { "WW_CELL_FOG_PROBE", 0, "src/gl/celllights.cpp:166 st | init-once state, re-read when a live set moves its prefix (b)" },
 { "WW_CELL_FOG_RED", 1, "src/cellview.cpp:1656 cellPublishLighting | (a) written into the cell's light and fog list when the built cell is handed to the renderer" },
+{ "WW_CELL_FXDECAL_RED", 0, "src/gl/glshape.cpp:847 Shape::wwDecalDrawsFirst | re-read per frame or per call (a)" },
 { "WW_CELL_FXD_RED", 1, "src/cellview.cpp:3757 cellBuild | (a) cellBuild: decides which blocks (shapes, lights, decals, far layers) are written into the cell document" },
 { "WW_CELL_FXLAW_RED", 0, "src/features/lights/cellfxlit.cpp:257 wwCellFxLawUniforms | re-read per frame or per call (a)" },
 { "WW_CELL_FXLIT_COLOR_RED", 0, "src/gl/celllights.cpp:1908 wwCellLightsUniforms | re-read per frame or per call (a)" },

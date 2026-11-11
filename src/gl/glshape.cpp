@@ -841,7 +841,24 @@ bool Shape::wwDecalDrawsFirst() const
 {
 	// lane FXD1: the game draws its decals before its sorted blended pass. Red control WW_CELL_FXD_RED=late: never
 	WW_SWITCH_STATIC( bool, late, wwEnv( "WW_CELL_FXD_RED" ) == "late" );
-	return surfaceDecal && drawInSecondPass && !late && wwCellLightsWanted( scene );
+	/* AIRPERF1 round 3: the effect shader's decals too (a wall stain model with a .bgem, Decal flag). They stayed in
+	 * the blended pass in bucket order, so a stain painted over the mist cards between it and the eye: a dark, clear
+	 * panel in the mist. Red WW_CELL_FXDECAL_RED=late: the effect decals stay in the blended pass. */
+	WW_SWITCH_STATIC( bool, fxLate, wwEnv( "WW_CELL_FXDECAL_RED" ).trimmed() == "late" );
+	if ( !( surfaceDecal || effectDecal ) || !drawInSecondPass || late || !wwCellLightsWanted( scene ) )
+		return false;
+	if ( effectDecal && !surfaceDecal ) {
+		static QSet<QString> told;	// once per material and rule
+		const QString key = bsesp->materialFileName() + ( fxLate ? "|late" : "|first" );
+		if ( !told.contains( key ) ) {
+			told.insert( key );
+			fprintf( stderr, "decal order: effect decal %s (shape %d) -> %s (red WW_CELL_FXDECAL_RED=late)\n",
+				bsesp->materialFileName().isEmpty() ? "(material in the NIF)" : qPrintable( bsesp->materialFileName() ),
+				int( id() ), fxLate ? "in the blended pass, bucket order (red)" : "with the decals, before the water and the blended pass" );
+		}
+		return !fxLate;
+	}
+	return true;
 }
 
 bool Shape::wwWaterDraws() const

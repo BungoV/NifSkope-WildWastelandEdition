@@ -1,3 +1,21 @@
+## AIRPERF1 round 3 (2026-11-11): wall stain models draw with the decals, under the mist
+- **The draw (bungo: the tall dark panel on a Goodneighbor wall, CommonwealthFoggy):** `DecoStain2x1WallL01` (ref
+  00232786) and `DecoStain1x2Wall02` (00232785): one quad each, effect shader, `BldStreaks01.BGEM` (Decal flags, blend,
+  greyscale-to-palette alpha driven by the vertex alpha, no depth write). An EFFECT-shader decal: the earlier decal
+  fix covered the lighting shader's decals only, and this draw printed no `decal blend:` line.
+- **The cause:** only the lighting shader's decals were drawn before the blended pass (`Shape::wwDecalDrawsFirst`).
+  An effect decal stayed in the blended pass in bucket order, so it painted over every mist card drawn before it: the
+  stain kept its own colour while the wall beside it sat under the mist. The game draws its decals before its blended
+  effects.
+- **The fix (src/gl/glshape.cpp):** effect-shader decals take the decals' place in the order too (before the water
+  and the blended pass). Their light, fog and blend are unchanged.
+- **Red:** `WW_CELL_FXDECAL_RED=late` (live): effect decals stay in the blended pass. `WW_CELL_FXD_RED=late` still
+  holds every decal back.
+- **Telemetry:** `decal order: effect decal <material> (shape N) -> with the decals, before the water and the blended
+  pass`, once per material and rule.
+- **Not changed:** the stain's own coverage. By its files the left third of this stain is authored near opaque
+  (vertex alpha 255, palette alpha up to 0.9): it stays a darker area of the wall, now under the same mist.
+
 ## AIRPERF1 round 2 (2026-11-11): the ReSTIR pass no longer makes the frame wait on the device
 - **The cause (bungo: 19-35 ms in the big window):** "device wall" timed the whole step, and the step ended in a CPU
   wait on its submit's fence. That submit waits on GL's glDone semaphore, so the fence fires only after the GPU has
