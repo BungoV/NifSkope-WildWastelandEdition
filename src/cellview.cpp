@@ -273,6 +273,7 @@ struct Bucket
 	bool grass = false;   // blades of the game's grass (src/gl/cellgrass.h): the fade applies
 	float grassWave = 0.0f;   // its GRAS wave period (one bucket per grass type), the wind's phase
 	bool grassNoFade = false;   // lane CABLES1: a swaying cable: the grass wind, never the grass fade
+	bool noSpecLobe = false;    // MODULES1 R6-4: a cable: no material names a specular lobe, so none is drawn
 	bool treeWind = false;      // lane WINDTREE1: one placement's Tree_Anim shapes (gl/celltreewind.h)
 	float treeWindK[10] = { 0.0f, 0.0f, 0.0f, 0.0f, 3.4e38f, 0.0f, 1.0f, 1.0f, 1.0f, 1.0f };   // its constants (WwTreeWindK's order)
 	std::vector<OutVert> verts;
@@ -719,6 +720,8 @@ bool emitBucket( NifModel * nif, const QModelIndex & iRoot, const Bucket & b,
 		}
 		if ( b.emits )
 			nif->set<float>( iShader, "Emissive Multiple", b.emissiveScale );
+		if ( b.noSpecLobe )	// MODULES1 R6-4
+			nif->set<float>( iShader, "Specular Strength", 0.0f );
 		if ( b.blend )
 			nif->set<float>( iShader, "Alpha", b.alpha );
 		nif->setLink( iShape, "Shader Property", nif->getBlockNumber( iShader ) );
@@ -5633,6 +5636,8 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 			const bool cableSway = cableLook && cableLook->windSensibility > 0.0f && wwCellCablesWind();
 			if ( cableSway )
 				bbOwn += QStringLiteral( "|CABLEWIND|%1" ).arg( p.base, 8, 16, QLatin1Char( '0' ) );
+			else if ( cableLook )
+				bbOwn += QLatin1String( "|CABLE" );	// MODULES1 R6-4: never one bucket with a static of the same texture
 			/* Lane WATER1: a placed water mesh (an ACTI whose WNAM names a WATR; its shape carries the water
 			 * shader) gets a bucket per record, drawn by src/features/water/cellwater.h with that record's terms. */
 			const WwWaterRecord * placedWater = nullptr;
@@ -5730,6 +5735,12 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 			Bucket & b = bucketFor( s, colouring || ownColor || repaint, bbOwn );
 			if ( fakeAir && !b.name.startsWith( QLatin1String( "FakeAir " ) ) )
 				b.name.prepend( QLatin1String( "FakeAir " ) );
+			/* MODULES1 R6-4: a cable has textures and no material file, so its property kept the block's defaults
+			 * (Smoothness 1, Specular Strength 1): the sun's sharpest lobe at full strength on a 1-2 px tube drew it
+			 * flat white. Nothing authored that lobe (the game draws these with its grass shader): strength 0.
+			 * Red WW_CELL_CABLES_RED=spec keeps the defaults. */
+			if ( cableLook && wwEnv( "WW_CELL_CABLES_RED" ).trimmed() != "spec" )
+				b.noSpecLobe = true;
 			if ( cableSway ) {
 				b.grass = true;
 				b.grassWave = cableLook->windFlexibility;
@@ -5889,6 +5900,9 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 			.arg( cableBuilt ).arg( cableWind ).arg( cableVerts ).arg( cableTris ).arg( cableEndBad )
 			.arg( double( cableEndWorst ), 0, 'f', 4 ).arg( cableSagBad ).arg( double( cableSagWorst ), 0, 'f', 4 )
 			+ ( wwCellCablesWind() ? QString() : QStringLiteral( "; wind off (WW_CELL_CABLES_RED=nowind)" ) )
+			+ ( wwEnv( "WW_CELL_CABLES_RED" ).trimmed() == "spec"
+				? QStringLiteral( "; specular lobe: the block's defaults, smoothness 1 x strength 1 (RED WW_CELL_CABLES_RED=spec)" )
+				: QStringLiteral( "; specular lobe: strength 0 (no material names one; sun and lamps light it by diffuse only)" ) )
 		: QStringLiteral( "cables: off (WW_CELL_CABLES_RED=off), XBSD refs %1 (on a BNDS base %2), placed 0" )
 			.arg( cableXbsd ).arg( cableBnds );
 	qInfo().noquote() << cableLine;
