@@ -1,3 +1,22 @@
+## AIRPERF1 (2026-11-11): the cell air's cost, and Foggy too thin
+- **A1 the sky share walks the probes once a layer, not once a froxel:** the layer's turn replaces the per-froxel
+  dither. Key `WW_CELL_AIR_ENVRATE=dither` (red) / `4` / `8`. Telemetry `envwalk=` in the `cell air:` echo.
+- **A2 slice count by a live key:** `WW_CELL_AIR_SLICES=64` / `96` on the 128-slice presets (the default is unchanged:
+  the offline twin's bars for 64 slices failed on hard shaft edges). Telemetry `slices=`.
+- **A3 the sun and the inject lights refresh a layer every second cycle** under the temporal mode, and the lamp walk
+  skips a froxel with no lamp in its list. Reds `WW_CELL_AIR_SUNRATE=1`, `WW_CELL_AIR_LAMPS_RED=walkempty`. Telemetry
+  `sunrate=`, `lampempty=`.
+- **A4 the far grid's refresh of an unchanged view is spread over its refresh frames.** Red
+  `WW_CELL_AIR_FARSPREAD_RED=1`. Telemetry `farspread=`.
+- **A5 a moved caster redraws a lamp's shadow tiles only when the move can show** (half a tile texel at its nearest
+  point, or entering / leaving the lamp's reach). Red `WW_CELL_AIR_LAMPATLAS_RED=exactsig`. Telemetry
+  `air lamp atlas mover: ...` (each mover's name once), `held` in the atlas line.
+- **A6 the echo names the light lists the air walks:** `lists=surfaces(...)` / `air` / `flat(...)`.
+- **A7 CommonwealthFoggy far too thin:** the air's fit took the sky's haze off the record's street fit and the
+  surfaces then took the min of the two as well, so the eye saw half the record's fog and none of the air's own
+  light. The air now keeps the record's whole street fit, for every weather. Red `WW_CELL_AIR_FIT_RED=apcut`.
+  Telemetry `fit=(rule= street= record= sky= T air/game ... light=)`.
+
 ## MODULES1 round 7 (2026-11-11): bungo's build 62 flight
 - **R7-1 lit effect cards and particles dark beside a lamp:** outdoors they take the surfaces' sun, the weather's
   ambient and the lamps at their own spot. Red `WW_CELL_FXLOCAL_RED=base`. Telemetry `cell fx local: ...`.
