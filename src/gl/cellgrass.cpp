@@ -812,6 +812,9 @@ bool wwCellGrassCableWind( const void * nif, int block, float wind[4], float win
 	const auto nf = s.noFade.constFind( nif );
 	if ( nf == s.noFade.constEnd() || !nf->contains( block ) || !wwCellGrassWind( wind, wind2 ) )
 		return false;
+	WW_SWITCH_STATIC( bool, noWind, wwEnv( "WW_CELL_CABLES_RED" ).trimmed() == "nowind" );	// MODULES1 R6-7: live
+	if ( noWind )
+		return false;
 	const auto wit = s.wave.constFind( nif );
 	wind[3] = wwCellGrassPhase( s.tCur, wit != s.wave.constEnd() ? wit->value( block, 0.0f ) : 0.0f );
 	return true;
@@ -966,6 +969,16 @@ void wwCellGrassUniforms( Scene * scene, int block )
 	if ( nf != s.noFade.constEnd() && nf->contains( block ) ) {
 		if ( !bentRed )
 			wind2[3] = 2.0f;
+		// MODULES1 R6-7: the red nowind is live: the cable keeps its sway bucket and gets a wind of speed 0
+		WW_SWITCH_STATIC( bool, noWind, wwEnv( "WW_CELL_CABLES_RED" ).trimmed() == "nowind" );
+		if ( noWind )
+			wind2[0] = wind2[1] = 0.0f;
+		static int saidWind = -1;
+		if ( saidWind != int( noWind ) ) {
+			saidWind = int( noWind );
+			qInfo().noquote() << ( noWind ? QStringLiteral( "cable wind: OFF, speed 0 at the draw (red WW_CELL_CABLES_RED=nowind, live)" )
+				: QStringLiteral( "cable wind: the weather's wind at the draw (red WW_CELL_CABLES_RED=nowind, live)" ) );
+		}
 		static int saidCable = -1;
 		if ( saidCable != int( bentRed ) ) {
 			saidCable = int( bentRed );

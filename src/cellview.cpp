@@ -5633,7 +5633,7 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 			 * (the wind, the colour's 2.2 power) and its wave period is the base's wind flexibility. One bucket per
 			 * base; the vertex alpha is the weight. The grass FADE is not applied (not measured for cables). */
 			const EsmBendable * cableLook = p.cable ? &world.bendable( p.base ) : nullptr;
-			const bool cableSway = cableLook && cableLook->windSensibility > 0.0f && wwCellCablesWind();
+			const bool cableSway = cableLook && cableLook->windSensibility > 0.0f;	// MODULES1 R6-7: the red nowind is a draw gate now (cellgrass.cpp), live
 			if ( cableSway )
 				bbOwn += QStringLiteral( "|CABLEWIND|%1" ).arg( p.base, 8, 16, QLatin1Char( '0' ) );
 			else if ( cableLook )

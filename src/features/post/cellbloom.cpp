@@ -141,7 +141,7 @@ BloomState & bs()
 {
 	static BloomState s;
 	// lane TESTDRIVER1: a live set of these switches re-reads them (pins and or-ed reds back to their defaults first)
-	if ( s.init && !wwSwitchMovedFor( s.liveGen, { "WW_CELL_BLOOM" } ) )
+	if ( s.init && !wwSwitchMovedFor( s.liveGen, { "WW_CELL_BLOOM", "WW_CELL_GLARE" } ) )
 		return s;
 	const bool again = s.init;
 	s.init = true;
