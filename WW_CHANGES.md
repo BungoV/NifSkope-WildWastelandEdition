@@ -1,3 +1,30 @@
+## MODULES1 round 6 (2026-11-11): bungo's build 61 flight
+- **R6-1 far trees glowing white when back-lit:** the far tree MESHES' leaf back light was added to the root of the
+  lit colour in the viewport light's unit. Under the cell's sun it is now albedo x sun x (N.-L x power)^2 x the sun's
+  visibility, in linear light. Red `WW_CELL_LIT_RED=backglow`. Telemetry `cell back light: ...`.
+- **R6-2 the sea ended before the horizon:** a child worldspace (Goodneighbor) takes its parent's water type and
+  level for the endless sea. Red `WW_CELL_PARENTWATER_RED`. Telemetry `esm world: ... sea water type`, `endless sea: ...`.
+- **R6-4 white cables in direct sun:** cables draw no specular lobe. Red `WW_CELL_CABLES_RED=spec`.
+- **R6-6 sun disc and sunlight disagree at 6:30:** the sky's bodies and the light read one sun path on the game's
+  clock. Red `WW_SUNPATH_RED=realclock`. Telemetry `sky bodies sources: ...`.
+- **R6-7 settings that needed a reopen:** glare, the bloom fields and the cable wind red are re-read live; 25 rows of
+  src/wwswitchstages.inc corrected to live; the table is in byte order again.
+- **R6-8 shadow debug views unreadable:** the views are a probe pass (no fog, no post, no exposure on top).
+  Red `WW_SHADOW_RED=viewpost`. Telemetry `shadow view: ...`.
+- **R6-11 Scene window rows bunched and cut off:** the Name | Value tree is replaced by the panel standard: a scroll
+  area with one label | field grid, wwHeading groups, fields the width of the value column, one row height, selectors
+  never narrower than their longest entry, the Status text elided with the whole text in its tooltip. Red
+  `WW_SCENE_LAYOUT_RED=1`. Telemetry `scene window: panel standard rows: ...` and `scene window rows: ... check 1..5`;
+  `WW_SCENE_ROWS_PROBE=1` repeats the checks at 400, 800 and 1152 px.
+- **R6-12 night too dark, tiny moon:** a flight keeps the atmosphere rows on (aerial perspective, sun, night sky, GI);
+  new row **Sun and Moon Size** (Physical / Game / Large, ships Game; pin `WW_ATMO_BODYSIZE`; telemetry
+  `sky bodies size: ...`); one gameplay moon factor on the physical path (red `WW_MOON_RED=physical`, pin
+  `WW_MOON_GAME`, telemetry `moon light game: ...`).
+- **R6-13 Physical Light Units is a Scene row and ships Off:** Off = vanilla Fallout 4 lighting: lamps at the record's
+  colour x fade, the weather record's sun and ambient, the imagespace eye and the vanilla filmic curve. `WW_PHYSUNITS_RED`
+  stays as the pin. Reds `WW_PHYSUNITS_VANILLA_RED=curve,eye,lampscale`. Telemetry `physunits master: ...`,
+  `tonemap: curve=...`, `phys lamps: ...`. Game Light Brightness greys while it is Off.
+
 ## MODULES1 round 5 B9 (2026-11-10): far tree cards take the hour's sun (white at noon, glowing at night)
 - **Cause:** an exterior has no XCLL directional, and the card programs (impostor_cell*) were not on the list that
   takes the weather's sun and DALC (src/gl/celllights.cpp `extProg`). Their cellHasDir stayed 0, so PERFLOAD1 P2's
