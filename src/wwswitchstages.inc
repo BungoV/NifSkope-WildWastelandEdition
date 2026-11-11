@@ -523,6 +523,7 @@
 { "WW_CELL_OPEN", 1, "src/cellstream.cpp:1408 cellStreamWanted | hand: the cell spec: the reopen builds the new rectangle in the same window" },
 { "WW_CELL_OVERLAY", 1, "src/cellview.cpp:906 cellApplyEnvModifiers | read while the cell document is built" },
 { "WW_CELL_PARENTLAND_RED", 1, "src/esmdata.cpp:161 EsmWorld::load | read while the cell document is built" },
+{ "WW_CELL_PARENTWATER_RED", 1, "src/esmdata.cpp:154 EsmWorld::load | read while the cell document is built" },
 { "WW_CELL_PARTICLES", 1, "src/cellview.cpp:1885 wwCellParticlesOn | read while the cell document is built" },
 { "WW_CELL_PARTICLES_AIR_RED", 0, "src/features/particles/glparticles.cpp:426 Particles::drawShapes | re-read per frame or per call (a)" },
 { "WW_CELL_PARTICLES_MAX", 1, "src/cellstream.cpp:296 pfxRoom | read while the cell document is built" },

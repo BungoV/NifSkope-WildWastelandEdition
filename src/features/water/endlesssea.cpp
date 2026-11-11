@@ -10,6 +10,7 @@
 #include "model/nifmodel.h"
 #include "spells/blocks.h"
 
+#include <QDebug>
 #include <QElapsedTimer>
 
 #include <algorithm>
@@ -212,14 +213,30 @@ void wwEndlessSeaFollow( Scene * scene, const Transform & view )
 		return;
 	// the eye in world units (celllights.cpp wwCellCamDump)
 	const float sc = view.scale != 0.0f ? view.scale : 1.0f;
-	float e[2];
-	for ( int k = 0; k < 2; k++ ) {
+	float e[3];
+	for ( int k = 0; k < 3; k++ ) {
 		float w = 0.0f;
 		for ( int j = 0; j < 3; j++ )
 			w -= view.rotation( j, k ) * view.translation[j];
 		e[k] = w / sc;
 	}
 	const float tx = std::round( e[0] / kSnap ) * kSnap, ty = std::round( e[1] / kSnap ) * kSnap;
+	/* MODULES1 R6-2: where the sea ends for this eye. A flat sheet's rim lies atan( h / rim ) under eye level,
+	 * the sky starts at eye level: the line says how wide that strip is. Said when the height moves by a tenth. */
+	{
+		static float saidH = -1.0f;
+		const float h = std::max( e[2] - seaZ, 1.0f );
+		if ( saidH < 0.0f || std::fabs( h - saidH ) > 0.1f * saidH ) {
+			saidH = h;
+			const double rim = double( reach );
+			qInfo().noquote() << QStringLiteral( "endless sea: far water extent %1 u (%2 km) from the eye, eye %3 u over"
+				" the sea; the rim lies %4 deg under eye level; the sea-level horizon of the earth is %5 u out (%6 deg under)" )
+				.arg( rim, 0, 'f', 0 ).arg( rim / 70000.0, 0, 'f', 1 ).arg( double( h ), 0, 'f', 0 )
+				.arg( std::atan2( double( h ), rim ) * 180.0 / M_PI, 0, 'f', 3 )
+				.arg( std::sqrt( 2.0 * kEarthU * double( h ) ), 0, 'f', 0 )
+				.arg( std::sqrt( 2.0 * double( h ) / kEarthU ) * 180.0 / M_PI, 0, 'f', 3 );
+		}
+	}
 	Transform & loc = n->*Peek::loc();
 	if ( loc.translation[0] != tx || loc.translation[1] != ty || loc.translation[2] != 0.0f ) {
 		loc.translation = Vector3( tx, ty, 0.0f );

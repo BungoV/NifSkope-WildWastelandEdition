@@ -975,10 +975,18 @@ QString cellFarLodAppend( NifModel * nif, const QModelIndex & iRoot, const EsmWo
 				"%5 WATR forms: %6 their own record, %7 the worldspace default, %8 none" )
 				.arg( wQuads ).arg( wShapes ).arg( wRegistered ).arg( wBodies.size() )
 				.arg( recOk.size() ).arg( own ).arg( viaDef ).arg( none ) );
-			if ( haveDef )	// lane FARSEA1: the endless sea past the bake, at the worldspace's sea level
-				say( wwEndlessSeaAppend( nif, iFar, def, world.defaultWaterHeight(), lodlPath ) );
+			/* MODULES1 R6-2: the sea's record is the worldspace's own default, else its parent's (a child
+			 * worldspace without a NAM2 had no endless sea: the water ended at the bake's box). */
+			WwWaterRecord sea = def;
+			const bool haveSea = haveDef
+				|| ( world.seaWaterType() != 0 && world.waterRecord( world.seaWaterType(), sea ) );
+			if ( haveSea )	// lane FARSEA1: the endless sea past the bake, at the worldspace's sea level
+				say( wwEndlessSeaAppend( nif, iFar, sea, world.defaultWaterHeight(), lodlPath )
+					+ QStringLiteral( "; sea record %1 from %2" ).arg( world.seaWaterType(), 8, 16, QChar( '0' ) )
+						.arg( haveDef ? QStringLiteral( "the worldspace's own default" ) : world.seaWaterFrom() ) );
 			else
-				say( QStringLiteral( "endless sea: NONE (the worldspace has no default water)" ) );
+				say( QStringLiteral( "endless sea: NONE (no default water in the worldspace or its parents%1)" )
+					.arg( wwEnvIsSet( "WW_CELL_PARENTWATER_RED" ) ? QStringLiteral( "; WW_CELL_PARENTWATER_RED" ) : QString() ) );
 		}
 	}
 

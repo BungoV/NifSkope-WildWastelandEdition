@@ -400,6 +400,11 @@ public:
 
 	//! The worldspace's default water type (WRLD NAM2), 0 when absent.
 	quint32 defaultWaterType() const { return defWaterType; }
+	//! MODULES1 R6-2: the sea this worldspace lies in: its own NAM2, else the first one up its WNAM parents
+	//! (Goodneighbor has none of its own and lies in the Commonwealth's); 0 when the chain has none.
+	quint32 seaWaterType() const { return seaType; }
+	//! the worldspace that names seaWaterType() (its EDID)
+	QString seaWaterFrom() const { return seaFrom; }
 
 	//! the WATR record `form` (src/features/water/esmwater.h), false when it is no WATR
 	bool waterRecord( quint32 form, struct WwWaterRecord & out ) const;
@@ -550,6 +555,8 @@ private:
 	float defLandH = 0.0f;
 	float defWaterH = 0.0f;
 	quint32 defWaterType = 0;
+	quint32 seaType = 0;
+	QString seaFrom;
 	/*! a child worldspace that takes its parent's land (WRLD
 	 *  WNAM parent + PNAM bit 0 "Use Land Data": in Fallout4.esm only Goodneighbor) holds no LAND of its own; the game
 	 *  draws the PARENT's LAND at the same cell grid. Cell grid -> the parent cell's type-6 group, indexed cells only. */
