@@ -588,7 +588,7 @@ bool keyLight( const WwAtmoFrame & f, float w[3], float & k )
 		k = f.sunK;
 	} else {
 		std::copy( f.moonW, f.moonW + 3, w );
-		k = f.moonK;
+		k = f.moonKey;	// MODULES1 round 10: the moon's direct light, without the night sky's factor
 	}
 	return k > 0.0f;
 }
@@ -658,7 +658,7 @@ bool marchPass( Renderer * r, CvGpu & g, const CvRedo & d, const WwAtmoFrame & f
 	p->uni3f( "cvSunW", f.sunW[0], f.sunW[1], f.sunW[2] );
 	p->uni3f( "cvMoonW", f.moonW[0], f.moonW[1], f.moonW[2] );
 	p->uni1f( "cvSunK", f.sunK );
-	p->uni1f( "cvMoonK", f.moonK );
+	p->uni1f( "cvMoonK", f.moonKey );
 	p->uni3f( "cvKeyW", d.keyW[0], d.keyW[1], d.keyW[2] );
 	p->uni1f( "cvKeyK", d.keyK );
 	setMat3( r, p, "cvCam", d.cam.m );
@@ -1262,7 +1262,8 @@ bool wwLightningGround( float add[6][3] )
 bool wwCloudVolLowColour( float out[3] )
 {
 	CvState & s = cs();
-	if ( s.tier != 1 )
+	// MODULES1 round 10: red WW_CLOUDVOL_RED=vanillalit (live): the 2D layers keep the record's cloud colours
+	if ( s.tier != 1 || red( "vanillalit" ) )
 		return false;
 	const WwAtmoFrame & f = wwAtmoFrame();
 	if ( !f.valid )
@@ -1279,7 +1280,11 @@ bool wwCloudVolLowColour( float out[3] )
 			skyAmbient( s, w[2], f.haze, E );
 			for ( float & e : E )
 				e *= WwAtmoMath::kPi;	// lowColour takes the irradiance
-			V::lowColour( k, T, w[2], k, E, s.low );
+			/* MODULES1 round 10: by night the layers' sky share takes the lifted night sky (the frame's moonK = the
+			 * drawn sky's unit x the one factor); the key share keeps the moon's direct light */
+			const float skyK = ( f.sunW[2] > -0.1f || f.moonK <= 0.0f ) ? k : f.moonK;
+			V::lowColour( k, T, w[2], skyK, E, s.low );
+			wwAtmoNightSkyGot( WwNsClouds, skyK / WwAtmoMath::kPi, 0.2126f * s.low[0] + 0.7152f * s.low[1] + 0.0722f * s.low[2] );
 			if ( m.valid )
 				for ( int c = 0; c < 3; c++ )
 					s.low[c] *= red( "notint" ) ? 1.0f : m.band[0].tint[c];	// lane CLOUD2B: CLOUD1's Low band tint

@@ -124,6 +124,7 @@ in vec4 C;
 flat in vec4 D;
 in float rawVertexAlpha;	// the vertex colour's own alpha (channel 11 G only)
 in float wwFarSkyVis;	// lane FIX1101A lodch: a far placement vertex's baked sky factor (fo4_default.vert), 1 elsewhere
+in float wwFarAo;	// MODULES1 round 10: a far placement vertex's baked AO (fo4_default.vert), 1 elsewhere
 #ifdef WW_FAR_SPLAT	// lane FARLOOK1101 (FARSHIMMER2): the far splat's coverage, 1 / (kx * ky) (fo4_default.vert)
 flat in float farSplatA;
 #endif
@@ -989,7 +990,7 @@ void main()
 	}
 	// lane AO1: the ambient obscurance on the whole lit colour (linear, so its root here), before the fog
 	if ( cellOn )
-		color.rgb *= sqrt( cellAoFactor() );
+		color.rgb *= sqrt( cellAoShared( wwFarAo ) );	// MODULES1 round 10: near (screen) and far (baked) through one rule
 #endif
 
 	// lane FOG1 (Lookdev weather fog): this colour is sqrt of linear light (tonemap squares it),

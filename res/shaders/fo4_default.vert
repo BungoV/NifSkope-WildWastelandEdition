@@ -73,6 +73,12 @@ flat out vec2 farLadder;
 uniform bool farStreamOn;
 uniform samplerBuffer farStream;
 out float wwFarSkyVis;
+/* MODULES1 round 10 (bungo 11-11: "Far baked AO needs to behave through regular AO rules"): the stream's AO leaves the
+ * vertex colour and goes to the fragment's one AO rule (cell_ao.glsl cellAoShared) as wwFarAo. farBakeK: x the AO's
+ * and y the sky occlusion's maximum (live keys WW_LODL_AO_MAX / WW_LODL_SKY_MAX, 0..1), z 1 = the red
+ * WW_LODL_AO_RED=albedo (the AO multiplied into the vertex colour, as before). Set with farStreamOn. */
+out float wwFarAo;
+uniform vec3 farBakeK;
 #ifdef WW_FAR_SPLAT
 /* lane FARLOOK1101 (FARSHIMMER2): a far row whose projected box is under S px on an axis draws widened to S about its
  * projected centre at alpha 1 / (kx * ky) (exact ink: the area grows by kx * ky). farSplat = (S px, pass: 1 opaque =
@@ -100,6 +106,7 @@ void main()
 	vec2 uv0 = multiTexCoord0;
 	vec2 farXY = vertexPosition.xy;
 	wwFarSkyVis = 1.0;
+	wwFarAo = 1.0;
 	if ( farInst ) {
 		mat3 Mt = mat3( farInstRow0.xyz, farInstRow1.xyz, farInstRow2.xyz );	// n * Mt = M n
 		v.xyz = vec3( dot( farInstRow0, v ), dot( farInstRow1, v ), dot( farInstRow2, v ) );
@@ -114,8 +121,10 @@ void main()
 		}
 		if ( farStreamOn ) {
 			vec2 ch = texelFetch( farStream, floatBitsToInt( farInstExtra.y ) + gl_VertexID ).rg;
-			vc.rgb *= ch.r * e;
-			wwFarSkyVis = ch.g;
+			float ao = 1.0 - ( 1.0 - ch.r ) * farBakeK.x;
+			wwFarAo = farBakeK.z > 0.5 ? 1.0 : ao;
+			vc.rgb *= ( farBakeK.z > 0.5 ? ao : 1.0 ) * e;
+			wwFarSkyVis = 1.0 - ( 1.0 - ch.g ) * farBakeK.y;
 		} else
 		vc.rgb *= vec3( farInstExtra.yz, e );
 	}

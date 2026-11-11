@@ -59,7 +59,7 @@ void main()
 		float mu = dot( vr, viewMatrix[2] );	// world up: viewMatrix's columns are the world axes in view space
 		float muH = -sqrt( max( 0.0, 1.0 - kRb * kRb / ( atSkyCamR * atSkyCamR ) ) );
 		vec3 ts = atTrans( atSkyTransTex, atSkyCamR, max( mu, muH + 1e-4 ) );	// below the horizon: the horizon's
-		if ( atApSkyRule == 3 && mu < muH ) {
+		if ( atApSkyRule >= 3 && mu < muH ) {
 			// MODULES1 item 18 (rule 3): a ray that meets the planet keeps the air's transmittance to the ground
 			// (T(ground, up) / T(camera, up) along the reversed ray), not the horizon's ~0 that banded a high view black
 			float dg = atDistGround( atSkyCamR, mu );
@@ -75,20 +75,23 @@ void main()
 			// night ambient and the aerial perspective does not: rule 1 drew a dark flat stripe (spot 3 22:00, 18,19,21
 			// between a 25,40,60 sky and a 36,59,90 far land, hard edges).
 			vec4 ap = vec4( 0.0 );	// unused where the band's weight is 0 (wwSkyBandL mixes it by w)
+			float tFar = 1.0;	// MODULES1 round 10 (rule 4): the far path's transmittance; 1 = no air, no band
 			if ( atApSkyRule >= 2 ) {
 				if ( wwSkyBandW( tSky ) > 0.0 ) {	// the fog path only in the band (~2 deg above the horizon and under it)
 					float farV = projectionMatrix[3][2] / min( projectionMatrix[2][2] + 1.0, -1e-6 );	// the far plane (view units)
 					float dV = abs( farV );
 					// MODULES1 item 18 (rule 3): a ray that meets the planet ends there (km to units: / 1.42875e-5)
-					if ( atApSkyRule == 3 && mu < muH )
+					if ( atApSkyRule >= 3 && mu < muH )
 						dV = min( dV, atDistGround( atSkyCamR, mu ) / 1.42875e-5 );
 					ap = vec4( wwFog( vec3( 0.0 ), vr * dV ), 0.0 );
+					if ( atApSkyRule >= 4 )	// wwFog is linear in the surface's colour on the air's path: white - black = T
+						tFar = clamp( dot( wwFog( vec3( 1.0 ), vr * dV ) - ap.rgb, vec3( 1.0 / 3.0 ) ), 0.0, 1.0 );
 				}
 			} else {
 				ap = wwAtmoApAt( vr * ( atAp.y / max( atAp.z, 1e-12 ) ) );
 			}
-			float tb = wwSkyBandT( a.a, tSky, 1 );
-			a = vec4( wwSkyBandL( a.rgb, a.a, ap.rgb, ap.a, tSky, tb, 1 ), tb );
+			float tb = atApSkyRule >= 4 ? wwSkyBandT4( a.a, tSky, tFar ) : wwSkyBandT( a.a, tSky, 1 );
+			a = vec4( atApSkyRule >= 4 ? wwSkyBandL4( a.rgb, a.a, ap.rgb, tFar, tSky, tb ) : wwSkyBandL( a.rgb, a.a, ap.rgb, ap.a, tSky, tb, 1 ), tb );
 		} else {
 			float tr = wwApFogResidualT( tSky, a.a, atApDouble > 0.5 );
 			a = vec4( atApDouble > 0.5 ? a.rgb : wwApFogResidualL( a.rgb, a.a, tr ), tr );

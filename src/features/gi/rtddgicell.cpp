@@ -13,6 +13,7 @@
 #include "features/gi/rtddgi/rtddgi_gpu.h"
 #include "version.h"
 #include "wwswitch.h"
+#include "features/sky/atmosphere.h"	// MODULES1 round 10: the one night sky's factor (WwNightSky)
 #include "features/sky/atmomath.h"    // FIX1101A: giSkyFromPhysical
 #include "features/weather/weatherrecx.h"   // MODULES1: the ground albedo for the GI sky's -Z
 #include "gl/celllights.h"
@@ -1928,14 +1929,23 @@ static void volumeFrame( Scene * scene, Cell & c, const CellSpec * spIn, bool du
 			if ( absMode ) {
 				const float k = absMode == 1 ? WwAtmoMath::giSkyLevel( phys, T, sky.sun, sky.amb, mixed )
 				                             : WwAtmoMath::giSkyAbsolute( phys, T, sky.sun, sky.amb, mixed );
+				/* MODULES1 round 10: the one night sky's factor (atmosphere.h WwNightSky): the miss sky's five sky
+				 * faces x the same gain the drawn sky takes; the key (sky.sun) is not lifted */
+				const WwNightSky & nsk = wwAtmoNightSky();
+				if ( absMode == 2 && k > 0.0f && nsk.mode == 0 )
+					for ( int a = 0; a < 5; a++ )
+						for ( int ch = 0; ch < 3; ch++ )
+							mixed[a][ch] *= nsk.gain;
+				if ( absMode == 2 )
+					wwAtmoNightSkyGot( WwNsVolumes, k * ( nsk.mode == 0 ? nsk.gain : 1.0f ), WwAtmoMath::lum( mixed[4] ) );
 				// MODULES1: absolute -Z = a Lambertian ground under the same sun and sky, not the weather's DALC
 				const float rho = wwWeatherRecx().groundAlbedo >= 0.0f ? wwWeatherRecx().groundAlbedo : 0.15f;
 				const bool ground = absMode == 2 && k > 0.0f && !rtddgiGroundRed();
 				if ( ground )
 					WwAtmoMath::giSkyGround( sky.sun, sky.sunTo[2], rho, mixed );
 				static float saidK = -1.0f, saidG = -1.0f;
-				if ( std::fabs( k - saidK ) > 1e-5f || std::fabs( mixed[5][1] - saidG ) > 1e-6f ) {
-					saidK = k;
+				if ( std::fabs( k * nsk.gain - saidK ) > 1e-5f || std::fabs( mixed[5][1] - saidG ) > 1e-6f ) {
+					saidK = k * nsk.gain;
 					saidG = mixed[5][1];
 					say( c.tag + ( ground ? QStringLiteral( "GI sky -Z: the ground, albedo %1 x (sun + sky on +Z) = %2 %3 %4 (MODULES1)" )
 						.arg( double( rho ), 0, 'f', 3 ).arg( double( mixed[5][0] ), 0, 'f', 4 ).arg( double( mixed[5][1] ), 0, 'f', 4 )

@@ -514,11 +514,15 @@ int main( int argc, char * argv[] )
 			{ "WW_SUNPATH", "1" }, { "WW_ATMO", "ultra" }, { "WW_CELL_RT_PRESET", "ultra" }, { "WW_CELL_SSGI_QUALITY", "ultra" },
 			{ "WW_TAA2", "ultra" }, { "WW_CELL_WATER_PRESET", "ultra" }, { "WW_CELL_LAMPSHADOW", "ultra" },
 			{ "WW_CELL_AIR_FAR", "4" }, { "WW_CELL_AO_METHOD", "xegtao" }, { "WW_CELL_AO_QUALITY", "ultra" },
-			{ "WW_CLOUDVOL", "ultra" }, { "WW_CELL_AIR_GRID", "ultra" },
+			/* MODULES1 round 10 (bungo 11-11: "No volumetric clouds, the 2d clouds"): a flight starts with the Cloud Map
+			 * on and the 2D layers lit by the model (WW_CLOUDVOL low), and with the clouds' shadows. Before, WW_CLOUDMAP
+			 * was not in this list: a flight is a harness run, the Cloud Map row pinned itself Off, and the clouds
+			 * (Ultra) refused "Cloud Map off or no weather", so the record-coloured layers drew. */
+			{ "WW_CLOUDMAP", "1" }, { "WW_CLOUDVOL", "low" }, { "WW_CLOUDSHADOW", "low" }, { "WW_CELL_AIR_GRID", "ultra" },
 			// MODULES1 R6-12: the atmosphere's other rows at their SHIPPED values (a harness pinned them Off, so the
 			// Scene panel read Aerial Perspective / Sun and Sky Light / Night Sky / Sky Light in GI = Off in a flight)
 			{ "WW_ATMO_AP", "1" }, { "WW_ATMO_SUN", "full" }, { "WW_ATMO_NIGHT", "1" }, { "WW_ATMO_GI", "1" },
-			{ "WW_ATMO_BODYSIZE", "game" } };	// R6-12 b: the Sun and Moon Size row's shipped value	// part 18 audit: a harness pins clouds 0 and the grid Low otherwise
+			{ "WW_ATMO_BODYSIZE", "medium" } };	// R6-12 b: the Sun and Moon Size row's shipped value	// part 18 audit: a harness pins clouds 0 and the grid Low otherwise
 		QByteArray set, kept;
 		for ( const auto & kv : kAllOn ) {
 			const char * k = kv[0];

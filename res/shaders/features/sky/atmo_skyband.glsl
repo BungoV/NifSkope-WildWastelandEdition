@@ -43,3 +43,32 @@ vec3 wwSkyBandL( vec3 fogL, float tFog, vec3 apL, float tAp, float tSky, float t
 	vec3 hz = apL * ( 1.0 / max( 1.0 - tAp, 1e-4 ) );
 	return ( fogInf * ( 1.0 - w ) + hz * w ) * ( 1.0 - tr );
 }
+
+// MODULES1 round 10 (rule 4, shipped; bungo 11-11: "if we have no fog, the color needs to match ... always, fog or no
+// fog"): the band has no colour and no cover of its own. Its cover is the band's weight x the share of light the far
+// land under it loses to the air (1 - tFar, tFar = the transmittance of the surfaces' own fog path to the far plane),
+// and its light is that same path's in-scatter: at the land's edge the backdrop is fogged exactly as a surface at the
+// far plane is (sky x tFar + apL), above it the cover fades to none, and with no air (tFar = 1) nothing is drawn.
+// Rule 3 (the cover forced to w whatever the air) is the red WW_ATMO_AP_RED=bandfull.
+float wwSkyBandW4( float tSky, float tFar )
+{
+	return wwSkyBandW( tSky ) * clamp( 1.0 - tFar, 0.0, 1.0 );
+}
+
+float wwSkyBandT4( float tFog, float tSky, float tFar )
+{
+	float tr = clamp( tFog / max( tSky, 1e-30 ), 0.0, 1.0 );
+	return min( tr, 1.0 - wwSkyBandW4( tSky, tFar ) );
+}
+
+// the cover's light: the far path's own in-scatter over the band's share, the air's own colour over any cover beyond it
+vec3 wwSkyBandL4( vec3 fogL, float tFog, vec3 apL, float tFar, float tSky, float tr )
+{
+	if ( tr >= 1.0 )
+		return vec3( 0.0 );
+	float w4 = wwSkyBandW4( tSky, tFar );
+	float cover = 1.0 - tr;
+	vec3 fogInf = fogL * ( 1.0 / max( 1.0 - tFog, 1e-6 ) );
+	vec3 hz = apL * ( 1.0 / max( 1.0 - tFar, 1e-4 ) );
+	return hz * min( w4, cover ) + fogInf * max( cover - w4, 0.0 );
+}

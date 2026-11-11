@@ -1,3 +1,39 @@
+## MODULES1 round 10 (2026-11-11): one physical night sky, 2D clouds lit by it, a Medium moon, the horizon gap fill, far baked AO by the AO rule, cloud shadows on
+Changed, not checked in a window (no build in this round). bungo: "our physical sky is meant to be used day and night",
+"Why are you showing me vanilla sky and clouds and moon".
+- **One night sky.** The record's painted night dome is no longer in the default path. The night sky is the physical
+  sky lit from the moon, x one readable-night factor: film day-for-night shows a night scene about 2 stops under the
+  day's exposure, so the sky a full moon lights is drawn 2^-2 x the weather's Day key over its Night key brighter, and
+  the moon's phase is cancelled on the sky only (the moon's direct light keeps it). The same sky x factor feeds the
+  drawn sky, the RTXGI miss sky, the six ambient axes (master Off: they cross from the record's rows to the physical
+  sky by the night share), the saturated night air and the far fog colour (the drawn sky's own horizon colour), the
+  reflection captures and the 2D cloud layers. The drawn sky now takes the light's own unit by night, so the drawn sky
+  and the volumes' sky are one number. Telemetry: one `night sky:` line (factor, stops, the unit and level each
+  consumer got, drawn : RTXGI ratio). Live: `WW_NIGHTSKY_STOPS` (0..8, default 2). Reds: `WW_NIGHTSKY_RED=physical`
+  (no factor), `=record` (round 7's crossfade to the record's dome colours). Not covered: with the moon down, the
+  master-Off ambient axes keep the record's rows (no key, so no sky from the key).
+- **Clouds.** A flight (WW_ALL_ON) starts with the Cloud Map on and the 2D layers lit by the model
+  (`WW_CLOUDMAP=1 WW_CLOUDVOL=low`; it was `ultra` with the Cloud Map row pinned Off by the harness rule, so the
+  clouds refused and the record-coloured layers drew). By night the layers' sky share takes the same lifted sky; the
+  key share keeps the moon's direct light. Red `WW_CLOUDVOL_RED=vanillalit`: the record's cloud colours.
+- **Sun and Moon Size** gains a step and ships it: Physical / **Medium** / Game / Large. Medium draws the moon 4 deg
+  across (x7.7 of 0.52) and the sun the same share of the way to its Game size on a log scale (x2.60, 1.39 deg).
+  WW_ATMO_BODYSIZE takes `medium`; WW_ALL_ON sets it. A stored row value keeps its index (a stored Game = 1 now reads
+  Medium; a stored Large = 2 now reads Game).
+- **The horizon gap fill** (the sky band over the far land's edge, cell_volsky.frag) has no colour and no cover of
+  its own (rule 4): its cover is the band's weight x the share of light the far land under it loses to the air, and
+  its light is that same fog path's in-scatter. No fog, no band; with fog it is the backdrop fogged as a surface at the
+  far plane is. Red `WW_ATMO_AP_RED=bandfull` (rule 3: the cover forced to the band's weight whatever the air).
+- **Far baked AO** (the far rows' AO + sky stream) leaves the vertex colour and enters the one AO rule
+  (`cellAoShared`, cell_ao.glsl): the screen obscurance x the baked obscurance on the whole lit colour before the fog,
+  near and far alike. Debug keys, no menu row and no INI: `WW_LODL_AO_MAX` and `WW_LODL_SKY_MAX` (0..1, unset 1; the
+  second scales the baked sky occlusion 1 - visibility). Telemetry `far baked ao:`. Red `WW_LODL_AO_RED=albedo` (the AO
+  in the vertex colour, as before). The flat far copy and the far ground still carry their AO baked into colours.
+- **Cloud shadows.** Defaults: Cloud Shadows now start ON when no choice is saved (at the clouds' own step: Low, the
+  Cloud Map's field, for the 2D layers); this replaces "Cloud Shadows ... still ship Off" in the older Defaults line
+  below. WW_ALL_ON pins `WW_CLOUDSHADOW=low`. The status line names the field, the light and the receivers. Red
+  `WW_CLOUDSHADOW_DEFAULT_RED=1` (Off with no saved choice). A harness run still measures only what it pins.
+
 ## AIRPERF1 round 3 (2026-11-11): no shortcut fires in the free camera
 - **bungo:** "I keep entering some 'marker' placement mode accidentally, why" and "Make sure no other shortcuts
   are toggled if I am in the free cam mode (from shift + f)". Cause of the first: the cell editor's key handler ran

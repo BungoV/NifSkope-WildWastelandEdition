@@ -214,9 +214,9 @@ SceneWindow::SceneWindow( QWidget * mainWindow, std::function<void()> repaint, s
 	// MODULES1 R6-12 b: the drawn sun and moon, true size / the game's / larger (needs Physical Sky), ships Game
 	bodySizeBox = new QComboBox( tree );
 	bodySizeBox->setObjectName( QStringLiteral( "sunMoonSize" ) );
-	bodySizeBox->addItems( { tr( "Physical" ), tr( "Game" ), tr( "Large" ) } );
-	bodySizeBox->setCurrentIndex( std::clamp( wwAtmoBodySize(), 0, 2 ) );
-	bodySizeBox->setToolTip( tr( "The drawn size of the sun and the moon. Physical is the real size in the sky, Game is the game's own, Large is half again bigger. The light does not change." ) );
+	bodySizeBox->addItems( { tr( "Physical" ), tr( "Medium" ), tr( "Game" ), tr( "Large" ) } );
+	bodySizeBox->setCurrentIndex( std::clamp( wwAtmoBodySize(), 0, 3 ) );
+	bodySizeBox->setToolTip( tr( "The drawn size of the sun and the moon. Physical is the real size in the sky, Medium draws the moon 4 degrees across, Game is the game's own, Large is half again bigger. The light does not change." ) );
 	wwMatchFieldStyle( bodySizeBox );
 	row( tr( "Sun and Moon Size" ), bodySizeBox, true );
 	liveCheck( cloudsBox, "lookdevClouds", tr( "Clouds" ), wwLookdevClouds() );

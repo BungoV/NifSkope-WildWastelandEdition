@@ -1015,6 +1015,7 @@ LdLight currentLight()
 	// MODULES1 R6-12: the gameplay moon's pin moves the light too (live)
 	const QString mr = wwEnvStr( "WW_MOON_RED" ).trimmed().toLower() + QLatin1Char( '|' ) + wwEnvStr( "WW_MOON_GAME" ).trimmed()
 		+ QLatin1Char( '|' ) + wwEnvStr( "WW_NIGHTSKY_RED" ).trimmed().toLower()
+		+ QLatin1Char( '|' ) + wwEnvStr( "WW_NIGHTSKY_STOPS" ).trimmed()
 		+ QLatin1Char( '|' ) + wwEnvStr( "WW_PHYSUNITS_AXES_RED" ).trimmed();
 	if ( gen != s.gen || hour != s.hour || sun != s.sun || atmoSun != atmoKey || !( sunPath == sunKey ) || wxStamp != wx
 		|| mr != moonRed || physSky != wwPhysSkyOn() || wxOv != wwWxOvStamp() ) {
@@ -1066,6 +1067,13 @@ void physFinish( LdLight & L, float rKey, bool airKey )
 			x /= len;
 		sky = wwAtmoGiSkyAxes( n, axes, T ) && WwAtmoMath::giSkyAbsolute( axes, T, L.sun, L.dalc, out ) > 0.0f;
 	}
+	// MODULES1 round 10: the one night sky's factor on the key's scattered light (never on the key itself)
+	const WwNightSky & nsk = wwAtmoNightSky();
+	const float nsFloor = nsk.mode == 0 ? nsk.floorGain : 1.0f;
+	if ( sky && nsk.mode == 0 )
+		for ( int a = 0; a < 5; a++ )
+			for ( int c = 0; c < 3; c++ )
+				out[a][c] *= nsk.gain;
 	float d[3] = { L.discPos[0], L.discPos[1], L.discPos[2] };
 	/* MODULES1 M7: the sun's sky from the sun itself (sunBodyDir). Under the horizon: the sky of a sun just on it
 	 * (elevation 0.57 degrees) x 10^(0.4 x elevation), ~750 lux at sunset to ~3 lux at -6 (civil twilight's end) */
@@ -1116,7 +1124,7 @@ void physFinish( LdLight & L, float rKey, bool airKey )
 	for ( int c = 0; c < 3; c++ ) {
 		float m = 0.0f;
 		for ( int a = 0; a < 6; a++ )
-			m += ( L.dalc[a][c] += wwphys::kNightFloor	// MODULES1 R7: + the record's night sky: all of it on +Z, its ground bounce on -Z
+			m += ( L.dalc[a][c] += wwphys::kNightFloor * nsFloor	// MODULES1 R7: + the record's night sky: all of it on +Z, its ground bounce on -Z
 				+ ( a == up ? 1.0f : a == ( up ^ 1 ) ? skyAl : 0.5f * ( 1.0f + skyAl ) ) * L.skyGame[c] );
 		L.amb[c] = m / 6.0f;
 	}
@@ -1148,6 +1156,49 @@ void physFinish( LdLight & L, float rKey, bool airKey )
 		said = line;
 		fprintf( stderr, "%s\n", qPrintable( line ) );
 	}
+}
+
+/* MODULES1 round 10 (bungo 11-11: "our physical sky is meant to be used day and night", "Why are you showing me vanilla
+ * sky"): the light's own sky unit goes to the atmosphere (the drawn sky takes it by night, so the drawn sky and the
+ * RTXGI miss sky are one sky), and with the master Off the six ambient axes cross to the SAME physical sky x factor by
+ * the night share (they were the record's rows, tinted). The moon down (no sky from the key): the axes stay as they
+ * were. Reds WW_NIGHTSKY_RED=physical / record. */
+void nightFinish( LdLight & L, WwNightSky ns, bool phys )
+{
+	auto lumOf = []( const float v[3] ) { return 0.2126f * v[0] + 0.7152f * v[1] + 0.0722f * v[2]; };
+	float n[3] = { L.sunDir[0], L.sunDir[1], L.sunDir[2] };
+	const float len = std::sqrt( n[0] * n[0] + n[1] * n[1] + n[2] * n[2] );
+	float axes[6][3], T[3] = { 0.0f, 0.0f, 0.0f };
+	bool have = false;
+	if ( len > 0.0f && ns.share > 0.0f ) {
+		for ( float & x : n )
+			x /= len;
+		have = wwAtmoGiSkyAxes( n, axes, T );
+	}
+	const float lt = have ? lumOf( T ) : 0.0f;
+	ns.lightK = lt > 1e-9f ? lumOf( L.sun ) / lt : 0.0f;
+	wwAtmoSetNightSky( ns );
+	const bool axRed = wwPhysAxesRed();
+	const int up = axRed ? 4 : 5;
+	if ( !phys && ns.mode == 0 && have ) {
+		float out[6][3];
+		if ( WwAtmoMath::giSkyAbsolute( axes, T, L.sun, L.dalc, out ) > 0.0f ) {
+			for ( int a = 0; a < 5; a++ )
+				for ( int c = 0; c < 3; c++ )
+					out[a][c] *= ns.gain;
+			WwAtmoMath::giSkyGround( L.sun, n[2], wwWeatherRecx().groundAlbedo >= 0.0f ? wwWeatherRecx().groundAlbedo : 0.15f, out );
+			for ( int c = 0; c < 3; c++ ) {
+				float m = 0.0f;
+				for ( int a = 0; a < 6; a++ ) {	// out is by the face; the readers take the weather's order
+					float & d = L.dalc[axRed ? a : ( a ^ 1 )][c];
+					d += ( out[a][c] - d ) * ns.share;
+					m += d;
+				}
+				L.amb[c] += ( m / 6.0f - L.amb[c] ) * ns.share;
+			}
+		}
+	}
+	wwAtmoNightSkyGot( WwNsAmbient, ns.lightK * ( ns.mode == 0 ? ns.gain : 1.0f ), lumOf( L.dalc[up] ) );
 }
 
 LdLight computeLight()
@@ -1299,8 +1350,40 @@ LdLight computeLight()
 	 * Master On: the record's sky rows x Sky Scale x the key's unit x the night share are ADDED to the drawn sky
 	 * (atmo_sky.frag atRecNight.y) and to the ambient (physFinish). Master Off: the drawn sky crossfades to the record's
 	 * dome colours by the night share (atRecNight.x), as the game draws them. Red WW_NIGHTSKY_RED=physical: neither. */
-	L.nightW = ( wwNightSkyRed() || !s.haveWeather ) ? 0.0f : std::clamp( wE, 0.0f, 1.0f );
-	if ( s.haveWeather ) {
+	/* MODULES1 round 10: no record dome in the default path. ONE night sky, the physical one, x one readable-night
+	 * factor: film's day-for-night shows a night scene about 2 stops under the day's exposure (notes: r10 BARS.md), so
+	 * the sky a full moon lights is drawn 2^-stops x the weather's Day key over its Night key brighter, and the moon's
+	 * phase share is cancelled on the SKY (the key keeps it: a thin moon gives darker ground under the same readable
+	 * sky). The floor (airglow) takes the same rule in the moon's own unit. The record crossfade above is the red
+	 * WW_NIGHTSKY_RED=record; =physical is the sky with no factor. WW_NIGHTSKY_STOPS (live, default 2). */
+	const QString nsWord = wwEnvStr( "WW_NIGHTSKY_RED" ).trimmed().toLower();
+	const int nsMode = nsWord == QLatin1StringView( "physical" ) ? 1 : nsWord == QLatin1StringView( "record" ) ? 2 : 0;
+	L.nightW = ( nsMode != 2 || !s.haveWeather ) ? 0.0f : std::clamp( wE, 0.0f, 1.0f );
+	WwNightSky ns;
+	ns.mode = nsMode;
+	ns.share = std::clamp( wE, 0.0f, 1.0f );
+	{
+		bool ok = false;
+		const float st = wwEnvStr( "WW_NIGHTSKY_STOPS" ).trimmed().toFloat( &ok );
+		ns.stops = ok ? std::clamp( st, 0.0f, 8.0f ) : 2.0f;
+		const float vd = weatherKeyOf( WwTodDay ), vn = weatherKeyOf( WwTodNight );
+		// the night key over the day key as the screen shows them (master On: through the moon's gameplay factor)
+		const float onScreen = phys ? ( wwphys::kMoonToaLux * moonGame / wwphys::kSunToaLux ) * ( wwphys::kKeyDaylightCdm2 / wwphys::kAdaptFloorCdm2 )
+			: ( vd > 1e-9f ? vn / vd : 0.0f );
+		const float full = onScreen > 1e-9f ? std::clamp( std::exp2( -ns.stops ) / onScreen, 1.0f, 4096.0f ) : 1.0f;
+		ns.phase = !wwAtmoNightOn() ? 1.0f : std::clamp( wwAtmoDiscs() ? wwAtmoMoonFactorDeg( moonAlphaNow( s ) )
+			: wwAtmoMoonFactor( wwMoonPhase( s.gameDay, s.clim.tnam[5] ) ), 0.02f, 1.0f );
+		ns.factor = std::clamp( full / ns.phase, 1.0f, 4096.0f );
+		// the floor is in the sun's unit: x the moon's unit over the sun's (master Off: the record's keys against the real ones)
+		const float unit = phys ? moonGame : onScreen * wwphys::kSunToaLux / wwphys::kMoonToaLux;
+		const float floorFull = std::clamp( full * unit, 1.0f, 1.0e7f );
+		if ( nsMode == 0 && s.haveWeather ) {
+			ns.gain = 1.0f + ( ns.factor - 1.0f ) * ns.share;
+			ns.floorGain = 1.0f + ( floorFull - 1.0f ) * ns.share;
+		}
+	}
+	wwAtmoSetNightSky( ns );	// physFinish reads the gain; nightFinish adds the light's unit
+	if ( s.haveWeather && nsMode != 0 ) {
 		const int rows3[3] = { WwRowSkyUpper, WwRowSkyLower, WwRowHorizon };
 		float m3[3] = { 0.0f, 0.0f, 0.0f };
 		for ( int r3 : rows3 ) {
@@ -1373,6 +1456,7 @@ LdLight computeLight()
 		}
 		if ( phys )
 			physFinish( L, rKey, true );
+		nightFinish( L, ns, phys );
 		return L;
 	}
 	bool airKey = false;
@@ -1394,6 +1478,7 @@ LdLight computeLight()
 		L.sun[c] *= f;
 	if ( phys )
 		physFinish( L, rKey, airKey );
+	nightFinish( L, ns, phys );
 	return L;
 }
 
@@ -1640,24 +1725,35 @@ void wwLookdevFogUniforms( Scene * scene )
 	prog->uni4f( "fogSunColour", FloatVector4( L.sun[0], L.sun[1], L.sun[2], s.gmst.dirFogPower ) );
 	prog->uni4f( "fogProbe", FloatVector4( s.fogProbe[0], s.fogProbe[1], s.fogProbe[2], 0.0f ) );
 	{	// MODULES1 R7 night sky d
+		/* MODULES1 round 10: in the default path the saturated air's night colour is the drawn (lifted) sky's own
+		 * colour just above the horizon (wwAtmoHorizon), so thick far air, the horizon band and the sky are one
+		 * colour; no record colour, no dome. The record's colours stay under the red WW_NIGHTSKY_RED=record. */
 		const bool phys = wwPhysSkyOn(), nRed = wwNightAirRed();
-		const float n = nRed ? 0.0f : L.nightW;
+		const WwNightSky & nsk = wwAtmoNightSky();
+		const float n = nRed ? 0.0f : nsk.mode == 0 ? nsk.share : L.nightW;
 		const WwAtmoFrame & af = wwAtmoFrame();
 		const float dome = ( nRed || !af.valid ) ? 0.0f : af.recNight[0];	// the dome's share as drawn
 		const float mF = fu * ( horizon ? gNear : 1.0f );
-		float c[3];
+		float c[3], hzN[3] = { 0.0f, 0.0f, 0.0f };
+		const bool hzOk = nsk.mode == 0 && wwAtmoHorizon( hzN );
 		for ( int k = 0; k < 3; k++ )
-			c[k] = phys ? L.amb[k] : 0.5f * ( f.K[3][k] + f.K[4][k] ) * mF;
+			c[k] = hzOk ? hzN[k] : ( phys || nsk.mode == 0 ) ? L.amb[k] : 0.5f * ( f.K[3][k] + f.K[4][k] ) * mF;
+		{
+			const float lc = ( 0.2126f * c[0] + 0.7152f * c[1] + 0.0722f * c[2] ) * n;
+			wwAtmoNightSkyGot( WwNsAir, nsk.lightK * nsk.gain, lc );
+			wwAtmoNightSkyGot( WwNsFar, nsk.lightK * nsk.gain, hzOk ? 0.2126f * hzN[0] + 0.7152f * hzN[1] + 0.0722f * hzN[2] : 0.0f );
+		}
 		prog->uni4f( "fogNight", FloatVector4( c[0] * n, c[1] * n, c[2] * n, n ) );
 		if ( prog->uniLocation( "volSkyDome" ) >= 0 )
 			prog->uni1f( "volSkyDome", dome );
 		static int saidKey = -1;	// the line is built only when the state moves (this runs per fogged program)
-		const int key = nRed ? 1 : n <= 0.0f ? 2 : ( phys ? 3 : 5 ) + ( n >= 0.999f ? 1 : 0 ) + ( dome > 0.0f ? 4 : 0 );
+		const int key = nRed ? 1 : n <= 0.0f ? 2 : ( phys ? 3 : 5 ) + ( n >= 0.999f ? 1 : 0 ) + ( dome > 0.0f ? 4 : 0 ) + ( hzOk ? 16 : nsk.mode == 0 ? 32 : 0 );
 		const QString line = key == saidKey ? QString() : nRed ? QStringLiteral( "night air: RED WW_NIGHTAIR_RED=1: the air's own light alone, the record's dome under the sky's residual and band" )
 			: n <= 0.0f ? QStringLiteral( "night air: off (night share 0)" )
 			: QStringLiteral( "night air: master %1: saturated air = %2 %3 %4 %5 x night share %6; a ray's air holds at least that x (1 - T) (sky cover and surfaces); the record's dome takes the air's own T over share %7 of the drawn sky (red WW_NIGHTAIR_RED=1)" )
 				.arg( phys ? QStringLiteral( "On" ) : QStringLiteral( "Off" ) )
-				.arg( phys ? QStringLiteral( "the sky's mean with the record's level (ambient axes, albedo 1)" ) : QStringLiteral( "the record's far fog colour" ) )
+				.arg( hzOk ? QStringLiteral( "the drawn night sky's own horizon colour (round 10)" ) : nsk.mode == 0 ? QStringLiteral( "the ambient axes' mean (no sky drawn yet)" )
+					: phys ? QStringLiteral( "the sky's mean with the record's level (ambient axes, albedo 1)" ) : QStringLiteral( "the record's far fog colour" ) )
 				.arg( double( c[0] ), 0, 'g', 3 ).arg( double( c[1] ), 0, 'g', 3 ).arg( double( c[2] ), 0, 'g', 3 )
 				.arg( double( n ), 0, 'f', 2 ).arg( double( dome ), 0, 'f', 2 );
 		if ( key != saidKey ) {

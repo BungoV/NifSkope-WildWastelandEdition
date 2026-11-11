@@ -464,6 +464,29 @@ bool draw( NifSkopeOpenGLContext * r, Scene * scene, const CellMeshInst & d, Nif
 		r->fn->glBindTexture( GL_TEXTURE_BUFFER, k->streamTex );
 		r->fn->glActiveTexture( GLenum( was ) );
 		prog->uni1i( "farStreamOn", 1 );
+		{	/* MODULES1 round 10: the far rows' baked AO enters the one AO rule (cell_ao.glsl cellAoShared), scaled by a
+			 * live maximum; the baked sky occlusion ( 1 - visibility ) takes its own. Debug keys only (no menu row, no
+			 * INI): WW_LODL_AO_MAX, WW_LODL_SKY_MAX, 0..1, unset = 1. Red WW_LODL_AO_RED=albedo: the AO in the vertex
+			 * colour (the diffuse light only), as before. */
+			auto key01 = []( const char * name ) {
+				bool ok = false;
+				const float v = wwEnvStr( name ).trimmed().toFloat( &ok );
+				return ok ? std::clamp( v, 0.0f, 1.0f ) : 1.0f;
+			};
+			WW_SWITCH_STATIC( float, aoMax, key01( "WW_LODL_AO_MAX" ) );
+			WW_SWITCH_STATIC( float, skyMax, key01( "WW_LODL_SKY_MAX" ) );
+			WW_SWITCH_STATIC( bool, albedo, wwEnv( "WW_LODL_AO_RED" ).trimmed() == "albedo" );
+			prog->uni3f( "farBakeK", aoMax, skyMax, albedo ? 1.0f : 0.0f );
+			static float said[3] = { -1.0f, -1.0f, -1.0f };
+			if ( said[0] != aoMax || said[1] != skyMax || said[2] != ( albedo ? 1.0f : 0.0f ) ) {
+				said[0] = aoMax;
+				said[1] = skyMax;
+				said[2] = albedo ? 1.0f : 0.0f;
+				std::fprintf( stderr, "far baked ao: max %.3f (WW_LODL_AO_MAX), sky occlusion max %.3f (WW_LODL_SKY_MAX), rule %s; "
+					"the far rows with the AO + sky stream (the flat copy and the far ground keep the AO baked in their colours)\n",
+					double( aoMax ), double( skyMax ), albedo ? "RED albedo (the vertex colour)" : "shared (cell_ao.glsl cellAoShared: the whole lit colour)" );
+			}
+		}
 	}
 	submit( r, *cp, *k, cmds );
 	if ( k->streamTex )

@@ -68,7 +68,7 @@ struct CsState
 CsState & cs()
 {
 	static CsState s;
-	if ( !s.init || wwSwitchMovedFor( s.liveGen, { "WW_CLOUDSHADOW" } ) ) {
+	if ( !s.init || wwSwitchMovedFor( s.liveGen, { "WW_CLOUDSHADOW", "WW_CLOUDVOL" } ) ) {
 		s.init = true;
 		s.liveGen = wwSwitchGen();
 		s.pinned = false;
@@ -84,7 +84,12 @@ CsState & cs()
 			s.tier = 0;	// a harness measures what it pins
 			s.pinned = true;
 		} else {
-			s.tier = std::clamp( QSettings().value( QLatin1StringView( kKey ), 0 ).toInt(), 0, 4 );
+			/* MODULES1 round 10 (bungo 11-11: "Cloud shadows always need to be on"): with no saved choice and no pin
+			 * the row starts at the clouds' own step (Volume Clouds Low or Off, the 2D layers: Low, the Cloud Map's
+			 * field; Medium and up: the same step). It was Off: red WW_CLOUDSHADOW_DEFAULT_RED=1. A saved choice stays. */
+			const int def = wwEnvStr( "WW_CLOUDSHADOW_DEFAULT_RED" ).trimmed() == QLatin1StringView( "1" ) ? 0
+				: std::clamp( wwCloudVolTier(), 1, 4 );
+			s.tier = std::clamp( QSettings().value( QLatin1StringView( kKey ), def ).toInt(), 0, 4 );
 		}
 	}
 	return s;
@@ -549,13 +554,15 @@ void wwCloudShadowPass( Scene * scene )
 	g.far[0] = float( M::bandFarT( cov, thick, dens, cb.s[2], kSigma ) );
 	g.far[1] = 0.1f;
 	g.far[2] = pr.tail ? 1.0f : 0.0f;
-	status( s, QStringLiteral( "on tier=%1 mode=%2 size=%3 side_km=%4 texel_m=%5 sun=%6,%7,%8 far_t=%9 gi=%10 mem_mb=%11%12%13" )
+	status( s, QStringLiteral( "on tier=%1 mode=%2 size=%3 side_km=%4 texel_m=%5 sun=%6,%7,%8 far_t=%9 gi=%10 mem_mb=%11%12%13 field=%14 light=key(sun_by_day,moon_by_night) receivers=terrain,objects,far_lod,water,effects,air" )
 		.arg( QLatin1StringView( tierName( s.tier ) ) ).arg( mode == 1 ? QStringLiteral( "volume" ) : QStringLiteral( "map" ) )
 		.arg( n ).arg( g.fit.extentKm, 0, 'f', 1 ).arg( g.fit.texelKm() * 1000.0, 0, 'f', 1 )
 		.arg( cb.s[0], 0, 'f', 3 ).arg( cb.s[1], 0, 'f', 3 ).arg( cb.s[2], 0, 'f', 3 ).arg( double( g.far[0] ), 0, 'f', 3 )
 		.arg( double( s.gi.load() ), 0, 'f', 4 ).arg( double( n ) * n * 16.0 / ( 1024.0 * 1024.0 ), 0, 'f', 1 )
 		.arg( redV ? QStringLiteral( " red=vertical" ) : QString() )
-		.arg( red( "fullmove" ) ? QStringLiteral( " red=fullmove" ) : QStringLiteral( " sliced=%1" ).arg( g.swaps ) ) );
+		.arg( red( "fullmove" ) ? QStringLiteral( " red=fullmove" ) : QStringLiteral( " sliced=%1" ).arg( g.swaps ) )
+		// MODULES1 round 10: the field the map was built from (the 2D layers and their shadows are one field)
+		.arg( mode == 1 ? QStringLiteral( "cloud_density" ) : QStringLiteral( "cloud_map_2d_layers" ) ) );
 }
 
 void wwCloudShadowUniforms( Scene * scene, NifSkopeOpenGLContext::Program * prog, bool volume, float airAmb )

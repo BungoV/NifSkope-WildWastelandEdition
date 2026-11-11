@@ -50,6 +50,7 @@ struct WwAtmoFrame
 	bool valid = false;
 	float sunW[3] = { 0, 0, 1 }, moonW[3] = { 0, 0, 1 };	//!< world, TO the light, normalised
 	float sunK = 0.0f, moonK = 0.0f;	//!< scene units per unit LUT radiance (moonK 0 = the moon is down)
+	float moonKey = 0.0f;	//!< MODULES1 round 10: moonK without the night sky's factor (the moon's direct light is not lifted)
 	float camR = 0.0f;	//!< km from the planet's centre, as the sky-view tables were drawn
 	float haze[3] = { 0.0f, 1.0f, 0.0f };
 	unsigned trans = 0, sunView = 0, moonView = 0;
@@ -63,6 +64,28 @@ struct WwAtmoFrame
 const WwAtmoFrame & wwAtmoFrame();
 //! MODULES1 M8: the drawn sky's colour just above the horizon, scene units (false with no sky drawn)
 bool wwAtmoHorizon( float out[3] );
+/*! MODULES1 round 10 (bungo 11-11: "our physical sky is meant to be used day and night"): ONE night sky, the physical
+ *  one, shown brighter by one readable-night factor. The stage (lookdevstage.cpp computeLight) sets it per light; every
+ *  reader of the sky's scattered light takes the same gain: the drawn sky and the probes' capture (wwAtmoDrawSky), the
+ *  RTXGI miss sky (rtddgicell.cpp), the ambient axes, the night air and the far horizon (lookdevstage.cpp), the 2D cloud
+ *  layers (cloudvol.cpp). The moon's direct light is never lifted. mode 0 = on, 1 = the red WW_NIGHTSKY_RED=physical
+ *  (gain 1), 2 = the red WW_NIGHTSKY_RED=record (gain 1 + the record dome's crossfade, round 7). */
+struct WwNightSky
+{
+	int mode = 1;
+	float gain = 1.0f;	//!< on the moon's scattered light: 1 + (factor - 1) x share
+	float floorGain = 1.0f;	//!< on the night floor (airglow): the same rule in the moon's own unit
+	float share = 0.0f;	//!< the night's share of the light, 0 by day
+	float stops = 2.0f;	//!< WW_NIGHTSKY_STOPS: stops under the weather's Day key
+	float factor = 1.0f;	//!< the full factor at night share 1
+	float lightK = 0.0f;	//!< the light's own unit (luminance of the key / the air's transmittance toward it), 0 = unknown
+	float phase = 1.0f;	//!< the moon's phase share the factor cancels
+};
+void wwAtmoSetNightSky( const WwNightSky & n );
+const WwNightSky & wwAtmoNightSky();
+enum { WwNsDrawn = 0, WwNsVolumes, WwNsAmbient, WwNsAir, WwNsProbes, WwNsFar, WwNsClouds, WwNsCount };
+//! a consumer reports the unit (scene units per unit sky) and the level it took; prints the one `night sky:` line on a change
+void wwAtmoNightSkyGot( int who, float unit, float level );
 //! SHAFTS1b: where the last sky's haze rung came from: "recx", "clearday" (a clear weather's aerosol) or "record"
 const char * wwAtmoHazeSource();
 
@@ -155,8 +178,10 @@ bool wwAtmoGiPinned();
 bool wwAtmoGiActive();	//!< the row on and Physical Sky on: the capture takes the physical sky
 bool wwAtmoGiRedDome();
 bool wwAtmoGiRedCamZ();	//!< SKY3 red: the capture from the view camera's height, not the probes'
-/*! MODULES1 R6-12 b: the Sun and Moon Size row, 0 Physical (the true angular sizes) / 1 Game (the record's own
- *  discs) / 2 Large (Game x 1.5); pin WW_ATMO_BODYSIZE; ships Game. The drawn disc and its glare only: the light,
+/*! MODULES1 R6-12 b: the Sun and Moon Size row, 0 Physical (the true angular sizes) / 1 Medium (round 10: the
+ *  moon 4 degrees across, the sun the same share of the way to its Game size) / 2 Game (the record's own discs) /
+ *  3 Large (Game x 1.5); pin WW_ATMO_BODYSIZE (physical, medium, game, large or 0..3); ships Medium. A value stored
+ *  before round 10 reads one step smaller (old Game = Medium, old Large = Game). The drawn disc and its glare only: the light,
  *  the shadows' penumbra and the sky never read it. */
 int wwAtmoBodySize();
 void wwAtmoSetBodySize( int v );	//!< refused while WW_ATMO_BODYSIZE pins it
