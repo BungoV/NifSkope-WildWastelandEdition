@@ -8454,14 +8454,29 @@ static void cellChunkParticles( NifModel * nif, CellChunk & c, CellBlockSource &
 {
 	c.pfxDone = true;
 	QHash<QString, std::shared_ptr<NifModel>> * cache = src.pfxModels();
-	if ( c.pfx.empty() || !cache || !wwCellParticlesOn() )
+	/* FARWATER1 late item 5 (bungo b71: the ground fog gone after a goto jump, 5 systems in 25 cells): one line per
+	 * attach: what the cell placed, copied and refused, and the stream's cap left after it */
+	QString why;
+	int pfxUnread = 0, pfxEmpty = 0, pfxCapped = 0;
+	const auto say = [&]( const char * stop ) {
+		std::fprintf( stderr, "cell stream particles: %s: %d systems placed (refs with a particle model), %d copied, refused %d "
+			"(model unread or another version) + %d (the copy wrote nothing%s%s) + %d (over the cap); cap left %d of "
+			"WW_CELL_PARTICLES_MAX%s\n", qPrintable( nif->get<QString>( iCell, "Name" ) ), int( c.pfx.size() ), c.pfxCopies,
+			pfxUnread, pfxEmpty, why.isEmpty() ? "" : ": ", qPrintable( why ), pfxCapped, src.pfxRoom() - c.pfxCopies, stop );
+	};
+	if ( c.pfx.empty() || !cache || !wwCellParticlesOn() ) {
+		say( c.pfx.empty() ? "" : !cache ? "; no model cache" : "; the particles row is off" );
 		return;
+	}
 	QVector<qint32> written;	// lane LIVESET4: taken from the stream's pool (it records them for the cell)
 	QPersistentModelIndex iPfx;
-	QString why;
+	int pfxAt = 0;
 	for ( const CellChunk::Pfx & p : c.pfx ) {
-		if ( c.pfxCopies >= src.pfxRoom() )
+		if ( c.pfxCopies >= src.pfxRoom() ) {
+			pfxCapped = int( c.pfx.size() ) - pfxAt;
 			break;
+		}
+		pfxAt++;
 		const QString key = p.model.toLower();
 		auto it = cache->find( key );
 		if ( it == cache->end() ) {
@@ -8478,8 +8493,10 @@ static void cellChunkParticles( NifModel * nif, CellChunk & c, CellBlockSource &
 				m.reset();
 			it = cache->insert( key, m );
 		}
-		if ( !it.value() )
+		if ( !it.value() ) {
+			pfxUnread++;
 			continue;
+		}
 		if ( !iPfx.isValid() ) {
 			QModelIndex iP = src.take( nif, QStringLiteral( "NiNode" ) );
 			if ( !iP.isValid() )
@@ -8493,9 +8510,12 @@ static void cellChunkParticles( NifModel * nif, CellChunk & c, CellBlockSource &
 		}
 		if ( cellCopyParticleBranch( nif, QModelIndex( iPfx ), *it.value(), p.at, p.rot, p.scale, &why, nullptr, &src, &written ) > 0 )
 			c.pfxCopies++;
+		else
+			pfxEmpty++;
 	}
 	for ( const qint32 b : written )
 		nif->updateBlockLinks( b );
+	say( "" );
 }
 
 // lane CELLSTREAM1: the cell's buckets written under its node, as the open writes them, a slice at a time

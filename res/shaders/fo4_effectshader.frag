@@ -596,6 +596,9 @@ void main()
 			}
 #ifdef WW_FX_AMBSHARE
 			if ( fxAirCard != 0 && !fxAdditive && ( fxLocalRed & 4 ) == 0 ) {	// round 9: a slab of air (vpLit's thin share alone)
+#ifndef WW_FX_DECALLIT
+				vpAirCardA = ( fxLocalRed & 8 ) == 0 ? clamp( aThick, 0.0, 1.0 ) : 0.0;	// FARWATER1 late item 4: lamps' multiple scatter
+#endif
 				aThick = 0.0;
 				fxLocalGi = vec3( 0.0 );
 			}

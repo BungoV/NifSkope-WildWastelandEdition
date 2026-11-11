@@ -27,6 +27,21 @@ uniform int fogRed;		// gates only: 1 maxclamp, 2 noescape, 4 height0; 8 the air
  * (L, T) holds at least that x (1 - T): the sky's cover (cell_volsky.frag) and the surfaces (wwFog) alike, so the far
  * land and the sky behind it end at one colour. */
 uniform vec4 fogNight;
+/* FARWATER1 late item 3 (bungo b71, night: grey haze reading brown between a blue sky and blue water): 1 = the air's light
+ * at night takes the night sky's own tint (fogNight's chroma at the air's own luminance), weighted by the night share
+ * fogNight.a, so twilight blends into it. Red WW_NIGHTAIR_RED=neutral (live): 0, the neutral lobes' grey as before. */
+uniform float fogNightHue;
+
+vec3 wwAirNightHue( vec3 L )
+{
+	if ( fogNightHue <= 0.0 || fogNight.a <= 0.0 )
+		return L;
+	const vec3 kY = vec3( 0.2126, 0.7152, 0.0722 );
+	float yn = dot( fogNight.rgb, kY );
+	if ( yn <= 1e-12 )
+		return L;
+	return mix( L, dot( max( L, vec3( 0.0 ) ), kY ) * fogNight.rgb / yn, clamp( fogNight.a * fogNightHue, 0.0, 1.0 ) );
+}
 
 /* lane SKYA (ATMO2): the physical sky's aerial perspective (src/features/sky/atmosphere.h, Hillaire 2020 sec. 5.4). atApTex
  * holds per froxel the light the air sends toward the eye from the camera to slice k (rgb, the sky's scene units)
@@ -92,6 +107,22 @@ uniform sampler3D volTex;
 uniform vec4 volRect;		// the viewport's origin, 1 / its size
 uniform sampler2D volTile;	// the air pass's stage 0: per froxel column the farthest, nearest opaque ray distance (game units)
 uniform int volFarClamp;	// 1: the lookup clamped to its column's farthest (red nofarclamp, and the programs without it: 0)
+/* FARWATER1 round 2: a draw that is never in the obscurance pass's depth (the water) sets this before wwFog: the column's
+ * farthest opaque surface is a hill behind it or nothing, so the clamp cut the sea's air to the hill's (light flat-topped
+ * blocks where far hills meet the sea). Red WW_ENDLESS_SEA_RED=air: clamped as before. */
+bool wwAirFree = false;
+
+/* FARWATER1 round 2: the endless sea is curved (endlesssea.cpp: z = sea - r^2 / 2R) while the air's height frame is flat;
+ * its far rows sat up to ~19700 u under the frame's ground and took a wrong, deep blue air. The point as the flat frame
+ * sees it: lifted by g^2 / 2R (g its horizontal world distance), so it reads the air at its height above the ground, as
+ * the far land at the same distance does. Also the sky band's far-plane point while the sea is drawn (cell_volsky.frag). */
+vec3 wwAirFlatPos( vec3 posView )
+{
+	float up2 = max( dot( fogView.xyz, fogView.xyz ), 1e-12 );
+	float h = dot( fogView.xyz, posView );
+	float g2 = max( dot( posView, posView ) * up2 - h * h, 0.0 );	// |fogView.xyz| = view -> world, h is world
+	return posView + fogView.xyz * ( g2 / ( 2.0 * 6371000.0 * 70.0 ) / up2 );
+}
 uniform vec4 volSlices;		// near, ln(far / near), slices, 1 = applied (0 under the red "off": the game's fog drawn)
 uniform int volProbe;		// gates only: 1 the light term L alone, raw; 2 the transmittance T, grey; 3 the sun's T to the surface
 uniform int volFogBlend;	// test only (WW_CELL_VOLAIR_FOGBLEND=1, option B): the game's fog drawn over the lit air
@@ -561,7 +592,7 @@ bool wwVolAirNearHead( float d, vec2 uv, out vec4 v, out vec3 J, out float far )
 vec4 wwVolAirAtUv( vec3 posView, vec2 uv )	// lane VOLPART1: uv = the column (a particle's probe: its centre's)
 {
 	float d = length( posView ) * fogDistScale;
-	if ( volFarClamp != 0 )
+	if ( volFarClamp != 0 && !wwAirFree )
 		d = min( d, texture( volTile, uv ).r );
 	bool farGrid = volFar.w > 0.5;
 	vec4 v;
@@ -600,7 +631,7 @@ vec4 wwVolAirAtUv( vec3 posView, vec2 uv )	// lane VOLPART1: uv = the column (a 
 	/* 10-16: no farther than the column's farthest opaque surface (the obscurance pass's depth). At a thin sliver's
 	 * edge the interpolated position can lie far past the depth the same fragment writes (a trim at 596 shaded as 763):
 	 * that read the froxels the depth skip had left empty, and an air no surface there sits behind. */
-	if ( volFarClamp != 0 )
+	if ( volFarClamp != 0 && !wwAirFree )
 		d = min( d, texture( volTile, uv ).r );
 	if ( volFar.w > 0.5 )
 		return wwVolAirAtFar( d, uv, posView );
@@ -884,11 +915,11 @@ vec3 wwFog( vec3 preFog, vec3 posView )
 			float tr = wwApFogResidualT( ap.a, a.a, dbl );
 			vec3 lr = dbl ? a.rgb : wwApFogResidualL( a.rgb, a.a, tr );
 			if ( fogNight.a > 0.0 )	// R7 night sky d: the two airs' light together (ap.rgb x tr + lr), their T ap.a x tr
-				lr = max( lr, fogNight.rgb * ( 1.0 - ap.a * tr ) - ap.rgb * tr );
+				lr = max( wwAirNightHue( lr ), fogNight.rgb * ( 1.0 - ap.a * tr ) - ap.rgb * tr );
 			return preFog * tr + lr;
 		}
 		if ( fogNight.a > 0.0 )
-			a.rgb = max( a.rgb, fogNight.rgb * ( 1.0 - a.a ) );
+			a.rgb = max( wwAirNightHue( a.rgb ), fogNight.rgb * ( 1.0 - a.a ) );
 		vec3 lit = preFog * a.a + a.rgb;
 		if ( volFogBlend == 1 )
 			return wwFogBase( lit, posView, 1.0, false );

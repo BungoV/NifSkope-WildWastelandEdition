@@ -45,6 +45,8 @@ struct FxState
 	QString dump;
 };
 
+QString g_fxDumpDone;	// FARWATER1 late item 4: the dump file last written (a live set of WW_CELL_FXLIT_DUMP writes again)
+
 FxState & st()
 {
 	static FxState * s = nullptr;
@@ -215,6 +217,7 @@ void wwCellFxLitPick( const void * nif )
 				dark++;
 		}
 		QString three;
+		const bool thinLampsRed = wwEnvStr( "WW_CELL_FXLOCAL_RED" ).split( ',' ).contains( QStringLiteral( "thinlamps" ) );
 		float probeAt[3][3] = {};
 		int probeN = 0;
 		{
@@ -236,6 +239,10 @@ void wwCellFxLitPick( const void * nif )
 				three += QStringLiteral( ", as a slab of air %1,%2,%3 (a lump's surface share took up to %4,%5,%6)" )
 					.arg( double( 0.25f * c.rgb[0] ), 0, 'g', 3 ).arg( double( 0.25f * c.rgb[1] ), 0, 'g', 3 ).arg( double( 0.25f * c.rgb[2] ), 0, 'g', 3 )
 					.arg( double( c.rgb[0] ), 0, 'g', 3 ).arg( double( c.rgb[1] ), 0, 'g', 3 ).arg( double( c.rgb[2] ), 0, 'g', 3 );
+				// FARWATER1 late item 4: an opaque card's lamps as the plume's multiple scatter (diffuse, 1/2 at N.L 0)
+				three += thinLampsRed ? QStringLiteral( ", lamps thin only (RED WW_CELL_FXLOCAL_RED=thinlamps)" )
+					: QStringLiteral( ", an opaque card up to %1,%2,%3 (multiple scatter)" ).arg( double( 0.5f * c.rgb[0] ), 0, 'g', 3 )
+						.arg( double( 0.5f * c.rgb[1] ), 0, 'g', 3 ).arg( double( 0.5f * c.rgb[2] ), 0, 'g', 3 );
 				// MODULES1 10b-3: the card's sky share beside the air's at the same point (the env strata's read-back)
 				three += QStringLiteral( "; " ) + wwVolAirEnvProbeSay( probeN );
 				for ( int k = 0; k < 3; k++ )
@@ -258,6 +265,7 @@ void wwCellFxLitPick( const void * nif )
 	}
 	if ( s.dump.isEmpty() )
 		return;
+	g_fxDumpDone = s.dump;
 	QFile f( s.dump );
 	if ( !f.open( QIODevice::WriteOnly | QIODevice::Text ) )
 		return;
@@ -274,7 +282,25 @@ void wwCellFxLitPick( const void * nif )
 			const WwCellLight & l = L->lights[m.light[k]];
 			o << " " << m.light[k] << ":" << l.pos[0] << "," << l.pos[1] << "," << l.pos[2];
 		}
-		o << " model " << m.model << "\n";
+		// FARWATER1 late item 4: the lights of the full list that reach the centre, and the nearest one
+		int reach = 0, nearI = -1;
+		float nearD = 1e30f;
+		for ( int j = 0; j < L->lights.size(); j++ ) {
+			const float d = dist3( L->lights[j].pos, m.center );
+			if ( d < L->lights[j].radius )
+				reach++;
+			if ( d < nearD ) {
+				nearD = d;
+				nearI = j;
+			}
+		}
+		o << " model " << m.model << " reach " << reach;
+		if ( nearI >= 0 ) {
+			const WwCellLight & l = L->lights[nearI];
+			o << " nearest " << nearI << ":" << l.pos[0] << "," << l.pos[1] << "," << l.pos[2] << " d " << nearD << " radius "
+			  << l.radius << " colour " << l.color[0] << "," << l.color[1] << "," << l.color[2] << " ref " << QString::number( l.ref, 16 );
+		}
+		o << "\n";
 	}
 }
 
@@ -299,6 +325,8 @@ void wwCellFxLitUniforms( Scene * scene, int block )
 	NifSkopeOpenGLContext::Program * prog = scene->renderer->getCurrentProgram();
 	if ( !prog || prog->uniLocation( "fxLitMode" ) < 0 )
 		return;
+	if ( !st().dump.isEmpty() && st().dump != g_fxDumpDone && wwCellLightsWanted( scene ) )
+		wwCellFxLitPick( scene->nifModel );	// FARWATER1 late item 4: a live set of WW_CELL_FXLIT_DUMP writes it now
 	int serial = -1;
 	const WwFxLitModel * m = wwCellLightsWanted( scene ) ? wwCellFxLitFor( scene->nifModel, block, &serial ) : nullptr;
 	if ( !m ) {

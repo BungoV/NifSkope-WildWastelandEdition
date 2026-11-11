@@ -303,10 +303,10 @@ int wwCellPassRed();
 const WwCellGi * wwCellGiFor( const void * nif );
 //! lane LIGHTPHYS4: moves on each wwCellGiPublish for the document (0: none yet)
 int wwCellGiVersion( const void * nif );
-//! the GI row (ships off); the pin WW_CELL_GI wins. Draws only while the Cell lights row is on.
+//! the old baked GI: on exactly under the PRT red (FARWATER1 item 6: its pin and row are gone). Draws only while Cell lights is on.
 bool wwCellGiOn();
 /*! lane PRTOFF1 (bungo 10-29): the old baked probe GI (PRT) draws only under the red WW_CELL_PRT_RED=1 (read once, at
- *  launch). Off: wwCellGiOn() is false whatever the row or WW_CELL_GI say, WW_CELL_GI_FROM loads no bake, nothing
+ *  launch). Off: wwCellGiOn() is false, WW_CELL_GI_FROM loads no bake, nothing
  *  relights one, the march is never compiled and the shaders hold no grid read (WW_CELL_PRT, src/gl/glcontext.cpp) */
 bool wwCellPrtOn();
 /*! lane PERF1: the GI's visibility, WW_CELL_GI_VIS: 0 the volumes (default: the pixel's volume, the threshold blend),
@@ -316,7 +316,6 @@ int wwCellGiVis();
  *  (the screen GI at full resolution), 2 inline (no screen pass: each surface reads the volumes), 3 red (the screen
  *  pass runs, the surfaces read inline). With WW_CELL_GI_VIS=march: no screen pass. */
 int wwCellGiRate();
-void wwCellGiSetOn( bool on );
 //! the GPU relight row (WW/CellGiGpu, WW_CELL_GI_GPU, read when a cell opens); the env pin wins over its row
 bool wwCellGiGpuOn();
 void wwCellGiGpuSetOn( bool on );

@@ -99,6 +99,8 @@ vec3 wwDvSurface( vec3 alb, vec3 Nw, float gloss, float specM, float aoBaked, fl
 		float s = wwDvLum( fogIn );
 		return vec3( 1.0 - clamp( wwDvLum( fogT ), 0.0, 1.0 ), s / max( s + wwDvLum( litPreFog * fogT ), 1.0e-7 ), 0.0 );
 	}
+	if ( v == WW_DV_AIR )	// FARWATER1 round 2: the air's transmittance per channel (white clear, black opaque)
+		return clamp( fogT, 0.0, 1.0 );
 	if ( v == WW_DV_CLOUDSHADOW )
 		return vec3( clamp( cloudT, 0.0, 1.0 ) );
 	if ( v == WW_DV_FAROWNER )
@@ -111,5 +113,5 @@ vec3 wwDvSurface( vec3 alb, vec3 Nw, float gloss, float specM, float aoBaked, fl
 		return wwDvAbs( wwDvSpec );
 	if ( v == WW_DV_REFLECTION )
 		return wwDvAbs( wwDvRefl );
-	return vec3( 0.0 );	// air, clouds and overdraw (owed: the log says why) and the water's own views
+	return vec3( 0.0 );	// clouds and overdraw (owed: the log says why) and the water's own views
 }

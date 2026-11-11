@@ -12,6 +12,35 @@ syntax check of glview.cpp, cellpasstime.cpp, nifskope_ui.cpp (rc=0).
 - **Frame wall (telemetry).** With WW_CELL_PASSTIME on, once a second: `frame wall: X ms a frame (F fps) = before-frame
   + passes + gi-frame + restir + probe-sky + other-in-frame + after-frame + swap + cap-wait + between-paints | the pass
   timers hold P %`. The parts add up to the wall (paint start to paint start, the overlay's fps).
+## FARWATER1 round 2 + late items 2-6 (2026-11-11): the endless sea's air, the sea join, night haze tint, barrel smoke, stream particles, WW_CELL_GI gone
+
+Changed, not checked live (no build, no window). Offline: syntax checks of every edited .cpp (rc=0), CPU twins
+(notes/farwater1/tools/twin_r2.py: flat air frame worst 12.7 u, night hue R/B = the sky's; twin_late4.py PASS), shader
+link sweeps over 161 programs in every mode.
+
+- **Round 2, the deep blue strip = the endless sea's air.** The sheet is curved (z drops r^2 / 2R) while the air is a
+  flat frame: wwFog at fo4_water.frag:633 read the air at a point under the flat ground, and lookdev_fog.glsl:564/603
+  (volFarClamp) clamped its distance to the column's farthest depth, so the sea past the land's end got the land's
+  clamp (the blocks). Now the water's air reads its point in the flat air frame (+ g^2 / 2R, wwAirFlatPos), unclamped
+  (uniform waterAir), and the sky band's far-plane point too (cell_volsky.frag, volSkySea). Red
+  `WW_ENDLESS_SEA_RED=air`. Echo: `water tiers: ... air per tier: near .., far map .., endless sea ..`.
+  Debug view `air` (WW_DEBUG_VIEW=air): T per channel on surfaces and water, no longer black.
+- **Late 2, the dotted line where the endless sea meets the map sea.** The map water drew to its mesh edge at the box
+  rim; it now leaves the outer 2048 u to the sheet under it by a per-pixel cut (waterSeam.w). Red
+  `WW_ENDLESS_SEA_RED=edge`. Echo: `water tiers: ... seam: ...`.
+- **Late 3, the night haze grey.** lookdev_fog.glsl:887/891 lifted the air to fogNight's neutral grey; the night light
+  now takes the drawn night sky's horizon tint at the air's own luminance, by the night share (twilight blends).
+  Red `WW_NIGHTAIR_RED=neutral`. Echo: `cell air: ... night haze=r,g,b R/B x share n`.
+- **Late 4, the barrel fire does not light its smoke.** fo4_effectshader.frag:598 (round 9) set a volumetric mesh card's
+  opacity to 0, so its lamps gave only the air's single-scatter phase (a forward lobe gives ~0.06-0.13 at a lamp below,
+  eye level). A dense plume scatters many times: each lamp now adds opacity x max( wrap( N.L, 1 ) - phase, 0 )
+  (cell_volpart.glsl vpLampMs; raise-only, the env and GI stay thin). Red word `WW_CELL_FXLOCAL_RED=thinlamps`. Echo:
+  `cell fx local: ... its lamps mix( thin, ... )` and `an opaque card up to r,g,b`. WW_CELL_FXLIT_DUMP is now written on
+  a live set too, with each model's reaching lights and its nearest light (position, distance, radius, colour, ref).
+- **Late 5, ground fog particles missing after a goto jump.** No cause found in the code; each stream attach now logs
+  `cell stream particles: cell x,y: N systems placed, copied, refused (unread / empty copy / over the cap), cap left`.
+- **Item 6.** The retired switch WW_CELL_GI is gone: its stage row, its menu and Display rows ("Precomputed Radiance
+  Transfer") and its read. Under the PRT red (WW_CELL_PRT_RED=1) the old GI draws whole.
 
 ## FARWATER1 (2026-11-11): far water at the horizon mirrors the deck, not the clear sky
 

@@ -28,6 +28,12 @@ uniform bool volSkyOn;
  * physical sky's opaque air hiding a backdrop it is not in front of). fogNight (lookdev_fog.glsl): the saturated air's
  * night colour, the cover's light is at least that x its coverage. Red WW_NIGHTAIR_RED=1 (live): both 0, as before. */
 uniform float volSkyDome;
+/* FARWATER1 round 2 (bungo b71: a deep blue strip over the sea's edge, gone with WW_ENDLESS_SEA=0): the endless sea pushes
+ * the far plane to its rim (glview.cpp: x 1.05, ~4.4 M u), and the band's far-plane point on a ray between eye level and
+ * the sea's dip then lay ~20000 u under the flat air frame's ground (deep blue). True while the sea draws: the point as the
+ * flat frame sees the curved earth (lookdev_fog.glsl wwAirFlatPos, the sea's own rule) and no column clamp. Red
+ * WW_ENDLESS_SEA_RED=air: false. */
+uniform bool volSkySea;
 
 out vec4 fragColor;
 
@@ -83,9 +89,14 @@ void main()
 					// MODULES1 item 18 (rule 3): a ray that meets the planet ends there (km to units: / 1.42875e-5)
 					if ( atApSkyRule >= 3 && mu < muH )
 						dV = min( dV, atDistGround( atSkyCamR, mu ) / 1.42875e-5 );
-					ap = vec4( wwFog( vec3( 0.0 ), vr * dV ), 0.0 );
+					vec3 pFar = vr * dV;
+					if ( volSkySea ) {
+						pFar = wwAirFlatPos( pFar );
+						wwAirFree = true;
+					}
+					ap = vec4( wwFog( vec3( 0.0 ), pFar ), 0.0 );
 					if ( atApSkyRule >= 4 )	// wwFog is linear in the surface's colour on the air's path: white - black = T
-						tFar = clamp( dot( wwFog( vec3( 1.0 ), vr * dV ) - ap.rgb, vec3( 1.0 / 3.0 ) ), 0.0, 1.0 );
+						tFar = clamp( dot( wwFog( vec3( 1.0 ), pFar ) - ap.rgb, vec3( 1.0 / 3.0 ) ), 0.0, 1.0 );
 				}
 			} else {
 				ap = wwAtmoApAt( vr * ( atAp.y / max( atAp.z, 1e-12 ) ) );
@@ -99,7 +110,7 @@ void main()
 	}
 	if ( volSkyMode == 0 && volSkyOn && fogNight.a > 0.0 ) {	// MODULES1 R7 night sky d
 		a = mix( a, air, volSkyDome );
-		a.rgb = max( a.rgb, fogNight.rgb * ( 1.0 - a.a ) );
+		a.rgb = max( wwAirNightHue( a.rgb ), fogNight.rgb * ( 1.0 - a.a ) );	// FARWATER1 late 3: the night sky's tint
 	}
 	if ( volSkyMode == 1 ) {
 		fragColor = vec4( volProbe == 1 ? a.rgb : vec3( a.a ), 1.0 );

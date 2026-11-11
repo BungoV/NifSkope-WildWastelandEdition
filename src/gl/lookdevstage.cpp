@@ -869,6 +869,30 @@ bool wwNightAirRed()
 	return wwEnvStr( "WW_NIGHTAIR_RED" ).trimmed() == QLatin1StringView( "1" );
 }
 
+/* FARWATER1 late item 3 (bungo b71: the night haze grey, brown between a blue sky and blue water): the air's light at
+ * night takes the drawn night sky's horizon tint (lookdev_fog.glsl wwAirNightHue, weighted by the night share, so
+ * twilight blends into it). Red WW_NIGHTAIR_RED=neutral (live): the neutral lobes' grey as before. */
+bool wwNightHazeRed()
+{
+	return wwEnvStr( "WW_NIGHTAIR_RED" ).trimmed() == QLatin1StringView( "neutral" );
+}
+
+namespace {
+float g_nightHaze[4] = { 0.0f, 0.0f, 0.0f, 0.0f };	// the tint (the sky's horizon colour) and the night share
+}
+
+QString wwNightHazeNote()
+{
+	const float * h = g_nightHaze;
+	if ( h[3] <= 0.0f )
+		return QStringLiteral( " night haze=off (night share 0)" );
+	if ( wwNightHazeRed() )
+		return QStringLiteral( " night haze=RED neutral (WW_NIGHTAIR_RED=neutral: the lobes' grey)" );
+	return QStringLiteral( " night haze=%1,%2,%3 R/B %4 share %5 (the drawn night sky's horizon tint at the air's own "
+		"luminance; red WW_NIGHTAIR_RED=neutral)" ).arg( double( h[0] ), 0, 'g', 3 ).arg( double( h[1] ), 0, 'g', 3 )
+		.arg( double( h[2] ), 0, 'g', 3 ).arg( h[2] > 0.0f ? double( h[0] / h[2] ) : 0.0, 0, 'f', 2 ).arg( double( h[3] ), 0, 'f', 2 );
+}
+
 /* MODULES1 R7 item 6 (the 1 px bright row at eye level, bungo b61): the sky's level ray through the air ends like the
  * rows beside it (lookdev_fog.glsl wwVolAirSky). Red WW_CELL_AIR_LEVELRAY_RED=1 (live, fogRed 16): the old branch. */
 bool wwAirLevelRayRed()
@@ -1814,6 +1838,9 @@ void wwLookdevFogUniforms( Scene * scene )
 			wwAtmoNightSkyGot( WwNsFar, nsk.lightK * nsk.gain, hzOk ? 0.2126f * hzN[0] + 0.7152f * hzN[1] + 0.0722f * hzN[2] : 0.0f );
 		}
 		prog->uni4f( "fogNight", FloatVector4( c[0] * n, c[1] * n, c[2] * n, n ) );
+		if ( prog->uniLocation( "fogNightHue" ) >= 0 )	// FARWATER1 late item 3: the night haze takes the sky's tint
+			prog->uni1f( "fogNightHue", wwNightHazeRed() ? 0.0f : 1.0f );
+		g_nightHaze[0] = c[0], g_nightHaze[1] = c[1], g_nightHaze[2] = c[2], g_nightHaze[3] = n;
 		if ( prog->uniLocation( "volSkyDome" ) >= 0 )
 			prog->uni1f( "volSkyDome", dome );
 		static int saidKey = -1;	// the line is built only when the state moves (this runs per fogged program)

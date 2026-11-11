@@ -403,6 +403,8 @@ struct WaterTierTally {
 	int n[3] = { 0, 0, 0 };
 	float fade[3] = { 0.0f, 0.0f, 0.0f };
 	int ssr[3] = { 0, 0, 0 };	// FARWATER1: the draws with the march's reflections bound
+	int air[3] = { 0, 0, 0 };	// FARWATER1 round 2: the draws' waterAir (the last one per tier)
+	float handover = 0.0f;	// FARWATER1 late item 2: the map water's hand-over band at the box rim
 };
 WaterTierTally g_waterTierNow;
 QString g_waterTierSaid;
@@ -424,7 +426,8 @@ void wwCellWaterTierFrame()
 	const QString line = QStringLiteral( "water tiers: near %1 draws, far map %2, endless sea %3 (far water draws %4); "
 		"far fade 8192 -> %5 / %6 / %7 u from the eye per tier (the WATR's own distance, eye-relative: the band moves "
 		"with the camera); far colour: %8; program %9; reflection per tier: near %10, far map %11, endless sea %12; "
-		"grazing sky (R.z < 0.08, flat water past 12.5 x the eye's height): %13" )
+		"grazing sky (R.z < 0.08, flat water past 12.5 x the eye's height): %13; air per tier: near %14, far map %15, endless "
+		"sea %16; seam: %17" )
 		.arg( t.n[0] ).arg( t.n[1] ).arg( t.n[2] ).arg( t.n[1] + t.n[2] )
 		.arg( double( t.fade[0] ), 0, 'f', 0 ).arg( double( t.fade[1] ), 0, 'f', 0 ).arg( double( t.fade[2] ), 0, 'f', 0 )
 		.arg( nearLaw ? QStringLiteral( "the near law to the horizon (one shading for every tier)" )
@@ -433,10 +436,18 @@ void wwCellWaterTierFrame()
 		.arg( reflSrc( t, 0 ) ).arg( reflSrc( t, 1 ) ).arg( reflSrc( t, 2 ) )
 		.arg( rr == "grazing" ? QStringLiteral( "the clear WTHR gradient, the clouds faded out (red WW_CELL_WATER_REFL_RED=grazing)" )
 			: QStringLiteral( "the WTHR horizon row under the clouds' mean cover, the deck the drawn sky shows (FARWATER1)" ) );
-	if ( line == g_waterTierSaid )
+	const auto airSrc = []( const WaterTierTally & a, int k ) {
+		return a.n[k] == 0 ? QStringLiteral( "none" ) : a.air[k] == 3 ? QStringLiteral( "its point in the flat air frame (+ g^2 / 2R), no column clamp" )
+			: a.air[k] == 1 ? QStringLiteral( "no column clamp" ) : QStringLiteral( "clamped to the column (RED WW_ENDLESS_SEA_RED=air)" );
+	};
+	const QString line2 = line.arg( airSrc( t, 0 ) ).arg( airSrc( t, 1 ) ).arg( airSrc( t, 2 ) )
+		.arg( t.handover > 0.0f ? QStringLiteral( "the map water leaves the outer %1 u of the box rim to the endless sheet under it "
+			"(a per-pixel cut, no mesh edge; red WW_ENDLESS_SEA_RED=edge)" ).arg( double( t.handover ), 0, 'f', 0 )
+			: QStringLiteral( "the map water draws to its mesh edge (RED edge, or no endless sea)" ) );
+	if ( line2 == g_waterTierSaid )
 		return;
-	g_waterTierSaid = line;
-	std::fprintf( stderr, "%s\n", qPrintable( line ) );
+	g_waterTierSaid = line2;
+	std::fprintf( stderr, "%s\n", qPrintable( line2 ) );
 }
 
 bool wwCellWaterUniforms( Scene * scene, int block, int unit )
@@ -632,10 +643,20 @@ bool wwCellWaterUniforms( Scene * scene, int block, int unit )
 	}
 	if ( prog->uniLocation( "waterSeam" ) >= 0 ) {	// lane FARSEA1: the endless sea and its seam (water_info.glsl)
 		const bool seaOn = !dit->endless.isEmpty() && wwEndlessSeaOn();
+		// FARWATER1 late item 2: on the map water w = the hand-over band (fo4_water.frag), inside the sheet's overlap
+		const float handover = seaOn && !dit->endless.contains( block ) ? std::min( wwEndlessSeaHandover(), 0.5f * wwEndlessSeaOverlap() ) : 0.0f;
+		if ( handover > 0.0f )
+			g_waterTierNow.handover = handover;
 		prog->uni4f( "waterSeam", FloatVector4( seaOn ? wwEndlessSeaSeam() : 0.0f, float( dit->seaId ),
 			seaOn && dit->endless.contains( block ) ? 1.0f : 0.0f,
-			seaOn && dit->endless.contains( block ) ? wwEndlessSeaOverlap() : 0.0f ) );	// lane SKYSEA1: under the baked edge
+			seaOn && dit->endless.contains( block ) ? wwEndlessSeaOverlap() : handover ) );	// lane SKYSEA1: under the baked edge
 		prog->uni4f( "waterSeamBox", FloatVector4( dit->seaBox[0], dit->seaBox[1], dit->seaBox[2], dit->seaBox[3] ) );
+	}
+	if ( prog->uniLocation( "waterAir" ) >= 0 ) {	// FARWATER1 round 2: the air the far land at the same distance gets
+		const bool endless = dit->endless.contains( block ) && wwEndlessSeaOn();
+		const int air = wwEndlessSeaAirFlat() ? ( endless ? 3 : 1 ) : 0;
+		prog->uni1i( "waterAir", air );
+		g_waterTierNow.air[endless ? 2 : dit->farMask.contains( block ) ? 1 : 0] = air;
 	}
 	if ( prog->uniLocation( "waterShoreOn" ) >= 0 ) {
 		/* lane WATERSHORE1 (fo4_waterlook.prog, water_shore.glsl). Engineering choices in world units, no game value
