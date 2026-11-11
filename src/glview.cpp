@@ -21640,9 +21640,58 @@ int GLView::convertKeyCode( int n, Qt::KeyboardModifiers mods, bool anyModifiers
 	return -1;
 }
 
+bool GLView::flyOwnsShortcuts() const
+{
+	return freeCamera && !cellEditArmRed();
+}
+
+void GLView::flyKeySwallowed( int key, int modifiers )
+{
+	switch ( key ) {
+	case Qt::Key_Shift: case Qt::Key_Control: case Qt::Key_Alt: case Qt::Key_Meta: case Qt::Key_AltGr:
+	case Qt::Key_CapsLock: case Qt::Key_NumLock: case Qt::Key_unknown: case 0:
+		return;	// a modifier on its own is no shortcut
+	default:
+		break;
+	}
+	static QSet<quint64> seen;
+	const quint64 id = ( quint64( quint32( modifiers ) ) << 32 ) | quint32( key );
+	if ( seen.contains( id ) )
+		return;
+	seen.insert( id );
+	const int mods = modifiers & int( Qt::ShiftModifier | Qt::ControlModifier | Qt::AltModifier | Qt::MetaModifier );
+	std::fprintf( stderr, "fly keys: %s swallowed (free camera on: only move / look / zoom keys, Shift, F11 and the exit keys Shift+F / Esc work)\n",
+		qPrintable( QKeySequence( key | mods ).toString( QKeySequence::PortableText ) ) );
+}
+
 void GLView::keyPressEvent( QKeyEvent * event )
 {
-	if ( cellEditKey( this, event->key(), int( event->modifiers() ) ) ) {	// Shift+A, the place mode's keys
+	// lane AIRPERF1 r3 (bungo 11-11: "no other shortcuts are toggled if I am in the free cam mode"): the free camera's
+	// lockout is the FIRST thing here now; before, the place mode, the physics sim, the paint modes and the modal
+	// tools all read the key ahead of it. Red WW_FLYKEYS_RED=1 = the old order.
+	if ( flyOwnsShortcuts() ) {
+		if ( ShortcutRegistry::get().matches( "viewport.free_camera", event->key(), event->modifiers() )
+			|| event->key() == Qt::Key_Escape ) {
+			setFreeCamera( false );
+			event->accept();
+			return;
+		}
+		const int fk = convertKeyCode( event->key(), event->modifiers() );
+		const bool cameraKey = fk == Key_Shift
+			|| fk == Key_MoveLeft || fk == Key_MoveRight || fk == Key_MoveForward || fk == Key_MoveBack
+			|| fk == Key_MoveDown || fk == Key_MoveUp
+			|| fk == Key_RotateUp || fk == Key_RotateDown || fk == Key_RotateLeft || fk == Key_RotateRight
+			|| fk == Key_ZoomIn || fk == Key_ZoomOut;
+		if ( cameraKey )
+			kbdState = kbdState | ( 1ULL << fk );
+		else
+			flyKeySwallowed( event->key(), int( event->modifiers() ) );
+		event->accept();
+		return;
+	}
+	// lane AIRPERF1 r3: this runs ahead of the free camera's key lockout, so it is told which camera owns WASD
+	if ( cellEditKey( this, event->key(), int( event->modifiers() ),
+			freeCamera ? 1 : ( view == ViewWalk ? 2 : 0 ), event->isAutoRepeat() ) ) {	// Shift+A, the place mode's keys
 		event->accept();
 		return;
 	}
@@ -21920,8 +21969,13 @@ void GLView::keyPressEvent( QKeyEvent * event )
 	// duplicate the selection and start a move (object + edit mode)
 	if ( !riggingWeightPaintMode && !vertexPaintMode && !segmentPaintMode
 		&& shortcuts.matches( "viewport.duplicate", event->key(), mods ) && model ) {
-		duplicateSelection();
-		return;
+		// lane AIRPERF1 r3: in the walk view Shift+D is a fast "move right", never a duplicate
+		if ( view != ViewWalk || cellEditArmRed() ) {
+			duplicateSelection();
+			return;
+		}
+		if ( !event->isAutoRepeat() )
+			std::fprintf( stderr, "place arm: Shift+D duplicate swallowed (the camera owns the keys: camera=walk repeat=0)\n" );
 	}
 
 	// join the selected compatible meshes into the active one (object)

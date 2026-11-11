@@ -79,7 +79,7 @@ CellEditPanel::CellEditPanel( QWidget * parent ) : QWidget( parent )
 	placeBtn = new QPushButton( tr( "Place" ), this );
 	placeBtn->setObjectName( QStringLiteral( "CellEditPlace" ) );
 	placeBtn->setCheckable( true );
-	row( QString(), placeBtn, tr( "Place mode (Shift+A in the view): click drops, drag turns, Esc leaves" ) );
+	row( QString(), placeBtn, tr( "Place mode (Shift+A in the view, off while the fly or walk camera is on): click drops, drag turns, Esc leaves" ) );
 
 	// ESPWRITE3B: change the picked reference (an override of its winner; never a delete)
 	pickedLabel = new QLabel( this );

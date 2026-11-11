@@ -1,3 +1,24 @@
+## AIRPERF1 round 3 (2026-11-11): no shortcut fires in the free camera
+- **bungo:** "I keep entering some 'marker' placement mode accidentally, why" and "Make sure no other shortcuts
+  are toggled if I am in the free cam mode (from shift + f)". Cause of the first: the cell editor's key handler ran
+  ahead of the free camera's key lockout, and its arm key is Shift+A. In the free camera A is "move left" and Shift
+  is "fast", so a fast strafe left armed Place mode and the next clicks dropped XMarkerHeading refs.
+- **Now, free camera on (Shift+F):** only the camera's own keys do anything: move (W A S D Q E), look / zoom keys,
+  Shift (fast), F11 (full screen) and the exit keys Shift+F / Esc. Two gates: the window's key filter accepts the
+  shortcut override for every other key (no menu, toolbar or window shortcut is matched) and skips its own key
+  branches; the view's key handler runs the camera lockout first, ahead of Place, the physics sim, the paint
+  modes and the modal tools.
+- **Walk view:** Shift+A does not arm Place and Shift+D does not duplicate (they are fast strafes there); a held
+  key's repeats never arm Place. Outside both cameras Shift+A and the panel's Place button work as before; the
+  tooltip says when the shortcut is off.
+- **Never silent:** arming writes "Place mode ON (base): click drops, drag turns, Esc leaves" into the view's own
+  status line (before, only the panel said it); leaving clears it.
+- **Telemetry:** `fly keys: <key> swallowed (free camera on: ...)` once per key;
+  `place arm: Shift+A swallowed (the camera owns the keys: camera=walk|orbit repeat=0)`,
+  `place arm: armed by Shift+A (camera=orbit)`, `place arm: Shift+D duplicate swallowed (...)`.
+- **Red:** `WW_FLYKEYS_RED=1` = the old rule for all of it (live, read per key press).
+- **Known, not changed:** in the walk view of a NIF document Shift+A still opens the Add menu.
+
 ## AIRPERF1 round 3 (2026-11-11): no navigation gizmo in full screen
 - **bungo:** "please hide the navigation gizmo in the top right corner if F11 is on". Full screen on = the axis balls
   are not drawn, not hovered and not clicked (no axis snap, no ring drag in that corner); leaving full screen puts

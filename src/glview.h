@@ -507,6 +507,11 @@ public:
 	 *  contextual the way Blender's per-editor keymaps are.
 	 */
 	bool viewportClaimsKey( int key ) const;
+	//! lane AIRPERF1 r3 (bungo 11-11): the free camera is on, so NO shortcut may fire: only the camera's own keys
+	//! (move, look, zoom, Shift), F11 and the exit keys (Shift+F, Esc) do anything. False under WW_FLYKEYS_RED=1.
+	bool flyOwnsShortcuts() const;
+	//! One stderr line the first time each key is swallowed by the free camera.
+	static void flyKeySwallowed( int key, int modifiers );
 	void move( float, float, float );
 	void rotate( float, float, float );
 	void rotateLight( float, float );

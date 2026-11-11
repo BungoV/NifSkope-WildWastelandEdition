@@ -912,6 +912,7 @@
 { "WW_FLATTEN_POSE", 2, "src/nifskope_ui.cpp:13869 NifSkope::createWindow | createWindow: picks which harness the window runs" },
 { "WW_FLATTEN_TEST", 2, "src/nifskope_ui.cpp:13839 NifSkope::createWindow | createWindow: picks which harness the window runs" },
 { "WW_FLY", 3, "src/harnesswindow.cpp:295 wwFlyRun | bake/CLI/test path" },
+{ "WW_FLYKEYS_RED", 0, "src/celledit.cpp:266 cellEditArmRed | re-read per frame or per call (a)" },
 { "WW_FOG_HORIZON_RED", 0, "src/gl/lookdevstage.cpp:1412 wwFogHorizonRed | re-read per frame or per call (a)" },
 { "WW_FOG_NOISE_DEFAULT_RED", 0, "src/features/air/cellvolair.cpp:2125 vaPassInner | re-read per frame or per call (a)" },
 { "WW_FOG_TERRAIN_RED", 0, "src/gl/fogterrain.cpp:170 wwFogTerrainRed | re-read per frame or per call (a)" },

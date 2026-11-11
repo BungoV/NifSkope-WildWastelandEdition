@@ -30513,6 +30513,26 @@ bool NifSkope::eventFilter( QObject * o, QEvent * e )
 		// Shift+F toggles the free camera whenever the pointer is over the viewport, no matter which widget
 		// currently has key focus.
 		auto ke = static_cast<QKeyEvent *>( e );
+		// lane AIRPERF1 r3 (bungo 11-11: "no other shortcuts are toggled if I am in the free cam mode"): the one gate
+		// for every QAction and QShortcut of the window and for every key branch of this filter. Accepting the
+		// override stops Qt's shortcut matching, so the key arrives as a plain KeyPress at the view (it holds the
+		// keyboard grab), which moves the camera or swallows it. Kept: F11 (full screen), Shift+F / Esc (leave).
+		// Red WW_FLYKEYS_RED=1 = the old rule.
+		if ( ogl && ogl->flyOwnsShortcuts() && !QApplication::activePopupWidget() && !QApplication::activeModalWidget()
+			&& !( ke->key() == Qt::Key_F11 && !( ke->modifiers() & ~Qt::KeypadModifier ) ) ) {
+			if ( e->type() == QEvent::ShortcutOverride ) {
+				e->accept();
+				return true;
+			}
+			if ( ShortcutRegistry::get().matches( "viewport.free_camera", ke->key(), ke->modifiers() )
+				|| ke->key() == Qt::Key_Escape ) {
+				if ( !ke->isAutoRepeat() )
+					ogl->setFreeCamera( false );
+				e->accept();
+				return true;
+			}
+			return false;
+		}
 		// Block List: X or Delete removes the selected block(s) and their branches, on a multi-selection,
 		// exactly as the viewport does — and with the viewport's split between the two keys.
 		if ( o == list && ogl && nif
