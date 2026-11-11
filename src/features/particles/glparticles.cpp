@@ -55,6 +55,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "gl/glscene.h"
 #include "gl/renderer.h"
 #include "features/shadows/sunshadow.h"	// lane VOLPART1: the sun's cascades on a puff
+#include "features/shadows/shadowset.h"	// MODULES1 R6-8: the shadow debug view's pass
 #include "glview.h"
 #include "model/nifmodel.h"
 
@@ -334,7 +335,7 @@ void Particles::drawShapes( NodeList * secondPass )
 	const bool cellPfx = !scene->selecting && !cellPfxRed && wwCellLightsWanted( scene );
 	// lane VOLPART1, gates only: WW_CELL_VOLPART_HIDE=1 draws no cell particle (the plate the hard-edge gate subtracts)
 	WW_SWITCH_STATIC( bool, vpHide, qEnvironmentVariableIntValue( "WW_CELL_VOLPART_HIDE" ) == 1 );	// lane LIVESET1: follows a live set
-	if ( cellPfx && vpHide )
+	if ( cellPfx && ( vpHide || wwShadowViewPass( scene ) ) )	// MODULES1 R6-8: no particle over a shadow debug view
 		return;
 	bool volPart = false, vpAlways = false;
 	auto	prog = scene->renderer->useProgram( scene->selecting ? "selection.prog"

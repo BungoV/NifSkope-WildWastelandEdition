@@ -3679,7 +3679,8 @@ void GLView::paintGL()
 	wwCellCamDump( scene );	// the eye, with or without the Cell lights row (a no-op when unset)
 
 	// Setup projection mode
-	wwGameTaaArmJitter( true );
+	const bool shView = wwShadowViewPass( scene );	// MODULES1 R6-8: a shadow debug view: no jitter, no post chain
+	wwGameTaaArmJitter( !shView );
 	glProjection();
 	wwGameTaaArmJitter( false );
 
@@ -3791,7 +3792,17 @@ void GLView::paintGL()
 	PassTime::begin( PassTime::Background );	// the sky (or background) and the ground plane
 	if ( perspectiveMode ) {
 		// Lookdev: the lookdev cube background replaces the (FO76+) skybox
-		bool	colorBufCleared = wwLookdevActive() ? wwLookdevDrawBackground( scene ) : scene->renderer->drawSkyBox( scene );
+		bool	colorBufCleared = false;
+		if ( shView ) {	// MODULES1 R6-8: the sky is a flat neutral under a shadow debug view
+			GLfloat pc[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+			glGetFloatv( GL_COLOR_CLEAR_VALUE, pc );
+			glClearColor( 0.5f, 0.5f, 0.5f, 1.0f );
+			glClear( GL_COLOR_BUFFER_BIT );
+			glClearColor( pc[0], pc[1], pc[2], pc[3] );
+			colorBufCleared = true;
+		} else {
+			colorBufCleared = wwLookdevActive() ? wwLookdevDrawBackground( scene ) : scene->renderer->drawSkyBox( scene );
+		}
 		if ( clearNeeded ) {
 			glClear( colorBufCleared ? GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT
 										: GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT );
@@ -3970,7 +3981,7 @@ void GLView::paintGL()
 			wwVolAirSkyDraw( scene, true );	// the sky's air probes (gates only; no GL call otherwise)
 			if ( hdr )
 				rtddgiCellViewDrawLinear( scene, viewTrans );	// the Ray-traced GI probes inside the linear frame (fog, exposure)
-			if ( !hdr )
+			if ( !hdr && !shView )
 				wwCloudVolLookdevFront( scene );	// clouds in front of a single NIF (its opaque depth)
 			if ( hdr ) {
 				PassTime::begin( PassTime::FarCards );
@@ -4006,7 +4017,8 @@ void GLView::paintGL()
 			// the cards when the frame is not HDR (lit and toned by their own program), then the
 			// census a gate reads
 			PassTime::begin( PassTime::FarCards );
-			wwCellFarLodCards( scene, false, hdr );
+			if ( !shView )	// R6-8
+				wwCellFarLodCards( scene, false, hdr );
 			wwCellFarLodSkyCensus( scene );
 			PassTime::end( PassTime::FarCards );
 			// the game's temporal AA on the finished (tone-mapped) frame; inert when the row is off
@@ -4019,11 +4031,13 @@ void GLView::paintGL()
 					if ( !wwGameTaaInputsRan() )	// the before-tone-map resolve ran it already
 						wwTaaInputsPass( scene );	// inert unless asked for (gl/taainputs.h)
 				}
-				wwCellPostApply( scene );
+				if ( !shView )	// R6-8: no depth of field or motion blur over a shadow debug view
+					wwCellPostApply( scene );
 				PassTime::subBegin( PassTime::PostFlare );	// the post zone's parts
-				wwCellLensFlareDraw( scene );	// the lights' flares, a screen pass; inert when off
+				if ( !shView )
+					wwCellLensFlareDraw( scene );	// the lights' flares, a screen pass; inert when off
 				PassTime::subEnd( PassTime::PostFlare );
-				{
+				if ( !shView ) {
 					PassTime::Swap taaT( PassTime::Post, PassTime::Taa );	// blits + vectors + resolve + copy-back
 					wwGameTaaResolve( scene );
 				}

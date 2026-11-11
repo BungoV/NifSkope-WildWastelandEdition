@@ -149,6 +149,11 @@ bool wwTerrainShadowPending();
 //! the census line
 QString wwShadowSetSummary();
 bool wwShadowRed( const char * name );
+/*! MODULES1 R6-8: true while a shadow debug view (WW_SHADOW_VIEW 1-5, WW_CSM_PROBE 1 / 3 / 4 / 5) is shown. The frame
+ *  is then a probe pass (gl/celllights.h wwCellProbePass): the surfaces write the view's value as drawn, the sky is
+ *  a flat 0.5, and nothing else draws or filters the picture. Red WW_SHADOW_RED=viewpost: the old rule (the value
+ *  inside the lit frame, through the air and the whole post chain). Says so once per change. */
+bool wwShadowViewPass( Scene * scene );
 //! lane WATERWETBAKE1: the shadow set's terrain test (the cells' LAND under "ground", the far LOD's terrain)
 class Shape;
 bool wwCellIsTerrainShape( const Shape * sh );

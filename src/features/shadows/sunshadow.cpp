@@ -789,6 +789,11 @@ bool wwSunShadowWanted( Scene * scene )
 	return ( s.valid || wwShadowSetActive( scene ) ) && scene && !scene->selecting && wwLookdevActive();
 }
 
+int wwSunShadowProbeMode()
+{
+	return cs().probe;
+}
+
 static void sunShadowPassImpl( Scene * scene );
 
 /* WW_CSM_DUMP=<ABSOLUTE path> (lane VOLAIR1, gates only): the cascade map the receivers read, rewritten whenever the

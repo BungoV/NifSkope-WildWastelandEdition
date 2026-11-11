@@ -683,7 +683,9 @@ bool wwCellProbePass( Scene * scene )
 	const ClState & s = st();
 	if ( s.red & 4096 )
 		return false;	// WW_CELL_LIT_RED=probefx: the effects write over the probes
-	return ( s.probe > 0 || s.fogProbe > 0 || ( scene && wwCellPassFor( scene->nifModel ) > 0 ) ) && wwCellLightsWanted( scene );
+	// MODULES1 R6-8: a shadow debug view is a probe pass too (no effects over it, no linear frame, no post chain)
+	return ( s.probe > 0 || s.fogProbe > 0 || ( scene && wwCellPassFor( scene->nifModel ) > 0 ) || wwShadowViewPass( scene ) )
+		&& wwCellLightsWanted( scene );
 }
 
 /* lane FO4CELLGI1: the loader's WW_CELL_VIEWS (fo4_default.frag's probe and pass views in the programs with the GI volume

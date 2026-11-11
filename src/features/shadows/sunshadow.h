@@ -63,6 +63,8 @@ class Scene;
 
 //! true while this draw receives: the map was built this frame for this view
 bool wwSunShadowWanted( Scene * scene );
+//! MODULES1 R6-8: the WW_CSM_PROBE value (0 off)
+int wwSunShadowProbeMode();
 //! the caster pass: renders the three cascade maps (GLView calls it before the background)
 void wwSunShadowPass( Scene * scene );
 //! the receiver uniforms of the renderer's CURRENT program; a no-op without csmMap

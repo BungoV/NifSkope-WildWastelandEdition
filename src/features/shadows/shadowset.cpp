@@ -1672,6 +1672,34 @@ bool wwShadowRed( const char * name )
 	return ss().reds.contains( QString::fromLatin1( name ) );
 }
 
+/* MODULES1 R6-8 (bungo 11-10: the shadow views are unreadable): the views wrote their value into the LIT frame, so the
+ * air, the bloom, the glare, the exposure and the tone map all ran over it, and the effects, cards and sky drew
+ * around it as lit pictures. Now the frame is a probe pass while a view is shown. */
+bool wwShadowViewPass( Scene * scene )
+{
+	const SetState & s = ss();
+	const int probe = wwSunShadowProbeMode();
+	const bool asked = ( s.view > 0 && s.view <= 5 ) || probe == 1 || ( probe >= 3 && probe <= 5 );	// probe 2 tints the lit picture
+	const bool red = wwShadowRed( "viewpost" );
+	const bool on = asked && !red && scene && !scene->selecting && wwSunShadowWanted( scene );
+	static int saidKey = 0;	// asked off at start: nothing to say (this runs per shape: no string work unless it changed)
+	const int key = !asked ? 0 : ( 1 | ( on ? 2 : 0 ) | ( red ? 4 : 0 ) | ( s.view << 3 ) | ( probe << 8 ) );
+	if ( scene && !scene->selecting && key != saidKey ) {
+		saidKey = key;
+		static QString said;
+		const QString line = !asked ? QStringLiteral( "shadow view: off" )
+			: QStringLiteral( "shadow view: WW_SHADOW_VIEW=%1 WW_CSM_PROBE=%2: %3" ).arg( s.view ).arg( probe )
+				.arg( on ? QStringLiteral( "readable pass ON: cell-lit surfaces write the view's value as drawn (0 black = shadowed, 1 white = lit; view 5 = the weights as colours), the sky is a flat 0.5; not drawn: effects, water, particles, far tree cards, clouds, precipitation, far bulbs; bypassed: the air / fog, the linear frame, bloom, glare, lens flare, exposure + tone map, depth of field, motion blur, TAA jitter + resolve + sharpen (red WW_SHADOW_RED=viewpost)" )
+					: red ? QStringLiteral( "RED WW_SHADOW_RED=viewpost: the value inside the lit frame, through the air and the post chain" )
+					: QStringLiteral( "asked, no receiver this frame (no cascade map and no terrain / contact producer): the plain picture" ) );
+		if ( line != said ) {
+			said = line;
+			fprintf( stderr, "%s\n", qPrintable( line ) );
+		}
+	}
+	return on;
+}
+
 bool wwShadowPar( int bit )
 {
 	const SetState & s = ss();
