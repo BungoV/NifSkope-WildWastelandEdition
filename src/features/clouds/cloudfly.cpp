@@ -59,6 +59,8 @@ struct FlState
 	QElapsedTimer hAge;
 };
 
+bool red( const char * word );
+
 FlState & cs()
 {
 	static FlState s;
@@ -75,12 +77,19 @@ FlState & cs()
 				: e == QLatin1StringView( "high" ) ? 3 : e == QLatin1StringView( "ultra" ) ? 4 : 0;
 			s.pinned = true;
 		} else if ( wwHarnessRun() ) {
-			s.tier = 0;	// a harness measures what it pins
+			/* SKYLIGHT1 round 2: any WW_ variable in the environment makes a "harness" run (nifskope.cpp wwHeadlessRun),
+			 * bungo's flights included, so the row's default never reached them (cloudmap heights=eye: the bands rode with
+			 * the camera and ran away from it). A harness now takes the shipped default; it pins WW_CLOUDFLY to measure
+			 * another. Red WW_CLOUDFLY_RED=harnessoff: a harness pinned Off (before). */
+			s.tier = red( "harnessoff" ) ? 0 : kTierDef;
 			s.pinned = true;
 		} else {
 			s.tier = std::clamp( QSettings().value( QLatin1StringView( kKey ), kTierDef ).toInt(), 0, 4 );
 		}
 		s.hKey.clear();
+		fprintf( stderr, "cloudfly: tier=%s (%s) heights=%s (red WW_CLOUDFLY_RED=harnessoff,eyeheights)\n", tierName( s.tier ),
+			!e.isEmpty() ? "WW_CLOUDFLY" : wwHarnessRun() ? ( red( "harnessoff" ) ? "harness: Off, the red" : "harness: the shipped default" )
+				: "the row's saved setting", s.tier >= 1 && !red( "eyeheights" ) ? "world" : "eye" );
 	}
 	return s;
 }

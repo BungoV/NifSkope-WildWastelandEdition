@@ -1,6 +1,7 @@
 #include "features/lights/lightmeas.h"
 #include "features/clouds/cloudshadow.h"
 #include "features/clouds/cloudvol.h"	// lane SKYLIGHT1: the deck
+#include "features/clouds/cloudmap.h"	// SKYLIGHT1 round 3: the cloud field the light used
 #include "gl/dalcfit.h"	// lane SKYLIGHT1: the ambient's upload fit
 #include "features/exposure/physunits.h"
 #include "features/sky/atmomath.h"
@@ -179,6 +180,17 @@ void wwLightMeasFrame( Scene * scene, const float * px, int qw, int qh )
 		double( toa * lumOf( T ) ), double( keyN ), col( key ).c_str(), double( sunScale ), farT, double( cloudEye ),
 		double( keyN * cloudEye ), double( keyN * mu ), double( keyN * mu * cloudEye ), double( T[0] / std::max( T[2], 1e-6f ) ),
 		WwAtmoMath::hazeOptics().rgb680 ? "680/550/440 nm (red WW_ATMO_RED=rgb680)" : "sRGB bands (SKYLIGHT1)" );
+	{	// SKYLIGHT1 round 3: the cloud field this light came through (the map the volume, its shadow and the deck read)
+		const WwCloudMap & cm = wwCloudMap();
+		float dk[4] = { 0, 1, 1, 0 };
+		const bool deck = mu > 0.0f && wwCloudDeckThrough( mu, dk );
+		const size_t nb = std::strlen( b );
+		std::snprintf( b + nb, sizeof( b ) - nb, " | cloud field: %s low cover %.3f density %.2f mid cover %.3f density %.2f"
+			" (texels x%.3f) -> deck tau %.2f sun through %.3f sky through %.3f, ground sun x cloud over the eye %.4f",
+			cm.valid ? "map" : "none", double( cm.band[0].coverage ), double( cm.band[0].density ), double( cm.band[1].coverage ),
+			double( cm.band[1].density ), double( cm.band[0].coverK ), deck ? double( dk[3] ) : 0.0, double( dk[1] ), double( dk[2] ),
+			double( cloudEye ) );
+	}
 	say( 0, b );
 
 	// ---- the drawn clear sky at five directions, and its horizontal irradiance by quadrature

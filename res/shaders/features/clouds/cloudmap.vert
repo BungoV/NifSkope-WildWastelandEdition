@@ -13,6 +13,7 @@ uniform float cmHeight;	// the band plane above the eye, game units
 uniform float cmHalfExtent;	// the map square's half side, game units
 uniform vec2 uvOffset;	// the layer's scroll
 uniform bool cmShow;
+uniform bool cmQuad;	// SKYLIGHT1 round 3: the layer laid on the world (a quad over the map, uv from the world point)
 
 out float vfade;
 out vec2 uv;
@@ -22,6 +23,12 @@ void main()
 	if ( cmShow ) {
 		vfade = 1.0;
 		uv = vertexPosition.xy * 0.5 + 0.5;
+		gl_Position = vec4( vertexPosition.xy, 0.0, 1.0 );
+		return;
+	}
+	if ( cmQuad ) {
+		vfade = vertexColor.a;
+		uv = multiTexCoord0 + uvOffset;
 		gl_Position = vec4( vertexPosition.xy, 0.0, 1.0 );
 		return;
 	}
