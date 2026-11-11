@@ -153,6 +153,15 @@ bool wwAtmoGiPinned();
 bool wwAtmoGiActive();	//!< the row on and Physical Sky on: the capture takes the physical sky
 bool wwAtmoGiRedDome();
 bool wwAtmoGiRedCamZ();	//!< SKY3 red: the capture from the view camera's height, not the probes'
+/*! MODULES1 R6-12 b: the Sun and Moon Size row, 0 Physical (the true angular sizes) / 1 Game (the record's own
+ *  discs) / 2 Large (Game x 1.5); pin WW_ATMO_BODYSIZE; ships Game. The drawn disc and its glare only: the light,
+ *  the shadows' penumbra and the sky never read it. */
+int wwAtmoBodySize();
+void wwAtmoSetBodySize( int v );	//!< refused while WW_ATMO_BODYSIZE pins it
+//! the game's own discs (tan of the half-angle: the record's quad x the art's disc share); the stage hands them per frame
+void wwAtmoSetBodyGame( float sunTanHalf, float moonTanHalf );
+//! the drawn disc's radius over the true one (1 = Physical)
+float wwAtmoBodyScale( bool moon );
 
 QString wwAtmoSummary();
 

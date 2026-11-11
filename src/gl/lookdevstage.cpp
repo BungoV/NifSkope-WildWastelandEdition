@@ -2381,6 +2381,13 @@ SkyFrame skyFrame()
 	f.c = wwSkyClock( s.hour, s.tnam, s.gmst );
 	// lane TERRSHADOW1: Sun Path = Real moves the drawn disc and glare with the light (one sun); Off leaves the clock's
 	wwSunPathGameHorizon( f.c.A, f.c.D );	// MODULES1 R6-6
+	{	/* MODULES1 R6-12 b: the game's own discs for the Sun and Moon Size row: the record's quad (fSunBaseSize,
+		 * iMasserSize over fSunXExtreme, as drawSunQuad / the game's moon draw them) x the share of the quad the art's
+		 * disc takes (measured on the vanilla art, notes/modules1/r6/skytex_disc.py: sun.dds solid core, alpha over
+		 * 240, 0.031 of the quad; masser_full.dds disc, alpha over half its peak, 0.83). */
+		const float X = std::max( 1.0f, std::fabs( s.gmst.sunX ) );
+		wwAtmoSetBodyGame( 0.031f * s.gmst.sunBase / X, 0.83f * s.gmst.masserSize / X );
+	}
 	if ( wwSunPathMode() == 1 )
 		wwSunPathApply( s.hour, s.gameDay, f.c.lightDir, f.c.sunPos );
 	if ( !s.haveWeather )
@@ -2906,7 +2913,9 @@ bool drawMoonGlobe( Scene * scene, const SkyFrame & f, float mul, QStringList & 
 	glGetIntegerv( GL_VIEWPORT, vp );
 	const float p11 = r->globalUniforms->projectionMatrix[1][1];
 	const double pxAng = 2.0 / ( double( p11 > 1e-6f ? p11 : 1.0f ) * double( std::max( vp[3], 1 ) ) );
-	const double sinR = std::sin( wwskydisc::kMoonHalfDeg * wwskydisc::kRad );
+	// MODULES1 R6-12 b: the Sun and Moon Size row scales the drawn globe (its radiance kept)
+	const double moonTan = std::tan( wwskydisc::kMoonHalfDeg * wwskydisc::kRad ) * double( wwAtmoBodyScale( true ) );
+	const double sinR = std::sin( std::atan( moonTan ) );
 	const float exposure = skyExposure();
 	const wwskydisc::MoonTerms t = wwskydisc::moonTerms( g.alphaDeg, af.sunK, exposure );
 	skyState( r, true, false );
@@ -2943,7 +2952,7 @@ bool drawMoonGlobe( Scene * scene, const SkyFrame & f, float mul, QStringList & 
 	prog->uni1i( "viewTransform", skyViewTransform() );
 	const float c[3] = { float( g.D[0] ), float( g.D[1] ), float( g.D[2] ) };
 	prog->uni3f( "centerWorld", c[0], c[1], c[2] );
-	prog->uni1f( "halfSize", float( std::tan( wwskydisc::kMoonHalfDeg * wwskydisc::kRad ) * 1.5 + 2.0 * pxAng ) );
+	prog->uni1f( "halfSize", float( moonTan * 1.5 + 2.0 * pxAng ) );
 	static const float quad[12] = { -1, -1, 0, 1, -1, 0, -1, 1, 0, 1, 1, 0 };
 	static const std::uint16_t idx[6] = { 0, 1, 2, 2, 1, 3 };
 	const float * attrs = quad;

@@ -82,6 +82,7 @@ public:
 	QComboBox * exposureFromSkyBox = nullptr;	// lane SKYA (EXPO1)
 	QComboBox * skyColorBox = nullptr;	// lane SKYA (ATMOCHECK1)
 	QComboBox * giSkyFromPhysicalBox = nullptr;	// lane SKYA (SKYGI1)
+	QComboBox * bodySizeBox = nullptr;	// MODULES1 R6-12 b: Sun and Moon Size
 	QComboBox * cloudMapBox = nullptr;	// lane CLOUD1
 	QComboBox * volumeCloudsBox = nullptr;	// lane CLOUD2
 	QComboBox * cloudVarietyBox = nullptr;	// lane CLOUD5

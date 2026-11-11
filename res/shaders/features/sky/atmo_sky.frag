@@ -19,6 +19,7 @@ uniform float atSunK;	// pi * k for the sun
 uniform float atMoonK;	// pi * k for the moon; 0 = no moon term
 uniform float atLimb;	// 1 = limb darkening (High+)
 uniform float atDiscCap;	// the disc's display cap (scene units)
+uniform float atSunSize;	// MODULES1 R6-12 b: the drawn disc's radius over the true one (the Sun and Moon Size row; <= 1 = true)
 uniform float atDiscHue;	// lane SKYDISC1: 1 = one scale for the whole disc (its centre to the cap): hue and limb kept
 /* lane FIX1101A (moon, LATE ITEM 24d(2)): the disc's gain through the Volumetric Air (gl/moonlight.h discAirGain): the
  * air's composite keeps T_air / T_sky of the sky, the bands included, while the sun's light takes only the ground layer;
@@ -90,8 +91,10 @@ void main()
 	if ( atTintOn > 0.5 )	// the disc below keeps the physical color
 		c = atWeatherTint( c, degrees( asin( clamp( d.z, -1.0, 1.0 ) ) ) );
 	float cs = dot( d, atSunW );
-	if ( cs > kSunCos ) {
-		float x = clamp( ( 1.0 - cs ) / ( 1.0 - kSunCos ), 0.0, 1.0 );	// ~ (theta / alpha)^2
+	// R6-12 b: a bigger drawn disc keeps its radiance (it sits at the cap); 1 - cos grows by the square of the radius
+	float sunEdge = ( 1.0 - kSunCos ) * ( atSunSize > 1.0 ? atSunSize * atSunSize : 1.0 );
+	if ( atSunSize > 1.0 ? ( 1.0 - cs < sunEdge ) : ( cs > kSunCos ) ) {
+		float x = clamp( ( 1.0 - cs ) / sunEdge, 0.0, 1.0 );	// ~ (theta / alpha)^2
 		vec3 limb = vec3( 1.0 );
 		if ( atLimb > 0.5 ) {
 			vec3 a = vec3( 0.397, 0.503, 0.652 );

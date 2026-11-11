@@ -42,6 +42,8 @@ constexpr int kTierDef = 4, kApDef = 1, kSunDef = 2, kNightDef = 1, kGiDef = 1;	
 constexpr const char * kExpoKey = "Settings/Render/Scene/Exposure From Sky";	// lane SKYA (EXPO1)
 constexpr const char * kTintKey = "Settings/Render/Scene/Sky Color";	// lane SKYA (ATMOCHECK1)
 constexpr const char * kGiKey = "Settings/Render/Scene/GI Sky From Physical Sky 2";	// lane SKYA (SKYGI1)
+constexpr const char * kBodyKey = "Settings/Render/Scene/Sun and Moon Size";	// MODULES1 R6-12 b
+constexpr int kBodyDef = 1;	// Game
 static_assert( kTintN == 17, "WwAtmoInputs::tint and atmo_sky.frag atTint[17]" );
 constexpr GLenum kTimestamp = 0x8E28;	// GL_TIMESTAMP
 constexpr int kTransW = 256, kTransH = 64;
@@ -79,6 +81,9 @@ struct AtState
 	bool glowSky = false;	// LATE 7: this hour's weather sky is one the physical model cannot make (wwAtmoSetGlowSky)
 	int gi = 0;	// lane SKYA (SKYGI1): the GI Sky From Physical Sky row, 0 Off / 1 On (pin WW_ATMO_GI)
 	bool giPinned = false;
+	int bodySize = 0;	// MODULES1 R6-12 b: the Sun and Moon Size row (pin WW_ATMO_BODYSIZE)
+	bool bodySizePinned = false;
+	float gameSun = 0.0f, gameMoon = 0.0f;	// the game's own discs, tan of the half-angle (0 = not handed yet)
 };
 
 //! lane SKYA: one row's value from its pin (already read by the caller: the survey needs literal names), a harness
@@ -140,6 +145,7 @@ AtState & as()
 		s.tint = rowValue( wwEnvStr( "WW_ATMO_TINT" ), kTintKey, { "physical", "weather" }, s.tintPinned );
 		s.tintEnv = !wwEnvStr( "WW_ATMO_TINT" ).trimmed().isEmpty();
 		s.gi = rowValue( wwEnvStr( "WW_ATMO_GI" ), kGiKey, { "off", "on" }, s.giPinned, kGiDef );
+		s.bodySize = rowValue( wwEnvStr( "WW_ATMO_BODYSIZE" ), kBodyKey, { "physical", "game", "large" }, s.bodySizePinned, kBodyDef );
 		// lane WEATHERRECX1: the record reds hand a light channel back to the WTHR record (an unpinned row only)
 		const unsigned rr = wwWeatherRecordChannels( wwEnvStr( "WW_WEATHER_RECORD_RED" ) );
 		if ( ( rr & WwRecSky ) && !s.tintPinned )
@@ -787,6 +793,7 @@ bool wwAtmoDrawSky( Scene * scene, const WwAtmoInputs & in, QString * line )
 			p->uni1f( "atMoonK", moonK );
 			p->uni1f( "atLimb", ( s.tier >= 3 || in.discs ) ? 1.0f : 0.0f );
 			p->uni1f( "atDiscCap", in.disc ? ( phys ? wwphys::kDiscCap : kDiscCap ) : 0.0f );
+			p->uni1f( "atSunSize", wwAtmoBodyScale( false ) );	// MODULES1 R6-12 b
 			p->uni1f( "atDiscHue", in.discs ? 1.0f : 0.0f );	// SKYDISC1: 0 = the per-channel min() as before
 			p->uni1f( "atDiscAir", discAir[0] );	// lane FIX1101A (moon): the disc's gain through the air
 			p->uni1f( "sceneExposure", in.exposure );
@@ -1103,6 +1110,52 @@ void wwAtmoApFrame()
 int wwAtmoGi()
 {
 	return as().gi;
+}
+
+// ---- MODULES1 R6-12 b: the Sun and Moon Size row ----
+int wwAtmoBodySize()
+{
+	return as().bodySize;
+}
+
+void wwAtmoSetBodySize( int v )
+{
+	AtState & s = as();
+	if ( s.bodySizePinned )
+		return;
+	s.bodySize = std::clamp( v, 0, 2 );
+	QSettings().setValue( QLatin1StringView( kBodyKey ), s.bodySize );
+}
+
+float wwAtmoBodyScale( bool moon )
+{
+	const AtState & s = as();
+	const float game = moon ? s.gameMoon : s.gameSun;
+	if ( s.bodySize <= 0 || !( game > 0.0f ) )
+		return 1.0f;
+	const float real = float( std::tan( ( moon ? wwskydisc::kMoonHalfDeg : wwskydisc::kSunHalfDeg ) * wwskydisc::kRad ) );
+	// never under the true size; the bound keeps a broken record from filling the sky (a disc 30 degrees across)
+	return std::clamp( game * ( s.bodySize == 2 ? 1.5f : 1.0f ) / real, 1.0f, 58.0f );
+}
+
+void wwAtmoSetBodyGame( float sunTanHalf, float moonTanHalf )
+{
+	AtState & s = as();
+	s.gameSun = sunTanHalf;
+	s.gameMoon = moonTanHalf;
+	static QString said;
+	const char * names[3] = { "Physical", "Game", "Large (Game x 1.5)" };
+	const double ks = wwAtmoBodyScale( false ), km = wwAtmoBodyScale( true );
+	const double ts = std::tan( wwskydisc::kSunHalfDeg * wwskydisc::kRad ), tm = std::tan( wwskydisc::kMoonHalfDeg * wwskydisc::kRad );
+	const QString line = QStringLiteral( "sky bodies size: row %1%2; sun disc drawn %3 deg across (true %4, x%5), moon %6 deg (true %7, x%8); the game's own: sun %9 deg, moon %10 deg (the record's quad x the art's disc share); disc and glare only, the light reads the true sizes (red: the row's Physical, WW_ATMO_BODYSIZE=physical)" )
+		.arg( QLatin1String( names[std::clamp( s.bodySize, 0, 2 )] ), s.bodySizePinned ? QStringLiteral( " (PINNED)" ) : QString() )
+		.arg( 2.0 * std::atan( ts * ks ) / wwskydisc::kRad, 0, 'f', 2 ).arg( 2.0 * wwskydisc::kSunHalfDeg, 0, 'f', 3 ).arg( ks, 0, 'f', 2 )
+		.arg( 2.0 * std::atan( tm * km ) / wwskydisc::kRad, 0, 'f', 2 ).arg( 2.0 * wwskydisc::kMoonHalfDeg, 0, 'f', 3 ).arg( km, 0, 'f', 2 )
+		.arg( 2.0 * std::atan( double( sunTanHalf ) ) / wwskydisc::kRad, 0, 'f', 2 ).arg( 2.0 * std::atan( double( moonTanHalf ) ) / wwskydisc::kRad, 0, 'f', 2 );
+	if ( line != said ) {
+		said = line;
+		fprintf( stderr, "%s\n", qPrintable( line ) );
+	}
 }
 
 void wwAtmoSetGi( int on )

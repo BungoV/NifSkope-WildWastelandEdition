@@ -517,7 +517,8 @@ int main( int argc, char * argv[] )
 			{ "WW_CLOUDVOL", "ultra" }, { "WW_CELL_AIR_GRID", "ultra" },
 			// MODULES1 R6-12: the atmosphere's other rows at their SHIPPED values (a harness pinned them Off, so the
 			// Scene panel read Aerial Perspective / Sun and Sky Light / Night Sky / Sky Light in GI = Off in a flight)
-			{ "WW_ATMO_AP", "1" }, { "WW_ATMO_SUN", "full" }, { "WW_ATMO_NIGHT", "1" }, { "WW_ATMO_GI", "1" } };	// part 18 audit: a harness pins clouds 0 and the grid Low otherwise
+			{ "WW_ATMO_AP", "1" }, { "WW_ATMO_SUN", "full" }, { "WW_ATMO_NIGHT", "1" }, { "WW_ATMO_GI", "1" },
+			{ "WW_ATMO_BODYSIZE", "game" } };	// R6-12 b: the Sun and Moon Size row's shipped value	// part 18 audit: a harness pins clouds 0 and the grid Low otherwise
 		QByteArray set, kept;
 		for ( const auto & kv : kAllOn ) {
 			const char * k = kv[0];
