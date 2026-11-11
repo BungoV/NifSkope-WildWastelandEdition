@@ -23,6 +23,7 @@ uniform float atSunK;
 uniform float atMoonK;
 uniform float atTintOn;
 uniform vec3 atTint[17];
+uniform vec2 atRecNight;	// MODULES1 R7: atmo_sky.frag's twin
 uniform vec3 moonD;	// TO the moon's centre (world, unit)
 uniform vec3 moonS;	// TO the sun from the moon (world, unit): the phase
 uniform vec3 bodyX;	// the moon's axes: x = longitude 0, y = 90 east, z = the spin pole
@@ -135,6 +136,11 @@ void main()
 	vec3 sky = atSunK * atLookup( atSunView, d, atSunW );
 	if ( atMoonK > 0.0 )
 		sky += atMoonK * atLookup( atMoonView, d, atMoonW );
+	if ( atRecNight.y > 0.0 ) {
+		float tn = sqrt( clamp( degrees( asin( clamp( d.z, -1.0, 1.0 ) ) ), 0.0, 90.0 ) / 90.0 ) * 16.0;
+		int jn = min( int( tn ), 15 );
+		sky = sky * ( 1.0 - atRecNight.x ) + mix( atTint[jn], atTint[jn + 1], tn - float( jn ) ) * atRecNight.y;
+	}
 	if ( atTintOn > 0.5 )
 		sky = atWeatherTint( sky, degrees( asin( clamp( d.z, -1.0, 1.0 ) ) ) );
 	fragColor = vec4( studioOutput( sky + m ) * cov, cov );

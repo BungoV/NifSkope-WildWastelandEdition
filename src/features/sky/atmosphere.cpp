@@ -803,7 +803,9 @@ bool wwAtmoDrawSky( Scene * scene, const WwAtmoInputs & in, QString * line )
 			s.tintDrawn = tintOn;
 			p->uni1f( "atTintOn", tintOn ? 1.0f : 0.0f );
 			const GLint tintLoc = p->uniLocation( "atTint" );
-			if ( tintOn && tintLoc >= 0 )
+			const bool recOn = in.tintOk && in.recNight[1] > 0.0f;	// MODULES1 R7: the record's night sky (lookdevstage.cpp computeLight)
+			p->uni2f( "atRecNight", recOn ? in.recNight[0] : 0.0f, recOn ? in.recNight[1] : 0.0f );
+			if ( ( tintOn || recOn ) && tintLoc >= 0 )
 				fn->glUniform3fv( tintLoc, kTintN, &in.tint[0][0] );
 			quad( r );
 			r->stopProgram();
@@ -851,7 +853,10 @@ bool wwAtmoDrawSky( Scene * scene, const WwAtmoInputs & in, QString * line )
 		f.frame = s.frame;
 		f.moonDiscAir = discAir[1];	// lane FIX1101A (moon): our globe's gain through the air
 		f.tintOn = s.tintDrawn && ok;
-		if ( f.tintOn )
+		const bool recOn = ok && in.tintOk && in.recNight[1] > 0.0f;	// MODULES1 R7
+		f.recNight[0] = recOn ? in.recNight[0] : 0.0f;
+		f.recNight[1] = recOn ? in.recNight[1] : 0.0f;
+		if ( f.tintOn || recOn )
 			std::copy( &in.tint[0][0], &in.tint[0][0] + kTintN * 3, &f.tint[0][0] );
 	}
 
@@ -872,6 +877,11 @@ bool wwAtmoDrawSky( Scene * scene, const WwAtmoInputs & in, QString * line )
 		reds += in.tintOk ? ( wwAtmoTintRedFlat() ? QStringLiteral( ",tint=weather,TINT_RED=flat" )
 			: wwAtmoTintRedPhysical() ? QStringLiteral( ",tint=weather,TINT_RED=physical" ) : QStringLiteral( ",tint=weather(ap,amb)" ) )
 			: QStringLiteral( ",tint=refused(no dome)" );
+	if ( in.recNight[1] > 0.0f )	// MODULES1 R7: the record's night sky as drawn
+		reds += !in.tintOk ? QStringLiteral( ",nightsky=refused(no dome)" )
+			: in.recNight[0] > 0.0f ? QString( ",nightsky=record(x%1)" ).arg( double( in.recNight[1] ), 0, 'f', 3 )
+			: QString( ",nightsky=game(+record x%1,zenith +%2)" ).arg( double( in.recNight[1] ), 0, 'f', 3 )
+				.arg( double( ( 0.2126f * in.tint[16][0] + 0.7152f * in.tint[16][1] + 0.0722f * in.tint[16][2] ) * in.recNight[1] ), 0, 'g', 3 );
 	s.last = ok ? QString( "physical(tier=%1,view=%2x%3,ms=%4,haze=%5/km@%6km,sun_elev=%7,k=%8,moon=%9%10)" )
 			.arg( QLatin1StringView( tierName( s.tier ) ) ).arg( vw ).arg( vh ).arg( msN )
 			.arg( double( s.haze[0] ), 0, 'f', 3 ).arg( double( s.haze[1] ), 0, 'f', 3 ).arg( double( sunEl ), 0, 'f', 1 )
@@ -1287,15 +1297,17 @@ bool wwAtmoHorizon( float out[3] )
 			memo[c] = float( acc[c] / NA ) + f.sunK * fl[c] * vr * tr[c];
 	}
 	std::copy( memo, memo + 3, out );
-	if ( f.tintOn ) {	// atmo_sky.frag atWeatherTint at the same elevation
+	if ( f.tintOn || f.recNight[1] > 0.0f ) {	// atmo_sky.frag atRecNight, then atWeatherTint, at the same elevation
 		const float t = std::sqrt( std::asin( 0.01f ) * 57.29578f / 90.0f ) * 16.0f;
 		const int i = std::min( int( t ), 15 );
 		float w[3];
 		for ( int c = 0; c < 3; c++ )
 			w[c] = f.tint[i][c] + ( f.tint[i + 1][c] - f.tint[i][c] ) * ( t - float( i ) );
+		for ( int c = 0; c < 3; c++ )	// MODULES1 R7: the record's night sky
+			out[c] = out[c] * ( 1.0f - f.recNight[0] ) + w[c] * f.recNight[1];
 		const float lw = 0.2126f * w[0] + 0.7152f * w[1] + 0.0722f * w[2];
 		const float lc = 0.2126f * out[0] + 0.7152f * out[1] + 0.0722f * out[2];
-		if ( lw > 1e-8f )
+		if ( f.tintOn && lw > 1e-8f )
 			for ( int c = 0; c < 3; c++ )
 				out[c] = w[c] * lc / lw;
 	}

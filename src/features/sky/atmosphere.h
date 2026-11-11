@@ -31,6 +31,7 @@ struct WwAtmoInputs
 	int viewTransform = 0;
 	float tint[17][3] = {};	//!< lane SKYA (ATMOCHECK1): the weather dome's linear color at atmomath.h's tint elevations
 	bool tintOk = false;	//!< the table is filled (the dome resolved); else Weather Tint draws the physical color
+	float recNight[2] = { 0.0f, 0.0f };	//!< MODULES1 R7: the record's night sky: sky x (1 - [0]) + the tint table x [1] (needs tintOk)
 	bool capture = false;	//!< lane SKYA (SKYGI1): the probes' sky capture; no timing, no exposure read-back, no air
 	bool discs = false;	//!< lane SKYDISC1: our sun disc (limb darkening at every tier, a hue-keeping cap)
 };
@@ -57,6 +58,7 @@ struct WwAtmoFrame
 	float moonDiscAir = 1.0f;	//!< lane FIX1101A (moon): our globe's gain through the air (gl/moonlight.h discAirGain)
 	bool tintOn = false;	//!< lane SKYDISC1: the Weather Tint drawn, with its table (the moon redraws the sky behind it)
 	float tint[17][3] = {};
+	float recNight[2] = { 0.0f, 0.0f };	//!< MODULES1 R7: as drawn (0 0 = none); the table above is filled when [1] > 0
 };
 const WwAtmoFrame & wwAtmoFrame();
 //! MODULES1 M8: the drawn sky's colour just above the horizon, scene units (false with no sky drawn)

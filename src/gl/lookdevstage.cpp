@@ -816,6 +816,8 @@ struct LdLight
 	bool fromWeather = false;
 	float physKey = 1.0f;	// lane PHYSUNITS1: the real key over the weather's (1 = the old scale)
 	float physFog = 1.0f;	// lane PHYSUNITS1: the real light over the weather's, sun + ambient (the fog's colours take it)
+	float nightW = 0.0f;	// MODULES1 R7: the night share the record's night sky is drawn by (0 = day, or the red)
+	float skyGame[3] = { 0.0f, 0.0f, 0.0f };	// MODULES1 R7: master On: the record's sky x Sky Scale x the key's unit x nightW, cd/m2
 };
 
 LdLight computeLight();
@@ -838,6 +840,12 @@ bool wwMoonRed( const char * word )
 {
 	const QString v = wwEnvStr( "WW_MOON_RED" ).trimmed().toLower();
 	return v == QLatin1StringView( "vanilla" ) || v == QLatin1StringView( word );
+}
+
+/* MODULES1 R7: WW_NIGHTSKY_RED=physical (live): the night sky without the weather record's level (computeLight) */
+bool wwNightSkyRed()
+{
+	return wwEnvStr( "WW_NIGHTSKY_RED" ).trimmed().toLower() == QLatin1StringView( "physical" );
 }
 
 MoonGeo moonGeo( const LdState & s, const float gamePos[3] )
@@ -974,7 +982,8 @@ LdLight currentLight()
 	const WwSunPathKey sunKey = wwSunPathKey();
 	const unsigned long long wx = wwWeatherRecx().stamp;
 	// MODULES1 R6-12: the gameplay moon's pin moves the light too (live)
-	const QString mr = wwEnvStr( "WW_MOON_RED" ).trimmed().toLower() + QLatin1Char( '|' ) + wwEnvStr( "WW_MOON_GAME" ).trimmed();
+	const QString mr = wwEnvStr( "WW_MOON_RED" ).trimmed().toLower() + QLatin1Char( '|' ) + wwEnvStr( "WW_MOON_GAME" ).trimmed()
+		+ QLatin1Char( '|' ) + wwEnvStr( "WW_NIGHTSKY_RED" ).trimmed().toLower();
 	if ( gen != s.gen || hour != s.hour || sun != s.sun || atmoSun != atmoKey || !( sunPath == sunKey ) || wxStamp != wx
 		|| mr != moonRed || physSky != wwPhysSkyOn() || wxOv != wwWxOvStamp() ) {
 		physSky = wwPhysSkyOn();
@@ -1013,6 +1022,7 @@ void physFinish( LdLight & L, float rKey, bool airKey )
 		for ( int c = 0; c < 3; c++ )
 			L.sun[c] *= rKey;
 	const float ambOld = lumOf( L.amb );
+	const float skyAl = wwWeatherRecx().groundAlbedo >= 0.0f ? wwWeatherRecx().groundAlbedo : 0.15f;
 	float n[3] = { L.sunDir[0], L.sunDir[1], L.sunDir[2] };
 	const float len = std::sqrt( n[0] * n[0] + n[1] * n[1] + n[2] * n[2] );
 	float axes[6][3], T[3], out[6][3];
@@ -1071,7 +1081,8 @@ void physFinish( LdLight & L, float rKey, bool airKey )
 	for ( int c = 0; c < 3; c++ ) {
 		float m = 0.0f;
 		for ( int a = 0; a < 6; a++ )
-			m += ( L.dalc[a][c] += wwphys::kNightFloor );
+			m += ( L.dalc[a][c] += wwphys::kNightFloor	// MODULES1 R7: + the record's night sky: all of it on +Z, its ground bounce on -Z
+				+ ( a == 4 ? 1.0f : a == 5 ? skyAl : 0.5f * ( 1.0f + skyAl ) ) * L.skyGame[c] );
 		L.amb[c] = m / 6.0f;
 	}
 	const float oldTot = lumOf( L.sun ) / std::max( rKey, 1e-9f ) + ambOld;
@@ -1244,6 +1255,43 @@ LdLight computeLight()
 		const float rd = vd > 1e-9f ? keyLumOf( WwTodDay ) * 0.8f / vd : 1.0f;
 		const float rn = vn > 1e-9f ? keyLumOf( WwTodNight ) * 0.8f / vn : rd;
 		rKey = rd * std::pow( rn / rd, std::clamp( wE, 0.0f, 1.0f ) );
+	}
+	/* MODULES1 R7 (bungo 11-11: "the sky is pitch black, why", "I already told you to fix the physical sky being too dark
+	 * at night"): the night sky at the level the weather record gives it. Put in the light's units, the record's night
+	 * sky is ~40x over the real one (2.2e-4 cd/m2 + the moon's scatter), and the camera does not adapt under 1 cd/m2.
+	 * Master On: the record's sky rows x Sky Scale x the key's unit x the night share are ADDED to the drawn sky
+	 * (atmo_sky.frag atRecNight.y) and to the ambient (physFinish). Master Off: the drawn sky crossfades to the record's
+	 * dome colours by the night share (atRecNight.x), as the game draws them. Red WW_NIGHTSKY_RED=physical: neither. */
+	L.nightW = ( wwNightSkyRed() || !s.haveWeather ) ? 0.0f : std::clamp( wE, 0.0f, 1.0f );
+	if ( s.haveWeather ) {
+		const int rows3[3] = { WwRowSkyUpper, WwRowSkyLower, WwRowHorizon };
+		float m3[3] = { 0.0f, 0.0f, 0.0f };
+		for ( int r3 : rows3 ) {
+			float c3[3];
+			EsmWeather::blendRowLab( s.w, r3, L.keys, c3 );
+			for ( int c = 0; c < 3; c++ )
+				m3[c] += lin( c3[c] ) / 3.0f;
+		}
+		const float sc = EsmWeather::blendSkyScale( s.w, L.keys );
+		if ( phys )
+			for ( int c = 0; c < 3; c++ )
+				L.skyGame[c] = m3[c] * sc * rKey * L.nightW;
+		const double recL = double( ( 0.2126f * m3[0] + 0.7152f * m3[1] + 0.0722f * m3[2] ) * sc );
+		static QString saidSky;
+		const QString line = wwNightSkyRed()
+			? QStringLiteral( "night sky: RED WW_NIGHTSKY_RED=physical: the physical night sky alone (master %1; the record's sky %2 not used)" )
+				.arg( phys ? QStringLiteral( "On" ) : QStringLiteral( "Off" ) ).arg( recL, 0, 'g', 3 )
+			: phys ? QStringLiteral( "night sky: master On: record sky %1 (rows x Sky Scale %2) x key unit %3 x night share %4 = +%5 cd/m2 added to the drawn sky and the ambient (rgb %6 %7 %8; the real floor %9; red WW_NIGHTSKY_RED=physical)" )
+				.arg( recL, 0, 'g', 3 ).arg( double( sc ), 0, 'g', 3 ).arg( double( rKey ), 0, 'g', 4 ).arg( double( L.nightW ), 0, 'f', 3 )
+				.arg( recL * double( rKey * L.nightW ), 0, 'g', 3 ).arg( double( L.skyGame[0] ), 0, 'g', 3 ).arg( double( L.skyGame[1] ), 0, 'g', 3 )
+				.arg( double( L.skyGame[2] ), 0, 'g', 3 ).arg( double( wwphys::kNightFloor ), 0, 'g', 3 )
+			: QStringLiteral( "night sky: master Off: the drawn sky x %1 + the record's dome colours x %2 (night share; record sky %3 = rows %4 %5 %6 x Sky Scale %7; red WW_NIGHTSKY_RED=physical)" )
+				.arg( double( 1.0f - L.nightW ), 0, 'f', 3 ).arg( double( L.nightW ), 0, 'f', 3 ).arg( recL, 0, 'g', 3 )
+				.arg( double( m3[0] ), 0, 'g', 3 ).arg( double( m3[1] ), 0, 'g', 3 ).arg( double( m3[2] ), 0, 'g', 3 ).arg( double( sc ), 0, 'g', 3 );
+		if ( line != saidSky ) {
+			saidSky = line;
+			fprintf( stderr, "%s\n", qPrintable( line ) );
+		}
 	}
 	const WwFog fog = currentFog();
 	const float fogIn[4] = { fog.effOff ? 0.0f : fog.fogFar, fog.effOff ? 0.0f : fog.maxv, fog.fMid, fog.fRange };
@@ -2933,8 +2981,9 @@ bool drawMoonGlobe( Scene * scene, const SkyFrame & f, float mul, QStringList & 
 	prog->uni1f( "atSunK", af.sunK );
 	prog->uni1f( "atMoonK", af.moonK );
 	prog->uni1f( "atTintOn", af.tintOn ? 1.0f : 0.0f );
+	prog->uni2f( "atRecNight", af.recNight[0], af.recNight[1] );	// MODULES1 R7: the sky behind the globe takes the same
 	const GLint tintLoc = prog->uniLocation( "atTint" );
-	if ( af.tintOn && tintLoc >= 0 )
+	if ( ( af.tintOn || af.recNight[1] > 0.0f ) && tintLoc >= 0 )
 		r->fn->glUniform3fv( tintLoc, 17, &af.tint[0][0] );
 	prog->uni3f( "moonD", float( g.D[0] ), float( g.D[1] ), float( g.D[2] ) );
 	prog->uni3f( "moonS", float( g.S[0] ), float( g.S[1] ), float( g.S[2] ) );
@@ -3336,7 +3385,8 @@ void drawStars( Scene * scene, const SkyFrame & f, QStringList & drew )
 		m->uv.constData() };
 	r->drawShape( m->nv, 0x20000043ULL, unsigned( m->idx.size() ), GL_TRIANGLES, GL_UNSIGNED_SHORT, attrs, m->idx.constData() );
 	r->stopProgram();
-	drew << QString( "stars:%1(alpha=%2,turn=%3deg)" ).arg( path, f3( a ) ).arg( double( ang ) * 360.0 / kTau, 0, 'f', 1 );
+	drew << QString( "stars:%1(alpha=%2,turn=%3deg,level=%4)" ).arg( path, f3( a ) ).arg( double( ang ) * 360.0 / kTau, 0, 'f', 1 )
+		.arg( double( ( 0.2126f * f.stars[0] + 0.7152f * f.stars[1] + 0.0722f * f.stars[2] ) * starK * f.skyScale ), 0, 'g', 3 );
 }
 
 /* MODULES1 M6: every user of the sun's and the moon's direction this frame, azimuth/elevation in degrees, printed when
@@ -3436,6 +3486,11 @@ bool drawAtmo( Scene * scene, QStringList & drew, bool capture = false )
 	in.discs = wwAtmoDiscs() && !capture;	// lane SKYDISC1: our sun disc
 	in.exposure = skyExposure();
 	in.viewTransform = skyViewTransform();
+	{	// MODULES1 R7: the record's night sky (computeLight): master Off = a crossfade to the dome's colours, On = added
+		const LdLight nl = currentLight();
+		in.recNight[0] = phys ? 0.0f : nl.nightW;
+		in.recNight[1] = nl.nightW;
+	}
 	// lane SKYA (ATMOCHECK1): the weather dome's colors by elevation for the Sky Color row's Weather Tint; the rings come
 	// from the dome mesh's vertex weights once per mesh, the colors from this hour's weather each frame
 	{	// LATE 7: a glowing record sky (the radstorms) draws Weather Tint (atmosphere.h wwAtmoSetGlowSky)
@@ -3443,7 +3498,7 @@ bool drawAtmo( Scene * scene, QStringList & drew, bool capture = false )
 		const float * u = gf.up;
 		wwAtmoSetGlowSky( u[1] > 0.0f && u[1] >= u[0] && u[1] >= u[2] && u[2] < 0.75f * u[1] && u[2] < u[0] );
 	}
-	if ( wwAtmoTintDrawn() > 0 ) {
+	if ( wwAtmoTintDrawn() > 0 || in.recNight[1] > 0.0f ) {
 		QString why;
 		const SkyMesh * m = domeMesh( scene, &why );
 		const int cs = m && m->nv > 0 ? int( m->col.size() ) / int( m->nv ) : 0;

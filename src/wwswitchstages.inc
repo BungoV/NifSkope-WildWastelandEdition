@@ -1171,6 +1171,7 @@
 { "WW_NIFX_LIGHTS_DUMP", 0, "src/features/lights/celllamps.cpp:504 WwCellLightsP::nifxTick | re-read per frame or per call (a)" },
 { "WW_NIFX_LIGHTS_RED", 0, "src/features/lights/celllamps.cpp:366 WwCellLightsP::fogScaleTick | re-read per frame or per call (a)" },
 { "WW_NIFX_ROOT", 0, "src/cellview.cpp:1004 cellNifxModel | hand: celllights.cpp nifxTick re-reads it every tick; a moved root makes the live scan look at every folder (NIFXLIGHT3)" },
+{ "WW_NIGHTSKY_RED", 0, "src/gl/lookdevstage.cpp:844 wwNightSkyRed | re-read per frame or per call (a)" },
 { "WW_NORMALS_TEST", 2, "src/nifskope_ui.cpp:7325 NifSkope::createWindow | createWindow: picks which harness the window runs" },
 { "WW_NO_SPIN", 2, "src/nifskope_ui.cpp:16466 NifSkope::createWindow | createWindow: picks which harness the window runs" },
 { "WW_OBJAO_SLAB_TEST", 3, "src/features/far-lod/lodgen.cpp:11845 lodgenObjectSlabSelfTestOnce | bake/CLI/test path" },

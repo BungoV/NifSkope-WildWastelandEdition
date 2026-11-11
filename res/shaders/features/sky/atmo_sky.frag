@@ -29,6 +29,7 @@ uniform float sceneExposure;
 uniform int viewTransform;
 uniform float atTintOn;	// lane SKYA (ATMOCHECK1): 1 = the Sky Color row's Weather Tint
 uniform vec3 atTint[17];	// the weather dome's linear color at 90 (i / 16)^2 degrees (gl/atmomath.h tintTable)
+uniform vec2 atRecNight;	// MODULES1 R7: the record's night sky: the sky x (1 - x) + the dome's color x y (0 0 = none)
 uniform sampler2D atMsTex;	// lane SKY2B (SKYBLUR1): the per-pixel sky marches each pixel (red WW_ATMO_RED=perpixel)
 uniform vec2 atMsSize;
 uniform float atMsOn;
@@ -87,6 +88,11 @@ void main()
 		float sz2 = 1.0 - d.z * d.z;
 		float vr = inversesqrt( max( 1.0 - 0.97226 * sz2, 0.02 ) );	// (6360 / 6450)^2
 		c += atSunK * atFloor * vr * atTrans( atTransTex, atCamR, d.z );
+	}
+	if ( atRecNight.y > 0.0 ) {	// MODULES1 R7: master Off: a crossfade to the record's dome (x = y); On: the dome added (x = 0)
+		float tn = sqrt( clamp( degrees( asin( clamp( d.z, -1.0, 1.0 ) ) ), 0.0, 90.0 ) / 90.0 ) * 16.0;
+		int jn = min( int( tn ), 15 );
+		c = c * ( 1.0 - atRecNight.x ) + mix( atTint[jn], atTint[jn + 1], tn - float( jn ) ) * atRecNight.y;
 	}
 	if ( atTintOn > 0.5 )	// the disc below keeps the physical color
 		c = atWeatherTint( c, degrees( asin( clamp( d.z, -1.0, 1.0 ) ) ) );
