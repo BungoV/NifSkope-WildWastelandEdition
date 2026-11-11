@@ -30,6 +30,9 @@ struct WwWaterRecord;
  *
  *    WW_ENDLESS_SEA=0|1            the Endless sea row's pin (Settings: Water), ships ON, live
  *    WW_ENDLESS_SEA_RED=off        the old picture: the sheet is not drawn and the baked water keeps its edge (live)
+ *    WW_ENDLESS_SEA_RED=seamcut    lane SKYSEA1's red: the sheet stops exactly at the box edge (a crack where the
+ *                                  baked water's last texels end); default it reaches 4096 u under the baked water
+ *    WW_ENDLESS_SEA_RED=worldrec   lane SKYSEA1's red: the sheet takes the worldspace default WATR, not the sea body's
  *    WW_ENDLESS_SEA_SEAM=<u>       the seam band (live; 0 = no fade)
  *    WW_ENDLESS_SEA_FAR=<u>        the far rim (built with the cell)
  *    WW_ENDLESS_SEA_CURVE=1        the earth's curvature: the rim drops d^2 / 2R (R = 6371 km; built with the cell) */
@@ -42,6 +45,10 @@ QString wwEndlessSeaAppend( NifModel * nif, const QModelIndex & parent, const Ww
 	const QString & lodlPath, const int * drawnCells = nullptr );
 //! The Endless sea row and its red.
 bool wwEndlessSeaOn();
+//! Lane SKYSEA1: the sea body's own WATR form (the record the baked sea draws with), 0 = none or red worldrec.
+quint32 wwEndlessSeaBodyForm( const QString & lodlPath );
+//! Lane SKYSEA1: how far the sheet reaches under the baked water inside the box, world units (red seamcut: 0).
+float wwEndlessSeaOverlap();
 //! The seam band, world units (0 = no fade).
 float wwEndlessSeaSeam();
 //! Once a frame before the scene's transform: the sheet moves to the camera's 2048 u step.

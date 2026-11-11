@@ -582,7 +582,8 @@ bool wwCellWaterUniforms( Scene * scene, int block, int unit )
 	if ( prog->uniLocation( "waterSeam" ) >= 0 ) {	// lane FARSEA1: the endless sea and its seam (water_info.glsl)
 		const bool seaOn = !dit->endless.isEmpty() && wwEndlessSeaOn();
 		prog->uni4f( "waterSeam", FloatVector4( seaOn ? wwEndlessSeaSeam() : 0.0f, float( dit->seaId ),
-			seaOn && dit->endless.contains( block ) ? 1.0f : 0.0f, 0.0f ) );
+			seaOn && dit->endless.contains( block ) ? 1.0f : 0.0f,
+			seaOn && dit->endless.contains( block ) ? wwEndlessSeaOverlap() : 0.0f ) );	// lane SKYSEA1: under the baked edge
 		prog->uni4f( "waterSeamBox", FloatVector4( dit->seaBox[0], dit->seaBox[1], dit->seaBox[2], dit->seaBox[3] ) );
 	}
 	if ( prog->uniLocation( "waterShoreOn" ) >= 0 ) {
@@ -642,7 +643,15 @@ bool wwCellWaterUniforms( Scene * scene, int block, int unit )
 		WW_SWITCH_STATIC( QByteArray, gr, wwEnv( "WW_CELL_WATER_GLINT_RED" ).trimmed() );
 		prog->uni1b( "waterReflOn", reflOn );
 		prog->uni1b( "waterGlintOn", glintOn );
-		prog->uni1i( "waterReflRed", rr == "record" ? 1 : rr == "farcolour" ? 2 : rr == "sharp" ? 4 : 0 );
+		prog->uni1i( "waterReflRed", rr == "record" ? 1 : rr == "farcolour" ? 2 : rr == "sharp" ? 4
+			: rr == "cloudedge" ? 16 : 0 );	// lane SKYSEA1: cloudedge = the cloud map's hard square edge in the water
+		static bool edgeSaid = false;
+		if ( reflOn && !edgeSaid ) {
+			edgeSaid = true;
+			fprintf( stderr, "cell water: reflected clouds %s\n", rr == "cloudedge"
+				? "cut at the cloud map's square edge (red WW_CELL_WATER_REFL_RED=cloudedge)"
+				: "fade to the band's mean cover over the cloud map's outer 15% (no square line on the sea; lane SKYSEA1)" );
+		}
 		prog->uni1i( "waterGlintRed", gr == "game" ? 1 : gr == "nolean" ? 2 : gr == "noshoulder" ? 4
 			: gr == "noglitter" ? 8 : gr == "nodisc" ? 16 : gr == "pixel" ? 32 : gr == "nolodblend" ? 64
 			: gr == "sparse" ? 128 : 0 );	// WATERLOOK1 step 9; FIX1031B: sparse = the bare count, then the shoulder

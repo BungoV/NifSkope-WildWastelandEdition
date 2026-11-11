@@ -1019,8 +1019,19 @@ QString cellFarLodAppend( NifModel * nif, const QModelIndex & iRoot, const EsmWo
 			/* MODULES1 R6-2: the sea's record is the worldspace's own default, else its parent's (a child
 			 * worldspace without a NAM2 had no endless sea: the water ended at the bake's box). */
 			WwWaterRecord sea = def;
-			const bool haveSea = haveDef
+			bool haveSea = haveDef
 				|| ( world.seaWaterType() != 0 && world.waterRecord( world.seaWaterType(), sea ) );
+			/* lane SKYSEA1: the sheet draws with the record the baked sea draws with (its body's WATR), so both sides
+			 * of the seam shade alike; red WW_ENDLESS_SEA_RED=worldrec keeps the worldspace default. */
+			const quint32 seaForm = wwEndlessSeaBodyForm( lodlPath );
+			QString seaRecSaid = QStringLiteral( "; sheet record: the worldspace default (sea body form %1)" )
+				.arg( seaForm, 8, 16, QChar( '0' ) );
+			if ( seaForm != 0 && recOk.value( seaForm, -1 ) > 0 ) {
+				sea = recs.value( seaForm );
+				haveSea = true;
+				seaRecSaid = QStringLiteral( "; sheet record: the sea body's own %1 (as the baked sea; lane SKYSEA1)" )
+					.arg( seaForm, 8, 16, QChar( '0' ) );
+			}
 			// lane STREAMGN1: the far water rings' footprint (union of the rings), where the sheet starts
 			int drawn[4] = { 0, 0, -1, -1 };
 			for ( const LodlFarWater & w : wr ) {
@@ -1035,7 +1046,8 @@ QString cellFarLodAppend( NifModel * nif, const QModelIndex & iRoot, const EsmWo
 			if ( haveSea )	// lane FARSEA1: the endless sea past the bake, at the worldspace's sea level
 				say( wwEndlessSeaAppend( nif, iFar, sea, world.defaultWaterHeight(), lodlPath, drawn )
 					+ QStringLiteral( "; sea record %1 from %2" ).arg( world.seaWaterType(), 8, 16, QChar( '0' ) )
-						.arg( haveDef ? QStringLiteral( "the worldspace's own default" ) : world.seaWaterFrom() ) );
+						.arg( haveDef ? QStringLiteral( "the worldspace's own default" ) : world.seaWaterFrom() )
+					+ seaRecSaid );
 			else
 				say( QStringLiteral( "endless sea: NONE (no default water in the worldspace or its parents%1)" )
 					.arg( wwEnvIsSet( "WW_CELL_PARENTWATER_RED" ) ? QStringLiteral( "; WW_CELL_PARENTWATER_RED" ) : QString() ) );

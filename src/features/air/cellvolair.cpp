@@ -3517,6 +3517,17 @@ void wwVolAirUniforms( Scene * scene )
 	WW_SWITCH_STATIC( bool, aboveRed, wwEnv( "WW_CELL_AIR_ABOVE_RED" ).trimmed() == "1" );	// MODULES1 item 18
 	// MODULES1 M5: 65536 = a downward sky ray's air ends at the ground (lookdev_fog.glsl wwVolAirSky); red: never ends
 	WW_SWITCH_STATIC( bool, groundEndRed, wwEnv( "WW_CELL_AIR_GROUNDEND_RED" ).trimmed() == "1" );
+	// lane SKYSEA1: 131072 = a sky ray's air column over the curved ground (lookdev_fog.glsl wwAirCurvedTau); red: flat
+	WW_SWITCH_STATIC( bool, curveRed, wwEnv( "WW_CELL_AIR_CURVE_RED" ).trimmed() == "1" );
+	{
+		static int saidC = -1;
+		if ( fl >= 0 && saidC != int( curveRed ) ) {
+			saidC = int( curveRed );
+			fprintf( stderr, "air sky curve: %s\n", curveRed
+				? "off, flat ground: rows near eye level read the air's own colour (red WW_CELL_AIR_CURVE_RED=1)"
+				: "on, a sky ray's air over the curved ground (R 6371 km): a near-level ray dips and leaves, no horizon band (lane SKYSEA1)" );
+		}
+	}
 	{
 		static int said = -1;
 		if ( fl >= 0 && said != int( groundEndRed ) ) {
@@ -3536,7 +3547,8 @@ void wwVolAirUniforms( Scene * scene )
 			| ( ditherRed ? 0 : 512 | int( ( g.frame & 15u ) << 10 ) )	// part 18: 512 = the dithered froxel read, bits 10-13 its frame
 			| ( aboveRed ? 0 : 16384 )	// MODULES1 item 18: 16384 = a downward tail still above the air's top is clear
 			| ( vaThinSrcRed() ? 0 : 32768 )	// MODULES1 10c: 32768 = a too-thin column's tail takes the grid's light over the law's depth
-			| ( groundEndRed ? 0 : 65536 ) );	// MODULES1 M5: 65536 = a downward sky ray ends at the ground
+			| ( groundEndRed ? 0 : 65536 )	// MODULES1 M5: 65536 = a downward sky ray ends at the ground
+			| ( curveRed ? 0 : 131072 ) );	// lane SKYSEA1: 131072 = the sky ray's air over the curved ground
 }
 
 /* lane VOLAIR1 (bungo 10-14, cellvolair.h): the sky through the air. The far tower stood out against a sky the air never
