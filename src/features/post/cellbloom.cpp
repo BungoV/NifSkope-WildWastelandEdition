@@ -2,6 +2,7 @@
 #include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 
 #include "features/exposure/physunits.h"	// lane PHYSUNITS1: energy-conserving glare (wwPhysBloomK)
+#include "features/post/gametaa.h"	// MODULES1 R8-2: the frame's jitter (the level-0 hold)
 #include "features/post/cellfogbloom.h"	// lane PERFFIX3: the per-pixel combine stands down when the fog's gain picks the lod per sample
 #include "gl/cellunits.h"	// lane PERFFIX3: WwPassUnit::HdrBloomComb
 #include "gl/celllights.h"
@@ -31,6 +32,7 @@ constexpr int kMaxMips = 12;			// FO4CS kBloomMaxMipLevels
 constexpr float kEps = 0.0001f;			// kBloomEpsilon
 constexpr float kMinRadius = 0.5f, kMaxRadius = 4.0f, kMaxIntensity = 10.0f;
 constexpr int kUnitA = 8, kUnitB = 9;	// the chain's passes (their own programs: no cell sampler beside them)
+constexpr int kHoldFrames = 8;			// MODULES1 R8-2: the temporal jitter's period (gametaa.cpp: n = ( frame & 7 ) + 1)
 
 const char * const kModeKey = "WW/CellBloomMode";
 
@@ -63,6 +65,14 @@ struct BloomGpu
 	GLuint mip[kMaxMips] = {}, up[kMaxMips] = {};
 	int dims[kMaxMips][2] = {};
 	int mipCount = 0, w = 0, h = 0, samples = 0;
+	/* MODULES1 R8-2: level 0 of the last 8 jittered frames (a 2D array, RGBA16F, level 0's size: 16 bytes a frame
+	 * pixel). ringN = the frames that count (0: none yet), ringK = the newest layer; the view they were drawn from */
+	GLuint ring = 0;
+	int ringN = 0, ringK = 0;
+	Matrix4 ringProj;
+	Matrix ringRot;
+	Vector3 ringPos;
+	bool ringSaid = false;
 	WwCellUni::ErrTrust err;	// lane CELLUNI5: the error reads, until a clean frame on these targets
 };
 
@@ -74,6 +84,7 @@ struct BloomState
 	bool modePinned = false;
 	bool pinned[kFieldCount] = {};
 	int red = 0;				// 1 nokaris
+	bool holdRed = false;		// MODULES1 R8-2: WW_CELL_BLOOM_RED=nohold, level 0 is this frame's alone
 	float impulse = 0.0f;		// WW_CELL_BLOOM_IMPULSE: the 2x2 block at the frame's centre, this value
 	QString dumpDir;
 	bool dumped = false;
@@ -192,6 +203,7 @@ BloomState & bs()
 	}
 	s.set = clamped( s.set );
 	s.red = wwEnvStr( "WW_CELL_BLOOM_RED" ).contains( QLatin1StringView( "nokaris" ) ) ? 1 : 0;
+	s.holdRed = wwEnvStr( "WW_CELL_BLOOM_RED" ).contains( QLatin1StringView( "nohold" ) );
 	s.impulse = wwEnvStr( "WW_CELL_BLOOM_IMPULSE" ).toFloat();
 	s.dumpDir = wwEnvStr( "WW_CELL_BLOOM_DUMP" ).trimmed();
 	s.combRed = wwEnvStr( "WW_CELL_BLOOM_COMB_RED" ).trimmed() == QLatin1String( "1" );
@@ -244,6 +256,10 @@ void freeGpu( Renderer * r, BloomGpu & g )
 			fn->glDeleteTextures( 1, &x );
 	g.msColor = g.src = g.finalTex = 0;
 	g.mipCount = 0;
+	if ( g.ring )
+		fn->glDeleteTextures( 1, &g.ring );
+	g.ring = 0;
+	g.ringN = 0;
 }
 
 // cellpost.cpp's dump format: int32 w h channels, then rows bottom-up, channels interleaved
@@ -641,8 +657,44 @@ bool wwCellBloomRun( Scene * scene, unsigned hdrColor, unsigned ds, int W, int H
 	s.ecK = wwPhysBloomK();
 	const bool ec = s.ecK > 0.0f;
 	const float thr = ec ? 0.0f : std::clamp( set.threshold, 0.0f, 64.0f ), knee = ec ? 0.0f : std::clamp( set.softKnee, 0.0f, 1.0f );
+	/* MODULES1 R8-2 (bungo: "our bloom is not stable ... it shimmers"): the chain reads the frame BEFORE the temporal
+	 * resolve (that runs after the tone map unless WW_TAA2_LINEAR=1), so each frame's jitter hits or misses the bright
+	 * things under a pixel wide and their whole halo blinks. On a jittered frame level 0 goes to a ring of 8 layers
+	 * (the jitter's period) and the chain reads the mean of the layers drawn from this same view and projection:
+	 * a still camera's bloom is the same every frame; a moved camera counts from 1 again (this frame alone, as before).
+	 * Cost: 16 bytes of video memory a frame pixel, and one pass of up to 8 fetches over level 0 (2 a frame pixel).
+	 * Red WW_CELL_BLOOM_RED=nohold. Model + bars: notes/modules1/r8/gate_bloom.py (private). */
+	float holdJx = 0.0f, holdJy = 0.0f;
+	const bool hold = !s.holdRed && s.impulse <= 0.0f && wwGameTaaJitter( holdJx, holdJy );
+	Matrix4 holdProj;
+	int holdN = 1, holdK = 0;
+	if ( hold ) {
+		const bool hasProj = wwGameTaaUnjittered( holdProj );
+		if ( !g.ring ) {
+			fn->glGenTextures( 1, &g.ring );
+			fn->glBindTexture( GL_TEXTURE_2D_ARRAY, g.ring );
+			fn->glTexImage3D( GL_TEXTURE_2D_ARRAY, 0, GL_RGBA16F, dims[0][0], dims[0][1], kHoldFrames, 0, GL_RGBA, GL_FLOAT, nullptr );
+			fn->glTexParameteri( GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MIN_FILTER, GL_NEAREST );
+			fn->glTexParameteri( GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAG_FILTER, GL_NEAREST );
+			fn->glTexParameteri( GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE );
+			fn->glTexParameteri( GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE );
+			fn->glBindTexture( GL_TEXTURE_2D_ARRAY, 0 );
+			g.ringN = 0;
+		}
+		const bool still = g.ringN > 0 && hasProj && g.ringProj == holdProj
+			&& g.ringRot == scene->view.rotation && g.ringPos == scene->view.translation;
+		holdN = still ? std::min( g.ringN + 1, kHoldFrames ) : 1;
+		holdK = ( g.ringK + 1 ) % kHoldFrames;
+	}
 	for ( int i = 0; ok && i < mipCount; i++ ) {
-		target( g.mip[i], dims[i][0], dims[i][1] );
+		if ( i == 0 && hold ) {
+			fn->glBindFramebuffer( GL_FRAMEBUFFER, g.fbo );
+			fn->glFramebufferTextureLayer( GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, g.ring, 0, holdK );
+			fn->glDrawBuffers( 1, &one );
+			fn->glViewport( 0, 0, dims[0][0], dims[0][1] );
+		} else {
+			target( g.mip[i], dims[i][0], dims[i][1] );
+		}
 		auto prog = r->useProgram( "cell_bloom_down.prog" );
 		if ( !prog ) {
 			ok = false;
@@ -656,6 +708,36 @@ bool wwCellBloomRun( Scene * scene, unsigned hdrColor, unsigned ds, int W, int H
 		prog->uni1i( "bloomRed", s.red );
 		r->drawShape( 4, 3, 6, GL_TRIANGLES, GL_UNSIGNED_SHORT, &attrs, idx );
 		r->stopProgram();
+		if ( i == 0 && hold ) {	// level 0 = the mean of the ring's layers that count
+			target( g.mip[0], dims[0][0], dims[0][1] );
+			auto hp = r->useProgram( "cell_bloom_hold.prog" );
+			if ( !hp ) {
+				ok = false;
+				why = QStringLiteral( "no cell_bloom_hold.prog" );
+				break;
+			}
+			bind( kUnitA, GL_TEXTURE_2D_ARRAY, g.ring );
+			hp->uni1i( "bloomRing", kUnitA );
+			hp->uni1i( "bloomHoldK", holdK );
+			hp->uni1i( "bloomHoldN", holdN );
+			r->drawShape( 4, 3, 6, GL_TRIANGLES, GL_UNSIGNED_SHORT, &attrs, idx );
+			r->stopProgram();
+			bind( kUnitA, GL_TEXTURE_2D_ARRAY, 0 );
+		}
+	}
+	if ( hold && ok ) {
+		g.ringN = holdN;
+		g.ringK = holdK;
+		g.ringProj = holdProj;
+		g.ringRot = scene->view.rotation;
+		g.ringPos = scene->view.translation;
+		if ( holdN == kHoldFrames && !g.ringSaid ) {	// once: the still test does hold in this window
+			g.ringSaid = true;
+			qInfo().noquote() << QStringLiteral( "cell bloom hold: 8 frames from one view reached (level 0 = their mean, %1x%2, %3 MB)" )
+				.arg( dims[0][0] ).arg( dims[0][1] ).arg( double( dims[0][0] ) * double( dims[0][1] ) * 8.0 * kHoldFrames / 1048576.0, 0, 'f', 1 );
+		}
+	} else {
+		g.ringN = 0;
 	}
 
 	// 3. the up chain (BloomUpCS): from the deepest mip up to level 0, each band at its weight
@@ -851,6 +933,9 @@ bool wwCellBloomRun( Scene * scene, unsigned hdrColor, unsigned ds, int W, int H
 		glare += QStringLiteral( " physglare k=%1 flatgain=%2" ).arg( f6( s.ecK ), f6( s.ecGain ) );
 	else
 		glare += QStringLiteral( " physglare off (additive)" );
+	glare += s.holdRed ? QStringLiteral( " hold=RED off (WW_CELL_BLOOM_RED=nohold: level 0 is this frame's alone)" )
+		: hold ? QStringLiteral( " hold=on (level 0 = the mean of up to 8 jittered frames from one view; a moved camera counts from 1)" )
+		: QStringLiteral( " hold=off (no jitter this frame: the source is not jittered)" );
 	note( s, QStringLiteral( "fo4cs mips=%1 (%2x%3..%4x%5) threshold=%6 knee=%7 intensity=%8 radius=%9 weight=%10 %11%12 (checks %13)" )
 		.arg( mipCount ).arg( dims[0][0] ).arg( dims[0][1] ).arg( dims[mipCount - 1][0] ).arg( dims[mipCount - 1][1] )
 		.arg( f6( thr ), f6( knee ), f6( set.intensity ), f6( radius ), f6( finalWeight ), glare,

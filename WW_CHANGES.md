@@ -122,6 +122,13 @@
   Follow-up (bungo: "Opacity gives the height, or rather 'depth' always"): with a normal map the map's slope and the
   opacity-depth's slope add at 1 : 1 (surface gradients), and the UV ball no longer stands in for the depth: the
   thickness a card's light reads is its opacity. Red words `mapalone` (a normal map alone) and `ball` (the ball again).
+- **MODULES1 R8-2: the bloom holds still under the temporal jitter** (bungo: "our bloom is not stable ... it shimmers").
+  The bloom chain reads the frame before the temporal resolve, so a bright thing under a pixel wide was hit by one
+  jitter and missed by the next and its halo blinked. On a jittered frame the chain's first level is now the mean of
+  its last 8 frames (the jitter's period) while the view stands still; a moved camera counts from 1 again. Offline
+  model: the bloom's frame-to-frame energy swing of a still view 30.7 % -> 0.0 %. Not bounded while the camera moves
+  (a 13-tap down pass was measured for that and not shipped: lower at 4 and 8 samples, higher at 1).
+  Red `WW_CELL_BLOOM_RED=nohold`. Telemetry `cell bloom: ... hold=` and `cell bloom hold:`.
 - **Night sky:** Physical Light Units Off: the drawn sky crossfades to the weather record's night dome colours by
   the night share. On: the record's sky level is added to the physical night sky and to the ambient, so the night
   stays readable. Stars in both. Red `WW_NIGHTSKY_RED=physical`. Telemetry `night sky: ...`, `nightsky=` in the sky echo.
