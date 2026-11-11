@@ -18,6 +18,7 @@ uniform bool cellExtDalc;			// an exterior's ambient is the weather's DALC, in c
 uniform float cellSunScale;			// the imagespace Sunlight Scale outdoors (1 indoors; cellDirColor has it in)
 // set by the caller before cellLit (exterior sun only): the cascades' light, the viewport ambient, the sun's specular (linear)
 float cellDirVis = 1.0;
+float cellBackK = 0.0;	// MODULES1 R6-1: the sun through a back-lit leaf, per unit sun x albedo (fo4_default.frag sets it)
 float cellAirDif = 0.0;	// MODULES1 G3: the sun the air scattered down onto a level surface, per unit sun (wwVolAirSunTD)
 vec3 cellExtAmb = vec3( 0.0 );
 vec3 cellExtSpec = vec3( 0.0 );
@@ -2175,7 +2176,8 @@ vec3 cellLit( vec3 color, vec3 albedo, vec3 normalView, vec3 posView, vec3 Vview
 		// MODULES1 G3: what the air took out of the beam, as soft light from the sky's half (no cascade shadow)
 		vec3 airDif = cellDirColor * ( cellAirDif * ( 0.5 + 0.5 * N.z ) );
 		vec3 Ex = diff + gi + dir + airDif + cellExtAmb;
-		vec3 Edx = diffOn + gi + airDif + dir * ( cellOren( N, Ld, Vw, nl, gloss ) + cellRim( N, Ld, Vw, gloss ) );
+		vec3 Edx = diffOn + gi + airDif + dir * ( cellOren( N, Ld, Vw, nl, gloss ) + cellRim( N, Ld, Vw, gloss ) )
+		         + cellDirColor * ( cellBackK * cellDirVis );
 		vec3 ambDim = vec3( 1.0 );
 		float specDim = 1.0;
 #ifdef WW_SUNSHADOW
@@ -2201,7 +2203,7 @@ vec3 cellLit( vec3 color, vec3 albedo, vec3 normalView, vec3 posView, vec3 Vview
 		float nl = dot( N, Ld );
 		vec3 dir = cellDirColor * max( nl, 0.0 );
 		E += dir;
-		Ed += dir * ( cellOren( N, Ld, Vw, nl, gloss ) + cellRim( N, Ld, Vw, gloss ) );
+		Ed += dir * ( cellOren( N, Ld, Vw, nl, gloss ) + cellRim( N, Ld, Vw, gloss ) ) + cellDirColor * cellBackK;
 	}
 	// the game multiplies its cube term by the diffuse light (Ed); debug cubeold takes the Lambert sum
 	vec3 lin = alb * Ed + spec * specMask * specCol + cubeK * ( ( cellRed & 512 ) != 0 ? E : Ed ) + cellReflAdd;

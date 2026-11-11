@@ -872,6 +872,17 @@ void main()
 	if ( backlightPower > 0.0 ) {
 		backlight = albedo * NdotNegL * clamp( backlightPower, 0.0, 1.0 );
 
+#ifdef WW_CELLLIGHTS
+		/* MODULES1 R6-1: under the cell's sun the back light is the sun through the leaf, in the sun's own unit and
+		 * in linear light (cellLit adds albedo x sun x cellBackK x the sun's visibility). The old law added it to the
+		 * ROOT of the lit colour in the viewport light's 0..1 unit: (root + e)^2 took a cross term and no exposure,
+		 * a back-lit far crown (no cascades there) came out as bright as a white wall facing the sun.
+		 * Red WW_CELL_LIT_RED=backglow. A far placement's baked sky visibility stands in for the crown's own shade. */
+		if ( cellOn && cellHasDir && ( cellRed & 2048 ) == 0 ) {
+			float bk = NdotNegL * clamp( backlightPower, 0.0, 1.0 );
+			cellBackK = bk * bk * max( wwFarSkyVis, 0.0 );
+		} else
+#endif
 		emissive += backlight * D.rgb;
 	}
 

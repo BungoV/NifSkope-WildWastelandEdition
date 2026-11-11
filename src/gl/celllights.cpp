@@ -192,6 +192,18 @@ ClState & st()
 			s.red = 1024;	// the Ambient Only lights' ambient adjustment ignored
 		else if ( red == "probefx" )
 			s.red = 4096;	// effects and refraction shapes drawn into the probe passes again
+		else if ( red == "backglow" )
+			s.red = 2048;	// MODULES1 R6-1: a material's back light added to the root in the viewport's unit again
+		{
+			static int backLast = -1;
+			const int backNow = ( s.red & 2048 ) ? 1 : 0;
+			if ( backNow != backLast ) {
+				backLast = backNow;
+				std::fprintf( stderr, "cell back light: %s\n", backNow
+					? "RED WW_CELL_LIT_RED=backglow: albedo x N.-L x power x the viewport light, added to the root (no exposure, no sun unit)"
+					: "the cell sun x albedo x (N.-L x power)^2 x the sun's visibility x a far placement's sky visibility, linear, in the sun's unit" );
+			}
+		}
 		// the lights' Non Specular flag ignored (a bit clear of WW_CELL_LIT_RED's)
 		if ( wwEnv( "WW_CELL_SPEC_RED" ).trimmed() == "nonspec" )
 			s.red |= 65536;
