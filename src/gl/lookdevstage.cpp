@@ -881,6 +881,8 @@ namespace {
 float g_nightHaze[4] = { 0.0f, 0.0f, 0.0f, 0.0f };	// the tint (the sky's horizon colour) and the night share
 }
 
+}	// the file's private block pauses: the header's global wwNightHazeNote (build 72 link fix)
+
 QString wwNightHazeNote()
 {
 	const float * h = g_nightHaze;
@@ -892,6 +894,9 @@ QString wwNightHazeNote()
 		"luminance; red WW_NIGHTAIR_RED=neutral)" ).arg( double( h[0] ), 0, 'g', 3 ).arg( double( h[1] ), 0, 'g', 3 )
 		.arg( double( h[2] ), 0, 'g', 3 ).arg( h[2] > 0.0f ? double( h[0] / h[2] ) : 0.0, 0, 'f', 2 ).arg( double( h[3] ), 0, 'f', 2 );
 }
+
+namespace
+{
 
 /* MODULES1 R7 item 6 (the 1 px bright row at eye level, bungo b61): the sky's level ray through the air ends like the
  * rows beside it (lookdev_fog.glsl wwVolAirSky). Red WW_CELL_AIR_LEVELRAY_RED=1 (live, fogRed 16): the old branch. */
