@@ -12,6 +12,8 @@
 #include "features/gi/rtddgimath.h"
 #include "features/gi/rtddgi/rtddgi_gpu.h"
 #include "features/gi/rttraceset.h"   // lane AIRPERF1 r4: the traced set follows the streamed cells
+#include "features/gi/rttracesetrule.h"   // lane AIRPERF1 r5: warmUpdates
+#include <chrono>
 #include "version.h"
 #include "wwswitch.h"
 #include "features/sky/atmosphere.h"	// MODULES1 round 10: the one night sky's factor (WwNightSky)
@@ -191,6 +193,9 @@ struct Build
 	quint64 lightKey = 0;     // MODULES1 11-09 item 3: the sun, sky and directional it is lit by (relight moves it)
 	// M3: the window the scroll keeps the camera in (world): the grid it stays inside, its size on each axis
 	double gridLo[3] = { 0, 0, 0 }, gridHi[3] = { 0, 0, 0 }, window[3] = { 0, 0, 0 };
+	// lane AIRPERF1 r5: the updates the worker ran before the volume is handed over (startBuild `warm`)
+	int warmWant = 0, warmRan = 0, warmBusy = 0;
+	double warmMs = 0;
 };
 
 // M3: GL_EXT_memory_object(_win32) + GL_EXT_semaphore(_win32), loaded for the current context
@@ -845,9 +850,16 @@ bool upload( Cell & c, Renderer * r, const RtDdgiLive & L )
  * the worker holds it until the open returns, so a drop of cascade 0 meanwhile cannot free the scene under it) */
 void startBuild( Cell & c, const ProbeSoup & soup, const WwCellLighting & lights, const ProbeSkyLight & sky, const WwCellGi * G,
 	const float eye[3], const CellSpec & sp, int paths, std::shared_ptr<Build> from = nullptr,
-	std::shared_ptr<const ProbeSoup> shared = nullptr )   // AIRPERF1 r4: the traced set's own builder copy (no copy here)
+	std::shared_ptr<const ProbeSoup> shared = nullptr,    // AIRPERF1 r4: the traced set's own builder copy (no copy here)
+	int warm = 0 )
 {
+	/* lane AIRPERF1 r5: `warm` = the updates the worker runs after the open, before the volume is reported done. A
+	 * hand-over at a cell crossing passes rttracesetrule.h warmUpdates( kHysteresis ): the old volume stays drawn until
+	 * the new one's every texel is the mean of that many updates, so no unconverged volume is drawn. The step holds the
+	 * device for its wait (rtddgi_vk.inc ddgiGpuStepEx); the drawn volume's own step that frame reads busy and runs
+	 * the next frame. No GL is involved: the session is not imported yet, a step without beforeSubmit signals nothing */
 	auto b = std::make_shared<Build>();
+	b->warmWant = std::max( warm, 0 );
 	b->spec = sp;
 	b->paths = paths;
 	b->lights = int( lights.lights.size() );
@@ -892,7 +904,36 @@ void startBuild( Cell & c, const ProbeSoup & soup, const WwCellLighting & lights
 		QElapsedTimer tm;
 		tm.start();
 		const bool ok = b->live.open( *soupCopy, lights, sky, spec, share, from ? &from->live : nullptr );
+		int ran = 0, busyN = 0;
+		double warmMs = 0;
+		if ( ok && b->warmWant > 0 ) {
+			QElapsedTimer tw;
+			tw.start();
+			while ( ran < b->warmWant && busyN < 4000 ) {
+				{
+					std::lock_guard<std::mutex> lk( b->m );
+					if ( b->cancel )
+						break;
+				}
+				RtDdgiStep o;
+				o.k = std::min( 16, b->warmWant - ran );
+				o.host = false;
+				o.wait = true;
+				if ( b->live.step( o ) ) {
+					ran += o.k;
+					continue;
+				}
+				if ( !b->live.busy() )
+					break;   // the step failed: handed over as far as it got (the line says so)
+				busyN++;
+				std::this_thread::sleep_for( std::chrono::milliseconds( 1 ) );
+			}
+			warmMs = double( tw.nsecsElapsed() ) / 1e6;
+		}
 		std::lock_guard<std::mutex> lk( b->m );
+		b->warmRan = ran;
+		b->warmBusy = busyN;
+		b->warmMs = warmMs;
 		b->ok = ok;
 		b->why = b->live.why();
 		b->ms = double( tm.nsecsElapsed() ) / 1e6;
@@ -2094,7 +2135,9 @@ static void volumeFrame( Scene * scene, Cell & c, const CellSpec * spIn, bool du
 		// RTXCASCADE2: one BLAS. AIRPERF1 r4: during a handover a coarse cascade is held until cascade 0's build is up
 		startBuild( c, *soup, lights, sky, G, eye, sp, paths,
 			c.level > 0 && !( paths & kPathPerCascade ) ? cell().live : nullptr,
-			setFollows ? rtTraceSetBuildSoup( nif, soup ) : nullptr );
+			setFollows ? rtTraceSetBuildSoup( nif, soup ) : nullptr,
+			// lane AIRPERF1 r5: a hand-over's new volume is warmed before it is drawn (red WW_CELL_RTSET_RED=nowarm)
+			handover && !rtTraceSetRed( "nowarm" ) ? rttracesetrule::warmUpdates( double( rtddgi::kHysteresis ) ) : 0 );
 		if ( c.pending )
 			c.pending->lightKey = lightKey;
 		say( c.tag + QStringLiteral( "%1 (%2 triangles)" ).arg( !had ? QStringLiteral( "building" )
@@ -2114,7 +2157,12 @@ static void volumeFrame( Scene * scene, Cell & c, const CellSpec * spIn, bool du
 					c.sets = c.busy = 0;
 					c.syncSignals = c.syncWaits = 0;
 					c.stopped = c.dumped = c.censusBuilt = false;
-					say( c.tag + QStringLiteral( "handover done: the volume of traced set generation %1 is drawn" ).arg( c.setGen ) );
+					say( c.tag + QStringLiteral( "handover done: the volume of traced set generation %1 is drawn" ).arg( c.setGen )
+						+ ( b->warmWant > 0
+							? QStringLiteral( "; warmed %1 of %2 updates before it was drawn (%3 ms on the build worker, the device "
+								"was busy %4 times)%5" ).arg( b->warmRan ).arg( b->warmWant ).arg( b->warmMs, 0, 'f', 1 ).arg( b->warmBusy )
+								.arg( b->warmRan < b->warmWant ? QStringLiteral( " NOT WARM: drawn short of the bar" ) : QString() )
+							: QStringLiteral( "; not warmed (RED WW_CELL_RTSET_RED=nowarm, or no hand-over): drawn from its first update" ) ) );
 				}
 				c.live = b;
 				c.interopWhy.clear();

@@ -1,3 +1,30 @@
+## AIRPERF1 round 5 (2026-11-11): far objects in the traced set, a warmed hand-over, late soups, the saved row
+
+Changed, not checked (no build in this round; offline: tests/cellstreamrule/run.sh 20 checks, 14 reds, syntax check).
+
+- **Far objects are traced** (`src/features/gi/rtfartrace.*`, `Stream::traceFarRead` / `traceSync`): every far shape of
+  the ring (far terrain, the far objects' arrays, the instanced far rows, the game's own far chunks) is read once
+  into triangles with the colour of its diffuse map at each triangle's middle; the set takes the runs within the ring
+  that no loaded cell traces already (a placed object by its ref, other geometry by its cell). The far terrain takes
+  its map's colour too (was one dirt tone). Far objects are two-sided and keep their alpha-tested map. Budget:
+  600,000 far-object triangles a set, whole cells, nearest the centre first; reading is 4 ms a tick on the main
+  thread (one shape at least). Not in it: far water, far trees drawn as cards (no mesh).
+  Lines: `cell stream: traced set handed over: ... far terrain T triangles from S shapes, far objects ...` and
+  `rtddgi traced set: gen G by source: loaded cells ... MB | large refs ... | far terrain ... | far objects ...`.
+  Reds (WW_CELL_RTSET_RED, live, one word): `nofarobj` (terrain alone), `fardirt` (one stated tone), `nofarcap`.
+- **No unconverged volume at a cell crossing** (`rtddgicell.cpp startBuild`): the new volume runs
+  `rttracesetrule.h warmUpdates( 0.97 )` = 33 updates on the build worker before it replaces the old one, which stays
+  drawn meanwhile. Line: `handover done: ...; warmed 33 of 33 updates before it was drawn (N ms ...)`. Red `nowarm`.
+- **Per-cell BLAS: not done.** The kernels index their triangle tables by primitive without an instance id
+  (`rtddgi/ddgi_common.glsl`, `trace.comp`); it needs a kernel change and new SPIR-V, so the worker rebuild stays.
+- **Cells loaded before the Ray-traced GI row went on get their soup** (`Stream::pumpWorker`): when no cell waits to be
+  built, the worker gathers the soup of a drawn cell that has none, nearest first. Line: `cell stream: soup gathered
+  for X,Y ...`. Red `nolatesoup`.
+- **The Cell Streaming row is saved** (QSettings `CellView/CellStream`, ships on; `cellstreamrule.h rowStart`). Still
+  live, still pinned by WW_CELL_STREAM. Line: `cell stream: the Cell Streaming row starts on|off (...)`.
+- The land soup's cell origin goes through `rttracesetrule.h soupCellOrigin` (the world's frame under any document
+  origin; unit u8).
+
 ## AIRPERF1 round 4 (2026-11-11): cell streaming always on, a Cell Streaming row, the Ray-traced GI follows the stream
 
 Changed, not checked (no build in this round). bungo: "as I move the camera, the 5x5 area does not load new cells",

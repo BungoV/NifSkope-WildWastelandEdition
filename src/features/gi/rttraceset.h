@@ -11,7 +11,12 @@
  *  the old volume drawn until the new one is up).
  *
  *  Reds: WW_CELL_RTSET_WELD_RED=1 (read at the open) = the welded fixed block, no stream; WW_CELL_RTSET_RED (live) =
- *  parked (the first set stays), nofar (no far terrain in the set), drop (the old volume is dropped at a publish). */
+ *  parked (the first set stays), nofar (no far terrain in the set), drop (the old volume is dropped at a publish).
+ *
+ *  Round 5: the far OBJECTS within the ring are in the set too, and every far triangle takes its diffuse map's colour
+ *  (rtfartrace.h; reds nofarobj, fardirt, nofarcap). The new volume runs rttracesetrule.h warmUpdates before it is
+ *  drawn in place of the old one (rtddgicell.cpp; red nowarm). A cell loaded before the row went on has its soup
+ *  gathered by the stream's worker (cellstream.cpp; red nolatesoup). */
 
 #include <QString>
 #include <QtGlobal>
@@ -31,6 +36,27 @@ struct RtTraceUnit
 	std::shared_ptr<const RtTraceUnitSoup> soup;
 };
 
+// ---- round 5: the far field in the set (features/gi/rtfartrace.h)
+struct RtFarShape;
+
+//! the runs of one far shape the set traces
+struct RtFarPick
+{
+	std::shared_ptr<const RtFarShape> shape;
+	std::vector<int> runs;
+};
+
+//! what the stream picked of the far field, for the key and the lines
+struct RtFarInfo
+{
+	int cells = 0, shapes = 0, pending = 0;   //!< pending: far shapes in the ring not read yet (the next hand-overs bring them)
+	qint64 terrainTris = 0, objTris = 0, objDropped = 0, flat = 0;
+	int objCells = 0, objCellsDropped = 0;
+	quint64 key = 0;
+	double cacheMb = 0.0;
+	int cacheShapes = 0;
+};
+
 //! red WW_CELL_RTSET_WELD_RED (read at the open): an open with the Ray-traced GI on welds a fixed block and does not stream
 bool rtTraceSetWeldRed();
 //! streamed cells gather their soup now: the Ray-traced GI is on, the old probe GI is off, no weld red (main thread)
@@ -44,7 +70,7 @@ qint64 rtTraceUnitTris( const RtTraceUnitSoup & u );
 int rtTraceSetRing( const void * nif, int gridHalf );
 //! the stream's loaded set (after its lights were published): merged and published when it differs from the last
 void rtTraceSetSync( const void * nif, std::vector<RtTraceUnit> units, int cx, int cy, int ex, int ey, int ring,
-	std::shared_ptr<const ProbeSoup> farSoup, int farCells, int unitsNoSoup );
+	std::vector<RtFarPick> farPicks, const RtFarInfo & farInfo, int unitsNoSoup );
 //! every stream tick: a finished merge is published, a waiting one starts
 void rtTraceSetTick( const void * nif, int ex, int ey );
 //! the stream of this document ended

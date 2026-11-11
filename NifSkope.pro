@@ -476,6 +476,7 @@ HEADERS += \
 	src/features/gi/rtddgi/rtddgi_gpu.h \
 	src/features/gi/rtddgicell.h \
 	src/features/gi/rttraceset.h \
+	src/features/gi/rtfartrace.h \
 	src/features/gi/rttracesetrule.h \
 	src/features/air/airzone.h \
 	src/features/air/airzonemath.h \
@@ -848,6 +849,7 @@ SOURCES += \
 	src/features/reflections/reflcensuscli.cpp \
 	src/features/gi/rtddgicell.cpp \
 	src/features/gi/rttraceset.cpp \
+	src/features/gi/rtfartrace.cpp \
 	src/features/air/airzone.cpp \
 	src/features/air/airzonepanel.cpp \
 	src/io/espwrite.cpp \

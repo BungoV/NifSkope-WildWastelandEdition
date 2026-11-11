@@ -5,6 +5,7 @@
 #include "features/gi/probeplace.h"   // ProbeSoup
 #include "features/gi/probesky.h"     // the kept soup the volume traces
 #include "features/gi/rtddgicell.h"
+#include "features/gi/rtfartrace.h"   // round 5: the far field's runs
 #include "features/gi/rttracesetrule.h"
 #include "gl/celllights.h"            // wwCellPrtOn
 #include "wwswitch.h"
@@ -192,11 +193,88 @@ void append( ProbeSoup & out, const ProbeSoup & s, const std::vector<std::shared
 	}
 }
 
+/*! round 5: a far shape's picked runs appended (rtfartrace.h): world triangles copied, an instanced row's mesh placed
+ *  (a mirrored placement turns the winding), each triangle with its own colour, an alpha-tested map by its name */
+void appendFar( ProbeSoup & out, const RtFarPick & p, bool withAlb, Index & maskIdx )
+{
+	const RtFarShape & f = *p.shape;
+	const bool masked = f.mask && !f.maskName.empty() && f.uv.size() * 9 == f.tris.size() * 6;
+	int map = -1;
+	for ( const int ri : p.runs ) {
+		if ( ri < 0 || size_t( ri ) >= f.runs.size() )
+			continue;
+		const RtFarShape::Run & r = f.runs[size_t( ri )];
+		const size_t t0 = out.tris.size() / 9, n = size_t( std::max( r.count, 0 ) ), a = size_t( std::max( r.first, 0 ) );
+		if ( !n || ( a + n ) * 9 > f.tris.size() )
+			continue;
+		const RtFarShape::Xf * x = ( r.xf >= 0 && size_t( r.xf ) < f.xf.size() ) ? &f.xf[size_t( r.xf )] : nullptr;
+		const bool flip = x && x->flip;
+		if ( !x ) {
+			out.tris.insert( out.tris.end(), f.tris.begin() + std::ptrdiff_t( a * 9 ), f.tris.begin() + std::ptrdiff_t( ( a + n ) * 9 ) );
+		} else {
+			out.tris.resize( ( t0 + n ) * 9 );
+			float * d = out.tris.data() + t0 * 9;
+			const float * s = f.tris.data() + a * 9;
+			for ( size_t j = 0; j < n; j++, d += 9, s += 9 ) {
+				for ( int k = 0; k < 3; k++ ) {
+					const float * v = s + ( flip && k ? 3 - k : k ) * 3;
+					for ( int c = 0; c < 3; c++ )
+						d[k * 3 + c] = x->m[c * 4] * v[0] + x->m[c * 4 + 1] * v[1] + x->m[c * 4 + 2] * v[2] + x->m[c * 4 + 3];
+				}
+			}
+		}
+		if ( withAlb ) {
+			out.alb.resize( t0 * 3, 128 );
+			if ( f.alb.size() >= ( a + n ) * 3 )
+				out.alb.insert( out.alb.end(), f.alb.begin() + std::ptrdiff_t( a * 3 ), f.alb.begin() + std::ptrdiff_t( ( a + n ) * 3 ) );
+			else
+				out.alb.resize( ( t0 + n ) * 3, 128 );
+		}
+		if ( f.twoSided ) {
+			out.twoSided.resize( t0, 0 );
+			out.twoSided.resize( t0 + n, 1 );
+		}
+		if ( !masked )
+			continue;
+		if ( map < 0 ) {
+			const std::string key = mapKey( 'a', f.maskName, f.maskW, f.maskH );
+			const auto have = maskIdx.find( key );
+			if ( have != maskIdx.end() ) {
+				map = have->second;
+			} else {
+				probebvh::AlphaMask::Map mp;
+				mp.w = f.maskW;
+				mp.h = f.maskH;
+				mp.a = *f.mask;
+				map = int( out.amask.maps.size() );
+				out.amask.maps.push_back( std::move( mp ) );
+				out.amask.mapNames.push_back( f.maskName );
+				maskIdx.emplace( key, map );
+			}
+		}
+		out.amask.triOf.resize( t0, -1 );
+		for ( size_t j = 0; j < n; j++ ) {
+			probebvh::AlphaMask::Tri t;
+			t.map = map;
+			t.thr = static_cast<unsigned char>( std::clamp( f.thr, 1, 255 ) );
+			const float * u = f.uv.data() + ( a + j ) * 6;
+			for ( int k = 0; k < 3; k++ ) {
+				const int kk = flip && k ? 3 - k : k;
+				t.uv[k * 2 + 0] = ( x && x->mirrorU ) ? x->uMid - u[kk * 2 + 0] : u[kk * 2 + 0];
+				t.uv[k * 2 + 1] = u[kk * 2 + 1];
+			}
+			out.amask.triOf.push_back( int( out.amask.tris.size() ) );
+			out.amask.tris.push_back( t );
+		}
+	}
+}
+
 struct Merge
 {
 	std::vector<RtTraceUnit> units;
 	std::vector<rttracesetrule::Unit> rule;
-	std::shared_ptr<const ProbeSoup> farSoup;
+	std::vector<RtFarPick> farPicks;
+	RtFarInfo farInfo;
 	ProbeSoup out;                            //!< becomes the kept soup
 	std::shared_ptr<const ProbeSoup> build;   //!< the builds' copy, made here so no frame pays for it
 	std::atomic<bool> done { false };
@@ -216,12 +294,14 @@ void mergeAll( Merge & m )
 			withAlb = withAlb || !u.soup->soup.alb.empty();
 		}
 	m.nearTris = qint64( total );
-	if ( m.farSoup ) {
-		m.farTris = m.farSoup->triCount();
-		if ( !total )
-			withAlb = !m.farSoup->alb.empty();
-		total += size_t( m.farTris );
-	}
+	m.farTris = 0;
+	for ( const RtFarPick & p : m.farPicks )
+		for ( const int ri : p.runs )
+			if ( p.shape && ri >= 0 && size_t( ri ) < p.shape->runs.size() )
+				m.farTris += p.shape->runs[size_t( ri )].count;
+	if ( m.farTris > 0 )
+		withAlb = true;   // every far triangle has its colour
+	total += size_t( m.farTris );
 	m.out.tris.reserve( total * 9 );
 	if ( withAlb )
 		m.out.alb.reserve( total * 3 );
@@ -229,9 +309,12 @@ void mergeAll( Merge & m )
 	for ( const RtTraceUnit & u : m.units )
 		if ( u.soup )
 			append( m.out, u.soup->soup, &u.soup->maskBytes, &u.soup->glowBytes, withAlb, maskIdx, glowIdx, modelIdx );
-	if ( m.farSoup )
-		append( m.out, *m.farSoup, nullptr, nullptr, withAlb, maskIdx, glowIdx, modelIdx );
+	const size_t nearGot = m.out.tris.size() / 9;
+	for ( const RtFarPick & p : m.farPicks )
+		if ( p.shape )
+			appendFar( m.out, p, withAlb, maskIdx );
 	const size_t got = m.out.tris.size() / 9;
+	m.farTris = qint64( got - nearGot );
 	if ( withAlb )
 		m.out.alb.resize( got * 3, 128 );
 	if ( !m.out.amask.triOf.empty() )
@@ -244,7 +327,8 @@ struct Set
 {
 	std::vector<RtTraceUnit> units;            //!< the loaded set the stream gave last
 	std::vector<rttracesetrule::Unit> rule;
-	std::shared_ptr<const ProbeSoup> farSoup;
+	std::vector<RtFarPick> farPicks;
+	RtFarInfo farInfo;
 	int farCells = 0, ring = 0, cx = 0, cy = 0, noSoup = 0;
 	std::uint64_t wantKey = 0, pubKey = 0;
 	bool changed = false, saidEmpty = false, saidParked = false;
@@ -351,7 +435,7 @@ int rtTraceSetRing( const void * nif, int gridHalf )
 }
 
 void rtTraceSetSync( const void * nif, std::vector<RtTraceUnit> units, int cx, int cy, int ex, int ey, int ring,
-	std::shared_ptr<const ProbeSoup> farSoup, int farCells, int unitsNoSoup )
+	std::vector<RtFarPick> farPicks, const RtFarInfo & farInfo, int unitsNoSoup )
 {
 	Q_UNUSED( ex );
 	Q_UNUSED( ey );
@@ -371,8 +455,9 @@ void rtTraceSetSync( const void * nif, std::vector<RtTraceUnit> units, int cx, i
 		r.tris = u.soup ? std::uint64_t( rtTraceUnitTris( *u.soup ) ) : 0;
 		rule.push_back( r );
 	}
-	const std::uint64_t farTris = farSoup ? std::uint64_t( farSoup->triCount() ) : 0;
-	const std::uint64_t key = rttracesetrule::setKey( rule, ring, std::uint64_t( farCells ), farTris );
+	const int farCells = farInfo.cells;
+	const std::uint64_t farTris = std::uint64_t( farInfo.terrainTris + farInfo.objTris );
+	const std::uint64_t key = rttracesetrule::setKey( rule, ring, std::uint64_t( farCells ), farTris, farInfo.key );
 	s.cx = cx;
 	s.cy = cy;
 	s.noSoup = unitsNoSoup;
@@ -381,7 +466,8 @@ void rtTraceSetSync( const void * nif, std::vector<RtTraceUnit> units, int cx, i
 	s.wantKey = key;
 	s.units = std::move( units );
 	s.rule = std::move( rule );
-	s.farSoup = std::move( farSoup );
+	s.farPicks = std::move( farPicks );
+	s.farInfo = farInfo;
 	s.farCells = farCells;
 	s.ring = ring;
 	s.changed = key != s.pubKey;
@@ -402,19 +488,22 @@ void rtTraceSetTick( const void * nif, int ex, int ey )
 		s.changed = s.wantKey != s.pubKey;
 		if ( m->out.tris.empty() ) {
 			if ( !s.saidEmpty )
-				say( QStringLiteral( "nothing to trace: %1 loaded cells, %2 of them without a soup (they loaded before the "
-					"Ray-traced GI row went on: open the cell again), %3 far cells" ).arg( int( m->rule.size() ) + m->noSoup )
-					.arg( m->noSoup ).arg( m->farCells ) );
+				say( QStringLiteral( "nothing to trace yet: %1 loaded cells, %2 of them without a soup (they loaded before the "
+					"Ray-traced GI row went on: the stream gathers their soup now, nearest first), %3 far cells" )
+					.arg( int( m->rule.size() ) + m->noSoup ).arg( m->noSoup ).arg( m->farCells ) );
 			s.saidEmpty = true;
 		} else {
 			int cells = 0, lrefs = 0;
+			qint64 cellTris = 0, lrefTris = 0;
 			QString list;
 			for ( const rttracesetrule::Unit & u : m->rule ) {
 				if ( u.lref ) {
 					lrefs++;
+					lrefTris += qint64( u.tris );
 					continue;
 				}
 				cells++;
+				cellTris += qint64( u.tris );
 				list += QStringLiteral( " %1,%2" ).arg( u.x ).arg( u.y );
 			}
 			const bool in = rttracesetrule::cameraIn( m->rule, ex, ey );
@@ -430,8 +519,19 @@ void rtTraceSetTick( const void * nif, int ex, int ey )
 				.arg( s.gen ).arg( cells ).arg( lrefs ).arg( m->farCells ).arg( m->ring ).arg( m->cx ).arg( m->cy ).arg( ex ).arg( ey )
 				.arg( in ? QStringLiteral( "yes" ) : QStringLiteral( "no" ) ).arg( m->nearTris + m->farTris ).arg( m->nearTris )
 				.arg( m->farTris ).arg( mbOf( bytes ), 0, 'f', 1 ).arg( m->ms, 0, 'f', 1 )
-				.arg( m->noSoup ? QStringLiteral( ", %1 loaded cells without a soup (loaded before the row went on)" ).arg( m->noSoup ) : QString() )
+				.arg( m->noSoup ? QStringLiteral( ", %1 loaded cells without a soup (loaded before the row went on: being gathered)" ).arg( m->noSoup ) : QString() )
 				.arg( list ) );
+			// round 5: what each source brings (39 B a triangle kept: 9 floats and its colour)
+			const RtFarInfo & fi = m->farInfo;
+			const auto mb39 = []( qint64 tris ) { return mbOf( double( tris ) * 39.0 ); };
+			say( QStringLiteral( "gen %1 by source: loaded cells %2 triangles %3 MB | large refs %4 triangles %5 MB | far terrain %6 "
+				"triangles %7 MB | far objects %8 triangles %9 MB in %10 cells (budget %11 triangles: %12 triangles of %13 cells left "
+				"out, nearest cells kept first) | far triangles on a stated tone (no map read) %14 | far cache %15 shapes %16 MB, "
+				"%17 far shapes still to read" )
+				.arg( s.gen ).arg( cellTris ).arg( mb39( cellTris ), 0, 'f', 1 ).arg( lrefTris ).arg( mb39( lrefTris ), 0, 'f', 1 )
+				.arg( fi.terrainTris ).arg( mb39( fi.terrainTris ), 0, 'f', 1 ).arg( fi.objTris ).arg( mb39( fi.objTris ), 0, 'f', 1 )
+				.arg( fi.objCells ).arg( qint64( rttracesetrule::kFarObjTriCap ) ).arg( fi.objDropped ).arg( fi.objCellsDropped )
+				.arg( fi.flat ).arg( fi.cacheShapes ).arg( fi.cacheMb, 0, 'f', 1 ).arg( fi.pending ) );
 		}
 	}
 	const bool parked = rtTraceSetRed( "parked" );
@@ -447,9 +547,10 @@ void rtTraceSetTick( const void * nif, int ex, int ey )
 	auto m = std::make_shared<Merge>();
 	m->units = s.units;
 	m->rule = s.rule;
-	m->farSoup = rtTraceSetRed( "nofar" ) ? nullptr : s.farSoup;
+	m->farPicks = s.farPicks;   // red nofar: the stream picked none (cellstream.cpp traceSync)
+	m->farInfo = s.farInfo;
 	m->key = s.wantKey;
-	m->farCells = m->farSoup ? s.farCells : 0;
+	m->farCells = s.farCells;
 	m->ring = s.ring;
 	m->cx = s.cx;
 	m->cy = s.cy;

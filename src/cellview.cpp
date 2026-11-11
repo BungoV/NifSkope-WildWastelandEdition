@@ -36,6 +36,7 @@ BSD License - see nifskope.h
 #include "nativeemit.h"
 #include "features/gi/probeplace.h"		// lane PRTPPLACE
 #include "features/gi/rttraceset.h"		// lane AIRPERF1 r4: a streamed cell's soup for the ray-traced GI
+#include "features/gi/rttracesetrule.h"	// lane AIRPERF1 r5: the soup's frame
 #include "features/gi/probebake.h"		// lane PRTPBAKE
 #include "features/gi/pgiwrite.h"
 #include "features/gi/probegi.h"
@@ -6584,7 +6585,9 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 					EsmLand l;
 					if ( !world.land( x, y, l ) )
 						continue;
-					const float ox = float( x ) * CELL_UNITS, oy = float( y ) * CELL_UNITS;
+					// lane AIRPERF1 r5: the soup's frame is the world's, whatever the document's origin (rttracesetrule.h)
+					const float ox = float( rttracesetrule::soupCellOrigin( x, double( origin[0] ) ) );
+					const float oy = float( rttracesetrule::soupCellOrigin( y, double( origin[1] ) ) );
 					const float st = CELL_UNITS / float( LAND_GRID - 1 );
 					if ( landDumpFile.isOpen() ) {
 						const qint32 xy[2] = { x, y };

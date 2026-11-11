@@ -90,6 +90,30 @@ inline void centreFor( double ex, double ey, double shift, bool held, int & cx, 
 	}
 }
 
+/*! lane AIRPERF1 r5: the Cell Streaming row at the start of a session: the saved setting (CellView/CellStream), on when
+ *  nothing was saved (it ships on) */
+inline bool rowStart( bool saved, bool savedOn )
+{
+#ifdef CELLSTREAMRULE_RED_ROWNOSAVE
+	(void)saved; (void)savedOn;
+	return true;   // red: round 4's row, on at every launch
+#else
+	return saved ? savedOn : true;
+#endif
+}
+
+/*! lane AIRPERF1 r5: a loaded cell still owes the ray-traced GI its soup: the traced set follows the stream now, the
+ *  cell is drawn, it was built before the row went on (no soup) and no gather was started for it yet */
+inline bool soupOwed( bool follows, bool attached, bool hasSoup, bool asked )
+{
+#ifdef CELLSTREAMRULE_RED_NEVEROWED
+	(void)follows; (void)attached; (void)hasSoup; (void)asked;
+	return false;   // red: round 4, such a cell is traced only after it was streamed again
+#else
+	return follows && attached && !hasSoup && !asked;
+#endif
+}
+
 } // namespace cellstreamrule
 
 #endif

@@ -152,6 +152,54 @@ int main()
 			&& edgeFade( 2.0f, dims ) == 1.0f && edgeFade( 11.5f, dims ) == 1.0f;
 		check( mono && ends, "u4 fade", "0 at the box edge and over the outer cell, 0 to 1 over the next, 1 inside, monotonic" );
 	}
+	// ---- round 5
+	// u5: the far objects' budget, the traced rows, what a loaded cell traces already
+	{
+		using namespace rttracesetrule;
+		std::vector<FarCell> c( 5 );
+		c[0].x = 9; c[0].y = 0; c[0].tris = 50;    // 4 out
+		c[1].x = 6; c[1].y = 0; c[1].tris = 100;   // 1 out
+		c[2].x = 5; c[2].y = 3; c[2].tris = 400;   // 3 out
+		c[3].x = 5; c[3].y = 2; c[3].tris = 200;   // 2 out
+		c[4].x = 5; c[4].y = 1; c[4].tris = 300;   // 1 out, y after cell 1
+		std::uint64_t dropped = 0;
+		const size_t keep = farCap( c, 5, 0, 700, &dropped );   // 100 + 300 + 200 = 600 fits, + 400 does not
+		std::printf( "farcap keep %d dropped %d, order %d,%d %d,%d %d,%d\n", int( keep ), int( dropped ), c[0].x, c[0].y, c[1].x,
+			c[1].y, c[2].x, c[2].y );
+		check( keep == 3 && dropped == 450 && c[0].x == 6 && c[1].y == 1 && c[2].y == 2 && c[3].y == 3 && c[4].x == 9, "u5 farcap",
+			"nearest cells first, kept while the sum fits, the first that does not fit ends the list (the 50 past it is out too)" );
+		check( rowTraced( 0 ) && rowTraced( 0x80 ) && rowTraced( 0x83 ) && !rowTraced( 1 ) && !rowTraced( 2 ) && !rowTraced( 3 ),
+			"u5 rows", "the ring's own row is traced, a tree ladder's other steps are not" );
+		check( farSkip( 7, true, false ) && !farSkip( 7, false, true ) && !farSkip( 7, false, false ) && farSkip( 0, false, true )
+			&& !farSkip( 0, true, false ), "u5 skip", "a placed object by its ref being listed, geometry without a ref by its cell" );
+	}
+	// u6: the hand-over's warm bar
+	{
+		using namespace rttracesetrule;
+		std::printf( "warm updates 0.97 -> %d, 0.9 -> %d, 0 -> %d\n", warmUpdates( 0.97 ), warmUpdates( 0.9 ), warmUpdates( 0.0 ) );
+		check( warmUpdates( 0.97 ) == 33 && warmUpdates( 0.9 ) == 9 && warmUpdates( 0.0 ) == 1, "u6 warm",
+			"the smallest count with age / (age + 1) >= the hysteresis" );
+	}
+	// u7: a drawn cell owes its soup; the saved row
+	{
+		using namespace cellstreamrule;
+		check( soupOwed( true, true, false, false ) && !soupOwed( false, true, false, false ) && !soupOwed( true, false, false, false )
+			&& !soupOwed( true, true, true, false ) && !soupOwed( true, true, false, true ), "u7 owed",
+			"follows, drawn, no soup, not asked yet" );
+		check( rowStart( false, false ) && rowStart( false, true ) && rowStart( true, true ) && !rowStart( true, false ), "u7 row",
+			"nothing saved: on; else the saved value" );
+	}
+	// u8: the soup's frame is the world's (a cell of the opened block vs the same cell streamed in under another origin)
+	{
+		using namespace rttracesetrule;
+		const double oa = 4096.0 * -14.5, ob = 4096.0 * 9.5;   // two documents' origins
+		bool same = true;
+		for ( int cell = -20; cell <= 20; cell += 5 ) {
+			const double a = soupCellOrigin( cell, oa ), b = soupCellOrigin( cell, ob ), w = double( cell ) * 4096.0;
+			same = same && a - b == 0.0 && a - w == 0.0 && docWorld( w - oa, oa ) - a == 0.0 && docWorld( w - ob, ob ) - b == 0.0;
+		}
+		check( same, "u8 frame", "a cell's land starts at cell x 4096 under any origin, and an origin-relative far vertex meets it" );
+	}
 	std::printf( fails ? "CELLSTREAMRULE FAIL %d\n" : "CELLSTREAMRULE PASS %d failed\n", fails );
 	return fails ? 1 : 0;
 }
