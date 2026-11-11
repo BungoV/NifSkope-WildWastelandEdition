@@ -97,6 +97,7 @@ SceneWindow::SceneWindow( QWidget * mainWindow, std::function<void()> repaint, s
 	exposureBox->setValue( double( wwSceneExposureEV() ) );
 	wwMakeScrubField( exposureBox );
 	row( tr( "Exposure" ), exposureBox, true );
+	wwSceneRowsReset( tree, exposureBox, 0.0 );	// R7 item 10: scenelighting.cpp ev = 0
 
 	// MODULES1 R6-13: the master of the real light units; Off = vanilla Fallout 4 lighting (ships), live
 	physUnitsBox = new QComboBox( tree );
@@ -116,6 +117,7 @@ SceneWindow::SceneWindow( QWidget * mainWindow, std::function<void()> repaint, s
 	gameLightsBox->setValue( double( wwPhysGameLights() ) );
 	wwMakeScrubField( gameLightsBox );
 	row( tr( "Game Light Brightness" ), gameLightsBox, true );
+	wwSceneRowsReset( tree, gameLightsBox, 1.0 );
 
 	viewBox = new QComboBox( tree );
 	viewBox->setObjectName( QStringLiteral( "sceneViewTransform" ) );
@@ -270,6 +272,7 @@ SceneWindow::SceneWindow( QWidget * mainWindow, std::function<void()> repaint, s
 	gameDayBox->setValue( wwLookdevGameDay() );
 	wwMakeScrubField( gameDayBox );
 	row( tr( "Game Day" ), gameDayBox, true );
+	wwSceneRowsReset( tree, gameDayBox, 0.0 );	// lookdevstage.cpp gameDay = 0
 	heading( tr( "Ground" ) );
 	groundBox = new QCheckBox( tree );
 	groundBox->setObjectName( QStringLiteral( "lookdevGround" ) );
@@ -315,6 +318,7 @@ SceneWindow::SceneWindow( QWidget * mainWindow, std::function<void()> repaint, s
 	shadowDistanceBox->setValue( wwShadowDistance() );
 	wwMakeScrubField( shadowDistanceBox );
 	row( tr( "Shadow Distance" ), shadowDistanceBox, true );
+	wwSceneRowsReset( tree, shadowDistanceBox, 14000.0 );	// shadowset.cpp dist = 14000
 	// lane GAPTOOL1: SSAO and Bloom were greyed placeholders; now the cell view's own AO and bloom mode (a pin greys them)
 	liveCheck( aoBox, "cellAo", tr( "Screen-Space Ambient Occlusion" ), wwCellAoOn() );
 	aoBox->setEnabled( !wwCellAoPinned() );

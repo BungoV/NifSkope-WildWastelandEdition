@@ -24,6 +24,14 @@ QWidget * wwSceneRowsArea( QWidget * body );
 void wwSceneRowsHeading( QWidget * body, const QString & text );
 //! one setting: its name (greys with the field, buddy = the field, takes the field's tooltip) and its field
 QLabel * wwSceneRowsAdd( QWidget * body, const QString & name, QWidget * field, bool enabled );
+/* MODULES1 R7 item 10 (the two points R6-11 left to the standard, settled by the closest panel behaviour):
+ * (1) a plain NUMBER row goes back to its default the way a switch row does (livepanel.cpp): a "Reset" tool button at
+ *     the row's end, enabled only while the value is off the default. Selectors and tick boxes carry none, as in the
+ *     LOD and body panels. Call after wwSceneRowsAdd.
+ * (2) an elided text is reached beyond its tooltip the way the LOD panel's summary and result lines are (text a mouse
+ *     can take out): a click on it puts the WHOLE text on the clipboard.
+ * Red WW_SCENE_LAYOUT_RED=r6: neither (the R6-11 state). */
+void wwSceneRowsReset( QWidget * body, class QDoubleSpinBox * field, double def );
 //! a one-line text that is elided to its width; the whole text is its tooltip (set it with wwSceneElideSet)
 QLabel * wwSceneElideLabel( QWidget * parent );
 void wwSceneElideSet( QLabel * label, const QString & full );

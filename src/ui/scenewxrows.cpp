@@ -7,6 +7,7 @@
 
 #include <QAbstractSpinBox>
 #include <QEvent>
+#include <QClipboard>
 #include <QComboBox>
 #include <QDoubleSpinBox>
 #include <QGuiApplication>
@@ -17,9 +18,11 @@
 #include <QScreen>
 #include <QScrollBar>
 #include <QTimer>
+#include <QToolButton>
 #include <QScrollArea>
 
 #include <algorithm>
+#include <cmath>
 #include <cstdio>
 
 void wwSceneAddWeatherOverrides( const std::function<void( const QString & )> & heading,
@@ -82,6 +85,12 @@ namespace {
 constexpr const char * kRowsProp = "wwSceneRowCount";
 constexpr const char * kFullProp = "wwSceneFullText";
 
+//! MODULES1 R7 item 10: the R6-11 state (no Reset on number rows, no copy of an elided text)
+bool rowsR6Red()
+{
+	return wwEnvStr( "WW_SCENE_LAYOUT_RED" ).trimmed() == QLatin1String( "r6" );
+}
+
 QGridLayout * rowsGrid( QWidget * body )
 {
 	return body ? qobject_cast<QGridLayout *>( body->layout() ) : nullptr;
@@ -113,6 +122,15 @@ struct RowWatch : QObject
 			name->setEnabled( static_cast<QWidget *>( o )->isEnabled() );
 		if ( !name && e->type() == QEvent::Resize )
 			elideNow( static_cast<QLabel *>( o ) );
+		if ( !name && e->type() == QEvent::MouseButtonRelease && !rowsR6Red() ) {	// R7 item 10 (2): the whole text, to paste
+			const QLabel * l = static_cast<QLabel *>( o );
+			const QString full = l->property( kFullProp ).toString();
+			if ( !full.isEmpty() ) {
+				QGuiApplication::clipboard()->setText( full );
+				std::fprintf( stderr, "scene window: elided text copied whole on a click (%d characters, %d shown)\n",
+					int( full.size() ), int( l->text().size() ) );
+			}
+		}
 		return false;
 	}
 };
@@ -190,6 +208,45 @@ QLabel * wwSceneRowsAdd( QWidget * body, const QString & name, QWidget * field, 
 	return l;
 }
 
+void wwSceneRowsReset( QWidget * body, QDoubleSpinBox * f, double def )
+{
+	QGridLayout * g = rowsGrid( body );
+	const int at = ( g && f ) ? g->indexOf( f ) : -1;
+	if ( at < 0 || rowsR6Red() )
+		return;
+	int r = 0, c = 0, rs = 0, cs = 0;
+	g->getItemPosition( at, &r, &c, &rs, &cs );
+	auto * b = new QToolButton( body );
+	b->setObjectName( QStringLiteral( "sceneRowReset" ) );
+	b->setText( QObject::tr( "Reset" ) );	// the switch rows' word and control (livepanel.cpp)
+	b->setToolTip( QObject::tr( "Back to the default (%1)" ).arg( f->textFromValue( def ) + f->suffix() ) );
+	g->addWidget( b, r, 2 );
+	auto follow = [b, f, def]() {
+		b->setEnabled( f->isEnabled() && std::fabs( f->value() - def ) > 0.5 * std::pow( 10.0, -f->decimals() ) );
+	};
+	QObject::connect( f, qOverload<double>( &QDoubleSpinBox::valueChanged ), b, [follow]( double ) { follow(); } );
+	QObject::connect( b, &QToolButton::clicked, f, [f, def]() {
+		std::fprintf( stderr, "scene window: reset '%s': %s -> its default %s\n", qPrintable( f->objectName() ),
+			qPrintable( f->text() ), qPrintable( f->textFromValue( def ) + f->suffix() ) );
+		f->setValue( def );	// the row's own valueChanged applies it
+	} );
+	struct Grey : QObject	// a greyed field (a pin, a master off) greys its Reset
+	{
+		std::function<void()> fn;
+		explicit Grey( QObject * p ) : QObject( p ) {}
+		bool eventFilter( QObject *, QEvent * e ) override
+		{
+			if ( e->type() == QEvent::EnabledChange )
+				fn();
+			return false;
+		}
+	};
+	auto * grey = new Grey( b );
+	grey->fn = follow;
+	f->installEventFilter( grey );
+	follow();
+}
+
 QLabel * wwSceneElideLabel( QWidget * parent )
 {
 	auto * l = new QLabel( parent );
@@ -234,6 +291,14 @@ void wwSceneTidyRows( QWidget * body )
 		l->setFixedHeight( h );
 	}
 	g->setColumnMinimumWidth( 0, nameW );
+	{	// R7 item 10: the Reset buttons take the row height; say what the rows carry
+		const QList<QToolButton *> resets = body->findChildren<QToolButton *>( QStringLiteral( "sceneRowReset" ) );
+		for ( QToolButton * b : resets )
+			b->setFixedHeight( h );
+		std::fprintf( stderr, "scene window: %d number rows carry Reset (the switch rows' control, lit only off the default); "
+			"an elided text copies whole on a click%s\n", int( resets.size() ),
+			rowsR6Red() ? " -- RED WW_SCENE_LAYOUT_RED=r6: neither" : " (red WW_SCENE_LAYOUT_RED=r6)" );
+	}
 	std::fprintf( stderr, "scene window: panel standard rows: %d rows, %d headings, row height %d px, name column %d px, %d selectors (widest entry %d px), fields fill the value column, the rows scroll under a narrow window (red WW_SCENE_LAYOUT_RED=1)\n",
 		int( names.size() ), int( body->findChildren<QLabel *>( QStringLiteral( "sceneRowHeading" ) ).size() ), h, nameW, combos, comboW );
 	// the proof: once shown, the geometry checks (and at three widths with WW_SCENE_ROWS_PROBE=1)
