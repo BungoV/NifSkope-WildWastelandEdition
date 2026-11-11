@@ -2675,7 +2675,26 @@ void wwShadowSetUniforms( Scene * scene, NifSkopeOpenGLContext::Program * prog, 
 	prog->uni1i( "ussCsmOn", csmValid ? 1 : 0 );
 	WwCascadePreset cp;
 	const bool vogel = upgraded && wwShadowCascadePreset( cp ) && !wwShadowRed( "novogel" );
-	prog->uni4f( "ussCsmFilter", FloatVector4( vogel ? 1.0f : 0.0f, cp.radius, float( cp.taps ), ( vogel && !volume ) ? 1.0f : 0.0f ) );
+	/* MODULES1 R7 item 9: w 1 = the receiver plane's depth slope with each tap's walk held to 4 texels, 2 = the red
+	 * WW_SHADOW_RED=walk2000 (the walk clamped at 2000 u: a grazed wall reads half lit behind its own pier) */
+	const bool walkRed = wwShadowRed( "walk2000" );
+	prog->uni4f( "ussCsmFilter", FloatVector4( vogel ? 1.0f : 0.0f, cp.radius, float( cp.taps ),
+		( vogel && !volume ) ? ( walkRed ? 2.0f : 1.0f ) : 0.0f ) );
+	if ( vogel && !volume ) {
+		static int saidWalk = -1;
+		static float saidTexel = -1.0f;
+		if ( saidWalk != int( walkRed ) || saidTexel != csmTexel[0] ) {
+			saidWalk = int( walkRed );
+			saidTexel = csmTexel[0];
+			if ( walkRed )
+				std::fprintf( stderr, "sun cascades filter: RED walk2000: a tap's depth follows the receiver's slope up to 2000 u along the light "
+					"(a wall the sun grazes compares half of its taps past every caster)\n" );
+			else
+				std::fprintf( stderr, "sun cascades filter: a tap's depth follows the receiver's slope for at most 4 texels along the light "
+					"(%.2f / %.2f / %.2f u in cascades 0 / 1 / 2), a steeper tap is pulled toward the point (red WW_SHADOW_RED=walk2000)\n",
+					double( 4.0f * csmTexel[0] ), double( 4.0f * csmTexel[1] ), double( 4.0f * csmTexel[2] ) );
+		}
+	}
 	// lane SHADOWPAR1: FO4CS's world-unit radius clamp(r, 1, 6) x {0.8, 1, 1.2} x {1, 3, 10}, its taps per cascade
 	const float wr = std::clamp( cp.radius, 1.0f, 6.0f );
 	prog->uni4f( "ussCsmWorld", FloatVector4( vogel && wwShadowPar( WwParCascRadius ) ? 1.0f : 0.0f, wr * 0.8f, wr * 3.0f, wr * 12.0f ) );

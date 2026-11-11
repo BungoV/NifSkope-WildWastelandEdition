@@ -2380,6 +2380,25 @@ bool Renderer::setupProgramRoute( const NifModel * nif, Program * prog, Shape * 
 	return true;
 }
 
+/* MODULES1 R7 item 9 (sun on faces turned away from it): fo4_default.frag adds a material's back light whenever its
+ * power is above 0 and never read the back-lighting flag. 171 of the 6616 vanilla BGSM carry a power with the flag off
+ * (Window01 2.0, BrickSteamTPlaster01 1000): their faces glowed with the sun behind them. The power now reaches the
+ * shader only with the flag. Red WW_BACKLIGHT_FLAG_RED=1 (live): the power alone, as before. */
+static float wwBackLightPower( bool flag, float power, const QString & name )
+{
+	WW_SWITCH_STATIC( bool, red, qEnvironmentVariableIntValue( "WW_BACKLIGHT_FLAG_RED" ) == 1 );
+	if ( flag || !( power > 0.0f ) )
+		return power;
+	static int said = -1;
+	if ( said != int( red ) ) {
+		said = int( red );
+		std::fprintf( stderr, "back light flag: '%s' has back light power %.2f and no back-lighting flag: %s (red WW_BACKLIGHT_FLAG_RED=1)\n",
+			qPrintable( name ), double( power ),
+			red ? "RED: lit from behind by the power alone" : "no back light, as its flag says (said for the first such shape only)" );
+	}
+	return red ? power : 0.0f;
+}
+
 bool Renderer::setupProgramCE1( const NifModel * nif, Program * prog, Shape * mesh )
 {
 	auto nifVersion = nif->getBSVersion();
@@ -2679,7 +2698,7 @@ bool Renderer::setupProgramCE1( const NifModel * nif, Program * prog, Shape * me
 			if ( nifVersion < 151 ) {
 				prog->uni1f( "subsurfaceRolloff", lsp->lightingEffect1 );
 				prog->uni1f( "rimPower", lsp->rimPower );
-				prog->uni1f( "backlightPower", lsp->backlightPower );
+				prog->uni1f( "backlightPower", wwBackLightPower( lsp->hasBacklight, lsp->backlightPower, mesh->getName() ) );
 			} else {
 				FloatVector4	translucencyColorAndScale( 1.0f, 1.0f, 1.0f, -1.0f );
 				if ( mat && mat->isShaderMaterial() ) {

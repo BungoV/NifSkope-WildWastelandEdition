@@ -48,6 +48,7 @@
 { "WW_ATMO_SUN_RED", 0, "src/features/sky/atmosphere.cpp:931 wwAtmoSunKey | re-read per frame or per call (a)" },
 { "WW_ATMO_TINT", 0, "src/features/sky/atmosphere.cpp:138 as | re-read per frame or per call (a)" },
 { "WW_ATMO_TINT_RED", 0, "src/features/sky/atmosphere.cpp:1184 wwAtmoTintRedFlat | re-read per frame or per call (a)" },
+{ "WW_BACKLIGHT_FLAG_RED", 0, "src/gl/renderer.cpp:2389 wwBackLightPower | re-read per frame or per call (a)" },
 { "WW_BAKE_PROF", 2, "src/features/gi/probebake.cpp:959 probeBake | cell build, function static: read once for the process (a reopen keeps it)" },
 { "WW_BAKE_RT", 0, "src/features/gi/bakert.cpp:515 gpuWanted | re-read per frame or per call (a)" },
 { "WW_BAKE_RTGI2_RED", 2, "src/features/gi/probebake.cpp:1865 probeBake | cell build, function static: read once for the process (a reopen keeps it)" },

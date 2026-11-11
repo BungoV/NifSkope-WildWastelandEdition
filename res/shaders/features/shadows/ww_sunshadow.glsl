@@ -175,6 +175,12 @@ float ussVogel( int i, vec3 posView, float offsetWorld, vec3 dPx, vec3 dPy, vec3
 	float rot = 6.2831853 * ussIgn( rp );
 	float k = 1.0 / csmParams.z;
 	float lim = 2000.0 * csmInvRange[i];
+	/* MODULES1 R7 item 9 (bungo b60/b61: "Still the same leak", the sun on a wall panel inside a shadowed alley): on a
+	 * wall the sun grazes, the receiver plane's depth slope has no bound, so half of the taps compared 2000 u toward the
+	 * sun, past every caster (50 % lit at N.L 0). A tap is now pulled toward the centre until its depth walk is at most
+	 * 4 texels of its cascade: it stays on the receiver's plane, near the point. ussCsmFilter.w 2 = the red
+	 * WW_SHADOW_RED=walk2000. */
+	float cap = ussCsmFilter.w > 1.5 ? lim : 4.0 * ussCsmTexel[i] * csmInvRange[i];
 	float sum = 0.0;
 	for ( int t = 0; t < 48; t++ ) {
 		if ( t >= n )
@@ -182,7 +188,9 @@ float ussVogel( int i, vec3 posView, float offsetWorld, vec3 dPx, vec3 dPy, vec3
 		float r = sqrt( ( float( t ) + 0.5 ) / float( n ) ) * R;
 		float th = float( t ) * 2.39996323 + rot;
 		vec2 o = vec2( cos( th ), sin( th ) ) * ( r * k );
-		sum += texture( csmMap, vec4( q.xy + o, float( i ), zRef + clamp( dot( rpdb, o ), -lim, lim ) ) );
+		float dz = dot( rpdb, o );
+		float pull = ussCsmFilter.w > 1.5 ? 1.0 : min( 1.0, cap / max( abs( dz ), 1e-30 ) );
+		sum += texture( csmMap, vec4( q.xy + o * pull, float( i ), zRef + clamp( dz * pull, -lim, lim ) ) );
 	}
 	return sum / float( n );
 }
