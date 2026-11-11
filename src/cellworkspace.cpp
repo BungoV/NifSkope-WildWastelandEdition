@@ -611,7 +611,6 @@ void CellWorkspacePanel::buildUi()
 	}
 	section( tr( "Lighting" ), "lighting" );
 	cellLights = tick( showMenu, tr( "Cell lights" ), "CellWorkspaceCellLights", wwCellLightsOn() );
-	cellGi = tick( showMenu, tr( "Precomputed Radiance Transfer" ), "CellWorkspaceCellGi", wwCellGiOn() );	// bungo 10-27 note 12: the label only
 	/* lane RTXGI1 M2 (src/features/gi/rtddgicell.h): the ray-traced GI volume in place of the baked grid where it reaches; ships Off.
 	 * Live: a tick reloads the shaders (the read is a #define) and the next frame builds or frees the volume. */
 	{
@@ -684,8 +683,9 @@ void CellWorkspacePanel::buildUi()
 			f->setEnabled( giOn && !pinned );
 		};
 		// lane PRTOFF1: without the PRT the row follows the Ray-traced GI row (the volume's sky visibility)
-		QAction * by = wwCellPrtOn() ? cellGi : showMenu->findChild<QAction *>( QStringLiteral( "CellWorkspaceRtDdgi" ) );
-		greys( by && by->isChecked() );
+		// FARWATER1 item 6: under the PRT red the old GI always draws (its row is gone), so the row is live
+		QAction * by = wwCellPrtOn() ? nullptr : showMenu->findChild<QAction *>( QStringLiteral( "CellWorkspaceRtDdgi" ) );
+		greys( wwCellPrtOn() || ( by && by->isChecked() ) );
 		if ( by )
 			connect( by, &QAction::toggled, this, greys );
 		connect( f, qOverload<double>( &QDoubleSpinBox::valueChanged ), this, [this]( double v ) {
@@ -867,7 +867,7 @@ void CellWorkspacePanel::buildUi()
 	 * visibility, smoothing, out of walls). The actions stay, off the menu, for their slots. Emittance in bounce light and
 	 * Sky specular occlusion stay: the ray-traced GI's soup and its sky visibility take them. */
 	if ( !wwCellPrtOn() ) {
-		for ( QAction * a : { cellGi, cellFar, cellPass->menuAction(), cellGiGpu, cellEmissiveGrid, cellAoDecal } )
+		for ( QAction * a : { cellFar, cellPass->menuAction(), cellGiGpu, cellEmissiveGrid, cellAoDecal } )
 			showMenu->removeAction( a );
 		for ( QAction * a : lookActions ) {
 			const WwLook l = WwLook( a->data().toInt() );
@@ -1326,11 +1326,8 @@ void CellWorkspacePanel::buildUi()
 		head( V, "CellWorkspaceTemporalAa", "", -1, false, QStringList(), tr( "Temporal Anti-Aliasing" ) );	// round 4: Title Case
 		rows.last().overriddenBy = QStringLiteral( "CellWorkspaceModernTaa" );	// gametaa.cpp: a Modern tier replaces it
 		// Fusion Shaders
-		if ( wwCellPrtOn() )
-			head( F, "CellWorkspaceCellGi", "", -1, false,
-				{ QStringLiteral( "CellWorkspaceSkyVisRow" ), QStringLiteral( "CellWorkspaceCellPass" ) } );
-		else	// lane PRTOFF1: the GI group's row is the Ray-traced GI's; the PRT's rows below are off the menu (not drawn)
-			head( F, "CellWorkspaceRtDdgi", "", -1, false, { QStringLiteral( "CellWorkspaceSkyVisRow" ) } );
+		// lane PRTOFF1: the GI group's row is the Ray-traced GI's (FARWATER1 item 6: the PRT row is gone, also under its red)
+		head( F, "CellWorkspaceRtDdgi", "", -1, false, { QStringLiteral( "CellWorkspaceSkyVisRow" ) } );
 		rows.last().heavy = true;	// built-in Low: off (PRTP bounce light)
 		look( WwLook::ProbeShare, tr( "Probe sharing" ) );
 		look( WwLook::ProbeShareWide, tr( "Wide probe sharing" ) );
@@ -1648,12 +1645,6 @@ void CellWorkspacePanel::buildUi()
 	} );
 	connect( cellDofLens, &QAction::toggled, this, [this]( bool on ) {	// lane DOFLENS1
 		wwCellDofLensSetOn( on );
-		if ( glView )
-			glView->update();
-	} );
-	// the bounce of the last bake, drawn while Cell lights is on
-	connect( cellGi, &QAction::toggled, this, [this]( bool on ) {
-		wwCellGiSetOn( on );
 		if ( glView )
 			glView->update();
 	} );

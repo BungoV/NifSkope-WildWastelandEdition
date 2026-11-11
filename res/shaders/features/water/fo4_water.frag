@@ -65,6 +65,10 @@ uniform sampler2D waterSsrRaw;	// the march
 uniform sampler2D waterSsrFin;	// the march blurred
 uniform int waterSslr;		// 1: the reflection-ray pass (waterDepth is then the obscurance pass's linear depth)
 uniform int waterProbe;
+/* FARWATER1 round 2 (src/features/water/cellwater.cpp): 1 the air without the column clamp (the water is not in the
+ * obscurance depth), 2 the endless sea's curved point read in the flat air frame (lookdev_fog.glsl wwAirFlatPos); 0 under
+ * the red WW_ENDLESS_SEA_RED=air */
+uniform int waterAir;
 #ifdef WW_WATER_WAVES	// lane WATERWAVES1: fo4_waterlook.prog only (fo4_water.prog keeps its machine code)
 #include "water_waves.glsl"
 #endif
@@ -216,6 +220,13 @@ void main()
 	// lane SKYSEA1: waterSeam.w = the sheet's reach under the baked water (no crack where its last texels end)
 	if ( waterSeam.z > 0.0 && all( greaterThan( P.xy, waterSeamBox.xy + waterSeam.w ) )
 		&& all( lessThan( P.xy, waterSeamBox.zw - waterSeam.w ) ) )
+		discard;
+	/* FARWATER1 late item 2 (bungo b71, open sea: a thin dotted dark line where the endless sea meets the map's sea): the
+	 * map water's mesh edge at the box rim was the join, its edge pixels part covered (dark samples). On the map water
+	 * (z 0) waterSeam.w is the hand-over: it leaves the outer band to the endless sheet under it (which reaches 4096 u
+	 * in), so the join is a per-pixel cut over one continuous sheet, no mesh edge. Red WW_ENDLESS_SEA_RED=edge: w 0. */
+	if ( waterSeam.z <= 0.0 && waterSeam.w > 0.0 && ( any( lessThan( P.xy, waterSeamBox.xy + waterSeam.w ) )
+		|| any( greaterThan( P.xy, waterSeamBox.zw - waterSeam.w ) ) ) )
 		discard;
 	vec3 eye = cellWorldPos( vec3( 0.0 ) );
 	vec3 ray = P - eye;
@@ -629,8 +640,12 @@ void main()
 #endif
 	}
 	lin = max( lin, vec3( 0.0 ) );
+	vec3 pAir = posView;	// FARWATER1 round 2: the air as the far land at the same distance gets it (waterAir)
+	wwAirFree = ( waterAir & 1 ) != 0;
+	if ( ( waterAir & 2 ) != 0 )
+		pAir = wwAirFlatPos( posView );
 	if ( fogOn || wwApOn() )	// lane SKYA: the sky's aerial perspective with the fog off too
-		lin = max( wwFog( lin, posView ), vec3( 0.0 ) );
+		lin = max( wwFog( lin, pAir ), vec3( 0.0 ) );
 
 	vec3 s = sqrt( lin );
 	vec3 outC = ( cellOn && cellIsOn ) ? ( cellIsLinear ? lin : cellImageSpace( s ) ) : tonemap( s );
@@ -658,6 +673,8 @@ void main()
 			o = wwDvAbs( lin );
 		else if ( v == WW_DV_DEPTH )
 			o = wwDvDepth( dist );
+		else if ( v == WW_DV_AIR )	// FARWATER1 round 2: the air's transmittance per channel (white clear, black opaque)
+			o = clamp( wwFog( vec3( 1.0 ), pAir ) - wwFog( vec3( 0.0 ), pAir ), 0.0, 1.0 );
 		else if ( v == WW_DV_WATERSKY ) {	// lane FARWATER1: the sky this tier mirrors (before the march), x / (1 + x)
 #ifdef WW_WATER_REFL
 			o = reflSky / ( vec3( 1.0 ) + max( reflSky, vec3( 0.0 ) ) );

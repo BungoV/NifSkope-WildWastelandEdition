@@ -26,7 +26,7 @@ const DvView kViews[] = {
 	{ "gi", "cellLit's GI term (cellGi*; the far tree cards through cellLit, pbrm_default its giDiff); the water: black" },
 	{ "emissive", "the applied glow (emissive x glowScale) of fo4_default / pbrm_default; tree cards and water: black" },
 	{ "fog", "red = 1 - the fog's transmittance, green = its in-scatter share (wwFog, the aerial perspective) on every surface" },
-	{ "air", "black: owed (the volume air is its own pass, cellvolair.cpp, not a surface term)" },
+	{ "air", "the air's transmittance T per channel on surfaces (fo4_default, pbrm_default) and water (fo4_water, every tier): white clear, black opaque; the sky stays black (FARWATER1)" },
 	{ "clouds", "black: owed (the sky and its clouds are not drawn in a probe pass)" },
 	{ "cloudshadow", "the clouds' transmittance toward the sun (ussCloudT) on surfaces with the sun's shadow and on the tree cards" },
 	{ "water", "the water tiers: cyan near water, violet far water, teal endless sea, x the far fade (fo4_water); surfaces black" },

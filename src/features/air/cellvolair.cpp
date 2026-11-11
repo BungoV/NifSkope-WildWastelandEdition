@@ -43,6 +43,7 @@ BSD License - see nifskope.h
 #include "harnesswindow.h"
 #include "recx.h"
 #include "features/air/fognoise.h"	// MODULES1 part 19: the lumps' texture file
+#include "features/water/endlesssea.h"	// FARWATER1 round 2: the sky band over the endless sea
 
 #include <QDebug>
 #include <QElapsedTimer>
@@ -2069,6 +2070,7 @@ static void vaPassInner( Scene * scene, bool run )
 	 * WW_CELL_AIR_PHASE_RED=recordhue (or the bluescatter red): the record's hue on the lobes. */
 	const bool recordHue = ( s.red & 524288 ) != 0 || vaPhaseRecordHue();
 	medNote += recordHue ? QStringLiteral( " hue=record" ) : QStringLiteral( " hue=neutral" );
+	medNote += wwNightHazeNote();	// FARWATER1 late item 3: the night haze's tint
 	VaPhase ph = vaPhase( med, recordHue );
 	ph.gi[3] = wwWxOv( WwWx::AirPhaseG, ph.gi[3] );	// lane MODULES1 item 12: live phase g and tint
 	{
@@ -3607,6 +3609,9 @@ void wwVolAirSkyDraw( Scene * scene, bool probes )
 	wwLookdevFogUniforms( scene );	// fogOn, the view and the sun; wwVolAirUniforms: the volume, the medium, the flags
 	prog->uni1i( "volSkyMode", probes ? 1 : 0 );
 	prog->uni1b( "volSkyOn", !( s.red & 65536 ) );
+	// FARWATER1 round 2: the band's far-plane point as the flat air frame sees the curved earth while the sea pushes the far plane
+	const bool skySea = wwEndlessSeaReach( scene ) > 0.0f && wwEndlessSeaAirFlat();
+	prog->uni1b( "volSkySea", skySea );
 	auto fn = r->fn;
 	GLboolean colorMask[4], depthMask = GL_TRUE;
 	fn->glGetBooleanv( GL_COLOR_WRITEMASK, colorMask );
@@ -3663,8 +3668,10 @@ void wwVolAirSkyDraw( Scene * scene, bool probes )
 	fn->glColorMask( colorMask[0], colorMask[1], colorMask[2], colorMask[3] );
 	fn->glDepthMask( depthMask );
 	note( probes ? QStringLiteral( "probes (red nosky %1)" ).arg( ( s.red & 65536 ) ? 1 : 0 )
-		: overSky ? QStringLiteral( "through the air (linear frame, over the sky in the frame: sky x T + L)" )
-		: QStringLiteral( "through the air (linear frame, composited by 1 - T over the backdrop)" ) );
+		: ( overSky ? QStringLiteral( "through the air (linear frame, over the sky in the frame: sky x T + L)" )
+		: QStringLiteral( "through the air (linear frame, composited by 1 - T over the backdrop)" ) )
+		+ ( skySea ? QStringLiteral( "; band over the endless sea: the far-plane point in the flat air frame (+ g^2 / 2R), no column clamp (red WW_ENDLESS_SEA_RED=air)" )
+			: wwEndlessSeaReach( scene ) > 0.0f ? QStringLiteral( "; band over the endless sea: RED air (the far-plane point under the flat ground)" ) : QString() ) );
 }
 
 /* ---- lane VOLPART1: volumetric particles (cellvolair.h, res/shaders/features/particles/particles.frag) ---- */

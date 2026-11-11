@@ -105,7 +105,6 @@ ClState & st()
 		{
 			const ClState d {};
 			s.pinned = d.pinned;
-			s.giPinned = d.giPinned;
 			s.farPinned = d.farPinned;
 			s.isPinned = d.isPinned;
 			s.passPinned = d.passPinned;
@@ -121,15 +120,8 @@ ClState & st()
 			s.on = wwEnvInt( "WW_DEFAULTS1_RED" ) == 1 ? QSettings().value( QStringLiteral( "WW/CellLights" ), false ).toBool()
 				: QSettings().value( QStringLiteral( "WW/CellLights2" ), true ).toBool();
 		}
-		const QByteArray giPin = wwEnv( "WW_CELL_GI" );
-		if ( !wwCellPrtOn() ) {
-			s.giOn = false;	// lane PRTOFF1: the old GI never draws; its pin and its row do nothing
-		} else if ( !giPin.isEmpty() ) {
-			s.giPinned = true;
-			s.giOn = giPin.trimmed() != "0";
-		} else {
-			s.giOn = QSettings().value( QStringLiteral( "WW/CellGi" ), false ).toBool();
-		}
+		// FARWATER1 item 6 (bungo 11-11): the retired pin WW_CELL_GI and its row are gone; the PRT red draws the old GI whole
+		s.giOn = wwCellPrtOn();
 		const QByteArray farPin = wwEnv( "WW_CELL_FAR" );
 		if ( !farPin.isEmpty() ) {
 			s.farPinned = true;
@@ -532,15 +524,6 @@ bool wwCellPrtOn()
 {
 	static const bool red = qEnvironmentVariableIntValue( "WW_CELL_PRT_RED" ) == 1;	// lane PRTOFF1: the old draw back (launch)
 	return red;
-}
-
-void wwCellGiSetOn( bool on )
-{
-	ClState & s = st();
-	if ( s.giPinned || !wwCellPrtOn() )	// lane PRTOFF1: the row is gone; the stored value stays as it was
-		return;
-	s.giOn = on;
-	QSettings().setValue( QStringLiteral( "WW/CellGi" ), on );
 }
 
 void wwCellFarPublish( const void * nif, const WwCellFar & far )
@@ -1929,6 +1912,9 @@ void wwCellLightsUniforms( Scene * scene )
 	 * takes the air's own scatter at its pixel (fo4_effectshader.frag fxAirCard). Red word `lump` (live): the lump's
 	 * surface share + the GI surface term again. */
 	WW_SWITCH_STATIC( bool, fxLocalLumpRed, wwEnvStr( "WW_CELL_FXLOCAL_RED" ).split( ',' ).contains( QStringLiteral( "lump" ) ) );
+	/* FARWATER1 late item 4 (bungo b71: the barrel fire does not light its smoke): an air card's lamps take the dense
+	 * plume's multiple scatter x its opacity (cell_volpart.glsl vpLampMs). Red word `thinlamps` (live): thin share only. */
+	WW_SWITCH_STATIC( bool, fxLocalThinLampsRed, wwEnvStr( "WW_CELL_FXLOCAL_RED" ).split( ',' ).contains( QStringLiteral( "thinlamps" ) ) );
 	bool fxLocalHere = false;
 	float fxSunLocal[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
 	/* lane SUNCELL1 final: a lit effect or lit particle outdoors (fo4_effectcell / particles_cell) takes the game's
@@ -2015,7 +2001,9 @@ void wwCellLightsUniforms( Scene * scene )
 							: QStringLiteral( "; a lit-band material is a receiver: weight = the band, the lighting influence reads 1" ) )
 						+ ( fxLocalLumpRed ? QStringLiteral( "; volumetric mesh cards are lumps: the surface share + the GI surface term, RED WW_CELL_FXLOCAL_RED=lump" )
 							: QStringLiteral( "; a volumetric mesh card is a slab of air: the air's scatter at its pixel (lamps x phase in their "
-								"own colours + the sky share under the record's cap) x its opacity, no surface share, no GI surface term" ) )
+								"own colours + the sky share under the record's cap) x its opacity, no surface share, no GI surface term" )
+							+ ( fxLocalThinLampsRed ? QStringLiteral( "; its lamps thin only (1/4 phase), RED WW_CELL_FXLOCAL_RED=thinlamps" )
+								: QStringLiteral( "; its lamps mix( thin, the multiple scatter's diffuse wrap( N.L, 1 ), opacity ) (FARWATER1)" ) ) )
 					: QStringLiteral( "the game's base + lamps, no ambient, RED WW_CELL_FXLOCAL_RED=base" ) )
 				.arg( double( fxSunLocal[0] ), 0, 'f', 5 ).arg( double( fxSunLocal[1] ), 0, 'f', 5 ).arg( double( fxSunLocal[2] ), 0, 'f', 5 )
 				.arg( double( dirColor[0] ), 0, 'f', 5 ).arg( double( dirColor[1] ), 0, 'f', 5 ).arg( double( dirColor[2] ), 0, 'f', 5 );
@@ -2054,7 +2042,8 @@ void wwCellLightsUniforms( Scene * scene )
 	if ( prog->uniLocation( "vpSun" ) >= 0 )
 		rec.f4( prog, "vpSun", FloatVector4( fxSunLocal[0], fxSunLocal[1], fxSunLocal[2], fxSunLocal[3] ) );
 	if ( prog->uniLocation( "fxLocalRed" ) >= 0 )
-		rec.i( prog, "fxLocalRed", ( fxLocalAmbRed ? 1 : 0 ) | ( fxLocalInfRed ? 2 : 0 ) | ( fxLocalLumpRed ? 4 : 0 ) );	// R8-1, round 9
+		rec.i( prog, "fxLocalRed", ( fxLocalAmbRed ? 1 : 0 ) | ( fxLocalInfRed ? 2 : 0 ) | ( fxLocalLumpRed ? 4 : 0 )
+			| ( fxLocalThinLampsRed ? 8 : 0 ) );	// R8-1, round 9
 	prof.at( 18, "fxsun" );
 	/* An exterior's ambient is the weather's DALC, uploaded in the interior's form so cellAmbient is one law
 	 * indoors and out. The axis is the light's TRAVEL direction (Z- lights an up-facing normal). */

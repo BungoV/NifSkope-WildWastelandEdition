@@ -138,6 +138,8 @@ bool wwLookdevMoon();
 void wwLookdevSetMoon( bool on );
 //! the weather fog row (lane FOG1), OFF by default
 bool wwLookdevFog();
+//! FARWATER1 late item 3: the night haze's tint for the "cell air:" line (" night haze=r,g,b R/B x ...")
+QString wwNightHazeNote();
 void wwLookdevSetFog( bool on );
 //! the cascaded sun shadows row (lane CSM1, gl/sunshadow.h), OFF by default
 bool wwLookdevShadows();

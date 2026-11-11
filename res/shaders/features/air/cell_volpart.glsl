@@ -230,12 +230,25 @@ int vpLightsBegin( vec3 P, vec3 posView, out int n )
 	return cellClusterBase + texelFetch( cellCluster, 2 * cl ).r;
 }
 
+#ifndef WW_FX_DECALLIT
+/* FARWATER1 late item 4 (bungo b71: the barrel fire does not light its smoke): an air card's lamps past the thin share.
+ * A dense plume scatters many times and its light tends to the isotropic diffuse of the irradiance (wrap 1, no phase):
+ * per lamp e x max( wrap( N.L, 1 ) - phase, 0 ), added by vpLit x the card's opacity (vpAirCardA), so each lamp gives
+ * max( thin, mix( thin, diffuse, a ) ): a lamp's forward lobe toward the eye is kept. The env and the GI stay thin
+ * (round 9). Red WW_CELL_FXLOCAL_RED=thinlamps (fxLocalRed 8). */
+vec3 vpLampMs = vec3( 0.0 );
+float vpAirCardA = 0.0;
+#endif
+
 /* the light at the sprite's point (posView, world P, height z in the fog's frame) toward the eye along dW (world):
  * thin = the air's J there (pi x radiance per unit opacity), thick = the wrapped diffuse at world normal N */
 void vpLight( vec3 posView, vec3 P, vec3 dW, float z, vec3 N, float w, out vec3 thin, out vec3 thick )
 {
 	thin = vec3( 0.0 );
 	thick = vec3( 0.0 );
+#ifndef WW_FX_DECALLIT
+	vpLampMs = vec3( 0.0 );
+#endif
 	vec3 skyThin = vec3( 0.0 ), skyThick = vec3( 0.0 );	// the sky's share: the records' colour at the end (the air's rule)
 	vec3 jEnv = vec3( 0.0 );	// the env share alone, as the air's Jenv (the veil's open level)
 	airGroundAt( P );	// FOGTERRAIN2: the ground layer on the pass's terrain grid, as the froxels at this point
@@ -289,6 +302,9 @@ void vpLight( vec3 posView, vec3 P, vec3 dW, float z, vec3 N, float w, out vec3 
 			e = vpTint( e ) * exp( -airOd( z, t0.z + zOff, d ) * dL );
 			thin += e * vpPhase( dot( L, dW ) );
 			thick += e * vpWrap( dot( N, L ), w ) * vpPhaseN( dot( L, dW ) );
+#ifndef WW_FX_DECALLIT
+			vpLampMs += e * max( vpWrap( dot( N, L ), 1.0 ) - vpPhase( dot( L, dW ) ), vec3( 0.0 ) );
+#endif
 #ifdef PC_LOOK
 			vpDom += vec4( L, 1.0 ) * dot( e, vec3( 0.2126, 0.7152, 0.0722 ) );
 			vpDomC += e;
@@ -354,6 +370,9 @@ vec3 vpLit( vec3 posView, vec3 Nview, float a )
 	vec3 thin, thick;
 	vpLight( posView, cellWorldPos( posView ), cellWorldDir( posView ), dot( fogView.xyz, posView ) + fogView.w,
 		cellWorldDir( Nview ), m, thin, thick );
+#ifndef WW_FX_DECALLIT
+	thin += vpAirCardA * vpLampMs;	// FARWATER1 late item 4: an air card's lamps, the multiple scatter x its opacity
+#endif
 #if defined( WW_CELL_AIRZONE ) && !defined( WW_FX_DECALLIT )
 	if ( azCount > 0 )	// lane AIRZONE1: a volume's particles block at the puff, one read (the alpha takes its density after)
 		return fxLawMix( azPartLit( cellWorldPos( posView ), m * thin + ( 1.0 - m ) * thick ), lightingInfluence, false );

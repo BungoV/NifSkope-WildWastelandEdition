@@ -83,6 +83,18 @@ float wwEndlessSeaOverlap()
 	return red == "seamcut" ? 0.0f : 4096.0f;
 }
 
+bool wwEndlessSeaAirFlat()
+{
+	WW_SWITCH_STATIC( QByteArray, red, wwEnv( "WW_ENDLESS_SEA_RED" ).trimmed() );
+	return red != "air";
+}
+
+float wwEndlessSeaHandover()
+{
+	WW_SWITCH_STATIC( QByteArray, red, wwEnv( "WW_ENDLESS_SEA_RED" ).trimmed() );
+	return red == "edge" || red == "seamcut" ? 0.0f : 2048.0f;
+}
+
 float wwEndlessSeaSeam()
 {
 	WW_SWITCH_STATIC( QByteArray, seam, wwEnv( "WW_ENDLESS_SEA_SEAM" ).trimmed() );

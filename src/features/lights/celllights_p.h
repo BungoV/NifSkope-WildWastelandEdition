@@ -60,7 +60,7 @@ struct ClState
 	int nextNifxStamp = 1;
 	QHash<const void *, int> version;
 	int nextVersion = 1;
-	bool giOn = false, giPinned = false;
+	bool giOn = false;
 	QHash<const void *, WwCellGi> gi;
 	QHash<const void *, int> giVersion;
 	QHash<const void *, int> giFadeVersion;	// lane GIPROBE2: the grid's rgba edited in place (Probe light smoothing)
