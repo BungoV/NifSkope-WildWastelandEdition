@@ -2044,7 +2044,13 @@ static void vaPassInner( Scene * scene, bool run )
 	const int W = std::max( vp[2], 1 ), H = std::max( vp[3], 1 );
 	// lane PERFFIX3: the near grid's preset (0 / Low = the grid as before: 12 px, 64 slices)
 	const VaGrid grid = vaGridOf( s.grid );
-	const int kColumnPx = grid.px, kSlices = grid.slices;
+	/* lane AIRPERF1 A2: the near grid's slice count of the 128-slice presets by a live key, to time and to judge:
+	 * WW_CELL_AIR_SLICES=64 / 96 (unset or 128 = the preset's own count, the rule before). Offline
+	 * (notes/modules1/airperf1/tools/slices_twin.py) 128 slices buy nothing in the thin ground layer (64 reads it within
+	 * 0.3 of an 8-bit step) and 1 to 2 steps where a surface cuts a sun shaft's edge inside a slice */
+	WW_SWITCH_STATIC( QString, slicesKey, wwEnv( "WW_CELL_AIR_SLICES" ).trimmed() );
+	const int slicesAsk = slicesKey == QLatin1String( "64" ) ? 64 : slicesKey == QLatin1String( "96" ) ? 96 : 0;
+	const int kColumnPx = grid.px, kSlices = slicesAsk && grid.slices > 64 ? slicesAsk : grid.slices;
 	const int cols = ( W + kColumnPx - 1 ) / kColumnPx, rows = ( H + kColumnPx - 1 ) / kColumnPx;
 	// lane FARGRID1: one volume, the far grid's layers after the near grid's (no new sampler on the surfaces)
 	const int texW = farOn ? std::max( cols, fp.cols ) : cols, texH = farOn ? std::max( rows, fp.rows ) : rows;
@@ -2090,6 +2096,8 @@ static void vaPassInner( Scene * scene, bool run )
 	 * Red WW_CELL_AIR_ENVSPREAD_RED=1: the walk every froxel every frame, four strata, as before */
 	WW_SWITCH_STATIC( bool, envSpreadRed, wwEnv( "WW_CELL_AIR_ENVSPREAD_RED" ).trimmed() == "1" );
 	const int strata = envSpreadRed ? 4 : 6;
+	apNote += kSlices == grid.slices ? QStringLiteral( " slices=%1(preset)" ).arg( kSlices )
+		: QStringLiteral( " slices=%1(key, preset %2)" ).arg( kSlices ).arg( grid.slices );	// AIRPERF1 A2
 	if ( temporal && ( !g.hist[0] || g.histCols != cols || g.histRows != rows || g.histSlices != kSlices
 		|| g.histStrata != strata ) ) {
 		for ( GLuint & h : g.hist )
