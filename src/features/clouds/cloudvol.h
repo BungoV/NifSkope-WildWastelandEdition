@@ -68,6 +68,11 @@ bool wwCloudVolDraw( Scene * scene, const WwCloudVolView & view, QStringList & d
  *  the drawn tier or the sky did not draw this frame: the caller keeps the weather's colour. */
 bool wwCloudVolLowColour( float out[3] );
 
+/*! lane SKYLIGHT1: the cloud map's Low + Mid deck over a ground point (clouddeckmath.h, the volume's own density), sun
+ *  at mu0: out = cover, the sun's diffuse transmission, the clear sky's transmission, the mean column tau. False = no
+ *  deck this frame. Memoised (tables per band shape, columns per coverage and mu0). GL thread. */
+bool wwCloudDeckThrough( float mu0, float out[4] );
+
 /*! lane LIGHTNING2 (LIGHTNINGSKY1): the storm's flash for the rest of the frame, the same strike, level and colour as the
  *  volume's (one schedule on the clouds' clock, gl/cloudlightning.h). Switch WW_LIGHTNING_SKY (live, on), red
  *  WW_LIGHTNING_SKY_RED = the volume clouds alone (CLOUD6f).

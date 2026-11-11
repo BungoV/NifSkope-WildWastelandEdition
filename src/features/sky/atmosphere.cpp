@@ -214,13 +214,14 @@ void clearDayHaze( float haze[3], bool recordHasFog )
 	HazeOptics & ho = hazeOptics();
 	ho = HazeOptics();
 	ho.greyMs = red( "greyms" );	// NIGHTHAZE1: the CPU twin's old grey haze scatter (atmomath.h skyMedium)
+	ho.rgb680 = red( "rgb680" );	// SKYLIGHT1: the medium at 680 / 550 / 440 nm (atmomath.h kRayBand)
 	g_airglow = 1.0f;
 	float alb[3], ang = 0.0f, g = kMieG, glow = 1.0f;
 	if ( wwWeatherRecxHazeOptics( alb, ang, g, glow ) ) {
-		static const float kLambda[3] = { 680.0f, 550.0f, 440.0f };
+		const float * lambda = hazeLambda();	// SKYLIGHT1: the band's aerosol wavelength (red rgb680: 680 nm)
 		for ( int c = 0; c < 3; c++ ) {
 			ho.albedo[c] = std::clamp( alb[c], 0.0f, 1.0f );
-			ho.spec[c] = std::pow( kLambda[c] / 550.0f, -ang );
+			ho.spec[c] = std::pow( lambda[c] / 550.0f, -ang );
 		}
 		ho.g = std::clamp( g, 0.0f, 0.95f );
 		g_airglow = std::clamp( glow, 0.0f, 10.0f );
@@ -384,7 +385,8 @@ float g_ozone = 1.0f;	// lane WX1: atmosphere.ozone of the drawn sky (1 = the re
 
 void medium( NifSkopeOpenGLContext::Program * p, const float haze[3], bool noOzone )
 {
-	p->uni3f( "atRay", kRay[0], kRay[1], kRay[2] );
+	const float * ray = rayK(), * oz = ozoneK();	// SKYLIGHT1: the band medium (red WW_ATMO_RED=rgb680: kRay / kOzone)
+	p->uni3f( "atRay", ray[0], ray[1], ray[2] );
 	p->uni1f( "atMieS", kMieS );
 	p->uni1f( "atMieE", kMieE );
 	const HazeOptics & ho = hazeOptics();	// lane WEATHERRECX1: the weather .recx haze (clearDayHaze sets it)
@@ -394,7 +396,7 @@ void medium( NifSkopeOpenGLContext::Program * p, const float haze[3], bool noOzo
 	if ( noOzone )
 		p->uni3f( "atOzone", 0.0f, 0.0f, 0.0f );
 	else
-		p->uni3f( "atOzone", kOzone[0] * g_ozone, kOzone[1] * g_ozone, kOzone[2] * g_ozone );
+		p->uni3f( "atOzone", oz[0] * g_ozone, oz[1] * g_ozone, oz[2] * g_ozone );
 	p->uni3f( "atHaze", haze[0], haze[1], haze[2] );
 	// lane FIX1101A (atmo): the MS LUT's sqrt height rows + 40 packed steps (red msold: linear rows, 20 uniform), read
 	// and written by every pass that takes this medium; the night floor (red nofloor: none), read by atmo_sky only
@@ -694,7 +696,8 @@ bool wwAtmoDrawSky( Scene * scene, const WwAtmoInputs & in, QString * line )
 	const QString hazeKey = QString( "%1,%2,%3,%4" ).arg( double( s.haze[0] ), 0, 'g', 6 ).arg( double( s.haze[1] ), 0, 'g', 6 )
 		.arg( double( s.haze[2] ), 0, 'g', 6 ).arg( noOzone )
 		+ ( g_ozone != 1.0f ? QStringLiteral( ",oz%1" ).arg( double( g_ozone ) ) : QString() )
-		+ ( red( "msold" ) ? QStringLiteral( ",msold" ) : QString() );	// lane FIX1101A (atmo): the red's LUT is another table
+		+ ( red( "msold" ) ? QStringLiteral( ",msold" ) : QString() )	// lane FIX1101A (atmo): the red's LUT is another table
+		+ ( hazeOptics().rgb680 ? QStringLiteral( ",rgb680" ) : QString() );	// SKYLIGHT1: the old medium's tables
 	// 1. transmittance and multiple scattering: only when the medium moves (weather, hour through the fog keys)
 	if ( ok && g.transKey != hazeKey ) {
 		auto p = r->useProgram( "atmo_transmittance.prog" );

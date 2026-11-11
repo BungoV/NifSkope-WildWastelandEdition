@@ -1,3 +1,25 @@
+## SKYLIGHT1 (2026-11-11): overcast ambient through the cloud deck, clear air colour, world-anchored clouds
+
+Changed, not checked live (no build, no window). Offline: CPU twins (notes/skylight1/tools), syntax check of every
+edited file and every includer of the changed headers (16 sources, rc=0).
+
+- **1a. Overcast land takes its ambient through the drawn deck.** `src/features/clouds/clouddeckmath.h` reads the cloud
+  map's Low + Mid bands with the volume's own density as independent columns (Cahalan 1994): the key's light on the
+  deck top passes as two-stream diffuse light, the clear sky's at the diffusivity cosine, x the ground-deck reflections;
+  never under the clear sky's (today's look). physFinish sets up / down / sides from it. Twin at CommonwealthOvercast
+  13.8: cover 0.993, up 0.744 lux (clear 0.529), ground 0.0388 cd/m2, drawn sky / ground 9.6 (today 15.7). Red
+  `WW_SKY_CLOUDDECK_RED=1`. Log `sky deck: ...` and the `light meas: sky Eh` line's `deck:` part.
+- **1b. The ambient's upload reads the up / down poles exactly** (`src/gl/dalcfit.h`): the constant term comes from the
+  up / down pair, not the mean of six (the drop from 0.529 to 0.349 lux). Twin: up / down pole error 7e-7 (red up to
+  23x off). Red `WW_CELL_DALC_FIT_RED=1`. Log `cell ambient: ... fit=`.
+- **2. Clear air no longer too red.** The atmosphere's RGB coefficients are band-effective sRGB values from a spectral
+  model (Rayleigh: Hansen & Travis 1974; ozone: Serdyuchenko 2014 via Bruneton 2017; colour: Wyman 2013 CMF, sRGB) in
+  place of the 680 / 550 / 440 nm samples. Moon at 33.7 deg: T R/B 1.757 -> 1.551. Red `WW_ATMO_RED=rgb680`. Log
+  `light meas: key ... air R/B`.
+- **3. The volume clouds sit on the world.** The cloud map's square stays where it was laid (laid again past 24 km;
+  red `WW_CLOUDMAP_RED=eyesquare`), and Fly-through Clouds ships Low (world heights; new settings key). Twin: a cloud
+  6 km away is 3.46x wider than at 20 km (red 1.00x). Log `cloudmap: square=world@...`.
+
 ## NIGHTHAZE1 (2026-11-11): the brown night haze, the air's filters, select all in a cell view
 
 Changed, not checked live (no build, no window). Offline: the three shader programs link in every air define mode;

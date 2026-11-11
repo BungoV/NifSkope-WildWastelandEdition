@@ -26,6 +26,7 @@ BSD License - see nifskope.h
 #include "features/clouds/cloudfusionlaw.h"	// MODULES1 10c: the 2D layers' scatter law
 #include "features/clouds/cloudmap.h"	// lane CLOUD1: the cloud map
 #include "features/clouds/cloudvol.h"	// lane CLOUD2: the volume clouds
+#include "features/clouds/clouddeckmath.h"	// lane SKYLIGHT1: the deck's light on the ground
 #include "features/clouds/cloudlightning.h"	// lane CLOUD6f: the storm share of the lightning
 #include "features/sky/atmomath.h"	// lane SKYA (ATMOCHECK1): the weather tint table
 #include "features/sky/skyephem.h"	// lane EPHEM1: the real moon's phase texture
@@ -1115,6 +1116,34 @@ void physFinish( LdLight & L, float rKey, bool airKey )
 	}
 	if ( sky ) {
 		WwAtmoMath::giSkyGround( L.sun, n[2], wwWeatherRecx().groundAlbedo >= 0.0f ? wwWeatherRecx().groundAlbedo : 0.15f, out );
+		/* lane SKYLIGHT1 (bungo: overcast land too dark): the ambient comes from the sky as drawn WITH its clouds. The deck
+		 * (the cloud map's Low + Mid, the volume's own density) passes the key's light on its top (what a surface takes:
+		 * key x sunlight scale x mu) as diffuse light and the clear sky's through (clouddeckmath.h). Up = that; the down face
+		 * the ground's bounce of it; the sides under the deck (0.396 + rho / 2) x up (CIE overcast sky, Ev / Eh, + the ground's
+		 * half), blended by the cover. Red WW_SKY_CLOUDDECK_RED=1: the clear sky's ambient. */
+		WW_SWITCH_STATIC( bool, deckRed, wwEnvStr( "WW_SKY_CLOUDDECK_RED" ).trimmed() == QLatin1StringView( "1" ) );
+		float dk[4];
+		if ( !deckRed && len > 0.0f && n[2] > 0.0f && wwCloudDeckThrough( n[2], dk ) ) {
+			const float rho = skyAl, ks = wwLookdevSunlightScale() * n[2];
+			const WwCloudDeck::Through t = { dk[0], dk[1], dk[2], dk[3] };
+			const float clearUp = lumOf( out[4] );
+			for ( int c = 0; c < 3; c++ ) {
+				const float upD = WwCloudDeck::upC( t, L.sun[c] * ks, out[4][c], rho, false );
+				const float add = upD - out[4][c];
+				for ( int a = 0; a < 4; a++ )
+					out[a][c] = ( 1.0f - t.cover ) * out[a][c] + t.cover * ( 0.396f + 0.5f * rho ) * upD;
+				out[4][c] = upD;
+				out[5][c] += rho * add;
+			}
+			static int saidDk = -1;
+			const int k = int( std::lround( dk[0] * 100.0f ) ) * 1000 + int( std::lround( dk[1] * 100.0f ) );
+			if ( k != saidDk ) {
+				saidDk = k;
+				fprintf( stderr, "sky deck: cover %.3f tau %.2f sun through %.3f sky through %.3f -> up x%.3f of the clear sky's"
+					" (red WW_SKY_CLOUDDECK_RED=1)\n", double( dk[0] ), double( dk[3] ), double( dk[1] ), double( dk[2] ),
+					double( lumOf( out[4] ) / std::max( clearUp, 1e-9f ) ) );
+			}
+		}
 		for ( int a = 0; a < 6; a++ )	// out is by the face; the readers take the weather's order (wwPhysAxesRed)
 			std::copy( out[a], out[a] + 3, L.dalc[axRed ? a : ( a ^ 1 )] );
 	} else {

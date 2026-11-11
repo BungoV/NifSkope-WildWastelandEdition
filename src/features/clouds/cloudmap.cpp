@@ -88,6 +88,8 @@ struct CmState
 	int cur2 = 0;
 	double ms = 0.0;
 	quint64 builds = 0;
+	float anchor[2] = { 0.0f, 0.0f };	// SKYLIGHT1: the square's world centre (game units)
+	bool anchored = false;
 };
 
 CmState & cs()
@@ -678,8 +680,23 @@ const WwCloudMap & wwCloudMapUpdate( Scene * scene )
 		key += QStringLiteral( "|var%1,%2" ).arg( double( shown[0].type ), 0, 'f', 3 ).arg( double( shown[0].typeSpread ), 0, 'f', 3 );
 
 	WwCloudMap & m = s.map;
-	m.centerX = eye[0];	// the sky follows the camera: only the square moves
-	m.centerY = eye[1];
+	/* SKYLIGHT1 (bungo: "they just have the same distance away from me, so they move away as I get closer"): the square
+	 * stays where it was laid, so its coverage sits on the world and a cloud ahead grows as the camera nears it; it is laid
+	 * again only when the camera is half a half-extent (24 km) from its centre (the map's content is the projection
+	 * around the eye either way, so a new anchor needs no rebuild). Red WW_CLOUDMAP_RED=eyesquare: the square under the
+	 * camera every frame (before). */
+	const bool eyeSquare = red( "eyesquare" );
+	const float reanchor = 0.5f * kHalfExtentM * kUnitsPerM;
+	if ( eyeSquare || !s.anchored || std::hypot( eye[0] - s.anchor[0], eye[1] - s.anchor[1] ) > reanchor ) {
+		s.anchor[0] = eye[0];
+		s.anchor[1] = eye[1];
+		s.anchored = !eyeSquare;
+		if ( !eyeSquare )
+			fprintf( stderr, "cloudmap: square=world@%.0f,%.0f (laid again past %.0f m; heights=%s; red WW_CLOUDMAP_RED=eyesquare)\n",
+				double( eye[0] ), double( eye[1] ), double( reanchor / kUnitsPerM ), world ? "world" : "eye" );
+	}
+	m.centerX = s.anchor[0];
+	m.centerY = s.anchor[1];
 	for ( int b = 0; b < 3; b++ ) {
 		m.band[b].baseZ = ( world ? 0.0f : eye[2] ) + shown[b].baseM * kUnitsPerM;
 		m.band[b].topZ = ( world ? 0.0f : eye[2] ) + shown[b].topM * kUnitsPerM;
