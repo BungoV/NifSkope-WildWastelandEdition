@@ -1091,6 +1091,13 @@ int restirRedBits()
 	return b;
 }
 
+//! lane AIRPERF1 round 2. WW_CELL_RESTIR_WAIT_RED=1 (live, read every frame): the frame waits on the device for the
+//! pass, the rule before (the wait is GL's own queue up to the hand-over: 18-40 ms in a 104 ms frame)
+bool restirWaitRed()
+{
+	return wwEnvStr( "WW_CELL_RESTIR_WAIT_RED" ).trimmed() == QLatin1StringView( "1" );
+}
+
 //! the pass's GL side: the shared g-buffer copy (a pixel-pack buffer) and the ratio (a texture buffer, RG32F)
 struct RestirGl
 {
@@ -1101,6 +1108,8 @@ struct RestirGl
 	bool ready = false, history = false;
 	quint32 frame = 0;
 	qint64 runs = 0, busy = 0;
+	bool valid = false;         // the ratio holds a submit GL has ordered its reads after (a late frame keeps it)
+	qint64 late = 0, steps = 0; // frames without a hand-over (the last submit still on the device) of frames asked
 	float prows[12] = { 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0 }, pproj[4] = { 1, 1, 0, 0 };
 	QString last;
 };
@@ -1293,6 +1302,8 @@ void rtddgiRestirPass( Scene * scene )
 	auto fn = r->fn;
 	GlShare & sh = glShare();
 	// the shared g-buffer into the device's buffer (a GPU copy through the pixel-pack binding)
+	QElapsedTimer copyTimer;
+	copyTimer.start();
 	GLint prevActive = 0, prevPack = 0;
 	fn->glGetIntegerv( GL_ACTIVE_TEXTURE, &prevActive );
 	fn->glGetIntegerv( GL_PIXEL_PACK_BUFFER_BINDING, &prevPack );
@@ -1304,6 +1315,7 @@ void rtddgiRestirPass( Scene * scene )
 	fn->glBindBuffer( GL_PIXEL_PACK_BUFFER, GLuint( prevPack ) );
 	fn->glBindTexture( GL_TEXTURE_2D, 0 );
 	fn->glActiveTexture( GLenum( prevActive ) );
+	const double msCopy = double( copyTimer.nsecsElapsed() ) / 1e6;   // the CPU side of the queued GPU copy + two state asks
 	// the camera: view -> world rows (celllights.cpp cellRow), moved into the soup's local frame; the frame's projection
 	bakert::RestirGpuIn in;
 	const Transform & vt = scene->view;
@@ -1330,6 +1342,8 @@ void rtddgiRestirPass( Scene * scene )
 	in.H = t.h;
 	in.frame = G.frame++;
 	in.red = restirRedBits();
+	in.wait = restirWaitRed();   // lane AIRPERF1 round 2: the frame does not wait on the device (the red: it does)
+	G.steps++;
 	const std::vector<float> & pl = c.live->live.packedLights();
 	for ( size_t i = 0; i + 31 < pl.size(); i += 32 )
 		if ( pl[i + 30] > 0.5f )
@@ -1341,7 +1355,17 @@ void rtddgiRestirPass( Scene * scene )
 	};
 	bakert::RestirGpuOut out;
 	if ( !bakert::restirGpuStep( s, in, &out ) ) {
+		if ( out.late && G.valid ) {
+			// lane AIRPERF1 round 2: the last submit is still on the device. No hand-over this frame (no signal, no wait:
+			// the pair stays balanced); the last ratio stays, and GL's wait on vkDone queued with that submit already
+			// orders this frame's reads after it. The history stays the last stepped frame's.
+			G.frame--;
+			G.late++;
+			G.ready = true;
+			return;
+		}
 		G.history = false;
+		G.valid = false;
 		G.busy += out.busy ? 1 : 0;
 		restirSay( G, out.busy ? QStringLiteral( "busy (a bake holds the device): this frame unshadowed" )
 			: QStringLiteral( "refused(%1)" ).arg( QString::fromStdString( out.why ) ) );
@@ -1349,13 +1373,29 @@ void rtddgiRestirPass( Scene * scene )
 	}
 	sh.waitSem( G.semVk, 2, G.buf, 0, nullptr, nullptr );
 	G.ready = true;
+	G.valid = true;
 	G.history = true;
 	std::copy( in.rows, in.rows + 12, G.prows );
 	std::copy( in.proj, in.proj + 4, G.pproj );
-	if ( ( G.runs++ % 64 ) == 0 )
-		restirSay( G, QStringLiteral( "on %1 x %2, %3 shadow lights of %4 (candidates %5, neighbours %6), frame %7, device wall %8 ms, red %9" )
+	if ( ( G.runs++ % 64 ) == 0 ) {
+		// lane AIRPERF1 round 2: the wall split into its parts. "wait" is this submit's fence on the CPU: with the frame
+		// waiting (the red) it holds GL's queue up to the hand-over + the kernels, so wait - device gpu = behind GL's queue
+		const QString gpu = out.ms < 0.0 ? QStringLiteral( "- (no finished submit with timestamps yet)" )
+			: QStringLiteral( "%1 ms (%2)" ).arg( out.ms, 0, 'f', 3 )
+				.arg( out.pending ? QStringLiteral( "the last finished submit's" ) : QStringLiteral( "this submit's" ) );
+		const QString split = QStringLiteral( "last submit %1 + upload %2 + record %3 + submit %4 + wait %5 + read %6" )
+			.arg( out.msPrev, 0, 'f', 3 ).arg( out.msUpload, 0, 'f', 3 ).arg( out.msRecord, 0, 'f', 3 ).arg( out.msSubmit, 0, 'f', 3 )
+			.arg( out.msWait, 0, 'f', 3 ).arg( out.msRead, 0, 'f', 3 );
+		const QString mode = in.wait
+			? QStringLiteral( "the frame waits (RED WW_CELL_RESTIR_WAIT_RED=1): behind GL's queue %1 ms" )
+				.arg( out.ms < 0.0 ? out.msWait : std::max( 0.0, out.msWait - out.ms ), 0, 'f', 3 )
+			: QStringLiteral( "no wait on the frame (red WW_CELL_RESTIR_WAIT_RED=1)" );
+		restirSay( G, QStringLiteral( "on %1 x %2, %3 shadow lights of %4 (candidates %5, neighbours %6), frame %7, device wall %8 ms = %9" )
 			.arg( t.w ).arg( t.h ).arg( in.cand.size() ).arg( pl.size() / 32 ).arg( in.candidates ).arg( in.spatial ).arg( in.frame )
-			.arg( out.msWall, 0, 'f', 3 ).arg( in.red ) );
+			.arg( out.msWall, 0, 'f', 3 ).arg( split )
+			+ QStringLiteral( "; device gpu %1; gl copy %2 ms cpu (shared buffer: no CPU copy); hand-over: %3; late %4 of %5 frames; red %6" )
+				.arg( gpu ).arg( msCopy, 0, 'f', 3 ).arg( mode ).arg( G.late ).arg( G.steps ).arg( in.red ) );
+	}
 }
 
 namespace {

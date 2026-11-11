@@ -11,6 +11,8 @@
 #include <string>
 #include <vector>
 
+#include "restirhandover.h"   // lane AIRPERF1 round 2: when a ReSTIR step may wait on the device
+
 namespace probebvh { struct Bvh; }
 
 namespace bakert {
@@ -208,14 +210,22 @@ struct RestirGpuIn
 	std::vector<int> cand;                // the candidate lights (indices into the volume's packed list)
 	const float * gbuf = nullptr;         // host g-buffer W x H x 4 (the CLI); nullptr: GL wrote the shared one
 	bool readBack = false;                // copy the ratio, num / den / blocked, reservoirs and running means to the host
+	bool wait = true;                     // false (the GL frame): return after the submit; a last submit still running = late
 	std::function<bool()> beforeSubmit;   // interop (restirGpuShare): GL signalled glDone; the submit waits on it
 };
 struct RestirGpuOut
 {
 	bool ok = false, busy = false;
 	std::string why;
-	double ms = -1;                       // the four passes + copies on the device (-1: no timestamps)
-	double msWall = 0;
+	double ms = -1;                       // the four passes + copies on the device's own clock, of the last FINISHED submit
+	                                      // (this one's when the step waited; -1: no timestamps or none finished yet)
+	double msWall = 0;                    // the whole step on the CPU's clock = the six parts below (+ pipeline lookups)
+	// lane AIRPERF1 round 2: the wall's parts, CPU ms. msPrev: our last submit (0 unless the caller waits); msUpload: a host
+	// g-buffer's copy (the CLI; 0 with the shared buffer); msRecord: parameters + command buffer; msSubmit: GL's signal +
+	// flush + the queue submit; msWait: this submit's fence (behind GL's queue: 0 unless the caller waits); msRead: read-back
+	double msPrev = 0, msUpload = 0, msRecord = 0, msSubmit = 0, msWait = 0, msRead = 0;
+	bool late = false;                    // no submit: the last one is still on the device (in.wait false); not an error
+	bool pending = false;                 // the submit went in and was not waited for
 	std::vector<float> ratio;             // readBack: 2 a pixel (ratio, linear depth)
 	std::vector<float> numDen;            // 4 a pixel (num, den, blocked 0/1 (2: no ray), 0)
 	std::vector<float> res;               // 4 a pixel (light as a float, wsum, M, W): the frame's output reservoir

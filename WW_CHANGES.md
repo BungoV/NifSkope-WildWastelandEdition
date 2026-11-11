@@ -1,3 +1,24 @@
+## AIRPERF1 round 2 (2026-11-11): the ReSTIR pass no longer makes the frame wait on the device
+- **The cause (bungo: 19-35 ms in the big window):** "device wall" timed the whole step, and the step ended in a CPU
+  wait on its submit's fence. That submit waits on GL's glDone semaphore, so the fence fires only after the GPU has
+  run every GL command queued before the hand-over (shadow maps, lamp cubes, the shared depth / normal pass). In a
+  104 ms GPU frame that queue is 18-40 ms deep; the kernels themselves are about 1-2 ms. The first frame after the
+  resize read 1.7 ms because the re-import had just drained GL. The volume's own steps on the same device do not
+  wait and read 0.14 ms wall in the same flight.
+- **The rule (`src/features/gi/rtddgi/restirhandover.h`):** the GL frame submits and returns; GL orders its read of the
+  ratio on the GPU with its wait on vkDone (EXT_semaphore: the wait blocks the GL server, not the caller). A step
+  that finds its last submit still on the device makes no new one (the parameters and the command buffer are in
+  use): that frame keeps the last ratio and is counted `late`. The CLI and a read-back wait as before.
+- Red, live: `WW_CELL_RESTIR_WAIT_RED=1` (the frame waits, the rule before).
+- Telemetry: `restir cell: on W x H, ... device wall X ms = last submit a + upload b + record c + submit d + wait e +
+  read f; device gpu G ms (...); gl copy C ms cpu ...; hand-over: ...; late L of N frames; red R`. `device gpu` is two
+  timestamps on the device (before the first kernel, after the last copy), read when the fence is known signalled.
+  With the red the line also gives `behind GL's queue` = wait - device gpu.
+- Offline proof: `bash tests/features/gi/restir_handover/run.sh <out>` (a frame timeline on the rule; green 5, the
+  red `-DRESTIR_HANDOVER_RED` fails framewait and behind). Not flown yet: the numbers above are the flight log's
+  and the code's reading; the next flight's `restir cell:` line decides.
+- Files: `src/features/gi/rtddgi/restirhandover.h` (new), `restir_vk.inc`, `rtddgi_gpu.h`, `src/features/gi/rtddgicell.cpp`.
+
 ## AIRPERF1 A9 (2026-11-11): clouds, night, wind, lightning and precipitation follow the physical weather switch
 - **The rule (bungo), per block family:** with `"physicalWeather": true` in the block's own entry every physical
   value written there decides alone; the record is no blend, fit target, clamp or floor. A value not written stays the
