@@ -304,6 +304,7 @@ vec3 tonemap(vec3 x)
 #define WW_CELL_GI_MARCH_ONCE 1	// lane GIBLACKLINK1: the march red runs once (cellGiMarchPrime in main)
 #endif
 #define CELL_GI_ONEREAD 1	// DDGIREADPERF1: one volume read site (cellGiFirst in main, cell_lights.glsl)
+#define CELL_RESTIR_MISS_PIXEL 1	// MODULES1 R7 item 2: a surface off the traced depth takes the pixel's shadow ratio (cellShadowF)
 #include "cell_lights.glsl"
 #include "cell_reflprobe.glsl"
 #include "cell_ao.glsl"

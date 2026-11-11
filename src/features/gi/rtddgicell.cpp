@@ -1215,7 +1215,15 @@ void restirUniforms( Renderer * r, NifSkopeOpenGLContext::Program * prog )
 	}
 	prog->uni1i( "cellRestir", WwCellUnit::Restir );
 	prog->uni1b_l( loc, on );
-	prog->uni4f( "cellRestirSize", FloatVector4( float( G.W ), float( G.H ), 0.0f, 0.0f ) );
+	// MODULES1 R7 item 2: a fragment off the ratio's depth (cell_lights.glsl cellShadowF); the red is live
+	const bool missRed = wwEnvStr( "WW_CELL_RESTIR_MISS_RED" ).trimmed() == QLatin1StringView( "1" );
+	static int saidMiss = -1;
+	if ( on && saidMiss != int( missRed ) ) {
+		saidMiss = int( missRed );
+		fprintf( stderr, "restir ratio miss: a surface fragment off the traced depth (2 %% + 2 units) takes %s (ratio %dx%d; red WW_CELL_RESTIR_MISS_RED=1: unshadowed)\n",
+			missRed ? "1.0 = every shadow lamp unshadowed (RED, the old rule)" : "the pixel's ratio; 1.0 only with no surface behind it", G.W, G.H );
+	}
+	prog->uni4f( "cellRestirSize", FloatVector4( float( G.W ), float( G.H ), missRed ? 1.0f : 0.0f, 0.0f ) );
 }
 
 } // namespace

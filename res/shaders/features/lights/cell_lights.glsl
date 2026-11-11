@@ -117,7 +117,7 @@ uniform float cellShadowFade[16];
 // (Heitz 2018: the shadowed / unshadowed estimates of the shadow-casting lights) and the linear depth it was traced for
 uniform bool cellRestirOn;
 uniform samplerBuffer cellRestir;	// RG32F, bottom row first: ratio, linear depth
-uniform vec4 cellRestirSize;		// W, H
+uniform vec4 cellRestirSize;		// W, H, z = 1: red WW_CELL_RESTIR_MISS_RED (a fragment off the ratio's depth is unshadowed)
 #endif
 // distant light from the surfels (src/features/far-lod/farlight.h), set by celllights.cpp
 uniform bool cellFarOn;
@@ -289,7 +289,18 @@ float cellShadowF( int i, vec3 P, vec3 N )
 		vec3 w = P - vec3( cellRow[0].w, cellRow[1].w, cellRow[2].w );
 		float s2 = 1.0 / max( dot( cellRow[0].xyz, cellRow[0].xyz ), 1e-12 );
 		float D = -s2 * ( cellRow[0].z * w.x + cellRow[1].z * w.y + cellRow[2].z * w.z );
-		return abs( D - rr.y ) <= 0.02 * rr.y + 2.0 ? rr.x : 1.0;
+		if ( abs( D - rr.y ) <= 0.02 * rr.y + 2.0 )
+			return rr.x;
+#ifdef CELL_RESTIR_MISS_PIXEL
+		/* MODULES1 R7 item 2 (bungo: one-frame flashes, stray lights): a SURFACE fragment (fo4_default, pbrm_default) off
+		 * the traced depth took 1.0 = EVERY shadow-casting lamp unshadowed. A shape the opaque pre-pass missed for one
+		 * frame then lit up with the light of a lamp behind a wall, sharp at the shape's outline, for that frame. Now it
+		 * takes the pixel's ratio (the surface behind it, traced this frame). No surface behind (the g-buffer's 1e6):
+		 * unshadowed, as before. Red WW_CELL_RESTIR_MISS_RED=1 (cellRestirSize.z). */
+		return ( cellRestirSize.z > 0.5 || rr.y > 9.0e5 ) ? 1.0 : rr.x;
+#else
+		return 1.0;	// an effect card, a particle, water, a froxel: free in the air, not the traced surface's shadow
+#endif
 	}
 #ifndef WW_CELL_RESTIR_CUBES_RED
 	/* lane PRESETPERF1 (PRESETPERM1): under WW_CELL_RESTIR no cube is drawn and every slot is let go (celllights.cpp, the

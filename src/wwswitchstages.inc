@@ -600,6 +600,7 @@
 { "WW_CELL_REFL_PREV_RED", 0, "src/features/reflections/cellssr.cpp:142 wwCellReflPrevRed | re-read per frame or per call (a)" },
 { "WW_CELL_REFS_RED", 1, "src/cellview.cpp:3175 cellBuild | read while the cell document is built" },
 { "WW_CELL_REGION_RED", 0, "src/gl/lookdevstage.cpp:611 regionWalk | re-read per frame or per call (a)" },
+{ "WW_CELL_RESTIR_MISS_RED", 0, "src/features/gi/rtddgicell.cpp:1219 restirUniforms | re-read per frame or per call (a)" },
 { "WW_CELL_RESTIR_RED", 0, "src/features/gi/rtddgicell.cpp:1081 restirRedBits | hand: restirRedBits read every frame by rtddgiRestirPass: the kernel red bits (RESTIRDI1)" },
 { "WW_CELL_ROOMCLAMP_PIN", 1, "src/cellview.cpp:4293 cellBuild | read while the cell document is built" },
 { "WW_CELL_ROOMFIT_RED", 2, "src/features/gi/probevolfine.cpp:1535 probeVolumesFineFit | cell build, function static: read once for the process (a reopen keeps it)" },
