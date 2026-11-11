@@ -36,6 +36,36 @@
   Telemetry `fit=(rule= street= record= sky= T air/game ... light=)`.
 
 ## MODULES1 round 7 (2026-11-11): bungo's build 62 flight
+- **Item 4 strips in the far fog:** the far tail's light came from the LAST froxel slice alone (dL / dT); in the
+  16F grids a thin last slice's dT is a few half-float steps, so it stepped per slice. Now the tail reads the column
+  (L / (1 - T) over the slices holding the last ~64 steps of T), and under optical depth 0.125 the analytic depth.
+  The grids stay 16F. Red `WW_CELL_AIR_TAILJ_RED=1`. Fog echo `tailJ=column|RED last slice`. Offline model: red 194
+  pixel steps, green 0.
+- **Night sky d (Foggy h22 "the sky is pitch black"):** saturated night air ends at the record's night fog colour with
+  Physical Light Units Off, at albedo x the sky's mean (with the record's level) with it On; surfaces take the same
+  floor, so far land and sky end at one colour. Over the record's dome the sky is covered by the air ONCE (its own
+  L, T; straight up T 0.227), not also by the residual credit and the horizon band. Red `WW_NIGHTAIR_RED=1`.
+  Telemetry `night air: master On|Off: saturated air = ...`.
+- **Item 6 white 1 px line across the horizon (from high up):** the sky air's exactly-level ray had its own end
+  (T 1 above the air's top) while the rows beside it were opaque. It ends like its neighbours now.
+  Red `WW_CELL_AIR_LEVELRAY_RED=1`. Telemetry `sky air level ray: ...`.
+- **Item 9 sun leak on the alley wall:** the wall is grazed by the sun (N.L 0.00); the soft shadow filter moved each
+  tap's depth along the receiver's slope by up to 2000 units, past every caster, so half the taps read lit. A tap's
+  depth walk is now at most 4 texels of its cascade. Red `WW_SHADOW_RED=walk2000`. Telemetry `sun cascades filter:
+  ...`. Offline model at 0 deg: rays 0.000, red 0.500, green 0.000; from 20 deg up green = red within 0.011.
+  The "weak GI bounce" is the same wall: 0 of 83324 lux reaches a grazed face, so 0 bounce is right.
+- **Item 9, same class: back light without its flag:** a material's back light power reached the shader without
+  the back-lighting flag (171 of 6616 vanilla BGSM). The power is passed only with the flag.
+  Red `WW_BACKLIGHT_FLAG_RED=1`. Telemetry `back light flag: ...`.
+- **Item 7 the 306 settings rows left at "reopen":** every row says its bin and reason: 219 build cell data, 59 are
+  options of the run that opens the cell, 10 are no switches (7 name prefixes, 3 names with no reader), 18 are live
+  now (11 already re-read; 7 were read once per process and are re-read: `WW_CELL_AO_LEAN` / `_RED`,
+  `WW_DRAW_GLCACHE` / `_RED`, `WW_PBRM_ROUTE_VIEW`, `WW_CELL_STREAM_TEXKEEP` / `_GEOKEEP`). Red `WW_R7LIVE_RED=1`
+  (launch). Telemetry `switch: cell ao lean ...`, `switch: draw gl cache ...`, `stream keep: ...`.
+- **Item 10 Scene window, the two open points of R6-11:** the number rows with a stated default (Exposure, Game Light
+  Brightness, Game Day, Shadow Distance) carry the switch rows' Reset button, lit only off the default; a click on
+  the cut Status text copies the whole text. Red `WW_SCENE_LAYOUT_RED=r6`. Telemetry `scene window: N number rows
+  carry Reset (...)`, `scene window: reset '<row>': ...`, `scene window: elided text copied whole on a click ...`.
 - **R7-1 lit effect cards and particles dark beside a lamp:** outdoors they take the surfaces' sun, the weather's
   ambient and the lamps at their own spot. Red `WW_CELL_FXLOCAL_RED=base`. Telemetry `cell fx local: ...`.
 - **Night sky:** Physical Light Units Off: the drawn sky crossfades to the weather record's night dome colours by
