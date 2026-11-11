@@ -44,9 +44,15 @@
 	float mu0 = dot( up, cvKeyW );
 	vec3 key = cvKeyK * atTrans( cvTrans, kRb + p.z, mu0 );
 	float ph = cvOctaveSum( cosT, tauL );
+	vec3 phC = vec3( ph );	// lane NIGHTHAZE1: the two-stream floor per colour when clouds.albedo is not grey
+	bool alC = cvAlbedoD != vec3( 0.0 );
 	// lane CLOUD2B: the octaves' floor: the diffuse light through the cloud above, as a slab of tauL mu0 (gate C)
 	if ( cvMsOn > 0.5 && mu0 > 0.01 ) {
 		float fd = mu0 * cvTdif( tauL * mu0, mu0, cvMsG, kCvAlbedo );
+		vec3 fdC = vec3( fd );
+		if ( alC )
+			for ( int c = 0; c < 3; c++ )
+				fdC[c] = mu0 * cvTdif( tauL * mu0, mu0, cvMsG, kCvAlbedo + cvAlbedoD[c] );
 		/* lane CLOUD2C: what the cloud UNDER the sample sends back up (a thick top seen from above): its slab
 		 * reflection (cvRdir) of the light reaching the sample, the direct beam and fd, the slab's depth from
 		 * taps straight down. Seen along d it weighs (1 - g d.z) / 2: the phase's share of up-going light
@@ -71,11 +77,16 @@
 			}
 			float fu = cvRdir( tauB, mu0, cvMsG, kCvAlbedo ) * ( mu0 * exp( -tauL ) + fd );
 			fd += 0.5 * ( 1.0 - cvMsG * d.z ) * fu;
+			if ( alC )
+				for ( int c = 0; c < 3; c++ )
+					fdC[c] += 0.5 * ( 1.0 - cvMsG * d.z ) * cvRdir( tauB, mu0, cvMsG, kCvAlbedo + cvAlbedoD[c] ) * ( mu0 * exp( -tauL ) + fdC[c] );
 		}
 		ph = max( ph, fd / kPi );
+		phC = alC ? max( phC, fdC / kPi ) : vec3( ph );
 	}
 	vec3 tint = p.z < cvBands.topKm.x ? cvTint[0] : cvTint[1];
 	float ambF = mix( 0.5, 1.0, hf );
+	vec3 ambC = vec3( ambF );	// lane NIGHTHAZE1
 	/* lane CLOUDBAND1 (b), RDR2's darker sky light inside thick cloud (Bauer 2019 darkens it by a sun-ward sample): the open
 	 * sky's light reaching the sample is its transmission through the column above: the delta-Eddington scaled direct
 	 * part exp(-(1 - g^2 w) tau / 0.6) + the two-stream Tdif, both at mu 0.6 (the diffusivity cosine), tau from three
@@ -93,9 +104,15 @@
 		}
 		// the direct part of the delta-Eddington scaled slab (the forward peak counts as passed through, as in cvTdif)
 		ambF = exp( -( 1.0 - cvMsG * cvMsG * kCvAlbedo ) * tauU / 0.6 ) + cvTdif( tauU, 0.6, cvMsG, kCvAlbedo );
+		ambC = vec3( ambF );
+		if ( alC )
+			for ( int c = 0; c < 3; c++ ) {
+				float wc = kCvAlbedo + cvAlbedoD[c];
+				ambC[c] = exp( -( 1.0 - cvMsG * cvMsG * wc ) * tauU / 0.6 ) + cvTdif( tauU, 0.6, cvMsG, wc );
+			}
 	}
 	// lane MODULES1: the light the droplets passed on, red absorbed by the water on its way in (cloudvolmath.h waterAbsorbK)
-	vec3 S = kCvAlbedo * tint * ( key * ph * exp( -cvWaterK * tauL ) + cvAmbOn * cvAmb * ambF * exp( -cvWaterK * tauU ) );
+	vec3 S = ( kCvAlbedo + cvAlbedoD ) * tint * ( key * phC * exp( -cvWaterK * tauL ) + cvAmbOn * cvAmb * ambC * exp( -cvWaterK * tauU ) );
 	float tr = exp( -dens * kCvSigma * dt );
 	float w = T * ( 1.0 - tr );
 	L += S * w;	// Frostbite: S (1 - e^(-sigma dt)) / sigma x sigma_s, sigma_s = albedo sigma

@@ -18851,6 +18851,16 @@ void GLView::selectAll( int action )
 	// deselect), 1 = select all, 2 = deselect all
 	if ( !model )
 		return;
+	/* lane NIGHTHAZE1: select all in a cell view (thousands of refs, A key, Select > All, every caller) froze the
+	 * window: refused there, deselect kept; a plain NIF view selects all as before */
+	if ( action != 2 && cellCamBoundsIsCell( model ) ) {
+		const bool clears = action == 0 && ( editMode ? !pickedElems.isEmpty() : !objSelection.isEmpty() );
+		if ( !clears ) {
+			std::fprintf( stderr, "select all: refused in the cell view (%d shapes; deselect still works)\n",
+				scene ? int( scene->shapes.size() ) : 0 );
+			return;
+		}
+	}
 	if ( riggingWeightPaintMode )
 		setRiggingWeightPaintBrushEnabled( false );
 	if ( vertexPaintMode )

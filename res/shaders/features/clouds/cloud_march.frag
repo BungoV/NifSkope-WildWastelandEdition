@@ -64,6 +64,9 @@ layout ( location = 0 ) out vec4 cvOut;
 layout ( location = 1 ) out vec4 cvDepth;
 
 const float kCvAlbedo = 0.99;
+/* lane NIGHTHAZE1: the weather .recx clouds.albedo (the hazeType's default; glowing = the radstorm's green) minus 0.99,
+ * per colour; 0 0 0 (unset) = the grey march as before, one two-stream evaluation */
+uniform vec3 cvAlbedoD;
 
 float cvDens( vec3 p )
 {
@@ -354,7 +357,7 @@ void main()
 		float al = 1.0 - exp( -tau );
 		vec3 key = cvKeyK * atTrans( cvTrans, kRb + p.z, dot( up, cvKeyW ) );
 		cvIceNow = cvIce.z;	// lane CLOUDRECX1
-		vec3 S = kCvAlbedo * cvTint[2] * ( key * cvOctaveSum( cosT, 0.5 * tau ) + cvAmbOn * cvAmb );
+		vec3 S = ( kCvAlbedo + cvAlbedoD ) * cvTint[2] * ( key * cvOctaveSum( cosT, 0.5 * tau ) + cvAmbOn * cvAmb );
 		L += T * al * S;
 		dsum += T * al * th;
 		wsum += T * al;

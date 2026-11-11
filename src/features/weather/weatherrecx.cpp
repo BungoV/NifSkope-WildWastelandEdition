@@ -331,8 +331,55 @@ const char * const kSlotDefaults[] = { "FO4CS\\Fog\\GroundFogNoise.dds", "FO4CS\
 	"FO4CS\\Lightning\\bolt_d.dds", "FO4CS\\Particles\\dust_d.dds", "FO4CS\\Particles\\rad_d.dds" };
 const char * const kPrecipTypes[] = { "rain", "hail", "snow_fine", "snow_far_dot", "snow_wet_clump", "snow_big_clump" };
 
+//! lane NIGHTHAZE1: an [r,g,b] key (or one number for all three) in [lo, hi]; dropped with a line otherwise
+void readRgb( const Obj & b, const char * key, float lo, float hi, float out[3] )
+{
+	const QJsonValue v = b.get( key );
+	if ( v.isUndefined() )
+		return;
+	float c[3];
+	bool ok = false;
+	if ( v.isDouble() ) {
+		c[0] = c[1] = c[2] = float( v.toDouble() );
+		ok = true;
+	} else if ( v.isArray() && v.toArray().size() == 3 ) {
+		const QJsonArray a = v.toArray();
+		ok = true;
+		for ( int i = 0; i < 3; i++ ) {
+			ok = ok && a[i].isDouble();
+			c[i] = float( a[i].toDouble() );
+		}
+	}
+	for ( int i = 0; ok && i < 3; i++ )
+		ok = c[i] >= lo && c[i] <= hi;
+	if ( ok )
+		std::copy( c, c + 3, out );
+	else
+		sayOnce( QStringLiteral( "weather recx: %1: %2 dropped (not-rgb: %3..%4 or three of them)" ).arg( b.where,
+			QLatin1String( key ) ).arg( double( lo ) ).arg( double( hi ) ) );
+}
+
+//! lane NIGHTHAZE1: one number in [lo, hi]; dropped with a line otherwise
+void readNum( const Obj & b, const char * key, float lo, float hi, float & out )
+{
+	const QJsonValue v = b.get( key );
+	if ( v.isUndefined() )
+		return;
+	if ( v.isDouble() && v.toDouble() >= lo && v.toDouble() <= hi )
+		out = float( v.toDouble() );
+	else
+		sayOnce( QStringLiteral( "weather recx: %1: %2 dropped (not-number: %3..%4)" ).arg( b.where, QLatin1String( key ) )
+			.arg( double( lo ) ).arg( double( hi ) ) );
+}
+
 void readAtmoWords( const Obj & b, WwWeatherRecx & r, unsigned & useRecord )
 {
+	// lane NIGHTHAZE1: the haze's glow filter and the last-resort inscattering overrides (SPEC.md 1.5)
+	readRgb( b, "hazeGlow", 0.0f, 1000.0f, r.hazeGlow );
+	readRgb( b, "inscatterColor", 0.0f, 100.0f, r.inscatterColor );
+	readRgb( b, "directionalInscatter", 0.0f, 100.0f, r.dirInscatter );
+	readNum( b, "directionalInscatterExponent", 1.0f, 64.0f, r.dirInscatterExp );
+	readNum( b, "directionalInscatterStart", 0.0f, 100000.0f, r.dirInscatterStart );
 	const QJsonValue ht = b.get( "hazeType" );
 	if ( !ht.isUndefined() ) {
 		const QString w = ht.toString().trimmed().toLower();
@@ -461,6 +508,16 @@ QString keyOf( const WwWeatherRecx & r )
 		x += QStringLiteral( " air=%1C" ).arg( double( r.airTemp ), 0, 'g', 4 );
 	if ( r.recordRed )
 		x += QStringLiteral( " recordRed=0x%1" ).arg( r.recordRed, 0, 16 );
+	// lane NIGHTHAZE1: the air's filters and overrides (only when set: the text above is as before otherwise)
+	const struct { const char * n; const float * v; } rgb[] = { { "hazeAlbedo", r.hazeAlbedo }, { "hazeGlow", r.hazeGlow },
+		{ "cloudAlbedo", r.cloudAlbedo }, { "inscatterColor", r.inscatterColor }, { "directionalInscatter", r.dirInscatter } };
+	for ( const auto & m : rgb )
+		if ( m.v[0] >= 0.0f )
+			x += QStringLiteral( " %1=%2,%3,%4" ).arg( QLatin1String( m.n ), f4( m.v[0] ), f4( m.v[1] ), f4( m.v[2] ) );
+	if ( r.dirInscatterExp >= 0.0f )
+		x += QStringLiteral( " dirExp=%1" ).arg( f4( r.dirInscatterExp ) );
+	if ( r.dirInscatterStart >= 0.0f )
+		x += QStringLiteral( " dirStart=%1" ).arg( f4( r.dirInscatterStart ) );
 	// lane CLOUDRECX1: the 1.4 clouds values (only when one is set: the text above is as before otherwise)
 	const struct { const char * n; float v; } c14[] = { { "liquidWater", r.liquidWater }, { "dropletRadius", r.dropletRadius },
 		{ "iceFraction", r.iceFraction }, { "evolution", r.evolution }, { "precipitationBase", r.precipitationBase },
@@ -708,7 +765,9 @@ WwWeatherRecx resolveOne( const Who & w, const QStringList & roots, const QStrin
 			b.unknownKeys( { QStringLiteral( "visibility" ), QStringLiteral( "hazeHeight" ), QStringLiteral( "ozone" ),
 				QStringLiteral( "hours" ), QStringLiteral( "hazeType" ), QStringLiteral( "humidity" ),
 				QStringLiteral( "groundAlbedo" ), QStringLiteral( "angstrom" ), QStringLiteral( "hazeAnisotropy" ),
-				QStringLiteral( "airglow" ), QStringLiteral( "hazeAlbedo" ), QStringLiteral( "useRecordColors" ) } );
+				QStringLiteral( "airglow" ), QStringLiteral( "hazeAlbedo" ), QStringLiteral( "useRecordColors" ),
+				QStringLiteral( "hazeGlow" ), QStringLiteral( "inscatterColor" ), QStringLiteral( "directionalInscatter" ),
+				QStringLiteral( "directionalInscatterExponent" ), QStringLiteral( "directionalInscatterStart" ) } );
 			readKeys( b, kAtmo, hour, r );
 			readAtmoWords( b, r, useRecord );
 			if ( wwRecxPhysicalWeather( h.entry ) )	// lane AIRPERF1 A8: the entry's switch, read where its values are
@@ -717,9 +776,15 @@ WwWeatherRecx resolveOne( const Who & w, const QStringList & roots, const QStrin
 				src[QStringLiteral( "hazeType" )] = QStringLiteral( "file:" ) + rel;
 			if ( r.hazeAlbedo[0] >= 0.0f )
 				src[QStringLiteral( "hazeAlbedo" )] = QStringLiteral( "file:" ) + rel;
+			if ( r.hazeGlow[0] >= 0.0f )
+				src[QStringLiteral( "hazeGlow" )] = QStringLiteral( "file:" ) + rel;
+			if ( r.inscatterColor[0] >= 0.0f )
+				src[QStringLiteral( "inscatterColor" )] = QStringLiteral( "file:" ) + rel;
+			if ( r.dirInscatter[0] >= 0.0f )
+				src[QStringLiteral( "directionalInscatter" )] = QStringLiteral( "file:" ) + rel;
 		} else if ( bn == QLatin1String( "clouds" ) ) {
 			QStringList known = { QStringLiteral( "coverage" ), QStringLiteral( "density" ), QStringLiteral( "layers" ),
-				QStringLiteral( "type" ), QStringLiteral( "hours" ) };
+				QStringLiteral( "type" ), QStringLiteral( "hours" ), QStringLiteral( "albedo" ) };	// NIGHTHAZE1: albedo
 			const bool v14 = !wwCloudRecx14Red();	// lane CLOUDRECX1: the 1.4 keys (the red: the 1.3 block, they are unknown)
 			if ( v14 )
 				known << QStringLiteral( "liquidWater" ) << QStringLiteral( "dropletRadius" ) << QStringLiteral( "iceFraction" )
@@ -748,6 +813,9 @@ WwWeatherRecx resolveOne( const Who & w, const QStringList & roots, const QStrin
 			readLayers( b, r );
 			if ( r.layers )
 				src[QStringLiteral( "layers" )] = QStringLiteral( "file:" ) + rel;
+			readRgb( b, "albedo", 0.0f, 1.0f, r.cloudAlbedo );	// lane NIGHTHAZE1: clouds.albedo
+			if ( r.cloudAlbedo[0] >= 0.0f )
+				src[QStringLiteral( "clouds.albedo" )] = QStringLiteral( "file:" ) + rel;
 		} else if ( bn == QLatin1String( "night" ) ) {
 			b.unknownKeys( { QStringLiteral( "stars" ), QStringLiteral( "moonlight" ), QStringLiteral( "hours" ) } );
 			readKeys( b, kNight, hour, r );
@@ -924,8 +992,15 @@ void blendInto( WwWeatherRecx & b, const WwWeatherRecx & a, float t )
 		}
 		b.*( in.field ) = lerpSet( a.*( in.field ), b.*( in.field ), t, in.field == &WwWeatherRecx::windDirection );
 	}
-	for ( int i = 0; i < 3; i++ )
+	for ( int i = 0; i < 3; i++ ) {
 		b.hazeAlbedo[i] = lerpSet( a.hazeAlbedo[i], b.hazeAlbedo[i], t );
+		b.hazeGlow[i] = lerpSet( a.hazeGlow[i], b.hazeGlow[i], t );	// lane NIGHTHAZE1
+		b.cloudAlbedo[i] = lerpSet( a.cloudAlbedo[i], b.cloudAlbedo[i], t );
+		b.inscatterColor[i] = lerpSet( a.inscatterColor[i], b.inscatterColor[i], t );
+		b.dirInscatter[i] = lerpSet( a.dirInscatter[i], b.dirInscatter[i], t );
+	}
+	b.dirInscatterExp = lerpSet( a.dirInscatterExp, b.dirInscatterExp, t );
+	b.dirInscatterStart = lerpSet( a.dirInscatterStart, b.dirInscatterStart, t );
 }
 
 }	// namespace
@@ -1187,6 +1262,24 @@ bool wwWeatherRecxHazeOptics( float albedo[3], float & angstrom, float & g, floa
 		if ( r.hazeAnisotropy < 0.0f )
 			g = g2;
 	}
+	return true;
+}
+
+bool wwWeatherRecxAirFilters( float glow[3], float cloudAlbedo[3], float inscatter[3], float dir[3], float & dirExp,
+	float & dirStart )
+{
+	const WwWeatherRecx & r = wwWeatherRecx();
+	if ( !r.on )
+		return false;
+	const WwWeatherGen::HazeType * h = r.hazeType.isEmpty() ? nullptr : WwWeatherGen::hazeType( r.hazeType.toStdString() );
+	for ( int i = 0; i < 3; i++ ) {
+		glow[i] = r.hazeGlow[0] >= 0.0f ? r.hazeGlow[i] : -1.0f;
+		cloudAlbedo[i] = r.cloudAlbedo[0] >= 0.0f ? r.cloudAlbedo[i] : h ? h->cloudAlbedo[i] : 0.99f;
+		inscatter[i] = r.inscatterColor[0] >= 0.0f ? r.inscatterColor[i] : 0.0f;
+		dir[i] = r.dirInscatter[0] >= 0.0f ? r.dirInscatter[i] : 0.0f;
+	}
+	dirExp = r.dirInscatterExp >= 0.0f ? r.dirInscatterExp : 4.0f;
+	dirStart = r.dirInscatterStart >= 0.0f ? r.dirInscatterStart : 0.0f;
 	return true;
 }
 

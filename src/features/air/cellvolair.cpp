@@ -117,6 +117,10 @@ struct VaState
 	// lane FARCITYWASH1 (bungo 11-02, far city washed out): red WW_CELL_AIR_RED=veilphys = the sky-lit share of the air at
 	// its physical level, as before; shipped: brought down to the records' fog colour where brighter (cell_volair.frag airVeilK)
 	bool veilPhys = false;
+	// lane NIGHTHAZE1: red WW_CELL_AIR_RED=greyalbedo = the grey air (albedo 1 in every colour); shipped: the sky haze's
+	// albedo per colour (atmomath.h hazeAirAlbedo, cell_volair.frag airAlbedoD), so near fog and far haze match
+	bool greyAlbedo = false;
+	QString albedoNote = QStringLiteral( "grey" );
 	/* lane FOGLEAK1 (fog lit where no light reaches; only under the loader's WW_CELL_FOGLEAK, cell_volair.frag
 	 * WW_AIR_LEAK): reds WW_CELL_AIR_RED= 1 dalcenv (the env share the flat weather ambient), 2 nosungate (the sun past
 	 * the cascades unshadowed), 4 lightleak (unshadowed lights / the pixel ReSTIR ratio in the air), 8 nofartailshadow
@@ -176,6 +180,7 @@ VaState & vs()
 			s.sunColumn = d.sunColumn;
 			s.envHue = d.envHue;
 			s.veilPhys = d.veilPhys;
+			s.greyAlbedo = d.greyAlbedo;
 			s.leakRed = d.leakRed;
 			s.openEnv = d.openEnv;
 			s.askRed = d.askRed;
@@ -203,6 +208,7 @@ VaState & vs()
 			s.sunColumn = s.sunColumn || r == "suncolumn";	// lane FIX1101A
 			s.envHue = s.envHue || r == "envhue";	// lane FIX1101A
 			s.veilPhys = s.veilPhys || r == "veilphys";	// lane FARCITYWASH1
+			s.greyAlbedo = s.greyAlbedo || r == "greyalbedo";	// lane NIGHTHAZE1
 			s.openEnv = s.openEnv || r == "openenv";	// lane DARKAIR1
 			s.farOffRed = s.farOffRed || r == "faroff";	// SHAFTS1b
 			s.apStackRed = s.apStackRed || r == "apstack";	// SHAFTS1b
@@ -2354,6 +2360,33 @@ static void vaPassInner( Scene * scene, bool run )
 	prog->uni1b( "airSunLayer", !s.sunColumn );	// lane FIX1101A: the sun dimmed by the ground layer only (cell_airmed.glsl airTupSun)
 	prog->uni1b( "airEnvFogHue", !s.envHue );	// lane FIX1101A: the env share without the sun glare hue (airEnvColourEnv)
 	prog->uni1b( "volVeil", !s.veilPhys );	// lane FARCITYWASH1: the sky-lit share at most the records' fog (airVeilK)
+	float alb[3] = { 1.0f, 1.0f, 1.0f };
+	if ( !s.greyAlbedo )
+		WwAtmoMath::hazeAirAlbedo( alb );
+	prog->uni3f( "airAlbedoD", alb[0] - 1.0f, alb[1] - 1.0f, alb[2] - 1.0f );	// lane NIGHTHAZE1
+	s.albedoNote = s.greyAlbedo ? QStringLiteral( "grey(red)" )
+		: QStringLiteral( "%1,%2,%3" ).arg( double( alb[0] ), 0, 'f', 3 ).arg( double( alb[1] ), 0, 'f', 3 ).arg( double( alb[2] ), 0, 'f', 3 );
+	{	// lane NIGHTHAZE1: the haze's glow and the last-resort overrides, the sky's own values (atmosphere.cpp); the red
+		// greyalbedo: none (the near air as before)
+		WwAtmoAirExtras ax;
+		const bool axOn = !s.greyAlbedo && wwAtmoAirExtras( ax );
+		prog->uni1i( "airXOn", axOn ? 1 : 0 );
+		if ( axOn ) {
+			float lv[3];
+			for ( int i = 0; i < 3; i++ )
+				lv[i] = vt.rotation( i, 0 ) * ax.lightW[0] + vt.rotation( i, 1 ) * ax.lightW[1] + vt.rotation( i, 2 ) * ax.lightW[2];
+			const float ll = std::sqrt( lv[0] * lv[0] + lv[1] * lv[1] + lv[2] * lv[2] );
+			prog->uni3f( "airEmit", ax.glow[0], ax.glow[1], ax.glow[2] );
+			prog->uni3f( "airInsc", ax.inscatter[0], ax.inscatter[1], ax.inscatter[2] );
+			prog->uni3f( "airDirC", ax.dir[0], ax.dir[1], ax.dir[2] );
+			prog->uni3f( "airDirV", lv[0] / std::max( ll, 1e-6f ), lv[1] / std::max( ll, 1e-6f ), lv[2] / std::max( ll, 1e-6f ) );
+			prog->uni1f( "airDirExp", ax.dirExp );
+			prog->uni1f( "airDirStart", ax.dirStartM * 0.001f / WwAtmoMath::kUnitKm );
+		}
+		s.albedoNote += axOn ? QStringLiteral( " glow=%1,%2,%3%4" ).arg( double( ax.glow[0] ), 0, 'g', 3 ).arg( double( ax.glow[1] ), 0, 'g', 3 )
+			.arg( double( ax.glow[2] ), 0, 'g', 3 ).arg( ax.inscatter[0] + ax.inscatter[1] + ax.inscatter[2] + ax.dir[0] + ax.dir[1] + ax.dir[2] > 0.0f
+				? QStringLiteral( " override" ) : QString() ) : QString();
+	}
 	if ( !( s.red & 65536 ) ) {	// lane FIX1101A (moon): the medium the sky's disc gain reads (none under the red nosky)
 		VaPub & pub = vaPub();
 		const float m4[4] = { M.sigma0, M.zb, M.invH, zTop }, l4[4] = { G.w, G.zn, G.invHn, G.s };
@@ -3226,6 +3259,7 @@ static void vaPassInner( Scene * scene, bool run )
 		+ QStringLiteral( " rainfog=" ) + g.rfNote
 		+ QStringLiteral( " fogleak=%1(red=%2)" ).arg( !wwFogLeakShaderDefine() ? "off" : vaLeakBits( L, s.leakRed ) == s.leakRed ? "live" : "compiled,old-path" ).arg( vaLeakBits( L, s.leakRed ) ) +QStringLiteral( " intenv=%1" ).arg( L && L->interior && wwCellAsOutdoor( L ) ? ( ( s.leakRed & 128 ) ? "ratio(red)" : "direct" ) : "n/a" )	// lane FOGLEAK1
 		+ QStringLiteral( " veil=%1" ).arg( s.veilPhys ? "phys" : "record" )	// lane FARCITYWASH1
+		+ QStringLiteral( " albedo=" ) + s.albedoNote	// lane NIGHTHAZE1
 		+ QStringLiteral( " fogleak=%1(red=%2)" ).arg( wwFogLeakShaderDefine() ? "on" : "off" ).arg( s.leakRed )	// lane FOGLEAK1
 		+ QStringLiteral( " envocc=%1" ).arg( !wwAirSkyViewShaderDefine() ? "off" : s.openEnv ? "red(open)" : "sky" )	// lane DARKAIR1
 		// lane PERFFIX3: the grid preset, the integrated volume's format, the sun's read in the air, the uniform reads

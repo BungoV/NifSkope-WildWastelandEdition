@@ -715,6 +715,11 @@ bool marchPass( Renderer * r, CvGpu & g, const CvRedo & d, const WwAtmoFrame & f
 			p->uni3f( kTint[i], d.b.tint[i][0], d.b.tint[i][1], d.b.tint[i][2] );
 		}
 	}
+	{	// lane NIGHTHAZE1: clouds.albedo, the haze's shared source (atmomath.h HazeOptics); red greyalbedo: 0.99 grey
+		const float * ca = WwAtmoMath::hazeOptics().cloudAlbedo;
+		const bool grey = red( "greyalbedo" );
+		p->uni3f( "cvAlbedoD", grey ? 0.0f : ca[0] - 0.99f, grey ? 0.0f : ca[1] - 0.99f, grey ? 0.0f : ca[2] - 0.99f );
+	}
 	fn->glActiveTexture( GL_TEXTURE6 );
 	fn->glBindTexture( GL_TEXTURE_2D, sceneTex );
 	p->uni1i( "cvScene", 6 );

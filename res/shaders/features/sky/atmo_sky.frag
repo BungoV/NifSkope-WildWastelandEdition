@@ -39,6 +39,13 @@ uniform float atPerPixel;	// 1 = march per pixel instead of the sky-view LUT (th
  * sun irradiance at the top like the LUTs, zenith ~4e-4 cd/m2 (natural dark sky 21-22 V mag / arcsec2, Leinert et al.
  * 1998); 0 = the red WW_ATMO_RED=nofloor (the sky fell 30-160x under that at sun -18). gl/atmomath.h kNightFloor. */
 uniform vec3 atFloor;
+/* lane NIGHTHAZE1: UE's height-fog inscattering overrides, last resort for special weathers (weather .recx
+ * atmosphere.inscatterColor / directionalInscatter): a flat colour and a lobe around atDirL (the sun up, else the moon),
+ * scene units, drawn over the haze's opacity along the view. Unset = 0 = skipped */
+uniform vec3 atInscatter;
+uniform vec3 atDirIns;
+uniform vec3 atDirL;
+uniform float atDirExp;
 
 out vec4 fragColor;
 
@@ -96,6 +103,10 @@ void main()
 	}
 	if ( atTintOn > 0.5 )	// the disc below keeps the physical color
 		c = atWeatherTint( c, degrees( asin( clamp( d.z, -1.0, 1.0 ) ) ) );
+	if ( dot( atInscatter + atDirIns, vec3( 1.0 ) ) > 0.0 ) {	// NIGHTHAZE1: the overrides, x (1 - the view's transmittance)
+		vec3 op = vec3( 1.0 ) - atTrans( atTransTex, atCamR, d.z );
+		c += ( atInscatter + atDirIns * pow( max( dot( d, atDirL ), 0.0 ), max( atDirExp, 1.0 ) ) ) * op;
+	}
 	float cs = dot( d, atSunW );
 	// R6-12 b: a bigger drawn disc keeps its radiance (it sits at the cap); 1 - cos grows by the square of the radius
 	float sunEdge = ( 1.0 - kSunCos ) * ( atSunSize > 1.0 ? atSunSize * atSunSize : 1.0 );

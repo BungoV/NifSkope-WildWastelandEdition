@@ -213,6 +213,7 @@ void clearDayHaze( float haze[3], bool recordHasFog )
 	 * (row off, red fog): the grey haze before 1.3 */
 	HazeOptics & ho = hazeOptics();
 	ho = HazeOptics();
+	ho.greyMs = red( "greyms" );	// NIGHTHAZE1: the CPU twin's old grey haze scatter (atmomath.h skyMedium)
 	g_airglow = 1.0f;
 	float alb[3], ang = 0.0f, g = kMieG, glow = 1.0f;
 	if ( wwWeatherRecxHazeOptics( alb, ang, g, glow ) ) {
@@ -223,6 +224,61 @@ void clearDayHaze( float haze[3], bool recordHasFog )
 		}
 		ho.g = std::clamp( g, 0.0f, 0.95f );
 		g_airglow = std::clamp( glow, 0.0f, 10.0f );
+	}
+	/* NIGHTHAZE1 (bungo 11-11, UE's volumetric fog): the colour filters and the last-resort overrides, one source for
+	 * the sky, the near air (cellvolair.cpp) and the clouds (cloudvol.cpp). The glow unset = the airglow excess as the
+	 * 557.7 nm line (the night floor's law as before); red WW_ATMO_RED=glowgrey: no glow */
+	if ( g_airglow > 1.0f )
+		for ( int c = 0; c < 3; c++ )
+			ho.glow[c] = ( g_airglow - 1.0f ) * kGreenLine5577[c];
+	float fg[3], ca[3], ins[3], dir[3], dExp = 4.0f, dStart = 0.0f;
+	if ( wwWeatherRecxAirFilters( fg, ca, ins, dir, dExp, dStart ) ) {
+		ho.glowSet = fg[0] >= 0.0f;
+		for ( int c = 0; c < 3; c++ ) {
+			if ( ho.glowSet )
+				ho.glow[c] = fg[c];
+			ho.cloudAlbedo[c] = std::clamp( ca[c], 0.0f, 1.0f );
+			ho.inscatter[c] = ins[c];
+			ho.dir[c] = dir[c];
+		}
+		ho.dirExp = dExp;
+		ho.dirStart = dStart;
+	}
+	if ( red( "glowgrey" ) ) {
+		ho.glowSet = false;
+		ho.glow[0] = ho.glow[1] = ho.glow[2] = 0.0f;
+	}
+	// one line when the filters move, one per override a file sets (bungo: "for very special cases, so mostly unused")
+	static QString lastF, lastI, lastD;
+	const QString lf = QStringLiteral( "air filters: haze albedo %1,%2,%3 glow %4,%5,%6 (%7) clouds.albedo %8,%9,%10 "
+		"(sky, near air and clouds read these; red WW_ATMO_RED=glowgrey)" ).arg( double( ho.albedo[0] ), 0, 'f', 3 )
+		.arg( double( ho.albedo[1] ), 0, 'f', 3 ).arg( double( ho.albedo[2] ), 0, 'f', 3 ).arg( double( ho.glow[0] ), 0, 'g', 4 )
+		.arg( double( ho.glow[1] ), 0, 'g', 4 ).arg( double( ho.glow[2] ), 0, 'g', 4 )
+		.arg( ho.glowSet ? QStringLiteral( "file" ) : QStringLiteral( "hazeType airglow" ) )
+		.arg( double( ho.cloudAlbedo[0] ), 0, 'f', 3 ).arg( double( ho.cloudAlbedo[1] ), 0, 'f', 3 )
+		.arg( double( ho.cloudAlbedo[2] ), 0, 'f', 3 );
+	if ( lf != lastF ) {
+		lastF = lf;
+		fprintf( stderr, "%s\n", qPrintable( lf ) );
+	}
+	const QString li = ho.inscatter[0] + ho.inscatter[1] + ho.inscatter[2] > 0.0f
+		? QStringLiteral( "air override: inscatterColor %1,%2,%3 set by the weather file (a flat colour the fog adds, sky "
+			"haze and near air; last resort)" ).arg( double( ho.inscatter[0] ), 0, 'g', 4 ).arg( double( ho.inscatter[1] ), 0, 'g', 4 )
+			.arg( double( ho.inscatter[2] ), 0, 'g', 4 ) : QString();
+	if ( li != lastI ) {
+		lastI = li;
+		if ( !li.isEmpty() )
+			fprintf( stderr, "%s\n", qPrintable( li ) );
+	}
+	const QString ld = ho.dir[0] + ho.dir[1] + ho.dir[2] > 0.0f
+		? QStringLiteral( "air override: directionalInscatter %1,%2,%3 exponent %4 start %5 m set by the weather file (a glow "
+			"around the sun or moon, sky haze and near air; last resort)" ).arg( double( ho.dir[0] ), 0, 'g', 4 )
+			.arg( double( ho.dir[1] ), 0, 'g', 4 ).arg( double( ho.dir[2] ), 0, 'g', 4 ).arg( double( ho.dirExp ), 0, 'g', 4 )
+			.arg( double( ho.dirStart ), 0, 'g', 6 ) : QString();
+	if ( ld != lastD ) {
+		lastD = ld;
+		if ( !ld.isEmpty() )
+			fprintf( stderr, "%s\n", qPrintable( ld ) );
 	}
 }
 
@@ -346,7 +402,12 @@ void medium( NifSkopeOpenGLContext::Program * p, const float haze[3], bool noOzo
 	const float nsF = g_night.floorGain;	// MODULES1 round 10: the night sky's factor on the floor
 	if ( red( "nofloor" ) )
 		p->uni3f( "atFloor", 0.0f, 0.0f, 0.0f );
-	else if ( g_airglow <= 1.0f || red( "glowgrey" ) )
+	else if ( hazeOptics().glowSet ) {	// NIGHTHAZE1: the file's hazeGlow in place of the airglow excess
+		const HazeOptics & ho = hazeOptics();
+		const float b = std::min( g_airglow, 1.0f );
+		p->uni3f( "atFloor", ( kNightFloor[0] * b + kNightFloorLum * ho.glow[0] ) * nsF, ( kNightFloor[1] * b + kNightFloorLum * ho.glow[1] ) * nsF,
+			( kNightFloor[2] * b + kNightFloorLum * ho.glow[2] ) * nsF );
+	} else if ( g_airglow <= 1.0f || red( "glowgrey" ) )
 		p->uni3f( "atFloor", kNightFloor[0] * g_airglow * nsF, kNightFloor[1] * g_airglow * nsF, kNightFloor[2] * g_airglow * nsF );	// WEATHERRECX1: x airglow
 	else {	// MODULES1: the natural floor + the excess as the 557.7 nm green line (atmomath.h kGreenLine5577)
 		const float ex = kNightFloorLum * ( g_airglow - 1.0f );
@@ -816,6 +877,15 @@ bool wwAtmoDrawSky( Scene * scene, const WwAtmoInputs & in, QString * line )
 			const GLint tintLoc = p->uniLocation( "atTint" );
 			const bool recOn = in.tintOk && in.recNight[1] > 0.0f;	// MODULES1 R7: the record's night sky (lookdevstage.cpp computeLight)
 			p->uni2f( "atRecNight", recOn ? in.recNight[0] : 0.0f, recOn ? in.recNight[1] : 0.0f );
+			{	// NIGHTHAZE1: the last-resort inscattering overrides in the sky's haze (0 = off, the shader skips them)
+				const HazeOptics & ho = hazeOptics();
+				const bool up = sunW[2] > 0.0f;
+				const float key = up ? sunK : moonK;
+				p->uni3f( "atInscatter", sunK * ho.inscatter[0], sunK * ho.inscatter[1], sunK * ho.inscatter[2] );
+				p->uni3f( "atDirIns", key * ho.dir[0], key * ho.dir[1], key * ho.dir[2] );
+				p->uni3f( "atDirL", up ? sunW[0] : moonW[0], up ? sunW[1] : moonW[1], up ? sunW[2] : moonW[2] );
+				p->uni1f( "atDirExp", ho.dirExp );
+			}
 			if ( ( tintOn || recOn ) && tintLoc >= 0 )
 				fn->glUniform3fv( tintLoc, kTintN, &in.tint[0][0] );
 			quad( r );
@@ -1245,12 +1315,13 @@ bool wwAtmoGiSkyAxes( const float sunTo[3], float out[6][3], float * trans, floa
 	const float hq[3] = { twinRed ? s.haze[0] : q2( s.haze[0] ), twinRed ? s.haze[1] : q2( s.haze[1] ),
 		twinRed ? s.haze[2] : std::round( s.haze[2] * 100.0f ) / 100.0f };
 	const float h = twinRed ? 0.0f : std::round( std::clamp( hKm, 0.002f, 80.0f ) * 1000.0f ) / 1000.0f;
-	static float key[10] = { -9.0f, -9.0f, -9.0f, -9.0f, -9.0f, -9.0f, -9.0f, -9.0f, -9.0f, -9.0f };
+	static float key[11] = { -9.0f, -9.0f, -9.0f, -9.0f, -9.0f, -9.0f, -9.0f, -9.0f, -9.0f, -9.0f, -9.0f };
 	static float memo[6][3], memoT[3];
 	SkyTables & tables = drawnTables();
-	const float now[10] = { sunTo[0], sunTo[1], sunTo[2], hq[0], hq[1], hq[2], h, g_ozone, float( msN ), twinRed ? 1.0f : 0.0f };
-	if ( !std::equal( now, now + 10, key ) ) {
-		std::copy( now, now + 10, key );
+	const float now[11] = { sunTo[0], sunTo[1], sunTo[2], hq[0], hq[1], hq[2], h, g_ozone, float( msN ), twinRed ? 1.0f : 0.0f,
+		hazeOpticsStamp() };	// NIGHTHAZE1: a new hazeType re-reads the twin
+	if ( !std::equal( now, now + 11, key ) ) {
+		std::copy( now, now + 11, key );
 		if ( twinRed )
 			skyIrradianceAxes( sunTo, s.haze, memo );
 		else
@@ -1321,7 +1392,11 @@ static void nightFloorRgb( float fl[3] )
 	fl[0] = fl[1] = fl[2] = 0.0f;
 	if ( red( "nofloor" ) )
 		return;
-	if ( g_airglow <= 1.0f || red( "glowgrey" ) ) {
+	if ( hazeOptics().glowSet ) {	// NIGHTHAZE1: as medium()'s atFloor
+		const float b = std::min( g_airglow, 1.0f );
+		for ( int c = 0; c < 3; c++ )
+			fl[c] = kNightFloor[c] * b + kNightFloorLum * hazeOptics().glow[c];
+	} else if ( g_airglow <= 1.0f || red( "glowgrey" ) ) {
 		for ( int c = 0; c < 3; c++ )
 			fl[c] = kNightFloor[c] * g_airglow;
 	} else {
@@ -1345,6 +1420,27 @@ bool wwAtmoNightFloorScene( float out[3], float * unit )
 	return out[0] + out[1] + out[2] > 0.0f;
 }
 
+bool wwAtmoAirExtras( WwAtmoAirExtras & o )
+{
+	const WwAtmoFrame & f = g_frame;
+	const HazeOptics & ho = hazeOptics();
+	o = WwAtmoAirExtras();
+	if ( !f.valid || as().tier <= 0 || f.sunK <= 0.0f )
+		return false;
+	const float u = f.sunK * g_night.floorGain * kNightFloorLum;
+	const bool up = f.sunW[2] > 0.0f;
+	const float key = up ? f.sunK : f.moonK;
+	for ( int c = 0; c < 3; c++ ) {
+		o.glow[c] = u * ho.glow[c];
+		o.inscatter[c] = f.sunK * ho.inscatter[c];
+		o.dir[c] = key * ho.dir[c];
+		o.lightW[c] = up ? f.sunW[c] : f.moonW[c];
+	}
+	o.dirExp = ho.dirExp;
+	o.dirStartM = ho.dirStart;
+	return o.glow[0] + o.glow[1] + o.glow[2] + o.inscatter[0] + o.inscatter[1] + o.inscatter[2] + o.dir[0] + o.dir[1] + o.dir[2] > 0.0f;
+}
+
 bool wwAtmoHorizon( float out[3] )
 {
 	const WwAtmoFrame & f = g_frame;
@@ -1354,17 +1450,17 @@ bool wwAtmoHorizon( float out[3] )
 	const int msN = s.tier == 1 ? 16 : 32;
 	auto q2 = []( float x ) { return x > 1e-4f ? std::exp( std::round( std::log( x ) * 50.0f ) / 50.0f ) : x; };
 	const float hq[3] = { q2( f.haze[0] ), q2( f.haze[1] ), std::round( f.haze[2] * 100.0f ) / 100.0f };
-	static float key[14] = { -9.0f };
+	static float key[15] = { -9.0f };
 	static float memo[3];
-	const float now[14] = { f.sunW[0], f.sunW[1], f.sunW[2], f.moonW[0], f.moonW[1], f.moonW[2], f.sunK, f.moonK, f.camR,
-		hq[0], hq[1], hq[2], g_ozone * 64.0f + float( msN ), g_night.floorGain };
-	if ( !std::equal( now, now + 14, key ) ) {
-		std::copy( now, now + 14, key );
+	const float now[15] = { f.sunW[0], f.sunW[1], f.sunW[2], f.moonW[0], f.moonW[1], f.moonW[2], f.sunK, f.moonK, f.camR,
+		hq[0], hq[1], hq[2], g_ozone * 64.0f + float( msN ), g_night.floorGain, hazeOpticsStamp() };
+	if ( !std::equal( now, now + 15, key ) ) {
+		std::copy( now, now + 15, key );
 		SkyTables & T = drawnTables();
 		skyTablesBuild( hq, g_ozone, msN, T );
 		constexpr float vz = 0.01f;
 		const float ch = std::sqrt( 1.0f - vz * vz );
-		double acc[3] = { 0, 0, 0 };
+		double acc[3] = { 0, 0, 0 }, accM[3] = { 0, 0, 0 };
 		constexpr int NA = 16;
 		for ( int a = 0; a < NA; a++ ) {
 			const float az = ( float( a ) + 0.5f ) * 2.0f * float( kPi ) / float( NA );
@@ -1376,7 +1472,7 @@ bool wwAtmoHorizon( float out[3] )
 			if ( f.moonK > 0.0f ) {
 				skyMarch( T, hq, g_ozone, f.camR, v, f.moonW, L );
 				for ( int c = 0; c < 3; c++ )
-					acc[c] += double( f.moonK ) * L[c];
+					accM[c] += double( f.moonK ) * L[c];
 			}
 		}
 		float fl[3];
@@ -1384,8 +1480,25 @@ bool wwAtmoHorizon( float out[3] )
 		float tr[3];
 		cpuTrans( f.camR - kRb, vz, hq, red( "noozone" ), tr, g_ozone );
 		const float vr = 1.0f / std::sqrt( std::max( 1.0f - 0.97226f * ( 1.0f - vz * vz ), 0.02f ) );
-		for ( int c = 0; c < 3; c++ )
-			memo[c] = float( acc[c] / NA ) + f.sunK * fl[c] * g_night.floorGain * vr * tr[c];
+		float fp[3];
+		for ( int c = 0; c < 3; c++ ) {
+			fp[c] = f.sunK * fl[c] * g_night.floorGain * vr * tr[c];
+			memo[c] = float( ( acc[c] + accM[c] ) / NA ) + fp[c];
+		}
+		/* NIGHTHAZE1: the haze's light at night, by part, when it moves 5 % or the haze changes (the fog's night colour
+		 * is this horizon: lookdevstage.cpp fogNight) */
+		static float lastL = -1.0f, lastStamp = -1.0f;
+		const float l = 0.2126f * memo[0] + 0.7152f * memo[1] + 0.0722f * memo[2];
+		if ( f.sunW[2] < 0.0f && ( std::fabs( l - lastL ) > 0.05f * std::max( lastL, 1e-12f ) || now[14] != lastStamp ) ) {
+			lastL = l;
+			lastStamp = now[14];
+			const HazeOptics & ho = hazeOptics();
+			fprintf( stderr, "night haze: horizon %.4g,%.4g,%.4g = moon %.4g,%.4g,%.4g + sun %.4g,%.4g,%.4g + floor %.4g,%.4g,%.4g;"
+				" haze albedo %.3f,%.3f,%.3f scatter %s (red WW_ATMO_RED=greyms)\n",
+				double( memo[0] ), double( memo[1] ), double( memo[2] ), accM[0] / NA, accM[1] / NA, accM[2] / NA,
+				acc[0] / NA, acc[1] / NA, acc[2] / NA, double( fp[0] ), double( fp[1] ), double( fp[2] ),
+				double( ho.albedo[0] ), double( ho.albedo[1] ), double( ho.albedo[2] ), ho.greyMs ? "grey(red)" : "per-colour" );
+		}
 	}
 	std::copy( memo, memo + 3, out );
 	if ( f.tintOn || f.recNight[1] > 0.0f ) {	// atmo_sky.frag atRecNight, then atWeatherTint, at the same elevation

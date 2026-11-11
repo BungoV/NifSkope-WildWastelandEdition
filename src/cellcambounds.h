@@ -547,6 +547,8 @@ void cellCamBoundsForget( const NifModel * nif );
 void cellCamBoundsHome( const NifModel * nif, bool valid, const float eye[3], float yawDeg );
 //! the rule applies to this document (an exterior cell document, or an interior with placements; reds not set)
 bool cellCamBoundsActive( const NifModel * nif );
+//! lane NIGHTHAZE1: this document is a cell scene (interior or exterior; reds ignored), a plain NIF is not
+bool cellCamBoundsIsCell( const NifModel * nif );
 //! changes with every open of the document (the last in-bounds pose of the old one is not kept)
 quint64 cellCamBoundsGen( const NifModel * nif );
 /*! the verdict for an eye; `why` = the words (eye, cell, ground), `key` = what the once-a-refusal line is keyed on

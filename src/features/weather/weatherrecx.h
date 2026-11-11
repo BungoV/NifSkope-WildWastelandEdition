@@ -35,6 +35,12 @@ struct WwWeatherRecx
 	QString hazeType;	//!< clean, maritime, urban, dust, smoke, glowing
 	float humidity = -1.0f, groundAlbedo = -1.0f, angstrom = -1.0f, hazeAnisotropy = -1.0f, airglow = -1.0f;
 	float hazeAlbedo[3] = { -1.0f, -1.0f, -1.0f };	//!< single-scattering albedo at 680 / 550 / 440 nm
+	/* lane NIGHTHAZE1 (UE's volumetric fog model): hazeGlow = the haze's own light (a thick haze glows at it, in units of
+	 * the natural night sky's floor luminance); cloudAlbedo = clouds.albedo; inscatterColor / directionalInscatter (+
+	 * exponent, start metres) = the last-resort overrides UE's height fog has, off unless a file sets them. < 0 = not set */
+	float hazeGlow[3] = { -1.0f, -1.0f, -1.0f }, cloudAlbedo[3] = { -1.0f, -1.0f, -1.0f };
+	float inscatterColor[3] = { -1.0f, -1.0f, -1.0f }, dirInscatter[3] = { -1.0f, -1.0f, -1.0f };
+	float dirInscatterExp = -1.0f, dirInscatterStart = -1.0f;
 	float windSpeed = -1.0f, windDirection = -1.0f, gusts = -1.0f, turbulence = -1.0f;	//!< m/s, degrees FROM
 	float airTemp = -1000.0f;	//!< deg C; <= -999 = not set
 	float lightningFreq = -1.0f, cloudToGround = -1.0f, lightningDistance = -1.0f;	//!< flashes / min, share, km
@@ -113,6 +119,11 @@ float wwWeatherRecxOzone();
 /*! lane WEATHERRECX1: the haze's optical make-up at the file's humidity (hazeType preset, hazeAlbedo / angstrom /
  *  hazeAnisotropy / airglow overrides, Haenel's growth); false when the row is off or no hazeType resolves */
 bool wwWeatherRecxHazeOptics( float albedo[3], float & angstrom, float & g, float & airglow );
+/*! lane NIGHTHAZE1: the air's colour filters and overrides as the file (or its hazeType) gives them; false when the row
+ *  is off. glow[0] < 0 = not set (the hazeType's airglow law stands); cloudAlbedo = the file's, else the hazeType's, else
+ *  0.99 grey; inscatter / dir = 0 unless set; dirExp 4 and dirStart 0 m unless set */
+bool wwWeatherRecxAirFilters( float glow[3], float cloudAlbedo[3], float inscatter[3], float dir[3], float & dirExp,
+	float & dirStart );
 /*! lane WEATHERRECX1: the wind on the WTHR byte scale the consumers already take (lookdevstage wwLookdevWind):
  *  [0] speed byte = 255 * m/s / 20, [1] direction byte (the record's), [3] turbulence byte; false when the wind is the
  *  record's (red wind, row off) */

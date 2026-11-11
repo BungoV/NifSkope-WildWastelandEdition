@@ -64,6 +64,15 @@ struct WwAtmoFrame
 const WwAtmoFrame & wwAtmoFrame();
 //! MODULES1 M8: the drawn sky's colour just above the horizon, scene units (false with no sky drawn)
 bool wwAtmoHorizon( float out[3] );
+/*! NIGHTHAZE1: the haze's glow (emissive radiance a thick haze reaches) and the last-resort inscattering overrides, in
+ *  scene units as the last sky frame drew them, for the near air (cellvolair.cpp). lightW = world, TO the sun (up) or
+ *  the moon. False when all are 0 (the near air adds nothing). */
+struct WwAtmoAirExtras
+{
+	float glow[3] = { 0, 0, 0 }, inscatter[3] = { 0, 0, 0 }, dir[3] = { 0, 0, 0 }, lightW[3] = { 0, 0, 1 };
+	float dirExp = 4.0f, dirStartM = 0.0f;
+};
+bool wwAtmoAirExtras( WwAtmoAirExtras & o );
 //! MODULES1 10b-4: the drawn sky's night floor (the airglow x the night sky's floor gain) at the zenith, scene units,
 //! as the last sky frame drew it; unit = scene units per unit floor. False with no sky drawn or no floor.
 bool wwAtmoNightFloorScene( float out[3], float * unit );

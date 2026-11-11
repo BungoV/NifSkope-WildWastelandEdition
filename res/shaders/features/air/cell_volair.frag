@@ -124,12 +124,33 @@ layout ( location = 1 ) out vec4 volMrt[7];	// stage 3: layers volLayer + 1 .. +
 #include "cell_airmed.glsl"
 // lane CLOUD6e: the rain fog under the rain clouds (cell_rainfog.glsl; rfOn 0 = the air exactly as before)
 #include "cell_rainfog.glsl"
+/* lane NIGHTHAZE1: the air's single-scattering albedo per colour, the sky haze's own (atmomath.h hazeAirAlbedo: the
+ * hazeType's albedo over its luminance; the record fit keeps the level). Stored minus 1: 0, and an unset uniform, is the
+ * grey air before it. Every scattered term takes it here (sun, env, lamps, rest); the tails carry it from the grid. */
+uniform vec3 airAlbedoD;
+/* lane NIGHTHAZE1 (UE's volumetric fog): the haze's emissive glow (atmosphere.hazeGlow; a thick haze reaches it) and the
+ * last-resort overrides (inscatterColor: a flat colour; directionalInscatter: a lobe around airDirV, the sun up else
+ * the moon, from airDirStart game units on), scene units, each sub-step x its opacity. airXOn 0 = none (as before) */
+uniform int airXOn;
+uniform vec3 airEmit;
+uniform vec3 airInsc;
+uniform vec3 airDirC;
+uniform vec3 airDirV;
+uniform float airDirExp;
+uniform float airDirStart;
+vec3 airExtra( vec3 dirView, float t )
+{
+	vec3 e = airEmit + airInsc;
+	if ( t >= airDirStart )
+		e += airDirC * pow( max( dot( dirView, airDirV ), 0.0 ), max( airDirExp, 1.0 ) );
+	return e;
+}
 // lane AIRZONE1: the hand-placed volumes (cell_airzone.glsl): one read a sub-step, the light it scatters x the tint
 #ifdef WW_CELL_AIRZONE
 #include "cell_airzone.glsl"
-#define AZ_TINT( q ) * azTintQ[q]
+#define AZ_TINT( q ) * ( azTintQ[q] * ( vec3( 1.0 ) + airAlbedoD ) )
 #else
-#define AZ_TINT( q )
+#define AZ_TINT( q ) * ( vec3( 1.0 ) + airAlbedoD )
 #endif
 
 #ifdef WW_AIR_SKYVIEW
@@ -1753,6 +1774,8 @@ void main()
 			}
 			if ( wq[q] > 0.0 )
 				acc += Tq[q] * wq[q] * vk * airEnvColourEnv( Jenv, t, zt, dirView ) AZ_TINT( q );	// lane FIX1101A: the env share without the sun glare
+			if ( airXOn != 0 && wq[q] > 0.0 )	// lane NIGHTHAZE1: fresh every frame, never in the history
+				acc += Tq[q] * wq[q] * airExtra( dirView, t );
 			acc += Cq;
 		}
 		volMrt[0] = so[0];
@@ -1787,6 +1810,8 @@ void main()
 			float zt = zc + dzdt * t;
 			// lane FIX1101A: the sun's share (shadowed) keeps the records' glare hue, the env share takes the fog colour only
 			acc += T * w * ( Jrest + vk * ( airEnvColourEnv( Jenv, t, zt, dirView ) + airEnvColour( airSun( dirView * ( t / fogDistScale ), dirView, zt ), t, zt, dirView ) ) ) AZ_TINT( q );
+			if ( airXOn != 0 )	// lane NIGHTHAZE1
+				acc += T * w * airExtra( dirView, t );
 		}
 		T *= exp( -tau );
 	}

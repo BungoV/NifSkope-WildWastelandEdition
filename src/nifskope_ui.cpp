@@ -44,6 +44,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "features/far-lod/lodgengpu.h"
 #include "features/far-lod/lodgenlayout.h"
 #include "esmdata.h"
+#include "cellcambounds.h"	// lane NIGHTHAZE1: cellCamBoundsIsCell (select all refused in a cell view)
 #include "cellclick.h"		// lane CELLVIEW2
 #include "cellpanel.h"		// lane CELLVIEW2
 #include "cellpicktest.h"	// lane CELLVIEW2
@@ -30564,6 +30565,16 @@ bool NifSkope::eventFilter( QObject * o, QEvent * e )
 			&& !( ke->modifiers() & ( Qt::ControlModifier | Qt::AltModifier | Qt::ShiftModifier ) ) ) {
 			if ( e->type() == QEvent::KeyPress && !ke->isAutoRepeat() )
 				removeSelectedWorkspaceDocuments();
+			return true;
+		}
+		/* lane NIGHTHAZE1: Ctrl+A on the Block List in a cell view selected every block (tens of thousands) and the
+		 * selection sync froze the window: refused there, a click or deselect still works; a plain NIF keeps it */
+		if ( ( o == list || ( list && o == list->viewport() ) ) && ke->matches( QKeySequence::SelectAll )
+			&& nif && cellCamBoundsIsCell( nif ) ) {
+			if ( e->type() == QEvent::KeyPress && !ke->isAutoRepeat() )
+				std::fprintf( stderr, "select all: refused in the cell view (Block List Ctrl+A, %d blocks)\n",
+					nif->getBlockCount() );
+			e->accept();
 			return true;
 		}
 		// Block List Ctrl+C / Ctrl+V are the Copy Branch / Paste Branch spells (QKeySequence::Copy/Paste

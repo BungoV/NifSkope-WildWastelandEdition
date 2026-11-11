@@ -27,11 +27,39 @@ struct HazeOptics
 	float albedo[3] = { kMieS / kMieE, kMieS / kMieE, kMieS / kMieE };
 	float spec[3] = { 1.0f, 1.0f, 1.0f };
 	float g = kMieG;
+	bool greyMs = false;	//!< NIGHTHAZE1 red WW_ATMO_RED=greyms: the CPU twin's haze scatters green's share in all three
+	/* NIGHTHAZE1 (UE's volumetric fog model, one source for the sky, the near air and the clouds): glow = the haze's
+	 * emissive in units of kNightFloorLum (0 = none; the glowing hazeType's airglow excess as the 557.7 nm line);
+	 * cloudAlbedo = the cloud medium's albedo (0.99 grey = the march as before); inscatter / dir = the last-resort
+	 * overrides (per unit sun irradiance at the top, as the LUTs; 0 = off), dirExp, dirStart in metres */
+	float glow[3] = { 0.0f, 0.0f, 0.0f };
+	bool glowSet = false;	//!< the file's hazeGlow (replaces the airglow excess); false = the airglow law as before
+	float cloudAlbedo[3] = { 0.99f, 0.99f, 0.99f };
+	float inscatter[3] = { 0.0f, 0.0f, 0.0f }, dir[3] = { 0.0f, 0.0f, 0.0f };
+	float dirExp = 4.0f, dirStart = 0.0f;
 };
 inline HazeOptics & hazeOptics()
 {
 	static HazeOptics h;
 	return h;
+}
+/*! NIGHTHAZE1: the near air's albedo per colour from the same haze (one source: cellvolair.cpp airAlbedoD). The
+ * hazeType's albedo over its luminance: the air's level stays the records' fit, the colour is the haze's. A grey
+ * albedo gives exactly 1. */
+inline void hazeAirAlbedo( float out[3] )
+{
+	const HazeOptics & o = hazeOptics();
+	const float l = 0.2126f * o.albedo[0] + 0.7152f * o.albedo[1] + 0.0722f * o.albedo[2];
+	const bool grey = o.albedo[0] == o.albedo[1] && o.albedo[1] == o.albedo[2];
+	for ( int c = 0; c < 3; c++ )
+		out[c] = grey || !( l > 1e-6f ) ? 1.0f : o.albedo[c] / l;
+}
+//! NIGHTHAZE1: one number per optics state, for the CPU tables' and memos' keys (a new hazeType rebuilds them)
+inline float hazeOpticsStamp()
+{
+	const HazeOptics & o = hazeOptics();
+	return o.spec[0] + 3.0f * o.spec[2] + 7.0f * o.albedo[0] + 11.0f * o.albedo[1] + 13.0f * o.albedo[2] + 17.0f * o.g
+		+ ( o.greyMs ? 19.0f : 0.0f ) + 23.0f * o.glow[0] + 29.0f * o.glow[1] + 31.0f * o.glow[2] + ( o.glowSet ? 37.0f : 0.0f );
 }
 constexpr float kPi = 3.14159265f;
 /* lane FIX1101A (atmo): the moonless night sky's own radiance (airglow, zodiacal light, unresolved stars) at the zenith
@@ -318,14 +346,19 @@ inline void skyIrradianceAxes( const float s[3], const float haze[3], float out[
  *     haze overhead (0.62 -> 0.53)
  * So this is atmo_transmittance.frag, atmo_ms.frag and atmo_common.glsl atSkyMarch ported 1:1 (the same LUT sizes, uv
  * maps, sample points and bilinear reads), integrated on the six axes from height hKm. Red: skyIrradianceAxes (today's). */
-inline void skyMedium( float h, const float haze[3], float ozone, float rs[3], float & ms, float e[3] )
+/* NIGHTHAZE1: the haze scatters per channel as atmo_common.glsl atMedium does (dh x spec x albedo). It took green's
+ * share in all three while the extinction was per channel, so red scattered more than it lost (albedo 1.08 at
+ * humidity 100) and blue less: the twin's night horizon read 1 : 0.68 : 0.46 where the drawn sky reads 1 : 0.94 : 0.91. */
+inline void skyMedium( float h, const float haze[3], float ozone, float rs[3], float ms[3], float e[3] )
 {
 	h = std::max( h, 0.0f );
 	const float dr = std::exp( -h / 8.0f ), dm = std::exp( -h / 1.2f );
 	const float dz = std::max( 0.0f, 1.0f - std::fabs( h - 25.0f ) / 15.0f );
 	const float dh = haze[0] * std::exp( -std::max( h - haze[2], 0.0f ) / std::max( haze[1], 0.02f ) );
-	ms = kMieS * dm + dh * hazeOptics().spec[1] * hazeOptics().albedo[1];
+	const HazeOptics & ho = hazeOptics();
 	for ( int c = 0; c < 3; c++ ) {
+		const int k = ho.greyMs ? 1 : c;
+		ms[c] = kMieS * dm + dh * ho.spec[k] * ho.albedo[k];
 		rs[c] = kRay[c] * dr;
 		e[c] = rs[c] + ( kMieE * dm + dh * hazeOptics().spec[c] ) + kOzone[c] * ozone * dz;
 	}
@@ -349,7 +382,7 @@ struct SkyTables
 {
 	static constexpr int kTW = 256, kTH = 64;
 	int msN = 0;
-	float key[5] = { -1.0f, -1.0f, -1.0f, -1.0f, -1.0f };	// haze x3, ozone, msN
+	float key[6] = { -1.0f, -1.0f, -1.0f, -1.0f, -1.0f, -1.0f };	// haze x3, ozone, msN, hazeOpticsStamp
 	std::vector<float> trans, ms;	// rgb rows, row 0 = v 0 (GL's bottom row)
 };
 
@@ -405,10 +438,10 @@ template <class F> void skyRows( int n, F && row )
 //! atmo_transmittance.frag + atmo_ms.frag (msN 32 = High+, 16 = Low, atmosphere.cpp); kept while haze, ozone and msN stand
 inline void skyTablesBuild( const float haze[3], float ozone, int msN, SkyTables & T )
 {
-	const float key[5] = { haze[0], haze[1], haze[2], ozone, float( msN ) };
-	if ( std::equal( key, key + 5, T.key ) )
+	const float key[6] = { haze[0], haze[1], haze[2], ozone, float( msN ), hazeOpticsStamp() };
+	if ( std::equal( key, key + 6, T.key ) )
 		return;
-	std::copy( key, key + 5, T.key );
+	std::copy( key, key + 6, T.key );
 	T.msN = msN;
 	const int W = SkyTables::kTW, Hh = SkyTables::kTH;
 	T.trans.assign( size_t( W * Hh * 3 ), 0.0f );
@@ -427,7 +460,7 @@ inline void skyTablesBuild( const float haze[3], float ozone, int msN, SkyTables
 				const float a0 = float( k ) / N, a1 = float( k + 1 ) / N, am = ( a0 + a1 ) * 0.5f;
 				const float tA = tm * ( 1.0f - ( 1.0f - am ) * ( 1.0f - am ) ), wA = tm * ( ( 1.0f - a0 ) * ( 1.0f - a0 ) - ( 1.0f - a1 ) * ( 1.0f - a1 ) );
 				const float tB = tm + ( d - tm ) * am * am, wB = ( d - tm ) * ( a1 * a1 - a0 * a0 );
-				float rs[3], ms, e[3];
+				float rs[3], ms[3], e[3];
 				skyMedium( std::sqrt( r * r + tA * tA + 2.0f * r * mu * tA ) - kRb, haze, ozone, rs, ms, e );
 				for ( int c = 0; c < 3; c++ )
 					od[c] += double( e[c] ) * wA;
@@ -462,11 +495,11 @@ inline void skyTablesBuild( const float haze[3], float ozone, int msN, SkyTables
 						const float dt = d * ( a1 * a1 - a0 * a0 ), t = d * 0.5f * ( a0 * a0 + a1 * a1 );
 						const float p[3] = { v[0] * t, v[1] * t, r + v[2] * t };
 						const float rp = std::sqrt( p[0] * p[0] + p[1] * p[1] + p[2] * p[2] );
-						float rs[3], ms, e[3], Ts[3];
+						float rs[3], ms[3], e[3], Ts[3];
 						skyMedium( rp - kRb, haze, ozone, rs, ms, e );
 						skyTrans( T, rp, ( p[0] * s[0] + p[2] * s[2] ) / rp, Ts );
 						for ( int c = 0; c < 3; c++ ) {
-							const double sc = double( rs[c] ) + ms, Tst = std::exp( -e[c] * dt );
+							const double sc = double( rs[c] ) + ms[c], Tst = std::exp( -e[c] * dt );
 							const double ie = 1.0 / std::max( double( e[c] ), 1e-9 );
 							L[c] += thr[c] * ( Ts[c] * sc / ( 4.0 * kPi ) ) * ( 1.0 - Tst ) * ie;
 							f[c] += thr[c] * sc * ( 1.0 - Tst ) * ie;
@@ -513,12 +546,12 @@ inline void skyMarch( const SkyTables & T, const float haze[3], float ozone, flo
 		const float p[3] = { v[0] * t, v[1] * t, r + v[2] * t };
 		const float rp = std::sqrt( p[0] * p[0] + p[1] * p[1] + p[2] * p[2] );
 		const float mus = ( p[0] * s[0] + p[1] * s[1] + p[2] * s[2] ) / rp;
-		float rs[3], ms, e[3], Ts[3], M[3];
+		float rs[3], ms[3], e[3], Ts[3], M[3];
 		skyMedium( rp - kRb, haze, ozone, rs, ms, e );
 		skyTrans( T, rp, mus, Ts );
 		skyMs( T, rp, mus, M );
 		for ( int c = 0; c < 3; c++ ) {
-			const double S = double( Ts[c] ) * ( rs[c] * pr + ms * pm ) + double( M[c] ) * ( rs[c] + ms );
+			const double S = double( Ts[c] ) * ( rs[c] * pr + ms[c] * pm ) + double( M[c] ) * ( rs[c] + ms[c] );
 			const double Tst = std::exp( -double( e[c] ) * dt );
 			L[c] += thr[c] * S * ( 1.0 - Tst ) / std::max( double( e[c] ), 1e-9 );
 			thr[c] *= Tst;

@@ -1,3 +1,32 @@
+## NIGHTHAZE1 (2026-11-11): the brown night haze, the air's filters, select all in a cell view
+
+Changed, not checked live (no build, no window). Offline: the three shader programs link in every air define mode;
+the near fog (`cell_volair.prog`) equals HEAD with the new terms off (max |d| 3.73e-9 of 0.024, the compile's
+reordering) and adds exactly emissive x opacity with them on; the reader takes the new keys (fixture check 11/11).
+
+- **1. The night haze is no longer brown.** The CPU twin of the sky (`src/features/sky/atmomath.h`) scatters the haze
+  per colour with the haze's albedo, like the GPU sky, so the horizon colour the night and the near air read is the
+  drawn sky's hue, not a grey-albedo residual. Red `WW_ATMO_RED=greyms`. Log line `night haze: horizon ...`.
+- **2. The air's three optional filters** (Unreal Volumetric Fog's Albedo / Emissive, plus the clouds' albedo), one
+  shared source (`HazeOptics` in atmomath.h) read by the sky haze, the near fog and the clouds:
+  `atmosphere.hazeAlbedo` (now also tints the near fog per colour; red `WW_ATMO_RED=greyalbedo`),
+  `atmosphere.hazeGlow` (emissive; unset = the airglow law, above 1 the 557.7 nm green line, so `glowing` glows
+  green; red `WW_ATMO_RED=glowgrey`), `clouds.albedo` (per-colour two-stream in `cloud_march_step.glsl`; the
+  `hazeType` default, `glowing` 0.985 / 0.99 / 0.98, the rest 0.99 = the grey march as before). The base stays
+  physical: the fog is lit by the drawn sky, the sun and the moon. Log line `air filters: haze albedo ... glow ...
+  clouds.albedo ...`.
+- **3. Last resort, special cases only:** `atmosphere.inscatterColor` and `directionalInscatter` (+ `Exponent`,
+  `Start` in metres), default off, drawn in the sky haze and the near fog; a log line `air override: ...` when a
+  weather file sets one. No shipped file sets them.
+- **4. Select all in a cell view is refused** (the A key, Select > All, every caller of `GLView::selectAll`, and
+  Ctrl+A on the Block List): it selected tens of thousands of refs and froze the window. Deselect still works; a
+  plain NIF view selects all as before. Log line `select all: refused in the cell view (...)`.
+  (`cellCamBoundsIsCell` in `src/cellcambounds.h`.)
+- **5. The weatherrecx gate runs again** (`tests/features/weather/weatherrecx`): the reader's env is cached until
+  `wwEnvChanged`, so the gate read only its first root; build.sh links `wxoverride.cpp`, `recxmodroots.cpp` and a
+  `cellModSource` stub. 25 -> 17 failures, the same 17 on HEAD (not this lane's; owed to the gate's owner).
+- Spec: FO4-Extension-Formats branch `nighthaze-recx-20261111` (1.7; not merged).
+
 ## MODULES1 round 10c (2026-11-11): the Fusion Shaders cloud model's remaining parts (a sheet per layer, sun-disc taps, hex tiling, the density exponent, the 2D layers' light, the weather file's shadow keys), far baked AO on the PBR far draws, a refused red links again, the leak fade on lit mist cards
 
 Changed, not checked (no build, no window in this round; every touched shader program linked offline through the

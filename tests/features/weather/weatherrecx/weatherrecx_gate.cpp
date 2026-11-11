@@ -9,6 +9,7 @@
 #include "features/weather/weatherrecxmath.h"
 #include "features/weather/weathergen.h"
 #include "recx.h"
+#include "wwswitch.h"
 
 #include <QCoreApplication>
 #include <QDir>
@@ -140,6 +141,7 @@ void use( const QString & root, bool row, double hour )
 	g_row = row;
 	g_hour = hour;
 	qputenv( "WW_RECX_ROOT", root.toLocal8Bit() );
+	wwEnvChanged();	// lane NIGHTHAZE1: the reader's env is cached until this (without it every root read the first)
 	QThread::msleep( 120 );	// past the reader's 100 ms re-resolve
 }
 }	// namespace

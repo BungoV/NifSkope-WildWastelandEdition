@@ -230,17 +230,20 @@ struct HazeType
 {
 	const char * word;
 	float albedo[3], angstrom, g, airglow;
+	float cloudAlbedo[3];	//!< NIGHTHAZE1: the cloud medium's single-scattering albedo (clouds.albedo's default)
 };
 
 inline const HazeType * hazeType( const std::string & w )
 {
 	static const HazeType t[] = {
-		{ "clean", { 0.97f, 0.97f, 0.97f }, 1.1f, 0.70f, 1.0f },
-		{ "maritime", { 0.99f, 0.99f, 0.99f }, 0.3f, 0.75f, 1.0f },
-		{ "urban", { 0.82f, 0.82f, 0.82f }, 1.4f, 0.65f, 1.0f },
-		{ "dust", { 0.97f, 0.92f, 0.80f }, 0.2f, 0.75f, 1.0f },
-		{ "smoke", { 0.86f, 0.84f, 0.80f }, 1.8f, 0.60f, 1.0f },
-		{ "glowing", { 0.88f, 0.97f, 0.82f }, 0.6f, 0.72f, 4.0f },
+		{ "clean", { 0.97f, 0.97f, 0.97f }, 1.1f, 0.70f, 1.0f, { 0.99f, 0.99f, 0.99f } },
+		{ "maritime", { 0.99f, 0.99f, 0.99f }, 0.3f, 0.75f, 1.0f, { 0.99f, 0.99f, 0.99f } },
+		{ "urban", { 0.82f, 0.82f, 0.82f }, 1.4f, 0.65f, 1.0f, { 0.99f, 0.99f, 0.99f } },
+		{ "dust", { 0.97f, 0.92f, 0.80f }, 0.2f, 0.75f, 1.0f, { 0.99f, 0.99f, 0.99f } },
+		{ "smoke", { 0.86f, 0.84f, 0.80f }, 1.8f, 0.60f, 1.0f, { 0.99f, 0.99f, 0.99f } },
+		// NIGHTHAZE1: the glowing cloud medium absorbs a little red and blue (deck_green.py: a tau 30 deck lets through
+		// R/G 0.68, B/G 0.47 at 0.89 x the grey deck's light)
+		{ "glowing", { 0.88f, 0.97f, 0.82f }, 0.6f, 0.72f, 4.0f, { 0.985f, 0.99f, 0.98f } },
 	};
 	const std::string l = lower( w );
 	for ( const HazeType & h : t )
