@@ -156,6 +156,7 @@ def entry_of(w, v):
     if v['visibilityNight'] is not None:
         atmo['hours'] = {'2': {'visibility': v['visibilityNight']}, '14': {'visibility': v['visibility']}}
     e = {'weather': '%s|%s' % (w['owner'], w['lid']), '_editorId': w.get('edid', ''),	# one match key per entry
+         'physicalWeather': True,	# AIRPERF1 A8 (spec 1.6): the entry's physical values replace the record's look
          '_derivedFrom': derived_note(w, v),
          'atmosphere': atmo,
          'clouds': {'coverage': v['coverage'], 'type': v['cloudType'],

@@ -249,6 +249,7 @@ QString wwWxSaveRecx()
 	e.insert( QStringLiteral( "weather" ),
 		owner + QStringLiteral( "|0x" ) + QStringLiteral( "%1" ).arg( formID & 0xFFFFFFu, 8, 16, QLatin1Char( '0' ) ).toUpper() );
 	e.insert( QStringLiteral( "_editorId" ), edid );
+	e.insert( QStringLiteral( "physicalWeather" ), true );	// AIRPERF1 A8 (spec 1.6): saved values replace the record's look
 	e.insert( QStringLiteral( "_derivedFrom" ), QStringLiteral( "saved from the NifSkope live weather overrides" ) );
 	QJsonObject atmo, clouds, ov;
 	if ( has( WwWx::HazeVisibility ) )
