@@ -848,6 +848,16 @@ bool wwNightSkyRed()
 	return wwEnvStr( "WW_NIGHTSKY_RED" ).trimmed().toLower() == QLatin1StringView( "physical" );
 }
 
+/* MODULES1 R7 item 5 (the white far tower pink with the sun BEHIND it). The weather names its six ambient colours by
+ * the light's travel: a face looking up reads Z- (index 5), a face looking east reads X- (every reader: celllights,
+ * probesky, lookdev_ground). The physical sky's axes are named by the face (index 4 = a face looking up), and went in
+ * unturned: every face took the sky of the opposite side (a wall facing away from a low sun took the sun side's sky,
+ * the ground 15 % of its sky, a ceiling all of it). Red WW_PHYSUNITS_AXES_RED=1 (live): unturned, as before. */
+bool wwPhysAxesRed()
+{
+	return wwEnvStr( "WW_PHYSUNITS_AXES_RED" ).trimmed() == QLatin1StringView( "1" );
+}
+
 MoonGeo moonGeo( const LdState & s, const float gamePos[3] )
 {
 	MoonGeo g;
@@ -983,7 +993,8 @@ LdLight currentLight()
 	const unsigned long long wx = wwWeatherRecx().stamp;
 	// MODULES1 R6-12: the gameplay moon's pin moves the light too (live)
 	const QString mr = wwEnvStr( "WW_MOON_RED" ).trimmed().toLower() + QLatin1Char( '|' ) + wwEnvStr( "WW_MOON_GAME" ).trimmed()
-		+ QLatin1Char( '|' ) + wwEnvStr( "WW_NIGHTSKY_RED" ).trimmed().toLower();
+		+ QLatin1Char( '|' ) + wwEnvStr( "WW_NIGHTSKY_RED" ).trimmed().toLower()
+		+ QLatin1Char( '|' ) + wwEnvStr( "WW_PHYSUNITS_AXES_RED" ).trimmed();
 	if ( gen != s.gen || hour != s.hour || sun != s.sun || atmoSun != atmoKey || !( sunPath == sunKey ) || wxStamp != wx
 		|| mr != moonRed || physSky != wwPhysSkyOn() || wxOv != wwWxOvStamp() ) {
 		physSky = wwPhysSkyOn();
@@ -1023,6 +1034,8 @@ void physFinish( LdLight & L, float rKey, bool airKey )
 			L.sun[c] *= rKey;
 	const float ambOld = lumOf( L.amb );
 	const float skyAl = wwWeatherRecx().groundAlbedo >= 0.0f ? wwWeatherRecx().groundAlbedo : 0.15f;
+	const bool axRed = wwPhysAxesRed();
+	const int up = axRed ? 4 : 5;	// the index a face looking up reads: the weather's order (Z-), red: the face order
 	float n[3] = { L.sunDir[0], L.sunDir[1], L.sunDir[2] };
 	const float len = std::sqrt( n[0] * n[0] + n[1] * n[1] + n[2] * n[2] );
 	float axes[6][3], T[3], out[6][3];
@@ -1072,7 +1085,8 @@ void physFinish( LdLight & L, float rKey, bool airKey )
 	}
 	if ( sky ) {
 		WwAtmoMath::giSkyGround( L.sun, n[2], wwWeatherRecx().groundAlbedo >= 0.0f ? wwWeatherRecx().groundAlbedo : 0.15f, out );
-		std::copy( &out[0][0], &out[0][0] + 18, &L.dalc[0][0] );
+		for ( int a = 0; a < 6; a++ )	// out is by the face; the readers take the weather's order (wwPhysAxesRed)
+			std::copy( out[a], out[a] + 3, L.dalc[axRed ? a : ( a ^ 1 )] );
 	} else {
 		for ( int a = 0; a < 6; a++ )
 			for ( int c = 0; c < 3; c++ )
@@ -1082,7 +1096,7 @@ void physFinish( LdLight & L, float rKey, bool airKey )
 		float m = 0.0f;
 		for ( int a = 0; a < 6; a++ )
 			m += ( L.dalc[a][c] += wwphys::kNightFloor	// MODULES1 R7: + the record's night sky: all of it on +Z, its ground bounce on -Z
-				+ ( a == 4 ? 1.0f : a == 5 ? skyAl : 0.5f * ( 1.0f + skyAl ) ) * L.skyGame[c] );
+				+ ( a == up ? 1.0f : a == ( up ^ 1 ) ? skyAl : 0.5f * ( 1.0f + skyAl ) ) * L.skyGame[c] );
 		L.amb[c] = m / 6.0f;
 	}
 	const float oldTot = lumOf( L.sun ) / std::max( rKey, 1e-9f ) + ambOld;
@@ -1100,13 +1114,15 @@ void physFinish( LdLight & L, float rKey, bool airKey )
 		L.effect[c] *= rFx;
 	L.physKey = rKey;
 	L.physFog = rEff;
-	wwPhysNoteDaylight( L.sun, len > 0.0f ? n[2] : 0.0f, L.dalc[4] );	// MODULES1 item 14: the incident meter
+	wwPhysNoteDaylight( L.sun, len > 0.0f ? n[2] : 0.0f, L.dalc[up] );	// MODULES1 item 14: the incident meter
 	static QString said;
 	const QString line = QStringLiteral( "phys light: key %1 cd/m2 (x%2 %3) sky +Z %4 -Z %5 ambient %6 effect x%7 sky=%8 (fog x%9)" )
 		.arg( double( lumOf( L.sun ) ), 0, 'g', 5 ).arg( double( rKey ), 0, 'g', 5 )
-		.arg( airKey ? QStringLiteral( "air" ) : QStringLiteral( "weather" ) ).arg( double( lumOf( L.dalc[4] ) ), 0, 'g', 5 )
-		.arg( double( lumOf( L.dalc[5] ) ), 0, 'g', 5 ).arg( double( lumOf( L.amb ) ), 0, 'g', 5 ).arg( double( rFx ), 0, 'g', 5 )
-		.arg( sky ? QStringLiteral( "physical" ) : QStringLiteral( "weather" ) ).arg( double( rEff ), 0, 'g', 5 );
+		.arg( airKey ? QStringLiteral( "air" ) : QStringLiteral( "weather" ) ).arg( double( lumOf( L.dalc[up] ) ), 0, 'g', 5 )
+		.arg( double( lumOf( L.dalc[up ^ 1] ) ), 0, 'g', 5 ).arg( double( lumOf( L.amb ) ), 0, 'g', 5 ).arg( double( rFx ), 0, 'g', 5 )
+		.arg( sky ? QStringLiteral( "physical" ) : QStringLiteral( "weather" ) ).arg( double( rEff ), 0, 'g', 5 )
+		+ ( axRed ? QStringLiteral( " axes=RED WW_PHYSUNITS_AXES_RED=1 (by the face: every face reads the opposite side's sky)" )
+		          : QStringLiteral( " axes=weather order (a face looking up reads Z-; red WW_PHYSUNITS_AXES_RED=1)" ) );
 	if ( line != said ) {
 		said = line;
 		fprintf( stderr, "%s\n", qPrintable( line ) );

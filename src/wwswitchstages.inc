@@ -1200,6 +1200,7 @@
 { "WW_PERF_TEST", 2, "src/nifskope.cpp:2710 NifSkope::NifSkope | constructor/startup of a window-lifetime object" },
 { "WW_PHYSICS_TEST", 2, "src/nifskope_ui.cpp:19355 NifSkope::createWindow | createWindow: picks which harness the window runs" },
 { "WW_PHYSSKY_WINDOW_RED", 0, "src/features/exposure/physunits.cpp windowRed | hand: WW_SWITCH_STATIC, read per call in wwPhysSkyOn (MODULES1 11-09)" },
+{ "WW_PHYSUNITS_AXES_RED", 0, "src/gl/lookdevstage.cpp:856 wwPhysAxesRed | re-read per frame or per call (a)" },
 { "WW_PHYSUNITS_BLOOM_K", 0, "- | hand: physunits.cpp pinnedFloat reads it at every call (R6-7)" },
 { "WW_PHYSUNITS_BLOOM_RED", 1, "src/features/exposure/physunits.cpp wwPhysBloomK | static" },
 { "WW_PHYSUNITS_CAMERA_RED", 0, "src/features/exposure/physunits.cpp wwPhysExposure | hand: read per call (MODULES1 G1)" },
