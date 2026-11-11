@@ -3455,6 +3455,8 @@ bool nifAppendLodlFarRings( NifModel * nif, const QModelIndex & parent, const QS
 					s.tileDiffuse[at] = t.colour;
 					s.tileNormal[at] = t.msn;
 					r.sheetTiles++;
+					if ( !t.colour.isEmpty() && !r.sheetNames.contains( t.colour ) )
+						r.sheetNames << t.colour;
 				}
 			}
 			r.sheetFile = QFileInfo( sheets->containerPath() ).fileName();

@@ -26,6 +26,11 @@ class Vector3;
 
 bool cellFarLodWanted();
 void cellFarLodSetWanted( bool on );
+/* lane LODLIVE1: Far LOD off set live keeps the far data built and skips it at draw time (Node::isHidden on the
+ * "FarLOD" subtree, the cards draw 0); on again shows the kept data, nothing rebuilt, nothing reopened. */
+extern bool g_wwFarLodHidden;
+inline bool cellFarLodHidden() { return g_wwFarLodHidden; }
+void cellFarLodSetHidden( bool on );
 
 /*! LOD type: Vanilla = only the game's .btr/.bto; FO4CS = our .lodl/.lodi/cards, the game's chunks filling gaps.
  *  QSettings CellView/FarLodType; WW_CELL_FARLOD_TYPE=vanilla|fo4cs pins it. */

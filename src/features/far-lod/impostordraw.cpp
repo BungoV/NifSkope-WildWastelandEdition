@@ -16,6 +16,7 @@ BSD License - see nifskope.h
 #include "gl/glscene.h"
 #include "gl/gltex.h"
 #include "features/far-lod/impostorpick.h"
+#include "features/far-lod/lodpreview.h"
 #include "gl/renderer.h"
 #include "impostorcard.h"
 #include "model/nifmodel.h"
@@ -646,6 +647,20 @@ ImpostorDraw::Resolved ImpostorDraw::resolve( const Options & opt )
 	return r;
 }
 
+/* The LOD coloration's card band (lane LODLIVE1): the caller's tint (the flat card blue, a fading card magenta), except
+ * an octahedral set at rest, which draws cyan with stripes for its frame size. 0 tint = off, no stripes. */
+template <class P> static void cardBandUniforms( P * prog, const ImpostorDraw::Options & opt, const ImpostorCardSet & set )
+{
+	float t[3] = { opt.lodTint[0], opt.lodTint[1], opt.lodTint[2] };
+	float stripe = 0.0f;
+	if ( t[0] + t[1] + t[2] > 0.0f && opt.fadeOut <= 0.0f && set.oct > 0 ) {
+		LodPreview::tintColour( LodPreview::Oct, t );
+		stripe = float( LodPreview::octStripe( set.frameW ) );
+	}
+	prog->uni3f( "cardLodTint", t[0], t[1], t[2] );
+	prog->uni1f( "cardLodStripe", stripe );
+}
+
 bool ImpostorDraw::drawCard( Scene * scene, const ImpostorCardSet & set,
 								const Vector3 & worldOffset, const Options & opt, QString * why )
 {
@@ -797,7 +812,7 @@ bool ImpostorDraw::drawCard( Scene * scene, const ImpostorCardSet & set,
 	prog->uni1f( "swayPhase", opt.swayPhase );
 	prog->uni1f( "cardFadeOut", opt.fadeOut );	// lane PERFLOAD1 P7
 	prog->uni1f( "cardFadeFrame", opt.fadeFrame );
-	prog->uni3f( "cardLodTint", opt.lodTint[0], opt.lodTint[1], opt.lodTint[2] );	// lane PERFLOAD1 P8
+	cardBandUniforms( prog, opt, set );	// lane PERFLOAD1 P8, LODLIVE1
 
 	wwImpostorTrace( "H card uniforms" );
 	if ( fresh ) {
@@ -1272,6 +1287,7 @@ bool ImpostorDraw::drawCardsInstanced( Scene * scene, const QVector< InstCard > 
 		prog->uni1f( "cardCovBase",  set.covOk() ? float( set.covBase )  / 255.0f : 0.0f );
 		prog->uni1i( "cardBase", first.at( s ) );
 		prog->uni1i( "frameTableBase", g.tabBase.value( &set ) );
+		cardBandUniforms( prog, opt, set );	// lane LODLIVE1: the set's own band (octahedral cyan + stripes)
 		if ( gpuPick ) {	// the set's own pick: grid side or ring, its convention, the frames it draws
 			prog->uni1i( "pickN", set.oct );
 			prog->uni1i( "pickV", set.views );

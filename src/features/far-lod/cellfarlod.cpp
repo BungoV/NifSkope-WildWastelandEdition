@@ -242,6 +242,22 @@ void cellFarLodSetWanted( bool on )
 	QSettings().setValue( QStringLiteral( "CellView/FarLod2" ), on );
 }
 
+bool g_wwFarLodHidden = false;
+
+// lane LODLIVE1: the LOD coloration's legend: each ring's start (scene units from the block centre) and the view's fov
+static float g_ringStart[LodPreview::kRings] = {};
+static int g_ringCount = 0;
+static double g_tanHalfFovY = 0.0;
+
+void cellFarLodSetHidden( bool on )
+{
+	if ( on == g_wwFarLodHidden )
+		return;
+	g_wwFarLodHidden = on;
+	qInfo().noquote() << ( on ? QStringLiteral( "far lod: hidden in place (data kept, a draw-time skip; nothing cut, nothing reopened)" )
+		: QStringLiteral( "far lod: shown again (the kept data, nothing rebuilt)" ) );
+}
+
 namespace
 {
 int & farlod1LastType()
@@ -537,6 +553,23 @@ QString cellFarLodAppend( NifModel * nif, const QModelIndex & iRoot, const EsmWo
 	defs.resize( size_t( ringsWanted ) );
 	for ( size_t i = 1; i < defs.size(); i++ )
 		defs[i].reach = std::max( defs[i].reach, defs[i - 1].reach + 1 );
+	/* lane LODLIVE1: the map level (WW_CELL_LOD_LEVEL, the "LOD map level" row): one level on every ring past the band,
+	 * its terrain sheets, object slot and the game's chunk level; the reaches stay the preset's */
+	const int mapLevel = LodPreview::level();
+	if ( mapLevel >= 0 ) {
+		static const int kLevelLod[4] = { 2, 3, 4, 5 }, kLevelDim[4] = { 8, 16, 16, 32 };
+		for ( size_t i = 1; i < defs.size(); i++ ) {
+			defs[i].lod = kLevelLod[mapLevel];
+			defs[i].sheetDim = kLevelDim[mapLevel];
+			defs[i].slot = mapLevel;
+		}
+		say( QStringLiteral( "lod level: %1 forced on rings 1-%2 (terrain lod %3, sheets of %4 cells, object slot %5, the "
+			"game's level %6); the band ring keeps its own" ).arg( LodPreview::mapLevelName( mapLevel ) )
+			.arg( int( defs.size() ) - 1 ).arg( kLevelLod[mapLevel] ).arg( kLevelDim[mapLevel] ).arg( mapLevel ).arg( 4 << mapLevel ) );
+	}
+	for ( size_t i = 0; i < defs.size() && i < size_t( LodPreview::kRings ); i++ )	// lane LODLIVE1: the legend's distances
+		g_ringStart[i] = float( ( i == 0 ? h : defs[i - 1].reach ) ) * kCell;
+	g_ringCount = int( std::min( defs.size(), size_t( LodPreview::kRings ) ) );
 
 	// the far field's own memory budget, default 2 GB
 	const double budgetMB = std::max( 64, envInt( "WW_CELL_FARLOD_BUDGET_MB", 2048 ) );
@@ -694,7 +727,7 @@ QString cellFarLodAppend( NifModel * nif, const QModelIndex & iRoot, const EsmWo
 			ny1 = std::max( ny1, r.oy1 );
 		}
 		WwFarVanRing v;
-		v.level = kVanLevel[std::min( i, size_t( 4 ) )];
+		v.level = mapLevel >= 0 && i > 0 ? 4 << mapLevel : kVanLevel[std::min( i, size_t( 4 ) )];	// lane LODLIVE1
 		/* A ring we did not build is the game's: whole chunks of its level, as the game draws them. */
 		if ( !r.built ) {
 			const int L = v.level;
@@ -870,6 +903,14 @@ QString cellFarLodAppend( NifModel * nif, const QModelIndex & iRoot, const EsmWo
 				.arg( QStringLiteral( ", %1 skirt tris (%2 edges over the 16-bit cap)%3" ).arg( r.skirtTris ).arg( r.skirtCapped )
 					.arg( wwEnvInt( "WW_CELL_FARLOD_SKIRT_RED" ) == 1 ? QStringLiteral( " (RED: unskirted)" ) : QString() )
 					+ ( r.notes.isEmpty() ? QString() : QStringLiteral( " -- " ) + r.notes.join( QLatin1String( "; " ) ) ) ) ) );
+		if ( r.built )	// lane LODLIVE1: which texture each chunk of the ring samples
+			say( QStringLiteral( "far lod: ground texture ring %1: %2 distinct baked colour tiles for %3 chunks (%4 .. %5)%6" )
+				.arg( int( i ) ).arg( r.sheetNames.size() ).arg( r.sheetTiles )
+				.arg( r.sheetNames.isEmpty() ? QStringLiteral( "none" ) : r.sheetNames.first() )
+				.arg( r.sheetNames.isEmpty() ? QStringLiteral( "none" ) : r.sheetNames.last() )
+				.arg( qgetenv( "WW_LANDSPEC_RED" ).trimmed() == "farnoise"
+					? QStringLiteral( "; x noise.dds + detail normals (RED farnoise)" )
+					: QStringLiteral( "; drawn alone, no world-tiled noise.dds or detail normals" ) ) );
 		if ( r.built ) {
 			tVerts += r.verts;
 			tTris += r.tris;
@@ -1796,11 +1837,56 @@ WwFarSway wwCellFarLodSway( Scene * scene )
 	return o;
 }
 
+/* lane LODLIVE1: the LOD coloration's line, one frame after it turns on or changes (the cards and rows counted by then):
+ * the document shapes per band (near = full mesh, far by ring), the cards and rows, the legend */
+static void lodViewSay( Scene * scene )
+{
+	static quint64 said = 0, armed = 0;
+	if ( !LodPreview::tint() ) {
+		said = armed = 0;
+		return;
+	}
+	if ( said == LodPreview::gen() )
+		return;
+	if ( armed != LodPreview::gen() ) {
+		armed = LodPreview::gen();
+		return;
+	}
+	said = armed;
+	int shapes[LodPreview::kBands] = {}, farOther = 0;
+	for ( const Shape * s : std::as_const( scene->shapes ) ) {
+		if ( !s || s->isHidden() )
+			continue;
+		int b = LodPreview::Full;
+		bool isFar = false;	// not "far": a Windows macro
+		for ( const Node * p = s; p; p = p->parentNode() ) {
+			const int pb = LodPreview::bandOfFarName( p->getName() );
+			if ( pb >= 0 ) {
+				b = pb;
+				isFar = true;
+				break;
+			}
+			isFar = isFar || p->getName().startsWith( QLatin1String( "FarLOD" ) );
+		}
+		if ( isFar && b == LodPreview::Full )
+			farOther++;
+		else
+			shapes[b]++;
+	}
+	qInfo().noquote() << QStringLiteral( "lod view: on (WW_CELL_LOD_TINT, live), map level %1, object level %2; drawn shapes "
+		"full mesh %3, LOD4 %4, LOD8 %5, LOD16 %6, LOD32 %7 (far shapes with no ring, untinted bands: %8); %9" )
+		.arg( LodPreview::mapLevelName( LodPreview::level() ) ).arg( LodPreview::levelName( LodPreview::force() ) )
+		.arg( shapes[0] ).arg( shapes[1] ).arg( shapes[2] ).arg( shapes[3] ).arg( shapes[4] ).arg( farOther )
+		.arg( LodPreview::viewCounts() );
+	qInfo().noquote() << QStringLiteral( "lod view: legend " ) + LodPreview::viewLegend( g_ringStart, g_ringCount, g_tanHalfFovY );
+}
+
 void wwCellFarLodFrame( Scene * scene )
 {
 	static bool wasSet = false;
 	if ( !scene || !scene->renderer )
 		return;
+	lodViewSay( scene );
 	const WwFarSway fs = wwCellFarLodSway( scene );	// lane SHADOWSHIMMER2: the sample the sun casters take too
 	const float amp = fs.amp;
 	if ( amp <= 0.0f && !wasSet )
@@ -1857,7 +1943,7 @@ bool wwCellFarLodWantsRepaint()
 int wwCellFarLodCards( Scene * scene, bool insideHdr, bool hdrFrame )
 {
 	const FarDoc * f = farFor( scene );
-	if ( !f || f->cards <= 0 )
+	if ( !f || f->cards <= 0 || cellFarLodHidden() )	// lane LODLIVE1: far off set live
 		return 0;
 	// the red control: the Phase 1 path, after the resolve and lit by the viewer alone
 	const bool redAfter = wwEnv( "WW_CELL_FARLOD_RED" ) == "cardsafter";
@@ -2011,6 +2097,7 @@ static float farLandTop( const Scene * scene, int n[4], float by[3] )
  * Red WW_CELL_FARLOD_NEAR_RED=bounds: the loaded block's plane alone. */
 double wwCellFarLodNearCap( const Scene * scene, double nr, double tanHalfFovY, double aspect )
 {
+	g_tanHalfFovY = tanHalfFovY;	// lane LODLIVE1: the coloration legend's screen sizes
 	const FarDoc * f = farFor( scene );
 	if ( !f || nr <= 16.0 || envFloat( "WW_CELL_FARLOD_NEAR", 0.0f ) > 0.0f )
 		return nr;

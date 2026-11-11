@@ -43,6 +43,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "ui/settingsdialog.h"
 #include "glview.h"
 #include "renderer.h"
+#include "features/far-lod/cellfarlod.h"	// lane LODLIVE1: far off set live hides the kept far field
 
 #include "lib/nvtristripwrapper.h"
 
@@ -501,6 +502,12 @@ bool Node::isHidden() const
 			n = n->parent;
 		}
 	}
+
+	// lane LODLIVE1: Far LOD off set live, a draw-time skip of the kept "FarLOD" subtree
+	if ( cellFarLodHidden() )
+		for ( const Node * n = this; n; n = n->parent )
+			if ( n->name.startsWith( QLatin1String( "FarLOD" ) ) )
+				return true;
 
 	if ( scene->hasOption(Scene::ShowHidden) )
 		return false;

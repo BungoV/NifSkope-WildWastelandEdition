@@ -273,8 +273,15 @@ void ladderFadeRows( GLFunctions * fn, Ctx & c, Copy & k, const CellMeshInst & d
 	}
 	if ( k.tintFor != LodPreview::gen() ) {
 		k.tintFor = LodPreview::gen();
-		for ( qsizetype i = 0; i < nRows; i++ )
+		int perCode[8] = {};	// lane LODLIVE1: the coloration's row counts (code = band + 1)
+		for ( qsizetype i = 0; i < nRows; i++ ) {
 			k.fadeCpu[std::size_t( i ) * 2 + 1] = tint && i < d.rowLevel.size() ? float( d.rowLevel[i] ) : 0.0f;
+			if ( tint && i < d.rowLevel.size() && d.rowLevel[i] > 0 && d.rowLevel[i] < 8 )
+				perCode[d.rowLevel[i]]++;
+		}
+		for ( int code = 1; code < 8; code++ )
+			if ( perCode[code] )
+				LodPreview::noteRows( code - 1, perCode[code] );
 		fn->glBindBuffer( GL_ARRAY_BUFFER, k.fade );
 		fn->glBufferSubData( GL_ARRAY_BUFFER, 0, GLsizeiptr( k.fadeCpu.size() * sizeof( float ) ), k.fadeCpu.data() );
 		fn->glBindBuffer( GL_ARRAY_BUFFER, 0 );

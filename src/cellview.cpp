@@ -2252,6 +2252,7 @@ struct LiveDoc
 	int tailEnd = -1;              //!< the block count our last step left: anything else appended = not our tail
 	bool interior = false;
 	bool farWanted = false;        //!< the far LOD was built (exterior, Far LOD on)
+	int lodLevel = -1;             //!< lane LODLIVE1: the map level the far LOD was built at (its timing line)
 	bool streamed = false;         //!< the cells come from the streamer, after the far LOD
 	QByteArray farType, farRed;    //!< the inputs that also move the near cells' load order (the bake's stack)
 	int farFirst = -1;             //!< the block count before the far section
@@ -2302,6 +2303,7 @@ QByteArray liveFarKey()
 		+ wwEnv( "WW_LODL_SKY_RED" ) + '\x1f';
 	// lane PERFLOAD1 P8: the LOD preview's forced level picks the far object rows' MNAM slot at build
 	k += QByteArray::number( LodPreview::objectSlot() ) + '\x1f';
+	k += QByteArray::number( LodPreview::level() ) + '\x1f';	// lane LODLIVE1: the map level, every ring past the band
 	return k;
 }
 
@@ -2559,10 +2561,20 @@ int liveFar( NifModel * nif, LiveDoc & d, QString * why )
 	const QByteArray red = wwEnv( "WW_CELL_FARLOD_RED" );
 	const bool wanted = !d.interior && cellFarLodWanted();
 	const QByteArray type = liveFarType(), key = liveFarKey(), cells = liveCellsKey( d.interior );
-	const bool farMoved = wanted != d.farWanted || ( wanted && ( type != d.farType || red != d.farRed || key != d.farKey ) );
+	/* lane LODLIVE1: on -> off hides the built far field at draw time (no cut, no stack check, no reopen); off -> on
+	 * shows it again, rebuilt only when a build-time value moved while it was hidden */
+	const bool hide = d.farWanted && !wanted;
+	const bool farMoved = d.farWanted ? wanted && ( type != d.farType || red != d.farRed || key != d.farKey ) : wanted;
 	const bool cellsMoved = cells != d.cellsKey;
-	if ( !farMoved && !cellsMoved )
-		return 0;	// no far LOD either way, or no build-time value moved
+	if ( !farMoved && !cellsMoved ) {
+		if ( hide == cellFarLodHidden() )
+			return 0;	// no far LOD either way, or no build-time value moved
+		cellFarLodSetHidden( hide );
+		*why = QStringLiteral( "far LOD %1 in place in 0 ms (a draw-time skip; the far data and the near stack kept)" )
+			.arg( hide ? QStringLiteral( "hidden" ) : QStringLiteral( "shown" ) );
+		return 1;
+	}
+	cellFarLodSetHidden( false );	// a rebuild below cuts the hidden far data or builds it shown
 	if ( cellsMoved && !d.streamed ) {
 		*why = d.interior ? QStringLiteral( "weapon parts: an interior is one fixed block, its weapons welded with the statics" )
 			: QStringLiteral( "actors outdoors / weapon parts: this fixed block (a harness or bake open) welds them with the "
@@ -2640,6 +2652,11 @@ int liveFar( NifModel * nif, LiveDoc & d, QString * why )
 		.arg( t.elapsed() )
 		.arg( QString( seed ? QStringLiteral( " (streamed cells dropped and streamed again)" ) : QString() )
 			+ ( parked ? QStringLiteral( " (views parked)" ) : QString() ) );
+	if ( wanted && LodPreview::level() != d.lodLevel ) {	// lane LODLIVE1: the map level's cost, said as it is
+		d.lodLevel = LodPreview::level();
+		qInfo().noquote() << QStringLiteral( "lod level: %1 on the whole map, far rebuilt in place in %2 ms on the GUI thread "
+			"(the window waits that long: a stall, not a reopen)" ).arg( LodPreview::mapLevelName( d.lodLevel ) ).arg( t.elapsed() );
+	}
 	return 1;
 }
 
@@ -2656,6 +2673,8 @@ void liveKeep( NifModel * nif, const CellSceneSpec & spec, const std::shared_ptr
 	d.rootBlock = rootBlock;
 	d.interior = spec.interior;
 	d.farWanted = !spec.interior && cellFarLodWanted();
+	d.lodLevel = LodPreview::level();
+	cellFarLodSetHidden( false );	// lane LODLIVE1: a fresh open draws what it built
 	d.streamed = streamed;
 	d.farType = liveFarType();
 	d.farRed = wwEnv( "WW_CELL_FARLOD_RED" );
@@ -2740,7 +2759,8 @@ int cellLiveSections( NifModel * nif, QString * why )
 	if ( !nif || it == liveDocs().end() )
 		return 0;
 	LiveDoc & d = it->second;
-	const bool farMoved = wwSwitchMovedFor( d.farSeen, { "WW_CELL_FARLOD", "WW_CELL_ACTORS_OUT", "WW_CELL_WEAP_PARTS" } );
+	const bool farMoved = wwSwitchMovedFor( d.farSeen, { "WW_CELL_FARLOD", "WW_CELL_ACTORS_OUT", "WW_CELL_WEAP_PARTS",
+		"WW_CELL_LOD_" } );	// lane LODLIVE1: the LOD level and map level move the far key
 	const bool probesMoved = wwSwitchMovedFor( d.probesSeen, { "WW_CELL_PROBES_HIDE" } );
 	const bool terrMoved = wwSwitchMovedFor( d.terrSeen, { "WW_TERRBLEND_RED" } );
 	int r = farMoved ? liveFar( nif, d, &w ) : 0;

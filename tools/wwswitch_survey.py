@@ -91,7 +91,8 @@ OVERRIDES = {
     'WW_CELL_DOF_LENS_NEARTILE_RED': ('live', 'cellpost.cpp ps() re-reads it when a live set moves it (prefix WW_CELL_DOF) (DOFLENS1-NEARTILE)'),
     # lane LIVESET1: cellLiveSections rebuilds the far LOD / the probe markers in place (the document's tail);
     # lane LIVESET4: on/off, TYPE and the stack reds too, while the near cells' stack stays the one they loaded
-    'WW_CELL_FARLOD': ('live', 'far section added/cut in place (LIVESET4); a changed near stack owes a reopen, named in the reply'),
+    'WW_CELL_FARLOD': ('live', 'LODLIVE1: off hides the built far field at draw time (cellFarLodSetHidden), on shows it again; no cut, no stack check, no reopen. Only a window opened with far off still owes a reopen when its stack moves'),
+    'WW_CELL_LOD_LEVEL': ('live', 'LODLIVE1: one LOD level forced on every far ring (lodpreview.cpp level(), in liveFarKey): far rebuilt in place, no reopen'),
     'WW_CELL_FARLOD_TYPE': ('live', 'far section rebuilt in place (LIVESET4); a changed near stack owes a reopen, named in the reply'),
     'WW_CELL_FARLOD_RED': ('live', 'rebuilt in place (live section); a stack red that changes the near stack owes a reopen'),
     'WW_CELL_FARLOD_SHORE': ('live', 'rebuilt in place (live section)'),

@@ -1155,9 +1155,9 @@ void main()
 	}
 #ifdef WW_CELLLIGHTS
 	/* lane PERFLOAD1 P8: the LOD preview's tint (lodpreview.cpp's colours): the row's level code y (2 rep0 .. 5 rep3), its
-	 * luminance kept; a row mid ladder fade (x != 0) the band's magenta */
+	 * luminance kept; a row mid ladder fade (x != 0) the band's magenta. LODLIVE1: code 1 = a full mesh, white */
 	if ( farLadder.y > 0.5 ) {
-		vec3 lt = farLadder.x != 0.0 ? vec3( 1.0, 0.2, 1.0 ) : farLadder.y < 2.5 ? vec3( 0.2, 0.85, 0.25 )
+		vec3 lt = farLadder.x != 0.0 ? vec3( 1.0, 0.2, 1.0 ) : farLadder.y < 1.5 ? vec3( 0.92 ) : farLadder.y < 2.5 ? vec3( 0.2, 0.85, 0.25 )
 			: farLadder.y < 3.5 ? vec3( 0.95, 0.9, 0.15 ) : farLadder.y < 4.5 ? vec3( 1.0, 0.55, 0.1 ) : vec3( 0.95, 0.15, 0.15 );
 		fragColor.rgb = lt * ( 0.25 + 0.75 * clamp( dot( fragColor.rgb, vec3( 0.2126, 0.7152, 0.0722 ) ), 0.0, 1.0 ) );
 	}

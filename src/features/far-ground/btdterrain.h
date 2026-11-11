@@ -248,6 +248,7 @@ struct LodlFarRing
 	qint64 skirtTris = 0, skirtCapped = 0;    //!< lane PERFLOAD1 P9: the ring's skirt walls, edges left open at the 16-bit cap
 	int sheetTiles = 0;
 	QString sheetFile;
+	QStringList sheetNames;                   //!< lane LODLIVE1: the distinct colour tiles the ring's chunks name
 	qint64 seamSamples = 0;
 	double seamBeforeMax = 0, seamBeforeMean = 0, seamAfterMax = 0, seamAfterMean = 0;
 	qint64 snappedAll = 0;                    //!< lane CELLSTREAM1: vertices snapAll moved onto the LAND

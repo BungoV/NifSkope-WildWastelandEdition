@@ -99,6 +99,9 @@ QString wwSwitchRowSet( const QByteArray & sw, const QString & value, bool unset
 	QString r;
 	if ( st == WwSwitchStage::Live ) {
 		r = wwSwitchSet( sw, unset ? QByteArray() : value.toLocal8Bit(), unset );
+		// lane LODLIVE1: far on/off and the LOD level act on the document (hide, show, rebuild) through apply
+		if ( runner() && r.startsWith( QLatin1String( "ok" ) ) && ( sw == "WW_CELL_FARLOD" || sw == "WW_CELL_LOD_LEVEL" ) )
+			r += QStringLiteral( "; " ) + runner()( QStringLiteral( "apply" ) );
 		if ( repainter() )
 			repainter()();
 	} else if ( st == WwSwitchStage::Reopen || st == WwSwitchStage::Shaders ) {

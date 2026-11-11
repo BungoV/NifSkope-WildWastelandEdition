@@ -77,6 +77,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "features/air/cellvolair.h"	// lane VOLPART1: volumetric lit effect cards
 #include "features/far-ground/cellfarground.h"	// lane FARDRAW1: the far ring 0's live ground
 #include "features/far-lod/cellfarinst.h"	// lane SKYSHARDS3: the far ring keeps its own program
+#include "features/far-lod/lodpreview.h"	// lane LODLIVE1: the LOD coloration's bands
 #include "features/far-ground/landlodspec.h"	// lane LANDSPEC1
 #include "libfo76utils/src/ddstxt16.hpp"
 #include "glview.h"
@@ -431,6 +432,20 @@ static const QByteArray & wwLandSpecRed()
 	return v;
 }
 
+/* lane LODLIVE1: the far LOD ground draws its own baked sheet tile alone. The world-tiled noise.dds multiply and the
+ * detail normals laid one 4000-unit pattern over every far chunk. Red WW_LANDSPEC_RED=farnoise = the LANDSPEC3 look. */
+static bool wwLandFarNoise()
+{
+	WW_SWITCH_STATIC( int, v, [] {
+		const bool on = wwLandSpecRed() == "farnoise";
+		fprintf( stderr, "landspec: far LOD ground %s\n", on
+			? "x noise.dds + detail normals (RED farnoise: one world-tiled pattern over every chunk)"
+			: "= each chunk's baked sheet tile alone (noise.dds multiply and detail normals off; red WW_LANDSPEC_RED=farnoise)" );
+		return on ? 1 : 0;
+	}() );
+	return v != 0;
+}
+
 /* lane LANDSPEC2: the blend centre's glide (src/features/far-ground/landlodspec.h). Harness pins: WW_LANDSPEC_GLIDEFROM=dx,dy (cells) starts
  * the first frame's glide that far from the camera's cell, WW_LANDSPEC_GLIDETIME=t freezes its elapsed seconds. */
 static LandLodSpec::Glide & wwLandGlide()
@@ -668,8 +683,9 @@ static void wwLandLodTextures( Scene * scene, NifSkopeOpenGLContext::Program * p
 	for ( int k = 0; k < 3; k++ )
 		prog->uni1i_l( prog->uniLocation( names[k] ), units[k] );
 	prog->uni1i_l( prog->uniLocation( "LandLodOuter" ), WwCellUnit::LandLodOuter );	// lane LANDSPEC6
-	const bool albedo = noise && ( mode == LandLodSpec::Far || bits.any() || outerBits.any() );
-	prog->uni4f( "landLodTex", FloatVector4( ox, oy, albedo ? 1.0f : 0.0f, detail ? 1.0f : 0.0f ) );
+	const bool farBare = mode == LandLodSpec::Far && !wwLandFarNoise();	// lane LODLIVE1
+	const bool albedo = noise && !farBare && ( mode == LandLodSpec::Far || bits.any() || outerBits.any() );
+	prog->uni4f( "landLodTex", FloatVector4( ox, oy, albedo ? 1.0f : 0.0f, detail && !farBare ? 1.0f : 0.0f ) );
 	// LANDSPEC4: z the window's chunks a side, w 1 = red perlayer; landLodBits the bound layers, 16 bits a component
 	// LANDSPEC5: landLodBits[4], one 64-bit word a vec4
 	prog->uni4f( "landLodWin", FloatVector4( float( win.fx ) * LandLodSpec::kCell, float( win.fy ) * LandLodSpec::kCell,
@@ -691,6 +707,27 @@ static void wwLandLodTextures( Scene * scene, NifSkopeOpenGLContext::Program * p
 			float( ( b >> 48 ) & 0xFFFF ) );
 	}
 	prog->uni4fv( "landLodOuterBits", obitv, size_t( LandLodSpec::kOuterBitWords ) );
+}
+
+/* lane LODLIVE1: the LOD coloration's band of a document shape (fo4_default.vert lodViewCode = band + 1, 0 untinted):
+ * a far ring shape its ring's level (lodpreview.cpp bandOfFarName), anything else the full mesh. The instanced far rows
+ * keep their own row code (attribute 9) and take this one where they have none. */
+static void wwLodViewUniform( NifSkopeOpenGLContext::Program * prog, const Shape * mesh )
+{
+	if ( prog->uniLocation( "lodViewCode" ) < 0 )
+		return;
+	int band = -1;
+	if ( LodPreview::tint() ) {
+		band = LodPreview::Full;
+		for ( const Node * p = mesh; p; p = p->parentNode() ) {
+			const int b = LodPreview::bandOfFarName( p->getName() );
+			if ( b >= 0 ) {
+				band = b;
+				break;
+			}
+		}
+	}
+	prog->uni1f( "lodViewCode", float( band + 1 ) );
 }
 
 static void wwLandLodUniforms( Scene * scene, NifSkopeOpenGLContext::Program * prog, const Shape * mesh )
@@ -2260,6 +2297,7 @@ bool Renderer::setupProgramPBRM( const NifModel * nif, Program * prog, Shape * m
 		prog->uni1i( "landSplatDbg", wwLandSplatDbg() );
 	wwCellGrassUniforms( scene, mesh->id() );	// lane GRASSMB1: the grass fade, zero on every other shape
 	CellFarInst::vcAoUniform( prog, CellFarInst::vcAoType( mesh->getName() ) );	// MODULES1 10c: the PBR far draws too
+	wwLodViewUniform( prog, mesh );	// lane LODLIVE1
 	if ( prog->uniLocation( "landShoreIndex" ) >= 0 )	// lane WATERWETBAKE1: the cell programs (the Wet shore row)
 		wwCellLandShoreUniforms( scene, wwCellIsTerrainShape( mesh ) );
 	if ( prog->uniLocation( "rainWet" ) >= 0 ) {	// lane FO76WEATHER1: rain wetness (gl/cellprecip.h)
@@ -2488,6 +2526,7 @@ bool Renderer::setupProgramCE1( const NifModel * nif, Program * prog, Shape * me
 		}
 		wwCellGrassUniforms( scene, mesh->id() );	// lane GRASSMB1: the grass fade, zero on every other shape
 		CellFarInst::vcAoUniform( prog, CellFarInst::vcAoType( mesh->getName() ) );	// MODULES1 10b-2: zero on every other shape
+		wwLodViewUniform( prog, mesh );	// lane LODLIVE1
 		if ( prog->uniLocation( "fgMode" ) >= 0 )	// lane FARDRAW1: a live-ground twin's grid, layers and decals
 			CellFarGround::uniforms( scene, prog );
 		if ( prog->uniLocation( "landShoreIndex" ) >= 0 )	// lane WATERWETBAKE1: the cell programs (the Wet shore row)

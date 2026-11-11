@@ -66,6 +66,7 @@ layout ( location = 13 ) in vec4	farInstExtra;
 // lane PERFLOAD1 P7 round 2: the far row's tree-ladder dither (x; 0 = whole), unset (0) on every other draw
 layout ( location = 9 ) in vec2	farLadderIn;
 flat out vec2 farLadder;
+uniform float lodViewCode;	// lane LODLIVE1: the LOD coloration's band + 1 of a shape (0 = untinted), renderer.cpp
 /* lane FIX1101A lodch: the ring's per-vertex bake channels (gl/cellfarinst.cpp; src/cellmesh.h CellMeshInst::vstream).
  * On, the row's .y holds the int bits of its first texel minus the sub's base vertex: + gl_VertexID = this vertex's
  * RG8 texel, R the AO (into the colour, as the flat copy has it), G the ambient's sky factor (wwFarSkyVis). The
@@ -180,7 +181,7 @@ void main()
 		v.xyz += viewMatrix * ( w * ( farSwayAmp * vertexColor.a ) );
 	}
 	gl_Position = projectionMatrix * v;
-	farLadder = farInst ? farLadderIn : vec2( 0.0 );
+	farLadder = farInst ? vec2( farLadderIn.x, farLadderIn.y > 0.5 ? farLadderIn.y : lodViewCode ) : vec2( 0.0, lodViewCode );
 #ifdef WW_FAR_SPLAT
 	farSplatA = 1.0;
 	if ( farInst && farSplat.x > 0.0 ) {

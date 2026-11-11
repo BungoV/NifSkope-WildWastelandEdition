@@ -641,6 +641,7 @@ int ImpostorChunk::drawCellFar( Scene * scene, const ImpostorDraw::Options & opt
 	}
 	static int saidDrawn = -1, saidOut = -1;
 	int drawn = 0, outside = 0, refused = 0;
+	int bandFlat = 0, bandOct = 0, bandFade = 0;	// lane LODLIVE1
 	QString firstWhy;	// a card the drawer refuses says why, once (was thrown away)
 	// THE CAMERA'S CULL: a card whose bounding sphere is outside one of the four side planes is not drawn, the
 	// game's per-object test (SUNCELL1's cellcull uses the same planes for the document's shapes).
@@ -712,7 +713,9 @@ int ImpostorChunk::drawCellFar( Scene * scene, const ImpostorDraw::Options & opt
 		o.fadeFrame = float( fadeFrame );
 		if ( lodTint )	// P8: the impostor's colour, a card mid-fade the band's
 			LodPreview::tintColour( fadeOut > 0.0f ? 6 : int( TreeLadder::Impostor ), o.lodTint );
-		if ( inst && s.sets.at( p.setIndex ).ok && fadeOut <= 0.0f ) {	// a fading card goes one by one (its own fade)
+		if ( lodTint )	// lane LODLIVE1: the coloration's card counts (flat, octahedral, fading)
+			( fadeOut > 0.0f ? bandFade : s.sets.at( p.setIndex ).oct > 0 ? bandOct : bandFlat )++;
+		if ( inst &&s.sets.at( p.setIndex ).ok && fadeOut <= 0.0f ) {	// a fading card goes one by one (its own fade)
 			ImpostorDraw::InstCard c;
 			c.set = &s.sets.at( p.setIndex );
 			c.offset[0] = p.world[0] - F.shift[0];
@@ -746,7 +749,7 @@ int ImpostorChunk::drawCellFar( Scene * scene, const ImpostorDraw::Options & opt
 		} else {	// the instanced program is missing: the cards the old way, so nothing vanishes
 			ImpostorDraw::batchBegin();
 			for ( const ImpostorDraw::InstCard & c : std::as_const( instCards ) ) {
-				ImpostorDraw::Options o = opt;
+				ImpostorDraw::Options o = io;	// LODLIVE1: io, so the tint is kept (was opt)
 				o.worldScale = c.scale;
 				o.swayPhase = c.swayPhase;
 				QString why;
@@ -759,6 +762,8 @@ int ImpostorChunk::drawCellFar( Scene * scene, const ImpostorDraw::Options & opt
 			ist.sets = -1;
 		}
 	}
+	if ( lodTint )
+		LodPreview::noteCards( bandFlat, bandOct, bandFade );
 	static int saidSets = -2, saidDraws = -1, sinceSaid = 0;
 	// once more 60 frames after a change: the GPU pick's first frame sends the whole static buffer
 	const bool steady = inst && ++sinceSaid == 60;

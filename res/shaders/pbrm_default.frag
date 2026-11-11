@@ -48,6 +48,9 @@ uniform samplerCube CubeMap;
 // mirror the reader's resolved values (src/io/pbrmfile.h).
 uniform vec3 pbrBaseColor;
 uniform float pbrOpacity;
+#ifdef WW_CELLLIGHTS
+flat in vec2 farLadder;	// lane LODLIVE1: the LOD coloration's band (fo4_default.vert)
+#endif
 uniform float pbrRoughness;
 uniform float pbrMetallic;
 uniform float pbrAo;
@@ -838,6 +841,15 @@ void main()
 	bool splatData = false;
 #ifdef WW_CELLLIGHTS
 	splatData = cellOn && ( cellProbe == 20 || cellProbe == 60 || cellProbe == 61 );
+#endif
+#ifdef WW_CELLLIGHTS
+	/* lane LODLIVE1: the LOD coloration in the PBR path too (fo4_default.frag's colours; farLadder from fo4_default.vert:
+	 * y = band + 1, x != 0 mid ladder fade) */
+	if ( farLadder.y > 0.5 ) {
+		vec3 lt = farLadder.x != 0.0 ? vec3( 1.0, 0.2, 1.0 ) : farLadder.y < 1.5 ? vec3( 0.92 ) : farLadder.y < 2.5 ? vec3( 0.2, 0.85, 0.25 )
+			: farLadder.y < 3.5 ? vec3( 0.95, 0.9, 0.15 ) : farLadder.y < 4.5 ? vec3( 1.0, 0.55, 0.1 ) : vec3( 0.95, 0.15, 0.15 );
+		fragColor.rgb = lt * ( 0.25 + 0.75 * clamp( dot( fragColor.rgb, vec3( 0.2126, 0.7152, 0.0722 ) ), 0.0, 1.0 ) );
+	}
 #endif
 	if ( landSplat && !splatData ) {
 		/* lane ALLON2 (bungo's thin dark lines along the ground's edges, 21.png): with MSAA a pixel on the

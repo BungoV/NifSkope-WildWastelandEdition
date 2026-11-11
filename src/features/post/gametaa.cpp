@@ -182,6 +182,7 @@ struct TaaState
 {
 	bool init = false;
 	quint64 liveGen = 0;	// lane TESTDRIVER1: the switch generation last read
+	quint64 lookGen = 0;	// lane LODLIVE1: the generation the look keys below were last checked at
 	bool on = false, pinned = false;
 	bool redNoClamp = false, redWrongJitter = false;
 	bool hist8 = false, redHist8Nearest = false;	// lane MOTION1-FMT2: the game's RGBA8 history (test pin) and its red
@@ -287,6 +288,15 @@ TaaState & ts()
 		s.taa2LinearBlit = wwEnvStr( "WW_TAA2_LINEAR_RED" ).trimmed() == QLatin1StringView( "blit" );
 		if ( s.taa2 != was2 || s.taa2Linear != wasLinear || s.taa2LinearBlit != wasBlit )
 			s.taa2Fresh = true;	// the history's colour space changes
+	}
+	/* lane LODLIVE1: a far look key set live restarts both histories, so the new far shade shows on the next frame
+	 * instead of fading in through the history and its locks (seconds at a low frame rate). Red WW_TAA_RED=lookkeep */
+	if ( wwSwitchMovedFor( s.lookGen, { "WW_LODL_AO_MAX", "WW_LODL_SKY_MAX", "WW_CELL_LOD_" } )
+		&& !wwEnvStr( "WW_TAA_RED" ).contains( QLatin1StringView( "lookkeep" ) ) ) {
+		s.haveLast = false;
+		s.taa2Fresh = true;
+		qInfo().noquote() << "temporal aa: history restarted (a far look key was set: WW_LODL_AO_MAX/SKY_MAX or "
+			"WW_CELL_LOD_*; the change shows on the next frame)";
 	}
 	return s;
 }

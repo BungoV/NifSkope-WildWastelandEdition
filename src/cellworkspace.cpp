@@ -544,7 +544,10 @@ void CellWorkspacePanel::buildUi()
 	QActionGroup * lodLevelGroup = lodChoice( "CellWorkspaceLodLevel", tr( "LOD level" ), { tr( "Auto" ), tr( "Full" ),
 		tr( "Rep 0" ), tr( "Rep 1" ), tr( "Rep 2" ), tr( "Rep 3" ), tr( "Impostor" ) }, -1, LodPreview::force(),
 		LodPreview::pinned( "force" ) );
-	QActionGroup * lodTintGroup = lodChoice( "CellWorkspaceLodTint", tr( "LOD tint" ), { tr( "Off" ), tr( "On" ) }, 0,
+	// lane LODLIVE1: one LOD level on the whole map (WW_CELL_LOD_LEVEL), rebuilt in place; the coloration row was "LOD tint"
+	QActionGroup * lodMapLevelGroup = lodChoice( "CellWorkspaceLodMapLevel", tr( "LOD map level" ), { tr( "Auto" ),
+		tr( "LOD4" ), tr( "LOD8" ), tr( "LOD16" ), tr( "LOD32" ) }, -1, LodPreview::level(), LodPreview::pinned( "level" ) );
+	QActionGroup * lodTintGroup = lodChoice( "CellWorkspaceLodTint", tr( "LOD coloration" ), { tr( "Off" ), tr( "On" ) }, 0,
 		LodPreview::tint() ? 1 : 0, LodPreview::pinned( "tint" ) );
 	QActionGroup * lodRingGroup = lodChoice( "CellWorkspaceLodRing", tr( "LOD ring" ), { tr( "All" ), tr( "Band" ),
 		tr( "LOD4" ), tr( "LOD8" ), tr( "LOD16" ), tr( "LOD32" ) }, -1, LodPreview::ring(), LodPreview::pinned( "ring" ) );
@@ -1672,6 +1675,15 @@ void CellWorkspacePanel::buildUi()
 			return;
 		if ( !liveFirst() )
 			say( tr( "LOD level: the far objects take it at the next far build (no reopen)" ), false );
+	} );
+	connect( lodMapLevelGroup, &QActionGroup::triggered, this, [this, liveFirst]( QAction * a ) {	// lane LODLIVE1
+		LodPreview::setLevel( a->data().toInt() );
+		if ( glView )
+			glView->update();
+		if ( syncing || g_path.isEmpty() || !cellFarLodWanted() )
+			return;
+		if ( !liveFirst() )
+			say( tr( "LOD map level: the far LOD takes it at the next far build (no reopen)" ), false );
 	} );
 	connect( cellFarLod, &QAction::toggled, this, [this, liveFirst]( bool on ) {
 		cellFarLodSetWanted( on );
