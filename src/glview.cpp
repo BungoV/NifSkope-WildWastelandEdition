@@ -4351,7 +4351,7 @@ void GLView::paintGL()
 		}
 		if ( model && showCursor )
 			drawCursorOverlay( painter );
-		if ( scene->hasOption( Scene::ShowAxes ) )
+		if ( scene->hasOption( Scene::ShowAxes ) && !navGizmoOff )	// AIRPERF1 round 3: none in full screen
 			drawNavGizmo( painter );
 		if ( drawSnapMarker ) {
 			// Blender snap marker: orange square outline + white center dot
@@ -5935,8 +5935,21 @@ void GLView::navGizmoBalls( QPointF pos[6], float depth[6] ) const
 	}
 }
 
+void GLView::wwSetNavGizmoOff( bool off )
+{
+	// AIRPERF1 round 3: full screen on = no gizmo. The draw and the hit test both read navGizmoOff.
+	navGizmoOff = off;
+	if ( off ) {
+		navGizmoHover = -1;
+		navGizmoDrag = false;
+	}
+	update();
+}
+
 int GLView::navGizmoHitTest( const QPointF & p ) const
 {
+	if ( navGizmoOff )
+		return -1;	// AIRPERF1 round 3: no hover, no axis snap, no ring drag while it is not drawn
 	QPointF center;
 	float R, ballR;
 	navGizmoLayout( center, R, ballR );

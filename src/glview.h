@@ -1473,6 +1473,9 @@ public:
 	float freeCamSpeed = 1.0f;
 	//! lane VIEWFULL1: Clean View (Blender's Overlays switch) draws the world only; live, menu row "Clean View"
 	bool cleanView = false;
+	//! AIRPERF1 round 3: full screen (F11) hides the navigation gizmo: not drawn, not hovered, not clicked
+	bool navGizmoOff = false;
+	void wwSetNavGizmoOff( bool off );
 	//! lane VIEWFULL1: the fly-mode crosshair (menu row "Crosshair"); Clean View hides it too
 	bool showCrosshair = true;
 	//! lane VIEWFULL1: a viewport mode owns Esc (flight, a modal tool, a paint mode, picks), so full screen keeps it

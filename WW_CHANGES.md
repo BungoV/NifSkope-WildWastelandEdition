@@ -1,3 +1,12 @@
+## AIRPERF1 round 3 (2026-11-11): no navigation gizmo in full screen
+- **bungo:** "please hide the navigation gizmo in the top right corner if F11 is on". Full screen on = the axis balls
+  are not drawn, not hovered and not clicked (no axis snap, no ring drag in that corner); leaving full screen puts
+  them back. No new setting.
+- **How:** `NifSkope::toggleViewportFullScreen` hands the state to the viewport (`GLView::wwSetNavGizmoOff`); the
+  draw (paintGL's overlay) and `GLView::navGizmoHitTest` both read `navGizmoOff`.
+- **Red:** `WW_VIEWFULL_GIZMO_RED=1`: the gizmo stays in full screen. **Telemetry:** `view full screen: on, navigation
+  gizmo hidden (not drawn, no clicks)` / `view full screen: off, navigation gizmo shown` at every toggle.
+
 ## AIRPERF1 round 3 (2026-11-11): wall stain models draw with the decals, under the mist
 - **The draw (bungo: the tall dark panel on a Goodneighbor wall, CommonwealthFoggy):** `DecoStain2x1WallL01` (ref
   00232786) and `DecoStain1x2Wall02` (00232785): one quad each, effect shader, `BldStreaks01.BGEM` (Decal flags, blend,

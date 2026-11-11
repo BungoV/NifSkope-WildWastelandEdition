@@ -1465,6 +1465,7 @@
 { "WW_UNFUCK_TEST", 2, "src/nifskope_ui.cpp:28792 NifSkope::initMenu | constructor/startup of a window-lifetime object" },
 { "WW_USEGPU_TEST", 2, "src/nifskope_ui.cpp:6048 NifSkope::createWindow | createWindow: picks which harness the window runs" },
 { "WW_VERTEXFLAGS_TEST", 2, "src/nifskope_ui.cpp:4242 NifSkope::createWindow | createWindow: picks which harness the window runs" },
+{ "WW_VIEWFULL_GIZMO_RED", 0, "src/nifskope_ui.cpp:30388 NifSkope::toggleViewportFullScreen | re-read per frame or per call (a)" },
 { "WW_VIEWFULL_KEEP", 3, "src/viewfulltest.cpp:209 wwViewFullHarness | bake/CLI/test path" },
 { "WW_VIEWFULL_TEST", 3, "src/viewfulltest.cpp:108 wwViewFullHarness | bake/CLI/test path" },
 { "WW_VIEW_TRANSFORM", 0, "src/gl/scenelighting.cpp:97 st | init-once state, re-read when a live set moves its prefix (b)" },

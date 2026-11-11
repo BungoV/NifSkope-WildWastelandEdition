@@ -30383,8 +30383,15 @@ void NifSkope::toggleViewportFullScreen()
 {
 	viewFull.setExtraChrome( { viewportHeader } );
 	viewFull.toggle();
-	if ( ogl )
+	if ( ogl ) {
+		// AIRPERF1 round 3 (bungo 11-11): no navigation gizmo in full screen. Red WW_VIEWFULL_GIZMO_RED=1: it stays.
+		WW_SWITCH_STATIC( bool, gizmoRed, wwEnvInt( "WW_VIEWFULL_GIZMO_RED" ) == 1 );
+		const bool off = viewFull.active() && !gizmoRed;
+		ogl->wwSetNavGizmoOff( off );
+		fprintf( stderr, "view full screen: %s, navigation gizmo %s%s\n", viewFull.active() ? "on" : "off",
+			off ? "hidden (not drawn, no clicks)" : "shown", gizmoRed ? " (red WW_VIEWFULL_GIZMO_RED=1: it stays)" : "" );
 		ogl->update();
+	}
 }
 
 bool NifSkope::eventFilter( QObject * o, QEvent * e )
