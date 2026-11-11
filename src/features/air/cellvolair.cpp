@@ -801,7 +801,15 @@ struct VaMedium
 	float sigma0 = 0.0f, zb = 0.0f, invH = 0.0f, dFull = 0.0f, farD = 0.0f;
 	bool band = false;
 	bool apCut = false;	// SHAFTS1b: the sky's haze share taken off (the aerial perspective drawn)
+	float sStreet = 0.0f, apShare = 0.0f;	// AIRPERF1 A7: the record's street fit alone; the sky's haze the fit was given
 };
+
+// lane AIRPERF1 A7 red (live): WW_CELL_AIR_FIT_RED=apcut = the fit before (the sky's haze taken off the street fit)
+bool vaFitCutRed()
+{
+	WW_SWITCH_STATIC( bool, cut, wwEnvStr( "WW_CELL_AIR_FIT_RED" ) == QLatin1String( "apcut" ) );
+	return cut;
+}
 
 // the game's fog alpha at distance d and fog-frame height z (lookdev_fog.glsl wwFogEval, the same formula)
 double vaGameAlpha( const float K[6][4], double d, double z )
@@ -869,9 +877,20 @@ VaMedium vaFit( const float K[6][4], bool wrong, bool farFit, float apPerUnit = 
 	 * from this same fog record (atmosphere.cpp hazeFromFog), apPerUnit its ground extinction. The far-end floor is
 	 * the sky's then (the air past the street is its), and the air keeps only the street fit's share above the sky's:
 	 * one count of the record's haze, not the air's on top of the sky's. Red apstack: today's fit. */
+	/* lane AIRPERF1 A7 (bungo 11-11, CommonwealthFoggy at Goodneighbor h22 far too thin): the surfaces take the MIN of
+	 * the two transmittances (atmo_apfog.glsl: the air keeps only the share the sky's air has not taken, and its
+	 * light is scaled to that share). Taking the sky's haze off the fit as well counted it out twice: the eye saw
+	 * max(street - sky, sky), not the record's street, and wherever the sky's haze was half the street fit or more
+	 * (Foggy: 19.5 /km fitted, 9.8 /km in the sky from the 400 m visibility) the air's own light (lamps, shafts) was
+	 * scaled to nothing. Now the air keeps the record's whole street fit and the min alone counts the haze once; the
+	 * far-end floor stays the sky's. One rule for every weather: a clear one changes by its thin sky haze only
+	 * (0.11 /km) and never passes its record's street fit. Offline: notes/modules1/airperf1/tools/a7_fit_twin.py.
+	 * Red WW_CELL_AIR_FIT_RED=apcut (live): the cut, as before. */
+	m.sStreet = sStreet;
+	m.apShare = farFit ? 0.0f : apPerUnit;
 	if ( apPerUnit > 0.0f && !farFit ) {
-		m.sigma0 = std::max( sStreet - apPerUnit, 0.0f );
-		m.apCut = true;
+		m.apCut = vaFitCutRed();
+		m.sigma0 = m.apCut ? std::max( sStreet - apPerUnit, 0.0f ) : sStreet;
 	}
 	m.farD = m.dFull;
 	if ( m.sigma0 > sFar && m.sigma0 > 0.0f )
@@ -924,9 +943,9 @@ void vaNearShare( const float K[6][4], const VaMedium & M, VaLayer & L )
 	if ( std::fabs( L.zn - M.zb ) < 0.5f && std::fabs( L.invHn - M.invH ) <= 1e-4f * M.invH )
 		return;
 	static float lastK[24] = {};
-	static float lastW = 0.0f;
+	static float lastW = 0.0f, lastS = 0.0f;	// AIRPERF1 A7: the share is fitted with sigma0 held, so it is keyed on it too
 	static bool have = false;
-	if ( have && std::equal( &K[0][0], &K[0][0] + 24, lastK ) ) {
+	if ( have && lastS == M.sigma0 && std::equal( &K[0][0], &K[0][0] + 24, lastK ) ) {
 		L.w = lastW;
 		return;
 	}
@@ -963,6 +982,7 @@ void vaNearShare( const float K[6][4], const VaMedium & M, VaLayer & L )
 	}
 	std::copy( &K[0][0], &K[0][0] + 24, lastK );
 	lastW = L.w;
+	lastS = M.sigma0;
 	have = true;
 }
 
@@ -3114,8 +3134,25 @@ static void vaPassInner( Scene * scene, bool run )
 	const QString hazeNote = QStringLiteral( "haze=(src=%6 air=%1/km ap=%2/km vis=%3km apcut=%4%5)" ).arg( airKm, 0, 'f', 3 )
 		.arg( apKm, 0, 'f', 3 ).arg( 3.912 / std::max( std::max( airKm, apKm ), 1e-4 ), 0, 'f', 1 ).arg( M.apCut ? 1 : 0 )
 		.arg( s.apStackRed ? QStringLiteral( ",RED=apstack" ) : QString() ).arg( QLatin1StringView( wwAtmoHazeSource() ) );
+	/* lane AIRPERF1 A7 telemetry: the air at the STREET (haze=(air=...) is the density aloft, under a ground layer a
+	 * quarter of the street's), the record's street fit, the sky's share, and the air's transmittance against the
+	 * record's fog (1 - alpha) at 500 / 1000 / 2000 / 4000 units; light = the share of the air's own light the min
+	 * with the sky's air leaves at 2000 units (0 = the air is not seen at all) */
+	QString fitNote;
+	{
+		const double rhoSt = ( 1.0 - G.w ) * vaB( G.zg, M.zb, M.invH ) + G.w * vaB( G.zg, G.zn, G.invHn ) + G.s;
+		const double stU = double( M.sigma0 ) * rhoSt, zLow = M.band ? double( M.zb ) - 10.0 : 0.0;
+		fitNote = QStringLiteral( " fit=(rule=%1 street=%2/km record=%3/km sky=%4/km T air/game" )
+			.arg( M.apCut ? QStringLiteral( "apcut(red)" ) : M.apShare > 0.0f ? QStringLiteral( "full" ) : QStringLiteral( "full(no sky share)" ) )
+			.arg( stU * kUnitsPerKm, 0, 'f', 3 ).arg( double( M.sStreet ) * kUnitsPerKm, 0, 'f', 3 ).arg( apKm, 0, 'f', 3 );
+		for ( const double d : { 500.0, 1000.0, 2000.0, 4000.0 } )
+			fitNote += QStringLiteral( " %1:%2/%3" ).arg( d, 0, 'f', 0 ).arg( std::exp( -stU * d ), 0, 'f', 3 )
+				.arg( 1.0 - vaGameAlpha( K, d, zLow ), 0, 'f', 3 );
+		const double tA = std::exp( -stU * 2000.0 ), tS = std::exp( -apKm / kUnitsPerKm * 2000.0 );
+		fitNote += QStringLiteral( " light=%1)" ).arg( tA < 1.0 ? ( 1.0 - std::min( 1.0, tA / tS ) ) / ( 1.0 - tA ) : 0.0, 0, 'f', 2 );
+	}
 	s.last.chop( 1 );
-	s.last += QStringLiteral( " " ) + optNote + QStringLiteral( " " ) + groundNote + QStringLiteral( " " ) + farNote + QStringLiteral( " " ) + hazeNote
+	s.last += QStringLiteral( " " ) + optNote + QStringLiteral( " " ) + groundNote + QStringLiteral( " " ) + farNote + QStringLiteral( " " ) + hazeNote + fitNote
 		+ ( dr.on ? QStringLiteral( " drift=" ) + dr.note : QString() ) + QStringLiteral( " sungate=" ) + sunGateNote
 		+ QStringLiteral( " rainfog=" ) + g.rfNote
 		+ QStringLiteral( " fogleak=%1(red=%2)" ).arg( !wwFogLeakShaderDefine() ? "off" : vaLeakBits( L, s.leakRed ) == s.leakRed ? "live" : "compiled,old-path" ).arg( vaLeakBits( L, s.leakRed ) ) +QStringLiteral( " intenv=%1" ).arg( L && L->interior && wwCellAsOutdoor( L ) ? ( ( s.leakRed & 128 ) ? "ratio(red)" : "direct" ) : "n/a" )	// lane FOGLEAK1
