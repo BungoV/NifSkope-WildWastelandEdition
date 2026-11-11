@@ -177,6 +177,8 @@ private:
 #include "features/clouds/cloudvol.h"	// the volume clouds' depth test
 #include "features/exposure/physunits.h"	// lane PHYSUNITS1: emissives in cd/m2
 #include "wwloadwatch.h"	// lane PERFLOAD1 P5: the frame's unbracketed steps name themselves to the main-thread watch
+#include "framepacer.h"	// lane EMPTY240 ITEM 0: the next frame starts when the last one is done
+#include "harnesswindow.h"	// wwWorldClockLive: a harness keeps the old pacing
 
 // NOTE: The FPS define is a frame limiter,
 //	NOT the guaranteed FPS in the viewport.
@@ -354,8 +356,8 @@ GLView::GLView( QWindow * p )
 	fmt.setProfile( QSurfaceFormat::CoreProfile );
 	fmt.setOption( QSurfaceFormat::DeprecatedFunctions, false );
 
-	// V-Sync
-	fmt.setSwapInterval( DEBUG_FRAME_TIME ? 0 : 1 );
+	// V-Sync: off unless the View > Vertical Sync row (or WW_VSYNC=1, or the red WW_FRAMETIMER_RED=1) asks (EMPTY240)
+	fmt.setSwapInterval( ( DEBUG_FRAME_TIME || !wwVsyncOn() ) ? 0 : 1 );
 	fmt.setSwapBehavior( QSurfaceFormat::DoubleBuffer );
 
 	fmt.setDepthBufferSize( 24 );
@@ -3456,8 +3458,224 @@ void wwSetFramerateOverlay( bool on )
 	QSettings().setValue( QLatin1StringView( kFpsKey ), on );
 }
 
+/* lane EMPTY240 ITEM 0: the frame pacer (framepacer.h). The rows are read from QSettings once, then held here. */
+namespace
+{
+struct WwPacingRows
+{
+	bool init = false;
+	bool vsync = false;
+	int cap = 0;
+};
+WwPacingRows & wwPacingRows()
+{
+	static WwPacingRows r;
+	if ( !r.init ) {
+		r.init = true;
+		QSettings s;
+		r.vsync = s.value( QStringLiteral( "GLView/Display/VSync" ), false ).toBool();
+		r.cap = s.value( QStringLiteral( "GLView/Display/FrameCap" ), 0 ).toInt();
+	}
+	return r;
+}
+
+bool wwFrameTimerRed()
+{
+	return wwEnvInt( "WW_FRAMETIMER_RED" ) == 1;
+}
+
+struct WwPacer
+{
+	bool queued = false;
+	int cap = 0;	// Hz, 0 = off
+	int interval = -1;	// the swap interval set on the view's context (-1 = not yet)
+	bool swapOk = true;
+	WwFramePacer::Clock clock;
+	QString said;	// the last pacing line's facts
+	double saidAt = -10.0;
+};
+WwPacer & wwPacer()
+{
+	static WwPacer p;
+	return p;
+}
+
+//! the pacing and frame-wall clock (QueryPerformanceCounter; processSeconds() steps with the system tick)
+double wwPaceNowS()
+{
+	static QElapsedTimer t;
+	if ( !t.isValid() )
+		t.start();
+	return double( t.nsecsElapsed() ) * 1e-9;
+}
+
+//! lane EMPTY240 item 1: this paint's marks and the second's sums (framepacer.h WwFrameWall)
+struct WwWall
+{
+	WwFrameWall::Marks cur;
+	WwFrameWall::Window win;
+	bool connected = false;
+};
+WwWall & wwWall()
+{
+	static WwWall w;
+	return w;
+}
+
+//! adds the scope's seconds to one named part of this paint
+struct WwWallPart
+{
+	double & part;
+	const double t0;
+	explicit WwWallPart( double & p ) : part( p ), t0( wwPaceNowS() ) {}
+	~WwWallPart() { part += wwPaceNowS() - t0; }
+};
+}	// namespace
+
+bool wwVsyncOn()
+{
+	if ( wwEnvIsSet( "WW_VSYNC" ) )
+		return wwEnvInt( "WW_VSYNC" ) != 0;
+	if ( wwFrameTimerRed() )
+		return true;	// build 71
+	return wwPacingRows().vsync;
+}
+
+void wwSetVsync( bool on )
+{
+	wwPacingRows().vsync = on;
+	QSettings().setValue( QStringLiteral( "GLView/Display/VSync" ), on );
+}
+
+int wwFrameCapRow()
+{
+	if ( wwEnvIsSet( "WW_FRAME_CAP" ) ) {
+		const QString v = wwEnvStr( "WW_FRAME_CAP" ).trimmed();
+		return v.compare( QLatin1String( "refresh" ), Qt::CaseInsensitive ) == 0 ? -1 : v.toInt();
+	}
+	return wwPacingRows().cap;
+}
+
+void wwSetFrameCap( int row )
+{
+	wwPacingRows().cap = row;
+	QSettings().setValue( QStringLiteral( "GLView/Display/FrameCap" ), row );
+}
+
+/* At the paint's start: the cap's clock, the swap interval when the row changed, and the pacing line on a change.
+ * `wants` = this view wants the next frame (a cell view with a live clock, a playing animation, a held key). */
+static void wwPacerFrameStart( GLView * v, bool wants )
+{
+	WwPacer & p = wwPacer();
+	const bool red = wwFrameTimerRed();
+	const double refresh = v->screen() ? v->screen()->refreshRate() : 0.0;
+	const int row = wwFrameCapRow();
+	p.cap = red ? 0 : WwFramePacer::capHz( row, refresh );
+	const double now = wwPaceNowS();
+	WwFramePacer::started( p.clock, p.cap, now );
+	const int interval = ( DEBUG_FRAME_TIME || !wwVsyncOn() ) ? 0 : 1;
+	if ( interval != p.interval ) {
+		using SwapFn = int ( QOPENGLF_APIENTRYP )( int );	// wglSwapIntervalEXT
+		QOpenGLContext * c = QOpenGLContext::currentContext();
+		const auto swap = c ? reinterpret_cast<SwapFn>( c->getProcAddress( "wglSwapIntervalEXT" ) ) : nullptr;
+		p.swapOk = swap && swap( interval ) != 0;
+		p.interval = interval;
+	}
+	const QString driver = red ? QStringLiteral( "the 6 ms timer (WW_FRAMETIMER_RED=1)" )
+		: wants ? QStringLiteral( "frames (each starts when the last is done)" )
+		: QStringLiteral( "the 6 ms timer (nothing moves)" );
+	const QString cap = p.cap <= 0 ? QStringLiteral( "off" )
+		: row < 0 ? QStringLiteral( "%1 fps (monitor refresh)" ).arg( p.cap ) : QStringLiteral( "%1 fps" ).arg( p.cap );
+	const QString facts = driver + cap + QString::number( interval ) + QString::number( int( p.swapOk ) );
+	if ( facts != p.said && now - p.saidAt >= 1.0 ) {
+		p.said = facts;
+		p.saidAt = now;
+		const double res = wwTimerResolutionMs();
+		std::fprintf( stderr, "frame pacing: driven by %s, cap %s, vsync %s%s, timer resolution %s\n", qPrintable( driver ),
+			qPrintable( cap ), interval ? "on" : "off", p.swapOk ? "" : " (wglSwapIntervalEXT refused: the driver's own setting)",
+			res > 0.0 ? qPrintable( QStringLiteral( "%1 ms" ).arg( res, 0, 'f', 2 ) ) : "unknown" );
+	}
+}
+
+static void wwPacerTick( GLView * v );
+
+//! at the paint's end (every return): queue the next frame when the view wants one
+static void wwPacerAfterPaint( GLView * v, bool wants )
+{
+	WwPacer & p = wwPacer();
+	if ( !wants || p.queued || wwFrameTimerRed() )
+		return;
+	p.queued = true;
+	QTimer::singleShot( 0, v, [v]() { wwPacerTick( v ); } );
+}
+
+//! the queued frame: wait out the cap (short sleeps, then re-posts so input still runs), then a tick and a paint
+static void wwPacerTick( GLView * v )
+{
+	WwPacer & p = wwPacer();
+	p.queued = false;
+	const double wait = WwFramePacer::waitSeconds( p.clock, p.cap, wwPaceNowS() );
+	if ( wait > 0.0 ) {
+		{
+			WwWallPart wallPart( wwWall().cur.capWait );
+			wwPreciseSleep( WwFramePacer::sleepSeconds( wait ) );
+		}
+		p.queued = true;
+		QTimer::singleShot( 0, v, [v]() { wwPacerTick( v ); } );
+		return;
+	}
+	QMetaObject::invokeMethod( v, "advanceGears", Qt::DirectConnection );
+	v->update();
+}
+
+/* lane EMPTY240 item 1: at a paint's start the last paint is closed (its wall = start to start); with the pass timers
+ * on, the second's line: every part named, and how much of the wall the pass timers hold. */
+static void wwWallStart( GLView * v )
+{
+	WwWall & w = wwWall();
+	if ( !w.connected ) {
+		w.connected = true;
+		QObject::connect( v, &QOpenGLWindow::frameSwapped, v, []() { wwWall().cur.swapAt = wwPaceNowS(); } );
+	}
+	const double now = wwPaceNowS();
+	WwFrameWall::add( w.win, w.cur, now );
+	w.cur = WwFrameWall::Marks();
+	w.cur.start = now;
+	if ( w.win.frames > 0 && now - w.win.t0 >= 1.0 ) {
+		if ( PassTime::on() && w.win.wall > 0.0 ) {
+			const double n = double( w.win.frames ), ms = 1e3 / n;
+			QByteArray line = QByteArray( "frame wall: " ) + QByteArray::number( w.win.wall * ms, 'f', 2 ) + " ms a frame ("
+				+ QByteArray::number( n / w.win.wall, 'f', 1 ) + " fps, " + QByteArray::number( w.win.frames ) + " frames) =";
+			for ( int p = 0; p < WwFrameWall::PartCount; p++ )
+				line += QByteArray( p ? " + " : " " ) + WwFrameWall::partName( p ) + " "
+					+ QByteArray::number( w.win.part[p] * ms, 'f', 2 );
+			line += QByteArray( " | the pass timers hold " )
+				+ QByteArray::number( 100.0 * w.win.part[WwFrameWall::Passes] / w.win.wall, 'f', 0 ) + " %";
+			std::fprintf( stderr, "%s\n", line.constData() );
+		}
+		w.win = WwFrameWall::Window();
+	}
+}
+
 void GLView::paintGL()
 {
+	wwWallStart( this );	// lane EMPTY240 item 1: the last paint's wall, start to start
+	struct WwWallEnd
+	{
+		~WwWallEnd() { wwWall().cur.finish = wwPaceNowS(); }
+	} wwWallEnd;
+	/* lane EMPTY240 ITEM 0: the next frame is queued when this one is done (build 71 waited for the 6 ms coarse timer:
+	 * ~64 frames a second). A harness keeps the old pacing (its clock stands still). */
+	const bool wwPacerWants = wwWorldClockLive() && ( ( scene && scene->nifModel && wwCellLightsFor( scene->nifModel ) )
+		|| ( ( animState & AnimEnabled ) && ( animState & AnimPlay ) && scene && scene->timeMin() != scene->timeMax() )
+		|| kbdState != 0 );
+	wwPacerFrameStart( this, wwPacerWants );
+	struct WwPacerEnd
+	{
+		GLView * v;
+		bool wants;
+		~WwPacerEnd() { wwPacerAfterPaint( v, wants ); }
+	} wwPacerEnd{ this, wwPacerWants };
 	CellSpeed::Acc speedAcc( "frames painted (paintGL, with first-use uploads)" );
 	CellTexAhead::Frame texAheadFrame;   // a frame that loads no texture ends the read-ahead
 	wwPaintCounter++;
@@ -3503,6 +3721,7 @@ void GLView::paintGL()
 	} wwPaintTime{ wwPaintClock };
 	wwEnvChanged();	// MODULES1 item 8: the env accessors' cache lives one frame at most (a backstop for any writer)
 	// the frame's per-pass timers (one bool test while the Frame Timers row is off)
+	wwWall().cur.begin = wwPaceNowS();
 	PassTime::frameBegin();
 	if ( scene && scene->textures )
 		scene->textures->wwParamFrame();	// the texture parameter shadow trusts nothing from an older frame
@@ -3511,6 +3730,8 @@ void GLView::paintGL()
 		~WwPassFrame()
 		{
 			PassTime::frameEnd();
+			wwWall().cur.end = wwPaceNowS();
+			wwWall().cur.passes = PassTime::lastFrameCpuSumMs() * 1e-3;
 			extern bool wwStderrFrameFlush;	// the frame's log lines in one write
 			if ( wwStderrFrameFlush )
 				std::fflush( stderr );
@@ -3788,9 +4009,15 @@ void GLView::paintGL()
 	wwCellShadowPass( scene );
 	PassTime::end( PassTime::CellShadows );
 	wwMainStep( "probe sky tick (the bounce follows the hour)" );	// lane PERFLOAD1 P5
-	probeSkyTick( scene, scene->nifModel, this );	// an exterior's bounce follows the weather
+	{
+		WwWallPart wallPart( wwWall().cur.probe );
+		probeSkyTick( scene, scene->nifModel, this );	// an exterior's bounce follows the weather
+	}
 	wwMainStep( "rtddgi cell frame (GI relight, builds, uploads)" );
-	rtddgiCellFrame( scene );	// the ray-traced GI volume builds, updates and uploads (off: nothing)
+	{
+		WwWallPart wallPart( wwWall().cur.gi );
+		rtddgiCellFrame( scene );	// the ray-traced GI volume builds, updates and uploads (off: nothing)
+	}
 
 	PassTime::begin( PassTime::Background );	// the sky (or background) and the ground plane
 	if ( perspectiveMode ) {
@@ -3925,7 +4152,10 @@ void GLView::paintGL()
 	PassTime::begin( PassTime::Obscurance );	// one bracket per pass
 	wwCellAoPass( scene, cellPasses );
 	PassTime::end( PassTime::Obscurance );
-	rtddgiRestirPass( scene );	// lane RESTIRDI1: the RT quality preset's ReSTIR DI on that pass's g-buffer (Low: nothing)
+	{
+		WwWallPart wallPart( wwWall().cur.restir );
+		rtddgiRestirPass( scene );	// lane RESTIRDI1: the RT quality preset's ReSTIR DI on that pass's g-buffer (Low: nothing)
+	}
 	PassTime::begin( PassTime::Water );	// lane TIMING1: the water zone (its draws in the sorted pass join it)
 	wwCellOceanPass( scene, cellPasses );	// lane WATERLOOK1: the wind's waves, before any pass that draws water
 	PassTime::end( PassTime::Water );

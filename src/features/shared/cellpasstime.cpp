@@ -4,6 +4,7 @@
 #include "wwloadwatch.h"	// lane PERFLOAD1 P5: every pass names itself to the main-thread watch
 #include "gl/gpustage.h"	// MODULES1: the staged-upload counts in the stream1 mem line
 #include "filebuf.hpp"	// MODULES1: the archive trims in the ram owners line
+#include "framepacer.h"	// lane EMPTY240: the timer resolution helpers live here (Windows headers)
 
 #include <QByteArray>
 #include <QMap>
@@ -693,11 +694,19 @@ void subEnd( int sub )
 	s.openSub[sub] = -1;
 }
 
+static double s_lastCpuSum = 0.0;	// lane EMPTY240 item 1
+
+double lastFrameCpuSumMs()
+{
+	return s_lastCpuSum;
+}
+
 void frameEnd()
 {
 	State & s = st();
 	if ( s.memArmed > 0 && --s.memArmed == 0 )
 		memLog( "first frames drawn" );
+	s_lastCpuSum = 0.0;
 	if ( !s.inFrame )
 		return;
 	Slot & sl = s.ring[s.frame % kSlots];
@@ -711,6 +720,8 @@ void frameEnd()
 	Sampler::pass = -2;
 	s.gl->glQueryCounter( sl.f1, GL_TIMESTAMP );
 	sl.cpuFrame = double( nowNs() - s.frameT0 ) * 1e-6;
+	for ( int p = 0; p < CullCamera; p++ )	// the CPU-only rows after it sit inside the passes
+		s_lastCpuSum += sl.cpu[p];
 	const CacheCounts & cc = cacheCounts();
 	sl.cache.made = cc.made - sl.cache0.made;
 	sl.cache.madeBytes = cc.madeBytes - sl.cache0.madeBytes;
@@ -1060,3 +1071,37 @@ void stream1Hitch( double * maxMs, int * over, int * frames, bool reset )
 }
 
 } // namespace PassTime
+
+// lane EMPTY240 ITEM 0: the system timer's resolution, said in the frame pacing line (framepacer.h)
+double wwTimerResolutionMs()
+{
+#ifdef Q_OS_WIN
+	using QueryFn = LONG ( WINAPI * )( PULONG, PULONG, PULONG );
+	static const QueryFn query = reinterpret_cast<QueryFn>(
+		reinterpret_cast<void *>( GetProcAddress( GetModuleHandleW( L"ntdll.dll" ), "NtQueryTimerResolution" ) ) );
+	ULONG coarsest = 0, finest = 0, current = 0;
+	if ( query && query( &coarsest, &finest, &current ) == 0 )
+		return double( current ) * 1.0e-4;	// 100 ns units
+#endif
+	return -1.0;
+}
+
+bool wwPreciseSleep( double seconds )
+{
+#ifdef Q_OS_WIN
+	// a Sleep( 1 ) took 14-24 ms on bungo's PC even after timeBeginPeriod( 1 ); this timer 0.55 ms for 0.5 (11-12)
+	static HANDLE timer = CreateWaitableTimerExW( nullptr, nullptr, 0x00000002 /* CREATE_WAITABLE_TIMER_HIGH_RESOLUTION */,
+		TIMER_ALL_ACCESS );
+	if ( !timer || seconds <= 0.0 )
+		return false;
+	LARGE_INTEGER due;
+	due.QuadPart = -LONGLONG( seconds * 1.0e7 );	// relative, 100 ns units
+	if ( !SetWaitableTimerEx( timer, &due, 0, nullptr, nullptr, nullptr, 0 ) )
+		return false;
+	WaitForSingleObject( timer, 50 );
+	return true;
+#else
+	(void) seconds;
+	return false;
+#endif
+}

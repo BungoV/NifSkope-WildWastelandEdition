@@ -1,3 +1,18 @@
+## EMPTY240 (2026-11-12): frames no longer wait for a 6 ms timer; vsync ships off; the frame wall line
+
+Changed, not checked live (no build, no window). Offline: tests/framepacer (model + this PC's timers; the red fails),
+syntax check of glview.cpp, cellpasstime.cpp, nifskope_ui.cpp (rc=0).
+
+- **Cause.** A frame started only when GLView's 6 ms coarse QTimer ticked; on Windows that timer fires on the system
+  tick: 64 ticks a second measured on bungo's PC, even at 1 ms resolution (the empty scene's 68 fps).
+- **Fix (ships on).** While a cell view's clock runs (or an animation plays, or a key is held) the next frame is posted
+  as soon as paintGL returns. View > Vertical Sync (off by default, live via wglSwapIntervalEXT) and View > Frame Cap
+  (Off, Monitor Refresh, 30..500; its wait is a high-resolution waitable timer). Pins WW_VSYNC, WW_FRAME_CAP; red
+  WW_FRAMETIMER_RED=1 (the 6 ms timer, vsync on). Log: `frame pacing: driven by ..., cap ..., vsync ..., timer resolution ...`.
+- **Frame wall (telemetry).** With WW_CELL_PASSTIME on, once a second: `frame wall: X ms a frame (F fps) = before-frame
+  + passes + gi-frame + restir + probe-sky + other-in-frame + after-frame + swap + cap-wait + between-paints | the pass
+  timers hold P %`. The parts add up to the wall (paint start to paint start, the overlay's fps).
+
 ## FARWATER1 (2026-11-11): far water at the horizon mirrors the deck, not the clear sky
 
 Changed, not checked live (no build, no window). Offline: CPU twin (notes/farwater1/tools/twin.py, 0 fails), syntax
