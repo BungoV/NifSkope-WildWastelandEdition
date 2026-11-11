@@ -11,7 +11,10 @@
 #include <QString>
 #include <QtGlobal>
 
+#include <QList>
+
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <cstdio>
 #include <utility>
@@ -20,12 +23,15 @@
 namespace {
 
 constexpr const char * kLightsKey = "WW/GameLightBrightness";
+constexpr const char * kMasterKey = "Settings/Render/Scene/Physical Light Units 1";	// MODULES1 R6-13: its own key
+constexpr bool kMasterDef = false;	// masters ship off: vanilla Fallout 4 lighting
 
 struct PhysState
 {
 	QElapsedTimer cellFrame;
 	quint64 cellPaint = 0;	// MODULES1 11-09 item 1: the paint that last drew the cell's HDR camera (0 = none yet)
 	bool loaded = false;
+	bool master = kMasterDef;	// MODULES1 R6-13: the Physical Light Units row
 	double g = 1.0;
 	float evMetered = 0.0f, evApplied = 0.0f;
 	float hiSpread = 0.0f;	// MODULES1 item 14: log2( 97th percentile / mean ) of the last meter
@@ -46,6 +52,7 @@ PhysState & ps()
 	if ( !s.loaded ) {
 		s.loaded = true;
 		s.g = std::clamp( QSettings().value( QLatin1StringView( kLightsKey ), 1.0 ).toDouble(), 0.25, 4.0 );
+		s.master = QSettings().value( QLatin1StringView( kMasterKey ), kMasterDef ? 1 : 0 ).toInt() != 0;
 	}
 	return s;
 }
@@ -63,13 +70,74 @@ bool pinnedFloat( const char * name, float & out )
 
 }	// namespace
 
+bool wwPhysMasterPinned()
+{
+	return wwEnvIsSet( "WW_PHYSUNITS_RED" );
+}
+
+bool wwPhysVanillaRed( const char * term )
+{
+	if ( !wwEnvIsSet( "WW_PHYSUNITS_VANILLA_RED" ) )
+		return false;
+	const QList<QByteArray> l = wwEnv( "WW_PHYSUNITS_VANILLA_RED" ).trimmed().toLower().split( ',' );
+	return l.contains( QByteArray( term ) ) || l.contains( QByteArrayLiteral( "all" ) );
+}
+
+/* MODULES1 R6-13: the master. It was a hidden red (WW_PHYSUNITS_RED) with real units as the default; now it is a row
+ * that ships Off, and Off is the game's lighting on every term (the line below names each). Read per call: the row
+ * and the pin are live (a lamp's colour factor follows in celllamps.cpp physTick). */
 bool wwPhysOn()
 {
-	WW_SWITCH_STATIC( bool, red, wwSwitchEcho( "physunits red (the old pinned scale)", [] {
-		const QByteArray v = wwEnvIsSet( "WW_PHYSUNITS_RED" ) ? wwEnv( "WW_PHYSUNITS_RED" ).trimmed() : QByteArray();
-		return !v.isEmpty() && v != "0";
-	}() ) );
-	return !red;
+	const bool pinned = wwEnvIsSet( "WW_PHYSUNITS_RED" );
+	bool on = ps().master;
+	QByteArray pin;
+	if ( pinned ) {
+		pin = wwEnv( "WW_PHYSUNITS_RED" ).trimmed();
+		on = pin.isEmpty() || pin == "0";
+	}
+	static std::atomic<int> said { -1 };
+	const int key = ( on ? 1 : 0 ) | ( pinned ? 2 : 0 );
+	if ( said.exchange( key ) != key ) {
+		const QByteArray how = pinned ? QByteArray( "PINNED WW_PHYSUNITS_RED=" ) + pin : QByteArray( "the row; ships Off" );
+		const bool curve = wwPhysVanillaRed( "curve" ), eye = wwPhysVanillaRed( "eye" ), lamp = wwPhysVanillaRed( "lampscale" );
+		if ( on )
+			std::fprintf( stderr, "physunits master: Physical Light Units ON (%s). physical: lamps (LIGH: the %g lux edge law x Game "
+				"Light Brightness), .nifx lights (absolute lumens), sun and moon (top of the atmosphere over pi, through the air), "
+				"ambient (the physical sky's irradiance + the night floor), sky scale and glare, emissives (%g cd/m2 per unit x "
+				"Game Light Brightness), unlit effects, particles and fog colours (the light's ratio to the weather's), exposure "
+				"(the EV100 camera), bloom (the energy-conserving glare), tone curve (Physical), frame RGBA32F. vanilla: none\n",
+				how.constData(), double( wwphys::kLampEdgeLux ), double( wwphys::kEmitMidCdm2 ) );
+		else
+			std::fprintf( stderr, "physunits master: Physical Light Units OFF (%s) = vanilla Fallout 4 lighting. vanilla: lamps (LIGH "
+				"colour x fade x1, no Game Light Brightness%s), sun and moon light (the weather record's sunlight x the imagespace's "
+				"sunlight scale), ambient (the weather record's), sky scale and glare (x1), emissives (x1 x the Glow row), unlit "
+				"effects, particles and fog colours (x1), exposure (the imagespace's eye adaptation, HNAM min / max%s), tone curve "
+				"(%s), bloom (the Bloom row's own law, no glare), frame RGBA16F. no vanilla form: .nifx lights (ours; their "
+				"authored fade, 637 lm per fade, x1). physical: none (the Physical Sky rows are their own masters). Reds "
+				"WW_PHYSUNITS_VANILLA_RED=curve,eye,lampscale\n",
+				how.constData(), lamp ? "; RED lampscale: a sunlit interior's lamps x the derived scale" : "",
+				eye ? "; RED eye: the partial law under L0" : ", full law",
+				curve ? "RED curve: Physical" : "the game's filmic" );
+	}
+	return on;
+}
+
+int wwPhysMaster()
+{
+	return wwPhysOn() ? 1 : 0;
+}
+
+void wwPhysSetMaster( int on )
+{
+	if ( wwPhysMasterPinned() )
+		return;
+	PhysState & s = ps();
+	if ( s.master == ( on != 0 ) )
+		return;
+	s.master = on != 0;
+	QSettings().setValue( QLatin1StringView( kMasterKey ), s.master ? 1 : 0 );
+	// the statics that read it (the frame's format, cellhdr.cpp) take their value again, as after a live set
+	g_wwSwitchGen.fetch_add( 1, std::memory_order_acq_rel );
 }
 
 quint64 wwGlPaintCount();	// glview.cpp
@@ -314,8 +382,9 @@ float wwPhysLastEvApplied()
 
 QString wwPhysEcho()
 {
-	if ( !wwPhysOn() )
-		return QStringLiteral( "physunits: RED ^WW_PHYSUNITS_RED=1 (the old pinned scale)" );
+	if ( !wwPhysOn() )	// MODULES1 R6-13
+		return wwPhysMasterPinned() ? QStringLiteral( "physunits: OFF, vanilla Fallout 4 lighting (PINNED ^WW_PHYSUNITS_RED)" )
+			: QStringLiteral( "physunits: OFF, vanilla Fallout 4 lighting (the Physical Light Units row)" );
 	return QStringLiteral( "physunits: on sky=%1 sun toa %2 lux moon toa %3 lux night floor %4 cd/m2 game lights %5%6 emit %7 cd/m2 "
 		"EV100 metered %8 applied %9" )
 		.arg( wwPhysSkyOn() ? 1 : 0 ).arg( double( wwphys::kSunToaLux ), 0, 'f', 0 ).arg( double( wwphys::kMoonToaLux ), 0, 'f', 2 )

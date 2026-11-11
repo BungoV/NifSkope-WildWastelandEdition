@@ -44,6 +44,7 @@ public:
 	QComboBox * modeBox = nullptr;
 	QDoubleSpinBox * exposureBox = nullptr;
 	QDoubleSpinBox * gameLightsBox = nullptr;	// lane PHYSUNITS1: Game Light Brightness (vanilla lamps + emissives)
+	QComboBox * physUnitsBox = nullptr;	// MODULES1 R6-13: Physical Light Units, the master (ships Off)
 	QComboBox * viewBox = nullptr;
 	QCheckBox * routeViewBox = nullptr;
 	// Weather (W1) and Ground rows (lane PBRR2B)

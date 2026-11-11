@@ -480,7 +480,7 @@ void WwCellLightsP::nifxTick( const void * nif )
 		x.key.clear();
 		return;
 	}
-	QByteArray key = QByteArray::number( red );
+	QByteArray key = QByteArray::number( red ) + ( wwPhysOn() ? "|phys" : "|van" );	// MODULES1 R6-13: the master is live
 	for ( const QString & p : files ) {
 		const QFileInfo fi( p );
 		key += '|' + p.toUtf8() + ':' + QByteArray::number( fi.exists() ? fi.size() : -1 ) + ':'
@@ -520,26 +520,32 @@ void WwCellLightsP::nifxTick( const void * nif )
  * when G or the document's version moves (a streamed chunk built under the old G is caught too). */
 void WwCellLightsP::physTick( const void * nif )
 {
-	if ( !wwPhysOn() )
-		return;
+	/* MODULES1 R6-13: the master (Physical Light Units) is live too. A placed lamp carries the unit factor in its colour
+	 * (physIn: 1 = the record's colour x fade, the game's; the law x G while on); the wanted one is taken per lamp. */
 	ClState & s = st();
 	static QHash<const void *, QPair<int, float>> seen;
-	const float g = wwPhysGameLights();
+	const bool on = wwPhysOn();
+	const float g = on ? wwPhysGameLights() : -1.0f;	// -1: vanilla
 	const int ver = s.version.value( nif, 0 );
 	const auto it = seen.constFind( nif );
 	if ( it != seen.cend() && it->first == ver && it->second == g )
 		return;
-	auto rescale = [g]( WwCellLighting & L ) {
+	auto rescale = [g, on]( WwCellLighting & L ) {
 		int n = 0;
 		for ( QVector<WwCellLight> * v : { &L.lights, &L.offLights, &L.nifxOffPlaced, &L.nifxBulbs, &L.nifxOffBulbs } )
-			for ( WwCellLight & l : *v )
-				if ( l.physG > 0.0f && l.physG != g ) {
-					const float k = g / l.physG;
+			for ( WwCellLight & l : *v ) {
+				if ( !( l.physIn > 0.0f ) )
+					continue;
+				const float want = on ? wwPhysLighK( l.radius ) * g : 1.0f;
+				if ( l.physIn != want ) {
+					const float k = want / l.physIn;
 					for ( int c = 0; c < 3; c++ )
 						l.color[c] *= k;
-					l.physG = g;
+					l.physIn = want;	// 0 (a G pinned to 0): the lamp stays off, as before
+					l.physG = on ? g : 0.0f;
 					n++;
 				}
+			}
 		return n;
 	};
 	int n = 0;
@@ -553,8 +559,11 @@ void WwCellLightsP::physTick( const void * nif )
 		s.version.insert( nif, s.nextVersion++ );
 		if ( s.nifxStamp.contains( nif ) )
 			s.nifxStamp.insert( nif, s.nextNifxStamp++ );
-		std::fprintf( stderr, "phys lamps: Game Light Brightness %.3f on %d placed lamps (live)%s\n", double( g ), n,
-			wwPhysGameLightsPinned() ? " PINNED WW_PHYSUNITS_LIGHTS" : "" );
+		if ( on )
+			std::fprintf( stderr, "phys lamps: Game Light Brightness %.3f on %d placed lamps (live)%s\n", double( g ), n,
+				wwPhysGameLightsPinned() ? " PINNED WW_PHYSUNITS_LIGHTS" : "" );
+		else
+			std::fprintf( stderr, "phys lamps: Physical Light Units off: %d placed lamps back on the record's colour x fade (x1, live)\n", n );
 	}
 	seen.insert( nif, qMakePair( s.version.value( nif, 0 ), g ) );
 }

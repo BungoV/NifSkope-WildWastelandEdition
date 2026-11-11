@@ -1471,12 +1471,14 @@ static void cellPublishLighting( const NifModel * nif, const EsmWorld & world, c
 			l.xemi = xl.exists ? 0x01000000U | ( quint32( xl.color[0] ) << 16 ) | ( quint32( xl.color[1] ) << 8 ) | quint32( xl.color[2] )
 				: xr && *xr == "REGN" ? wwCellXemiRegionCode( r.emittance ) : 0U;
 		}
+		l.physIn = 1.0f;	// MODULES1 R6-13: the record's colour x fade; celllamps.cpp physTick moves it when the master flips
 		if ( wwPhysOn() ) {	// lane PHYSUNITS1: lumens (637 per fade, the .nifx SPEC's law) x Game Light Brightness
 			const float g = wwPhysGameLights();
 			const float k = wwPhysLighK( l.radius ) * g;	// LATE ITEM 11-08: the radius law (red WW_PHYSUNITS_LAMP_RED=1)
 			for ( int c = 0; c < 3; c++ )
 				l.color[c] *= k;
 			l.physG = g;
+			l.physIn = k;
 		}
 		if ( startOff ) {   // recorded, lights nothing at the start
 			L.offLights.append( l );
@@ -1498,15 +1500,15 @@ static void cellPublishLighting( const NifModel * nif, const EsmWorld & world, c
 	 * red WW_CELL_LAMP_SCALE_RED=1 = the lamps as authored. Census `cell lamp scale:`. */
 	/* lane PHYSUNITS1: the lamps' census in lumens (the law 637 x fade x Y before Game Light Brightness: the anchors) and
 	 * an interior's ambient factor, the median lamp factor (the cell's ambient keeps its authored ratio to its lamps) */
-	if ( wwPhysOn() ) {
+	{	// MODULES1 R6-13: always (the master is live, the ambient factor must exist when it turns on later)
 		auto y709 = []( const float c[3] ) { return 0.2126f * c[0] + 0.7152f * c[1] + 0.0722f * c[2]; };
 		QVector<float> lm, ks, rs;
 		for ( const QVector<WwCellLight> * v : { &L.lights, &L.offLights } )
 			for ( const WwCellLight & l : *v ) {
-				if ( !( l.physG > 0.0f ) || !( l.radius > 0.0f ) )
+				if ( !( l.physIn > 0.0f ) || !( l.radius > 0.0f ) )
 					continue;
-				const float k = wwPhysLighK( l.radius );	// the drawn lumens: colour / (k G) x 637 / wwPhysLampK
-				lm.append( wwphys::kLumenPerFade * y709( l.color ) / ( k * l.physG * wwPhysLampK( l.radius ) ) );
+				const float k = wwPhysLighK( l.radius );	// the drawn lumens: colour / its factor x 637 / wwPhysLampK
+				lm.append( wwphys::kLumenPerFade * y709( l.color ) / ( l.physIn * wwPhysLampK( l.radius ) ) );
 				ks.append( k );
 				rs.append( l.radius );
 			}
@@ -1518,8 +1520,9 @@ static void cellPublishLighting( const NifModel * nif, const EsmWorld & world, c
 		};
 		if ( spec.interior )
 			L.physAmbK = ks.isEmpty() ? wwPhysLighK( 400.0f ) : ks.at( ks.size() / 2 );
-		std::fprintf( stderr, "phys lamps: %s%s %lld lamps lumens (law, before x%.3f) p10 %.0f median %.0f p90 %.0f max %.0f; "
+		std::fprintf( stderr, "phys lamps: %s%s%s %lld lamps lumens (law, before x%.3f) p10 %.0f median %.0f p90 %.0f max %.0f; "
 			"radius p10 %.0f median %.0f p90 %.0f; factor median %.4f%s\n",
+			wwPhysOn() ? "" : "Physical Light Units OFF, the lamps drawn as recorded (x1), the law's census only: ",
 			spec.interior ? qPrintable( world.interior().edid ) : "exterior", chunkOut ? " (chunk)" : "", qint64( lm.size() ),
 			double( wwPhysGameLights() ), q( lm, 0.1 ), q( lm, 0.5 ), q( lm, 0.9 ), q( lm, 1.0 ), q( rs, 0.1 ), q( rs, 0.5 ),
 			q( rs, 0.9 ), q( ks, 0.5 ),
@@ -1548,7 +1551,13 @@ static void cellPublishLighting( const NifModel * nif, const EsmWorld & world, c
 		const float pinned = pin.toFloat( &pinOk );
 		const bool red = wwEnv( "WW_CELL_LAMP_SCALE_RED" ).trimmed() == "1";
 		const bool sunlit = wwCellSunlit( &L ).on;
-		const float s = ( red || !sunlit ) ? 1.0f : ( pinOk && pinned >= 0.0f ) ? pinned : derived;
+		/* MODULES1 R6-13: Physical Light Units off = the game's lamps, as recorded: the derived scale is no longer the
+		 * off state's default (a pin still applies; red WW_PHYSUNITS_VANILLA_RED=lampscale: the derived scale) */
+		const bool musgi = wwPhysVanillaRed( "lampscale" );
+		const float s = ( red || !sunlit ) ? 1.0f : ( pinOk && pinned >= 0.0f ) ? pinned : musgi ? derived : 1.0f;
+		if ( sunlit && !red && !musgi && !( pinOk && pinned >= 0.0f ) )
+			std::fprintf( stderr, "cell lamp scale: %s Physical Light Units off: the lamps as recorded (the derived %.6f is not "
+				"applied; red WW_PHYSUNITS_VANILLA_RED=lampscale)\n", qPrintable( world.interior().edid ), double( derived ) );
 		int scaled = 0;
 		if ( s != 1.0f )
 			for ( QVector<WwCellLight> * v : { &L.lights, &L.offLights, &L.nifxOffPlaced } )

@@ -1,6 +1,8 @@
 // lane MODULES1 (exposure, from gl/celllights.cpp): the eye's adaptation limit, the exposure law the cell
 // uniforms and the imagespace echo read, and the tone curve's red switch
 #include "features/exposure/exposure.h"
+#include "features/exposure/physunits.h"	// MODULES1 R6-13: the master (off = the game's eye and curve)
+#include <cstdio>
 #include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 #include "gl/celllooks.h"	// lane GAPLOOK1: the Wide exposure range row
 #include "gl/celllights.h"
@@ -39,7 +41,9 @@ WwCellEye wwCellEye()
 	}() );
 	WW_SWITCH_STATIC( QByteArray, pin, wwEnvIsSet( "WW_CELL_EYE" ) ? wwEnv( "WW_CELL_EYE" ).trimmed() : QByteArray() );
 	WwCellEye e;
-	e.red = red;
+	// MODULES1 R6-13: with Physical Light Units off the eye is the game's (full adaptation between HNAM min and max),
+	// unless WW_CELL_EYE pins a law or WW_PHYSUNITS_VANILLA_RED=eye keeps the partial one
+	e.red = red || ( pin.isEmpty() && !wwPhysOn() && !wwPhysVanillaRed( "eye" ) );
 	const QList<QByteArray> p = pin.split( ',' );
 	bool ok = false;
 	if ( !pin.isEmpty() && p.size() >= 1 ) {
@@ -76,7 +80,7 @@ float wwCellExposure( const float * h, float adapted )
 		saidLaw = law;
 		saidE = e;
 		qInfo( "cell eye: exposure %.4f cap %.3f adapted %.5f law %s (a=%.2f L0=%.3f; full adaptation would give %.4f)", double( e ),
-			double( cap ), double( adapted ), law == 2 ? "full (the red WW_CELL_EYE_RED)" : law == 1 ? "partial" : "full (over L0)",
+			double( cap ), double( adapted ), law == 2 ? "full (the game's: Physical Light Units off, or the red WW_CELL_EYE_RED)" : law == 1 ? "partial" : "full (over L0)",
 			double( eye.a ), double( eye.l0 ), double( wwCellExposureFull( h, adapted ) ) );
 	}
 	return e;
@@ -86,7 +90,19 @@ float wwCellExposure( const float * h, float adapted )
  * WW_TONEMAP_RED=vanilla keeps the game's filmic curve. Read per draw (live), echoed once per change. */
 bool wwCellTonemapVanilla()
 {
-	WW_SWITCH_STATIC( bool, van, wwSwitchEcho( "tonemap red vanilla", wwEnv( "WW_TONEMAP_RED" ).trimmed() == "vanilla" ) );
+	WW_SWITCH_STATIC( int, pin, [] {
+		const QByteArray v = wwEnv( "WW_TONEMAP_RED" ).trimmed().toLower();
+		return v == "vanilla" ? 1 : v == "physical" ? 2 : 0;
+	}() );
+	/* MODULES1 R6-13: with Physical Light Units off the curve is the game's filmic one (vanilla Fallout 4 lighting is the
+	 * default); WW_TONEMAP_RED=vanilla / physical pins either, WW_PHYSUNITS_VANILLA_RED=curve keeps Physical while off */
+	const bool van = pin == 1 || ( pin == 0 && !wwPhysOn() && !wwPhysVanillaRed( "curve" ) );
+	static int said = -1;
+	if ( said != ( van ? 1 : 0 ) + pin * 2 ) {
+		said = ( van ? 1 : 0 ) + pin * 2;
+		std::fprintf( stderr, "tonemap: curve=%s (%s)\n", van ? "vanilla, the game's filmic" : "physical",
+			pin ? "PINNED WW_TONEMAP_RED" : van ? "Physical Light Units off" : wwPhysOn() ? "Physical Light Units on" : "RED WW_PHYSUNITS_VANILLA_RED=curve" );
+	}
 	return van;
 }
 

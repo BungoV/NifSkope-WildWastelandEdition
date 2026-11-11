@@ -121,6 +121,15 @@ SceneWindow::SceneWindow( QWidget * mainWindow, std::function<void()> repaint, s
 	wwMakeScrubField( exposureBox );
 	row( tr( "Exposure" ), exposureBox, true );
 
+	// MODULES1 R6-13: the master of the real light units; Off = vanilla Fallout 4 lighting (ships), live
+	physUnitsBox = new QComboBox( tree );
+	physUnitsBox->setObjectName( QStringLiteral( "physicalLightUnits" ) );
+	physUnitsBox->addItems( { tr( "Off" ), tr( "On" ) } );
+	physUnitsBox->setCurrentIndex( std::clamp( wwPhysMaster(), 0, 1 ) );
+	physUnitsBox->setToolTip( tr( "Off is the game's own lighting. On lights the scene in real units: lamps, sun, sky, glowing surfaces and the camera's exposure." ) );
+	wwMatchFieldStyle( physUnitsBox );
+	row( tr( "Physical Light Units" ), physUnitsBox, true );
+
 	gameLightsBox = new QDoubleSpinBox( tree );	// lane PHYSUNITS1: one scale for the game's lamps and emissives
 	gameLightsBox->setObjectName( QStringLiteral( "gameLightBrightness" ) );
 	gameLightsBox->setRange( 0.25, 4.0 );
@@ -355,6 +364,13 @@ SceneWindow::SceneWindow( QWidget * mainWindow, std::function<void()> repaint, s
 		syncEnabled();
 		if ( i == 2 )
 			refreshLookdev();
+		if ( m_repaint )
+			m_repaint();
+	} );
+	connect( physUnitsBox, qOverload<int>( &QComboBox::currentIndexChanged ), this, [this, live]( int i ) {
+		if ( live )
+			wwPhysSetMaster( i );	// MODULES1 R6-13: live, the lamps and the frame follow on the next paint
+		syncEnabled();	// Game Light Brightness greys while off
 		if ( m_repaint )
 			m_repaint();
 	} );
@@ -606,6 +622,8 @@ void SceneWindow::syncEnabled()
 	const int m = modeBox ? modeBox->currentIndex() : 0;
 	exposureBox->setEnabled( m >= 1 );
 	gameLightsBox->setEnabled( wwPhysOn() && !wwPhysGameLightsPinned() );	// lane PHYSUNITS1: greyed on the red or a pin
+	if ( physUnitsBox )	// MODULES1 R6-13: greyed while WW_PHYSUNITS_RED pins it
+		physUnitsBox->setEnabled( !wwPhysMasterPinned() );
 	viewBox->setEnabled( m >= 1 );
 	const bool ld = m == 2;
 	for ( QWidget * w : { static_cast<QWidget *>( pluginBox ), static_cast<QWidget *>( weatherBox ),

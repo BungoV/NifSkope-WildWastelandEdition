@@ -26,8 +26,17 @@ constexpr float kDiscCap = 6.0e4f;			//!< the sun disc's cap in cd/m2: the RGBA1
 constexpr float kPi = 3.14159265f;
 }
 
-//! the physical scale (false under the red ^WW_PHYSUNITS_RED=1)
+/*! MODULES1 R6-13 (bungo 11-11: physical units are "part of vanilla Fallout 4 lighting, which is the default if
+ *  anything else is not toggled on"): the master, the Scene panel's Physical Light Units row. Off = vanilla Fallout 4
+ *  lighting (ships), On = real photometric units; live. Pin WW_PHYSUNITS_RED: set and not "0" = Off, "0" = On. */
 bool wwPhysOn();
+int wwPhysMaster();	//!< the row's value, 0 Off / 1 On (the pin's while pinned)
+void wwPhysSetMaster( int on );	//!< refused while WW_PHYSUNITS_RED pins it
+bool wwPhysMasterPinned();
+/*! R6-13: while the master is off each term is the game's own. WW_PHYSUNITS_VANILLA_RED=<list of curve, eye,
+ *  lampscale; or all> keeps a term as it was drawn before the master existed (the Physical tone curve, the partial
+ *  eye adaptation, the sunlit interior's lamp scale). Read per call. */
+bool wwPhysVanillaRed( const char * term );
 //! the cell view's HDR camera drew this frame (celllights.cpp); the sky and the key take real units only while it does
 void wwPhysNoteCellFrame();
 bool wwPhysSkyOn();

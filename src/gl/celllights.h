@@ -88,6 +88,7 @@ struct WwCellLight
 	float byteColor[3] = { 0, 0, 0 };   //!< lane LIGHTS3: DATA colour bytes / 255 (the lens flare's colour influence)
 	quint32 xemi = 0;                   //!< lane LIGHTS4: the placement's XEMI code (cellfxlit.h wwCellXemiCode), 0 none
 	float physG = 0.0f;                 //!< lane PHYSUNITS1: the Game Light Brightness in its colour (0: none, a .nifx light)
+	float physIn = 0.0f;                //!< MODULES1 R6-13: the unit factor in its colour (1 = the record's own; 0: not a placed LIGH)
 	//! lane LIGHTFLICKER1: 0 steady, 1 flicker (LIGH flag 0x8), 2 pulse (0x80 | 0x100), with DATA's Flicker Effect
 	int flicker = 0;
 	float flickerPeriod = 0.0f, flickerIntensity = 0.0f, flickerMovement = 0.0f;
