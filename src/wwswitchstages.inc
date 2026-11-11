@@ -1286,6 +1286,7 @@
 { "WW_SAMPOSE_TEST", 2, "src/nifskope_ui.cpp:4978 NifSkope::createWindow | createWindow: picks which harness the window runs" },
 { "WW_SAMPOSE_WEAPON", 2, "src/nifskope_ui.cpp:5366 NifSkope::createWindow | createWindow: picks which harness the window runs" },
 { "WW_SCENE_LAYOUT_RED", 2, "src/ui/scenewxrows.cpp wwSceneTidyRows | hand: read when the Scene window is built (MODULES1 11-09)" },
+{ "WW_SCENE_ROWS_PROBE", 3, "src/ui/scenewxrows.cpp wwSceneTidyRows | hand: the rows' geometry probe at three widths, read when the Scene window is first shown (R6-11)" },
 { "WW_SCENE_TEST", 3, "src/scenetest.cpp:931 wwSceneHarness | bake/CLI/test path" },
 { "WW_SCENE_TEST_CUBE", 3, "src/scenetest.cpp:250 cubeLeg | bake/CLI/test path" },
 { "WW_SCENE_TEST_EXPECT", 1, "- | name passed through a variable: conservative" },

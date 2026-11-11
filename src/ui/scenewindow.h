@@ -14,7 +14,7 @@ BSD License - see nifskope.h
  * window as parent), opened and closed from View > Scene and the viewport
  * toolbar's Scene button, remembering its size and position.
  *
- * A flat Name|Value tree in the skinVars palette, label + control only. The
+ * The panel standard (MODULES1 R6-11): a scroll area with one label | field grid under wwHeading groups. The
  * sections are Mode / Weather / Sky / Ground / Fog / Effects; R2a makes the Mode
  * rows real (Lighting, Exposure, View Transform, PBR Route View) and leaves the
  * others as disabled rows for the stages that fill them. Every enabled row
@@ -32,7 +32,7 @@ class QComboBox;
 class QDoubleSpinBox;
 class QLabel;
 class QTimer;
-class QTreeWidget;
+class QWidget;
 
 class SceneWindow final : public QWidget
 {
@@ -40,7 +40,7 @@ public:
 	//! repaint: redraw the viewport; visibility: the window was shown (true) or hidden
 	SceneWindow( QWidget * mainWindow, std::function<void()> repaint, std::function<void( bool )> visibility );
 
-	QTreeWidget * tree = nullptr;
+	QWidget * tree = nullptr;	// R6-11: the rows' body (ui/scenewxrows.h wwSceneRowsCreate), the parent of every field
 	QComboBox * modeBox = nullptr;
 	QDoubleSpinBox * exposureBox = nullptr;
 	QDoubleSpinBox * gameLightsBox = nullptr;	// lane PHYSUNITS1: Game Light Brightness (vanilla lamps + emissives)

@@ -38,12 +38,10 @@ BSD License - see nifskope.h
 #include <QFileInfo>
 #include <QHash>
 #include <QLabel>
-#include <QHeaderView>
 #include <QScreen>
 #include <QSettings>
 #include <QSignalBlocker>
 #include <QTimer>
-#include <QTreeWidget>
 #include <QVBoxLayout>
 
 #include <algorithm>
@@ -69,36 +67,15 @@ SceneWindow::SceneWindow( QWidget * mainWindow, std::function<void()> repaint, s
 	page->setContentsMargins( 6, 6, 6, 6 );
 	page->setSpacing( 4 );
 
-	tree = new QTreeWidget( this );
-	tree->setObjectName( QStringLiteral( "SceneRows" ) );
-	tree->setColumnCount( 2 );
-	tree->setHeaderLabels( { tr( "Name" ), tr( "Value" ) } );
-	tree->setRootIsDecorated( false );
-	tree->setUniformRowHeights( true );
-	tree->setAlternatingRowColors( false );
-	tree->setSelectionMode( QAbstractItemView::NoSelection );
-	tree->setEditTriggers( QAbstractItemView::NoEditTriggers );
-	tree->setFocusPolicy( Qt::NoFocus );
-	tree->header()->setSectionResizeMode( 0, QHeaderView::ResizeToContents );
-	tree->header()->setSectionResizeMode( 1, QHeaderView::Stretch );
-	tree->setStyleSheet( wwSelectionTreeQss() );
-	page->addWidget( tree, 1 );
+	// MODULES1 R6-11: the panel standard's rows (a scroll area, one label | field grid, wwHeading groups)
+	tree = wwSceneRowsCreate( this );
+	page->addWidget( wwSceneRowsArea( tree ), 1 );
 
 	auto heading = [this]( const QString & text ) {
-		auto * it = new QTreeWidgetItem( tree );
-		it->setText( 0, text );
-		it->setFirstColumnSpanned( true );
-		QFont f = it->font( 0 );
-		f.setWeight( QFont::DemiBold );
-		it->setFont( 0, f );
-		it->setFlags( Qt::ItemIsEnabled );
+		wwSceneRowsHeading( tree, text );
 	};
 	auto row = [this]( const QString & name, QWidget * w, bool enabled ) {
-		auto * it = new QTreeWidgetItem( tree );
-		it->setText( 0, name );
-		it->setFlags( enabled ? Qt::ItemIsEnabled : Qt::NoItemFlags );
-		w->setEnabled( enabled );
-		tree->setItemWidget( it, 1, w );
+		wwSceneRowsAdd( tree, name, w, enabled );
 	};
 
 	/* ---- Mode (R2a: real) ---- */
@@ -170,10 +147,8 @@ SceneWindow::SceneWindow( QWidget * mainWindow, std::function<void()> repaint, s
 	hourBox->setValue( wwLookdevHour() );
 	wwMakeScrubField( hourBox );
 	row( tr( "Hour" ), hourBox, true );
-	statusLabel = new QLabel( tree );
+	statusLabel = wwSceneElideLabel( tree );	// R6-11: one line, elided; the whole text is the tooltip
 	statusLabel->setObjectName( QStringLiteral( "lookdevStatus" ) );
-	statusLabel->setWordWrap( true );
-	statusLabel->setTextInteractionFlags( Qt::TextSelectableByMouse );
 	row( tr( "Status" ), statusLabel, true );
 
 	/* ---- the weather preview (lane PBRWX1): every part its own live row, all OFF as shipped ---- */
@@ -708,7 +683,7 @@ void SceneWindow::refreshStatus()
 {
 	if ( !statusLabel )
 		return;
-	statusLabel->setText( wwLookdevActive() ? wwLookdevSummary() : tr( "Lookdev off" ) );
+	wwSceneElideSet( statusLabel, wwLookdevActive() ? wwLookdevSummary() : tr( "Lookdev off" ) );
 }
 
 void SceneWindow::saveGeometryNow()
