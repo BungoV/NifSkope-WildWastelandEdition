@@ -16,6 +16,8 @@
 // multisampled target is timed, not compared); a pass line may end with `draw=<vertices>`, `blend=add|alpha` (GL's
 // ONE, ONE / SRC_ALPHA, ONE_MINUS_SRC_ALPHA with alpha ZERO, ONE) and `vs=<spv>` (a raster-only pass: its own vertex stage,
 // whose ps is <spv>_ps.spv as usual). Rule `ndc` (float images): every value within 2^-22 (the motion vectors).
+// Round 9: `blend=pre` (premultiplied over: ONE, ONE_MINUS_SRC_ALPHA); a pass whose spv is `blit`, `resolve` or `clear` is a
+// transfer command (t0 -> out0 nearest / the MS t0 resolved into out0 / out0 to 0; its pc is `-`), timed like a pass.
 #define VK_NO_PROTOTYPES
 #include <vulkan/vulkan.h>
 #include <windows.h>
@@ -43,7 +45,7 @@ VKF( vkCmdBindDescriptorSets ); VKF( vkCmdPushConstants ); VKF( vkCmdDispatch );
 VKF( vkCmdPipelineBarrier ); VKF( vkCmdCopyBufferToImage ); VKF( vkCmdCopyImageToBuffer ); VKF( vkCreateQueryPool );
 VKF( vkCmdResetQueryPool ); VKF( vkCmdWriteTimestamp ); VKF( vkGetQueryPoolResults );
 VKF( vkCreateGraphicsPipelines ); VKF( vkCreateRenderPass ); VKF( vkCreateFramebuffer ); VKF( vkCmdBeginRenderPass );
-VKF( vkCmdEndRenderPass ); VKF( vkCmdDraw );
+VKF( vkCmdEndRenderPass ); VKF( vkCmdDraw ); VKF( vkCmdBlitImage ); VKF( vkCmdResolveImage ); VKF( vkCmdClearColorImage );
 
 static VkDevice dev;
 static VkQueue queue;
@@ -103,6 +105,12 @@ static const Fmt kFmts[] = { { "rgba16f", VK_FORMAT_R16G16B16A16_SFLOAT, 8, true
 	{ "rgba8", VK_FORMAT_R8G8B8A8_UNORM, 4, false, 1 }, { "rgba32f", VK_FORMAT_R32G32B32A32_SFLOAT, 16, false, 4 } };
 static const Fmt kRgba8 = kFmts[5];
 static int rasterMode = 0;	// POSTFXMATCH_RASTER
+// round 9: a pass whose spv is `blit` (t0 -> out0, nearest), `resolve` (MS t0 -> out0) or `clear` (out0 to 0) is a transfer
+// command, no shader (the present blit and the overlay target's clear, timed beside the composite)
+static int transferKind( const std::string & s )
+{
+	return s == "blit" ? 1 : s == "resolve" ? 2 : s == "clear" ? 3 : 0;
+}
 
 static Img makeImg( int w, int h, const Fmt & fm, int samples = 1 )
 {
@@ -122,7 +130,8 @@ static Img makeImg( int w, int h, const Fmt & fm, int samples = 1 )
 	ci.arrayLayers = 1;
 	ci.samples = samples == 4 ? VK_SAMPLE_COUNT_4_BIT : VK_SAMPLE_COUNT_1_BIT;
 	ci.tiling = VK_IMAGE_TILING_OPTIMAL;
-	ci.usage = samples > 1 ? VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT
+	ci.usage = samples > 1 ? VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT
+		| VK_IMAGE_USAGE_TRANSFER_DST_BIT
 		: VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_STORAGE_BIT
 		| ( rasterMode ? VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT : 0 );
 	ci.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
@@ -283,10 +292,10 @@ static Raster makeRaster( const std::vector<const Img *> & outs, VkShaderModule 
 	for ( auto & a : cba ) {
 		a.colorWriteMask = 0xF;
 		a.blendEnable = blend ? VK_TRUE : VK_FALSE;
-		a.srcColorBlendFactor = blend == 1 ? VK_BLEND_FACTOR_ONE : VK_BLEND_FACTOR_SRC_ALPHA;
+		a.srcColorBlendFactor = blend == 1 || blend == 3 ? VK_BLEND_FACTOR_ONE : VK_BLEND_FACTOR_SRC_ALPHA;
 		a.dstColorBlendFactor = blend == 1 ? VK_BLEND_FACTOR_ONE : VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
-		a.srcAlphaBlendFactor = blend == 1 ? VK_BLEND_FACTOR_ONE : VK_BLEND_FACTOR_ZERO;
-		a.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+		a.srcAlphaBlendFactor = blend == 1 || blend == 3 ? VK_BLEND_FACTOR_ONE : VK_BLEND_FACTOR_ZERO;
+		a.dstAlphaBlendFactor = blend == 3 ? VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA : VK_BLEND_FACTOR_ONE;
 		a.colorBlendOp = a.alphaBlendOp = VK_BLEND_OP_ADD;
 	}
 	VkPipelineColorBlendStateCreateInfo cb { VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO };
@@ -421,6 +430,8 @@ int main( int argc, char ** argv )
 						p.blend = 1;
 					else if ( o == "blend=alpha" )
 						p.blend = 2;
+					else if ( o == "blend=pre" )	// premultiplied over: ONE, ONE_MINUS_SRC_ALPHA (the overlay target)
+						p.blend = 3;
 					else if ( o.rfind( "vs=", 0 ) == 0 )
 						p.vs = o.substr( 3 );
 					else
@@ -434,7 +445,7 @@ int main( int argc, char ** argv )
 			}
 		}
 	}
-	if ( passes.empty() || cmps.empty() )
+	if ( passes.empty() || ( cmps.empty() && !timeIt ) )	// a tm_* job is timed, never compared
 		return fail( "chain has no pass or no compare" );
 
 	HMODULE lib = LoadLibraryA( "vulkan-1.dll" );
@@ -511,7 +522,7 @@ int main( int argc, char ** argv )
 	LOADD( vkCmdCopyBufferToImage ); LOADD( vkCmdCopyImageToBuffer ); LOADD( vkCreateQueryPool ); LOADD( vkCmdResetQueryPool );
 	LOADD( vkCmdWriteTimestamp ); LOADD( vkGetQueryPoolResults );
 	LOADD( vkCreateGraphicsPipelines ); LOADD( vkCreateRenderPass ); LOADD( vkCreateFramebuffer ); LOADD( vkCmdBeginRenderPass );
-	LOADD( vkCmdEndRenderPass ); LOADD( vkCmdDraw );
+	LOADD( vkCmdEndRenderPass ); LOADD( vkCmdDraw ); LOADD( vkCmdBlitImage ); LOADD( vkCmdResolveImage ); LOADD( vkCmdClearColorImage );
 	vkGetDeviceQueue( dev, family, 0, &queue );
 	for ( const Pass & p : passes )
 		if ( !p.vs.empty() && !rasterMode )
@@ -636,6 +647,11 @@ int main( int argc, char ** argv )
 	std::vector<Raster> rasters( passes.size() );
 	for ( size_t k = 0; k < passes.size(); k++ ) {
 		const Pass & p = passes[k];
+		if ( transferKind( p.spv ) ) {
+			if ( !imgs.count( p.out[0] ) || ( p.spv != "clear" && !imgs.count( p.t[0] ) ) )
+				return fail( "transfer pass image" );
+			continue;
+		}
 		if ( rasterMode ) {
 			static const VkShaderModule pfxVs = loadModule( spvDir + "pfx_vs.spv" );
 			const VkShaderModule vs = p.vs.empty() ? pfxVs : loadModule( spvDir + p.vs );
@@ -702,7 +718,27 @@ int main( int argc, char ** argv )
 	for ( size_t k = 0; k < passes.size(); k++ ) {
 		const Img & o = imgs[passes[k].out[0]];
 		VkMemoryBarrier mb { VK_STRUCTURE_TYPE_MEMORY_BARRIER };
-		if ( rasterMode ) {
+		if ( const int tk = transferKind( passes[k].spv ) ) {
+			const VkImageSubresourceLayers sl { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
+			if ( tk == 3 ) {
+				const VkClearColorValue cc {};
+				const VkImageSubresourceRange sr { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
+				vkCmdClearColorImage( run, o.i, VK_IMAGE_LAYOUT_GENERAL, &cc, 1, &sr );
+			} else if ( tk == 2 ) {
+				const Img & s = imgs[passes[k].t[0]];
+				const VkImageResolve r { sl, {}, sl, {}, { uint32_t( o.w ), uint32_t( o.h ), 1 } };
+				vkCmdResolveImage( run, s.i, VK_IMAGE_LAYOUT_GENERAL, o.i, VK_IMAGE_LAYOUT_GENERAL, 1, &r );
+			} else {
+				const Img & s = imgs[passes[k].t[0]];
+				VkImageBlit b { sl, { {}, { s.w, s.h, 1 } }, sl, { {}, { o.w, o.h, 1 } } };
+				vkCmdBlitImage( run, s.i, VK_IMAGE_LAYOUT_GENERAL, o.i, VK_IMAGE_LAYOUT_GENERAL, 1, &b, VK_FILTER_NEAREST );
+			}
+			mb.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+			mb.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT
+				| VK_ACCESS_TRANSFER_READ_BIT | VK_ACCESS_TRANSFER_WRITE_BIT;
+			vkCmdPipelineBarrier( run, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT
+				| VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 1, &mb, 0, nullptr, 0, nullptr );
+		} else if ( rasterMode ) {
 			VkRenderPassBeginInfo rb { VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO };
 			rb.renderPass = rasters[k].rp;
 			rb.framebuffer = rasters[k].fb;
