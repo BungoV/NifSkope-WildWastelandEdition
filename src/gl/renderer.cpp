@@ -43,6 +43,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "gl/celluniform.h"	// lane CELLUNI1
 #include "gl/glasspanerules.h"	// lane GLASSPANE1: the effect shader's env mask channel
 #include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
+#include "gl/wwuploadcap.h"	// lane EMPTY240 R7-4: a band chunk's read that waits a paint
 
 #include "message.h"
 #include "nifskope.h"
@@ -528,7 +529,14 @@ static WwLandLodBits wwLandLodWindow( Scene * scene, const QString & ws, int fx,
 	using PfnStorage3D = void ( APIENTRY * )( GLenum, GLsizei, GLenum, GLsizei, GLsizei, GLsizei );
 	using PfnCopyImage = void ( APIENTRY * )( GLuint, GLenum, GLint, GLint, GLint, GLint, GLuint, GLenum, GLint, GLint,
 		GLint, GLint, GLsizei, GLsizei, GLsizei );
-	struct Win { GLuint tex = 0; QString key; WwLandLodBits bits; };
+	struct Win
+	{
+		GLuint tex = 0;
+		QString key;
+		WwLandLodBits bits;
+		WwLandLodBits pending;	// R7-4: chunks whose read waited a paint (the upload budget)
+		GLint w0 = 0, h0 = 0, f0 = 0, levels = 0;	// R7-4: the array's size, kept for a later paint's chunks
+	};
 	static QHash<const void *, Win> wins[2];	// per GL context; [1] the outer window
 	QOpenGLContext * q = QOpenGLContext::currentContext();
 	auto fn = scene->renderer->fn;
@@ -543,12 +551,25 @@ static WwLandLodBits wwLandLodWindow( Scene * scene, const QString & ws, int fx,
 		fn->glBindTexture( GL_TEXTURE_2D_ARRAY, 0 );
 		return WwLandLodBits();
 	}
-	if ( win.key != key ) {
-		win.key = key;
-		win.bits = WwLandLodBits();
-		if ( win.tex )
-			fn->glDeleteTextures( 1, &win.tex );
-		win.tex = 0;
+	/* lane EMPTY240 R7-4: build 80's frame 185 (a live set) spent 363.7 ms CPU in the obscurance pass's geometry; the
+	 * log's line before it: "landspec: band window rebuild took 340.9 ms on the main thread: 3 chunk files read now"
+	 * (3 of 25 chunks). The first ground draw of the paint (the obscurance pre-pass) rebuilds the band window. A chunk
+	 * whose read the upload budget sent to a later paint came back 0 and stayed out (its bit clear) until the window
+	 * moved. Such a chunk is now asked again on the next paint (only the chunks that waited), and the rebuild line
+	 * names its parts (reads, size asks, copies). Red WW_LANDSPECWAIT_RED=1: a chunk that waited stays out, build 80. */
+	static const bool waitRed = wwEnvInt( "WW_LANDSPECWAIT_RED" ) == 1;
+	const bool fresh = win.key != key;
+	if ( fresh || win.pending.any() ) {
+		const WwLandLodBits retry = win.pending;
+		win.pending = WwLandLodBits();
+		if ( fresh ) {
+			win.key = key;
+			win.bits = WwLandLodBits();
+			if ( win.tex )
+				fn->glDeleteTextures( 1, &win.tex );
+			win.tex = 0;
+			win.w0 = win.h0 = win.f0 = win.levels = 0;
+		}
 		/* lane PERFLOAD1 (P4, the drop at height): a rebuild asked the driver 13 questions a chunk
 		 * (glGetTexLevelParameteriv; each one waits for the driver's thread), 256 chunks at the highest point, on
 		 * every window move. A chunk's size is now asked once and remembered with its texture id. The rebuild
@@ -560,8 +581,15 @@ static WwLandLodBits wwLandLodWindow( Scene * scene, const QString & ws, int fx,
 		const auto t0 = std::chrono::steady_clock::now();
 		const auto storage = q ? reinterpret_cast<PfnStorage3D>( q->getProcAddress( "glTexStorage3D" ) ) : nullptr;
 		const auto copy = q ? reinterpret_cast<PfnCopyImage>( q->getProcAddress( "glCopyImageSubData" ) ) : nullptr;	// GL 4.3
-		GLint w0 = 0, h0 = 0, f0 = 0, levels = 0;
+		GLint w0 = win.w0, h0 = win.h0, f0 = win.f0, levels = win.levels;
+		double readMs = 0.0, askMs = 0.0, copyMs = 0.0;	// R7-4: the rebuild's parts
+		int waited = 0;
+		auto msAt = [t0]() { return std::chrono::duration<double, std::milli>( std::chrono::steady_clock::now() - t0 ).count(); };
 		for ( int k = 0; k < n * n && storage && copy; k++ ) {
+			if ( !fresh && !( ( retry.w[k >> 6] >> ( k & 63 ) ) & 1u ) )
+				continue;	// R7-4: a later paint asks only the chunks that waited
+			const quint64 deferred0 = WwUp::st().deferredAll;
+			const double readT0 = msAt();
 			const QString path = QStringLiteral( "textures\\terrain\\%1\\%1.4.%2.%3.dds" ).arg( w )
 				.arg( fx + LandLodSpec::kLodLevel * ( k % n ) )
 				.arg( fy + LandLodSpec::kLodLevel * ( k / n ) );
@@ -571,8 +599,15 @@ static WwLandLodBits wwLandLodWindow( Scene * scene, const QString & ws, int fx,
 				readNow += m > 0 && !id ? 1 : 0;	// lane PERFLOAD1: the bind that read the file
 				return m;
 			}, wwLandSpecRed() == "firstload" );
+			readMs += msAt() - readT0;
+			if ( !src && !waitRed && WwUp::st().deferredAll != deferred0 ) {	// R7-4: the read waits a paint
+				win.pending.w[k >> 6] |= quint64( 1 ) << ( k & 63 );
+				waited++;
+				continue;
+			}
 			if ( !src )
 				continue;
+			const double askT0 = msAt();
 			GLint cw = 0, ch = 0, cf = 0, cl = 0;
 			ChunkDim & dim = dimMemo[path];
 			if ( dim.id == src && !askDims ) {	// lane PERFLOAD1: known from an earlier window
@@ -589,6 +624,7 @@ static WwLandLodBits wwLandLodWindow( Scene * scene, const QString & ws, int fx,
 				dim.id = src, dim.w = cw, dim.h = ch, dim.f = cf, dim.l = cl;
 				asked++;
 			}
+			askMs += msAt() - askT0;
 			if ( cw <= 0 || ch <= 0 || cl <= mip )
 				continue;
 			cw = std::max( cw >> mip, 1 ), ch = std::max( ch >> mip, 1 ), cl -= mip;	// LANDSPEC6: the outer's mip 1 up
@@ -612,22 +648,27 @@ static WwLandLodBits wwLandLodWindow( Scene * scene, const QString & ws, int fx,
 				continue;	// a chunk unlike the first stays out (its bit clear)
 			int ox = 0, oy = 0;
 			const int layer = packed ? LandLodSpec::packLayer( k % n, k / n, n, ox, oy ) : k;
+			const double copyT0 = msAt();
 			for ( GLint l = 0; l < levels; l++ ) {
 				const int lw = std::max( w0 >> l, 1 ), lh = std::max( h0 >> l, 1 );
 				copy( src, GL_TEXTURE_2D, l + mip, 0, 0, 0, win.tex, GL_TEXTURE_2D_ARRAY, l, ox * lw, oy * lh, layer, lw, lh, 1 );
 			}
+			copyMs += msAt() - copyT0;
 			win.bits.w[k >> 6] |= quint64( 1 ) << ( k & 63 );
 		}
 		fn->glBindTexture( GL_TEXTURE_2D, 0 );
+		win.w0 = w0, win.h0 = h0, win.f0 = f0, win.levels = levels;
 		const int pk = packed ? 2 : 1, side = packed ? LandLodSpec::packSide( n ) : n;
 		std::fprintf( stderr, "landspec: band %s %s %d,%d: %d of %d chunks, %dx%d, %d levels, mip %d, %s%d layers, %.1f MiB\n",
 			outer ? "outer window" : "window", qPrintable( w ), fx, fy, win.bits.count(), n * n, w0, h0, levels, mip,
 			packed ? "packed 2x2, " : "", side * side,
 			double( LandLodSpec::arrayBytes( w0 * pk, h0 * pk, levels, side * side ) ) / 1048576.0 );
 		std::fprintf( stderr, "landspec: band %s rebuild took %.1f ms on the main thread: %d chunk files read now, "
-			"%d chunk sizes asked from the driver, %d known%s\n", outer ? "outer window" : "window",
-			std::chrono::duration<double, std::milli>( std::chrono::steady_clock::now() - t0 ).count(), readNow, asked,
-			known, askDims ? " (WW_LANDSPEC_RED=askdims: every size asked again)" : "" );
+			"%d chunk sizes asked from the driver, %d known%s; %s, parts: reads %.1f + size asks %.1f + copies %.1f ms; %d chunks "
+			"wait a paint for the upload budget (R7-4; red WW_LANDSPECWAIT_RED=1: they stay out, build 80)\n",
+			outer ? "outer window" : "window", msAt(), readNow, asked, known,
+			askDims ? " (WW_LANDSPEC_RED=askdims: every size asked again)" : "", fresh ? "a new window" : "the chunks that waited",
+			readMs, askMs, copyMs, waited );
 	}
 	fn->glBindTexture( GL_TEXTURE_2D_ARRAY, win.bits.any() ? win.tex : 0 );
 	return win.bits;
