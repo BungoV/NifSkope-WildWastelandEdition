@@ -127,8 +127,15 @@ struct ToneStat
 	std::string glWhy, failWhy;        //!< the last reasons
 	int pipelines = 0;                 //!< built for the frame's samples
 	double buildMs = 0.0;
+	int deferred = 0, flushed = 0;     //!< lane VKPOST2: runs left for the TAA's crossing; of those, crossed alone (toneFlush)
 };
 ToneStat takeToneStat();
+/* Lane VKPOST2: the merged crossing. toneRun may DEFER its crossing (state recorded, no GL signal) when the last TAA ran
+ * on Vulkan right after it: the TAA's crossing then carries the tone pass too (TaaRun::colorFromView). Any GL pass that
+ * reads or draws the view between the two calls toneFlush() first (GL current): the deferred pass crosses alone.
+ * tonePending: a deferred pass waits. Red WW_VKVIEW_MERGE_RED=1: never deferred (two crossings). */
+bool tonePending();
+bool toneFlush( std::string * why = nullptr );
 //! the pipeline cache file (empty: none); the Qt part sets it before the first toneFrame
 void toneCachePath( const std::string & path );
 
@@ -177,6 +184,8 @@ struct TaaRun
 	std::uintptr_t cur = 0, depth = 0, mv = 0, pic = 0, hist[2] = {}, lock[2] = {};  //!< sharedTarget keys
 	unsigned vel = 0, mask = 0;     //!< TAAINPUTS1's GL textures (RG16F / RGBA8; 0: none), copied into shared twins
 	std::uintptr_t velKey = 0, maskKey = 0;
+	bool colorFromView = false;     //!< lane VKPOST2: GL skipped its colour blit; Vulkan resolves the view into cur behind
+	                                //!< the deferred tone pass (one crossing for both). Refused without a deferred pass.
 };
 /* GL current, the view bound, the frame's colour and depth already blitted into the shared cur / depth: the vectors,
  * resolve and copy-back run on Vulkan. false: why; nothing drawn (GL runs its passes). */
@@ -190,6 +199,7 @@ struct TaaStat
 	std::string glWhy, failWhy;
 	int pipelines = 0;
 	double buildMs = 0.0;
+	int merged = 0;                    //!< lane VKPOST2: runs that carried the deferred tone pass (one crossing)
 };
 TaaStat takeTaaStat();
 

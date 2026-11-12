@@ -527,11 +527,13 @@ struct Work
 	HGLRC ctx = nullptr;
 	bool tone = false;  // round 11 (k = -1): record and submit the tone pass on the view (toneWork)
 	bool taa = false;   // lane VKSHARE1 (k = -1): the temporal AA's passes on the view (taaWork); shares tone's counters
+	bool merge = false; // lane VKPOST2 (k = -1): the deferred tone pass, then the TAA, one crossing (mergeWork)
 };
 
 // round 11: the tone pass's record + submit, on the worker (the queue is the worker's)
 bool toneWork( std::string & why );
 bool taaWork( std::string & why );
+bool mergeWork( std::string & why );
 
 struct Worker
 {
@@ -597,9 +599,9 @@ void workerLoop()
 			W.q.pop_front();
 			W.busy = true;
 		}
-		if ( j.tone || j.taa ) {
+		if ( j.tone || j.taa || j.merge ) {
 			std::string why;
-			const bool ok = j.taa ? taaWork( why ) : toneWork( why );
+			const bool ok = j.merge ? mergeWork( why ) : j.taa ? taaWork( why ) : toneWork( why );
 			{
 				std::lock_guard<std::mutex> lk( W.m );
 				W.toneDone++;
@@ -1400,6 +1402,13 @@ struct Tone
 	bool splitSky = false, sorted = true;
 	WwVkPresent::ToneJob job;
 	WwVkPresent::ToneStat st;  // since the last take
+	/* lane VKPOST2: the merged crossing. A deferred pass is recorded state only: GL's signal goes with the TAA's (one
+	 * crossing), or toneFlush sends it alone when a GL pass needs the view first. mergeHint: the last TAA ran on Vulkan
+	 * right after a tone pass; backoff: frames without deferring after a flush; red WW_VKVIEW_MERGE_RED=1 never defers */
+	bool deferred = false, ranSinceTaa = false, mergeHint = false, mergeRed = false, subOk = false;
+	int backoff = 0;
+	GLuint defTex[5] = {};
+	GLuint defN = 0;
 };
 
 Tone & tone()
@@ -1893,8 +1902,8 @@ bool toneFbs( std::string & why )
 	return true;
 }
 
-// the worker: record the LUT's copy (when new) and the pass into this frame's view slot, submit between A and B
-bool toneWork( std::string & why )
+// the worker: record the LUT's copy (when new) and the pass into this frame's view slot (toneWork submits it)
+bool toneRecord( std::string & why )
 {
 	Vk & v = vk();
 	Tone & T = tone();
@@ -1958,6 +1967,16 @@ bool toneWork( std::string & why )
 		why = "vkEndCommandBuffer (the tone pass) failed";
 		return false;
 	}
+	return true;
+}
+
+// the tone pass alone between A and B
+bool toneWork( std::string & why )
+{
+	Vk & v = vk();
+	Tone & T = tone();
+	if ( !toneRecord( why ) )
+		return false;
 	const VkPipelineStageFlags waitAt = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
 	VkSubmitInfo si { VK_STRUCTURE_TYPE_SUBMIT_INFO };
 	si.waitSemaphoreCount = 1;
@@ -2014,6 +2033,9 @@ struct Taa
 	WwVkPresent::TaaJob job;
 	WwVkPresent::PfxJob mvJob, rcasJob;
 	WwVkPresent::TaaStat st;  // since the last take
+	// lane VKPOST2: the colour from the view slot on Vulkan (merged crossing: GL skipped its colour blit), into cur
+	bool fromView = false;
+	VkImage curImg = VK_NULL_HANDLE;
 };
 
 Taa & taa()
@@ -2321,8 +2343,11 @@ bool taaFbs( std::string & why )
 	return true;
 }
 
-// the worker: the vectors, the resolve and the copy-back into this frame's view slot, one submit between A and B
-bool taaWork( std::string & why )
+// lane VKPOST2: harness only; 1 = the merged crossing skips the view's colour into cur (the gate's red, must FAIL)
+int mergeRedTest = 0;
+
+// the worker: the vectors, the resolve and the copy-back into this frame's view slot (taaWork / mergeWork submit it)
+bool taaRecord( std::string & why )
 {
 	Vk & v = vk();
 	Taa & A = taa();
@@ -2335,6 +2360,30 @@ bool taaWork( std::string & why )
 	VkCommandBufferBeginInfo bi { VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
 	bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
 	v.vkBeginCommandBuffer( A.cmd, &bi );
+	if ( A.fromView && mergeRedTest != 1 ) {
+		/* 1. the frame's colour: the view slot (the tone pass just drew it, earlier in submission order) resolved into cur,
+		 * what GL's colour blit did (glBlitFramebuffer MS -> 1 sample, NEAREST, the whole view) */
+		const ViewSlot & vsl = view().slot[A.slot];
+		VkMemoryBarrier in { VK_STRUCTURE_TYPE_MEMORY_BARRIER };
+		in.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_MEMORY_WRITE_BIT;
+		in.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT | VK_ACCESS_TRANSFER_WRITE_BIT;
+		v.vkCmdPipelineBarrier( A.cmd, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 1, &in, 0, nullptr, 0, nullptr );
+		if ( view().samples > 1 ) {
+			VkImageResolve r {};
+			r.srcSubresource = r.dstSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
+			r.extent = { std::uint32_t( A.w ), std::uint32_t( A.h ), 1 };
+			v.vkCmdResolveImage( A.cmd, vsl.color, VK_IMAGE_LAYOUT_GENERAL, A.curImg, VK_IMAGE_LAYOUT_GENERAL, 1, &r );
+		} else {
+			VkImageBlit b {};
+			b.srcSubresource = b.dstSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
+			b.srcOffsets[1] = b.dstOffsets[1] = { A.w, A.h, 1 };
+			v.vkCmdBlitImage( A.cmd, vsl.color, VK_IMAGE_LAYOUT_GENERAL, A.curImg, VK_IMAGE_LAYOUT_GENERAL, 1, &b, VK_FILTER_NEAREST );
+		}
+		VkMemoryBarrier out { VK_STRUCTURE_TYPE_MEMORY_BARRIER };
+		out.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+		out.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+		v.vkCmdPipelineBarrier( A.cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 1, &out, 0, nullptr, 0, nullptr );
+	}
 	const std::uint32_t gx = std::uint32_t( ( A.w + 7 ) / 8 ), gy = std::uint32_t( ( A.h + 7 ) / 8 );
 	VkMemoryBarrier mb { VK_STRUCTURE_TYPE_MEMORY_BARRIER };
 	mb.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
@@ -2373,6 +2422,16 @@ bool taaWork( std::string & why )
 		why = "vkEndCommandBuffer (the temporal AA) failed";
 		return false;
 	}
+	return true;
+}
+
+// the TAA alone between A and B
+bool taaWork( std::string & why )
+{
+	Vk & v = vk();
+	Taa & A = taa();
+	if ( !taaRecord( why ) )
+		return false;
 	const VkPipelineStageFlags waitAt = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
 	VkSubmitInfo si { VK_STRUCTURE_TYPE_SUBMIT_INFO };
 	si.waitSemaphoreCount = 1;
@@ -2385,6 +2444,43 @@ bool taaWork( std::string & why )
 	const VkResult r = v.vkQueueSubmit( v.queue, 1, &si, A.fence );
 	if ( r != VK_SUCCESS ) {
 		why = "vkQueueSubmit (the temporal AA) returned " + std::to_string( int( r ) );
+		return false;
+	}
+	return true;
+}
+
+/* lane VKPOST2: the deferred tone pass and the TAA in ONE crossing. Submit 1 waits the TAA's GL signal (it covers the
+ * tone frame's names too) and runs the tone pass (its own fence); submit 2 resolves the view into cur behind a full
+ * barrier (taaRecord, fromView), runs the TAA and signals B. subOk tells the drawing thread the tone fence is armed. */
+bool mergeWork( std::string & why )
+{
+	Vk & v = vk();
+	Tone & T = tone();
+	Taa & A = taa();
+	T.subOk = false;
+	if ( !toneRecord( why ) || !taaRecord( why ) )
+		return false;
+	const VkPipelineStageFlags waitAt = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
+	VkSubmitInfo si { VK_STRUCTURE_TYPE_SUBMIT_INFO };
+	si.waitSemaphoreCount = 1;
+	si.pWaitSemaphores = &A.glDone;
+	si.pWaitDstStageMask = &waitAt;
+	si.commandBufferCount = 1;
+	si.pCommandBuffers = &T.cmd;
+	VkResult r = v.vkQueueSubmit( v.queue, 1, &si, T.fence );
+	if ( r != VK_SUCCESS ) {
+		why = "vkQueueSubmit (the merged crossing's tone pass) returned " + std::to_string( int( r ) );
+		return false;
+	}
+	T.subOk = true;
+	VkSubmitInfo sa { VK_STRUCTURE_TYPE_SUBMIT_INFO };
+	sa.commandBufferCount = 1;
+	sa.pCommandBuffers = &A.cmd;
+	sa.signalSemaphoreCount = 1;
+	sa.pSignalSemaphores = &A.vkDone;
+	r = v.vkQueueSubmit( v.queue, 1, &sa, A.fence );
+	if ( r != VK_SUCCESS ) {
+		why = "vkQueueSubmit (the merged crossing's TAA) returned " + std::to_string( int( r ) );
 		return false;
 	}
 	return true;
@@ -2577,6 +2673,7 @@ void captureNext( std::vector<std::uint8_t> * out )
 
 void shutdown()
 {
+	tone().deferred = false;  // lane VKPOST2: a deferred pass is dropped with its frame
 	if ( ch().parent || ch().child )
 		dropAll( gl().ok );
 	if ( view().glCtx ) {
@@ -2669,6 +2766,7 @@ unsigned viewFbo()
 
 bool viewRescue()
 {
+	toneFlush( nullptr );  // lane VKPOST2: a deferred tone pass goes before the view is read
 	View & V = view();
 	Gl & g = gl();
 	if ( V.cur < 0 || !V.fbo || !g.ok )
@@ -2777,6 +2875,7 @@ bool toneFrameIs( unsigned color )
 void toneFrameDrop()
 {
 	Tone & T = tone();
+	T.deferred = false;  // lane VKPOST2: the frame it would draw from goes
 	if ( !T.color && !T.colorTex )
 		return;
 	drain();
@@ -2877,6 +2976,67 @@ SharedStat takeSharedStat()
 	return s;
 }
 
+/* the tone pass's crossing alone (GL current): GL signals A with the deferred names, the worker submits, GL waits B.
+ * false: why (nothing signals B: GL does not wait it) */
+static bool toneCross( std::string & w )
+{
+	Tone & T = tone();
+	Gl & g = gl();
+	const GLenum lay[5] = { kLayoutGeneral, kLayoutGeneral, kLayoutGeneral, kLayoutGeneral, kLayoutGeneral };
+	g.signalSemaphore( T.glDoneGl, 0, nullptr, T.defN, T.defTex, lay );
+	g.flush();  // Vulkan's wait sees GL's signal only once it is flushed
+	Worker & W = wk();
+	std::uint64_t want = 0;
+	{
+		std::lock_guard<std::mutex> lk( W.m );
+		want = W.toneDone + 1;
+	}
+	Work j;
+	j.k = -1;
+	j.tone = true;
+	hand( j );
+	bool ok = false;
+	{
+		// GL may wait Vulkan's signal only once its submit is in the queue
+		std::unique_lock<std::mutex> lk( W.m );
+		W.idle.wait( lk, [&W, want]() { return W.toneDone >= want; } );
+		ok = W.toneOk;
+		w = W.toneWhy;
+	}
+	if ( !ok )
+		return false;
+	g.waitSemaphore( T.vkDoneGl, 0, nullptr, T.defN, T.defTex, lay );
+	T.pending = true;
+	return true;
+}
+
+bool tonePending()
+{
+	return tone().deferred;
+}
+
+bool toneFlush( std::string * why )
+{
+	Tone & T = tone();
+	if ( !T.deferred )
+		return true;
+	// a GL pass needs the view before the TAA's crossing: this one crosses alone, the next frames do not defer
+	T.deferred = false;
+	T.mergeHint = false;
+	T.backoff = 120;
+	T.st.flushed++;
+	std::string w = "the GL context changed under a deferred pass (dropped)";
+	if ( T.semCtx == gl().ctx && toneCross( w ) )
+		return true;
+	T.broken = true;
+	T.brokenWhy = "the tone pass broke (deferred, crossing alone): " + w;
+	T.st.fails++;
+	T.st.failWhy = T.brokenWhy;
+	if ( why )
+		*why = T.brokenWhy;
+	return false;
+}
+
 bool toneRun( const ToneRun & t, std::string & why )
 {
 	Tone & T = tone();
@@ -2884,6 +3044,7 @@ bool toneRun( const ToneRun & t, std::string & why )
 	Gl & g = gl();
 	Vk & v = vk();
 	const double t0 = nowMs();
+	toneFlush( nullptr );  // never two deferred passes
 	auto refuse = [&]( const std::string & w ) {
 		why = w;
 		T.st.fails++;
@@ -3011,33 +3172,22 @@ bool toneRun( const ToneRun & t, std::string & why )
 	T.sorted = t.sorted;
 	T.job = t.job;
 	// GL's frame (and the view's depth GL blitted) done -> the worker's pass -> GL's later passes on the view
-	GLuint tex[5] = { T.colorTex, T.dsTex, V.slot[V.cur].colorTex, V.slot[V.cur].dsTex, T.measureTex };
-	const GLenum lay[5] = { kLayoutGeneral, kLayoutGeneral, kLayoutGeneral, kLayoutGeneral, kLayoutGeneral };
-	const GLuint nTex = measureBound ? 5u : 4u;
-	g.signalSemaphore( T.glDoneGl, 0, nullptr, nTex, tex, lay );
-	g.flush();  // Vulkan's wait sees GL's signal only once it is flushed
-	Worker & W = wk();
-	std::uint64_t want = 0;
-	{
-		std::lock_guard<std::mutex> lk( W.m );
-		want = W.toneDone + 1;
-	}
-	Work j;
-	j.k = -1;
-	j.tone = true;
-	hand( j );
-	bool ok = false;
-	{
-		// GL may wait Vulkan's signal only once its submit is in the queue
-		std::unique_lock<std::mutex> lk( W.m );
-		W.idle.wait( lk, [&W, want]() { return W.toneDone >= want; } );
-		ok = W.toneOk;
-		w = W.toneWhy;
-	}
-	if ( !ok )
+	T.defTex[0] = T.colorTex;
+	T.defTex[1] = T.dsTex;
+	T.defTex[2] = V.slot[V.cur].colorTex;
+	T.defTex[3] = V.slot[V.cur].dsTex;
+	T.defTex[4] = T.measureTex;
+	T.defN = measureBound ? 5u : 4u;
+	if ( T.backoff > 0 )
+		T.backoff--;
+	if ( T.mergeHint && !T.mergeRed && T.backoff == 0 ) {
+		// lane VKPOST2: no crossing now; the TAA's carries this pass (or toneFlush, before a GL pass on the view)
+		T.deferred = true;
+		T.st.deferred++;
+	} else if ( !toneCross( w ) ) {
 		return breakOff( w );  // nothing signals vkDone: GL does not wait it; GL draws its quads this frame
-	g.waitSemaphore( T.vkDoneGl, 0, nullptr, nTex, tex, lay );
-	T.pending = true;
+	}
+	T.ranSinceTaa = true;
 	const double ms = nowMs() - t0;
 	T.st.runs++;
 	T.st.cpuMs += ms;
@@ -3100,6 +3250,13 @@ bool taaRun( const TaaRun & t, std::string & why )
 		return refuse( "the device lacks shaderStorageImageExtendedFormats (the vectors' RG32F store)" );
 	if ( t.wr < 0 || t.wr > 1 )
 		return refuse( "a history index out of 0..1" );
+	// lane VKPOST2: the merged crossing takes the colour from the view (GL skipped its blit) behind the deferred tone pass
+	Tone & T = tone();
+	const bool merge = t.colorFromView;
+	if ( merge && !T.deferred )
+		return refuse( "the colour from the view, but no deferred tone pass" );
+	if ( !merge )
+		toneFlush( nullptr );
 	auto storable = [&]( VkFormat f ) {
 		VkFormatProperties fp {};
 		v.vkGetPhysicalDeviceFormatProperties( v.phys, f, &fp );
@@ -3122,6 +3279,8 @@ bool taaRun( const TaaRun & t, std::string & why )
 	if ( sMv.fmt != VK_FORMAT_R32G32_SFLOAT || sPic.fmt != VK_FORMAT_R8G8B8A8_UNORM || sHist[0]->fmt != VK_FORMAT_R16G16B16A16_SFLOAT
 		|| sLock[0]->fmt != VK_FORMAT_R16G16B16A16_SFLOAT || sDepth.glFmt != kDepth24Stencil8 )
 		return refuse( "a TAA target's format is not the pass's" );
+	if ( merge && sCur.fmt != VK_FORMAT_R8G8B8A8_UNORM )
+		return refuse( "the colour target is not RGBA8 (the view's resolve needs the same format)" );
 	const int inputs = t.job.ints[3];
 	if ( ( inputs & 3 ) && !g.copyImageSubData )
 		return refuse( "TAAINPUTS1's velocity / mask are on but no glCopyImageSubData" );
@@ -3212,15 +3371,24 @@ bool taaRun( const TaaRun & t, std::string & why )
 	A.job = t.job;
 	A.mvJob = t.mvJob;
 	A.rcasJob = t.rcasJob;
+	A.fromView = merge;
+	A.curImg = sCur.img;
 	// GL's blits (colour, depth), the lock clears and the inputs' copies done -> the worker's passes -> GL's later passes
-	GLuint tex[13] = { sCur.tex, sDepth.tex, sMv.tex, sPic.tex, sHist[0]->tex, sHist[1]->tex, sLock[0]->tex, sLock[1]->tex,
-		V.slot[V.cur].colorTex, 0, 0, 0, 0 };
+	GLuint tex[18] = { sCur.tex, sDepth.tex, sMv.tex, sPic.tex, sHist[0]->tex, sHist[1]->tex, sLock[0]->tex, sLock[1]->tex,
+		V.slot[V.cur].colorTex };
 	GLuint nTex = 9;
 	if ( velTex )
 		tex[nTex++] = velTex;
 	if ( maskTex )
 		tex[nTex++] = maskTex;
-	GLenum lay[13];
+	if ( merge ) {
+		// the tone pass's names too (the view slot's colour is in both lists once)
+		for ( GLuint k = 0; k < T.defN; k++ ) {
+			if ( std::find( tex, tex + nTex, T.defTex[k] ) == tex + nTex )
+				tex[nTex++] = T.defTex[k];
+		}
+	}
+	GLenum lay[18];
 	for ( GLenum & l : lay )
 		l = kLayoutGeneral;
 	g.signalSemaphore( A.glDoneGl, 0, nullptr, nTex, tex, lay );
@@ -3233,7 +3401,8 @@ bool taaRun( const TaaRun & t, std::string & why )
 	}
 	Work j;
 	j.k = -1;
-	j.taa = true;
+	j.taa = !merge;
+	j.merge = merge;
 	hand( j );
 	bool ok = false;
 	{
@@ -3242,10 +3411,24 @@ bool taaRun( const TaaRun & t, std::string & why )
 		ok = W.toneOk;
 		w = W.toneWhy;
 	}
-	if ( !ok )
+	if ( merge ) {
+		T.deferred = false;
+		T.pending = T.subOk;  // the tone fence is armed once its submit went in
+	}
+	if ( !ok ) {
+		if ( merge ) {
+			// the tone map of this frame is lost too: both stages off for good, GL's own from the next frame
+			T.broken = true;
+			T.brokenWhy = "the tone pass broke (merged crossing): " + w;
+		}
 		return breakOff( w );  // nothing signals vkDone: GL does not wait it; GL runs its passes this frame
+	}
 	g.waitSemaphore( A.vkDoneGl, 0, nullptr, nTex, tex, lay );
 	A.pending = true;
+	if ( merge )
+		A.st.merged++;
+	T.mergeHint = merge || T.ranSinceTaa;
+	T.ranSinceTaa = false;
 	const double ms = nowMs() - t0;
 	A.st.runs++;
 	A.st.cpuMs += ms;
@@ -3288,6 +3471,7 @@ bool present( void * hwnd, int w, int h, bool vsync, GlProc gp, std::string & wh
 		fresh.ctx = ctx;
 		g = fresh;
 	}
+	toneFlush( nullptr );  // lane VKPOST2: a deferred tone pass no TAA took crosses before the present reads the view
 	if ( w < 1 || h < 1 ) {
 		why = "the window has no area";
 		return false;
@@ -3735,6 +3919,7 @@ bool toneWanted()
 	}
 	if ( wwEnvInt( "WW_VKVIEW_TONE_RED" ) == 1 )
 		return false;
+	tone().mergeRed = wwEnvInt( "WW_VKVIEW_MERGE_RED" ) == 1;  // lane VKPOST2: two crossings again (tone, then TAA)
 	QString off;
 	return viewWanted( off ) && viewFbo() != 0;
 }
@@ -3909,6 +4094,10 @@ bool frame( QOpenGLWindow * w, const std::function<void()> & paint )
 					"%3 ms, drawing thread %4 ms, max %5; GL keeps the colour / depth blits and the lock clears)" )
 					.arg( as.runs ).arg( as.pipelines ).arg( as.buildMs, 0, 'f', 1 ).arg( as.cpuMs / as.runs, 0, 'f', 3 )
 					.arg( as.maxMs, 0, 'f', 3 );
+				// lane VKPOST2: frames whose TAA crossing also carried the tone pass (GL's colour blit skipped)
+				taa += QStringLiteral( "; tone + TAA in one crossing %1 frames, tone deferred %2, of those crossed alone %3 (%4)" )
+					.arg( as.merged ).arg( ts.deferred ).arg( ts.flushed )
+					.arg( ::tone().mergeRed ? QStringLiteral( "red WW_VKVIEW_MERGE_RED=1" ) : QStringLiteral( "merge on" ) );
 				if ( as.gl > 0 )
 					taa += QStringLiteral( ", on GL %1 frames (last: %2)" ).arg( as.gl ).arg( QString::fromStdString( as.glWhy ) );
 				if ( as.fails > 0 )

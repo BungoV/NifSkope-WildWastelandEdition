@@ -4816,6 +4816,8 @@ void GLView::paintGL()
 				wwTaaInputsView( scene );	// the inputs' debug view (WW_TAAINPUTS_VIEW)
 				wwCellGrassFrameEnd();	// the grass wind's clock steps once per frame
 			}
+			// lane VKPOST2: a tone pass no TAA crossing took lands before the workspaces, overlays and QPainter draw
+			WwVkPresent::toneFlush();
 			for ( Scene * ws : std::as_const( workspaceDrawScenes ) )
 				ws->draw();
 		}
