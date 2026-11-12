@@ -62,7 +62,8 @@ bool DDGI_Nearest( float3 o, float3 d, float tmax, out uint bestPr, out float be
 			}
 		}
 	}
-	if ( !hit || ( red & DDGI_RED_NOTIE ) != 0u )
+	bool wwh0 = ( red & DDGI_RED_NOTIE ) != 0u;
+	if (!hit || wwh0)
 		return hit;
 	// the tie pass: a short query over [t0 - w, t0 + w], nothing committed, every face in it seen
 	const float t0 = bestT;

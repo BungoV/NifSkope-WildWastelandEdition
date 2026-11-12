@@ -3,9 +3,9 @@ feature flag is on (glcontext.cpp Shader::load); the converted HLSL is flat, so 
 converted as its own file: res/shaders/hlsl/<module>/<stem>_<stage>__<A+B>.hlsl (names sorted), and
 res/shaders/hlsl/variants.txt lists one line per program variant: `<prog>\t<A+B union>\t<stem.ext>=<stage tag> ...`.
   python -I -X utf8 tests/hlsllive/variants.py <tree> [--dry] [--only substr]
-Flag sets met in a default run: WW_FRAME_UBO always (WW_FRAME_UBO_RED=1 is a red), WW_CELL_RTDDGI off/on, WW_CELL_RESTIR
-(only with RTDDGI), WW_CELL_AIRZONE, WW_CELL_AIR_SKYVIEW. Other defines (views, debug views, fog leak, air bounce, water
-probe, PRT, march, the RTDDGI cascades/one-read reds) are not built: the loader finds no key and falls back to GLSL.
+R7: the sets come from the app. fly94.log's 'hlsl fallback' keys all carry WW_CELL_FOGLEAK (on by default) and, with the Ray-traced
+GI row, WW_CELL_RTDDGI_CASCADES: ALWAYS / RT_STATES / FLAGS below list every combination of the shipped-on rows. Not built:
+probe/pass views, debug views, GI march, PRT, water info probe and the reds (FOGLEAK=0, cascades one, one-read): GLSL fallback.
 Uses notes/hlslbulk1/tools/convert.py (the GLSL -> HLSL converter) and its census.json: a generator, not part of the build."""
 import itertools
 import json
@@ -20,16 +20,20 @@ sys.path.insert(0, NOTES)
 import remap
 import convert
 
-FLAGS = ['WW_CELL_RTDDGI', 'WW_CELL_RESTIR', 'WW_CELL_AIRZONE', 'WW_CELL_AIR_SKYVIEW']
+ALWAYS = ['WW_FRAME_UBO', 'WW_CELL_FOGLEAK']   # on in a default run (FOGLEAK since FOGLEAK1; WW_CELL_FOGLEAK=0 is a red)
+# the Ray-traced GI row and the RT quality preset (rtddgicell.cpp): off, or on with the cascades (kPresetCascades 3/3/3/4, always
+# > 1 unless the red WW_CELL_RTDDGI_CASCADES_RED=one), and RESTIR from preset Medium up (it needs RTDDGI)
+RT_STATES = [[], ['WW_CELL_RTDDGI', 'WW_CELL_RTDDGI_CASCADES'], ['WW_CELL_RTDDGI', 'WW_CELL_RTDDGI_CASCADES', 'WW_CELL_RESTIR']]
+# rows that inject a define: Air zones row (AIRZONE), the air's sky visibility (AIR_SKYVIEW, on since DARKAIR2), the lamps' floor bounce
+# (AIR_BOUNCE). Not built: probe/pass views (VIEWS), debug views (DEBUG_VIEWS), GI march / PRT / water info probe (reds, harness).
+FLAGS = ['WW_CELL_AIRZONE', 'WW_CELL_AIR_SKYVIEW', 'WW_CELL_AIR_BOUNCE']
 
 
 def flag_sets():
     out = []
-    for bits in itertools.product([0, 1], repeat=len(FLAGS)):
-        s = {'WW_FRAME_UBO'} | {f for f, b in zip(FLAGS, bits) if b}
-        if 'WW_CELL_RESTIR' in s and 'WW_CELL_RTDDGI' not in s:
-            continue
-        out.append(sorted(s))
+    for rt in RT_STATES:
+        for bits in itertools.product([0, 1], repeat=len(FLAGS)):
+            out.append(sorted(set(ALWAYS) | set(rt) | {f for f, b in zip(FLAGS, bits) if b}))
     return out
 
 

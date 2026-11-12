@@ -155,7 +155,8 @@ uint wwWaterInfoWord(float2 worldXY)
 {
     float2 param = worldXY;
     uint w = wwWaterInfoRaw(param);
-    if ((waterSeam.x <= 0.0f) || (!waterInfoOn))
+    bool wwh0 = (waterSeam.x <= 0.0f);
+    if (wwh0 || (!waterInfoOn))
     {
         return w;
     }

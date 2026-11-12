@@ -796,7 +796,9 @@ void vpLight(float3 posView, float3 P, float3 dW, float z, inout float3 N, float
             int i = cellLightAt(param_18, param_19);
             float4 t0 = cellLights.Load(i * 8);
             float d = length(t0.xyz - P);
-            if ((d >= t0.w) || (d < 0.001000000047497451305389404296875f))
+            bool wwh0 = (d >= t0.w);
+            bool wwh1 = (d < 0.001000000047497451305389404296875f);
+            if (wwh0 || wwh1)
             {
                 continue;
             }

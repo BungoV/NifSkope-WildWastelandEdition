@@ -1982,7 +1982,8 @@ void frag_main()
     diffuse = diff.xxx;
     float3 soft = 0.0f.xxx;
     float wrap = NdotL;
-    if (hasSoftlight || (subsurfaceRolloff > 0.0f))
+    bool wwh0 = (subsurfaceRolloff > 0.0f);
+    if (hasSoftlight || wwh0)
     {
         wrap = (wrap + subsurfaceRolloff) / (1.0f + subsurfaceRolloff);
         soft = (albedo * max(0.0f, wrap)) * smoothstep(1.0f, 0.0f, sqrt(diff));

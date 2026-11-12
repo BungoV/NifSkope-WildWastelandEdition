@@ -364,7 +364,9 @@ float3 wwSkyBelowTap(int k)
     float q = 0.3535533845424652099609375f;
     float s6 = -0.866025388240814208984375f;
     float tmp3826;
-    if ((k == 5) || (k == 8))
+    bool wwh0 = (k == 5);
+    bool wwh1 = (k == 8);
+    if (wwh0 || wwh1)
     {
         tmp3826 = q;
     }

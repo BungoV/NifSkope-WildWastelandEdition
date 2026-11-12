@@ -24,7 +24,9 @@ float3 F4FX_SanitizeBloomSample( float3 color )
 	const uint3 bits = asuint( color );
 	const uint3 exponent = bits & 0x7F800000u;
 	const uint3 mantissa = bits & 0x007FFFFFu;
-	if ( ( exponent.x == 0x7F800000u && mantissa.x != 0u ) || ( exponent.y == 0x7F800000u && mantissa.y != 0u )
+	bool wwh0 = ( exponent.x == 0x7F800000u && mantissa.x != 0u );
+	bool wwh1 = ( exponent.y == 0x7F800000u && mantissa.y != 0u;
+	if (wwh0 || wwh1)
 		|| ( exponent.z == 0x7F800000u && mantissa.z != 0u ) )
 		return float3( 0.0, 0.0, 0.0 );
 	const float3 bounded = sign( color ) * min( abs( color ), F4FX_BLOOM_MAX_FINITE.xxx );

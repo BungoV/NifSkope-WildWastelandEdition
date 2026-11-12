@@ -201,7 +201,9 @@ void frag_main()
         {
             float base = cvBands.baseKm[b_1];
             float top = cvBands.topKm[b_1];
-            if ((cvBands.density[b_1] <= 0.0f) || (top <= base))
+            bool wwh0 = (cvBands.density[b_1] <= 0.0f);
+            bool wwh1 = (top <= base);
+            if (wwh0 || wwh1)
             {
                 continue;
             }
@@ -375,7 +377,9 @@ void frag_main()
                 {
                     float base_1 = cvBands.baseKm[b_2];
                     float top_1 = cvBands.topKm[b_2];
-                    if ((cvBands.density[b_2] <= 0.0f) || (top_1 <= base_1))
+                    bool wwh2 = (cvBands.density[b_2] <= 0.0f);
+                    bool wwh3 = (top_1 <= base_1);
+                    if (wwh2 || wwh3)
                     {
                         continue;
                     }
@@ -414,7 +418,9 @@ void frag_main()
                 {
                     float base_2 = cvBands.baseKm[b_3];
                     float top_2 = cvBands.topKm[b_3];
-                    if ((cvBands.density[b_3] <= 0.0f) || (top_2 <= base_2))
+                    bool wwh4 = (cvBands.density[b_3] <= 0.0f);
+                    bool wwh5 = (top_2 <= base_2);
+                    if (wwh4 || wwh5)
                     {
                         continue;
                     }
@@ -447,7 +453,9 @@ void frag_main()
             }
         }
     }
-    if ((zTop < 0.0f) || (od <= 0.0f))
+    bool wwh6 = (zTop < 0.0f);
+    bool wwh7 = (od <= 0.0f);
+    if (wwh6 || wwh7)
     {
         fragColor = float4((floorKm < 10000.0f) ? floorKm : 0.0f, 0.0f, 0.0f, 0.0f);
         return;

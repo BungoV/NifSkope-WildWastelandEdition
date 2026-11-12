@@ -1213,7 +1213,8 @@ void frag_main()
     float shoreColFoot = fwidth(min(vert, 4096.0f));
     float3 shoreFoamDbg = 0.0f.xxx;
     float tmp9841;
-    if (((waterShoreOn & 2) == 0) || under)
+    bool wwh0 = ((waterShoreOn & 2) == 0);
+    if (wwh0 || under)
     {
         tmp9841 = 0.0f;
     }

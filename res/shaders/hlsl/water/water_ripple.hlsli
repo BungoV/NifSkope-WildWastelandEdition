@@ -46,7 +46,9 @@ float wwContactDist(float vert, float3 P, float3 S, float3 eye, out float2 dir, 
     trust *= smoothstep(0.1500000059604644775390625f, 0.300000011920928955078125f, abs(dot(n, Vs)));
     dir = (n.xy * sign(e)) / max(h, 9.9999999747524270787835121154785e-07f).xx;
     float tmp1;
-    if (((vert > 100000000.0f) || (nl < 9.9999999600419720025001879548654e-13f)) || (h < 0.001000000047497451305389404296875f))
+    bool wwh0 = ((vert > 100000000.0f) || (nl < 9.9999999600419720025001879548654e-13f));
+    bool wwh1 = (h < 0.001000000047497451305389404296875f);
+    if (wwh0 || wwh1)
     {
         tmp1 = 1000000000.0f;
     }

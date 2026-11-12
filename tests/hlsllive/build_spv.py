@@ -34,18 +34,26 @@ def bool_names(src):
     return out
 
 
-def build(hlsl, out, defines=(), locs=None):
+def compile_raw(hlsl, raw, defines=()):
+    '''R7: the DXC step alone (thread safe: no shared state), so build_all can run many at once -> (ok, stderr tail)'''
     st = os.path.basename(hlsl).rsplit('.', 1)[0].rsplit('_', 1)[1]
-    raw = out + '.raw'
     src = open(hlsl, encoding='utf-8', errors='replace').read()
     pm = re.search(r'// profile: (\w+)', src)
     cmd = [DXC, '-spirv', '-fspv-target-env=vulkan1.0'] + shifts_of(hlsl, src) + [os.environ.get('DXC_OPT', '-O0'), '-T', pm.group(1) if pm else PROFILE[st],
            '-E', 'main', '-I', os.path.dirname(hlsl), '-Fo', raw, hlsl]
     for d in defines:
         cmd += ['-D', d]
-    r = subprocess.run(cmd, capture_output=True, text=True)
-    if r.returncode:
-        return None, r.stderr[-600:]
+    r = subprocess.run(cmd, capture_output=True, text=True, stdin=subprocess.DEVNULL)
+    return r.returncode == 0, r.stderr[-600:]
+
+
+def build(hlsl, out, defines=(), locs=None, precompiled=False):
+    raw = out + '.raw'
+    src = open(hlsl, encoding='utf-8', errors='replace').read()
+    if not precompiled:
+        ok, err = compile_raw(hlsl, raw, defines)
+        if not ok:
+            return None, err
     rep = {}
     data, rep = spvgl.patch(open(raw, 'rb').read(), BLOCKS, rep, locs, bool_names(src))
     os.remove(raw)

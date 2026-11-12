@@ -23,7 +23,9 @@ GLTYPE = {'vert': 0x8B31, 'frag': 0x8B30, 'geom': 0x8DD9, 'tesc': 0x8E88, 'tese'
 
 # R6: the loader's injected defines and the text that makes it inject each one (glcontext.cpp Shader::load; same table as variants.py)
 MARKERS = {'WW_FRAME_UBO': 'WW_FRAME_UBO', 'WW_CELL_RTDDGI': '_CELL_RTDDGI', 'WW_CELL_RESTIR': '_CELL_RESTIR',
-           'WW_CELL_AIRZONE': '_CELL_AIRZONE', 'WW_CELL_AIR_SKYVIEW': '_CELL_AIR_SKYVIEW'}
+           'WW_CELL_AIRZONE': '_CELL_AIRZONE', 'WW_CELL_AIR_SKYVIEW': '_CELL_AIR_SKYVIEW',
+           'WW_CELL_FOGLEAK': '_CELL_FOGLEAK', 'WW_CELL_AIR_BOUNCE': '_CELL_AIR_BOUNCE',
+           'WW_CELL_RTDDGI_CASCADES': '_CELL_RTDDGI'}
 
 
 def items(tree):

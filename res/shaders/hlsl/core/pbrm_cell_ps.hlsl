@@ -1738,7 +1738,8 @@ void frag_main()
                     cubeK = (((cube_1 * cube_1) * envReflection) * Espec) * s.ao;
                 }
             }
-            if (cellSsrOn || (cellProbe == 60))
+            bool wwh0 = (cellProbe == 60);
+            if (cellSsrOn || wwh0)
             {
                 float2 sg_1 = CellSpecMap.Sample(_CellSpecMap_sampler, offset).xy;
                 float3 param_111 = cubeK;

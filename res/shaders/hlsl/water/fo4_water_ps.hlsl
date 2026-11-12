@@ -1045,7 +1045,9 @@ void frag_main()
     if (waterProbe > 0)
     {
         float3 o = 0.0f.xxx;
-        if ((waterProbe == 1) || (waterProbe == 2))
+        bool wwh0 = (waterProbe == 1);
+        bool wwh1 = (waterProbe == 2);
+        if (wwh0 || wwh1)
         {
             float3 tmp5714;
             if (waterProbe == 1)
@@ -1062,7 +1064,9 @@ void frag_main()
         }
         else
         {
-            if ((waterProbe == 3) || (waterProbe == 4))
+            bool wwh2 = (waterProbe == 3);
+            bool wwh3 = (waterProbe == 4);
+            if (wwh2 || wwh3)
             {
                 float3 tmp5741;
                 if (waterProbe == 3)
@@ -1079,7 +1083,9 @@ void frag_main()
             }
             else
             {
-                if ((waterProbe == 5) || (waterProbe == 6))
+                bool wwh4 = (waterProbe == 5);
+                bool wwh5 = (waterProbe == 6);
+                if (wwh4 || wwh5)
                 {
                     float3 tmp5768;
                     if (waterProbe == 5)
@@ -1108,7 +1114,9 @@ void frag_main()
                         }
                         else
                         {
-                            if ((waterProbe == 9) || (waterProbe == 10))
+                            bool wwh6 = (waterProbe == 9);
+                            bool wwh7 = (waterProbe == 10);
+                            if (wwh6 || wwh7)
                             {
                                 int col = int(gl_FragCoord.x) % 4;
                                 float3 tmp5813;
@@ -1154,7 +1162,9 @@ void frag_main()
                             }
                             else
                             {
-                                if ((waterProbe == 11) || (waterProbe == 12))
+                                bool wwh8 = (waterProbe == 11);
+                                bool wwh9 = (waterProbe == 12);
+                                if (wwh8 || wwh9)
                                 {
                                     float3 tmp5881;
                                     if (waterProbe == 11)
@@ -1171,7 +1181,9 @@ void frag_main()
                                 }
                                 else
                                 {
-                                    if ((waterProbe == 13) || (waterProbe == 14))
+                                    bool wwh10 = (waterProbe == 13);
+                                    bool wwh11 = (waterProbe == 14);
+                                    if (wwh10 || wwh11)
                                     {
                                         float3 tmp5914;
                                         if (waterProbe == 13)
@@ -1188,7 +1200,9 @@ void frag_main()
                                     }
                                     else
                                     {
-                                        if ((waterProbe == 15) || (waterProbe == 16))
+                                        bool wwh12 = (waterProbe == 15);
+                                        bool wwh13 = (waterProbe == 16);
+                                        if (wwh12 || wwh13)
                                         {
                                             float3 tmp5945;
                                             if (waterProbe == 15)
@@ -1205,7 +1219,9 @@ void frag_main()
                                         }
                                         else
                                         {
-                                            if ((waterProbe == 17) || (waterProbe == 18))
+                                            bool wwh14 = (waterProbe == 17);
+                                            bool wwh15 = (waterProbe == 18);
+                                            if (wwh14 || wwh15)
                                             {
                                                 float3 tmp5970;
                                                 if (waterProbe == 17)
@@ -1238,7 +1254,9 @@ void frag_main()
                                                     }
                                                     else
                                                     {
-                                                        if ((waterProbe == 25) || (waterProbe == 26))
+                                                        bool wwh16 = (waterProbe == 25);
+                                                        bool wwh17 = (waterProbe == 26);
+                                                        if (wwh16 || wwh17)
                                                         {
                                                             float3 tmp6041;
                                                             if (waterProbe == 25)

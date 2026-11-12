@@ -233,7 +233,9 @@ float wwCauEnvelope(float d, float L)
 float3 wwWaterCaustic(float3 S, float d, float3 Ldir, float3 sun, float3 sky, float shadow, float fw, out float3 dbg)
 {
     dbg = float3(1.0f, 0.0f, 0.0f);
-    if ((Ldir.z <= 0.0f) || (d <= 0.0f))
+    bool wwh0 = (Ldir.z <= 0.0f);
+    bool wwh1 = (d <= 0.0f);
+    if (wwh0 || wwh1)
     {
         return 1.0f.xxx;
     }

@@ -78,7 +78,8 @@ void frag_main()
     bool v0 = param_1;
     float lin0 = tmp140;
     fragMask = 1.0f;
-    if ((!v0) || (lin0 <= 0.0f))
+    bool wwh0 = (lin0 <= 0.0f);
+    if ((!v0) || wwh0)
     {
         return;
     }

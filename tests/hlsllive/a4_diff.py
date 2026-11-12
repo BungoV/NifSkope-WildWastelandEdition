@@ -14,6 +14,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from glctx import *
 import remap, spirv_probe
 import a2_iface
+import stamps
 
 c_f, c_i, c_u, c_p, c_c = ctypes.c_float, ctypes.c_int, ctypes.c_uint, ctypes.c_void_p, ctypes.c_char_p
 SZ = 32
@@ -416,6 +417,18 @@ def main():
     rig = Rig()
     rows, tot = [], {}
     byn = remap._byname(tree)
+    # R7: a verdict is cached against the program's SPIR-V bytes, the GLSL sources it is compared with (and their includes) and the
+    # harness files; a program with no change since the last run is not rendered again (--fresh ignores the cache)
+    cachef = os.path.join(spvdir, 'spirv', 'a4cache.txt')
+    # the repo's seed (res/shaders/hlsl/a4cache.txt, verdicts of the machine that built it) first, this build folder's cache over it
+    cache = {}
+    if '--fresh' not in a and not plant:
+        cache = stamps.load_table(os.path.join(tree, 'res/shaders/hlsl/a4cache.txt'), 5)
+        cache.update(stamps.load_table(cachef, 5))
+    tk = stamps.tools_key(['spvgl.py', 'build_spv.py'])
+    atool = stamps.sha(stamps.tools_key(['a4_diff.py', 'a2_iface.py', 'glctx.py', 'spirv_probe.py']), units, seeds, os.environ.get('A4_BASEONLY', ''))
+    gfind = lambda n: os.path.join(tree, byn[n]) if n in byn else None
+    newcache = dict(cache)
     for pf, st, vdefs, name in a2_iface.items(tree):
         txt = open(os.path.join(tree, pf), encoding='utf-8', errors='replace').read()
         if '.geom' not in txt:
@@ -429,6 +442,13 @@ def main():
         group = pf.replace('\\', '/').split('/')[3] if pf.replace('\\', '/').startswith('res/shaders/features/') else 'core'
         specs = [(a2_iface.STG[e], os.path.join(spvdir, 'spirv', os.path.basename(pth).rsplit('.', 1)[0] + '.spv')) for e, pth, _s in st]
         shaders = [w for ln in txt.splitlines() if ln.startswith('shaders') for w in ln.split()[1:]]
+        ckey = stamps.sha(name, atool, ','.join(vdefs), *([stamps.stage_key(pth_, [], tk) for _e, pth_, _s in st]
+                                                         + [stamps.source_key(os.path.join(tree, byn.get(s_, 'res/shaders/' + s_)), gfind) for s_ in shaders]))
+        hit = cache.get(name)
+        if hit and hit[0] == ckey:
+            rows.append((name, group, hit[2], hit[3]))
+            print('%-6s %-22s %-34s %s' % (hit[2], group, name, ('(cached) ' + hit[3]).strip()), flush=True)
+            continue
         pg = a2_iface.glsl_program(tree, [byn.get(s, 'res/shaders/' + s) for s in shaders], units, vdefs)
         ps, log = spirv_probe.build(specs)
         if pg is None or ps is None:
@@ -506,6 +526,8 @@ def main():
         if verdict in ('EXACT', 'BOUND') and cov == 0:
             verdict, detail = 'NOCOV', 'the GLSL render wrote no pixel over %d seeds' % seeds
         rows.append((name, group, verdict, detail))
+        if verdict != 'SKIP':
+            newcache[name] = [ckey, group, verdict, detail]
         print('%-6s %-22s %-34s %s' % (verdict, group, name, detail), flush=True)
     cnt = {}
     for _n, grp, v, _d in rows:
@@ -518,6 +540,10 @@ def main():
     for r in rows:
         allv[r[2]] = allv.get(r[2], 0) + 1
     print('A4 %d programs: %s%s' % (len(rows), ' '.join('%s=%d' % kv for kv in sorted(allv.items())), '  (planted fault run)' if plant else ''))
+    if not plant:
+        names_now = {r[0] for r in rows}
+        open(cachef, 'w', newline='\n').write(''.join('%s\t%s\t%s\t%s\t%s\n' % (n, v[0], v[1], v[2], v[3].replace('\t', ' ').replace('\n', ' '))
+                                                      for n, v in sorted(newcache.items()) if n in names_now or only))
     out = os.path.join(spvdir, 'spirv', 'a4_plant.txt' if plant else 'a4.txt')
     open(out, 'w', newline='\n').write(''.join('%s\t%s\t%s\t%s\n' % r for r in rows))
     if apply_ and not plant:

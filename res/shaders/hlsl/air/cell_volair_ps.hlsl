@@ -1086,7 +1086,9 @@ void airLampVolStage(int2 col)
                     float qb = dot(Dws[s_1], mm);
                     float qc = dot(mm, mm) - (a0_1.w * a0_1.w);
                     float disc = (qb * qb) - (qa * qc);
-                    if ((disc <= 0.0f) || (qa <= 0.0f))
+                    bool wwh0 = (disc <= 0.0f);
+                    bool wwh1 = (qa <= 0.0f);
+                    if (wwh0 || wwh1)
                     {
                         continue;
                     }
@@ -1104,7 +1106,9 @@ void airLampVolStage(int2 col)
                 }
                 float3 Pk = Pw - volLightShift;
                 float d = length(a0_1.xyz - Pk);
-                if ((d >= a0_1.w) || (d < 0.001000000047497451305389404296875f))
+                bool wwh2 = (d >= a0_1.w);
+                bool wwh3 = (d < 0.001000000047497451305389404296875f);
+                if (wwh2 || wwh3)
                 {
                     continue;
                 }
@@ -1191,7 +1195,8 @@ void airLampVolStage(int2 col)
 float airDriftW(float3 P, float t)
 {
     float f = 1.0f - clamp((t - volDrift.y) * volDrift.z, 0.0f, 1.0f);
-    if ((f <= 0.0f) || (!cellOn))
+    bool wwh4 = (f <= 0.0f);
+    if (wwh4 || (!cellOn))
     {
         return 1.0f;
     }
@@ -1413,7 +1418,9 @@ float3 airRest(float3 posView, float3 dirView, float z, float sA, float sB, inou
                 if ((volRed & 262144) != 0)
                 {
                     float d = length(t0.xyz - Pl);
-                    if ((d >= t0.w) || (d < 0.001000000047497451305389404296875f))
+                    bool wwh5 = (d >= t0.w);
+                    bool wwh6 = (d < 0.001000000047497451305389404296875f);
+                    if (wwh5 || wwh6)
                     {
                         continue;
                     }
@@ -1442,7 +1449,9 @@ float3 airRest(float3 posView, float3 dirView, float z, float sA, float sB, inou
                 float qb = dot(Dw, m);
                 float qc = dot(m, m) - (t0.w * t0.w);
                 float disc = (qb * qb) - (qa * qc);
-                if ((disc <= 0.0f) || (qa <= 0.0f))
+                bool wwh7 = (disc <= 0.0f);
+                bool wwh8 = (qa <= 0.0f);
+                if (wwh7 || wwh8)
                 {
                     continue;
                 }
@@ -1458,7 +1467,9 @@ float3 airRest(float3 posView, float3 dirView, float z, float sA, float sB, inou
                 {
                     float3 Pk = Pl + (Dw * lerp(s0, s1, (float(k) + 0.5f) * 0.25f));
                     float d_1 = length(t0.xyz - Pk);
-                    if ((d_1 >= t0.w) || (d_1 < 0.001000000047497451305389404296875f))
+                    bool wwh9 = (d_1 >= t0.w);
+                    bool wwh10 = (d_1 < 0.001000000047497451305389404296875f);
+                    if (wwh9 || wwh10)
                     {
                         continue;
                     }
@@ -1788,7 +1799,9 @@ void airLightsQ(float3 posView, float3 dirView, float z, float sA, float sB, int
         float qb = dot(Dw, m);
         float qc = dot(m, m) - (t0.w * t0.w);
         float disc = (qb * qb) - (qa * qc);
-        if ((disc <= 0.0f) || (qa <= 0.0f))
+        bool wwh11 = (disc <= 0.0f);
+        bool wwh12 = (qa <= 0.0f);
+        if (wwh11 || wwh12)
         {
             continue;
         }
@@ -1808,7 +1821,9 @@ void airLightsQ(float3 posView, float3 dirView, float z, float sA, float sB, int
             }
             float3 Pk = Pl + (Dw * lerp(s0, s1, (float(k_2) + 0.5f) * 0.25f));
             float d = length(t0.xyz - Pk);
-            if ((d >= t0.w) || (d < 0.001000000047497451305389404296875f))
+            bool wwh13 = (d >= t0.w);
+            bool wwh14 = (d < 0.001000000047497451305389404296875f);
+            if (wwh13 || wwh14)
             {
                 continue;
             }
@@ -2279,7 +2294,8 @@ float airSkyToward(float3 P, float3 D)
     {
         tmp6428 = true;
     }
-    if (tmp6428 || (cellSpecSkyBase < 1.0f))
+    bool wwh15 = (cellSpecSkyBase < 1.0f);
+    if (tmp6428 || wwh15)
     {
         return 0.0f;
     }
@@ -2486,7 +2502,8 @@ float3 airMsSum(float vis, float T, float c, float hard, float a0)
 
 float3 airMsDiffuse(float3 rSum, float vis, float T, float c, float hard, float z, float mu)
 {
-    if ((!volMsDiff) || (mu <= 0.0f))
+    bool wwh16 = (mu <= 0.0f);
+    if ((!volMsDiff) || wwh16)
     {
         return rSum;
     }
@@ -3237,7 +3254,8 @@ void frag_main()
         volMrt[3] = so[3];
         volMrt[5] = 0.0f.xxxx;
         volMrt[4] = 0.0f.xxxx;
-        if ((!fogOn) || (keep < (-1000000015047466219876688855040.0f)))
+        bool wwh17 = (keep < (-1000000015047466219876688855040.0f));
+        if ((!fogOn) || wwh17)
         {
             acc = 0.0f.xxx;
         }
@@ -3299,7 +3317,8 @@ void frag_main()
         }
         T_3 *= exp(-tau);
     }
-    if ((!fogOn) || (keep < (-1000000015047466219876688855040.0f)))
+    bool wwh18 = (keep < (-1000000015047466219876688855040.0f));
+    if ((!fogOn) || wwh18)
     {
         acc_1 = 0.0f.xxx;
     }

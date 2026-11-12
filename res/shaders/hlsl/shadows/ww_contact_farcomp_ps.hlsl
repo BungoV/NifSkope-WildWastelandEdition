@@ -39,7 +39,9 @@ void frag_main()
     float2 full = gl_FragCoord.xy * maskScale;
     int2 fq = clamp(int2(floor(full)), int2(0, 0), fullSize - int2(1, 1));
     float fine = gbuf.Load(int3(fq, 0)).w;
-    if ((fine >= 900000.0f) || (fine <= 0.0f))
+    bool wwh0 = (fine >= 900000.0f);
+    bool wwh1 = (fine <= 0.0f);
+    if (wwh0 || wwh1)
     {
         return;
     }
@@ -87,7 +89,9 @@ void frag_main()
             }
             float bw = tmp127 * tmp140;
             float cd = farDepth.Load(int3(c, 0)).w;
-            if ((bw <= 0.0f) || (cd >= 900000.0f))
+            bool wwh2 = (bw <= 0.0f);
+            bool wwh3 = (cd >= 900000.0f);
+            if (wwh2 || wwh3)
             {
                 continue;
             }

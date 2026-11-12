@@ -107,7 +107,9 @@ void frag_main()
     {
         discard;
     }
-    if ((alphaTest != 0) || (covMode != 0))
+    bool wwh0 = (alphaTest != 0);
+    bool wwh1 = (covMode != 0);
+    if (wwh0 || wwh1)
     {
         float a = BaseMap.Sample(_BaseMap_sampler, (texCoord * uvScale) + uvOffset).w;
         if (fxMode != 0)

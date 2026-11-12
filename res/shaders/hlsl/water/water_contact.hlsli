@@ -53,7 +53,9 @@ float4 wwWaterContact(float vert, float3 P, float3 S, float3 eye, float t)
     float foot = tmp6;
     float trust = tmp7;
     float d = tmp8;
-    if (((!waterContactOn) || (trust <= 0.0f)) || (d > 100000000.0f))
+    bool wwh0 = ((!waterContactOn) || (trust <= 0.0f));
+    bool wwh1 = (d > 100000000.0f);
+    if (wwh0 || wwh1)
     {
         return float4(0.0f, d, trust, foot);
     }

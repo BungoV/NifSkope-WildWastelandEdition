@@ -378,7 +378,8 @@ void frag_main()
             count = n;
         }
         float3 param_3 = p;
-        if ((rayOut(param_3) || (count == 32)) || refused)
+        bool wwh0 = (rayOut(param_3) || (count == 32));
+        if (wwh0 || refused)
         {
             return;
         }
