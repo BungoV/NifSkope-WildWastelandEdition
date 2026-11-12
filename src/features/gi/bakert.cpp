@@ -5,6 +5,7 @@
 #include "features/gi/bakertwalk.h"
 #include "features/gi/probebvh.h"
 #include "features/gi/rttracesetrule.h"   // lane AIRPERF1 r6: the BLAS parts' plan
+#include "features/gi/vkasyncrule.h"     // lane VKCOMPUTE1: the queue family
 #include "harnesswindow.h"   // wwHarnessSettingsSuffix
 #include "version.h"
 
@@ -89,6 +90,8 @@ struct Dev
 	VkDevice dev = VK_NULL_HANDLE;
 	VkQueue q = VK_NULL_HANDLE;
 	uint32_t qf = 0;
+	bool async = false;      // lane VKCOMPUTE1: qf is a compute-only family (runs beside GL's graphics queue)
+	std::string queueWhy;
 	VkPhysicalDeviceMemoryProperties mem {};
 	VkCommandPool pool = VK_NULL_HANDLE;
 	VkCommandBuffer cb = VK_NULL_HANDLE;
@@ -105,6 +108,14 @@ struct Dev
 };
 
 const char * kRed = "WW_BAKE_RT_RED";
+
+//! lane VKCOMPUTE1: the Async compute row (Settings, General; default on), read once at the device's creation
+bool asyncComputeRow()
+{
+	QSettings s( QStringLiteral( "NifTools" ),
+		QStringLiteral( "NifSkope " ) + NifSkopeVersion::rawToMajMin( NIFSKOPE_VERSION ) + wwHarnessSettingsSuffix() );
+	return s.value( QLatin1String( "Settings/Nif/Async Compute" ), true ).toBool();
+}
 
 uint32_t memType( const Dev & D, uint32_t bits, VkMemoryPropertyFlags want )
 {
@@ -373,6 +384,23 @@ void init( Dev & D )
 	}
 	D.pd = pds[size_t( best )];
 	D.qf = bestQf;
+	{   // lane VKCOMPUTE1: a compute-only family when the device has one (vkasyncrule.h); red WW_VKASYNC_RED=1 = as before
+		uint32_t nq = 0;
+		vk.vkGetPhysicalDeviceQueueFamilyProperties( D.pd, &nq, nullptr );
+		std::vector<VkQueueFamilyProperties> qs( nq );
+		vk.vkGetPhysicalDeviceQueueFamilyProperties( D.pd, &nq, qs.data() );
+		std::vector<uint32_t> fl( nq ), ts( nq );
+		for ( uint32_t k = 0; k < nq; k++ ) {
+			fl[k] = qs[k].queueFlags;
+			ts[k] = qs[k].timestampValidBits;
+		}
+		const char * ar = std::getenv( "WW_VKASYNC_RED" );
+		const vkasync::Pick pk = vkasync::pickFamily( fl.data(), ts.data(), nq, asyncComputeRow(), ar && !std::strcmp( ar, "1" ) );
+		if ( pk.family >= 0 )
+			D.qf = uint32_t( pk.family );
+		D.async = pk.why == vkasync::Why::Async;
+		D.queueWhy = vkasync::whyText( pk.why );
+	}
 	VkPhysicalDeviceProperties pp;
 	vk.vkGetPhysicalDeviceProperties( D.pd, &pp );
 	D.name = pp.deviceName;
@@ -435,6 +463,7 @@ void init( Dev & D )
 	}
 	vk.vkGetDeviceQueue( D.dev, D.qf, 0, &D.q );
 	D.share = share;
+	std::fprintf( stderr, "vk async: device %s queue family %u: %s\n", D.name.c_str(), D.qf, D.queueWhy.c_str() );
 	{
 		VkPhysicalDeviceIDProperties idp { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ID_PROPERTIES };
 		VkPhysicalDeviceProperties2 p2 { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2 };
@@ -503,6 +532,18 @@ Dev & dev()
 }
 
 } // namespace
+
+bool asyncQueue()
+{
+	Dev & D = dev();
+	return D.ok && D.async;
+}
+
+std::string queueInfo()
+{
+	Dev & D = dev();
+	return D.ok ? "q" + std::to_string( D.qf ) + ( D.async ? " async" : " shared with graphics" ) : std::string( "no device" );
+}
 
 const char * pathName( Path p )
 {

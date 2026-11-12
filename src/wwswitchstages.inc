@@ -1487,6 +1487,7 @@
 { "WW_VIEWFULL_KEEP", 3, "src/viewfulltest.cpp:209 wwViewFullHarness | bake/CLI/test path" },
 { "WW_VIEWFULL_TEST", 3, "src/viewfulltest.cpp:108 wwViewFullHarness | bake/CLI/test path" },
 { "WW_VIEW_TRANSFORM", 0, "src/gl/scenelighting.cpp:97 st | init-once state, re-read when a live set moves its prefix (b)" },
+{ "WW_VKASYNC_RED", 2, "src/features/gi/bakert.cpp:397 init | the ray-tracing device is made once a run (dev(): call_once)" },
 { "WW_VOLCHECK_DUMP", 1, "src/features/gi/probevolcheck.cpp:950 probeVolCheckCli | (a) the probe volumes fitted at the GI build of the open (dump / spec of that fit)" },
 { "WW_VOLCHECK_DUMPBOX", 1, "src/features/gi/probevolcheck.cpp:952 probeVolCheckCli | (a) the probe volumes fitted at the GI build of the open (dump / spec of that fit)" },
 { "WW_VOLCHECK_DUMPROOM", 1, "src/features/gi/probevolcheck.cpp:951 probeVolCheckCli | (a) the probe volumes fitted at the GI build of the open (dump / spec of that fit)" },
