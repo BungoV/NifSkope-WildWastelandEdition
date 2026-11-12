@@ -19,6 +19,15 @@ static const float F4FX_TM_LIN = 0.444f;
 static const float F4FX_TM_TOE = 1.280f;
 static const float F4FX_TM_PEAK = F4FX_TM_PAPER / F4FX_TM_REF;	// 2.5
 
+// dot() as the fma chain GL's driver (and the compute stage) emit for it. The Vulkan fragment stage lowers OpDot in its
+// own order: 1 ulp there grew past 1 8-bit level near black (the PQ exponent, then pow 1 / 2.2), so every dot, lerp and
+// sum of products below is spelled out as mads, and constant scales are folded into the weights the way the driver folds
+// them (tests/vkframe/tonemap.sh: compute and fragment pass both BOUND to GL)
+float F4FX_Dot3( float3 a, float3 b )
+{
+	return mad( a.z, b.z, mad( a.y, b.y, a.x * b.x ) );
+}
+
 // a toe blended into a linear section, then an exponential shoulder toward the peak
 float F4FX_TmCurve( float x )
 {
@@ -49,41 +58,48 @@ float F4FX_TmPqEotf( float v )
 	return l * 10000.0f / F4FX_TM_REF;
 }
 
-float3 F4FX_TmToICtCp( float3 rgb )
+float3 F4FX_TmLmsToICtCp( float3 lms )
 {
-	float l = dot( rgb, float3( 1688.0f, 2146.0f, 262.0f ) ) / 4096.0f;
-	float m = dot( rgb, float3( 683.0f, 2951.0f, 462.0f ) ) / 4096.0f;
-	float s = dot( rgb, float3( 99.0f, 309.0f, 3688.0f ) ) / 4096.0f;
-	float3 lmsPq = float3( F4FX_TmInvPq( l ), F4FX_TmInvPq( m ), F4FX_TmInvPq( s ) );
-	return float3( 0.5f * ( lmsPq.x + lmsPq.y ), dot( lmsPq, float3( 6610.0f, -13613.0f, 7003.0f ) ) / 4096.0f,
-		dot( lmsPq, float3( 17933.0f, -17390.0f, -543.0f ) ) / 4096.0f );
+	float3 lmsPq = float3( F4FX_TmInvPq( lms.x ), F4FX_TmInvPq( lms.y ), F4FX_TmInvPq( lms.z ) );
+	return float3( 0.5f * ( lmsPq.x + lmsPq.y ), F4FX_Dot3( lmsPq, float3( 6610.0f, -13613.0f, 7003.0f ) / 4096.0f ),
+		F4FX_Dot3( lmsPq, float3( 17933.0f, -17390.0f, -543.0f ) / 4096.0f ) );
+}
+
+// ICtCp of rgb * s: the scale and the 1 / 4096 folded into the weights, as the driver folds them for GL
+float3 F4FX_TmToICtCp( float3 rgb, float s )
+{
+	const float q = s / 4096.0f;
+	return F4FX_TmLmsToICtCp( float3( F4FX_Dot3( rgb, float3( 1688.0f, 2146.0f, 262.0f ) * q ),
+		F4FX_Dot3( rgb, float3( 683.0f, 2951.0f, 462.0f ) * q ), F4FX_Dot3( rgb, float3( 99.0f, 309.0f, 3688.0f ) * q ) ) );
 }
 
 float3 F4FX_TmFromICtCp( float3 ictcp )
 {
-	float3 lmsPq = float3( ictcp.x + 0.00860904f * ictcp.y + 0.11103f * ictcp.z, ictcp.x - 0.00860904f * ictcp.y - 0.11103f * ictcp.z,
-		ictcp.x + 0.560031f * ictcp.y - 0.320627f * ictcp.z );
+	float3 lmsPq = float3( mad( 0.11103f, ictcp.z, mad( 0.00860904f, ictcp.y, ictcp.x ) ), mad( -0.11103f, ictcp.z, mad( -0.00860904f, ictcp.y, ictcp.x ) ),
+		mad( -0.320627f, ictcp.z, mad( 0.560031f, ictcp.y, ictcp.x ) ) );
 	float3 lms = float3( F4FX_TmPqEotf( lmsPq.x ), F4FX_TmPqEotf( lmsPq.y ), F4FX_TmPqEotf( lmsPq.z ) );
-	return max( float3( dot( lms, float3( 3.43661f, -2.50645f, 0.0698454f ) ), dot( lms, float3( -0.79133f, 1.9836f, -0.192271f ) ),
-		dot( lms, float3( -0.0259499f, -0.0989137f, 1.12486f ) ) ), float3( 0.0f, 0.0f, 0.0f ) );
+	return max( float3( F4FX_Dot3( lms, float3( 3.43661f, -2.50645f, 0.0698454f ) ), F4FX_Dot3( lms, float3( -0.79133f, 1.9836f, -0.192271f ) ),
+		F4FX_Dot3( lms, float3( -0.0259499f, -0.0989137f, 1.12486f ) ) ), float3( 0.0f, 0.0f, 0.0f ) );
 }
 
 // the Physical operator, SDR output: in the exposed scene-linear light (Rec.709, 1.0 = paper white), out display-linear 0..1
 float3 F4FX_TonemapPhysicalSdr( float3 c709 )
 {
 	c709 = max( c709, float3( 0.0f, 0.0f, 0.0f ) );
-	float3 rgb = max( float3( dot( c709, float3( 0.6274040f, 0.3292820f, 0.0433136f ) ), dot( c709, float3( 0.0690970f, 0.9195400f, 0.0113612f ) ),
-		dot( c709, float3( 0.0163916f, 0.0880132f, 0.8955950f ) ) ), float3( 0.0f, 0.0f, 0.0f ) ) * F4FX_TM_PEAK;
-	float3 originalUcs = F4FX_TmToICtCp( rgb );
+	float3 d = max( float3( F4FX_Dot3( c709, float3( 0.6274040f, 0.3292820f, 0.0433136f ) ), F4FX_Dot3( c709, float3( 0.0690970f, 0.9195400f, 0.0113612f ) ),
+		F4FX_Dot3( c709, float3( 0.0163916f, 0.0880132f, 0.8955950f ) ) ), float3( 0.0f, 0.0f, 0.0f ) );
+	float3 rgb = d * F4FX_TM_PEAK;
+	float3 originalUcs = F4FX_TmToICtCp( d, F4FX_TM_PEAK );
 	float3 skewedRgb = float3( F4FX_TmCurve( rgb.r ), F4FX_TmCurve( rgb.g ), F4FX_TmCurve( rgb.b ) );
-	float3 skewedUcs = F4FX_TmToICtCp( skewedRgb );
-	float targetUcs = F4FX_TmToICtCp( float3( F4FX_TM_PEAK, F4FX_TM_PEAK, F4FX_TM_PEAK ) ).x;
+	float3 skewedUcs = F4FX_TmToICtCp( skewedRgb, 1.0f );
+	float targetUcs = F4FX_TmToICtCp( float3( F4FX_TM_PEAK, F4FX_TM_PEAK, F4FX_TM_PEAK ), 1.0f ).x;
 	float normalizedLuminance = originalUcs.x / max( targetUcs, 0.0001f );
 	float chromaScale = 1.0f - smoothstep( F4FX_TM_FADE0, F4FX_TM_FADE1, normalizedLuminance );
 	float3 scaledRgb = F4FX_TmFromICtCp( float3( skewedUcs.x, originalUcs.yz * chromaScale ) );
-	float3 m = min( lerp( skewedRgb, scaledRgb, F4FX_TM_BLEND ), float3( F4FX_TM_PEAK, F4FX_TM_PEAK, F4FX_TM_PEAK ) ) * ( F4FX_TM_REF / F4FX_TM_PAPER );
-	float3 o = float3( dot( m, float3( 1.6604910f, -0.5876411f, -0.0728499f ) ), dot( m, float3( -0.1245505f, 1.1328999f, -0.0083494f ) ),
-		dot( m, float3( -0.0181508f, -0.1005789f, 1.1187297f ) ) );
+	float3 m = min( mad( F4FX_TM_BLEND, scaledRgb - skewedRgb, skewedRgb ), float3( F4FX_TM_PEAK, F4FX_TM_PEAK, F4FX_TM_PEAK ) );
+	const float r = F4FX_TM_REF / F4FX_TM_PAPER;
+	float3 o = float3( F4FX_Dot3( m, float3( 1.6604910f, -0.5876411f, -0.0728499f ) * r ), F4FX_Dot3( m, float3( -0.1245505f, 1.1328999f, -0.0083494f ) * r ),
+		F4FX_Dot3( m, float3( -0.0181508f, -0.1005789f, 1.1187297f ) * r ) );
 	return clamp( o, 0.0f, 1.0f );
 }
 
@@ -192,7 +208,7 @@ float3 F4FX_CellImageSpace( float3 sqrtColor, bool measureOn, float3 measureBloo
 	} else
 		c = F4FX_TonemapPhysicalSdr( 0.5f * x );
 	if ( ( p.red & 4 ) == 0 ) {
-		float luma = dot( c, float3( 0.2125f, 0.7154f, 0.0721f ) );
+		float luma = F4FX_Dot3( c, float3( 0.2125f, 0.7154f, 0.0721f ) );
 		c = lerp( float3( luma, luma, luma ), c, p.cine.x );
 		c = lerp( c, luma * p.tint.yzw, p.tint.x );
 		c = p.cine.z * ( p.cine.y * c - p.adapted ) + p.adapted;
