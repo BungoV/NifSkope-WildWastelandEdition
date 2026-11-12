@@ -41,6 +41,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "glproperty.h"
 #include "harnesswindow.h"
 #include "features/shared/cellpasstime.h"	// lane PERF1
+#include "features/shared/camunired.h"	// lane EMPTY240 R12-1: the global uniforms not uploaded twice
 #include "features/near/celldrawpacket.h"	// lane GAPPERF-BINDLESS: the setters record while a draw packet records
 #include "features/near/cellbindless.h"	// lane BINDLESS2
 #include "progcachekeep.h"	// lane BUGS1102C
@@ -1322,6 +1323,8 @@ NifSkopeOpenGLContext::NifSkopeOpenGLContext( QOpenGLContext * context )
 	globalUniforms->glowScaleSRGB = 1.0f;
 
 	fn->glGenBuffers( 1, &globalUniformsBufferObject );
+	void wwGlobalUboForget();	// below: a new buffer holds nothing yet (lane EMPTY240 R12-1)
+	wwGlobalUboForget();
 	setGlobalUniforms();
 	fn->glGenBuffers( 1, &boneTransformsBufferObject );
 	updateBoneTransforms( nullptr, 0 );
@@ -1342,6 +1345,8 @@ NifSkopeOpenGLContext::~NifSkopeOpenGLContext()
 	}
 	fn->glDeleteBuffers( 1, &boneTransformsBufferObject );
 	fn->glDeleteBuffers( 1, &globalUniformsBufferObject );
+	void wwGlobalUboForget();	// below (lane EMPTY240 R12-1)
+	wwGlobalUboForget();
 	delete globalUniforms;
 }
 
@@ -1784,6 +1789,26 @@ void NifSkopeOpenGLContext::setViewTransform( const Transform & t, int upAxis, f
 
 quint64 wwGlPaintCount();	// glview.cpp
 
+namespace {
+//! lane EMPTY240 R12-1: the bytes the global uniform buffer was last given, and whose buffer
+struct WwUboLast
+{
+	const void * ctx = nullptr;
+	unsigned int buf = 0;
+	NifSkopeOpenGLContext::GlobalUniforms bytes;
+};
+WwUboLast & wwUboLast()
+{
+	static WwUboLast l;
+	return l;
+}
+}	// namespace
+
+void wwGlobalUboForget()
+{
+	wwUboLast().ctx = nullptr;
+}
+
 void NifSkopeOpenGLContext::setGlobalUniforms()
 {
 	/* Never upload a zero viewport — it makes the line geometry shader emit NaN.
@@ -1856,6 +1881,15 @@ void NifSkopeOpenGLContext::setGlobalUniforms()
 		}
 	}
 
+	/* lane EMPTY240 R12-1: the buffer already holds these bytes (same context, same buffer; every write to it goes through
+	 * here): no upload. Red WW_CAMUNI_RED=ubo: uploaded every call. */
+	WwUboLast & last = wwUboLast();
+	if ( last.ctx == this && last.buf == globalUniformsBufferObject
+		&& std::memcmp( &last.bytes, globalUniforms, sizeof( GlobalUniforms ) ) == 0 && !wwCamUniRed( "ubo" ) )
+		return;
+	last.ctx = this;
+	last.buf = globalUniformsBufferObject;
+	std::memcpy( &last.bytes, globalUniforms, sizeof( GlobalUniforms ) );
 	fn->glBindBuffer( GL_UNIFORM_BUFFER, globalUniformsBufferObject );
 	fn->glBufferData( GL_UNIFORM_BUFFER, GLsizeiptr( sizeof(GlobalUniforms) ), globalUniforms, GL_DYNAMIC_DRAW );
 	fn->glBindBuffer( GL_UNIFORM_BUFFER, 0 );

@@ -3,6 +3,7 @@
 #include "gl/glnode.h"
 #include "gl/glscene.h"
 #include "wwswitch.h"
+#include "features/shared/camunired.h"	// lane EMPTY240 R12-1
 
 #include <QString>
 
@@ -63,7 +64,8 @@ int parse( const QByteArray & v )
 
 bool wwDebugViewPinned()
 {
-	return !wwEnv( "WW_DEBUG_VIEW" ).trimmed().isEmpty();
+	WW_SWITCH_STATIC( bool, pinned, !wwEnv( "WW_DEBUG_VIEW" ).trimmed().isEmpty() );	// lane EMPTY240 R12-1: once a generation
+	return wwCamUniRed( "envkeys" ) ? !wwEnv( "WW_DEBUG_VIEW" ).trimmed().isEmpty() : pinned;
 }
 
 int wwDebugViewId()

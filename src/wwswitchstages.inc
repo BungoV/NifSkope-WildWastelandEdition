@@ -86,6 +86,7 @@
 { "WW_CAMERA_BOUNDS_RED", 0, "src/cellcambounds.cpp:92 cellCamBoundsRedHas | re-read per frame or per call (a)" },
 { "WW_CAMERA_CENSUS", 0, "src/glview.cpp:5327 GLView::wwLogCameraCensus | re-read per frame or per call (a)" },
 { "WW_CAMERA_LOG", 0, "src/glview.cpp:199 wwCameraLog | re-read per frame or per call (a)" },
+{ "WW_CAMUNI_RED", 0, "src/features/shared/camunired.h:15 wwCamUniRed | hand: re-read when a live set moves the generation; names envkeys, farplanes, jittervp, ubo (1/all: every one) = the frame start's camera and uniforms step as build 91 (EMPTY240 R12-1)" },
 { "WW_CARDBAKE_TIMES", 0, "src/nifskope_ui.cpp:1160 wwCardTimesMainEntry | re-read per frame or per call (a)" },
 { "WW_CARDMEM_RED", 3, "src/features/far-lod/lodgen.cpp:1343 lodgenCardMemRed | bake/CLI/test path" },
 { "WW_CASCADEFILL_RED", 0, "src/features/shadows/sunshadow.cpp:1465 sunShadowPassImpl | hand: re-read per frame or per call; 1 = every sun cascade's first fill in the same paint, build 77 (EMPTY240 R5-1)" },
