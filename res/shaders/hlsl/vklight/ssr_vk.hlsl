@@ -5,6 +5,9 @@
 // (RGBA32F, alpha the reflection flag, bilinear), T3 the previous stage's target, T4 the water's ray; out0 RGBA32F half size.
 // Push: c[0] (fullW, fullH, halfW, halfH), c[1] (P00, P11, near, far), c[2] the game's four, c[3..5].xyz viewToWorld's GL
 // columns; i = (ssrRed, haveWaterRay, opaqueRays). SSR_RED (gate only): the stage drops one term (see below).
+#ifndef SSR_STAGE
+#define SSR_STAGE 1	// hlsl_check compiles without -D
+#endif
 #include "LightBindingsVk.hlsli"
 
 #define SSR_GBUF( t ) LpxT0.Load( int3( ( t ), 0 ) )
