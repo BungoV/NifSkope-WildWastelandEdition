@@ -532,6 +532,10 @@ int ImpostorChunk::armCellFar( NifModel * nif, const QStringList & chunkPaths, c
 quint64 wwGlPaintCount();	// glview.cpp
 #include "features/far-lod/lodpreview.h"	// lane PERFLOAD1 P8
 
+// lane EMPTY240 R7-4 (impostordraw.cpp): the sheet roots' parts since the last call; a far-card draw's end
+void wwFarSheetRootsTake( int & sets, int & walks, double & walkMs, double & addMs );
+void wwFarSheetsIdle();
+
 int ImpostorChunk::drawCellFar( Scene * scene, const ImpostorDraw::Options & opt )
 {
 	CellFarState & F = farSt();
@@ -649,6 +653,16 @@ int ImpostorChunk::drawCellFar( Scene * scene, const ImpostorDraw::Options & opt
 			if ( set.ok )
 				ImpostorDraw::registerLooseSheets( scene, set );
 		wwSheetsNs = wwSlow.nsecsElapsed() - t0;
+		int rootSets = 0, rootWalks = 0;
+		double walkMs = 0.0, addMs = 0.0;
+		wwFarSheetRootsTake( rootSets, rootWalks, walkMs, addMs );
+		static int rootsSaid = 0;
+		if ( rootsSaid < 8 ) {
+			rootsSaid++;
+			qInfo().noquote() << QStringLiteral( "far sheet roots: %1 sets in %2 ms = %3 folder walks %4 ms + model roots %5 ms "
+				"(R7-4: a folder's root kept; red WW_SHEETROOTS_RED=1: a walk a set, build 80)" ).arg( rootSets )
+				.arg( double( wwSheetsNs ) * 1e-6, 0, 'f', 1 ).arg( rootWalks ).arg( walkMs, 0, 'f', 1 ).arg( addMs, 0, 'f', 1 );
+		}
 	}
 	const qint64 wwCardsT0 = wwSlow.nsecsElapsed();
 	static int saidDrawn = -1, saidOut = -1;
@@ -776,6 +790,7 @@ int ImpostorChunk::drawCellFar( Scene * scene, const ImpostorDraw::Options & opt
 	}
 	if ( lodTint )
 		LodPreview::noteCards( bandFlat, bandOct, bandFade );
+	wwFarSheetsIdle();	// R7-4
 	static int wwSlowSaid = 0;
 	if ( wwSlow.elapsed() > 50 && wwSlowSaid < 8 ) {
 		wwSlowSaid++;

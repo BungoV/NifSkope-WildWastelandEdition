@@ -125,6 +125,18 @@ Vector3 eyeWorld( const Scene * scene )
  *  frame do not re-read a file that failed once. */
 int sheetWaits = 0;	// lane EMPTY240 R6-5: array layers left for a later paint by the upload budget, all so far
 
+/* lane EMPTY240 R7-4: build 80's `far sheets: 111 array layers made from 111 file reads`: R6-5 kept only the file just
+ * read, and a set's sheets (colour, normal, mask, emissive) are four files bound in turn, so the next layer never found
+ * its file. The last 4 files read are held now; they go after 8 far-card draws that made no layer. Red
+ * WW_SHEETHOLD_RED=1: the last file only, build 80. */
+struct SheetHeld
+{
+	QString file;
+	gli::texture tex;
+};
+SheetHeld sheetHeld[4];
+int sheetHeldNext = 0, sheetsIdle = 0;
+
 GLuint arrayLayerTexture( Scene * scene, const QString & file, int layer, QString * err )
 {
 	struct Entry { GLuint id = 0; QString err; };
@@ -144,13 +156,14 @@ GLuint arrayLayerTexture( Scene * scene, const QString & file, int layer, QStrin
 	const bool capRed = wwEnvInt( "WW_FARSHEETCAP_RED" ) == 1;
 	if ( !capRed && WwUp::spent() ) {
 		sheetWaits++;
+		sheetsIdle = 0;	// R7-4: a layer waits a paint, its file stays held
 		WwUp::deferTex();
 		if ( err )
 			*err = QStringLiteral( "waits a paint (the upload budget)" );
 		return 0;
 	}
-	static QString lastFile;
-	static gli::texture lastTex;
+	static const int holdN = wwEnvInt( "WW_SHEETHOLD_RED" ) == 1 ? 1 : 4;	// R7-4
+	sheetsIdle = 0;
 	static int saidMade = 0, made = 0, reads = 0;
 	static double madeMs = 0.0;
 	static QElapsedTimer sinceSaid;
@@ -160,9 +173,10 @@ GLuint arrayLayerTexture( Scene * scene, const QString & file, int layer, QStrin
 	Entry e;
 	do {
 		gli::texture t;
-		if ( !capRed && !lastTex.empty() && lastFile == file )
-			t = lastTex;	// the next layer of the file just read: no second read and decode
-		else {
+		for ( int h = 0; !capRed && h < holdN; h++ )
+			if ( !sheetHeld[h].tex.empty() && sheetHeld[h].file == file )
+				t = sheetHeld[h].tex;	// the next layer of a file held: no second read and decode
+		if ( t.empty() ) {
 			QFile f( file );
 			if ( !f.open( QIODevice::ReadOnly ) ) {
 				e.err = QStringLiteral( "cannot open %1" ).arg( file );
@@ -172,8 +186,9 @@ GLuint arrayLayerTexture( Scene * scene, const QString & file, int layer, QStrin
 			t = gli::load_dds( bytes.constData(), std::size_t( bytes.size() ) );
 			reads++;
 			if ( !capRed ) {
-				lastFile = file;
-				lastTex = t;
+				SheetHeld & h = sheetHeld[sheetHeldNext++ % holdN];
+				h.file = file;
+				h.tex = t;
 			}
 		}
 		if ( t.empty() ) {
@@ -222,7 +237,8 @@ GLuint arrayLayerTexture( Scene * scene, const QString & file, int layer, QStrin
 		saidMade = made;
 		sinceSaid.start();
 		qInfo().noquote() << QStringLiteral( "far sheets: %1 array layers made from %2 file reads in %3 ms, %4 waited a "
-			"paint for the upload budget (red WW_FARSHEETCAP_RED=1: a read per layer, no budget, build 78)" )
+			"paint for the upload budget (red WW_FARSHEETCAP_RED=1: a read per layer, no budget, build 78; R7-4: the last 4 "
+			"files held, red WW_SHEETHOLD_RED=1: the last one, build 80)" )
 			.arg( made ).arg( reads ).arg( madeMs, 0, 'f', 1 ).arg( sheetWaits );
 	}
 	if ( err )
@@ -576,10 +592,51 @@ void ImpostorDraw::batchEnd( Scene * scene )
 	}
 }
 
+/* lane EMPTY240 R7-4: build 80's `far cards slow draw: 196.3 ms = ... sheet roots 188.4`. Every card set walked up to 6
+ * folders (a directory listing each) from its .lodm to its `textures` root, and the sets share a few folders. A
+ * folder's answer (the root, or none) is now kept; the model still gets the root each time (addResourceRoot skips a
+ * root it has). Red WW_SHEETROOTS_RED=1: the walk for every set, build 80. Line `far sheet roots:` (impostorchunk). */
+static int g_rootSets = 0, g_rootWalks = 0;
+static qint64 g_rootWalkNs = 0, g_rootAddNs = 0;
+
+//! R7-4: a far-card draw ends; after 8 that made no layer the held sheet files go
+void wwFarSheetsIdle()
+{
+	if ( ++sheetsIdle < 8 )
+		return;
+	sheetsIdle = 8;
+	for ( SheetHeld & h : sheetHeld )
+		if ( !h.tex.empty() )
+			h = SheetHeld();
+}
+
+void wwFarSheetRootsTake( int & sets, int & walks, double & walkMs, double & addMs )
+{
+	sets = g_rootSets;
+	walks = g_rootWalks;
+	walkMs = double( g_rootWalkNs ) * 1e-6;
+	addMs = double( g_rootAddNs ) * 1e-6;
+	g_rootSets = g_rootWalks = 0;
+	g_rootWalkNs = g_rootAddNs = 0;
+}
+
 QString ImpostorDraw::registerLooseSheets( Scene * scene, const ImpostorCardSet & set )
 {
 	if ( !scene || !scene->nifModel || !set.ok )
 		return QString();
+	static const bool rootsRed = wwEnvInt( "WW_SHEETROOTS_RED" ) == 1;
+	static QHash<QString, QString> rootOf;	// R7-4: a .lodm folder -> its textures root ("" = none)
+	g_rootSets++;
+	QElapsedTimer rootClock;
+	rootClock.start();
+	const QString from = QFileInfo( set.lodmPath ).absolutePath();
+	const auto known = rootsRed ? rootOf.constEnd() : rootOf.constFind( from );
+	const bool walk = known == rootOf.constEnd();
+	QString root;
+	if ( !walk )
+		root = *known;
+	else
+		g_rootWalks++;
 	/* Registered whether or not the sheets are beside the `.lodm`. The earlier
 	 * `fromLocal` early-out read as "only loose sets need this", but it is the
 	 * OTHER case that needs it most: a set baked into a data-shaped tree has
@@ -587,7 +644,7 @@ QString ImpostorDraw::registerLooseSheets( Scene * scene, const ImpostorCardSet 
 	 * tree holding them is exactly what has to reach the resource list.
 	 * Registering a root that is already installed costs a duplicate entry. */
 	QDir dir = QFileInfo( set.lodmPath ).absoluteDir();
-	for ( int up = 0; up < 6; up++ ) {
+	for ( int up = 0; up < 6 && walk; up++ ) {
 		const QStringList hits = dir.entryList( { QStringLiteral( "textures" ) },
 												QDir::Dirs | QDir::NoDotAndDotDot );
 		if ( !hits.isEmpty() ) {
@@ -605,7 +662,7 @@ QString ImpostorDraw::registerLooseSheets( Scene * scene, const ImpostorCardSet 
 			 * the SUBFOLDERS of a data directory and not the directory
 			 * (`gamemanager.cpp:808`). The folder's own spelling is taken from
 			 * the listing rather than assumed, because the cut is by name. */
-			const QString root = QDir::toNativeSeparators( dir.absoluteFilePath( hits.first() ) );
+			root = QDir::toNativeSeparators( dir.absoluteFilePath( hits.first() ) );
 			/* THROUGH THE MODEL, NEVER THROUGH `GameManager` DIRECTLY.
 			 * `addNIFResourcePath` replaces the model's GameResources object and
 			 * deletes the old one; calling it here and dropping the result left
@@ -617,13 +674,20 @@ QString ImpostorDraw::registerLooseSheets( Scene * scene, const ImpostorCardSet 
 			 * is not const. Registering a resource root is exactly as const as
 			 * `findResourceFile`, which builds the archive index on demand
 			 * through the same pointer. */
-			const_cast< NifModel * >( scene->nifModel )->addResourceRoot( root );
-			return root;
+			break;
 		}
 		if ( !dir.cdUp() )
 			break;
 	}
-	return QString();
+	if ( walk && !rootsRed )
+		rootOf.insert( from, root );
+	g_rootWalkNs += rootClock.nsecsElapsed();
+	if ( root.isEmpty() )
+		return QString();
+	rootClock.restart();
+	const_cast< NifModel * >( scene->nifModel )->addResourceRoot( root );
+	g_rootAddNs += rootClock.nsecsElapsed();
+	return root;
 }
 
 QStringList ImpostorDraw::describeSelection( Scene * scene, const ImpostorCardSet & set,

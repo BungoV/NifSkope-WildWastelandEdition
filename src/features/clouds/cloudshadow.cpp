@@ -16,6 +16,7 @@
 #include "harnesswindow.h"
 #include "wwswitch.h"
 
+#include <QElapsedTimer>
 #include <QHash>
 #include <QSettings>
 
@@ -629,11 +630,46 @@ bool wwCloudShadowPending()
 	return false;
 }
 
+namespace
+{
+/* lane EMPTY240 R7-5: build 80's first paint spent 135.4 ms CPU in the cloud-shadow part (and 466.4 ms GPU in the sun
+ * cascades zone round it). A pass that takes over 20 ms names its parts (at most 8 lines): the cloud map, the
+ * target (state reads and the map's FBO), the program (a first link), the inputs (density, uniforms, sheets) and
+ * the draws (the rest). A line only; no behaviour changes. */
+struct CsSlowParts
+{
+	QElapsedTimer clock;
+	qint64 at[4] = { -1, -1, -1, -1 };
+	CsSlowParts() { clock.start(); }
+	void mark( int i ) { at[i] = clock.nsecsElapsed(); }
+	~CsSlowParts()
+	{
+		static int said = 0;
+		const qint64 end = clock.nsecsElapsed();
+		if ( said >= 8 || end < 20000000 )
+			return;
+		said++;
+		double part[5];
+		qint64 prev = 0;
+		for ( int i = 0; i < 4; i++ ) {
+			const qint64 t = at[i] < 0 ? prev : at[i];
+			part[i] = double( t - prev ) * 1e-6;
+			prev = t;
+		}
+		part[4] = double( end - prev ) * 1e-6;
+		std::fprintf( stderr, "cloud shadow slow: %.1f ms CPU = map %.1f + target %.1f + program %.1f + inputs %.1f + "
+			"draws %.1f (R7-5: the parts of a pass over 20 ms; a part not reached reads 0)\n", double( end ) * 1e-6,
+			part[0], part[1], part[2], part[3], part[4] );
+	}
+};
+}	// namespace
+
 void wwCloudShadowPass( Scene * scene )
 {
 	CsState & s = cs();
 	if ( !scene || !scene->renderer || scene->selecting )
 		return;
+	CsSlowParts slow;	// R7-5
 	Renderer * r = scene->renderer;
 	g_last = r;
 	CsGpu & g = gpus()[r];
@@ -655,6 +691,7 @@ void wwCloudShadowPass( Scene * scene )
 	if ( disc[2] <= 0.0f )
 		return off( QStringLiteral( "refused(the light is under the horizon)" ) );
 	const WwCloudMap & m = wwCloudMapUpdate( scene );
+	slow.mark( 0 );
 	if ( !m.valid )
 		return off( QStringLiteral( "refused(needs the Cloud Map row)" ) );
 	auto fn = r->fn;
@@ -717,6 +754,7 @@ void wwCloudShadowPass( Scene * scene )
 	fn->glGetIntegerv( GL_TEXTURE_BINDING_2D, &prevTex );
 	const bool fboOk = ensure( fn, g, pr.size );
 	fn->glBindTexture( GL_TEXTURE_2D, GLuint( prevTex ) );
+	slow.mark( 1 );
 	if ( !fboOk ) {
 		restore();
 		return off( QStringLiteral( "refused(the map's target is incomplete)" ) );
@@ -731,6 +769,7 @@ void wwCloudShadowPass( Scene * scene )
 	// lane CLOUD5: Cloud Variety on, the twin over the variety density (wwCloudVolBindDensity sets its uniforms)
 	const bool variety = wwCloudVolVarietyOn() && m.variety;
 	NifSkopeOpenGLContext::Program * p = r->useProgram( variety ? "cloud_shadowmap_v.prog" : "cloud_shadowmap.prog" );
+	slow.mark( 2 );
 	if ( !p ) {
 		restore();
 		return off( variety ? QStringLiteral( "refused(cloud_shadowmap_v.prog did not link)" )
@@ -757,6 +796,7 @@ void wwCloudShadowPass( Scene * scene )
 			? QStringLiteral( " sheets=0(volume_mode: the volume tiers have no Fusion Shaders counterpart, left as they are)" )
 			: QStringLiteral( " sheets=0(red=beer)" );
 	}
+	slow.mark( 3 );
 	/* lane PERFFIX3: a hard change rebuilds the front whole (as before); a moved fit or sun builds the back size/16
 	 * rows a frame under the new fit while the receivers keep the front, then swaps (cloudshadowslice.h). Red
 	 * WW_CLOUDSHADOW_RED=fullmove: a move rebuilds the front whole at once (CLOUD3) */
