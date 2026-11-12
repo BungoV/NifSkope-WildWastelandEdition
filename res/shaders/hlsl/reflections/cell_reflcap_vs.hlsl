@@ -6,11 +6,11 @@
 #include "ReflectionsBindingsVk.hlsli"
 cbuffer LooseUniforms : register(b31, space0)
 {
-    float4x4 rpRelFromView;
-    float4x4 modelViewMatrix;
+    row_major float4x4 rpRelFromView;
+    row_major float4x4 modelViewMatrix;
     float2 uvScale;
     float2 uvOffset;
-    float4x4 rpClipFromRel;
+    row_major float4x4 rpClipFromRel;
 };
 
 static float4 gl_Position;

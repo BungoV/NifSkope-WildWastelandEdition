@@ -8,7 +8,7 @@ cbuffer LooseUniforms : register(b31, space0)
 {
     int flareRed;	// 1 noocclude
     float2 flareViewport;	// pixels
-    float4x4 flareProj;
+    row_major float4x4 flareProj;
     float flareSlack;	// view units a surface may sit in front of the light and still let it show
 };
 Texture2D<float4> flareDepth : register(t0, space0);	// the opaque pass's depth, the viewport's corner at texel 0

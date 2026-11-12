@@ -45,11 +45,11 @@ cbuffer LooseUniforms : register(b31, space0)
     float volAirTerrRef;	// the world z of the fog frame's ground (airTerrRef)
     float4 volAirRain;	// x sigma per game unit near the ground (0 = none), y the base excess, z 1 / falloff km, w 1 / fade km
     float4 volAirRainFar;	// x the Low band's coverage past the map, y the map's edge band (uv), z the sub-segments
-    float4x4 volAirRainXf;	// view -> (u, v, km below the Low base): cell_rainfog.glsl's rfFromView
+    row_major float4x4 volAirRainXf;	// view -> (u, v, km below the Low base): cell_rainfog.glsl's rfFromView
     float4 volAirDrift;	// the air pass's volDrift: x amp, y the fade's start, z 1 / its length, w the noise's mean
     float4 volAirDriftUv[6];	// per octave three rows: the noise's uvw at view point p = dot( row, vec4( p, 1 ) )
     int volAirDriftRed;	// lane WEATHERBLEND5: 1 red onesun (the sun's column at one point), 2 red puffonly
-    float4x4 csmMat[3];	// view space -> (u, v, depth) of cascade i
+    row_major float4x4 csmMat[3];	// view space -> (u, v, depth) of cascade i
     float3 csmInvRange;	// 1 / (far_i - 150): a world-unit offset in depth units
     float4 csmParams;	// 1 / view scale, shadow distance D, map size, blend band B
     float4 csmSplitOffset;	// the two pair boundaries (800, 3000), receiver offsets A / B (0.275, 1.0)
@@ -61,7 +61,7 @@ cbuffer LooseUniforms : register(b31, space0)
     float4 ussCsmFilter;	// x Vogel filter on, y radius (texels), z taps, w receiver-plane depth bias on
     float3 ussCsmBias;	// the receiver offset of each cascade, world units along the light
     int ussTerrOn;
-    float4x4 ussWorldFromView;
+    row_major float4x4 ussWorldFromView;
     float4 ussTerrXform;	// u = x X.x + X.y, v = y X.z + X.w
     float4 ussTerrRange;	// zmin, z span, the receiver's bias (world up), the edge fade (uv)
     int ussContactOn;
@@ -85,7 +85,7 @@ cbuffer LooseUniforms : register(b31, space0)
     float2 ussDim;	// the ambient / specular dimming in terrain shadow (FO4CS 0.5 / 0.5; 0 off)
     int ussPbrDim;	// lane GAPLOOK1: 1 the PBR path dims its ambient + environment too, 2 red (the sun too)
     int ussCloudOn;
-    float4x4 ussCloudFromView;	// view space -> (u, v, height km); u, v across the sun
+    row_major float4x4 ussCloudFromView;	// view space -> (u, v, height km); u, v across the sun
     float4 ussCloudFar;	// x transmittance past the map, y edge fade (uv), z the air tail's cloud taps (Ultra), w the air's ambient share
     int cellLightCount;
     bool cellClusterOn;	// false: every pixel walks every light (the flat loop)

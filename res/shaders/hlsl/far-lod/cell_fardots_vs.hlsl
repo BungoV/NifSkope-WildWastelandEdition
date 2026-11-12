@@ -8,7 +8,7 @@
 cbuffer LooseUniforms : register(b31, space0)
 {
     float4 dotRow[3];
-    float4x4 dotProj;
+    row_major float4x4 dotProj;
     float3 dotCam;	// the camera, world
     int dotRed;	// 1 = never faded (debug)
     float2 dotBand;

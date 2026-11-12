@@ -48,7 +48,7 @@ cbuffer LooseUniforms : register(b31, space0)
     bool lodEmissiveRaw;	// channel 13: the glow slot raw (a source .lodm's emissive texture)
     float3 lodEmissiveColor;	// channel 13: the source's emissive colour, folded into the legacy sheet
     bool hasModelSpaceNormals;
-    float3x3 normalMatrix;
+    row_major float3x3 normalMatrix;
     bool wwDecalMapped;	// lane DECALANGLE2: and its vertex rgb is D as a signed byte (not a colour)
     bool greyscaleColor;
     float paletteScale;

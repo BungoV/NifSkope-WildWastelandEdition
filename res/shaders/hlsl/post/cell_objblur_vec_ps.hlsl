@@ -9,7 +9,7 @@ cbuffer LooseUniforms : register(b31, space0)
     float2 invSize;
     int objRed;
     float2 jitterNdc;
-    float4x4 reproj;
+    row_major float4x4 reproj;
     float shutter;
     float maxPx;
 };

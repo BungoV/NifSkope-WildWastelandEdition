@@ -8,7 +8,7 @@ cbuffer LooseUniforms : register(b31, space0)
 {
     float2 invSize;
     float2 jitterNdc;
-    float4x4 reproj;
+    row_major float4x4 reproj;
 };
 Texture2D<float4> depthTex : register(t0, space0);
 SamplerState _depthTex_sampler : register(s0, space0);

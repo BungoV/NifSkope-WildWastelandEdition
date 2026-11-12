@@ -3,6 +3,8 @@
 // GLSL includes are inlined as the loader does. Fusion Shaders (F4FS) feeds it the GL-side inputs
 // named in notes/vkcompute1/hlsl_plan.md. Not wired: nothing loads this file.
 // profile: ps_6_0
+// note: gl_FragDepth layout depth_greater kept as SV_DepthGreaterEqual
+// note: gl_FragCoord is noperspective centroid (D3D asks for it beside SV_Depth*Equal; same value at 1x)
 #include "FarLodBindingsVk.hlsli"
 cbuffer globalUniforms : register(b0, space0)
 {
@@ -52,7 +54,7 @@ cbuffer LooseUniforms : register(b31, space0)
     float cardFadeOut;
     float cardFadeFrame;
     bool useDepthOffset;	// gl_FragDepth, spec 286
-    float4x4 modelViewMatrix;	// the same one the vertex stage used
+    row_major float4x4 modelViewMatrix;	// the same one the vertex stage used
     int debugChannel;	// 0 = lit; otherwise one sheet channel raw
     float emissiveScale;	// spec 88..95 -- carried, never folded in
     bool useBakedAo;	// spec 293..295
@@ -82,14 +84,16 @@ struct SPIRV_Cross_Input
     float3 cardPosModel : TEXCOORD0;
     float2 cardQuadUv : TEXCOORD1;
     float3 cardViewRay : TEXCOORD2;
-    float4 gl_FragCoord : SV_Position;
+    noperspective centroid float4 gl_FragCoord : SV_Position;
 };
 
 struct SPIRV_Cross_Output
 {
     float4 fragColor : SV_Target0;
-    float gl_FragDepth : SV_Depth;
+    float gl_FragDepth : SV_DepthGreaterEqual;
 };
+
+static uint dummy_parameter;
 
 uint2 spvTextureSize(Texture2D<float4> Tex, uint Level, out uint Param)
 {
@@ -122,7 +126,6 @@ float coverageOf(float a)
 
 float covAt(float2 uv)
 {
-    uint dummy_parameter;
     int2 sz = int2(spvTextureSize(ColourSheet, uint(0), dummy_parameter));
     float2 p = (uv * float2(sz)) - 0.5f.xx;
     float2 fl = floor(p);
@@ -222,7 +225,6 @@ void frag_main()
     float cutCov = 0.0f;
     float cutW = -1.0f;
     float3 ray = normalize(cardViewRay);
-    uint dummy_parameter;
     float2 stipTexels = float2(int2(spvTextureSize(ColourSheet, uint(0), dummy_parameter))) * frameRect[0].zw;
     float2 stipCell = floor(cardQuadUv * stipTexels);
     float stipNoise = frac(sin(dot(stipCell, float2(12.98980045318603515625f, 78.233001708984375f))) * 43758.546875f);

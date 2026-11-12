@@ -12,9 +12,9 @@ cbuffer LooseUniforms : register(b31, space0)
     float2 cvPhase;
     float cvHistOn;	// 0 = no history yet (first frame, resize, a jump)
     float cvReproj;	// 0 = the red noreproj: the same pixel of the history, the camera's motion ignored
-    float3x3 cvCam;	// this frame: world columns right, up, back
+    row_major float3x3 cvCam;	// this frame: world columns right, up, back
     float4 cvProj;	// P00, P11, P20, P21
-    float3x3 cvPrevCam;	// last frame's
+    row_major float3x3 cvPrevCam;	// last frame's
     float3 cvCamKm;
     float3 cvPrevCamKm;
     float4 cvPrevProj;
@@ -42,6 +42,8 @@ struct SPIRV_Cross_Output
     float4 cvOut : SV_Target0;
     float4 cvDepth : SV_Target1;
 };
+
+static uint dummy_parameter;
 
 float mod(float x, float y)
 {
@@ -95,7 +97,6 @@ float4 cvMoveBox(float2 q, float2 uv, float2 pv, float4 c)
         return c;
     }
     int2 m = int2(floor(q / cvStride.xx));
-    uint dummy_parameter;
     int2 mhi = int2(spvTextureSize(cvMarch, uint(0), dummy_parameter)) - int2(1, 1);
     float4 lo = 1000000015047466219876688855040.0f.xxxx;
     float4 up = (-1000000015047466219876688855040.0f).xxxx;

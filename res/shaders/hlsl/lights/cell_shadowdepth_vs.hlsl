@@ -6,9 +6,9 @@
 #include "LightsBindingsVk.hlsli"
 cbuffer LooseUniforms : register(b31, space0)
 {
-    float4x4 shRelFromView;
-    float4x4 modelViewMatrix;
-    float4x4 shClipFromRel;
+    row_major float4x4 shRelFromView;
+    row_major float4x4 modelViewMatrix;
+    row_major float4x4 shClipFromRel;
 };
 
 static float4 gl_Position;

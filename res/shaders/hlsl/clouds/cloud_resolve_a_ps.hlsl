@@ -10,9 +10,9 @@ cbuffer LooseUniforms : register(b31, space0)
     float2 cvHistSize;
     float cvStride;
     float cvReproj;	// 0 = the red noreproj: the same pixel of the history, the camera's motion ignored
-    float3x3 cvCam;	// this frame: world columns right, up, back
+    row_major float3x3 cvCam;	// this frame: world columns right, up, back
     float4 cvProj;	// P00, P11, P20, P21
-    float3x3 cvPrevCam;	// last frame's
+    row_major float3x3 cvPrevCam;	// last frame's
     float3 cvCamKm;
     float3 cvPrevCamKm;
     float4 cvPrevProj;
@@ -50,6 +50,8 @@ struct SPIRV_Cross_Output
     float4 cvOut : SV_Target0;
     float4 cvDepth : SV_Target1;
 };
+
+static uint dummy_parameter;
 
 float mod(float x, float y)
 {
@@ -136,7 +138,6 @@ float4 cvMoveBox(float2 q, float2 uv, float2 pv, float4 c)
         return c;
     }
     int2 m = int2(floor(q / cvStride.xx));
-    uint dummy_parameter;
     int2 mhi = int2(spvTextureSize(cvMarch, uint(0), dummy_parameter)) - int2(1, 1);
     float4 lo = 1000000015047466219876688855040.0f.xxxx;
     float4 up = (-1000000015047466219876688855040.0f).xxxx;
@@ -167,7 +168,6 @@ void frag_main()
     float2 tmp349;
     if (cvHistAge > 0.0f)
     {
-        uint dummy_parameter;
         tmp349 = (((q - cvPhase) / cvStride.xx) + 0.5f.xx) / float2(int2(spvTextureSize(cvMarch, uint(0), dummy_parameter)));
     }
     else
@@ -246,7 +246,6 @@ void frag_main()
         cvOut = cvMoveBox(param_5, param_6, param_7, param_8);
         if (((cvHistAge > 0.0f) && (age > cvHistAge)) && (cvAccReset > 0.0f))
         {
-            uint dummy_parameter;
             int2 mhi = int2(spvTextureSize(cvMarch, uint(0), dummy_parameter)) - int2(1, 1);
             int2 hp = hp0 + int2(((float2(m) * cvStride) + cvPhase) - q);
             float s1 = 0.0f;
@@ -280,7 +279,6 @@ void frag_main()
     float a = cvAccAlpha;
     if (cvAccClamp > 0.5f)
     {
-        uint dummy_parameter;
         int2 mhi_1 = int2(spvTextureSize(cvMarch, uint(0), dummy_parameter)) - int2(1, 1);
         float4 lo = coarse;
         float4 up = coarse;

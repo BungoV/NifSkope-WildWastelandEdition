@@ -34,6 +34,8 @@ struct SPIRV_Cross_Output
     float4 fragColor : SV_Target0;
 };
 
+static uint dummy_parameter;
+
 uint2 spvTextureSize(Texture2D<float4> Tex, uint Level, out uint Param)
 {
     uint2 ret;
@@ -60,7 +62,6 @@ float reach(float d, float r)
 void frag_main()
 {
     int2 X = int2(gl_FragCoord.xy);
-    uint dummy_parameter;
     int2 sz = int2(spvTextureSize(colTex, uint(0), dummy_parameter));
     float4 cX = colTex.Load(int3(X, 0));
     float2 vn = neighTex.Load(int3(X / tile.xx, 0)).xy * 0.5f;

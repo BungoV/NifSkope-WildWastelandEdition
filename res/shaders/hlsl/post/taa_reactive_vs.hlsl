@@ -6,7 +6,7 @@
 #include "PostBindingsVk.hlsli"
 cbuffer LooseUniforms : register(b31, space0)
 {
-    float4x4 clipJit;
+    row_major float4x4 clipJit;
 };
 
 static float4 gl_Position;

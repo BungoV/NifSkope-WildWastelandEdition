@@ -30,12 +30,12 @@ cbuffer globalUniforms : register(b0, space0)
 cbuffer LooseUniforms : register(b31, space0)
 {
     bool farInst;
-    float4x4 modelViewMatrix;
+    row_major float4x4 modelViewMatrix;
     float4 farSwayBlock;
     float farSwayAmp;
     bool lodTreeAnim;
     float farSwayTime;
-    float4x4 csmClipFromView;
+    row_major float4x4 csmClipFromView;
 };
 
 static float4 gl_Position;

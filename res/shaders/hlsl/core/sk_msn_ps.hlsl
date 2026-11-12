@@ -34,7 +34,7 @@ cbuffer LooseUniforms : register(b31, space0)
     int alphaFlags;	// bits 0 to 2: alpha test mode, bit 3: alpha blending enabled
     float alpha;
     float alphaThreshold;
-    float4x4 modelViewMatrix;
+    row_major float4x4 modelViewMatrix;
     bool hasEmit;
     float3 glowColor;
     float glowMult;
