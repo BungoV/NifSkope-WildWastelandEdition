@@ -3966,7 +3966,6 @@ void GLView::paintGL()
 	} wwFirstFrame{ wwPaintCounter == 1 };
 	QElapsedTimer wwStream1Clock;	// lane STREAM1: the whole paint, for the hitch figures
 	wwStream1Clock.start();
-	WwVkFramePaint wwVkPaint;	// lane VKFRAME1: the paint's CPU time for the `vk frame:` overlap
 	wwFpsGpuMark( 0 );	// lane MODULES1 item 7: F3's GPU ms
 	wwGpuFrameBegin( Pos );	// lane EMPTY240 R2-3: the frames-in-flight cap and the `frame gpu longest:` window
 	struct WwGpuFrameDone

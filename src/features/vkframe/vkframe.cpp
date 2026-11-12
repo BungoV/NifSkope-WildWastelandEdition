@@ -23,6 +23,7 @@
 #include "harnesswindow.h"   // wwHarnessSettingsSuffix
 #include "version.h"
 #include "wwswitch.h"
+#include "wwsyncwait.h"	// lane EMPTY240 R4-2: the `frame overlap:` window, read before its line resets it
 
 #include <QDebug>
 #include <QDir>
@@ -49,6 +50,8 @@
 #include "features/vkframe/bloom_down.spv.h"
 #include "features/vkframe/bloom_hold.spv.h"
 #include "features/vkframe/bloom_up.spv.h"
+#include "features/vkframe/bloom_src.spv.h"	// round 3 (P3): the source from the shared frame
+#include "features/vkframe/bloom_comb.spv.h"	// round 3 (P2): the final tent once per pixel
 #endif
 
 namespace
@@ -62,8 +65,6 @@ double nowMs()
 // the 5 s window the `vk frame:` line and the `hardware use:` words read (GL thread)
 struct Window
 {
-	double cpuMs = 0.0;
-	int cpuN = 0;
 	double vkMs = 0.0;
 	int vkN = 0;	// frames with a timestamp read back
 	double blockedMs = 0.0;
@@ -78,14 +79,6 @@ Window & win()
 }
 
 }	// namespace
-
-WwVkFramePaint::WwVkFramePaint() : t0( (long long)( nowMs() * 1.0e6 ) ) {}
-
-WwVkFramePaint::~WwVkFramePaint()
-{
-	win().cpuMs += nowMs() - double( t0 ) * 1.0e-6;
-	win().cpuN++;
-}
 
 #ifndef _WIN32
 
@@ -102,6 +95,14 @@ bool makeChain( const void *, int, int, int, const int[][2], unsigned &, unsigne
 }
 void freeChain( const void * ) {}
 bool hasChain( const void * ) { return false; }
+bool makeFrame( const void *, int, int, int, unsigned, unsigned &, unsigned &, QString & why )
+{
+	why = QStringLiteral( "no device (Windows only)" );
+	return false;
+}
+void freeFrame( const void * ) {}
+bool sourceReady( const void *, unsigned, unsigned ) { return false; }
+unsigned combTexture( const void * ) { return 0; }
 bool runBloom( const void *, const BloomJob &, QString & why )
 {
 	why = QStringLiteral( "no device (Windows only)" );
@@ -165,8 +166,8 @@ struct Dev
 	VkPipelineLayout pipeLayout = VK_NULL_HANDLE;
 	VkSampler linearClamp = VK_NULL_HANDLE;
 	VkCommandPool cpool = VK_NULL_HANDLE;
-	VkPipeline pipe[3] = {};	// down, hold, up
-	int pipesWanted = 3, pipesBuilt = 0;
+	VkPipeline pipe[5] = {};	// down, hold, up, source (round 3, P3), combine (round 3, P2)
+	int pipesWanted = 5, pipesBuilt = 0;
 	QString cacheWords;
 	// the frames in flight: a ring of slots, each a command buffer, a fence and two timestamps
 	static constexpr int kSlots = 8;
@@ -199,6 +200,7 @@ typedef void ( APIENTRY * PfnMemoryObjectParameteriv )( GLuint, GLenum, const GL
 typedef void ( APIENTRY * PfnImportMemoryWin32Handle )( GLuint, std::uint64_t, GLenum, void * );
 typedef void ( APIENTRY * PfnTexStorageMem2D )( GLenum, GLsizei, GLenum, GLsizei, GLsizei, GLuint, std::uint64_t );
 typedef void ( APIENTRY * PfnTexStorageMem3D )( GLenum, GLsizei, GLenum, GLsizei, GLsizei, GLsizei, GLuint, std::uint64_t );
+typedef void ( APIENTRY * PfnTexStorageMem2DMs )( GLenum, GLsizei, GLenum, GLsizei, GLsizei, GLboolean, GLuint, std::uint64_t );
 typedef void ( APIENTRY * PfnGenSemaphores )( GLsizei, GLuint * );
 typedef void ( APIENTRY * PfnDeleteSemaphores )( GLsizei, const GLuint * );
 typedef void ( APIENTRY * PfnImportSemaphoreWin32Handle )( GLuint, GLenum, void * );
@@ -210,6 +212,12 @@ constexpr GLenum kGlNumDeviceUuids = 0x9596;          // GL_NUM_DEVICE_UUIDS_EXT
 constexpr GLenum kGlDeviceUuid = 0x9597;              // GL_DEVICE_UUID_EXT
 constexpr GLenum kGlLayoutGeneral = 0x958D;           // GL_LAYOUT_GENERAL_EXT
 constexpr GLenum kGlRgba16f = 0x881A;                 // GL_RGBA16F
+constexpr GLenum kGlRgba32f = 0x8814;                 // GL_RGBA32F
+constexpr GLenum kGlD24S8 = 0x88F0;                   // GL_DEPTH24_STENCIL8
+constexpr GLenum kGlD32FS8 = 0x8CAD;                  // GL_DEPTH32F_STENCIL8
+constexpr GLenum kGlTexture2DMultisample = 0x9100;    // GL_TEXTURE_2D_MULTISAMPLE
+constexpr GLenum kGlDepthStencilTextureMode = 0x90EA; // GL_DEPTH_STENCIL_TEXTURE_MODE
+constexpr GLenum kGlStencilIndex = 0x1901;            // GL_STENCIL_INDEX
 constexpr GLenum kGlTexture2DArray = 0x8C1A;          // GL_TEXTURE_2D_ARRAY
 constexpr GLenum kGlClampToEdge = 0x812F;             // GL_CLAMP_TO_EDGE
 constexpr GLenum kGlTextureMaxLevel = 0x813D;         // GL_TEXTURE_MAX_LEVEL
@@ -225,6 +233,7 @@ struct GlShare
 	PfnImportMemoryWin32Handle importMem = nullptr;
 	PfnTexStorageMem2D storage2D = nullptr;
 	PfnTexStorageMem3D storage3D = nullptr;
+	PfnTexStorageMem2DMs storage2DMs = nullptr;	// round 3: the shared frame (makeFrame refuses without it)
 	PfnGenSemaphores genSem = nullptr;
 	PfnDeleteSemaphores deleteSem = nullptr;
 	PfnImportSemaphoreWin32Handle importSem = nullptr;
@@ -257,6 +266,7 @@ GlShare & glShare()
 	g.importMem = reinterpret_cast<PfnImportMemoryWin32Handle>( q->getProcAddress( "glImportMemoryWin32HandleEXT" ) );
 	g.storage2D = reinterpret_cast<PfnTexStorageMem2D>( q->getProcAddress( "glTexStorageMem2DEXT" ) );
 	g.storage3D = reinterpret_cast<PfnTexStorageMem3D>( q->getProcAddress( "glTexStorageMem3DEXT" ) );
+	g.storage2DMs = reinterpret_cast<PfnTexStorageMem2DMs>( q->getProcAddress( "glTexStorageMem2DMultisampleEXT" ) );
 	g.genSem = reinterpret_cast<PfnGenSemaphores>( q->getProcAddress( "glGenSemaphoresEXT" ) );
 	g.deleteSem = reinterpret_cast<PfnDeleteSemaphores>( q->getProcAddress( "glDeleteSemaphoresEXT" ) );
 	g.importSem = reinterpret_cast<PfnImportSemaphoreWin32Handle>( q->getProcAddress( "glImportSemaphoreWin32HandleEXT" ) );
@@ -298,15 +308,64 @@ uint32_t memType( uint32_t bits, VkMemoryPropertyFlags want )
 	return UINT32_MAX;
 }
 
+bool isDsFormat( VkFormat fmt )
+{
+	return fmt == VK_FORMAT_D24_UNORM_S8_UINT || fmt == VK_FORMAT_D32_SFLOAT_S8_UINT;
+}
+
+GLenum glFormatOf( VkFormat fmt )
+{
+	return fmt == VK_FORMAT_R32G32B32A32_SFLOAT ? kGlRgba32f : fmt == VK_FORMAT_D24_UNORM_S8_UINT ? kGlD24S8
+		: fmt == VK_FORMAT_D32_SFLOAT_S8_UINT ? kGlD32FS8 : kGlRgba16f;
+}
+
+/* what GL does with each kind of shared image: the chain's are sampled, stored, drawn and blitted; the frame's multisample
+ * colour and depth / stencil are drawn, sampled and blitted (no storage: multisample storage is an optional feature) */
+VkImageUsageFlags imgUsage( VkFormat fmt, int samples )
+{
+	const VkImageUsageFlags base = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+	if ( isDsFormat( fmt ) )
+		return base | VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
+	if ( samples > 1 )
+		return base | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+	return base | VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+}
+
+// the format at this sample count can be made with these uses and shared both ways with GL (OPAQUE_WIN32)
+bool exportable( VkFormat fmt, int samples, QString & why )
+{
+	Dev & d = dv();
+	VkPhysicalDeviceExternalImageFormatInfo xi { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTERNAL_IMAGE_FORMAT_INFO };
+	xi.handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_WIN32_BIT;
+	VkPhysicalDeviceImageFormatInfo2 fi { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_IMAGE_FORMAT_INFO_2 };
+	fi.pNext = &xi;
+	fi.format = fmt;
+	fi.type = VK_IMAGE_TYPE_2D;
+	fi.tiling = VK_IMAGE_TILING_OPTIMAL;
+	fi.usage = imgUsage( fmt, samples );
+	VkExternalImageFormatProperties xp { VK_STRUCTURE_TYPE_EXTERNAL_IMAGE_FORMAT_PROPERTIES };
+	VkImageFormatProperties2 fp { VK_STRUCTURE_TYPE_IMAGE_FORMAT_PROPERTIES_2 };
+	fp.pNext = &xp;
+	const VkExternalMemoryFeatureFlags needF = VK_EXTERNAL_MEMORY_FEATURE_EXPORTABLE_BIT | VK_EXTERNAL_MEMORY_FEATURE_IMPORTABLE_BIT;
+	if ( d.vkGetPhysicalDeviceImageFormatProperties2( d.pd, &fi, &fp ) != VK_SUCCESS
+		|| ( xp.externalMemoryProperties.externalMemoryFeatures & needF ) != needF
+		|| !( fp.imageFormatProperties.sampleCounts & VkSampleCountFlags( samples ) ) ) {
+		why = QStringLiteral( "Vulkan format %1 at %2 sample(s) cannot be shared with GL here" ).arg( int( fmt ) ).arg( samples );
+		return false;
+	}
+	return true;
+}
+
 // one image Vulkan made and GL imported (RGBA16F, GENERAL layout on the Vulkan side for its whole life)
 struct Img
 {
 	VkImage i = VK_NULL_HANDLE;
 	VkDeviceMemory m = VK_NULL_HANDLE;
-	VkImageView v = VK_NULL_HANDLE;	// level 0, every layer (2D, or 2D_ARRAY for the ring)
+	VkImageView v = VK_NULL_HANDLE;	// level 0, every layer (2D, or 2D_ARRAY for the ring); a depth / stencil: its stencil
 	VkImageView layer[WwVkPost::kRingLayers] = {};
 	GLuint tex = 0, mem = 0;
-	int w = 0, h = 0, layers = 1, levels = 1;
+	int w = 0, h = 0, layers = 1, levels = 1, samples = 1;
+	VkImageAspectFlags aspect = VK_IMAGE_ASPECT_COLOR_BIT;
 };
 
 struct Chain
@@ -319,6 +378,12 @@ struct Chain
 	VkDescriptorPool pool = VK_NULL_HANDLE;
 	VkDescriptorSet down[WwVkPost::kMaxMips] = {}, downRing[WwVkPost::kRingLayers] = {}, hold = VK_NULL_HANDLE,
 		upSet[WwVkPost::kMaxMips] = {};
+	/* round 3: the source's set (5, 6 = the shared frame's colour and stencil, written again when that frame is made
+	 * again: srcFrame) and the combine's (7 = comb, made the first frame the combine is asked for) */
+	VkDescriptorSet srcSet = VK_NULL_HANDLE, combSet = VK_NULL_HANDLE;
+	VkImage srcFrame = VK_NULL_HANDLE;
+	Img comb;
+	bool combFailed = false, combRan = false;
 	VkSemaphore vkGlDone = VK_NULL_HANDLE, vkVkDone = VK_NULL_HANDLE;
 	GLuint glGlDone = 0, glVkDone = 0;
 	std::vector<GLuint> texs;
@@ -338,7 +403,21 @@ QHash<const void *, QString> & refusals()
 	return r;
 }
 
-bool makeImg( Img & I, int w, int h, int layers, int levels, QString & why )
+// round 3 (P3): the linear frame cellhdr.cpp draws into, shared: multisample colour and depth / stencil (view = stencil)
+struct Frame
+{
+	const QOpenGLContext * ctx = nullptr;
+	Img color, ds;
+};
+
+QHash<const void *, Frame> & frames()
+{
+	static QHash<const void *, Frame> f;
+	return f;
+}
+
+bool makeImg( Img & I, int w, int h, int layers, int levels, QString & why, VkFormat fmt = VK_FORMAT_R16G16B16A16_SFLOAT,
+	int samples = 1 )
 {
 	Dev & d = dv();
 	GlShare & g = glShare();
@@ -346,20 +425,22 @@ bool makeImg( Img & I, int w, int h, int layers, int levels, QString & why )
 	I.h = h;
 	I.layers = layers;
 	I.levels = levels;
+	I.samples = samples;
+	const bool isDs = isDsFormat( fmt );
+	I.aspect = isDs ? VkImageAspectFlags( VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT ) : VkImageAspectFlags( VK_IMAGE_ASPECT_COLOR_BIT );
 	VkExternalMemoryImageCreateInfo ext { VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_IMAGE_CREATE_INFO };
 	ext.handleTypes = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_WIN32_BIT;
 	VkImageCreateInfo ci { VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO };
 	ci.pNext = &ext;
 	ci.imageType = VK_IMAGE_TYPE_2D;
-	ci.format = VK_FORMAT_R16G16B16A16_SFLOAT;
+	ci.format = fmt;
 	ci.extent = { uint32_t( w ), uint32_t( h ), 1 };
 	ci.mipLevels = uint32_t( levels );
 	ci.arrayLayers = uint32_t( layers );
-	ci.samples = VK_SAMPLE_COUNT_1_BIT;
+	ci.samples = VkSampleCountFlagBits( samples );
 	ci.tiling = VK_IMAGE_TILING_OPTIMAL;
-	// GL draws into them too (its route, the dump, the top's mips): colour attachment and transfer as well
-	ci.usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT
-		| VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+	// GL draws into them too (its route, the dump, the top's mips; the frame): attachment and transfer as well
+	ci.usage = imgUsage( fmt, samples );
 	ci.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
 	if ( d.vkCreateImage( d.dev, &ci, nullptr, &I.i ) != VK_SUCCESS ) {
 		why = QStringLiteral( "vkCreateImage failed (%1x%2x%3)" ).arg( w ).arg( h ).arg( layers );
@@ -385,7 +466,8 @@ bool makeImg( Img & I, int w, int h, int layers, int levels, QString & why )
 	vi.image = I.i;
 	vi.viewType = layers > 1 ? VK_IMAGE_VIEW_TYPE_2D_ARRAY : VK_IMAGE_VIEW_TYPE_2D;
 	vi.format = ci.format;
-	vi.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, uint32_t( layers ) };
+	vi.subresourceRange = { isDs ? VkImageAspectFlags( VK_IMAGE_ASPECT_STENCIL_BIT ) : VkImageAspectFlags( VK_IMAGE_ASPECT_COLOR_BIT ), 0,
+		1, 0, uint32_t( layers ) };
 	if ( d.vkCreateImageView( d.dev, &vi, nullptr, &I.v ) != VK_SUCCESS ) {
 		why = QStringLiteral( "vkCreateImageView failed" );
 		return false;
@@ -414,20 +496,28 @@ bool makeImg( Img & I, int w, int h, int layers, int levels, QString & why )
 	g.importMem( I.mem, std::uint64_t( r.size ), kGlHandleOpaqueWin32, mh );
 	CloseHandle( mh );
 	f->glGenTextures( 1, &I.tex );
-	const GLenum target = layers > 1 ? kGlTexture2DArray : GLenum( GL_TEXTURE_2D );
+	const GLenum target = samples > 1 ? kGlTexture2DMultisample : layers > 1 ? kGlTexture2DArray : GLenum( GL_TEXTURE_2D );
 	f->glBindTexture( target, I.tex );
-	if ( layers > 1 )
-		g.storage3D( target, levels, kGlRgba16f, w, h, layers, I.mem, 0 );
+	if ( samples > 1 )
+		g.storage2DMs( target, samples, glFormatOf( fmt ), w, h, GL_TRUE, I.mem, 0 );
+	else if ( layers > 1 )
+		g.storage3D( target, levels, glFormatOf( fmt ), w, h, layers, I.mem, 0 );
 	else
-		g.storage2D( target, levels, kGlRgba16f, w, h, I.mem, 0 );
-	// cellbloom.cpp makeTex's state: bilinear and clamped, one level read (the ring: nearest, as its GL twin)
-	const GLint filter = layers > 1 ? GL_NEAREST : GL_LINEAR;
-	f->glTexParameteri( target, GL_TEXTURE_MIN_FILTER, filter );
-	f->glTexParameteri( target, GL_TEXTURE_MAG_FILTER, filter );
-	f->glTexParameteri( target, GL_TEXTURE_WRAP_S, kGlClampToEdge );
-	f->glTexParameteri( target, GL_TEXTURE_WRAP_T, kGlClampToEdge );
-	if ( layers == 1 )
-		f->glTexParameteri( target, kGlTextureMaxLevel, 0 );
+		g.storage2D( target, levels, glFormatOf( fmt ), w, h, I.mem, 0 );
+	if ( samples > 1 ) {
+		// a multisample texture has no filter; the frame's depth / stencil reads as its stencil (cellhdr.cpp's state)
+		if ( isDs )
+			f->glTexParameteri( target, kGlDepthStencilTextureMode, GLint( kGlStencilIndex ) );
+	} else {
+		// cellbloom.cpp makeTex's state: bilinear and clamped, one level read (the ring and the combine: nearest, as their GL twins)
+		const GLint filter = layers > 1 || fmt == VK_FORMAT_R32G32B32A32_SFLOAT ? GL_NEAREST : GL_LINEAR;
+		f->glTexParameteri( target, GL_TEXTURE_MIN_FILTER, filter );
+		f->glTexParameteri( target, GL_TEXTURE_MAG_FILTER, filter );
+		f->glTexParameteri( target, GL_TEXTURE_WRAP_S, kGlClampToEdge );
+		f->glTexParameteri( target, GL_TEXTURE_WRAP_T, kGlClampToEdge );
+		if ( layers == 1 )
+			f->glTexParameteri( target, kGlTextureMaxLevel, 0 );
+	}
 	f->glBindTexture( target, 0 );
 	const GLenum err = f->glGetError();
 	if ( err != GL_NO_ERROR ) {
@@ -506,6 +596,7 @@ void waitSlots( std::uint64_t upTo, int reuse )
 		}
 	}
 	win().blockedMs += nowMs() - t0;
+	WwSync::add( WwSync::CapFence, ( nowMs() - t0 ) * 1.0e6 );	// the Vulkan frames-in-flight cap is the same wait
 }
 
 void dropChain( Chain & c )
@@ -527,6 +618,7 @@ void dropChain( Chain & c )
 		d.vkDestroyDescriptorPool( d.dev, c.pool, nullptr );
 	dropImg( c.src );
 	dropImg( c.ring );
+	dropImg( c.comb );
 	for ( int i = 0; i < WwVkPost::kMaxMips; i++ ) {
 		dropImg( c.mip[i] );
 		dropImg( c.up[i] );
@@ -553,6 +645,65 @@ void writeSet( VkDescriptorSet set, VkImageView src, VkImageView mip, VkImageVie
 		wr[i].pImageInfo = &ii[i];
 	}
 	d.vkUpdateDescriptorSets( d.dev, 5, wr, 0, nullptr );
+}
+
+// round 3: one more image in a set (5, 6: the shared frame; 7: the combine's target)
+void writeImage( VkDescriptorSet set, uint32_t binding, VkImageView v, VkDescriptorType t )
+{
+	Dev & d = dv();
+	VkDescriptorImageInfo ii { VK_NULL_HANDLE, v, VK_IMAGE_LAYOUT_GENERAL };
+	VkWriteDescriptorSet wr { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
+	wr.dstSet = set;
+	wr.dstBinding = binding;
+	wr.descriptorCount = 1;
+	wr.descriptorType = t;
+	wr.pImageInfo = &ii;
+	d.vkUpdateDescriptorSets( d.dev, 1, &wr, 0, nullptr );
+}
+
+// round 3: new images to GENERAL once (they stay there), waited on: a frame is made once per size
+bool toGeneralNow( std::initializer_list<const Img *> imgs, QString & why )
+{
+	Dev & d = dv();
+	std::vector<VkImageMemoryBarrier> bars;
+	for ( const Img * I : imgs ) {
+		VkImageMemoryBarrier b { VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER };
+		b.srcAccessMask = 0;
+		b.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
+		b.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+		b.newLayout = VK_IMAGE_LAYOUT_GENERAL;
+		b.srcQueueFamilyIndex = b.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+		b.image = I->i;
+		b.subresourceRange = { I->aspect, 0, uint32_t( I->levels ), 0, uint32_t( I->layers ) };
+		bars.push_back( b );
+	}
+	const std::uint64_t f = ++d.frame;
+	const int slot = int( f % Dev::kSlots );
+	waitSlots( 0, slot );
+	VkCommandBuffer cb = d.cb[slot];
+	d.vkResetCommandBuffer( cb, 0 );
+	VkCommandBufferBeginInfo bi { VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
+	bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+	d.vkBeginCommandBuffer( cb, &bi );
+	d.vkCmdPipelineBarrier( cb, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 0, nullptr, 0, nullptr,
+		uint32_t( bars.size() ), bars.data() );
+	d.vkEndCommandBuffer( cb );
+	d.vkResetFences( d.dev, 1, &d.fence[slot] );
+	VkSubmitInfo sub { VK_STRUCTURE_TYPE_SUBMIT_INFO };
+	sub.commandBufferCount = 1;
+	sub.pCommandBuffers = &cb;
+	bool ok;
+	{
+		std::unique_lock<std::mutex> lk;
+		if ( d.qm )
+			lk = std::unique_lock<std::mutex>( *d.qm );
+		ok = d.vkQueueSubmit( d.q, 1, &sub, d.fence[slot] ) == VK_SUCCESS;
+	}
+	if ( ok )
+		d.vkWaitForFences( d.dev, 1, &d.fence[slot], VK_TRUE, 1000000000ull );
+	else
+		why = QStringLiteral( "the layout submit failed" );
+	return ok;
 }
 
 void computeBarrier( VkCommandBuffer cb )
@@ -665,14 +816,16 @@ void wwVkFrameSetDevice( void * instance, void * physical, void * device, unsign
 		return;
 	}
 
-	// the layout every bloom pipeline shares (BloomBindingsVk.hlsli: 0 source, 1 mip, 2 ring, 3 sampler, 4 target; 48 bytes)
-	VkDescriptorSetLayoutBinding b[5];
-	const VkDescriptorType t[5] = { VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
-		VK_DESCRIPTOR_TYPE_SAMPLER, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE };
-	for ( uint32_t i = 0; i < 5; i++ )
+	/* the layout every bloom pipeline shares (BloomBindingsVk.hlsli: 0 source, 1 mip, 2 ring, 3 sampler, 4 target; round 3:
+	 * 5 the frame's colour, 6 its stencil, 7 the combine's target; 48 bytes). A set fills only what its kernel reads. */
+	VkDescriptorSetLayoutBinding b[8];
+	const VkDescriptorType t[8] = { VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
+		VK_DESCRIPTOR_TYPE_SAMPLER, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
+		VK_DESCRIPTOR_TYPE_STORAGE_IMAGE };
+	for ( uint32_t i = 0; i < 8; i++ )
 		b[i] = VkDescriptorSetLayoutBinding { i, t[i], 1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr };
 	VkDescriptorSetLayoutCreateInfo li { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
-	li.bindingCount = 5;
+	li.bindingCount = 8;
 	li.pBindings = b;
 	VkPushConstantRange pr { VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof( Job ) };
 	VkPipelineLayoutCreateInfo pi { VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO };
@@ -731,10 +884,13 @@ void wwVkFrameSetDevice( void * instance, void * physical, void * device, unsign
 		pci.pInitialData = nullptr;
 		d.vkCreatePipelineCache( d.dev, &pci, nullptr, &d.cache );
 	}
-	const uint32_t * code[3] = { vkframe_bloom_down_spv, vkframe_bloom_hold_spv, vkframe_bloom_up_spv };
-	const size_t bytes[3] = { sizeof( vkframe_bloom_down_spv ), sizeof( vkframe_bloom_hold_spv ), sizeof( vkframe_bloom_up_spv ) };
+	// round 3: the source and the combine too, so no frame builds a pipeline (the tone map's 265 ms first-use hitch)
+	const uint32_t * code[5] = { vkframe_bloom_down_spv, vkframe_bloom_hold_spv, vkframe_bloom_up_spv, vkframe_bloom_src_spv,
+		vkframe_bloom_comb_spv };
+	const size_t bytes[5] = { sizeof( vkframe_bloom_down_spv ), sizeof( vkframe_bloom_hold_spv ), sizeof( vkframe_bloom_up_spv ),
+		sizeof( vkframe_bloom_src_spv ), sizeof( vkframe_bloom_comb_spv ) };
 	d.pipesBuilt = 0;
-	for ( int k = 0; k < 3; k++ ) {
+	for ( int k = 0; k < 5; k++ ) {
 		VkShaderModuleCreateInfo mi { VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO };
 		mi.codeSize = bytes[k];
 		mi.pCode = code[k];
@@ -857,11 +1013,12 @@ bool makeChain( const void * key, int W, int H, int mipCount, const int dims[][2
 			ok = makeImg( c.up[i], dims[i][0], dims[i][1], 1, i == 0 ? topLevels( dims[0][0], dims[0][1] ) : 1, why );
 	}
 	ok = ok && makeSemaphore( c.vkGlDone, c.glGlDone, why ) && makeSemaphore( c.vkVkDone, c.glVkDone, why );
-	// the descriptor sets, once per chain shape: down per level, level 0 into each ring layer, the hold, up per level
-	const int sets = mipCount + kRingLayers + 1 + mipCount;
+	/* the descriptor sets, once per chain shape: down per level, level 0 into each ring layer, the hold, up per level; round 3:
+	 * the source and the combine (each set takes the layout's 5 sampled images, 1 sampler, 2 storage images from the pool) */
+	const int sets = mipCount + kRingLayers + 1 + mipCount + 2;
 	if ( ok ) {
-		VkDescriptorPoolSize ps[3] = { { VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, uint32_t( 3 * sets ) }, { VK_DESCRIPTOR_TYPE_SAMPLER, uint32_t( sets ) },
-			{ VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, uint32_t( sets ) } };
+		VkDescriptorPoolSize ps[3] = { { VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, uint32_t( 5 * sets ) }, { VK_DESCRIPTOR_TYPE_SAMPLER, uint32_t( sets ) },
+			{ VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, uint32_t( 2 * sets ) } };
 		VkDescriptorPoolCreateInfo dp { VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO };
 		dp.maxSets = uint32_t( sets );
 		dp.poolSizeCount = 3;
@@ -893,6 +1050,12 @@ bool makeChain( const void * key, int W, int H, int mipCount, const int dims[][2
 				const VkImageView acc = level + 2 == mipCount ? c.mip[mipCount - 1].v : c.up[level + 1].v;
 				writeSet( c.upSet[level], c.mip[level].v, acc, c.ring.v, c.up[level].v );
 			}
+			// round 3: the source writes src (5, 6 when a frame is shared); the combine reads the top (7 when it is made)
+			c.srcSet = all[size_t( k++ )];
+			writeSet( c.srcSet, c.src.v, c.src.v, c.ring.v, c.src.v );
+			c.combSet = all[size_t( k++ )];
+			const VkImageView top = mipCount == 1 ? c.mip[0].v : c.up[0].v;
+			writeSet( c.combSet, top, top, c.ring.v, c.src.v );
 		}
 	}
 	// every image to GENERAL once (it stays there: GL reads and writes it in that layout too)
@@ -975,6 +1138,77 @@ bool makeChain( const void * key, int W, int H, int mipCount, const int dims[][2
 	return true;
 }
 
+bool makeFrame( const void * key, int W, int H, int samples, unsigned dsFormat, unsigned & color, unsigned & ds, QString & why )
+{
+	Dev & d = dv();
+	freeFrame( key );
+	GlShare & g = glShare();
+	const bool device = d.ready.load( std::memory_order_acquire );
+	const bool glImport = device && g.ok && sameGpu( g, why );
+	const WwVkFrame::Route rt = WwVkFrame::route( device, glImport, device && d.pipesBuilt >= d.pipesWanted, !wanted() );
+	if ( rt.side != WwVkFrame::Side::Vk ) {
+		if ( why.isEmpty() )
+			why = !device ? d.why : !g.ok ? g.why : QString::fromLatin1( rt.why );
+		return false;
+	}
+	if ( !g.storage2DMs ) {
+		why = QStringLiteral( "no GL multisample import (glTexStorageMem2DMultisampleEXT is missing)" );
+		return false;
+	}
+	const VkFormat dsf = dsFormat == kGlD24S8 ? VK_FORMAT_D24_UNORM_S8_UINT
+		: dsFormat == kGlD32FS8 ? VK_FORMAT_D32_SFLOAT_S8_UINT : VK_FORMAT_UNDEFINED;
+	if ( dsf == VK_FORMAT_UNDEFINED || W < 1 || H < 1 || samples < 1 || samples > 64 || ( samples & ( samples - 1 ) ) ) {
+		why = QStringLiteral( "no Vulkan twin for the frame (depth format 0x%1, %2 samples)" ).arg( dsFormat, 0, 16 ).arg( samples );
+		return false;
+	}
+	if ( !exportable( VK_FORMAT_R16G16B16A16_SFLOAT, samples, why ) || !exportable( dsf, samples, why ) )
+		return false;
+	Frame & fr = frames()[key];
+	fr.ctx = QOpenGLContext::currentContext();
+	const bool ok = makeImg( fr.color, W, H, 1, 1, why, VK_FORMAT_R16G16B16A16_SFLOAT, samples )
+		&& makeImg( fr.ds, W, H, 1, 1, why, dsf, samples ) && toGeneralNow( { &fr.color, &fr.ds }, why );
+	if ( !ok ) {
+		dropImg( fr.color );
+		dropImg( fr.ds );
+		frames().remove( key );
+		return false;
+	}
+	color = fr.color.tex;
+	ds = fr.ds.tex;
+	const double mb = double( W ) * H * samples / 1048576.0;
+	std::fprintf( stderr, "vk post: frame shared %dx%d, %d sample(s): colour RGBA16F %.1f MB, depth / stencil %s %.1f MB\n", W, H,
+		samples, mb * 8.0, dsf == VK_FORMAT_D24_UNORM_S8_UINT ? "D24S8" : "D32FS8", mb * ( dsf == VK_FORMAT_D24_UNORM_S8_UINT ? 4.0 : 8.0 ) );
+	return true;
+}
+
+void freeFrame( const void * key )
+{
+	auto it = frames().find( key );
+	if ( it == frames().end() )
+		return;
+	waitSlots( ~std::uint64_t( 0 ), -1 );	// nothing in flight reads them
+	for ( Chain & c : chains() )
+		c.srcFrame = VK_NULL_HANDLE;	// a new frame can reuse the handle: its set is written again
+	dropImg( it->color );
+	dropImg( it->ds );
+	frames().erase( it );
+}
+
+bool sourceReady( const void * key, unsigned color, unsigned ds )
+{
+	const auto it = chains().constFind( key );
+	const auto ft = frames().constFind( key );
+	const QOpenGLContext * q = QOpenGLContext::currentContext();
+	return it != chains().constEnd() && it->ok && it->ctx == q && ft != frames().constEnd() && ft->ctx == q && color
+		&& ft->color.tex == color && ft->ds.tex == ds && wanted();
+}
+
+unsigned combTexture( const void * key )
+{
+	const auto it = chains().constFind( key );
+	return it != chains().constEnd() && it->ok && it->combRan ? it->comb.tex : 0u;
+}
+
 bool runBloom( const void * key, const BloomJob & job, QString & why )
 {
 	Dev & d = dv();
@@ -1006,6 +1240,44 @@ bool runBloom( const void * key, const BloomJob & job, QString & why )
 		sayRoute( QStringLiteral( "gl (%1)" ).arg( why ) );
 		return false;
 	}
+	c.combRan = false;
+	// round 3 (P3): the source's frame; the set is written again only when that frame was made again
+	const Frame * fr = nullptr;
+	if ( job.src ) {
+		const auto ft = frames().constFind( key );
+		if ( ft == frames().constEnd() || !ft->color.i || ft->color.tex != job.frameColor || ft->ds.tex != job.frameDs ) {
+			why = QStringLiteral( "the source's frame is not the shared one" );
+			win().glFrames++;
+			win().glWhy = why;
+			sayRoute( QStringLiteral( "gl (%1)" ).arg( why ) );
+			return false;
+		}
+		fr = &*ft;
+		if ( c.srcFrame != fr->color.i ) {
+			waitSlots( ~std::uint64_t( 0 ), -1 );	// no frame in flight reads the set
+			writeImage( c.srcSet, 5, fr->color.v, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE );
+			writeImage( c.srcSet, 6, fr->ds.v, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE );
+			c.srcFrame = fr->color.i;
+		}
+	}
+	// round 3 (P2): the combine's RGBA32F target, made the first frame the combine is asked for (an allocation, no pipeline)
+	bool combFresh = false;
+	if ( job.comb && !c.comb.i && !c.combFailed ) {
+		QString cw;
+		if ( makeImg( c.comb, c.W, c.H, 1, 1, cw, VK_FORMAT_R32G32B32A32_SFLOAT ) ) {
+			writeImage( c.combSet, 7, c.comb.v, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE );
+			c.texs.push_back( c.comb.tex );
+			c.layouts.push_back( kGlLayoutGeneral );
+			combFresh = true;
+			std::fprintf( stderr, "vk post: bloom combine target shared %dx%d RGBA32F (%.1f MB)\n", c.W, c.H,
+				double( c.W ) * c.H * 16.0 / 1048576.0 );
+		} else {
+			dropImg( c.comb );
+			c.combFailed = true;
+			std::fprintf( stderr, "vk post: the combine's target was refused (%s): GL combines\n", qPrintable( cw ) );
+		}
+	}
+	const bool comb = job.comb && c.comb.i;
 	// the frames in flight: wait for frame n - cap (2; WW_FRAMEQUEUE_RED=1: none), and for this slot's last use
 	const std::uint64_t f = ++d.frame;
 	const int slot = int( f % Dev::kSlots );
@@ -1027,6 +1299,26 @@ bool runBloom( const void * key, const BloomJob & job, QString & why )
 	mb.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
 	d.vkCmdPipelineBarrier( cb, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 1, &mb, 0, nullptr, 0,
 		nullptr );
+	if ( combFresh ) {	// its first use: to GENERAL, where it stays
+		VkImageMemoryBarrier ib { VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER };
+		ib.dstAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+		ib.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+		ib.newLayout = VK_IMAGE_LAYOUT_GENERAL;
+		ib.srcQueueFamilyIndex = ib.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+		ib.image = c.comb.i;
+		ib.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
+		d.vkCmdPipelineBarrier( cb, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 0, nullptr, 0, nullptr, 1,
+			&ib );
+	}
+	if ( fr ) {	// round 3 (P3): the source (bloom_src.hlsl: the cell-lit samples exposed, their mean rounded to half)
+		Job j {};
+		j.params[0] = job.exposure;
+		j.params[1] = job.impulseX;
+		j.params[2] = job.impulseY;
+		j.params[3] = job.impulse;
+		j.ints[0] = job.on ? 1 : 0;
+		dispatch( cb, 3, c.srcSet, c.W, c.H, j );
+	}
 	const int n = c.mipCount;
 	for ( int i = 0; i < n; i++ ) {
 		Job j {};
@@ -1054,6 +1346,12 @@ bool runBloom( const void * key, const BloomJob & job, QString & why )
 		j.params[3] = job.dispersion;
 		dispatch( cb, 2, c.upSet[level], c.dims[level][0], c.dims[level][1], j );
 	}
+	if ( comb ) {	// round 3 (P2): the final tent once per pixel (bloom_comb.hlsl), lod 0 of the top
+		Job j {};
+		j.params[0] = job.radius;
+		j.params[2] = job.dispersion;
+		dispatch( cb, 4, c.combSet, c.W, c.H, j );
+	}
 	// the shaders' writes reach GL's reads after the signal
 	mb.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
 	mb.dstAccessMask = VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT;
@@ -1070,8 +1368,17 @@ bool runBloom( const void * key, const BloomJob & job, QString & why )
 	}
 
 	// GL -> Vulkan: GL signals after its source resolve (flushed, so the signal is queued before the submit waits on it)
-	const GLuint nt = GLuint( c.texs.size() );
-	g.signalSem( c.glGlDone, 0, nullptr, nt, c.texs.data(), c.layouts.data() );
+	// the images both sides touch this frame: the chain's, and the shared frame while the source reads it
+	std::vector<GLuint> & texs = c.texs;
+	std::vector<GLenum> & lays = c.layouts;
+	const size_t own = texs.size();
+	if ( fr ) {
+		texs.push_back( fr->color.tex );
+		texs.push_back( fr->ds.tex );
+		lays.resize( texs.size(), kGlLayoutGeneral );
+	}
+	const GLuint nt = GLuint( texs.size() );
+	g.signalSem( c.glGlDone, 0, nullptr, nt, texs.data(), lays.data() );
 	QOpenGLContext::currentContext()->functions()->glFlush();
 	const VkPipelineStageFlags waitStage = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;	// the first timestamp too: it times the work alone
 	VkSubmitInfo sub { VK_STRUCTURE_TYPE_SUBMIT_INFO };
@@ -1093,6 +1400,8 @@ bool runBloom( const void * key, const BloomJob & job, QString & why )
 	if ( !ok ) {
 		// GL's signal has no waiter now: the chain cannot pair its semaphores again, so it goes back to GL for good
 		c.ok = false;
+		texs.resize( own );
+		lays.resize( own );
 		why = QStringLiteral( "vkQueueSubmit failed: the chain stays on GL" );
 		win().glFrames++;
 		win().glWhy = why;
@@ -1102,9 +1411,13 @@ bool runBloom( const void * key, const BloomJob & job, QString & why )
 	d.frameOf[slot] = f;
 	d.pending[slot] = true;
 	// Vulkan -> GL: GL's next reads (the top's mips, the combine, the tone map, the dump) wait on the GPU, not the CPU
-	g.waitSem( c.glVkDone, 0, nullptr, nt, c.texs.data(), c.layouts.data() );
+	g.waitSem( c.glVkDone, 0, nullptr, nt, texs.data(), lays.data() );
+	texs.resize( own );
+	lays.resize( own );
+	c.combRan = comb;
 	win().vkFrames++;
-	sayRoute( QStringLiteral( "vulkan (bloom down / hold / up on the ray-tracing device, %1 mips%2)" ).arg( n )
+	sayRoute( QStringLiteral( "vulkan (bloom %1down / hold / up%2 on the ray-tracing device, %3 mips%4)" )
+		.arg( fr ? QStringLiteral( "source / " ) : QString() ).arg( comb ? QStringLiteral( " / combine" ) : QString() ).arg( n )
 		.arg( job.hold ? QStringLiteral( ", hold" ) : QString() ) );
 	return true;
 }
@@ -1117,8 +1430,11 @@ QString wwVkFrameUse( int frames, double glGpuMs, double wallMs )
 	Dev & d = dv();
 	const double fr = double( std::max( 1, frames ) );
 	const double wall = wallMs / fr;
-	const double cpu = w.cpuMs / double( std::max( 1, w.cpuN ) );
-	const double gpu = glGpuMs / fr;	// GL's frame timestamps: GL waits on the Vulkan block, so it lies inside them
+	// the same CPU and GPU as `frame overlap:` (its window, not reset yet): GL waits on the Vulkan block, so the GL
+	// timestamps hold it
+	const WwSync::Stats & sy = WwSync::stats();
+	const double cpu = sy.cpuMs / double( std::max( 1, sy.cpuFrames ) );
+	const double gpu = sy.gpuFrames > 0 ? sy.gpuMs / double( sy.gpuFrames ) : glGpuMs / fr;
 	const double vk = w.vkMs / double( std::max( 1, w.vkN ) );
 	const double blocked = w.blockedMs / fr;
 	const double lo = std::min( cpu, gpu ), hi = std::max( cpu, gpu );
@@ -1131,8 +1447,8 @@ QString wwVkFrameUse( int frames, double glGpuMs, double wallMs )
 	const QString why = vkRoute ? QStringLiteral( "vulkan" )
 		: !d.ready.load( std::memory_order_acquire ) ? d.why
 		: w.glWhy.isEmpty() ? QStringLiteral( "no bloom chain this window (bloom off or vanilla)" ) : w.glWhy;
-	std::fprintf( stderr, "%s | frames vulkan %d gl %d | overlap: wall %.2f ms a frame, CPU %.2f (paint start to return), GPU %.2f "
-		"(GL timestamps, the Vulkan block inside them), Vulkan %.3f; max %.2f, sum %.2f: %s (%.0f %% of the shorter side runs "
+	std::fprintf( stderr, "%s | frames vulkan %d gl %d | overlap: wall %.2f ms a frame, CPU %.2f (paint start to swap return), GPU %.2f "
+		"(timestamps, the Vulkan block inside them), Vulkan %.3f; max %.2f, sum %.2f: %s (%.0f %% of the shorter side runs "
 		"beside the other); blocked on Vulkan %.3f (the frames-in-flight fences; the semaphores wait on the GPU only) | "
 		"pipelines %d/%d built before first use (cache %s)\n",
 		led.line( qPrintable( why ), 0 ).c_str(), w.vkFrames, w.glFrames, wall, cpu, gpu, vk, hi, cpu + gpu,

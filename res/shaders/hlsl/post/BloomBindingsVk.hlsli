@@ -34,6 +34,17 @@ BLOOM_BIND( 4 ) BLOOM_FORMAT RWTexture2D<float4> BloomTarget : register( u0 );
 ConstantBuffer<BloomJob> BloomJobPc : register( b0 );
 #endif
 
+#ifdef BLOOM_FRAME	// lane VKFRAME1 P2 / P3: the source and the combine (bloom_src.hlsl, bloom_comb.hlsl) only
+#ifdef __spirv__
+#define BLOOM_FORMAT32 [[vk::image_format( "rgba32f" )]]
+#else
+#define BLOOM_FORMAT32
+#endif
+BLOOM_BIND( 5 ) Texture2DMS<float4> BloomFrameColor : register( t3 );  // the linear frame, multisampled (GL draws it, shared)
+BLOOM_BIND( 6 ) Texture2DMS<uint> BloomFrameStencil : register( t4 );  // its stencil (a stencil-aspect view of the depth / stencil)
+BLOOM_BIND( 7 ) BLOOM_FORMAT32 RWTexture2D<float4> BloomComb : register( u1 );  // the final tent once per pixel (RGBA32F)
+#endif
+
 // this thread's texel and the target's size; false past the edge
 bool BloomTexel( uint3 id, out uint2 size )
 {

@@ -128,4 +128,24 @@ float3 F4FX_BloomHoldMean( Texture2DArray<float4> ring, int2 p, int k, int n )
 	return c / float( n );
 }
 
+// The bloom's source, one sample (lane VKFRAME1 P3; GL twin cell_bloom_src.frag): a lit sample's light (never negative)
+// times the exposure (1 under the exposure's red), as the half-float target stores it. lit: the sample's stencil said
+// "a cell program or a cell effect wrote it last" (stencil & 3 == 1), on: the cell's lights and its imagespace are on.
+// Alpha 1 for a lit sample, 0 else: the resolve's mean is the lit share.
+float4 F4FX_BloomSourceSample( float3 hdr, float exposure, bool lit, bool on )
+{
+	if ( !lit )
+		return float4( 0.0, 0.0, 0.0, 0.0 );
+	if ( !on )
+		return float4( 0.0, 0.0, 0.0, 0.0 );
+	const float3 c = max( hdr, 0.0.xxx ) * exposure;
+	return float4( f16tof32( f32tof16( c ) ), 1.0 );
+}
+
+// The bloom's test probe (cell_bloom_src.frag bloomImpulse): value v on the 2x2 block holding (x, y), 0 elsewhere
+float4 F4FX_BloomImpulse( int2 p, float2 at, float v )
+{
+	return float4( all( p / 2 == int2( at ) / 2 ) ? v.xxx : 0.0.xxx, 1.0 );
+}
+
 #endif

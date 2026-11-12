@@ -17,6 +17,10 @@ SPECS = [
 ] + [('src/features/gi/rtddgi', k, 'vulkan1.2', 'rtddgi_%s_spv' % k) for k in ('trace', 'blend', 'reloc', 'restir', 'airrays')]
 # lane VKCOMPUTE1: kernels converted to HLSL, built by DXC from res/shaders/hlsl/rtddgi/<k>.hlsl + tools/spv_header.py
 HLSL_SPECS = [('src/features/gi/rtddgi', k, 'vulkan1.2', 'rtddgi_%s_spv' % k) for k in ('border',)]
+# lane VKFRAME1: the bloom chain, built by src/features/vkframe/vkframe_spirv.sh from res/shaders/hlsl/post/<k>.hlsl
+VKFRAME_KERNELS = ('down', 'hold', 'up', 'src', 'comb')
+HLSL_SPECS += [('src/features/vkframe', 'bloom_' + k, 'vulkan1.2', 'vkframe_bloom_%s_spv' % k) for k in VKFRAME_KERNELS]
+HLSL_DIR = {'src/features/gi/rtddgi': 'res/shaders/hlsl/rtddgi', 'src/features/vkframe': 'res/shaders/hlsl/post'}
 DEFAULT_G = 'E:/Tools/RenderDoc/RenderDoc_1.45_64/plugins/spirv/glslangValidator.exe'
 DEFAULT_DXC = 'E:/Tools/dxc/bin/x64/dxc.exe'
 
@@ -42,8 +46,13 @@ def script_ok(tree):
 			bad.append('src/features/gi/rtddgi_spirv.sh: kernel %s is not in this checker' % k)
 	m = re.search(r'^for k in ([a-z ]+); do\n\t"\$DXC" -spirv -fspv-target-env=vulkan1\.2 -T cs_6_0 -E main ', r, re.M)
 	hloop = m.group(1).split() if m else []
-	if sorted(hloop) != sorted(k for d, k, e, v in HLSL_SPECS):
+	if sorted(hloop) != sorted(k for d, k, e, v in HLSL_SPECS if d == 'src/features/gi/rtddgi'):
 		bad.append('src/features/gi/rtddgi_spirv.sh: its DXC loop (%s) is not this checker\'s HLSL kernels' % ' '.join(hloop))
+	vf = open(os.path.join(tree, 'src/features/vkframe/vkframe_spirv.sh'), encoding='utf-8', errors='replace').read()
+	m = re.search(r'^for k in ([a-z ]+); do\n\t"\$DXC" -spirv -fspv-target-env=vulkan1\.2 -T cs_6_0 -E main ', vf, re.M)
+	vloop = m.group(1).split() if m else []
+	if sorted(vloop) != sorted(VKFRAME_KERNELS):
+		bad.append('src/features/vkframe/vkframe_spirv.sh: its DXC loop (%s) is not this checker\'s bloom kernels' % ' '.join(vloop))
 	return bad
 
 
@@ -144,7 +153,7 @@ def main(argv):
 				if os.path.exists(f):
 					os.remove(f)
 			r = subprocess.run([dxc, '-spirv', '-fspv-target-env=' + env, '-T', 'cs_6_0', '-E', 'main', '-Fo', spv,
-			                    os.path.join(tree, 'res/shaders/hlsl/rtddgi', k + '.hlsl')], capture_output=True, text=True, timeout=300)
+			                    os.path.join(tree, HLSL_DIR[d], k + '.hlsl')], capture_output=True, text=True, timeout=300)
 			if r.returncode == 0:
 				r = subprocess.run([sys.executable, '-I', os.path.join(tree, 'tools/spv_header.py'), spv, vn, out],
 				                   capture_output=True, text=True, timeout=60, stdin=subprocess.DEVNULL)
@@ -155,8 +164,9 @@ def main(argv):
 			if a == c:
 				print('OK    %s/%s %d B (HLSL)' % (d, name, len(c)))
 			else:
-				fails.append('%s/%s: STALE, rebuilt %d B vs committed %d B (%s); run tools/rtddgi_spirv.sh'
-				             % (d, name, len(a), len(c), first_diff(a, c)))
+				fails.append('%s/%s: STALE, rebuilt %d B vs committed %d B (%s); run %s'
+				             % (d, name, len(a), len(c), first_diff(a, c), 'src/features/vkframe/vkframe_spirv.sh'
+				                if d == 'src/features/vkframe' else 'src/features/gi/rtddgi_spirv.sh'))
 	for f in fails:
 		print('FAIL  ' + f)
 	for s in skips:

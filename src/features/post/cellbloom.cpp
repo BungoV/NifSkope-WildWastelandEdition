@@ -631,7 +631,39 @@ bool wwCellBloomRun( Scene * scene, unsigned hdrColor, unsigned ds, int W, int H
 		fn->glViewport( 0, 0, w, h );
 	};
 
+	/* lane VKFRAME1 round 3 (P3): the frame shared with Vulkan (cellhdr.cpp) and the chain on Vulkan: the source is
+	 * bloom_src.hlsl there (runBloom, before the down chain) on the same samples; its uniforms are read here, from what
+	 * wwCellLightsUniforms gives cell_bloom_src.prog (the mirror, else GL). GL's pass below otherwise. */
+	const bool srcVk = ok && WwVkPost::sourceReady( r, hdrColor, ds );
+	float srcExposure = 1.0f;
+	bool srcOn = false;
+	if ( srcVk ) {
+		auto prog = r->useProgram( "cell_bloom_src.prog" );
+		if ( !prog ) {
+			ok = false;
+			why = QStringLiteral( "no cell_bloom_src.prog" );
+		} else {
+			prog->wwMirror.on = true;
+			wwCellLightsUniforms( scene );	// the exposure (and the red's noexp)
+			auto uniI = [&]( const char * n ) {
+				GLint v = 0;
+				const int l = prog->uniLocation( n );
+				if ( l >= 0 && !prog->wwMirror.get( l, WwCellUni::K1i, &v, 1 ) )
+					fn->glGetUniformiv( prog->id, l, &v );
+				return v;
+			};
+			GLfloat e = 1.0f;
+			const int le = prog->uniLocation( "cellIsExposure" );
+			if ( le >= 0 && !prog->wwMirror.get( le, WwCellUni::K1f, &e, 1 ) )
+				fn->glGetUniformfv( prog->id, le, &e );
+			srcOn = uniI( "cellOn" ) != 0 && uniI( "cellIsOn" ) != 0;
+			srcExposure = ( uniI( "cellIsRed" ) & 2 ) != 0 ? 1.0f : e;
+			r->stopProgram();
+		}
+	}
+
 	// 1. the source: the cell-lit samples (stencil 1, the frame's own depth / stencil), exposed; then resolved
+	if ( !srcVk ) {
 	fn->glBindFramebuffer( GL_FRAMEBUFFER, g.srcFbo );
 	fn->glFramebufferTexture2D( GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D_MULTISAMPLE, g.msColor, 0 );
 	if ( dsTexture )	// lane TONEMAP1: the frame's depth / stencil is a multisample texture
@@ -643,7 +675,8 @@ bool wwCellBloomRun( Scene * scene, unsigned hdrColor, unsigned ds, int W, int H
 		ok = false;
 		why = QStringLiteral( "the source target is incomplete" );
 	}
-	if ( ok ) {
+	}	// !srcVk (the GL body keeps its indent: one diff hunk)
+	if ( ok && !srcVk ) {
 		fn->glViewport( 0, 0, W, H );
 		fn->glClearColor( 0.0f, 0.0f, 0.0f, 0.0f );
 		fn->glClear( GL_COLOR_BUFFER_BIT );
@@ -723,7 +756,7 @@ bool wwCellBloomRun( Scene * scene, unsigned hdrColor, unsigned ds, int W, int H
 	/* lane VKFRAME1 (plan step P1): down, hold and up as the Fusion Shaders compute kernels on the ray-tracing device, on
 	 * the same textures (bit-identical to these GL passes offline: tests/vkframe/run.sh); GL's passes below whenever
 	 * it says no (WW_VKPOST_RED=1, the Vulkan Post row off, no device, the images GL's own). One call a frame. */
-	bool onVk = false;
+	bool onVk = false, combVk = false;
 	if ( ok ) {
 		WwVkPost::BloomJob vj;
 		vj.thr = thr;
@@ -734,10 +767,29 @@ bool wwCellBloomRun( Scene * scene, unsigned hdrColor, unsigned ds, int W, int H
 		vj.holdN = holdN;
 		vj.radius = wwBloomRadius( set );
 		vj.dispersion = set.glare ? std::clamp( set.glareDispersion, 0.0f, 2.0f ) : 0.0f;
+		// round 3 (P3): the source from the shared frame, cell_bloom_src.frag's uniforms
+		vj.src = srcVk;
+		vj.frameColor = hdrColor;
+		vj.frameDs = ds;
+		vj.exposure = srcExposure;
+		vj.on = srcOn;
+		vj.impulseX = float( W / 2 );
+		vj.impulseY = float( H / 2 );
+		vj.impulse = s.impulse > 0.0f ? s.impulse : 0.0f;
+		/* round 3 (P2): the combine at lod 0, on the GL combine's own condition below (the "wide" red reads lod 2: GL's);
+		 * the Bloom Mip lod the tone map reads is planned here from the same switches */
+		const float perPixelPlan = !wwLookOn( WwLook::BloomMip ) ? 0.0f
+			: wwEnvStr( "WW_CELL_BLOOM_PERPIX_RED" ) == QLatin1String( "wide" ) ? -1.0f : 1.0f;
+		vj.comb = !s.combRed && vj.dispersion > 0.0f && perPixelPlan >= 0.0f && !( perPixelPlan > 0.0f && wwCellFogBloomOn() );
 		for ( int offset = mipCount - 1; offset > 0; offset-- )
 			bandWeights( set, offset - 1, offset, mipCount, vj.srcW[offset - 1], vj.accW[offset - 1] );
 		QString vkWhy;
 		onVk = WwVkPost::runBloom( r, vj, vkWhy );
+		combVk = onVk && vj.comb;
+	}
+	if ( srcVk && !onVk && ok ) {	// GL drew no source this frame (the route's change is logged by runBloom)
+		ok = false;
+		why = QStringLiteral( "the Vulkan source did not run: no bloom this frame" );
 	}
 	for ( int i = 0; ok && !onVk && i < mipCount; i++ ) {
 		if ( i == 0 && hold ) {
@@ -919,7 +971,10 @@ bool wwCellBloomRun( Scene * scene, unsigned hdrColor, unsigned ds, int W, int H
 		s.topMips = true;
 		s.perPixel = wwEnvStr( "WW_CELL_BLOOM_PERPIX_RED" ) == QLatin1String( "wide" ) ? -1.0f : 1.0f;
 	}
-	if ( ok && accumulated && !s.combRed && dispersion > 0.0f && !( s.perPixel > 0.0f && wwCellFogBloomOn() ) ) {
+	const GLuint combVkTex = ok && accumulated && combVk ? GLuint( WwVkPost::combTexture( r ) ) : 0u;
+	if ( combVkTex ) {
+		s.combTex = combVkTex;	// lane VKFRAME1 round 3 (P2): bloom_comb.hlsl ran on Vulkan in runBloom
+	} else if ( ok && accumulated && !s.combRed && dispersion > 0.0f && !( s.perPixel > 0.0f && wwCellFogBloomOn() ) ) {
 		if ( !g.comb || g.combW != W || g.combH != H ) {
 			if ( g.comb )
 				fn->glDeleteTextures( 1, &g.comb );
