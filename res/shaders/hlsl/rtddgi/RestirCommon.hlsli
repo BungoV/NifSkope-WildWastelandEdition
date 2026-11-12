@@ -124,11 +124,7 @@ float Restir_ClampM( float Mprev, float Mcur, int red )
 // MIRROR restirmath.h similar: a neighbour or the history pixel may be reused (depth within 10 %, normal within 25 deg)
 bool Restir_Similar( float depthA, float3 nA, float depthB, float3 nB )
 {
-	bool wwh0 = depthA <= 0.0;
-	bool wwh1 = depthB <= 0.0;
-	bool wwh2 = depthA >= 1e5;
-	bool wwh3 = depthB >= 1e5;
-	if (wwh0 || wwh1 || wwh2 || wwh3)
+	if ( depthA <= 0.0 || depthB <= 0.0 || depthA >= 1e5 || depthB >= 1e5 )
 		return false;
 	if ( abs( depthA - depthB ) > RESTIR_DEPTH_TOL * depthA )
 		return false;
@@ -186,9 +182,7 @@ float3 Restir_ViewPos( float px, float py, float W, float H, float D, float4 pro
 // frames; valid false = no history), at most RESTIR_ACC_MAX frames deep
 float4 Restir_Accumulate( float4 prev, float num, float den, bool valid, int red )
 {
-	bool wwh4 = ( red & RESTIR_BIT_NOTEMPORAL ) != 0;
-	bool wwh5 = prev.z < 0.5;
-	if (!valid || wwh4 || wwh5)
+	if ( !valid || ( red & RESTIR_BIT_NOTEMPORAL ) != 0 || prev.z < 0.5 )
 		return float4( num, den, 1.0, 0.0 );
 	const float n = min( prev.z + 1.0, RESTIR_ACC_MAX );
 	const float a = 1.0 / n;

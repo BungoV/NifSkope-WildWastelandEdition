@@ -59,8 +59,27 @@ def source_key(path, find=None):
     return sha(*[os.path.basename(f) + ':' + sha(_file(f)) for f in files])
 
 
+DEFAULT_OPT = '-O3'
+_LEVELS = {}
+
+
+def levels_of(hlsl):
+    """R8: res/shaders/hlsl/optlevels.txt = `<stage file name>\\t<DXC level>` for the stages that stay below the default level
+    (the ones whose optimised build failed A4); every other stage is built at DEFAULT_OPT. -> {file name: level}"""
+    p = os.path.normpath(hlsl).replace('\\', '/')
+    root = p.split('/res/shaders/hlsl/')[0] + '/res/shaders/hlsl/optlevels.txt' if '/res/shaders/hlsl/' in p else ''
+    if root not in _LEVELS:
+        _LEVELS[root] = {k: v[0] for k, v in load_table(root, 2).items()} if root else {}
+    return _LEVELS[root]
+
+
+def opt_of(hlsl):
+    """the DXC optimisation flag of one stage file; env DXC_OPT overrides every stage (a diagnosis run)"""
+    return os.environ.get('DXC_OPT') or levels_of(hlsl).get(os.path.basename(hlsl), DEFAULT_OPT)
+
+
 def stage_key(hlsl, defines, toolkey):
-    return sha(source_key(hlsl), ','.join(defines), os.environ.get('DXC_OPT', '-O0'), dxc_key(), toolkey)
+    return sha(source_key(hlsl), ','.join(defines), opt_of(hlsl), dxc_key(), toolkey)
 
 
 def read_key(spv):

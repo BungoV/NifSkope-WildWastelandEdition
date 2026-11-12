@@ -3,7 +3,7 @@ Usage: python -I -X utf8 tests/hlsllive/build_spv.py <outdir> <file_vs.hlsl> [<f
 Stage from the file suffix (_vs _ps _gs _hs _ds); prints one line per file: name, bytes, loose/sampler/block counts."""
 import os, re, subprocess, sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import spvgl
+import spvgl, stamps
 
 DXC = 'E:/Tools/dxc/bin/x64/dxc.exe'
 PROFILE = {'vs': 'vs_6_0', 'ps': 'ps_6_0', 'gs': 'gs_6_0', 'hs': 'hs_6_0', 'ds': 'ds_6_0'}
@@ -39,7 +39,7 @@ def compile_raw(hlsl, raw, defines=()):
     st = os.path.basename(hlsl).rsplit('.', 1)[0].rsplit('_', 1)[1]
     src = open(hlsl, encoding='utf-8', errors='replace').read()
     pm = re.search(r'// profile: (\w+)', src)
-    cmd = [DXC, '-spirv', '-fspv-target-env=vulkan1.0'] + shifts_of(hlsl, src) + [os.environ.get('DXC_OPT', '-O0'), '-T', pm.group(1) if pm else PROFILE[st],
+    cmd = [DXC, '-spirv', '-fspv-target-env=vulkan1.0'] + shifts_of(hlsl, src) + [stamps.opt_of(hlsl), '-T', pm.group(1) if pm else PROFILE[st],
            '-E', 'main', '-I', os.path.dirname(hlsl), '-Fo', raw, hlsl]
     for d in defines:
         cmd += ['-D', d]
