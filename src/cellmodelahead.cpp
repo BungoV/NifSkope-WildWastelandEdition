@@ -142,7 +142,7 @@ void CellModelAhead::load()
 	lodgenParallelFor( int( jobs_.size() ), [&]( int i ) {
 		Job & j = jobs_[size_t( i )];
 		NifItemThreadCache ownItems;
-		WwHw::Busy wwBusy;	// lane EMPTY240 R3-1
+		WwHw::Busy wwBusy( WwHw::BusyModels );	// lane EMPTY240 R3-1, R5-4: by kind
 		j.ok = lodgenNativeLoadModelPlacedOnce( user, j.model, j.subst.isEmpty() ? nullptr : &j.subst, &j.shapes );
 		j.done = true;
 	}, workerCap(), floor );

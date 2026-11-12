@@ -22,13 +22,30 @@ namespace WwHw
 //! R3-1: worker slots for stream work: idealThreadCount() - 2, at least 1
 int poolSlots();	// not `slots`: a Qt keyword macro
 std::atomic<int> & busyCount();
+//! lane EMPTY240 R5-4 (build 77: workers 0.6 / 14 at load): what each busy worker is doing, for the `hardware use:` line
+enum BusyKind { BusyOther, BusyBuilder, BusyModels, BusyTextures, BusyTrim, BusyKinds };
+inline std::atomic<int> & busyKind( int k )
+{
+	static std::atomic<int> n[BusyKinds];
+	return n[k];
+}
 //! one stream worker busy while it lives (builder, model parse, texture read-ahead, archive trim)
 struct Busy
 {
-	Busy() { busyCount().fetch_add( 1, std::memory_order_relaxed ); }
-	~Busy() { busyCount().fetch_sub( 1, std::memory_order_relaxed ); }
+	explicit Busy( int kind = BusyOther ) : kind_( kind )
+	{
+		busyCount().fetch_add( 1, std::memory_order_relaxed );
+		busyKind( kind_ ).fetch_add( 1, std::memory_order_relaxed );
+	}
+	~Busy()
+	{
+		busyCount().fetch_sub( 1, std::memory_order_relaxed );
+		busyKind( kind_ ).fetch_sub( 1, std::memory_order_relaxed );
+	}
 	Busy( const Busy & ) = delete;
 	Busy & operator=( const Busy & ) = delete;
+private:
+	int kind_;
 };
 
 //! R3-2: archive reads since launch, every thread (ns and bytes)

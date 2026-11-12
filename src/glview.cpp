@@ -85,6 +85,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "cellworldanim.h"	// the cell's world clock
 #include "gl/wwuploadcap.h"	// lane EMPTY240 R4-1: the paint's upload budget
 #include "wwsyncwait.h"	// lane EMPTY240 R4-2: the `frame overlap:` line
+#include "wwbetweenpaints.h"	// lane EMPTY240 R5-3: the `between paints:` line
 #include "shortcutregistry.h"
 #include "wwskin.h"
 #include "features/near/cellqueue.h"
@@ -3505,6 +3506,9 @@ struct WwPacer
 	// R3-0b: request to paint, the `frame request:` line every 5 s
 	double requestAt = -1.0, reqSum = 0.0, reqMax = 0.0, reqWinAt = -1.0;
 	int reqN = 0;
+	// R5-3: a paint sent by the tick asks for the next one here; the frames started straight from the last / by a post
+	bool inTick = false, wantNext = false;
+	int straight = 0, posted = 0;
 };
 WwPacer & wwPacer()
 {
@@ -3596,12 +3600,15 @@ static void wwPacerFrameStart( GLView * v, bool wants, bool cellView )
 		p.reqWinAt = now;
 	if ( now - p.reqWinAt >= 5.0 && p.reqN > 0 ) {
 		std::fprintf( stderr, "frame request: the paint starts %.2f ms after the frame's request (mean of %d, longest %.2f), "
-			"delivered %s\n", p.reqSum / double( p.reqN ), p.reqN, p.reqMax, wwEnvInt( "WW_PAINTDIRECT_RED" ) == 1
+			"delivered %s; %d frames started straight after the last one's swap (the message queue empty), %d through the "
+			"event loop (red WW_PACERLOOP_RED=1: every frame through the loop, build 77)\n", p.reqSum / double( p.reqN ), p.reqN,
+			p.reqMax, wwEnvInt( "WW_PAINTDIRECT_RED" ) == 1
 				? "by Qt's update timer (WW_PAINTDIRECT_RED=1: QWindow::requestUpdate, 5 ms + the timer's rounding)"
-				: "at once (the update request sent by the pacer, Qt's timer not waited for)" );
+				: "at once (the update request sent by the pacer, Qt's timer not waited for)", p.straight, p.posted );
 		p.reqWinAt = now;
 		p.reqSum = p.reqMax = 0.0;
 		p.reqN = 0;
+		p.straight = p.posted = 0;
 	}
 	const int interval = ( DEBUG_FRAME_TIME || !wwVsyncOn() ) ? 0 : 1;
 	if ( interval != p.interval ) {
@@ -3638,37 +3645,63 @@ static void wwPacerAfterPaint( GLView * v, bool wants )
 	WwPacer & p = wwPacer();
 	if ( !wants || p.queued || wwFrameTimerRed() )
 		return;
+	if ( p.inTick ) {
+		p.wantNext = true;	// lane EMPTY240 R5-3: the tick that sent this paint goes on (or posts) after the swap
+		return;
+	}
 	p.queued = true;
+	p.posted++;
 	QTimer::singleShot( 0, v, [v]() { wwPacerTick( v ); } );
 }
 
-//! the queued frame: wait out the cap (short sleeps, then re-posts so input still runs), then a tick and a paint
+/*! the queued frame: wait out the cap (short sleeps, then re-posts so input still runs), then a tick and a paint.
+ * lane EMPTY240 R5-3: build 77 spent 1.47 ms a frame between the swap and the next paint going round the event loop for
+ * the posted tick. A paint this tick sent asks for the next one here instead: with the thread's message queue empty
+ * (no input, timer, paint, posted or sent message waits) the next frame starts straight away, up to 4 frames before
+ * the loop gets a turn; anything waiting: posted as before. Red WW_PACERLOOP_RED=1: every frame through the loop. */
 static void wwPacerTick( GLView * v )
 {
 	WwPacer & p = wwPacer();
 	p.queued = false;
-	const double wait = WwFramePacer::waitSeconds( p.clock, p.cap, wwPaceNowS() );
-	if ( wait > 0.0 ) {
+	const bool loopRed = wwEnvInt( "WW_PACERLOOP_RED" ) == 1;
+	for ( int run = 0;; run++ ) {
+		const double wait = WwFramePacer::waitSeconds( p.clock, p.cap, wwPaceNowS() );
+		if ( wait > 0.0 ) {
+			{
+				WwWallPart wallPart( wwWall().cur.capWait );
+				wwPreciseSleep( WwFramePacer::sleepSeconds( wait ) );
+			}
+			p.queued = true;
+			QTimer::singleShot( 0, v, [v]() { wwPacerTick( v ); } );
+			return;
+		}
 		{
-			WwWallPart wallPart( wwWall().cur.capWait );
-			wwPreciseSleep( WwFramePacer::sleepSeconds( wait ) );
+			WwWallPart wallPart( wwWall().cur.gears );	// lane EMPTY240 R4-2: named out of between-paints
+			QMetaObject::invokeMethod( v, "advanceGears", Qt::DirectConnection );
+		}
+		p.requestAt = wwPaceNowS();
+		v->update();
+		/* lane EMPTY240 R3-0b (build 74: 9 ms between paints of a 4 ms frame): update() asks QWindow::requestUpdate, whose
+		 * UpdateRequest comes from the platform's update timer (5 ms + the timer's rounding). The pacer sends it now; the
+		 * timer's own request later finds nothing dirty. Red WW_PAINTDIRECT_RED=1: wait for Qt's timer. */
+		if ( wwEnvInt( "WW_PAINTDIRECT_RED" ) != 1 && v->isExposed() ) {
+			QEvent ev( QEvent::UpdateRequest );
+			p.inTick = !loopRed;
+			p.wantNext = false;
+			QCoreApplication::sendEvent( v, &ev );
+			p.inTick = false;
+		}
+		if ( !p.wantNext )
+			return;	// no paint asked for the next frame here (or it posted it itself)
+		p.wantNext = false;
+		if ( run < 3 && !p.queued && WwBetween::queueEmpty() ) {
+			p.straight++;
+			continue;
 		}
 		p.queued = true;
+		p.posted++;
 		QTimer::singleShot( 0, v, [v]() { wwPacerTick( v ); } );
 		return;
-	}
-	{
-		WwWallPart wallPart( wwWall().cur.gears );	// lane EMPTY240 R4-2: named out of between-paints
-		QMetaObject::invokeMethod( v, "advanceGears", Qt::DirectConnection );
-	}
-	p.requestAt = wwPaceNowS();
-	v->update();
-	/* lane EMPTY240 R3-0b (build 74: 9 ms between paints of a 4 ms frame): update() asks QWindow::requestUpdate, whose
-	 * UpdateRequest comes from the platform's update timer (5 ms + the timer's rounding). The pacer sends it now; the
-	 * timer's own request later finds nothing dirty. Red WW_PAINTDIRECT_RED=1: wait for Qt's timer. */
-	if ( wwEnvInt( "WW_PAINTDIRECT_RED" ) != 1 && v->isExposed() ) {
-		QEvent ev( QEvent::UpdateRequest );
-		QCoreApplication::sendEvent( v, &ev );
 	}
 }
 
@@ -3679,7 +3712,10 @@ static void wwWallStart( GLView * v )
 	WwWall & w = wwWall();
 	if ( !w.connected ) {
 		w.connected = true;
-		QObject::connect( v, &QOpenGLWindow::frameSwapped, v, []() { wwWall().cur.swapAt = wwPaceNowS(); } );
+		QObject::connect( v, &QOpenGLWindow::frameSwapped, v, []() {
+			wwWall().cur.swapAt = wwPaceNowS();
+			WwBetween::swapped();	// lane EMPTY240 R5-3
+		} );
 	}
 	const double now = wwPaceNowS();
 	if ( w.cur.start >= 0.0 && w.cur.finish >= w.cur.start ) {	// lane EMPTY240 R4-2: the paint's CPU time, to the swap's return
@@ -3734,6 +3770,7 @@ struct WwGpuFrames
 	// LATE ITEM 5: the `hardware use:` window (5 s)
 	QElapsedTimer hwWin, paintT;
 	double hwGpuMs = 0.0, hwPaintMs = 0.0, hwWorkers = 0.0, hwOwn = 0.0;	// hwOwn: EMPTY240 R3-1, the stream pool
+	double hwKind[WwHw::BusyKinds] = {};	// EMPTY240 R5-4: hwOwn by what the workers do
 	int hwFrames = 0;
 };
 WwGpuFrames & wwGpuFrames()
@@ -3883,10 +3920,13 @@ static void wwGpuFrameFinish()
 	const QThreadPool * pool = QThreadPool::globalInstance();
 	g.hwWorkers += double( pool->activeThreadCount() );
 	g.hwOwn += double( WwHw::busyCount().load( std::memory_order_relaxed ) );
+	for ( int k = 0; k < WwHw::BusyKinds; k++ )
+		g.hwKind[k] += double( WwHw::busyKind( k ).load( std::memory_order_relaxed ) );
 	g.hwFrames++;
 	if ( !g.hwWin.isValid() ) {
 		g.hwWin.start();
 		g.hwGpuMs = g.hwPaintMs = g.hwWorkers = g.hwOwn = 0.0;
+		std::fill( g.hwKind, g.hwKind + WwHw::BusyKinds, 0.0 );
 		g.hwFrames = 0;
 		return;
 	}
@@ -3901,12 +3941,13 @@ static void wwGpuFrameFinish()
 	WwHw::archiveOpens( &arOpens, &arShared, &arLive );
 	const double fr = double( std::max( 1, g.hwFrames ) );
 	std::fprintf( stderr, "hardware use: GPU busy %.0f %% (GL frames' GPU time over the wall), draw thread busy %.0f %%, "
-		"workers busy %.1f / %d (stream pool: cell builder, model parse, texture read-ahead, archive trim) + %.1f / %d (Qt's "
-		"pool), %.1f fps; RAM cache %lld / %lld MB (%lld files, %lld hits, %lld misses, %lld evicted%s), archives opened %llu "
+		"workers busy %.1f / %d (stream pool: the one cell builder %.2f, model parse %.2f, texture read-ahead %.2f, archive "
+		"trim %.2f, other %.2f) + %.1f / %d (Qt's pool), %.1f fps; RAM cache %lld / %lld MB (%lld files, %lld hits, %lld misses, %lld evicted%s), archives opened %llu "
 		"(%llu shared a live mapping, %zu mapped now), GPU geometry cache %lld / %lld MB; "
 		"%s\n",
 		std::min( 100.0, 100.0 * g.hwGpuMs / wallMs ), std::min( 100.0, 100.0 * g.hwPaintMs / wallMs ),
-		g.hwOwn / fr, WwHw::poolSlots(), g.hwWorkers / fr, pool->maxThreadCount(), 1000.0 * double( g.hwFrames ) / wallMs,
+		g.hwOwn / fr, WwHw::poolSlots(), g.hwKind[WwHw::BusyBuilder] / fr, g.hwKind[WwHw::BusyModels] / fr,
+		g.hwKind[WwHw::BusyTextures] / fr, g.hwKind[WwHw::BusyTrim] / fr, g.hwKind[WwHw::BusyOther] / fr, g.hwWorkers / fr, pool->maxThreadCount(), 1000.0 * double( g.hwFrames ) / wallMs,
 		(long long)( rc.bytes >> 20 ), (long long)( rc.budget >> 20 ), (long long) rc.files, (long long) rc.hits,
 		(long long) rc.misses, (long long) rc.evicted, rc.on ? "" : "; off: WW_RAMCACHE_RED=1",
 		(unsigned long long) arOpens, (unsigned long long) arShared, arLive,
@@ -3932,12 +3973,14 @@ static void wwGpuFrameFinish()
 	WwSync::line( wallMs, g.hwFrames );	// lane EMPTY240 R4-2: CPU, GPU and the waits beside the wall
 	g.hwWin.start();
 	g.hwGpuMs = g.hwPaintMs = g.hwWorkers = g.hwOwn = 0.0;
+	std::fill( g.hwKind, g.hwKind + WwHw::BusyKinds, 0.0 );
 	g.hwFrames = 0;
 }
 
 void GLView::paintGL()
 {
 	wwWallStart( this );	// lane EMPTY240 item 1: the last paint's wall, start to start
+	WwBetween::paintStart();	// lane EMPTY240 R5-3: the `between paints:` line
 	struct WwWallEnd
 	{
 		~WwWallEnd() { wwWall().cur.finish = wwPaceNowS(); }
@@ -6183,7 +6226,7 @@ void GLView::wwCellStreamEvict()
 		if ( !trimRed && model && ( !trimClock.isValid() || trimClock.elapsed() >= 2000 ) && !trimBusy.exchange( true ) ) {
 			trimClock.start();
 			std::thread( [] {
-				WwHw::Busy wwBusy;	// lane EMPTY240 R3-1
+				WwHw::Busy wwBusy( WwHw::BusyTrim );	// lane EMPTY240 R3-1, R5-4: by kind
 				FileBuffer::trimMappedViews();
 				trimBusy = false;
 			} ).detach();

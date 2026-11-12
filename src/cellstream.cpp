@@ -218,6 +218,15 @@ public:
 	std::shared_ptr<CellChunk> job;
 	std::atomic<bool> jobDone { false };
 	WwHw::Io jobIo;                             //!< lane EMPTY240 R3-2: the archive reads in the job's window (the worker writes it)
+	/* lane EMPTY240 R5-4 (build 77: workers 0.6 / 14 at load): the builder is one thread, one cell at a time. Its idle
+	 * time while cells wait to be built, by what held it: [0] a finished build waits for a paint's pump to collect it,
+	 * [1] a wanted built cell waits for its write on the drawing thread, [2] leaving cells are unloaded / reset / freed
+	 * first, [3] Cell Streaming is off. Printed in the `cell stream load:` line, since the last hookup. */
+	std::atomic<long long> jobDoneNs { 0 };
+	long long idleAt = 0;
+	int idleWhy = -1;
+	double idleMs[4] = { 0.0, 0.0, 0.0, 0.0 }, idleBuildMs = 0.0;
+	int idleBuilds = 0;
 	Scene * scene = nullptr;
 	QPointer<Node> root;
 	std::vector<FarTile> farTiles;
@@ -486,13 +495,35 @@ void Stream::shiftCentre( const Vector3 & eye )
 	}
 }
 
+static long long streamNowNs()	// lane EMPTY240 R5-4: one clock for the builder thread and the pump
+{
+	return (long long) std::chrono::duration_cast<std::chrono::nanoseconds>(
+		std::chrono::steady_clock::now().time_since_epoch() ).count();
+}
+
 void Stream::pumpWorker( const Vector3 & eye )
 {
+	// lane EMPTY240 R5-4: the time since the last pump goes to what held the builder then
+	const long long pumpNs = streamNowNs();
+	if ( idleWhy >= 0 && idleAt > 0 )
+		idleMs[idleWhy] += double( pumpNs - idleAt ) * 1e-6;
+	idleAt = pumpNs;
+	idleWhy = -1;
+	auto anyQueued = [this]() {
+		for ( const auto & kv : cells )
+			if ( kv.second.st == CellState::Queued )
+				return true;
+		return false;
+	};
 	if ( worker.joinable() && jobDone.load() && threadGone( worker ) ) {
 		worker.join();
 		std::shared_ptr<CellChunk> done = std::move( job );
 		job.reset();
 		st.buildMaxMs = std::max( st.buildMaxMs, double( done->buildMs ) );
+		if ( jobDoneNs.load() > 0 )	// lane EMPTY240 R5-4: finished, then waited for this pump
+			idleMs[0] += double( pumpNs - jobDoneNs.load() ) * 1e-6;
+		idleBuildMs += double( done->buildMs );
+		idleBuilds++;
 		auto it = cells.find( done->largeRef ? lrKey( done->largeRef ) : Key( done->cx, done->cy ) );
 		if ( soupJob ) {
 			/* lane AIRPERF1 r5: a soup-only job. The cell is drawn by the chunk it has; the second build is dropped as
@@ -531,15 +562,19 @@ void Stream::pumpWorker( const Vector3 & eye )
 	const bool held = paused && !pausedFill;   // lane AIRPERF1 r4: Cell Streaming off: no cell build starts
 	// lane CELLSTREAM1: leaving cells go, their blocks reset and built cells are written before the next build
 	// starts: the builder's heap traffic stalls the main thread's model edits by up to tens of ms
-	if ( unloadWaiting || !toReset.empty() || !toClear.empty() || !toFree.empty() )
+	if ( unloadWaiting || !toReset.empty() || !toClear.empty() || !toFree.empty() ) {
+		idleWhy = anyQueued() ? 2 : -1;	// lane EMPTY240 R5-4
 		return;
+	}
 	/* lane EMPTY240 R3-1 (build 74: workers 0.0 / 16 while cells load): the next build starts while a built cell is
 	 * written on the drawing thread; only a wanted cell still waiting for its write holds it back. Red
 	 * WW_STREAMPOOL_RED=1: a cell being written holds it back too (build 74). */
 	const bool poolRed = wwEnvInt( "WW_STREAMPOOL_RED" ) == 1;
 	for ( const auto & kv : cells )
-		if ( want( kv.first ) && ( kv.second.st == CellState::Ready || ( poolRed && kv.second.st == CellState::Writing ) ) )
+		if ( want( kv.first ) && ( kv.second.st == CellState::Ready || ( poolRed && kv.second.st == CellState::Writing ) ) ) {
+			idleWhy = anyQueued() ? 1 : -1;	// lane EMPTY240 R5-4
 			return;
+		}
 	const int ex = cellOf( eye[0] ), ey = cellOf( eye[1] );
 	StreamCell * best = nullptr;
 	double bestScore = 1.0e30;
@@ -557,6 +592,7 @@ void Stream::pumpWorker( const Vector3 & eye )
 		}
 	}
 	if ( held ) {
+		idleWhy = queued > 0 ? 3 : -1;	// lane EMPTY240 R5-4
 		best = nullptr;
 		bestScore = 1.0e30;
 	}
@@ -609,15 +645,17 @@ void Stream::pumpWorker( const Vector3 & eye )
 		for ( int k = 0; k < 4; k++ )
 			job->facts[k] = best->chunk->facts[k];
 	jobDone = false;
+	jobDoneNs = 0;
 	std::shared_ptr<CellChunk> j = job;
 	std::atomic<bool> * flag = &jobDone;
+	std::atomic<long long> * doneNs = &jobDoneNs;
 	WwHw::Io * ioOut = &jobIo;
 	// a thread a job: the loaders' per-thread caches go with it
 	// lane CELLSPIKE3: the builder takes item slots a run per lock; one lock per item, held by a low-priority thread
 	// the machine had pre-empted, stalled the main thread 10-35 ms off the processor (red lock)
 	const bool ownSlots = !spikeRed( "lock" );
-	worker = std::thread( [j, flag, ownSlots, ioOut]() {
-		WwHw::Busy wwBusy;	// lane EMPTY240 R3-1
+	worker = std::thread( [j, flag, ownSlots, ioOut, doneNs]() {
+		WwHw::Busy wwBusy( WwHw::BusyBuilder );	// lane EMPTY240 R3-1, R5-4: by kind
 		const WwHw::Io io0 = WwHw::io();
 #ifdef Q_OS_WIN
 		// lane CELLSTREAM1: the builder yields to the main thread (its frame slices are what the gate times)
@@ -628,6 +666,7 @@ void Stream::pumpWorker( const Vector3 & eye )
 			itemRun.emplace();
 		cellChunkBuild( *j );
 		*ioOut = WwHw::ioDelta( WwHw::io(), io0 );
+		doneNs->store( streamNowNs() );	// lane EMPTY240 R5-4
 		flag->store( true );
 	} );
 }
@@ -1132,11 +1171,17 @@ bool Stream::attach( StreamCell & c, const QElapsedTimer & t, double budget )
 		std::fprintf( stderr, "cell stream load: %d,%d built in %.0f ms on a worker = archive open (index builds) %.1f ms, "
 			"read %.1f ms, decompress %.1f ms over %lld files (%lld from the RAM cache), %.1f MB packed -> %.1f MB; "
 			"attached %.0f ms after it was built (written %.1f ms on the drawing thread in slices; the drawing thread read "
-			"%lld archive files meanwhile, %.1f ms); workers busy %d / %d\n", c.x, c.y, c.loadBuildMs,
+			"%lld archive files meanwhile, %.1f ms); workers busy %d / %d; since the last hookup the one cell builder built "
+			"%d cells in %.0f ms and stood idle while cells waited %.0f ms = waiting for a paint to collect its cell %.0f + held "
+			"by a wanted built cell not yet written %.0f + held by unloads / resets / frees %.0f + streaming off %.0f\n",
+			c.x, c.y, c.loadBuildMs,
 			double( b.indexNs ) * 1e-6, double( b.readNs ) * 1e-6, double( b.inflateNs ) * 1e-6, (long long) b.files,
 			(long long) b.cacheHits, double( b.packed ) / 1048576.0, double( b.bytes ) / 1048576.0,
 			double( c.readyAt.nsecsElapsed() ) * 1e-6, c.writeMs, (long long) d.drawFiles, double( d.drawNs ) * 1e-6,
-			WwHw::busyCount().load(), WwHw::poolSlots() );
+			WwHw::busyCount().load(), WwHw::poolSlots(), idleBuilds, idleBuildMs,
+			idleMs[0] + idleMs[1] + idleMs[2] + idleMs[3], idleMs[0], idleMs[1], idleMs[2], idleMs[3] );
+		idleMs[0] = idleMs[1] = idleMs[2] = idleMs[3] = idleBuildMs = 0.0;	// lane EMPTY240 R5-4
+		idleBuilds = 0;
 		c.readyAt.invalidate();
 	}
 	if ( gridMode == LodPreview::Off ) {	// lane PERFLOAD1 P8: a cell attached under the near grid's OFF stays hidden

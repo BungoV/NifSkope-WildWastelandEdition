@@ -116,7 +116,7 @@ void worker()
 		QByteArray data;
 		bool ok = false;
 		{
-			WwHw::Busy wwBusy;	// lane EMPTY240 R3-1
+			WwHw::Busy wwBusy( WwHw::BusyTextures );	// lane EMPTY240 R3-1, R5-4: by kind
 			CellSpeed::Acc speedAcc( "texture files read ahead (worker threads)" );
 			const QString full = nif->findResourceFile( name, "textures", ".dds" );
 			ok = !full.isEmpty() && nif->getResourceFile( data, full, "textures", "" ) && !data.isEmpty();

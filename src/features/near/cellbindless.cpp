@@ -7,6 +7,7 @@
 #include "wwswitch.h"
 #include "wwsyncwait.h"	// lane EMPTY240 R4-2: the ring's wrap wait by name
 #include "gl/gpustage.h"	// MODULES1: the pool is filled by a GPU copy (no driver RAM copy)
+#include "gl/wwuploadcap.h"	// lane EMPTY240 R5-1: the pool's intake counts in the paint's upload budget
 
 #include <QObject>
 #include <QOpenGLContext>
@@ -891,10 +892,14 @@ bool poolBind( const Shape * sh, NifSkopeOpenGLContext::GLFunctions * f, unsigne
 	Entry & e = c.entries[sh];
 	const bool same = e.cls && e.h0 == h->h[0] && e.h1 == h->h[1] && e.attrMask == h->attrMask && e.numVerts == h->numVerts
 		&& e.elementBytes == h->elementBytes;
+	if ( !same && WwUp::poolWaits() )
+		return false;	// lane EMPTY240 R5-1: past the paint's upload budget, from its own buffers this paint
 	Class & k = c.classes[h->attrMask];
 	if ( !same ) {
 		// new or changed: (re)placed and uploaded from the shape's arrays, as ShapeData uploads them (fp32)
 		std::uint32_t verts = h->numVerts, idx = h->elementBytes / 2;
+		WwUp::Charge charge;	// lane EMPTY240 R5-1
+		WwUp::Charge::addBytes( qint64( verts ) * floatsOf( h->attrMask ) * 4 + qint64( idx ) * 2 );
 		release( e, c.frameNo );
 		if ( !k.attrMask ) {
 			k.attrMask = h->attrMask;

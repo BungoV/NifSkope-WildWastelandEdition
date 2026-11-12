@@ -349,6 +349,16 @@ static void costRow( const Slot & sl, const double * gpu, double gpuFrame, const
 		+ "},\"sub\":{" + subs + "},\"cpusub\":{" + cpus + "},\"modules\":{" + mods + "}" );
 }
 
+const char * const kSubName[SubCount] = { "air-tile", "air-inject", "air-integrate", "ao-geometry",
+	"ao-stages", "ao-gi", "tone-blit", "tone-measure", "tone-bloom", "tone-quads", "far-dots",
+	"far-cards-lit", "tone-vrs", "fxres-down", "fxres-layer", "fxres-comp", "air-pre", "air-far", "air-post", "far-ground-paint",
+	"far-ground-draw", "sun-casters", "sun-terrstep", "cloud-shadow", "far-ground-pass",	// lane PERFFIX2 b
+	"ssgi-hiz", "ssgi-mips", "ssgi-ecast", "ssgi-echain", "ssgi-cast", "ssgi-temporal",
+	"ssgi-denoise", "contact",	// lane PERFFIX2 c
+	"water", "water-copy", "underwater",
+	"post-dof", "post-mblur", "post-objblur", "post-flare",
+	"air-lampvol" };	// lane MODULES1 part 25	// lane POSTFX1
+
 void collect( Slot & sl )
 {
 	State & s = st();
@@ -439,15 +449,7 @@ void collect( Slot & sl )
 			+ QByteArray::number( sl.cache.maxBytes >> 20 ) + " MB | textures made " + QByteArray::number( sl.cache.texMade )
 			+ " (" + QByteArray::number( double( sl.cache.texBytes ) / 1048576.0, 'f', 1 ) + " MB) | private "
 			+ QByteArray::number( sl.privMb ) + " MB";
-		static const char * const subName[SubCount] = { "air-tile", "air-inject", "air-integrate", "ao-geometry",
-			"ao-stages", "ao-gi", "tone-blit", "tone-measure", "tone-bloom", "tone-quads", "far-dots",
-			"far-cards-lit", "tone-vrs", "fxres-down", "fxres-layer", "fxres-comp", "air-pre", "air-far", "air-post", "far-ground-paint",
-			"far-ground-draw", "sun-casters", "sun-terrstep", "cloud-shadow", "far-ground-pass",	// lane PERFFIX2 b
-			"ssgi-hiz", "ssgi-mips", "ssgi-ecast", "ssgi-echain", "ssgi-cast", "ssgi-temporal",
-			"ssgi-denoise", "contact",	// lane PERFFIX2 c
-			"water", "water-copy", "underwater",
-			"post-dof", "post-mblur", "post-objblur", "post-flare",
-			"air-lampvol" };	// lane MODULES1 part 25	// lane POSTFX1
+		const char * const * subName = kSubName;	// lane EMPTY240 R5-1: at file scope (the GPU zones name them too)
 		for ( int k = 0; k < SubCount; k++ )
 			if ( subSeen[k] )
 				line += QByteArray( " | sub " ) + subName[k] + " " + QByteArray::number( sub[k], 'f', 2 );
@@ -502,6 +504,9 @@ struct WatchZone
 	const char * name;
 	GLuint q0, q1;
 	bool closed;
+	// lane EMPTY240 R5-1: the CPU's ns, the draws and the uploads at its start (0) and end (1)
+	qint64 c0 = 0, c1 = 0, d0 = 0, d1 = 0, t0 = 0, t1 = 0, m0 = 0, m1 = 0;
+	int parent = -1;	// a part (a sub-stage): the zone it sits in
 };
 struct WatchSlot
 {
@@ -509,10 +514,13 @@ struct WatchSlot
 	quint64 frame = 0;
 	GLuint f0 = 0, f1 = 0;
 	std::vector<WatchZone> zones;
+	std::vector<WatchZone> parts;	// lane EMPTY240 R5-1: the sub-stages (PassTime::subBegin) inside the zones
+	WatchZone whole{ "frame", 0, 0, false };	// the paint's own CPU ns, draws and uploads
 	CacheCounts c0, c;
 };
 constexpr int kWatchSlots = 8;
 constexpr int kNotOpen = -100;
+constexpr size_t kWatchParts = 96;	// parts a paint records at most (a sub opened per draw stops there)
 struct Watch
 {
 	bool loaded = false, red = false, inFrame = false;
@@ -520,9 +528,11 @@ struct Watch
 	QOpenGLFunctions_3_3_Core * gl = nullptr;
 	std::vector<GLuint> pool;
 	WatchSlot ring[kWatchSlots];
-	int cur = 0, depth = 0;
+	int cur = 0, depth = 0, top = -1;
 	int open[Count];
+	int partOpen[SubCount];
 	quint64 n = 0;
+	qint64 draws = 0;	// PassTime::countDraw calls, timers on or off
 };
 Watch & watch()
 {
@@ -532,6 +542,8 @@ Watch & watch()
 		w.red = wwEnvInt( "WW_GPUZONES_RED" ) == 1;
 		for ( int & o : w.open )
 			o = kNotOpen;
+		for ( int & o : w.partOpen )
+			o = -1;
 	}
 	return w;
 }
@@ -554,6 +566,51 @@ double watchMs( GLuint a, GLuint b )
 	watch().gl->glGetQueryObjectui64v( b, GL_QUERY_RESULT, &t1 );
 	return t1 > t0 ? double( t1 - t0 ) * 1e-6 : 0.0;
 }
+// lane EMPTY240 R5-1: the CPU clock, the draws and the uploads now, into a zone's start or end
+void watchStamp( WatchZone & z, bool end )
+{
+	const CacheCounts & cc = cacheCounts();
+	( end ? z.c1 : z.c0 ) = nowNs();
+	( end ? z.d1 : z.d0 ) = watch().draws;
+	( end ? z.t1 : z.t0 ) = cc.texMade;
+	( end ? z.m1 : z.m0 ) = cc.made;
+}
+// one figure of the `frame gpu zones:` line: GPU ms [cpu ms, draws, textures, meshes]
+struct WatchSum
+{
+	const char * name = nullptr;
+	double gpu = 0.0, cpu = 0.0;
+	qint64 draws = 0, tex = 0, meshes = 0;
+	int times = 0;
+};
+void watchAdd( std::vector<WatchSum> & sums, const char * name, double gpu, qint64 cpuNs, qint64 draws, qint64 tex, qint64 meshes )
+{
+	size_t k = 0;
+	while ( k < sums.size() && std::strcmp( sums[k].name, name ) != 0 )
+		k++;
+	if ( k == sums.size() ) {
+		sums.push_back( WatchSum() );
+		sums[k].name = name;
+	}
+	sums[k].gpu += gpu;
+	sums[k].cpu += double( std::max<qint64>( 0, cpuNs ) ) * 1e-6;
+	sums[k].draws += draws;
+	sums[k].tex += tex;
+	sums[k].meshes += meshes;
+	sums[k].times++;
+}
+QByteArray watchFigure( const WatchSum & s, bool times )
+{
+	QByteArray f = QByteArray::number( s.gpu, 'f', 1 );
+	if ( times && s.times > 1 )
+		f += " (x" + QByteArray::number( s.times ) + ")";
+	f += " [cpu " + QByteArray::number( s.cpu, 'f', 1 ) + ", " + QByteArray::number( s.draws ) + " draws";
+	if ( s.tex > 0 )
+		f += ", " + QByteArray::number( s.tex ) + " textures";
+	if ( s.meshes > 0 )
+		f += ", " + QByteArray::number( s.meshes ) + " meshes";
+	return f + "]";
+}
 void watchCollect( WatchSlot & sl )
 {
 	Watch & w = watch();
@@ -566,39 +623,69 @@ void watchCollect( WatchSlot & sl )
 	sl.pending = false;
 	const double total = watchMs( sl.f0, sl.f1 );
 	if ( total > 250.0 ) {
-		// zones of one name summed, in first-seen order
-		std::vector<const char *> names;
-		std::vector<double> ms;
-		std::vector<int> times;
+		/* zones of one name summed, in first-seen order. R5-1: each with the CPU ms the paint spent in it, its draws and
+		 * its uploads (a zone whose CPU ms match its GPU ms is the CPU's: the GPU waited for the commands); the gaps
+		 * between the zones named by the zone before them; the sub-stages inside the zones as parts */
+		std::vector<WatchSum> zones, gaps, parts;
 		double held = 0.0;
+		GLuint prevQ = sl.f0;
+		const WatchZone * prev = &sl.whole;
+		bool prevEnd = false;
+		auto gap = [&]( GLuint q, const WatchZone & z ) {
+			const qint64 c = prevEnd ? prev->c1 : prev->c0, d = prevEnd ? prev->d1 : prev->d0;
+			const qint64 t = prevEnd ? prev->t1 : prev->t0, m = prevEnd ? prev->m1 : prev->m0;
+			watchAdd( gaps, prevEnd ? prev->name : "before the first zone", watchMs( prevQ, q ), z.c0 - c, z.d0 - d,
+				z.t0 - t, z.m0 - m );
+		};
 		for ( const WatchZone & z : sl.zones ) {
 			if ( !z.closed )
 				continue;
 			const double m = watchMs( z.q0, z.q1 );
 			held += m;
-			size_t k = 0;
-			while ( k < names.size() && std::strcmp( names[k], z.name ) != 0 )
-				k++;
-			if ( k == names.size() ) {
-				names.push_back( z.name );
-				ms.push_back( 0.0 );
-				times.push_back( 0 );
-			}
-			ms[k] += m;
-			times[k]++;
+			watchAdd( zones, z.name, m, z.c1 - z.c0, z.d1 - z.d0, z.t1 - z.t0, z.m1 - z.m0 );
+			gap( z.q0, z );
+			prevQ = z.q1;
+			prev = &z;
+			prevEnd = true;
 		}
+		{	// the last zone's end to the paint's end
+			WatchZone fin = sl.whole;
+			fin.c0 = fin.c1;
+			fin.d0 = fin.d1;
+			fin.t0 = fin.t1;
+			fin.m0 = fin.m1;
+			gap( sl.f1, fin );
+		}
+		for ( const WatchZone & z : sl.parts )
+			if ( z.closed )
+				watchAdd( parts, z.name, watchMs( z.q0, z.q1 ), z.c1 - z.c0, z.d1 - z.d0, z.t1 - z.t0, z.m1 - z.m0 );
+		const WatchZone & a = sl.whole;
 		QByteArray line = "frame gpu zones: frame " + QByteArray::number( sl.frame ) + " took "
-			+ QByteArray::number( total, 'f', 1 ) + " ms on the GPU =";
-		for ( size_t k = 0; k < names.size(); k++ ) {
-			if ( ms[k] < 0.5 )
+			+ QByteArray::number( total, 'f', 1 ) + " ms on the GPU [cpu " + QByteArray::number( double( a.c1 - a.c0 ) * 1e-6, 'f', 1 )
+			+ ", " + QByteArray::number( a.d1 - a.d0 ) + " draws] =";
+		for ( const WatchSum & s : zones ) {
+			if ( s.gpu < 0.5 && s.cpu < 0.5 )
 				continue;
-			line += " " + QByteArray( names[k] ) + " " + QByteArray::number( ms[k], 'f', 1 );
-			if ( times[k] > 1 )
-				line += " (x" + QByteArray::number( times[k] ) + ")";
-			line += " +";
+			line += " " + QByteArray( s.name ) + " " + watchFigure( s, true ) + " +";
 		}
-		line += " outside the zones " + QByteArray::number( std::max( 0.0, total - held ), 'f', 1 )
-			+ " | this paint uploaded " + QByteArray::number( sl.c.texMade ) + " textures ("
+		line += " outside the zones " + QByteArray::number( std::max( 0.0, total - held ), 'f', 1 );
+		QByteArray after;
+		for ( const WatchSum & s : gaps ) {
+			if ( s.gpu < 0.5 && s.cpu < 0.5 )
+				continue;
+			after += QByteArray( after.isEmpty() ? "" : " +" ) + " after " + s.name + " " + watchFigure( s, false );
+		}
+		if ( !after.isEmpty() )
+			line += " (" + after.mid( 1 ) + ")";
+		QByteArray inside;
+		for ( const WatchSum & s : parts ) {
+			if ( s.gpu < 0.5 && s.cpu < 0.5 )
+				continue;
+			inside += QByteArray( inside.isEmpty() ? "" : " +" ) + " " + s.name + " " + watchFigure( s, true );
+		}
+		if ( !inside.isEmpty() )
+			line += " | parts:" + inside;
+		line += " | this paint uploaded " + QByteArray::number( sl.c.texMade ) + " textures ("
 			+ QByteArray::number( double( sl.c.texBytes ) / 1048576.0, 'f', 1 ) + " MB; "
 			+ QByteArray::number( sl.c.texPumped ) + " by the pump), " + QByteArray::number( sl.c.made ) + " meshes ("
 			+ QByteArray::number( double( sl.c.madeBytes ) / 1048576.0, 'f', 1 ) + " MB)";
@@ -608,7 +695,12 @@ void watchCollect( WatchSlot & sl )
 		w.pool.push_back( z.q0 );
 		w.pool.push_back( z.q1 );
 	}
+	for ( const WatchZone & z : sl.parts ) {
+		w.pool.push_back( z.q0 );
+		w.pool.push_back( z.q1 );
+	}
 	sl.zones.clear();
+	sl.parts.clear();
 	w.pool.push_back( sl.f0 );
 	w.pool.push_back( sl.f1 );
 }
@@ -624,6 +716,32 @@ void watchPass( int pass, bool opening )
 		zoneEnd( w.open[pass] );
 		w.open[pass] = kNotOpen;
 	}
+}
+// lane EMPTY240 R5-1: a sub-stage (PassTime::subBegin/subEnd, timers on or off) as a part of the open zone
+void watchPart( int sub, bool opening )
+{
+	Watch & w = watch();
+	if ( !w.inFrame || sub < 0 || sub >= SubCount )
+		return;
+	WatchSlot & sl = w.ring[w.cur];
+	if ( opening ) {
+		if ( w.partOpen[sub] >= 0 || sl.parts.size() >= kWatchParts )
+			return;
+		WatchZone z{ kSubName[sub], watchQuery(), watchQuery(), false };
+		z.parent = w.top;
+		watchStamp( z, false );
+		w.gl->glQueryCounter( z.q0, GL_TIMESTAMP );
+		sl.parts.push_back( z );
+		w.partOpen[sub] = int( sl.parts.size() ) - 1;
+		return;
+	}
+	if ( w.partOpen[sub] < 0 )
+		return;
+	WatchZone & z = sl.parts[size_t( w.partOpen[sub] )];
+	w.gl->glQueryCounter( z.q1, GL_TIMESTAMP );
+	watchStamp( z, true );
+	z.closed = true;
+	w.partOpen[sub] = -1;
 }
 }	// namespace
 
@@ -644,6 +762,7 @@ void gpuWatchFrame( bool opening, quint64 frame )
 			for ( WatchSlot & sl : w.ring ) {
 				sl.pending = false;
 				sl.zones.clear();
+				sl.parts.clear();
 			}
 		}
 		if ( !w.gl )
@@ -658,23 +777,35 @@ void gpuWatchFrame( bool opening, quint64 frame )
 		sl.f0 = watchQuery();
 		sl.f1 = watchQuery();
 		sl.c0 = cacheCounts();
+		watchStamp( sl.whole, false );
 		w.gl->glQueryCounter( sl.f0, GL_TIMESTAMP );
 		w.cur = k;
 		w.depth = 0;
+		w.top = -1;
 		for ( int & o : w.open )
 			o = kNotOpen;
+		for ( int & o : w.partOpen )
+			o = -1;
 		w.inFrame = true;
 		return;
 	}
 	if ( !w.inFrame )
 		return;
 	WatchSlot & sl = w.ring[w.cur];
+	for ( WatchZone & z : sl.parts )
+		if ( !z.closed ) {
+			w.gl->glQueryCounter( z.q1, GL_TIMESTAMP );
+			watchStamp( z, true );
+			z.closed = true;
+		}
 	for ( WatchZone & z : sl.zones )
 		if ( !z.closed ) {
 			w.gl->glQueryCounter( z.q1, GL_TIMESTAMP );
+			watchStamp( z, true );
 			z.closed = true;
 		}
 	w.gl->glQueryCounter( sl.f1, GL_TIMESTAMP );
+	watchStamp( sl.whole, true );
 	const CacheCounts & cc = cacheCounts();
 	sl.c.made = cc.made - sl.c0.made;
 	sl.c.madeBytes = cc.madeBytes - sl.c0.madeBytes;
@@ -683,6 +814,7 @@ void gpuWatchFrame( bool opening, quint64 frame )
 	sl.c.texPumped = cc.texPumped - sl.c0.texPumped;
 	sl.pending = true;
 	w.inFrame = false;
+	w.top = -1;
 }
 
 int zoneBegin( const char * zoneName )
@@ -694,9 +826,11 @@ int zoneBegin( const char * zoneName )
 		return -2;	// nested: the outer zone holds it
 	WatchSlot & sl = w.ring[w.cur];
 	WatchZone z{ zoneName, watchQuery(), watchQuery(), false };
+	watchStamp( z, false );
 	w.gl->glQueryCounter( z.q0, GL_TIMESTAMP );
 	sl.zones.push_back( z );
-	return int( sl.zones.size() ) - 1;
+	w.top = int( sl.zones.size() ) - 1;
+	return w.top;
 }
 
 void zoneEnd( int zone )
@@ -710,7 +844,9 @@ void zoneEnd( int zone )
 	if ( zone < 0 || size_t( zone ) >= sl.zones.size() || sl.zones[size_t( zone )].closed )
 		return;
 	w.gl->glQueryCounter( sl.zones[size_t( zone )].q1, GL_TIMESTAMP );
+	watchStamp( sl.zones[size_t( zone )], true );
 	sl.zones[size_t( zone )].closed = true;
+	w.top = -1;
 }
 
 int openPass()
@@ -888,6 +1024,7 @@ void addCpu( int pass, qint64 ns )
 
 void countDraw( qint64 ranges )
 {
+	watch().draws++;	// lane EMPTY240 R5-1: the GPU zones' draws (timers on or off)
 	State & s = st();
 	if ( !s.inFrame )
 		return;
@@ -899,6 +1036,7 @@ void countDraw( qint64 ranges )
 
 void subBegin( int sub )
 {
+	watchPart( sub, true );	// lane EMPTY240 R5-1
 	State & s = st();
 	if ( !s.inFrame || sub < 0 || sub >= SubCount || s.openSub[sub] >= 0 )
 		return;
@@ -911,6 +1049,7 @@ void subBegin( int sub )
 
 void subEnd( int sub )
 {
+	watchPart( sub, false );	// lane EMPTY240 R5-1
 	State & s = st();
 	if ( !s.inFrame || sub < 0 || sub >= SubCount || s.openSub[sub] < 0 )
 		return;
