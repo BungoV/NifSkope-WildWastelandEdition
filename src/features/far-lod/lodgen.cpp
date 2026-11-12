@@ -1567,6 +1567,8 @@ BA2File * lodgenStackIndex()
 	return s.index.get();
 }
 
+} // namespace (manager build 84: the anonymous namespace was still open here, so this had no external linkage)
+
 /* lane EMPTY240 R9-c: build 83's frame 2 spent 185 ms in the cloud map, 164 of them building this index on the drawing
  * thread ("archive index: resource stack index (every extension) built on the drawing thread, 91 archive files opened,
  * 164 ms") for one sky mesh (clouds.nif). True when the index is built for the current stack; otherwise one worker builds
@@ -1597,6 +1599,9 @@ bool lodgenStackIndexWarm()
 	}
 	return false;
 }
+
+namespace
+{
 
 static BA2File * lodgenMeshArchives()
 {
