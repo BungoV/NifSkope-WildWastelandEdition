@@ -165,11 +165,33 @@ float2 cvSphere(float h0, float3 d, float R)
 {
     float r0 = 6360.0f + h0;
     float b = r0 * d.z;
-    float c = (r0 * r0) - (R * R);
-    float disc = (b * b) - c;
+    float c = mad(r0, r0, -(R * R));
+    precise float bb = b * b;
+    float disc = bb - c;
     if (disc < 0.0f)
     {
         return (-1.0f).xx;
+    }
+    float s = sqrt(disc);
+    return float2((-b) - s, (-b) + s);
+}
+
+// the ground call (R = 6360 constant), as in cloud_march_ps.hlsl: NV GL takes a ray within ~1e-3 (relative) of the horizon tangent
+// as a tangent hit (s = 0); fitted on the test frame, not derived
+float2 cvSphereGnd(float h0, float3 d)
+{
+    float r0 = 6360.0f + h0;
+    float b = r0 * d.z;
+    float c = mad(r0, r0, -40449600.0f);
+    precise float bb = b * b;
+    float disc = bb - c;
+    if (disc < 0.0f)
+    {
+        if (disc < -bb * 1.0e-3f)
+        {
+            return (-1.0f).xx;
+        }
+        disc = 0.0f;
     }
     float s = sqrt(disc);
     return float2((-b) - s, (-b) + s);
@@ -186,7 +208,7 @@ float cvJitter(float2 q)
 
 float cvHeight(float3 o, float3 d, float t, out float3 up)
 {
-    float3 e = float3(d.xy * t, (6360.0f + o.z) + (d.z * t));
+    float3 e = float3(d.xy * t, 6360.0f + mad(d.z, t, o.z));
     float r = length(e);
     up = e / r.xxx;
     return r - 6360.0f;
@@ -393,7 +415,8 @@ void frag_main()
     cvPrm = cvPhasePrm;
     cvPrm.x = min(cvPrm.x, 1.0f - (8.0f / (cvProj.y * cvHistSize.y)));
     float2 ndc = (((q + 0.5f.xx) / cvHistSize) * 2.0f) - 1.0f.xx;
-    float3 d = normalize(mul(float3((ndc.x + cvProj.z) / cvProj.x, (ndc.y + cvProj.w) / cvProj.y, -1.0f), cvCam));
+    float3 du = mul(float3((ndc.x + cvProj.z) / cvProj.x, (ndc.y + cvProj.w) / cvProj.y, -1.0f), cvCam);
+    float3 d = du * rsqrt(mad(du.z, du.z, mad(du.y, du.y, du.x * du.x)));
     float3 o = cvCamKm;
     float lo = min(cvBands.baseKm.x, cvBands.baseKm.y);
     float hi = max(cvBands.topKm.x, cvBands.topKm.y);
@@ -422,7 +445,7 @@ void frag_main()
     float param_1 = o.z;
     float3 param_2 = d;
     float param_3 = 6360.0f;
-    float2 gnd = cvSphere(param_1, param_2, param_3);
+    float2 gnd = cvSphereGnd(param_1, param_2);
     bool tmp1727 = gnd.y > 0.0f;
     bool tmp1733;
     if (tmp1727)

@@ -216,11 +216,14 @@ JIT_VARS = {
 # the jitter's dot(q, c) as NV GL lowers it: y term fused onto the x product (probe_cloud_jit_*); cvHeight's
 # kRb + o.z + d.z t reassociated by NV GL to kRb + fma(d.z, t, o.z) (probe_cloud_height, height_fit.py: 0 of 39892)
 HEIGHT_FIX = [('float3 e = float3(d.xy * t, (6360.0f + o.z) + (d.z * t));', 'float3 e = float3(d.xy * t, 6360.0f + mad(d.z, t, o.z));')]
-MARCH_FIX = MARCH_FIX0 + JIT_VARS['dot'] + HEIGHT_FIX
+MARCH_FIX = []  # HLSLBULK1 r10: the four fixes (MARCH_FIX0 + JIT_VARS['dot'] + HEIGHT_FIX) now live in cloud_march*_ps.hlsl
 # with the fixes: max rel 8.1e-4 outside the grazing ground hits (row 55: disc ~ 0, hit or miss by GL's compile of
 # cvSphere around it); the rest is NV GL fast-math on ill-conditioned terms (the coverage remap near the threshold,
 # probe_cloud_dens10: ~300 texels at 1e-4) compounding over 48 steps. Stated, not tuned: 1e-3, the grazing texels' share.
 MARCH_RULE = ('rel', 1e-3, 1e-4)
+# DXC ICEs on the dead code after a probe's early return with the port's mad height / jitter: probes put the old text back
+ICE_REV = [(HEIGHT_FIX[0][1], HEIGHT_FIX[0][0]),
+           ('frac(' + JIT_DOT + ')', 'frac(dot(q, float2(0.067110560834407806396484375f, 0.005837149918079376220703125f)))')]
 
 
 def cloud_jobs():
@@ -252,7 +255,7 @@ def cloud_jobs():
                 u['cvBlueSlice'] = 5
             out.append(dict(name='cloud%s_%s' % (suffix, name), size=size, hlsl='clouds/cloud_march%s_ps.hlsl' % suffix,
                             glsl='clouds/cloud_march.frag', defines=defs, uniforms=u, textures=T, rule=MARCH_RULE,
-                            vk_edit=MARCH_FIX0 + HEIGHT_FIX if suffix else MARCH_FIX,  # _a jitters by blue noise: no dot
+                            vk_edit=MARCH_FIX,  # the port carries the fixes (_a jitters by blue noise: no dot)
                             reds=red if name == 'march_full' else []))
 
         def rtex(out_dir, suffix=suffix):
@@ -394,7 +397,7 @@ def jobs(want, tex):
                            gl_edit=[('vec2 cvSphere( float h0, vec3 d, float R )', 'vec4 gPrb; vec2 cvSphere( float h0, vec3 d, float R )'),
                                     ('float s = sqrt( disc );', 'float s = sqrt( disc ); if ( R == kRb + 1.5 ) gPrb.xy = vec2( c, disc ); if ( R == kRb + 6.5 ) gPrb.zw = vec2( c, disc );'),
                                     (ga, ga + ' cvOut = gPrb; cvDepth = vec4( sb, st ); return;')],
-                           vk_edit=MARCH_FIX + [('float2 cvSphere(float h0, float3 d, float R)', 'static float4 gPrb; float2 cvSphere(float h0, float3 d, float R)'),
+                           vk_edit=ICE_REV + [('float2 cvSphere(float h0, float3 d, float R)', 'static float4 gPrb; float2 cvSphere(float h0, float3 d, float R)'),
                                                 ('float s = sqrt(disc);', 'float s = sqrt(disc); if (R == 6361.5f) gPrb.xy = float2(c, disc); if (R == 6366.5f) gPrb.zw = float2(c, disc);'),
                                                 (va, va + ' cvOut = gPrb; cvDepth = float4(sb, st); return;')]))
         # the ground sphere's c, disc, s, b kept in a global (no early return: the hit code stays as compiled)
@@ -402,9 +405,18 @@ def jobs(want, tex):
                            gl_edit=[('vec2 cvSphere( float h0, vec3 d, float R )', 'vec4 gPrb; vec2 cvSphere( float h0, vec3 d, float R )'),
                                     ('float s = sqrt( disc );', 'float s = sqrt( disc ); if ( R == kRb ) gPrb = vec4( c, disc, s, b );'),
                                     (ga, ga + ' cvOut = gPrb; cvDepth = vec4( gnd, o.z, d.z ); return;')],
-                           vk_edit=MARCH_FIX + [('float2 cvSphere(float h0, float3 d, float R)', 'static float4 gPrb; float2 cvSphere(float h0, float3 d, float R)'),
+                           vk_edit=ICE_REV + [
+                                                ('float2 cvSphere(float h0, float3 d, float R)', 'static float4 gPrb; float2 cvSphere(float h0, float3 d, float R)'),
                                                 ('float s = sqrt(disc);', 'float s = sqrt(disc); if (R == 6360.0f) gPrb = float4(c, disc, s, b);'),
                                                 (va, va + ' cvOut = gPrb; cvDepth = float4(gnd, o.z, d.z); return;')]))
+        # in place: rt0 = t0, t1, tGround, tScene at the march gate (no early return; HLSLBULK1 r10: the grazing pixels)
+        probes.append(dict(cm[0], name='probe_cloud_gate', reds=[],
+                           gl_edit=[('void main()', 'vec4 gA = vec4( 0.0 ), gB = vec4( 0.0 ); void main()'),
+                                    ('float cosT = dot( d, cvKeyW );', 'float cosT = dot( d, cvKeyW ); gA = vec4( t0, t1, tGround, tScene ); gB = vec4( gnd, d.z, o.z );'),
+                                    ('cvOut = vec4( L, T );', 'cvOut = gA;'), ('cvDepth = vec4( dm );', 'cvDepth = gB;')],
+                           vk_edit=[('void frag_main()', 'static float4 gA; static float4 gB; void frag_main()'),
+                                    ('float cosT = dot(d, cvKeyW);', 'float cosT = dot(d, cvKeyW); gA = float4(t0, t1, tGround, tScene); gB = float4(gnd, d.z, o.z);'),
+                                    ('cvOut = float4(L, T);', 'cvOut = gA;'), ('cvDepth = dm.xxxx;', 'cvDepth = gB;')]))
         probes.append(dict(sph, name='probe_cloud_sph_fix', vk_edit=MARCH_FIX + sph['vk_edit']))
         probes.append(dict(cd, name='probe_cloud_cd_fix', vk_edit=MARCH_FIX + sph['vk_edit'] + [
             ('float disc = bb - c;', 'float disc = bb - c; return float2(c, disc);')]))
