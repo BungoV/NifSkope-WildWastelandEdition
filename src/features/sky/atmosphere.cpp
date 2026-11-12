@@ -26,6 +26,15 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
+#include <chrono>
+#include <cstring>
+#include <string>
+
+#include "features/exposure/cellhdr.h"	// lane VKSKY1: wwCellHdrVkToneColor, wwCellHdrFrameSize
+#include "features/vkframe/vkpresent.h"	// lane VKSKY1: the sky on the present device
+
+//! lane VKSKY1 (glcontext.cpp): the bytes the global uniform buffer holds for this context, null when not known
+const void * wwGlobalUboBytes( const NifSkopeOpenGLContext * ctx );
 
 // lane ATMO1: the physical sky (atmosphere.h). The constants are Hillaire 2020's Earth (tests/features/sky/atmo_model.py).
 
@@ -455,6 +464,83 @@ void bindTex( NifSkopeOpenGLContext::GLFunctions * fn, NifSkopeOpenGLContext::Pr
 	fn->glActiveTexture( GLenum( GL_TEXTURE0 + unit ) );
 	fn->glBindTexture( GL_TEXTURE_2D, tex );
 	p->uni1i( name, unit );
+}
+
+/* lane VKSKY1 (row G, the sky first): the sky's quad on the present device into the tone frame. The uniforms GL's program
+ * holds go over as atmo_sky_ps.hlsl's two blocks: b0 = the bytes the global buffer holds (glcontext.cpp), b31 packed from
+ * the program's mirror at the reflected offsets (vkpresent.h kSkyFields; glGetUniform only on a miss). false: GL's quad. */
+bool skyOnVulkan( Renderer * r, NifSkopeOpenGLContext::Program * p, GLuint color, const GLint vp[4], const AtGpu & g,
+	const float tint[17][3], std::string & why )
+{
+	const void * ubo = wwGlobalUboBytes( r );
+	if ( !ubo ) {
+		why = "the global uniform buffer's bytes are not known for this context";
+		return false;
+	}
+	WwVkPresent::SkyRun t;
+	wwCellHdrFrameSize( t.w, t.h );
+	std::memcpy( t.vp, vp, sizeof( t.vp ) );
+	t.color = color;
+	const Target * lut[4] = { &g.trans, &g.ms, &g.sunView, &g.moonView };	// the HLSL's t0..t3
+	for ( int k = 0; k < 4; k++ ) {
+		t.lut[k] = lut[k]->tex;
+		t.lutW[k] = lut[k]->w;
+		t.lutH[k] = lut[k]->h;
+		t.lutKey[k] = reinterpret_cast<std::uintptr_t>( lut[k] );
+	}
+	std::memcpy( t.global, ubo, sizeof( t.global ) );
+	auto fn = r->fn;
+	for ( const WwVkPresent::SkyField & f : WwVkPresent::kSkyFields ) {
+		std::uint8_t * at = t.loose + f.offset;
+		if ( f.count > 1 ) {	// atTint[17]: written raw (glUniform3fv), so the caller's copy of what GL holds
+			for ( int i = 0; i < f.count; i++ )
+				std::memcpy( at + i * 16, tint[i], 12 );
+			continue;
+		}
+		const int l = p->uniLocation( f.name );
+		if ( l < 0 )
+			continue;	// not in the program: GL reads 0 there too
+		if ( !p->wwMirror.get( l, f.isInt ? WwCellUni::K1i : WwCellUni::K4f, at, f.words ) ) {
+			if ( f.isInt )
+				fn->glGetUniformiv( p->id, l, reinterpret_cast<GLint *>( at ) );
+			else
+				fn->glGetUniformfv( p->id, l, reinterpret_cast<GLfloat *>( at ) );
+		}
+	}
+	return WwVkPresent::skyRun( t, why );
+}
+
+// lane VKSKY1: the route's line, one a 5 s window while the sky is wanted on Vulkan
+void skyVkSay( bool wanted, const char * glWhy )
+{
+	static QString said;
+	static auto at = std::chrono::steady_clock::now();
+	if ( !wanted ) {
+		const QString line = QStringLiteral( "vk sky: on GL (%1)" ).arg( QString::fromUtf8( glWhy ) );
+		if ( line != said ) {
+			said = line;
+			qInfo().noquote() << line;
+		}
+		return;
+	}
+	const auto now = std::chrono::steady_clock::now();
+	if ( std::chrono::duration<double>( now - at ).count() < 5.0 && !said.isEmpty() && said.startsWith( QStringLiteral( "vk sky: on V" ) ) )
+		return;
+	at = now;
+	const WwVkPresent::SkyStat st = WwVkPresent::takeSkyStat();
+	QString line;
+	if ( st.runs > 0 )
+		line = QStringLiteral( "vk sky: on Vulkan %1 frames (atmo_sky_ps into the tone frame, one crossing; %2 pipeline built in %3 ms; "
+			"drawing thread %4 ms, max %5)" ).arg( st.runs ).arg( st.pipelines ).arg( st.buildMs, 0, 'f', 1 )
+			.arg( st.cpuMs / st.runs, 0, 'f', 3 ).arg( st.maxMs, 0, 'f', 3 );
+	else
+		line = QStringLiteral( "vk sky: on Vulkan wanted, 0 frames drawn" );
+	if ( st.gl > 0 )
+		line += QStringLiteral( ", on GL %1 frames (last: %2)" ).arg( st.gl ).arg( QString::fromStdString( st.glWhy ) );
+	if ( st.fails > 0 )
+		line += QStringLiteral( ", %1 refused to GL (last: %2)" ).arg( st.fails ).arg( QString::fromStdString( st.failWhy ) );
+	said = line;
+	qInfo().noquote() << line;
 }
 
 // the haze rung, the CPU transmittance and lum(): src/features/sky/atmomath.h (moved there by lane SKYA, unchanged)
@@ -935,6 +1021,12 @@ bool wwAtmoDrawSky( Scene * scene, const WwAtmoInputs & in, QString * line )
 	if ( ok ) {
 		auto p = r->useProgram( "atmo_sky.prog" );
 		if ( p ) {
+			/* lane VKSKY1: the frame is the present device's tone frame and the view is on Vulkan (red WW_VKVIEW_SKY_RED=1:
+			 * GL's quad): the setters below also fill the program's mirror, which skyOnVulkan reads */
+			const GLuint vkColor = in.capture ? 0u : wwCellHdrVkToneColor( GLuint( prevDraw ) );
+			const bool vkWant = vkColor && WwVkPresent::shareWanted( "WW_VKVIEW_SKY_RED" );
+			if ( vkWant )
+				p->wwMirror.on = true;
 			medium( p, s.haze, noOzone );
 			bindTex( fn, p, 0, "atTransTex", g.trans.tex );
 			bindTex( fn, p, 1, "atSunView", g.sunView.tex );
@@ -975,9 +1067,25 @@ bool wwAtmoDrawSky( Scene * scene, const WwAtmoInputs & in, QString * line )
 				p->uni3f( "atDirL", up ? sunW[0] : moonW[0], up ? sunW[1] : moonW[1], up ? sunW[2] : moonW[2] );
 				p->uni1f( "atDirExp", ho.dirExp );
 			}
-			if ( ( tintOn || recOn ) && tintLoc >= 0 )
+			static float tintHeld[kTintN][3] = {};	// lane VKSKY1: what GL's atTint holds (a raw write; 0 until the first)
+			if ( ( tintOn || recOn ) && tintLoc >= 0 ) {
 				fn->glUniform3fv( tintLoc, kTintN, &in.tint[0][0] );
-			quad( r );
+				std::memcpy( tintHeld, in.tint, sizeof( tintHeld ) );
+			}
+			bool vkDrew = false;
+			if ( vkWant ) {
+				std::string vkWhy;
+				if ( perPixel ) {
+					WwVkPresent::skyOnGl( "the per-pixel march red (WW_ATMO_RED=perpixel)" );
+				} else {
+					vkDrew = skyOnVulkan( r, p, vkColor, vp, g, tintHeld, vkWhy );
+				}
+				skyVkSay( true, nullptr );
+			} else if ( vkColor ) {
+				skyVkSay( false, "red WW_VKVIEW_SKY_RED=1 or the view not on Vulkan" );
+			}
+			if ( !vkDrew )
+				quad( r );
 			r->stopProgram();
 		} else {
 			ok = false;
