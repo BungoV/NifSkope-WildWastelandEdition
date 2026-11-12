@@ -5,7 +5,7 @@
 // the GL reference draws them (srccomb_gen.hlsl per sample, stencil REPLACE, one draw a value); the kernel then reads them,
 // the combine, the measure's bloom, the LUT (3D) and the backdrop, and writes each sample's value at column x * S + s.
 // Usage: tonemapmatch <job dir> <tonemap.spv> <gen_vs.spv> <gen_ps.spv>
-// Prints `TONEMATCH <job> EXACT|BOUND|FAIL ...` and the GPU ms (timestamps, median of 32 after 2 warm-ups).
+// Prints `TONEMATCH <job> EXACT|BOUND|FAIL ...` and the GPU ms (timestamps, median of 32 after 0.5 s of warm-up dispatches).
 #define VK_NO_PROTOTYPES
 #include <vulkan/vulkan.h>
 #include <windows.h>
@@ -718,6 +718,9 @@ int main( int argc, char ** argv )
 	run( true, false );
 	std::vector<uint32_t> vk( size_t( W ) * S * H * 4 );
 	download( iOut, vk.data(), vk.size() * 4 );
+	// 0.5 s of dispatches first: a GPU that clocked down during the download reads up to 2x slow (the P5 lesson)
+	for ( const DWORD t0 = GetTickCount(); GetTickCount() - t0 < 500; )
+		run( false, false );
 	std::vector<double> t;
 	for ( int r = 0; r < 34; r++ ) {
 		const double ms = run( false, true );

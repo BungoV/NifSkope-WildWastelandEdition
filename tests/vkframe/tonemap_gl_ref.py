@@ -10,9 +10,9 @@ per sample into a 4x RGBA32F target cleared to -7 (a discarded sample keeps it),
 Jobs (one folder each): job.txt (readable), params.txt (tonemapmatch's input), data.bin, sten.bin, fog.bin, comb.bin,
 mb.bin, lut.bin (16 x 256 RGBA8: z-slices stacked), backdrop.bin, gl_out.bin (W*S, H, float32 RGBA), gl_ms.txt (timed jobs:
 the tone map into RGBA32F, into RGBA8 as the view, and a composite pass that would lay a Vulkan result into the view;
-GL_TIME_ELAPSED medians of 32 after 2 warm-ups).
+GL_TIME_ELAPSED medians of 32 after 0.5 s of warm-up draws).
 """
-import ctypes, os, sys
+import ctypes, os, sys, time
 import numpy as np
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -218,6 +218,9 @@ def put(path, a, dtype):
 def timed(run):
     q = U(); genQ(1, ctypes.byref(q))
     t = []
+    t0 = time.perf_counter()
+    while time.perf_counter() - t0 < 0.5:   # warm the clocks (tonemapmatch does the same)
+        run(); finish()
     for r in range(34):
         finish(); beginQ(0x88BF, q); run(); endQ(0x88BF)
         v = ctypes.c_uint64(); getQ64(q, 0x8866, ctypes.byref(v))
