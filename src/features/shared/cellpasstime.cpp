@@ -709,6 +709,66 @@ void watchCollect( WatchSlot & sl )
 			+ QByteArray::number( sl.c.texPumped ) + " by the pump), " + QByteArray::number( sl.c.made ) + " meshes ("
 			+ QByteArray::number( double( sl.c.madeBytes ) / 1048576.0, 'f', 1 ) + " MB)";
 		std::fprintf( stderr, "%s\n", line.constData() );
+		/* lane EMPTY240 R8-1: build 82's frame 152 spent 7206.8 ms in opaque on the GPU with 7.6 ms of CPU and 256 draws:
+		 * the GPU waited on something no zone holds. A paint over a second names what it waited on: the driver's
+		 * evictions (video memory paged out to make room) and the process's page faults since the last such line, the
+		 * free video memory, and the process's private bytes and working set beside the free RAM. Evictions or hard
+		 * faults growing with the stall = the memory manager paged; none = a wait on another queue (the Vulkan frame's
+		 * semaphores) or the device itself. Red WW_GPUSTALL_RED=1: no line, build 82. */
+		WW_SWITCH_STATIC( bool, stallRed, wwEnvInt( "WW_GPUSTALL_RED" ) == 1 );
+		if ( total > 1000.0 && !stallRed ) {
+			static GLint lastEvictions = -1, lastEvictedKb = 0;
+			GLint evictions = -1, evictedKb = 0, freeKb = -1, totalKb = -1;
+			QOpenGLContext * ctx = QOpenGLContext::currentContext();
+			if ( ctx && ctx->hasExtension( QByteArrayLiteral( "GL_NVX_gpu_memory_info" ) ) ) {
+				while ( w.gl->glGetError() != GL_NO_ERROR ) {
+				}
+				w.gl->glGetIntegerv( 0x904A, &evictions );	// GPU_MEMORY_INFO_EVICTION_COUNT_NVX
+				w.gl->glGetIntegerv( 0x904B, &evictedKb );	// GPU_MEMORY_INFO_EVICTED_MEMORY_NVX
+				w.gl->glGetIntegerv( 0x9049, &freeKb );	// GPU_MEMORY_INFO_CURRENT_AVAILABLE_VIDMEM_NVX
+				w.gl->glGetIntegerv( 0x9048, &totalKb );	// GPU_MEMORY_INFO_TOTAL_AVAILABLE_MEMORY_NVX
+				while ( w.gl->glGetError() != GL_NO_ERROR ) {
+				}
+			}
+			const WatchSum * worst = nullptr;
+			for ( const WatchSum & s : zones )
+				if ( !worst || s.gpu > worst->gpu )
+					worst = &s;
+			QByteArray stall = "frame gpu stall: frame " + QByteArray::number( sl.frame ) + " " + QByteArray::number( total, 'f', 1 )
+				+ " ms on the GPU, longest zone " + QByteArray( worst ? worst->name : "none" ) + " "
+				+ QByteArray::number( worst ? worst->gpu : 0.0, 'f', 1 ) + " ms against its cpu "
+				+ QByteArray::number( worst ? worst->cpu : 0.0, 'f', 1 ) + " ms | video memory: ";
+			if ( evictions >= 0 ) {
+				stall += QByteArray::number( lastEvictions >= 0 ? evictions - lastEvictions : evictions ) + " evictions ("
+					+ QByteArray::number( double( lastEvictions >= 0 ? evictedKb - lastEvictedKb : evictedKb ) / 1024.0, 'f', 0 )
+					+ " MB) since the last stall line, " + QByteArray::number( freeKb / 1024 ) + " of "
+					+ QByteArray::number( totalKb / 1024 ) + " MB free";
+				lastEvictions = evictions;
+				lastEvictedKb = evictedKb;
+			} else {
+				stall += "no NVX memory counters on this driver";
+			}
+#ifdef Q_OS_WIN
+			static DWORD lastFaults = 0;
+			PROCESS_MEMORY_COUNTERS_EX pm;
+			std::memset( &pm, 0, sizeof( pm ) );
+			pm.cb = sizeof( pm );
+			MEMORYSTATUSEX ms;
+			std::memset( &ms, 0, sizeof( ms ) );
+			ms.dwLength = sizeof( ms );
+			if ( GetProcessMemoryInfo( GetCurrentProcess(), reinterpret_cast<PROCESS_MEMORY_COUNTERS *>( &pm ), sizeof( pm ) )
+				&& GlobalMemoryStatusEx( &ms ) ) {
+				stall += " | process: " + QByteArray::number( qint64( pm.PageFaultCount - lastFaults ) ) + " page faults since the "
+					"last stall line, private " + QByteArray::number( qint64( pm.PrivateUsage >> 20 ) ) + " MB, working set "
+					+ QByteArray::number( qint64( pm.WorkingSetSize >> 20 ) ) + " MB, RAM free "
+					+ QByteArray::number( qint64( ms.ullAvailPhys >> 20 ) ) + " of " + QByteArray::number( qint64( ms.ullTotalPhys >> 20 ) )
+					+ " MB, commit free " + QByteArray::number( qint64( ms.ullAvailPageFile >> 20 ) ) + " MB";
+				lastFaults = pm.PageFaultCount;
+			}
+#endif
+			stall += " (R8-1; red WW_GPUSTALL_RED=1: no line, build 82)";
+			std::fprintf( stderr, "%s\n", stall.constData() );
+		}
 	}
 	for ( const WatchZone & z : sl.zones ) {
 		w.pool.push_back( z.q0 );

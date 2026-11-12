@@ -53,6 +53,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <QSettings>
 
 #include <algorithm>
+#include <chrono>
 #include <cstdio>
 
 #ifndef GL_TEXTURE_MAX_ANISOTROPY_EXT
@@ -393,6 +394,14 @@ int TexCache::bind( const QStringView & fname, const NifModel * nif )
 			WwUp::deferTex();
 			return 0;
 		}
+		// lane EMPTY240 R8-2: a file the workers have not read yet waits a paint (celltexahead.cpp poll)
+		WW_SWITCH_STATIC( bool, readWaitRed, wwEnvInt( "WW_TEXREADWAIT_RED" ) == 1 );
+		if ( !readWaitRed && WwUp::st().inPaint && !fname.isEmpty() && fname.front() != QChar( '#' )
+			&& CellTexAhead::armedFor( nif ) && CellTexAhead::poll( nif, fname.toString() ) == CellTexAhead::Wait ) {
+			WwDp::abortRecording();
+			WwUp::deferTex();
+			return 0;
+		}
 
 		return loadTex( *tx, nif );
 	}
@@ -531,6 +540,11 @@ bool TexCache::bindCube( const QString & fname, const NifModel * nif, bool useSe
 	return true;
 }
 
+// lane EMPTY240 R8-2: set by texLoad (gltexloaders.cpp) for the `texture load slow:` line
+extern double wwTexLoadBytesMs, wwTexLoadQueryMs;
+extern bool wwTexLoadTaken;
+extern qint64 wwTexLoadSize;
+
 std::uint16_t TexCache::loadTex( Tex & txIn, const NifModel * nif )
 {
 	WwDp::abortRecording();	// lane GAPPERF-BINDLESS: a load is never replayed
@@ -555,7 +569,9 @@ std::uint16_t TexCache::loadTex( Tex & txIn, const NifModel * nif )
 		return 0;
 	}
 
+	const auto wwT0 = std::chrono::steady_clock::now();	// lane EMPTY240 R8-2: the `texture load slow:` line's parts
 	i->filepath = find( fileName, nif );
+	const double wwFindMs = std::chrono::duration<double, std::milli>( std::chrono::steady_clock::now() - wwT0 ).count();
 
 	/* lane PERF1: before this file is read here (one at a time), the files the read-ahead workers already hold go
 	 * up first, so their byte bound frees and they read on in parallel; each binds on this unit, and this file's
@@ -590,6 +606,10 @@ std::uint16_t TexCache::loadTex( Tex & txIn, const NifModel * nif )
 
 	wwCovLoadRef = covRef;	// lane TREELEAF1: read by texLoadDDS
 	const qint64	bytes0 = PassTime::cacheCounts().texBytes;	// lane STREAMTEX1
+	const auto wwT1 = std::chrono::steady_clock::now();	// lane EMPTY240 R8-2
+	wwTexLoadBytesMs = wwTexLoadQueryMs = 0.0;
+	wwTexLoadTaken = false;
+	wwTexLoadSize = 0;
 	try
 	{
 		i->mipmaps = texLoad( nif, i->filepath, i->format, t->target, i->width, i->height, t->id );
@@ -598,6 +618,21 @@ std::uint16_t TexCache::loadTex( Tex & txIn, const NifModel * nif )
 	catch ( QString & e )
 	{
 		i->status = e;
+	}
+	{	/* lane EMPTY240 R8-2: a load over 30 ms on the drawing thread names its parts: finding the file, its bytes (taken
+		 * from a worker, or read here), the decode and upload, and the driver's size queries after it (each one waits for
+		 * the driver's thread) */
+		const auto wwT2 = std::chrono::steady_clock::now();
+		const double loadMs = std::chrono::duration<double, std::milli>( wwT2 - wwT1 ).count();
+		const double allMs = std::chrono::duration<double, std::milli>( wwT2 - wwT0 ).count();
+		static int wwSlowN = 0;
+		if ( allMs > 30.0 && ( ++wwSlowN <= 40 || wwSlowN % 25 == 0 ) )
+			std::fprintf( stderr, "texture load slow: %s took %.1f ms on the drawing thread = find %.1f + ready files first "
+				"%.1f + file bytes %.1f (%s, %.0f KB) + decode and upload %.1f + driver size queries %.1f ms (R8-2: %d such "
+				"loads so far)\n", qPrintable( fileName ), allMs, wwFindMs, std::max( 0.0, allMs - loadMs - wwFindMs ),
+				wwTexLoadBytesMs, wwTexLoadTaken ? "taken from a worker" : "read here",
+				double( wwTexLoadSize ) / 1024.0, std::max( 0.0, loadMs - wwTexLoadBytesMs - wwTexLoadQueryMs ), wwTexLoadQueryMs,
+				wwSlowN );
 	}
 	wwCovLoadRef = 0;
 	paramForget( t->id[1] );	// lane CELLUNI4: FO76's second cube (a fresh name may reuse a freed one)

@@ -94,6 +94,11 @@ struct CmState
 	bool anchored = false;
 	float coverK[3] = { 1.0f, 1.0f, 1.0f };	// SKYLIGHT1 round 2: the texels x this per band (paramsOf)
 	int worldLaid = 0, worldSkipped = 0;	// SKYLIGHT1 round 3: layers laid on the world / without a zenith cap (left out)
+	// lane EMPTY240 R8-4: buildMap's parts (ms) for the `cloud map slow:` line; a refusal by the layers' shapes alone
+	double partTarget = 0.0, partProgram = 0.0, partLayers = 0.0;
+	bool bindTried = false;
+	QString refusedShape;
+	int refusedSkips = 0;
 };
 
 CmState & cs()
@@ -379,7 +384,13 @@ bool buildMap( Scene * scene, CmState & s, const QVector<Draw> & ds, const QVect
 {
 	Renderer * r = scene->renderer;
 	auto fn = r->fn;
-	if ( !ensureTarget( fn, s, n ) ) {
+	QElapsedTimer partClock;	// lane EMPTY240 R8-4
+	partClock.start();
+	s.partTarget = s.partProgram = s.partLayers = 0.0;
+	s.bindTried = false;
+	const bool targetOk = ensureTarget( fn, s, n );
+	s.partTarget = double( partClock.nsecsElapsed() ) * 1e-6;
+	if ( !targetOk ) {
 		*why = QStringLiteral( "the map target is incomplete" );
 		return false;
 	}
@@ -401,11 +412,14 @@ bool buildMap( Scene * scene, CmState & s, const QVector<Draw> & ds, const QVect
 		fn->glBlendEquation( GL_FUNC_ADD );
 		fn->glBlendFunc( GL_ONE_MINUS_DST_COLOR, GL_ONE );
 	}
+	const qint64 progAt = partClock.nsecsElapsed();
 	auto prog = r->useProgram( "cloudmap.prog" );
+	s.partProgram = double( partClock.nsecsElapsed() - progAt ) * 1e-6;
 	if ( !prog ) {
 		*why = QStringLiteral( "cloudmap.prog did not link" );
 		return false;
 	}
+	const qint64 layersAt = partClock.nsecsElapsed();
 	int drawn = 0;
 	/* SKYLIGHT1 round 3 (bungo: a dark area around him, the shadows vanish as he nears them; Coverage 0 left the
 	 * volume as it was): the map was the dome seen from the square's centre, flattened: the zenith's dense texels
@@ -431,6 +445,7 @@ bool buildMap( Scene * scene, CmState & s, const QVector<Draw> & ds, const QVect
 		}
 		const RoleInfo & ri = roleInfo( d.role );
 		fn->glActiveTexture( GL_TEXTURE0 );
+		s.bindTried = true;	// lane EMPTY240 R8-4: a texture may come a paint later (the upload budget): never memo this refusal
 		if ( scene->bindTexture( QStringView( d.in.tex ), true ) <= 0 )
 			continue;
 		fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT );
@@ -485,6 +500,7 @@ bool buildMap( Scene * scene, CmState & s, const QVector<Draw> & ds, const QVect
 		drawn++;
 	}
 	r->stopProgram();
+	s.partLayers = double( partClock.nsecsElapsed() - layersAt ) * 1e-6;
 	if ( !drawn && !ds.isEmpty() ) {
 		*why = s.worldSkipped > 0 && !drawn ? QStringLiteral( "no layer has a zenith cap to lay on the world (red "
 			"WW_CLOUDMAP_RED=domeproj: the dome's projection)" ) : QStringLiteral( "no layer drew (no mesh or texture resolved)" );
@@ -585,6 +601,26 @@ const WwCloudMap & wwCloudMap()
 const WwCloudMap & wwCloudMapUpdate( Scene * scene )
 {
 	CmState & s = cs();
+	/* lane EMPTY240 R8-4: build 82's load spent 139.1 ms in the cloud shadow's map part, a map that was then refused (no
+	 * layer has a zenith cap). An update over 20 ms names its parts: the layers (meshes from the lookdev stage), the
+	 * set-up and key, the build (its target, program and layer fits / binds / draws). */
+	struct Slow {
+		CmState & s;
+		QElapsedTimer t;
+		double layers = -1.0, setup = -1.0, build = -1.0;
+		const char * how = "kept";
+		explicit Slow( CmState & st ) : s( st ) { t.start(); }
+		double now() const { return double( t.nsecsElapsed() ) * 1e-6; }
+		~Slow()
+		{
+			const double all = now();
+			if ( all > 20.0 )
+				std::fprintf( stderr, "cloud map slow: %.1f ms = layers %.1f + setup and key %.1f + build %.1f (target %.1f, "
+					"program %.1f, layer fits/binds/draws %.1f) + after %.1f; %s (R8-4)\n", all, std::max( 0.0, layers ),
+					std::max( 0.0, setup ), std::max( 0.0, build ), s.partTarget, s.partProgram, s.partLayers,
+					std::max( 0.0, all - std::max( 0.0, layers ) - std::max( 0.0, setup ) - std::max( 0.0, build ) ), how );
+		}
+	} slow( s );
 	if ( !s.tier || !scene || !scene->renderer ) {
 		if ( s.map.valid || s.map.tex )
 			drop( scene, s );
@@ -594,7 +630,10 @@ const WwCloudMap & wwCloudMapUpdate( Scene * scene )
 	QVector<WwCloudLayerIn> layers;
 	QString wkey, why;
 	float eye[3] = { 0, 0, 0 };
-	if ( !wwLookdevCloudLayers( scene, layers, wkey, eye, &why ) ) {
+	const bool layersOk = wwLookdevCloudLayers( scene, layers, wkey, eye, &why );
+	slow.layers = slow.now();
+	if ( !layersOk ) {
+		slow.how = "no layers";
 		if ( s.map.valid || s.map.tex )
 			drop( scene, s );
 		s.weather.clear();
@@ -770,7 +809,29 @@ const WwCloudMap & wwCloudMapUpdate( Scene * scene )
 		m.band[0].topZ = m.band[0].baseZ
 			+ 1000.0f * WwCloudVolMath::typeDepthKm( tmax, depthKm, WwCloudVolMath::kVarTowerKm ) * kUnitsPerM;
 	}
+	/* lane EMPTY240 R8-4: a map refused because no layer has a zenith cap was tried again every paint (the refusal kept no
+	 * key) and made its target again each time (the refusal drops it). That verdict follows the layers' meshes alone, not
+	 * the wind: it holds while the weather, size, blend and layer list stay. Red WW_CLOUDMAPMEMO_RED=1: try every paint,
+	 * build 82. */
+	WW_SWITCH_STATIC( bool, memoRed, wwEnvInt( "WW_CLOUDMAPMEMO_RED" ) == 1 );
+	QString shape = QStringLiteral( "%1|%2|%3|%4|%5" ).arg( wkey ).arg( n ).arg( double( t ), 0, 'f', 4 ).arg( ds.size() )
+		.arg( red( "domeproj" ) ? 1 : 0 );
+	for ( const Draw & d : ds )
+		shape += QStringLiteral( "|%1" ).arg( d.in.layer );
+	slow.setup = slow.now() - slow.layers;
+	if ( !memoRed && !s.refusedShape.isEmpty() && shape == s.refusedShape && !m.valid ) {
+		slow.how = "refusal kept (same layers)";
+		s.refusedSkips++;
+		return s.map;
+	}
 	if ( key != s.key || !m.valid ) {
+		slow.how = "built";
+		const double buildAt = slow.now();
+		struct BuildMark {
+			Slow & sl;
+			double at;
+			~BuildMark() { sl.build = sl.now() - at; }
+		} buildMark{ slow, buildAt };
 		Renderer * r = scene->renderer;
 		auto fn = r->fn;
 		while ( fn->glGetError() != GL_NO_ERROR ) {
@@ -793,8 +854,11 @@ const WwCloudMap & wwCloudMapUpdate( Scene * scene )
 		if ( !ok ) {
 			drop( scene, s );
 			say( s, QStringLiteral( "refused(%1)" ).arg( why ) );
+			slow.how = "refused";
+			s.refusedShape = !s.bindTried && s.worldSkipped > 0 ? shape : QString();	// lane EMPTY240 R8-4
 			return s.map;
 		}
+		s.refusedShape.clear();
 		m.valid = true;
 		m.stub = false;
 		m.size = n;

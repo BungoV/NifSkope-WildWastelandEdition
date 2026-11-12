@@ -9,6 +9,7 @@
 #include "model/nifmodel.h"
 
 #include <QCoreApplication>
+#include <QElapsedTimer>
 #include <QThread>
 
 #include <algorithm>
@@ -60,6 +61,7 @@ struct State
 	qint64 again = 0, drawRead = 0;                // lane GAPFIX1: whole session (the walk dump reads them)
 	const NifModel * nif = nullptr;
 	bool quitHooked = false;
+	qint64 polled = 0, pollWaits = 0, pollOwn = 0;	// lane EMPTY240 R8-2: the `texture reads:` line's window
 };
 
 std::atomic<const NifModel *> armed{ nullptr };
@@ -241,6 +243,60 @@ void CellTexAhead::want( const NifModel * nif, const QStringList & names )
 	s.cv.notify_all();
 }
 
+/* lane EMPTY240 R8-2: build 82's frames 137-152 held 250-580 ms of CPU each in the obscurance pass's geometry, one or a
+ * few textures a paint: the first ground draw rebuilds the landspec band window, whose chunk bind read its file on the
+ * drawing thread ("landspec: band window rebuild took 420.3 ms on the main thread: reads 420.1"), and a texture the
+ * read-ahead had queued but not read yet was read there too (take() of a Pending entry) or waited for (Reading). A bind
+ * in a paint now asks poll() first: a file not read yet waits a paint while the workers read it (first in line), as a
+ * texture over the upload budget does; only the upload stays on the drawing thread. Red WW_TEXREADWAIT_RED=1: the
+ * drawing thread reads or waits, build 82. Line `texture reads:` every 5 s. */
+CellTexAhead::Poll CellTexAhead::poll( const NifModel * nif, const QString & name )
+{
+	if ( !nif || armed.load( std::memory_order_relaxed ) != nif || name.isEmpty() || name.startsWith( QChar( '#' ) ) )
+		return Own;
+	const std::string key = GameManager::get_full_path( name, "textures", ".dds" );
+	State & s = st();
+	std::unique_lock<std::mutex> l( s.lock );
+	if ( s.nif != nif || s.stopping )
+		return Own;
+	auto it = s.byKey.find( key );
+	if ( it == s.byKey.end() ) {
+		if ( s.held >= AHEAD_BYTES ) {
+			s.pollOwn++;
+			return Own;
+		}
+		s.again += s.forgotten.erase( key ) ? 1 : 0;
+		it = s.byKey.emplace( key, int( s.entries.size() ) ).first;
+		Entry e;
+		e.name = name;
+		s.entries.push_back( e );
+		s.pending++;
+		s.polled++;
+		if ( s.workers == 0 ) {
+			const int n = qBound( 1, QThread::idealThreadCount() - 2, 8 );
+			for ( int i = 0; i < n; i++ ) {
+				s.workers++;
+				std::thread( worker ).detach();
+			}
+		}
+	}
+	Entry & e = s.entries[size_t( it->second )];
+	if ( e.st == St::Done )
+		return Ready;
+	if ( e.st == St::Pending && s.held >= AHEAD_BYTES ) {
+		s.pollOwn++;
+		return Own;	// the workers wait for takes: never hold a draw on them
+	}
+	if ( e.st == St::Pending || e.st == St::Reading ) {
+		if ( e.st == St::Pending )
+			s.next = size_t( it->second );	// a draw asks for it: the workers read it next
+		s.pollWaits++;
+		s.cv.notify_all();
+		return Wait;
+	}
+	return Own;	// read and handed out before, or a read that failed: the drawing thread's own words
+}
+
 bool CellTexAhead::take( const NifModel * nif, const QString & filepath, QByteArray & data )
 {
 	if ( !nif || armed.load( std::memory_order_relaxed ) != nif )
@@ -361,6 +417,23 @@ void CellTexAhead::stop( const NifModel * nif )
 
 void CellTexAhead::frameEnd()
 {
+	{	// lane EMPTY240 R8-2: the `texture reads:` line, every 5 s while binds waited for the workers
+		static QElapsedTimer win;
+		if ( !win.isValid() )
+			win.start();
+		if ( win.elapsed() >= 5000 ) {
+			win.start();
+			State & s = st();
+			std::unique_lock<std::mutex> l( s.lock );
+			if ( s.pollWaits + s.pollOwn > 0 )
+				std::fprintf( stderr, "texture reads: %lld binds waited a paint for their file (read by the workers, not the "
+					"drawing thread), %lld files first asked by a draw, %lld read on the drawing thread at the byte bound; "
+					"drawing-thread reads %lld, waits for a worker %lld (R8-2; red WW_TEXREADWAIT_RED=1: the drawing thread "
+					"reads or waits, build 82)\n", (long long) s.pollWaits, (long long) s.polled, (long long) s.pollOwn,
+					(long long) s.own, (long long) s.waited );
+			s.pollWaits = s.polled = s.pollOwn = 0;
+		}
+	}
 	const NifModel * a = armed.load( std::memory_order_relaxed );
 	if ( !a )
 		return;
