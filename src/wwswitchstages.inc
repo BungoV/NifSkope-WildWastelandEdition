@@ -121,6 +121,7 @@
 { "WW_CELL_AIR_CURVE_RED", 0, "src/features/air/cellvolair.cpp:3521 wwVolAirUniforms | re-read per frame or per call (a)" },
 { "WW_CELL_AIR_DENSITY", 0, "src/features/air/cellvolair.cpp:855 vaFit | re-read per frame or per call (a)" },
 { "WW_CELL_AIR_DITHER_RED", 0, "src/features/air/cellvolair.cpp:2877 wwVolAirUniforms | re-read per frame or per call (a)" },
+{ "WW_CELL_AIR_APPLY_DUMP", 0, "src/features/air/cellvolair.cpp:3566 vaApplyDump | init-once state (b)" },
 { "WW_CELL_AIR_DUMP", 0, "src/features/air/cellvolair.cpp:255 vs | init-once state, re-read when a live set moves its prefix (b)" },
 { "WW_CELL_AIR_DUMP_FRAMES", 0, "src/features/air/cellvolair.cpp:2682 vaPassInner | re-read per frame or per call (a)" },
 { "WW_CELL_AIR_ENVRATE", 0, "src/features/air/cellvolair.cpp:2473 vaPassInner | re-read per frame or per call (a)" },

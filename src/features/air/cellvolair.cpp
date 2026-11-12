@@ -3555,6 +3555,91 @@ void wwVolAirUniforms( Scene * scene )
 			| ( curveRed ? 0 : 131072 ) );	// lane SKYSEA1: 131072 = the sky ray's air over the curved ground
 }
 
+/* lane VKLIGHT1 r2: WW_CELL_AIR_APPLY_DUMP=<existing folder>: once, what cell_volsky reads as its draw sees it, for the
+ * offline Vulkan gate (tests/vklight/frag_jobs.py). uniforms.txt: one line per active uniform (array elements apart),
+ * `name gltype v0 v1 ...` (glGetUniformfv: ints as floats). <sampler>.bin per bound 2D / 3D / 2D-array sampler: int32
+ * w h d, then RGBA float per texel, layer 0 and row 0 first (glGetTexImage of the texture on the sampler's unit).
+ * Read only: no binding is changed except the active unit and the pack buffer, both put back. */
+template<typename F>
+static void vaApplyDump( F * fn, GLuint progId )
+{
+	WW_SWITCH_STATIC( QString, dir, QString::fromLocal8Bit( wwEnv( "WW_CELL_AIR_APPLY_DUMP" ) ).trimmed() );
+	static bool done = false;
+	if ( dir.isEmpty() || done )
+		return;
+	done = true;
+	GLint n = 0, len = 0, unitWas = GL_TEXTURE0, packWas = 0;
+	fn->glGetProgramiv( progId, GL_ACTIVE_UNIFORMS, &n );
+	fn->glGetProgramiv( progId, GL_ACTIVE_UNIFORM_MAX_LENGTH, &len );
+	fn->glGetIntegerv( GL_ACTIVE_TEXTURE, &unitWas );
+	fn->glGetIntegerv( GL_PIXEL_PACK_BUFFER_BINDING, &packWas );
+	fn->glBindBuffer( GL_PIXEL_PACK_BUFFER, 0 );
+	std::vector<char> nm( size_t( std::max( len, 1 ) ) + 1 );
+	QString o;
+	int texs = 0;
+	for ( GLint i = 0; i < n; i++ ) {
+		GLint size = 0;
+		GLenum type = 0;
+		GLsizei got = 0;
+		fn->glGetActiveUniform( progId, GLuint( i ), GLsizei( nm.size() ), &got, &size, &type, nm.data() );
+		QByteArray base( nm.data(), got );
+		if ( base.endsWith( "[0]" ) )
+			base.chop( 3 );
+		int cnt = 1;
+		switch ( type ) {
+		case GL_FLOAT_VEC2: case GL_INT_VEC2: case GL_BOOL_VEC2: cnt = 2; break;
+		case GL_FLOAT_VEC3: case GL_INT_VEC3: case GL_BOOL_VEC3: cnt = 3; break;
+		case GL_FLOAT_VEC4: case GL_INT_VEC4: case GL_BOOL_VEC4: case GL_FLOAT_MAT2: cnt = 4; break;
+		case GL_FLOAT_MAT3: cnt = 9; break;
+		case GL_FLOAT_MAT4: cnt = 16; break;
+		default: break;
+		}
+		for ( GLint e = 0; e < std::max( size, 1 ); e++ ) {
+			const QByteArray at = size > 1 ? base + '[' + QByteArray::number( e ) + ']' : base;
+			const GLint l = fn->glGetUniformLocation( progId, at.constData() );
+			if ( l < 0 )
+				continue;
+			float v[16] = {};
+			fn->glGetUniformfv( progId, l, v );
+			o += QString::fromLatin1( at ) + QStringLiteral( " 0x%1" ).arg( type, 4, 16, QLatin1Char( '0' ) );
+			for ( int k = 0; k < cnt; k++ )
+				o += QLatin1Char( ' ' ) + QString::number( double( v[k] ), 'g', 9 );
+			o += QLatin1Char( '\n' );
+			GLenum target = 0, query = 0;
+			if ( type == GL_SAMPLER_2D ) { target = GL_TEXTURE_2D; query = GL_TEXTURE_BINDING_2D; }
+			else if ( type == GL_SAMPLER_3D ) { target = GL_TEXTURE_3D; query = GL_TEXTURE_BINDING_3D; }
+			else if ( type == GL_SAMPLER_2D_ARRAY ) { target = GL_TEXTURE_2D_ARRAY; query = GL_TEXTURE_BINDING_2D_ARRAY; }
+			if ( !target )
+				continue;
+			GLint unit = 0, tex = 0, w = 0, h = 0, d = 1;
+			fn->glGetUniformiv( progId, l, &unit );
+			fn->glActiveTexture( GLenum( GL_TEXTURE0 + unit ) );
+			fn->glGetIntegerv( query, &tex );
+			if ( !tex )
+				continue;
+			fn->glGetTexLevelParameteriv( target, 0, GL_TEXTURE_WIDTH, &w );
+			fn->glGetTexLevelParameteriv( target, 0, GL_TEXTURE_HEIGHT, &h );
+			if ( target != GL_TEXTURE_2D )
+				fn->glGetTexLevelParameteriv( target, 0, GL_TEXTURE_DEPTH, &d );
+			std::vector<float> px( size_t( w ) * size_t( h ) * size_t( d ) * 4 );
+			fn->glGetTexImage( target, 0, GL_RGBA, GL_FLOAT, px.data() );
+			QFile f( dir + QLatin1Char( '/' ) + QString::fromLatin1( at ) + QStringLiteral( ".bin" ) );
+			if ( f.open( QIODevice::WriteOnly ) ) {
+				const qint32 hd[3] = { w, h, d };
+				f.write( reinterpret_cast<const char *>( hd ), sizeof( hd ) );
+				f.write( reinterpret_cast<const char *>( px.data() ), qint64( px.size() * sizeof( float ) ) );
+				texs++;
+			}
+		}
+	}
+	fn->glActiveTexture( GLenum( unitWas ) );
+	fn->glBindBuffer( GL_PIXEL_PACK_BUFFER, GLuint( packWas ) );
+	QFile t( dir + QStringLiteral( "/uniforms.txt" ) );
+	if ( t.open( QIODevice::WriteOnly | QIODevice::Text ) )
+		t.write( o.toUtf8() );
+	fprintf( stderr, "air apply dump: %d uniforms, %d textures -> %s\n", int( n ), texs, qPrintable( dir ) );
+}
+
 /* lane VOLAIR1 (bungo 10-14, cellvolair.h): the sky through the air. The far tower stood out against a sky the air never
  * touched. cell_volsky.prog over the pixels no draw reaches: before the scene, into the linear frame (stencil 1, the
  * resolve composites it over the backdrop by its coverage, cell_hdr.frag mode 2); in a probe frame, after the scene, the
@@ -3657,6 +3742,8 @@ void wwVolAirSkyDraw( Scene * scene, bool probes )
 	static const float quad[12] = { -1, -1, 0, 1, -1, 0, -1, 1, 0, 1, 1, 0 };
 	static const std::uint16_t idx[6] = { 0, 1, 2, 2, 1, 3 };
 	const float * attrs = quad;
+	if ( !probes )
+		vaApplyDump( fn, prog->id );	// lane VKLIGHT1 r2: WW_CELL_AIR_APPLY_DUMP
 	r->drawShape( 4, 3, 6, GL_TRIANGLES, GL_UNSIGNED_SHORT, &attrs, idx );
 	r->stopProgram();
 	if ( overSky )
