@@ -817,6 +817,72 @@ void sayRoute( const QString & why )
 	}
 }
 
+/* build 89 late item (fly89.log: "tone map slow step: bloom" 96.7, 106.7, 111.2 ms after the goto): the device's queue
+ * lock is the traced GI's too, and its cell build holds it through masks + BLAS + TLAS (107 ms by paint 126). The
+ * drawing thread does not wait on it: a lock not free within kBusySpinMs sends that frame's bloom to GL's passes. */
+constexpr double kBusySpinMs = 0.5;
+
+bool takeQueue( Dev & d, double spinMs )	// true = held (the caller unlocks); no lock = always
+{
+	if ( !d.qm )
+		return true;
+	const double t0 = nowMs();
+	for ( ;; ) {
+		if ( d.qm->try_lock() )
+			return true;
+		if ( nowMs() - t0 >= spinMs )
+			return false;
+		SwitchToThread();
+	}
+}
+
+struct Busy
+{
+	std::uint64_t gen = 0, askedGen = ~std::uint64_t( 0 );	// runBloom's count; the one sourceReady asked in
+	bool asked = false;	// its answer: busy
+	int frames = 0;
+	double t0 = -1.0, waitedMs = 0.0;
+};
+
+Busy & busy()
+{
+	static Busy b;
+	return b;
+}
+
+bool queueBusyNow()
+{
+	Dev & d = dv();
+	const bool held = takeQueue( d, kBusySpinMs );
+	if ( held && d.qm )
+		d.qm->unlock();
+	return !held;
+}
+
+// one telemetry line a busy run, when it ends (GL thread)
+void sayBusy( bool busyNow, double spunMs )
+{
+	Busy & b = busy();
+	if ( busyNow ) {
+		if ( b.t0 < 0.0 ) {
+			b.t0 = nowMs();
+			b.frames = 0;
+			b.waitedMs = 0.0;
+		}
+		b.frames++;
+		b.waitedMs += spunMs;
+		return;
+	}
+	if ( b.t0 >= 0.0 ) {
+		static int said = 0;
+		if ( said++ < 40 )
+			std::fprintf( stderr, "vk post: the ray-tracing device's queue was held by its other user (the traced GI's build) for "
+				"%.1f ms: bloom on GL's passes for %d frames; the drawing thread spun %.2f ms on it in all, no wait\n",
+				nowMs() - b.t0, b.frames, b.waitedMs );
+		b.t0 = -1.0;
+	}
+}
+
 QString cachePath()
 {
 	QString dir = QStandardPaths::writableLocation( QStandardPaths::CacheLocation );
@@ -1316,8 +1382,14 @@ bool sourceReady( const void * key, unsigned color, unsigned ds )
 	const auto it = chains().constFind( key );
 	const auto ft = frames().constFind( key );
 	const QOpenGLContext * q = QOpenGLContext::currentContext();
-	return it != chains().constEnd() && it->ok && it->ctx == q && ft != frames().constEnd() && ft->ctx == q && color
-		&& ft->color.tex == color && ft->ds.tex == ds && wanted();
+	if ( it == chains().constEnd() || !it->ok || it->ctx != q || ft == frames().constEnd() || ft->ctx != q || !color
+		|| ft->color.tex != color || ft->ds.tex != ds || !wanted() )
+		return false;
+	// build 89 late item: a busy queue -> GL draws the source too (runBloom reads this answer, it does not ask again)
+	Busy & b = busy();
+	b.askedGen = b.gen;
+	b.asked = queueBusyNow();
+	return !b.asked;
 }
 
 unsigned combTexture( const void * key )
@@ -1357,8 +1429,24 @@ bool runBloom( const void * key, const BloomJob & job, QString & why )
 		sayRoute( QStringLiteral( "gl (%1)" ).arg( why ) );
 		return false;
 	}
-	c.lastRun = nowMs();
+	c.lastRun = nowMs();	// a busy frame keeps the frame shared (no rebuild, no full wait after it)
 	c.combRan = false;
+	// build 89 late item: the queue's other user holds it -> GL's passes this frame, nothing waited
+	{
+		Busy & b = busy();
+		const double ts = nowMs();
+		const bool isBusy = job.src ? false : b.askedGen == b.gen ? b.asked : queueBusyNow();
+		b.gen++;
+		sayBusy( isBusy, nowMs() - ts );
+		if ( isBusy ) {
+			why = QStringLiteral( "the ray-tracing device's queue is held by its other user (the traced GI's build)" );
+			win().glFrames++;
+			win().glWhy = why;
+			return false;
+		}
+	}
+	// build 89 late item: where a slow bloom's CPU went (one line a bloom of 20 ms or more)
+	const double ph0 = nowMs();
 	// round 3 (P3): the source's frame; the set is written again only when that frame was made again
 	const Frame * fr = nullptr;
 	if ( job.src ) {
@@ -1378,6 +1466,7 @@ bool runBloom( const void * key, const BloomJob & job, QString & why )
 			c.srcFrame = fr->color.i;
 		}
 	}
+	const double ph1 = nowMs();
 	// round 3 (P2): the combine's RGBA32F target, made the first frame the combine is asked for (an allocation, no pipeline)
 	bool combFresh = false;
 	if ( job.comb && !c.comb.i && !c.combFailed ) {
@@ -1396,11 +1485,13 @@ bool runBloom( const void * key, const BloomJob & job, QString & why )
 		}
 	}
 	const bool comb = job.comb && c.comb.i;
+	const double ph2 = nowMs();
 	// the frames in flight: wait for frame n - cap (2; WW_FRAMEQUEUE_RED=1: none), and for this slot's last use
 	const std::uint64_t f = ++d.frame;
 	const int slot = int( f % Dev::kSlots );
 	const int cap = wwEnvInt( "WW_FRAMEQUEUE_RED" ) == 1 ? 0 : 2;
 	waitSlots( WwVkFrame::inFlightWait( f, cap ), slot );
+	const double ph3 = nowMs();
 
 	VkCommandBuffer cb = d.cb[slot];
 	d.vkResetCommandBuffer( cb, 0 );
@@ -1485,6 +1576,25 @@ bool runBloom( const void * key, const BloomJob & job, QString & why )
 		return false;
 	}
 
+	const double ph4 = nowMs();
+	/* build 89 late item: the queue lock before GL's signal (a frame GL drew the source for may still go to GL's passes);
+	 * a frame whose source Vulkan makes has no GL source to fall back on: it takes the lock, the wait is named below */
+	bool held = takeQueue( d, kBusySpinMs );
+	if ( !held && !job.src ) {
+		sayBusy( true, nowMs() - ph4 );
+		why = QStringLiteral( "the ray-tracing device's queue is held by its other user (the traced GI's build)" );
+		win().glFrames++;
+		win().glWhy = why;
+		return false;
+	}
+	if ( !held ) {
+		d.qm->lock();
+		held = true;
+	}
+	std::unique_lock<std::mutex> lk;
+	if ( d.qm )
+		lk = std::unique_lock<std::mutex>( *d.qm, std::adopt_lock );
+	const double ph5 = nowMs();
 	// GL -> Vulkan: GL signals after its source resolve (flushed, so the signal is queued before the submit waits on it)
 	// the images both sides touch this frame: the chain's, and the shared frame while the source reads it
 	std::vector<GLuint> & texs = c.texs;
@@ -1498,6 +1608,7 @@ bool runBloom( const void * key, const BloomJob & job, QString & why )
 	const GLuint nt = GLuint( texs.size() );
 	g.signalSem( c.glGlDone, 0, nullptr, nt, texs.data(), lays.data() );
 	QOpenGLContext::currentContext()->functions()->glFlush();
+	const double ph6 = nowMs();
 	const VkPipelineStageFlags waitStage = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;	// the first timestamp too: it times the work alone
 	VkSubmitInfo sub { VK_STRUCTURE_TYPE_SUBMIT_INFO };
 	sub.waitSemaphoreCount = 1;
@@ -1508,13 +1619,10 @@ bool runBloom( const void * key, const BloomJob & job, QString & why )
 	sub.signalSemaphoreCount = 1;
 	sub.pSignalSemaphores = &c.vkVkDone;
 	d.vkResetFences( d.dev, 1, &d.fence[slot] );
-	bool ok;
-	{
-		std::unique_lock<std::mutex> lk;
-		if ( d.qm )
-			lk = std::unique_lock<std::mutex>( *d.qm );
-		ok = d.vkQueueSubmit( d.q, 1, &sub, d.fence[slot] ) == VK_SUCCESS;
-	}
+	const bool ok = d.vkQueueSubmit( d.q, 1, &sub, d.fence[slot] ) == VK_SUCCESS;
+	if ( lk.owns_lock() )
+		lk.unlock();
+	const double ph7 = nowMs();
 	if ( !ok ) {
 		// GL's signal has no waiter now: the chain cannot pair its semaphores again, so it goes back to GL for good
 		c.ok = false;
@@ -1534,6 +1642,16 @@ bool runBloom( const void * key, const BloomJob & job, QString & why )
 	lays.resize( own );
 	c.combRan = comb;
 	win().vkFrames++;
+	sayBusy( false, 0.0 );
+	const double ph8 = nowMs();
+	if ( ph8 - ph0 >= 20.0 ) {
+		static int slow = 0;
+		if ( slow++ < 40 )
+			std::fprintf( stderr, "vk post: slow bloom %.1f ms CPU (Vulkan frame %llu) = source set wait %.1f + combine target %.1f + "
+				"frames-in-flight wait %.1f + record %.1f + queue lock wait %.1f + GL signal and flush %.1f + submit %.1f + GL wait "
+				"%.1f\n", ph8 - ph0, static_cast<unsigned long long>( f ), ph1 - ph0, ph2 - ph1, ph3 - ph2, ph4 - ph3, ph5 - ph4,
+				ph6 - ph5, ph7 - ph6, ph8 - ph7 );
+	}
 	sayRoute( QStringLiteral( "vulkan (bloom %1down / hold / up%2 on the ray-tracing device, %3 mips%4)" )
 		.arg( fr ? QStringLiteral( "source / " ) : QString() ).arg( comb ? QStringLiteral( " / combine" ) : QString() ).arg( n )
 		.arg( job.hold ? QStringLiteral( ", hold" ) : QString() ) );
