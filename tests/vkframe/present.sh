@@ -9,7 +9,7 @@ ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 export PATH="/c/msys64/ucrt64/bin:$PATH"
 if tasklist | grep -qiE '^(NifSkope|Fallout4)'; then echo "PRESENT GATE FAILED (NifSkope or the game runs: no window of ours now)"; exit 1; fi
 mkdir -p "$OUT"
-g++ -O2 -std=c++17 -I"$ROOT/src" "$ROOT/tests/vkframe/present.cpp" -o "$OUT/present.exe" -lopengl32 -lgdi32 -luser32 \
+g++ -O2 -std=c++17 -pthread -I"$ROOT/src" "$ROOT/tests/vkframe/present.cpp" -o "$OUT/present.exe" -lopengl32 -lgdi32 -luser32 \
 	|| { echo "PRESENT GATE FAILED (g++)"; exit 1; }
 "$OUT/present.exe" "${2:-1280}" "${3:-720}" "${4:-600}" 2>&1 | tee "$OUT/present.txt"
 tail -1 "$OUT/present.txt" | grep -q "PRESENT GATE OK"
