@@ -6,6 +6,7 @@ BSD License - see nifskope.h
 
 #include "features/shadows/shadowset.h"
 #include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
+#include "wwsyncred.h"	// lane PERFFIX6: ^WW_SYNC_RED
 
 #include "gl/cellunits.h"	// lane HARNESSMIN1 (testint): the terrain/contact maps registered on 31/32
 #include "gl/celluniform.h"	// lane CELLUNI2
@@ -418,7 +419,7 @@ void timerRead( NifSkopeOpenGLContext::GLFunctions * fn, GpuTimer & t, int slot,
 	if ( !t.pending[slot] )
 		return;
 	const GLuint last = elapsedRed() ? t.q[slot * 2] : t.q[slot * 2 + 1];
-	if ( !wait ) {
+	if ( !wait || !wwSyncRed() ) {	// lane PERFFIX6: an unfinished query is read next frame
 		GLuint avail = 0;
 		fn->glGetQueryObjectuiv( last, GL_QUERY_RESULT_AVAILABLE, &avail );
 		if ( !avail )

@@ -604,8 +604,16 @@ static bool redBlRow()
 
 bool bindlessUniformRow()
 {
+	/* lane EMPTY240 R4-3: on unless set off (FARINSTBL1 shipped it off: every far ring then refused the bindless twin and
+	 * ran the whole setupProgram walk). Red WW_BLROUTE_RED=1: off unless set, build 76. */
 	WW_SWITCH_STATIC( bool, on, [] {
 		const QString v = wwEnvStr( "WW_CELL_FARINST_BL" ).trimmed().toLower();
+		if ( v.isEmpty() ) {
+			const bool red = wwEnvInt( "WW_BLROUTE_RED" ) == 1;
+			std::fprintf( stderr, "far ring bindless: %s\n", red ? "off (red WW_BLROUTE_RED=1: build 76)"
+				: "on by default (the uniform row; WW_CELL_FARINST_BL=0 or the red WW_BLROUTE_RED=1 = off)" );
+			return !red;
+		}
 		return v == QLatin1String( "1" ) || v == QLatin1String( "on" );
 	}() );
 	return on && !redBlRow();

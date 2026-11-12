@@ -45,6 +45,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "features/near/cellbindless.h"	// lane BINDLESS2
 #include "progcachekeep.h"	// lane BUGS1102C
 #include "gpustage.h"	// MODULES1: static buffers filled by a GPU copy (no driver RAM copy)
+#include "wwuploadcap.h"	// lane EMPTY240 R4-1: the paint's upload budget
 
 // lane CELLUNI1: inside the cell-uniform scope an unchanged value is not uploaded again (celluniform.h)
 #define WWCU( k, l, v, n ) WwCellUni::want( wwUni, l, WwCellUni::k, v, n, WwDp::rec != nullptr )
@@ -1446,6 +1447,80 @@ void NifSkopeOpenGLContext::rehashShaders()
 
 static int wwColdLinkRun( const QVector< NifSkopeOpenGLContext::Program * > & started, int workers, qint64 & ms );
 
+/* lane EMPTY240 R4-1: a program's first draw makes the driver finish it (build 76: the first cell paint and a live set's
+ * first paint after a shader reload ran hundreds of ms in their zones). Each linked program draws one point here, at
+ * the load, into a 1x1 target with the rasterizer off (no attributes; the per-draw row a zeroed buffer). Programs with a
+ * geometry, tessellation or compute stage are left out. Red WW_PROGWARM_RED=1: none (finished at the first draw). */
+static void wwWarmPrograms( NifSkopeOpenGLContext::GLFunctions * f, NifSkopeOpenGLContext::Program * list )
+{
+	if ( wwEnvInt( "WW_PROGWARM_RED" ) == 1 ) {
+		std::fprintf( stderr, "shader warm: off (WW_PROGWARM_RED=1: the driver finishes each program at its first draw)\n" );
+		return;
+	}
+	QElapsedTimer	clock;
+	clock.start();
+	constexpr GLenum	kSsbo = 0x90D2, kSsboBinding = 0x90D3;	// GL_SHADER_STORAGE_BUFFER(_BINDING)
+	GLint	prevProg = 0, prevVao = 0, prevFbo = 0, prevRb = 0, prevSsbo = 0;
+	f->glGetIntegerv( GL_CURRENT_PROGRAM, &prevProg );
+	f->glGetIntegerv( GL_VERTEX_ARRAY_BINDING, &prevVao );
+	f->glGetIntegerv( GL_DRAW_FRAMEBUFFER_BINDING, &prevFbo );
+	f->glGetIntegerv( GL_RENDERBUFFER_BINDING, &prevRb );
+	f->glGetIntegeri_v( kSsboBinding, 12, &prevSsbo );
+	const GLboolean	prevDiscard = f->glIsEnabled( GL_RASTERIZER_DISCARD );
+	GLuint	vao = 0, fbo = 0, rb = 0, ssbo = 0;
+	f->glGenVertexArrays( 1, &vao );
+	f->glGenRenderbuffers( 1, &rb );
+	f->glBindRenderbuffer( GL_RENDERBUFFER, rb );
+	f->glRenderbufferStorage( GL_RENDERBUFFER, GL_RGBA8, 1, 1 );
+	f->glGenFramebuffers( 1, &fbo );
+	f->glBindFramebuffer( GL_DRAW_FRAMEBUFFER, fbo );
+	f->glFramebufferRenderbuffer( GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_RENDERBUFFER, rb );
+	f->glGenBuffers( 1, &ssbo );
+	f->glBindBuffer( kSsbo, ssbo );
+	const std::vector< char >	zero( 176 * 64, 0 );
+	f->glBufferData( kSsbo, GLsizeiptr( zero.size() ), zero.data(), GL_STATIC_DRAW );
+	f->glBindBufferBase( kSsbo, 12, ssbo );
+	f->glBindVertexArray( vao );
+	f->glEnable( GL_RASTERIZER_DISCARD );
+	while ( f->glGetError() != GL_NO_ERROR ) {
+	}
+	// a stage this point draw does not fit: its query answers without an error only when the program has it
+	auto hasStage = [f]( GLuint id, GLenum q ) {
+		GLint	v[3] = { 0, 0, 0 };
+		f->glGetProgramiv( id, q, v );
+		return f->glGetError() == GL_NO_ERROR;
+	};
+	int	warmed = 0, skipped = 0;
+	for ( NifSkopeOpenGLContext::Program * p = list; p; p = p->nextProgram ) {
+		if ( !p->status || !p->id || p->patches || hasStage( p->id, 0x8916 /* GL_GEOMETRY_VERTICES_OUT */ )
+			|| hasStage( p->id, 0x8E75 /* GL_TESS_CONTROL_OUTPUT_VERTICES */ )
+			|| hasStage( p->id, 0x8267 /* GL_COMPUTE_WORK_GROUP_SIZE */ ) ) {
+			skipped++;
+			continue;
+		}
+		f->glUseProgram( p->id );
+		f->glDrawArrays( GL_POINTS, 0, 1 );
+		warmed++;
+	}
+	while ( f->glGetError() != GL_NO_ERROR ) {
+	}
+	if ( !prevDiscard )
+		f->glDisable( GL_RASTERIZER_DISCARD );
+	f->glUseProgram( GLuint( prevProg ) );
+	f->glBindVertexArray( GLuint( prevVao ) );
+	f->glBindBufferBase( kSsbo, 12, GLuint( prevSsbo ) );
+	f->glBindBuffer( kSsbo, 0 );
+	f->glBindFramebuffer( GL_DRAW_FRAMEBUFFER, GLuint( prevFbo ) );
+	f->glBindRenderbuffer( GL_RENDERBUFFER, GLuint( prevRb ) );
+	f->glDeleteFramebuffers( 1, &fbo );
+	f->glDeleteRenderbuffers( 1, &rb );
+	f->glDeleteBuffers( 1, &ssbo );
+	f->glDeleteVertexArrays( 1, &vao );
+	std::fprintf( stderr, "shader warm: %d programs drawn once at the load (%d left out: geometry, tessellation or compute "
+		"stage, or not linked) in %lld ms (red WW_PROGWARM_RED=1: the driver finishes each at its first draw)\n",
+		warmed, skipped, (long long) clock.elapsed() );
+}
+
 void NifSkopeOpenGLContext::updateShaders()
 {
 	releaseShaders();
@@ -1538,6 +1613,7 @@ void NifSkopeOpenGLContext::updateShaders()
 	wwDeferredShaders().clear();
 	std::fprintf( stderr, "shader coldlink: workers %d, %d linked on them in %lld ms\n", coldLinkWorkers, coldLinked,
 		(long long) coldMs );
+	wwWarmPrograms( fn, programsLinked );	// lane EMPTY240 R4-1: finished now, not at a paint's first draw
 }
 
 /* lane COLDLINK1: a cold start links every program the binary cache missed (~2 s each on the NV driver). With
@@ -1852,7 +1928,18 @@ void NifSkopeOpenGLContext::bindShape(
 		j = i;
 	}
 
-	ShapeData *	d = new ShapeData( *this, h, attrData, elementData );
+	// lane EMPTY240 R4-1: over this paint's upload budget: a draw that can wait leaves its mesh for the next paint
+	if ( WwUp::st().meshMayDefer && WwUp::spent() ) {
+		WwUp::deferMesh();
+		WwDp::abortRecording();
+		return;
+	}
+	ShapeData *	d;
+	{
+		WwUp::Charge wwUpCharge;
+		d = new ShapeData( *this, h, attrData, elementData );
+		WwUp::Charge::addBytes( qint64( d->h.getBufferDataSize() ) );
+	}
 	if ( !cacheLastItem ) {
 		d->prev = d;
 		d->next = d;

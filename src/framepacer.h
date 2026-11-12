@@ -129,6 +129,7 @@ enum Part
 	After,	// the timed frame's end to paintGL's return (log flush)
 	Swap,	// paintGL's return to Qt's frameSwapped (the swap; vsync or a GPU-bound queue waits here)
 	CapWait,	// the frame cap's sleeps
+	Gears,	// lane EMPTY240 R4-2: the pacer's advanceGears (the cell stream's step, physics, animation) before update()
 	Between,	// the rest until the next paintGL (Qt's event loop, the redraw timer or the posted chain)
 	PartCount
 };
@@ -136,7 +137,7 @@ enum Part
 inline const char * partName( int p )
 {
 	static const char * const n[PartCount] = { "before-frame", "passes", "gi-frame", "restir", "probe-sky",
-		"other-in-frame", "after-frame", "swap", "cap-wait", "between-paints" };
+		"other-in-frame", "after-frame", "swap", "cap-wait", "gears", "between-paints" };
 	return p >= 0 && p < PartCount ? n[p] : "?";
 }
 
@@ -144,7 +145,7 @@ inline const char * partName( int p )
 struct Marks
 {
 	double start = -1.0, begin = -1.0, end = -1.0, finish = -1.0, swapAt = -1.0;
-	double passes = 0.0, gi = 0.0, restir = 0.0, probe = 0.0, capWait = 0.0;
+	double passes = 0.0, gi = 0.0, restir = 0.0, probe = 0.0, capWait = 0.0, gears = 0.0;
 };
 
 struct Window
@@ -173,7 +174,8 @@ inline bool add( Window & w, const Marks & m, double next )
 	p[After] = m.finish - end;
 	p[Swap] = m.swapAt >= m.finish && m.swapAt <= next ? m.swapAt - m.finish : 0.0;
 	p[CapWait] = m.capWait;
-	p[Between] = ( next - m.finish ) - p[Swap] - p[CapWait];
+	p[Gears] = m.gears;
+	p[Between] = ( next - m.finish ) - p[Swap] - p[CapWait] - p[Gears];
 	if ( w.t0 < 0.0 )
 		w.t0 = m.start;
 	w.frames++;

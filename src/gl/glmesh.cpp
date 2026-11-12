@@ -34,6 +34,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "message.h"
 #include "features/near/cellqueue.h"	// lane GPUFIX1
+#include "gl/wwuploadcap.h"	// lane EMPTY240 R4-1: this draw may wait a paint for its mesh
 #include "gl/controllers.h"
 #include "gl/glscene.h"
 #include "gl/renderer.h"
@@ -761,7 +762,10 @@ void Mesh::drawShapes( NodeList * secondPass )
 	auto	nif = NifModel::fromIndex( iBlock );
 	auto	context = scene->renderer;
 
-	if ( !nif || !context || !bindShape() )
+	WwUp::st().meshMayDefer = !scene->selecting;	// lane EMPTY240 R4-1: a new mesh over the budget waits a paint
+	const bool wwBound = nif && context && bindShape();
+	WwUp::st().meshMayDefer = false;
+	if ( !wwBound )
 		return;
 
 	glDisable( GL_FRAMEBUFFER_SRGB );

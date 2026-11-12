@@ -1,5 +1,7 @@
 #include "features/exposure/cellhdr.h"
 #include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
+#include "wwsyncred.h"	// lane PERFFIX6: ^WW_SYNC_RED
+#include "wwsyncwait.h"	// lane EMPTY240 R4-2: the waits by name
 #include "gl/cellunits.h"
 
 #include "features/sky/atmosphere.h"	// lane SKYA (EXPO1): the sky in the exposure's mean
@@ -465,8 +467,18 @@ void isMeasureFrame( Scene * scene, HdrGpu & g, int W, int H, int S, GLint prevD
 	const void * doc = scene->nifModel;
 	IsMeasureGpu & m = isGpus()[r];
 	const int qw = std::max( 1, W >> 2 ), qh = std::max( 1, H >> 2 );
+	/* lane PERFFIX6 (PHASE 2): the fence polled with a zero timeout; the GPU not past it yet: this frame applies nothing and
+	 * measures nothing (its read buffer is still in flight; the last value stays), and the read is tried again next frame.
+	 * Red ^WW_SYNC_RED=1: the wait (up to 1 s) */
+	if ( m.fence && !wwSyncRed() && fn->glClientWaitSync( m.fence, GL_SYNC_FLUSH_COMMANDS_BIT, 0 ) == GL_TIMEOUT_EXPIRED ) {
+		isServed().insert( doc, true );	// glview's own pass stays off: the measure is late, not missing
+		return;
+	}
 	if ( m.fence ) {	// the last frame's readback (a frame old: the GPU is past it in a GPU-bound frame)
-		fn->glClientWaitSync( m.fence, GL_SYNC_FLUSH_COMMANDS_BIT, GLuint64( 1000000000 ) );
+		{
+			WwSync::Wait wwWait( WwSync::ClientWait );	// lane EMPTY240 R4-2: instant unless the red
+			fn->glClientWaitSync( m.fence, GL_SYNC_FLUSH_COMMANDS_BIT, GLuint64( 1000000000 ) );
+		}
 		fn->glDeleteSync( m.fence );
 		m.fence = nullptr;
 		if ( m.doc == doc && mode != 1 ) {
@@ -610,6 +622,14 @@ bool wwCellImageSpaceMeasureByPass( Scene * scene )
 	const bool served = isServed().take( scene->nifModel );
 	// lane PHYSUNITS1 (RESUME 11-09 b): one camera writer: a fresh frame meter keeps the pass off (it only seeds)
 	if ( wwPhysFrameMeterFresh() && wwCellImageSpaceAdapted( scene ) >= 0.0f )
+		return false;
+	/* lane EMPTY240 R4-2: the old pass draws the scene again and reads it back in the same frame (build 76: the first
+	 * paint's 100 ms `measure` zone). The linear frame measures a frame late, so a document waits up to 4 paints for it
+	 * before the old pass takes over. Red WW_MEASURE_WAIT_RED=1: the old pass at every miss. */
+	static QHash<const void *, int> missed;
+	int & miss = missed[scene->nifModel];
+	miss = served ? 0 : miss + 1;
+	if ( !served && miss <= 4 && wwEnvInt( "WW_MEASURE_WAIT_RED" ) != 1 )
 		return false;
 	return !served || wwCellImageSpaceAdapted( scene ) < 0.0f;
 }

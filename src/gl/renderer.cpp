@@ -1315,16 +1315,24 @@ NifSkopeOpenGLContext::Program * Renderer::setupProgram( Shape * mesh, Program *
 	 * in by name only while this draw fogs (a hint is swapped either way). */
 	/* lane BINDLESS2: a cell-lit FO4 lighting draw takes the bindless twin of fo4_cell / fo4_cellcsm while the Bindless
 	 * draws row is on: the shapes the draw packets record (no selection, refraction or census pass) */
-	auto wwBlWants = [mesh]() -> bool {
-		if ( !mesh->bslsp || !WwBl::on() )
-			return false;
+	/* lane EMPTY240 R4-3: the answer is the refusal's route (RouteAsked = wants the twin), counted for the `near draws:` line */
+	auto wwBlWants = [mesh]() -> WwHw::Route {
+		if ( !mesh->bslsp )
+			return WwHw::RouteNoLsp;
+		if ( !WwBl::on() )
+			return WwHw::RouteBlOff;
 		// lane SKYSHARDS3: an instanced far ring's base instance is a placement row, not the row offset the twin reads
 		if ( mesh->wwFarInstData() && !CellFarInst::bindlessTwinAllowed() )
-			return false;
+			return WwHw::RouteFarRing;
 		const Scene * scene = mesh->scene;
 		const auto v = scene->nifModel->getBSVersion();
-		return v >= 130 && v < 151 && !scene->selecting && !( mesh->bslsp->hasRefraction && scene->showRefraction )
-			&& !GpuDriven::census();
+		if ( v < 130 || v >= 151 )
+			return WwHw::RouteVersion;
+		if ( scene->selecting )
+			return WwHw::RouteSelecting;
+		if ( mesh->bslsp->hasRefraction && scene->showRefraction )
+			return WwHw::RouteRefraction;
+		return GpuDriven::census() ? WwHw::RouteCensus : WwHw::RouteAsked;
 	};
 	auto fogVariant = [&]( Program * p ) -> Program * {
 		/* lane EFX2: a cell-lit effect draw takes fo4_effectcell.prog (the effect shader the game's way: unlit,
@@ -1384,7 +1392,10 @@ NifSkopeOpenGLContext::Program * Renderer::setupProgram( Shape * mesh, Program *
 		}
 		if ( !fgTwin && want[4] == 'c' && want[5] == 'e' )
 			WwHw::route( WwHw::RouteCell );	// lane EMPTY240 R3-4: a cell-lit draw, then whether it asked the bindless twin
-		if ( !fgTwin && ( want[4] == 'c' && want[5] == 'e' ) && wwBlWants() ) {	// lane BINDLESS2: fo4_cell / fo4_cellcsm
+		const WwHw::Route wwBlRoute = !fgTwin && ( want[4] == 'c' && want[5] == 'e' ) ? wwBlWants() : WwHw::RouteCount;
+		if ( wwBlRoute != WwHw::RouteAsked && wwBlRoute != WwHw::RouteCount )
+			WwHw::route( wwBlRoute );	// lane EMPTY240 R4-3: the refusal by reason
+		if ( wwBlRoute == WwHw::RouteAsked ) {	// lane BINDLESS2: fo4_cell / fo4_cellcsm
 			WwHw::route( WwHw::RouteAsked );
 			const char * bl = want[8] == 'c' ? "fo4_cellcsmbl.prog" : "fo4_cellbl.prog";
 			if ( WwBl::red() != 5 ) {	// lane BINDLESSPERF1: the twin first; its base is looked up once
@@ -1402,6 +1413,7 @@ NifSkopeOpenGLContext::Program * Renderer::setupProgram( Shape * mesh, Program *
 					return q;
 				}
 			}
+			WwHw::route( WwHw::RouteTwinMissing );	// lane EMPTY240 R4-3
 		}
 		if ( p->name == std::string_view( want ) )
 			return p;
@@ -1456,8 +1468,10 @@ NifSkopeOpenGLContext::Program * Renderer::setupProgram( Shape * mesh, Program *
 			else
 				setupStatus = setupProgramFO3( nif, program, mesh );
 			if ( setupStatus ) {
-				if ( program->wwBindless )	// lane BINDLESS2
+				if ( program->wwBindless ) {	// lane BINDLESS2
+					WwHw::route( WwHw::RouteBindless );	// lane EMPTY240 R4-3: the scanned path's twin counts too
 					WwBl::commit( fn, program );
+				}
 				return wwProgramCensus( nif, mesh, wwSp, wwKind, wwMsn, wwLodLand, program,
 				globalUniforms->lightSourcePosition[0] );
 			}
