@@ -198,7 +198,7 @@ LodgenWorkerScope::~LodgenWorkerScope()
 	tlsInWorker = saved;
 }
 
-void lodgenParallelFor( int n, const std::function<void( int )> & f, int cap )
+void lodgenParallelFor( int n, const std::function<void( int )> & f, int cap, int floor )
 {
 	if ( n <= 0 )
 		return;
@@ -207,7 +207,7 @@ void lodgenParallelFor( int n, const std::function<void( int )> & f, int cap )
 	 * is still two. */
 	const int t = cap > 0 ? qMin( lodgenThreadCount(), cap ) : lodgenThreadCount();
 	// THE SIZE FLOOR: below eight items the threads cost more than the work
-	if ( n < 32 || t <= 1 || tlsInWorker ) {
+	if ( n < floor || t <= 1 || tlsInWorker ) {	// lane EMPTY240 R4-4: a caller with heavy items may ask a lower floor
 		// THE WAY BACK: the same loop, the same thread, ascending i
 		for ( int i = 0; i < n; i++ )
 			f( i );

@@ -83,6 +83,8 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "features/gi/rtddgicell.h"	// the ray-traced GI volume, one call a frame
 #include "celldoorlive.h"	// one call a frame
 #include "cellworldanim.h"	// the cell's world clock
+#include "gl/wwuploadcap.h"	// lane EMPTY240 R4-1: the paint's upload budget
+#include "wwsyncwait.h"	// lane EMPTY240 R4-2: the `frame overlap:` line
 #include "shortcutregistry.h"
 #include "wwskin.h"
 #include "features/near/cellqueue.h"
@@ -3318,11 +3320,14 @@ static void wwCellImageSpaceMeasurePass( Scene * scene )
 	std::vector<float> px( size_t( w ) * size_t( h ) * 4 );
 	// the stencil (renderer.cpp): bit 0 a cell-lit fragment landed, bit 1 the last one was blended/not cell-lit
 	std::vector<unsigned char> cover( size_t( w ) * size_t( h ) );
+	QElapsedTimer wwReadClock;	// lane EMPTY240 R4-2: a same-frame read-back (only when the linear frame could not measure)
+	wwReadClock.start();
 	fn->glBindFramebuffer( GL_READ_FRAMEBUFFER, fbo->handle() );
 	glPixelStorei( GL_PACK_ALIGNMENT, 4 );
 	glReadPixels( 0, 0, w, h, GL_RGBA, GL_FLOAT, px.data() );
 	glPixelStorei( GL_PACK_ALIGNMENT, 1 );
 	glReadPixels( 0, 0, w, h, GL_STENCIL_INDEX, GL_UNSIGNED_BYTE, cover.data() );
+	WwSync::add( WwSync::ReadPixels, double( wwReadClock.nsecsElapsed() ) );
 	glPixelStorei( GL_PACK_ALIGNMENT, 4 );
 	fn->glBindFramebuffer( GL_FRAMEBUFFER, GLuint( prevFbo ) );
 	glViewport( vp[0], vp[1], vp[2], vp[3] );
@@ -3652,7 +3657,10 @@ static void wwPacerTick( GLView * v )
 		QTimer::singleShot( 0, v, [v]() { wwPacerTick( v ); } );
 		return;
 	}
-	QMetaObject::invokeMethod( v, "advanceGears", Qt::DirectConnection );
+	{
+		WwWallPart wallPart( wwWall().cur.gears );	// lane EMPTY240 R4-2: named out of between-paints
+		QMetaObject::invokeMethod( v, "advanceGears", Qt::DirectConnection );
+	}
 	p.requestAt = wwPaceNowS();
 	v->update();
 	/* lane EMPTY240 R3-0b (build 74: 9 ms between paints of a 4 ms frame): update() asks QWindow::requestUpdate, whose
@@ -3674,6 +3682,11 @@ static void wwWallStart( GLView * v )
 		QObject::connect( v, &QOpenGLWindow::frameSwapped, v, []() { wwWall().cur.swapAt = wwPaceNowS(); } );
 	}
 	const double now = wwPaceNowS();
+	if ( w.cur.start >= 0.0 && w.cur.finish >= w.cur.start ) {	// lane EMPTY240 R4-2: the paint's CPU time, to the swap's return
+		const bool swapped = w.cur.swapAt >= w.cur.finish && w.cur.swapAt <= now;
+		WwSync::cpuFrame( ( ( swapped ? w.cur.swapAt : w.cur.finish ) - w.cur.start ) * 1.0e3,
+			swapped ? ( w.cur.swapAt - w.cur.finish ) * 1.0e3 : 0.0 );
+	}
 	WwFrameWall::add( w.win, w.cur, now );
 	w.cur = WwFrameWall::Marks();
 	w.cur.start = now;
@@ -3768,6 +3781,7 @@ static void wwGpuFrameBegin( const Vector3 & pos )
 			t.start();
 			const GLenum r = xf->glClientWaitSync( g.fence[i], 0x00000001 /* GL_SYNC_FLUSH_COMMANDS_BIT */, 1000000000ull );
 			const double ms = double( t.nsecsElapsed() ) * 1.0e-6;
+			WwSync::add( WwSync::CapFence, ms * 1.0e6 );	// lane EMPTY240 R4-2
 			if ( r == 0x911B /* GL_TIMEOUT_EXPIRED */ ) {
 				g.timeouts++;
 				std::fprintf( stderr, "frame queue: the paint 2 back still runs on the GPU after 1 s (frame %llu): going on\n",
@@ -3819,6 +3833,7 @@ static void wwGpuFrameBegin( const Vector3 & pos )
 			continue;
 		const double ms = double( t1 - t0 ) * 1.0e-6;
 		g.hwGpuMs += ms;
+		WwSync::gpuFrame( ms );	// lane EMPTY240 R4-2
 		if ( ms > 250.0 )
 			std::fprintf( stderr, "frame gpu long: frame %llu took %.1f ms on the GPU (a reset comes at 2000)\n",
 				(unsigned long long)g.frameOf[s], ms );
@@ -3907,6 +3922,14 @@ static void wwGpuFrameFinish()
 		double( rt[WwHw::RouteBindless] ) / fr, double( rt[WwHw::RoutePbrm] ) / fr, double( rt[WwHw::RouteWater] ) / fr,
 		WwBl::on() ? "on" : "off (the look is off or the context lacks the extensions)", WwBl::mdiOn() ? "on" : "off",
 		wwCellAoPrepassEcho().toUtf8().constData() );
+	std::fprintf( stderr, "near draws not asking the twin, a frame: %.0f no lighting shader, %.0f bindless off, %.0f far ring "
+		"(WW_CELL_FARINST_BL off), %.0f not FO4, %.0f selecting, %.0f refraction, %.0f census; %.0f asked but the twin was "
+		"missing (EMPTY240 R4-3)\n",
+		double( rt[WwHw::RouteNoLsp] ) / fr, double( rt[WwHw::RouteBlOff] ) / fr, double( rt[WwHw::RouteFarRing] ) / fr,
+		double( rt[WwHw::RouteVersion] ) / fr, double( rt[WwHw::RouteSelecting] ) / fr,
+		double( rt[WwHw::RouteRefraction] ) / fr, double( rt[WwHw::RouteCensus] ) / fr,
+		double( rt[WwHw::RouteTwinMissing] ) / fr );
+	WwSync::line( wallMs, g.hwFrames );	// lane EMPTY240 R4-2: CPU, GPU and the waits beside the wall
 	g.hwWin.start();
 	g.hwGpuMs = g.hwPaintMs = g.hwWorkers = g.hwOwn = 0.0;
 	g.hwFrames = 0;
@@ -3948,6 +3971,7 @@ void GLView::paintGL()
 	{
 		~WwGpuFrameDone() { wwGpuFrameFinish(); }
 	} wwGpuFrameDone;
+	WwUp::Paint wwUpPaint( &PassTime::cacheCounts().texBytes );	// lane EMPTY240 R4-1: this paint's upload budget
 	{
 		PassTime::Zone wwZone( "stream evict" );
 		wwCellStreamEvict();

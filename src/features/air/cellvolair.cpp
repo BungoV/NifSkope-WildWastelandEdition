@@ -6,6 +6,7 @@ BSD License - see nifskope.h
 
 #include "features/air/cellvolair.h"
 #include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
+#include "wwsyncwait.h"	// lane EMPTY240 R4-2: the env strata's read-back by name
 #include "features/weather/wxoverride.h"	// lane MODULES1 item 12: live air overrides
 #include "gl/cellunits.h"
 
@@ -3293,6 +3294,7 @@ static void vaPassInner( Scene * scene, bool run )
 				const int x = std::min( int( pu * float( cols ) ), cols - 1 ), y = std::min( int( pv2 * float( rows ) ), rows - 1 );
 				const int k = std::min( int( fk ), kSlices - 1 );
 				float h0[4] = { 0.0f, 0.0f, 0.0f, 0.0f }, h1[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+				WwSync::Wait wwWait( WwSync::ReadPixels );	// a new set, then every 600 frames
 				fn->glFramebufferTextureLayer( GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, g.hist[g.histCur], 0, 4 * kSlices + k );
 				fn->glReadPixels( x, y, 1, 1, GL_RGBA, GL_FLOAT, h0 );
 				fn->glFramebufferTextureLayer( GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, g.hist[g.histCur], 0, 5 * kSlices + k );

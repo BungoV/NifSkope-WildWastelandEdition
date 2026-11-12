@@ -34,6 +34,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 #include "cellsplat.h"	// lane TERRBLEND1: wwCellLandIs
 #include "features/near/cellbindless.h"	// lane BINDLESS2
+#include "gl/wwuploadcap.h"	// lane EMPTY240 R4-1: a mesh left for the next paint
 
 #include "gl/controllers.h"
 #include "gl/glscene.h"
@@ -1077,7 +1078,12 @@ bool Shape::bindShape() const
 	if ( !h ) [[unlikely]]
 		return false;
 
+	WwUp::st().meshDeferredHit = false;
 	context->bindShape( *h, vertexAttrs, triangles.constData() );
+	if ( WwUp::st().meshDeferredHit ) [[unlikely]] {	// lane EMPTY240 R4-1: over the paint's upload budget
+		WwUp::st().meshDeferredHit = false;
+		return false;
+	}
 
 	return true;
 }

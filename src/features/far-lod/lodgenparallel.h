@@ -71,7 +71,7 @@ private:
  *  in the same bake went 36.3, 19.7, 12.6, 10.4, 9.2, 8.3, so one number for
  *  both stages would have to throw one of them away.
  */
-void lodgenParallelFor( int n, const std::function<void( int )> & f, int cap = 0 );
+void lodgenParallelFor( int n, const std::function<void( int )> & f, int cap = 0, int floor = 32 );
 
 /*! as lodgenParallelFor, with no size floor, on a pool of its own whose threads are not
  *  generator workers, so a lodgenParallelFor inside f still fans out (a few big items keep every core busy).

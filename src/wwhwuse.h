@@ -90,7 +90,10 @@ struct Cache
 Cache cache();
 
 //! R3-4: the draws' program routes, counted per paint by Renderer::setupProgram
-enum Route { RouteCalls, RouteCell, RouteAsked, RouteBindless, RoutePbrm, RouteWater, RouteCount };
+enum Route { RouteCalls, RouteCell, RouteAsked, RouteBindless, RoutePbrm, RouteWater,
+	// R4-3: why a cell-lit draw did not ask the bindless twin (renderer.cpp wwBlWants), and an asked twin that was missing
+	RouteNoLsp, RouteBlOff, RouteFarRing, RouteVersion, RouteSelecting, RouteRefraction, RouteCensus, RouteTwinMissing,
+	RouteCount };
 void route( Route r );
 //! the counts since the last call (the hardware line's window)
 void routeTake( std::int64_t out[RouteCount] );

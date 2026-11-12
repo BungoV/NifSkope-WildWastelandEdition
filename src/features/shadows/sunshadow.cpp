@@ -9,6 +9,7 @@ BSD License - see nifskope.h
 #include "gl/cellunits.h"
 #include "gl/celluniform.h"	// lane CELLUNI2
 #include "gl/alphabgsm.h"	// lane ALPHABGSM1: the side passes' alpha-test census
+#include "gl/wwuploadcap.h"	// lane EMPTY240 R4-1: a layer drawn while uploads waited is drawn again
 #include "features/post/gametaa.h"
 #include "features/water/cellwater.h"	// lane SUNCELL1: water never casts
 #include "cellmesh.h"	// lane FARDRAW1: CellMeshInst
@@ -1386,6 +1387,7 @@ static void sunShadowPassImpl( Scene * scene )
 		ht.p( progAt );
 		for ( const QString & rr : cs().reds )
 			ht.w( qHash( rr ) );
+		ht.w( WwUp::st().deferredAll );	// lane EMPTY240 R4-1: a caster's mesh or map that waited a paint redraws the layers
 		stateSig = ht.h;
 	}
 	bool anyScroll = false;

@@ -6,6 +6,7 @@
 #include "features/sky/atmomath.h"
 #include "recx.h"
 #include "wwswitch.h"
+#include "wwsyncred.h"	// lane PERFFIX6: ^WW_SYNC_RED
 #include "gl/glscene.h"
 #include "gl/lookdevstage.h"
 #include "gl/renderer.h"
@@ -149,7 +150,7 @@ void timeRead( NifSkopeOpenGLContext::GLFunctions * fn, FlGpu & g, int slot, boo
 {
 	if ( !g.pending[slot] )
 		return;
-	if ( !wait ) {
+	if ( !wait || !wwSyncRed() ) {	// lane PERFFIX6: an unfinished query is read next frame
 		GLuint avail = 0;
 		fn->glGetQueryObjectuiv( g.q[slot * 2 + 1], GL_QUERY_RESULT_AVAILABLE, &avail );
 		if ( !avail )
