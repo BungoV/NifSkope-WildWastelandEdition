@@ -1,0 +1,4 @@
+# lane EMPTY240 R11-1 (src/features/exposure/cellhdr.cpp): the measure drawn straight at the quarter size, stencil read in the shader.
+# No conditions: never picked for a shape; cellhdr.cpp selects it by name.
+
+shaders cell_ao.vert cell_is_measure_q.frag

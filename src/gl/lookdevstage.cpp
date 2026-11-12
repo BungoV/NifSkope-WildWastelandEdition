@@ -8,6 +8,7 @@ BSD License - see nifskope.h
 #include "features/shared/cellpasstime.h"	// lane PERF2: the draws' CPU setup time
 #include "gl/celluniprof.h"	// lane PERFFIX1: WW_CELL_UNI_PROF
 #include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
+#include "features/shared/glstatememo.h"	// lane EMPTY240 R11-2: the sky's stencil reads kept
 #include "cellworldanim.h"	// MODULES1: the cell world clock (nothing acts paused; red WW_CELL_CLOCK_RED=harness)
 
 #include "features/weather/esmweather.h"
@@ -4062,15 +4063,24 @@ void wwLookdevSkyLinearDraw( Scene * scene, bool hdr )
 	// measure and the bloom take it; the depth stays at the far plane (every backdrop pass draws with the depth off)
 	Renderer * r = scene->renderer;
 	auto fn = r->fn;
-	GLint sFunc = GL_ALWAYS, sRef = 0, sMask = 0xFF, sWrite = 0xFF, sFail = GL_KEEP, sZFail = GL_KEEP, sPass = GL_KEEP;
-	fn->glGetIntegerv( GL_STENCIL_FUNC, &sFunc );
-	fn->glGetIntegerv( GL_STENCIL_REF, &sRef );
-	fn->glGetIntegerv( GL_STENCIL_VALUE_MASK, &sMask );
-	fn->glGetIntegerv( GL_STENCIL_WRITEMASK, &sWrite );
-	fn->glGetIntegerv( GL_STENCIL_FAIL, &sFail );
-	fn->glGetIntegerv( GL_STENCIL_PASS_DEPTH_FAIL, &sZFail );
-	fn->glGetIntegerv( GL_STENCIL_PASS_DEPTH_PASS, &sPass );
-	const bool wasStencil = fn->glIsEnabled( GL_STENCIL_TEST );
+	// lane EMPTY240 R11-2: build 86 read these 8 every frame (sky 0.35 ms CPU); kept (glstatememo.h, red WW_GLSTATE_MEMO_RED=1)
+	static QHash<const void *, WwGlMemo<GLint, 8>> stMemos;
+	WwGlMemo<GLint, 8> & st = stMemos[r];
+	if ( st.due() ) {
+		GLint now[8] = { GL_ALWAYS, 0, 0xFF, 0xFF, GL_KEEP, GL_KEEP, GL_KEEP, 0 };
+		fn->glGetIntegerv( GL_STENCIL_FUNC, &now[0] );
+		fn->glGetIntegerv( GL_STENCIL_REF, &now[1] );
+		fn->glGetIntegerv( GL_STENCIL_VALUE_MASK, &now[2] );
+		fn->glGetIntegerv( GL_STENCIL_WRITEMASK, &now[3] );
+		fn->glGetIntegerv( GL_STENCIL_FAIL, &now[4] );
+		fn->glGetIntegerv( GL_STENCIL_PASS_DEPTH_FAIL, &now[5] );
+		fn->glGetIntegerv( GL_STENCIL_PASS_DEPTH_PASS, &now[6] );
+		now[7] = fn->glIsEnabled( GL_STENCIL_TEST ) ? 1 : 0;
+		st.keep( now, "lookdev sky stencil" );
+	}
+	const GLint sFunc = st.v[0], sRef = st.v[1], sMask = st.v[2], sWrite = st.v[3], sFail = st.v[4], sZFail = st.v[5],
+		sPass = st.v[6];
+	const bool wasStencil = st.v[7] != 0;
 	fn->glEnable( GL_STENCIL_TEST );
 	fn->glStencilMask( 0x03 );
 	fn->glStencilFunc( GL_ALWAYS, 1, 0xFF );
@@ -4086,11 +4096,17 @@ void wwLookdevSkyLinearDraw( Scene * scene, bool hdr )
 	WW_SWITCH_STATIC( bool, noMark, wwEnv( "WW_SKY_LINEAR_RED" ).trimmed() == QLatin1StringView( "nomark" ) );
 	const bool mark = drew && !noMark;
 	if ( mark ) {
-		GLint clearS = 0;
-		GLint maskS = 0xFF;
-		fn->glGetIntegerv( GL_STENCIL_CLEAR_VALUE, &clearS );
-		fn->glGetIntegerv( GL_STENCIL_WRITEMASK, &maskS );
-		const bool wasScissor = fn->glIsEnabled( GL_SCISSOR_TEST );
+		static QHash<const void *, WwGlMemo<GLint, 3>> mkMemos;	// lane EMPTY240 R11-2: as above
+		WwGlMemo<GLint, 3> & mk = mkMemos[r];
+		if ( mk.due() ) {
+			GLint now[3] = { 0, 0xFF, 0 };
+			fn->glGetIntegerv( GL_STENCIL_CLEAR_VALUE, &now[0] );
+			fn->glGetIntegerv( GL_STENCIL_WRITEMASK, &now[1] );
+			now[2] = fn->glIsEnabled( GL_SCISSOR_TEST ) ? 1 : 0;
+			mk.keep( now, "lookdev sky mark" );
+		}
+		const GLint clearS = mk.v[0], maskS = mk.v[1];
+		const bool wasScissor = mk.v[2] != 0;
 		fn->glDisable( GL_SCISSOR_TEST );
 		fn->glStencilMask( 0x03 );
 		fn->glClearStencil( 1 );
