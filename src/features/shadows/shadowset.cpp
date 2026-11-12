@@ -10,6 +10,7 @@ BSD License - see nifskope.h
 
 #include "gl/cellunits.h"	// lane HARNESSMIN1 (testint): the terrain/contact maps registered on 31/32
 #include "gl/celluniform.h"	// lane CELLUNI2
+#include "features/shared/glstatememo.h"	// lane EMPTY240 R11-2: the contact pass's state reads kept
 #include "features/clouds/cloudshadow.h"	// lane CLOUD3: the clouds' shadow map joins the composition
 #include "gl/celllooks.h"	// lane GAPLOOK1: the contact far tier's switch
 #include "features/sky/skyephem.h"	// lane EPHEM1: FO4CS Solar's sun + moon arithmetic
@@ -235,6 +236,9 @@ struct Contact
 	unsigned int up = 0, upFbo = 0;
 	int upW = 0, upH = 0;
 	bool upValid = false;
+	// lane EMPTY240 R11-2: the target shape that passed its status check (0: ask) and the pass's entry state
+	quint64 okKey = 0;
+	WwGlMemo<GLint, 10> entry;
 };
 
 struct SetState
@@ -1678,7 +1682,8 @@ bool wwShadowPreviewDrops( const Scene * scene, const Shape * sh )
 
 bool wwShadowRed( const char * name )
 {
-	return ss().reds.contains( QString::fromLatin1( name ) );
+	const SetState & s = ss();
+	return !s.reds.isEmpty() && s.reds.contains( QString::fromLatin1( name ) );	// lane EMPTY240 R11-2: no string with no red
 }
 
 /* MODULES1 R6-8 (bungo 11-10: the shadow views are unreadable): the views wrote their value into the LIT frame, so the
@@ -1714,6 +1719,8 @@ bool wwShadowPar( int bit )
 	const SetState & s = ss();
 	if ( ( s.par & bit ) == 0 )
 		return false;
+	if ( s.reds.isEmpty() )
+		return true;	// lane EMPTY240 R11-2: no string with no red
 	for ( int i = 0; i < 14; i++ )
 		if ( bit == ( 1 << i ) )
 			return !s.reds.contains( QStringLiteral( "no" ) + QLatin1StringView( kParNames[i] ) );
@@ -2423,7 +2430,24 @@ void wwContactShadowPass( Scene * scene )
 	fn->glGetIntegerv( GL_DRAW_FRAMEBUFFER_BINDING, &prevFbo );
 	fn->glGetIntegerv( GL_READ_FRAMEBUFFER_BINDING, &prevRead );
 	fn->glGetIntegerv( GL_VIEWPORT, vp );
-	fn->glGetIntegerv( GL_ACTIVE_TEXTURE, &prevActive );
+	/* lane EMPTY240 R11-2: the active unit, four enables and the masks kept (build 86 read them every frame, contact
+	 * 0.10 ms CPU; glstatememo.h, red WW_GLSTATE_MEMO_RED=1); the targets, the binding and the viewport still asked */
+	if ( c.entry.due() ) {
+		GLint now[10] = { GL_TEXTURE0, 0, 0, 0, 0, 1, 1, 1, 1, 1 };
+		fn->glGetIntegerv( GL_ACTIVE_TEXTURE, &now[0] );
+		now[1] = fn->glIsEnabled( GL_DEPTH_TEST ) ? 1 : 0;
+		now[2] = fn->glIsEnabled( GL_BLEND ) ? 1 : 0;
+		now[3] = fn->glIsEnabled( GL_CULL_FACE ) ? 1 : 0;
+		now[4] = fn->glIsEnabled( GL_SCISSOR_TEST ) ? 1 : 0;
+		GLboolean dm = GL_TRUE, cm[4] = { GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE };
+		fn->glGetBooleanv( GL_DEPTH_WRITEMASK, &dm );
+		fn->glGetBooleanv( GL_COLOR_WRITEMASK, cm );
+		now[5] = dm ? 1 : 0;
+		for ( int k = 0; k < 4; k++ )
+			now[6 + k] = cm[k] ? 1 : 0;
+		c.entry.keep( now, "contact entry" );
+	}
+	prevActive = c.entry.v[0];
 	if ( c.w != mw || c.h != mh ) {
 		fn->glBindTexture( GL_TEXTURE_2D, c.tex );
 		fn->glTexImage2D( GL_TEXTURE_2D, 0, GL_R8, mw, mh, 0, GL_RED, GL_UNSIGNED_BYTE, nullptr );
@@ -2436,9 +2460,14 @@ void wwContactShadowPass( Scene * scene )
 		fn->glFramebufferTexture2D( GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, c.tex, 0 );
 		c.w = mw;
 		c.h = mh;
+		c.okKey = 0;
 	}
 	fn->glBindFramebuffer( GL_FRAMEBUFFER, c.fbo );
-	const bool complete = fn->glCheckFramebufferStatus( GL_FRAMEBUFFER ) == GL_FRAMEBUFFER_COMPLETE;
+	// lane EMPTY240 R11-2: asked once a shape (build 86 every frame); red WW_GLSTATE_MEMO_RED=1: every frame
+	const quint64 okKey = quint64( c.fbo & 0xFFFF ) | quint64( mw & 0xFFFF ) << 16 | quint64( mh & 0xFFFF ) << 32 | quint64( 1 ) << 48;
+	const bool complete = ( c.okKey == okKey && !wwGlStateMemoRed() )
+		|| fn->glCheckFramebufferStatus( GL_FRAMEBUFFER ) == GL_FRAMEBUFFER_COMPLETE;
+	c.okKey = complete ? okKey : 0;
 	NifSkopeOpenGLContext::Program * prog = complete ? r->useProgram( "ww_contact.prog" ) : nullptr;
 	if ( !prog ) {
 		fn->glBindFramebuffer( GL_DRAW_FRAMEBUFFER, GLuint( prevFbo ) );
@@ -2448,11 +2477,12 @@ void wwContactShadowPass( Scene * scene )
 	}
 	timerBegin( fn, s.tmContact );
 	PassTime::subBegin( PassTime::ContactMarch );	// lane PERFFIX2: "| sub contact" each frame
-	const bool wasDepth = fn->glIsEnabled( GL_DEPTH_TEST ), wasBlend = fn->glIsEnabled( GL_BLEND );
-	const bool wasCull = fn->glIsEnabled( GL_CULL_FACE ), wasScissor = fn->glIsEnabled( GL_SCISSOR_TEST );
-	GLboolean depthMask = GL_TRUE, colorMask[4];
-	fn->glGetBooleanv( GL_DEPTH_WRITEMASK, &depthMask );
-	fn->glGetBooleanv( GL_COLOR_WRITEMASK, colorMask );
+	const bool wasDepth = c.entry.v[1] != 0, wasBlend = c.entry.v[2] != 0;
+	const bool wasCull = c.entry.v[3] != 0, wasScissor = c.entry.v[4] != 0;
+	const GLboolean depthMask = c.entry.v[5] ? GL_TRUE : GL_FALSE;
+	GLboolean colorMask[4];
+	for ( int k = 0; k < 4; k++ )
+		colorMask[k] = c.entry.v[6 + k] ? GL_TRUE : GL_FALSE;
 	fn->glDisable( GL_DEPTH_TEST );
 	fn->glDisable( GL_BLEND );
 	fn->glDisable( GL_CULL_FACE );

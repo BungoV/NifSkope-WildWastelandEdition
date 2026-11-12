@@ -9,6 +9,7 @@
 #include "features/exposure/physunits.h"	// lane PHYSUNITS1: real units
 #include "features/air/cellvolair.h"	// lane FIX1101A (moon): the air's medium for that gain
 #include "wwswitch.h"
+#include "features/shared/glstatememo.h"	// lane EMPTY240 R11-2: the sky's state reads kept
 #include "wwsyncred.h"	// lane PERFFIX6: ^WW_SYNC_RED
 #include "wwsyncwait.h"	// lane EMPTY240 R4-2: the waits by name
 #include "gl/cellunits.h"
@@ -160,9 +161,11 @@ AtState & as()
 	return s;
 }
 
+// lane EMPTY240 R11-2: the reds' words taken once a live set (build 86 trimmed and lowered them ~20 times a frame)
 bool red( const char * word )
 {
-	return wwEnvStr( "WW_ATMO_RED" ).trimmed().toLower() == QLatin1StringView( word );
+	WW_SWITCH_STATIC( QString, w, wwEnvStr( "WW_ATMO_RED" ).trimmed().toLower() );
+	return w == QLatin1StringView( word );
 }
 
 /* LATE 7 (bungo: the radstorm is not green): the Sky Color the frame draws. A glowing sky (the radstorms, the
@@ -289,13 +292,15 @@ void clearDayHaze( float haze[3], bool recordHasFog )
 //! not dimmed toward the horizon)
 bool nightRed( const char * word )
 {
-	return wwEnvStr( "WW_ATMO_NIGHT_RED" ).trimmed().toLower() == QLatin1StringView( word );
+	WW_SWITCH_STATIC( QString, w, wwEnvStr( "WW_ATMO_NIGHT_RED" ).trimmed().toLower() );
+	return w == QLatin1StringView( word );
 }
 
 //! lane SKYA (EXPO1): skyzero (the sky counted as nothing), zenithw (the hemisphere mean not weighted by solid angle)
 bool expoRed( const char * word )
 {
-	return wwEnvStr( "WW_ATMO_EXPO_RED" ).trimmed().toLower() == QLatin1StringView( word );
+	WW_SWITCH_STATIC( QString, w, wwEnvStr( "WW_ATMO_EXPO_RED" ).trimmed().toLower() );
+	return w == QLatin1StringView( word );
 }
 
 struct Target
@@ -315,6 +320,7 @@ struct Volume	// lane SKYA (ATMO2): the aerial-perspective froxels, RGBA16F 3D, 
 	float proj[4] = {};	// P00, P11, P20, P21
 	float kmPerView = 0.0f;
 	float camR = 0.0f;	// km from the planet's centre (the sky's air reads the transmittance LUT from here)
+	GLuint attached = 0;	// lane EMPTY240 R11-2: the texture the layered target holds and passed its status check (0: none)
 };
 
 struct AtGpu
@@ -516,6 +522,7 @@ bool buildAp( Scene * scene, AtGpu & g, int msN, float camR, const float sunW[3]
 		fn->glBindTexture( GL_TEXTURE_3D, 0 );
 		v.w = v.h = w;
 		v.n = n;
+		v.attached = 0;
 	}
 	/* lane PERFFIX3 (item 1): every slice in ONE layered draw (atmo_apl.prog: gl_Layer from the geometry shader, the
 	 * whole 3D texture attached layered), not a draw and a glFramebufferTextureLayer re-attach per slice. Same maths per
@@ -571,9 +578,14 @@ bool buildAp( Scene * scene, AtGpu & g, int msN, float camR, const float sunW[3]
 	const GLenum one = GL_COLOR_ATTACHMENT0;
 	bool ok = true;
 	if ( layered ) {
-		fn->glFramebufferTexture( GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, v.tex, 0 );
-		fn->glDrawBuffers( 1, &one );
-		ok = fn->glCheckFramebufferStatus( GL_FRAMEBUFFER ) == GL_FRAMEBUFFER_COMPLETE;
+		/* lane EMPTY240 R11-2: attached and its status asked once a texture (build 86 did both every frame); red
+		 * WW_GLSTATE_MEMO_RED=1: every frame */
+		if ( v.attached != v.tex || wwGlStateMemoRed() ) {
+			fn->glFramebufferTexture( GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, v.tex, 0 );
+			fn->glDrawBuffers( 1, &one );
+			ok = fn->glCheckFramebufferStatus( GL_FRAMEBUFFER ) == GL_FRAMEBUFFER_COMPLETE;
+			v.attached = ok ? v.tex : 0;
+		}
 		if ( ok ) {
 			quad( r );	// atApDims.z slices, one geometry invocation each
 		} else {
@@ -582,6 +594,8 @@ bool buildAp( Scene * scene, AtGpu & g, int msN, float camR, const float sunW[3]
 			fprintf( stderr, "atmo: the layered aerial-perspective target is incomplete; a draw a slice from now on\n" );
 		}
 	}
+	if ( !layered )
+		v.attached = 0;	// a slice a draw re-attaches
 	for ( int k = 0; k < n && ok && !layered; k++ ) {
 		fn->glFramebufferTextureLayer( GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, v.tex, 0, k );
 		if ( k == 0 ) {
@@ -639,7 +653,11 @@ bool wwAtmoDrawSky( Scene * scene, const WwAtmoInputs & in, QString * line )
 	Renderer * r = scene->renderer;
 	auto fn = r->fn;
 	AtGpu & g = gpus()[r];
-	while ( fn->glGetError() != GL_NO_ERROR ) {
+	/* lane EMPTY240 R11-2: build 86 drained the error queue every frame and nothing here reads it after (ensure() asks
+	 * glCheckFramebufferStatus); a probe capture keeps it. Red WW_GLSTATE_MEMO_RED=1: every frame */
+	if ( in.capture || wwGlStateMemoRed() ) {
+		while ( fn->glGetError() != GL_NO_ERROR ) {
+		}
 	}
 	if ( !g.q[0] )
 		fn->glGenQueries( 4, g.q );
@@ -702,13 +720,31 @@ bool wwAtmoDrawSky( Scene * scene, const WwAtmoInputs & in, QString * line )
 	GLint prevDraw = 0, prevRead = 0, prevActive = 0, vp[4] = { 0, 0, 1, 1 };
 	fn->glGetIntegerv( GL_DRAW_FRAMEBUFFER_BINDING, &prevDraw );
 	fn->glGetIntegerv( GL_READ_FRAMEBUFFER_BINDING, &prevRead );
-	fn->glGetIntegerv( GL_ACTIVE_TEXTURE, &prevActive );
 	fn->glGetIntegerv( GL_VIEWPORT, vp );
-	const bool wasDepth = fn->glIsEnabled( GL_DEPTH_TEST ), wasBlend = fn->glIsEnabled( GL_BLEND );
-	const bool wasCull = fn->glIsEnabled( GL_CULL_FACE ), wasScissor = fn->glIsEnabled( GL_SCISSOR_TEST );
-	const bool wasStencil = fn->glIsEnabled( GL_STENCIL_TEST );
-	GLboolean depthMask = GL_TRUE;
-	fn->glGetBooleanv( GL_DEPTH_WRITEMASK, &depthMask );
+	/* lane EMPTY240 R11-2: the active unit, the five enables and the depth mask kept for the frame's sky (glstatememo.h;
+	 * the targets and the viewport follow a resize, still asked); a probe capture asks. Red WW_GLSTATE_MEMO_RED=1 */
+	static QHash<const void *, WwGlMemo<GLint, 7>> stMemos;
+	WwGlMemo<GLint, 7> * st = in.capture ? nullptr : &stMemos[r];
+	GLint now[7] = { GL_TEXTURE0, 0, 0, 0, 0, 0, 1 };
+	if ( !st || st->due() ) {
+		fn->glGetIntegerv( GL_ACTIVE_TEXTURE, &now[0] );
+		now[1] = fn->glIsEnabled( GL_DEPTH_TEST ) ? 1 : 0;
+		now[2] = fn->glIsEnabled( GL_BLEND ) ? 1 : 0;
+		now[3] = fn->glIsEnabled( GL_CULL_FACE ) ? 1 : 0;
+		now[4] = fn->glIsEnabled( GL_SCISSOR_TEST ) ? 1 : 0;
+		now[5] = fn->glIsEnabled( GL_STENCIL_TEST ) ? 1 : 0;
+		GLboolean dm = GL_TRUE;
+		fn->glGetBooleanv( GL_DEPTH_WRITEMASK, &dm );
+		now[6] = dm ? 1 : 0;
+		if ( st )
+			st->keep( now, "atmosphere sky" );
+	} else {
+		std::memcpy( now, st->v, sizeof now );
+	}
+	prevActive = now[0];
+	const bool wasDepth = now[1] != 0, wasBlend = now[2] != 0, wasCull = now[3] != 0, wasScissor = now[4] != 0;
+	const bool wasStencil = now[5] != 0;
+	const GLboolean depthMask = now[6] ? GL_TRUE : GL_FALSE;
 	fn->glDisable( GL_DEPTH_TEST );
 	fn->glDisable( GL_BLEND );
 	fn->glDisable( GL_CULL_FACE );
@@ -721,11 +757,22 @@ bool wwAtmoDrawSky( Scene * scene, const WwAtmoInputs & in, QString * line )
 		&& ensure( fn, g.moonView, vw, vh );
 	if ( !ok )
 		why = QStringLiteral( "a LUT target is incomplete" );
-	const QString hazeKey = QString( "%1,%2,%3,%4" ).arg( double( s.haze[0] ), 0, 'g', 6 ).arg( double( s.haze[1] ), 0, 'g', 6 )
-		.arg( double( s.haze[2] ), 0, 'g', 6 ).arg( noOzone )
-		+ ( g_ozone != 1.0f ? QStringLiteral( ",oz%1" ).arg( double( g_ozone ) ) : QString() )
-		+ ( red( "msold" ) ? QStringLiteral( ",msold" ) : QString() )	// lane FIX1101A (atmo): the red's LUT is another table
-		+ ( hazeOptics().rgb680 ? QStringLiteral( ",rgb680" ) : QString() );	// SKYLIGHT1: the old medium's tables
+	/* lane EMPTY240 R11-2: the keys' text made again only when their numbers move (build 86 formatted both every frame);
+	 * the same text from the same numbers, so the LUTs redraw exactly when they did */
+	static float keyIn[7] = { -1.0f, -1.0f, -1.0f, -1.0f, -1.0f, -1.0f, -1.0f };
+	static QString hazeKeyMade, msKeyMade;
+	const float keyNow[7] = { s.haze[0], s.haze[1], s.haze[2], noOzone ? 1.0f : 0.0f, g_ozone,
+		float( ( red( "msold" ) ? 1 : 0 ) | ( hazeOptics().rgb680 ? 2 : 0 ) ), float( msN ) };
+	if ( hazeKeyMade.isEmpty() || std::memcmp( keyNow, keyIn, sizeof keyIn ) != 0 ) {
+		std::memcpy( keyIn, keyNow, sizeof keyIn );
+		hazeKeyMade = QString( "%1,%2,%3,%4" ).arg( double( s.haze[0] ), 0, 'g', 6 ).arg( double( s.haze[1] ), 0, 'g', 6 )
+			.arg( double( s.haze[2] ), 0, 'g', 6 ).arg( noOzone )
+			+ ( g_ozone != 1.0f ? QStringLiteral( ",oz%1" ).arg( double( g_ozone ) ) : QString() )
+			+ ( red( "msold" ) ? QStringLiteral( ",msold" ) : QString() )	// lane FIX1101A (atmo): the red's LUT is another table
+			+ ( hazeOptics().rgb680 ? QStringLiteral( ",rgb680" ) : QString() );	// SKYLIGHT1: the old medium's tables
+		msKeyMade = hazeKeyMade + QString( "|%1" ).arg( msN );
+	}
+	const QString & hazeKey = hazeKeyMade;
 	// 1. transmittance and multiple scattering: only when the medium moves (weather, hour through the fog keys)
 	if ( ok && g.transKey != hazeKey ) {
 		auto p = r->useProgram( "atmo_transmittance.prog" );
@@ -742,7 +789,7 @@ bool wwAtmoDrawSky( Scene * scene, const WwAtmoInputs & in, QString * line )
 			why = QStringLiteral( "atmo_transmittance.prog did not link" );
 		}
 	}
-	const QString msKey = hazeKey + QString( "|%1" ).arg( msN );
+	const QString & msKey = msKeyMade;
 	if ( ok && g.msKey != msKey ) {
 		auto p = r->useProgram( "atmo_ms.prog" );
 		ok = p != nullptr;
@@ -1129,7 +1176,8 @@ float wwAtmoMoonFactor( int phase )
 
 bool wwAtmoDiscRed( const char * word )
 {
-	return wwEnvStr( "WW_ATMO_DISC_RED" ).trimmed().toLower() == QLatin1StringView( word );
+	WW_SWITCH_STATIC( QString, w, wwEnvStr( "WW_ATMO_DISC_RED" ).trimmed().toLower() );	// lane EMPTY240 R11-2
+	return w == QLatin1StringView( word );
 }
 
 bool wwAtmoDiscs()

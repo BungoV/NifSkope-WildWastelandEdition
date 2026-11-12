@@ -19,6 +19,7 @@
 #include "features/exposure/physunits.h"	// lane PHYSUNITS1: the physical camera; the frame in RGBA32F
 #include "features/lights/lightmeas.h"	// lane LIGHTMEAS1: the light at the camera in real units (measure only)
 #include "features/vkframe/vkframe.h"	// lane VKFRAME1 round 3: the frame shared with the Vulkan bloom source
+#include "features/shared/glstatememo.h"	// lane EMPTY240 R11-2: the clear's state reads kept
 
 #include <QDebug>
 #include <QFile>
@@ -26,6 +27,7 @@
 #include <QOpenGLContext>
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <vector>
@@ -329,6 +331,11 @@ struct IsMeasureGpu
 	bool trusted = false;	// lane SYNC1: a measure on this target raised no GL error
 	int qw = 0, qh = 0;
 	const void * doc = nullptr;
+	// lane EMPTY240 R11-1: the quarter-size measure's own target (drawn straight at qw x qh, no full-size copy or mips)
+	GLuint qfbo = 0, qtex = 0;
+	int qtw = 0, qth = 0;
+	GLenum qfmt = 0;
+	int route = -1;	// the route last measured by (1 quarter, 0 full size); a change reads errors again
 };
 
 QHash<Renderer *, IsMeasureGpu> & isGpus()
@@ -352,8 +359,8 @@ bool bloomGpuOn()
 	return !red;
 }
 
-// the measure's quarter-size level (m.tex level 2) blurred into m.btex[slot]; false = none (no imagespace, no program)
-bool bloomBlur( Scene * scene, IsMeasureGpu & m, int qw, int qh, int slot )
+// the measure's quarter size (srcTex level srcLod: m.tex level 2, or m.qtex level 0) blurred into m.btex[slot]; false = none
+bool bloomBlur( Scene * scene, IsMeasureGpu & m, GLuint srcTex, int srcLod, int qw, int qh, int slot )
 {
 	float thresh = 0.0f, scale = 0.0f;
 	if ( !wwCellImageSpaceBloomParams( scene, thresh, scale ) )
@@ -403,8 +410,8 @@ bool bloomBlur( Scene * scene, IsMeasureGpu & m, int qw, int qh, int slot )
 	fn->glActiveTexture( GLenum( GL_TEXTURE0 + kSrcUnit ) );
 	// 1. the bright pass and the column, from the measure's quarter size
 	fn->glFramebufferTexture2D( GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, m.btex[2], 0 );
-	fn->glBindTexture( GL_TEXTURE_2D, m.tex );
-	prog->uni1i( "bloomLod", 2 );
+	fn->glBindTexture( GL_TEXTURE_2D, srcTex );
+	prog->uni1i( "bloomLod", srcLod );
 	prog->uni1i( "bloomVertical", 1 );
 	r->drawShape( 4, 3, 6, GL_TRIANGLES, GL_UNSIGNED_SHORT, &attrs, idx );
 	// 2. the row, into the final
@@ -498,9 +505,24 @@ void isMeasureFrame( Scene * scene, HdrGpu & g, int W, int H, int S, GLint prevD
 		}
 	}
 	isServed().insert( doc, false );
-	auto prog = r->useProgram( "cell_is_measure.prog" );
+	/* lane EMPTY240 R11-1: build 86's measure cost 0.33 ms CPU a frame: a full-size stencil blit, a full-size clear and
+	 * draw, then a mip build, to read level 2. With the frame's stencil a texture the measure is drawn straight at the
+	 * quarter size (cell_is_measure_q.frag reads each texel's 4 x 4 pixels and their stencil): one small draw, no copy, no
+	 * mips. Red WW_IS_MEASURE_Q_RED=1: the full-size route. Live */
+	WW_SWITCH_STATIC( bool, qRed, wwEnvInt( "WW_IS_MEASURE_Q_RED" ) == 1 );
+	auto prog = g.dsTex && !qRed ? r->useProgram( "cell_is_measure_q.prog" ) : nullptr;
+	const bool q = prog != nullptr;
+	if ( !q )
+		prog = r->useProgram( "cell_is_measure.prog" );
 	if ( !prog )
 		return;	// glview's pass measures the next frame
+	if ( m.route != int( q ) ) {
+		m.route = int( q );
+		m.trusted = false;
+		std::fprintf( stderr, "tone map measure: %s (EMPTY240 R11-1%s)\n", q ? "drawn at the quarter size, the stencil read in "
+			"the shader" : "the full-size draw, its stencil copy and mips", q ? "" : qRed ? ", WW_IS_MEASURE_Q_RED=1"
+			: ": the stencil is a renderbuffer or the quarter program is missing" );
+	}
 	GLint prevTex = 0;
 	GlSnap own;	// lane SYNC1: the tone map's one read of the state (shared), else this pass's own as before
 	if ( !shared )
@@ -511,7 +533,32 @@ void isMeasureFrame( Scene * scene, HdrGpu & g, int W, int H, int S, GLint prevD
 		while ( fn->glGetError() != GL_NO_ERROR ) {
 		}
 	}
-	if ( !m.fbo || m.w != W || m.h != H || m.dsFormat != g.dsFormat || m.fmt != postFormat() ) {
+	if ( q && ( !m.qfbo || m.qtw != qw || m.qth != qh || m.qfmt != postFormat() ) ) {
+		m.trusted = false;
+		std::fprintf( stderr, "tone map measure: quarter target made %dx%d (format 0x%x, was %dx%d 0x%x): the first frame, a "
+			"resize or a live set\n", qw, qh, unsigned( postFormat() ), m.qtw, m.qth, unsigned( m.qfmt ) );
+		if ( !m.qfbo )
+			fn->glGenFramebuffers( 1, &m.qfbo );
+		if ( m.qtex )
+			fn->glDeleteTextures( 1, &m.qtex );
+		fn->glGenTextures( 1, &m.qtex );
+		fn->glActiveTexture( GLenum( GL_TEXTURE0 + kSrcUnit ) );
+		fn->glGetIntegerv( GL_TEXTURE_BINDING_2D, &prevTex );
+		fn->glBindTexture( GL_TEXTURE_2D, m.qtex );
+		fn->glTexImage2D( GL_TEXTURE_2D, 0, GLint( postFormat() ), qw, qh, 0, GL_RGBA, GL_FLOAT, nullptr );
+		fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0 );
+		fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST );
+		fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST );
+		fn->glBindTexture( GL_TEXTURE_2D, GLuint( prevTex ) );
+		fn->glBindFramebuffer( GL_DRAW_FRAMEBUFFER, m.qfbo );
+		fn->glFramebufferTexture2D( GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, m.qtex, 0 );
+		m.qtw = qw;
+		m.qth = qh;
+		m.qfmt = postFormat();
+		if ( !m.pbo )
+			fn->glGenBuffers( 1, &m.pbo );
+	}
+	if ( !q && ( !m.fbo || m.w != W || m.h != H || m.dsFormat != g.dsFormat || m.fmt != postFormat() ) ) {
 		m.trusted = false;
 		// lane EMPTY240 R5-2: build 77's frame 546 ran 265 ms in the tone map with nothing uploaded; a remade target is one cause
 		std::fprintf( stderr, "tone map measure: target made %dx%d (format 0x%x, was %dx%d 0x%x): the first frame, a resize "
@@ -545,23 +592,36 @@ void isMeasureFrame( Scene * scene, HdrGpu & g, int W, int H, int S, GLint prevD
 			fn->glGenBuffers( 1, &m.pbo );
 	}
 	// the frame's stencil (who wrote each pixel last) into the measure's own, then its linear pixels only
-	fn->glBindFramebuffer( GL_READ_FRAMEBUFFER, g.fbo );
-	fn->glBindFramebuffer( GL_DRAW_FRAMEBUFFER, m.fbo );
-	fn->glBlitFramebuffer( 0, 0, W, H, 0, 0, W, H, GL_STENCIL_BUFFER_BIT, GL_NEAREST );
+	if ( q ) {
+		fn->glBindFramebuffer( GL_DRAW_FRAMEBUFFER, m.qfbo );	// lane EMPTY240 R11-1: the shader reads the frame's stencil
+	} else {
+		fn->glBindFramebuffer( GL_READ_FRAMEBUFFER, g.fbo );
+		fn->glBindFramebuffer( GL_DRAW_FRAMEBUFFER, m.fbo );
+		fn->glBlitFramebuffer( 0, 0, W, H, 0, 0, W, H, GL_STENCIL_BUFFER_BIT, GL_NEAREST );
+	}
 	bool ok = !check || fn->glGetError() == GL_NO_ERROR;
 	if ( ok ) {
-		fn->glViewport( 0, 0, W, H );
+		fn->glViewport( 0, 0, q ? qw : W, q ? qh : H );
 		fn->glColorMask( GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE );
-		fn->glClearColor( 0.0f, 0.0f, 0.0f, 0.0f );
-		fn->glClear( GL_COLOR_BUFFER_BIT );
+		if ( !q ) {	// the quarter draw writes every texel
+			fn->glClearColor( 0.0f, 0.0f, 0.0f, 0.0f );
+			fn->glClear( GL_COLOR_BUFFER_BIT );
+		}
 		fn->glDisable( GL_DEPTH_TEST );
 		fn->glDisable( GL_BLEND );
 		fn->glDisable( GL_CULL_FACE );
 		fn->glDisable( GL_SCISSOR_TEST );
-		fn->glEnable( GL_STENCIL_TEST );
-		fn->glStencilMask( 0 );
-		fn->glStencilOp( GL_KEEP, GL_KEEP, GL_KEEP );
-		fn->glStencilFunc( GL_EQUAL, 1, 0x03 );	// a cell program or a cell effect wrote it last: linear light
+		if ( q ) {
+			fn->glDisable( GL_STENCIL_TEST );
+			fn->glActiveTexture( GLenum( GL_TEXTURE0 + kStencilUnit ) );
+			fn->glBindTexture( GL_TEXTURE_2D_MULTISAMPLE, g.ds );
+			prog->uni1i( "hdrStencil", kStencilUnit );
+		} else {
+			fn->glEnable( GL_STENCIL_TEST );
+			fn->glStencilMask( 0 );
+			fn->glStencilOp( GL_KEEP, GL_KEEP, GL_KEEP );
+			fn->glStencilFunc( GL_EQUAL, 1, 0x03 );	// a cell program or a cell effect wrote it last: linear light
+		}
 		fn->glActiveTexture( GLenum( GL_TEXTURE0 + kSrcUnit ) );
 		fn->glBindTexture( GL_TEXTURE_2D_MULTISAMPLE, g.color );
 		prog->uni1i( "hdrSrc", kSrcUnit );
@@ -570,32 +630,40 @@ void isMeasureFrame( Scene * scene, HdrGpu & g, int W, int H, int S, GLint prevD
 		static const std::uint16_t idx[6] = { 0, 1, 2, 2, 1, 3 };
 		const float * attrs = quad;
 		r->drawShape( 4, 3, 6, GL_TRIANGLES, GL_UNSIGNED_SHORT, &attrs, idx );
+		if ( q ) {
+			fn->glActiveTexture( GLenum( GL_TEXTURE0 + kStencilUnit ) );
+			fn->glBindTexture( GL_TEXTURE_2D_MULTISAMPLE, 0 );
+			fn->glActiveTexture( GLenum( GL_TEXTURE0 + kSrcUnit ) );
+		}
 		fn->glBindTexture( GL_TEXTURE_2D_MULTISAMPLE, 0 );
 		fn->glGetIntegerv( GL_TEXTURE_BINDING_2D, &prevTex );
-		fn->glBindTexture( GL_TEXTURE_2D, m.tex );
-		fn->glGenerateMipmap( GL_TEXTURE_2D );	// level 2: the quarter size, a 4 x 4 box mean (the game's downsample)
+		const GLuint src = q ? m.qtex : m.tex;
+		const int lod = q ? 0 : 2;
+		fn->glBindTexture( GL_TEXTURE_2D, src );
+		if ( !q )
+			fn->glGenerateMipmap( GL_TEXTURE_2D );	// level 2: the quarter size, a 4 x 4 box mean (the game's downsample)
 		fn->glPixelStorei( GL_PACK_ALIGNMENT, 4 );
 		if ( mode == 1 ) {
 			std::vector<float> px( size_t( qw ) * size_t( qh ) * 4 );
 			{
 				WwSync::Wait wwWait( WwSync::GetTexImage );	// lane EMPTY240 R5-2: WW_IS_MEASURE=sync waits for the GPU here
-				fn->glGetTexImage( GL_TEXTURE_2D, 2, GL_RGBA, GL_FLOAT, px.data() );
+				fn->glGetTexImage( GL_TEXTURE_2D, lod, GL_RGBA, GL_FLOAT, px.data() );
 			}
 			isApply( scene, px.data(), qw, qh );
 			// lane PERFFIX1: the same frame's bloom, blurred on the GPU
-			if ( bloomGpuOn() && bloomBlur( scene, m, qw, qh, 0 ) )
+			if ( bloomGpuOn() && bloomBlur( scene, m, src, lod, qw, qh, 0 ) )
 				wwCellImageSpaceSetBloomGpu( scene, m.btex[0], qw, qh );
 		} else {
 			fn->glBindBuffer( GL_PIXEL_PACK_BUFFER, m.pbo );
 			fn->glBufferData( GL_PIXEL_PACK_BUFFER, GLsizeiptr( size_t( qw ) * size_t( qh ) * 4 * sizeof( float ) ), nullptr, GL_STREAM_READ );
-			fn->glGetTexImage( GL_TEXTURE_2D, 2, GL_RGBA, GL_FLOAT, nullptr );
+			fn->glGetTexImage( GL_TEXTURE_2D, lod, GL_RGBA, GL_FLOAT, nullptr );
 			fn->glBindBuffer( GL_PIXEL_PACK_BUFFER, 0 );
 			m.fence = fn->glFenceSync( GL_SYNC_GPU_COMMANDS_COMPLETE, 0 );
 			m.doc = doc;
 			m.qw = qw;
 			m.qh = qh;
 			// lane PERFFIX1: blurred now on the GPU, shown when this measure is applied (the next frame); the other final
-			if ( bloomGpuOn() && !bloomBlur( scene, m, qw, qh, m.bmade == 0 ? 1 : 0 ) )
+			if ( bloomGpuOn() && !bloomBlur( scene, m, src, lod, qw, qh, m.bmade == 0 ? 1 : 0 ) )
 				m.bmade = -1;
 		}
 		fn->glBindTexture( GL_TEXTURE_2D, GLuint( prevTex ) );
@@ -1260,12 +1328,27 @@ bool wwCellHdrBegin( Scene * scene )
 		g.complete = true;
 	}
 	// a clean target: no colour (pixels no draw reaches are not written back), the depth / stencil clears
-	GLfloat clear[4];
-	fn->glGetFloatv( GL_COLOR_CLEAR_VALUE, clear );
-	GLboolean colorMask[4], depthMask = GL_TRUE;
-	fn->glGetBooleanv( GL_COLOR_WRITEMASK, colorMask );
-	fn->glGetBooleanv( GL_DEPTH_WRITEMASK, &depthMask );
-	const bool wasScissor = fn->glIsEnabled( GL_SCISSOR_TEST );
+	// lane EMPTY240 R11-2: the clear colour, the masks and the scissor kept (glstatememo.h; red WW_GLSTATE_MEMO_RED=1)
+	static QHash<const void *, WwGlMemo<GLfloat, 10>> clMemos;
+	WwGlMemo<GLfloat, 10> & cl = clMemos[r];
+	if ( cl.due() ) {
+		GLfloat now[10] = {};
+		fn->glGetFloatv( GL_COLOR_CLEAR_VALUE, now );
+		GLboolean cm[4] = { GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE }, dm = GL_TRUE;
+		fn->glGetBooleanv( GL_COLOR_WRITEMASK, cm );
+		fn->glGetBooleanv( GL_DEPTH_WRITEMASK, &dm );
+		for ( int k = 0; k < 4; k++ )
+			now[4 + k] = cm[k] ? 1.0f : 0.0f;
+		now[8] = dm ? 1.0f : 0.0f;
+		now[9] = fn->glIsEnabled( GL_SCISSOR_TEST ) ? 1.0f : 0.0f;
+		cl.keep( now, "tone map clear" );
+	}
+	const GLfloat * clear = cl.v;
+	GLboolean colorMask[4];
+	for ( int k = 0; k < 4; k++ )
+		colorMask[k] = cl.v[4 + k] != 0.0f ? GL_TRUE : GL_FALSE;
+	const GLboolean depthMask = cl.v[8] != 0.0f ? GL_TRUE : GL_FALSE;
+	const bool wasScissor = cl.v[9] != 0.0f;
 	fn->glDisable( GL_SCISSOR_TEST );
 	fn->glColorMask( GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE );
 	fn->glDepthMask( GL_TRUE );
@@ -1289,8 +1372,31 @@ bool wwCellHdrBegin( Scene * scene )
 	return true;
 }
 
+namespace {
+/* lane EMPTY240 R11-1: build 86's frame 217 spent 140.2 ms CPU in the tone map with no draw and no wait counted (the
+ * frame of the flight's live set WW_CELL_SSR=0). Each step of the frame end is clocked: one over 20 ms prints
+ * `tone map slow step:` with its name (at most 32 lines), so the next flight names the step */
+struct ToneSteps
+{
+	std::chrono::steady_clock::time_point t = std::chrono::steady_clock::now();
+	void at( const char * step )
+	{
+		const auto now = std::chrono::steady_clock::now();
+		const double ms = std::chrono::duration<double, std::milli>( now - t ).count();
+		t = now;
+		static int said = 0;
+		if ( ms >= 20.0 && said < 32 ) {
+			said++;
+			std::fprintf( stderr, "tone map slow step: %s %.1f ms CPU in paint %llu (EMPTY240 R11-1: a tone-map step over 20 ms)\n",
+				step, ms, static_cast<unsigned long long>( wwGlPaintCount() ) );
+		}
+	}
+};
+}	// namespace
+
 void wwCellHdrEnd( Scene * scene )
 {
+	ToneSteps ts;	// lane EMPTY240 R11-1
 	HdrState & s = hst();
 	if ( !s.active || s.scene != scene || !scene || !scene->renderer )
 		return;
@@ -1317,6 +1423,7 @@ void wwCellHdrEnd( Scene * scene )
 	if ( check && sync && blitErr == GL_NO_ERROR )
 		g.trusted = true;
 	PassTime::subEnd( PassTime::ToneBlit );
+	ts.at( "probe, error drain and depth blit" );
 	fn->glBindFramebuffer( GL_READ_FRAMEBUFFER, GLuint( s.prevRead ) );
 	GlSnap sn;	// lane SYNC1: read once here for the measure and the tone quads (the measure and the bloom restore it)
 	if ( sync ) {
@@ -1337,13 +1444,16 @@ void wwCellHdrEnd( Scene * scene )
 	known.sFunc = sn.sFunc, known.sRef = sn.sRef, known.sMask = sn.sMask, known.sWrite = sn.sWrite;
 	known.sFail = sn.sFail, known.sZFail = sn.sZFail, known.sPass = sn.sPass;
 	WwCellUni::knownSlot() = sync && !wwCellUniRed() ? &known : nullptr;
+	ts.at( "state read" );
 	wwCellSsrKeepFrame( scene, g.fbo, s.w, s.h );	// lane PERF3: WW_CELL_SSR_PREV's previous frame (else nothing)
+	ts.at( "reflections' previous frame" );
 	if ( wwGameTaaLinearOn() ) {	// lane POSTFX3: the Modern temporal AA on this linear frame (no GL call when off)
 		const float adapted = wwCellImageSpaceAdapted( scene );
 		wwGameTaaResolveLinear( scene, g.fbo, g.colorFormat, g.color, g.samples,
 			wwPhysSkyOn() ? 1.0f / ( 1.2f * std::exp2( wwPhysLastEvApplied() ) )	// lane PHYSUNITS1: the frame's camera
 			: adapted >= 0.0f ? std::clamp( 0.18f / ( adapted + 0.001f ), 1.0f / 64.0f, 64.0f ) : 1.0f );
 	}
+	ts.at( "temporal AA" );
 	// lane VOLAIR1 (gates only): WW_CELL_HDR_DUMP=<file> writes the linear frame before the bloom and the tone map,
 	// samples resolved: int32 W H, then W x H x RGBA float32, bottom row first. Every frame (a still path: the last).
 	WW_SWITCH_STATIC( QByteArray, hdrDump, wwEnv( "WW_CELL_HDR_DUMP" ) );
@@ -1449,16 +1559,20 @@ void wwCellHdrEnd( Scene * scene )
 		while ( fn->glGetError() != GL_NO_ERROR ) {
 		}
 	}
+	ts.at( "dump switch" );
 	// lane PERF1: the exposure and the bloom from this linear frame (before the uniforms take them)
 	PassTime::subBegin( PassTime::ToneMeasure );
 	isMeasureFrame( scene, g, s.w, s.h, s.samples, s.prevDraw, s.prevRead, sync ? &sn : nullptr );
 	PassTime::subEnd( PassTime::ToneMeasure );
+	ts.at( "measure" );
 	// the FO4CS bloom's chain on the linear frame, when that mode is picked (cellbloom.h); Vanilla: no GL call
 	PassTime::subBegin( PassTime::ToneBloom );
 	const bool foBloom = wwCellBloomRun( scene, g.color, g.ds, s.w, s.h, s.samples, g.dsFormat, g.dsTex );
 	PassTime::subEnd( PassTime::ToneBloom );
+	ts.at( "bloom" );
 	// lane FOGBLOOM1: the per-pixel bloom strength from the air along each ray (cellfogbloom.h); off: no GL call
 	const bool fogBloom = wwCellFogBloomRun( scene, g.fbo, g.ds, s.w, s.h, s.samples, g.dsFormat, g.dsTex );
+	ts.at( "fog bloom" );
 	WwCellUni::knownSlot() = nullptr;	// lane CELLUNI4: the quads change the state
 
 	// lane PERF2: the quad at the far plane keeps the early tests (WW_CELL_HDR_EARLY_RED=1: depth written per sample)
@@ -1484,8 +1598,10 @@ void wwCellHdrEnd( Scene * scene )
 	fn->glDisable( GL_SCISSOR_TEST );
 	fn->glColorMask( GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE );
 
+	ts.at( "tone program" );
 	PassTime::subBegin( PassTime::ToneQuads );
 	wwCellLightsUniforms( scene );	// the imagespace's uniforms (exposure, curve, grade, LUT, bloom)
+	ts.at( "imagespace uniforms" );
 	fn->glActiveTexture( GLenum( GL_TEXTURE0 + kSrcUnit ) );
 	fn->glBindTexture( GL_TEXTURE_2D_MULTISAMPLE, g.color );
 	prog->uni1i( "hdrSrc", kSrcUnit );
@@ -1620,10 +1736,12 @@ void wwCellHdrEnd( Scene * scene )
 		fn->glActiveTexture( GLenum( GL_TEXTURE0 + kSrcUnit ) );
 	}
 	PassTime::subEnd( PassTime::ToneQuads );
+	ts.at( "tone quads" );
 	// lane VRS1: the next frame's shading rate images from this picture (returns at once while the row is off)
 	if ( !sync && wwCellVrsWanted() )
 		fn->glGetIntegerv( GL_VIEWPORT, sn.vp );
 	wwCellVrsBuild( scene, s.prevDraw, s.prevRead, s.w, s.h, sn.vp );
+	ts.at( "shading rate build" );
 	wwCellFogBloomDone( r, kFogBloomUnit, quadsActive );
 
 	fn->glBindTexture( GL_TEXTURE_2D_MULTISAMPLE, 0 );
@@ -1646,4 +1764,5 @@ void wwCellHdrEnd( Scene * scene )
 	note( s, sorted ? QStringLiteral( "linear frame %1x%2, %3 sample(s), one tone map" ).arg( s.w ).arg( s.h ).arg( s.samples ) + lane
 		: QStringLiteral( "linear frame %1x%2, %3 sample(s), one tone map over every pixel (depth / stencil blit refused, GL error %4)" )
 			.arg( s.w ).arg( s.h ).arg( s.samples ).arg( blitErr ) );
+	ts.at( "restore and note" );
 }
