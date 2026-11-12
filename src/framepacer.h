@@ -125,6 +125,8 @@ enum Part
 	GiFrame,	// rtddgiCellFrame (the traced GI volume: builds, Vulkan submits and waits, uploads)
 	Restir,	// rtddgiRestirPass (ReSTIR DI)
 	ProbeSky,	// probeSkyTick
+	PassTimers,	// lane EMPTY240 R10-4: PassTime::frameBegin + frameEnd (the timers' own stamps, read-back and pass line)
+	Transform,	// lane EMPTY240 R10-4: the scene's transform with the skeleton, door, world clock and sea steps before it
 	OtherInFrame,	// inside the timed frame, in no pass zone and no part above
 	After,	// the timed frame's end to paintGL's return (log flush)
 	Swap,	// paintGL's return to Qt's frameSwapped (the swap; vsync or a GPU-bound queue waits here)
@@ -137,7 +139,7 @@ enum Part
 inline const char * partName( int p )
 {
 	static const char * const n[PartCount] = { "before-frame", "passes", "gi-frame", "restir", "probe-sky",
-		"other-in-frame", "after-frame", "swap", "cap-wait", "gears", "between-paints" };
+		"pass-timers", "scene-transform", "other-in-frame", "after-frame", "swap", "cap-wait", "gears", "between-paints" };
 	return p >= 0 && p < PartCount ? n[p] : "?";
 }
 
@@ -146,6 +148,7 @@ struct Marks
 {
 	double start = -1.0, begin = -1.0, end = -1.0, finish = -1.0, swapAt = -1.0;
 	double passes = 0.0, gi = 0.0, restir = 0.0, probe = 0.0, capWait = 0.0, gears = 0.0;
+	double timers = 0.0, transform = 0.0;	// lane EMPTY240 R10-4
 };
 
 struct Window
@@ -170,7 +173,9 @@ inline bool add( Window & w, const Marks & m, double next )
 	p[GiFrame] = m.gi;
 	p[Restir] = m.restir;
 	p[ProbeSky] = m.probe;
-	p[OtherInFrame] = ( end - begin ) - p[Passes] - p[GiFrame] - p[Restir] - p[ProbeSky];
+	p[PassTimers] = timed ? m.timers : 0.0;
+	p[Transform] = timed ? m.transform : 0.0;
+	p[OtherInFrame] = ( end - begin ) - p[Passes] - p[GiFrame] - p[Restir] - p[ProbeSky] - p[PassTimers] - p[Transform];
 	p[After] = m.finish - end;
 	p[Swap] = m.swapAt >= m.finish && m.swapAt <= next ? m.swapAt - m.finish : 0.0;
 	p[CapWait] = m.capWait;
