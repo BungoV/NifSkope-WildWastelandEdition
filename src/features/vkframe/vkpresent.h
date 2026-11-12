@@ -132,6 +132,67 @@ ToneStat takeToneStat();
 //! the pipeline cache file (empty: none); the Qt part sets it before the first toneFrame
 void toneCachePath( const std::string & path );
 
+/* Lane VKSHARE1: single-sample targets another pass owns (the clouds' march and history, TAA's), made on the present
+ * device and imported into GL, keyed by the owner. type 0 = 2D, 1 = 3D (d deep), 2 = 2D array (d layers); glFmt one of
+ * GL_RGBA16F / RGBA32F / RGBA8 / RG32F / RG16F / R32F / R8 / DEPTH24_STENCIL8. GL current. Same key and shape: the same
+ * name; another shape: the old one goes first (a full drain). false: why; tex 0 (the owner makes GL's own). The GL
+ * texture has NEAREST filters; the owner sets its own. */
+bool sharedTarget( std::uintptr_t key, int type, int w, int h, int d, unsigned glFmt, unsigned & tex, std::string & why );
+//! tex is key's live shared name in the current GL context (a shutdown drops every one: the owner makes GL's own again)
+bool sharedTargetIs( std::uintptr_t key, unsigned tex );
+//! key's target goes (GL current: its GL names too)
+void sharedTargetDrop( std::uintptr_t key );
+struct SharedStat
+{
+	int made = 0, dropped = 0, fails = 0;  //!< since the last take
+	int live = 0;                          //!< targets now
+	double mb = 0.0;                       //!< their memory
+	std::string failWhy;
+};
+SharedStat takeSharedStat();
+
+/* Lane VKSHARE1: the Modern temporal AA (gametaa.cpp, tier High) on the present device. GL blits the frame's colour and
+ * depth into shared targets (sharedTarget) as before; taaRun: GL signals, the worker submits the camera vectors, the
+ * resolve and the RCAS copy-back into the view (one crossing), GL waits Vulkan's signal. Red WW_VKVIEW_TAA_RED=1: GL. */
+struct TaaJob  // 128 bytes: TaaBindingsVk.hlsli's TaaJob
+{
+	float sizeJitter[4] = {};       //!< 1/W, 1/H, jitter px x, y
+	std::int32_t ints[4] = {};      //!< tier, red, no history, inputs
+	std::int32_t ints2[4] = {};     //!< linear, dither on, dither seed, spare
+	float f[4] = {};                //!< expose
+	float reproj[16] = {};          //!< GL's mat4, column-major
+};
+static_assert( sizeof( TaaJob ) == 128, "TaaJob is the shader's push constant block" );
+struct PfxJob  // 128 bytes: PostFxBindingsVk.hlsli's PfxJob
+{
+	float c[7][4] = {};
+	std::int32_t i[4] = {};
+};
+static_assert( sizeof( PfxJob ) == 128, "PfxJob is the shader's push constant block" );
+struct TaaRun
+{
+	TaaJob job;                     //!< the resolve
+	PfxJob mvJob, rcasJob;          //!< the camera vectors (game_taa_mv), the copy-back (taa2_rcas)
+	int w = 0, h = 0, wr = 0;       //!< the frame; the history written this frame (0 / 1)
+	std::uintptr_t cur = 0, depth = 0, mv = 0, pic = 0, hist[2] = {}, lock[2] = {};  //!< sharedTarget keys
+	unsigned vel = 0, mask = 0;     //!< TAAINPUTS1's GL textures (RG16F / RGBA8; 0: none), copied into shared twins
+	std::uintptr_t velKey = 0, maskKey = 0;
+};
+/* GL current, the view bound, the frame's colour and depth already blitted into the shared cur / depth: the vectors,
+ * resolve and copy-back run on Vulkan. false: why; nothing drawn (GL runs its passes). */
+bool taaRun( const TaaRun & t, std::string & why );
+//! a frame whose TAA stayed on GL while the stage was wanted, and why (the telemetry)
+void taaOnGl( const char * why );
+struct TaaStat
+{
+	int runs = 0, gl = 0, fails = 0;   //!< since the last take
+	double cpuMs = 0.0, maxMs = 0.0;   //!< the drawing thread's taaRun ms
+	std::string glWhy, failWhy;
+	int pipelines = 0;
+	double buildMs = 0.0;
+};
+TaaStat takeTaaStat();
+
 }
 
 #ifndef WW_VKPRESENT_NO_QT
@@ -149,5 +210,8 @@ QPaintDevice * painterTarget( QOpenGLWindow * w );
 bool frame( QOpenGLWindow * w, const std::function<void()> & paint );
 //! round 11: the tone map on the present device is wanted this frame (the view on Vulkan, WW_VKVIEW_TONE_RED unset)
 bool toneWanted();
+/* lane VKSHARE1: a pass's targets go on the present device this frame (sharedTarget): the view on Vulkan with its size
+ * settled (viewFbo), and the pass's red (redEnv=1) unset */
+bool shareWanted( const char * redEnv );
 }
 #endif

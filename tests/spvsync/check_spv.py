@@ -34,7 +34,8 @@ HLSL_SPECS += [('src/features/vkframe', k, 'vulkan1.2', 'vkframe_%s_spv' % k) fo
 VKFRAME_EXPOSURE = ('measure_q',)	# the script's third loop: res/shaders/hlsl/exposure/<k>.hlsl -> <k>.spv.h
 HLSL_SPECS += [('src/features/vkframe', k, 'vulkan1.2', 'vkframe_%s_spv' % k) for k in VKFRAME_EXPOSURE]
 HLSL_DIR = {'src/features/gi/rtddgi': 'res/shaders/hlsl/rtddgi', 'src/features/vkframe': 'res/shaders/hlsl/post'}
-VKFRAME_VIEW = ('tone_view_vs', 'tone_view_ps')	# the script's fourth loop (round 11): vertex + fragment, post dir
+VKFRAME_VIEW = ('tone_view_vs', 'tone_view_ps',	# the script's fourth loop (round 11): vertex + fragment, post dir
+	'taa_view_mv_cs', 'taa_view_resolve_cs', 'taa_view_rcas_ps')	# lane VKSHARE1: TAA on the view
 HLSL_SPECS += [('src/features/vkframe', k, 'vulkan1.2', 'vkframe_%s_spv' % k) for k in VKFRAME_VIEW]
 HLSL_SRC = dict((k, 'res/shaders/hlsl/exposure') for k in VKFRAME_EXPOSURE)	# a kernel outside its folder's HLSL dir
 DEFAULT_G = 'E:/Tools/RenderDoc/RenderDoc_1.45_64/plugins/spirv/glslangValidator.exe'

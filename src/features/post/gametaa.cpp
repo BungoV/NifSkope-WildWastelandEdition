@@ -10,6 +10,7 @@
 #include "gl/glscene.h"
 #include "gl/renderer.h"
 #include "features/post/taainputs.h"	// lane TAA3: Ultra's velocity and mask
+#include "features/vkframe/vkpresent.h"	// lane VKSHARE1: the Modern resolve on the present device
 #include "harnesswindow.h"
 
 #include <QDebug>
@@ -179,6 +180,11 @@ struct TaaGpu
 	GLuint lock[2] = { 0, 0 };	// lane TAA3: the thin-feature lock (r flip rate, g sign), ping-pong with hist2
 	GLenum histFormat = 0, histFilter = 0;	// lane MOTION1-FMT2: the game resolve's history pair (RGBA16F, or RGBA8 pinned)
 	GLenum curFormat = 0, outFormat = 0;	// lane POSTFX3: t0 / t_out (RGBA8, or float before the tone map)
+	/* lane VKSHARE1: on the Vulkan route cur, depth, mv, out, hist2 and lock are the present device's targets (keys vkKey +
+	 * 0..7; +8 / +9 the inputs' twins); vkMiss counts refused runs in a row, vkFailed sends this size back to GL's own */
+	bool vk = false, vkFailed = false;
+	int vkMiss = 0;
+	std::uintptr_t vkKey = 0;
 };
 
 struct TaaState
@@ -360,6 +366,12 @@ GLuint makeTex( Renderer * r, GLenum internal, GLenum format, GLenum type, int w
 void freeGpu( Renderer * r, TaaGpu & g )
 {
 	auto fn = r->fn;
+	if ( g.vk ) {	// lane VKSHARE1: the shared names go with their keys (GL's names too)
+		for ( std::uintptr_t k = 0; k < 10; k++ )
+			WwVkPresent::sharedTargetDrop( g.vkKey + k );
+		g.cur = g.depth = g.mv = g.out = g.hist2[0] = g.hist2[1] = g.lock[0] = g.lock[1] = 0;
+		g.vk = false;
+	}
 	GLuint texs[10] = { g.cur, g.depth, g.mv, g.out, g.hist[0], g.hist[1], g.hist2[0], g.hist2[1], g.lock[0], g.lock[1] };
 	for ( GLuint t : texs )
 		if ( t )
@@ -742,21 +754,98 @@ bool taaResolveImpl( Scene * scene, const LinearIn * lin )
 	const GLenum histFilter = s.redHist8Nearest ? GLenum( GL_NEAREST ) : GLenum( GL_LINEAR );
 	// lane POSTFX3: before the tone map t0 takes the linear frame's own format (the red's multisample blit needs it), t_out half floats
 	const GLenum curFormat = linear ? lin->format : GLenum( GL_RGBA8 ), outFormat = linear ? GLenum( GL_RGBA16F ) : GLenum( GL_RGBA8 );
+	/* lane VKSHARE1: the Modern resolve at High on the present device while the view is on Vulkan (WW_VKVIEW=1; red
+	 * WW_VKVIEW_TAA_RED=1): its targets are shared, GL blits into them as before, then WwVkPresent::taaRun draws the vectors,
+	 * the resolve and the RCAS copy-back. Every other tier and shape stays on GL with its reason in the route line. */
+	const char * vkNo = nullptr;
+	const bool vkAsked = s.taa2 > 0 && WwVkPresent::shareWanted( "WW_VKVIEW_TAA_RED" );
+	if ( vkAsked ) {
+		if ( s.taa2 != 3 )
+			vkNo = "the tier is not High (only the default tier runs on Vulkan)";
+		else if ( linear )
+			vkNo = "the resolve runs before the tone map (WW_TAA2_LINEAR=1)";
+		else if ( s.taa2Red )
+			vkNo = "a WW_TAA2_RED is set";
+		else if ( !s.dumpDir.isEmpty() || !s.taa2Dump.isEmpty() )
+			vkNo = "a TAA dump is asked";
+		else if ( dsFormat != GL_DEPTH24_STENCIL8 )
+			vkNo = "the frame's depth is not D24S8";
+		else if ( prevDraw != GLint( WwVkPresent::viewFbo() ) || vp[0] || vp[1] )
+			vkNo = "the frame is not the whole view";
+		else if ( g.vkFailed && g.w == W && g.h == H )
+			vkNo = "the Vulkan run was refused 60 frames in a row at this size";
+		if ( vkNo )
+			WwVkPresent::taaOnGl( vkNo );
+	}
+	const bool vkTry = vkAsked && !vkNo;
 	const bool resized = !g.inFbo || g.w != W || g.h != H || g.dsFormat != dsFormat || g.curFormat != curFormat || g.outFormat != outFormat
-		|| g.histFormat != histFormat || g.histFilter != histFilter;
+		|| g.histFormat != histFormat || g.histFilter != histFilter || g.vk != vkTry
+		|| ( g.vk && !WwVkPresent::sharedTargetIs( g.vkKey, g.cur ) );
 	if ( resized ) {
+		if ( g.vk && !WwVkPresent::sharedTargetIs( g.vkKey, g.cur ) )
+			g.cur = g.depth = g.mv = g.out = g.hist2[0] = g.hist2[1] = g.lock[0] = g.lock[1] = 0;	// a shutdown took them
+		if ( g.w != W || g.h != H ) {
+			g.vkFailed = false;
+			g.vkMiss = 0;
+		}
 		freeGpu( r, g );
 		if ( !g.inFbo ) {
 			fn->glGenFramebuffers( 1, &g.inFbo );
 			fn->glGenFramebuffers( 1, &g.mvFbo );
 			fn->glGenFramebuffers( 1, &g.outFbo );
 		}
-		g.cur = linear ? makeTex( r, curFormat, curFormat == GL_R11F_G11F_B10F ? GL_RGB : GL_RGBA, GL_FLOAT, W, H, GL_NEAREST )
-			: makeTex( r, GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE, W, H, GL_NEAREST );		// t0 NEAREST
-		g.depth = makeTex( r, dsFormat, dsFmt, dsType, W, H, GL_NEAREST );				// t3 NEAREST
-		g.mv = makeTex( r, GL_RG32F, GL_RG, GL_FLOAT, W, H, GL_NEAREST );				// t2 NEAREST
-		g.out = linear ? makeTex( r, GL_RGBA16F, GL_RGBA, GL_FLOAT, W, H, GL_NEAREST )
-			: makeTex( r, GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE, W, H, GL_NEAREST );
+		if ( vkTry ) {
+			static std::uintptr_t nextKey = 0x54410000u;	// "TA": 16 keys a renderer
+			if ( !g.vkKey ) {
+				g.vkKey = nextKey;
+				nextKey += 16;
+			}
+			const GLenum fmts[8] = { GL_RGBA8, GL_DEPTH24_STENCIL8, GL_RG32F, GL_RGBA8, GL_RGBA16F, GL_RGBA16F, GL_RGBA16F, GL_RGBA16F };
+			unsigned t[8] = {};
+			std::string why;
+			bool shared = true;
+			for ( int i = 0; i < 8 && shared; i++ )
+				shared = WwVkPresent::sharedTarget( g.vkKey + std::uintptr_t( i ), 0, W, H, 1, fmts[i], t[i], why );
+			if ( shared ) {
+				g.cur = t[0];
+				g.depth = t[1];
+				g.mv = t[2];
+				g.out = t[3];
+				g.hist2[0] = t[4];
+				g.hist2[1] = t[5];
+				g.lock[0] = t[6];
+				g.lock[1] = t[7];
+				// the shared names come NEAREST with GL's default wrap: makeTex's state (t1's Modern history BILERP)
+				for ( int i = 0; i < 8; i++ ) {
+					const GLint f = ( i == 4 || i == 5 ) ? GL_LINEAR : GL_NEAREST;
+					fn->glBindTexture( GL_TEXTURE_2D, t[i] );
+					fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, f );
+					fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, f );
+					fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE );
+					fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE );
+					fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0 );
+					if ( i == 1 )
+						fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_COMPARE_MODE, GL_NONE );
+				}
+				fn->glBindTexture( GL_TEXTURE_2D, 0 );
+				g.vk = true;
+			} else {
+				for ( std::uintptr_t k = 0; k < 8; k++ )
+					WwVkPresent::sharedTargetDrop( g.vkKey + k );
+				g.vkFailed = true;
+				WwVkPresent::taaOnGl( "a TAA target could not be shared" );
+				qInfo().noquote() << QStringLiteral( "temporal aa: %1x%2 targets stay GL's own (shared target refused: %3)" ).arg( W ).arg( H )
+					.arg( QString::fromStdString( why ) );
+			}
+		}
+		if ( !g.vk ) {
+			g.cur = linear ? makeTex( r, curFormat, curFormat == GL_R11F_G11F_B10F ? GL_RGB : GL_RGBA, GL_FLOAT, W, H, GL_NEAREST )
+				: makeTex( r, GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE, W, H, GL_NEAREST );		// t0 NEAREST
+			g.depth = makeTex( r, dsFormat, dsFmt, dsType, W, H, GL_NEAREST );				// t3 NEAREST
+			g.mv = makeTex( r, GL_RG32F, GL_RG, GL_FLOAT, W, H, GL_NEAREST );				// t2 NEAREST
+			g.out = linear ? makeTex( r, GL_RGBA16F, GL_RGBA, GL_FLOAT, W, H, GL_NEAREST )
+				: makeTex( r, GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE, W, H, GL_NEAREST );
+		}
 		g.curFormat = curFormat;
 		g.outFormat = outFormat;
 		s.taa2Fresh = true;	// lane TAA3: the Modern history went with the old targets
@@ -934,24 +1023,26 @@ bool taaResolveImpl( Scene * scene, const LinearIn * lin )
 	bool ok = blitErr == GL_NO_ERROR && msOk;
 	const Matrix4 reproj4 = toMatrix4( reproj );
 
-	// 2. the motion vectors (t2): the camera's reprojection of the frame's depth
-	if ( ok ) {
+	// 2. the motion vectors (t2): the camera's reprojection of the frame's depth (lane VKSHARE1: on the Vulkan route
+	// taaRun draws them, and GL only when that run is refused)
+	auto mvPass = [&]() -> bool {
 		fn->glBindFramebuffer( GL_FRAMEBUFFER, g.mvFbo );
 		auto prog = r->useProgram( "game_taa_mv.prog" );
-		if ( !prog ) {
-			ok = false;
-		} else {
-			fn->glActiveTexture( GLenum( GL_TEXTURE0 + kUnitDepth ) );
-			fn->glBindTexture( GL_TEXTURE_2D, g.depth );
-			prog->uni1i( "depthTex", kUnitDepth );
-			prog->uni4m( "reproj", reproj4 );
-			prog->uni2f( "jitterNdc", s.offX, s.offY );
-			prog->uni2f( "invSize", 1.0f / float( W ), 1.0f / float( H ) );
-			r->drawShape( 4, 3, 6, GL_TRIANGLES, GL_UNSIGNED_SHORT, &attrs, idx );
-			r->stopProgram();
-			g.mvOk = true;
-		}
-	}
+		if ( !prog )
+			return false;
+		fn->glActiveTexture( GLenum( GL_TEXTURE0 + kUnitDepth ) );
+		fn->glBindTexture( GL_TEXTURE_2D, g.depth );
+		prog->uni1i( "depthTex", kUnitDepth );
+		prog->uni4m( "reproj", reproj4 );
+		prog->uni2f( "jitterNdc", s.offX, s.offY );
+		prog->uni2f( "invSize", 1.0f / float( W ), 1.0f / float( H ) );
+		r->drawShape( 4, 3, 6, GL_TRIANGLES, GL_UNSIGNED_SHORT, &attrs, idx );
+		r->stopProgram();
+		g.mvOk = true;
+		return true;
+	};
+	if ( ok && !g.vk )
+		ok = mvPass();
 
 	// 3. the resolve: o0 the next history, o1 the picture (tap 1: o0 the filtered history sample, for the dump)
 	auto resolvePass = [&]( int tap ) -> bool {
@@ -1101,8 +1192,58 @@ bool taaResolveImpl( Scene * scene, const LinearIn * lin )
 			maskTex = wwTaaInputsMaskTex( scene, mw, mh );
 			inputs = ( velTex && vw == W && vh == H ? 1 : 0 ) | ( maskTex && mw == W && mh == H ? 2 : 0 );
 		}
-		auto prog = r->useProgram( "taa2.prog" );
-		if ( !prog ) {
+		// lane VKSHARE1: the vectors, this resolve and the copy-back as one Vulkan crossing; refused: GL's passes this frame
+		bool vkDrew = false;
+		if ( g.vk ) {
+			WwVkPresent::TaaRun t;
+			t.w = W;
+			t.h = H;
+			t.wr = wr;
+			const float sj[4] = { 1.0f / float( W ), 1.0f / float( H ), jpx, jpy };
+			const std::int32_t ints[4] = { s.taa2, s.taa2Red, noHist2 ? 1 : 0, inputs };
+			const int dither = wwCellDitherSeed();
+			const std::int32_t ints2[4] = { 0, dither >= 0 ? 1 : 0, std::max( dither, 0 ), 0 };
+			std::memcpy( t.job.sizeJitter, sj, sizeof( sj ) );
+			std::memcpy( t.job.ints, ints, sizeof( ints ) );
+			std::memcpy( t.job.ints2, ints2, sizeof( ints2 ) );
+			t.job.f[0] = expose;
+			std::memcpy( t.job.reproj, reproj4.data(), sizeof( t.job.reproj ) );	// GL's uni4m upload order: the columns
+			for ( int c = 0; c < 4; c++ )
+				std::memcpy( t.mvJob.c[c], t.job.reproj + 4 * c, sizeof( t.mvJob.c[c] ) );
+			const float mvc[4] = { s.offX, s.offY, 1.0f / float( W ), 1.0f / float( H ) };
+			std::memcpy( t.mvJob.c[4], mvc, sizeof( mvc ) );
+			t.rcasJob.c[0][0] = std::exp2( -kRcasStops[3] );
+			t.rcasJob.c[0][1] = expose;
+			t.cur = g.vkKey + 0;
+			t.depth = g.vkKey + 1;
+			t.mv = g.vkKey + 2;
+			t.pic = g.vkKey + 3;
+			for ( int i = 0; i < 2; i++ ) {
+				t.hist[i] = g.vkKey + 4 + std::uintptr_t( i );
+				t.lock[i] = g.vkKey + 6 + std::uintptr_t( i );
+			}
+			t.vel = ( inputs & 1 ) ? velTex : 0;
+			t.mask = ( inputs & 2 ) ? maskTex : 0;
+			t.velKey = g.vkKey + 8;
+			t.maskKey = g.vkKey + 9;
+			std::string why;
+			vkDrew = WwVkPresent::taaRun( t, why );
+			if ( vkDrew ) {
+				g.vkMiss = 0;
+				g.mvOk = true;
+				taa2Inputs = inputs;
+				taa2Vel = ( inputs & 1 ) ? velTex : g.mv;
+				taa2Mask = ( inputs & 2 ) ? maskTex : 0;
+			} else {
+				if ( ++g.vkMiss >= 60 )
+					g.vkFailed = true;	// next frame: GL's own targets at this size
+				ok = mvPass();
+				fn->glBindFramebuffer( GL_FRAMEBUFFER, g.outFbo );	// its three draw buffers are the framebuffer's own state
+			}
+		}
+		if ( vkDrew ) {
+			// the Vulkan passes drew the next history, the lock and the picture into the view
+		} else if ( auto prog = ok ? r->useProgram( "taa2.prog" ) : nullptr; !prog ) {
 			ok = false;
 		} else {
 			fn->glActiveTexture( GLenum( GL_TEXTURE0 + kUnitCur ) );
@@ -1145,7 +1286,7 @@ bool taaResolveImpl( Scene * scene, const LinearIn * lin )
 			r->stopProgram();
 		}
 		fn->glFramebufferTexture2D( GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT2, GL_TEXTURE_2D, 0, 0 );
-		if ( ok ) {
+		if ( ok && !vkDrew ) {
 			// the picture back: into the frame, or (lane POSTFX3) into the linear frame with its alpha kept for the tone map
 			fn->glBindFramebuffer( GL_DRAW_FRAMEBUFFER, linear ? lin->fbo : GLuint( prevDraw ) );
 			if ( linear ) {
