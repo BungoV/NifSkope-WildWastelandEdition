@@ -14,12 +14,12 @@ HLSL="$ROOT/res/shaders/hlsl/rtddgi"
 cd "$ROOT/src/features/gi/rtddgi"
 # lane RESTIRDI1: restir (ReSTIR DI on the volume's BVH, src/features/gi/rtddgi/restir_vk.inc; it includes restir_common.glsl)
 # MODULES1 RESUME 15: airrays (the lamps' shadow in the air, route b of RESEARCH_AIR.md; src/features/gi/rtddgi/airrays_vk.inc)
-for k in restir airrays; do
+for k in restir; do
 	"$G" --target-env vulkan1.2 -V --vn "rtddgi_${k}_spv" -o "${k}.spv.h" "${k}.comp"
 done
 # -O0: DXC's optimizer reorders float math (a / b -> a * (1 / b), NMin/NMax); unoptimized it keeps the source's order, which
 # tests/hlslmatch proves byte-exact against the .comp. The entry's `// hlsl profile: cs_6_N` line picks the shader model.
-for k in border reloc blend trace; do
+for k in border reloc blend trace airrays; do
 	T="$(grep -o 'hlsl profile: cs_6_[0-9]' "$HLSL/${k}.hlsl" | head -1 | awk '{print $3}')"
 	"$DXC" -spirv -fspv-target-env=vulkan1.2 -T "${T:-cs_6_0}" -E main -O0 -Fo "${k}.hlsl.spv" "$(cygpath -m "$HLSL/${k}.hlsl" 2>/dev/null || echo "$HLSL/${k}.hlsl")"
 	python -I "$ROOT/tools/spv_header.py" "${k}.hlsl.spv" "rtddgi_${k}_spv" "${k}.spv.h" < /dev/null

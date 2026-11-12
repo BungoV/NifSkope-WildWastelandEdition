@@ -100,8 +100,11 @@ static void freeBuf( Buf & B )
 
 // the DDGI set: bindings 0-14, 6 = the TLAS (partially bound: written only when a case built one, the trace's)
 static VkAccelerationStructureKHR tlas = VK_NULL_HANDLE;
-static VkDescriptorSetLayout setLayout;
+static VkDescriptorSetLayout setLayout, set1Layout;
 static VkPipelineLayout pipeLayout;
+// a kernel's own set 1 (air rays 4 buffers, restir 11): bufs[15 + i] = set 1 binding i; every binding partially bound
+constexpr uint32_t kSet1Max = 11;
+static uint32_t nSet1 = 0;
 static VkDescriptorPool pool;
 static VkCommandPool cpool;
 static VkCommandBuffer cb;
@@ -124,10 +127,19 @@ static bool makeLayout()
 	li.pBindings = b;
 	if ( vkCreateDescriptorSetLayout( dev, &li, nullptr, &setLayout ) != VK_SUCCESS )
 		return false;
+	for ( uint32_t i = 0; i < kSet1Max; i++ ) {
+		b[i] = VkDescriptorSetLayoutBinding { i, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr };
+		fl[i] = VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT;
+	}
+	fi.bindingCount = kSet1Max;
+	li.bindingCount = kSet1Max;
+	if ( vkCreateDescriptorSetLayout( dev, &li, nullptr, &set1Layout ) != VK_SUCCESS )
+		return false;
+	const VkDescriptorSetLayout both[2] = { setLayout, set1Layout };
 	VkPushConstantRange pr { VK_SHADER_STAGE_COMPUTE_BIT, 0, 64 };
 	VkPipelineLayoutCreateInfo pi { VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO };
-	pi.setLayoutCount = 1;
-	pi.pSetLayouts = &setLayout;
+	pi.setLayoutCount = 2;
+	pi.pSetLayouts = both;
 	pi.pushConstantRangeCount = 1;
 	pi.pPushConstantRanges = &pr;
 	if ( vkCreatePipelineLayout( dev, &pi, nullptr, &pipeLayout ) != VK_SUCCESS )
@@ -172,11 +184,24 @@ static bool run( const std::vector<uint32_t> & spv, std::vector<Buf> & bufs, con
 	da.descriptorPool = pool;
 	da.descriptorSetCount = 1;
 	da.pSetLayouts = &setLayout;
-	static VkDescriptorSet set = VK_NULL_HANDLE;
+	static VkDescriptorSet set = VK_NULL_HANDLE, set1 = VK_NULL_HANDLE;
 	if ( !set && vkAllocateDescriptorSets( dev, &da, &set ) != VK_SUCCESS )
 		return false;
-	std::vector<VkDescriptorBufferInfo> bi( 15 );
+	da.pSetLayouts = &set1Layout;
+	if ( !set1 && vkAllocateDescriptorSets( dev, &da, &set1 ) != VK_SUCCESS )
+		return false;
+	std::vector<VkDescriptorBufferInfo> bi( 15 + kSet1Max );
 	std::vector<VkWriteDescriptorSet> w;
+	for ( uint32_t i = 0; i < nSet1; i++ ) {
+		bi[15 + i] = VkDescriptorBufferInfo { bufs[15 + i].b, 0, VK_WHOLE_SIZE };
+		VkWriteDescriptorSet x { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
+		x.dstSet = set1;
+		x.dstBinding = i;
+		x.descriptorCount = 1;
+		x.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+		x.pBufferInfo = &bi[15 + i];
+		w.push_back( x );
+	}
 	for ( uint32_t i = 0; i < 15; i++ ) {
 		if ( i == 6 )
 			continue;
@@ -206,7 +231,8 @@ static bool run( const std::vector<uint32_t> & spv, std::vector<Buf> & bufs, con
 	VkCommandBufferBeginInfo bb { VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
 	vkBeginCommandBuffer( cb, &bb );
 	vkCmdBindPipeline( cb, VK_PIPELINE_BIND_POINT_COMPUTE, pipe );
-	vkCmdBindDescriptorSets( cb, VK_PIPELINE_BIND_POINT_COMPUTE, pipeLayout, 0, 1, &set, 0, nullptr );
+	const VkDescriptorSet sets[2] = { set, set1 };
+	vkCmdBindDescriptorSets( cb, VK_PIPELINE_BIND_POINT_COMPUTE, pipeLayout, 0, nSet1 ? 2 : 1, sets, 0, nullptr );
 	vkCmdPushConstants( cb, pipeLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, 64, pc );
 	const uint64_t gx = groups < 65535 ? groups : 65535;
 	const uint64_t gy = ( groups + gx - 1 ) / gx;
@@ -696,6 +722,82 @@ static void fillTrace( std::vector<Buf> & bufs, const Case & c, uint64_t & group
 	groups = ( uint64_t( nP ) * count + 63 ) / 64;
 }
 
+// air rays: airrays.comp struct AirParams (std430, 11 vec4); the froxel grid and options by case seed (airOf)
+struct AirParams
+{
+	int32_t size[4], opts[4];
+	float slice[4], rows[3][4], proj[4], prows[3][4], pproj[4];
+};
+static_assert( sizeof( AirParams ) == 11 * 16, "AirParams is 11 vec4" );
+struct AirCase { int fx, fy, fz, samples, red, hist; };
+static AirCase airOf[64];   // by case seed
+
+// air rays: set 0 = the trace's scene + TLAS + params (lights with the shadow flag), set 1 = 0 params, 1 acc (written),
+// 2 the previous frame's acc, 3 the ratio (written); a camera at the grid's centre, a random turn, the previous one moved
+static void fillAirRays( std::vector<Buf> & bufs, const Case & c, uint64_t & groups, uint32_t pc[16] )
+{
+	const uint32_t nP = uint32_t( c.x * c.y * c.z );
+	const AirCase & q = airOf[c.seed % 64];
+	const uint64_t nF = uint64_t( q.fx ) * q.fy * q.fz;
+	Rng r { c.seed };
+	Params P;
+	traceParams( P, c, nP, r );
+	std::memcpy( bufs[5].p, S.attr.data(), S.attr.size() * 4 );
+	std::memcpy( bufs[7].p, S.remap.data(), S.remap.size() * 4 );
+	std::memcpy( bufs[8].p, S.verts.data(), S.verts.size() * 4 );
+	std::memcpy( bufs[9].p, S.triOf.data(), S.triOf.size() * 4 );
+	std::memcpy( bufs[10].p, S.mask.data(), S.mask.size() * 4 );
+	std::memcpy( bufs[11].p, S.maps.data(), S.maps.size() * 4 );
+	std::memcpy( bufs[12].p, S.alpha.data(), S.alpha.size() * 4 );
+	std::vector<float> L = S.lights;
+	for ( int l = 0; l < S.nLights; l++ )
+		L[size_t( l ) * 32 + 30] = l % 4 == 3 ? 0.0f : 1.0f;   // the shadow flag (l7.z): one lamp casts none
+	std::memcpy( bufs[13].p, L.data(), L.size() * 4 );
+	std::memcpy( bufs[14].p, &P, sizeof P );
+	AirParams A;
+	std::memset( &A, 0, sizeof A );
+	A.size[0] = q.fx; A.size[1] = q.fy; A.size[2] = q.fz; A.size[3] = int32_t( c.seed * 37 % 1000 );
+	A.opts[0] = q.samples; A.opts[1] = 8; A.opts[2] = q.red; A.opts[3] = q.hist;
+	const float ext[3] = { float( c.x ) * P.stepv[0], float( c.y ) * P.stepv[1], float( c.z ) * P.stepv[2] };
+	const float diag = std::sqrt( ext[0] * ext[0] + ext[1] * ext[1] + ext[2] * ext[2] );
+	A.slice[0] = 0.05f * P.stepv[3];
+	A.slice[1] = std::log( diag / A.slice[0] );
+	A.slice[2] = 1e-3f * P.stepv[3];
+	A.slice[3] = 1.0f;
+	// a random rotation (unit quaternion) as the rows of view -> world, the camera at the box centre
+	float qq[4] = { r.unit() - 0.5f, r.unit() - 0.5f, r.unit() - 0.5f, r.unit() - 0.5f };
+	const float ql = std::sqrt( qq[0] * qq[0] + qq[1] * qq[1] + qq[2] * qq[2] + qq[3] * qq[3] ) + 1e-6f;
+	for ( float & v : qq )
+		v /= ql;
+	const float w = qq[0], x = qq[1], y = qq[2], z = qq[3];
+	const float R[3][3] = { { 1 - 2 * ( y * y + z * z ), 2 * ( x * y - w * z ), 2 * ( x * z + w * y ) },
+		{ 2 * ( x * y + w * z ), 1 - 2 * ( x * x + z * z ), 2 * ( y * z - w * x ) },
+		{ 2 * ( x * z - w * y ), 2 * ( y * z + w * x ), 1 - 2 * ( x * x + y * y ) } };
+	for ( int i = 0; i < 3; i++ ) {
+		const float cam = P.origin[i] + 0.5f * ext[i];
+		for ( int k = 0; k < 3; k++ )
+			A.rows[i][k] = A.prows[i][k] = R[i][k];
+		A.rows[i][3] = cam;
+		A.prows[i][3] = cam + ( r.unit() - 0.5f ) * 0.3f * P.stepv[3];
+	}
+	A.proj[0] = 1.3f; A.proj[1] = 2.0f; A.proj[2] = 0.02f; A.proj[3] = -0.01f;
+	A.pproj[0] = 1.31f; A.pproj[1] = 1.99f; A.pproj[2] = 0.025f; A.pproj[3] = -0.012f;
+	std::memcpy( bufs[15].p, &A, sizeof A );
+	float * acc = static_cast<float *>( bufs[16].p ), * prev = static_cast<float *>( bufs[17].p ), * out = static_cast<float *>( bufs[18].p );
+	for ( uint64_t i = 0; i < nF; i++ ) {
+		for ( int k = 0; k < 4; k++ )
+			acc[i * 4 + k] = r.unit();
+		prev[i * 4 + 0] = r.unit() * 2.0f;
+		prev[i * 4 + 1] = r.unit() * 2.0f;
+		prev[i * 4 + 2] = float( r.next() % 20 );   // frames: past the clamp (8) about half the time
+		prev[i * 4 + 3] = 0.0f;
+		out[i * 2] = r.unit();
+		out[i * 2 + 1] = r.unit();
+	}
+	randomRotation( r, pc );
+	groups = ( nF + 63 ) / 64;
+}
+
 int main( int argc, char ** argv )
 {
 	const std::string kernel = argc > 1 ? argv[1] : "";
@@ -730,6 +832,18 @@ int main( int argc, char ** argv )
 			{ 6, 5, 4, 1, 1, 34, 96, 0, 1, 0 }, { 6, 5, 4, 0, 0, 35, 96, 0, 0, 1, 8 }, { 6, 5, 4, 0, 0, 36, 96, 0, 0, 1, 16 },
 			{ 6, 5, 4, 0, 0, 37, 96, 0, 0, 0, 7 }, { 6, 5, 4, 0, 0, 38, 96, 0, 0, 1, 32 }, { 6, 5, 4, 0, 0, 39, 96, 0, 0, 1, 0, 1 },
 			{ 6, 5, 4, 0, 0, 40, 96, 0, 0, 1, 0, 0, 0 }, { 32, 32, 16, 0, 0, 41, 288, 0, 0, 1 } };
+	} else if ( kernel == "airrays" ) {
+		fill = fillAirRays;
+		nSet1 = 4;
+		watch = 15 + 3;
+		// froxel grids, 1-4 samples (0 and 5 clamp), history on / off, each red bit (1 NOHOLE, 2 NOHIST, 4 NOSHADOW); the last
+		// passes 65535 groups (the y split)
+		const AirCase ac[] = { { 16, 9, 8, 2, 0, 1 }, { 16, 9, 8, 1, 0, 0 }, { 16, 9, 8, 4, 1, 1 }, { 16, 9, 8, 2, 2, 1 },
+			{ 16, 9, 8, 3, 4, 1 }, { 32, 18, 16, 0, 0, 1 }, { 32, 18, 16, 5, 0, 1 }, { 256, 144, 128, 2, 0, 1 } };
+		for ( int i = 0; i < 8; i++ ) {
+			airOf[( 51 + i ) % 64] = ac[i];
+			cases.push_back( Case { 6, 5, 4, 0, 0, uint64_t( 51 + i ) } );
+		}
 	}
 	if ( argc < 4 || !fill ) {
 		std::printf( "usage: kernelmatch border|reloc|blend|trace <glsl .spv> <hlsl .spv>\n" );
@@ -834,9 +948,15 @@ int main( int argc, char ** argv )
 	int fails = 0, total = 0;
 	for ( const Case & c : cases ) {
 		const size_t nP = size_t( c.x * c.y * c.z );
-		size_t sz[15] = { nP * size_t( c.N ) * 16, nP * 64 * 16, nP * 256 * 8, nP * 16, nP * 4, 256, 256, 256, 256, 256, 256, 256,
+		const size_t nb = 15 + nSet1;
+		std::vector<size_t> sz = { nP * size_t( c.N ) * 16, nP * 64 * 16, nP * 256 * 8, nP * 16, nP * 4, 256, 256, 256, 256, 256, 256, 256,
 			256, 256, sizeof( Params ) };
-		if ( kernel == "trace" ) {   // the soup, sized per binding (one scene, one TLAS, read by both runs)
+		if ( kernel == "airrays" ) {
+			const AirCase & q = airOf[c.seed % 64];
+			const size_t nF = size_t( q.fx ) * q.fy * q.fz;
+			sz.insert( sz.end(), { sizeof( AirParams ), nF * 16, nF * 16, nF * 8 } );
+		}
+		if ( kernel == "trace" || kernel == "airrays" ) {   // the soup, sized per binding (one scene, one TLAS, read by both runs)
 			Params P0;
 			Rng r0 { c.seed };
 			fillParamsBase( P0, c, uint32_t( nP ), r0 );
@@ -846,8 +966,8 @@ int main( int argc, char ** argv )
 			for ( int i = 5; i < 14; i++ )
 				sz[i] = std::max( sz[i], s[i] );
 		}
-		std::vector<Buf> A( 15 ), B( 15 );
-		for ( int i = 0; i < 15; i++ ) {
+		std::vector<Buf> A( nb ), B( nb );
+		for ( size_t i = 0; i < nb; i++ ) {
 			A[i] = makeBuf( sz[i] );
 			B[i] = makeBuf( sz[i] );
 		}
@@ -862,8 +982,8 @@ int main( int argc, char ** argv )
 		std::vector<unsigned char> before( sz[watch] );
 		std::memcpy( before.data(), A[watch].p, sz[watch] );
 		const bool ra = run( a, A, pc, groups ), rb = run( b, B, pc, groups );
-		size_t diff[15] = {};
-		for ( int i = 0; i < 15; i++ ) {
+		std::vector<size_t> diff( nb, 0 );
+		for ( size_t i = 0; i < nb; i++ ) {
 			const unsigned char * x = static_cast<const unsigned char *>( A[i].p ), * y = static_cast<const unsigned char *>( B[i].p );
 			for ( size_t k = 0; k < sz[i]; k++ )
 				diff[i] += x[k] != y[k];
@@ -872,8 +992,18 @@ int main( int argc, char ** argv )
 		for ( size_t k = 0; k < sz[watch]; k++ )
 			moved += before[k] != static_cast<const unsigned char *>( A[watch].p )[k];
 		size_t all = 0;
-		for ( int i = 0; i < 15; i++ )
+		for ( size_t i = 0; i < nb; i++ )
 			all += diff[i];
+		if ( kernel == "airrays" ) {   // coverage: froxels lit by a lamp (frames > 0), and those with a shadowed share (ratio < 1)
+			const float * o = static_cast<const float *>( A[18].p );
+			size_t lit = 0, shadowed = 0;
+			for ( size_t k = 0; k < sz[18] / 8; k++ ) {
+				lit += o[k * 2 + 1] > 0.0f;
+				shadowed += o[k * 2 + 1] > 0.0f && o[k * 2] < 1.0f;
+			}
+			std::printf( "  air: samples %d red %d history %d, froxels with a lamp %zu, with a shadowed share %zu\n", airOf[c.seed % 64].samples,
+				airOf[c.seed % 64].red, airOf[c.seed % 64].hist, lit, shadowed );
+		}
 		const bool ok = ra && rb && all == 0 && moved > 0;
 		fails += ok ? 0 : 1;
 		total++;
@@ -881,7 +1011,7 @@ int main( int argc, char ** argv )
 			"irr %zu dist %zu age %zu probes %zu other %zu, glsl bytes written (binding %d) %zu: %s\n", c.x, c.y, c.z, c.N, pc[12], pc[13],
 			c.skipAsleep, c.skip, c.below, (unsigned long long)groups, ra, rb, diff[0], diff[1], diff[2], diff[4], diff[3],
 			all - diff[0] - diff[1] - diff[2] - diff[3] - diff[4], watch, moved, ok ? "same" : "DIFFERS" );
-		for ( int i = 0; i < 15 && !ok; i++ ) {   // the first differing word a binding, both values, and the largest ulp gap
+		for ( int i = 0; i < int( nb ) && !ok; i++ ) {   // the first differing word a binding (15+ = set 1), both values, the largest ulp gap
 			const uint32_t * x = static_cast<const uint32_t *>( A[i].p ), * y = static_cast<const uint32_t *>( B[i].p );
 			size_t first = SIZE_MAX;
 			int64_t worst = 0;
@@ -900,7 +1030,7 @@ int main( int argc, char ** argv )
 			}
 		}
 		std::fflush( stdout );
-		for ( int i = 0; i < 15; i++ ) {
+		for ( size_t i = 0; i < nb; i++ ) {
 			freeBuf( A[i] );
 			freeBuf( B[i] );
 		}
