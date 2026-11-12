@@ -26,6 +26,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <deque>
+#include <map>
 #include <mutex>
 #include <thread>
 
@@ -47,6 +48,9 @@ constexpr GLenum kTexture2D = 0x0DE1, kRgba8 = 0x8058, kScissorTest = 0x0C11, kR
 	kFbComplete = 0x8CD5, kSyncGpuDone = 0x9117, kAlreadySignaled = 0x911A, kConditionSatisfied = 0x911C,
 	kTexture2DMs = 0x9100, kDepth24Stencil8 = 0x88F0, kDepthStencilAttach = 0x821A, kFramebuffer = 0x8D40,
 	kTexBinding2DMs = 0x9104, kRgba16f = 0x881A, kRgba32f = 0x8814, kDsTexMode = 0x90EA, kStencilIndex = 0x1901;
+// lane VKSHARE1: volumes and layered targets, and the single-channel formats the cloud / TAA targets use
+constexpr GLenum kTexture3D = 0x806F, kTexBinding3D = 0x806A, kTexture2DArray = 0x8C1A, kTexBinding2DArray = 0x8C1D,
+	kGlRg32f = 0x8230, kGlRg16f = 0x822F, kGlR32f = 0x822E, kGlR8 = 0x8229;
 constexpr GLuint64 kTimeoutIgnored = ~0ull;
 
 struct Gl
@@ -87,6 +91,8 @@ struct Gl
 	void( WINAPI * deleteSync )( void * ) = nullptr;
 	// round 10 (optional): the view's multisample images (the view on Vulkan)
 	void( WINAPI * texStorageMem2DMultisample )( GLenum, GLsizei, GLenum, GLsizei, GLsizei, unsigned char, GLuint, GLuint64 ) = nullptr;
+	// lane VKSHARE1 (optional): 3D and 2D-array shared targets
+	void( WINAPI * texStorageMem3D )( GLenum, GLsizei, GLenum, GLsizei, GLsizei, GLsizei, GLuint, GLuint64 ) = nullptr;
 };
 
 template <class F> void load( F & f, WwVkPresent::GlProc gp, const char * name )
@@ -127,6 +133,7 @@ bool loadGl( Gl & g, WwVkPresent::GlProc gp, std::string & why )
 	load( g.fenceSync, gp, "glFenceSync" );
 	load( g.deleteSync, gp, "glDeleteSync" );
 	load( g.texStorageMem2DMultisample, gp, "glTexStorageMem2DMultisampleEXT" );
+	load( g.texStorageMem3D, gp, "glTexStorageMem3DEXT" );
 	g.ok = g.getIntegerv && g.getError && g.enable && g.disable && g.isEnabled && g.flush && g.genTextures && g.deleteTextures
 		&& g.bindTexture && g.texParameteri && g.genFramebuffers && g.deleteFramebuffers && g.bindFramebuffer
 		&& g.framebufferTexture2D && g.checkFramebufferStatus && g.blitFramebuffer && g.createMemoryObjects
@@ -1011,12 +1018,20 @@ bool makeSlot( Slot & s, int w, int h, std::string & why )
 
 /* round 10: one image the present device makes and GL imports (the view's colour or depth / stencil), GENERAL on both
  * sides; samples 1 = a plain 2D texture. The route's other shared targets (the LUT, TAA's history and vectors, the
- * overlay) take the same steps: this is the one place they are written. */
+ * overlay) take the same steps: this is the one place they are written. Lane VKSHARE1: type 3D (d deep) or a 2D array
+ * (layers), single-sample, GL_TEXTURE_3D / GL_TEXTURE_2D_ARRAY through glTexStorageMem3DEXT; one mip level always. */
 bool makeShared( VkImage & img, VkDeviceMemory & mem, GLuint & tex, GLuint & obj, VkFormat fmt, GLenum glFmt, int samples, int w,
-	int h, bool depth, double & mb, std::string & why )
+	int h, bool depth, double & mb, std::string & why, VkImageType type = VK_IMAGE_TYPE_2D, int d = 1, int layers = 1 )
 {
 	Vk & v = vk();
 	Gl & g = gl();
+	const bool is3d = type == VK_IMAGE_TYPE_3D, layered = !is3d && layers > 1;
+	if ( ( is3d || layered ) && ( samples != 1 || depth || !g.texStorageMem3D ) ) {
+		why = !g.texStorageMem3D ? "no glTexStorageMem3DEXT (a 3D / layered shared target)" : "a 3D / layered shared target is single-sample colour only";
+		return false;
+	}
+	d = is3d ? std::max( d, 1 ) : 1;
+	layers = is3d ? 1 : std::max( layers, 1 );
 	const VkSampleCountFlagBits sc = VkSampleCountFlagBits( samples );
 	// every use GL's texture could have (the import fails with fewer); multisample storage is optional: never asked
 	VkImageUsageFlags usage = VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT
@@ -1024,21 +1039,30 @@ bool makeShared( VkImage & img, VkDeviceMemory & mem, GLuint & tex, GLuint & obj
 	if ( samples == 1 && !depth )
 		usage |= VK_IMAGE_USAGE_STORAGE_BIT;
 	VkImageFormatProperties ip {};
-	if ( v.vkGetPhysicalDeviceImageFormatProperties( v.phys, fmt, VK_IMAGE_TYPE_2D, VK_IMAGE_TILING_OPTIMAL, usage, 0, &ip ) != VK_SUCCESS
-		|| !( ip.sampleCounts & sc ) || ip.maxExtent.width < std::uint32_t( w ) || ip.maxExtent.height < std::uint32_t( h ) ) {
+	auto offered = [&]() {
+		return v.vkGetPhysicalDeviceImageFormatProperties( v.phys, fmt, type, VK_IMAGE_TILING_OPTIMAL, usage, 0, &ip ) == VK_SUCCESS
+			&& ( ip.sampleCounts & sc ) && ip.maxExtent.width >= std::uint32_t( w ) && ip.maxExtent.height >= std::uint32_t( h )
+			&& ip.maxExtent.depth >= std::uint32_t( d ) && ip.maxArrayLayers >= std::uint32_t( layers );
+	};
+	bool ok = offered();
+	if ( !ok && ( usage & VK_IMAGE_USAGE_STORAGE_BIT ) ) {  // a format without storage (R8 / RG16F on some devices): sampled only
+		usage &= ~VkImageUsageFlags( VK_IMAGE_USAGE_STORAGE_BIT );
+		ok = offered();
+	}
+	if ( !ok ) {
 		why = std::string( depth ? "depth / stencil" : "colour" ) + " format " + std::to_string( int( fmt ) ) + " at " + std::to_string( samples )
-			+ " samples is not offered by the device";
+			+ " samples (" + ( is3d ? "3D" : layered ? "2D array" : "2D" ) + ") is not offered by the device";
 		return false;
 	}
 	VkExternalMemoryImageCreateInfo ext { VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_IMAGE_CREATE_INFO };
 	ext.handleTypes = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_WIN32_BIT;
 	VkImageCreateInfo ci { VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO };
 	ci.pNext = &ext;
-	ci.imageType = VK_IMAGE_TYPE_2D;
+	ci.imageType = type;
 	ci.format = fmt;
-	ci.extent = { std::uint32_t( w ), std::uint32_t( h ), 1 };
+	ci.extent = { std::uint32_t( w ), std::uint32_t( h ), std::uint32_t( d ) };
 	ci.mipLevels = 1;
-	ci.arrayLayers = 1;
+	ci.arrayLayers = std::uint32_t( layers );
 	ci.samples = sc;
 	ci.tiling = VK_IMAGE_TILING_OPTIMAL;
 	ci.usage = usage;
@@ -1082,7 +1106,7 @@ bool makeShared( VkImage & img, VkDeviceMemory & mem, GLuint & tex, GLuint & obj
 		b.srcQueueFamilyIndex = b.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
 		b.image = img;
 		b.subresourceRange = { VkImageAspectFlags( depth ? VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT : VK_IMAGE_ASPECT_COLOR_BIT ),
-			0, 1, 0, 1 };
+			0, 1, 0, std::uint32_t( layers ) };
 		v.vkCmdPipelineBarrier( cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0, 0, nullptr, 0, nullptr, 1, &b );
 		v.vkEndCommandBuffer( cmd );
 		laid = oneShot( cmd, fence );
@@ -1103,10 +1127,10 @@ bool makeShared( VkImage & img, VkDeviceMemory & mem, GLuint & tex, GLuint & obj
 		why = "vkGetMemoryWin32HandleKHR (a view image) failed";
 		return false;
 	}
-	const GLenum target = samples > 1 ? kTexture2DMs : kTexture2D;
+	const GLenum target = is3d ? kTexture3D : layered ? kTexture2DArray : samples > 1 ? kTexture2DMs : kTexture2D;
 	while ( g.getError() != 0 ) {}
 	GLint was = 0;
-	g.getIntegerv( samples > 1 ? kTexBinding2DMs : kTexBinding2D, &was );
+	g.getIntegerv( is3d ? kTexBinding3D : layered ? kTexBinding2DArray : samples > 1 ? kTexBinding2DMs : kTexBinding2D, &was );
 	g.createMemoryObjects( 1, &obj );
 	const GLint one = 1;
 	g.memoryObjectParameteriv( obj, kDedicated, &one );
@@ -1118,7 +1142,10 @@ bool makeShared( VkImage & img, VkDeviceMemory & mem, GLuint & tex, GLuint & obj
 	if ( samples > 1 )
 		g.texStorageMem2DMultisample( target, samples, glFmt, w, h, 1, obj, 0 );
 	else {
-		g.texStorageMem2D( target, 1, glFmt, w, h, obj, 0 );
+		if ( is3d || layered )
+			g.texStorageMem3D( target, 1, glFmt, w, h, is3d ? d : layers, obj, 0 );
+		else
+			g.texStorageMem2D( target, 1, glFmt, w, h, obj, 0 );
 		g.texParameteri( target, kTexMinFilter, GLint( kNearest ) );
 		g.texParameteri( target, kTexMagFilter, GLint( kNearest ) );
 	}
@@ -1136,6 +1163,74 @@ bool makeShared( VkImage & img, VkDeviceMemory & mem, GLuint & tex, GLuint & obj
 void toneFbsDrop();
 
 // the views go (GL alive: its textures, memory objects and FBO too); the caller drained the worker
+/* lane VKSHARE1: the keyed single-sample targets other passes keep on the present device (sharedTarget): GL draws and
+ * reads them by their GL names as before; a Vulkan pass finds the image by its key (sharedFind) */
+struct Shared
+{
+	VkImage img = VK_NULL_HANDLE;
+	VkDeviceMemory mem = VK_NULL_HANDLE;
+	VkImageView view = VK_NULL_HANDLE;
+	GLuint tex = 0, obj = 0;
+	void * glCtx = nullptr;
+	int type = 0, w = 0, h = 0, d = 0;
+	GLenum glFmt = 0;
+	VkFormat fmt = VK_FORMAT_UNDEFINED;
+	double mb = 0.0;
+};
+
+std::map<std::uintptr_t, Shared> & shareds()
+{
+	static std::map<std::uintptr_t, Shared> m;
+	return m;
+}
+
+WwVkPresent::SharedStat & sharedStat()
+{
+	static WwVkPresent::SharedStat s;
+	return s;
+}
+
+VkFormat vkFormatOf( GLenum f, bool & depth )
+{
+	depth = f == kDepth24Stencil8;
+	switch ( f ) {
+	case kRgba16f: return VK_FORMAT_R16G16B16A16_SFLOAT;
+	case kRgba32f: return VK_FORMAT_R32G32B32A32_SFLOAT;
+	case kRgba8: return VK_FORMAT_R8G8B8A8_UNORM;
+	case kGlRg32f: return VK_FORMAT_R32G32_SFLOAT;
+	case kGlRg16f: return VK_FORMAT_R16G16_SFLOAT;
+	case kGlR32f: return VK_FORMAT_R32_SFLOAT;
+	case kGlR8: return VK_FORMAT_R8_UNORM;
+	case kDepth24Stencil8: return VK_FORMAT_D24_UNORM_S8_UINT;
+	default: return VK_FORMAT_UNDEFINED;
+	}
+}
+
+// the caller drained the worker and waited the device idle
+void sharedFree( Shared & s, bool glAlive )
+{
+	Vk & v = vk();
+	if ( glAlive ) {
+		if ( s.tex )
+			gl().deleteTextures( 1, &s.tex );
+		if ( s.obj )
+			gl().deleteMemoryObjects( 1, &s.obj );
+	}
+	if ( s.view )
+		v.vkDestroyImageView( v.dev, s.view, nullptr );
+	if ( s.img )
+		v.vkDestroyImage( v.dev, s.img, nullptr );
+	if ( s.mem )
+		v.vkFreeMemory( v.dev, s.mem, nullptr );
+	s = Shared();
+}
+
+const Shared * sharedFind( std::uintptr_t key )
+{
+	auto it = shareds().find( key );
+	return it != shareds().end() && it->second.glCtx == gl().ctx ? &it->second : nullptr;
+}
+
 void dropView( bool glAlive )
 {
 	Vk & v = vk();
@@ -2066,6 +2161,15 @@ void shutdown()
 		toneFrameFree( gl().ok && T.glCtx == gl().ctx );
 		toneSemsDrop( gl().ok && T.semCtx == gl().ctx );
 	}
+	// lane VKSHARE1: the keyed shared targets (their owners see sharedTargetIs false and make GL's own again)
+	if ( !shareds().empty() ) {
+		drain();
+		vk().vkDeviceWaitIdle( vk().dev );
+		for ( auto & kv : shareds() )
+			sharedFree( kv.second, gl().ok && kv.second.glCtx == gl().ctx );
+		shareds().clear();
+		sharedStat().mb = 0.0;
+	}
 }
 
 bool viewBegin( int w, int h, int samples, GlProc gp, std::string & why )
@@ -2238,6 +2342,96 @@ void toneFrameDrop()
 	vk().vkDeviceWaitIdle( vk().dev );
 	T.pending = false;
 	toneFrameFree( gl().ok && T.glCtx == gl().ctx );
+}
+
+bool sharedTarget( std::uintptr_t key, int type, int w, int h, int d, unsigned glFmt, unsigned & tex, std::string & why )
+{
+	Gl & g = gl();
+	Vk & v = vk();
+	SharedStat & st = sharedStat();
+	tex = 0;
+	auto fail = [&]( const std::string & r ) {
+		why = r;
+		st.fails++;
+		st.failWhy = r;
+		return false;
+	};
+	if ( !v.ok || !g.ok || g.ctx != reinterpret_cast<void *>( wglGetCurrentContext() ) )
+		return fail( "the present device or GL's entry points are not ready in this context" );
+	if ( w < 1 || h < 1 || type < 0 || type > 2 )
+		return fail( "a shared target of size " + std::to_string( w ) + "x" + std::to_string( h ) + " type " + std::to_string( type ) );
+	bool depth = false;
+	const VkFormat fmt = vkFormatOf( GLenum( glFmt ), depth );
+	if ( fmt == VK_FORMAT_UNDEFINED )
+		return fail( "GL format " + std::to_string( glFmt ) + " has no shared twin" );
+	d = type == 0 ? 1 : std::max( d, 1 );
+	auto it = shareds().find( key );
+	if ( it != shareds().end() ) {
+		Shared & s = it->second;
+		if ( s.glCtx == g.ctx && s.type == type && s.w == w && s.h == h && s.d == d && s.glFmt == glFmt ) {
+			tex = s.tex;
+			return true;
+		}
+	}
+	drain();  // the first layout change below is a submit; the queue is the worker's
+	v.vkDeviceWaitIdle( v.dev );
+	if ( it != shareds().end() ) {
+		st.mb -= it->second.mb;
+		sharedFree( it->second, it->second.glCtx == g.ctx );
+		shareds().erase( it );
+		st.dropped++;
+	}
+	Shared s;
+	const VkImageType vt = type == 1 ? VK_IMAGE_TYPE_3D : VK_IMAGE_TYPE_2D;
+	if ( !makeShared( s.img, s.mem, s.tex, s.obj, fmt, GLenum( glFmt ), 1, w, h, depth, s.mb, why, vt, type == 1 ? d : 1, type == 2 ? d : 1 ) ) {
+		sharedFree( s, true );
+		return fail( why );
+	}
+	const VkImageViewType viewType = type == 1 ? VK_IMAGE_VIEW_TYPE_3D : type == 2 ? VK_IMAGE_VIEW_TYPE_2D_ARRAY : VK_IMAGE_VIEW_TYPE_2D;
+	s.view = imageView( s.img, viewType, fmt, depth ? VK_IMAGE_ASPECT_DEPTH_BIT : VK_IMAGE_ASPECT_COLOR_BIT );
+	if ( !s.view ) {
+		sharedFree( s, true );
+		return fail( "a shared target's image view failed" );
+	}
+	s.glCtx = g.ctx;
+	s.type = type;
+	s.w = w;
+	s.h = h;
+	s.d = d;
+	s.glFmt = GLenum( glFmt );
+	s.fmt = fmt;
+	st.made++;
+	st.mb += s.mb;
+	tex = s.tex;
+	shareds()[key] = s;
+	return true;
+}
+
+bool sharedTargetIs( std::uintptr_t key, unsigned tex )
+{
+	const Shared * s = sharedFind( key );
+	return s && tex && s->tex == tex;
+}
+
+void sharedTargetDrop( std::uintptr_t key )
+{
+	auto it = shareds().find( key );
+	if ( it == shareds().end() )
+		return;
+	drain();
+	vk().vkDeviceWaitIdle( vk().dev );
+	sharedStat().mb -= it->second.mb;
+	sharedStat().dropped++;
+	sharedFree( it->second, gl().ok && it->second.glCtx == gl().ctx );
+	shareds().erase( it );
+}
+
+SharedStat takeSharedStat()
+{
+	SharedStat s = sharedStat();
+	s.live = int( shareds().size() );
+	sharedStat().made = sharedStat().dropped = sharedStat().fails = 0;
+	return s;
 }
 
 bool toneRun( const ToneRun & t, std::string & why )
@@ -2900,6 +3094,14 @@ bool toneWanted()
 	return viewWanted( off ) && viewFbo() != 0;
 }
 
+bool shareWanted( const char * redEnv )
+{
+	if ( redEnv && wwEnvInt( redEnv ) == 1 )
+		return false;
+	QString off;
+	return viewWanted( off ) && viewFbo() != 0;
+}
+
 bool frame( QOpenGLWindow * w, const std::function<void()> & paint )
 {
 	static QString said;
@@ -3046,17 +3248,25 @@ bool frame( QOpenGLWindow * w, const std::function<void()> & paint )
 						: ts.fails > 0 ? QString::fromStdString( ts.failWhy )
 						: ts.gl > 0 ? QString::fromStdString( ts.glWhy ) : QStringLiteral( "no HDR cell frame asked for it" ) );
 			}
+			// lane VKSHARE1: the keyed targets on the present device (the clouds' march + history: red WW_VKVIEW_CLOUD_RED=1)
+			const SharedStat ss = takeSharedStat();
+			QString shared = QStringLiteral( "%1 targets shared on the present device, %2 MB; %3 made, %4 dropped" )
+				.arg( ss.live ).arg( ss.mb, 0, 'f', 1 ).arg( ss.made ).arg( ss.dropped );
+			if ( ss.fails > 0 )
+				shared += QStringLiteral( ", %1 refused to GL (last: %2)" ).arg( ss.fails ).arg( QString::fromStdString( ss.failWhy ) );
+			if ( wwEnvInt( "WW_VKVIEW_CLOUD_RED" ) == 1 )
+				shared += QStringLiteral( "; the clouds' own: red WW_VKVIEW_CLOUD_RED=1" );
 			if ( winView > 0 ) {
 				routeSaid.clear();  // one a window while it runs
 				sayRoute( QStringLiteral( "vk view, %1 of %2 frames: GL draws the view into the present device's images (%3x%4 "
 					"MS%5 RGBA8 + D24S8, %6 views, %7 MB, made in %8 ms), the worker resolves on Vulkan (no GL blit: drawing "
 					"thread present %9 ms); %10 views still read when GL wanted them (wait %11 ms); bakert hop none (the view is "
 					"made on the present device); %12; still on GL into the view: the FO4CS bloom's tone (mode 3) and the fog "
-					"bloom's, clouds in front (their targets not shared until VKLIGHT1 r2), P7, lens flare, TAA (history + "
+					"bloom's, clouds in front (%13), P7, lens flare, TAA (history + "
 					"vectors GL's), overlays + QPainter (the overlay target is the view)" )
 					.arg( winView ).arg( winN ).arg( vs.w ).arg( vs.h ).arg( vs.samples ).arg( vs.views ).arg( vs.mb, 0, 'f', 1 )
 					.arg( vs.makeMs, 0, 'f', 1 ).arg( winSum / winN, 0, 'f', 3 ).arg( vs.busy ).arg( vs.waitMs, 0, 'f', 3 )
-					.arg( tone ) );
+					.arg( tone ).arg( shared ) );
 			} else {
 				sayRoute( QStringLiteral( "vk present (old route: GL draws its back buffer, GL blits it into the slot; view on "
 					"Vulkan off: %1)" ).arg( viewWhy ) );

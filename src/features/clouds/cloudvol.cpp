@@ -12,6 +12,7 @@
 #include "features/sky/atmomath.h"
 #include "features/exposure/cellhdr.h"
 #include "features/water/cellunderwater.h"	// lane WATERUNDER3: no clouds over a camera under water
+#include "features/vkframe/vkpresent.h"	// lane VKSHARE1: the march + history targets on the present device
 #include "wwswitch.h"
 #include "wwsyncred.h"	// lane PERFFIX6: ^WW_SYNC_RED
 #include "gl/glscene.h"
@@ -189,6 +190,9 @@ struct Tgt	// a colour (RGBA16F) + depth (R32F) pair in one FBO
 {
 	GLuint fbo = 0, col = 0, dep = 0;
 	int w = 0, h = 0;
+	bool shared = false, refused = false;	// lane VKSHARE1: col / dep live on the present device (keys key, key + 1)
+	std::uintptr_t key = 0;
+	unsigned long long made = 0;	// rebuilds (the contents are new)
 };
 
 struct CvGpu
@@ -253,13 +257,64 @@ GLuint upload3d( NifSkopeOpenGLContext::GLFunctions * fn, const std::vector<std:
 	return t;
 }
 
+/* lane VKSHARE1: while the view is on Vulkan (WW_VKVIEW=1, its size settled) the march and history targets live on the
+ * present device (WwVkPresent::sharedTarget), so a Vulkan clouds-in-front pass can read and write them with no copy;
+ * GL draws and reads the same names as before. Red WW_VKVIEW_CLOUD_RED=1 (or a refusal): GL's own textures. */
 bool ensure( NifSkopeOpenGLContext::GLFunctions * fn, Tgt & t, int w, int h )
 {
-	if ( t.fbo && t.w == w && t.h == h )
+	static std::uintptr_t nextKey = 0x434C0000u;	// "CL": two keys a target
+	const bool asked = WwVkPresent::shareWanted( "WW_VKVIEW_CLOUD_RED" );
+	if ( !asked )
+		t.refused = false;	// asked again later: one more try
+	const bool want = asked && !t.refused;
+	const bool live = t.shared && WwVkPresent::sharedTargetIs( t.key, t.col ) && WwVkPresent::sharedTargetIs( t.key + 1, t.dep );
+	if ( t.shared && !live )
+		t.col = t.dep = 0;	// a shutdown dropped them (their GL names with them)
+	if ( t.fbo && t.w == w && t.h == h && t.shared == want && ( !t.shared || live ) )
 		return true;
+	t.made++;	// new contents: the caller's history starts again
 	if ( !t.fbo )
 		fn->glGenFramebuffers( 1, &t.fbo );
+	const bool wasShared = t.shared;
+	if ( t.shared ) {
+		WwVkPresent::sharedTargetDrop( t.key );
+		WwVkPresent::sharedTargetDrop( t.key + 1 );
+		t.col = t.dep = 0;
+		t.shared = false;
+	}
+	if ( want ) {
+		if ( !t.key ) {
+			t.key = nextKey;
+			nextKey += 2;
+		}
+		unsigned c = 0, d = 0;
+		std::string why;
+		if ( WwVkPresent::sharedTarget( t.key, 0, w, h, 1, GL_RGBA16F, c, why )
+			&& WwVkPresent::sharedTarget( t.key + 1, 0, w, h, 1, GL_RG32F, d, why ) ) {
+			for ( GLuint * tex : { &t.col, &t.dep } )
+				if ( *tex )
+					fn->glDeleteTextures( 1, tex );
+			t.col = c;
+			t.dep = d;
+			t.shared = true;
+		} else {
+			WwVkPresent::sharedTargetDrop( t.key );
+			t.refused = true;
+			std::fprintf( stderr, "cloudvol: %dx%d targets stay GL's own (shared target refused: %s)\n", w, h, why.c_str() );
+		}
+	}
+	if ( t.shared != wasShared || ( t.shared && ( t.w != w || t.h != h ) ) )
+		std::fprintf( stderr, "cloudvol: %dx%d march / history target %s\n", w, h,
+			t.shared ? "on the present device (shared with GL)" : "back on GL's own textures" );
 	auto make = [&]( GLuint & tex, GLenum fmt, GLenum chans ) {
+		if ( t.shared ) {	// the shared name: only the sampling state is GL's
+			fn->glBindTexture( GL_TEXTURE_2D, tex );
+			fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR );
+			fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR );
+			fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE );
+			fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE );
+			return;
+		}
 		if ( tex )
 			fn->glDeleteTextures( 1, &tex );
 		fn->glGenTextures( 1, &tex );
@@ -1488,8 +1543,9 @@ bool wwCloudVolDraw( Scene * scene, const WwCloudVolView & view, QStringList & d
 	timeRead( fn, g, g.qcur, true );
 	fn->glQueryCounter( g.q[g.qcur * 2], kTimestamp );
 
-	const bool sized = g.hist[0].w == hw && g.hist[0].h == hh;
+	const unsigned long long histMade = g.hist[0].made + g.hist[1].made;
 	bool ok = ensure( fn, g.march, mw, mh ) && ensure( fn, g.hist[0], hw, hh ) && ensure( fn, g.hist[1], hw, hh );
+	const bool sized = g.hist[0].made + g.hist[1].made == histMade;	// lane VKSHARE1: also a move to / from the present device
 	QString why = ok ? QString() : QStringLiteral( "framebuffer incomplete" );
 	const Cam cam = cameraOf( scene );
 	const float jump = std::hypot( cam.km[0] - g.prevKm[0], cam.km[1] - g.prevKm[1], cam.km[2] - g.prevKm[2] );
