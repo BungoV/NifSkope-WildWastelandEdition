@@ -34,8 +34,8 @@ cbuffer globalUniforms : register(b1, space0)
 
 cbuffer LooseUniforms : register(b31, space0)
 {
-    float4x4 modelViewMatrix;
-    float3x3 normalMatrix;	// in row-major order
+    row_major float4x4 modelViewMatrix;
+    row_major float3x3 normalMatrix;	// in row-major order
     int selectionParam;	// vertex selected (-1: none)
     float4 highlightColor;
     float4 vertexColorOverride;	// components greater than zero replace the vertex color

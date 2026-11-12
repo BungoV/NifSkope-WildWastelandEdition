@@ -41,7 +41,7 @@ cbuffer LooseUniforms : register(b31, space0)
     float4 cvPhasePrm;	// the droplet phase (gHG, gD, alpha, wD)
     float4 cvProj;	// P00, P11, P20, P21
     float2 cvHistSize;
-    float3x3 cvCam;	// world columns: right, up, back
+    row_major float3x3 cvCam;	// world columns: right, up, back
     float3 cvCamKm;	// world x, y km, height km
     float cvMaxKm;	// the march's reach along the ray
     float4 cvSceneZ;	// the projection's [2][2], [3][2]; km per view unit; 1 = clip the march at the scene

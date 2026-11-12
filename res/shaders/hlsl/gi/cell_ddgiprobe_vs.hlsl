@@ -35,7 +35,7 @@ cbuffer LooseUniforms : register(b31, space0)
     int4 cellDdgiDims;
     float4 cellDdgiOrigin;
     float4 cellDdgiStep;
-    float4x4 modelViewMatrix;
+    row_major float4x4 modelViewMatrix;
     float probeRad;
 };
 Buffer<float4> probeList : register(t1, space0);

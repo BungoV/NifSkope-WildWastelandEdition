@@ -9,11 +9,11 @@ cbuffer LooseUniforms : register(b31, space0)
     float4 wwGrassWind2;
     float4 wwGrassWind;
     int velMode;
-    float4x4 clipCur;	// unjittered, this frame
-    float4x4 clipPrev;	// unjittered, last frame
-    float4x4 modelViewMatrix;
-    float3x3 normalMatrix;	// lane TREELEAF4: the shape's view rotation, as Shape::setUniforms gives the colour pass
-    float4x4 clipJit;	// the frame's jittered projection x model-view: lands on the frame's depth
+    row_major float4x4 clipCur;	// unjittered, this frame
+    row_major float4x4 clipPrev;	// unjittered, last frame
+    row_major float4x4 modelViewMatrix;
+    row_major float3x3 normalMatrix;	// lane TREELEAF4: the shape's view rotation, as Shape::setUniforms gives the colour pass
+    row_major float4x4 clipJit;	// the frame's jittered projection x model-view: lands on the frame's depth
 };
 
 static float4 gl_Position;

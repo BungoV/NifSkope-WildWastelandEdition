@@ -38,7 +38,7 @@ cbuffer LooseUniforms : register(b31, space0)
     int selectionParam;
     float4 vertexColorOverride;	// components greater than zero replace the vertex color
     float4 highlightColor;
-    float4x4 modelViewMatrix;
+    row_major float4x4 modelViewMatrix;
 };
 
 static float4 gl_Position;

@@ -25,6 +25,8 @@ struct SPIRV_Cross_Output
     float2 vmax : SV_Target0;
 };
 
+static uint dummy_parameter;
+
 uint2 spvTextureSize(Texture2D<float4> Tex, uint Level, out uint Param)
 {
     uint2 ret;
@@ -35,7 +37,6 @@ uint2 spvTextureSize(Texture2D<float4> Tex, uint Level, out uint Param)
 void frag_main()
 {
     int2 t = int2(gl_FragCoord.xy);
-    uint dummy_parameter;
     int2 sz = int2(spvTextureSize(srcTex, uint(0), dummy_parameter));
     float2 best = 0.0f.xx;
     float bl = 0.0f;

@@ -103,7 +103,7 @@ cbuffer LooseUniforms : register(b31, space0)
     float4 volAirMed;	// the pass's medium (cell_volair.frag airMed): sigma0, zb, 1 / H, the top (the fog's height frame)
     float4 volAirLayer;	// its near band and ground layer (airLayer): the near share w, zn, 1 / Hn, the ground strength s
     float4 volAirRain;	// x sigma per game unit near the ground (0 = none), y the base excess, z 1 / falloff km, w 1 / fade km
-    float4x4 volAirRainXf;	// view -> (u, v, km below the Low base): cell_rainfog.glsl's rfFromView
+    row_major float4x4 volAirRainXf;	// view -> (u, v, km below the Low base): cell_rainfog.glsl's rfFromView
     float4 volAirRainFar;	// x the Low band's coverage past the map, y the map's edge band (uv), z the sub-segments
     float4 volPackDims;	// the packed volume's texels: width, height, depth; the near grid's slices
     float4 volFar;	// lane FARGRID1: the far grid's start (the near grid's end), ln(end / start), slices, 1 = on
@@ -149,7 +149,7 @@ cbuffer LooseUniforms : register(b31, space0)
     float cellSpecSkyBase;	// the sky grid's slot 0 rides cellGi after its own slabs (6, or 12 with rooms): no new sampler
     float cellGiVoxel;
     float3 cellGiOrigin;
-    float4x4 csmMat[3];	// view space -> (u, v, depth) of cascade i
+    row_major float4x4 csmMat[3];	// view space -> (u, v, depth) of cascade i
     float4 ussCsmStable;	// lane SHADOWSHIMMER1: x 1 the kernel rotation world-locked (0 the red: screen + frame), y the normal offset (texels)
     float4 csmParams;	// 1 / view scale, shadow distance D, map size, blend band B
     float3 ussCsmTexel;	// each cascade's texel (world units)
@@ -171,14 +171,14 @@ cbuffer LooseUniforms : register(b31, space0)
     float4 ussTerrXform;	// u = x X.x + X.y, v = y X.z + X.w
     float4 ussTerrSelf;	// lane FAR6: x the self-test on, y the relief band's low edge (0: no gate), z the margin cap, w the quantum
     int ussTerrOn;
-    float4x4 ussWorldFromView;
+    row_major float4x4 ussWorldFromView;
     float4 ussTerrBias;	// x FO4CS's slope bias on, y max(sin elev, sin 1 deg), z the strength (low sun, moon), w the near texel
     float4 ussTerrNearXform;	// the near window: u = x X.x + X.y, v = y X.z + X.w
     int ussContactOn;
     float2 ussContactInvSize;
     int ussRed;	// 1 terrseam, 2 mulcompose
     int ussCloudOn;
-    float4x4 ussCloudFromView;	// view space -> (u, v, height km); u, v across the sun
+    row_major float4x4 ussCloudFromView;	// view space -> (u, v, height km); u, v across the sun
     float4 ussCloudFar;	// x transmittance past the map, y edge fade (uv), z the air tail's cloud taps (Ultra), w the air's ambient share
     float csmForce;	// WW_CSM_FORCE: >= 0 replaces the factor (the factor-site wiring test); -1 off
     int ussOn;
@@ -475,6 +475,8 @@ static float ussLastTerr;
 static float3 csmNOff;
 static float wwCauPathGain;
 static float3 cellRimSum;
+
+static uint dummy_parameter;
 
 float mod(float x, float y)
 {
@@ -2746,7 +2748,6 @@ float wwWaterSkyVisDir(float3 P, float3 N, float3 D_1, float farV)
     float z = clamp(t.z, 0.5f, cellGiDims.z - 0.5f);
     float3 sl = float3((D_1.x >= 0.0f) ? 0.0f : 1.0f, (D_1.y >= 0.0f) ? 2.0f : 3.0f, (D_1.z >= 0.0f) ? 4.0f : 5.0f);
     float3 w = D_1 * D_1;
-    uint dummy_parameter;
     float depth = float(int3(spvTextureSize(cellGi, uint(0), dummy_parameter)).z);
     float2 a = 0.0f.xx;
     for (int k = 0; k < 3; k++)
@@ -5623,7 +5624,6 @@ float4 wwVolTex(float3 p, bool xyOnly)
     {
         return volTex.Sample(_volTex_sampler, p);
     }
-    uint dummy_parameter;
     float3 n = float3(int3(spvTextureSize(volTex, uint(0), dummy_parameter)));
     float3 c = (p * n) - 0.5f.xxx;
     float3 i = floor(c);
@@ -6723,7 +6723,6 @@ void frag_main()
             sky = lerp(sky, ssr.xyz, ssr.w.xxx);
         }
     }
-    uint dummy_parameter;
     int2 size = int2(spvTextureSize(waterScene, uint(0), dummy_parameter));
     float2 uv = (float2(px) + 0.5f.xx) / float2(size);
     float2 offUV = uv + (float2(-N.x, -N.y) * (N.z * 0.0625f));

@@ -32,7 +32,7 @@ cbuffer globalUniforms : register(b0, space0)
 
 cbuffer LooseUniforms : register(b31, space0)
 {
-    float4x4 csmMat[3];	// view space -> (u, v, depth) of cascade i
+    row_major float4x4 csmMat[3];	// view space -> (u, v, depth) of cascade i
     float4 ussCsmStable;	// lane SHADOWSHIMMER1: x 1 the kernel rotation world-locked (0 the red: screen + frame), y the normal offset (texels)
     float4 csmParams;	// 1 / view scale, shadow distance D, map size, blend band B
     float3 ussCsmTexel;	// each cascade's texel (world units)
@@ -54,14 +54,14 @@ cbuffer LooseUniforms : register(b31, space0)
     float4 ussTerrXform;	// u = x X.x + X.y, v = y X.z + X.w
     float4 ussTerrSelf;	// lane FAR6: x the self-test on, y the relief band's low edge (0: no gate), z the margin cap, w the quantum
     int ussTerrOn;
-    float4x4 ussWorldFromView;
+    row_major float4x4 ussWorldFromView;
     float4 ussTerrBias;	// x FO4CS's slope bias on, y max(sin elev, sin 1 deg), z the strength (low sun, moon), w the near texel
     float4 ussTerrNearXform;	// the near window: u = x X.x + X.y, v = y X.z + X.w
     int ussContactOn;
     float2 ussContactInvSize;
     int ussRed;	// 1 terrseam, 2 mulcompose
     int ussCloudOn;
-    float4x4 ussCloudFromView;	// view space -> (u, v, height km); u, v across the sun
+    row_major float4x4 ussCloudFromView;	// view space -> (u, v, height km); u, v across the sun
     float4 ussCloudFar;	// x transmittance past the map, y edge fade (uv), z the air tail's cloud taps (Ultra), w the air's ambient share
     float csmForce;	// WW_CSM_FORCE: >= 0 replaces the factor (the factor-site wiring test); -1 off
     int ussOn;
@@ -86,7 +86,7 @@ cbuffer LooseUniforms : register(b31, space0)
     bool lodEmissiveRaw;	// channel 13: the glow slot raw (a source .lodm's emissive texture)
     float3 lodEmissiveColor;	// channel 13: the source's emissive colour, folded into the legacy sheet
     bool hasModelSpaceNormals;
-    float3x3 normalMatrix;
+    row_major float3x3 normalMatrix;
     bool wwDecalMapped;	// lane DECALANGLE2: and its vertex rgb is D as a signed byte (not a colour)
     bool greyscaleColor;
     float paletteScale;

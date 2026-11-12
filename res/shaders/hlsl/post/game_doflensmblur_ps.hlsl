@@ -44,6 +44,8 @@ struct SPIRV_Cross_Output
 
 static float lensS1;
 
+static uint dummy_parameter;
+
 uint2 spvTextureSize(Texture2D<float4> Tex, uint Level, out uint Param)
 {
     uint2 ret;
@@ -74,7 +76,6 @@ float lensFocus(Texture2D<float4> depthTex, SamplerState _depthTex_sampler)
     float s1 = lensP.x;
     if (!(s1 > 0.0f))
     {
-        uint dummy_parameter;
         int2 c = int2(spvTextureSize(depthTex, uint(0), dummy_parameter)) / int2(2, 2);
         float param = depthTex.Load(int3(c, 0)).x;
         float z = lensDist(param);
@@ -165,7 +166,6 @@ float4 lensTexel(int2 p)
     float param_1 = lensDist(param);
     float param_2 = lensS1;
     float cf = lensCoc(param_1, param_2);
-    uint dummy_parameter;
     float2 uq = (float2(p) + 0.5f.xx) / (float2(int2(spvTextureSize(t2, uint(0), dummy_parameter))) * 4.0f);
     float3 m = a.xyz;
     if (cf > 1.0f)
@@ -236,7 +236,6 @@ void frag_main()
 {
     lensS1 = 0.0f;
     lensS1 = lensFocus(t3, _t3_sampler);
-    uint dummy_parameter;
     float2 size = float2(int2(spvTextureSize(t0, uint(0), dummy_parameter)));
     float2 g = gl_FragCoord.xy / size;
     float2 param = g;

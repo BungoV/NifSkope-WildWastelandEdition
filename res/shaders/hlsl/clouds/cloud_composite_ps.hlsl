@@ -10,7 +10,7 @@ cbuffer LooseUniforms : register(b31, space0)
     int viewTransform;
     float4 cvLtSrc;	// the strike, km: world x, y, height; w = 1 / delta (1 / km)
     float4 cvLtPrm;	// r0^2 (km^2), the image planes' doubled heights 2 (base - z_b), 2 (top + z_b), 3 g D (km)
-    float3x3 cvCam;	// world columns: right, up, back (cloud_march.frag)
+    row_major float3x3 cvCam;	// world columns: right, up, back (cloud_march.frag)
     float4 cvProj;	// P00, P11, P20, P21
     float3 cvCamKm;	// world x, y km, height km
     float3 cvLtCol;	// the flash's light: colour x level x power x w / (4 pi) / (4 pi D) x the Low band's tint
@@ -38,6 +38,8 @@ struct SPIRV_Cross_Output
 {
     float4 fragColor : SV_Target0;
 };
+
+static uint dummy_parameter;
 
 uint2 spvTextureSize(Texture2D<float4> Tex, uint Level, out uint Param)
 {
@@ -189,7 +191,6 @@ void frag_main()
         float2 ndc = (uv * 2.0f) - 1.0f.xx;
         float3 v = float3((ndc.x + cvProj.z) / cvProj.x, (ndc.y + cvProj.w) / cvProj.y, -1.0f);
         float tScene = ((length(v) * cvSceneZ.y) / (((2.0f * z) - 1.0f) + cvSceneZ.x)) * cvSceneZ.z;
-        uint dummy_parameter;
         int2 hs = int2(spvTextureSize(cvHistDepth, uint(0), dummy_parameter));
         float dm = cvHistDepth.Load(int3(clamp(int2(uv * float2(hs)), int2(0, 0), hs - int2(1, 1)), 0)).x;
         if ((cvSceneZ.w > 0.5f) && (dm >= tScene))

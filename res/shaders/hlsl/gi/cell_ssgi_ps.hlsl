@@ -33,7 +33,7 @@ cbuffer LooseUniforms : register(b31, space0)
     int ssgiStage;
     bool emitAdd;
     bool historyValid;
-    float3x3 curToPrev;	// game-unit view now -> game-unit view last frame (rotation)
+    row_major float3x3 curToPrev;	// game-unit view now -> game-unit view last frame (rotation)
     float3 curToPrevT;
     bool moving;
     float maxAccum;
@@ -84,6 +84,8 @@ struct SPIRV_Cross_Output
     float4 fragMeta : SV_Target1;
     float4 fragState : SV_Target2;
 };
+
+static uint dummy_parameter;
 
 uint2 spvTextureSize(Texture2D<float4> Tex, uint Level, out uint Param)
 {
@@ -270,7 +272,6 @@ float4 cast(int2 wp)
                     int m = min(int(max(clamp(log2(off) - 3.2999999523162841796875f, 0.0f, 5.0f) - 1.0f, 0.0f) + 0.5f), hizLevels);
                     if (m > 0)
                     {
-                        uint dummy_parameter;
                         int2 c = min((int2(sp) >> m.xx), (int2(spvTextureSize(hiz, uint(m - 1), dummy_parameter)) - int2(1, 1)));
                         float2 iv = hiz.Load(int3(c, m - 1)).xy;
                         bool tmp678 = iv.x > ((g.w + radius) + 1.0f);
@@ -1152,7 +1153,6 @@ float2 hizReduce(int2 p, bool fromGbuf)
     }
     else
     {
-        uint dummy_parameter;
         tmp2380 = int2(spvTextureSize(hiz, uint(0), dummy_parameter));
     }
     int2 fs = tmp2380;

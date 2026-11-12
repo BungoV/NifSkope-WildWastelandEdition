@@ -32,7 +32,7 @@ cbuffer LooseUniforms : register(b31, space0)
     int uwClass;	// the body's class: 0 sea, 1 river, 2 lake (placed water)
     float4 uwSun;	// the sun's linear colour (0 below the horizon), its height (cos from the zenith)
     float3 uwSky;	// the water's diffuse sky light, linear: half the horizon + half the upper row
-    float4x4 uwInvProj;	// clip -> view
+    row_major float4x4 uwInvProj;	// clip -> view
     float4 uwRow[3];	// view -> world rows
     float4 uwFog;	// amount, near, far, surface height
     float4 uwVp;	// the viewport x, y, w, h

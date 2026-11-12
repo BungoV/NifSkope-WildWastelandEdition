@@ -45,13 +45,13 @@ cbuffer LooseUniforms : register(b31, space0)
     float4 farVcAo;
     float4 wwGrassWind2;
     float4 wwGrassWind;
-    float4x4 modelViewMatrix;
+    row_major float4x4 modelViewMatrix;
     float4 farSwayBlock;
     float farSwayAmp;
     bool lodTreeAnim;
     float farSwayTime;
     float lodViewCode;	// lane LODLIVE1: the LOD coloration's band + 1 of a shape (0 = untinted), renderer.cpp
-    float3x3 normalMatrix;	// in row-major order
+    row_major float3x3 normalMatrix;	// in row-major order
     float4 vertexColorOverride;	// components greater than zero replace the vertex color
 };
 Buffer<float4> farStream : register(t0, space0);

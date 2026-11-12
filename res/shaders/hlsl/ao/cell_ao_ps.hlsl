@@ -12,7 +12,7 @@ cbuffer LooseUniforms : register(b31, space0)
     int2 mipSize[5];	// [0] = fullSize
     int2 halfSize;
     bool aoZLin;	// RESUME 15: stage 5 reads zlin (else the window depth zres, part 14 / red zwin)
-    float4x4 aoInvProj;	// MODULES1: stage 5, clip -> view
+    row_major float4x4 aoInvProj;	// MODULES1: stage 5, clip -> view
     float aoUnit;	// MODULES1: stage 5, view units -> game units (cell_ao.glsl cellAoPassOut)
     int aoStage;
     int mipLevel;

@@ -6,7 +6,7 @@
 #include "NearBindingsVk.hlsli"
 cbuffer LooseUniforms : register(b31, space0)
 {
-    float4x4 csmClipFromView;
+    row_major float4x4 csmClipFromView;
 };
 
 static float4 gl_Position;

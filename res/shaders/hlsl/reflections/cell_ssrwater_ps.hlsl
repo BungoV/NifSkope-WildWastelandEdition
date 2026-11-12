@@ -16,13 +16,13 @@ cbuffer LooseUniforms : register(b31, space0)
     int ssrStage;
     int2 fullSize;
     float2 proj;	// the projection's P00, P11
-    float3x3 ssrPrevRot;	// this view -> the previous view (game units): ssrPrevRot * P + ssrPrevT
+    row_major float3x3 ssrPrevRot;	// this view -> the previous view (game units): ssrPrevRot * P + ssrPrevT
     float3 ssrPrevT;
     float2 ssrPrevProj;	// the previous projection's P00, P11
     bool haveWaterRay;
     bool opaqueRays;	// false in an exterior: the water's rays alone
     float4 ssrK;	// the game's four: color scale 1, angle gate 0.2, normal z scale 2, confidence scale 1
-    float3x3 viewToWorld;
+    row_major float3x3 viewToWorld;
     int ssrRed;	// WW_CELL_SSR_RED: 2 nogap (no 50-unit refusal), 4 nofade (confidence 1 on a hit)
     bool ssrPrev;	// lane PERF3: the hit's color from prevScene
 };

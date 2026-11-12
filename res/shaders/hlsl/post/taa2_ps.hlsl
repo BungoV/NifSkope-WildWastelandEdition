@@ -16,7 +16,7 @@ cbuffer LooseUniforms : register(b31, space0)
     int taa2Tier;
     int taa2Inputs;	// lane TAA3: bits 1 velTex bound, 2 maskTex bound
     int taa2NoHist;	// 1: no history this frame (first frame, reset, size change)
-    float4x4 reproj;	// current unjittered clip -> previous unjittered clip
+    row_major float4x4 reproj;	// current unjittered clip -> previous unjittered clip
 };
 Texture2D<float4> histTex : register(t0, space0);	// the history, LINEAR (RGBA16F)
 SamplerState _histTex_sampler : register(s0, space0);
@@ -49,6 +49,8 @@ struct SPIRV_Cross_Output
     float4 o1 : SV_Target1;
     float4 o2 : SV_Target2;
 };
+
+static uint dummy_parameter;
 
 uint2 spvTextureSize(Texture2D<float4> Tex, uint Level, out uint Param)
 {
@@ -155,7 +157,6 @@ float3 wwDither8(float3 c, float2 fragCoord)
 
 void frag_main()
 {
-    uint dummy_parameter;
     int2 size = int2(spvTextureSize(curTex, uint(0), dummy_parameter));
     int2 ip = int2(gl_FragCoord.xy);
     float2 uv = gl_FragCoord.xy * invSize;

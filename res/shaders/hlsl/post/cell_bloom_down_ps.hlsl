@@ -26,6 +26,8 @@ struct SPIRV_Cross_Output
     float4 fragColor : SV_Target0;
 };
 
+static uint dummy_parameter;
+
 uint2 spvTextureSize(Texture2D<float4> Tex, uint Level, out uint Param)
 {
     uint2 ret;
@@ -124,7 +126,6 @@ float bloomThresholdWeight(inout float luminance, inout float threshold, float s
 void frag_main()
 {
     float2 uv = (floor(gl_FragCoord.xy) + 0.5f.xx) / bloomDst;
-    uint dummy_parameter;
     float2 texel = 1.0f.xx / float2(max(int2(spvTextureSize(bloomSrc, uint(0), dummy_parameter)), int2(1, 1)));
     float prefilter = clamp(bloomParams.z, 0.0f, 1.0f);
     float karis = (bloomRed == 1) ? 0.0f : prefilter;

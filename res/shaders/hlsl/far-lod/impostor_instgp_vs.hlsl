@@ -45,7 +45,7 @@ cbuffer LooseUniforms : register(b31, space0)
     float cardSwayBase;	// Options::swayPhase; a slot adds its own offset
     int frameTableBase;	// this set's first texel in cardFrames
     bool cardOrtho;	// true: no eye point, the ray is cardFwd
-    float4x4 modelViewMatrix;
+    row_major float4x4 modelViewMatrix;
 };
 Buffer<float4> cardData : register(t0, space0);
 Buffer<float4> cardFrames : register(t1, space0);

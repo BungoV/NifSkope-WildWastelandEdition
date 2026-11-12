@@ -49,7 +49,7 @@ cbuffer LooseUniforms : register(b31, space0)
     float4 volAirMed;	// the pass's medium (cell_volair.frag airMed): sigma0, zb, 1 / H, the top (the fog's height frame)
     float4 volAirLayer;	// its near band and ground layer (airLayer): the near share w, zn, 1 / Hn, the ground strength s
     float4 volAirRain;	// x sigma per game unit near the ground (0 = none), y the base excess, z 1 / falloff km, w 1 / fade km
-    float4x4 volAirRainXf;	// view -> (u, v, km below the Low base): cell_rainfog.glsl's rfFromView
+    row_major float4x4 volAirRainXf;	// view -> (u, v, km below the Low base): cell_rainfog.glsl's rfFromView
     float4 volAirRainFar;	// x the Low band's coverage past the map, y the map's edge band (uv), z the sub-segments
     float4 volPackDims;	// the packed volume's texels: width, height, depth; the near grid's slices
     float4 fogView;	// world z above the ground = dot( fogView.xyz, posView ) + fogView.w
@@ -91,7 +91,7 @@ cbuffer LooseUniforms : register(b31, space0)
     float4 cellAmbo[16];
     float4 cellDalc[3];	// per channel: (p - n) / 2 per axis, mean of the six (byte / 255)
     float4 vpSun;
-    float4x4 csmMat[3];	// view space -> (u, v, depth) of cascade i
+    row_major float4x4 csmMat[3];	// view space -> (u, v, depth) of cascade i
     float4 ussCsmStable;	// lane SHADOWSHIMMER1: x 1 the kernel rotation world-locked (0 the red: screen + frame), y the normal offset (texels)
     float4 csmParams;	// 1 / view scale, shadow distance D, map size, blend band B
     float3 ussCsmTexel;	// each cascade's texel (world units)
@@ -113,14 +113,14 @@ cbuffer LooseUniforms : register(b31, space0)
     float4 ussTerrXform;	// u = x X.x + X.y, v = y X.z + X.w
     float4 ussTerrSelf;	// lane FAR6: x the self-test on, y the relief band's low edge (0: no gate), z the margin cap, w the quantum
     int ussTerrOn;
-    float4x4 ussWorldFromView;
+    row_major float4x4 ussWorldFromView;
     float4 ussTerrBias;	// x FO4CS's slope bias on, y max(sin elev, sin 1 deg), z the strength (low sun, moon), w the near texel
     float4 ussTerrNearXform;	// the near window: u = x X.x + X.y, v = y X.z + X.w
     int ussContactOn;
     float2 ussContactInvSize;
     int ussRed;	// 1 terrseam, 2 mulcompose
     int ussCloudOn;
-    float4x4 ussCloudFromView;	// view space -> (u, v, height km); u, v across the sun
+    row_major float4x4 ussCloudFromView;	// view space -> (u, v, height km); u, v across the sun
     float4 ussCloudFar;	// x transmittance past the map, y edge fade (uv), z the air tail's cloud taps (Ultra), w the air's ambient share
     float csmForce;	// WW_CSM_FORCE: >= 0 replaces the factor (the factor-site wiring test); -1 off
     int ussOn;
@@ -173,7 +173,7 @@ cbuffer LooseUniforms : register(b31, space0)
     float2 pcInset;	// half a texel of that deepest mip, in uv
     int pcFar;
     bool pcHasTex;
-    float4x4 pcProj;
+    row_major float4x4 pcProj;
     float4 pcViewport;	// the frame's viewport (x, y, w, h): the centre's window position
     float pcTrans;	// the thin (scattering) share
     float4 fogProbe;	// gates only: .z = 0 off, 1 alpha, 2 colour / 2, 3 hb (at d = .x, z = .y); 5 geometry echo (d / 4096, 0.5 + z / 2000);
@@ -357,6 +357,8 @@ static float4 pcFragCoord;
 static float3 pcDPx;
 static float3 pcDPy;
 static float3 cellRimSum;
+
+static uint dummy_parameter;
 
 float mod(float x, float y)
 {
@@ -2416,7 +2418,6 @@ void volCubeAll(float3 P, inout float3 E[6], inout float share[6])
     float3 g = (P - cellGiOrigin) / cellGiVoxel.xxx;
     float2 xy = g.xy / cellGiDims.xy;
     float z = clamp(g.z, 0.5f, cellGiDims.z - 0.5f);
-    uint dummy_parameter;
     float depth = float(int3(spvTextureSize(cellGi, uint(0), dummy_parameter)).z);
     float4 plain[6];
     float4 r[6];
@@ -3958,7 +3959,6 @@ float4 wwVolTex(float3 p, bool xyOnly)
     {
         return volTex.SampleLevel(_volTex_sampler, p, 0.0f);
     }
-    uint dummy_parameter;
     float3 n = float3(int3(spvTextureSize(volTex, uint(0), dummy_parameter)));
     float3 c = (p * n) - 0.5f.xxx;
     float3 i = floor(c);

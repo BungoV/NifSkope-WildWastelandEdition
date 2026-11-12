@@ -48,6 +48,8 @@ struct SPIRV_Cross_Output
 
 static float cvFootKm;
 
+static uint dummy_parameter;
+
 uint2 spvTextureSize(Texture2D<float4> Tex, uint Level, out uint Param)
 {
     uint2 ret;
@@ -241,7 +243,6 @@ float2 cfCoverMax(float2 xy0, float2 xy1)
     {
         return r;
     }
-    uint dummy_parameter;
     int2 n = int2(spvTextureSize(cvMap, uint(0), dummy_parameter));
     int2 a = clamp(int2(floor((clamp(uv0, 0.0f.xx, 1.0f.xx) * float2(n)) - 0.5f.xx)), int2(0, 0), n - int2(1, 1));
     int2 b = clamp(int2(floor((clamp(uv1, 0.0f.xx, 1.0f.xx) * float2(n)) - 0.5f.xx)) + int2(1, 1), int2(0, 0), n - int2(1, 1));
@@ -263,7 +264,6 @@ float2 cfCoverMax(float2 xy0, float2 xy1)
 //! the largest shape texel a trilinear read at mip lod can mix anywhere in [q0, q1] (noise km, wind added); 1 = too wide
 float cfShapeMip(float3 q0, float3 q1, int lod)
 {
-    uint dummy_parameter;
     int n = int3(spvTextureSize(cvShape, uint(lod), dummy_parameter)).x;
     float3 u0 = ((q0 / 6.0f.xxx) * float(n)) - 0.5f.xxx;
     float3 u1 = ((q1 / 6.0f.xxx) * float(n)) - 0.5f.xxx;

@@ -7,9 +7,9 @@
 cbuffer LooseUniforms : register(b31, space0)
 {
     int shFaces[6];
-    float4x4 shRelFromView;
-    float4x4 modelViewMatrix;
-    float4x4 shClipFace[6];
+    row_major float4x4 shRelFromView;
+    row_major float4x4 modelViewMatrix;
+    row_major float4x4 shClipFace[6];
 };
 
 static float4 gl_Position;

@@ -31,7 +31,7 @@ cbuffer globalUniforms : register(b0, space0)
 
 cbuffer LooseUniforms : register(b31, space0)
 {
-    float4x4 csmMat[3];	// view space -> (u, v, depth) of cascade i
+    row_major float4x4 csmMat[3];	// view space -> (u, v, depth) of cascade i
     float4 ussCsmStable;	// lane SHADOWSHIMMER1: x 1 the kernel rotation world-locked (0 the red: screen + frame), y the normal offset (texels)
     float4 csmParams;	// 1 / view scale, shadow distance D, map size, blend band B
     float3 ussCsmTexel;	// each cascade's texel (world units)
@@ -53,14 +53,14 @@ cbuffer LooseUniforms : register(b31, space0)
     float4 ussTerrXform;	// u = x X.x + X.y, v = y X.z + X.w
     float4 ussTerrSelf;	// lane FAR6: x the self-test on, y the relief band's low edge (0: no gate), z the margin cap, w the quantum
     int ussTerrOn;
-    float4x4 ussWorldFromView;
+    row_major float4x4 ussWorldFromView;
     float4 ussTerrBias;	// x FO4CS's slope bias on, y max(sin elev, sin 1 deg), z the strength (low sun, moon), w the near texel
     float4 ussTerrNearXform;	// the near window: u = x X.x + X.y, v = y X.z + X.w
     int ussContactOn;
     float2 ussContactInvSize;
     int ussRed;	// 1 terrseam, 2 mulcompose
     int ussCloudOn;
-    float4x4 ussCloudFromView;	// view space -> (u, v, height km); u, v across the sun
+    row_major float4x4 ussCloudFromView;	// view space -> (u, v, height km); u, v across the sun
     float4 ussCloudFar;	// x transmittance past the map, y edge fade (uv), z the air tail's cloud taps (Ultra), w the air's ambient share
     float csmForce;	// WW_CSM_FORCE: >= 0 replaces the factor (the factor-site wiring test); -1 off
     int ussOn;
@@ -96,7 +96,7 @@ cbuffer LooseUniforms : register(b31, space0)
     int cellLightCount;
     bool cellHasDir;
     float3 cellDirTo;	// world, TO the light
-    float4x4 rpViewFromWorld;	// for the cascades (they take view space)
+    row_major float4x4 rpViewFromWorld;	// for the cascades (they take view space)
     float3 cellDirColor;	// linear
     bool fogOn;
     float4 fogK[6];	// cb12[41..46]
@@ -132,7 +132,7 @@ cbuffer LooseUniforms : register(b31, space0)
     float volAirTerrRef;	// the world z of the fog frame's ground (airTerrRef)
     float4 volAirRain;	// x sigma per game unit near the ground (0 = none), y the base excess, z 1 / falloff km, w 1 / fade km
     float4 volAirRainFar;	// x the Low band's coverage past the map, y the map's edge band (uv), z the sub-segments
-    float4x4 volAirRainXf;	// view -> (u, v, km below the Low base): cell_rainfog.glsl's rfFromView
+    row_major float4x4 volAirRainXf;	// view -> (u, v, km below the Low base): cell_rainfog.glsl's rfFromView
     float4 volAirDrift;	// the air pass's volDrift: x amp, y the fade's start, z 1 / its length, w the noise's mean
     float4 volAirDriftUv[6];	// per octave three rows: the noise's uvw at view point p = dot( row, vec4( p, 1 ) )
     int volAirDriftRed;	// lane WEATHERBLEND5: 1 red onesun (the sun's column at one point), 2 red puffonly

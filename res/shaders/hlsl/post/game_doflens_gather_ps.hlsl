@@ -28,6 +28,8 @@ struct SPIRV_Cross_Output
     float4 nearOut : SV_Target1;
 };
 
+static uint dummy_parameter;
+
 uint2 spvTextureSize(Texture2D<float4> Tex, uint Level, out uint Param)
 {
     uint2 ret;
@@ -52,7 +54,6 @@ float sat(float v)
 void frag_main()
 {
     int2 q = int2(gl_FragCoord.xy);
-    uint dummy_parameter;
     float2 qs = float2(int2(spvTextureSize(t0, uint(0), dummy_parameter)));
     float4 c0 = t0.Load(int3(q, 0));
     float cc = c0.w;

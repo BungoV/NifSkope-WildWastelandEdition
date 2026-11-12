@@ -27,6 +27,8 @@ struct SPIRV_Cross_Output
     float4 fragColor : SV_Target0;
 };
 
+static uint dummy_parameter;
+
 uint2 spvTextureSize(Texture2D<float4> Tex, uint Level, out uint Param)
 {
     uint2 ret;
@@ -124,7 +126,6 @@ float3 bloomTent(Texture2D<float4> m, SamplerState _m_sampler, float2 uv, float2
 // BloomUpCS's dispersion: red and blue tents pushed apart along the radial from the frame's center, green the anchor
 float3 bloomTentDispersed(Texture2D<float4> m, SamplerState _m_sampler, float2 uv, float radiusPixels, float dispersion)
 {
-    uint dummy_parameter;
     float2 texel = 1.0f.xx / float2(max(int2(spvTextureSize(m, uint(0), dummy_parameter)), int2(1, 1)));
     float2 radial = uv - 0.5f.xx;
     float len = length(radial);

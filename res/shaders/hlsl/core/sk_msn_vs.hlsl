@@ -34,7 +34,7 @@ cbuffer globalUniforms : register(b1, space0)
 
 cbuffer LooseUniforms : register(b31, space0)
 {
-    float4x4 modelViewMatrix;
+    row_major float4x4 modelViewMatrix;
     float4 vertexColorOverride;	// components greater than zero replace the vertex color
 };
 

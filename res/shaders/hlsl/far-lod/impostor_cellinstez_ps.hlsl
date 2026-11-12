@@ -48,7 +48,7 @@ cbuffer LooseUniforms : register(b31, space0)
     float4 volAirMed;	// the pass's medium (cell_volair.frag airMed): sigma0, zb, 1 / H, the top (the fog's height frame)
     float4 volAirLayer;	// its near band and ground layer (airLayer): the near share w, zn, 1 / Hn, the ground strength s
     float4 volAirRain;	// x sigma per game unit near the ground (0 = none), y the base excess, z 1 / falloff km, w 1 / fade km
-    float4x4 volAirRainXf;	// view -> (u, v, km below the Low base): cell_rainfog.glsl's rfFromView
+    row_major float4x4 volAirRainXf;	// view -> (u, v, km below the Low base): cell_rainfog.glsl's rfFromView
     float4 volAirRainFar;	// x the Low band's coverage past the map, y the map's edge band (uv), z the sub-segments
     float4 volPackDims;	// the packed volume's texels: width, height, depth; the near grid's slices
     float4 fogView;	// world z above the ground = dot( fogView.xyz, posView ) + fogView.w
@@ -132,10 +132,10 @@ cbuffer LooseUniforms : register(b31, space0)
     float cardCovBase;
     float cardCovFloor;
     int ussCloudOn;
-    float4x4 ussCloudFromView;
+    row_major float4x4 ussCloudFromView;
     float4 ussCloudFar;
     bool cardZcull;
-    float4x4 modelViewMatrix;	// the same one the vertex stage used
+    row_major float4x4 modelViewMatrix;	// the same one the vertex stage used
     bool cardZcullRed;	// gates only: the bound takes the card's far end (the picture must change)
     bool useHeightBlend;	// the ghost-free blend, spec 286
     int depthSearchSteps;

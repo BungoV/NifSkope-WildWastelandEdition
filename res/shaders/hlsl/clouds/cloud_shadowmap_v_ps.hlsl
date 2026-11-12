@@ -66,6 +66,8 @@ struct SPIRV_Cross_Output
 
 static float cvFootKm;
 
+static uint dummy_parameter;
+
 float mod(float x, float y)
 {
     return x - y * floor(x / y);
@@ -546,7 +548,6 @@ void frag_main()
                 float rAcross = t * csSheetP.z;
                 float rAlong = rAcross / sz;
                 float2x2 m = float2x2(float2(csSheetA[i_1].x, csSheetA[i_1].z), float2(csSheetA[i_1].y, csSheetA[i_1].w));
-                uint dummy_parameter;
                 int2 ts = int2(spvTextureSize(csSheetTex[i_1], uint(0), dummy_parameter));
                 float maxDim = float(max(ts.x, ts.y));
                 float uvPerWorld = sqrt(abs(determinant(m)));

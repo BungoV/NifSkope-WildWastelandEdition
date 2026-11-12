@@ -29,7 +29,7 @@ cbuffer globalUniforms : register(b0, space0)
 
 cbuffer LooseUniforms : register(b31, space0)
 {
-    float4x4 modelViewMatrix;
+    row_major float4x4 modelViewMatrix;
 };
 
 static float4 gl_Position;

@@ -13,7 +13,7 @@ cbuffer LooseUniforms : register(b31, space0)
     float2 pcInset;	// half a texel of that deepest mip, in uv
     int pcFar;
     bool pcHasTex;
-    float4x4 pcProj;
+    row_major float4x4 pcProj;
 };
 Texture2D<float4> pcTex : register(t0, space0);
 SamplerState _pcTex_sampler : register(s0, space0);

@@ -3,6 +3,8 @@
 // GLSL includes are inlined as the loader does. Fusion Shaders (F4FS) feeds it the GL-side inputs
 // named in notes/vkcompute1/hlsl_plan.md. Not wired: nothing loads this file.
 // profile: ps_6_0
+// note: gl_FragDepth layout depth_greater kept as SV_DepthGreaterEqual
+// note: gl_FragCoord is noperspective centroid (D3D asks for it beside SV_Depth*Equal; same value at 1x)
 #include "FarLodBindingsVk.hlsli"
 cbuffer globalUniforms : register(b0, space0)
 {
@@ -46,7 +48,7 @@ cbuffer LooseUniforms : register(b31, space0)
     float4 volAirMed;	// the pass's medium (cell_volair.frag airMed): sigma0, zb, 1 / H, the top (the fog's height frame)
     float4 volAirLayer;	// its near band and ground layer (airLayer): the near share w, zn, 1 / Hn, the ground strength s
     float4 volAirRain;	// x sigma per game unit near the ground (0 = none), y the base excess, z 1 / falloff km, w 1 / fade km
-    float4x4 volAirRainXf;	// view -> (u, v, km below the Low base): cell_rainfog.glsl's rfFromView
+    row_major float4x4 volAirRainXf;	// view -> (u, v, km below the Low base): cell_rainfog.glsl's rfFromView
     float4 volAirRainFar;	// x the Low band's coverage past the map, y the map's edge band (uv), z the sub-segments
     float4 volPackDims;	// the packed volume's texels: width, height, depth; the near grid's slices
     float4 fogView;	// world z above the ground = dot( fogView.xyz, posView ) + fogView.w
@@ -130,7 +132,7 @@ cbuffer LooseUniforms : register(b31, space0)
     float cardCovBase;
     float cardCovFloor;
     int ussCloudOn;
-    float4x4 ussCloudFromView;
+    row_major float4x4 ussCloudFromView;
     float4 ussCloudFar;
     float3 cardCenter;
     float3 frameRight[3];
@@ -153,7 +155,7 @@ cbuffer LooseUniforms : register(b31, space0)
     float cardFadeOut;
     float cardFadeFrame;
     bool useDepthOffset;	// gl_FragDepth, spec 286
-    float4x4 modelViewMatrix;	// the same one the vertex stage used
+    row_major float4x4 modelViewMatrix;	// the same one the vertex stage used
     int debugChannel;	// 0 = lit; otherwise one sheet channel raw
     float emissiveScale;	// spec 88..95 -- carried, never folded in
     bool cellOn;
@@ -257,13 +259,13 @@ struct SPIRV_Cross_Input
     float3 cardPosModel : TEXCOORD0;
     float2 cardQuadUv : TEXCOORD1;
     float3 cardViewRay : TEXCOORD2;
-    float4 gl_FragCoord : SV_Position;
+    noperspective centroid float4 gl_FragCoord : SV_Position;
 };
 
 struct SPIRV_Cross_Output
 {
     float4 fragColor : SV_Target0;
-    float gl_FragDepth : SV_Depth;
+    float gl_FragDepth : SV_DepthGreaterEqual;
 };
 
 static bool wwAirFree;
@@ -278,6 +280,8 @@ static int cellGiPath;
 static int cellFarIters;
 static bool cellFarFade;
 static float3 cellRimSum;
+
+static uint dummy_parameter;
 
 uint2 spvTextureSize(Texture2D<float4> Tex, uint Level, out uint Param)
 {
@@ -317,7 +321,6 @@ float coverageOf(float a)
 
 float covAt(float2 uv)
 {
-    uint dummy_parameter;
     int2 sz = int2(spvTextureSize(ColourSheet, uint(0), dummy_parameter));
     float2 p = (uv * float2(sz)) - 0.5f.xx;
     float2 fl = floor(p);
@@ -2704,7 +2707,6 @@ float4 wwVolTex(float3 p, bool xyOnly)
     {
         return volTex.Sample(_volTex_sampler, p);
     }
-    uint dummy_parameter;
     float3 n = float3(int3(spvTextureSize(volTex, uint(0), dummy_parameter)));
     float3 c = (p * n) - 0.5f.xxx;
     float3 i = floor(c);
@@ -3230,7 +3232,6 @@ void frag_main()
     float cutCov = 0.0f;
     float cutW = -1.0f;
     float3 ray = normalize(cardViewRay);
-    uint dummy_parameter;
     float2 stipTexels = float2(int2(spvTextureSize(ColourSheet, uint(0), dummy_parameter))) * frameRect[0].zw;
     float2 stipCell = floor(cardQuadUv * stipTexels);
     float stipNoise = frac(sin(dot(stipCell, float2(12.98980045318603515625f, 78.233001708984375f))) * 43758.546875f);

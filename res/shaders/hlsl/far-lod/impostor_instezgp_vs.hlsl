@@ -45,7 +45,7 @@ cbuffer LooseUniforms : register(b31, space0)
     float cardSwayBase;	// Options::swayPhase; a slot adds its own offset
     int frameTableBase;	// this set's first texel in cardFrames
     bool cardOrtho;	// true: no eye point, the ray is cardFwd
-    float4x4 modelViewMatrix;
+    row_major float4x4 modelViewMatrix;
     bool useDepthOffset;	// lane PERFFIX4: the fragment's pixel depth offset (impostor_oct.frag), read here too
 };
 Buffer<float4> cardData : register(t0, space0);

@@ -47,7 +47,7 @@ cbuffer LooseUniforms : register(b31, space0)
     float4 volAirMed;	// the pass's medium (cell_volair.frag airMed): sigma0, zb, 1 / H, the top (the fog's height frame)
     float4 volAirLayer;	// its near band and ground layer (airLayer): the near share w, zn, 1 / Hn, the ground strength s
     float4 volAirRain;	// x sigma per game unit near the ground (0 = none), y the base excess, z 1 / falloff km, w 1 / fade km
-    float4x4 volAirRainXf;	// view -> (u, v, km below the Low base): cell_rainfog.glsl's rfFromView
+    row_major float4x4 volAirRainXf;	// view -> (u, v, km below the Low base): cell_rainfog.glsl's rfFromView
     float4 volAirRainFar;	// x the Low band's coverage past the map, y the map's edge band (uv), z the sub-segments
     float4 volPackDims;	// the packed volume's texels: width, height, depth; the near grid's slices
     float4 volFar;	// lane FARGRID1: the far grid's start (the near grid's end), ln(end / start), slices, 1 = on
@@ -114,6 +114,8 @@ struct SPIRV_Cross_Output
 };
 
 static bool wwAirFree;
+
+static uint dummy_parameter;
 
 uint3 spvTextureSize(Texture3D<float4> Tex, uint Level, out uint Param)
 {
@@ -299,7 +301,6 @@ float4 wwVolTex(float3 p, bool xyOnly)
     {
         return volTex.Sample(_volTex_sampler, p);
     }
-    uint dummy_parameter;
     float3 n = float3(int3(spvTextureSize(volTex, uint(0), dummy_parameter)));
     float3 c = (p * n) - 0.5f.xxx;
     float3 i = floor(c);

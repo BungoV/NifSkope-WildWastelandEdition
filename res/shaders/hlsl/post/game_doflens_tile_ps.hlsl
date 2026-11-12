@@ -24,6 +24,8 @@ struct SPIRV_Cross_Output
     float4 fragColor : SV_Target0;
 };
 
+static uint dummy_parameter;
+
 uint2 spvTextureSize(Texture2D<float4> Tex, uint Level, out uint Param)
 {
     uint2 ret;
@@ -34,7 +36,6 @@ uint2 spvTextureSize(Texture2D<float4> Tex, uint Level, out uint Param)
 void frag_main()
 {
     int2 q = int2(gl_FragCoord.xy);
-    uint dummy_parameter;
     int2 sz = int2(spvTextureSize(t0, uint(0), dummy_parameter));
     float m = 0.0f;
     if (dilate == 0)

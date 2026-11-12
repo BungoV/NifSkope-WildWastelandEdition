@@ -31,7 +31,7 @@ cbuffer LooseUniforms : register(b31, space0)
     float pcMinPx;	// the least half size drawn, pixels
     float pcFocal;	// pixels per view unit at depth 1
     float pcShutter;	// seconds
-    float4x4 pcProj;
+    row_major float4x4 pcProj;
 };
 Texture2D<float4> pcRoof : register(t0, space0);
 SamplerState _pcRoof_sampler : register(s0, space0);
@@ -62,6 +62,8 @@ struct SPIRV_Cross_Output
     float vsCull : TEXCOORD6;
     float4 gl_Position : SV_Position;
 };
+
+static uint dummy_parameter;
 
 uint2 spvTextureSize(Texture2D<float4> Tex, uint Level, out uint Param)
 {
@@ -104,7 +106,6 @@ float pcWrap(float x, float L)
 bool pcRoofOpen(float3 rel)
 {
     int2 t = int2(floor(pcRoofCam.xy + (rel.xy * pcRoofInv)));
-    uint dummy_parameter;
     int2 n = int2(spvTextureSize(pcRoof, uint(0), dummy_parameter));
     bool tmp71 = any(bool2(t.x < int2(0, 0).x, t.y < int2(0, 0).y));
     bool tmp79;

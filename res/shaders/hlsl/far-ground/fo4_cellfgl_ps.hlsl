@@ -46,7 +46,7 @@ cbuffer LooseUniforms : register(b31, space0)
     float4 volAirMed;	// the pass's medium (cell_volair.frag airMed): sigma0, zb, 1 / H, the top (the fog's height frame)
     float4 volAirLayer;	// its near band and ground layer (airLayer): the near share w, zn, 1 / Hn, the ground strength s
     float4 volAirRain;	// x sigma per game unit near the ground (0 = none), y the base excess, z 1 / falloff km, w 1 / fade km
-    float4x4 volAirRainXf;	// view -> (u, v, km below the Low base): cell_rainfog.glsl's rfFromView
+    row_major float4x4 volAirRainXf;	// view -> (u, v, km below the Low base): cell_rainfog.glsl's rfFromView
     float4 volAirRainFar;	// x the Low band's coverage past the map, y the map's edge band (uv), z the sub-segments
     float4 volPackDims;	// the packed volume's texels: width, height, depth; the near grid's slices
     float4 fogView;	// world z above the ground = dot( fogView.xyz, posView ) + fogView.w
@@ -179,7 +179,7 @@ cbuffer LooseUniforms : register(b31, space0)
     bool wwDecalMapped;	// lane DECALANGLE2: and its vertex rgb is D as a signed byte (not a colour)
     bool wwDecalGbufOn;	// lane DECALANGLE2: cellCtGbuf holds this view's shared opaque pass
     float4 wwDecalGbufRect;	// its origin in the viewport, its size
-    float3x3 normalMatrix;
+    row_major float3x3 normalMatrix;
     float2 wwDecalPom;	// lane DECALS1: placed decal parallax (DODT scale x 0.1, step cap); x = 0 off
     float farFadeFrame;
     float2 uvScale;
@@ -417,6 +417,8 @@ static bool cellFarFade;
 static float cellReflW;
 static float cellReflFall;
 static float3 cellRimSum;
+
+static uint dummy_parameter;
 
 float mod(float x, float y)
 {
@@ -1709,7 +1711,6 @@ float wwRainWetExposed(float3 P, float3 N)
     float2 q = (((P.xy + (N.xy * (1.5f * rainCoverGrid.w))) - rainCoverGrid.xy) * rainCoverGrid.z) - 0.5f.xx;
     int2 t = int2(floor(q));
     float2 f = q - float2(t);
-    uint dummy_parameter;
     int2 n = int2(spvTextureSize(rainCover, uint(0), dummy_parameter));
     float z = (P.z + 8.0f) + (rainCoverGrid.w * min(length(N.xy) / max(abs(N.z), 0.0500000007450580596923828125f), 2.0f));
     int2 param = t;
@@ -1862,7 +1863,6 @@ float3 cellCubeGame(TextureCube<float4> cube, SamplerState _cube_sampler, float3
     }
     float g = clamp(gloss, 0.0f, 1.0f);
     float depth = abs(posView.z) * length(cellRow[0].xyz);
-    uint dummy_parameter;
     float lod = (((1.0f - g) * 6.0f) + (depth * 0.00195299996994435787200927734375f)) + log2(float(int2(spvTextureSize(cube, uint(0), dummy_parameter)).x) / 128.0f);
     float3 c = cube.SampleLevel(_cube_sampler, dir, max(lod, 0.0f)).xyz;
     if (cellCubeMat.z < 2.0f)
@@ -4027,7 +4027,6 @@ float4 wwVolTex(float3 p, bool xyOnly)
     {
         return volTex.Sample(_volTex_sampler, p);
     }
-    uint dummy_parameter;
     float3 n = float3(int3(spvTextureSize(volTex, uint(0), dummy_parameter)));
     float3 c = (p * n) - 0.5f.xxx;
     float3 i = floor(c);

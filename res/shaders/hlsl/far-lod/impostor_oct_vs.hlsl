@@ -36,7 +36,7 @@ cbuffer LooseUniforms : register(b31, space0)
     bool cardOrtho;	// true: no eye point, the ray is cardFwd
     float3 cardFwd;	// fragment of one card agrees on them
     float3 cardEyeModel;	// the camera's position in model space
-    float4x4 modelViewMatrix;
+    row_major float4x4 modelViewMatrix;
 };
 
 static float4 gl_Position;
