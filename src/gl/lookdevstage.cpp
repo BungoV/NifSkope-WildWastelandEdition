@@ -2792,7 +2792,8 @@ SkyMeshes & skyMeshes()
 }
 
 //! a sky NIF through the resource manager (mod folders + archives), then the game manager
-bool loadSkyNif( Scene * scene, const QString & path, NifModel & src, QString * why )
+//! (lane EMPTY240 R9-c: *pending = the resource stack's index is being built on a worker: ask again a paint later)
+bool loadSkyNif( Scene * scene, const QString & path, NifModel & src, QString * why, bool * pending = nullptr )
 {
 	QByteArray bytes;
 	bool found = false;
@@ -2805,8 +2806,14 @@ bool loadSkyNif( Scene * scene, const QString & path, NifModel & src, QString * 
 	 * dome and the clouds (Fallout4 - Meshes.ba2) were "not found" and every all-on cell shot fell back to the cube.
 	 * The cell's own models are read this way (lodgenReadModelBytes): the sky now resolves where they do.
 	 * WW_LOOKDEV_RED=nostacksky skips it (the gate's refuter). */
-	if ( !found && !wwLookdevRed( "nostacksky" ) )
+	if ( !found && !wwLookdevRed( "nostacksky" ) ) {
+		if ( pending && !lodgenStackIndexWarm() ) {	// lane EMPTY240 R9-c: never build the index on the drawing thread
+			*pending = true;
+			*why = QString( "%1 waits for the resource stack's index (a worker builds it)" ).arg( path );
+			return false;
+		}
 		found = lodgenReadModelBytes( QString(), path, bytes ) && !bytes.isEmpty();
+	}
 	if ( !found ) {
 		// the archive index only exists while Fallout 4 is enabled in the Resources settings; a loose
 		// data folder is read directly: the game manager's list (empty while that status is off) and
@@ -2899,7 +2906,8 @@ const SkyMesh * domeMesh( Scene * scene, QString * why )
 		// lane SKYFULL1 red "nodome": the dome's file never resolves (the refusal is named, the cube falls back)
 		const QString domePath = wwLookdevRed( "nodome" ) ? QStringLiteral( "meshes/sky/atmosphere_red_nodome.nif" )
 			: QStringLiteral( "meshes/sky/atmosphere.nif" );
-		if ( loadSkyNif( scene, domePath, src, &w ) ) {
+		bool pending = false;
+		if ( loadSkyNif( scene, domePath, src, &w, &pending ) ) {
 			for ( int b = 0; b < src.getBlockCount() && !m.domeOk; b++ ) {
 				const QModelIndex i = src.getBlockIndex( b );
 				if ( src.blockInherits( i, "BSTriShape" ) )
@@ -2908,6 +2916,7 @@ const SkyMesh * domeMesh( Scene * scene, QString * why )
 			if ( !m.domeOk )
 				w = domePath + QStringLiteral( " has no readable BSTriShape" );
 		}
+		m.domeTried = !pending;	// lane EMPTY240 R9-c: a paint later
 		m.domeWhy = w;
 	}
 	if ( why )
@@ -2925,7 +2934,8 @@ const QVector<SkyMesh> * cloudMeshes( Scene * scene, QString * why )
 		m.clouds.clear();
 		NifModel src;
 		QString w;
-		if ( loadSkyNif( scene, QStringLiteral( "meshes/sky/clouds.nif" ), src, &w ) ) {
+		bool pending = false;
+		if ( loadSkyNif( scene, QStringLiteral( "meshes/sky/clouds.nif" ), src, &w, &pending ) ) {
 			const QModelIndex iRoot = src.getBlockIndex( 0 );
 			for ( qint32 l : src.getLinkArray( iRoot, QStringLiteral( "Children" ) ) ) {
 				const QModelIndex i = src.getBlockIndex( l );
@@ -2939,6 +2949,7 @@ const QVector<SkyMesh> * cloudMeshes( Scene * scene, QString * why )
 			if ( !m.cloudsOk )
 				w = QStringLiteral( "meshes/sky/clouds.nif has no layer shapes under its root" );
 		}
+		m.cloudsTried = !pending;	// lane EMPTY240 R9-c: a paint later
 		m.cloudsWhy = w;
 	}
 	if ( why )
@@ -2957,7 +2968,8 @@ const SkyMesh * starsMesh( Scene * scene, QString * tex, QString * why )
 		m.starsTex.clear();
 		NifModel src;
 		QString w;
-		if ( loadSkyNif( scene, QStringLiteral( "meshes/sky/stars.nif" ), src, &w ) ) {
+		bool pending = false;
+		if ( loadSkyNif( scene, QStringLiteral( "meshes/sky/stars.nif" ), src, &w, &pending ) ) {
 			for ( int b = 0; b < src.getBlockCount() && !m.starsOk; b++ ) {
 				const QModelIndex i = src.getBlockIndex( b );
 				if ( !src.blockInherits( i, "BSTriShape" ) || !readSkyShape( src, i, m.stars ) )
@@ -2979,6 +2991,7 @@ const SkyMesh * starsMesh( Scene * scene, QString * tex, QString * why )
 			else if ( m.starsTex.isEmpty() )
 				m.starsTex = QStringLiteral( "textures/sky/skystars.dds" );
 		}
+		m.starsTried = !pending;	// lane EMPTY240 R9-c: a paint later
 		m.starsWhy = w;
 	}
 	if ( why )
@@ -3548,10 +3561,25 @@ void drawClouds( Scene * scene, const SkyFrame & f, float mul, QStringList & dre
 
 } // namespace
 
+namespace
+{
+double cloudLayersPartMs[3] = { 0.0, 0.0, 0.0 };	// lane EMPTY240 R9-c: the last call's resolve / sky frame / meshes
+}
+
+void wwLookdevCloudLayersParts( double ms[3] )
+{
+	for ( int i = 0; i < 3; i++ )
+		ms[i] = cloudLayersPartMs[i];
+}
+
 bool wwLookdevCloudLayers( Scene * scene, QVector<WwCloudLayerIn> & out, QString & key, float eye[3], QString * why )
 {
 	out.clear();
+	QElapsedTimer partClock;	// lane EMPTY240 R9-c: the `cloud map slow:` line's layers part, split
+	partClock.start();
+	cloudLayersPartMs[0] = cloudLayersPartMs[1] = cloudLayersPartMs[2] = 0.0;
 	resolve();
+	cloudLayersPartMs[0] = double( partClock.nsecsElapsed() ) * 1e-6;
 	LdState & s = st();
 	if ( !s.haveWeather ) {
 		if ( why )
@@ -3559,8 +3587,10 @@ bool wwLookdevCloudLayers( Scene * scene, QVector<WwCloudLayerIn> & out, QString
 		return false;
 	}
 	const SkyFrame f = skyFrame();
+	cloudLayersPartMs[1] = double( partClock.nsecsElapsed() ) * 1e-6 - cloudLayersPartMs[0];
 	QString mwhy;
 	const QVector<SkyMesh> * ms = scene ? cloudMeshes( scene, &mwhy ) : nullptr;
+	cloudLayersPartMs[2] = double( partClock.nsecsElapsed() ) * 1e-6 - cloudLayersPartMs[0] - cloudLayersPartMs[1];
 	const double secs = wwLookdevCloudSeconds();
 	key = QStringLiteral( "%1|%2|%3" ).arg( s.plugin, s.weatherKey ).arg( s.gen );
 	eye[0] = eye[1] = eye[2] = 0.0f;

@@ -948,28 +948,49 @@ static gli::texture load_if_valid( const char * data, unsigned int size, DdsView
 /*! lane TREELEAF1: an alpha-tested base map's BC3 mips, rewritten in this load's own bytes before the upload so each level
  *  keeps level 0's coverage at ref (src/gl/wwalphacov.h; the leaves stop breaking into flecks / blobs as they shrink on
  *  screen). Anything but a 2D, one-layer, one-face BC3 chain with mips is left as the file has it. */
-static void wwCovPreserve( const QString & filepath, QByteArray & data, int ref )
+//! the rewrite itself: -1 = not a chain it rewrites, else the levels changed (st[] per level, *levels the chain's length)
+static int wwCovPreserveCore( QByteArray & data, int ref, WwAlphaCov::LevelStat * st, int * levels )
 {
 	DdsView	v;
 	load_if_valid( data.constData(), static_cast<unsigned int>( data.size() ), &v );
-	if ( v.empty() || v.levels() < 2 || v.layers() != 1 || v.faces() != 1 || v.target() != gli::TARGET_2D
+	if ( v.empty() || v.levels() < 2 || v.levels() > 32 || v.layers() != 1 || v.faces() != 1 || v.target() != gli::TARGET_2D
 		|| ( v.format() != gli::FORMAT_RGBA_DXT5_UNORM_BLOCK16 && v.format() != gli::FORMAT_RGBA_DXT5_SRGB_BLOCK16 ) )
-		return;
+		return -1;
 	const char *	base = data.constData();
 	char *	bytes = data.data();	// detaches when shared: the rewrite never reaches a cached copy of the file
 	std::uint8_t *	lv[32];
 	for ( size_t l = 0; l < v.levels(); l++ )
 		lv[l] = reinterpret_cast<std::uint8_t *>( bytes + ( static_cast<const char *>( v.data( 0, 0, l ) ) - base ) );
+	*levels = int( v.levels() );
+	return WwAlphaCov::preserve( lv, int( v.levels() ), int( v.extent().x ), int( v.extent().y ), ref, st );
+}
+
+/* lane EMPTY240 R9-d: build 83 spent 23.3 ms of one 32.4 ms load on the drawing thread in "decode and upload" for
+ * BNS/Landscape/Grass/BeachGrass01_d.dds (5462 KB = a 2048 BC3 chain): the coverage rewrite decodes and re-encodes
+ * every mip. The read-ahead workers (celltexahead.cpp) now rewrite a "|wwcov" entry's bytes after reading them, so
+ * the drawing thread only uploads. No census line here (worker thread). */
+void wwCovPreserveBytes( QByteArray & data, int ref )
+{
 	WwAlphaCov::LevelStat	st[32];
-	const int changed = WwAlphaCov::preserve( lv, int( v.levels() ), int( v.extent().x ), int( v.extent().y ), ref, st );
+	int	levels = 0;
+	(void) wwCovPreserveCore( data, ref, st, &levels );
+}
+
+static void wwCovPreserve( const QString & filepath, QByteArray & data, int ref )
+{
+	WwAlphaCov::LevelStat	st[32];
+	int	levels = 0;
+	const int changed = wwCovPreserveCore( data, ref, st, &levels );
+	if ( changed < 0 )
+		return;
 	// WW_TEX_CENSUS=1 (lane PERF1's upload census): one line per rewritten texture, level 0 and the 16 x 16 level's coverage
 	WW_SWITCH_STATIC( bool, census, wwEnvInt( "WW_TEX_CENSUS" ) == 1 );
 	if ( census ) {
 		QString lvls;
-		for ( size_t l = 1; l < v.levels(); l++ )
+		for ( int l = 1; l < levels; l++ )
 			lvls += QStringLiteral( " %1:%2>%3" ).arg( l ).arg( st[l].before, 0, 'f', 3 ).arg( st[l].after, 0, 'f', 3 );
 		std::fprintf( stderr, "tex leafcov: ref %d level0 %.3f rewritten %d of %d levels%s %s\n", ref, st[0].before, changed,
-			int( v.levels() ) - 1, qPrintable( lvls ), qPrintable( filepath ) );
+			levels - 1, qPrintable( lvls ), qPrintable( filepath ) );
 	}
 }
 
@@ -1451,7 +1472,12 @@ GLuint TexCache::texLoad( const NifModel * nif, const QString & filepath,
 		if ( !nif )
 			fileFound = Game::GameManager::get_file( data, Game::OTHER, filepath, "textures", "" );
 		else {   // lane SPEED1: a cell's files are read ahead by worker threads (celltexahead.h)
-			wwTexLoadTaken = CellTexAhead::take( nif, filepath, data );
+			// lane EMPTY240 R9-d: a "|wwcov" load takes the bytes the workers rewrote (red WW_COVAHEAD_RED=1: the raw file)
+			WW_SWITCH_STATIC( bool, covAheadRed, wwEnvInt( "WW_COVAHEAD_RED" ) == 1 );
+			bool	covDone = false;
+			wwTexLoadTaken = CellTexAhead::take( nif, filepath, data, covAheadRed ? 0 : wwCovLoadRef, &covDone );
+			if ( covDone )
+				wwCovLoadRef = 0;	// the worker rewrote the mips: texLoadDDS uploads them as they are
 			fileFound = wwTexLoadTaken || nif->getResourceFile( data, filepath, "textures", "" );
 		}
 		wwTexLoadBytesMs = std::chrono::duration<double, std::milli>( std::chrono::steady_clock::now() - wwB0 ).count();

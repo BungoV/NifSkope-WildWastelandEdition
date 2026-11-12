@@ -367,9 +367,11 @@ int TexCache::bind( const QStringView & fname, const NifModel * nif )
 	paramId = 0;	// lane PERF5
 	wwBound = 0;	// lane CELLUNI3
 	Tex *	tx;
+	bool	covKeyed = false;	// lane EMPTY240 R9-d: the poll below asks the workers for the coverage copy
 	// lane TREELEAF1: an alpha-tested base map (armed by setupProgramCE1) binds its coverage-preserving copy
 	if ( wwCovArmed > 0 && wwCovArmed < 255 && fname.size() > 4 && fname.front() != QChar( '#' )
 		&& fname.endsWith( QLatin1StringView( ".dds" ), Qt::CaseInsensitive ) ) {
+		covKeyed = true;
 		wwCovKey.resize( 0 );
 		wwCovKey.append( fname );
 		wwCovKey.append( QLatin1StringView( "|wwcov" ) );
@@ -396,8 +398,12 @@ int TexCache::bind( const QStringView & fname, const NifModel * nif )
 		}
 		// lane EMPTY240 R8-2: a file the workers have not read yet waits a paint (celltexahead.cpp poll)
 		WW_SWITCH_STATIC( bool, readWaitRed, wwEnvInt( "WW_TEXREADWAIT_RED" ) == 1 );
+		/* lane EMPTY240 R9-d: a coverage copy asks by its "|wwcov" name: the workers read AND rewrite its alpha mips
+		 * (build 83: BeachGrass01_d.dds 23.3 ms of decode on the drawing thread). Red WW_COVAHEAD_RED=1: by the file */
+		WW_SWITCH_STATIC( bool, covAheadRed, wwEnvInt( "WW_COVAHEAD_RED" ) == 1 );
 		if ( !readWaitRed && WwUp::st().inPaint && !fname.isEmpty() && fname.front() != QChar( '#' )
-			&& CellTexAhead::armedFor( nif ) && CellTexAhead::poll( nif, fname.toString() ) == CellTexAhead::Wait ) {
+			&& CellTexAhead::armedFor( nif )
+			&& CellTexAhead::poll( nif, covKeyed && !covAheadRed ? wwCovKey : fname.toString() ) == CellTexAhead::Wait ) {
 			WwDp::abortRecording();
 			WwUp::deferTex();
 			return 0;
@@ -826,9 +832,20 @@ int TexCache::wwPump( const NifModel * nif, qint64 budgetBytes )
 	const qint64	bytes0 = pc.texBytes;
 	int	n = 0;
 	draining = true;
+	/* lane EMPTY240 R9-b: build 83's frame 4 pumped 183 textures (118.6 ms CPU) and frame 3 201: the pump capped bytes
+	 * only, past the paint's upload budget (WwUp: 16 ms, 32 textures). It now stops when that budget is spent too; the
+	 * rest stay ready for the next paints. Red WW_PUMPCAP_RED=1: bytes only, build 83. */
+	WW_SWITCH_STATIC( bool, pumpCapRed, wwEnvInt( "WW_PUMPCAP_RED" ) == 1 );
+	static int pumpCapped = 0, pumpCappedLeft = 0;
+	static auto pumpLineAt = std::chrono::steady_clock::now();
 	for ( const QString & name : names ) {
 		if ( n > 0 && pc.texBytes - bytes0 >= budgetBytes )
 			break;
+		if ( n > 0 && !pumpCapRed && WwUp::spent() ) {
+			pumpCapped++;
+			pumpCappedLeft += int( names.size() ) - n;
+			break;
+		}
 		Tex *	tx = insertTex( name );
 		if ( !tx )
 			continue;
@@ -843,6 +860,12 @@ int TexCache::wwPump( const NifModel * nif, qint64 budgetBytes )
 	draining = false;
 	pc.texPumped += n;
 	pc.texPumpedBytes += pc.texBytes - bytes0;
+	if ( pumpCapped > 0 && std::chrono::steady_clock::now() - pumpLineAt >= std::chrono::seconds( 5 ) ) {
+		pumpLineAt = std::chrono::steady_clock::now();
+		std::fprintf( stderr, "texture pump: %d paints stopped at the upload budget, %d ready textures left for later paints "
+			"(R9-b; red WW_PUMPCAP_RED=1: bytes only, build 83)\n", pumpCapped, pumpCappedLeft );
+		pumpCapped = pumpCappedLeft = 0;
+	}
 	if ( fn )
 		fn->glActiveTexture( GLenum( unit ) );
 	glBindTexture( GL_TEXTURE_2D, GLuint( b2d ) );

@@ -27,6 +27,8 @@
 
 using Game::GameManager;
 
+void wwCovPreserveBytes( QByteArray & data, int ref );	// gltexloaders.cpp (lane EMPTY240 R9-d)
+
 namespace
 {
 
@@ -40,6 +42,7 @@ struct Entry
 	QString name;
 	St st = St::Pending;
 	QByteArray data;
+	int covRef = 0;	// lane EMPTY240 R9-d: a "|wwcov<ref>" entry: the worker rewrites its alpha mips for ref
 };
 
 struct State
@@ -62,9 +65,32 @@ struct State
 	const NifModel * nif = nullptr;
 	bool quitHooked = false;
 	qint64 polled = 0, pollWaits = 0, pollOwn = 0;	// lane EMPTY240 R8-2: the `texture reads:` line's window
+	qint64 covMoved = 0, covTaken = 0, covRaw = 0;	// lane EMPTY240 R9-d: same window
 };
 
 std::atomic<const NifModel *> armed{ nullptr };
+
+/* lane EMPTY240 R9-d: "<file>|wwcov<ref>" (gltex.cpp bind's coverage-preserving copy) is keyed apart, with its ref;
+ * *ref = the ref (0: a plain name), *base = the file */
+std::string keyOf( const QString & name, const char * ext, int * ref = nullptr, QString * base = nullptr )
+{
+	const qsizetype at = name.lastIndexOf( QLatin1StringView( "|wwcov" ) );
+	const int r = at > 0 ? name.mid( at + 6 ).toInt() : 0;
+	const QString b = at > 0 ? name.left( at ) : name;
+	if ( ref )
+		*ref = r;
+	if ( base )
+		*base = b;
+	std::string k = GameManager::get_full_path( b, "textures", ext );
+	if ( r > 0 )
+		k += "|wwcov" + std::to_string( r );
+	return k;
+}
+
+QString nameOf( const Entry & e )
+{
+	return e.covRef > 0 ? e.name + QStringLiteral( "|wwcov" ) + QString::number( e.covRef ) : e.name;
+}
 
 // never destroyed: a worker may still be inside it when the process ends
 State & st()
@@ -110,18 +136,28 @@ void worker()
 		s.pending--;
 		s.entries[i].st = St::Reading;
 		const QString name = s.entries[i].name;
+		const int covRef = s.entries[i].covRef;
+		// R9-d: read before it became a coverage entry: only the rewrite is left
+		QByteArray data = s.entries[i].data;
+		if ( !data.isEmpty() ) {
+			s.held -= data.size();
+			s.entries[i].data = QByteArray();
+		}
 		const NifModel * nif = s.nif;
 		l.unlock();
 
 		// the two calls TexCache::find and TexCache::texLoad make; a file that is not there is left to
 		// the drawing thread, which says so in its own words
-		QByteArray data;
-		bool ok = false;
+		bool ok = !data.isEmpty();
 		{
 			WwHw::Busy wwBusy( WwHw::BusyTextures );	// lane EMPTY240 R3-1, R5-4: by kind
 			CellSpeed::Acc speedAcc( "texture files read ahead (worker threads)" );
-			const QString full = nif->findResourceFile( name, "textures", ".dds" );
-			ok = !full.isEmpty() && nif->getResourceFile( data, full, "textures", "" ) && !data.isEmpty();
+			if ( !ok ) {
+				const QString full = nif->findResourceFile( name, "textures", ".dds" );
+				ok = !full.isEmpty() && nif->getResourceFile( data, full, "textures", "" ) && !data.isEmpty();
+			}
+			if ( ok && covRef > 0 )
+				wwCovPreserveBytes( data, covRef );	// R9-d: the decode and re-encode off the drawing thread
 		}
 
 		l.lock();
@@ -129,7 +165,12 @@ void worker()
 		if ( ok && !s.stopping ) {
 			s.held += data.size();
 			e.data = data;
-			e.st = St::Done;
+			if ( e.covRef != covRef ) {	// R9-d: became a coverage entry while being read: the rewrite next round
+				e.st = St::Pending;
+				s.pending++;
+			} else {
+				e.st = St::Done;
+			}
 		} else {
 			e.st = St::Gone;
 		}
@@ -220,13 +261,16 @@ void CellTexAhead::want( const NifModel * nif, const QStringList & names )
 	for ( const QString & n : names ) {
 		if ( n.isEmpty() || n.startsWith( QChar( '#' ) ) )
 			continue;
-		const std::string key = GameManager::get_full_path( n, "textures", ".dds" );
+		int ref = 0;
+		QString base;
+		const std::string key = keyOf( n, ".dds", &ref, &base );
 		if ( s.byKey.find( key ) != s.byKey.end() )
 			continue;
 		s.again += s.forgotten.erase( key ) ? 1 : 0;
 		s.byKey.emplace( key, int( s.entries.size() ) );
 		Entry e;
-		e.name = n;
+		e.name = base;
+		e.covRef = ref;
 		s.entries.push_back( e );
 		s.pending++;
 		added = true;
@@ -254,12 +298,32 @@ CellTexAhead::Poll CellTexAhead::poll( const NifModel * nif, const QString & nam
 {
 	if ( !nif || armed.load( std::memory_order_relaxed ) != nif || name.isEmpty() || name.startsWith( QChar( '#' ) ) )
 		return Own;
-	const std::string key = GameManager::get_full_path( name, "textures", ".dds" );
+	int ref = 0;
+	QString base;
+	const std::string key = keyOf( name, ".dds", &ref, &base );
 	State & s = st();
 	std::unique_lock<std::mutex> l( s.lock );
 	if ( s.nif != nif || s.stopping )
 		return Own;
 	auto it = s.byKey.find( key );
+	if ( it == s.byKey.end() && ref > 0 ) {
+		/* lane EMPTY240 R9-d: a coverage copy of a file the materials named plain: that entry becomes the coverage
+		 * entry (no second read); read already, it goes back to the workers for the rewrite */
+		auto pl = s.byKey.find( keyOf( base, ".dds" ) );
+		if ( pl != s.byKey.end() && s.entries[size_t( pl->second )].covRef == 0
+			&& s.entries[size_t( pl->second )].st != St::Gone ) {
+			const int idx = pl->second;
+			s.byKey.erase( pl );
+			it = s.byKey.emplace( key, idx ).first;
+			Entry & pe = s.entries[size_t( idx )];
+			pe.covRef = ref;
+			if ( pe.st == St::Done ) {
+				pe.st = St::Pending;
+				s.pending++;
+			}
+			s.covMoved++;
+		}
+	}
 	if ( it == s.byKey.end() ) {
 		if ( s.held >= AHEAD_BYTES ) {
 			s.pollOwn++;
@@ -268,7 +332,8 @@ CellTexAhead::Poll CellTexAhead::poll( const NifModel * nif, const QString & nam
 		s.again += s.forgotten.erase( key ) ? 1 : 0;
 		it = s.byKey.emplace( key, int( s.entries.size() ) ).first;
 		Entry e;
-		e.name = name;
+		e.name = base;
+		e.covRef = ref;
 		s.entries.push_back( e );
 		s.pending++;
 		s.polled++;
@@ -297,17 +362,22 @@ CellTexAhead::Poll CellTexAhead::poll( const NifModel * nif, const QString & nam
 	return Own;	// read and handed out before, or a read that failed: the drawing thread's own words
 }
 
-bool CellTexAhead::take( const NifModel * nif, const QString & filepath, QByteArray & data )
+bool CellTexAhead::take( const NifModel * nif, const QString & filepath, QByteArray & data, int covRef, bool * covDone )
 {
+	if ( covDone )
+		*covDone = false;
 	if ( !nif || armed.load( std::memory_order_relaxed ) != nif )
 		return false;
-	const std::string key = GameManager::get_full_path( filepath, "textures", "" );
+	const std::string plainKey = GameManager::get_full_path( filepath, "textures", "" );
+	const std::string key = covRef > 0 ? plainKey + "|wwcov" + std::to_string( covRef ) : plainKey;
 	State & s = st();
 	std::unique_lock<std::mutex> l( s.lock );
 	if ( s.nif != nif )
 		return false;
 	s.takesThisFrame++;
 	auto it = s.byKey.find( key );
+	if ( it == s.byKey.end() && covRef > 0 )
+		it = s.byKey.find( plainKey );	// R9-d: read plain only: the drawing thread rewrites, as before
 	if ( it == s.byKey.end() ) {
 		s.drawRead += s.forgotten.count( key ) ? 1 : 0;
 		s.unknown++;
@@ -317,6 +387,18 @@ bool CellTexAhead::take( const NifModel * nif, const QString & filepath, QByteAr
 	}
 	const int i = it->second;
 	s.drawRead += ( s.entries[size_t( i )].st == St::Gone ) ? 1 : 0;
+	if ( s.entries[size_t( i )].st == St::Pending && !s.entries[size_t( i )].data.isEmpty() ) {
+		Entry & r = s.entries[size_t( i )];	// R9-d: read, its rewrite not started: the raw bytes, rewritten here
+		data = r.data;
+		r.data = QByteArray();
+		r.st = St::Gone;
+		s.pending--;
+		s.held -= data.size();
+		s.hits++;
+		s.covRaw++;
+		s.cv.notify_all();
+		return true;
+	}
 	if ( s.entries[size_t( i )].st == St::Pending ) {
 		s.entries[size_t( i )].st = St::Gone;   // no worker has started it: the old way, now
 		s.pending--;
@@ -339,6 +421,11 @@ bool CellTexAhead::take( const NifModel * nif, const QString & filepath, QByteAr
 	e.st = St::Gone;
 	s.held -= data.size();
 	s.hits++;
+	if ( covRef > 0 && e.covRef == covRef ) {
+		s.covTaken++;
+		if ( covDone )
+			*covDone = true;
+	}
 	s.cv.notify_all();
 	return true;
 }
@@ -356,7 +443,7 @@ QStringList CellTexAhead::ready( const NifModel * nif, int max )
 		if ( out.size() >= max )
 			break;
 		if ( e.st == St::Done )
-			out << e.name;
+			out << nameOf( e );	// R9-d: a coverage entry by its "|wwcov" name
 	}
 	return out;
 }
@@ -369,7 +456,7 @@ void CellTexAhead::drop( const NifModel * nif, const QString & name )
 	std::unique_lock<std::mutex> l( s.lock );
 	if ( s.nif != nif )
 		return;
-	auto it = s.byKey.find( GameManager::get_full_path( name, "textures", ".dds" ) );
+	auto it = s.byKey.find( keyOf( name, ".dds" ) );
 	if ( it == s.byKey.end() )
 		return;
 	Entry & e = s.entries[size_t( it->second )];
@@ -389,7 +476,7 @@ void CellTexAhead::forget( const NifModel * nif, const QString & name )
 	std::unique_lock<std::mutex> l( s.lock );
 	if ( s.nif != nif )
 		return;
-	const std::string key = GameManager::get_full_path( name, "textures", ".dds" );
+	const std::string key = keyOf( name, ".dds" );
 	auto it = s.byKey.find( key );
 	if ( it == s.byKey.end() || s.entries[size_t( it->second )].st != St::Gone )
 		return;   // still to read, or read and waiting: the bytes come anyway
@@ -425,6 +512,11 @@ void CellTexAhead::frameEnd()
 			win.start();
 			State & s = st();
 			std::unique_lock<std::mutex> l( s.lock );
+			if ( s.covMoved + s.covTaken + s.covRaw > 0 )
+				std::fprintf( stderr, "texture coverage ahead: %lld coverage copies handed to the workers, %lld taken rewritten "
+					"(no decode on the drawing thread), %lld taken raw (R9-d; red WW_COVAHEAD_RED=1: the drawing thread "
+					"rewrites, build 83)\n", (long long) s.covMoved, (long long) s.covTaken, (long long) s.covRaw );
+			s.covMoved = s.covTaken = s.covRaw = 0;
 			if ( s.pollWaits + s.pollOwn > 0 )
 				std::fprintf( stderr, "texture reads: %lld binds waited a paint for their file (read by the workers, not the "
 					"drawing thread), %lld files first asked by a draw, %lld read on the drawing thread at the byte bound; "

@@ -630,6 +630,53 @@ QByteArray watchFigure( const WatchSum & s, bool times, bool gpu = true )
 		f += ", " + QByteArray::number( s.meshes ) + " meshes";
 	return f + "]";
 }
+/* lane EMPTY240 R9-a: build 83's first stall line read "148237 evictions (2067050 MB)": the NVX counters (0x904A count,
+ * 0x904B KB) are the driver's totals since the device started, not this process's, and 2067050 MB = 2.1e9 KB sits at the
+ * top of a 32-bit GLint. The first collected paint now reads both as the base, the stall line prints unsigned 32-bit
+ * differences from it ("since this view's first paint", then "since the last stall line"), and the page faults likewise.
+ * Red WW_STALLBASE_RED=1: the raw totals on the first line, build 83. */
+struct StallBase
+{
+	GLint evictions = -1, evictedKb = 0;
+	unsigned long faults = 0;
+	bool based = false, firstLine = true, red = false;
+};
+StallBase & stallBase()
+{
+	static StallBase s;
+	return s;
+}
+void stallBaseTake( Watch & w )
+{
+	StallBase & s = stallBase();
+	if ( s.based )
+		return;
+	s.based = true;
+	s.red = wwEnvInt( "WW_STALLBASE_RED" ) == 1 || wwEnvInt( "WW_GPUSTALL_RED" ) == 1;
+	if ( s.red )
+		return;
+	QOpenGLContext * ctx = QOpenGLContext::currentContext();
+	if ( ctx && ctx->hasExtension( QByteArrayLiteral( "GL_NVX_gpu_memory_info" ) ) ) {
+		while ( w.gl->glGetError() != GL_NO_ERROR ) {
+		}
+		GLint e = -1, kb = 0;
+		w.gl->glGetIntegerv( 0x904A, &e );
+		w.gl->glGetIntegerv( 0x904B, &kb );
+		while ( w.gl->glGetError() != GL_NO_ERROR ) {
+		}
+		if ( e >= 0 ) {
+			s.evictions = e;
+			s.evictedKb = kb;
+		}
+	}
+#ifdef Q_OS_WIN
+	PROCESS_MEMORY_COUNTERS pm0;
+	std::memset( &pm0, 0, sizeof( pm0 ) );
+	pm0.cb = sizeof( pm0 );
+	if ( GetProcessMemoryInfo( GetCurrentProcess(), &pm0, sizeof( pm0 ) ) )
+		s.faults = pm0.PageFaultCount;
+#endif
+}
 void watchCollect( WatchSlot & sl )
 {
 	Watch & w = watch();
@@ -641,6 +688,7 @@ void watchCollect( WatchSlot & sl )
 		return;
 	sl.pending = false;
 	const double total = watchMs( sl.f0, sl.f1 );
+	stallBaseTake( w );	// lane EMPTY240 R9-a: the counters' base, at the first collected paint
 	if ( total > 250.0 ) {
 		/* zones of one name summed, in first-seen order. R5-1: each with the CPU ms the paint spent in it, its draws and
 		 * its uploads (a zone whose CPU ms match its GPU ms is the CPU's: the GPU waited for the commands); the gaps
@@ -716,8 +764,13 @@ void watchCollect( WatchSlot & sl )
 		 * faults growing with the stall = the memory manager paged; none = a wait on another queue (the Vulkan frame's
 		 * semaphores) or the device itself. Red WW_GPUSTALL_RED=1: no line, build 82. */
 		WW_SWITCH_STATIC( bool, stallRed, wwEnvInt( "WW_GPUSTALL_RED" ) == 1 );
+		StallBase & sb = stallBase();
+		const bool baseRed = sb.red;
+		GLint & lastEvictions = sb.evictions;
+		GLint & lastEvictedKb = sb.evictedKb;
+		unsigned long & lastFaults = sb.faults;
+		bool & stallFirstLine = sb.firstLine;
 		if ( total > 1000.0 && !stallRed ) {
-			static GLint lastEvictions = -1, lastEvictedKb = 0;
 			GLint evictions = -1, evictedKb = 0, freeKb = -1, totalKb = -1;
 			QOpenGLContext * ctx = QOpenGLContext::currentContext();
 			if ( ctx && ctx->hasExtension( QByteArrayLiteral( "GL_NVX_gpu_memory_info" ) ) ) {
@@ -738,10 +791,13 @@ void watchCollect( WatchSlot & sl )
 				+ " ms on the GPU, longest zone " + QByteArray( worst ? worst->name : "none" ) + " "
 				+ QByteArray::number( worst ? worst->gpu : 0.0, 'f', 1 ) + " ms against its cpu "
 				+ QByteArray::number( worst ? worst->cpu : 0.0, 'f', 1 ) + " ms | video memory: ";
+			const char * since = stallFirstLine ? ( baseRed ? "since the device started" : "since this view's first paint" )
+				: "since the last stall line";
 			if ( evictions >= 0 ) {
-				stall += QByteArray::number( lastEvictions >= 0 ? evictions - lastEvictions : evictions ) + " evictions ("
-					+ QByteArray::number( double( lastEvictions >= 0 ? evictedKb - lastEvictedKb : evictedKb ) / 1024.0, 'f', 0 )
-					+ " MB) since the last stall line, " + QByteArray::number( freeKb / 1024 ) + " of "
+				const quint32 dn = lastEvictions >= 0 ? quint32( evictions ) - quint32( lastEvictions ) : quint32( evictions );
+				const quint32 dkb = lastEvictions >= 0 ? quint32( evictedKb ) - quint32( lastEvictedKb ) : quint32( evictedKb );
+				stall += QByteArray::number( dn ) + " evictions (" + QByteArray::number( double( dkb ) / 1024.0, 'f', 1 )
+					+ " MB) " + since + ", " + QByteArray::number( freeKb / 1024 ) + " of "
 					+ QByteArray::number( totalKb / 1024 ) + " MB free";
 				lastEvictions = evictions;
 				lastEvictedKb = evictedKb;
@@ -749,7 +805,6 @@ void watchCollect( WatchSlot & sl )
 				stall += "no NVX memory counters on this driver";
 			}
 #ifdef Q_OS_WIN
-			static DWORD lastFaults = 0;
 			PROCESS_MEMORY_COUNTERS_EX pm;
 			std::memset( &pm, 0, sizeof( pm ) );
 			pm.cb = sizeof( pm );
@@ -758,15 +813,16 @@ void watchCollect( WatchSlot & sl )
 			ms.dwLength = sizeof( ms );
 			if ( GetProcessMemoryInfo( GetCurrentProcess(), reinterpret_cast<PROCESS_MEMORY_COUNTERS *>( &pm ), sizeof( pm ) )
 				&& GlobalMemoryStatusEx( &ms ) ) {
-				stall += " | process: " + QByteArray::number( qint64( pm.PageFaultCount - lastFaults ) ) + " page faults since the "
-					"last stall line, private " + QByteArray::number( qint64( pm.PrivateUsage >> 20 ) ) + " MB, working set "
+				stall += " | process: " + QByteArray::number( qint64( pm.PageFaultCount - lastFaults ) ) + " page faults " + since
+					+ ", private " + QByteArray::number( qint64( pm.PrivateUsage >> 20 ) ) + " MB, working set "
 					+ QByteArray::number( qint64( pm.WorkingSetSize >> 20 ) ) + " MB, RAM free "
 					+ QByteArray::number( qint64( ms.ullAvailPhys >> 20 ) ) + " of " + QByteArray::number( qint64( ms.ullTotalPhys >> 20 ) )
 					+ " MB, commit free " + QByteArray::number( qint64( ms.ullAvailPageFile >> 20 ) ) + " MB";
 				lastFaults = pm.PageFaultCount;
 			}
 #endif
-			stall += " (R8-1; red WW_GPUSTALL_RED=1: no line, build 82)";
+			stall += " (R8-1, R9-a; red WW_GPUSTALL_RED=1: no line, build 82; WW_STALLBASE_RED=1: device totals, build 83)";
+			stallFirstLine = false;
 			std::fprintf( stderr, "%s\n", stall.constData() );
 		}
 	}
