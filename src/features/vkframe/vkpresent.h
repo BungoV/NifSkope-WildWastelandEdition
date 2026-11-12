@@ -21,11 +21,12 @@ using GlProc = void * (*)( const char * name );
 struct Stat
 {
 	double ms = 0.0;           //!< the last present() call on the drawing thread, CPU (the Vulkan half: the worker, Split)
-	double waitMs = 0.0;       //!< of it, the wait for the worker to have submitted the ring slot's last use
+	double waitMs = 0.0;       //!< of it, the wait for the ring slot's last use (the worker's submit, then its fence)
 	double stateMs = 0.0;      //!< of it, the GL state asked (scissor; the bindings when no named blit)
 	double glMs = 0.0;         //!< of it, GL's semaphore wait, the resolve blit and the signal
 	double flushMs = 0.0;      //!< of it, glFlush
 	bool dsa = false;          //!< the resolve went through glBlitNamedFramebuffer
+	bool busy = false;         //!< the slot's last Vulkan read was still running: the drawing thread waited its fence
 	bool worker = false;       //!< the Vulkan half went to the worker (false: ran here, the harness's capture)
 	const char * mode = "none";
 	int images = 0;

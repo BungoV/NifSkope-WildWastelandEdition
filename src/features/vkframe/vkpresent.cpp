@@ -149,6 +149,7 @@ struct Vk
 	VKP( vkCreateImage ); VKP( vkDestroyImage ); VKP( vkGetImageMemoryRequirements ); VKP( vkAllocateMemory ); VKP( vkFreeMemory );
 	VKP( vkBindImageMemory ); VKP( vkGetMemoryWin32HandleKHR ); VKP( vkCreateSemaphore ); VKP( vkDestroySemaphore );
 	VKP( vkGetSemaphoreWin32HandleKHR ); VKP( vkCreateFence ); VKP( vkDestroyFence ); VKP( vkWaitForFences ); VKP( vkResetFences );
+	VKP( vkGetFenceStatus );
 	VKP( vkCreateCommandPool ); VKP( vkAllocateCommandBuffers ); VKP( vkFreeCommandBuffers ); VKP( vkBeginCommandBuffer );
 	VKP( vkEndCommandBuffer ); VKP( vkResetCommandBuffer ); VKP( vkCmdPipelineBarrier ); VKP( vkCmdBlitImage );
 	VKP( vkCreateBuffer ); VKP( vkDestroyBuffer ); VKP( vkGetBufferMemoryRequirements ); VKP( vkBindBufferMemory );
@@ -156,7 +157,10 @@ struct Vk
 };
 #undef VKP
 
-constexpr int kSlots = 3;
+/* build 87: with 3 slots GL's queue waited (vkDone) on the present of 3 frames back, and the frame cap fence then
+ * waited 0.72 ms on that GL work. 5 slots, and GL no longer waits on Vulkan at all: the drawing thread checks the slot's
+ * fence (almost always long signaled) before GL writes into it */
+constexpr int kSlots = 5;
 
 struct Slot
 {
@@ -334,6 +338,7 @@ bool makeDevice( std::string & why )
 	LD( vkCreateImage ); LD( vkDestroyImage ); LD( vkGetImageMemoryRequirements ); LD( vkAllocateMemory ); LD( vkFreeMemory );
 	LD( vkBindImageMemory ); LD( vkGetMemoryWin32HandleKHR ); LD( vkCreateSemaphore ); LD( vkDestroySemaphore );
 	LD( vkGetSemaphoreWin32HandleKHR ); LD( vkCreateFence ); LD( vkDestroyFence ); LD( vkWaitForFences ); LD( vkResetFences );
+	LD( vkGetFenceStatus );
 	LD( vkCreateCommandPool ); LD( vkAllocateCommandBuffers ); LD( vkFreeCommandBuffers ); LD( vkBeginCommandBuffer );
 	LD( vkEndCommandBuffer ); LD( vkResetCommandBuffer ); LD( vkCmdPipelineBarrier ); LD( vkCmdBlitImage );
 	LD( vkCreateBuffer ); LD( vkDestroyBuffer ); LD( vkGetBufferMemoryRequirements ); LD( vkBindBufferMemory );
@@ -939,14 +944,20 @@ bool present( void * hwnd, int w, int h, bool vsync, GlProc gp, std::string & wh
 	( void ) v;
 	const int k = int( c.frame++ % kSlots );
 	Slot & s = c.slot[k];
-	// the worker has submitted this slot's last Vulkan half (GL may wait its vkDone only once that signal is queued)
+	/* the worker has submitted this slot's last Vulkan half, and that read of the slot is done (its fence): GL then
+	 * writes the slot with no GPU wait on Vulkan (the frame cap fence measures GL's own work only) */
 	const double tw = nowMs();
 	waitSlot( k );
+	bool busy = false;
+	if ( s.pending && v.vkGetFenceStatus( v.dev, s.fence ) == VK_NOT_READY ) {
+		busy = true;
+		v.vkWaitForFences( v.dev, 1, &s.fence, VK_TRUE, 1000000000ull );
+	}
 	const double waited = nowMs() - tw;
-	/* GL: wait Vulkan's last read of the slot, resolve the back buffer into it, signal (GENERAL both sides). With
-	 * glBlitNamedFramebuffer no binding is asked or changed (a glGet can wait for the driver's own thread) */
+	/* GL: resolve the back buffer into the slot, signal (GENERAL both sides). Nothing is asked: with
+	 * glBlitNamedFramebuffer no binding changes, and the scissor test is switched off without asking (glIsEnabled
+	 * cost 0.13-0.20 ms on build 87, a wait for the driver's own thread); the paint sets its own scissor */
 	const double tq = nowMs();
-	const bool scissor = g.isEnabled( kScissorTest ) != 0;
 	GLint rd = 0, dr = 0;
 	if ( !g.blitNamedFramebuffer ) {
 		g.getIntegerv( kReadFbBinding, &rd );
@@ -954,10 +965,7 @@ bool present( void * hwnd, int w, int h, bool vsync, GlProc gp, std::string & wh
 	}
 	const double tg = nowMs();
 	const GLenum general = kLayoutGeneral;
-	if ( s.used )
-		g.waitSemaphore( s.vkDoneGl, 0, nullptr, 1, &s.tex, &general );
-	if ( scissor )
-		g.disable( kScissorTest );
+	g.disable( kScissorTest );
 	if ( g.blitNamedFramebuffer ) {
 		g.blitNamedFramebuffer( 0, s.fbo, 0, 0, w, h, 0, 0, w, h, kColorBit, kNearest );
 	} else {
@@ -967,8 +975,6 @@ bool present( void * hwnd, int w, int h, bool vsync, GlProc gp, std::string & wh
 		g.bindFramebuffer( kReadFb, GLuint( rd ) );
 		g.bindFramebuffer( kDrawFb, GLuint( dr ) );
 	}
-	if ( scissor )
-		g.enable( kScissorTest );
 	g.signalSemaphore( s.glDoneGl, 0, nullptr, 1, &s.tex, &general );
 	const double tf = nowMs();
 	g.flush();  // Vulkan's wait sees GL's signal only once it is flushed
@@ -995,6 +1001,7 @@ bool present( void * hwnd, int w, int h, bool vsync, GlProc gp, std::string & wh
 	st.glMs = tf - tg;
 	st.flushMs = tv - tf;
 	st.dsa = g.blitNamedFramebuffer != nullptr;
+	st.busy = busy;
 	st.mode = modeName( c.mode );
 	st.images = int( c.images.size() );
 	st.w = int( c.extent.width );
@@ -1033,12 +1040,10 @@ bool vkPart( int k, int w, int h, std::string & why, bool & rebuild, WwVkPresent
 	VkSubmitInfo si { VK_STRUCTURE_TYPE_SUBMIT_INFO };
 	const VkPipelineStageFlags stages[2] = { VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT };
 	if ( ar != VK_SUCCESS && ar != VK_SUBOPTIMAL_KHR ) {
-		// GL's signal is still owed a wait, and GL's next blit a vkDone: an empty batch carries both
+		// GL's signal is still owed a wait: an empty batch carries it (and the fence the next use checks)
 		si.waitSemaphoreCount = 1;
 		si.pWaitSemaphores = &s.glDone;
 		si.pWaitDstStageMask = stages;
-		si.signalSemaphoreCount = 1;
-		si.pSignalSemaphores = &s.vkDone;
 		s.pending = v.vkQueueSubmit( v.queue, 1, &si, s.fence ) == VK_SUCCESS;
 		rebuild = true;
 		why = "vkAcquireNextImageKHR returned " + std::to_string( int( ar ) );
@@ -1110,14 +1115,13 @@ bool vkPart( int k, int w, int h, std::string & why, bool & rebuild, WwVkPresent
 	v.vkCmdPipelineBarrier( cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0, 0, nullptr, 0, nullptr, 1, &p );
 	v.vkEndCommandBuffer( cmd );
 	const VkSemaphore waits[2] = { s.glDone, s.acquired };
-	const VkSemaphore signalSems[2] = { c.renderDone[idx], s.vkDone };	// not "signals": Qt's macro (the pch)
 	si.waitSemaphoreCount = 2;
 	si.pWaitSemaphores = waits;
 	si.pWaitDstStageMask = stages;
 	si.commandBufferCount = 1;
 	si.pCommandBuffers = &cmd;
-	si.signalSemaphoreCount = 2;
-	si.pSignalSemaphores = signalSems;
+	si.signalSemaphoreCount = 1;  // the present's only (GL checks the fence, not vkDone: no GPU wait on Vulkan)
+	si.pSignalSemaphores = &c.renderDone[idx];
 	sp.recordMs += nowMs() - tr;
 	const double ts = nowMs();
 	const VkResult sr = v.vkQueueSubmit( v.queue, 1, &si, s.fence );
@@ -1214,7 +1218,7 @@ bool frame( QOpenGLWindow * w, const std::function<void()> & paint )
 	static QString said;
 	static QSize baseSize;
 	static double winAt = 0.0, winSum = 0.0, winMax = 0.0, winWait = 0.0, winState = 0.0, winGl = 0.0, winFlush = 0.0;
-	static int winN = 0;
+	static int winN = 0, winBusy = 0;
 	static std::uint64_t builtSaid = 0;
 	auto say = [&]( const QString & line ) {
 		if ( line != said ) {
@@ -1258,15 +1262,17 @@ bool frame( QOpenGLWindow * w, const std::function<void()> & paint )
 	winState += st.stateMs;
 	winGl += st.glMs;
 	winFlush += st.flushMs;
+	winBusy += st.busy ? 1 : 0;
 	winMax = std::max( winMax, st.ms );
 	winN++;
 	const double now = nowMs();
 	if ( now - winAt >= 5000.0 ) {
 		const Split sp = takeSplit();
 		if ( winAt > 0.0 && winN > 0 ) {
-			qInfo().noquote() << QStringLiteral( "vk present: %1 ms (max %2, slot wait %3), mode %4, %5 images, %6x%7, %8 frames" )
+			qInfo().noquote() << QStringLiteral( "vk present: %1 ms (max %2, slot wait %3), mode %4, %5 images, %6x%7, %8 frames, "
+				"%9 slots, %10 reused while Vulkan still read them" )
 				.arg( winSum / winN, 0, 'f', 3 ).arg( winMax, 0, 'f', 3 ).arg( winWait / winN, 0, 'f', 3 )
-				.arg( QLatin1String( st.mode ) ).arg( st.images ).arg( st.w ).arg( st.h ).arg( winN );
+				.arg( QLatin1String( st.mode ) ).arg( st.images ).arg( st.w ).arg( st.h ).arg( winN ).arg( kSlots ).arg( winBusy );
 			// the drawing thread's share by part, and the worker's (its ms are off the drawing thread)
 			const double n = std::max( sp.n, 1 );
 			qInfo().noquote() << QStringLiteral( "vk present split: drawing thread slot wait %1 + GL state %2 + GL blit/signal %3 + "
@@ -1281,6 +1287,7 @@ bool frame( QOpenGLWindow * w, const std::function<void()> & paint )
 		}
 		winAt = now;
 		winSum = winMax = winWait = winState = winGl = winFlush = 0.0;
+		winBusy = 0;
 		winN = 0;
 	}
 	return true;

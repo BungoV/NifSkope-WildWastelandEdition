@@ -80,6 +80,9 @@ int main( int argc, char ** argv )
 {
 	const int W = argc > 1 ? std::atoi( argv[1] ) : 1280, H = argc > 2 ? std::atoi( argv[2] ) : 720;
 	const int N = argc > 3 ? std::atoi( argv[3] ) : 600;
+	// the frame's ms (0: as fast as it goes). 2.0 = the 500 fps bar: an unpaced 0.2 ms frame makes the present's GPU
+	// work (GL -> Vulkan, the compositor copy) the bound, which no real frame is
+	const double paceMs = argc > 4 ? std::atof( argv[4] ) : 0.0;
 	gOpenGl = LoadLibraryA( "opengl32.dll" );
 	WNDCLASSA wc {};
 	wc.style = CS_OWNDC;
@@ -180,6 +183,8 @@ int main( int argc, char ** argv )
 	std::vector<double> vkMs, vkWait, vkFrame;
 	prev = nowMs();
 	for ( int f = 0; f < N; f++ ) {
+		while ( paceMs > 0.0 && nowMs() - prev < paceMs ) {
+		}
 		pump();
 		draw( W, H, f );
 		if ( !WwVkPresent::present( wnd, W, H, false, glProc, why ) ) {
