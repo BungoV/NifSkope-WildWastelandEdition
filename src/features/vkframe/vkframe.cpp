@@ -53,6 +53,7 @@
 #include "features/vkframe/bloom_up.spv.h"
 #include "features/vkframe/bloom_src.spv.h"	// round 3 (P3): the source from the shared frame
 #include "features/vkframe/bloom_comb.spv.h"	// round 3 (P2): the final tent once per pixel
+#include "features/vkframe/measure_q.spv.h"	// round 6 (P4): the exposure measure
 #endif
 
 namespace
@@ -105,6 +106,8 @@ bool makeFrame( const void *, int, int, int, unsigned, unsigned &, unsigned &, Q
 void freeFrame( const void * ) {}
 bool sourceReady( const void *, unsigned, unsigned ) { return false; }
 unsigned combTexture( const void * ) { return 0; }
+bool requestMeasure( const void *, unsigned, unsigned, int, int ) { return false; }
+unsigned measureTexture( const void * ) { return 0; }
 bool runBloom( const void *, const BloomJob &, QString & why )
 {
 	why = QStringLiteral( "no device (Windows only)" );
@@ -171,8 +174,8 @@ struct Dev
 	VkPipelineLayout pipeLayout = VK_NULL_HANDLE;
 	VkSampler linearClamp = VK_NULL_HANDLE;
 	VkCommandPool cpool = VK_NULL_HANDLE;
-	VkPipeline pipe[5] = {};	// down, hold, up, source (round 3, P3), combine (round 3, P2)
-	int pipesWanted = 5, pipesBuilt = 0;
+	VkPipeline pipe[6] = {};	// down, hold, up, source (round 3, P3), combine (round 3, P2), exposure measure (P4)
+	int pipesWanted = 6, pipesBuilt = 0;
 	QString cacheWords;
 	// the frames in flight: a ring of slots, each a command buffer, a fence and two timestamps
 	static constexpr int kSlots = 8;
@@ -452,6 +455,13 @@ struct Chain
 	VkImage srcFrame = VK_NULL_HANDLE;
 	Img comb;
 	bool combFailed = false, combRan = false;
+	/* round 6 (P4): the exposure measure's set (5, 6 = the shared frame, written again when it is made again: measFrame;
+	 * 7 = meas, the quarter target made on the first request) and the request runBloom takes (0 = none) */
+	VkDescriptorSet measSet = VK_NULL_HANDLE;
+	VkImage measFrame = VK_NULL_HANDLE;
+	Img meas;
+	int measW = 0, measH = 0;
+	bool measFailed = false, measRan = false;
 	double lastRun = -1.0e9;	// nowMs() of the last runBloom on Vulkan (chainRunning)
 	VkSemaphore vkGlDone = VK_NULL_HANDLE, vkVkDone = VK_NULL_HANDLE;
 	GLuint glGlDone = 0, glVkDone = 0;
@@ -700,6 +710,7 @@ void dropChain( Chain & c )
 	dropImg( c.src );
 	dropImg( c.ring );
 	dropImg( c.comb );
+	dropImg( c.meas );
 	for ( int i = 0; i < WwVkPost::kMaxMips; i++ ) {
 		dropImg( c.mip[i] );
 		dropImg( c.up[i] );
@@ -797,13 +808,13 @@ void computeBarrier( VkCommandBuffer cb )
 		nullptr );
 }
 
-void dispatch( VkCommandBuffer cb, int pipe, VkDescriptorSet set, int w, int h, const Job & j )
+void dispatch( VkCommandBuffer cb, int pipe, VkDescriptorSet set, int w, int h, const Job & j, int group = 8 )
 {
 	Dev & d = dv();
 	d.vkCmdBindPipeline( cb, VK_PIPELINE_BIND_POINT_COMPUTE, d.pipe[pipe] );
 	d.vkCmdBindDescriptorSets( cb, VK_PIPELINE_BIND_POINT_COMPUTE, d.pipeLayout, 0, 1, &set, 0, nullptr );
 	d.vkCmdPushConstants( cb, d.pipeLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof( Job ), &j );
-	d.vkCmdDispatch( cb, uint32_t( ( w + 7 ) / 8 ), uint32_t( ( h + 7 ) / 8 ), 1 );
+	d.vkCmdDispatch( cb, uint32_t( ( w + group - 1 ) / group ), uint32_t( ( h + group - 1 ) / group ), 1 );
 	computeBarrier( cb );
 }
 
@@ -1039,12 +1050,12 @@ void wwVkFrameSetDevice( void * instance, void * physical, void * device, unsign
 		d.vkCreatePipelineCache( d.dev, &pci, nullptr, &d.cache );
 	}
 	// round 3: the source and the combine too, so no frame builds a pipeline (the tone map's 265 ms first-use hitch)
-	const uint32_t * code[5] = { vkframe_bloom_down_spv, vkframe_bloom_hold_spv, vkframe_bloom_up_spv, vkframe_bloom_src_spv,
-		vkframe_bloom_comb_spv };
-	const size_t bytes[5] = { sizeof( vkframe_bloom_down_spv ), sizeof( vkframe_bloom_hold_spv ), sizeof( vkframe_bloom_up_spv ),
-		sizeof( vkframe_bloom_src_spv ), sizeof( vkframe_bloom_comb_spv ) };
+	const uint32_t * code[6] = { vkframe_bloom_down_spv, vkframe_bloom_hold_spv, vkframe_bloom_up_spv, vkframe_bloom_src_spv,
+		vkframe_bloom_comb_spv, vkframe_measure_q_spv };
+	const size_t bytes[6] = { sizeof( vkframe_bloom_down_spv ), sizeof( vkframe_bloom_hold_spv ), sizeof( vkframe_bloom_up_spv ),
+		sizeof( vkframe_bloom_src_spv ), sizeof( vkframe_bloom_comb_spv ), sizeof( vkframe_measure_q_spv ) };
 	d.pipesBuilt = 0;
-	for ( int k = 0; k < 5; k++ ) {
+	for ( int k = 0; k < 6; k++ ) {
 		VkShaderModuleCreateInfo mi { VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO };
 		mi.codeSize = bytes[k];
 		mi.pCode = code[k];
@@ -1178,8 +1189,9 @@ bool makeChain( const void * key, int W, int H, int mipCount, const int dims[][2
 	}
 	ok = ok && makeSemaphore( c.vkGlDone, c.glGlDone, why ) && makeSemaphore( c.vkVkDone, c.glVkDone, why );
 	/* the descriptor sets, once per chain shape: down per level, level 0 into each ring layer, the hold, up per level; round 3:
-	 * the source and the combine (each set takes the layout's 5 sampled images, 1 sampler, 2 storage images from the pool) */
-	const int sets = mipCount + kRingLayers + 1 + mipCount + 2;
+	 * the source and the combine; round 6: the exposure measure (each set takes the layout's 5 sampled images, 1 sampler,
+	 * 2 storage images from the pool) */
+	const int sets = mipCount + kRingLayers + 1 + mipCount + 3;
 	if ( ok ) {
 		VkDescriptorPoolSize ps[3] = { { VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, uint32_t( 5 * sets ) }, { VK_DESCRIPTOR_TYPE_SAMPLER, uint32_t( sets ) },
 			{ VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, uint32_t( 2 * sets ) } };
@@ -1220,6 +1232,8 @@ bool makeChain( const void * key, int W, int H, int mipCount, const int dims[][2
 			c.combSet = all[size_t( k++ )];
 			const VkImageView top = mipCount == 1 ? c.mip[0].v : c.up[0].v;
 			writeSet( c.combSet, top, top, c.ring.v, c.src.v );
+			c.measSet = all[size_t( k++ )];	// round 6 (P4): 5, 6 the frame and 7 meas when asked
+			writeSet( c.measSet, c.src.v, c.src.v, c.ring.v, c.src.v );
 		}
 	}
 	// every image to GENERAL once (it stays there: GL reads and writes it in that layout too)
@@ -1370,8 +1384,10 @@ void freeFrame( const void * key )
 	if ( it == frames().end() )
 		return;
 	waitSlots( ~std::uint64_t( 0 ), -1 );	// nothing in flight reads them
-	for ( Chain & c : chains() )
+	for ( Chain & c : chains() ) {
 		c.srcFrame = VK_NULL_HANDLE;	// a new frame can reuse the handle: its set is written again
+		c.measFrame = VK_NULL_HANDLE;
+	}
 	dropImg( it->color );
 	dropImg( it->ds );
 	frames().erase( it );
@@ -1398,6 +1414,29 @@ unsigned combTexture( const void * key )
 	return it != chains().constEnd() && it->ok && it->combRan ? it->comb.tex : 0u;
 }
 
+bool requestMeasure( const void * key, unsigned color, unsigned ds, int qw, int qh )
+{
+	const auto it = chains().find( key );
+	const auto ft = frames().constFind( key );
+	const QOpenGLContext * q = QOpenGLContext::currentContext();
+	if ( it == chains().end() || !it->ok || it->measFailed || it->ctx != q || ft == frames().constEnd() || ft->ctx != q || !color
+		|| ft->color.tex != color || ft->ds.tex != ds || !wanted() || qw != std::max( 1, it->W >> 2 ) || qh != std::max( 1, it->H >> 2 ) )
+		return false;
+	it->measW = qw;
+	it->measH = qh;
+	it->measRan = false;
+	return true;
+}
+
+unsigned measureTexture( const void * key )
+{
+	const auto it = chains().find( key );
+	if ( it == chains().end() || !it->ok || !it->measRan )
+		return 0u;
+	it->measRan = false;
+	return it->meas.tex;
+}
+
 bool runBloom( const void * key, const BloomJob & job, QString & why )
 {
 	Dev & d = dv();
@@ -1421,6 +1460,10 @@ bool runBloom( const void * key, const BloomJob & job, QString & why )
 		return false;
 	}
 	Chain & c = *it;
+	// round 6 (P4): this frame's measure request, taken now (a frame that falls back to GL leaves none for the next)
+	const int measW = c.measW, measH = c.measH;
+	c.measW = c.measH = 0;
+	c.measRan = false;
 	GlShare & g = glShare();
 	if ( c.ctx != QOpenGLContext::currentContext() || !g.ok ) {
 		why = QStringLiteral( "another GL context" );
@@ -1485,6 +1528,30 @@ bool runBloom( const void * key, const BloomJob & job, QString & why )
 		}
 	}
 	const bool comb = job.comb && c.comb.i;
+	// round 6 (P4): the exposure measure's RGBA32F quarter target, made the first frame it is asked for; it reads the frame
+	const bool measWant = fr && measW > 0;
+	bool measFresh = false;
+	if ( measWant && !c.meas.i && !c.measFailed ) {
+		QString mw;
+		if ( makeImg( c.meas, measW, measH, 1, 1, mw, VK_FORMAT_R32G32B32A32_SFLOAT ) ) {
+			writeImage( c.measSet, 7, c.meas.v, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE );
+			c.texs.push_back( c.meas.tex );
+			c.layouts.push_back( kGlLayoutGeneral );
+			measFresh = true;
+			std::fprintf( stderr, "vk post: exposure measure target shared %dx%d RGBA32F\n", measW, measH );
+		} else {
+			dropImg( c.meas );
+			c.measFailed = true;
+			std::fprintf( stderr, "vk post: the exposure measure's target was refused (%s): GL measures\n", qPrintable( mw ) );
+		}
+	}
+	const bool meas = measWant && c.meas.i && c.meas.w == measW && c.meas.h == measH;
+	if ( meas && c.measFrame != fr->color.i ) {
+		waitSlots( ~std::uint64_t( 0 ), -1 );	// no frame in flight reads the set
+		writeImage( c.measSet, 5, fr->color.v, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE );
+		writeImage( c.measSet, 6, fr->ds.v, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE );
+		c.measFrame = fr->color.i;
+	}
 	const double ph2 = nowMs();
 	// the frames in flight: wait for frame n - cap (2; WW_FRAMEQUEUE_RED=1: none), and for this slot's last use
 	const std::uint64_t f = ++d.frame;
@@ -1519,6 +1586,17 @@ bool runBloom( const void * key, const BloomJob & job, QString & why )
 		d.vkCmdPipelineBarrier( cb, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 0, nullptr, 0, nullptr, 1,
 			&ib );
 	}
+	if ( measFresh ) {	// round 6 (P4): the measure's target, its first use: to GENERAL, where it stays
+		VkImageMemoryBarrier ib { VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER };
+		ib.dstAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+		ib.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+		ib.newLayout = VK_IMAGE_LAYOUT_GENERAL;
+		ib.srcQueueFamilyIndex = ib.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+		ib.image = c.meas.i;
+		ib.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
+		d.vkCmdPipelineBarrier( cb, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 0, nullptr, 0, nullptr, 1,
+			&ib );
+	}
 	if ( fr ) {	// round 3 (P3): the source (bloom_src.hlsl: the cell-lit samples exposed, their mean rounded to half)
 		Job j {};
 		j.params[0] = job.exposure;
@@ -1527,6 +1605,12 @@ bool runBloom( const void * key, const BloomJob & job, QString & why )
 		j.params[3] = job.impulse;
 		j.ints[0] = job.on ? 1 : 0;
 		dispatch( cb, 3, c.srcSet, c.W, c.H, j );
+	}
+	/* round 6 (P4): the exposure measure (measure_q.hlsl): 16 x 16 frame pixels a group = 4 x 4 quarter texels, so the
+	 * groups are counted over the quarter size by 4 (bit-identical to GL's cell_is_measure_q.frag: tests/vkframe/measure.sh) */
+	if ( meas ) {
+		const Job j {};
+		dispatch( cb, 5, c.measSet, measW, measH, j, 4 );
 	}
 	const int n = c.mipCount;
 	for ( int i = 0; i < n; i++ ) {
@@ -1641,6 +1725,7 @@ bool runBloom( const void * key, const BloomJob & job, QString & why )
 	texs.resize( own );
 	lays.resize( own );
 	c.combRan = comb;
+	c.measRan = meas;
 	win().vkFrames++;
 	sayBusy( false, 0.0 );
 	const double ph8 = nowMs();
@@ -1652,9 +1737,9 @@ bool runBloom( const void * key, const BloomJob & job, QString & why )
 				"%.1f\n", ph8 - ph0, static_cast<unsigned long long>( f ), ph1 - ph0, ph2 - ph1, ph3 - ph2, ph4 - ph3, ph5 - ph4,
 				ph6 - ph5, ph7 - ph6, ph8 - ph7 );
 	}
-	sayRoute( QStringLiteral( "vulkan (bloom %1down / hold / up%2 on the ray-tracing device, %3 mips%4)" )
+	sayRoute( QStringLiteral( "vulkan (bloom %1down / hold / up%2 on the ray-tracing device, %3 mips%4%5)" )
 		.arg( fr ? QStringLiteral( "source / " ) : QString() ).arg( comb ? QStringLiteral( " / combine" ) : QString() ).arg( n )
-		.arg( job.hold ? QStringLiteral( ", hold" ) : QString() ) );
+		.arg( job.hold ? QStringLiteral( ", hold" ) : QString() ).arg( meas ? QStringLiteral( ", exposure measure" ) : QString() ) );
 	return true;
 }
 
