@@ -15,6 +15,7 @@
 
 #include <QDebug>
 #include <QDir>
+#include <QElapsedTimer>
 #include <QFile>
 #include <QHash>
 #include <QSettings>
@@ -33,6 +34,7 @@ constexpr int kMaxMips = 12;			// FO4CS kBloomMaxMipLevels
 constexpr float kEps = 0.0001f;			// kBloomEpsilon
 constexpr float kMinRadius = 0.5f, kMaxRadius = 4.0f, kMaxIntensity = 10.0f;
 constexpr int kUnitA = 8, kUnitB = 9;	// the chain's passes (their own programs: no cell sampler beside them)
+constexpr qint64 kVkSettleMs = 500;	// lane VKFRAME1: the view's size holds this long before the shared chain is built
 constexpr int kHoldFrames = 8;			// MODULES1 R8-2: the temporal jitter's period (gametaa.cpp: n = ( frame & 7 ) + 1)
 
 const char * const kModeKey = "WW/CellBloomMode";
@@ -77,6 +79,8 @@ struct BloomGpu
 	/* lane VKFRAME1 (plan step P1): src, mip, up and the ring are images Vulkan made and GL imported (vkframe.cpp), so
 	 * the chain runs on either side on the same names; vkTried: asked once for these targets */
 	bool vkShared = false, vkTried = false;
+	int vkSizeW = 0, vkSizeH = 0, vkSizeMips = 0;	// lane VKFRAME1: the size last seen and since when (freeGpu keeps them)
+	qint64 vkSizeSince = 0;
 	WwCellUni::ErrTrust err;	// lane CELLUNI5: the error reads, until a clean frame on these targets
 };
 
@@ -528,10 +532,23 @@ bool wwCellBloomRun( Scene * scene, unsigned hdrColor, unsigned ds, int W, int H
 	auto fn = r->fn;
 	BloomGpu & g = bloomGpus()[r];
 	const int S = std::max( samples, 1 );
+	/* lane VKFRAME1 (build 83, frame 3: 357 ms): freeing the shared chain waits for every frame in flight, so the chain is
+	 * built only once the view's size has held kVkSettleMs; a size still moving (the first frames) gets GL's own textures */
+	static QElapsedTimer vkClock;
+	if ( !vkClock.isValid() )
+		vkClock.start();
+	if ( g.vkSizeW != W || g.vkSizeH != H || g.vkSizeMips != mipCount ) {
+		g.vkSizeW = W;
+		g.vkSizeH = H;
+		g.vkSizeMips = mipCount;
+		g.vkSizeSince = vkClock.elapsed();
+	}
+	const qint64 vkHeld = vkClock.elapsed() - g.vkSizeSince;
+	const bool vkWant = WwVkPost::ready() && vkHeld >= kVkSettleMs;
 	// lane VKFRAME1: once the Vulkan route is ready (the device came up, or the row went on), the targets are made again shared
 	const bool remake = !g.srcFbo || g.w != W || g.h != H || g.samples != S || g.mipCount != mipCount
 		|| ( mipCount && ( g.dims[0][0] != dims[0][0] || g.dims[0][1] != dims[0][1] ) )
-		|| ( !g.vkShared && !g.vkTried && WwVkPost::ready() );
+		|| ( !g.vkShared && !g.vkTried && vkWant );
 	// lane CELLUNI5: the drain and the error reads until a clean frame on these targets (WW_CELL_UNI_RED=1: every frame)
 	// lane CELLUNI6: WW_SETUP_MEMO_CHECK=1 reads on a trusted frame too, and names an error found there
 	const bool trustedSkip = !g.err.check( wwCellUniRed(), remake );
@@ -543,7 +560,10 @@ bool wwCellBloomRun( Scene * scene, unsigned hdrColor, unsigned ds, int W, int H
 	if ( remake ) {
 		made = true;
 		g.err.forget();
+		const qint64 tMake = vkClock.nsecsElapsed();
 		freeGpu( r, g );
+		const double freeMs = double( vkClock.nsecsElapsed() - tMake ) * 1.0e-6;
+		double vkMs = 0.0;
 		if ( !g.srcFbo ) {
 			fn->glGenFramebuffers( 1, &g.srcFbo );
 			fn->glGenFramebuffers( 1, &g.resFbo );
@@ -553,11 +573,13 @@ bool wwCellBloomRun( Scene * scene, unsigned hdrColor, unsigned ds, int W, int H
 		fn->glBindTexture( GL_TEXTURE_2D_MULTISAMPLE, g.msColor );
 		fn->glTexImage2DMultisample( GL_TEXTURE_2D_MULTISAMPLE, S, GL_RGBA16F, W, H, GL_TRUE );
 		fn->glBindTexture( GL_TEXTURE_2D_MULTISAMPLE, 0 );
-		if ( WwVkPost::ready() ) {	// lane VKFRAME1: shared images when the Vulkan route can run; else GL's own
+		if ( vkWant ) {	// lane VKFRAME1: shared images when the Vulkan route can run and the size held; else GL's own
 			g.vkTried = true;
 			QString vkWhy;
 			GLuint vsrc = 0, vring = 0, vmip[kMaxMips] = {}, vup[kMaxMips] = {};
+			const qint64 tVk = vkClock.nsecsElapsed();
 			g.vkShared = WwVkPost::makeChain( r, W, H, mipCount, dims, vsrc, vmip, vup, vring, vkWhy );
+			vkMs = double( vkClock.nsecsElapsed() - tVk ) * 1.0e-6;
 			if ( g.vkShared ) {
 				g.src = vsrc;
 				g.ring = vring;
@@ -587,6 +609,13 @@ bool wwCellBloomRun( Scene * scene, unsigned hdrColor, unsigned ds, int W, int H
 		g.h = H;
 		g.samples = S;
 		g.mipCount = mipCount;
+		const double makeMs = double( vkClock.nsecsElapsed() - tMake ) * 1.0e-6;
+		const QString route = g.vkShared ? QStringLiteral( "vulkan chain %1 ms" ).arg( vkMs, 0, 'f', 1 )
+			: vkWant ? QStringLiteral( "GL's textures, the Vulkan chain refused" )
+			: WwVkPost::ready() ? QStringLiteral( "GL's textures while the size settles (held %1 ms)" ).arg( vkHeld )
+			: QStringLiteral( "GL's textures" );
+		qInfo().noquote() << QStringLiteral( "cell bloom: targets made %1x%2 in %3 ms (free %4 ms, %5)" ).arg( W ).arg( H )
+			.arg( makeMs, 0, 'f', 1 ).arg( freeMs, 0, 'f', 1 ).arg( route );
 	}
 
 	/* state kept for the restore. lane CELLUNI4: the tone map's known state, unless the block above made the targets

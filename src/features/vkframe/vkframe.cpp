@@ -563,7 +563,12 @@ bool makeImg( Img & I, int w, int h, int layers, int levels, QString & why, VkFo
 	const GLint one = 1;
 	g.memParam( I.mem, kGlDedicatedMemoryObject, &one );
 	g.importMem( I.mem, std::uint64_t( r.size ), kGlHandleOpaqueWin32, mh );
+	const GLenum errImport = f->glGetError();	// before the close: the driver imports on its own thread later
 	CloseHandle( mh );
+	if ( errImport != GL_NO_ERROR ) {
+		why = QStringLiteral( "the GL import of a %1x%2 image's memory failed, GL error %3" ).arg( w ).arg( h ).arg( errImport );
+		return false;
+	}
 	f->glGenTextures( 1, &I.tex );
 	const GLenum target = samples > 1 ? kGlTexture2DMultisample : layers > 1 ? kGlTexture2DArray : GLenum( GL_TEXTURE_2D );
 	f->glBindTexture( target, I.tex );
@@ -637,9 +642,16 @@ bool makeSemaphore( VkSemaphore & s, GLuint & gs, QString & why )
 		why = QStringLiteral( "vkGetSemaphoreWin32HandleKHR failed" );
 		return false;
 	}
+	QOpenGLFunctions * f = QOpenGLContext::currentContext()->functions();
+	while ( f->glGetError() != GL_NO_ERROR ) {}
 	g.genSem( 1, &gs );
 	g.importSem( gs, kGlHandleOpaqueWin32, h );
+	const GLenum err = f->glGetError();	// before the close (as the memory import)
 	CloseHandle( h );
+	if ( err != GL_NO_ERROR ) {
+		why = QStringLiteral( "the GL import of a semaphore failed (GL error %1)" ).arg( err );
+		return false;
+	}
 	return true;
 }
 
@@ -1057,7 +1069,9 @@ bool makeChain( const void * key, int W, int H, int mipCount, const int dims[][2
 	unsigned & ring, QString & why )
 {
 	Dev & d = dv();
+	const double tMake = nowMs();
 	freeChain( key );
+	const double freeMs = nowMs() - tMake;
 	refusals().remove( key );
 	struct Refused	// any refusal below is remembered for the route's reason
 	{
@@ -1217,8 +1231,8 @@ bool makeChain( const void * key, int W, int H, int mipCount, const int dims[][2
 	double mb = ( double( W ) * H + double( dims[0][0] ) * dims[0][1] * kRingLayers ) * 8.0;
 	for ( int i = 0; i < mipCount; i++ )
 		mb += double( dims[i][0] ) * dims[i][1] * 8.0 * ( i + 1 < mipCount ? 2.0 : 1.0 );
-	std::fprintf( stderr, "vk post: bloom chain shared %dx%d, %d mips, %d images (%.1f MB), %d descriptor sets\n", W, H, mipCount,
-		int( c.texs.size() ), mb / 1048576.0, sets );
+	std::fprintf( stderr, "vk post: bloom chain shared %dx%d, %d mips, %d images (%.1f MB), %d descriptor sets, in %.1f ms (free %.1f ms)\n",
+		W, H, mipCount, int( c.texs.size() ), mb / 1048576.0, sets, nowMs() - tMake, freeMs );
 	return true;
 }
 
