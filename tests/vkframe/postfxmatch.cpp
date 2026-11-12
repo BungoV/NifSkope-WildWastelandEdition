@@ -5,16 +5,24 @@
 // Usage: postfxmatch <chain.txt> <spv dir> [time]
 // chain.txt:  img <name> <rgba16f|rg16f|r16f|r32f|rg32f> <w> <h> <file relative to the job's parent | ->
 //             pass <label> <spv> <pc file> <out0> <out1|-> <t0> <t1> <t2> <t3> <t4>   (- = unbound)
-//             cmp <image> <gl file> <ulp1|step|gather>
+//             cmp <image> <gl file> <ulp1|step|gather|ndc>
 // Prints a line per compare, with `time` the per-pass GPU ms (timestamps, median of 32 after 0.5 s of warm-up chains) beside
 // gl_ms.txt, then `POSTFXMATCH <job> EXACT|BOUND (...)|FAIL (...)`. Exit 0 for EXACT or BOUND.
 // POSTFXMATCH_RASTER=1: every pass as a fragment pass the way GL draws it (the kernel's PFX_RASTER build <spv>_ps.spv beside
 // pfx_vs.spv; colour attachments in the chain's formats, GENERAL, a graphics queue); =8 also puts the last pass's out0 in
 // RGBA8 (the app's LDR target; that image is not compared).
+// Round 8 (the passes after the tone map): formats rgba8 (compared by 8-bit step) and rgba32f; an img line may end `ms4`
+// (4 samples: an input's file holds the samples side by side, W x 4 wide, spread over the samples by ms_expand_ps.spv; a
+// multisampled target is timed, not compared); a pass line may end with `draw=<vertices>`, `blend=add|alpha` (GL's
+// ONE, ONE / SRC_ALPHA, ONE_MINUS_SRC_ALPHA with alpha ZERO, ONE) and `vs=<spv>` (a raster-only pass: its own vertex stage,
+// whose ps is <spv>_ps.spv as usual). Rule `ndc` (float images): every value within 2^-22 (the motion vectors).
+// Round 9: `blend=pre` (premultiplied over: ONE, ONE_MINUS_SRC_ALPHA); a pass whose spv is `blit`, `resolve` or `clear` is a
+// transfer command (t0 -> out0 nearest / the MS t0 resolved into out0 / out0 to 0; its pc is `-`), timed like a pass.
 #define VK_NO_PROTOTYPES
 #include <vulkan/vulkan.h>
 #include <windows.h>
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -37,7 +45,7 @@ VKF( vkCmdBindDescriptorSets ); VKF( vkCmdPushConstants ); VKF( vkCmdDispatch );
 VKF( vkCmdPipelineBarrier ); VKF( vkCmdCopyBufferToImage ); VKF( vkCmdCopyImageToBuffer ); VKF( vkCreateQueryPool );
 VKF( vkCmdResetQueryPool ); VKF( vkCmdWriteTimestamp ); VKF( vkGetQueryPoolResults );
 VKF( vkCreateGraphicsPipelines ); VKF( vkCreateRenderPass ); VKF( vkCreateFramebuffer ); VKF( vkCmdBeginRenderPass );
-VKF( vkCmdEndRenderPass ); VKF( vkCmdDraw );
+VKF( vkCmdEndRenderPass ); VKF( vkCmdDraw ); VKF( vkCmdBlitImage ); VKF( vkCmdResolveImage ); VKF( vkCmdClearColorImage );
 
 static VkDevice dev;
 static VkQueue queue;
@@ -88,31 +96,43 @@ static Buf makeBuf( size_t n )
 	return B;
 }
 
-struct Img { VkImage i = VK_NULL_HANDLE; VkDeviceMemory m = VK_NULL_HANDLE; VkImageView v = VK_NULL_HANDLE; int w = 0, h = 0, tb = 8; bool half = true; VkFormat f = VK_FORMAT_UNDEFINED; std::string file; };
+struct Img { VkImage i = VK_NULL_HANDLE; VkDeviceMemory m = VK_NULL_HANDLE; VkImageView v = VK_NULL_HANDLE; int w = 0, h = 0, tb = 8, cb = 2, samples = 1; bool half = true; VkFormat f = VK_FORMAT_UNDEFINED; std::string file; };
 
-struct Fmt { const char * name; VkFormat f; int tb; bool half; };
-static const Fmt kFmts[] = { { "rgba16f", VK_FORMAT_R16G16B16A16_SFLOAT, 8, true }, { "rg16f", VK_FORMAT_R16G16_SFLOAT, 4, true },
-	{ "r16f", VK_FORMAT_R16_SFLOAT, 2, true }, { "r32f", VK_FORMAT_R32_SFLOAT, 4, false }, { "rg32f", VK_FORMAT_R32G32_SFLOAT, 8, false } };
-static const Fmt kRgba8 = { "rgba8", VK_FORMAT_R8G8B8A8_UNORM, 4, false };
+// cb: bytes a channel (1 = 8-bit unorm, 2 = half, 4 = float)
+struct Fmt { const char * name; VkFormat f; int tb; bool half; int cb; };
+static const Fmt kFmts[] = { { "rgba16f", VK_FORMAT_R16G16B16A16_SFLOAT, 8, true, 2 }, { "rg16f", VK_FORMAT_R16G16_SFLOAT, 4, true, 2 },
+	{ "r16f", VK_FORMAT_R16_SFLOAT, 2, true, 2 }, { "r32f", VK_FORMAT_R32_SFLOAT, 4, false, 4 }, { "rg32f", VK_FORMAT_R32G32_SFLOAT, 8, false, 4 },
+	{ "rgba8", VK_FORMAT_R8G8B8A8_UNORM, 4, false, 1 }, { "rgba32f", VK_FORMAT_R32G32B32A32_SFLOAT, 16, false, 4 } };
+static const Fmt kRgba8 = kFmts[5];
 static int rasterMode = 0;	// POSTFXMATCH_RASTER
+// round 9: a pass whose spv is `blit` (t0 -> out0, nearest), `resolve` (MS t0 -> out0) or `clear` (out0 to 0) is a transfer
+// command, no shader (the present blit and the overlay target's clear, timed beside the composite)
+static int transferKind( const std::string & s )
+{
+	return s == "blit" ? 1 : s == "resolve" ? 2 : s == "clear" ? 3 : 0;
+}
 
-static Img makeImg( int w, int h, const Fmt & fm )
+static Img makeImg( int w, int h, const Fmt & fm, int samples = 1 )
 {
 	Img I;
 	I.w = w;
 	I.h = h;
 	I.tb = fm.tb;
+	I.cb = fm.cb;
 	I.half = fm.half;
 	I.f = fm.f;
+	I.samples = samples;
 	VkImageCreateInfo ci { VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO };
 	ci.imageType = VK_IMAGE_TYPE_2D;
 	ci.format = fm.f;
 	ci.extent = { uint32_t( w ), uint32_t( h ), 1 };
 	ci.mipLevels = 1;
 	ci.arrayLayers = 1;
-	ci.samples = VK_SAMPLE_COUNT_1_BIT;
+	ci.samples = samples == 4 ? VK_SAMPLE_COUNT_4_BIT : VK_SAMPLE_COUNT_1_BIT;
 	ci.tiling = VK_IMAGE_TILING_OPTIMAL;
-	ci.usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_STORAGE_BIT
+	ci.usage = samples > 1 ? VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT
+		| VK_IMAGE_USAGE_TRANSFER_DST_BIT
+		: VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_STORAGE_BIT
 		| ( rasterMode ? VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT : 0 );
 	ci.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
 	vkCreateImage( dev, &ci, nullptr, &I.i );
@@ -138,7 +158,7 @@ static VkDescriptorPool pool;
 static VkCommandPool cpool;
 static VkSampler samplers[2];	// linear, point
 static const uint32_t kBindings = 9;
-static const VkShaderStageFlags kStages = VK_SHADER_STAGE_COMPUTE_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+static const VkShaderStageFlags kStages = VK_SHADER_STAGE_COMPUTE_BIT | VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_VERTEX_BIT;
 
 // PostFxBindingsVk.hlsli: 0-4 sampled, 5 linear, 6 point, 7-8 storage
 static VkDescriptorType bindingType( uint32_t i )
@@ -206,16 +226,18 @@ static VkPipeline makePipe( const std::vector<uint8_t> & spv )
 // a pass as a fragment pass: a full-screen triangle into out0 (and out1), LOAD + STORE, GENERAL throughout
 struct Raster { VkRenderPass rp = VK_NULL_HANDLE; VkFramebuffer fb = VK_NULL_HANDLE; VkPipeline pipe = VK_NULL_HANDLE; };
 
-static Raster makeRaster( const std::vector<const Img *> & outs, VkShaderModule vs, VkShaderModule ps )
+// blend: 0 none, 1 add (ONE, ONE), 2 alpha (SRC_ALPHA, ONE_MINUS_SRC_ALPHA; alpha ZERO, ONE); perSample: sample shading 1.0
+static Raster makeRaster( const std::vector<const Img *> & outs, VkShaderModule vs, VkShaderModule ps, int blend = 0, bool perSample = false )
 {
 	Raster g;
 	const uint32_t n = uint32_t( outs.size() );
+	const VkSampleCountFlagBits sc4 = outs[0]->samples == 4 ? VK_SAMPLE_COUNT_4_BIT : VK_SAMPLE_COUNT_1_BIT;
 	VkAttachmentDescription at[2] {};
 	VkAttachmentReference cr[2];
 	VkImageView views[2];
 	for ( uint32_t k = 0; k < n; k++ ) {
 		at[k].format = outs[k]->f;
-		at[k].samples = VK_SAMPLE_COUNT_1_BIT;
+		at[k].samples = sc4;
 		at[k].loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
 		at[k].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
 		at[k].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
@@ -263,9 +285,19 @@ static Raster makeRaster( const std::vector<const Img *> & outs, VkShaderModule 
 	rs.cullMode = VK_CULL_MODE_NONE;
 	rs.lineWidth = 1.0f;
 	VkPipelineMultisampleStateCreateInfo ms { VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO };
-	ms.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+	ms.rasterizationSamples = sc4;
+	ms.sampleShadingEnable = perSample ? VK_TRUE : VK_FALSE;
+	ms.minSampleShading = 1.0f;
 	VkPipelineColorBlendAttachmentState cba[2] {};
-	cba[0].colorWriteMask = cba[1].colorWriteMask = 0xF;
+	for ( auto & a : cba ) {
+		a.colorWriteMask = 0xF;
+		a.blendEnable = blend ? VK_TRUE : VK_FALSE;
+		a.srcColorBlendFactor = blend == 1 || blend == 3 ? VK_BLEND_FACTOR_ONE : VK_BLEND_FACTOR_SRC_ALPHA;
+		a.dstColorBlendFactor = blend == 1 ? VK_BLEND_FACTOR_ONE : VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+		a.srcAlphaBlendFactor = blend == 1 || blend == 3 ? VK_BLEND_FACTOR_ONE : VK_BLEND_FACTOR_ZERO;
+		a.dstAlphaBlendFactor = blend == 3 ? VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA : VK_BLEND_FACTOR_ONE;
+		a.colorBlendOp = a.alphaBlendOp = VK_BLEND_OP_ADD;
+	}
 	VkPipelineColorBlendStateCreateInfo cb { VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO };
 	cb.attachmentCount = n;
 	cb.pAttachments = cba;
@@ -329,7 +361,7 @@ static int ulps( uint16_t a, uint16_t b )
 	return std::abs( ord( a ) - ord( b ) );
 }
 
-struct Pass { std::string label, spv, pc; std::string out[2], t[5]; };
+struct Pass { std::string label, spv, pc; std::string out[2], t[5]; std::string vs; int draw = 3, blend = 0; };
 struct Cmp { std::string img, file, rule; };
 
 int main( int argc, char ** argv )
@@ -357,6 +389,7 @@ int main( int argc, char ** argv )
 	std::vector<std::string> imgOrder;
 	std::map<std::string, std::pair<const Fmt *, std::pair<int, int>>> imgDecl;
 	std::map<std::string, std::string> imgFile;
+	std::map<std::string, int> imgMs;
 	std::vector<Pass> passes;
 	std::vector<Cmp> cmps;
 	{
@@ -370,9 +403,9 @@ int main( int argc, char ** argv )
 			std::string k;
 			l >> k;
 			if ( k == "img" ) {
-				std::string n, f, file;
+				std::string n, f, file, opt;
 				int w = 0, h = 0;
-				l >> n >> f >> w >> h >> file;
+				l >> n >> f >> w >> h >> file >> opt;
 				const Fmt * fm = nullptr;
 				for ( const Fmt & x : kFmts )
 					if ( f == x.name )
@@ -382,11 +415,28 @@ int main( int argc, char ** argv )
 				imgOrder.push_back( n );
 				imgDecl[n] = { fm, { w, h } };
 				imgFile[n] = file;
+				if ( opt == "ms4" )
+					imgMs[n] = 4;
 			} else if ( k == "pass" ) {
 				Pass p;
 				l >> p.label >> p.spv >> p.pc >> p.out[0] >> p.out[1];
 				for ( auto & t : p.t )
 					l >> t;
+				std::string o;
+				while ( l >> o ) {
+					if ( o.rfind( "draw=", 0 ) == 0 )
+						p.draw = std::atoi( o.c_str() + 5 );
+					else if ( o == "blend=add" )
+						p.blend = 1;
+					else if ( o == "blend=alpha" )
+						p.blend = 2;
+					else if ( o == "blend=pre" )	// premultiplied over: ONE, ONE_MINUS_SRC_ALPHA (the overlay target)
+						p.blend = 3;
+					else if ( o.rfind( "vs=", 0 ) == 0 )
+						p.vs = o.substr( 3 );
+					else
+						return fail( "pass option" );
+				}
 				passes.push_back( p );
 			} else if ( k == "cmp" ) {
 				Cmp c;
@@ -395,7 +445,7 @@ int main( int argc, char ** argv )
 			}
 		}
 	}
-	if ( passes.empty() || cmps.empty() )
+	if ( passes.empty() || ( cmps.empty() && !timeIt ) )	// a tm_* job is timed, never compared
 		return fail( "chain has no pass or no compare" );
 
 	HMODULE lib = LoadLibraryA( "vulkan-1.dll" );
@@ -441,7 +491,7 @@ int main( int argc, char ** argv )
 	vkGetPhysicalDeviceQueueFamilyProperties( phys, &nq, qf.data() );
 	family = UINT32_MAX;
 	for ( uint32_t i = 0; family == UINT32_MAX && i < nq; i++ )
-		if ( rasterMode ? ( qf[i].queueFlags & VK_QUEUE_GRAPHICS_BIT ) && qf[i].timestampValidBits
+		if ( rasterMode || !imgMs.empty() ? ( qf[i].queueFlags & VK_QUEUE_GRAPHICS_BIT ) && qf[i].timestampValidBits
 						: ( qf[i].queueFlags & VK_QUEUE_COMPUTE_BIT ) && !( qf[i].queueFlags & VK_QUEUE_GRAPHICS_BIT ) && qf[i].timestampValidBits )
 			family = i;
 	for ( uint32_t i = 0; family == UINT32_MAX && i < nq; i++ )
@@ -472,9 +522,12 @@ int main( int argc, char ** argv )
 	LOADD( vkCmdCopyBufferToImage ); LOADD( vkCmdCopyImageToBuffer ); LOADD( vkCreateQueryPool ); LOADD( vkCmdResetQueryPool );
 	LOADD( vkCmdWriteTimestamp ); LOADD( vkGetQueryPoolResults );
 	LOADD( vkCreateGraphicsPipelines ); LOADD( vkCreateRenderPass ); LOADD( vkCreateFramebuffer ); LOADD( vkCmdBeginRenderPass );
-	LOADD( vkCmdEndRenderPass ); LOADD( vkCmdDraw );
+	LOADD( vkCmdEndRenderPass ); LOADD( vkCmdDraw ); LOADD( vkCmdBlitImage ); LOADD( vkCmdResolveImage ); LOADD( vkCmdClearColorImage );
 	vkGetDeviceQueue( dev, family, 0, &queue );
-	if ( !makeLayout( uint32_t( passes.size() ) ) )
+	for ( const Pass & p : passes )
+		if ( !p.vs.empty() && !rasterMode )
+			return fail( "a raster-only pass (vs=) needs POSTFXMATCH_RASTER" );
+	if ( !makeLayout( uint32_t( passes.size() + imgMs.size() ) ) )
 		return fail( "layout" );
 
 	// images, all to GENERAL; a 1x1 dummy for unbound slots
@@ -483,15 +536,28 @@ int main( int argc, char ** argv )
 	const std::string ldr = rasterMode == 8 ? passes.back().out[0] : std::string();	// the LDR target in RGBA8
 	for ( const std::string & n : imgOrder ) {
 		const auto & d = imgDecl[n];
-		imgs[n] = makeImg( d.second.first, d.second.second, n == ldr ? kRgba8 : *d.first );
+		imgs[n] = makeImg( d.second.first, d.second.second, n == ldr ? kRgba8 : *d.first, imgMs.count( n ) ? imgMs[n] : 1 );
 		imgs[n].file = imgFile[n];
-		maxBytes = std::max( maxBytes, size_t( d.second.first ) * d.second.second * d.first->tb );
+		maxBytes = std::max( maxBytes, size_t( d.second.first ) * d.second.second * d.first->tb * imgs[n].samples );
 	}
 	const Img dummy = makeImg( 1, 1, kFmts[0] );
+	// a multisampled input's samples side by side (W x 4 wide), and a single-sample stand-in for an MS target's storage slot
+	std::map<std::string, Img> msFlat, msShadow;
+	for ( auto & kv : imgs )
+		if ( kv.second.samples > 1 ) {
+			const Fmt & fm = *imgDecl[kv.first].first;
+			if ( kv.second.file != "-" )
+				msFlat[kv.first] = makeImg( kv.second.w * kv.second.samples, kv.second.h, fm );
+			msShadow[kv.first] = makeImg( kv.second.w, kv.second.h, kFmts[0] );
+		}
 	{
 		VkCommandBuffer cb = newCb();
 		std::vector<VkImage> all { dummy.i };
 		for ( auto & kv : imgs )
+			all.push_back( kv.second.i );
+		for ( auto & kv : msFlat )
+			all.push_back( kv.second.i );
+		for ( auto & kv : msShadow )
 			all.push_back( kv.second.i );
 		for ( VkImage x : all ) {
 			VkImageMemoryBarrier ib { VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER };
@@ -508,10 +574,10 @@ int main( int argc, char ** argv )
 	}
 	Buf stage = makeBuf( maxBytes + 256 );
 	for ( const std::string & n : imgOrder ) {
-		Img & x = imgs[n];
-		if ( x.file == "-" )
+		Img & x = msFlat.count( n ) ? msFlat[n] : imgs[n];
+		if ( imgs[n].file == "-" )
 			continue;
-		const std::vector<uint8_t> f = readFile( parent + x.file );
+		const std::vector<uint8_t> f = readFile( parent + imgs[n].file );
 		const size_t want = size_t( x.w ) * x.h * x.tb;
 		if ( f.size() != want + 8 || reinterpret_cast<const int32_t *>( f.data() )[0] != x.w
 			|| reinterpret_cast<const int32_t *>( f.data() )[1] != x.h ) {
@@ -528,6 +594,52 @@ int main( int argc, char ** argv )
 		submitWait( cb );
 	}
 
+	// each multisampled input: sample s of pixel (x, y) = column x * S + s of its flat upload, drawn per sample (exact copies)
+	for ( auto & kv : msFlat ) {
+		const Img & ms = imgs[kv.first];
+		const VkShaderModule vs = loadModule( spvDir + "pfx_vs.spv" ), ps = loadModule( spvDir + "ms_expand_ps.spv" );
+		const Raster ex = vs && ps ? makeRaster( { &ms }, vs, ps, 0, true ) : Raster();
+		if ( ex.pipe == VK_NULL_HANDLE )
+			return fail( "ms_expand_ps.spv / pfx_vs.spv missing or no pipeline" );
+		VkDescriptorSet set;
+		VkDescriptorSetAllocateInfo ai { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO };
+		ai.descriptorPool = pool;
+		ai.descriptorSetCount = 1;
+		ai.pSetLayouts = &setLayout;
+		vkAllocateDescriptorSets( dev, &ai, &set );
+		VkDescriptorImageInfo ii[kBindings];
+		VkWriteDescriptorSet wr[kBindings];
+		for ( uint32_t i = 0; i < kBindings; i++ ) {
+			if ( i == 5 || i == 6 )
+				ii[i] = VkDescriptorImageInfo { samplers[i - 5], VK_NULL_HANDLE, VK_IMAGE_LAYOUT_UNDEFINED };
+			else
+				ii[i] = VkDescriptorImageInfo { VK_NULL_HANDLE, i == 0 ? kv.second.v : i >= 7 ? msShadow[kv.first].v : dummy.v,
+					VK_IMAGE_LAYOUT_GENERAL };
+			wr[i] = VkWriteDescriptorSet { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
+			wr[i].dstSet = set;
+			wr[i].dstBinding = i;
+			wr[i].descriptorCount = 1;
+			wr[i].descriptorType = bindingType( i );
+			wr[i].pImageInfo = &ii[i];
+		}
+		vkUpdateDescriptorSets( dev, kBindings, wr, 0, nullptr );
+		VkCommandBuffer cb = newCb();
+		VkRenderPassBeginInfo rb { VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO };
+		rb.renderPass = ex.rp;
+		rb.framebuffer = ex.fb;
+		rb.renderArea = { { 0, 0 }, { uint32_t( ms.w ), uint32_t( ms.h ) } };
+		vkCmdBeginRenderPass( cb, &rb, VK_SUBPASS_CONTENTS_INLINE );
+		vkCmdBindPipeline( cb, VK_PIPELINE_BIND_POINT_GRAPHICS, ex.pipe );
+		vkCmdBindDescriptorSets( cb, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeLayout, 0, 1, &set, 0, nullptr );
+		int32_t pc[32] = {};
+		pc[28] = ms.samples;	// PfxJob.i.x
+		vkCmdPushConstants( cb, pipeLayout, kStages, 0, 128, pc );
+		vkCmdDraw( cb, 3, 1, 0, 0 );
+		vkCmdEndRenderPass( cb );
+		vkEndCommandBuffer( cb );
+		submitWait( cb );
+	}
+
 	// one set, one pipeline, one push block a pass
 	std::map<std::string, VkPipeline> pipes;
 	std::vector<VkDescriptorSet> sets( passes.size() );
@@ -535,8 +647,14 @@ int main( int argc, char ** argv )
 	std::vector<Raster> rasters( passes.size() );
 	for ( size_t k = 0; k < passes.size(); k++ ) {
 		const Pass & p = passes[k];
+		if ( transferKind( p.spv ) ) {
+			if ( !imgs.count( p.out[0] ) || ( p.spv != "clear" && !imgs.count( p.t[0] ) ) )
+				return fail( "transfer pass image" );
+			continue;
+		}
 		if ( rasterMode ) {
-			static const VkShaderModule vs = loadModule( spvDir + "pfx_vs.spv" );
+			static const VkShaderModule pfxVs = loadModule( spvDir + "pfx_vs.spv" );
+			const VkShaderModule vs = p.vs.empty() ? pfxVs : loadModule( spvDir + p.vs );
 			const VkShaderModule ps = loadModule( spvDir + p.spv.substr( 0, p.spv.size() - 4 ) + "_ps.spv" );
 			if ( !imgs.count( p.out[0] ) || ( p.out[1] != "-" && !imgs.count( p.out[1] ) ) )
 				return fail( "pass target" );
@@ -544,7 +662,7 @@ int main( int argc, char ** argv )
 			if ( p.out[1] != "-" )
 				outs.push_back( &imgs[p.out[1]] );
 			if ( vs == VK_NULL_HANDLE || ps == VK_NULL_HANDLE
-				|| ( rasters[k] = makeRaster( outs, vs, ps ) ).pipe == VK_NULL_HANDLE ) {
+				|| ( rasters[k] = makeRaster( outs, vs, ps, p.blend ) ).pipe == VK_NULL_HANDLE ) {
 				std::printf( "pass %s: raster spv for %s missing or no pipeline\n", p.label.c_str(), p.spv.c_str() );
 				return fail( "raster pipeline" );
 			}
@@ -574,7 +692,8 @@ int main( int argc, char ** argv )
 					std::printf( "pass %s: no image %s\n", p.label.c_str(), n.c_str() );
 					return fail( "pass image" );
 				}
-				ii[i] = VkDescriptorImageInfo { VK_NULL_HANDLE, n == "-" ? dummy.v : imgs[n].v, VK_IMAGE_LAYOUT_GENERAL };
+				const bool shadow = i >= 7 && n != "-" && msShadow.count( n );	// an MS target cannot be a storage image
+				ii[i] = VkDescriptorImageInfo { VK_NULL_HANDLE, n == "-" ? dummy.v : shadow ? msShadow[n].v : imgs[n].v, VK_IMAGE_LAYOUT_GENERAL };
 			} else
 				ii[i] = VkDescriptorImageInfo { samplers[i - 5], VK_NULL_HANDLE, VK_IMAGE_LAYOUT_UNDEFINED };
 			wr[i] = VkWriteDescriptorSet { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
@@ -599,7 +718,27 @@ int main( int argc, char ** argv )
 	for ( size_t k = 0; k < passes.size(); k++ ) {
 		const Img & o = imgs[passes[k].out[0]];
 		VkMemoryBarrier mb { VK_STRUCTURE_TYPE_MEMORY_BARRIER };
-		if ( rasterMode ) {
+		if ( const int tk = transferKind( passes[k].spv ) ) {
+			const VkImageSubresourceLayers sl { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
+			if ( tk == 3 ) {
+				const VkClearColorValue cc {};
+				const VkImageSubresourceRange sr { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
+				vkCmdClearColorImage( run, o.i, VK_IMAGE_LAYOUT_GENERAL, &cc, 1, &sr );
+			} else if ( tk == 2 ) {
+				const Img & s = imgs[passes[k].t[0]];
+				const VkImageResolve r { sl, {}, sl, {}, { uint32_t( o.w ), uint32_t( o.h ), 1 } };
+				vkCmdResolveImage( run, s.i, VK_IMAGE_LAYOUT_GENERAL, o.i, VK_IMAGE_LAYOUT_GENERAL, 1, &r );
+			} else {
+				const Img & s = imgs[passes[k].t[0]];
+				VkImageBlit b { sl, { {}, { s.w, s.h, 1 } }, sl, { {}, { o.w, o.h, 1 } } };
+				vkCmdBlitImage( run, s.i, VK_IMAGE_LAYOUT_GENERAL, o.i, VK_IMAGE_LAYOUT_GENERAL, 1, &b, VK_FILTER_NEAREST );
+			}
+			mb.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+			mb.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT
+				| VK_ACCESS_TRANSFER_READ_BIT | VK_ACCESS_TRANSFER_WRITE_BIT;
+			vkCmdPipelineBarrier( run, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT
+				| VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 1, &mb, 0, nullptr, 0, nullptr );
+		} else if ( rasterMode ) {
 			VkRenderPassBeginInfo rb { VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO };
 			rb.renderPass = rasters[k].rp;
 			rb.framebuffer = rasters[k].fb;
@@ -608,7 +747,7 @@ int main( int argc, char ** argv )
 			vkCmdBindPipeline( run, VK_PIPELINE_BIND_POINT_GRAPHICS, rasters[k].pipe );
 			vkCmdBindDescriptorSets( run, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeLayout, 0, 1, &sets[k], 0, nullptr );
 			vkCmdPushConstants( run, pipeLayout, kStages, 0, 128, pcs[k].data() );
-			vkCmdDraw( run, 3, 1, 0, 0 );
+			vkCmdDraw( run, uint32_t( passes[k].draw ), 1, 0, 0 );
 			vkCmdEndRenderPass( run );
 			mb.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
 			mb.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT
@@ -638,8 +777,12 @@ int main( int argc, char ** argv )
 			std::printf( "%s: RGBA8 (POSTFXMATCH_RASTER=8), not compared\n", c.img.c_str() );
 			continue;
 		}
-		if ( !imgs.count( c.img ) || !imgs[c.img].half )
+		if ( !imgs.count( c.img ) )
 			return fail( "compare image" );
+		if ( imgs[c.img].samples > 1 ) {
+			std::printf( "%s: multisampled target, timed, not compared\n", c.img.c_str() );
+			continue;
+		}
 		const Img & x = imgs[c.img];
 		const std::vector<uint8_t> g = readFile( dir + c.file );
 		const size_t bytes = size_t( x.w ) * x.h * x.tb;
@@ -655,8 +798,9 @@ int main( int argc, char ** argv )
 		vkCmdCopyImageToBuffer( cb, x.i, VK_IMAGE_LAYOUT_GENERAL, rb.b, 1, &bc );
 		vkEndCommandBuffer( cb );
 		submitWait( cb );
-		const uint16_t * v = static_cast<const uint16_t *>( rb.p );
-		const uint16_t * gp = reinterpret_cast<const uint16_t *>( g.data() + 8 );
+		const uint8_t * vb = static_cast<const uint8_t *>( rb.p );
+		const uint8_t * gb = g.data() + 8;
+		const void * v = vb;
 		if ( std::getenv( "POSTFXMATCH_DUMP" ) )	// vk_<image>.bin beside gl_<image>.bin, for a difference map
 			if ( FILE * f = std::fopen( ( dir + "vk_" + c.img + ".bin" ).c_str(), "wb" ) ) {
 				const int32_t wh[2] = { x.w, x.h };
@@ -664,19 +808,44 @@ int main( int argc, char ** argv )
 				std::fwrite( v, 1, bytes, f );
 				std::fclose( f );
 			}
-		const size_t n = bytes / 2;
-		const int ch = x.tb / 2;
+		// one value: a half (ulps), an 8-bit level, or a float (ordered bit distance, capped)
+		const int cbv = x.cb;
+		auto raw = [cbv]( const uint8_t * p, size_t k ) -> uint32_t {
+			uint32_t r = 0;
+			std::memcpy( &r, p + k * cbv, size_t( cbv ) );
+			return r;
+		};
+		auto dist = [cbv]( uint32_t a, uint32_t b ) -> int {
+			if ( cbv == 2 )
+				return ulps( uint16_t( a ), uint16_t( b ) );
+			if ( cbv == 1 )
+				return std::abs( int( a ) - int( b ) );
+			auto nanf = []( uint32_t x ) { return ( x & 0x7F800000u ) == 0x7F800000u && ( x & 0x007FFFFFu ); };
+			if ( nanf( a ) || nanf( b ) )
+				return nanf( a ) == nanf( b ) ? 0 : 1 << 20;
+			auto ord = []( uint32_t x ) { return ( x & 0x80000000u ) ? -int64_t( x & 0x7FFFFFFFu ) : int64_t( x ); };
+			return int( std::min<int64_t>( std::llabs( ord( a ) - ord( b ) ), 1 << 20 ) );
+		};
+		const size_t n = bytes / size_t( cbv );
+		const int ch = x.tb / cbv;
 		size_t d = 0, big = 0, nz = 0;
 		int mu = 0;
 		long firstBad = -1;
+		double maxAbs = 0.0;	// floats: the largest absolute difference (the ndc rule)
 		for ( size_t k = 0; k < n; k++ ) {
-			const int u = ulps( v[k], gp[k] );
+			const int u = dist( raw( vb, k ), raw( gb, k ) );
+			if ( cbv == 4 && u ) {
+				float fv, fg;
+				std::memcpy( &fv, vb + k * 4, 4 );
+				std::memcpy( &fg, gb + k * 4, 4 );
+				maxAbs = std::max( maxAbs, std::fabs( double( fv ) - double( fg ) ) );
+			}
 			d += u != 0;
 			big += u > 1;
 			if ( u > 1 && firstBad < 0 )
 				firstBad = long( k );
 			mu = std::max( mu, u );
-			nz += ( gp[k] & 0x7FFF ) != 0;
+			nz += ( raw( gb, k ) & ( cbv == 1 ? 0xFFu : cbv == 2 ? 0x7FFFu : 0x7FFFFFFFu ) ) != 0;
 		}
 		diffAll += d;
 		valuesAll += n;
@@ -685,14 +854,20 @@ int main( int argc, char ** argv )
 		/* gather (the object blur): any count at 1 ulp (the alpha is wsum / wsum, which either side's divide leaves 1 or
 		 * 1 - 1 ulp, the truncating store makes it a half ulp; measured 77410 of the 77919), <= 0.01 % by more than 1 ulp
 		 * (a sample position flipped by a last-bit jitter) */
-		const bool pass = mu <= 1 || ( c.rule == "step" && d * 200 <= n && big * 1000 <= n ) || ( c.rule == "gather" && big * 10000 <= n );
+		/* ndc (the motion vectors, floats): (p.xy / p.w - ndc.xy) * 0.5 is a difference of two values near 1, so its ulps say
+		 * nothing; bound: every value within 2^-22 (two last bits of a unit NDC, 1 / 4.2M of the screen; measured 1.197e-7) */
+		const bool pass = mu <= 1 || ( c.rule == "step" && d * 200 <= n && big * 1000 <= n ) || ( c.rule == "gather" && big * 10000 <= n )
+			|| ( c.rule == "ndc" && cbv == 4 && maxAbs <= 1.0 / 4194304.0 );
 		exact = exact && d == 0;
 		ok = ok && pass;
-		std::printf( "%s %dx%d [%s]: %zu of %zu halves differ, %zu by > 1 ulp, max %d ulp (GL non-zero %zu)%s", c.img.c_str(), x.w, x.h,
-			c.rule.c_str(), d, n, big, mu, nz, pass ? "" : " OUT");
+		std::printf( "%s %dx%d [%s]: %zu of %zu %s differ, %zu by > 1 %s, max %d (GL non-zero %zu)%s", c.img.c_str(), x.w, x.h,
+			c.rule.c_str(), d, n, cbv == 2 ? "halves" : cbv == 1 ? "8-bit values" : "floats", big, cbv == 1 ? "level" : "ulp", mu, nz,
+			pass ? "" : " OUT");
+		if ( cbv == 4 )
+			std::printf( "; max abs %.4g", maxAbs );
 		if ( firstBad >= 0 )
-			std::printf( "; first > 1 ulp at x %ld y %ld ch %ld: vk 0x%04x gl 0x%04x", ( firstBad / ch ) % x.w, ( firstBad / ch ) / x.w,
-				firstBad % ch, v[firstBad], gp[firstBad] );
+			std::printf( "; first > 1 at x %ld y %ld ch %ld: vk 0x%x gl 0x%x", ( firstBad / ch ) % x.w, ( firstBad / ch ) / x.w,
+				firstBad % ch, raw( vb, size_t( firstBad ) ), raw( gb, size_t( firstBad ) ) );
 		std::printf( "\n" );
 	}
 

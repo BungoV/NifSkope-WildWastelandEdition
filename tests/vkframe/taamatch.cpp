@@ -32,10 +32,13 @@ VKF( vkCmdBindDescriptorSets ); VKF( vkCmdPushConstants ); VKF( vkCmdDispatch );
 VKF( vkCmdPipelineBarrier ); VKF( vkCmdCopyBufferToImage ); VKF( vkCmdCopyImageToBuffer ); VKF( vkCreateQueryPool );
 VKF( vkCmdResetQueryPool ); VKF( vkCmdWriteTimestamp ); VKF( vkGetQueryPoolResults );
 VKF( vkCreateGraphicsPipelines ); VKF( vkCreateRenderPass ); VKF( vkCreateFramebuffer ); VKF( vkCmdBeginRenderPass );
-VKF( vkCmdEndRenderPass ); VKF( vkCmdDraw );
+VKF( vkCmdEndRenderPass ); VKF( vkCmdDraw ); VKF( vkCmdFillBuffer );
 
 static VkDevice dev;
 static bool raster = false;	// TAAMATCH_RASTER
+// TAAMATCH_OPT=1 (raster only): the targets are plain colour attachments (no STORAGE usage, so the driver may compress
+// them), DONT_CARE loads, inputs in SHADER_READ_ONLY_OPTIMAL: the layout GL's own textures and FBOs get
+static int opt = 0;
 static const VkShaderStageFlags kStages = VK_SHADER_STAGE_COMPUTE_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
 static VkPhysicalDevice phys;
 static VkQueue queue;
@@ -86,7 +89,7 @@ static uint32_t memType( uint32_t bits, VkMemoryPropertyFlags want )
 
 struct Buf { VkBuffer b = VK_NULL_HANDLE; VkDeviceMemory m = VK_NULL_HANDLE; void * p = nullptr; size_t n = 0; };
 
-static Buf makeBuf( size_t n )
+static Buf makeBuf( size_t n, bool deviceLocal = false )
 {
 	Buf B;
 	B.n = n;
@@ -98,10 +101,12 @@ static Buf makeBuf( size_t n )
 	vkGetBufferMemoryRequirements( dev, B.b, &r );
 	VkMemoryAllocateInfo ai { VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO };
 	ai.allocationSize = r.size;
-	ai.memoryTypeIndex = memType( r.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT );
+	ai.memoryTypeIndex = memType( r.memoryTypeBits, deviceLocal ? VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
+		: VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT );
 	vkAllocateMemory( dev, &ai, nullptr, &B.m );
 	vkBindBufferMemory( dev, B.b, B.m, 0 );
-	vkMapMemory( dev, B.m, 0, VK_WHOLE_SIZE, 0, &B.p );
+	if ( !deviceLocal )
+		vkMapMemory( dev, B.m, 0, VK_WHOLE_SIZE, 0, &B.p );
 	return B;
 }
 
@@ -121,7 +126,8 @@ static Img makeImg( int w, int h, VkFormat fmt, bool storage )
 	ci.samples = VK_SAMPLE_COUNT_1_BIT;
 	ci.tiling = VK_IMAGE_TILING_OPTIMAL;
 	ci.usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT
-		| ( storage ? VK_IMAGE_USAGE_STORAGE_BIT | ( raster ? VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT : 0 ) : 0 );
+		| ( storage ? ( opt ? 0 : VK_IMAGE_USAGE_STORAGE_BIT ) | ( raster ? VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT : 0 ) : 0 )
+		| ( opt >= 2 ? VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT : 0 );	// 2: the inputs are render targets too (GL's textures are)
 	ci.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
 	vkCreateImage( dev, &ci, nullptr, &I.i );
 	VkMemoryRequirements r;
@@ -230,12 +236,13 @@ static Raster makeRaster( const Img * outs, int W, int H, VkShaderModule vs, VkS
 	for ( uint32_t k = 0; k < 3; k++ ) {
 		at[k].format = VK_FORMAT_R16G16B16A16_SFLOAT;
 		at[k].samples = VK_SAMPLE_COUNT_1_BIT;
-		at[k].loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
+		at[k].loadOp = opt ? VK_ATTACHMENT_LOAD_OP_DONT_CARE : VK_ATTACHMENT_LOAD_OP_LOAD;
 		at[k].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
 		at[k].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
 		at[k].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-		at[k].initialLayout = at[k].finalLayout = VK_IMAGE_LAYOUT_GENERAL;
-		cr[k] = { k, VK_IMAGE_LAYOUT_GENERAL };
+		at[k].initialLayout = opt ? VK_IMAGE_LAYOUT_UNDEFINED : VK_IMAGE_LAYOUT_GENERAL;
+		at[k].finalLayout = opt ? VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL : VK_IMAGE_LAYOUT_GENERAL;
+		cr[k] = { k, opt ? VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL : VK_IMAGE_LAYOUT_GENERAL };
 		views[k] = outs[k].v;
 	}
 	VkSubpassDescription sp {};
@@ -375,6 +382,10 @@ int main( int argc, char ** argv )
 	name = name.substr( name.find_last_of( "/\\" ) + 1 );
 	const char * rasterVs = std::getenv( "TAAMATCH_RASTER" );
 	raster = rasterVs && rasterVs[0];
+	if ( const char * o = std::getenv( "TAAMATCH_OPT" ) )
+		opt = raster ? std::atoi( o ) : 0;
+	if ( opt )
+		name += " opt";
 	if ( raster )
 		name += " raster";
 	Job job {};
@@ -482,7 +493,7 @@ int main( int argc, char ** argv )
 	LOADD( vkCmdCopyBufferToImage ); LOADD( vkCmdCopyImageToBuffer ); LOADD( vkCreateQueryPool ); LOADD( vkCmdResetQueryPool );
 	LOADD( vkCmdWriteTimestamp ); LOADD( vkGetQueryPoolResults );
 	LOADD( vkCreateGraphicsPipelines ); LOADD( vkCreateRenderPass ); LOADD( vkCreateFramebuffer ); LOADD( vkCmdBeginRenderPass );
-	LOADD( vkCmdEndRenderPass ); LOADD( vkCmdDraw );
+	LOADD( vkCmdEndRenderPass ); LOADD( vkCmdDraw ); LOADD( vkCmdFillBuffer );
 	vkGetDeviceQueue( dev, family, 0, &queue );
 	if ( !makeLayout() ) {
 		std::printf( "TAAMATCH %s FAIL (layout)\n", name.c_str() );
@@ -519,7 +530,9 @@ int main( int argc, char ** argv )
 			VkImageMemoryBarrier ib { VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER };
 			ib.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT | VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
 			ib.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-			ib.newLayout = VK_IMAGE_LAYOUT_GENERAL;
+			// 3: the inputs are uploaded in TRANSFER_DST_OPTIMAL (GENERAL may keep the driver from compressing them)
+			ib.newLayout = opt >= 3 && x != &out[0] && x != &out[1] && x != &out[2] ? VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
+				: VK_IMAGE_LAYOUT_GENERAL;
 			ib.srcQueueFamilyIndex = ib.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
 			ib.image = x->i;
 			ib.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
@@ -537,7 +550,7 @@ int main( int argc, char ** argv )
 		VkBufferImageCopy c {};
 		c.imageSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
 		c.imageExtent = { uint32_t( d.w ), uint32_t( d.h ), 1 };
-		vkCmdCopyBufferToImage( cb, stage.b, x.i, VK_IMAGE_LAYOUT_GENERAL, 1, &c );
+		vkCmdCopyBufferToImage( cb, stage.b, x.i, opt >= 3 ? VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL : VK_IMAGE_LAYOUT_GENERAL, 1, &c );
 		vkEndCommandBuffer( cb );
 		submitWait( cb );
 	};
@@ -548,6 +561,28 @@ int main( int argc, char ** argv )
 	upload( mv, iMv );
 	upload( vel, iVel );
 	upload( depth, iDepth );
+	const VkImageLayout inLayout = opt ? VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL : VK_IMAGE_LAYOUT_GENERAL;
+	auto toLayout = [&]( Img * const * xs, int n, VkImageLayout from, VkImageLayout to ) {
+		VkCommandBuffer cb = newCb();
+		VkCommandBufferBeginInfo bi { VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
+		vkBeginCommandBuffer( cb, &bi );
+		for ( int k = 0; k < n; k++ ) {
+			VkImageMemoryBarrier ib { VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER };
+			ib.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+			ib.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_TRANSFER_READ_BIT;
+			ib.oldLayout = from;
+			ib.newLayout = to;
+			ib.srcQueueFamilyIndex = ib.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+			ib.image = xs[k]->i;
+			ib.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
+			vkCmdPipelineBarrier( cb, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 0, nullptr, 0, nullptr, 1,
+				&ib );
+		}
+		vkEndCommandBuffer( cb );
+		submitWait( cb );
+	};
+	if ( opt )
+		toLayout( all, 7, opt >= 3 ? VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL : VK_IMAGE_LAYOUT_GENERAL, inLayout );
 
 	VkDescriptorSetAllocateInfo ai { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO };
 	ai.descriptorPool = pool;
@@ -561,7 +596,7 @@ int main( int argc, char ** argv )
 	VkWriteDescriptorSet wr[kBindings];
 	for ( uint32_t i = 0; i < kBindings; i++ ) {
 		ii[i] = i == 7 ? VkDescriptorImageInfo { linearClamp, VK_NULL_HANDLE, VK_IMAGE_LAYOUT_UNDEFINED }
-			: VkDescriptorImageInfo { VK_NULL_HANDLE, views[i], VK_IMAGE_LAYOUT_GENERAL };
+			: VkDescriptorImageInfo { VK_NULL_HANDLE, views[i], i < 7 ? inLayout : VK_IMAGE_LAYOUT_GENERAL };
 		wr[i] = VkWriteDescriptorSet { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
 		wr[i].dstSet = set;
 		wr[i].dstBinding = i;
@@ -569,7 +604,7 @@ int main( int argc, char ** argv )
 		wr[i].descriptorType = bindingType( i );
 		wr[i].pImageInfo = &ii[i];
 	}
-	vkUpdateDescriptorSets( dev, kBindings, wr, 0, nullptr );
+	vkUpdateDescriptorSets( dev, opt ? 8 : kBindings, wr, 0, nullptr );	// opt: the ps never reads the storage outputs
 
 	VkQueryPoolCreateInfo qpi { VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO };
 	qpi.queryType = VK_QUERY_TYPE_TIMESTAMP;
@@ -625,7 +660,18 @@ int main( int argc, char ** argv )
 		VkBufferImageCopy c {};
 		c.imageSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
 		c.imageExtent = { uint32_t( W ), uint32_t( H ), 1 };
-		vkCmdCopyImageToBuffer( cb, out[o].i, VK_IMAGE_LAYOUT_GENERAL, rb.b, 1, &c );
+		if ( opt ) {
+			VkImageMemoryBarrier ib { VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER };
+			ib.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+			ib.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+			ib.oldLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+			ib.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+			ib.srcQueueFamilyIndex = ib.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+			ib.image = out[o].i;
+			ib.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
+			vkCmdPipelineBarrier( cb, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1, &ib );
+		}
+		vkCmdCopyImageToBuffer( cb, out[o].i, opt ? VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL : VK_IMAGE_LAYOUT_GENERAL, rb.b, 1, &c );
 		vkEndCommandBuffer( cb );
 		submitWait( cb );
 		const uint16_t * v = static_cast<const uint16_t *>( rb.p );
@@ -653,8 +699,57 @@ int main( int argc, char ** argv )
 		std::printf( "\n" );
 	}
 
+	/* TAAMATCH_OPT=4 (timing only): the frame's own shape. Resolve A runs as above (untimed); the timed resolve B reads
+	 * A's attachments as its frame (o1), history (o0) and lock (o2), the way next frame's resolve reads this one's, so its
+	 * inputs are render targets the driver wrote, not copies. B's outputs are fresh attachments. */
+	if ( opt >= 4 ) {
+		Img outB[3] = { makeImg( W, H, F16, true ), makeImg( W, H, F16, true ), makeImg( W, H, F16, true ) };
+		const Raster rpB = makeRaster( outB, W, H, module( readSpv( rasterVs ) ), module( spv ) );
+		VkDescriptorSet setB;
+		vkAllocateDescriptorSets( dev, &ai, &setB );
+		const VkImageView viewsB[kBindings] = { out[1].v, out[0].v, iMv.v, iDepth.v, out[2].v, iVel.v, iMask.v, VK_NULL_HANDLE };
+		for ( uint32_t i = 0; i < 8; i++ ) {
+			ii[i].imageView = viewsB[i];
+			wr[i].dstSet = setB;
+		}
+		vkUpdateDescriptorSets( dev, 8, wr, 0, nullptr );
+		VkCommandBuffer chain = newCb();
+		VkCommandBufferBeginInfo bi { VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
+		vkBeginCommandBuffer( chain, &bi );
+		vkCmdResetQueryPool( chain, qp, 0, 2 );
+		for ( int k = 0; k < 2; k++ ) {
+			if ( k == 1 ) {
+				if ( opt >= 5 ) {	// 5: 192 MB of buffer writes between A and B, so B's reads start from DRAM, not A's L2
+					static Buf evict = makeBuf( size_t( 192 ) << 20, true );
+					vkCmdFillBuffer( chain, evict.b, 0, VK_WHOLE_SIZE, 0x3c003c00u );
+				}
+				VkMemoryBarrier mb { VK_STRUCTURE_TYPE_MEMORY_BARRIER };
+				mb.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+				mb.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+				vkCmdPipelineBarrier( chain, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_TRANSFER_BIT,
+					VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, 0, 1, &mb,
+					0, nullptr, 0, nullptr );
+				vkCmdWriteTimestamp( chain, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, qp, 0 );
+			}
+			VkRenderPassBeginInfo rb { VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO };
+			rb.renderPass = k ? rpB.rp : rp.rp;
+			rb.framebuffer = k ? rpB.fb : rp.fb;
+			rb.renderArea = { { 0, 0 }, { uint32_t( W ), uint32_t( H ) } };
+			vkCmdBeginRenderPass( chain, &rb, VK_SUBPASS_CONTENTS_INLINE );
+			vkCmdBindPipeline( chain, VK_PIPELINE_BIND_POINT_GRAPHICS, k ? rpB.pipe : rp.pipe );
+			vkCmdBindDescriptorSets( chain, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeLayout, 0, 1, k ? &setB : &set, 0, nullptr );
+			vkCmdPushConstants( chain, pipeLayout, kStages, 0, sizeof( Job ), &job );
+			vkCmdDraw( chain, 3, 1, 0, 0 );
+			vkCmdEndRenderPass( chain );
+		}
+		vkCmdWriteTimestamp( chain, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, qp, 1 );
+		vkEndCommandBuffer( chain );
+		run = chain;
+	}
+
 	// 0.5 s of resolves first: after the CPU compare the GPU had clocked down and read 0.31 ms for a 0.16 ms resolve
-	for ( const DWORD t0 = GetTickCount(); GetTickCount() - t0 < 500; )
+	const DWORD warmMs = std::getenv( "TAAMATCH_WARM_MS" ) ? DWORD( std::atoi( std::getenv( "TAAMATCH_WARM_MS" ) ) ) : 500;
+	for ( const DWORD t0 = GetTickCount(); GetTickCount() - t0 < warmMs; )
 		submitWait( run );
 	std::vector<double> ms;
 	for ( int r = 0; r < 34; r++ ) {

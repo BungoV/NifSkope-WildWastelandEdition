@@ -31,7 +31,11 @@ struct PfxJob
 	int4 i;
 };
 
+#ifdef PFX_T0_MS	// a multisampled source (round 8: the MS resolve)
+PFX_BIND( 0 ) Texture2DMS<float4> PfxT0 : register( t0 );
+#else
 PFX_BIND( 0 ) Texture2D<float4> PfxT0 : register( t0 );
+#endif
 PFX_BIND( 1 ) Texture2D<float4> PfxT1 : register( t1 );
 PFX_BIND( 2 ) Texture2D<float4> PfxT2 : register( t2 );
 PFX_BIND( 3 ) Texture2D<float4> PfxT3 : register( t3 );
@@ -64,6 +68,7 @@ static PFX_OUT0_TYPE PfxStore0;
 static float4 PfxStore1;
 #define PFX_STORE0( p, v ) PfxStore0 = ( v )
 #define PFX_STORE1( p, v ) PfxStore1 = ( v )
+#define PFX_DISCARD() discard	// GL's discard: the target keeps what it held (a blended draw over the frame)
 #define main PfxKernel
 void PfxKernel( uint3 id );
 
@@ -94,6 +99,7 @@ PfxPsOut ps( float4 pos : SV_Position )
 #else
 #define PFX_STORE0( p, v ) PfxOut0[p] = ( v )
 #define PFX_STORE1( p, v ) PfxOut1[p] = ( v )
+#define PFX_DISCARD() return
 #endif
 
 #endif

@@ -88,7 +88,8 @@ def compile_(kind, src):
 
 
 P = createProgram()
-attach(P, compile_(0x8B31, VERT)); attach(P, compile_(0x8B30, S.expand(os.path.join(POST, 'taa2.frag')))); link(P)
+FRAG = os.environ.get('TAA_GL_FRAG') or os.path.join(POST, 'taa2.frag')  # a scratch twin for timing knock-outs
+attach(P, compile_(0x8B31, VERT)); attach(P, compile_(0x8B30, S.expand(FRAG))); link(P)
 _ok = I(); getProgramiv(P, 0x8B82, ctypes.byref(_ok))
 if not _ok.value:
     print('TAA-GL-REF FAIL (link)'); sys.exit(2)
