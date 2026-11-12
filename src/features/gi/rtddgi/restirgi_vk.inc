@@ -35,6 +35,13 @@ namespace {
 #include "features/gi/rtddgi/restirgi_filt.spv.h"
 #define RESTIRGI_HAVE_FILT 1
 #endif
+// HLSLRESTIR1: the two headers above are DXC's (res/shaders/hlsl/rtddgi/restirgi.hlsl); glslang's of restirgi.comp stay as
+// the red WW_CELL_RESTIRGI_RED=glsl (tests/hlslmatch restirgi / restirgi_filt: the two byte-exact on the same buffers)
+#if __has_include( "restirgi_glsl.spv.h" ) && __has_include( "restirgi_filt_glsl.spv.h" )
+#include "features/gi/rtddgi/restirgi_glsl.spv.h"
+#include "features/gi/rtddgi/restirgi_filt_glsl.spv.h"
+#define RESTIRGI_HAVE_GLSL 1
+#endif
 
 constexpr int kRgBindings = 15;   // restirgi.comp set 1
 constexpr VkDeviceSize kRgStbnBytes = 128 * 128 * 64;   // res/air/stbn_scalar_128x128x64.r8
@@ -50,6 +57,7 @@ struct RgPipe
 	VkPipelineLayout pl = VK_NULL_HANDLE;
 	VkPipeline pipe = VK_NULL_HANDLE;
 	VkPipeline pipeF = VK_NULL_HANDLE;   // modes 2.. (restirgi.comp -DRESTIRGI_FILTER); none: pipe runs them
+	const char * kernel = "hlsl";        // the SPIR-V the pipelines came from (the red: "glsl")
 };
 
 RgPipe & rgPipe( Dev & D, DdgiPipes & S )
@@ -85,13 +93,40 @@ RgPipe & rgPipe( Dev & D, DdgiPipes & S )
 		R.why = "no ReSTIR GI pipeline layout";
 		return R;
 	}
-	R.pipe = pipeline( D, rtddgi_restirgi_spv, sizeof rtddgi_restirgi_spv, R.pl );
+	// the red list's `glsl` token (beside rtddgicell.cpp restirGiRedBits' kernel bits), read once at the first frame
+	const char * red = std::getenv( "WW_CELL_RESTIRGI_RED" );
+	bool glsl = false;
+	for ( const char * p = red; p && *p; ) {
+		while ( *p == ',' || *p == ' ' )
+			p++;
+		const char * e = p;
+		while ( *e && *e != ',' && *e != ' ' )
+			e++;
+		glsl = glsl || ( e - p == 4 && std::strncmp( p, "glsl", 4 ) == 0 );
+		p = e;
+	}
+#ifndef RESTIRGI_HAVE_GLSL
+	glsl = false;
+#endif
+	R.kernel = glsl ? "glsl" : "hlsl";
+#ifdef RESTIRGI_HAVE_GLSL
+	if ( glsl )
+		R.pipe = pipeline( D, rtddgi_restirgi_glsl_spv, sizeof rtddgi_restirgi_glsl_spv, R.pl );
+	else
+#endif
+		R.pipe = pipeline( D, rtddgi_restirgi_spv, sizeof rtddgi_restirgi_spv, R.pl );
 	R.ok = R.pipe != VK_NULL_HANDLE;
 	if ( !R.ok )
 		R.why = "the ReSTIR GI kernel did not build";
 #ifdef RESTIRGI_HAVE_FILT
-	if ( R.ok && !std::getenv( "WW_CELL_RESTIRGI_ONEKERNEL" ) )
-		R.pipeF = pipeline( D, rtddgi_restirgi_filt_spv, sizeof rtddgi_restirgi_filt_spv, R.pl );
+	if ( R.ok && !std::getenv( "WW_CELL_RESTIRGI_ONEKERNEL" ) ) {
+#ifdef RESTIRGI_HAVE_GLSL
+		if ( glsl )
+			R.pipeF = pipeline( D, rtddgi_restirgi_filt_glsl_spv, sizeof rtddgi_restirgi_filt_glsl_spv, R.pl );
+		else
+#endif
+			R.pipeF = pipeline( D, rtddgi_restirgi_filt_spv, sizeof rtddgi_restirgi_filt_spv, R.pl );
+	}
 #endif
 	return R;
 }
@@ -370,6 +405,7 @@ bool restirGiGpuStep( DdgiGpuSession * s, const RestirGiGpuIn & in, RestirGiGpuO
 		out->why = S.ok ? R.why : S.why;
 		return false;
 	}
+	out->kernel = R.kernel;
 	RgGpu * g = rgStateFor( D, s );
 	if ( !g ) {
 		out->why = "no command buffer for ReSTIR GI";

@@ -6,7 +6,8 @@
 # lane HLSLBULK1 R8: one start per shader variant the app can ship, so the first launch never compiles a variant from SPIR-V
 # (build 95: the measuring settings met 39 variants the one default-settings warm had not built, 322 s to the first frame).
 # A define set is chosen by the Ray-traced GI row / RT quality preset (off, Low = RTDDGI+CASCADES, Medium+ = +RESTIR), the Air
-# zones row, the air's sky visibility and the lamps' floor bounce: 3 x 2 x 2 x 2 = 24 starts, each pinned by the env keys the
+# zones row, the air's sky visibility and the lamps' floor bounce: 3 x 2 x 2 x 2 = 24 starts (HLSLRESTIR1: plus the ReSTIR GI row
+# with RTDDGI on, Low and Medium: 5 RT states, 40 starts), each pinned by the env keys the
 # loader's getters read (the same lists as tests/hlsllive/variants.py). WW_WARM_ALL=0 runs only the default start;
 # WW_WARM_COLDLINK=<n> (default 8) links the uncached programs on n threads (WW_COLDLINK). The last line of release/ww_warm.log
 # is `shader programs: S of T linked ...` summed over the starts, the line ww_build.sh tests.
@@ -70,11 +71,13 @@ add_start() {	# $1 label, rest: env
 if [ "${WW_WARM_ALL:-1}" = 0 ]; then
 	add_start default
 else
-	for rt in off low medium; do
+	for rt in off low medium low+restirgi medium+restirgi; do
 		case "$rt" in
-			off) rtenv="WW_CELL_RTDDGI=0 WW_CELL_RT_PRESET=0" ;;
-			low) rtenv="WW_CELL_RTDDGI=1 WW_CELL_RT_PRESET=0" ;;
-			medium) rtenv="WW_CELL_RTDDGI=1 WW_CELL_RT_PRESET=1" ;;
+			off) rtenv="WW_CELL_RTDDGI=0 WW_CELL_RT_PRESET=0 WW_CELL_RESTIRGI=0" ;;
+			low) rtenv="WW_CELL_RTDDGI=1 WW_CELL_RT_PRESET=0 WW_CELL_RESTIRGI=0" ;;
+			medium) rtenv="WW_CELL_RTDDGI=1 WW_CELL_RT_PRESET=1 WW_CELL_RESTIRGI=0" ;;
+			low+restirgi) rtenv="WW_CELL_RTDDGI=1 WW_CELL_RT_PRESET=0 WW_CELL_RESTIRGI=1" ;;
+			medium+restirgi) rtenv="WW_CELL_RTDDGI=1 WW_CELL_RT_PRESET=1 WW_CELL_RESTIRGI=1" ;;
 		esac
 		for az in 0 1; do
 			for sky in 0 1; do

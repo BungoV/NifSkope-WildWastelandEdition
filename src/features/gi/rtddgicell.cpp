@@ -1752,10 +1752,11 @@ void rtddgiRestirGiPass( Scene * scene )
 	std::copy( in.proj, in.proj + 4, G.pproj );
 	if ( ( G.runs++ % 64 ) == 0 )
 		restirSay( G, QStringLiteral( "on %1 x %2 (neighbours %3, radius %4, running mean %5 frames), frame %6, device wall %7 ms, red %8, "
-			"history dropped: cuts %9, light changes %10; gpu %11 ms, filter + a-trous (%12 passes) %13 ms, noise %14" )
+			"history dropped: cuts %9, light changes %10; gpu %11 ms, filter + a-trous (%12 passes) %13 ms, noise %14, kernel %15" )
 			.arg( t.w ).arg( t.h ).arg( in.spatial ).arg( in.radius ).arg( in.accFrames ).arg( in.frame ).arg( out.msWall, 0, 'f', 3 )
 			.arg( in.red ).arg( out.cuts ).arg( out.relights ).arg( out.msGpu, 0, 'f', 3 ).arg( in.atrous ).arg( out.msDenoise, 0, 'f', 3 )
-			.arg( ( in.red & 16 ) ? QStringLiteral( "white" ) : ( in.stbn && !( in.red & 32 ) ) ? QStringLiteral( "stbn" ) : QStringLiteral( "r2" ) ) );
+			.arg( ( in.red & 16 ) ? QStringLiteral( "white" ) : ( in.stbn && !( in.red & 32 ) ) ? QStringLiteral( "stbn" ) : QStringLiteral( "r2" ) )
+			.arg( QString::fromLatin1( out.kernel ) ) );
 }
 
 namespace {
