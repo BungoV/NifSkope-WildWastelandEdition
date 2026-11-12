@@ -1,0 +1,266 @@
+// Lane RTEMIS1: the probe trace's helpers (ddgiNearest, ddgiShadow, ddgiDirect, ddgiIrradianceAt, ddgiHitRadiance),
+// split out of trace.comp so restirgi.comp shades its rays with the same rules. Include after ddgi_common.glsl.
+// BLAS (geometry g, primitive i) -> its row in remap[] / verts[] (geometry 1 follows the P.counts.w opaque rows).
+// AIRPERF1 r6: c = the instance's custom index, the first row of a BLAS part (0: the single soup's one instance).
+// MIRROR rttracesetrule.h blasRow
+uint ddgiPrim( uint c, uint g, uint i ) { return c + i + ( g == 1u ? uint( P.counts.w ) : 0u ); }
+
+// MIRROR probebvh.h Bvh::tri (in float): the ray against BLAS row pr's TRUE triangle (binding 8, not the grown copy
+// the BLAS was built from); u weighs vertex 1, v vertex 2 (the barycentrics ddgiHole and AlphaMask::hole take)
+bool ddgiTriTest( uint pr, vec3 o, vec3 d, out float t, out float u, out float v )
+{
+	t = 0.0;
+	u = 0.0;
+	v = 0.0;
+	const uint vb = pr * 9u;
+	const vec3 p0 = vec3( verts[vb], verts[vb + 1u], verts[vb + 2u] );
+	const vec3 e1 = vec3( verts[vb + 3u], verts[vb + 4u], verts[vb + 5u] ) - p0;
+	const vec3 e2 = vec3( verts[vb + 6u], verts[vb + 7u], verts[vb + 8u] ) - p0;
+	const vec3 pv = cross( d, e2 );
+	const float det = dot( e1, pv );
+	if ( abs( det ) < 1e-12 )
+		return false;
+	const float id = 1.0 / det;
+	const vec3 tv = o - p0;
+	u = dot( tv, pv ) * id;
+	if ( u < 0.0 || u > 1.0 )
+		return false;
+	const vec3 qv = cross( tv, e1 );
+	v = dot( d, qv ) * id;
+	if ( v < 0.0 || u + v > 1.0 )
+		return false;
+	t = dot( e2, qv ) * id;
+	return true;
+}
+
+// MIRROR src/rtddgi.cpp Twin::backFace: a one-sided face seen from behind
+bool ddgiBackFace( uint pr, vec3 d )
+{
+	const uint vb = pr * 9u;
+	const vec3 v0 = vec3( verts[vb], verts[vb + 1u], verts[vb + 2u] );
+	const vec3 e1 = vec3( verts[vb + 3u], verts[vb + 4u], verts[vb + 5u] ) - v0;
+	const vec3 e2 = vec3( verts[vb + 6u], verts[vb + 7u], verts[vb + 8u] ) - v0;
+	const vec3 nf = normalize( cross( e1, e2 ) );
+	return triAttr[uint( remap[pr] ) * 2u].w < 0.5 && dot( nf, d ) > 0.0;
+}
+
+// MIRROR probebvh.h Bvh::anyHitIn (tLo 1e-4, every face picked): is anything hit in (1e-4, tmax]?
+bool ddgiShadow( vec3 o, vec3 d, float tmax )
+{
+	if ( tmax <= 1e-3 )
+		return false;
+	const bool hw = ( uint( P.flags.w ) & DDGI_RED_HWHIT ) != 0u;
+	rayQueryEXT q;
+	rayQueryInitializeEXT( q, tlas, gl_RayFlagsTerminateOnFirstHitEXT | ( hw ? gl_RayFlagsNoneEXT : gl_RayFlagsNoOpaqueEXT ), 0xFF, o,
+		0.0, d, tmax );
+	while ( rayQueryProceedEXT( q ) ) {
+		if ( rayQueryGetIntersectionTypeEXT( q, false ) != gl_RayQueryCandidateIntersectionTriangleEXT )
+			continue;
+		const uint pr = ddgiPrim( uint( rayQueryGetIntersectionInstanceCustomIndexEXT( q, false ) ), rayQueryGetIntersectionGeometryIndexEXT( q, false ), rayQueryGetIntersectionPrimitiveIndexEXT( q, false ) );
+		if ( hw ) {
+			const vec2 bc = rayQueryGetIntersectionBarycentricsEXT( q, false );
+			if ( !ddgiHole( remap[pr], bc.x, bc.y ) )
+				rayQueryConfirmIntersectionEXT( q );
+			continue;
+		}
+		float t, u, v;
+		if ( ddgiTriTest( pr, o, d, t, u, v ) && t > DDGI_TMIN && t <= tmax && !ddgiHole( remap[pr], u, v ) )
+			rayQueryConfirmIntersectionEXT( q );
+	}
+	return rayQueryGetIntersectionTypeEXT( q, true ) == gl_RayQueryCommittedIntersectionTriangleEXT;
+}
+
+// MIRROR src/rtddgi.cpp Twin::nearest: the nearest hit on the true triangles (probebvh::Bvh::ray's rule), then the
+// tie pass: of every face hit within ddgiTieWindow of that t, the one ddgiTieWins keeps. bestPr = the BLAS row.
+bool ddgiNearest( vec3 o, vec3 d, float tmax, out uint bestPr, out float bestT )
+{
+	bestPr = 0u;
+	bestT = tmax;
+	const uint red = uint( P.flags.w );
+	if ( ( red & DDGI_RED_HWHIT ) != 0u ) {   // the refuter: M1's rule
+		rayQueryEXT q;
+		rayQueryInitializeEXT( q, tlas, gl_RayFlagsNoneEXT, 0xFF, o, 0.0, d, tmax );
+		while ( rayQueryProceedEXT( q ) ) {
+			if ( rayQueryGetIntersectionTypeEXT( q, false ) != gl_RayQueryCandidateIntersectionTriangleEXT )
+				continue;
+			const uint pr = ddgiPrim( uint( rayQueryGetIntersectionInstanceCustomIndexEXT( q, false ) ), rayQueryGetIntersectionGeometryIndexEXT( q, false ), rayQueryGetIntersectionPrimitiveIndexEXT( q, false ) );
+			const vec2 bc = rayQueryGetIntersectionBarycentricsEXT( q, false );
+			if ( !ddgiHole( remap[pr], bc.x, bc.y ) )
+				rayQueryConfirmIntersectionEXT( q );
+		}
+		if ( rayQueryGetIntersectionTypeEXT( q, true ) != gl_RayQueryCommittedIntersectionTriangleEXT )
+			return false;
+		bestT = rayQueryGetIntersectionTEXT( q, true );
+		bestPr = ddgiPrim( uint( rayQueryGetIntersectionInstanceCustomIndexEXT( q, true ) ), rayQueryGetIntersectionGeometryIndexEXT( q, true ), rayQueryGetIntersectionPrimitiveIndexEXT( q, true ) );
+		return true;
+	}
+	bool hit = false;
+	{
+		rayQueryEXT q;
+		rayQueryInitializeEXT( q, tlas, gl_RayFlagsNoOpaqueEXT, 0xFF, o, 0.0, d, tmax );
+		while ( rayQueryProceedEXT( q ) ) {
+			if ( rayQueryGetIntersectionTypeEXT( q, false ) != gl_RayQueryCandidateIntersectionTriangleEXT )
+				continue;
+			const uint pr = ddgiPrim( uint( rayQueryGetIntersectionInstanceCustomIndexEXT( q, false ) ), rayQueryGetIntersectionGeometryIndexEXT( q, false ), rayQueryGetIntersectionPrimitiveIndexEXT( q, false ) );
+			float t, u, v;
+			if ( ddgiTriTest( pr, o, d, t, u, v ) && t > DDGI_TMIN && t <= bestT && !ddgiHole( remap[pr], u, v ) ) {
+				bestT = t;
+				bestPr = pr;
+				hit = true;
+				rayQueryConfirmIntersectionEXT( q );   // the hardware culls past it; our own bestT decides
+			}
+		}
+	}
+	if ( !hit || ( red & DDGI_RED_NOTIE ) != 0u )
+		return hit;
+	// the tie pass: a short query over [t0 - w, t0 + w], nothing confirmed, every face in it seen
+	const float t0 = bestT;
+	const float w = ddgiTieWindow( o, t0 );
+	int keepTri = remap[bestPr];
+	bool keepBack = ddgiBackFace( bestPr, d );
+	rayQueryEXT q2;
+	rayQueryInitializeEXT( q2, tlas, gl_RayFlagsNoOpaqueEXT, 0xFF, o, max( t0 - w, 0.0 ), d, t0 + w );
+	while ( rayQueryProceedEXT( q2 ) ) {
+		if ( rayQueryGetIntersectionTypeEXT( q2, false ) != gl_RayQueryCandidateIntersectionTriangleEXT )
+			continue;
+		const uint pr = ddgiPrim( uint( rayQueryGetIntersectionInstanceCustomIndexEXT( q2, false ) ), rayQueryGetIntersectionGeometryIndexEXT( q2, false ), rayQueryGetIntersectionPrimitiveIndexEXT( q2, false ) );
+		float t, u, v;
+		if ( ddgiTriTest( pr, o, d, t, u, v ) && t > DDGI_TMIN && t >= t0 - w && t <= t0 + w && !ddgiHole( remap[pr], u, v ) ) {
+			const bool back = ddgiBackFace( pr, d );
+			const int tri = remap[pr];
+			if ( ddgiTieWins( back, tri, keepBack, keepTri ) ) {
+				keepTri = tri;
+				keepBack = back;
+				bestPr = pr;
+				bestT = t;
+			}
+		}
+	}
+	return true;
+}
+
+// FIX1101A: the bounce read's runtime red (the CLI's --red bouncenocover, src/rtddgi.cpp kRedBounceNoCover): today's main
+#define DDGI_RED_BOUNCENOCOVER 32u
+
+// MIRROR rtddgimath.h flatAmbient: the flat ambient's irradiance at n from the sky cube (0 without a sky)
+vec3 ddgiFlatAmbient( vec3 n )
+{
+	if ( P.sky[0].w <= 0.5 )
+		return vec3( 0.0 );
+	const vec3 s = P.sky[0].rgb + P.sky[1].rgb + P.sky[2].rgb + P.sky[3].rgb + P.sky[4].rgb + P.sky[5].rgb;
+	const vec3 ex = 0.5 * DDGI_PI * ( n.x >= 0.0 ? P.sky[0].rgb : P.sky[1].rgb ) + 0.125 * DDGI_PI * ( s - P.sky[0].rgb - P.sky[1].rgb );
+	const vec3 ey = 0.5 * DDGI_PI * ( n.y >= 0.0 ? P.sky[2].rgb : P.sky[3].rgb ) + 0.125 * DDGI_PI * ( s - P.sky[2].rgb - P.sky[3].rgb );
+	const vec3 ez = 0.5 * DDGI_PI * ( n.z >= 0.0 ? P.sky[4].rgb : P.sky[5].rgb ) + 0.125 * DDGI_PI * ( s - P.sky[4].rgb - P.sky[5].rgb );
+	return n.x * n.x * ex + n.y * n.y * ey + n.z * n.z * ez;
+}
+
+// MIRROR src/rtddgi.cpp sampleVolume: the 8-probe irradiance at P (normal n, viewer direction o), x 2 pi.
+// FIX1101A: x the fade (box faces x cover: rtddgimath.h sampleVolume), the flat ambient for the rest (bounceIrradiance)
+vec3 ddgiIrradianceAt( vec3 Pw, vec3 n, vec3 o )
+{
+	const float D = P.stepv.w;
+	vec3 Pb = Pw;
+	if ( ( uint( P.flags.w ) & DDGI_RED_NOBIAS ) == 0u )
+		Pb += ddgiBiasVector( n, o, D, P.blendp.z );
+	const vec3 g = ( Pb - P.origin.xyz ) / P.stepv.xyz;
+	const ivec3 base = clamp( ivec3( floor( g ) ), ivec3( 0 ), max( P.dims.xyz - ivec3( 2 ), ivec3( 0 ) ) );
+	const vec3 a = clamp( g - vec3( base ), vec3( 0.0 ), vec3( 1.0 ) );
+	const vec3 e3 = clamp( min( g, vec3( P.dims.xyz - ivec3( 1 ) ) - g ), vec3( 0.0 ), vec3( 1.0 ) );   // MIRROR cascadeEdge (untight)
+	const float fade = min( e3.x, min( e3.y, e3.z ) );
+	vec3 sum = vec3( 0.0 );
+	float wsum = 0.0;
+	float cover = 0.0;
+	for ( int c = 0; c < 8; c++ ) {
+		const ivec3 off = ivec3( c & 1, ( c >> 1 ) & 1, ( c >> 2 ) & 1 );
+		const ivec3 pc3 = min( base + off, P.dims.xyz - ivec3( 1 ) );
+		const uint p = uint( pc3.x + P.dims.x * ( pc3.y + P.dims.y * pc3.z ) );
+		const vec3 tri = mix( vec3( 1.0 ) - a, a, vec3( off ) );
+		const float trilinear = tri.x * tri.y * tri.z;
+		const int st = ddgiProbeState( p );
+		if ( st != DDGI_VIGILANT || age[p] == 0u ) {
+			cover += st == DDGI_OFF ? trilinear : 0.0;   // MIRROR rtddgimath.h probeMissing: Off keeps its cover
+			continue;
+		}
+		cover += trilinear;
+		const vec3 pp = ddgiProbePos( p );
+		const vec3 toProbe = normalize( pp - Pw );
+		float w = ddgiBackfaceWeight( toProbe, n );
+		const vec3 bToProbe = pp - Pb;
+		const float r = length( bToProbe );
+		if ( ( uint( P.flags.w ) & DDGI_RED_NOCHEB ) == 0u && r > 0.0 ) {
+			const vec2 m = ddgiSampleDist( p, -bToProbe / r );
+			w *= ddgiChebyshev( r, m.x, m.y );
+		}
+		w = max( w, 1e-6 );
+		w = ddgiCrush( w );
+		w *= trilinear;
+		const vec3 e = ddgiSampleIrr( p, n );
+		sum += w * pow( max( e, vec3( 0.0 ) ), vec3( 2.5 ) );
+		wsum += w;
+	}
+	const bool rule = ( uint( P.flags.w ) & DDGI_RED_BOUNCENOCOVER ) == 0u;
+	if ( wsum <= 0.0 )
+		return rule ? ddgiFlatAmbient( n ) : vec3( 0.0 );
+	const vec3 m = sum / wsum;
+	const vec3 E = m * m * ( 2.0 * DDGI_PI );
+	if ( !rule )
+		return E;
+	const float f = clamp( fade * min( cover, 1.0 ), 0.0, 1.0 );
+	return E * f + ddgiFlatAmbient( n ) * ( 1.0 - f );
+}
+
+vec3 ddgiDirect( vec3 Pw, vec3 n )
+{
+	vec3 E = vec3( 0.0 );
+	const vec3 o = Pw + n * 0.5;
+	if ( P.sunTo.w > 0.5 ) {
+		const float nl = dot( n, P.sunTo.xyz );
+		if ( nl > 0.0 && !ddgiShadow( o, P.sunTo.xyz, P.sun.w ) )
+			E += P.sun.rgb * nl;
+	}
+	if ( P.dirTo.w > 0.5 ) {
+		const float nl = dot( n, P.dirTo.xyz );
+		if ( nl > 0.0 )
+			E += P.dirColor.rgb * nl;
+	}
+	for ( int li = 0; li < P.counts.y; li++ ) {
+		const uint b = uint( li ) * 8u;
+		const vec4 l0 = lights[b], l1 = lights[b + 1u], l2 = lights[b + 2u], l3 = lights[b + 3u];
+		const vec4 l7 = lights[b + 7u];
+		const vec3 Lv = l0.xyz - Pw;
+		const float d = length( Lv );
+		if ( d >= l0.w )
+			continue;
+		const int shape = int( l7.x + 0.5 );
+		if ( shape == 1 && dot( Pw - l0.xyz, l2.xyz ) < 0.0 )
+			continue;
+		if ( shape == 2 ) {
+			bool inside = true;
+			for ( int k = 0; k < 3; k++ ) {
+				const vec4 bx = lights[b + 4u + uint( k )];
+				if ( abs( dot( bx.xyz, Pw ) + bx.w ) > 1.0 )
+					inside = false;
+			}
+			if ( !inside )
+				continue;
+		}
+		const vec3 L = Lv / max( d, 0.001 );
+		const float nl = dot( n, L );
+		if ( nl <= 0.0 )
+			continue;
+		float att = ddgiRadial( d, l0.w, l3.x, l3.y, l3.z );
+		if ( l1.w > 0.5 )
+			att *= ddgiSpot( -dot( L, l2.xyz ), l2.w, l3.w );
+		if ( att * nl <= 0.0 )
+			continue;
+		const vec3 dl = l0.xyz - o;
+		const float len = length( dl );
+		if ( ddgiShadow( o, dl / max( len, 1e-6 ), len - P.dirColor.w ) )
+			continue;
+		E += l1.rgb * att * nl;
+	}
+	return E;
+}
+
+// MIRROR rtddgimath.h hitRadiance (RTEMIS1): albedo x irradiance / pi + the surface's own emission Le (placed lights kept)
+vec3 ddgiHitRadiance( vec3 alb, vec3 E, vec3 Le ) { return alb * E / DDGI_PI + Le; }

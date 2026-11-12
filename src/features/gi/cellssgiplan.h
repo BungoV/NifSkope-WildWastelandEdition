@@ -44,17 +44,23 @@ inline const char * wwSsgiSubName( int sub )
  *  SSGI3's fill law like any other radiance: one cast, one temporal, one denoise, and the scene pass writes no
  *  emission target. Chain (red `emitchain`, lane SSGI2's FO4CS row 16): stage 8's importance-sampled cast with its
  *  own chain, the ordinary donor less the emission. None: no emission target (`noemissive`; draws as the fold). */
-enum WwSsgiEmissive { WwSsgiEmitFolded = 0, WwSsgiEmitChain = 1 };
+enum WwSsgiEmissive { WwSsgiEmitFolded = 0, WwSsgiEmitChain = 1, WwSsgiEmitOff = 2 };
 
-inline int wwSsgiEmissive( int red )
+/*! RTEMIS1 (bungo 11-06): traced = the probe volume's rays carry the emission (rtddgicell.h rtddgiCellEmissiveTraced).
+ *  Then Off by default: the ordinary donor less the emission (emitSub reads the emission target), no own chain, so the
+ *  emitters light the scene once, through the volume. Red 32768 (WW_CELL_SSGI_EMISSIVE_RED=on) keeps the old default;
+ *  the explicit `emitchain` red keeps its chain */
+inline int wwSsgiEmissive( int red, bool traced = false )
 {
-	return ( red & 1024 ) && !( red & 128 ) ? WwSsgiEmitChain : WwSsgiEmitFolded;
+	if ( ( red & 1024 ) && !( red & 128 ) )
+		return WwSsgiEmitChain;
+	return traced && !( red & 32768 ) ? WwSsgiEmitOff : WwSsgiEmitFolded;
 }
 
-//! whether the scene pass writes the emission target (only the chain reads it)
-inline bool wwSsgiWantsEmissionTarget( int red )
+//! whether the scene pass writes the emission target (the chain and Off read it)
+inline bool wwSsgiWantsEmissionTarget( int red, bool traced = false )
 {
-	return wwSsgiEmissive( red ) == WwSsgiEmitChain;
+	return wwSsgiEmissive( red, traced ) != WwSsgiEmitFolded;
 }
 
 /*! 3c: the interval pyramid (stages 10/11 over the FULL-size depth, whatever the tier) is built only under red `hiz`

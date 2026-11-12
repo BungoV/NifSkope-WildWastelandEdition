@@ -63,6 +63,7 @@ struct SsgiState
 	int pathFrame = -1;	// lane SSGI2FRAMES: the camera path's frame (wwCellSsgiSetPath), -1 a still view
 	int lastVerdict = -1;
 	float lastRadius = -1.0f;	// lane INTGI1: the echo again when the march radius moves
+	bool lastEmisOff = false;	// RTEMIS1: the echo again when the traced-emission mode moves
 	char echo[240] = {};
 };
 
@@ -89,6 +90,10 @@ SsgiState & st()
 				: w == "nohiz" ? 32 : w == "oldblur" ? 64 : w == "noemissive" ? 128 : w == "oldlaw" ? 256
 				: w == "oldframes" ? 512 : w == "emitchain" ? 1024 : w == "hiz" ? 2048 : w == "oldtiers" ? 4096
 				: w == "nohandover" ? 8192 : w == "nointradius" ? 16384 : 0;	// GIFIX1101 HO; lane INTGI1
+		// RTEMIS1: under the traced emission the screen GI leaves it out; =on keeps the old default (red bit 32768)
+		const QByteArray er = wwEnv( "WW_CELL_SSGI_EMISSIVE_RED" ).trimmed().toLower();
+		if ( er == "on" || er == "1" )
+			s.red |= 32768;
 	}
 	return s;
 }
@@ -231,7 +236,8 @@ bool wwCellSsgiWantsScene( Scene * scene )
 
 bool wwCellSsgiWantsEmission( Scene * scene )
 {
-	return wwCellSsgiWantsScene( scene ) && wwSsgiWantsEmissionTarget( st().red );	// lane PERFFIX2 (3b)
+	return wwCellSsgiWantsScene( scene )	// lane PERFFIX2 (3b); RTEMIS1: Off under the traced emission reads it too
+		&& wwSsgiWantsEmissionTarget( st().red, rtddgiCellEmissiveTraced( scene ) );
 }
 
 const char * wwCellSsgiEcho()
@@ -273,7 +279,15 @@ void wwCellSsgiPass( Scene * scene, bool run )
 		return;
 	}
 	// lane PERFFIX2 (3b): the emitters ride the ordinary march (folded); red `emitchain`: the emissive cast's own chain
-	const bool emis = wwSsgiEmissive( s.red ) == WwSsgiEmitChain && wwCellSsrEmissionTexture( scene, emitTex );
+	const int emitMode = wwSsgiEmissive( s.red, rtddgiCellEmissiveTraced( scene ) );
+	const bool emis = emitMode == WwSsgiEmitChain && wwCellSsrEmissionTexture( scene, emitTex );
+	// RTEMIS1: the traced volume carries the emission; the ordinary donor less it (no target this frame: folded as before)
+	const bool emisOff = emitMode == WwSsgiEmitOff && wwCellSsrEmissionTexture( scene, emitTex );
+	if ( emisOff != s.lastEmisOff ) {
+		s.lastEmisOff = emisOff;
+		std::fprintf( stderr, "cell ssgi: emissive %s\n", emisOff ? "off (traced by the probe volume; red WW_CELL_SSGI_EMISSIVE_RED=on)"
+			: emitMode == WwSsgiEmitOff ? "folded (traced, but no emission target this frame)" : "as before (not traced)" );
+	}
 	auto fn = r->fn;
 	if ( g.unit < 0 ) {
 		GLint units = 0;
@@ -436,7 +450,7 @@ void wwCellSsgiPass( Scene * scene, bool run )
 	prog->uni1i( "emitTex", 9 );
 	prog->uni1i( "emitFin", 9 );
 	prog->uni1i( "emitSlices", kEmissiveSlices );
-	prog->uni1b( "emitSub", emis );
+	prog->uni1b( "emitSub", emis || emisOff );
 	prog->uni1b( "emissivePass", false );
 	prog->uni1b( "emitAdd", false );
 	prog->uni1b( "blueNoise", blue );
@@ -544,7 +558,7 @@ void wwCellSsgiPass( Scene * scene, bool run )
 		}
 	};
 	for ( int sub = 0; sub < subFrames; sub++ ) {
-		bind( 9, emis ? GLuint( emitTex ) : 0 );	// the last chain left efin there
+		bind( 9, emis || emisOff ? GLuint( emitTex ) : 0 );	// the last chain left efin there
 		if ( sub == subFrames - 1 ) {	// lane SSGI2FRAMES: the state a repaint of this view redoes from
 			g.snap = { g.cur, g.frame, g.haveHistory, g.eHistory, {}, {} };
 			std::memcpy( g.snap.R, g.prevR, sizeof( R ) );

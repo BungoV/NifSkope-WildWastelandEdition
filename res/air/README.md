@@ -12,4 +12,5 @@ notes tool `stbn_gen.py`. sha256 e621c2377988e506f102b8df367ed636d7b4b381c593629
 
 Read it with nearest-neighbour point sampling: tile it across the grid and advance one slice a frame (frame mod 64).
 Readers: the lamp-injection twin `src/features/air/airlampinjmath.h` (maskPoint) and its unit
-`tests/features/air/airlampinj`.
+`tests/features/air/airlampinj`; the ReSTIR GI bounce (lane RTEMIS1: `src/features/gi/restirgimath.h` stbnIndex, the kernel
+`restirgi.comp` through the qrc alias `:/air/stbn_scalar_128x128x64.r8`).

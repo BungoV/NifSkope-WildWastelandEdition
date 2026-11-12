@@ -109,6 +109,18 @@ bool restirGpuShare( DdgiGpuSession *, int, int, RestirGpuShare * out )
 	out->why = kDdgiNoKernels;
 	return false;
 }
+bool restirGiGpuStep( DdgiGpuSession *, const RestirGiGpuIn &, RestirGiGpuOut * out )   // RTEMIS1: no kernels, no ReSTIR GI
+{
+	*out = RestirGiGpuOut();
+	out->why = kDdgiNoKernels;
+	return false;
+}
+bool restirGiGpuShare( DdgiGpuSession *, int, int, RestirGpuShare * out )
+{
+	*out = RestirGpuShare();
+	out->why = kDdgiNoKernels;
+	return false;
+}
 bool airraysGpuStep( DdgiGpuSession *, const AirRaysGpuIn &, AirRaysGpuOut * out )   // MODULES1: no kernels, no air rays
 {
 	*out = AirRaysGpuOut();
@@ -515,6 +527,7 @@ namespace {
 
 void restirFreeFor( Dev & D, DdgiGpuSession * s );   // lane RESTIRDI1: restir_vk.inc (its set reads this session's TLAS)
 void airraysFreeFor( Dev & D, DdgiGpuSession * s );  // MODULES1: airrays_vk.inc (the same)
+void restirGiFreeFor( Dev & D, DdgiGpuSession * s );  // RTEMIS1: restirgi_vk.inc (the same)
 
 void ddgiFree( Dev & D, DdgiGpuSession * s )
 {
@@ -523,6 +536,7 @@ void ddgiFree( Dev & D, DdgiGpuSession * s )
 		vk.vkWaitForFences( D.dev, 1, &s->inFence, VK_TRUE, UINT64_MAX );
 	restirFreeFor( D, s );
 	airraysFreeFor( D, s );
+	restirGiFreeFor( D, s );
 	if ( s->set )
 		vk.vkFreeDescriptorSets( D.dev, D.dpool, 1, &s->set );
 	DdgiTimer & T = ddgiTimer( D );
@@ -1368,6 +1382,7 @@ bool ddgiGpuRun( const DdgiGpuJob & job, DdgiGpuOut * out )
 
 #include "features/gi/rtddgi/restir_vk.inc"   // lane RESTIRDI1: ReSTIR DI on this device and BVH
 #include "features/gi/rtddgi/airrays_vk.inc"  // MODULES1: the lamps' shadow in the air by rays
+#include "features/gi/rtddgi/restirgi_vk.inc" // RTEMIS1: ReSTIR GI on this device and BVH
 
 #endif // RTDDGI_HAVE_SPIRV
 
