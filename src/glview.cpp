@@ -3889,13 +3889,14 @@ static void wwGpuFrameFinish()
 		"workers busy %.1f / %d (stream pool: cell builder, model parse, texture read-ahead, archive trim) + %.1f / %d (Qt's "
 		"pool), %.1f fps; RAM cache %lld / %lld MB (%lld files, %lld hits, %lld misses, %lld evicted%s), archives opened %llu "
 		"(%llu shared a live mapping, %zu mapped now), GPU geometry cache %lld / %lld MB; "
-		"async queue: none (the traces share the graphics family; lane VKCOMPUTE1), overlapped 0 ms\n",
+		"%s\n",
 		std::min( 100.0, 100.0 * g.hwGpuMs / wallMs ), std::min( 100.0, 100.0 * g.hwPaintMs / wallMs ),
 		g.hwOwn / fr, WwHw::poolSlots(), g.hwWorkers / fr, pool->maxThreadCount(), 1000.0 * double( g.hwFrames ) / wallMs,
 		(long long)( rc.bytes >> 20 ), (long long)( rc.budget >> 20 ), (long long) rc.files, (long long) rc.hits,
 		(long long) rc.misses, (long long) rc.evicted, rc.on ? "" : "; off: WW_RAMCACHE_RED=1",
 		(unsigned long long) arOpens, (unsigned long long) arShared, arLive,
-		(long long)( cc.usedBytes >> 20 ), (long long)( cc.maxBytes >> 20 ) );
+		(long long)( cc.usedBytes >> 20 ), (long long)( cc.maxBytes >> 20 ),
+		qPrintable( rtddgiAsyncUse( g.hwFrames ) ) );
 	/* EMPTY240 R3-4: the draws' program routes in the same window. A cell-lit draw that asks the bindless twin sets only
 	 * its row (the twin is the per-draw program cache); one that does not runs the whole setupProgram walk. */
 	std::int64_t rt[WwHw::RouteCount];

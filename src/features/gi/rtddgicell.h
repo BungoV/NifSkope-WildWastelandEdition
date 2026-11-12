@@ -109,5 +109,8 @@ void rtddgiRestirPass( Scene * scene );
  * air reads its walk. Census line `air rays: ...`. Red WW_CELL_AIR_RAYS_RED = nohole | nohist | noshadow (any mix). */
 bool rtddgiAirRaysFrame( Scene * scene, int cols, int rows, int slices, float nearT, float logRatio, float viewUnit );
 QString rtddgiAirRaysEcho();
+//! lane VKCOMPUTE1 item 4: the `hardware use:` line's part: the traces' queue family and the device ms of the submits that
+//! ran beside GL (their GL wait deferred to the reader), a frame over `frames`; resets the sums
+QString rtddgiAsyncUse( int frames );
 
 #endif // RTDDGICELL_H

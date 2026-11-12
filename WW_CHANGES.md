@@ -1,3 +1,40 @@
+## VKCOMPUTE1 HLSL 1 (2026-11-12): the DDGI border kernel is HLSL (DXC), byte-exact with its GLSL original
+
+Changed, not checked live (no build). Offline, on the GPU: tests/hlslmatch (green 6 cases, 0 bytes differ; red
+BORDER_RED fails 6 of 6), tests/spvsync (PASS 9 + its reds), tests/spells/hlsl_check.py (1 OK + its red).
+
+- res/shaders/hlsl/rtddgi/border.hlsl + ddgi_common.hlsli (the part border uses: bindings, Params, borderXY,
+  borderSource, skipped, probe state). DXC builds it into src/features/gi/rtddgi/border.spv.h (rtddgi_spirv.sh,
+  tools/spv_header.py writes glslang's array shape); border.comp stays as the original the gate compares with.
+  Target vulkan1.2 for the embedded kernel = bakert.cpp's device version; the check row also compiles vulkan1.3 + DXIL.
+- HLSL has no gl_NumWorkGroups: the linear id uses rtddgi_vk.inc ddgiDispatch's split (x = 65535 whenever y > 0); the
+  gate's 50x50x20 case runs past 65535 groups.
+- tests/hlslmatch/run.sh <out>: a headless Vulkan device (compute-only family), both SPIR-Vs on the same random buffers
+  (every probe state, both skip rules), every buffer compared byte for byte.
+- tests/spells/hlsl_check.py: the HLSL row of the shader check (DXIL cs_6_0 + SPIR-V vulkan1.3 for every .hlsl).
+
+## VKCOMPUTE1 item 2 (2026-11-12): the ray-traced GI and ReSTIR run beside GL's frame (async compute)
+
+Changed, not checked live (no build, no window). Offline: tests/vkasync (family pick + a two-queue frame timeline, green
+6 + 4 reds), syntax check of bakert.cpp and rtddgicell.cpp (rc=0).
+
+- **Cause.** The ray-tracing device took the first compute family (the graphics one, family 0), and GL waited on each
+  submit's vkDone right after the submit. The submit itself waits on GL's glDone, so GL's queue sat idle while the
+  device ran: DDGI (~1.9 ms + 0.5 for the coarse cascades) and ReSTIR (~0.4 ms) were in series with the frame.
+- **Fix (ships on).** The device takes a compute-only family with timestamps when it has one (RTX 5070 Ti: family 2;
+  src/features/gi/vkasyncrule.h pickFamily). GL's wait is owed until the first GL read (vkasyncrule.h Ledger): the
+  atlas's bindOne, the debug view, a drop; the cascades' copy now takes LAST frame's tiles before this frame's submit,
+  with the params those tiles were traced with (Combined org/stp/dims), so the cascades' work runs beside the rest of
+  the frame; ReSTIR's ratio waits at its first read in the opaque pass. One GL wait per submit, always before the next
+  signal. Settings > General > Ray tracing device > Async Compute (default on, read at the device's creation:
+  relaunch). Red WW_VKASYNC_RED=1 = family 0 and the wait right after the submit, as before.
+- **Lines.** `vk async: device <name> queue family F: <why>` at the device's creation; the DDGI census's sync part
+  ends `vk async: qF async|shared with graphics, D of S waits at the reader`.
+- Air rays (airrays_vk.inc, a CPU fence wait per step) are not changed here (MODULES1's file).
+- **Item 4.** The `hardware use:` line (src/glview.cpp, EMPTY240's) ends `async queue: qF async|shared with graphics,
+  overlapped up to X ms a frame (B of S submits ran beside GL)`: X = the device ms of the DDGI / ReSTIR submits whose
+  GL wait was deferred (rtddgicell.cpp rtddgiAsyncUse), an upper bound of the true overlap.
+
 ## EMPTY240 (2026-11-12): frames no longer wait for a 6 ms timer; vsync ships off; the frame wall line
 
 Changed, not checked live (no build, no window). Offline: tests/framepacer (model + this PC's timers; the red fails),

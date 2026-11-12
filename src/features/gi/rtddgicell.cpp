@@ -13,6 +13,8 @@
 #include "features/gi/rtddgi/rtddgi_gpu.h"
 #include "features/gi/rttraceset.h"   // lane AIRPERF1 r4: the traced set follows the streamed cells
 #include "features/gi/rttracesetrule.h"   // lane AIRPERF1 r5: warmUpdates
+#include "features/gi/bakert.h"          // lane VKCOMPUTE1: asyncQueue
+#include "features/gi/vkasyncrule.h"     // lane VKCOMPUTE1: GL's wait placement
 #include <chrono>
 #include "version.h"
 #include "wwswitch.h"
@@ -289,6 +291,7 @@ struct Cell
 	GLuint mem = 0, semVk = 0, semGl = 0;   // M3: the imported memory object and the two semaphores
 	bool interop = false;                   // M3: buf is the device's atlas (no upload)
 	bool glRead = false;                    // M3: GL waited on vkDone since its last glDone (it owes a signal before the next submit)
+	vkasync::Ledger vk;                     // lane VKCOMPUTE1: GL's wait on the last submit, owed until the first read
 	QString interopWhy;                     // M3: why this volume reads back (the census)
 	size_t bytes = 0;
 	bool uploaded = false, attach = false, probesPacked = false;
@@ -512,6 +515,9 @@ struct Combined
 	bool attach = false;
 	int count = 0;
 	int base[rtddgi::kMaxCascades] = {}, nP[rtddgi::kMaxCascades] = {};
+	// lane VKCOMPUTE1: each cascade's origin / step / dims at its last copy (the tiles' own; a later step may scroll)
+	GLfloat org[4 * rtddgi::kMaxCascades] = {}, stp[4 * rtddgi::kMaxCascades] = {};
+	GLint dims[4 * rtddgi::kMaxCascades] = {};
 	double copyMs = 0;
 	qint64 copies = 0;
 };
@@ -560,10 +566,53 @@ void refuse( Cell & c, const QString & why )
 	say( c.tag + QStringLiteral( "refused(%1)" ).arg( why ) );
 }
 
+//! lane VKCOMPUTE1 item 4: device ms of the submits GL did not wait on right after (they ran beside GL's frame)
+struct AsyncUse
+{
+	double ms = 0.0;
+	int submits = 0, beside = 0;
+};
+
+AsyncUse & asyncUse()
+{
+	static AsyncUse u;
+	return u;
+}
+
+void asyncUseAdd( bool beside, double ms )
+{
+	AsyncUse & u = asyncUse();
+	u.submits++;
+	if ( beside ) {
+		u.beside++;
+		u.ms += std::max( 0.0, ms );
+	}
+}
+
+/* lane VKCOMPUTE1: GL's wait on a submit's vkDone (a GL server wait). With a compute-only queue (bakert::asyncQueue) it
+ * is owed until the first GL read of the atlas (bindOne, the cascades' copy, the debug view, a drop) or the next signal,
+ * so the device runs beside GL's frame; the red WW_VKASYNC_RED=1 waits right after the submit, as before */
+void glWaitVk( Cell & c )
+{
+	QElapsedTimer t;
+	t.start();
+	glShare().waitSem( c.semVk, 1, &c.buf, 0, nullptr, nullptr );
+	c.glWaitMs = double( t.nsecsElapsed() ) / 1e6;
+	c.glRead = true;
+	c.syncWaits++;
+}
+
+void glSettle( Cell & c )
+{
+	if ( c.vk.owed && c.semVk && glShare().ok )
+		c.vk.settle( [&c]() { glWaitVk( c ); } );
+}
+
 //! the GL side: the texture buffer, and with interop the imported memory and semaphores (before the session closes)
 void freeGl( Cell & c, Renderer * r )
 {
 	if ( r && c.glOwner == r ) {
+		glSettle( c );   // lane VKCOMPUTE1: the device's last write ordered before the objects go
 		if ( c.tex )
 			r->fn->glDeleteTextures( 1, &c.tex );
 		if ( c.buf )
@@ -585,6 +634,7 @@ void freeGl( Cell & c, Renderer * r )
 	c.uploaded = c.attach = c.probesPacked = false;
 	c.interop = c.glRead = false;
 	c.fresh = false;
+	c.vk.reset();
 }
 
 //! the volume and its GL objects (GL first: its import holds the device's memory)
@@ -991,8 +1041,9 @@ void censusSet( const Cell & c, const RtDdgiLive & L, int k, const QString & tai
 	QString rb;
 	if ( c.interop )   // nothing comes back: the census's readback is 0 (the brief's key), the GL wait is the GPU-side order
 		rb = QStringLiteral( "readback ms 0.000 (interop: no copy, no upload; GL waits on the device %1 ms on the CPU); sync glDone %2 "
-			"vkDone waits %3%4" ).arg( c.glWaitMs, 0, 'f', 3 ).arg( c.syncSignals ).arg( c.syncWaits )
-			.arg( ( cellRedPaths() & kPathNoWait ) ? QStringLiteral( " (the nowait red: no order)" ) : QString() );   // lane RTXFIX1
+			"vkDone waits %3%4; vk async: %5, %6 of %7 waits at the reader" ).arg( c.glWaitMs, 0, 'f', 3 ).arg( c.syncSignals ).arg( c.syncWaits )
+			.arg( ( cellRedPaths() & kPathNoWait ) ? QStringLiteral( " (the nowait red: no order)" ) : QString() )   // lane RTXFIX1
+			.arg( QString::fromStdString( bakert::queueInfo() ) ).arg( c.vk.deferred ).arg( c.vk.submits );   // lane VKCOMPUTE1
 	else
 		rb = QStringLiteral( "readback ms %1 (device copy %2 + GL upload %3; interop owed when over 0.2: %4)" )
 			.arg( msText( ms[3] < 0.0 ? -1.0 : ms[3] + c.uploadMs ) ).arg( msText( ms[3] ) ).arg( c.uploadMs, 0, 'f', 3 ).arg( c.interopWhy );
@@ -1166,12 +1217,20 @@ struct RestirGl
 	qint64 late = 0, steps = 0; // frames without a hand-over (the last submit still on the device) of frames asked
 	float prows[12] = { 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0 }, pproj[4] = { 1, 1, 0, 0 };
 	QString last;
+	vkasync::Ledger vk;         // lane VKCOMPUTE1: GL's wait on the last submit, owed until the ratio's first read
 };
 
 RestirGl & restirGl()
 {
 	static RestirGl * g = new RestirGl;   // never destroyed (as cell())
 	return *g;
+}
+
+//! lane VKCOMPUTE1: the owed wait on the last ReSTIR submit (before a read of the ratio, a g-buffer copy, a signal, a drop)
+void restirSettle( RestirGl & G )
+{
+	if ( G.vk.owed && G.semVk && glShare().ok )
+		G.vk.settle( [&G]() { glShare().waitSem( G.semVk, 2, G.buf, 0, nullptr, nullptr ); } );
 }
 
 void restirSay( RestirGl & G, const QString & line )
@@ -1186,6 +1245,7 @@ void restirSay( RestirGl & G, const QString & line )
 void restirDropGl( RestirGl & G, Renderer * r )
 {
 	if ( r && G.owner == r ) {
+		restirSettle( G );   // lane VKCOMPUTE1
 		auto fn = r->fn;
 		GlShare & sh = glShare();
 		if ( G.tex )
@@ -1269,6 +1329,8 @@ void restirUniforms( Renderer * r, NifSkopeOpenGLContext::Program * prog )
 		return;
 	RestirGl & G = restirGl();
 	const bool on = G.ready && G.owner == r && G.tex;
+	if ( on )
+		restirSettle( G );   // lane VKCOMPUTE1: the ratio's first read this frame waits on the submit that wrote it
 	auto fn = r->fn;
 	{	// lane PERFFIX1: through the CELLUNI kit (DSA: the active unit never asked; WW_CELL_UNI_RED=1 the old calls)
 		WwCellUni::Units<std::remove_pointer_t<decltype( fn )>> u( fn, wwCellUniDsa() );
@@ -1355,6 +1417,7 @@ void rtddgiRestirPass( Scene * scene )
 	}
 	auto fn = r->fn;
 	GlShare & sh = glShare();
+	restirSettle( G );   // lane VKCOMPUTE1: the last submit's reads of the g-buffer copy before GL overwrites it
 	// the shared g-buffer into the device's buffer (a GPU copy through the pixel-pack binding)
 	QElapsedTimer copyTimer;
 	copyTimer.start();
@@ -1403,6 +1466,7 @@ void rtddgiRestirPass( Scene * scene )
 		if ( pl[i + 30] > 0.5f )
 			in.cand.push_back( int( i / 32 ) );
 	in.beforeSubmit = [&G, &sh, fn]() {
+		restirSettle( G );   // lane VKCOMPUTE1: one GL wait per signal
 		sh.signalSem( G.semGl, 2, G.buf, 0, nullptr, nullptr );
 		fn->glFlush();
 		return true;
@@ -1425,7 +1489,8 @@ void rtddgiRestirPass( Scene * scene )
 			: QStringLiteral( "refused(%1)" ).arg( QString::fromStdString( out.why ) ) );
 		return;
 	}
-	sh.waitSem( G.semVk, 2, G.buf, 0, nullptr, nullptr );
+	G.vk.afterSubmit( bakert::asyncQueue(), [&G, &sh]() { sh.waitSem( G.semVk, 2, G.buf, 0, nullptr, nullptr ); } );   // lane VKCOMPUTE1
+	asyncUseAdd( bakert::asyncQueue(), out.ms );
 	G.ready = true;
 	G.valid = true;
 	G.history = true;
@@ -1668,6 +1733,16 @@ bool rtddgiAirRaysFrame( Scene * scene, int cols, int rows, int slices, float ne
 	return true;
 }
 
+QString rtddgiAsyncUse( int frames )
+{
+	AsyncUse & u = asyncUse();
+	const QString s = QStringLiteral( "async queue: %1, overlapped up to %2 ms a frame (%3 of %4 submits ran beside GL)" )
+		.arg( QString::fromStdString( bakert::queueInfo() ) ).arg( u.ms / double( std::max( 1, frames ) ), 0, 'f', 2 )
+		.arg( u.beside ).arg( u.submits );
+	u = AsyncUse();
+	return s;
+}
+
 QString rtddgiAirRaysEcho()
 {
 	const AirRaysGl & G = airRaysGl();
@@ -1760,6 +1835,7 @@ static bool stepGlBefore( Cell & c, RtDdgiStep & o, F * fn )
 		Cell * cp = &c;
 		GlShare * gp = &g;
 		o.beforeSubmit = [cp, gp, fn]() {
+			glSettle( *cp );   // lane VKCOMPUTE1: an owed wait first (one GL wait per signal)
 			if ( !cp->glRead )
 				return false;
 			gp->signalSem( cp->semGl, 1, &cp->buf, 0, nullptr, nullptr );
@@ -1774,14 +1850,14 @@ static bool stepGlBefore( Cell & c, RtDdgiStep & o, F * fn )
 
 static void stepGlAfter( Cell & c, const RtDdgiLive & L, bool ok, bool gl )
 {
-	GlShare & g = glShare();
 	if ( ok && gl && L.submitted() ) {   // every such submit signalled vkDone: GL waits on it exactly once
-		QElapsedTimer t;
-		t.start();
-		g.waitSem( c.semVk, 1, &c.buf, 0, nullptr, nullptr );
-		c.glWaitMs = double( t.nsecsElapsed() ) / 1e6;
-		c.glRead = true;
-		c.syncWaits++;
+		Cell * cp = &c;
+		c.vk.afterSubmit( bakert::asyncQueue(), [cp]() { glWaitVk( *cp ); } );   // lane VKCOMPUTE1: async = at the first read
+		const double * m = L.lastMs();
+		double d = 0.0;
+		for ( int i : { 0, 1, 2, 4 } )
+			d += m ? std::max( 0.0, m[i] ) : 0.0;
+		asyncUseAdd( bakert::asyncQueue(), d );   // the last finished step's device ms (one step late)
 		c.uploaded = true;
 		c.fresh = true;
 	} else if ( ok && c.interop && !gl && L.submitted() ) {
@@ -2347,7 +2423,9 @@ static void combinedUpdate( Renderer * r, int n, const void * nif )
 		freeCombined( nullptr );
 	int m = 0, nP[rtddgi::kMaxCascades] = {};
 	for ( int l = 0; l < n; l++ ) {
-		const Cell & c = cascCell( l );
+		Cell & c = cascCell( l );
+		if ( c.glOwner == r )
+			glSettle( c );   // lane VKCOMPUTE1: the copy below reads the atlas
 		if ( !c.live || !c.uploaded || !c.buf || c.glOwner != r || c.nif != nif )
 			break;
 		nP[l] = c.live->live.volume().probeCount();
@@ -2391,6 +2469,15 @@ static void combinedUpdate( Renderer * r, int n, const void * nif )
 			GLsizeiptr( size_t( nP[l] ) * kAtlasTexels * 16 ) );
 		c.fresh = false;
 		K.copies++;
+		const RtDdgiVolume & v = c.live->live.volume();   // lane VKCOMPUTE1: the params of the tiles just copied
+		for ( int a = 0; a < 3; a++ ) {
+			K.org[4 * l + a] = v.origin[a];
+			K.stp[4 * l + a] = v.step[a];
+			K.dims[4 * l + a] = v.dims[a];
+		}
+		K.org[4 * l + 3] = std::min( v.step[0], std::min( v.step[1], v.step[2] ) );
+		K.stp[4 * l + 3] = c.live->live.spec().bias;
+		K.dims[4 * l + 3] = v.probeCount();
 	}
 	fn->glBindBuffer( GL_COPY_READ_BUFFER, 0 );
 	fn->glBindBuffer( GL_COPY_WRITE_BUFFER, 0 );
@@ -2460,9 +2547,16 @@ static void cascadesFrame( Scene * scene, std::vector<Deferred> * defer )
 			c.key = 0;
 		volumeFrame( scene, c, &q, due, resetAll, defer );
 	}
+	/* lane VKCOMPUTE1: with a compute-only queue the copies take the LAST frame's tiles before this frame's submit (its
+	 * glDone orders the device's writes after them), so the device's work runs beside the rest of GL's frame; the red
+	 * WW_VKASYNC_RED=1 copies after the submit, as before */
+	const bool early = bakert::asyncQueue();
+	if ( early )
+		combinedUpdate( r, n, scene->nifModel );
 	if ( defer )
 		groupStep( r, *defer );   // RTXCASCADE2: every cascade due this frame in one submit, before the copies read them
-	combinedUpdate( r, n, scene->nifModel );
+	if ( !early )
+		combinedUpdate( r, n, scene->nifModel );
 }
 
 void rtddgiCellFrame( Scene * scene )
@@ -2545,6 +2639,8 @@ static void openEUniform( Renderer * r, NifSkopeOpenGLContext::Program * prog, c
 
 static void bindOne( Scene * scene, Renderer * r, NifSkopeOpenGLContext::Program * prog, int locOn, Cell & c )
 {
+	if ( c.glOwner == r )
+		glSettle( c );   // lane VKCOMPUTE1: the first read of the atlas waits on the submit that wrote it
 	const bool ready = c.live && c.uploaded && c.tex && c.glOwner == r && c.nif == scene->nifModel;
 	auto fn = r->fn;
 	{	// lane PERFFIX1: through the CELLUNI kit (DSA: the active unit never asked; WW_CELL_UNI_RED=1 the old calls)
@@ -2607,17 +2703,12 @@ void rtddgiCellUniforms( Scene * scene )
 			return;
 		GLfloat org[4 * rtddgi::kMaxCascades] = {}, stp[4 * rtddgi::kMaxCascades] = {};
 		GLint dims[4 * rtddgi::kMaxCascades] = {}, base[rtddgi::kMaxCascades] = {};
-		for ( int l = 0; l < cnt; l++ ) {
-			const RtDdgiLive & L = cascCell( l ).live->live;
-			const RtDdgiVolume & v = L.volume();
-			for ( int a = 0; a < 3; a++ ) {
-				org[4 * l + a] = v.origin[a];
-				stp[4 * l + a] = v.step[a];
-				dims[4 * l + a] = v.dims[a];
+		for ( int l = 0; l < cnt; l++ ) {   // lane VKCOMPUTE1: the params the copied tiles were traced with (combinedUpdate)
+			for ( int a = 0; a < 4; a++ ) {
+				org[4 * l + a] = K.org[4 * l + a];
+				stp[4 * l + a] = K.stp[4 * l + a];
+				dims[4 * l + a] = K.dims[4 * l + a];
 			}
-			org[4 * l + 3] = std::min( v.step[0], std::min( v.step[1], v.step[2] ) );
-			stp[4 * l + 3] = L.spec().bias;
-			dims[4 * l + 3] = v.probeCount();
 			base[l] = K.base[l];
 		}
 		fn->glUniform1i( locCount, cnt );
@@ -2816,6 +2907,8 @@ void rtddgiCellViewDrawLinear( Scene * scene, const Transform & viewTrans )
 	Cell & c = cell();
 	Renderer * r = scene->renderer;
 	Cell & vc = cascCell( viewLevel() );   // RTXCASCADE2: the picked cascade's volume and atlas (0 = M3's volume)
+	if ( vc.glOwner == r )
+		glSettle( vc );   // lane VKCOMPUTE1
 	if ( !mode || !vc.live || vc.nif != scene->nifModel || !vc.uploaded || !vc.tex || vc.glOwner != r )
 		return;
 	QElapsedTimer t;
