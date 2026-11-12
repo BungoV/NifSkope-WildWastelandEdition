@@ -8,6 +8,7 @@ BSD License - see nifskope.h
 #include "gl/cellunits.h"
 #include "gl/celluniform.h"	// lane CELLUNI2
 #include "gl/alphabgsm.h"	// lane ALPHABGSM1: the side passes' alpha-test census
+#include "gl/wwuploadcap.h"	// lane EMPTY240 R4-1: a capture drawn while uploads waited is taken again
 #include "features/near/celldrawstate.h"
 #include "wwswitch.h"	// fix TDFIX2: a live set re-reads the switches
 #include "gl/celllooks.h"	// lane OPENCELLFIX2: the Reflections master
@@ -603,6 +604,7 @@ void wwCellReflProbePass( Scene * scene, bool run )
 	const bool schedRed = frameSchedRed();
 	quint64 camCapKey = mix64( mix64( sceneKey, moverKey ), quint64( std::uint32_t( wwCellLightsVersion( scene->nifModel ) ) ) );
 	camCapKey = mix64( camCapKey, quint64( PassTime::cacheCounts().texMade + PassTime::cacheCounts().texPumped ) );
+	camCapKey = mix64( camCapKey, quint64( WwUp::st().deferredAll ) );	// lane EMPTY240 R4-1: meshes that waited a paint
 	for ( int a = 0; a < 3; a++ ) {
 		camCapKey = mixF( camCapKey, g.slot[0].pos[a] );
 		camCapKey = mixF( camCapKey, g.slot[0].bmin[a] );

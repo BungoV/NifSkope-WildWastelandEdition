@@ -9,6 +9,8 @@
 #include "features/exposure/physunits.h"	// lane PHYSUNITS1: real units
 #include "features/air/cellvolair.h"	// lane FIX1101A (moon): the air's medium for that gain
 #include "wwswitch.h"
+#include "wwsyncred.h"	// lane PERFFIX6: ^WW_SYNC_RED
+#include "wwsyncwait.h"	// lane EMPTY240 R4-2: the waits by name
 #include "gl/cellunits.h"
 #include "gl/celluniform.h"	// lane CELLUNI3: the units bound without a unit ask
 #include "gl/glscene.h"
@@ -329,6 +331,7 @@ struct AtGpu
 	// and the size they were drawn with
 	GLuint pbo[2] = { 0, 0 };
 	GLsync fence = nullptr;
+	bool skyPending = false;	// lane PERFFIX6: the fence polled not done (the read buffers in flight)
 	int rbW = 0, rbH = 0;
 	float rbSunK = 0.0f, rbMoonK = 0.0f, rbCamR = 0.0f;
 	float rbLight[2][3] = {};	// SKY2B (EXPO2): the sun's and the moon's directions the queued tables were drawn for
@@ -438,7 +441,7 @@ void timeRead( NifSkopeOpenGLContext::GLFunctions * fn, AtGpu & g, int slot, boo
 {
 	if ( !g.pending[slot] )
 		return;
-	if ( !wait ) {
+	if ( !wait || !wwSyncRed() ) {	// lane PERFFIX6: an unfinished query is read next frame
 		GLuint avail = 0;
 		fn->glGetQueryObjectuiv( g.q[slot * 2 + 1], GL_QUERY_RESULT_AVAILABLE, &avail );
 		if ( !avail )
@@ -758,8 +761,17 @@ bool wwAtmoDrawSky( Scene * scene, const WwAtmoInputs & in, QString * line )
 	if ( ok && moonK > 0.0f )
 		view( g.moonView, moonW );
 	// 2a. lane SKYA (EXPO1): the last frame's read-back tables give the sky's mean; this frame's are queued
-	if ( g.fence && !in.capture ) {
-		fn->glClientWaitSync( g.fence, GL_SYNC_FLUSH_COMMANDS_BIT, GLuint64( 1000000000 ) );
+	/* lane PERFFIX6 (PHASE 2): a zero-timeout poll; the GPU not past it yet: the tables stay last frame's, nothing new is
+	 * queued (the read buffers are still in flight) and the read is tried again next frame. Red ^WW_SYNC_RED=1: the wait */
+	if ( g.fence && !in.capture && !wwSyncRed()
+		&& fn->glClientWaitSync( g.fence, GL_SYNC_FLUSH_COMMANDS_BIT, 0 ) == GL_TIMEOUT_EXPIRED )
+		g.skyPending = true;
+	else if ( g.fence && !in.capture ) {
+		g.skyPending = false;
+		{
+			WwSync::Wait wwWait( WwSync::ClientWait );	// lane EMPTY240 R4-2: instant unless the red
+			fn->glClientWaitSync( g.fence, GL_SYNC_FLUSH_COMMANDS_BIT, GLuint64( 1000000000 ) );
+		}
 		fn->glDeleteSync( g.fence );
 		g.fence = nullptr;
 		const GLsizeiptr bytes = GLsizeiptr( size_t( g.rbW ) * size_t( g.rbH ) * 4 * sizeof( float ) );
@@ -788,7 +800,7 @@ bool wwAtmoDrawSky( Scene * scene, const WwAtmoInputs & in, QString * line )
 			g.tabFrame = s.frame;
 		}
 	}
-	if ( ok && s.expo > 0 && !in.capture ) {
+	if ( ok && s.expo > 0 && !in.capture && !g.skyPending ) {
 		if ( !g.pbo[0] )
 			fn->glGenBuffers( 2, g.pbo );
 		GLint prevTex = 0;

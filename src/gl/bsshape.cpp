@@ -17,6 +17,7 @@
 #include "features/near/cellgpucull.h"	// lane GPUDRIVEN1 step B: the GPU cluster cull
 #include "features/far-lod/cellfarinst.h"	// lane FARDRAW1: the instanced far rings
 #include "features/near/celldrawpacket.h"	// lane BINDLESSMDI1: the follower tests
+#include "gl/wwuploadcap.h"	// lane EMPTY240 R4-1: this draw may wait a paint for its mesh
 #include "features/particles/cellfxres.h"
 #include "gl/cellgrass.h"
 #include "features/near/cellvrs.h"
@@ -393,7 +394,9 @@ void BSShape::drawShapes( NodeList * secondPass )
 	const bool blDefer = !scene->selecting && scene->renderer && WwBl::fastOn();
 	if ( blDefer )
 		scene->renderer->wwVaoDefer = true;
+	WwUp::st().meshMayDefer = !scene->selecting;	// lane EMPTY240 R4-1: a new mesh over the budget waits a paint
 	const bool shapeBound = nif && bindShape();
+	WwUp::st().meshMayDefer = false;
 	if ( blDefer )
 		scene->renderer->wwVaoDefer = false;
 	if ( !shapeBound )

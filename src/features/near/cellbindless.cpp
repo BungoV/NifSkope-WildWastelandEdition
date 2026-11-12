@@ -5,6 +5,7 @@
 #include "gl/celllooks.h"
 #include "gl/glshape.h"
 #include "wwswitch.h"
+#include "wwsyncwait.h"	// lane EMPTY240 R4-2: the ring's wrap wait by name
 #include "gl/gpustage.h"	// MODULES1: the pool is filled by a GPU copy (no driver RAM copy)
 
 #include <QObject>
@@ -402,6 +403,7 @@ void commit( NifSkopeOpenGLContext::GLFunctions * f, NifSkopeOpenGLContext::Prog
 			GLenum r = f->glClientWaitSync( c.fences[seg], GL_SYNC_FLUSH_COMMANDS_BIT, 0 );
 			if ( r == GL_TIMEOUT_EXPIRED ) {
 				c.waits++;
+				WwSync::Wait wwWait( WwSync::ClientWait );
 				f->glClientWaitSync( c.fences[seg], GL_SYNC_FLUSH_COMMANDS_BIT, 1000000000ULL );
 			}
 			f->glDeleteSync( c.fences[seg] );

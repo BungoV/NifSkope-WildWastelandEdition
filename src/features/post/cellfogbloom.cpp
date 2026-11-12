@@ -1,5 +1,6 @@
 #include "features/post/cellfogbloom.h"
 #include "wwswitch.h"	// lane LIVESET1: the pin and reds follow a live set
+#include "wwsyncred.h"	// lane PERFFIX6: ^WW_SYNC_RED
 
 #include "gl/celluniform.h"	// lane CELLUNI4: the tone map's known state
 #include "gl/glscene.h"
@@ -83,7 +84,7 @@ void timeRead( NifSkopeOpenGLContext::GLFunctions * fn, FbGpu & g, FbState & s, 
 {
 	if ( !g.pending[slot] )
 		return;
-	if ( !wait ) {
+	if ( !wait || !wwSyncRed() ) {	// lane PERFFIX6: an unfinished query is read next frame
 		GLuint avail = 0;
 		fn->glGetQueryObjectuiv( g.q[slot * 2 + 1], GL_QUERY_RESULT_AVAILABLE, &avail );
 		if ( !avail )

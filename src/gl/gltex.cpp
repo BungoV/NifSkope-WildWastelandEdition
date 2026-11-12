@@ -39,6 +39,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "features/near/celldrawpacket.h"	// lane GAPPERF-BINDLESS
 #include "features/near/cellbindless.h"	// lane BINDLESS2
 #include "texpool.h"	// lane PERFFIX4: the streaming pool
+#include "gl/wwuploadcap.h"	// lane EMPTY240 R4-1: the paint's upload budget
 
 #include "message.h"
 #include "gl/glscene.h"
@@ -386,6 +387,12 @@ int TexCache::bind( const QStringView & fname, const NifModel * nif )
 	if ( !tx->isLoaded() ) [[unlikely]] {
 		if ( tx->id[0] )
 			return 0;
+		// lane EMPTY240 R4-1: over this paint's upload budget: the next paint loads it (generated maps never wait)
+		if ( !fname.isEmpty() && fname.front() != QChar( '#' ) && WwUp::spent() ) {
+			WwDp::abortRecording();
+			WwUp::deferTex();
+			return 0;
+		}
 
 		return loadTex( *tx, nif );
 	}
@@ -527,6 +534,7 @@ bool TexCache::bindCube( const QString & fname, const NifModel * nif, bool useSe
 std::uint16_t TexCache::loadTex( Tex & txIn, const NifModel * nif )
 {
 	WwDp::abortRecording();	// lane GAPPERF-BINDLESS: a load is never replayed
+	WwUp::Charge wwUpCharge;	// lane EMPTY240 R4-1: its time and bytes count against the paint's budget
 	Tex *	t = &txIn;
 	Tex::ImageInfo *	i = t->imageInfo;
 	CellSpeed::Acc speedAcc( "texture loads (find, decode, upload)" );   // lane SPEED1
@@ -556,6 +564,8 @@ std::uint16_t TexCache::loadTex( Tex & txIn, const NifModel * nif )
 		draining = true;
 		const QStringList names = CellTexAhead::ready( nif, 4096 );
 		for ( const QString & n : names ) {
+			if ( WwUp::spent() )	// lane EMPTY240 R4-1: the rest stay ready for a later paint
+				break;
 			if ( n == i->filename )
 				continue;
 			Tex * o = insertTex( n );	// may rehash the table: t is found again below
