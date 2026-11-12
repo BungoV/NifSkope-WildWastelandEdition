@@ -491,6 +491,228 @@ const char * name( int pass )
 	return pass >= 0 && pass < Count ? k[pass] : "?";
 }
 
+/* lane EMPTY240 R3-0 (build 74: GPU paints of 1.4 s at the first frames and after cell attaches): the GL work of each
+ * paint split by its top-level passes and named zones, always on, read only once available (no stall). A paint over
+ * 250 ms on the GPU prints `frame gpu zones:` with every zone, the gap no zone holds and what the paint uploaded.
+ * Red WW_GPUZONES_RED=1: no zones. */
+namespace
+{
+struct WatchZone
+{
+	const char * name;
+	GLuint q0, q1;
+	bool closed;
+};
+struct WatchSlot
+{
+	bool pending = false;
+	quint64 frame = 0;
+	GLuint f0 = 0, f1 = 0;
+	std::vector<WatchZone> zones;
+	CacheCounts c0, c;
+};
+constexpr int kWatchSlots = 8;
+constexpr int kNotOpen = -100;
+struct Watch
+{
+	bool loaded = false, red = false, inFrame = false;
+	QOpenGLContext * ctx = nullptr;
+	QOpenGLFunctions_3_3_Core * gl = nullptr;
+	std::vector<GLuint> pool;
+	WatchSlot ring[kWatchSlots];
+	int cur = 0, depth = 0;
+	int open[Count];
+	quint64 n = 0;
+};
+Watch & watch()
+{
+	static Watch w;
+	if ( !w.loaded ) {
+		w.loaded = true;
+		w.red = wwEnvInt( "WW_GPUZONES_RED" ) == 1;
+		for ( int & o : w.open )
+			o = kNotOpen;
+	}
+	return w;
+}
+GLuint watchQuery()
+{
+	Watch & w = watch();
+	if ( w.pool.empty() ) {
+		GLuint q[64];
+		w.gl->glGenQueries( 64, q );
+		w.pool.insert( w.pool.end(), q, q + 64 );
+	}
+	const GLuint q = w.pool.back();
+	w.pool.pop_back();
+	return q;
+}
+double watchMs( GLuint a, GLuint b )
+{
+	GLuint64 t0 = 0, t1 = 0;
+	watch().gl->glGetQueryObjectui64v( a, GL_QUERY_RESULT, &t0 );
+	watch().gl->glGetQueryObjectui64v( b, GL_QUERY_RESULT, &t1 );
+	return t1 > t0 ? double( t1 - t0 ) * 1e-6 : 0.0;
+}
+void watchCollect( WatchSlot & sl )
+{
+	Watch & w = watch();
+	if ( !sl.pending )
+		return;
+	GLuint avail = 0;
+	w.gl->glGetQueryObjectuiv( sl.f1, GL_QUERY_RESULT_AVAILABLE, &avail );
+	if ( !avail )
+		return;
+	sl.pending = false;
+	const double total = watchMs( sl.f0, sl.f1 );
+	if ( total > 250.0 ) {
+		// zones of one name summed, in first-seen order
+		std::vector<const char *> names;
+		std::vector<double> ms;
+		std::vector<int> times;
+		double held = 0.0;
+		for ( const WatchZone & z : sl.zones ) {
+			if ( !z.closed )
+				continue;
+			const double m = watchMs( z.q0, z.q1 );
+			held += m;
+			size_t k = 0;
+			while ( k < names.size() && std::strcmp( names[k], z.name ) != 0 )
+				k++;
+			if ( k == names.size() ) {
+				names.push_back( z.name );
+				ms.push_back( 0.0 );
+				times.push_back( 0 );
+			}
+			ms[k] += m;
+			times[k]++;
+		}
+		QByteArray line = "frame gpu zones: frame " + QByteArray::number( sl.frame ) + " took "
+			+ QByteArray::number( total, 'f', 1 ) + " ms on the GPU =";
+		for ( size_t k = 0; k < names.size(); k++ ) {
+			if ( ms[k] < 0.5 )
+				continue;
+			line += " " + QByteArray( names[k] ) + " " + QByteArray::number( ms[k], 'f', 1 );
+			if ( times[k] > 1 )
+				line += " (x" + QByteArray::number( times[k] ) + ")";
+			line += " +";
+		}
+		line += " outside the zones " + QByteArray::number( std::max( 0.0, total - held ), 'f', 1 )
+			+ " | this paint uploaded " + QByteArray::number( sl.c.texMade ) + " textures ("
+			+ QByteArray::number( double( sl.c.texBytes ) / 1048576.0, 'f', 1 ) + " MB; "
+			+ QByteArray::number( sl.c.texPumped ) + " by the pump), " + QByteArray::number( sl.c.made ) + " meshes ("
+			+ QByteArray::number( double( sl.c.madeBytes ) / 1048576.0, 'f', 1 ) + " MB)";
+		std::fprintf( stderr, "%s\n", line.constData() );
+	}
+	for ( const WatchZone & z : sl.zones ) {
+		w.pool.push_back( z.q0 );
+		w.pool.push_back( z.q1 );
+	}
+	sl.zones.clear();
+	w.pool.push_back( sl.f0 );
+	w.pool.push_back( sl.f1 );
+}
+void watchPass( int pass, bool opening )
+{
+	Watch & w = watch();
+	if ( pass < 0 || pass >= CullCamera )
+		return;
+	if ( opening ) {
+		if ( w.open[pass] == kNotOpen && w.inFrame )
+			w.open[pass] = zoneBegin( name( pass ) );
+	} else if ( w.open[pass] != kNotOpen ) {
+		zoneEnd( w.open[pass] );
+		w.open[pass] = kNotOpen;
+	}
+}
+}	// namespace
+
+void gpuWatchFrame( bool opening, quint64 frame )
+{
+	Watch & w = watch();
+	if ( w.red )
+		return;
+	if ( opening ) {
+		w.inFrame = false;
+		QOpenGLContext * c = QOpenGLContext::currentContext();
+		if ( !c )
+			return;
+		if ( c != w.ctx ) {
+			w.ctx = c;
+			w.gl = QOpenGLVersionFunctionsFactory::get<QOpenGLFunctions_3_3_Core>( c );
+			w.pool.clear();
+			for ( WatchSlot & sl : w.ring ) {
+				sl.pending = false;
+				sl.zones.clear();
+			}
+		}
+		if ( !w.gl )
+			return;
+		for ( WatchSlot & sl : w.ring )
+			watchCollect( sl );
+		const int k = int( w.n++ % quint64( kWatchSlots ) );
+		WatchSlot & sl = w.ring[k];
+		if ( sl.pending )
+			return;	// still on the GPU after 8 paints: this paint goes untimed
+		sl.frame = frame;
+		sl.f0 = watchQuery();
+		sl.f1 = watchQuery();
+		sl.c0 = cacheCounts();
+		w.gl->glQueryCounter( sl.f0, GL_TIMESTAMP );
+		w.cur = k;
+		w.depth = 0;
+		for ( int & o : w.open )
+			o = kNotOpen;
+		w.inFrame = true;
+		return;
+	}
+	if ( !w.inFrame )
+		return;
+	WatchSlot & sl = w.ring[w.cur];
+	for ( WatchZone & z : sl.zones )
+		if ( !z.closed ) {
+			w.gl->glQueryCounter( z.q1, GL_TIMESTAMP );
+			z.closed = true;
+		}
+	w.gl->glQueryCounter( sl.f1, GL_TIMESTAMP );
+	const CacheCounts & cc = cacheCounts();
+	sl.c.made = cc.made - sl.c0.made;
+	sl.c.madeBytes = cc.madeBytes - sl.c0.madeBytes;
+	sl.c.texMade = cc.texMade - sl.c0.texMade;
+	sl.c.texBytes = cc.texBytes - sl.c0.texBytes;
+	sl.c.texPumped = cc.texPumped - sl.c0.texPumped;
+	sl.pending = true;
+	w.inFrame = false;
+}
+
+int zoneBegin( const char * zoneName )
+{
+	Watch & w = watch();
+	if ( !w.inFrame )
+		return -1;
+	if ( w.depth++ > 0 )
+		return -2;	// nested: the outer zone holds it
+	WatchSlot & sl = w.ring[w.cur];
+	WatchZone z{ zoneName, watchQuery(), watchQuery(), false };
+	w.gl->glQueryCounter( z.q0, GL_TIMESTAMP );
+	sl.zones.push_back( z );
+	return int( sl.zones.size() ) - 1;
+}
+
+void zoneEnd( int zone )
+{
+	Watch & w = watch();
+	if ( zone == -1 || !w.inFrame )
+		return;
+	if ( w.depth > 0 )
+		w.depth--;
+	WatchSlot & sl = w.ring[w.cur];
+	if ( zone < 0 || size_t( zone ) >= sl.zones.size() || sl.zones[size_t( zone )].closed )
+		return;
+	w.gl->glQueryCounter( sl.zones[size_t( zone )].q1, GL_TIMESTAMP );
+	sl.zones[size_t( zone )].closed = true;
+}
+
 int openPass()
 {
 	const State & s = st();
@@ -584,6 +806,7 @@ void frameBegin()
 void begin( int pass )
 {
 	::wwMainStep( name( pass ) );	// lane PERFLOAD1 P5
+	watchPass( pass, true );	// lane EMPTY240 R3-0
 	State & s = st();
 	if ( !s.inFrame || pass < 0 || pass >= Count || s.openMark[pass] >= 0 )
 		return;
@@ -617,6 +840,7 @@ void begin( int pass )
 
 void end( int pass )
 {
+	watchPass( pass, false );	// lane EMPTY240 R3-0
 	State & s = st();
 	if ( !s.inFrame || pass < 0 || pass >= Count || s.openMark[pass] < 0 )
 		return;

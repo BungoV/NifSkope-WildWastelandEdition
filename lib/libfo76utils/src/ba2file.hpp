@@ -83,6 +83,8 @@ class BA2File
       bool (*fileFilterFunc)(void *p, const std::string_view& s) = nullptr,
       void *fileFilterFuncData = nullptr);
   virtual ~BA2File();
+  // EMPTY240: told when any index goes (the RAM cache drops what it read through it)
+  static inline void (*destroyHook)(const void *index) = nullptr;
   // returns a list of null-terminated paths with optional sorting and filtering
   void getFileList(std::vector< std::string_view >& fileList,
                    bool disableSorting = false,

@@ -43,6 +43,7 @@ BSD License - see nifskope.h
 #include <QDir>
 #include "gamemanager.h"
 #include "ba2file.hpp"
+#include "wwhwuse.h"	// lane EMPTY240: archive reads through the RAM cache and the read/inflate counters
 #include <QBuffer>
 #include <QPainter>
 #include <memory>
@@ -1537,6 +1538,7 @@ BA2File * lodgenStackIndex()
 	const QStringList paths = lodgenStackSearchPaths();
 	if ( paths.isEmpty() )
 		return nullptr;
+	WwHw::IndexScope wwIx( "resource stack index (every extension)" );
 	index = std::make_unique<BA2File>();
 	for ( const QString & p : paths ) {
 		try {
@@ -1557,6 +1559,7 @@ static BA2File * lodgenMeshArchives()
 		if ( Game::GameManager::status( Game::FALLOUT_4 ) ) {
 			const QStringList paths = Game::GameManager::folders( Game::FALLOUT_4 );
 			if ( !paths.isEmpty() ) {
+				WwHw::IndexScope wwIx( "mesh archive index (.nif only)" );
 				index = std::make_unique<BA2File>();
 				for ( const QString & path : paths ) {
 					try {
@@ -1590,7 +1593,7 @@ bool lodgenReadFromStack( const QString & relPath, const char * archiveFolder,
 	if ( !fd )
 		return false;
 	try {
-		ix->extractFile( &out, &lodgenByteArrayAlloc, *fd );
+		WwHw::extract( *ix, *fd, out, &lodgenByteArrayAlloc );
 	} catch ( ... ) {
 		out.clear();
 	}
@@ -1689,7 +1692,7 @@ static bool lodgenReadAssetRaw( const QString & dataRoot, const QString & relPat
 		if ( !fd )
 			return false;
 		try {
-			ix->extractFile( &out, &lodgenByteArrayAlloc, *fd );
+			WwHw::extract( *ix, *fd, out, &lodgenByteArrayAlloc );
 		} catch ( ... ) {
 			out.clear();
 		}

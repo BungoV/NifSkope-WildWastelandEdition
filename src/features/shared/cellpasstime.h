@@ -94,11 +94,27 @@ private:
 void subEnd( int sub );
 qint64 nowNs();
 
+/*! lane EMPTY240 R3-0: the always-on GPU zones (the top-level passes and the named zones below, two timestamps each,
+ *  read once available). A paint over 250 ms on the GPU prints `frame gpu zones:`. Red WW_GPUZONES_RED=1. */
+void gpuWatchFrame( bool begin, quint64 frame );
+int zoneBegin( const char * name );
+void zoneEnd( int zone );
+class Zone
+{
+public:
+	explicit Zone( const char * name ) : z_( zoneBegin( name ) ) {}
+	~Zone() { zoneEnd( z_ ); }
+private:
+	int z_;
+	Q_DISABLE_COPY( Zone )
+};
+
 class Scope
 {
 public:
-	explicit Scope( int pass ) : p_( on() ? pass : -1 ) { if ( p_ >= 0 ) begin( p_ ); }
-	~Scope() { if ( p_ >= 0 ) end( p_ ); }
+	// EMPTY240 R3-0: begin/end run with the timers off too (they feed the GPU zones; the timers' part checks on())
+	explicit Scope( int pass ) : p_( pass ) { begin( p_ ); }
+	~Scope() { end( p_ ); }
 private:
 	int p_;
 	Q_DISABLE_COPY( Scope )

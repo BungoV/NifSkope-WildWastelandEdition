@@ -20,6 +20,9 @@ class FileBuffer
   // MODULES1 (NifSkope WW): drop every mapped view's touched pages from the working set; returns the views trimmed
   static size_t trimMappedViews();
   static std::uint64_t mappedViewTrims(double *maxMs = nullptr);
+  // EMPTY240: archive opens since launch, the ones that shared a live view, and the views mapped now
+  static void archiveShareStats(std::uint64_t *opens, std::uint64_t *shared,
+                                size_t *live);
   static inline std::uint32_t swapUInt32(unsigned int n);
   // the fast versions of the functions are inline
   // and do not check if the read position is valid
