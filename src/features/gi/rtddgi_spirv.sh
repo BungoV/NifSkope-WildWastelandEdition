@@ -15,19 +15,22 @@ cd "$ROOT/src/features/gi/rtddgi"
 # lane RESTIRDI1: restir (ReSTIR DI on the volume's BVH, src/features/gi/rtddgi/restir_vk.inc; it includes restir_common.glsl)
 # MODULES1 RESUME 15: airrays (the lamps' shadow in the air, route b of RESEARCH_AIR.md; src/features/gi/rtddgi/airrays_vk.inc)
 # RTEMIS1 part 2: restirgi (ReSTIR GI, src/features/gi/rtddgi/restirgi_vk.inc; it includes trace_body.glsl, trace.comp's
-# helpers): GLSL only, built by glslang (no HLSL twin yet)
-for k in restirgi; do
-	"$G" --target-env vulkan1.2 -V --vn "rtddgi_${k}_spv" -o "${k}.spv.h" "${k}.comp"
-done
+# helpers). Lane HLSLRESTIR1 (11-12): built from its HLSL twin like the rest; glslang builds the .comp only for the red
+# (WW_CELL_RESTIRGI_RED=glsl: restirgi_glsl.spv.h / restirgi_filt_glsl.spv.h)
+"$G" --target-env vulkan1.2 -V --vn rtddgi_restirgi_glsl_spv -o restirgi_glsl.spv.h restirgi.comp
+"$G" --target-env vulkan1.2 -V -DRESTIRGI_FILTER --vn rtddgi_restirgi_filt_glsl_spv -o restirgi_filt_glsl.spv.h restirgi.comp
 # lane VKCOMPUTE1: every kernel now builds from HLSL (restir last, 11-12); $G stays for a kernel that goes back to its .comp
 # -O0: DXC's optimizer reorders float math (a / b -> a * (1 / b), NMin/NMax); unoptimized it keeps the source's order, which
 # tests/hlslmatch proves byte-exact against the .comp. The entry's `// hlsl profile: cs_6_N` line picks the shader model.
-for k in border reloc blend trace airrays restir; do
+for k in border reloc blend trace airrays restir restirgi; do
 	T="$(grep -o 'hlsl profile: cs_6_[0-9]' "$HLSL/${k}.hlsl" | head -1 | awk '{print $3}')"
 	"$DXC" -spirv -fspv-target-env=vulkan1.2 -T "${T:-cs_6_0}" -E main -O0 -Fo "${k}.hlsl.spv" "$(cygpath -m "$HLSL/${k}.hlsl" 2>/dev/null || echo "$HLSL/${k}.hlsl")"
 	python -I "$ROOT/tools/spv_header.py" "${k}.hlsl.spv" "rtddgi_${k}_spv" "${k}.spv.h" < /dev/null
 	rm -f "${k}.hlsl.spv"
 done
-# RTEMIS1 11-08: restirgi's modes 2.. as their own kernel (no ray code: the filter and a-trous passes' registers)
-"$G" --target-env vulkan1.2 -V -DRESTIRGI_FILTER --vn rtddgi_restirgi_filt_spv -o restirgi_filt.spv.h restirgi.comp
-ls -la trace.spv.h blend.spv.h border.spv.h reloc.spv.h restir.spv.h airrays.spv.h restirgi.spv.h restirgi_filt.spv.h
+# RTEMIS1 11-08: restirgi's modes 2.. as their own kernel (no ray code: the filter and a-trous passes' registers);
+# HLSLRESTIR1: the same HLSL under -DRESTIRGI_FILTER
+"$DXC" -spirv -fspv-target-env=vulkan1.2 -T cs_6_5 -E main -O0 -DRESTIRGI_FILTER -Fo restirgi_filt.hlsl.spv "$(cygpath -m "$HLSL/restirgi.hlsl" 2>/dev/null || echo "$HLSL/restirgi.hlsl")"
+python -I "$ROOT/tools/spv_header.py" restirgi_filt.hlsl.spv rtddgi_restirgi_filt_spv restirgi_filt.spv.h < /dev/null
+rm -f restirgi_filt.hlsl.spv
+ls -la trace.spv.h blend.spv.h border.spv.h reloc.spv.h restir.spv.h airrays.spv.h restirgi.spv.h restirgi_filt.spv.h restirgi_glsl.spv.h restirgi_filt_glsl.spv.h

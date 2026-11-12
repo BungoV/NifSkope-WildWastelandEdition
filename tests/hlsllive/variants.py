@@ -24,6 +24,8 @@ ALWAYS = ['WW_FRAME_UBO', 'WW_CELL_FOGLEAK']   # on in a default run (FOGLEAK si
 # the Ray-traced GI row and the RT quality preset (rtddgicell.cpp): off, or on with the cascades (kPresetCascades 3/3/3/4, always
 # > 1 unless the red WW_CELL_RTDDGI_CASCADES_RED=one), and RESTIR from preset Medium up (it needs RTDDGI)
 RT_STATES = [[], ['WW_CELL_RTDDGI', 'WW_CELL_RTDDGI_CASCADES'], ['WW_CELL_RTDDGI', 'WW_CELL_RTDDGI_CASCADES', 'WW_CELL_RESTIR']]
+# HLSLRESTIR1: the ReSTIR GI row (WW_CELL_RESTIRGI, off by default) at any RT quality while RTDDGI runs (rtddgicell.cpp restirGiOffWhy)
+RT_STATES += [s + ['WW_CELL_RESTIRGI'] for s in RT_STATES[1:]]
 # rows that inject a define: Air zones row (AIRZONE), the air's sky visibility (AIR_SKYVIEW, on since DARKAIR2), the lamps' floor bounce
 # (AIR_BOUNCE). Not built: probe/pass views (VIEWS), debug views (DEBUG_VIEWS), GI march / PRT / water info probe (reds, harness).
 FLAGS = ['WW_CELL_AIRZONE', 'WW_CELL_AIR_SKYVIEW', 'WW_CELL_AIR_BOUNCE']

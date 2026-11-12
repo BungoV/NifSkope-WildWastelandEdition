@@ -19,15 +19,19 @@ ENV=vulkan1.2
 [ "$K" = bvh ] && ENV=vulkan1.1
 mkdir -p "$OUT"
 W() { cygpath -m "$1" 2>/dev/null || echo "$1"; }
-RED="$(echo "$K" | tr a-z A-Z)_RED"
-H="$ROOT/res/shaders/hlsl/$SET/$K.hlsl"
+# a kernel built from another's source with a define (restirgi_filt = restirgi.comp / .hlsl with -DRESTIRGI_FILTER)
+SRC="$K"
+DEF=()
+[ "$K" = restirgi_filt ] && { SRC=restirgi; DEF=(-DRESTIRGI_FILTER); }
+RED="$(echo "$SRC" | tr a-z A-Z)_RED"
+H="$ROOT/res/shaders/hlsl/$SET/$SRC.hlsl"
 T="$(grep -o 'hlsl profile: cs_6_[0-9]' "$H" | head -1 | awk '{print $3}')"
 T="${T:-cs_6_0}"
 g++ -O1 -std=c++17 "$ROOT/tests/hlslmatch/kernelmatch.cpp" -o "$OUT/kernelmatch.exe" || { echo "HLSLMATCH GATE FAILED (g++)"; exit 1; }
-( cd "$ROOT/src/features/gi/$SET" && "$G" --target-env "$ENV" -V -o "$(W "$OUT/${K}_glsl.spv")" "$K.comp" > /dev/null ) \
+( cd "$ROOT/src/features/gi/$SET" && "$G" --target-env "$ENV" -V "${DEF[@]}" -o "$(W "$OUT/${K}_glsl.spv")" "$SRC.comp" > /dev/null ) \
 	|| { echo "HLSLMATCH GATE FAILED (glslang)"; exit 1; }
-"$DXC" -spirv -fspv-target-env="$ENV" -T "$T" -E main -O0 -Fo "$(W "$OUT/${K}_hlsl.spv")" "$(W "$H")" || { echo "HLSLMATCH GATE FAILED (dxc)"; exit 1; }
-"$DXC" -spirv -fspv-target-env="$ENV" -T "$T" -E main -O0 -D "$RED" -Fo "$(W "$OUT/${K}_red.spv")" "$(W "$H")" || { echo "HLSLMATCH GATE FAILED (dxc red)"; exit 1; }
+"$DXC" -spirv -fspv-target-env="$ENV" -T "$T" -E main -O0 "${DEF[@]}" -Fo "$(W "$OUT/${K}_hlsl.spv")" "$(W "$H")" || { echo "HLSLMATCH GATE FAILED (dxc)"; exit 1; }
+"$DXC" -spirv -fspv-target-env="$ENV" -T "$T" -E main -O0 "${DEF[@]}" -D "$RED" -Fo "$(W "$OUT/${K}_red.spv")" "$(W "$H")" || { echo "HLSLMATCH GATE FAILED (dxc red)"; exit 1; }
 cd "$OUT"
 ./kernelmatch.exe "$K" "${K}_glsl.spv" "${K}_hlsl.spv" > green.txt; g=$?
 ./kernelmatch.exe "$K" "${K}_glsl.spv" "${K}_red.spv" > red.txt; r=$?

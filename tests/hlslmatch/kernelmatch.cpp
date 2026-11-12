@@ -102,8 +102,8 @@ static void freeBuf( Buf & B )
 static VkAccelerationStructureKHR tlas = VK_NULL_HANDLE;
 static VkDescriptorSetLayout setLayout, set1Layout;
 static VkPipelineLayout pipeLayout;
-// a kernel's own set 1 (air rays 4 buffers, restir 11): bufs[15 + i] = set 1 binding i; every binding partially bound
-constexpr uint32_t kSet1Max = 11;
+// a kernel's own set 1 (air rays 4 buffers, restir 11, restirgi 15): bufs[15 + i] = set 1 binding i; every binding partially bound
+constexpr uint32_t kSet1Max = 15;
 static uint32_t nSet1 = 0;
 // bakert's bvh kernel: binding 6 is a storage buffer (the tree's nodes), so it runs on a second layout
 static bool storage6 = false;
@@ -938,6 +938,186 @@ static void fillRestir( std::vector<Buf> & bufs, const Case & c, uint64_t & grou
 	groups = ( nPix + 63 ) / 64;
 }
 
+// ReSTIR GI (HLSLRESTIR1): restirgi.comp's RestirGiParams has RestirParams' layout (11 vec4); size / options by case seed
+// (rgOf). knobs: x history, y the running mean's frames cap, z the STBN mask bound, w the a-trous passes
+struct RgCase { int w, h, K, R, f, red, hist, frames, mask, passes; };
+static RgCase rgOf[128];   // by case seed
+// the binding each mode writes: 0 cur, 1 est, 2 acc, 3 out, a-trous it even atrB, odd atrA
+static int rgWatch( uint32_t mode ) { return mode == 0 ? 15 + 3 : mode == 1 ? 15 + 6 : mode == 2 ? 15 + 7 : mode == 3 ? 15 + 9 : ( mode & 1 ) ? 15 + 12 : 15 + 13; }
+
+static uint32_t rgPackSnorm( float v )
+{
+	const float c = v < -1.0f ? -1.0f : v > 1.0f ? 1.0f : v;
+	return uint32_t( int32_t( std::lround( c * 32767.0f ) ) ) & 0xFFFFu;
+}
+
+// set 0 = the trace's scene + TLAS + params and the bounce read's volume (1-4, as fillTrace); set 1 = 0 params, 1 g-buffer,
+// 2 the previous one, 3 cur, 4 hist reservoirs (64 B), 5 history pixel, 6 estimate, 7 acc, 8 previous acc, 9 out, 10 the
+// bounce's Lo, 11 STBN bytes, 12 / 13 a-trous ping-pong, 14 the packed g-buffer (host-packed for modes 3.., random below, so
+// mode 2's own write shows and its red fails). The g-buffer as fillRestir's, some normals facing away (the octahedral fold)
+static void fillRestirGi( std::vector<Buf> & bufs, const Case & c, uint64_t & groups, uint32_t pc[16] )
+{
+	const uint32_t nP = uint32_t( c.x * c.y * c.z );
+	const RgCase & q = rgOf[c.seed % 128];
+	const uint64_t nPix = uint64_t( q.w ) * q.h;
+	Rng r { c.seed };
+	Params P;
+	traceParams( P, c, nP, r );
+	fillRays( static_cast<float *>( bufs[0].p ), nP, c.N, r, P.stepv[3] );
+	float * irr = static_cast<float *>( bufs[1].p );
+	for ( size_t i = 0; i < size_t( nP ) * 64 * 4; i++ )
+		irr[i] = r.unit() * 1.5f;
+	float * dist = static_cast<float *>( bufs[2].p );
+	for ( size_t i = 0; i < size_t( nP ) * 256 * 2; i++ )
+		dist[i] = r.unit() * 3.0f * P.stepv[3];
+	float * prb = static_cast<float *>( bufs[3].p );
+	for ( uint32_t p = 0; p < nP; p++ ) {
+		for ( int k = 0; k < 3; k++ )
+			prb[p * 4 + k] = ( r.unit() - 0.5f ) * 0.8f * P.stepv[k];
+		prb[p * 4 + 3] = float( r.next() % 4 );
+	}
+	uint32_t * age = static_cast<uint32_t *>( bufs[4].p );
+	for ( uint32_t p = 0; p < nP; p++ )
+		age[p] = r.next() % 4 == 0 ? 0u : 1 + r.next() % 100;
+	std::memcpy( bufs[5].p, S.attr.data(), S.attr.size() * 4 );
+	std::memcpy( bufs[7].p, S.remap.data(), S.remap.size() * 4 );
+	std::memcpy( bufs[8].p, S.verts.data(), S.verts.size() * 4 );
+	std::memcpy( bufs[9].p, S.triOf.data(), S.triOf.size() * 4 );
+	std::memcpy( bufs[10].p, S.mask.data(), S.mask.size() * 4 );
+	std::memcpy( bufs[11].p, S.maps.data(), S.maps.size() * 4 );
+	std::memcpy( bufs[12].p, S.alpha.data(), S.alpha.size() * 4 );
+	std::memcpy( bufs[13].p, S.lights.data(), S.lights.size() * 4 );
+	std::memcpy( bufs[14].p, &P, sizeof P );
+	RestirParams R;
+	std::memset( &R, 0, sizeof R );
+	R.size[0] = q.w; R.size[1] = q.h; R.size[2] = int32_t( c.seed * 7 % 64 ); R.size[3] = int32_t( c.seed * 41 % 100000 );
+	R.opts[0] = q.K; R.opts[1] = q.R; R.opts[2] = q.f; R.opts[3] = q.red;
+	const float ext[3] = { float( c.x ) * P.stepv[0], float( c.y ) * P.stepv[1], float( c.z ) * P.stepv[2] };
+	const float diag = std::sqrt( ext[0] * ext[0] + ext[1] * ext[1] + ext[2] * ext[2] );
+	R.knobs[0] = float( q.hist ); R.knobs[1] = float( q.frames ); R.knobs[2] = float( q.mask ); R.knobs[3] = float( q.passes );
+	float qq[4] = { r.unit() - 0.5f, r.unit() - 0.5f, r.unit() - 0.5f, r.unit() - 0.5f };
+	const float ql = std::sqrt( qq[0] * qq[0] + qq[1] * qq[1] + qq[2] * qq[2] + qq[3] * qq[3] ) + 1e-6f;
+	for ( float & v : qq )
+		v /= ql;
+	const float w = qq[0], x = qq[1], y = qq[2], z = qq[3];
+	const float Rm[3][3] = { { 1 - 2 * ( y * y + z * z ), 2 * ( x * y - w * z ), 2 * ( x * z + w * y ) },
+		{ 2 * ( x * y + w * z ), 1 - 2 * ( x * x + z * z ), 2 * ( y * z - w * x ) },
+		{ 2 * ( x * z - w * y ), 2 * ( y * z + w * x ), 1 - 2 * ( x * x + y * y ) } };
+	for ( int i = 0; i < 3; i++ ) {
+		const float cam = P.origin[i] + 0.5f * ext[i];
+		for ( int k = 0; k < 3; k++ )
+			R.rows[i][k] = R.prows[i][k] = Rm[i][k];
+		R.rows[i][3] = cam;
+		R.prows[i][3] = cam + ( r.unit() - 0.5f ) * 0.05f * P.stepv[3];
+	}
+	R.proj[0] = 1.3f; R.proj[1] = 1.7f; R.proj[2] = 0.02f; R.proj[3] = -0.01f;
+	R.pproj[0] = 1.3f; R.pproj[1] = 1.7f; R.pproj[2] = 0.021f; R.pproj[3] = -0.011f;
+	std::memcpy( bufs[15].p, &R, sizeof R );
+	float * g = static_cast<float *>( bufs[16].p ), * pg = static_cast<float *>( bufs[17].p );
+	const int bw = ( q.w + 7 ) / 8, bh = ( q.h + 7 ) / 8;
+	std::vector<float> bn( size_t( bw ) * bh * 3 );
+	for ( size_t i = 0; i < size_t( bw ) * bh; i++ ) {
+		float n[3] = { r.unit() - 0.5f, r.unit() - 0.5f, 0.3f + r.unit() };
+		if ( i % 5 == 0 )
+			n[2] = -n[2];
+		const float nl = std::sqrt( n[0] * n[0] + n[1] * n[1] + n[2] * n[2] );
+		for ( int k = 0; k < 3; k++ )
+			bn[i * 3 + k] = n[k] / nl;
+	}
+	for ( uint64_t i = 0; i < nPix; i++ ) {
+		const int px = int( i % uint64_t( q.w ) ), py = int( i / uint64_t( q.w ) );
+		const float * n = &bn[( size_t( py / 8 ) * bw + size_t( px / 8 ) ) * 3];
+		const float u = r.unit();
+		float D = diag * ( 0.15f + 0.3f * ( 1.0f + std::sin( float( px ) * 0.02f ) * std::cos( float( py ) * 0.03f ) ) );
+		if ( u < 0.05f )
+			D = 1e6f;
+		else if ( u < 0.08f )
+			D = 0.0f;
+		for ( int k = 0; k < 3; k++ ) {
+			g[i * 4 + k] = n[k] + ( r.unit() - 0.5f ) * 0.02f;
+			pg[i * 4 + k] = g[i * 4 + k] + ( r.unit() - 0.5f ) * 0.02f;
+		}
+		g[i * 4 + 3] = D;
+		pg[i * 4 + 3] = D < 1e5f && D > 0.0f ? D * ( 1.0f + ( r.unit() - 0.5f ) * 0.04f ) : D;
+	}
+	// a reservoir (RgRes, 16 floats): xs (a point in the volume, or a miss's direction), hit, ns, wsum, Lo, M, W, any, pads
+	auto res = [&]( float * o ) {
+		const bool hit = r.unit() < 0.8f;
+		float d[3] = { r.unit() - 0.5f, r.unit() - 0.5f, r.unit() - 0.5f };
+		const float dl = std::sqrt( d[0] * d[0] + d[1] * d[1] + d[2] * d[2] ) + 1e-6f;
+		for ( int k = 0; k < 3; k++ )
+			o[k] = hit ? P.origin[k] + r.unit() * ext[k] : d[k] / dl;
+		o[3] = hit ? 1.0f : 0.0f;
+		float nn[3] = { r.unit() - 0.5f, r.unit() - 0.5f, r.unit() - 0.5f };
+		const float nl = std::sqrt( nn[0] * nn[0] + nn[1] * nn[1] + nn[2] * nn[2] ) + 1e-6f;
+		for ( int k = 0; k < 3; k++ )
+			o[4 + k] = nn[k] / nl;
+		o[7] = r.unit() * 5.0f;
+		for ( int k = 0; k < 3; k++ )
+			o[8 + k] = r.unit() * 3.0f;
+		o[11] = float( 1 + r.next() % 40 );   // M: past the history cap (20) now and then
+		o[12] = r.unit() * 2.0f;
+		o[13] = r.unit() < 0.85f ? 1.0f : 0.0f;
+		o[14] = 0.0f;
+		o[15] = 0.0f;
+	};
+	float * cur = static_cast<float *>( bufs[18].p ), * hist = static_cast<float *>( bufs[19].p );
+	int32_t * hp = static_cast<int32_t *>( bufs[20].p );
+	float * est = static_cast<float *>( bufs[21].p ), * acc = static_cast<float *>( bufs[22].p ), * prev = static_cast<float *>( bufs[23].p );
+	float * out = static_cast<float *>( bufs[24].p ), * cand = static_cast<float *>( bufs[25].p );
+	float * atA = static_cast<float *>( bufs[27].p ), * atB = static_cast<float *>( bufs[28].p );
+	uint32_t * pk = static_cast<uint32_t *>( bufs[29].p );
+	for ( uint64_t i = 0; i < nPix; i++ ) {
+		res( cur + i * 16 );
+		res( hist + i * 16 );
+		hp[i] = r.unit() < 0.3f ? -1 : int32_t( r.next() % uint32_t( nPix ) );
+		for ( int k = 0; k < 3; k++ ) {
+			est[i * 4 + k] = r.unit() * 3.0f;
+			acc[i * 4 + k] = r.unit() * 3.0f;
+			prev[i * 4 + k] = r.unit() * 3.0f;
+			out[i * 4 + k] = r.unit();
+			cand[i * 4 + k] = r.unit();
+			atA[i * 4 + k] = r.unit() * 3.0f;
+			atB[i * 4 + k] = r.unit() * 3.0f;
+		}
+		const bool valid = g[i * 4 + 3] > 0.0f && g[i * 4 + 3] < 1e5f;
+		est[i * 4 + 3] = valid && r.unit() < 0.7f ? 1.0f : 0.0f;
+		acc[i * 4 + 3] = valid ? float( r.next() % 31 ) : 0.0f;   // frames 0..30: young (< 4) and past the cap
+		prev[i * 4 + 3] = float( r.next() % 31 );
+		out[i * 4 + 3] = r.unit();
+		cand[i * 4 + 3] = r.unit() < 0.2f ? -1.0f : r.unit();
+		atA[i * 4 + 3] = r.unit() * 0.5f;
+		atB[i * 4 + 3] = r.unit() * 0.5f;
+		if ( c.mode >= 3 ) {   // what mode 2 wrote (rgPack): the depth's bits, the octahedral normal in two snorm16
+			const float * gg = g + i * 4;
+			const float s = std::fabs( gg[0] ) + std::fabs( gg[1] ) + std::fabs( gg[2] );
+			float p0 = s > 0.0f ? gg[0] / s : 0.0f, p1 = s > 0.0f ? gg[1] / s : 0.0f;
+			if ( s > 0.0f && gg[2] < 0.0f ) {
+				const float a0 = ( 1.0f - std::fabs( p1 ) ) * ( p0 >= 0.0f ? 1.0f : -1.0f ), a1 = ( 1.0f - std::fabs( p0 ) ) * ( p1 >= 0.0f ? 1.0f : -1.0f );
+				p0 = a0;
+				p1 = a1;
+			}
+			std::memcpy( pk + i * 2, gg + 3, 4 );
+			pk[i * 2 + 1] = rgPackSnorm( p0 ) | ( rgPackSnorm( p1 ) << 16 );
+		} else {
+			pk[i * 2] = r.next();
+			pk[i * 2 + 1] = r.next();
+		}
+	}
+	unsigned char * stbn = static_cast<unsigned char *>( bufs[26].p );
+	for ( size_t i = 0; i < size_t( 128 ) * 128 * 64; i++ )
+		stbn[i] = static_cast<unsigned char>( r.next() & 255u );
+	randomRotation( r, pc );
+	pc[12] = c.mode;
+	// restirgi_vk.inc: 8 x 8 tiles; modes 0 / 1 of the half / quarter trace (not red linear) tile the 2 x 1 / 2 x 2 blocks
+	groups = uint64_t( ( q.w + 7 ) / 8 ) * uint64_t( ( q.h + 7 ) / 8 );
+	const int tb = q.red & ( 512 | 1024 );
+	if ( c.mode <= 1 && tb && !( q.red & 256 ) ) {
+		const int bbw = ( q.w + 1 ) / 2, bbh = ( tb & 1024 ) ? ( q.h + 1 ) / 2 : q.h;
+		groups = uint64_t( ( bbw + 7 ) / 8 ) * uint64_t( ( bbh + 7 ) / 8 );
+	}
+}
+
 // bakert (bvh / rq / rqx, src/features/gi/bakert): bindings 0 rays, 1 hits, 2 triOf, 3 mask records, 4 maps, 5 alpha;
 // rq / rqx 6 TLAS, 7 remap (BLAS primitive -> soup triangle), rqx 8 the true triangles a BLAS primitive; bvh 6 nodes,
 // 7 idx, 8 the triangles in soup order. Push constants: first count useMask nTri nOpaque flags grow pad. One invocation a ray
@@ -1152,7 +1332,45 @@ int main( int argc, char ** argv )
 			k.mode = rc[i].mode;
 			cases.push_back( k );
 		}
-	} else if ( kernel == "bvh" || kernel == "rq" || kernel == "rqx" ) {
+	} else if ( kernel == "restirgi" || kernel == "restirgi_filt" ) {
+		fill = fillRestirGi;
+		nSet1 = 15;
+		// { w h K R f red hist frames mask passes }: modes 0 (bounce + temporal) and 1 (spatial) with each red bit the kernel
+		// reads (1 NOJACOBIAN, 2 NOVIS, 4 NOPDF, 8 NOTEMPORAL, 16 WHITE, 32 R2, 64 NOJCLAMP, 256 LINEAR, 512 HALF, 1024 QUARTER,
+		// 2048 MERGEVIS, 4096 ALLLIGHTS), history and the STBN mask on / off, K past the 15 cap, the DDGI one bounce / sky off /
+		// hardware hit; 2 accumulate, 3 filter (f 0-2), 4.. a-trous (the last pass writes out). The filter kernel runs modes 2..
+		// only. The 2048 x 2080 filter case passes 65535 groups (the y split)
+		struct { uint32_t mode; RgCase q; int oneBounce, sky, ddgiRed; } gc[] = {
+			{ 0, { 64, 48, 4, 3, 1, 0, 1, 16, 1, 3 }, 0, 1, 0 }, { 0, { 64, 48, 4, 3, 1, 16, 1, 16, 1, 3 }, 0, 1, 0 },
+			{ 0, { 64, 48, 4, 3, 1, 32, 1, 16, 0, 3 }, 0, 1, 0 }, { 0, { 64, 48, 4, 3, 1, 8, 1, 16, 1, 3 }, 0, 1, 0 },
+			{ 0, { 64, 48, 4, 3, 1, 0, 0, 16, 1, 3 }, 0, 1, 0 }, { 0, { 66, 50, 4, 3, 1, 512, 1, 16, 1, 3 }, 0, 1, 0 },
+			{ 0, { 66, 50, 4, 3, 1, 1024, 1, 16, 1, 3 }, 0, 1, 0 }, { 0, { 64, 48, 4, 3, 1, 256, 1, 16, 1, 3 }, 0, 1, 0 },
+			{ 0, { 64, 48, 4, 3, 1, 4096, 1, 16, 1, 3 }, 0, 1, 0 }, { 0, { 64, 48, 4, 3, 1, 4, 1, 16, 1, 3 }, 0, 1, 0 },
+			{ 0, { 64, 48, 4, 3, 1, 0, 1, 16, 1, 3 }, 1, 1, 0 }, { 0, { 64, 48, 4, 3, 1, 0, 1, 16, 1, 3 }, 0, 0, 0 },
+			{ 0, { 64, 48, 4, 3, 1, 0, 1, 16, 1, 3 }, 0, 1, 8 }, { 0, { 64, 48, 4, 3, 1, 1024 | 256, 1, 16, 1, 3 }, 0, 1, 0 },
+			{ 1, { 64, 48, 4, 3, 1, 0, 1, 16, 1, 3 }, 0, 1, 0 }, { 1, { 64, 48, 20, 3, 1, 0, 1, 16, 1, 3 }, 0, 1, 0 },
+			{ 1, { 64, 48, 6, 8, 1, 1, 1, 16, 1, 3 }, 0, 1, 0 }, { 1, { 64, 48, 4, 3, 1, 2, 1, 16, 1, 3 }, 0, 1, 0 },
+			{ 1, { 64, 48, 4, 3, 1, 64, 1, 16, 1, 3 }, 0, 1, 0 }, { 1, { 64, 48, 4, 3, 1, 2048, 1, 16, 1, 3 }, 0, 1, 0 },
+			{ 1, { 66, 50, 4, 3, 1, 512, 1, 16, 1, 3 }, 0, 1, 0 }, { 1, { 66, 50, 4, 3, 1, 1024, 1, 16, 1, 3 }, 0, 1, 0 },
+			{ 1, { 64, 48, 4, 3, 1, 256, 1, 16, 1, 3 }, 0, 1, 0 }, { 1, { 64, 48, 4, 3, 1, 4, 1, 16, 1, 3 }, 0, 1, 0 },
+			{ 2, { 64, 48, 4, 3, 1, 0, 1, 16, 1, 3 }, 0, 1, 0 }, { 2, { 64, 48, 4, 3, 1, 0, 0, 16, 1, 3 }, 0, 1, 0 },
+			{ 2, { 66, 50, 4, 3, 1, 512, 1, 1, 1, 3 }, 0, 1, 0 }, { 2, { 64, 48, 4, 3, 1, 1024, 1, 30, 1, 3 }, 0, 1, 0 },
+			{ 3, { 64, 48, 4, 3, 1, 0, 1, 16, 1, 3 }, 0, 1, 0 }, { 3, { 64, 48, 4, 3, 0, 0, 1, 16, 1, 3 }, 0, 1, 0 },
+			{ 3, { 66, 50, 4, 3, 2, 0, 1, 16, 1, 3 }, 0, 1, 0 }, { 4, { 64, 48, 4, 3, 1, 0, 1, 16, 1, 3 }, 0, 1, 0 },
+			{ 5, { 64, 48, 4, 3, 1, 0, 1, 16, 1, 3 }, 0, 1, 0 }, { 6, { 64, 48, 4, 3, 1, 0, 1, 16, 1, 3 }, 0, 1, 0 },
+			{ 4, { 66, 50, 4, 3, 1, 0, 1, 16, 1, 1 }, 0, 1, 0 }, { 3, { 2048, 2080, 4, 3, 1, 0, 1, 16, 1, 3 }, 0, 1, 0 } };
+		for ( int i = 0; i < int( sizeof gc / sizeof gc[0] ); i++ ) {
+			if ( kernel == "restirgi_filt" && gc[i].mode < 2 )
+				continue;
+			rgOf[( 1 + i ) % 128] = gc[i].q;
+			Case k { 6, 5, 4, 0, 0, uint64_t( 1 + i ) };
+			k.mode = gc[i].mode;
+			k.oneBounce = gc[i].oneBounce;
+			k.sky = gc[i].sky;
+			k.red = gc[i].ddgiRed;
+			cases.push_back( k );
+		}
+	} else if ( kernel == "bvh"|| kernel == "rq" || kernel == "rqx" ) {
 		fill = fillBake;
 		bakeKernel = kernel;
 		bakeScene = true;
@@ -1289,7 +1507,15 @@ int main( int argc, char ** argv )
 			sz.insert( sz.end(), { sizeof( RestirParams ), n * 16, n * 16, n * 16, n * 16, n * 4, n * 16, n * 16, n * 16, 64, n * 8 } );
 			watch = kRestirWatch[c.mode & 3];
 		}
-		if ( kernel == "trace" || kernel == "airrays" || kernel == "restir" ) {   // the soup, sized per binding (one scene, one TLAS, read by both runs)
+		const bool rg = kernel == "restirgi" || kernel == "restirgi_filt";
+		if ( rg ) {
+			const RgCase & q = rgOf[c.seed % 128];
+			const size_t n = size_t( q.w ) * q.h;
+			sz.insert( sz.end(), { sizeof( RestirParams ), n * 16, n * 16, n * 64, n * 64, n * 4, n * 16, n * 16, n * 16, n * 16, n * 16,
+				size_t( 128 ) * 128 * 64, n * 16, n * 16, n * 8 } );
+			watch = rgWatch( c.mode );
+		}
+		if ( kernel == "trace" || kernel == "airrays" || kernel == "restir" || rg ) {   // the soup, sized per binding (one scene, one TLAS, read by both runs)
 			Params P0;
 			Rng r0 { c.seed };
 			fillParamsBase( P0, c, uint32_t( nP ), r0 );
@@ -1363,6 +1589,22 @@ int main( int argc, char ** argv )
 			const RestirCase & q = restirOf[c.seed % 128];
 			std::printf( "  restir: mode %u C %d K %d f %d red %d history %d; light kept %zu, history pixel %zu, rays blocked %zu open %zu\n",
 				c.mode, q.C, q.K, q.f, q.red, q.hist, kept, withHist, blocked, open );
+		}
+		if ( rg ) {   // coverage: reservoirs holding a sample / a hit, history pixels, valid estimates, bounce hits (cand.w >= 0)
+			const float * cur = static_cast<const float *>( A[18].p ), * est = static_cast<const float *>( A[21].p ), * cd = static_cast<const float *>( A[25].p );
+			const int32_t * hp = static_cast<const int32_t *>( A[20].p );
+			size_t held = 0, hits = 0, withHist = 0, valid = 0, bounce = 0;
+			for ( size_t k = 0; k < sz[20] / 4; k++ ) {
+				held += cur[k * 16 + 13] > 0.5f;
+				hits += cur[k * 16 + 13] > 0.5f && cur[k * 16 + 3] > 0.5f;
+				withHist += hp[k] >= 0;
+				valid += est[k * 4 + 3] > 0.5f;
+				bounce += cd[k * 4 + 3] >= 0.0f;
+			}
+			const RgCase & q = rgOf[c.seed % 128];
+			std::printf( "  restirgi: mode %u %dx%d K %d R %d f %d red %d history %d frames %d mask %d passes %d; held %zu hit %zu, "
+				"history pixel %zu, estimate valid %zu, bounce %zu\n", c.mode, q.w, q.h, q.K, q.R, q.f, q.red, q.hist, q.frames, q.mask,
+				q.passes, held, hits, withHist, valid, bounce );
 		}
 		if ( bakeScene ) {   // coverage: hits, hits on an alpha-tested triangle; rqx the unsure reasons by bit
 			const BakeCase & q = bakeOf[c.seed % 64];
