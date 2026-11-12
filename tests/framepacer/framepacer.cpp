@@ -151,6 +151,40 @@ int main()
 	check( redOld < 70.0, "build 71 route stays at the tick (the 68 fps reading)", redOld, 0, 70 );
 	check( WwFramePacer::capHz( -1, 0.0 ) == 60 && WwFramePacer::capHz( 5, 0.0 ) == 10 && WwFramePacer::capHz( 5000, 0.0 ) == 1000
 		&& WwFramePacer::capHz( 0, 144.0 ) == 0, "capHz rows (refresh unknown -> 60, clamps 10..1000)", 0, 0, 0 );
+	{	// R2-1: a cell view draws continuously whatever moves (build 72 at empty240_b71: clock "stopped", 6 ms timer)
+#ifdef FRAMEPACER_RED
+		const int rule = 2;	// build 72's rule
+#else
+		const int rule = 0;
+#endif
+		check( WwFramePacer::wantsFrames( true, false, false, false, rule ), "a cell view with nothing moving and no live clock wants frames", 0, 0, 0 );
+		check( WwFramePacer::wantsFrames( true, true, false, false, rule ), "a cell view with a live clock wants frames", 0, 0, 0 );
+		check( !WwFramePacer::wantsFrames( false, true, false, false, rule ), "an editing view with nothing moving idles on the timer", 0, 0, 0 );
+		check( WwFramePacer::wantsFrames( false, true, true, false, rule ) && WwFramePacer::wantsFrames( false, true, false, true, rule ),
+			"an editing view wants frames while an animation plays or a key is held", 0, 0, 0 );
+		check( !WwFramePacer::wantsFrames( false, false, true, true, rule ), "an editing view in a harness (clock stopped) idles", 0, 0, 0 );
+		check( !WwFramePacer::wantsFrames( true, false, false, false, 2 ), "the red route (WW_FRAMETIMER_RED=2) is build 72's rule", 0, 0, 0 );
+	}
+	{	// R2-3: frames in flight capped at 2; the `frame gpu longest:` window after a jump
+#ifdef FRAMEPACER_RED
+		const int qred = 1;	// build 72: no cap
+#else
+		const int qred = 0;
+#endif
+		check( WwFramePacer::framesInFlight( qred ) == 2, "at most 2 frames queued ahead of the GPU", 0, 0, 0 );
+		check( WwFramePacer::framesInFlight( 1 ) == 0, "the red route (WW_FRAMEQUEUE_RED=1) has no cap", 0, 0, 0 );
+		check( WwFramePacer::GpuLongest::jumped( 5000.0, 0.0, 0.0, 4096.0 )
+			&& !WwFramePacer::GpuLongest::jumped( 3000.0, 2000.0, 0.0, 4096.0 ), "a jump is a move past the reach", 0, 0, 0 );
+		WwFramePacer::GpuLongest g;
+		bool early = g.add( 5, 99.0 );	// no window open: ignored
+		g.open( 100, 4 );
+		early = early || g.add( 97, 900.0 );	// painted before the jump (read late): not counted
+		early = early || g.add( 100, 12.0 ) || g.add( 101, 640.0 ) || g.add( 102, 30.0 );
+		const bool closed = g.add( 103, 8.0 );
+		check( !early && closed && g.frames == 4 && g.longestAt == 101 && g.longestMs == 640.0 && g.sumMs == 690.0,
+			"the window holds the 4 frames from the jump and names the longest", 0, 0, 0 );
+		check( !g.add( 104, 5000.0 ) && g.longestMs == 640.0, "a closed window takes nothing", 0, 0, 0 );
+	}
 	{	// item 1: the frame wall's parts add up to the wall (timed paints, an untimed one, a swap mark out of range)
 		WwFrameWall::Window w;
 		double t = 10.0;

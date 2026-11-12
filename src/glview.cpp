@@ -120,6 +120,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <QScreen>
 #include <QTimer>
 #include <QElapsedTimer>
+#include <QThreadPool>	// lane EMPTY240 LATE ITEM 5: the workers in the `hardware use:` line
 
 namespace {
 //! A QMenu that cancels itself once the pointer moves well clear of it, so the small operator pop-ups (Delete /
@@ -3564,7 +3565,7 @@ void wwSetFrameCap( int row )
 
 /* At the paint's start: the cap's clock, the swap interval when the row changed, and the pacing line on a change.
  * `wants` = this view wants the next frame (a cell view with a live clock, a playing animation, a held key). */
-static void wwPacerFrameStart( GLView * v, bool wants )
+static void wwPacerFrameStart( GLView * v, bool wants, bool cellView )
 {
 	WwPacer & p = wwPacer();
 	const bool red = wwFrameTimerRed();
@@ -3582,8 +3583,11 @@ static void wwPacerFrameStart( GLView * v, bool wants )
 		p.interval = interval;
 	}
 	const QString driver = red ? QStringLiteral( "the 6 ms timer (WW_FRAMETIMER_RED=1)" )
-		: wants ? QStringLiteral( "frames (each starts when the last is done)" )
-		: QStringLiteral( "the 6 ms timer (nothing moves)" );
+		: wants ? ( cellView && wwEnvInt( "WW_FRAMETIMER_RED" ) != 2
+			? QStringLiteral( "frames (a cell view draws continuously, each starts when the last is done)" )
+			: QStringLiteral( "frames (each starts when the last is done)" ) )
+		: cellView ? QStringLiteral( "the 6 ms timer (WW_FRAMETIMER_RED=2: a cell view with its clock stopped)" )
+		: QStringLiteral( "the 6 ms timer (an editing view, nothing moves)" );
 	const QString cap = p.cap <= 0 ? QStringLiteral( "off" )
 		: row < 0 ? QStringLiteral( "%1 fps (monitor refresh)" ).arg( p.cap ) : QStringLiteral( "%1 fps" ).arg( p.cap );
 	const QString facts = driver + cap + QString::number( interval ) + QString::number( int( p.swapOk ) );
@@ -3657,6 +3661,200 @@ static void wwWallStart( GLView * v )
 	}
 }
 
+/* lane EMPTY240 R2-3 (build 72: a GPU reset, TDR, at the first goto; the cascade rebuilds of the jump ran 105-548 ms
+ * while the uncapped pacer queued 64-160 ms cell frames): two jobs per frame, always on.
+ * 1. The frames-in-flight cap: each paint's end sets a fence, the next paint but one waits on it (1 s at most), so the
+ *    driver never holds more than WwFramePacer::framesInFlight frames of GL work. Red WW_FRAMEQUEUE_RED=1: no cap.
+ * 2. Each paint's GPU time (GL_TIMESTAMP at its start and end, read only once available: no stall). A camera jump
+ *    opens a 240-frame window; when it closes, `frame gpu longest:` names the longest frame (a frame's GPU time bounds
+ *    every GL job in it; the Vulkan steps have their own gpu ms on the rtddgi lines). Any frame over 250 ms says so. */
+namespace
+{
+struct WwGpuFrames
+{
+	static constexpr int kSlots = 8;
+	bool made = false, ok = false;
+	GLuint q[kSlots][2] = {};
+	quint64 frameOf[kSlots] = {};
+	bool pending[kSlots] = {};
+	bool begun = false;
+	int slot = 0;
+	GLsync fence[4] = {};
+	int capSaid = -1;
+	int waits = 0, timeouts = 0;
+	double waitLongestMs = 0.0, jumpU = 0.0;
+	WwFramePacer::GpuLongest win;
+	Vector3 lastPos;
+	bool havePos = false;
+	// LATE ITEM 5: the `hardware use:` window (5 s)
+	QElapsedTimer hwWin, paintT;
+	double hwGpuMs = 0.0, hwPaintMs = 0.0, hwWorkers = 0.0;
+	int hwFrames = 0;
+};
+WwGpuFrames & wwGpuFrames()
+{
+	static WwGpuFrames g;
+	return g;
+}
+using WwQueryCounterFn = void ( QOPENGLF_APIENTRYP )( GLuint, GLenum );
+using WwQueryU64Fn = void ( QOPENGLF_APIENTRYP )( GLuint, GLenum, GLuint64 * );
+WwQueryCounterFn wwGpuQc = nullptr;
+WwQueryU64Fn wwGpuQu = nullptr;
+}	// namespace
+
+static void wwGpuFrameBegin( const Vector3 & pos )
+{
+	WwGpuFrames & g = wwGpuFrames();
+	QOpenGLContext * c = QOpenGLContext::currentContext();
+	QOpenGLExtraFunctions * xf = c ? c->extraFunctions() : nullptr;
+	if ( !xf )
+		return;
+	if ( !g.made ) {
+		g.made = true;
+		wwGpuQc = reinterpret_cast<WwQueryCounterFn>( c->getProcAddress( "glQueryCounter" ) );
+		wwGpuQu = reinterpret_cast<WwQueryU64Fn>( c->getProcAddress( "glGetQueryObjectui64v" ) );
+		g.ok = wwGpuQc && wwGpuQu;
+		if ( g.ok )
+			xf->glGenQueries( 2 * WwGpuFrames::kSlots, &g.q[0][0] );
+	}
+	const quint64 frame = wwPaintCounter;
+	// 1. the cap (re-read each paint: a live set takes the next frame)
+	const int cap = WwFramePacer::framesInFlight( wwEnvInt( "WW_FRAMEQUEUE_RED" ) );
+	if ( cap != g.capSaid ) {
+		g.capSaid = cap;
+		std::fprintf( stderr, "frame queue: %s\n", cap > 0
+			? QByteArray( "at most " ).append( QByteArray::number( cap ) )
+				.append( " frames queued ahead of the GPU (each paint waits on the fence of the paint 2 back, 1 s at most; red WW_FRAMEQUEUE_RED=1: no cap)" ).constData()
+			: "no cap (WW_FRAMEQUEUE_RED=1: the driver queues as many frames as it likes, build 72)" );
+	}
+	for ( int i = 0; i < 4; i++ ) {
+		const bool mine = cap > 0 && i == int( frame % quint64( cap ) );
+		if ( !g.fence[i] || ( cap > 0 && !mine ) )
+			continue;
+		if ( mine ) {
+			QElapsedTimer t;
+			t.start();
+			const GLenum r = xf->glClientWaitSync( g.fence[i], 0x00000001 /* GL_SYNC_FLUSH_COMMANDS_BIT */, 1000000000ull );
+			const double ms = double( t.nsecsElapsed() ) * 1.0e-6;
+			if ( r == 0x911B /* GL_TIMEOUT_EXPIRED */ ) {
+				g.timeouts++;
+				std::fprintf( stderr, "frame queue: the paint 2 back still runs on the GPU after 1 s (frame %llu): going on\n",
+					(unsigned long long)frame );
+			}
+			if ( ms > 0.05 ) {
+				g.waits++;
+				g.waitLongestMs = std::max( g.waitLongestMs, ms );
+			}
+		}
+		xf->glDeleteSync( g.fence[i] );
+		g.fence[i] = nullptr;
+	}
+	// 2. a jump opens the window
+	if ( g.havePos ) {
+		const double dx = double( pos[0] ) - double( g.lastPos[0] );
+		const double dy = double( pos[1] ) - double( g.lastPos[1] );
+		const double dz = double( pos[2] ) - double( g.lastPos[2] );
+		if ( WwFramePacer::GpuLongest::jumped( dx, dy, dz, 4096.0 ) ) {
+			if ( g.win.left <= 0 ) {
+				g.waits = 0;
+				g.timeouts = 0;
+				g.waitLongestMs = 0.0;
+			}
+			g.jumpU = std::sqrt( dx * dx + dy * dy + dz * dz );
+			g.win.open( (long long)frame, 240 );
+		}
+	}
+	g.lastPos = pos;
+	g.havePos = true;
+	g.paintT.start();
+	if ( !g.ok )
+		return;
+	constexpr GLenum kTimestamp = 0x8E28;	// GL_TIMESTAMP
+	constexpr GLenum kAvailable = 0x8867;	// GL_QUERY_RESULT_AVAILABLE
+	for ( int s = 0; s < WwGpuFrames::kSlots; s++ ) {
+		if ( !g.pending[s] )
+			continue;
+		GLuint avail = 0;
+		xf->glGetQueryObjectuiv( g.q[s][1], kAvailable, &avail );
+		if ( !avail )
+			continue;
+		g.pending[s] = false;
+		GLuint64 t0 = 0, t1 = 0;
+		wwGpuQu( g.q[s][0], GL_QUERY_RESULT, &t0 );
+		wwGpuQu( g.q[s][1], GL_QUERY_RESULT, &t1 );
+		if ( t1 <= t0 )
+			continue;
+		const double ms = double( t1 - t0 ) * 1.0e-6;
+		g.hwGpuMs += ms;
+		if ( ms > 250.0 )
+			std::fprintf( stderr, "frame gpu long: frame %llu took %.1f ms on the GPU (a reset comes at 2000)\n",
+				(unsigned long long)g.frameOf[s], ms );
+		if ( g.win.add( (long long)g.frameOf[s], ms ) )
+			std::fprintf( stderr, "frame gpu longest: %.1f ms at frame %lld, of the %d frames after a camera jump of %.0f u "
+				"(from frame %lld, mean %.1f ms a frame); frames queued ahead of the GPU: %s, the cap waited %d times, "
+				"longest %.1f ms, %d waits over 1 s (a frame's GPU time bounds every GL job in it; the Vulkan steps: the rtddgi lines)\n",
+				g.win.longestMs, g.win.longestAt, g.win.frames, g.jumpU, g.win.from, g.win.sumMs / double( std::max( 1, g.win.frames ) ),
+				cap > 0 ? "capped at 2" : "no cap (WW_FRAMEQUEUE_RED=1)", g.waits, g.waitLongestMs, g.timeouts );
+	}
+	// this paint's start, in a free slot (one still in flight after 8 paints: this paint goes untimed)
+	g.begun = false;
+	g.slot = int( frame % quint64( WwGpuFrames::kSlots ) );
+	if ( !g.pending[g.slot] ) {
+		wwGpuQc( g.q[g.slot][0], kTimestamp );
+		g.begun = true;
+	}
+}
+
+static void wwGpuFrameFinish()
+{
+	WwGpuFrames & g = wwGpuFrames();
+	QOpenGLContext * c = QOpenGLContext::currentContext();
+	QOpenGLExtraFunctions * xf = c ? c->extraFunctions() : nullptr;
+	if ( !xf )
+		return;
+	if ( g.ok && g.begun ) {
+		wwGpuQc( g.q[g.slot][1], 0x8E28 );
+		g.pending[g.slot] = true;
+		g.frameOf[g.slot] = wwPaintCounter;
+		g.begun = false;
+	}
+	if ( g.capSaid > 0 ) {
+		const int i = int( wwPaintCounter % quint64( g.capSaid ) );
+		if ( g.fence[i] )
+			xf->glDeleteSync( g.fence[i] );
+		g.fence[i] = xf->glFenceSync( 0x9117 /* GL_SYNC_GPU_COMMANDS_COMPLETE */, 0 );
+	}
+	/* LATE ITEM 5 (bungo 11-12: "fully utilized, just as if a game would"): one line each 5 s of painting. GPU busy = the
+	 * GL frames' GPU time over the wall (the Vulkan traces overlap on the same queue and are not in it); draw thread =
+	 * the paints' CPU time over the wall; workers = Qt's pool, mean active / size; the cache = the GPU geometry cache. */
+	if ( g.paintT.isValid() ) {
+		g.hwPaintMs += double( g.paintT.nsecsElapsed() ) * 1.0e-6;
+		g.paintT.invalidate();
+	}
+	const QThreadPool * pool = QThreadPool::globalInstance();
+	g.hwWorkers += double( pool->activeThreadCount() );
+	g.hwFrames++;
+	if ( !g.hwWin.isValid() ) {
+		g.hwWin.start();
+		g.hwGpuMs = g.hwPaintMs = g.hwWorkers = 0.0;
+		g.hwFrames = 0;
+		return;
+	}
+	const double wallMs = double( g.hwWin.nsecsElapsed() ) * 1.0e-6;
+	if ( wallMs < 5000.0 )
+		return;
+	const PassTime::CacheCounts & cc = PassTime::cacheCounts();
+	std::fprintf( stderr, "hardware use: GPU busy %.0f %% (GL frames' GPU time over the wall), draw thread busy %.0f %%, "
+		"workers busy %.1f / %d (Qt's pool), %.1f fps; RAM cache: none yet (5c open), GPU geometry cache %lld / %lld MB; "
+		"async queue: none (the traces share the graphics family; lane VKCOMPUTE1), overlapped 0 ms\n",
+		std::min( 100.0, 100.0 * g.hwGpuMs / wallMs ), std::min( 100.0, 100.0 * g.hwPaintMs / wallMs ),
+		g.hwWorkers / double( std::max( 1, g.hwFrames ) ), pool->maxThreadCount(), 1000.0 * double( g.hwFrames ) / wallMs,
+		(long long)( cc.usedBytes >> 20 ), (long long)( cc.maxBytes >> 20 ) );
+	g.hwWin.start();
+	g.hwGpuMs = g.hwPaintMs = g.hwWorkers = 0.0;
+	g.hwFrames = 0;
+}
+
 void GLView::paintGL()
 {
 	wwWallStart( this );	// lane EMPTY240 item 1: the last paint's wall, start to start
@@ -3665,11 +3863,13 @@ void GLView::paintGL()
 		~WwWallEnd() { wwWall().cur.finish = wwPaceNowS(); }
 	} wwWallEnd;
 	/* lane EMPTY240 ITEM 0: the next frame is queued when this one is done (build 71 waited for the 6 ms coarse timer:
-	 * ~64 frames a second). A harness keeps the old pacing (its clock stands still). */
-	const bool wwPacerWants = wwWorldClockLive() && ( ( scene && scene->nifModel && wwCellLightsFor( scene->nifModel ) )
-		|| ( ( animState & AnimEnabled ) && ( animState & AnimPlay ) && scene && scene->timeMin() != scene->timeMax() )
-		|| kbdState != 0 );
-	wwPacerFrameStart( this, wwPacerWants );
+	 * ~64 frames a second). R2-1: a cell view always (bungo's flight has no WW_FLY, so its clock read "stopped" and
+	 * build 72 fell back to the timer); an editing view while something moves. Red WW_FRAMETIMER_RED=2 = build 72. */
+	const bool wwPacerCell = scene && scene->nifModel && wwCellLightsFor( scene->nifModel );
+	const bool wwPacerWants = WwFramePacer::wantsFrames( wwPacerCell, wwWorldClockLive(),
+		( animState & AnimEnabled ) && ( animState & AnimPlay ) && scene && scene->timeMin() != scene->timeMax(),
+		kbdState != 0, wwEnvInt( "WW_FRAMETIMER_RED" ) );
+	wwPacerFrameStart( this, wwPacerWants, wwPacerCell );
 	struct WwPacerEnd
 	{
 		GLView * v;
@@ -3686,6 +3886,11 @@ void GLView::paintGL()
 	QElapsedTimer wwStream1Clock;	// lane STREAM1: the whole paint, for the hitch figures
 	wwStream1Clock.start();
 	wwFpsGpuMark( 0 );	// lane MODULES1 item 7: F3's GPU ms
+	wwGpuFrameBegin( Pos );	// lane EMPTY240 R2-3: the frames-in-flight cap and the `frame gpu longest:` window
+	struct WwGpuFrameDone
+	{
+		~WwGpuFrameDone() { wwGpuFrameFinish(); }
+	} wwGpuFrameDone;
 	wwCellStreamEvict();
 	// the streaming read-ahead's ready files go up before anything draws, a few MB a
 	// paint (WW_TEX_PUMP_MB, default 24), so a cell that comes into view finds them loaded. Red: texpump.

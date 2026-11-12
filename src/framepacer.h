@@ -56,6 +56,61 @@ inline double sleepSeconds( double wait )
 	return s > 0.004 ? 0.004 : s;
 }
 
+/* lane EMPTY240 R2-1 (build 72 at empty240_b71: "driven by the 6 ms timer (nothing moves)", between-paints 6 ms): does
+ * the view want the next frame as soon as this one is done? A cell view always does, like a game, whatever moves; an
+ * editing view only while an animation plays or a key is held, and only with a live clock (a harness stands still).
+ * red 2 (WW_FRAMETIMER_RED=2) = build 72's rule: the cell view too only with a live clock. */
+inline bool wantsFrames( bool cellView, bool clockLive, bool animPlays, bool keyHeld, int red )
+{
+	if ( red == 2 )
+		return clockLive && ( cellView || animPlays || keyHeld );
+	return cellView || ( clockLive && ( animPlays || keyHeld ) );
+}
+
+/* lane EMPTY240 R2-3 (build 72's GPU reset at the first goto): the frames the CPU may queue ahead of the GPU. Uncapped
+ * (R2-1), the driver queued several heavy cell frames behind the jump's cascade rebuilds; a game holds 2. Red 1
+ * (WW_FRAMEQUEUE_RED=1) = build 72: no cap (0). */
+inline int framesInFlight( int red )
+{
+	return red == 1 ? 0 : 2;
+}
+
+/* The `frame gpu longest:` window: a camera jump (a goto) opens it for n frames; each frame's GPU ms (read late, so
+ * only frames painted from the jump on count) feeds it; add() says when it closed. */
+struct GpuLongest
+{
+	int left = 0, frames = 0;
+	long long from = 0, longestAt = -1;
+	double longestMs = 0.0, sumMs = 0.0;
+	static bool jumped( double dx, double dy, double dz, double reach )
+	{
+		return dx * dx + dy * dy + dz * dz > reach * reach;
+	}
+	void open( long long frame, int n )
+	{
+		if ( left <= 0 ) {
+			frames = 0;
+			longestMs = 0.0;
+			sumMs = 0.0;
+			longestAt = -1;
+			from = frame;
+		}
+		left = n;	// a second jump inside the window extends it
+	}
+	bool add( long long frame, double ms )
+	{
+		if ( left <= 0 || frame < from )
+			return false;
+		frames++;
+		sumMs += ms;
+		if ( ms > longestMs ) {
+			longestMs = ms;
+			longestAt = frame;
+		}
+		return --left == 0;
+	}
+};
+
 }	// namespace WwFramePacer
 
 /* lane EMPTY240 item 1: the whole frame, start to start, in parts that add up to it exactly (the overlay's fps is
