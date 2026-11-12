@@ -45,6 +45,9 @@ unsigned combTexture( const void * key );
 //! drops the images (and their GL textures: the caller does not delete them)
 void freeChain( const void * key );
 bool hasChain( const void * key );
+/* build 79: true while runBloom ran on Vulkan for this key in the last 2 s. cellhdr.cpp shares the frame only then: a
+ * frame Vulkan does not read stays GL's own (GL drew the shared frame 30-60x slower when it sat outside video memory) */
+bool chainRunning( const void * key );
 
 struct BloomJob
 {

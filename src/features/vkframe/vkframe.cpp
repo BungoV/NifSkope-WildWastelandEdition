@@ -95,6 +95,7 @@ bool makeChain( const void *, int, int, int, const int[][2], unsigned &, unsigne
 }
 void freeChain( const void * ) {}
 bool hasChain( const void * ) { return false; }
+bool chainRunning( const void * ) { return false; }
 bool makeFrame( const void *, int, int, int, unsigned, unsigned &, unsigned &, QString & why )
 {
 	why = QStringLiteral( "no device (Windows only)" );
@@ -139,7 +140,7 @@ constexpr VkStructureType kSemaphoreGetWin32 = VkStructureType( 1000078003 );  /
 
 #define VKFRAME_INSTANCE_FNS( X ) \
 	X( vkGetPhysicalDeviceProperties ) X( vkGetPhysicalDeviceMemoryProperties ) X( vkGetPhysicalDeviceQueueFamilyProperties ) \
-	X( vkGetPhysicalDeviceImageFormatProperties2 )
+	X( vkGetPhysicalDeviceImageFormatProperties2 ) X( vkGetPhysicalDeviceMemoryProperties2 ) X( vkEnumerateDeviceExtensionProperties )
 
 struct Dev
 {
@@ -161,6 +162,7 @@ struct Dev
 #undef VKFRAME_MEMBER
 	PfnGetMemoryWin32 getMemWin32 = nullptr;
 	PfnGetSemaphoreWin32 getSemWin32 = nullptr;
+	bool budget = false;	// VK_EXT_memory_budget: the device heap's use and budget can be read (makeFrame's check)
 	VkPipelineCache cache = VK_NULL_HANDLE;
 	VkDescriptorSetLayout setLayout = VK_NULL_HANDLE;
 	VkPipelineLayout pipeLayout = VK_NULL_HANDLE;
@@ -308,6 +310,25 @@ uint32_t memType( uint32_t bits, VkMemoryPropertyFlags want )
 	return UINT32_MAX;
 }
 
+// this process's use of the device-local heaps and their budget, MB (VK_EXT_memory_budget); false = not readable
+bool localHeap( double & usedMb, double & budgetMb )
+{
+	Dev & d = dv();
+	usedMb = budgetMb = 0.0;
+	if ( !d.budget || !d.vkGetPhysicalDeviceMemoryProperties2 )
+		return false;
+	VkPhysicalDeviceMemoryBudgetPropertiesEXT bp { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_BUDGET_PROPERTIES_EXT };
+	VkPhysicalDeviceMemoryProperties2 m2 { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_PROPERTIES_2 };
+	m2.pNext = &bp;
+	d.vkGetPhysicalDeviceMemoryProperties2( d.pd, &m2 );
+	for ( uint32_t h = 0; h < m2.memoryProperties.memoryHeapCount; h++ )
+		if ( m2.memoryProperties.memoryHeaps[h].flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT ) {
+			usedMb += double( bp.heapUsage[h] ) / 1048576.0;
+			budgetMb += double( bp.heapBudget[h] ) / 1048576.0;
+		}
+	return budgetMb > 0.0;
+}
+
 bool isDsFormat( VkFormat fmt )
 {
 	return fmt == VK_FORMAT_D24_UNORM_S8_UINT || fmt == VK_FORMAT_D32_SFLOAT_S8_UINT;
@@ -384,6 +405,7 @@ struct Chain
 	VkImage srcFrame = VK_NULL_HANDLE;
 	Img comb;
 	bool combFailed = false, combRan = false;
+	double lastRun = -1.0e9;	// nowMs() of the last runBloom on Vulkan (chainRunning)
 	VkSemaphore vkGlDone = VK_NULL_HANDLE, vkVkDone = VK_NULL_HANDLE;
 	GLuint glGlDone = 0, glVkDone = 0;
 	std::vector<GLuint> texs;
@@ -788,6 +810,13 @@ void wwVkFrameSetDevice( void * instance, void * physical, void * device, unsign
 	d.vkGetPhysicalDeviceProperties( d.pd, &pp );
 	d.tsPeriod = double( pp.limits.timestampPeriod );
 	d.vkGetPhysicalDeviceMemoryProperties( d.pd, &d.mp );
+	uint32_t ne = 0;
+	if ( d.vkEnumerateDeviceExtensionProperties && d.vkEnumerateDeviceExtensionProperties( d.pd, nullptr, &ne, nullptr ) == VK_SUCCESS ) {
+		std::vector<VkExtensionProperties> ep( ne );
+		if ( ne && d.vkEnumerateDeviceExtensionProperties( d.pd, nullptr, &ne, ep.data() ) == VK_SUCCESS )
+			for ( const VkExtensionProperties & e : ep )
+				d.budget = d.budget || std::strcmp( e.extensionName, VK_EXT_MEMORY_BUDGET_EXTENSION_NAME ) == 0;
+	}
 	uint32_t nq = 0;
 	d.vkGetPhysicalDeviceQueueFamilyProperties( d.pd, &nq, nullptr );
 	std::vector<VkQueueFamilyProperties> qp( nq );
@@ -958,6 +987,12 @@ bool hasChain( const void * key )
 {
 	auto it = chains().find( key );
 	return it != chains().end() && it->ok;
+}
+
+bool chainRunning( const void * key )
+{
+	const auto it = chains().constFind( key );
+	return it != chains().constEnd() && it->ok && nowMs() - it->lastRun < 2000.0 && wanted();
 }
 
 void freeChain( const void * key )
@@ -1163,11 +1198,28 @@ bool makeFrame( const void * key, int W, int H, int samples, unsigned dsFormat, 
 	}
 	if ( !exportable( VK_FORMAT_R16G16B16A16_SFLOAT, samples, why ) || !exportable( dsf, samples, why ) )
 		return false;
+	/* build 79: GL drew into the shared frame at PCIe speed (sky 3.17 ms, was 0.07; the resolve 1.5-2.4, was 0.11): made
+	 * while the load filled video memory, it sat outside it. Made only with room left in the device heap's budget, and
+	 * kept only if the heap grew by it (this process's use, VK_EXT_memory_budget) */
+	const double mb = double( W ) * H * samples / 1048576.0;
+	const double needMb = mb * ( dsf == VK_FORMAT_D24_UNORM_S8_UINT ? 12.0 : 16.0 );
+	double usedMb = 0.0, budgetMb = 0.0;
+	const bool budget = localHeap( usedMb, budgetMb );
+	if ( budget && budgetMb - usedMb < needMb + 256.0 ) {
+		why = QStringLiteral( "video memory is short (%1 MB left of the budget; the frame needs %2 MB and 256 to spare)" )
+			.arg( budgetMb - usedMb, 0, 'f', 0 ).arg( needMb, 0, 'f', 1 );
+		return false;
+	}
 	Frame & fr = frames()[key];
 	fr.ctx = QOpenGLContext::currentContext();
 	const bool ok = makeImg( fr.color, W, H, 1, 1, why, VK_FORMAT_R16G16B16A16_SFLOAT, samples )
 		&& makeImg( fr.ds, W, H, 1, 1, why, dsf, samples ) && toGeneralNow( { &fr.color, &fr.ds }, why );
-	if ( !ok ) {
+	double afterMb = 0.0, afterBudgetMb = 0.0;
+	const bool placed = !budget || ( localHeap( afterMb, afterBudgetMb ) && afterMb - usedMb >= 0.75 * needMb );
+	if ( ok && !placed )
+		why = QStringLiteral( "the frame landed outside video memory (the device heap grew %1 MB for %2 MB)" )
+			.arg( afterMb - usedMb, 0, 'f', 1 ).arg( needMb, 0, 'f', 1 );
+	if ( !ok || !placed ) {
 		dropImg( fr.color );
 		dropImg( fr.ds );
 		frames().remove( key );
@@ -1175,9 +1227,11 @@ bool makeFrame( const void * key, int W, int H, int samples, unsigned dsFormat, 
 	}
 	color = fr.color.tex;
 	ds = fr.ds.tex;
-	const double mb = double( W ) * H * samples / 1048576.0;
-	std::fprintf( stderr, "vk post: frame shared %dx%d, %d sample(s): colour RGBA16F %.1f MB, depth / stencil %s %.1f MB\n", W, H,
-		samples, mb * 8.0, dsf == VK_FORMAT_D24_UNORM_S8_UINT ? "D24S8" : "D32FS8", mb * ( dsf == VK_FORMAT_D24_UNORM_S8_UINT ? 4.0 : 8.0 ) );
+	std::fprintf( stderr, "vk post: frame shared %dx%d, %d sample(s): colour RGBA16F %.1f MB, depth / stencil %s %.1f MB; %s\n", W, H,
+		samples, mb * 8.0, dsf == VK_FORMAT_D24_UNORM_S8_UINT ? "D24S8" : "D32FS8", mb * ( dsf == VK_FORMAT_D24_UNORM_S8_UINT ? 4.0 : 8.0 ),
+		budget ? qPrintable( QStringLiteral( "in video memory (the device heap grew %1 MB, %2 MB left of the budget)" )
+			.arg( afterMb - usedMb, 0, 'f', 1 ).arg( afterBudgetMb - afterMb, 0, 'f', 0 ) )
+			: "the place not checked (no VK_EXT_memory_budget)" );
 	return true;
 }
 
@@ -1240,6 +1294,7 @@ bool runBloom( const void * key, const BloomJob & job, QString & why )
 		sayRoute( QStringLiteral( "gl (%1)" ).arg( why ) );
 		return false;
 	}
+	c.lastRun = nowMs();
 	c.combRan = false;
 	// round 3 (P3): the source's frame; the set is written again only when that frame was made again
 	const Frame * fr = nullptr;
