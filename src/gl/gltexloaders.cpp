@@ -55,6 +55,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <QOpenGLContext>
 #include <QString>
 #include <QtEndian>
+#include <chrono>
 #include <cstdio>
 
 #include "dds.h"
@@ -1426,6 +1427,11 @@ void TexCache::wwFo4SrgbTagAsUnorm( const NifModel * nif, const QString & filepa
 	glTexParameteri( GL_TEXTURE_2D, 0x8A48, 0x8A4A );	// TEXTURE_SRGB_DECODE_EXT = SKIP_DECODE_EXT
 }
 
+// lane EMPTY240 R8-2: texLoad's parts for loadTex's `texture load slow:` line (drawing thread only)
+double wwTexLoadBytesMs = 0.0, wwTexLoadQueryMs = 0.0;
+bool wwTexLoadTaken = false;
+qint64 wwTexLoadSize = 0;
+
 GLuint TexCache::texLoad( const NifModel * nif, const QString & filepath,
 							TexFmt & format, GLenum & target, GLuint & width, GLuint & height, GLuint * id )
 {
@@ -1440,11 +1446,16 @@ GLuint TexCache::texLoad( const NifModel * nif, const QString & filepath,
 			return texLoadColor( nif, filepath, target, width, height, data, id );
 	} else {
 		CellSpeed::Acc speedAcc( "  texture file bytes (taken ready, or read here)" );   // lane SPEED1
+		const auto wwB0 = std::chrono::steady_clock::now();	// lane EMPTY240 R8-2
 		bool	fileFound;
 		if ( !nif )
 			fileFound = Game::GameManager::get_file( data, Game::OTHER, filepath, "textures", "" );
-		else   // lane SPEED1: a cell's files are read ahead by worker threads (celltexahead.h)
-			fileFound = CellTexAhead::take( nif, filepath, data ) || nif->getResourceFile( data, filepath, "textures", "" );
+		else {   // lane SPEED1: a cell's files are read ahead by worker threads (celltexahead.h)
+			wwTexLoadTaken = CellTexAhead::take( nif, filepath, data );
+			fileFound = wwTexLoadTaken || nif->getResourceFile( data, filepath, "textures", "" );
+		}
+		wwTexLoadBytesMs = std::chrono::duration<double, std::milli>( std::chrono::steady_clock::now() - wwB0 ).count();
+		wwTexLoadSize = data.size();
 		if ( !fileFound )
 			throw QString( "could not open file" );
 	}
@@ -1494,6 +1505,7 @@ GLuint TexCache::texLoad( const NifModel * nif, const QString & filepath,
 		target = GL_TEXTURE_2D;
 
 	if ( mipmaps > 0 ) {
+		const auto wwQ0 = std::chrono::steady_clock::now();	// lane EMPTY240 R8-2: the driver's size queries
 		GLenum t = target;
 		if ( target == GL_TEXTURE_CUBE_MAP )
 			t = GL_TEXTURE_CUBE_MAP_POSITIVE_X;
@@ -1529,6 +1541,7 @@ GLuint TexCache::texLoad( const NifModel * nif, const QString & filepath,
 		glGetTexLevelParameteriv( t, 0, GL_TEXTURE_COMPRESSED, &tmp );
 		format.isCompressed = bool( tmp );
 		wwFo4SrgbTagAsUnorm( nif, filepath, target, format.internalFormat );
+		wwTexLoadQueryMs = std::chrono::duration<double, std::milli>( std::chrono::steady_clock::now() - wwQ0 ).count();
 	} else {
 		throw QString( "unknown texture format" );
 	}
