@@ -1,11 +1,13 @@
 """Lane VKCOMPUTE1 (2026-11-12): the HLSL row of the shader check. Every entry file res/shaders/hlsl/**/*.hlsl
 (.hlsli are includes) compiles with DXC both ways: DXIL (-T <profile>, validated and signed by dxil.dll beside dxc)
-for FO4CS's D3D12 path, and SPIR-V (-spirv -fspv-target-env=vulkan1.3, validated by DXC's own SPIR-V validator)
-for NifSkope's Vulkan device. Compute kernels only so far: profile cs_6_0, entry main.
+for Fusion Shaders' (F4FS) D3D12 path, and SPIR-V (-spirv -fspv-target-env=vulkan1.3, validated by DXC's own SPIR-V
+validator) for NifSkope's Vulkan device. Compute kernels only so far, entry main; profile cs_6_0 unless the file has a
+`// hlsl profile: cs_6_N` line (ray queries need cs_6_5).
   python -I tests/spells/hlsl_check.py [<tree>] [--dxc <exe>] [--selftest <scratch dir>]
 Rows `HLSL OK <file> dxil N B spirv M B` / `HLSL FAIL <file> <which>: <log>`; last line `HLSL CHECK OK n` or
 `HLSL CHECK FAIL f of n`. --selftest also compiles a broken kernel in <scratch dir>: it must FAIL (the red)."""
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -15,11 +17,13 @@ DEFAULT_DXC = 'E:/Tools/dxc/bin/x64/dxc.exe'
 
 def compile_both(dxc, path, scratch):
     sizes = {}
+    m = re.search(r'hlsl profile: (cs_6_[0-9])', open(path, encoding='utf-8', errors='replace').read())
+    profile = m.group(1) if m else 'cs_6_0'
     for which, extra in (('dxil', []), ('spirv', ['-spirv', '-fspv-target-env=vulkan1.3'])):
         out = os.path.join(scratch, os.path.basename(path) + '.' + which)
         if os.path.exists(out):
             os.remove(out)
-        r = subprocess.run([dxc] + extra + ['-T', 'cs_6_0', '-E', 'main', '-Fo', out, path],
+        r = subprocess.run([dxc] + extra + ['-T', profile, '-E', 'main', '-Fo', out, path],
                            capture_output=True, text=True, timeout=300, stdin=subprocess.DEVNULL)
         if r.returncode != 0 or not os.path.isfile(out):
             return None, '%s: %s' % (which, (r.stdout + r.stderr).strip().replace('\n', ' | ')[-400:])

@@ -40,7 +40,7 @@ def script_ok(tree):
 	for k in loop:
 		if k not in known:
 			bad.append('src/features/gi/rtddgi_spirv.sh: kernel %s is not in this checker' % k)
-	m = re.search(r'^for k in ([a-z ]+); do\n\t"\$DXC" -spirv -fspv-target-env=vulkan1\.2 -T cs_6_0 -E main ', r, re.M)
+	m = re.search(r'^for k in ([a-z ]+); do\n\tT=.*\n\t"\$DXC" -spirv -fspv-target-env=vulkan1\.2 -T "\$\{T:-cs_6_0\}" -E main -O0 ', r, re.M)
 	hloop = m.group(1).split() if m else []
 	if sorted(hloop) != sorted(k for d, k, e, v in HLSL_SPECS):
 		bad.append('src/features/gi/rtddgi_spirv.sh: its DXC loop (%s) is not this checker\'s HLSL kernels' % ' '.join(hloop))
@@ -143,8 +143,10 @@ def main(argv):
 			for f in (spv, out):
 				if os.path.exists(f):
 					os.remove(f)
-			r = subprocess.run([dxc, '-spirv', '-fspv-target-env=' + env, '-T', 'cs_6_0', '-E', 'main', '-Fo', spv,
-			                    os.path.join(tree, 'res/shaders/hlsl/rtddgi', k + '.hlsl')], capture_output=True, text=True, timeout=300)
+			src = os.path.join(tree, 'res/shaders/hlsl', os.path.basename(d), k + '.hlsl')
+			m = re.search(r'hlsl profile: (cs_6_[0-9])', open(src, encoding='utf-8', errors='replace').read())
+			r = subprocess.run([dxc, '-spirv', '-fspv-target-env=' + env, '-T', m.group(1) if m else 'cs_6_0', '-E', 'main',
+			                    '-O0', '-Fo', spv, src], capture_output=True, text=True, timeout=300)
 			if r.returncode == 0:
 				r = subprocess.run([sys.executable, '-I', os.path.join(tree, 'tools/spv_header.py'), spv, vn, out],
 				                   capture_output=True, text=True, timeout=60, stdin=subprocess.DEVNULL)

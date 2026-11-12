@@ -9,7 +9,10 @@
 #include <windows.h>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
+#include <cmath>
+#include <string>
 #include <vector>
 
 #define VKF( name ) static PFN_##name name
@@ -20,6 +23,7 @@ VKF( vkCreateDescriptorSetLayout ); VKF( vkCreatePipelineLayout ); VKF( vkCreate
 VKF( vkCreateDescriptorPool ); VKF( vkAllocateDescriptorSets ); VKF( vkUpdateDescriptorSets ); VKF( vkCreateCommandPool );
 VKF( vkAllocateCommandBuffers ); VKF( vkBeginCommandBuffer ); VKF( vkEndCommandBuffer ); VKF( vkCmdBindPipeline );
 VKF( vkCmdBindDescriptorSets ); VKF( vkCmdPushConstants ); VKF( vkCmdDispatch ); VKF( vkQueueSubmit ); VKF( vkQueueWaitIdle );
+VKF( vkCreateFence ); VKF( vkWaitForFences ); VKF( vkDestroyFence );
 VKF( vkResetCommandBuffer ); VKF( vkDestroyPipeline ); VKF( vkDestroyShaderModule ); VKF( vkDestroyBuffer ); VKF( vkFreeMemory );
 
 static std::vector<uint32_t> readSpv( const char * path )
@@ -189,7 +193,18 @@ static bool run( const std::vector<uint32_t> & spv, std::vector<Buf> & bufs, con
 	VkSubmitInfo si { VK_STRUCTURE_TYPE_SUBMIT_INFO };
 	si.commandBufferCount = 1;
 	si.pCommandBuffers = &cb;
-	const bool ok = vkQueueSubmit( queue, 1, &si, VK_NULL_HANDLE ) == VK_SUCCESS && vkQueueWaitIdle( queue ) == VK_SUCCESS;
+	// a fence with a 20 s bound: a kernel that hangs the GPU fails its case instead of spinning the gate forever
+	VkFenceCreateInfo fci { VK_STRUCTURE_TYPE_FENCE_CREATE_INFO };
+	VkFence fence;
+	vkCreateFence( dev, &fci, nullptr, &fence );
+	const bool ok = vkQueueSubmit( queue, 1, &si, fence ) == VK_SUCCESS
+		&& vkWaitForFences( dev, 1, &fence, VK_TRUE, 20000000000ull ) == VK_SUCCESS;
+	if ( !ok ) {
+		std::printf( "HLSLMATCH FAIL (a dispatch did not finish in 20 s)\n" );
+		std::fflush( stdout );
+		std::exit( 1 );
+	}
+	vkDestroyFence( dev, fence, nullptr );
 	vkDestroyPipeline( dev, pipe, nullptr );
 	vkDestroyShaderModule( dev, sm, nullptr );
 	return ok;
@@ -206,11 +221,121 @@ struct Params
 };
 static_assert( sizeof( Params ) == 18 * 16, "Params is 18 vec4" );
 
-struct Case { int x, y, z; int skipAsleep; int skip; uint64_t seed; };
+// x y z probes, skipAsleep, the skip range on, seed; round 2: rays a probe, job mode, job.y (fresh only), sky-below rule
+struct Case { int x, y, z; int skipAsleep; int skip; uint64_t seed; int N = 288; uint32_t mode = 3; uint32_t jobY = 0; int below = 1; };
+
+// the rays buffer (binding 0, nP x N vec4): radiance rgb, signed distance with every kind the kernels branch on --
+// a miss (1e27), a backface (-0.2 t), a hit nearer or farther than a probe step. backShare: a probe's chance a ray is a back
+static void fillRays( float * rays, size_t nP, int N, Rng & r, float stepMax )
+{
+	for ( size_t p = 0; p < nP; p++ ) {
+		const float backShare = r.unit() < 0.3f ? 0.5f : 0.1f * r.unit();
+		for ( int i = 0; i < N; i++ ) {
+			float * v = rays + ( p * size_t( N ) + size_t( i ) ) * 4;
+			v[0] = r.unit() * 4.0f; v[1] = r.unit() * 4.0f; v[2] = r.unit() * 4.0f;
+			const float u = r.unit();
+			if ( u < backShare )
+				v[3] = -0.2f * r.unit() * stepMax * 2.0f;
+			else if ( u < backShare + 0.3f )
+				v[3] = 1e27f;
+			else
+				v[3] = ( r.unit() * 2.0f + 0.001f ) * stepMax;
+		}
+	}
+}
+
+// a random rotation's rows (Gram-Schmidt of two random vectors), as the CPU's updateRotation hands the kernels
+static void randomRotation( Rng & r, uint32_t pc[16] )
+{
+	float a[3] = { r.unit() - 0.5f, r.unit() - 0.5f, r.unit() - 0.5f }, b[3] = { r.unit() - 0.5f, r.unit() - 0.5f, r.unit() - 0.5f };
+	auto norm = []( float * v ) { const float l = std::sqrt( v[0] * v[0] + v[1] * v[1] + v[2] * v[2] ); v[0] /= l; v[1] /= l; v[2] /= l; };
+	norm( a );
+	const float d = a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+	for ( int k = 0; k < 3; k++ )
+		b[k] -= d * a[k];
+	norm( b );
+	const float c[3] = { a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0] };
+	float rows[12] = { a[0], a[1], a[2], 0, b[0], b[1], b[2], 0, c[0], c[1], c[2], 0 };
+	std::memcpy( pc, rows, sizeof rows );
+}
+
+static void fillParamsBase( Params & P, const Case & c, uint32_t nP, Rng & r )
+{
+	std::memset( &P, 0, sizeof P );
+	P.dims[0] = c.x; P.dims[1] = c.y; P.dims[2] = c.z; P.dims[3] = int32_t( nP );
+	P.flags[1] = c.skipAsleep;
+	if ( c.skip ) {
+		P.skipLo[0] = c.x / 4; P.skipLo[1] = c.y / 4; P.skipLo[2] = c.z / 4; P.skipLo[3] = 1;
+		P.skipHi[0] = c.x / 2; P.skipHi[1] = c.y / 2; P.skipHi[2] = c.z / 2;
+	}
+	P.counts[0] = c.N;
+	for ( int k = 0; k < 3; k++ ) {
+		P.origin[k] = ( r.unit() - 0.5f ) * 2000.0f;
+		P.stepv[k] = 40.0f + r.unit() * 120.0f;
+	}
+	P.stepv[3] = std::fmin( P.stepv[0], std::fmin( P.stepv[1], P.stepv[2] ) );
+	P.origin[3] = 2.0f * P.stepv[3];   // distClamp
+	for ( int f = 0; f < 6; f++ )
+		for ( int k = 0; k < 4; k++ )
+			P.sky[f][k] = r.unit() * 2.0f;
+	P.sky[0][3] = 1.0f;
+	P.sky[4][3] = float( c.below );
+	P.blendp[0] = 0.97f;
+	P.blendp[1] = 50.0f;
+	P.blendp[2] = 0.3f;
+}
+
+// reloc (modes 4 relocate / 5 classify): binding 0 rays, 3 probes, 14 params; one invocation a probe
+static void fillReloc( std::vector<Buf> & bufs, const Case & c, uint64_t & groups, uint32_t pc[16] )
+{
+	const uint32_t nP = uint32_t( c.x * c.y * c.z );
+	Rng r { c.seed };
+	Params P;
+	fillParamsBase( P, c, nP, r );
+	fillRays( static_cast<float *>( bufs[0].p ), nP, c.N, r, P.stepv[3] );
+	float * pr = static_cast<float *>( bufs[3].p );
+	for ( uint32_t p = 0; p < nP; p++ ) {
+		for ( int k = 0; k < 3; k++ )
+			pr[p * 4 + k] = ( r.unit() - 0.5f ) * 0.9f * P.stepv[k];
+		pr[p * 4 + 3] = float( r.next() % 4 );
+	}
+	std::memcpy( bufs[14].p, &P, sizeof P );
+	pc[12] = c.mode; pc[13] = c.jobY;
+	groups = ( uint64_t( nP ) + 63 ) / 64;   // rtddgi_vk.inc probe-wide passes
+}
+
+// blend: binding 0 rays, 1 irr, 2 dist, 3 probes, 4 age, 14 params; one group of 256 a probe
+static void fillBlend( std::vector<Buf> & bufs, const Case & c, uint64_t & groups, uint32_t pc[16] )
+{
+	const uint32_t nP = uint32_t( c.x * c.y * c.z );
+	Rng r { c.seed };
+	Params P;
+	fillParamsBase( P, c, nP, r );
+	fillRays( static_cast<float *>( bufs[0].p ), nP, c.N, r, P.stepv[3] );
+	float * irr = static_cast<float *>( bufs[1].p );
+	for ( size_t i = 0; i < size_t( nP ) * 64 * 4; i++ )
+		irr[i] = r.unit() * 1.5f;   // an encoded change past 0.25 and 0.8 both happen
+	float * dist = static_cast<float *>( bufs[2].p );
+	for ( size_t i = 0; i < size_t( nP ) * 256 * 2; i++ )
+		dist[i] = r.unit() * 300.0f;
+	float * pr = static_cast<float *>( bufs[3].p );
+	for ( uint32_t p = 0; p < nP; p++ ) {
+		pr[p * 4 + 0] = r.unit(); pr[p * 4 + 1] = r.unit(); pr[p * 4 + 2] = r.unit();
+		pr[p * 4 + 3] = float( r.next() % 4 );
+	}
+	uint32_t * age = static_cast<uint32_t *>( bufs[4].p );
+	for ( uint32_t p = 0; p < nP; p++ )
+		age[p] = r.next() % 4 == 0 ? 0u : r.next() % 1000;
+	std::memcpy( bufs[14].p, &P, sizeof P );
+	randomRotation( r, pc );
+	pc[12] = 2; pc[13] = 1;
+	groups = nP;
+}
 
 // border: binding 1 irr (64 vec4 a probe), 2 dist (256 vec2), 3 probes (vec4), 4 age (uint), 14 params; the rest 256 B
-static void fillBorder( std::vector<Buf> & bufs, const Case & c, uint64_t & groups )
+static void fillBorder( std::vector<Buf> & bufs, const Case & c, uint64_t & groups, uint32_t pc[16] )
 {
+	pc[12] = 3; pc[13] = 1;   // job: mode 3 (border), frame 1
 	const uint32_t nP = uint32_t( c.x * c.y * c.z );
 	Rng r { c.seed };
 	float * irr = static_cast<float *>( bufs[1].p );
@@ -243,8 +368,31 @@ static void fillBorder( std::vector<Buf> & bufs, const Case & c, uint64_t & grou
 
 int main( int argc, char ** argv )
 {
-	if ( argc < 4 || std::strcmp( argv[1], "border" ) ) {
-		std::printf( "usage: kernelmatch border <glsl .spv> <hlsl .spv>\n" );
+	const std::string kernel = argc > 1 ? argv[1] : "";
+	typedef void ( *Fill )( std::vector<Buf> &, const Case &, uint64_t &, uint32_t * );
+	Fill fill = nullptr;
+	int watch = 1;   // the binding the GLSL run must change (a case that wrote nothing proves nothing)
+	std::vector<Case> cases;
+	if ( kernel == "border" ) {
+		fill = fillBorder;
+		cases = { { 4, 3, 2, 0, 0, 1 }, { 4, 3, 2, 1, 0, 2 }, { 9, 7, 5, 0, 1, 3 }, { 9, 7, 5, 1, 1, 4 },
+			{ 16, 16, 8, 1, 1, 5 }, { 50, 50, 20, 0, 1, 6 } };
+	} else if ( kernel == "reloc" ) {
+		fill = fillReloc;
+		watch = 3;
+		// modes 4 / 5, every probe and fresh only, several ray counts. Past 65535 groups of 64 would take 4.2 M probes
+		// (2 GB of rays a run): the y split is DDGI_LinearId's, shared with border, whose last case proves it
+		cases = { { 4, 3, 2, 0, 0, 11, 64, 4, 0 }, { 4, 3, 2, 0, 0, 12, 64, 5, 0 }, { 9, 7, 5, 0, 0, 13, 96, 4, 1 },
+			{ 9, 7, 5, 0, 0, 14, 96, 5, 1 }, { 20, 20, 10, 0, 0, 15, 288, 4, 0 }, { 20, 20, 10, 0, 0, 16, 288, 5, 0 },
+			{ 64, 64, 16, 0, 0, 17, 32, 5, 0 }, { 64, 64, 16, 0, 0, 18, 32, 4, 0 } };
+	} else if ( kernel == "blend" ) {
+		fill = fillBlend;
+		// rays 288 (all 256 threads load), 160, 64; skipAsleep and the skip range; sky-below rule on and off
+		cases = { { 4, 3, 2, 0, 0, 21, 288, 2, 1, 1 }, { 4, 3, 2, 1, 1, 22, 288, 2, 1, 0 }, { 9, 7, 5, 0, 1, 23, 160, 2, 1, 1 },
+			{ 9, 7, 5, 1, 0, 24, 64, 2, 1, 0 }, { 16, 16, 8, 0, 1, 25, 288, 2, 1, 1 } };
+	}
+	if ( argc < 4 || !fill ) {
+		std::printf( "usage: kernelmatch border|reloc|blend <glsl .spv> <hlsl .spv>\n" );
 		return 2;
 	}
 	const std::vector<uint32_t> a = readSpv( argv[2] ), b = readSpv( argv[3] );
@@ -330,6 +478,7 @@ int main( int argc, char ** argv )
 	LOADD( vkCreateComputePipelines ); LOADD( vkCreateDescriptorPool ); LOADD( vkAllocateDescriptorSets ); LOADD( vkUpdateDescriptorSets );
 	LOADD( vkCreateCommandPool ); LOADD( vkAllocateCommandBuffers ); LOADD( vkBeginCommandBuffer ); LOADD( vkEndCommandBuffer );
 	LOADD( vkCmdBindPipeline ); LOADD( vkCmdBindDescriptorSets ); LOADD( vkCmdPushConstants ); LOADD( vkCmdDispatch );
+	LOADD( vkCreateFence ); LOADD( vkWaitForFences ); LOADD( vkDestroyFence );
 	LOADD( vkQueueSubmit ); LOADD( vkQueueWaitIdle ); LOADD( vkResetCommandBuffer ); LOADD( vkDestroyPipeline );
 	LOADD( vkDestroyShaderModule ); LOADD( vkDestroyBuffer ); LOADD( vkFreeMemory );
 	vkGetDeviceQueue( dev, family, 0, &queue );
@@ -338,26 +487,23 @@ int main( int argc, char ** argv )
 		return 1;
 	}
 	std::printf( "device queue family %u\n", family );
-	// cases: small grids with every state and both skip rules, and one past 65535 groups (the y split of the dispatch)
-	const Case cases[] = {
-		{ 4, 3, 2, 0, 0, 1 }, { 4, 3, 2, 1, 0, 2 }, { 9, 7, 5, 0, 1, 3 }, { 9, 7, 5, 1, 1, 4 },
-		{ 16, 16, 8, 1, 1, 5 }, { 50, 50, 20, 0, 1, 6 },
-	};
-	const uint32_t pc[16] = { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3, 1, 0, 0 };   // job: mode 3 (border), frame 1
+	// cases (per kernel above): small grids with every state and both skip rules, border's last past 65535 groups
 	int fails = 0, total = 0;
 	for ( const Case & c : cases ) {
 		const size_t nP = size_t( c.x * c.y * c.z );
-		const size_t sz[15] = { 256, nP * 64 * 16, nP * 256 * 8, nP * 16, nP * 4, 256, 256, 256, 256, 256, 256, 256, 256, 256, sizeof( Params ) };
+		const size_t sz[15] = { nP * size_t( c.N ) * 16, nP * 64 * 16, nP * 256 * 8, nP * 16, nP * 4, 256, 256, 256, 256, 256, 256, 256,
+			256, 256, sizeof( Params ) };
 		std::vector<Buf> A( 15 ), B( 15 );
 		for ( int i = 0; i < 15; i++ ) {
 			A[i] = makeBuf( sz[i] );
 			B[i] = makeBuf( sz[i] );
 		}
 		uint64_t groups = 0;
-		fillBorder( A, c, groups );
-		fillBorder( B, c, groups );
-		std::vector<unsigned char> before( sz[1] );
-		std::memcpy( before.data(), A[1].p, sz[1] );
+		uint32_t pc[16] = {};
+		fill( A, c, groups, pc );
+		fill( B, c, groups, pc );
+		std::vector<unsigned char> before( sz[watch] );
+		std::memcpy( before.data(), A[watch].p, sz[watch] );
 		const bool ra = run( a, A, pc, groups ), rb = run( b, B, pc, groups );
 		size_t diff[15] = {};
 		for ( int i = 0; i < 15; i++ ) {
@@ -365,18 +511,38 @@ int main( int argc, char ** argv )
 			for ( size_t k = 0; k < sz[i]; k++ )
 				diff[i] += x[k] != y[k];
 		}
-		size_t moved = 0;   // the GLSL run's own irradiance writes: a case that wrote nothing proves nothing
-		for ( size_t k = 0; k < sz[1]; k++ )
-			moved += before[k] != static_cast<const unsigned char *>( A[1].p )[k];
+		size_t moved = 0;   // the GLSL run's own writes to the watched binding: a case that wrote nothing proves nothing
+		for ( size_t k = 0; k < sz[watch]; k++ )
+			moved += before[k] != static_cast<const unsigned char *>( A[watch].p )[k];
 		size_t all = 0;
 		for ( int i = 0; i < 15; i++ )
 			all += diff[i];
 		const bool ok = ra && rb && all == 0 && moved > 0;
 		fails += ok ? 0 : 1;
 		total++;
-		std::printf( "case %dx%dx%d skipAsleep %d skip %d groups %llu: ran %d/%d, bytes differing irr %zu dist %zu age %zu probes %zu "
-			"other %zu, glsl bytes written irr %zu: %s\n", c.x, c.y, c.z, c.skipAsleep, c.skip, (unsigned long long)groups, ra, rb,
-			diff[1], diff[2], diff[4], diff[3], all - diff[1] - diff[2] - diff[3] - diff[4], moved, ok ? "same" : "DIFFERS" );
+		std::printf( "case %dx%dx%d rays %d mode %u.%u skipAsleep %d skip %d below %d groups %llu: ran %d/%d, bytes differing rays %zu "
+			"irr %zu dist %zu age %zu probes %zu other %zu, glsl bytes written (binding %d) %zu: %s\n", c.x, c.y, c.z, c.N, pc[12], pc[13],
+			c.skipAsleep, c.skip, c.below, (unsigned long long)groups, ra, rb, diff[0], diff[1], diff[2], diff[4], diff[3],
+			all - diff[0] - diff[1] - diff[2] - diff[3] - diff[4], watch, moved, ok ? "same" : "DIFFERS" );
+		for ( int i = 0; i < 15 && !ok; i++ ) {   // the first differing word a binding, both values, and the largest ulp gap
+			const uint32_t * x = static_cast<const uint32_t *>( A[i].p ), * y = static_cast<const uint32_t *>( B[i].p );
+			size_t first = SIZE_MAX;
+			int64_t worst = 0;
+			for ( size_t k = 0; k < sz[i] / 4; k++ )
+				if ( x[k] != y[k] ) {
+					first = first == SIZE_MAX ? k : first;
+					const int64_t g = int64_t( x[k] ) - int64_t( y[k] );
+					worst = std::max( worst, g < 0 ? -g : g );
+				}
+			if ( first != SIZE_MAX ) {
+				float fx, fy;
+				std::memcpy( &fx, x + first, 4 );
+				std::memcpy( &fy, y + first, 4 );
+				std::printf( "  binding %d word %zu: glsl %08x (%g) hlsl %08x (%g); largest gap %lld ulp\n", i, first, x[first], fx, y[first], fy,
+					(long long)worst );
+			}
+		}
+		std::fflush( stdout );
 		for ( int i = 0; i < 15; i++ ) {
 			freeBuf( A[i] );
 			freeBuf( B[i] );
