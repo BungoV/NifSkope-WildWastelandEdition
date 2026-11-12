@@ -18,6 +18,6 @@ void main( uint3 id : SV_DispatchThreadID )
 #ifdef PFX_RED
 	red = true;
 #endif
-	PfxOut0[id.xy] = F4FX_ObjBlurVector( float2( id.xy ) + 0.5f, PfxT0.Load( p ).xy, PfxT1.Load( p ).b, PfxT2.Load( p ).r, j.c[0],
-		j.c[1], j.c[2], j.c[3], j.c[4], j.c[5].x, j.c[5].y, red );
+	PFX_STORE0( id.xy, F4FX_ObjBlurVector( float2( id.xy ) + 0.5f, PfxT0.Load( p ).xy, PfxT1.Load( p ).b, PfxT2.Load( p ).r, j.c[0],
+		j.c[1], j.c[2], j.c[3], j.c[4], j.c[5].x, j.c[5].y, red ) );
 }

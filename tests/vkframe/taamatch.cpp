@@ -6,7 +6,9 @@
 // Usage: taamatch <job dir> <taa_resolve.spv>
 // Prints one line an output, the resolve's GPU ms (timestamps, median of 32 after 2 warm-ups), then `TAAMATCH <job> EXACT`,
 // `TAAMATCH <job> BOUND (...)` (max 1 ulp, or the counted step rule at the verdict) or `TAAMATCH <job> FAIL ...`. Exit 0 for
-// EXACT or BOUND. TAAMATCH_GROUP=<x>x<y> dispatches for a scratch kernel of another group shape.
+// EXACT or BOUND. TAAMATCH_GROUP=<x>x<y> dispatches for a scratch kernel of another group shape. TAAMATCH_RASTER=<vs spv>:
+// the resolve as a fragment pass the way GL draws it (argv[2] = the TAA_RASTER ps build, entries vs / ps), three RGBA16F colour
+// attachments in GENERAL on the graphics queue.
 #define VK_NO_PROTOTYPES
 #include <vulkan/vulkan.h>
 #include <windows.h>
@@ -29,8 +31,12 @@ VKF( vkAllocateCommandBuffers ); VKF( vkBeginCommandBuffer ); VKF( vkEndCommandB
 VKF( vkCmdBindDescriptorSets ); VKF( vkCmdPushConstants ); VKF( vkCmdDispatch ); VKF( vkQueueSubmit ); VKF( vkQueueWaitIdle );
 VKF( vkCmdPipelineBarrier ); VKF( vkCmdCopyBufferToImage ); VKF( vkCmdCopyImageToBuffer ); VKF( vkCreateQueryPool );
 VKF( vkCmdResetQueryPool ); VKF( vkCmdWriteTimestamp ); VKF( vkGetQueryPoolResults );
+VKF( vkCreateGraphicsPipelines ); VKF( vkCreateRenderPass ); VKF( vkCreateFramebuffer ); VKF( vkCmdBeginRenderPass );
+VKF( vkCmdEndRenderPass ); VKF( vkCmdDraw );
 
 static VkDevice dev;
+static bool raster = false;	// TAAMATCH_RASTER
+static const VkShaderStageFlags kStages = VK_SHADER_STAGE_COMPUTE_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
 static VkPhysicalDevice phys;
 static VkQueue queue;
 static uint32_t family;
@@ -115,7 +121,7 @@ static Img makeImg( int w, int h, VkFormat fmt, bool storage )
 	ci.samples = VK_SAMPLE_COUNT_1_BIT;
 	ci.tiling = VK_IMAGE_TILING_OPTIMAL;
 	ci.usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT
-		| ( storage ? VK_IMAGE_USAGE_STORAGE_BIT : 0 );
+		| ( storage ? VK_IMAGE_USAGE_STORAGE_BIT | ( raster ? VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT : 0 ) : 0 );
 	ci.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
 	vkCreateImage( dev, &ci, nullptr, &I.i );
 	VkMemoryRequirements r;
@@ -151,13 +157,13 @@ static bool makeLayout()
 {
 	VkDescriptorSetLayoutBinding b[kBindings];
 	for ( uint32_t i = 0; i < kBindings; i++ )
-		b[i] = VkDescriptorSetLayoutBinding { i, bindingType( i ), 1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr };
+		b[i] = VkDescriptorSetLayoutBinding { i, bindingType( i ), 1, kStages, nullptr };
 	VkDescriptorSetLayoutCreateInfo li { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
 	li.bindingCount = kBindings;
 	li.pBindings = b;
 	if ( vkCreateDescriptorSetLayout( dev, &li, nullptr, &setLayout ) != VK_SUCCESS )
 		return false;
-	VkPushConstantRange pr { VK_SHADER_STAGE_COMPUTE_BIT, 0, 128 };
+	VkPushConstantRange pr { kStages, 0, 128 };
 	VkPipelineLayoutCreateInfo pi { VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO };
 	pi.setLayoutCount = 1;
 	pi.pSetLayouts = &setLayout;
@@ -200,6 +206,95 @@ static VkPipeline makePipe( const std::vector<uint32_t> & spv )
 	VkPipeline p = VK_NULL_HANDLE;
 	vkCreateComputePipelines( dev, VK_NULL_HANDLE, 1, &pc, nullptr, &p );
 	return p;
+}
+
+// the resolve as a fragment pass: a full-screen triangle into the three outputs, LOAD + STORE, GENERAL throughout
+struct Raster { VkRenderPass rp = VK_NULL_HANDLE; VkFramebuffer fb = VK_NULL_HANDLE; VkPipeline pipe = VK_NULL_HANDLE; };
+
+static VkShaderModule module( const std::vector<uint32_t> & spv )
+{
+	VkShaderModuleCreateInfo mi { VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO };
+	mi.codeSize = spv.size() * 4;
+	mi.pCode = spv.data();
+	VkShaderModule m = VK_NULL_HANDLE;
+	vkCreateShaderModule( dev, &mi, nullptr, &m );
+	return m;
+}
+
+static Raster makeRaster( const Img * outs, int W, int H, VkShaderModule vs, VkShaderModule ps )
+{
+	Raster g;
+	VkAttachmentDescription at[3] {};
+	VkAttachmentReference cr[3];
+	VkImageView views[3];
+	for ( uint32_t k = 0; k < 3; k++ ) {
+		at[k].format = VK_FORMAT_R16G16B16A16_SFLOAT;
+		at[k].samples = VK_SAMPLE_COUNT_1_BIT;
+		at[k].loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
+		at[k].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+		at[k].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+		at[k].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+		at[k].initialLayout = at[k].finalLayout = VK_IMAGE_LAYOUT_GENERAL;
+		cr[k] = { k, VK_IMAGE_LAYOUT_GENERAL };
+		views[k] = outs[k].v;
+	}
+	VkSubpassDescription sp {};
+	sp.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+	sp.colorAttachmentCount = 3;
+	sp.pColorAttachments = cr;
+	VkRenderPassCreateInfo rpi { VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO };
+	rpi.attachmentCount = 3;
+	rpi.pAttachments = at;
+	rpi.subpassCount = 1;
+	rpi.pSubpasses = &sp;
+	if ( vkCreateRenderPass( dev, &rpi, nullptr, &g.rp ) != VK_SUCCESS )
+		return Raster();
+	VkFramebufferCreateInfo fbi { VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO };
+	fbi.renderPass = g.rp;
+	fbi.attachmentCount = 3;
+	fbi.pAttachments = views;
+	fbi.width = uint32_t( W );
+	fbi.height = uint32_t( H );
+	fbi.layers = 1;
+	if ( vkCreateFramebuffer( dev, &fbi, nullptr, &g.fb ) != VK_SUCCESS )
+		return Raster();
+	VkPipelineShaderStageCreateInfo st[2] = {
+		{ VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, nullptr, 0, VK_SHADER_STAGE_VERTEX_BIT, vs, "vs", nullptr },
+		{ VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, nullptr, 0, VK_SHADER_STAGE_FRAGMENT_BIT, ps, "ps", nullptr } };
+	VkPipelineVertexInputStateCreateInfo vin { VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO };
+	VkPipelineInputAssemblyStateCreateInfo ia { VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO };
+	ia.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+	VkViewport vp { 0, 0, float( W ), float( H ), 0, 1 };
+	VkRect2D sc { { 0, 0 }, { uint32_t( W ), uint32_t( H ) } };
+	VkPipelineViewportStateCreateInfo vps { VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO };
+	vps.viewportCount = 1;
+	vps.pViewports = &vp;
+	vps.scissorCount = 1;
+	vps.pScissors = &sc;
+	VkPipelineRasterizationStateCreateInfo rs { VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO };
+	rs.polygonMode = VK_POLYGON_MODE_FILL;
+	rs.cullMode = VK_CULL_MODE_NONE;
+	rs.lineWidth = 1.0f;
+	VkPipelineMultisampleStateCreateInfo ms { VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO };
+	ms.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+	VkPipelineColorBlendAttachmentState cba[3] {};
+	cba[0].colorWriteMask = cba[1].colorWriteMask = cba[2].colorWriteMask = 0xF;
+	VkPipelineColorBlendStateCreateInfo cb { VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO };
+	cb.attachmentCount = 3;
+	cb.pAttachments = cba;
+	VkGraphicsPipelineCreateInfo gpc { VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO };
+	gpc.stageCount = 2;
+	gpc.pStages = st;
+	gpc.pVertexInputState = &vin;
+	gpc.pInputAssemblyState = &ia;
+	gpc.pViewportState = &vps;
+	gpc.pRasterizationState = &rs;
+	gpc.pMultisampleState = &ms;
+	gpc.pColorBlendState = &cb;
+	gpc.layout = pipeLayout;
+	gpc.renderPass = g.rp;
+	vkCreateGraphicsPipelines( dev, VK_NULL_HANDLE, 1, &gpc, nullptr, &g.pipe );
+	return g;
 }
 
 static VkCommandBuffer newCb()
@@ -278,6 +373,10 @@ int main( int argc, char ** argv )
 		name.pop_back();
 	const std::string parent = name.substr( 0, name.find_last_of( "/\\" ) + 1 );
 	name = name.substr( name.find_last_of( "/\\" ) + 1 );
+	const char * rasterVs = std::getenv( "TAAMATCH_RASTER" );
+	raster = rasterVs && rasterVs[0];
+	if ( raster )
+		name += " raster";
 	Job job {};
 	std::string input;
 	if ( !readJob( dir + "/job.txt", job, input ) ) {
@@ -346,7 +445,7 @@ int main( int argc, char ** argv )
 	vkGetPhysicalDeviceQueueFamilyProperties( phys, &nq, qf.data() );
 	family = UINT32_MAX;
 	const char * fam = std::getenv( "TAAMATCH_GRAPHICS_QUEUE" );	// 1: the graphics family (timing comparison)
-	for ( uint32_t i = 0; i < nq && fam && fam[0] == '1'; i++ )
+	for ( uint32_t i = 0; i < nq && ( raster || ( fam && fam[0] == '1' ) ); i++ )
 		if ( qf[i].queueFlags & VK_QUEUE_GRAPHICS_BIT ) {
 			family = i;
 			break;
@@ -382,13 +481,15 @@ int main( int argc, char ** argv )
 	LOADD( vkCmdDispatch ); LOADD( vkQueueSubmit ); LOADD( vkQueueWaitIdle ); LOADD( vkCmdPipelineBarrier );
 	LOADD( vkCmdCopyBufferToImage ); LOADD( vkCmdCopyImageToBuffer ); LOADD( vkCreateQueryPool ); LOADD( vkCmdResetQueryPool );
 	LOADD( vkCmdWriteTimestamp ); LOADD( vkGetQueryPoolResults );
+	LOADD( vkCreateGraphicsPipelines ); LOADD( vkCreateRenderPass ); LOADD( vkCreateFramebuffer ); LOADD( vkCmdBeginRenderPass );
+	LOADD( vkCmdEndRenderPass ); LOADD( vkCmdDraw );
 	vkGetDeviceQueue( dev, family, 0, &queue );
 	if ( !makeLayout() ) {
 		std::printf( "TAAMATCH %s FAIL (layout)\n", name.c_str() );
 		return 2;
 	}
-	const VkPipeline pipe = makePipe( spv );
-	if ( !pipe ) {
+	const VkPipeline pipe = raster ? VK_NULL_HANDLE : makePipe( spv );
+	if ( !raster && !pipe ) {
 		std::printf( "TAAMATCH %s FAIL (pipeline)\n", name.c_str() );
 		return 2;
 	}
@@ -401,6 +502,15 @@ int main( int argc, char ** argv )
 	Img iVel = makeImg( W, H, VK_FORMAT_R32G32_SFLOAT, false ), iDepth = makeImg( W, H, VK_FORMAT_R32_SFLOAT, false );
 	Img out[3] = { makeImg( W, H, F16, true ), makeImg( W, H, F16, true ), makeImg( W, H, F16, true ) };
 	Img * all[10] = { &iCur, &iHist, &iLock, &iMask, &iMv, &iVel, &iDepth, &out[0], &out[1], &out[2] };
+	Raster rp;
+	if ( raster ) {
+		const std::vector<uint32_t> vsSpv = readSpv( rasterVs );
+		const VkShaderModule vs = vsSpv.empty() ? VK_NULL_HANDLE : module( vsSpv ), ps = module( spv );
+		if ( !vs || !ps || ( rp = makeRaster( out, W, H, vs, ps ) ).pipe == VK_NULL_HANDLE ) {
+			std::printf( "TAAMATCH %s FAIL (raster pipeline)\n", name.c_str() );
+			return 2;
+		}
+	}
 	{
 		VkCommandBuffer cb = newCb();
 		VkCommandBufferBeginInfo bi { VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
@@ -472,13 +582,26 @@ int main( int argc, char ** argv )
 		vkBeginCommandBuffer( run, &bi );
 		vkCmdResetQueryPool( run, qp, 0, 2 );
 		vkCmdWriteTimestamp( run, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, qp, 0 );
-		vkCmdBindPipeline( run, VK_PIPELINE_BIND_POINT_COMPUTE, pipe );
-		vkCmdBindDescriptorSets( run, VK_PIPELINE_BIND_POINT_COMPUTE, pipeLayout, 0, 1, &set, 0, nullptr );
-		vkCmdPushConstants( run, pipeLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof( Job ), &job );
-		int gx = 8, gy = 8;	// the kernel's numthreads; TAAMATCH_GROUP=<x>x<y> for a scratch variant
-		if ( const char * g = std::getenv( "TAAMATCH_GROUP" ) )
-			std::sscanf( g, "%dx%d", &gx, &gy );
-		vkCmdDispatch( run, uint32_t( ( W + gx - 1 ) / gx ), uint32_t( ( H + gy - 1 ) / gy ), 1 );
+		if ( raster ) {
+			VkRenderPassBeginInfo rb { VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO };
+			rb.renderPass = rp.rp;
+			rb.framebuffer = rp.fb;
+			rb.renderArea = { { 0, 0 }, { uint32_t( W ), uint32_t( H ) } };
+			vkCmdBeginRenderPass( run, &rb, VK_SUBPASS_CONTENTS_INLINE );
+			vkCmdBindPipeline( run, VK_PIPELINE_BIND_POINT_GRAPHICS, rp.pipe );
+			vkCmdBindDescriptorSets( run, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeLayout, 0, 1, &set, 0, nullptr );
+			vkCmdPushConstants( run, pipeLayout, kStages, 0, sizeof( Job ), &job );
+			vkCmdDraw( run, 3, 1, 0, 0 );
+			vkCmdEndRenderPass( run );
+		} else {
+			vkCmdBindPipeline( run, VK_PIPELINE_BIND_POINT_COMPUTE, pipe );
+			vkCmdBindDescriptorSets( run, VK_PIPELINE_BIND_POINT_COMPUTE, pipeLayout, 0, 1, &set, 0, nullptr );
+			vkCmdPushConstants( run, pipeLayout, kStages, 0, sizeof( Job ), &job );
+			int gx = 8, gy = 8;	// the kernel's numthreads; TAAMATCH_GROUP=<x>x<y> for a scratch variant
+			if ( const char * g = std::getenv( "TAAMATCH_GROUP" ) )
+				std::sscanf( g, "%dx%d", &gx, &gy );
+			vkCmdDispatch( run, uint32_t( ( W + gx - 1 ) / gx ), uint32_t( ( H + gy - 1 ) / gy ), 1 );
+		}
 		vkCmdWriteTimestamp( run, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, qp, 1 );
 		vkEndCommandBuffer( run );
 	}

@@ -19,7 +19,7 @@ void main( uint3 id : SV_DispatchThreadID )
 	const float2 vn = PfxT2.Load( int3( X / j.i.x, 0 ) ).xy * 0.5f;
 	const float ln = length( vn );
 	if ( ln < 0.5f ) {
-		PfxOut0[id.xy] = cX;
+		PFX_STORE0( id.xy, cX );
 		return;
 	}
 	const float2 vs = vn * ( ( ln + 0.5f ) / ln );
@@ -45,5 +45,5 @@ void main( uint3 id : SV_DispatchThreadID )
 		wsum += a;
 		sum += a * PfxT0.Load( int3( Y, 0 ) );
 	}
-	PfxOut0[id.xy] = sum / wsum;	// alpha: wsum / wsum, 1 or 1 - 1 ulp by either side's divide (the gate's "gather" rule)
+	PFX_STORE0( id.xy, sum / wsum );	// alpha: wsum / wsum, 1 or 1 - 1 ulp by either side's divide (the gate's "gather" rule)
 }

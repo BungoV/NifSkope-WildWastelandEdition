@@ -3,8 +3,8 @@
 # whole) on the same inputs, every mode, per sample. bash tests/vkframe/tonemap.sh <out dir> [<WW_CELL_HDR_DUMP .hdr>]
 # Needs MSYS2 UCRT64 g++ (Vulkan headers), DXC (DXC= to override) and python with numpy.
 # Each job runs the compute kernel and the fragment pass (tonemap_raster.hlsl, the way GL draws it).
-# Green: every job's compute TONEMATCH EXACT or BOUND (tonemapmatch.cpp); the fragment pass's verdict is printed and
-# counted, not gated (modes 2 / 3 differ up to 3 levels on this driver: plan.md P6). Red TONEMAP_RED (no LUT) must FAIL job real_A
+# Green: every job's TONEMATCH EXACT or BOUND, compute and fragment pass both (tonemapmatch.cpp's return code gates both;
+# TONEMATCH_VKVS=1 also diffs the two Vulkan routes float by float). Red TONEMAP_RED (no LUT) must FAIL job real_A
 # both ways. Then the floor: TONEMAP_NO_WORK (load + store only) both ways on real_A, timed (its compare fails by design).
 # Last line: `VKFRAME TONEMAP GATE OK` or `... FAILED`.
 set -u
@@ -40,7 +40,7 @@ for j in real_A real_B real_C syn_A syn_B syn_C syn_D syn_E syn_F; do
 	grep -E "^(time|tone |TONEMATCH|no VK)" "green_$j.txt"
 	[ $g -eq 0 ] || { echo "GREEN $j FAILED"; tail -8 "green_$j.txt"; rc=1; }
 done
-echo "raster route: $(cat green_*.txt | grep -c "raster FAIL") of 9 jobs FAIL the match (reported, not gated)"
+echo "raster route: $(cat green_*.txt | grep -cE "raster (EXACT|BOUND)") of 9 jobs match"
 [ -f jobs/real_A/gl_ms.txt ] && echo "GL real_A: $(tr '\n' ' ' < jobs/real_A/gl_ms.txt)"
 ./tonemapmatch.exe jobs/real_A tonemap_red.spv gen_vs.spv gen_ps.spv raster_vs.spv raster_red.spv unpack.spv > red.txt
 echo "red TONEMAP_RED: $(grep TONEMATCH red.txt | tr '\n' ' ')"

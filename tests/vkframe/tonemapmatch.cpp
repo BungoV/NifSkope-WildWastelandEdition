@@ -987,7 +987,7 @@ int main( int argc, char ** argv )
 	};
 	const uint32_t sentinel = 0xC0E00000u;	// -7.0f
 	auto compare = [&]( const std::vector<uint32_t> & v, const std::string & label ) {
-		size_t diff = 0, diff8 = 0, kept = 0, sentinelMiss = 0;
+		size_t diff = 0, diff8 = 0, kept = 0, sentinelMiss = 0, big = 0;
 		long long maxU = 0;
 		int max8 = 0;
 		for ( size_t i = 0; i < v.size(); i++ ) {
@@ -1007,6 +1007,16 @@ int main( int argc, char ** argv )
 			diff++;
 			maxU = std::max( maxU, u );
 			const int d8 = std::abs( lvl( v[i] ) - lvl( gp[i] ) );
+			if ( d8 > 1 && big < 8 ) {
+				float a, b, cpt;
+				std::memcpy( &a, &v[i], 4 );
+				std::memcpy( &b, &gp[i], 4 );
+				std::memcpy( &cpt, &vk[i], 4 );
+				const size_t px = i / 4;
+				std::printf( "big%s x %zu s %zu y %zu c %zu: vk %.9g gl %.9g compute %.9g (%d levels)\n", label.c_str(),
+					( px % ( size_t( W ) * S ) ) / S, px % S, px / ( size_t( W ) * S ), i % 4, a, b, cpt, d8 );
+				big++;
+			}
 			diff8 += d8 != 0;
 			max8 = std::max( max8, d8 );
 		}
@@ -1023,9 +1033,28 @@ int main( int argc, char ** argv )
 				bound ? "BOUND" : "FAIL", diff, maxU, diff8, max8 );
 		return diff == 0 || bound;
 	};
-	// the fragment pass's verdict is printed, not gated: it is not a match yet (modes 2 / 3 up to 3 levels, plan.md P6)
+	// TONEMATCH_VKVS=1: the fragment pass against the kernel float by float (a TONE_PROBE build writes one intermediate)
+	if ( raster && std::getenv( "TONEMATCH_VKVS" ) ) {
+		size_t d = 0;
+		long long mu = 0;
+		for ( size_t i = 0; i < vk.size(); i++ ) {
+			const long long u = ulps32( vk[i], vkR[i] );
+			if ( !u )
+				continue;
+			if ( d < 6 ) {
+				float a, b;
+				std::memcpy( &a, &vk[i], 4 );
+				std::memcpy( &b, &vkR[i], 4 );
+				const size_t px = i / 4;
+				std::printf( "vkvs x %zu s %zu y %zu c %zu: compute %.9g raster %.9g (%lld ulp)\n", ( px % ( size_t( W ) * S ) ) / S,
+					px % S, px / ( size_t( W ) * S ), i % 4, a, b, u );
+			}
+			d++;
+			mu = std::max( mu, u );
+		}
+		std::printf( "VKVS %s: %zu of %zu floats differ, max %lld ulp\n", name.c_str(), d, vk.size(), mu );
+	}
 	const bool ok = compare( vk, "" );
-	if ( raster )
-		compare( vkR, " raster" );
-	return ok ? 0 : 1;
+	const bool rasterOk = !raster || compare( vkR, " raster" );
+	return ok && rasterOk ? 0 : 1;
 }

@@ -21,5 +21,5 @@ void main( uint3 id : SV_DispatchThreadID )
 		const float2 off = j.i.w == 1 ? float2( o, 0.0f ) : float2( 0.0f, o );
 		acc = PfxT0.SampleLevel( PfxPoint, v1 + off, 0.0f ) * F4FX_BlurWeights[row][j.i.z + t] + acc;
 	}
-	PfxOut0[id.xy] = acc;
+	PFX_STORE0( id.xy, acc );
 }

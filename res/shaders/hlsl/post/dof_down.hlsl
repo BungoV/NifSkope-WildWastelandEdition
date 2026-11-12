@@ -15,5 +15,5 @@ void main( uint3 id : SV_DispatchThreadID )
 	taps[3].z = 0.0f;
 #endif
 	const float2 v1 = ( float2( id.xy ) + 0.5f ) / float2( size );
-	PfxOut0[id.xy] = float4( F4FX_DofDown( PfxT0, PfxLinear, v1, j.c[0], j.c[1], taps ), j.c[1].z );
+	PFX_STORE0( id.xy, float4( F4FX_DofDown( PfxT0, PfxLinear, v1, j.c[0], j.c[1], taps ), j.c[1].z ) );
 }

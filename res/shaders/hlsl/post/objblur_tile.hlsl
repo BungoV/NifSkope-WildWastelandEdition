@@ -36,5 +36,5 @@ void main( uint3 id : SV_DispatchThreadID )
 			for ( int x = -1; x <= 1; x++ )
 				F4FX_ObjBlurLonger( PfxT0.Load( int3( clamp( t + int2( x, y ), int2( 0, 0 ), sz - 1 ), 0 ) ).xy, best, bl );
 	}
-	PfxOut0[id.xy] = best;
+	PFX_STORE0( id.xy, best );
 }

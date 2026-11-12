@@ -39,5 +39,5 @@ void main( uint3 id : SV_DispatchThreadID )
 #endif
 		}
 	}
-	PfxOut0[id.xy] = float4( acc, F4FX_LensCoc( sky ? -1.0f : zn, s1, j.c[0], j.c[1], j.c[2] ) );
+	PFX_STORE0( id.xy, float4( acc, F4FX_LensCoc( sky ? -1.0f : zn, s1, j.c[0], j.c[1], j.c[2] ) ) );
 }

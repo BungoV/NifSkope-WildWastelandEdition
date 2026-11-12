@@ -77,9 +77,9 @@ void main( uint3 id : SV_DispatchThreadID )
 	rr = L * rr;
 	if ( rr < 0.001f ) {
 #ifdef MBLUR_FUSE
-		PfxOut0[id.xy] = DofTexel( int2( id.xy ), size );
+		PFX_STORE0( id.xy, DofTexel( int2( id.xy ), size ) );
 #else
-		PfxOut0[id.xy] = PfxT0.SampleLevel( PfxLinear, g, 0.0f );
+		PFX_STORE0( id.xy, PfxT0.SampleLevel( PfxLinear, g, 0.0f ) );
 #endif
 		return;
 	}
@@ -108,5 +108,5 @@ void main( uint3 id : SV_DispatchThreadID )
 	ws = w3 + ws;
 	col = ColorAt( F4FX_MbV( p3 ), size ) * w3 + col;
 	ws = ws + 0.001f;
-	PfxOut0[id.xy] = float4( col / ws, 1.0f );
+	PFX_STORE0( id.xy, float4( col / ws, 1.0f ) );
 }

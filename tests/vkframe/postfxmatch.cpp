@@ -8,6 +8,9 @@
 //             cmp <image> <gl file> <ulp1|step|gather>
 // Prints a line per compare, with `time` the per-pass GPU ms (timestamps, median of 32 after 0.5 s of warm-up chains) beside
 // gl_ms.txt, then `POSTFXMATCH <job> EXACT|BOUND (...)|FAIL (...)`. Exit 0 for EXACT or BOUND.
+// POSTFXMATCH_RASTER=1: every pass as a fragment pass the way GL draws it (the kernel's PFX_RASTER build <spv>_ps.spv beside
+// pfx_vs.spv; colour attachments in the chain's formats, GENERAL, a graphics queue); =8 also puts the last pass's out0 in
+// RGBA8 (the app's LDR target; that image is not compared).
 #define VK_NO_PROTOTYPES
 #include <vulkan/vulkan.h>
 #include <windows.h>
@@ -33,6 +36,8 @@ VKF( vkAllocateCommandBuffers ); VKF( vkBeginCommandBuffer ); VKF( vkEndCommandB
 VKF( vkCmdBindDescriptorSets ); VKF( vkCmdPushConstants ); VKF( vkCmdDispatch ); VKF( vkQueueSubmit ); VKF( vkQueueWaitIdle );
 VKF( vkCmdPipelineBarrier ); VKF( vkCmdCopyBufferToImage ); VKF( vkCmdCopyImageToBuffer ); VKF( vkCreateQueryPool );
 VKF( vkCmdResetQueryPool ); VKF( vkCmdWriteTimestamp ); VKF( vkGetQueryPoolResults );
+VKF( vkCreateGraphicsPipelines ); VKF( vkCreateRenderPass ); VKF( vkCreateFramebuffer ); VKF( vkCmdBeginRenderPass );
+VKF( vkCmdEndRenderPass ); VKF( vkCmdDraw );
 
 static VkDevice dev;
 static VkQueue queue;
@@ -83,11 +88,13 @@ static Buf makeBuf( size_t n )
 	return B;
 }
 
-struct Img { VkImage i = VK_NULL_HANDLE; VkDeviceMemory m = VK_NULL_HANDLE; VkImageView v = VK_NULL_HANDLE; int w = 0, h = 0, tb = 8; bool half = true; std::string file; };
+struct Img { VkImage i = VK_NULL_HANDLE; VkDeviceMemory m = VK_NULL_HANDLE; VkImageView v = VK_NULL_HANDLE; int w = 0, h = 0, tb = 8; bool half = true; VkFormat f = VK_FORMAT_UNDEFINED; std::string file; };
 
 struct Fmt { const char * name; VkFormat f; int tb; bool half; };
 static const Fmt kFmts[] = { { "rgba16f", VK_FORMAT_R16G16B16A16_SFLOAT, 8, true }, { "rg16f", VK_FORMAT_R16G16_SFLOAT, 4, true },
 	{ "r16f", VK_FORMAT_R16_SFLOAT, 2, true }, { "r32f", VK_FORMAT_R32_SFLOAT, 4, false }, { "rg32f", VK_FORMAT_R32G32_SFLOAT, 8, false } };
+static const Fmt kRgba8 = { "rgba8", VK_FORMAT_R8G8B8A8_UNORM, 4, false };
+static int rasterMode = 0;	// POSTFXMATCH_RASTER
 
 static Img makeImg( int w, int h, const Fmt & fm )
 {
@@ -96,6 +103,7 @@ static Img makeImg( int w, int h, const Fmt & fm )
 	I.h = h;
 	I.tb = fm.tb;
 	I.half = fm.half;
+	I.f = fm.f;
 	VkImageCreateInfo ci { VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO };
 	ci.imageType = VK_IMAGE_TYPE_2D;
 	ci.format = fm.f;
@@ -104,7 +112,8 @@ static Img makeImg( int w, int h, const Fmt & fm )
 	ci.arrayLayers = 1;
 	ci.samples = VK_SAMPLE_COUNT_1_BIT;
 	ci.tiling = VK_IMAGE_TILING_OPTIMAL;
-	ci.usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_STORAGE_BIT;
+	ci.usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_STORAGE_BIT
+		| ( rasterMode ? VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT : 0 );
 	ci.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
 	vkCreateImage( dev, &ci, nullptr, &I.i );
 	VkMemoryRequirements r;
@@ -129,6 +138,7 @@ static VkDescriptorPool pool;
 static VkCommandPool cpool;
 static VkSampler samplers[2];	// linear, point
 static const uint32_t kBindings = 9;
+static const VkShaderStageFlags kStages = VK_SHADER_STAGE_COMPUTE_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
 
 // PostFxBindingsVk.hlsli: 0-4 sampled, 5 linear, 6 point, 7-8 storage
 static VkDescriptorType bindingType( uint32_t i )
@@ -140,13 +150,13 @@ static bool makeLayout( uint32_t sets )
 {
 	VkDescriptorSetLayoutBinding b[kBindings];
 	for ( uint32_t i = 0; i < kBindings; i++ )
-		b[i] = VkDescriptorSetLayoutBinding { i, bindingType( i ), 1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr };
+		b[i] = VkDescriptorSetLayoutBinding { i, bindingType( i ), 1, kStages, nullptr };
 	VkDescriptorSetLayoutCreateInfo li { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
 	li.bindingCount = kBindings;
 	li.pBindings = b;
 	if ( vkCreateDescriptorSetLayout( dev, &li, nullptr, &setLayout ) != VK_SUCCESS )
 		return false;
-	VkPushConstantRange pr { VK_SHADER_STAGE_COMPUTE_BIT, 0, 128 };
+	VkPushConstantRange pr { kStages, 0, 128 };
 	VkPipelineLayoutCreateInfo pi { VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO };
 	pi.setLayoutCount = 1;
 	pi.pSetLayouts = &setLayout;
@@ -193,6 +203,100 @@ static VkPipeline makePipe( const std::vector<uint8_t> & spv )
 	return p;
 }
 
+// a pass as a fragment pass: a full-screen triangle into out0 (and out1), LOAD + STORE, GENERAL throughout
+struct Raster { VkRenderPass rp = VK_NULL_HANDLE; VkFramebuffer fb = VK_NULL_HANDLE; VkPipeline pipe = VK_NULL_HANDLE; };
+
+static Raster makeRaster( const std::vector<const Img *> & outs, VkShaderModule vs, VkShaderModule ps )
+{
+	Raster g;
+	const uint32_t n = uint32_t( outs.size() );
+	VkAttachmentDescription at[2] {};
+	VkAttachmentReference cr[2];
+	VkImageView views[2];
+	for ( uint32_t k = 0; k < n; k++ ) {
+		at[k].format = outs[k]->f;
+		at[k].samples = VK_SAMPLE_COUNT_1_BIT;
+		at[k].loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
+		at[k].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+		at[k].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+		at[k].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+		at[k].initialLayout = at[k].finalLayout = VK_IMAGE_LAYOUT_GENERAL;
+		cr[k] = { k, VK_IMAGE_LAYOUT_GENERAL };
+		views[k] = outs[k]->v;
+	}
+	VkSubpassDescription sp {};
+	sp.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+	sp.colorAttachmentCount = n;
+	sp.pColorAttachments = cr;
+	VkRenderPassCreateInfo rpi { VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO };
+	rpi.attachmentCount = n;
+	rpi.pAttachments = at;
+	rpi.subpassCount = 1;
+	rpi.pSubpasses = &sp;
+	if ( vkCreateRenderPass( dev, &rpi, nullptr, &g.rp ) != VK_SUCCESS )
+		return Raster();
+	const int W = outs[0]->w, H = outs[0]->h;
+	VkFramebufferCreateInfo fbi { VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO };
+	fbi.renderPass = g.rp;
+	fbi.attachmentCount = n;
+	fbi.pAttachments = views;
+	fbi.width = uint32_t( W );
+	fbi.height = uint32_t( H );
+	fbi.layers = 1;
+	if ( vkCreateFramebuffer( dev, &fbi, nullptr, &g.fb ) != VK_SUCCESS )
+		return Raster();
+	VkPipelineShaderStageCreateInfo st[2] = {
+		{ VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, nullptr, 0, VK_SHADER_STAGE_VERTEX_BIT, vs, "vs", nullptr },
+		{ VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, nullptr, 0, VK_SHADER_STAGE_FRAGMENT_BIT, ps, "ps", nullptr } };
+	VkPipelineVertexInputStateCreateInfo vin { VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO };
+	VkPipelineInputAssemblyStateCreateInfo ia { VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO };
+	ia.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+	VkViewport vp { 0, 0, float( W ), float( H ), 0, 1 };
+	VkRect2D sc { { 0, 0 }, { uint32_t( W ), uint32_t( H ) } };
+	VkPipelineViewportStateCreateInfo vps { VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO };
+	vps.viewportCount = 1;
+	vps.pViewports = &vp;
+	vps.scissorCount = 1;
+	vps.pScissors = &sc;
+	VkPipelineRasterizationStateCreateInfo rs { VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO };
+	rs.polygonMode = VK_POLYGON_MODE_FILL;
+	rs.cullMode = VK_CULL_MODE_NONE;
+	rs.lineWidth = 1.0f;
+	VkPipelineMultisampleStateCreateInfo ms { VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO };
+	ms.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+	VkPipelineColorBlendAttachmentState cba[2] {};
+	cba[0].colorWriteMask = cba[1].colorWriteMask = 0xF;
+	VkPipelineColorBlendStateCreateInfo cb { VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO };
+	cb.attachmentCount = n;
+	cb.pAttachments = cba;
+	VkGraphicsPipelineCreateInfo gpc { VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO };
+	gpc.stageCount = 2;
+	gpc.pStages = st;
+	gpc.pVertexInputState = &vin;
+	gpc.pInputAssemblyState = &ia;
+	gpc.pViewportState = &vps;
+	gpc.pRasterizationState = &rs;
+	gpc.pMultisampleState = &ms;
+	gpc.pColorBlendState = &cb;
+	gpc.layout = pipeLayout;
+	gpc.renderPass = g.rp;
+	vkCreateGraphicsPipelines( dev, VK_NULL_HANDLE, 1, &gpc, nullptr, &g.pipe );
+	return g;
+}
+
+static VkShaderModule loadModule( const std::string & path )
+{
+	const std::vector<uint8_t> spv = readFile( path );
+	if ( spv.empty() )
+		return VK_NULL_HANDLE;
+	VkShaderModuleCreateInfo mi { VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO };
+	mi.codeSize = spv.size();
+	mi.pCode = reinterpret_cast<const uint32_t *>( spv.data() );
+	VkShaderModule m = VK_NULL_HANDLE;
+	vkCreateShaderModule( dev, &mi, nullptr, &m );
+	return m;
+}
+
 static VkCommandBuffer newCb()
 {
 	VkCommandBufferAllocateInfo ca { VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO };
@@ -237,10 +341,14 @@ int main( int argc, char ** argv )
 	}
 	const std::string chainPath = argv[1], spvDir = std::string( argv[2] ) + "/";
 	const bool timeIt = argc > 3 && std::string( argv[3] ) == "time";
+	if ( const char * r = std::getenv( "POSTFXMATCH_RASTER" ) )
+		rasterMode = std::atoi( r );
 	const std::string dir = chainPath.substr( 0, chainPath.find_last_of( "/\\" ) + 1 );
 	std::string name = dir.substr( 0, dir.size() - 1 );
 	const std::string parent = name.substr( 0, name.find_last_of( "/\\" ) + 1 );
 	name = name.substr( name.find_last_of( "/\\" ) + 1 ) + "/" + chainPath.substr( chainPath.find_last_of( "/\\" ) + 1 );
+	if ( rasterMode )
+		name += rasterMode == 8 ? " raster8" : " raster";
 	auto fail = [&]( const char * why ) {
 		std::printf( "POSTFXMATCH %s FAIL (%s)\n", name.c_str(), why );
 		return 2;
@@ -333,7 +441,8 @@ int main( int argc, char ** argv )
 	vkGetPhysicalDeviceQueueFamilyProperties( phys, &nq, qf.data() );
 	family = UINT32_MAX;
 	for ( uint32_t i = 0; family == UINT32_MAX && i < nq; i++ )
-		if ( ( qf[i].queueFlags & VK_QUEUE_COMPUTE_BIT ) && !( qf[i].queueFlags & VK_QUEUE_GRAPHICS_BIT ) && qf[i].timestampValidBits )
+		if ( rasterMode ? ( qf[i].queueFlags & VK_QUEUE_GRAPHICS_BIT ) && qf[i].timestampValidBits
+						: ( qf[i].queueFlags & VK_QUEUE_COMPUTE_BIT ) && !( qf[i].queueFlags & VK_QUEUE_GRAPHICS_BIT ) && qf[i].timestampValidBits )
 			family = i;
 	for ( uint32_t i = 0; family == UINT32_MAX && i < nq; i++ )
 		if ( qf[i].queueFlags & VK_QUEUE_COMPUTE_BIT )
@@ -362,6 +471,8 @@ int main( int argc, char ** argv )
 	LOADD( vkCmdDispatch ); LOADD( vkQueueSubmit ); LOADD( vkQueueWaitIdle ); LOADD( vkCmdPipelineBarrier );
 	LOADD( vkCmdCopyBufferToImage ); LOADD( vkCmdCopyImageToBuffer ); LOADD( vkCreateQueryPool ); LOADD( vkCmdResetQueryPool );
 	LOADD( vkCmdWriteTimestamp ); LOADD( vkGetQueryPoolResults );
+	LOADD( vkCreateGraphicsPipelines ); LOADD( vkCreateRenderPass ); LOADD( vkCreateFramebuffer ); LOADD( vkCmdBeginRenderPass );
+	LOADD( vkCmdEndRenderPass ); LOADD( vkCmdDraw );
 	vkGetDeviceQueue( dev, family, 0, &queue );
 	if ( !makeLayout( uint32_t( passes.size() ) ) )
 		return fail( "layout" );
@@ -369,9 +480,10 @@ int main( int argc, char ** argv )
 	// images, all to GENERAL; a 1x1 dummy for unbound slots
 	std::map<std::string, Img> imgs;
 	size_t maxBytes = 64;
+	const std::string ldr = rasterMode == 8 ? passes.back().out[0] : std::string();	// the LDR target in RGBA8
 	for ( const std::string & n : imgOrder ) {
 		const auto & d = imgDecl[n];
-		imgs[n] = makeImg( d.second.first, d.second.second, *d.first );
+		imgs[n] = makeImg( d.second.first, d.second.second, n == ldr ? kRgba8 : *d.first );
 		imgs[n].file = imgFile[n];
 		maxBytes = std::max( maxBytes, size_t( d.second.first ) * d.second.second * d.first->tb );
 	}
@@ -420,9 +532,23 @@ int main( int argc, char ** argv )
 	std::map<std::string, VkPipeline> pipes;
 	std::vector<VkDescriptorSet> sets( passes.size() );
 	std::vector<std::vector<uint8_t>> pcs( passes.size() );
+	std::vector<Raster> rasters( passes.size() );
 	for ( size_t k = 0; k < passes.size(); k++ ) {
 		const Pass & p = passes[k];
-		if ( !pipes.count( p.spv ) ) {
+		if ( rasterMode ) {
+			static const VkShaderModule vs = loadModule( spvDir + "pfx_vs.spv" );
+			const VkShaderModule ps = loadModule( spvDir + p.spv.substr( 0, p.spv.size() - 4 ) + "_ps.spv" );
+			if ( !imgs.count( p.out[0] ) || ( p.out[1] != "-" && !imgs.count( p.out[1] ) ) )
+				return fail( "pass target" );
+			std::vector<const Img *> outs { &imgs[p.out[0]] };
+			if ( p.out[1] != "-" )
+				outs.push_back( &imgs[p.out[1]] );
+			if ( vs == VK_NULL_HANDLE || ps == VK_NULL_HANDLE
+				|| ( rasters[k] = makeRaster( outs, vs, ps ) ).pipe == VK_NULL_HANDLE ) {
+				std::printf( "pass %s: raster spv for %s missing or no pipeline\n", p.label.c_str(), p.spv.c_str() );
+				return fail( "raster pipeline" );
+			}
+		} else if ( !pipes.count( p.spv ) ) {
 			const std::vector<uint8_t> spv = readFile( spvDir + p.spv );
 			if ( spv.empty() || ( pipes[p.spv] = makePipe( spv ) ) == VK_NULL_HANDLE ) {
 				std::printf( "pass %s: spv %s missing or no pipeline\n", p.label.c_str(), p.spv.c_str() );
@@ -472,15 +598,33 @@ int main( int argc, char ** argv )
 	vkCmdWriteTimestamp( run, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, qp, 0 );
 	for ( size_t k = 0; k < passes.size(); k++ ) {
 		const Img & o = imgs[passes[k].out[0]];
-		vkCmdBindPipeline( run, VK_PIPELINE_BIND_POINT_COMPUTE, pipes[passes[k].spv] );
-		vkCmdBindDescriptorSets( run, VK_PIPELINE_BIND_POINT_COMPUTE, pipeLayout, 0, 1, &sets[k], 0, nullptr );
-		vkCmdPushConstants( run, pipeLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, 128, pcs[k].data() );
-		vkCmdDispatch( run, uint32_t( ( o.w + 7 ) / 8 ), uint32_t( ( o.h + 7 ) / 8 ), 1 );
 		VkMemoryBarrier mb { VK_STRUCTURE_TYPE_MEMORY_BARRIER };
-		mb.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-		mb.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT | VK_ACCESS_TRANSFER_READ_BIT;
-		vkCmdPipelineBarrier( run, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_TRANSFER_BIT,
-			0, 1, &mb, 0, nullptr, 0, nullptr );
+		if ( rasterMode ) {
+			VkRenderPassBeginInfo rb { VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO };
+			rb.renderPass = rasters[k].rp;
+			rb.framebuffer = rasters[k].fb;
+			rb.renderArea = { { 0, 0 }, { uint32_t( o.w ), uint32_t( o.h ) } };
+			vkCmdBeginRenderPass( run, &rb, VK_SUBPASS_CONTENTS_INLINE );
+			vkCmdBindPipeline( run, VK_PIPELINE_BIND_POINT_GRAPHICS, rasters[k].pipe );
+			vkCmdBindDescriptorSets( run, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeLayout, 0, 1, &sets[k], 0, nullptr );
+			vkCmdPushConstants( run, pipeLayout, kStages, 0, 128, pcs[k].data() );
+			vkCmdDraw( run, 3, 1, 0, 0 );
+			vkCmdEndRenderPass( run );
+			mb.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+			mb.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT
+				| VK_ACCESS_TRANSFER_READ_BIT;
+			vkCmdPipelineBarrier( run, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT
+				| VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 1, &mb, 0, nullptr, 0, nullptr );
+		} else {
+			vkCmdBindPipeline( run, VK_PIPELINE_BIND_POINT_COMPUTE, pipes[passes[k].spv] );
+			vkCmdBindDescriptorSets( run, VK_PIPELINE_BIND_POINT_COMPUTE, pipeLayout, 0, 1, &sets[k], 0, nullptr );
+			vkCmdPushConstants( run, pipeLayout, kStages, 0, 128, pcs[k].data() );
+			vkCmdDispatch( run, uint32_t( ( o.w + 7 ) / 8 ), uint32_t( ( o.h + 7 ) / 8 ), 1 );
+			mb.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+			mb.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT | VK_ACCESS_TRANSFER_READ_BIT;
+			vkCmdPipelineBarrier( run, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_TRANSFER_BIT,
+				0, 1, &mb, 0, nullptr, 0, nullptr );
+		}
 		vkCmdWriteTimestamp( run, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, qp, uint32_t( k + 1 ) );
 	}
 	vkEndCommandBuffer( run );
@@ -490,6 +634,10 @@ int main( int argc, char ** argv )
 	size_t diffAll = 0, valuesAll = 0;
 	bool exact = true, ok = true;
 	for ( const Cmp & c : cmps ) {
+		if ( c.img == ldr ) {
+			std::printf( "%s: RGBA8 (POSTFXMATCH_RASTER=8), not compared\n", c.img.c_str() );
+			continue;
+		}
 		if ( !imgs.count( c.img ) || !imgs[c.img].half )
 			return fail( "compare image" );
 		const Img & x = imgs[c.img];

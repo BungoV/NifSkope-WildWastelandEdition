@@ -33,5 +33,5 @@ void main( uint3 id : SV_DispatchThreadID )
 				m = max( m, PfxT0.Load( int3( clamp( q + int2( x, y ), int2( 0, 0 ), sz - 1 ), 0 ) ).r );
 		}
 	}
-	PfxOut0[id.xy] = m;
+	PFX_STORE0( id.xy, m );
 }

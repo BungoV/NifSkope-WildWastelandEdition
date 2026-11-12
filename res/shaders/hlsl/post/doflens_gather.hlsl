@@ -22,8 +22,8 @@ void main( uint3 id : SV_DispatchThreadID )
 	const float rn = lensQ.y == 0.0f ? 0.0f : lensQ.w > 0.5f ? PfxT1.Load( int3( q / 8, 0 ) ).r : lensQ.x * 0.5f;
 	const float rk = max( rc, rn );
 	if ( rk < 0.5f ) {
-		PfxOut0[id.xy] = float4( c0.rgb, 1.0f );
-		PfxOut1[id.xy] = float4( 0.0f, 0.0f, 0.0f, 0.0f );
+		PFX_STORE0( id.xy, float4( c0.rgb, 1.0f ) );
+		PFX_STORE1( id.xy, float4( 0.0f, 0.0f, 0.0f, 0.0f ) );
 		return;
 	}
 	const float2 uc = ( float2( q ) + 0.5f ) / qs;
@@ -50,7 +50,7 @@ void main( uint3 id : SV_DispatchThreadID )
 		na += cs.rgb * d;
 		nd += d;
 	}
-	PfxOut0[id.xy] = float4( fw > 0.0001f ? fa / fw : c0.rgb, 1.0f );
+	PFX_STORE0( id.xy, float4( fw > 0.0001f ? fa / fw : c0.rgb, 1.0f ) );
 	const float a = F4FX_PostSat( nd );
-	PfxOut1[id.xy] = nd > 0.0f ? float4( na / nd * a, a ) : float4( 0.0f, 0.0f, 0.0f, 0.0f );
+	PFX_STORE1( id.xy, nd > 0.0f ? float4( na / nd * a, a ) : float4( 0.0f, 0.0f, 0.0f, 0.0f ) );
 }

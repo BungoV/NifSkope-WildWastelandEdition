@@ -57,4 +57,43 @@ bool PfxTexel( uint3 id, out uint2 size )
 	return all( id.xy < size );
 }
 
+// a kernel's stores; PFX_RASTER (tests/vkframe/postfx.sh's raster arm) builds the same kernel as a fragment pass: its main
+// becomes PfxKernel, called once a pixel by the entry ps, and the stores go to SV_Target0 / 1 (the way GL draws them)
+#ifdef PFX_RASTER
+static PFX_OUT0_TYPE PfxStore0;
+static float4 PfxStore1;
+#define PFX_STORE0( p, v ) PfxStore0 = ( v )
+#define PFX_STORE1( p, v ) PfxStore1 = ( v )
+#define main PfxKernel
+void PfxKernel( uint3 id );
+
+struct PfxPsOut
+{
+	PFX_OUT0_TYPE o0 : SV_Target0;
+#ifdef PFX_OUT1
+	float4 o1 : SV_Target1;
+#endif
+};
+
+float4 vs( uint v : SV_VertexID ) : SV_Position
+{
+	const float2 p = float2( ( v << 1 ) & 2, v & 2 );
+	return float4( p * 2.0f - 1.0f, 0.0f, 1.0f );
+}
+
+PfxPsOut ps( float4 pos : SV_Position )
+{
+	PfxKernel( uint3( uint2( pos.xy ), 0 ) );
+	PfxPsOut o;
+	o.o0 = PfxStore0;
+#ifdef PFX_OUT1
+	o.o1 = PfxStore1;
+#endif
+	return o;
+}
+#else
+#define PFX_STORE0( p, v ) PfxOut0[p] = ( v )
+#define PFX_STORE1( p, v ) PfxOut1[p] = ( v )
+#endif
+
 #endif

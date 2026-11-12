@@ -18,7 +18,7 @@ void main( uint3 id : SV_DispatchThreadID )
 	q.y = 0.0f;
 #endif
 	const float s1 = F4FX_LensFocus( PfxT2, j.c[0], j.c[1] );
-	PfxOut0[id.xy] = F4FX_LensTexel( int2( id.xy ), PfxT0, PfxT1, PfxT2, PfxT3, PfxLinear, s1, j.c[0], j.c[1], q );
+	PFX_STORE0( id.xy, F4FX_LensTexel( int2( id.xy ), PfxT0, PfxT1, PfxT2, PfxT3, PfxLinear, s1, j.c[0], j.c[1], q ) );
 #else
 	uint fw, fh;
 	PfxT0.GetDimensions( fw, fh );
@@ -30,6 +30,6 @@ void main( uint3 id : SV_DispatchThreadID )
 	const float k = F4FX_DofFactor( PfxT2.SampleLevel( PfxPoint, v1, 0.0f ).r, j.c[0], j.c[1], j.c[2], j.i.x != 0, red );
 	const float4 b = PfxT1.SampleLevel( PfxLinear, v1 * j.c[3].zw, 0.0f );
 	const float4 a = PfxT0.SampleLevel( PfxLinear, v1, 0.0f );
-	PfxOut0[id.xy] = F4FX_DofBlend( k, a, b );
+	PFX_STORE0( id.xy, F4FX_DofBlend( k, a, b ) );
 #endif
 }
