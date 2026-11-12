@@ -918,14 +918,14 @@ bool present( void * hwnd, int w, int h, bool vsync, GlProc gp, std::string & wh
 	v.vkCmdPipelineBarrier( cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0, 0, nullptr, 0, nullptr, 1, &p );
 	v.vkEndCommandBuffer( cmd );
 	const VkSemaphore waits[2] = { s.glDone, s.acquired };
-	const VkSemaphore signals[2] = { c.renderDone[idx], s.vkDone };
+	const VkSemaphore signalSems[2] = { c.renderDone[idx], s.vkDone };	// not "signals": Qt's macro (the pch)
 	si.waitSemaphoreCount = 2;
 	si.pWaitSemaphores = waits;
 	si.pWaitDstStageMask = stages;
 	si.commandBufferCount = 1;
 	si.pCommandBuffers = &cmd;
 	si.signalSemaphoreCount = 2;
-	si.pSignalSemaphores = signals;
+	si.pSignalSemaphores = signalSems;
 	if ( v.vkQueueSubmit( v.queue, 1, &si, s.fence ) != VK_SUCCESS ) {
 		why = "vkQueueSubmit (the present blit) failed";
 		c.rebuild = true;
