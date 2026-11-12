@@ -1231,8 +1231,13 @@ qint64 videoMemoryMb( qint64 * usedMb )
 /* MODULES1 (11-06): where the working set lives, once at the first full frame. Committed regions by type (private
  * <1 MB / 1-64 MB / >=64 MB, mapped files, images) with the resident share sampled through QueryWorkingSetEx (up to 64
  * pages a region, scaled), plus the process heaps' busy bytes. Private >=64 MB with little resident is driver commit. */
+/* lane EMPTY240 R6-4: build 78's frame 526 (the first full frame) held the paint thread 285.8 ms "after overlays": the
+ * HeapLock + HeapWalk over every heap block (~3M under 256 B), read as 286 ms of "tone-vrs" on the GPU. The region census
+ * now runs on a worker (VirtualQuery / QueryWorkingSetEx need no lock) and the block walk only on the red, since a walk
+ * holds every heap's lock and stops each thread that allocates. Red WW_RAMOWNERS_RED=1: the full census on the paint
+ * thread, build 78. */
 #ifdef Q_OS_WIN
-static QString ramOwnersLine()
+static QString ramOwnersLine( bool heapWalk, const QString & tail )
 {
 	static const char * kName[5] = { "private<1MB", "private1-64MB", "private>=64MB", "mapped", "image" };
 	double commit[5] = {}, res[5] = {};
@@ -1267,6 +1272,8 @@ static QString ramOwnersLine()
 	QString s = QStringLiteral( "ram owners:" );
 	for ( int b = 0; b < 5; b++ )
 		s += QString::asprintf( " %s commit=%.0f ws~%.0f MB", kName[b], commit[b] / 1048576.0, res[b] / 1048576.0 );
+	if ( !heapWalk )
+		return s + tail;
 	PROCESS_HEAP_ENTRY e;
 	double busy = 0;
 	// MODULES1 p18: busy heap bytes by block size (who owns the heaps: many small = document items, big = arrays)
@@ -1289,11 +1296,7 @@ static QString ramOwnersLine()
 			}
 		HeapUnlock( heaps[i] );
 	}
-	double trimMs = 0.0;
-	const unsigned long long trims = (unsigned long long)FileBuffer::mappedViewTrims( &trimMs );
-	s += QString::asprintf( " | heaps %lu busy=%.0f MB | staged=%.0f MB direct=%.0f MB | archive trims=%llu (max %.1f ms)",
-		(unsigned long)nh, busy / 1048576.0, double( gpuStageCounts().stagedBytes.load() ) / 1048576.0,
-		double( gpuStageCounts().directBytes.load() ) / 1048576.0, trims, trimMs );
+	s += QString::asprintf( " | heaps %lu busy=%.0f MB", (unsigned long)nh, busy / 1048576.0 ) + tail;
 	static const char * kSz[6] = { "<256B", "<4K", "<64K", "<1M", "<16M", ">=16M" };
 	s += QStringLiteral( " | heap blocks" );
 	for ( int k = 0; k < 6; k++ )
@@ -1376,7 +1379,25 @@ void stream1PaintEnd( bool ready, double paintMs )
 				(long long)( cc.made - l.made0 ), (long long)made, (long long)madeBytes );
 			std::fprintf( stderr, "%s\n", qPrintable( stream1MemLine( "first full frame" ) ) );
 #ifdef Q_OS_WIN
-			std::fprintf( stderr, "%s\n", qPrintable( ramOwnersLine() ) );
+			{	// lane EMPTY240 R6-4: the staged counts and archive trims read here, the census on a worker
+				double trimMs = 0.0;
+				const unsigned long long trims = (unsigned long long)FileBuffer::mappedViewTrims( &trimMs );
+				const QString tail = QString::asprintf( " | staged=%.0f MB direct=%.0f MB | archive trims=%llu (max %.1f ms)",
+					double( gpuStageCounts().stagedBytes.load() ) / 1048576.0,
+					double( gpuStageCounts().directBytes.load() ) / 1048576.0, trims, trimMs );
+				if ( wwEnvInt( "WW_RAMOWNERS_RED" ) == 1 ) {
+					const qint64 at = nowNs();
+					const QString line = ramOwnersLine( true, tail );
+					std::fprintf( stderr, "%s | census %.1f ms on the paint thread (WW_RAMOWNERS_RED=1, build 78)\n",
+						qPrintable( line ), double( nowNs() - at ) * 1e-6 );
+				} else
+					std::thread( [tail]() {
+						const qint64 at = nowNs();
+						const QString line = ramOwnersLine( false, tail );
+						std::fprintf( stderr, "%s | census %.1f ms on a worker, heap block walk off (WW_RAMOWNERS_RED=1 = on the "
+							"paint thread with the walk, build 78)\n", qPrintable( line ), double( nowNs() - at ) * 1e-6 );
+					} ).detach();
+			}
 #endif
 		}
 		return;
