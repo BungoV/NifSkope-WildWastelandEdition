@@ -3846,10 +3846,10 @@ static void wwGpuFrameFinish()
 	const PassTime::CacheCounts & cc = PassTime::cacheCounts();
 	std::fprintf( stderr, "hardware use: GPU busy %.0f %% (GL frames' GPU time over the wall), draw thread busy %.0f %%, "
 		"workers busy %.1f / %d (Qt's pool), %.1f fps; RAM cache: none yet (5c open), GPU geometry cache %lld / %lld MB; "
-		"async queue: none (the traces share the graphics family; lane VKCOMPUTE1), overlapped 0 ms\n",
+		"%s\n",
 		std::min( 100.0, 100.0 * g.hwGpuMs / wallMs ), std::min( 100.0, 100.0 * g.hwPaintMs / wallMs ),
 		g.hwWorkers / double( std::max( 1, g.hwFrames ) ), pool->maxThreadCount(), 1000.0 * double( g.hwFrames ) / wallMs,
-		(long long)( cc.usedBytes >> 20 ), (long long)( cc.maxBytes >> 20 ) );
+		(long long)( cc.usedBytes >> 20 ), (long long)( cc.maxBytes >> 20 ), qPrintable( rtddgiAsyncUse( g.hwFrames ) ) );
 	g.hwWin.start();
 	g.hwGpuMs = g.hwPaintMs = g.hwWorkers = 0.0;
 	g.hwFrames = 0;

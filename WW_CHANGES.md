@@ -16,6 +16,9 @@ Changed, not checked live (no build, no window). Offline: tests/vkasync (family 
 - **Lines.** `vk async: device <name> queue family F: <why>` at the device's creation; the DDGI census's sync part
   ends `vk async: qF async|shared with graphics, D of S waits at the reader`.
 - Air rays (airrays_vk.inc, a CPU fence wait per step) are not changed here (MODULES1's file).
+- **Item 4.** The `hardware use:` line (src/glview.cpp, EMPTY240's) ends `async queue: qF async|shared with graphics,
+  overlapped up to X ms a frame (B of S submits ran beside GL)`: X = the device ms of the DDGI / ReSTIR submits whose
+  GL wait was deferred (rtddgicell.cpp rtddgiAsyncUse), an upper bound of the true overlap.
 
 ## EMPTY240 (2026-11-12): frames no longer wait for a 6 ms timer; vsync ships off; the frame wall line
 

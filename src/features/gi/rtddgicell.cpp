@@ -566,6 +566,29 @@ void refuse( Cell & c, const QString & why )
 	say( c.tag + QStringLiteral( "refused(%1)" ).arg( why ) );
 }
 
+//! lane VKCOMPUTE1 item 4: device ms of the submits GL did not wait on right after (they ran beside GL's frame)
+struct AsyncUse
+{
+	double ms = 0.0;
+	int submits = 0, beside = 0;
+};
+
+AsyncUse & asyncUse()
+{
+	static AsyncUse u;
+	return u;
+}
+
+void asyncUseAdd( bool beside, double ms )
+{
+	AsyncUse & u = asyncUse();
+	u.submits++;
+	if ( beside ) {
+		u.beside++;
+		u.ms += std::max( 0.0, ms );
+	}
+}
+
 /* lane VKCOMPUTE1: GL's wait on a submit's vkDone (a GL server wait). With a compute-only queue (bakert::asyncQueue) it
  * is owed until the first GL read of the atlas (bindOne, the cascades' copy, the debug view, a drop) or the next signal,
  * so the device runs beside GL's frame; the red WW_VKASYNC_RED=1 waits right after the submit, as before */
@@ -1467,6 +1490,7 @@ void rtddgiRestirPass( Scene * scene )
 		return;
 	}
 	G.vk.afterSubmit( bakert::asyncQueue(), [&G, &sh]() { sh.waitSem( G.semVk, 2, G.buf, 0, nullptr, nullptr ); } );   // lane VKCOMPUTE1
+	asyncUseAdd( bakert::asyncQueue(), out.ms );
 	G.ready = true;
 	G.valid = true;
 	G.history = true;
@@ -1709,6 +1733,16 @@ bool rtddgiAirRaysFrame( Scene * scene, int cols, int rows, int slices, float ne
 	return true;
 }
 
+QString rtddgiAsyncUse( int frames )
+{
+	AsyncUse & u = asyncUse();
+	const QString s = QStringLiteral( "async queue: %1, overlapped up to %2 ms a frame (%3 of %4 submits ran beside GL)" )
+		.arg( QString::fromStdString( bakert::queueInfo() ) ).arg( u.ms / double( std::max( 1, frames ) ), 0, 'f', 2 )
+		.arg( u.beside ).arg( u.submits );
+	u = AsyncUse();
+	return s;
+}
+
 QString rtddgiAirRaysEcho()
 {
 	const AirRaysGl & G = airRaysGl();
@@ -1819,6 +1853,11 @@ static void stepGlAfter( Cell & c, const RtDdgiLive & L, bool ok, bool gl )
 	if ( ok && gl && L.submitted() ) {   // every such submit signalled vkDone: GL waits on it exactly once
 		Cell * cp = &c;
 		c.vk.afterSubmit( bakert::asyncQueue(), [cp]() { glWaitVk( *cp ); } );   // lane VKCOMPUTE1: async = at the first read
+		const double * m = L.lastMs();
+		double d = 0.0;
+		for ( int i : { 0, 1, 2, 4 } )
+			d += m ? std::max( 0.0, m[i] ) : 0.0;
+		asyncUseAdd( bakert::asyncQueue(), d );   // the last finished step's device ms (one step late)
 		c.uploaded = true;
 		c.fresh = true;
 	} else if ( ok && c.interop && !gl && L.submitted() ) {
