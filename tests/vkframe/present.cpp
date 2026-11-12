@@ -5,7 +5,10 @@
 // Prints `PRESENT gl ...`, `PRESENT vk ...` (CPU ms of the swap / present call: median, p90; the frame period median),
 // `PRESENTMATCH EXACT|FAIL` (the presented swapchain image, read back in the same submit, against glReadPixels of the
 // back buffer before the present: every byte), `PRESENTMATCH RED ...` (the same compare without the y flip: must FAIL),
-// and `PRESENT GATE OK|FAILED` (vk median under 0.3 ms, EXACT, the red FAILs).
+// and `PRESENT GATE OK|FAILED` (vk median under 0.3 ms, EXACT, the red FAILs). Build 91: each signal route (0 drawing
+// thread, 1 worker GL signal, 2 worker CPU wait); the 6th argument adds a load (that many small blended quads, one draw
+// each, right after the present, while the worker runs: the next frame's passes in the view), timed as a pass is:
+// `PRESENT load (...)` prints its CPU ms (the frame wall's passes), its GPU ms, and the drawing thread's whole CPU ms.
 #define WW_VKPRESENT_NO_QT
 #include "../../src/features/vkframe/vkpresent.cpp"
 
@@ -67,6 +70,63 @@ void draw( int W, int H, int f )
 	glEnd();
 }
 
+// build 91: the passes under load. Small quads, one draw each (the CPU side of a pass), between two GL_TIMESTAMP queries
+// (a ring of 4 frames, read 4 frames late, as the view's pass timers); returns the GPU ms of frame f - 4 (-1: none yet)
+int gLoadQuads = 0;
+GLuint gStamp[8] = {};
+bool gStampMade = false;
+void( WINAPI * gGenQueries )( GLsizei, GLuint * ) = nullptr;
+void( WINAPI * gQueryCounter )( GLuint, GLenum ) = nullptr;
+void( WINAPI * gGetQuery64 )( GLuint, GLenum, unsigned long long * ) = nullptr;
+double load( int f )
+{
+	if ( gLoadQuads <= 0 )
+		return -1.0;
+	if ( !gStampMade ) {
+		gGenQueries = reinterpret_cast<decltype( gGenQueries )>( glProc( "glGenQueries" ) );
+		gQueryCounter = reinterpret_cast<decltype( gQueryCounter )>( glProc( "glQueryCounter" ) );
+		gGetQuery64 = reinterpret_cast<decltype( gGetQuery64 )>( glProc( "glGetQueryObjectui64v" ) );
+		if ( !gGenQueries || !gQueryCounter || !gGetQuery64 ) {
+			std::printf( "PRESENT load: no GL timestamp queries, no load\n" );
+			gLoadQuads = 0;
+			return -1.0;
+		}
+		gGenQueries( 8, gStamp );
+		gStampMade = true;
+	}
+	const int r = f % 4;
+	double ms = -1.0;
+	if ( f >= 4 ) {
+		unsigned long long a = 0, b = 0;
+		gGetQuery64( gStamp[r * 2], 0x8866, &a );	// GL_QUERY_RESULT
+		gGetQuery64( gStamp[r * 2 + 1], 0x8866, &b );
+		ms = double( b - a ) * 1e-6;
+	}
+	gQueryCounter( gStamp[r * 2], 0x8E28 );	// GL_TIMESTAMP
+	glMatrixMode( GL_MODELVIEW );
+	glLoadIdentity();
+	glEnable( GL_BLEND );
+	glBlendFunc( GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA );
+	for ( int i = 0; i < gLoadQuads; i++ ) {
+		const float x = -1.0f + 0.1f * float( i % 20 ), y = -1.0f + 0.1f * float( ( i / 20 ) % 20 );
+		glBegin( GL_QUADS );
+		glColor4f( ( i % 3 ) * 0.5f, ( i % 5 ) * 0.25f, ( i % 7 ) / 7.0f, 0.3f );
+		glVertex2f( x, y );
+		glVertex2f( x + 0.1f, y );
+		glVertex2f( x + 0.1f, y + 0.1f );
+		glVertex2f( x, y + 0.1f );
+		glEnd();
+		if ( i % 100 == 99 ) {	// a pass's query (a round trip to the driver's own thread, as glIsEnabled was on build 87)
+			GLint vp[4];
+			glGetIntegerv( GL_VIEWPORT, vp );
+		}
+	}
+	glDisable( GL_BLEND );
+	gQueryCounter( gStamp[r * 2 + 1], 0x8E28 );
+	glFlush();	// the GPU span is the load's, not a wait for the next frame's flush
+	return ms;
+}
+
 double median( std::vector<double> v, double q = 0.5 )
 {
 	if ( v.empty() )
@@ -83,6 +143,7 @@ int main( int argc, char ** argv )
 	// the frame's ms (0: as fast as it goes). 2.0 = the 500 fps bar: an unpaced 0.2 ms frame makes the present's GPU
 	// work (GL -> Vulkan, the compositor copy) the bound, which no real frame is
 	const double paceMs = argc > 4 ? std::atof( argv[4] ) : 0.0;
+	gLoadQuads = argc > 5 ? std::atoi( argv[5] ) : 0;
 	gOpenGl = LoadLibraryA( "opengl32.dll" );
 	WNDCLASSA wc {};
 	wc.style = CS_OWNDC;
@@ -132,28 +193,35 @@ int main( int argc, char ** argv )
 		reinterpret_cast<const char *>( glGetString( GL_RENDERER ) ) );
 
 	// GL's swap
-	std::vector<double> swapMs, glFrame;
+	std::vector<double> swapMs, glFrame, glLoad;
 	double prev = nowMs();
 	for ( int f = 0; f < N; f++ ) {
 		pump();
 		draw( W, H, f );
+		const double lm = load( f );
 		const double t0 = nowMs();
 		SwapBuffers( dc );
 		const double t1 = nowMs();
 		if ( f >= 30 ) {
 			swapMs.push_back( t1 - t0 );
 			glFrame.push_back( t1 - prev );
+			if ( lm >= 0.0 )
+				glLoad.push_back( lm );
 		}
 		prev = t1;
 	}
 	std::printf( "PRESENT gl SwapBuffers %.3f ms (p90 %.3f), frame %.3f ms\n", median( swapMs ), median( swapMs, 0.9 ), median( glFrame ) );
+	if ( gLoadQuads > 0 )
+		std::printf( "PRESENT load (GL SwapBuffers, unpaced): %d quads, GPU %.3f ms (p90 %.3f)\n", gLoadQuads, median( glLoad ),
+			median( glLoad, 0.9 ) );
 
-	/* build 88: each run twice, GL's signal to Vulkan from the drawing thread (the fallback) and from the worker's own GL
-	 * context (shipped); the gate holds for both */
-	auto run = [&]( bool workerSig ) -> bool {
+	/* build 91: each signal route (0 the drawing thread's GL signal, 1 the worker's GL signal, 2 the worker's CPU wait on
+	 * GL's fence, no GL signal); the gate holds for each */
+	auto run = [&]( int route ) -> bool {
 	drain();
-	workerSignal() = workerSig;
-	const char * tag = workerSig ? "worker signal" : "drawing-thread signal";
+	signalRoute() = route;
+	const char * tag = route == 2 ? "route 2 worker CPU wait" : route == 1 ? "route 1 worker GL signal"
+		: "route 0 drawing-thread GL signal";
 	// the picture: the back buffer, then the same frame presented and read back in its own submit
 	std::string why;
 	draw( W, H, 3 );
@@ -168,7 +236,7 @@ int main( int argc, char ** argv )
 		return false;
 	}
 	const WwVkPresent::Stat st0 = WwVkPresent::last();
-	if ( workerSig && !st0.sigWorker ) {
+	if ( route != 0 && ( !st0.sigWorker || st0.sigWait != ( route == 2 ) ) ) {
 		std::printf( "PRESENT vk (%s): the signal stayed on the drawing thread (%s)\n", tag, st0.sigWhy.c_str() );
 		return false;
 	}
@@ -190,7 +258,7 @@ int main( int argc, char ** argv )
 	std::printf( "PRESENTMATCH RED %s (%s, no y flip: %zu bytes differ; must FAIL)\n", redFails ? "FAIL" : "EXACT", tag, diffRed );
 
 	// the Vulkan present
-	std::vector<double> vkMs, vkWait, vkFrame, vkBlit, vkGl, vkFlush;
+	std::vector<double> vkMs, vkWait, vkFrame, vkBlit, vkGl, vkFlush, vkLoad, vkCpu, vkLoadCpu;
 	drain();
 	WwVkPresent::takeSplit();
 	double prev = nowMs();
@@ -198,11 +266,14 @@ int main( int argc, char ** argv )
 		while ( paceMs > 0.0 && nowMs() - prev < paceMs ) {
 		}
 		pump();
+		const double td = nowMs();
 		draw( W, H, f );
 		if ( !WwVkPresent::present( wnd, W, H, false, glProc, why ) ) {
 			std::printf( "PRESENT vk FAILED (%s) at frame %d: %s\n", tag, f, why.c_str() );
 			return false;
 		}
+		const double tl = nowMs();
+		const double lm = load( f );
 		const double t1 = nowMs();
 		if ( f >= 30 ) {
 			const WwVkPresent::Stat & sf = WwVkPresent::last();
@@ -212,6 +283,10 @@ int main( int argc, char ** argv )
 			vkGl.push_back( sf.glMs );
 			vkFlush.push_back( sf.flushMs );
 			vkFrame.push_back( t1 - prev );
+			vkCpu.push_back( t1 - td );
+			vkLoadCpu.push_back( t1 - tl );
+			if ( lm >= 0.0 )
+				vkLoad.push_back( lm );
 		}
 		prev = t1;
 	}
@@ -227,14 +302,18 @@ int main( int argc, char ** argv )
 		tag, median( vkBlit ), st.sigWorker ? "fence" : "GL signal", median( vkGl ), median( vkFlush ), st.dsa ? "named" : "bound",
 		sp.n, sp.failed, sp.totalMs / sn, sp.maxMs, sp.signalMs / sn, sp.fenceMs / sn, sp.acquireMs / sn, sp.recordMs / sn,
 		sp.submitMs / sn, sp.presentMs / sn );
+	if ( gLoadQuads > 0 )
+		std::printf( "PRESENT load (%s): %d quads, CPU %.3f ms (p90 %.3f), GPU %.3f ms (p90 %.3f); drawing thread draw + present "
+			"+ load CPU %.3f ms (p90 %.3f)\n", tag, gLoadQuads, median( vkLoadCpu ), median( vkLoadCpu, 0.9 ), median( vkLoad ),
+			median( vkLoad, 0.9 ), median( vkCpu ), median( vkCpu, 0.9 ) );
 	return median( vkMs ) < 0.3 && exact && redFails && sp.n >= N - 1 && sp.failed == 0;
 	};
-	const bool okMain = run( false ), okWorker = run( true );
+	const bool okMain = run( 0 ), okWorker = run( 1 ), okWait = run( 2 );
 	WwVkPresent::shutdown();  // drains the worker
 	wglMakeCurrent( nullptr, nullptr );
 	wglDeleteContext( glrc );
 	DestroyWindow( wnd );
-	const bool ok = okMain && okWorker;
+	const bool ok = okMain && okWorker && okWait;
 	std::printf( "PRESENT GATE %s\n", ok ? "OK" : "FAILED" );
 	return ok ? 0 : 1;
 }
