@@ -1,7 +1,8 @@
 // Lighting passes on Vulkan compute: NifSkope's shim (lane VKLIGHT1, 2026-11-12). The ONE file that binds the shared math
 // (AoCommon.hlsli, ...) to a Vulkan descriptor set and push constants; Fusion Shaders keeps its own shim and calls the same
 // functions. Same layout as VKFRAME1's PostFxBindingsVk.hlsli (tests/vklight/lightmatch.cpp runs both):
-// set 0: 0-4 sampled, 5 linear clamp, 6 point clamp, 7 / 8 storage targets; a 128-byte push block.
+// set 0: 0-4 sampled, 5 linear clamp, 6 point clamp, 7 / 8 storage targets, 9 a structured buffer (LPX_BUF_TYPE);
+// a 128-byte push block.
 // A kernel names its target's format before the include: LPX_OUT0_FORMAT / LPX_OUT0_TYPE (default "rgba32f" / float4).
 // register() numbers give DXIL the same slots.
 #ifndef LIGHT_BINDINGS_VK_HLSLI
@@ -39,6 +40,9 @@ LPX_BIND( 6 ) SamplerState LpxPoint : register( s1 );	// nearest, clamp to edge,
 LPX_BIND( 7 ) LPX_FORMAT( LPX_OUT0_FORMAT ) RWTexture2D<LPX_OUT0_TYPE> LpxOut0 : register( u0 );
 #ifdef LPX_OUT1_FORMAT
 LPX_BIND( 8 ) LPX_FORMAT( LPX_OUT1_FORMAT ) RWTexture2D<LPX_OUT1_TYPE> LpxOut1 : register( u1 );
+#endif
+#ifdef LPX_BUF_TYPE
+LPX_BIND( 9 ) StructuredBuffer<LPX_BUF_TYPE> LpxBuf : register( t5 );	// a kernel's read-only table (the contact bands)
 #endif
 #ifdef __spirv__
 [[vk::push_constant]] ConstantBuffer<LpxJob> LpxJobPc;

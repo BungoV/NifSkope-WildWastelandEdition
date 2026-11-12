@@ -73,7 +73,7 @@ static Buf makeBuf( size_t n )
 	Buf B;
 	VkBufferCreateInfo bi { VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
 	bi.size = n;
-	bi.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+	bi.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
 	vkCreateBuffer( dev, &bi, nullptr, &B.b );
 	VkMemoryRequirements r;
 	vkGetBufferMemoryRequirements( dev, B.b, &r );
@@ -91,7 +91,7 @@ struct Img { VkImage i = VK_NULL_HANDLE; VkDeviceMemory m = VK_NULL_HANDLE; VkIm
 struct Fmt { const char * name; VkFormat f; int tb; bool half; };
 static const Fmt kFmts[] = { { "rgba16f", VK_FORMAT_R16G16B16A16_SFLOAT, 8, true }, { "rg16f", VK_FORMAT_R16G16_SFLOAT, 4, true },
 	{ "r16f", VK_FORMAT_R16_SFLOAT, 2, true }, { "r32f", VK_FORMAT_R32_SFLOAT, 4, false }, { "rg32f", VK_FORMAT_R32G32_SFLOAT, 8, false },
-	{ "rgba32f", VK_FORMAT_R32G32B32A32_SFLOAT, 16, false } };
+	{ "rgba32f", VK_FORMAT_R32G32B32A32_SFLOAT, 16, false }, { "r8", VK_FORMAT_R8_UNORM, 1, false } };
 static const Fmt kRgba8 = { "rgba8", VK_FORMAT_R8G8B8A8_UNORM, 4, false };
 static int rasterMode = 0;	// LIGHTMATCH_RASTER
 
@@ -136,13 +136,14 @@ static VkPipelineLayout pipeLayout;
 static VkDescriptorPool pool;
 static VkCommandPool cpool;
 static VkSampler samplers[2];	// linear, point
-static const uint32_t kBindings = 9;
+static const uint32_t kBindings = 10;
 static const VkShaderStageFlags kStages = VK_SHADER_STAGE_COMPUTE_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
 
-// PostFxBindingsVk.hlsli: 0-4 sampled, 5 linear, 6 point, 7-8 storage
+// LightBindingsVk.hlsli: 0-4 sampled, 5 linear, 6 point, 7-8 storage images, 9 one storage buffer (the chain's `buf`)
 static VkDescriptorType bindingType( uint32_t i )
 {
-	return i < 5 ? VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE : ( i < 7 ? VK_DESCRIPTOR_TYPE_SAMPLER : VK_DESCRIPTOR_TYPE_STORAGE_IMAGE );
+	return i < 5 ? VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE : ( i < 7 ? VK_DESCRIPTOR_TYPE_SAMPLER
+		: i < 9 ? VK_DESCRIPTOR_TYPE_STORAGE_IMAGE : VK_DESCRIPTOR_TYPE_STORAGE_BUFFER );
 }
 
 static bool makeLayout( uint32_t sets )
@@ -163,11 +164,11 @@ static bool makeLayout( uint32_t sets )
 	pi.pPushConstantRanges = &pr;
 	if ( vkCreatePipelineLayout( dev, &pi, nullptr, &pipeLayout ) != VK_SUCCESS )
 		return false;
-	VkDescriptorPoolSize ps[3] = { { VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 5 * sets }, { VK_DESCRIPTOR_TYPE_SAMPLER, 2 * sets },
-		{ VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 2 * sets } };
+	VkDescriptorPoolSize ps[4] = { { VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 5 * sets }, { VK_DESCRIPTOR_TYPE_SAMPLER, 2 * sets },
+		{ VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 2 * sets }, { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, sets } };
 	VkDescriptorPoolCreateInfo dp { VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO };
 	dp.maxSets = sets;
-	dp.poolSizeCount = 3;
+	dp.poolSizeCount = 4;
 	dp.pPoolSizes = ps;
 	if ( vkCreateDescriptorPool( dev, &dp, nullptr, &pool ) != VK_SUCCESS )
 		return false;
@@ -339,7 +340,7 @@ static int ulps32( uint32_t a, uint32_t b )
 	return int( std::min<int64_t>( d < 0 ? -d : d, 1 << 30 ) );
 }
 
-struct Pass { std::string label, spv, pc; std::string out[2], t[5]; };
+struct Pass { std::string label, spv, pc; std::string out[2], t[5]; int gx = 0, gy = 0; };	// gx > 0: explicit groups
 struct Cmp { std::string img, file, rule; };
 
 int main( int argc, char ** argv )
@@ -369,6 +370,7 @@ int main( int argc, char ** argv )
 	std::map<std::string, std::string> imgFile;
 	std::vector<Pass> passes;
 	std::vector<Cmp> cmps;
+	std::string bufFile;
 	{
 		const std::vector<uint8_t> txt = readFile( chainPath );
 		if ( txt.empty() )
@@ -397,7 +399,10 @@ int main( int argc, char ** argv )
 				l >> p.label >> p.spv >> p.pc >> p.out[0] >> p.out[1];
 				for ( auto & t : p.t )
 					l >> t;
+				l >> p.gx >> p.gy;	// optional: the group counts (default 8x8 groups over out0)
 				passes.push_back( p );
+			} else if ( k == "buf" ) {
+				l >> bufFile;	// the storage buffer at binding 9, relative to the job folder
 			} else if ( k == "cmp" ) {
 				Cmp c;
 				l >> c.img >> c.file >> c.rule;
@@ -539,6 +544,14 @@ int main( int argc, char ** argv )
 		submitWait( cb );
 	}
 
+	// the storage buffer (binding 9): the chain's `buf` file, else 256 zero bytes
+	std::vector<uint8_t> bufData = bufFile.empty() ? std::vector<uint8_t>( 256, 0 ) : readFile( dir + bufFile );
+	if ( bufData.empty() )
+		return fail( "buf file" );
+	Buf sbuf = makeBuf( bufData.size() );
+	std::memcpy( sbuf.p, bufData.data(), bufData.size() );
+	VkDescriptorBufferInfo sbi { sbuf.b, 0, VK_WHOLE_SIZE };
+
 	// one set, one pipeline, one push block a pass
 	std::map<std::string, VkPipeline> pipes;
 	std::vector<VkDescriptorSet> sets( passes.size() );
@@ -580,7 +593,9 @@ int main( int argc, char ** argv )
 		VkWriteDescriptorSet wr[kBindings];
 		for ( uint32_t i = 0; i < kBindings; i++ ) {
 			const std::string & n = i < 5 ? p.t[i] : i >= 7 ? p.out[i - 7] : std::string();
-			if ( i < 5 || i >= 7 ) {
+			if ( i == 9 )
+				ii[i] = VkDescriptorImageInfo {};
+			else if ( i < 5 || i >= 7 ) {
 				if ( n != "-" && !imgs.count( n ) ) {
 					std::printf( "pass %s: no image %s\n", p.label.c_str(), n.c_str() );
 					return fail( "pass image" );
@@ -593,7 +608,10 @@ int main( int argc, char ** argv )
 			wr[i].dstBinding = i;
 			wr[i].descriptorCount = 1;
 			wr[i].descriptorType = bindingType( i );
-			wr[i].pImageInfo = &ii[i];
+			if ( i == 9 )
+				wr[i].pBufferInfo = &sbi;
+			else
+				wr[i].pImageInfo = &ii[i];
 		}
 		vkUpdateDescriptorSets( dev, kBindings, wr, 0, nullptr );
 	}
@@ -630,7 +648,10 @@ int main( int argc, char ** argv )
 			vkCmdBindPipeline( run, VK_PIPELINE_BIND_POINT_COMPUTE, pipes[passes[k].spv] );
 			vkCmdBindDescriptorSets( run, VK_PIPELINE_BIND_POINT_COMPUTE, pipeLayout, 0, 1, &sets[k], 0, nullptr );
 			vkCmdPushConstants( run, pipeLayout, kStages, 0, 128, pcs[k].data() );
-			vkCmdDispatch( run, uint32_t( ( o.w + 7 ) / 8 ), uint32_t( ( o.h + 7 ) / 8 ), 1 );
+			if ( passes[k].gx > 0 )
+				vkCmdDispatch( run, uint32_t( passes[k].gx ), uint32_t( std::max( passes[k].gy, 1 ) ), 1 );
+			else
+				vkCmdDispatch( run, uint32_t( ( o.w + 7 ) / 8 ), uint32_t( ( o.h + 7 ) / 8 ), 1 );
 			mb.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
 			mb.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT | VK_ACCESS_TRANSFER_READ_BIT;
 			vkCmdPipelineBarrier( run, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_TRANSFER_BIT,
@@ -666,8 +687,10 @@ int main( int argc, char ** argv )
 		vkCmdCopyImageToBuffer( cb, x.i, VK_IMAGE_LAYOUT_GENERAL, rb.b, 1, &bc );
 		vkEndCommandBuffer( cb );
 		submitWait( cb );
-		const bool h16 = x.half;
-		const size_t es = h16 ? 2 : 4;
+		const bool h16 = x.half, b8 = x.tb == 1;	// b8: R8 unorm, compared by byte steps
+		const size_t es = b8 ? 1 : h16 ? 2 : 4;
+		const uint8_t * v8 = static_cast<const uint8_t *>( rb.p );
+		const uint8_t * g8 = g.data() + 8;
 		const uint16_t * v = static_cast<const uint16_t *>( rb.p );
 		const uint16_t * gp = reinterpret_cast<const uint16_t *>( g.data() + 8 );
 		const uint32_t * v32 = static_cast<const uint32_t *>( rb.p );
@@ -700,13 +723,13 @@ int main( int argc, char ** argv )
 				else if ( fa == fa )
 					maxAbs = std::max( maxAbs, std::fabs( double( fa ) - double( fb ) ) );
 			}
-			const int u = h16 ? ulps( v[k], gp[k] ) : ulps32( v32[k], g32[k] );
+			const int u = b8 ? std::abs( int( v8[k] ) - int( g8[k] ) ) : h16 ? ulps( v[k], gp[k] ) : ulps32( v32[k], g32[k] );
 			d += u != 0;
 			big += u > tol;
 			if ( u > tol && firstBad < 0 )
 				firstBad = long( k );
 			mu = std::max( mu, u );
-			nz += h16 ? ( gp[k] & 0x7FFF ) != 0 : ( g32[k] & 0x7FFFFFFFu ) != 0;
+			nz += b8 ? g8[k] != 0 : h16 ? ( gp[k] & 0x7FFF ) != 0 : ( g32[k] & 0x7FFFFFFFu ) != 0;
 		}
 		diffAll += d;
 		valuesAll += n;
@@ -723,7 +746,8 @@ int main( int argc, char ** argv )
 			x.w, x.h, c.rule.c_str(), d, n, big, mu, maxAbs, nz, pass ? "" : " OUT");
 		if ( firstBad >= 0 )
 			std::printf( "; first > 1 ulp at x %ld y %ld ch %ld: vk 0x%x gl 0x%x", ( firstBad / ch ) % x.w, ( firstBad / ch ) / x.w,
-				firstBad % ch, h16 ? unsigned( v[firstBad] ) : unsigned( v32[firstBad] ), h16 ? unsigned( gp[firstBad] ) : unsigned( g32[firstBad] ) );
+				firstBad % ch, b8 ? unsigned( v8[firstBad] ) : h16 ? unsigned( v[firstBad] ) : unsigned( v32[firstBad] ),
+				b8 ? unsigned( g8[firstBad] ) : h16 ? unsigned( gp[firstBad] ) : unsigned( g32[firstBad] ) );
 		std::printf( "\n" );
 	}
 

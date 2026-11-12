@@ -2,7 +2,7 @@
 # Lane VKLIGHT1 (2026-11-12): the lighting passes on Vulkan compute (res/shaders/hlsl/vklight/*.hlsl) against the GL .frag
 # chains on the same inputs (tests/vklight/light_gl_ref.py, a hidden GL context; tests/vklight/lightmatch.cpp, a headless
 # Vulkan device). Copied from VKFRAME1's tests/vkframe/postfx.sh.
-# bash tests/vklight/light.sh <out dir> [<WW_CELL_HDR_DUMP .hdr>] [<pass> ...]     (passes: ao; default all)
+# bash tests/vklight/light.sh <out dir> [<WW_CELL_HDR_DUMP .hdr>] [<pass> ...]     (passes: ao contact; default all)
 # VKLIGHT_NOTIME=1 skips every timing (gate only, while another job loads the GPU).
 # Needs MSYS2 UCRT64 g++ (Vulkan headers), DXC (DXC= to override) and python with numpy.
 # Green: every job LIGHTMATCH EXACT or BOUND; each kernel's red build must FAIL its job. Last line `VKLIGHT GATE OK` / `FAILED`.
@@ -10,7 +10,7 @@ set -u
 OUT="${1:?out dir}"
 HDR="${2:-X:/ClaudeOverflow/fogmatch1/m1/mem_fm_def.hdr}"
 shift; [ $# -gt 0 ] && shift
-PASSES="${*:-ao}"
+PASSES="${*:-ao contact}"
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 DXC="${DXC:-/e/Tools/dxc/bin/x64/dxc.exe}"
 PY="${PY:-$(command -v python)}"	# before the UCRT64 PATH: its python has no numpy
@@ -19,6 +19,9 @@ mkdir -p "$OUT/spv"
 W() { cygpath -m "$1" 2>/dev/null || echo "$1"; }
 H="$ROOT/res/shaders/hlsl/vklight"
 g++ -O1 -std=c++17 "$ROOT/tests/vklight/lightmatch.cpp" -o "$OUT/lightmatch.exe" || { echo "VKLIGHT GATE FAILED (g++)"; exit 1; }
+# the contact bands from the app's own header (both sides read the same bytes)
+g++ -O1 -std=c++17 -I"$ROOT/src" "$ROOT/tests/vklight/contact_bands.cpp" -o "$OUT/contact_bands.exe" || { echo "VKLIGHT GATE FAILED (g++ bands)"; exit 1; }
+export VKLIGHT_BANDS="$(W "$OUT/contact_bands.exe")"
 sp() { "$DXC" -spirv -fspv-target-env=vulkan1.2 -T cs_6_0 -E main -O0 "$@" > /dev/null || { echo "VKLIGHT GATE FAILED (dxc $*)"; exit 1; }; }
 # kernel name : source : defines (comma separated) : red define
 K=""
@@ -29,6 +32,8 @@ for p in $PASSES; do
 	ao) K="$K ao_gbuf:ao_vk.hlsl:-DAO_STAGE=5:AO_GBUF_RED ao_mip:ao_vk.hlsl:-DAO_STAGE=1:AO_MIP_RED ao_raw:ao_vk.hlsl:-DAO_STAGE=2:AO_RAW_RED
 		ao_blur:ao_vk.hlsl:-DAO_STAGE=3:AO_BLUR_RED ao_blurf:ao_vk.hlsl:-DAO_STAGE=4:AO_BLUR_RED"
 		JOBS="$JOBS ao_A ao_L ao_N ao_S ao_SL"; NRED=$((NRED + 5)) ;;
+	contact) K="$K contact:contact_vk.hlsl::CONTACT_RED"
+		JOBS="$JOBS ct_A ct_B ct_C ct_S"; NRED=$((NRED + 1)) ;;
 	*) echo "VKLIGHT GATE FAILED (unknown pass $p)"; exit 1 ;;
 	esac
 done

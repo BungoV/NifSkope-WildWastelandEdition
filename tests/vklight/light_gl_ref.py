@@ -59,13 +59,21 @@ pixelStore = _fn('glPixelStorei', None, E, I); finish = _fn('glFinish', None)
 genQ = _fn('glGenQueries', None, I, ctypes.POINTER(U)); beginQ = _fn('glBeginQuery', None, E, U); endQ = _fn('glEndQuery', None, E)
 getQ64 = _fn('glGetQueryObjectui64v', None, U, E, ctypes.POINTER(ctypes.c_uint64))
 getError = _fn('glGetError', E)
+# compute (ww_contact.comp): SSBO, image store, dispatch
+u4i = _fn('glUniform4i', None, I, I, I, I, I)
+genBuf = _fn('glGenBuffers', None, I, ctypes.POINTER(U)); bindBuf = _fn('glBindBuffer', None, E, U)
+bufData = _fn('glBufferData', None, E, ctypes.c_ssize_t, VP, E); bindBufBase = _fn('glBindBufferBase', None, E, U, U)
+bindImage = _fn('glBindImageTexture', None, U, U, I, ctypes.c_ubyte, I, E, E)
+dispatch = _fn('glDispatchCompute', None, U, U, U); memBarrier = _fn('glMemoryBarrier', None, U)
+texSub = _fn('glTexSubImage2D', None, E, I, I, I, I, I, E, E, VP)
 
 T2D, FBO, HALF, FLOAT, RGBA, RG, RED = 0x0DE1, 0x8D40, 0x140B, 0x1406, 0x1908, 0x8227, 0x1903
 NEAREST, LINEAR = 0x2600, 0x2601
 # name: GL internal format, pixel format, channels, type, numpy dtype as stored
 FMT = {'rgba16f': (0x881A, RGBA, 4, HALF, np.uint16), 'rg16f': (0x822F, RG, 2, HALF, np.uint16),
        'r16f': (0x822D, RED, 1, HALF, np.uint16), 'r32f': (0x822E, RED, 1, FLOAT, np.float32),
-       'rg32f': (0x8230, RG, 2, FLOAT, np.float32), 'rgba32f': (0x8814, RGBA, 4, FLOAT, np.float32)}
+       'rg32f': (0x8230, RG, 2, FLOAT, np.float32), 'rgba32f': (0x8814, RGBA, 4, FLOAT, np.float32),
+       'r8': (0x8229, RED, 1, 0x1401, np.uint8)}
 va = U(); genVA(1, ctypes.byref(va)); bindVA(va)
 pixelStore(0x0CF5, 1); pixelStore(0x0D05, 1)
 VERT = """#version 410 core
@@ -336,9 +344,153 @@ def ao_main():
     ao_chain('ao_SL', sdir, sw, sh, sd, proj, 1.0, True, 8, 0, False, [])
 
 
+# ------------------------------------------------------------------------------------------------------- contact shadows
+CONTACT = os.environ.get('VKLIGHT_CONTACT_SRC') or os.path.join(FEAT, 'shadows', 'ww_contact.comp')   # override: a probe copy
+_cprog = []
+
+
+def contact_program():
+    if not _cprog:
+        p = createProgram()
+        attach(p, compile_(0x91B9, S.expand(CONTACT))); link(p)
+        ok = I(); getProgramiv(p, 0x8B82, ctypes.byref(ok))
+        if not ok.value:
+            print('LIGHT-GL-REF FAIL (link ww_contact.comp)'); sys.exit(2)
+        _cprog.append(p)
+    return _cprog[0]
+
+
+def gl_gbuf(srcd, W, H, depth, proj):
+    """the AO stage 5 g-buffer (view normal, linear depth) the contact march reads, written to <srcd>/gbuf.bin"""
+    inv = np.linalg.inv(proj.T.astype(np.float64)).astype(np.float32).T.copy()
+    im = {'zres': Img('zres', 'r32f', W, H, NEAREST, depth), 'zlin': Img('zlin', 'r32f', W, H, NEAREST, np.zeros_like(depth)),
+          'gbuf': Img('gbuf', 'rgba32f', W, H, NEAREST)}
+    draw(Pass('gbuf', 'ao_gbuf', AO, ['gbuf'], [('zres', 'zres'), ('zlin', 'zlin')], [],
+              [('aoStage', 'i', 5), ('aoInvProj', 'm', inv), ('aoUnit', 'f', 1.0), ('aoZLin', 'i', 0), ('fullSize', '2i', (W, H))]), im)
+    finish()
+    bindFB(FBO, fbo); fbTex(FBO, 0x8CE0, T2D, im['gbuf'].tex, 0); fbTex(FBO, 0x8CE1, T2D, 0, 0); readBuffer(0x8CE0)
+    g = im['gbuf'].read()
+    put(os.path.join(srcd, 'gbuf.bin'), g, W, H)
+    return g
+
+
+def contact_job(name, srcd, gb, W, H, proj, lv, scale, samples, reach_d, time_it, reds):
+    """src/features/shadows/shadowset.cpp's line route (contactLineRun): the light lv (view space) projected as the app does"""
+    import subprocess
+    d = os.path.join(OUT, name)
+    os.makedirs(d, exist_ok=True)
+    mw, mh = (W + scale - 1) // scale, (H + scale - 1) // scale
+    pm = proj.astype(np.float64)                     # pm[column][row], as the app's pm
+    lv = np.asarray(lv, np.float64); lv /= np.linalg.norm(lv)
+    cx, cy, cz, cw = (sum(pm[k][r] * lv[k] for k in range(3)) for r in range(4))
+    if abs(cw) < 1e-6:
+        cw = -1e-6 if cw < 0 else 1e-6
+    lx, ly, lz = (cx / cw * 0.5 + 0.5) * mw, (cy / cw * 0.5 + 0.5) * mh, cz / cw * 0.5 + 0.5
+    light = np.array([lx, ly, lz, 1.0 if cw > 0 else -1.0], np.float32)
+    out = subprocess.run([os.environ['VKLIGHT_BANDS'], '%.9g' % light[0], '%.9g' % light[1], str(mw), str(mh),
+                          os.path.join(d, 'bands.bin')], capture_output=True, text=True).stdout.split()
+    nb, waves, first = int(out[1]), int(out[3]), [int(x) for x in out[5:9]]
+    bands = np.fromfile(os.path.join(d, 'bands.bin'), np.int32)
+    params = np.array([0.02, 0.02, 4.0, samples], np.float32)
+    reach = np.array([48.0 if reach_d else 0.0, 0.0, reach_d, 0.0], np.float32)   # kContactReach, cascade preset D
+    tan = np.array([1.0 / proj[0][0] if proj[0][0] != 0 else 1.0, 1.0 / proj[1][1] if proj[1][1] != 0 else 1.0], np.float32)
+    gx, gy = min(waves, 32768), (waves + 32767) // 32768
+    # GL: the app's calls in order (mask cleared to lit, SSBO at 1, image unit 0 R8, gbuf on unit 0)
+    gtex = Img('gbuf', 'rgba32f', W, H, NEAREST, gb)
+    ones = np.full((mh, mw), 255, np.uint8)
+    mask = Img('mask', 'r8', mw, mh, NEAREST, ones)
+    ssbo = U(); genBuf(1, ctypes.byref(ssbo)); bindBuf(0x90D2, ssbo)
+    bufData(0x90D2, bands.nbytes, bands.ctypes.data, 0x88E0)
+    prog = contact_program()
+
+    def run():
+        bindBufBase(0x90D2, 1, ssbo)
+        useProgram(prog)
+        L = lambda n: uloc(prog, n.encode())
+        u1i(L('gbuf'), 0); u2i(L('fullSize'), W, H); u2i(L('maskSize'), mw, mh); u1f(L('maskScale'), float(scale))
+        u4fv(L('lightCoord'), 1, light.ctypes.data); u4fv(L('sssParams'), 1, params.ctypes.data); u1f(L('sssFloor'), 1.5)
+        u4fv(L('sssReach'), 1, reach.ctypes.data); u2f(L('sssTan'), float(tan[0]), float(tan[1]))
+        u1i(L('bandCount'), nb); u1i(L('waveCount'), waves); u4i(L('sideFirst'), *first)
+        activeTex(0x84C0); bindTex(T2D, gtex.tex)
+        bindImage(0, mask.tex, 0, 0, 0, 0x88B9, 0x8229)
+        dispatch(gx, gy, 1)
+        memBarrier(0xFFFFFFFF)
+    run()
+    finish()
+    if getError() != 0:
+        print('LIGHT-GL-REF FAIL (gl error in %s)' % name); sys.exit(2)
+    bindFB(FBO, fbo); fbTex(FBO, 0x8CE0, T2D, mask.tex, 0); fbTex(FBO, 0x8CE1, T2D, 0, 0); readBuffer(0x8CE0)
+    m = mask.read()
+    put(os.path.join(d, 'gl_mask.bin'), m, mw, mh)
+    put(os.path.join(srcd, 'ones_%dx%d.bin' % (mw, mh)), ones, mw, mh)
+    with open(os.path.join(d, 'pc_0.bin'), 'wb') as f:
+        f.write(pc_bytes([light, params, reach, (scale, 1.5, tan[0], tan[1]), (W, H, mw, mh), (nb, waves, 0, 0)], first))
+    sd = os.path.basename(srcd)
+
+    def chain(path, red):
+        with open(path, 'w') as f:
+            f.write('img gbuf rgba32f %d %d %s/gbuf.bin\n' % (W, H, sd))
+            f.write('img mask r8 %d %d %s/ones_%dx%d.bin\n' % (mw, mh, sd, mw, mh))
+            f.write('buf bands.bin\n')
+            f.write('pass contact %s pc_0.bin mask - gbuf - - - - %d %d\n' % ('contact' + ('_red' if red else '') + '.spv', gx, gy))
+            f.write('cmp mask gl_mask.bin ulp1\n')
+    chain(os.path.join(d, 'chain.txt'), False)
+    for r in reds:
+        chain(os.path.join(d, 'red_%s.txt' % r), True)
+    ms = None
+    if time_it and not os.environ.get('VKLIGHT_NOTIME'):
+        q = U(); genQ(1, ctypes.byref(q))
+        t = []
+        t0 = time.perf_counter()
+        while time.perf_counter() - t0 < 0.5:
+            run(); finish()
+        for r in range(34):
+            finish()
+            beginQ(0x88BF, q); run(); endQ(0x88BF)
+            v = ctypes.c_uint64(); getQ64(q, 0x8866, ctypes.byref(v))
+            if r >= 2:
+                t.append(v.value / 1e6)
+        ms = float(np.median(t))
+        with open(os.path.join(d, 'gl_ms.txt'), 'w') as f:
+            f.write('contact %.5f\n' % ms)
+    shade = float((m < 255).mean())
+    print('job %s: contact | %s  mask %dx%d light %.1f %.1f %.4f w%+d bands %d waves %d samples %d reach %g shaded %.3f'
+          % (name, '' if ms is None else 'GL ms contact %.4f total %.4f' % (ms, ms), mw, mh, light[0], light[1], light[2],
+             int(light[3]), nb, waves, samples, reach_d, shade))
+
+
+def contact_main():
+    W, H, px, proj, depth = load_dump()
+    srcd = os.path.join(OUT, 'in_real')
+    os.makedirs(srcd, exist_ok=True)
+    gb = gl_gbuf(srcd, W, H, depth, proj)
+    # the default tier (96 samples, full mask) with the cascades' reach, a sun up-right in front of the camera
+    contact_job('ct_A', srcd, gb, W, H, proj, (0.35, 0.55, -0.75), 1, 96, 3000.0, True, ['contact'])
+    # a light behind the camera (w < 0: the march runs away from the light), half mask, 60 samples, no reach
+    contact_job('ct_B', srcd, gb, W, H, proj, (-0.3, 0.4, 0.85), 2, 60, 0.0, True, [])
+    # nearly across the view (the light far off screen), half mask, 32 samples, the far preset's reach
+    contact_job('ct_C', srcd, gb, W, H, proj, (0.98, 0.15, -0.05), 2, 32, 6000.0, False, [])
+    # synthetic: the AO job's odd-size steps and sky, full mask, light on screen
+    sw, sh = 641, 361
+    rng = np.random.default_rng(31)
+    sy, sx = np.mgrid[0:sh, 0:sw].astype(np.float32)
+    sdp = (0.9990 + 0.0008 * np.sin(sx / 29.0) * np.cos(sy / 17.0)).astype(np.float32)
+    for _ in range(40):
+        x0, y0 = rng.integers(0, sw - 40), rng.integers(0, sh - 40)
+        sdp[y0:y0 + rng.integers(5, 60), x0:x0 + rng.integers(5, 80)] -= np.float32(rng.uniform(0.0002, 0.0008))
+    sdp[: sh // 7] = 1.0
+    sdp[:, : 3] = 1.0
+    sdir = os.path.join(OUT, 'in_syn')
+    os.makedirs(sdir, exist_ok=True)
+    sg = gl_gbuf(sdir, sw, sh, sdp, proj)
+    contact_job('ct_S', sdir, sg, sw, sh, proj, (-0.2, 0.3, -0.93), 1, 96, 3000.0, False, [])
+
+
 def main():
     if 'ao' in WANT:
         ao_main()
+    if 'contact' in WANT:
+        contact_main()
     print('LIGHT-GL-REF OK')
 
 
