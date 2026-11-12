@@ -24,7 +24,7 @@
 { "WW_AO_WELD_DEG", 1, "src/nativeemit.cpp:3643 lodgenNativeWrite | (a) far LOD data: read when the far tail (objects, terrain, water, cards, far lights) is baked or appended to the cell" },
 { "WW_ARCHIVEBROWSE_EXPECT", 2, "src/nifskope_ui.cpp:22281 NifSkope::createWindow | createWindow: picks which harness the window runs" },
 { "WW_ARCHIVEBROWSE_TEST", 2, "src/nifskope_ui.cpp:22216 NifSkope::createWindow | createWindow: picks which harness the window runs" },
-{ "WW_ARCHIVE_SHARE_RED", 2, "lib/libfo76utils/src/filebuf.cpp mappedShareOn | hand: read once at the first archive open; 1 = a mapping per open, build 74 (EMPTY240 R3-2)" },
+{ "WW_ARCHIVE_SHARE_RED", 2, "filebuf.cpp (the vendored archive reader) mappedShareable | hand: read once at the first archive open; 1 = a mapping per open, build 74 (EMPTY240 R3-2)" },
 { "WW_ARCHIVE_TRIM_RED", 0, "src/glview.cpp:5475 GLView::wwCellStreamEvict | re-read per frame or per call (a)" },
 { "WW_ARCHLOCK_NIF", 3, "src/archlocktest.cpp:349 wwArchLockHarness | bake/CLI/test path" },
 { "WW_ARCHLOCK_RESOURCES", 3, "src/archlocktest.cpp:201 wwRun | bake/CLI/test path" },
