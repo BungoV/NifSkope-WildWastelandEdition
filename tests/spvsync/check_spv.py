@@ -14,9 +14,9 @@ SPECS = [
 	('src/features/gi/bakert', 'rq', 'vulkan1.2', 'bakert_rq_spv'),
 	('src/features/gi/bakert', 'bvh', 'vulkan1.1', 'bakert_bvh_spv'),
 	('src/features/gi/bakert', 'rqx', 'vulkan1.2', 'bakert_rqx_spv'),
-] + [('src/features/gi/rtddgi', k, 'vulkan1.2', 'rtddgi_%s_spv' % k) for k in ('restir',)]
+] + [('src/features/gi/rtddgi', k, 'vulkan1.2', 'rtddgi_%s_spv' % k) for k in ()]
 # lane VKCOMPUTE1: kernels converted to HLSL, built by DXC from res/shaders/hlsl/rtddgi/<k>.hlsl + tools/spv_header.py
-HLSL_SPECS = [('src/features/gi/rtddgi', k, 'vulkan1.2', 'rtddgi_%s_spv' % k) for k in ('border', 'reloc', 'blend', 'trace', 'airrays')]
+HLSL_SPECS = [('src/features/gi/rtddgi', k, 'vulkan1.2', 'rtddgi_%s_spv' % k) for k in ('border', 'reloc', 'blend', 'trace', 'airrays', 'restir')]
 DEFAULT_G = 'E:/Tools/RenderDoc/RenderDoc_1.45_64/plugins/spirv/glslangValidator.exe'
 DEFAULT_DXC = 'E:/Tools/dxc/bin/x64/dxc.exe'
 
@@ -26,9 +26,10 @@ def script_ok(tree):
 	bad = []
 	b = open(os.path.join(tree, 'src/features/gi/bakert_spirv.sh'), encoding='utf-8', errors='replace').read()
 	r = open(os.path.join(tree, 'src/features/gi/rtddgi_spirv.sh'), encoding='utf-8', errors='replace').read()
-	m = re.search(r'^for k in ([a-z ]+); do$', r, re.M)
+	# the glslang loop: a `for` line followed by the "$G" compile line (none once every kernel builds from HLSL)
+	m = re.search(r'^for k in ([a-z ]+); do\n\t"\$G" ', r, re.M)
 	loop = m.group(1).split() if m else []
-	if '"$G" --target-env vulkan1.2 -V --vn "rtddgi_${k}_spv" -o "${k}.spv.h" "${k}.comp"' not in r:
+	if loop and '"$G" --target-env vulkan1.2 -V --vn "rtddgi_${k}_spv" -o "${k}.spv.h" "${k}.comp"' not in r:
 		bad.append('src/features/gi/rtddgi_spirv.sh: its compile line changed')
 	for d, k, env, vn in SPECS:
 		if d == 'src/features/gi/bakert':

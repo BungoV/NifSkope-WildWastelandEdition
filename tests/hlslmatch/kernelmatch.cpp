@@ -798,6 +798,126 @@ static void fillAirRays( std::vector<Buf> & bufs, const Case & c, uint64_t & gro
 	groups = ( nF + 63 ) / 64;
 }
 
+// ReSTIR DI: restir.comp struct RestirParams (std430, 11 vec4); the target size and options by case seed (restirOf)
+struct RestirParams
+{
+	int32_t size[4], opts[4];
+	float knobs[4], rows[3][4], proj[4], prows[3][4], pproj[4];
+};
+static_assert( sizeof( RestirParams ) == 11 * 16, "RestirParams is 11 vec4" );
+struct RestirCase { int w, h, C, K, f, red, hist; };
+static RestirCase restirOf[128];   // by case seed
+static const int kRestirWatch[4] = { 15 + 3, 15 + 6, 15 + 7, 15 + 10 };   // the binding each mode writes: cur, numDen, acc, ratio
+
+// set 0 = the trace's scene + TLAS + params (lamps with a source radius), set 1 = 0 params, 1 g-buffer, 2 the previous one,
+// 3 cur, 4 hist reservoirs, 5 history pixel, 6 num/den, 7 acc, 8 previous acc, 9 the candidate list, 10 the ratio. The
+// g-buffer: 8x8 blocks of one view normal (jittered) on a smooth depth (neighbours similar), 1 in 10 empty (1e6) or 0
+static void fillRestir( std::vector<Buf> & bufs, const Case & c, uint64_t & groups, uint32_t pc[16] )
+{
+	const uint32_t nP = uint32_t( c.x * c.y * c.z );
+	const RestirCase & q = restirOf[c.seed % 128];
+	const uint64_t nPix = uint64_t( q.w ) * q.h;
+	Rng r { c.seed };
+	Params P;
+	traceParams( P, c, nP, r );
+	std::memcpy( bufs[5].p, S.attr.data(), S.attr.size() * 4 );
+	std::memcpy( bufs[7].p, S.remap.data(), S.remap.size() * 4 );
+	std::memcpy( bufs[8].p, S.verts.data(), S.verts.size() * 4 );
+	std::memcpy( bufs[9].p, S.triOf.data(), S.triOf.size() * 4 );
+	std::memcpy( bufs[10].p, S.mask.data(), S.mask.size() * 4 );
+	std::memcpy( bufs[11].p, S.maps.data(), S.maps.size() * 4 );
+	std::memcpy( bufs[12].p, S.alpha.data(), S.alpha.size() * 4 );
+	std::vector<float> L = S.lights;
+	for ( int l = 0; l < S.nLights; l++ )
+		L[size_t( l ) * 32 + 29] = 0.1f * P.stepv[3] * float( l % 3 );   // the source radius (l7.y), 0 for some
+	std::memcpy( bufs[13].p, L.data(), L.size() * 4 );
+	std::memcpy( bufs[14].p, &P, sizeof P );
+	RestirParams R;
+	std::memset( &R, 0, sizeof R );
+	const int nCand = 7;
+	R.size[0] = q.w; R.size[1] = q.h; R.size[2] = nCand; R.size[3] = int32_t( c.seed * 41 % 1000 );
+	R.opts[0] = q.C; R.opts[1] = q.K; R.opts[2] = q.f; R.opts[3] = q.red;
+	const float ext[3] = { float( c.x ) * P.stepv[0], float( c.y ) * P.stepv[1], float( c.z ) * P.stepv[2] };
+	const float diag = std::sqrt( ext[0] * ext[0] + ext[1] * ext[1] + ext[2] * ext[2] );
+	R.knobs[0] = 6.0f; R.knobs[1] = 1e-3f * P.stepv[3]; R.knobs[2] = 1e-3f * P.stepv[3]; R.knobs[3] = float( q.hist );
+	float qq[4] = { r.unit() - 0.5f, r.unit() - 0.5f, r.unit() - 0.5f, r.unit() - 0.5f };
+	const float ql = std::sqrt( qq[0] * qq[0] + qq[1] * qq[1] + qq[2] * qq[2] + qq[3] * qq[3] ) + 1e-6f;
+	for ( float & v : qq )
+		v /= ql;
+	const float w = qq[0], x = qq[1], y = qq[2], z = qq[3];
+	const float Rm[3][3] = { { 1 - 2 * ( y * y + z * z ), 2 * ( x * y - w * z ), 2 * ( x * z + w * y ) },
+		{ 2 * ( x * y + w * z ), 1 - 2 * ( x * x + z * z ), 2 * ( y * z - w * x ) },
+		{ 2 * ( x * z - w * y ), 2 * ( y * z + w * x ), 1 - 2 * ( x * x + y * y ) } };
+	for ( int i = 0; i < 3; i++ ) {
+		const float cam = P.origin[i] + 0.5f * ext[i];
+		for ( int k = 0; k < 3; k++ )
+			R.rows[i][k] = R.prows[i][k] = Rm[i][k];
+		R.rows[i][3] = cam;
+		R.prows[i][3] = cam + ( r.unit() - 0.5f ) * 0.05f * P.stepv[3];
+	}
+	R.proj[0] = 1.3f; R.proj[1] = 1.7f; R.proj[2] = 0.02f; R.proj[3] = -0.01f;
+	R.pproj[0] = 1.3f; R.pproj[1] = 1.7f; R.pproj[2] = 0.021f; R.pproj[3] = -0.011f;
+	std::memcpy( bufs[15].p, &R, sizeof R );
+	float * g = static_cast<float *>( bufs[16].p ), * pg = static_cast<float *>( bufs[17].p );
+	const int bw = ( q.w + 7 ) / 8, bh = ( q.h + 7 ) / 8;
+	std::vector<float> bn( size_t( bw ) * bh * 3 );
+	for ( size_t i = 0; i < size_t( bw ) * bh; i++ ) {
+		float n[3] = { r.unit() - 0.5f, r.unit() - 0.5f, 0.3f + r.unit() };
+		const float nl = std::sqrt( n[0] * n[0] + n[1] * n[1] + n[2] * n[2] );
+		for ( int k = 0; k < 3; k++ )
+			bn[i * 3 + k] = n[k] / nl;
+	}
+	for ( uint64_t i = 0; i < nPix; i++ ) {
+		const int px = int( i % uint64_t( q.w ) ), py = int( i / uint64_t( q.w ) );
+		const float * n = &bn[( size_t( py / 8 ) * bw + size_t( px / 8 ) ) * 3];
+		const float u = r.unit();
+		float D = diag * ( 0.15f + 0.3f * ( 1.0f + std::sin( float( px ) * 0.02f ) * std::cos( float( py ) * 0.03f ) ) );
+		if ( u < 0.05f )
+			D = 1e6f;
+		else if ( u < 0.08f )
+			D = 0.0f;
+		for ( int k = 0; k < 3; k++ ) {
+			g[i * 4 + k] = n[k] + ( r.unit() - 0.5f ) * 0.02f;
+			pg[i * 4 + k] = g[i * 4 + k] + ( r.unit() - 0.5f ) * 0.02f;
+		}
+		g[i * 4 + 3] = D;
+		pg[i * 4 + 3] = D < 1e5f && D > 0.0f ? D * ( 1.0f + ( r.unit() - 0.5f ) * 0.04f ) : D;
+	}
+	auto res = [&]( float * o ) {
+		o[0] = 0.0f;
+		const int32_t yy = int32_t( r.next() % uint32_t( S.nLights + 1 ) ) - 1;
+		std::memcpy( o, &yy, 4 );
+		o[1] = r.unit() * 5.0f;
+		o[2] = float( 1 + r.next() % 400 );   // M: past the history cap (20 x C) now and then
+		o[3] = r.unit() * 2.0f;
+	};
+	float * cur = static_cast<float *>( bufs[18].p ), * hist = static_cast<float *>( bufs[19].p );
+	int32_t * hp = static_cast<int32_t *>( bufs[20].p );
+	float * nd = static_cast<float *>( bufs[21].p ), * acc = static_cast<float *>( bufs[22].p ), * prev = static_cast<float *>( bufs[23].p );
+	int32_t * cand = static_cast<int32_t *>( bufs[24].p );
+	float * out = static_cast<float *>( bufs[25].p );
+	for ( uint64_t i = 0; i < nPix; i++ ) {
+		res( cur + i * 4 );
+		res( hist + i * 4 );
+		hp[i] = int32_t( r.next() % uint32_t( nPix + 1 ) ) - 1;
+		for ( int k = 0; k < 4; k++ ) {
+			nd[i * 4 + k] = r.unit() * 3.0f;
+			acc[i * 4 + k] = r.unit() * 3.0f;
+		}
+		prev[i * 4] = r.unit() * 3.0f;
+		prev[i * 4 + 1] = r.unit() * 3.0f;
+		prev[i * 4 + 2] = float( r.next() % 24 ) * 0.99f;   // frames: 0 (no history), past the 16 cap
+		prev[i * 4 + 3] = 0.0f;
+		out[i * 2] = r.unit();
+		out[i * 2 + 1] = r.unit();
+	}
+	for ( int j = 0; j < nCand; j++ )
+		cand[j] = j < S.nLights ? j : int32_t( r.next() % uint32_t( S.nLights ) );
+	randomRotation( r, pc );
+	pc[12] = c.mode;
+	groups = ( nPix + 63 ) / 64;
+}
+
 int main( int argc, char ** argv )
 {
 	const std::string kernel = argc > 1 ? argv[1] : "";
@@ -843,6 +963,23 @@ int main( int argc, char ** argv )
 		for ( int i = 0; i < 8; i++ ) {
 			airOf[( 51 + i ) % 64] = ac[i];
 			cases.push_back( Case { 6, 5, 4, 0, 0, uint64_t( 51 + i ) } );
+		}
+	} else if ( kernel == "restir" ) {
+		fill = fillRestir;
+		nSet1 = 11;
+		// each mode (0 candidates + temporal, 1 spatial + the shadow ray, 2 accumulate, 3 ratio) with the red bits it reads
+		// (1 NOVIS, 2 NOPDF, 4 NOTEMPORAL, 8 NOCLAMP, 16 NOHOLE), history on / off, K past the 16 cap, windows 0-2; the
+		// 2048 x 2080 spatial case passes 65535 groups (the y split)
+		struct { uint32_t mode; RestirCase q; } rc[] = { { 0, { 64, 48, 8, 4, 1, 0, 1 } }, { 0, { 64, 48, 4, 4, 1, 4, 1 } },
+			{ 0, { 96, 64, 16, 4, 1, 8, 1 } }, { 0, { 64, 48, 8, 4, 1, 2, 0 } }, { 1, { 64, 48, 8, 4, 1, 0, 1 } },
+			{ 1, { 64, 48, 8, 20, 1, 1, 1 } }, { 1, { 96, 64, 8, 8, 1, 16, 1 } }, { 1, { 64, 48, 8, 6, 1, 2, 1 } },
+			{ 2, { 64, 48, 8, 4, 1, 0, 1 } }, { 2, { 64, 48, 8, 4, 1, 4, 1 } }, { 3, { 64, 48, 8, 4, 1, 0, 1 } },
+			{ 3, { 96, 64, 8, 4, 2, 0, 1 } }, { 3, { 64, 48, 8, 4, 0, 0, 1 } }, { 1, { 2048, 2080, 8, 4, 1, 0, 1 } } };
+		for ( int i = 0; i < int( sizeof rc / sizeof rc[0] ); i++ ) {
+			restirOf[( 61 + i ) % 128] = rc[i].q;
+			Case k { 6, 5, 4, 0, 0, uint64_t( 61 + i ) };
+			k.mode = rc[i].mode;
+			cases.push_back( k );
 		}
 	}
 	if ( argc < 4 || !fill ) {
@@ -956,7 +1093,13 @@ int main( int argc, char ** argv )
 			const size_t nF = size_t( q.fx ) * q.fy * q.fz;
 			sz.insert( sz.end(), { sizeof( AirParams ), nF * 16, nF * 16, nF * 8 } );
 		}
-		if ( kernel == "trace" || kernel == "airrays" ) {   // the soup, sized per binding (one scene, one TLAS, read by both runs)
+		if ( kernel == "restir" ) {
+			const RestirCase & q = restirOf[c.seed % 128];
+			const size_t n = size_t( q.w ) * q.h;
+			sz.insert( sz.end(), { sizeof( RestirParams ), n * 16, n * 16, n * 16, n * 16, n * 4, n * 16, n * 16, n * 16, 64, n * 8 } );
+			watch = kRestirWatch[c.mode & 3];
+		}
+		if ( kernel == "trace" || kernel == "airrays" || kernel == "restir" ) {   // the soup, sized per binding (one scene, one TLAS, read by both runs)
 			Params P0;
 			Rng r0 { c.seed };
 			fillParamsBase( P0, c, uint32_t( nP ), r0 );
@@ -1003,6 +1146,20 @@ int main( int argc, char ** argv )
 			}
 			std::printf( "  air: samples %d red %d history %d, froxels with a lamp %zu, with a shadowed share %zu\n", airOf[c.seed % 64].samples,
 				airOf[c.seed % 64].red, airOf[c.seed % 64].hist, lit, shadowed );
+		}
+		if ( kernel == "restir" ) {   // coverage: mode 0 pixels with a light kept / a history pixel; mode 1 shadow rays blocked / open
+			const int32_t * cur = static_cast<const int32_t *>( A[18].p ), * hp = static_cast<const int32_t *>( A[20].p );
+			const float * nd = static_cast<const float *>( A[21].p );
+			size_t kept = 0, withHist = 0, blocked = 0, open = 0;
+			for ( size_t k = 0; k < sz[20] / 4; k++ ) {
+				kept += cur[k * 4] >= 0;
+				withHist += hp[k] >= 0;
+				blocked += nd[k * 4 + 2] == 1.0f;
+				open += nd[k * 4 + 2] == 0.0f;
+			}
+			const RestirCase & q = restirOf[c.seed % 128];
+			std::printf( "  restir: mode %u C %d K %d f %d red %d history %d; light kept %zu, history pixel %zu, rays blocked %zu open %zu\n",
+				c.mode, q.C, q.K, q.f, q.red, q.hist, kept, withHist, blocked, open );
 		}
 		const bool ok = ra && rb && all == 0 && moved > 0;
 		fails += ok ? 0 : 1;
