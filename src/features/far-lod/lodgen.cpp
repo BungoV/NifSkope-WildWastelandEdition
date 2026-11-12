@@ -1522,24 +1522,40 @@ QStringList lodgenStackSearchPaths()
 	return out;
 }
 
+namespace
+{
+struct StackIndex
+{
+	std::mutex mu;	// lane EMPTY240 R9-c: the stream builder and the drawing thread both ask
+	std::unique_ptr<BA2File> index;
+	QStringList builtFor;
+	QHash<QString, int> builtRank;
+	bool tried = false;
+	std::atomic<bool> warming{ false };
+};
+StackIndex & stackIx()
+{
+	static StackIndex * s = new StackIndex;	// never destroyed: a warm-up thread may still be inside it at exit
+	return *s;
+}
+} // namespace
+
 //! The stack's index: every extension, built once, dropped when the stack changes.
 BA2File * lodgenStackIndex()
 {
-	static std::unique_ptr<BA2File> index;
-	static QStringList builtFor;
-	static QHash<QString, int> builtRank;
-	static bool tried = false;
-	if ( tried && builtFor == lodgenStack() && builtRank == lodgenPluginRank() )
-		return index.get();
-	tried = true;
-	builtFor = lodgenStack();
-	builtRank = lodgenPluginRank();
-	index.reset();
+	StackIndex & s = stackIx();
+	std::lock_guard<std::mutex> g( s.mu );
+	if ( s.tried && s.builtFor == lodgenStack() && s.builtRank == lodgenPluginRank() )
+		return s.index.get();
+	s.tried = true;
+	s.builtFor = lodgenStack();
+	s.builtRank = lodgenPluginRank();
+	s.index.reset();
 	const QStringList paths = lodgenStackSearchPaths();
 	if ( paths.isEmpty() )
 		return nullptr;
 	WwHw::IndexScope wwIx( "resource stack index (every extension)" );
-	index = std::make_unique<BA2File>();
+	auto index = std::make_unique<BA2File>();
 	for ( const QString & p : paths ) {
 		try {
 			index->loadArchivePath( p.toLocal8Bit().constData() );
@@ -1547,7 +1563,39 @@ BA2File * lodgenStackIndex()
 			// an unreadable entry is skipped, as the game manager skips one
 		}
 	}
-	return index.get();
+	s.index = std::move( index );
+	return s.index.get();
+}
+
+/* lane EMPTY240 R9-c: build 83's frame 2 spent 185 ms in the cloud map, 164 of them building this index on the drawing
+ * thread ("archive index: resource stack index (every extension) built on the drawing thread, 91 archive files opened,
+ * 164 ms") for one sky mesh (clouds.nif). True when the index is built for the current stack; otherwise one worker builds
+ * it and the caller asks again a paint later (a build already running is never waited for). Red WW_STACKINDEXWARM_RED=1:
+ * the asking thread builds it, build 83. */
+bool lodgenStackIndexWarm()
+{
+	WW_SWITCH_STATIC( bool, warmRed, wwEnvInt( "WW_STACKINDEXWARM_RED" ) == 1 );
+	if ( warmRed )
+		return true;
+	StackIndex & s = stackIx();
+	if ( s.warming.load() )
+		return false;
+	{
+		std::unique_lock<std::mutex> g( s.mu, std::try_to_lock );
+		if ( !g.owns_lock() )
+			return false;	// another thread builds it now
+		if ( s.tried && s.builtFor == lodgenStack() && s.builtRank == lodgenPluginRank() )
+			return true;
+	}
+	if ( !s.warming.exchange( true ) ) {
+		std::fprintf( stderr, "archive index: resource stack index goes to a worker thread, the asker waits a paint (R9-c; red "
+			"WW_STACKINDEXWARM_RED=1: built on the asking thread, build 83)\n" );
+		std::thread( [] {
+			lodgenStackIndex();
+			stackIx().warming.store( false );
+		} ).detach();
+	}
+	return false;
 }
 
 static BA2File * lodgenMeshArchives()

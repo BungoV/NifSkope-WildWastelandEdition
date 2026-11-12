@@ -614,11 +614,15 @@ const WwCloudMap & wwCloudMapUpdate( Scene * scene )
 		~Slow()
 		{
 			const double all = now();
-			if ( all > 20.0 )
-				std::fprintf( stderr, "cloud map slow: %.1f ms = layers %.1f + setup and key %.1f + build %.1f (target %.1f, "
-					"program %.1f, layer fits/binds/draws %.1f) + after %.1f; %s (R8-4)\n", all, std::max( 0.0, layers ),
+			if ( all > 20.0 ) {
+				double lp[3] = { 0.0, 0.0, 0.0 };	// lane EMPTY240 R9-c: the layers part split (weather resolve, sky frame, meshes)
+				wwLookdevCloudLayersParts( lp );
+				std::fprintf( stderr, "cloud map slow: %.1f ms = layers %.1f (weather resolve %.1f, sky frame %.1f, sky meshes %.1f) "
+					"+ setup and key %.1f + build %.1f (target %.1f, program %.1f, layer fits/binds/draws %.1f) + after %.1f; %s "
+					"(R8-4, R9-c)\n", all, std::max( 0.0, layers ), lp[0], lp[1], lp[2],
 					std::max( 0.0, setup ), std::max( 0.0, build ), s.partTarget, s.partProgram, s.partLayers,
 					std::max( 0.0, all - std::max( 0.0, layers ) - std::max( 0.0, setup ) - std::max( 0.0, build ) ), how );
+			}
 		}
 	} slow( s );
 	if ( !s.tier || !scene || !scene->renderer ) {

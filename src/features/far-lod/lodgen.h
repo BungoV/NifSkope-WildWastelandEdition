@@ -57,6 +57,8 @@ bool lodgenModelHasParticlesRead( const QString & dataRoot, const QString & mode
 bool lodgenModelMoves( const QString & model );
 //! a model's file bytes, found the way the model loader finds them (loose, then the archives)
 bool lodgenReadModelBytes( const QString & dataRoot, const QString & model, QByteArray & bytes );
+//! lane EMPTY240 R9-c: true when the resource stack's index is built; else a worker builds it (ask again a paint later)
+bool lodgenStackIndexWarm();
 //! a previs file (`vis/<plugin>/<form>.uvd`), loose or from the archives
 bool lodgenReadVisFile( const QString & dataRoot, const QString & relPath, QByteArray & bytes );
 /*! is this BGEM (a material path as an effect property names it) lit by the placed lights in the

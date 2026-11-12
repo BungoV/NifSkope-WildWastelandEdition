@@ -177,6 +177,8 @@ struct WwCloudLayerIn
 /*! the active layers (not disabled, alpha > 0, a texture), key = plugin|weather|load generation, eye = the view's
  *  world position (game units); false + why when no weather resolved */
 bool wwLookdevCloudLayers( Scene * scene, QVector<WwCloudLayerIn> & out, QString & key, float eye[3], QString * why );
+//! lane EMPTY240 R9-c: the last wwLookdevCloudLayers call's parts (ms): the weather resolve, the sky frame, the meshes
+void wwLookdevCloudLayersParts( double ms[3] );
 //! lane CLOUD1: fills io's mesh pointers for layer io.layer (a previous weather's layer during a transition)
 bool wwLookdevCloudMesh( Scene * scene, WwCloudLayerIn & io );
 //! the scene cube (the material's own EnvmapTexture wins per shape, in the renderer)
