@@ -89,10 +89,15 @@ bool cvReprojUv(float2 uv, float dk, inout float2 pv)
         return true;
     }
     float2 ndc = (uv * 2.0f) - 1.0f.xx;
-    float3 d = normalize(mul(float3((ndc.x + cvProj.z) / cvProj.x, (ndc.y + cvProj.w) / cvProj.y, -1.0f), cvCam));
+    float3 du = mul(float3((ndc.x + cvProj.z) / cvProj.x, (ndc.y + cvProj.w) / cvProj.y, -1.0f), cvCam);
+    float3 d = du * rsqrt(mad(du.z, du.z, mad(du.y, du.y, du.x * du.x)));	// NV GL's normalize: x*x first
     float dp = cvPrevDepth.Sample(_cvPrevDepth_sampler, uv).x;
     float dist = min((dp < 1000.0f) ? dp : dk, 400.0f);
-    float3 v = mul((cvCamKm + (d * dist)) - cvPrevCamKm, transpose(cvPrevCam));
+    // NV GL: u = fma(d, dist, cam) - prev; transpose(M) * u per GL column fma(c.z, u.z, fma(c.x, u.x, c.y * u.y))
+    float3 u = mad(d, dist.xxx, cvCamKm) - cvPrevCamKm;
+    float3 v = float3(mad(cvPrevCam[0].z, u.z, mad(cvPrevCam[0].x, u.x, cvPrevCam[0].y * u.y)),
+                      mad(cvPrevCam[1].z, u.z, mad(cvPrevCam[1].x, u.x, cvPrevCam[1].y * u.y)),
+                      mad(cvPrevCam[2].z, u.z, mad(cvPrevCam[2].x, u.x, cvPrevCam[2].y * u.y)));
     if (v.z >= (-9.9999997473787516355514526367188e-05f))
     {
         return false;
@@ -117,7 +122,10 @@ float4 cvCatmull(float t)
 {
     float t2 = t * t;
     float t3 = t2 * t;
-    return float4(((-t3) + (2.0f * t2)) - t, ((3.0f * t3) - (5.0f * t2)) + 2.0f, (((-3.0f) * t3) + (4.0f * t2)) + t, t3 - t2) * 0.5f;
+    // NV GL's lowering: w1, w2 by Horner on t2; w0, w3 unfused
+    precise float w0 = ((2.0f * t2) - t3) - t;
+    precise float w3 = t3 - t2;
+    return float4(w0, mad(t2, mad(3.0f, t, -5.0f), 2.0f), mad(t2, mad(-3.0f, t, 4.0f), t), w3) * 0.5f;
 }
 
 float4 cvMoveBox(float2 q, float2 uv, float2 pv, float4 c)
@@ -155,7 +163,8 @@ float4 cvMoveBox(float2 q, float2 uv, float2 pv, float4 c)
 
 float cvLum(float3 c)
 {
-    return dot(c, float3(0.2125999927520751953125f, 0.715200006961822509765625f, 0.072200000286102294921875f));
+    // NV GL's dot: x product first, then y, then z fused
+    return mad(c.z, 0.072200000286102294921875f, mad(c.y, 0.715200006961822509765625f, c.x * 0.2125999927520751953125f));
 }
 
 void frag_main()
@@ -217,7 +226,7 @@ void frag_main()
         cvDepth = float4(dk, 0.0f, 0.0f, 0.0f);
         return;
     }
-    float2 xy = (pv * cvHistSize) - 0.5f.xx;
+    float2 xy = mad(pv, cvHistSize, -0.5f.xx);
     float2 f = frac(xy);
     int2 i0 = int2(floor(xy)) - int2(1, 1);
     int2 hi = int2(cvHistSize) - int2(1, 1);
@@ -340,7 +349,8 @@ void frag_main()
                 float fm = f1 / 9.0f;
                 float fsd = sqrt(max((f2 / 9.0f) - (fm * fm), 0.0f));
                 float lref = max(0.5f * (lm + fm), cvLitFloor);
-                float tl = cvLitReset + ((cvAccResetSd * min(fsd, lsd)) / (3.0f * lref));
+                // NV GL: x / (3 lref) as x * rcp(lref) fused with the 1 / 3 onto cvLitReset
+                float tl = mad((cvAccResetSd * min(fsd, lsd)) * (1.0f / lref), 0.3333333432674407958984375f, cvLitReset);
                 a = max(a, smoothstep(tl, 2.0f * tl, abs(lm - fm) / lref));
             }
         }

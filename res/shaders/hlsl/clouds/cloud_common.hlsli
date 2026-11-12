@@ -13,12 +13,21 @@ static const float kCvVarWrapKm = 384.0;
 static const float kCvCurlPeriodKm = 24.0;
 #endif
 
+// GLSL mix(x, y, a) as NV GL lowers it: fma(y - x, a, x) (fitted on cvCalAt and mod_, HLSLBULK1 r10)
+#ifndef WW_CVMIX
+#define WW_CVMIX
+float cvMix(float x, float y, float a)
+{
+    return mad(y - x, a, x);
+}
+#endif
+
 #if defined(WW_FN_cvCalAt) || defined(WW_FN_ALL)
 float cvCalAt(int b, float c)
 {
     float t = clamp(c, 0.0f, 1.0f) * 16.0f;
     int i = min(int(t), 15);
-    return lerp(cvCal[(b * 17) + i], cvCal[((b * 17) + i) + 1], t - float(i));
+    return cvMix(cvCal[(b * 17) + i], cvCal[((b * 17) + i) + 1], t - float(i));
 }
 #endif
 
@@ -80,7 +89,7 @@ float cvGradient(int b, float hf, float sheet)
         float tmp11 = 0.300000011920928955078125f;
         float tmp12 = hf;
         float st = cvSmooth(tmp7, tmp8, tmp9) * (1.0f - cvSmooth(tmp10, tmp11, tmp12));
-        return lerp(cu, st, clamp(sheet, 0.0f, 1.0f));
+        return cvMix(cu, st, clamp(sheet, 0.0f, 1.0f));
     }
     float tmp13 = 0.0f;
     float tmp14 = 0.1500000059604644775390625f;
@@ -150,14 +159,14 @@ float cloudDensity(float3 p)
         int tmp8 = b;
         float tmp9 = hf;
         float tmp10 = sheet;
-        float base_ = clamp(((s * cvGradient(tmp8, tmp9, tmp10)) - t) / max(1.0f - t, 9.9999997473787516355514526367188e-05f), 0.0f, 1.0f) * c;
+        float base_ = clamp(mad(s, cvGradient(tmp8, tmp9, tmp10), -t) / max(1.0f - t, 9.9999997473787516355514526367188e-05f), 0.0f, 1.0f) * c;
         if (base_ <= 0.0f)
         {
             continue;
         }
         float det = cvDetail.SampleLevel(_cvDetail_sampler, q / 0.60000002384185791015625f.xxx, log2(max((cvFootKm * 32.0f) / 0.60000002384185791015625f, 1.0f))).x;
-        float mod_ = lerp(det, 1.0f - det, clamp(hf * 4.0f, 0.0f, 1.0f)) * 0.20000000298023223876953125f;
-        d += (clamp((base_ - mod_) / (1.0f - mod_), 0.0f, 1.0f) * cvBands.density[b]);
+        float mod_ = cvMix(det, 1.0f - det, clamp(hf * 4.0f, 0.0f, 1.0f)) * 0.20000000298023223876953125f;
+        d = mad(clamp((base_ - mod_) / (1.0f - mod_), 0.0f, 1.0f), cvBands.density[b], d);
     }
     return d;
 }
