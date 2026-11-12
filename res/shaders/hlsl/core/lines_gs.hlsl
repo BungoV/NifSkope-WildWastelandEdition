@@ -39,13 +39,13 @@ static float4 vsColor[2];
 
 struct SPIRV_Cross_Input
 {
-    float4 vsColor : TEXCOORD0;
+    WW_LOC(0) float4 vsColor : TEXCOORD0;
     float4 gl_PositionIn : SV_Position;
 };
 
 struct SPIRV_Cross_Output
 {
-    float4 C : TEXCOORD0;
+    WW_LOC(1) float4 C : TEXCOORD1;
     float4 gl_Position : SV_Position;
 };
 

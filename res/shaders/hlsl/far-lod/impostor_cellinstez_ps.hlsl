@@ -260,20 +260,20 @@ static float4 fragColor;
 
 struct SPIRV_Cross_Input
 {
-    nointerpolation float4 frameRect[3] : TEXCOORD0;
-    nointerpolation float3 frameWeightV : TEXCOORD3;
-    nointerpolation float3 frameRight[3] : TEXCOORD4;
-    nointerpolation float3 frameUp[3] : TEXCOORD7;
-    nointerpolation float3 frameFwd[3] : TEXCOORD10;
-    nointerpolation int frameCount : TEXCOORD13;
-    nointerpolation float2 frameOffset[3] : TEXCOORD14;
-    nointerpolation float3 cardCenter : TEXCOORD17;
-    nointerpolation float2 cardHalf : TEXCOORD18;
-    nointerpolation float cardDepthSpan : TEXCOORD19;
-    nointerpolation float swayPhase : TEXCOORD20;
-    float3 cardPosModel : TEXCOORD21;
-    float2 cardQuadUv : TEXCOORD22;
-    float3 cardViewRay : TEXCOORD23;
+    WW_LOC(6) nointerpolation float4 frameRect[3] : TEXCOORD6;
+    WW_LOC(22) nointerpolation float3 frameWeightV : TEXCOORD22;
+    WW_LOC(9) nointerpolation float3 frameRight[3] : TEXCOORD9;
+    WW_LOC(12) nointerpolation float3 frameUp[3] : TEXCOORD12;
+    WW_LOC(0) nointerpolation float3 frameFwd[3] : TEXCOORD0;
+    WW_LOC(21) nointerpolation int frameCount : TEXCOORD21;
+    WW_LOC(3) nointerpolation float2 frameOffset[3] : TEXCOORD3;
+    WW_LOC(15) nointerpolation float3 cardCenter : TEXCOORD15;
+    WW_LOC(17) nointerpolation float2 cardHalf : TEXCOORD17;
+    WW_LOC(16) nointerpolation float cardDepthSpan : TEXCOORD16;
+    WW_LOC(23) nointerpolation float swayPhase : TEXCOORD23;
+    WW_LOC(18) float3 cardPosModel : TEXCOORD18;
+    WW_LOC(19) float2 cardQuadUv : TEXCOORD19;
+    WW_LOC(20) float3 cardViewRay : TEXCOORD20;
     noperspective centroid float4 gl_FragCoord : SV_Position;
 };
 

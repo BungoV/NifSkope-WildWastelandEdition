@@ -65,8 +65,8 @@ struct SPIRV_Cross_Input
 
 struct SPIRV_Cross_Output
 {
-    float3x3 btnMatrix : TEXCOORD0;
-    float4 vsColor : TEXCOORD3;
+    WW_LOC(5) float3x3 btnMatrix : TEXCOORD5;
+    WW_LOC(0) float4 vsColor : TEXCOORD0;
     float4 gl_Position : SV_Position;
 };
 

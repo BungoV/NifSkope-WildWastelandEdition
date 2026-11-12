@@ -57,12 +57,12 @@ struct SPIRV_Cross_Input
 
 struct SPIRV_Cross_Output
 {
-    float3 vsLightDir : TEXCOORD0;
-    float3 vsViewDir : TEXCOORD1;
-    float4 vsColor : TEXCOORD2;
-    float vsParticleSize : TEXCOORD3;
-    float2 vsUVOffset : TEXCOORD4;
-    float vsAngle : TEXCOORD5;
+    WW_LOC(2) float3 vsLightDir : TEXCOORD2;
+    WW_LOC(5) float3 vsViewDir : TEXCOORD5;
+    WW_LOC(0) float4 vsColor : TEXCOORD0;
+    WW_LOC(3) float vsParticleSize : TEXCOORD3;
+    WW_LOC(4) float2 vsUVOffset : TEXCOORD4;
+    WW_LOC(1) float vsAngle : TEXCOORD1;
     float4 gl_Position : SV_Position;
 };
 
