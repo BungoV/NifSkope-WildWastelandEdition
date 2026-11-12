@@ -510,6 +510,9 @@ void isMeasureFrame( Scene * scene, HdrGpu & g, int W, int H, int S, GLint prevD
 	}
 	if ( !m.fbo || m.w != W || m.h != H || m.dsFormat != g.dsFormat || m.fmt != postFormat() ) {
 		m.trusted = false;
+		// lane EMPTY240 R5-2: build 77's frame 546 ran 265 ms in the tone map with nothing uploaded; a remade target is one cause
+		std::fprintf( stderr, "tone map measure: target made %dx%d (format 0x%x, was %dx%d 0x%x): the first frame, a resize "
+			"or a live set\n", W, H, unsigned( postFormat() ), m.w, m.h, unsigned( m.fmt ) );
 		if ( !m.fbo )
 			fn->glGenFramebuffers( 1, &m.fbo );
 		if ( m.tex )
@@ -571,7 +574,10 @@ void isMeasureFrame( Scene * scene, HdrGpu & g, int W, int H, int S, GLint prevD
 		fn->glPixelStorei( GL_PACK_ALIGNMENT, 4 );
 		if ( mode == 1 ) {
 			std::vector<float> px( size_t( qw ) * size_t( qh ) * 4 );
-			fn->glGetTexImage( GL_TEXTURE_2D, 2, GL_RGBA, GL_FLOAT, px.data() );
+			{
+				WwSync::Wait wwWait( WwSync::GetTexImage );	// lane EMPTY240 R5-2: WW_IS_MEASURE=sync waits for the GPU here
+				fn->glGetTexImage( GL_TEXTURE_2D, 2, GL_RGBA, GL_FLOAT, px.data() );
+			}
 			isApply( scene, px.data(), qw, qh );
 			// lane PERFFIX1: the same frame's bloom, blurred on the GPU
 			if ( bloomGpuOn() && bloomBlur( scene, m, qw, qh, 0 ) )

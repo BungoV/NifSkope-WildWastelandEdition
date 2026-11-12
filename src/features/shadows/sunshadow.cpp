@@ -1457,6 +1457,29 @@ static void sunShadowPassImpl( Scene * scene )
 		addStrip( ix0, 0, ix1, iy0 );
 		addStrip( ix0, iy1, ix1, c.vh );
 	}
+	/* lane EMPTY240 R5-1: build 77's first paint filled every cascade's static layer at once (sun-cascades 528.9 ms on
+	 * the GPU). One first fill a paint now, the nearest cascade first; a cascade still waiting is cleared (lit) this
+	 * paint and fills on a later one. Red WW_CASCADEFILL_RED=1: every first fill in the same paint (build 77). */
+	bool waitFill[kCascades] = { false, false, false };
+	{
+		WW_SWITCH_STATIC( bool, fillRed, wwEnvInt( "WW_CASCADEFILL_RED" ) == 1 );
+		int firstFills = 0, waits = 0;
+		for ( int i = 0; i < kCascades && cacheOn && !fillRed && cst.red != 1; i++ ) {
+			if ( i >= s.nCasc || mode[i] != ShadowCache::Full || ( cst.c[i].valid && cst.c[i].map == s.map ) )
+				continue;	// not drawn, or a redraw of a filled layer
+			if ( firstFills++ > 0 ) {
+				waitFill[i] = true;
+				waits++;
+			}
+		}
+		static bool saidRed = false;
+		if ( waits > 0 )
+			std::fprintf( stderr, "sun cascades: first fills spread, %d of %d wait a paint (one first fill a paint; red "
+				"WW_CASCADEFILL_RED=1: all in one paint, build 77)\n", waits, firstFills );
+		else if ( fillRed && !saidRed )
+			std::fprintf( stderr, "sun cascades: first fills all in one paint (WW_CASCADEFILL_RED=1, build 77)\n" );
+		saidRed = fillRed;
+	}
 	NifSkopeOpenGLContext::Program * progRemap = nullptr;
 	if ( anyScroll ) {
 		progRemap = r->useProgram( "lookdev_csmremap.prog" );
@@ -1476,8 +1499,8 @@ static void sunShadowPassImpl( Scene * scene )
 	std::vector<Job> jobs;
 	std::vector<int> jobsOf[kCascades][3];
 	for ( int i = 0; i < kCascades; i++ ) {
-		if ( i >= s.nCasc )
-			continue;	// lane PERFFIX2 b: a cascade the tier does not draw (the receivers never select it)
+		if ( i >= s.nCasc || waitFill[i] )
+			continue;	// lane PERFFIX2 b: a cascade the tier does not draw (the receivers never select it); R5-1: one waiting
 		const Cascade & c = s.c[i];
 		auto add = [&]( int set, const int * rc ) {
 			Job j;
@@ -1884,6 +1907,12 @@ static void sunShadowPassImpl( Scene * scene )
 			continue;	// lane PERFFIX2 b: not drawn, not read
 		const Cascade & c = s.c[i];
 		ShadowCache::Layer & L = cst.c[i];
+		if ( waitFill[i] ) {	// lane EMPTY240 R5-1: lit this paint (no caster), filled on a later one (its layer stays unfilled)
+			L.live.known = false;
+			if ( attach( s.tex, i ) )
+				clearAll();
+			continue;
+		}
 		switch ( mode[i] ) {
 		case ShadowCache::Off:
 			L.live.known = false;	// lane PERFFIX2 b: the live layer is no static copy now

@@ -31,6 +31,7 @@ struct State
 	// the 5 s window of the `upload cap:` line
 	QElapsedTimer win;
 	qint64 winPaints = 0, winCapped = 0, winTex = 0, winMesh = 0, winBytes = 0, winNs = 0, winMaxNs = 0;
+	qint64 winPool = 0;	// R5-1: shapes kept out of a GPU geometry pool for a paint
 };
 
 inline State & st()
@@ -96,6 +97,18 @@ inline void deferMesh()
 	s.meshDeferredHit = true;
 }
 
+/* lane EMPTY240 R5-1: a shape entering a GPU geometry pool (the bindless twin's, the cascades' queue) is an upload too
+ * (build 77's first paint filled 310 MB of them outside the budget). Past the budget it waits: this paint draws it
+ * from its own buffers, as a shape the pool refuses. Red WW_POOLCAP_RED=1: the pools never wait (build 77). */
+inline bool poolWaits()
+{
+	WW_SWITCH_STATIC( bool, red, wwEnvInt( "WW_POOLCAP_RED" ) == 1 );
+	if ( red || !spent() )
+		return false;
+	st().winPool++;
+	return true;
+}
+
 //! glview paintGL: the paint's budget opens here and closes when this goes out of scope
 struct Paint
 {
@@ -122,15 +135,16 @@ struct Paint
 			s.winCapped++;
 		if ( s.win.elapsed() < 5000 )
 			return;
-		if ( s.winTex + s.winMesh > 0 )
+		if ( s.winTex + s.winMesh + s.winPool > 0 )
 			std::fprintf( stderr, "upload cap: %lld of %lld paints reached the budget (%lld ms or %lld MB a paint); %lld texture binds "
-				"and %lld mesh draws waited for a later paint; uploads %.1f MB, %.1f ms load time in all, longest paint %.1f ms "
-				"(red WW_UPLOAD_RED=1: no budget, build 76)\n",
+				"and %lld mesh draws waited for a later paint, %lld shapes drew from their own buffers while the geometry pools "
+				"waited (red WW_POOLCAP_RED=1: pools outside the budget, build 77); uploads %.1f MB, %.1f ms load time in all, "
+				"longest paint %.1f ms (red WW_UPLOAD_RED=1: no budget, build 76)\n",
 				(long long) s.winCapped, (long long) s.winPaints, (long long) kBudgetMs, (long long) kBudgetMB,
-				(long long) s.winTex, (long long) s.winMesh, double( s.winBytes ) / 1048576.0, double( s.winNs ) * 1e-6,
-				double( s.winMaxNs ) * 1e-6 );
+				(long long) s.winTex, (long long) s.winMesh, (long long) s.winPool, double( s.winBytes ) / 1048576.0,
+				double( s.winNs ) * 1e-6, double( s.winMaxNs ) * 1e-6 );
 		s.win.start();
-		s.winPaints = s.winCapped = s.winTex = s.winMesh = s.winBytes = s.winNs = s.winMaxNs = 0;
+		s.winPaints = s.winCapped = s.winTex = s.winMesh = s.winBytes = s.winNs = s.winMaxNs = s.winPool = 0;
 	}
 	static bool spentAfter( const State & s )
 	{

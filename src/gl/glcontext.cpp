@@ -1449,11 +1449,16 @@ static int wwColdLinkRun( const QVector< NifSkopeOpenGLContext::Program * > & st
 
 /* lane EMPTY240 R4-1: a program's first draw makes the driver finish it (build 76: the first cell paint and a live set's
  * first paint after a shader reload ran hundreds of ms in their zones). Each linked program draws one point here, at
- * the load, into a 1x1 target with the rasterizer off (no attributes; the per-draw row a zeroed buffer). Programs with a
- * geometry, tessellation or compute stage are left out. Red WW_PROGWARM_RED=1: none (finished at the first draw). */
+ * every shader load (the start and each reload: updateShaders), into a 1x1 target (no attributes; the per-draw row a
+ * zeroed buffer). Programs with a geometry, tessellation or compute stage are left out. R5-2: build 77 still ran 79 ms
+ * of obscurance and 33 of restir in a live set's paint: with the rasterizer off the driver may finish the vertex stage
+ * only. The point now goes through the whole pipeline into a half-float target (the frame's), with an empty scissor so
+ * no fragment runs (a bindless program never samples the zeroed row's handles). Red WW_PROGWARM_RED=1: none (finished
+ * at the first draw); =2: the rasterizer off into RGBA8 (build 77). */
 static void wwWarmPrograms( NifSkopeOpenGLContext::GLFunctions * f, NifSkopeOpenGLContext::Program * list )
 {
-	if ( wwEnvInt( "WW_PROGWARM_RED" ) == 1 ) {
+	const int	warmRed = wwEnvInt( "WW_PROGWARM_RED" );
+	if ( warmRed == 1 ) {
 		std::fprintf( stderr, "shader warm: off (WW_PROGWARM_RED=1: the driver finishes each program at its first draw)\n" );
 		return;
 	}
@@ -1467,11 +1472,14 @@ static void wwWarmPrograms( NifSkopeOpenGLContext::GLFunctions * f, NifSkopeOpen
 	f->glGetIntegerv( GL_RENDERBUFFER_BINDING, &prevRb );
 	f->glGetIntegeri_v( kSsboBinding, 12, &prevSsbo );
 	const GLboolean	prevDiscard = f->glIsEnabled( GL_RASTERIZER_DISCARD );
+	const GLboolean	prevScissorOn = f->glIsEnabled( GL_SCISSOR_TEST );
+	GLint	prevScissor[4] = { 0, 0, 0, 0 };
+	f->glGetIntegerv( GL_SCISSOR_BOX, prevScissor );
 	GLuint	vao = 0, fbo = 0, rb = 0, ssbo = 0;
 	f->glGenVertexArrays( 1, &vao );
 	f->glGenRenderbuffers( 1, &rb );
 	f->glBindRenderbuffer( GL_RENDERBUFFER, rb );
-	f->glRenderbufferStorage( GL_RENDERBUFFER, GL_RGBA8, 1, 1 );
+	f->glRenderbufferStorage( GL_RENDERBUFFER, warmRed == 2 ? GL_RGBA8 : GL_RGBA16F, 1, 1 );
 	f->glGenFramebuffers( 1, &fbo );
 	f->glBindFramebuffer( GL_DRAW_FRAMEBUFFER, fbo );
 	f->glFramebufferRenderbuffer( GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_RENDERBUFFER, rb );
@@ -1481,7 +1489,13 @@ static void wwWarmPrograms( NifSkopeOpenGLContext::GLFunctions * f, NifSkopeOpen
 	f->glBufferData( kSsbo, GLsizeiptr( zero.size() ), zero.data(), GL_STATIC_DRAW );
 	f->glBindBufferBase( kSsbo, 12, ssbo );
 	f->glBindVertexArray( vao );
-	f->glEnable( GL_RASTERIZER_DISCARD );
+	if ( warmRed == 2 ) {
+		f->glEnable( GL_RASTERIZER_DISCARD );
+	} else {
+		f->glDisable( GL_RASTERIZER_DISCARD );
+		f->glEnable( GL_SCISSOR_TEST );
+		f->glScissor( 0, 0, 0, 0 );
+	}
 	while ( f->glGetError() != GL_NO_ERROR ) {
 	}
 	// a stage this point draw does not fit: its query answers without an error only when the program has it
@@ -1504,8 +1518,15 @@ static void wwWarmPrograms( NifSkopeOpenGLContext::GLFunctions * f, NifSkopeOpen
 	}
 	while ( f->glGetError() != GL_NO_ERROR ) {
 	}
-	if ( !prevDiscard )
+	if ( prevDiscard )
+		f->glEnable( GL_RASTERIZER_DISCARD );
+	else
 		f->glDisable( GL_RASTERIZER_DISCARD );
+	if ( prevScissorOn )
+		f->glEnable( GL_SCISSOR_TEST );
+	else
+		f->glDisable( GL_SCISSOR_TEST );
+	f->glScissor( prevScissor[0], prevScissor[1], prevScissor[2], prevScissor[3] );
 	f->glUseProgram( GLuint( prevProg ) );
 	f->glBindVertexArray( GLuint( prevVao ) );
 	f->glBindBufferBase( kSsbo, 12, GLuint( prevSsbo ) );
@@ -1516,9 +1537,11 @@ static void wwWarmPrograms( NifSkopeOpenGLContext::GLFunctions * f, NifSkopeOpen
 	f->glDeleteRenderbuffers( 1, &rb );
 	f->glDeleteBuffers( 1, &ssbo );
 	f->glDeleteVertexArrays( 1, &vao );
-	std::fprintf( stderr, "shader warm: %d programs drawn once at the load (%d left out: geometry, tessellation or compute "
-		"stage, or not linked) in %lld ms (red WW_PROGWARM_RED=1: the driver finishes each at its first draw)\n",
-		warmed, skipped, (long long) clock.elapsed() );
+	std::fprintf( stderr, "shader warm: %d programs drawn once at this shader load (the start or a reload; %d left out: "
+		"geometry, tessellation or compute stage, or not linked) in %lld ms, %s (red WW_PROGWARM_RED=1: the driver finishes "
+		"each at its first draw; =2: the rasterizer off, build 77)\n",
+		warmed, skipped, (long long) clock.elapsed(),
+		warmRed == 2 ? "rasterizer off, RGBA8" : "whole pipeline, half-float target, empty scissor" );
 }
 
 void NifSkopeOpenGLContext::updateShaders()

@@ -7,6 +7,7 @@ BSD License - see nifskope.h
 #include "features/near/cellqueue.h"
 #include "features/near/cellgpucull.h"	// lane GPUDRIVEN1 step B
 #include "wwswitch.h"	// lane LIVESET1: the switches follow a live set
+#include "gl/wwuploadcap.h"	// lane EMPTY240 R5-1: the pool's intake counts in the paint's upload budget
 
 #include "gl/glcontext.hpp"
 #include "gl/glnode.h"
@@ -297,6 +298,8 @@ void ensureCapacity( GLFunctions * fn, Pool & p, std::size_t verts, std::size_t 
 void uploadEntry( GLFunctions * fn, Pool & p, const Shape * sh, const PoolEntry & e )
 {
 	const std::size_t nv = std::size_t( sh->verts.size() );
+	WwUp::Charge charge;	// lane EMPTY240 R5-1
+	WwUp::Charge::addBytes( qint64( nv ) * ( e.uv ? 20 : 12 ) + qint64( e.numIndices ) * 2 );
 	upload( fn, p.pos, std::size_t( e.baseVertex ) * 12, nv * 12, &( sh->verts.constFirst()[0] ) );
 	if ( e.uv )
 		upload( fn, p.uv, std::size_t( e.baseVertex ) * 8, nv * 8, &( sh->coords.constFirst().constFirst()[0] ) );
@@ -435,6 +438,8 @@ bool poolEnsure( NifSkopeOpenGLContext * r, const Shape * sh, PoolEntry & out )
 			out = x.e;
 			return true;
 		}
+		if ( WwUp::poolWaits() )
+			return false;	// lane EMPTY240 R5-1: past the paint's upload budget, drawn per draw this paint
 		if ( x.numVerts == nv && x.e.numIndices == ni ) {
 			// the same sizes: rewritten in place
 			x.h0 = h->h[0];
@@ -448,6 +453,8 @@ bool poolEnsure( NifSkopeOpenGLContext * r, const Shape * sh, PoolEntry & out )
 		p.iGarbage += x.e.numIndices;
 		p.entries.erase( it );
 	}
+	if ( WwUp::poolWaits() )
+		return false;	// lane EMPTY240 R5-1: past the paint's upload budget, drawn per draw this paint
 	ensureCapacity( r->fn, p, nv, ni );
 	Entry x;
 	x.h0 = h->h[0];
