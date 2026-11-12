@@ -20,6 +20,8 @@ HLSL_SPECS = [('src/features/gi/rtddgi', k, 'vulkan1.2', 'rtddgi_%s_spv' % k) fo
 # lane VKFRAME1: the bloom chain, built by src/features/vkframe/vkframe_spirv.sh from res/shaders/hlsl/post/<k>.hlsl
 VKFRAME_KERNELS = ('down', 'hold', 'up', 'src', 'comb')
 HLSL_SPECS += [('src/features/vkframe', 'bloom_' + k, 'vulkan1.2', 'vkframe_bloom_%s_spv' % k) for k in VKFRAME_KERNELS]
+VKFRAME_POST = ('tonemap',)	# the script's second loop: res/shaders/hlsl/post/<k>.hlsl -> <k>.spv.h
+HLSL_SPECS += [('src/features/vkframe', k, 'vulkan1.2', 'vkframe_%s_spv' % k) for k in VKFRAME_POST]
 HLSL_DIR = {'src/features/gi/rtddgi': 'res/shaders/hlsl/rtddgi', 'src/features/vkframe': 'res/shaders/hlsl/post'}
 DEFAULT_G = 'E:/Tools/RenderDoc/RenderDoc_1.45_64/plugins/spirv/glslangValidator.exe'
 DEFAULT_DXC = 'E:/Tools/dxc/bin/x64/dxc.exe'
@@ -53,6 +55,10 @@ def script_ok(tree):
 	vloop = m.group(1).split() if m else []
 	if sorted(vloop) != sorted(VKFRAME_KERNELS):
 		bad.append('src/features/vkframe/vkframe_spirv.sh: its DXC loop (%s) is not this checker\'s bloom kernels' % ' '.join(vloop))
+	m = re.search(r'^for t in ([a-z ]+); do\n\t"\$DXC" -spirv -fspv-target-env=vulkan1\.2 -T cs_6_0 -E main ', vf, re.M)
+	ploop = m.group(1).split() if m else []
+	if sorted(ploop) != sorted(VKFRAME_POST):
+		bad.append('src/features/vkframe/vkframe_spirv.sh: its post loop (%s) is not this checker\'s post kernels' % ' '.join(ploop))
 	return bad
 
 
