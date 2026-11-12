@@ -24,7 +24,10 @@ float Air_Target( uint b, float3 Pw )
 		return 0.0;
 	if ( shape == 2 ) {
 		const float4 b0 = DDGILights[b + 4u], b1 = DDGILights[b + 5u], b2 = DDGILights[b + 6u];
-		if ( abs( dot( b0.xyz, Pw ) + b0.w ) > 1.0 || abs( dot( b1.xyz, Pw ) + b1.w ) > 1.0 || abs( dot( b2.xyz, Pw ) + b2.w ) > 1.0 )
+		bool wwh0 = abs( dot( b0.xyz, Pw ) + b0.w ) > 1.0;
+		bool wwh1 = abs( dot( b1.xyz, Pw ) + b1.w ) > 1.0;
+		bool wwh2 = abs( dot( b2.xyz, Pw ) + b2.w ) > 1.0;
+		if (wwh0 || wwh1 || wwh2)
 			return 0.0;
 	}
 	float att = DDGI_Radial( d, l0.w, l3.x, l3.y, l3.z );

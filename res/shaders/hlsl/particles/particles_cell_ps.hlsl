@@ -416,7 +416,9 @@ float4 getTexture(int n)
 
 float pfxSoftFade()
 {
-    if ((((pfxGame & 2) == 0) || (!fxSoft)) || (volPart != 0))
+    bool wwh0 = (((pfxGame & 2) == 0) || (!fxSoft));
+    bool wwh1 = (volPart != 0);
+    if (wwh0 || wwh1)
     {
         return 1.0f;
     }
@@ -843,7 +845,9 @@ void vpLight(float3 posView, float3 P, float3 dW, float z, inout float3 N, float
             int i = cellLightAt(param_18, param_19);
             float4 t0 = cellLights.Load(i * 8);
             float d = length(t0.xyz - P);
-            if ((d >= t0.w) || (d < 0.001000000047497451305389404296875f))
+            bool wwh2 = (d >= t0.w);
+            bool wwh3 = (d < 0.001000000047497451305389404296875f);
+            if (wwh2 || wwh3)
             {
                 continue;
             }

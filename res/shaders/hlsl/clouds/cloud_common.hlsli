@@ -349,7 +349,9 @@ float cloudDensity(float3 p)
             float T = clamp(cvVarA.x + (cvVarA.y * n), 0.0f, 1.0f) * (1.0f - sheet);
             float tmp5 = T;
             hf = (p.z - cvBands.baseKm.x) / max(cvTypeDepth(tmp5), 0.001000000047497451305389404296875f);
-            if ((hf <= 0.0f) || (hf >= 1.0f))
+            bool wwh0 = (hf <= 0.0f);
+            bool wwh1 = (hf >= 1.0f);
+            if (wwh0 || wwh1)
             {
                 continue;
             }
@@ -379,7 +381,9 @@ float cloudDensity(float3 p)
         else
         {
             hf = (p.z - cvBands.baseKm.y) / max(cvBands.topKm.y - cvBands.baseKm.y, 0.001000000047497451305389404296875f);
-            if ((hf <= 0.0f) || (hf >= 1.0f))
+            bool wwh2 = (hf <= 0.0f);
+            bool wwh3 = (hf >= 1.0f);
+            if (wwh2 || wwh3)
             {
                 continue;
             }

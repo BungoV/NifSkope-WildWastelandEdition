@@ -36,7 +36,9 @@ void frag_main()
     float2 mp = (gl_FragCoord.xy / maskScale.xx) - 0.5f.xx;
     int2 base = int2(floor(mp));
     float2 fr = mp - float2(base);
-    if ((z >= 900000.0f) || (z <= 0.0f))
+    bool wwh0 = (z >= 900000.0f);
+    bool wwh1 = (z <= 0.0f);
+    if (wwh0 || wwh1)
     {
         fragMask = mask.Load(int3(clamp(int2(floor(gl_FragCoord.xy / maskScale.xx)), int2(0, 0), maskSize - int2(1, 1)), 0)).x;
         return;

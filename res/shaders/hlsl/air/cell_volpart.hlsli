@@ -221,7 +221,9 @@ float vpNearFade(float depth)
 #if defined(WW_FN_vpPuffAlpha) || defined(WW_FN_ALL)
 float vpPuffAlpha(float a0, float2 q)
 {
-    if (((volPartRed & 2) != 0) || (vpTiled != 0))
+    bool wwh0 = ((volPartRed & 2) != 0);
+    bool wwh1 = (vpTiled != 0);
+    if (wwh0 || wwh1)
     {
         return a0;
     }

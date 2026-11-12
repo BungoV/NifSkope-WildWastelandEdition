@@ -245,7 +245,9 @@ float4 volRoomAxis(int3 c0, float3 f, int2 L, int a, float4 plain, int3 dm)
             tmp1 = tmp2;
         }
         int base = tmp1;
-        if ((base < 0) || (w <= 0.0f))
+        bool wwh0 = (base < 0);
+        bool wwh1 = (w <= 0.0f);
+        if (wwh0 || wwh1)
         {
             continue;
         }

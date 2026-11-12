@@ -18,7 +18,9 @@ void DDGI_BorderCS( uint id )
 	const uint p = id / per;
 	const int k = int( id % per );
 	const int st = DDGI_ProbeState( p );
-	if ( st == DDGI_OFF || ( st == DDGI_ASLEEP && DDGI_P.flags.y != 0 ) || DDGI_Skipped( DDGI_P, p ) )
+	bool wwh0 = st == DDGI_OFF;
+	bool wwh1 = ( st == DDGI_ASLEEP && DDGI_P.flags.y != 0 );
+	if (wwh0 || wwh1 || DDGI_Skipped( DDGI_P, p ))
 		return;   // a covered coarse probe was not blended: no border, its age stays
 	if ( k < 4 * DDGI_IRR_S - 4 ) {
 		const int2 xy = DDGI_BorderXY( k, DDGI_IRR_S );

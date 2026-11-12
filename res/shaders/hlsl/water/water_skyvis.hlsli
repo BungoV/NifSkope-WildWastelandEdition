@@ -28,7 +28,8 @@ float wwWaterSkyVisDir(float3 P, float3 N, float3 D_1, float farV)
     {
         tmp4 = tmp3;
     }
-    if ((tmp4 || cellInterior) || (cellSpecSkyBase < 1.0f))
+    bool wwh0 = (cellSpecSkyBase < 1.0f);
+    if ((tmp4 || cellInterior) || wwh0)
     {
         return farV;
     }

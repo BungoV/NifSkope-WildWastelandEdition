@@ -16,10 +16,11 @@ static const float kAirEarthU = 6371000.0 * 70.0;
 float3 wwAirNightHue(float3 L)
 {
     bool tmp1 = fogNightHue <= 0.0f;
+    bool wwh0 = fogNight.w <= 0.0f;
     bool tmp2;
     if (!tmp1)
     {
-        tmp2 = fogNight.w <= 0.0f;
+        tmp2 = wwh0;
     }
     else
     {
@@ -108,10 +109,11 @@ float wwFogEval(float d, inout float z, inout float hb, out float3 fogCol)
     hb = lerp(pair.x, pair.y, f);
     float mx = fogK[2].w;
     bool tmp1 = ramp > 0.75f;
+    bool wwh1 = (fogRed & 1) == 0;
     bool tmp2;
     if (tmp1)
     {
-        tmp2 = (fogRed & 1) == 0;
+        tmp2 = wwh1;
     }
     else
     {
@@ -128,10 +130,11 @@ float wwFogEval(float d, inout float z, inout float hb, out float3 fogCol)
     }
     float clampT = tmp3;
     bool tmp4 = ramp < 0.014999999664723873138427734375f;
+    bool wwh2 = (fogRed & 2) == 0;
     bool tmp5;
     if (tmp4)
     {
-        tmp5 = (fogRed & 2) == 0;
+        tmp5 = wwh2;
     }
     else
     {
@@ -246,10 +249,11 @@ float wwAirRhoLaw(inout float z, float4 med, float4 layer, float4 ground)
     }
     float r = tmp1;
     bool tmp2 = layer.x <= 0.0f;
+    bool wwh3 = layer.w <= 0.0f;
     bool tmp3;
     if (tmp2)
     {
-        tmp3 = layer.w <= 0.0f;
+        tmp3 = wwh3;
     }
     else
     {
@@ -293,10 +297,11 @@ float wwAirRhoLaw(inout float z, float4 med, float4 layer, float4 ground)
 float wwAirColLaw(float lo, inout float hi, float4 med, float4 layer, float4 ground)
 {
     bool tmp1 = ground.z > 0.0f;
+    bool wwh4 = hi > med.w;
     bool tmp2;
     if (tmp1)
     {
-        tmp2 = hi > med.w;
+        tmp2 = wwh4;
     }
     else
     {
@@ -328,10 +333,11 @@ float wwAirColLaw(float lo, inout float hi, float4 med, float4 layer, float4 gro
     float tmp16 = med.z;
     float c = wwAirColOne(tmp13, tmp14, tmp15, tmp16);
     bool tmp17 = layer.x <= 0.0f;
+    bool wwh5 = layer.w <= 0.0f;
     bool tmp18;
     if (tmp17)
     {
-        tmp18 = layer.w <= 0.0f;
+        tmp18 = wwh5;
     }
     else
     {
@@ -696,10 +702,11 @@ float3 wwAirTailJ(float4 last, float4 prev)
             return max((last.xyz - prev.xyz) / dT.xxx, 0.0f.xxx);
         }
         bool tmp1 = volAirGround.z > 0.0f;
+        bool wwh6 = last.w < 0.99989998340606689453125f;
         bool tmp2;
         if (tmp1)
         {
-            tmp2 = last.w < 0.99989998340606689453125f;
+            tmp2 = wwh6;
         }
         else
         {
@@ -769,10 +776,11 @@ float3 wwAirThinJ(float3 J, float4 v, float z0, float far)
 {
     float zc = fogView.w;
     bool tmp1 = (fogRed & 8) == 0;
+    bool wwh7 = (-log(max(v.w, 9.9999999747524270787835121154785e-07f))) <= 0.125f;
     bool tmp2;
     if (tmp1)
     {
-        tmp2 = (-log(max(v.w, 9.9999999747524270787835121154785e-07f))) <= 0.125f;
+        tmp2 = wwh7;
     }
     else
     {
@@ -784,19 +792,21 @@ float3 wwAirThinJ(float3 J, float4 v, float z0, float far)
     if (tmp3)
     {
         bool tmp5 = (volAirFlags & 32768) == 0;
+        bool wwh8 = volAirGround.z <= 0.0f;
         bool tmp6;
         if (!tmp5)
         {
-            tmp6 = volAirGround.z <= 0.0f;
+            tmp6 = wwh8;
         }
         else
         {
             tmp6 = tmp5;
         }
+        bool wwh9 = min(zc, z0) < volAirMed.w;
         bool tmp7;
         if (!tmp6)
         {
-            tmp7 = min(zc, z0) < volAirMed.w;
+            tmp7 = wwh9;
         }
         else
         {
@@ -868,10 +878,11 @@ float3 wwGridTailJ(float2 uv, float4 a, float4 b, float4 whole)
     bool red = (fogRed & 8) != 0;
     float tmp1 = whole.w;
     float db = (volFar.x * exp(volFar.y)) * (1.0f - wwAirTailW(tmp1));
+    bool wwh10 = db > volFar.x;
     bool tmp2;
     if (!red)
     {
-        tmp2 = db > volFar.x;
+        tmp2 = wwh10;
     }
     else
     {
@@ -1005,19 +1016,21 @@ float4 wwVolAirAtFar(float d, float2 uv, float3 posView)
     float4 w = wwGridAt(tmp6, tmp7, tmp8, tmp9, tmp10);
     float4 o = float4(v.xyz + (w.xyz * v.w), v.w * w.w);
     bool tmp11 = fF <= volFar.z;
+    bool wwh11 = (volAirFlags & 2) == 0;
     bool tmp12;
     if (!tmp11)
     {
-        tmp12 = (volAirFlags & 2) == 0;
+        tmp12 = wwh11;
     }
     else
     {
         tmp12 = tmp11;
     }
+    bool wwh12 = volAirMed.x <= 0.0f;
     bool tmp13;
     if (!tmp12)
     {
-        tmp13 = volAirMed.x <= 0.0f;
+        tmp13 = wwh12;
     }
     else
     {
@@ -1200,19 +1213,21 @@ bool wwVolAirFarHead(float d, float2 uv, float3 posView, inout float4 o, out flo
     float4 w = wwGridAt(tmp6, tmp7, tmp8, tmp9, tmp10);
     o = float4(v.xyz + (w.xyz * v.w), v.w * w.w);
     bool tmp11 = fF <= volFar.z;
+    bool wwh13 = (volAirFlags & 2) == 0;
     bool tmp12;
     if (!tmp11)
     {
-        tmp12 = (volAirFlags & 2) == 0;
+        tmp12 = wwh13;
     }
     else
     {
         tmp12 = tmp11;
     }
+    bool wwh14 = volAirMed.x <= 0.0f;
     bool tmp13;
     if (!tmp12)
     {
-        tmp13 = volAirMed.x <= 0.0f;
+        tmp13 = wwh14;
     }
     else
     {
@@ -1258,19 +1273,21 @@ bool wwVolAirNearHead(float d, float2 uv, inout float4 v, out float3 J, out floa
     }
     v = float4(max(v.xyz, 0.0f.xxx), clamp(v.w, 0.0f, 1.0f));
     bool tmp5 = f <= volSlices.z;
+    bool wwh15 = (volAirFlags & 2) == 0;
     bool tmp6;
     if (!tmp5)
     {
-        tmp6 = (volAirFlags & 2) == 0;
+        tmp6 = wwh15;
     }
     else
     {
         tmp6 = tmp5;
     }
+    bool wwh16 = volAirMed.x <= 0.0f;
     bool tmp7;
     if (!tmp6)
     {
-        tmp7 = volAirMed.x <= 0.0f;
+        tmp7 = wwh16;
     }
     else
     {
@@ -1324,19 +1341,21 @@ float4 wwVolAirAtUv(float3 posView, float2 uv)
     }
     v = float4(max(v.xyz, 0.0f.xxx), clamp(v.w, 0.0f, 1.0f));
     bool tmp8 = f <= volSlices.z;
+    bool wwh17 = (volAirFlags & 2) == 0;
     bool tmp9;
     if (!tmp8)
     {
-        tmp9 = (volAirFlags & 2) == 0;
+        tmp9 = wwh17;
     }
     else
     {
         tmp9 = tmp8;
     }
+    bool wwh18 = volAirMed.x <= 0.0f;
     bool tmp10;
     if (!tmp9)
     {
-        tmp10 = volAirMed.x <= 0.0f;
+        tmp10 = wwh18;
     }
     else
     {
@@ -1446,19 +1465,21 @@ float4 wwVolAirAtUv(float3 posView, float2 uv)
     }
     v = float4(max(v.xyz, 0.0f.xxx), clamp(v.w, 0.0f, 1.0f));
     bool tmp8 = f <= volSlices.z;
+    bool wwh19 = (volAirFlags & 2) == 0;
     bool tmp9;
     if (!tmp8)
     {
-        tmp9 = (volAirFlags & 2) == 0;
+        tmp9 = wwh19;
     }
     else
     {
         tmp9 = tmp8;
     }
+    bool wwh20 = volAirMed.x <= 0.0f;
     bool tmp10;
     if (!tmp9)
     {
-        tmp10 = volAirMed.x <= 0.0f;
+        tmp10 = wwh20;
     }
     else
     {
@@ -1573,19 +1594,21 @@ float4 wwVolAirAtUv(float3 posView, float2 uv)
     }
     v = float4(max(v.xyz, 0.0f.xxx), clamp(v.w, 0.0f, 1.0f));
     bool tmp8 = f <= volSlices.z;
+    bool wwh21 = (volAirFlags & 2) == 0;
     bool tmp9;
     if (!tmp8)
     {
-        tmp9 = (volAirFlags & 2) == 0;
+        tmp9 = wwh21;
     }
     else
     {
         tmp9 = tmp8;
     }
+    bool wwh22 = volAirMed.x <= 0.0f;
     bool tmp10;
     if (!tmp9)
     {
-        tmp10 = volAirMed.x <= 0.0f;
+        tmp10 = wwh22;
     }
     else
     {
@@ -1697,7 +1720,9 @@ float4 wwVolAirAt(inout float3 posView)
 float wwAirDriftAt(float3 p)
 {
     float f = 1.0f - clamp(((length(p) * fogDistScale) - volAirDrift.y) * volAirDrift.z, 0.0f, 1.0f);
-    if ((volAirDrift.x <= 0.0f) || (f <= 0.0f))
+    bool wwh0 = (volAirDrift.x <= 0.0f);
+    bool wwh1 = (f <= 0.0f);
+    if (wwh0 || wwh1)
     {
         return 1.0f;
     }
@@ -1712,7 +1737,9 @@ float wwAirDriftAt(float3 p)
 float wwAirDriftAt(float3 p)
 {
     float f = 1.0f - clamp(((length(p) * fogDistScale) - volAirDrift.y) * volAirDrift.z, 0.0f, 1.0f);
-    if ((volAirDrift.x <= 0.0f) || (f <= 0.0f))
+    bool wwh2 = (volAirDrift.x <= 0.0f);
+    bool wwh3 = (f <= 0.0f);
+    if (wwh2 || wwh3)
     {
         return 1.0f;
     }
@@ -1747,37 +1774,41 @@ float wwAirDriftSunK(float3 p, float lo, float mu, float top)
 float2 wwVolAirSunTD(float3 posView)
 {
     bool tmp1 = (!fogOn) || (!volOn);
+    bool wwh23 = volSlices.w < 0.5f;
     bool tmp2;
     if (!tmp1)
     {
-        tmp2 = volSlices.w < 0.5f;
+        tmp2 = wwh23;
     }
     else
     {
         tmp2 = tmp1;
     }
+    bool wwh24 = fogSun.w <= 0.0f;
     bool tmp3;
     if (!tmp2)
     {
-        tmp3 = fogSun.w <= 0.0f;
+        tmp3 = wwh24;
     }
     else
     {
         tmp3 = tmp2;
     }
+    bool wwh25 = volAirMed.x <= 0.0f;
     bool tmp4;
     if (!tmp3)
     {
-        tmp4 = volAirMed.x <= 0.0f;
+        tmp4 = wwh25;
     }
     else
     {
         tmp4 = tmp3;
     }
+    bool wwh26 = (volAirFlags & 1) == 0;
     bool tmp5;
     if (!tmp4)
     {
-        tmp5 = (volAirFlags & 1) == 0;
+        tmp5 = wwh26;
     }
     else
     {
@@ -1971,10 +2002,11 @@ float3 wwFog(inout float3 preFog, float3 posView)
     {
         return preFog;
     }
+    bool wwh27 = volSlices.w > 0.5f;
     bool tmp3;
     if (volOn)
     {
-        tmp3 = volSlices.w > 0.5f;
+        tmp3 = wwh27;
     }
     else
     {
@@ -2059,19 +2091,21 @@ float3 wwFogFx(inout float3 lin, float3 posView, bool additive)
     {
         return lin;
     }
+    bool wwh28 = volSlices.w > 0.5f;
     bool tmp1;
     if (volOn)
     {
-        tmp1 = volSlices.w > 0.5f;
+        tmp1 = wwh28;
     }
     else
     {
         tmp1 = volOn;
     }
+    bool wwh29 = (volAirFlags & 16) != 0;
     bool tmp2;
     if (tmp1)
     {
-        tmp2 = (volAirFlags & 16) != 0;
+        tmp2 = wwh29;
     }
     else
     {
@@ -2167,10 +2201,11 @@ bool wwFogProbe(float3 posView, out float3 o)
 {
     o = 0.0f.xxx;
     bool tmp1 = fogOn && volOn;
+    bool wwh30 = (volProbe == 1) || (volProbe == 2);
     bool tmp2;
     if (tmp1)
     {
-        tmp2 = (volProbe == 1) || (volProbe == 2);
+        tmp2 = wwh30;
     }
     else
     {
@@ -2200,10 +2235,11 @@ bool wwFogProbe(float3 posView, out float3 o)
         return true;
     }
     bool tmp7 = !fogOn;
+    bool wwh31 = fogProbe.z < 0.5f;
     bool tmp8;
     if (!tmp7)
     {
-        tmp8 = fogProbe.z < 0.5f;
+        tmp8 = wwh31;
     }
     else
     {
@@ -2301,10 +2337,11 @@ bool wwFogProbe(float3 posView, out float3 o)
 {
     o = 0.0f.xxx;
     bool tmp1 = fogOn && volOn;
+    bool wwh32 = (volProbe == 1) || (volProbe == 2);
     bool tmp2;
     if (tmp1)
     {
-        tmp2 = (volProbe == 1) || (volProbe == 2);
+        tmp2 = wwh32;
     }
     else
     {
@@ -2334,10 +2371,11 @@ bool wwFogProbe(float3 posView, out float3 o)
         return true;
     }
     bool tmp7 = !fogOn;
+    bool wwh33 = fogProbe.z < 0.5f;
     bool tmp8;
     if (!tmp7)
     {
-        tmp8 = fogProbe.z < 0.5f;
+        tmp8 = wwh33;
     }
     else
     {

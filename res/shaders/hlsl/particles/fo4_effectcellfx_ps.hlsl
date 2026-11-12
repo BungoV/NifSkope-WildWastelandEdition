@@ -1045,7 +1045,9 @@ void vpLight(float3 posView, float3 P, float3 dW, float z, inout float3 N, float
             int i = cellLightAt(param_18, param_19);
             float4 t0 = cellLights.Load(i * 8);
             float d = length(t0.xyz - P);
-            if ((d >= t0.w) || (d < 0.001000000047497451305389404296875f))
+            bool wwh0 = (d >= t0.w);
+            bool wwh1 = (d < 0.001000000047497451305389404296875f);
+            if (wwh0 || wwh1)
             {
                 continue;
             }
@@ -1340,7 +1342,9 @@ float3 fxLumpNormal(inout float3 N, float3 Nf, float3 pv, float a)
         float2 dux = ddx(texCoord);
         float2 duy = ddy(texCoord);
         float duv = abs((dux.x * duy.y) - (dux.y * duy.x));
-        if ((abs(det) < 9.9999996826552253889678874634872e-21f) || (duv < 9.9999996826552253889678874634872e-21f))
+        bool wwh2 = (abs(det) < 9.9999996826552253889678874634872e-21f);
+        bool wwh3 = (duv < 9.9999996826552253889678874634872e-21f);
+        if (wwh2 || wwh3)
         {
             return normalize(n);
         }
@@ -1355,7 +1359,9 @@ float3 fxLumpNormal(inout float3 N, float3 Nf, float3 pv, float a)
     float2 dux_1 = ddx(texCoord);
     float2 duy_1 = ddy(texCoord);
     float duv_1 = abs((dux_1.x * duy_1.y) - (dux_1.y * duy_1.x));
-    if ((abs(det_1) < 9.9999996826552253889678874634872e-21f) || (duv_1 < 9.9999996826552253889678874634872e-21f))
+    bool wwh4 = (abs(det_1) < 9.9999996826552253889678874634872e-21f);
+    bool wwh5 = (duv_1 < 9.9999996826552253889678874634872e-21f);
+    if (wwh4 || wwh5)
     {
         return N;
     }

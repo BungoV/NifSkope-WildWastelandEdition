@@ -750,7 +750,9 @@ float ussTerrSelfWeight(float2 uv, float wz, float4 h)
     float tmp5 = ussTerrExtra.x;
     float2 tmp6 = ussTerrExtraUv(tmp4, tmp5);
     float cast = ussTerrMap.Sample(_ussTerrMap_sampler, tmp6).y;
-    if ((rg.x <= 0.0f) || (cast <= 0.0f))
+    bool wwh0 = (rg.x <= 0.0f);
+    bool wwh1 = (cast <= 0.0f);
+    if (wwh0 || wwh1)
     {
         return 1.0f;
     }
@@ -787,7 +789,9 @@ float ussTerrSelfWeight(float2 uv, float wz, float4 h)
     float tmp5 = ussTerrExtra.x;
     float2 tmp6 = ussTerrExtraUv(tmp4, tmp5);
     float cast = ussTerrMap.SampleLevel(_ussTerrMap_sampler, tmp6, 0.0f).y;
-    if ((rg.x <= 0.0f) || (cast <= 0.0f))
+    bool wwh2 = (rg.x <= 0.0f);
+    bool wwh3 = (cast <= 0.0f);
+    if (wwh2 || wwh3)
     {
         return 1.0f;
     }
@@ -1405,7 +1409,8 @@ float wwAirTailShadow(float3 dirView, float t0, float t1, float tau)
         tmp4 = tmp3;
     }
     bool cloud = tmp4;
-    if (((!terr) && (!cloud)) || (t1 <= t0))
+    bool wwh4 = (t1 <= t0);
+    if (((!terr) && (!cloud)) || wwh4)
     {
         return 1.0f;
     }

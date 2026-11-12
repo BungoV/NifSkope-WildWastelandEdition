@@ -256,7 +256,9 @@ void frag_main()
     float q = length(cross(d, moonD));
     float cov = clamp(((sinR - q) / pxAng) + 0.5f, 0.0f, 1.0f) * clamp((d.z / pxAng) + 0.5f, 0.0f, 1.0f);
     cov *= alpha;
-    if ((b <= 0.0f) || (cov <= 0.0f))
+    bool wwh0 = (b <= 0.0f);
+    bool wwh1 = (cov <= 0.0f);
+    if (wwh0 || wwh1)
     {
         discard;
     }

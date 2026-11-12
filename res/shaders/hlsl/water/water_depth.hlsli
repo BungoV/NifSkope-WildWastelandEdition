@@ -163,7 +163,9 @@ float wwWaterBedNearW(float bd, float sceneVert, float dist, bool on)
     float tmp2 = sceneVert;
     bool tmp3 = true;
     float far = wwWaterBedBakeW(tmp1, tmp2, tmp3);
-    if (((!on) || (bd < 0.0f)) || (sceneVert > 100000000.0f))
+    bool wwh0 = ((!on) || (bd < 0.0f));
+    bool wwh1 = (sceneVert > 100000000.0f);
+    if (wwh0 || wwh1)
     {
         return far;
     }

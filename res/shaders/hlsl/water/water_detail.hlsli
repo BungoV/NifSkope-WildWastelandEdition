@@ -17,7 +17,9 @@ float2 wwWaterDetailUv(float2 wxy, float2 cs, float k, float tile, float2 scroll
 float2 wwWaterOceanDetail(float2 wxy, float tile, float2 scroll, float var, float w, out float keep)
 {
     keep = 0.0f;
-    if (((((waterOceanRed & 4096) != 0) || (w <= 0.0f)) || (var <= 0.0f)) || (tile <= 0.0f))
+    bool wwh0 = ((((waterOceanRed & 4096) != 0) || (w <= 0.0f)) || (var <= 0.0f));
+    bool wwh1 = (tile <= 0.0f);
+    if (wwh0 || wwh1)
     {
         return 0.0f.xx;
     }

@@ -467,7 +467,8 @@ void frag_main()
         }
         return;
     }
-    if (((hdrMode != 0) || (!cellOn)) || (!cellIsOn))
+    bool wwh0 = ((hdrMode != 0) || (!cellOn));
+    if (wwh0 || (!cellIsOn))
     {
         fragColor = x;
         return;

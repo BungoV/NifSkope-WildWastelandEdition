@@ -301,7 +301,9 @@ float4 cast(int2 wp)
                 float3 S = viewPos(param_10, param_11);
                 float3 dF = S - P;
                 float len = length(dF);
-                if ((len > radius) || (len < 0.001000000047497451305389404296875f))
+                bool wwh0 = (len > radius);
+                bool wwh1 = (len < 0.001000000047497451305389404296875f);
+                if (wwh0 || wwh1)
                 {
                     continue;
                 }
@@ -705,7 +707,9 @@ float4 castEmissive(int2 wp)
                 float3 S = viewPos(param_17, param_18);
                 float3 dF = S - P;
                 float len = length(dF);
-                if ((len > radius) || (len < 0.001000000047497451305389404296875f))
+                bool wwh2 = (len > radius);
+                bool wwh3 = (len < 0.001000000047497451305389404296875f);
+                if (wwh2 || wwh3)
                 {
                     continue;
                 }
@@ -719,7 +723,8 @@ float4 castEmissive(int2 wp)
                 uint bits = sectorBits(param_19, param_20);
                 uint fresh = bits & (~occ);
                 occ |= bits;
-                if ((fresh == 0u) || (!hit))
+                bool wwh4 = (fresh == 0u);
+                if (wwh4 || (!hit))
                 {
                     continue;
                 }
@@ -1212,7 +1217,9 @@ void frag_main()
     int2 wp = int2(gl_FragCoord.xy);
     fragMeta = 0.0f.xxxx;
     fragState = 0.0f.xxxx;
-    if ((ssgiStage == 1) || (ssgiStage == 8))
+    bool wwh5 = (ssgiStage == 1);
+    bool wwh6 = (ssgiStage == 8);
+    if (wwh5 || wwh6)
     {
         float4 tmp3632;
         if (ssgiStage == 1)
@@ -1459,7 +1466,9 @@ void frag_main()
         tmp4047 = 0.0f.xxx;
     }
     float3 eAdd = tmp4047;
-    if ((g.w <= 0.0f) || (blurRadius <= 0.0f))
+    bool wwh7 = (g.w <= 0.0f);
+    bool wwh8 = (blurRadius <= 0.0f);
+    if (wwh7 || wwh8)
     {
         fragColor = c0 + float4(eAdd, 0.0f);
         return;

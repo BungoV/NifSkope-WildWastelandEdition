@@ -75,7 +75,8 @@ void frag_main()
     float4 c = 0.0f.xxxx;
     float4 tr = 0.0f.xxxx;
     float cov = 0.0f;
-    if ((fxrMode == 1) || (!edge))
+    bool wwh0 = (fxrMode == 1);
+    if (wwh0 || (!edge))
     {
         for (int i_1 = 0; i_1 < 4; i_1++)
         {

@@ -658,7 +658,9 @@ float3 cellShadowProbe(float3 P, float3 N)
         int tmp5 = k;
         int i = cellLightAt(tmp4, tmp5);
         float slot = cellLights.Load((i * 8) + 4).x;
-        if ((slot < (-0.5f)) || (slot > 2.5f))
+        bool wwh0 = (slot < (-0.5f));
+        bool wwh1 = (slot > 2.5f);
+        if (wwh0 || wwh1)
         {
             continue;
         }
@@ -844,7 +846,8 @@ float cellAmbShare(float3 P, float3 N)
         float3 tmp2 = N;
         return cellGiSkyK(tmp1, tmp2);
     }
-    if ((true || (!cellHasDalc)) || (cellGiAmb != 1))
+    bool wwh2 = (cellGiAmb != 1);
+    if ((true || (!cellHasDalc)) || wwh2)
     {
         return 0.0f;
     }
@@ -1621,7 +1624,8 @@ float3 cellProbeRaw(float3 P, float3 N)
 #if defined(WW_FN_cellPassOut) || defined(WW_FN_ALL)
 float3 cellPassOut(float3 P, float3 N)
 {
-    if (((cellPass >= 3) && (cellPass != 6)) || true)
+    bool wwh3 = ((cellPass >= 3) && (cellPass != 6));
+    if (wwh3 || true)
     {
         bool3 tmp1 = (cellPass == 6).xxx;
         return float3(tmp1.x ? float3(1.0f, 0.0f, 1.0f).x : float3(0.0f, 1.0f, 1.0f).x, tmp1.y ? float3(1.0f, 0.0f, 1.0f).y : float3(0.0f, 1.0f, 1.0f).y, tmp1.z ? float3(1.0f, 0.0f, 1.0f).z : float3(0.0f, 1.0f, 1.0f).z);
@@ -2031,7 +2035,8 @@ float3 cellAmbGi(float3 amb, float3 gi, float3 P, float3 N)
     {
         return 0.0f.xxx;
     }
-    if ((cellGiAmb == 0) || true)
+    bool wwh4 = (cellGiAmb == 0);
+    if (wwh4 || true)
     {
         return amb;
     }
@@ -2409,7 +2414,9 @@ float3 cellProbeOut(float3 normalView, float3 posView, float alphaR, float kSmit
         float3 tmp14 = cellFarProbeOut(tmp12, tmp13);
         return tmp14;
     }
-    if (((((cellProbe == 1) || (cellProbe == 8)) || (cellProbe == 10)) || (cellProbe == 30)) || (cellProbe == 31))
+    bool wwh5 = ((((cellProbe == 1) || (cellProbe == 8)) || (cellProbe == 10)) || (cellProbe == 30));
+    bool wwh6 = (cellProbe == 31);
+    if (wwh5 || wwh6)
     {
         float3 tmp15;
         if (cellProbe == 1)

@@ -218,7 +218,9 @@ float cvShaftDens(float3 p)
 {
     float base = cvBands.baseKm.x;
     float hb = (base - p.z) / max(base - cvShaft.y, 0.001000000047497451305389404296875f);
-    if ((hb <= 0.0f) || (hb >= 1.0f))
+    bool wwh0 = (hb <= 0.0f);
+    bool wwh1 = (hb >= 1.0f);
+    if (wwh0 || wwh1)
     {
         return 0.0f;
     }

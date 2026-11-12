@@ -594,7 +594,8 @@ float3 cellFxLight(int i, float3 P)
 
 float3 fxRoomLitMul(float3 Pv, float3 normal)
 {
-    if (((fxLitMode & 8) != 0) || (!cellHasDir))
+    bool wwh0 = ((fxLitMode & 8) != 0);
+    if (wwh0 || (!cellHasDir))
     {
         return 1.0f.xxx;
     }
@@ -1459,7 +1460,9 @@ void vpLight(float3 posView, float3 P, float3 dW, float z, inout float3 N, float
             int i = cellLightAt(param_18, param_19);
             float4 t0 = cellLights.Load(i * 8);
             float d = length(t0.xyz - P);
-            if ((d >= t0.w) || (d < 0.001000000047497451305389404296875f))
+            bool wwh1 = (d >= t0.w);
+            bool wwh2 = (d < 0.001000000047497451305389404296875f);
+            if (wwh1 || wwh2)
             {
                 continue;
             }
