@@ -524,6 +524,7 @@ constexpr size_t kWatchParts = 96;	// parts a paint records at most (a sub opene
 struct Watch
 {
 	bool loaded = false, red = false, inFrame = false;
+	bool partGpu = false;	// lane EMPTY240 R6-1: parts take a GPU timestamp pair (red WW_WATCHPART_RED=1, build 78)
 	QOpenGLContext * ctx = nullptr;
 	QOpenGLFunctions_3_3_Core * gl = nullptr;
 	std::vector<GLuint> pool;
@@ -540,6 +541,13 @@ Watch & watch()
 	if ( !w.loaded ) {
 		w.loaded = true;
 		w.red = wwEnvInt( "WW_GPUZONES_RED" ) == 1;
+		/* lane EMPTY240 R6-1: build 78 put two glQueryCounter calls round every sub-stage of every paint (96 at most);
+		 * a part's GPU figure also read an unflushed timestamp across a CPU stall (frame 526's 286 ms "tone-vrs" was
+		 * the CPU's ram census). Parts now take the CPU clock, draws and uploads only; zones keep their GPU pairs. */
+		w.partGpu = wwEnvInt( "WW_WATCHPART_RED" ) == 1;
+		if ( !w.red )
+			std::fprintf( stderr, "frame gpu zones: parts %s (WW_WATCHPART_RED=1 = a GPU timestamp pair per part, build 78)\n",
+				w.partGpu ? "take GPU timestamps" : "take CPU stamps only" );
 		for ( int & o : w.open )
 			o = kNotOpen;
 		for ( int & o : w.partOpen )
@@ -599,9 +607,9 @@ void watchAdd( std::vector<WatchSum> & sums, const char * name, double gpu, qint
 	sums[k].meshes += meshes;
 	sums[k].times++;
 }
-QByteArray watchFigure( const WatchSum & s, bool times )
+QByteArray watchFigure( const WatchSum & s, bool times, bool gpu = true )
 {
-	QByteArray f = QByteArray::number( s.gpu, 'f', 1 );
+	QByteArray f = gpu ? QByteArray::number( s.gpu, 'f', 1 ) : QByteArray( "-" );
 	if ( times && s.times > 1 )
 		f += " (x" + QByteArray::number( s.times ) + ")";
 	f += " [cpu " + QByteArray::number( s.cpu, 'f', 1 ) + ", " + QByteArray::number( s.draws ) + " draws";
@@ -658,7 +666,7 @@ void watchCollect( WatchSlot & sl )
 		}
 		for ( const WatchZone & z : sl.parts )
 			if ( z.closed )
-				watchAdd( parts, z.name, watchMs( z.q0, z.q1 ), z.c1 - z.c0, z.d1 - z.d0, z.t1 - z.t0, z.m1 - z.m0 );
+				watchAdd( parts, z.name, z.q0 ? watchMs( z.q0, z.q1 ) : 0.0, z.c1 - z.c0, z.d1 - z.d0, z.t1 - z.t0, z.m1 - z.m0 );
 		const WatchZone & a = sl.whole;
 		QByteArray line = "frame gpu zones: frame " + QByteArray::number( sl.frame ) + " took "
 			+ QByteArray::number( total, 'f', 1 ) + " ms on the GPU [cpu " + QByteArray::number( double( a.c1 - a.c0 ) * 1e-6, 'f', 1 )
@@ -681,7 +689,7 @@ void watchCollect( WatchSlot & sl )
 		for ( const WatchSum & s : parts ) {
 			if ( s.gpu < 0.5 && s.cpu < 0.5 )
 				continue;
-			inside += QByteArray( inside.isEmpty() ? "" : " +" ) + " " + s.name + " " + watchFigure( s, true );
+			inside += QByteArray( inside.isEmpty() ? "" : " +" ) + " " + s.name + " " + watchFigure( s, true, w.partGpu );
 		}
 		if ( !inside.isEmpty() )
 			line += " | parts:" + inside;
@@ -696,6 +704,8 @@ void watchCollect( WatchSlot & sl )
 		w.pool.push_back( z.q1 );
 	}
 	for ( const WatchZone & z : sl.parts ) {
+		if ( !z.q0 )
+			continue;
 		w.pool.push_back( z.q0 );
 		w.pool.push_back( z.q1 );
 	}
@@ -727,10 +737,11 @@ void watchPart( int sub, bool opening )
 	if ( opening ) {
 		if ( w.partOpen[sub] >= 0 || sl.parts.size() >= kWatchParts )
 			return;
-		WatchZone z{ kSubName[sub], watchQuery(), watchQuery(), false };
+		WatchZone z{ kSubName[sub], w.partGpu ? watchQuery() : 0u, w.partGpu ? watchQuery() : 0u, false };
 		z.parent = w.top;
 		watchStamp( z, false );
-		w.gl->glQueryCounter( z.q0, GL_TIMESTAMP );
+		if ( z.q0 )
+			w.gl->glQueryCounter( z.q0, GL_TIMESTAMP );
 		sl.parts.push_back( z );
 		w.partOpen[sub] = int( sl.parts.size() ) - 1;
 		return;
@@ -738,7 +749,8 @@ void watchPart( int sub, bool opening )
 	if ( w.partOpen[sub] < 0 )
 		return;
 	WatchZone & z = sl.parts[size_t( w.partOpen[sub] )];
-	w.gl->glQueryCounter( z.q1, GL_TIMESTAMP );
+	if ( z.q1 )
+		w.gl->glQueryCounter( z.q1, GL_TIMESTAMP );
 	watchStamp( z, true );
 	z.closed = true;
 	w.partOpen[sub] = -1;

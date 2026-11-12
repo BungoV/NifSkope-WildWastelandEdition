@@ -7,11 +7,14 @@
 #include <QElapsedTimer>
 #include <QEvent>
 #include <QObject>
+#include <QVariant>
 
 #include <algorithm>
 #include <cstdio>
 #include <cstring>
 #include <map>
+#include <set>
+#include <string>
 #include <tuple>
 #include <vector>
 
@@ -33,6 +36,7 @@ struct Key
 	int kind = AfterSwap, code = 0;
 	const char * cls = nullptr;
 	bool operator<( const Key & o ) const { return std::tie( kind, code, cls ) < std::tie( o.kind, o.code, o.cls ); }
+	bool operator==( const Key & o ) const { return kind == o.kind && code == o.code && cls == o.cls; }
 };
 
 struct Cost
@@ -41,15 +45,23 @@ struct Cost
 	long long n = 0;
 };
 
+/* lane EMPTY240 R6-1: build 78 timed every gap through a std::map insert per event; now one gap in 8 is timed (the
+ * others leave the filters at one bool test) into a fixed table searched in place. Red WW_BETWEENSAMPLE_RED=1 = every
+ * gap, build 78. Paint and Timer receivers are named by their parents ("QLineEdit < QDoubleSpinBox < CellEditPanel"). */
 struct State
 {
+	static constexpr int kSlots = 48;
 	bool installed = false, on = false;
 	QElapsedTimer clock;
 	qint64 last = 0, winAt = 0;
 	Key at;
-	std::map<Key, Cost> by;
+	std::pair<Key, Cost> by[kSlots];
+	int used = 0;
+	Cost spill;	// parts past the table
 	double totalMs = 0.0;
-	long long frames = 0;
+	long long frames = 0, gaps = 0;
+	int every = 8;
+	std::set<std::string> names;	// interned receiver names
 };
 
 inline State & st()
@@ -64,12 +76,49 @@ inline void mark( const Key & next )
 	if ( !s.on )
 		return;
 	const qint64 now = s.clock.nsecsElapsed();
-	Cost & c = s.by[s.at];
-	c.ms += double( now - s.last ) * 1e-6;
-	c.n++;
+	Cost * c = &s.spill;
+	int i = 0;
+	while ( i < s.used && !( s.by[i].first == s.at ) )
+		i++;
+	if ( i < s.used )
+		c = &s.by[i].second;
+	else if ( s.used < State::kSlots ) {
+		s.by[s.used].first = s.at;
+		s.by[s.used].second = Cost();
+		c = &s.by[s.used++].second;
+	}
+	c->ms += double( now - s.last ) * 1e-6;
+	c->n++;
 	s.totalMs += double( now - s.last ) * 1e-6;
 	s.last = now;
 	s.at = next;
+}
+
+//! lane EMPTY240 R6-2: a Paint receiver by its parents up to the first named or non-Qt one; a QTimer by its owner
+inline const char * receiverName( QObject * o, int type )
+{
+	if ( !o )
+		return "none";
+	const char * cls = o->metaObject()->className();
+	const bool paint = type == QEvent::Paint, timer = type == QEvent::Timer && o->inherits( "QTimer" );
+	if ( !paint && !timer )
+		return cls;
+	std::string n = cls;
+	if ( !o->objectName().isEmpty() )
+		n += " '" + o->objectName().toStdString() + "'";
+	if ( timer )
+		n += " (interval " + std::to_string( o->property( "interval" ).toInt() ) + " ms)";
+	QObject * p = o->parent();
+	for ( int up = 0; p && up < 4; up++, p = p->parent() ) {
+		const char * pc = p->metaObject()->className();
+		n += std::string( timer ? " of " : " < " ) + pc;
+		const bool named = !p->objectName().isEmpty();
+		if ( named )
+			n += " '" + p->objectName().toStdString() + "'";
+		if ( named || timer || pc[0] != 'Q' )
+			break;
+	}
+	return st().names.insert( n ).first->c_str();
 }
 
 struct AppFilter : QObject
@@ -80,7 +129,7 @@ struct AppFilter : QObject
 			Key k;
 			k.kind = Event;
 			k.code = int( e->type() );
-			k.cls = o ? o->metaObject()->className() : "none";
+			k.cls = receiverName( o, k.code );
 			mark( k );
 		}
 		return false;
@@ -113,6 +162,8 @@ inline void install()
 		return;
 	s.installed = true;
 	s.clock.start();
+	s.every = qEnvironmentVariableIntValue( "WW_BETWEENSAMPLE_RED" ) == 1 ? 1 : 8;
+	std::fprintf( stderr, "between paints: timing one gap in %d (WW_BETWEENSAMPLE_RED=1 = every gap, build 78)\n", s.every );
 	static AppFilter app;
 	static NativeFilter native;
 	QCoreApplication::instance()->installEventFilter( &app );
@@ -128,6 +179,8 @@ inline void swapped()
 {
 	install();
 	State & s = st();
+	if ( s.gaps++ % s.every != 0 )
+		return;
 	s.on = true;
 	s.last = s.clock.nsecsElapsed();
 	s.at = Key();
@@ -164,11 +217,12 @@ inline void paintStart()
 	if ( now - s.winAt < 5000000000LL )
 		return;
 	s.winAt = now;
-	std::vector<std::pair<Key, Cost>> v( s.by.begin(), s.by.end() );
+	std::vector<std::pair<Key, Cost>> v( s.by, s.by + s.used );
 	std::sort( v.begin(), v.end(), []( const auto & a, const auto & b ) { return a.second.ms > b.second.ms; } );
 	const double f = double( std::max<long long>( 1, s.frames ) );
 	QByteArray line = "between paints: " + QByteArray::number( s.totalMs / f, 'f', 2 ) + " ms a frame ("
-		+ QByteArray::number( s.frames ) + " frames, the swap's return to the next paint) =";
+		+ QByteArray::number( s.frames ) + " frames timed, one gap in " + QByteArray::number( s.every )
+		+ ", the swap's return to the next paint) =";
 	int shown = 0;
 	double rest = s.totalMs;
 	for ( const auto & kc : v ) {
@@ -191,7 +245,8 @@ inline void paintStart()
 	line += " + the rest " + QByteArray::number( std::max( 0.0, rest ) / f, 'f', 3 )
 		+ " (each part runs from its mark to the next one)";
 	std::fprintf( stderr, "%s\n", line.constData() );
-	s.by.clear();
+	s.used = 0;
+	s.spill = Cost();
 	s.totalMs = 0.0;
 	s.frames = 0;
 }
