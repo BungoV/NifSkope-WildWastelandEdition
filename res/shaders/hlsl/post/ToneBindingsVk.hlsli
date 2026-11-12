@@ -74,4 +74,58 @@ float2 ToneFragCoord( uint2 px )
 	return float2( px ) + 0.5f;
 }
 
+// one sample's value as cell_hdr.frag writes it; false where its stencil test discards the sample. foBloom: the Fusion
+// Shaders bloom at the pixel times its weight. tonemap.hlsl (compute) and tonemap_raster.hlsl (a fragment pass) share it.
+bool ToneSample( ToneJob j, F4FX_ImageSpace p, int2 px, uint s, float3 foBloom, out float4 v )
+{
+	v = float4( 0.0f, 0.0f, 0.0f, 0.0f );
+	const int flags = j.ints.x;
+	const int mode = ( flags >> 16 ) & 3, test = ( flags >> 20 ) & 3, ref = ( flags >> 24 ) & 3;
+	const bool cellOn = ( flags & TONE_F_CELLON ) != 0;
+	if ( test != 0 ) {
+		uint st = ToneStencil.Load( px, s ) & 3u;
+		if ( ( st == uint( ref ) ) != ( test == 1 ) )
+			return false;
+	}
+	const float4 x = ToneFrame.Load( px, s );
+	const float2 fc = ToneFragCoord( uint2( px ) );
+	float gain = 1.0f;
+	if ( ( flags & TONE_F_FOGBLOOM ) != 0 )
+		gain = 1.0f + 4.0f * ToneFogBloom.Load( px, s ).r;
+	const bool measureOn = ( flags & TONE_F_MEASURE ) != 0;
+	float3 mb = float3( 0.0f, 0.0f, 0.0f );
+	if ( measureOn )
+		mb = ToneMeasureBloom.SampleLevel( ToneLinearClamp, ( fc - j.bloomRect.xy ) * j.bloomRect.zw, 0.0f ).rgb;
+	const float3 zero = float3( 0.0f, 0.0f, 0.0f );
+	if ( mode == 3 ) {
+		float3 lit = F4FX_CellImageSpace( zero, measureOn, mb, gain, foBloom, p, ToneLut, ToneLinearClamp );
+		float3 glow = max( lit - F4FX_CellImageSpace( zero, measureOn, mb, gain, zero, p, ToneLut, ToneLinearClamp ), zero );
+		if ( ( flags & TONE_F_BACKDROP ) != 0 )
+			glow *= F4FX_CellGlowShoulder( ToneBackdrop.Load( int3( px, 0 ) ).rgb, 2.0f * gain * foBloom, p );
+		v = float4( glow, 0.0f );
+		return true;
+	}
+	const float3 foHere = mode == 0 ? foBloom : zero;
+	if ( mode == 2 ) {
+		float A = clamp( x.a, 0.0f, 1.0f );
+		float3 c = max( x.rgb, zero );
+		if ( !cellOn )
+			v = float4( c, A );
+		else if ( A > 1.0f / 1024.0f )
+			v = float4( F4FX_Dither8( F4FX_CellImageSpace( sqrt( c / A ), measureOn, mb, gain, foHere, p, ToneLut, ToneLinearClamp ) * A,
+				uint2( fc ), j.ints.y, j.ints.z ), A );
+		else
+			v = float4( max( F4FX_CellImageSpace( sqrt( c ), measureOn, mb, gain, foHere, p, ToneLut, ToneLinearClamp )
+				- F4FX_CellImageSpace( zero, measureOn, mb, gain, foHere, p, ToneLut, ToneLinearClamp ), zero ), 0.0f );
+		return true;
+	}
+	if ( mode != 0 || !cellOn ) {
+		v = x;
+		return true;
+	}
+	v = float4( F4FX_Dither8( F4FX_CellImageSpace( sqrt( max( x.rgb, zero ) ), measureOn, mb, gain, foHere, p, ToneLut,
+		ToneLinearClamp ), uint2( fc ), j.ints.y, j.ints.z ), 1.0f );
+	return true;
+}
+
 #endif

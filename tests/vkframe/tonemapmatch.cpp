@@ -4,8 +4,15 @@
 // The multisample frame (RGBA16F + D24S8, 4 samples) and the fog's gain (R8, 4 samples) are drawn from the job's data the way
 // the GL reference draws them (srccomb_gen.hlsl per sample, stencil REPLACE, one draw a value); the kernel then reads them,
 // the combine, the measure's bloom, the LUT (3D) and the backdrop, and writes each sample's value at column x * S + s.
-// Usage: tonemapmatch <job dir> <tonemap.spv> <gen_vs.spv> <gen_ps.spv>
+// With <raster_vs.spv> <raster_ps.spv> <unpack.spv> it also draws the tone map as a fragment pass (tonemap_raster.hlsl: a
+// full-screen triangle, per-sample shading, the multisample attachment written through the ROP, as GL draws cell_hdr.frag),
+// unpacks the RGBA32F attachment to x * S + s and compares it the same way (`TONEMATCH <job> raster ...`).
+// Usage: tonemapmatch <job dir> <tonemap.spv> <gen_vs.spv> <gen_ps.spv> [<raster_vs.spv> <raster_ps.spv> <unpack.spv>]
 // Prints `TONEMATCH <job> EXACT|BOUND|FAIL ...` and the GPU ms (timestamps, median of 32 after 0.5 s of warm-up dispatches).
+// Job real_A also times the floor's parts: the fragment pass into RGBA8 (the view's format) with the attachment kept in
+// GENERAL (the interop rule), moved GENERAL -> COLOR_ATTACHMENT_OPTIMAL -> GENERAL by the render pass, or kept in
+// COLOR_ATTACHMENT_OPTIMAL; each again on an exported (OPAQUE_WIN32, dedicated) image. TONEMATCH_EXTIN=1 makes the inputs
+// (frame, stencil, fog gain) exported images too.
 #define VK_NO_PROTOTYPES
 #include <vulkan/vulkan.h>
 #include <windows.h>
@@ -105,12 +112,20 @@ static Buf makeBuf( size_t n )
 
 struct Img { VkImage i = VK_NULL_HANDLE; VkDeviceMemory m = VK_NULL_HANDLE; VkImageView v = VK_NULL_HANDLE, sv = VK_NULL_HANDLE; int w = 0, h = 0; };
 
-static Img makeImg( int w, int h, VkFormat fmt, int samples, VkImageUsageFlags usage, VkImageAspectFlags aspect )
+static bool gHaveExport = false;	// VK_KHR_external_memory_win32 enabled
+
+// external: made as the interop images are (vkframe.cpp makeImg): OPAQUE_WIN32 export, a dedicated allocation
+static Img makeImg( int w, int h, VkFormat fmt, int samples, VkImageUsageFlags usage, VkImageAspectFlags aspect, bool external = false )
 {
 	Img I;
 	I.w = w;
 	I.h = h;
+	if ( external && !gHaveExport )
+		return I;
+	VkExternalMemoryImageCreateInfo ext { VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_IMAGE_CREATE_INFO };
+	ext.handleTypes = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_WIN32_BIT;
 	VkImageCreateInfo ci { VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO };
+	ci.pNext = external ? &ext : nullptr;
 	ci.imageType = VK_IMAGE_TYPE_2D;
 	ci.format = fmt;
 	ci.extent = { uint32_t( w ), uint32_t( h ), 1 };
@@ -124,10 +139,17 @@ static Img makeImg( int w, int h, VkFormat fmt, int samples, VkImageUsageFlags u
 		return Img();
 	VkMemoryRequirements r;
 	vkGetImageMemoryRequirements( dev, I.i, &r );
+	VkMemoryDedicatedAllocateInfo ded { VK_STRUCTURE_TYPE_MEMORY_DEDICATED_ALLOCATE_INFO };
+	ded.image = I.i;
+	VkExportMemoryAllocateInfo exp { VK_STRUCTURE_TYPE_EXPORT_MEMORY_ALLOCATE_INFO };
+	exp.pNext = &ded;
+	exp.handleTypes = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_WIN32_BIT;
 	VkMemoryAllocateInfo ai { VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO };
+	ai.pNext = external ? &exp : nullptr;
 	ai.allocationSize = r.size;
 	ai.memoryTypeIndex = memType( r.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT );
-	vkAllocateMemory( dev, &ai, nullptr, &I.m );
+	if ( vkAllocateMemory( dev, &ai, nullptr, &I.m ) != VK_SUCCESS )
+		return Img();
 	vkBindImageMemory( dev, I.i, I.m, 0 );
 	VkImageViewCreateInfo vi { VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO };
 	vi.image = I.i;
@@ -375,6 +397,94 @@ static Gen makeGen( VkFormat fmt, const Img & color, const Img * ds, int W, int 
 	return g;
 }
 
+// the tone map as a fragment pass into one multisample colour attachment: LOAD + STORE (a discarded sample keeps what was
+// there), `outside` before and after the pass, `inPass` during it (the render pass makes the moves)
+static Gen makeRaster( VkFormat fmt, const Img & color, int W, int H, int S, VkImageLayout outside, VkImageLayout inPass,
+	VkPipelineLayout layout, VkShaderModule vs, VkShaderModule ps )
+{
+	Gen g;
+	VkAttachmentDescription at {};
+	at.format = fmt;
+	at.samples = VkSampleCountFlagBits( S );
+	at.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
+	at.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+	at.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+	at.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+	at.initialLayout = outside;
+	at.finalLayout = outside;
+	VkAttachmentReference cr { 0, inPass };
+	VkSubpassDescription sp {};
+	sp.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+	sp.colorAttachmentCount = 1;
+	sp.pColorAttachments = &cr;
+	VkRenderPassCreateInfo rpi { VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO };
+	rpi.attachmentCount = 1;
+	rpi.pAttachments = &at;
+	rpi.subpassCount = 1;
+	rpi.pSubpasses = &sp;
+	if ( vkCreateRenderPass( dev, &rpi, nullptr, &g.rp ) != VK_SUCCESS )
+		return Gen();
+	VkFramebufferCreateInfo fbi { VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO };
+	fbi.renderPass = g.rp;
+	fbi.attachmentCount = 1;
+	fbi.pAttachments = &color.v;
+	fbi.width = uint32_t( W );
+	fbi.height = uint32_t( H );
+	fbi.layers = 1;
+	vkCreateFramebuffer( dev, &fbi, nullptr, &g.fb );
+	VkPipelineShaderStageCreateInfo st[2] = {
+		{ VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, nullptr, 0, VK_SHADER_STAGE_VERTEX_BIT, vs, "vs", nullptr },
+		{ VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, nullptr, 0, VK_SHADER_STAGE_FRAGMENT_BIT, ps, "main", nullptr } };
+	VkPipelineVertexInputStateCreateInfo vin { VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO };
+	VkPipelineInputAssemblyStateCreateInfo ia { VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO };
+	ia.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+	VkViewport vp { 0, 0, float( W ), float( H ), 0, 1 };
+	VkRect2D sc { { 0, 0 }, { uint32_t( W ), uint32_t( H ) } };
+	VkPipelineViewportStateCreateInfo vps { VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO };
+	vps.viewportCount = 1;
+	vps.pViewports = &vp;
+	vps.scissorCount = 1;
+	vps.pScissors = &sc;
+	VkPipelineRasterizationStateCreateInfo rs { VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO };
+	rs.polygonMode = VK_POLYGON_MODE_FILL;
+	rs.cullMode = VK_CULL_MODE_NONE;
+	rs.lineWidth = 1.0f;
+	VkPipelineMultisampleStateCreateInfo ms { VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO };
+	ms.rasterizationSamples = VkSampleCountFlagBits( S );
+	ms.sampleShadingEnable = VK_TRUE;
+	ms.minSampleShading = 1.0f;
+	VkPipelineColorBlendAttachmentState cba {};
+	cba.colorWriteMask = 0xF;
+	VkPipelineColorBlendStateCreateInfo cb { VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO };
+	cb.attachmentCount = 1;
+	cb.pAttachments = &cba;
+	VkGraphicsPipelineCreateInfo gpc { VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO };
+	gpc.stageCount = 2;
+	gpc.pStages = st;
+	gpc.pVertexInputState = &vin;
+	gpc.pInputAssemblyState = &ia;
+	gpc.pViewportState = &vps;
+	gpc.pRasterizationState = &rs;
+	gpc.pMultisampleState = &ms;
+	gpc.pColorBlendState = &cb;
+	gpc.layout = layout;
+	gpc.renderPass = g.rp;
+	vkCreateGraphicsPipelines( dev, VK_NULL_HANDLE, 1, &gpc, nullptr, &g.pipe );
+	return g;
+}
+
+static void toLayout( VkCommandBuffer cb, VkImage i, VkImageLayout to )
+{
+	VkImageMemoryBarrier b { VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER };
+	b.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+	b.newLayout = to;
+	b.srcQueueFamilyIndex = b.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+	b.image = i;
+	b.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
+	b.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_TRANSFER_WRITE_BIT;
+	vkCmdPipelineBarrier( cb, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 0, nullptr, 0, nullptr, 1, &b );
+}
+
 int main( int argc, char ** argv )
 {
 	std::setvbuf( stdout, nullptr, _IONBF, 0 );
@@ -414,7 +524,10 @@ int main( int argc, char ** argv )
 		return 2;
 	}
 	const std::vector<uint32_t> spvTone = readSpv( argv[2] ), spvVs = readSpv( argv[3] ), spvPs = readSpv( argv[4] );
-	if ( spvTone.empty() || spvVs.empty() || spvPs.empty() ) {
+	const bool raster = argc >= 8;
+	const std::vector<uint32_t> spvRVs = raster ? readSpv( argv[5] ) : std::vector<uint32_t>(),
+		spvRPs = raster ? readSpv( argv[6] ) : std::vector<uint32_t>(), spvUnpack = raster ? readSpv( argv[7] ) : std::vector<uint32_t>();
+	if ( spvTone.empty() || spvVs.empty() || spvPs.empty() || ( raster && ( spvRVs.empty() || spvRPs.empty() || spvUnpack.empty() ) ) ) {
 		std::printf( "TONEMATCH %s FAIL (spv)\n", name.c_str() );
 		return 2;
 	}
@@ -481,7 +594,15 @@ int main( int argc, char ** argv )
 	di.queueCreateInfoCount = 1;
 	di.pQueueCreateInfos = &qi;
 	di.pEnabledFeatures = &feat;
-	if ( vkCreateDevice( phys, &di, nullptr, &dev ) != VK_SUCCESS ) {
+	const char * exts[] = { "VK_KHR_external_memory_win32" };
+	di.enabledExtensionCount = 1;
+	di.ppEnabledExtensionNames = exts;
+	gHaveExport = vkCreateDevice( phys, &di, nullptr, &dev ) == VK_SUCCESS;
+	if ( !gHaveExport ) {
+		di.enabledExtensionCount = 0;
+		std::printf( "no VK_KHR_external_memory_win32: the exported-image variants are skipped\n" );
+	}
+	if ( !gHaveExport && vkCreateDevice( phys, &di, nullptr, &dev ) != VK_SUCCESS ) {
 		std::printf( "TONEMATCH %s FAIL (device)\n", name.c_str() );
 		return 2;
 	}
@@ -509,9 +630,13 @@ int main( int argc, char ** argv )
 	const VkFormat F16 = VK_FORMAT_R16G16B16A16_SFLOAT, F32 = VK_FORMAT_R32G32B32A32_SFLOAT;
 	Img iData = makeImg( W * S, H, F16, 1, up, C ), iSten = makeImg( W * S, H, VK_FORMAT_R8_UINT, 1, up, C );
 	Img iFogData = makeImg( W * S, H, F16, 1, up, C ), iZero = makeImg( W * S, H, VK_FORMAT_R8_UINT, 1, up, C );
-	Img iColor = makeImg( W, H, F16, S, VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT, C );
-	Img iDs = makeImg( W, H, VK_FORMAT_D24_UNORM_S8_UINT, S, VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT, DS );
-	Img iFog = makeImg( W, H, VK_FORMAT_R8_UNORM, S, VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT, C );
+	const char * extInEnv = std::getenv( "TONEMATCH_EXTIN" );
+	const bool extIn = extInEnv && *extInEnv == '1';
+	if ( extIn )
+		std::printf( "inputs: exported images (TONEMATCH_EXTIN=1)\n" );
+	Img iColor = makeImg( W, H, F16, S, VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT, C, extIn );
+	Img iDs = makeImg( W, H, VK_FORMAT_D24_UNORM_S8_UINT, S, VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT, DS, extIn );
+	Img iFog = makeImg( W, H, VK_FORMAT_R8_UNORM, S, VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT, C, extIn );
 	Img iComb = makeImg( W, H, F32, 1, up, C ), iMb = makeImg( mb.w, mb.h, F16, 1, up, C ), iBack = makeImg( W, H, F16, 1, up, C );
 	Img iLut = makeImg3( 16, VK_FORMAT_R8G8B8A8_UNORM, up );
 	Img iOut = makeImg( W * S, H, F32, 1, VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT, C );
@@ -566,7 +691,7 @@ int main( int argc, char ** argv )
 	const VkDescriptorType SI = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
 	const VkDescriptorType kt[9] = { SI, SI, SI, SI, SI, SI, SI, VK_DESCRIPTOR_TYPE_SAMPLER, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE };
 	for ( uint32_t i = 0; i < 9; i++ )
-		kb[i] = VkDescriptorSetLayoutBinding { i, kt[i], 1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr };
+		kb[i] = VkDescriptorSetLayoutBinding { i, kt[i], 1, VK_SHADER_STAGE_COMPUTE_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, nullptr };
 	VkDescriptorSetLayoutCreateInfo kli { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
 	kli.bindingCount = 9;
 	kli.pBindings = kb;
@@ -640,6 +765,75 @@ int main( int argc, char ** argv )
 	write( kSet, 7, VK_DESCRIPTOR_TYPE_SAMPLER, VK_NULL_HANDLE, linearClamp );
 	write( kSet, 8, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, iOut.v, VK_NULL_HANDLE );
 
+	// the fragment pass: the kernel's set (the shader leaves binding 8 unused), its own push range; RGBA32F for the compare
+	// (unpacked by a compute pass to x * S + s), RGBA8 as the view for the timing, in the layout variants
+	const VkImageLayout GEN_L = VK_IMAGE_LAYOUT_GENERAL, ATT_L = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+	const VkFormat U8 = VK_FORMAT_R8G8B8A8_UNORM;
+	const VkImageUsageFlags att = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+	VkPipelineLayout rPipeLayout = VK_NULL_HANDLE, uPipeLayout = VK_NULL_HANDLE;
+	VkPipeline pUnpack = VK_NULL_HANDLE;
+	VkDescriptorSet uSet = VK_NULL_HANDLE;
+	Img iR32, iR8, iR8o, iR8x, iR8xo;
+	Gen r32, r8g, r8t, r8o, r8xg, r8xt, r8xo;
+	if ( raster ) {
+		VkPushConstantRange rpr { VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof( ToneJob ) };
+		VkPipelineLayoutCreateInfo rpi = kpi;
+		rpi.pPushConstantRanges = &rpr;
+		vkCreatePipelineLayout( dev, &rpi, nullptr, &rPipeLayout );
+		iR32 = makeImg( W, H, F32, S, att | VK_IMAGE_USAGE_SAMPLED_BIT, C );
+		iR8 = makeImg( W, H, U8, S, att, C );
+		iR8o = makeImg( W, H, U8, S, att, C );
+		iR8x = makeImg( W, H, U8, S, att, C, true );
+		iR8xo = makeImg( W, H, U8, S, att, C, true );
+		if ( !iR32.v || !iR8.v || !iR8o.v ) {
+			std::printf( "TONEMATCH %s FAIL (raster images)\n", name.c_str() );
+			return 2;
+		}
+		{
+			VkCommandBuffer cb = newCb();
+			toLayout( cb, iR32.i, GEN_L );
+			toLayout( cb, iR8.i, GEN_L );
+			toLayout( cb, iR8o.i, ATT_L );
+			if ( iR8x.v ) {
+				toLayout( cb, iR8x.i, GEN_L );
+				toLayout( cb, iR8xo.i, ATT_L );
+			}
+			submitWait( cb );
+		}
+		const VkShaderModule rVs = module( spvRVs ), rPs = module( spvRPs );
+		r32 = makeRaster( F32, iR32, W, H, S, GEN_L, GEN_L, rPipeLayout, rVs, rPs );
+		r8g = makeRaster( U8, iR8, W, H, S, GEN_L, GEN_L, rPipeLayout, rVs, rPs );
+		r8t = makeRaster( U8, iR8, W, H, S, GEN_L, ATT_L, rPipeLayout, rVs, rPs );
+		r8o = makeRaster( U8, iR8o, W, H, S, ATT_L, ATT_L, rPipeLayout, rVs, rPs );
+		if ( iR8x.v ) {
+			r8xg = makeRaster( U8, iR8x, W, H, S, GEN_L, GEN_L, rPipeLayout, rVs, rPs );
+			r8xt = makeRaster( U8, iR8x, W, H, S, GEN_L, ATT_L, rPipeLayout, rVs, rPs );
+			r8xo = makeRaster( U8, iR8xo, W, H, S, ATT_L, ATT_L, rPipeLayout, rVs, rPs );
+		}
+		VkDescriptorSetLayoutBinding ub[2] = { { 0, SI, 1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr },
+			{ 1, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr } };
+		VkDescriptorSetLayoutCreateInfo uli { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
+		uli.bindingCount = 2;
+		uli.pBindings = ub;
+		VkDescriptorSetLayout uLayout;
+		vkCreateDescriptorSetLayout( dev, &uli, nullptr, &uLayout );
+		VkPipelineLayoutCreateInfo upi { VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO };
+		upi.setLayoutCount = 1;
+		upi.pSetLayouts = &uLayout;
+		vkCreatePipelineLayout( dev, &upi, nullptr, &uPipeLayout );
+		VkComputePipelineCreateInfo pc { VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO };
+		pc.stage = { VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, nullptr, 0, VK_SHADER_STAGE_COMPUTE_BIT, module( spvUnpack ), "main", nullptr };
+		pc.layout = uPipeLayout;
+		vkCreateComputePipelines( dev, VK_NULL_HANDLE, 1, &pc, nullptr, &pUnpack );
+		uSet = alloc( uLayout );
+		write( uSet, 0, SI, iR32.v, VK_NULL_HANDLE );
+		write( uSet, 1, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, iOut.v, VK_NULL_HANDLE );
+		if ( !r32.pipe || !r8g.pipe || !r8t.pipe || !r8o.pipe || !pUnpack ) {
+			std::printf( "TONEMATCH %s FAIL (raster pipelines)\n", name.c_str() );
+			return 2;
+		}
+	}
+
 	auto draw = [&]( const Gen & g, VkDescriptorSet set, std::initializer_list<int> values, bool stencil ) {
 		VkCommandBuffer c = newCb();
 		VkClearValue cv[2] = {};
@@ -687,25 +881,49 @@ int main( int argc, char ** argv )
 		qpi.queryCount = 2;
 		vkCreateQueryPool( dev, &qpi, nullptr, &qp );
 	}
-	auto run = [&]( bool clearFirst, bool timeIt ) {
-		VkCommandBuffer c = newCb();
-		if ( clearFirst ) {	// GL's target starts at the sentinel: a sample the stencil test skips keeps it
-			VkClearColorValue cv;
-			cv.float32[0] = cv.float32[1] = cv.float32[2] = cv.float32[3] = -7.0f;
-			VkImageSubresourceRange rr { C, 0, 1, 0, 1 };
-			barrier( c, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_ACCESS_MEMORY_WRITE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_WRITE_BIT );
-			vkCmdClearColorImage( c, iOut.i, VK_IMAGE_LAYOUT_GENERAL, &cv, 1, &rr );
-		}
+	// one command buffer, re-recorded (the pool resets it at begin)
+	VkCommandBuffer rcb = newCb();
+	vkEndCommandBuffer( rcb );
+	auto clearTo = [&]( VkCommandBuffer c, VkImage i ) {	// GL's target starts at the sentinel: a sample the stencil test skips keeps it
+		VkClearColorValue cv;
+		cv.float32[0] = cv.float32[1] = cv.float32[2] = cv.float32[3] = -7.0f;
+		VkImageSubresourceRange rr { C, 0, 1, 0, 1 };
+		barrier( c, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_ACCESS_MEMORY_WRITE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_WRITE_BIT );
+		vkCmdClearColorImage( c, i, VK_IMAGE_LAYOUT_GENERAL, &cv, 1, &rr );
+	};
+	// g null: the compute kernel into iOut; else the fragment pass g
+	auto run = [&]( const Gen * g, bool clearFirst, bool timeIt ) {
+		VkCommandBufferBeginInfo bi { VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
+		vkBeginCommandBuffer( rcb, &bi );
+		VkCommandBuffer c = rcb;
+		if ( clearFirst )
+			clearTo( c, g ? iR32.i : iOut.i );
 		if ( timeIt ) {
 			vkCmdResetQueryPool( c, qp, 0, 2 );
 			vkCmdWriteTimestamp( c, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, qp, 0 );
 		}
-		barrier( c, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_ACCESS_MEMORY_WRITE_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-			VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT );
-		vkCmdBindPipeline( c, VK_PIPELINE_BIND_POINT_COMPUTE, pTone );
-		vkCmdBindDescriptorSets( c, VK_PIPELINE_BIND_POINT_COMPUTE, kPipeLayout, 0, 1, &kSet, 0, nullptr );
-		vkCmdPushConstants( c, kPipeLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof( ToneJob ), &j );
-		vkCmdDispatch( c, uint32_t( ( W + 7 ) / 8 ), uint32_t( ( H + 7 ) / 8 ), 1 );
+		if ( !g ) {
+			barrier( c, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_ACCESS_MEMORY_WRITE_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+				VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT );
+			vkCmdBindPipeline( c, VK_PIPELINE_BIND_POINT_COMPUTE, pTone );
+			vkCmdBindDescriptorSets( c, VK_PIPELINE_BIND_POINT_COMPUTE, kPipeLayout, 0, 1, &kSet, 0, nullptr );
+			vkCmdPushConstants( c, kPipeLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof( ToneJob ), &j );
+			vkCmdDispatch( c, uint32_t( ( W + 7 ) / 8 ), uint32_t( ( H + 7 ) / 8 ), 1 );
+		} else {
+			barrier( c, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_ACCESS_MEMORY_WRITE_BIT,
+				VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+				VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT );
+			VkRenderPassBeginInfo rb { VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO };
+			rb.renderPass = g->rp;
+			rb.framebuffer = g->fb;
+			rb.renderArea = { { 0, 0 }, { uint32_t( W ), uint32_t( H ) } };
+			vkCmdBeginRenderPass( c, &rb, VK_SUBPASS_CONTENTS_INLINE );
+			vkCmdBindPipeline( c, VK_PIPELINE_BIND_POINT_GRAPHICS, g->pipe );
+			vkCmdBindDescriptorSets( c, VK_PIPELINE_BIND_POINT_GRAPHICS, rPipeLayout, 0, 1, &kSet, 0, nullptr );
+			vkCmdPushConstants( c, rPipeLayout, VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof( ToneJob ), &j );
+			vkCmdDraw( c, 3, 1, 0, 0 );
+			vkCmdEndRenderPass( c );
+		}
 		if ( timeIt )
 			vkCmdWriteTimestamp( c, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, qp, 1 );
 		submitWait( c );
@@ -715,26 +933,51 @@ int main( int argc, char ** argv )
 		vkGetQueryPoolResults( dev, qp, 0, 2, sizeof( ts ), ts, 8, VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT );
 		return double( ts[1] - ts[0] ) * double( props.limits.timestampPeriod ) * 1.0e-6;
 	};
-	run( true, false );
-	std::vector<uint32_t> vk( size_t( W ) * S * H * 4 );
+	// 0.5 s of passes first: a GPU that clocked down during the download reads up to 2x slow (the P5 lesson)
+	auto timeOf = [&]( const Gen * g ) {
+		for ( const DWORD t0 = GetTickCount(); GetTickCount() - t0 < 500; )
+			run( g, false, false );
+		std::vector<double> t;
+		for ( int r = 0; r < 34; r++ ) {
+			const double ms = run( g, false, true );
+			if ( r >= 2 )
+				t.push_back( ms );
+		}
+		std::sort( t.begin(), t.end() );
+		return t[t.size() / 2];
+	};
+	run( nullptr, true, false );
+	std::vector<uint32_t> vk( size_t( W ) * S * H * 4 ), vkR;
 	download( iOut, vk.data(), vk.size() * 4 );
-	// 0.5 s of dispatches first: a GPU that clocked down during the download reads up to 2x slow (the P5 lesson)
-	for ( const DWORD t0 = GetTickCount(); GetTickCount() - t0 < 500; )
-		run( false, false );
-	std::vector<double> t;
-	for ( int r = 0; r < 34; r++ ) {
-		const double ms = run( false, true );
-		if ( r >= 2 )
-			t.push_back( ms );
+	if ( raster ) {	// the fragment pass into RGBA32F, unpacked into iOut (every texel written)
+		run( &r32, true, false );
+		VkCommandBufferBeginInfo bi { VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
+		vkBeginCommandBuffer( rcb, &bi );
+		barrier( rcb, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_ACCESS_MEMORY_WRITE_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+			VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT );
+		vkCmdBindPipeline( rcb, VK_PIPELINE_BIND_POINT_COMPUTE, pUnpack );
+		vkCmdBindDescriptorSets( rcb, VK_PIPELINE_BIND_POINT_COMPUTE, uPipeLayout, 0, 1, &uSet, 0, nullptr );
+		vkCmdDispatch( rcb, uint32_t( ( W + 7 ) / 8 ), uint32_t( ( H + 7 ) / 8 ), 1 );
+		submitWait( rcb );
+		vkR.resize( vk.size() );
+		download( iOut, vkR.data(), vkR.size() * 4 );
 	}
-	std::sort( t.begin(), t.end() );
-	const double msTone = t[t.size() / 2];
+	const double msTone = timeOf( nullptr );
+	std::printf( "device %s\n", props.deviceName );
+	std::printf( "time %s: Vulkan tone map %.4f ms\n", name.c_str(), msTone );
+	if ( raster ) {
+		std::printf( "time %s: Vulkan fragment pass into RGBA32F %.4f ms\n", name.c_str(), timeOf( &r32 ) );
+		if ( name == "real_A" ) {
+			std::printf( "time %s: fragment pass into RGBA8, GENERAL %.4f, GENERAL->ATTACHMENT->GENERAL %.4f, kept ATTACHMENT %.4f ms\n",
+				name.c_str(), timeOf( &r8g ), timeOf( &r8t ), timeOf( &r8o ) );
+			if ( r8xg.pipe )
+				std::printf( "time %s: exported RGBA8, GENERAL %.4f, GENERAL->ATTACHMENT->GENERAL %.4f, kept ATTACHMENT %.4f ms\n",
+					name.c_str(), timeOf( &r8xg ), timeOf( &r8xt ), timeOf( &r8xo ) );
+		}
+	}
 
 	// compare: every float's bits; then as the 8-bit view would hold it (the value clamped, x 255, rounded)
 	const uint32_t * gp = reinterpret_cast<const uint32_t *>( glOut.px.data() );
-	size_t diff = 0, diff8 = 0, kept = 0, sentinelMiss = 0;
-	long long maxU = 0;
-	int max8 = 0;
 	auto lvl = []( uint32_t b ) {
 		float f;
 		std::memcpy( &f, &b, 4 );
@@ -743,38 +986,46 @@ int main( int argc, char ** argv )
 		return int( std::lround( std::min( std::max( f, 0.0f ), 1.0f ) * 255.0f ) );
 	};
 	const uint32_t sentinel = 0xC0E00000u;	// -7.0f
-	for ( size_t i = 0; i < vk.size(); i++ ) {
-		kept += gp[i] != sentinel;
-		sentinelMiss += ( gp[i] == sentinel ) != ( vk[i] == sentinel );
-		const long long u = ulps32( vk[i], gp[i] );
-		if ( !u )
-			continue;
-		if ( diff < 6 ) {
-			float a, b;
-			std::memcpy( &a, &vk[i], 4 );
-			std::memcpy( &b, &gp[i], 4 );
-			const size_t px = i / 4;
-			std::printf( "diff x %zu s %zu y %zu c %zu: vk %.9g gl %.9g (%lld ulp)\n", ( px % ( size_t( W ) * S ) ) / S, px % S,
-				px / ( size_t( W ) * S ), i % 4, a, b, u );
+	auto compare = [&]( const std::vector<uint32_t> & v, const std::string & label ) {
+		size_t diff = 0, diff8 = 0, kept = 0, sentinelMiss = 0;
+		long long maxU = 0;
+		int max8 = 0;
+		for ( size_t i = 0; i < v.size(); i++ ) {
+			kept += gp[i] != sentinel;
+			sentinelMiss += ( gp[i] == sentinel ) != ( v[i] == sentinel );
+			const long long u = ulps32( v[i], gp[i] );
+			if ( !u )
+				continue;
+			if ( diff < 6 ) {
+				float a, b;
+				std::memcpy( &a, &v[i], 4 );
+				std::memcpy( &b, &gp[i], 4 );
+				const size_t px = i / 4;
+				std::printf( "diff%s x %zu s %zu y %zu c %zu: vk %.9g gl %.9g (%lld ulp)\n", label.c_str(), ( px % ( size_t( W ) * S ) ) / S,
+					px % S, px / ( size_t( W ) * S ), i % 4, a, b, u );
+			}
+			diff++;
+			maxU = std::max( maxU, u );
+			const int d8 = std::abs( lvl( v[i] ) - lvl( gp[i] ) );
+			diff8 += d8 != 0;
+			max8 = std::max( max8, d8 );
 		}
-		diff++;
-		maxU = std::max( maxU, u );
-		const int d8 = std::abs( lvl( vk[i] ) - lvl( gp[i] ) );
-		diff8 += d8 != 0;
-		max8 = std::max( max8, d8 );
-	}
-	std::printf( "device %s\n", props.deviceName );
-	std::printf( "time %s: Vulkan tone map %.4f ms\n", name.c_str(), msTone );
-	std::printf( "tone %s: %zu of %zu floats differ, max %lld ulp; 8-bit levels: %zu differ, max %d; %zu GL floats written, "
-		"%zu skip mismatches\n", name.c_str(), diff, vk.size(), maxU, diff8, max8, kept, sentinelMiss );
-	// EXACT: every float. BOUND (named cause: the drivers' pow / exp2 / log2 / divide differ by an ulp between the GLSL and
-	// SPIR-V paths, and the Physical curve's PQ exponent 78.84 grows that): no skip mismatch, none past 1 level in the
-	// 8-bit view, at most 1 in 1,000 floats a level off there
-	const bool bound = sentinelMiss == 0 && max8 <= 1 && diff8 * 1000 <= vk.size();
-	if ( diff == 0 )
-		std::printf( "TONEMATCH %s EXACT\n", name.c_str() );
-	else
-		std::printf( "TONEMATCH %s %s (%zu floats, max %lld ulp, %zu 8-bit levels off by at most %d)\n", name.c_str(), bound ? "BOUND" : "FAIL",
-			diff, maxU, diff8, max8 );
-	return diff == 0 || bound ? 0 : 1;
+		std::printf( "tone %s%s: %zu of %zu floats differ, max %lld ulp; 8-bit levels: %zu differ, max %d; %zu GL floats written, "
+			"%zu skip mismatches\n", name.c_str(), label.c_str(), diff, v.size(), maxU, diff8, max8, kept, sentinelMiss );
+		// EXACT: every float. BOUND (named cause: the drivers' pow / exp2 / log2 / divide differ by an ulp between the GLSL
+		// and SPIR-V paths, and the Physical curve's PQ exponent 78.84 grows that): no skip mismatch, none past 1 level in
+		// the 8-bit view, at most 1 in 1,000 floats a level off there
+		const bool bound = sentinelMiss == 0 && max8 <= 1 && diff8 * 1000 <= v.size();
+		if ( diff == 0 )
+			std::printf( "TONEMATCH %s%s EXACT\n", name.c_str(), label.c_str() );
+		else
+			std::printf( "TONEMATCH %s%s %s (%zu floats, max %lld ulp, %zu 8-bit levels off by at most %d)\n", name.c_str(), label.c_str(),
+				bound ? "BOUND" : "FAIL", diff, maxU, diff8, max8 );
+		return diff == 0 || bound;
+	};
+	// the fragment pass's verdict is printed, not gated: it is not a match yet (modes 2 / 3 up to 3 levels, plan.md P6)
+	const bool ok = compare( vk, "" );
+	if ( raster )
+		compare( vkR, " raster" );
+	return ok ? 0 : 1;
 }
