@@ -11,13 +11,13 @@ import os, re, shutil, subprocess, sys
 
 # (source dir, kernel, --target-env, --vn) == src/features/gi/bakert_spirv.sh + src/features/gi/rtddgi_spirv.sh
 SPECS = [
-	('src/features/gi/bakert', 'rq', 'vulkan1.2', 'bakert_rq_spv'),
 	('src/features/gi/bakert', 'rqx', 'vulkan1.2', 'bakert_rqx_spv'),
 ] + [('src/features/gi/rtddgi', k, 'vulkan1.2', 'rtddgi_%s_spv' % k) for k in ()]
 # lane VKCOMPUTE1: kernels converted to HLSL, built by DXC from res/shaders/hlsl/<dir>/<k>.hlsl + tools/spv_header.py
 # (rtddgi_spirv.sh's DXC loop; bakert_spirv.sh's `hk <k> <env>` lines)
 HLSL_SPECS = [('src/features/gi/rtddgi', k, 'vulkan1.2', 'rtddgi_%s_spv' % k) for k in ('border', 'reloc', 'blend', 'trace', 'airrays', 'restir')] + [
 	('src/features/gi/bakert', 'bvh', 'vulkan1.1', 'bakert_bvh_spv'),
+	('src/features/gi/bakert', 'rq', 'vulkan1.2', 'bakert_rq_spv'),
 ]
 BAKERT_HK = '\t"$DXC" -spirv -fspv-target-env="$2" -T "${T:-cs_6_0}" -E main -O0 -Fo "$1.hlsl.spv" '
 DEFAULT_G = 'E:/Tools/RenderDoc/RenderDoc_1.45_64/plugins/spirv/glslangValidator.exe'
