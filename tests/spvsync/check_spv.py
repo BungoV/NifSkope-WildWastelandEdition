@@ -14,8 +14,11 @@ SPECS = [
 	('src/features/gi/bakert', 'rq', 'vulkan1.2', 'bakert_rq_spv'),
 	('src/features/gi/bakert', 'bvh', 'vulkan1.1', 'bakert_bvh_spv'),
 	('src/features/gi/bakert', 'rqx', 'vulkan1.2', 'bakert_rqx_spv'),
-] + [('src/features/gi/rtddgi', k, 'vulkan1.2', 'rtddgi_%s_spv' % k) for k in ('trace', 'blend', 'border', 'reloc', 'restir', 'airrays')]
+] + [('src/features/gi/rtddgi', k, 'vulkan1.2', 'rtddgi_%s_spv' % k) for k in ('trace', 'blend', 'reloc', 'restir', 'airrays')]
+# lane VKCOMPUTE1: kernels converted to HLSL, built by DXC from res/shaders/hlsl/rtddgi/<k>.hlsl + tools/spv_header.py
+HLSL_SPECS = [('src/features/gi/rtddgi', k, 'vulkan1.2', 'rtddgi_%s_spv' % k) for k in ('border',)]
 DEFAULT_G = 'E:/Tools/RenderDoc/RenderDoc_1.45_64/plugins/spirv/glslangValidator.exe'
+DEFAULT_DXC = 'E:/Tools/dxc/bin/x64/dxc.exe'
 
 
 def script_ok(tree):
@@ -37,6 +40,10 @@ def script_ok(tree):
 	for k in loop:
 		if k not in known:
 			bad.append('src/features/gi/rtddgi_spirv.sh: kernel %s is not in this checker' % k)
+	m = re.search(r'^for k in ([a-z ]+); do\n\t"\$DXC" -spirv -fspv-target-env=vulkan1\.2 -T cs_6_0 -E main ', r, re.M)
+	hloop = m.group(1).split() if m else []
+	if sorted(hloop) != sorted(k for d, k, e, v in HLSL_SPECS):
+		bad.append('src/features/gi/rtddgi_spirv.sh: its DXC loop (%s) is not this checker\'s HLSL kernels' % ' '.join(hloop))
 	return bad
 
 
@@ -75,7 +82,7 @@ def main(argv):
 	for s in script_ok(tree):
 		fails.append(s)
 	# every committed SPIR-V header has a generator line
-	listed = set('%s/%s.spv.h' % (d, k) for d, k, e, v in SPECS)
+	listed = set('%s/%s.spv.h' % (d, k) for d, k, e, v in SPECS + HLSL_SPECS)
 	for root, dirs, files in os.walk(os.path.join(tree, 'src')):
 		for f in files:
 			if f.endswith('.spv.h'):
@@ -86,7 +93,7 @@ def main(argv):
 		if not os.path.isfile(os.path.join(tree, n)):
 			fails.append('%s: listed but not on disk' % n)
 	for n in swap:
-		if not any(n == '%s.spv.h' % k for d, k, e, v in SPECS):
+		if not any(n == '%s.spv.h' % k for d, k, e, v in SPECS + HLSL_SPECS):
 			fails.append('--committed %s: no such header' % n)
 	g = g or os.environ.get('GLSLANG') or (DEFAULT_G if os.path.isfile(DEFAULT_G) else None) \
 		or shutil.which('glslangValidator')
@@ -124,6 +131,32 @@ def main(argv):
 				why = 'line endings only' if a.replace(b'\r\n', b'\n') == c.replace(b'\r\n', b'\n') else first_diff(a, c)
 				fails.append('%s/%s: STALE, rebuilt %d B vs committed %d B (%s); run tools/%s_spirv.sh'
 				             % (d, name, len(a), len(c), why, 'bakert' if d == 'src/features/gi/bakert' else 'rtddgi'))
+	dxc = os.environ.get('DXC') or (DEFAULT_DXC if os.path.isfile(DEFAULT_DXC) else None) or shutil.which('dxc')
+	if not dxc or not os.path.isfile(dxc):
+		skips.append('no dxc (set DXC=<exe>): the HLSL kernels are not compared')
+	else:
+		for d, k, env, vn in HLSL_SPECS:
+			name = '%s.spv.h' % k
+			committed = swap.get(name, os.path.join(tree, d, name))
+			spv = os.path.join(scratch, 'hlsl_' + k + '.spv')
+			out = os.path.join(scratch, 'hlsl_' + name)
+			for f in (spv, out):
+				if os.path.exists(f):
+					os.remove(f)
+			r = subprocess.run([dxc, '-spirv', '-fspv-target-env=' + env, '-T', 'cs_6_0', '-E', 'main', '-Fo', spv,
+			                    os.path.join(tree, 'res/shaders/hlsl/rtddgi', k + '.hlsl')], capture_output=True, text=True, timeout=300)
+			if r.returncode == 0:
+				r = subprocess.run([sys.executable, '-I', os.path.join(tree, 'tools/spv_header.py'), spv, vn, out],
+				                   capture_output=True, text=True, timeout=60, stdin=subprocess.DEVNULL)
+			if r.returncode != 0 or not os.path.isfile(out):
+				fails.append('%s: dxc / spv_header rc %d: %s' % (name, r.returncode, (r.stdout + r.stderr).strip()[-300:]))
+				continue
+			a, c = open(out, 'rb').read(), open(committed, 'rb').read()
+			if a == c:
+				print('OK    %s/%s %d B (HLSL)' % (d, name, len(c)))
+			else:
+				fails.append('%s/%s: STALE, rebuilt %d B vs committed %d B (%s); run tools/rtddgi_spirv.sh'
+				             % (d, name, len(a), len(c), first_diff(a, c)))
 	for f in fails:
 		print('FAIL  ' + f)
 	for s in skips:
@@ -132,7 +165,7 @@ def main(argv):
 		print('SPVSYNC FAIL %d' % len(fails)); return 1
 	if skips:
 		print('SPVSYNC SKIP %d' % len(skips)); return 77
-	print('SPVSYNC PASS %d' % len(SPECS)); return 0
+	print('SPVSYNC PASS %d' % len(SPECS + HLSL_SPECS)); return 0
 
 
 if __name__ == '__main__':
