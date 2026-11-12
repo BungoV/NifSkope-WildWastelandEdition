@@ -193,6 +193,57 @@ struct TaaStat
 };
 TaaStat takeTaaStat();
 
+/* Lane VKSKY1 (row G, the sky first): the cell sky (atmo_sky.frag, step 3 of wwAtmoDrawSky) as a Vulkan fragment pass
+ * into the tone frame (toneFrame's colour), res/shaders/hlsl/sky/atmo_sky_ps.hlsl. GL builds the LUTs as before; skyRun
+ * copies the four into shared twins (sharedTarget), GL signals, the worker draws one full-screen triangle at the frame's
+ * samples (no depth or stencil attachment: GL's quad ran with both off), GL waits Vulkan's signal and draws the rest of
+ * the backdrop and the objects on it. Red WW_VKVIEW_SKY_RED=1 (or WW_VKVIEW off): GL's quad. */
+struct SkyField
+{
+	const char * name;
+	int offset, words, count;  //!< bytes into LooseUniforms; floats (or ints) a member; array length (1: plain)
+	bool isInt;
+};
+//! atmo_sky_ps.hlsl's LooseUniforms (b31), offsets from spirv-cross --reflect of sky_view_ps.spv.h (block 564 B)
+constexpr SkyField kSkyFields[] = {
+	{ "atHaze", 0, 3, 1, false }, { "atRay", 16, 3, 1, false }, { "atMieS", 28, 1, 1, false }, { "atHazeSpec", 32, 3, 1, false },
+	{ "atHazeAlbedo", 48, 3, 1, false }, { "atMieE", 60, 1, 1, false }, { "atOzone", 64, 3, 1, false }, { "atMsOld", 76, 1, 1, false },
+	{ "atG", 80, 1, 1, false }, { "sceneExposure", 84, 1, 1, false }, { "viewTransform", 88, 1, 1, true }, { "atCamR", 92, 1, 1, false },
+	{ "atViewSize", 96, 2, 1, false }, { "atTint", 112, 3, 17, false }, { "atRect", 384, 4, 1, false }, { "atPerPixel", 400, 1, 1, false },
+	{ "atSunK", 404, 1, 1, false }, { "atMsSize", 408, 2, 1, false }, { "atMsOn", 416, 1, 1, false }, { "atGround", 420, 1, 1, false },
+	{ "atSunW", 432, 3, 1, false }, { "atMoonK", 444, 1, 1, false }, { "atMoonW", 448, 3, 1, false }, { "atFloor", 464, 3, 1, false },
+	{ "atRecNight", 480, 2, 1, false }, { "atTintOn", 488, 1, 1, false }, { "atInscatter", 496, 3, 1, false }, { "atDirIns", 512, 3, 1, false },
+	{ "atDirL", 528, 3, 1, false }, { "atDirExp", 540, 1, 1, false }, { "atSunSize", 544, 1, 1, false }, { "atLimb", 548, 1, 1, false },
+	{ "atDiscAir", 552, 1, 1, false }, { "atDiscHue", 556, 1, 1, false }, { "atDiscCap", 560, 1, 1, false },
+};
+constexpr int kSkyLooseBytes = 576;   //!< the block (564) rounded to 16
+constexpr int kSkyGlobalBytes = 336;  //!< NifSkopeOpenGLContext::GlobalUniforms (b0), copied as is
+struct SkyRun
+{
+	int w = 0, h = 0;              //!< the tone frame
+	int vp[4] = {};                //!< GL's viewport (x, y, w, h): the pass's viewport and scissor
+	unsigned color = 0;            //!< the tone frame's colour name (toneFrameIs)
+	unsigned lut[4] = {};          //!< GL's RGBA16F 2D LUTs: transmittance, multiple scattering, sun view, moon view
+	int lutW[4] = {}, lutH[4] = {};
+	std::uintptr_t lutKey[4] = {}; //!< their shared twins' keys (sharedTarget)
+	std::uint8_t global[kSkyGlobalBytes] = {};
+	std::uint8_t loose[kSkyLooseBytes] = {};
+};
+/* GL current, the tone frame bound as GL's draw target, the LUTs drawn: the sky's pixels drawn on Vulkan. false: why;
+ * nothing drawn (GL draws its quad). */
+bool skyRun( const SkyRun & t, std::string & why );
+//! a frame whose sky stayed on GL while the stage was wanted, and why (the telemetry)
+void skyOnGl( const char * why );
+struct SkyStat
+{
+	int runs = 0, gl = 0, fails = 0;   //!< since the last take
+	double cpuMs = 0.0, maxMs = 0.0;   //!< the drawing thread's skyRun ms
+	std::string glWhy, failWhy;
+	int pipelines = 0;
+	double buildMs = 0.0;
+};
+SkyStat takeSkyStat();
+
 }
 
 #ifndef WW_VKPRESENT_NO_QT

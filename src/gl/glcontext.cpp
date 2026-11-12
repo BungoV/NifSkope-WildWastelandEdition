@@ -2026,6 +2026,13 @@ void wwGlobalUboForget()
 	wwUboLast().ctx = nullptr;
 }
 
+//! lane VKSKY1: the bytes the global uniform buffer holds for ctx (what GL's programs read), null when not known
+const void * wwGlobalUboBytes( const NifSkopeOpenGLContext * ctx )
+{
+	const WwUboLast & l = wwUboLast();
+	return ctx && l.ctx == static_cast<const void *>( ctx ) ? &l.bytes : nullptr;
+}
+
 void NifSkopeOpenGLContext::setGlobalUniforms()
 {
 	/* Never upload a zero viewport — it makes the line geometry shader emit NaN.
