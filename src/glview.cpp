@@ -36,6 +36,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "filebuf.hpp"	// MODULES1: FileBuffer::trimMappedViews
 #include "wwhwuse.h"	// lane EMPTY240 round 3: the stream pool, the RAM cache and the archive census in `hardware use:`
 #include "features/vkframe/vkframe.h"	// lane VKFRAME1: the Vulkan frame's words in `hardware use:`, the `vk frame:` line
+#include "features/vkframe/vkpresent.h"	// lane VKFRAME1 PRESENT FIRST: the frame to the screen through a Vulkan swapchain
 #include "features/near/cellbindless.h"	// lane EMPTY240 R3-4: the `near draws:` line's bindless and multi-draw verdict
 #include "features/ao/ao.h"	// lane EMPTY240 R3-4: and the depth prepass's note
 #include "wwflyfix.h"	// FLYFIX1's free-camera rules (their old way is a test twin now)
@@ -22173,6 +22174,14 @@ bool GLView::event( QEvent * e )
 	case QEvent::Leave:
 		flyResync = true;
 		mouseRot = Vector3();
+		break;
+	case QEvent::UpdateRequest:
+		// lane VKFRAME1: painted and presented through a Vulkan flip-model swapchain (not GL's SwapBuffers); false =
+		// WW_VKPRESENT_RED=1, the row off or a new size: QOpenGLWindow's own paint and swap
+		if ( WwVkPresent::frame( this, [this]() { paintGL(); } ) ) {
+			emit frameSwapped();
+			return true;
+		}
 		break;
 	default:
 		break;
