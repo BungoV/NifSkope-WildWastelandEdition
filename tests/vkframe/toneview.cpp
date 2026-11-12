@@ -8,6 +8,8 @@
 // D24S8 target with the same depth and backdrop. Both read back per sample (texelFetch, every byte).
 // Prints `TONEVIEW <job> EXACT|BOUND|FAIL` (BOUND: no byte off by more than 1), `TONEVIEW RED ...` (the Vulkan run
 // with splitSky off against the split reference: must FAIL) and `TONEVIEW GATE OK|FAILED`.
+// Lane VKPOST2: `TONEVIEW MERGE <job> <output> EXACT|FAIL`: the tone pass + TAA in one crossing against two crossings,
+// and `TONEVIEW MERGE RED` (the view's resolve into cur skipped: must FAIL).
 #define WW_VKPRESENT_NO_QT
 #include "../../src/features/vkframe/vkpresent.cpp"
 
@@ -510,12 +512,8 @@ int main( int argc, char ** argv )
 	}
 	std::uint64_t gen = 0;
 
-	auto runVk = [&]( const Job & j, bool splitSky, std::vector<std::uint8_t> & out ) -> bool {
-		if ( !WwVkPresent::viewBegin( W, H, S, glProc, why ) ) {
-			std::printf( "TONEVIEW %s: the view: %s\n", j.name, why.c_str() );
-			return false;
-		}
-		const GLuint vfb = WwVkPresent::viewFbo();
+	// the frame into the shared frame, its depth into the view, the backdrop; the tone pass's job for it
+	auto toneOf = [&]( const Job & j, bool splitSky, GLuint vfb ) {
 		genFrame( fbFrame );
 		f.bindFramebuffer( kRead, fbFrame );
 		f.bindFramebuffer( kDraw, vfb );
@@ -549,6 +547,14 @@ int main( int argc, char ** argv )
 		t.vp[2] = W;
 		t.vp[3] = H;
 		t.drawFb = t.readFb = vfb;
+		return t;
+	};
+	auto runVk = [&]( const Job & j, bool splitSky, std::vector<std::uint8_t> & out ) -> bool {
+		if ( !WwVkPresent::viewBegin( W, H, S, glProc, why ) ) {
+			std::printf( "TONEVIEW %s: the view: %s\n", j.name, why.c_str() );
+			return false;
+		}
+		const WwVkPresent::ToneRun t = toneOf( j, splitSky, WwVkPresent::viewFbo() );
 		if ( !WwVkPresent::toneRun( t, why ) ) {
 			std::printf( "TONEVIEW %s: toneRun refused: %s\n", j.name, why.c_str() );
 			return false;
@@ -671,10 +677,181 @@ int main( int argc, char ** argv )
 			v.diff, v.maxd );
 		ok = ok && redFails;
 	}
+	/* lane VKPOST2: the tone pass and the TAA in ONE crossing (toneRun defers, taaRun colorFromView: Vulkan resolves the
+	 * view into cur) against the two crossings (toneRun alone, GL's colour blit into cur as gametaa.cpp does, taaRun).
+	 * Both routes start from the same frame, history and lock; cur, vectors, history, lock, picture and the view's samples
+	 * must be byte-EXACT. Red: mergeRedTest = 1 (the resolve into cur skipped; cur keeps its clear) must FAIL. */
+	const WwVkPresent::ToneStat st0 = WwVkPresent::takeToneStat();
+	{
+		constexpr GLenum kHalf = 0x140B, kRg = 0x8227;
+		const std::uintptr_t key = 0x54410000u;
+		const GLenum fmts[8] = { kRgba8, kD24s8, kGlRg32f, kRgba8, kRgba16f, kRgba16f, kRgba16f, kRgba16f };
+		unsigned sh[8] = {};
+		bool made = true;
+		for ( int i = 0; i < 8 && made; i++ )
+			made = WwVkPresent::sharedTarget( key + std::uintptr_t( i ), 0, W, H, 1, fmts[i], sh[i], why );
+		GLuint fbCur = 0, fbSd = 0;
+		if ( made ) {
+			f.genFramebuffers( 1, &fbCur );
+			f.bindFramebuffer( kFb, fbCur );
+			f.framebufferTexture2D( kFb, kCol0, GL_TEXTURE_2D, sh[0], 0 );
+			made = f.checkFramebufferStatus( kFb ) == kComplete;
+			f.genFramebuffers( 1, &fbSd );
+			f.bindFramebuffer( kFb, fbSd );
+			f.framebufferTexture2D( kFb, kDsAtt, GL_TEXTURE_2D, sh[1], 0 );
+			glDrawBuffer( GL_NONE );
+			glReadBuffer( GL_NONE );
+			made = made && f.checkFramebufferStatus( kFb ) == kComplete;
+		}
+		if ( !made ) {
+			std::printf( "TONEVIEW MERGE FAIL (the TAA targets: %s)\n", why.c_str() );
+			ok = false;
+		} else {
+			std::mt19937 hr( 53 );
+			std::vector<std::uint16_t> histInit( size_t( W ) * H * 4 ), lockInit( histInit.size() );
+			for ( auto & x : histInit )
+				x = std::uint16_t( hr() & 0x3bff );	// finite halves under 1
+			for ( auto & x : lockInit )
+				x = std::uint16_t( hr() & 0x3bff );
+			const std::vector<std::uint8_t> zero( size_t( W ) * H * 4, 0 );
+			auto put = [&]( GLuint t, GLenum typ, const void * d ) {
+				glBindTexture( GL_TEXTURE_2D, t );
+				glTexSubImage2D( GL_TEXTURE_2D, 0, 0, 0, W, H, GL_RGBA, typ, d );
+			};
+			auto get = [&]( GLuint t, GLenum fmt, GLenum typ, size_t bpp ) {
+				std::vector<std::uint8_t> o( size_t( W ) * H * bpp );
+				glBindTexture( GL_TEXTURE_2D, t );
+				glGetTexImage( GL_TEXTURE_2D, 0, fmt, typ, o.data() );
+				return o;
+			};
+			const int wr = 1, rd = 0;
+			// out: cur, vectors, history, lock, picture, the view's samples
+			auto route = [&]( const Job & j, bool merged, int red, std::vector<std::uint8_t> out[6] ) -> bool {
+				put( sh[0], GL_UNSIGNED_BYTE, zero.data() );
+				put( sh[4 + rd], kHalf, histInit.data() );
+				put( sh[6 + rd], kHalf, lockInit.data() );
+				if ( !WwVkPresent::viewBegin( W, H, S, glProc, why ) ) {
+					std::printf( "TONEVIEW MERGE %s: the view: %s\n", j.name, why.c_str() );
+					return false;
+				}
+				const GLuint vfb = WwVkPresent::viewFbo();
+				Tone & T = tone();
+				T.mergeRed = !merged;	// the app's red WW_VKVIEW_MERGE_RED=1: the tone pass crosses alone
+				T.mergeHint = merged;
+				T.backoff = 0;
+				const WwVkPresent::ToneRun tr = toneOf( j, j.splitSky, vfb );
+				if ( !WwVkPresent::toneRun( tr, why ) ) {
+					std::printf( "TONEVIEW MERGE %s: toneRun refused: %s\n", j.name, why.c_str() );
+					return false;
+				}
+				if ( T.deferred != merged ) {
+					std::printf( "TONEVIEW MERGE %s: the tone pass %s\n", j.name, merged ? "crossed alone" : "was deferred" );
+					return false;
+				}
+				// gametaa.cpp's blits: the depth (both routes), the colour (the two crossings only)
+				f.bindFramebuffer( kRead, vfb );
+				f.bindFramebuffer( kDraw, fbSd );
+				f.blitFramebuffer( 0, 0, W, H, 0, 0, W, H, GL_DEPTH_BUFFER_BIT, GL_NEAREST );
+				if ( !merged ) {
+					f.bindFramebuffer( kDraw, fbCur );
+					f.blitFramebuffer( 0, 0, W, H, 0, 0, W, H, GL_COLOR_BUFFER_BIT, GL_NEAREST );
+				}
+				f.bindFramebuffer( kFb, vfb );
+				WwVkPresent::TaaRun t;
+				t.w = W;
+				t.h = H;
+				t.wr = wr;
+				const float jpx = 0.25f, jpy = -0.15f;
+				const float offX = 2.0f * jpx / float( W ), offY = 2.0f * jpy / float( H );
+				const float reproj[16] = { 1, 0, 0, 0.0002f, 0, 1, 0, -0.0001f, 0, 0, 1, 0, -1.4f / float( W ), 0.001f, 0, 1 };
+				const float sj[4] = { 1.0f / float( W ), 1.0f / float( H ), jpx, jpy };
+				const std::int32_t ints[4] = { 3, 0, 0, 0 };
+				const std::int32_t ints2[4] = { 0, 1, 10, 0 };
+				std::memcpy( t.job.sizeJitter, sj, sizeof( sj ) );
+				std::memcpy( t.job.ints, ints, sizeof( ints ) );
+				std::memcpy( t.job.ints2, ints2, sizeof( ints2 ) );
+				t.job.f[0] = 1.0f;
+				std::memcpy( t.job.reproj, reproj, sizeof( reproj ) );
+				for ( int c = 0; c < 4; c++ )
+					std::memcpy( t.mvJob.c[c], reproj + 4 * c, sizeof( t.mvJob.c[c] ) );
+				const float mvc[4] = { offX, offY, 1.0f / float( W ), 1.0f / float( H ) };
+				std::memcpy( t.mvJob.c[4], mvc, sizeof( mvc ) );
+				t.rcasJob.c[0][0] = std::exp2( -0.5f );
+				t.rcasJob.c[0][1] = 1.0f;
+				t.cur = key + 0;
+				t.depth = key + 1;
+				t.mv = key + 2;
+				t.pic = key + 3;
+				for ( int i = 0; i < 2; i++ ) {
+					t.hist[i] = key + 4 + std::uintptr_t( i );
+					t.lock[i] = key + 6 + std::uintptr_t( i );
+				}
+				t.colorFromView = merged;
+				mergeRedTest = red;
+				const bool ran = WwVkPresent::taaRun( t, why );
+				mergeRedTest = 0;
+				if ( !ran ) {
+					std::printf( "TONEVIEW MERGE %s: taaRun refused: %s\n", j.name, why.c_str() );
+					return false;
+				}
+				View & V = view();
+				out[5] = readSamples( V.slot[V.cur].colorTex );
+				out[0] = get( sh[0], GL_RGBA, GL_UNSIGNED_BYTE, 4 );
+				out[1] = get( sh[2], kRg, GL_FLOAT, 8 );
+				out[2] = get( sh[4 + wr], GL_RGBA, kHalf, 8 );
+				out[3] = get( sh[6 + wr], GL_RGBA, kHalf, 8 );
+				out[4] = get( sh[3], GL_RGBA, GL_UNSIGNED_BYTE, 4 );
+				if ( !WwVkPresent::present( wnd, W, H, false, glProc, why ) ) {
+					std::printf( "TONEVIEW MERGE %s: present: %s\n", j.name, why.c_str() );
+					return false;
+				}
+				pump();
+				return glGetError() == GL_NO_ERROR;
+			};
+			const char * outNames[6] = { "cur", "vectors", "history", "lock", "picture", "view" };
+			size_t mergedBytes = 0;
+			std::vector<std::uint8_t> twoRef[6];
+			for ( const Job * jp : { &jobs[0], &jobs[2] } ) {
+				std::vector<std::uint8_t> two[6], one[6];
+				if ( !route( *jp, false, 0, two ) || !route( *jp, true, 0, one ) ) {
+					std::printf( "TONEVIEW MERGE %s FAIL (a route did not run)\n", jp->name );
+					ok = false;
+					continue;
+				}
+				for ( int k = 0; k < 6; k++ ) {
+					const Verdict v = compare( one[k], two[k] );
+					std::printf( "TONEVIEW MERGE %s %s %s (one crossing vs two: %zu of %zu bytes differ, max %d)\n", jp->name, outNames[k],
+						v.diff == 0 && v.total > 0 ? "EXACT" : "FAIL", v.diff, v.total, v.maxd );
+					ok = ok && v.diff == 0 && v.total > 0;
+					mergedBytes += v.total;
+				}
+				if ( jp == &jobs[0] )
+					for ( int k = 0; k < 6; k++ )
+						twoRef[k] = two[k];
+			}
+			// the red: the merged route without the resolve into cur, against the two crossings
+			{
+				std::vector<std::uint8_t> one[6];
+				const bool ran = route( jobs[0], true, 1, one );
+				const Verdict vc = compare( one[0], twoRef[0] ), vp = compare( one[4], twoRef[4] );
+				const bool redFails = !ran || vc.diff > 0 || vp.diff > 0;
+				std::printf( "TONEVIEW MERGE RED %s (the view's resolve into cur skipped: cur %zu of %zu bytes differ, picture %zu; must "
+					"FAIL)\n", redFails ? "FAIL" : "EXACT", vc.diff, vc.total, vp.diff );
+				ok = ok && redFails;
+			}
+			const WwVkPresent::TaaStat ts = WwVkPresent::takeTaaStat();
+			std::printf( "TONEVIEW MERGE stat: %d TAA runs, %d in one crossing with the tone pass, %d failed (%s); %zu bytes compared\n",
+				ts.runs, ts.merged, ts.fails, ts.failWhy.c_str(), mergedBytes );
+			ok = ok && ts.merged == 3 && mergedBytes > 0;
+		}
+		f.bindFramebuffer( kFb, 0 );
+		for ( std::uintptr_t k = 0; k < 8; k++ )
+			WwVkPresent::sharedTargetDrop( key + k );
+	}
 	const WwVkPresent::ToneStat st = WwVkPresent::takeToneStat();
 	std::printf( "TONEVIEW stat: %d runs on Vulkan, %d failed (%s), drawing thread %.3f ms a run (max %.3f), %d pipelines built in "
-		"%.1f ms, %.1f MB\n", st.runs, st.fails, st.failWhy.c_str(), st.runs ? st.cpuMs / st.runs : 0.0, st.maxMs, st.pipelines,
-		st.buildMs, st.mb );
+		"%.1f ms, %.1f MB; merge arm: %d runs, %d deferred, %d flushed\n", st0.runs, st0.fails, st0.failWhy.c_str(),
+		st0.runs ? st0.cpuMs / st0.runs : 0.0, st0.maxMs, st0.pipelines, st0.buildMs, st0.mb, st.runs, st.deferred, st.flushed );
 	f.bindFramebuffer( kFb, 0 );
 	WwVkPresent::toneFrameDrop();
 	WwVkPresent::shutdown();

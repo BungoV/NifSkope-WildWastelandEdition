@@ -1,3 +1,17 @@
+## VKPOST2 (2026-11-12): the tone map and the temporal AA share one GL -> Vulkan crossing (WW_VKVIEW=1)
+
+Changed, not built, not checked live. Offline: tests/vkframe/toneview.sh merge arm (one crossing vs two: cur, vectors,
+history, lock, picture and the view's samples all EXACT, 22.1 M bytes; red FAILS), taaview / present / post2 / spvsync OK.
+
+- With the view on Vulkan (WW_VKVIEW=1) and last frame's TAA on Vulkan, the tone pass no longer crosses alone: it is
+  recorded and sent with the TAA's crossing. GL skips its colour blit into the TAA's input; Vulkan resolves the view into
+  it after the tone pass, then runs the TAA. One GL signal, one flush and one worker round trip less a frame.
+- Any GL pass that could see the frame in between (post passes, lens flare, clouds in front, workspaces, the rescue blit,
+  the present) first sends the waiting tone pass on its own and backs the merge off for 120 frames.
+- Red WW_VKVIEW_MERGE_RED=1: two crossings as before. The TAA telemetry line counts frames in one crossing, deferred and
+  crossed alone.
+- Clouds in front and the lens flare stay on GL (reasons in notes/vkframe1/plan.md rows P8 / P9).
+
 ## VKCOMPUTE1 HLSL 1 (2026-11-12): the DDGI border kernel is HLSL (DXC), byte-exact with its GLSL original
 
 Changed, not checked live (no build). Offline, on the GPU: tests/hlslmatch (green 6 cases, 0 bytes differ; red

@@ -1833,8 +1833,10 @@ void wwCloudVolFront( Scene * scene )
 	CvGpu & g = gpus()[scene->renderer];
 	const bool go = g.drewNow && g.sceneTex && !red( "nodepth" ) && !wwCellUnderwaterHidesClouds();
 	g.drewNow = false;
-	if ( go )
+	if ( go ) {
+		WwVkPresent::toneFlush();	// lane VKPOST2: blended over the tone-mapped view
 		frontPass( scene->renderer, g, 1 );	// the red display (CLOUD2B); red nodepth: behind all geometry, as CLOUD2
+	}
 }
 
 void wwCloudVolLookdevFront( Scene * scene )

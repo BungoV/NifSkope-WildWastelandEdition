@@ -3,6 +3,7 @@
 #include "gl/celllooks.h"	// lane OPENCELLFIX2: the Camera master
 #include "features/shared/cellpasstime.h"	// lane POSTFX1: the post zone's sub-timers
 #include "features/post/taainputs.h"	// lane POSTFX1: the object vectors
+#include "features/vkframe/vkpresent.h"	// lane VKPOST2: a deferred tone pass crosses before this pass reads the view
 
 #include "esmdata.h"
 #include "features/post/gametaa.h"
@@ -626,6 +627,7 @@ void postApply( Scene * scene, bool linear )
 	}
 	if ( ( !wantDof && !wantMb && !wantOb ) || !scene || !scene->renderer || scene->selecting )
 		return;
+	WwVkPresent::toneFlush();	// lane VKPOST2: the view holds the tone map before this pass reads it
 	if ( wantOb )
 		wwTaaInputsRequest();	// lane POSTFX1: the object vectors of the NEXT frame (the inputs ran before this pass)
 	Renderer * r = scene->renderer;
