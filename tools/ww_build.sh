@@ -142,6 +142,7 @@ for f in $(cd res/shaders && find . -type f | sed 's|^\./||'); do	# MODULES1: th
 	[ -f "release/shaders/$f" ] && ! cmp -s "res/shaders/$f" "release/shaders/$f" && { echo "shader copy out of step: res/shaders/$f"; exit 5; }
 done
 echo "copies in step"
+bash "$ROOT/tools/ww_spirv.sh" "$ROOT" < /dev/null || true	# lane HLSLBULK1 R5: the SPIR-V set of the HLSL live path (never fails the build)
 
 # lane STARTSPEED1: the shader-cache warm start. When the shaders changed since the last warm start (or there
 # was none), the new exe starts once, headless, and quits at its first frame (WW_STARTUP_QUIT=1), so the next
