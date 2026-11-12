@@ -86,7 +86,7 @@ static Buf makeBuf( size_t n )
 	return B;
 }
 
-struct Img { VkImage i = VK_NULL_HANDLE; VkDeviceMemory m = VK_NULL_HANDLE; VkImageView v = VK_NULL_HANDLE; int w = 0, h = 0, tb = 8; bool half = true; VkFormat f = VK_FORMAT_UNDEFINED; std::string file; };
+struct Img { VkImage i = VK_NULL_HANDLE; VkDeviceMemory m = VK_NULL_HANDLE; VkImageView v = VK_NULL_HANDLE; int w = 0, h = 0, tb = 8, lv = 1; bool half = true; VkFormat f = VK_FORMAT_UNDEFINED; std::string file; };
 
 struct Fmt { const char * name; VkFormat f; int tb; bool half; };
 static const Fmt kFmts[] = { { "rgba16f", VK_FORMAT_R16G16B16A16_SFLOAT, 8, true }, { "rg16f", VK_FORMAT_R16G16_SFLOAT, 4, true },
@@ -95,9 +95,10 @@ static const Fmt kFmts[] = { { "rgba16f", VK_FORMAT_R16G16B16A16_SFLOAT, 8, true
 static const Fmt kRgba8 = { "rgba8", VK_FORMAT_R8G8B8A8_UNORM, 4, false };
 static int rasterMode = 0;	// LIGHTMATCH_RASTER
 
-static Img makeImg( int w, int h, const Fmt & fm )
+static Img makeImg( int w, int h, const Fmt & fm, int lv = 1 )
 {
 	Img I;
+	I.lv = lv;
 	I.w = w;
 	I.h = h;
 	I.tb = fm.tb;
@@ -107,7 +108,7 @@ static Img makeImg( int w, int h, const Fmt & fm )
 	ci.imageType = VK_IMAGE_TYPE_2D;
 	ci.format = fm.f;
 	ci.extent = { uint32_t( w ), uint32_t( h ), 1 };
-	ci.mipLevels = 1;
+	ci.mipLevels = uint32_t( lv );	// an input with mips (img line's 7th field): sampled only, all levels in the view
 	ci.arrayLayers = 1;
 	ci.samples = VK_SAMPLE_COUNT_1_BIT;
 	ci.tiling = VK_IMAGE_TILING_OPTIMAL;
@@ -126,7 +127,7 @@ static Img makeImg( int w, int h, const Fmt & fm )
 	vi.image = I.i;
 	vi.viewType = VK_IMAGE_VIEW_TYPE_2D;
 	vi.format = fm.f;
-	vi.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
+	vi.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, uint32_t( lv ), 0, 1 };
 	vkCreateImageView( dev, &vi, nullptr, &I.v );
 	return I;
 }
@@ -177,7 +178,7 @@ static bool makeLayout( uint32_t sets )
 		si.magFilter = si.minFilter = s == 0 ? VK_FILTER_LINEAR : VK_FILTER_NEAREST;
 		si.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
 		si.addressModeU = si.addressModeV = si.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-		si.maxLod = 0.0f;
+		si.maxLod = VK_LOD_CLAMP_NONE;	// GL's mip rule on mip inputs; single-level images clamp to 0 anyway
 		if ( vkCreateSampler( dev, &si, nullptr, &samplers[s] ) != VK_SUCCESS )
 			return false;
 	}
@@ -368,6 +369,7 @@ int main( int argc, char ** argv )
 	std::vector<std::string> imgOrder;
 	std::map<std::string, std::pair<const Fmt *, std::pair<int, int>>> imgDecl;
 	std::map<std::string, std::string> imgFile;
+	std::map<std::string, int> imgLv;
 	std::vector<Pass> passes;
 	std::vector<Cmp> cmps;
 	std::string bufFile;
@@ -394,6 +396,10 @@ int main( int argc, char ** argv )
 				imgOrder.push_back( n );
 				imgDecl[n] = { fm, { w, h } };
 				imgFile[n] = file;
+				int lv = 1;
+				if ( !( l >> lv ) || lv < 1 )
+					lv = 1;
+				imgLv[n] = lv;	// the file holds every level, each with its own W, H (floor halving)
 			} else if ( k == "pass" ) {
 				Pass p;
 				l >> p.label >> p.spv >> p.pc >> p.out[0] >> p.out[1];
@@ -499,7 +505,7 @@ int main( int argc, char ** argv )
 	const std::string ldr = rasterMode == 8 ? passes.back().out[0] : std::string();	// the LDR target in RGBA8
 	for ( const std::string & n : imgOrder ) {
 		const auto & d = imgDecl[n];
-		imgs[n] = makeImg( d.second.first, d.second.second, n == ldr ? kRgba8 : *d.first );
+		imgs[n] = makeImg( d.second.first, d.second.second, n == ldr ? kRgba8 : *d.first, imgLv[n] );
 		imgs[n].file = imgFile[n];
 		maxBytes = std::max( maxBytes, size_t( d.second.first ) * d.second.second * d.first->tb );
 	}
@@ -516,7 +522,7 @@ int main( int argc, char ** argv )
 			ib.newLayout = VK_IMAGE_LAYOUT_GENERAL;
 			ib.srcQueueFamilyIndex = ib.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
 			ib.image = x;
-			ib.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
+			ib.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, VK_REMAINING_MIP_LEVELS, 0, 1 };
 			vkCmdPipelineBarrier( cb, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1, &ib );
 		}
 		vkEndCommandBuffer( cb );
@@ -528,20 +534,29 @@ int main( int argc, char ** argv )
 		if ( x.file == "-" )
 			continue;
 		const std::vector<uint8_t> f = readFile( parent + x.file );
-		const size_t want = size_t( x.w ) * x.h * x.tb;
-		if ( f.size() != want + 8 || reinterpret_cast<const int32_t *>( f.data() )[0] != x.w
-			|| reinterpret_cast<const int32_t *>( f.data() )[1] != x.h ) {
-			std::printf( "input %s (%s): wrong size\n", n.c_str(), x.file.c_str() );
+		size_t at = 0;
+		for ( int m = 0; m < x.lv; m++ ) {
+			const int mw = std::max( x.w >> m, 1 ), mh = std::max( x.h >> m, 1 );
+			const size_t want = size_t( mw ) * mh * x.tb;
+			if ( f.size() < at + want + 8 || reinterpret_cast<const int32_t *>( f.data() + at )[0] != mw
+				|| reinterpret_cast<const int32_t *>( f.data() + at )[1] != mh ) {
+				std::printf( "input %s (%s) level %d: wrong size\n", n.c_str(), x.file.c_str(), m );
+				return fail( "input file" );
+			}
+			std::memcpy( stage.p, f.data() + at + 8, want );
+			at += want + 8;
+			VkCommandBuffer cb = newCb();
+			VkBufferImageCopy c {};
+			c.imageSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, uint32_t( m ), 0, 1 };
+			c.imageExtent = { uint32_t( mw ), uint32_t( mh ), 1 };
+			vkCmdCopyBufferToImage( cb, stage.b, x.i, VK_IMAGE_LAYOUT_GENERAL, 1, &c );
+			vkEndCommandBuffer( cb );
+			submitWait( cb );
+		}
+		if ( at != f.size() ) {
+			std::printf( "input %s (%s): %zu bytes left over\n", n.c_str(), x.file.c_str(), f.size() - at );
 			return fail( "input file" );
 		}
-		std::memcpy( stage.p, f.data() + 8, want );
-		VkCommandBuffer cb = newCb();
-		VkBufferImageCopy c {};
-		c.imageSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
-		c.imageExtent = { uint32_t( x.w ), uint32_t( x.h ), 1 };
-		vkCmdCopyBufferToImage( cb, stage.b, x.i, VK_IMAGE_LAYOUT_GENERAL, 1, &c );
-		vkEndCommandBuffer( cb );
-		submitWait( cb );
 	}
 
 	// the storage buffer (binding 9): the chain's `buf` file, else 256 zero bytes
@@ -738,7 +753,11 @@ int main( int argc, char ** argv )
 		/* gather (the object blur): any count at 1 ulp (the alpha is wsum / wsum, which either side's divide leaves 1 or
 		 * 1 - 1 ulp, the truncating store makes it a half ulp; measured 77410 of the 77919), <= 0.01 % by more than 1 ulp
 		 * (a sample position flipped by a last-bit jitter) */
+		/* sector (SSGI): the slice angle's divide by the slice count is lowered differently by NV's GL and Vulkan compilers
+		 * (1-2 ulp on ~40 % of texels, no single reciprocal fits either side); a sector bit or march sample then flips:
+		 * bound <= 1 % of values differ and <= 0.2 % by more than 1 ulp (the red: 12 %) */
 		const bool pass = mu <= tol || ( c.rule == "step" && d * 200 <= n && big * 1000 <= n ) || ( c.rule == "gather" && big * 10000 <= n )
+			|| ( c.rule == "sector" && d * 100 <= n && big * 500 <= n )
 			|| ( absRule && !nanBad && maxAbs <= absTol && d * 50 <= n );
 		exact = exact && d == 0;
 		ok = ok && pass;

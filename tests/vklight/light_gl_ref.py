@@ -211,7 +211,8 @@ def job(name, imgs, passes, cmps, reds, time_it):
     def chain(path, red):
         with open(path, 'w') as f:
             for x in imgs:
-                f.write('img %s %s %d %d %s\n' % (x.name, x.fmt, x.w, x.h, x.src or '-'))
+                lv = getattr(x, 'lv', 1)
+                f.write('img %s %s %d %d %s%s\n' % (x.name, x.fmt, x.w, x.h, x.src or '-', ' %d' % lv if lv > 1 else ''))
             for k, p in enumerate(passes):
                 spv = p.kernel + ('_red' if p.kernel == red else '') + '.spv'
                 outs = list(p.outs) + ['-'] * (2 - len(p.outs))
@@ -486,11 +487,97 @@ def contact_main():
     contact_job('ct_S', sdir, sg, sw, sh, proj, (-0.2, 0.3, -0.93), 1, 96, 3000.0, False, [])
 
 
+# -------------------------------------------------------------------------------------------------------------- SSGI
+SSGI = os.environ.get('VKLIGHT_SSGI_SRC', 'gi/cell_ssgi.frag')   # a stage probe's copy (absolute path) overrides
+genMip = _fn('glGenerateMipmap', None, E)
+getTexImage = _fn('glGetTexImage', None, E, I, E, E, VP)
+SCENE = {}
+NOISE = None
+
+
+def mip_img(name, srcd, W, H, rgba, levels):
+    """an RGBA16F input with GL's own mip chain (glGenerateMipmap, LINEAR_MIPMAP_NEAREST, as cellssgi.cpp makes the scene's);
+    every level read back into <srcd>/<name>.bin so Vulkan samples the same texels"""
+    x = Img(name, 'rgba16f', W, H, LINEAR, half(rgba), os.path.basename(srcd) + '/%s.bin' % name)
+    bindTex(T2D, x.tex)
+    texParam(T2D, 0x813D, levels - 1); genMip(T2D); texParam(T2D, 0x2801, 0x2701)
+    with open(os.path.join(srcd, name + '.bin'), 'wb') as f:
+        for m in range(levels):
+            mw, mh = max(W >> m, 1), max(H >> m, 1)
+            a = np.zeros((mh, mw, 4), np.uint16)
+            getTexImage(T2D, m, RGBA, HALF, a.ctypes.data)
+            f.write(np.array([mw, mh], np.int32).tobytes()); f.write(a.tobytes())
+    x.lv = levels
+    return x
+
+
+def ssgi_job(name, srcd, W, H, proj, div, slices, steps, blue, frame, radius, time_it, reds):
+    """src/features/gi/cellssgi.cpp stage 1 (the cast) at a tier's work size; the interval pyramid off (its default),
+    the full-mask early out on, no emissive subtraction"""
+    ww = (W + div - 1) // div if div > 1 else W
+    wh = (H + div - 1) // div if div > 1 else H
+    P00, P11 = float(proj[0][0]), float(proj[1][1])
+    gbf = os.path.basename(srcd) + '/gbuf.bin'
+    with open(os.path.join(srcd, 'gbuf.bin'), 'rb') as f:
+        f.read(8); gb = np.frombuffer(f.read(), np.float32).reshape(H, W, 4)
+    imgs = [Img('gbuf', 'rgba32f', W, H, NEAREST, gb, gbf), SCENE[srcd],
+            Img('noise', 'rgba16f', 128, 64 * 128, NEAREST, NOISE, 'noise.bin'), Img('cast', 'rgba16f', ww, wh, NEAREST)]
+    thick, srcb, sat = 32.0, 1.0, 0.8
+    flags = (1 if blue else 0) | 2
+    uni = [('ssgiStage', 'i', 1), ('fullSize', '2i', (W, H)), ('workSize', '2i', (ww, wh)), ('proj', '2f', (P00, P11)),
+           ('slices', 'i', slices), ('steps', 'i', steps), ('radius', 'f', radius), ('thickness', 'f', thick),
+           ('sourceBrightness', 'f', srcb), ('saturation', 'f', sat), ('frameIndex', 'i', frame), ('blueNoise', 'i', int(blue)),
+           ('hizLevels', 'i', 0), ('fullBreak', 'i', 1), ('emitSub', 'i', 0), ('oldLaw', 'i', 0)]
+    ps = [Pass('cast', 'ssgi', SSGI, ['cast'], [('gbuf', 'gbuf'), ('scene', 'scene'), ('noiseTex', 'noise')],
+               ['gbuf', 'scene', 'noise'], uni, [(W, H, ww, wh), (P00, P11, radius, thick), (srcb, sat, 0, 0)],
+               (slices, steps, frame, flags))]
+    job(name, imgs, ps, [('cast', os.environ.get('VKLIGHT_SSGI_RULE', 'sector'))], reds, time_it)
+
+
+def ssgi_main():
+    global NOISE
+    W, H, px, proj, depth = load_dump()
+    rng = np.random.default_rng(57)
+    nz = np.zeros((64 * 128, 128, 4), np.float32)
+    nz[..., :2] = rng.integers(0, 256, (64 * 128, 128, 2)) / 255.0
+    NOISE = half(nz)
+    os.makedirs(OUT, exist_ok=True)
+    put(os.path.join(OUT, 'noise.bin'), NOISE, 128, 64 * 128)
+    srcd = os.path.join(OUT, 'in_real')
+    os.makedirs(srcd, exist_ok=True)
+    gl_gbuf(srcd, W, H, depth, proj)
+    SCENE[srcd] = mip_img('scene', srcd, W, H, np.nan_to_num(px, posinf=6.0e4, neginf=0.0).astype(np.float32), 5)
+    # quality 1 (the default: quarter work size, 3 x 12), blue noise
+    ssgi_job('sg_A', srcd, W, H, proj, 4, 3, 12, True, 5, 256.0, True, ['ssgi'])
+    # quality 3 (half work size, 4 x 12), the closed-form noise
+    ssgi_job('sg_B', srcd, W, H, proj, 2, 4, 12, False, 41, 256.0, True, [])
+    # synthetic: odd sizes, sky rows, a bright scene with steps; full work size, a short radius (the interior's spacing)
+    sw, sh = 641, 361
+    sy, sx = np.mgrid[0:sh, 0:sw].astype(np.float32)
+    sdp = (0.9990 + 0.0008 * np.sin(sx / 29.0) * np.cos(sy / 17.0)).astype(np.float32)
+    for _ in range(40):
+        x0, y0 = rng.integers(0, sw - 40), rng.integers(0, sh - 40)
+        sdp[y0:y0 + rng.integers(5, 60), x0:x0 + rng.integers(5, 80)] -= np.float32(rng.uniform(0.0002, 0.0008))
+    sdp[: sh // 7] = 1.0
+    sdir = os.path.join(OUT, 'in_syn')
+    os.makedirs(sdir, exist_ok=True)
+    gl_gbuf(sdir, sw, sh, sdp, proj)
+    col = np.zeros((sh, sw, 4), np.float32)
+    col[..., 0] = 0.5 + 0.5 * np.sin(sx / 7.0)
+    col[..., 1] = (sy / sh) * 4.0
+    col[..., 2] = ((sx // 16 + sy // 16) % 2) * 20.0
+    col[..., 3] = 1.0
+    SCENE[sdir] = mip_img('scene', sdir, sw, sh, col, 5)
+    ssgi_job('sg_S', sdir, sw, sh, proj, 1, 2, 12, True, 63, 128.0, False, [])
+
+
 def main():
     if 'ao' in WANT:
         ao_main()
     if 'contact' in WANT:
         contact_main()
+    if 'ssgi' in WANT:
+        ssgi_main()
     print('LIGHT-GL-REF OK')
 
 
