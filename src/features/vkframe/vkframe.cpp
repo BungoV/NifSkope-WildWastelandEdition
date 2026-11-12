@@ -19,6 +19,7 @@
 
 #include "features/vkframe/vkframe.h"
 #include "features/vkframe/vkframegraph.h"
+#include "features/gi/bakert.h"	// round 5: the route asks for bakert's device when nothing else has
 #include "features/shared/cellpasstime.h"
 #include "harnesswindow.h"   // wwHarnessSettingsSuffix
 #include "version.h"
@@ -142,10 +143,12 @@ constexpr VkStructureType kSemaphoreGetWin32 = VkStructureType( 1000078003 );  /
 	X( vkGetPhysicalDeviceProperties ) X( vkGetPhysicalDeviceMemoryProperties ) X( vkGetPhysicalDeviceQueueFamilyProperties ) \
 	X( vkGetPhysicalDeviceImageFormatProperties2 ) X( vkGetPhysicalDeviceMemoryProperties2 ) X( vkEnumerateDeviceExtensionProperties )
 
+const char * const kNoDeviceYet = "no device yet (the ray-tracing device is not up)";
+
 struct Dev
 {
 	std::atomic<bool> ready { false };
-	QString why = QStringLiteral( "no device (the ray-tracing device is not made with GL sharing yet)" );
+	QString why = QLatin1String( kNoDeviceYet );
 	VkInstance inst = VK_NULL_HANDLE;
 	VkPhysicalDevice pd = VK_NULL_HANDLE;
 	VkDevice dev = VK_NULL_HANDLE;
@@ -185,6 +188,50 @@ Dev & dv()
 {
 	static Dev d;
 	return d;
+}
+
+/* round 5: the route's device is bakert's, which registers itself (wwVkFrameSetDevice) when it is made with GL sharing.
+ * bakert makes it on first use; with no RT GI and no GPU bake in a run nothing used it, and the route waited for good.
+ * So the route asks once, on its own thread (the first use builds the bakes' pipelines). WW_VKFRAME_KICK_RED=1: no
+ * ask, the route waits for another user as before round 5. */
+std::atomic<int> & kickState()	// 0 not asked, 1 coming up, 2 asked and back
+{
+	static std::atomic<int> s { 0 };
+	return s;
+}
+
+void kickDevice()
+{
+	if ( kickState().load( std::memory_order_relaxed ) != 0 || dv().ready.load( std::memory_order_acquire )
+		|| wwEnvInt( "WW_VKFRAME_KICK_RED" ) == 1 )
+		return;
+	int no = 0;
+	if ( !kickState().compare_exchange_strong( no, 1 ) )
+		return;
+	std::fprintf( stderr, "vk frame: asking for the ray-tracing device (the route is wanted and it is not up yet)\n" );
+	std::thread( []() {
+		const double t0 = nowMs();
+		const std::string name = bakert::deviceName();
+		const bool up = dv().ready.load( std::memory_order_acquire );
+		std::fprintf( stderr, "vk frame: ray-tracing device %s after %.1f ms: %s\n", name.empty() ? "absent" : name.c_str(),
+			nowMs() - t0, up ? "registered with GL sharing, the route can run on Vulkan"
+			: name.empty() ? "no Vulkan device, the route stays GL"
+			: "not registered (no ray query or no Win32 export extensions, or WW_BAKE_RT_RED=noshare / compute), the route stays GL" );
+		kickState().store( 2 );
+	} ).detach();
+}
+
+QString deviceWhy()
+{
+	Dev & d = dv();
+	const int k = kickState().load();
+	if ( k == 1 )
+		return QStringLiteral( "no device yet (the ray-tracing device is coming up)" );
+	if ( k == 2 && d.why == QLatin1String( kNoDeviceYet ) )
+		return QStringLiteral( "no device (the ray-tracing device came up without GL sharing)" );
+	if ( k == 0 && wwEnvInt( "WW_VKFRAME_KICK_RED" ) == 1 )
+		return d.why + QStringLiteral( " (red WW_VKFRAME_KICK_RED=1: the route does not ask for it)" );
+	return d.why;
 }
 
 // the BloomBindingsVk.hlsli push constants (48 bytes)
@@ -975,6 +1022,8 @@ bool wanted()
 		QSettings s( "NifTools", "NifSkope " + NifSkopeVersion::rawToMajMin( NIFSKOPE_VERSION ) + wwHarnessSettingsSuffix() );
 		row = s.value( "Settings/Nif/Vulkan Post", true ).toBool();
 	}
+	if ( row )
+		kickDevice();	// round 5: once a run, while the device is not up
 	return row;
 }
 
@@ -1023,7 +1072,7 @@ bool makeChain( const void * key, int W, int H, int mipCount, const int dims[][2
 	const WwVkFrame::Route rt = WwVkFrame::route( device, glImport, device && d.pipesBuilt >= d.pipesWanted, !wanted() );
 	if ( rt.side != WwVkFrame::Side::Vk ) {
 		if ( why.isEmpty() )
-			why = !device ? d.why : !g.ok ? g.why : QString::fromLatin1( rt.why );
+			why = !device ? deviceWhy() : !g.ok ? g.why : QString::fromLatin1( rt.why );
 		return false;
 	}
 	if ( mipCount < 1 || mipCount > kMaxMips ) {
@@ -1183,7 +1232,7 @@ bool makeFrame( const void * key, int W, int H, int samples, unsigned dsFormat, 
 	const WwVkFrame::Route rt = WwVkFrame::route( device, glImport, device && d.pipesBuilt >= d.pipesWanted, !wanted() );
 	if ( rt.side != WwVkFrame::Side::Vk ) {
 		if ( why.isEmpty() )
-			why = !device ? d.why : !g.ok ? g.why : QString::fromLatin1( rt.why );
+			why = !device ? deviceWhy() : !g.ok ? g.why : QString::fromLatin1( rt.why );
 		return false;
 	}
 	if ( !g.storage2DMs ) {
@@ -1269,7 +1318,7 @@ bool runBloom( const void * key, const BloomJob & job, QString & why )
 	auto it = chains().find( key );
 	if ( it == chains().end() || !it->ok ) {
 		const QString made = refusals().value( key );
-		why = !d.ready.load( std::memory_order_acquire ) ? d.why
+		why = !d.ready.load( std::memory_order_acquire ) ? deviceWhy()
 			: !wanted() ? ( wwEnvInt( "WW_VKPOST_RED" ) == 1 ? QStringLiteral( "red (WW_VKPOST_RED=1)" ) : QStringLiteral( "the Vulkan Post row is off" ) )
 			: made.isEmpty() ? QStringLiteral( "the chain's images are GL's (made before the route was Vulkan)" )
 			: QStringLiteral( "the shared images were refused: %1" ).arg( made );
@@ -1500,7 +1549,7 @@ QString wwVkFrameUse( int frames, double glGpuMs, double wallMs )
 	led.add( "bloom-chain", vkRoute ? WwVkFrame::Side::Vk : WwVkFrame::Side::Gl, vkRoute ? vk : 0.0 );
 	led.add( "gl-tone-map-to-present", WwVkFrame::Side::Gl, 0.0 );
 	const QString why = vkRoute ? QStringLiteral( "vulkan" )
-		: !d.ready.load( std::memory_order_acquire ) ? d.why
+		: !d.ready.load( std::memory_order_acquire ) ? deviceWhy()
 		: w.glWhy.isEmpty() ? QStringLiteral( "no bloom chain this window (bloom off or vanilla)" ) : w.glWhy;
 	std::fprintf( stderr, "%s | frames vulkan %d gl %d | overlap: wall %.2f ms a frame, CPU %.2f (paint start to swap return), GPU %.2f "
 		"(timestamps, the Vulkan block inside them), Vulkan %.3f; max %.2f, sum %.2f: %s (%.0f %% of the shorter side runs "

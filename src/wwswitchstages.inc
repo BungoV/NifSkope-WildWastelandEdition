@@ -1511,6 +1511,7 @@
 { "WW_VIEW_TRANSFORM", 0, "src/gl/scenelighting.cpp:97 st | init-once state, re-read when a live set moves its prefix (b)" },
 { "WW_VKASYNC_RED", 2, "src/features/gi/bakert.cpp:397 init | the ray-tracing device is made once a run (dev(): call_once)" },
 { "WW_VKPOST_RED", 0, "src/features/vkframe/vkframe.cpp WwVkPost::wanted | hand: re-read per frame, the bloom chain's route (GL or Vulkan) at the next paint (VKFRAME1 11-12)" },
+{ "WW_VKFRAME_KICK_RED", 0, "src/features/vkframe/vkframe.cpp kickDevice | hand: read until the route first asks for the ray-tracing device; 1 = before round 5, the route waits for RT GI or a GPU bake to make it (VKFRAME1 11-12)" },
 { "WW_VOLCHECK_DUMP", 1, "src/features/gi/probevolcheck.cpp:950 probeVolCheckCli | (a) the probe volumes fitted at the GI build of the open (dump / spec of that fit)" },
 { "WW_VOLCHECK_DUMPBOX", 1, "src/features/gi/probevolcheck.cpp:952 probeVolCheckCli | (a) the probe volumes fitted at the GI build of the open (dump / spec of that fit)" },
 { "WW_VOLCHECK_DUMPROOM", 1, "src/features/gi/probevolcheck.cpp:951 probeVolCheckCli | (a) the probe volumes fitted at the GI build of the open (dump / spec of that fit)" },
