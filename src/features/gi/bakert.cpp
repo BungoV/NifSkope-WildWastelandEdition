@@ -8,6 +8,11 @@
 #include "features/gi/vkasyncrule.h"     // lane VKCOMPUTE1: the queue family
 #include "harnesswindow.h"   // wwHarnessSettingsSuffix
 #include "version.h"
+// lane VKFRAME1: the Vulkan frame takes this device (notes/vkframe1/BAKERT_REQUEST.md); until vkframe.h lands the call drops out
+#if __has_include( "features/vkframe/vkframe.h" )
+#include "features/vkframe/vkframe.h"   // wwVkFrameSetDevice
+#define BAKERT_VKFRAME 1
+#endif
 
 #include <QSettings>
 
@@ -521,6 +526,11 @@ void init( Dev & D )
 		&& makeBuf( D, D.cap * 8, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, { kHost | VK_MEMORY_PROPERTY_HOST_CACHED_BIT, kHost }, D.xhits );
 	if ( wantX && !D.x && D.why.empty() )
 		D.why = "no memory for the whole-ray batch";
+#ifdef BAKERT_VKFRAME
+	// every vkQueueSubmit on D.q holds D.m (bakert, rtddgi_vk.inc, restir_vk.inc, airrays_vk.inc): the frame's submits take it too
+	if ( D.ok && D.share )
+		wwVkFrameSetDevice( D.inst, D.pd, D.dev, D.qf, D.q, (void *) vk.vkGetDeviceProcAddr, D.deviceUuid, &D.m );
+#endif
 }
 
 Dev & dev()
