@@ -45,6 +45,10 @@ void frameBegin();
 void frameEnd();
 //! lane EMPTY240 item 1: the last timed frame's pass CPU ms, summed over the zones (0 while the timers are off)
 double lastFrameCpuSumMs();
+/* lane VKFRAME1 build 88: a named frame wall part's seconds leave the open gap between top-level passes; the take gives
+ * the gaps by the pass before each, ms a frame since the last take (then reset): " | other-in-frame by ..." or "" */
+void gapNamed( double seconds );
+QByteArray otherInFrameTake();
 
 void begin( int pass );
 void end( int pass );

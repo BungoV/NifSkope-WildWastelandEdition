@@ -226,6 +226,12 @@ struct State
 	QStringList lines;
 	int memArmed = 0;
 	bool text = true;	// lane PERFLOAD1 (P5): the table is drawn on screen (WW_CELL_PASSTIME_TEXT)
+	// lane VKFRAME1 build 88: the frame wall's other-in-frame by name: the gaps between top-level passes, by the pass before
+	qint64 gapT0 = -1;	// the open gap's start (-1: inside a pass, or no frame)
+	int gapAfter = -1;	// the top-level pass before it (-1: the frame's start)
+	qint64 gapNamed = 0;	// of the open gap, the wall's named parts (gi-frame, restir, probe-sky, scene-transform)
+	double gapSum[Count + 1] = {};	// ms since the last take; [Count] = after the frame's start
+	int gapFrames = 0;
 };
 
 State & st()
@@ -1046,6 +1052,14 @@ qint64 nowNs()
 	return st().clock.nsecsElapsed();
 }
 
+static void gapClose( State & s )	// lane VKFRAME1 build 88
+{
+	if ( s.gapT0 >= 0 )
+		s.gapSum[s.gapAfter < 0 ? Count : s.gapAfter] += double( nowNs() - s.gapT0 - s.gapNamed ) * 1e-6;
+	s.gapT0 = -1;
+	s.gapNamed = 0;
+}
+
 void frameBegin()
 {
 	::wwMainStep( "a frame's start" );	// lane PERFLOAD1 P5: a stall inside a frame names its pass, timers on or off
@@ -1101,6 +1115,9 @@ void frameBegin()
 		s.gl->glQueryCounter( sl.f0, GL_TIMESTAMP );
 	s.frameT0 = nowNs();
 	s.inFrame = true;
+	s.gapT0 = s.frameT0;	// lane VKFRAME1 build 88
+	s.gapAfter = -1;
+	s.gapNamed = 0;
 }
 
 void begin( int pass )
@@ -1113,6 +1130,8 @@ void begin( int pass )
 	if ( pass < CullCamera && !s.stack.empty() )
 		return;	// nested (the measure's own scene draw): the outer pass holds its time and its draws
 	Slot & sl = s.ring[s.frame % kSlots];
+	if ( pass < CullCamera )
+		gapClose( s );	// lane VKFRAME1 build 88
 	if ( s.sync && pass < CullCamera )
 		s.gl->glFinish();
 	s.open[pass] = nowNs();
@@ -1167,8 +1186,46 @@ void end( int pass )
 				break;
 			}
 		Sampler::pass = s.stack.empty() ? -1 : s.stack.back();
+		if ( s.stack.empty() ) {	// lane VKFRAME1 build 88: a gap opens
+			s.gapT0 = nowNs();
+			s.gapAfter = pass;
+			s.gapNamed = 0;
+		}
 	}
 	s.openMark[pass] = -1;
+}
+
+void gapNamed( double seconds )
+{
+	State & s = st();
+	if ( !s.inFrame || s.gapT0 < 0 )
+		return;
+	const qint64 ns = qint64( seconds * 1e9 ), open = nowNs() - s.gapT0;	// a part that began before the gap: its share
+	s.gapNamed += ns < open ? ns : open;
+}
+
+QByteArray otherInFrameTake()
+{
+	State & s = st();
+	QByteArray out;
+	if ( s.gapFrames > 0 ) {
+		int order[Count + 1];
+		double sum = 0.0;
+		for ( int i = 0; i <= Count; i++ ) {
+			order[i] = i;
+			sum += s.gapSum[i];
+		}
+		std::sort( order, order + Count + 1, [&s]( int a, int b ) { return s.gapSum[a] > s.gapSum[b]; } );
+		const double n = double( s.gapFrames );
+		out = " | other-in-frame by the pass before it " + QByteArray::number( sum / n, 'f', 2 ) + " =";
+		for ( int i = 0; i < 6 && s.gapSum[order[i]] / n >= 0.005; i++ )
+			out += QByteArray( i ? " + " : " " ) + ( order[i] == Count ? QByteArray( "frame-start" )
+				: QByteArray( "after " ) + name( order[i] ) ) + " " + QByteArray::number( s.gapSum[order[i]] / n, 'f', 2 );
+	}
+	for ( double & g : s.gapSum )
+		g = 0.0;
+	s.gapFrames = 0;
+	return out;
 }
 
 void cpuSubAdd( int sub, qint64 ns )
@@ -1255,6 +1312,8 @@ void frameEnd()
 	}
 	for ( int k = 0; k < SubCount; k++ )
 		subEnd( k );
+	gapClose( s );	// lane VKFRAME1 build 88: the last pass to the frame's end
+	s.gapFrames++;
 	s.inFrame = false;
 	Sampler::pass = -2;
 	if ( sl.stamped )	// lane EMPTY240 R10-1

@@ -41,7 +41,8 @@ constexpr GLenum kTexture2D = 0x0DE1, kRgba8 = 0x8058, kScissorTest = 0x0C11, kR
 	kReadFbBinding = 0x8CAA, kDrawFbBinding = 0x8CA6, kColorAttach0 = 0x8CE0, kColorBit = 0x4000, kNearest = 0x2600,
 	kTexMinFilter = 0x2801, kTexMagFilter = 0x2800, kTexBinding2D = 0x8069, kLayoutGeneral = 0x958D,
 	kHandleOpaqueWin32 = 0x9587, kDedicated = 0x9581, kNumDeviceUuids = 0x9596, kDeviceUuid = 0x9597,
-	kFbComplete = 0x8CD5;
+	kFbComplete = 0x8CD5, kSyncGpuDone = 0x9117;
+constexpr GLuint64 kTimeoutIgnored = ~0ull;
 
 struct Gl
 {
@@ -76,6 +77,9 @@ struct Gl
 	void( WINAPI * waitSemaphore )( GLuint, GLuint, const GLuint *, GLuint, const GLuint *, const GLenum * ) = nullptr;
 	void( WINAPI * signalSemaphore )( GLuint, GLuint, const GLuint *, GLuint, const GLuint *, const GLenum * ) = nullptr;
 	void( WINAPI * getUnsignedBytei )( GLenum, GLuint, GLubyte * ) = nullptr;
+	// GL 3.2 (optional): the fence the worker's GL context waits before it signals Vulkan (build 88)
+	void *( WINAPI * fenceSync )( GLenum, GLbitfield ) = nullptr;
+	void( WINAPI * deleteSync )( void * ) = nullptr;
 };
 
 template <class F> void load( F & f, WwVkPresent::GlProc gp, const char * name )
@@ -113,6 +117,8 @@ bool loadGl( Gl & g, WwVkPresent::GlProc gp, std::string & why )
 	load( g.waitSemaphore, gp, "glWaitSemaphoreEXT" );
 	load( g.signalSemaphore, gp, "glSignalSemaphoreEXT" );
 	load( g.getUnsignedBytei, gp, "glGetUnsignedBytei_vEXT" );
+	load( g.fenceSync, gp, "glFenceSync" );
+	load( g.deleteSync, gp, "glDeleteSync" );
 	g.ok = g.getIntegerv && g.getError && g.enable && g.disable && g.isEnabled && g.flush && g.genTextures && g.deleteTextures
 		&& g.bindTexture && g.texParameteri && g.genFramebuffers && g.deleteFramebuffers && g.bindFramebuffer
 		&& g.framebufferTexture2D && g.checkFramebufferStatus && g.blitFramebuffer && g.createMemoryObjects
@@ -190,7 +196,20 @@ struct Chain
 	int w = 0, h = 0;
 	std::uint64_t frame = 0;
 	std::vector<std::uint8_t> * capture = nullptr;
+	/* build 88: GL's signal to Vulkan (a submit: 0.16 ms of the drawing thread with the blit) is sent by a GL context of
+	 * the worker's own, sharing GL's objects, on a hidden 1x1 window with GL's pixel format; the drawing thread fences */
+	HWND sigWnd = nullptr;
+	HDC sigDc = nullptr;
+	HGLRC sigCtx = nullptr;
+	bool sigTried = false;
+	std::string sigWhy;  // why the signal stays on the drawing thread
 };
+
+bool & workerSignal()  // the harness compares both (no switch: the drawing thread's signal is the fallback only)
+{
+	static bool on = true;
+	return on;
+}
 
 Vk & vk()
 {
@@ -399,6 +418,10 @@ bool vkPart( int k, int w, int h, std::string & why, bool & rebuild, WwVkPresent
 struct Work
 {
 	int k = 0, w = 0, h = 0;
+	void * sync = nullptr;  // build 88: the worker's GL context waits this fence, then signals sem (null: signaled already)
+	GLuint sem = 0, tex = 0;
+	HDC dc = nullptr;  // k < 0: the worker takes ctx current and keeps it (null ctx: lets its context go)
+	HGLRC ctx = nullptr;
 };
 
 struct Worker
@@ -409,6 +432,8 @@ struct Worker
 	bool started = false, busy = false, rebuild = false;
 	bool inFlight[kSlots] = {};  // queued or running: its vkDone signal is not submitted yet
 	WwVkPresent::Split split;
+	bool bindOk = false, lastOk = true;
+	std::string bindWhy, lastWhy;
 };
 
 Worker & wk()
@@ -417,9 +442,38 @@ Worker & wk()
 	return *w;
 }
 
+// the worker's GL context: current on the worker thread from its bind job to its release job
+struct SigGl
+{
+	HGLRC ctx = nullptr;
+	void( WINAPI * waitSync )( void *, GLbitfield, GLuint64 ) = nullptr;
+	void( WINAPI * deleteSync )( void * ) = nullptr;
+	void( WINAPI * signalSemaphore )( GLuint, GLuint, const GLuint *, GLuint, const GLuint *, const GLenum * ) = nullptr;
+};
+
+bool sigBind( SigGl & sg, HDC dc, HGLRC ctx, std::string & why )
+{
+	if ( !wglMakeCurrent( dc, ctx ) ) {
+		why = "wglMakeCurrent on the worker failed (error " + std::to_string( GetLastError() ) + ")";
+		sg = SigGl();
+		return false;
+	}
+	sg.ctx = ctx;
+	sg.waitSync = reinterpret_cast<decltype( sg.waitSync )>( wglGetProcAddress( "glWaitSync" ) );
+	sg.deleteSync = reinterpret_cast<decltype( sg.deleteSync )>( wglGetProcAddress( "glDeleteSync" ) );
+	sg.signalSemaphore = reinterpret_cast<decltype( sg.signalSemaphore )>( wglGetProcAddress( "glSignalSemaphoreEXT" ) );
+	if ( sg.waitSync && sg.deleteSync && sg.signalSemaphore )
+		return true;
+	why = "no glWaitSync / glSignalSemaphoreEXT in the worker's GL context";
+	wglMakeCurrent( nullptr, nullptr );
+	sg = SigGl();
+	return false;
+}
+
 void workerLoop()
 {
 	Worker & W = wk();
+	SigGl sg;
 	for ( ;; ) {
 		Work j;
 		{
@@ -429,16 +483,48 @@ void workerLoop()
 			W.q.pop_front();
 			W.busy = true;
 		}
+		if ( j.k < 0 ) {
+			std::string why;
+			bool ok = true;
+			if ( j.ctx )
+				ok = sigBind( sg, j.dc, j.ctx, why );
+			else if ( sg.ctx ) {
+				wglMakeCurrent( nullptr, nullptr );
+				sg = SigGl();
+			}
+			{
+				std::lock_guard<std::mutex> lk( W.m );
+				W.bindOk = ok;
+				W.bindWhy = why;
+				W.busy = false;
+			}
+			W.idle.notify_all();
+			continue;
+		}
 		const double t0 = nowMs();
 		std::string why;
-		bool rebuild = false;
+		bool rebuild = false, ok = false;
 		WwVkPresent::Split one;
-		const bool ok = vkPart( j.k, j.w, j.h, why, rebuild, one );
+		if ( j.sync && !sg.ctx ) {
+			why = "the worker has no GL context: GL's signal was not sent";
+			rebuild = true;
+		} else {
+			if ( j.sync ) {  // build 88: GL's frame fence (a GPU wait, in order), then the signal Vulkan's submit waits
+				const double ts = nowMs();
+				const GLenum general = kLayoutGeneral;
+				sg.waitSync( j.sync, 0, kTimeoutIgnored );
+				sg.deleteSync( j.sync );
+				sg.signalSemaphore( j.sem, 0, nullptr, 1, &j.tex, &general );
+				one.signalMs = nowMs() - ts;
+			}
+			ok = vkPart( j.k, j.w, j.h, why, rebuild, one );
+		}
 		const double ms = nowMs() - t0;
 		{
 			std::lock_guard<std::mutex> lk( W.m );
 			WwVkPresent::Split & s = W.split;
 			s.n++;
+			s.signalMs += one.signalMs;
 			s.fenceMs += one.fenceMs;
 			s.acquireMs += one.acquireMs;
 			s.recordMs += one.recordMs;
@@ -451,6 +537,8 @@ void workerLoop()
 				s.why = why;
 			}
 			W.rebuild = W.rebuild || rebuild;
+			W.lastOk = ok;
+			W.lastWhy = why;
 			W.busy = false;
 			W.inFlight[j.k] = false;
 		}
@@ -458,7 +546,7 @@ void workerLoop()
 	}
 }
 
-void hand( int k, int w, int h )
+void hand( const Work & j )
 {
 	Worker & W = wk();
 	{
@@ -467,8 +555,9 @@ void hand( int k, int w, int h )
 			W.started = true;
 			std::thread( workerLoop ).detach();
 		}
-		W.inFlight[k] = true;
-		W.q.push_back( Work { k, w, h } );
+		if ( j.k >= 0 )
+			W.inFlight[j.k] = true;
+		W.q.push_back( j );
 	}
 	W.cv.notify_one();
 }
@@ -555,11 +644,93 @@ void dropSwap( bool keepOld, VkSwapchainKHR * old )
 	c.swap = VK_NULL_HANDLE;
 }
 
+// the worker's GL context goes (the worker lets it go first: a context current on another thread is not deleted)
+void dropSig( Chain & c )
+{
+	if ( c.sigCtx ) {
+		Work j;
+		j.k = -1;
+		hand( j );
+		drain();
+		wglDeleteContext( c.sigCtx );
+	}
+	if ( c.sigDc )
+		ReleaseDC( c.sigWnd, c.sigDc );
+	if ( c.sigWnd )
+		DestroyWindow( c.sigWnd );
+	c.sigCtx = nullptr;
+	c.sigDc = nullptr;
+	c.sigWnd = nullptr;
+}
+
+// GL current: the worker's GL context, sharing GL's (the slot textures, the semaphores, the fence), bound once and checked
+bool makeSig( Chain & c, std::string & why )
+{
+	HDC mdc = wglGetCurrentDC();
+	HGLRC mctx = wglGetCurrentContext();
+	const int pf = mdc ? GetPixelFormat( mdc ) : 0;
+	if ( !pf || !mctx ) {
+		why = "GL's window has no pixel format";
+		return false;
+	}
+	PIXELFORMATDESCRIPTOR pfd {};
+	DescribePixelFormat( mdc, pf, sizeof( pfd ), &pfd );
+	static const bool registered = []() {
+		WNDCLASSA wc {};
+		wc.style = CS_OWNDC;
+		wc.lpfnWndProc = DefWindowProcA;
+		wc.hInstance = GetModuleHandleA( nullptr );
+		wc.lpszClassName = "WwVkPresentSignal";
+		return RegisterClassA( &wc ) != 0;
+	}();
+	( void ) registered;
+	c.sigWnd = CreateWindowExA( WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW, "WwVkPresentSignal", "", WS_POPUP, 0, 0, 1, 1, nullptr,
+		nullptr, GetModuleHandleA( nullptr ), nullptr );
+	c.sigDc = c.sigWnd ? GetDC( c.sigWnd ) : nullptr;
+	if ( !c.sigDc || !SetPixelFormat( c.sigDc, pf, &pfd ) ) {
+		why = "the signal window took no pixel format (error " + std::to_string( GetLastError() ) + ")";
+		dropSig( c );
+		return false;
+	}
+	using CreateCtx = HGLRC( WINAPI * )( HDC, HGLRC, const int * );
+	const auto create = reinterpret_cast<CreateCtx>( wglGetProcAddress( "wglCreateContextAttribsARB" ) );
+	c.sigCtx = create ? create( c.sigDc, mctx, nullptr ) : nullptr;
+	if ( !c.sigCtx ) {
+		c.sigCtx = wglCreateContext( c.sigDc );
+		if ( c.sigCtx && !wglShareLists( mctx, c.sigCtx ) ) {
+			wglDeleteContext( c.sigCtx );
+			c.sigCtx = nullptr;
+		}
+	}
+	if ( !c.sigCtx ) {
+		why = "no GL context sharing GL's objects (error " + std::to_string( GetLastError() ) + ")";
+		dropSig( c );
+		return false;
+	}
+	Work j;
+	j.k = -1;
+	j.dc = c.sigDc;
+	j.ctx = c.sigCtx;
+	hand( j );
+	drain();
+	bool ok = false;
+	{
+		Worker & W = wk();
+		std::lock_guard<std::mutex> lk( W.m );
+		ok = W.bindOk;
+		why = W.bindWhy;
+	}
+	if ( !ok )
+		dropSig( c );
+	return ok;
+}
+
 void dropAll( bool glAlive )
 {
 	Vk & v = vk();
 	Chain & c = ch();
 	drain();
+	dropSig( c );
 	if ( v.ok ) {
 		v.vkDeviceWaitIdle( v.dev );
 		dropSlots( glAlive );
@@ -942,6 +1113,10 @@ bool present( void * hwnd, int w, int h, bool vsync, GlProc gp, std::string & wh
 	}
 	failWhy.clear();
 	( void ) v;
+	if ( !c.sigTried ) {
+		c.sigTried = true;
+		makeSig( c, c.sigWhy );
+	}
 	const int k = int( c.frame++ % kSlots );
 	Slot & s = c.slot[k];
 	/* the worker has submitted this slot's last Vulkan half, and that read of the slot is done (its fence): GL then
@@ -975,15 +1150,41 @@ bool present( void * hwnd, int w, int h, bool vsync, GlProc gp, std::string & wh
 		g.bindFramebuffer( kReadFb, GLuint( rd ) );
 		g.bindFramebuffer( kDrawFb, GLuint( dr ) );
 	}
-	g.signalSemaphore( s.glDoneGl, 0, nullptr, 1, &s.tex, &general );
+	const double tb = nowMs();
+	/* build 88: the signal is a submit of the whole frame (0.16 ms of the drawing thread with the blit): the worker's GL
+	 * context sends it after a GPU wait on this fence; here only the fence and the flush that sends it */
+	void * sync = nullptr;
+	if ( c.sigCtx && g.fenceSync && g.deleteSync && workerSignal() )
+		sync = g.fenceSync( kSyncGpuDone, 0 );
+	if ( !sync )
+		g.signalSemaphore( s.glDoneGl, 0, nullptr, 1, &s.tex, &general );
 	const double tf = nowMs();
-	g.flush();  // Vulkan's wait sees GL's signal only once it is flushed
+	g.flush();  // Vulkan's wait (or the worker's fence wait) sees GL's work only once it is flushed
 	const double tv = nowMs();
 	s.used = true;
-	// Vulkan: on the present worker; a capture (the harness's picture) runs here, after the worker drained
+	// Vulkan: on the present worker; a capture (the harness's picture) waits for it here
 	Stat & st = stat();
-	st.worker = !c.capture;
-	if ( c.capture ) {
+	const bool capture = c.capture != nullptr;
+	st.worker = sync || !capture;
+	if ( st.worker ) {
+		Work j;
+		j.k = k;
+		j.w = w;
+		j.h = h;
+		j.sync = sync;
+		j.sem = s.glDoneGl;
+		j.tex = s.tex;
+		hand( j );
+		if ( capture ) {
+			drain();
+			Worker & W = wk();
+			std::lock_guard<std::mutex> lk( W.m );
+			if ( !W.lastOk ) {
+				why = W.lastWhy;
+				return false;
+			}
+		}
+	} else {
 		drain();
 		bool rebuild = false;
 		Split one;
@@ -992,14 +1193,15 @@ bool present( void * hwnd, int w, int h, bool vsync, GlProc gp, std::string & wh
 			c.rebuild = true;
 		if ( !ok )
 			return false;
-	} else {
-		hand( k, w, h );
 	}
 	st.ms = nowMs() - t0;
 	st.waitMs = waited;
 	st.stateMs = tg - tq;
-	st.glMs = tf - tg;
+	st.blitMs = tb - tg;
+	st.glMs = tf - tb;
 	st.flushMs = tv - tf;
+	st.sigWorker = sync != nullptr;
+	st.sigWhy = c.sigCtx ? std::string() : c.sigWhy;
 	st.dsa = g.blitNamedFramebuffer != nullptr;
 	st.busy = busy;
 	st.mode = modeName( c.mode );
@@ -1217,7 +1419,8 @@ bool frame( QOpenGLWindow * w, const std::function<void()> & paint )
 {
 	static QString said;
 	static QSize baseSize;
-	static double winAt = 0.0, winSum = 0.0, winMax = 0.0, winWait = 0.0, winState = 0.0, winGl = 0.0, winFlush = 0.0;
+	static double winAt = 0.0, winSum = 0.0, winMax = 0.0, winWait = 0.0, winState = 0.0, winBlit = 0.0, winGl = 0.0,
+		winFlush = 0.0;
 	static int winN = 0, winBusy = 0;
 	static std::uint64_t builtSaid = 0;
 	auto say = [&]( const QString & line ) {
@@ -1260,6 +1463,7 @@ bool frame( QOpenGLWindow * w, const std::function<void()> & paint )
 	winSum += st.ms;
 	winWait += st.waitMs;
 	winState += st.stateMs;
+	winBlit += st.blitMs;
 	winGl += st.glMs;
 	winFlush += st.flushMs;
 	winBusy += st.busy ? 1 : 0;
@@ -1275,18 +1479,24 @@ bool frame( QOpenGLWindow * w, const std::function<void()> & paint )
 				.arg( QLatin1String( st.mode ) ).arg( st.images ).arg( st.w ).arg( st.h ).arg( winN ).arg( kSlots ).arg( winBusy );
 			// the drawing thread's share by part, and the worker's (its ms are off the drawing thread)
 			const double n = std::max( sp.n, 1 );
-			qInfo().noquote() << QStringLiteral( "vk present split: drawing thread slot wait %1 + GL state %2 + GL blit/signal %3 + "
-				"flush %4 ms (%5); worker %6 ms (max %7) = fence %8 + acquire %9 + record %10 + submit %11 + present %12, %13 frames, "
-				"%14 failed%15" )
-				.arg( winWait / winN, 0, 'f', 3 ).arg( winState / winN, 0, 'f', 3 ).arg( winGl / winN, 0, 'f', 3 )
-				.arg( winFlush / winN, 0, 'f', 3 ).arg( st.dsa ? QStringLiteral( "named blit" ) : QStringLiteral( "bound blit" ) )
-				.arg( sp.totalMs / n, 0, 'f', 3 ).arg( sp.maxMs, 0, 'f', 3 ).arg( sp.fenceMs / n, 0, 'f', 3 )
+			const QString how = QStringLiteral( "%1 blit, GL signal on the %2" )
+				.arg( st.dsa ? QLatin1String( "named" ) : QLatin1String( "bound" ) )
+				.arg( st.sigWorker ? QStringLiteral( "worker" ) : st.sigWhy.empty() ? QStringLiteral( "drawing thread" )
+					: QStringLiteral( "drawing thread (%1)" ).arg( QString::fromStdString( st.sigWhy ) ) );
+			qInfo().noquote() << QStringLiteral( "vk present split: drawing thread slot wait %1 + GL state %2 + blit %3 + %4 %5 + "
+				"flush %6 ms (%7); worker %8 ms (max %9) = GL signal %10 + fence %11 + acquire %12 + record %13 + submit %14 + "
+				"present %15, %16 frames, %17 failed%18" )
+				.arg( winWait / winN, 0, 'f', 3 ).arg( winState / winN, 0, 'f', 3 ).arg( winBlit / winN, 0, 'f', 3 )
+				.arg( st.sigWorker ? QLatin1String( "fence" ) : QLatin1String( "GL signal" ) ).arg( winGl / winN, 0, 'f', 3 )
+				.arg( winFlush / winN, 0, 'f', 3 ).arg( how )
+				.arg( sp.totalMs / n, 0, 'f', 3 ).arg( sp.maxMs, 0, 'f', 3 ).arg( sp.signalMs / n, 0, 'f', 3 )
+				.arg( sp.fenceMs / n, 0, 'f', 3 )
 				.arg( sp.acquireMs / n, 0, 'f', 3 ).arg( sp.recordMs / n, 0, 'f', 3 ).arg( sp.submitMs / n, 0, 'f', 3 )
 				.arg( sp.presentMs / n, 0, 'f', 3 ).arg( sp.n ).arg( sp.failed )
 				.arg( sp.failed ? QStringLiteral( " (last: %1)" ).arg( QString::fromStdString( sp.why ) ) : QString() );
 		}
 		winAt = now;
-		winSum = winMax = winWait = winState = winGl = winFlush = 0.0;
+		winSum = winMax = winWait = winState = winBlit = winGl = winFlush = 0.0;
 		winBusy = 0;
 		winN = 0;
 	}

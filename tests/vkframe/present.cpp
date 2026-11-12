@@ -148,6 +148,12 @@ int main( int argc, char ** argv )
 	}
 	std::printf( "PRESENT gl SwapBuffers %.3f ms (p90 %.3f), frame %.3f ms\n", median( swapMs ), median( swapMs, 0.9 ), median( glFrame ) );
 
+	/* build 88: each run twice, GL's signal to Vulkan from the drawing thread (the fallback) and from the worker's own GL
+	 * context (shipped); the gate holds for both */
+	auto run = [&]( bool workerSig ) -> bool {
+	drain();
+	workerSignal() = workerSig;
+	const char * tag = workerSig ? "worker signal" : "drawing-thread signal";
 	// the picture: the back buffer, then the same frame presented and read back in its own submit
 	std::string why;
 	draw( W, H, 3 );
@@ -158,10 +164,14 @@ int main( int argc, char ** argv )
 	glReadPixels( 0, 0, W, H, GL_RGBA, GL_UNSIGNED_BYTE, ref.data() );
 	WwVkPresent::captureNext( &cap );
 	if ( !WwVkPresent::present( wnd, W, H, false, glProc, why ) ) {
-		std::printf( "PRESENT vk FAILED: %s\nPRESENT GATE FAILED\n", why.c_str() );
-		return 1;
+		std::printf( "PRESENT vk FAILED (%s): %s\n", tag, why.c_str() );
+		return false;
 	}
 	const WwVkPresent::Stat st0 = WwVkPresent::last();
+	if ( workerSig && !st0.sigWorker ) {
+		std::printf( "PRESENT vk (%s): the signal stayed on the drawing thread (%s)\n", tag, st0.sigWhy.c_str() );
+		return false;
+	}
 	size_t diff = 0, diffRed = 0;
 	const bool sized = st0.w == W && st0.h == H && cap.size() == ref.size();
 	if ( sized )
@@ -175,45 +185,56 @@ int main( int argc, char ** argv )
 					diffRed += gRed != v;
 				}
 	const bool exact = sized && diff == 0, redFails = !sized || diffRed != 0;
-	std::printf( "PRESENTMATCH %s (%zu of %zu bytes differ; swapchain %dx%d)\n", exact ? "EXACT" : "FAIL", diff, size_t( W ) * H * 3,
-		st0.w, st0.h );
-	std::printf( "PRESENTMATCH RED %s (no y flip: %zu bytes differ; must FAIL)\n", redFails ? "FAIL" : "EXACT", diffRed );
+	std::printf( "PRESENTMATCH %s (%s: %zu of %zu bytes differ; swapchain %dx%d)\n", exact ? "EXACT" : "FAIL", tag, diff,
+		size_t( W ) * H * 3, st0.w, st0.h );
+	std::printf( "PRESENTMATCH RED %s (%s, no y flip: %zu bytes differ; must FAIL)\n", redFails ? "FAIL" : "EXACT", tag, diffRed );
 
 	// the Vulkan present
-	std::vector<double> vkMs, vkWait, vkFrame;
-	prev = nowMs();
+	std::vector<double> vkMs, vkWait, vkFrame, vkBlit, vkGl, vkFlush;
+	drain();
+	WwVkPresent::takeSplit();
+	double prev = nowMs();
 	for ( int f = 0; f < N; f++ ) {
 		while ( paceMs > 0.0 && nowMs() - prev < paceMs ) {
 		}
 		pump();
 		draw( W, H, f );
 		if ( !WwVkPresent::present( wnd, W, H, false, glProc, why ) ) {
-			std::printf( "PRESENT vk FAILED at frame %d: %s\nPRESENT GATE FAILED\n", f, why.c_str() );
-			return 1;
+			std::printf( "PRESENT vk FAILED (%s) at frame %d: %s\n", tag, f, why.c_str() );
+			return false;
 		}
 		const double t1 = nowMs();
 		if ( f >= 30 ) {
-			vkMs.push_back( WwVkPresent::last().ms );
-			vkWait.push_back( WwVkPresent::last().waitMs );
+			const WwVkPresent::Stat & sf = WwVkPresent::last();
+			vkMs.push_back( sf.ms );
+			vkWait.push_back( sf.waitMs );
+			vkBlit.push_back( sf.blitMs );
+			vkGl.push_back( sf.glMs );
+			vkFlush.push_back( sf.flushMs );
 			vkFrame.push_back( t1 - prev );
 		}
 		prev = t1;
 	}
 	const WwVkPresent::Stat & st = WwVkPresent::last();
-	std::printf( "PRESENT vk present %.3f ms (p90 %.3f, fence wait %.3f), frame %.3f ms, mode %s, %d images, %dx%d, builds %llu\n",
-		median( vkMs ), median( vkMs, 0.9 ), median( vkWait ), median( vkFrame ), st.mode, st.images, st.w, st.h,
-		static_cast<unsigned long long>( st.builds ) );
-	WwVkPresent::shutdown();  // drains the worker
+	std::printf( "PRESENT vk (%s) present %.3f ms (p90 %.3f, fence wait %.3f), frame %.3f ms, mode %s, %d images, %dx%d, "
+		"builds %llu\n", tag, median( vkMs ), median( vkMs, 0.9 ), median( vkWait ), median( vkFrame ), st.mode, st.images,
+		st.w, st.h, static_cast<unsigned long long>( st.builds ) );
+	drain();
 	const WwVkPresent::Split sp = WwVkPresent::takeSplit();
 	const double sn = sp.n > 0 ? sp.n : 1;
-	std::printf( "PRESENT split: drawing thread GL state %.3f + GL blit/signal %.3f + flush %.3f (%s blit); worker %d frames, "
-		"%d failed, %.3f ms (max %.3f) = fence %.3f + acquire %.3f + record %.3f + submit %.3f + present %.3f\n",
-		st.stateMs, st.glMs, st.flushMs, st.dsa ? "named" : "bound", sp.n, sp.failed, sp.totalMs / sn, sp.maxMs,
-		sp.fenceMs / sn, sp.acquireMs / sn, sp.recordMs / sn, sp.submitMs / sn, sp.presentMs / sn );
+	std::printf( "PRESENT split (%s, medians): drawing thread blit %.3f + %s %.3f + flush %.3f (%s blit); worker %d frames, "
+		"%d failed, %.3f ms (max %.3f) = GL signal %.3f + fence %.3f + acquire %.3f + record %.3f + submit %.3f + present %.3f\n",
+		tag, median( vkBlit ), st.sigWorker ? "fence" : "GL signal", median( vkGl ), median( vkFlush ), st.dsa ? "named" : "bound",
+		sp.n, sp.failed, sp.totalMs / sn, sp.maxMs, sp.signalMs / sn, sp.fenceMs / sn, sp.acquireMs / sn, sp.recordMs / sn,
+		sp.submitMs / sn, sp.presentMs / sn );
+	return median( vkMs ) < 0.3 && exact && redFails && sp.n >= N - 1 && sp.failed == 0;
+	};
+	const bool okMain = run( false ), okWorker = run( true );
+	WwVkPresent::shutdown();  // drains the worker
 	wglMakeCurrent( nullptr, nullptr );
 	wglDeleteContext( glrc );
 	DestroyWindow( wnd );
-	const bool ok = median( vkMs ) < 0.3 && exact && redFails && sp.n >= N - 1 && sp.failed == 0;
+	const bool ok = okMain && okWorker;
 	std::printf( "PRESENT GATE %s\n", ok ? "OK" : "FAILED" );
 	return ok ? 0 : 1;
 }
