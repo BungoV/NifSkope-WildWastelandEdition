@@ -625,15 +625,14 @@ void CellWorkspacePanel::buildUi()
 	/* FIX1031B (bungo 10-31): no "Ray-traced GI cascades" picker any more: the cascades ARE the ray-traced GI; their count,
 	 * cadence and rays follow the RT quality preset below (src/features/gi/rtddgicell.h rtddgiCellCascades) */
 	/* lane RESTIRDI1 (bungo 10-29's ruling): the RT quality preset. Low = the ray-traced GI volume (as the row above), Medium =
-	 * + ReSTIR DI (ray-traced shadows for the shadow-casting lights, the 16 cube shadows off); High = + ReSTIR GI (RTEMIS1
-	 * part 2: a bounce ray a pixel, reused, in place of the volume's irradiance on the surfaces); Ultra = High for now.
+	 * + ReSTIR DI (ray-traced shadows for the shadow-casting lights, the 16 cube shadows off); High and Ultra (+ ReSTIR PT) =
+	 * Medium for now (ReSTIR GI is its own row below since RTEMIS1's toggle, bungo 11-12).
 	 * Live: a pick reloads the shaders (WW_CELL_RESTIR is a loader define); Medium and up also turn the volume on */
 	{
 		QMenu * m = showMenu->addMenu( tr( "Ray-traced quality" ) );
 		m->setObjectName( QStringLiteral( "CellWorkspaceRtPreset" ) );
 		m->setToolTip( tr( "Low: ray-traced GI only. Medium: + ReSTIR DI ray-traced shadows for the lights that cast shadows "
-			"(in place of the 16 shadow cubes). High: + ReSTIR GI, a traced bounce a pixel for the indirect light on the surfaces. "
-			"Ultra (+ ReSTIR PT) is High for now." ) );
+			"(in place of the 16 shadow cubes). High and Ultra (+ ReSTIR PT) are Medium for now." ) );
 		m->setToolTipsVisible( true );
 		QActionGroup * grp = new QActionGroup( m );
 		grp->setExclusive( true );
@@ -643,15 +642,24 @@ void CellWorkspacePanel::buildUi()
 			a->setCheckable( true );
 			a->setData( k );
 			a->setChecked( k == rtddgiRtPreset() );
-			if ( k == 2 )
-				a->setToolTip( tr( "Medium + ReSTIR GI (a traced bounce a pixel)" ) );
-			else if ( k == 3 )
-				a->setToolTip( tr( "High for now (ReSTIR PT is planned)" ) );
+			if ( k >= 2 )
+				a->setToolTip( tr( "Medium for now (ReSTIR PT is planned)" ) );
 			grp->addAction( a );
 		}
 		m->setEnabled( !rtddgiRtPresetPinned() );
 		connect( grp, &QActionGroup::triggered, this, [this]( QAction * a ) {
 			rtddgiRtPresetSet( a->data().toInt() );
+			if ( glView )
+				glView->updateShaders();
+		} );
+	}
+	/* RTEMIS1 toggle (bungo 11-12): ReSTIR GI, a traced bounce a pixel, its own row: ships Off, any RT quality while the
+	 * ray-traced GI volume runs. Live: a tick reloads the shaders (WW_CELL_RESTIRGI is a loader define) */
+	{
+		QAction * rg = tick( showMenu, tr( "ReSTIR GI" ), "CellWorkspaceRestirGi", rtddgiRestirGiOn() );
+		rg->setEnabled( !rtddgiRestirGiPinned() );
+		connect( rg, &QAction::toggled, this, [this]( bool on ) {
+			rtddgiRestirGiSetOn( on );
 			if ( glView )
 				glView->updateShaders();
 		} );

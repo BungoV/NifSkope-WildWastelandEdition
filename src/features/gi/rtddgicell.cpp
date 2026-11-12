@@ -1171,8 +1171,9 @@ bool rtddgiSkyBelowRedNow()
 
 // ------------------------------------------------------------------ lane RESTIRDI1 (2026-10-30): the RT quality preset
 /* bungo's ruling (10-29): Low = the ray-traced GI volume only (today), Medium = + ReSTIR DI (ray-traced shadows for the
- * shadow-casting lights in place of the 16 depth cubes), High = + ReSTIR GI, Ultra = + ReSTIR PT. High and Ultra are
- * Medium until those lanes land (the row's tooltip says so). WW_CELL_RT_PRESET (low|medium|high|ultra or 0..3) pins it,
+ * shadow-casting lights in place of the 16 depth cubes), Ultra = + ReSTIR PT. High and Ultra are Medium until ReSTIR PT
+ * lands (the row's tooltip says so); ReSTIR GI left the preset for its own row (RTEMIS1 toggle, bungo 11-12,
+ * rtddgiRestirGiOn; WW_CELL_RESTIRGI_GATE_RED=preset is the old High gate). WW_CELL_RT_PRESET (low|medium|high|ultra or 0..3) pins it,
  * else the Show menu row (WW/CellRtPreset, harness-scoped settings: a harness starts Low). Live: the row reloads the
  * shaders (WW_CELL_RESTIR is a loader define) and the next frame's pass imports or frees its buffers. */
 namespace {
@@ -1455,9 +1456,62 @@ bool rtddgiRestirShaderDefine()
 	return rtddgiRtPreset() >= 1 && rtddgiCellShaderDefine();
 }
 
+/* RTEMIS1 toggle (bungo 11-12, "Should be a separate toggle to enable it then": 13.4-13.9 ms at High): ReSTIR GI is its
+ * own Show row, off by default, at any RT quality while the ray-traced GI volume runs (it traces the volume's BVH).
+ * WW_CELL_RESTIRGI pins it (0 = off), else WW/CellRestirGi (harness-scoped settings: a harness starts Off). */
+static bool & restirGiRow()
+{
+	static bool loaded = false;
+	static bool gui = false;
+	if ( !loaded ) {
+		loaded = true;
+		QSettings s( QStringLiteral( "NifTools" ), rowSettingsApp() );
+		gui = s.value( QStringLiteral( "WW/CellRestirGi" ), false ).toBool();
+	}
+	return gui;
+}
+
+bool rtddgiRestirGiPinned()
+{
+	return wwEnvIsSet( "WW_CELL_RESTIRGI" );
+}
+
+bool rtddgiRestirGiOn()
+{
+	if ( wwEnvIsSet( "WW_CELL_RESTIRGI" ) ) {
+		const QByteArray v = wwEnv( "WW_CELL_RESTIRGI" ).trimmed();
+		return !v.isEmpty() && v != "0";
+	}
+	return restirGiRow();
+}
+
+void rtddgiRestirGiSetOn( bool on )
+{
+	restirGiRow() = on;
+	rowWrite( QStringLiteral( "WW/CellRestirGi" ), on );
+}
+
+//! why ReSTIR GI is off, "" while on (the restirgi echo's reason). WW_CELL_RESTIRGI_GATE_RED=preset: the old gate (the RT
+//! quality High+ turns it on, the row is not read)
+static QString restirGiOffWhy()
+{
+	if ( wwEnvStr( "WW_CELL_RESTIRGI_GATE_RED" ).trimmed() == QLatin1String( "preset" ) ) {
+		if ( rtddgiRtPreset() < 2 )
+			return QStringLiteral( "WW_CELL_RESTIRGI_GATE_RED=preset: the RT quality is below High" );
+	} else if ( !rtddgiRestirGiOn() ) {
+		return rtddgiRestirGiPinned() ? QStringLiteral( "WW_CELL_RESTIRGI pins it off" ) : QStringLiteral( "the ReSTIR GI row is off" );
+	}
+	if ( !rtddgiCellShaderDefine() )
+		return rtddgiCellOn() ? QStringLiteral( "a GI view is up" )
+			: QStringLiteral( "ray-traced GI is off (the Ray-traced GI row, or the RT quality Medium+)" );
+	if ( restirGiRedOff() )
+		return QStringLiteral( "WW_CELL_RESTIRGI_RED=off" );
+	return QString();
+}
+
 bool rtddgiRestirGiShaderDefine()
 {
-	return rtddgiRtPreset() >= 2 && rtddgiCellShaderDefine() && !restirGiRedOff();
+	return restirGiOffWhy().isEmpty();
 }
 
 //! the camera: view -> world rows (celllights.cpp cellRow), moved into the soup's local frame; the frame's projection
@@ -1612,11 +1666,11 @@ void rtddgiRestirGiPass( Scene * scene )
 	Renderer * r = scene ? scene->renderer : nullptr;
 	if ( !r || scene->selecting || !scene->nifModel )
 		return;
-	if ( !rtddgiRestirGiShaderDefine() ) {
-		if ( G.owner ) {
+	const QString off = restirGiOffWhy();
+	if ( !off.isEmpty() ) {
+		if ( G.owner )
 			restirDropGl( G, r );
-			restirSay( G, QStringLiteral( "freed (the RT quality is below High, or WW_CELL_RESTIRGI_RED=off)" ) );
-		}
+		restirSay( G, QStringLiteral( "off (%1)" ).arg( off ) );
 		return;
 	}
 	Cell & c = cell();

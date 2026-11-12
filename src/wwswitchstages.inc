@@ -616,6 +616,8 @@
 { "WW_CELL_REFL_PREV_RED", 0, "src/features/reflections/cellssr.cpp:142 wwCellReflPrevRed | re-read per frame or per call (a)" },
 { "WW_CELL_REFS_RED", 1, "src/cellview.cpp:3175 cellBuild | (a) cellBuild: decides which blocks (shapes, lights, decals, far layers) are written into the cell document" },
 { "WW_CELL_REGION_RED", 0, "src/gl/lookdevstage.cpp:611 regionWalk | re-read per frame or per call (a)" },
+{ "WW_CELL_RESTIRGI", 4, "src/features/gi/rtddgicell.cpp:1476 rtddgiRestirGiPinned | hand: the ReSTIR GI row pin (RTEMIS1 toggle, ships Off): rtddgiRestirGiOn in rtddgiRestirGiShaderDefine, the loader define WW_CELL_RESTIRGI; rtddgiRestirGiPass reads it every frame (runs or frees), a set reloads the shaders" },
+{ "WW_CELL_RESTIRGI_GATE_RED", 4, "src/features/gi/rtddgicell.cpp:1498 restirGiOffWhy | hand: RTEMIS1 toggle red: =preset restores the old gate (RT quality High+ turns ReSTIR GI on, the row unread); read with WW_CELL_RESTIRGI in rtddgiRestirGiShaderDefine" },
 { "WW_CELL_RESTIRGI_ONEKERNEL", 2, "src/features/gi/rtddgi/restirgi_vk.inc:93 rgPipe | hand: rgPipe's static pipelines, read once at the first ReSTIR GI frame: set, the filter and a-trous modes run in the bounce's kernel (the cost red of restirgi_filt.spv.h, RTEMIS1)" },
 { "WW_CELL_RESTIRGI_RED", 4, "src/features/gi/rtddgicell.cpp:1241 restirGiRedBits | hand: restirGiRedBits read every frame by rtddgiRestirGiPass (the kernel red bits); off is in rtddgiRestirGiShaderDefine, the loader define WW_CELL_RESTIRGI: the pass stops that frame, a set reloads the shaders (RTEMIS1)" },
 { "WW_CELL_RESTIR_MISS_RED", 0, "src/features/gi/rtddgicell.cpp:1219 restirUniforms | re-read per frame or per call (a)" },

@@ -92,8 +92,8 @@ bool rtddgiCellPending();
 //! spec's every-frame step); the reflection probes keep their capture off such a frame (gl/wwframesched.h)
 bool rtddgiCellCoarseStepped();
 
-/* lane RESTIRDI1 (2026-10-30): the RT quality preset (bungo 10-29: Low = the volume only, Medium = + ReSTIR DI, High =
- * + ReSTIR GI, Ultra = + ReSTIR PT; High and Ultra are Medium for now). WW_CELL_RT_PRESET pins it, else the Show row.
+/* lane RESTIRDI1 (2026-10-30): the RT quality preset (bungo 10-29: Low = the volume only, Medium = + ReSTIR DI, Ultra =
+ * + ReSTIR PT; High and Ultra are Medium for now; ReSTIR GI is its own row since RTEMIS1's toggle, 11-12). WW_CELL_RT_PRESET pins it, else the Show row.
  * Medium and up turn the volume on (its BVH is what ReSTIR traces) and the loader's WW_CELL_RESTIR define: the
  * shadow-casting lights take the pixel's ray-traced ratio in place of the 16 depth cubes (cell_lights.glsl cellShadowF). */
 int rtddgiRtPreset();
@@ -104,8 +104,12 @@ bool rtddgiRestirShaderDefine();
 //! one call a frame after the shared opaque pass (glview.cpp, after wwCellAoPass): the g-buffer to the device, the four
 //! ReSTIR passes on the volume's BVH, the ratio back in place for the opaque pass (no-op while the preset is Low)
 void rtddgiRestirPass( Scene * scene );
-//! RTEMIS1 part 2: ReSTIR GI (High+; WW_CELL_RESTIRGI_RED=off: no), the loader's question and the pass after rtddgiRestirPass:
+//! RTEMIS1 part 2: ReSTIR GI (the ReSTIR GI row / WW_CELL_RESTIRGI, ships Off, any RT quality with the volume on;
+//! WW_CELL_RESTIRGI_RED=off: no), the loader's question and the pass after rtddgiRestirPass:
 //! one bounce a pixel on the volume's BVH, shaded by the volume, reused in time and space; the irradiance back for cellGiSample
+bool rtddgiRestirGiOn();
+bool rtddgiRestirGiPinned();
+void rtddgiRestirGiSetOn( bool on );
 bool rtddgiRestirGiShaderDefine();
 void rtddgiRestirGiPass( Scene * scene );
 
