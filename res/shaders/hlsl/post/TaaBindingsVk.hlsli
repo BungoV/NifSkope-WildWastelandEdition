@@ -9,9 +9,15 @@
 #ifdef __spirv__
 #define TAA_BIND( b ) [[vk::binding( b, 0 )]]
 #define TAA_FORMAT16 [[vk::image_format( "rgba16f" )]]
+#ifdef TAA_PIC_RGBA8	// lane VKSHARE1: the picture into the RGBA8 target GL's display route reads (taa_view_resolve_cs.hlsl)
+#define TAA_FORMAT_PIC [[vk::image_format( "rgba8" )]]
+#else
+#define TAA_FORMAT_PIC TAA_FORMAT16
+#endif
 #else
 #define TAA_BIND( b )
 #define TAA_FORMAT16
+#define TAA_FORMAT_PIC
 #endif
 
 // one dispatch's values (128 bytes): taa2.frag's uniforms
@@ -33,7 +39,7 @@ TAA_BIND( 5 ) Texture2D<float4> TaaVel : register( t5 );		// TAAINPUTS1 velocity
 TAA_BIND( 6 ) Texture2D<float4> TaaMask : register( t6 );		// TAAINPUTS1 mask (bound to TaaMv when absent)
 TAA_BIND( 7 ) SamplerState TaaLinearClamp : register( s0 );	// linear, clamp to edge, no mips
 TAA_BIND( 8 ) TAA_FORMAT16 RWTexture2D<float4> TaaOutHist : register( u0 );	// o0
-TAA_BIND( 9 ) TAA_FORMAT16 RWTexture2D<float4> TaaOutPic : register( u1 );	// o1
+TAA_BIND( 9 ) TAA_FORMAT_PIC RWTexture2D<float4> TaaOutPic : register( u1 );	// o1
 TAA_BIND( 10 ) TAA_FORMAT16 RWTexture2D<float4> TaaOutLock : register( u2 );	// o2
 #ifdef __spirv__
 [[vk::push_constant]] ConstantBuffer<TaaJob> TaaJobPc;

@@ -18,6 +18,9 @@
 
 #include "features/vkframe/tone_view_vs.spv.h"  // round 11: the tone pass on the view (vkframe_spirv.sh)
 #include "features/vkframe/tone_view_ps.spv.h"
+#include "features/vkframe/taa_view_mv_cs.spv.h"  // lane VKSHARE1: the Modern temporal AA on the view
+#include "features/vkframe/taa_view_resolve_cs.spv.h"
+#include "features/vkframe/taa_view_rcas_ps.spv.h"
 
 #include <algorithm>
 #include <chrono>
@@ -93,6 +96,9 @@ struct Gl
 	void( WINAPI * texStorageMem2DMultisample )( GLenum, GLsizei, GLenum, GLsizei, GLsizei, unsigned char, GLuint, GLuint64 ) = nullptr;
 	// lane VKSHARE1 (optional): 3D and 2D-array shared targets
 	void( WINAPI * texStorageMem3D )( GLenum, GLsizei, GLenum, GLsizei, GLsizei, GLsizei, GLuint, GLuint64 ) = nullptr;
+	// lane VKSHARE1 (optional, GL 4.3): TAA's velocity and mask into their shared copies
+	void( WINAPI * copyImageSubData )( GLuint, GLenum, GLint, GLint, GLint, GLint, GLuint, GLenum, GLint, GLint, GLint, GLint, GLsizei,
+		GLsizei, GLsizei ) = nullptr;
 };
 
 template <class F> void load( F & f, WwVkPresent::GlProc gp, const char * name )
@@ -134,6 +140,7 @@ bool loadGl( Gl & g, WwVkPresent::GlProc gp, std::string & why )
 	load( g.deleteSync, gp, "glDeleteSync" );
 	load( g.texStorageMem2DMultisample, gp, "glTexStorageMem2DMultisampleEXT" );
 	load( g.texStorageMem3D, gp, "glTexStorageMem3DEXT" );
+	load( g.copyImageSubData, gp, "glCopyImageSubData" );
 	g.ok = g.getIntegerv && g.getError && g.enable && g.disable && g.isEnabled && g.flush && g.genTextures && g.deleteTextures
 		&& g.bindTexture && g.texParameteri && g.genFramebuffers && g.deleteFramebuffers && g.bindFramebuffer
 		&& g.framebufferTexture2D && g.checkFramebufferStatus && g.blitFramebuffer && g.createMemoryObjects
@@ -188,6 +195,9 @@ struct Vk
 	VKP( vkCmdBindPipeline ); VKP( vkCmdBindDescriptorSets ); VKP( vkCmdPushConstants ); VKP( vkCmdDraw );
 	VKP( vkCmdSetViewport ); VKP( vkCmdSetScissor ); VKP( vkCmdCopyBufferToImage );
 	VKP( vkCreatePipelineCache ); VKP( vkDestroyPipelineCache ); VKP( vkGetPipelineCacheData );
+	// lane VKSHARE1: the temporal AA's compute passes on the view (rg32f vectors need the extended storage formats)
+	bool storageExt = false;
+	VKP( vkCmdDispatch ); VKP( vkCreateComputePipelines );
 };
 #undef VKP
 
@@ -422,6 +432,8 @@ bool makeDevice( std::string & why )
 		v.vkGetPhysicalDeviceFeatures( v.phys, &offered );
 	en.sampleRateShading = offered.sampleRateShading;
 	v.sampleShading = offered.sampleRateShading == VK_TRUE;
+	en.shaderStorageImageExtendedFormats = offered.shaderStorageImageExtendedFormats;
+	v.storageExt = offered.shaderStorageImageExtendedFormats == VK_TRUE;
 	VkDeviceCreateInfo di { VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO };
 	di.pEnabledFeatures = &en;
 	di.queueCreateInfoCount = 1;
@@ -450,6 +462,7 @@ bool makeDevice( std::string & why )
 	LD( vkCmdBindPipeline ); LD( vkCmdBindDescriptorSets ); LD( vkCmdPushConstants ); LD( vkCmdDraw );
 	LD( vkCmdSetViewport ); LD( vkCmdSetScissor ); LD( vkCmdCopyBufferToImage );
 	LD( vkCreatePipelineCache ); LD( vkDestroyPipelineCache ); LD( vkGetPipelineCacheData );
+	LD( vkCmdDispatch ); LD( vkCreateComputePipelines );
 #undef LD
 	if ( !v.vkGetMemoryWin32HandleKHR || !v.vkGetSemaphoreWin32HandleKHR || !v.vkCreateSwapchainKHR )
 		return fail( "the device lacks a swapchain / win32 export entry point" );
@@ -513,10 +526,12 @@ struct Work
 	HDC dc = nullptr;  // k < 0: the worker takes ctx current and keeps it (null ctx: lets its context go)
 	HGLRC ctx = nullptr;
 	bool tone = false;  // round 11 (k = -1): record and submit the tone pass on the view (toneWork)
+	bool taa = false;   // lane VKSHARE1 (k = -1): the temporal AA's passes on the view (taaWork); shares tone's counters
 };
 
 // round 11: the tone pass's record + submit, on the worker (the queue is the worker's)
 bool toneWork( std::string & why );
+bool taaWork( std::string & why );
 
 struct Worker
 {
@@ -582,9 +597,9 @@ void workerLoop()
 			W.q.pop_front();
 			W.busy = true;
 		}
-		if ( j.tone ) {
+		if ( j.tone || j.taa ) {
 			std::string why;
-			const bool ok = toneWork( why );
+			const bool ok = j.taa ? taaWork( why ) : toneWork( why );
 			{
 				std::lock_guard<std::mutex> lk( W.m );
 				W.toneDone++;
@@ -1161,6 +1176,7 @@ bool makeShared( VkImage & img, VkDeviceMemory & mem, GLuint & tex, GLuint & obj
 
 // round 11: the tone pass's framebuffers and image views of the view ring (defined with the tone pass)
 void toneFbsDrop();
+void taaFbsDrop();  // lane VKSHARE1: the temporal AA's copy-back framebuffers over the same ring
 
 // the views go (GL alive: its textures, memory objects and FBO too); the caller drained the worker
 /* lane VKSHARE1: the keyed single-sample targets other passes keep on the present device (sharedTarget): GL draws and
@@ -1237,6 +1253,7 @@ void dropView( bool glAlive )
 	Gl & g = gl();
 	View & V = view();
 	toneFbsDrop();
+	taaFbsDrop();
 	for ( ViewSlot & s : V.slot ) {
 		if ( glAlive ) {
 			for ( GLuint * t : { &s.colorTex, &s.dsTex } )
@@ -1958,6 +1975,421 @@ bool toneWork( std::string & why )
 	return true;
 }
 
+/* Lane VKSHARE1: the Modern temporal AA (gametaa.cpp, tier High) on the view. GL blits the frame's colour and depth into
+ * shared targets (sharedTarget) and clears the lock on a history reset, as before; the crossing has the tone pass's
+ * shape: GL signals A, the worker's ONE submit waits A, runs the camera vectors (compute), the resolve (compute) and the
+ * RCAS copy-back (a raster pass into the view slot, every sample the pixel's value, as GL's quad), signals B; GL waits B
+ * before its next pass on the view. */
+struct Taa
+{
+	bool made = false, broken = false;
+	std::string brokenWhy;
+	VkSampler linear = VK_NULL_HANDLE, point = VK_NULL_HANDLE;
+	VkDescriptorSetLayout rdsl = VK_NULL_HANDLE, pdsl = VK_NULL_HANDLE;  // the resolve's 11 bindings; the PostFx shim's 8
+	VkDescriptorPool dpool = VK_NULL_HANDLE;
+	VkDescriptorSet rset[2] = {}, mvSet = VK_NULL_HANDLE, rcasSet = VK_NULL_HANDLE;  // rset[wr]: writes history wr
+	VkImageView rHeld[2][10] = {}, mvHeld[2] = {}, rcasHeld = VK_NULL_HANDLE;  // what each set holds
+	std::uint64_t heldGen = 0;
+	VkPipelineLayout rlayout = VK_NULL_HANDLE, playout = VK_NULL_HANDLE;
+	VkShaderModule mvCs = VK_NULL_HANDLE, resolveCs = VK_NULL_HANDLE, vs = VK_NULL_HANDLE, ps = VK_NULL_HANDLE;
+	VkPipeline mvPipe = VK_NULL_HANDLE, resolvePipe = VK_NULL_HANDLE;
+	VkSemaphore glDone = VK_NULL_HANDLE, vkDone = VK_NULL_HANDLE;
+	GLuint glDoneGl = 0, vkDoneGl = 0;
+	void * semCtx = nullptr;
+	VkCommandBuffer cmd = VK_NULL_HANDLE;
+	VkFence fence = VK_NULL_HANDLE;
+	bool pending = false;
+	// per sample count: the copy-back's render pass and pipeline
+	int pipeSamples = 0;
+	VkRenderPass pass = VK_NULL_HANDLE;
+	VkPipeline rcasPipe = VK_NULL_HANDLE;
+	int pipelines = 0;
+	double buildMs = 0.0;
+	// per view slot (made again with the view ring)
+	VkImageView vColor[kViewSlots] = {};
+	VkFramebuffer fb[kViewSlots] = {};
+	std::uint64_t fbGen = 0;
+	// this frame's passes: written by the drawing thread before the hand, read by the worker
+	int slot = -1, w = 0, h = 0, wr = 0;
+	WwVkPresent::TaaJob job;
+	WwVkPresent::PfxJob mvJob, rcasJob;
+	WwVkPresent::TaaStat st;  // since the last take
+};
+
+Taa & taa()
+{
+	static Taa t;
+	return t;
+}
+
+// bumped whenever a keyed shared target is made or goes: a descriptor set holding its view is written again
+std::uint64_t & sharedGen()
+{
+	static std::uint64_t n = 1;
+	return n;
+}
+
+void taaFbsDrop()
+{
+	Vk & v = vk();
+	Taa & A = taa();
+	for ( int k = 0; k < kViewSlots; k++ ) {
+		if ( A.fb[k] )
+			v.vkDestroyFramebuffer( v.dev, A.fb[k], nullptr );
+		if ( A.vColor[k] )
+			v.vkDestroyImageView( v.dev, A.vColor[k], nullptr );
+		A.fb[k] = VK_NULL_HANDLE;
+		A.vColor[k] = VK_NULL_HANDLE;
+	}
+	A.fbGen = 0;
+}
+
+/* the device-time parts (once): two samplers, the two set layouts, pool + 4 sets, two pipeline layouts, the shader
+ * modules, the two compute pipelines, the command buffer and its fence. No submit. */
+bool taaStatic( std::string & why )
+{
+	Vk & v = vk();
+	Taa & A = taa();
+	if ( A.made )
+		return true;
+	if ( !v.vkCmdDispatch || !v.vkCreateComputePipelines ) {
+		why = "no vkCmdDispatch / vkCreateComputePipelines";
+		return false;
+	}
+	const double t0 = nowMs();
+	VkSamplerCreateInfo sci { VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO };
+	sci.magFilter = sci.minFilter = VK_FILTER_LINEAR;
+	sci.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
+	sci.addressModeU = sci.addressModeV = sci.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+	sci.maxLod = 0.0f;
+	const bool linOk = v.vkCreateSampler( v.dev, &sci, nullptr, &A.linear ) == VK_SUCCESS;
+	sci.magFilter = sci.minFilter = VK_FILTER_NEAREST;
+	if ( !linOk || v.vkCreateSampler( v.dev, &sci, nullptr, &A.point ) != VK_SUCCESS ) {
+		why = "vkCreateSampler (the temporal AA) failed";
+		return false;
+	}
+	// TaaBindingsVk.hlsli: 0-6 sampled, 7 sampler, 8-10 storage; PostFxBindingsVk.hlsli: 0-4 sampled, 5-6 samplers, 7 storage
+	VkDescriptorSetLayoutBinding rb[11] = {}, pb[8] = {};
+	for ( std::uint32_t k = 0; k < 11; k++ ) {
+		rb[k].binding = k;
+		rb[k].descriptorType = k < 7 ? VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE : k == 7 ? VK_DESCRIPTOR_TYPE_SAMPLER : VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+		rb[k].descriptorCount = 1;
+		rb[k].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+	}
+	for ( std::uint32_t k = 0; k < 8; k++ ) {
+		pb[k].binding = k;
+		pb[k].descriptorType = k < 5 ? VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE : k < 7 ? VK_DESCRIPTOR_TYPE_SAMPLER : VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+		pb[k].descriptorCount = 1;
+		pb[k].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+	}
+	VkDescriptorSetLayoutCreateInfo lci { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
+	lci.bindingCount = 11;
+	lci.pBindings = rb;
+	const bool rOk = v.vkCreateDescriptorSetLayout( v.dev, &lci, nullptr, &A.rdsl ) == VK_SUCCESS;
+	lci.bindingCount = 8;
+	lci.pBindings = pb;
+	const bool pOk = rOk && v.vkCreateDescriptorSetLayout( v.dev, &lci, nullptr, &A.pdsl ) == VK_SUCCESS;
+	VkDescriptorPoolSize ps[3] = { { VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 2 * 7 + 2 * 5 }, { VK_DESCRIPTOR_TYPE_SAMPLER, 2 * 1 + 2 * 2 },
+		{ VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 2 * 3 + 2 * 1 } };
+	VkDescriptorPoolCreateInfo pci { VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO };
+	pci.maxSets = 4;
+	pci.poolSizeCount = 3;
+	pci.pPoolSizes = ps;
+	if ( !pOk || v.vkCreateDescriptorPool( v.dev, &pci, nullptr, &A.dpool ) != VK_SUCCESS ) {
+		why = "the temporal AA's descriptor set layouts / pool failed";
+		return false;
+	}
+	const VkDescriptorSetLayout layouts[4] = { A.rdsl, A.rdsl, A.pdsl, A.pdsl };
+	VkDescriptorSet sets[4] = {};
+	VkDescriptorSetAllocateInfo dai { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO };
+	dai.descriptorPool = A.dpool;
+	dai.descriptorSetCount = 4;
+	dai.pSetLayouts = layouts;
+	const VkPushConstantRange rpc { VK_SHADER_STAGE_COMPUTE_BIT, 0, std::uint32_t( sizeof( WwVkPresent::TaaJob ) ) };
+	const VkPushConstantRange ppc { VK_SHADER_STAGE_COMPUTE_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0,
+		std::uint32_t( sizeof( WwVkPresent::PfxJob ) ) };
+	VkPipelineLayoutCreateInfo plci { VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO };
+	plci.setLayoutCount = 1;
+	plci.pSetLayouts = &A.rdsl;
+	plci.pushConstantRangeCount = 1;
+	plci.pPushConstantRanges = &rpc;
+	const bool lOk = v.vkAllocateDescriptorSets( v.dev, &dai, sets ) == VK_SUCCESS
+		&& v.vkCreatePipelineLayout( v.dev, &plci, nullptr, &A.rlayout ) == VK_SUCCESS;
+	plci.pSetLayouts = &A.pdsl;
+	plci.pPushConstantRanges = &ppc;
+	if ( !lOk || v.vkCreatePipelineLayout( v.dev, &plci, nullptr, &A.playout ) != VK_SUCCESS ) {
+		why = "the temporal AA's descriptor sets / pipeline layouts failed";
+		return false;
+	}
+	A.rset[0] = sets[0];
+	A.rset[1] = sets[1];
+	A.mvSet = sets[2];
+	A.rcasSet = sets[3];
+	auto module = [&]( const std::uint32_t * code, size_t bytes, VkShaderModule & out ) {
+		VkShaderModuleCreateInfo mci { VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO };
+		mci.codeSize = bytes;
+		mci.pCode = code;
+		return v.vkCreateShaderModule( v.dev, &mci, nullptr, &out ) == VK_SUCCESS;
+	};
+	if ( !module( vkframe_taa_view_mv_cs_spv, sizeof( vkframe_taa_view_mv_cs_spv ), A.mvCs )
+		|| !module( vkframe_taa_view_resolve_cs_spv, sizeof( vkframe_taa_view_resolve_cs_spv ), A.resolveCs )
+		|| !module( vkframe_tone_view_vs_spv, sizeof( vkframe_tone_view_vs_spv ), A.vs )
+		|| !module( vkframe_taa_view_rcas_ps_spv, sizeof( vkframe_taa_view_rcas_ps_spv ), A.ps ) ) {
+		why = "the temporal AA's shader modules failed";
+		return false;
+	}
+	VkComputePipelineCreateInfo cp[2] = { { VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO }, { VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO } };
+	for ( int k = 0; k < 2; k++ ) {
+		cp[k].stage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+		cp[k].stage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+		cp[k].stage.module = k ? A.resolveCs : A.mvCs;
+		cp[k].stage.pName = "main";
+		cp[k].layout = k ? A.rlayout : A.playout;
+	}
+	VkPipeline pipes[2] = {};
+	if ( v.vkCreateComputePipelines( v.dev, tone().cache, 2, cp, nullptr, pipes ) != VK_SUCCESS ) {
+		why = "vkCreateComputePipelines (the temporal AA's vectors / resolve) failed";
+		return false;
+	}
+	A.mvPipe = pipes[0];
+	A.resolvePipe = pipes[1];
+	VkFenceCreateInfo fi { VK_STRUCTURE_TYPE_FENCE_CREATE_INFO };
+	VkCommandBufferAllocateInfo cai { VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO };
+	cai.commandPool = v.pool;
+	cai.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+	cai.commandBufferCount = 1;
+	if ( v.vkCreateFence( v.dev, &fi, nullptr, &A.fence ) != VK_SUCCESS || v.vkAllocateCommandBuffers( v.dev, &cai, &A.cmd ) != VK_SUCCESS ) {
+		why = "the temporal AA's fence / command buffer failed";
+		return false;
+	}
+	A.pipelines = 2;
+	A.buildMs = nowMs() - t0;
+	toneCacheSave();
+	A.made = true;
+	return true;
+}
+
+// the crossing's two semaphores go (GL alive: GL's names too); the caller waited the device
+void taaSemsDrop( bool glAlive )
+{
+	Vk & v = vk();
+	Gl & g = gl();
+	Taa & A = taa();
+	if ( glAlive )
+		for ( GLuint * s : { &A.glDoneGl, &A.vkDoneGl } )
+			if ( *s )
+				g.deleteSemaphores( 1, s );
+	for ( VkSemaphore * s : { &A.glDone, &A.vkDone } )
+		if ( *s )
+			v.vkDestroySemaphore( v.dev, *s, nullptr );
+	A.glDoneGl = A.vkDoneGl = 0;
+	A.glDone = A.vkDone = VK_NULL_HANDLE;
+	A.semCtx = nullptr;
+}
+
+bool taaSems( std::string & why )
+{
+	Gl & g = gl();
+	Taa & A = taa();
+	if ( A.glDone && A.semCtx == g.ctx )
+		return true;
+	taaSemsDrop( false );  // another context's names: that context went
+	if ( !exportSem( A.glDone, A.glDoneGl, why ) || !exportSem( A.vkDone, A.vkDoneGl, why ) ) {
+		taaSemsDrop( true );
+		return false;
+	}
+	A.semCtx = g.ctx;
+	return true;
+}
+
+// the copy-back's render pass (one RGBA8 colour, LOAD / STORE, GENERAL) and pipeline at the view's samples
+bool taaPipes( int samples, std::string & why )
+{
+	Vk & v = vk();
+	Taa & A = taa();
+	if ( A.pass && A.pipeSamples == samples )
+		return true;
+	taaFbsDrop();
+	if ( A.rcasPipe )
+		v.vkDestroyPipeline( v.dev, A.rcasPipe, nullptr );
+	if ( A.pass )
+		v.vkDestroyRenderPass( v.dev, A.pass, nullptr );
+	A.rcasPipe = VK_NULL_HANDLE;
+	A.pass = VK_NULL_HANDLE;
+	A.pipeSamples = 0;
+	const double t0 = nowMs();
+	const VkSampleCountFlagBits sc = VkSampleCountFlagBits( samples );
+	VkAttachmentDescription at {};
+	at.format = VK_FORMAT_R8G8B8A8_UNORM;
+	at.samples = sc;
+	at.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
+	at.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+	at.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+	at.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+	at.initialLayout = at.finalLayout = VK_IMAGE_LAYOUT_GENERAL;
+	const VkAttachmentReference cr { 0, VK_IMAGE_LAYOUT_GENERAL };
+	VkSubpassDescription sp {};
+	sp.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+	sp.colorAttachmentCount = 1;
+	sp.pColorAttachments = &cr;
+	VkRenderPassCreateInfo rci { VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO };
+	rci.attachmentCount = 1;
+	rci.pAttachments = &at;
+	rci.subpassCount = 1;
+	rci.pSubpasses = &sp;
+	if ( v.vkCreateRenderPass( v.dev, &rci, nullptr, &A.pass ) != VK_SUCCESS ) {
+		why = "vkCreateRenderPass (the temporal AA's copy-back) failed";
+		return false;
+	}
+	VkPipelineShaderStageCreateInfo st[2] = { { VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO },
+		{ VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO } };
+	st[0].stage = VK_SHADER_STAGE_VERTEX_BIT;
+	st[0].module = A.vs;
+	st[0].pName = "main";
+	st[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+	st[1].module = A.ps;
+	st[1].pName = "main";
+	VkPipelineVertexInputStateCreateInfo vi { VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO };
+	VkPipelineInputAssemblyStateCreateInfo ia { VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO };
+	ia.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+	VkPipelineViewportStateCreateInfo vps { VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO };
+	vps.viewportCount = vps.scissorCount = 1;
+	VkPipelineRasterizationStateCreateInfo rs { VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO };
+	rs.polygonMode = VK_POLYGON_MODE_FILL;
+	rs.cullMode = VK_CULL_MODE_NONE;
+	rs.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
+	rs.lineWidth = 1.0f;
+	VkPipelineMultisampleStateCreateInfo ms { VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO };
+	ms.rasterizationSamples = sc;  // once a pixel: every covered sample takes the value (GL's copy quad)
+	VkPipelineColorBlendAttachmentState cb {};
+	cb.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+	VkPipelineColorBlendStateCreateInfo cbs { VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO };
+	cbs.attachmentCount = 1;
+	cbs.pAttachments = &cb;
+	const VkDynamicState dyn[2] = { VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR };
+	VkPipelineDynamicStateCreateInfo dy { VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO };
+	dy.dynamicStateCount = 2;
+	dy.pDynamicStates = dyn;
+	VkGraphicsPipelineCreateInfo gp { VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO };
+	gp.stageCount = 2;
+	gp.pStages = st;
+	gp.pVertexInputState = &vi;
+	gp.pInputAssemblyState = &ia;
+	gp.pViewportState = &vps;
+	gp.pRasterizationState = &rs;
+	gp.pMultisampleState = &ms;
+	gp.pColorBlendState = &cbs;
+	gp.pDynamicState = &dy;
+	gp.layout = A.playout;
+	gp.renderPass = A.pass;
+	if ( v.vkCreateGraphicsPipelines( v.dev, tone().cache, 1, &gp, nullptr, &A.rcasPipe ) != VK_SUCCESS ) {
+		why = "vkCreateGraphicsPipelines (the temporal AA's copy-back, " + std::to_string( samples ) + " samples) failed";
+		return false;
+	}
+	A.pipeSamples = samples;
+	A.pipelines = 3;
+	A.buildMs += nowMs() - t0;
+	toneCacheSave();
+	return true;
+}
+
+// the copy-back's framebuffers over the view ring's colour (made again when the ring is)
+bool taaFbs( std::string & why )
+{
+	Vk & v = vk();
+	Taa & A = taa();
+	View & V = view();
+	if ( A.fb[0] && A.fbGen == V.gen )
+		return true;
+	taaFbsDrop();
+	for ( int k = 0; k < kViewSlots; k++ ) {
+		A.vColor[k] = imageView( V.slot[k].color, VK_IMAGE_VIEW_TYPE_2D, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_ASPECT_COLOR_BIT );
+		VkFramebufferCreateInfo fci { VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO };
+		fci.renderPass = A.pass;
+		fci.attachmentCount = 1;
+		fci.pAttachments = &A.vColor[k];
+		fci.width = std::uint32_t( V.w );
+		fci.height = std::uint32_t( V.h );
+		fci.layers = 1;
+		if ( !A.vColor[k] || v.vkCreateFramebuffer( v.dev, &fci, nullptr, &A.fb[k] ) != VK_SUCCESS ) {
+			taaFbsDrop();
+			why = "the temporal AA's framebuffer over a view failed";
+			return false;
+		}
+	}
+	A.fbGen = V.gen;
+	return true;
+}
+
+// the worker: the vectors, the resolve and the copy-back into this frame's view slot, one submit between A and B
+bool taaWork( std::string & why )
+{
+	Vk & v = vk();
+	Taa & A = taa();
+	if ( A.slot < 0 || !A.fb[A.slot] ) {
+		why = "no view slot to draw into";
+		return false;
+	}
+	v.vkResetFences( v.dev, 1, &A.fence );
+	v.vkResetCommandBuffer( A.cmd, 0 );
+	VkCommandBufferBeginInfo bi { VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
+	bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+	v.vkBeginCommandBuffer( A.cmd, &bi );
+	const std::uint32_t gx = std::uint32_t( ( A.w + 7 ) / 8 ), gy = std::uint32_t( ( A.h + 7 ) / 8 );
+	VkMemoryBarrier mb { VK_STRUCTURE_TYPE_MEMORY_BARRIER };
+	mb.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+	mb.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+	// 2. the camera vectors (game_taa_mv.frag's twin) from the shared depth
+	v.vkCmdBindPipeline( A.cmd, VK_PIPELINE_BIND_POINT_COMPUTE, A.mvPipe );
+	v.vkCmdBindDescriptorSets( A.cmd, VK_PIPELINE_BIND_POINT_COMPUTE, A.playout, 0, 1, &A.mvSet, 0, nullptr );
+	v.vkCmdPushConstants( A.cmd, A.playout, VK_SHADER_STAGE_COMPUTE_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0,
+		std::uint32_t( sizeof( A.mvJob ) ), &A.mvJob );
+	v.vkCmdDispatch( A.cmd, gx, gy, 1 );
+	v.vkCmdPipelineBarrier( A.cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 1, &mb, 0, nullptr, 0, nullptr );
+	// 3b. the resolve (taa2.frag's twin): the next history, the picture, the lock
+	v.vkCmdBindPipeline( A.cmd, VK_PIPELINE_BIND_POINT_COMPUTE, A.resolvePipe );
+	v.vkCmdBindDescriptorSets( A.cmd, VK_PIPELINE_BIND_POINT_COMPUTE, A.rlayout, 0, 1, &A.rset[A.wr], 0, nullptr );
+	v.vkCmdPushConstants( A.cmd, A.rlayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, std::uint32_t( sizeof( A.job ) ), &A.job );
+	v.vkCmdDispatch( A.cmd, gx, gy, 1 );
+	v.vkCmdPipelineBarrier( A.cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 1, &mb, 0, nullptr, 0, nullptr );
+	// 4b. the picture back through RCAS into the view (taa2_rcas.frag's quad)
+	View & V = view();
+	VkRenderPassBeginInfo rbi { VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO };
+	rbi.renderPass = A.pass;
+	rbi.framebuffer = A.fb[A.slot];
+	rbi.renderArea = { { 0, 0 }, { std::uint32_t( V.w ), std::uint32_t( V.h ) } };
+	v.vkCmdBeginRenderPass( A.cmd, &rbi, VK_SUBPASS_CONTENTS_INLINE );
+	const VkViewport vp { 0.0f, 0.0f, float( A.w ), float( A.h ), 0.0f, 1.0f };
+	const VkRect2D sc { { 0, 0 }, { std::uint32_t( A.w ), std::uint32_t( A.h ) } };
+	v.vkCmdSetViewport( A.cmd, 0, 1, &vp );
+	v.vkCmdSetScissor( A.cmd, 0, 1, &sc );
+	v.vkCmdBindPipeline( A.cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, A.rcasPipe );
+	v.vkCmdBindDescriptorSets( A.cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, A.playout, 0, 1, &A.rcasSet, 0, nullptr );
+	v.vkCmdPushConstants( A.cmd, A.playout, VK_SHADER_STAGE_COMPUTE_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0,
+		std::uint32_t( sizeof( A.rcasJob ) ), &A.rcasJob );
+	v.vkCmdDraw( A.cmd, 3, 1, 0, 0 );
+	v.vkCmdEndRenderPass( A.cmd );
+	if ( v.vkEndCommandBuffer( A.cmd ) != VK_SUCCESS ) {
+		why = "vkEndCommandBuffer (the temporal AA) failed";
+		return false;
+	}
+	const VkPipelineStageFlags waitAt = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
+	VkSubmitInfo si { VK_STRUCTURE_TYPE_SUBMIT_INFO };
+	si.waitSemaphoreCount = 1;
+	si.pWaitSemaphores = &A.glDone;
+	si.pWaitDstStageMask = &waitAt;
+	si.commandBufferCount = 1;
+	si.pCommandBuffers = &A.cmd;
+	si.signalSemaphoreCount = 1;
+	si.pSignalSemaphores = &A.vkDone;
+	const VkResult r = v.vkQueueSubmit( v.queue, 1, &si, A.fence );
+	if ( r != VK_SUCCESS ) {
+		why = "vkQueueSubmit (the temporal AA) returned " + std::to_string( int( r ) );
+		return false;
+	}
+	return true;
+}
+
 bool makeSwap( int w, int h, std::string & why )
 {
 	Vk & v = vk();
@@ -2169,6 +2601,15 @@ void shutdown()
 			sharedFree( kv.second, gl().ok && kv.second.glCtx == gl().ctx );
 		shareds().clear();
 		sharedStat().mb = 0.0;
+		sharedGen()++;
+	}
+	// the temporal AA's crossing semaphores (GL's names); its pipelines stay with the device
+	Taa & A = taa();
+	if ( A.glDone || A.pending ) {
+		drain();
+		vk().vkDeviceWaitIdle( vk().dev );
+		A.pending = false;
+		taaSemsDrop( gl().ok && A.semCtx == gl().ctx );
 	}
 }
 
@@ -2404,6 +2845,7 @@ bool sharedTarget( std::uintptr_t key, int type, int w, int h, int d, unsigned g
 	st.mb += s.mb;
 	tex = s.tex;
 	shareds()[key] = s;
+	sharedGen()++;
 	return true;
 }
 
@@ -2424,6 +2866,7 @@ void sharedTargetDrop( std::uintptr_t key )
 	sharedStat().dropped++;
 	sharedFree( it->second, gl().ok && it->second.glCtx == gl().ctx );
 	shareds().erase( it );
+	sharedGen()++;
 }
 
 SharedStat takeSharedStat()
@@ -2625,6 +3068,208 @@ ToneStat takeToneStat()
 void toneCachePath( const std::string & path )
 {
 	tone().cachePath = path;
+}
+
+bool taaRun( const TaaRun & t, std::string & why )
+{
+	Taa & A = taa();
+	View & V = view();
+	Gl & g = gl();
+	Vk & v = vk();
+	const double t0 = nowMs();
+	auto refuse = [&]( const std::string & w ) {
+		why = w;
+		A.st.fails++;
+		A.st.failWhy = w;
+		return false;
+	};
+	auto breakOff = [&]( const std::string & w ) {
+		A.broken = true;
+		A.brokenWhy = "the temporal AA on Vulkan broke: " + w;
+		return refuse( A.brokenWhy );
+	};
+	if ( A.broken )
+		return refuse( A.brokenWhy );
+	if ( !v.ok || !g.ok || g.ctx != reinterpret_cast<void *>( wglGetCurrentContext() ) )
+		return refuse( "the present device or GL's entry points are not ready in this context" );
+	if ( V.cur < 0 || !V.fbo )
+		return refuse( "the view is not bound this frame" );
+	if ( V.w != t.w || V.h != t.h )
+		return refuse( "the frame is not the view's size" );
+	if ( !v.storageExt )
+		return refuse( "the device lacks shaderStorageImageExtendedFormats (the vectors' RG32F store)" );
+	if ( t.wr < 0 || t.wr > 1 )
+		return refuse( "a history index out of 0..1" );
+	auto storable = [&]( VkFormat f ) {
+		VkFormatProperties fp {};
+		v.vkGetPhysicalDeviceFormatProperties( v.phys, f, &fp );
+		return ( fp.optimalTilingFeatures & VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT ) != 0;
+	};
+	static const bool formatsOk = storable( VK_FORMAT_R32G32_SFLOAT ) && storable( VK_FORMAT_R16G16B16A16_SFLOAT )
+		&& storable( VK_FORMAT_R8G8B8A8_UNORM );
+	if ( !formatsOk )
+		return refuse( "RG32F / RGBA16F / RGBA8 storage is not offered by the device" );
+	// every target this frame's passes touch, shared in this context
+	const std::uintptr_t keys[9] = { t.cur, t.depth, t.mv, t.pic, t.hist[0], t.hist[1], t.lock[0], t.lock[1], 0 };
+	const Shared * s[8] = {};
+	for ( int k = 0; k < 8; k++ ) {
+		s[k] = sharedFind( keys[k] );
+		if ( !s[k] || s[k]->glCtx != g.ctx || !s[k]->view || s[k]->w != t.w || s[k]->h != t.h )
+			return refuse( "a TAA target is not shared in this context at the frame's size (key " + std::to_string( k ) + ")" );
+	}
+	const Shared & sCur = *s[0], & sDepth = *s[1], & sMv = *s[2], & sPic = *s[3];
+	const Shared * sHist[2] = { s[4], s[5] }, * sLock[2] = { s[6], s[7] };
+	if ( sMv.fmt != VK_FORMAT_R32G32_SFLOAT || sPic.fmt != VK_FORMAT_R8G8B8A8_UNORM || sHist[0]->fmt != VK_FORMAT_R16G16B16A16_SFLOAT
+		|| sLock[0]->fmt != VK_FORMAT_R16G16B16A16_SFLOAT || sDepth.glFmt != kDepth24Stencil8 )
+		return refuse( "a TAA target's format is not the pass's" );
+	const int inputs = t.job.ints[3];
+	if ( ( inputs & 3 ) && !g.copyImageSubData )
+		return refuse( "TAAINPUTS1's velocity / mask are on but no glCopyImageSubData" );
+	// the last run is done before its command buffer and sets are written again
+	if ( A.pending ) {
+		v.vkWaitForFences( v.dev, 1, &A.fence, VK_TRUE, 1000000000ull );
+		A.pending = false;
+	}
+	std::string w;
+	if ( !taaStatic( w ) || !taaSems( w ) || !taaPipes( V.samples, w ) || !taaFbs( w ) )
+		return breakOff( w );
+	// TAAINPUTS1's velocity and mask: GL's own textures copied into shared twins (made on first use, between frames' passes)
+	GLuint velTex = 0, maskTex = 0;
+	const Shared * sVel = nullptr, * sMask = nullptr;
+	if ( inputs & 1 ) {
+		if ( !t.vel || !t.velKey || !sharedTarget( t.velKey, 0, t.w, t.h, 1, kGlRg16f, velTex, w ) )
+			return refuse( "the velocity's shared twin: " + ( w.empty() ? std::string( "no texture" ) : w ) );
+		g.copyImageSubData( t.vel, kTexture2D, 0, 0, 0, 0, velTex, kTexture2D, 0, 0, 0, 0, t.w, t.h, 1 );
+		sVel = sharedFind( t.velKey );
+	}
+	if ( inputs & 2 ) {
+		if ( !t.mask || !t.maskKey || !sharedTarget( t.maskKey, 0, t.w, t.h, 1, kRgba8, maskTex, w ) )
+			return refuse( "the mask's shared twin: " + ( w.empty() ? std::string( "no texture" ) : w ) );
+		g.copyImageSubData( t.mask, kTexture2D, 0, 0, 0, 0, maskTex, kTexture2D, 0, 0, 0, 0, t.w, t.h, 1 );
+		sMask = sharedFind( t.maskKey );
+	}
+	// the sets, written again when a view in them changed (a remade target) or a shared target came or went
+	const int wr = t.wr, rd = wr ^ 1;
+	const VkImageView rViews[10] = { sCur.view, sHist[rd]->view, sMv.view, sDepth.view, sLock[rd]->view, sVel ? sVel->view : sMv.view,
+		sMask ? sMask->view : sMv.view, sHist[wr]->view, sPic.view, sLock[wr]->view };
+	const bool genMoved = A.heldGen != sharedGen();
+	if ( genMoved || std::memcmp( rViews, A.rHeld[wr], sizeof( rViews ) ) != 0 ) {
+		VkDescriptorImageInfo ii[11] = {};
+		VkWriteDescriptorSet ws[11] = {};
+		for ( std::uint32_t k = 0; k < 11; k++ ) {
+			ii[k].imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+			if ( k == 7 )
+				ii[k].sampler = A.linear;
+			else
+				ii[k].imageView = rViews[k < 7 ? k : k - 1];
+			ws[k].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+			ws[k].dstSet = A.rset[wr];
+			ws[k].dstBinding = k;
+			ws[k].descriptorCount = 1;
+			ws[k].descriptorType = k < 7 ? VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE : k == 7 ? VK_DESCRIPTOR_TYPE_SAMPLER : VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+			ws[k].pImageInfo = &ii[k];
+		}
+		v.vkUpdateDescriptorSets( v.dev, 11, ws, 0, nullptr );
+		std::memcpy( A.rHeld[wr], rViews, sizeof( rViews ) );
+	}
+	// the PostFx shim's sets: the vectors (T0 the depth, out 7 the vectors) and the copy-back (T0 the picture, 7 the same)
+	auto pfxSet = [&]( VkDescriptorSet set, VkImageView t0v, VkImageView outv ) {
+		VkDescriptorImageInfo ii[8] = {};
+		VkWriteDescriptorSet ws[8] = {};
+		for ( std::uint32_t k = 0; k < 8; k++ ) {
+			ii[k].imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+			if ( k == 5 || k == 6 )
+				ii[k].sampler = k == 5 ? A.linear : A.point;
+			else
+				ii[k].imageView = k == 7 ? outv : t0v;
+			ws[k].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+			ws[k].dstSet = set;
+			ws[k].dstBinding = k;
+			ws[k].descriptorCount = 1;
+			ws[k].descriptorType = k < 5 ? VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE : k < 7 ? VK_DESCRIPTOR_TYPE_SAMPLER : VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+			ws[k].pImageInfo = &ii[k];
+		}
+		v.vkUpdateDescriptorSets( v.dev, 8, ws, 0, nullptr );
+	};
+	if ( genMoved || A.mvHeld[0] != sDepth.view || A.mvHeld[1] != sMv.view ) {
+		pfxSet( A.mvSet, sDepth.view, sMv.view );
+		A.mvHeld[0] = sDepth.view;
+		A.mvHeld[1] = sMv.view;
+	}
+	if ( genMoved || A.rcasHeld != sPic.view ) {
+		pfxSet( A.rcasSet, sPic.view, sPic.view );
+		A.rcasHeld = sPic.view;
+	}
+	if ( genMoved ) {
+		// the other history slot's set holds old views too: written again on its frame
+		std::memset( A.rHeld[rd], 0, sizeof( A.rHeld[rd] ) );
+		A.heldGen = sharedGen();
+	}
+	A.slot = V.cur;
+	A.w = t.w;
+	A.h = t.h;
+	A.wr = wr;
+	A.job = t.job;
+	A.mvJob = t.mvJob;
+	A.rcasJob = t.rcasJob;
+	// GL's blits (colour, depth), the lock clears and the inputs' copies done -> the worker's passes -> GL's later passes
+	GLuint tex[13] = { sCur.tex, sDepth.tex, sMv.tex, sPic.tex, sHist[0]->tex, sHist[1]->tex, sLock[0]->tex, sLock[1]->tex,
+		V.slot[V.cur].colorTex, 0, 0, 0, 0 };
+	GLuint nTex = 9;
+	if ( velTex )
+		tex[nTex++] = velTex;
+	if ( maskTex )
+		tex[nTex++] = maskTex;
+	GLenum lay[13];
+	for ( GLenum & l : lay )
+		l = kLayoutGeneral;
+	g.signalSemaphore( A.glDoneGl, 0, nullptr, nTex, tex, lay );
+	g.flush();
+	Worker & W = wk();
+	std::uint64_t want = 0;
+	{
+		std::lock_guard<std::mutex> lk( W.m );
+		want = W.toneDone + 1;
+	}
+	Work j;
+	j.k = -1;
+	j.taa = true;
+	hand( j );
+	bool ok = false;
+	{
+		std::unique_lock<std::mutex> lk( W.m );
+		W.idle.wait( lk, [&W, want]() { return W.toneDone >= want; } );
+		ok = W.toneOk;
+		w = W.toneWhy;
+	}
+	if ( !ok )
+		return breakOff( w );  // nothing signals vkDone: GL does not wait it; GL runs its passes this frame
+	g.waitSemaphore( A.vkDoneGl, 0, nullptr, nTex, tex, lay );
+	A.pending = true;
+	const double ms = nowMs() - t0;
+	A.st.runs++;
+	A.st.cpuMs += ms;
+	A.st.maxMs = std::max( A.st.maxMs, ms );
+	return true;
+}
+
+void taaOnGl( const char * why )
+{
+	Taa & A = taa();
+	A.st.gl++;
+	A.st.glWhy = why ? why : "";
+}
+
+TaaStat takeTaaStat()
+{
+	Taa & A = taa();
+	TaaStat s = A.st;
+	s.pipelines = A.pipelines;
+	s.buildMs = A.buildMs;
+	if ( A.broken && s.failWhy.empty() )
+		s.failWhy = A.brokenWhy;
+	A.st = TaaStat();
+	return s;
 }
 
 bool present( void * hwnd, int w, int h, bool vsync, GlProc gp, std::string & why )
@@ -3256,17 +3901,35 @@ bool frame( QOpenGLWindow * w, const std::function<void()> & paint )
 				shared += QStringLiteral( ", %1 refused to GL (last: %2)" ).arg( ss.fails ).arg( QString::fromStdString( ss.failWhy ) );
 			if ( wwEnvInt( "WW_VKVIEW_CLOUD_RED" ) == 1 )
 				shared += QStringLiteral( "; the clouds' own: red WW_VKVIEW_CLOUD_RED=1" );
+			// lane VKSHARE1: the Modern temporal AA's vectors, resolve and copy-back (red WW_VKVIEW_TAA_RED=1)
+			const TaaStat as = takeTaaStat();
+			QString taa;
+			if ( as.runs > 0 ) {
+				taa = QStringLiteral( "TAA on Vulkan %1 frames (vectors + resolve + RCAS copy-back, one crossing: %2 pipelines built in "
+					"%3 ms, drawing thread %4 ms, max %5; GL keeps the colour / depth blits and the lock clears)" )
+					.arg( as.runs ).arg( as.pipelines ).arg( as.buildMs, 0, 'f', 1 ).arg( as.cpuMs / as.runs, 0, 'f', 3 )
+					.arg( as.maxMs, 0, 'f', 3 );
+				if ( as.gl > 0 )
+					taa += QStringLiteral( ", on GL %1 frames (last: %2)" ).arg( as.gl ).arg( QString::fromStdString( as.glWhy ) );
+				if ( as.fails > 0 )
+					taa += QStringLiteral( ", %1 refused (last: %2)" ).arg( as.fails ).arg( QString::fromStdString( as.failWhy ) );
+			} else {
+				taa = QStringLiteral( "TAA on GL (%1%2)" )
+					.arg( wwEnvInt( "WW_VKVIEW_TAA_RED" ) == 1 ? QStringLiteral( "red WW_VKVIEW_TAA_RED=1" )
+						: as.fails > 0 ? QString::fromStdString( as.failWhy )
+						: as.gl > 0 ? QString::fromStdString( as.glWhy ) : QStringLiteral( "the Modern TAA did not run" ) )
+					.arg( as.gl > 0 ? QStringLiteral( ", %1 frames" ).arg( as.gl ) : QString() );
+			}
 			if ( winView > 0 ) {
 				routeSaid.clear();  // one a window while it runs
 				sayRoute( QStringLiteral( "vk view, %1 of %2 frames: GL draws the view into the present device's images (%3x%4 "
 					"MS%5 RGBA8 + D24S8, %6 views, %7 MB, made in %8 ms), the worker resolves on Vulkan (no GL blit: drawing "
 					"thread present %9 ms); %10 views still read when GL wanted them (wait %11 ms); bakert hop none (the view is "
 					"made on the present device); %12; still on GL into the view: the FO4CS bloom's tone (mode 3) and the fog "
-					"bloom's, clouds in front (%13), P7, lens flare, TAA (history + "
-					"vectors GL's), overlays + QPainter (the overlay target is the view)" )
+					"bloom's, clouds in front (%13), P7, lens flare, overlays + QPainter (the overlay target is the view); %14" )
 					.arg( winView ).arg( winN ).arg( vs.w ).arg( vs.h ).arg( vs.samples ).arg( vs.views ).arg( vs.mb, 0, 'f', 1 )
 					.arg( vs.makeMs, 0, 'f', 1 ).arg( winSum / winN, 0, 'f', 3 ).arg( vs.busy ).arg( vs.waitMs, 0, 'f', 3 )
-					.arg( tone ).arg( shared ) );
+					.arg( tone ).arg( shared ).arg( taa ) );
 			} else {
 				sayRoute( QStringLiteral( "vk present (old route: GL draws its back buffer, GL blits it into the slot; view on "
 					"Vulkan off: %1)" ).arg( viewWhy ) );
