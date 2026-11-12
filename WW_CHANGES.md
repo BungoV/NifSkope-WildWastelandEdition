@@ -1,3 +1,14 @@
+## VKPOST3 (2026-11-12): which post passes can join the one GL -> Vulkan crossing (no code change)
+
+Notes only; nothing in the app changed. Gates rerun unchanged: present, toneview merge arm, taaview, post2, spvsync,
+hlsl_check.
+
+- Depth of field, motion blur and object blur stay on GL. They could ride the tone map + TAA crossing only on frames where
+  clouds in front and the lens flare draw nothing and the TAA runs on Vulkan, and that crossing is not used with the default
+  Fusion Shaders bloom. A depth-of-field-only design is written down for a later lane.
+- Fog bloom stays on GL: it reads the fog volume, which Vulkan cannot see yet.
+- Exposure measure and bloom keep their own crossing: they run on the ray-tracing device, not the one that shows the frame.
+
 ## VKPOST2 (2026-11-12): the tone map and the temporal AA share one GL -> Vulkan crossing (WW_VKVIEW=1)
 
 Changed, not built, not checked live. Offline: tests/vkframe/toneview.sh merge arm (one crossing vs two: cur, vectors,
