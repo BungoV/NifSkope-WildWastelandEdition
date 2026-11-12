@@ -538,6 +538,7 @@ bool NifSkopeOpenGLContext::Shader::load( const QString & filepath )
 	try
 	{
 		QByteArray	data = loadShaderFile( filepath );
+		const qsizetype	wwOrigSize = data.size();	// lane HLSLBULK1 R5: a longer source means a loader define went in
 		// red for the shader guard (printCompileError): WW_SHADER_RED=<file name> breaks that one shader
 		if ( const QString red = wwEnvStr( "WW_SHADER_RED" );
 			!red.isEmpty() && QFileInfo( filepath ).fileName().compare( red, Qt::CaseInsensitive ) == 0 ) {
@@ -603,9 +604,15 @@ bool NifSkopeOpenGLContext::Shader::load( const QString & filepath )
 		if ( infoProbe && data.startsWith( "#version" ) && data.contains( "_WATER_INFO_PROBE" ) )	// not a "WW_" literal: the switch survey would list it
 			data.insert( data.indexOf( '\n' ) + 1, "#define WW_WATER_INFO_PROBE 1\n" );
 
+		wwBaseVariant = ( data.size() == wwOrigSize );
+
 		if ( name.ends_with( "frag" ) ) {
 			if ( qsizetype n = data.indexOf( "NUM_TEXTURE_UNITS" ); n >= 0 )
+				{
+				if ( TexCache::num_texture_units - 2 != 30 )	// the HLSL twin was converted at 30 (a 32-unit driver)
+					wwBaseVariant = false;
 				data.replace( n, 17, QByteArray::number( TexCache::num_texture_units - 2 ) );
+			}
 		}
 
 		const char * src = data.constData();
@@ -645,6 +652,124 @@ bool NifSkopeOpenGLContext::Shader::load( const QString & filepath )
 	return true;
 }
 
+
+/* lane HLSLBULK1 R5: the converted HLSL, built offline to SPIR-V (tests/hlsllive/build_all.py -> shaders/spirv/), is the
+ * live path. A program whose stage shaders all have a .spv, whose GLSL variant is the base one (no loader define went into
+ * a source) and that the build linked, is linked from its SPIR-V (GL_ARB_gl_spirv). Any other program stays on the GLSL
+ * and says why (one "hlsl fallback:" line each, and the startup line "hlsl live: N of M ..."). The driver refusing the
+ * SPIR-V at specialize or link falls back too. Red WW_HLSLLIVE_RED=1: every program on the GLSL. */
+static QString	wwSpvDir;
+static QHash< QString, QString >	wwSpvIndex;	// shader file name (lines.vert) -> .spv file name
+static QHash< QString, bool >	wwSpvProgOk;	// program name -> the build linked its set
+static int	wwSpvLive = 0, wwSpvFell = 0;
+static QStringList	wwSpvFellNames;
+using WwSpecializeFn = void ( QOPENGLF_APIENTRY * )( GLuint, const GLchar *, GLuint, const GLuint *, const GLuint * );
+static WwSpecializeFn	wwSpecialize = nullptr;
+
+static void wwSpvTable( const QString & file, QHash< QString, QString > * map, QHash< QString, bool > * ok )
+{
+	QFile	fi( file );
+	if ( !fi.open( QIODevice::ReadOnly ) )
+		return;
+	for ( const QByteArray & raw : fi.readAll().split( 10 ) ) {
+		const QString	l = QString::fromUtf8( raw ).trimmed();
+		const qsizetype	t = l.indexOf( QLatin1Char( 9 ) );
+		if ( t <= 0 )
+			continue;
+		if ( map )
+			map->insert( l.left( t ), l.mid( t + 1 ) );
+		if ( ok )
+			ok->insert( l.left( t ), l.mid( t + 1 ) == QLatin1StringView( "OK" ) );
+	}
+}
+
+static void wwSpvInit( const QDir & shaders )
+{
+	wwSpvDir = shaders.filePath( "spirv" );
+	wwSpvIndex.clear();
+	wwSpvProgOk.clear();
+	wwSpvFellNames.clear();
+	wwSpvLive = wwSpvFell = 0;
+	wwSpvTable( wwSpvDir + "/index.txt", &wwSpvIndex, nullptr );
+	wwSpvTable( wwSpvDir + "/programs.txt", nullptr, &wwSpvProgOk );
+	wwSpecialize = nullptr;
+	if ( QOpenGLContext * ctx = QOpenGLContext::currentContext(); ctx && ctx->hasExtension( "GL_ARB_gl_spirv" ) ) {
+		wwSpecialize = reinterpret_cast< WwSpecializeFn >( ctx->getProcAddress( "glSpecializeShader" ) );
+		if ( !wwSpecialize )
+			wwSpecialize = reinterpret_cast< WwSpecializeFn >( ctx->getProcAddress( "glSpecializeShaderARB" ) );
+	}
+}
+
+static void wwSpvFellNote( const std::string_view & n, const QString & why )
+{
+	wwSpvFell++;
+	wwSpvFellNames.append( QString::fromLatin1( n.data(), qsizetype( n.size() ) ) );
+	std::fprintf( stderr, "hlsl fallback: %.*s: %s\n", int( n.size() ), n.data(), qPrintable( why ) );
+}
+
+// the SPIR-V shader objects of a program (specialized), or why not; hash = of the .spv bytes (the program binary cache key)
+static bool wwSpvAttach( NifSkopeOpenGLContext::GLFunctions * f, const std::string_view & progName, const std::vector< std::string > & files,
+	const std::vector< bool > & base, std::vector< unsigned int > & ids, QString & why, std::uint64_t & hash )
+{
+	if ( wwEnvInt( "WW_HLSLLIVE_RED" ) == 1 ) {
+		why = "red WW_HLSLLIVE_RED=1";
+		return false;
+	}
+	if ( !wwSpecialize ) {
+		why = wwSpvIndex.isEmpty() ? "no spirv folder beside the shaders" : "no GL_ARB_gl_spirv";
+		return false;
+	}
+	const auto	ok = wwSpvProgOk.constFind( QString::fromLatin1( progName.data(), qsizetype( progName.size() ) ) );
+	if ( ok == wwSpvProgOk.constEnd() || !ok.value() ) {
+		why = "no SPIR-V set for the program (not converted, or the build did not link it)";
+		return false;
+	}
+	for ( size_t i = 0; i < files.size(); i++ ) {
+		if ( !base[i] ) {
+			why = QString( "variant: a loader define is on in %1" ).arg( QString::fromStdString( files[i] ) );
+			return false;
+		}
+		if ( !wwSpvIndex.contains( QString::fromStdString( files[i] ) ) ) {
+			why = QString( "no .spv for %1" ).arg( QString::fromStdString( files[i] ) );
+			return false;
+		}
+	}
+	hash = 0xCBF29CE484222325ULL;
+	for ( size_t i = 0; i < files.size(); i++ ) {
+		const std::string &	fn = files[i];
+		QFile	fi( wwSpvDir + '/' + wwSpvIndex.value( QString::fromStdString( fn ) ) );
+		if ( !fi.open( QIODevice::ReadOnly ) ) {
+			why = "cannot read " + fi.fileName();
+		} else {
+			const QByteArray	b = fi.readAll();
+			for ( char c : b )
+				hash = ( hash ^ (unsigned char) c ) * 0x100000001B3ULL;
+			const std::string	ext = fn.substr( fn.rfind( '.' ) + 1 );
+			GLenum	type = ext == "frag" ? GL_FRAGMENT_SHADER : ext == "geom" ? GL_GEOMETRY_SHADER
+				: ext == "tesc" ? GL_TESS_CONTROL_SHADER : ext == "tese" ? GL_TESS_EVALUATION_SHADER : GL_VERTEX_SHADER;
+			GLuint	s = f->glCreateShader( type );
+			f->glShaderBinary( 1, &s, 0x9551, b.constData(), GLsizei( b.size() ) );	// GL_SHADER_BINARY_FORMAT_SPIR_V
+			wwSpecialize( s, "main", 0, nullptr, nullptr );
+			GLint	st = 0;
+			f->glGetShaderiv( s, GL_COMPILE_STATUS, &st );
+			if ( st ) {
+				ids.push_back( s );
+				continue;
+			}
+			GLint	ll = 0;
+			f->glGetShaderiv( s, GL_INFO_LOG_LENGTH, &ll );
+			QByteArray	lg( qMax( ll, 1 ), '\0' );
+			f->glGetShaderInfoLog( s, ll, nullptr, lg.data() );
+			f->glDeleteShader( s );
+			why = QString( "specialize refused %1: %2" ).arg( QString::fromStdString( fn ), QString::fromLatin1( lg ).simplified().left( 120 ) );
+		}
+		for ( unsigned int d : ids )
+			f->glDeleteShader( d );
+		ids.clear();
+		return false;
+	}
+	return true;
+}
 
 inline size_t NifSkopeOpenGLContext::Program::getUniLocationMapAllocSize( unsigned int m )
 {
@@ -713,6 +838,12 @@ bool NifSkopeOpenGLContext::Program::load( const QString & filepath, NifSkopeOpe
 		QStack<ConditionGroup *> chkgrps;
 		chkgrps.push( &conditions );
 		patches = false;
+		std::vector< std::string >	wwFiles;
+		std::vector< bool >	wwBase;
+		wwGlslIds.clear();
+		wwSpvIds.clear();
+		wwSpv = false;
+		wwSpvWhy.clear();
 
 		while ( !stream.atEnd() ) {
 			QString line = stream.readLine().trimmed();
@@ -737,6 +868,9 @@ bool NifSkopeOpenGLContext::Program::load( const QString & filepath, NifSkopeOpe
 								patches = true;
 							f->glAttachShader( id, shader->id );
 							mix( QByteArray::number( qulonglong( shader->srcHash ), 16 ) );
+							wwFiles.push_back( nameStr );
+							wwBase.push_back( shader->wwBaseVariant );
+							wwGlslIds.push_back( shader->id );
 						}
 						else
 							throw QString( "depends on shader %1 which was not compiled successful" ).arg( name );
@@ -770,6 +904,21 @@ bool NifSkopeOpenGLContext::Program::load( const QString & filepath, NifSkopeOpe
 				}
 
 				chkgrps.top()->addCondition( new ConditionSingle( line, invert ) );
+			}
+		}
+
+		/* lane HLSLBULK1 R5: SPIR-V from the converted HLSL when the program's whole set is ready; the GLSL shaders stay
+		 * listed (wwGlslIds) for the fallback and are not compiled while the SPIR-V links (nothing attached asks for them) */
+		{
+			std::uint64_t	h = 0;
+			if ( wwSpvAttach( f, name, wwFiles, wwBase, wwSpvIds, wwSpvWhy, h ) ) {
+				for ( unsigned int s : wwGlslIds )
+					f->glDetachShader( id, s );
+				for ( unsigned int s : wwSpvIds )
+					f->glAttachShader( id, s );
+				wwSpv = true;
+				mix( QByteArray( "hlsl-spirv" ) );
+				mix( QByteArray::number( qulonglong( h ), 16 ) );
 			}
 		}
 
@@ -854,6 +1003,33 @@ bool NifSkopeOpenGLContext::Program::finishLink( NifSkopeOpenGLContext * context
 			f->glGetProgramiv( id, GL_LINK_STATUS, &result );
 		}
 
+		if ( result != GL_TRUE && wwSpv ) {
+			// lane HLSLBULK1 R5: the driver refused the SPIR-V program: the GLSL one, named in the telemetry
+			GLint	ll = 0;
+			f->glGetProgramiv( id, GL_INFO_LOG_LENGTH, &ll );
+			QByteArray	lg( qMax( ll, 1 ), '\0' );
+			f->glGetProgramInfoLog( id, ll, nullptr, lg.data() );
+			wwSpvWhy = "link refused: " + QString::fromLatin1( lg ).simplified().left( 160 );
+			for ( unsigned int s : wwSpvIds ) {
+				f->glDetachShader( id, s );
+				f->glDeleteShader( s );
+			}
+			wwSpvIds.clear();
+			for ( unsigned int s : wwGlslIds )
+				f->glAttachShader( id, s );
+			wwSpv = false;
+			cacheFile.clear();
+			f->glProgramParameteri( id, GL_PROGRAM_BINARY_RETRIEVABLE_HINT, GL_TRUE );
+			if ( QString err; !wwCompileDeferred( f, id, err ) ) {
+				f->glDeleteProgram( id );
+				id = 0;
+				throw err;
+			}
+			f->glLinkProgram( id );
+			linkFrom = 1;
+			f->glGetProgramiv( id, GL_LINK_STATUS, &result );
+		}
+
 		if ( result != GL_TRUE ) {
 			GLint logLen = 0;
 			f->glGetProgramiv( id, GL_INFO_LOG_LENGTH, &logLen );
@@ -869,18 +1045,21 @@ bool NifSkopeOpenGLContext::Program::finishLink( NifSkopeOpenGLContext * context
 			}
 		} else {
 			if ( unsigned int l = f->glGetUniformBlockIndex( id, "globalUniforms" ); l != GL_INVALID_INDEX ) {
-				f->glUniformBlockBinding( id, l, 0 );
+				if ( !wwSpv )	// SPIR-V: the binding is the shader's own decoration
+					f->glUniformBlockBinding( id, l, 0 );
 				f->glBindBufferBase( GL_UNIFORM_BUFFER, 0, context->globalUniformsBufferObject );
 			}
 			if ( unsigned int l = f->glGetUniformBlockIndex( id, "skinningUniforms" ); l != GL_INVALID_INDEX ) {
-				f->glUniformBlockBinding( id, l, 1 );
+				if ( !wwSpv )
+					f->glUniformBlockBinding( id, l, 1 );
 				f->glBindBufferBase( GL_UNIFORM_BUFFER, 1, context->boneTransformsBufferObject );
 			}
 			wwShadowFrame = false;	// lane PERF3: gl/sunshadow.cpp fills and binds the buffer
 			wwBindless = name.size() > 7 && name.substr( name.size() - 7 ) == std::string_view( "bl.prog" );	// lane BINDLESS2
 			wwDrawIdLoc = wwBindless ? f->glGetUniformLocation( id, "wwDrawBase" ) : -1;	// lane BINDLESSMDI1: + base instance
 			if ( unsigned int l = f->glGetUniformBlockIndex( id, "wwShadowFrame" ); l != GL_INVALID_INDEX ) {
-				f->glUniformBlockBinding( id, l, 2 );
+				if ( !wwSpv )
+					f->glUniformBlockBinding( id, l, 2 );
 				wwShadowFrame = true;
 			}
 			/* lane FIX1101A lodch: fo4_default.vert's far stream (samplerBuffer) sits on its own unit in every program
@@ -923,6 +1102,10 @@ bool NifSkopeOpenGLContext::Program::finishLink( NifSkopeOpenGLContext * context
 		return false;
 	}
 	status = true;
+	if ( wwSpv )
+		wwSpvLive++;
+	else
+		wwSpvFellNote( name, wwSpvWhy.isEmpty() ? QString( "no SPIR-V" ) : wwSpvWhy );
 	nextProgram = context->programsLinked;
 	context->programsLinked = this;
 	return true;
@@ -1561,6 +1744,7 @@ void NifSkopeOpenGLContext::updateShaders()
 	QElapsedTimer	clock;
 	clock.start();
 	programCacheHits = programCacheRejected = programCacheWritten = 0;
+	wwSpvInit( dir );
 	programCacheDir.clear();
 	if ( wwEnvStr( "WW_PROGCACHE" ) != "0" ) {
 		QDir	app( QCoreApplication::applicationDirPath() );
@@ -1631,6 +1815,8 @@ void NifSkopeOpenGLContext::updateShaders()
 		ok, int( started.size() ), programCacheHits, programCacheRejected, programCacheWritten,
 		programCacheDir.isEmpty() ? "off" : "on", threads, (long long) issued, (long long) clock.elapsed() );
 	// lane STARTSPEED1: what the deferred compile saved (the waiting sources no link asked for go now)
+	std::fprintf( stderr, "hlsl live: %d of %d programs from SPIR-V, %d fell back (%s)\n", wwSpvLive, int( started.size() ), wwSpvFell,
+		qPrintable( wwSpvFellNames.join( QLatin1String( ", " ) ) ) );
 	std::fprintf( stderr, "shader sources: %d of %d compiled (%s)\n", wwShadersCompiled, wwShadersLoaded,
 		wwStartupEager() ? "eager, WW_STARTUP_EAGER=1" : "on demand" );
 	wwDeferredShaders().clear();
