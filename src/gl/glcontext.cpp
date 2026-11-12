@@ -605,13 +605,31 @@ bool NifSkopeOpenGLContext::Shader::load( const QString & filepath )
 		if ( infoProbe && data.startsWith( "#version" ) && data.contains( "_WATER_INFO_PROBE" ) )	// not a "WW_" literal: the switch survey would list it
 			data.insert( data.indexOf( '\n' ) + 1, "#define WW_WATER_INFO_PROBE 1\n" );
 
-		wwBaseVariant = ( data.size() == wwOrigSize );
+		/* lane HLSLBULK1 R6: the variant key of this source = the loader defines that went in (sorted, joined with '+'); they
+		 * sit as `#define WW_X 1` lines right after the #version line, wwOrigSize bytes before the end excepted */
+		wwDefs.clear();
+		if ( data.size() != wwOrigSize ) {
+			QStringList	dn;
+			const qsizetype	b0 = data.indexOf( '\n' ) + 1;
+			for ( const QByteArray & l : data.mid( b0, data.size() - wwOrigSize ).split( '\n' ) ) {
+				if ( l.isEmpty() )
+					continue;
+				if ( l.startsWith( "#define WW_" ) && l.endsWith( " 1" ) ) {
+					dn.append( QString::fromLatin1( l.mid( 8, l.size() - 10 ) ) );
+				} else {
+					dn = QStringList( QStringLiteral( "!" ) );
+					break;
+				}
+			}
+			dn.sort();
+			wwDefs = dn.join( QChar( '+' ) ).toStdString();
+		}
 
 		if ( name.ends_with( "frag" ) ) {
 			if ( qsizetype n = data.indexOf( "NUM_TEXTURE_UNITS" ); n >= 0 )
 				{
 				if ( TexCache::num_texture_units - 2 != 30 )	// the HLSL twin was converted at 30 (a 32-unit driver)
-					wwBaseVariant = false;
+					wwDefs += "!units";
 				data.replace( n, 17, QByteArray::number( TexCache::num_texture_units - 2 ) );
 			}
 		}
@@ -710,7 +728,7 @@ static void wwSpvFellNote( const std::string_view & n, const QString & why )
 
 // the SPIR-V shader objects of a program (specialized), or why not; hash = of the .spv bytes (the program binary cache key)
 static bool wwSpvAttach( NifSkopeOpenGLContext::GLFunctions * f, const std::string_view & progName, const std::vector< std::string > & files,
-	const std::vector< bool > & base, std::vector< unsigned int > & ids, QString & why, std::uint64_t & hash )
+	const std::vector< std::string > & defs, std::vector< unsigned int > & ids, QString & why, std::uint64_t & hash )
 {
 	if ( wwEnvInt( "WW_HLSLLIVE_RED" ) == 1 ) {
 		why = "red WW_HLSLLIVE_RED=1";
@@ -720,25 +738,34 @@ static bool wwSpvAttach( NifSkopeOpenGLContext::GLFunctions * f, const std::stri
 		why = wwSpvIndex.isEmpty() ? "no spirv folder beside the shaders" : "no GL_ARB_gl_spirv";
 		return false;
 	}
-	const auto	ok = wwSpvProgOk.constFind( QString::fromLatin1( progName.data(), qsizetype( progName.size() ) ) );
+	/* lane HLSLBULK1 R6: a variant is keyed by the loader defines in its sources. A stage's key is file[@A+B]; the program's is
+	 * name[@union of its stages' defines]; the build (tests/hlsllive/build_all.py) writes one line per variant it linked */
+	QStringList	un;
+	std::vector< QString >	keys;
+	for ( size_t i = 0; i < files.size(); i++ ) {
+		keys.push_back( QString::fromStdString( files[i] ) + ( defs[i].empty() ? QString() : QChar( '@' ) + QString::fromStdString( defs[i] ) ) );
+		for ( const QString & p : QString::fromStdString( defs[i] ).split( QChar( '+' ), Qt::SkipEmptyParts ) )
+			if ( !un.contains( p ) )
+				un.append( p );
+	}
+	un.sort();
+	const QString	pkey = QString::fromLatin1( progName.data(), qsizetype( progName.size() ) ) + ( un.isEmpty() ? QString() : QChar( '@' ) + un.join( QChar( '+' ) ) );
+	const auto	ok = wwSpvProgOk.constFind( pkey );
 	if ( ok == wwSpvProgOk.constEnd() || !ok.value() ) {
-		why = "no SPIR-V set for the program (not converted, or the build did not link it)";
+		why = un.isEmpty() ? QString( "no SPIR-V set for the program (not converted, or the build did not link it)" )
+			: QString( "no SPIR-V set for the variant %1" ).arg( pkey );
 		return false;
 	}
 	for ( size_t i = 0; i < files.size(); i++ ) {
-		if ( !base[i] ) {
-			why = QString( "variant: a loader define is on in %1" ).arg( QString::fromStdString( files[i] ) );
-			return false;
-		}
-		if ( !wwSpvIndex.contains( QString::fromStdString( files[i] ) ) ) {
-			why = QString( "no .spv for %1" ).arg( QString::fromStdString( files[i] ) );
+		if ( !wwSpvIndex.contains( keys[i] ) ) {
+			why = QString( "no .spv for %1" ).arg( keys[i] );
 			return false;
 		}
 	}
 	hash = 0xCBF29CE484222325ULL;
 	for ( size_t i = 0; i < files.size(); i++ ) {
 		const std::string &	fn = files[i];
-		QFile	fi( wwSpvDir + '/' + wwSpvIndex.value( QString::fromStdString( fn ) ) );
+		QFile	fi( wwSpvDir + '/' + wwSpvIndex.value( keys[i] ) );
 		if ( !fi.open( QIODevice::ReadOnly ) ) {
 			why = "cannot read " + fi.fileName();
 		} else {
@@ -840,7 +867,7 @@ bool NifSkopeOpenGLContext::Program::load( const QString & filepath, NifSkopeOpe
 		chkgrps.push( &conditions );
 		patches = false;
 		std::vector< std::string >	wwFiles;
-		std::vector< bool >	wwBase;
+		std::vector< std::string >	wwBase;	// each stage's variant key (Shader::wwDefs)
 		wwGlslIds.clear();
 		wwSpvIds.clear();
 		wwSpv = false;
@@ -870,7 +897,7 @@ bool NifSkopeOpenGLContext::Program::load( const QString & filepath, NifSkopeOpe
 							f->glAttachShader( id, shader->id );
 							mix( QByteArray::number( qulonglong( shader->srcHash ), 16 ) );
 							wwFiles.push_back( nameStr );
-							wwBase.push_back( shader->wwBaseVariant );
+							wwBase.push_back( shader->wwDefs );
 							wwGlslIds.push_back( shader->id );
 						}
 						else

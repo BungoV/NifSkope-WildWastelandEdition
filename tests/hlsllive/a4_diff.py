@@ -10,7 +10,7 @@ import ctypes, os, sys, zlib
 import numpy as np
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-sys.path.insert(0, 'E:/Projects/Claude/notes/hlslbulk1/tools')
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from glctx import *
 import remap, spirv_probe
 import a2_iface
@@ -52,6 +52,19 @@ def cstr_buf(n=512):
     return ctypes.create_string_buffer(n)
 
 
+def attrib_cols(attribs):
+    '''R6: a matrix attribute takes one location per column (the queue's per-draw modelViewMatrix at 8-11): one vector attribute each,
+    named `<name>#<column>`; the harness feeds every column, not only the first'''
+    out = []
+    for name, loc, ty in attribs:
+        if ty in MAT_T:
+            c, rr = MAT_T[ty]
+            out += [('%s#%d' % (name, k), loc + k, {2: 0x8B50, 3: 0x8B51, 4: 0x8B52}[rr]) for k in range(c)]
+        else:
+            out.append((name, loc, ty))
+    return out
+
+
 class Prog:
     def __init__(self, p):
         self.p = p
@@ -86,6 +99,23 @@ class Prog:
             gb(p, i, 0x8A40, ctypes.byref(sz))      # DATA_SIZE
             gb(p, i, 0x8A3F, ctypes.byref(bd))      # BINDING
             self.blocks.append([nm.value.decode(), i, sz.value, bd.value])
+        # R6: the colour attachments the fragment stage writes (index 0 outputs): a draw buffer no output feeds, or the second
+        # output of a dual-source pair, holds an undefined value that differs between two drivers' compiles of the same shader
+        self.outs = None
+        try:
+            gpi = g('glGetProgramInterfaceiv', None, GLuint, GLenum, GLenum, ctypes.POINTER(GLint))
+            gpr = g('glGetProgramResourceiv', None, GLuint, GLenum, GLuint, GLsizei, c_p, GLsizei, c_p, c_p)
+            gpi(p, 0x92E4, 0x92F5, ctypes.byref(v))
+            outs = set()
+            for i in range(v.value):
+                props = (GLenum * 3)(0x930E, 0x930F, 0x92FB)   # LOCATION, LOCATION_INDEX, ARRAY_SIZE
+                res = (GLint * 3)()
+                gpr(p, 0x92E4, i, 3, ctypes.cast(props, c_p), 3, None, ctypes.cast(res, c_p))
+                if res[1] <= 0 and res[0] >= 0:
+                    outs.update(range(res[0], res[0] + max(res[2], 1)))
+            self.outs = outs
+        except Exception:
+            self.outs = None
         self.members = {}
         for bname, bi, _sz, _bd in self.blocks:
             cnt = GLint()
@@ -105,6 +135,9 @@ class Prog:
 
 def int_uniform(ty, name):
     return ty in INT_T or ty in UINT_T or ty in BOOL_T
+
+
+MODE = ''   # R6 coverage retry: '' random ints and bools | 'zero' all 0 | 'one' all 1 (a state the random draw never reaches)
 
 
 def set_uniform(prog, name, loc, ty, size, seed, plant):
@@ -130,6 +163,8 @@ def set_uniform(prog, name, loc, ty, size, seed, plant):
     elif ty in INT_T or ty in BOOL_T:
         n = INT_T.get(ty) or BOOL_T[ty]
         a = r.integers(0, 2 if ty in BOOL_T else 3, n * size).astype(np.int32)   # a bool is 0 or 1 as the app sets it
+        if MODE and ty in INT_T | BOOL_T and ty != 0x8B55:
+            a[:] = 1 if MODE == 'one' else 0
         if ty == 0x8B55:
             a[:] = np.tile(np.array([0, 0, SZ, SZ], dtype=np.int32), size)
         g('glUniform%div' % n, None, GLint, GLsizei, c_p)(loc, size, a.ctypes.data)
@@ -215,7 +250,7 @@ class Rig:
         self.tex = {}
 
     def ubo_for(self, name, size, seed, members=()):
-        k = (name, size, seed)
+        k = (name, size, seed, MODE)
         if k not in self.ubo:
             b = GLuint(); g('glGenBuffers', None, GLsizei, ctypes.POINTER(GLuint))(1, ctypes.byref(b))
             a = (rng_for(name, seed).random(max(size, 16) // 4 + 4) * 0.8 + 0.1).astype(np.float32)
@@ -228,7 +263,7 @@ class Rig:
                     if ty in INT_T or ty in UINT_T or ty in BOOL_T:
                         n = INT_T.get(ty) or UINT_T.get(ty) or BOOL_T[ty]
                         for q in range(n):
-                            iv[base + q] = int(rng_for('%s%d%d' % (name, off, q), seed).integers(0, 2 if ty in BOOL_T else 3))
+                            iv[base + q] = (1 if MODE == 'one' else 0) if MODE else int(rng_for('%s%d%d' % (name, off, q), seed).integers(0, 2 if ty in BOOL_T else 3))
                         if ty == 0x8B55:   # an ivec4 is a viewport rectangle often: x y w h
                             iv[base:base + 4] = (0, 0, SZ, SZ)
                     elif ty in MAT_T and MAT_T[ty][0] == MAT_T[ty][1] and mst > 0:   # a square matrix: identity plus a small skew
@@ -255,12 +290,18 @@ class Rig:
         for i in range(4):
             g('glClearBufferfv', None, GLenum, GLint, c_p)(0x1800, i, ctypes.cast(clr, c_p))
         g('glViewport', None, GLint, GLint, GLsizei, GLsizei)(0, 0, SZ, SZ)
-        for cap in (0x0B44, 0x0B71, 0x0BE2, 0x0C11):   # CULL_FACE, DEPTH_TEST, BLEND, SCISSOR_TEST
+        for cap in (0x0B44, 0x0BE2, 0x0C11):   # CULL_FACE, BLEND, SCISSOR_TEST
             g('glDisable', None, GLenum)(cap)
+        # R6: the depth buffer is an output too (a depth-only program, gl_FragDepth): test ALWAYS, write on, cleared to 1.0
+        g('glEnable', None, GLenum)(0x0B71)
+        g('glDepthFunc', None, GLenum)(0x0207)
+        g('glDepthMask', None, ctypes.c_ubyte)(1)
+        dclr = (c_f * 1)(1.0)
+        g('glClearBufferfv', None, GLenum, GLint, c_p)(0x1801, 0, ctypes.cast(dclr, c_p))
         g('glBindVertexArray', None, GLuint)(self.vao.value)
         # vertices (attribute by location from the GLSL program; the SPIR-V one carries the same locations)
         bl = []
-        for name, loc, ty in ref.attribs:
+        for name, loc, ty in attrib_cols(ref.attribs):
             n = FLOAT_T.get(ty) or INT_T.get(ty) or UINT_T.get(ty) or 4
             isint = ty in INT_T or ty in UINT_T
             r = rng_for('attr' + name, seed)
@@ -268,7 +309,10 @@ class Rig:
                 a = r.integers(0, 3, nverts * n).astype(np.int32)
             else:
                 a = (r.random(nverts * n) * 1.8 - 0.9).astype(np.float32)
-                if n == 4:
+                if '#' in name:   # a column of a matrix attribute: the identity's column plus a small skew
+                    a = (r.random(nverts * n) * 0.05 - 0.025).astype(np.float32)
+                    a[int(name.rsplit('#', 1)[1]) % n::n] += 1.0
+                elif n == 4:
                     a[3::4] = 1.0
             b = GLuint(); g('glGenBuffers', None, GLsizei, ctypes.POINTER(GLuint))(1, ctypes.byref(b))
             g('glBindBuffer', None, GLenum, GLuint)(0x8892, b.value)
@@ -325,7 +369,14 @@ class Rig:
             g('glReadBuffer', None, GLenum)(0x8CE0 + i)
             buf = np.zeros(SZ * SZ * 4, dtype=np.float32)
             g('glReadPixels', None, GLint, GLint, GLsizei, GLsizei, GLenum, GLenum, c_p)(0, 0, SZ, SZ, 0x1908, 0x1406, buf.ctypes.data)
+            if ref.outs is not None and i not in ref.outs:
+                buf[:] = 0.25
             outs.append(buf)
+        dbuf = np.zeros(SZ * SZ, dtype=np.float32)
+        g('glReadPixels', None, GLint, GLint, GLsizei, GLsizei, GLenum, GLenum, c_p)(0, 0, SZ, SZ, 0x1902, 0x1406, dbuf.ctypes.data)
+        d4 = np.full(SZ * SZ * 4, 0.25, dtype=np.float32)   # a texel the draw left at the cleared 1.0 reads as the colour clear (not covered)
+        d4[0::4] = np.where(dbuf == 1.0, 0.25, dbuf)
+        outs.append(d4)
         for loc, b in bl:
             g('glDisableVertexAttribArray', None, GLuint)(loc)
             g('glDeleteBuffers', None, GLsizei, ctypes.POINTER(GLuint))(1, ctypes.byref(GLuint(b)))
@@ -365,8 +416,7 @@ def main():
     rig = Rig()
     rows, tot = [], {}
     byn = remap._byname(tree)
-    for pf, st in remap.programs(tree):
-        name = os.path.basename(pf)
+    for pf, st, vdefs, name in a2_iface.items(tree):
         txt = open(os.path.join(tree, pf), encoding='utf-8', errors='replace').read()
         if '.geom' not in txt:
             st = [x for x in st if not x[1].endswith('_points_gs.hlsl')]
@@ -374,10 +424,12 @@ def main():
             continue
         if okp.get(name, '')[:2] != 'OK':
             continue
+        if os.environ.get('A4_BASEONLY') and '@' in name:   # debug: the base programs only (a diagnosis loop, not a verdict)
+            continue
         group = pf.replace('\\', '/').split('/')[3] if pf.replace('\\', '/').startswith('res/shaders/features/') else 'core'
         specs = [(a2_iface.STG[e], os.path.join(spvdir, 'spirv', os.path.basename(pth).rsplit('.', 1)[0] + '.spv')) for e, pth, _s in st]
         shaders = [w for ln in txt.splitlines() if ln.startswith('shaders') for w in ln.split()[1:]]
-        pg = a2_iface.glsl_program(tree, [byn.get(s, 'res/shaders/' + s) for s in shaders], units)
+        pg = a2_iface.glsl_program(tree, [byn.get(s, 'res/shaders/' + s) for s in shaders], units, vdefs)
         ps, log = spirv_probe.build(specs)
         if pg is None or ps is None:
             rows.append((name, group, 'SKIP', 'did not build here'))
@@ -400,24 +452,37 @@ def main():
             it = G.has(0x8917)
             prim = {0x0000: 0x0000, 0x0001: 0x0001, 0x0004: 0x0004, 0x000A: 0x000A, 0x000C: 0x000C}.get(it, 0x0004)
             nverts = 48
-        verdict, detail, cov = 'EXACT', '', 0
-        try:
-            for seed in range(seeds):
-                o1, e1 = rig.run(G, G, seed, False, prim, nverts, patch_n)
-                o2, e2 = rig.run(S, G, seed, plant, prim, nverts, patch_n)
-                cov += int((o1 != 0.25).sum())
-                if rig.uerr:
-                    detail = 'uniform refused: ' + ','.join(rig.uerr[:6])
-                if e1 != e2:
-                    verdict, detail = 'FAIL', 'GL error glsl=%#x spv=%#x' % (e1, e2)
-                    break
-                v, d = compare(o1, o2)
-                if v == 'FAIL' or (v == 'BOUND' and verdict == 'EXACT'):
-                    verdict, detail = v, (d + ' | ' + detail if detail.startswith('uniform refused') else d)
-                    if v == 'FAIL':
+        def sweep():
+            verdict, detail, cov = 'EXACT', '', 0
+            o1 = o2 = None
+            try:
+                for seed in range(seeds):
+                    o1, e1 = rig.run(G, G, seed, False, prim, nverts, patch_n)
+                    o2, e2 = rig.run(S, G, seed, plant, prim, nverts, patch_n)
+                    cov += int((o1 != 0.25).sum())
+                    if rig.uerr:
+                        detail = 'uniform refused: ' + ','.join(rig.uerr[:6])
+                    if e1 != e2:
+                        verdict, detail = 'FAIL', 'GL error glsl=%#x spv=%#x' % (e1, e2)
                         break
-        except Exception as ex:
-            verdict, detail = 'SKIP', 'harness: %s' % ex
+                    v, d = compare(o1, o2)
+                    if v == 'FAIL' or (v == 'BOUND' and verdict == 'EXACT'):
+                        verdict, detail = v, (d + ' | ' + detail if detail.startswith('uniform refused') else d)
+                        if v == 'FAIL':
+                            break
+            except Exception as ex:
+                verdict, detail = 'SKIP', 'harness: %s' % ex
+            return verdict, detail, cov, o1, o2
+        global MODE
+        MODE = ''
+        verdict, detail, cov, o1, o2 = sweep()
+        for md in ('zero', 'one'):
+            if verdict in ('EXACT', 'BOUND') and cov == 0:
+                MODE = md
+                verdict, detail, cov, o1, o2 = sweep()
+                if cov:
+                    detail = ('ints and bools all ' + md + (' | ' + detail if detail else '')).strip()
+        MODE = ''
         if verdict == 'FAIL' and os.environ.get('A4_DEBUG'):
             dd = np.nonzero(o1.view(np.uint32) != o2.view(np.uint32))[0]
             print('  DEBUG prim %#x nverts %d patch %d | glsl nonclear %d spv nonclear %d' % (prim, nverts, patch_n, int((o1 != 0.25).sum()), int((o2 != 0.25).sum())))

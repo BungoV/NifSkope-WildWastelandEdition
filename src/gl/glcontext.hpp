@@ -130,7 +130,7 @@ public:
 		bool status;
 		bool isProgram;
 		std::uint64_t srcHash = 0;
-		bool wwBaseVariant = true;	// lane HLSLBULK1 R5: no loader define went into the source (the HLSL twin is this variant)	// of the final source (lane PERF1: the program binary cache key)
+		std::string wwDefs;	// lane HLSLBULK1 R6: the loader defines in the source, sorted, joined with '+' (empty: the base variant)	// of the final source (lane PERF1: the program binary cache key)
 	};
 
 public:
