@@ -340,7 +340,29 @@ struct AtGpu
 	int tabW = 0, tabH = 0;
 	float tabK[2] = { 0.0f, 0.0f }, tabCamR = 0.0f, tabLight[2][3] = {};
 	quint64 tabFrame = 0;
+	quint64 rbDue = 0;	// lane EMPTY240 R10-2: the frame the next read-back may be queued at
+	bool timed = false;	// lane EMPTY240 R10-2: this draw took the timer pair
 };
+
+/* lane EMPTY240 R10-2: build 83 queued the sky-view read-back (orphan + glGetTexImage, map, copy, the 24 x 24 mean) and
+ * the sky's timer pair every frame (sky 0.77 ms CPU). The tables feed the exposure, which adapts over seconds: a read-back
+ * every 4th frame, the timer pair 1 frame in 8; the readers' stale window grows to match. Red WW_SKYREAD_RED=1: every frame */
+bool skyReadRed()
+{
+	const bool r = wwEnvInt( "WW_SKYREAD_RED" ) == 1;
+	static int said = -1;
+	if ( said != int( r ) ) {
+		said = int( r );
+		fprintf( stderr, "atmo read-back: the sky-view tables every %s frame, the timer pair %s%s\n", r ? "" : "4th",
+			r ? "every frame" : "1 frame in 8", r ? " (WW_SKYREAD_RED=1)" : "" );
+	}
+	return r;
+}
+
+quint64 skyReadEvery()
+{
+	return skyReadRed() ? 1u : 4u;
+}
 
 QHash<Renderer *, AtGpu> & gpus()
 {
@@ -621,10 +643,13 @@ bool wwAtmoDrawSky( Scene * scene, const WwAtmoInputs & in, QString * line )
 	}
 	if ( !g.q[0] )
 		fn->glGenQueries( 4, g.q );
+	g.timed = false;
 	if ( !in.capture ) {	// SKYGI1: the probes' capture is not a frame (its six faces would scramble the timer pairs)
 		timeRead( fn, g, 1 - g.cur, false );
 		timeRead( fn, g, g.cur, true );
-		fn->glQueryCounter( g.q[g.cur * 2], kTimestamp );
+		g.timed = skyReadRed() || s.frame % 8 == 0;	// lane EMPTY240 R10-2
+		if ( g.timed )
+			fn->glQueryCounter( g.q[g.cur * 2], kTimestamp );
 	}
 
 	const int vw = s.tier == 1 ? 96 : s.tier == 4 ? 256 : 192;
@@ -800,7 +825,8 @@ bool wwAtmoDrawSky( Scene * scene, const WwAtmoInputs & in, QString * line )
 			g.tabFrame = s.frame;
 		}
 	}
-	if ( ok && s.expo > 0 && !in.capture && !g.skyPending ) {
+	if ( ok && s.expo > 0 && !in.capture && !g.skyPending && ( s.frame >= g.rbDue || s.frame + 64 < g.rbDue ) ) {
+		g.rbDue = s.frame + skyReadEvery();	// lane EMPTY240 R10-2
 		if ( !g.pbo[0] )
 			fn->glGenBuffers( 2, g.pbo );
 		GLint prevTex = 0;
@@ -926,7 +952,7 @@ bool wwAtmoDrawSky( Scene * scene, const WwAtmoInputs & in, QString * line )
 	if ( wasStencil )
 		fn->glEnable( GL_STENCIL_TEST );
 	fn->glDepthMask( depthMask );
-	if ( !in.capture ) {
+	if ( !in.capture && g.timed ) {	// lane EMPTY240 R10-2: 1 frame in 8
 		fn->glQueryCounter( g.q[g.cur * 2 + 1], kTimestamp );
 		g.pending[g.cur] = true;
 		g.cur = 1 - g.cur;
@@ -1605,7 +1631,7 @@ float wwAtmoAdapted( float sceneMean, int counted, int total )
 {
 	const AtState & s = as();
 	// the sky read within the last two frames only (an interior, or the Physical Sky just turned off: the scene alone)
-	if ( s.tier <= 0 || s.expo <= 0 || s.skyMean < 0.0f || total <= 0 || s.frame > s.skyFrame + 2 )
+	if ( s.tier <= 0 || s.expo <= 0 || s.skyMean < 0.0f || total <= 0 || s.frame > s.skyFrame + 1 + skyReadEvery() )
 		return sceneMean;
 	const float a = adaptedWithSky( sceneMean, float( counted ) / float( total ), s.skyMean, expoRed( "skyzero" ) );
 	// stderr: when the cover or the sky's mean moves by 1 % (SKY2B: every 600th call hid the live set's own value)
@@ -1633,7 +1659,7 @@ float wwAtmoAdaptedInView( Scene * scene, float sceneMean, const float * px, int
 		return wwAtmoAdapted( sceneMean, counted, total );
 	auto it = gpus().find( scene->renderer );
 	const auto & gu = *scene->renderer->globalUniforms;
-	if ( it == gpus().end() || it->tab[0].empty() || s.frame > it->tabFrame + 2 || gu.projectionMatrix[3][3] == 1.0f )
+	if ( it == gpus().end() || it->tab[0].empty() || s.frame > it->tabFrame + 1 + skyReadEvery() || gu.projectionMatrix[3][3] == 1.0f )
 		return wwAtmoAdapted( sceneMean, counted, total );
 	const AtGpu & g = *it;
 	// the frustum's corner rays (buildAp's): the measure's texel (x, y) looks along f0 + fx x/qw + fy y/qh

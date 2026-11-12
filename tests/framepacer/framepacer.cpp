@@ -198,6 +198,8 @@ int main()
 				m.gi = 1.5e-3;
 				m.restir = 0.3e-3;
 				m.probe = 0.05e-3;
+				m.timers = 0.2e-3;	// lane EMPTY240 R10-4
+				m.transform = 0.1e-3;
 			}
 			m.finish = t + 5.1e-3;
 			m.swapAt = i % 7 == 0 ? t - 1.0 : t + 6.0e-3;

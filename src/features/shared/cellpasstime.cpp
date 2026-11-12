@@ -164,6 +164,7 @@ namespace
 {
 
 constexpr int kSlots = 3;	// GPU results are read two frames after they were issued
+constexpr int kStampEvery = 8;	// lane EMPTY240 R10-1: the GPU stamps and the pass line, 1 frame in 8
 
 struct Mark
 {
@@ -181,6 +182,7 @@ struct Slot
 	double subExt[SubCount] = {};	// lane VKFRAME1: sub ms timed outside GL (subAddMs)
 	bool subExtSeen[SubCount] = {};
 	GLuint f0 = 0, f1 = 0;	// the whole frame
+	bool stamped = false;	// lane EMPTY240 R10-1: this frame took GPU stamps (and prints the pass line)
 	double cpu[Count] = {};
 	double wait[Count] = {};	// sync mode: the closing glFinish's wait (the GPU still working after the CPU issued it all)
 	qint64 calls[Count] = {}, ranges[Count] = {};
@@ -199,6 +201,8 @@ struct State
 	bool census = false;	// WW_CELL_PASSTIME_CENSUS=1: each pass's samples passed (overdraw) and primitives, in the log line
 	bool frags = false;	// MODULES1 p18: WW_CELL_PASSTIME_CENSUS=2: + fragment shader invocations (a pipeline statistics query)
 	bool lightLoop = false;	// lane TIMING1: WW_CELL_PASSTIME_LIGHTLOOP=1, odd frames unlit (cellpasstime.h lightLoopOff)
+	bool sampleRed = false;	// lane EMPTY240 R10-1: WW_PASSLINE_RED=1, the GPU stamps and the pass line every frame (build 83)
+	bool stamp = true;	// lane EMPTY240 R10-1: the open frame takes GPU stamps
 	double llSum[2][5] = {};	// [unlit, lit] x opaque, sorted, water, ssr-donor, frame GPU ms
 	int llN[2] = {};
 	QOpenGLContext * ctx = nullptr;
@@ -256,6 +260,13 @@ State & st()
 		s.census = wwEnvInt( "WW_CELL_PASSTIME_CENSUS" ) >= 1;
 		s.frags = wwEnvInt( "WW_CELL_PASSTIME_CENSUS" ) == 2;
 		s.lightLoop = wwEnvInt( "WW_CELL_PASSTIME_LIGHTLOOP" ) == 1;
+		/* lane EMPTY240 R10-1: build 83 took a GPU timestamp pair per pass and sub-stage, read them back and printed the
+		 * pass line every frame (other-in-frame 0.33-0.40 ms). Now 1 frame in 8 (every frame with sync, census or the
+		 * light loop on); the window averages count the stamped frames only. Red WW_PASSLINE_RED=1: every frame */
+		s.sampleRed = wwEnvInt( "WW_PASSLINE_RED" ) == 1;
+		if ( s.on )
+			std::fprintf( stderr, "pass time sample: GPU stamps and the pass line 1 frame in %d%s\n", s.sampleRed ? 1 : kStampEvery,
+				s.sampleRed ? " (WW_PASSLINE_RED=1)" : "" );
 		for ( int k = 0; k < 2; k++ ) {
 			s.llN[k] = 0;
 			for ( double & v : s.llSum[k] )
@@ -367,6 +378,16 @@ void collect( Slot & sl )
 	State & s = st();
 	if ( sl.frame < 0 )
 		return;
+	if ( !sl.stamped ) {	// lane EMPTY240 R10-1: no queries were taken; its CPU went into the window at its end
+		sl.marks.clear();
+		sl.subs.clear();
+		for ( int k = 0; k < SubCount; k++ ) {
+			sl.subExt[k] = 0.0;
+			sl.subExtSeen[k] = false;
+		}
+		sl.frame = -1;
+		return;
+	}
 	double gpu[Count] = {};
 	GLuint64 samples[Count] = {}, prims[Count] = {}, frags[Count] = {};
 	for ( const Mark & m : sl.marks ) {
@@ -1070,10 +1091,14 @@ void frameBegin()
 		m = -1;
 	Sampler::start();
 	Sampler::pass = -1;
-	sl.f0 = query();
-	sl.f1 = query();
+	s.stamp = s.sampleRed || s.sync || s.census || s.lightLoop || s.frame % kStampEvery == 0
+		|| WwTelemetry::costDue( s.frame );	// lane EMPTY240 R10-1
+	sl.stamped = s.stamp;
+	sl.f0 = s.stamp ? query() : 0u;
+	sl.f1 = s.stamp ? query() : 0u;
 	sl.cache0 = cacheCounts();
-	s.gl->glQueryCounter( sl.f0, GL_TIMESTAMP );
+	if ( s.stamp )
+		s.gl->glQueryCounter( sl.f0, GL_TIMESTAMP );
 	s.frameT0 = nowNs();
 	s.inFrame = true;
 }
@@ -1092,8 +1117,9 @@ void begin( int pass )
 		s.gl->glFinish();
 	s.open[pass] = nowNs();
 	if ( pass < CullCamera ) {
-		Mark m{ pass, query(), query() };
-		s.gl->glQueryCounter( m.q0, GL_TIMESTAMP );
+		Mark m{ pass, s.stamp ? query() : 0u, s.stamp ? query() : 0u };	// lane EMPTY240 R10-1
+		if ( m.q0 )
+			s.gl->glQueryCounter( m.q0, GL_TIMESTAMP );
 		if ( s.census ) {	// top-level passes never nest (above), so one query of each target is open at a time
 			m.qs = cquery();
 			m.qp = cquery();
@@ -1127,7 +1153,8 @@ void end( int pass )
 	}
 	sl.cpu[pass] += double( nowNs() - s.open[pass] ) * 1e-6;
 	if ( pass < CullCamera ) {
-		s.gl->glQueryCounter( sl.marks[s.openMark[pass]].q1, GL_TIMESTAMP );
+		if ( sl.marks[s.openMark[pass]].q1 )	// lane EMPTY240 R10-1
+			s.gl->glQueryCounter( sl.marks[s.openMark[pass]].q1, GL_TIMESTAMP );
 		if ( sl.marks[s.openMark[pass]].qs ) {
 			s.gl->glEndQuery( GL_SAMPLES_PASSED );
 			s.gl->glEndQuery( GL_PRIMITIVES_GENERATED );
@@ -1177,7 +1204,7 @@ void subBegin( int sub )
 {
 	watchPart( sub, true );	// lane EMPTY240 R5-1
 	State & s = st();
-	if ( !s.inFrame || sub < 0 || sub >= SubCount || s.openSub[sub] >= 0 )
+	if ( !s.inFrame || !s.stamp || sub < 0 || sub >= SubCount || s.openSub[sub] >= 0 )	// lane EMPTY240 R10-1: !stamp
 		return;
 	Slot & sl = s.ring[s.frame % kSlots];
 	Mark m{ sub, query(), query() };
@@ -1230,7 +1257,8 @@ void frameEnd()
 		subEnd( k );
 	s.inFrame = false;
 	Sampler::pass = -2;
-	s.gl->glQueryCounter( sl.f1, GL_TIMESTAMP );
+	if ( sl.stamped )	// lane EMPTY240 R10-1
+		s.gl->glQueryCounter( sl.f1, GL_TIMESTAMP );
 	sl.cpuFrame = double( nowNs() - s.frameT0 ) * 1e-6;
 	for ( int p = 0; p < CullCamera; p++ )	// the CPU-only rows after it sit inside the passes
 		s_lastCpuSum += sl.cpu[p];
@@ -1242,7 +1270,7 @@ void frameEnd()
 	sl.cache.maxBytes = cc.maxBytes;
 	sl.cache.texMade = cc.texMade - sl.cache0.texMade;
 	sl.cache.texBytes = cc.texBytes - sl.cache0.texBytes;
-	if ( s.log ) {
+	if ( s.log && sl.stamped ) {	// lane EMPTY240 R10-1: the pass line's private MB, on its frames only
 		qint64 wm = 0;
 		memory( sl.privMb, wm );
 	}

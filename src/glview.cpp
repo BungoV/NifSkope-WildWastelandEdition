@@ -4118,15 +4118,20 @@ void GLView::paintGL()
 	wwEnvChanged();	// MODULES1 item 8: the env accessors' cache lives one frame at most (a backstop for any writer)
 	// the frame's per-pass timers (one bool test while the Frame Timers row is off)
 	wwWall().cur.begin = wwPaceNowS();
-	PassTime::frameBegin();
+	{
+		WwWallPart wallPart( wwWall().cur.timers );	// lane EMPTY240 R10-4: named out of other-in-frame
+		PassTime::frameBegin();
+	}
 	if ( scene && scene->textures )
 		scene->textures->wwParamFrame();	// the texture parameter shadow trusts nothing from an older frame
 	struct WwPassFrame
 	{
 		~WwPassFrame()
 		{
+			const double t0 = wwPaceNowS();
 			PassTime::frameEnd();
 			wwWall().cur.end = wwPaceNowS();
+			wwWall().cur.timers += wwWall().cur.end - t0;	// lane EMPTY240 R10-4
 			wwWall().cur.passes = PassTime::lastFrameCpuSumMs() * 1e-3;
 			extern bool wwStderrFrameFlush;	// the frame's log lines in one write
 			if ( wwStderrFrameFlush )
@@ -4289,11 +4294,14 @@ void GLView::paintGL()
 		scene->transformDirty = true;
 	// Before anything transforms: pose the marked skeleton and hand its pose to
 	// every scene that snaps to it. No-op, and costs one branch, when unmarked.
-	applyWorkspaceSkeleton( viewTrans );
-	wwDoorLiveTick( scene, this );	// the live door's pose (a no-op unless WW_CELL_DOOR_ANIM)
-	wwCellWorldAnimFrame( scene, time );	// a cell's world clock (a no-op unless World animation)
-	wwEndlessSeaFollow( scene, viewTrans );	// lane FARSEA1: the endless sea to the camera's step (a no-op without one)
-	scene->transform( viewTrans, time );
+	{
+		WwWallPart wallPart( wwWall().cur.transform );	// lane EMPTY240 R10-4: named out of other-in-frame
+		applyWorkspaceSkeleton( viewTrans );
+		wwDoorLiveTick( scene, this );	// the live door's pose (a no-op unless WW_CELL_DOOR_ANIM)
+		wwCellWorldAnimFrame( scene, time );	// a cell's world clock (a no-op unless World animation)
+		wwEndlessSeaFollow( scene, viewTrans );	// lane FARSEA1: the endless sea to the camera's step (a no-op without one)
+		scene->transform( viewTrans, time );
+	}
 	wwCellCamDump( scene );	// the eye, with or without the Cell lights row (a no-op when unset)
 
 	// Setup projection mode
