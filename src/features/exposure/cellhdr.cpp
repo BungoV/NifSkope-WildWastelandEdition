@@ -19,6 +19,7 @@
 #include "features/exposure/physunits.h"	// lane PHYSUNITS1: the physical camera; the frame in RGBA32F
 #include "features/lights/lightmeas.h"	// lane LIGHTMEAS1: the light at the camera in real units (measure only)
 #include "features/vkframe/vkframe.h"	// lane VKFRAME1 round 3: the frame shared with the Vulkan bloom source
+#include "features/vkframe/vkpresent.h"	// lane VKFRAME1 round 10: the view on Vulkan keeps the view's cached format
 #include "features/shared/glstatememo.h"	// lane EMPTY240 R11-2: the clear's state reads kept
 
 #include <QDebug>
@@ -1256,7 +1257,9 @@ bool wwCellHdrBegin( Scene * scene )
 	HdrGpu & g = hdrGpus()[r];
 	const bool sync = syncOn();
 	// lane SYNC1: the view's own framebuffer keeps its format for the window's life (an FBO name can come back as another)
-	const bool cached = sync && s.prevDraw == 0 && g.cfgValid && g.cfgW == W && g.cfgH == H;
+	// round 10: the view on Vulkan (one FBO name for life, the back buffer's format) is the view's own framebuffer too
+	const bool viewFb = s.prevDraw == 0 || ( WwVkPresent::viewFbo() && s.prevDraw == GLint( WwVkPresent::viewFbo() ) );
+	const bool cached = sync && viewFb && g.cfgValid && g.cfgW == W && g.cfgH == H;
 	GLenum dsFormat = 0;
 	if ( cached ) {
 		dsFormat = g.cfgFormat;
@@ -1279,7 +1282,7 @@ bool wwCellHdrBegin( Scene * scene )
 				.arg( depthBits ).arg( stencilBits ) );
 			return false;
 		}
-		if ( sync && s.prevDraw == 0 ) {
+		if ( sync && viewFb ) {
 			g.cfgValid = true;
 			g.cfgW = W;
 			g.cfgH = H;

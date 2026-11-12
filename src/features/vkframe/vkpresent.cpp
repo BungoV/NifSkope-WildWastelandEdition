@@ -41,7 +41,9 @@ constexpr GLenum kTexture2D = 0x0DE1, kRgba8 = 0x8058, kScissorTest = 0x0C11, kR
 	kReadFbBinding = 0x8CAA, kDrawFbBinding = 0x8CA6, kColorAttach0 = 0x8CE0, kColorBit = 0x4000, kNearest = 0x2600,
 	kTexMinFilter = 0x2801, kTexMagFilter = 0x2800, kTexBinding2D = 0x8069, kLayoutGeneral = 0x958D,
 	kHandleOpaqueWin32 = 0x9587, kDedicated = 0x9581, kNumDeviceUuids = 0x9596, kDeviceUuid = 0x9597,
-	kFbComplete = 0x8CD5, kSyncGpuDone = 0x9117, kAlreadySignaled = 0x911A, kConditionSatisfied = 0x911C;
+	kFbComplete = 0x8CD5, kSyncGpuDone = 0x9117, kAlreadySignaled = 0x911A, kConditionSatisfied = 0x911C,
+	kTexture2DMs = 0x9100, kDepth24Stencil8 = 0x88F0, kDepthStencilAttach = 0x821A, kFramebuffer = 0x8D40,
+	kTexBinding2DMs = 0x9104;
 constexpr GLuint64 kTimeoutIgnored = ~0ull;
 
 struct Gl
@@ -80,6 +82,8 @@ struct Gl
 	// GL 3.2 (optional): the fence the worker's GL context waits before it signals Vulkan (build 88)
 	void *( WINAPI * fenceSync )( GLenum, GLbitfield ) = nullptr;
 	void( WINAPI * deleteSync )( void * ) = nullptr;
+	// round 10 (optional): the view's multisample images (the view on Vulkan)
+	void( WINAPI * texStorageMem2DMultisample )( GLenum, GLsizei, GLenum, GLsizei, GLsizei, unsigned char, GLuint, GLuint64 ) = nullptr;
 };
 
 template <class F> void load( F & f, WwVkPresent::GlProc gp, const char * name )
@@ -119,6 +123,7 @@ bool loadGl( Gl & g, WwVkPresent::GlProc gp, std::string & why )
 	load( g.getUnsignedBytei, gp, "glGetUnsignedBytei_vEXT" );
 	load( g.fenceSync, gp, "glFenceSync" );
 	load( g.deleteSync, gp, "glDeleteSync" );
+	load( g.texStorageMem2DMultisample, gp, "glTexStorageMem2DMultisampleEXT" );
 	g.ok = g.getIntegerv && g.getError && g.enable && g.disable && g.isEnabled && g.flush && g.genTextures && g.deleteTextures
 		&& g.bindTexture && g.texParameteri && g.genFramebuffers && g.deleteFramebuffers && g.bindFramebuffer
 		&& g.framebufferTexture2D && g.checkFramebufferStatus && g.blitFramebuffer && g.createMemoryObjects
@@ -147,6 +152,7 @@ struct Vk
 	VKP( vkGetInstanceProcAddr ); VKP( vkCreateInstance ); VKP( vkEnumeratePhysicalDevices );
 	VKP( vkGetPhysicalDeviceProperties2 ); VKP( vkGetPhysicalDeviceQueueFamilyProperties ); VKP( vkGetPhysicalDeviceMemoryProperties );
 	VKP( vkGetPhysicalDeviceFormatProperties ); VKP( vkCreateDevice ); VKP( vkGetDeviceProcAddr );
+	VKP( vkGetPhysicalDeviceImageFormatProperties );
 	VKP( vkCreateWin32SurfaceKHR ); VKP( vkDestroySurfaceKHR ); VKP( vkGetPhysicalDeviceSurfaceSupportKHR );
 	VKP( vkGetPhysicalDeviceSurfaceCapabilitiesKHR ); VKP( vkGetPhysicalDeviceSurfaceFormatsKHR );
 	VKP( vkGetPhysicalDeviceSurfacePresentModesKHR );
@@ -159,7 +165,7 @@ struct Vk
 	VKP( vkCreateCommandPool ); VKP( vkAllocateCommandBuffers ); VKP( vkFreeCommandBuffers ); VKP( vkBeginCommandBuffer );
 	VKP( vkEndCommandBuffer ); VKP( vkResetCommandBuffer ); VKP( vkCmdPipelineBarrier ); VKP( vkCmdBlitImage );
 	VKP( vkCreateBuffer ); VKP( vkDestroyBuffer ); VKP( vkGetBufferMemoryRequirements ); VKP( vkBindBufferMemory );
-	VKP( vkMapMemory ); VKP( vkUnmapMemory ); VKP( vkCmdCopyImageToBuffer );
+	VKP( vkMapMemory ); VKP( vkUnmapMemory ); VKP( vkCmdCopyImageToBuffer ); VKP( vkCmdResolveImage );
 };
 #undef VKP
 
@@ -205,6 +211,42 @@ struct Chain
 	bool sigTried = false;
 	std::string sigWhy;  // why the signal stays on the drawing thread
 };
+
+/* Round 10, the view on Vulkan (WW_VKVIEW=1): GL draws the view into images the present device made (MS colour RGBA8
+ * + depth / stencil D24S8, the back buffer's format), not into its back buffer; the worker resolves the colour into the
+ * ring slot on Vulkan and the drawing thread's GL blit goes. The ring holds 3 views: GL draws view v only once the
+ * present that read it (3 frames back) is done (its slot's fence). One GL FBO name for every view (its attachments
+ * change): a pass that remembers the frame's FBO across frames still finds it. */
+constexpr int kViewSlots = 3;
+
+struct ViewSlot
+{
+	VkImage color = VK_NULL_HANDLE, ds = VK_NULL_HANDLE;
+	VkDeviceMemory colorMem = VK_NULL_HANDLE, dsMem = VK_NULL_HANDLE;
+	GLuint colorTex = 0, dsTex = 0, colorObj = 0, dsObj = 0;
+	int reader = -1;  // the present ring slot that read it last (-1: none yet)
+};
+
+struct View
+{
+	void * glCtx = nullptr;
+	int w = 0, h = 0, samples = 0;
+	GLuint fbo = 0;
+	ViewSlot slot[kViewSlots];
+	std::uint64_t frame = 0;
+	int cur = -1;            // drawn this frame, not yet presented
+	double mb = 0.0, makeMs = 0.0;
+	int busy = 0;            // views whose last present was still running when GL wanted them (since the last take)
+	double waitMs = 0.0;
+	std::string failWhy;     // the last make that failed (the route stays off at that shape)
+	int failW = 0, failH = 0, failS = 0;
+};
+
+View & view()
+{
+	static View v;
+	return v;
+}
 
 /* build 91: who tells Vulkan that GL's frame is done. 0 = the drawing thread's GL signal (0.07-0.16 ms there); 1 = the
  * worker's GL context signals after a GPU wait on the drawing thread's fence (build 88: build 90 read the passes up
@@ -308,6 +350,7 @@ bool makeDevice( std::string & why )
 #define LI( fn ) v.fn = reinterpret_cast<PFN_##fn>( v.vkGetInstanceProcAddr( v.inst, #fn ) )
 	LI( vkEnumeratePhysicalDevices ); LI( vkGetPhysicalDeviceProperties2 ); LI( vkGetPhysicalDeviceQueueFamilyProperties );
 	LI( vkGetPhysicalDeviceMemoryProperties ); LI( vkGetPhysicalDeviceFormatProperties ); LI( vkCreateDevice ); LI( vkGetDeviceProcAddr );
+	LI( vkGetPhysicalDeviceImageFormatProperties );
 	LI( vkCreateWin32SurfaceKHR ); LI( vkDestroySurfaceKHR ); LI( vkGetPhysicalDeviceSurfaceSupportKHR );
 	LI( vkGetPhysicalDeviceSurfaceCapabilitiesKHR ); LI( vkGetPhysicalDeviceSurfaceFormatsKHR );
 	LI( vkGetPhysicalDeviceSurfacePresentModesKHR );
@@ -367,7 +410,7 @@ bool makeDevice( std::string & why )
 	LD( vkCreateCommandPool ); LD( vkAllocateCommandBuffers ); LD( vkFreeCommandBuffers ); LD( vkBeginCommandBuffer );
 	LD( vkEndCommandBuffer ); LD( vkResetCommandBuffer ); LD( vkCmdPipelineBarrier ); LD( vkCmdBlitImage );
 	LD( vkCreateBuffer ); LD( vkDestroyBuffer ); LD( vkGetBufferMemoryRequirements ); LD( vkBindBufferMemory );
-	LD( vkMapMemory ); LD( vkUnmapMemory ); LD( vkCmdCopyImageToBuffer );
+	LD( vkMapMemory ); LD( vkUnmapMemory ); LD( vkCmdCopyImageToBuffer ); LD( vkCmdResolveImage );
 #undef LD
 	if ( !v.vkGetMemoryWin32HandleKHR || !v.vkGetSemaphoreWin32HandleKHR || !v.vkCreateSwapchainKHR )
 		return fail( "the device lacks a swapchain / win32 export entry point" );
@@ -419,11 +462,12 @@ HWND makeChild( HWND parent, int w, int h )
 /* the present worker (build 85: the present held the drawing thread 1.09 ms a frame): the Vulkan half (fence, acquire,
  * the flipped blit, submit, present) runs on its own thread; GL hands it the slot once its signal is flushed. The queue
  * and the swapchain are the worker's alone until drain() returns: every rebuild and teardown drains first. */
-bool vkPart( int k, int w, int h, std::string & why, bool & rebuild, WwVkPresent::Split & sp );
+bool vkPart( int k, int w, int h, int vs, std::string & why, bool & rebuild, WwVkPresent::Split & sp );
 
 struct Work
 {
 	int k = 0, w = 0, h = 0;
+	int vs = -1;  // round 10: the view GL drew this frame (resolved on Vulkan into slot k); -1: GL blitted into slot k
 	void * sync = nullptr;  // build 88: the worker's GL context waits this fence, then signals sem (null: signaled already)
 	GLuint sem = 0, tex = 0;
 	bool cpuWait = false;  // build 91: wait the fence on the CPU, no GL signal (signalRoute 2)
@@ -533,7 +577,7 @@ void workerLoop()
 				sg.signalSemaphore( j.sem, 0, nullptr, 1, &j.tex, &general );
 				one.signalMs = nowMs() - ts;
 			}
-			ok = vkPart( j.k, j.w, j.h, why, rebuild, one );
+			ok = vkPart( j.k, j.w, j.h, j.vs, why, rebuild, one );
 		}
 		const double ms = nowMs() - t0;
 		{
@@ -913,6 +957,211 @@ bool makeSlot( Slot & s, int w, int h, std::string & why )
 	return exportSem( s.glDone, s.glDoneGl, why ) && exportSem( s.vkDone, s.vkDoneGl, why );
 }
 
+/* round 10: one image the present device makes and GL imports (the view's colour or depth / stencil), GENERAL on both
+ * sides; samples 1 = a plain 2D texture. The route's other shared targets (the LUT, TAA's history and vectors, the
+ * overlay) take the same steps: this is the one place they are written. */
+bool makeShared( VkImage & img, VkDeviceMemory & mem, GLuint & tex, GLuint & obj, VkFormat fmt, GLenum glFmt, int samples, int w,
+	int h, bool depth, double & mb, std::string & why )
+{
+	Vk & v = vk();
+	Gl & g = gl();
+	const VkSampleCountFlagBits sc = VkSampleCountFlagBits( samples );
+	// every use GL's texture could have (the import fails with fewer); multisample storage is optional: never asked
+	VkImageUsageFlags usage = VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT
+		| ( depth ? VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT : VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT );
+	if ( samples == 1 && !depth )
+		usage |= VK_IMAGE_USAGE_STORAGE_BIT;
+	VkImageFormatProperties ip {};
+	if ( v.vkGetPhysicalDeviceImageFormatProperties( v.phys, fmt, VK_IMAGE_TYPE_2D, VK_IMAGE_TILING_OPTIMAL, usage, 0, &ip ) != VK_SUCCESS
+		|| !( ip.sampleCounts & sc ) || ip.maxExtent.width < std::uint32_t( w ) || ip.maxExtent.height < std::uint32_t( h ) ) {
+		why = std::string( depth ? "depth / stencil" : "colour" ) + " format " + std::to_string( int( fmt ) ) + " at " + std::to_string( samples )
+			+ " samples is not offered by the device";
+		return false;
+	}
+	VkExternalMemoryImageCreateInfo ext { VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_IMAGE_CREATE_INFO };
+	ext.handleTypes = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_WIN32_BIT;
+	VkImageCreateInfo ci { VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO };
+	ci.pNext = &ext;
+	ci.imageType = VK_IMAGE_TYPE_2D;
+	ci.format = fmt;
+	ci.extent = { std::uint32_t( w ), std::uint32_t( h ), 1 };
+	ci.mipLevels = 1;
+	ci.arrayLayers = 1;
+	ci.samples = sc;
+	ci.tiling = VK_IMAGE_TILING_OPTIMAL;
+	ci.usage = usage;
+	if ( v.vkCreateImage( v.dev, &ci, nullptr, &img ) != VK_SUCCESS ) {
+		why = "vkCreateImage (a view image) failed";
+		return false;
+	}
+	VkMemoryRequirements r;
+	v.vkGetImageMemoryRequirements( v.dev, img, &r );
+	VkMemoryDedicatedAllocateInfo ded { VK_STRUCTURE_TYPE_MEMORY_DEDICATED_ALLOCATE_INFO };
+	ded.image = img;
+	VkExportMemoryAllocateInfo exp { VK_STRUCTURE_TYPE_EXPORT_MEMORY_ALLOCATE_INFO };
+	exp.pNext = &ded;
+	exp.handleTypes = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_WIN32_BIT;
+	VkMemoryAllocateInfo ai { VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO };
+	ai.pNext = &exp;
+	ai.allocationSize = r.size;
+	ai.memoryTypeIndex = memType( r.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT );
+	if ( ai.memoryTypeIndex == UINT32_MAX || v.vkAllocateMemory( v.dev, &ai, nullptr, &mem ) != VK_SUCCESS
+		|| v.vkBindImageMemory( v.dev, img, mem, 0 ) != VK_SUCCESS ) {
+		why = "no exportable device memory for a view image";
+		return false;
+	}
+	mb += double( r.size ) / 1048576.0;
+	// UNDEFINED -> GENERAL once, in a command buffer of its own
+	VkCommandBufferAllocateInfo cai { VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO };
+	cai.commandPool = v.pool;
+	cai.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+	cai.commandBufferCount = 1;
+	VkCommandBuffer cmd = VK_NULL_HANDLE;
+	VkFence fence = VK_NULL_HANDLE;
+	VkFenceCreateInfo fi { VK_STRUCTURE_TYPE_FENCE_CREATE_INFO };
+	bool laid = false;
+	if ( v.vkAllocateCommandBuffers( v.dev, &cai, &cmd ) == VK_SUCCESS && v.vkCreateFence( v.dev, &fi, nullptr, &fence ) == VK_SUCCESS ) {
+		VkCommandBufferBeginInfo bi { VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
+		bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+		v.vkBeginCommandBuffer( cmd, &bi );
+		VkImageMemoryBarrier b { VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER };
+		b.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+		b.newLayout = VK_IMAGE_LAYOUT_GENERAL;
+		b.srcQueueFamilyIndex = b.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+		b.image = img;
+		b.subresourceRange = { VkImageAspectFlags( depth ? VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT : VK_IMAGE_ASPECT_COLOR_BIT ),
+			0, 1, 0, 1 };
+		v.vkCmdPipelineBarrier( cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0, 0, nullptr, 0, nullptr, 1, &b );
+		v.vkEndCommandBuffer( cmd );
+		laid = oneShot( cmd, fence );
+	}
+	if ( cmd )
+		v.vkFreeCommandBuffers( v.dev, v.pool, 1, &cmd );
+	if ( fence )
+		v.vkDestroyFence( v.dev, fence, nullptr );
+	if ( !laid ) {
+		why = "a view image's first layout change failed";
+		return false;
+	}
+	VkMemoryGetWin32HandleInfoKHR mi { VK_STRUCTURE_TYPE_MEMORY_GET_WIN32_HANDLE_INFO_KHR };
+	mi.memory = mem;
+	mi.handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_WIN32_BIT;
+	HANDLE mh = nullptr;
+	if ( v.vkGetMemoryWin32HandleKHR( v.dev, &mi, &mh ) != VK_SUCCESS || !mh ) {
+		why = "vkGetMemoryWin32HandleKHR (a view image) failed";
+		return false;
+	}
+	const GLenum target = samples > 1 ? kTexture2DMs : kTexture2D;
+	while ( g.getError() != 0 ) {}
+	GLint was = 0;
+	g.getIntegerv( samples > 1 ? kTexBinding2DMs : kTexBinding2D, &was );
+	g.createMemoryObjects( 1, &obj );
+	const GLint one = 1;
+	g.memoryObjectParameteriv( obj, kDedicated, &one );
+	g.importMemoryWin32Handle( obj, GLuint64( r.size ), kHandleOpaqueWin32, mh );
+	const GLenum errImport = g.getError();  // before the close (makeSlot)
+	CloseHandle( mh );
+	g.genTextures( 1, &tex );
+	g.bindTexture( target, tex );
+	if ( samples > 1 )
+		g.texStorageMem2DMultisample( target, samples, glFmt, w, h, 1, obj, 0 );
+	else {
+		g.texStorageMem2D( target, 1, glFmt, w, h, obj, 0 );
+		g.texParameteri( target, kTexMinFilter, GLint( kNearest ) );
+		g.texParameteri( target, kTexMagFilter, GLint( kNearest ) );
+	}
+	const GLenum errStorage = g.getError();
+	g.bindTexture( target, GLuint( was ) );
+	if ( errImport || errStorage ) {
+		why = std::string( "the GL import of a view image failed (GL error at the import " ) + std::to_string( errImport )
+			+ ", the storage " + std::to_string( errStorage ) + "; " + std::to_string( r.size ) + " bytes)";
+		return false;
+	}
+	return true;
+}
+
+// the views go (GL alive: its textures, memory objects and FBO too); the caller drained the worker
+void dropView( bool glAlive )
+{
+	Vk & v = vk();
+	Gl & g = gl();
+	View & V = view();
+	for ( ViewSlot & s : V.slot ) {
+		if ( glAlive ) {
+			for ( GLuint * t : { &s.colorTex, &s.dsTex } )
+				if ( *t )
+					g.deleteTextures( 1, t );
+			for ( GLuint * o : { &s.colorObj, &s.dsObj } )
+				if ( *o )
+					g.deleteMemoryObjects( 1, o );
+		}
+		for ( VkImage * i : { &s.color, &s.ds } )
+			if ( *i )
+				v.vkDestroyImage( v.dev, *i, nullptr );
+		for ( VkDeviceMemory * m : { &s.colorMem, &s.dsMem } )
+			if ( *m )
+				v.vkFreeMemory( v.dev, *m, nullptr );
+		s = ViewSlot();
+	}
+	if ( glAlive && V.fbo )
+		g.deleteFramebuffers( 1, &V.fbo );
+	V.fbo = 0;
+	V.w = V.h = V.samples = 0;
+	V.cur = -1;
+	V.mb = 0.0;
+	V.glCtx = nullptr;
+}
+
+// the ring of views at w x h x samples (the back buffer's shape), each slot's FBO completeness asked once here
+bool makeView( int w, int h, int samples, std::string & why )
+{
+	Vk & v = vk();
+	Gl & g = gl();
+	View & V = view();
+	const double t0 = nowMs();
+	drain();
+	v.vkDeviceWaitIdle( v.dev );
+	dropView( V.glCtx == g.ctx );
+	if ( samples > 1 && !g.texStorageMem2DMultisample ) {
+		why = "no glTexStorageMem2DMultisampleEXT";
+		return false;
+	}
+	V.glCtx = g.ctx;
+	for ( ViewSlot & s : V.slot )
+		if ( !makeShared( s.color, s.colorMem, s.colorTex, s.colorObj, VK_FORMAT_R8G8B8A8_UNORM, kRgba8, samples, w, h, false, V.mb, why )
+			|| !makeShared( s.ds, s.dsMem, s.dsTex, s.dsObj, VK_FORMAT_D24_UNORM_S8_UINT, kDepth24Stencil8, samples, w, h, true, V.mb, why ) ) {
+			dropView( true );
+			return false;
+		}
+	GLint rd = 0, dr = 0;
+	g.getIntegerv( kReadFbBinding, &rd );
+	g.getIntegerv( kDrawFbBinding, &dr );
+	g.genFramebuffers( 1, &V.fbo );
+	g.bindFramebuffer( kFramebuffer, V.fbo );
+	const GLenum target = samples > 1 ? kTexture2DMs : kTexture2D;
+	GLenum st = kFbComplete;
+	for ( ViewSlot & s : V.slot ) {
+		g.framebufferTexture2D( kFramebuffer, kColorAttach0, target, s.colorTex, 0 );
+		g.framebufferTexture2D( kFramebuffer, kDepthStencilAttach, target, s.dsTex, 0 );
+		const GLenum one = g.checkFramebufferStatus( kFramebuffer );
+		if ( one != kFbComplete )
+			st = one;
+	}
+	g.bindFramebuffer( kReadFb, GLuint( rd ) );
+	g.bindFramebuffer( kDrawFb, GLuint( dr ) );
+	const GLenum err = g.getError();
+	if ( st != kFbComplete || err != 0 ) {
+		why = "the view's framebuffer is not complete (status " + std::to_string( st ) + ", GL error " + std::to_string( err ) + ")";
+		dropView( true );
+		return false;
+	}
+	V.w = w;
+	V.h = h;
+	V.samples = samples;
+	V.makeMs = nowMs() - t0;
+	return true;
+}
+
 bool makeSwap( int w, int h, std::string & why )
 {
 	Vk & v = vk();
@@ -1063,6 +1312,25 @@ bool ensure( HWND parent, int w, int h, bool vsync, std::string & why )
 	return true;
 }
 
+// GL's entry points for the context current (loaded again when it changes)
+bool glCurrent( WwVkPresent::GlProc gp, std::string & why )
+{
+	Gl & g = gl();
+	void * ctx = reinterpret_cast<void *>( wglGetCurrentContext() );
+	if ( !ctx ) {
+		why = "no GL context current";
+		return false;
+	}
+	if ( g.ctx != ctx ) {
+		Gl fresh;
+		if ( !loadGl( fresh, gp, why ) )
+			return false;
+		fresh.ctx = ctx;
+		g = fresh;
+	}
+	return true;
+}
+
 }  // namespace
 
 namespace WwVkPresent
@@ -1083,6 +1351,109 @@ void shutdown()
 {
 	if ( ch().parent || ch().child )
 		dropAll( gl().ok );
+	if ( view().glCtx ) {
+		drain();
+		vk().vkDeviceWaitIdle( vk().dev );
+		dropView( gl().ok && view().glCtx == gl().ctx );
+	}
+}
+
+bool viewBegin( int w, int h, int samples, GlProc gp, std::string & why )
+{
+	View & V = view();
+	V.cur = -1;
+	if ( w < 1 || h < 1 ) {
+		why = "the window has no area";
+		return false;
+	}
+	samples = std::max( samples, 1 );
+	if ( !glCurrent( gp, why ) || !makeDevice( why ) )
+		return false;
+	Gl & g = gl();
+	if ( !V.failWhy.empty() && V.failW == w && V.failH == h && V.failS == samples ) {
+		why = V.failWhy;
+		return false;
+	}
+	if ( V.w != w || V.h != h || V.samples != samples || !V.fbo || V.glCtx != g.ctx ) {
+		if ( !makeView( w, h, samples, why ) ) {
+			V.failWhy = why;
+			V.failW = w;
+			V.failH = h;
+			V.failS = samples;
+			return false;
+		}
+		V.failWhy.clear();
+	}
+	const int vs = int( V.frame++ % kViewSlots );
+	ViewSlot & s = V.slot[vs];
+	// the present that read this view last (kViewSlots frames back): submitted by the worker, then its fence
+	if ( s.reader >= 0 ) {
+		const double tw = nowMs();
+		waitSlot( s.reader );
+		Vk & v = vk();
+		Slot & p = ch().slot[s.reader];
+		if ( p.pending && p.fence && v.vkGetFenceStatus( v.dev, p.fence ) == VK_NOT_READY ) {
+			V.busy++;
+			v.vkWaitForFences( v.dev, 1, &p.fence, VK_TRUE, 1000000000ull );
+		}
+		V.waitMs += nowMs() - tw;
+		s.reader = -1;
+	}
+	const GLenum target = V.samples > 1 ? kTexture2DMs : kTexture2D;
+	g.bindFramebuffer( kFramebuffer, V.fbo );
+	g.framebufferTexture2D( kFramebuffer, kColorAttach0, target, s.colorTex, 0 );
+	g.framebufferTexture2D( kFramebuffer, kDepthStencilAttach, target, s.dsTex, 0 );
+	V.cur = vs;
+	return true;
+}
+
+unsigned viewFbo()
+{
+	return view().cur >= 0 ? view().fbo : 0u;
+}
+
+bool viewRescue()
+{
+	View & V = view();
+	Gl & g = gl();
+	if ( V.cur < 0 || !V.fbo || !g.ok )
+		return false;
+	V.cur = -1;
+	g.disable( kScissorTest );
+	g.bindFramebuffer( kReadFb, V.fbo );
+	g.bindFramebuffer( kDrawFb, 0 );
+	g.blitFramebuffer( 0, 0, V.w, V.h, 0, 0, V.w, V.h, kColorBit, kNearest );
+	g.bindFramebuffer( kFramebuffer, 0 );
+	return true;
+}
+
+ViewStat takeViewStat()
+{
+	View & V = view();
+	ViewStat s;
+	s.on = V.fbo != 0;
+	s.w = V.w;
+	s.h = V.h;
+	s.samples = V.samples;
+	s.views = kViewSlots;
+	s.mb = V.mb;
+	s.makeMs = V.makeMs;
+	s.busy = V.busy;
+	s.waitMs = V.waitMs;
+	s.why = V.failWhy;
+	V.busy = 0;
+	V.waitMs = 0.0;
+	return s;
+}
+
+void viewDrop()
+{
+	View & V = view();
+	if ( !V.glCtx )
+		return;
+	drain();
+	vk().vkDeviceWaitIdle( vk().dev );
+	dropView( gl().ok && V.glCtx == gl().ctx );
 }
 
 bool present( void * hwnd, int w, int h, bool vsync, GlProc gp, std::string & why )
@@ -1156,10 +1527,20 @@ bool present( void * hwnd, int w, int h, bool vsync, GlProc gp, std::string & wh
 	}
 	const double tg = nowMs();
 	const GLenum general = kLayoutGeneral;
-	g.disable( kScissorTest );
-	if ( g.blitNamedFramebuffer ) {
+	/* round 10, the view on Vulkan: GL drew the frame into view vs (viewBegin); the worker resolves it into the slot on
+	 * Vulkan, so no GL blit here. Size mismatch (a view made at another size): the old blit from the back buffer */
+	View & V = view();
+	const int vs = V.cur >= 0 && V.w == w && V.h == h ? V.cur : -1;
+	V.cur = -1;
+	GLuint sigTex = s.tex;
+	if ( vs >= 0 ) {
+		V.slot[vs].reader = k;
+		sigTex = V.slot[vs].colorTex;
+	} else if ( g.blitNamedFramebuffer ) {
+		g.disable( kScissorTest );
 		g.blitNamedFramebuffer( 0, s.fbo, 0, 0, w, h, 0, 0, w, h, kColorBit, kNearest );
 	} else {
+		g.disable( kScissorTest );
 		g.bindFramebuffer( kReadFb, 0 );
 		g.bindFramebuffer( kDrawFb, s.fbo );
 		g.blitFramebuffer( 0, 0, w, h, 0, 0, w, h, kColorBit, kNearest );
@@ -1174,7 +1555,7 @@ bool present( void * hwnd, int w, int h, bool vsync, GlProc gp, std::string & wh
 	if ( c.sigCtx && g.fenceSync && g.deleteSync && route != 0 )
 		sync = g.fenceSync( kSyncGpuDone, 0 );
 	if ( !sync )
-		g.signalSemaphore( s.glDoneGl, 0, nullptr, 1, &s.tex, &general );
+		g.signalSemaphore( s.glDoneGl, 0, nullptr, 1, &sigTex, &general );
 	s.glWaited = sync && route == 2;
 	const double tf = nowMs();
 	g.flush();  // Vulkan's wait (or the worker's fence wait) sees GL's work only once it is flushed
@@ -1191,8 +1572,9 @@ bool present( void * hwnd, int w, int h, bool vsync, GlProc gp, std::string & wh
 		j.h = h;
 		j.sync = sync;
 		j.sem = s.glDoneGl;
-		j.tex = s.tex;
+		j.tex = sigTex;
 		j.cpuWait = s.glWaited;
+		j.vs = vs;
 		hand( j );
 		if ( capture ) {
 			drain();
@@ -1207,7 +1589,7 @@ bool present( void * hwnd, int w, int h, bool vsync, GlProc gp, std::string & wh
 		drain();
 		bool rebuild = false;
 		Split one;
-		const bool ok = vkPart( k, w, h, why, rebuild, one );
+		const bool ok = vkPart( k, w, h, vs, why, rebuild, one );
 		if ( rebuild )
 			c.rebuild = true;
 		if ( !ok )
@@ -1224,6 +1606,7 @@ bool present( void * hwnd, int w, int h, bool vsync, GlProc gp, std::string & wh
 	st.sigWhy = c.sigCtx ? std::string() : c.sigWhy;
 	st.dsa = g.blitNamedFramebuffer != nullptr;
 	st.busy = busy;
+	st.view = vs >= 0;
 	st.mode = modeName( c.mode );
 	st.images = int( c.images.size() );
 	st.w = int( c.extent.width );
@@ -1236,17 +1619,33 @@ Split takeSplit()
 	return takeWorkerSplit();
 }
 
+namespace
+{
+const char *& routeWord()
+{
+	static const char * r = "gl swap";
+	return r;
+}
+}  // namespace
+
+const char * routeName()
+{
+	return routeWord();
+}
+
 }  // namespace WwVkPresent
 
 namespace
 {
 
 // the Vulkan half of slot k's frame: the fence of its last use, the next swapchain image, the flipped blit, present
-bool vkPart( int k, int w, int h, std::string & why, bool & rebuild, WwVkPresent::Split & sp )
+bool vkPart( int k, int w, int h, int vs, std::string & why, bool & rebuild, WwVkPresent::Split & sp )
 {
 	Vk & v = vk();
 	Chain & c = ch();
 	Slot & s = c.slot[k];
+	const ViewSlot * vw = vs >= 0 ? &view().slot[vs] : nullptr;
+	const int vSamples = view().samples;
 	const double tw = nowMs();
 	if ( s.pending ) {
 		v.vkWaitForFences( v.dev, 1, &s.fence, VK_TRUE, 1000000000ull );
@@ -1284,6 +1683,25 @@ bool vkPart( int k, int w, int h, std::string & why, bool & rebuild, WwVkPresent
 	b[0].srcQueueFamilyIndex = b[0].dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
 	b[0].image = s.img;
 	b[0].subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
+	VkImage src = s.img;
+	if ( vw && vSamples > 1 ) {
+		/* round 10: GL's multisample view resolved here into the slot (GL's blit before): the view's GL writes before
+		 * the transfer read, the slot's last read (the blit of kSlots frames back) before the resolve's write */
+		VkImageMemoryBarrier r2[2] = { b[0], b[0] };
+		r2[0].image = vw->color;
+		r2[1].srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+		r2[1].dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+		v.vkCmdPipelineBarrier( cmd, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 2, r2 );
+		VkImageResolve rs {};
+		rs.srcSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
+		rs.dstSubresource = rs.srcSubresource;
+		rs.extent = { std::uint32_t( w ), std::uint32_t( h ), 1 };
+		v.vkCmdResolveImage( cmd, vw->color, VK_IMAGE_LAYOUT_GENERAL, s.img, VK_IMAGE_LAYOUT_GENERAL, 1, &rs );
+		b[0].srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+	} else if ( vw ) {
+		src = vw->color;  // a single-sample view: the flipped blit reads it as it is
+		b[0].image = src;
+	}
 	b[1] = b[0];
 	b[1].srcAccessMask = 0;
 	b[1].dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
@@ -1299,7 +1717,7 @@ bool vkPart( int k, int w, int h, std::string & why, bool & rebuild, WwVkPresent
 	r.srcOffsets[1] = { bw, h - bh, 1 };
 	r.dstOffsets[0] = { 0, 0, 0 };
 	r.dstOffsets[1] = { bw, bh, 1 };
-	v.vkCmdBlitImage( cmd, s.img, VK_IMAGE_LAYOUT_GENERAL, c.images[idx], VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &r, VK_FILTER_NEAREST );
+	v.vkCmdBlitImage( cmd, src, VK_IMAGE_LAYOUT_GENERAL, c.images[idx], VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &r, VK_FILTER_NEAREST );
 	VkBuffer buf = VK_NULL_HANDLE;
 	VkDeviceMemory bufMem = VK_NULL_HANDLE;
 	const VkDeviceSize bytes = VkDeviceSize( c.extent.width ) * c.extent.height * 4;
@@ -1400,8 +1818,12 @@ bool vkPart( int k, int w, int h, std::string & why, bool & rebuild, WwVkPresent
 
 #include <QDebug>
 #include <QOpenGLContext>
+#include <QOpenGLFunctions>
+#include <QOpenGLPaintDevice>
 #include <QOpenGLWindow>
 #include <QSettings>
+
+#include <memory>
 
 namespace WwVkPresent
 {
@@ -1438,7 +1860,49 @@ bool wanted( QString & off )
 		off = QStringLiteral( "the Vulkan Present row is off" );
 	return row;
 }
+
+/* round 10: the view on Vulkan. Opt-in WW_VKVIEW=1 (live): no flight has measured it a win yet, so it ships off; the
+ * red WW_VKVIEW_RED=1 forces the old route (GL draws its back buffer and blits it into the slot) over the key */
+bool viewWanted( QString & off )
+{
+	if ( wwEnvInt( "WW_VKVIEW_RED" ) == 1 ) {
+		off = QStringLiteral( "red WW_VKVIEW_RED=1" );
+		return false;
+	}
+	if ( wwEnvInt( "WW_VKVIEW" ) != 1 ) {
+		off = QStringLiteral( "WW_VKVIEW unset: off until a flight measures it a win" );
+		return false;
+	}
+	return true;
+}
+
+// QPainter through the view's FBO (QOpenGLWindow's own paint device binds the back buffer)
+class ViewPaintDevice : public QOpenGLPaintDevice
+{
+public:
+	explicit ViewPaintDevice( const QSize & s ) : QOpenGLPaintDevice( s ) {}
+	void ensureActiveTarget() override
+	{
+		if ( QOpenGLContext * q = QOpenGLContext::currentContext() )
+			q->functions()->glBindFramebuffer( GL_FRAMEBUFFER, viewFbo() );
+	}
+};
 }  // namespace
+
+QPaintDevice * painterTarget( QOpenGLWindow * w )
+{
+	static std::unique_ptr<ViewPaintDevice> dev;
+	static QOpenGLContext * devCtx = nullptr;
+	if ( !viewFbo() )
+		return w;
+	const QSize size( view().w, view().h );
+	if ( !dev || dev->size() != size || devCtx != QOpenGLContext::currentContext() ) {
+		dev = std::make_unique<ViewPaintDevice>( size );
+		devCtx = QOpenGLContext::currentContext();
+	}
+	dev->setDevicePixelRatio( w->devicePixelRatio() );
+	return dev.get();
+}
 
 bool frame( QOpenGLWindow * w, const std::function<void()> & paint )
 {
@@ -1454,14 +1918,27 @@ bool frame( QOpenGLWindow * w, const std::function<void()> & paint )
 			qInfo().noquote() << "vk present:" << line;
 		}
 	};
+	static QString routeSaid, viewWhy;
+	static double sizeAt = 0.0;
+	static bool viewLast = false, viewMade = false;
+	static int winView = 0;
+	auto sayRoute = [&]( const QString & line ) {
+		if ( line != routeSaid ) {
+			routeSaid = line;
+			qInfo().noquote() << "vk post route:" << line;
+		}
+	};
 	QString off;
 	const bool on = wanted( off );
 	if ( !on ) {
-		if ( ch().child ) {
+		if ( ch().child || viewMade ) {
 			w->makeCurrent();
 			shutdown();
+			viewMade = viewLast = false;
 		}
+		routeWord() = "gl swap";
 		say( QStringLiteral( "off (%1): GL's SwapBuffers" ).arg( off ) );
+		sayRoute( QStringLiteral( "gl swap (the Vulkan present is off): GL draws its back buffer" ) );
 		return false;
 	}
 	const qreal dpr = w->devicePixelRatio();
@@ -1469,16 +1946,46 @@ bool frame( QOpenGLWindow * w, const std::function<void()> & paint )
 	// a new size (and the first frame): QOpenGLWindow's own paint sizes the paint device QPainter draws through
 	if ( ds != baseSize || !w->isExposed() || !w->context() ) {
 		baseSize = ds;
+		sizeAt = nowMs();
+		viewLast = false;  // QOpenGLWindow's paint binds its back buffer itself
 		return false;
 	}
 	w->makeCurrent();
+	/* round 10: the view on Vulkan (WW_VKVIEW=1) once the size has held 500 ms (a view ring is a full sync to rebuild,
+	 * skill ww-gl-vk-interop build 83); otherwise, and on any refusal, the old route: the back buffer and GL's blit */
+	QString viewOff;
+	bool viewOn = viewWanted( viewOff );
+	if ( viewOn && nowMs() - sizeAt < 500.0 ) {
+		viewOn = false;
+		viewOff = QStringLiteral( "the size is still moving" );
+	}
+	if ( !viewOn && viewMade && viewOff != QStringLiteral( "the size is still moving" ) ) {
+		viewDrop();
+		viewMade = false;
+	}
+	if ( viewOn ) {
+		std::string vwhy;
+		const int samples = std::max( w->context()->format().samples(), 1 );
+		viewOn = viewBegin( ds.width(), ds.height(), samples, qtProc, vwhy );
+		if ( viewOn )
+			viewMade = true;
+		else
+			viewOff = QStringLiteral( "refused: %1" ).arg( QString::fromStdString( vwhy ) );
+	}
+	if ( !viewOn && viewLast )
+		w->context()->functions()->glBindFramebuffer( GL_FRAMEBUFFER, 0 );
+	viewLast = viewOn;
+	viewWhy = viewOff;
 	paint();
 	std::string why;
 	if ( !present( reinterpret_cast<void *>( w->winId() ), ds.width(), ds.height(), wwVsyncOn(), qtProc, why ) ) {
 		say( QStringLiteral( "failed (%1): GL's SwapBuffers this frame" ).arg( QString::fromStdString( why ) ) );
+		viewRescue();
 		w->context()->swapBuffers( w );
 		return true;
 	}
+	routeWord() = last().view ? "vk view" : "vk present";
+	winView += last().view ? 1 : 0;
 	const Stat & st = last();
 	if ( st.builds != builtSaid ) {
 		builtSaid = st.builds;
@@ -1504,8 +2011,9 @@ bool frame( QOpenGLWindow * w, const std::function<void()> & paint )
 				.arg( QLatin1String( st.mode ) ).arg( st.images ).arg( st.w ).arg( st.h ).arg( winN ).arg( kSlots ).arg( winBusy );
 			// the drawing thread's share by part, and the worker's (its ms are off the drawing thread)
 			const double n = std::max( sp.n, 1 );
-			const QString how = QStringLiteral( "%1 blit, signal route %2" )
-				.arg( st.dsa ? QLatin1String( "named" ) : QLatin1String( "bound" ) )
+			const QString how = QStringLiteral( "%1, signal route %2" )
+				.arg( st.view ? QStringLiteral( "view on Vulkan: no GL blit, the worker resolves (record)" )
+					: st.dsa ? QStringLiteral( "named blit" ) : QStringLiteral( "bound blit" ) )
 				.arg( st.sigWait ? QStringLiteral( "2 worker CPU wait, no GL signal" ) : st.sigWorker
 					? QStringLiteral( "1 worker GL signal" ) : st.sigWhy.empty() ? QStringLiteral( "0 drawing thread GL signal" )
 					: QStringLiteral( "0 drawing thread GL signal (%1)" ).arg( QString::fromStdString( st.sigWhy ) ) );
@@ -1520,7 +2028,25 @@ bool frame( QOpenGLWindow * w, const std::function<void()> & paint )
 				.arg( sp.acquireMs / n, 0, 'f', 3 ).arg( sp.recordMs / n, 0, 'f', 3 ).arg( sp.submitMs / n, 0, 'f', 3 )
 				.arg( sp.presentMs / n, 0, 'f', 3 ).arg( sp.n ).arg( sp.failed )
 				.arg( sp.failed ? QStringLiteral( " (last: %1)" ).arg( QString::fromStdString( sp.why ) ) : QString() );
+			/* round 10: which route carried the frame, and what still runs on GL before it. The view on Vulkan is the
+			 * step every later move stands on: the tone map's backdrop and depth are its images on the present device */
+			const ViewStat vs = takeViewStat();
+			if ( winView > 0 ) {
+				routeSaid.clear();  // one a window while it runs
+				sayRoute( QStringLiteral( "vk view, %1 of %2 frames: GL draws the view into the present device's images (%3x%4 "
+					"MS%5 RGBA8 + D24S8, %6 views, %7 MB, made in %8 ms), the worker resolves on Vulkan (no GL blit: drawing "
+					"thread present %9 ms); %10 views still read when GL wanted them (wait %11 ms); bakert hop none (the view is "
+					"made on the present device); on GL into the view: tone map (backdrop + LUT GL's), clouds in front (their "
+					"targets not shared: GL clouds in front), TAA (history + vectors GL's), lens flare, overlays + QPainter (the "
+					"overlay target is the view)" )
+					.arg( winView ).arg( winN ).arg( vs.w ).arg( vs.h ).arg( vs.samples ).arg( vs.views ).arg( vs.mb, 0, 'f', 1 )
+					.arg( vs.makeMs, 0, 'f', 1 ).arg( winSum / winN, 0, 'f', 3 ).arg( vs.busy ).arg( vs.waitMs, 0, 'f', 3 ) );
+			} else {
+				sayRoute( QStringLiteral( "vk present (old route: GL draws its back buffer, GL blits it into the slot; view on "
+					"Vulkan off: %1)" ).arg( viewWhy ) );
+			}
 		}
+		winView = 0;
 		winAt = now;
 		winSum = winMax = winWait = winState = winBlit = winGl = winFlush = 0.0;
 		winBusy = 0;

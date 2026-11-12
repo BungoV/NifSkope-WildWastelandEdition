@@ -32,6 +32,7 @@ struct Stat
 	bool dsa = false;          //!< the resolve went through glBlitNamedFramebuffer
 	bool busy = false;         //!< the slot's last Vulkan read was still running: the drawing thread waited its fence
 	bool worker = false;       //!< the Vulkan half went to the worker (false: ran here, the harness's capture)
+	bool view = false;         //!< round 10: GL drew into the view on Vulkan; no GL blit, the worker resolved it
 	const char * mode = "none";
 	int images = 0;
 	int w = 0, h = 0;
@@ -57,13 +58,41 @@ Split takeSplit();
 //! the child window, the swapchain and the ring go (GL current: its textures and semaphores go too); the device stays
 void shutdown();
 
+/* Round 10 (VKFRAME1, the view on Vulkan, WW_VKVIEW=1; red WW_VKVIEW_RED=1 = the old route): before the paint, GL binds
+ * (GL_FRAMEBUFFER) a view the present device made, w x h at the back buffer's samples (RGBA8 + D24S8), and draws the
+ * frame into it; present() then hands it to the worker, which resolves it on Vulkan into the ring slot (no GL blit).
+ * false: why; nothing bound (the caller draws into its back buffer). A ring of 3 views; GL waits a view's last present. */
+bool viewBegin( int w, int h, int samples, GlProc gl, std::string & why );
+//! the FBO the view is drawn into this frame (0: the back buffer)
+unsigned viewFbo();
+//! a view drawn but not presented (present() failed early): GL resolves it into the back buffer for GL's swap
+bool viewRescue();
+struct ViewStat
+{
+	bool on = false;
+	int w = 0, h = 0, samples = 0, views = 0;  // not `slots`: a Qt macro
+	double mb = 0.0, makeMs = 0.0;  //!< the ring's device memory, the last make's ms
+	int busy = 0;                   //!< since the last take: views still read by Vulkan when GL wanted them
+	double waitMs = 0.0;            //!< since the last take: the drawing thread's wait for them, summed
+	std::string why;                //!< the last make that failed
+};
+ViewStat takeViewStat();
+//! the views go (the route went off)
+void viewDrop();
+//! the route this process presents through, for the zone lines: "vk view" / "vk present" / "gl swap"
+const char * routeName();
+
 }
 
 #ifndef WW_VKPRESENT_NO_QT
 class QOpenGLWindow;
+class QPaintDevice;
 #include <functional>
 namespace WwVkPresent
 {
+/* round 10: what the view's QPainter draws through: the window (its back buffer) or, while the view is on Vulkan, a
+ * paint device that binds the view's FBO */
+QPaintDevice * painterTarget( QOpenGLWindow * w );
 /* GLView::event's UpdateRequest: false = not taken (the red, the row off, a new size: QOpenGLWindow's own paint runs,
  * which also sizes its paint device for QPainter). true = painted (paint()) and on the screen, through the swapchain
  * or, when the present failed, GL's swap; the caller emits frameSwapped. */
