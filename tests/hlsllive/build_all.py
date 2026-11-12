@@ -21,6 +21,27 @@ import remap, build_spv, stamps
 STG = {'vert': 'vs', 'frag': 'ps', 'geom': 'gs', 'tesc': 'hs', 'tese': 'ds'}
 
 
+def ifmap_of(vs, ps):
+    """R9: a pixel shader whose inputs include wwPointCoord was converted for a points geometry twin; in a vertex + pixel program its
+    inputs are matched to the vertex shader's outputs by member name ({} when it has no wwPointCoord)"""
+    import re
+    pt = open(ps, encoding='utf-8', errors='replace').read()
+    if 'wwPointCoord' not in pt:
+        return {}
+    def members(txt, struct):
+        m = re.search(r'struct %s\s*\{(.*?)\};' % struct, txt, re.S)
+        return dict((n, int(i)) for n, i in re.findall(r'\b\w+\s+(\w+)\s*:\s*TEXCOORD(\d+)', m.group(1))) if m else {}
+    pin = members(pt, 'SPIRV_Cross_Input')
+    vout = members(open(vs, encoding='utf-8', errors='replace').read(), 'SPIRV_Cross_Output')
+    out = {}
+    for n, i in pin.items():
+        if n == 'wwPointCoord':
+            out[i] = -1
+        elif n in vout:
+            out[i] = vout[n]
+    return out
+
+
 def main():
     t0 = time.time()
     a = sys.argv[1:]
@@ -78,7 +99,14 @@ def main():
     tkey = stamps.tools_key(['spvgl.py', 'build_spv.py'])
     paths = sorted({path for _n, st, _nm in progs for _e, path, _s in st})
     spv_of = {p: os.path.basename(p).rsplit('.', 1)[0] + '.spv' for p in paths}
-    key_of = {p: stamps.stage_key(p, defines, tkey) for p in paths}
+    ifmap = {}   # R9: pixel shader path -> {its TEXCOORD input index: the vertex shader's output index, or -1 = gl_PointCoord}
+    for _n, st, _nm in progs:
+        es = dict((e, path) for e, path, _s in st)
+        if set(es) == {'vert', 'frag'} and es['frag'] not in ifmap:
+            m = ifmap_of(es['vert'], es['frag'])
+            if m:
+                ifmap[es['frag']] = m
+    key_of = {p: stamps.sha(stamps.stage_key(p, defines, tkey), sorted(ifmap.get(p, {}).items())) for p in paths}
     stale = [p for p in paths if not (have_locs and os.path.exists(os.path.join(od, spv_of[p])) and stamps.read_key(os.path.join(od, spv_of[p])) == key_of[p])]
     bad = {}
 
@@ -100,7 +128,7 @@ def main():
             n, rep = None, err
             if ok:
                 try:
-                    n, rep = build_spv.build(p, spv, defines, locs, precompiled=True)
+                    n, rep = build_spv.build(p, spv, defines, locs, precompiled=True, ps_remap=ifmap.get(p))
                 except Exception as ex:
                     n, rep = None, 'patch: %s' % ex
                     if os.path.exists(spv + '.raw'):

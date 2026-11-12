@@ -11,7 +11,7 @@
 # WW_WARM_COLDLINK=<n> (default 8) links the uncached programs on n threads (WW_COLDLINK). The last line of release/ww_warm.log
 # is `shader programs: S of T linked ...` summed over the starts, the line ww_build.sh tests.
 # lane HLSLBULK1 R9 (build 96 warm: 1167 s): every start prints its seconds; a start whose env text repeats an earlier one is
-# skipped; WW_WARM_PAR=<n> starts run side by side (default 2; 1 when free RAM is under 8 GB per start), each with its own
+# skipped; WW_WARM_PAR=<n> starts run side by side (default 1 until two starts are proven safe on the program cache; 1 when free RAM is under 8 GB per start), each with its own
 # log and settings scope, merged in order.
 cd "$1" || exit 2
 LOG=release/ww_warm.log
@@ -86,7 +86,7 @@ else
 	done
 fi
 
-PAR="${WW_WARM_PAR:-2}"
+PAR="${WW_WARM_PAR:-1}"
 if [ "$PAR" -gt 1 ] && [ "$(free_gb)" -lt $((8 * PAR)) ]; then
 	PAR=1
 fi
