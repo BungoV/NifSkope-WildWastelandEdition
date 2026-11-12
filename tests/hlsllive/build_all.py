@@ -172,6 +172,14 @@ def main():
             lv[built[p]] = stamps.opt_of(p)
     open(os.path.join(od, 'levels.txt'), 'w', newline='\n').write('\n'.join('%s\t%s' % kv for kv in sorted(lv.items())) + '\n')
     print('A1 levels: ' + ', '.join('%s %d' % (o, list(lv.values()).count(o)) for o in sorted(set(lv.values()))), flush=True)
+    tab = stamps.load_table(os.path.join(tree, 'res', 'shaders', 'hlsl', 'optlevels.txt'), 2)   # R9: a table the build ignored is a failure
+    if tab and not os.environ.get('DXC_OPT') and not only:
+        names = set(os.path.basename(p) for p in paths)
+        miss = sorted(k for k in tab if k not in names or stamps.opt_of(os.path.join(tree, 'res', 'shaders', 'hlsl', k)) != tab[k][0])
+        print('A1 optlevels: %d entries, %d applied' % (len(tab), len(tab) - len(miss)), flush=True)
+        if miss:
+            print('A1 FAIL optlevels.txt not applied: ' + ' '.join(miss), flush=True)
+            sys.exit(3)
     open(locf, 'w', newline='\n').write('\n'.join('%s\t%d\t%d' % (k, v[0], v[1]) for k, v in sorted(locs.items(), key=lambda kv: kv[1][0])) + '\n')
     print('A1 built %d stage shaders (%d failed), %d rebuilt, %d kept, linked %d of %d programs (%d link-tested now), %d locations, %.1f s' % (
         len(built) - len(bad), len(bad), len(stale), len(paths) - len(stale), ok, len(progs), linked, sum(v[1] for v in locs.values()), time.time() - t0))
