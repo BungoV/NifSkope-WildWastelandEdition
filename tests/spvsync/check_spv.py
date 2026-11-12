@@ -14,9 +14,9 @@ SPECS = [
 	('src/features/gi/bakert', 'rq', 'vulkan1.2', 'bakert_rq_spv'),
 	('src/features/gi/bakert', 'bvh', 'vulkan1.1', 'bakert_bvh_spv'),
 	('src/features/gi/bakert', 'rqx', 'vulkan1.2', 'bakert_rqx_spv'),
-] + [('src/features/gi/rtddgi', k, 'vulkan1.2', 'rtddgi_%s_spv' % k) for k in ('trace', 'blend', 'reloc', 'restir', 'airrays')]
+] + [('src/features/gi/rtddgi', k, 'vulkan1.2', 'rtddgi_%s_spv' % k) for k in ('trace', 'blend', 'restir', 'airrays')]
 # lane VKCOMPUTE1: kernels converted to HLSL, built by DXC from res/shaders/hlsl/rtddgi/<k>.hlsl + tools/spv_header.py
-HLSL_SPECS = [('src/features/gi/rtddgi', k, 'vulkan1.2', 'rtddgi_%s_spv' % k) for k in ('border',)]
+HLSL_SPECS = [('src/features/gi/rtddgi', k, 'vulkan1.2', 'rtddgi_%s_spv' % k) for k in ('border', 'reloc')]
 DEFAULT_G = 'E:/Tools/RenderDoc/RenderDoc_1.45_64/plugins/spirv/glslangValidator.exe'
 DEFAULT_DXC = 'E:/Tools/dxc/bin/x64/dxc.exe'
 
