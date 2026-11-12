@@ -3551,7 +3551,12 @@ struct WwWallPart
 	double & part;
 	const double t0;
 	explicit WwWallPart( double & p ) : part( p ), t0( wwPaceNowS() ) {}
-	~WwWallPart() { part += wwPaceNowS() - t0; }
+	~WwWallPart()
+	{
+		const double d = wwPaceNowS() - t0;
+		part += d;
+		PassTime::gapNamed( d );	// lane VKFRAME1 build 88: named, so out of the gaps' other-in-frame
+	}
 };
 
 /* lane EMPTY240 R10-5: build 84's spikes after the goto sat in gaps outside the GPU zones (frame 296: 647 ms CPU after
@@ -3819,7 +3824,8 @@ static void wwWallStart( GLView * v )
 				line += QByteArray( p ? " + " : " " ) + WwFrameWall::partName( p ) + " "
 					+ QByteArray::number( w.win.part[p] * ms, 'f', 2 );
 			line += QByteArray( " | the pass timers hold " )
-				+ QByteArray::number( 100.0 * w.win.part[WwFrameWall::Passes] / w.win.wall, 'f', 0 ) + " %";
+				+ QByteArray::number( 100.0 * w.win.part[WwFrameWall::Passes] / w.win.wall, 'f', 0 ) + " %"
+				+ PassTime::otherInFrameTake();	// lane VKFRAME1 build 88
 			std::fprintf( stderr, "%s\n", line.constData() );
 		}
 		w.win = WwFrameWall::Window();

@@ -23,8 +23,11 @@ struct Stat
 	double ms = 0.0;           //!< the last present() call on the drawing thread, CPU (the Vulkan half: the worker, Split)
 	double waitMs = 0.0;       //!< of it, the wait for the ring slot's last use (the worker's submit, then its fence)
 	double stateMs = 0.0;      //!< of it, the GL state asked (scissor; the bindings when no named blit)
-	double glMs = 0.0;         //!< of it, GL's semaphore wait, the resolve blit and the signal
+	double blitMs = 0.0;       //!< of it, the resolve blit
+	double glMs = 0.0;         //!< of it, the fence for the worker's GL signal (sigWorker), else GL's signal to Vulkan
 	double flushMs = 0.0;      //!< of it, glFlush
+	bool sigWorker = false;    //!< build 88: GL's signal to Vulkan went out from the worker's own GL context
+	std::string sigWhy;        //!< why not (the worker's context was not made)
 	bool dsa = false;          //!< the resolve went through glBlitNamedFramebuffer
 	bool busy = false;         //!< the slot's last Vulkan read was still running: the drawing thread waited its fence
 	bool worker = false;       //!< the Vulkan half went to the worker (false: ran here, the harness's capture)
@@ -45,6 +48,7 @@ void captureNext( std::vector<std::uint8_t> * out );
 struct Split
 {
 	int n = 0, failed = 0;
+	double signalMs = 0.0;  //!< build 88: the worker's GL fence wait (a GPU wait, queued) and GL signal
 	double fenceMs = 0.0, acquireMs = 0.0, recordMs = 0.0, submitMs = 0.0, presentMs = 0.0, totalMs = 0.0, maxMs = 0.0;
 	std::string why;
 };
