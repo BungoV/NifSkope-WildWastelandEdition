@@ -117,10 +117,12 @@ def compile_(kind, src):
 
 
 def edits(src, pairs, what):
-    """a probe's literal replaces (each anchor exactly once)"""
-    for old, new in pairs:
-        if src.count(old) != 1:
-            fail('%s probe anchor found %d times: %s' % (what, src.count(old), old[:60]))
+    """a probe's literal replaces (each anchor exactly once; a third element n = exactly n times, all replaced: an
+    #include expanded twice, e.g. cloud_march_step.glsl in the plain and the fly-through loop)"""
+    for pair in pairs:
+        old, new, n = pair if len(pair) == 3 else (pair[0], pair[1], 1)
+        if src.count(old) != n:
+            fail('%s probe anchor found %d times (want %d): %s' % (what, src.count(old), n, old[:60]))
         src = src.replace(old, new)
     return src
 
@@ -255,14 +257,22 @@ def vk_blocks(refl, vals, jobdir, tag):
     for ub in refl.get('ubos', []):
         t = refl['types'][ub['type']]
         raw = bytearray(ub['block_size'])
-        for m in t['members']:
-            if m['name'] not in vals:
-                continue
-            if m['type'] not in XT:
-                fail('block member type %s (%s)' % (m['type'], m['name']))
-            kind, comp = XT[m['type']]
-            count = m['array'][0] if m.get('array') else 1
-            put_member(raw, vals[m['name']], kind, comp, count, m['offset'], m.get('array_stride', 0), m.get('matrix_stride', 16))
+
+        def members(t, prefix, base):  # a struct member's own members, named as GL names them (cvBands.baseKm)
+            for m in t['members']:
+                name = prefix + m['name']
+                if m['type'] in refl['types'] and not m.get('array'):
+                    members(refl['types'][m['type']], name + '.', base + m['offset'])
+                    continue
+                if name not in vals:
+                    continue
+                if m['type'] not in XT:
+                    fail('block member type %s (%s)' % (m['type'], name))
+                kind, comp = XT[m['type']]
+                count = m['array'][0] if m.get('array') else 1
+                put_member(raw, vals[name], kind, comp, count, base + m['offset'], m.get('array_stride', 0),
+                           m.get('matrix_stride', 16))
+        members(t, '', 0)
         f = os.path.join(jobdir, '%s_ubo%d.bin' % (tag, ub['binding']))
         with open(f, 'wb') as fh:
             fh.write(bytes(raw))
@@ -410,7 +420,7 @@ def run_job(job, jobdir):
     vs = os.path.join(OUT, 'frag_vs.spv')
     refl = reflect(spv)
     vals = job['uniforms']
-    texs = job['textures']
+    texs = job['textures'](OUT) if callable(job['textures']) else job['textures']  # callable: an earlier job's targets
     outs = outputs(hsrc)
     nrt = max(k for _, k in outs) + 1 if outs else 1
 

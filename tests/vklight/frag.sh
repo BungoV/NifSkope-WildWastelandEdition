@@ -15,4 +15,8 @@ export PATH="/c/msys64/ucrt64/bin:$PATH"
 mkdir -p "$OUT"
 W() { cygpath -m "$1" 2>/dev/null || echo "$1"; }
 g++ -O1 -std=c++17 "$ROOT/tests/vklight/fragmatch.cpp" -o "$OUT/fragmatch.exe" || { echo "FRAG GATE FAILED (g++)"; exit 1; }
+# the clouds' inputs from the tree's own producers (noise + calibration dump, the real atmo LUT programs), made once
+export FRAG_CLOUDIN="$(W "$OUT/cloudin")"
+[ -f "$OUT/cloudin/cloud_inputs.json" ] || "$PY" -I "$ROOT/tests/vklight/cloud_inputs.py" "$FRAG_CLOUDIN" < /dev/null | tail -1 \
+	|| { echo "FRAG GATE FAILED (cloud inputs)"; exit 1; }
 "$PY" -I "$ROOT/tests/vklight/frag_gate.py" "$(W "$OUT")" "$(W "$OUT/fragmatch.exe")" "$@" < /dev/null 2>&1
