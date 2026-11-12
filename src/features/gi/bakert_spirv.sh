@@ -19,5 +19,5 @@ hk() {
 cd "$ROOT/src/features/gi/bakert"
 hk rq vulkan1.2
 hk bvh vulkan1.1
-"$G" --target-env vulkan1.2 -V --vn bakert_rqx_spv -o rqx.spv.h rqx.comp   # lane RTGI1: whole rays, sure/unsure
+hk rqx vulkan1.2   # lane RTGI1: whole rays, sure/unsure
 ls -la rq.spv.h bvh.spv.h rqx.spv.h
