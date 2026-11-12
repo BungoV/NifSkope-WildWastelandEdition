@@ -11,10 +11,7 @@ float BakeRT_Mf( uint i ) { return asfloat( BakeRTMaskTris[i] ); }
 // the hit at barycentrics (b1, b2) of soup triangle `tri` lands on a hole. MIRROR probemask.h AlphaMask::hole (float)
 bool BakeRT_Hole( int tri, float b1, float b2 )
 {
-	bool wwh0 = BAKERT_PC.useMask == 0u;
-	bool wwh1 = tri < 0;
-	bool wwh2 = uint( tri ) >= BAKERT_PC.nTri;
-	if (wwh0 || wwh1 || wwh2)
+	if ( BAKERT_PC.useMask == 0u || tri < 0 || uint( tri ) >= BAKERT_PC.nTri )
 		return false;
 	const int m = BakeRTTriOf[tri];
 	if ( m < 0 )

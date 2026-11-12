@@ -37,10 +37,7 @@ float2 DDGI_SampleDist( uint p, float3 d )
 // the alpha-test hole at barycentrics (b1, b2) of soup triangle tri (src/features/gi/bakert/common.glsl's hole)
 bool DDGI_Hole( int tri, float b1, float b2 )
 {
-	bool wwh0 = DDGI_P.flags.z == 0;
-	bool wwh1 = tri < 0;
-	bool wwh2 = tri >= DDGI_P.counts.z;
-	if (wwh0 || wwh1 || wwh2)
+	if ( DDGI_P.flags.z == 0 || tri < 0 || tri >= DDGI_P.counts.z )
 		return false;
 	const int m = DDGITriOf[tri];
 	if ( m < 0 )

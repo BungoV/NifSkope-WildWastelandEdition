@@ -27,9 +27,7 @@ RestirPixel Restir_PixelAt( bool prev, int x, int y )
 	o.Nv = o.N;
 	const float4 g = prev ? RestirPrevGbuf[y * RESTIR_R.size.x + x] : RestirGbuf[y * RESTIR_R.size.x + x];
 	o.D = g.w;
-	bool wwh0 = !( o.D > 0.0 );
-	bool wwh1 = o.D >= 1e5;
-	if (wwh0 || wwh1)
+	if ( !( o.D > 0.0 ) || o.D >= 1e5 )
 		return o;
 	o.Nv = g.xyz;
 	const float4 pj = prev ? RESTIR_R.pproj : RESTIR_R.proj;
@@ -48,9 +46,7 @@ RestirPixel Restir_PixelAt( bool prev, int x, int y )
 // MIRROR restirmath.h targetOf
 float Restir_TargetOf( int y, RestirPixel p )
 {
-	bool wwh2 = y < 0;
-	bool wwh3 = y >= DDGI_P.counts.y;
-	if (wwh2 || wwh3 || !p.ok)
+	if ( y < 0 || y >= DDGI_P.counts.y || !p.ok )
 		return 0.0;
 	const uint b = uint( y ) * 8u;
 	return Restir_Target( DDGILights[b], DDGILights[b + 1u], DDGILights[b + 2u], DDGILights[b + 3u], DDGILights[b + 4u], DDGILights[b + 5u],
@@ -64,8 +60,7 @@ void Restir_Candidates( int x, int y, uint id )
 	RestirCur[id] = Restir_Make( -1, 0.0, 0.0, 0.0 );
 	const RestirPixel p = Restir_PixelAt( false, x, y );
 	const int nCand = RESTIR_R.size.z;
-	bool wwh4 = nCand <= 0;
-	if (!p.ok || wwh4)
+	if ( !p.ok || nCand <= 0 )
 		return;
 	const int red = RESTIR_R.opts.w;
 	const uint s0 = Restir_Seed( id, uint( RESTIR_R.size.w ), 0u );
@@ -78,9 +73,7 @@ void Restir_Candidates( int x, int y, uint id )
 	}
 	r = Restir_Finalize( r, Restir_TargetOf( r.y, p ), r.M, red );
 	RestirCur[id] = r;
-	bool wwh5 = ( red & RESTIR_BIT_NOTEMPORAL ) != 0;
-	bool wwh6 = RESTIR_R.knobs.w < 0.5;
-	if (wwh5 || wwh6)
+	if ( ( red & RESTIR_BIT_NOTEMPORAL ) != 0 || RESTIR_R.knobs.w < 0.5 )
 		return;
 	// world -> the previous view: the transpose of its rows' rotation
 	const float3 t = p.P - float3( RESTIR_R.prows[0].w, RESTIR_R.prows[1].w, RESTIR_R.prows[2].w );
@@ -92,11 +85,7 @@ void Restir_Candidates( int x, int y, uint id )
 	const float Dp = -pv.z;
 	const float nx = ( RESTIR_R.pproj.x * pv.x - RESTIR_R.pproj.z * Dp ) / Dp, ny = ( RESTIR_R.pproj.y * pv.y - RESTIR_R.pproj.w * Dp ) / Dp;
 	const int qx = int( floor( ( nx + 1.0 ) * 0.5 * float( RESTIR_R.size.x ) ) ), qy = int( floor( ( ny + 1.0 ) * 0.5 * float( RESTIR_R.size.y ) ) );
-	bool wwh7 = qx < 0;
-	bool wwh8 = qy < 0;
-	bool wwh9 = qx >= RESTIR_R.size.x;
-	bool wwh10 = qy >= RESTIR_R.size.y;
-	if (wwh7 || wwh8 || wwh9 || wwh10)
+	if ( qx < 0 || qy < 0 || qx >= RESTIR_R.size.x || qy >= RESTIR_R.size.y )
 		return;
 	const RestirPixel q = Restir_PixelAt( true, qx, qy );
 	if ( !q.ok || !Restir_Similar( Dp, p.N, q.D, q.N ) )
@@ -135,12 +124,7 @@ void Restir_Spatial( int x, int y, uint id )
 		const float a = 6.283185307179586 * Restir_Rand( s2, uint( 1 + 3 * k ) );
 		const float rr = RESTIR_R.knobs.x * sqrt( Restir_Rand( s2, uint( 2 + 3 * k ) ) );
 		const int qx = x + int( floor( rr * cos( a ) + 0.5 ) ), qy = y + int( floor( rr * sin( a ) + 0.5 ) );
-		bool wwh11 = ( qx == x && qy == y );
-		bool wwh12 = qx < 0;
-		bool wwh13 = qy < 0;
-		bool wwh14 = qx >= RESTIR_R.size.x;
-		bool wwh15 = qy >= RESTIR_R.size.y;
-		if (wwh11 || wwh12 || wwh13 || wwh14 || wwh15)
+		if ( ( qx == x && qy == y ) || qx < 0 || qy < 0 || qx >= RESTIR_R.size.x || qy >= RESTIR_R.size.y )
 			continue;
 		const RestirPixel q = Restir_PixelAt( false, qx, qy );
 		if ( !q.ok || !Restir_Similar( p.D, p.Nv, q.D, q.Nv ) )
@@ -158,9 +142,7 @@ void Restir_Spatial( int x, int y, uint id )
 	}
 	s = Restir_Finalize( s, Restir_TargetOf( s.y, p ), Z, red );
 	RestirHist[id] = s;
-	bool wwh16 = s.y < 0;
-	bool wwh17 = !( s.W > 0.0 );
-	if (wwh16 || wwh17)
+	if ( s.y < 0 || !( s.W > 0.0 ) )
 		return;
 	const uint b = uint( s.y ) * 8u;
 	const uint s3 = Restir_Seed( id, uint( RESTIR_R.size.w ), 3u );
@@ -190,11 +172,7 @@ void Restir_RatioPass( int x, int y, uint id )
 	for ( int dy = -f; dy <= f; dy++ )
 		for ( int dx = -f; dx <= f; dx++ ) {
 			const int qx = x + dx, qy = y + dy;
-			bool wwh18 = qx < 0;
-			bool wwh19 = qy < 0;
-			bool wwh20 = qx >= RESTIR_R.size.x;
-			bool wwh21 = qy >= RESTIR_R.size.y;
-			if (wwh18 || wwh19 || wwh20 || wwh21)
+			if ( qx < 0 || qy < 0 || qx >= RESTIR_R.size.x || qy >= RESTIR_R.size.y )
 				continue;
 			const float4 h = RestirGbuf[qy * RESTIR_R.size.x + qx];
 			if ( ( dx != 0 || dy != 0 ) && !Restir_Similar( g.w, g.xyz, h.w, h.xyz ) )

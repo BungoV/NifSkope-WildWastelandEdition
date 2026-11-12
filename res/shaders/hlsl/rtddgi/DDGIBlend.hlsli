@@ -16,9 +16,7 @@ void DDGI_BlendCS( uint p, uint t )
 	if ( p >= uint( DDGI_P.dims.w ) )
 		return;
 	const int st = DDGI_ProbeState( p );
-	bool wwh0 = st == DDGI_OFF;
-	bool wwh1 = ( st == DDGI_ASLEEP && DDGI_P.flags.y != 0 );
-	if (wwh0 || wwh1 || DDGI_Skipped( DDGI_P, p ))
+	if ( st == DDGI_OFF || ( st == DDGI_ASLEEP && DDGI_P.flags.y != 0 ) || DDGI_Skipped( DDGI_P, p ) )
 		return;   // the whole group leaves together: no barrier is skipped by part of it
 	const int N = DDGI_P.counts.x;
 	const int nb = N - DDGI_FIXED;

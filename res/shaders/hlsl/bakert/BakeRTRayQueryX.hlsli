@@ -19,10 +19,7 @@ static const double kBakeRTGraze = 1e-4L;
 // AlphaMask::hole in double; why |= 2 when the texel or threshold decision sat on its edge
 bool BakeRT_HoleD( int tri, double b1, double b2, inout uint why )
 {
-	bool wwh0 = BAKERT_PC.useMask == 0u;
-	bool wwh1 = tri < 0;
-	bool wwh2 = uint( tri ) >= BAKERT_PC.nTri;
-	if (wwh0 || wwh1 || wwh2)
+	if ( BAKERT_PC.useMask == 0u || tri < 0 || uint( tri ) >= BAKERT_PC.nTri )
 		return false;
 	const int m = BakeRTTriOf[tri];
 	if ( m < 0 )
@@ -36,13 +33,7 @@ bool BakeRT_HoleD( int tri, double b1, double b2, inout uint why )
 	v -= BakeRT_FloorD( v );
 	const double xu = u * BakeRT_UToD( mp.y ), yv = v * BakeRT_UToD( mp.z );
 	const double fx = xu - BakeRT_FloorD( xu ), fy = yv - BakeRT_FloorD( yv );
-	bool wwh3 = fx < 1e-7L;
-	bool wwh4 = fx > 1.0L - 1e-7L;
-	bool wwh5 = fy < 1e-7L;
-	bool wwh6 = fy > 1.0L - 1e-7L;
-	bool wwh7 = u < 1e-9L;
-	bool wwh8 = v < 1e-9L;
-	if (wwh3 || wwh4 || wwh5 || wwh6 || wwh7 || wwh8)
+	if ( fx < 1e-7L || fx > 1.0L - 1e-7L || fy < 1e-7L || fy > 1.0L - 1e-7L || u < 1e-9L || v < 1e-9L )
 		why |= 2u;
 	const int x = clamp( int( xu ), 0, int( mp.y ) - 1 );
 	const int y = clamp( int( yv ), 0, int( mp.z ) - 1 );
@@ -97,24 +88,13 @@ bool BakeRT_TestD( uint p, double3 o, double3 d, double tmax, double eDist, out 
 		if ( min( c0, min( c1, c2 ) ) > -2.0L && max( c0, max( c1, c2 ) ) <= 1.0L - 8e-6L )
 			eEdge = eDist * 2.5e-4L;
 	}
-	bool wwh9 = abs( w ) * h0 <= eEdge;
-	bool wwh10 = abs( u ) * h1 <= eEdge;
-	bool wwh11 = abs( v ) * h2 <= eEdge;
-	if (wwh9 || wwh10 || wwh11)
+	if ( abs( w ) * h0 <= eEdge || abs( u ) * h1 <= eEdge || abs( v ) * h2 <= eEdge )
 		why |= 1u;
-	bool wwh12 = u < 0.0L;
-	bool wwh13 = u > 1.0L;
-	bool wwh14 = v < 0.0L;
-	bool wwh15 = u + v > 1.0L;
-	if (wwh12 || wwh13 || wwh14 || wwh15)
+	if ( u < 0.0L || u > 1.0L || v < 0.0L || u + v > 1.0L )
 		return false;
-	bool wwh16 = abs( tt - 1e-4L ) <= 1e-9L;
-	bool wwh17 = abs( tt - tmax ) <= kBakeRTNearPad * ( 1.0L + tmax );
-	if (wwh16 || wwh17)
+	if ( abs( tt - 1e-4L ) <= 1e-9L || abs( tt - tmax ) <= kBakeRTNearPad * ( 1.0L + tmax ) )
 		why |= 8u;
-	bool wwh18 = !( tt > 1e-4L );
-	bool wwh19 = tt > tmax;
-	if (wwh18 || wwh19)
+	if ( !( tt > 1e-4L ) || tt > tmax )
 		return false;
 	if ( BakeRT_HoleD( BakeRTRemap[p], u, v, why ) )
 		return false;

@@ -166,6 +166,12 @@ def main():
     open(os.path.join(od, 'programs.txt'), 'w', newline='\n').write('\n'.join(out_progs) + '\n')
     open(os.path.join(od, 'programs.cache'), 'w', newline='\n').write('\n'.join(cache_out) + '\n')
     open(os.path.join(od, 'index.txt'), 'w', newline='\n').write('\n'.join('%s\t%s' % (k, v) for k, v in sorted(index.items())) + '\n')
+    lv = {}   # R8: the DXC level each stage was built at (stamps.opt_of; the stage key holds it)
+    for p in paths:
+        if built.get(p):
+            lv[built[p]] = stamps.opt_of(p)
+    open(os.path.join(od, 'levels.txt'), 'w', newline='\n').write('\n'.join('%s\t%s' % kv for kv in sorted(lv.items())) + '\n')
+    print('A1 levels: ' + ', '.join('%s %d' % (o, list(lv.values()).count(o)) for o in sorted(set(lv.values()))), flush=True)
     open(locf, 'w', newline='\n').write('\n'.join('%s\t%d\t%d' % (k, v[0], v[1]) for k, v in sorted(locs.items(), key=lambda kv: kv[1][0])) + '\n')
     print('A1 built %d stage shaders (%d failed), %d rebuilt, %d kept, linked %d of %d programs (%d link-tested now), %d locations, %.1f s' % (
         len(built) - len(bad), len(bad), len(stale), len(paths) - len(stale), ok, len(progs), linked, sum(v[1] for v in locs.values()), time.time() - t0))

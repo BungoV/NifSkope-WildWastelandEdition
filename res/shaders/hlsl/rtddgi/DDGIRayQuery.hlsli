@@ -33,15 +33,11 @@ bool DDGI_TriTest( uint pr, float3 o, float3 d, out float t, out float u, out fl
 	const float id = 1.0 / det;
 	const float3 tv = o - p0;
 	u = dot( tv, pv ) * id;
-	bool wwh0 = u < 0.0;
-	bool wwh1 = u > 1.0;
-	if (wwh0 || wwh1)
+	if ( u < 0.0 || u > 1.0 )
 		return false;
 	const float3 qv = cross( tv, e1 );
 	v = dot( d, qv ) * id;
-	bool wwh2 = v < 0.0;
-	bool wwh3 = u + v > 1.0;
-	if (wwh2 || wwh3)
+	if ( v < 0.0 || u + v > 1.0 )
 		return false;
 	t = dot( e2, qv ) * id;
 	return true;
