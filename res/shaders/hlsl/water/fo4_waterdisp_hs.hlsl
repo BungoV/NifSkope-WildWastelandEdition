@@ -40,30 +40,30 @@ cbuffer LooseUniforms : register(b31, space0)
 
 struct StageInput
 {
-    float3 LightDir : TEXCOORD0;
-    float3 ViewDir : TEXCOORD1;
-    float2 texCoord : TEXCOORD2;
-    float3x3 btnMatrix : TEXCOORD3;
-    nointerpolation float4 A : TEXCOORD6;
-    float4 C : TEXCOORD7;
-    nointerpolation float4 D : TEXCOORD8;
-    float rawVertexAlpha : TEXCOORD9;
-    nointerpolation float3x3 reflMatrix : TEXCOORD10;
+    WW_LOC(3) float3 LightDir : TEXCOORD3;
+    WW_LOC(4) float3 ViewDir : TEXCOORD4;
+    WW_LOC(8) float2 texCoord : TEXCOORD8;
+    WW_LOC(5) float3x3 btnMatrix : TEXCOORD5;
+    WW_LOC(0) nointerpolation float4 A : TEXCOORD0;
+    WW_LOC(1) float4 C : TEXCOORD1;
+    WW_LOC(2) nointerpolation float4 D : TEXCOORD2;
+    WW_LOC(12) float rawVertexAlpha : TEXCOORD12;
+    WW_LOC(9) nointerpolation float3x3 reflMatrix : TEXCOORD9;
     float4 gl_PositionIn : SV_Position;
 };
 
 struct StageOutput
 {
-    float3 tcLightDir : TEXCOORD0;
-    float3 tcViewDir : TEXCOORD1;
-    float2 tcTexCoord : TEXCOORD2;
-    float3x3 tcBtn : TEXCOORD3;
-    float4 tcA : TEXCOORD6;
-    float4 tcC : TEXCOORD7;
-    float4 tcD : TEXCOORD8;
-    float tcRawAlpha : TEXCOORD9;
-    float3x3 tcRefl : TEXCOORD10;
-    float4 gl_Position : POSITION;	// gl_out[].gl_Position: the clip position rides as a user semantic into the domain shader
+    WW_LOC(10) float3 tcLightDir : TEXCOORD10;
+    WW_LOC(13) float3 tcViewDir : TEXCOORD13;
+    WW_LOC(12) float2 tcTexCoord : TEXCOORD12;
+    WW_LOC(0) float3x3 tcBtn : TEXCOORD0;
+    WW_LOC(7) float4 tcA : TEXCOORD7;
+    WW_LOC(8) float4 tcC : TEXCOORD8;
+    WW_LOC(9) float4 tcD : TEXCOORD9;
+    WW_LOC(11) float tcRawAlpha : TEXCOORD11;
+    WW_LOC(3) float3x3 tcRefl : TEXCOORD3;
+    WW_LOC(6) float4 gl_Position : POSITION;	// gl_out[].gl_Position: the clip position rides as a user semantic into the domain shader
 };
 
 struct PatchConstants

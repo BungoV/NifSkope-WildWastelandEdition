@@ -69,9 +69,9 @@ static float4 fragColor;
 
 struct SPIRV_Cross_Input
 {
-    float3 ViewDir : TEXCOORD0;
-    float2 texCoords[9] : TEXCOORD1;
-    float4 C : TEXCOORD10;
+    WW_LOC(4) float3 ViewDir : TEXCOORD4;
+    WW_LOC(6) float2 texCoords[9] : TEXCOORD6;
+    WW_LOC(1) float4 C : TEXCOORD1;
 };
 
 struct SPIRV_Cross_Output

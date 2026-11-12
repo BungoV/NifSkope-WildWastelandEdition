@@ -338,12 +338,12 @@ static float4 fragColor;
 
 struct SPIRV_Cross_Input
 {
-    float3 ViewDir : TEXCOORD0;
-    float2 texCoords[9] : TEXCOORD1;
-    float4 C : TEXCOORD10;
-    float3 pPos : TEXCOORD11;
-    float2 pQ : TEXCOORD12;
-    nointerpolation float4 pSprite : TEXCOORD13;
+    WW_LOC(4) float3 ViewDir : TEXCOORD4;
+    WW_LOC(6) float2 texCoords[9] : TEXCOORD6;
+    WW_LOC(1) float4 C : TEXCOORD1;
+    WW_LOC(15) float3 pPos : TEXCOORD15;
+    WW_LOC(16) float2 pQ : TEXCOORD16;
+    WW_LOC(17) nointerpolation float4 pSprite : TEXCOORD17;
     float4 gl_FragCoord : SV_Position;
 };
 

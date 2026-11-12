@@ -9,7 +9,7 @@ static float4 C;
 
 struct SPIRV_Cross_Input
 {
-    float4 C : TEXCOORD0;
+    WW_LOC(1) float4 C : TEXCOORD1;
 };
 
 struct SPIRV_Cross_Output

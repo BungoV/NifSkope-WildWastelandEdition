@@ -24,7 +24,7 @@ struct SPIRV_Cross_Input
 
 struct SPIRV_Cross_Output
 {
-    float4 vsColor : TEXCOORD0;
+    WW_LOC(0) float4 vsColor : TEXCOORD0;
     float4 gl_Position : SV_Position;
 };
 
