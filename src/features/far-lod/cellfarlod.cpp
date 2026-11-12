@@ -24,6 +24,7 @@ BSD License - see nifskope.h
 #include "harnesswindow.h"	// lane GAPFIX1
 #include "features/exposure/cellhdr.h"
 #include "features/shared/cellpasstime.h"	// MODULES1 part 27: the early cards keep their FarCards zone
+#include "features/shared/camunired.h"	// lane EMPTY240 R12-1: the planes' pins and line kept
 #if __has_include( "features/near/cellcull.h" )	// lane PERFLOAD1 11-10: the old path "gl/cellcull.h" left the runs unregistered since 11-05
 #include "features/near/cellcull.h"   // the cell cull table, when merged
 #define FARLOD1_HAVE_CULL 1
@@ -2058,9 +2059,16 @@ bool wwCellFarLodDrewEarly()
 	return earlyDrew;
 }
 
+//! lane EMPTY240 R12-1: WW_CELL_FARLOD_NEAR read once per switch generation (red WW_CAMUNI_RED=envkeys: per call)
+static float farNearPin()
+{
+	WW_SWITCH_STATIC( float, pin, envFloat( "WW_CELL_FARLOD_NEAR", 0.0f ) );
+	return wwCamUniRed( "envkeys" ) ? envFloat( "WW_CELL_FARLOD_NEAR", 0.0f ) : pin;
+}
+
 double wwCellFarLodNear( double nr )
 {
-	const float forced = envFloat( "WW_CELL_FARLOD_NEAR", 0.0f );
+	const float forced = farNearPin();
 	return forced > 0.0f ? double( forced ) : std::max( nr, 16.0 );
 }
 
@@ -2115,9 +2123,10 @@ double wwCellFarLodNearCap( const Scene * scene, double nr, double tanHalfFovY, 
 {
 	g_tanHalfFovY = tanHalfFovY;	// lane LODLIVE1: the coloration legend's screen sizes
 	const FarDoc * f = farFor( scene );
-	if ( !f || nr <= 16.0 || envFloat( "WW_CELL_FARLOD_NEAR", 0.0f ) > 0.0f )
+	if ( !f || nr <= 16.0 || farNearPin() > 0.0f )
 		return nr;
-	const bool red = wwEnv( "WW_CELL_FARLOD_NEAR_RED" ) == "bounds";
+	WW_SWITCH_STATIC( bool, redKept, wwEnv( "WW_CELL_FARLOD_NEAR_RED" ) == "bounds" );	// lane EMPTY240 R12-1
+	const bool red = wwCamUniRed( "envkeys" ) ? wwEnv( "WW_CELL_FARLOD_NEAR_RED" ) == "bounds" : redKept;
 	if ( !f->topAsked ) {
 		int n[4] = { 0, 0, 0, 0 };
 		float by[3] = { -3.4e38f, -3.4e38f, -3.4e38f };
@@ -2158,6 +2167,12 @@ double wwCellFarLodNearCap( const Scene * scene, double nr, double tanHalfFovY, 
 void wwCellFarLodPlanes( double nearPlane, double farPlane )
 {
 	static QString said;
+	// lane EMPTY240 R12-1: the line is formatted only when a plane moved (red WW_CAMUNI_RED=farplanes: every frame)
+	static double lastNear = -1.0, lastFar = -1.0;
+	if ( nearPlane == lastNear && farPlane == lastFar && !wwCamUniRed( "farplanes" ) )
+		return;
+	lastNear = nearPlane;
+	lastFar = farPlane;
 	/* The depth step of a 24-bit buffer at distance d under this perspective: d^2 (f - n) / (n f 2^24). */
 	auto step = [nearPlane, farPlane]( double d ) {
 		return d * d * ( farPlane - nearPlane ) / ( nearPlane * farPlane * 16777216.0 );

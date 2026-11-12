@@ -11,6 +11,7 @@ BSD License - see nifskope.h
 #include "gl/cellunits.h"	// lane HARNESSMIN1 (testint): the terrain/contact maps registered on 31/32
 #include "gl/celluniform.h"	// lane CELLUNI2
 #include "features/shared/glstatememo.h"	// lane EMPTY240 R11-2: the contact pass's state reads kept
+#include "features/shared/camunired.h"	// lane EMPTY240 R12-1: the sun path's key strings kept
 #include "features/clouds/cloudshadow.h"	// lane CLOUD3: the clouds' shadow map joins the composition
 #include "gl/celllooks.h"	// lane GAPLOOK1: the contact far tier's switch
 #include "features/sky/skyephem.h"	// lane EPHEM1: FO4CS Solar's sun + moon arithmetic
@@ -1788,13 +1789,18 @@ WwSunPathKey wwSunPathKey()
 	WwSunPathKey k;
 	k.mode = s.sunPath;
 	k.pin = s.sunPin;
-	k.realClock = s.sunPath == 1 && wwEnvStr( "WW_SUNPATH_RED" ).trimmed() == QLatin1String( "realclock" );
+	// lane EMPTY240 R12-1: the two reds read once per switch generation, not per call (red WW_CAMUNI_RED=envkeys)
+	WW_SWITCH_STATIC( bool, realClockRed, wwEnvStr( "WW_SUNPATH_RED" ).trimmed() == QLatin1String( "realclock" ) );
+	WW_SWITCH_STATIC( bool, juneRed, wwEnvStr( "WW_SKY_EPHEM_RED" ) == QLatin1String( "june" ) );
+	const bool perCall = wwCamUniRed( "envkeys" );
+	k.realClock = s.sunPath == 1 && ( perCall ? wwEnvStr( "WW_SUNPATH_RED" ).trimmed() == QLatin1String( "realclock" )
+		: realClockRed );
 	if ( s.sunPin ) {
 		k.elev = s.pinElev;
 		k.az = s.pinAz;
 	} else if ( s.sunPath == 1 && wwLookOn( WwLook::Ephemeris ) ) {
 		k.ephem = true;
-		k.june = wwEnvStr( "WW_SKY_EPHEM_RED" ) == QLatin1String( "june" );
+		k.june = perCall ? wwEnvStr( "WW_SKY_EPHEM_RED" ) == QLatin1String( "june" ) : juneRed;
 	}
 	return k;
 }

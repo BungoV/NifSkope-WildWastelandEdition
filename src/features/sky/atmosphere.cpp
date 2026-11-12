@@ -10,6 +10,7 @@
 #include "features/air/cellvolair.h"	// lane FIX1101A (moon): the air's medium for that gain
 #include "wwswitch.h"
 #include "features/shared/glstatememo.h"	// lane EMPTY240 R11-2: the sky's state reads kept
+#include "features/shared/camunired.h"	// lane EMPTY240 R12-1: the sun key's red kept
 #include "wwsyncred.h"	// lane PERFFIX6: ^WW_SYNC_RED
 #include "wwsyncwait.h"	// lane EMPTY240 R4-2: the waits by name
 #include "gl/cellunits.h"
@@ -1135,8 +1136,11 @@ int wwAtmoSunKey()
 {
 	const AtState & s = as();
 	// lane SKY2B (SKYAFIX1): the red nohaze changes the key's haze too, so it moves the key (a live set kept the old one)
-	return s.tier > 0 ? s.sun + 3 * ( wwEnvStr( "WW_ATMO_SUN_RED" ).trimmed().toLower() == QLatin1StringView( "flat" ) )
-		+ 6 * red( "nohaze" ) : 0;
+	// lane EMPTY240 R12-1: the red read once per switch generation (red WW_CAMUNI_RED=envkeys: per call)
+	WW_SWITCH_STATIC( bool, flat, wwEnvStr( "WW_ATMO_SUN_RED" ).trimmed().toLower() == QLatin1StringView( "flat" ) );
+	const bool isFlat = wwCamUniRed( "envkeys" ) ? wwEnvStr( "WW_ATMO_SUN_RED" ).trimmed().toLower() == QLatin1StringView( "flat" )
+		: flat;
+	return s.tier > 0 ? s.sun + 3 * isFlat + 6 * red( "nohaze" ) : 0;
 }
 
 int wwAtmoNight()

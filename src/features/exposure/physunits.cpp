@@ -4,6 +4,7 @@
 #include "features/lights/lightphys.h"
 #include "cellworldanim.h"
 #include "wwswitch.h"
+#include "features/shared/camunired.h"	// lane EMPTY240 R12-1: the master's pin read once per switch generation
 
 #include <QByteArray>
 #include <QElapsedTimer>
@@ -88,11 +89,15 @@ bool wwPhysVanillaRed( const char * term )
  * and the pin are live (a lamp's colour factor follows in celllamps.cpp physTick). */
 bool wwPhysOn()
 {
-	const bool pinned = wwEnvIsSet( "WW_PHYSUNITS_RED" );
+	// lane EMPTY240 R12-1: the pin is a switch (a live set moves the generation); red WW_CAMUNI_RED=envkeys reads per call
+	WW_SWITCH_STATIC( bool, pinnedKept, wwEnvIsSet( "WW_PHYSUNITS_RED" ) );
+	WW_SWITCH_STATIC( QByteArray, pinKept, wwEnv( "WW_PHYSUNITS_RED" ).trimmed() );
+	const bool perCall = wwCamUniRed( "envkeys" );
+	const bool pinned = perCall ? wwEnvIsSet( "WW_PHYSUNITS_RED" ) : pinnedKept;
 	bool on = ps().master;
 	QByteArray pin;
 	if ( pinned ) {
-		pin = wwEnv( "WW_PHYSUNITS_RED" ).trimmed();
+		pin = perCall ? wwEnv( "WW_PHYSUNITS_RED" ).trimmed() : pinKept;
 		on = pin.isEmpty() || pin == "0";
 	}
 	static std::atomic<int> said { -1 };

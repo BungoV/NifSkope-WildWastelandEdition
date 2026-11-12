@@ -3284,6 +3284,9 @@ void GLView::glProjection( [[maybe_unused]] int x, [[maybe_unused]] int y )
 static quint64 wwPaintCounter = 0;
 static qint64 wwPaintNanos = 0;
 quint64 wwGlPaintCount() { return wwPaintCounter; }
+//! lane EMPTY240 R12-1: one step per resizeGL (valid context or not): the TAA jitter's kept viewport is asked again
+static quint64 wwResizeGen = 0;
+quint64 wwGlResizeGen() { return wwResizeGen; }
 qint64 wwGlPaintNanos() { return wwPaintNanos; }
 
 // the imagespace's measure (src/gl/celllights.h).
@@ -3566,6 +3569,10 @@ struct WwStartSteps
 	static constexpr int Count = 5;
 	double ms[Count] = {};
 	double last = -1.0;
+	// lane EMPTY240 R12-1: "camera and uniforms" by call
+	static constexpr int CamCount = 7;
+	double cam[CamCount] = {};
+	double camLast = -1.0;
 };
 WwStartSteps & wwStartSteps()
 {
@@ -3574,7 +3581,16 @@ WwStartSteps & wwStartSteps()
 }
 void wwStartStepBegin()
 {
-	wwStartSteps().last = wwPaceNowS();
+	wwStartSteps().last = wwStartSteps().camLast = wwPaceNowS();
+}
+//! lane EMPTY240 R12-1: the end of one call inside "camera and uniforms" (a clock read)
+void wwCamStepMark( int step )
+{
+	WwStartSteps & s = wwStartSteps();
+	const double now = wwPaceNowS();
+	if ( s.camLast >= 0.0 )
+		s.cam[step] += ( now - s.camLast ) * 1e3;
+	s.camLast = now;
 }
 void wwStartStepEnd( int step )
 {
@@ -3592,6 +3608,11 @@ QByteArray wwStartStepsTake( double frames )
 	QByteArray out = " | frame-start by step =";
 	for ( int i = 0; i < WwStartSteps::Count; i++ )
 		out += QByteArray( i ? " + " : " " ) + names[i] + " " + QByteArray::number( frames > 0.0 ? s.ms[i] / frames : 0.0, 'f', 3 );
+	static const char * const camNames[WwStartSteps::CamCount] = { "cam dump", "shadow view", "debug view", "projection",
+		"view and light", "global uniforms", "vertex attribs" };
+	out += " | camera and uniforms by call (EMPTY240 R12-1) =";
+	for ( int i = 0; i < WwStartSteps::CamCount; i++ )
+		out += QByteArray( i ? " + " : " " ) + camNames[i] + " " + QByteArray::number( frames > 0.0 ? s.cam[i] / frames : 0.0, 'f', 3 );
 	s = WwStartSteps();
 	return out;
 }
@@ -4388,14 +4409,18 @@ void GLView::paintGL()
 	}
 	wwStartStepBegin();	// the transform is the wall's own named part
 	wwCellCamDump( scene );	// the eye, with or without the Cell lights row (a no-op when unset)
+	wwCamStepMark( 0 );	// lane EMPTY240 R12-1: the step by call
 
 	// Setup projection mode
 	const bool shView = wwShadowViewPass( scene );	// MODULES1 R6-8: a shadow debug view: no jitter, no post chain
+	wwCamStepMark( 1 );
 	const bool dvView = wwDebugViewId() != 0;	// lane DEBUGVIEW1: a debug view: the same, the far cards kept, the clear black
 	wwDebugViewFrame();
+	wwCamStepMark( 2 );
 	wwGameTaaArmJitter( !shView && !dvView );
 	glProjection();
 	wwGameTaaArmJitter( false );
+	wwCamStepMark( 3 );
 
 	cx->setViewTransform( scene->view, int( cfg.upAxis ), envMapRotation );
 	auto &	globalUniforms = *( cx->globalUniforms );
@@ -4474,9 +4499,12 @@ void GLView::paintGL()
 	globalUniforms.glowScaleSRGB = float( std::sqrt( globalUniforms.glowScale ) );
 	globalUniforms.doSkinning = std::int32_t( scene->hasOption(Scene::DoSkinning) );
 	globalUniforms.sceneOptions = std::int32_t( scene->options );
+	wwCamStepMark( 4 );
 	cx->setGlobalUniforms();
+	wwCamStepMark( 5 );
 
 	cx->setDefaultVertexAttribs( Scene::defaultAttrMask, Scene::defaultVertexAttrs );
+	wwCamStepMark( 6 );
 
 	if ( scene->hasOption(Scene::DoMultisampling) )
 		glEnable( GL_MULTISAMPLE );
@@ -5406,6 +5434,7 @@ bool GLView::wwPaintNow()
 
 void GLView::resizeGL( int width, int height )
 {
+	wwResizeGen++;	// lane EMPTY240 R12-1
 	pixelWidth = width;
 	pixelHeight = height;
 

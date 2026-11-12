@@ -1,6 +1,8 @@
 #include "features/post/gametaa.h"
 #include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 #include "wwsyncred.h"	// lane PERFFIX6: ^WW_SYNC_RED
+#include "features/shared/camunired.h"	// lane EMPTY240 R12-1: the jitter's viewport kept
+#include "features/shared/glstatememo.h"	// lane EMPTY240 R12-1
 
 #include "gl/celluniform.h"	// lane CELLUNI4: the tone map's known state
 #include "gl/cellunits.h"	// lane WATERFIX7: the passes' named units
@@ -479,6 +481,7 @@ void wwGameTaaArmJitter( bool armed )
 }
 
 quint64 wwGlPaintCount();	// glview.cpp
+quint64 wwGlResizeGen();	// glview.cpp: lane EMPTY240 R12-1, one step per resizeGL
 
 void wwGameTaaJitterProjection( Scene * scene, Matrix4 & proj )
 {
@@ -487,7 +490,26 @@ void wwGameTaaJitterProjection( Scene * scene, Matrix4 & proj )
 		return;
 	s.armed = false;	// one projection a frame: a tool's own glProjection later in the frame is not jittered again
 	GLint vp[4] = { 0, 0, 1, 1 };
-	scene->renderer->fn->glGetIntegerv( GL_VIEWPORT, vp );
+	{
+		/* lane EMPTY240 R12-1: the frame start's viewport is the one the last frame left, the same each frame; kept while
+		 * the global uniforms' last viewport (setViewport on a resize or a pick, every upload) and the view's resize count
+		 * are the same, checked 1 paint in 64 (WwGlMemo). Red WW_CAMUNI_RED=jittervp: asked every frame. */
+		static WwGlMemo<GLint, 4> memo;
+		static std::int32_t key[4] = { -1, -1, -1, -1 };
+		static quint64 keyResize = ~quint64( 0 );
+		const std::int32_t * dims = scene->renderer->globalUniforms->viewportDimensions;
+		const bool keyed = std::memcmp( key, dims, sizeof key ) == 0 && keyResize == wwGlResizeGen();
+		keyResize = wwGlResizeGen();
+		if ( wwCamUniRed( "jittervp" ) || !keyed || memo.due() ) {
+			scene->renderer->fn->glGetIntegerv( GL_VIEWPORT, vp );
+			if ( !keyed )
+				memo.valid = false;	// another key: a fresh state, not a check
+			memo.keep( vp, "taa jitter viewport" );
+			std::memcpy( key, dims, sizeof key );
+		} else {
+			std::memcpy( vp, memo.v, sizeof vp );
+		}
+	}
 	if ( !wwCellUni6Red( "jitter" ) )	// lane CELLUNI6: the global uniforms' upload next takes it (celluniform.h VpNote)
 		WwCellUni::jitterVp().put( wwGlPaintCount(), vp );
 	s.W = std::max( int( vp[2] ), 1 );

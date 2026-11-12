@@ -9,6 +9,7 @@ BSD License - see nifskope.h
 #include "gl/celluniprof.h"	// lane PERFFIX1: WW_CELL_UNI_PROF
 #include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 #include "features/shared/glstatememo.h"	// lane EMPTY240 R11-2: the sky's stencil reads kept
+#include "features/shared/camunired.h"	// lane EMPTY240 R12-1: the light's key strings kept
 #include "cellworldanim.h"	// MODULES1: the cell world clock (nothing acts paused; red WW_CELL_CLOCK_RED=harness)
 
 #include "features/weather/esmweather.h"
@@ -841,7 +842,8 @@ struct MoonGeo
  * real sunset (the ghost sun), vanilla = both */
 bool wwMoonRed( const char * word )
 {
-	const QString v = wwEnvStr( "WW_MOON_RED" ).trimmed().toLower();
+	WW_SWITCH_STATIC( QString, kept, wwEnvStr( "WW_MOON_RED" ).trimmed().toLower() );	// lane EMPTY240 R12-1
+	const QString v = wwCamUniRed( "envkeys" ) ? wwEnvStr( "WW_MOON_RED" ).trimmed().toLower() : kept;
 	return v == QLatin1StringView( "vanilla" ) || v == QLatin1StringView( word );
 }
 
@@ -908,7 +910,10 @@ bool wwAirLevelRayRed()
 
 bool wwPhysAxesRed()
 {
-	return wwEnvStr( "WW_PHYSUNITS_AXES_RED" ).trimmed() == QLatin1StringView( "1" );
+	WW_SWITCH_STATIC( bool, kept, wwEnvStr( "WW_PHYSUNITS_AXES_RED" ).trimmed() == QLatin1StringView( "1" ) );	// EMPTY240 R12-1
+	if ( wwCamUniRed( "envkeys" ) )
+		return wwEnvStr( "WW_PHYSUNITS_AXES_RED" ).trimmed() == QLatin1StringView( "1" );
+	return kept;
 }
 
 MoonGeo moonGeo( const LdState & s, const float gamePos[3] )
@@ -1045,10 +1050,15 @@ LdLight currentLight()
 	const WwSunPathKey sunKey = wwSunPathKey();
 	const unsigned long long wx = wwWeatherRecx().stamp;
 	// MODULES1 R6-12: the gameplay moon's pin moves the light too (live)
-	const QString mr = wwEnvStr( "WW_MOON_RED" ).trimmed().toLower() + QLatin1Char( '|' ) + wwEnvStr( "WW_MOON_GAME" ).trimmed()
-		+ QLatin1Char( '|' ) + wwEnvStr( "WW_NIGHTSKY_RED" ).trimmed().toLower()
-		+ QLatin1Char( '|' ) + wwEnvStr( "WW_NIGHTSKY_STOPS" ).trimmed()
-		+ QLatin1Char( '|' ) + wwEnvStr( "WW_PHYSUNITS_AXES_RED" ).trimmed();
+	// lane EMPTY240 R12-1: the five keys formatted once per switch generation, not per call (red WW_CAMUNI_RED=envkeys)
+	auto mrNow = []() {
+		return wwEnvStr( "WW_MOON_RED" ).trimmed().toLower() + QLatin1Char( '|' ) + wwEnvStr( "WW_MOON_GAME" ).trimmed()
+			+ QLatin1Char( '|' ) + wwEnvStr( "WW_NIGHTSKY_RED" ).trimmed().toLower()
+			+ QLatin1Char( '|' ) + wwEnvStr( "WW_NIGHTSKY_STOPS" ).trimmed()
+			+ QLatin1Char( '|' ) + wwEnvStr( "WW_PHYSUNITS_AXES_RED" ).trimmed();
+	};
+	WW_SWITCH_STATIC( QString, mrKept, mrNow() );
+	const QString mr = wwCamUniRed( "envkeys" ) ? mrNow() : mrKept;
 	if ( gen != s.gen || hour != s.hour || sun != s.sun || atmoSun != atmoKey || !( sunPath == sunKey ) || wxStamp != wx
 		|| mr != moonRed || physSky != wwPhysSkyOn() || wxOv != wwWxOvStamp() ) {
 		physSky = wwPhysSkyOn();
