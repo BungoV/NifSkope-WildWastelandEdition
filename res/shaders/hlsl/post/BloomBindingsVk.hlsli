@@ -1,5 +1,5 @@
 // Bloom pyramid: NifSkope's shim (lane VKFRAME1, 2026-11-12). The ONE file that binds the shared bloom math
-// (BloomCommon.hlsli) to NifSkope's Vulkan descriptor set (src/features/post/vkbloom.cpp fills it) and push constants.
+// (BloomCommon.hlsli) to NifSkope's Vulkan descriptor set (src/features/vkframe/vkframe.cpp fills it) and push constants.
 // Fusion Shaders keeps its own shim (its Post/Common.hlsli constant block on its D3D slots) and calls the same functions.
 // The register() numbers give DXIL the same slots (t = sampled, u = storage), so this shim also compiles to DXIL.
 #ifndef BLOOM_BINDINGS_VK_HLSLI
@@ -15,7 +15,7 @@
 #define BLOOM_FORMAT
 #endif
 
-// one dispatch's values (vkbloom.cpp BloomJob, 48 bytes)
+// one dispatch's values (vkframe.cpp WwVkPost's Job, 48 bytes)
 struct BloomJob
 {
 	float4 params;   // down: threshold, soft knee, prefilter (level 0), scale; up: radius (pixels), source weight, bloom weight, dispersion

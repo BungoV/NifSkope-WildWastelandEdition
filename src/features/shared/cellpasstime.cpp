@@ -178,6 +178,8 @@ struct Slot
 	qint64 frame = -1;
 	std::vector<Mark> marks;
 	std::vector<Mark> subs;	// lane PERF2: the sub-stages (Mark::pass = the Sub)
+	double subExt[SubCount] = {};	// lane VKFRAME1: sub ms timed outside GL (subAddMs)
+	bool subExtSeen[SubCount] = {};
 	GLuint f0 = 0, f1 = 0;	// the whole frame
 	double cpu[Count] = {};
 	double wait[Count] = {};	// sync mode: the closing glFinish's wait (the GPU still working after the CPU issued it all)
@@ -385,6 +387,14 @@ void collect( Slot & sl )
 		s.pool.push_back( m.q1 );
 	}
 	sl.subs.clear();
+	for ( int k = 0; k < SubCount; k++ ) {	// lane VKFRAME1
+		if ( sl.subExtSeen[k] ) {
+			sub[k] += sl.subExt[k];
+			subSeen[k] = true;
+		}
+		sl.subExt[k] = 0.0;
+		sl.subExtSeen[k] = false;
+	}
 	const double gpuFrame = gpuMs( sl.f0, sl.f1 );
 	s.pool.push_back( sl.f0 );
 	s.pool.push_back( sl.f1 );
@@ -447,7 +457,8 @@ void collect( Slot & sl )
 			"ssgi-denoise", "contact",	// lane PERFFIX2 c
 			"water", "water-copy", "underwater",
 			"post-dof", "post-mblur", "post-objblur", "post-flare",
-			"air-lampvol" };	// lane MODULES1 part 25	// lane POSTFX1
+			"air-lampvol",	// lane MODULES1 part 25	// lane POSTFX1
+			"vk-bloom" };	// lane VKFRAME1
 		for ( int k = 0; k < SubCount; k++ )
 			if ( subSeen[k] )
 				line += QByteArray( " | sub " ) + subName[k] + " " + QByteArray::number( sub[k], 'f', 2 );
@@ -916,6 +927,16 @@ void subEnd( int sub )
 		return;
 	s.gl->glQueryCounter( s.ring[s.frame % kSlots].subs[s.openSub[sub]].q1, GL_TIMESTAMP );
 	s.openSub[sub] = -1;
+}
+
+void subAddMs( int sub, double ms )
+{
+	State & s = st();
+	if ( !s.inFrame || sub < 0 || sub >= SubCount )
+		return;
+	Slot & sl = s.ring[s.frame % kSlots];
+	sl.subExt[sub] += ms;
+	sl.subExtSeen[sub] = true;
 }
 
 static double s_lastCpuSum = 0.0;	// lane EMPTY240 item 1

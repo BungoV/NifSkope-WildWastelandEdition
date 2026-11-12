@@ -67,6 +67,7 @@ enum Sub { AirTile, AirInject, AirIntegrate, AoGeometry, AoStages, AoGi, ToneBli
 	WaterDraw, WaterCopy, UnderwaterSub,	// lane PERFFIX3: the water's colour draws (each, summed; the copy inside), its refraction copies, the camera-under-water pass
 	PostDof, PostMblur, PostObjBlur, PostFlare,	// lane POSTFX1: the post zone's parts (cellpost.cpp, the lens flares)
 	AirLampVol,	// lane MODULES1 part 25: the air's stage 4, the lamps' in-scatter (LampVol)
+	VkBloom,	// lane VKFRAME1: the bloom chain on Vulkan (its own timestamps, added with subAddMs)
 	SubCount };	// lane FOGPERF1: the air before stage 0 (depth blit), its far grid, after it
 void subBegin( int sub );
 //! lane PERF2: CPU time inside the per-draw setup (setupProgram and the cell's uniform calls), summed per frame
@@ -92,6 +93,8 @@ private:
 	Q_DISABLE_COPY( DrawCpuScope )
 };
 void subEnd( int sub );
+//! lane VKFRAME1: GPU ms timed outside GL (a Vulkan pass's timestamps) added to this frame's sub; the log's "sub" field
+void subAddMs( int sub, double ms );
 qint64 nowNs();
 
 /*! lane EMPTY240 R3-0: the always-on GPU zones (the top-level passes and the named zones below, two timestamps each,
