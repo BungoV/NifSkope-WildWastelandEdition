@@ -336,6 +336,7 @@ struct IsMeasureGpu
 	int qtw = 0, qth = 0;
 	GLenum qfmt = 0;
 	int route = -1;	// the route last measured by (1 quarter, 0 full size); a change reads errors again
+	bool vkAsked = false;	// lane VKFRAME1 P4: this frame's measure was asked of Vulkan (isMeasureFinish takes it)
 };
 
 QHash<Renderer *, IsMeasureGpu> & isGpus()
@@ -460,7 +461,29 @@ void isApply( Scene * scene, const float * px, int qw, int qh )
 	}
 }
 
-void isMeasureFrame( Scene * scene, HdrGpu & g, int W, int H, int S, GLint prevDraw, GLint prevRead, const GlSnap * shared )
+// the state the measure found (sn: the tone map's one read, or the measure's own), set back
+void isRestore( Renderer * r, const GlSnap & sn, GLint prevDraw, GLint prevRead )
+{
+	auto fn = r->fn;
+	fn->glActiveTexture( GLenum( sn.active ) );
+	fn->glViewport( sn.vp[0], sn.vp[1], sn.vp[2], sn.vp[3] );
+	fn->glClearColor( sn.clear[0], sn.clear[1], sn.clear[2], sn.clear[3] );
+	fn->glColorMask( sn.colorMask[0], sn.colorMask[1], sn.colorMask[2], sn.colorMask[3] );
+	fn->glStencilFunc( GLenum( sn.sFunc ), sn.sRef, GLuint( sn.sMask ) );
+	fn->glStencilMask( GLuint( sn.sWrite ) );
+	fn->glStencilOp( GLenum( sn.sFail ), GLenum( sn.sZFail ), GLenum( sn.sPass ) );
+	if ( sn.stencil ) fn->glEnable( GL_STENCIL_TEST ); else fn->glDisable( GL_STENCIL_TEST );
+	if ( sn.depth ) fn->glEnable( GL_DEPTH_TEST ); else fn->glDisable( GL_DEPTH_TEST );
+	if ( sn.blend ) fn->glEnable( GL_BLEND ); else fn->glDisable( GL_BLEND );
+	if ( sn.cull ) fn->glEnable( GL_CULL_FACE ); else fn->glDisable( GL_CULL_FACE );
+	if ( sn.scissor ) fn->glEnable( GL_SCISSOR_TEST );
+	fn->glBindFramebuffer( GL_DRAW_FRAMEBUFFER, GLuint( prevDraw ) );
+	fn->glBindFramebuffer( GL_READ_FRAMEBUFFER, GLuint( prevRead ) );
+}
+
+// mayVk: lane VKFRAME1 P4, the call before the bloom may hand the draw to Vulkan (false: isMeasureFinish's GL fallback)
+void isMeasureFrame( Scene * scene, HdrGpu & g, int W, int H, int S, GLint prevDraw, GLint prevRead, const GlSnap * shared,
+	bool mayVk )
 {
 	const int mode = isMeasureMode();
 	static int saidMode = -1;
@@ -510,6 +533,15 @@ void isMeasureFrame( Scene * scene, HdrGpu & g, int W, int H, int S, GLint prevD
 	 * quarter size (cell_is_measure_q.frag reads each texel's 4 x 4 pixels and their stencil): one small draw, no copy, no
 	 * mips. Red WW_IS_MEASURE_Q_RED=1: the full-size route. Live */
 	WW_SWITCH_STATIC( bool, qRed, wwEnvInt( "WW_IS_MEASURE_Q_RED" ) == 1 );
+	/* lane VKFRAME1 P4: the quarter measure on Vulkan (measure_q.hlsl: bit-identical offline, 0.073 ms vs GL's 0.082 at
+	 * 1920 x 1045, tests/vkframe/measure.sh), dispatched in the bloom's submit from the shared frame; isMeasureFinish reads
+	 * it back after wwCellBloomRun, or draws GL's quarter measure there when Vulkan did not run it. Frame mode, the quarter
+	 * route and RGBA32F only. Red WW_IS_MEASURE_VK_RED=1: GL's draw here, as before. Live */
+	if ( mayVk && mode == 0 && g.dsTex && !qRed && postFormat() == GL_RGBA32F && wwEnvInt( "WW_IS_MEASURE_VK_RED" ) != 1
+		&& WwVkPost::requestMeasure( r, g.color, g.ds, qw, qh ) ) {
+		m.vkAsked = true;
+		return;
+	}
 	auto prog = g.dsTex && !qRed ? r->useProgram( "cell_is_measure_q.prog" ) : nullptr;
 	const bool q = prog != nullptr;
 	if ( !q )
@@ -673,20 +705,60 @@ void isMeasureFrame( Scene * scene, HdrGpu & g, int W, int H, int S, GLint prevD
 	}
 	r->stopProgram();
 	isServed().insert( doc, ok );
-	fn->glActiveTexture( GLenum( sn.active ) );
-	fn->glViewport( sn.vp[0], sn.vp[1], sn.vp[2], sn.vp[3] );
-	fn->glClearColor( sn.clear[0], sn.clear[1], sn.clear[2], sn.clear[3] );
-	fn->glColorMask( sn.colorMask[0], sn.colorMask[1], sn.colorMask[2], sn.colorMask[3] );
-	fn->glStencilFunc( GLenum( sn.sFunc ), sn.sRef, GLuint( sn.sMask ) );
-	fn->glStencilMask( GLuint( sn.sWrite ) );
-	fn->glStencilOp( GLenum( sn.sFail ), GLenum( sn.sZFail ), GLenum( sn.sPass ) );
-	if ( sn.stencil ) fn->glEnable( GL_STENCIL_TEST ); else fn->glDisable( GL_STENCIL_TEST );
-	if ( sn.depth ) fn->glEnable( GL_DEPTH_TEST ); else fn->glDisable( GL_DEPTH_TEST );
-	if ( sn.blend ) fn->glEnable( GL_BLEND ); else fn->glDisable( GL_BLEND );
-	if ( sn.cull ) fn->glEnable( GL_CULL_FACE ); else fn->glDisable( GL_CULL_FACE );
-	if ( sn.scissor ) fn->glEnable( GL_SCISSOR_TEST );
-	fn->glBindFramebuffer( GL_DRAW_FRAMEBUFFER, GLuint( prevDraw ) );
-	fn->glBindFramebuffer( GL_READ_FRAMEBUFFER, GLuint( prevRead ) );
+	isRestore( r, sn, prevDraw, prevRead );
+}
+
+/* lane VKFRAME1 P4: after wwCellBloomRun. The measure Vulkan ran in the bloom's submit is read back as GL's quarter target
+ * was (the same read buffer, fence, apply a frame late and blur); Vulkan did not run it (its queue held, no bloom this
+ * frame): GL's quarter draw now, on the same frame. No call asked: nothing (no GL call) */
+void isMeasureFinish( Scene * scene, HdrGpu & g, int W, int H, int S, GLint prevDraw, GLint prevRead, const GlSnap * shared )
+{
+	Renderer * r = scene->renderer;
+	IsMeasureGpu & m = isGpus()[r];
+	if ( !m.vkAsked )
+		return;
+	m.vkAsked = false;
+	PassTime::subBegin( PassTime::ToneMeasure );
+	const GLuint tex = WwVkPost::measureTexture( r );
+	static int said = -1, says = 0;
+	if ( said != int( tex != 0 ) && says < 40 ) {
+		said = int( tex != 0 );
+		says++;
+		std::fprintf( stderr, "tone map measure: %s (VKFRAME1 P4)\n", tex ? "on Vulkan in the bloom's submit (measure_q.hlsl)"
+			: "GL's quarter draw after the bloom (Vulkan did not run it this frame)" );
+	}
+	if ( !tex ) {
+		isMeasureFrame( scene, g, W, H, S, prevDraw, prevRead, shared, false );
+	} else {
+		auto fn = r->fn;
+		const int qw = std::max( 1, W >> 2 ), qh = std::max( 1, H >> 2 );
+		GlSnap own;
+		if ( !shared )
+			own.measurePart( fn );
+		const GlSnap & sn = shared ? *shared : own;
+		if ( !m.pbo )
+			fn->glGenBuffers( 1, &m.pbo );
+		GLint prevTex = 0;
+		fn->glActiveTexture( GLenum( GL_TEXTURE0 + kSrcUnit ) );
+		fn->glGetIntegerv( GL_TEXTURE_BINDING_2D, &prevTex );
+		fn->glBindTexture( GL_TEXTURE_2D, tex );
+		fn->glPixelStorei( GL_PACK_ALIGNMENT, 4 );
+		fn->glBindBuffer( GL_PIXEL_PACK_BUFFER, m.pbo );
+		fn->glBufferData( GL_PIXEL_PACK_BUFFER, GLsizeiptr( size_t( qw ) * size_t( qh ) * 4 * sizeof( float ) ), nullptr, GL_STREAM_READ );
+		fn->glGetTexImage( GL_TEXTURE_2D, 0, GL_RGBA, GL_FLOAT, nullptr );
+		fn->glBindBuffer( GL_PIXEL_PACK_BUFFER, 0 );
+		m.fence = fn->glFenceSync( GL_SYNC_GPU_COMMANDS_COMPLETE, 0 );
+		m.doc = scene->nifModel;
+		m.qw = qw;
+		m.qh = qh;
+		if ( bloomGpuOn() && !bloomBlur( scene, m, tex, 0, qw, qh, m.bmade == 0 ? 1 : 0 ) )
+			m.bmade = -1;
+		fn->glBindTexture( GL_TEXTURE_2D, GLuint( prevTex ) );
+		r->stopProgram();
+		isServed().insert( scene->nifModel, true );
+		isRestore( r, sn, prevDraw, prevRead );
+	}
+	PassTime::subEnd( PassTime::ToneMeasure );
 }
 
 }	// namespace
@@ -1562,7 +1634,7 @@ void wwCellHdrEnd( Scene * scene )
 	ts.at( "dump switch" );
 	// lane PERF1: the exposure and the bloom from this linear frame (before the uniforms take them)
 	PassTime::subBegin( PassTime::ToneMeasure );
-	isMeasureFrame( scene, g, s.w, s.h, s.samples, s.prevDraw, s.prevRead, sync ? &sn : nullptr );
+	isMeasureFrame( scene, g, s.w, s.h, s.samples, s.prevDraw, s.prevRead, sync ? &sn : nullptr, true );
 	PassTime::subEnd( PassTime::ToneMeasure );
 	ts.at( "measure" );
 	// the FO4CS bloom's chain on the linear frame, when that mode is picked (cellbloom.h); Vanilla: no GL call
@@ -1570,6 +1642,8 @@ void wwCellHdrEnd( Scene * scene )
 	const bool foBloom = wwCellBloomRun( scene, g.color, g.ds, s.w, s.h, s.samples, g.dsFormat, g.dsTex );
 	PassTime::subEnd( PassTime::ToneBloom );
 	ts.at( "bloom" );
+	// lane VKFRAME1 P4: the measure Vulkan made in the bloom's submit read back (or GL's draw now); no Vulkan ask: no call
+	isMeasureFinish( scene, g, s.w, s.h, s.samples, s.prevDraw, s.prevRead, sync ? &sn : nullptr );
 	// lane FOGBLOOM1: the per-pixel bloom strength from the air along each ray (cellfogbloom.h); off: no GL call
 	const bool fogBloom = wwCellFogBloomRun( scene, g.fbo, g.ds, s.w, s.h, s.samples, g.dsFormat, g.dsTex );
 	ts.at( "fog bloom" );

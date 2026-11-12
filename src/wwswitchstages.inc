@@ -1052,6 +1052,7 @@
 { "WW_IS_MEASURE", 0, "src/features/exposure/cellhdr.cpp:306 isMeasureMode | re-read per frame or per call (a)" },
 { "WW_IS_MEASURE_ECHO", 0, "src/glview.cpp:3334 wwCellImageSpaceMeasurePass | re-read per frame or per call (a)" },
 { "WW_IS_MEASURE_Q_RED", 0, "src/features/exposure/cellhdr.cpp:512 isMeasureFrame | hand: re-read per frame; 1 = the tone-map measure draws full size with its stencil copy and mips, build 86 (EMPTY240 R11-1)" },
+{ "WW_IS_MEASURE_VK_RED", 0, "src/features/exposure/cellhdr.cpp isMeasureFrame | hand: re-read per frame; 1 = the tone-map measure stays GL's quarter draw before the bloom, build 94 (VKFRAME1 P4)" },
 { "WW_JOIN_TEST", 2, "src/nifskope_ui.cpp:4022 NifSkope::createWindow | createWindow: picks which harness the window runs" },
 { "WW_LANDSPECWAIT_RED", 2, "src/gl/renderer.cpp:560 wwLandLodWindow | hand: read once at the first band window; 1 = a chunk whose read waited a paint stays out until the window moves, build 80 (EMPTY240 R7-4)" },
 { "WW_LANDSPEC_GLIDEFROM", 0, "src/gl/renderer.cpp:459 wwLandGlideCentre | re-read per frame or per call (a)" },

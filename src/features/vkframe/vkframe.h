@@ -42,6 +42,12 @@ void freeFrame( const void * key );
 bool sourceReady( const void * key, unsigned color, unsigned ds );
 //! the combine's RGBA32F target (GL name) if the last runBloom ran the combine (BloomJob::comb), else 0
 unsigned combTexture( const void * key );
+/* round 6 (P4): the exposure measure (res/shaders/hlsl/exposure/measure_q.hlsl, cell_is_measure_q.frag's twin) asked for
+ * the next runBloom that makes the source: the shared frame (these GL names) into an RGBA32F quarter target, qw x qh = the
+ * chain's W >> 2 x H >> 2. false = not possible (no chain, another frame, another size): the caller measures on GL now. */
+bool requestMeasure( const void * key, unsigned color, unsigned ds, int qw, int qh );
+//! that target's GL name if the last runBloom ran the measure (once: the call clears it), else 0 (the caller measures on GL)
+unsigned measureTexture( const void * key );
 //! drops the images (and their GL textures: the caller does not delete them)
 void freeChain( const void * key );
 bool hasChain( const void * key );
