@@ -3552,6 +3552,26 @@ struct WwWallPart
 	explicit WwWallPart( double & p ) : part( p ), t0( wwPaceNowS() ) {}
 	~WwWallPart() { part += wwPaceNowS() - t0; }
 };
+
+/* lane EMPTY240 R10-5: build 84's spikes after the goto sat in gaps outside the GPU zones (frame 296: 647 ms CPU after
+ * the texture pump; frame 402: 1264 ms CPU after the sun cascades). A drawing-thread step over 50 ms prints its name;
+ * a clock read each end, no GL, at most 32 lines. */
+struct WwSlowStep
+{
+	const char * name;
+	const double t0;
+	explicit WwSlowStep( const char * n ) : name( n ), t0( wwPaceNowS() ) {}
+	~WwSlowStep()
+	{
+		const double ms = ( wwPaceNowS() - t0 ) * 1e3;
+		static int said = 0;
+		if ( ms < 50.0 || said >= 32 )
+			return;
+		said++;
+		std::fprintf( stderr, "frame slow step: %s %.1f ms CPU in paint %llu (EMPTY240 R10-5: a drawing-thread step "
+			"outside the GPU zones over 50 ms)\n", name, ms, static_cast<unsigned long long>( wwPaintCounter ) );
+	}
+};
 }	// namespace
 
 bool wwVsyncOn()
@@ -4122,8 +4142,10 @@ void GLView::paintGL()
 		WwWallPart wallPart( wwWall().cur.timers );	// lane EMPTY240 R10-4: named out of other-in-frame
 		PassTime::frameBegin();
 	}
-	if ( scene && scene->textures )
-		scene->textures->wwParamFrame();	// the texture parameter shadow trusts nothing from an older frame
+	if ( scene && scene->textures ) {
+		WwSlowStep slowStep( "texture parameter frame" );
+		scene->textures->wwParamFrame();
+	}	// the texture parameter shadow trusts nothing from an older frame
 	struct WwPassFrame
 	{
 		~WwPassFrame()
@@ -4241,8 +4263,11 @@ void GLView::paintGL()
 		// avoid potential infinite recursion in case a message box is opened while initializing the scene
 		isDisabled = true;
 		textures->setNifFolder( model->getFolder() );
-		scene->make( model );
-		scene->transform( Transform(), scene->timeMin() );
+		{
+			WwSlowStep slowStep( "scene make (a document compile)" );
+			scene->make( model );
+			scene->transform( Transform(), scene->timeMin() );
+		}
 
 		axis = (scene->bounds().radius <= 0) ? 1024.0 * scale() : scene->bounds().radius;
 
@@ -4296,10 +4321,20 @@ void GLView::paintGL()
 	// every scene that snaps to it. No-op, and costs one branch, when unmarked.
 	{
 		WwWallPart wallPart( wwWall().cur.transform );	// lane EMPTY240 R10-4: named out of other-in-frame
-		applyWorkspaceSkeleton( viewTrans );
-		wwDoorLiveTick( scene, this );	// the live door's pose (a no-op unless WW_CELL_DOOR_ANIM)
-		wwCellWorldAnimFrame( scene, time );	// a cell's world clock (a no-op unless World animation)
-		wwEndlessSeaFollow( scene, viewTrans );	// lane FARSEA1: the endless sea to the camera's step (a no-op without one)
+		{
+			WwSlowStep slowStep( "workspace skeleton and live door" );
+			applyWorkspaceSkeleton( viewTrans );
+			wwDoorLiveTick( scene, this );	// the live door's pose (a no-op unless WW_CELL_DOOR_ANIM)
+		}
+		{
+			WwSlowStep slowStep( "cell world animation" );
+			wwCellWorldAnimFrame( scene, time );	// a cell's world clock (a no-op unless World animation)
+		}
+		{
+			WwSlowStep slowStep( "endless sea follow" );
+			wwEndlessSeaFollow( scene, viewTrans );	// lane FARSEA1: the endless sea to the camera's step (a no-op without one)
+		}
+		WwSlowStep slowStep( "scene transform" );
 		scene->transform( viewTrans, time );
 	}
 	wwCellCamDump( scene );	// the eye, with or without the Cell lights row (a no-op when unset)
@@ -4399,15 +4434,24 @@ void GLView::paintGL()
 	/* Lookdev: the three sun-shadow cascade maps, rendered before
 	 * anything else this frame so the ground and the PBR shapes can receive.
 	 * A no-op with the Shadows row off (the default): no map, no program swap. */
-	wwCellCullFrame();	// the last frame's culling counts, printed when they change
-	wwCellCullCameraView( scene->view );	// previs culls only through this eye
-	wwCellUnderwaterFrame( scene );	// the eye under water, decided before anything draws
+	{
+		WwSlowStep slowStep( "cell cull frame and underwater test" );
+		wwCellCullFrame();	// the last frame's culling counts, printed when they change
+		wwCellCullCameraView( scene->view );	// previs culls only through this eye
+		wwCellUnderwaterFrame( scene );	// the eye under water, decided before anything draws
+	}
 	if ( wwLookdevActive() ) {
 		PassTime::Scope pt( PassTime::SunShadows );
 		wwSunShadowPass( scene );
 	}
-	wwCellFlickerFrame( scene );	// this frame's flicker, before any pass reads the lights
-	wwCellXemiLightsFrame( scene );	// placed lights recoloured by their XEMI source, before the lights are read
+	{
+		WwSlowStep slowStep( "cell light flicker" );
+		wwCellFlickerFrame( scene );	// this frame's flicker, before any pass reads the lights
+	}
+	{
+		WwSlowStep slowStep( "cell XEMI lights" );
+		wwCellXemiLightsFrame( scene );	// placed lights recoloured by their XEMI source, before the lights are read
+	}
 	// the cell lights' depth cubes (a no-op unless the document draws cell-lit)
 	PassTime::begin( PassTime::CellShadows );
 	wwCellShadowPass( scene );

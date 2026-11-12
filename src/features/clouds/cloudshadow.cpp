@@ -639,7 +639,7 @@ namespace
 struct CsSlowParts
 {
 	QElapsedTimer clock;
-	qint64 at[4] = { -1, -1, -1, -1 };
+	qint64 at[6] = { -1, -1, -1, -1, -1, -1 };	// EMPTY240 R10-5: + the draw, + the gi/far issues
 	CsSlowParts() { clock.start(); }
 	void mark( int i ) { at[i] = clock.nsecsElapsed(); }
 	~CsSlowParts()
@@ -649,17 +649,18 @@ struct CsSlowParts
 		if ( said >= 8 || end < 20000000 )
 			return;
 		said++;
-		double part[5];
+		double part[7];
 		qint64 prev = 0;
-		for ( int i = 0; i < 4; i++ ) {
+		for ( int i = 0; i < 6; i++ ) {
 			const qint64 t = at[i] < 0 ? prev : at[i];
 			part[i] = double( t - prev ) * 1e-6;
 			prev = t;
 		}
-		part[4] = double( end - prev ) * 1e-6;
+		part[6] = double( end - prev ) * 1e-6;
 		std::fprintf( stderr, "cloud shadow slow: %.1f ms CPU = map %.1f + target %.1f + program %.1f + inputs %.1f + "
-			"draws %.1f (R7-5: the parts of a pass over 20 ms; a part not reached reads 0)\n", double( end ) * 1e-6,
-			part[0], part[1], part[2], part[3], part[4] );
+			"draw %.1f + gi/far issue %.1f + after (restore, law and status lines) %.1f (R7-5, R10-5: the parts of a pass "
+			"over 20 ms; a part not reached reads 0)\n", double( end ) * 1e-6,
+			part[0], part[1], part[2], part[3], part[4], part[5], part[6] );
 	}
 };
 }	// namespace
@@ -881,6 +882,7 @@ void wwCloudShadowPass( Scene * scene )
 		g.qcur = 1 - g.qcur;
 	}
 	r->stopProgram();
+	slow.mark( 4 );	// EMPTY240 R10-5
 	if ( st.swap ) {	// lane PERFFIX3: the back is whole: the receivers take it (and its fit) from now
 		std::swap( g.fbo, g.fbo2 );
 		std::swap( g.tex, g.tex2 );
@@ -898,6 +900,7 @@ void wwCloudShadowPass( Scene * scene )
 		giIssue( fn, g, eyeW );
 	if ( !g.fenceFar && ( g.frame % kGiEvery == kGiEvery / 2 || g.farMean < 0.0f ) )
 		farIssue( fn, g );	// lane SEAMCLOUD1
+	slow.mark( 5 );	// EMPTY240 R10-5
 	restore();
 
 	// the far value: the bands' statistical transmittance at this sun; the edge fade; Ultra's air taps
