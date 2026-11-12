@@ -218,9 +218,38 @@ JIT_VARS = {
 HEIGHT_FIX = [('float3 e = float3(d.xy * t, (6360.0f + o.z) + (d.z * t));', 'float3 e = float3(d.xy * t, 6360.0f + mad(d.z, t, o.z));')]
 MARCH_FIX = []  # HLSLBULK1 r10: the four fixes (MARCH_FIX0 + JIT_VARS['dot'] + HEIGHT_FIX) now live in cloud_march*_ps.hlsl
 # with the fixes: max rel 8.1e-4 outside the grazing ground hits (row 55: disc ~ 0, hit or miss by GL's compile of
-# cvSphere around it); the rest is NV GL fast-math on ill-conditioned terms (the coverage remap near the threshold,
-# probe_cloud_dens10: ~300 texels at 1e-4) compounding over 48 steps. Stated, not tuned: 1e-3, the grazing texels' share.
+# cvSphere around it). r10 (cvMix = fma, p = fma(d, t, o)): full / s4 / prev all BOUND under it (prev 1.9e-3 max,
+# inside the share); left: ~460 cloudDensity base_ values 1 ulp off (cvGradient), compounding over 48 steps.
+# Stated, not tuned: 1e-3, the grazing texels' share.
 MARCH_RULE = ('rel', 1e-3, 1e-4)
+# HLSLBULK1 r10: the resolve's history read, fitted on probe_res_* dumps (notes/hlslbulk1/r10 v_fit.py, pv_fit.py,
+# cr_fit.py) and now in cloud_resolve*_ps.hlsl: the view ray's normalize as the march's (rsqrt of the x-first dot);
+# u = fma(d, dist, cam) - prev and transpose(M) * u per GL column fma(c.z, u.z, fma(c.x, u.x, c.y u.y));
+# xy = fma(pv, size, -0.5); Catmull-Rom w1, w2 by Horner on t2 (fma(t2, fma(3, t, -5), 2), fma(t2, fma(-3, t, 4), t)),
+# w0, w3 precise (the driver re-factored them once w1 / w2 changed). RES_VARS: Vulkan-only trials for the probes.
+RES_VARS = {}
+DENS_INC = '#define WW_FN_cloudDensity\n#include "cloud_common.hlsli"\n#undef WW_FN_cloudDensity'
+
+
+def dens_inline(pairs, head=''):
+    """a vk_edit pair: cloud_common.hlsli's cloudDensity inlined in the entry, with literal replaces (probes, trials)"""
+    src = open(os.path.join(TREE_RES, 'shaders', 'hlsl', 'clouds', 'cloud_common.hlsli'), encoding='latin-1').read()
+    a = src.index('#if defined(WW_FN_cloudDensity) || defined(WW_FN_ALL)\n')
+    body = src[src.index('\n', a) + 1:src.index('\n#endif', a)]
+    for old, new in pairs:
+        assert body.count(old) == 1, old
+        body = body.replace(old, new)
+    return (DENS_INC, head + '\n' + body)
+
+
+# Vulkan-only trials on cloudDensity (probe_cloud_dfn_<k>_prev, probe_march_prev_<k>)
+# r10 results, now in the port: the step's p = fma(d, t, o) (march_prev's camera is off the origin: the shape / detail
+# fetches moved, 161 texels; full has o.xy = 0 and never showed it), cvMix = fma(y - x, a, x) (cvCalAt's c 1 ulp on
+# every texel, mod_ 345 texels; cal_fit.py). Missed: q * (1 / 6) (no change), precise p (worse), base_'s numerator /
+# denominator reshaped (worse or no change; ~460 base_ values stay ~1 ulp). DENS_VARS: {name: pairs on cloudDensity};
+# STEP_VARS: {name: (DENS_VARS key | None, pairs on the entry)}.
+DENS_VARS = {}
+STEP_VARS = {}
 # DXC ICEs on the dead code after a probe's early return with the port's mad height / jitter: probes put the old text back
 ICE_REV = [(HEIGHT_FIX[0][1], HEIGHT_FIX[0][0]),
            ('frac(' + JIT_DOT + ')', 'frac(dot(q, float2(0.067110560834407806396484375f, 0.005837149918079376220703125f)))')]
@@ -256,7 +285,7 @@ def cloud_jobs():
             out.append(dict(name='cloud%s_%s' % (suffix, name), size=size, hlsl='clouds/cloud_march%s_ps.hlsl' % suffix,
                             glsl='clouds/cloud_march.frag', defines=defs, uniforms=u, textures=T, rule=MARCH_RULE,
                             vk_edit=MARCH_FIX,  # the port carries the fixes (_a jitters by blue noise: no dot)
-                            reds=red if name == 'march_full' else []))
+                            reds=red))  # every march job carries the red (the gate wants a red per job)
 
         def rtex(out_dir, suffix=suffix):
             def tgt(job, k, fmt):
@@ -288,7 +317,7 @@ def jobs(want, tex):
     ]
     for j in all_:
         j['rule'] = VOLSKY_RULE
-    # L6 clouds run only when named ('clouds' = all of them): march_prev and resolve FAIL their bound (see MARCH_RULE)
+    # L6 clouds run only when named ('clouds' = all of them): every march BOUND, resolves EXACT (r10)
     clouds = cloud_jobs()
     if 'clouds' in (want or []):
         want = list(want) + [j['name'] for j in clouds]
@@ -435,4 +464,99 @@ def jobs(want, tex):
                 (v[-1][1] if v[-1][0] == SPHERE_D else SPHERE_D, (v[-1][1] if v[-1][0] == SPHERE_D else SPHERE_D) + ' return float2(c, disc);')]))
         for k, v in SPHERE_VARS.items():
             probes.append(dict(ray, name='probe_cloud_ray_' + k, vk_edit=ray['vk_edit'] + v))
+    pm = [j for j in clouds if j['name'] == 'cloud_march_prev']
+    if cm and pm:  # HLSLBULK1 r10: the march probes on the last frame's camera (march_prev's near-horizon rows)
+        gs, vs = 'float tr = exp( -dens * kCvSigma * dt );', 'float tr = exp(((-dens) * 40.0f) * dt);'
+        probes.append(dict(cm[0], name='probe_cloud_last', reds=[],  # in place: the last step's T, tr, dens, dt; t, i, S.x, tauL
+                           gl_edit=[('void main()', 'vec4 gA = vec4( 0.0 ), gB = vec4( 0.0 ); void main()'),
+                                    (gs, gs + ' gA = vec4( T, tr, dens, dt ); gB = vec4( t, float( i ), S.x, tauL );', 2),
+                                    ('cvOut = vec4( L, T );', 'cvOut = gA;'), ('cvDepth = vec4( dm );', 'cvDepth = gB;')],
+                           vk_edit=[('void frag_main()', 'static float4 gA; static float4 gB; void frag_main()'),
+                                    (vs, vs + ' gA = float4(T, tr, dens, dt); gB = float4(t, float(i), S.x, tauL);'),
+                                    ('cvOut = float4(L, T);', 'cvOut = gA;'), ('cvDepth = dm.xxxx;', 'cvDepth = gB;')]))
+        # cloudDensity's inputs / outputs at step 10 (dens10: p exact, dens off): the .hlsli is inlined so it can be edited
+        ga, gb = 'float mod_ = mix( det,', 'd += clamp( ( base_ - mod_ )'
+        lg = ('log2( max( cvFootKm * 128.0 / kCvShapeKm, 1.0 ) )', 'log2( max( cvFootKm * 32.0 / kCvDetailKm, 1.0 ) )')
+        vlg = ('log2(max((cvFootKm * 128.0f) / 6.0f, 1.0f))', 'log2(max((cvFootKm * 32.0f) / 0.60000002384185791015625f, 1.0f))')
+        gdn = [('float cvCalAt( int b, float c )', 'vec4 gD = vec4( 0.0 ), gE = vec4( 0.0 ); float cvCalAt( int b, float c )'),
+               (ga, 'gD = vec4( s, %s, det, %s ); %s' % (lg[0], lg[1], ga), 2), (gb, 'gE = vec4( base_, mod_, hf, c ); ' + gb, 2),
+               ('void main()', 'vec4 gA = vec4( 0.0 ), gB = vec4( 0.0 ); void main()'),
+               ('float dens = cvDens( p );', 'gD = vec4( -1.0 ); gE = vec4( -1.0 ); float dens = cvDens( p ); if ( i == 10 ) { gA = gD; gB = gE; }', 2),
+               ('cvOut = vec4( L, T );', 'cvOut = gA;'), ('cvDepth = vec4( dm );', 'cvDepth = gB;')]
+        vdn = [('float mod_ = ', 'gD = float4(s, %s, det, %s); float mod_ = ' % vlg), ('d = mad(clamp(', 'gE = float4(base_, mod_, hf, c); d = mad(clamp(')]
+        vstep = [('void frag_main()', 'static float4 gA; static float4 gB; void frag_main()'),
+                 ('float dens = cvDens(param_14);', 'gD = -1.0f.xxxx; gE = -1.0f.xxxx; float dens = cvDens(param_14); if (i == 10) { gA = gD; gB = gE; }'),
+                 ('cvOut = float4(L, T);', 'cvOut = gA;'), ('cvDepth = dm.xxxx;', 'cvDepth = gB;')]
+        probes.append(dict(cm[0], name='probe_cloud_dfn', reds=[], gl_edit=gdn,
+                           vk_edit=[dens_inline(vdn, 'static float4 gD; static float4 gE;')] + vstep))
+        for k, v in DENS_VARS.items():  # Vulkan-only trials: the probe and the whole march with the variant
+            probes.append(dict(cm[0], name='probe_cloud_dfn_' + k, reds=[], gl_edit=gdn,
+                               vk_edit=[dens_inline(v + vdn, 'static float4 gD; static float4 gE;')] + vstep))
+            probes.append(dict(pm[0], name='probe_march_prev_' + k, reds=[], vk_edit=[dens_inline(v)]))
+        for k, (dk, v) in STEP_VARS.items():
+            dv = [dens_inline(DENS_VARS[dk])] if dk else []
+            probes.append(dict(cm[0], name='probe_cloud_dfn_' + k, reds=[], gl_edit=gdn,
+                               vk_edit=[dens_inline((DENS_VARS[dk] if dk else []) + vdn, 'static float4 gD; static float4 gE;')] + v + vstep))
+            probes.append(dict(pm[0], name='probe_march_prev_' + k, reds=[], vk_edit=dv + v))
+        for p in [p for p in probes if p['name'] in ('probe_cloud_gate', 'probe_cloud_dens0', 'probe_cloud_dens10',
+                                                     'probe_cloud_dens30', 'probe_cloud_step_first', 'probe_cloud_step_mid',
+                                                     'probe_cloud_height', 'probe_cloud_last', 'probe_cloud_dfn')
+                  or p['name'].startswith('probe_cloud_dfn_')]:
+            probes.append(dict(p, name=p['name'] + '_prev', uniforms=pm[0]['uniforms']))
+    rs = [j for j in clouds if j['name'] == 'cloud_resolve']
+    if rs:  # HLSLBULK1 r10: the Off resolve's history read, one intermediate into rt0 instead of the move-boxed colour
+        gr = 'cvOut = cvMoveBox( q, uv, pv, vec4( max( c.rgb, vec3( 0.0 ) ), clamp( c.a, 0.0, 1.0 ) ) );'
+        vr = 'cvOut = cvMoveBox(param_2, param_3, param_4, param_5);'
+        for k, (g, v) in {'pv': ('vec4( pv, f )', 'float4(pv, f)'), 'c': ('c', 'c'), 'wx': ('wx', 'wx'),
+                          'wy': ('wy', 'wy')}.items():
+            probes.append(dict(rs[0], name='probe_res_' + k, reds=[], gl_edit=[(gr, 'cvOut = %s;' % g)],
+                               vk_edit=[(vr, 'cvOut = %s;' % v)]))
+        # mid-chain, in place: a static set right after the named line, written at the end
+        gd = ('vec4 cvCatmull( float t )', 'vec4 gPrb = vec4( 0.0 );\nvec4 cvCatmull( float t )')
+        vd = ('float4 cvCatmull(float t)', 'static float4 gPrb;\nfloat4 cvCatmull(float t)')
+        ra = [j for j in clouds if j['name'] == 'cloud_a_resolve']
+        if ra:  # the accumulation resolve's blend: weight and inputs, then Vulkan-only trials of the mix
+            ga, va = 'cvOut = mix( c, coarse, a );', 'cvOut = lerp(c, coarse, a.xxxx);'
+            probes.append(dict(ra[0], name='probe_resa_a', reds=[], gl_edit=[(ga, 'cvOut = vec4( a, c.a, coarse.a, 0.0 );')],
+                               vk_edit=[(va, 'cvOut = float4(a, c.w, coarse.w, 0.0f);')]))
+            AMID = {'te': ('float te = cvAccReset + cvAccResetSd * min( sd.a, hsd ) / 3.0;', 'gPrb = vec4( te, hm, mu.a, min( sd.a, hsd ) );',
+                           'float te_1 = cvAccReset + ((cvAccResetSd * min(sd_1.w, hsd_1)) / 3.0f);',
+                           'gPrb = float4(te_1, hm_1, mu_1.w, min(sd_1.w, hsd_1));'),
+                    'a1': ('a = max( a, smoothstep( te, 2.0 * te, abs( hm - mu.a ) ) );', 'gPrb = vec4( a, 0.0, 0.0, 0.0 );',
+                           'a = max(a, smoothstep(te_1, 2.0f * te_1, abs(hm_1 - mu_1.w)));', 'gPrb = float4(a, 0.0f, 0.0f, 0.0f);'),
+                    'tl': ('float tl = cvLitReset + cvAccResetSd * min( fsd, lsd ) / ( 3.0 * lref );', 'gPrb = vec4( tl, lm, fm, lref );',
+                           'float tl = mad((cvAccResetSd * min(fsd, lsd)) * (1.0f / lref), 0.3333333432674407958984375f, cvLitReset);',
+                           'gPrb = float4(tl, lm, fm, lref);'),
+                    'sd': ('float tl = cvLitReset + cvAccResetSd * min( fsd, lsd ) / ( 3.0 * lref );', 'gPrb = vec4( sd.a, hsd, lsd, fsd );',
+                           'float tl = mad((cvAccResetSd * min(fsd, lsd)) * (1.0f / lref), 0.3333333432674407958984375f, cvLitReset);',
+                           'gPrb = float4(sd_1.w, hsd_1, lsd, fsd);')}
+            # trials that went into cloud_resolve_a_ps.hlsl (r10): cvLum as the x-first mad chain ('lx'; y-first, z-first,
+            # unfused all missed), tl = fma(x * rcp(lref), 1/3, reset) ('tA'; x / lref the same, a 1 / (3 lref) factor 1 ulp)
+            RESA_VARS = {}
+            for vn, vv in RESA_VARS.items():
+                probes.append(dict(ra[0], name='probe_resa_full_' + vn, reds=[], vk_edit=vv))
+            for k, (g1, g2, v1, v2) in AMID.items():
+                for vn, vv in [('', [])] + list(RESA_VARS.items()):
+                    probes.append(dict(ra[0], name='probe_resa_' + k + ('_' + vn if vn else ''), reds=[],
+                                       gl_edit=[gd, (g1, g1 + ' ' + g2), (ga, 'cvOut = gPrb;')],
+                                       vk_edit=[vd, (v1, v1 + ' ' + v2), (va, 'cvOut = gPrb;')] + vv))
+            for k, new in {'fma': 'cvOut = mad(coarse - c, a.xxxx, c);',
+                           'plain': 'precise float4 dl = (coarse - c) * a; cvOut = c + dl;'}.items():
+                probes.append(dict(ra[0], name='probe_resa_' + k, reds=[], vk_edit=[(va, new)]))
+        MID = {'d': ('float dist = min( dp < 1e3 ? dp : dk, 400.0 );', 'gPrb = vec4( d, dist );',
+                     'float dist = min((dp < 1000.0f) ? dp : dk, 400.0f);', 'gPrb = float4(d, dist);'),
+               'v': ('vec3 v = transpose( cvPrevCam ) * ( cvCamKm + d * dist - cvPrevCamKm );', 'gPrb = vec4( v, dist );',
+                     'mad(cvPrevCam[2].z, u.z, mad(cvPrevCam[2].x, u.x, cvPrevCam[2].y * u.y)));', 'gPrb = float4(v, dist);'),
+               'pn': ('vec2 pn = vec2( vr.x * cvPrevProj.x - cvPrevProj.z, vr.y * cvPrevProj.y - cvPrevProj.w );',
+                      'gPrb = vec4( vr, pn );',
+                      'float2 pn = float2((vr.x * cvPrevProj.x) - cvPrevProj.z, (vr.y * cvPrevProj.y) - cvPrevProj.w);',
+                      'gPrb = float4(vr, pn);')}
+        for k, (ga, gs, va, vs) in MID.items():
+            for vn, vv in [('', [])] + list(RES_VARS.items()):
+                probes.append(dict(rs[0], name='probe_res_' + k + ('_' + vn if vn else ''), reds=[],
+                                   gl_edit=[gd, (ga, ga + ' ' + gs, 2), (gr, 'cvOut = gPrb;')],
+                                   vk_edit=[vd, (va, va + ' ' + vs), (vr, 'cvOut = gPrb;')] + vv))
+        for vn, vv in RES_VARS.items():
+            probes.append(dict(rs[0], name='probe_res_pv_' + vn, reds=[], gl_edit=[(gr, 'cvOut = vec4( pv, f );')],
+                               vk_edit=vv + [(vr, 'cvOut = float4(pv, f);')]))
     return [j for j in all_ if not want or j['name'] in want] + [j for j in clouds + probes if j['name'] in want]

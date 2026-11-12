@@ -512,7 +512,7 @@ void frag_main()
         for (int i = 0; i < cvSteps; i++)
         {
             float t = t0 + ((float(i) + j) * dt);
-            float3 p = o + (d * t);
+            float3 p = mad(d, t.xxx, o);	// NV GL fuses the sample's position
             float3 param_10 = o;
             float3 param_11 = d;
             float param_12 = t;

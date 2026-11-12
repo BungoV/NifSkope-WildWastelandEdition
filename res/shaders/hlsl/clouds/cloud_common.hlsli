@@ -13,12 +13,12 @@ static const float kCvVarWrapKm = 384.0;
 static const float kCvCurlPeriodKm = 24.0;
 #endif
 
-// GLSL mix(x, y, a) = x * (1 - a) + y * a as NV GL lowers it (HLSL lerp is x + a * (y - x): other roundings)
+// GLSL mix(x, y, a) as NV GL lowers it: fma(y - x, a, x) (fitted on cvCalAt and mod_, HLSLBULK1 r10)
 #ifndef WW_CVMIX
 #define WW_CVMIX
 float cvMix(float x, float y, float a)
 {
-    return mad(y, a, x * (1.0f - a));
+    return mad(y - x, a, x);
 }
 #endif
 
