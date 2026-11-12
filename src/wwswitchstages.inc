@@ -1481,6 +1481,7 @@
 { "WW_TEST_FACEBONES_OUT", 2, "src/nifskope_ui.cpp:3097 NifSkope::createWindow | createWindow: picks which harness the window runs" },
 { "WW_TEST_PICKNODE", 2, "src/nifskope_ui.cpp:3508 NifSkope::createWindow | createWindow: picks which harness the window runs" },
 { "WW_TEST_SAVE", 2, "src/nifskope_ui.cpp:3763 NifSkope::createWindow | createWindow: picks which harness the window runs" },
+{ "WW_TEXCAP_RED", 0, "src/gl/wwuploadcap.h:162 WwUp::Paint::Paint | hand: read at each paint; 1 = no count of textures made a paint (only ms and MB), build 78 (EMPTY240 R6-5)" },
 { "WW_TEXCOLOR_TEST", 2, "src/nifskope_ui.cpp:18737 NifSkope::createWindow | createWindow: picks which harness the window runs" },
 { "WW_TEX_CENSUS", 0, "src/gl/gltexloaders.cpp:1042 TexCache::texLoadDDS | (b) live (R7 item 7): texLoadDDS re-reads it per set; it feeds no cell data" },
 { "WW_TEX_DRAIN_RED", 0, "src/gl/gltex.cpp:554 TexCache::loadTex | (b) live (R7 item 7): TexCache::loadTex re-reads it per set; it feeds no cell data" },

@@ -535,6 +535,7 @@ std::uint16_t TexCache::loadTex( Tex & txIn, const NifModel * nif )
 {
 	WwDp::abortRecording();	// lane GAPPERF-BINDLESS: a load is never replayed
 	WwUp::Charge wwUpCharge;	// lane EMPTY240 R4-1: its time and bytes count against the paint's budget
+	WwUp::texMade();	// lane EMPTY240 R6-5: and its count
 	Tex *	t = &txIn;
 	Tex::ImageInfo *	i = t->imageInfo;
 	CellSpeed::Acc speedAcc( "texture loads (find, decode, upload)" );   // lane SPEED1

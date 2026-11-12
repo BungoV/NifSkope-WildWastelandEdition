@@ -18,11 +18,15 @@ namespace WwUp
 
 constexpr qint64 kBudgetMs = 16;
 constexpr qint64 kBudgetMB = 64;
+/* lane EMPTY240 R6-5: build 78's first paint made 163 textures (18.9 MB) inside the sun casters, in budget by load time
+ * and bytes, and the GPU spent 465.7 ms there: the driver's own work for a new texture lands at its first use, which
+ * the CPU clock never sees. A paint also makes at most kBudgetTex textures. Red WW_TEXCAP_RED=1: no count, build 78. */
+constexpr int kBudgetTex = 32;
 
 struct State
 {
-	bool inPaint = false, red = false;
-	int depth = 0, items = 0;
+	bool inPaint = false, red = false, texCapRed = false;
+	int depth = 0, items = 0, texN = 0;
 	qint64 bytes = 0, ns = 0, bytes0 = 0;
 	const qint64 * meter = nullptr;	// the texture cache's uploaded bytes (PassTime::cacheCounts().texBytes)
 	QElapsedTimer clock;	// the outermost charge's
@@ -47,6 +51,8 @@ inline bool spent()
 	const State & s = st();
 	if ( !s.inPaint || s.red || s.items <= 0 )
 		return false;
+	if ( !s.texCapRed && s.texN >= kBudgetTex )
+		return true;
 	qint64 b = s.bytes, n = s.ns;
 	if ( s.depth > 0 ) {
 		if ( s.meter )
@@ -96,6 +102,12 @@ struct Charge
 	}
 	static void addBytes( qint64 b ) { st().bytes += b; }	// bytes the meter does not see (meshes)
 };
+
+//! R6-5: a texture made this paint (TexCache::loadTex)
+inline void texMade()
+{
+	st().texN++;
+}
 
 inline void deferTex()
 {
@@ -147,8 +159,10 @@ struct Paint
 	{
 		State & s = st();
 		s.red = wwEnvInt( "WW_UPLOAD_RED" ) == 1;
+		s.texCapRed = wwEnvInt( "WW_TEXCAP_RED" ) == 1;
 		s.inPaint = true;
 		s.items = 0;
+		s.texN = 0;
 		s.bytes = s.ns = 0;
 		s.meter = texBytes;
 		if ( !s.win.isValid() )
@@ -167,12 +181,13 @@ struct Paint
 		if ( s.win.elapsed() < 5000 )
 			return;
 		if ( s.winTex + s.winMesh + s.winPool + s.winPickWait > 0 || s.winPickNs > kBudgetMs * 1000000 )
-			std::fprintf( stderr, "upload cap: %lld of %lld paints reached the budget (%lld ms or %lld MB a paint); %lld texture binds "
+			std::fprintf( stderr, "upload cap: %lld of %lld paints reached the budget (%lld ms, %lld MB or %d textures a paint; red "
+				"WW_TEXCAP_RED=1: no texture count, build 78); %lld texture binds "
 				"and %lld mesh draws waited for a later paint, %lld shapes drew from their own buffers while the geometry pools "
 				"waited (red WW_POOLCAP_RED=1: pools outside the budget, build 77); uploads %.1f MB, %.1f ms load time in all, "
 				"longest paint %.1f ms (red WW_UPLOAD_RED=1: no budget, build 76); %lld first program picks (%.1f ms), %lld new "
 				"shapes waited a paint for theirs (red WW_PICKCAP_RED=1: picks outside the budget, build 78)\n",
-				(long long) s.winCapped, (long long) s.winPaints, (long long) kBudgetMs, (long long) kBudgetMB,
+				(long long) s.winCapped, (long long) s.winPaints, (long long) kBudgetMs, (long long) kBudgetMB, kBudgetTex,
 				(long long) s.winTex, (long long) s.winMesh, (long long) s.winPool, double( s.winBytes ) / 1048576.0,
 				double( s.winNs ) * 1e-6, double( s.winMaxNs ) * 1e-6, (long long) s.winPicks, double( s.winPickNs ) * 1e-6,
 				(long long) s.winPickWait );
@@ -182,7 +197,8 @@ struct Paint
 	}
 	static bool spentAfter( const State & s )
 	{
-		return !s.red && s.items > 0 && ( s.bytes >= ( kBudgetMB << 20 ) || s.ns >= kBudgetMs * 1000000 );
+		return !s.red && s.items > 0 && ( s.bytes >= ( kBudgetMB << 20 ) || s.ns >= kBudgetMs * 1000000
+			|| ( !s.texCapRed && s.texN >= kBudgetTex ) );
 	}
 };
 
