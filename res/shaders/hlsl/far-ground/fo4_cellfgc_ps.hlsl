@@ -376,18 +376,18 @@ static float wwFarAo;
 
 struct SPIRV_Cross_Input
 {
-    float3 LightDir : TEXCOORD0;
-    float3 ViewDir : TEXCOORD1;
-    float2 texCoord : TEXCOORD2;
-    nointerpolation float4 A : TEXCOORD3;
-    float4 C : TEXCOORD4;
-    nointerpolation float4 D : TEXCOORD5;
-    float rawVertexAlpha : TEXCOORD6;
-    float wwFarSkyVis : TEXCOORD7;
-    float wwFarAo : TEXCOORD8;
-    float3x3 btnMatrix : TEXCOORD9;
-    nointerpolation float3x3 reflMatrix : TEXCOORD12;
-    nointerpolation float2 farLadder : TEXCOORD15;
+    WW_LOC(3) float3 LightDir : TEXCOORD3;
+    WW_LOC(4) float3 ViewDir : TEXCOORD4;
+    WW_LOC(8) float2 texCoord : TEXCOORD8;
+    WW_LOC(0) nointerpolation float4 A : TEXCOORD0;
+    WW_LOC(1) float4 C : TEXCOORD1;
+    WW_LOC(2) nointerpolation float4 D : TEXCOORD2;
+    WW_LOC(12) float rawVertexAlpha : TEXCOORD12;
+    WW_LOC(15) float wwFarSkyVis : TEXCOORD15;
+    WW_LOC(14) float wwFarAo : TEXCOORD14;
+    WW_LOC(5) float3x3 btnMatrix : TEXCOORD5;
+    WW_LOC(9) nointerpolation float3x3 reflMatrix : TEXCOORD9;
+    WW_LOC(13) nointerpolation float2 farLadder : TEXCOORD13;
     float4 gl_FragCoord : SV_Position;
     bool gl_FrontFacing : SV_IsFrontFace;
 };

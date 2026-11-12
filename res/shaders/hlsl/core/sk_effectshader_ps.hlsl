@@ -60,11 +60,11 @@ static float3 LightDir;
 
 struct SPIRV_Cross_Input
 {
-    float3 LightDir : TEXCOORD0;
-    float3 ViewDir : TEXCOORD1;
-    float2 texCoord : TEXCOORD2;
-    float4 C : TEXCOORD3;
-    float3 N : TEXCOORD4;
+    WW_LOC(3) float3 LightDir : TEXCOORD3;
+    WW_LOC(4) float3 ViewDir : TEXCOORD4;
+    WW_LOC(8) float2 texCoord : TEXCOORD8;
+    WW_LOC(1) float4 C : TEXCOORD1;
+    WW_LOC(5) float3 N : TEXCOORD5;
 };
 
 struct SPIRV_Cross_Output

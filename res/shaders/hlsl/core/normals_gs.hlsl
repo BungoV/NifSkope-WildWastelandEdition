@@ -42,14 +42,14 @@ static float3x3 btnMatrix[1];
 
 struct SPIRV_Cross_Input
 {
-    float3x3 btnMatrix : TEXCOORD0;
-    float4 vsColor : TEXCOORD3;
+    WW_LOC(5) float3x3 btnMatrix : TEXCOORD5;
+    WW_LOC(0) float4 vsColor : TEXCOORD0;
     float4 gl_PositionIn : SV_Position;
 };
 
 struct SPIRV_Cross_Output
 {
-    float4 C : TEXCOORD0;
+    WW_LOC(1) float4 C : TEXCOORD1;
     float4 gl_Position : SV_Position;
 };
 

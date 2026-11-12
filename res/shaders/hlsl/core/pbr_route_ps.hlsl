@@ -16,8 +16,8 @@ static float4 fragColor;
 
 struct SPIRV_Cross_Input
 {
-    float3 LightDir : TEXCOORD0;
-    float3x3 btnMatrix : TEXCOORD1;
+    WW_LOC(3) float3 LightDir : TEXCOORD3;
+    WW_LOC(5) float3x3 btnMatrix : TEXCOORD5;
     bool gl_FrontFacing : SV_IsFrontFace;
 };
 

@@ -56,27 +56,27 @@ static float2 pQ;
 
 struct SPIRV_Cross_Input
 {
-    float3 vsLightDir : TEXCOORD0;
-    float3 vsViewDir : TEXCOORD1;
-    float4 vsColor : TEXCOORD2;
-    float vsParticleSize : TEXCOORD3;
-    float2 vsUVOffset : TEXCOORD4;
-    float vsAngle : TEXCOORD5;
+    WW_LOC(2) float3 vsLightDir : TEXCOORD2;
+    WW_LOC(5) float3 vsViewDir : TEXCOORD5;
+    WW_LOC(0) float4 vsColor : TEXCOORD0;
+    WW_LOC(3) float vsParticleSize : TEXCOORD3;
+    WW_LOC(4) float2 vsUVOffset : TEXCOORD4;
+    WW_LOC(1) float vsAngle : TEXCOORD1;
     float4 gl_PositionIn : SV_Position;
 };
 
 struct SPIRV_Cross_Output
 {
-    float3 LightDir : TEXCOORD0;
-    float3 ViewDir : TEXCOORD1;
-    float2 texCoords[9] : TEXCOORD2;
-    nointerpolation float4 A : TEXCOORD11;
-    float4 C : TEXCOORD12;
-    nointerpolation float4 D : TEXCOORD13;
-    float3 N : TEXCOORD14;
-    float3 pPos : TEXCOORD15;
-    float2 pQ : TEXCOORD16;
-    nointerpolation float4 pSprite : TEXCOORD17;
+    WW_LOC(3) float3 LightDir : TEXCOORD3;
+    WW_LOC(4) float3 ViewDir : TEXCOORD4;
+    WW_LOC(6) float2 texCoords[9] : TEXCOORD6;
+    WW_LOC(0) nointerpolation float4 A : TEXCOORD0;
+    WW_LOC(1) float4 C : TEXCOORD1;
+    WW_LOC(2) nointerpolation float4 D : TEXCOORD2;
+    WW_LOC(5) float3 N : TEXCOORD5;
+    WW_LOC(15) float3 pPos : TEXCOORD15;
+    WW_LOC(16) float2 pQ : TEXCOORD16;
+    WW_LOC(17) nointerpolation float4 pSprite : TEXCOORD17;
     float4 gl_Position : SV_Position;
 };
 
