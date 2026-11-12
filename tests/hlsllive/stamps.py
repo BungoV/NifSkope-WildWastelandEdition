@@ -66,7 +66,7 @@ _LEVELS = {}
 def levels_of(hlsl):
     """R8: res/shaders/hlsl/optlevels.txt = `<stage file name>\\t<DXC level>` for the stages that stay below the default level
     (the ones whose optimised build failed A4); every other stage is built at DEFAULT_OPT. -> {file name: level}"""
-    p = os.path.normpath(hlsl).replace('\\', '/')
+    p = os.path.abspath(hlsl).replace('\\', '/')
     root = p.split('/res/shaders/hlsl/')[0] + '/res/shaders/hlsl/optlevels.txt' if '/res/shaders/hlsl/' in p else ''
     if root not in _LEVELS:
         _LEVELS[root] = {k: v[0] for k, v in load_table(root, 2).items()} if root else {}

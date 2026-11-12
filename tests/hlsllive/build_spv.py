@@ -25,12 +25,10 @@ def shifts_of(path, src):
 
 def bool_names(src):
     """the LooseUniforms members declared bool / boolN (a uint in SPIR-V, set by the app with glUniform1i)"""
-    m = re.search(r'cbuffer LooseUniforms[^{]*\{(.*?)\n\};?', src, re.S)
-    if not m:
-        return set()
     out = set()
-    for d in re.finditer(r'\bbool[1-4]?\s+(\w+)', m.group(1)):
-        out.add(d.group(1))
+    for m in re.finditer(r'(?:cbuffer LooseUniforms[^{]*|\nstruct \w+\s*)\{(.*?)\n\};?', src, re.S):   # R9: struct members too (spvgl checks the leaf is a uint)
+        for d in re.finditer(r'\bbool[1-4]?\s+(\w+)', m.group(1)):
+            out.add(d.group(1))
     return out
 
 
@@ -47,7 +45,7 @@ def compile_raw(hlsl, raw, defines=()):
     return r.returncode == 0, r.stderr[-600:]
 
 
-def build(hlsl, out, defines=(), locs=None, precompiled=False):
+def build(hlsl, out, defines=(), locs=None, precompiled=False, ps_remap=None):
     raw = out + '.raw'
     src = open(hlsl, encoding='utf-8', errors='replace').read()
     if not precompiled:
@@ -55,7 +53,7 @@ def build(hlsl, out, defines=(), locs=None, precompiled=False):
         if not ok:
             return None, err
     rep = {}
-    data, rep = spvgl.patch(open(raw, 'rb').read(), BLOCKS, rep, locs, bool_names(src))
+    data, rep = spvgl.patch(open(raw, 'rb').read(), BLOCKS, rep, locs, bool_names(src), ps_remap)
     os.remove(raw)
     open(out, 'wb').write(data)
     return len(data), rep

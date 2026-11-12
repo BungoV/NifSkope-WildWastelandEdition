@@ -22,12 +22,15 @@ OP_FUNCTION, OP_LABEL = 54, 248
 OP_VARIABLE, OP_LOAD, OP_STORE, OP_ACCESS_CHAIN, OP_IN_BOUNDS_AC = 59, 61, 62, 65, 66
 OP_DECORATE, OP_MEMBER_DECORATE = 71, 72
 OP_SAMPLED_IMAGE, OP_IMAGE, OP_BITCAST = 86, 100, 124
+OP_COPY_OBJECT = 83
 SAMPLED_IMAGE_CONSUMERS = {87, 88, 89, 90, 91, 92, 93, 94, 96, 97, 105}   # operand [2] is a sampled image
 DEC_BLOCK, DEC_BUFFER_BLOCK, DEC_ROW_MAJOR, DEC_COL_MAJOR, DEC_ARRAY_STRIDE, DEC_MATRIX_STRIDE = 2, 3, 4, 5, 6, 7
 DEC_BUILTIN, DEC_LOCATION, DEC_BINDING, DEC_DESCRIPTOR_SET, DEC_OFFSET = 11, 30, 33, 34, 35
 SC_UNIFORM_CONSTANT, SC_INPUT, SC_UNIFORM, SC_OUTPUT, SC_FUNCTION = 0, 1, 2, 3, 7
 BI_VERTEX_INDEX, BI_INSTANCE_INDEX, BI_VERTEX_ID, BI_INSTANCE_ID = 42, 43, 5, 6
 EM_VERTEX = 0
+EM_FRAGMENT = 4
+BI_POINT_COORD = 16
 
 HEAD_OPS = {OP_CAP, OP_EXT, 11, 14, OP_ENTRY, OP_EXECMODE, 3, 4, 5, 6, 7, 8}   # up to the debug names
 ANNOT_OPS = {71, 72, 73, 74, 75, 5632}
@@ -195,6 +198,82 @@ def int_twin(mod, tid, cache):
     raise ValueError('bool uniform of an unexpected type (op %d)' % t.op)
 
 
+def uint_leaf(mod, tid):
+    t = mod.defn[tid]
+    if t.op in (OP_TYPE_ARRAY, OP_TYPE_VECTOR):
+        return uint_leaf(mod, t.a[1])
+    return t.op == OP_TYPE_INT and t.a[1] == 32 and t.a[2] == 0
+
+
+def struct_twin(mod, tid, bool_names, cache):
+    """R9: the type with every bool-named unsigned member (at any depth, through arrays of structs) declared int; the same id when
+    nothing changes. The new struct keeps the member names (GL names a struct uniform's members from them)."""
+    key = ('s', tid)
+    if key in cache:
+        return cache[key]
+    t = mod.defn[tid]
+    res = tid
+    if t.op == OP_TYPE_ARRAY:
+        e = struct_twin(mod, t.a[1], bool_names, cache)
+        if e != t.a[1]:
+            res = mod.new_id()
+            mod.add_glob(Inst(OP_TYPE_ARRAY, [res, e, t.a[2]]))
+    elif t.op == OP_TYPE_STRUCT:
+        mem = []
+        for k, m in enumerate(t.a[1:]):
+            if mod.mnames.get((tid, k), '') in bool_names and uint_leaf(mod, m):
+                mem.append(int_twin(mod, m, cache))
+            else:
+                mem.append(struct_twin(mod, m, bool_names, cache))
+        if mem != list(t.a[1:]):
+            res = mod.new_id()
+            mod.add_glob(Inst(OP_TYPE_STRUCT, [res] + mem))
+            for k in range(len(mem)):
+                nm = mod.mnames.get((tid, k))
+                if nm is not None:
+                    mod.head.append(Inst(OP_MEMBER_NAME, [res, k] + str_words(nm)))
+                    mod.mnames[(res, k)] = nm
+            if tid in mod.names:
+                mod.add_name(res, mod.names[tid])
+    cache[key] = res
+    return res
+
+
+def convert_back(mod, out, val, ntid, otid):
+    """emit into `out` the instructions turning a value of the twinned type `ntid` into the original type `otid` (int -> uint bitcast at
+    the leaves, struct / array rebuilt by OpCompositeExtract + OpCompositeConstruct); -> the id of the result"""
+    if ntid == otid:
+        return val
+    nt, ot = mod.defn[ntid], mod.defn[otid]
+    if nt.op == OP_TYPE_STRUCT:
+        parts = []
+        for k in range(len(nt.a[1:])):
+            e = mod.new_id()
+            out.append(Inst(81, [nt.a[1 + k], e, val, k]))
+            parts.append(convert_back(mod, out, e, nt.a[1 + k], ot.a[1 + k]))
+    elif nt.op == OP_TYPE_ARRAY:
+        parts = []
+        for k in range(const_value(mod, nt.a[2])):
+            e = mod.new_id()
+            out.append(Inst(81, [nt.a[1], e, val, k]))
+            parts.append(convert_back(mod, out, e, nt.a[1], ot.a[1]))
+    else:
+        r = mod.new_id()
+        out.append(Inst(OP_BITCAST, [otid, r, val]))
+        return r
+    r = mod.new_id()
+    out.append(Inst(80, [otid, r] + parts))
+    return r
+
+
+def walk_type(mod, tid, idx):
+    """the type reached from `tid` through access-chain indices (struct members by constant, arrays / vectors / matrices by element)"""
+    for i in idx:
+        t = mod.defn[tid]
+        tid = t.a[1 + const_value(mod, i)] if t.op == OP_TYPE_STRUCT else t.a[1]
+    return tid
+
+
 def ptr_type(mod, sc, pointee, cache):
     k = (sc, pointee)
     if k not in cache:
@@ -204,7 +283,7 @@ def ptr_type(mod, sc, pointee, cache):
     return cache[k]
 
 
-def patch(data, block_bindings, report=None, locs=None, bool_names=()):
+def patch(data, block_bindings, report=None, locs=None, bool_names=(), ps_remap=None):
     locs = locs if locs is not None else {}   # name -> (location, slots), shared by every stage of one program
     mod = Module(data)
     rep = report if report is not None else {}
@@ -236,6 +315,23 @@ def patch(data, block_bindings, report=None, locs=None, bool_names=()):
         for e in lst:
             if e[0] == DEC_BUILTIN and e[1] in (BI_VERTEX_INDEX, BI_INSTANCE_INDEX):
                 e[1] = BI_VERTEX_ID if e[1] == BI_VERTEX_INDEX else BI_INSTANCE_ID
+
+    # ---- R9: a pixel shader converted for a points geometry twin (input wwPointCoord) in a program with no geometry stage: its inputs are
+    # renumbered to the vertex shader's outputs by name, and wwPointCoord becomes the real gl_PointCoord (cell_fardots, selection)
+    if ps_remap and stage == EM_FRAGMENT:
+        for v in gvars:
+            vid, sc = v.a[1], v.a[2]
+            nm = mod.name_of(vid)
+            if sc == SC_INPUT and nm.startswith('in.var.TEXCOORD') and nm[len('in.var.TEXCOORD'):].isdigit():
+                to = ps_remap.get(int(nm[len('in.var.TEXCOORD'):]))
+                if to is None:
+                    continue
+                mod.annot = [x for x in mod.annot if not (x.op == OP_DECORATE and x.a[0] == vid and x.a[1] == DEC_LOCATION)]
+                mod.decs[vid] = [e for e in mod.decs.get(vid, []) if e[0] != DEC_LOCATION]
+                if to < 0:
+                    mod.add_dec(vid, DEC_BUILTIN, BI_POINT_COORD)
+                else:
+                    mod.add_dec(vid, DEC_LOCATION, to)
 
     # ---- 2. vertex inputs: Location = TEXCOORD index
     if stage == EM_VERTEX:
@@ -330,9 +426,10 @@ def patch(data, block_bindings, report=None, locs=None, bool_names=()):
                 if e[0] == DEC_ROW_MAJOR:
                     raise ValueError('RowMajor loose uniform %s' % mod.mnames.get((st_id, k)))
             nt = strip_type(mod, mt, stripc)
-            isb = mod.mnames.get((st_id, k), '') in bool_names
-            if isb:
+            if mod.mnames.get((st_id, k), '') in bool_names and uint_leaf(mod, nt):
                 nt = int_twin(mod, nt, twinc)
+            else:
+                nt = struct_twin(mod, nt, bool_names, twinc)   # R9: bool members of a struct uniform (stf_default lm.alphaSettings.*)
             vid = mod.new_id()
             pid = ptr_type(mod, SC_UNIFORM_CONSTANT, nt, ptrs)
             mod.add_glob(Inst(OP_VARIABLE, [pid, vid, SC_UNIFORM_CONSTANT]))
@@ -341,40 +438,31 @@ def patch(data, block_bindings, report=None, locs=None, bool_names=()):
             lc = alloc(nm_, scalar_slots(mod, nt), mod.defn[nt].op == OP_TYPE_ARRAY)
             mod.add_dec(vid, DEC_LOCATION, lc)
             rep['loose'].append((nm_, lc))
-            mvar[k] = (vid, nt, isb)
-        # a Uniform pointer type -> its UniformConstant twin (pointee stripped)
-        up_cache = {}
-
-        def uc_ptr(old_ptr_id, isb=False):
-            if (old_ptr_id, isb) not in up_cache:
-                pt = mod.defn[old_ptr_id]
-                pe = strip_type(mod, pt.a[2], stripc)
-                up_cache[(old_ptr_id, isb)] = ptr_type(mod, SC_UNIFORM_CONSTANT, int_twin(mod, pe, twinc) if isb else pe, ptrs)
-            return up_cache[(old_ptr_id, isb)]
-        bptr = set()      # pointers into a bool uniform (declared int, see int_twin)
+            mvar[k] = (vid, nt)
+        # a pointer reached through the block -> its UniformConstant twin; the pointee is walked from the (twinned) member type, so a
+        # bool leaf at any depth is an int (glUniform1i) and is bitcast on load
+        newpt = {}        # result id of a derived pointer -> its new pointee type
         derived = set()   # ids of pointers reached through the block
         newf = []
         for x in mod.funcs:
             if x.op in (OP_ACCESS_CHAIN, OP_IN_BOUNDS_AC) and x.a[2] == lid:
                 k = const_value(mod, x.a[3])
-                vid, nt, isb = mvar[k]
+                vid, nt = mvar[k]
                 rest = x.a[4:]
                 derived.add(x.a[1])
-                if isb:
-                    bptr.add(x.a[1])
-                if rest:
-                    newf.append(Inst(OP_ACCESS_CHAIN, [uc_ptr(x.a[0], isb), x.a[1], vid] + rest))
-                else:
-                    newf.append(Inst(OP_ACCESS_CHAIN, [uc_ptr(x.a[0], isb), x.a[1], vid]))
+                newpt[x.a[1]] = walk_type(mod, nt, rest)
+                newf.append(Inst(OP_ACCESS_CHAIN, [ptr_type(mod, SC_UNIFORM_CONSTANT, newpt[x.a[1]], ptrs), x.a[1], vid] + rest))
             elif x.op in (OP_ACCESS_CHAIN, OP_IN_BOUNDS_AC) and x.a[2] in derived:
                 derived.add(x.a[1])
-                if x.a[2] in bptr:
-                    bptr.add(x.a[1])
-                newf.append(Inst(x.op, [uc_ptr(x.a[0], x.a[2] in bptr)] + x.a[1:]))
-            elif x.op == OP_LOAD and x.a[2] in bptr:
+                newpt[x.a[1]] = walk_type(mod, newpt[x.a[2]], x.a[3:])
+                newf.append(Inst(x.op, [ptr_type(mod, SC_UNIFORM_CONSTANT, newpt[x.a[1]], ptrs)] + x.a[1:]))
+            elif x.op == OP_LOAD and x.a[2] in newpt and newpt[x.a[2]] != x.a[0]:
                 tmp = mod.new_id()
-                newf.append(Inst(OP_LOAD, [int_twin(mod, x.a[0], twinc), tmp, x.a[2]] + x.a[3:]))
-                newf.append(Inst(OP_BITCAST, [x.a[0], x.a[1], tmp]))
+                newf.append(Inst(OP_LOAD, [newpt[x.a[2]], tmp, x.a[2]] + x.a[3:]))
+                tail = []
+                res = convert_back(mod, tail, tmp, newpt[x.a[2]], x.a[0])
+                newf += tail
+                newf.append(Inst(OP_COPY_OBJECT, [x.a[0], x.a[1], res]))
             else:
                 bad = (x.op == OP_LOAD and x.a[2] == lid) or (x.op == OP_STORE and x.a[0] in (lid,)) or x.op == 57 and lid in x.a[3:]
                 if bad:

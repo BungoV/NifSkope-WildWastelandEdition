@@ -63,6 +63,7 @@ inline const WwPresetRow * wwPresetTable( int * count )
 		{ "CellWorkspaceLook_WW_CELL_NIFX_LIGHTS", '0', "1111", "0000", 'M', false, { 0.06f, 0.10f, 0.15f, 0.19f }, WW_PR_NONE,
 			"light extras; no ms (and needs Cell lights, a Vanilla row no preset touches)" },
 		{ "CellWorkspaceLightCurve", '-', "----", "----", '-', false, WW_PR_NONE, WW_PR_NONE, "a look curve, not a cost step" },
+		{ "CellWorkspaceCellStream", '-', "----", "----", '-', false, WW_PR_NONE, WW_PR_NONE, "the cell streaming row (AIRPERF1 r4): ships on, not a cost step" },
 		{ "CellWorkspaceCellFar", '0', "1111", "0000", 'M', false, { 0.06f, 0.10f, 0.15f, 0.19f }, WW_PR_NONE, "far lights; no ms" },
 		{ "CellWorkspaceGroup_SHADOWS", '1', "1111", "1111", 'G', false, WW_PR_NONE, WW_PR_NONE, "a master" },
 		{ "CellWorkspaceCascadedShadows", '1', "LMHU", "1111", 'M', false, { 0.21f, 0.27f, 0.40f, 0.50f }, WW_PR_NONE,

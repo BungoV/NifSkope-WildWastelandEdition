@@ -10,15 +10,20 @@
 # loader's getters read (the same lists as tests/hlsllive/variants.py). WW_WARM_ALL=0 runs only the default start;
 # WW_WARM_COLDLINK=<n> (default 8) links the uncached programs on n threads (WW_COLDLINK). The last line of release/ww_warm.log
 # is `shader programs: S of T linked ...` summed over the starts, the line ww_build.sh tests.
+# lane HLSLBULK1 R9 (build 96 warm: 1167 s): every start prints its seconds; a start whose env text repeats an earlier one is
+# skipped; WW_WARM_PAR=<n> starts run side by side (default 1 until two starts are proven safe on the program cache; 1 when free RAM is under 8 GB per start), each with its own
+# log and settings scope, merged in order.
 cd "$1" || exit 2
 LOG=release/ww_warm.log
 : > "$LOG"
 
-run_one() {	# $1 label, rest: env assignments
-	local label="$1"
-	shift
-	local one=release/ww_warm_one.log
-	env WW_STARTUP_QUIT=1 WW_SETTINGS_SCOPE=ww_warm WW_COLDLINK="${WW_WARM_COLDLINK:-8}" "$@" release/NifSkope.exe > "$one" 2>&1 < /dev/null &
+one_start() {	# $1 index, $2 label, rest: env assignments -> release/ww_warm_$1.log and release/ww_warm_$1.sec
+	local idx="$1" label="$2"
+	shift 2
+	local one="release/ww_warm_$idx.log"
+	local t0
+	t0=$(date +%s)
+	env WW_STARTUP_QUIT=1 WW_SETTINGS_SCOPE="ww_warm$idx" WW_COLDLINK="${WW_WARM_COLDLINK:-8}" "$@" release/NifSkope.exe > "$one" 2>&1 < /dev/null &
 	local pid=$!
 	local t=0
 	while kill -0 "$pid" 2>/dev/null && [ "$t" -lt 900 ]; do
@@ -37,26 +42,33 @@ run_one() {	# $1 label, rest: env assignments
 		kill -9 "$pid" 2>/dev/null
 	fi
 	wait "$pid" 2>/dev/null
-	echo "=== warm start $label ($*) ===" >> "$LOG"
-	cat "$one" >> "$LOG"
-	local line ok total
-	line="$(grep -a "shader programs:" "$one" | tail -1 | tr -d '\r')"
-	if [ -n "$line" ]; then
-		ok="$(echo "$line" | sed -E 's/.*programs: ([0-9]+) of ([0-9]+) linked.*/\1/')"
-		total="$(echo "$line" | sed -E 's/.*programs: ([0-9]+) of ([0-9]+) linked.*/\2/')"
-		OKSUM=$((OKSUM + ok))
-		TOTSUM=$((TOTSUM + total))
-	else
-		TOTSUM=$((TOTSUM + 1))	# no line: the start failed, the sums can not match
-	fi
-	RUNS=$((RUNS + 1))
+	echo $(( $(date +%s) - t0 )) > "release/ww_warm_$idx.sec"
 }
 
-OKSUM=0
-TOTSUM=0
-RUNS=0
+free_gb() {	# free RAM in GB, 99 when unknown
+	local kb
+	kb="$(grep -a '^MemAvailable:' /proc/meminfo 2>/dev/null | awk '{print $2}')"
+	if [ -n "$kb" ]; then echo $((kb / 1048576)); else echo 99; fi
+}
+
+LABELS=()
+ENVS=()
+add_start() {	# $1 label, rest: env
+	local label="$1"
+	shift
+	local key="$*" i
+	for i in "${!ENVS[@]}"; do
+		if [ "${ENVS[$i]}" = "$key" ]; then
+			echo "warm: start '$label' repeats '${LABELS[$i]}': skipped" >> "$LOG"
+			return
+		fi
+	done
+	LABELS+=("$label")
+	ENVS+=("$key")
+}
+
 if [ "${WW_WARM_ALL:-1}" = 0 ]; then
-	run_one default
+	add_start default
 else
 	for rt in off low medium; do
 		case "$rt" in
@@ -67,11 +79,49 @@ else
 		for az in 0 1; do
 			for sky in 0 1; do
 				for bounce in 0 1; do
-					run_one "rt=$rt air-zones=$az sky-view=$sky bounce=$bounce" $rtenv WW_CELL_AIRZONE=$az WW_CELL_AIR_SKYVIEW=$sky WW_CELL_AIR_BOUNCE_LAMPS=$bounce
+					add_start "rt=$rt air-zones=$az sky-view=$sky bounce=$bounce" $rtenv WW_CELL_AIRZONE=$az WW_CELL_AIR_SKYVIEW=$sky WW_CELL_AIR_BOUNCE_LAMPS=$bounce
 				done
 			done
 		done
 	done
 fi
+
+PAR="${WW_WARM_PAR:-1}"
+if [ "$PAR" -gt 1 ] && [ "$(free_gb)" -lt $((8 * PAR)) ]; then
+	PAR=1
+fi
+N=${#LABELS[@]}
+i=0
+while [ "$i" -lt "$N" ]; do
+	j=0
+	while [ "$j" -lt "$PAR" ] && [ $((i + j)) -lt "$N" ]; do
+		k=$((i + j))
+		one_start "$k" "${LABELS[$k]}" ${ENVS[$k]} &
+		j=$((j + 1))
+	done
+	wait
+	i=$((i + PAR))
+done
+
+OKSUM=0
+TOTSUM=0
+RUNS=0
+for k in "${!LABELS[@]}"; do
+	one="release/ww_warm_$k.log"
+	echo "=== warm start ${LABELS[$k]} (${ENVS[$k]}) ===" >> "$LOG"
+	cat "$one" >> "$LOG"
+	line="$(grep -a "shader programs:" "$one" | tail -1 | tr -d '\r')"
+	if [ -n "$line" ]; then
+		ok="$(echo "$line" | sed -E 's/.*programs: ([0-9]+) of ([0-9]+) linked.*/\1/')"
+		total="$(echo "$line" | sed -E 's/.*programs: ([0-9]+) of ([0-9]+) linked.*/\2/')"
+		OKSUM=$((OKSUM + ok))
+		TOTSUM=$((TOTSUM + total))
+	else
+		TOTSUM=$((TOTSUM + 1))	# no line: the start failed, the sums can not match
+	fi
+	RUNS=$((RUNS + 1))
+	echo "warm start $((k + 1)) of $N (${LABELS[$k]}): $(cat "release/ww_warm_$k.sec" 2>/dev/null) s (parallel $PAR)" | tee -a "$LOG"
+	rm -f "$one" "release/ww_warm_$k.sec"
+done
 echo "shader programs: $OKSUM of $TOTSUM linked (summed over $RUNS warm starts)" >> "$LOG"
 exit 0
