@@ -27,7 +27,7 @@ FROM = {'restirgi_glsl': ('restirgi', []), 'restirgi_filt_glsl': ('restirgi', ['
 HLSL_FROM = {'restirgi_filt': ('restirgi', ['-DRESTIRGI_FILTER'])}
 BAKERT_HK = '\t"$DXC" -spirv -fspv-target-env="$2" -T "${T:-cs_6_0}" -E main -O0 -Fo "$1.hlsl.spv" '
 # lane VKFRAME1: the bloom chain, built by src/features/vkframe/vkframe_spirv.sh from res/shaders/hlsl/post/<k>.hlsl
-VKFRAME_KERNELS = ('down', 'hold', 'up', 'src', 'comb')
+VKFRAME_KERNELS = ('down', 'hold', 'up', 'src', 'comb', 'back')	# VKBLOOM1: back = the backdrop's half-float resolve
 HLSL_SPECS += [('src/features/vkframe', 'bloom_' + k, 'vulkan1.2', 'vkframe_bloom_%s_spv' % k) for k in VKFRAME_KERNELS]
 VKFRAME_POST = ('tonemap',)	# the script's second loop: res/shaders/hlsl/post/<k>.hlsl -> <k>.spv.h
 HLSL_SPECS += [('src/features/vkframe', k, 'vulkan1.2', 'vkframe_%s_spv' % k) for k in VKFRAME_POST]
