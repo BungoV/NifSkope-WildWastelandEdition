@@ -1,12 +1,13 @@
 // Lane VKCOMPUTE1 (2026-11-12): run a converted DDGI kernel and its GLSL original on the same buffers and compare every
 // buffer byte for byte. No NifSkope: a headless Vulkan device of its own (the compute-only family when there is one),
 // the DDGI set's layout (src/features/gi/rtddgi/ddgi_common.glsl: storage buffers 0-5, 7-14, the TLAS at 6 partially
-// bound and never written), the dispatch split of rtddgi_vk.inc ddgiDispatch.
-// Usage: kernelmatch <kernel> <glsl .spv> <hlsl .spv>   (kernel: border). Prints one line a case, then
+// bound; trace builds a real TLAS in bakert's shape and writes it), the dispatch split of rtddgi_vk.inc ddgiDispatch.
+// Usage: kernelmatch <kernel> <glsl .spv> <hlsl .spv>   (kernel: border reloc blend trace). Prints one line a case, then
 // `HLSLMATCH <kernel> PASS n cases` or `HLSLMATCH <kernel> FAIL d of n cases`.
 #define VK_NO_PROTOTYPES
 #include <vulkan/vulkan.h>
 #include <windows.h>
+#include <algorithm>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -25,6 +26,10 @@ VKF( vkAllocateCommandBuffers ); VKF( vkBeginCommandBuffer ); VKF( vkEndCommandB
 VKF( vkCmdBindDescriptorSets ); VKF( vkCmdPushConstants ); VKF( vkCmdDispatch ); VKF( vkQueueSubmit ); VKF( vkQueueWaitIdle );
 VKF( vkCreateFence ); VKF( vkWaitForFences ); VKF( vkDestroyFence );
 VKF( vkResetCommandBuffer ); VKF( vkDestroyPipeline ); VKF( vkDestroyShaderModule ); VKF( vkDestroyBuffer ); VKF( vkFreeMemory );
+// round 2 (trace): a real TLAS for the ray-query kernels
+VKF( vkGetBufferDeviceAddress ); VKF( vkCreateAccelerationStructureKHR ); VKF( vkDestroyAccelerationStructureKHR );
+VKF( vkGetAccelerationStructureBuildSizesKHR ); VKF( vkCmdBuildAccelerationStructuresKHR );
+VKF( vkGetAccelerationStructureDeviceAddressKHR ); VKF( vkCmdPipelineBarrier );
 
 static std::vector<uint32_t> readSpv( const char * path )
 {
@@ -56,13 +61,14 @@ static VkPhysicalDevice phys;
 static VkQueue queue;
 static uint32_t family;
 
-static Buf makeBuf( size_t n )
+// host-visible + coherent, mapped; addr: usable by device address (acceleration structure inputs, storage, scratch)
+static Buf makeBuf( size_t n, VkBufferUsageFlags usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, bool addr = false )
 {
 	Buf B;
 	B.n = n;
 	VkBufferCreateInfo bi { VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
 	bi.size = n;
-	bi.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
+	bi.usage = usage | ( addr ? VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT : 0 );
 	vkCreateBuffer( dev, &bi, nullptr, &B.b );
 	VkMemoryRequirements r;
 	vkGetBufferMemoryRequirements( dev, B.b, &r );
@@ -73,7 +79,10 @@ static Buf makeBuf( size_t n )
 	for ( ; t < mp.memoryTypeCount; t++ )
 		if ( ( r.memoryTypeBits & ( 1u << t ) ) && ( mp.memoryTypes[t].propertyFlags & want ) == want )
 			break;
+	VkMemoryAllocateFlagsInfo af { VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_FLAGS_INFO };
+	af.flags = VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT;
 	VkMemoryAllocateInfo ai { VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO };
+	ai.pNext = addr ? &af : nullptr;
 	ai.allocationSize = r.size;
 	ai.memoryTypeIndex = t;
 	vkAllocateMemory( dev, &ai, nullptr, &B.m );
@@ -89,7 +98,8 @@ static void freeBuf( Buf & B )
 	B = Buf();
 }
 
-// the DDGI set: bindings 0-14, 6 = the TLAS (partially bound, never written: no converted kernel reads it yet)
+// the DDGI set: bindings 0-14, 6 = the TLAS (partially bound: written only when a case built one, the trace's)
+static VkAccelerationStructureKHR tlas = VK_NULL_HANDLE;
 static VkDescriptorSetLayout setLayout;
 static VkPipelineLayout pipeLayout;
 static VkDescriptorPool pool;
@@ -179,6 +189,18 @@ static bool run( const std::vector<uint32_t> & spv, std::vector<Buf> & bufs, con
 		x.pBufferInfo = &bi[i];
 		w.push_back( x );
 	}
+	VkWriteDescriptorSetAccelerationStructureKHR wa { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET_ACCELERATION_STRUCTURE_KHR };
+	wa.accelerationStructureCount = 1;
+	wa.pAccelerationStructures = &tlas;
+	if ( tlas ) {
+		VkWriteDescriptorSet x { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
+		x.pNext = &wa;
+		x.dstSet = set;
+		x.dstBinding = 6;
+		x.descriptorCount = 1;
+		x.descriptorType = VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR;
+		w.push_back( x );
+	}
 	vkUpdateDescriptorSets( dev, uint32_t( w.size() ), w.data(), 0, nullptr );
 	vkResetCommandBuffer( cb, 0 );
 	VkCommandBufferBeginInfo bb { VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
@@ -222,7 +244,9 @@ struct Params
 static_assert( sizeof( Params ) == 18 * 16, "Params is 18 vec4" );
 
 // x y z probes, skipAsleep, the skip range on, seed; round 2: rays a probe, job mode, job.y (fresh only), sky-below rule
-struct Case { int x, y, z; int skipAsleep; int skip; uint64_t seed; int N = 288; uint32_t mode = 3; uint32_t jobY = 0; int below = 1; };
+// trace: the red bits (flags.w), one bounce (flags.x), the sky on (sky[0].w)
+struct Case { int x, y, z; int skipAsleep; int skip; uint64_t seed; int N = 288; uint32_t mode = 3; uint32_t jobY = 0; int below = 1;
+	int red = 0; int oneBounce = 0; int sky = 1; };
 
 // the rays buffer (binding 0, nP x N vec4): radiance rgb, signed distance with every kind the kernels branch on --
 // a miss (1e27), a backface (-0.2 t), a hit nearer or farther than a probe step. backShare: a probe's chance a ray is a back
@@ -366,6 +390,312 @@ static void fillBorder( std::vector<Buf> & bufs, const Case & c, uint64_t & grou
 	groups = ( uint64_t( nP ) * 88 + 63 ) / 64;   // rtddgi_vk.inc borderGroups
 }
 
+// ---- trace: a random soup in bakert's TLAS shape (rtddgi_vk.inc buildRt) ----
+// Part 0 = the single-soup layout: one BLAS, geometry 0 opaque rows [0, nOp), geometry 1 alpha rows [nOp, nOp + nAl),
+// custom index 0 (counts.w = nOp moves geometry 1). Parts 1, 2 = AIRPERF1's per-part layout: one geometry each, custom
+// index = the part's first row. The BLAS takes GROWN triangles, binding 8 the true ones (the kernel re-tests every
+// candidate); every 16th row repeats the one before (winding flipped every other time) so the tie pass has ties to settle.
+struct Scene
+{
+	std::vector<float> verts;     // binding 8: rows x 9, the true triangles
+	std::vector<int32_t> remap;   // binding 7: row -> soup triangle (a permutation)
+	std::vector<float> attr;      // binding 5: soup triangle x 2 vec4 (albedo + two-sided, Le)
+	std::vector<int32_t> triOf;   // binding 9: soup triangle -> masked record or -1
+	std::vector<uint32_t> mask;   // binding 10: 12 words a record
+	std::vector<uint32_t> maps;   // binding 11: offset, w, h, 0
+	std::vector<uint32_t> alpha;  // binding 12: bytes, packed 4 a word
+	std::vector<float> lights;    // binding 13: 8 vec4 a light
+	uint32_t partFirst[3], partN0[3], partN1[3];
+	int nOp = 0, nLights = 0;
+};
+static Scene S;
+static bool sceneOn = false;
+struct AsParts { Buf vb[3], blasBuf[3], tlasBuf, inst, scratch; VkAccelerationStructureKHR blas[3] = {}; };
+static AsParts AS;
+
+static void makeScene( const Case & c, const Params & P )
+{
+	Rng r { c.seed * 7919 + 3 };
+	S = Scene();
+	const uint32_t n0 = 120, nAl = 60, n1 = 90, n2 = 70;
+	S.nOp = int( n0 );
+	S.partFirst[0] = 0; S.partN0[0] = n0; S.partN1[0] = nAl;
+	S.partFirst[1] = n0 + nAl; S.partN0[1] = n1; S.partN1[1] = 0;
+	S.partFirst[2] = n0 + nAl + n1; S.partN0[2] = n2; S.partN1[2] = 0;
+	const uint32_t rows = n0 + nAl + n1 + n2;
+	S.verts.resize( size_t( rows ) * 9 );
+	for ( uint32_t i = 0; i < rows; i++ ) {
+		float * v = &S.verts[size_t( i ) * 9];
+		if ( i % 16 == 15 ) {   // a duplicate of the row before: an exact tie
+			const float * u = &S.verts[size_t( i - 1 ) * 9];
+			const bool flip = ( i / 16 ) % 2 == 1;
+			for ( int k = 0; k < 3; k++ ) {
+				v[k] = u[k];
+				v[3 + k] = flip ? u[6 + k] : u[3 + k];
+				v[6 + k] = flip ? u[3 + k] : u[6 + k];
+			}
+			continue;
+		}
+		float ctr[3];
+		for ( int k = 0; k < 3; k++ )
+			ctr[k] = P.origin[k] + ( r.unit() * float( ( k == 0 ? c.x : k == 1 ? c.y : c.z ) + 1 ) - 0.5f ) * P.stepv[k];
+		for ( int j = 0; j < 3; j++ )
+			for ( int k = 0; k < 3; k++ )
+				v[j * 3 + k] = ctr[k] + ( r.unit() - 0.5f ) * 2.4f * P.stepv[k];
+	}
+	S.remap.resize( rows );
+	for ( uint32_t i = 0; i < rows; i++ )
+		S.remap[i] = int32_t( i );
+	for ( uint32_t i = rows - 1; i > 0; i-- ) {
+		const uint32_t j = r.next() % ( i + 1 );
+		std::swap( S.remap[i], S.remap[j] );
+	}
+	S.attr.resize( size_t( rows ) * 8 );
+	for ( uint32_t t = 0; t < rows; t++ ) {
+		float * a = &S.attr[size_t( t ) * 8];
+		a[0] = r.unit(); a[1] = r.unit(); a[2] = r.unit(); a[3] = r.unit() < 0.5f ? 0.0f : 1.0f;
+		const bool glow = r.unit() < 0.1f;
+		a[4] = glow ? r.unit() * 2.0f : 0.0f; a[5] = glow ? r.unit() * 2.0f : 0.0f; a[6] = glow ? r.unit() * 2.0f : 0.0f; a[7] = 0.0f;
+	}
+	// alpha: every geometry-1 row's soup triangle and ~1 in 5 of the rest is masked; two maps
+	S.maps = { 0, 16, 16, 0, 256, 8, 32, 0 };
+	S.alpha.resize( 128 );
+	for ( uint32_t & w : S.alpha )
+		w = r.next();
+	S.triOf.assign( rows, -1 );
+	for ( uint32_t i = 0; i < rows; i++ ) {
+		const bool masked = ( i >= n0 && i < n0 + nAl ) || r.unit() < 0.2f;
+		if ( !masked )
+			continue;
+		S.triOf[size_t( S.remap[i] )] = int32_t( S.mask.size() / 12 );
+		auto fl = []( float f ) { uint32_t u; std::memcpy( &u, &f, 4 ); return u; };
+		S.mask.push_back( r.next() % 2 );
+		S.mask.push_back( 64 + r.next() % 128 );
+		for ( int k = 0; k < 6; k++ )
+			S.mask.push_back( fl( r.unit() * 3.0f - 1.0f ) );
+		for ( int k = 0; k < 3; k++ )
+			S.mask.push_back( fl( 0.5f + r.unit() ) );
+		S.mask.push_back( r.next() % 2 );
+	}
+	// lights: point (shape 0), half-space (1), box (2); some spots
+	S.nLights = 5;
+	for ( int l = 0; l < S.nLights; l++ ) {
+		float L[32] = {};
+		for ( int k = 0; k < 3; k++ )
+			L[k] = P.origin[k] + r.unit() * float( ( k == 0 ? c.x : k == 1 ? c.y : c.z ) ) * P.stepv[k];
+		L[3] = ( 2.0f + r.unit() * 3.0f ) * P.stepv[3];
+		L[4] = r.unit() * 3.0f; L[5] = r.unit() * 3.0f; L[6] = r.unit() * 3.0f; L[7] = r.unit() < 0.5f ? 1.0f : 0.0f;
+		float d[3] = { r.unit() - 0.5f, r.unit() - 0.5f, r.unit() - 0.5f };
+		const float dl = std::sqrt( d[0] * d[0] + d[1] * d[1] + d[2] * d[2] ) + 1e-6f;
+		L[8] = d[0] / dl; L[9] = d[1] / dl; L[10] = d[2] / dl; L[11] = 0.5f + r.unit() * 0.4f;
+		L[12] = r.unit() * 0.2f; L[13] = 0.8f + r.unit() * 0.2f; L[14] = 1.0f + r.unit(); L[15] = 1.0f + 2.0f * r.unit();
+		const float h = 2.0f * P.stepv[3];
+		for ( int k = 0; k < 3; k++ ) {   // the box planes: |dot(axis / h, x) - axis . centre / h| <= 1 inside
+			L[16 + k * 4 + k] = 1.0f / h;
+			L[16 + k * 4 + 3] = -L[k] / h;
+		}
+		L[28] = float( l % 3 );
+		S.lights.insert( S.lights.end(), L, L + 32 );
+	}
+	sceneOn = true;
+}
+
+static VkDeviceAddress addrOf( const Buf & B )
+{
+	VkBufferDeviceAddressInfo i { VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO };
+	i.buffer = B.b;
+	return vkGetBufferDeviceAddress( dev, &i );
+}
+
+static bool submitWait()
+{
+	VkSubmitInfo si { VK_STRUCTURE_TYPE_SUBMIT_INFO };
+	si.commandBufferCount = 1;
+	si.pCommandBuffers = &cb;
+	VkFenceCreateInfo fci { VK_STRUCTURE_TYPE_FENCE_CREATE_INFO };
+	VkFence fence;
+	vkCreateFence( dev, &fci, nullptr, &fence );
+	const bool ok = vkQueueSubmit( queue, 1, &si, fence ) == VK_SUCCESS
+		&& vkWaitForFences( dev, 1, &fence, VK_TRUE, 20000000000ull ) == VK_SUCCESS;
+	vkDestroyFence( dev, fence, nullptr );
+	return ok;
+}
+
+// one build: geometry info + its sizes -> storage buffer + AS + scratch, recorded and waited on
+static bool buildAs( VkAccelerationStructureTypeKHR type, const VkAccelerationStructureGeometryKHR * g, const uint32_t * counts,
+	uint32_t nGeo, Buf & store, VkAccelerationStructureKHR & as )
+{
+	VkAccelerationStructureBuildGeometryInfoKHR bi { VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR };
+	bi.type = type;
+	bi.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR;
+	bi.mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR;
+	bi.geometryCount = nGeo;
+	bi.pGeometries = g;
+	VkAccelerationStructureBuildSizesInfoKHR sz { VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR };
+	vkGetAccelerationStructureBuildSizesKHR( dev, VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR, &bi, counts, &sz );
+	store = makeBuf( sz.accelerationStructureSize, VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR, true );
+	VkAccelerationStructureCreateInfoKHR ci { VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_KHR };
+	ci.buffer = store.b;
+	ci.size = sz.accelerationStructureSize;
+	ci.type = type;
+	if ( vkCreateAccelerationStructureKHR( dev, &ci, nullptr, &as ) != VK_SUCCESS )
+		return false;
+	if ( AS.scratch.b )
+		freeBuf( AS.scratch );
+	AS.scratch = makeBuf( sz.buildScratchSize + 256, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, true );
+	bi.dstAccelerationStructure = as;
+	bi.scratchData.deviceAddress = ( addrOf( AS.scratch ) + 255 ) & ~VkDeviceAddress( 255 );
+	std::vector<VkAccelerationStructureBuildRangeInfoKHR> ranges( nGeo );
+	for ( uint32_t i = 0; i < nGeo; i++ )
+		ranges[i] = VkAccelerationStructureBuildRangeInfoKHR { counts[i], 0, 0, 0 };
+	const VkAccelerationStructureBuildRangeInfoKHR * pr = ranges.data();
+	vkResetCommandBuffer( cb, 0 );
+	VkCommandBufferBeginInfo bb { VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
+	vkBeginCommandBuffer( cb, &bb );
+	vkCmdBuildAccelerationStructuresKHR( cb, 1, &bi, &pr );
+	vkEndCommandBuffer( cb );
+	return submitWait();
+}
+
+static bool buildScene()
+{
+	// grown copies for the BLAS (bakert grows each edge outward; here every vertex moves 1e-4 off the centroid)
+	auto grown = []( uint32_t row, float * out ) {
+		const float * v = &S.verts[size_t( row ) * 9];
+		for ( int k = 0; k < 3; k++ ) {
+			const float m = ( v[k] + v[3 + k] + v[6 + k] ) / 3.0f;
+			for ( int j = 0; j < 3; j++ )
+				out[j * 3 + k] = m + ( v[j * 3 + k] - m ) * 1.0001f;
+		}
+	};
+	const VkBufferUsageFlags in = VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR;
+	std::vector<VkAccelerationStructureInstanceKHR> inst( 3 );
+	for ( int p = 0; p < 3; p++ ) {
+		const uint32_t n = S.partN0[p] + S.partN1[p];
+		AS.vb[p] = makeBuf( size_t( n ) * 36, in, true );
+		float * dst = static_cast<float *>( AS.vb[p].p );
+		for ( uint32_t i = 0; i < n; i++ )
+			grown( S.partFirst[p] + i, dst + size_t( i ) * 9 );
+		VkAccelerationStructureGeometryKHR g[2];
+		uint32_t counts[2] = { S.partN0[p], S.partN1[p] };
+		const uint32_t nGeo = S.partN1[p] ? 2 : 1;
+		for ( uint32_t k = 0; k < nGeo; k++ ) {
+			g[k] = VkAccelerationStructureGeometryKHR { VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR };
+			g[k].geometryType = VK_GEOMETRY_TYPE_TRIANGLES_KHR;
+			g[k].flags = k == 0 ? VK_GEOMETRY_OPAQUE_BIT_KHR : 0;
+			VkAccelerationStructureGeometryTrianglesDataKHR & t = g[k].geometry.triangles;
+			t = VkAccelerationStructureGeometryTrianglesDataKHR { VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_TRIANGLES_DATA_KHR };
+			t.vertexFormat = VK_FORMAT_R32G32B32_SFLOAT;
+			t.vertexData.deviceAddress = addrOf( AS.vb[p] ) + ( k == 0 ? 0 : VkDeviceAddress( S.partN0[p] ) * 36 );
+			t.vertexStride = 12;
+			t.maxVertex = counts[k] * 3 - 1;
+			t.indexType = VK_INDEX_TYPE_NONE_KHR;
+		}
+		if ( !buildAs( VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR, g, counts, nGeo, AS.blasBuf[p], AS.blas[p] ) )
+			return false;
+		VkAccelerationStructureDeviceAddressInfoKHR ai { VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_DEVICE_ADDRESS_INFO_KHR };
+		ai.accelerationStructure = AS.blas[p];
+		VkAccelerationStructureInstanceKHR & I = inst[size_t( p )];
+		std::memset( &I, 0, sizeof I );
+		I.transform.matrix[0][0] = I.transform.matrix[1][1] = I.transform.matrix[2][2] = 1.0f;
+		I.instanceCustomIndex = S.partFirst[p];
+		I.mask = 0xFF;
+		I.flags = VK_GEOMETRY_INSTANCE_TRIANGLE_FACING_CULL_DISABLE_BIT_KHR;
+		I.accelerationStructureReference = vkGetAccelerationStructureDeviceAddressKHR( dev, &ai );
+	}
+	AS.inst = makeBuf( sizeof( VkAccelerationStructureInstanceKHR ) * 3, in, true );
+	std::memcpy( AS.inst.p, inst.data(), sizeof( VkAccelerationStructureInstanceKHR ) * 3 );
+	VkAccelerationStructureGeometryKHR g { VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR };
+	g.geometryType = VK_GEOMETRY_TYPE_INSTANCES_KHR;
+	g.geometry.instances = VkAccelerationStructureGeometryInstancesDataKHR { VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_INSTANCES_DATA_KHR };
+	g.geometry.instances.data.deviceAddress = addrOf( AS.inst );
+	const uint32_t three = 3;
+	return buildAs( VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR, &g, &three, 1, AS.tlasBuf, tlas );
+}
+
+static void freeScene()
+{
+	if ( tlas )
+		vkDestroyAccelerationStructureKHR( dev, tlas, nullptr );
+	tlas = VK_NULL_HANDLE;
+	for ( int p = 0; p < 3; p++ ) {
+		if ( AS.blas[p] )
+			vkDestroyAccelerationStructureKHR( dev, AS.blas[p], nullptr );
+		for ( Buf * b : { &AS.vb[p], &AS.blasBuf[p] } )
+			if ( b->b )
+				freeBuf( *b );
+	}
+	for ( Buf * b : { &AS.tlasBuf, &AS.inst, &AS.scratch } )
+		if ( b->b )
+			freeBuf( *b );
+	AS = AsParts();
+	sceneOn = false;
+}
+
+static void traceParams( Params & P, const Case & c, uint32_t nP, Rng & r )
+{
+	fillParamsBase( P, c, nP, r );
+	P.sky[0][3] = float( c.sky );
+	float s[3] = { r.unit() - 0.5f, r.unit() - 0.5f, 0.2f + r.unit() };
+	const float sl = std::sqrt( s[0] * s[0] + s[1] * s[1] + s[2] * s[2] );
+	for ( int k = 0; k < 3; k++ ) {
+		P.sunTo[k] = s[k] / sl;
+		P.sun[k] = r.unit() * 5.0f;
+		P.dirTo[k] = -s[k] / sl;
+		P.dirColor[k] = r.unit();
+	}
+	P.sunTo[3] = 1.0f;
+	P.sun[3] = 4.0f * P.stepv[3] * float( c.x + c.y + c.z );   // the trace tmax
+	P.dirTo[3] = c.seed % 2 ? 1.0f : 0.0f;
+	P.dirColor[3] = 2.0f;   // fixtureClear
+	P.flags[0] = c.oneBounce;
+	P.flags[2] = 1;          // useMask
+	P.flags[3] = c.red;
+	P.counts[1] = 5;
+	P.counts[2] = int32_t( S.remap.size() );
+	P.counts[3] = S.nOp;
+}
+
+// trace: binding 0 rays (written), 1 irr, 2 dist, 3 probes, 4 age (the bounce read), 5 attr, 6 TLAS, 7 remap, 8 verts,
+// 9 triOf, 10 mask, 11 maps, 12 alpha, 13 lights, 14 params; one invocation a (probe, ray) of job.z .. job.z + job.w
+static void fillTrace( std::vector<Buf> & bufs, const Case & c, uint64_t & groups, uint32_t pc[16] )
+{
+	const uint32_t nP = uint32_t( c.x * c.y * c.z );
+	Rng r { c.seed };
+	Params P;
+	traceParams( P, c, nP, r );
+	fillRays( static_cast<float *>( bufs[0].p ), nP, c.N, r, P.stepv[3] );   // old contents the kernel overwrites
+	float * irr = static_cast<float *>( bufs[1].p );
+	for ( size_t i = 0; i < size_t( nP ) * 64 * 4; i++ )
+		irr[i] = r.unit() * 1.5f;
+	float * dist = static_cast<float *>( bufs[2].p );
+	for ( size_t i = 0; i < size_t( nP ) * 256 * 2; i++ )
+		dist[i] = r.unit() * 3.0f * P.stepv[3];
+	float * pr = static_cast<float *>( bufs[3].p );
+	for ( uint32_t p = 0; p < nP; p++ ) {
+		for ( int k = 0; k < 3; k++ )
+			pr[p * 4 + k] = ( r.unit() - 0.5f ) * 0.8f * P.stepv[k];
+		pr[p * 4 + 3] = float( r.next() % 4 );
+	}
+	uint32_t * age = static_cast<uint32_t *>( bufs[4].p );
+	for ( uint32_t p = 0; p < nP; p++ )
+		age[p] = r.next() % 4 == 0 ? 0u : 1 + r.next() % 100;
+	std::memcpy( bufs[5].p, S.attr.data(), S.attr.size() * 4 );
+	std::memcpy( bufs[7].p, S.remap.data(), S.remap.size() * 4 );
+	std::memcpy( bufs[8].p, S.verts.data(), S.verts.size() * 4 );
+	std::memcpy( bufs[9].p, S.triOf.data(), S.triOf.size() * 4 );
+	std::memcpy( bufs[10].p, S.mask.data(), S.mask.size() * 4 );
+	std::memcpy( bufs[11].p, S.maps.data(), S.maps.size() * 4 );
+	std::memcpy( bufs[12].p, S.alpha.data(), S.alpha.size() * 4 );
+	std::memcpy( bufs[13].p, S.lights.data(), S.lights.size() * 4 );
+	std::memcpy( bufs[14].p, &P, sizeof P );
+	randomRotation( r, pc );
+	// mode 1: the 32 fixed rays; mode 0: every ray, or (jobY 1, which mode 0 does not read) the rays past the fixed ones
+	const uint32_t first = c.mode == 0 && c.jobY ? 32 : 0, count = c.mode == 1 ? 32 : uint32_t( c.N ) - first;
+	pc[12] = c.mode; pc[13] = c.jobY; pc[14] = first; pc[15] = count;
+	groups = ( uint64_t( nP ) * count + 63 ) / 64;
+}
+
 int main( int argc, char ** argv )
 {
 	const std::string kernel = argc > 1 ? argv[1] : "";
@@ -390,9 +720,19 @@ int main( int argc, char ** argv )
 		// rays 288 (all 256 threads load), 160, 64; skipAsleep and the skip range; sky-below rule on and off
 		cases = { { 4, 3, 2, 0, 0, 21, 288, 2, 1, 1 }, { 4, 3, 2, 1, 1, 22, 288, 2, 1, 0 }, { 9, 7, 5, 0, 1, 23, 160, 2, 1, 1 },
 			{ 9, 7, 5, 1, 0, 24, 64, 2, 1, 0 }, { 16, 16, 8, 0, 1, 25, 288, 2, 1, 1 } };
+	} else if ( kernel == "trace" ) {
+		fill = fillTrace;
+		watch = 0;
+		// modes 0 (all rays / past the fixed) and 1 (fixed, fresh only), skipAsleep + skip range, sky on / off, below on /
+		// off, one bounce, and each runtime red the kernel reads: 8 HWHIT, 16 NOTIE, 1|2|4 NOBACK NOCHEB NOBIAS, 32 BOUNCENOCOVER.
+		// The last case passes 65535 groups (the y split)
+		cases = { { 4, 3, 2, 0, 0, 31, 64, 0, 0, 1 }, { 4, 3, 2, 0, 0, 32, 64, 1, 0, 1 }, { 4, 3, 2, 1, 0, 33, 64, 1, 1, 1 },
+			{ 6, 5, 4, 1, 1, 34, 96, 0, 1, 0 }, { 6, 5, 4, 0, 0, 35, 96, 0, 0, 1, 8 }, { 6, 5, 4, 0, 0, 36, 96, 0, 0, 1, 16 },
+			{ 6, 5, 4, 0, 0, 37, 96, 0, 0, 0, 7 }, { 6, 5, 4, 0, 0, 38, 96, 0, 0, 1, 32 }, { 6, 5, 4, 0, 0, 39, 96, 0, 0, 1, 0, 1 },
+			{ 6, 5, 4, 0, 0, 40, 96, 0, 0, 1, 0, 0, 0 }, { 32, 32, 16, 0, 0, 41, 288, 0, 0, 1 } };
 	}
 	if ( argc < 4 || !fill ) {
-		std::printf( "usage: kernelmatch border|reloc|blend <glsl .spv> <hlsl .spv>\n" );
+		std::printf( "usage: kernelmatch border|reloc|blend|trace <glsl .spv> <hlsl .spv>\n" );
 		return 2;
 	}
 	const std::vector<uint32_t> a = readSpv( argv[2] ), b = readSpv( argv[3] );
@@ -481,6 +821,9 @@ int main( int argc, char ** argv )
 	LOADD( vkCreateFence ); LOADD( vkWaitForFences ); LOADD( vkDestroyFence );
 	LOADD( vkQueueSubmit ); LOADD( vkQueueWaitIdle ); LOADD( vkResetCommandBuffer ); LOADD( vkDestroyPipeline );
 	LOADD( vkDestroyShaderModule ); LOADD( vkDestroyBuffer ); LOADD( vkFreeMemory );
+	LOADD( vkGetBufferDeviceAddress ); LOADD( vkCreateAccelerationStructureKHR ); LOADD( vkDestroyAccelerationStructureKHR );
+	LOADD( vkGetAccelerationStructureBuildSizesKHR ); LOADD( vkCmdBuildAccelerationStructuresKHR );
+	LOADD( vkGetAccelerationStructureDeviceAddressKHR ); LOADD( vkCmdPipelineBarrier );
 	vkGetDeviceQueue( dev, family, 0, &queue );
 	if ( !makeLayout() ) {
 		std::printf( "HLSLMATCH FAIL (layout)\n" );
@@ -491,12 +834,26 @@ int main( int argc, char ** argv )
 	int fails = 0, total = 0;
 	for ( const Case & c : cases ) {
 		const size_t nP = size_t( c.x * c.y * c.z );
-		const size_t sz[15] = { nP * size_t( c.N ) * 16, nP * 64 * 16, nP * 256 * 8, nP * 16, nP * 4, 256, 256, 256, 256, 256, 256, 256,
+		size_t sz[15] = { nP * size_t( c.N ) * 16, nP * 64 * 16, nP * 256 * 8, nP * 16, nP * 4, 256, 256, 256, 256, 256, 256, 256,
 			256, 256, sizeof( Params ) };
+		if ( kernel == "trace" ) {   // the soup, sized per binding (one scene, one TLAS, read by both runs)
+			Params P0;
+			Rng r0 { c.seed };
+			fillParamsBase( P0, c, uint32_t( nP ), r0 );
+			makeScene( c, P0 );
+			const size_t s[15] = { 0, 0, 0, 0, 0, S.attr.size() * 4, 0, S.remap.size() * 4, S.verts.size() * 4, S.triOf.size() * 4,
+				S.mask.size() * 4, S.maps.size() * 4, S.alpha.size() * 4, S.lights.size() * 4, 0 };
+			for ( int i = 5; i < 14; i++ )
+				sz[i] = std::max( sz[i], s[i] );
+		}
 		std::vector<Buf> A( 15 ), B( 15 );
 		for ( int i = 0; i < 15; i++ ) {
 			A[i] = makeBuf( sz[i] );
 			B[i] = makeBuf( sz[i] );
+		}
+		if ( sceneOn && !buildScene() ) {
+			std::printf( "HLSLMATCH FAIL (the TLAS did not build)\n" );
+			return 1;
 		}
 		uint64_t groups = 0;
 		uint32_t pc[16] = {};
@@ -547,6 +904,8 @@ int main( int argc, char ** argv )
 			freeBuf( A[i] );
 			freeBuf( B[i] );
 		}
+		if ( sceneOn )
+			freeScene();
 	}
 	if ( fails )
 		std::printf( "HLSLMATCH %s FAIL %d of %d cases\n", argv[1], fails, total );
