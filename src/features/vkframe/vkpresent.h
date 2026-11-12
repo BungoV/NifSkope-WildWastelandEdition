@@ -20,8 +20,13 @@ using GlProc = void * (*)( const char * name );
 
 struct Stat
 {
-	double ms = 0.0;           //!< the last present() call, CPU (the GL blit and signal, acquire, submit, present)
-	double waitMs = 0.0;       //!< of it, the wait for the ring slot's fence (the GPU 3 frames behind)
+	double ms = 0.0;           //!< the last present() call on the drawing thread, CPU (the Vulkan half: the worker, Split)
+	double waitMs = 0.0;       //!< of it, the wait for the worker to have submitted the ring slot's last use
+	double stateMs = 0.0;      //!< of it, the GL state asked (scissor; the bindings when no named blit)
+	double glMs = 0.0;         //!< of it, GL's semaphore wait, the resolve blit and the signal
+	double flushMs = 0.0;      //!< of it, glFlush
+	bool dsa = false;          //!< the resolve went through glBlitNamedFramebuffer
+	bool worker = false;       //!< the Vulkan half went to the worker (false: ran here, the harness's capture)
 	const char * mode = "none";
 	int images = 0;
 	int w = 0, h = 0;
@@ -34,6 +39,15 @@ bool present( void * hwnd, int w, int h, bool vsync, GlProc gl, std::string & wh
 const Stat & last();
 //! harness: the next present() also copies the swapchain image it presents into out (BGRA8, top row first)
 void captureNext( std::vector<std::uint8_t> * out );
+/* the present worker's Vulkan half, summed since the last call (then reset): fence, acquire, record, submit, present
+ * and its whole ms, n frames, failed ones (a failed frame is not shown; why: the last reason) */
+struct Split
+{
+	int n = 0, failed = 0;
+	double fenceMs = 0.0, acquireMs = 0.0, recordMs = 0.0, submitMs = 0.0, presentMs = 0.0, totalMs = 0.0, maxMs = 0.0;
+	std::string why;
+};
+Split takeSplit();
 //! the child window, the swapchain and the ring go (GL current: its textures and semaphores go too); the device stays
 void shutdown();
 

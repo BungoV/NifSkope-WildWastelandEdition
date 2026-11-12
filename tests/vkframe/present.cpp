@@ -198,11 +198,17 @@ int main( int argc, char ** argv )
 	std::printf( "PRESENT vk present %.3f ms (p90 %.3f, fence wait %.3f), frame %.3f ms, mode %s, %d images, %dx%d, builds %llu\n",
 		median( vkMs ), median( vkMs, 0.9 ), median( vkWait ), median( vkFrame ), st.mode, st.images, st.w, st.h,
 		static_cast<unsigned long long>( st.builds ) );
-	WwVkPresent::shutdown();
+	WwVkPresent::shutdown();  // drains the worker
+	const WwVkPresent::Split sp = WwVkPresent::takeSplit();
+	const double sn = sp.n > 0 ? sp.n : 1;
+	std::printf( "PRESENT split: drawing thread GL state %.3f + GL blit/signal %.3f + flush %.3f (%s blit); worker %d frames, "
+		"%d failed, %.3f ms (max %.3f) = fence %.3f + acquire %.3f + record %.3f + submit %.3f + present %.3f\n",
+		st.stateMs, st.glMs, st.flushMs, st.dsa ? "named" : "bound", sp.n, sp.failed, sp.totalMs / sn, sp.maxMs,
+		sp.fenceMs / sn, sp.acquireMs / sn, sp.recordMs / sn, sp.submitMs / sn, sp.presentMs / sn );
 	wglMakeCurrent( nullptr, nullptr );
 	wglDeleteContext( glrc );
 	DestroyWindow( wnd );
-	const bool ok = median( vkMs ) < 0.3 && exact && redFails;
+	const bool ok = median( vkMs ) < 0.3 && exact && redFails && sp.n >= N - 1 && sp.failed == 0;
 	std::printf( "PRESENT GATE %s\n", ok ? "OK" : "FAILED" );
 	return ok ? 0 : 1;
 }

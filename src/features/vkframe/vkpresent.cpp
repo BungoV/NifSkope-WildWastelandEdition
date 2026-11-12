@@ -2,8 +2,12 @@
  * The core (present / shutdown) has no Qt in it: tests/vkframe/present.cpp builds it with WW_VKPRESENT_NO_QT and
  * times it against SwapBuffers, and checks the presented image against GL's back buffer. */
 
+#ifndef NOMINMAX  // the pch defines it
 #define NOMINMAX
+#endif
+#ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
+#endif
 #include <windows.h>
 
 #include "features/vkframe/vkpresent.h"
@@ -14,9 +18,13 @@
 
 #include <algorithm>
 #include <chrono>
+#include <condition_variable>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <deque>
+#include <mutex>
+#include <thread>
 
 namespace
 {
@@ -55,6 +63,8 @@ struct Gl
 	void( WINAPI * framebufferTexture2D )( GLenum, GLenum, GLenum, GLuint, GLint ) = nullptr;
 	GLenum( WINAPI * checkFramebufferStatus )( GLenum ) = nullptr;
 	void( WINAPI * blitFramebuffer )( GLint, GLint, GLint, GLint, GLint, GLint, GLint, GLint, GLbitfield, GLenum ) = nullptr;
+	// GL 4.5 (optional): the resolve with no binding asked or changed
+	void( WINAPI * blitNamedFramebuffer )( GLuint, GLuint, GLint, GLint, GLint, GLint, GLint, GLint, GLint, GLint, GLbitfield, GLenum ) = nullptr;
 	void( WINAPI * createMemoryObjects )( GLsizei, GLuint * ) = nullptr;
 	void( WINAPI * deleteMemoryObjects )( GLsizei, const GLuint * ) = nullptr;
 	void( WINAPI * memoryObjectParameteriv )( GLuint, GLenum, const GLint * ) = nullptr;
@@ -91,6 +101,7 @@ bool loadGl( Gl & g, WwVkPresent::GlProc gp, std::string & why )
 	load( g.framebufferTexture2D, gp, "glFramebufferTexture2D" );
 	load( g.checkFramebufferStatus, gp, "glCheckFramebufferStatus" );
 	load( g.blitFramebuffer, gp, "glBlitFramebuffer" );
+	load( g.blitNamedFramebuffer, gp, "glBlitNamedFramebuffer" );
 	load( g.createMemoryObjects, gp, "glCreateMemoryObjectsEXT" );
 	load( g.deleteMemoryObjects, gp, "glDeleteMemoryObjectsEXT" );
 	load( g.memoryObjectParameteriv, gp, "glMemoryObjectParameterivEXT" );
@@ -375,6 +386,120 @@ HWND makeChild( HWND parent, int w, int h )
 		0, 0, w, h, parent, nullptr, GetModuleHandleW( nullptr ), nullptr );
 }
 
+/* the present worker (build 85: the present held the drawing thread 1.09 ms a frame): the Vulkan half (fence, acquire,
+ * the flipped blit, submit, present) runs on its own thread; GL hands it the slot once its signal is flushed. The queue
+ * and the swapchain are the worker's alone until drain() returns: every rebuild and teardown drains first. */
+bool vkPart( int k, int w, int h, std::string & why, bool & rebuild, WwVkPresent::Split & sp );
+
+struct Work
+{
+	int k = 0, w = 0, h = 0;
+};
+
+struct Worker
+{
+	std::mutex m;
+	std::condition_variable cv, idle;
+	std::deque<Work> q;
+	bool started = false, busy = false, rebuild = false;
+	bool inFlight[kSlots] = {};  // queued or running: its vkDone signal is not submitted yet
+	WwVkPresent::Split split;
+};
+
+Worker & wk()
+{
+	static Worker * w = new Worker;  // never destroyed: the detached thread waits on it until the process ends
+	return *w;
+}
+
+void workerLoop()
+{
+	Worker & W = wk();
+	for ( ;; ) {
+		Work j;
+		{
+			std::unique_lock<std::mutex> lk( W.m );
+			W.cv.wait( lk, [&W]() { return !W.q.empty(); } );
+			j = W.q.front();
+			W.q.pop_front();
+			W.busy = true;
+		}
+		const double t0 = nowMs();
+		std::string why;
+		bool rebuild = false;
+		WwVkPresent::Split one;
+		const bool ok = vkPart( j.k, j.w, j.h, why, rebuild, one );
+		const double ms = nowMs() - t0;
+		{
+			std::lock_guard<std::mutex> lk( W.m );
+			WwVkPresent::Split & s = W.split;
+			s.n++;
+			s.fenceMs += one.fenceMs;
+			s.acquireMs += one.acquireMs;
+			s.recordMs += one.recordMs;
+			s.submitMs += one.submitMs;
+			s.presentMs += one.presentMs;
+			s.totalMs += ms;
+			s.maxMs = std::max( s.maxMs, ms );
+			if ( !ok ) {
+				s.failed++;
+				s.why = why;
+			}
+			W.rebuild = W.rebuild || rebuild;
+			W.busy = false;
+			W.inFlight[j.k] = false;
+		}
+		W.idle.notify_all();
+	}
+}
+
+void hand( int k, int w, int h )
+{
+	Worker & W = wk();
+	{
+		std::lock_guard<std::mutex> lk( W.m );
+		if ( !W.started ) {
+			W.started = true;
+			std::thread( workerLoop ).detach();
+		}
+		W.inFlight[k] = true;
+		W.q.push_back( Work { k, w, h } );
+	}
+	W.cv.notify_one();
+}
+
+void waitSlot( int k )
+{
+	Worker & W = wk();
+	std::unique_lock<std::mutex> lk( W.m );
+	W.idle.wait( lk, [&W, k]() { return !W.inFlight[k]; } );
+}
+
+void drain()
+{
+	Worker & W = wk();
+	std::unique_lock<std::mutex> lk( W.m );
+	W.idle.wait( lk, [&W]() { return W.q.empty() && !W.busy; } );
+}
+
+bool takeRebuild()
+{
+	Worker & W = wk();
+	std::lock_guard<std::mutex> lk( W.m );
+	const bool r = W.rebuild;
+	W.rebuild = false;
+	return r;
+}
+
+WwVkPresent::Split takeWorkerSplit()
+{
+	Worker & W = wk();
+	std::lock_guard<std::mutex> lk( W.m );
+	const WwVkPresent::Split s = W.split;
+	W.split = WwVkPresent::Split();
+	return s;
+}
+
 void dropSlots( bool glAlive )
 {
 	Vk & v = vk();
@@ -429,6 +554,7 @@ void dropAll( bool glAlive )
 {
 	Vk & v = vk();
 	Chain & c = ch();
+	drain();
 	if ( v.ok ) {
 		v.vkDeviceWaitIdle( v.dev );
 		dropSlots( glAlive );
@@ -643,7 +769,7 @@ bool makeSwap( int w, int h, std::string & why )
 		else if ( has( VK_PRESENT_MODE_IMMEDIATE_KHR ) )
 			c.mode = VK_PRESENT_MODE_IMMEDIATE_KHR;
 	}
-	std::uint32_t count = std::max( caps.minImageCount + 1, 3u );
+	std::uint32_t count = std::max( caps.minImageCount + 1, 4u );	// 4: MAILBOX's acquire never waits on a held image
 	if ( caps.maxImageCount )
 		count = std::min( count, caps.maxImageCount );
 	VkExtent2D ext { std::uint32_t( w ), std::uint32_t( h ) };
@@ -718,6 +844,7 @@ bool ensure( HWND parent, int w, int h, bool vsync, std::string & why )
 		c.rebuild = true;
 	if ( !c.rebuild )
 		return true;
+	drain();
 	v.vkDeviceWaitIdle( v.dev );
 	SetWindowPos( c.child, HWND_TOP, 0, 0, w, h, SWP_NOACTIVATE | SWP_NOOWNERZORDER | SWP_SHOWWINDOW );
 	c.vsync = vsync;
@@ -756,6 +883,7 @@ const Stat & last()
 
 void captureNext( std::vector<std::uint8_t> * out )
 {
+	drain();  // the worker reads capture in vkPart
 	ch().capture = out;
 }
 
@@ -797,6 +925,8 @@ bool present( void * hwnd, int w, int h, bool vsync, GlProc gp, std::string & wh
 		why = failWhy;
 		return false;
 	}
+	if ( takeRebuild() )
+		c.rebuild = true;
 	if ( !ensure( HWND( hwnd ), w, h, vsync, why ) ) {
 		failWhy = why;
 		failHwnd = HWND( hwnd );
@@ -806,39 +936,100 @@ bool present( void * hwnd, int w, int h, bool vsync, GlProc gp, std::string & wh
 		return false;
 	}
 	failWhy.clear();
+	( void ) v;
 	const int k = int( c.frame++ % kSlots );
 	Slot & s = c.slot[k];
-	// the CPU waits only for this slot's frame of 3 presents ago (the GPU queue depth); the GL side never waits on the CPU
+	// the worker has submitted this slot's last Vulkan half (GL may wait its vkDone only once that signal is queued)
+	const double tw = nowMs();
+	waitSlot( k );
+	const double waited = nowMs() - tw;
+	/* GL: wait Vulkan's last read of the slot, resolve the back buffer into it, signal (GENERAL both sides). With
+	 * glBlitNamedFramebuffer no binding is asked or changed (a glGet can wait for the driver's own thread) */
+	const double tq = nowMs();
+	const bool scissor = g.isEnabled( kScissorTest ) != 0;
+	GLint rd = 0, dr = 0;
+	if ( !g.blitNamedFramebuffer ) {
+		g.getIntegerv( kReadFbBinding, &rd );
+		g.getIntegerv( kDrawFbBinding, &dr );
+	}
+	const double tg = nowMs();
+	const GLenum general = kLayoutGeneral;
+	if ( s.used )
+		g.waitSemaphore( s.vkDoneGl, 0, nullptr, 1, &s.tex, &general );
+	if ( scissor )
+		g.disable( kScissorTest );
+	if ( g.blitNamedFramebuffer ) {
+		g.blitNamedFramebuffer( 0, s.fbo, 0, 0, w, h, 0, 0, w, h, kColorBit, kNearest );
+	} else {
+		g.bindFramebuffer( kReadFb, 0 );
+		g.bindFramebuffer( kDrawFb, s.fbo );
+		g.blitFramebuffer( 0, 0, w, h, 0, 0, w, h, kColorBit, kNearest );
+		g.bindFramebuffer( kReadFb, GLuint( rd ) );
+		g.bindFramebuffer( kDrawFb, GLuint( dr ) );
+	}
+	if ( scissor )
+		g.enable( kScissorTest );
+	g.signalSemaphore( s.glDoneGl, 0, nullptr, 1, &s.tex, &general );
+	const double tf = nowMs();
+	g.flush();  // Vulkan's wait sees GL's signal only once it is flushed
+	const double tv = nowMs();
+	s.used = true;
+	// Vulkan: on the present worker; a capture (the harness's picture) runs here, after the worker drained
+	Stat & st = stat();
+	st.worker = !c.capture;
+	if ( c.capture ) {
+		drain();
+		bool rebuild = false;
+		Split one;
+		const bool ok = vkPart( k, w, h, why, rebuild, one );
+		if ( rebuild )
+			c.rebuild = true;
+		if ( !ok )
+			return false;
+	} else {
+		hand( k, w, h );
+	}
+	st.ms = nowMs() - t0;
+	st.waitMs = waited;
+	st.stateMs = tg - tq;
+	st.glMs = tf - tg;
+	st.flushMs = tv - tf;
+	st.dsa = g.blitNamedFramebuffer != nullptr;
+	st.mode = modeName( c.mode );
+	st.images = int( c.images.size() );
+	st.w = int( c.extent.width );
+	st.h = int( c.extent.height );
+	return true;
+}
+
+Split takeSplit()
+{
+	return takeWorkerSplit();
+}
+
+}  // namespace WwVkPresent
+
+namespace
+{
+
+// the Vulkan half of slot k's frame: the fence of its last use, the next swapchain image, the flipped blit, present
+bool vkPart( int k, int w, int h, std::string & why, bool & rebuild, WwVkPresent::Split & sp )
+{
+	Vk & v = vk();
+	Chain & c = ch();
+	Slot & s = c.slot[k];
 	const double tw = nowMs();
 	if ( s.pending ) {
 		v.vkWaitForFences( v.dev, 1, &s.fence, VK_TRUE, 1000000000ull );
 		v.vkResetFences( v.dev, 1, &s.fence );
 		s.pending = false;
 	}
-	const double waited = nowMs() - tw;
-	// GL: wait Vulkan's last read of the slot, resolve the back buffer into it, signal (GENERAL both sides)
-	GLint rd = 0, dr = 0;
-	g.getIntegerv( kReadFbBinding, &rd );
-	g.getIntegerv( kDrawFbBinding, &dr );
-	const bool scissor = g.isEnabled( kScissorTest ) != 0;
-	const GLenum general = kLayoutGeneral;
-	if ( s.used )
-		g.waitSemaphore( s.vkDoneGl, 0, nullptr, 1, &s.tex, &general );
-	g.bindFramebuffer( kReadFb, 0 );
-	g.bindFramebuffer( kDrawFb, s.fbo );
-	if ( scissor )
-		g.disable( kScissorTest );
-	g.blitFramebuffer( 0, 0, w, h, 0, 0, w, h, kColorBit, kNearest );
-	if ( scissor )
-		g.enable( kScissorTest );
-	g.signalSemaphore( s.glDoneGl, 0, nullptr, 1, &s.tex, &general );
-	g.bindFramebuffer( kReadFb, GLuint( rd ) );
-	g.bindFramebuffer( kDrawFb, GLuint( dr ) );
-	g.flush();
-	s.used = true;
+	sp.fenceMs += nowMs() - tw;
 	// Vulkan: the next swapchain image, the flipped blit (GL's row 0 is the bottom), present
 	std::uint32_t idx = 0;
+	const double ta = nowMs();
 	VkResult ar = v.vkAcquireNextImageKHR( v.dev, c.swap, 100000000ull, s.acquired, VK_NULL_HANDLE, &idx );
+	sp.acquireMs += nowMs() - ta;
 	VkSubmitInfo si { VK_STRUCTURE_TYPE_SUBMIT_INFO };
 	const VkPipelineStageFlags stages[2] = { VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT };
 	if ( ar != VK_SUCCESS && ar != VK_SUBOPTIMAL_KHR ) {
@@ -849,10 +1040,11 @@ bool present( void * hwnd, int w, int h, bool vsync, GlProc gp, std::string & wh
 		si.signalSemaphoreCount = 1;
 		si.pSignalSemaphores = &s.vkDone;
 		s.pending = v.vkQueueSubmit( v.queue, 1, &si, s.fence ) == VK_SUCCESS;
-		c.rebuild = true;
+		rebuild = true;
 		why = "vkAcquireNextImageKHR returned " + std::to_string( int( ar ) );
 		return false;
 	}
+	const double tr = nowMs();
 	VkCommandBuffer cmd = s.cmd;
 	v.vkResetCommandBuffer( cmd, 0 );
 	VkCommandBufferBeginInfo bi { VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
@@ -926,9 +1118,13 @@ bool present( void * hwnd, int w, int h, bool vsync, GlProc gp, std::string & wh
 	si.pCommandBuffers = &cmd;
 	si.signalSemaphoreCount = 2;
 	si.pSignalSemaphores = signalSems;
-	if ( v.vkQueueSubmit( v.queue, 1, &si, s.fence ) != VK_SUCCESS ) {
+	sp.recordMs += nowMs() - tr;
+	const double ts = nowMs();
+	const VkResult sr = v.vkQueueSubmit( v.queue, 1, &si, s.fence );
+	sp.submitMs += nowMs() - ts;
+	if ( sr != VK_SUCCESS ) {
 		why = "vkQueueSubmit (the present blit) failed";
-		c.rebuild = true;
+		rebuild = true;
 		return false;
 	}
 	s.pending = true;
@@ -938,9 +1134,11 @@ bool present( void * hwnd, int w, int h, bool vsync, GlProc gp, std::string & wh
 	pi.swapchainCount = 1;
 	pi.pSwapchains = &c.swap;
 	pi.pImageIndices = &idx;
+	const double tp = nowMs();
 	const VkResult pr = v.vkQueuePresentKHR( v.queue, &pi );
+	sp.presentMs += nowMs() - tp;
 	if ( pr == VK_SUBOPTIMAL_KHR || pr == VK_ERROR_OUT_OF_DATE_KHR )
-		c.rebuild = true;
+		rebuild = true;
 	if ( c.capture ) {
 		v.vkWaitForFences( v.dev, 1, &s.fence, VK_TRUE, 1000000000ull );
 		void * m = nullptr;
@@ -962,17 +1160,11 @@ bool present( void * hwnd, int w, int h, bool vsync, GlProc gp, std::string & wh
 		why = "vkQueuePresentKHR returned " + std::to_string( int( pr ) );
 		return false;
 	}
-	Stat & st = stat();
-	st.ms = nowMs() - t0;
-	st.waitMs = waited;
-	st.mode = modeName( c.mode );
-	st.images = int( c.images.size() );
-	st.w = int( c.extent.width );
-	st.h = int( c.extent.height );
+	sp.n = 1;
 	return true;
 }
 
-}  // namespace WwVkPresent
+}  // namespace
 
 #ifndef WW_VKPRESENT_NO_QT
 #include "framepacer.h"   // wwVsyncOn
@@ -1021,7 +1213,7 @@ bool frame( QOpenGLWindow * w, const std::function<void()> & paint )
 {
 	static QString said;
 	static QSize baseSize;
-	static double winAt = 0.0, winSum = 0.0, winMax = 0.0, winWait = 0.0;
+	static double winAt = 0.0, winSum = 0.0, winMax = 0.0, winWait = 0.0, winState = 0.0, winGl = 0.0, winFlush = 0.0;
 	static int winN = 0;
 	static std::uint64_t builtSaid = 0;
 	auto say = [&]( const QString & line ) {
@@ -1063,16 +1255,32 @@ bool frame( QOpenGLWindow * w, const std::function<void()> & paint )
 	}
 	winSum += st.ms;
 	winWait += st.waitMs;
+	winState += st.stateMs;
+	winGl += st.glMs;
+	winFlush += st.flushMs;
 	winMax = std::max( winMax, st.ms );
 	winN++;
 	const double now = nowMs();
 	if ( now - winAt >= 5000.0 ) {
-		if ( winAt > 0.0 && winN > 0 )
-			qInfo().noquote() << QStringLiteral( "vk present: %1 ms (max %2, fence wait %3), mode %4, %5 images, %6x%7, %8 frames" )
+		const Split sp = takeSplit();
+		if ( winAt > 0.0 && winN > 0 ) {
+			qInfo().noquote() << QStringLiteral( "vk present: %1 ms (max %2, slot wait %3), mode %4, %5 images, %6x%7, %8 frames" )
 				.arg( winSum / winN, 0, 'f', 3 ).arg( winMax, 0, 'f', 3 ).arg( winWait / winN, 0, 'f', 3 )
 				.arg( QLatin1String( st.mode ) ).arg( st.images ).arg( st.w ).arg( st.h ).arg( winN );
+			// the drawing thread's share by part, and the worker's (its ms are off the drawing thread)
+			const double n = std::max( sp.n, 1 );
+			qInfo().noquote() << QStringLiteral( "vk present split: drawing thread slot wait %1 + GL state %2 + GL blit/signal %3 + "
+				"flush %4 ms (%5); worker %6 ms (max %7) = fence %8 + acquire %9 + record %10 + submit %11 + present %12, %13 frames, "
+				"%14 failed%15" )
+				.arg( winWait / winN, 0, 'f', 3 ).arg( winState / winN, 0, 'f', 3 ).arg( winGl / winN, 0, 'f', 3 )
+				.arg( winFlush / winN, 0, 'f', 3 ).arg( st.dsa ? QStringLiteral( "named blit" ) : QStringLiteral( "bound blit" ) )
+				.arg( sp.totalMs / n, 0, 'f', 3 ).arg( sp.maxMs, 0, 'f', 3 ).arg( sp.fenceMs / n, 0, 'f', 3 )
+				.arg( sp.acquireMs / n, 0, 'f', 3 ).arg( sp.recordMs / n, 0, 'f', 3 ).arg( sp.submitMs / n, 0, 'f', 3 )
+				.arg( sp.presentMs / n, 0, 'f', 3 ).arg( sp.n ).arg( sp.failed )
+				.arg( sp.failed ? QStringLiteral( " (last: %1)" ).arg( QString::fromStdString( sp.why ) ) : QString() );
+		}
 		winAt = now;
-		winSum = winMax = winWait = 0.0;
+		winSum = winMax = winWait = winState = winGl = winFlush = 0.0;
 		winN = 0;
 	}
 	return true;
