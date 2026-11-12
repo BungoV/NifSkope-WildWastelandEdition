@@ -9,6 +9,7 @@ A word-level editor, no SPIRV-Tools needed. What it changes (each one found with
   5. a real uniform block (globalUniforms, skinningUniforms, ...) keeps its layout and gets Binding = BLOCK_BINDING[name];
   6. VertexIndex / InstanceIndex built-ins become VertexId / InstanceId (the GL names).
 Usage: patch(spv_bytes, block_bindings) -> (new bytes, report dict)."""
+import re
 import struct
 
 OP_NAME, OP_MEMBER_NAME = 5, 6
@@ -243,7 +244,9 @@ def patch(data, block_bindings, report=None, locs=None, bool_names=()):
             if sc == SC_INPUT and mod.dec(vid, DEC_LOCATION) is not None:
                 nm = mod.name_of(vid)
                 if nm.startswith('in.var.TEXCOORD'):
-                    n = int(nm[len('in.var.TEXCOORD'):])
+                    # a matrix attribute's columns are TEXCOORD<loc>_<column> (spirv-cross); int('8_0') is 80 in Python: add the column
+                    tm = re.match(r'(\d+)(?:_(\d+))?$', nm[len('in.var.TEXCOORD'):])
+                    n = int(tm.group(1)) + int(tm.group(2) or 0)
                     for e in mod.decs[vid]:
                         if e[0] == DEC_LOCATION:
                             e[1] = n
@@ -280,6 +283,10 @@ def patch(data, block_bindings, report=None, locs=None, bool_names=()):
             rep['blocks'].append((nm, (mod.dec(vid, DEC_BINDING) or [None])[0]))
 
     # ---- 3. LooseUniforms -> default-block uniforms
+    # one name, two shapes: game_dof_blur declares `int taps`, game_dof_down `vec4 taps[4]`; whichever shader comes first
+    # must reserve the larger one (the name keeps one base location in every shader)
+    MIN_RESERVE = {'taps': 4}
+
     def alloc(name, slots, is_array=False):
         # an array is reserved 64 locations: the same name is declared with different lengths in different shaders
         # (textureUnits[10] here, textureUnits[30] there) and every shader must see the same base location
@@ -288,7 +295,7 @@ def patch(data, block_bindings, report=None, locs=None, bool_names=()):
                 raise ValueError('uniform %s needs %d locations, %d reserved' % (name, slots, locs[name][1]))
             return locs[name][0]
         n = sum(v[1] for v in locs.values())
-        locs[name] = (n, slots if slots == 1 and not is_array else max(slots, 64))
+        locs[name] = (n, max(MIN_RESERVE.get(name, 1), slots) if slots == 1 and not is_array else max(slots, 64))
         return n
     loc_next = 0
     if loose_var is not None:
@@ -534,6 +541,16 @@ def patch(data, block_bindings, report=None, locs=None, bool_names=()):
             if pt is not None:
                 keep_ids.add(pt.a[2])
                 keep_struct.add(pt.a[2])
+    # R6: a stage-interface variable keeps a name of its own (by storage and location). The driver names an unnamed one after its
+    # SPIR-V id, and a geometry output and a fragment input with the same id read as one variable of two types (cell_precip_look).
+    for x in mod.glob:
+        if x.op == OP_VARIABLE and x.a[2] in (SC_INPUT, SC_OUTPUT) and not (stage == EM_VERTEX and x.a[2] == SC_INPUT) \
+                and not (stage == 4 and x.a[2] == SC_OUTPUT):
+            lc = mod.dec(x.a[1], DEC_LOCATION)
+            if lc is not None:
+                mod.head = [h for h in mod.head if not (h.op == OP_NAME and h.a[0] == x.a[1])]
+                mod.add_name(x.a[1], ('wwi%d' if x.a[2] == SC_INPUT else 'wwo%d') % lc[0])
+                keep_ids.add(x.a[1])
     mod.head = [h for h in mod.head if not (h.op in (3, 4, 7, 8) or (h.op == OP_NAME and h.a[0] not in keep_ids)
                                             or (h.op == OP_MEMBER_NAME and h.a[0] not in keep_struct))]
     rep['locations'] = sum(v[1] for v in locs.values())

@@ -9,7 +9,7 @@ left as the .prog says."""
 import os, sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-sys.path.insert(0, 'E:/Projects/Claude/notes/hlslbulk1/tools')
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import remap, build_spv, spirv_probe, glctx
 
 STG = {'vert': 'vs', 'frag': 'ps', 'geom': 'gs', 'tesc': 'hs', 'tese': 'ds'}
@@ -36,6 +36,23 @@ def main():
             if ln.startswith('shaders'):
                 names = [os.path.basename(w) for w in ln.split()[1:]]
         progs.append((os.path.basename(pf), st, names))
+    # R6: the variant HLSL (variants.py -> res/shaders/hlsl/variants.txt): one program per loader define set, keyed `<prog>@<A+B>`
+    vt = os.path.join(tree, 'res/shaders/hlsl/variants.txt')
+    if os.path.exists(vt):
+        base = dict((n, (st, nm)) for n, st, nm in progs)
+        for ln in open(vt, encoding='utf-8'):
+            if not ln.strip():
+                continue
+            p, un, spec = ln.rstrip('\n').split('\t')
+            if p not in base:
+                continue
+            tags = dict(x.split('=', 1) for x in spec.split())
+            st = []
+            for e, path, stem in base[p][0]:
+                t = tags.get(stem + '.' + e)
+                st.append((e, path[:-5] + '__' + t + '.hlsl' if t else path, stem))
+            if all(os.path.exists(x[1]) for x in st):
+                progs.append((p + '@' + un, st, base[p][1]))
     locs, built, index, bad = {}, {}, {}, {}
     for name, st, names in sorted(progs, key=lambda x: x[0]):
         for e, path, stem in st:
@@ -67,7 +84,8 @@ def main():
             ok += 1
             out_progs.append('%s\tOK' % name)
             for (e, path, stem) in st:
-                index[stem + '.' + e] = built[path]
+                tg = os.path.basename(path)[:-5].partition('__')[2]
+                index[stem + '.' + e + ('@' + tg if tg else '')] = built[path]
         else:
             out_progs.append('%s\tFAIL %s' % (name, why))
         print(('LINK OK ' if why is None else 'FAIL ') + name + ('' if why is None else ' ' + why), flush=True)

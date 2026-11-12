@@ -4,7 +4,7 @@ Prints one line per program (LINK OK / FAIL + reason) and a closing count 'A1 li
 import os, sys, ctypes
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-sys.path.insert(0, 'E:/Projects/Claude/notes/hlslbulk1/tools')
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import remap, build_spv, spirv_probe, glctx
 
 STG = {'vert': 'vs', 'frag': 'ps', 'geom': 'gs', 'tesc': 'hs', 'tese': 'ds'}

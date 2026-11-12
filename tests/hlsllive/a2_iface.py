@@ -9,7 +9,7 @@ import ctypes, os, sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(HERE)), 'tests', 'spells'))
-sys.path.insert(0, 'E:/Projects/Claude/notes/hlslbulk1/tools')
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import remap, spirv_probe, glctx
 from glctx import GLuint, GLint, GLenum, fn
 import shader_link_check as slc
@@ -21,7 +21,30 @@ STG = {'vert': 'vs', 'frag': 'ps', 'geom': 'gs', 'tesc': 'hs', 'tese': 'ds'}
 GLTYPE = {'vert': 0x8B31, 'frag': 0x8B30, 'geom': 0x8DD9, 'tesc': 0x8E88, 'tese': 0x8E87}
 
 
-def glsl_program(sdir, files, units):
+# R6: the loader's injected defines and the text that makes it inject each one (glcontext.cpp Shader::load; same table as variants.py)
+MARKERS = {'WW_FRAME_UBO': 'WW_FRAME_UBO', 'WW_CELL_RTDDGI': '_CELL_RTDDGI', 'WW_CELL_RESTIR': '_CELL_RESTIR',
+           'WW_CELL_AIRZONE': '_CELL_AIRZONE', 'WW_CELL_AIR_SKYVIEW': '_CELL_AIR_SKYVIEW'}
+
+
+def items(tree):
+    '''(prog file, stages, defines, key): each program in its base variant, then each variant res/shaders/hlsl/variants.txt lists.'''
+    var = {}
+    vt = os.path.join(tree, 'res/shaders/hlsl/variants.txt')
+    if os.path.exists(vt):
+        for ln in open(vt, encoding='utf-8'):
+            if ln.strip():
+                p, un, spec = ln.rstrip('\n').split('\t')
+                var.setdefault(p, []).append((un, dict(x.split('=', 1) for x in spec.split())))
+    for pf, st in remap.programs(tree):
+        name = os.path.basename(pf)
+        yield pf, st, [], name
+        for un, tags in var.get(name, []):
+            st2 = [(e, p[:-5] + '__' + tags[s + '.' + e] + '.hlsl' if tags.get(s + '.' + e) else p, s) for e, p, s in st]
+            if all(os.path.exists(x[1]) for x in st2):
+                yield pf, st2, un.split('+'), name + '@' + un
+
+
+def glsl_program(sdir, files, units, defs=()):
     cs, ss, cm = fn('glCreateShader', GLuint, GLenum), fn('glShaderSource', None, GLuint, ctypes.c_int, ctypes.POINTER(ctypes.c_char_p), ctypes.c_void_p), fn('glCompileShader', None, GLuint)
     gsi = fn('glGetShaderiv', None, GLuint, GLenum, ctypes.POINTER(GLint))
     cp, at, lk = fn('glCreateProgram', GLuint), fn('glAttachShader', None, GLuint, GLuint), fn('glLinkProgram', None, GLuint)
@@ -29,6 +52,10 @@ def glsl_program(sdir, files, units):
     p = cp()
     for f in files:
         src = slc.expand(os.path.join(sdir, f))
+        dd = [d for d in defs if MARKERS[d] in src]
+        if dd and src.startswith('#version'):
+            e0 = src.find('\n') + 1
+            src = src[:e0] + ''.join('#define %s 1\n' % d for d in dd) + src[e0:]
         if f.endswith('frag') and 'NUM_TEXTURE_UNITS' in src:
             src = src.replace('NUM_TEXTURE_UNITS', str(units), 1)
         s = cs(GLTYPE[f.rsplit('.', 1)[-1]])
@@ -97,8 +124,7 @@ def main():
     bad = []
     okp = dict(l.rstrip('\n').split('\t', 1) for l in open(os.path.join(spvdir, 'spirv', 'programs.txt')) if '\t' in l)
     okp = {k: v[:2] for k, v in okp.items()}
-    for pf, st in remap.programs(tree):
-        name = os.path.basename(pf)
+    for pf, st, vdefs, name in items(tree):
         if '.geom' not in open(os.path.join(tree, pf), encoding='utf-8', errors='replace').read():
             st = [x for x in st if not x[1].endswith('_points_gs.hlsl')]
         if only and only not in name or any(e not in STG for e, _p, _s in st):
@@ -115,7 +141,7 @@ def main():
             if ln.startswith('shaders'):
                 shaders = ln.split()[1:]
         byn = remap._byname(tree)
-        pg = glsl_program(tree, [byn.get(s, 'res/shaders/' + s) for s in shaders], units)
+        pg = glsl_program(tree, [byn.get(s, 'res/shaders/' + s) for s in shaders], units, vdefs)
         ps, log = spirv_probe.build(specs)
         if pg is None or ps is None:
             tot['skipped'] += 1
