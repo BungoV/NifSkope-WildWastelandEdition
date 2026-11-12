@@ -1445,6 +1445,7 @@
 { "WW_STREAM1_RED", 2, "src/features/shared/cellpasstime.cpp:804 stream1Red | hand: its reds pick load-time upload formats of every texture/mesh already resident" },
 { "WW_STREAM1_TEXCHECK", 0, "src/gl/gltexloaders.cpp:989 TexCache::texLoadDDS | (b) live (R7 item 7): texLoadDDS re-reads it per set (WW_SWITCH_STATIC + echo); it feeds no cell data" },
 { "WW_STREAMPOOL_RED", 0, "src/cellstream.cpp Stream::pumpWorker | hand: re-read per pump; 1 = a cell being written holds the next build back, build 74 (EMPTY240 R3-1)" },
+{ "WW_STREAMWRITE_RED", 0, "src/cellstream.cpp:1917 Stream::tick | hand: read at each tick; 1 = a built cell's write slices wait while the builder builds, build 78 (EMPTY240 R6-6)" },
 { "WW_STUDIO_CUBE", 0, "src/gl/scenelighting.cpp:105 st | init-once state, re-read when a live set moves its prefix (b)" },
 { "WW_STUDIO_PROBE", 0, "src/gl/scenelighting.cpp:102 st | init-once state, re-read when a live set moves its prefix (b)" },
 { "WW_STUDIO_SUN", 0, "src/gl/scenelighting.cpp:109 st | init-once state, re-read when a live set moves its prefix (b)" },
