@@ -105,6 +105,10 @@ static VkPipelineLayout pipeLayout;
 // a kernel's own set 1 (air rays 4 buffers, restir 11): bufs[15 + i] = set 1 binding i; every binding partially bound
 constexpr uint32_t kSet1Max = 11;
 static uint32_t nSet1 = 0;
+// bakert's bvh kernel: binding 6 is a storage buffer (the tree's nodes), so it runs on a second layout
+static bool storage6 = false;
+static VkDescriptorSetLayout setLayoutB;
+static VkPipelineLayout pipeLayoutB;
 static VkDescriptorPool pool;
 static VkCommandPool cpool;
 static VkCommandBuffer cb;
@@ -127,6 +131,10 @@ static bool makeLayout()
 	li.pBindings = b;
 	if ( vkCreateDescriptorSetLayout( dev, &li, nullptr, &setLayout ) != VK_SUCCESS )
 		return false;
+	b[6].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+	fl[6] = 0;
+	if ( vkCreateDescriptorSetLayout( dev, &li, nullptr, &setLayoutB ) != VK_SUCCESS )
+		return false;
 	for ( uint32_t i = 0; i < kSet1Max; i++ ) {
 		b[i] = VkDescriptorSetLayoutBinding { i, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr };
 		fl[i] = VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT;
@@ -143,6 +151,10 @@ static bool makeLayout()
 	pi.pushConstantRangeCount = 1;
 	pi.pPushConstantRanges = &pr;
 	if ( vkCreatePipelineLayout( dev, &pi, nullptr, &pipeLayout ) != VK_SUCCESS )
+		return false;
+	pi.setLayoutCount = 1;
+	pi.pSetLayouts = &setLayoutB;
+	if ( vkCreatePipelineLayout( dev, &pi, nullptr, &pipeLayoutB ) != VK_SUCCESS )
 		return false;
 	VkDescriptorPoolSize ps[2] = { { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 64 }, { VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, 8 } };
 	VkDescriptorPoolCreateInfo dp { VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO };
@@ -176,7 +188,8 @@ static bool run( const std::vector<uint32_t> & spv, std::vector<Buf> & bufs, con
 	ci.stage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
 	ci.stage.module = sm;
 	ci.stage.pName = "main";
-	ci.layout = pipeLayout;
+	const VkPipelineLayout pl = storage6 ? pipeLayoutB : pipeLayout;
+	ci.layout = pl;
 	VkPipeline pipe;
 	if ( vkCreateComputePipelines( dev, VK_NULL_HANDLE, 1, &ci, nullptr, &pipe ) != VK_SUCCESS )
 		return false;
@@ -184,9 +197,13 @@ static bool run( const std::vector<uint32_t> & spv, std::vector<Buf> & bufs, con
 	da.descriptorPool = pool;
 	da.descriptorSetCount = 1;
 	da.pSetLayouts = &setLayout;
-	static VkDescriptorSet set = VK_NULL_HANDLE, set1 = VK_NULL_HANDLE;
-	if ( !set && vkAllocateDescriptorSets( dev, &da, &set ) != VK_SUCCESS )
+	static VkDescriptorSet setA = VK_NULL_HANDLE, setB = VK_NULL_HANDLE, set1 = VK_NULL_HANDLE;
+	if ( !setA && vkAllocateDescriptorSets( dev, &da, &setA ) != VK_SUCCESS )
 		return false;
+	da.pSetLayouts = &setLayoutB;
+	if ( !setB && vkAllocateDescriptorSets( dev, &da, &setB ) != VK_SUCCESS )
+		return false;
+	const VkDescriptorSet set = storage6 ? setB : setA;
 	da.pSetLayouts = &set1Layout;
 	if ( !set1 && vkAllocateDescriptorSets( dev, &da, &set1 ) != VK_SUCCESS )
 		return false;
@@ -203,7 +220,7 @@ static bool run( const std::vector<uint32_t> & spv, std::vector<Buf> & bufs, con
 		w.push_back( x );
 	}
 	for ( uint32_t i = 0; i < 15; i++ ) {
-		if ( i == 6 )
+		if ( i == 6 && !storage6 )
 			continue;
 		bi[i] = VkDescriptorBufferInfo { bufs[i].b, 0, VK_WHOLE_SIZE };
 		VkWriteDescriptorSet x { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
@@ -217,7 +234,7 @@ static bool run( const std::vector<uint32_t> & spv, std::vector<Buf> & bufs, con
 	VkWriteDescriptorSetAccelerationStructureKHR wa { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET_ACCELERATION_STRUCTURE_KHR };
 	wa.accelerationStructureCount = 1;
 	wa.pAccelerationStructures = &tlas;
-	if ( tlas ) {
+	if ( tlas && !storage6 ) {
 		VkWriteDescriptorSet x { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
 		x.pNext = &wa;
 		x.dstSet = set;
@@ -232,8 +249,8 @@ static bool run( const std::vector<uint32_t> & spv, std::vector<Buf> & bufs, con
 	vkBeginCommandBuffer( cb, &bb );
 	vkCmdBindPipeline( cb, VK_PIPELINE_BIND_POINT_COMPUTE, pipe );
 	const VkDescriptorSet sets[2] = { set, set1 };
-	vkCmdBindDescriptorSets( cb, VK_PIPELINE_BIND_POINT_COMPUTE, pipeLayout, 0, nSet1 ? 2 : 1, sets, 0, nullptr );
-	vkCmdPushConstants( cb, pipeLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, 64, pc );
+	vkCmdBindDescriptorSets( cb, VK_PIPELINE_BIND_POINT_COMPUTE, pl, 0, nSet1 && !storage6 ? 2 : 1, sets, 0, nullptr );
+	vkCmdPushConstants( cb, pl, VK_SHADER_STAGE_COMPUTE_BIT, 0, 64, pc );
 	const uint64_t gx = groups < 65535 ? groups : 65535;
 	const uint64_t gy = ( groups + gx - 1 ) / gx;
 	vkCmdDispatch( cb, uint32_t( gx ), uint32_t( gy ), 1 );
@@ -438,12 +455,13 @@ static Scene S;
 static bool sceneOn = false;
 struct AsParts { Buf vb[3], blasBuf[3], tlasBuf, inst, scratch; VkAccelerationStructureKHR blas[3] = {}; };
 static AsParts AS;
+static bool bakeScene = false;   // bakert's BLAS: ONE instance, geometry 0 the opaque rows, geometry 1 the alpha-tested ones
 
 static void makeScene( const Case & c, const Params & P )
 {
 	Rng r { c.seed * 7919 + 3 };
 	S = Scene();
-	const uint32_t n0 = 120, nAl = 60, n1 = 90, n2 = 70;
+	const uint32_t n0 = bakeScene ? 280 : 120, nAl = 60, n1 = bakeScene ? 0 : 90, n2 = bakeScene ? 0 : 70;
 	S.nOp = int( n0 );
 	S.partFirst[0] = 0; S.partN0[0] = n0; S.partN1[0] = nAl;
 	S.partFirst[1] = n0 + nAl; S.partN0[1] = n1; S.partN1[1] = 0;
@@ -596,8 +614,11 @@ static bool buildScene()
 	};
 	const VkBufferUsageFlags in = VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR;
 	std::vector<VkAccelerationStructureInstanceKHR> inst( 3 );
+	uint32_t nInst = 0;
 	for ( int p = 0; p < 3; p++ ) {
 		const uint32_t n = S.partN0[p] + S.partN1[p];
+		if ( n == 0 )   // bakert's scene: one part
+			continue;
 		AS.vb[p] = makeBuf( size_t( n ) * 36, in, true );
 		float * dst = static_cast<float *>( AS.vb[p].p );
 		for ( uint32_t i = 0; i < n; i++ )
@@ -621,7 +642,7 @@ static bool buildScene()
 			return false;
 		VkAccelerationStructureDeviceAddressInfoKHR ai { VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_DEVICE_ADDRESS_INFO_KHR };
 		ai.accelerationStructure = AS.blas[p];
-		VkAccelerationStructureInstanceKHR & I = inst[size_t( p )];
+		VkAccelerationStructureInstanceKHR & I = inst[nInst++];
 		std::memset( &I, 0, sizeof I );
 		I.transform.matrix[0][0] = I.transform.matrix[1][1] = I.transform.matrix[2][2] = 1.0f;
 		I.instanceCustomIndex = S.partFirst[p];
@@ -629,14 +650,13 @@ static bool buildScene()
 		I.flags = VK_GEOMETRY_INSTANCE_TRIANGLE_FACING_CULL_DISABLE_BIT_KHR;
 		I.accelerationStructureReference = vkGetAccelerationStructureDeviceAddressKHR( dev, &ai );
 	}
-	AS.inst = makeBuf( sizeof( VkAccelerationStructureInstanceKHR ) * 3, in, true );
-	std::memcpy( AS.inst.p, inst.data(), sizeof( VkAccelerationStructureInstanceKHR ) * 3 );
+	AS.inst = makeBuf( sizeof( VkAccelerationStructureInstanceKHR ) * nInst, in, true );
+	std::memcpy( AS.inst.p, inst.data(), sizeof( VkAccelerationStructureInstanceKHR ) * nInst );
 	VkAccelerationStructureGeometryKHR g { VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR };
 	g.geometryType = VK_GEOMETRY_TYPE_INSTANCES_KHR;
 	g.geometry.instances = VkAccelerationStructureGeometryInstancesDataKHR { VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_INSTANCES_DATA_KHR };
 	g.geometry.instances.data.deviceAddress = addrOf( AS.inst );
-	const uint32_t three = 3;
-	return buildAs( VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR, &g, &three, 1, AS.tlasBuf, tlas );
+	return buildAs( VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR, &g, &nInst, 1, AS.tlasBuf, tlas );
 }
 
 static void freeScene()
@@ -918,6 +938,157 @@ static void fillRestir( std::vector<Buf> & bufs, const Case & c, uint64_t & grou
 	groups = ( nPix + 63 ) / 64;
 }
 
+// bakert (bvh / rq / rqx, src/features/gi/bakert): bindings 0 rays, 1 hits, 2 triOf, 3 mask records, 4 maps, 5 alpha;
+// rq / rqx 6 TLAS, 7 remap (BLAS primitive -> soup triangle), rqx 8 the true triangles a BLAS primitive; bvh 6 nodes,
+// 7 idx, 8 the triangles in soup order. Push constants: first count useMask nTri nOpaque flags grow pad. One invocation a ray
+struct BakeCase { uint32_t rays, first, useMask, flags; float grow; };
+static BakeCase bakeOf[64];   // by case seed
+static std::string bakeKernel;
+static std::vector<float> bakeTris;       // bvh binding 8
+static std::vector<uint32_t> bakeNodes;   // bvh binding 6: lo3 hi3 (float bits), left (-1 = a leaf), first (inner: the right child), count
+static std::vector<int32_t> bakeIdx;      // bvh binding 7
+
+static uint32_t bvhNode( uint32_t first, uint32_t count )
+{
+	const uint32_t n = uint32_t( bakeNodes.size() / 9 );
+	bakeNodes.resize( bakeNodes.size() + 9 );
+	float lo[3] = { 1e30f, 1e30f, 1e30f }, hi[3] = { -1e30f, -1e30f, -1e30f };
+	for ( uint32_t i = first; i < first + count; i++ )
+		for ( int j = 0; j < 3; j++ )
+			for ( int k = 0; k < 3; k++ ) {
+				const float v = bakeTris[size_t( bakeIdx[i] ) * 9 + size_t( j * 3 + k )];
+				lo[k] = std::min( lo[k], v );
+				hi[k] = std::max( hi[k], v );
+			}
+	for ( int k = 0; k < 3; k++ ) {
+		std::memcpy( &bakeNodes[n * 9 + uint32_t( k )], &lo[k], 4 );
+		std::memcpy( &bakeNodes[n * 9 + 3 + uint32_t( k )], &hi[k], 4 );
+	}
+	if ( count <= 4 ) {
+		bakeNodes[n * 9 + 6] = 0xFFFFFFFFu;
+		bakeNodes[n * 9 + 7] = first;
+		bakeNodes[n * 9 + 8] = count;
+		return n;
+	}
+	int ax = 0;
+	for ( int k = 1; k < 3; k++ )
+		ax = hi[k] - lo[k] > hi[ax] - lo[ax] ? k : ax;
+	auto ctr = [ax]( int32_t t ) { const float * v = &bakeTris[size_t( t ) * 9]; return v[ax] + v[3 + ax] + v[6 + ax]; };
+	std::sort( bakeIdx.begin() + first, bakeIdx.begin() + first + count,
+		[&]( int32_t a, int32_t b ) { return ctr( a ) < ctr( b ) || ( ctr( a ) == ctr( b ) && a < b ); } );
+	const uint32_t half = count / 2;
+	const uint32_t l = bvhNode( first, half );
+	const uint32_t r = bvhNode( first + half, count - half );
+	bakeNodes[n * 9 + 6] = l;
+	bakeNodes[n * 9 + 7] = r;
+	bakeNodes[n * 9 + 8] = count;
+	return n;
+}
+
+static void buildBvh()
+{
+	const size_t rows = S.remap.size();
+	bakeTris.assign( rows * 9, 0.0f );
+	for ( size_t i = 0; i < rows; i++ )
+		std::memcpy( &bakeTris[size_t( S.remap[i] ) * 9], &S.verts[i * 9], 36 );
+	bakeIdx.resize( rows );
+	for ( size_t t = 0; t < rows; t++ )
+		bakeIdx[t] = int32_t( t );
+	bakeNodes.clear();
+	bvhNode( 0, uint32_t( rows ) );
+}
+
+// rays: ~60 % aimed at a row's true triangle (some on an edge, some starting ~1e-4 off the surface, some ending just
+// short of it), the rest random in the scene's box; ~5 % with a zero direction axis (bvh's flat slab); tmin 1e-4 or 0
+static void fillBake( std::vector<Buf> & bufs, const Case & c, uint64_t & groups, uint32_t pc[16] )
+{
+	const BakeCase & q = bakeOf[c.seed % 64];
+	const bool xr = bakeKernel == "rqx", bvh = bakeKernel == "bvh";
+	for ( size_t i = 0; i < 15; i++ )   // makeBuf does not clear: every byte both runs see is written here
+		std::memset( bufs[i].p, i == 1 ? 0x5A : 0, bufs[i].n );
+	Rng r { c.seed * 31 + 7 };
+	const size_t rows = S.remap.size();
+	float lo[3] = { 1e30f, 1e30f, 1e30f }, hi[3] = { -1e30f, -1e30f, -1e30f };
+	for ( size_t i = 0; i < S.verts.size(); i++ ) {
+		lo[i % 3] = std::min( lo[i % 3], S.verts[i] );
+		hi[i % 3] = std::max( hi[i % 3], S.verts[i] );
+	}
+	const float ext = std::max( hi[0] - lo[0], std::max( hi[1] - lo[1], hi[2] - lo[2] ) ), step = ext / 8.0f;
+	const uint32_t n = q.first + q.rays;
+	for ( uint32_t i = 0; i < n; i++ ) {
+		float d[3] = { r.unit() - 0.5f, r.unit() - 0.5f, r.unit() - 0.5f };
+		if ( r.unit() < 0.05f )
+			d[r.next() % 3] = 0.0f;
+		float dl = std::sqrt( d[0] * d[0] + d[1] * d[1] + d[2] * d[2] );
+		if ( dl < 1e-3f ) {
+			d[0] = 0.0f; d[1] = 0.0f; d[2] = 1.0f; dl = 1.0f;
+		}
+		for ( int k = 0; k < 3; k++ )
+			d[k] /= dl;
+		float o[3], tmax;
+		const float tmin = r.unit() < 0.5f ? 1e-4f : 0.0f;
+		if ( r.unit() < 0.6f ) {
+			const float * v = &S.verts[size_t( r.next() % rows ) * 9];
+			float b1 = r.unit(), b2 = r.unit();
+			if ( b1 + b2 > 1.0f ) {
+				b1 = 1.0f - b1;
+				b2 = 1.0f - b2;
+			}
+			const float e = r.unit();
+			if ( e < 0.1f )
+				b1 = 0.0f;
+			else if ( e < 0.2f )
+				b2 = 1.0f - b1;
+			const float b0 = 1.0f - b1 - b2;
+			const float w = r.unit();
+			const float dist = w < 0.15f ? 1e-4f * ( 1.0f + r.unit() ) : step * ( 0.2f + 2.0f * r.unit() );
+			for ( int k = 0; k < 3; k++ )
+				o[k] = b0 * v[k] + b1 * v[3 + k] + b2 * v[6 + k] - d[k] * dist;
+			tmax = r.unit() < 0.15f ? dist * 0.99999f : dist + step * 4.0f * r.unit();
+		} else {
+			for ( int k = 0; k < 3; k++ )
+				o[k] = lo[k] - step + r.unit() * ( hi[k] - lo[k] + 2.0f * step );
+			tmax = ext * ( 0.2f + r.unit() );
+		}
+		if ( xr ) {
+			double * x = static_cast<double *>( bufs[0].p ) + size_t( i ) * 8;
+			double dd[3], ddl = 0.0;
+			for ( int k = 0; k < 3; k++ ) {
+				x[k] = double( o[k] ) + double( r.unit() ) * 1e-9;
+				dd[k] = double( d[k] );
+				ddl += dd[k] * dd[k];
+			}
+			ddl = std::sqrt( ddl );
+			x[3] = double( tmax );
+			for ( int k = 0; k < 3; k++ )
+				x[4 + k] = dd[k] / ddl;
+			x[7] = 0.0;
+		} else {
+			float * x = static_cast<float *>( bufs[0].p ) + size_t( i ) * 8;
+			x[0] = o[0]; x[1] = o[1]; x[2] = o[2]; x[3] = tmin;
+			x[4] = d[0]; x[5] = d[1]; x[6] = d[2]; x[7] = tmax;
+		}
+	}
+	std::memcpy( bufs[2].p, S.triOf.data(), S.triOf.size() * 4 );
+	std::memcpy( bufs[3].p, S.mask.data(), S.mask.size() * 4 );
+	std::memcpy( bufs[4].p, S.maps.data(), S.maps.size() * 4 );
+	std::memcpy( bufs[5].p, S.alpha.data(), S.alpha.size() * 4 );
+	if ( bvh ) {
+		std::memcpy( bufs[6].p, bakeNodes.data(), bakeNodes.size() * 4 );
+		std::memcpy( bufs[7].p, bakeIdx.data(), bakeIdx.size() * 4 );
+		std::memcpy( bufs[8].p, bakeTris.data(), bakeTris.size() * 4 );
+	} else {
+		std::memcpy( bufs[7].p, S.remap.data(), S.remap.size() * 4 );
+		if ( xr )
+			std::memcpy( bufs[8].p, S.verts.data(), S.verts.size() * 4 );
+	}
+	pc[0] = q.first; pc[1] = q.rays; pc[2] = q.useMask; pc[3] = uint32_t( rows ); pc[4] = uint32_t( S.nOp ); pc[5] = q.flags;
+	std::memcpy( &pc[6], &q.grow, 4 );
+	pc[7] = 0;
+	const uint32_t local = bvh ? 64 : 128;
+	groups = ( q.rays + local - 1 ) / local;
+}
+
 int main( int argc, char ** argv )
 {
 	const std::string kernel = argc > 1 ? argv[1] : "";
@@ -980,6 +1151,22 @@ int main( int argc, char ** argv )
 			Case k { 6, 5, 4, 0, 0, uint64_t( 61 + i ) };
 			k.mode = rc[i].mode;
 			cases.push_back( k );
+		}
+	} else if ( kernel == "bvh" || kernel == "rq" || kernel == "rqx" ) {
+		fill = fillBake;
+		bakeKernel = kernel;
+		bakeScene = true;
+		storage6 = kernel == "bvh";
+		// rays, first, useMask, flags (1 any hit / occlusion; rqx 2 = the graze red), grow (rqx's narrowed edge band)
+		std::vector<BakeCase> bc;
+		if ( kernel == "rqx" )
+			bc = { { 30000, 0, 1, 0, 0.0f }, { 30000, 37, 1, 1, 0.0f }, { 30000, 0, 1, 0, 0.05f }, { 30000, 0, 1, 2, 0.0f },
+				{ 20000, 0, 0, 0, 0.05f }, { 30000, 11, 1, 1, 0.05f } };
+		else
+			bc = { { 30000, 0, 1, 0, 0.0f }, { 30000, 37, 1, 1, 0.0f }, { 20000, 0, 0, 0, 0.0f }, { 70000, 5, 1, 0, 0.0f } };
+		for ( size_t i = 0; i < bc.size(); i++ ) {
+			bakeOf[( 81 + i ) % 64] = bc[i];
+			cases.push_back( Case { 4, 3, 2, 0, 0, uint64_t( 81 + i ) } );
 		}
 	}
 	if ( argc < 4 || !fill ) {
@@ -1054,6 +1241,9 @@ int main( int argc, char ** argv )
 	const char * ext[] = { "VK_KHR_acceleration_structure", "VK_KHR_ray_query", "VK_KHR_deferred_host_operations" };
 	VkDeviceCreateInfo di { VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO };
 	di.pNext = &v12;
+	VkPhysicalDeviceFeatures feat {};
+	feat.shaderFloat64 = VK_TRUE;   // bakert's rqx device (never shaderInt64)
+	di.pEnabledFeatures = &feat;
 	di.queueCreateInfoCount = 1;
 	di.pQueueCreateInfos = &qi;
 	di.enabledExtensionCount = 3;
@@ -1109,6 +1299,19 @@ int main( int argc, char ** argv )
 			for ( int i = 5; i < 14; i++ )
 				sz[i] = std::max( sz[i], s[i] );
 		}
+		if ( bakeScene ) {   // bakert's own binding sizes (the scene's, one BLAS)
+			Params P0;
+			Rng r0 { c.seed };
+			fillParamsBase( P0, c, uint32_t( nP ), r0 );
+			makeScene( c, P0 );
+			if ( storage6 )
+				buildBvh();
+			const BakeCase & q = bakeOf[c.seed % 64];
+			const size_t nr = size_t( q.first ) + q.rays;
+			sz = { nr * ( kernel == "rqx" ? 64 : 32 ), nr * 8, S.triOf.size() * 4, S.mask.size() * 4, S.maps.size() * 4, S.alpha.size() * 4,
+				storage6 ? bakeNodes.size() * 4 : 256, storage6 ? bakeIdx.size() * 4 : S.remap.size() * 4,
+				storage6 ? bakeTris.size() * 4 : kernel == "rqx" ? S.verts.size() * 4 : 256, 256, 256, 256, 256, 256, 256 };
+		}
 		std::vector<Buf> A( nb ), B( nb );
 		for ( size_t i = 0; i < nb; i++ ) {
 			A[i] = makeBuf( sz[i] );
@@ -1160,6 +1363,25 @@ int main( int argc, char ** argv )
 			const RestirCase & q = restirOf[c.seed % 128];
 			std::printf( "  restir: mode %u C %d K %d f %d red %d history %d; light kept %zu, history pixel %zu, rays blocked %zu open %zu\n",
 				c.mode, q.C, q.K, q.f, q.red, q.hist, kept, withHist, blocked, open );
+		}
+		if ( bakeScene ) {   // coverage: hits, hits on an alpha-tested triangle; rqx the unsure reasons by bit
+			const BakeCase & q = bakeOf[c.seed % 64];
+			const uint32_t * h = static_cast<const uint32_t *>( A[1].p ) + size_t( q.first ) * 2;
+			size_t hit = 0, masked = 0, why[6] = {};
+			for ( uint32_t k = 0; k < q.rays; k++ ) {
+				const uint32_t t = kernel == "rqx" ? h[k * 2] : h[k * 2 + 1];
+				if ( t != 0xFFFFFFFFu ) {
+					hit++;
+					masked += t < S.triOf.size() && S.triOf[t] >= 0;
+				}
+				for ( int b = 0; b < 6 && kernel == "rqx"; b++ )
+					why[b] += ( h[k * 2 + 1] >> b ) & 1u;
+			}
+			std::printf( "  %s: rays %u first %u useMask %u flags %u grow %g; hits %zu, on a masked triangle %zu", kernel.c_str(), q.rays,
+				q.first, q.useMask, q.flags, double( q.grow ), hit, masked );
+			if ( kernel == "rqx" )
+				std::printf( "; unsure 1:%zu 2:%zu 4:%zu 8:%zu 16:%zu 32:%zu", why[0], why[1], why[2], why[3], why[4], why[5] );
+			std::printf( "\n" );
 		}
 		const bool ok = ra && rb && all == 0 && moved > 0;
 		fails += ok ? 0 : 1;

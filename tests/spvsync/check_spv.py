@@ -12,11 +12,14 @@ import os, re, shutil, subprocess, sys
 # (source dir, kernel, --target-env, --vn) == src/features/gi/bakert_spirv.sh + src/features/gi/rtddgi_spirv.sh
 SPECS = [
 	('src/features/gi/bakert', 'rq', 'vulkan1.2', 'bakert_rq_spv'),
-	('src/features/gi/bakert', 'bvh', 'vulkan1.1', 'bakert_bvh_spv'),
 	('src/features/gi/bakert', 'rqx', 'vulkan1.2', 'bakert_rqx_spv'),
 ] + [('src/features/gi/rtddgi', k, 'vulkan1.2', 'rtddgi_%s_spv' % k) for k in ()]
-# lane VKCOMPUTE1: kernels converted to HLSL, built by DXC from res/shaders/hlsl/rtddgi/<k>.hlsl + tools/spv_header.py
-HLSL_SPECS = [('src/features/gi/rtddgi', k, 'vulkan1.2', 'rtddgi_%s_spv' % k) for k in ('border', 'reloc', 'blend', 'trace', 'airrays', 'restir')]
+# lane VKCOMPUTE1: kernels converted to HLSL, built by DXC from res/shaders/hlsl/<dir>/<k>.hlsl + tools/spv_header.py
+# (rtddgi_spirv.sh's DXC loop; bakert_spirv.sh's `hk <k> <env>` lines)
+HLSL_SPECS = [('src/features/gi/rtddgi', k, 'vulkan1.2', 'rtddgi_%s_spv' % k) for k in ('border', 'reloc', 'blend', 'trace', 'airrays', 'restir')] + [
+	('src/features/gi/bakert', 'bvh', 'vulkan1.1', 'bakert_bvh_spv'),
+]
+BAKERT_HK = '\t"$DXC" -spirv -fspv-target-env="$2" -T "${T:-cs_6_0}" -E main -O0 -Fo "$1.hlsl.spv" '
 DEFAULT_G = 'E:/Tools/RenderDoc/RenderDoc_1.45_64/plugins/spirv/glslangValidator.exe'
 DEFAULT_DXC = 'E:/Tools/dxc/bin/x64/dxc.exe'
 
@@ -43,8 +46,17 @@ def script_ok(tree):
 			bad.append('src/features/gi/rtddgi_spirv.sh: kernel %s is not in this checker' % k)
 	m = re.search(r'^for k in ([a-z ]+); do\n\tT=.*\n\t"\$DXC" -spirv -fspv-target-env=vulkan1\.2 -T "\$\{T:-cs_6_0\}" -E main -O0 ', r, re.M)
 	hloop = m.group(1).split() if m else []
-	if sorted(hloop) != sorted(k for d, k, e, v in HLSL_SPECS):
+	if sorted(hloop) != sorted(k for d, k, e, v in HLSL_SPECS if d == 'src/features/gi/rtddgi'):
 		bad.append('src/features/gi/rtddgi_spirv.sh: its DXC loop (%s) is not this checker\'s HLSL kernels' % ' '.join(hloop))
+	bk = [k for d, k, e, v in HLSL_SPECS if d == 'src/features/gi/bakert']
+	if bk and BAKERT_HK not in b:
+		bad.append('src/features/gi/bakert_spirv.sh: its hk compile line changed')
+	for d, k, env, vn in HLSL_SPECS:
+		if d == 'src/features/gi/bakert' and not re.search(r'^hk %s %s$' % (k, re.escape(env)), b, re.M):
+			bad.append('src/features/gi/bakert_spirv.sh: no `hk %s %s` line' % (k, env))
+	for k, env in re.findall(r'^hk ([a-z]+) (\S+)$', b, re.M):
+		if k not in bk:
+			bad.append('src/features/gi/bakert_spirv.sh: hk %s is not in this checker' % k)
 	return bad
 
 
@@ -158,8 +170,8 @@ def main(argv):
 			if a == c:
 				print('OK    %s/%s %d B (HLSL)' % (d, name, len(c)))
 			else:
-				fails.append('%s/%s: STALE, rebuilt %d B vs committed %d B (%s); run tools/rtddgi_spirv.sh'
-				             % (d, name, len(a), len(c), first_diff(a, c)))
+				fails.append('%s/%s: STALE, rebuilt %d B vs committed %d B (%s); run src/features/gi/%s_spirv.sh'
+				             % (d, name, len(a), len(c), first_diff(a, c), os.path.basename(d)))
 	for f in fails:
 		print('FAIL  ' + f)
 	for s in skips:

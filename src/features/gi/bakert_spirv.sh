@@ -5,8 +5,19 @@
 set -eu
 ROOT="$(cd "$(dirname "$0")/../../.." && pwd)"
 G="${GLSLANG:-/e/Tools/RenderDoc/RenderDoc_1.45_64/plugins/spirv/glslangValidator.exe}"
+# lane VKCOMPUTE1: a kernel converted to HLSL (res/shaders/hlsl/bakert/NAME.hlsl) builds with DXC, -O0 (the source's float
+# order, proven byte-exact against the .comp by tests/hlslmatch); the .comp stays as that gate's original. The entry's
+# `// hlsl profile: cs_6_N` line picks the shader model. hk <kernel> <target env>
+DXC="${DXC:-/e/Tools/dxc/bin/x64/dxc.exe}"
+HLSL="$ROOT/res/shaders/hlsl/bakert"
+hk() {
+	T="$(grep -o 'hlsl profile: cs_6_[0-9]' "$HLSL/$1.hlsl" | head -1 | awk '{print $3}')"
+	"$DXC" -spirv -fspv-target-env="$2" -T "${T:-cs_6_0}" -E main -O0 -Fo "$1.hlsl.spv" "$(cygpath -m "$HLSL/$1.hlsl" 2>/dev/null || echo "$HLSL/$1.hlsl")"
+	python -I "$ROOT/tools/spv_header.py" "$1.hlsl.spv" "bakert_$1_spv" "$1.spv.h" < /dev/null
+	rm -f "$1.hlsl.spv"
+}
 cd "$ROOT/src/features/gi/bakert"
 "$G" --target-env vulkan1.2 -V --vn bakert_rq_spv -o rq.spv.h rq.comp
-"$G" --target-env vulkan1.1 -V --vn bakert_bvh_spv -o bvh.spv.h bvh.comp
+hk bvh vulkan1.1
 "$G" --target-env vulkan1.2 -V --vn bakert_rqx_spv -o rqx.spv.h rqx.comp   # lane RTGI1: whole rays, sure/unsure
 ls -la rq.spv.h bvh.spv.h rqx.spv.h
