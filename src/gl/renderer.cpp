@@ -32,6 +32,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "renderer.h"
 #include "features/shared/cellpasstime.h"	// lane PERF2: the draws' CPU setup time
+#include "wwhwuse.h"	// lane EMPTY240 R3-4: the draws' program routes for the `near draws:` line
 #include "features/overlays/debugview.h"	// lane DEBUGVIEW1: the farowner view's owner
 #include "features/near/celldrawstate.h"	// lane PERF3
 #include "features/near/celldrawpacket.h"	// lane GAPPERF-BINDLESS
@@ -1146,6 +1147,7 @@ float wwCellCubeDecodeMode( TexCache * tc )
 NifSkopeOpenGLContext::Program * Renderer::setupProgram( Shape * mesh, Program * hint )
 {
 	PassTime::DrawCpuScope wwSetupT( PassTime::CpuSetup );	// lane PERF2
+	WwHw::route( WwHw::RouteCalls );	// lane EMPTY240 R3-4
 	WwCellUni::forgetBlend();	// lane CELLUNI3: the census takes the blend from this draw's own writes, or asks
 	wwRestoreSrgbDecode();
 	const NifModel *	nif = mesh->scene->nifModel;
@@ -1208,6 +1210,7 @@ NifSkopeOpenGLContext::Program * Renderer::setupProgram( Shape * mesh, Program *
 		&& nif->getBSVersion() >= 130 && nif->getBSVersion() < 140 ) {
 		if ( Program * program = useProgram( "pbr_route.prog" ) ) {
 			routeProgramSeen = program;
+			WwHw::route( WwHw::RoutePbrm );
 			if ( setupProgramRoute( nif, program, mesh ) )
 				return wwProgramCensus( nif, mesh, wwSp, wwKind, wwMsn, wwLodLand, program,
 				globalUniforms->lightSourcePosition[0] );
@@ -1226,6 +1229,7 @@ NifSkopeOpenGLContext::Program * Renderer::setupProgram( Shape * mesh, Program *
 		else if ( !waterProg && std::string_view( wwCellWaterProgram() ) == "fo4_waterlookm.prog" )
 			waterProg = useProgram( "fo4_waterlook.prog" );	// lane FIX1101A: the Medium twin refused, the full one
 		if ( Program * program = waterProg ) {
+			WwHw::route( WwHw::RouteWater );
 			if ( setupProgramCE1( nif, program, mesh ) && wwCellWaterUniforms( mesh->scene, mesh->id(), 0 ) )
 				return wwProgramCensus( nif, mesh, wwSp, wwKind, wwMsn, wwLodLand, program,
 				globalUniforms->lightSourcePosition[0] );
@@ -1252,6 +1256,7 @@ NifSkopeOpenGLContext::Program * Renderer::setupProgram( Shape * mesh, Program *
 			: wwSunShadowWanted( mesh->scene ) ? "pbrm_csm.prog" : "pbrm_default.prog";
 		if ( Program * program = useProgram( pbrmWant ) ) {
 			pbrmProgramSeen = program;
+			WwHw::route( WwHw::RoutePbrm );
 			if ( setupProgramPBRM( nif, program, mesh ) )
 				return wwProgramCensus( nif, mesh, wwSp, wwKind, wwMsn, wwLodLand, program,
 				globalUniforms->lightSourcePosition[0] );
@@ -1377,7 +1382,10 @@ NifSkopeOpenGLContext::Program * Renderer::setupProgram( Shape * mesh, Program *
 				fgTwin = true;
 			}
 		}
+		if ( !fgTwin && want[4] == 'c' && want[5] == 'e' )
+			WwHw::route( WwHw::RouteCell );	// lane EMPTY240 R3-4: a cell-lit draw, then whether it asked the bindless twin
 		if ( !fgTwin && ( want[4] == 'c' && want[5] == 'e' ) && wwBlWants() ) {	// lane BINDLESS2: fo4_cell / fo4_cellcsm
+			WwHw::route( WwHw::RouteAsked );
 			const char * bl = want[8] == 'c' ? "fo4_cellcsmbl.prog" : "fo4_cellbl.prog";
 			if ( WwBl::red() != 5 ) {	// lane BINDLESSPERF1: the twin first; its base is looked up once
 				Program * q = useProgram( bl );
@@ -1413,6 +1421,7 @@ NifSkopeOpenGLContext::Program * Renderer::setupProgram( Shape * mesh, Program *
 			setupStatus = setupProgramFO3( nif, program, mesh );
 		if ( setupStatus ) {
 			if ( program->wwBindless ) {	// lane BINDLESS2: the draw's row
+				WwHw::route( WwHw::RouteBindless );	// lane EMPTY240 R3-4
 				PassTime::DrawCpuScope blT( PassTime::CpuBlRow );	// lane BINDLESSPERF1
 				WwBl::commit( fn, program );
 			}

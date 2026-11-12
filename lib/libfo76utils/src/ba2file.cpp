@@ -845,6 +845,8 @@ void BA2File::loadArchivePath(
 
 BA2File::~BA2File()
 {
+  if (destroyHook)
+    destroyHook(this);
   clear();
 }
 

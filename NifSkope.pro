@@ -463,6 +463,7 @@ HEADERS += \
 	src/cellspawn.h \
 	src/cellcambounds.h \
 	src/celltexahead.h \
+	src/wwhwuse.h \
 	src/cellmodelahead.h \
 	src/features/gi/probealbedo.h \
 	src/features/gi/probebake.h \
@@ -845,6 +846,7 @@ SOURCES += \
 	src/cellstreamwalk.cpp \
 	src/wwsharedread.cpp \
 	src/celltexahead.cpp \
+	src/wwhwuse.cpp \
 	src/cellmodelahead.cpp \
 	src/features/gi/probealbedo.cpp \
 	src/features/gi/probebake.cpp \

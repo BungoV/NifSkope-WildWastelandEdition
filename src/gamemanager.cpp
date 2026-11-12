@@ -3,6 +3,7 @@
 #include "celltexahead.h"
 #include "recx.h"	// lane WEATHERRECX1: the Fusion Shaders data mod (the moon maps' home)
 #include "ba2file.hpp"
+#include "wwhwuse.h"	// lane EMPTY240: archive reads through the RAM cache and the read/inflate counters
 #include "bsrefl.hpp"
 #include "material.hpp"
 #include "message.h"
@@ -195,6 +196,7 @@ void GameManager::GameResources::init_archives()
 	}
 	if ( tmp.isEmpty() )
 		return;
+	WwHw::IndexScope wwIx( parent ? "game archive index (child)" : "game archive index (every extension but .nif)" );
 	ba2File = new BA2File();
 	for ( const auto & i : tmp ) {
 		try {
@@ -363,7 +365,7 @@ bool GameManager::GameResources::get_file( QByteArray & data, const std::string_
 		return false;
 	}
 	try {
-		ba2File->extractFile( &data, &byteArrayAllocFunc, *fd );
+		WwHw::extract( *ba2File, *fd, data, &byteArrayAllocFunc );
 	} catch ( NifSkopeError & e ) {
 		if ( std::string_view(e.what()).starts_with( "BA2File: unexpected change to size of loose file" ) ) {
 			// drop the READ lock before close_archives() takes the write one

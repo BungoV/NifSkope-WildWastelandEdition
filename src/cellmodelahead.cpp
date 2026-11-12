@@ -1,5 +1,6 @@
 #include "cellmodelahead.h"
 #include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
+#include "wwhwuse.h"	// lane EMPTY240 R3-1: the stream pool's busy count
 
 #include "cellspeed.h"
 #include "data/nifitemcache.h"
@@ -123,6 +124,7 @@ void CellModelAhead::load()
 	lodgenParallelFor( int( jobs_.size() ), [&]( int i ) {
 		Job & j = jobs_[size_t( i )];
 		NifItemThreadCache ownItems;
+		WwHw::Busy wwBusy;	// lane EMPTY240 R3-1
 		j.ok = lodgenNativeLoadModelPlacedOnce( user, j.model, j.subst.isEmpty() ? nullptr : &j.subst, &j.shapes );
 		j.done = true;
 	}, workerCap() );

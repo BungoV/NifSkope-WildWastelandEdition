@@ -1,5 +1,6 @@
 #include "celltexahead.h"
 #include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
+#include "wwhwuse.h"	// lane EMPTY240 R3-1: the stream pool's busy count
 
 #include "cellspeed.h"
 #include "cellstream.h"
@@ -115,6 +116,7 @@ void worker()
 		QByteArray data;
 		bool ok = false;
 		{
+			WwHw::Busy wwBusy;	// lane EMPTY240 R3-1
 			CellSpeed::Acc speedAcc( "texture files read ahead (worker threads)" );
 			const QString full = nif->findResourceFile( name, "textures", ".dds" );
 			ok = !full.isEmpty() && nif->getResourceFile( data, full, "textures", "" ) && !data.isEmpty();
