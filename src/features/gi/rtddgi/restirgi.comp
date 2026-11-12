@@ -1,0 +1,521 @@
+#version 460
+// Lane RTEMIS1 part 2 (2026-11-06): ReSTIR GI on the DDGI volume's BVH, one invocation a pixel (the RT quality preset
+// High). The CPU twin is src/features/gi/restirgimath.h restirgi::frame() (its pass 0 = mode 0, pass 1 = mode 1); the
+// per-pixel rules are restirgi_common.glsl (MIRROR restirgimath.h). A bounce ray's hit is shaded as a probe ray's
+// (trace_body.glsl: direct + the volume's irradiance, x albedo / pi, + Le), a miss returns the volume's miss radiance.
+// mode 2 keeps a running mean a pixel (reprojected, at most knobs.y frames, clamped to the like neighbours' estimates),
+// mode 3 filters it in a depth / normal aware window (twice as wide while the mean is young: one frame must stand on its
+// own, history only polishes), modes 4.. run the variance-guided a-trous passes on it and the last one writes the
+// irradiance the cell shader reads (no a-trous passes: mode 3 writes it). Set 0 = the volume's own set, set 1 = the buffers below.
+#extension GL_EXT_ray_query : require
+#extension GL_GOOGLE_include_directive : require
+layout( local_size_x = 64 ) in;
+#include "ddgi_common.glsl"
+#include "trace_body.glsl"
+#include "restir_common.glsl"
+#include "restirgi_common.glsl"
+
+struct RestirGiParams {
+	ivec4 size;       // W, H, frame, seed
+	ivec4 opts;       // neighbours (K), the neighbour square's half side, the filter's half size, red bits (RESTIRGI_BIT_*)
+	vec4 knobs;       // history (1: the previous frame's buffers are valid), the running mean's frames cap, 1: the STBN
+	                  // mask is bound, the a-trous passes
+	vec4 rows[3];     // view -> world (the soup's local frame)
+	vec4 proj;        // P00, P11, P20, P21
+	vec4 prows[3];    // the previous frame's
+	vec4 pproj;
+};
+layout( std430, set = 1, binding = 0 ) readonly buffer GParams { RestirGiParams G; };
+layout( std430, set = 1, binding = 1 ) readonly buffer GGbuf { vec4 gbuf[]; };
+layout( std430, set = 1, binding = 2 ) readonly buffer GPrevGbuf { vec4 prevGbuf[]; };
+layout( std430, set = 1, binding = 3 ) buffer GCur { RgRes resCur[]; };      // this frame's temporal reservoirs
+layout( std430, set = 1, binding = 4 ) readonly buffer GHist { RgRes resHist[]; };   // the previous frame's
+layout( std430, set = 1, binding = 5 ) buffer GHistPix { int histPix[]; };   // the reprojected pixel (-1 none)
+layout( std430, set = 1, binding = 6 ) buffer GEst { vec4 est[]; };          // the frame's estimate: E rgb, 1 valid
+layout( std430, set = 1, binding = 7 ) buffer GAcc { vec4 acc[]; };          // the running mean: E rgb, frames
+layout( std430, set = 1, binding = 8 ) readonly buffer GAccPrev { vec4 accPrev[]; };
+layout( std430, set = 1, binding = 9 ) buffer GOut { vec4 outE[]; };         // the filtered E rgb, the linear depth it is for
+layout( std430, set = 1, binding = 10 ) buffer GCand { vec4 candLo[]; };     // the bounce's Lo rgb, hit (-1 no pixel): the CLI gate
+layout( std430, set = 1, binding = 11 ) readonly buffer GStbn { uint stbn[]; };   // res/air/stbn_scalar_128x128x64.r8, 4 bytes a uint
+layout( std430, set = 1, binding = 12 ) buffer GAtrA { vec4 atrA[]; };       // the a-trous ping-pong: E rgb, its variance
+layout( std430, set = 1, binding = 13 ) buffer GAtrB { vec4 atrB[]; };
+layout( std430, set = 1, binding = 14 ) buffer GPk { uvec2 gpk[]; };          // mode 2 -> the filters: depth bits, octahedral normal
+
+uint rgStbnByte( uint i ) { return ( stbn[i >> 2u] >> ( ( i & 3u ) * 8u ) ) & 255u; }
+
+/* the g-buffer texel packed for the filter and a-trous taps (8 bytes, not 16): the depth's own float bits and the normal
+ * octahedral in two snorm16 [Cigolle 2014, "A Survey of Efficient Representations for Independent Unit Vectors"];
+ * a zero normal packs to (0, 0) and comes back +z (only where the depth is invalid) */
+uvec2 rgPack( vec4 g )
+{
+	const float s = abs( g.x ) + abs( g.y ) + abs( g.z );
+	vec2 p = s > 0.0 ? g.xy / s : vec2( 0.0 );
+	if ( s > 0.0 && g.z < 0.0 )
+		p = ( 1.0 - abs( p.yx ) ) * vec2( p.x >= 0.0 ? 1.0 : -1.0, p.y >= 0.0 ? 1.0 : -1.0 );
+	return uvec2( floatBitsToUint( g.w ), packSnorm2x16( p ) );
+}
+
+vec4 rgUnpack( uvec2 k )
+{
+	const vec2 p = unpackSnorm2x16( k.y );
+	vec3 n = vec3( p, 1.0 - abs( p.x ) - abs( p.y ) );
+	const float t = max( -n.z, 0.0 );
+	n.x += n.x >= 0.0 ? -t : t;
+	n.y += n.y >= 0.0 ? -t : t;
+	return vec4( normalize( n ), uintBitsToFloat( k.x ) );
+}
+
+vec3 rgToWorld( vec4 r0, vec4 r1, vec4 r2, vec3 v )
+{
+	return vec3( dot( r0.xyz, v ) + r0.w, dot( r1.xyz, v ) + r1.w, dot( r2.xyz, v ) + r2.w );
+}
+
+struct RgPixel { bool ok; float D; vec3 P; vec3 N; };
+
+// MIRROR restirmath.h pixelAt (restir.comp rsPixel)
+RgPixel rgPixel( bool prev, int x, int y )
+{
+	RgPixel o;
+	o.ok = false;
+	o.P = vec3( 0.0 );
+	o.N = vec3( 0.0, 0.0, 1.0 );
+	const vec4 g = prev ? prevGbuf[y * G.size.x + x] : gbuf[y * G.size.x + x];
+	o.D = g.w;
+	if ( !( o.D > 0.0 ) || o.D >= 1e5 )
+		return o;
+	const vec3 pv = restirViewPos( float( x ), float( y ), float( G.size.x ), float( G.size.y ), o.D, prev ? G.pproj : G.proj );
+	if ( prev ) {
+		o.P = rgToWorld( G.prows[0], G.prows[1], G.prows[2], pv );
+		o.N = normalize( vec3( dot( G.prows[0].xyz, g.xyz ), dot( G.prows[1].xyz, g.xyz ), dot( G.prows[2].xyz, g.xyz ) ) );
+	} else {
+		o.P = rgToWorld( G.rows[0], G.rows[1], G.rows[2], pv );
+		o.N = normalize( vec3( dot( G.rows[0].xyz, g.xyz ), dot( G.rows[1].xyz, g.xyz ), dot( G.rows[2].xyz, g.xyz ) ) );
+	}
+	o.ok = true;
+	return o;
+}
+
+// the bounce ray, shaded as trace.comp main shades a probe ray (the twin: src/features/gi/rtddgi.cpp restirgiCli's scene)
+/* the bounce hit's direct light (RTEMIS1 11-09, the cost cut; MIRROR rtddgi.cpp RgTwinScene directOne): the sun and the
+ * directional term as ddgiDirect, the placed lights by ONE pick in proportion to its unshadowed luminance (a running
+ * pick on the one uniform u, rescaled each step) with one shadow ray, over its probability: the mean of every light with
+ * a ray each [Talbot 2005, RIS]; red alllights = ddgiDirect */
+vec3 rgDirectOne( vec3 Pw, vec3 n, float u )
+{
+	vec3 E = vec3( 0.0 );
+	const vec3 o = Pw + n * 0.5;
+	if ( P.sunTo.w > 0.5 ) {
+		const float nl = dot( n, P.sunTo.xyz );
+		if ( nl > 0.0 && !ddgiShadow( o, P.sunTo.xyz, P.sun.w ) )
+			E += P.sun.rgb * nl;
+	}
+	if ( P.dirTo.w > 0.5 ) {
+		const float nl = dot( n, P.dirTo.xyz );
+		if ( nl > 0.0 )
+			E += P.dirColor.rgb * nl;
+	}
+	float wsum = 0.0, wp = 0.0;
+	vec3 cp = vec3( 0.0 ), lp = vec3( 0.0 );
+	for ( int li = 0; li < P.counts.y; li++ ) {
+		const uint b = uint( li ) * 8u;
+		const vec4 l0 = lights[b], l1 = lights[b + 1u], l2 = lights[b + 2u], l3 = lights[b + 3u];
+		const vec4 l7 = lights[b + 7u];
+		const vec3 Lv = l0.xyz - Pw;
+		const float d = length( Lv );
+		if ( d >= l0.w )
+			continue;
+		const int shape = int( l7.x + 0.5 );
+		if ( shape == 1 && dot( Pw - l0.xyz, l2.xyz ) < 0.0 )
+			continue;
+		if ( shape == 2 ) {
+			bool inside = true;
+			for ( int k = 0; k < 3; k++ ) {
+				const vec4 bx = lights[b + 4u + uint( k )];
+				if ( abs( dot( bx.xyz, Pw ) + bx.w ) > 1.0 )
+					inside = false;
+			}
+			if ( !inside )
+				continue;
+		}
+		const vec3 L = Lv / max( d, 0.001 );
+		const float nl = dot( n, L );
+		if ( nl <= 0.0 )
+			continue;
+		float att = ddgiRadial( d, l0.w, l3.x, l3.y, l3.z );
+		if ( l1.w > 0.5 )
+			att *= ddgiSpot( -dot( L, l2.xyz ), l2.w, l3.w );
+		if ( att * nl <= 0.0 )
+			continue;
+		const vec3 c = l1.rgb * ( att * nl );
+		const float w = rgLum( c );
+		if ( !( w > 0.0 ) )
+			continue;
+		wsum += w;
+		const float pr = w / wsum;
+		if ( u < pr ) {
+			u = u / pr;
+			wp = w;
+			cp = c;
+			lp = l0.xyz;
+		} else {
+			u = ( u - pr ) / max( 1.0 - pr, 1e-30 );
+		}
+	}
+	if ( wp > 0.0 ) {
+		const vec3 dl = lp - o;
+		const float len = length( dl );
+		if ( !ddgiShadow( o, dl / max( len, 1e-6 ), len - P.dirColor.w ) )
+			E += cp * ( wsum / wp );
+	}
+	return E;
+}
+
+RgRes rgTrace( vec3 o, vec3 d, float u, int red )
+{
+	uint pr;
+	float t;
+	if ( !ddgiNearest( o, d, P.sun.w, pr, t ) )
+		return rgSample( d, vec3( 0.0 ), P.sky[0].w > 0.5 ? ddgiMiss( d ) : vec3( 0.0 ), false );
+	const int tri = remap[pr];
+	const uint vb = pr * 9u;
+	const vec3 v0 = vec3( verts[vb], verts[vb + 1u], verts[vb + 2u] );
+	const vec3 e1 = vec3( verts[vb + 3u], verts[vb + 4u], verts[vb + 5u] ) - v0;
+	const vec3 e2 = vec3( verts[vb + 6u], verts[vb + 7u], verts[vb + 8u] ) - v0;
+	const vec3 nf = normalize( cross( e1, e2 ) );
+	const vec4 a0 = triAttr[uint( tri ) * 2u];
+	const vec3 n = dot( nf, d ) > 0.0 ? -nf : nf;
+	const vec3 Pw = o + d * t;
+	if ( a0.w < 0.5 && dot( nf, d ) > 0.0 && ( uint( P.flags.w ) & DDGI_RED_NOBACK ) == 0u )
+		return rgSample( Pw, n, vec3( 0.0 ), true );   // a one-sided face from behind sends nothing
+	vec3 E = ( red & RESTIRGI_BIT_ALLLIGHTS ) != 0 ? ddgiDirect( Pw, n ) : rgDirectOne( Pw, n, u );
+	if ( P.flags.x == 0 )
+		E += ddgiIrradianceAt( Pw, n, -d );
+	return rgSample( Pw, n, ddgiHitRadiance( a0.rgb, E, triAttr[uint( tri ) * 2u + 1u].rgb ), true );
+}
+
+// MIRROR restirgimath.h frame's sees: a shadow ray from the receiver to the sample (a miss: along its direction)
+bool rgSees( vec3 x, vec3 n, RgRes y, int red )
+{
+	if ( ( red & RESTIRGI_BIT_NOVIS ) != 0 )
+		return true;
+	const vec3 o = x + n * RESTIRGI_EPS;
+	if ( y.hit < 0.5 )
+		return !ddgiShadow( o, y.xs, P.sun.w );
+	const vec3 d = y.xs - o;
+	const float l = length( d );
+	return l > 2.0 * RESTIRGI_EPS && !ddgiShadow( o, d / l, l - 2.0 * RESTIRGI_EPS );
+}
+
+// mode 0, MIRROR restirgimath.h frame pass 0: the bounce, then the reprojected history
+void modeCandidate( int x, int y, uint id )
+{
+	histPix[id] = -1;
+	resCur[id] = rgEmpty();
+	candLo[id] = vec4( 0.0, 0.0, 0.0, -1.0 );
+	const RgPixel p = rgPixel( false, x, y );
+	if ( !p.ok )
+		return;
+	const int red = G.opts.w;
+	const uint pix = uint( G.size.w ) ^ id;
+	const uint s1 = restirSeed( pix, uint( G.size.z ), 1u );
+	const bool mask = G.knobs.z > 0.5;
+	const uint m0 = mask ? rgStbnByte( rgStbnIndex( x, y, uint( G.size.z ), uint( G.size.w ), 0 ) ) : 0u;
+	const uint m1 = mask ? rgStbnByte( rgStbnIndex( x, y, uint( G.size.z ), uint( G.size.w ), 1 ) ) : 0u;
+	// the half / quarter trace: a skipped pixel draws nothing (M 0) and keeps its history; mode 2 fills its estimate
+	RgRes r = rgEmpty();
+	if ( rgTraced( x, y, uint( G.size.z ), red ) ) {
+		const vec3 d = rgBounceDir( p.N, x, y, G.size.x, uint( G.size.w ), uint( G.size.z ), red, mask, m0, m1 );
+		const RgRes yv = rgTrace( p.P + p.N * RESTIRGI_EPS, d, restirRand( s1, 1u ), red );
+		candLo[id] = vec4( yv.Lo, yv.hit );
+		r = rgCandidate( p.P, p.N, yv, red );
+	}
+	resCur[id] = r;
+	if ( ( red & RESTIRGI_BIT_NOTEMPORAL ) != 0 || G.knobs.x < 0.5 )
+		return;
+	// world -> the previous view (restir.comp modeCandidates)
+	const vec3 t = p.P - vec3( G.prows[0].w, G.prows[1].w, G.prows[2].w );
+	const vec3 pv = vec3( G.prows[0].x * t.x + G.prows[1].x * t.y + G.prows[2].x * t.z, G.prows[0].y * t.x + G.prows[1].y * t.y + G.prows[2].y * t.z,
+		G.prows[0].z * t.x + G.prows[1].z * t.y + G.prows[2].z * t.z );
+	if ( !( pv.z < -1e-3 ) )
+		return;
+	const float Dp = -pv.z;
+	const float nx = ( G.pproj.x * pv.x - G.pproj.z * Dp ) / Dp, ny = ( G.pproj.y * pv.y - G.pproj.w * Dp ) / Dp;
+	const int qx = int( floor( ( nx + 1.0 ) * 0.5 * float( G.size.x ) ) ), qy = int( floor( ( ny + 1.0 ) * 0.5 * float( G.size.y ) ) );
+	if ( qx < 0 || qy < 0 || qx >= G.size.x || qy >= G.size.y )
+		return;
+	const RgPixel q = rgPixel( true, qx, qy );
+	if ( !q.ok || !restirSimilar( Dp, p.N, q.D, q.N ) )
+		return;
+	histPix[id] = qy * G.size.x + qx;
+	const RgRes h = resHist[qy * G.size.x + qx];
+	if ( h.any < 0.5 )
+		return;
+	const float Mh = min( h.M, RESTIRGI_HISTORY_CAP );
+	RgRes s = rgUpdate( rgEmpty(), r, rgTarget( p.P, p.N, r ) * r.W * r.M, r.M, 0.0 );
+	s = rgUpdate( s, h, rgTarget( p.P, p.N, h ) * h.W * Mh, Mh, restirRand( s1, 0u ) );
+	resCur[id] = rgFinalize( s, rgTarget( p.P, p.N, s ), s.M );
+}
+
+// mode 1, MIRROR restirgimath.h frame pass 1: K neighbours with the Jacobian (unshadowed weights; red mergevis: seen);
+// Z over the merged pixels
+void modeSpatial( int x, int y, uint id )
+{
+	est[id] = vec4( 0.0 );
+	const RgPixel p = rgPixel( false, x, y );
+	const int red = G.opts.w;
+	if ( !p.ok || !rgTraced( x, y, uint( G.size.z ), red ) )
+		return;
+	const int W = G.size.x, H = G.size.y;
+	const uint s2 = restirSeed( uint( G.size.w ) ^ id, uint( G.size.z ), 2u );
+	const RgRes own = resCur[id];
+	RgRes r = rgUpdate( rgEmpty(), own, rgTarget( p.P, p.N, own ) * own.W * own.M, own.M, restirRand( s2, 0u ) );
+	int from[16];
+	int nf = 0;
+	from[nf] = int( id );
+	nf++;
+	const int R = G.opts.y;
+	const int side = 2 * R + 1;
+	for ( int k = 0; k < min( G.opts.x, 15 ); k++ ) {
+		const int o = int( restirRand( s2, uint( 1 + 3 * k ) ) * float( side * side ) );
+		const ivec2 qs = rgSnapTraced( x + o % side - R, y + o / side - R, uint( G.size.z ), red );
+		const int qx = qs.x, qy = qs.y;
+		if ( qx < 0 || qy < 0 || qx >= W || qy >= H || ( qx == x && qy == y ) )
+			continue;
+		const int q = qy * W + qx;
+		const RgPixel pq = rgPixel( false, qx, qy );
+		if ( !pq.ok )
+			continue;
+		const RgRes rq = resCur[q];
+		const float jk = rgJacobianKept( rq.any > 0.5 ? rgJacobian( p.P, pq.P, rq, red ) : 1.0, red );
+		if ( jk < 0.0 )
+			continue;
+		from[nf] = q;
+		nf++;
+		float w = 0.0;
+		if ( rq.any > 0.5 && ( ( red & RESTIRGI_BIT_MERGEVIS ) == 0 || rgSees( p.P, p.N, rq, red ) ) )
+			w = rgTarget( p.P, p.N, rq ) * rq.W * rq.M * jk;
+		r = rgUpdate( r, rq, w, rq.M, restirRand( s2, uint( 2 + 3 * k ) ) );
+	}
+	// the own pixel's shadow ray is traced once: Z's k = 0 term and pHat ask the same question
+	const bool seesOwn = r.any > 0.5 && rgSees( p.P, p.N, r, red );
+	const float tOwn = r.any > 0.5 ? rgTarget( p.P, p.N, r ) : 0.0;
+	float Z = tOwn > 0.0 && seesOwn ? own.M : 0.0;
+	for ( int k = 1; k < nf; k++ ) {
+		const RgPixel ps = rgPixel( false, from[k] % W, from[k] / W );
+		if ( r.any > 0.5 && rgTarget( ps.P, ps.N, r ) > 0.0 && rgSees( ps.P, ps.N, r, red ) )
+			Z += resCur[from[k]].M;
+	}
+	const float pHat = seesOwn ? tOwn : 0.0;
+	r = rgFinalize( r, pHat, Z );
+	est[id] = vec4( rgEstimate( p.P, p.N, r ), 1.0 );
+}
+
+// mode 2: the running mean, through the reprojected pixel (none: starts over; mode 0 found none on a cut, a light change
+// or a disocclusion). The history is clamped to the 3 x 3 like pixels' estimates first [Karis 2014, TAA's clamp], so a
+// stale mean (a light gone, a thing moved) cannot outlive the frame that shows it. The same 3 x 3 gives the frame's
+// spatial variance of the estimate's luminance; over the mean's frames it is the mean's variance, the a-trous guide
+// (a young mean: one frame's spread, so the guide is wide exactly when the history is short) [Schied 2017, SVGF 4.2].
+void modeAccumulate( int x, int y, uint id )
+{
+	vec4 e = est[id];
+	atrB[id] = vec4( 0.0 );
+	const vec4 g = gbuf[id];
+	gpk[id] = rgPack( g );
+	// a pixel the half / quarter trace skipped (valid depth, no estimate): the mean of its traced like 3 x 3 neighbours;
+	// none like it: its own history's mean, then any traced neighbour, then black (the filters read acc.w > 0 exactly
+	// where the depth is valid, so a valid pixel always gets one)
+	if ( e.w < 0.5 && g.w > 0.0 && g.w < 1e5 && !rgTraced( x, y, uint( G.size.z ), G.opts.w ) ) {
+		vec3 sum = vec3( 0.0 ), sumAny = vec3( 0.0 );
+		float nf = 0.0, nAny = 0.0;
+		for ( int dy = -1; dy <= 1; dy++ )
+			for ( int dx = -1; dx <= 1; dx++ ) {
+				const int qx = x + dx, qy = y + dy;
+				if ( ( dx == 0 && dy == 0 ) || qx < 0 || qy < 0 || qx >= G.size.x || qy >= G.size.y )
+					continue;
+				const int q = qy * G.size.x + qx;
+				const vec4 h = gbuf[q];
+				const vec4 eq = est[q];
+				if ( eq.w < 0.5 )
+					continue;
+				sumAny += eq.xyz;
+				nAny += 1.0;
+				if ( restirSimilar( g.w, g.xyz, h.w, h.xyz ) ) {
+					sum += eq.xyz;
+					nf += 1.0;
+				}
+			}
+		const int hq = histPix[id];
+		e = nf > 0.0 ? vec4( sum / nf, 1.0 ) : hq >= 0 && accPrev[hq].w > 0.0 ? vec4( accPrev[hq].xyz, 1.0 )
+			: vec4( nAny > 0.0 ? sumAny / nAny : vec3( 0.0 ), 1.0 );
+	}
+	if ( e.w < 0.5 ) {
+		acc[id] = vec4( 0.0 );
+		return;
+	}
+	vec3 lo = e.xyz, hi = e.xyz;
+	const float le = rgLum( e.xyz );
+	float s1 = le, s2 = le * le, ns = 1.0;
+	for ( int dy = -1; dy <= 1; dy++ )
+		for ( int dx = -1; dx <= 1; dx++ ) {
+			const int qx = x + dx, qy = y + dy;
+			if ( ( dx == 0 && dy == 0 ) || qx < 0 || qy < 0 || qx >= G.size.x || qy >= G.size.y )
+				continue;
+			const int q = qy * G.size.x + qx;
+			const vec4 h = gbuf[q];
+			const vec4 eq = est[q];
+			if ( eq.w < 0.5 || !restirSimilar( g.w, g.xyz, h.w, h.xyz ) )
+				continue;
+			lo = min( lo, eq.xyz );
+			hi = max( hi, eq.xyz );
+			const float l = rgLum( eq.xyz );
+			s1 += l;
+			s2 += l * l;
+			ns += 1.0;
+		}
+	const float vs = max( s2 / ns - ( s1 / ns ) * ( s1 / ns ), 0.0 );
+	const int hp = histPix[id];
+	float n = 1.0;
+	if ( hp < 0 ) {
+		acc[id] = vec4( e.xyz, 1.0 );
+	} else {
+		const vec4 a = accPrev[hp];
+		const vec3 ah = clamp( a.xyz, lo, hi );
+		n = min( a.w + 1.0, max( G.knobs.y, 1.0 ) );
+		acc[id] = vec4( ah + ( e.xyz - ah ) / n, n );
+	}
+	atrB[id] = vec4( 0.0, 0.0, 0.0, vs / n );
+}
+
+// mode 3: the running means of the window's like pixels (depth within 10 %, normal within 25 degrees: restirSimilar)
+void modeFilter( int x, int y, uint id )
+{
+	const vec4 g = rgUnpack( gpk[id] );
+	vec3 s = vec3( 0.0 );
+	float n = 0.0;
+	const int f = G.opts.z;
+	const int st = acc[id].w < 4.0 ? 2 : 1;   // a young mean (TAA off, a cut, a disocclusion): the same taps, twice as wide
+	if ( g.w > 0.0 && g.w < 1e5 )
+		for ( int dy = -f; dy <= f; dy++ )
+			for ( int dx = -f; dx <= f; dx++ ) {
+				const int qx = x + dx * st, qy = y + dy * st;
+				if ( qx < 0 || qy < 0 || qx >= G.size.x || qy >= G.size.y )
+					continue;
+				const vec4 h = rgUnpack( gpk[qy * G.size.x + qx] );
+				if ( ( dx != 0 || dy != 0 ) && !restirSimilar( g.w, g.xyz, h.w, h.xyz ) )
+					continue;
+				const vec4 a = acc[qy * G.size.x + qx];
+				if ( a.w > 0.0 ) {
+					s += a.xyz;
+					n += 1.0;
+				}
+			}
+	const vec3 m = n > 0.0 ? s / n : vec3( 0.0 );
+	atrA[id] = vec4( m, atrB[id].w / max( n, 1.0 ) );
+	outE[id] = vec4( m, g.w );
+}
+
+/* mode 4 + it: one a-trous pass of the edge-avoiding wavelet filter [Dammertz 2010; Schied 2017, SVGF 4.3]: the 5 x 5
+ * B3 spline kernel (3/8, 1/4, 1/16) with holes, step 2^it; edge stops on depth and normal (restirSimilar, then
+ * cos^128 of the normals) and on luminance against the variance guide (sigma_l 4: SVGF's); the variance is filtered
+ * with the squared weights. Ping-pong atrA -> atrB -> atrA ...; the last pass (knobs.w of them) writes outE. */
+void modeAtrous( int x, int y, uint id, int it )
+{
+	const bool fromA = ( it & 1 ) == 0;
+	const vec4 g = rgUnpack( gpk[id] );
+	const vec4 c = fromA ? atrA[id] : atrB[id];
+	vec4 o = c;
+	if ( g.w > 0.0 && g.w < 1e5 ) {
+		const int st = 1 << it;
+		const float lc = rgLum( c.xyz );
+		const float sl = 4.0 * sqrt( max( c.w, 0.0 ) ) + 1e-4;
+		const float hk[3] = float[3]( 0.375, 0.25, 0.0625 );
+		vec3 s = vec3( 0.0 );
+		float v = 0.0, ws = 0.0;
+		for ( int dy = -2; dy <= 2; dy++ )
+			for ( int dx = -2; dx <= 2; dx++ ) {
+				const int qx = x + dx * st, qy = y + dy * st;
+				if ( qx < 0 || qy < 0 || qx >= G.size.x || qy >= G.size.y )
+					continue;
+				const int q = qy * G.size.x + qx;
+				const vec4 h = rgUnpack( gpk[q] );
+				// acc[q].w > 0 exactly where the depth is valid (modes 1-2): the g-buffer read answers it, one read fewer a tap
+				if ( ( dx != 0 || dy != 0 ) && ( !restirSimilar( g.w, g.xyz, h.w, h.xyz ) || !( h.w > 0.0 && h.w < 1e5 ) ) )
+					continue;
+				const vec4 cq = fromA ? atrA[q] : atrB[q];
+				const float wn = pow( max( dot( g.xyz, h.xyz ), 0.0 ), 128.0 );
+				const float wl = exp( -abs( lc - rgLum( cq.xyz ) ) / sl );
+				const float w = hk[abs( dx )] * hk[abs( dy )] * wn * wl;
+				s += cq.xyz * w;
+				v += cq.w * w * w;
+				ws += w;
+			}
+		if ( ws > 0.0 )
+			o = vec4( s / ws, v / ( ws * ws ) );
+	}
+	if ( fromA )
+		atrB[id] = o;
+	else
+		atrA[id] = o;
+	if ( it + 1 == int( G.knobs.w ) )
+		outE[id] = vec4( o.xyz, g.w );
+}
+
+void main()
+{
+	// a group is an 8 x 8 tile, so its rays and taps stay close (a pixel's result does not depend on which invocation runs it)
+	int x, y;
+	if ( ( G.opts.w & RESTIRGI_BIT_LINEAR ) != 0 ) {
+		const uint l = ddgiLinearId();
+		x = int( l % uint( G.size.x ) );
+		y = int( l / uint( G.size.x ) );
+	} else {
+		const uint t = ddgiGroupId(), tw = ( uint( G.size.x ) + 7u ) / 8u;
+		x = int( ( t % tw ) * 8u + ( gl_LocalInvocationIndex & 7u ) );
+		y = int( ( t / tw ) * 8u + ( gl_LocalInvocationIndex >> 3u ) );
+	}
+	const uint mode = pc.job.x;
+#ifndef RESTIRGI_FILTER
+	// the half / quarter trace, modes 0 and 1: an invocation a 2 x 1 (half) or 2 x 2 (quarter) block, so every invocation
+	// holds exactly one traced pixel (a checkerboard over invocations leaves half of each subgroup idle in the ray loops)
+	const int tb = G.opts.w & ( RESTIRGI_BIT_HALF | RESTIRGI_BIT_QUARTER );
+	if ( mode <= 1u && tb != 0 && ( G.opts.w & RESTIRGI_BIT_LINEAR ) == 0 ) {
+		const int bh = ( tb & RESTIRGI_BIT_QUARTER ) != 0 ? 2 : 1;
+		const uint t = ddgiGroupId(), tw = ( uint( ( G.size.x + 1 ) / 2 ) + 7u ) / 8u;   // tiles over the block grid
+		const int bx = int( ( t % tw ) * 8u + ( gl_LocalInvocationIndex & 7u ) ), by = int( ( t / tw ) * 8u + ( gl_LocalInvocationIndex >> 3u ) );
+		// the traced pixel first (k = 0 in every invocation: the rays run together), then the skipped ones (history only)
+		const uint f = uint( G.size.z );
+		const int k3 = int( f & 3u );
+		const int o0 = bh == 2 ? ( k3 == 0 ? 0 : k3 == 1 ? 3 : k3 == 2 ? 1 : 2 ) : ( by + int( f & 1u ) ) & 1;
+		for ( int k = 0; k < 2 * bh; k++ ) {
+			const int s = ( k + o0 ) % ( 2 * bh );
+			const int px = 2 * bx + ( s & 1 ), py = bh * by + ( s >> 1 );
+			if ( px >= G.size.x || py >= G.size.y )
+				continue;
+			if ( mode == 0u )
+				modeCandidate( px, py, uint( py * G.size.x + px ) );
+			else
+				modeSpatial( px, py, uint( py * G.size.x + px ) );
+		}
+		return;
+	}
+#endif
+	if ( x >= G.size.x || y >= G.size.y )
+		return;
+	const uint id = uint( y * G.size.x + x );
+#ifdef RESTIRGI_FILTER
+	// the filter kernel (rtddgi_spirv.sh -DRESTIRGI_FILTER -> restirgi_filt.spv.h): modes 2.. only, so no ray code and
+	// its registers stays in it (one module for every mode sized the a-trous passes' occupancy by the bounce's)
+	if ( mode == 2u )
+#else
+	if ( mode == 0u )
+		modeCandidate( x, y, id );
+	else if ( mode == 1u )
+		modeSpatial( x, y, id );
+	else if ( mode == 2u )
+#endif
+		modeAccumulate( x, y, id );
+	else if ( mode == 3u )
+		modeFilter( x, y, id );
+	else
+		modeAtrous( x, y, id, int( mode ) - 4 );
+}

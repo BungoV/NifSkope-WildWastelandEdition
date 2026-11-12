@@ -52,6 +52,10 @@
 //   bounce    FIX1101A the bounce read (a probe ray's hit) hands over the same  RED_BOUNCE     renormalised, black
 //             way: no step up a trunk, the flat ambient past it (= the cube's                     past the usable
 //             own axis irradiance; 0 without a sky)                                               probes (today's main)
+//   emitmean  RTEMIS1 a triangle's packed Le = the glow's area mean (16       RED_EMITMEAN   the centre texel (M1)
+//             equal-area centroids): a half-lit map 0.25, b1^2 1/6
+//   emitquad  RTEMIS1 an emissive ceiling quad lights a black box's probe by   RED_EMITQUAD   no Le at the hit
+//             the quad's irradiance (hitRadiance, the blend, decode x 2 pi)
 // Every check is independent of the others' reds (a red build may pass the other twenty-one).
 
 #include "features/gi/rtddgimath.h"
@@ -1326,6 +1330,73 @@ void checkBounceSat()
 		m[0] / m[2], std::max( eHalf, eZero ) );
 }
 
+/* RTEMIS1: a triangle's packed Le is the glow's AREA mean. A map lit where b1 > 0.5 covers a quarter of the triangle
+ * (the centre texel reads 0); le = b1^2 has the mean 1/6. Red RTDDGI_RED_EMITMEAN: the centre texel (M1) */
+void checkEmitMean()
+{
+	double step[3], quad[3];
+	emitAreaMean( []( double b1, double, double v[3] ) { v[0] = v[1] = v[2] = b1 > 0.5 ? 1.0 : 0.0; }, step );
+	emitAreaMean( []( double b1, double, double v[3] ) { v[0] = v[1] = v[2] = b1 * b1; }, quad );
+	const bool ok = std::fabs( step[0] - 0.25 ) < 0.02 && std::fabs( quad[0] - 1.0 / 6.0 ) / ( 1.0 / 6.0 ) < 0.03;
+	report( "emitmean", ok, "half-lit map mean %.4f (area share 0.25), b1^2 mean %.4f (exact %.4f, bar 3 %%)", step[0], quad[0],
+		1.0 / 6.0 );
+}
+
+/* RTEMIS1: an emissive quad (Le 1, side s = 2h, facing down) on the ceiling of a black box h over a probe. The probe's
+ * blended rays shaded by hitRadiance (albedo 0: no bounce), the texel nearest +Z decoded x 2 pi, against the quad's
+ * irradiance at that texel's normal by quadrature (E(n) = L int max(0, n.w) h / r^3 dA). Red RTDDGI_RED_EMITQUAD: the
+ * emission dropped at the hit (the probe stays black) */
+void checkEmitQuad()
+{
+	const int N = 4096 + kFixedRays, nb = N - kFixedRays;
+	const float h = 100.0f, a = 100.0f;   // a = s / 2
+	int bx = 0, by = 0;
+	float bestZ = -2.0f;
+	for ( int ty = 0; ty < kIrrInterior; ty++ )
+		for ( int tx = 0; tx < kIrrInterior; tx++ )
+			if ( texelDir( tx, ty, kIrrInterior ).z > bestZ ) {
+				bestZ = texelDir( tx, ty, kIrrInterior ).z;
+				bx = tx;
+				by = ty;
+			}
+	const V3 n = texelDir( bx, by, kIrrInterior );
+	double ref = 0.0;
+	const int Q = 600;
+	for ( int i = 0; i < Q; i++ )
+		for ( int j = 0; j < Q; j++ ) {
+			const double x = -a + ( i + 0.5 ) * 2.0 * a / Q, y = -a + ( j + 0.5 ) * 2.0 * a / Q;
+			const double r = std::sqrt( x * x + y * y + double( h ) * h );
+			const double c = ( n.x * x + n.y * y + n.z * h ) / r;
+			ref += std::max( c, 0.0 ) * h / ( r * r * r ) * ( 2.0 * a / Q ) * ( 2.0 * a / Q );
+		}
+	double mean = 0.0;
+	const int R = 4;
+	for ( int k = 0; k < R; k++ ) {
+		const M3 rot = updateRotation( 7, uint32_t( k ) );
+		std::vector<V3> dirs;
+		std::vector<float> rad;
+		const float alb[3] = { 0, 0, 0 }, E[3] = { 0, 0, 0 }, Le[3] = { 1, 1, 1 }, none[3] = { 0, 0, 0 };
+		for ( int i = kFixedRays; i < N; i++ ) {
+			const V3 d = rayDir( i, N, rot );
+			dirs.push_back( d );
+			bool hit = false;
+			if ( d.z > 1e-6f ) {
+				const float t = h / d.z;
+				hit = std::fabs( d.x * t ) < a && std::fabs( d.y * t ) < a;
+			}
+			float rec[3];
+			hitRadiance( alb, E, hit ? Le : none, rec );
+			rad.insert( rad.end(), { rec[0], rec[1], rec[2] } );
+		}
+		const float old[3] = { 0, 0, 0 };
+		float out[3];
+		blendIrradianceTexel( n, dirs.data(), rad.data(), nb, 0.0f, old, out );
+		mean += gammaDecode( out[0] ) * 2.0 * kPi / R;
+	}
+	const double rel = ref > 0.0 ? std::fabs( mean - ref ) / ref : 1.0;
+	report( "emitquad", rel < 0.03, "+Z texel irradiance %.5f vs the quad's %.5f by quadrature (rel %.4f, bar 0.03)", mean, ref, rel );
+}
+
 } // namespace
 
 int main()
@@ -1361,6 +1432,8 @@ int main()
 	checkSkyAbove();
 	checkSkyVisUp();
 	checkBounceSat();
+	checkEmitMean();
+	checkEmitQuad();
 	std::printf( "RTDDGI_MATH %s %d%s\n", g_fail ? "FAIL" : "PASS", g_fail ? g_fail : g_pass, g_fail ? " failed" : "" );
 	return g_fail ? 1 : 0;
 }

@@ -12,6 +12,7 @@
 #include "features/gi/rtddgimath.h"
 #include "features/gi/rttracesetrule.h"   // lane AIRPERF1 r6: the BLAS parts' origin
 #include "restirmath.h"  // lane RESTIRDI1: the twin of restir.comp (restirCli)
+#include "features/gi/restirgimath.h"   // RTEMIS1 part 2: the twin of restirgi.comp (restirgiCli)
 #include "features/gi/rtddgi/rtddgi_gpu.h"
 #include "gl/celllights.h"
 
@@ -121,6 +122,9 @@ struct Twin
 	unsigned red = 0;
 	std::vector<float> rays, probes, irr, dist;
 	std::vector<quint32> age;
+	// RTEMIS1 telemetry, a probe's blended rays (one thread a probe): emissive hits, their Le and every ray's radiance (luminance)
+	std::vector<qint64> emHits;
+	std::vector<double> emLum, allLum;
 
 	explicit Twin( const Packed & s ) : S( s )
 	{
@@ -137,6 +141,9 @@ struct Twin
 		irr.assign( size_t( nP ) * 64 * 4, 0.0f );
 		dist.assign( size_t( nP ) * 256 * 2, 0.0f );
 		age.assign( size_t( nP ), 0 );
+		emHits.assign( size_t( nP ), 0 );
+		emLum.assign( size_t( nP ), 0.0 );
+		allLum.assign( size_t( nP ), 0.0 );
 		for ( int p = 0; p < nP; p++ )
 			probes[size_t( p ) * 4 + 3] = float( kVigilant );
 	}
@@ -320,9 +327,15 @@ struct Twin
 		V3 E = direct( Pw, n );
 		if ( !P.flags[0] )
 			E = E + sampleVolume( Pw, n, -d );
-		for ( int c = 0; c < 3; c++ )
-			rec[c] = a0[c] * E[c] / kPi + a0[4 + c];
+		const float Ec[3] = { E[0], E[1], E[2] };
+		hitRadiance( a0, Ec, a0 + 4, rec );   // RTEMIS1: MIRROR trace.comp ddgiHitRadiance
 		rec[3] = tf;
+		const double le = 0.2126 * a0[4] + 0.7152 * a0[5] + 0.0722 * a0[6];
+		if ( le > 0.0 ) {
+			emHits[size_t( p )]++;
+			emLum[size_t( p )] += le;
+		}
+		allLum[size_t( p )] += 0.2126 * rec[0] + 0.7152 * rec[1] + 0.0722 * rec[2];
 	}
 	// MIRROR blend.comp
 	void blendProbe( int p, const M3 & rot )
@@ -459,8 +472,16 @@ void runTwin( const Packed & S, const RtDdgiSpec & spec, RtDdgiVolume * out, std
 			T.borderProbe( int( p ) );
 		} );
 		out->rays += traced.load();
+		out->emisRays += traced.load() / std::max( T.N, 1 ) * ( T.N - kFixedRays );   // RTEMIS1: the shaded (blended) rays
 	}
 	out->msFrames = double( tm.nsecsElapsed() ) / 1e6;
+	out->emisHits = 0;   // RTEMIS1: the blended rays' emissive census (fixed rays are never shaded, so never counted)
+	out->emisLum = out->allLum = 0.0;
+	for ( int p = 0; p < T.nP; p++ ) {
+		out->emisHits += T.emHits[size_t( p )];
+		out->emisLum += T.emLum[size_t( p )];
+		out->allLum += T.allLum[size_t( p )];
+	}
 	out->offset.resize( size_t( T.nP ) * 3 );
 	out->state.resize( size_t( T.nP ) );
 	for ( int p = 0; p < T.nP; p++ ) {
@@ -665,17 +686,34 @@ static bool packVolume( const ProbeSoup & soup, const WwCellLighting & lighting,
 	const size_t nTri = soup.tris.size() / 9;
 	S.triAttr.assign( nTri * kAttr, 0.0f );
 	const bool hasAlb = soup.alb.size() >= nTri * 3;
+	const bool noEmis = hasRed( spec.red, "noemissive" ), emiCentre = hasRed( spec.red, "emicentre" );
+	out->emisTris = 0;
+	out->emisArea = out->emisPower = 0.0;
 	for ( size_t t = 0; t < nTri; t++ ) {
 		float * a = &S.triAttr[t * kAttr];
 		for ( int c = 0; c < 3; c++ )
 			a[c] = hasAlb ? soup.alb[t * 3 + size_t( c )] / 255.0f : 0.5f;   // ours: mid grey without ALB1
 		bounceAlbedo( a, spec.bounceSat );   // GIFIX1101 1B (1 = as read)
 		a[3] = soup.isTwoSided( t ) ? 1.0f : 0.0f;
-		if ( soup.glow.emits( int( t ) ) ) {   // the glow at the triangle's centre (ours: one texel a triangle)
+		if ( !noEmis && soup.glow.emits( int( t ) ) ) {   // RTEMIS1: the glow's area mean (red emicentre: M1's centre texel)
 			double le[3];
-			soup.glow.le( int( t ), 1.0 / 3.0, 1.0 / 3.0, le );
+			const int ti = int( t );
+			if ( emiCentre )
+				soup.glow.le( ti, 1.0 / 3.0, 1.0 / 3.0, le );
+			else
+				emitAreaMean( [&]( double b1, double b2, double v[3] ) { soup.glow.le( ti, b1, b2, v ); }, le );
 			for ( int c = 0; c < 3; c++ )
 				a[4 + c] = float( le[c] ) * ( wwPhysOn() ? wwPhysEmitScale() : lighting.glowScale );	// PHYSUNITS1; MUSGI1 r5
+			const double lum = 0.2126 * a[4] + 0.7152 * a[5] + 0.0722 * a[6];
+			if ( lum > 0.0 ) {
+				const float * v = &soup.tris[t * 9];
+				const double e1[3] = { v[3] - v[0], v[4] - v[1], v[5] - v[2] }, e2[3] = { v[6] - v[0], v[7] - v[1], v[8] - v[2] };
+				const double cx = e1[1] * e2[2] - e1[2] * e2[1], cy = e1[2] * e2[0] - e1[0] * e2[2], cz = e1[0] * e2[1] - e1[1] * e2[0];
+				const double area = 0.5 * std::sqrt( cx * cx + cy * cy + cz * cz );
+				out->emisTris++;
+				out->emisArea += area;
+				out->emisPower += kPi * lum * area * ( a[3] > 0.5f ? 2.0 : 1.0 );
+			}
 		}
 	}
 	for ( const WwCellLight & l : lighting.lights ) {
@@ -1456,6 +1494,22 @@ static QByteArray skyBelowLine( const RtDdgiVolume & vol )
 	return QByteArray( b );
 }
 
+/* lane RTEMIS1: the emission at the hits in one line (CLI stdout): the pack census (both paths), then the twin's hit census
+ * (hits per update, the share of the shaded hits' radiance that is Le); the GPU keeps no per-hit count */
+static QByteArray emissiveLine( const RtDdgiVolume & vol, const RtDdgiSpec & spec )
+{
+	char b[512];
+	const int n = std::snprintf( b, sizeof b, "emissive: %d triangles, area %.1f u2, power %.6g (pi x lum Le x area); ", vol.emisTris,
+		vol.emisArea, vol.emisPower );
+	if ( vol.emisHits < 0 )
+		std::snprintf( b + n, sizeof b - size_t( n ), "hits not counted on this path" );
+	else
+		std::snprintf( b + n, sizeof b - size_t( n ), "hits %lld of %lld shaded rays (%.1f an update), Le %.6g of hit radiance %.6g (%.3f %%)",
+			(long long)vol.emisHits, (long long)vol.emisRays, double( vol.emisHits ) / double( std::max( spec.frames, 1 ) ),
+			vol.emisLum, vol.allLum, vol.allLum > 0.0 ? 100.0 * vol.emisLum / vol.allLum : 0.0 );
+	return QByteArray( b );
+}
+
 bool rtddgiDump( const RtDdgiVolume & vol, const RtDdgiSpec & spec, const QString & dir, QString * err )
 {
 	if ( !QDir().mkpath( dir ) ) {
@@ -1645,7 +1699,7 @@ int rtddgiCli( const QStringList & args )
 		std::fprintf( stderr, "usage: rtddgi --soup <file> --rect minX,minY,maxX,maxY --out <dir> [--light x,y,z,radius,r,g,b ...] "
 			"[--lights <file>] [--sun tx,ty,tz,r,g,b] [--sky r,g,b | 18 values] [--spacing s] [--zscale k] [--rays n] [--frames n] "
 			"[--hyst h] [--bias b] [--seed n] [--max-probes n] [--one-bounce] [--no-sky] [--gpu 0|1] [--no-place] [--no-reloc] "
-			"[--no-classify] [--trace-asleep] [--dump-fixed] [--red noback,nocheb,nobias,norot,hwhit,notie,skybelow,bouncenocover]\n" );
+			"[--no-classify] [--trace-asleep] [--dump-fixed] [--red noback,nocheb,nobias,norot,hwhit,notie,skybelow,bouncenocover,noemissive,emicentre]\n" );
 		return 2;
 	}
 	for ( int k = 0; k < 4; k++ )
@@ -1706,6 +1760,7 @@ int rtddgiCli( const QStringList & args )
 		qPrintable( vol.path ), vol.dims[0], vol.dims[1], vol.dims[2], vol.probes, vol.off, vol.asleep, vol.vigilant, vol.moved,
 		(long long)vol.rays, vol.msBuild, vol.msReloc, spec.frames, vol.msFrames, vol.blasGrow );
 	std::printf( "%s\n", skyBelowLine( vol ).constData() );   // lane SKYBELOW1
+	std::printf( "%s\n", emissiveLine( vol, spec ).constData() );   // lane RTEMIS1
 	// lane AIRPERF1 r6: the gate reads this line (--blas-parts N against --blas-parts N --blas-red: the same dumps)
 	std::printf( "rtddgi BLAS parts %d: %d BLASes built (%lld triangles), %d found again (%lld triangles), %.1f ms%s\n", vol.blasParts,
 		vol.blasNew, (long long)vol.blasTrisNew, vol.blasKept, (long long)vol.blasTrisKept, vol.blasMs,
@@ -1962,6 +2017,556 @@ int restirCli( const QStringList & args )
 			}
 	}
 	return 0;
+}
+
+/* RTEMIS1 part 2: ReSTIR GI, the CPU twin (restirgimath.h frame) against the GPU (restirgi.comp) on one soup. The volume is
+ * traced on the GPU (--updates n), read back into the twin, so both shade the bounce from the same probes. Prints the
+ * frame-0 bounce (Lo, hit) and every frame's estimate differences; writes restirgi_frame.tsv. */
+namespace {
+struct RgTwinScene
+{
+	const Twin & T;
+	// MIRROR restirgi.comp rgDirectOne (RTEMIS1 11-09): the placed lights by one pick on u, one shadow ray
+	V3 directOne( V3 Pw, V3 n, float u ) const
+	{
+		V3 E( 0, 0, 0 );
+		const V3 o = Pw + n * 0.5f;
+		const auto & P = T.S.prm;
+		if ( P.sunTo[3] > 0.5f ) {
+			const V3 to( P.sunTo[0], P.sunTo[1], P.sunTo[2] );
+			const float nl = dot( n, to );
+			if ( nl > 0.0f && !T.shadow( o, to, P.sun[3] ) )
+				E = E + V3( P.sun[0], P.sun[1], P.sun[2] ) * nl;
+		}
+		if ( P.dirTo[3] > 0.5f ) {
+			const float nl = dot( n, V3( P.dirTo[0], P.dirTo[1], P.dirTo[2] ) );
+			if ( nl > 0.0f )
+				E = E + V3( P.dirColor[0], P.dirColor[1], P.dirColor[2] ) * nl;
+		}
+		float wsum = 0.0f, wp = 0.0f;
+		V3 cp( 0, 0, 0 ), lpk( 0, 0, 0 );
+		for ( int li = 0; li < T.S.nLights; li++ ) {
+			const float * l = &T.S.lights[size_t( li ) * kLight];
+			const V3 lp( l[0], l[1], l[2] );
+			const V3 Lv = lp - Pw;
+			const float d = length( Lv );
+			if ( d >= l[3] )
+				continue;
+			const int shape = int( l[28] + 0.5f );
+			if ( shape == 1 && dot( Pw - lp, V3( l[8], l[9], l[10] ) ) < 0.0f )
+				continue;
+			if ( shape == 2 ) {
+				bool inside = true;
+				for ( int k = 0; k < 3; k++ ) {
+					const float * bx = &l[16 + k * 4];
+					if ( std::fabs( bx[0] * Pw.x + bx[1] * Pw.y + bx[2] * Pw.z + bx[3] ) > 1.0f )
+						inside = false;
+				}
+				if ( !inside )
+					continue;
+			}
+			const V3 L = Lv * ( 1.0f / std::max( d, 0.001f ) );
+			const float nl = dot( n, L );
+			if ( nl <= 0.0f )
+				continue;
+			float att = lightRadial( d, l[3], l[12], l[13], l[14] );
+			if ( l[7] > 0.5f )
+				att *= spotCone( -dot( L, V3( l[8], l[9], l[10] ) ), l[11], l[15] );
+			if ( att * nl <= 0.0f )
+				continue;
+			const V3 c = V3( l[4], l[5], l[6] ) * ( att * nl );
+			const float w = restirgi::lum( c );
+			if ( !( w > 0.0f ) )
+				continue;
+			wsum += w;
+			const float pr = w / wsum;
+			if ( u < pr ) {
+				u = u / pr;
+				wp = w;
+				cp = c;
+				lpk = lp;
+			} else {
+				u = ( u - pr ) / std::max( 1.0f - pr, 1e-30f );
+			}
+		}
+		if ( wp > 0.0f ) {
+			const V3 dl = lpk - o;
+			const float len = length( dl );
+			if ( !T.shadow( o, dl * ( 1.0f / std::max( len, 1e-6f ) ), len - P.dirColor[3] ) )
+				E = E + cp * ( wsum / wp );
+		}
+		return E;
+	}
+	restirgi::Sample trace( V3 o, V3 d, float u, int red ) const   // MIRROR restirgi.comp rgTrace
+	{
+		const auto & P = T.S.prm;
+		restirgi::Sample y;
+		double t = 0.0;
+		int tri = -1;
+		if ( !T.nearest( o, d, P.sun[3], &t, &tri ) ) {
+			float sky[3] = { 0, 0, 0 };
+			if ( P.sky[0][3] > 0.5f ) {
+				const float R[6][3] = { { P.sky[0][0], P.sky[0][1], P.sky[0][2] }, { P.sky[1][0], P.sky[1][1], P.sky[1][2] },
+					{ P.sky[2][0], P.sky[2][1], P.sky[2][2] }, { P.sky[3][0], P.sky[3][1], P.sky[3][2] },
+					{ P.sky[4][0], P.sky[4][1], P.sky[4][2] }, { P.sky[5][0], P.sky[5][1], P.sky[5][2] } };
+				const float ground[3] = { P.sky[1][3], P.sky[2][3], P.sky[3][3] };
+				missRadiance( R, ground, d, P.sky[4][3] > 0.5f, sky );
+			}
+			y.xs = d;
+			y.ns = V3( 0, 0, 0 );
+			y.Lo = V3( sky[0], sky[1], sky[2] );
+			return y;
+		}
+		const float * v = &T.S.bvh.t[size_t( tri ) * 9];
+		const V3 v0( v[0], v[1], v[2] );
+		const V3 nf = normalize( cross( V3( v[3], v[4], v[5] ) - v0, V3( v[6], v[7], v[8] ) - v0 ) );
+		const float * a0 = &T.S.triAttr[size_t( tri ) * kAttr];
+		y.hit = true;
+		y.ns = dot( nf, d ) > 0.0f ? -nf : nf;
+		y.xs = o + d * float( t );
+		y.Lo = V3( 0, 0, 0 );
+		if ( a0[3] < 0.5f && dot( nf, d ) > 0.0f && !( T.red & kRedNoBack ) )
+			return y;
+		V3 E = ( red & restirgi::kRedAllLights ) ? T.direct( y.xs, y.ns ) : directOne( y.xs, y.ns, u );
+		if ( !P.flags[0] )
+			E = E + T.sampleVolume( y.xs, y.ns, -d );
+		const float Ec[3] = { E[0], E[1], E[2] };
+		float L[4] = { 0, 0, 0, 0 };
+		hitRadiance( a0, Ec, a0 + 4, L );
+		y.Lo = V3( L[0], L[1], L[2] );
+		return y;
+	}
+	bool blocked( V3 o, V3 d, float tmax ) const { return T.shadow( o, d, tmax < 0.0f ? T.S.prm.sun[3] : tmax ); }
+};
+} // namespace
+
+const unsigned char * restirGiStbnMask()
+{
+	static std::vector<unsigned char> m;
+	static bool tried = false;
+	if ( !tried ) {
+		tried = true;
+		QFile f( QStringLiteral( ":/air/stbn_scalar_128x128x64.r8" ) );
+		const size_t want = size_t( restirgi::kStbnSide ) * size_t( restirgi::kStbnSide ) * size_t( restirgi::kStbnSlices );
+		if ( f.open( QIODevice::ReadOnly ) ) {
+			const QByteArray b = f.readAll();
+			if ( size_t( b.size() ) == want )
+				m.assign( b.constData(), b.constData() + b.size() );
+		}
+	}
+	return m.empty() ? nullptr : m.data();
+}
+
+int restirgiCli( const QStringList & args )
+{
+	QString soupPath, outDir, rect, lightsFile, redText;
+	bool twin = true;   // --no-twin: the GPU alone (the cost at a real size, 1080p: the twin takes minutes a frame there)
+	int refFrames = 64;   // the one-frame bar's reference: the mean of this many independent (no history) GPU frames
+	RtDdgiSpec spec;
+	spec.gpu = 1;
+	spec.place = false;
+	spec.fitProbes = true;
+	spec.maxProbes = 4096;
+	spec.rays = 64;
+	WwCellLighting L;
+	L.interior = true;
+	ProbeSkyLight sky;
+	float cam[6] = { 0, 0, 0, 0, 1, 0 };
+	bool haveCam = false;
+	int W = 160, H = 96, frames = 4, updates = 8;
+	float fov = 55.0f;
+	uint32_t seed = 0x9e3779b9u;
+	int jumpAt = -1, relightAt = -1;   // a frame whose previous camera is far away / whose sceneKey changes
+	bakert::RestirGiGpuIn base;
+	auto addLight = [&L]( const QStringList & v ) {
+		WwCellLight l;
+		for ( int c = 0; c < 3; c++ ) {
+			l.pos[c] = v[c].toFloat();
+			l.color[c] = v[4 + c].toFloat();
+		}
+		l.radius = v[3].toFloat();
+		l.shadow = 3;
+		L.lights.push_back( l );
+	};
+	for ( int i = 0; i < args.size(); i++ ) {
+		const QString & a = args[i];
+		const QString nx = i + 1 < args.size() ? args[i + 1] : QString();
+		if ( a == QLatin1String( "--soup" ) ) { soupPath = nx; i++; }
+		else if ( a == QLatin1String( "--out" ) ) { outDir = nx; i++; }
+		else if ( a == QLatin1String( "--rect" ) ) { rect = nx; i++; }
+		else if ( a == QLatin1String( "--lights" ) ) { lightsFile = nx; i++; }
+		else if ( a == QLatin1String( "--red" ) ) { redText = nx; i++; }
+		else if ( a == QLatin1String( "--frames" ) ) { frames = std::max( 1, nx.toInt() ); i++; }
+		else if ( a == QLatin1String( "--updates" ) ) { updates = std::max( 0, nx.toInt() ); i++; }
+		else if ( a == QLatin1String( "--fov" ) ) { fov = nx.toFloat(); i++; }
+		else if ( a == QLatin1String( "--seed" ) ) { seed = nx.toUInt(); i++; }
+		else if ( a == QLatin1String( "--spatial" ) ) { base.spatial = std::clamp( nx.toInt(), 0, 15 ); i++; }
+		else if ( a == QLatin1String( "--radius" ) ) { base.radius = std::clamp( nx.toInt(), 1, 16 ); i++; }
+		else if ( a == QLatin1String( "--filter" ) ) { base.filter = std::clamp( nx.toInt(), 0, 8 ); i++; }
+		else if ( a == QLatin1String( "--acc" ) ) { base.accFrames = std::max( 1.0f, nx.toFloat() ); i++; }
+		else if ( a == QLatin1String( "--jump" ) ) { jumpAt = nx.toInt(); i++; }
+		else if ( a == QLatin1String( "--relight" ) ) { relightAt = nx.toInt(); i++; }
+		else if ( a == QLatin1String( "--atrous" ) ) { base.atrous = std::clamp( nx.toInt(), 0, 5 ); i++; }
+		else if ( a == QLatin1String( "--ref" ) ) { refFrames = std::max( 0, nx.toInt() ); i++; }
+		else if ( a == QLatin1String( "--no-twin" ) ) twin = false;
+		else if ( a == QLatin1String( "--size" ) ) {
+			const QStringList v = nx.split( ',' );
+			if ( v.size() == 2 ) {
+				W = std::max( 8, v[0].toInt() );
+				H = std::max( 8, v[1].toInt() );
+			}
+			i++;
+		} else if ( a == QLatin1String( "--cam" ) ) {
+			const QStringList v = nx.split( ',' );
+			if ( v.size() == 6 ) {
+				for ( int k = 0; k < 6; k++ )
+					cam[k] = v[k].toFloat();
+				haveCam = true;
+			}
+			i++;
+		} else if ( a == QLatin1String( "--light" ) ) {
+			const QStringList v = nx.split( ',' );
+			if ( v.size() == 7 )
+				addLight( v );
+			i++;
+		}
+	}
+	if ( !lightsFile.isEmpty() ) {
+		QFile lf( lightsFile );
+		if ( lf.open( QIODevice::ReadOnly | QIODevice::Text ) )
+			while ( !lf.atEnd() ) {
+				const QStringList v = QString::fromLatin1( lf.readLine() ).simplified().split( ' ', Qt::SkipEmptyParts );
+				if ( v.size() == 7 && !v[0].startsWith( '#' ) )
+					addLight( v );
+			}
+	}
+	const QStringList rc = rect.split( ',' );
+	if ( soupPath.isEmpty() || outDir.isEmpty() || rc.size() != 4 || L.lights.isEmpty() || !haveCam ) {
+		std::fprintf( stderr, "usage: restirgi --soup <file> --rect minX,minY,maxX,maxY --out <dir> --cam ex,ey,ez,tx,ty,tz "
+			"--light x,y,z,radius,r,g,b [...] [--lights <file>] [--size W,H] [--fov deg] [--frames n] [--updates n] [--seed n] "
+			"[--spatial K] [--radius R] [--filter f] [--acc n] [--atrous n] [--ref n] [--no-twin] [--jump frame] [--relight frame] "
+			"[--red nojacobian,novis,nopdf,notemporal,white,r2,nojclamp,linear,half,quarter,fullres,mergevis,alllights]\n" );
+		return 2;
+	}
+	for ( int k = 0; k < 4; k++ )
+		spec.rect[k] = rc[k].toFloat();
+	// every pixel traced is the default (half: one-frame cut 2.61x, under the 3x bar); half: the checkerboard, quarter: one
+	// of each 2 x 2 (cost arms); fullres: the default named
+	int red = 0;
+	for ( const QString & r : redText.split( ',', Qt::SkipEmptyParts ) ) {
+		const QString t = r.trimmed();
+		if ( t == QLatin1String( "fullres" ) || t == QLatin1String( "half" ) || t == QLatin1String( "quarter" ) ) {
+			red &= ~( restirgi::kTraceHalf | restirgi::kTraceQuarter );
+			red |= t == QLatin1String( "quarter" ) ? restirgi::kTraceQuarter : t == QLatin1String( "half" ) ? restirgi::kTraceHalf : 0;
+			continue;
+		}
+		red |= t == QLatin1String( "nojacobian" ) ? restirgi::kRedNoJacobian : t == QLatin1String( "novis" ) ? restirgi::kRedNoVis
+			: t == QLatin1String( "nopdf" ) ? restirgi::kRedNoPdf : t == QLatin1String( "notemporal" ) ? restirgi::kRedNoTemporal
+			: t == QLatin1String( "white" ) ? restirgi::kRedWhite : t == QLatin1String( "r2" ) ? restirgi::kRedR2
+			: t == QLatin1String( "nojclamp" ) ? restirgi::kRedNoJClamp : t == QLatin1String( "linear" ) ? restirgi::kRedLinear
+			: t == QLatin1String( "mergevis" ) ? restirgi::kRedMergeVis : t == QLatin1String( "alllights" ) ? restirgi::kRedAllLights : 0;
+	}
+	const unsigned char * mask = restirGiStbnMask();
+	ProbeSoup soup;
+	QString err;
+	if ( !probeSoupRead( soupPath, &soup, &err ) ) {
+		std::fprintf( stderr, "restirgi: %s\n", qPrintable( err ) );
+		return 1;
+	}
+	RtDdgiVolume vol;
+	Packed S;
+	if ( !packVolume( soup, L, sky, spec, &vol, S ) ) {
+		std::fprintf( stderr, "restirgi: %s\n", qPrintable( vol.error ) );
+		return 1;
+	}
+	// the GPU volume, traced, then read into the twin (both shade the bounce from the same probes)
+	RtDdgiLive live;
+	RtDdgiSpec gs = spec;
+	gs.relocate = false;
+	gs.classify = false;
+	if ( !live.open( soup, L, sky, gs, false ) ) {
+		std::printf( "restirgi: no gpu (%s)\n", qPrintable( live.why() ) );
+		return 1;
+	}
+	if ( updates > 0 && !live.step( updates ) ) {
+		std::printf( "restirgi: the volume's updates failed (%s)\n", qPrintable( live.why() ) );
+		return 1;
+	}
+	Twin T( S );
+	RtDdgiVolume lv;
+	live.snapshot( &lv );   // volume() holds no atlas (it stays on the device): the host copies the last step made
+	const size_t nP = size_t( T.nP );
+	if ( lv.irr.size() != T.irr.size() || lv.dist.size() != T.dist.size() || lv.offset.size() < nP * 3 || lv.state.size() < nP ) {
+		std::printf( "restirgi: the GPU volume (%d probes) is not the twin's (%d)\n", int( lv.state.size() ), T.nP );
+		return 1;
+	}
+	T.irr = lv.irr;
+	T.dist = lv.dist;
+	for ( size_t p = 0; p < nP; p++ ) {
+		for ( int c = 0; c < 3; c++ )
+			T.probes[p * 4 + size_t( c )] = lv.offset[p * 3 + size_t( c )];
+		T.probes[p * 4 + 3] = float( lv.state[p] );
+		T.age[p] = p < lv.age.size() ? lv.age[p] : 0u;
+	}
+	// the camera and the g-buffer exactly as restirCli
+	const V3 eye( float( cam[0] - S.O[0] ), float( cam[1] - S.O[1] ), cam[2] );
+	const V3 at( float( cam[3] - S.O[0] ), float( cam[4] - S.O[1] ), cam[5] );
+	const V3 f = normalize( at - eye );
+	const V3 rt = normalize( cross( f, std::fabs( f.z ) > 0.99f ? V3( 0, 1, 0 ) : V3( 0, 0, 1 ) ) );
+	const V3 up = cross( rt, f );
+	restir::Cam C;
+	const float rows[12] = { rt.x, up.x, -f.x, eye.x, rt.y, up.y, -f.y, eye.y, rt.z, up.z, -f.z, eye.z };
+	std::copy( rows, rows + 12, C.rows );
+	const float fy = 1.0f / std::tan( 0.5f * fov * kPi / 180.0f );
+	C.proj[0] = fy * float( H ) / float( W );
+	C.proj[1] = fy;
+	C.proj[2] = C.proj[3] = 0.0f;
+	const size_t n = size_t( W ) * size_t( H );
+	std::vector<float> gbuf( n * 4, 0.0f );
+	for ( int y = 0; y < H; y++ )
+		for ( int x = 0; x < W; x++ ) {
+			float * g = &gbuf[( size_t( y ) * size_t( W ) + size_t( x ) ) * 4];
+			g[3] = 1e6f;
+			const float nxv = ( float( x ) + 0.5f ) / float( W ) * 2.0f - 1.0f, nyv = ( float( y ) + 0.5f ) / float( H ) * 2.0f - 1.0f;
+			const V3 dv( nxv / C.proj[0], nyv / C.proj[1], -1.0f );
+			const V3 dw = C.dirToWorld( dv );
+			const float len = length( dw );
+			const double od[3] = { eye.x, eye.y, eye.z }, dd[3] = { dw.x / len, dw.y / len, dw.z / len };
+			double t = 0.0;
+			int tri = -1;
+			if ( !S.bvh.ray( od, dd, 1e6, &t, &tri ) || tri < 0 )
+				continue;
+			const float * v = &S.bvh.t[size_t( tri ) * 9];
+			V3 nf = normalize( cross( V3( v[3] - v[0], v[4] - v[1], v[5] - v[2] ), V3( v[6] - v[0], v[7] - v[1], v[8] - v[2] ) ) );
+			if ( dot( nf, dw ) > 0.0f )
+				nf = -nf;
+			g[0] = dot( nf, rt );
+			g[1] = dot( nf, up );
+			g[2] = -dot( nf, f );
+			g[3] = float( t ) / len;
+		}
+	std::vector<restirgi::Pixel> px( n );
+	int hits = 0;
+	for ( int y = 0; y < H; y++ )
+		for ( int x = 0; x < W; x++ ) {
+			const restir::Pixel q = restir::pixelAt( gbuf.data(), W, H, C, x, y );
+			restirgi::Pixel & p = px[size_t( y ) * size_t( W ) + size_t( x )];
+			p.x = q.P;
+			p.n = q.N;
+			p.valid = q.ok;
+			hits += q.ok ? 1 : 0;
+		}
+	const RgTwinScene scene{ T };
+	restirgi::Settings set;
+	set.spatialK = base.spatial;
+	set.radius = base.radius;
+	set.mask = mask;
+	std::vector<float> jmax;
+	set.jmax = &jmax;
+	std::vector<restirgi::Res> hist;
+	std::vector<V3> est;
+	QDir().mkpath( outDir );
+	const char * noise = ( red & restirgi::kRedWhite ) ? "white" : ( mask && !( red & restirgi::kRedR2 ) ) ? "stbn" : "r2";
+	std::printf( "restirgi: %d x %d, %d of %d pixels hit, %d probes after %d updates, %d frames, K %d R %d, red %d, noise %s, "
+		"a-trous %d, twin %d\n", W, H, hits, int( n ), T.nP, updates, frames, set.spatialK, set.radius, red, noise, base.atrous, int( twin ) );
+	// frame 0's bounce on the twin (the kernel's ray: the same seed, the same direction); the gates count the traced pixels
+	auto tracedAt = [&]( size_t i, int fr ) { return restirgi::traced( int( i % size_t( W ) ), int( i / size_t( W ) ), uint32_t( fr ), red ); };
+	std::vector<restirgi::Sample> cand0( n );
+	if ( twin )
+		for ( size_t i = 0; i < n; i++ )
+			if ( px[i].valid && tracedAt( i, 0 ) ) {
+				const V3 d = restirgi::bounceDir( px[i].n, int( i % size_t( W ) ), int( i / size_t( W ) ), W, seed, 0u, red, mask );
+				cand0[i] = scene.trace( px[i].x + px[i].n * restirgi::kEps, d, restir::rand01( restir::pixelSeed( seed ^ uint32_t( i ), 0u, 1 ), 1 ), red );
+			}
+	bakert::RestirGiGpuOut go;
+	std::vector<float> est0, out0;
+	double wallSum = 0, gpuSum = 0, denSum = 0;
+	int gpuN = 0;
+	bool gpuOk = true;
+	int worstFrame = -1;
+	double worstMatch = 1.0;
+	auto gpuIn = [&]( int fr, int r, bool history ) {
+		bakert::RestirGiGpuIn in = base;
+		in.W = W;
+		in.H = H;
+		in.frame = uint32_t( fr );
+		in.seed = seed;
+		in.red = r;
+		in.stbn = mask;
+		std::copy( C.rows, C.rows + 12, in.rows );
+		std::copy( C.proj, C.proj + 4, in.proj );
+		std::copy( C.rows, C.rows + 12, in.prows );
+		std::copy( C.proj, C.proj + 4, in.pproj );
+		in.history = history;
+		in.gbuf = gbuf.data();
+		in.readBack = true;
+		return in;
+	};
+	for ( int fr = 0; fr < frames && gpuOk; fr++ ) {
+		QElapsedTimer tm;
+		// a cut or a light change: the twin starts over by hand, the kernel must find it on its own (else the match fails)
+		if ( fr == jumpAt || fr == relightAt )
+			hist.clear();
+		tm.start();
+		if ( twin )
+			restirgi::frame( scene, px, W, H, seed, uint32_t( fr ), set, red, hist, est );
+		const double cpuMs = double( tm.nsecsElapsed() ) / 1e6;
+		bakert::RestirGiGpuIn in = gpuIn( fr, red, fr > 0 );
+		if ( fr == jumpAt )
+			in.prows[3] += 1000.0f;
+		in.sceneKey = relightAt >= 0 && fr >= relightAt ? 1u : 0u;
+		if ( !bakert::restirGiGpuStep( live.session(), in, &go ) || go.est.size() != n * 4 || go.cand.size() != n * 4 ) {
+			std::printf( "frame %d: the GPU refused (%s)\n", fr, go.why.c_str() );
+			gpuOk = false;
+			break;
+		}
+		if ( fr > 0 && go.msGpu >= 0.0 ) {
+			gpuSum += go.msGpu;
+			denSum += go.msDenoise;
+			gpuN++;
+		}
+		if ( fr == 0 ) {
+			est0 = go.est;
+			out0 = go.out;
+		}
+		wallSum += fr > 0 ? go.msWall : 0.0;
+		if ( !twin ) {
+			std::printf( "frame %d: gpu wall %.2f ms, gpu %.3f ms, filter + a-trous %.3f ms, stages", fr, go.msWall, go.msGpu, go.msDenoise );
+			for ( double ms : go.msStage )
+				if ( ms >= 0.0 )
+					std::printf( " %.3f", ms );
+			std::printf( "\n" );
+			std::fflush( stdout );
+			continue;
+		}
+		if ( fr == 0 ) {
+			int valid = 0, hitDiff = 0, loMatch = 0;
+			double loMax = 0;
+			for ( size_t i = 0; i < n; i++ ) {
+				if ( !px[i].valid || !tracedAt( i, 0 ) )
+					continue;
+				valid++;
+				const bool hg = go.cand[i * 4 + 3] > 0.5f;
+				hitDiff += hg != cand0[i].hit ? 1 : 0;
+				const double lc = restirgi::lum( cand0[i].Lo ), lg = restir::luminance( go.cand[i * 4], go.cand[i * 4 + 1], go.cand[i * 4 + 2] );
+				const double rel = std::fabs( lc - lg ) / std::max( 1e-4, std::max( lc, lg ) );
+				loMatch += rel <= 1e-3 ? 1 : 0;
+				loMax = std::max( loMax, rel );
+			}
+			const double vd = std::max( valid, 1 );
+			std::printf( "bounce: %d pixels; hit/miss differs %d (%.3f %%); Lo within 1e-3 relative %.3f %%; worst %.4f\n", valid, hitDiff,
+				100.0 * hitDiff / vd, 100.0 * loMatch / vd, loMax );
+		}
+		int valid = 0, match = 0;
+		double sumC = 0, sumG = 0, sumAbs = 0;
+		std::vector<std::pair<double, size_t>> worst;
+		for ( size_t i = 0; i < n; i++ ) {
+			if ( !px[i].valid || !tracedAt( i, fr ) )
+				continue;
+			valid++;
+			const double ec = restirgi::lum( est[i] ), eg = restir::luminance( go.est[i * 4], go.est[i * 4 + 1], go.est[i * 4 + 2] );
+			sumC += ec;
+			sumG += eg;
+			sumAbs += std::fabs( ec - eg );
+			match += std::fabs( ec - eg ) <= 1e-2 * std::max( 1e-4, std::max( ec, eg ) ) ? 1 : 0;
+			worst.push_back( { std::fabs( ec - eg ), i } );
+		}
+		const double vd = std::max( valid, 1 );
+		const double frac = match / vd;
+		if ( frac < worstMatch ) {
+			worstMatch = frac;
+			worstFrame = fr;
+		}
+		std::printf( "frame %d: estimate within 1 %% %.3f %% of pixels; mean twin %.5f gpu %.5f; mean |twin - gpu| / mean %.5f; twin %.1f ms, "
+			"gpu wall %.1f ms\n", fr, 100.0 * frac, sumC / vd, sumG / vd, sumAbs / std::max( 1e-9, sumC ), cpuMs, go.msWall );
+		// the diagnosis: the pixels that carry the difference (a firefly is a few pixels), what the twin held there
+		const size_t top = std::min<size_t>( 4, worst.size() );
+		std::partial_sort( worst.begin(), worst.begin() + std::ptrdiff_t( top ), worst.end(), []( const auto & a, const auto & b ) { return a.first > b.first; } );
+		double topSum = 0;
+		for ( size_t k = 0; k < top; k++ )
+			topSum += worst[k].first;
+		std::printf( "  frame %d: the %d worst pixels carry %.1f %% of the |difference|; brightest twin pixel %.3g\n", fr, int( top ),
+			100.0 * topSum / std::max( 1e-9, sumAbs ), [&]() { double m = 0; for ( size_t i = 0; i < n; i++ ) m = std::max( m, double( restirgi::lum( est[i] ) ) ); return m; }() );
+		for ( size_t k = 0; k < top && fr > 0; k++ ) {
+			const size_t i = worst[k].second;
+			const int x = int( i % size_t( W ) ), y = int( i / size_t( W ) );
+			const restirgi::Res & h = hist[i];
+			const restirgi::Sample yc = scene.trace( px[i].x + px[i].n * restirgi::kEps, restirgi::bounceDir( px[i].n, x, y, W, seed, uint32_t( fr ), red, mask ),
+				restir::rand01( restir::pixelSeed( seed ^ uint32_t( i ), uint32_t( fr ), 1 ), 1 ), red );
+			std::printf( "    (%d,%d): twin %.4g gpu %.4g; twin temporal M %.0f W %.4g Lo %.4g hit %d; largest J merged %.4g; bounce twin Lo %.4g hit %d, "
+				"gpu Lo %.4g hit %d\n", x, y, double( restirgi::lum( est[i] ) ), restir::luminance( go.est[i * 4], go.est[i * 4 + 1], go.est[i * 4 + 2] ),
+				double( h.M ), double( h.W ), double( restirgi::lum( h.y.Lo ) ), int( h.y.hit ), double( jmax[i] ), double( restirgi::lum( yc.Lo ) ), int( yc.hit ),
+				restir::luminance( go.cand[i * 4], go.cand[i * 4 + 1], go.cand[i * 4 + 2] ), int( go.cand[i * 4 + 3] > 0.5f ) );
+		}
+		std::fflush( stdout );
+	}
+	if ( gpuOk ) {
+		if ( twin )
+			std::printf( "restirgi: worst frame %d, %.3f %% of pixels within 1 %%\n", worstFrame, 100.0 * worstMatch );
+		std::printf( "history dropped: cuts %u, light changes %u\n", go.cuts, go.relights );
+		std::printf( "gpu wall mean (frames 1..) %.3f ms, filter half %d\n", wallSum / std::max( 1, frames - 1 ), base.filter );
+		if ( gpuN > 0 )
+			std::printf( "gpu timestamps mean (frames 1..) %.3f ms; filter + a-trous %.3f ms (%d x %d, a-trous %d)\n", gpuSum / gpuN, denSum / gpuN,
+				W, H, base.atrous );
+		else
+			std::printf( "gpu timestamps: none (the device has no timer)\n" );
+		auto oneFrame = [&]( const std::vector<float> & ref, const char * what ) {
+			double rs = 0, dOut = 0, dEst = 0;
+			int v = 0;
+			for ( size_t i = 0; i < n; i++ ) {
+				if ( !px[i].valid )
+					continue;
+				v++;
+				const double r = restir::luminance( ref[i * 4], ref[i * 4 + 1], ref[i * 4 + 2] );
+				rs += r;
+				dOut += std::fabs( restir::luminance( out0[i * 4], out0[i * 4 + 1], out0[i * 4 + 2] ) - r );
+				dEst += std::fabs( restir::luminance( est0[i * 4], est0[i * 4 + 1], est0[i * 4 + 2] ) - r );
+			}
+			rs = std::max( rs, 1e-9 );
+			std::printf( "%s: filtered frame 0 mean |diff| / mean %.4f; raw estimate %.4f; the filter cuts it %.2fx (%d pixels)\n", what, dOut / rs,
+				dEst / rs, dEst / std::max( dOut, 1e-9 ), v );
+		};
+		// bar (1), one frame stands alone: frame 0 (no history) against the last frame's filtered mean (the old reference)
+		if ( frames > 1 && go.out.size() == n * 4 && out0.size() == n * 4 )
+			oneFrame( go.out, QStringLiteral( "one frame vs frame %1" ).arg( frames - 1 ).toLatin1().constData() );
+		// and against the unfiltered truth: the mean of refFrames independent frames' estimates (no history, no filter; every
+		// pixel traced: a half / quarter trace's raw estimate is 0 on the pixels it skipped)
+		if ( refFrames > 0 && out0.size() == n * 4 ) {
+			std::vector<double> acc( n * 4, 0.0 );
+			bool ok = true;
+			const int refRed = ( red | restirgi::kRedNoTemporal ) & ~( restirgi::kTraceHalf | restirgi::kTraceQuarter );
+			for ( int k = 0; k < refFrames && ok; k++ ) {
+				bakert::RestirGiGpuIn in = gpuIn( 1000 + k, refRed, false );
+				in.sceneKey = go.relights > 0 ? 1u : 0u;
+				bakert::RestirGiGpuOut ro;
+				ok = bakert::restirGiGpuStep( live.session(), in, &ro ) && ro.est.size() == n * 4;
+				for ( size_t j = 0; ok && j < n * 4; j++ )
+					acc[j] += ro.est[j];
+			}
+			if ( ok ) {
+				std::vector<float> ref( n * 4 );
+				for ( size_t j = 0; j < n * 4; j++ )
+					ref[j] = float( acc[j] / refFrames );
+				oneFrame( ref, QStringLiteral( "one frame vs the reference (%1 independent frames)" ).arg( refFrames ).toLatin1().constData() );
+			} else {
+				std::printf( "one frame vs the reference: the GPU refused a reference frame\n" );
+			}
+		}
+	}
+	QFile o( outDir + QStringLiteral( "/restirgi_frame.tsv" ) );
+	if ( o.open( QIODevice::WriteOnly | QIODevice::Text ) ) {
+		o.write( "x\ty\tvalid\tE_twin\tE_gpu\tLo0_twin\thit0_twin\n" );
+		const bool g = gpuOk && go.est.size() == n * 4;
+		for ( int y = 0; y < H; y++ )
+			for ( int x = 0; x < W; x++ ) {
+				const size_t i = size_t( y ) * size_t( W ) + size_t( x );
+				o.write( QStringLiteral( "%1\t%2\t%3\t%4\t%5\t%6\t%7\n" ).arg( x ).arg( y ).arg( int( px[i].valid ) )
+					.arg( i < est.size() ? restirgi::lum( est[i] ) : 0.0f )
+					.arg( g ? restir::luminance( go.est[i * 4], go.est[i * 4 + 1], go.est[i * 4 + 2] ) : -1.0f )
+					.arg( restirgi::lum( cand0[i].Lo ) ).arg( int( cand0[i].hit ) ).toLatin1() );
+			}
+	}
+	return gpuOk ? 0 : 1;
 }
 
 /* MODULES1 RESUME 15: the air rays' gate (airrays.comp). A still camera: after F frames the GPU's running share must
