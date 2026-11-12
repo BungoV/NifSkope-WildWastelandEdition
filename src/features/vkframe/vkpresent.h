@@ -28,6 +28,7 @@ struct Stat
 	double flushMs = 0.0;      //!< of it, glFlush
 	bool sigWorker = false;    //!< build 88: GL's signal to Vulkan went out from the worker's own GL context
 	std::string sigWhy;        //!< why not (the worker's context was not made)
+	bool sigWait = false;      //!< build 91: no GL signal: the worker waited GL's fence on the CPU (signal route 2)
 	bool dsa = false;          //!< the resolve went through glBlitNamedFramebuffer
 	bool busy = false;         //!< the slot's last Vulkan read was still running: the drawing thread waited its fence
 	bool worker = false;       //!< the Vulkan half went to the worker (false: ran here, the harness's capture)

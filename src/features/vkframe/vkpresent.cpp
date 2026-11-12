@@ -41,7 +41,7 @@ constexpr GLenum kTexture2D = 0x0DE1, kRgba8 = 0x8058, kScissorTest = 0x0C11, kR
 	kReadFbBinding = 0x8CAA, kDrawFbBinding = 0x8CA6, kColorAttach0 = 0x8CE0, kColorBit = 0x4000, kNearest = 0x2600,
 	kTexMinFilter = 0x2801, kTexMagFilter = 0x2800, kTexBinding2D = 0x8069, kLayoutGeneral = 0x958D,
 	kHandleOpaqueWin32 = 0x9587, kDedicated = 0x9581, kNumDeviceUuids = 0x9596, kDeviceUuid = 0x9597,
-	kFbComplete = 0x8CD5, kSyncGpuDone = 0x9117;
+	kFbComplete = 0x8CD5, kSyncGpuDone = 0x9117, kAlreadySignaled = 0x911A, kConditionSatisfied = 0x911C;
 constexpr GLuint64 kTimeoutIgnored = ~0ull;
 
 struct Gl
@@ -178,6 +178,7 @@ struct Slot
 	GLuint tex = 0, memObj = 0, fbo = 0, glDoneGl = 0, vkDoneGl = 0;
 	bool used = false;     // GL waits vkDone before its next blit
 	bool pending = false;  // the fence is armed
+	bool glWaited = false;  // build 91: the worker saw GL's fence done on the CPU: no GL signal, Vulkan waits no semaphore
 };
 
 struct Chain
@@ -205,10 +206,15 @@ struct Chain
 	std::string sigWhy;  // why the signal stays on the drawing thread
 };
 
-bool & workerSignal()  // the harness compares both (no switch: the drawing thread's signal is the fallback only)
+/* build 91: who tells Vulkan that GL's frame is done. 0 = the drawing thread's GL signal (0.07-0.16 ms there); 1 = the
+ * worker's GL context signals after a GPU wait on the drawing thread's fence (build 88: build 90 read the passes up
+ * 1.40 to 1.50, a second context's GPU work); 2 = the worker's GL context waits that fence on the CPU and Vulkan's
+ * submit waits nothing (no GL work from a second context). WW_VKPRESENT_SIGNAL, or the Vulkan Present Signal row */
+constexpr int kSignalDefault = 2;
+int & signalRoute()
 {
-	static bool on = true;
-	return on;
+	static int route = kSignalDefault;
+	return route;
 }
 
 Vk & vk()
@@ -420,6 +426,7 @@ struct Work
 	int k = 0, w = 0, h = 0;
 	void * sync = nullptr;  // build 88: the worker's GL context waits this fence, then signals sem (null: signaled already)
 	GLuint sem = 0, tex = 0;
+	bool cpuWait = false;  // build 91: wait the fence on the CPU, no GL signal (signalRoute 2)
 	HDC dc = nullptr;  // k < 0: the worker takes ctx current and keeps it (null ctx: lets its context go)
 	HGLRC ctx = nullptr;
 };
@@ -448,6 +455,7 @@ struct SigGl
 	HGLRC ctx = nullptr;
 	void( WINAPI * waitSync )( void *, GLbitfield, GLuint64 ) = nullptr;
 	void( WINAPI * deleteSync )( void * ) = nullptr;
+	GLenum( WINAPI * clientWaitSync )( void *, GLbitfield, GLuint64 ) = nullptr;
 	void( WINAPI * signalSemaphore )( GLuint, GLuint, const GLuint *, GLuint, const GLuint *, const GLenum * ) = nullptr;
 };
 
@@ -461,10 +469,11 @@ bool sigBind( SigGl & sg, HDC dc, HGLRC ctx, std::string & why )
 	sg.ctx = ctx;
 	sg.waitSync = reinterpret_cast<decltype( sg.waitSync )>( wglGetProcAddress( "glWaitSync" ) );
 	sg.deleteSync = reinterpret_cast<decltype( sg.deleteSync )>( wglGetProcAddress( "glDeleteSync" ) );
+	sg.clientWaitSync = reinterpret_cast<decltype( sg.clientWaitSync )>( wglGetProcAddress( "glClientWaitSync" ) );
 	sg.signalSemaphore = reinterpret_cast<decltype( sg.signalSemaphore )>( wglGetProcAddress( "glSignalSemaphoreEXT" ) );
-	if ( sg.waitSync && sg.deleteSync && sg.signalSemaphore )
+	if ( sg.waitSync && sg.deleteSync && sg.clientWaitSync && sg.signalSemaphore )
 		return true;
-	why = "no glWaitSync / glSignalSemaphoreEXT in the worker's GL context";
+	why = "no glWaitSync / glClientWaitSync / glSignalSemaphoreEXT in the worker's GL context";
 	wglMakeCurrent( nullptr, nullptr );
 	sg = SigGl();
 	return false;
@@ -509,7 +518,14 @@ void workerLoop()
 			why = "the worker has no GL context: GL's signal was not sent";
 			rebuild = true;
 		} else {
-			if ( j.sync ) {  // build 88: GL's frame fence (a GPU wait, in order), then the signal Vulkan's submit waits
+			if ( j.sync && j.cpuWait ) {  // build 91: GL's frame done, seen on the CPU; nothing goes to the GPU from here
+				const double ts = nowMs();
+				const GLenum r = sg.clientWaitSync( j.sync, 0, 1000000000ull );
+				sg.deleteSync( j.sync );
+				if ( r != kAlreadySignaled && r != kConditionSatisfied )
+					why = "glClientWaitSync returned " + std::to_string( r ) + " (the frame went on)";
+				one.signalMs = nowMs() - ts;
+			} else if ( j.sync ) {  // build 88: GL's frame fence (a GPU wait, in order), then the signal Vulkan's submit waits
 				const double ts = nowMs();
 				const GLenum general = kLayoutGeneral;
 				sg.waitSync( j.sync, 0, kTimeoutIgnored );
@@ -1154,10 +1170,12 @@ bool present( void * hwnd, int w, int h, bool vsync, GlProc gp, std::string & wh
 	/* build 88: the signal is a submit of the whole frame (0.16 ms of the drawing thread with the blit): the worker's GL
 	 * context sends it after a GPU wait on this fence; here only the fence and the flush that sends it */
 	void * sync = nullptr;
-	if ( c.sigCtx && g.fenceSync && g.deleteSync && workerSignal() )
+	const int route = signalRoute();
+	if ( c.sigCtx && g.fenceSync && g.deleteSync && route != 0 )
 		sync = g.fenceSync( kSyncGpuDone, 0 );
 	if ( !sync )
 		g.signalSemaphore( s.glDoneGl, 0, nullptr, 1, &s.tex, &general );
+	s.glWaited = sync && route == 2;
 	const double tf = nowMs();
 	g.flush();  // Vulkan's wait (or the worker's fence wait) sees GL's work only once it is flushed
 	const double tv = nowMs();
@@ -1174,6 +1192,7 @@ bool present( void * hwnd, int w, int h, bool vsync, GlProc gp, std::string & wh
 		j.sync = sync;
 		j.sem = s.glDoneGl;
 		j.tex = s.tex;
+		j.cpuWait = s.glWaited;
 		hand( j );
 		if ( capture ) {
 			drain();
@@ -1201,6 +1220,7 @@ bool present( void * hwnd, int w, int h, bool vsync, GlProc gp, std::string & wh
 	st.glMs = tf - tb;
 	st.flushMs = tv - tf;
 	st.sigWorker = sync != nullptr;
+	st.sigWait = s.glWaited;
 	st.sigWhy = c.sigCtx ? std::string() : c.sigWhy;
 	st.dsa = g.blitNamedFramebuffer != nullptr;
 	st.busy = busy;
@@ -1243,7 +1263,7 @@ bool vkPart( int k, int w, int h, std::string & why, bool & rebuild, WwVkPresent
 	const VkPipelineStageFlags stages[2] = { VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT };
 	if ( ar != VK_SUCCESS && ar != VK_SUBOPTIMAL_KHR ) {
 		// GL's signal is still owed a wait: an empty batch carries it (and the fence the next use checks)
-		si.waitSemaphoreCount = 1;
+		si.waitSemaphoreCount = s.glWaited ? 0 : 1;
 		si.pWaitSemaphores = &s.glDone;
 		si.pWaitDstStageMask = stages;
 		s.pending = v.vkQueueSubmit( v.queue, 1, &si, s.fence ) == VK_SUCCESS;
@@ -1316,8 +1336,8 @@ bool vkPart( int k, int w, int h, std::string & why, bool & rebuild, WwVkPresent
 	p.newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
 	v.vkCmdPipelineBarrier( cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0, 0, nullptr, 0, nullptr, 1, &p );
 	v.vkEndCommandBuffer( cmd );
-	const VkSemaphore waits[2] = { s.glDone, s.acquired };
-	si.waitSemaphoreCount = 2;
+	const VkSemaphore waits[2] = { s.acquired, s.glDone };
+	si.waitSemaphoreCount = s.glWaited ? 1 : 2;  // build 91: GL's frame seen done on the CPU: the image's wait only
 	si.pWaitSemaphores = waits;
 	si.pWaitDstStageMask = stages;
 	si.commandBufferCount = 1;
@@ -1394,7 +1414,8 @@ void * qtProc( const char * name )
 	return q ? reinterpret_cast<void *>( q->getProcAddress( name ) ) : nullptr;
 }
 
-// WW_VKPRESENT_RED=1 (live), or Settings > Ray tracing device > Vulkan Present unticked (read again each second)
+// WW_VKPRESENT_RED=1 (live), or Settings > Ray tracing device > Vulkan Present unticked (read again each second).
+// Build 91: the signal route, WW_VKPRESENT_SIGNAL=0|1|2 (live), else the Vulkan Present Signal row (signalRoute)
 bool wanted( QString & off )
 {
 	if ( wwEnvInt( "WW_VKPRESENT_RED" ) == 1 ) {
@@ -1403,12 +1424,16 @@ bool wanted( QString & off )
 	}
 	static double at = -1.0e9;
 	static bool row = true;
+	static int routeRow = kSignalDefault;
 	const double now = nowMs();
 	if ( now - at >= 1000.0 ) {
 		at = now;
 		QSettings s( "NifTools", "NifSkope " + NifSkopeVersion::rawToMajMin( NIFSKOPE_VERSION ) + wwHarnessSettingsSuffix() );
 		row = s.value( "Settings/Nif/Vulkan Present", true ).toBool();
+		routeRow = s.value( "Settings/Nif/Vulkan Present Signal", kSignalDefault ).toInt();
 	}
+	const int route = wwEnvIsSet( "WW_VKPRESENT_SIGNAL" ) ? wwEnvInt( "WW_VKPRESENT_SIGNAL" ) : routeRow;
+	signalRoute() = route >= 0 && route <= 2 ? route : kSignalDefault;
 	if ( !row )
 		off = QStringLiteral( "the Vulkan Present row is off" );
 	return row;
@@ -1479,10 +1504,11 @@ bool frame( QOpenGLWindow * w, const std::function<void()> & paint )
 				.arg( QLatin1String( st.mode ) ).arg( st.images ).arg( st.w ).arg( st.h ).arg( winN ).arg( kSlots ).arg( winBusy );
 			// the drawing thread's share by part, and the worker's (its ms are off the drawing thread)
 			const double n = std::max( sp.n, 1 );
-			const QString how = QStringLiteral( "%1 blit, GL signal on the %2" )
+			const QString how = QStringLiteral( "%1 blit, signal route %2" )
 				.arg( st.dsa ? QLatin1String( "named" ) : QLatin1String( "bound" ) )
-				.arg( st.sigWorker ? QStringLiteral( "worker" ) : st.sigWhy.empty() ? QStringLiteral( "drawing thread" )
-					: QStringLiteral( "drawing thread (%1)" ).arg( QString::fromStdString( st.sigWhy ) ) );
+				.arg( st.sigWait ? QStringLiteral( "2 worker CPU wait, no GL signal" ) : st.sigWorker
+					? QStringLiteral( "1 worker GL signal" ) : st.sigWhy.empty() ? QStringLiteral( "0 drawing thread GL signal" )
+					: QStringLiteral( "0 drawing thread GL signal (%1)" ).arg( QString::fromStdString( st.sigWhy ) ) );
 			qInfo().noquote() << QStringLiteral( "vk present split: drawing thread slot wait %1 + GL state %2 + blit %3 + %4 %5 + "
 				"flush %6 ms (%7); worker %8 ms (max %9) = GL signal %10 + fence %11 + acquire %12 + record %13 + submit %14 + "
 				"present %15, %16 frames, %17 failed%18" )
