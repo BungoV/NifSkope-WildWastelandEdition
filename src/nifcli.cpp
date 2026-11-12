@@ -8245,6 +8245,13 @@ int nifskopeCliMain( const QStringList & args )
 		err().flush();
 		return rc;
 	}
+	// `restirgi` runs ReSTIR GI, the CPU twin against the GPU (RTEMIS1 part 2; src/features/gi/rtddgi.cpp restirgiCli)
+	if ( cmd == QLatin1String( "restirgi" ) ) {
+		const int rc = restirgiCli( a );
+		std::fflush( stdout );
+		err().flush();
+		return rc;
+	}
 	// `airrays` gates the air's lamp-shadow rays (lane MODULES1 route b; src/features/gi/rtddgi.cpp airraysCli)
 	if ( cmd == QLatin1String( "airrays" ) ) {
 		const int rc = airraysCli( a );

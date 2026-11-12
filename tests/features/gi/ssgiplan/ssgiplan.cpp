@@ -1,6 +1,7 @@
 // lane PERFFIX2 (item 3): src/features/gi/cellssgiplan.h alone (no Qt, no GL).
 // g++ -std=c++17 -I<tree>/src tests/features/gi/ssgiplan/ssgiplan.cpp; -DSSGIPLAN_RED=3a tests the pass before the sub-timers
 // (one zone, no stage groups): must fail. -DSSGIPLAN_RED=7: the interior march radius before lane INTGI1 (256).
+// -DSSGIPLAN_RED=8: the emission before RTEMIS1 (the traced volume ignored: SSGI keeps folding it in).
 #include "features/gi/cellssgiplan.h"
 
 #include <cstdio>
@@ -135,6 +136,19 @@ int main()
 	check( wwSsgiRadius( 256.0f, true, 0.0f, 0 ) == 256.0f && wwSsgiRadius( 256.0f, true, -1.0f, 0 ) == 256.0f,
 		"int: no volume up: 256" );
 	check( wwSsgiRadius( 256.0f, true, 140.0f, 16384 ) == 256.0f, "int: red nointradius: 256" );
+	// RTEMIS1: under the traced emission SSGI leaves it out (the donor less the emission: the target is read); red 32768
+	// (WW_CELL_SSGI_EMISSIVE_RED=on) keeps the fold; the emitchain red keeps its chain; not traced: unchanged
+#if defined( SSGIPLAN_RED ) && SSGIPLAN_RED == 8
+	auto emisT = []( int red, bool ) { return wwSsgiEmissive( red ); };
+	auto wantT = []( int red, bool ) { return wwSsgiWantsEmissionTarget( red ); };
+#else
+	auto emisT = []( int red, bool tr ) { return wwSsgiEmissive( red, tr ); };
+	auto wantT = []( int red, bool tr ) { return wwSsgiWantsEmissionTarget( red, tr ); };
+#endif
+	check( emisT( 0, true ) == WwSsgiEmitOff && wantT( 0, true ), "emis: traced: SSGI's emission off, the target read" );
+	check( emisT( 32768, true ) == WwSsgiEmitFolded && !wantT( 32768, true ), "emis: traced + red on: folded as before" );
+	check( emisT( 1024, true ) == WwSsgiEmitChain, "emis: traced + emitchain: the chain" );
+	check( emisT( 0, false ) == WwSsgiEmitFolded && !wantT( 0, false ), "emis: not traced: folded, no target" );
 	std::printf( "SSGIPLAN %s %d failed\n", fails ? "FAIL" : "PASS", fails );
 	return fails ? 1 : 0;
 }

@@ -10,7 +10,8 @@
 import os, re, shutil, subprocess, sys
 
 # (source dir, kernel, --target-env, --vn) == src/features/gi/bakert_spirv.sh + src/features/gi/rtddgi_spirv.sh
-SPECS = [] + [('src/features/gi/rtddgi', k, 'vulkan1.2', 'rtddgi_%s_spv' % k) for k in ()]   # none since VKCOMPUTE1 (11-12)
+SPECS = [('src/features/gi/rtddgi', k, 'vulkan1.2', 'rtddgi_%s_spv' % k) for k in ('restirgi',)] \
+  + [('src/features/gi/rtddgi', 'restirgi_filt', 'vulkan1.2', 'rtddgi_restirgi_filt_spv')]   # RTEMIS1: GLSL only (VKCOMPUTE1 took the rest)
 # lane VKCOMPUTE1: kernels converted to HLSL, built by DXC from res/shaders/hlsl/<dir>/<k>.hlsl + tools/spv_header.py
 # (rtddgi_spirv.sh's DXC loop; bakert_spirv.sh's `hk <k> <env>` lines)
 HLSL_SPECS = [('src/features/gi/rtddgi', k, 'vulkan1.2', 'rtddgi_%s_spv' % k) for k in ('border', 'reloc', 'blend', 'trace', 'airrays', 'restir')] + [
@@ -18,6 +19,8 @@ HLSL_SPECS = [('src/features/gi/rtddgi', k, 'vulkan1.2', 'rtddgi_%s_spv' % k) fo
 	('src/features/gi/bakert', 'rq', 'vulkan1.2', 'bakert_rq_spv'),
 	('src/features/gi/bakert', 'rqx', 'vulkan1.2', 'bakert_rqx_spv'),
 ]
+# RTEMIS1 11-09: a header built from another kernel's source under defines (rtddgi_spirv.sh's own line, outside its loop)
+FROM = {'restirgi_filt': ('restirgi', ['-DRESTIRGI_FILTER'])}
 BAKERT_HK = '\t"$DXC" -spirv -fspv-target-env="$2" -T "${T:-cs_6_0}" -E main -O0 -Fo "$1.hlsl.spv" '
 # lane VKFRAME1: the bloom chain, built by src/features/vkframe/vkframe_spirv.sh from res/shaders/hlsl/post/<k>.hlsl
 VKFRAME_KERNELS = ('down', 'hold', 'up', 'src', 'comb')
@@ -46,6 +49,10 @@ def script_ok(tree):
 		if d == 'src/features/gi/bakert':
 			if '"$G" --target-env %s -V --vn %s -o %s.spv.h %s.comp' % (env, vn, k, k) not in b:
 				bad.append('src/features/gi/bakert_spirv.sh: no line for %s (%s)' % (k, env))
+		elif k in FROM:
+			src, defs = FROM[k]
+			if '"$G" --target-env %s -V %s --vn %s -o %s.spv.h %s.comp' % (env, ' '.join(defs), vn, k, src) not in r:
+				bad.append('src/features/gi/rtddgi_spirv.sh: no line for %s (%s from %s.comp)' % (k, ' '.join(defs), src))
 		elif k not in loop:
 			bad.append('src/features/gi/rtddgi_spirv.sh: %s not in its kernel loop' % k)
 	known = set(k for d, k, e, v in SPECS if d == 'src/features/gi/rtddgi')
@@ -155,7 +162,8 @@ def main(argv):
 			out = os.path.join(scratch, d.replace('/', '_') + '_' + name)
 			if os.path.exists(out):
 				os.remove(out)
-			r = subprocess.run([g, '--target-env', env, '-V', '--vn', vn, '-o', out, k + '.comp'],
+			src, defs = FROM.get(k, (k, []))
+			r = subprocess.run([g, '--target-env', env, '-V'] + defs + ['--vn', vn, '-o', out, src + '.comp'],
 			                   cwd=os.path.join(tree, d), capture_output=True, text=True, timeout=300)
 			if r.returncode != 0 or not os.path.isfile(out):
 				fails.append('%s: glslang rc %d: %s' % (name, r.returncode, (r.stdout + r.stderr).strip()[-300:]))

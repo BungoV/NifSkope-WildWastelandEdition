@@ -455,6 +455,50 @@ inline void bounceAlbedo( float a[3], float s )
 		a[c] = clampf( L + s * ( a[c] - L ), 0.0f, 1.0f );
 }
 
+/*! RTEMIS1 (bungo 11-06): a probe ray's front-face hit sends on its albedo x (direct + volume irradiance) / pi plus the
+ *  surface's own emission Le (the drawn emissive squared into linear, probeemit.h). The placed lights stay; Le adds the
+ *  bounce of big glowing surfaces. GLSL: trace.comp ddgiHitRadiance. RTDDGI_RED_EMITQUAD: the emission dropped */
+inline void hitRadiance( const float alb[3], const float E[3], const float Le[3], float out[3] )
+{
+	for ( int c = 0; c < 3; c++ )
+#ifdef RTDDGI_RED_EMITQUAD
+		out[c] = alb[c] * E[c] / kPi + 0.0f * Le[c];
+#else
+		out[c] = alb[c] * E[c] / kPi + Le[c];
+#endif
+}
+
+constexpr int kEmitSplit = 4;   // RTEMIS1: a triangle's Le from kEmitSplit^2 equal-area sub-triangles (16 glow reads)
+/*! RTEMIS1: the packed Le of one triangle = the AREA MEAN of its glow (le(b1, b2, out) = the radiance at barycentrics
+ *  b1, b2), read at the centroids of the kEmitSplit^2 equal-area sub-triangles; M1 read the centre texel alone, so a
+ *  letter on a dark atlas sent all or nothing. Mean radiance x area = the flux the triangle sends. Pack-time only (no
+ *  extra rays). RTDDGI_RED_EMITMEAN: the centre texel (M1's rule) */
+template <class F>
+inline void emitAreaMean( F le, double out[3] )
+{
+	out[0] = out[1] = out[2] = 0.0;
+#ifdef RTDDGI_RED_EMITMEAN
+	le( 1.0 / 3.0, 1.0 / 3.0, out );
+#else
+	const int n = kEmitSplit;
+	int got = 0;
+	for ( int i = 0; i < n; i++ )
+		for ( int j = 0; i + j < n; j++ )
+			for ( int up = 0; up < 2; up++ ) {
+				if ( up == 1 && i + j > n - 2 )
+					continue;
+				const double o = up == 0 ? 1.0 / 3.0 : 2.0 / 3.0;
+				double v[3];
+				le( ( double( i ) + o ) / n, ( double( j ) + o ) / n, v );
+				for ( int c = 0; c < 3; c++ )
+					out[c] += v[c];
+				got++;
+			}
+	for ( int c = 0; c < 3; c++ )
+		out[c] /= double( got );
+#endif
+}
+
 // ------------------------------------------------------------------ the 8-probe read (M2: the bounce and the surfaces)
 //! the read's red bits: the twin's (src/features/gi/rtddgi.cpp kRedNoCheb / kRedNoBias, ddgi_common.glsl DDGI_RED_*) and the cell's
 constexpr unsigned kSampleTrilinear = 1u;   // WW_CELL_RTDDGI_RED=trilinear: the trilinear weight alone (no backface, no Chebyshev, no crush)

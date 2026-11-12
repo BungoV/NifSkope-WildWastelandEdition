@@ -4689,6 +4689,11 @@ void GLView::paintGL()
 		PassTime::Zone wwZone( "restir" );
 		rtddgiRestirPass( scene );	// lane RESTIRDI1: the RT quality preset's ReSTIR DI on that pass's g-buffer (Low: nothing)
 	}
+	{
+		WwWallPart wallPart( wwWall().cur.restir );
+		PassTime::Zone wwZone( "restirgi" );
+		rtddgiRestirGiPass( scene );	// RTEMIS1 part 2: ReSTIR GI on the same g-buffer (the ReSTIR GI row; off: nothing)
+	}
 	PassTime::begin( PassTime::Water );	// lane TIMING1: the water zone (its draws in the sorted pass join it)
 	wwCellOceanPass( scene, cellPasses );	// lane WATERLOOK1: the wind's waves, before any pass that draws water
 	PassTime::end( PassTime::Water );
