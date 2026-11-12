@@ -101,9 +101,29 @@ bool toneFrame( int w, int h, int samples, unsigned & color, unsigned & ds, std:
 bool toneFrameIs( unsigned color );
 //! the shared frame goes (GL current)
 void toneFrameDrop();
+/* Lane VKBLOOM1: the Fusion Shaders bloom (cellbloom.cpp, mode 3) on the present device, in the tone pass's command
+ * buffer before its draws: the source from the shared frame, down / hold / up, the per-pixel combine (vkframe.cpp's
+ * kernels, the same SPIR-V), then mode 3 over the backdrop the view holds after modes 0-2. cellbloom.cpp fills it. */
+constexpr int kToneBloomMips = 12;
+struct ToneBloom
+{
+	int mips = 0;
+	int dims[kToneBloomMips][2] = {};
+	float thr = 1.0f, knee = 0.5f;
+	int red = 0;
+	bool hold = false;
+	int holdK = 0, holdN = 1;
+	float radius = 1.0f, dispersion = 0.0f;
+	float srcW[kToneBloomMips] = {}, accW[kToneBloomMips] = {};
+	float exposure = 1.0f;  //!< cell_bloom_src.frag's uniforms
+	bool on = false;
+	float impulseX = 0.0f, impulseY = 0.0f, impulse = 0.0f;
+};
 struct ToneRun
 {
 	ToneJob job;
+	const ToneBloom * bloom = nullptr;  //!< lane VKBLOOM1: flag 7 (and 11) on: the bloom runs in this pass
+	int measQw = 0, measQh = 0;         //!< lane VKBLOOM1: the exposure measure's quarter size (0: not asked)
 	bool splitSky = false;   //!< mode 0 where the depth is nearer than the far plane, mode 2 (premultiplied) where it is not
 	bool sorted = true;      //!< the stencil sorts the pixels: mode 0 takes stencil 1, mode 1 stencil 2 after it
 	const std::uint8_t * lut = nullptr;  //!< the grading LUT, 16^3 RGB8 (null: none); uploaded when lutGen changes
@@ -117,6 +137,15 @@ struct ToneRun
 /* GL current, the view (viewBegin) bound and the frame's depth already in it: the tone draws on Vulkan into the view.
  * false: why; nothing drawn (GL draws its quads). */
 bool toneRun( const ToneRun & t, std::string & why );
+//! lane VKBLOOM1: the bloom can run in the tone pass (the stage made, not broken; the frame multisample)
+bool toneBloomReady();
+//! lane VKBLOOM1: toneRun calls that took a bloom (cellbloom.cpp resets its hold when one was lost)
+std::uint64_t toneBloomRuns();
+//! lane VKBLOOM1: the last toneRun recorded the measure it was asked for
+bool toneMeasureRan();
+/* lane VKBLOOM1: the measure's quarter values (RGBA32F, qw x qh) read back in the pass's command buffer. 1: px valid until
+ * the next toneRun, tex its GL name (the shared target; GL may blur it); 0: none waits; -1: its pass is not done yet. */
+int toneMeasureTake( const float *& px, int & qw, int & qh, unsigned & tex );
 //! a frame whose tone map stayed on GL while the stage was wanted, and why (the telemetry)
 void toneOnGl( const char * why );
 struct ToneStat
@@ -128,6 +157,7 @@ struct ToneStat
 	int pipelines = 0;                 //!< built for the frame's samples
 	double buildMs = 0.0;
 	int deferred = 0, flushed = 0;     //!< lane VKPOST2: runs left for the TAA's crossing; of those, crossed alone (toneFlush)
+	int bloom = 0, measure = 0;        //!< lane VKBLOOM1: runs that carried the Fusion Shaders bloom / the exposure measure
 };
 ToneStat takeToneStat();
 /* Lane VKPOST2: the merged crossing. toneRun may DEFER its crossing (state recorded, no GL signal) when the last TAA ran

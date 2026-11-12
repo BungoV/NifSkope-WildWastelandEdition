@@ -340,6 +340,8 @@ struct IsMeasureGpu
 	GLenum qfmt = 0;
 	int route = -1;	// the route last measured by (1 quarter, 0 full size); a change reads errors again
 	bool vkAsked = false;	// lane VKFRAME1 P4: this frame's measure was asked of Vulkan (isMeasureFinish takes it)
+	// lane VKBLOOM1: the measure rides in the tone pass on the present device (vkToneAsk: asked this frame; vkTone: one waits)
+	bool vkToneAsk = false, vkTone = false;
 };
 
 QHash<Renderer *, IsMeasureGpu> & isGpus()
@@ -503,6 +505,40 @@ void isMeasureFrame( Scene * scene, HdrGpu & g, int W, int H, int S, GLint prevD
 	const void * doc = scene->nifModel;
 	IsMeasureGpu & m = isGpus()[r];
 	const int qw = std::max( 1, W >> 2 ), qh = std::max( 1, H >> 2 );
+	/* lane VKBLOOM1: the measure the last frame's tone pass ran on the present device, applied as GL's read buffer is (a
+	 * frame late); its blur is drawn now from the same quarter values (GL draws it at the measure and shows it a frame
+	 * later: the same picture). -1: that pass is not done yet, as GL's fence poll below: nothing applied, nothing asked */
+	if ( mayVk && m.vkTone ) {
+		const float * tpx = nullptr;
+		int tqw = 0, tqh = 0;
+		unsigned ttex = 0;
+		const int took = WwVkPresent::toneMeasureTake( tpx, tqw, tqh, ttex );
+		if ( took < 0 ) {
+			isServed().insert( doc, true );
+			return;
+		}
+		m.vkTone = false;
+		if ( took > 0 && m.doc == doc ) {
+			isApply( scene, tpx, tqw, tqh );
+			if ( bloomGpuOn() ) {
+				GlSnap own;
+				if ( !shared )
+					own.measurePart( fn );
+				const GlSnap & sn = shared ? *shared : own;
+				GLint prevTex = 0;
+				fn->glActiveTexture( GLenum( GL_TEXTURE0 + kSrcUnit ) );
+				fn->glGetIntegerv( GL_TEXTURE_BINDING_2D, &prevTex );
+				if ( bloomBlur( scene, m, GLuint( ttex ), 0, tqw, tqh, m.bmade == 0 ? 1 : 0 ) )
+					wwCellImageSpaceSetBloomGpu( scene, m.btex[m.bmade], m.bw, m.bh );
+				else
+					m.bmade = -1;
+				fn->glActiveTexture( GLenum( GL_TEXTURE0 + kSrcUnit ) );
+				fn->glBindTexture( GL_TEXTURE_2D, GLuint( prevTex ) );
+				r->stopProgram();
+				isRestore( r, sn, prevDraw, prevRead );
+			}
+		}
+	}
 	/* lane PERFFIX6 (PHASE 2): the fence polled with a zero timeout; the GPU not past it yet: this frame applies nothing and
 	 * measures nothing (its read buffer is still in flight; the last value stays), and the read is tried again next frame.
 	 * Red ^WW_SYNC_RED=1: the wait (up to 1 s) */
@@ -540,8 +576,15 @@ void isMeasureFrame( Scene * scene, HdrGpu & g, int W, int H, int S, GLint prevD
 	 * 1920 x 1045, tests/vkframe/measure.sh), dispatched in the bloom's submit from the shared frame; isMeasureFinish reads
 	 * it back after wwCellBloomRun, or draws GL's quarter measure there when Vulkan did not run it. Frame mode, the quarter
 	 * route and RGBA32F only. Red WW_IS_MEASURE_VK_RED=1: GL's draw here, as before. Live */
-	if ( mayVk && mode == 0 && g.dsTex && !qRed && postFormat() == GL_RGBA32F && wwEnvInt( "WW_IS_MEASURE_VK_RED" ) != 1
-		&& WwVkPost::requestMeasure( r, g.color, g.ds, qw, qh ) ) {
+	/* lane VKBLOOM1: the tone map on the present device: the measure goes into its pass (measure_q.hlsl on the shared
+	 * frame), read back after it; the tone stays on GL or refuses: GL's quarter draw after the tone (isMeasureAfterTone) */
+	const bool vkAskOk = mayVk && mode == 0 && g.dsTex && !qRed && postFormat() == GL_RGBA32F
+		&& wwEnvInt( "WW_IS_MEASURE_VK_RED" ) != 1;
+	if ( vkAskOk && g.vkTone && WwVkPresent::toneFrameIs( g.color ) && WwVkPresent::toneBloomReady() ) {
+		m.vkToneAsk = true;
+		return;
+	}
+	if ( vkAskOk && WwVkPost::requestMeasure( r, g.color, g.ds, qw, qh ) ) {
 		m.vkAsked = true;
 		return;
 	}
@@ -1003,7 +1046,7 @@ static GLuint backdropCopy( Renderer * r, GLint viewDraw, GLint viewRead, int w,
 		d.w = w;
 		d.h = h;
 		if ( !d.ok )
-			qInfo().noquote() << "cell hdr: the FO4CS glow's backdrop copy is incomplete; the glow over the sky as before";
+			qInfo().noquote() << "cell hdr: the Fusion Shaders glow's backdrop copy is incomplete; the glow over the sky as before";
 	}
 	if ( d.ok ) {
 		if ( !d.tested ) {	// the first copy on this renderer: a refused blit (a view format it cannot take) turns it off
@@ -1020,7 +1063,7 @@ static GLuint backdropCopy( Renderer * r, GLint viewDraw, GLint viewRead, int w,
 			const GLenum err = fn->glGetError();
 			if ( err != GL_NO_ERROR ) {
 				d.ok = false;
-				qInfo().noquote() << QStringLiteral( "cell hdr: the FO4CS glow's backdrop copy refused (GL error %1); the glow over the sky as before" ).arg( err );
+				qInfo().noquote() << QStringLiteral( "cell hdr: the Fusion Shaders glow's backdrop copy refused (GL error %1); the glow over the sky as before" ).arg( err );
 			}
 		}
 	}
@@ -1683,7 +1726,12 @@ void wwCellHdrEnd( Scene * scene )
 	isMeasureFrame( scene, g, s.w, s.h, s.samples, s.prevDraw, s.prevRead, sync ? &sn : nullptr, true );
 	PassTime::subEnd( PassTime::ToneMeasure );
 	ts.at( "measure" );
-	// the FO4CS bloom's chain on the linear frame, when that mode is picked (cellbloom.h); Vanilla: no GL call
+	// the Fusion Shaders bloom's chain on the linear frame, when that mode is picked (cellbloom.h); Vanilla: no GL call
+	/* lane VKBLOOM1: the tone will run on the present device (the conditions of the glWhy chain below that the bloom does
+	 * not decide itself): the chain goes into that pass */
+	wwCellBloomPresentAllow( g.vkTone && g.dsTex && qEnvironmentVariableIntValue( "WW_CELL_HDR_STEX_BREAK" ) != 1
+		&& qEnvironmentVariableIntValue( "WW_CELL_HDR_EARLY_RED" ) == 0 && WwVkPresent::viewFbo()
+		&& s.prevDraw == GLint( WwVkPresent::viewFbo() ) );
 	PassTime::subBegin( PassTime::ToneBloom );
 	const bool foBloom = wwCellBloomRun( scene, g.color, g.ds, s.w, s.h, s.samples, g.dsFormat, g.dsTex );
 	PassTime::subEnd( PassTime::ToneBloom );
@@ -1796,12 +1844,13 @@ void wwCellHdrEnd( Scene * scene )
 	}
 	const bool splitSky = sorted && !skyholeOld && !skyIn;
 	/* lane VKFRAME1 round 11 (stage 1): modes 0, 2 and 1 on the present device into the view (vkpresent.cpp toneRun) from
-	 * the uniforms just set; the FO4CS glow (mode 3), the fog bloom and every refusal: GL's quads, the reason in the route line */
+	 * the uniforms just set; the fog bloom and every refusal: GL's quads, the reason in the route line. Lane VKBLOOM1: the
+	 * Fusion Shaders glow (mode 3) and the measure in the same pass (cellbloom.cpp filled the job) */
 	bool vkDrew = false;
 	if ( g.vkTone ) {
 		const char * glWhy = nullptr;
 		if ( foBloom )
-			glWhy = "the FO4CS bloom is on (mode 3 reads the backdrop)";
+			glWhy = "the Fusion Shaders bloom ran on GL (mode 3 reads GL's chain)";
 		else if ( fogBloom )
 			glWhy = "the fog bloom is on";
 		else if ( !g.dsTex )
@@ -1840,6 +1889,19 @@ void wwCellHdrEnd( Scene * scene )
 				flags |= 1 << 6;
 			if ( toneI( "cellOn" ) && toneI( "cellIsOn" ) )
 				flags |= 1 << 10;
+			// lane VKBLOOM1: the bloom's chain and mode 3 in this pass (11: over the backdrop, unless the sky red adds it)
+			if ( wwCellBloomPresent() ) {
+				WW_SWITCH_STATIC( bool, skyAddVk, wwEnv( "WW_CELL_BLOOM_SKY_RED" ).trimmed() == "add" );
+				flags |= 1 << 7;
+				if ( !skyAddVk )
+					flags |= 1 << 11;
+				t.bloom = &wwCellBloomPresentJob();
+				wwCellBloomPresentWeights( t.job.fo[0], t.job.fo[1], t.job.fo[2] );
+			}
+			if ( isGpus()[r].vkToneAsk ) {
+				t.measQw = std::max( 1, s.w >> 2 );
+				t.measQh = std::max( 1, s.h >> 2 );
+			}
 			t.job.ints[0] = flags;
 			const int dither = wwCellDitherSeed();
 			t.job.ints[1] = dither >= 0 ? 1 : 0;
@@ -1888,7 +1950,7 @@ void wwCellHdrEnd( Scene * scene )
 		r->drawShape( 4, 3, 6, GL_TRIANGLES, GL_UNSIGNED_SHORT, &attrs, idx );
 	}
 	}	// !vkDrew (the GL quads above keep their indent: one diff hunk)
-	/* The FO4CS glow over the pixels mode 0 did not take, added in display space as the tone-mapped difference the
+	/* The Fusion Shaders glow over the pixels mode 0 did not take, added in display space as the tone-mapped difference the
 	 * bloom makes (cell_hdr.frag mode 3): only cell-lit pixels are light here. */
 	if ( foBloom && sorted ) {
 		// lane GLAREBLOW2: the view as mode 3 finds it (modes 0-2 drawn), so the glow follows the curve there
@@ -1896,7 +1958,7 @@ void wwCellHdrEnd( Scene * scene )
 		static int skySaid = -1;
 		if ( skySaid != int( skyAdd ) ) {
 			skySaid = int( skyAdd );
-			qInfo().noquote() << "cell hdr: the FO4CS glow over the sky" << ( skyAdd
+			qInfo().noquote() << "cell hdr: the Fusion Shaders glow over the sky" << ( skyAdd
 				? "added from black (RED add)" : "at the backdrop's place on the curve (lane GLAREBLOW2)" );
 		}
 		GLint backdropPrev = 0;
@@ -1952,6 +2014,30 @@ void wwCellHdrEnd( Scene * scene )
 	fn->glDepthMask( depthMask );
 	fn->glBindFramebuffer( GL_DRAW_FRAMEBUFFER, GLuint( s.prevDraw ) );
 	fn->glBindFramebuffer( GL_READ_FRAMEBUFFER, GLuint( s.prevRead ) );
+	{	// lane VKBLOOM1: the measure asked of the tone pass: taken next frame, or GL's quarter draw now (the pass did not run it)
+		IsMeasureGpu & mg = isGpus()[r];
+		if ( mg.vkToneAsk ) {
+			mg.vkToneAsk = false;
+			PassTime::subBegin( PassTime::ToneMeasure );
+			const bool ran = vkDrew && WwVkPresent::toneMeasureRan();
+			static int saidRan = -1;
+			if ( saidRan != int( ran ) ) {
+				saidRan = int( ran );
+				std::fprintf( stderr, "tone map measure: %s (VKBLOOM1)\n", ran ? "in the tone pass on the present device "
+					"(measure_q.hlsl), read a frame late" : "GL's quarter draw after the tone (the tone pass did not run it)" );
+			}
+			if ( ran ) {
+				mg.vkTone = true;
+				mg.doc = scene->nifModel;
+				mg.qw = std::max( 1, s.w >> 2 );
+				mg.qh = std::max( 1, s.h >> 2 );
+				isServed().insert( scene->nifModel, true );
+			} else {
+				isMeasureFrame( scene, g, s.w, s.h, s.samples, s.prevDraw, s.prevRead, nullptr, false );
+			}
+			PassTime::subEnd( PassTime::ToneMeasure );
+		}
+	}
 	// lane TONEMAP1 / SYNC1: which stencil path and which query regime ran (the gates read these words)
 	const QString lane = QStringLiteral( " [stencil %1, sync %2]" ).arg( g.dsTex ? QStringLiteral( "in shader" ) : QStringLiteral( "blit" ),
 		sync ? QStringLiteral( "cached" ) : QStringLiteral( "red" ) );

@@ -64,4 +64,14 @@ void wwCellBloomDone( Renderer * r, int unit, int knownActive = -1 );
 //! One line for the notes: the mode, the glare values and the mip count used (or why not).
 QString wwCellBloomEcho();
 
+namespace WwVkPresent { struct ToneBloom; }
+/*! Lane VKBLOOM1: before wwCellBloomRun, cellhdr.cpp says the tone map may run on the present device this frame; Run then
+ *  fills the job for that pass instead of drawing on GL (returns false, wwCellBloomReplacing true, wwCellBloomPresent true).
+ *  Red WW_VKVIEW_BLOOM_RED=1 keeps GL's chain. */
+void wwCellBloomPresentAllow( bool allow );
+bool wwCellBloomPresent();
+const WwVkPresent::ToneBloom & wwCellBloomPresentJob();
+//! the tone pass's fo: the final weight, the energy-conserving k (0: additive), the fog's cap on it
+void wwCellBloomPresentWeights( float & finalWeight, float & ecK, float & fogCap );
+
 #endif
