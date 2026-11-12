@@ -30,6 +30,8 @@ HLSL_SPECS += [('src/features/vkframe', k, 'vulkan1.2', 'vkframe_%s_spv' % k) fo
 VKFRAME_EXPOSURE = ('measure_q',)	# the script's third loop: res/shaders/hlsl/exposure/<k>.hlsl -> <k>.spv.h
 HLSL_SPECS += [('src/features/vkframe', k, 'vulkan1.2', 'vkframe_%s_spv' % k) for k in VKFRAME_EXPOSURE]
 HLSL_DIR = {'src/features/gi/rtddgi': 'res/shaders/hlsl/rtddgi', 'src/features/vkframe': 'res/shaders/hlsl/post'}
+VKFRAME_VIEW = ('tone_view_vs', 'tone_view_ps')	# the script's fourth loop (round 11): vertex + fragment, post dir
+HLSL_SPECS += [('src/features/vkframe', k, 'vulkan1.2', 'vkframe_%s_spv' % k) for k in VKFRAME_VIEW]
 HLSL_SRC = dict((k, 'res/shaders/hlsl/exposure') for k in VKFRAME_EXPOSURE)	# a kernel outside its folder's HLSL dir
 DEFAULT_G = 'E:/Tools/RenderDoc/RenderDoc_1.45_64/plugins/spirv/glslangValidator.exe'
 DEFAULT_DXC = 'E:/Tools/dxc/bin/x64/dxc.exe'
@@ -85,6 +87,10 @@ def script_ok(tree):
 	eloop = m.group(1).split() if m else []
 	if sorted(eloop) != sorted(VKFRAME_EXPOSURE):
 		bad.append('src/features/vkframe/vkframe_spirv.sh: its exposure loop (%s) is not this checker\'s exposure kernels' % ' '.join(eloop))
+	m = re.search(r'^for v in ([a-z_ ]+); do\n\t"\$DXC" -spirv -fspv-target-env=vulkan1\.2 -T "\$\{v##\*_\}_6_0" -E main ', vf, re.M)
+	wloop = m.group(1).split() if m else []
+	if sorted(wloop) != sorted(VKFRAME_VIEW):
+		bad.append('src/features/vkframe/vkframe_spirv.sh: its view loop (%s) is not this checker\'s view shaders' % ' '.join(wloop))
 	return bad
 
 
@@ -188,7 +194,7 @@ def main(argv):
 				if os.path.exists(f):
 					os.remove(f)
 			src = os.path.join(tree, HLSL_SRC.get(k, HLSL_DIR.get(d, 'res/shaders/hlsl/' + os.path.basename(d))), k + '.hlsl')
-			m = re.search(r'hlsl profile: (cs_6_[0-9])', open(src, encoding='utf-8', errors='replace').read())
+			m = re.search(r'hlsl profile: ([cvp]s_6_[0-9])', open(src, encoding='utf-8', errors='replace').read())
 			opt = [] if d == 'src/features/vkframe' else ['-O0']   # vkframe_spirv.sh builds optimised
 			r = subprocess.run([dxc, '-spirv', '-fspv-target-env=' + env, '-T', m.group(1) if m else 'cs_6_0', '-E', 'main']
 			                   + opt + ['-Fo', spv, src], capture_output=True, text=True, timeout=300)

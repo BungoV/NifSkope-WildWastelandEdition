@@ -16,6 +16,9 @@
 #define VK_USE_PLATFORM_WIN32_KHR
 #include <vulkan/vulkan.h>
 
+#include "features/vkframe/tone_view_vs.spv.h"  // round 11: the tone pass on the view (vkframe_spirv.sh)
+#include "features/vkframe/tone_view_ps.spv.h"
+
 #include <algorithm>
 #include <chrono>
 #include <condition_variable>
@@ -43,7 +46,7 @@ constexpr GLenum kTexture2D = 0x0DE1, kRgba8 = 0x8058, kScissorTest = 0x0C11, kR
 	kHandleOpaqueWin32 = 0x9587, kDedicated = 0x9581, kNumDeviceUuids = 0x9596, kDeviceUuid = 0x9597,
 	kFbComplete = 0x8CD5, kSyncGpuDone = 0x9117, kAlreadySignaled = 0x911A, kConditionSatisfied = 0x911C,
 	kTexture2DMs = 0x9100, kDepth24Stencil8 = 0x88F0, kDepthStencilAttach = 0x821A, kFramebuffer = 0x8D40,
-	kTexBinding2DMs = 0x9104;
+	kTexBinding2DMs = 0x9104, kRgba16f = 0x881A, kRgba32f = 0x8814, kDsTexMode = 0x90EA, kStencilIndex = 0x1901;
 constexpr GLuint64 kTimeoutIgnored = ~0ull;
 
 struct Gl
@@ -166,6 +169,18 @@ struct Vk
 	VKP( vkEndCommandBuffer ); VKP( vkResetCommandBuffer ); VKP( vkCmdPipelineBarrier ); VKP( vkCmdBlitImage );
 	VKP( vkCreateBuffer ); VKP( vkDestroyBuffer ); VKP( vkGetBufferMemoryRequirements ); VKP( vkBindBufferMemory );
 	VKP( vkMapMemory ); VKP( vkUnmapMemory ); VKP( vkCmdCopyImageToBuffer ); VKP( vkCmdResolveImage );
+	// round 11: the tone pass on the view (a render pass of the present device)
+	bool sampleShading = false;  // the device feature SV_SampleIndex needs (enabled when offered)
+	VKP( vkGetPhysicalDeviceFeatures );
+	VKP( vkCreateImageView ); VKP( vkDestroyImageView ); VKP( vkCreateSampler ); VKP( vkDestroySampler );
+	VKP( vkCreateDescriptorSetLayout ); VKP( vkDestroyDescriptorSetLayout ); VKP( vkCreateDescriptorPool );
+	VKP( vkDestroyDescriptorPool ); VKP( vkAllocateDescriptorSets ); VKP( vkUpdateDescriptorSets );
+	VKP( vkCreatePipelineLayout ); VKP( vkDestroyPipelineLayout ); VKP( vkCreateShaderModule ); VKP( vkDestroyShaderModule );
+	VKP( vkCreateGraphicsPipelines ); VKP( vkDestroyPipeline ); VKP( vkCreateRenderPass ); VKP( vkDestroyRenderPass );
+	VKP( vkCreateFramebuffer ); VKP( vkDestroyFramebuffer ); VKP( vkCmdBeginRenderPass ); VKP( vkCmdEndRenderPass );
+	VKP( vkCmdBindPipeline ); VKP( vkCmdBindDescriptorSets ); VKP( vkCmdPushConstants ); VKP( vkCmdDraw );
+	VKP( vkCmdSetViewport ); VKP( vkCmdSetScissor ); VKP( vkCmdCopyBufferToImage );
+	VKP( vkCreatePipelineCache ); VKP( vkDestroyPipelineCache ); VKP( vkGetPipelineCacheData );
 };
 #undef VKP
 
@@ -240,6 +255,7 @@ struct View
 	double waitMs = 0.0;
 	std::string failWhy;     // the last make that failed (the route stays off at that shape)
 	int failW = 0, failH = 0, failS = 0;
+	std::uint64_t gen = 0;   // round 11: one more each make (the tone pass's framebuffers follow it)
 };
 
 View & view()
@@ -353,7 +369,7 @@ bool makeDevice( std::string & why )
 	LI( vkGetPhysicalDeviceImageFormatProperties );
 	LI( vkCreateWin32SurfaceKHR ); LI( vkDestroySurfaceKHR ); LI( vkGetPhysicalDeviceSurfaceSupportKHR );
 	LI( vkGetPhysicalDeviceSurfaceCapabilitiesKHR ); LI( vkGetPhysicalDeviceSurfaceFormatsKHR );
-	LI( vkGetPhysicalDeviceSurfacePresentModesKHR );
+	LI( vkGetPhysicalDeviceSurfacePresentModesKHR ); LI( vkGetPhysicalDeviceFeatures );
 #undef LI
 	std::uint8_t want[VK_UUID_SIZE] = {};
 	const bool haveUuid = glUuid( want );
@@ -393,7 +409,14 @@ bool makeDevice( std::string & why )
 	qi.pQueuePriorities = &prio;
 	const char * dext[] = { VK_KHR_SWAPCHAIN_EXTENSION_NAME, VK_KHR_EXTERNAL_MEMORY_WIN32_EXTENSION_NAME,
 		VK_KHR_EXTERNAL_SEMAPHORE_WIN32_EXTENSION_NAME };
+	// round 11: the tone pass's fragment shader reads SV_SampleIndex (the SampleRateShading capability)
+	VkPhysicalDeviceFeatures offered {}, en {};
+	if ( v.vkGetPhysicalDeviceFeatures )
+		v.vkGetPhysicalDeviceFeatures( v.phys, &offered );
+	en.sampleRateShading = offered.sampleRateShading;
+	v.sampleShading = offered.sampleRateShading == VK_TRUE;
 	VkDeviceCreateInfo di { VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO };
+	di.pEnabledFeatures = &en;
 	di.queueCreateInfoCount = 1;
 	di.pQueueCreateInfos = &qi;
 	di.enabledExtensionCount = 3;
@@ -411,6 +434,15 @@ bool makeDevice( std::string & why )
 	LD( vkEndCommandBuffer ); LD( vkResetCommandBuffer ); LD( vkCmdPipelineBarrier ); LD( vkCmdBlitImage );
 	LD( vkCreateBuffer ); LD( vkDestroyBuffer ); LD( vkGetBufferMemoryRequirements ); LD( vkBindBufferMemory );
 	LD( vkMapMemory ); LD( vkUnmapMemory ); LD( vkCmdCopyImageToBuffer ); LD( vkCmdResolveImage );
+	LD( vkCreateImageView ); LD( vkDestroyImageView ); LD( vkCreateSampler ); LD( vkDestroySampler );
+	LD( vkCreateDescriptorSetLayout ); LD( vkDestroyDescriptorSetLayout ); LD( vkCreateDescriptorPool );
+	LD( vkDestroyDescriptorPool ); LD( vkAllocateDescriptorSets ); LD( vkUpdateDescriptorSets );
+	LD( vkCreatePipelineLayout ); LD( vkDestroyPipelineLayout ); LD( vkCreateShaderModule ); LD( vkDestroyShaderModule );
+	LD( vkCreateGraphicsPipelines ); LD( vkDestroyPipeline ); LD( vkCreateRenderPass ); LD( vkDestroyRenderPass );
+	LD( vkCreateFramebuffer ); LD( vkDestroyFramebuffer ); LD( vkCmdBeginRenderPass ); LD( vkCmdEndRenderPass );
+	LD( vkCmdBindPipeline ); LD( vkCmdBindDescriptorSets ); LD( vkCmdPushConstants ); LD( vkCmdDraw );
+	LD( vkCmdSetViewport ); LD( vkCmdSetScissor ); LD( vkCmdCopyBufferToImage );
+	LD( vkCreatePipelineCache ); LD( vkDestroyPipelineCache ); LD( vkGetPipelineCacheData );
 #undef LD
 	if ( !v.vkGetMemoryWin32HandleKHR || !v.vkGetSemaphoreWin32HandleKHR || !v.vkCreateSwapchainKHR )
 		return fail( "the device lacks a swapchain / win32 export entry point" );
@@ -473,7 +505,11 @@ struct Work
 	bool cpuWait = false;  // build 91: wait the fence on the CPU, no GL signal (signalRoute 2)
 	HDC dc = nullptr;  // k < 0: the worker takes ctx current and keeps it (null ctx: lets its context go)
 	HGLRC ctx = nullptr;
+	bool tone = false;  // round 11 (k = -1): record and submit the tone pass on the view (toneWork)
 };
+
+// round 11: the tone pass's record + submit, on the worker (the queue is the worker's)
+bool toneWork( std::string & why );
 
 struct Worker
 {
@@ -485,6 +521,9 @@ struct Worker
 	WwVkPresent::Split split;
 	bool bindOk = false, lastOk = true;
 	std::string bindWhy, lastWhy;
+	std::uint64_t toneDone = 0;  // round 11: tone jobs the worker finished (submitted, or failed: toneOk)
+	bool toneOk = true;
+	std::string toneWhy;
 };
 
 Worker & wk()
@@ -535,6 +574,19 @@ void workerLoop()
 			j = W.q.front();
 			W.q.pop_front();
 			W.busy = true;
+		}
+		if ( j.tone ) {
+			std::string why;
+			const bool ok = toneWork( why );
+			{
+				std::lock_guard<std::mutex> lk( W.m );
+				W.toneDone++;
+				W.toneOk = ok;
+				W.toneWhy = why;
+				W.busy = false;
+			}
+			W.idle.notify_all();
+			continue;
 		}
 		if ( j.k < 0 ) {
 			std::string why;
@@ -1080,12 +1132,16 @@ bool makeShared( VkImage & img, VkDeviceMemory & mem, GLuint & tex, GLuint & obj
 	return true;
 }
 
+// round 11: the tone pass's framebuffers and image views of the view ring (defined with the tone pass)
+void toneFbsDrop();
+
 // the views go (GL alive: its textures, memory objects and FBO too); the caller drained the worker
 void dropView( bool glAlive )
 {
 	Vk & v = vk();
 	Gl & g = gl();
 	View & V = view();
+	toneFbsDrop();
 	for ( ViewSlot & s : V.slot ) {
 		if ( glAlive ) {
 			for ( GLuint * t : { &s.colorTex, &s.dsTex } )
@@ -1159,6 +1215,651 @@ bool makeView( int w, int h, int samples, std::string & why )
 	V.h = h;
 	V.samples = samples;
 	V.makeMs = nowMs() - t0;
+	V.gen++;
+	return true;
+}
+
+/* Round 11, stage 1: the cell tone map (cell_hdr.frag modes 0, 2, 1) as a render pass of the present device into the
+ * view slot GL draws this frame. GL draws the linear frame into images made here (toneFrame: RGBA16F + D24S8 at the
+ * view's samples). The crossing: GL signals A (the frame, the view slot, the measure), the worker's submit waits A and
+ * signals B, GL waits B before its next pass on the view; the drawing thread waits the worker's submit first (GL may
+ * wait a binary semaphore only after its signal is submitted). The LUT goes up from the CPU bytes GL uploads (16^3,
+ * 16 KB), not through a GL import; the FO4CS bloom (mode 3, its backdrop) and the fog bloom stay GL's. */
+struct Tone
+{
+	void * glCtx = nullptr;
+	int w = 0, h = 0, samples = 0;
+	VkImage color = VK_NULL_HANDLE, ds = VK_NULL_HANDLE;
+	VkDeviceMemory colorMem = VK_NULL_HANDLE, dsMem = VK_NULL_HANDLE;
+	GLuint colorTex = 0, dsTex = 0, colorObj = 0, dsObj = 0;
+	VkImageView colorView = VK_NULL_HANDLE, stencilView = VK_NULL_HANDLE;
+	double frameMb = 0.0;
+	// the measure's bloom, copied by GL into an image of this device (RGBA32F, 1 sample) when it changes
+	int mw = 0, mh = 0;
+	VkImage measure = VK_NULL_HANDLE;
+	VkDeviceMemory measureMem = VK_NULL_HANDLE;
+	GLuint measureTex = 0, measureObj = 0, copyFb[2] = {};
+	GLuint measureSrc = 0;  // GL's bloom texture attached to copyFb[0] (its completeness asked once per name)
+	VkImageView measureView = VK_NULL_HANDLE;
+	double measureMb = 0.0;
+	std::uint64_t measureGen = 0;
+	bool measureHave = false;
+	// made once on the device
+	bool made = false, broken = false;
+	std::string brokenWhy;
+	VkSampler sampler = VK_NULL_HANDLE;
+	VkDescriptorSetLayout dsl = VK_NULL_HANDLE;
+	VkDescriptorPool dpool = VK_NULL_HANDLE;
+	VkDescriptorSet set = VK_NULL_HANDLE;
+	VkPipelineLayout layout = VK_NULL_HANDLE;
+	VkShaderModule vs = VK_NULL_HANDLE, ps = VK_NULL_HANDLE;
+	VkImage dummy = VK_NULL_HANDLE, lut = VK_NULL_HANDLE;
+	VkDeviceMemory dummyMem = VK_NULL_HANDLE, lutMem = VK_NULL_HANDLE, stagingMem = VK_NULL_HANDLE;
+	VkImageView dummyView = VK_NULL_HANDLE, lutView = VK_NULL_HANDLE;
+	VkBuffer staging = VK_NULL_HANDLE;
+	std::uint8_t * stagingPtr = nullptr;
+	double fixedMb = 0.0;
+	std::uint64_t lutGen = 0;
+	bool lutCopy = false;  // the worker copies the staging buffer into the LUT before the pass
+	bool lutHave = false;
+	VkSemaphore glDone = VK_NULL_HANDLE, vkDone = VK_NULL_HANDLE;
+	GLuint glDoneGl = 0, vkDoneGl = 0;
+	void * semCtx = nullptr;  // the GL context the two semaphores were imported into
+	VkCommandBuffer cmd = VK_NULL_HANDLE;
+	VkFence fence = VK_NULL_HANDLE;
+	bool pending = false;  // the fence is armed (the last pass may still run)
+	std::uint64_t handed = 0;
+	VkPipelineCache cache = VK_NULL_HANDLE;
+	std::string cachePath;
+	// per sample count
+	int pipeSamples = 0;
+	VkRenderPass pass = VK_NULL_HANDLE;
+	VkPipeline pipe[3] = {};  // 0: no depth test; 1: GREATER (an opaque draw's depth); 2: LEQUAL + premultiplied blend
+	int pipelines = 0;
+	double buildMs = 0.0;
+	// per view slot (made again with the view ring)
+	VkImageView vColor[kViewSlots] = {}, vDs[kViewSlots] = {};
+	VkFramebuffer fb[kViewSlots] = {};
+	std::uint64_t fbGen = 0;
+	bool descDirty = true;
+	// this frame's draw: written by the drawing thread before the hand, read by the worker
+	int slot = -1;
+	int vp[4] = {};
+	bool splitSky = false, sorted = true;
+	WwVkPresent::ToneJob job;
+	WwVkPresent::ToneStat st;  // since the last take
+};
+
+Tone & tone()
+{
+	static Tone t;
+	return t;
+}
+
+VkImageView imageView( VkImage img, VkImageViewType type, VkFormat fmt, VkImageAspectFlags aspect )
+{
+	Vk & v = vk();
+	VkImageViewCreateInfo ci { VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO };
+	ci.image = img;
+	ci.viewType = type;
+	ci.format = fmt;
+	ci.subresourceRange = { aspect, 0, 1, 0, 1 };
+	VkImageView out = VK_NULL_HANDLE;
+	if ( v.vkCreateImageView( v.dev, &ci, nullptr, &out ) != VK_SUCCESS )
+		return VK_NULL_HANDLE;
+	return out;
+}
+
+// an image only this device reads (the LUT, the dummy), device-local
+bool makeLocal( VkImage & img, VkDeviceMemory & mem, VkImageType type, VkFormat fmt, int w, int h, int d, double & mb )
+{
+	Vk & v = vk();
+	VkImageCreateInfo ci { VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO };
+	ci.imageType = type;
+	ci.format = fmt;
+	ci.extent = { std::uint32_t( w ), std::uint32_t( h ), std::uint32_t( d ) };
+	ci.mipLevels = 1;
+	ci.arrayLayers = 1;
+	ci.samples = VK_SAMPLE_COUNT_1_BIT;
+	ci.tiling = VK_IMAGE_TILING_OPTIMAL;
+	ci.usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+	if ( v.vkCreateImage( v.dev, &ci, nullptr, &img ) != VK_SUCCESS )
+		return false;
+	VkMemoryRequirements r;
+	v.vkGetImageMemoryRequirements( v.dev, img, &r );
+	VkMemoryAllocateInfo ai { VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO };
+	ai.allocationSize = r.size;
+	ai.memoryTypeIndex = memType( r.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT );
+	if ( ai.memoryTypeIndex == UINT32_MAX || v.vkAllocateMemory( v.dev, &ai, nullptr, &mem ) != VK_SUCCESS
+		|| v.vkBindImageMemory( v.dev, img, mem, 0 ) != VK_SUCCESS )
+		return false;
+	mb += double( r.size ) / 1048576.0;
+	return true;
+}
+
+void toneFbsDrop()
+{
+	Vk & v = vk();
+	Tone & T = tone();
+	for ( int k = 0; k < kViewSlots; k++ ) {
+		if ( T.fb[k] )
+			v.vkDestroyFramebuffer( v.dev, T.fb[k], nullptr );
+		for ( VkImageView * iv : { &T.vColor[k], &T.vDs[k] } )
+			if ( *iv )
+				v.vkDestroyImageView( v.dev, *iv, nullptr );
+		T.fb[k] = VK_NULL_HANDLE;
+		T.vColor[k] = T.vDs[k] = VK_NULL_HANDLE;
+	}
+	T.fbGen = 0;
+}
+
+void tonePipesDrop()
+{
+	Vk & v = vk();
+	Tone & T = tone();
+	toneFbsDrop();
+	for ( VkPipeline & p : T.pipe ) {
+		if ( p )
+			v.vkDestroyPipeline( v.dev, p, nullptr );
+		p = VK_NULL_HANDLE;
+	}
+	if ( T.pass )
+		v.vkDestroyRenderPass( v.dev, T.pass, nullptr );
+	T.pass = VK_NULL_HANDLE;
+	T.pipeSamples = 0;
+	T.pipelines = 0;
+}
+
+// the measure's copy goes (GL alive: its texture, memory object and copy FBOs too); the caller waited the device
+void toneMeasureDrop( bool glAlive )
+{
+	Vk & v = vk();
+	Gl & g = gl();
+	Tone & T = tone();
+	if ( glAlive ) {
+		if ( T.measureTex )
+			g.deleteTextures( 1, &T.measureTex );
+		if ( T.measureObj )
+			g.deleteMemoryObjects( 1, &T.measureObj );
+		if ( T.copyFb[0] )
+			g.deleteFramebuffers( 2, T.copyFb );
+	}
+	if ( T.measureView )
+		v.vkDestroyImageView( v.dev, T.measureView, nullptr );
+	if ( T.measure )
+		v.vkDestroyImage( v.dev, T.measure, nullptr );
+	if ( T.measureMem )
+		v.vkFreeMemory( v.dev, T.measureMem, nullptr );
+	T.measureTex = T.measureObj = T.copyFb[0] = T.copyFb[1] = T.measureSrc = 0;
+	T.measureView = VK_NULL_HANDLE;
+	T.measure = VK_NULL_HANDLE;
+	T.measureMem = VK_NULL_HANDLE;
+	T.mw = T.mh = 0;
+	T.measureMb = 0.0;
+	T.measureHave = false;
+	T.descDirty = true;
+}
+
+// the shared frame goes (GL alive: its textures and memory objects too); the caller waited the device
+void toneFrameFree( bool glAlive )
+{
+	Vk & v = vk();
+	Gl & g = gl();
+	Tone & T = tone();
+	if ( glAlive ) {
+		for ( GLuint * t : { &T.colorTex, &T.dsTex } )
+			if ( *t )
+				g.deleteTextures( 1, t );
+		for ( GLuint * o : { &T.colorObj, &T.dsObj } )
+			if ( *o )
+				g.deleteMemoryObjects( 1, o );
+	}
+	for ( VkImageView * iv : { &T.colorView, &T.stencilView } )
+		if ( *iv )
+			v.vkDestroyImageView( v.dev, *iv, nullptr );
+	for ( VkImage * i : { &T.color, &T.ds } )
+		if ( *i )
+			v.vkDestroyImage( v.dev, *i, nullptr );
+	for ( VkDeviceMemory * m : { &T.colorMem, &T.dsMem } )
+		if ( *m )
+			v.vkFreeMemory( v.dev, *m, nullptr );
+	toneMeasureDrop( glAlive );
+	T.colorTex = T.dsTex = T.colorObj = T.dsObj = 0;
+	T.colorView = T.stencilView = VK_NULL_HANDLE;
+	T.color = T.ds = VK_NULL_HANDLE;
+	T.colorMem = T.dsMem = VK_NULL_HANDLE;
+	T.w = T.h = T.samples = 0;
+	T.frameMb = 0.0;
+	T.glCtx = nullptr;
+	T.descDirty = true;
+}
+
+// the pipeline cache: read from the file the Qt part names (none: an empty cache), written after a build
+void toneCacheSave()
+{
+	Vk & v = vk();
+	Tone & T = tone();
+	if ( !T.cache || T.cachePath.empty() )
+		return;
+	size_t n = 0;
+	if ( v.vkGetPipelineCacheData( v.dev, T.cache, &n, nullptr ) != VK_SUCCESS || !n )
+		return;
+	std::vector<char> data( n );
+	if ( v.vkGetPipelineCacheData( v.dev, T.cache, &n, data.data() ) != VK_SUCCESS )
+		return;
+	if ( FILE * f = std::fopen( T.cachePath.c_str(), "wb" ) ) {
+		std::fwrite( data.data(), 1, n, f );
+		std::fclose( f );
+	}
+}
+
+/* the device-time parts (once): sampler, set layout, pool + set, pipeline layout, shader modules, pipeline cache, the
+ * dummy and the LUT images, the LUT's staging buffer, the two semaphores, the command buffer and its fence. The caller
+ * drained the worker (the dummy's first fill is a submit). */
+bool toneStatic( std::string & why )
+{
+	Vk & v = vk();
+	Tone & T = tone();
+	if ( T.made )
+		return true;
+	VkSamplerCreateInfo sci { VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO };
+	sci.magFilter = sci.minFilter = VK_FILTER_LINEAR;
+	sci.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
+	sci.addressModeU = sci.addressModeV = sci.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+	sci.maxLod = 0.0f;
+	if ( v.vkCreateSampler( v.dev, &sci, nullptr, &T.sampler ) != VK_SUCCESS ) {
+		why = "vkCreateSampler (the tone pass) failed";
+		return false;
+	}
+	VkDescriptorSetLayoutBinding b[8] = {};
+	for ( std::uint32_t k = 0; k < 8; k++ ) {
+		b[k].binding = k;
+		b[k].descriptorType = k == 7 ? VK_DESCRIPTOR_TYPE_SAMPLER : VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+		b[k].descriptorCount = 1;
+		b[k].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+	}
+	VkDescriptorSetLayoutCreateInfo lci { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
+	lci.bindingCount = 8;
+	lci.pBindings = b;
+	VkDescriptorPoolSize ps[2] = { { VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 7 }, { VK_DESCRIPTOR_TYPE_SAMPLER, 1 } };
+	VkDescriptorPoolCreateInfo pci { VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO };
+	pci.maxSets = 1;
+	pci.poolSizeCount = 2;
+	pci.pPoolSizes = ps;
+	if ( v.vkCreateDescriptorSetLayout( v.dev, &lci, nullptr, &T.dsl ) != VK_SUCCESS
+		|| v.vkCreateDescriptorPool( v.dev, &pci, nullptr, &T.dpool ) != VK_SUCCESS ) {
+		why = "the tone pass's descriptor set layout / pool failed";
+		return false;
+	}
+	VkDescriptorSetAllocateInfo dai { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO };
+	dai.descriptorPool = T.dpool;
+	dai.descriptorSetCount = 1;
+	dai.pSetLayouts = &T.dsl;
+	VkPushConstantRange pcr { VK_SHADER_STAGE_FRAGMENT_BIT, 0, std::uint32_t( sizeof( WwVkPresent::ToneJob ) ) };
+	VkPipelineLayoutCreateInfo plci { VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO };
+	plci.setLayoutCount = 1;
+	plci.pSetLayouts = &T.dsl;
+	plci.pushConstantRangeCount = 1;
+	plci.pPushConstantRanges = &pcr;
+	if ( v.vkAllocateDescriptorSets( v.dev, &dai, &T.set ) != VK_SUCCESS
+		|| v.vkCreatePipelineLayout( v.dev, &plci, nullptr, &T.layout ) != VK_SUCCESS ) {
+		why = "the tone pass's descriptor set / pipeline layout failed";
+		return false;
+	}
+	VkShaderModuleCreateInfo mci { VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO };
+	mci.codeSize = sizeof( vkframe_tone_view_vs_spv );
+	mci.pCode = vkframe_tone_view_vs_spv;
+	const bool vsOk = v.vkCreateShaderModule( v.dev, &mci, nullptr, &T.vs ) == VK_SUCCESS;
+	mci.codeSize = sizeof( vkframe_tone_view_ps_spv );
+	mci.pCode = vkframe_tone_view_ps_spv;
+	if ( !vsOk || v.vkCreateShaderModule( v.dev, &mci, nullptr, &T.ps ) != VK_SUCCESS ) {
+		why = "the tone pass's shader modules failed";
+		return false;
+	}
+	std::vector<char> seed;
+	if ( !T.cachePath.empty() ) {
+		if ( FILE * f = std::fopen( T.cachePath.c_str(), "rb" ) ) {
+			char buf[65536];
+			size_t n = 0;
+			while ( ( n = std::fread( buf, 1, sizeof( buf ), f ) ) > 0 )
+				seed.insert( seed.end(), buf, buf + n );
+			std::fclose( f );
+		}
+	}
+	VkPipelineCacheCreateInfo cci { VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO };
+	cci.initialDataSize = seed.size();
+	cci.pInitialData = seed.empty() ? nullptr : seed.data();
+	if ( v.vkCreatePipelineCache( v.dev, &cci, nullptr, &T.cache ) != VK_SUCCESS ) {
+		cci.initialDataSize = 0;  // a stale file: start empty
+		cci.pInitialData = nullptr;
+		if ( v.vkCreatePipelineCache( v.dev, &cci, nullptr, &T.cache ) != VK_SUCCESS )
+			T.cache = VK_NULL_HANDLE;
+	}
+	if ( !makeLocal( T.dummy, T.dummyMem, VK_IMAGE_TYPE_2D, VK_FORMAT_R8G8B8A8_UNORM, 1, 1, 1, T.fixedMb )
+		|| !makeLocal( T.lut, T.lutMem, VK_IMAGE_TYPE_3D, VK_FORMAT_R8G8B8A8_UNORM, 16, 16, 16, T.fixedMb ) ) {
+		why = "the tone pass's dummy / LUT image failed";
+		return false;
+	}
+	T.dummyView = imageView( T.dummy, VK_IMAGE_VIEW_TYPE_2D, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_ASPECT_COLOR_BIT );
+	T.lutView = imageView( T.lut, VK_IMAGE_VIEW_TYPE_3D, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_ASPECT_COLOR_BIT );
+	VkBufferCreateInfo bci { VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
+	bci.size = 16 * 16 * 16 * 4;
+	bci.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+	VkMemoryRequirements br {};
+	bool staged = v.vkCreateBuffer( v.dev, &bci, nullptr, &T.staging ) == VK_SUCCESS;
+	if ( staged ) {
+		v.vkGetBufferMemoryRequirements( v.dev, T.staging, &br );
+		VkMemoryAllocateInfo ai { VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO };
+		ai.allocationSize = br.size;
+		ai.memoryTypeIndex = memType( br.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT );
+		void * p = nullptr;
+		staged = ai.memoryTypeIndex != UINT32_MAX && v.vkAllocateMemory( v.dev, &ai, nullptr, &T.stagingMem ) == VK_SUCCESS
+			&& v.vkBindBufferMemory( v.dev, T.staging, T.stagingMem, 0 ) == VK_SUCCESS
+			&& v.vkMapMemory( v.dev, T.stagingMem, 0, VK_WHOLE_SIZE, 0, &p ) == VK_SUCCESS;
+		T.stagingPtr = static_cast<std::uint8_t *>( p );
+	}
+	if ( !staged || !T.dummyView || !T.lutView ) {
+		why = "the tone pass's LUT staging buffer / image views failed";
+		return false;
+	}
+	VkFenceCreateInfo fi { VK_STRUCTURE_TYPE_FENCE_CREATE_INFO };
+	VkCommandBufferAllocateInfo cai { VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO };
+	cai.commandPool = v.pool;
+	cai.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+	cai.commandBufferCount = 1;
+	if ( v.vkCreateFence( v.dev, &fi, nullptr, &T.fence ) != VK_SUCCESS || v.vkAllocateCommandBuffers( v.dev, &cai, &T.cmd ) != VK_SUCCESS ) {
+		why = "the tone pass's fence / command buffer failed";
+		return false;
+	}
+	// the dummy and the LUT: GENERAL, zero (a zero dummy reads as "no bloom", "no fog gain")
+	std::memset( T.stagingPtr, 0, size_t( bci.size ) );
+	VkCommandBufferBeginInfo bi { VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
+	bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+	v.vkBeginCommandBuffer( T.cmd, &bi );
+	VkImageMemoryBarrier ib[2] = { { VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER }, { VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER } };
+	for ( int k = 0; k < 2; k++ ) {
+		ib[k].oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+		ib[k].newLayout = VK_IMAGE_LAYOUT_GENERAL;
+		ib[k].dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+		ib[k].srcQueueFamilyIndex = ib[k].dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+		ib[k].image = k ? T.lut : T.dummy;
+		ib[k].subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
+	}
+	v.vkCmdPipelineBarrier( T.cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 2, ib );
+	VkBufferImageCopy c[2] = {};
+	c[0].imageSubresource = c[1].imageSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
+	c[0].imageExtent = { 1, 1, 1 };
+	c[1].imageExtent = { 16, 16, 16 };
+	v.vkCmdCopyBufferToImage( T.cmd, T.staging, T.dummy, VK_IMAGE_LAYOUT_GENERAL, 1, &c[0] );
+	v.vkCmdCopyBufferToImage( T.cmd, T.staging, T.lut, VK_IMAGE_LAYOUT_GENERAL, 1, &c[1] );
+	for ( int k = 0; k < 2; k++ ) {
+		ib[k].oldLayout = ib[k].newLayout;
+		ib[k].srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+		ib[k].dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+	}
+	v.vkCmdPipelineBarrier( T.cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0, nullptr, 0, nullptr, 2, ib );
+	v.vkEndCommandBuffer( T.cmd );
+	if ( !oneShot( T.cmd, T.fence ) ) {
+		why = "the tone pass's first fill failed";
+		return false;
+	}
+	T.made = true;
+	return true;
+}
+
+// the crossing's two semaphores go (GL alive: GL's names too); the caller waited the device
+void toneSemsDrop( bool glAlive )
+{
+	Vk & v = vk();
+	Gl & g = gl();
+	Tone & T = tone();
+	if ( glAlive )
+		for ( GLuint * s : { &T.glDoneGl, &T.vkDoneGl } )
+			if ( *s )
+				g.deleteSemaphores( 1, s );
+	for ( VkSemaphore * s : { &T.glDone, &T.vkDone } )
+		if ( *s )
+			v.vkDestroySemaphore( v.dev, *s, nullptr );
+	T.glDoneGl = T.vkDoneGl = 0;
+	T.glDone = T.vkDone = VK_NULL_HANDLE;
+	T.semCtx = nullptr;
+}
+
+// the crossing's semaphores, imported into the GL context current (made again when that context changes)
+bool toneSems( std::string & why )
+{
+	Gl & g = gl();
+	Tone & T = tone();
+	if ( T.glDone && T.semCtx == g.ctx )
+		return true;
+	toneSemsDrop( false );  // another context's names: that context went
+	if ( !exportSem( T.glDone, T.glDoneGl, why ) || !exportSem( T.vkDone, T.vkDoneGl, why ) ) {
+		toneSemsDrop( true );
+		return false;
+	}
+	T.semCtx = g.ctx;
+	return true;
+}
+
+// the render pass (LOAD / STORE, GENERAL) and the three pipelines at the view's samples
+bool tonePipes( int samples, std::string & why )
+{
+	Vk & v = vk();
+	Tone & T = tone();
+	if ( T.pass && T.pipeSamples == samples )
+		return true;
+	if ( samples > 1 && !v.sampleShading ) {
+		why = "the device offers no sampleRateShading (the pass reads SV_SampleIndex)";
+		return false;
+	}
+	tonePipesDrop();
+	const double t0 = nowMs();
+	const VkSampleCountFlagBits sc = VkSampleCountFlagBits( samples );
+	VkAttachmentDescription at[2] = {};
+	at[0].format = VK_FORMAT_R8G8B8A8_UNORM;
+	at[1].format = VK_FORMAT_D24_UNORM_S8_UINT;
+	for ( VkAttachmentDescription & a : at ) {
+		a.samples = sc;
+		a.loadOp = a.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
+		a.storeOp = a.stencilStoreOp = VK_ATTACHMENT_STORE_OP_STORE;
+		a.initialLayout = a.finalLayout = VK_IMAGE_LAYOUT_GENERAL;
+	}
+	const VkAttachmentReference cr { 0, VK_IMAGE_LAYOUT_GENERAL }, dr { 1, VK_IMAGE_LAYOUT_GENERAL };
+	VkSubpassDescription sp {};
+	sp.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+	sp.colorAttachmentCount = 1;
+	sp.pColorAttachments = &cr;
+	sp.pDepthStencilAttachment = &dr;
+	VkRenderPassCreateInfo rci { VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO };
+	rci.attachmentCount = 2;
+	rci.pAttachments = at;
+	rci.subpassCount = 1;
+	rci.pSubpasses = &sp;
+	if ( v.vkCreateRenderPass( v.dev, &rci, nullptr, &T.pass ) != VK_SUCCESS ) {
+		why = "vkCreateRenderPass (the tone pass) failed";
+		return false;
+	}
+	VkPipelineShaderStageCreateInfo st[2] = { { VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO },
+		{ VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO } };
+	st[0].stage = VK_SHADER_STAGE_VERTEX_BIT;
+	st[0].module = T.vs;
+	st[0].pName = "main";
+	st[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+	st[1].module = T.ps;
+	st[1].pName = "main";
+	VkPipelineVertexInputStateCreateInfo vi { VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO };
+	VkPipelineInputAssemblyStateCreateInfo ia { VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO };
+	ia.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+	VkPipelineViewportStateCreateInfo vps { VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO };
+	vps.viewportCount = vps.scissorCount = 1;
+	VkPipelineRasterizationStateCreateInfo rs { VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO };
+	rs.polygonMode = VK_POLYGON_MODE_FILL;
+	rs.cullMode = VK_CULL_MODE_NONE;
+	rs.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
+	rs.lineWidth = 1.0f;
+	VkPipelineMultisampleStateCreateInfo ms { VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO };
+	ms.rasterizationSamples = sc;
+	ms.sampleShadingEnable = samples > 1 ? VK_TRUE : VK_FALSE;  // per sample, as GL's gl_SampleID read makes it
+	ms.minSampleShading = 1.0f;
+	VkPipelineDepthStencilStateCreateInfo dss[3] = { { VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO },
+		{ VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO }, { VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO } };
+	dss[1].depthTestEnable = dss[2].depthTestEnable = VK_TRUE;  // never written: the quad at the far plane only tests
+	dss[1].depthCompareOp = VK_COMPARE_OP_GREATER;
+	dss[2].depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
+	VkPipelineColorBlendAttachmentState cb[2] = {};
+	cb[0].colorWriteMask = cb[1].colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT
+		| VK_COLOR_COMPONENT_A_BIT;
+	cb[1].blendEnable = VK_TRUE;  // mode 2: premultiplied over the backdrop (GL_ONE, GL_ONE_MINUS_SRC_ALPHA)
+	cb[1].srcColorBlendFactor = cb[1].srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+	cb[1].dstColorBlendFactor = cb[1].dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+	cb[1].colorBlendOp = cb[1].alphaBlendOp = VK_BLEND_OP_ADD;
+	VkPipelineColorBlendStateCreateInfo cbs[2] = { { VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO },
+		{ VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO } };
+	for ( int k = 0; k < 2; k++ ) {
+		cbs[k].attachmentCount = 1;
+		cbs[k].pAttachments = &cb[k];
+	}
+	const VkDynamicState dyn[2] = { VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR };
+	VkPipelineDynamicStateCreateInfo dy { VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO };
+	dy.dynamicStateCount = 2;
+	dy.pDynamicStates = dyn;
+	VkGraphicsPipelineCreateInfo gp[3] = {};
+	for ( int k = 0; k < 3; k++ ) {
+		gp[k].sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+		gp[k].stageCount = 2;
+		gp[k].pStages = st;
+		gp[k].pVertexInputState = &vi;
+		gp[k].pInputAssemblyState = &ia;
+		gp[k].pViewportState = &vps;
+		gp[k].pRasterizationState = &rs;
+		gp[k].pMultisampleState = &ms;
+		gp[k].pDepthStencilState = &dss[k];
+		gp[k].pColorBlendState = &cbs[k == 2 ? 1 : 0];
+		gp[k].pDynamicState = &dy;
+		gp[k].layout = T.layout;
+		gp[k].renderPass = T.pass;
+	}
+	if ( v.vkCreateGraphicsPipelines( v.dev, T.cache, 3, gp, nullptr, T.pipe ) != VK_SUCCESS ) {
+		why = "vkCreateGraphicsPipelines (the tone pass, " + std::to_string( samples ) + " samples) failed";
+		return false;
+	}
+	T.pipeSamples = samples;
+	T.pipelines = 3;
+	T.buildMs = nowMs() - t0;
+	toneCacheSave();
+	return true;
+}
+
+// the framebuffers over the view ring's slots (made again when the ring is)
+bool toneFbs( std::string & why )
+{
+	Vk & v = vk();
+	Tone & T = tone();
+	View & V = view();
+	if ( T.fb[0] && T.fbGen == V.gen )
+		return true;
+	toneFbsDrop();
+	for ( int k = 0; k < kViewSlots; k++ ) {
+		T.vColor[k] = imageView( V.slot[k].color, VK_IMAGE_VIEW_TYPE_2D, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_ASPECT_COLOR_BIT );
+		T.vDs[k] = imageView( V.slot[k].ds, VK_IMAGE_VIEW_TYPE_2D, VK_FORMAT_D24_UNORM_S8_UINT,
+			VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT );
+		const VkImageView att[2] = { T.vColor[k], T.vDs[k] };
+		VkFramebufferCreateInfo fci { VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO };
+		fci.renderPass = T.pass;
+		fci.attachmentCount = 2;
+		fci.pAttachments = att;
+		fci.width = std::uint32_t( V.w );
+		fci.height = std::uint32_t( V.h );
+		fci.layers = 1;
+		if ( !att[0] || !att[1] || v.vkCreateFramebuffer( v.dev, &fci, nullptr, &T.fb[k] ) != VK_SUCCESS ) {
+			toneFbsDrop();
+			why = "the tone pass's framebuffer over a view failed";
+			return false;
+		}
+	}
+	T.fbGen = V.gen;
+	return true;
+}
+
+// the worker: record the LUT's copy (when new) and the pass into this frame's view slot, submit between A and B
+bool toneWork( std::string & why )
+{
+	Vk & v = vk();
+	Tone & T = tone();
+	View & V = view();
+	if ( T.slot < 0 || !T.fb[T.slot] ) {
+		why = "no view slot to draw into";
+		return false;
+	}
+	v.vkResetFences( v.dev, 1, &T.fence );
+	v.vkResetCommandBuffer( T.cmd, 0 );
+	VkCommandBufferBeginInfo bi { VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
+	bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+	v.vkBeginCommandBuffer( T.cmd, &bi );
+	if ( T.lutCopy ) {
+		VkImageMemoryBarrier b { VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER };
+		b.oldLayout = b.newLayout = VK_IMAGE_LAYOUT_GENERAL;
+		b.srcAccessMask = VK_ACCESS_SHADER_READ_BIT;
+		b.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+		b.srcQueueFamilyIndex = b.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+		b.image = T.lut;
+		b.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
+		v.vkCmdPipelineBarrier( T.cmd, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1, &b );
+		VkBufferImageCopy c {};
+		c.imageSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
+		c.imageExtent = { 16, 16, 16 };
+		v.vkCmdCopyBufferToImage( T.cmd, T.staging, T.lut, VK_IMAGE_LAYOUT_GENERAL, 1, &c );
+		b.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+		b.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+		v.vkCmdPipelineBarrier( T.cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0, nullptr, 0, nullptr, 1, &b );
+		T.lutCopy = false;
+	}
+	VkRenderPassBeginInfo rbi { VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO };
+	rbi.renderPass = T.pass;
+	rbi.framebuffer = T.fb[T.slot];
+	rbi.renderArea = { { 0, 0 }, { std::uint32_t( V.w ), std::uint32_t( V.h ) } };
+	v.vkCmdBeginRenderPass( T.cmd, &rbi, VK_SUBPASS_CONTENTS_INLINE );
+	// GL's window rows are the image's rows (no flip: GL's row 0 and Vulkan's row 0 are the same texels)
+	const VkViewport vp { float( T.vp[0] ), float( T.vp[1] ), float( T.vp[2] ), float( T.vp[3] ), 0.0f, 1.0f };
+	const VkRect2D sc { { T.vp[0], T.vp[1] }, { std::uint32_t( T.vp[2] ), std::uint32_t( T.vp[3] ) } };
+	v.vkCmdSetViewport( T.cmd, 0, 1, &vp );
+	v.vkCmdSetScissor( T.cmd, 0, 1, &sc );
+	v.vkCmdBindDescriptorSets( T.cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, T.layout, 0, 1, &T.set, 0, nullptr );
+	auto draw = [&]( int p, int mode, int test, int ref ) {
+		WwVkPresent::ToneJob j = T.job;
+		j.ints[0] = ( j.ints[0] & ~( ( 3 << 16 ) | ( 3 << 20 ) | ( 3 << 24 ) ) ) | ( mode << 16 ) | ( test << 20 ) | ( ref << 24 );
+		v.vkCmdBindPipeline( T.cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, T.pipe[p] );
+		v.vkCmdPushConstants( T.cmd, T.layout, VK_SHADER_STAGE_FRAGMENT_BIT, 0, std::uint32_t( sizeof( j ) ), &j );
+		v.vkCmdDraw( T.cmd, 3, 1, 0, 0 );
+	};
+	// cellhdr.cpp's quads: mode 0 where an opaque draw reached (GREATER), mode 2 over the far plane, mode 1 stencil 2
+	if ( T.splitSky ) {
+		draw( 1, 0, 1, 1 );
+		draw( 2, 2, 1, 1 );
+	} else {
+		draw( 0, 0, T.sorted ? 1 : 0, 1 );
+	}
+	if ( T.sorted )
+		draw( 0, 1, 1, 2 );
+	v.vkCmdEndRenderPass( T.cmd );
+	if ( v.vkEndCommandBuffer( T.cmd ) != VK_SUCCESS ) {
+		why = "vkEndCommandBuffer (the tone pass) failed";
+		return false;
+	}
+	const VkPipelineStageFlags waitAt = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
+	VkSubmitInfo si { VK_STRUCTURE_TYPE_SUBMIT_INFO };
+	si.waitSemaphoreCount = 1;
+	si.pWaitSemaphores = &T.glDone;
+	si.pWaitDstStageMask = &waitAt;
+	si.commandBufferCount = 1;
+	si.pCommandBuffers = &T.cmd;
+	si.signalSemaphoreCount = 1;
+	si.pSignalSemaphores = &T.vkDone;
+	const VkResult r = v.vkQueueSubmit( v.queue, 1, &si, T.fence );
+	if ( r != VK_SUCCESS ) {
+		why = "vkQueueSubmit (the tone pass) returned " + std::to_string( int( r ) );
+		return false;
+	}
 	return true;
 }
 
@@ -1356,6 +2057,15 @@ void shutdown()
 		vk().vkDeviceWaitIdle( vk().dev );
 		dropView( gl().ok && view().glCtx == gl().ctx );
 	}
+	// round 11: the tone frame and the crossing's semaphores (GL's names); the pipelines and the LUT stay with the device
+	Tone & T = tone();
+	if ( T.color || T.colorTex || T.glDone ) {
+		drain();
+		vk().vkDeviceWaitIdle( vk().dev );
+		T.pending = false;
+		toneFrameFree( gl().ok && T.glCtx == gl().ctx );
+		toneSemsDrop( gl().ok && T.semCtx == gl().ctx );
+	}
 }
 
 bool viewBegin( int w, int h, int samples, GlProc gp, std::string & why )
@@ -1454,6 +2164,273 @@ void viewDrop()
 	drain();
 	vk().vkDeviceWaitIdle( vk().dev );
 	dropView( gl().ok && V.glCtx == gl().ctx );
+}
+
+bool toneFrame( int w, int h, int samples, unsigned & color, unsigned & ds, std::string & why )
+{
+	Tone & T = tone();
+	Gl & g = gl();
+	Vk & v = vk();
+	color = ds = 0;
+	if ( !v.ok || !g.ok || g.ctx != reinterpret_cast<void *>( wglGetCurrentContext() ) ) {
+		why = "the present device or GL's entry points are not ready (the view is not on Vulkan in this context)";
+		return false;
+	}
+	if ( T.broken ) {
+		why = T.brokenWhy;
+		return false;
+	}
+	samples = std::max( samples, 1 );
+	if ( samples < 2 ) {
+		why = "1 sample: the pass reads the frame as Texture2DMS (a multisample image only)";
+		return false;
+	}
+	if ( samples > 1 && !g.texStorageMem2DMultisample ) {
+		why = "no glTexStorageMem2DMultisampleEXT";
+		return false;
+	}
+	drain();  // the first fills below are submits; the queue is the worker's
+	v.vkDeviceWaitIdle( v.dev );
+	T.pending = false;
+	toneFrameFree( T.glCtx == g.ctx );
+	if ( !toneStatic( why ) || !toneSems( why ) )
+		return false;
+	T.glCtx = g.ctx;
+	if ( !makeShared( T.color, T.colorMem, T.colorTex, T.colorObj, VK_FORMAT_R16G16B16A16_SFLOAT, kRgba16f, samples, w, h, false, T.frameMb, why )
+		|| !makeShared( T.ds, T.dsMem, T.dsTex, T.dsObj, VK_FORMAT_D24_UNORM_S8_UINT, kDepth24Stencil8, samples, w, h, true, T.frameMb, why ) ) {
+		toneFrameFree( true );
+		return false;
+	}
+	// the stencil as GL's cell_hdr.frag reads it (usampler2DMS), and the pass's two views of the frame
+	GLint was = 0;
+	g.getIntegerv( kTexBinding2DMs, &was );
+	g.bindTexture( kTexture2DMs, T.dsTex );
+	g.texParameteri( kTexture2DMs, kDsTexMode, GLint( kStencilIndex ) );
+	g.bindTexture( kTexture2DMs, GLuint( was ) );
+	T.colorView = imageView( T.color, VK_IMAGE_VIEW_TYPE_2D, VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT );
+	T.stencilView = imageView( T.ds, VK_IMAGE_VIEW_TYPE_2D, VK_FORMAT_D24_UNORM_S8_UINT, VK_IMAGE_ASPECT_STENCIL_BIT );
+	const GLenum err = g.getError();
+	if ( !T.colorView || !T.stencilView || err != 0 ) {
+		why = "the tone frame's views / stencil mode failed (GL error " + std::to_string( err ) + ")";
+		toneFrameFree( true );
+		return false;
+	}
+	T.w = w;
+	T.h = h;
+	T.samples = samples;
+	T.descDirty = true;
+	color = T.colorTex;
+	ds = T.dsTex;
+	return true;
+}
+
+bool toneFrameIs( unsigned color )
+{
+	return color && tone().colorTex == color && tone().glCtx == gl().ctx;
+}
+
+void toneFrameDrop()
+{
+	Tone & T = tone();
+	if ( !T.color && !T.colorTex )
+		return;
+	drain();
+	vk().vkDeviceWaitIdle( vk().dev );
+	T.pending = false;
+	toneFrameFree( gl().ok && T.glCtx == gl().ctx );
+}
+
+bool toneRun( const ToneRun & t, std::string & why )
+{
+	Tone & T = tone();
+	View & V = view();
+	Gl & g = gl();
+	Vk & v = vk();
+	const double t0 = nowMs();
+	auto refuse = [&]( const std::string & w ) {
+		why = w;
+		T.st.fails++;
+		T.st.failWhy = w;
+		return false;
+	};
+	// the pass for good off after a failed submit or build (no retry each frame); toneFrame says it too
+	auto breakOff = [&]( const std::string & w ) {
+		T.broken = true;
+		T.brokenWhy = "the tone pass broke: " + w;
+		return refuse( T.brokenWhy );
+	};
+	if ( T.broken )
+		return refuse( T.brokenWhy );
+	if ( !g.ok || !T.colorTex || T.glCtx != g.ctx || !T.made || T.semCtx != g.ctx )
+		return refuse( "no shared tone frame in this GL context" );
+	if ( V.cur < 0 || !V.fbo )
+		return refuse( "the view is not bound this frame" );
+	if ( V.samples != T.samples || T.w > V.w || T.h > V.h )
+		return refuse( "the tone frame's shape is not the view's" );
+	const std::int32_t f = t.job.ints[0];
+	if ( f & ( ( 1 << 7 ) | ( 1 << 9 ) | ( 1 << 11 ) ) )
+		return refuse( "a job flag the pass does not take (FO4CS bloom / fog bloom / backdrop: GL's)" );
+	const bool lutOn = ( f & ( 1 << 5 ) ) != 0, measureOn = ( f & ( 1 << 6 ) ) != 0;
+	if ( lutOn && !t.lut && !( T.lutHave && T.lutGen == t.lutGen ) )
+		return refuse( "the LUT is on but no LUT bytes" );
+	if ( measureOn && ( !t.measure || t.measureW < 1 || t.measureH < 1 ) )
+		return refuse( "the measure is on but no measure texture" );
+	// the last pass is done before its command buffer, set and staging are written again (the worker submitted it)
+	if ( T.pending ) {
+		v.vkWaitForFences( v.dev, 1, &T.fence, VK_TRUE, 1000000000ull );
+		T.pending = false;
+	}
+	std::string w;
+	if ( !tonePipes( V.samples, w ) || !toneFbs( w ) )
+		return breakOff( w );
+	if ( lutOn && t.lut && ( !T.lutHave || T.lutGen != t.lutGen ) ) {
+		for ( int k = 0; k < 16 * 16 * 16; k++ ) {
+			T.stagingPtr[k * 4 + 0] = t.lut[k * 3 + 0];
+			T.stagingPtr[k * 4 + 1] = t.lut[k * 3 + 1];
+			T.stagingPtr[k * 4 + 2] = t.lut[k * 3 + 2];
+			T.stagingPtr[k * 4 + 3] = 255;
+		}
+		T.lutCopy = true;
+		T.lutHave = true;
+		T.lutGen = t.lutGen;
+	}
+	if ( measureOn ) {
+		if ( !T.measureTex || T.mw != t.measureW || T.mh != t.measureH ) {
+			drain();  // makeShared's layout change is a submit
+			toneMeasureDrop( true );
+			if ( !makeShared( T.measure, T.measureMem, T.measureTex, T.measureObj, VK_FORMAT_R32G32B32A32_SFLOAT, kRgba32f, 1, t.measureW,
+					t.measureH, false, T.measureMb, w ) ) {
+				toneMeasureDrop( true );
+				return refuse( w );
+			}
+			T.measureView = imageView( T.measure, VK_IMAGE_VIEW_TYPE_2D, VK_FORMAT_R32G32B32A32_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT );
+			g.genFramebuffers( 2, T.copyFb );
+			g.bindFramebuffer( kDrawFb, T.copyFb[1] );
+			g.framebufferTexture2D( kDrawFb, kColorAttach0, kTexture2D, T.measureTex, 0 );
+			g.bindFramebuffer( kDrawFb, t.drawFb );
+			T.mw = t.measureW;
+			T.mh = t.measureH;
+			T.descDirty = true;
+		}
+		if ( T.measureSrc != t.measure ) {
+			// a new GL bloom texture: attached once, its completeness asked once (an RGB32F upload is not renderable everywhere)
+			g.bindFramebuffer( kReadFb, T.copyFb[0] );
+			g.framebufferTexture2D( kReadFb, kColorAttach0, kTexture2D, t.measure, 0 );
+			const GLenum st = g.checkFramebufferStatus( kReadFb );
+			g.bindFramebuffer( kReadFb, t.readFb );
+			if ( st != kFbComplete ) {
+				T.measureSrc = 0;
+				return refuse( "GL's measure bloom cannot be read through a framebuffer (status " + std::to_string( st ) + ")" );
+			}
+			T.measureSrc = t.measure;
+			T.measureHave = false;
+		}
+		if ( !T.measureHave || T.measureGen != t.measureGen ) {
+			// GL's bloom into the shared copy (nearest, same size; the caller turned GL's scissor off); the
+			// frame's bindings go back as the caller named them
+			g.bindFramebuffer( kReadFb, T.copyFb[0] );
+			g.bindFramebuffer( kDrawFb, T.copyFb[1] );
+			g.blitFramebuffer( 0, 0, T.mw, T.mh, 0, 0, T.mw, T.mh, kColorBit, kNearest );
+			g.bindFramebuffer( kReadFb, t.readFb );
+			g.bindFramebuffer( kDrawFb, t.drawFb );
+			T.measureHave = true;
+			T.measureGen = t.measureGen;
+		}
+	}
+	const bool measureBound = measureOn && T.measureView;
+	static bool boundMeasure = false;
+	if ( T.descDirty || boundMeasure != measureBound ) {
+		const VkImageView views[7] = { T.colorView, T.stencilView, T.dummyView, measureBound ? T.measureView : T.dummyView, T.lutView,
+			T.colorView, T.dummyView };
+		VkDescriptorImageInfo ii[8] = {};
+		VkWriteDescriptorSet wr[8] = {};
+		for ( std::uint32_t k = 0; k < 8; k++ ) {
+			ii[k].imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+			if ( k < 7 )
+				ii[k].imageView = views[k];
+			else
+				ii[k].sampler = T.sampler;
+			wr[k].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+			wr[k].dstSet = T.set;
+			wr[k].dstBinding = k;
+			wr[k].descriptorCount = 1;
+			wr[k].descriptorType = k == 7 ? VK_DESCRIPTOR_TYPE_SAMPLER : VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+			wr[k].pImageInfo = &ii[k];
+		}
+		v.vkUpdateDescriptorSets( v.dev, 8, wr, 0, nullptr );
+		T.descDirty = false;
+		boundMeasure = measureBound;
+	}
+	T.slot = V.cur;
+	if ( t.vp[2] > 0 && t.vp[3] > 0 ) {
+		for ( int k = 0; k < 4; k++ )
+			T.vp[k] = t.vp[k];
+	} else {
+		T.vp[0] = T.vp[1] = 0;
+		T.vp[2] = T.w;
+		T.vp[3] = T.h;
+	}
+	T.splitSky = t.splitSky;
+	T.sorted = t.sorted;
+	T.job = t.job;
+	// GL's frame (and the view's depth GL blitted) done -> the worker's pass -> GL's later passes on the view
+	GLuint tex[5] = { T.colorTex, T.dsTex, V.slot[V.cur].colorTex, V.slot[V.cur].dsTex, T.measureTex };
+	const GLenum lay[5] = { kLayoutGeneral, kLayoutGeneral, kLayoutGeneral, kLayoutGeneral, kLayoutGeneral };
+	const GLuint nTex = measureBound ? 5u : 4u;
+	g.signalSemaphore( T.glDoneGl, 0, nullptr, nTex, tex, lay );
+	g.flush();  // Vulkan's wait sees GL's signal only once it is flushed
+	Worker & W = wk();
+	std::uint64_t want = 0;
+	{
+		std::lock_guard<std::mutex> lk( W.m );
+		want = W.toneDone + 1;
+	}
+	Work j;
+	j.k = -1;
+	j.tone = true;
+	hand( j );
+	bool ok = false;
+	{
+		// GL may wait Vulkan's signal only once its submit is in the queue
+		std::unique_lock<std::mutex> lk( W.m );
+		W.idle.wait( lk, [&W, want]() { return W.toneDone >= want; } );
+		ok = W.toneOk;
+		w = W.toneWhy;
+	}
+	if ( !ok )
+		return breakOff( w );  // nothing signals vkDone: GL does not wait it; GL draws its quads this frame
+	g.waitSemaphore( T.vkDoneGl, 0, nullptr, nTex, tex, lay );
+	T.pending = true;
+	const double ms = nowMs() - t0;
+	T.st.runs++;
+	T.st.cpuMs += ms;
+	T.st.maxMs = std::max( T.st.maxMs, ms );
+	return true;
+}
+
+void toneOnGl( const char * why )
+{
+	Tone & T = tone();
+	T.st.gl++;
+	T.st.glWhy = why ? why : "";
+}
+
+ToneStat takeToneStat()
+{
+	Tone & T = tone();
+	ToneStat s = T.st;
+	s.mb = T.frameMb + T.measureMb + T.fixedMb;
+	s.pipelines = T.pipelines;
+	s.buildMs = T.buildMs;
+	if ( T.broken && s.failWhy.empty() )
+		s.failWhy = T.brokenWhy;
+	T.st = ToneStat();
+	return s;
+}
+
+void toneCachePath( const std::string & path )
+{
+	tone().cachePath = path;
 }
 
 bool present( void * hwnd, int w, int h, bool vsync, GlProc gp, std::string & why )
@@ -1821,7 +2798,9 @@ bool vkPart( int k, int w, int h, int vs, std::string & why, bool & rebuild, WwV
 #include <QOpenGLFunctions>
 #include <QOpenGLPaintDevice>
 #include <QOpenGLWindow>
+#include <QDir>
 #include <QSettings>
+#include <QStandardPaths>
 
 #include <memory>
 
@@ -1902,6 +2881,23 @@ QPaintDevice * painterTarget( QOpenGLWindow * w )
 	}
 	dev->setDevicePixelRatio( w->devicePixelRatio() );
 	return dev.get();
+}
+
+bool toneWanted()
+{
+	static bool pathSet = false;
+	if ( !pathSet ) {  // before the first toneFrame (the pipeline cache is read once, at the device-time make)
+		pathSet = true;
+		QString dir = QStandardPaths::writableLocation( QStandardPaths::CacheLocation );
+		if ( dir.isEmpty() )
+			dir = QDir::tempPath();
+		QDir().mkpath( dir );
+		toneCachePath( ( dir + QStringLiteral( "/vkpresent_tone" ) + wwHarnessSettingsSuffix() + QStringLiteral( ".bin" ) ).toLocal8Bit().toStdString() );
+	}
+	if ( wwEnvInt( "WW_VKVIEW_TONE_RED" ) == 1 )
+		return false;
+	QString off;
+	return viewWanted( off ) && viewFbo() != 0;
 }
 
 bool frame( QOpenGLWindow * w, const std::function<void()> & paint )
@@ -2031,16 +3027,36 @@ bool frame( QOpenGLWindow * w, const std::function<void()> & paint )
 			/* round 10: which route carried the frame, and what still runs on GL before it. The view on Vulkan is the
 			 * step every later move stands on: the tone map's backdrop and depth are its images on the present device */
 			const ViewStat vs = takeViewStat();
+			/* round 11: the stages on the present device and the ones still on GL; each stage's red puts it back on GL
+			 * (stage 1, the tone map: WW_VKVIEW_TONE_RED=1) */
+			const ToneStat ts = takeToneStat();
+			QString tone;
+			if ( ts.runs > 0 ) {
+				tone = QStringLiteral( "tone map on Vulkan %1 frames (a render pass of the present device into the view: %2 "
+					"pipelines built in %3 ms, %4 MB frame + measure + LUT, drawing thread %5 ms, max %6)" )
+					.arg( ts.runs ).arg( ts.pipelines ).arg( ts.buildMs, 0, 'f', 1 ).arg( ts.mb, 0, 'f', 1 )
+					.arg( ts.cpuMs / ts.runs, 0, 'f', 3 ).arg( ts.maxMs, 0, 'f', 3 );
+				if ( ts.gl > 0 )
+					tone += QStringLiteral( ", on GL %1 frames (last: %2)" ).arg( ts.gl ).arg( QString::fromStdString( ts.glWhy ) );
+				if ( ts.fails > 0 )
+					tone += QStringLiteral( ", %1 refused (last: %2)" ).arg( ts.fails ).arg( QString::fromStdString( ts.failWhy ) );
+			} else {
+				tone = QStringLiteral( "tone map on GL (%1)" )
+					.arg( wwEnvInt( "WW_VKVIEW_TONE_RED" ) == 1 ? QStringLiteral( "red WW_VKVIEW_TONE_RED=1" )
+						: ts.fails > 0 ? QString::fromStdString( ts.failWhy )
+						: ts.gl > 0 ? QString::fromStdString( ts.glWhy ) : QStringLiteral( "no HDR cell frame asked for it" ) );
+			}
 			if ( winView > 0 ) {
 				routeSaid.clear();  // one a window while it runs
 				sayRoute( QStringLiteral( "vk view, %1 of %2 frames: GL draws the view into the present device's images (%3x%4 "
 					"MS%5 RGBA8 + D24S8, %6 views, %7 MB, made in %8 ms), the worker resolves on Vulkan (no GL blit: drawing "
 					"thread present %9 ms); %10 views still read when GL wanted them (wait %11 ms); bakert hop none (the view is "
-					"made on the present device); on GL into the view: tone map (backdrop + LUT GL's), clouds in front (their "
-					"targets not shared: GL clouds in front), TAA (history + vectors GL's), lens flare, overlays + QPainter (the "
-					"overlay target is the view)" )
+					"made on the present device); %12; still on GL into the view: the FO4CS bloom's tone (mode 3) and the fog "
+					"bloom's, clouds in front (their targets not shared until VKLIGHT1 r2), P7, lens flare, TAA (history + "
+					"vectors GL's), overlays + QPainter (the overlay target is the view)" )
 					.arg( winView ).arg( winN ).arg( vs.w ).arg( vs.h ).arg( vs.samples ).arg( vs.views ).arg( vs.mb, 0, 'f', 1 )
-					.arg( vs.makeMs, 0, 'f', 1 ).arg( winSum / winN, 0, 'f', 3 ).arg( vs.busy ).arg( vs.waitMs, 0, 'f', 3 ) );
+					.arg( vs.makeMs, 0, 'f', 1 ).arg( winSum / winN, 0, 'f', 3 ).arg( vs.busy ).arg( vs.waitMs, 0, 'f', 3 )
+					.arg( tone ) );
 			} else {
 				sayRoute( QStringLiteral( "vk present (old route: GL draws its back buffer, GL blits it into the slot; view on "
 					"Vulkan off: %1)" ).arg( viewWhy ) );

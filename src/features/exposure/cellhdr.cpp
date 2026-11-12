@@ -131,6 +131,8 @@ struct HdrGpu
 	GLenum cfgFormat = 0;
 	bool vkShared = false;	// lane VKFRAME1 round 3: color and ds are Vulkan's images GL imported (WwVkPost::freeFrame drops them)
 	bool vkTried = false;	// a share was refused once at this shape: GL's own from then on
+	bool vkTone = false;	// lane VKFRAME1 round 11: color and ds are the present device's (WwVkPresent::toneFrame), the tone on Vulkan
+	bool vkToneTried = false;	// that make was refused once at this shape
 };
 
 // lane SYNC1: the state the measure and the tone quads restore, read once (sync) or each where it was (red)
@@ -1295,12 +1297,19 @@ bool wwCellHdrBegin( Scene * scene )
 	/* lane VKFRAME1 round 3 (P3): with the Vulkan bloom on, the frame's colour and depth / stencil are images Vulkan made
 	 * and GL imported, so the bloom's source reads them on Vulkan (RGBA16F only; the stencil read needs the texture). */
 	const bool wantVk = wantTex && hdrFormat().gl == GL_RGBA16F && WwVkPost::ready() && WwVkPost::chainRunning( r );
+	/* lane VKFRAME1 round 11 (stage 1): the view on Vulkan and the stage wanted (WW_VKVIEW_TONE_RED unset): the frame is
+	 * made on the present device, which tone-maps it into the view (wwCellHdrEnd); the Vulkan bloom's frame comes first */
+	const bool wantTone = !wantVk && wantTex && hdrFormat().gl == GL_RGBA16F && dsFormat == GL_DEPTH24_STENCIL8 && WwVkPresent::viewFbo()
+		&& s.prevDraw == GLint( WwVkPresent::viewFbo() ) && WwVkPresent::toneWanted();
 	if ( !g.fbo || g.w != W || g.h != H || g.samples != S || g.dsFormat != dsFormat || g.dsTex != wantTex
-		|| g.colorFormat != hdrFormat().gl || ( wantVk && !g.vkShared && !g.vkTried ) || ( g.vkShared && !wantVk ) ) {
+		|| g.colorFormat != hdrFormat().gl || ( wantVk && !g.vkShared && !g.vkTried ) || ( g.vkShared && !wantVk )
+		|| ( wantTone && !g.vkTone && !g.vkToneTried ) || ( g.vkTone && ( !wantTone || !WwVkPresent::toneFrameIs( g.color ) ) ) ) {
 		if ( !g.fbo )
 			fn->glGenFramebuffers( 1, &g.fbo );
-		if ( g.w != W || g.h != H || g.samples != S || g.dsFormat != dsFormat )
+		if ( g.w != W || g.h != H || g.samples != S || g.dsFormat != dsFormat ) {
 			g.vkTried = false;	// a new shape is worth a new try
+			g.vkToneTried = false;
+		}
 		if ( g.vkShared ) {	// Vulkan's: dropped there, not deleted here
 			WwVkPost::freeFrame( r );
 			g.color = g.ds = 0;
@@ -1308,6 +1317,40 @@ bool wwCellHdrBegin( Scene * scene )
 			if ( !wantVk ) {	// build 79: a frame Vulkan does not read is GL's own (shared only while the chain runs there)
 				g.vkTried = false;
 				qInfo().noquote() << "cell hdr: the frame back to GL's own (no Vulkan bloom chain ran in the last 2 s)";
+			}
+		}
+		if ( g.vkTone ) {	// the present device's: dropped there, not deleted here
+			WwVkPresent::toneFrameDrop();
+			g.color = g.ds = 0;
+			g.dsTex = g.vkTone = false;
+			if ( !wantTone ) {
+				g.vkToneTried = false;
+				qInfo().noquote() << "cell hdr: the frame back to GL's own (the tone stage on Vulkan is not wanted this frame)";
+			}
+		}
+		if ( wantTone && !g.vkToneTried ) {
+			std::string toneWhy;
+			unsigned tc = 0, td = 0;
+			if ( g.color )
+				fn->glDeleteTextures( 1, &g.color );
+			if ( g.ds && g.dsTex )
+				fn->glDeleteTextures( 1, &g.ds );
+			else if ( g.ds )
+				fn->glDeleteRenderbuffers( 1, &g.ds );
+			g.color = g.ds = 0;
+			g.dsTex = false;
+			g.vkTone = WwVkPresent::toneFrame( W, H, S, tc, td, toneWhy );
+			if ( g.vkTone ) {
+				g.color = tc;
+				g.ds = td;
+				g.dsTex = true;
+				g.colorFormat = GL_RGBA16F;
+				qInfo().noquote() << QStringLiteral( "cell hdr: the frame on the present device (%1x%2, %3 samples): the tone map draws on Vulkan" )
+					.arg( W ).arg( H ).arg( S );
+			} else {
+				g.vkToneTried = true;
+				qInfo().noquote() << QStringLiteral( "cell hdr: the frame stays GL's own, the tone map on GL (%1)" )
+					.arg( QString::fromStdString( toneWhy ) );
 			}
 		}
 		if ( wantVk && !g.vkTried ) {
@@ -1332,7 +1375,7 @@ bool wwCellHdrBegin( Scene * scene )
 				qInfo().noquote() << QStringLiteral( "cell hdr: the frame stays GL's own (%1)" ).arg( vkWhy );
 			}
 		}
-		if ( !g.vkShared ) {
+		if ( !g.vkShared && !g.vkTone ) {
 		if ( g.color )
 			fn->glDeleteTextures( 1, &g.color );
 		fn->glGenTextures( 1, &g.color );
@@ -1677,6 +1720,8 @@ void wwCellHdrEnd( Scene * scene )
 
 	ts.at( "tone program" );
 	PassTime::subBegin( PassTime::ToneQuads );
+	if ( g.vkTone )
+		prog->wwMirror.on = true;	// lane VKFRAME1 round 11: the Vulkan tone pass reads the values back from the mirror
 	wwCellLightsUniforms( scene );	// the imagespace's uniforms (exposure, curve, grade, LUT, bloom)
 	ts.at( "imagespace uniforms" );
 	fn->glActiveTexture( GLenum( GL_TEXTURE0 + kSrcUnit ) );
@@ -1750,6 +1795,77 @@ void wwCellHdrEnd( Scene * scene )
 			? "inside the linear frame (one tone map, one exposure: lane PERFFIX3)" : "in the view under the frame (display space)" );
 	}
 	const bool splitSky = sorted && !skyholeOld && !skyIn;
+	/* lane VKFRAME1 round 11 (stage 1): modes 0, 2 and 1 on the present device into the view (vkpresent.cpp toneRun) from
+	 * the uniforms just set; the FO4CS glow (mode 3), the fog bloom and every refusal: GL's quads, the reason in the route line */
+	bool vkDrew = false;
+	if ( g.vkTone ) {
+		const char * glWhy = nullptr;
+		if ( foBloom )
+			glWhy = "the FO4CS bloom is on (mode 3 reads the backdrop)";
+		else if ( fogBloom )
+			glWhy = "the fog bloom is on";
+		else if ( !g.dsTex )
+			glWhy = "no stencil texture";
+		else if ( stexBreak || earlyRed )
+			glWhy = "a gate switch (WW_CELL_HDR_STEX_BREAK / EARLY_RED)";
+		else if ( !WwVkPresent::viewFbo() || s.prevDraw != GLint( WwVkPresent::viewFbo() ) )
+			glWhy = "the frame is not drawn into the view";
+		if ( !glWhy ) {
+			auto toneI = [&]( const char * n ) {
+				GLint v = 0;
+				const int l = prog->uniLocation( n );
+				if ( l >= 0 && !prog->wwMirror.get( l, WwCellUni::K1i, &v, 1 ) )
+					fn->glGetUniformiv( prog->id, l, &v );
+				return v;
+			};
+			auto toneF = [&]( const char * n, float * v, int cnt ) {
+				const int l = prog->uniLocation( n );
+				if ( l >= 0 && !prog->wwMirror.get( l, WwCellUni::K4f, v, cnt ) )
+					fn->glGetUniformfv( prog->id, l, v );
+			};
+			WwVkPresent::ToneRun t;
+			toneF( "cellIsCine", t.job.cineE, 3 );
+			toneF( "cellIsE", &t.job.cineE[3], 1 );
+			toneF( "cellIsTint", t.job.tint, 4 );
+			toneF( "cellIsWbD", t.job.wbExposure, 3 );
+			toneF( "cellIsExposure", &t.job.wbExposure[3], 1 );
+			toneF( "cellIsBloomRect", t.job.bloomRect, 4 );
+			toneF( "cellIsAdapted", &t.job.fo[3], 1 );
+			int flags = toneI( "cellIsRed" ) & 15;
+			if ( toneI( "cellIsVanCurve" ) )
+				flags |= 1 << 4;
+			if ( toneI( "cellIsLutOn" ) )
+				flags |= 1 << 5;
+			if ( toneI( "cellIsBloomOn" ) )
+				flags |= 1 << 6;
+			if ( toneI( "cellOn" ) && toneI( "cellIsOn" ) )
+				flags |= 1 << 10;
+			t.job.ints[0] = flags;
+			const int dither = wwCellDitherSeed();
+			t.job.ints[1] = dither >= 0 ? 1 : 0;
+			t.job.ints[2] = std::max( dither, 0 );
+			t.splitSky = splitSky;
+			t.sorted = sorted;
+			const WwCellToneInputs & ti = wwCellToneInputs();
+			t.lut = ti.lut;
+			t.lutGen = ti.lutGen;
+			t.measure = ti.measure;
+			t.measureW = ti.mw;
+			t.measureH = ti.mh;
+			t.measureGen = ti.measureGen;
+			if ( sync )
+				std::memcpy( t.vp, sn.vp, sizeof t.vp );
+			else
+				fn->glGetIntegerv( GL_VIEWPORT, t.vp );
+			t.drawFb = GLuint( s.prevDraw );
+			t.readFb = GLuint( s.prevRead );
+			std::string runWhy;
+			vkDrew = WwVkPresent::toneRun( t, runWhy );	// a refusal is counted there with its reason
+		} else {
+			WwVkPresent::toneOnGl( glWhy );
+		}
+	}
+	if ( !vkDrew ) {
 	if ( splitSky ) {
 		fn->glEnable( GL_DEPTH_TEST );
 		fn->glDepthFunc( GL_GREATER );	// an opaque draw's depth is nearer than the quad's 1.0
@@ -1771,6 +1887,7 @@ void wwCellHdrEnd( Scene * scene )
 		prog->uni1i( "hdrMode", 1 );
 		r->drawShape( 4, 3, 6, GL_TRIANGLES, GL_UNSIGNED_SHORT, &attrs, idx );
 	}
+	}	// !vkDrew (the GL quads above keep their indent: one diff hunk)
 	/* The FO4CS glow over the pixels mode 0 did not take, added in display space as the tone-mapped difference the
 	 * bloom makes (cell_hdr.frag mode 3): only cell-lit pixels are light here. */
 	if ( foBloom && sorted ) {

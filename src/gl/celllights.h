@@ -401,6 +401,16 @@ void wwCellLightsSetOn( bool on );
 bool wwCellLightsWanted( Scene * scene );
 //! the uniforms of the renderer's CURRENT program (a no-op for a program without `cellOn`)
 void wwCellLightsUniforms( Scene * scene );
+//! VKFRAME1 round 11: what the tone pass on the present device reads besides the frame, as wwCellLightsUniforms bound it
+struct WwCellToneInputs
+{
+	const unsigned char * lut = nullptr;  //!< the grading LUT, 16^3 RGB8 (null: none drawn)
+	unsigned long long lutGen = 0;        //!< one more each upload
+	unsigned measure = 0;                 //!< the measure's bloom, a GL 2D texture (0: none drawn), mw x mh
+	int mw = 0, mh = 0;
+	unsigned long long measureGen = 0;    //!< one more each change (each call while the GPU blurs it)
+};
+const WwCellToneInputs & wwCellToneInputs();
 //! a harness probe pass (WW_CELL_LIT_PROBE or WW_CELL_FOG_PROBE) on a cell-lit scene: effects are not drawn
 bool wwCellProbePass( Scene * scene );
 //! lane FO4CELLGI1: a probe (WW_CELL_LIT_PROBE) or a Pass is asked, or WW_CELL_VIEWS_RED=1: the shaders compile the views

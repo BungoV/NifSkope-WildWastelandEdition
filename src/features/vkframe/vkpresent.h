@@ -82,6 +82,56 @@ void viewDrop();
 //! the route this process presents through, for the zone lines: "vk view" / "vk present" / "gl swap"
 const char * routeName();
 
+/* Round 11 (VKFRAME1, stage 1 of the post on the present device): the cell tone map (cell_hdr.frag modes 0, 2 and 1) as
+ * a Vulkan fragment pass into the view (res/shaders/hlsl/post/tone_view_*.hlsl over tonemap_raster.hlsl). GL draws the
+ * linear frame into images the present device made (toneFrame), blits its depth into the view as before, then toneRun:
+ * GL signals, the worker records and submits the pass (it waits GL's signal, signals back), the drawing thread waits the
+ * submit and GL waits Vulkan's signal; GL's later passes (clouds in front, P7, lens flare, TAA, overlays) draw on the
+ * result. Red WW_VKVIEW_TONE_RED=1 (or WW_VKVIEW off): GL's tone quads. */
+struct ToneJob  // 96 bytes: ToneBindingsVk.hlsli's ToneJob (push constants); ints[0]'s mode / test / ref are toneRun's
+{
+	float cineE[4] = {}, tint[4] = {}, wbExposure[4] = {}, bloomRect[4] = {}, fo[4] = {};
+	std::int32_t ints[4] = {};
+};
+static_assert( sizeof( ToneJob ) == 96, "ToneJob is the shader's push constant block" );
+/* the linear frame (RGBA16F + D24S8, samples at the view's) GL draws the cell into, made on the present device; GL names
+ * out (multisample textures; ds already in GL_STENCIL_INDEX mode). GL current. */
+bool toneFrame( int w, int h, int samples, unsigned & color, unsigned & ds, std::string & why );
+//! color is the live shared frame's colour name (a shutdown or a remake drops it)
+bool toneFrameIs( unsigned color );
+//! the shared frame goes (GL current)
+void toneFrameDrop();
+struct ToneRun
+{
+	ToneJob job;
+	bool splitSky = false;   //!< mode 0 where the depth is nearer than the far plane, mode 2 (premultiplied) where it is not
+	bool sorted = true;      //!< the stencil sorts the pixels: mode 0 takes stencil 1, mode 1 stencil 2 after it
+	const std::uint8_t * lut = nullptr;  //!< the grading LUT, 16^3 RGB8 (null: none); uploaded when lutGen changes
+	std::uint64_t lutGen = 0;
+	unsigned measure = 0;    //!< the measure's bloom, a GL 2D float texture (0: none), measureW x measureH
+	int measureW = 0, measureH = 0;
+	std::uint64_t measureGen = 0;  //!< copied into the shared image when it changes
+	int vp[4] = {};                //!< GL's viewport (x, y, w, h; w 0: the whole frame): the pass's viewport and scissor
+	unsigned drawFb = 0, readFb = 0;  //!< bound again after the measure's copy (no glGet)
+};
+/* GL current, the view (viewBegin) bound and the frame's depth already in it: the tone draws on Vulkan into the view.
+ * false: why; nothing drawn (GL draws its quads). */
+bool toneRun( const ToneRun & t, std::string & why );
+//! a frame whose tone map stayed on GL while the stage was wanted, and why (the telemetry)
+void toneOnGl( const char * why );
+struct ToneStat
+{
+	int runs = 0, gl = 0, fails = 0;   //!< since the last take: on Vulkan, on GL (toneOnGl), failed toneRun calls
+	double cpuMs = 0.0, maxMs = 0.0;   //!< the drawing thread's toneRun ms, summed and max
+	double mb = 0.0;                   //!< the shared frame + measure + LUT memory
+	std::string glWhy, failWhy;        //!< the last reasons
+	int pipelines = 0;                 //!< built for the frame's samples
+	double buildMs = 0.0;
+};
+ToneStat takeToneStat();
+//! the pipeline cache file (empty: none); the Qt part sets it before the first toneFrame
+void toneCachePath( const std::string & path );
+
 }
 
 #ifndef WW_VKPRESENT_NO_QT
@@ -97,5 +147,7 @@ QPaintDevice * painterTarget( QOpenGLWindow * w );
  * which also sizes its paint device for QPainter). true = painted (paint()) and on the screen, through the swapchain
  * or, when the present failed, GL's swap; the caller emits frameSwapped. */
 bool frame( QOpenGLWindow * w, const std::function<void()> & paint );
+//! round 11: the tone map on the present device is wanted this frame (the view on Vulkan, WW_VKVIEW_TONE_RED unset)
+bool toneWanted();
 }
 #endif
