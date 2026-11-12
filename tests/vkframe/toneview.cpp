@@ -10,6 +10,10 @@
 // with splitSky off against the split reference: must FAIL) and `TONEVIEW GATE OK|FAILED`.
 // Lane VKPOST2: `TONEVIEW MERGE <job> <output> EXACT|FAIL`: the tone pass + TAA in one crossing against two crossings,
 // and `TONEVIEW MERGE RED` (the view's resolve into cur skipped: must FAIL).
+// Lane VKBLOOM1: `TONEVIEW BLOOM <case> view|measure EXACT|BOUND|FAIL`: the Fusion Shaders bloom chain + mode 3 + the
+// quarter measure in the tone pass against GL's cellbloom.cpp chain (the tree's cell_bloom_*.frag + cell_is_measure_q.frag),
+// `TONEVIEW BLOOM RED 1|2|3` (mode 3 not drawn / measure not run / no backdrop: must FAIL), and `TONEVIEW MERGE bloom`
+// (bloom + measure + tone + TAA in one crossing against two).
 #define WW_VKPRESENT_NO_QT
 #include "../../src/features/vkframe/vkpresent.cpp"
 
@@ -85,6 +89,8 @@ struct Fns
 	void( WINAPI * enableVertexAttribArray )( GLuint ) = nullptr;
 	void( WINAPI * disableVertexAttribArray )( GLuint ) = nullptr;
 	void( WINAPI * vertexAttribPointer )( GLuint, GLint, GLenum, GLboolean, GLsizei, const void * ) = nullptr;
+	void( WINAPI * uniform2f )( GLint, GLfloat, GLfloat ) = nullptr;  // lane VKBLOOM1: the bloom chain's GL reference
+	void( WINAPI * framebufferTextureLayer )( GLenum, GLenum, GLuint, GLint, GLint ) = nullptr;
 };
 Fns f;
 
@@ -110,7 +116,8 @@ bool loadAll()
 		&& load( f.checkFramebufferStatus, "glCheckFramebufferStatus" ) && load( f.blitFramebuffer, "glBlitFramebuffer" )
 		&& load( f.enableVertexAttribArray, "glEnableVertexAttribArray" )
 		&& load( f.disableVertexAttribArray, "glDisableVertexAttribArray" )
-		&& load( f.vertexAttribPointer, "glVertexAttribPointer" );
+		&& load( f.vertexAttribPointer, "glVertexAttribPointer" ) && load( f.uniform2f, "glUniform2f" )
+		&& load( f.framebufferTextureLayer, "glFramebufferTextureLayer" );
 }
 
 std::string readFile( const std::string & p )
@@ -169,6 +176,12 @@ void u1f( GLuint p, const char * n, float v )
 	const GLint l = f.getUniformLocation( p, n );
 	if ( l >= 0 )
 		f.uniform1f( l, v );
+}
+void u2f( GLuint p, const char * n, float x, float y )
+{
+	const GLint l = f.getUniformLocation( p, n );
+	if ( l >= 0 )
+		f.uniform2f( l, x, y );
 }
 void u3f( GLuint p, const char * n, const float * v )
 {
@@ -338,27 +351,46 @@ int main( int argc, char ** argv )
 		std::printf( "TONEVIEW GATE FAILED (GL programs)\n" );
 		return 2;
 	}
+	// lane VKBLOOM1: the bloom chain's and the measure's GL programs (cellbloom.cpp's passes, cellhdr.cpp's quarter draw)
+	const std::string aoVs = readFile( dir + "/cell_ao.vert.glsl" );
+	const GLuint pSrc = program( aoVs, readFile( dir + "/cell_bloom_src.frag.glsl" ), "cell_bloom_src" );
+	const GLuint pDown = program( aoVs, readFile( dir + "/cell_bloom_down.frag.glsl" ), "cell_bloom_down" );
+	const GLuint pHold = program( aoVs, readFile( dir + "/cell_bloom_hold.frag.glsl" ), "cell_bloom_hold" );
+	const GLuint pUp = program( aoVs, readFile( dir + "/cell_bloom_up.frag.glsl" ), "cell_bloom_up" );
+	const GLuint pComb = program( aoVs, readFile( dir + "/cell_bloom_comb.frag.glsl" ), "cell_bloom_comb" );
+	const GLuint pMeas = program( aoVs, readFile( dir + "/cell_is_measure_q.frag.glsl" ), "cell_is_measure_q" );
+	if ( !pSrc || !pDown || !pHold || !pUp || !pComb || !pMeas ) {
+		std::printf( "TONEVIEW GATE FAILED (GL bloom / measure programs)\n" );
+		return 2;
+	}
 	// every sampler on a unit of its own (two sampler types on one unit refuse the draw); the read ones on fixed units
-	{
-		f.useProgram( pHdr );
+	auto units = [&]( GLuint p, bool hdr ) {
+		f.useProgram( p );
 		GLint n = 0;
-		f.getProgramiv( pHdr, kActiveUnis, &n );
+		f.getProgramiv( p, kActiveUnis, &n );
 		int next = 20;
 		for ( GLint i = 0; i < n; i++ ) {
 			char name[256] = {};
 			GLint size = 0;
 			GLenum typ = 0;
-			f.getActiveUniform( pHdr, GLuint( i ), 256, nullptr, &size, &typ, name );
+			f.getActiveUniform( p, GLuint( i ), 256, nullptr, &size, &typ, name );
 			const bool sampler = ( typ >= 0x8B5D && typ <= 0x8B62 ) || ( typ >= 0x8DC1 && typ <= 0x8DD8 ) || typ == 0x900C
 				|| typ == 0x900D || ( typ >= 0x9108 && typ <= 0x910A );
 			if ( !sampler )
 				continue;
 			std::string nm( name );
 			nm = nm.substr( 0, nm.find( '[' ) );
-			const int unit = nm == "hdrSrc" ? 8 : nm == "hdrStencil" ? 9 : nm == "cellIsBloom" ? 11 : nm == "cellIsLut" ? 12 : next++;
-			u1i( pHdr, nm.c_str(), unit );
+			int unit = nm == "hdrSrc" ? 8 : nm == "hdrStencil" ? 9 : nm == "cellIsBloom" ? 11 : nm == "cellIsLut" ? 12 : -1;
+			if ( unit < 0 && hdr )
+				unit = nm == "cellIsFoBloom" ? 13 : nm == "cellIsFoBloomComb" ? 14 : nm == "hdrBackdrop" ? 15 : -1;
+			if ( unit < 0 && !hdr )	// the chain's passes: kUnitA 8, kUnitB 9 (cellbloom.cpp)
+				unit = nm == "bloomSrc" || nm == "bloomRing" || ( p == pComb && nm == "cellIsFoBloom" ) ? 8 : nm == "bloomMip" ? 9 : -1;
+			u1i( p, nm.c_str(), unit < 0 ? next++ : unit );
 		}
-	}
+	};
+	units( pHdr, true );
+	for ( GLuint p : { pSrc, pDown, pHold, pUp, pComb, pMeas } )
+		units( p, false );
 
 	// the frame's data, per sample (column x * S + s), seeded
 	std::mt19937 rng( 29 );
@@ -511,6 +543,11 @@ int main( int argc, char ** argv )
 		return 2;
 	}
 	std::uint64_t gen = 0;
+	// lane VKBLOOM1: the bloom's job and the measure's ask the next tone passes carry (cellhdr.cpp's flags 7 and 11)
+	const WwVkPresent::ToneBloom * bloomNow = nullptr;
+	float bloomFo[3] = {};
+	bool measNow = false;
+	const int qw = std::max( 1, W >> 2 ), qh = std::max( 1, H >> 2 );
 
 	// the frame into the shared frame, its depth into the view, the backdrop; the tone pass's job for it
 	auto toneOf = [&]( const Job & j, bool splitSky, GLuint vfb ) {
@@ -534,6 +571,16 @@ int main( int argc, char ** argv )
 		t.job.bloomRect[3] = 1.0f / float( H );
 		t.job.fo[3] = j.adapted;
 		t.job.ints[0] = ( j.red & 15 ) | ( j.van ? 1 << 4 : 0 ) | ( j.lut ? 1 << 5 : 0 ) | ( j.measure ? 1 << 6 : 0 ) | ( j.cellOn ? 1 << 10 : 0 );
+		if ( bloomNow ) {
+			t.job.ints[0] |= ( 1 << 7 ) | ( 1 << 11 );
+			t.bloom = bloomNow;
+			for ( int c = 0; c < 3; c++ )
+				t.job.fo[c] = bloomFo[c];
+		}
+		if ( measNow ) {
+			t.measQw = qw;
+			t.measQh = qh;
+		}
 		t.job.ints[1] = j.dither;
 		t.job.ints[2] = j.seed;
 		t.splitSky = splitSky;
@@ -567,6 +614,16 @@ int main( int argc, char ** argv )
 		}
 		return true;
 	};
+	/* lane VKBLOOM1: GL's chain already drawn (top, combine): the tone quads read it (wwCellBloomFinal) and mode 3 adds the
+	 * glow over the backdrop (cellhdr.cpp backdropCopy: the view resolved into RGBA16F) */
+	struct GlBloom
+	{
+		GLuint top, comb;
+		float radius, weight, dispersion, ec, fogCap;
+	};
+	const GlBloom * glBloomNow = nullptr;
+	const GLuint backTex = tex2d( W, H, kRgba16f, GL_RGBA, GL_FLOAT, nullptr, false );
+	const GLuint fbBack = fbo( GL_TEXTURE_2D, backTex, 0 );
 	// cellhdr.cpp wwCellHdrEnd's GL quads (the stencil read in the shader), into GL's own target
 	auto runGl = [&]( const Job & j, std::vector<std::uint8_t> & out ) {
 		genFrame( fbFrame );
@@ -604,7 +661,18 @@ int main( int argc, char ** argv )
 		u1i( pHdr, "cellIsBloomOn", j.measure );
 		const float rect[4] = { 0.0f, 0.0f, 1.0f / float( W ), 1.0f / float( H ) };
 		u4f( pHdr, "cellIsBloomRect", rect );
-		u1i( pHdr, "cellIsFoBloomOn", 0 );
+		const GlBloom * bg = glBloomNow;
+		u1i( pHdr, "cellIsFoBloomOn", bg ? 1 : 0 );
+		u1i( pHdr, "cellIsFoBloomCombOn", bg ? 1 : 0 );
+		if ( bg ) {
+			bindUnit( 13, GL_TEXTURE_2D, bg->top );
+			bindUnit( 14, GL_TEXTURE_2D, bg->comb );
+			const float fp[4] = { bg->radius, bg->weight, bg->dispersion, 1.0f };
+			u4f( pHdr, "cellIsFoBloomParams", fp );
+			u1f( pHdr, "cellIsFoBloomEc", bg->ec );
+			u1f( pHdr, "cellIsFoBloomFogCap", bg->fogCap );
+			u2f( pHdr, "cellIsFoBloomFrame", float( W ), float( H ) );
+		}
 		u1i( pHdr, "cellFogBloomOn", 0 );
 		static const float quad[12] = { -1, -1, 0, 1, -1, 0, -1, 1, 0, 1, 1, 0 };
 		static const std::uint16_t idx[6] = { 0, 1, 2, 2, 1, 3 };
@@ -637,6 +705,28 @@ int main( int argc, char ** argv )
 		if ( j.sorted ) {
 			pick( 1, 2 );
 			draw( 1 );
+		}
+		if ( bg && j.sorted ) {	// cellhdr.cpp's mode-3 tail
+			f.bindFramebuffer( kRead, fbRef );
+			f.bindFramebuffer( kDraw, fbBack );
+			f.blitFramebuffer( 0, 0, W, H, 0, 0, W, H, GL_COLOR_BUFFER_BIT, GL_NEAREST );
+			f.bindFramebuffer( kFb, fbRef );
+			bindUnit( 15, GL_TEXTURE_2D, backTex );
+			u1i( pHdr, "hdrBackdropOn", 1 );
+			glEnable( GL_BLEND );
+			glBlendFunc( GL_ONE, GL_ONE );
+			pick( 2, 1 );
+			draw( 3 );
+			if ( j.splitSky ) {
+				pick( 1, 1 );
+				glEnable( GL_DEPTH_TEST );
+				glDepthFunc( GL_LEQUAL );
+				draw( 3 );
+				glDisable( GL_DEPTH_TEST );
+				glDepthFunc( GL_LESS );
+			}
+			glDisable( GL_BLEND );
+			u1i( pHdr, "hdrBackdropOn", 0 );
 		}
 		f.disableVertexAttribArray( 0 );
 		glDepthMask( GL_TRUE );
@@ -676,6 +766,286 @@ int main( int argc, char ** argv )
 		std::printf( "TONEVIEW RED %s (splitSky off on Vulkan: %zu bytes differ, max %d; must FAIL)\n", redFails ? "FAIL" : v.word(),
 			v.diff, v.maxd );
 		ok = ok && redFails;
+	}
+	/* lane VKBLOOM1: the Fusion Shaders bloom (source, down / hold / up, combine) and the exposure measure in the tone pass
+	 * on the present device (toneRun with the job cellbloom.cpp fills, flags 7 + 11, the measure's quarter ask) against
+	 * GL: cellbloom.cpp's passes (the tree's cell_bloom_*.frag) on the same frame, the tone quads reading the combine,
+	 * backdropCopy + mode 3, and cellhdr.cpp's quarter draw (cell_is_measure_q.frag). Bound stated before the first run:
+	 * the measure EXACT (float bits); the view BOUND (no byte off by more than 1: the backdrop is the view resolved into
+	 * RGBA16F on both, by bloom_back.hlsl on Vulkan and a blit on GL; the source is BOUND 1 fp16 ulp, tests/vkframe/srccomb.sh). Reds (must FAIL):
+	 * bloomRedTest 1 (mode 3 not drawn), 3 (mode 3 without the backdrop), 2 (the measure not dispatched; its target
+	 * cleared by GL first). */
+	struct BloomCase
+	{
+		const char * name;
+		int job;
+		float thr, knee, ec, weight, radius, dispersion, exposure;
+		int red;
+		bool hold, measure;
+	};
+	const BloomCase bcases[2] = {
+		{ "bloom_split", 0, 0.0f, 0.0f, 0.6f, 0.45f, 1.0f, 0.15f, 0.8f, 0, false, true },
+		{ "bloom_add", 1, 1.0f, 0.5f, 0.0f, 0.3f, 1.6f, 0.15f, 1.0f, 1, true, true },
+	};
+	int bdims[WwVkPresent::kToneBloomMips][2] = {};
+	int bmips = 0;
+	{	// cellbloom.cpp wwBloomPlanMips, 6 levels (the row's default)
+		int bw = W, bh = H;
+		for ( int l = 0; l < 6 && ( bw > 1 || bh > 1 ); l++ ) {
+			bw = std::max( ( bw + 1 ) / 2, 1 );
+			bh = std::max( ( bh + 1 ) / 2, 1 );
+			bdims[bmips][0] = bw;
+			bdims[bmips][1] = bh;
+			bmips++;
+		}
+	}
+	auto bloomJob = [&]( const BloomCase & c ) {
+		WwVkPresent::ToneBloom b;
+		b.mips = bmips;
+		std::memcpy( b.dims, bdims, sizeof( bdims ) );
+		b.thr = c.thr;
+		b.knee = c.knee;
+		b.red = c.red;
+		b.hold = c.hold;
+		b.holdK = 3;
+		b.holdN = 1;
+		b.radius = c.radius;
+		b.dispersion = c.dispersion;
+		for ( int l = 0; l + 1 < bmips; l++ ) {	// bandWeights' shape (bloom_gl_ref.py's)
+			b.srcW[l] = 0.55f + 0.05f * float( l );
+			b.accW[l] = l + 2 == bmips ? 0.7f : 1.0f;
+		}
+		b.exposure = c.exposure;
+		b.on = true;
+		b.impulseX = float( W / 2 );
+		b.impulseY = float( H / 2 );
+		return b;
+	};
+	// GL's chain on the frame now in the shared frame (cellbloom.cpp steps 1-3 and the combine)
+	const GLuint bMs = msTex( W, H, kRgba16f, S );
+	const GLuint fbBms = fbo( kT2DMS, bMs, fds );
+	const GLuint bSrc = tex2d( W, H, kRgba16f, GL_RGBA, GL_FLOAT, nullptr, true );
+	const GLuint fbBres = fbo( GL_TEXTURE_2D, bSrc, 0 );
+	GLuint bMip[WwVkPresent::kToneBloomMips] = {}, bUp[WwVkPresent::kToneBloomMips] = {};
+	for ( int i = 0; i < bmips; i++ ) {
+		bMip[i] = tex2d( bdims[i][0], bdims[i][1], kRgba16f, GL_RGBA, GL_FLOAT, nullptr, true );
+		bUp[i] = tex2d( bdims[i][0], bdims[i][1], kRgba16f, GL_RGBA, GL_FLOAT, nullptr, true );
+	}
+	const GLuint bComb = tex2d( W, H, kRgba32f, GL_RGBA, GL_FLOAT, nullptr, false );
+	const GLuint bMeas = tex2d( qw, qh, kRgba32f, GL_RGBA, GL_FLOAT, nullptr, false );
+	const GLuint fbMeas = fbo( GL_TEXTURE_2D, bMeas, 0 );
+	constexpr GLenum kArr = 0x8C1A;
+	GLuint bRing = 0;
+	glGenTextures( 1, &bRing );
+	glBindTexture( kArr, bRing );
+	f.texImage3D( kArr, 0, GLint( kRgba16f ), bdims[0][0], bdims[0][1], 8, 0, GL_RGBA, GL_FLOAT, nullptr );
+	glTexParameteri( kArr, GL_TEXTURE_MIN_FILTER, GL_NEAREST );
+	glTexParameteri( kArr, GL_TEXTURE_MAG_FILTER, GL_NEAREST );
+	glTexParameteri( kArr, GL_TEXTURE_WRAP_S, kClamp );
+	glTexParameteri( kArr, GL_TEXTURE_WRAP_T, kClamp );
+	glBindTexture( kArr, 0 );
+	GLuint fbChain = 0;
+	f.genFramebuffers( 1, &fbChain );
+	static const float bQuad[12] = { -1, -1, 0, 1, -1, 0, -1, 1, 0, 1, 1, 0 };
+	static const std::uint16_t bIdx[6] = { 0, 1, 2, 2, 1, 3 };
+	auto quadDraw = [&]() {
+		f.enableVertexAttribArray( 0 );
+		f.vertexAttribPointer( 0, 3, GL_FLOAT, GL_FALSE, 0, bQuad );
+		glDrawElements( GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, bIdx );
+		f.disableVertexAttribArray( 0 );
+	};
+	auto chainTarget = [&]( GLuint t, int layer, int w, int h ) {
+		f.bindFramebuffer( kFb, fbChain );
+		if ( layer >= 0 )
+			f.framebufferTextureLayer( kFb, kCol0, t, 0, layer );
+		else
+			f.framebufferTexture2D( kFb, kCol0, GL_TEXTURE_2D, t, 0 );
+		glViewport( 0, 0, w, h );
+	};
+	auto chainGl = [&]( const BloomCase & c, const WwVkPresent::ToneBloom & b, GlBloom & out ) {
+		glDisable( GL_DEPTH_TEST );
+		glDepthMask( GL_FALSE );
+		glDisable( GL_BLEND );
+		glDisable( GL_SCISSOR_TEST );
+		// 1. the source: the cell-lit samples (stencil & 3 == 1), exposed, per sample; resolved
+		f.bindFramebuffer( kFb, fbBms );
+		glViewport( 0, 0, W, H );
+		glClearColor( 0, 0, 0, 0 );
+		glClear( GL_COLOR_BUFFER_BIT );
+		glEnable( GL_STENCIL_TEST );
+		glStencilMask( 0 );
+		glStencilOp( GL_KEEP, GL_KEEP, GL_KEEP );
+		glStencilFunc( GL_EQUAL, 1, 0x03 );
+		f.useProgram( pSrc );
+		bindUnit( 8, kT2DMS, fc );
+		const float imp[3] = { b.impulseX, b.impulseY, 0.0f };
+		u3f( pSrc, "bloomImpulse", imp );
+		u1i( pSrc, "cellOn", 1 );
+		u1i( pSrc, "cellIsOn", 1 );
+		u1i( pSrc, "cellIsRed", 0 );
+		u1f( pSrc, "cellIsExposure", c.exposure );
+		quadDraw();
+		glDisable( GL_STENCIL_TEST );
+		glStencilMask( 0xFF );
+		f.bindFramebuffer( kRead, fbBms );
+		f.bindFramebuffer( kDraw, fbBres );
+		f.blitFramebuffer( 0, 0, W, H, 0, 0, W, H, GL_COLOR_BUFFER_BIT, GL_NEAREST );
+		// 2. down (level 0 into the ring's layer k and the hold's mean into mip 0 when held)
+		for ( int i = 0; i < bmips; i++ ) {
+			if ( i == 0 && b.hold )
+				chainTarget( bRing, b.holdK, bdims[0][0], bdims[0][1] );
+			else
+				chainTarget( bMip[i], -1, bdims[i][0], bdims[i][1] );
+			f.useProgram( pDown );
+			bindUnit( 8, GL_TEXTURE_2D, i == 0 ? bSrc : bMip[i - 1] );
+			u2f( pDown, "bloomDst", float( bdims[i][0] ), float( bdims[i][1] ) );
+			const float dp[4] = { b.thr, b.knee, i == 0 ? 1.0f : 0.0f, 1.0f };
+			u4f( pDown, "bloomParams", dp );
+			u1i( pDown, "bloomRed", b.red );
+			quadDraw();
+			if ( i == 0 && b.hold ) {
+				chainTarget( bMip[0], -1, bdims[0][0], bdims[0][1] );
+				f.useProgram( pHold );
+				bindUnit( 8, kArr, bRing );
+				u1i( pHold, "bloomHoldK", b.holdK );
+				u1i( pHold, "bloomHoldN", b.holdN );
+				quadDraw();
+				bindUnit( 8, kArr, 0 );
+			}
+		}
+		// 3. up, from the deepest mip to level 0
+		GLuint acc = bMip[bmips - 1];
+		for ( int offset = bmips - 1; offset > 0; offset-- ) {
+			const int level = offset - 1;
+			chainTarget( bUp[level], -1, bdims[level][0], bdims[level][1] );
+			f.useProgram( pUp );
+			bindUnit( 8, GL_TEXTURE_2D, bMip[level] );
+			bindUnit( 9, GL_TEXTURE_2D, acc );
+			u2f( pUp, "bloomDst", float( bdims[level][0] ), float( bdims[level][1] ) );
+			const float upp[4] = { b.radius, b.srcW[level], b.accW[level], b.dispersion };
+			u4f( pUp, "bloomParams", upp );
+			quadDraw();
+			acc = bUp[level];
+		}
+		// the combine once per pixel (cell_bloom_comb.frag, lod 0), RGBA32F
+		chainTarget( bComb, -1, W, H );
+		f.useProgram( pComb );
+		bindUnit( 8, GL_TEXTURE_2D, acc );
+		const float cp[4] = { b.radius, c.weight, b.dispersion, 1.0f };
+		u4f( pComb, "cellIsFoBloomParams", cp );
+		u2f( pComb, "cellIsFoBloomFrame", float( W ), float( H ) );
+		quadDraw();
+		bindUnit( 8, GL_TEXTURE_2D, 0 );
+		bindUnit( 9, GL_TEXTURE_2D, 0 );
+		glDepthMask( GL_TRUE );
+		out = GlBloom { acc, bComb, b.radius, c.weight, b.dispersion, c.ec, 2.0f };
+		return glGetError() == GL_NO_ERROR;
+	};
+	// cellhdr.cpp's quarter draw of the measure on the frame now in the shared frame
+	auto measureGl = [&]( std::vector<std::uint8_t> & out ) {
+		f.bindFramebuffer( kFb, fbMeas );
+		glViewport( 0, 0, qw, qh );
+		glDisable( GL_DEPTH_TEST );
+		glDisable( GL_STENCIL_TEST );
+		glDisable( GL_BLEND );
+		f.useProgram( pMeas );
+		bindUnit( 8, kT2DMS, fc );
+		bindUnit( 9, kT2DMS, fds );
+		u1i( pMeas, "hdrSamples", S );
+		quadDraw();
+		out.assign( size_t( qw ) * qh * 16, 0 );
+		glReadPixels( 0, 0, qw, qh, GL_RGBA, GL_FLOAT, out.data() );
+		return glGetError() == GL_NO_ERROR;
+	};
+	// the measure the tone pass read back (toneMeasureTake, as cellhdr.cpp's next frame takes it)
+	auto measureTake = [&]( std::vector<std::uint8_t> & out ) {
+		const float * px = nullptr;
+		int tqw = 0, tqh = 0;
+		unsigned ttex = 0;
+		int took = -1;
+		for ( int k = 0; k < 4000 && took < 0; k++ ) {
+			took = WwVkPresent::toneMeasureTake( px, tqw, tqh, ttex );
+			if ( took < 0 )
+				Sleep( 1 );
+		}
+		if ( took <= 0 || !px || tqw != qw || tqh != qh )
+			return false;
+		out.assign( reinterpret_cast<const std::uint8_t *>( px ), reinterpret_cast<const std::uint8_t *>( px ) + size_t( qw ) * qh * 16 );
+		return true;
+	};
+	std::vector<std::uint8_t> bloomRefView, bloomRefMeas;
+	WwVkPresent::ToneBloom bloomRefJob;
+	Job bloomRefTone {};
+	{
+		for ( const BloomCase & c : bcases ) {
+			Job j = jobs[c.job];
+			j.measure = 0;	// the vanilla bloom stands down while this one replaces it
+			const WwVkPresent::ToneBloom b = bloomJob( c );
+			// GL: the frame, the chain, the measure, then the tone quads (runGl draws the frame again: the same bits)
+			std::vector<std::uint8_t> ref, refMeas, vk, vkMeas;
+			genFrame( fbFrame );
+			GlBloom gb {};
+			const bool glChain = chainGl( c, b, gb ) && measureGl( refMeas );
+			glBloomNow = &gb;
+			const bool glTone = glChain && runGl( j, ref );
+			glBloomNow = nullptr;
+			// Vulkan: the same frame, everything in the tone pass
+			bloomNow = &b;
+			bloomFo[0] = c.weight;
+			bloomFo[1] = c.ec;
+			bloomFo[2] = 2.0f;
+			measNow = c.measure;
+			const bool vkRan = runVk( j, j.splitSky, vk ) && ( !c.measure || measureTake( vkMeas ) );
+			bloomNow = nullptr;
+			measNow = false;
+			if ( !glChain || !glTone || !vkRan ) {
+				std::printf( "TONEVIEW BLOOM %s FAIL (a run failed: GL chain %d, GL tone %d, Vulkan %d)\n", c.name, int( glChain ),
+					int( glTone ), int( vkRan ) );
+				ok = false;
+				continue;
+			}
+			const Verdict v = compare( vk, ref ), m = compare( vkMeas, refMeas );
+			std::printf( "TONEVIEW BLOOM %s view %s (%zu of %zu bytes differ, max %d; splitSky %d, hold %d, ec %.2f)\n", c.name, v.word(),
+				v.diff, v.total, v.maxd, int( j.splitSky ), int( c.hold ), double( c.ec ) );
+			std::printf( "TONEVIEW BLOOM %s measure %s (%zu of %zu bytes differ)\n", c.name, m.diff == 0 && m.total > 0 ? "EXACT" : "FAIL",
+				m.diff, m.total );
+			ok = ok && v.ok() && m.diff == 0 && m.total > 0;
+			if ( &c == &bcases[0] ) {
+				bloomRefView = ref;
+				bloomRefMeas = refMeas;
+				bloomRefJob = b;
+				bloomRefTone = j;
+				bloomRefTone.name = "bloom";
+			}
+		}
+		// the reds, on the first case
+		const BloomCase & c = bcases[0];
+		for ( int red : { 1, 3, 2 } ) {
+			if ( red == 2 ) {	// the measure's target cleared (GL, before the pass): a skipped dispatch reads zeros
+				if ( !fbo( GL_TEXTURE_2D, GLuint( tone().bloom.meas.tex ), 0 ) )
+					ok = false;
+				glViewport( 0, 0, qw, qh );
+				glClearColor( 0, 0, 0, 0 );
+				glClear( GL_COLOR_BUFFER_BIT );
+				f.bindFramebuffer( kFb, 0 );
+			}
+			std::vector<std::uint8_t> vk, vkMeas;
+			bloomNow = &bloomRefJob;
+			bloomFo[0] = c.weight;
+			bloomFo[1] = c.ec;
+			bloomFo[2] = 2.0f;
+			measNow = true;
+			bloomRedTest = red;
+			const bool ran = runVk( bloomRefTone, bloomRefTone.splitSky, vk ) && measureTake( vkMeas );
+			bloomRedTest = 0;
+			bloomNow = nullptr;
+			measNow = false;
+			const Verdict v = red == 2 ? compare( vkMeas, bloomRefMeas ) : compare( vk, bloomRefView );
+			const bool redFails = !ran || ( red == 2 ? v.diff > 0 : !v.ok() );
+			std::printf( "TONEVIEW BLOOM RED %d %s (%s: %zu bytes differ, max %d; must FAIL)\n", red, redFails ? "FAIL" : v.word(),
+				red == 1 ? "mode 3 not drawn" : red == 3 ? "mode 3 without the backdrop" : "the measure not dispatched", v.diff, v.maxd );
+			ok = ok && redFails;
+		}
 	}
 	/* lane VKPOST2: the tone pass and the TAA in ONE crossing (toneRun defers, taaRun colorFromView: Vulkan resolves the
 	 * view into cur) against the two crossings (toneRun alone, GL's colour blit into cur as gametaa.cpp does, taaRun).
@@ -811,12 +1181,30 @@ int main( int argc, char ** argv )
 			const char * outNames[6] = { "cur", "vectors", "history", "lock", "picture", "view" };
 			size_t mergedBytes = 0;
 			std::vector<std::uint8_t> twoRef[6];
-			for ( const Job * jp : { &jobs[0], &jobs[2] } ) {
-				std::vector<std::uint8_t> two[6], one[6];
-				if ( !route( *jp, false, 0, two ) || !route( *jp, true, 0, one ) ) {
+			// lane VKBLOOM1: + the default frame: the bloom and the measure in the tone pass, all of it in the TAA's crossing
+			const Job * const mergeJobs[3] = { &jobs[0], &jobs[2], &bloomRefTone };
+			for ( const Job * jp : mergeJobs ) {
+				const bool withBloom = jp == &bloomRefTone;
+				std::vector<std::uint8_t> two[6], one[6], twoMeas, oneMeas;
+				bloomNow = withBloom ? &bloomRefJob : nullptr;
+				bloomFo[0] = bcases[0].weight;
+				bloomFo[1] = bcases[0].ec;
+				bloomFo[2] = 2.0f;
+				measNow = withBloom;
+				const bool ran = route( *jp, false, 0, two ) && ( !withBloom || measureTake( twoMeas ) ) && route( *jp, true, 0, one )
+					&& ( !withBloom || measureTake( oneMeas ) );
+				bloomNow = nullptr;
+				measNow = false;
+				if ( !ran ) {
 					std::printf( "TONEVIEW MERGE %s FAIL (a route did not run)\n", jp->name );
 					ok = false;
 					continue;
+				}
+				if ( withBloom ) {
+					const Verdict vm = compare( oneMeas, twoMeas ), vg = compare( oneMeas, bloomRefMeas );
+					std::printf( "TONEVIEW MERGE bloom measure %s (one crossing vs two: %zu of %zu bytes differ; vs GL %zu)\n",
+						vm.diff == 0 && vg.diff == 0 && vm.total > 0 ? "EXACT" : "FAIL", vm.diff, vm.total, vg.diff );
+					ok = ok && vm.diff == 0 && vg.diff == 0 && vm.total > 0;
 				}
 				for ( int k = 0; k < 6; k++ ) {
 					const Verdict v = compare( one[k], two[k] );
@@ -842,7 +1230,7 @@ int main( int argc, char ** argv )
 			const WwVkPresent::TaaStat ts = WwVkPresent::takeTaaStat();
 			std::printf( "TONEVIEW MERGE stat: %d TAA runs, %d in one crossing with the tone pass, %d failed (%s); %zu bytes compared\n",
 				ts.runs, ts.merged, ts.fails, ts.failWhy.c_str(), mergedBytes );
-			ok = ok && ts.merged == 3 && mergedBytes > 0;
+			ok = ok && ts.merged == 4 && mergedBytes > 0;	// lane VKBLOOM1: split, unsorted, the bloom frame, the red
 		}
 		f.bindFramebuffer( kFb, 0 );
 		for ( std::uintptr_t k = 0; k < 8; k++ )

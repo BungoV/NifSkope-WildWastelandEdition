@@ -1,3 +1,20 @@
+## VKBLOOM1 (2026-11-12): the Fusion Shaders bloom and the exposure measure join the tone pass on Vulkan (WW_VKVIEW=1)
+
+Changed, not built, not checked live. Offline: tests/vkframe/toneview.sh gained a BLOOM arm (GL's own bloom chain and
+quarter measure as the reference) and a bloom job in the merge arm: measures EXACT, views BOUND (max 1 byte), the three
+reds FAIL, merge all EXACT. present / taaview / skyview / post2 / spvsync / hlsl_check OK.
+
+- With the view on Vulkan, the default bloom (Fusion Shaders, mode 3) no longer sends the tone map back to GL: its chain
+  (source, down, hold, up, combine), the glow over the backdrop and the exposure measure run inside the tone pass, so
+  bloom + measure + tone + TAA are one crossing a frame on default settings.
+- The measure is read back a frame late, as GL's is; its blur is drawn from the same values.
+- Red WW_VKVIEW_BLOOM_RED=1: the bloom on GL as before (and the tone map with it). The fog bloom still keeps the tone map
+  on GL.
+- Log and comment text says "Fusion Shaders" where it said FO4CS.
+- The backdrop under the glow is the view's samples averaged and rounded to half float (bloom_back.hlsl), as GL's blit
+  into RGBA16F keeps it. An RGBA8 resolve rounded the mean to 8 bits, and the vanilla curve's shoulder turned that into
+  up to 199 levels at edges (the gate's first run failed on it).
+
 ## VKPOST2 (2026-11-12): the tone map and the temporal AA share one GL -> Vulkan crossing (WW_VKVIEW=1)
 
 Changed, not built, not checked live. Offline: tests/vkframe/toneview.sh merge arm (one crossing vs two: cur, vectors,

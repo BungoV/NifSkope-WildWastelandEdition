@@ -21,6 +21,13 @@
 #include "features/vkframe/taa_view_mv_cs.spv.h"  // lane VKSHARE1: the Modern temporal AA on the view
 #include "features/vkframe/taa_view_resolve_cs.spv.h"
 #include "features/vkframe/taa_view_rcas_ps.spv.h"
+#include "features/vkframe/bloom_down.spv.h"  // lane VKBLOOM1: the Fusion Shaders bloom and the measure in the tone pass
+#include "features/vkframe/bloom_hold.spv.h"
+#include "features/vkframe/bloom_up.spv.h"
+#include "features/vkframe/bloom_src.spv.h"
+#include "features/vkframe/bloom_comb.spv.h"
+#include "features/vkframe/bloom_back.spv.h"
+#include "features/vkframe/measure_q.spv.h"
 #include "features/vkframe/sky_view_ps.spv.h"  // lane VKSKY1: the cell sky on the tone frame
 
 #include <algorithm>
@@ -183,7 +190,7 @@ struct Vk
 	VKP( vkCreateCommandPool ); VKP( vkAllocateCommandBuffers ); VKP( vkFreeCommandBuffers ); VKP( vkBeginCommandBuffer );
 	VKP( vkEndCommandBuffer ); VKP( vkResetCommandBuffer ); VKP( vkCmdPipelineBarrier ); VKP( vkCmdBlitImage );
 	VKP( vkCreateBuffer ); VKP( vkDestroyBuffer ); VKP( vkGetBufferMemoryRequirements ); VKP( vkBindBufferMemory );
-	VKP( vkMapMemory ); VKP( vkUnmapMemory ); VKP( vkCmdCopyImageToBuffer ); VKP( vkCmdResolveImage );
+	VKP( vkMapMemory ); VKP( vkUnmapMemory ); VKP( vkCmdCopyImageToBuffer ); VKP( vkCmdResolveImage ); VKP( vkCmdCopyImage );
 	// round 11: the tone pass on the view (a render pass of the present device)
 	bool sampleShading = false;  // the device feature SV_SampleIndex needs (enabled when offered)
 	VKP( vkGetPhysicalDeviceFeatures );
@@ -453,7 +460,7 @@ bool makeDevice( std::string & why )
 	LD( vkCreateCommandPool ); LD( vkAllocateCommandBuffers ); LD( vkFreeCommandBuffers ); LD( vkBeginCommandBuffer );
 	LD( vkEndCommandBuffer ); LD( vkResetCommandBuffer ); LD( vkCmdPipelineBarrier ); LD( vkCmdBlitImage );
 	LD( vkCreateBuffer ); LD( vkDestroyBuffer ); LD( vkGetBufferMemoryRequirements ); LD( vkBindBufferMemory );
-	LD( vkMapMemory ); LD( vkUnmapMemory ); LD( vkCmdCopyImageToBuffer ); LD( vkCmdResolveImage );
+	LD( vkMapMemory ); LD( vkUnmapMemory ); LD( vkCmdCopyImageToBuffer ); LD( vkCmdResolveImage ); LD( vkCmdCopyImage );
 	LD( vkCreateImageView ); LD( vkDestroyImageView ); LD( vkCreateSampler ); LD( vkDestroySampler );
 	LD( vkCreateDescriptorSetLayout ); LD( vkDestroyDescriptorSetLayout ); LD( vkCreateDescriptorPool );
 	LD( vkDestroyDescriptorPool ); LD( vkAllocateDescriptorSets ); LD( vkUpdateDescriptorSets );
@@ -1342,7 +1349,58 @@ bool makeView( int w, int h, int samples, std::string & why )
  * view's samples). The crossing: GL signals A (the frame, the view slot, the measure), the worker's submit waits A and
  * signals B, GL waits B before its next pass on the view; the drawing thread waits the worker's submit first (GL may
  * wait a binary semaphore only after its signal is submitted). The LUT goes up from the CPU bytes GL uploads (16^3,
- * 16 KB), not through a GL import; the FO4CS bloom (mode 3, its backdrop) and the fog bloom stay GL's. */
+ * 16 KB), not through a GL import; the fog bloom stays GL's. Lane VKBLOOM1: the Fusion Shaders bloom (its chain as
+ * compute dispatches, then mode 3 over the backdrop) and the exposure measure run in the same command buffer. */
+// lane VKBLOOM1: one image of the bloom chain (device-local, or shared when GL reads it: the combine, the measure)
+struct BloomImg
+{
+	VkImage img = VK_NULL_HANDLE;
+	VkDeviceMemory mem = VK_NULL_HANDLE;
+	VkImageView view = VK_NULL_HANDLE;
+	VkImageView layer[8] = {};  // the ring's layers, each a 2D storage view
+	GLuint tex = 0, obj = 0;
+	int w = 0, h = 0, layers = 1, samples = 1;
+};
+struct ToneBloomState
+{
+	bool made = false, broken = false;
+	std::string brokenWhy;
+	VkDescriptorSetLayout dsl = VK_NULL_HANDLE;
+	VkPipelineLayout layout = VK_NULL_HANDLE;
+	VkPipeline pipe[7] = {};  // down, hold, up, src, comb, measure_q (vkframe.cpp's order), back (the backdrop's resolve)
+	// per chain shape (W x H, the mips' dims); the frame's views are in the sets: made again with the frame
+	int W = 0, H = 0, mips = 0, dims[WwVkPresent::kToneBloomMips][2] = {};
+	BloomImg src, ring, comb, mip[WwVkPresent::kToneBloomMips], up[WwVkPresent::kToneBloomMips];
+	VkDescriptorPool pool = VK_NULL_HANDLE;
+	VkDescriptorSet down[WwVkPresent::kToneBloomMips] = {}, downRing[8] = {}, hold = VK_NULL_HANDLE,
+		upSet[WwVkPresent::kToneBloomMips] = {}, srcSet = VK_NULL_HANDLE, combSet = VK_NULL_HANDLE;
+	VkImage setFrame = VK_NULL_HANDLE;  // the frame image the sets hold
+	bool fresh = false;   // made this run: the layouts change in the pass, the hold starts again
+	double mb = 0.0;
+	// the measure's quarter target (shared: GL blurs it) and its host read buffer
+	BloomImg meas;
+	BloomImg measFill;  // 1 x 1, 2 layers: the measure set's unused bindings (the measure runs without the chain)
+	VkDescriptorPool measPool = VK_NULL_HANDLE;
+	VkDescriptorSet measSet = VK_NULL_HANDLE;
+	VkBuffer read = VK_NULL_HANDLE;
+	VkDeviceMemory readMem = VK_NULL_HANDLE;
+	float * readPtr = nullptr;
+	bool measFresh = false;
+	double measMb = 0.0;
+	/* the backdrop mode 3 reads: the view slot copied (backMs: RGBA8, its samples), resolved by bloom_back.hlsl into back
+	 * (RGBA16F, as GL's blit resolve keeps the mean); backFill: its set's unused bindings */
+	BloomImg back, backMs, backFill;
+	VkDescriptorPool backPool = VK_NULL_HANDLE;
+	VkDescriptorSet backSet = VK_NULL_HANDLE;
+	double backMb = 0.0;
+	// this frame's draw (the drawing thread writes it before the hand, the worker reads it)
+	bool on = false, backdrop = false;
+	int measQw = 0, measQh = 0;
+	WwVkPresent::ToneBloom job;
+	std::uint64_t runs = 0, records = 0, measRecord = 0;
+	bool measRan = false, measHave = false, measDone = false;
+	int measW = 0, measH = 0;
+};
 struct Tone
 {
 	void * glCtx = nullptr;
@@ -1392,7 +1450,9 @@ struct Tone
 	// per sample count
 	int pipeSamples = 0;
 	VkRenderPass pass = VK_NULL_HANDLE;
-	VkPipeline pipe[3] = {};  // 0: no depth test; 1: GREATER (an opaque draw's depth); 2: LEQUAL + premultiplied blend
+	// 0: no depth test; 1: GREATER (an opaque draw's depth); 2: LEQUAL + premultiplied blend; lane VKBLOOM1, mode 3's
+	// glow added (ONE, ONE): 3 no depth test, 4 LEQUAL
+	VkPipeline pipe[5] = {};
 	int pipelines = 0;
 	double buildMs = 0.0;
 	// per view slot (made again with the view ring)
@@ -1411,8 +1471,9 @@ struct Tone
 	 * right after a tone pass; backoff: frames without deferring after a flush; red WW_VKVIEW_MERGE_RED=1 never defers */
 	bool deferred = false, ranSinceTaa = false, mergeHint = false, mergeRed = false, subOk = false;
 	int backoff = 0;
-	GLuint defTex[5] = {};
+	GLuint defTex[8] = {};  // lane VKBLOOM1: + the combine and the measure's quarter target
 	GLuint defN = 0;
+	ToneBloomState bloom;  // lane VKBLOOM1
 };
 
 Tone & tone()
@@ -1525,6 +1586,509 @@ void toneMeasureDrop( bool glAlive )
 	T.descDirty = true;
 }
 
+void toneCacheSave();
+
+// lane VKBLOOM1: one bloom image goes (GL alive: its texture and memory object too); the caller waited the device
+void bloomImgDrop( BloomImg & I, bool glAlive )
+{
+	Vk & v = vk();
+	Gl & g = gl();
+	if ( glAlive ) {
+		if ( I.tex )
+			g.deleteTextures( 1, &I.tex );
+		if ( I.obj )
+			g.deleteMemoryObjects( 1, &I.obj );
+	}
+	for ( VkImageView & iv : I.layer )
+		if ( iv )
+			v.vkDestroyImageView( v.dev, iv, nullptr );
+	if ( I.view )
+		v.vkDestroyImageView( v.dev, I.view, nullptr );
+	if ( I.img )
+		v.vkDestroyImage( v.dev, I.img, nullptr );
+	if ( I.mem )
+		v.vkFreeMemory( v.dev, I.mem, nullptr );
+	I = BloomImg();
+}
+
+VkImageView layerView( VkImage img, VkImageViewType type, VkFormat fmt, int base, int count )
+{
+	Vk & v = vk();
+	VkImageViewCreateInfo ci { VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO };
+	ci.image = img;
+	ci.viewType = type;
+	ci.format = fmt;
+	ci.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, std::uint32_t( base ), std::uint32_t( count ) };
+	VkImageView out = VK_NULL_HANDLE;
+	if ( v.vkCreateImageView( v.dev, &ci, nullptr, &out ) != VK_SUCCESS )
+		return VK_NULL_HANDLE;
+	return out;
+}
+
+/* lane VKBLOOM1: a chain image only this device reads (device-local; layers > 1: the ring, a 2D array view and a 2D view
+ * per layer), left UNDEFINED (bloomGeneral lays it out) */
+bool bloomLocal( BloomImg & I, VkFormat fmt, VkImageUsageFlags usage, int w, int h, int layers, double & mb, int samples = 1 )
+{
+	Vk & v = vk();
+	VkImageCreateInfo ci { VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO };
+	ci.imageType = VK_IMAGE_TYPE_2D;
+	ci.format = fmt;
+	ci.extent = { std::uint32_t( w ), std::uint32_t( h ), 1 };
+	ci.mipLevels = 1;
+	ci.arrayLayers = std::uint32_t( layers );
+	ci.samples = VkSampleCountFlagBits( samples );
+	ci.tiling = VK_IMAGE_TILING_OPTIMAL;
+	ci.usage = usage;
+	if ( v.vkCreateImage( v.dev, &ci, nullptr, &I.img ) != VK_SUCCESS )
+		return false;
+	VkMemoryRequirements r;
+	v.vkGetImageMemoryRequirements( v.dev, I.img, &r );
+	VkMemoryAllocateInfo ai { VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO };
+	ai.allocationSize = r.size;
+	ai.memoryTypeIndex = memType( r.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT );
+	if ( ai.memoryTypeIndex == UINT32_MAX || v.vkAllocateMemory( v.dev, &ai, nullptr, &I.mem ) != VK_SUCCESS
+		|| v.vkBindImageMemory( v.dev, I.img, I.mem, 0 ) != VK_SUCCESS )
+		return false;
+	mb += double( r.size ) / 1048576.0;
+	I.w = w;
+	I.h = h;
+	I.layers = layers;
+	I.samples = samples;
+	I.view = layerView( I.img, layers > 1 ? VK_IMAGE_VIEW_TYPE_2D_ARRAY : VK_IMAGE_VIEW_TYPE_2D, fmt, 0, layers );
+	if ( !I.view )
+		return false;
+	for ( int l = 0; layers > 1 && l < layers && l < 8; l++ )
+		if ( !( I.layer[l] = layerView( I.img, VK_IMAGE_VIEW_TYPE_2D, fmt, l, 1 ) ) )
+			return false;
+	return true;
+}
+
+// lane VKBLOOM1: the device-local chain images UNDEFINED -> GENERAL once (a submit of its own, waited: once per shape)
+bool bloomGeneral( const std::vector<const BloomImg *> & imgs )
+{
+	Vk & v = vk();
+	std::vector<VkImageMemoryBarrier> bars;
+	for ( const BloomImg * I : imgs ) {
+		if ( !I->img )
+			continue;
+		VkImageMemoryBarrier b { VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER };
+		b.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
+		b.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+		b.newLayout = VK_IMAGE_LAYOUT_GENERAL;
+		b.srcQueueFamilyIndex = b.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+		b.image = I->img;
+		b.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, std::uint32_t( I->layers ) };
+		bars.push_back( b );
+	}
+	if ( bars.empty() )
+		return true;
+	VkCommandBufferAllocateInfo cai { VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO };
+	cai.commandPool = v.pool;
+	cai.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+	cai.commandBufferCount = 1;
+	VkCommandBuffer cmd = VK_NULL_HANDLE;
+	VkFence fence = VK_NULL_HANDLE;
+	VkFenceCreateInfo fi { VK_STRUCTURE_TYPE_FENCE_CREATE_INFO };
+	bool laid = false;
+	if ( v.vkAllocateCommandBuffers( v.dev, &cai, &cmd ) == VK_SUCCESS && v.vkCreateFence( v.dev, &fi, nullptr, &fence ) == VK_SUCCESS ) {
+		VkCommandBufferBeginInfo bi { VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
+		bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+		v.vkBeginCommandBuffer( cmd, &bi );
+		v.vkCmdPipelineBarrier( cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 0, nullptr, 0, nullptr,
+			std::uint32_t( bars.size() ), bars.data() );
+		v.vkEndCommandBuffer( cmd );
+		laid = oneShot( cmd, fence );
+	}
+	if ( cmd )
+		v.vkFreeCommandBuffers( v.dev, v.pool, 1, &cmd );
+	if ( fence )
+		v.vkDestroyFence( v.dev, fence, nullptr );
+	return laid;
+}
+
+// lane VKBLOOM1: the chain (and its sets), the measure's target and read buffer, the backdrop go; the caller waited the device
+void toneBloomFree( bool glAlive )
+{
+	Vk & v = vk();
+	Tone & T = tone();
+	ToneBloomState & B = T.bloom;
+	bloomImgDrop( B.src, glAlive );
+	bloomImgDrop( B.ring, glAlive );
+	bloomImgDrop( B.comb, glAlive );
+	for ( int i = 0; i < WwVkPresent::kToneBloomMips; i++ ) {
+		bloomImgDrop( B.mip[i], glAlive );
+		bloomImgDrop( B.up[i], glAlive );
+	}
+	if ( B.pool )
+		v.vkDestroyDescriptorPool( v.dev, B.pool, nullptr );
+	B.pool = VK_NULL_HANDLE;
+	B.W = B.H = B.mips = 0;
+	B.setFrame = VK_NULL_HANDLE;
+	B.mb = 0.0;
+	bloomImgDrop( B.meas, glAlive );
+	bloomImgDrop( B.measFill, glAlive );
+	if ( B.measPool )
+		v.vkDestroyDescriptorPool( v.dev, B.measPool, nullptr );
+	B.measPool = VK_NULL_HANDLE;
+	B.measSet = VK_NULL_HANDLE;
+	if ( B.read ) {
+		v.vkUnmapMemory( v.dev, B.readMem );
+		v.vkDestroyBuffer( v.dev, B.read, nullptr );
+	}
+	if ( B.readMem )
+		v.vkFreeMemory( v.dev, B.readMem, nullptr );
+	B.read = VK_NULL_HANDLE;
+	B.readMem = VK_NULL_HANDLE;
+	B.readPtr = nullptr;
+	B.measW = B.measH = 0;
+	B.measHave = B.measRan = false;
+	B.measMb = 0.0;
+	bloomImgDrop( B.back, glAlive );
+	bloomImgDrop( B.backMs, glAlive );
+	bloomImgDrop( B.backFill, glAlive );
+	if ( B.backPool )
+		v.vkDestroyDescriptorPool( v.dev, B.backPool, nullptr );
+	B.backPool = VK_NULL_HANDLE;
+	B.backSet = VK_NULL_HANDLE;
+	B.backMb = 0.0;
+	B.on = B.backdrop = false;
+	B.measQw = B.measQh = 0;
+	T.descDirty = true;
+}
+
+// lane VKBLOOM1: the set layout (BloomBindingsVk.hlsli, 8 bindings), the pipeline layout and the six compute pipelines, once
+bool toneBloomStatic( std::string & why )
+{
+	Vk & v = vk();
+	Tone & T = tone();
+	ToneBloomState & B = T.bloom;
+	if ( B.made )
+		return true;
+	if ( !v.vkCmdDispatch || !v.vkCreateComputePipelines ) {
+		why = "no vkCmdDispatch / vkCreateComputePipelines";
+		return false;
+	}
+	const VkDescriptorType t[8] = { VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
+		VK_DESCRIPTOR_TYPE_SAMPLER, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
+		VK_DESCRIPTOR_TYPE_STORAGE_IMAGE };
+	VkDescriptorSetLayoutBinding b[8] = {};
+	for ( std::uint32_t k = 0; k < 8; k++ )
+		b[k] = VkDescriptorSetLayoutBinding { k, t[k], 1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr };
+	VkDescriptorSetLayoutCreateInfo lci { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
+	lci.bindingCount = 8;
+	lci.pBindings = b;
+	VkPushConstantRange pcr { VK_SHADER_STAGE_COMPUTE_BIT, 0, 48 };  // vkframe.cpp's Job
+	VkPipelineLayoutCreateInfo plci { VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO };
+	plci.setLayoutCount = 1;
+	plci.pSetLayouts = &B.dsl;
+	plci.pushConstantRangeCount = 1;
+	plci.pPushConstantRanges = &pcr;
+	if ( v.vkCreateDescriptorSetLayout( v.dev, &lci, nullptr, &B.dsl ) != VK_SUCCESS
+		|| v.vkCreatePipelineLayout( v.dev, &plci, nullptr, &B.layout ) != VK_SUCCESS ) {
+		why = "the bloom's set / pipeline layout failed";
+		return false;
+	}
+	const std::uint32_t * code[7] = { vkframe_bloom_down_spv, vkframe_bloom_hold_spv, vkframe_bloom_up_spv, vkframe_bloom_src_spv,
+		vkframe_bloom_comb_spv, vkframe_measure_q_spv, vkframe_bloom_back_spv };
+	const size_t bytes[7] = { sizeof( vkframe_bloom_down_spv ), sizeof( vkframe_bloom_hold_spv ), sizeof( vkframe_bloom_up_spv ),
+		sizeof( vkframe_bloom_src_spv ), sizeof( vkframe_bloom_comb_spv ), sizeof( vkframe_measure_q_spv ), sizeof( vkframe_bloom_back_spv ) };
+	for ( int k = 0; k < 7; k++ ) {
+		VkShaderModuleCreateInfo mi { VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO };
+		mi.codeSize = bytes[k];
+		mi.pCode = code[k];
+		VkShaderModule m = VK_NULL_HANDLE;
+		if ( v.vkCreateShaderModule( v.dev, &mi, nullptr, &m ) != VK_SUCCESS ) {
+			why = "the bloom's shader module " + std::to_string( k ) + " failed";
+			return false;
+		}
+		VkComputePipelineCreateInfo pc { VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO };
+		pc.stage = { VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, nullptr, 0, VK_SHADER_STAGE_COMPUTE_BIT, m, "main", nullptr };
+		pc.layout = B.layout;
+		const VkResult r = v.vkCreateComputePipelines( v.dev, T.cache, 1, &pc, nullptr, &B.pipe[k] );
+		v.vkDestroyShaderModule( v.dev, m, nullptr );
+		if ( r != VK_SUCCESS ) {
+			why = "vkCreateComputePipelines (the bloom's kernel " + std::to_string( k ) + ") failed";
+			return false;
+		}
+	}
+	toneCacheSave();
+	B.made = true;
+	return true;
+}
+
+// lane VKBLOOM1: every binding of one set (0-2 sampled, 3 the sampler, 4 storage, 5-6 the frame, 7 the RGBA32F target)
+void bloomWriteSet( VkDescriptorSet set, VkImageView src, VkImageView mip, VkImageView ring, VkImageView dst, VkImageView out32,
+	VkImageView frame = VK_NULL_HANDLE )
+{
+	Vk & v = vk();
+	Tone & T = tone();
+	const VkImageView views[8] = { src, mip, ring, VK_NULL_HANDLE, dst, frame ? frame : T.colorView, T.stencilView, out32 };
+	VkDescriptorImageInfo ii[8] = {};
+	VkWriteDescriptorSet wr[8] = {};
+	for ( std::uint32_t k = 0; k < 8; k++ ) {
+		ii[k].imageLayout = k == 3 ? VK_IMAGE_LAYOUT_UNDEFINED : VK_IMAGE_LAYOUT_GENERAL;
+		ii[k].imageView = views[k];
+		ii[k].sampler = k == 3 ? T.sampler : VK_NULL_HANDLE;
+		wr[k].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+		wr[k].dstSet = set;
+		wr[k].dstBinding = k;
+		wr[k].descriptorCount = 1;
+		wr[k].descriptorType = k == 3 ? VK_DESCRIPTOR_TYPE_SAMPLER
+			: ( k == 4 || k == 7 ) ? VK_DESCRIPTOR_TYPE_STORAGE_IMAGE : VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+		wr[k].pImageInfo = &ii[k];
+	}
+	v.vkUpdateDescriptorSets( v.dev, 8, wr, 0, nullptr );
+}
+
+/* lane VKBLOOM1: the chain for this shape (source, ring, mips, ups as RGBA16F on this device alone; the combine RGBA32F
+ * shared, GL may read it) and its sets over the frame's views. The caller waited the last pass and drained the worker. */
+bool toneBloomChain( const WwVkPresent::ToneBloom & b, std::string & why )
+{
+	Vk & v = vk();
+	Tone & T = tone();
+	ToneBloomState & B = T.bloom;
+	const int W = T.w, H = T.h, n = b.mips;
+	bool same = B.pool && B.W == W && B.H == H && B.mips == n && B.setFrame == T.color;
+	for ( int i = 0; same && i < n; i++ )
+		same = B.dims[i][0] == b.dims[i][0] && B.dims[i][1] == b.dims[i][1];
+	if ( same )
+		return true;
+	if ( n < 1 || n > WwVkPresent::kToneBloomMips ) {
+		why = "no mip chain";
+		return false;
+	}
+	// the measure and the backdrop stay; the chain goes
+	bloomImgDrop( B.src, true );
+	bloomImgDrop( B.ring, true );
+	bloomImgDrop( B.comb, true );
+	for ( int i = 0; i < WwVkPresent::kToneBloomMips; i++ ) {
+		bloomImgDrop( B.mip[i], true );
+		bloomImgDrop( B.up[i], true );
+	}
+	if ( B.pool )
+		v.vkDestroyDescriptorPool( v.dev, B.pool, nullptr );
+	B.pool = VK_NULL_HANDLE;
+	B.mb = 0.0;
+	B.setFrame = VK_NULL_HANDLE;
+	const VkFormat f16 = VK_FORMAT_R16G16B16A16_SFLOAT;
+	const VkImageUsageFlags use = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT;
+	bool ok = bloomLocal( B.src, f16, use, W, H, 1, B.mb ) && bloomLocal( B.ring, f16, use, b.dims[0][0], b.dims[0][1], 8, B.mb );
+	for ( int i = 0; ok && i < n; i++ ) {
+		B.dims[i][0] = b.dims[i][0];
+		B.dims[i][1] = b.dims[i][1];
+		ok = bloomLocal( B.mip[i], f16, use, b.dims[i][0], b.dims[i][1], 1, B.mb );
+		if ( ok && i + 1 < n )
+			ok = bloomLocal( B.up[i], f16, use, b.dims[i][0], b.dims[i][1], 1, B.mb );
+	}
+	if ( !ok ) {
+		why = "the bloom chain's images failed";
+		return false;
+	}
+	std::vector<const BloomImg *> lay { &B.src, &B.ring };
+	for ( int i = 0; i < n; i++ ) {
+		lay.push_back( &B.mip[i] );
+		lay.push_back( &B.up[i] );
+	}
+	if ( !bloomGeneral( lay ) ) {
+		why = "the bloom chain's first layout change failed";
+		return false;
+	}
+	if ( !makeShared( B.comb.img, B.comb.mem, B.comb.tex, B.comb.obj, VK_FORMAT_R32G32B32A32_SFLOAT, kRgba32f, 1, W, H, false, B.mb, why ) ) {
+		why = "the bloom combine's shared target: " + why;
+		return false;
+	}
+	B.comb.w = W;
+	B.comb.h = H;
+	B.comb.view = imageView( B.comb.img, VK_IMAGE_VIEW_TYPE_2D, VK_FORMAT_R32G32B32A32_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT );
+	if ( !B.comb.view ) {
+		why = "the bloom combine's view failed";
+		return false;
+	}
+	const int sets = n + 8 + 1 + n + 2;
+	VkDescriptorPoolSize ps[3] = { { VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, std::uint32_t( 5 * sets ) }, { VK_DESCRIPTOR_TYPE_SAMPLER,
+		std::uint32_t( sets ) }, { VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, std::uint32_t( 2 * sets ) } };
+	VkDescriptorPoolCreateInfo dp { VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO };
+	dp.maxSets = std::uint32_t( sets );
+	dp.poolSizeCount = 3;
+	dp.pPoolSizes = ps;
+	std::vector<VkDescriptorSetLayout> lays( size_t( sets ), B.dsl );
+	std::vector<VkDescriptorSet> all( static_cast<size_t>( sets ) );
+	if ( v.vkCreateDescriptorPool( v.dev, &dp, nullptr, &B.pool ) != VK_SUCCESS ) {
+		why = "the bloom's descriptor pool failed";
+		return false;
+	}
+	VkDescriptorSetAllocateInfo ai { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO };
+	ai.descriptorPool = B.pool;
+	ai.descriptorSetCount = std::uint32_t( sets );
+	ai.pSetLayouts = lays.data();
+	if ( v.vkAllocateDescriptorSets( v.dev, &ai, all.data() ) != VK_SUCCESS ) {
+		why = "the bloom's descriptor sets failed";
+		return false;
+	}
+	// vkframe.cpp makeChain's sets; every binding written (the frame's views, the combine as the RGBA32F target)
+	const VkImageView src = B.src.view, ring = B.ring.view, c32 = B.comb.view;
+	int k = 0;
+	for ( int i = 0; i < n; i++ ) {
+		B.down[i] = all[size_t( k++ )];
+		bloomWriteSet( B.down[i], i == 0 ? src : B.mip[i - 1].view, src, ring, B.mip[i].view, c32 );
+	}
+	for ( int l = 0; l < 8; l++ ) {
+		B.downRing[l] = all[size_t( k++ )];
+		bloomWriteSet( B.downRing[l], src, src, ring, B.ring.layer[l], c32 );
+	}
+	B.hold = all[size_t( k++ )];
+	bloomWriteSet( B.hold, src, src, ring, B.mip[0].view, c32 );
+	for ( int level = 0; level + 1 < n; level++ ) {
+		B.upSet[level] = all[size_t( k++ )];
+		const VkImageView acc = level + 2 == n ? B.mip[n - 1].view : B.up[level + 1].view;
+		bloomWriteSet( B.upSet[level], B.mip[level].view, acc, ring, B.up[level].view, c32 );
+	}
+	B.srcSet = all[size_t( k++ )];
+	bloomWriteSet( B.srcSet, src, src, ring, src, c32 );
+	B.combSet = all[size_t( k++ )];
+	const VkImageView top = n == 1 ? B.mip[0].view : B.up[0].view;
+	bloomWriteSet( B.combSet, top, top, ring, src, c32 );
+	B.W = W;
+	B.H = H;
+	B.mips = n;
+	B.setFrame = T.color;
+	B.fresh = true;
+	T.descDirty = true;
+	std::fprintf( stderr, "vk view: bloom chain made %dx%d, %d mips (%.1f MB; the Fusion Shaders bloom in the tone pass)\n", W, H, n,
+		B.mb );
+	return true;
+}
+
+/* lane VKBLOOM1: the measure's quarter target (RGBA32F, shared: GL blurs it into the measure's bloom) and its host read
+ * buffer; the measure set's target written again. The caller waited the last pass and drained the worker. */
+bool toneBloomMeasure( int qw, int qh, std::string & why )
+{
+	Vk & v = vk();
+	Tone & T = tone();
+	ToneBloomState & B = T.bloom;
+	if ( B.meas.img && B.measW == qw && B.measH == qh && B.read && B.measSet )
+		return true;
+	bloomImgDrop( B.meas, true );
+	bloomImgDrop( B.measFill, true );
+	if ( B.measPool )
+		v.vkDestroyDescriptorPool( v.dev, B.measPool, nullptr );
+	B.measPool = VK_NULL_HANDLE;
+	B.measSet = VK_NULL_HANDLE;
+	if ( B.read ) {
+		v.vkUnmapMemory( v.dev, B.readMem );
+		v.vkDestroyBuffer( v.dev, B.read, nullptr );
+	}
+	if ( B.readMem )
+		v.vkFreeMemory( v.dev, B.readMem, nullptr );
+	B.read = VK_NULL_HANDLE;
+	B.readMem = VK_NULL_HANDLE;
+	B.readPtr = nullptr;
+	B.measHave = false;
+	B.measMb = 0.0;
+	B.measW = B.measH = 0;
+	if ( !makeShared( B.meas.img, B.meas.mem, B.meas.tex, B.meas.obj, VK_FORMAT_R32G32B32A32_SFLOAT, kRgba32f, 1, qw, qh, false, B.measMb,
+			why ) ) {
+		why = "the measure's shared target: " + why;
+		bloomImgDrop( B.meas, true );
+		return false;
+	}
+	B.meas.w = qw;
+	B.meas.h = qh;
+	B.meas.view = imageView( B.meas.img, VK_IMAGE_VIEW_TYPE_2D, VK_FORMAT_R32G32B32A32_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT );
+	VkBufferCreateInfo bci { VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
+	bci.size = VkDeviceSize( qw ) * VkDeviceSize( qh ) * 16;
+	bci.usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+	bool ok = B.meas.view && v.vkCreateBuffer( v.dev, &bci, nullptr, &B.read ) == VK_SUCCESS;
+	if ( ok ) {
+		VkMemoryRequirements br {};
+		v.vkGetBufferMemoryRequirements( v.dev, B.read, &br );
+		VkMemoryAllocateInfo ai { VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO };
+		ai.allocationSize = br.size;
+		ai.memoryTypeIndex = memType( br.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT );
+		void * p = nullptr;
+		ok = ai.memoryTypeIndex != UINT32_MAX && v.vkAllocateMemory( v.dev, &ai, nullptr, &B.readMem ) == VK_SUCCESS
+			&& v.vkBindBufferMemory( v.dev, B.read, B.readMem, 0 ) == VK_SUCCESS
+			&& v.vkMapMemory( v.dev, B.readMem, 0, VK_WHOLE_SIZE, 0, &p ) == VK_SUCCESS;
+		B.readPtr = static_cast<float *>( p );
+		B.measMb += double( br.size ) / 1048576.0;
+	}
+	if ( !ok || !B.readPtr ) {
+		why = "the measure's view / read buffer failed";
+		return false;
+	}
+	// its own set (measure_q.hlsl reads the frame, writes binding 7); the bindings it does not read hold a 1 x 1 fill
+	ok = bloomLocal( B.measFill, VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT, 1, 1, 2, B.measMb )
+		&& bloomGeneral( { &B.measFill } );
+	if ( ok ) {
+		VkDescriptorPoolSize ps[3] = { { VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 5 }, { VK_DESCRIPTOR_TYPE_SAMPLER, 1 },
+			{ VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 2 } };
+		VkDescriptorPoolCreateInfo dp { VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO };
+		dp.maxSets = 1;
+		dp.poolSizeCount = 3;
+		dp.pPoolSizes = ps;
+		ok = v.vkCreateDescriptorPool( v.dev, &dp, nullptr, &B.measPool ) == VK_SUCCESS;
+		VkDescriptorSetAllocateInfo ai { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO };
+		ai.descriptorPool = B.measPool;
+		ai.descriptorSetCount = 1;
+		ai.pSetLayouts = &B.dsl;
+		ok = ok && v.vkAllocateDescriptorSets( v.dev, &ai, &B.measSet ) == VK_SUCCESS;
+	}
+	if ( !ok ) {
+		why = "the measure's descriptor set failed";
+		return false;
+	}
+	const VkImageView fill = B.measFill.layer[0];
+	bloomWriteSet( B.measSet, fill, fill, B.measFill.view, fill, B.meas.view );
+	B.measW = qw;
+	B.measH = qh;
+	std::fprintf( stderr, "vk view: exposure measure target made %dx%d RGBA32F (read back in the tone pass's command buffer)\n", qw, qh );
+	return true;
+}
+
+/* lane VKBLOOM1: the backdrop mode 3 reads (cellhdr.cpp's backdropCopy: the view resolved into RGBA16F by a blit): the
+ * view slot's copy (RGBA8, its samples), the resolve's target (RGBA16F) and bloom_back.hlsl's set. The caller drained. */
+bool toneBloomBack( int samples, std::string & why )
+{
+	Vk & v = vk();
+	Tone & T = tone();
+	ToneBloomState & B = T.bloom;
+	bloomImgDrop( B.back, true );
+	bloomImgDrop( B.backMs, true );
+	bloomImgDrop( B.backFill, true );
+	if ( B.backPool )
+		v.vkDestroyDescriptorPool( v.dev, B.backPool, nullptr );
+	B.backPool = VK_NULL_HANDLE;
+	B.backSet = VK_NULL_HANDLE;
+	B.backMb = 0.0;
+	const VkFormat f16 = VK_FORMAT_R16G16B16A16_SFLOAT;
+	const VkImageUsageFlags use = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT;
+	bool ok = bloomLocal( B.backMs, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT, T.w, T.h, 1,
+				  B.backMb, samples )
+		&& bloomLocal( B.back, f16, use, T.w, T.h, 1, B.backMb ) && bloomLocal( B.backFill, f16, use, 1, 1, 2, B.backMb )
+		&& bloomGeneral( { &B.backMs, &B.back, &B.backFill } );
+	if ( ok ) {
+		VkDescriptorPoolSize ps[3] = { { VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 5 }, { VK_DESCRIPTOR_TYPE_SAMPLER, 1 },
+			{ VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 2 } };
+		VkDescriptorPoolCreateInfo dp { VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO };
+		dp.maxSets = 1;
+		dp.poolSizeCount = 3;
+		dp.pPoolSizes = ps;
+		ok = v.vkCreateDescriptorPool( v.dev, &dp, nullptr, &B.backPool ) == VK_SUCCESS;
+		VkDescriptorSetAllocateInfo ai { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO };
+		ai.descriptorPool = B.backPool;
+		ai.descriptorSetCount = 1;
+		ai.pSetLayouts = &B.dsl;
+		ok = ok && v.vkAllocateDescriptorSets( v.dev, &ai, &B.backSet ) == VK_SUCCESS;
+	}
+	if ( !ok ) {
+		why = "the backdrop's images / set failed";
+		return false;
+	}
+	const VkImageView fill = B.backFill.layer[0];
+	bloomWriteSet( B.backSet, fill, fill, B.backFill.view, B.back.view, fill, B.backMs.view );
+	return true;
+}
+
 // the shared frame goes (GL alive: its textures and memory objects too); the caller waited the device
 void toneFrameFree( bool glAlive )
 {
@@ -1549,6 +2113,7 @@ void toneFrameFree( bool glAlive )
 		if ( *m )
 			v.vkFreeMemory( v.dev, *m, nullptr );
 	toneMeasureDrop( glAlive );
+	toneBloomFree( glAlive );
 	T.colorTex = T.dsTex = T.colorObj = T.dsObj = 0;
 	T.colorView = T.stencilView = VK_NULL_HANDLE;
 	T.color = T.ds = VK_NULL_HANDLE;
@@ -1831,16 +2396,20 @@ bool tonePipes( int samples, std::string & why )
 	dss[1].depthTestEnable = dss[2].depthTestEnable = VK_TRUE;  // never written: the quad at the far plane only tests
 	dss[1].depthCompareOp = VK_COMPARE_OP_GREATER;
 	dss[2].depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
-	VkPipelineColorBlendAttachmentState cb[2] = {};
-	cb[0].colorWriteMask = cb[1].colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT
-		| VK_COLOR_COMPONENT_A_BIT;
+	VkPipelineColorBlendAttachmentState cb[3] = {};
+	cb[0].colorWriteMask = cb[1].colorWriteMask = cb[2].colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT
+		| VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
 	cb[1].blendEnable = VK_TRUE;  // mode 2: premultiplied over the backdrop (GL_ONE, GL_ONE_MINUS_SRC_ALPHA)
 	cb[1].srcColorBlendFactor = cb[1].srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
 	cb[1].dstColorBlendFactor = cb[1].dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
 	cb[1].colorBlendOp = cb[1].alphaBlendOp = VK_BLEND_OP_ADD;
-	VkPipelineColorBlendStateCreateInfo cbs[2] = { { VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO },
-		{ VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO } };
-	for ( int k = 0; k < 2; k++ ) {
+	cb[2].blendEnable = VK_TRUE;  // lane VKBLOOM1, mode 3: the glow added (GL_ONE, GL_ONE)
+	cb[2].srcColorBlendFactor = cb[2].srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+	cb[2].dstColorBlendFactor = cb[2].dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+	cb[2].colorBlendOp = cb[2].alphaBlendOp = VK_BLEND_OP_ADD;
+	VkPipelineColorBlendStateCreateInfo cbs[3] = { { VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO },
+		{ VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO }, { VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO } };
+	for ( int k = 0; k < 3; k++ ) {
 		cbs[k].attachmentCount = 1;
 		cbs[k].pAttachments = &cb[k];
 	}
@@ -1848,8 +2417,9 @@ bool tonePipes( int samples, std::string & why )
 	VkPipelineDynamicStateCreateInfo dy { VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO };
 	dy.dynamicStateCount = 2;
 	dy.pDynamicStates = dyn;
-	VkGraphicsPipelineCreateInfo gp[3] = {};
-	for ( int k = 0; k < 3; k++ ) {
+	VkGraphicsPipelineCreateInfo gp[5] = {};
+	const int dsOf[5] = { 0, 1, 2, 0, 2 }, cbOf[5] = { 0, 0, 1, 2, 2 };
+	for ( int k = 0; k < 5; k++ ) {
 		gp[k].sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
 		gp[k].stageCount = 2;
 		gp[k].pStages = st;
@@ -1858,18 +2428,18 @@ bool tonePipes( int samples, std::string & why )
 		gp[k].pViewportState = &vps;
 		gp[k].pRasterizationState = &rs;
 		gp[k].pMultisampleState = &ms;
-		gp[k].pDepthStencilState = &dss[k];
-		gp[k].pColorBlendState = &cbs[k == 2 ? 1 : 0];
+		gp[k].pDepthStencilState = &dss[dsOf[k]];
+		gp[k].pColorBlendState = &cbs[cbOf[k]];
 		gp[k].pDynamicState = &dy;
 		gp[k].layout = T.layout;
 		gp[k].renderPass = T.pass;
 	}
-	if ( v.vkCreateGraphicsPipelines( v.dev, T.cache, 3, gp, nullptr, T.pipe ) != VK_SUCCESS ) {
+	if ( v.vkCreateGraphicsPipelines( v.dev, T.cache, 5, gp, nullptr, T.pipe ) != VK_SUCCESS ) {
 		why = "vkCreateGraphicsPipelines (the tone pass, " + std::to_string( samples ) + " samples) failed";
 		return false;
 	}
 	T.pipeSamples = samples;
-	T.pipelines = 3;
+	T.pipelines = 5;
 	T.buildMs = nowMs() - t0;
 	toneCacheSave();
 	return true;
@@ -1906,6 +2476,10 @@ bool toneFbs( std::string & why )
 	return true;
 }
 
+// lane VKBLOOM1: harness only (tests/vkframe/toneview.cpp's reds, must FAIL); 1 = mode 3 not drawn, 2 = the measure not
+// dispatched, 3 = mode 3 reads no backdrop
+int bloomRedTest = 0;
+
 // the worker: record the LUT's copy (when new) and the pass into this frame's view slot (toneWork submits it)
 bool toneRecord( std::string & why )
 {
@@ -1939,6 +2513,99 @@ bool toneRecord( std::string & why )
 		v.vkCmdPipelineBarrier( T.cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0, nullptr, 0, nullptr, 1, &b );
 		T.lutCopy = false;
 	}
+	ToneBloomState & B = T.bloom;
+	if ( B.on || B.measQw > 0 ) {
+		/* lane VKBLOOM1: vkframe.cpp runBloom's dispatches on this command buffer, from the shared frame GL just drew (the
+		 * semaphore's wait + this barrier): the source, the exposure measure, down / hold / up, the combine. The tone draws
+		 * read the combine; GL reads the combine and the measure after B */
+		VkMemoryBarrier mb { VK_STRUCTURE_TYPE_MEMORY_BARRIER };
+		mb.srcAccessMask = VK_ACCESS_MEMORY_WRITE_BIT;
+		mb.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
+		v.vkCmdPipelineBarrier( T.cmd, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 1, &mb, 0, nullptr, 0,
+			nullptr );
+		struct Pc
+		{
+			float params[4];
+			float spare[4];
+			std::int32_t ints[4];
+		};
+		auto dispatch = [&]( int pipe, VkDescriptorSet set, int w, int h, const Pc & j, int group ) {
+			v.vkCmdBindPipeline( T.cmd, VK_PIPELINE_BIND_POINT_COMPUTE, B.pipe[pipe] );
+			v.vkCmdBindDescriptorSets( T.cmd, VK_PIPELINE_BIND_POINT_COMPUTE, B.layout, 0, 1, &set, 0, nullptr );
+			v.vkCmdPushConstants( T.cmd, B.layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, std::uint32_t( sizeof( Pc ) ), &j );
+			v.vkCmdDispatch( T.cmd, std::uint32_t( ( w + group - 1 ) / group ), std::uint32_t( ( h + group - 1 ) / group ), 1 );
+			VkMemoryBarrier cb { VK_STRUCTURE_TYPE_MEMORY_BARRIER };
+			cb.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+			cb.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
+			v.vkCmdPipelineBarrier( T.cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 1, &cb, 0, nullptr,
+				0, nullptr );
+		};
+		const WwVkPresent::ToneBloom & b = B.job;
+		if ( B.on ) {  // the source (bloom_src.hlsl)
+			Pc j {};
+			j.params[0] = b.exposure;
+			j.params[1] = b.impulseX;
+			j.params[2] = b.impulseY;
+			j.params[3] = b.impulse;
+			j.ints[0] = b.on ? 1 : 0;
+			dispatch( 3, B.srcSet, B.W, B.H, j, 8 );
+		}
+		if ( B.measQw > 0 && bloomRedTest != 2 ) {  // the measure (measure_q.hlsl): 4 x 4 quarter texels a group
+			const Pc j {};
+			dispatch( 5, B.measSet, B.measQw, B.measQh, j, 4 );
+		}
+		if ( B.on ) {
+			const int n = B.mips;
+			for ( int i = 0; i < n; i++ ) {
+				Pc j {};
+				j.params[0] = b.thr;
+				j.params[1] = b.knee;
+				j.params[2] = i == 0 ? 1.0f : 0.0f;
+				j.params[3] = 1.0f;
+				j.ints[0] = b.red;
+				if ( i == 0 && b.hold ) {
+					dispatch( 0, B.downRing[b.holdK & 7], B.dims[0][0], B.dims[0][1], j, 8 );
+					Pc h {};
+					h.ints[1] = b.holdK;
+					h.ints[2] = b.holdN;
+					dispatch( 1, B.hold, B.dims[0][0], B.dims[0][1], h, 8 );
+				} else {
+					dispatch( 0, B.down[i], B.dims[i][0], B.dims[i][1], j, 8 );
+				}
+			}
+			for ( int offset = n - 1; offset > 0; offset-- ) {
+				const int level = offset - 1;
+				Pc j {};
+				j.params[0] = b.radius;
+				j.params[1] = b.srcW[level];
+				j.params[2] = b.accW[level];
+				j.params[3] = b.dispersion;
+				dispatch( 2, B.upSet[level], B.dims[level][0], B.dims[level][1], j, 8 );
+			}
+			Pc j {};  // the final tent once per pixel (bloom_comb.hlsl), lod 0 of the top; the tone pass weighs it
+			j.params[0] = b.radius;
+			j.params[2] = b.dispersion;
+			dispatch( 4, B.combSet, B.W, B.H, j, 8 );
+			B.records++;
+		}
+		if ( B.measQw > 0 ) {  // the measure's texels into the host buffer: read at the next frame (toneMeasureTake)
+			mb.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+			mb.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+			v.vkCmdPipelineBarrier( T.cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 1, &mb, 0, nullptr, 0,
+				nullptr );
+			VkBufferImageCopy c {};
+			c.imageSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
+			c.imageExtent = { std::uint32_t( B.measQw ), std::uint32_t( B.measQh ), 1 };
+			v.vkCmdCopyImageToBuffer( T.cmd, B.meas.img, VK_IMAGE_LAYOUT_GENERAL, B.read, 1, &c );
+			mb.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+			mb.dstAccessMask = VK_ACCESS_HOST_READ_BIT;
+			v.vkCmdPipelineBarrier( T.cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_HOST_BIT, 0, 1, &mb, 0, nullptr, 0, nullptr );
+		}
+		mb.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+		mb.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_MEMORY_READ_BIT;
+		v.vkCmdPipelineBarrier( T.cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT
+			| VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 1, &mb, 0, nullptr, 0, nullptr );
+	}
 	VkRenderPassBeginInfo rbi { VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO };
 	rbi.renderPass = T.pass;
 	rbi.framebuffer = T.fb[T.slot];
@@ -1966,6 +2633,46 @@ bool toneRecord( std::string & why )
 	}
 	if ( T.sorted )
 		draw( 0, 1, 1, 2 );
+	if ( B.on && T.sorted && bloomRedTest != 1 ) {
+		/* lane VKBLOOM1: cellhdr.cpp's mode-3 tail, the glow over the pixels mode 0 did not take (added, GL_ONE / GL_ONE):
+		 * stencil not 1 everywhere, then (split sky) the 1s at the far plane. First the view as mode 3 finds it, resolved
+		 * (GLAREBLOW2's backdrop: the pass ends, the resolve, the pass again with its contents loaded) */
+		if ( B.backdrop ) {
+			v.vkCmdEndRenderPass( T.cmd );
+			VkMemoryBarrier mb { VK_STRUCTURE_TYPE_MEMORY_BARRIER };
+			mb.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+			mb.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT | VK_ACCESS_TRANSFER_WRITE_BIT;
+			v.vkCmdPipelineBarrier( T.cmd, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT
+				| VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT | VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 1, &mb, 0,
+				nullptr, 0, nullptr );
+			/* every sample copied, then their mean in half float (bloom_back.hlsl) as GL's blit resolve into RGBA16F keeps it:
+			 * an RGBA8 resolve rounds the mean to 8 bits, and the vanilla curve's shoulder turned that into 199 levels */
+			VkImageCopy cp {};
+			cp.srcSubresource = cp.dstSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
+			cp.extent = { std::uint32_t( B.backMs.w ), std::uint32_t( B.backMs.h ), 1 };
+			v.vkCmdCopyImage( T.cmd, V.slot[T.slot].color, VK_IMAGE_LAYOUT_GENERAL, B.backMs.img, VK_IMAGE_LAYOUT_GENERAL, 1, &cp );
+			mb.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+			mb.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+			v.vkCmdPipelineBarrier( T.cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 1, &mb, 0, nullptr, 0,
+				nullptr );
+			const std::int32_t noJob[12] = {};
+			v.vkCmdBindPipeline( T.cmd, VK_PIPELINE_BIND_POINT_COMPUTE, B.pipe[6] );
+			v.vkCmdBindDescriptorSets( T.cmd, VK_PIPELINE_BIND_POINT_COMPUTE, B.layout, 0, 1, &B.backSet, 0, nullptr );
+			v.vkCmdPushConstants( T.cmd, B.layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, std::uint32_t( sizeof( noJob ) ), noJob );
+			v.vkCmdDispatch( T.cmd, std::uint32_t( ( B.back.w + 7 ) / 8 ), std::uint32_t( ( B.back.h + 7 ) / 8 ), 1 );
+			mb.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
+			mb.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+			v.vkCmdPipelineBarrier( T.cmd, VK_PIPELINE_STAGE_TRANSFER_BIT | VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+				VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, 0, 1, &mb, 0, nullptr, 0, nullptr );
+			v.vkCmdBeginRenderPass( T.cmd, &rbi, VK_SUBPASS_CONTENTS_INLINE );
+			v.vkCmdSetViewport( T.cmd, 0, 1, &vp );
+			v.vkCmdSetScissor( T.cmd, 0, 1, &sc );
+			v.vkCmdBindDescriptorSets( T.cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, T.layout, 0, 1, &T.set, 0, nullptr );
+		}
+		draw( 3, 3, 2, 1 );
+		if ( T.splitSky )
+			draw( 4, 3, 1, 1 );
+	}
 	v.vkCmdEndRenderPass( T.cmd );
 	if ( v.vkEndCommandBuffer( T.cmd ) != VK_SUCCESS ) {
 		why = "vkEndCommandBuffer (the tone pass) failed";
@@ -2987,7 +3694,9 @@ static bool toneCross( std::string & w )
 {
 	Tone & T = tone();
 	Gl & g = gl();
-	const GLenum lay[5] = { kLayoutGeneral, kLayoutGeneral, kLayoutGeneral, kLayoutGeneral, kLayoutGeneral };
+	GLenum lay[8];
+	for ( GLenum & l : lay )
+		l = kLayoutGeneral;
 	g.signalSemaphore( T.glDoneGl, 0, nullptr, T.defN, T.defTex, lay );
 	g.flush();  // Vulkan's wait sees GL's signal only once it is flushed
 	Worker & W = wk();
@@ -3071,17 +3780,23 @@ bool toneRun( const ToneRun & t, std::string & why )
 	if ( V.samples != T.samples || T.w > V.w || T.h > V.h )
 		return refuse( "the tone frame's shape is not the view's" );
 	const std::int32_t f = t.job.ints[0];
-	if ( f & ( ( 1 << 7 ) | ( 1 << 9 ) | ( 1 << 11 ) ) )
-		return refuse( "a job flag the pass does not take (FO4CS bloom / fog bloom / backdrop: GL's)" );
+	if ( f & ( 1 << 9 ) )
+		return refuse( "the fog bloom is on (GL's)" );
+	const bool bloomOn = ( f & ( 1 << 7 ) ) != 0, backOn = ( f & ( 1 << 11 ) ) != 0;
+	if ( ( bloomOn || backOn ) != ( t.bloom != nullptr ) || ( backOn && !bloomOn ) )
+		return refuse( "the Fusion Shaders bloom's flags and its job do not agree (GL's bloom)" );
 	const bool lutOn = ( f & ( 1 << 5 ) ) != 0, measureOn = ( f & ( 1 << 6 ) ) != 0;
 	if ( lutOn && !t.lut && !( T.lutHave && T.lutGen == t.lutGen ) )
 		return refuse( "the LUT is on but no LUT bytes" );
 	if ( measureOn && ( !t.measure || t.measureW < 1 || t.measureH < 1 ) )
 		return refuse( "the measure is on but no measure texture" );
 	// the last pass is done before its command buffer, set and staging are written again (the worker submitted it)
+	ToneBloomState & B = T.bloom;
 	if ( T.pending ) {
 		v.vkWaitForFences( v.dev, 1, &T.fence, VK_TRUE, 1000000000ull );
 		T.pending = false;
+		if ( B.measHave )
+			B.measDone = true;  // lane VKBLOOM1: its read buffer is filled (toneMeasureTake)
 	}
 	std::string w;
 	if ( !tonePipes( V.samples, w ) || !toneFbs( w ) )
@@ -3140,11 +3855,62 @@ bool toneRun( const ToneRun & t, std::string & why )
 			T.measureGen = t.measureGen;
 		}
 	}
+	/* lane VKBLOOM1: the Fusion Shaders bloom (cellbloom.cpp's job) and the exposure measure (cellhdr.cpp's ask) recorded
+	 * in this pass's command buffer: their images made once per shape (the worker drained first: makeShared submits) */
+	B.on = B.backdrop = false;
+	B.measQw = B.measQh = 0;
+	B.measRan = false;
+	const bool measAsk = t.measQw > 0 && t.measQh > 0 && !B.broken;
+	bool bloomFresh = false;
+	if ( t.bloom || measAsk ) {
+		const WwVkPresent::ToneBloom * b = t.bloom;
+		if ( B.broken )
+			return refuse( B.brokenWhy );
+		bool same = B.made && ( !b || ( B.pool && B.W == T.w && B.H == T.h && B.mips == b->mips && B.setFrame == T.color ) );
+		for ( int i = 0; same && b && i < b->mips; i++ )
+			same = B.dims[i][0] == b->dims[i][0] && B.dims[i][1] == b->dims[i][1];
+		if ( measAsk && ( !B.meas.img || !B.measSet || B.measW != t.measQw || B.measH != t.measQh ) )
+			same = false;
+		const int backS = view().samples;
+		const bool backNew = backOn && ( !B.back.img || !B.backSet || B.back.w != T.w || B.back.h != T.h || B.backMs.samples != backS );
+		if ( backNew )
+			same = false;
+		if ( !same ) {
+			drain();
+			std::string bw;
+			bool ok = toneBloomStatic( bw ) && ( !measAsk || toneBloomMeasure( t.measQw, t.measQh, bw ) ) && ( !b || toneBloomChain( *b, bw ) );
+			if ( ok && backNew ) {
+				ok = toneBloomBack( backS, bw );
+				T.descDirty = true;
+			}
+			if ( !ok ) {
+				B.broken = true;
+				B.brokenWhy = "the bloom in the tone pass broke: " + bw;
+				return refuse( B.brokenWhy );
+			}
+		}
+		if ( b ) {
+			B.job = *b;
+			bloomFresh = B.fresh;
+			if ( B.fresh )
+				B.job.holdN = 1;  // a new ring: its other layers hold nothing yet
+			B.fresh = false;
+			B.on = true;
+			B.backdrop = backOn;
+		}
+		if ( measAsk && B.measSet && B.readPtr ) {
+			B.measQw = t.measQw;
+			B.measQh = t.measQh;
+		}
+	}
 	const bool measureBound = measureOn && T.measureView;
 	static bool boundMeasure = false;
-	if ( T.descDirty || boundMeasure != measureBound ) {
-		const VkImageView views[7] = { T.colorView, T.stencilView, T.dummyView, measureBound ? T.measureView : T.dummyView, T.lutView,
-			T.colorView, T.dummyView };
+	static VkImageView boundComb = VK_NULL_HANDLE, boundBack = VK_NULL_HANDLE;
+	const VkImageView combView = B.on && B.comb.view ? B.comb.view : T.dummyView;
+	const VkImageView backView = B.backdrop && B.back.view && bloomRedTest != 3 ? B.back.view : T.dummyView;
+	if ( T.descDirty || boundMeasure != measureBound || boundComb != combView || boundBack != backView ) {
+		const VkImageView views[7] = { T.colorView, T.stencilView, combView, measureBound ? T.measureView : T.dummyView, T.lutView,
+			T.colorView, backView };
 		VkDescriptorImageInfo ii[8] = {};
 		VkWriteDescriptorSet wr[8] = {};
 		for ( std::uint32_t k = 0; k < 8; k++ ) {
@@ -3163,6 +3929,8 @@ bool toneRun( const ToneRun & t, std::string & why )
 		v.vkUpdateDescriptorSets( v.dev, 8, wr, 0, nullptr );
 		T.descDirty = false;
 		boundMeasure = measureBound;
+		boundComb = combView;
+		boundBack = backView;
 	}
 	T.slot = V.cur;
 	if ( t.vp[2] > 0 && t.vp[3] > 0 ) {
@@ -3181,8 +3949,11 @@ bool toneRun( const ToneRun & t, std::string & why )
 	T.defTex[1] = T.dsTex;
 	T.defTex[2] = V.slot[V.cur].colorTex;
 	T.defTex[3] = V.slot[V.cur].dsTex;
-	T.defTex[4] = T.measureTex;
-	T.defN = measureBound ? 5u : 4u;
+	T.defN = 4u;
+	if ( measureBound )
+		T.defTex[T.defN++] = T.measureTex;
+	if ( B.measQw > 0 )
+		T.defTex[T.defN++] = B.meas.tex;  // lane VKBLOOM1: GL blurs the measure's quarter target at the next frame
 	if ( T.backoff > 0 )
 		T.backoff--;
 	if ( T.mergeHint && !T.mergeRed && T.backoff == 0 ) {
@@ -3190,7 +3961,19 @@ bool toneRun( const ToneRun & t, std::string & why )
 		T.deferred = true;
 		T.st.deferred++;
 	} else if ( !toneCross( w ) ) {
+		B.on = false;
+		B.measQw = B.measQh = 0;
 		return breakOff( w );  // nothing signals vkDone: GL does not wait it; GL draws its quads this frame
+	}
+	if ( B.on ) {
+		B.runs += bloomFresh ? 2 : 1;  // a new chain: cellbloom.cpp sees a gap and starts its hold again
+		T.st.bloom++;
+	}
+	if ( B.measQw > 0 ) {
+		T.st.measure++;
+		B.measRan = B.measHave = true;
+		B.measDone = false;
+		B.measRecord++;
 	}
 	T.ranSinceTaa = true;
 	const double ms = nowMs() - t0;
@@ -3198,6 +3981,51 @@ bool toneRun( const ToneRun & t, std::string & why )
 	T.st.cpuMs += ms;
 	T.st.maxMs = std::max( T.st.maxMs, ms );
 	return true;
+}
+
+bool toneBloomReady()
+{
+	const Tone & T = tone();
+	return vk().ok && T.made && !T.broken && !T.bloom.broken && T.colorTex && T.samples > 1 && vk().vkCmdDispatch
+		&& vk().vkCreateComputePipelines;
+}
+
+std::uint64_t toneBloomRuns()
+{
+	return tone().bloom.runs;
+}
+
+bool toneMeasureRan()
+{
+	return tone().bloom.measRan;
+}
+
+int toneMeasureTake( const float *& px, int & qw, int & qh, unsigned & tex )
+{
+	Tone & T = tone();
+	ToneBloomState & B = T.bloom;
+	px = nullptr;
+	qw = qh = 0;
+	tex = 0;
+	if ( !B.measHave || B.broken || !B.readPtr || !B.meas.tex )
+		return 0;
+	bool done = B.measDone;
+	if ( !done && T.deferred )
+		return -1;  // its pass waits for the TAA's crossing
+	if ( !done && T.pending ) {
+		const VkResult r = vk().vkGetFenceStatus( vk().dev, T.fence );
+		if ( r != VK_SUCCESS )
+			return r == VK_NOT_READY ? -1 : 0;
+		done = true;
+	}
+	B.measHave = false;
+	if ( !done )
+		return 0;  // its pass never went in (a failed submit): the caller measures on GL
+	px = B.readPtr;
+	qw = B.measW;
+	qh = B.measH;
+	tex = B.meas.tex;
+	return 1;
 }
 
 void toneOnGl( const char * why )
@@ -3211,7 +4039,7 @@ ToneStat takeToneStat()
 {
 	Tone & T = tone();
 	ToneStat s = T.st;
-	s.mb = T.frameMb + T.measureMb + T.fixedMb;
+	s.mb = T.frameMb + T.measureMb + T.fixedMb + T.bloom.mb + T.bloom.measMb + T.bloom.backMb;
 	s.pipelines = T.pipelines;
 	s.buildMs = T.buildMs;
 	if ( T.broken && s.failWhy.empty() )
@@ -4552,8 +5380,15 @@ bool frame( QOpenGLWindow * w, const std::function<void()> & paint )
 					"pipelines built in %3 ms, %4 MB frame + measure + LUT, drawing thread %5 ms, max %6)" )
 					.arg( ts.runs ).arg( ts.pipelines ).arg( ts.buildMs, 0, 'f', 1 ).arg( ts.mb, 0, 'f', 1 )
 					.arg( ts.cpuMs / ts.runs, 0, 'f', 3 ).arg( ts.maxMs, 0, 'f', 3 );
+				// lane VKBLOOM1: the Fusion Shaders bloom and the exposure measure in the same command buffer
+				tone += QStringLiteral( "; bloom in the pass %1 frames (%2), measure in the pass %3 frames (%4)" )
+					.arg( ts.bloom )
+					.arg( wwEnvInt( "WW_VKVIEW_BLOOM_RED" ) == 1 ? QStringLiteral( "red WW_VKVIEW_BLOOM_RED=1" )
+						: ::tone().bloom.broken ? QString::fromStdString( ::tone().bloom.brokenWhy ) : QStringLiteral( "on" ) )
+					.arg( ts.measure )
+					.arg( wwEnvInt( "WW_IS_MEASURE_VK_RED" ) == 1 ? QStringLiteral( "red WW_IS_MEASURE_VK_RED=1" ) : QStringLiteral( "on" ) );
 				if ( ts.gl > 0 )
-					tone += QStringLiteral( ", on GL %1 frames (last: %2)" ).arg( ts.gl ).arg( QString::fromStdString( ts.glWhy ) );
+					tone +=QStringLiteral( ", on GL %1 frames (last: %2)" ).arg( ts.gl ).arg( QString::fromStdString( ts.glWhy ) );
 				if ( ts.fails > 0 )
 					tone += QStringLiteral( ", %1 refused (last: %2)" ).arg( ts.fails ).arg( QString::fromStdString( ts.failWhy ) );
 			} else {
@@ -4598,8 +5433,8 @@ bool frame( QOpenGLWindow * w, const std::function<void()> & paint )
 				sayRoute( QStringLiteral( "vk view, %1 of %2 frames: GL draws the view into the present device's images (%3x%4 "
 					"MS%5 RGBA8 + D24S8, %6 views, %7 MB, made in %8 ms), the worker resolves on Vulkan (no GL blit: drawing "
 					"thread present %9 ms); %10 views still read when GL wanted them (wait %11 ms); bakert hop none (the view is "
-					"made on the present device); %12; still on GL into the view: the FO4CS bloom's tone (mode 3) and the fog "
-					"bloom's, clouds in front (%13), P7, lens flare, overlays + QPainter (the overlay target is the view); %14" )
+					"made on the present device); %12; still on GL into the view: the fog bloom's tone (and the Fusion "
+					"Shaders bloom's mode 3 under WW_VKVIEW_BLOOM_RED=1), clouds in front (%13), P7, lens flare, overlays + QPainter (the overlay target is the view); %14" )
 					.arg( winView ).arg( winN ).arg( vs.w ).arg( vs.h ).arg( vs.samples ).arg( vs.views ).arg( vs.mb, 0, 'f', 1 )
 					.arg( vs.makeMs, 0, 'f', 1 ).arg( winSum / winN, 0, 'f', 3 ).arg( vs.busy ).arg( vs.waitMs, 0, 'f', 3 )
 					.arg( tone ).arg( shared ).arg( taa ) );

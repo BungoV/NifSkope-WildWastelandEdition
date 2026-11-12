@@ -5,6 +5,7 @@
 #include "features/post/gametaa.h"	// MODULES1 R8-2: the frame's jitter (the level-0 hold)
 #include "features/post/cellfogbloom.h"	// lane PERFFIX3: the per-pixel combine stands down when the fog's gain picks the lod per sample
 #include "features/vkframe/vkframe.h"	// lane VKFRAME1: the chain's down / hold / up on Vulkan (WW_VKPOST_RED)
+#include "features/vkframe/vkpresent.h"	// lane VKBLOOM1: the whole chain in the tone pass (WW_VKVIEW_BLOOM_RED)
 #include "gl/cellunits.h"	// lane PERFFIX3: WwPassUnit::HdrBloomComb
 #include "gl/celllights.h"
 #include "gl/celllooks.h"
@@ -76,6 +77,9 @@ struct BloomGpu
 	Matrix ringRot;
 	Vector3 ringPos;
 	bool ringSaid = false;
+	// lane VKBLOOM1: the ring lives on the present device (its own image): toneBloomRuns() after the last job, the route
+	bool ringPresent = false;
+	std::uint64_t presentRuns = 0;
 	/* lane VKFRAME1 (plan step P1): src, mip, up and the ring are images Vulkan made and GL imported (vkframe.cpp), so
 	 * the chain runs on either side on the same names; vkTried: asked once for these targets */
 	bool vkShared = false, vkTried = false;
@@ -106,6 +110,9 @@ struct BloomState
 	int w = 0, h = 0;
 	float finalWeight = 0.0f, radius = 1.0f, dispersion = 0.0f;
 	float ecK = -1.0f, ecGain = 1.0f;	// lane PHYSUNITS1: the glare's lerp k (< 0: additive) and the chain's flat-field gain
+	// lane VKBLOOM1: the tone map runs on the present device this frame (cellhdr.cpp says so first); the chain went there
+	bool presentAllow = false, present = false;
+	WwVkPresent::ToneBloom presentJob;
 	QString last = QStringLiteral( "vanilla" ), said;
 	QString selfTest;
 };
@@ -504,10 +511,62 @@ QString wwCellBloomEcho()
 	return QStringLiteral( "cell bloom: " ) + bs().last;
 }
 
+namespace {
+/* the final combine's weight; one mip: its band weight too (UpdateUpsampleConstants, a_finalCombine). Lane PHYSUNITS1: the
+ * top's gain on a flat frame (each up pass: source x srcW + tent(accumulated) x accW, the tent and the Karis average keep a
+ * flat field); the glare's weight is k over it, so the blur carries the frame's energy. Lane VKBLOOM1: both routes ask here */
+float finalWeightOf( BloomState & s, const WwCellBloomSettings & set, float weight, int mipCount, bool ec )
+{
+	float finalWeight = weight;
+	if ( mipCount == 1 ) {
+		const float base = std::max( set.intensity, 0.0f );
+		const float glare = set.glare ? std::max( set.glareStrength, 0.0f ) : 0.0f;
+		const float total = std::max( base + glare, kEps );
+		finalWeight *= base / total + ( glare / total ) * wwBloomGlareBand( set, 0, 1 );
+	}
+	s.ecGain = 1.0f;
+	if ( ec ) {
+		float acc = 1.0f;
+		for ( int offset = mipCount - 1; offset > 0; offset-- ) {
+			float srcW = 1.0f, accW = 1.0f;
+			bandWeights( set, offset - 1, offset, mipCount, srcW, accW );
+			acc = srcW + accW * acc;
+		}
+		s.ecGain = std::max( acc, kEps );
+		finalWeight = s.ecK / s.ecGain;
+	}
+	return finalWeight;
+}
+}	// namespace
+
+void wwCellBloomPresentAllow( bool allow )
+{
+	bs().presentAllow = allow;
+}
+
+bool wwCellBloomPresent()
+{
+	return bs().replacing && bs().present;
+}
+
+const WwVkPresent::ToneBloom & wwCellBloomPresentJob()
+{
+	return bs().presentJob;
+}
+
+void wwCellBloomPresentWeights( float & finalWeight, float & ecK, float & fogCap )
+{
+	const BloomState & s = bs();
+	finalWeight = s.finalWeight;
+	ecK = s.ecK > 0.0f ? s.ecK : 0.0f;
+	fogCap = wwEnvStr( "WW_CELL_FOGBLOOM_RED" ).trimmed() == QLatin1StringView( "glare" ) ? 1.0e9f : 2.0f;
+}
+
 bool wwCellBloomRun( Scene * scene, unsigned hdrColor, unsigned ds, int W, int H, int samples, unsigned dsFormat, bool dsTexture )
 {
 	BloomState & s = bs();
 	s.replacing = false;
+	s.present = false;
 	s.top = 0;
 	Q_UNUSED( dsFormat );
 	if ( !s.set.fo4cs ) {
@@ -531,6 +590,97 @@ bool wwCellBloomRun( Scene * scene, unsigned hdrColor, unsigned ds, int W, int H
 	Renderer * r = scene->renderer;
 	auto fn = r->fn;
 	BloomGpu & g = bloomGpus()[r];
+	/* lane VKBLOOM1: the tone map runs on the present device (cellhdr.cpp allowed it) and the frame is its shared one: the
+	 * whole chain goes into that pass (WwVkPresent::ToneBloom, the same kernels as runBloom), nothing on GL here. The
+	 * dump, the combine's red, Bloom Mip's wide red and the fog bloom keep GL's chain. Red WW_VKVIEW_BLOOM_RED=1. */
+	const float perPixelPlan = !wwLookOn( WwLook::BloomMip ) ? 0.0f
+		: wwEnvStr( "WW_CELL_BLOOM_PERPIX_RED" ) == QLatin1String( "wide" ) ? -1.0f : 1.0f;
+	const float dispersionPlan = set.glare ? std::clamp( set.glareDispersion, 0.0f, 2.0f ) : 0.0f;
+	if ( s.presentAllow && wwEnvInt( "WW_VKVIEW_BLOOM_RED" ) != 1 && samples > 1 && s.dumpDir.isEmpty() && !s.combRed
+		&& dispersionPlan > 0.0f && perPixelPlan >= 0.0f && !wwCellFogBloomOn() && mipCount <= WwVkPresent::kToneBloomMips
+		&& WwVkPresent::toneFrameIs( hdrColor ) && WwVkPresent::toneBloomReady() ) {
+		WwVkPresent::ToneBloom & j = s.presentJob;
+		s.ecK = wwPhysBloomK();
+		const bool ec = s.ecK > 0.0f;
+		j = WwVkPresent::ToneBloom();
+		j.mips = mipCount;
+		for ( int i = 0; i < mipCount; i++ ) {
+			j.dims[i][0] = dims[i][0];
+			j.dims[i][1] = dims[i][1];
+		}
+		j.thr = ec ? 0.0f : std::clamp( set.threshold, 0.0f, 64.0f );
+		j.knee = ec ? 0.0f : std::clamp( set.softKnee, 0.0f, 1.0f );
+		j.red = s.red;
+		// the hold as GL's (MODULES1 R8-2); the ring is the present device's, so a lost pass or a new route counts from 1
+		const std::uint64_t runs = WwVkPresent::toneBloomRuns();
+		if ( !g.ringPresent || runs != g.presentRuns + 1 )
+			g.ringN = 0;
+		g.ringPresent = true;
+		float jx = 0.0f, jy = 0.0f;
+		Matrix4 holdProj;
+		j.hold = !s.holdRed && s.impulse <= 0.0f && wwGameTaaJitter( jx, jy );
+		if ( j.hold ) {
+			const bool hasProj = wwGameTaaUnjittered( holdProj );
+			const bool still = g.ringN > 0 && hasProj && g.ringProj == holdProj
+				&& g.ringRot == scene->view.rotation && g.ringPos == scene->view.translation;
+			j.holdN = still ? std::min( g.ringN + 1, kHoldFrames ) : 1;
+			j.holdK = ( g.ringK + 1 ) % kHoldFrames;
+			g.ringN = j.holdN;
+			g.ringK = j.holdK;
+			g.ringProj = holdProj;
+			g.ringRot = scene->view.rotation;
+			g.ringPos = scene->view.translation;
+		} else {
+			g.ringN = 0;
+		}
+		g.presentRuns = runs;
+		j.radius = wwBloomRadius( set );
+		j.dispersion = dispersionPlan;
+		for ( int offset = mipCount - 1; offset > 0; offset-- )
+			bandWeights( set, offset - 1, offset, mipCount, j.srcW[offset - 1], j.accW[offset - 1] );
+		// cell_bloom_src.frag's uniforms, from the mirror wwCellLightsUniforms fills (as the Vulkan source of runBloom)
+		if ( auto prog = r->useProgram( "cell_bloom_src.prog" ) ) {
+			prog->wwMirror.on = true;
+			wwCellLightsUniforms( scene );
+			auto uniI = [&]( const char * n ) {
+				GLint v = 0;
+				const int l = prog->uniLocation( n );
+				if ( l >= 0 && !prog->wwMirror.get( l, WwCellUni::K1i, &v, 1 ) )
+					fn->glGetUniformiv( prog->id, l, &v );
+				return v;
+			};
+			GLfloat e = 1.0f;
+			const int le = prog->uniLocation( "cellIsExposure" );
+			if ( le >= 0 && !prog->wwMirror.get( le, WwCellUni::K1f, &e, 1 ) )
+				fn->glGetUniformfv( prog->id, le, &e );
+			j.on = uniI( "cellOn" ) != 0 && uniI( "cellIsOn" ) != 0;
+			j.exposure = ( uniI( "cellIsRed" ) & 2 ) != 0 ? 1.0f : e;
+			r->stopProgram();
+		} else {
+			note( s, QStringLiteral( "fo4cs refused (no cell_bloom_src.prog): the vanilla bloom drawn" ) );
+			return false;
+		}
+		j.impulseX = float( W / 2 );
+		j.impulseY = float( H / 2 );
+		j.impulse = s.impulse > 0.0f ? s.impulse : 0.0f;
+		s.replacing = true;
+		s.present = true;
+		s.w = W;
+		s.h = H;
+		s.radius = j.radius;
+		s.dispersion = j.dispersion;
+		s.perPixel = perPixelPlan;
+		s.finalWeight = finalWeightOf( s, set, weight, mipCount, ec );
+		note( s, QStringLiteral( "fo4cs on the present device, in the tone pass: mips=%1 (%2x%3..%4x%5) threshold=%6 knee=%7 radius=%8 "
+			"weight=%9 hold=%10" ).arg( mipCount ).arg( dims[0][0] ).arg( dims[0][1] ).arg( dims[mipCount - 1][0] ).arg( dims[mipCount - 1][1] )
+			.arg( f6( j.thr ), f6( j.knee ), f6( j.radius ), f6( s.finalWeight ),
+				j.hold ? QStringLiteral( "%1/8" ).arg( j.holdN ) : QStringLiteral( "off" ) ) );
+		return false;	// GL drew nothing: cellhdr.cpp hands the job to toneRun
+	}
+	if ( g.ringPresent ) {	// back on GL: its own ring counts from 1
+		g.ringPresent = false;
+		g.ringN = 0;
+	}
 	const int S = std::max( samples, 1 );
 	/* lane VKFRAME1 (build 83, frame 3: 357 ms): freeing the shared chain waits for every frame in flight, so the chain is
 	 * built only once the view's size has held kVkSettleMs; a size still moving (the first frames) gets GL's own textures */
@@ -905,27 +1055,7 @@ bool wwCellBloomRun( Scene * scene, unsigned hdrColor, unsigned ds, int W, int H
 		r->stopProgram();
 		accumulated = g.up[level];
 	}
-	// the final combine's weight; one mip: its band weight too (UpdateUpsampleConstants, a_finalCombine)
-	float finalWeight = weight;
-	if ( mipCount == 1 ) {
-		const float base = std::max( set.intensity, 0.0f );
-		const float glare = set.glare ? std::max( set.glareStrength, 0.0f ) : 0.0f;
-		const float total = std::max( base + glare, kEps );
-		finalWeight *= base / total + ( glare / total ) * wwBloomGlareBand( set, 0, 1 );
-	}
-	/* lane PHYSUNITS1: the top's gain on a flat frame (each up pass: source x srcW + tent(accumulated) x accW, the tent
-	 * and the Karis average keep a flat field); the glare's weight is k over it, so the blur carries the frame's energy */
-	s.ecGain = 1.0f;
-	if ( ec ) {
-		float acc = 1.0f;
-		for ( int offset = mipCount - 1; offset > 0; offset-- ) {
-			float srcW = 1.0f, accW = 1.0f;
-			bandWeights( set, offset - 1, offset, mipCount, srcW, accW );
-			acc = srcW + accW * acc;
-		}
-		s.ecGain = std::max( acc, kEps );
-		finalWeight = s.ecK / s.ecGain;
-	}
+	const float finalWeight = finalWeightOf( s, set, weight, mipCount, ec );
 	if ( ok && check ) {
 		const GLenum err = fn->glGetError();
 		if ( trustErrCheck && err != GL_NO_ERROR )
@@ -1091,11 +1221,13 @@ void wwCellBloomFinal( Renderer * r, int unit, int knownActive )
 	auto prog = r ? r->getCurrentProgram() : nullptr;
 	if ( !prog )
 		return;
+	// lane VKBLOOM1: a chain sent to the present device is not GL's (a refused toneRun draws GL's quads without it)
+	const bool glOn = s.replacing && !s.present;
 	prog->uni1i( "cellIsFoBloom", unit );	// always its own unit: a sampler2D, never left on 0 beside another type
-	prog->uni1b( "cellIsFoBloomOn", s.replacing );
+	prog->uni1b( "cellIsFoBloomOn", glOn );
 	prog->uni1i( "cellIsFoBloomComb", WwPassUnit::HdrBloomComb );	// lane PERFFIX3: its own unit too
-	prog->uni1b( "cellIsFoBloomCombOn", s.replacing && s.combTex != 0 );
-	if ( !s.replacing )
+	prog->uni1b( "cellIsFoBloomCombOn", glOn && s.combTex != 0 );
+	if ( !glOn )
 		return;
 	auto fn = r->fn;
 	const GLint prevActive = WwCellUni::activeUnit( fn, knownActive );	// lane CELLUNI5: the tone quads' unit, or asked
@@ -1120,7 +1252,7 @@ void wwCellBloomFinal( Renderer * r, int unit, int knownActive )
 void wwCellBloomDone( Renderer * r, int unit, int knownActive )
 {
 	BloomState & s = bs();
-	if ( s.replacing && r ) {
+	if ( s.replacing && !s.present && r ) {
 		auto fn = r->fn;
 		const GLint prevActive = WwCellUni::activeUnit( fn, knownActive );	// lane CELLUNI5
 		fn->glActiveTexture( GLenum( GL_TEXTURE0 + unit ) );
@@ -1139,6 +1271,7 @@ void wwCellBloomDone( Renderer * r, int unit, int knownActive )
 	}
 	s.topMips = false;
 	s.replacing = false;
+	s.present = false;
 	s.top = 0;
 	s.combTex = 0;
 }
