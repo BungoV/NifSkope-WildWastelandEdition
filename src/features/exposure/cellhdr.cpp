@@ -18,6 +18,7 @@
 #include "features/post/gametaa.h"	// lane TAA3: the Modern resolve before the tone map
 #include "features/exposure/physunits.h"	// lane PHYSUNITS1: the physical camera; the frame in RGBA32F
 #include "features/lights/lightmeas.h"	// lane LIGHTMEAS1: the light at the camera in real units (measure only)
+#include "features/vkframe/vkframe.h"	// lane VKFRAME1 round 3: the frame shared with the Vulkan bloom source
 
 #include <QDebug>
 #include <QFile>
@@ -125,6 +126,8 @@ struct HdrGpu
 	bool cfgValid = false;	// lane SYNC1: the view's (framebuffer 0) depth format and samples at this size
 	int cfgW = 0, cfgH = 0, cfgSamples = 0;
 	GLenum cfgFormat = 0;
+	bool vkShared = false;	// lane VKFRAME1 round 3: color and ds are Vulkan's images GL imported (WwVkPost::freeFrame drops them)
+	bool vkTried = false;	// a share was refused once at this shape: GL's own from then on
 };
 
 // lane SYNC1: the state the measure and the tone quads restore, read once (sync) or each where it was (red)
@@ -1146,10 +1149,43 @@ bool wwCellHdrBegin( Scene * scene )
 	}
 	const int S = std::max( int( samples ), 1 );
 	const bool wantTex = stexOn() && !g.stexFailed;
+	/* lane VKFRAME1 round 3 (P3): with the Vulkan bloom on, the frame's colour and depth / stencil are images Vulkan made
+	 * and GL imported, so the bloom's source reads them on Vulkan (RGBA16F only; the stencil read needs the texture). */
+	const bool wantVk = wantTex && hdrFormat().gl == GL_RGBA16F && WwVkPost::ready();
 	if ( !g.fbo || g.w != W || g.h != H || g.samples != S || g.dsFormat != dsFormat || g.dsTex != wantTex
-		|| g.colorFormat != hdrFormat().gl ) {
+		|| g.colorFormat != hdrFormat().gl || ( wantVk && !g.vkShared && !g.vkTried ) ) {
 		if ( !g.fbo )
 			fn->glGenFramebuffers( 1, &g.fbo );
+		if ( g.w != W || g.h != H || g.samples != S || g.dsFormat != dsFormat )
+			g.vkTried = false;	// a new shape is worth a new try
+		if ( g.vkShared ) {	// Vulkan's: dropped there, not deleted here
+			WwVkPost::freeFrame( r );
+			g.color = g.ds = 0;
+			g.dsTex = g.vkShared = false;
+		}
+		if ( wantVk && !g.vkTried ) {
+			QString vkWhy;
+			unsigned vc = 0, vd = 0;
+			if ( g.color )
+				fn->glDeleteTextures( 1, &g.color );
+			if ( g.ds && g.dsTex )
+				fn->glDeleteTextures( 1, &g.ds );
+			else if ( g.ds )
+				fn->glDeleteRenderbuffers( 1, &g.ds );
+			g.color = g.ds = 0;
+			g.dsTex = false;
+			g.vkShared = WwVkPost::makeFrame( r, W, H, S, dsFormat, vc, vd, vkWhy );
+			if ( g.vkShared ) {
+				g.color = vc;
+				g.ds = vd;
+				g.dsTex = true;
+				g.colorFormat = GL_RGBA16F;
+			} else {
+				g.vkTried = true;
+				qInfo().noquote() << QStringLiteral( "cell hdr: the frame stays GL's own (%1)" ).arg( vkWhy );
+			}
+		}
+		if ( !g.vkShared ) {
 		if ( g.color )
 			fn->glDeleteTextures( 1, &g.color );
 		fn->glGenTextures( 1, &g.color );
@@ -1191,6 +1227,7 @@ bool wwCellHdrBegin( Scene * scene )
 			fn->glRenderbufferStorageMultisample( GL_RENDERBUFFER, S, dsFormat, W, H );
 			fn->glBindRenderbuffer( GL_RENDERBUFFER, 0 );
 		}
+		}	// !g.vkShared (the GL body above keeps its indent: one diff hunk)
 		fn->glBindFramebuffer( GL_FRAMEBUFFER, g.fbo );
 		fn->glFramebufferTexture2D( GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D_MULTISAMPLE, g.color, 0 );
 		if ( g.dsTex )

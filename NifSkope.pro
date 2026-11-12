@@ -281,6 +281,8 @@ HEADERS += \
 	src/features/near/cellvrs.h \
 	src/features/particles/cellfxres.h \
 	src/features/post/cellbloom.h \
+	src/features/vkframe/vkframe.h \
+	src/features/vkframe/vkframegraph.h \
 	src/features/post/cellfogbloom.h \
 	src/features/sky/atmosphere.h \
 	src/features/clouds/cloudmap.h \
@@ -653,6 +655,7 @@ SOURCES += \
 	src/features/particles/cellfxres.cpp \
 	src/features/particles/particlepreroll.cpp \
 	src/features/post/cellbloom.cpp \
+	src/features/vkframe/vkframe.cpp \
 	src/features/post/cellfogbloom.cpp \
 	src/features/sky/atmosphere.cpp \
 	src/features/clouds/cloudmap.cpp \

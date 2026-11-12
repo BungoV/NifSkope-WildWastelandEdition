@@ -35,6 +35,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "features/overlays/debugview.h"	// lane DEBUGVIEW1: the live debug views
 #include "filebuf.hpp"	// MODULES1: FileBuffer::trimMappedViews
 #include "wwhwuse.h"	// lane EMPTY240 round 3: the stream pool, the RAM cache and the archive census in `hardware use:`
+#include "features/vkframe/vkframe.h"	// lane VKFRAME1: the Vulkan frame's words in `hardware use:`, the `vk frame:` line
 #include "features/near/cellbindless.h"	// lane EMPTY240 R3-4: the `near draws:` line's bindless and multi-draw verdict
 #include "features/ao/ao.h"	// lane EMPTY240 R3-4: and the depth prepass's note
 #include "wwflyfix.h"	// FLYFIX1's free-camera rules (their old way is a test twin now)
@@ -3952,7 +3953,7 @@ static void wwGpuFrameFinish()
 		(long long) rc.misses, (long long) rc.evicted, rc.on ? "" : "; off: WW_RAMCACHE_RED=1",
 		(unsigned long long) arOpens, (unsigned long long) arShared, arLive,
 		(long long)( cc.usedBytes >> 20 ), (long long)( cc.maxBytes >> 20 ),
-		qPrintable( rtddgiAsyncUse( g.hwFrames ) ) );
+		qPrintable( rtddgiAsyncUse( g.hwFrames ) + wwVkFrameUse( g.hwFrames, g.hwGpuMs, wallMs ) ) );
 	/* EMPTY240 R3-4: the draws' program routes in the same window. A cell-lit draw that asks the bindless twin sets only
 	 * its row (the twin is the per-draw program cache); one that does not runs the whole setupProgram walk. */
 	std::int64_t rt[WwHw::RouteCount];

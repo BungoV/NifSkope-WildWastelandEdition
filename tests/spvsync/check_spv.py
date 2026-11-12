@@ -19,6 +19,10 @@ HLSL_SPECS = [('src/features/gi/rtddgi', k, 'vulkan1.2', 'rtddgi_%s_spv' % k) fo
 	('src/features/gi/bakert', 'rqx', 'vulkan1.2', 'bakert_rqx_spv'),
 ]
 BAKERT_HK = '\t"$DXC" -spirv -fspv-target-env="$2" -T "${T:-cs_6_0}" -E main -O0 -Fo "$1.hlsl.spv" '
+# lane VKFRAME1: the bloom chain, built by src/features/vkframe/vkframe_spirv.sh from res/shaders/hlsl/post/<k>.hlsl
+VKFRAME_KERNELS = ('down', 'hold', 'up', 'src', 'comb')
+HLSL_SPECS += [('src/features/vkframe', 'bloom_' + k, 'vulkan1.2', 'vkframe_bloom_%s_spv' % k) for k in VKFRAME_KERNELS]
+HLSL_DIR = {'src/features/vkframe': 'res/shaders/hlsl/post'}   # others: res/shaders/hlsl/<basename of the dir>
 DEFAULT_G = 'E:/Tools/RenderDoc/RenderDoc_1.45_64/plugins/spirv/glslangValidator.exe'
 DEFAULT_DXC = 'E:/Tools/dxc/bin/x64/dxc.exe'
 
@@ -56,6 +60,11 @@ def script_ok(tree):
 	for k, env in re.findall(r'^hk ([a-z]+) (\S+)', b, re.M):
 		if k not in bk:
 			bad.append('src/features/gi/bakert_spirv.sh: hk %s is not in this checker' % k)
+	vf = open(os.path.join(tree, 'src/features/vkframe/vkframe_spirv.sh'), encoding='utf-8', errors='replace').read()
+	m = re.search(r'^for k in ([a-z ]+); do\n\t"\$DXC" -spirv -fspv-target-env=vulkan1\.2 -T cs_6_0 -E main ', vf, re.M)
+	vloop = m.group(1).split() if m else []
+	if sorted(vloop) != sorted(VKFRAME_KERNELS):
+		bad.append('src/features/vkframe/vkframe_spirv.sh: its DXC loop (%s) is not this checker\'s bloom kernels' % ' '.join(vloop))
 	return bad
 
 
@@ -157,10 +166,11 @@ def main(argv):
 			for f in (spv, out):
 				if os.path.exists(f):
 					os.remove(f)
-			src = os.path.join(tree, 'res/shaders/hlsl', os.path.basename(d), k + '.hlsl')
+			src = os.path.join(tree, HLSL_DIR.get(d, 'res/shaders/hlsl/' + os.path.basename(d)), k + '.hlsl')
 			m = re.search(r'hlsl profile: (cs_6_[0-9])', open(src, encoding='utf-8', errors='replace').read())
-			r = subprocess.run([dxc, '-spirv', '-fspv-target-env=' + env, '-T', m.group(1) if m else 'cs_6_0', '-E', 'main',
-			                    '-O0', '-Fo', spv, src], capture_output=True, text=True, timeout=300)
+			opt = [] if d == 'src/features/vkframe' else ['-O0']   # vkframe_spirv.sh builds optimised
+			r = subprocess.run([dxc, '-spirv', '-fspv-target-env=' + env, '-T', m.group(1) if m else 'cs_6_0', '-E', 'main']
+			                   + opt + ['-Fo', spv, src], capture_output=True, text=True, timeout=300)
 			if r.returncode == 0:
 				r = subprocess.run([sys.executable, '-I', os.path.join(tree, 'tools/spv_header.py'), spv, vn, out],
 				                   capture_output=True, text=True, timeout=60, stdin=subprocess.DEVNULL)
@@ -171,8 +181,9 @@ def main(argv):
 			if a == c:
 				print('OK    %s/%s %d B (HLSL)' % (d, name, len(c)))
 			else:
-				fails.append('%s/%s: STALE, rebuilt %d B vs committed %d B (%s); run src/features/gi/%s_spirv.sh'
-				             % (d, name, len(a), len(c), first_diff(a, c), os.path.basename(d)))
+				fails.append('%s/%s: STALE, rebuilt %d B vs committed %d B (%s); run %s'
+				             % (d, name, len(a), len(c), first_diff(a, c), 'src/features/vkframe/vkframe_spirv.sh'
+				                if d == 'src/features/vkframe' else 'src/features/gi/%s_spirv.sh' % os.path.basename(d)))
 	for f in fails:
 		print('FAIL  ' + f)
 	for s in skips:
