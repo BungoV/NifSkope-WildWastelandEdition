@@ -16,6 +16,7 @@ BSD License - see nifskope.h
 #include "gl/lookdevstage.h"
 #include "gl/glscene.h"
 #include "gl/gltex.h"
+#include "gl/wwuploadcap.h"	// lane EMPTY240 R6-5: array-layer sheets in the paint's upload budget
 #include "features/far-lod/impostorpick.h"
 #include "features/far-lod/lodpreview.h"
 #include "gl/renderer.h"
@@ -122,6 +123,8 @@ Vector3 eyeWorld( const Scene * scene )
  *
  *  Cached per GL context, file and layer -- a refusal too, so 19,705 cards a
  *  frame do not re-read a file that failed once. */
+int sheetWaits = 0;	// lane EMPTY240 R6-5: array layers left for a later paint by the upload budget, all so far
+
 GLuint arrayLayerTexture( Scene * scene, const QString & file, int layer, QString * err )
 {
 	struct Entry { GLuint id = 0; QString err; };
@@ -134,15 +137,45 @@ GLuint arrayLayerTexture( Scene * scene, const QString & file, int layer, QStrin
 			*err = it->err;
 		return it->id;
 	}
+	/* lane EMPTY240 R6-5: build 78's first paint spent 461 ms CPU in far-cards for 37 draws. Each layer read and decoded
+	 * its whole DDS file again (8 layers = 8 reads) and uploaded it outside the paint's upload budget. The file just
+	 * decoded now serves its next layers, every layer is charged to the budget, and past it a layer waits a paint (its
+	 * set waits with it). Red WW_FARSHEETCAP_RED=1: a read per layer, no budget (build 78). Line `far sheets:`. */
+	const bool capRed = wwEnvInt( "WW_FARSHEETCAP_RED" ) == 1;
+	if ( !capRed && WwUp::spent() ) {
+		sheetWaits++;
+		WwUp::deferTex();
+		if ( err )
+			*err = QStringLiteral( "waits a paint (the upload budget)" );
+		return 0;
+	}
+	static QString lastFile;
+	static gli::texture lastTex;
+	static int saidMade = 0, made = 0, reads = 0;
+	static double madeMs = 0.0;
+	static QElapsedTimer sinceSaid;
+	QElapsedTimer took;
+	took.start();
+	WwUp::Charge wwUpCharge( !capRed );
 	Entry e;
 	do {
-		QFile f( file );
-		if ( !f.open( QIODevice::ReadOnly ) ) {
-			e.err = QStringLiteral( "cannot open %1" ).arg( file );
-			break;
+		gli::texture t;
+		if ( !capRed && !lastTex.empty() && lastFile == file )
+			t = lastTex;	// the next layer of the file just read: no second read and decode
+		else {
+			QFile f( file );
+			if ( !f.open( QIODevice::ReadOnly ) ) {
+				e.err = QStringLiteral( "cannot open %1" ).arg( file );
+				break;
+			}
+			const QByteArray bytes = f.readAll();
+			t = gli::load_dds( bytes.constData(), std::size_t( bytes.size() ) );
+			reads++;
+			if ( !capRed ) {
+				lastFile = file;
+				lastTex = t;
+			}
 		}
-		const QByteArray bytes = f.readAll();
-		gli::texture t = gli::load_dds( bytes.constData(), std::size_t( bytes.size() ) );
 		if ( t.empty() ) {
 			e.err = QStringLiteral( "%1 is not a DDS this build reads" ).arg( file );
 			break;
@@ -176,9 +209,22 @@ GLuint arrayLayerTexture( Scene * scene, const QString & file, int layer, QStrin
 			else
 				fn->glTexImage2D( GL_TEXTURE_2D, GLint( level ), GLint( fmt.Internal ), ext.x, ext.y, 0,
 						GLenum( fmt.External ), GLenum( fmt.Type ), t.data( std::size_t( layer ), 0, level ) );
+			if ( !capRed )
+				WwUp::Charge::addBytes( qint64( t.size( level ) ) );
 		}
+		if ( !capRed )
+			WwUp::texMade();
+		made++;
 	} while ( false );
 	cache.insert( key, e );
+	madeMs += double( took.nsecsElapsed() ) * 1e-6;
+	if ( made != saidMade && ( !sinceSaid.isValid() || sinceSaid.elapsed() >= 1000 ) ) {
+		saidMade = made;
+		sinceSaid.start();
+		qInfo().noquote() << QStringLiteral( "far sheets: %1 array layers made from %2 file reads in %3 ms, %4 waited a "
+			"paint for the upload budget (red WW_FARSHEETCAP_RED=1: a read per layer, no budget, build 78)" )
+			.arg( made ).arg( reads ).arg( madeMs, 0, 'f', 1 ).arg( sheetWaits );
+	}
 	if ( err )
 		*err = e.err;
 	return e.id;
@@ -263,8 +309,9 @@ bool bindSheet( Scene * scene, NifSkopeOpenGLContext::Program * prog,
 				return true;
 			}
 		}
+		const int waits0 = sheetWaits;
 		const GLuint id = layerSheetId( scene, sheet, layer );
-		if ( b.on )
+		if ( b.on && sheetWaits == waits0 )	// R6-5: a layer that waits a paint is asked again next paint
 			b.layerIds.insert( &sheet, id );
 		if ( !id )
 			return false;
@@ -715,6 +762,7 @@ bool ImpostorDraw::drawCard( Scene * scene, const ImpostorCardSet & set,
 	const bool sameSet = batch.on && !fresh && batch.set == &set;
 	bool haveColour = sameSet && batch.haveColour, haveNormal = sameSet && batch.haveNormal;
 	if ( !sameSet ) {
+		const int waits0 = sheetWaits;
 		haveColour = bindSheet( scene, prog, "ColourSheet", set.colour, 0, set.layer );
 		wwImpostorTrace( "C colour bound" );
 		haveNormal = bindSheet( scene, prog, "NormalSheet", set.normal, 1, set.nLayer() );
@@ -722,6 +770,8 @@ bool ImpostorDraw::drawCard( Scene * scene, const ImpostorCardSet & set,
 		const bool haveMask   = bindSheet( scene, prog, "MaskSheet",   set.mask,   2, set.layer );
 		const bool haveEmiss  = bindSheet( scene, prog, "EmissiveSheet", set.emissive, 3, set.layer );
 		wwImpostorTrace( "E aux bound" );
+		if ( sheetWaits != waits0 )
+			haveColour = false;	// R6-5: a sheet waits a paint, its set waits with it (no card without its mask)
 		if ( haveColour && haveNormal ) {
 			prog->uni1b( "hasMaskSheet", haveMask );
 			prog->uni1b( "hasEmissiveSheet", haveEmiss );
@@ -908,8 +958,13 @@ bool bindInstSheet( Scene * scene, NifSkopeOpenGLContext::Program * prog, const 
 	if ( loc < 0 )
 		return false;
 	auto it = g.layerIds.constFind( &sheet );
-	if ( it == g.layerIds.constEnd() )
-		it = g.layerIds.insert( &sheet, layerSheetId( scene, sheet, layer ) );
+	if ( it == g.layerIds.constEnd() ) {
+		const int waits0 = sheetWaits;
+		const GLuint id = layerSheetId( scene, sheet, layer );
+		if ( sheetWaits != waits0 )	// R6-5: it waits a paint, asked again next paint
+			return false;
+		it = g.layerIds.insert( &sheet, id );
+	}
 	if ( !*it )
 		return false;
 	auto * fn = scene->renderer->fn;
@@ -1283,6 +1338,7 @@ bool ImpostorDraw::drawCardsInstanced( Scene * scene, const QVector< InstCard > 
 	// ---- one instanced draw per set ----
 	for ( int s = 0; s < sets.size(); s++ ) {
 		const ImpostorCardSet & set = *sets.at( s );
+		const int waits0 = sheetWaits;
 		const bool haveColour = bindInstSheet( scene, prog, "ColourSheet", set.colour, 0, set.layer, g );
 		const bool haveNormal = bindInstSheet( scene, prog, "NormalSheet", set.normal, 1, set.nLayer(), g );
 		if ( !haveColour || !haveNormal ) {
@@ -1293,6 +1349,12 @@ bool ImpostorDraw::drawCardsInstanced( Scene * scene, const QVector< InstCard > 
 		}
 		const bool haveMask = bindInstSheet( scene, prog, "MaskSheet", set.mask, 2, set.layer, g );
 		const bool haveEmiss = bindInstSheet( scene, prog, "EmissiveSheet", set.emissive, 3, set.layer, g );
+		if ( sheetWaits != waits0 ) {	// R6-5: a sheet waits a paint, its set waits with it (no card without its mask)
+			if ( !st.refused )
+				st.firstWhy = QFileInfo( set.lodmPath ).fileName() + QStringLiteral( ": a sheet waits a paint (the upload budget)" );
+			st.refused += count.at( s );
+			continue;
+		}
 		prog->uni1b( "hasMaskSheet", haveMask );
 		prog->uni1b( "hasEmissiveSheet", haveEmiss );
 		prog->uni1b( "familyPbr", set.pbr );

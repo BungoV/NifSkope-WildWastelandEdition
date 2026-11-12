@@ -227,6 +227,8 @@ public:
 	int idleWhy = -1;
 	double idleMs[4] = { 0.0, 0.0, 0.0, 0.0 }, idleBuildMs = 0.0;
 	int idleBuilds = 0;
+	int besideSlices = 0;	// lane EMPTY240 R6-6: write slices run while the builder built, since the last hookup
+	double besideMs = 0.0, besideMaxMs = 0.0;
 	Scene * scene = nullptr;
 	QPointer<Node> root;
 	std::vector<FarTile> farTiles;
@@ -1173,14 +1175,19 @@ bool Stream::attach( StreamCell & c, const QElapsedTimer & t, double budget )
 			"attached %.0f ms after it was built (written %.1f ms on the drawing thread in slices; the drawing thread read "
 			"%lld archive files meanwhile, %.1f ms); workers busy %d / %d; since the last hookup the one cell builder built "
 			"%d cells in %.0f ms and stood idle while cells waited %.0f ms = waiting for a paint to collect its cell %.0f + held "
-			"by a wanted built cell not yet written %.0f + held by unloads / resets / frees %.0f + streaming off %.0f\n",
+			"by a wanted built cell not yet written %.0f + held by unloads / resets / frees %.0f + streaming off %.0f; %d write "
+			"slices ran beside a build, %.1f ms (longest %.1f ms; red WW_STREAMWRITE_RED=1: writes wait for the build, "
+			"build 78)\n",
 			c.x, c.y, c.loadBuildMs,
 			double( b.indexNs ) * 1e-6, double( b.readNs ) * 1e-6, double( b.inflateNs ) * 1e-6, (long long) b.files,
 			(long long) b.cacheHits, double( b.packed ) / 1048576.0, double( b.bytes ) / 1048576.0,
 			double( c.readyAt.nsecsElapsed() ) * 1e-6, c.writeMs, (long long) d.drawFiles, double( d.drawNs ) * 1e-6,
 			WwHw::busyCount().load(), WwHw::poolSlots(), idleBuilds, idleBuildMs,
-			idleMs[0] + idleMs[1] + idleMs[2] + idleMs[3], idleMs[0], idleMs[1], idleMs[2], idleMs[3] );
+			idleMs[0] + idleMs[1] + idleMs[2] + idleMs[3], idleMs[0], idleMs[1], idleMs[2], idleMs[3],
+			besideSlices, besideMs, besideMaxMs );
 		idleMs[0] = idleMs[1] = idleMs[2] = idleMs[3] = idleBuildMs = 0.0;	// lane EMPTY240 R5-4
+		besideSlices = 0;
+		besideMs = besideMaxMs = 0.0;
 		idleBuilds = 0;
 		c.readyAt.invalidate();
 	}
@@ -1902,7 +1909,13 @@ bool Stream::tick( Scene * sc, const Vector3 & eye )
 	// lane CELLSPIKE3: a slice always writes one bucket, so it starts only if the dearest recent slice still ends
 	// under the frame cap (2 budgets less 1 ms), or at the very start of a frame (red: whenever the budget has room)
 	const bool redWrite = spikeRed( "write" );
-	while ( !building() && msOf( t ) < budgetMs
+	/* lane EMPTY240 R6-6: build 78's loads held the one builder 1.8-6.6 s a hookup by "a wanted built cell not yet
+	 * written" (workers busy 0.6 of 14): a write slice ran only while no build ran, and the next build started as soon
+	 * as the cell before went into its write, so each write stood still for a whole build and the next built cell then
+	 * held the builder. A wanted cell's write slices now run beside a build (the worker builds only its own chunk; the
+	 * slice cost rule above still holds each slice). Red WW_STREAMWRITE_RED=1: writes wait for the build (build 78). */
+	const bool writeWaitsRed = wwEnvInt( "WW_STREAMWRITE_RED" ) == 1;
+	while ( ( !writeWaitsRed || !building() ) && msOf( t ) < budgetMs
 		&& ( redWrite || msOf( t ) < 0.5 || msOf( t ) + sliceEstMs < 2.0 * budgetMs - 1.0 ) ) {
 		// the cell being written, else the nearest built one the block wants
 		StreamCell * next = nullptr;
@@ -1927,7 +1940,15 @@ bool Stream::tick( Scene * sc, const Vector3 & eye )
 		if ( !next )
 			break;
 		g_phase = "write";
+		const bool beside = building();
+		const double sliceT0 = msOf( t );
 		write( *next, budgetMs - msOf( t ) );
+		if ( beside ) {
+			const double sliceMs = msOf( t ) - sliceT0;
+			besideSlices++;
+			besideMs += sliceMs;
+			besideMaxMs = std::max( besideMaxMs, sliceMs );
+		}
 		changed = true;
 		if ( next->emitted && next->st != CellState::Attached )
 			break;   // lane CELLSTREAM1: its hookup waits for the next frame's budget

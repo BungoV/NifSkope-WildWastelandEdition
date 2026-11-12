@@ -3510,6 +3510,10 @@ struct WwPacer
 	// R5-3: a paint sent by the tick asks for the next one here; the frames started straight from the last / by a post
 	bool inTick = false, wantNext = false;
 	int straight = 0, posted = 0;
+	// R6-2: the view's 6 ms gears timer, stopped while the pacer drives frames; R6-3: ticks that sent a paint, requests dropped
+	QPointer<QTimer> gearsTimer;
+	bool gearsLooked = false, gearsRed = false, gearsStopped = false;
+	int gearsSaid = 0, ticks = 0, dropped = 0;
 };
 WwPacer & wwPacer()
 {
@@ -3602,14 +3606,18 @@ static void wwPacerFrameStart( GLView * v, bool wants, bool cellView )
 	if ( now - p.reqWinAt >= 5.0 && p.reqN > 0 ) {
 		std::fprintf( stderr, "frame request: the paint starts %.2f ms after the frame's request (mean of %d, longest %.2f), "
 			"delivered %s; %d frames started straight after the last one's swap (the message queue empty), %d through the "
-			"event loop (red WW_PACERLOOP_RED=1: every frame through the loop, build 77)\n", p.reqSum / double( p.reqN ), p.reqN,
+			"event loop (red WW_PACERLOOP_RED=1: every frame through the loop, build 77); %d paints for %d pacer ticks, %d ticks "
+			"dropped the requests left posted (red WW_PAINTONCE_RED=1: a tick's posted request painted the frame again, build 78)\n",
+			p.reqSum / double( p.reqN ), p.reqN,
 			p.reqMax, wwEnvInt( "WW_PAINTDIRECT_RED" ) == 1
 				? "by Qt's update timer (WW_PAINTDIRECT_RED=1: QWindow::requestUpdate, 5 ms + the timer's rounding)"
-				: "at once (the update request sent by the pacer, Qt's timer not waited for)", p.straight, p.posted );
+				: "at once (the update request sent by the pacer, Qt's timer not waited for)", p.straight, p.posted,
+			p.reqN, p.ticks, p.dropped );
 		p.reqWinAt = now;
 		p.reqSum = p.reqMax = 0.0;
 		p.reqN = 0;
 		p.straight = p.posted = 0;
+		p.ticks = p.dropped = 0;
 	}
 	const int interval = ( DEBUG_FRAME_TIME || !wwVsyncOn() ) ? 0 : 1;
 	if ( interval != p.interval ) {
@@ -3640,10 +3648,41 @@ static void wwPacerFrameStart( GLView * v, bool wants, bool cellView )
 
 static void wwPacerTick( GLView * v );
 
+/* lane EMPTY240 R6-2: build 78's between-paints held "Timer to QTimer" 1.6 times a frame at load: the view's own 6 ms
+ * timer (GLView ctor, 1000 / FPS) runs advanceGears (cell stream step, physics, animation) beside the pacer's tick, which
+ * already runs it once a frame. While the pacer drives frames the timer is stopped; it starts again when the view stops
+ * wanting frames (an editing view, nothing moves). Red WW_GEARSTIMER_RED=1: the timer always runs, build 78. */
+static void wwGearsTimer( GLView * v, bool pacerDrives )
+{
+	WwPacer & p = wwPacer();
+	if ( !p.gearsLooked ) {
+		p.gearsLooked = true;
+		p.gearsRed = wwEnvInt( "WW_GEARSTIMER_RED" ) == 1;
+		for ( QTimer * t : v->findChildren<QTimer *>( Qt::FindDirectChildrenOnly ) )
+			if ( !t->isSingleShot() && t->interval() == 1000 / FPS )
+				p.gearsTimer = t;
+	}
+	QTimer * t = p.gearsTimer.data();
+	const bool stop = pacerDrives && !p.gearsRed;
+	if ( !t || stop == p.gearsStopped )
+		return;
+	p.gearsStopped = stop;
+	if ( stop )
+		t->stop();
+	else
+		t->start();
+	if ( p.gearsSaid < 4 || p.gearsSaid % 100 == 0 )
+		std::fprintf( stderr, "frame gears: the view's %d ms gears timer %s (change %d; red WW_GEARSTIMER_RED=1: it runs beside "
+			"the pacer, build 78)\n", t->interval(), stop ? "stopped, the pacer's tick steps the gears once a frame"
+			: "running, the pacer is idle", p.gearsSaid + 1 );
+	p.gearsSaid++;
+}
+
 //! at the paint's end (every return): queue the next frame when the view wants one
 static void wwPacerAfterPaint( GLView * v, bool wants )
 {
 	WwPacer & p = wwPacer();
+	wwGearsTimer( v, wants && !wwFrameTimerRed() );
 	if ( !wants || p.queued || wwFrameTimerRed() )
 		return;
 	if ( p.inTick ) {
@@ -3691,6 +3730,16 @@ static void wwPacerTick( GLView * v )
 			p.wantNext = false;
 			QCoreApplication::sendEvent( v, &ev );
 			p.inTick = false;
+			p.ticks++;
+			/* lane EMPTY240 R6-3: update() above (and advanceGears' own update calls) posted an UpdateRequest at high
+			 * priority; the paint just sent cleared updatePending, so that post stayed in the queue: the message queue was
+			 * never empty (build 78: 0 straight frames) and it painted the same frame again with no gears step (849 paints
+			 * for ~425 ticks). When the pacer paints next anyway (asked or queued), the leftover requests go. Red
+			 * WW_PAINTONCE_RED=1: they stay, build 78. */
+			if ( ( p.wantNext || p.queued ) && wwEnvInt( "WW_PAINTONCE_RED" ) != 1 ) {
+				QCoreApplication::removePostedEvents( v, QEvent::UpdateRequest );
+				p.dropped++;
+			}
 		}
 		if ( !p.wantNext )
 			return;	// no paint asked for the next frame here (or it posted it itself)

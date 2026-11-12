@@ -401,6 +401,10 @@ void BSShape::drawShapes( NodeList * secondPass )
 		scene->renderer->wwVaoDefer = false;
 	if ( !shapeBound )
 		return;
+	// lane EMPTY240 R6-4: a shape's first program pick counts against the paint's upload budget; past it the shape waits
+	const bool wwFirstPick = !shader && !scene->selecting;
+	if ( wwFirstPick && WwUp::pickWaits() )
+		return;
 	const unsigned int blOwnVao = blDefer ? scene->renderer->wwShapeVao() : 0u;
 
 	int	selectionFlags = scene->selecting;
@@ -451,6 +455,7 @@ void BSShape::drawShapes( NodeList * secondPass )
 		}
 		{
 			PassTime::CpuScope ptSetup( PassTime::ShapeSetup );	// lane PERF1
+			WwUp::Charge wwPickCharge( wwFirstPick, true );	// lane EMPTY240 R6-4
 			shader = context->setupProgram( this, shader );
 		}
 		wwCellAnimObjNoteDraw( static_cast<const Node *>( this ) );	// lane FIREFX1 (a no-op unless the census listens)

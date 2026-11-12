@@ -535,6 +535,7 @@ constexpr size_t kWatchParts = 96;	// parts a paint records at most (a sub opene
 struct Watch
 {
 	bool loaded = false, red = false, inFrame = false;
+	bool partGpu = false;	// lane EMPTY240 R6-1: parts take a GPU timestamp pair (red WW_WATCHPART_RED=1, build 78)
 	QOpenGLContext * ctx = nullptr;
 	QOpenGLFunctions_3_3_Core * gl = nullptr;
 	std::vector<GLuint> pool;
@@ -551,6 +552,13 @@ Watch & watch()
 	if ( !w.loaded ) {
 		w.loaded = true;
 		w.red = wwEnvInt( "WW_GPUZONES_RED" ) == 1;
+		/* lane EMPTY240 R6-1: build 78 put two glQueryCounter calls round every sub-stage of every paint (96 at most);
+		 * a part's GPU figure also read an unflushed timestamp across a CPU stall (frame 526's 286 ms "tone-vrs" was
+		 * the CPU's ram census). Parts now take the CPU clock, draws and uploads only; zones keep their GPU pairs. */
+		w.partGpu = wwEnvInt( "WW_WATCHPART_RED" ) == 1;
+		if ( !w.red )
+			std::fprintf( stderr, "frame gpu zones: parts %s (WW_WATCHPART_RED=1 = a GPU timestamp pair per part, build 78)\n",
+				w.partGpu ? "take GPU timestamps" : "take CPU stamps only" );
 		for ( int & o : w.open )
 			o = kNotOpen;
 		for ( int & o : w.partOpen )
@@ -610,9 +618,9 @@ void watchAdd( std::vector<WatchSum> & sums, const char * name, double gpu, qint
 	sums[k].meshes += meshes;
 	sums[k].times++;
 }
-QByteArray watchFigure( const WatchSum & s, bool times )
+QByteArray watchFigure( const WatchSum & s, bool times, bool gpu = true )
 {
-	QByteArray f = QByteArray::number( s.gpu, 'f', 1 );
+	QByteArray f = gpu ? QByteArray::number( s.gpu, 'f', 1 ) : QByteArray( "-" );
 	if ( times && s.times > 1 )
 		f += " (x" + QByteArray::number( s.times ) + ")";
 	f += " [cpu " + QByteArray::number( s.cpu, 'f', 1 ) + ", " + QByteArray::number( s.draws ) + " draws";
@@ -669,7 +677,7 @@ void watchCollect( WatchSlot & sl )
 		}
 		for ( const WatchZone & z : sl.parts )
 			if ( z.closed )
-				watchAdd( parts, z.name, watchMs( z.q0, z.q1 ), z.c1 - z.c0, z.d1 - z.d0, z.t1 - z.t0, z.m1 - z.m0 );
+				watchAdd( parts, z.name, z.q0 ? watchMs( z.q0, z.q1 ) : 0.0, z.c1 - z.c0, z.d1 - z.d0, z.t1 - z.t0, z.m1 - z.m0 );
 		const WatchZone & a = sl.whole;
 		QByteArray line = "frame gpu zones: frame " + QByteArray::number( sl.frame ) + " took "
 			+ QByteArray::number( total, 'f', 1 ) + " ms on the GPU [cpu " + QByteArray::number( double( a.c1 - a.c0 ) * 1e-6, 'f', 1 )
@@ -692,7 +700,7 @@ void watchCollect( WatchSlot & sl )
 		for ( const WatchSum & s : parts ) {
 			if ( s.gpu < 0.5 && s.cpu < 0.5 )
 				continue;
-			inside += QByteArray( inside.isEmpty() ? "" : " +" ) + " " + s.name + " " + watchFigure( s, true );
+			inside += QByteArray( inside.isEmpty() ? "" : " +" ) + " " + s.name + " " + watchFigure( s, true, w.partGpu );
 		}
 		if ( !inside.isEmpty() )
 			line += " | parts:" + inside;
@@ -707,6 +715,8 @@ void watchCollect( WatchSlot & sl )
 		w.pool.push_back( z.q1 );
 	}
 	for ( const WatchZone & z : sl.parts ) {
+		if ( !z.q0 )
+			continue;
 		w.pool.push_back( z.q0 );
 		w.pool.push_back( z.q1 );
 	}
@@ -738,10 +748,11 @@ void watchPart( int sub, bool opening )
 	if ( opening ) {
 		if ( w.partOpen[sub] >= 0 || sl.parts.size() >= kWatchParts )
 			return;
-		WatchZone z{ kSubName[sub], watchQuery(), watchQuery(), false };
+		WatchZone z{ kSubName[sub], w.partGpu ? watchQuery() : 0u, w.partGpu ? watchQuery() : 0u, false };
 		z.parent = w.top;
 		watchStamp( z, false );
-		w.gl->glQueryCounter( z.q0, GL_TIMESTAMP );
+		if ( z.q0 )
+			w.gl->glQueryCounter( z.q0, GL_TIMESTAMP );
 		sl.parts.push_back( z );
 		w.partOpen[sub] = int( sl.parts.size() ) - 1;
 		return;
@@ -749,7 +760,8 @@ void watchPart( int sub, bool opening )
 	if ( w.partOpen[sub] < 0 )
 		return;
 	WatchZone & z = sl.parts[size_t( w.partOpen[sub] )];
-	w.gl->glQueryCounter( z.q1, GL_TIMESTAMP );
+	if ( z.q1 )
+		w.gl->glQueryCounter( z.q1, GL_TIMESTAMP );
 	watchStamp( z, true );
 	z.closed = true;
 	w.partOpen[sub] = -1;
@@ -1240,8 +1252,13 @@ qint64 videoMemoryMb( qint64 * usedMb )
 /* MODULES1 (11-06): where the working set lives, once at the first full frame. Committed regions by type (private
  * <1 MB / 1-64 MB / >=64 MB, mapped files, images) with the resident share sampled through QueryWorkingSetEx (up to 64
  * pages a region, scaled), plus the process heaps' busy bytes. Private >=64 MB with little resident is driver commit. */
+/* lane EMPTY240 R6-4: build 78's frame 526 (the first full frame) held the paint thread 285.8 ms "after overlays": the
+ * HeapLock + HeapWalk over every heap block (~3M under 256 B), read as 286 ms of "tone-vrs" on the GPU. The region census
+ * now runs on a worker (VirtualQuery / QueryWorkingSetEx need no lock) and the block walk only on the red, since a walk
+ * holds every heap's lock and stops each thread that allocates. Red WW_RAMOWNERS_RED=1: the full census on the paint
+ * thread, build 78. */
 #ifdef Q_OS_WIN
-static QString ramOwnersLine()
+static QString ramOwnersLine( bool heapWalk, const QString & tail )
 {
 	static const char * kName[5] = { "private<1MB", "private1-64MB", "private>=64MB", "mapped", "image" };
 	double commit[5] = {}, res[5] = {};
@@ -1276,6 +1293,8 @@ static QString ramOwnersLine()
 	QString s = QStringLiteral( "ram owners:" );
 	for ( int b = 0; b < 5; b++ )
 		s += QString::asprintf( " %s commit=%.0f ws~%.0f MB", kName[b], commit[b] / 1048576.0, res[b] / 1048576.0 );
+	if ( !heapWalk )
+		return s + tail;
 	PROCESS_HEAP_ENTRY e;
 	double busy = 0;
 	// MODULES1 p18: busy heap bytes by block size (who owns the heaps: many small = document items, big = arrays)
@@ -1298,11 +1317,7 @@ static QString ramOwnersLine()
 			}
 		HeapUnlock( heaps[i] );
 	}
-	double trimMs = 0.0;
-	const unsigned long long trims = (unsigned long long)FileBuffer::mappedViewTrims( &trimMs );
-	s += QString::asprintf( " | heaps %lu busy=%.0f MB | staged=%.0f MB direct=%.0f MB | archive trims=%llu (max %.1f ms)",
-		(unsigned long)nh, busy / 1048576.0, double( gpuStageCounts().stagedBytes.load() ) / 1048576.0,
-		double( gpuStageCounts().directBytes.load() ) / 1048576.0, trims, trimMs );
+	s += QString::asprintf( " | heaps %lu busy=%.0f MB", (unsigned long)nh, busy / 1048576.0 ) + tail;
 	static const char * kSz[6] = { "<256B", "<4K", "<64K", "<1M", "<16M", ">=16M" };
 	s += QStringLiteral( " | heap blocks" );
 	for ( int k = 0; k < 6; k++ )
@@ -1385,7 +1400,25 @@ void stream1PaintEnd( bool ready, double paintMs )
 				(long long)( cc.made - l.made0 ), (long long)made, (long long)madeBytes );
 			std::fprintf( stderr, "%s\n", qPrintable( stream1MemLine( "first full frame" ) ) );
 #ifdef Q_OS_WIN
-			std::fprintf( stderr, "%s\n", qPrintable( ramOwnersLine() ) );
+			{	// lane EMPTY240 R6-4: the staged counts and archive trims read here, the census on a worker
+				double trimMs = 0.0;
+				const unsigned long long trims = (unsigned long long)FileBuffer::mappedViewTrims( &trimMs );
+				const QString tail = QString::asprintf( " | staged=%.0f MB direct=%.0f MB | archive trims=%llu (max %.1f ms)",
+					double( gpuStageCounts().stagedBytes.load() ) / 1048576.0,
+					double( gpuStageCounts().directBytes.load() ) / 1048576.0, trims, trimMs );
+				if ( wwEnvInt( "WW_RAMOWNERS_RED" ) == 1 ) {
+					const qint64 at = nowNs();
+					const QString line = ramOwnersLine( true, tail );
+					std::fprintf( stderr, "%s | census %.1f ms on the paint thread (WW_RAMOWNERS_RED=1, build 78)\n",
+						qPrintable( line ), double( nowNs() - at ) * 1e-6 );
+				} else
+					std::thread( [tail]() {
+						const qint64 at = nowNs();
+						const QString line = ramOwnersLine( false, tail );
+						std::fprintf( stderr, "%s | census %.1f ms on a worker, heap block walk off (WW_RAMOWNERS_RED=1 = on the "
+							"paint thread with the walk, build 78)\n", qPrintable( line ), double( nowNs() - at ) * 1e-6 );
+					} ).detach();
+			}
 #endif
 		}
 		return;
