@@ -42,6 +42,7 @@ getShaderInfoLog = _fn('glGetShaderInfoLog', None, U, I, VP, ctypes.c_char_p)
 createProgram = _fn('glCreateProgram', U); attach = _fn('glAttachShader', None, U, U); link = _fn('glLinkProgram', None, U)
 getProgramiv = _fn('glGetProgramiv', None, U, E, ctypes.POINTER(I)); useProgram = _fn('glUseProgram', None, U)
 uloc = _fn('glGetUniformLocation', I, U, ctypes.c_char_p)
+uM3 = _fn('glUniformMatrix3fv', None, I, I, ctypes.c_ubyte, VP)
 u1i = _fn('glUniform1i', None, I, I); u1f = _fn('glUniform1f', None, I, F); u2f = _fn('glUniform2f', None, I, F, F)
 u2i = _fn('glUniform2i', None, I, I, I); u3f = _fn('glUniform3f', None, I, F, F, F)
 u4fv = _fn('glUniform4fv', None, I, I, VP); uM4 = _fn('glUniformMatrix4fv', None, I, I, ctypes.c_ubyte, VP)
@@ -185,6 +186,9 @@ def draw(p, imgs):
             u2i(loc, int(v[0]), int(v[1]))
         elif kind == '3f':
             u3f(loc, float(v[0]), float(v[1]), float(v[2]))
+        elif kind == 'm3':   # GL columns, row k of v = column k
+            m = np.ascontiguousarray(v, np.float32)
+            uM3(loc, 1, 0, m.ctypes.data)
         elif kind == '4fv':
             a = np.ascontiguousarray(np.asarray(v, np.float32).reshape(-1, 4))
             u4fv(loc, a.shape[0], a.ctypes.data)
@@ -571,7 +575,127 @@ def ssgi_main():
     ssgi_job('sg_S', sdir, sw, sh, proj, 1, 2, 12, True, 63, 128.0, False, [])
 
 
+# --------------------------------------------------------------------------------------------------------------- SSR
+SSR = os.environ.get('VKLIGHT_SSR_SRC', 'reflections/cell_ssr.frag')   # a stage probe's copy (absolute path) overrides
+
+
+def ssr_inputs(srcd, W, H, depth, proj, rot, water):
+    """the AO pass's g-buffer and depth mips 1..4 (GL's own, cell_ao.frag stages 5 and 1), the scene (alpha = the reflection
+    flag where the world normal points up) and, with water, a water ray band; all written under srcd"""
+    g = gl_gbuf(srcd, W, H, depth, proj)
+    ms = [(W, H)]
+    for m in range(1, 5):
+        ms.append((max(ms[m - 1][0] // 2, 1), max(ms[m - 1][1] // 2, 1)))
+    im = {'gbuf': Img('gbuf', 'rgba32f', W, H, NEAREST, g)}
+    sizes = [('fullSize', '2i', (W, H))] + [('mipSize[%d]' % m, '2i', ms[m]) for m in range(5)]
+    with open(os.path.join(srcd, 'zmips.bin'), 'wb') as f:
+        for m in range(1, 5):
+            im['mip%d' % m] = Img('mip%d' % m, 'r32f', ms[m][0], ms[m][1], NEAREST)
+            units = [('gbuf', 'gbuf')] if m == 1 else [('src', 'mip%d' % (m - 1))]
+            draw(Pass('mip', 'ao_mip', AO, ['mip%d' % m], units, [], [('aoStage', 'i', 1), ('mipLevel', 'i', m)] + sizes), im)
+            finish()
+            bindFB(FBO, fbo); fbTex(FBO, 0x8CE0, T2D, im['mip%d' % m].tex, 0); fbTex(FBO, 0x8CE1, T2D, 0, 0); readBuffer(0x8CE0)
+            a = im['mip%d' % m].read()
+            f.write(np.array(ms[m], np.int32).tobytes()); f.write(a.tobytes())
+            put(os.path.join(srcd, 'mip%d.bin' % m), a, ms[m][0], ms[m][1])
+    return g, ms
+
+
+def ssr_job(name, srcd, W, H, g, ms, scene, proj, rot, water, red, reds):
+    """src/features/reflections/cellssr.cpp: stages 1 (ray), 2 (march), 3 (across), 4 (down), no previous frame, base program"""
+    hw, hh = (W + 1) // 2, (H + 1) // 2
+    b = os.path.basename(srcd)
+    P00, P11 = float(proj[0][0]), float(proj[1][1])
+    pa, pb = float(proj[2][2]), float(proj[3][2])
+    far = min(pb / (pa + 1.0), 353840.0)
+    near = 15.0
+    def mipimg(m):
+        with open(os.path.join(srcd, 'mip%d.bin' % m), 'rb') as f:
+            f.read(8); a = np.frombuffer(f.read(), np.float32).reshape(ms[m][1], ms[m][0]).copy()
+        return Img('mip%d' % m, 'r32f', ms[m][0], ms[m][1], NEAREST, a)
+    zm = Img('zmips', 'r32f', ms[1][0], ms[1][1], NEAREST, None, b + '/zmips.bin'); zm.lv = 4
+    wr = water if water is not None else np.zeros((H, W, 4), np.float32)
+    put(os.path.join(srcd, 'water_%s.bin' % name), wr, W, H)
+    put(os.path.join(srcd, 'scene_%s.bin' % name), scene, W, H)
+    imgs = [Img('gbuf', 'rgba32f', W, H, NEAREST, g, b + '/gbuf.bin'), zm] + [mipimg(m) for m in range(1, 5)] + [
+        Img('scene', 'rgba32f', W, H, LINEAR, scene, b + '/scene_%s.bin' % name),
+        Img('water', 'rgba32f', W, H, NEAREST, wr, b + '/water_%s.bin' % name),
+        Img('ray', 'rgba32f', hw, hh, NEAREST), Img('raw', 'rgba32f', hw, hh, LINEAR),
+        Img('across', 'rgba32f', hw, hh, LINEAR), Img('fin', 'rgba32f', hw, hh, LINEAR)]
+    have = 1 if water is not None else 0
+    uni = [('fullSize', '2i', (W, H)), ('halfSize', '2i', (hw, hh))] + [('mipSize[%d]' % m, '2i', ms[m]) for m in range(5)] + [
+        ('proj', '2f', (P00, P11)), ('viewToWorld', 'm3', rot), ('ssrK', '4fv', (1.0, 0.2, 2.0, 1.0)), ('ssrClip', '2f', (near, far)),
+        ('ssrRed', 'i', red), ('haveWaterRay', 'i', have), ('opaqueRays', 'i', 1), ('ssrPrev', 'i', 0)]
+    c = [(W, H, hw, hh), (P00, P11, near, far), (1.0, 0.2, 2.0, 1.0), tuple(rot[0]) + (0,), tuple(rot[1]) + (0,), tuple(rot[2]) + (0,)]
+    gu = [('gbuf', 'gbuf'), ('zMip1', 'mip1'), ('zMip2', 'mip2'), ('zMip3', 'mip3'), ('zMip4', 'mip4'), ('scene', 'scene')]
+    ps = []
+    for st, k, o, s in ((1, 'ssr_ray', 'ray', 'fin'), (2, 'ssr_march', 'raw', 'ray'), (3, 'ssr_across', 'across', 'raw'),
+                        (4, 'ssr_down', 'fin', 'across')):
+        ps.append(Pass('s%d' % st, k, SSR, [o], gu + [('src', s if st > 1 else 'gbuf'), ('waterRay', 'water')],
+                       ['gbuf', 'zmips', 'scene', s, 'water'], [('ssrStage', 'i', st)] + uni, c, (red, have, 1)))
+    rule = os.environ.get('VKLIGHT_SSR_RULE', 'ulp1')
+    job(name, imgs, ps, [('ray', 'ulp1'), ('raw', rule), ('across', rule), ('fin', rule)], reds, True)
+    print('  %s: %dx%d half %dx%d near %g far %g water %d red %d' % (name, W, H, hw, hh, near, far, have, red))
+
+
+def ssr_rot(yaw, pitch):
+    """viewToWorld's GL columns (row k = view axis k in the world, z up): a camera yawed and pitched"""
+    cy, sy, cp, sp_ = np.cos(yaw), np.sin(yaw), np.cos(pitch), np.sin(pitch)
+    fwd = np.array([cy * cp, sy * cp, sp_]); right = np.array([sy, -cy, 0.0]); up = np.cross(right, fwd)
+    return np.array([right, up, -fwd], np.float32)   # view x, y, z (the view looks down -z)
+
+
+def ssr_scene(px, g, rot, rng):
+    col = np.nan_to_num(px, posinf=6.0e4, neginf=0.0).astype(np.float32).copy()
+    nw = g[..., 0:1] * rot[0] + g[..., 1:2] * rot[1] + g[..., 2:3] * rot[2]
+    col[..., 3] = np.where((nw[..., 2] > 0.5) & (g[..., 3] > 0.0), 1.0, 0.0)
+    return col
+
+
+def ssr_main():
+    W, H, px, proj, depth = load_dump()
+    rng = np.random.default_rng(83)
+    rot = ssr_rot(0.6, -0.15)
+    srcd = os.path.join(OUT, 'in_real')
+    os.makedirs(srcd, exist_ok=True)
+    g, ms = ssr_inputs(srcd, W, H, depth, proj, rot, False)
+    scene = ssr_scene(px, g, rot, rng)
+    print('real input %s %dx%d, flagged %.3f' % (HDR, W, H, float(scene[..., 3].mean())))
+    ssr_job('ss_A', srcd, W, H, g, ms, scene, proj, rot, None, 0, ['ssr_ray', 'ssr_march', 'ssr_across', 'ssr_down'])
+    # a water band (lower third): its rays from the water pass, some zero (the water's own refusal)
+    wr = np.zeros((H, W, 4), np.float32)
+    band = slice(0, H // 3)   # bottom row first: the lower third of the picture
+    d = rng.normal(0.0, 0.25, (H // 3, W, 3)).astype(np.float32) + np.array([0.0, 0.7, -0.6], np.float32)
+    d /= np.linalg.norm(d, axis=-1, keepdims=True)
+    d[rng.random((H // 3, W)) < 0.05] = 0.0
+    wr[band, :, :3] = d
+    wr[band, :, 3] = np.where(g[band, :, 3] > 0.0, g[band, :, 3], 2000.0)
+    ssr_job('ss_W', srcd, W, H, g, ms, scene, proj, rot, wr, 0, [])
+    # the reds' bits on the green (no gap refusal, no fade): another branch set must match too
+    ssr_job('ss_R', srcd, W, H, g, ms, scene, proj, rot, None, 6, [])
+    # synthetic: odd size, steps and a ramp floor, a bright checker scene
+    sw, sh = 641, 361
+    sy, sx = np.mgrid[0:sh, 0:sw].astype(np.float32)
+    sdp = (0.9990 + 0.0008 * np.sin(sx / 29.0) * np.cos(sy / 17.0)).astype(np.float32)
+    for _ in range(40):
+        x0, y0 = rng.integers(0, sw - 40), rng.integers(0, sh - 40)
+        sdp[y0:y0 + rng.integers(5, 60), x0:x0 + rng.integers(5, 80)] -= np.float32(rng.uniform(0.0002, 0.0008))
+    sdp[sh - sh // 7:] = 1.0
+    sdir = os.path.join(OUT, 'in_syn')
+    os.makedirs(sdir, exist_ok=True)
+    srot = ssr_rot(1.1, -0.35)
+    sg, sms = ssr_inputs(sdir, sw, sh, sdp, proj, srot, False)
+    col = np.zeros((sh, sw, 4), np.float32)
+    col[..., 0] = 0.5 + 0.5 * np.sin(sx / 7.0)
+    col[..., 1] = (sy / sh) * 4.0
+    col[..., 2] = ((sx // 16 + sy // 16) % 2) * 0.9
+    col[..., 3] = ((sx // 40 + sy // 30) % 3 != 0) & (sg[..., 3] > 0.0)
+    ssr_job('ss_S', sdir, sw, sh, sg, sms, col, proj, srot, None, 0, [])
+
+
 def main():
+    if 'ssr' in WANT:
+        ssr_main()
     if 'ao' in WANT:
         ao_main()
     if 'contact' in WANT:

@@ -2,7 +2,7 @@
 # Lane VKLIGHT1 (2026-11-12): the lighting passes on Vulkan compute (res/shaders/hlsl/vklight/*.hlsl) against the GL .frag
 # chains on the same inputs (tests/vklight/light_gl_ref.py, a hidden GL context; tests/vklight/lightmatch.cpp, a headless
 # Vulkan device). Copied from VKFRAME1's tests/vkframe/postfx.sh.
-# bash tests/vklight/light.sh <out dir> [<WW_CELL_HDR_DUMP .hdr>] [<pass> ...]     (passes: ao contact ssgi; default all)
+# bash tests/vklight/light.sh <out dir> [<WW_CELL_HDR_DUMP .hdr>] [<pass> ...]     (passes: ao contact ssgi ssr; default all)
 # VKLIGHT_NOTIME=1 skips every timing (gate only, while another job loads the GPU).
 # Needs MSYS2 UCRT64 g++ (Vulkan headers), DXC (DXC= to override) and python with numpy.
 # Green: every job LIGHTMATCH EXACT or BOUND; each kernel's red build must FAIL its job. Last line `VKLIGHT GATE OK` / `FAILED`.
@@ -10,7 +10,7 @@ set -u
 OUT="${1:?out dir}"
 HDR="${2:-X:/ClaudeOverflow/fogmatch1/m1/mem_fm_def.hdr}"
 shift; [ $# -gt 0 ] && shift
-PASSES="${*:-ao contact ssgi}"
+PASSES="${*:-ao contact ssgi ssr}"
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 DXC="${DXC:-/e/Tools/dxc/bin/x64/dxc.exe}"
 PY="${PY:-$(command -v python)}"	# before the UCRT64 PATH: its python has no numpy
@@ -36,6 +36,9 @@ for p in $PASSES; do
 		JOBS="$JOBS ct_A ct_B ct_C ct_S"; NRED=$((NRED + 1)) ;;
 	ssgi) K="$K ssgi:ssgi_vk.hlsl::SSGI_RED"
 		JOBS="$JOBS sg_A sg_B sg_S"; NRED=$((NRED + 1)) ;;
+	ssr) K="$K ssr_ray:ssr_vk.hlsl:-DSSR_STAGE=1:SSR_RED ssr_march:ssr_vk.hlsl:-DSSR_STAGE=2:SSR_RED
+		ssr_across:ssr_vk.hlsl:-DSSR_STAGE=3:SSR_RED ssr_down:ssr_vk.hlsl:-DSSR_STAGE=4:SSR_RED"
+		JOBS="$JOBS ss_A ss_W ss_R ss_S"; NRED=$((NRED + 4)) ;;
 	*) echo "VKLIGHT GATE FAILED (unknown pass $p)"; exit 1 ;;
 	esac
 done
