@@ -771,8 +771,8 @@ int main( int argc, char ** argv )
 	 * on the present device (toneRun with the job cellbloom.cpp fills, flags 7 + 11, the measure's quarter ask) against
 	 * GL: cellbloom.cpp's passes (the tree's cell_bloom_*.frag) on the same frame, the tone quads reading the combine,
 	 * backdropCopy + mode 3, and cellhdr.cpp's quarter draw (cell_is_measure_q.frag). Bound stated before the first run:
-	 * the measure EXACT (float bits); the view BOUND (no byte off by more than 1: the backdrop is the view resolved,
-	 * RGBA8 on Vulkan, RGBA16F on GL; the source is BOUND 1 fp16 ulp, tests/vkframe/srccomb.sh). Reds (must FAIL):
+	 * the measure EXACT (float bits); the view BOUND (no byte off by more than 1: the backdrop is the view resolved into
+	 * RGBA16F on both, by bloom_back.hlsl on Vulkan and a blit on GL; the source is BOUND 1 fp16 ulp, tests/vkframe/srccomb.sh). Reds (must FAIL):
 	 * bloomRedTest 1 (mode 3 not drawn), 3 (mode 3 without the backdrop), 2 (the measure not dispatched; its target
 	 * cleared by GL first). */
 	struct BloomCase

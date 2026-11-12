@@ -26,6 +26,7 @@
 #include "features/vkframe/bloom_up.spv.h"
 #include "features/vkframe/bloom_src.spv.h"
 #include "features/vkframe/bloom_comb.spv.h"
+#include "features/vkframe/bloom_back.spv.h"
 #include "features/vkframe/measure_q.spv.h"
 
 #include <algorithm>
@@ -188,7 +189,7 @@ struct Vk
 	VKP( vkCreateCommandPool ); VKP( vkAllocateCommandBuffers ); VKP( vkFreeCommandBuffers ); VKP( vkBeginCommandBuffer );
 	VKP( vkEndCommandBuffer ); VKP( vkResetCommandBuffer ); VKP( vkCmdPipelineBarrier ); VKP( vkCmdBlitImage );
 	VKP( vkCreateBuffer ); VKP( vkDestroyBuffer ); VKP( vkGetBufferMemoryRequirements ); VKP( vkBindBufferMemory );
-	VKP( vkMapMemory ); VKP( vkUnmapMemory ); VKP( vkCmdCopyImageToBuffer ); VKP( vkCmdResolveImage );
+	VKP( vkMapMemory ); VKP( vkUnmapMemory ); VKP( vkCmdCopyImageToBuffer ); VKP( vkCmdResolveImage ); VKP( vkCmdCopyImage );
 	// round 11: the tone pass on the view (a render pass of the present device)
 	bool sampleShading = false;  // the device feature SV_SampleIndex needs (enabled when offered)
 	VKP( vkGetPhysicalDeviceFeatures );
@@ -458,7 +459,7 @@ bool makeDevice( std::string & why )
 	LD( vkCreateCommandPool ); LD( vkAllocateCommandBuffers ); LD( vkFreeCommandBuffers ); LD( vkBeginCommandBuffer );
 	LD( vkEndCommandBuffer ); LD( vkResetCommandBuffer ); LD( vkCmdPipelineBarrier ); LD( vkCmdBlitImage );
 	LD( vkCreateBuffer ); LD( vkDestroyBuffer ); LD( vkGetBufferMemoryRequirements ); LD( vkBindBufferMemory );
-	LD( vkMapMemory ); LD( vkUnmapMemory ); LD( vkCmdCopyImageToBuffer ); LD( vkCmdResolveImage );
+	LD( vkMapMemory ); LD( vkUnmapMemory ); LD( vkCmdCopyImageToBuffer ); LD( vkCmdResolveImage ); LD( vkCmdCopyImage );
 	LD( vkCreateImageView ); LD( vkDestroyImageView ); LD( vkCreateSampler ); LD( vkDestroySampler );
 	LD( vkCreateDescriptorSetLayout ); LD( vkDestroyDescriptorSetLayout ); LD( vkCreateDescriptorPool );
 	LD( vkDestroyDescriptorPool ); LD( vkAllocateDescriptorSets ); LD( vkUpdateDescriptorSets );
@@ -1354,7 +1355,7 @@ struct BloomImg
 	VkImageView view = VK_NULL_HANDLE;
 	VkImageView layer[8] = {};  // the ring's layers, each a 2D storage view
 	GLuint tex = 0, obj = 0;
-	int w = 0, h = 0, layers = 1;
+	int w = 0, h = 0, layers = 1, samples = 1;
 };
 struct ToneBloomState
 {
@@ -1362,7 +1363,7 @@ struct ToneBloomState
 	std::string brokenWhy;
 	VkDescriptorSetLayout dsl = VK_NULL_HANDLE;
 	VkPipelineLayout layout = VK_NULL_HANDLE;
-	VkPipeline pipe[6] = {};  // down, hold, up, src, comb, measure_q (vkframe.cpp's order)
+	VkPipeline pipe[7] = {};  // down, hold, up, src, comb, measure_q (vkframe.cpp's order), back (the backdrop's resolve)
 	// per chain shape (W x H, the mips' dims); the frame's views are in the sets: made again with the frame
 	int W = 0, H = 0, mips = 0, dims[WwVkPresent::kToneBloomMips][2] = {};
 	BloomImg src, ring, comb, mip[WwVkPresent::kToneBloomMips], up[WwVkPresent::kToneBloomMips];
@@ -1382,8 +1383,11 @@ struct ToneBloomState
 	float * readPtr = nullptr;
 	bool measFresh = false;
 	double measMb = 0.0;
-	// the backdrop mode 3 reads: the view slot resolved (RGBA8)
-	BloomImg back;
+	/* the backdrop mode 3 reads: the view slot copied (backMs: RGBA8, its samples), resolved by bloom_back.hlsl into back
+	 * (RGBA16F, as GL's blit resolve keeps the mean); backFill: its set's unused bindings */
+	BloomImg back, backMs, backFill;
+	VkDescriptorPool backPool = VK_NULL_HANDLE;
+	VkDescriptorSet backSet = VK_NULL_HANDLE;
 	double backMb = 0.0;
 	// this frame's draw (the drawing thread writes it before the hand, the worker reads it)
 	bool on = false, backdrop = false;
@@ -1619,7 +1623,7 @@ VkImageView layerView( VkImage img, VkImageViewType type, VkFormat fmt, int base
 
 /* lane VKBLOOM1: a chain image only this device reads (device-local; layers > 1: the ring, a 2D array view and a 2D view
  * per layer), left UNDEFINED (bloomGeneral lays it out) */
-bool bloomLocal( BloomImg & I, VkFormat fmt, VkImageUsageFlags usage, int w, int h, int layers, double & mb )
+bool bloomLocal( BloomImg & I, VkFormat fmt, VkImageUsageFlags usage, int w, int h, int layers, double & mb, int samples = 1 )
 {
 	Vk & v = vk();
 	VkImageCreateInfo ci { VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO };
@@ -1628,7 +1632,7 @@ bool bloomLocal( BloomImg & I, VkFormat fmt, VkImageUsageFlags usage, int w, int
 	ci.extent = { std::uint32_t( w ), std::uint32_t( h ), 1 };
 	ci.mipLevels = 1;
 	ci.arrayLayers = std::uint32_t( layers );
-	ci.samples = VK_SAMPLE_COUNT_1_BIT;
+	ci.samples = VkSampleCountFlagBits( samples );
 	ci.tiling = VK_IMAGE_TILING_OPTIMAL;
 	ci.usage = usage;
 	if ( v.vkCreateImage( v.dev, &ci, nullptr, &I.img ) != VK_SUCCESS )
@@ -1645,6 +1649,7 @@ bool bloomLocal( BloomImg & I, VkFormat fmt, VkImageUsageFlags usage, int w, int
 	I.w = w;
 	I.h = h;
 	I.layers = layers;
+	I.samples = samples;
 	I.view = layerView( I.img, layers > 1 ? VK_IMAGE_VIEW_TYPE_2D_ARRAY : VK_IMAGE_VIEW_TYPE_2D, fmt, 0, layers );
 	if ( !I.view )
 		return false;
@@ -1735,6 +1740,12 @@ void toneBloomFree( bool glAlive )
 	B.measHave = B.measRan = false;
 	B.measMb = 0.0;
 	bloomImgDrop( B.back, glAlive );
+	bloomImgDrop( B.backMs, glAlive );
+	bloomImgDrop( B.backFill, glAlive );
+	if ( B.backPool )
+		v.vkDestroyDescriptorPool( v.dev, B.backPool, nullptr );
+	B.backPool = VK_NULL_HANDLE;
+	B.backSet = VK_NULL_HANDLE;
 	B.backMb = 0.0;
 	B.on = B.backdrop = false;
 	B.measQw = B.measQh = 0;
@@ -1773,11 +1784,11 @@ bool toneBloomStatic( std::string & why )
 		why = "the bloom's set / pipeline layout failed";
 		return false;
 	}
-	const std::uint32_t * code[6] = { vkframe_bloom_down_spv, vkframe_bloom_hold_spv, vkframe_bloom_up_spv, vkframe_bloom_src_spv,
-		vkframe_bloom_comb_spv, vkframe_measure_q_spv };
-	const size_t bytes[6] = { sizeof( vkframe_bloom_down_spv ), sizeof( vkframe_bloom_hold_spv ), sizeof( vkframe_bloom_up_spv ),
-		sizeof( vkframe_bloom_src_spv ), sizeof( vkframe_bloom_comb_spv ), sizeof( vkframe_measure_q_spv ) };
-	for ( int k = 0; k < 6; k++ ) {
+	const std::uint32_t * code[7] = { vkframe_bloom_down_spv, vkframe_bloom_hold_spv, vkframe_bloom_up_spv, vkframe_bloom_src_spv,
+		vkframe_bloom_comb_spv, vkframe_measure_q_spv, vkframe_bloom_back_spv };
+	const size_t bytes[7] = { sizeof( vkframe_bloom_down_spv ), sizeof( vkframe_bloom_hold_spv ), sizeof( vkframe_bloom_up_spv ),
+		sizeof( vkframe_bloom_src_spv ), sizeof( vkframe_bloom_comb_spv ), sizeof( vkframe_measure_q_spv ), sizeof( vkframe_bloom_back_spv ) };
+	for ( int k = 0; k < 7; k++ ) {
 		VkShaderModuleCreateInfo mi { VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO };
 		mi.codeSize = bytes[k];
 		mi.pCode = code[k];
@@ -1802,11 +1813,12 @@ bool toneBloomStatic( std::string & why )
 }
 
 // lane VKBLOOM1: every binding of one set (0-2 sampled, 3 the sampler, 4 storage, 5-6 the frame, 7 the RGBA32F target)
-void bloomWriteSet( VkDescriptorSet set, VkImageView src, VkImageView mip, VkImageView ring, VkImageView dst, VkImageView out32 )
+void bloomWriteSet( VkDescriptorSet set, VkImageView src, VkImageView mip, VkImageView ring, VkImageView dst, VkImageView out32,
+	VkImageView frame = VK_NULL_HANDLE )
 {
 	Vk & v = vk();
 	Tone & T = tone();
-	const VkImageView views[8] = { src, mip, ring, VK_NULL_HANDLE, dst, T.colorView, T.stencilView, out32 };
+	const VkImageView views[8] = { src, mip, ring, VK_NULL_HANDLE, dst, frame ? frame : T.colorView, T.stencilView, out32 };
 	VkDescriptorImageInfo ii[8] = {};
 	VkWriteDescriptorSet wr[8] = {};
 	for ( std::uint32_t k = 0; k < 8; k++ ) {
@@ -2026,6 +2038,50 @@ bool toneBloomMeasure( int qw, int qh, std::string & why )
 	B.measW = qw;
 	B.measH = qh;
 	std::fprintf( stderr, "vk view: exposure measure target made %dx%d RGBA32F (read back in the tone pass's command buffer)\n", qw, qh );
+	return true;
+}
+
+/* lane VKBLOOM1: the backdrop mode 3 reads (cellhdr.cpp's backdropCopy: the view resolved into RGBA16F by a blit): the
+ * view slot's copy (RGBA8, its samples), the resolve's target (RGBA16F) and bloom_back.hlsl's set. The caller drained. */
+bool toneBloomBack( int samples, std::string & why )
+{
+	Vk & v = vk();
+	Tone & T = tone();
+	ToneBloomState & B = T.bloom;
+	bloomImgDrop( B.back, true );
+	bloomImgDrop( B.backMs, true );
+	bloomImgDrop( B.backFill, true );
+	if ( B.backPool )
+		v.vkDestroyDescriptorPool( v.dev, B.backPool, nullptr );
+	B.backPool = VK_NULL_HANDLE;
+	B.backSet = VK_NULL_HANDLE;
+	B.backMb = 0.0;
+	const VkFormat f16 = VK_FORMAT_R16G16B16A16_SFLOAT;
+	const VkImageUsageFlags use = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT;
+	bool ok = bloomLocal( B.backMs, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT, T.w, T.h, 1,
+				  B.backMb, samples )
+		&& bloomLocal( B.back, f16, use, T.w, T.h, 1, B.backMb ) && bloomLocal( B.backFill, f16, use, 1, 1, 2, B.backMb )
+		&& bloomGeneral( { &B.backMs, &B.back, &B.backFill } );
+	if ( ok ) {
+		VkDescriptorPoolSize ps[3] = { { VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 5 }, { VK_DESCRIPTOR_TYPE_SAMPLER, 1 },
+			{ VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 2 } };
+		VkDescriptorPoolCreateInfo dp { VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO };
+		dp.maxSets = 1;
+		dp.poolSizeCount = 3;
+		dp.pPoolSizes = ps;
+		ok = v.vkCreateDescriptorPool( v.dev, &dp, nullptr, &B.backPool ) == VK_SUCCESS;
+		VkDescriptorSetAllocateInfo ai { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO };
+		ai.descriptorPool = B.backPool;
+		ai.descriptorSetCount = 1;
+		ai.pSetLayouts = &B.dsl;
+		ok = ok && v.vkAllocateDescriptorSets( v.dev, &ai, &B.backSet ) == VK_SUCCESS;
+	}
+	if ( !ok ) {
+		why = "the backdrop's images / set failed";
+		return false;
+	}
+	const VkImageView fill = B.backFill.layer[0];
+	bloomWriteSet( B.backSet, fill, fill, B.backFill.view, B.back.view, fill, B.backMs.view );
 	return true;
 }
 
@@ -2582,24 +2638,28 @@ bool toneRecord( std::string & why )
 			VkMemoryBarrier mb { VK_STRUCTURE_TYPE_MEMORY_BARRIER };
 			mb.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
 			mb.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT | VK_ACCESS_TRANSFER_WRITE_BIT;
-			v.vkCmdPipelineBarrier( T.cmd, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
-				VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 1, &mb, 0, nullptr, 0, nullptr );
-			if ( V.samples > 1 ) {
-				VkImageResolve r {};
-				r.srcSubresource = r.dstSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
-				r.extent = { std::uint32_t( B.back.w ), std::uint32_t( B.back.h ), 1 };
-				v.vkCmdResolveImage( T.cmd, V.slot[T.slot].color, VK_IMAGE_LAYOUT_GENERAL, B.back.img, VK_IMAGE_LAYOUT_GENERAL, 1, &r );
-			} else {
-				VkImageBlit bl {};
-				bl.srcSubresource = bl.dstSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
-				bl.srcOffsets[1] = bl.dstOffsets[1] = { B.back.w, B.back.h, 1 };
-				v.vkCmdBlitImage( T.cmd, V.slot[T.slot].color, VK_IMAGE_LAYOUT_GENERAL, B.back.img, VK_IMAGE_LAYOUT_GENERAL, 1, &bl,
-					VK_FILTER_NEAREST );
-			}
-			mb.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT | VK_ACCESS_TRANSFER_READ_BIT;
+			v.vkCmdPipelineBarrier( T.cmd, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT
+				| VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT | VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 1, &mb, 0,
+				nullptr, 0, nullptr );
+			/* every sample copied, then their mean in half float (bloom_back.hlsl) as GL's blit resolve into RGBA16F keeps it:
+			 * an RGBA8 resolve rounds the mean to 8 bits, and the vanilla curve's shoulder turned that into 199 levels */
+			VkImageCopy cp {};
+			cp.srcSubresource = cp.dstSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
+			cp.extent = { std::uint32_t( B.backMs.w ), std::uint32_t( B.backMs.h ), 1 };
+			v.vkCmdCopyImage( T.cmd, V.slot[T.slot].color, VK_IMAGE_LAYOUT_GENERAL, B.backMs.img, VK_IMAGE_LAYOUT_GENERAL, 1, &cp );
+			mb.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+			mb.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+			v.vkCmdPipelineBarrier( T.cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 1, &mb, 0, nullptr, 0,
+				nullptr );
+			const std::int32_t noJob[12] = {};
+			v.vkCmdBindPipeline( T.cmd, VK_PIPELINE_BIND_POINT_COMPUTE, B.pipe[6] );
+			v.vkCmdBindDescriptorSets( T.cmd, VK_PIPELINE_BIND_POINT_COMPUTE, B.layout, 0, 1, &B.backSet, 0, nullptr );
+			v.vkCmdPushConstants( T.cmd, B.layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, std::uint32_t( sizeof( noJob ) ), noJob );
+			v.vkCmdDispatch( T.cmd, std::uint32_t( ( B.back.w + 7 ) / 8 ), std::uint32_t( ( B.back.h + 7 ) / 8 ), 1 );
+			mb.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
 			mb.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
-			v.vkCmdPipelineBarrier( T.cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT
-				| VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, 0, 1, &mb, 0, nullptr, 0, nullptr );
+			v.vkCmdPipelineBarrier( T.cmd, VK_PIPELINE_STAGE_TRANSFER_BIT | VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+				VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, 0, 1, &mb, 0, nullptr, 0, nullptr );
 			v.vkCmdBeginRenderPass( T.cmd, &rbi, VK_SUBPASS_CONTENTS_INLINE );
 			v.vkCmdSetViewport( T.cmd, 0, 1, &vp );
 			v.vkCmdSetScissor( T.cmd, 0, 1, &sc );
@@ -3806,21 +3866,16 @@ bool toneRun( const ToneRun & t, std::string & why )
 			same = B.dims[i][0] == b->dims[i][0] && B.dims[i][1] == b->dims[i][1];
 		if ( measAsk && ( !B.meas.img || !B.measSet || B.measW != t.measQw || B.measH != t.measQh ) )
 			same = false;
-		if ( backOn && ( !B.back.img || B.back.w != T.w || B.back.h != T.h ) )
+		const int backS = view().samples;
+		const bool backNew = backOn && ( !B.back.img || !B.backSet || B.back.w != T.w || B.back.h != T.h || B.backMs.samples != backS );
+		if ( backNew )
 			same = false;
 		if ( !same ) {
 			drain();
 			std::string bw;
 			bool ok = toneBloomStatic( bw ) && ( !measAsk || toneBloomMeasure( t.measQw, t.measQh, bw ) ) && ( !b || toneBloomChain( *b, bw ) );
-			if ( ok && backOn && ( !B.back.img || B.back.w != T.w || B.back.h != T.h ) ) {
-				// the backdrop mode 3 reads (cellhdr.cpp's backdropCopy): the view slot resolved, RGBA8 as the view holds it
-				bloomImgDrop( B.back, true );
-				B.backMb = 0.0;
-				ok = bloomLocal( B.back, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT, T.w, T.h, 1,
-						 B.backMb )
-					&& bloomGeneral( { &B.back } );
-				if ( !ok )
-					bw = "the backdrop's image failed";
+			if ( ok && backNew ) {
+				ok = toneBloomBack( backS, bw );
 				T.descDirty = true;
 			}
 			if ( !ok ) {
