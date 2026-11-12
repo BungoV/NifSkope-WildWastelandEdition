@@ -217,19 +217,52 @@ int main( int argc, char ** argv )
 
 	/* build 91: each signal route (0 the drawing thread's GL signal, 1 the worker's GL signal, 2 the worker's CPU wait on
 	 * GL's fence, no GL signal); the gate holds for each */
-	auto run = [&]( int route ) -> bool {
+	/* round 10: viewRoute = the view on Vulkan (GL draws into the present device's MS view, the worker resolves it on
+	 * Vulkan, no GL blit). Its picture's reference is GL's own resolve of that view (a blit into a plain RGBA8 FBO) */
+	auto bindFb = reinterpret_cast<void( WINAPI * )( GLenum, GLuint )>( glProc( "glBindFramebuffer" ) );
+	auto run = [&]( int route, bool viewRoute ) -> bool {
 	drain();
 	signalRoute() = route;
-	const char * tag = route == 2 ? "route 2 worker CPU wait" : route == 1 ? "route 1 worker GL signal"
-		: "route 0 drawing-thread GL signal";
+	const char * tag = viewRoute ? "route 2 + view on Vulkan" : route == 2 ? "route 2 worker CPU wait" : route == 1
+		? "route 1 worker GL signal" : "route 0 drawing-thread GL signal";
+	auto begin = [&]( std::string & why ) -> bool {
+		if ( !viewRoute ) {
+			bindFb( 0x8D40, 0 );
+			return true;
+		}
+		return WwVkPresent::viewBegin( W, H, samples, glProc, why );
+	};
 	// the picture: the back buffer, then the same frame presented and read back in its own submit
 	std::string why;
+	if ( !begin( why ) ) {
+		std::printf( "PRESENT vk FAILED (%s, the view): %s\n", tag, why.c_str() );
+		return false;
+	}
 	draw( W, H, 3 );
 	glFinish();
 	std::vector<std::uint8_t> ref( size_t( W ) * H * 4 ), cap;
-	glReadBuffer( GL_BACK );
 	glPixelStorei( GL_PACK_ALIGNMENT, 1 );
-	glReadPixels( 0, 0, W, H, GL_RGBA, GL_UNSIGNED_BYTE, ref.data() );
+	if ( viewRoute ) {
+		Gl & g = gl();
+		GLuint rt = 0, rf = 0;
+		glGenTextures( 1, &rt );
+		glBindTexture( GL_TEXTURE_2D, rt );
+		glTexImage2D( GL_TEXTURE_2D, 0, GL_RGBA8, W, H, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr );
+		g.genFramebuffers( 1, &rf );
+		g.bindFramebuffer( kDrawFb, rf );
+		g.framebufferTexture2D( kDrawFb, kColorAttach0, kTexture2D, rt, 0 );
+		g.bindFramebuffer( kReadFb, WwVkPresent::viewFbo() );
+		g.blitFramebuffer( 0, 0, W, H, 0, 0, W, H, kColorBit, kNearest );
+		g.bindFramebuffer( kReadFb, rf );
+		glReadPixels( 0, 0, W, H, GL_RGBA, GL_UNSIGNED_BYTE, ref.data() );
+		g.bindFramebuffer( kFramebuffer, WwVkPresent::viewFbo() );
+		g.deleteFramebuffers( 1, &rf );
+		glDeleteTextures( 1, &rt );
+		glFinish();
+	} else {
+		glReadBuffer( GL_BACK );
+		glReadPixels( 0, 0, W, H, GL_RGBA, GL_UNSIGNED_BYTE, ref.data() );
+	}
 	WwVkPresent::captureNext( &cap );
 	if ( !WwVkPresent::present( wnd, W, H, false, glProc, why ) ) {
 		std::printf( "PRESENT vk FAILED (%s): %s\n", tag, why.c_str() );
@@ -238,6 +271,10 @@ int main( int argc, char ** argv )
 	const WwVkPresent::Stat st0 = WwVkPresent::last();
 	if ( route != 0 && ( !st0.sigWorker || st0.sigWait != ( route == 2 ) ) ) {
 		std::printf( "PRESENT vk (%s): the signal stayed on the drawing thread (%s)\n", tag, st0.sigWhy.c_str() );
+		return false;
+	}
+	if ( st0.view != viewRoute ) {
+		std::printf( "PRESENT vk (%s): the view route %s\n", tag, viewRoute ? "did not carry the frame" : "carried a frame it should not" );
 		return false;
 	}
 	size_t diff = 0, diffRed = 0;
@@ -267,6 +304,10 @@ int main( int argc, char ** argv )
 		}
 		pump();
 		const double td = nowMs();
+		if ( !begin( why ) ) {
+			std::printf( "PRESENT vk FAILED (%s, the view) at frame %d: %s\n", tag, f, why.c_str() );
+			return false;
+		}
 		draw( W, H, f );
 		if ( !WwVkPresent::present( wnd, W, H, false, glProc, why ) ) {
 			std::printf( "PRESENT vk FAILED (%s) at frame %d: %s\n", tag, f, why.c_str() );
@@ -308,12 +349,16 @@ int main( int argc, char ** argv )
 			median( vkLoad, 0.9 ), median( vkCpu ), median( vkCpu, 0.9 ) );
 	return median( vkMs ) < 0.3 && exact && redFails && sp.n >= N - 1 && sp.failed == 0;
 	};
-	const bool okMain = run( 0 ), okWorker = run( 1 ), okWait = run( 2 );
+	const bool okMain = run( 0, false ), okWorker = run( 1, false ), okWait = run( 2, false ), okView = run( 2, true );
+	const WwVkPresent::ViewStat vst = WwVkPresent::takeViewStat();
+	std::printf( "PRESENT view: %dx%d MS%d, %d views, %.1f MB, made in %.1f ms, %d still read when GL wanted them\n", vst.w, vst.h,
+		vst.samples, vst.views, vst.mb, vst.makeMs, vst.busy );
+	bindFb( 0x8D40, 0 );
 	WwVkPresent::shutdown();  // drains the worker
 	wglMakeCurrent( nullptr, nullptr );
 	wglDeleteContext( glrc );
 	DestroyWindow( wnd );
-	const bool ok = okMain && okWorker && okWait;
+	const bool ok = okMain && okWorker && okWait && okView;
 	std::printf( "PRESENT GATE %s\n", ok ? "OK" : "FAILED" );
 	return ok ? 0 : 1;
 }

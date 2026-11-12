@@ -1005,6 +1005,20 @@ struct CuEnd
 
 quint64 wwSetupMemoEpochArmed();	// gl/renderer.cpp: the armed pass's epoch, 0 outside one
 
+namespace
+{
+WwCellToneInputs & toneInputs()
+{
+	static WwCellToneInputs t;
+	return t;
+}
+}	// namespace
+
+const WwCellToneInputs & wwCellToneInputs()
+{
+	return toneInputs();
+}
+
 void wwCellLightsUniforms( Scene * scene )
 {
 	PassTime::DrawCpuScope cpuT( PassTime::CpuCellUni );	// lane PERF2
@@ -1657,8 +1671,10 @@ void wwCellLightsUniforms( Scene * scene )
 		g.lutDoc = scene->nifModel;
 		g.lutVersion = s.version.value( scene->nifModel );
 		g.lutStamp = isStamp;
+		toneInputs().lutGen++;
 	}
 	const bool lutDraw = isDraw && g.lutTex && g.lutDoc == scene->nifModel && LI->isLut.size() == 16 * 16 * 16 * 3;
+	toneInputs().lut = lutDraw ? LI->isLut.data() : nullptr;	// VKFRAME1 round 11: the same bytes, for the Vulkan tone pass
 	u.section();
 	rec.bind( u, kLutUnit, GL_TEXTURE_3D, lutDraw ? g.lutTex : 0 );
 	u.done();
@@ -1691,6 +1707,19 @@ void wwCellLightsUniforms( Scene * scene )
 		&& !wwCellBloomReplacing();
 	rec.bind( u, kBloomUnit, GL_TEXTURE_2D, bloomDraw ? bloomTex : 0 );
 	u.done();
+	{	// VKFRAME1 round 11: the Vulkan tone pass copies it when it changes (the GPU's blur: every call)
+		WwCellToneInputs & ti = toneInputs();
+		static const void * tiDoc = nullptr;
+		static int tiVersion = -1;
+		const unsigned m = bloomDraw ? unsigned( bloomTex ) : 0u;
+		if ( m && ( B->gpuTex || m != ti.measure || tiDoc != scene->nifModel || tiVersion != B->version ) )
+			ti.measureGen++;
+		ti.measure = m;
+		ti.mw = m ? B->w : 0;
+		ti.mh = m ? B->h : 0;
+		tiDoc = scene->nifModel;
+		tiVersion = B ? B->version : -1;
+	}
 	rec.i( prog, "cellIsBloom", kBloomUnit );
 	rec.b( prog, "cellIsBloomOn", bloomDraw );
 	if ( bloomDraw ) {

@@ -5,6 +5,7 @@
 #include "gl/gpustage.h"	// MODULES1: the staged-upload counts in the stream1 mem line
 #include "filebuf.hpp"	// MODULES1: the archive trims in the ram owners line
 #include "framepacer.h"	// lane EMPTY240: the timer resolution helpers live here (Windows headers)
+#include "features/vkframe/vkpresent.h"	// lane VKFRAME1 round 10: the present route in the zone line
 
 #include <QByteArray>
 #include <QMap>
@@ -783,6 +784,7 @@ void watchCollect( WatchSlot & sl )
 			+ QByteArray::number( double( sl.c.texBytes ) / 1048576.0, 'f', 1 ) + " MB; "
 			+ QByteArray::number( sl.c.texPumped ) + " by the pump), " + QByteArray::number( sl.c.made ) + " meshes ("
 			+ QByteArray::number( double( sl.c.madeBytes ) / 1048576.0, 'f', 1 ) + " MB)";
+		line += " | present route " + QByteArray( WwVkPresent::routeName() );	// VKFRAME1 round 10: vk view / vk present / gl swap
 		std::fprintf( stderr, "%s\n", line.constData() );
 		/* lane EMPTY240 R8-1: build 82's frame 152 spent 7206.8 ms in opaque on the GPU with 7.6 ms of CPU and 256 draws:
 		 * the GPU waited on something no zone holds. A paint over a second names what it waited on: the driver's

@@ -4913,7 +4913,8 @@ void GLView::paintGL()
 			// of the currently bound VAO's state, and the renderer caches and reuses that VAO.
 		}
 		glPolygonMode( GL_FRONT_AND_BACK, GL_FILL );
-		QPainter painter( this );
+		// lane VKFRAME1 round 10: into the view on Vulkan when it is on (WW_VKVIEW=1), else the back buffer
+		QPainter painter( WwVkPresent::painterTarget( this ) );
 		if ( !volLabels.empty() ) {	// each room's name (and its group) and each threshold's two rooms
 			painter.setRenderHint( QPainter::TextAntialiasing, true );
 			QFont f = painter.font();
