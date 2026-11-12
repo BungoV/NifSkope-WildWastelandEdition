@@ -28,6 +28,7 @@
 #include "features/vkframe/bloom_comb.spv.h"
 #include "features/vkframe/bloom_back.spv.h"
 #include "features/vkframe/measure_q.spv.h"
+#include "features/vkframe/sky_view_ps.spv.h"  // lane VKSKY1: the cell sky on the tone frame
 
 #include <algorithm>
 #include <chrono>
@@ -535,12 +536,15 @@ struct Work
 	bool tone = false;  // round 11 (k = -1): record and submit the tone pass on the view (toneWork)
 	bool taa = false;   // lane VKSHARE1 (k = -1): the temporal AA's passes on the view (taaWork); shares tone's counters
 	bool merge = false; // lane VKPOST2 (k = -1): the deferred tone pass, then the TAA, one crossing (mergeWork)
+	bool sky = false;   // lane VKSKY1 (k = -1): the cell sky into the tone frame (skyWork); shares tone's counters
 };
 
 // round 11: the tone pass's record + submit, on the worker (the queue is the worker's)
 bool toneWork( std::string & why );
 bool taaWork( std::string & why );
 bool mergeWork( std::string & why );
+bool skyWork( std::string & why );
+void skyDrop();
 
 struct Worker
 {
@@ -606,9 +610,9 @@ void workerLoop()
 			W.q.pop_front();
 			W.busy = true;
 		}
-		if ( j.tone || j.taa || j.merge ) {
+		if ( j.tone || j.taa || j.merge || j.sky ) {
 			std::string why;
-			const bool ok = j.merge ? mergeWork( why ) : j.taa ? taaWork( why ) : toneWork( why );
+			const bool ok = j.merge ? mergeWork( why ) : j.sky ? skyWork( why ) : j.taa ? taaWork( why ) : toneWork( why );
 			{
 				std::lock_guard<std::mutex> lk( W.m );
 				W.toneDone++;
@@ -3415,6 +3419,7 @@ void shutdown()
 		A.pending = false;
 		taaSemsDrop( gl().ok && A.semCtx == gl().ctx );
 	}
+	skyDrop();  // lane VKSKY1: the sky's crossing semaphores and framebuffer
 }
 
 bool viewBegin( int w, int h, int samples, GlProc gp, std::string & why )
@@ -4461,6 +4466,485 @@ const char * routeName()
 	return routeWord();
 }
 
+}  // namespace WwVkPresent
+
+// lane VKSKY1: the cell sky on the tone frame (row G's first pass), its own crossing like the temporal AA's
+namespace
+{
+struct Sky
+{
+	bool made = false, broken = false;
+	std::string brokenWhy;
+	VkSampler linear = VK_NULL_HANDLE;
+	VkDescriptorSetLayout dsl = VK_NULL_HANDLE;
+	VkDescriptorPool dpool = VK_NULL_HANDLE;
+	VkDescriptorSet set = VK_NULL_HANDLE;
+	VkPipelineLayout layout = VK_NULL_HANDLE;
+	VkShaderModule vs = VK_NULL_HANDLE, ps = VK_NULL_HANDLE;
+	VkBuffer ubo = VK_NULL_HANDLE;  // b0 at 0, b31 at kSkyLooseAt
+	VkDeviceMemory uboMem = VK_NULL_HANDLE;
+	std::uint8_t * uboPtr = nullptr;
+	VkSemaphore glDone = VK_NULL_HANDLE, vkDone = VK_NULL_HANDLE;
+	GLuint glDoneGl = 0, vkDoneGl = 0;
+	void * semCtx = nullptr;
+	VkCommandBuffer cmd = VK_NULL_HANDLE;
+	VkFence fence = VK_NULL_HANDLE;
+	bool pending = false;
+	int pipeSamples = 0;
+	VkRenderPass pass = VK_NULL_HANDLE;
+	VkPipeline pipe = VK_NULL_HANDLE;
+	int pipelines = 0;
+	double buildMs = 0.0;
+	VkFramebuffer fb = VK_NULL_HANDLE;  // over the tone frame's colour, made each run (the frame may be remade between)
+	int w = 0, h = 0, vp[4] = {};
+	WwVkPresent::SkyStat st;
+};
+constexpr VkDeviceSize kSkyLooseAt = 512;  // past b0 (336), on any minUniformBufferOffsetAlignment up to 256
+
+Sky & sky()
+{
+	static Sky s;
+	return s;
+}
+
+// the device-time parts (once): the sampler, the set layout, pool + set, the pipeline layout, both modules, the uniform
+// buffer (host-coherent, mapped), the command buffer and its fence
+bool skyStatic( std::string & why )
+{
+	Vk & v = vk();
+	Sky & S = sky();
+	if ( S.made )
+		return true;
+	const double t0 = nowMs();
+	VkSamplerCreateInfo sci { VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO };  // GL's LUTs: LINEAR, CLAMP_TO_EDGE, one level
+	sci.magFilter = sci.minFilter = VK_FILTER_LINEAR;
+	sci.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
+	sci.addressModeU = sci.addressModeV = sci.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+	sci.maxLod = 0.0f;
+	if ( v.vkCreateSampler( v.dev, &sci, nullptr, &S.linear ) != VK_SUCCESS ) {
+		why = "vkCreateSampler (the sky) failed";
+		return false;
+	}
+	// sky_view_ps.spv.h: b0 / b31 uniform buffers, t0-3 at 64-67, s0-3 at 128-131 (vkframe_spirv.sh's shifts)
+	VkDescriptorSetLayoutBinding b[10] = {};
+	const std::uint32_t num[10] = { 0, 31, 64, 65, 66, 67, 128, 129, 130, 131 };
+	for ( int k = 0; k < 10; k++ ) {
+		b[k].binding = num[k];
+		b[k].descriptorType = k < 2 ? VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER : k < 6 ? VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE : VK_DESCRIPTOR_TYPE_SAMPLER;
+		b[k].descriptorCount = 1;
+		b[k].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+	}
+	VkDescriptorSetLayoutCreateInfo lci { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
+	lci.bindingCount = 10;
+	lci.pBindings = b;
+	VkDescriptorPoolSize ps[3] = { { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 2 }, { VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 4 },
+		{ VK_DESCRIPTOR_TYPE_SAMPLER, 4 } };
+	VkDescriptorPoolCreateInfo pci { VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO };
+	pci.maxSets = 1;
+	pci.poolSizeCount = 3;
+	pci.pPoolSizes = ps;
+	if ( v.vkCreateDescriptorSetLayout( v.dev, &lci, nullptr, &S.dsl ) != VK_SUCCESS
+		|| v.vkCreateDescriptorPool( v.dev, &pci, nullptr, &S.dpool ) != VK_SUCCESS ) {
+		why = "the sky's descriptor set layout / pool failed";
+		return false;
+	}
+	VkDescriptorSetAllocateInfo dai { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO };
+	dai.descriptorPool = S.dpool;
+	dai.descriptorSetCount = 1;
+	dai.pSetLayouts = &S.dsl;
+	VkPipelineLayoutCreateInfo plci { VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO };
+	plci.setLayoutCount = 1;
+	plci.pSetLayouts = &S.dsl;
+	if ( v.vkAllocateDescriptorSets( v.dev, &dai, &S.set ) != VK_SUCCESS
+		|| v.vkCreatePipelineLayout( v.dev, &plci, nullptr, &S.layout ) != VK_SUCCESS ) {
+		why = "the sky's descriptor set / pipeline layout failed";
+		return false;
+	}
+	auto module = [&]( const std::uint32_t * code, size_t bytes, VkShaderModule & out ) {
+		VkShaderModuleCreateInfo mci { VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO };
+		mci.codeSize = bytes;
+		mci.pCode = code;
+		return v.vkCreateShaderModule( v.dev, &mci, nullptr, &out ) == VK_SUCCESS;
+	};
+	if ( !module( vkframe_tone_view_vs_spv, sizeof( vkframe_tone_view_vs_spv ), S.vs )
+		|| !module( vkframe_sky_view_ps_spv, sizeof( vkframe_sky_view_ps_spv ), S.ps ) ) {
+		why = "the sky's shader modules failed";
+		return false;
+	}
+	VkBufferCreateInfo bci { VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
+	bci.size = kSkyLooseAt + VkDeviceSize( WwVkPresent::kSkyLooseBytes );
+	bci.usage = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
+	bool mapped = v.vkCreateBuffer( v.dev, &bci, nullptr, &S.ubo ) == VK_SUCCESS;
+	if ( mapped ) {
+		VkMemoryRequirements br {};
+		v.vkGetBufferMemoryRequirements( v.dev, S.ubo, &br );
+		VkMemoryAllocateInfo ai { VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO };
+		ai.allocationSize = br.size;
+		ai.memoryTypeIndex = memType( br.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT );
+		void * p = nullptr;
+		mapped = ai.memoryTypeIndex != UINT32_MAX && v.vkAllocateMemory( v.dev, &ai, nullptr, &S.uboMem ) == VK_SUCCESS
+			&& v.vkBindBufferMemory( v.dev, S.ubo, S.uboMem, 0 ) == VK_SUCCESS
+			&& v.vkMapMemory( v.dev, S.uboMem, 0, VK_WHOLE_SIZE, 0, &p ) == VK_SUCCESS;
+		S.uboPtr = static_cast<std::uint8_t *>( p );
+	}
+	if ( !mapped || !S.uboPtr ) {
+		why = "the sky's uniform buffer failed";
+		return false;
+	}
+	VkFenceCreateInfo fi { VK_STRUCTURE_TYPE_FENCE_CREATE_INFO };
+	VkCommandBufferAllocateInfo cai { VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO };
+	cai.commandPool = v.pool;
+	cai.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+	cai.commandBufferCount = 1;
+	if ( v.vkCreateFence( v.dev, &fi, nullptr, &S.fence ) != VK_SUCCESS || v.vkAllocateCommandBuffers( v.dev, &cai, &S.cmd ) != VK_SUCCESS ) {
+		why = "the sky's fence / command buffer failed";
+		return false;
+	}
+	S.buildMs = nowMs() - t0;
+	S.made = true;
+	return true;
+}
+
+void skySemsDrop( bool glAlive )
+{
+	Vk & v = vk();
+	Gl & g = gl();
+	Sky & S = sky();
+	if ( glAlive )
+		for ( GLuint * s : { &S.glDoneGl, &S.vkDoneGl } )
+			if ( *s )
+				g.deleteSemaphores( 1, s );
+	for ( VkSemaphore * s : { &S.glDone, &S.vkDone } )
+		if ( *s )
+			v.vkDestroySemaphore( v.dev, *s, nullptr );
+	S.glDoneGl = S.vkDoneGl = 0;
+	S.glDone = S.vkDone = VK_NULL_HANDLE;
+	S.semCtx = nullptr;
+}
+
+bool skySems( std::string & why )
+{
+	Gl & g = gl();
+	Sky & S = sky();
+	if ( S.glDone && S.semCtx == g.ctx )
+		return true;
+	skySemsDrop( false );  // another context's names: that context went
+	if ( !exportSem( S.glDone, S.glDoneGl, why ) || !exportSem( S.vkDone, S.vkDoneGl, why ) ) {
+		skySemsDrop( true );
+		return false;
+	}
+	S.semCtx = g.ctx;
+	return true;
+}
+
+// the render pass (one RGBA16F colour at the frame's samples, LOAD / STORE, GENERAL) and the pipeline: one fragment a
+// pixel writes every covered sample, as GL's quad does; no depth or stencil (GL draws the quad with both tests off)
+bool skyPipes( int samples, std::string & why )
+{
+	Vk & v = vk();
+	Sky & S = sky();
+	if ( S.pass && S.pipeSamples == samples )
+		return true;
+	if ( S.pipe )
+		v.vkDestroyPipeline( v.dev, S.pipe, nullptr );
+	if ( S.pass )
+		v.vkDestroyRenderPass( v.dev, S.pass, nullptr );
+	S.pipe = VK_NULL_HANDLE;
+	S.pass = VK_NULL_HANDLE;
+	S.pipeSamples = 0;
+	const double t0 = nowMs();
+	const VkSampleCountFlagBits sc = VkSampleCountFlagBits( samples );
+	VkAttachmentDescription at {};
+	at.format = VK_FORMAT_R16G16B16A16_SFLOAT;
+	at.samples = sc;
+	at.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
+	at.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+	at.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+	at.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+	at.initialLayout = at.finalLayout = VK_IMAGE_LAYOUT_GENERAL;
+	const VkAttachmentReference cr { 0, VK_IMAGE_LAYOUT_GENERAL };
+	VkSubpassDescription sp {};
+	sp.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+	sp.colorAttachmentCount = 1;
+	sp.pColorAttachments = &cr;
+	VkRenderPassCreateInfo rci { VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO };
+	rci.attachmentCount = 1;
+	rci.pAttachments = &at;
+	rci.subpassCount = 1;
+	rci.pSubpasses = &sp;
+	if ( v.vkCreateRenderPass( v.dev, &rci, nullptr, &S.pass ) != VK_SUCCESS ) {
+		why = "vkCreateRenderPass (the sky) failed";
+		return false;
+	}
+	VkPipelineShaderStageCreateInfo st[2] = { { VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO },
+		{ VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO } };
+	st[0].stage = VK_SHADER_STAGE_VERTEX_BIT;
+	st[0].module = S.vs;
+	st[0].pName = "main";
+	st[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+	st[1].module = S.ps;
+	st[1].pName = "main";
+	VkPipelineVertexInputStateCreateInfo vi { VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO };
+	VkPipelineInputAssemblyStateCreateInfo ia { VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO };
+	ia.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+	VkPipelineViewportStateCreateInfo vps { VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO };
+	vps.viewportCount = vps.scissorCount = 1;
+	VkPipelineRasterizationStateCreateInfo rs { VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO };
+	rs.polygonMode = VK_POLYGON_MODE_FILL;
+	rs.cullMode = VK_CULL_MODE_NONE;
+	rs.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
+	rs.lineWidth = 1.0f;
+	VkPipelineMultisampleStateCreateInfo ms { VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO };
+	ms.rasterizationSamples = sc;
+	VkPipelineColorBlendAttachmentState cb {};
+	cb.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+	VkPipelineColorBlendStateCreateInfo cbs { VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO };
+	cbs.attachmentCount = 1;
+	cbs.pAttachments = &cb;
+	const VkDynamicState dyn[2] = { VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR };
+	VkPipelineDynamicStateCreateInfo dy { VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO };
+	dy.dynamicStateCount = 2;
+	dy.pDynamicStates = dyn;
+	VkGraphicsPipelineCreateInfo gp { VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO };
+	gp.stageCount = 2;
+	gp.pStages = st;
+	gp.pVertexInputState = &vi;
+	gp.pInputAssemblyState = &ia;
+	gp.pViewportState = &vps;
+	gp.pRasterizationState = &rs;
+	gp.pMultisampleState = &ms;
+	gp.pColorBlendState = &cbs;
+	gp.pDynamicState = &dy;
+	gp.layout = S.layout;
+	gp.renderPass = S.pass;
+	if ( v.vkCreateGraphicsPipelines( v.dev, tone().cache, 1, &gp, nullptr, &S.pipe ) != VK_SUCCESS ) {
+		why = "vkCreateGraphicsPipelines (the sky, " + std::to_string( samples ) + " samples) failed";
+		return false;
+	}
+	S.pipeSamples = samples;
+	S.pipelines = 1;
+	S.buildMs += nowMs() - t0;
+	toneCacheSave();
+	return true;
+}
+
+// the worker: the sky's triangle into the tone frame, waiting GL's signal, signalling back, with the fence
+bool skyWork( std::string & why )
+{
+	Vk & v = vk();
+	Sky & S = sky();
+	if ( !S.fb ) {
+		why = "no framebuffer over the tone frame";
+		return false;
+	}
+	v.vkResetFences( v.dev, 1, &S.fence );
+	v.vkResetCommandBuffer( S.cmd, 0 );
+	VkCommandBufferBeginInfo bi { VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
+	bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+	v.vkBeginCommandBuffer( S.cmd, &bi );
+	VkRenderPassBeginInfo rbi { VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO };
+	rbi.renderPass = S.pass;
+	rbi.framebuffer = S.fb;
+	rbi.renderArea = { { 0, 0 }, { std::uint32_t( S.w ), std::uint32_t( S.h ) } };
+	v.vkCmdBeginRenderPass( S.cmd, &rbi, VK_SUBPASS_CONTENTS_INLINE );
+	// GL's viewport rows from the bottom = the image's rows from the top in memory: no flip (FragCoord.y = GL's)
+	const VkViewport vp { float( S.vp[0] ), float( S.vp[1] ), float( S.vp[2] ), float( S.vp[3] ), 0.0f, 1.0f };
+	const int x0 = std::clamp( S.vp[0], 0, S.w ), y0 = std::clamp( S.vp[1], 0, S.h );
+	const int x1 = std::clamp( S.vp[0] + S.vp[2], 0, S.w ), y1 = std::clamp( S.vp[1] + S.vp[3], 0, S.h );
+	const VkRect2D sc { { x0, y0 }, { std::uint32_t( std::max( x1 - x0, 0 ) ), std::uint32_t( std::max( y1 - y0, 0 ) ) } };
+	v.vkCmdSetViewport( S.cmd, 0, 1, &vp );
+	v.vkCmdSetScissor( S.cmd, 0, 1, &sc );
+	v.vkCmdBindPipeline( S.cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, S.pipe );
+	v.vkCmdBindDescriptorSets( S.cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, S.layout, 0, 1, &S.set, 0, nullptr );
+	v.vkCmdDraw( S.cmd, 3, 1, 0, 0 );
+	v.vkCmdEndRenderPass( S.cmd );
+	if ( v.vkEndCommandBuffer( S.cmd ) != VK_SUCCESS ) {
+		why = "vkEndCommandBuffer (the sky) failed";
+		return false;
+	}
+	const VkPipelineStageFlags waitAt = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
+	VkSubmitInfo si { VK_STRUCTURE_TYPE_SUBMIT_INFO };
+	si.waitSemaphoreCount = 1;
+	si.pWaitSemaphores = &S.glDone;
+	si.pWaitDstStageMask = &waitAt;
+	si.commandBufferCount = 1;
+	si.pCommandBuffers = &S.cmd;
+	si.signalSemaphoreCount = 1;
+	si.pSignalSemaphores = &S.vkDone;
+	const VkResult r = v.vkQueueSubmit( v.queue, 1, &si, S.fence );
+	if ( r != VK_SUCCESS ) {
+		why = "vkQueueSubmit (the sky) returned " + std::to_string( int( r ) );
+		return false;
+	}
+	return true;
+}
+
+// shutdown: the crossing's semaphores (GL's names) and the framebuffer; the pipelines stay with the device
+void skyDrop()
+{
+	Sky & S = sky();
+	if ( !S.glDone && !S.pending && !S.fb )
+		return;
+	drain();
+	vk().vkDeviceWaitIdle( vk().dev );
+	S.pending = false;
+	if ( S.fb )
+		vk().vkDestroyFramebuffer( vk().dev, S.fb, nullptr );
+	S.fb = VK_NULL_HANDLE;
+	skySemsDrop( gl().ok && S.semCtx == gl().ctx );
+}
+}  // namespace
+
+namespace WwVkPresent
+{
+bool skyRun( const SkyRun & t, std::string & why )
+{
+	Sky & S = sky();
+	Tone & T = tone();
+	Gl & g = gl();
+	Vk & v = vk();
+	const double t0 = nowMs();
+	auto refuse = [&]( const std::string & w ) {
+		why = w;
+		S.st.fails++;
+		S.st.failWhy = w;
+		return false;
+	};
+	auto breakOff = [&]( const std::string & w ) {
+		S.broken = true;
+		S.brokenWhy = "the sky on Vulkan broke: " + w;
+		return refuse( S.brokenWhy );
+	};
+	if ( S.broken )
+		return refuse( S.brokenWhy );
+	if ( !v.ok || !g.ok || g.ctx != reinterpret_cast<void *>( wglGetCurrentContext() ) )
+		return refuse( "the present device or GL's entry points are not ready in this context" );
+	if ( !toneFrameIs( t.color ) || !T.colorView )
+		return refuse( "the draw target is not the shared tone frame" );
+	if ( T.w != t.w || T.h != t.h )
+		return refuse( "the sky's size is not the tone frame's" );
+	if ( t.vp[2] < 1 || t.vp[3] < 1 )
+		return refuse( "an empty viewport" );
+	if ( !g.copyImageSubData )
+		return refuse( "no glCopyImageSubData (the LUTs' copies into their shared twins)" );
+	// the last run is done before its command buffer, set, framebuffer and uniforms are written again
+	if ( S.pending ) {
+		v.vkWaitForFences( v.dev, 1, &S.fence, VK_TRUE, 1000000000ull );
+		S.pending = false;
+	}
+	std::string w;
+	if ( !skyStatic( w ) || !skySems( w ) || !skyPipes( T.samples, w ) )
+		return breakOff( w );
+	// the four LUTs GL drew this frame, copied into shared twins (made on first use; a tier change remakes them)
+	GLuint lutTex[4] = {};
+	const Shared * sLut[4] = {};
+	for ( int k = 0; k < 4; k++ ) {
+		if ( !t.lut[k] || !t.lutKey[k] || !sharedTarget( t.lutKey[k], 0, t.lutW[k], t.lutH[k], 1, kRgba16f, lutTex[k], w ) )
+			return refuse( "a LUT's shared twin (" + std::to_string( k ) + "): " + ( w.empty() ? std::string( "no texture" ) : w ) );
+		sLut[k] = sharedFind( t.lutKey[k] );
+		if ( !sLut[k] || !sLut[k]->view )
+			return refuse( "a LUT's shared twin has no view" );
+	}
+	for ( int k = 0; k < 4; k++ )
+		g.copyImageSubData( t.lut[k], kTexture2D, 0, 0, 0, 0, lutTex[k], kTexture2D, 0, 0, 0, 0, t.lutW[k], t.lutH[k], 1 );
+	// the framebuffer over the frame (made again each run: the tone frame may be remade between runs)
+	if ( S.fb )
+		v.vkDestroyFramebuffer( v.dev, S.fb, nullptr );
+	S.fb = VK_NULL_HANDLE;
+	VkFramebufferCreateInfo fci { VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO };
+	fci.renderPass = S.pass;
+	fci.attachmentCount = 1;
+	fci.pAttachments = &T.colorView;
+	fci.width = std::uint32_t( T.w );
+	fci.height = std::uint32_t( T.h );
+	fci.layers = 1;
+	if ( v.vkCreateFramebuffer( v.dev, &fci, nullptr, &S.fb ) != VK_SUCCESS )
+		return breakOff( "the sky's framebuffer over the tone frame failed" );
+	// the uniforms and the set (the fence above: the GPU no longer reads either)
+	std::memcpy( S.uboPtr, t.global, size_t( kSkyGlobalBytes ) );
+	std::memcpy( S.uboPtr + kSkyLooseAt, t.loose, size_t( kSkyLooseBytes ) );
+	VkDescriptorBufferInfo bi[2] = { { S.ubo, 0, VkDeviceSize( kSkyGlobalBytes ) }, { S.ubo, kSkyLooseAt, VkDeviceSize( kSkyLooseBytes ) } };
+	VkDescriptorImageInfo ii[8] = {};
+	VkWriteDescriptorSet ws[10] = {};
+	// HLSL t0 atTransTex, t1 atMsTex, t2 atSunView, t3 atMoonView = SkyRun's lut 0, 1, 2, 3
+	for ( int k = 0; k < 10; k++ ) {
+		ws[k].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+		ws[k].dstSet = S.set;
+		ws[k].descriptorCount = 1;
+		if ( k < 2 ) {
+			ws[k].dstBinding = k ? 31 : 0;
+			ws[k].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+			ws[k].pBufferInfo = &bi[k];
+		} else if ( k < 6 ) {
+			ii[k - 2].imageView = sLut[k - 2]->view;
+			ii[k - 2].imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+			ws[k].dstBinding = std::uint32_t( 64 + k - 2 );
+			ws[k].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+			ws[k].pImageInfo = &ii[k - 2];
+		} else {
+			ii[k - 2].sampler = S.linear;
+			ws[k].dstBinding = std::uint32_t( 128 + k - 6 );
+			ws[k].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER;
+			ws[k].pImageInfo = &ii[k - 2];
+		}
+	}
+	v.vkUpdateDescriptorSets( v.dev, 10, ws, 0, nullptr );
+	S.w = t.w;
+	S.h = t.h;
+	std::memcpy( S.vp, t.vp, sizeof( S.vp ) );
+	// GL's frame so far and the LUT copies done -> the worker's sky -> GL's backdrop layers and objects
+	GLuint tex[5] = { T.colorTex, lutTex[0], lutTex[1], lutTex[2], lutTex[3] };
+	GLenum lay[5];
+	for ( GLenum & l : lay )
+		l = kLayoutGeneral;
+	g.signalSemaphore( S.glDoneGl, 0, nullptr, 5, tex, lay );
+	g.flush();
+	Worker & W = wk();
+	std::uint64_t want = 0;
+	{
+		std::lock_guard<std::mutex> lk( W.m );
+		want = W.toneDone + 1;
+	}
+	Work j;
+	j.k = -1;
+	j.sky = true;
+	hand( j );
+	bool ok = false;
+	{
+		std::unique_lock<std::mutex> lk( W.m );
+		W.idle.wait( lk, [&W, want]() { return W.toneDone >= want; } );
+		ok = W.toneOk;
+		w = W.toneWhy;
+	}
+	if ( !ok )
+		return breakOff( w );  // nothing signals vkDone: GL does not wait it; GL draws its quad this frame
+	g.waitSemaphore( S.vkDoneGl, 0, nullptr, 5, tex, lay );
+	S.pending = true;
+	const double ms = nowMs() - t0;
+	S.st.runs++;
+	S.st.cpuMs += ms;
+	S.st.maxMs = std::max( S.st.maxMs, ms );
+	return true;
+}
+
+void skyOnGl( const char * why )
+{
+	Sky & S = sky();
+	S.st.gl++;
+	S.st.glWhy = why ? why : "";
+}
+
+SkyStat takeSkyStat()
+{
+	Sky & S = sky();
+	SkyStat s = S.st;
+	s.pipelines = S.pipelines;
+	s.buildMs = S.buildMs;
+	if ( S.broken && s.failWhy.empty() )
+		s.failWhy = S.brokenWhy;
+	S.st = SkyStat();
+	return s;
+}
 }  // namespace WwVkPresent
 
 namespace

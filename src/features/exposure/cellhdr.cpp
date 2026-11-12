@@ -968,6 +968,15 @@ unsigned int wwCellHdrDepthFormat( unsigned int fbo )
 	return 0;
 }
 
+unsigned int wwCellHdrVkToneColor( unsigned int fbo )
+{
+	if ( fbo )
+		for ( const HdrGpu & g : hdrGpus() )
+			if ( g.fbo == fbo )
+				return g.vkTone ? g.color : 0;
+	return 0;
+}
+
 bool wwCellHdrDepthSpec( Scene * scene, int & w, int & h, int & samples, unsigned int & format )
 {
 	w = h = samples = 0;
