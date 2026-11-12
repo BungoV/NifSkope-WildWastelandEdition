@@ -36,6 +36,7 @@ vec3 wwDvAmb = vec3( 0.0 );
 vec3 wwDvGi = vec3( 0.0 );
 vec3 wwDvSpec = vec3( 0.0 );
 vec3 wwDvRefl = vec3( 0.0 );
+vec2 wwDvCloud = vec2( 0.0 );	// SEAMCLOUD1: the cloudshadow view's height share and far share (ww_sunshadow.glsl ussCloudDvInfo)
 
 float wwDvLum( vec3 c )
 {
@@ -101,8 +102,10 @@ vec3 wwDvSurface( vec3 alb, vec3 Nw, float gloss, float specM, float aoBaked, fl
 	}
 	if ( v == WW_DV_AIR )	// FARWATER1 round 2: the air's transmittance per channel (white clear, black opaque)
 		return clamp( fogT, 0.0, 1.0 );
-	if ( v == WW_DV_CLOUDSHADOW )
-		return vec3( clamp( cloudT, 0.0, 1.0 ) );
+	if ( v == WW_DV_CLOUDSHADOW ) {	// SEAMCLOUD1: grey = T; red = lit by height (above the cloud's start), blue = the far value
+		float t = clamp( cloudT, 0.0, 1.0 );
+		return vec3( max( t, 0.6 * wwDvCloud.x ), t, max( t, 0.6 * wwDvCloud.y ) );
+	}
 	if ( v == WW_DV_FAROWNER )
 		return wwDvOwnerColour( owner ) * ( 0.55 + 0.45 * abs( normalize( Nw ).z ) );
 	if ( v == WW_DV_EXPOSURE )

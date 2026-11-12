@@ -239,6 +239,9 @@ struct LodlFarRing
 	bool perCell = false;
 	//! lane CELLSTREAM1: every inner vertex takes innerZ (the LAND's height), not only the cut's edge
 	bool snapAll = false;
+	//! lane SEAMCLOUD1: walls under this ring's edge on every cell line where it stands above the fine heights
+	//! (a streamed cell loaded over the ring meets it there); the mask hides each with its own cell
+	bool seamSkirt = false;
 
 	// ---- out, read back from what was built
 	bool built = false;
@@ -252,6 +255,7 @@ struct LodlFarRing
 	qint64 seamSamples = 0;
 	double seamBeforeMax = 0, seamBeforeMean = 0, seamAfterMax = 0, seamAfterMean = 0;
 	qint64 snappedAll = 0;                    //!< lane CELLSTREAM1: vertices snapAll moved onto the LAND
+	qint64 seamSegs = 0, seamTris = 0, seamCapped = 0;   //!< lane SEAMCLOUD1: cell-line walls, segments left open at the 16-bit cap
 	qint64 aoVerts = 0;                       //!< lane FIX1101A lodch: vertices given the mask sheet's B (the bake's AO)
 	double aoMean = 255.0;                    //!< their mean byte
 	std::vector<std::array<int, 3>> cellBlocks;   //!< lane CELLSTREAM1: each shape's block, south-west cell x, y

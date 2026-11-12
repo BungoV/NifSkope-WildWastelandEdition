@@ -432,6 +432,24 @@ float ussCloudT( vec3 posView )
 	return mix( t, ussCloudFar.x, smoothstep( 1.0 - ussCloudFar.y, 1.0, max( e.x, e.y ) ) );
 }
 
+#ifdef WW_DEBUG_VIEWS
+/* lane SEAMCLOUD1: the cloudshadow view's parts at posView: x = ussCloudT, y = the share of the line's optical depth the
+ * receiver's height takes away (0 = the whole OD, the receiver under the cloud; 1 = above it), z = the far value's
+ * share (the map's outer edge). Same reads as ussCloudT, so the view shows the law the surfaces take. */
+vec3 ussCloudDvInfo( vec3 posView )
+{
+	if ( ussCloudOn == 0 )
+		return vec3( 1.0, 0.0, 0.0 );
+	vec3 q = ( ussCloudFromView * vec4( posView, 1.0 ) ).xyz;
+	vec3 m = textureLod( ussCloudMap, q.xy, 0.0 ).xyz;
+	float od = min( m.z, m.y * max( m.x - q.z, 0.0 ) );
+	float t = exp( -od );
+	vec2 e = abs( q.xy - 0.5 ) * 2.0;
+	float f = smoothstep( 1.0 - ussCloudFar.y, 1.0, max( e.x, e.y ) );
+	return vec3( mix( t, ussCloudFar.x, f ), m.z > 1e-4 ? clamp( 1.0 - od / m.z, 0.0, 1.0 ) : 0.0, f );
+}
+#endif
+
 //! the geometry's shadow factor (cascades, terrain, contact): 1 lit, 0 fully shadowed
 float wwSunShadowGeo( vec3 posView )
 {
