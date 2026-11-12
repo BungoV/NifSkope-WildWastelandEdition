@@ -1145,9 +1145,9 @@ bool wwCellHdrBegin( Scene * scene )
 	const bool wantTex = stexOn() && !g.stexFailed;
 	/* lane VKFRAME1 round 3 (P3): with the Vulkan bloom on, the frame's colour and depth / stencil are images Vulkan made
 	 * and GL imported, so the bloom's source reads them on Vulkan (RGBA16F only; the stencil read needs the texture). */
-	const bool wantVk = wantTex && hdrFormat().gl == GL_RGBA16F && WwVkPost::ready();
+	const bool wantVk = wantTex && hdrFormat().gl == GL_RGBA16F && WwVkPost::ready() && WwVkPost::chainRunning( r );
 	if ( !g.fbo || g.w != W || g.h != H || g.samples != S || g.dsFormat != dsFormat || g.dsTex != wantTex
-		|| g.colorFormat != hdrFormat().gl || ( wantVk && !g.vkShared && !g.vkTried ) ) {
+		|| g.colorFormat != hdrFormat().gl || ( wantVk && !g.vkShared && !g.vkTried ) || ( g.vkShared && !wantVk ) ) {
 		if ( !g.fbo )
 			fn->glGenFramebuffers( 1, &g.fbo );
 		if ( g.w != W || g.h != H || g.samples != S || g.dsFormat != dsFormat )
@@ -1156,6 +1156,10 @@ bool wwCellHdrBegin( Scene * scene )
 			WwVkPost::freeFrame( r );
 			g.color = g.ds = 0;
 			g.dsTex = g.vkShared = false;
+			if ( !wantVk ) {	// build 79: a frame Vulkan does not read is GL's own (shared only while the chain runs there)
+				g.vkTried = false;
+				qInfo().noquote() << "cell hdr: the frame back to GL's own (no Vulkan bloom chain ran in the last 2 s)";
+			}
 		}
 		if ( wantVk && !g.vkTried ) {
 			QString vkWhy;
