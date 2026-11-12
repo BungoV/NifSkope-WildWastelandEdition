@@ -298,6 +298,7 @@ struct WwWeatherData
 	 * Out, /255 of a change), 12..14 (Lightning Color); thunderSounds = the SNAM sounds of type 3 (thunder): a weather with
 	 * one storms (15 of 107 vanilla; the thunder byte is 133..255 in all 107 and tells nothing apart) */
 	quint8 thunderFadeIn = 0, thunderFadeOut = 0;
+	quint8 precipFadeIn = 0, precipFadeOut = 0;	// lane WEATHERRECX1: DATA bytes 6 / 7 (the generated rung, weathergen.h)
 	quint8 lightningRgb[3] = {};
 	int thunderSounds = 0;
 	// lane CLOUD6e: MNAM, the precipitation shader (an SPGD; 0 = none): the rain fog's "this weather rains"

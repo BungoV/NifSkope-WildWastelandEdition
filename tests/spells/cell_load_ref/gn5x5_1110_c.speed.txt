@@ -1,0 +1,47 @@
+CELLSPEED v1 b1c
+stage	(at start)	0	0	176	440
+stage	plugin index	586	578	709	740
+stage	references gathered	2145	1719	927	927
+stage	models read ahead	1529	6594	1162	1162
+stage	models loaded and placements welded	2847	2859	1718	1720
+stage	grass placed and welded	87	78	1719	1751
+stage	ground, water, lights, probes	1094	1094	1764	1879
+stage	welded shapes written to the document	1228	1219	2464	2464
+stage	far LOD appended	4222	4219	3041	3213
+stage	document updateModel	281	562	3056	3213
+stage	lighting, GI, census	53	125	3215	3215
+stage	back in the loader	389	766	2771	3215
+stage	views rebuilt (completeLoading)	52	93	2772	3215
+stage	after the load, until exit (frames, a shot's fixed wait)	113111	91188	2891	4735
+within	model file read	146	2265
+within	model parse	8744	2265
+within	model extract (vertices, materials)	1854	2265
+within	models read ahead on worker threads (wall)	1526	2
+within	precombined meshes loaded	286	1
+within	model loads	53	1806
+within	frames painted (paintGL, with first-use uploads)	108747	1123
+within	texture files read ahead (worker threads)	5577	1957
+within	scene made from the document (Scene::make)	333	1
+within	shape data read from the document	79	1636
+within	  texture file bytes (taken ready, or read here)	17909	2351
+within	  texture handed to the graphics card (decode, upload, queries)	1409	2349
+within	texture loads (find, decode, upload)	19955	2357
+count	models read ahead	2209
+count	models read ahead and taken	2208
+count	placements	7091
+count	placements drawn	6588
+count	model loads	1750
+count	models failed	459
+count	shapes written	793
+count	vertices written	2284655
+count	triangles written	1829755
+count	document blocks	9755
+count	textures named by materials	1957
+count	texture files taken ready	1955
+count	  of them waited for	0
+count	texture files the drawing thread read itself (not started)	0
+count	texture files nobody named	35
+count	texture files named, not ready when asked (not there, or stopped)	265
+count	texture files read and never taken	0
+total	wall_ms	127629	cpu_ms	111094	rss_mb	2891	peak_mb	4735
+END

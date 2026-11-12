@@ -7,13 +7,16 @@
 #include "features/clouds/cloudmath.h"
 #include "features/weather/weatherrecx.h"
 #include "features/weather/weatherrecxmath.h"
+#include "features/weather/weathergen.h"
 #include "recx.h"
+#include "wwswitch.h"
 
 #include <QCoreApplication>
 #include <QDir>
 #include <QFile>
 #include <QThread>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -42,6 +45,22 @@ bool wwLookdevWeatherId( quint32 & formID, QString & edid, QString & owner, QStr
 	files = { g_root + QStringLiteral( "/Fallout4.esm" ), g_root + QStringLiteral( "/ExampleMod.esp" ) };
 	dataDir = g_root;
 	return true;
+}
+/* lane WEATHERRECX1: the generated rung's inputs (lookdevstage.cpp reads them off the WTHR record). g_gen = 0: none
+ * (the arms before 1.3 see exactly what they saw); 1: this weather; 2: a change from g_genWas at g_pct */
+static int g_gen = 0;
+static WwWeatherGen::In g_genNow, g_genWas;
+static float g_pct = 1.0f;
+int wwLookdevWeatherGen( WwWeatherGen::In in[2], quint32 formID[2], float & pct )
+{
+	if ( g_gen == 0 )
+		return 0;
+	in[0] = g_genNow;
+	formID[0] = 0x01000801u;
+	in[1] = g_genWas;
+	formID[1] = 0x01000802u;
+	pct = g_gen == 2 ? g_pct : 1.0f;
+	return g_gen;
 }
 
 using namespace WwAtmoMath;
@@ -122,6 +141,7 @@ void use( const QString & root, bool row, double hour )
 	g_row = row;
 	g_hour = hour;
 	qputenv( "WW_RECX_ROOT", root.toLocal8Bit() );
+	wwEnvChanged();	// lane NIGHTHAZE1: the reader's env is cached until this (without it every root read the first)
 	QThread::msleep( 120 );	// past the reader's 100 ms re-resolve
 }
 }	// namespace
@@ -232,6 +252,78 @@ int main( int argc, char ** argv )
 	std::printf( "hot        visibility %.6g -> %.6g\n", double( v1 ), double( v2 ) );
 	check( near( v1, 4000 ) && near( v2, 12345 ), "hot reload: 4000 -> 12345 m without a restart" );
 	QDir( hot ).removeRecursively();
+
+	// ---- lane WEATHERRECX1 (SPEC 1.3): the generated rung, the record reds, a change's blend, the provider's new name
+	g_genNow.edid = "ExampleFoggy";
+	g_genNow.owner = "ExampleMod.esp";
+	g_genNow.windSpeed = 115;
+	g_genNow.windDir = 13;
+	g_genWas.edid = "ExampleClear";
+	g_genWas.owner = "ExampleMod.esp";
+	g_genWas.flags = 1;
+	const WwWeatherGen::Out gNow = WwWeatherGen::generate( g_genNow ), gWas = WwWeatherGen::generate( g_genWas );
+	const double visNow = gNow.visibility;	// at 14:00 the day key, with or without a night key
+	std::printf( "generated  class %s visibility %.6g (was %s %.6g) wind %.6g m/s from %.6g\n", gNow.cls, gNow.visibility,
+		gWas.cls, gWas.visibility, gNow.windSpeed, gNow.windDirection );
+
+	// 9. no file, the generated rung: every input set from the record's non-colour fields
+	g_gen = 1;
+	use( empty, true, 14.0 );
+	{
+		const WwWeatherRecx & g = wwWeatherRecx();
+		check( g.on && near( g.visibilityM, visNow ) && near( g.windSpeed, gNow.windSpeed ) && near( g.coverage, gNow.coverage ),
+			"no file: the generated rung sets visibility, wind and coverage" );
+		check( g.genClass == QLatin1String( gNow.cls ) && g.sources.contains( QStringLiteral( "visibility=generated" ) ),
+			"the class is named and the source says generated" );
+	}
+
+	// 10. a file over the generated rung: the file's keys win, the rest stay generated
+	use( fx + QStringLiteral( "/full" ), true, 8.0 );
+	{
+		const WwWeatherRecx & g = wwWeatherRecx();
+		check( near( g.visibilityM, 3600.0 ) && near( g.windSpeed, gNow.windSpeed ),
+			"file over generated: visibility 3600 m from the file, wind still generated" );
+		check( std::any_of( g.sources.begin(), g.sources.end(),
+			[]( const QString & s ) { return s.startsWith( QStringLiteral( "visibility=file:" ) ); } ), "the source says file" );
+	}
+
+	// 11. a record red per channel: fog unsets the atmosphere's keys, wind stays
+	qputenv( "WW_WEATHER_RECORD_RED", "fog" );
+	use( fx + QStringLiteral( "/full" ), true, 8.0 );
+	{
+		const WwWeatherRecx & g = wwWeatherRecx();
+		check( g.visibilityM < 0.0f && g.hazeType.isEmpty() && near( g.windSpeed, gNow.windSpeed ) && ( g.recordRed & WwRecFog )
+			&& g.sources.contains( QStringLiteral( "visibility=record" ) ), "record red fog: visibility from the record; wind kept" );
+	}
+	qputenv( "WW_WEATHER_RECORD_RED", "" );
+
+	// 12. a change half way: every number between the leaving and the coming weather
+	g_gen = 2;
+	g_pct = 0.5f;
+	use( empty, true, 14.0 );
+	{
+		const WwWeatherRecx & g = wwWeatherRecx();
+		const double lo = std::min( gNow.visibility, gWas.visibility ), hi = std::max( gNow.visibility, gWas.visibility );
+		std::printf( "blend      visibility %.6g between %.6g and %.6g\n", double( g.visibilityM ), lo, hi );
+		check( g.visibilityM > lo && g.visibilityM < hi, "a change at 50 %: visibility between the two weathers" );
+	}
+	g_gen = 0;
+
+	// 13. the provider's new name has spaces; 14. the old name FO4CS is still read (with a warning on stderr)
+	for ( int arm = 0; arm < 2; arm++ ) {
+		const QString prov = arm ? wwRecxOldProvider() : wwRecxProvider();
+		const QString dir = QDir::tempPath() + QStringLiteral( "/wx1_gate_prov%1" ).arg( arm );
+		QDir( dir ).removeRecursively();
+		QDir().mkpath( dir + QStringLiteral( "/Plugins/" ) + prov + QStringLiteral( "/Weathers/ExampleMod" ) );
+		QFile f( dir + QStringLiteral( "/Plugins/" ) + prov + QStringLiteral( "/Weathers/ExampleMod/ExampleFoggy.recx" ) );
+		f.open( QIODevice::WriteOnly );
+		f.write( "{\"entries\":[{\"weather\":\"ExampleMod.esp|0x00000801\",\"atmosphere\":{\"visibility\":7777}}]}" );
+		f.close();
+		use( dir, true, 8.0 );
+		check( near( wwWeatherRecx().visibilityM, 7777 ), arm ? "old provider FO4CS still read (one release)"
+			: "provider \"Fusion Shaders - Assets\" (spaces, a plugin subfolder) read" );
+		QDir( dir ).removeRecursively();
+	}
 
 	std::printf( "%s %d failed\n", fails ? "WEATHERRECX FAIL" : "WEATHERRECX PASS", fails );
 	return fails ? 1 : 0;

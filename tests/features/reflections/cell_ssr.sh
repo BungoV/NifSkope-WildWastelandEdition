@@ -1,4 +1,5 @@
 #!/bin/bash
+export WW_CELL_STREAM="${WW_CELL_STREAM:-0}"	# AIRPERF1 r4: this harness opens a fixed block (streaming is the default now)
 #
 # THE CELL VIEW'S SCREEN-SPACE REFLECTIONS (lane SSR1, 2026-10-02; src/features/reflections/cellssr.h, docs/PRTP_PLAN.md
 # "screen-space reflections").

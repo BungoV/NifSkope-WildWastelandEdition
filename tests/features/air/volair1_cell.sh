@@ -1,4 +1,5 @@
 #!/bin/bash
+export WW_CELL_STREAM="${WW_CELL_STREAM:-0}"	# AIRPERF1 r4: this harness opens a fixed block (streaming is the default now)
 #
 # VOLUMETRIC AIR IN THE CELL VIEW (lane VOLAIR1, 2026-10-13; src/features/air/cellvolair.h). Replaces lane VOLFOG1's
 # volfog1_cell.sh (the lit fog it gated is now the air).

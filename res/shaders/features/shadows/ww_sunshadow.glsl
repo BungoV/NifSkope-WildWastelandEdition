@@ -175,6 +175,12 @@ float ussVogel( int i, vec3 posView, float offsetWorld, vec3 dPx, vec3 dPy, vec3
 	float rot = 6.2831853 * ussIgn( rp );
 	float k = 1.0 / csmParams.z;
 	float lim = 2000.0 * csmInvRange[i];
+	/* MODULES1 R7 item 9 (bungo b60/b61: "Still the same leak", the sun on a wall panel inside a shadowed alley): on a
+	 * wall the sun grazes, the receiver plane's depth slope has no bound, so half of the taps compared 2000 u toward the
+	 * sun, past every caster (50 % lit at N.L 0). A tap is now pulled toward the centre until its depth walk is at most
+	 * 4 texels of its cascade: it stays on the receiver's plane, near the point. ussCsmFilter.w 2 = the red
+	 * WW_SHADOW_RED=walk2000. */
+	float cap = ussCsmFilter.w > 1.5 ? lim : 4.0 * ussCsmTexel[i] * csmInvRange[i];
 	float sum = 0.0;
 	for ( int t = 0; t < 48; t++ ) {
 		if ( t >= n )
@@ -182,7 +188,9 @@ float ussVogel( int i, vec3 posView, float offsetWorld, vec3 dPx, vec3 dPy, vec3
 		float r = sqrt( ( float( t ) + 0.5 ) / float( n ) ) * R;
 		float th = float( t ) * 2.39996323 + rot;
 		vec2 o = vec2( cos( th ), sin( th ) ) * ( r * k );
-		sum += texture( csmMap, vec4( q.xy + o, float( i ), zRef + clamp( dot( rpdb, o ), -lim, lim ) ) );
+		float dz = dot( rpdb, o );
+		float pull = ussCsmFilter.w > 1.5 ? 1.0 : min( 1.0, cap / max( abs( dz ), 1e-30 ) );
+		sum += texture( csmMap, vec4( q.xy + o * pull, float( i ), zRef + clamp( dz * pull, -lim, lim ) ) );
 	}
 	return sum / float( n );
 }
@@ -367,8 +375,12 @@ float ussTerrain( vec3 posView, out float inMap, float grad, bool pen )
 				vis = mix( vis, ussTerrVis( texture( ussTerrMap, ussTerrExtraUv( uv, ussTerrExtra.y ) ).rg, z ), m );
 		}
 	}
+	// MODULES1 M9: w < 0 = a circle around the eye, radius -w (world units), faded over its outer fifth; w > 0 the square's edge
 	vec2 e = min( uv, 1.0 - uv ) / max( ussTerrRange.w, 1e-6 );
-	vis = mix( 1.0, vis, clamp( min( e.x, e.y ), 0.0, 1.0 ) );
+	float edgeW = ussTerrRange.w < 0.0
+		? 1.0 - smoothstep( 0.8, 1.0, length( wp.xy - ussWorldFromView[3].xy ) / -ussTerrRange.w )
+		: clamp( min( e.x, e.y ), 0.0, 1.0 );
+	vis = mix( 1.0, vis, edgeW );
 	return mix( 1.0, vis, ussTerrBias.z );	// the low sun's fade and the moon's strength (1 when off)
 }
 
@@ -419,6 +431,24 @@ float ussCloudT( vec3 posView )
 	vec2 e = abs( q.xy - 0.5 ) * 2.0;
 	return mix( t, ussCloudFar.x, smoothstep( 1.0 - ussCloudFar.y, 1.0, max( e.x, e.y ) ) );
 }
+
+#ifdef WW_DEBUG_VIEWS
+/* lane SEAMCLOUD1: the cloudshadow view's parts at posView: x = ussCloudT, y = the share of the line's optical depth the
+ * receiver's height takes away (0 = the whole OD, the receiver under the cloud; 1 = above it), z = the far value's
+ * share (the map's outer edge). Same reads as ussCloudT, so the view shows the law the surfaces take. */
+vec3 ussCloudDvInfo( vec3 posView )
+{
+	if ( ussCloudOn == 0 )
+		return vec3( 1.0, 0.0, 0.0 );
+	vec3 q = ( ussCloudFromView * vec4( posView, 1.0 ) ).xyz;
+	vec3 m = textureLod( ussCloudMap, q.xy, 0.0 ).xyz;
+	float od = min( m.z, m.y * max( m.x - q.z, 0.0 ) );
+	float t = exp( -od );
+	vec2 e = abs( q.xy - 0.5 ) * 2.0;
+	float f = smoothstep( 1.0 - ussCloudFar.y, 1.0, max( e.x, e.y ) );
+	return vec3( mix( t, ussCloudFar.x, f ), m.z > 1e-4 ? clamp( 1.0 - od / m.z, 0.0, 1.0 ) : 0.0, f );
+}
+#endif
 
 //! the geometry's shadow factor (cascades, terrain, contact): 1 lit, 0 fully shadowed
 float wwSunShadowGeo( vec3 posView )

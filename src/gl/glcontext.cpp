@@ -31,6 +31,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ***** END LICENCE BLOCK *****/
 
 #include "glcontext.hpp"
+#include "wwloadwatch.h"	// lane PERFLOAD1: the log drain before a hard exit
 #include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 #include "cellunits.h"	// lane FIX1101A lodch: the far stream's unit
 #include "ddstxt16.hpp"
@@ -40,10 +41,12 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "glproperty.h"
 #include "harnesswindow.h"
 #include "features/shared/cellpasstime.h"	// lane PERF1
+#include "features/shared/camunired.h"	// lane EMPTY240 R12-1: the global uniforms not uploaded twice
 #include "features/near/celldrawpacket.h"	// lane GAPPERF-BINDLESS: the setters record while a draw packet records
 #include "features/near/cellbindless.h"	// lane BINDLESS2
 #include "progcachekeep.h"	// lane BUGS1102C
 #include "gpustage.h"	// MODULES1: static buffers filled by a GPU copy (no driver RAM copy)
+#include "wwuploadcap.h"	// lane EMPTY240 R4-1: the paint's upload budget
 
 // lane CELLUNI1: inside the cell-uniform scope an unchanged value is not uploaded again (celluniform.h)
 #define WWCU( k, l, v, n ) WwCellUni::want( wwUni, l, WwCellUni::k, v, n, WwDp::rec != nullptr )
@@ -56,6 +59,7 @@ bool rtddgiRestirGiShaderDefine();	// RTEMIS1 part 2: src/features/gi/rtddgicell
 bool rtddgiRestirShaderDefine();	// lane RESTIRDI1: src/features/gi/rtddgicell.cpp (the RT quality row Medium+ / WW_CELL_RT_PRESET)
 bool wwAirZoneShaderDefine();	// lane AIRZONE1: src/features/air/cellairzone.cpp (the Air zones row / WW_CELL_AIRZONE)
 bool wwCellViewsShaderDefine();	// lane FO4CELLGI1: src/gl/celllights.cpp (WW_CELL_VIEWS, the probe and pass views)
+bool wwDebugViewShaderDefine();	// lane DEBUGVIEW1: src/features/overlays/debugview.cpp (WW_DEBUG_VIEW, Show > Debug view)
 bool wwFogLeakShaderDefine();	// lane FOGLEAK1: src/features/air/cellvolair.cpp (WW_CELL_FOGLEAK, the fog leak fix; off by default)
 bool wwAirBounceShaderDefine();	// lane AIRBOUNCE1: src/features/air/cellvolair.cpp (WW_CELL_AIR_BOUNCE_LAMPS, the lamps' floor bounce; off by default)
 bool wwAirSkyViewShaderDefine();	// lane DARKAIR1: src/features/air/cellvolair.cpp (WW_CELL_AIR_SKYVIEW, the air's sky visibility; on since DARKAIR2, 0 compiles it out)
@@ -431,7 +435,7 @@ void NifSkopeOpenGLContext::Shader::printCompileError( const QString & err )
 		const QByteArray line = ( QStringLiteral( "SHADER REFUSED: " ) + QString( tmp ).simplified() ).toUtf8();
 		std::fprintf( stderr, "%s\n", line.constData() );
 		std::fflush( stderr );
-		std::_Exit( 87 );
+		( wwStderrPumpDrain(), std::_Exit( 87 ) );
 	}
 	Message::append( QObject::tr( "There were errors during shader compilation" ), tmp );
 }
@@ -536,6 +540,7 @@ bool NifSkopeOpenGLContext::Shader::load( const QString & filepath )
 	try
 	{
 		QByteArray	data = loadShaderFile( filepath );
+		const qsizetype	wwOrigSize = data.size();	// lane HLSLBULK1 R5: a longer source means a loader define went in
 		// red for the shader guard (printCompileError): WW_SHADER_RED=<file name> breaks that one shader
 		if ( const QString red = wwEnvStr( "WW_SHADER_RED" );
 			!red.isEmpty() && QFileInfo( filepath ).fileName().compare( red, Qt::CaseInsensitive ) == 0 ) {
@@ -582,6 +587,9 @@ bool NifSkopeOpenGLContext::Shader::load( const QString & filepath )
 		// lane FO4CELLGI1: fo4_default.frag's probe and pass views only while one is asked; not static: a set reloads the shaders
 		if ( wwCellViewsShaderDefine() && data.startsWith( "#version" ) && data.contains( "_CELL_VIEWS" ) )
 			data.insert( data.indexOf( '\n' ) + 1, "#define WW_CELL_VIEWS 1\n" );
+		// lane DEBUGVIEW1: the debug views (debug_view.glsl) only while one is on; not static: a set reloads the shaders
+		if ( wwDebugViewShaderDefine() && data.startsWith( "#version" ) && data.contains( "_DEBUG_VIEWS" ) )
+			data.insert( data.indexOf( '\n' ) + 1, "#define WW_DEBUG_VIEWS 1\n" );
 		// lane FOGLEAK1: the fog leak fix (cell_volair.frag WW_AIR_LEAK, lookdev_fog.glsl's far tail); not static: read per load
 		if ( wwFogLeakShaderDefine() && data.startsWith( "#version" ) && data.contains( "_CELL_FOGLEAK" ) )
 			data.insert( data.indexOf( '\n' ) + 1, "#define WW_CELL_FOGLEAK 1\n" );
@@ -601,9 +609,33 @@ bool NifSkopeOpenGLContext::Shader::load( const QString & filepath )
 		if ( infoProbe && data.startsWith( "#version" ) && data.contains( "_WATER_INFO_PROBE" ) )	// not a "WW_" literal: the switch survey would list it
 			data.insert( data.indexOf( '\n' ) + 1, "#define WW_WATER_INFO_PROBE 1\n" );
 
+		/* lane HLSLBULK1 R6: the variant key of this source = the loader defines that went in (sorted, joined with '+'); they
+		 * sit as `#define WW_X 1` lines right after the #version line, wwOrigSize bytes before the end excepted */
+		wwDefs.clear();
+		if ( data.size() != wwOrigSize ) {
+			QStringList	dn;
+			const qsizetype	b0 = data.indexOf( '\n' ) + 1;
+			for ( const QByteArray & l : data.mid( b0, data.size() - wwOrigSize ).split( '\n' ) ) {
+				if ( l.isEmpty() )
+					continue;
+				if ( l.startsWith( "#define WW_" ) && l.endsWith( " 1" ) ) {
+					dn.append( QString::fromLatin1( l.mid( 8, l.size() - 10 ) ) );
+				} else {
+					dn = QStringList( QStringLiteral( "!" ) );
+					break;
+				}
+			}
+			dn.sort();
+			wwDefs = dn.join( QChar( '+' ) ).toStdString();
+		}
+
 		if ( name.ends_with( "frag" ) ) {
 			if ( qsizetype n = data.indexOf( "NUM_TEXTURE_UNITS" ); n >= 0 )
+				{
+				if ( TexCache::num_texture_units - 2 != 30 )	// the HLSL twin was converted at 30 (a 32-unit driver)
+					wwDefs += "!units";
 				data.replace( n, 17, QByteArray::number( TexCache::num_texture_units - 2 ) );
+			}
 		}
 
 		const char * src = data.constData();
@@ -643,6 +675,133 @@ bool NifSkopeOpenGLContext::Shader::load( const QString & filepath )
 	return true;
 }
 
+
+/* lane HLSLBULK1 R5: the converted HLSL, built offline to SPIR-V (tests/hlsllive/build_all.py -> shaders/spirv/), is the
+ * live path. A program whose stage shaders all have a .spv, whose GLSL variant is the base one (no loader define went into
+ * a source) and that the build linked, is linked from its SPIR-V (GL_ARB_gl_spirv). Any other program stays on the GLSL
+ * and says why (one "hlsl fallback:" line each, and the startup line "hlsl live: N of M ..."). The driver refusing the
+ * SPIR-V at specialize or link falls back too. Red WW_HLSLLIVE_RED=1: every program on the GLSL. */
+static QString	wwSpvDir;
+static QHash< QString, QString >	wwSpvIndex;	// shader file name (lines.vert) -> .spv file name
+static QHash< QString, bool >	wwSpvProgOk;	// program name -> the build linked its set
+static int	wwSpvLive = 0, wwSpvFell = 0;
+static QStringList	wwSpvFellNames;
+using WwSpecializeFn = void ( QOPENGLF_APIENTRY * )( GLuint, const GLchar *, GLuint, const GLuint *, const GLuint * );
+static WwSpecializeFn	wwSpecialize = nullptr;
+
+static void wwSpvTable( const QString & file, QHash< QString, QString > * map, QHash< QString, bool > * ok )
+{
+	QFile	fi( file );
+	if ( !fi.open( QIODevice::ReadOnly ) )
+		return;
+	for ( const QByteArray & raw : fi.readAll().split( 10 ) ) {
+		const QString	l = QString::fromUtf8( raw ).trimmed();
+		const qsizetype	t = l.indexOf( QLatin1Char( 9 ) );
+		if ( t <= 0 )
+			continue;
+		if ( map )
+			map->insert( l.left( t ), l.mid( t + 1 ) );
+		if ( ok )
+			ok->insert( l.left( t ), l.mid( t + 1 ) == QLatin1StringView( "OK" ) );
+	}
+}
+
+static void wwSpvInit( const QDir & shaders )
+{
+	wwSpvDir = shaders.filePath( "spirv" );
+	wwSpvIndex.clear();
+	wwSpvProgOk.clear();
+	wwSpvFellNames.clear();
+	wwSpvLive = wwSpvFell = 0;
+	wwSpvTable( wwSpvDir + "/index.txt", &wwSpvIndex, nullptr );
+	wwSpvTable( wwSpvDir + "/programs.txt", nullptr, &wwSpvProgOk );
+	wwSpecialize = nullptr;
+	if ( QOpenGLContext * ctx = QOpenGLContext::currentContext(); ctx && ctx->hasExtension( "GL_ARB_gl_spirv" ) ) {
+		wwSpecialize = reinterpret_cast< WwSpecializeFn >( ctx->getProcAddress( "glSpecializeShader" ) );
+		if ( !wwSpecialize )
+			wwSpecialize = reinterpret_cast< WwSpecializeFn >( ctx->getProcAddress( "glSpecializeShaderARB" ) );
+	}
+}
+
+static void wwSpvFellNote( const std::string_view & n, const QString & why )
+{
+	wwSpvFell++;
+	wwSpvFellNames.append( QString::fromLatin1( n.data(), qsizetype( n.size() ) ) );
+	std::fprintf( stderr, "hlsl fallback: %.*s: %s\n", int( n.size() ), n.data(), qPrintable( why ) );
+}
+
+// the SPIR-V shader objects of a program (specialized), or why not; hash = of the .spv bytes (the program binary cache key)
+static bool wwSpvAttach( NifSkopeOpenGLContext::GLFunctions * f, const std::string_view & progName, const std::vector< std::string > & files,
+	const std::vector< std::string > & defs, std::vector< unsigned int > & ids, QString & why, std::uint64_t & hash )
+{
+	if ( wwEnvInt( "WW_HLSLLIVE_RED" ) == 1 ) {
+		why = "red WW_HLSLLIVE_RED=1";
+		return false;
+	}
+	if ( !wwSpecialize ) {
+		why = wwSpvIndex.isEmpty() ? "no spirv folder beside the shaders" : "no GL_ARB_gl_spirv";
+		return false;
+	}
+	/* lane HLSLBULK1 R6: a variant is keyed by the loader defines in its sources. A stage's key is file[@A+B]; the program's is
+	 * name[@union of its stages' defines]; the build (tests/hlsllive/build_all.py) writes one line per variant it linked */
+	QStringList	un;
+	std::vector< QString >	keys;
+	for ( size_t i = 0; i < files.size(); i++ ) {
+		keys.push_back( QString::fromStdString( files[i] ) + ( defs[i].empty() ? QString() : QChar( '@' ) + QString::fromStdString( defs[i] ) ) );
+		for ( const QString & p : QString::fromStdString( defs[i] ).split( QChar( '+' ), Qt::SkipEmptyParts ) )
+			if ( !un.contains( p ) )
+				un.append( p );
+	}
+	un.sort();
+	const QString	pkey = QString::fromLatin1( progName.data(), qsizetype( progName.size() ) ) + ( un.isEmpty() ? QString() : QChar( '@' ) + un.join( QChar( '+' ) ) );
+	const auto	ok = wwSpvProgOk.constFind( pkey );
+	if ( ok == wwSpvProgOk.constEnd() || !ok.value() ) {
+		why = un.isEmpty() ? QString( "no SPIR-V set for the program (not converted, or the build did not link it)" )
+			: QString( "no SPIR-V set for the variant %1" ).arg( pkey );
+		return false;
+	}
+	for ( size_t i = 0; i < files.size(); i++ ) {
+		if ( !wwSpvIndex.contains( keys[i] ) ) {
+			why = QString( "no .spv for %1" ).arg( keys[i] );
+			return false;
+		}
+	}
+	hash = 0xCBF29CE484222325ULL;
+	for ( size_t i = 0; i < files.size(); i++ ) {
+		const std::string &	fn = files[i];
+		QFile	fi( wwSpvDir + '/' + wwSpvIndex.value( keys[i] ) );
+		if ( !fi.open( QIODevice::ReadOnly ) ) {
+			why = "cannot read " + fi.fileName();
+		} else {
+			const QByteArray	b = fi.readAll();
+			for ( char c : b )
+				hash = ( hash ^ (unsigned char) c ) * 0x100000001B3ULL;
+			const std::string	ext = fn.substr( fn.rfind( '.' ) + 1 );
+			GLenum	type = ext == "frag" ? GL_FRAGMENT_SHADER : ext == "geom" ? GL_GEOMETRY_SHADER
+				: ext == "tesc" ? GL_TESS_CONTROL_SHADER : ext == "tese" ? GL_TESS_EVALUATION_SHADER : GL_VERTEX_SHADER;
+			GLuint	s = f->glCreateShader( type );
+			f->glShaderBinary( 1, &s, 0x9551, b.constData(), GLsizei( b.size() ) );	// GL_SHADER_BINARY_FORMAT_SPIR_V
+			wwSpecialize( s, "main", 0, nullptr, nullptr );
+			GLint	st = 0;
+			f->glGetShaderiv( s, GL_COMPILE_STATUS, &st );
+			if ( st ) {
+				ids.push_back( s );
+				continue;
+			}
+			GLint	ll = 0;
+			f->glGetShaderiv( s, GL_INFO_LOG_LENGTH, &ll );
+			QByteArray	lg( qMax( ll, 1 ), '\0' );
+			f->glGetShaderInfoLog( s, ll, nullptr, lg.data() );
+			f->glDeleteShader( s );
+			why = QString( "specialize refused %1: %2" ).arg( QString::fromStdString( fn ), QString::fromLatin1( lg ).simplified().left( 120 ) );
+		}
+		for ( unsigned int d : ids )
+			f->glDeleteShader( d );
+		ids.clear();
+		return false;
+	}
+	return true;
+}
 
 inline size_t NifSkopeOpenGLContext::Program::getUniLocationMapAllocSize( unsigned int m )
 {
@@ -711,6 +870,12 @@ bool NifSkopeOpenGLContext::Program::load( const QString & filepath, NifSkopeOpe
 		QStack<ConditionGroup *> chkgrps;
 		chkgrps.push( &conditions );
 		patches = false;
+		std::vector< std::string >	wwFiles;
+		std::vector< std::string >	wwBase;	// each stage's variant key (Shader::wwDefs)
+		wwGlslIds.clear();
+		wwSpvIds.clear();
+		wwSpv = false;
+		wwSpvWhy.clear();
 
 		while ( !stream.atEnd() ) {
 			QString line = stream.readLine().trimmed();
@@ -735,6 +900,9 @@ bool NifSkopeOpenGLContext::Program::load( const QString & filepath, NifSkopeOpe
 								patches = true;
 							f->glAttachShader( id, shader->id );
 							mix( QByteArray::number( qulonglong( shader->srcHash ), 16 ) );
+							wwFiles.push_back( nameStr );
+							wwBase.push_back( shader->wwDefs );
+							wwGlslIds.push_back( shader->id );
 						}
 						else
 							throw QString( "depends on shader %1 which was not compiled successful" ).arg( name );
@@ -768,6 +936,21 @@ bool NifSkopeOpenGLContext::Program::load( const QString & filepath, NifSkopeOpe
 				}
 
 				chkgrps.top()->addCondition( new ConditionSingle( line, invert ) );
+			}
+		}
+
+		/* lane HLSLBULK1 R5: SPIR-V from the converted HLSL when the program's whole set is ready; the GLSL shaders stay
+		 * listed (wwGlslIds) for the fallback and are not compiled while the SPIR-V links (nothing attached asks for them) */
+		{
+			std::uint64_t	h = 0;
+			if ( wwSpvAttach( f, name, wwFiles, wwBase, wwSpvIds, wwSpvWhy, h ) ) {
+				for ( unsigned int s : wwGlslIds )
+					f->glDetachShader( id, s );
+				for ( unsigned int s : wwSpvIds )
+					f->glAttachShader( id, s );
+				wwSpv = true;
+				mix( QByteArray( "hlsl-spirv" ) );
+				mix( QByteArray::number( qulonglong( h ), 16 ) );
 			}
 		}
 
@@ -852,6 +1035,33 @@ bool NifSkopeOpenGLContext::Program::finishLink( NifSkopeOpenGLContext * context
 			f->glGetProgramiv( id, GL_LINK_STATUS, &result );
 		}
 
+		if ( result != GL_TRUE && wwSpv ) {
+			// lane HLSLBULK1 R5: the driver refused the SPIR-V program: the GLSL one, named in the telemetry
+			GLint	ll = 0;
+			f->glGetProgramiv( id, GL_INFO_LOG_LENGTH, &ll );
+			QByteArray	lg( qMax( ll, 1 ), '\0' );
+			f->glGetProgramInfoLog( id, ll, nullptr, lg.data() );
+			wwSpvWhy = "link refused: " + QString::fromLatin1( lg ).simplified().left( 160 );
+			for ( unsigned int s : wwSpvIds ) {
+				f->glDetachShader( id, s );
+				f->glDeleteShader( s );
+			}
+			wwSpvIds.clear();
+			for ( unsigned int s : wwGlslIds )
+				f->glAttachShader( id, s );
+			wwSpv = false;
+			cacheFile.clear();
+			f->glProgramParameteri( id, GL_PROGRAM_BINARY_RETRIEVABLE_HINT, GL_TRUE );
+			if ( QString err; !wwCompileDeferred( f, id, err ) ) {
+				f->glDeleteProgram( id );
+				id = 0;
+				throw err;
+			}
+			f->glLinkProgram( id );
+			linkFrom = 1;
+			f->glGetProgramiv( id, GL_LINK_STATUS, &result );
+		}
+
 		if ( result != GL_TRUE ) {
 			GLint logLen = 0;
 			f->glGetProgramiv( id, GL_INFO_LOG_LENGTH, &logLen );
@@ -867,18 +1077,21 @@ bool NifSkopeOpenGLContext::Program::finishLink( NifSkopeOpenGLContext * context
 			}
 		} else {
 			if ( unsigned int l = f->glGetUniformBlockIndex( id, "globalUniforms" ); l != GL_INVALID_INDEX ) {
-				f->glUniformBlockBinding( id, l, 0 );
+				if ( !wwSpv )	// SPIR-V: the binding is the shader's own decoration
+					f->glUniformBlockBinding( id, l, 0 );
 				f->glBindBufferBase( GL_UNIFORM_BUFFER, 0, context->globalUniformsBufferObject );
 			}
 			if ( unsigned int l = f->glGetUniformBlockIndex( id, "skinningUniforms" ); l != GL_INVALID_INDEX ) {
-				f->glUniformBlockBinding( id, l, 1 );
+				if ( !wwSpv )
+					f->glUniformBlockBinding( id, l, 1 );
 				f->glBindBufferBase( GL_UNIFORM_BUFFER, 1, context->boneTransformsBufferObject );
 			}
 			wwShadowFrame = false;	// lane PERF3: gl/sunshadow.cpp fills and binds the buffer
 			wwBindless = name.size() > 7 && name.substr( name.size() - 7 ) == std::string_view( "bl.prog" );	// lane BINDLESS2
 			wwDrawIdLoc = wwBindless ? f->glGetUniformLocation( id, "wwDrawBase" ) : -1;	// lane BINDLESSMDI1: + base instance
 			if ( unsigned int l = f->glGetUniformBlockIndex( id, "wwShadowFrame" ); l != GL_INVALID_INDEX ) {
-				f->glUniformBlockBinding( id, l, 2 );
+				if ( !wwSpv )
+					f->glUniformBlockBinding( id, l, 2 );
 				wwShadowFrame = true;
 			}
 			/* lane FIX1101A lodch: fo4_default.vert's far stream (samplerBuffer) sits on its own unit in every program
@@ -921,6 +1134,10 @@ bool NifSkopeOpenGLContext::Program::finishLink( NifSkopeOpenGLContext * context
 		return false;
 	}
 	status = true;
+	if ( wwSpv )
+		wwSpvLive++;
+	else
+		wwSpvFellNote( name, wwSpvWhy.isEmpty() ? QString( "no SPIR-V" ) : wwSpvWhy );
 	nextProgram = context->programsLinked;
 	context->programsLinked = this;
 	return true;
@@ -1320,6 +1537,8 @@ NifSkopeOpenGLContext::NifSkopeOpenGLContext( QOpenGLContext * context )
 	globalUniforms->glowScaleSRGB = 1.0f;
 
 	fn->glGenBuffers( 1, &globalUniformsBufferObject );
+	void wwGlobalUboForget();	// below: a new buffer holds nothing yet (lane EMPTY240 R12-1)
+	wwGlobalUboForget();
 	setGlobalUniforms();
 	fn->glGenBuffers( 1, &boneTransformsBufferObject );
 	updateBoneTransforms( nullptr, 0 );
@@ -1340,6 +1559,8 @@ NifSkopeOpenGLContext::~NifSkopeOpenGLContext()
 	}
 	fn->glDeleteBuffers( 1, &boneTransformsBufferObject );
 	fn->glDeleteBuffers( 1, &globalUniformsBufferObject );
+	void wwGlobalUboForget();	// below (lane EMPTY240 R12-1)
+	wwGlobalUboForget();
 	delete globalUniforms;
 }
 
@@ -1445,6 +1666,103 @@ void NifSkopeOpenGLContext::rehashShaders()
 
 static int wwColdLinkRun( const QVector< NifSkopeOpenGLContext::Program * > & started, int workers, qint64 & ms );
 
+/* lane EMPTY240 R4-1: a program's first draw makes the driver finish it (build 76: the first cell paint and a live set's
+ * first paint after a shader reload ran hundreds of ms in their zones). Each linked program draws one point here, at
+ * every shader load (the start and each reload: updateShaders), into a 1x1 target (no attributes; the per-draw row a
+ * zeroed buffer). Programs with a geometry, tessellation or compute stage are left out. R5-2: build 77 still ran 79 ms
+ * of obscurance and 33 of restir in a live set's paint: with the rasterizer off the driver may finish the vertex stage
+ * only. The point now goes through the whole pipeline into a half-float target (the frame's), with an empty scissor so
+ * no fragment runs (a bindless program never samples the zeroed row's handles). Red WW_PROGWARM_RED=1: none (finished
+ * at the first draw); =2: the rasterizer off into RGBA8 (build 77). */
+static void wwWarmPrograms( NifSkopeOpenGLContext::GLFunctions * f, NifSkopeOpenGLContext::Program * list )
+{
+	const int	warmRed = wwEnvInt( "WW_PROGWARM_RED" );
+	if ( warmRed == 1 ) {
+		std::fprintf( stderr, "shader warm: off (WW_PROGWARM_RED=1: the driver finishes each program at its first draw)\n" );
+		return;
+	}
+	QElapsedTimer	clock;
+	clock.start();
+	constexpr GLenum	kSsbo = 0x90D2, kSsboBinding = 0x90D3;	// GL_SHADER_STORAGE_BUFFER(_BINDING)
+	GLint	prevProg = 0, prevVao = 0, prevFbo = 0, prevRb = 0, prevSsbo = 0;
+	f->glGetIntegerv( GL_CURRENT_PROGRAM, &prevProg );
+	f->glGetIntegerv( GL_VERTEX_ARRAY_BINDING, &prevVao );
+	f->glGetIntegerv( GL_DRAW_FRAMEBUFFER_BINDING, &prevFbo );
+	f->glGetIntegerv( GL_RENDERBUFFER_BINDING, &prevRb );
+	f->glGetIntegeri_v( kSsboBinding, 12, &prevSsbo );
+	const GLboolean	prevDiscard = f->glIsEnabled( GL_RASTERIZER_DISCARD );
+	const GLboolean	prevScissorOn = f->glIsEnabled( GL_SCISSOR_TEST );
+	GLint	prevScissor[4] = { 0, 0, 0, 0 };
+	f->glGetIntegerv( GL_SCISSOR_BOX, prevScissor );
+	GLuint	vao = 0, fbo = 0, rb = 0, ssbo = 0;
+	f->glGenVertexArrays( 1, &vao );
+	f->glGenRenderbuffers( 1, &rb );
+	f->glBindRenderbuffer( GL_RENDERBUFFER, rb );
+	f->glRenderbufferStorage( GL_RENDERBUFFER, warmRed == 2 ? GL_RGBA8 : GL_RGBA16F, 1, 1 );
+	f->glGenFramebuffers( 1, &fbo );
+	f->glBindFramebuffer( GL_DRAW_FRAMEBUFFER, fbo );
+	f->glFramebufferRenderbuffer( GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_RENDERBUFFER, rb );
+	f->glGenBuffers( 1, &ssbo );
+	f->glBindBuffer( kSsbo, ssbo );
+	const std::vector< char >	zero( 176 * 64, 0 );
+	f->glBufferData( kSsbo, GLsizeiptr( zero.size() ), zero.data(), GL_STATIC_DRAW );
+	f->glBindBufferBase( kSsbo, 12, ssbo );
+	f->glBindVertexArray( vao );
+	if ( warmRed == 2 ) {
+		f->glEnable( GL_RASTERIZER_DISCARD );
+	} else {
+		f->glDisable( GL_RASTERIZER_DISCARD );
+		f->glEnable( GL_SCISSOR_TEST );
+		f->glScissor( 0, 0, 0, 0 );
+	}
+	while ( f->glGetError() != GL_NO_ERROR ) {
+	}
+	// a stage this point draw does not fit: its query answers without an error only when the program has it
+	auto hasStage = [f]( GLuint id, GLenum q ) {
+		GLint	v[3] = { 0, 0, 0 };
+		f->glGetProgramiv( id, q, v );
+		return f->glGetError() == GL_NO_ERROR;
+	};
+	int	warmed = 0, skipped = 0;
+	for ( NifSkopeOpenGLContext::Program * p = list; p; p = p->nextProgram ) {
+		if ( !p->status || !p->id || p->patches || hasStage( p->id, 0x8916 /* GL_GEOMETRY_VERTICES_OUT */ )
+			|| hasStage( p->id, 0x8E75 /* GL_TESS_CONTROL_OUTPUT_VERTICES */ )
+			|| hasStage( p->id, 0x8267 /* GL_COMPUTE_WORK_GROUP_SIZE */ ) ) {
+			skipped++;
+			continue;
+		}
+		f->glUseProgram( p->id );
+		f->glDrawArrays( GL_POINTS, 0, 1 );
+		warmed++;
+	}
+	while ( f->glGetError() != GL_NO_ERROR ) {
+	}
+	if ( prevDiscard )
+		f->glEnable( GL_RASTERIZER_DISCARD );
+	else
+		f->glDisable( GL_RASTERIZER_DISCARD );
+	if ( prevScissorOn )
+		f->glEnable( GL_SCISSOR_TEST );
+	else
+		f->glDisable( GL_SCISSOR_TEST );
+	f->glScissor( prevScissor[0], prevScissor[1], prevScissor[2], prevScissor[3] );
+	f->glUseProgram( GLuint( prevProg ) );
+	f->glBindVertexArray( GLuint( prevVao ) );
+	f->glBindBufferBase( kSsbo, 12, GLuint( prevSsbo ) );
+	f->glBindBuffer( kSsbo, 0 );
+	f->glBindFramebuffer( GL_DRAW_FRAMEBUFFER, GLuint( prevFbo ) );
+	f->glBindRenderbuffer( GL_RENDERBUFFER, GLuint( prevRb ) );
+	f->glDeleteFramebuffers( 1, &fbo );
+	f->glDeleteRenderbuffers( 1, &rb );
+	f->glDeleteBuffers( 1, &ssbo );
+	f->glDeleteVertexArrays( 1, &vao );
+	std::fprintf( stderr, "shader warm: %d programs drawn once at this shader load (the start or a reload; %d left out: "
+		"geometry, tessellation or compute stage, or not linked) in %lld ms, %s (red WW_PROGWARM_RED=1: the driver finishes "
+		"each at its first draw; =2: the rasterizer off, build 77)\n",
+		warmed, skipped, (long long) clock.elapsed(),
+		warmRed == 2 ? "rasterizer off, RGBA8" : "whole pipeline, half-float target, empty scissor" );
+}
+
 void NifSkopeOpenGLContext::updateShaders()
 {
 	releaseShaders();
@@ -1462,6 +1780,7 @@ void NifSkopeOpenGLContext::updateShaders()
 	QElapsedTimer	clock;
 	clock.start();
 	programCacheHits = programCacheRejected = programCacheWritten = 0;
+	wwSpvInit( dir );
 	programCacheDir.clear();
 	if ( wwEnvStr( "WW_PROGCACHE" ) != "0" ) {
 		QDir	app( QCoreApplication::applicationDirPath() );
@@ -1532,11 +1851,14 @@ void NifSkopeOpenGLContext::updateShaders()
 		ok, int( started.size() ), programCacheHits, programCacheRejected, programCacheWritten,
 		programCacheDir.isEmpty() ? "off" : "on", threads, (long long) issued, (long long) clock.elapsed() );
 	// lane STARTSPEED1: what the deferred compile saved (the waiting sources no link asked for go now)
+	std::fprintf( stderr, "hlsl live: %d of %d programs from SPIR-V, %d fell back (%s)\n", wwSpvLive, int( started.size() ), wwSpvFell,
+		qPrintable( wwSpvFellNames.join( QLatin1String( ", " ) ) ) );
 	std::fprintf( stderr, "shader sources: %d of %d compiled (%s)\n", wwShadersCompiled, wwShadersLoaded,
 		wwStartupEager() ? "eager, WW_STARTUP_EAGER=1" : "on demand" );
 	wwDeferredShaders().clear();
 	std::fprintf( stderr, "shader coldlink: workers %d, %d linked on them in %lld ms\n", coldLinkWorkers, coldLinked,
 		(long long) coldMs );
+	wwWarmPrograms( fn, programsLinked );	// lane EMPTY240 R4-1: finished now, not at a paint's first draw
 }
 
 /* lane COLDLINK1: a cold start links every program the binary cache missed (~2 s each on the NV driver). With
@@ -1684,6 +2006,26 @@ void NifSkopeOpenGLContext::setViewTransform( const Transform & t, int upAxis, f
 
 quint64 wwGlPaintCount();	// glview.cpp
 
+namespace {
+//! lane EMPTY240 R12-1: the bytes the global uniform buffer was last given, and whose buffer
+struct WwUboLast
+{
+	const void * ctx = nullptr;
+	unsigned int buf = 0;
+	NifSkopeOpenGLContext::GlobalUniforms bytes;
+};
+WwUboLast & wwUboLast()
+{
+	static WwUboLast l;
+	return l;
+}
+}	// namespace
+
+void wwGlobalUboForget()
+{
+	wwUboLast().ctx = nullptr;
+}
+
 void NifSkopeOpenGLContext::setGlobalUniforms()
 {
 	/* Never upload a zero viewport — it makes the line geometry shader emit NaN.
@@ -1756,6 +2098,15 @@ void NifSkopeOpenGLContext::setGlobalUniforms()
 		}
 	}
 
+	/* lane EMPTY240 R12-1: the buffer already holds these bytes (same context, same buffer; every write to it goes through
+	 * here): no upload. Red WW_CAMUNI_RED=ubo: uploaded every call. */
+	WwUboLast & last = wwUboLast();
+	if ( last.ctx == this && last.buf == globalUniformsBufferObject
+		&& std::memcmp( &last.bytes, globalUniforms, sizeof( GlobalUniforms ) ) == 0 && !wwCamUniRed( "ubo" ) )
+		return;
+	last.ctx = this;
+	last.buf = globalUniformsBufferObject;
+	std::memcpy( &last.bytes, globalUniforms, sizeof( GlobalUniforms ) );
 	fn->glBindBuffer( GL_UNIFORM_BUFFER, globalUniformsBufferObject );
 	fn->glBufferData( GL_UNIFORM_BUFFER, GLsizeiptr( sizeof(GlobalUniforms) ), globalUniforms, GL_DYNAMIC_DRAW );
 	fn->glBindBuffer( GL_UNIFORM_BUFFER, 0 );
@@ -1851,7 +2202,18 @@ void NifSkopeOpenGLContext::bindShape(
 		j = i;
 	}
 
-	ShapeData *	d = new ShapeData( *this, h, attrData, elementData );
+	// lane EMPTY240 R4-1: over this paint's upload budget: a draw that can wait leaves its mesh for the next paint
+	if ( WwUp::st().meshMayDefer && WwUp::spent() ) {
+		WwUp::deferMesh();
+		WwDp::abortRecording();
+		return;
+	}
+	ShapeData *	d;
+	{
+		WwUp::Charge wwUpCharge;
+		d = new ShapeData( *this, h, attrData, elementData );
+		WwUp::Charge::addBytes( qint64( d->h.getBufferDataSize() ) );
+	}
 	if ( !cacheLastItem ) {
 		d->prev = d;
 		d->next = d;

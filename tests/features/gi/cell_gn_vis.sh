@@ -1,4 +1,5 @@
 #!/bin/bash
+export WW_CELL_STREAM="${WW_CELL_STREAM:-0}"	# AIRPERF1 r4: this harness opens a fixed block (streaming is the default now)
 #
 # GOODNEIGHBOR SKY VISIBILITY (lane GISHADE1's gate, 2026-10-13; the ww-probe-sky-shade skill's "0.639 vs 0.611").
 # One launch: the Goodneighbor 5x5 at 16h, the glass camera, with the GI dump (WW_CELL_GI_DUMP); then

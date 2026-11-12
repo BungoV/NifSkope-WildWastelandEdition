@@ -2,22 +2,33 @@
 #include "cellstream.h"
 #include "cellstreamtex.h"	// lane STREAMTEX1: the stream's file textures, counted by cell
 #include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
+#include "wwhwuse.h"	// lane EMPTY240 R3-1/R3-2: the stream pool's busy count and the archive read counters
 
 #include "features/far-lod/cellfarhide.h"	// lane FARHOLE2: the far field leaves room for every loaded cell
 #include "features/far-lod/cellfarlod.h"	// lane LARGEREF4: the far build's map for the large refs
 #include "cellmesh.h"
+#include "cellstreamrule.h"	// lane AIRPERF1 r4: when a view streams
+#include "features/gi/probeplace.h"	// lane AIRPERF1 r4: the far terrain's soup
+#include "features/gi/rttraceset.h"	// lane AIRPERF1 r4: the ray-traced GI's traced set follows the loaded cells
+#include "features/gi/rttracesetrule.h"
+#include "features/gi/probealbedo.h"	// lane AIRPERF1 r5: the far field's colours
+#include "features/gi/rtfartrace.h"	// lane AIRPERF1 r5: the far field as the trace takes it
+#include <array>
+#include <memory>
 #include "cellsplat.h"
 #include "esmdata.h"		// lane WEATHERBLEND6: the camera cell's regions
 #include "features/far-ground/landlodspec.h"	// lane LANDSPEC6: streamCentre
 #include "features/far-lod/largeref.h"		// lane LARGEREF2: who draws each large ref
 #include "cellmodsource.h"	// lane LANDSPEC8: uGridsToLoad
 #include "features/far-lod/impostorchunk.h"
+#include "features/far-lod/lodpreview.h"	// lane PERFLOAD1 P8: the near grid follow / freeze / off
 #include "gl/bsshape.h"
 #include "features/near/cellcull.h"
 #include "gl/cellgrass.h"
 #include "features/water/cellwater.h"
 #include "gl/glnode.h"
 #include "gl/glproperty.h"
+#include "gl/glcontroller.h"	// lane STREAMGN1: the controllers synced at a cell's hookup
 #include "gl/glscene.h"
 #include "gl/glshape.h"
 #include "gl/texpool.h"	// lane PERFFIX4: the streaming texture pool's budgets
@@ -27,6 +38,7 @@
 #include "model/nifmodel.h"
 #include "spells/blocks.h"
 
+#include <QDebug>
 #include <QElapsedTimer>
 #include <QHash>
 #include <QPointer>
@@ -123,6 +135,12 @@ struct StreamCell
 	double writeMs = 0.0;
 	int pfx = 0;                                    //!< lane LIVESET3: particle copies it holds (the stream's cap)
 	quint32 lref = 0;                               //!< lane LARGEREF2: a large-ref unit (x, y: the cell it stands in)
+	bool soupAsked = false;                         //!< lane AIRPERF1 r5: a soup-only gather was started for it
+	bool nearOff = false;                           //!< lane PERFLOAD1 P8: attached, but hidden by the near grid's OFF
+	// lane EMPTY240 R3-2: the `cell stream load:` line's facts
+	WwHw::Io loadIo, readyIo;                       //!< archive reads in the build's window; the counters when it was built
+	double loadBuildMs = 0.0;
+	QElapsedTimer readyAt;
 };
 
 /* lane LARGEREF2 (LARGEREF-STREAM): a large ref a loaded cell lists but whose own cell is not loaded is drawn by a unit
@@ -199,12 +217,26 @@ public:
 	std::thread worker;
 	std::shared_ptr<CellChunk> job;
 	std::atomic<bool> jobDone { false };
+	WwHw::Io jobIo;                             //!< lane EMPTY240 R3-2: the archive reads in the job's window (the worker writes it)
+	/* lane EMPTY240 R5-4 (build 77: workers 0.6 / 14 at load): the builder is one thread, one cell at a time. Its idle
+	 * time while cells wait to be built, by what held it: [0] a finished build waits for a paint's pump to collect it,
+	 * [1] a wanted built cell waits for its write on the drawing thread, [2] leaving cells are unloaded / reset / freed
+	 * first, [3] Cell Streaming is off. Printed in the `cell stream load:` line, since the last hookup. */
+	std::atomic<long long> jobDoneNs { 0 };
+	long long idleAt = 0;
+	int idleWhy = -1;
+	double idleMs[4] = { 0.0, 0.0, 0.0, 0.0 }, idleBuildMs = 0.0;
+	int idleBuilds = 0;
+	int besideSlices = 0;	// lane EMPTY240 R6-6: write slices run while the builder built, since the last hookup
+	double besideMs = 0.0, besideMaxMs = 0.0;
 	Scene * scene = nullptr;
 	QPointer<Node> root;
 	std::vector<FarTile> farTiles;
 	CellRefTable baseRefs;
 	CellPickTable basePicks;
 	bool dirty = false;
+	QElapsedTimer sinceRebuild;   //!< lane STREAMGN1: a filling block is lit at most this often (kLitEarlyMs)
+	int litEarly = 0;
 	CellStreamStats st;
 	QString red;
 	double budgetMs = 4.0;
@@ -212,10 +244,43 @@ public:
 	int sliceNodes = 0;           //!< node blocks taken in this slice, still to be wired
 	float shift = 2048.0f;
 	bool fixedCentre = false;     //!< lane LANDSPEC6: a fixed world's block never shifts (red WW_LANDSPEC_RED=fixedfollow)
+	//! lane AIRPERF1 r4: the Cell Streaming row (or WW_CELL_STREAM=0 set live) holds the block at the eye it had:
+	//! the cells it was loading finish (pausedFill), then nothing loads or unloads
+	bool paused = false, pausedFill = false, saidPaused = false;
+	Vector3 pausedEye;
+	int saidCx = INT_MIN, saidCy = INT_MIN;
+	//! lane AIRPERF1 r4: the ray-traced GI's traced set (features/gi/rttraceset.h): handed over after each rebuild()
+	bool traceDirty = false, traceOn = false;
+	int traceRing = -1;
+	void traceSync( int ring, int ex, int ey );
+	//! lane AIRPERF1 r5: a far shape as the trace takes it (rtfartrace.h), read once and kept while it reaches the ring
+	struct TraceFar
+	{
+		quint64 sig = 0;                              //!< rtFarShapeSig when it was looked at
+		std::array<int, 4> span { { 0, 0, -1, -1 } };   //!< its cells (x0, y0, x1, y1)
+		int src = 0;                                  //!< 0 the far terrain, 1 far objects
+		bool flat = false;                            //!< read under the fardirt red
+		std::shared_ptr<const RtFarShape> shape;
+	};
+	QHash<int, TraceFar> traceFar;                //!< by block
+	std::unique_ptr<ProbeAlbedo> traceAlb;        //!< the maps' reader, held only while shapes are still to read
+	bool traceMore = false;                       //!< far shapes of the ring are not read yet (a few ms a tick)
+	int traceReds = -1;                           //!< the far reds at the last hand-over (a changed word hands over again)
+	int traceReads = 0;
+	double traceReadMs = 0.0, traceReadMaxMs = 0.0;
+	int traceFarRead( int ring, double budgetMs );
+	//! lane AIRPERF1 r5: the worker's job gathers a soup for a cell that is drawn already (pumpWorker)
+	bool soupJob = false;
 	//! lane LANDSPEC7: a fixed world builds no cell round the eye past WCTR +- 2: the block never moves there, and the
 	//! game never loads those cells (red WW_LANDSPEC_RED=fixedopen: the prefetch row is built)
 	bool noPrefetch = false;
 	int gridHalf = LandLodSpec::kFixedGridHalf;	//!< lane LANDSPEC8: uGridsToLoad / 2 from the game's inis (was 2)
+	//! lane PERFLOAD1 P8: the near grid mode last applied, its line's gen, the once-a-second distance line
+	int gridMode = LodPreview::Follow;
+	quint64 gridSaid = 0;
+	QElapsedTimer gridSayT;
+	void nearOffCell( StreamCell & c, bool off );
+	void nearGrid( const Vector3 & eye );
 	CellStreamCamera cam;         //!< lane WEATHERBLEND6: the eye's cell and its regions, for the region walk
 	//! lane STREAMTEX1: the file textures each written cell's properties name (cellstreamtex.h); lane STREAMTEX3: the
 	//! counts give the PERFFIX4 pool its tiers, the budget shown in the census is the pool's (read at the open)
@@ -238,6 +303,8 @@ public:
 	~Stream() override
 	{
 		farHideForget();
+		if ( traceOn )
+			rtTraceSetForget( nif );   // lane AIRPERF1 r4
 		if ( worker.joinable() )
 			worker.join();
 		if ( reaper.joinable() )
@@ -430,16 +497,62 @@ void Stream::shiftCentre( const Vector3 & eye )
 	}
 }
 
+static long long streamNowNs()	// lane EMPTY240 R5-4: one clock for the builder thread and the pump
+{
+	return (long long) std::chrono::duration_cast<std::chrono::nanoseconds>(
+		std::chrono::steady_clock::now().time_since_epoch() ).count();
+}
+
 void Stream::pumpWorker( const Vector3 & eye )
 {
+	// lane EMPTY240 R5-4: the time since the last pump goes to what held the builder then
+	const long long pumpNs = streamNowNs();
+	if ( idleWhy >= 0 && idleAt > 0 )
+		idleMs[idleWhy] += double( pumpNs - idleAt ) * 1e-6;
+	idleAt = pumpNs;
+	idleWhy = -1;
+	auto anyQueued = [this]() {
+		for ( const auto & kv : cells )
+			if ( kv.second.st == CellState::Queued )
+				return true;
+		return false;
+	};
 	if ( worker.joinable() && jobDone.load() && threadGone( worker ) ) {
 		worker.join();
 		std::shared_ptr<CellChunk> done = std::move( job );
 		job.reset();
 		st.buildMaxMs = std::max( st.buildMaxMs, double( done->buildMs ) );
+		if ( jobDoneNs.load() > 0 )	// lane EMPTY240 R5-4: finished, then waited for this pump
+			idleMs[0] += double( pumpNs - jobDoneNs.load() ) * 1e-6;
+		idleBuildMs += double( done->buildMs );
+		idleBuilds++;
 		auto it = cells.find( done->largeRef ? lrKey( done->largeRef ) : Key( done->cx, done->cy ) );
-		if ( it != cells.end() && it->second.st == CellState::Building ) {
+		if ( soupJob ) {
+			/* lane AIRPERF1 r5: a soup-only job. The cell is drawn by the chunk it has; the second build is dropped as
+			 * the build of a cell that left the block is (its buckets go with `done`), only its soup is kept */
+			soupJob = false;
+			const bool live = it != cells.end() && it->second.st == CellState::Attached && it->second.chunk;
+			const bool got = live && !it->second.chunk->soup && done->ok && done->soup;
+			if ( got ) {
+				it->second.chunk->soup = done->soup;
+				traceDirty = true;
+			}
+			int owed = 0;
+			for ( const auto & kv : cells )
+				if ( cellstreamrule::soupOwed( true, kv.second.st == CellState::Attached && kv.second.chunk && kv.second.chunk->ok,
+						kv.second.chunk && kv.second.chunk->soup, kv.second.soupAsked ) )
+					owed++;
+			std::fprintf( stderr, "cell stream: soup %s for %d,%d%s (loaded before the Ray-traced GI row went on) in %lld ms, "
+				"%lld triangles, %d cells still owe theirs\n", got ? "gathered" : ( live ? "not gathered (the build gave none)"
+				: "dropped (the cell left meanwhile)" ), done->cx, done->cy, done->largeRef ? " (large ref)" : "",
+				static_cast<long long>( done->buildMs ), static_cast<long long>( got ? rtTraceUnitTris( *done->soup ) : 0 ), owed );
+			std::fflush( stderr );
+		} else if ( it != cells.end() && it->second.st == CellState::Building ) {
 			trace( QStringLiteral( "built %1,%2 in %3 ms" ).arg( done->cx ).arg( done->cy ).arg( done->buildMs ) );
+			it->second.loadIo = jobIo;	// lane EMPTY240 R3-2
+			it->second.loadBuildMs = double( done->buildMs );
+			it->second.readyIo = WwHw::io();
+			it->second.readyAt.start();
 			it->second.chunk = std::move( done );
 			it->second.st = CellState::Ready;
 			st.built++;
@@ -448,13 +561,22 @@ void Stream::pumpWorker( const Vector3 & eye )
 	}
 	if ( worker.joinable() )
 		return;
+	const bool held = paused && !pausedFill;   // lane AIRPERF1 r4: Cell Streaming off: no cell build starts
 	// lane CELLSTREAM1: leaving cells go, their blocks reset and built cells are written before the next build
 	// starts: the builder's heap traffic stalls the main thread's model edits by up to tens of ms
-	if ( unloadWaiting || !toReset.empty() || !toClear.empty() || !toFree.empty() )
+	if ( unloadWaiting || !toReset.empty() || !toClear.empty() || !toFree.empty() ) {
+		idleWhy = anyQueued() ? 2 : -1;	// lane EMPTY240 R5-4
 		return;
+	}
+	/* lane EMPTY240 R3-1 (build 74: workers 0.0 / 16 while cells load): the next build starts while a built cell is
+	 * written on the drawing thread; only a wanted cell still waiting for its write holds it back. Red
+	 * WW_STREAMPOOL_RED=1: a cell being written holds it back too (build 74). */
+	const bool poolRed = wwEnvInt( "WW_STREAMPOOL_RED" ) == 1;
 	for ( const auto & kv : cells )
-		if ( want( kv.first ) && ( kv.second.st == CellState::Ready || kv.second.st == CellState::Writing ) )
+		if ( want( kv.first ) && ( kv.second.st == CellState::Ready || ( poolRed && kv.second.st == CellState::Writing ) ) ) {
+			idleWhy = anyQueued() ? 1 : -1;	// lane EMPTY240 R5-4
 			return;
+		}
 	const int ex = cellOf( eye[0] ), ey = cellOf( eye[1] );
 	StreamCell * best = nullptr;
 	double bestScore = 1.0e30;
@@ -471,18 +593,49 @@ void Stream::pumpWorker( const Vector3 & eye )
 			best = &c;
 		}
 	}
+	if ( held ) {
+		idleWhy = queued > 0 ? 3 : -1;	// lane EMPTY240 R5-4
+		best = nullptr;
+		bestScore = 1.0e30;
+	}
+	/* lane AIRPERF1 r5: no cell waits to be built: a drawn cell that was built before the Ray-traced GI row went on
+	 * has its soup gathered now, nearest the eye first, one job at a time (red WW_CELL_RTSET_RED=nolatesoup: such a
+	 * cell is traced only after it was streamed again) */
+	bool soupOnly = false;
+	if ( !best && rtTraceSetFollows() && !rtTraceSetRed( "nolatesoup" ) ) {
+		for ( auto & kv : cells ) {
+			StreamCell & c = kv.second;
+			if ( !cellstreamrule::soupOwed( true, c.st == CellState::Attached && c.chunk && c.chunk->ok, c.chunk && c.chunk->soup,
+					c.soupAsked ) )
+				continue;
+			const double d = std::hypot( double( c.x - ex ), double( c.y - ey ) );
+			if ( d < bestScore ) {
+				bestScore = d;
+				best = &c;
+			}
+		}
+		soupOnly = best != nullptr;
+	}
 	if ( !best )
 		return;
-	best->st = CellState::Building;
-	// lane SHORE1: the eye cell, the pick's distance and the queue it beat, so a log proves nearest-first
-	trace( QStringLiteral( "build %1,%2 (%3) eye %4,%5 d %6 of %7 queued" ).arg( best->x ).arg( best->y )
-		.arg( want( keyOf( *best ) ) ? ( best->lref ? "large ref" : "wanted" ) : "prefetch" ).arg( ex ).arg( ey )
-		.arg( std::fmod( bestScore, 1000.0 ), 0, 'f', 2 ).arg( queued ) );
+	if ( soupOnly ) {
+		best->soupAsked = true;
+		soupJob = true;
+		trace( QStringLiteral( "soup %1,%2 (drawn already) eye %3,%4 d %5" ).arg( best->x ).arg( best->y ).arg( ex ).arg( ey )
+			.arg( bestScore, 0, 'f', 2 ) );
+	} else {
+		best->st = CellState::Building;
+		// lane SHORE1: the eye cell, the pick's distance and the queue it beat, so a log proves nearest-first
+		trace( QStringLiteral( "build %1,%2 (%3) eye %4,%5 d %6 of %7 queued" ).arg( best->x ).arg( best->y )
+			.arg( want( keyOf( *best ) ) ? ( best->lref ? "large ref" : "wanted" ) : "prefetch" ).arg( ex ).arg( ey )
+			.arg( std::fmod( bestScore, 1000.0 ), 0, 'f', 2 ).arg( queued ) );
+	}
 	job = std::make_shared<CellChunk>();
 	job->seed = seed;
 	job->cx = best->x;
 	job->cy = best->y;
 	job->largeRef = best->lref;	// lane LARGEREF2
+	job->wantSoup = soupOnly || rtTraceSetFollows();	// lane AIRPERF1 r4: the cell's soup for the ray-traced GI
 	// the enable facts of the 5x5 the cell is wanted in (the fixed block's rule)
 	const bool now = want( keyOf( *best ) );
 	const int fx = now ? ccx : ex, fy = now ? ccy : ey;
@@ -490,14 +643,22 @@ void Stream::pumpWorker( const Vector3 & eye )
 	job->facts[1] = fy - 2;
 	job->facts[2] = fx + 2;
 	job->facts[3] = fy + 2;
+	if ( soupOnly )   // the facts the drawn chunk was built with: the soup is of what is drawn
+		for ( int k = 0; k < 4; k++ )
+			job->facts[k] = best->chunk->facts[k];
 	jobDone = false;
+	jobDoneNs = 0;
 	std::shared_ptr<CellChunk> j = job;
 	std::atomic<bool> * flag = &jobDone;
+	std::atomic<long long> * doneNs = &jobDoneNs;
+	WwHw::Io * ioOut = &jobIo;
 	// a thread a job: the loaders' per-thread caches go with it
 	// lane CELLSPIKE3: the builder takes item slots a run per lock; one lock per item, held by a low-priority thread
 	// the machine had pre-empted, stalled the main thread 10-35 ms off the processor (red lock)
 	const bool ownSlots = !spikeRed( "lock" );
-	worker = std::thread( [j, flag, ownSlots]() {
+	worker = std::thread( [j, flag, ownSlots, ioOut, doneNs]() {
+		WwHw::Busy wwBusy( WwHw::BusyBuilder );	// lane EMPTY240 R3-1, R5-4: by kind
+		const WwHw::Io io0 = WwHw::io();
 #ifdef Q_OS_WIN
 		// lane CELLSTREAM1: the builder yields to the main thread (its frame slices are what the gate times)
 		SetThreadPriority( GetCurrentThread(), THREAD_PRIORITY_BELOW_NORMAL );
@@ -506,6 +667,8 @@ void Stream::pumpWorker( const Vector3 & eye )
 		if ( ownSlots )
 			itemRun.emplace();
 		cellChunkBuild( *j );
+		*ioOut = WwHw::ioDelta( WwHw::io(), io0 );
+		doneNs->store( streamNowNs() );	// lane EMPTY240 R5-4
 		flag->store( true );
 	} );
 }
@@ -606,6 +769,13 @@ void Stream::farHide( StreamCell & c, bool hide )
 			refs << c.chunk->refs.at( i ).refForm;
 	CellFarHide::setCell( nif, c.x, c.y, hide, refs );
 	farHideRefresh( c.x, c.y );
+	{	// lane SEAMCLOUD1: the far rings' cell-line walls show where a masked cell meets an unmasked one
+		const CellFarHide::Hidden * h = CellFarHide::hiddenFor( nif );
+		trace( QStringLiteral( "far seam: cells masked %1 (%2 %3,%4), walls %5 [WW_CELL_FARLOD_RED=noseam]" )
+			.arg( h ? h->cells.size() : 0 ).arg( hide ? QStringLiteral( "attach" ) : QStringLiteral( "unload" ) )
+			.arg( c.x ).arg( c.y )
+			.arg( wwEnv( "WW_CELL_FARLOD_RED" ) == "noseam" ? QStringLiteral( "OFF (red)" ) : QStringLiteral( "on (built with the rings)" ) ) );
+	}
 }
 
 //! the masked shapes reaching (x, y) (every one for INT_MIN) take their arrays again; the cards follow the cells
@@ -723,12 +893,68 @@ void Stream::lrPublish()
 		return;
 	QVector<quint32> refs;
 	for ( const auto & kv : cells )
-		if ( kv.second.lref && kv.second.st == CellState::Attached && kv.second.chunk )
+		if ( kv.second.lref && kv.second.st == CellState::Attached && kv.second.chunk && !kv.second.nearOff )
 			for ( int i = 0; i < kv.second.chunk->refs.size(); i++ )
 				refs << kv.second.chunk->refs.at( i ).refForm;
 	CellFarHide::setExtraRefs( nif, refs );
 	if ( scene && root )
 		scene->transformDirty = true;
+}
+
+//! lane PERFLOAD1 P8: one attached cell (or large-ref unit) out of the draw for the near grid's OFF, or back in
+void Stream::nearOffCell( StreamCell & c, bool off )
+{
+	if ( c.st != CellState::Attached || c.nearOff == off )
+		return;
+	c.nearOff = off;
+	if ( c.cellNode )
+		c.cellNode->makeParent( off ? nullptr : root.data() );
+	if ( !c.lref ) {
+		showFar( c.x, c.y, off );   // the far tile and its rows fill the hole
+		farHide( c, !off );
+	}
+	dirty = true;
+}
+
+/*! lane PERFLOAD1 P8: the LOD preview's near grid (lodpreview.h). FREEZE keeps the block where it was (tick's frozen
+ *  eye), OFF also takes every attached cell out of the draw; FOLLOW puts them back, no reopen. Telemetry: a line on each
+ *  change, then once a second while not following: the frozen cells and the eye's distance to the block's edge
+ *  (negative = outside it). */
+void Stream::nearGrid( const Vector3 & eye )
+{
+	const int mode = LodPreview::grid();
+	if ( mode != gridMode ) {
+		const bool off = mode == LodPreview::Off;
+		bool anyLr = false;
+		for ( auto & kv : cells ) {
+			nearOffCell( kv.second, off );
+			anyLr = anyLr || kv.second.lref;
+		}
+		if ( anyLr )
+			lrPublish();
+		gridMode = mode;
+	}
+	const bool say = LodPreview::gen() != gridSaid || ( mode != LodPreview::Follow
+		&& ( !gridSayT.isValid() || gridSayT.elapsed() >= 1000 ) );
+	if ( !say )
+		return;
+	gridSaid = LodPreview::gen();
+	gridSayT.start();
+	const float x0 = float( ccx - gridHalf ) * kCell, x1 = float( ccx + gridHalf + 1 ) * kCell;
+	const float y0 = float( ccy - gridHalf ) * kCell, y1 = float( ccy + gridHalf + 1 ) * kCell;
+	const float edge = std::min( std::min( eye[0] - x0, x1 - eye[0] ), std::min( eye[1] - y0, y1 - eye[1] ) );
+	int attached = 0, hidden = 0;
+	for ( const auto & kv : cells )
+		if ( kv.second.st == CellState::Attached ) {
+			attached++;
+			hidden += kv.second.nearOff ? 1 : 0;
+		}
+	qInfo().noquote() << QStringLiteral( "lod preview: near grid %1: cells %2..%3, %4..%5 %6; %7 attached, %8 hidden; "
+		"eye %9 units from the grid edge%10" ).arg( LodPreview::gridName( mode ) ).arg( ccx - gridHalf )
+		.arg( ccx + gridHalf ).arg( ccy - gridHalf ).arg( ccy + gridHalf )
+		.arg( mode == LodPreview::Follow ? QStringLiteral( "(following)" ) : QStringLiteral( "(frozen)" ) )
+		.arg( attached ).arg( hidden ).arg( double( edge ), 0, 'f', 0 )
+		.arg( edge < 0.0f ? QStringLiteral( " (outside it)" ) : QString() );
 }
 
 void Stream::showFar( int x, int y, bool show )
@@ -858,6 +1084,46 @@ bool Stream::write( StreamCell & c, double budget )
 	return hooked;
 }
 
+namespace
+{
+struct CardSync
+{
+	int owners = 0, ctrls = 0, missing = 0, active = 0;
+};
+
+/*! lane STREAMGN1: a cell's controllers read again at its hookup, so a streamed card animates as the open's did. A
+ *  copied branch's scene objects are made with its parent, before every controller, interpolator and data block of the
+ *  copy is written; in recycled, quietly reset blocks they kept what they read then. Each node and property with a
+ *  Controller chain syncs its list, every controller re-reads flags, interpolator and data, then takes the sequence.
+ *  Red WW_CELL_STREAM_RED=nocardsync leaves it out. */
+void syncControllers( const NifModel * nif, Scene * scene, IControllable * o, CardSync & s )
+{
+	const QModelIndex iFirst = nif->getBlockIndex( nif->getLink( o->index(), "Controller" ) );
+	if ( !iFirst.isValid() )
+		return;
+	s.owners++;
+	auto chain = [&]( auto && each ) {
+		int guard = 0;
+		for ( QModelIndex i = iFirst; i.isValid() && nif->blockInherits( i, "NiTimeController" ) && guard++ < 64;
+			i = nif->getBlockIndex( nif->getLink( i, "Next Controller" ) ) )
+			each( i );
+	};
+	bool missing = false;
+	chain( [&]( const QModelIndex & i ) { missing |= !o->findController( i ); } );
+	if ( missing ) {
+		s.missing++;
+		o->update( nif, o->index() );
+	}
+	chain( [&]( const QModelIndex & i ) {
+		s.ctrls++;
+		o->update( nif, i );
+		if ( Controller * ct = o->findController( i ) )
+			s.active += ct->active ? 1 : 0;
+	} );
+	o->setSequence( scene->animGroup );
+}
+}
+
 bool Stream::attach( StreamCell & c, const QElapsedTimer & t, double budget )
 {
 	// lane CELLSTREAM1: the containers' links a few a slice, then the hookup itself (one step: no half-shown cell)
@@ -875,7 +1141,60 @@ bool Stream::attach( StreamCell & c, const QElapsedTimer & t, double budget )
 		showFar( c.x, c.y, false );   // the near ground replaces the far tile in the same step: no overlap
 		farHide( c, true );   // lane FARHOLE2: and the far objects, cards and rings past 0 it holds
 	}
+	if ( red != QLatin1String( "nocardsync" ) && scene ) {	// lane STREAMGN1: syncControllers
+		CardSync s;
+		QSet<IControllable *> seen;
+		for ( auto it = c.nodes.cbegin(); it != c.nodes.cend(); ++it ) {
+			Node * n = it.value().data();
+			if ( !n )
+				continue;
+			if ( !seen.contains( n ) ) {
+				seen.insert( n );
+				syncControllers( nif, scene, n, s );
+			}
+			for ( Property * pr : n->propertyList() )
+				if ( pr && !seen.contains( pr ) ) {
+					seen.insert( pr );
+					syncControllers( nif, scene, pr, s );
+				}
+		}
+		if ( s.ctrls > 0 ) {
+			std::fprintf( stderr, "cell stream: controllers synced at the hookup of %d,%d: %d owners, %d controllers (%d active), %d lists rebuilt\n",
+				c.x, c.y, s.owners, s.ctrls, s.active, s.missing );
+			std::fflush( stderr );
+		}
+	}
 	c.st = CellState::Attached;
+	if ( c.readyAt.isValid() ) {
+		/* lane EMPTY240 R3-2: one line a hookup. The build's archive reads are those of every thread in the build's
+		 * window (the texture read-ahead's too); the wait is built -> attached, the write share of it on this thread. */
+		const WwHw::Io & b = c.loadIo;
+		const WwHw::Io d = WwHw::ioDelta( WwHw::io(), c.readyIo );
+		std::fprintf( stderr, "cell stream load: %d,%d built in %.0f ms on a worker = archive open (index builds) %.1f ms, "
+			"read %.1f ms, decompress %.1f ms over %lld files (%lld from the RAM cache), %.1f MB packed -> %.1f MB; "
+			"attached %.0f ms after it was built (written %.1f ms on the drawing thread in slices; the drawing thread read "
+			"%lld archive files meanwhile, %.1f ms); workers busy %d / %d; since the last hookup the one cell builder built "
+			"%d cells in %.0f ms and stood idle while cells waited %.0f ms = waiting for a paint to collect its cell %.0f + held "
+			"by a wanted built cell not yet written %.0f + held by unloads / resets / frees %.0f + streaming off %.0f; %d write "
+			"slices ran beside a build, %.1f ms (longest %.1f ms; red WW_STREAMWRITE_RED=1: writes wait for the build, "
+			"build 78)\n",
+			c.x, c.y, c.loadBuildMs,
+			double( b.indexNs ) * 1e-6, double( b.readNs ) * 1e-6, double( b.inflateNs ) * 1e-6, (long long) b.files,
+			(long long) b.cacheHits, double( b.packed ) / 1048576.0, double( b.bytes ) / 1048576.0,
+			double( c.readyAt.nsecsElapsed() ) * 1e-6, c.writeMs, (long long) d.drawFiles, double( d.drawNs ) * 1e-6,
+			WwHw::busyCount().load(), WwHw::poolSlots(), idleBuilds, idleBuildMs,
+			idleMs[0] + idleMs[1] + idleMs[2] + idleMs[3], idleMs[0], idleMs[1], idleMs[2], idleMs[3],
+			besideSlices, besideMs, besideMaxMs );
+		idleMs[0] = idleMs[1] = idleMs[2] = idleMs[3] = idleBuildMs = 0.0;	// lane EMPTY240 R5-4
+		besideSlices = 0;
+		besideMs = besideMaxMs = 0.0;
+		idleBuilds = 0;
+		c.readyAt.invalidate();
+	}
+	if ( gridMode == LodPreview::Off ) {	// lane PERFLOAD1 P8: a cell attached under the near grid's OFF stays hidden
+		c.nearOff = false;
+		nearOffCell( c, true );
+	}
 	if ( c.lref )
 		lrPublish();
 	else
@@ -897,10 +1216,11 @@ void Stream::unload( StreamCell & c )
 		setRootSlot( c.cellBlock, -1 );
 	const double msRoot = msOf( t );
 	const bool wasAttached = c.st == CellState::Attached;	// lane LARGEREF2
-	if ( !c.lref ) {
+	if ( !c.lref && !c.nearOff ) {	// lane PERFLOAD1 P8: a cell the near grid's OFF hid has its far tile out already
 		showFar( c.x, c.y, true );
 		farHide( c, false );   // lane FARHOLE2
 	}
+	c.nearOff = false;
 	const double msFar = msOf( t );
 	QSet<int> nodeBlocks, propBlocks;
 	for ( const auto & tk : c.takes ) {
@@ -1135,7 +1455,278 @@ void Stream::rebuild()
 	wwCellLightsPublish( nif, L );
 	wwCellFxLitPick( nif );
 	dirty = false;
+	traceDirty = true;   // lane AIRPERF1 r4: the traced set follows (tick)
 	st.rebuildMaxMs = std::max( st.rebuildMaxMs, msOf( t ) );
+}
+
+namespace
+{
+constexpr double kFarReadMs = 4.0;   //!< lane AIRPERF1 r5: the main thread's time a tick for reading far shapes (one at least)
+
+bool spanInRing( const std::array<int, 4> & s, int cx, int cy, int ring )
+{
+	return !( s[2] < cx - ring || s[0] > cx + ring || s[3] < cy - ring || s[1] > cy + ring );
+}
+}
+
+/*! lane AIRPERF1 r5: the far shapes that reach the ring are read into what the trace takes (rtfartrace.h), each once,
+ *  within `budgetMs` a call (one shape at least). Returns how many of the ring's shapes are still to read. A shape
+ *  that left the ring by more than two cells is freed. */
+int Stream::traceFarRead( int ring, double budgetMs )
+{
+	if ( !scene || rtTraceSetRed( "nofar" ) ) {
+		traceFar.clear();
+		traceAlb.reset();
+		return 0;
+	}
+	QElapsedTimer t;
+	t.start();
+	const bool flatRed = rtTraceSetRed( "fardirt" ), noObj = rtTraceSetRed( "nofarobj" ), noWater = rtTraceSetRed( "nofarwater" );
+	QSet<int> seen;
+	int pending = 0;
+	bool built = false;
+	for ( Shape * sh : scene->shapes ) {
+		if ( !sh )
+			continue;
+		const QString bn = sh->getName();
+		// round 6: far water is a source of its own (2); the endless sea's one plane stays out (rttracesetrule.h farSrcOf)
+		const int src = rttracesetrule::farSrcOf( bn.toLatin1().constData() );
+		if ( src < 0 )
+			continue;
+		const int b = nif->getBlockNumber( sh->index() );
+		const quint64 sig = b < 0 ? 0 : rtFarShapeSig( nif, sh );
+		if ( !sig )
+			continue;
+		seen.insert( b );
+		TraceFar & tf = traceFar[b];
+		if ( tf.sig != sig ) {   // new, or the far field was rebuilt: the cells it reaches
+			tf = TraceFar();
+			tf.sig = sig;
+			tf.src = src;
+			const QSharedPointer<CellMesh> cm = cellMeshFor( nif, sh->index() );
+			if ( cm && cm->inst ) {
+				bool first = true;
+				for ( const qint64 k : cm->inst->rowCell ) {
+					const int x = int( k >> 32 ), y = int( qint32( quint32( k & 0xFFFFFFFFll ) ) );
+					if ( first )
+						tf.span = { { x, y, x, y } };
+					else
+						tf.span = { { std::min( tf.span[0], x ), std::min( tf.span[1], y ), std::max( tf.span[2], x ), std::max( tf.span[3], y ) } };
+					first = false;
+				}
+				if ( first )   // rows without their cells: looked at wherever the ring is
+					tf.span = { { INT_MIN / 2, INT_MIN / 2, INT_MAX / 2, INT_MAX / 2 } };
+			} else {
+				const QVector<Vector3> & V = cm ? cm->verts : sh->verts;
+				const Transform w = sh->restWorldTrans();
+				float lo[2] = { 3.4e38f, 3.4e38f }, hi[2] = { -3.4e38f, -3.4e38f };
+				for ( const Vector3 & v : V ) {
+					const Vector3 p = w * v;
+					lo[0] = std::min( lo[0], p[0] );
+					lo[1] = std::min( lo[1], p[1] );
+					hi[0] = std::max( hi[0], p[0] );
+					hi[1] = std::max( hi[1], p[1] );
+				}
+				tf.span = { { cellOf( lo[0] ), cellOf( lo[1] ), cellOf( hi[0] ), cellOf( hi[1] ) } };
+			}
+		}
+		if ( !spanInRing( tf.span, ccx, ccy, ring ) ) {
+			if ( !spanInRing( tf.span, ccx, ccy, ring + 2 ) )
+				tf.shape.reset();
+			continue;
+		}
+		if ( ( tf.src == 1 && noObj ) || ( tf.src == 2 && noWater ) || ( tf.shape && tf.flat == flatRed ) )
+			continue;
+		if ( built && msOf( t ) >= budgetMs ) {
+			pending++;
+			continue;
+		}
+		if ( !traceAlb )
+			traceAlb = std::make_unique<ProbeAlbedo>( seed ? seed->dataRoot : QString() );
+		tf.shape = rtFarShapeBuild( nif, sh, tf.src, *traceAlb, flatRed );
+		tf.flat = flatRed;
+		built = true;
+		traceReads++;
+		traceReadMs += tf.shape->ms;
+		traceReadMaxMs = std::max( traceReadMaxMs, tf.shape->ms );
+	}
+	for ( auto it = traceFar.begin(); it != traceFar.end(); )
+		it = seen.contains( it.key() ) ? std::next( it ) : traceFar.erase( it );
+	if ( !pending )
+		traceAlb.reset();   // the maps go; the shapes keep their colours
+	return pending;
+}
+
+/*! lane AIRPERF1 r4: the loaded cells' soups and the far field round them go to the ray-traced GI's traced set
+ *  (features/gi/rttraceset.h), which merges and publishes them off the main thread.
+ *  Round 5: the far field is what is drawn out there, terrain AND objects (the far objects' arrays, the instanced far
+ *  rows, the game's own far chunks), each triangle with its diffuse map's colour, cut to the cells within `ring` of
+ *  the block's centre and to what no loaded cell traces already (rttracesetrule.h farSkip), the objects within a
+ *  triangle budget, nearest cells first (farCap). Reds WW_CELL_RTSET_RED = nofar (no far field), nofarobj (round 4:
+ *  the terrain alone), fardirt (round 4: one stated tone), nofarcap (no budget). */
+void Stream::traceSync( int ring, int ex, int ey )
+{
+	QElapsedTimer t;
+	t.start();
+	std::vector<RtTraceUnit> units;
+	std::set<Key> loaded;
+	int noSoup = 0;
+	for ( const auto & kv : cells ) {
+		const StreamCell & c = kv.second;
+		if ( c.st != CellState::Attached || !c.chunk || !c.chunk->ok )
+			continue;
+		if ( !c.lref )
+			loaded.insert( Key( c.x, c.y ) );
+		if ( !c.chunk->soup ) {
+			noSoup++;
+			continue;
+		}
+		RtTraceUnit u;
+		u.x = c.x;
+		u.y = c.y;
+		u.lref = c.lref;
+		u.soup = c.chunk->soup;
+		units.push_back( std::move( u ) );
+	}
+	std::vector<RtFarPick> picks;
+	RtFarInfo info;
+	std::set<Key> farCells;
+	info.pending = traceFarRead( ring, kFarReadMs );
+	traceMore = info.pending > 0;
+	int terrainShapes = 0, objShapes = 0, waterShapes = 0;
+	std::set<quint32> cardRefs;   // round 6: the carded trees traced as their authored far mesh
+	if ( !traceFar.isEmpty() ) {
+		const CellFarHide::Hidden * hidden = CellFarHide::hiddenFor( nif );
+		const bool noObj = rtTraceSetRed( "nofarobj" ), noWater = rtTraceSetRed( "nofarwater" ), noCards = rtTraceSetRed( "nofarcards" );
+		const auto cellXY = []( qint64 k, int & x, int & y ) {
+			x = int( k >> 32 );
+			y = int( qint32( quint32( k & 0xFFFFFFFFll ) ) );
+		};
+		QList<int> blocks = traceFar.keys();
+		std::sort( blocks.begin(), blocks.end() );   // one order, so the same picks give the same key
+		std::vector<int> pickBlock;
+		std::map<qint64, std::uint64_t> objCell;   // the far objects' triangles a cell
+		for ( const int b : blocks ) {
+			const TraceFar & tf = *traceFar.constFind( b );
+			if ( !tf.shape )
+				continue;
+			info.cacheShapes++;
+			info.cacheMb += tf.shape->bytes() / 1048576.0;
+			if ( ( tf.src == 1 && noObj ) || ( tf.src == 2 && noWater ) || !spanInRing( tf.span, ccx, ccy, ring ) )
+				continue;
+			const RtFarShape & f = *tf.shape;
+			RtFarPick p;
+			for ( int i = 0; i < int( f.runs.size() ); i++ ) {
+				const RtFarShape::Run & r = f.runs[size_t( i )];
+				int x = 0, y = 0;
+				cellXY( r.cell, x, y );
+				if ( r.count <= 0 || !rttracesetrule::inRing( x, y, ccx, ccy, ring ) || ( r.kind == 3 && noCards ) )
+					continue;
+				if ( rttracesetrule::farSkip( r.ref, r.ref && hidden && hidden->refs.contains( r.ref ), loaded.count( Key( x, y ) ) > 0 ) )
+					continue;
+				p.runs.push_back( i );
+				if ( f.src == 1 )
+					objCell[r.cell] += std::uint64_t( r.count );
+			}
+			if ( p.runs.empty() )
+				continue;
+			p.shape = tf.shape;
+			picks.push_back( std::move( p ) );
+			pickBlock.push_back( b );
+		}
+		// the far objects' budget: whole cells, nearest the centre first
+		std::vector<rttracesetrule::FarCell> oc;
+		oc.reserve( objCell.size() );
+		for ( const auto & kv : objCell ) {
+			rttracesetrule::FarCell c;
+			cellXY( kv.first, c.x, c.y );
+			c.tris = kv.second;
+			oc.push_back( c );
+		}
+		std::uint64_t dropped = 0;
+		const std::uint64_t cap = rtTraceSetRed( "nofarcap" ) ? ~std::uint64_t( 0 ) : rttracesetrule::kFarObjTriCap;
+		const size_t keep = rttracesetrule::farCap( oc, ccx, ccy, cap, &dropped );
+		std::set<qint64> kept;
+		for ( size_t i = 0; i < keep; i++ )
+			kept.insert( CellFarHide::cellKey( oc[i].x, oc[i].y ) );
+		info.objCells = int( keep );
+		info.objCellsDropped = int( oc.size() - keep );
+		info.objDropped = qint64( dropped );
+		std::vector<RtFarPick> out;
+		quint64 key = 1469598103934665603ull;
+		const auto mix = [&key]( quint64 v ) { key = ( key ^ v ) * 1099511628211ull; };
+		for ( size_t n = 0; n < picks.size(); n++ ) {
+			RtFarPick & p = picks[n];
+			const RtFarShape & f = *p.shape;
+			if ( f.src == 1 && keep < oc.size() ) {
+				std::vector<int> left;
+				for ( const int i : p.runs )
+					if ( kept.count( f.runs[size_t( i )].cell ) )
+						left.push_back( i );
+				p.runs.swap( left );
+			}
+			if ( p.runs.empty() )
+				continue;
+			mix( quint64( pickBlock[n] ) );
+			mix( f.sig );
+			mix( f.flat > 0 ? 2 : 1 );
+			qint64 tris = 0, byKind[4] = { 0, 0, 0, 0 };
+			for ( const int i : p.runs ) {
+				const RtFarShape::Run & r = f.runs[size_t( i )];
+				int x = 0, y = 0;
+				cellXY( r.cell, x, y );
+				farCells.insert( Key( x, y ) );
+				tris += r.count;
+				byKind[r.kind & 3] += r.count;
+				if ( r.kind == 3 && r.ref )
+					cardRefs.insert( r.ref );
+				mix( quint64( i ) );
+			}
+			// round 6: a triangle counts under what it is (water and a carded tree's authored mesh have their own counts)
+			info.terrainTris += byKind[0];
+			info.objTris += byKind[1];
+			info.waterTris += byKind[2];
+			info.cardTris += byKind[3];
+			( f.src == 2 ? waterShapes : ( f.src == 1 ? objShapes : terrainShapes ) )++;
+			if ( f.flat > 0 )
+				info.flat += tris;
+			out.push_back( std::move( p ) );
+		}
+		picks.swap( out );
+		info.key = key;
+		info.cardTrees = int( cardRefs.size() );
+		// the carded trees of the ring's far cells, and those with no authored mesh row (never traced: no mesh is made up)
+		QSet<qint64> ringCells;
+		for ( int y = ccy - ring; y <= ccy + ring; y++ )
+			for ( int x = ccx - ring; x <= ccx + ring; x++ )
+				if ( !loaded.count( Key( x, y ) ) )
+					ringCells.insert( ImpostorChunk::cellFarCellKey( x, y ) );
+		ImpostorChunk::cellFarCardsMeshIn( ringCells, &info.cardsInRing, &info.cardsNoMesh );
+	}
+	info.cells = int( farCells.size() );
+	info.shapes = int( picks.size() );
+	const int nUnits = int( units.size() );
+	const RtFarInfo said = info;
+	rtTraceSetSync( nif, std::move( units ), ccx, ccy, ex, ey, ring, std::move( picks ), info, noSoup );
+	traceDirty = false;
+	traceRing = ring;
+	traceOn = true;
+	std::fprintf( stderr, "cell stream: traced set handed over: %d units of %d loaded cells (%d without a soup), far terrain %lld "
+		"triangles from %d shapes, far objects %lld triangles from %d shapes in %d cells (budget %lld: %lld triangles of %d cells "
+		"left out), far cells %d, %lld far triangles on a stated tone, %d far shapes still to read (ring %d round centre %d,%d), "
+		"camera cell %d,%d, gather %.2f ms | far shapes read so far %d in %.1f ms (max %.1f ms a shape), kept %d shapes %.1f MB\n",
+		nUnits, int( loaded.size() ), noSoup, static_cast<long long>( said.terrainTris ), terrainShapes,
+		static_cast<long long>( said.objTris ), objShapes, said.objCells, static_cast<long long>( rttracesetrule::kFarObjTriCap ),
+		static_cast<long long>( said.objDropped ), said.objCellsDropped, said.cells, static_cast<long long>( said.flat ), said.pending,
+		ring, ccx, ccy, ex, ey, msOf( t ), traceReads, traceReadMs, traceReadMaxMs, said.cacheShapes, said.cacheMb );
+	// round 6: far water and far tree cards
+	std::fprintf( stderr, "cell stream: traced set handed over: far water %lld triangles from %d shapes%s | far tree cards %lld "
+		"triangles = the authored far mesh of %d carded trees%s; the ring's far cells draw %d cards, %d of them have no authored "
+		"mesh row and are not traced\n",
+		static_cast<long long>( said.waterTris ), waterShapes, rtTraceSetRed( "nofarwater" ) ? " (RED nofarwater)" : "",
+		static_cast<long long>( said.cardTris ), said.cardTrees, rtTraceSetRed( "nofarcards" ) ? " (RED nofarcards)" : "",
+		said.cardsInRing, said.cardsNoMesh );
+	std::fflush( stderr );
 }
 
 bool Stream::busy() const
@@ -1172,8 +1763,42 @@ bool Stream::tick( Scene * sc, const Vector3 & eye )
 		changed = true;
 	}
 
+	// lane PERFLOAD1 P8: the near grid's FREEZE / OFF hold the block at the eye they began at (the camera flies free)
+	Vector3 gridEye = eye;
+	if ( LodPreview::grid() != LodPreview::Follow ) {
+		float fe[3] = { eye[0], eye[1], eye[2] };
+		if ( !LodPreview::frozenEye( fe ) )
+			LodPreview::setFrozenEye( fe );
+		gridEye = Vector3( fe[0], fe[1], fe[2] );
+	}
+	// lane AIRPERF1 r4: Cell Streaming off (the row, or WW_CELL_STREAM=0 set live) holds the block where it is
+	const bool liveOn = cellStreamLiveOn();
+	if ( !liveOn && !paused ) {
+		paused = pausedFill = true;
+		pausedEye = gridEye;
+		std::fprintf( stderr, "cell stream: off (%s): the block stays at centre %d,%d; the cells it was loading finish, then "
+			"nothing loads or unloads\n", cellStreamPinned() ? "WW_CELL_STREAM=0" : "the Cell Streaming row", ccx, ccy );
+		std::fflush( stderr );
+	} else if ( liveOn && paused ) {
+		paused = pausedFill = false;
+		std::fprintf( stderr, "cell stream: on (%s): follows the camera again from centre %d,%d, camera cell %d,%d\n",
+			cellStreamPinned() ? "WW_CELL_STREAM=1" : "the Cell Streaming row", ccx, ccy, cellOf( eye[0] ), cellOf( eye[1] ) );
+		std::fflush( stderr );
+	}
+	if ( paused )
+		gridEye = pausedEye;
+	nearGrid( eye );
 	if ( !fixedCentre )	// lane LANDSPEC6: the game skips every grid shift in a fixed world
-		shiftCentre( eye );
+		shiftCentre( gridEye );
+	if ( ccx != saidCx || ccy != saidCy || paused != saidPaused ) {   // lane AIRPERF1 r4: the block's centre, on every move
+		saidCx = ccx;
+		saidCy = ccy;
+		saidPaused = paused;
+		std::fprintf( stderr, "cell stream: centre %d,%d (camera cell %d,%d), %d x %d cells%s\n", ccx, ccy, cellOf( eye[0] ),
+			cellOf( eye[1] ), 2 * gridHalf + 1, 2 * gridHalf + 1, paused ? ", held (streaming off)"
+				: fixedCentre ? ", a fixed world's block" : "" );
+		std::fflush( stderr );
+	}
 	if ( texCentre != Key( ccx, ccy ) )	// lane STREAMTEX1: a crossing (the first tick: the open's census)
 		texCensus();
 	wanted.clear();
@@ -1183,6 +1808,7 @@ bool Stream::tick( Scene * sc, const Vector3 & eye )
 	// the row the next move needs, as soon as the eye is in the neighbour cell
 	prefetch.clear();
 	const int ex = cellOf( eye[0] ), ey = cellOf( eye[1] );
+	const int gx = cellOf( gridEye[0] ), gy = cellOf( gridEye[1] );	// lane PERFLOAD1 P8: the prefetch row of the held block
 	if ( !cam.valid || ex != cam.cx || ey != cam.cy ) {	// lane WEATHERBLEND6: the regions read on entering a cell only
 		cam.valid = true;
 		cam.cx = ex;
@@ -1196,8 +1822,8 @@ bool Stream::tick( Scene * sc, const Vector3 & eye )
 	cam.eye[1] = eye[1];
 	for ( int dy = -gridHalf; dy <= gridHalf; dy++ )
 		for ( int dx = -gridHalf; dx <= gridHalf; dx++ )
-			if ( !noPrefetch && !wanted.count( Key( ex + dx, ey + dy ) ) )
-				prefetch.insert( Key( ex + dx, ey + dy ) );
+			if ( !noPrefetch && !paused && !wanted.count( Key( gx + dx, gy + dy ) ) )	// AIRPERF1 r4: no prefetch while held
+				prefetch.insert( Key( gx + dx, gy + dy ) );
 
 	// lane LARGEREF2: the units the layer draws (a ref listed by an attached cell whose own cell is not attached)
 	lrWanted.clear();
@@ -1283,7 +1909,13 @@ bool Stream::tick( Scene * sc, const Vector3 & eye )
 	// lane CELLSPIKE3: a slice always writes one bucket, so it starts only if the dearest recent slice still ends
 	// under the frame cap (2 budgets less 1 ms), or at the very start of a frame (red: whenever the budget has room)
 	const bool redWrite = spikeRed( "write" );
-	while ( !building() && msOf( t ) < budgetMs
+	/* lane EMPTY240 R6-6: build 78's loads held the one builder 1.8-6.6 s a hookup by "a wanted built cell not yet
+	 * written" (workers busy 0.6 of 14): a write slice ran only while no build ran, and the next build started as soon
+	 * as the cell before went into its write, so each write stood still for a whole build and the next built cell then
+	 * held the builder. A wanted cell's write slices now run beside a build (the worker builds only its own chunk; the
+	 * slice cost rule above still holds each slice). Red WW_STREAMWRITE_RED=1: writes wait for the build (build 78). */
+	const bool writeWaitsRed = wwEnvInt( "WW_STREAMWRITE_RED" ) == 1;
+	while ( ( !writeWaitsRed || !building() ) && msOf( t ) < budgetMs
 		&& ( redWrite || msOf( t ) < 0.5 || msOf( t ) + sliceEstMs < 2.0 * budgetMs - 1.0 ) ) {
 		// the cell being written, else the nearest built one the block wants
 		StreamCell * next = nullptr;
@@ -1308,24 +1940,91 @@ bool Stream::tick( Scene * sc, const Vector3 & eye )
 		if ( !next )
 			break;
 		g_phase = "write";
+		const bool beside = building();
+		const double sliceT0 = msOf( t );
 		write( *next, budgetMs - msOf( t ) );
+		if ( beside ) {
+			const double sliceMs = msOf( t ) - sliceT0;
+			besideSlices++;
+			besideMs += sliceMs;
+			besideMaxMs = std::max( besideMaxMs, sliceMs );
+		}
 		changed = true;
 		if ( next->emitted && next->st != CellState::Attached )
 			break;   // lane CELLSTREAM1: its hookup waits for the next frame's budget
 	}
 	const double msWrite = msOf( t ) - msWrite0;
 	double msRebuild0 = 0.0, msRebuild = 0.0;
-	if ( dirty && !worker.joinable() && toReset.empty() ) {
-		bool writingAny = false;
-		for ( const auto & kv : cells )
-			writingAny |= want( kv.first ) && kv.second.st != CellState::Attached;
-		if ( !writingAny ) {
+	if ( dirty && toReset.empty() ) {
+		/* lane STREAMGN1: a filling block is lit as it fills, not only when whole (the first open waited 90 s for its
+		 * 36th cell; its cards took no lamp light till then). The chunk worker writes only its own chunk, so this
+		 * rebuild may run beside it; never while a cell is half written. Red WW_CELL_STREAM_RED=nolitearly. */
+		constexpr qint64 kLitEarlyMs = 750;
+		int wanted = 0, attached = 0;
+		bool midWrite = false;
+		for ( const auto & kv : cells ) {
+			if ( !want( kv.first ) )
+				continue;
+			wanted++;
+			attached += kv.second.st == CellState::Attached ? 1 : 0;
+			midWrite |= kv.second.st == CellState::Writing;
+		}
+		const bool whole = attached == wanted && !worker.joinable();
+		const bool early = !whole && attached < wanted && attached > 0 && !midWrite && red != QLatin1String( "nolitearly" )
+			&& ( !sinceRebuild.isValid() || sinceRebuild.elapsed() >= kLitEarlyMs );
+		if ( whole || early ) {
 			g_phase = "rebuild";
 			msRebuild0 = msOf( t );
 			rebuild();
 			msRebuild = msOf( t ) - msRebuild0;
 			changed = true;
+			sinceRebuild.start();
+			if ( early ) {
+				litEarly++;
+				std::fprintf( stderr, "cell stream: lit early %d: rebuild with %d of %d wanted cells attached (centre %d,%d), %.1f ms\n",
+					litEarly, attached, wanted, ccx, ccy, msRebuild );
+				std::fflush( stderr );
+			}
 		}
+	}
+	if ( paused && pausedFill && !dirty ) {   // lane AIRPERF1 r4: the held block is whole: from here nothing is built
+		bool whole = true;
+		for ( const auto & kv : cells )
+			whole = whole && ( !want( kv.first ) || kv.second.st == CellState::Attached );
+		if ( whole ) {
+			pausedFill = false;
+			std::fprintf( stderr, "cell stream: off: the held block is whole (centre %d,%d), no build starts until it is on\n", ccx, ccy );
+			std::fflush( stderr );
+		}
+	}
+	// lane AIRPERF1 r4: the ray-traced GI's traced set is the loaded cells and the far terrain round them
+	if ( rtTraceSetFollows() ) {
+		const int ring = rtTraceSetRing( nif, gridHalf );
+		// lane AIRPERF1 r5: a changed far red hands over again; far shapes still to read are read a few ms a tick, then
+		// one more hand-over brings them
+		const int reds = ( rtTraceSetRed( "nofar" ) ? 1 : 0 ) | ( rtTraceSetRed( "nofarobj" ) ? 2 : 0 )
+			| ( rtTraceSetRed( "fardirt" ) ? 4 : 0 ) | ( rtTraceSetRed( "nofarcap" ) ? 8 : 0 )
+			| ( rtTraceSetRed( "nofarwater" ) ? 16 : 0 ) | ( rtTraceSetRed( "nofarcards" ) ? 32 : 0 )
+			| ( rtTraceSetRed( "oneblas" ) ? 64 : 0 );   // round 6
+		if ( reds != traceReds ) {
+			traceReds = reds;
+			traceDirty = true;
+		}
+		if ( traceMore && !dirty && !traceDirty && traceOn && ring == traceRing ) {
+			g_phase = "traceset";
+			if ( traceFarRead( ring, kFarReadMs ) == 0 ) {
+				traceMore = false;
+				traceDirty = true;
+			}
+		}
+		if ( !dirty && ( traceDirty || ring != traceRing || !traceOn ) ) {
+			g_phase = "traceset";
+			traceSync( ring, ex, ey );
+		}
+		rtTraceSetTick( nif, ex, ey );
+	} else if ( traceOn ) {
+		rtTraceSetForget( nif );   // the row went off: the kept soup stays as it is, nothing follows
+		traceOn = false;
 	}
 
 	g_phase = "idle";
@@ -1400,12 +2099,69 @@ QString keyList( const std::vector<Key> & keys )
 
 } // namespace
 
+/* lane AIRPERF1 r4: every exterior view streams, opened by a spec (WW_CELL_OPEN) or not; a harness that needs a
+ * fixed block says WW_CELL_STREAM=0 (cellstreamrule.h; red WW_CELL_STREAM_RED=specfixed = the rule before). The census
+ * walk opens exterior blocks itself and must weld them. */
 bool cellStreamWanted()
 {
-	if ( wwEnvIsSet( "WW_CELL_STREAM" ) )
-		return wwEnvInt( "WW_CELL_STREAM" ) != 0;
-	// a harness's fixed block stays fixed; the census walk opens exterior blocks itself and must weld them
-	return wwEnvIsEmpty( "WW_CELL_OPEN" ) && wwEnvIsEmpty( "WW_CELL_CENSUS_TEST" );
+	const int rule = cellstreamrule::openRule( wwEnvIsSet( "WW_CELL_STREAM" ), wwEnvInt( "WW_CELL_STREAM" ),
+		!wwEnvIsEmpty( "WW_CELL_OPEN" ), !wwEnvIsEmpty( "WW_CELL_CENSUS_TEST" ),
+		wwEnvStr( "WW_CELL_STREAM_RED" ) == QLatin1String( "specfixed" ) );
+	static int said = -1;
+	if ( rule != said ) {
+		said = rule;
+		std::fprintf( stderr, "cell stream: %s\n", cellstreamrule::openWords( rule ) );
+		std::fflush( stderr );
+	}
+	return cellstreamrule::openOn( rule );
+}
+
+static bool g_cellStreamRow = true;   // the row; lane AIRPERF1 r5: saved (CellView/CellStream), ships on
+static bool g_cellStreamRowRead = false;
+
+static void cellStreamRowRead()
+{
+	if ( g_cellStreamRowRead )
+		return;
+	g_cellStreamRowRead = true;
+	const QSettings s;
+	const bool saved = s.contains( QStringLiteral( "CellView/CellStream" ) );
+	const bool savedOn = saved && s.value( QStringLiteral( "CellView/CellStream" ) ).toBool();
+	g_cellStreamRow = cellstreamrule::rowStart( saved, savedOn );
+	std::fprintf( stderr, "cell stream: the Cell Streaming row starts %s (%s)%s\n", g_cellStreamRow ? "on" : "off",
+		saved ? "the saved setting CellView/CellStream" : "nothing saved: it ships on",
+		wwEnvIsSet( "WW_CELL_STREAM" ) ? ", WW_CELL_STREAM is set: the pin decides" : "" );
+	std::fflush( stderr );
+}
+
+bool cellStreamRowOn()
+{
+	cellStreamRowRead();
+	return g_cellStreamRow;
+}
+
+void cellStreamSetRow( bool on )
+{
+	cellStreamRowRead();
+	if ( on == g_cellStreamRow )
+		return;
+	g_cellStreamRow = on;
+	QSettings().setValue( QStringLiteral( "CellView/CellStream" ), on );
+	std::fprintf( stderr, "cell stream: the Cell Streaming row %s%s\n", on ? "on" : "off",
+		cellStreamPinned() ? " (WW_CELL_STREAM is set: the pin decides)" : "" );
+	std::fflush( stderr );
+}
+
+bool cellStreamPinned()
+{
+	return wwEnvIsSet( "WW_CELL_STREAM" );
+}
+
+bool cellStreamLiveOn()
+{
+	cellStreamRowRead();
+	return cellstreamrule::liveOn( wwEnvIsSet( "WW_CELL_STREAM" ), wwEnvInt( "WW_CELL_STREAM" ), g_cellStreamRow,
+		wwEnvInt( "WW_CELL_STREAM_ROW_RED" ) > 0 );
 }
 
 void cellStreamStart( NifModel * nif, std::shared_ptr<CellStreamSeed> seed )

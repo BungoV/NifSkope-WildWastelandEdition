@@ -19,6 +19,7 @@ uniform float atSunK;	// pi * k for the sun
 uniform float atMoonK;	// pi * k for the moon; 0 = no moon term
 uniform float atLimb;	// 1 = limb darkening (High+)
 uniform float atDiscCap;	// the disc's display cap (scene units)
+uniform float atSunSize;	// MODULES1 R6-12 b: the drawn disc's radius over the true one (the Sun and Moon Size row; <= 1 = true)
 uniform float atDiscHue;	// lane SKYDISC1: 1 = one scale for the whole disc (its centre to the cap): hue and limb kept
 /* lane FIX1101A (moon, LATE ITEM 24d(2)): the disc's gain through the Volumetric Air (gl/moonlight.h discAirGain): the
  * air's composite keeps T_air / T_sky of the sky, the bands included, while the sun's light takes only the ground layer;
@@ -28,6 +29,7 @@ uniform float sceneExposure;
 uniform int viewTransform;
 uniform float atTintOn;	// lane SKYA (ATMOCHECK1): 1 = the Sky Color row's Weather Tint
 uniform vec3 atTint[17];	// the weather dome's linear color at 90 (i / 16)^2 degrees (gl/atmomath.h tintTable)
+uniform vec2 atRecNight;	// MODULES1 R7: the record's night sky: the sky x (1 - x) + the dome's color x y (0 0 = none)
 uniform sampler2D atMsTex;	// lane SKY2B (SKYBLUR1): the per-pixel sky marches each pixel (red WW_ATMO_RED=perpixel)
 uniform vec2 atMsSize;
 uniform float atMsOn;
@@ -37,6 +39,13 @@ uniform float atPerPixel;	// 1 = march per pixel instead of the sky-view LUT (th
  * sun irradiance at the top like the LUTs, zenith ~4e-4 cd/m2 (natural dark sky 21-22 V mag / arcsec2, Leinert et al.
  * 1998); 0 = the red WW_ATMO_RED=nofloor (the sky fell 30-160x under that at sun -18). gl/atmomath.h kNightFloor. */
 uniform vec3 atFloor;
+/* lane NIGHTHAZE1: UE's height-fog inscattering overrides, last resort for special weathers (weather .recx
+ * atmosphere.inscatterColor / directionalInscatter): a flat colour and a lobe around atDirL (the sun up, else the moon),
+ * scene units, drawn over the haze's opacity along the view. Unset = 0 = skipped */
+uniform vec3 atInscatter;
+uniform vec3 atDirIns;
+uniform vec3 atDirL;
+uniform float atDirExp;
 
 out vec4 fragColor;
 
@@ -87,11 +96,22 @@ void main()
 		float vr = inversesqrt( max( 1.0 - 0.97226 * sz2, 0.02 ) );	// (6360 / 6450)^2
 		c += atSunK * atFloor * vr * atTrans( atTransTex, atCamR, d.z );
 	}
+	if ( atRecNight.y > 0.0 ) {	// MODULES1 R7: master Off: a crossfade to the record's dome (x = y); On: the dome added (x = 0)
+		float tn = sqrt( clamp( degrees( asin( clamp( d.z, -1.0, 1.0 ) ) ), 0.0, 90.0 ) / 90.0 ) * 16.0;
+		int jn = min( int( tn ), 15 );
+		c = c * ( 1.0 - atRecNight.x ) + mix( atTint[jn], atTint[jn + 1], tn - float( jn ) ) * atRecNight.y;
+	}
 	if ( atTintOn > 0.5 )	// the disc below keeps the physical color
 		c = atWeatherTint( c, degrees( asin( clamp( d.z, -1.0, 1.0 ) ) ) );
+	if ( dot( atInscatter + atDirIns, vec3( 1.0 ) ) > 0.0 ) {	// NIGHTHAZE1: the overrides, x (1 - the view's transmittance)
+		vec3 op = vec3( 1.0 ) - atTrans( atTransTex, atCamR, d.z );
+		c += ( atInscatter + atDirIns * pow( max( dot( d, atDirL ), 0.0 ), max( atDirExp, 1.0 ) ) ) * op;
+	}
 	float cs = dot( d, atSunW );
-	if ( cs > kSunCos ) {
-		float x = clamp( ( 1.0 - cs ) / ( 1.0 - kSunCos ), 0.0, 1.0 );	// ~ (theta / alpha)^2
+	// R6-12 b: a bigger drawn disc keeps its radiance (it sits at the cap); 1 - cos grows by the square of the radius
+	float sunEdge = ( 1.0 - kSunCos ) * ( atSunSize > 1.0 ? atSunSize * atSunSize : 1.0 );
+	if ( atSunSize > 1.0 ? ( 1.0 - cs < sunEdge ) : ( cs > kSunCos ) ) {
+		float x = clamp( ( 1.0 - cs ) / sunEdge, 0.0, 1.0 );	// ~ (theta / alpha)^2
 		vec3 limb = vec3( 1.0 );
 		if ( atLimb > 0.5 ) {
 			vec3 a = vec3( 0.397, 0.503, 0.652 );

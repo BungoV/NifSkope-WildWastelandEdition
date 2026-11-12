@@ -10,7 +10,9 @@ uniform float atMieS;	// Mie scattering /km (3.996e-3)
 uniform float atMieE;	// Mie extinction /km (4.40e-3)
 uniform vec3 atHaze;	// the weather fog's haze layer: ground extinction /km, scale height km, plateau top km
 uniform vec3 atOzone;	// ozone absorption /km (0.650, 1.881, 0.085)e-3; 0 under the red "noozone"
-uniform float atG;	// Mie Henyey-Greenstein g
+uniform float atG;	// Mie Henyey-Greenstein g (lane WEATHERRECX1: the haze's, atmomath.h hazeOptics)
+uniform vec3 atHazeAlbedo;	// lane WEATHERRECX1: the haze's albedo at 680 / 550 / 440 nm (3.996 / 4.40 grey before 1.3)
+uniform vec3 atHazeSpec;	// lane WEATHERRECX1: the haze extinction's (lambda / 550)^-angstrom (1 = grey, before 1.3)
 
 const float kRayH = 8.0;
 const float kMieH = 1.2;
@@ -24,8 +26,8 @@ void atMedium( float h, out vec3 rayS, out vec3 mieS, out vec3 ext )
 	float dz = max( 0.0, 1.0 - abs( h - 25.0 ) / 15.0 );
 	float dh = atHaze.x * exp( -max( h - atHaze.z, 0.0 ) / max( atHaze.y, 0.02 ) );
 	rayS = atRay * dr;
-	mieS = vec3( atMieS * dm + dh * ( 3.996 / 4.40 ) );
-	ext = rayS + vec3( atMieE * dm + dh ) + atOzone * dz;
+	mieS = vec3( atMieS * dm ) + dh * atHazeSpec * atHazeAlbedo;
+	ext = rayS + vec3( atMieE * dm ) + dh * atHazeSpec + atOzone * dz;
 }
 
 float atDistTop( float r, float mu )

@@ -532,6 +532,20 @@ void probeSkyKeep( const void * nif, const ProbeSoup & soup, const QString & bak
 	k.nifxStamp = 0;   // the bake traced the lights as built
 }
 
+void probeSkyKeepMove( const void * nif, ProbeSoup && soup, const ProbeGiSpec & spec, bool skyKept )
+{
+	Kept & k = kept();
+	k.nif = nif;
+	k.soup = std::move( soup );
+	k.bakeDir.clear();
+	k.spec = spec;
+	k.spec.record = nullptr;
+	k.wanted = spec.sky;
+	k.skyKept = skyKept;
+	k.fade = Fade();
+	k.nifxStamp = 0;
+}
+
 //! a set of the light physics rows relights the kept bake at once (the lamp term only, no rebake)
 bool cellFarLightRelit( const void * nif, const ProbeSoup & soup, const QString & giBakeDir );	// cellview.h
 void wwDoorLiveRowsRelit( const void * nif, const WwCellGi * relit );	// celldoorlive.h

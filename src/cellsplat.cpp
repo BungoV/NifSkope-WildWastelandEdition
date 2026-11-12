@@ -92,19 +92,29 @@ bool redFaceNormal()
 	return on;
 }
 
+/*! MODULES1 item 2 (bungo's black shards, 11-09): the base share is 1 - EVERY layer's share, so a layer past the
+ *  fifth left undrawn leaves its share black. Near Goodneighbor 1199 of 28900 vertices lost over 3/4 of their
+ *  share: black triangles fading out from them. Every layer is drawn (additive passes, up to the 12 slots).
+ *  Red WW_TERRBLEND_RED=five: the first five only (reopen). */
+bool redFive()
+{
+	WW_SWITCH_STATIC( bool, on, wwEnv( "WW_TERRBLEND_RED" ) == "five" );
+	return on;
+}
+
 /*! One quadrant's layers as the engine builds them: slot = layer index clamped to 11, opacities
  *  stored as truncated bytes; base = BTXT or the engine default set, never "no base"; matching
  *  slots summed, a slot equal to the base dropped into it; base weight = clamp(255 - sum, 0, 255);
- *  only the first five layers drawn. Pixel = sum(w_i * tex_i) * VCLR: shares, not alpha-over. */
+ *  every layer drawn (red five: the first five). Pixel = sum(w_i * tex_i) * VCLR: shares, not alpha-over. */
 struct QuadLayers
 {
 	quint32 base = 0;
 	bool defaultBase = false;
-	int n = 0;                          //!< layers kept (<= 5)
-	quint32 ltex[5] = {};
-	int order[5] = {};
-	float b[6][QUAD_GRID][QUAD_GRID];   //!< [0] = base bytes, [1..n] = layer bytes, 0..255
-	int dropped = 0;                    //!< layers past the fifth
+	int n = 0;                          //!< layers kept (<= 12; <= 5 under red five)
+	quint32 ltex[12] = {};
+	int order[12] = {};
+	float b[13][QUAD_GRID][QUAD_GRID];  //!< [0] = base bytes, [1..n] = layer bytes, 0..255
+	int dropped = 0;                    //!< layers past the fifth (drawn unless red five)
 	int merged = 0;                     //!< slots folded into another or into the base
 	int formZero = 0;                   //!< ATXT layers naming form 0 = the default set
 };
@@ -169,8 +179,8 @@ void buildQuadLayers( const EsmLand & land, int q, QuadLayers & out )
 			out.b[0][r][c] = qBound( 0.0f, 255.0f - sum, 255.0f );
 		}
 	}
-	out.n = int( qMin<size_t>( merged.size(), 5 ) );
-	out.dropped = int( merged.size() ) - out.n;
+	out.n = int( qMin<size_t>( merged.size(), redFive() ? 5 : 12 ) );
+	out.dropped = int( merged.size() ) - qMin( int( merged.size() ), 5 );
 	for ( int i = 0; i < out.n; i++ ) {
 		out.ltex[i] = merged[size_t( i )].ltex;
 		out.order[i] = merged[size_t( i )].order;
@@ -223,10 +233,10 @@ qint64 countCell( const EsmLand & land )
 	for ( int q = 0; q < 4; q++ )
 		buildQuadLayers( land, q, ql[q] );
 	qint64 n = 0;
-	Pass passes[8];
+	Pass passes[13];
 	for ( int row = 0; row + 1 < LAND_GRID; row++ ) {
 		for ( int col = 0; col + 1 < LAND_GRID; col++ )
-			n += passesFor( ql, row, col, passes, 8 );
+			n += passesFor( ql, row, col, passes, 13 );
 	}
 	return n;
 }
@@ -343,8 +353,8 @@ bool cellBuildSplat( EsmWorld & world, int x0, int y0, int x1, int y1,
 				for ( int col = 0; col + 1 < LAND_GRID; col++ ) {
 					out.quadsTotal++;
 
-					Pass passes[8];
-					const int np = passesFor( ql, row, col, passes, 8 );
+					Pass passes[13];
+					const int np = passesFor( ql, row, col, passes, 13 );
 					{
 						int q = 0, lr = 0, lc = 0;
 						quadrantOf( row, col, q, lr, lc );
@@ -504,9 +514,11 @@ QString cellSplatLegend( const CellSplatBuild & b )
 		"added): %L1 quads on %L2 quadrants with no BTXT took the engine default "
 		"base, %L3 bases fell back to it because their LTEX named no texture, "
 		"%L4 layers named form 0 and drew the default set, %L5 layers merged into a "
-		"matching one or the base, %L6 layers past the fifth not drawn" )
+		"matching one or the base, %L6 layers past the fifth %7" )
 		.arg( b.quadsDefaultBase ).arg( b.quadrantsDefaultBase ).arg( b.quadsBaseFallback )
-		.arg( b.layersFormZero ).arg( b.layersMerged ).arg( b.layersDropped );
+		.arg( b.layersFormZero ).arg( b.layersMerged ).arg( b.layersDropped )
+		.arg( redFive() ? QStringLiteral( "not drawn (RED CONTROL WW_TERRBLEND_RED=five: their share draws black)" )
+			: QStringLiteral( "drawn too (MODULES1 item 2)" ) );
 	if ( redNearest() )
 		s += QStringLiteral( "; RED CONTROL WW_TERRBLEND_RED=nearest: one share per quad "
 			"(its SW corner), the per-quad switching put back on purpose" );

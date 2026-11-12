@@ -1,4 +1,5 @@
 #!/bin/bash
+export WW_CELL_STREAM="${WW_CELL_STREAM:-0}"	# AIRPERF1 r4: this harness opens a fixed block (streaming is the default now)
 #
 # THE PRTP BAND'S PASS DROP-DOWN (lane PROBEVIEW1, 2026-10-02; src/gl/celllights.h, src/features/gi/cellprobeview.h).
 # The Division deck's probe views: GI (the grid's E / pi on the normal), Sky visibility (the probes'

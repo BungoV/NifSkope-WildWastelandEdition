@@ -38,6 +38,7 @@
 #include "features/lights/cellnifxlights.h"	// lane NIFXLIGHT1: a fixture mesh's .nifx lights
 #include "features/gi/rtddgicell.h"	// lane RTXGI1 M2: the ray-traced GI volume's read (rtddgiCellUniforms)
 #include "gl/celluniprof.h"	// lane PERFFIX1: WW_CELL_UNI_PROF
+#include "features/shared/glstatememo.h"	// lane EMPTY240 R11-2: the obscurance pass's state reads and target checks kept
 #include "gl/cellunirec.h"	// lane PERFFIX1: the cell-uniform class record
 #include "features/clouds/cloudvol.h"	// lane LIGHTNING2: a storm's flash on the exterior ambient (wwLightningGround)
 #include "cellworldanim.h"	// lane NIFXLIGHT3: the world clock a .nifx light's dimmer follows
@@ -206,6 +207,11 @@ struct AoGpu
 	GLuint volBuf = 0, volTex = 0, volVao = 0;	// the shapes, 3 RGBA32F texels each (a buffer texture)
 	std::vector<float> volData;	// what volBuf holds
 	bool giUnits = false;	// the GPU has WwCellUnit::GiHalfKey
+	// lane EMPTY240 R11-2: the targets' shapes that passed their status checks (0: ask), the depth buffer's size and owner
+	quint64 preOkKey = 0, gbufOkKey = 0;
+	int gbufDepthW = 0, gbufDepthH = 0;
+	GLuint gbufDepthOn = 0;	// the g-buffer FBO the depth buffer is attached to
+	WwGlMemo<GLint, 11> entry;	// the active unit, the masks and the five enables at the pass's start
 };
 
 QHash<const void *, AoGpu> & aoGpus()
@@ -690,12 +696,31 @@ void wwCellAoPass( Scene * scene, bool run )
 	fn->glGetIntegerv( GL_VIEWPORT, vp );
 	if ( !wwCellUni6Red( "hdrbegin" ) )	// lane CELLUNI6: the HDR frame's Begin takes them (every pass after puts them back)
 		WwCellUni::frameTarget().put( wwGlPaintCount(), prevFbo, prevRead, vp );
-	fn->glGetIntegerv( GL_ACTIVE_TEXTURE, &prevActive );
-	fn->glGetBooleanv( GL_DEPTH_WRITEMASK, &depthMask );
-	fn->glGetBooleanv( GL_COLOR_WRITEMASK, colorMask );
-	const bool wasDepth = fn->glIsEnabled( GL_DEPTH_TEST ), wasCull = fn->glIsEnabled( GL_CULL_FACE );
-	const bool wasBlend = fn->glIsEnabled( GL_BLEND ), wasScissor = fn->glIsEnabled( GL_SCISSOR_TEST );
-	const bool wasStencil = fn->glIsEnabled( GL_STENCIL_TEST );
+	/* lane EMPTY240 R11-2: build 86 read these 11 every frame (obscurance 0.25 ms CPU); kept (glstatememo.h; the targets
+	 * and the viewport above follow a resize, still asked). Red WW_GLSTATE_MEMO_RED=1 */
+	if ( g.entry.due() ) {
+		GLint now[11] = { GL_TEXTURE0, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0 };
+		fn->glGetIntegerv( GL_ACTIVE_TEXTURE, &now[0] );
+		GLboolean dm = GL_TRUE, cm[4] = { GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE };
+		fn->glGetBooleanv( GL_DEPTH_WRITEMASK, &dm );
+		fn->glGetBooleanv( GL_COLOR_WRITEMASK, cm );
+		now[1] = dm ? 1 : 0;
+		for ( int k = 0; k < 4; k++ )
+			now[2 + k] = cm[k] ? 1 : 0;
+		now[6] = fn->glIsEnabled( GL_DEPTH_TEST ) ? 1 : 0;
+		now[7] = fn->glIsEnabled( GL_CULL_FACE ) ? 1 : 0;
+		now[8] = fn->glIsEnabled( GL_BLEND ) ? 1 : 0;
+		now[9] = fn->glIsEnabled( GL_SCISSOR_TEST ) ? 1 : 0;
+		now[10] = fn->glIsEnabled( GL_STENCIL_TEST ) ? 1 : 0;
+		g.entry.keep( now, "obscurance entry" );
+	}
+	prevActive = g.entry.v[0];
+	depthMask = g.entry.v[1] ? GL_TRUE : GL_FALSE;
+	for ( int k = 0; k < 4; k++ )
+		colorMask[k] = g.entry.v[2 + k] ? GL_TRUE : GL_FALSE;
+	const bool wasDepth = g.entry.v[6] != 0, wasCull = g.entry.v[7] != 0;
+	const bool wasBlend = g.entry.v[8] != 0, wasScissor = g.entry.v[9] != 0;
+	const bool wasStencil = g.entry.v[10] != 0;
 	{	// lane PERFFIX3: the air pass after SSR / contact / SSGI takes this state instead of asking (celluniform.h EntryNote)
 		WwCellUni::EntryNote & en = WwCellUni::entryNote();
 		en.frame = wwGlPaintCount();
@@ -806,10 +831,17 @@ void wwCellAoPass( Scene * scene, bool run )
 			g.preZS = -1;
 			g.preZW = 0;
 		}
-		fn->glBindFramebuffer( GL_FRAMEBUFFER, g.zres.fbo );
-		usePre = fn->glCheckFramebufferStatus( GL_FRAMEBUFFER ) == GL_FRAMEBUFFER_COMPLETE;
-		fn->glBindFramebuffer( GL_FRAMEBUFFER, g.preFbo );
-		usePre = usePre && fn->glCheckFramebufferStatus( GL_FRAMEBUFFER ) == GL_FRAMEBUFFER_COMPLETE;
+		/* lane EMPTY240 R11-2: asked once a shape (build 86 asked both every frame); every later bind here is explicit.
+		 * Red WW_GLSTATE_MEMO_RED=1: every frame */
+		const quint64 preKey = quint64( W & 0xFFFF ) | quint64( H & 0xFFFF ) << 16 | quint64( hdrS & 0xFF ) << 32
+			| quint64( hdrFmt & 0xFFFF ) << 40 | quint64( a.zlin ? 1 : 0 ) << 56 | quint64( 1 ) << 57;
+		if ( g.preOkKey != preKey || wwGlStateMemoRed() ) {
+			fn->glBindFramebuffer( GL_FRAMEBUFFER, g.zres.fbo );
+			usePre = fn->glCheckFramebufferStatus( GL_FRAMEBUFFER ) == GL_FRAMEBUFFER_COMPLETE;
+			fn->glBindFramebuffer( GL_FRAMEBUFFER, g.preFbo );
+			usePre = usePre && fn->glCheckFramebufferStatus( GL_FRAMEBUFFER ) == GL_FRAMEBUFFER_COMPLETE;
+			g.preOkKey = usePre ? preKey : 0;
+		}
 		if ( !usePre )
 			a.preNote = QStringLiteral( "geom (the pre-pass target is incomplete)" );
 	}
@@ -819,17 +851,31 @@ void wwCellAoPass( Scene * scene, bool run )
 	aoAlloc( fn, g.gbuf, W, H, GL_RGBA32F, GL_RGBA, false );
 	if ( !g.gbufDepth )
 		fn->glGenRenderbuffers( 1, &g.gbufDepth );
-	fn->glBindRenderbuffer( GL_RENDERBUFFER, g.gbufDepth );
-	GLint rbw = 0, rbh = 0;
-	fn->glGetRenderbufferParameteriv( GL_RENDERBUFFER, GL_RENDERBUFFER_WIDTH, &rbw );
-	fn->glGetRenderbufferParameteriv( GL_RENDERBUFFER, GL_RENDERBUFFER_HEIGHT, &rbh );
+	/* lane EMPTY240 R11-2: the depth buffer's size kept here (build 86 asked the driver for it every frame) and attached
+	 * once a g-buffer FBO; red WW_GLSTATE_MEMO_RED=1: asked and attached every frame */
+	const bool gbufAsk = wwGlStateMemoRed();
+	GLint rbw = g.gbufDepthW, rbh = g.gbufDepthH;
+	if ( gbufAsk ) {
+		fn->glBindRenderbuffer( GL_RENDERBUFFER, g.gbufDepth );
+		fn->glGetRenderbufferParameteriv( GL_RENDERBUFFER, GL_RENDERBUFFER_WIDTH, &rbw );
+		fn->glGetRenderbufferParameteriv( GL_RENDERBUFFER, GL_RENDERBUFFER_HEIGHT, &rbh );
+	}
 	if ( rbw != W || rbh != H || g.gbufFmt != gbufFmt ) {
+		fn->glBindRenderbuffer( GL_RENDERBUFFER, g.gbufDepth );
 		fn->glRenderbufferStorage( GL_RENDERBUFFER, gbufFmt, W, H );
 		g.gbufFmt = gbufFmt;
+		g.gbufDepthW = W;
+		g.gbufDepthH = H;
+		g.gbufDepthOn = 0;
+		g.gbufOkKey = 0;
 	}
 	fn->glBindRenderbuffer( GL_RENDERBUFFER, 0 );
 	fn->glBindFramebuffer( GL_FRAMEBUFFER, g.gbuf.fbo );
-	fn->glFramebufferRenderbuffer( GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, g.gbufDepth );
+	if ( g.gbufDepthOn != g.gbuf.fbo || gbufAsk ) {
+		fn->glFramebufferRenderbuffer( GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, g.gbufDepth );
+		g.gbufDepthOn = g.gbuf.fbo;
+		g.gbufOkKey = 0;
+	}
 	for ( int m = 1; m < 5; m++ )
 		aoAlloc( fn, g.mip[m], ms[m][0], ms[m][1], GL_R32F, GL_RED, false );
 	aoAlloc( fn, g.raw, hw, hh, GL_RG32F, GL_RG, false );
@@ -847,7 +893,12 @@ void wwCellAoPass( Scene * scene, bool run )
 
 	// 1. the opaque cell-lit fragments: the view normal and the linear depth (probe 20); the background far away
 	fn->glBindFramebuffer( GL_FRAMEBUFFER, g.gbuf.fbo );
-	const bool complete = fn->glCheckFramebufferStatus( GL_FRAMEBUFFER ) == GL_FRAMEBUFFER_COMPLETE;
+	// lane EMPTY240 R11-2: asked once a shape (the colour's size and the depth's format; red WW_GLSTATE_MEMO_RED=1: every frame)
+	const quint64 gbufKey = quint64( g.gbuf.w & 0xFFFF ) | quint64( g.gbuf.h & 0xFFFF ) << 16 | quint64( gbufFmt & 0xFFFF ) << 32
+		| quint64( g.gbuf.fbo & 0xFFFF ) << 48;
+	const bool complete = ( g.gbufOkKey == gbufKey && gbufKey != 0 && !gbufAsk )
+		|| fn->glCheckFramebufferStatus( GL_FRAMEBUFFER ) == GL_FRAMEBUFFER_COMPLETE;
+	g.gbufOkKey = complete ? gbufKey : 0;
 	NifSkopeOpenGLContext::Program * prog = complete ? r->useProgram( "cell_ao.prog" ) : nullptr;
 	if ( prog )
 		r->stopProgram();
@@ -1182,8 +1233,12 @@ bool envOn( const char * sw, const char * red )
 }
 bool wwCellAoLean()
 {
-	static const bool on = envOn( "WW_CELL_AO_LEAN", "WW_CELL_AO_LEAN_RED" );
-	return on;
+	/* MODULES1 R7 item 7: read again on every set (it was read once per process, so the stage table's "reopen" never
+	 * reached it). Red WW_R7LIVE_RED=1 (launch): the first value stays. */
+	static const bool once = envOn( "WW_CELL_AO_LEAN", "WW_CELL_AO_LEAN_RED" );
+	static const bool stuck = qgetenv( "WW_R7LIVE_RED" ).trimmed() == "1";
+	WW_SWITCH_STATIC( bool, on, wwSwitchEcho( "cell ao lean (WW_CELL_AO_LEAN, live)", envOn( "WW_CELL_AO_LEAN", "WW_CELL_AO_LEAN_RED" ) ) );
+	return stuck ? once : on;
 }
 
 // this frame's opaque pass and depth pyramid, for the reflections' march (ao.h)

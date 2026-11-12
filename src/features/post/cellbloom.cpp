@@ -1,7 +1,10 @@
 #include "features/post/cellbloom.h"
 #include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 
+#include "features/exposure/physunits.h"	// lane PHYSUNITS1: energy-conserving glare (wwPhysBloomK)
+#include "features/post/gametaa.h"	// MODULES1 R8-2: the frame's jitter (the level-0 hold)
 #include "features/post/cellfogbloom.h"	// lane PERFFIX3: the per-pixel combine stands down when the fog's gain picks the lod per sample
+#include "features/vkframe/vkframe.h"	// lane VKFRAME1: the chain's down / hold / up on Vulkan (WW_VKPOST_RED)
 #include "gl/cellunits.h"	// lane PERFFIX3: WwPassUnit::HdrBloomComb
 #include "gl/celllights.h"
 #include "gl/celllooks.h"
@@ -12,6 +15,7 @@
 
 #include <QDebug>
 #include <QDir>
+#include <QElapsedTimer>
 #include <QFile>
 #include <QHash>
 #include <QSettings>
@@ -30,6 +34,8 @@ constexpr int kMaxMips = 12;			// FO4CS kBloomMaxMipLevels
 constexpr float kEps = 0.0001f;			// kBloomEpsilon
 constexpr float kMinRadius = 0.5f, kMaxRadius = 4.0f, kMaxIntensity = 10.0f;
 constexpr int kUnitA = 8, kUnitB = 9;	// the chain's passes (their own programs: no cell sampler beside them)
+constexpr qint64 kVkSettleMs = 500;	// lane VKFRAME1: the view's size holds this long before the shared chain is built
+constexpr int kHoldFrames = 8;			// MODULES1 R8-2: the temporal jitter's period (gametaa.cpp: n = ( frame & 7 ) + 1)
 
 const char * const kModeKey = "WW/CellBloomMode";
 
@@ -62,6 +68,19 @@ struct BloomGpu
 	GLuint mip[kMaxMips] = {}, up[kMaxMips] = {};
 	int dims[kMaxMips][2] = {};
 	int mipCount = 0, w = 0, h = 0, samples = 0;
+	/* MODULES1 R8-2: level 0 of the last 8 jittered frames (a 2D array, RGBA16F, level 0's size: 16 bytes a frame
+	 * pixel). ringN = the frames that count (0: none yet), ringK = the newest layer; the view they were drawn from */
+	GLuint ring = 0;
+	int ringN = 0, ringK = 0;
+	Matrix4 ringProj;
+	Matrix ringRot;
+	Vector3 ringPos;
+	bool ringSaid = false;
+	/* lane VKFRAME1 (plan step P1): src, mip, up and the ring are images Vulkan made and GL imported (vkframe.cpp), so
+	 * the chain runs on either side on the same names; vkTried: asked once for these targets */
+	bool vkShared = false, vkTried = false;
+	int vkSizeW = 0, vkSizeH = 0, vkSizeMips = 0;	// lane VKFRAME1: the size last seen and since when (freeGpu keeps them)
+	qint64 vkSizeSince = 0;
 	WwCellUni::ErrTrust err;	// lane CELLUNI5: the error reads, until a clean frame on these targets
 };
 
@@ -73,6 +92,7 @@ struct BloomState
 	bool modePinned = false;
 	bool pinned[kFieldCount] = {};
 	int red = 0;				// 1 nokaris
+	bool holdRed = false;		// MODULES1 R8-2: WW_CELL_BLOOM_RED=nohold, level 0 is this frame's alone
 	float impulse = 0.0f;		// WW_CELL_BLOOM_IMPULSE: the 2x2 block at the frame's centre, this value
 	QString dumpDir;
 	bool dumped = false;
@@ -85,6 +105,7 @@ struct BloomState
 	GLuint combTex = 0;	// lane PERFFIX3: this frame's per-pixel tent, 0 = the tone map runs its own taps
 	int w = 0, h = 0;
 	float finalWeight = 0.0f, radius = 1.0f, dispersion = 0.0f;
+	float ecK = -1.0f, ecGain = 1.0f;	// lane PHYSUNITS1: the glare's lerp k (< 0: additive) and the chain's flat-field gain
 	QString last = QStringLiteral( "vanilla" ), said;
 	QString selfTest;
 };
@@ -139,7 +160,7 @@ BloomState & bs()
 {
 	static BloomState s;
 	// lane TESTDRIVER1: a live set of these switches re-reads them (pins and or-ed reds back to their defaults first)
-	if ( s.init && !wwSwitchMovedFor( s.liveGen, { "WW_CELL_BLOOM" } ) )
+	if ( s.init && !wwSwitchMovedFor( s.liveGen, { "WW_CELL_BLOOM", "WW_CELL_GLARE" } ) )
 		return s;
 	const bool again = s.init;
 	s.init = true;
@@ -190,6 +211,7 @@ BloomState & bs()
 	}
 	s.set = clamped( s.set );
 	s.red = wwEnvStr( "WW_CELL_BLOOM_RED" ).contains( QLatin1StringView( "nokaris" ) ) ? 1 : 0;
+	s.holdRed = wwEnvStr( "WW_CELL_BLOOM_RED" ).contains( QLatin1StringView( "nohold" ) );
 	s.impulse = wwEnvStr( "WW_CELL_BLOOM_IMPULSE" ).toFloat();
 	s.dumpDir = wwEnvStr( "WW_CELL_BLOOM_DUMP" ).trimmed();
 	s.combRed = wwEnvStr( "WW_CELL_BLOOM_COMB_RED" ).trimmed() == QLatin1String( "1" );
@@ -229,6 +251,14 @@ GLuint makeTex( Renderer * r, int w, int h )
 void freeGpu( Renderer * r, BloomGpu & g )
 {
 	auto fn = r->fn;
+	if ( g.vkShared ) {	// lane VKFRAME1: the shared images (and their GL names) go with the chain
+		WwVkPost::freeChain( r );
+		g.src = g.ring = 0;
+		for ( int i = 0; i < kMaxMips; i++ )
+			g.mip[i] = g.up[i] = 0;
+		g.vkShared = false;
+	}
+	g.vkTried = false;
 	std::vector<GLuint> t = { g.msColor, g.src, g.finalTex, g.comb };
 	g.comb = 0;
 	g.combW = g.combH = 0;
@@ -242,6 +272,10 @@ void freeGpu( Renderer * r, BloomGpu & g )
 			fn->glDeleteTextures( 1, &x );
 	g.msColor = g.src = g.finalTex = 0;
 	g.mipCount = 0;
+	if ( g.ring )
+		fn->glDeleteTextures( 1, &g.ring );
+	g.ring = 0;
+	g.ringN = 0;
 }
 
 // cellpost.cpp's dump format: int32 w h channels, then rows bottom-up, channels interleaved
@@ -498,8 +532,23 @@ bool wwCellBloomRun( Scene * scene, unsigned hdrColor, unsigned ds, int W, int H
 	auto fn = r->fn;
 	BloomGpu & g = bloomGpus()[r];
 	const int S = std::max( samples, 1 );
+	/* lane VKFRAME1 (build 83, frame 3: 357 ms): freeing the shared chain waits for every frame in flight, so the chain is
+	 * built only once the view's size has held kVkSettleMs; a size still moving (the first frames) gets GL's own textures */
+	static QElapsedTimer vkClock;
+	if ( !vkClock.isValid() )
+		vkClock.start();
+	if ( g.vkSizeW != W || g.vkSizeH != H || g.vkSizeMips != mipCount ) {
+		g.vkSizeW = W;
+		g.vkSizeH = H;
+		g.vkSizeMips = mipCount;
+		g.vkSizeSince = vkClock.elapsed();
+	}
+	const qint64 vkHeld = vkClock.elapsed() - g.vkSizeSince;
+	const bool vkWant = WwVkPost::ready() && vkHeld >= kVkSettleMs;
+	// lane VKFRAME1: once the Vulkan route is ready (the device came up, or the row went on), the targets are made again shared
 	const bool remake = !g.srcFbo || g.w != W || g.h != H || g.samples != S || g.mipCount != mipCount
-		|| ( mipCount && ( g.dims[0][0] != dims[0][0] || g.dims[0][1] != dims[0][1] ) );
+		|| ( mipCount && ( g.dims[0][0] != dims[0][0] || g.dims[0][1] != dims[0][1] ) )
+		|| ( !g.vkShared && !g.vkTried && vkWant );
 	// lane CELLUNI5: the drain and the error reads until a clean frame on these targets (WW_CELL_UNI_RED=1: every frame)
 	// lane CELLUNI6: WW_SETUP_MEMO_CHECK=1 reads on a trusted frame too, and names an error found there
 	const bool trustedSkip = !g.err.check( wwCellUniRed(), remake );
@@ -511,7 +560,10 @@ bool wwCellBloomRun( Scene * scene, unsigned hdrColor, unsigned ds, int W, int H
 	if ( remake ) {
 		made = true;
 		g.err.forget();
+		const qint64 tMake = vkClock.nsecsElapsed();
 		freeGpu( r, g );
+		const double freeMs = double( vkClock.nsecsElapsed() - tMake ) * 1.0e-6;
+		double vkMs = 0.0;
 		if ( !g.srcFbo ) {
 			fn->glGenFramebuffers( 1, &g.srcFbo );
 			fn->glGenFramebuffers( 1, &g.resFbo );
@@ -521,11 +573,33 @@ bool wwCellBloomRun( Scene * scene, unsigned hdrColor, unsigned ds, int W, int H
 		fn->glBindTexture( GL_TEXTURE_2D_MULTISAMPLE, g.msColor );
 		fn->glTexImage2DMultisample( GL_TEXTURE_2D_MULTISAMPLE, S, GL_RGBA16F, W, H, GL_TRUE );
 		fn->glBindTexture( GL_TEXTURE_2D_MULTISAMPLE, 0 );
-		g.src = makeTex( r, W, H );
+		if ( vkWant ) {	// lane VKFRAME1: shared images when the Vulkan route can run and the size held; else GL's own
+			g.vkTried = true;
+			QString vkWhy;
+			GLuint vsrc = 0, vring = 0, vmip[kMaxMips] = {}, vup[kMaxMips] = {};
+			const qint64 tVk = vkClock.nsecsElapsed();
+			g.vkShared = WwVkPost::makeChain( r, W, H, mipCount, dims, vsrc, vmip, vup, vring, vkWhy );
+			vkMs = double( vkClock.nsecsElapsed() - tVk ) * 1.0e-6;
+			if ( g.vkShared ) {
+				g.src = vsrc;
+				g.ring = vring;
+				g.ringN = 0;
+				for ( int i = 0; i < mipCount; i++ ) {
+					g.mip[i] = vmip[i];
+					g.up[i] = vup[i];
+				}
+			} else {
+				qInfo().noquote() << "cell bloom: the Vulkan chain refused (" << vkWhy << "): GL's textures";
+			}
+		}
+		if ( !g.vkShared )
+			g.src = makeTex( r, W, H );
 		for ( int i = 0; i < mipCount; i++ ) {
-			g.mip[i] = makeTex( r, dims[i][0], dims[i][1] );
-			if ( i + 1 < mipCount )
-				g.up[i] = makeTex( r, dims[i][0], dims[i][1] );
+			if ( !g.vkShared ) {
+				g.mip[i] = makeTex( r, dims[i][0], dims[i][1] );
+				if ( i + 1 < mipCount )
+					g.up[i] = makeTex( r, dims[i][0], dims[i][1] );
+			}
 			g.dims[i][0] = dims[i][0];
 			g.dims[i][1] = dims[i][1];
 		}
@@ -535,6 +609,13 @@ bool wwCellBloomRun( Scene * scene, unsigned hdrColor, unsigned ds, int W, int H
 		g.h = H;
 		g.samples = S;
 		g.mipCount = mipCount;
+		const double makeMs = double( vkClock.nsecsElapsed() - tMake ) * 1.0e-6;
+		const QString route = g.vkShared ? QStringLiteral( "vulkan chain %1 ms" ).arg( vkMs, 0, 'f', 1 )
+			: vkWant ? QStringLiteral( "GL's textures, the Vulkan chain refused" )
+			: WwVkPost::ready() ? QStringLiteral( "GL's textures while the size settles (held %1 ms)" ).arg( vkHeld )
+			: QStringLiteral( "GL's textures" );
+		qInfo().noquote() << QStringLiteral( "cell bloom: targets made %1x%2 in %3 ms (free %4 ms, %5)" ).arg( W ).arg( H )
+			.arg( makeMs, 0, 'f', 1 ).arg( freeMs, 0, 'f', 1 ).arg( route );
 	}
 
 	/* state kept for the restore. lane CELLUNI4: the tone map's known state, unless the block above made the targets
@@ -579,7 +660,39 @@ bool wwCellBloomRun( Scene * scene, unsigned hdrColor, unsigned ds, int W, int H
 		fn->glViewport( 0, 0, w, h );
 	};
 
+	/* lane VKFRAME1 round 3 (P3): the frame shared with Vulkan (cellhdr.cpp) and the chain on Vulkan: the source is
+	 * bloom_src.hlsl there (runBloom, before the down chain) on the same samples; its uniforms are read here, from what
+	 * wwCellLightsUniforms gives cell_bloom_src.prog (the mirror, else GL). GL's pass below otherwise. */
+	const bool srcVk = ok && WwVkPost::sourceReady( r, hdrColor, ds );
+	float srcExposure = 1.0f;
+	bool srcOn = false;
+	if ( srcVk ) {
+		auto prog = r->useProgram( "cell_bloom_src.prog" );
+		if ( !prog ) {
+			ok = false;
+			why = QStringLiteral( "no cell_bloom_src.prog" );
+		} else {
+			prog->wwMirror.on = true;
+			wwCellLightsUniforms( scene );	// the exposure (and the red's noexp)
+			auto uniI = [&]( const char * n ) {
+				GLint v = 0;
+				const int l = prog->uniLocation( n );
+				if ( l >= 0 && !prog->wwMirror.get( l, WwCellUni::K1i, &v, 1 ) )
+					fn->glGetUniformiv( prog->id, l, &v );
+				return v;
+			};
+			GLfloat e = 1.0f;
+			const int le = prog->uniLocation( "cellIsExposure" );
+			if ( le >= 0 && !prog->wwMirror.get( le, WwCellUni::K1f, &e, 1 ) )
+				fn->glGetUniformfv( prog->id, le, &e );
+			srcOn = uniI( "cellOn" ) != 0 && uniI( "cellIsOn" ) != 0;
+			srcExposure = ( uniI( "cellIsRed" ) & 2 ) != 0 ? 1.0f : e;
+			r->stopProgram();
+		}
+	}
+
 	// 1. the source: the cell-lit samples (stencil 1, the frame's own depth / stencil), exposed; then resolved
+	if ( !srcVk ) {
 	fn->glBindFramebuffer( GL_FRAMEBUFFER, g.srcFbo );
 	fn->glFramebufferTexture2D( GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D_MULTISAMPLE, g.msColor, 0 );
 	if ( dsTexture )	// lane TONEMAP1: the frame's depth / stencil is a multisample texture
@@ -591,7 +704,8 @@ bool wwCellBloomRun( Scene * scene, unsigned hdrColor, unsigned ds, int W, int H
 		ok = false;
 		why = QStringLiteral( "the source target is incomplete" );
 	}
-	if ( ok ) {
+	}	// !srcVk (the GL body keeps its indent: one diff hunk)
+	if ( ok && !srcVk ) {
 		fn->glViewport( 0, 0, W, H );
 		fn->glClearColor( 0.0f, 0.0f, 0.0f, 0.0f );
 		fn->glClear( GL_COLOR_BUFFER_BIT );
@@ -635,9 +749,86 @@ bool wwCellBloomRun( Scene * scene, unsigned hdrColor, unsigned ds, int W, int H
 	}
 
 	// 2. the down chain (BloomDownCS): level 0 from the source with the threshold and the Karis average
-	const float thr = std::clamp( set.threshold, 0.0f, 64.0f ), knee = std::clamp( set.softKnee, 0.0f, 1.0f );
-	for ( int i = 0; ok && i < mipCount; i++ ) {
-		target( g.mip[i], dims[i][0], dims[i][1] );
+	// lane PHYSUNITS1 (RESUME 11-09 b): the energy-conserving glare takes every pixel's light (no threshold, no knee)
+	s.ecK = wwPhysBloomK();
+	const bool ec = s.ecK > 0.0f;
+	const float thr = ec ? 0.0f : std::clamp( set.threshold, 0.0f, 64.0f ), knee = ec ? 0.0f : std::clamp( set.softKnee, 0.0f, 1.0f );
+	/* MODULES1 R8-2 (bungo: "our bloom is not stable ... it shimmers"): the chain reads the frame BEFORE the temporal
+	 * resolve (that runs after the tone map unless WW_TAA2_LINEAR=1), so each frame's jitter hits or misses the bright
+	 * things under a pixel wide and their whole halo blinks. On a jittered frame level 0 goes to a ring of 8 layers
+	 * (the jitter's period) and the chain reads the mean of the layers drawn from this same view and projection:
+	 * a still camera's bloom is the same every frame; a moved camera counts from 1 again (this frame alone, as before).
+	 * Cost: 16 bytes of video memory a frame pixel, and one pass of up to 8 fetches over level 0 (2 a frame pixel).
+	 * Red WW_CELL_BLOOM_RED=nohold. Model + bars: notes/modules1/r8/gate_bloom.py (private). */
+	float holdJx = 0.0f, holdJy = 0.0f;
+	const bool hold = !s.holdRed && s.impulse <= 0.0f && wwGameTaaJitter( holdJx, holdJy );
+	Matrix4 holdProj;
+	int holdN = 1, holdK = 0;
+	if ( hold ) {
+		const bool hasProj = wwGameTaaUnjittered( holdProj );
+		if ( !g.ring ) {
+			fn->glGenTextures( 1, &g.ring );
+			fn->glBindTexture( GL_TEXTURE_2D_ARRAY, g.ring );
+			fn->glTexImage3D( GL_TEXTURE_2D_ARRAY, 0, GL_RGBA16F, dims[0][0], dims[0][1], kHoldFrames, 0, GL_RGBA, GL_FLOAT, nullptr );
+			fn->glTexParameteri( GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MIN_FILTER, GL_NEAREST );
+			fn->glTexParameteri( GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAG_FILTER, GL_NEAREST );
+			fn->glTexParameteri( GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE );
+			fn->glTexParameteri( GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE );
+			fn->glBindTexture( GL_TEXTURE_2D_ARRAY, 0 );
+			g.ringN = 0;
+		}
+		const bool still = g.ringN > 0 && hasProj && g.ringProj == holdProj
+			&& g.ringRot == scene->view.rotation && g.ringPos == scene->view.translation;
+		holdN = still ? std::min( g.ringN + 1, kHoldFrames ) : 1;
+		holdK = ( g.ringK + 1 ) % kHoldFrames;
+	}
+	/* lane VKFRAME1 (plan step P1): down, hold and up as the Fusion Shaders compute kernels on the ray-tracing device, on
+	 * the same textures (bit-identical to these GL passes offline: tests/vkframe/run.sh); GL's passes below whenever
+	 * it says no (WW_VKPOST_RED=1, the Vulkan Post row off, no device, the images GL's own). One call a frame. */
+	bool onVk = false, combVk = false;
+	if ( ok ) {
+		WwVkPost::BloomJob vj;
+		vj.thr = thr;
+		vj.knee = knee;
+		vj.red = s.red;
+		vj.hold = hold;
+		vj.holdK = holdK;
+		vj.holdN = holdN;
+		vj.radius = wwBloomRadius( set );
+		vj.dispersion = set.glare ? std::clamp( set.glareDispersion, 0.0f, 2.0f ) : 0.0f;
+		// round 3 (P3): the source from the shared frame, cell_bloom_src.frag's uniforms
+		vj.src = srcVk;
+		vj.frameColor = hdrColor;
+		vj.frameDs = ds;
+		vj.exposure = srcExposure;
+		vj.on = srcOn;
+		vj.impulseX = float( W / 2 );
+		vj.impulseY = float( H / 2 );
+		vj.impulse = s.impulse > 0.0f ? s.impulse : 0.0f;
+		/* round 3 (P2): the combine at lod 0, on the GL combine's own condition below (the "wide" red reads lod 2: GL's);
+		 * the Bloom Mip lod the tone map reads is planned here from the same switches */
+		const float perPixelPlan = !wwLookOn( WwLook::BloomMip ) ? 0.0f
+			: wwEnvStr( "WW_CELL_BLOOM_PERPIX_RED" ) == QLatin1String( "wide" ) ? -1.0f : 1.0f;
+		vj.comb = !s.combRed && vj.dispersion > 0.0f && perPixelPlan >= 0.0f && !( perPixelPlan > 0.0f && wwCellFogBloomOn() );
+		for ( int offset = mipCount - 1; offset > 0; offset-- )
+			bandWeights( set, offset - 1, offset, mipCount, vj.srcW[offset - 1], vj.accW[offset - 1] );
+		QString vkWhy;
+		onVk = WwVkPost::runBloom( r, vj, vkWhy );
+		combVk = onVk && vj.comb;
+	}
+	if ( srcVk && !onVk && ok ) {	// GL drew no source this frame (the route's change is logged by runBloom)
+		ok = false;
+		why = QStringLiteral( "the Vulkan source did not run: no bloom this frame" );
+	}
+	for ( int i = 0; ok && !onVk && i < mipCount; i++ ) {
+		if ( i == 0 && hold ) {
+			fn->glBindFramebuffer( GL_FRAMEBUFFER, g.fbo );
+			fn->glFramebufferTextureLayer( GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, g.ring, 0, holdK );
+			fn->glDrawBuffers( 1, &one );
+			fn->glViewport( 0, 0, dims[0][0], dims[0][1] );
+		} else {
+			target( g.mip[i], dims[i][0], dims[i][1] );
+		}
 		auto prog = r->useProgram( "cell_bloom_down.prog" );
 		if ( !prog ) {
 			ok = false;
@@ -651,6 +842,36 @@ bool wwCellBloomRun( Scene * scene, unsigned hdrColor, unsigned ds, int W, int H
 		prog->uni1i( "bloomRed", s.red );
 		r->drawShape( 4, 3, 6, GL_TRIANGLES, GL_UNSIGNED_SHORT, &attrs, idx );
 		r->stopProgram();
+		if ( i == 0 && hold ) {	// level 0 = the mean of the ring's layers that count
+			target( g.mip[0], dims[0][0], dims[0][1] );
+			auto hp = r->useProgram( "cell_bloom_hold.prog" );
+			if ( !hp ) {
+				ok = false;
+				why = QStringLiteral( "no cell_bloom_hold.prog" );
+				break;
+			}
+			bind( kUnitA, GL_TEXTURE_2D_ARRAY, g.ring );
+			hp->uni1i( "bloomRing", kUnitA );
+			hp->uni1i( "bloomHoldK", holdK );
+			hp->uni1i( "bloomHoldN", holdN );
+			r->drawShape( 4, 3, 6, GL_TRIANGLES, GL_UNSIGNED_SHORT, &attrs, idx );
+			r->stopProgram();
+			bind( kUnitA, GL_TEXTURE_2D_ARRAY, 0 );
+		}
+	}
+	if ( hold && ok ) {
+		g.ringN = holdN;
+		g.ringK = holdK;
+		g.ringProj = holdProj;
+		g.ringRot = scene->view.rotation;
+		g.ringPos = scene->view.translation;
+		if ( holdN == kHoldFrames && !g.ringSaid ) {	// once: the still test does hold in this window
+			g.ringSaid = true;
+			qInfo().noquote() << QStringLiteral( "cell bloom hold: 8 frames from one view reached (level 0 = their mean, %1x%2, %3 MB)" )
+				.arg( dims[0][0] ).arg( dims[0][1] ).arg( double( dims[0][0] ) * double( dims[0][1] ) * 8.0 * kHoldFrames / 1048576.0, 0, 'f', 1 );
+		}
+	} else {
+		g.ringN = 0;
 	}
 
 	// 3. the up chain (BloomUpCS): from the deepest mip up to level 0, each band at its weight
@@ -663,6 +884,10 @@ bool wwCellBloomRun( Scene * scene, unsigned hdrColor, unsigned ds, int W, int H
 		float srcW = 1.0f, accW = 1.0f;
 		bandWeights( set, level, offset, mipCount, srcW, accW );
 		bands << QStringLiteral( "%1:%2/%3" ).arg( level ).arg( f6( srcW ), f6( accW ) );
+		if ( onVk ) {	// lane VKFRAME1: Vulkan drew this level
+			accumulated = g.up[level];
+			continue;
+		}
 		target( g.up[level], dims[level][0], dims[level][1] );
 		auto prog = r->useProgram( "cell_bloom_up.prog" );
 		if ( !prog ) {
@@ -687,6 +912,19 @@ bool wwCellBloomRun( Scene * scene, unsigned hdrColor, unsigned ds, int W, int H
 		const float glare = set.glare ? std::max( set.glareStrength, 0.0f ) : 0.0f;
 		const float total = std::max( base + glare, kEps );
 		finalWeight *= base / total + ( glare / total ) * wwBloomGlareBand( set, 0, 1 );
+	}
+	/* lane PHYSUNITS1: the top's gain on a flat frame (each up pass: source x srcW + tent(accumulated) x accW, the tent
+	 * and the Karis average keep a flat field); the glare's weight is k over it, so the blur carries the frame's energy */
+	s.ecGain = 1.0f;
+	if ( ec ) {
+		float acc = 1.0f;
+		for ( int offset = mipCount - 1; offset > 0; offset-- ) {
+			float srcW = 1.0f, accW = 1.0f;
+			bandWeights( set, offset - 1, offset, mipCount, srcW, accW );
+			acc = srcW + accW * acc;
+		}
+		s.ecGain = std::max( acc, kEps );
+		finalWeight = s.ecK / s.ecGain;
 	}
 	if ( ok && check ) {
 		const GLenum err = fn->glGetError();
@@ -762,7 +1000,10 @@ bool wwCellBloomRun( Scene * scene, unsigned hdrColor, unsigned ds, int W, int H
 		s.topMips = true;
 		s.perPixel = wwEnvStr( "WW_CELL_BLOOM_PERPIX_RED" ) == QLatin1String( "wide" ) ? -1.0f : 1.0f;
 	}
-	if ( ok && accumulated && !s.combRed && dispersion > 0.0f && !( s.perPixel > 0.0f && wwCellFogBloomOn() ) ) {
+	const GLuint combVkTex = ok && accumulated && combVk ? GLuint( WwVkPost::combTexture( r ) ) : 0u;
+	if ( combVkTex ) {
+		s.combTex = combVkTex;	// lane VKFRAME1 round 3 (P2): bloom_comb.hlsl ran on Vulkan in runBloom
+	} else if ( ok && accumulated && !s.combRed && dispersion > 0.0f && !( s.perPixel > 0.0f && wwCellFogBloomOn() ) ) {
 		if ( !g.comb || g.combW != W || g.combH != H ) {
 			if ( g.comb )
 				fn->glDeleteTextures( 1, &g.comb );
@@ -829,6 +1070,13 @@ bool wwCellBloomRun( Scene * scene, unsigned hdrColor, unsigned ds, int W, int H
 		glare = QStringLiteral( "glare=on strength=%1 f=%2 dispersion=%3 bands=[%4]" )
 			.arg( f6( set.glareStrength ), f6( set.glareFNumber ), f6( dispersion ), b.join( QLatin1Char( ',' ) ) );
 	}
+	if ( ec )
+		glare += QStringLiteral( " physglare k=%1 flatgain=%2" ).arg( f6( s.ecK ), f6( s.ecGain ) );
+	else
+		glare += QStringLiteral( " physglare off (additive)" );
+	glare += s.holdRed ? QStringLiteral( " hold=RED off (WW_CELL_BLOOM_RED=nohold: level 0 is this frame's alone)" )
+		: hold ? QStringLiteral( " hold=on (level 0 = the mean of up to 8 jittered frames from one view; a moved camera counts from 1)" )
+		: QStringLiteral( " hold=off (no jitter this frame: the source is not jittered)" );
 	note( s, QStringLiteral( "fo4cs mips=%1 (%2x%3..%4x%5) threshold=%6 knee=%7 intensity=%8 radius=%9 weight=%10 %11%12 (checks %13)" )
 		.arg( mipCount ).arg( dims[0][0] ).arg( dims[0][1] ).arg( dims[mipCount - 1][0] ).arg( dims[mipCount - 1][1] )
 		.arg( f6( thr ), f6( knee ), f6( set.intensity ), f6( radius ), f6( finalWeight ), glare,
@@ -862,6 +1110,10 @@ void wwCellBloomFinal( Renderer * r, int unit, int knownActive )
 	 * mips grow in Run (the per-pixel combine reads them first) */
 	fn->glActiveTexture( GLenum( prevActive ) );
 	prog->uni4f( "cellIsFoBloomParams", FloatVector4( s.radius, s.finalWeight, s.dispersion, s.perPixel ) );
+	prog->uni1f( "cellIsFoBloomEc", s.replacing && s.ecK > 0.0f ? s.ecK : 0.0f );
+	// LATE 7: fog may at most double the energy-conserving glare's share (it raised k up to 5x, glare strong again)
+	prog->uni1f( "cellIsFoBloomFogCap",
+		wwEnvStr( "WW_CELL_FOGBLOOM_RED" ).trimmed() == QLatin1StringView( "glare" ) ? 1.0e9f : 2.0f );
 	prog->uni2f( "cellIsFoBloomFrame", float( s.w ), float( s.h ) );
 }
 

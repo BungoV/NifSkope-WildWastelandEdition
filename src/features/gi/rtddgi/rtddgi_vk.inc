@@ -718,15 +718,23 @@ DdgiGpuSession * ddgiGpuOpen( const DdgiGpuJob & job, DdgiGpuOut * out )
 	} else {
 		s->sc = new DdgiScene;
 		s->sc->refs = 1;
-		if ( !buildMasks( D, *job.bvh, s->sc->I ) || !buildRt( D, *job.bvh, s->sc->I ) ) {
+		const auto tb = std::chrono::steady_clock::now();
+		if ( !buildMasks( D, *job.bvh, s->sc->I ) || !buildRt( D, *job.bvh, s->sc->I, &job.parts, job.partsRed ) ) {
 			ddgiFree( D, s );
 			out->why = "the soup's BLAS did not build (out of GPU memory?)";
 			return nullptr;
 		}
 		g_ddgiBlasBuilds++;
 		out->blasBuilt = true;
+		// lane AIRPERF1 r6: what this open built of the scene's BLAS parts and what it found again
+		out->blasMs = std::chrono::duration<double, std::milli>( std::chrono::steady_clock::now() - tb ).count();
+		out->blasNew = s->sc->I.partNew;
+		out->blasKept = s->sc->I.partReused;
+		out->blasTrisNew = s->sc->I.partTrisNew;
+		out->blasTrisKept = s->sc->I.partTrisReused;
 	}
 	Scene::Impl & I = s->sc->I;
+	out->blasParts = I.partCount;
 	out->blasGrow = I.inflate;   // M1FIX: the BLAS holds grown triangles when > 0; trace.comp re-tests the true ones
 	out->blasGrowTris = I.inflateTris;
 	s->prm = job.params;
@@ -915,6 +923,10 @@ bool ddgiStepReady( Dev & D, DdgiExtra & X, DdgiGpuSession * s, const DdgiGpuSte
 			return false;
 		}
 	}
+	if ( in.lightSet && !X.update ) {
+		out->why = "a relight needs vkCmdUpdateBuffer";
+		return false;
+	}
 	return true;
 }
 
@@ -937,6 +949,19 @@ uint32_t ddgiStepRecord( Dev & D, DdgiPipes & S, DdgiExtra & X, DdgiTimer & T, D
 	if ( s->released )
 		ddgiOwner( D, s->atlas.b, true );
 	stamp();
+	if ( in.lightSet ) {   // MODULES1 11-09 item 3: a new hour or weather, the params only
+		for ( int c = 0; c < 4; c++ ) {
+			s->prm.sunTo[c] = in.sunTo[c];
+			s->prm.sun[c] = in.sun[c];
+			s->prm.dirTo[c] = in.dirTo[c];
+			s->prm.dirColor[c] = in.dirColor[c];
+			for ( int f = 0; f < 6; f++ )
+				s->prm.sky[f][c] = in.sky[f][c];
+		}
+		ddgiXferBarrier( D );
+		X.update( D.cb, s->params.b, 0, sizeof s->prm, &s->prm );
+		ddgiXferBarrier( D );
+	}
 	if ( in.skipSet ) {   // RTXCASCADE2: the covered coarse probes the updates skip, written only when the range moved
 		bool same = true;
 		for ( int c = 0; c < 4; c++ )

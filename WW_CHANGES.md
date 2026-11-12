@@ -1,3 +1,960 @@
+## VKCOMPUTE1 HLSL 1 (2026-11-12): the DDGI border kernel is HLSL (DXC), byte-exact with its GLSL original
+
+Changed, not checked live (no build). Offline, on the GPU: tests/hlslmatch (green 6 cases, 0 bytes differ; red
+BORDER_RED fails 6 of 6), tests/spvsync (PASS 9 + its reds), tests/spells/hlsl_check.py (1 OK + its red).
+
+- res/shaders/hlsl/rtddgi/border.hlsl + ddgi_common.hlsli (the part border uses: bindings, Params, borderXY,
+  borderSource, skipped, probe state). DXC builds it into src/features/gi/rtddgi/border.spv.h (rtddgi_spirv.sh,
+  tools/spv_header.py writes glslang's array shape); border.comp stays as the original the gate compares with.
+  Target vulkan1.2 for the embedded kernel = bakert.cpp's device version; the check row also compiles vulkan1.3 + DXIL.
+- HLSL has no gl_NumWorkGroups: the linear id uses rtddgi_vk.inc ddgiDispatch's split (x = 65535 whenever y > 0); the
+  gate's 50x50x20 case runs past 65535 groups.
+- tests/hlslmatch/run.sh <out>: a headless Vulkan device (compute-only family), both SPIR-Vs on the same random buffers
+  (every probe state, both skip rules), every buffer compared byte for byte.
+- tests/spells/hlsl_check.py: the HLSL row of the shader check (DXIL cs_6_0 + SPIR-V vulkan1.3 for every .hlsl).
+
+## VKCOMPUTE1 item 2 (2026-11-12): the ray-traced GI and ReSTIR run beside GL's frame (async compute)
+
+Changed, not checked live (no build, no window). Offline: tests/vkasync (family pick + a two-queue frame timeline, green
+6 + 4 reds), syntax check of bakert.cpp and rtddgicell.cpp (rc=0).
+
+- **Cause.** The ray-tracing device took the first compute family (the graphics one, family 0), and GL waited on each
+  submit's vkDone right after the submit. The submit itself waits on GL's glDone, so GL's queue sat idle while the
+  device ran: DDGI (~1.9 ms + 0.5 for the coarse cascades) and ReSTIR (~0.4 ms) were in series with the frame.
+- **Fix (ships on).** The device takes a compute-only family with timestamps when it has one (RTX 5070 Ti: family 2;
+  src/features/gi/vkasyncrule.h pickFamily). GL's wait is owed until the first GL read (vkasyncrule.h Ledger): the
+  atlas's bindOne, the debug view, a drop; the cascades' copy now takes LAST frame's tiles before this frame's submit,
+  with the params those tiles were traced with (Combined org/stp/dims), so the cascades' work runs beside the rest of
+  the frame; ReSTIR's ratio waits at its first read in the opaque pass. One GL wait per submit, always before the next
+  signal. Settings > General > Ray tracing device > Async Compute (default on, read at the device's creation:
+  relaunch). Red WW_VKASYNC_RED=1 = family 0 and the wait right after the submit, as before.
+- **Lines.** `vk async: device <name> queue family F: <why>` at the device's creation; the DDGI census's sync part
+  ends `vk async: qF async|shared with graphics, D of S waits at the reader`.
+- Air rays (airrays_vk.inc, a CPU fence wait per step) are not changed here (MODULES1's file).
+- **Item 4.** The `hardware use:` line (src/glview.cpp, EMPTY240's) ends `async queue: qF async|shared with graphics,
+  overlapped up to X ms a frame (B of S submits ran beside GL)`: X = the device ms of the DDGI / ReSTIR submits whose
+  GL wait was deferred (rtddgicell.cpp rtddgiAsyncUse), an upper bound of the true overlap.
+
+## EMPTY240 (2026-11-12): frames no longer wait for a 6 ms timer; vsync ships off; the frame wall line
+
+Changed, not checked live (no build, no window). Offline: tests/framepacer (model + this PC's timers; the red fails),
+syntax check of glview.cpp, cellpasstime.cpp, nifskope_ui.cpp (rc=0).
+
+- **Cause.** A frame started only when GLView's 6 ms coarse QTimer ticked; on Windows that timer fires on the system
+  tick: 64 ticks a second measured on bungo's PC, even at 1 ms resolution (the empty scene's 68 fps).
+- **Fix (ships on).** While a cell view's clock runs (or an animation plays, or a key is held) the next frame is posted
+  as soon as paintGL returns. View > Vertical Sync (off by default, live via wglSwapIntervalEXT) and View > Frame Cap
+  (Off, Monitor Refresh, 30..500; its wait is a high-resolution waitable timer). Pins WW_VSYNC, WW_FRAME_CAP; red
+  WW_FRAMETIMER_RED=1 (the 6 ms timer, vsync on). Log: `frame pacing: driven by ..., cap ..., vsync ..., timer resolution ...`.
+- **Frame wall (telemetry).** With WW_CELL_PASSTIME on, once a second: `frame wall: X ms a frame (F fps) = before-frame
+  + passes + gi-frame + restir + probe-sky + other-in-frame + after-frame + swap + cap-wait + between-paints | the pass
+  timers hold P %`. The parts add up to the wall (paint start to paint start, the overlay's fps).
+## FARWATER1 round 2 + late items 2-6 (2026-11-11): the endless sea's air, the sea join, night haze tint, barrel smoke, stream particles, WW_CELL_GI gone
+
+Changed, not checked live (no build, no window). Offline: syntax checks of every edited .cpp (rc=0), CPU twins
+(notes/farwater1/tools/twin_r2.py: flat air frame worst 12.7 u, night hue R/B = the sky's; twin_late4.py PASS), shader
+link sweeps over 161 programs in every mode.
+
+- **Round 2, the deep blue strip = the endless sea's air.** The sheet is curved (z drops r^2 / 2R) while the air is a
+  flat frame: wwFog at fo4_water.frag:633 read the air at a point under the flat ground, and lookdev_fog.glsl:564/603
+  (volFarClamp) clamped its distance to the column's farthest depth, so the sea past the land's end got the land's
+  clamp (the blocks). Now the water's air reads its point in the flat air frame (+ g^2 / 2R, wwAirFlatPos), unclamped
+  (uniform waterAir), and the sky band's far-plane point too (cell_volsky.frag, volSkySea). Red
+  `WW_ENDLESS_SEA_RED=air`. Echo: `water tiers: ... air per tier: near .., far map .., endless sea ..`.
+  Debug view `air` (WW_DEBUG_VIEW=air): T per channel on surfaces and water, no longer black.
+- **Late 2, the dotted line where the endless sea meets the map sea.** The map water drew to its mesh edge at the box
+  rim; it now leaves the outer 2048 u to the sheet under it by a per-pixel cut (waterSeam.w). Red
+  `WW_ENDLESS_SEA_RED=edge`. Echo: `water tiers: ... seam: ...`.
+- **Late 3, the night haze grey.** lookdev_fog.glsl:887/891 lifted the air to fogNight's neutral grey; the night light
+  now takes the drawn night sky's horizon tint at the air's own luminance, by the night share (twilight blends).
+  Red `WW_NIGHTAIR_RED=neutral`. Echo: `cell air: ... night haze=r,g,b R/B x share n`.
+- **Late 4, the barrel fire does not light its smoke.** fo4_effectshader.frag:598 (round 9) set a volumetric mesh card's
+  opacity to 0, so its lamps gave only the air's single-scatter phase (a forward lobe gives ~0.06-0.13 at a lamp below,
+  eye level). A dense plume scatters many times: each lamp now adds opacity x max( wrap( N.L, 1 ) - phase, 0 )
+  (cell_volpart.glsl vpLampMs; raise-only, the env and GI stay thin). Red word `WW_CELL_FXLOCAL_RED=thinlamps`. Echo:
+  `cell fx local: ... its lamps mix( thin, ... )` and `an opaque card up to r,g,b`. WW_CELL_FXLIT_DUMP is now written on
+  a live set too, with each model's reaching lights and its nearest light (position, distance, radius, colour, ref).
+- **Late 5, ground fog particles missing after a goto jump.** No cause found in the code; each stream attach now logs
+  `cell stream particles: cell x,y: N systems placed, copied, refused (unread / empty copy / over the cap), cap left`.
+- **Item 6.** The retired switch WW_CELL_GI is gone: its stage row, its menu and Display rows ("Precomputed Radiance
+  Transfer") and its read. Under the PRT red (WW_CELL_PRT_RED=1) the old GI draws whole.
+
+## FARWATER1 (2026-11-11): far water at the horizon mirrors the deck, not the clear sky
+
+Changed, not checked live (no build, no window). Offline: CPU twin (notes/farwater1/tools/twin.py, 0 fails), syntax
+check of cellwater.cpp and debugview.cpp (rc=0), shader link sweeps (161 programs: base 483, WW_DEBUG_VIEWS 483,
+WW_DEBUG_VIEWS + RTDDGI + fog leak 322, RTDDGI 322, leak 322, PRT 483, all link); off identity against HEAD: 468 of 483
+binaries equal but the source hash, the 15 that differ are the five fo4_waterlook* programs (on purpose).
+
+- **Cause.** water_refl.glsl wwWaterCloudSky: `cov *= smoothstep( 0.0, 0.08, R.z )`. For flat water R.z = the eye's
+  height / distance, so past 12.5 x the eye's height (245k u at bungo's 19589 u) the clouds dropped out of the
+  reflection and the far water (F -> 1) mirrored the WTHR gradient, which at R.z 0 is 0.65 x (0.25 horizon + 0.75 lower)
+  + 0.35 upper: the deep blue band. It is eye-relative, so it moves with the camera. The far map water and the endless
+  sea use one program, but their WATRs (normals, ssr byte) spread R.z differently, so the band showed as blocks.
+- **Fix (ships on).** Under R.z 0.08 the cover goes to the bands' mean cover (the deck the drawn sky shows at the
+  horizon), R.z <= 0 included, and the gradient goes to the horizon row (fo4_water.frag, WW_WATER_REFL programs).
+  Identical for R.z >= 0.08. Every tier, no distance cut. Red: `WW_CELL_WATER_REFL_RED=grazing` (bit 32).
+- **Log.** The `water tiers:` line also names the reflection source per tier (march + sky + clouds / sky + clouds) and
+  the grazing-sky rule (or the red).
+- **Debug view** `watersky` (23): the sky each tier mirrors before the march, x / (1 + x); tiers by `farowner`.
+
+## DEBUGVIEW1 (2026-11-11): live debug views, the far cards' sun under the clouds, shadow distance, sea curve
+
+Changed, not checked live (no build, no window). Offline: syntax check of every edited .cpp and every includer of the
+changed headers (31 sources, rc=0); shader link sweeps all link (161 programs: base 483, WW_DEBUG_VIEWS 483, WW_DEBUG_VIEWS + RTDDGI + fog leak 322,
+  RTDDGI 322, leak 322, PRT 483); off identity against HEAD: 468 of 483 binaries equal but the source hash, the 15 that
+  differ are the five impostor_cell* card programs (item 2 changes them on purpose).
+
+- **1. One live debug-view set.** `WW_DEBUG_VIEW=<name|id>` (stage 4: a set reloads the shaders, no reopen) and
+  Show > Debug view (Off first; greyed while the env pins it; the PRT bake's menu is now "PRT debug view"). Views:
+  albedo, normals, gloss, ao, sun, shadow, ambient, gi, emissive, fog, air, clouds, cloudshadow, water, waterrefl,
+  waterheight, farowner, exposure, depth, overdraw, specular, reflection. Near objects + land (fo4_default,
+  pbrm_default), far terrain + objects (same programs), tree cards (impostor_oct) and water (fo4_water); a term a
+  program lacks reads black. Owed (black, said in the log): air, clouds, overdraw. The views live in
+  `res/shaders/features/overlays/debug_view.glsl`, included only under the loader's `WW_DEBUG_VIEWS` (added while a
+  view is on), so off compiles the shipping source; one uniform `wwDebugView` (+ `wwDvOwner` for farowner), no extra
+  programs. A view runs as a probe pass (no linear frame, no post, no TAA jitter, black clear; the water and far cards
+  still draw). Log `debug view: <name> (<owner passes>) [WW_DEBUG_VIEW|Show > Debug view]` on change.
+- **2. Glowing far trees under overcast.** Cause: `impostor_oct.frag` lit the far cards through cellLit with
+  `cellDirVis` at its default 1.0 (`cell_lights.glsl:20`) and no air transmittance: the cards took the full sun under a
+  closed deck, the near trees (fo4_default.frag 462-470) the cloud-shadowed and air-cut one. Now the cards' sun is cut by
+  the cloud shadow (`cardCloudT`, the same ussCloud map) and the air's sun transmittance; `impostordraw.cpp` uploads
+  the cloud-shadow uniforms to the card program. Red `WW_CELL_FARLOD_RED=cardsun`. Log `switch: far cards' sun through
+  the clouds' shadow and the air ...`. Views: sun, cloudshadow, farowner (yellow = card).
+- **3. Dark stripe / near-far seam holes (goto 49675.5 95897.1 7004.9): OWED, not fixed.** His picture is build
+  9f77ff53, which has SKYSEA1's sky stencil mark (`WW_SKY_LINEAR_RED=nomark` is the red), so the blue slivers are real
+  holes in the geometry (the sky through them), not unmarked clear colour. From the code: the far rings and the
+  vanilla clip lines carry skirts (btdterrain.cpp 382-440, 512 + 128 a level deep), but a foot past the 16-bit vertex
+  cap leaves its edge open (`skirtCapped`, in the `far lod:` census line), and the near LAND block has no skirt, so a
+  ray from outside the block that passes over the far edge and under the LAND edge sees the sky. Which of the two
+  needs his log (`skirt edges ... over the 16-bit cap`) or the farowner view at the spot: green / orange either side of
+  a black line = a hole between near land and far terrain. The dark stripe: the cloudshadow, fog and farowner views
+  each show one candidate (cloud map edge, fog far edge, far ring seam).
+- **4. Shadow distance defaults to 24000** (bungo 11-11: his own FO4CS fCascadeShadowDistanceUnits, ~24k;
+  FO4CS's code default is 14000), a saved setting still wins. Red `WW_SHADOW_DIST_RED=1` (14000, the old default). The `shadow cascades:` line says `shadow distance N from <source>`.
+- **5. The endless sea bends with the earth by default** (red `WW_ENDLESS_SEA_CURVE=0`: flat), and one `water tiers:`
+  line on change: draws per tier, each tier's far fade and the far colour law.
+
+## SKYLIGHT1 (2026-11-11): overcast ambient through the cloud deck, clear air colour, world-anchored clouds
+
+Changed, not checked live (no build, no window). Offline: CPU twins (notes/skylight1/tools), syntax check of every
+edited file and every includer of the changed headers (16 sources, rc=0).
+
+- **1a. Overcast land takes its ambient through the drawn deck.** `src/features/clouds/clouddeckmath.h` reads the cloud
+  map's Low + Mid bands with the volume's own density as independent columns (Cahalan 1994): the key's light on the
+  deck top passes as two-stream diffuse light, the clear sky's at the diffusivity cosine, x the ground-deck reflections;
+  never under the clear sky's (today's look). physFinish sets up / down / sides from it. Twin at CommonwealthOvercast
+  13.8: cover 0.993, up 0.744 lux (clear 0.529), ground 0.0388 cd/m2, drawn sky / ground 9.6 (today 15.7). Red
+  `WW_SKY_CLOUDDECK_RED=1`. Log `sky deck: ...` and the `light meas: sky Eh` line's `deck:` part.
+- **1b. The ambient's upload reads the up / down poles exactly** (`src/gl/dalcfit.h`): the constant term comes from the
+  up / down pair, not the mean of six (the drop from 0.529 to 0.349 lux). Twin: up / down pole error 7e-7 (red up to
+  23x off). Red `WW_CELL_DALC_FIT_RED=1`. Log `cell ambient: ... fit=`.
+- **2. Clear air no longer too red.** The atmosphere's RGB coefficients are band-effective sRGB values from a spectral
+  model (Rayleigh: Hansen & Travis 1974; ozone: Serdyuchenko 2014 via Bruneton 2017; colour: Wyman 2013 CMF, sRGB) in
+  place of the 680 / 550 / 440 nm samples. Moon at 33.7 deg: T R/B 1.757 -> 1.551. Red `WW_ATMO_RED=rgb680`. Log
+  `light meas: key ... air R/B`.
+- **3. The volume clouds sit on the world.** The cloud map's square stays where it was laid (laid again past 24 km;
+  red `WW_CLOUDMAP_RED=eyesquare`), and Fly-through Clouds ships Low (world heights; new settings key). Twin: a cloud
+  6 km away is 3.46x wider than at 20 km (red 1.00x). Log `cloudmap: square=world@...`.
+- **4. The deck reaches the land the viewer draws.** The Physical Light Units master ships Off, so physFinish never ran
+  and the deck never touched the ambient. The vanilla stage DALC (the land, far LOD and probes) now goes through the
+  deck in `currentLight()` (`src/gl/lookdevstage.cpp`), and so does the GI miss sky (`src/features/gi/rtddgicell.cpp`).
+  Log `sky deck: stage DALC ...` and `sky deck: GI miss sky ...`. The up floor is the clear sky x (1 - cover) instead
+  of the whole clear sky, so Cloud Density moves the light (twin, cover 0.95: density 0 / 1 / 4 / 10 -> up x1.00 /
+  1.44 / 1.08 / 0.74, sun on the ground x1.00 / 0.005 / 0.005 / 0.007). Red `WW_SKY_CLOUDDECK_RED=floor`.
+- **5. The air under the deck is the deck's grey, not the clear sky's blue.** `cloud_march.frag` scales the clear-sky
+  in-scatter under the deck (`cvDeckAp`). Red `WW_CLOUDVOL_RED=apdeck`. Log `lookdev sky: ... volclouds ... apdeck=`.
+- **6. The cloud override and density reach the drawn clouds; clouds and shadows stay on the world.** The map texels
+  take the override's cover (red `WW_CLOUDMAP_RED=coveralpha`); a harness no longer pins Fly-through Clouds to eye
+  heights (red `WW_CLOUDFLY_RED=harnessoff`); each layer is laid on the world by its zenith-cap fit instead of the dome
+  projected around the square's centre, which made a dense patch over the anchor fading outward (the dark area around
+  the eye, shadows that left as he walked in; red `WW_CLOUDMAP_RED=domeproj`). Moving-eye twin: over 60 km and two
+  re-anchors a texel's uv drifts 1e-6 and its shadow's 0 (old: uv 2.9..12.6, alpha 0..0.16). Logs `cloudfly: tier=`,
+  `cloudmap: ... laid=world ... density=`, `cloudshadow anchor: ...`, `light meas: ... | cloud field: ...`.
+
+## NIGHTHAZE1 (2026-11-11): the brown night haze, the air's filters, select all in a cell view
+
+Changed, not checked live (no build, no window). Offline: the three shader programs link in every air define mode;
+the near fog (`cell_volair.prog`) equals HEAD with the new terms off (max |d| 3.73e-9 of 0.024, the compile's
+reordering) and adds exactly emissive x opacity with them on; the reader takes the new keys (fixture check 11/11).
+
+- **1. The night haze is no longer brown.** The CPU twin of the sky (`src/features/sky/atmomath.h`) scatters the haze
+  per colour with the haze's albedo, like the GPU sky, so the horizon colour the night and the near air read is the
+  drawn sky's hue, not a grey-albedo residual. Red `WW_ATMO_RED=greyms`. Log line `night haze: horizon ...`.
+- **2. The air's three optional filters** (Unreal Volumetric Fog's Albedo / Emissive, plus the clouds' albedo), one
+  shared source (`HazeOptics` in atmomath.h) read by the sky haze, the near fog and the clouds:
+  `atmosphere.hazeAlbedo` (now also tints the near fog per colour; red `WW_ATMO_RED=greyalbedo`),
+  `atmosphere.hazeGlow` (emissive; unset = the airglow law, above 1 the 557.7 nm green line, so `glowing` glows
+  green; red `WW_ATMO_RED=glowgrey`), `clouds.albedo` (per-colour two-stream in `cloud_march_step.glsl`; the
+  `hazeType` default, `glowing` 0.985 / 0.99 / 0.98, the rest 0.99 = the grey march as before). The base stays
+  physical: the fog is lit by the drawn sky, the sun and the moon. Log line `air filters: haze albedo ... glow ...
+  clouds.albedo ...`.
+- **3. Last resort, special cases only:** `atmosphere.inscatterColor` and `directionalInscatter` (+ `Exponent`,
+  `Start` in metres), default off, drawn in the sky haze and the near fog; a log line `air override: ...` when a
+  weather file sets one. No shipped file sets them.
+- **4. Select all in a cell view is refused** (the A key, Select > All, every caller of `GLView::selectAll`, and
+  Ctrl+A on the Block List): it selected tens of thousands of refs and froze the window. Deselect still works; a
+  plain NIF view selects all as before. Log line `select all: refused in the cell view (...)`.
+  (`cellCamBoundsIsCell` in `src/cellcambounds.h`.)
+- **5. The weatherrecx gate runs again** (`tests/features/weather/weatherrecx`): the reader's env is cached until
+  `wwEnvChanged`, so the gate read only its first root; build.sh links `wxoverride.cpp`, `recxmodroots.cpp` and a
+  `cellModSource` stub. 25 -> 17 failures, the same 17 on HEAD (not this lane's; owed to the gate's owner).
+- Spec: FO4-Extension-Formats branch `nighthaze-recx-20261111` (1.7; not merged).
+
+## MODULES1 round 10c (2026-11-11): the Fusion Shaders cloud model's remaining parts (a sheet per layer, sun-disc taps, hex tiling, the density exponent, the 2D layers' light, the weather file's shadow keys), far baked AO on the PBR far draws, a refused red links again, the leak fade on lit mist cards
+
+Changed, not checked (no build, no window in this round; every touched shader program linked offline through the
+driver in a hidden GL context: four sweep sets: base 483 of 483, Ray-traced GI 322 of 322, leak 322 of 322, retired baked GI 483 of 483). bungo: "I asked for my fusion shaders cloud model".
+
+- **1a. One shadow sheet per cloud layer.** In the 2D-clouds mode the cloud shadow map now lays one sheet per drawn
+  cloud layer at that layer's deck height; a map texel walks the sun line up to each sheet (parallax), and a receiver
+  takes only the sheets above it (the map's height ramp). The sheets are anchored to the world, as in the Fusion
+  Shaders model, not to the eye like the drawn dome. Plain math in `src/features/clouds/cloudsheetmath.h`, shader
+  branch in `res/shaders/features/clouds/cloud_shadowmap.frag`, texture units CloudSheetBase 95..102 and
+  CloudSheetBlend 103..110 (`src/gl/cellunits.h`). Red (WW_CLOUDSHADOW_RED, live, comma list): `bandsheets` = round
+  10b's band law.
+- **1b. Sun-disc penumbra taps.** Each sheet is read over the sun's disc at the sheet's distance, so a high deck
+  throws a softer edge than a low one. Red `notaps`.
+- **1c. Hex tiling.** The layer textures are read through a hex tiling, so the sheet does not repeat in a grid over
+  the far map. Red `nohex`.
+- **1d. The density exponent is applied** (the constant was already in `cloudfusionlaw.h`). Red `nodensity`.
+  Red `noscroll` holds the sheets still.
+- **1e. The 2D layers' light.** The drawn 2D cloud layers take the Fusion Shaders scatter: a rim at the cloud's edge
+  and a body tint, by the phase toward the key light, times the layer's own lit luminance, under a cap, gated by the
+  key light's elevation (the moon at night), scaled by the weather's class (clear 1, storm 0.5, radstorm 0).
+  `res/shaders/features/clouds/lookdev_clouds.frag`, `src/gl/lookdevstage.cpp`, constants in `cloudfusionlaw.h`.
+  Red `WW_LOOKDEV_RED=cloudnoscatter`. Fusion Shaders ships that pass switched off and reads scene luma; here it is on
+  and reads the layer's own colour.
+- **1f. The weather file feeds the shadow, both ends.** Four number keys in a weather .recx `clouds` block:
+  `shadowOpacity` 0..1, `shadowStrength` 0..8, `shadowLayerDensity` 25..400 (percent), `shadowDeck` 200..20000 (m).
+  They are physical additions: read under `physicalWeather` only; absent = the constants. Reader
+  `src/features/weather/weatherrecx.*`, writer `src/features/weather/weathertranslate.py` (the keys go under
+  `_added`). Red `norecx` (WW_CLOUDSHADOW_RED) = the file's keys not read. The 107 shipped weather files were NOT
+  replaced: they differ from this tree's translator output in more than the new keys, and the written values are the
+  constants, so a file without the keys draws the same. Spec: formats branch `cloudshadow-recx-20261111` (not merged).
+- **Lines.** `cloudshadow:` ends with `sheets=n/nc[layer@km:alpha] taps= hex= exponent=(applied|red) step= penumbra=
+  parallax= anchor=world above_receiver= values=...(file|default) reds= rejected=`, or `sheets=0(band_law_of_10b:<why>)`.
+  `clouds:drawn=` ends with `scatter=on|off(...)`. `volclouds:` says `fusion=2d_layers(...)` on the 2D tier and
+  `fusion=none(the volume tiers have no Fusion Shaders counterpart: left as they are)` on the volume tiers.
+- **2. Far baked AO on the PBR far draws.** The PBR programs have no vertex shader of their own (pbrm_* =
+  fo4_default.vert + pbrm_default.frag), so the vertex half was already shared; `pbrm_default.frag` now takes the far
+  bake's AO through the one AO rule (`cellAoShared`) and the far bake's sky factor on the ambient, and the renderer
+  hands the PBR far draws the same type. Both debug maxima apply (WW_LODL_AO_MAX, WW_LODL_SKY_MAX: debug keys only).
+  Red `WW_LODL_AO_RED=nopbr`. The `far baked ao vc:` line now says: far ground carries sky occlusion only, no baked
+  contact AO; and one more line names the PBR far draws.
+- **4. A red of a live feature links again.** fo4_effectdecalcsm with the Ray-traced GI and WW_CELL_FOGLEAK=0 was
+  refused by the driver (too many instructions). The leak-off fog path keeps one tail of the fog law in that variant
+  (`res/shaders/features/air/lookdev_fog.glsl`): 56486 instructions (none) and 56920 (ubo) of 65536. The old shape is
+  the offline define WW_AIR_TWOTAILS and still refuses. The shipping variants (with the leak) are binary equal to the
+  commit before when item 5 is put back (WW_FX_DECAL_NOKEEP; stamp and source hash aside, 4 of 4 binaries).
+- **5. The leak fade reaches lit mist cards.** With the room item 4 freed, the lit-decal programs take the mist
+  cards' leak-fade term (`res/shaders/features/air/cell_volpart.glsl`, +384 instructions; offline way back
+  WW_FX_DECAL_NOKEEP). Tightest program after it: fo4_effectdecalcsm 57322 of 65536 (ubo, with the leak). Red as in round 10b:
+  `WW_CELL_FXLOCAL_RED=noleakfade`.
+- **Known refusals of the retired baked-GI mode** (WW_CELL_PRT, the red of the old baked GI): round 10b listed
+  fo4_effectdecal and fo4_effectdecalcsm (none and ubo) as refused there. Item 4's path covers that mode too, so all
+  four link now; fo4_effectdecalcsm there is the tightest program of all sets, 65210 of 65536 (ubo, 0.5 % left), so
+  any new read in the lit decals can make it refuse again. Left as it is (a retired mode).
+- **Fixed on the way:** round 10b's texture unit AirEnvHist was missing from the unit list `kAll` in
+  `src/gl/cellunits.h` (tests/spells/cell_units_check.py failed on it; it passes now).
+- Offline checks: `tests/features/clouds/cloudsheets/build.sh` (38 bars, the red arm caught); the reader's six bars
+  (absent, fixture, clamp, no switch, every other value equal, red) in the lane notes; syntax check of every edited
+  source and every includer of a changed header. Not shown by a number: equality with round 10b under `bandsheets`
+  and the `norecx` red are by reading the code (the old block is untouched when no sheet is set).
+
+## AIRPERF1 round 6 (2026-11-11): far water and far tree cards in the traced set, a BLAS per part
+
+Changed, not checked (no build in this round; offline: tests/cellstreamrule/run.sh 26 checks, 20 reds; the kernels
+recompiled, tests/spvsync green; syntax check).
+
+- **Far water is traced** (`src/features/gi/rtfartrace.*`, `Stream::traceSync`): the far water shapes of the ring are
+  read like far objects and follow the stream the same way; two-sided, one stated tone (0.06), no map. The endless
+  sea plane stays out, and the loaded cells' own water is still not traced.
+  Lines: `cell stream: traced set handed over: far water T triangles from S shapes | ...` and
+  `rtddgi traced set: gen G by source, more: far water ... | far tree cards ... | BLAS parts ...`.
+  Red (WW_CELL_RTSET_RED, live, one word): `nofarwater`.
+- **Far tree cards are traced by their authored far mesh** (`impostorchunk.* cellFarCardsMeshIn`): a card is a photo
+  that turns to the eye and has no place in the world, so the rays take the tree's authored far mesh row of the
+  instanced far rows instead (alpha-tested with its own map; the kernels do test alpha). A carded tree with no
+  authored mesh row is counted in the line (`N of them have no authored mesh row and are not traced`), never given
+  an invented mesh. Red: `nofarcards`.
+- **A BLAS per part** (`rttraceset.cpp mergeAll`, `bakert.cpp buildRtParts`, kernels `rtddgi/trace.comp`,
+  `restir.comp`, `airrays.comp` + their `.spv.h`): the merged soup names its parts (each loaded cell, the large refs
+  of one 4 x 4 cell block, the far runs of one 4 x 4 cell block; at most 256, neighbours joined above that). Each
+  part is its own BLAS (opaque + alpha-tested), kept on the device by the bytes of its triangles while any volume
+  holds it, so a cell crossing builds only the parts that are new and one small TLAS. The tables keep the single
+  soup's order; a hit's row is the instance's custom index + the primitive (+ the opaque count for the alpha-tested
+  geometry), `rttracesetrule.h blasRow` == the kernels' `ddgiPrim` / `rsPrim` / `arPrim`. The set's local origin
+  snaps to a 32768-unit grid and the BLAS grow amount to a power of two so a part's bytes repeat from set to set.
+  Lines: `rtddgi cell: cascade L ...: BLAS parts N: B BLASes built (T triangles), K found again (T triangles),
+  masks + BLAS + TLAS M ms`; CLI `rtddgi BLAS parts N: ...` (`--blas-parts N`, `--blas-red`).
+  Red: `oneblas` (the single soup in round 5's order, one BLAS, a new set generation).
+  Limits: every part rebuilds when the snapped origin or the grow bucket changes; a soup of 2^24 triangles or more
+  stays one BLAS; no BLAS compaction. Unit `u10` (rows over 9 BLASes of a 600-triangle soup: 4096 rays, same hits).
+  The GPU identity gate needs the build: `--blas-parts 8` against `--blas-parts 8 --blas-red`, dumps byte-identical.
+
+## MODULES1 round 10b (2026-11-11): cloud shadows follow the clouds, the Fusion Shaders shadow law, far baked AO in the vertex colour by the AO rule, a mist card's leak fade, the moon-down ambient, the endless sea's draw line
+
+Changed, not checked (no build, no window in this round; every touched shader program linked offline through the
+driver). bungo: "Cloud shadows always need to be on", "I asked for my fusion shaders cloud model", far baked AO "needs
+to behave through regular AO rules", mist cards "the same sky visibility", "Were the cards actually using the depth
+buffer?".
+
+- **1. Cloud Shadows has no Off in its row.** Render > Scene > Cloud Shadows: Follows Clouds / Low / Medium / High /
+  Ultra. A stored 0 (an Off saved by an older build too) and no stored value follow the clouds' own step every frame.
+  Low..Ultra stay as chosen. Off is left as the pin `WW_CLOUDSHADOW=off`, a harness scope, or the red
+  `WW_CLOUDSHADOW_DEFAULT_RED=1` (stored 0 = Off). The `cloud shadows:` line gained `choice=` and `law=`.
+- **7. The cloud shadow map's law is the Fusion Shaders sheets law** (map mode, csMode 3): the light kept = the
+  product over the bands of (1 - cover), mask = 1 - saturate((1 - kept) x opacity), then mask ^ strength; constants in
+  ONE header, src/features/clouds/cloudfusionlaw.h (opacity 1, strength 1). Red `WW_CLOUDSHADOW_RED=beer` = the map
+  mode's old Beer law (40 /km x thickness). The volume mode (a march through the cloud density) has no counterpart
+  there and is unchanged. Not ported: one sheet per layer at the deck's height, the sun-disc taps, the hex tiling,
+  the density exponent, the 2D layers' lighting, a .recx clouds block.
+- **2. Far baked AO held in a vertex colour goes through the AO rule** (fo4_default.vert `farVcAo`): the flat far
+  copy's grey -> `wwFarAo` x `WW_LODL_AO_MAX`; instanced rows without the stream (mesh grey x row grey) -> the same;
+  the far ground's grey (its mask sheet's B, ONE sky-AO byte) -> `wwFarSkyVis` x `WW_LODL_SKY_MAX`. The colour is
+  then white. Red `WW_LODL_AO_RED=albedo`. Line `far baked ao vc:`. A contact-AO plane of its own for the far ground
+  needs a lodgen rebake that writes two planes; the PBR far draws have no such path.
+- **3. A lit mist card keeps the ambient the air keeps.** One law, `airAmbKeep` (cell_airmed.glsl), for the air's
+  froxel and the card: the card fetches the air's env strata (leak fade, open-field share) at its own froxel
+  (`volEnvHist`, unit 74). Outside the leak fix's live cases (WW_CELL_FOGLEAK=1, an interior drawn as outdoors) the
+  air's terms are 1 and the card's too. Not in the lit-decal programs. Red `WW_CELL_FXLOCAL_RED=noleakfade`.
+  `cell fx local:` says, per card, the ambient kept by the air and by the card (a one-texel read-back on a new card
+  set, then every 600 frames) and whether the volumetric cards' depth soft fade is on.
+- **4. Night with the moon down:** the master-Off ambient axes cross to the physical night sky's floor (airglow x the
+  floor gain, as the sky draws it) by the night share: +Z = pi x floor, -Z = ground albedo x +Z, a side half of each.
+  The record's rows: red `WW_NIGHTSKY_RED=record`. Line `night sky: moon down: floor:`.
+- **6. Endless sea:** line `endless sea draw:` on change: not sent / sent, hidden / sent, drawn, with the triangles
+  sent and the pixels that passed (one sample query round the sheet's first draw of the frame). Red
+  `WW_ENDLESS_SEA_RED=nocount`.
+
+## AIRPERF1 round 5 (2026-11-11): far objects in the traced set, a warmed hand-over, late soups, the saved row
+
+Changed, not checked (no build in this round; offline: tests/cellstreamrule/run.sh 20 checks, 14 reds, syntax check).
+
+- **Far objects are traced** (`src/features/gi/rtfartrace.*`, `Stream::traceFarRead` / `traceSync`): every far shape of
+  the ring (far terrain, the far objects' arrays, the instanced far rows, the game's own far chunks) is read once
+  into triangles with the colour of its diffuse map at each triangle's middle; the set takes the runs within the ring
+  that no loaded cell traces already (a placed object by its ref, other geometry by its cell). The far terrain takes
+  its map's colour too (was one dirt tone). Far objects are two-sided and keep their alpha-tested map. Budget:
+  600,000 far-object triangles a set, whole cells, nearest the centre first; reading is 4 ms a tick on the main
+  thread (one shape at least). Not in it: far water, far trees drawn as cards (no mesh).
+  Lines: `cell stream: traced set handed over: ... far terrain T triangles from S shapes, far objects ...` and
+  `rtddgi traced set: gen G by source: loaded cells ... MB | large refs ... | far terrain ... | far objects ...`.
+  Reds (WW_CELL_RTSET_RED, live, one word): `nofarobj` (terrain alone), `fardirt` (one stated tone), `nofarcap`.
+- **No unconverged volume at a cell crossing** (`rtddgicell.cpp startBuild`): the new volume runs
+  `rttracesetrule.h warmUpdates( 0.97 )` = 33 updates on the build worker before it replaces the old one, which stays
+  drawn meanwhile. Line: `handover done: ...; warmed 33 of 33 updates before it was drawn (N ms ...)`. Red `nowarm`.
+- **Per-cell BLAS: not done.** The kernels index their triangle tables by primitive without an instance id
+  (`rtddgi/ddgi_common.glsl`, `trace.comp`); it needs a kernel change and new SPIR-V, so the worker rebuild stays.
+- **Cells loaded before the Ray-traced GI row went on get their soup** (`Stream::pumpWorker`): when no cell waits to be
+  built, the worker gathers the soup of a drawn cell that has none, nearest first. Line: `cell stream: soup gathered
+  for X,Y ...`. Red `nolatesoup`.
+- **The Cell Streaming row is saved** (QSettings `CellView/CellStream`, ships on; `cellstreamrule.h rowStart`). Still
+  live, still pinned by WW_CELL_STREAM. Line: `cell stream: the Cell Streaming row starts on|off (...)`.
+- The land soup's cell origin goes through `rttracesetrule.h soupCellOrigin` (the world's frame under any document
+  origin; unit u8).
+
+## AIRPERF1 round 4 (2026-11-11): cell streaming always on, a Cell Streaming row, the Ray-traced GI follows the stream
+
+Changed, not checked (no build in this round). bungo: "as I move the camera, the 5x5 area does not load new cells",
+"The streaming is always on, I can switch it off if I want to during runtime", "and then back on"; on the Ray-traced
+GI's dark square that stayed at the spawn: "Why does it not follow me?".
+
+- **A. Streaming is the default in every exterior view**, also one opened by a spec (WW_CELL_OPEN). The rule is
+  src/cellstreamrule.h openRule (unit-tested); `WW_CELL_STREAM=0` at the open = a fixed block. 39 harness scripts
+  that open a fixed block now say so on their line 2 (`export WW_CELL_STREAM="${WW_CELL_STREAM:-0}"`). Red
+  `WW_CELL_STREAM_RED=specfixed` = the rule before. Line `cell stream: <why on or off>` at the open.
+- **B. View > Cell Streaming** (and its panel row in the LOD group), default on, this session only: off = the block
+  stays where it is (cells already being loaded finish, then nothing loads or unloads), on = the block follows the
+  camera again from the camera's cell, no reopen. `WW_CELL_STREAM=0|1` set live does the same and greys the row.
+  Lines `cell stream: off (...)`, `cell stream: on (...)`, and `cell stream: centre X,Y (camera cell ex,ey), N x N
+  cells` at every change of the centre. Red `WW_CELL_STREAM_ROW_RED=1` (live) = the row and the live pin hold nothing.
+- **C. The Ray-traced GI no longer stops the stream.** Each streamed cell gathers its own triangle soup on the
+  stream worker; src/features/gi/rttraceset.* merges the loaded cells' soups plus the far terrain of the ring round
+  them (cut where cells are loaded) on a worker and publishes the result as the traced soup, at most once per 1.5 s
+  (rttracesetrule.h). The volume and its cascades then build on the new set while the old volume stays drawn, and
+  swap when it is up (rtddgicell.cpp handover); the cascades' scroll box is the new set's box, so it follows the
+  camera. Lines `cell stream: traced set handed over: ...`, `rtddgi traced set: gen G, ... centre X,Y, camera cell
+  ex,ey in set yes|no, ... cells: ...`, `rtddgi cell: handover ...` / `handover done`. Reds: `WW_CELL_RTSET_WELD_RED=1`
+  (at the open: the welded block, no stream, as before), `WW_CELL_RTSET_RED=parked` (the set is never published
+  again: the dark square stays), `=nofar` (no far terrain in the set), `=drop` (the volume is dropped at every new set).
+- Not in this round (follow-ups): one acceleration structure per cell in a two-level structure inside the tracing
+  session (today each publish builds the whole set's structure once, on a worker), far objects in the traced set
+  (terrain only), a wider faded edge (today the cascades' one-probe-cell edge fade), the row stored in the settings.
+- New files: src/cellstreamrule.h, src/features/gi/rttraceset.cpp, rttraceset.h, rttracesetrule.h (NifSkope.pro),
+  tests/cellstreamrule (offline unit with reds).
+
+## MODULES1 round 10 (2026-11-11): one physical night sky, 2D clouds lit by it, a Medium moon, the horizon gap fill, far baked AO by the AO rule, cloud shadows on
+Changed, not checked in a window (no build in this round). bungo: "our physical sky is meant to be used day and night",
+"Why are you showing me vanilla sky and clouds and moon".
+- **One night sky.** The record's painted night dome is no longer in the default path. The night sky is the physical
+  sky lit from the moon, x one readable-night factor: film day-for-night shows a night scene about 2 stops under the
+  day's exposure, so the sky a full moon lights is drawn 2^-2 x the weather's Day key over its Night key brighter, and
+  the moon's phase is cancelled on the sky only (the moon's direct light keeps it). The same sky x factor feeds the
+  drawn sky, the RTXGI miss sky, the six ambient axes (master Off: they cross from the record's rows to the physical
+  sky by the night share), the saturated night air and the far fog colour (the drawn sky's own horizon colour), the
+  reflection captures and the 2D cloud layers. The drawn sky now takes the light's own unit by night, so the drawn sky
+  and the volumes' sky are one number. Telemetry: one `night sky:` line (factor, stops, the unit and level each
+  consumer got, drawn : RTXGI ratio). Live: `WW_NIGHTSKY_STOPS` (0..8, default 2). Reds: `WW_NIGHTSKY_RED=physical`
+  (no factor), `=record` (round 7's crossfade to the record's dome colours). Not covered: with the moon down, the
+  master-Off ambient axes keep the record's rows (no key, so no sky from the key).
+- **Clouds.** A flight (WW_ALL_ON) starts with the Cloud Map on and the 2D layers lit by the model
+  (`WW_CLOUDMAP=1 WW_CLOUDVOL=low`; it was `ultra` with the Cloud Map row pinned Off by the harness rule, so the
+  clouds refused and the record-coloured layers drew). By night the layers' sky share takes the same lifted sky; the
+  key share keeps the moon's direct light. Red `WW_CLOUDVOL_RED=vanillalit`: the record's cloud colours.
+- **Sun and Moon Size** gains a step and ships it: Physical / **Medium** / Game / Large. Medium draws the moon 4 deg
+  across (x7.7 of 0.52) and the sun the same share of the way to its Game size on a log scale (x2.60, 1.39 deg).
+  WW_ATMO_BODYSIZE takes `medium`; WW_ALL_ON sets it. A stored row value keeps its index (a stored Game = 1 now reads
+  Medium; a stored Large = 2 now reads Game).
+- **The horizon gap fill** (the sky band over the far land's edge, cell_volsky.frag) has no colour and no cover of
+  its own (rule 4): its cover is the band's weight x the share of light the far land under it loses to the air, and
+  its light is that same fog path's in-scatter. No fog, no band; with fog it is the backdrop fogged as a surface at the
+  far plane is. Red `WW_ATMO_AP_RED=bandfull` (rule 3: the cover forced to the band's weight whatever the air).
+- **Far baked AO** (the far rows' AO + sky stream) leaves the vertex colour and enters the one AO rule
+  (`cellAoShared`, cell_ao.glsl): the screen obscurance x the baked obscurance on the whole lit colour before the fog,
+  near and far alike. Debug keys, no menu row and no INI: `WW_LODL_AO_MAX` and `WW_LODL_SKY_MAX` (0..1, unset 1; the
+  second scales the baked sky occlusion 1 - visibility). Telemetry `far baked ao:`. Red `WW_LODL_AO_RED=albedo` (the AO
+  in the vertex colour, as before). The flat far copy and the far ground still carry their AO baked into colours.
+- **Cloud shadows.** Defaults: Cloud Shadows now start ON when no choice is saved (at the clouds' own step: Low, the
+  Cloud Map's field, for the 2D layers); this replaces "Cloud Shadows ... still ship Off" in the older Defaults line
+  below. WW_ALL_ON pins `WW_CLOUDSHADOW=low`. The status line names the field, the light and the receivers. Red
+  `WW_CLOUDSHADOW_DEFAULT_RED=1` (Off with no saved choice). A harness run still measures only what it pins.
+
+## AIRPERF1 round 3 (2026-11-11): no shortcut fires in the free camera
+- **bungo:** "I keep entering some 'marker' placement mode accidentally, why" and "Make sure no other shortcuts
+  are toggled if I am in the free cam mode (from shift + f)". Cause of the first: the cell editor's key handler ran
+  ahead of the free camera's key lockout, and its arm key is Shift+A. In the free camera A is "move left" and Shift
+  is "fast", so a fast strafe left armed Place mode and the next clicks dropped XMarkerHeading refs.
+- **Now, free camera on (Shift+F):** only the camera's own keys do anything: move (W A S D Q E), look / zoom keys,
+  Shift (fast), F11 (full screen) and the exit keys Shift+F / Esc. Two gates: the window's key filter accepts the
+  shortcut override for every other key (no menu, toolbar or window shortcut is matched) and skips its own key
+  branches; the view's key handler runs the camera lockout first, ahead of Place, the physics sim, the paint
+  modes and the modal tools.
+- **Walk view:** Shift+A does not arm Place and Shift+D does not duplicate (they are fast strafes there); a held
+  key's repeats never arm Place. Outside both cameras Shift+A and the panel's Place button work as before; the
+  tooltip says when the shortcut is off.
+- **Never silent:** arming writes "Place mode ON (base): click drops, drag turns, Esc leaves" into the view's own
+  status line (before, only the panel said it); leaving clears it.
+- **Telemetry:** `fly keys: <key> swallowed (free camera on: ...)` once per key;
+  `place arm: Shift+A swallowed (the camera owns the keys: camera=walk|orbit repeat=0)`,
+  `place arm: armed by Shift+A (camera=orbit)`, `place arm: Shift+D duplicate swallowed (...)`.
+- **Red:** `WW_FLYKEYS_RED=1` = the old rule for all of it (live, read per key press).
+- **Known, not changed:** in the walk view of a NIF document Shift+A still opens the Add menu.
+
+## AIRPERF1 round 3 (2026-11-11): no navigation gizmo in full screen
+- **bungo:** "please hide the navigation gizmo in the top right corner if F11 is on". Full screen on = the axis balls
+  are not drawn, not hovered and not clicked (no axis snap, no ring drag in that corner); leaving full screen puts
+  them back. No new setting.
+- **How:** `NifSkope::toggleViewportFullScreen` hands the state to the viewport (`GLView::wwSetNavGizmoOff`); the
+  draw (paintGL's overlay) and `GLView::navGizmoHitTest` both read `navGizmoOff`.
+- **Red:** `WW_VIEWFULL_GIZMO_RED=1`: the gizmo stays in full screen. **Telemetry:** `view full screen: on, navigation
+  gizmo hidden (not drawn, no clicks)` / `view full screen: off, navigation gizmo shown` at every toggle.
+
+## AIRPERF1 round 3 (2026-11-11): wall stain models draw with the decals, under the mist
+- **The draw (bungo: the tall dark panel on a Goodneighbor wall, CommonwealthFoggy):** `DecoStain2x1WallL01` (ref
+  00232786) and `DecoStain1x2Wall02` (00232785): one quad each, effect shader, `BldStreaks01.BGEM` (Decal flags, blend,
+  greyscale-to-palette alpha driven by the vertex alpha, no depth write). An EFFECT-shader decal: the earlier decal
+  fix covered the lighting shader's decals only, and this draw printed no `decal blend:` line.
+- **The cause:** only the lighting shader's decals were drawn before the blended pass (`Shape::wwDecalDrawsFirst`).
+  An effect decal stayed in the blended pass in bucket order, so it painted over every mist card drawn before it: the
+  stain kept its own colour while the wall beside it sat under the mist. The game draws its decals before its blended
+  effects.
+- **The fix (src/gl/glshape.cpp):** effect-shader decals take the decals' place in the order too (before the water
+  and the blended pass). Their light, fog and blend are unchanged.
+- **Red:** `WW_CELL_FXDECAL_RED=late` (live): effect decals stay in the blended pass. `WW_CELL_FXD_RED=late` still
+  holds every decal back.
+- **Telemetry:** `decal order: effect decal <material> (shape N) -> with the decals, before the water and the blended
+  pass`, once per material and rule.
+- **Not changed:** the stain's own coverage. By its files the left third of this stain is authored near opaque
+  (vertex alpha 255, palette alpha up to 0.9): it stays a darker area of the wall, now under the same mist.
+
+## AIRPERF1 round 2 (2026-11-11): the ReSTIR pass no longer makes the frame wait on the device
+- **The cause (bungo: 19-35 ms in the big window):** "device wall" timed the whole step, and the step ended in a CPU
+  wait on its submit's fence. That submit waits on GL's glDone semaphore, so the fence fires only after the GPU has
+  run every GL command queued before the hand-over (shadow maps, lamp cubes, the shared depth / normal pass). In a
+  104 ms GPU frame that queue is 18-40 ms deep; the kernels themselves are about 1-2 ms. The first frame after the
+  resize read 1.7 ms because the re-import had just drained GL. The volume's own steps on the same device do not
+  wait and read 0.14 ms wall in the same flight.
+- **The rule (`src/features/gi/rtddgi/restirhandover.h`):** the GL frame submits and returns; GL orders its read of the
+  ratio on the GPU with its wait on vkDone (EXT_semaphore: the wait blocks the GL server, not the caller). A step
+  that finds its last submit still on the device makes no new one (the parameters and the command buffer are in
+  use): that frame keeps the last ratio and is counted `late`. The CLI and a read-back wait as before.
+- Red, live: `WW_CELL_RESTIR_WAIT_RED=1` (the frame waits, the rule before).
+- Telemetry: `restir cell: on W x H, ... device wall X ms = last submit a + upload b + record c + submit d + wait e +
+  read f; device gpu G ms (...); gl copy C ms cpu ...; hand-over: ...; late L of N frames; red R`. `device gpu` is two
+  timestamps on the device (before the first kernel, after the last copy), read when the fence is known signalled.
+  With the red the line also gives `behind GL's queue` = wait - device gpu.
+- Offline proof: `bash tests/features/gi/restir_handover/run.sh <out>` (a frame timeline on the rule; green 5, the
+  red `-DRESTIR_HANDOVER_RED` fails framewait and behind). Not flown yet: the numbers above are the flight log's
+  and the code's reading; the next flight's `restir cell:` line decides.
+- Files: `src/features/gi/rtddgi/restirhandover.h` (new), `restir_vk.inc`, `rtddgi_gpu.h`, `src/features/gi/rtddgicell.cpp`.
+
+## AIRPERF1 A9 (2026-11-11): clouds, night, wind, lightning and precipitation follow the physical weather switch
+- **The rule (bungo), per block family:** with `"physicalWeather": true` in the block's own entry every physical
+  value written there decides alone; the record is no blend, fit target, clamp or floor. A value not written stays the
+  record's. With the switch off or absent the record decides, and only a record part written in the file is read.
+- **Record parts (read with the switch off):** `wind.direction`, `wind.turbulence`, `transitions.*`, a cloud layer's
+  `texture`, a precipitation layer's `texture` / `atlas`. **Physical additions (dropped with the switch off):** clouds
+  `coverage`, `density`, `type`, `liquidWater`, `dropletRadius`, the layer heights; night `stars`, `moonlight`; wind
+  `speed`, `gusts`; lightning `frequency`; precipitation layers' type / rate, `wetting`, `drying`.
+- **Record terms removed under the switch:** the Low band's cover is the file's `coverage` even when the record has
+  no counted cloud layer (before: 0); its density is the file's ratio alone, not the record's role mean times it
+  (CommonwealthOvercast, invented layers: 1.02 -> 1.2); the band heights come from the file's layers alone
+  (882 / 1673 m -> 850 / 1450 m); a storm is the file's `lightning.frequency` > 0, not the record's thunder sound.
+- Reds, live: `WW_WEATHER_RECX_RED=noswitch` (all five families read as before) or `noswitch-clouds`,
+  `noswitch-night`, `noswitch-wind`, `noswitch-lightning`, `noswitch-precipitation` (comma list).
+- Telemetry: `weather recx blocks: <weather> clouds=on:recx(...) night=off:record(...; file keys not read: ...) ...`
+  on stderr at every change of state; `phys=0x..` and the alone flags in the weather's key; the precipitation source
+  note says `(switch=off: recx:<file> layers not read)`.
+- Files: `src/features/weather/weatherrecx.cpp` / `.h`, `weatherrecxmath.h`, `cellprecip.cpp`,
+  `src/features/clouds/cloudmath.h`, `cloudmap.cpp`, `src/gl/lookdevstage.cpp` (the storm). Offline proof:
+  `notes/modules1/airperf1/unit/a9_gate.cpp` (105 checks, 0 failed).
+
+## AIRPERF1 A8 (2026-11-11): a weather .recx augments the record; one switch for the physical weather
+- **The rule (bungo):** the record is the base. A record's look part is replaced only by a switch or when that part
+  is written in the .recx. The one switch of a weather entry is `"physicalWeather": true` (beside the match keys,
+  default off; .recx spec 1.5 on the formats branch).
+- **Air, switch on:** the base density is the file's visibility (Koschmieder less clear air, the sky's own number),
+  even over height; a file's `groundFog` layer is added on top (`strength` x base at its floor, falling by e per
+  `thickness`). The record's fog distances, power, max and height bands are no fit target, clamp or floor.
+  CommonwealthFoggy hour 22: 400 m -> 9.762 /km aloft, x (1 + 3.0) = 39.05 /km at the street.
+- **Air, switch off or absent:** the record's street fit as in A7, a file's layer only reshapes the height.
+- **Sky haze:** a file's `visibility` / `hazeHeight` replace the record's haze only under the switch (or the Scene
+  window's live value); under it the haze height's flat part is 0, not the record's fog height. The generated rung's
+  values stand as before.
+- Reds `WW_CELL_AIR_FIT_RED=wthr` (the air before), `WW_WEATHER_RECX_RED=noswitch` (the sky haze before). Telemetry
+  `phys=(switch=atmosphere:..,groundFog:.. base=.. layer=.. heights=.. colours=.. street=../km T ..)` in the
+  `cell air:` echo, `weather recx haze:` on stderr, `physicalWeather=file:<path>` in the weather's sources.
+- Files: `src/features/air/airrecxfit.h` (the law, unit `notes/modules1/airperf1/unit/recxfit.cpp`),
+  `src/features/weather/recxphysical.h`, `cellvolair.cpp`, `weatherrecx.cpp`.
+
+## AIRPERF1 (2026-11-11): the cell air's cost, and Foggy too thin
+- **A1 the sky share walks the probes once a layer, not once a froxel:** the layer's turn replaces the per-froxel
+  dither. Key `WW_CELL_AIR_ENVRATE=dither` (red) / `4` / `8`. Telemetry `envwalk=` in the `cell air:` echo.
+- **A2 slice count by a live key:** `WW_CELL_AIR_SLICES=64` / `96` on the 128-slice presets (the default is unchanged:
+  the offline twin's bars for 64 slices failed on hard shaft edges). Telemetry `slices=`.
+- **A3 the sun and the inject lights refresh a layer every second cycle** under the temporal mode, and the lamp walk
+  skips a froxel with no lamp in its list. Reds `WW_CELL_AIR_SUNRATE=1`, `WW_CELL_AIR_LAMPS_RED=walkempty`. Telemetry
+  `sunrate=`, `lampempty=`.
+- **A4 the far grid's refresh of an unchanged view is spread over its refresh frames.** Red
+  `WW_CELL_AIR_FARSPREAD_RED=1`. Telemetry `farspread=`.
+- **A5 a moved caster redraws a lamp's shadow tiles only when the move can show** (half a tile texel at its nearest
+  point, or entering / leaving the lamp's reach). Red `WW_CELL_AIR_LAMPATLAS_RED=exactsig`. Telemetry
+  `air lamp atlas mover: ...` (each mover's name once), `held` in the atlas line.
+- **A6 the echo names the light lists the air walks:** `lists=surfaces(...)` / `air` / `flat(...)`.
+- **A7 CommonwealthFoggy far too thin:** the air's fit took the sky's haze off the record's street fit and the
+  surfaces then took the min of the two as well, so the eye saw half the record's fog and none of the air's own
+  light. The air now keeps the record's whole street fit, for every weather. Red `WW_CELL_AIR_FIT_RED=apcut`.
+  Telemetry `fit=(rule= street= record= sky= T air/game ... light=)`.
+
+## MODULES1 round 7 (2026-11-11): bungo's build 62 flight
+- **Item 4 strips in the far fog:** the far tail's light came from the LAST froxel slice alone (dL / dT); in the
+  16F grids a thin last slice's dT is a few half-float steps, so it stepped per slice. Now the tail reads the column
+  (L / (1 - T) over the slices holding the last ~64 steps of T), and under optical depth 0.125 the analytic depth.
+  The grids stay 16F. Red `WW_CELL_AIR_TAILJ_RED=1`. Fog echo `tailJ=column|RED last slice`. Offline model: red 194
+  pixel steps, green 0.
+- **Night sky d (Foggy h22 "the sky is pitch black"):** saturated night air ends at the record's night fog colour with
+  Physical Light Units Off, at albedo x the sky's mean (with the record's level) with it On; surfaces take the same
+  floor, so far land and sky end at one colour. Over the record's dome the sky is covered by the air ONCE (its own
+  L, T; straight up T 0.227), not also by the residual credit and the horizon band. Red `WW_NIGHTAIR_RED=1`.
+  Telemetry `night air: master On|Off: saturated air = ...`.
+- **Item 6 white 1 px line across the horizon (from high up):** the sky air's exactly-level ray had its own end
+  (T 1 above the air's top) while the rows beside it were opaque. It ends like its neighbours now.
+  Red `WW_CELL_AIR_LEVELRAY_RED=1`. Telemetry `sky air level ray: ...`.
+- **Item 9 sun leak on the alley wall:** the wall is grazed by the sun (N.L 0.00); the soft shadow filter moved each
+  tap's depth along the receiver's slope by up to 2000 units, past every caster, so half the taps read lit. A tap's
+  depth walk is now at most 4 texels of its cascade. Red `WW_SHADOW_RED=walk2000`. Telemetry `sun cascades filter:
+  ...`. Offline model at 0 deg: rays 0.000, red 0.500, green 0.000; from 20 deg up green = red within 0.011.
+  The "weak GI bounce" is the same wall: 0 of 83324 lux reaches a grazed face, so 0 bounce is right.
+- **Item 9, same class: back light without its flag:** a material's back light power reached the shader without
+  the back-lighting flag (171 of 6616 vanilla BGSM). The power is passed only with the flag.
+  Red `WW_BACKLIGHT_FLAG_RED=1`. Telemetry `back light flag: ...`.
+- **Item 7 the 306 settings rows left at "reopen":** every row says its bin and reason: 219 build cell data, 59 are
+  options of the run that opens the cell, 10 are no switches (7 name prefixes, 3 names with no reader), 18 are live
+  now (11 already re-read; 7 were read once per process and are re-read: `WW_CELL_AO_LEAN` / `_RED`,
+  `WW_DRAW_GLCACHE` / `_RED`, `WW_PBRM_ROUTE_VIEW`, `WW_CELL_STREAM_TEXKEEP` / `_GEOKEEP`). Red `WW_R7LIVE_RED=1`
+  (launch). Telemetry `switch: cell ao lean ...`, `switch: draw gl cache ...`, `stream keep: ...`.
+- **Item 10 Scene window, the two open points of R6-11:** the number rows with a stated default (Exposure, Game Light
+  Brightness, Game Day, Shadow Distance) carry the switch rows' Reset button, lit only off the default; a click on
+  the cut Status text copies the whole text. Red `WW_SCENE_LAYOUT_RED=r6`. Telemetry `scene window: N number rows
+  carry Reset (...)`, `scene window: reset '<row>': ...`, `scene window: elided text copied whole on a click ...`.
+- **R7-1 lit effect cards and particles dark beside a lamp:** outdoors they take the surfaces' sun, the weather's
+  ambient and the lamps at their own spot. Red `WW_CELL_FXLOCAL_RED=base`. Telemetry `cell fx local: ...`.
+- **R8-1 lit effect cards as dark as the street they stand in:** a lit card or particle keeps only the share of the
+  weather's ambient a surface at the same place keeps (1 - the GI volume's sky share) and takes the volume's light for
+  the rest, so at night it holds the street's level and the lamps' colour instead of a grey veil. Material in the NIF
+  or a .bgem: the same rule. A lit-band material (base colour x scale at or under 1) is a pure receiver outdoors: the
+  lighting influence no longer keeps an unlit share, so a fire barrel's smoke is orange at the fire and fades with
+  distance from it. A volumetric card with no normal map takes its normal from the opacity as a height.
+  Red `WW_CELL_FXLOCAL_RED=ambient` (the whole ambient), `influence` (the unlit share), `face` (the face normal);
+  `base` as before. Telemetry `cell fx local:` (three cards' lamp terms), `cell effects puff: ... law:` (base colour,
+  scale, brightness, band, influence per card), `cell effects volumetric: ... normal:`.
+  Follow-up (bungo: "Opacity gives the height, or rather 'depth' always"): with a normal map the map's slope and the
+  opacity-depth's slope add at 1 : 1 (surface gradients), and the UV ball no longer stands in for the depth: the
+  thickness a card's light reads is its opacity. Red words `mapalone` (a normal map alone) and `ball` (the ball again).
+- **Round 9 mist cards are slabs of air** (bungo: a mist card "is a slab of denser air"; "the fake fog cards on the
+  left should be tinted red, and on the right side tinted warm orange"): a blended lit mesh card on the volumetric law
+  takes the light the air at its pixel scatters toward the eye, x its opacity as density: the lamps x the air's phase,
+  each in its own colour with its own falloff, + the sky's share under the record's cap. The lump's surface share and
+  the GI surface term are gone from it, so a card is never brighter nor of another hue than thick air under the same
+  lights. Particle systems (smoke, steam jets) stay lumps; additive and light-beam cards are untouched.
+  Red `WW_CELL_FXLOCAL_RED=lump` (live). Telemetry `cell fx local:` (the law's sentence; three cards' lamps as a slab
+  of air beside the lump's).
+- **MODULES1 R8-2: the bloom holds still under the temporal jitter** (bungo: "our bloom is not stable ... it shimmers").
+  The bloom chain reads the frame before the temporal resolve, so a bright thing under a pixel wide was hit by one
+  jitter and missed by the next and its halo blinked. On a jittered frame the chain's first level is now the mean of
+  its last 8 frames (the jitter's period) while the view stands still; a moved camera counts from 1 again. Offline
+  model: the bloom's frame-to-frame energy swing of a still view 30.7 % -> 0.0 %. Not bounded while the camera moves
+  (a 13-tap down pass was measured for that and not shipped: lower at 4 and 8 samples, higher at 1).
+  Red `WW_CELL_BLOOM_RED=nohold`. Telemetry `cell bloom: ... hold=` and `cell bloom hold:`.
+- **Night sky:** Physical Light Units Off: the drawn sky crossfades to the weather record's night dome colours by
+  the night share. On: the record's sky level is added to the physical night sky and to the ambient, so the night
+  stays readable. Stars in both. Red `WW_NIGHTSKY_RED=physical`. Telemetry `night sky: ...`, `nightsky=` in the sky echo.
+- **Item 2 one-frame light flashes:** a surface fragment off the traced depth (2 % + 2 units) took every lamp
+  unshadowed for that frame; it now keeps its pixel's lamp shadow ratio (effects, particles, water and the air keep
+  1.0). Red `WW_CELL_RESTIR_MISS_RED=1`. Telemetry `restir ratio miss: ...`.
+- **Item 5 white far tower pink with the sun behind it:** under Physical Light Units the sky's six ambient axes went
+  in mirrored (every face read the opposite side's sky; the ground took 15 % of its sky). They now go in the
+  weather's order. Red `WW_PHYSUNITS_AXES_RED=1`. Telemetry `phys light: ... axes=...`; `cell ambient:` up above down by day.
+
+## MODULES1 round 6 (2026-11-11): bungo's build 61 flight
+- **R6-1 far trees glowing white when back-lit:** the far tree MESHES' leaf back light was added to the root of the
+  lit colour in the viewport light's unit. Under the cell's sun it is now albedo x sun x (N.-L x power)^2 x the sun's
+  visibility, in linear light. Red `WW_CELL_LIT_RED=backglow`. Telemetry `cell back light: ...`.
+- **R6-2 the sea ended before the horizon:** a child worldspace (Goodneighbor) takes its parent's water type and
+  level for the endless sea. Red `WW_CELL_PARENTWATER_RED`. Telemetry `esm world: ... sea water type`, `endless sea: ...`.
+- **R6-4 white cables in direct sun:** cables draw no specular lobe. Red `WW_CELL_CABLES_RED=spec`.
+- **R6-6 sun disc and sunlight disagree at 6:30:** the sky's bodies and the light read one sun path on the game's
+  clock. Red `WW_SUNPATH_RED=realclock`. Telemetry `sky bodies sources: ...`.
+- **R6-7 settings that needed a reopen:** glare, the bloom fields and the cable wind red are re-read live; 25 rows of
+  src/wwswitchstages.inc corrected to live; the table is in byte order again.
+- **R6-8 shadow debug views unreadable:** the views are a probe pass (no fog, no post, no exposure on top).
+  Red `WW_SHADOW_RED=viewpost`. Telemetry `shadow view: ...`.
+- **R6-11 Scene window rows bunched and cut off:** the Name | Value tree is replaced by the panel standard: a scroll
+  area with one label | field grid, wwHeading groups, fields the width of the value column, one row height, selectors
+  never narrower than their longest entry, the Status text elided with the whole text in its tooltip. Red
+  `WW_SCENE_LAYOUT_RED=1`. Telemetry `scene window: panel standard rows: ...` and `scene window rows: ... check 1..5`;
+  `WW_SCENE_ROWS_PROBE=1` repeats the checks at 400, 800 and 1152 px.
+- **R6-12 night too dark, tiny moon:** a flight keeps the atmosphere rows on (aerial perspective, sun, night sky, GI);
+  new row **Sun and Moon Size** (Physical / Game / Large, ships Game; pin `WW_ATMO_BODYSIZE`; telemetry
+  `sky bodies size: ...`); one gameplay moon factor on the physical path (red `WW_MOON_RED=physical`, pin
+  `WW_MOON_GAME`, telemetry `moon light game: ...`).
+- **R6-13 Physical Light Units is a Scene row and ships Off:** Off = vanilla Fallout 4 lighting: lamps at the record's
+  colour x fade, the weather record's sun and ambient, the imagespace eye and the vanilla filmic curve. `WW_PHYSUNITS_RED`
+  stays as the pin. Reds `WW_PHYSUNITS_VANILLA_RED=curve,eye,lampscale`. Telemetry `physunits master: ...`,
+  `tonemap: curve=...`, `phys lamps: ...`. Game Light Brightness greys while it is Off.
+
+## MODULES1 round 5 B9 (2026-11-10): far tree cards take the hour's sun (white at noon, glowing at night)
+- **Cause:** an exterior has no XCLL directional, and the card programs (impostor_cell*) were not on the list that
+  takes the weather's sun and DALC (src/gl/celllights.cpp `extProg`). Their cellHasDir stayed 0, so PERFLOAD1 P2's
+  hour-light block in impostor_oct.frag never ran outdoors and the cards were lit by the viewport light x Sunlight
+  Scale, which follows no hour.
+- **Now:** the card programs take the weather sun (x Sunlight Scale) and the weather DALC like the near trees.
+  Telemetry `far cards light: sun weather|none (the viewport light), ambient weather DALC|flat NAM0`.
+  Red WW_CELL_FARLOD_RED=cardsun.
+
+## MODULES1 round 5 B10 (2026-11-10): NPC hair no longer draws cyan
+- **Before:** the hair colour (item 16) goes into the vertex R as the palette row; a draw that skips the palette (the
+  PBR route, or material tint off) multiplied the diffuse by (row, 1, 1), so the hair drew cyan.
+- **Now:** on a Greyscale_To_PaletteColor material such a draw holds R at 1 (src/gl/renderer.cpp `wwPaletteRowHeld`);
+  the palette draw is unchanged. Telemetry `palette draw: <shape> route=legacy palette|pbr|material tint off`.
+  Red WW_CELL_PALETTE_ROW_RED=1.
+
+## MODULES1 M3 round 3 (2026-11-10): the steam cards' hard top band (flight 11-10, steam_mist_wide_1110)
+- **Cause.** A lit effect card with Volumetric Particles on takes the puff law (cell_volpart.glsl `vpPuffAlpha`):
+  its opacity thickens toward the middle of a ball spanning the card's UV 0..1, read from the CLAMPED UV. The vanilla
+  steam cards are no single sprite: MistGroundWaterSteam01Long's wall tiles (u 0.41..5.95, v -1.01..-0.38: the clamp
+  put every pixel on the ball's rim, opacity 0) and its Puff015 shape sits in an atlas cell (0..0.26: the ball's rim
+  crossed the cell as an arc near the top, where the square-root rim turns the opacity on in a few pixels = the band).
+- **Now.** The CPU reads each lit card's UV box; a card that is not one sprite (outside 0..1, or under 3/4 of it) is
+  a slab: its own alpha, thickened only by the soft slab, as drawn. Particles and one-sprite cards keep the ball.
+- **Telemetry:** `cell effects puff: shape N uv u A..B v C..D -> ball (one sprite) | slab (tiled or atlas cell)`,
+  once per shape.
+- **Red:** WW_FX_PUFF_SLAB_RED=1 (the ball for every card, as before).
+
+## MODULES1 G4 (2026-11-10): the sky and clouds through the fog, by its optical depth (night items 5, 10b, 12)
+- **Found.** Nothing covers the sky or the 12 vanilla layers but the air itself: the layers draw into the backdrop at
+  the deck, and the sky pass lays the air over it as sky x T + the air's light, T from the column between the camera
+  and the air's end along the ray (lookdev_fog.glsl `wwVolAirSky`). Under CommonwealthFoggy (18.3/km, its top 470 m
+  over the base, the ground layer x3) the flight's own line gives optical depth 2.14 straight up: T 0.12 overhead,
+  0.014 at 30 degrees, under 0.001 at 10 degrees, so the layers near the horizon are gone and the ones overhead show
+  at a tenth. Above the top T is 1, which is why the layers appear once the camera climbs out (flight item 10b).
+- **Lever left:** the band's height. The medium's top is the scene's tallest shape (`vaShapesTop`), not a fog depth
+  from the records; a thinner real fog depth (night item 13, G4b) would let more sky through.
+- **Telemetry:** `air sky: camera +Z over the ground layer's anchor (under the top ..., end ...) | optical depth
+  straight up X | the sky's and every vanilla cloud layer's T through the air at 90 deg A, 30 B, 10 C, 3 D`, said when
+  the medium changes or the camera moves 5 % of the air's height.
+- **Red:** none (telemetry only; the sky's air keeps its own red WW_CELL_AIR_RED=nosky).
+
+## MODULES1 G3 (2026-11-10): the land under fog gets the sun the fog scatters down (night items 6, 10e)
+- **Before.** The derived ground layer took the sun out of the surfaces' direct beam (flag 128) and gave none of it
+  back: under 3.4 optical depths (CommonwealthFoggy, ground layer x3, 61 m) the land kept 3 % of its sun at noon, while
+  the air over the layer stayed fully lit. The lit fog read many times brighter than the land beside it.
+- **Now.** What the column takes out of the beam reaches the surfaces as soft light from the sky's half, without the
+  cascade shadow: the conservative delta-Eddington total transmission minus the direct beam (lookdev_fog.glsl
+  `wwVolAirSunTD`, cell_lights.glsl `cellLit`). Offline: notes/modules1/tools/g3_sundif_mc.py against a Monte Carlo
+  slab, 80 cases (tau 0.5-3.4, sun height 0.1-1, g 0-0.85), worst error 0.030 of the sun. At tau 3.4, g 0.76, noon:
+  the land takes 0.74 of the sun instead of 0.03.
+- **Not covered:** the PBR surface program and the effects keep the direct beam alone.
+- **Telemetry:** `air sun soft: on, phase g G | soft share at mu 1 A, 0.5 B, 0.2 C | ... land L (direct only D) |
+  air single scattering side S, toward the sun T | air:land side R (direct only R0)`, said with the `air column:` line.
+- **Red:** `WW_CELL_AIR_SUNDIF_RED=1` = the direct beam alone, as before.
+
+## MODULES1 M3 round 2 (2026-11-10): the street steam no longer a white curtain in the shade
+
+- Cause: a lit effect outdoors takes no shadow and no sky occlusion (the game's base, HAZECARD1), and its level was
+  scaled with the sun + ambient (rEff). The physical sky's ambient is a far smaller share of the light than the
+  weather's (Clear noon: 4418 of 63550 lux), so the steam stood ~2x a wall in open shade and more in an alley.
+- Now the Effect Lighting scales with the ambient alone (src/gl/lookdevstage.cpp physFinish): it stands to the shaded
+  light as the game's does. `phys light:` prints the effect's scale and the fog's beside it (`fog x`).
+- Red `WW_FX_EFFECT_SCALE_RED=1`: the sun + ambient scale, as before.
+
+## MODULES1 M12 (2026-11-10): the air's column line (night items G4b, G5)
+
+- `air column:` is said when the medium changes (a weather change): the band's base, scale height, top and top falloff;
+  the ground layer's anchor, thickness, strength and whether it follows the terrain grid; the optical depth straight up
+  (the shipped sun's, the ground layer alone, and the whole band); the direct sun's transmittance at sun heights
+  mu 1 / 0.5 / 0.2 / 0.05; the band's optical depth along the horizon per km at the anchor. Telemetry only.
+
+## MODULES1 M11 (2026-11-10): the live port's `goto` and `where`
+
+- `goto X Y Z [YAW [PITCH]]` puts the camera's eye there (yaw degrees from +Y, north, toward +X, east; pitch degrees
+  above the horizon, clamped to 89) through `GLView::wwPlaceCamera`, and answers with the eye residual and `where`.
+- `where` prints `camera where: eye x,y,z yaw Y pitch P | goto ...`: the line that brings the camera back. Both also
+  go to stderr (`camera goto:`, `camera where:`), so a flight log keeps every jump.
+
+## MODULES1 M9 (2026-11-10): the shadow reach is a circle around the eye
+
+- **Cause:** past the cascades the terrain shadow map is the last tier. It faded only over 2 % of its square's edges,
+  and its window re-centred only once the eye was a quarter of the map off its centre, so from a high eye (3 AM,
+  -3046,65527,6437) its lit square border stood in view, to one side. The cascades already fade on a circle (D).
+- **Now:** the window re-centres at an eighth (its edge always 3/8 of the map from the eye), and the map fades out on a
+  circle around the eye over the outer fifth of the reach (3/8 of the map, or the published map's nearest edge if a
+  fast eye outruns the re-raster). Telemetry `shadow cascades:` (each cascade's centre and radius against the eye, the
+  fade) and `shadow terrain map:` (centre, eye offset, fade circle). Red WW_SHADOW_TERR_SQUARE_RED=1.
+
+## MODULES1 M8 (2026-11-10): night no longer lit like day; fog and sky meet in one colour
+
+- **Cause, from the flight's 3 AM lines** (Goodneighbor, Sun Path Real): `level 21076 lux (sun 0 + sky 21075) ...
+  day weight 1.00` and the fog's colours x89828 were M7's root cause: the sun's sky was taken at the disc, which sat on
+  the engine's night point 37 degrees up, at the sun's level. With M7 (9a5b3887) it comes from the sun body (-42
+  degrees, x ~1e-17): a few lux, the fog's scale ~1. The "Day,Day" phase was a stale air line from noon: the air
+  (WW_CELL_AIR=0) was never said while off; it is said now.
+- **Horizon:** the fog's far colours are now the drawn sky's colour 0.57 degrees above the horizon (atmosphere.cpp
+  `wwAtmoHorizon`: the sun's and the moon's scatter, the night floor, the Weather Tint, the drawn sky's own CPU twin),
+  the near colours keep the weather's hue at the same luminance step. Telemetry `fog horizon:`. Red WW_FOG_HORIZON_RED=1.
+
+## MODULES1 M7 (2026-11-10): sunrise light from the real sun
+
+- **Cause, from the flight's light lines** (CommonwealthClear, Sun Path Real): at 7:00 the real sun stood at +1.2
+  degrees, yet the land took the moon's key (`phys sun: 0 lux normal ... level 2 lux`, the engine clock's night share
+  still 1) under a sky drawn at the sun's level; the meter opened from EV 10.6 to 7.6 on the dark land and the whole
+  sky went up with it. At 6:30 (real sun -4 degrees) the sun's sky was taken at the disc, still the engine's night
+  point 21 degrees up: a day sky, `level 3395 lux`, on land that should be in twilight.
+- **Now:** the night share follows the real sun (`wwmoon::nightWeight`, as the physical night does) and the sun's sky
+  comes from the sun body (`sunBodyDir`); under the horizon the sky of a sun on it x 10^(0.4 x elevation), about
+  750 lux at sunset to 3 lux at -6 degrees. Telemetry `light night share:` and `sun sky:`. Red WW_SKY_TWILIGHT_RED=1.
+
+## MODULES1 M6 (2026-11-10): one direction each for the sun and the moon
+
+- **Before:** the sun's lens flare sat on the KEY LIGHT, not the sun. Under Sun Path Real at 6:30 (real sun -4 degrees)
+  that light is the twilight slerp toward the engine's night point (about 21 degrees up), so a sun-sized starburst
+  hung in the sky away from the sun, and by night it sat on the moon. The game moon (globe and vanilla billboards) was
+  placed on the clock's sun point after Sun Path Real had moved it onto the real sun, so between the real sunrise and
+  the engine's the moon was drawn on the sun (bungo 11-10, sun_glare_offset_0630, moon_above_flare_0630).
+- **Now:** one sun direction (`sunBodyDir`, src/gl/lookdevstage.cpp) for the sky's disc and the lens; the game moon on
+  the engine's own night point, as the sky's moonlight and the key light already were. The moon's lens would be the
+  sun's x 2.4e-6 x its phase: none is drawn. Telemetry `sky bodies (az/elev deg):` names every user of both bodies.
+  Red WW_SKY_BODYDIR_RED=1.
+
+## MODULES1 M5 (2026-11-10): the air's horizon band comes down onto the land
+
+- **Before:** from above the air's top (the bay view at 24306 units, top 22801) a sky ray pointing down was clear while
+  its height at the grid's end was over the top, and fully the fog's colour once under it (the air "never ends"). Over
+  the far hills that drew a flat light-blue stripe, with the drawn land under it far clearer (bungo 11-10, horizon_band).
+- **Now:** a downward sky ray ends at the ground along it, as the land under it does in the surfaces' tail, so the
+  rows over the hills carry the same air as the hills (res/shaders/features/air/lookdev_fog.glsl wwVolAirSky,
+  volAirFlags 65536). Telemetry: `air sky ground end: on`. Red WW_CELL_AIR_GROUNDEND_RED=1. Still owed: the dark
+  shapes in the sky with the air off (draw probe) and the air's ~27 ms at this view (capture first).
+
+## MODULES1 M4 (2026-11-10): swaying cables are lit like the still ones
+
+- **Before:** a `_Wind` cable took the grass vertex law whole, and that law bends the normal frame by the wind's lean in
+  units (`n + d x lean`, lean up to ~37 units). Every side of the tube then faced the wind's direction, so in sun the
+  wire drew flat white (bungo 11-10).
+- **Now:** a swaying cable moves as one tube and keeps its radial normals (res/shaders/fo4_default.vert, marker
+  wwGrassWind2.w = 2 from src/gl/cellgrass.cpp). Grass keeps the game's bend. Telemetry: `cable wind normals: radial`.
+  Red WW_CELL_CABLES_RED=bent.
+
+## MODULES1 M3 (2026-11-10): the Effect Lighting law; a partly lit smoke keeps its unlit share
+
+- **Before:** a lit effect mixed `mix( 1, E, lighting influence )`: E (the placed lights) is in physical units, the
+  unlit share "1" was not, so a smoke of influence 0.25 kept only a quarter of its light and drew black (the fire
+  barrels' SuperSpraySmoke003, bungo 11-10). Unlit particle systems never took the unlit effects' unit at all. Every
+  lit effect took its lights, the bright fire cards too.
+- **Now:** the Fusion Shaders Effect Lighting law (res/shaders/features/lights/cell_fxlaw.glsl,
+  src/features/lights/cellfxlit.cpp wwCellFxLawUniforms): a lit effect's max( base colour ) x base colour scale at or
+  under 1.0 is lit, at or over 2.0 emissive (never lit, never darkened), graded between (influence x ( 1 - smoothstep )).
+  The unlit share is on the unlit effects' unit (cards, particles, volumetric puffs). Telemetry: `fx law: lit N graded
+  N emissive N (last <shape> overbright X band Y)`, once per shape. Red WW_CELL_FXLAW_RED=1 (today), =band, =units.
+
+## MODULES1 M2 (2026-11-10): multiply decals darken the albedo only, not the lit frame
+
+- **Before:** a wall grime decal (GrimeSubtle01.BGSM: blend DestColor x Zero) was drawn lit, fogged and exposed, and
+  that colour multiplied the frame. In the sun the whole rectangle went dark (the decal took the alley's light a
+  second time); in fog it showed as a lighter, unfogged patch (bungo 11-10, decal_tall_wall, decal_unfogged_wall).
+- **Now:** the game multiplies the g-buffer albedo before lighting. A multiply decal (DestColor x Zero) or a 2x one
+  (DestColor x SrcColor) writes its albedo factor alone, mixed to neutral by its texture alpha (GrimeSubtle01_d: rgb
+  mean 31/255, alpha mean 12/255), unlit, faded to neutral by the fog's transmittance at the pixel, so only the grime
+  darkens and it fades with the wall. M1 already keeps decals out of the sun walk.
+- **Red:** `WW_DECALMUL_RED=1` (lit and fogged, as before). **Telemetry:** `decal blend: <material> src S dst D ->
+  multiply ... | lit and fogged (alpha blend); vertex alpha yes|none min..max`, once per blended surface-decal material,
+  so the flight names the material at decal_tall_wall (101 of 128 Materials\Decals are plain alpha blend: if the
+  rectangle is one of those, its vertex alpha range says whether its edges lost their fade).
+- **Cost:** two fog reads on multiply-decal pixels only; the pass-time before/after is owed at the build.
+
+## MODULES1 M1 (2026-11-10): the sun's casters draw both faces in every cell; decals cast nothing of their own
+
+- **Before:** INTSKY1 drew a caster's both faces and let decals pass the sun in a SUNLIT INTERIOR only; outdoors the
+  casters kept back-face culling and decals cast. A thin one-sided wall cast nothing from behind, so the sun went
+  through it (bungo 11-10, sun_through_thin_wall: "the sun gets through a very thin surface"; the lit wall of
+  gi_weak_bounce was that leak), and a wall decal shadowed its own wall.
+- **Now:** both rules hold in every cell (`src/features/shadows/sunshadow.cpp`, the caster walk): a wall is opaque to the
+  sun from both sides (culling back faces is a closed-mesh trick; the game's walls are open shells; Unity "Cast
+  Shadows: Two Sided", UE "Shadow Two Sided"), a decal is paint without thickness. Reds `WW_CSM_RED=onesided` (back
+  faces culled outdoors, as before) and `WW_CSM_RED=decalscast` (decals cast outdoors); the interior reds stay.
+- **Telemetry:** the sun summary prints `bothfaces=N decalspass=N` in every cell; the once-per-change census
+  `sun cascades: exterior <cell>: casters N, one-sided N (T tris) made solid from behind (both faces), two-sided N,
+  alpha-tested N, decals N passed, never cast N` now runs outdoors too (the top-20 list stays indoors). Cost: the
+  `cpu sun-walk` sub-time and the sun pass's GPU time, default vs `WW_CSM_RED=onesided`, at his spot (no build yet
+  in this round: measured when the manager builds).
+
+## MODULES1 10c (2026-11-10): a camera far above the fog: the thin air's tail has its light
+
+- **Before:** from a camera high in the top's falloff the froxel volume's transmittance cannot hold the air it marched:
+  16F steps by 4.9e-4 under 1.0, and the whole grid span had an optical depth near 2e-6. The tail's source (the grid's
+  light over its lost transmittance) was 0 in 11219 of 14756 columns and 7.6 in the other 3537 (the fog's own source
+  is near 10000), so the tail down to the land dimmed it and added nothing: dark far land under the camera.
+- **Now:** where the grid's whole span lies above the air's top and its optical depth by the medium's own law
+  (`wwAirCol`, the law the froxels march) is under 0.02, the tail's source is the grid's light over that optical depth
+  (`wwAirThinJ`, lookdev_fog.glsl, all four tails). Offline on the probe's dump at his 10c camera (z 126239): source
+  14370 median (13800 to 15710) in all 14756 columns, in line with the 10050 median at the 10b spot.
+- **Not covered:** a camera above the air's end (16 scale heights over the top) has no optical depth to divide by and
+  keeps the old source; the sky tail's downward branch still starts at the hard top.
+- **Telemetry:** `cell air: ... thinsrc=on(level od at top N, thin from +A to +B)` (heights over the top) or
+  `thinsrc=red(no source)`.
+- **Red:** `WW_CELL_AIR_THINSRC_RED=1` = no source for those columns, as before.
+
+## MODULES1 G2 (2026-11-10): the air has no hard top (flight items 10b, 10c)
+- **Before.** The cell air (fog and haze) ended at its top (22801 units in the fog frame at noon CommonwealthMisty)
+  at 99 % of its density: from above it read as a flat slab with a hard edge, and above the top there was no haze.
+- **Now.** One law, in every site that reads the air (the froxels, the surfaces' tail past the grid's far plane, the
+  sky's tail, the sun and sky columns, the particles): above the top the density falls off as exp( -dz / H ),
+  H = 0.120 km (8391.6 units), outdoors only. The parameter rides in the free component `airGround.z` /
+  `volAirGround.z` (1 / H; 0 = a hard top), so the red is the old result to the bit. `wwAirEnd` (top + 16 H) is
+  where the air counts as ended.
+- **Thin air's tail.** `wwAirTailJ` (one function for the four sites that had the expression): where the last
+  slice's step is under the volume's precision the tail takes the column's mean source instead of black.
+- **Telemetry.** The `cell air: volair=on(...)` line adds `topfall=on(H=... rho_top=... od_up=... T_up=...)`,
+  `topfall=red(hard top)` or `topfall=off(indoors)`.
+- **Red:** `WW_CELL_AIR_TOPFALL_RED=1` (live).
+- **Offline gate** (the shader's own law functions cut as text and compiled, notes f1109/g2/g2gate.sh): density
+  1 unit under / over the top 0.9938 / 0.0000 before, 0.9938 / 0.9936 now; straight up from 818 units above the
+  top T 1.000 before, 0.818 now; from the ground T 0.652 before, 0.523 now (the sun and the zenith pass 0.80 x
+  through the added air); extinction both sides of the grid's far plane equal to 1e-4 at three slopes and six
+  heights; the red equals the law before on all 13 lines. 160 of 160 programs link in the all-on define set.
+- **Not in this change.** A camera far above the air (item 10c's height) has froxels with no air in them, so the
+  land's tail still has no in-scatter there: needs the froxel pass's source as a uniform. Item 10e's disc is not
+  reproduced and not claimed. H per weather belongs to G4b.
+- Sources: Bruneton & Neyret 2008 and Hillaire 2020 (aerosol density exp( -h / H ), H 1.2 km for the clear
+  atmosphere's Mie layer); H 0.120 km here is this lane's ground-haze scale from its haze census.
+
+## PERFLOAD1 batch 2 (2026-11-10): far land clipped from high up, the land band window's rebuild
+- **Far land clipped by the near plane (old behaviour, found 11-10).** The cell view's near plane came from the
+  loaded block's bounds alone (its centre's depth less 1.5 radii, 16 at the least). With the camera away from the
+  block (high up, or flown off to the side) that plane rose to 73288 / 113722 units at the two high test cameras,
+  and far land nearer than it was cut away (sky in its place). The plane is now also held under the camera's height
+  over the far field's top (measured once from the drawn far shapes: their vertices, the instanced rings' tile
+  spheres, one tree card's height on top) times the cosine of the frustum's corner angle, so no far point can lie
+  in front of it. Goodneighbor 5x5: far land top z 45048; near 73288.10 -> 30890.92 (camera z 85387) and
+  113722.00 -> 46196.63 (camera z 105374); inside the block it stays 16.00. Lines `far lod: far land top z ...`
+  and `far lod: near plane held under the far land (...)`. Red `WW_CELL_FARLOD_NEAR_RED=bounds` (the old plane;
+  re-read per frame). `WW_CELL_FARLOD_NEAR` (a forced plane) still wins.
+- **Land band window rebuild (P4, first cut).** Every move of the land LOD band window deletes and refills its
+  whole texture array on the main thread; a chunk seen for the first time is read from the archive there (the
+  sampler put a 4.4 s stop at the high camera move on that read; 17.6 s with a cold file cache). A rebuild now
+  prints `landspec: band window rebuild took N ms on the main thread: N chunk files read now, N chunk sizes asked
+  from the driver, N known`, and a chunk's size is asked from the driver once, not at every rebuild (third window
+  of the test walk: 121 questions -> 40; 4.0-7.0 ms over three runs against 6.4 ms, inside the run-to-run spread with a
+  warm file cache). Red `WW_LANDSPEC_RED=askdims`. Reading the chunk files off the main thread is still open.
+- **Found, not changed:** the far shapes' cull runs have not been registered since the 11-05 header move
+  (`far lod: cull not registered`): `cellfarlod.cpp` still tests for `gl/cellcull.h`, the header lives in
+  `features/near/`. Far shapes are drawn whole. Turning it back on changes which far geometry enters the camera,
+  obscurance and shadow walks, so it waits for a pass-time gate and a pixel check.
+
+## PERFLOAD1 batch 1 (2026-11-10): cell load time, the 23:05 lockup, the pass-time table
+- **Load time (P1).** Goodneighbor 5x5 spent 79-87 % of its "models loaded and placements welded" stage inside
+  `lodgenProbeAsset`: after reading an asset it opened every archive of the stack again, only to say which one supplied
+  it, and 9 of its 11 callers never ask. A caller that wants only the bytes now returns right after the read
+  (src/features/far-lod/lodgen.cpp). The far-LOD stage rebuilt the stack's search path list per .lodm
+  (`lodgenStackSearchPaths`, ~25 % of that stage): the list is now kept while the stack, the plugin order and every
+  stack entry's change time stay the same. Same bytes read, same document. Reds (read at cell load):
+  `WW_LOADSPEED_RED=probewalk` and `WW_LOADSPEED_RED=pathlist`. Telemetry per load:
+  `load speed: asset source walks skipped N, search path list built N reused N`.
+  Measured 11-10, same build, same scene, files in the OS cache: load until the window can paint 78.7 s with the
+  old walk (`probewalk`) -> 14.5 s; first frames at 87.5 s -> 22.5 s; weld stage 32.3 s -> 2.8 s; far-LOD stage
+  35.9 s -> 4.2 s; 863 walks skipped; the same 7091 placements, 793 shapes, 2284655 vertices, 9755 blocks.
+  With a cold file cache the same build needed 30.9 s and its first frame waited 36 s more on texture files.
+- **Load gate.** `tests/spells/cell_load_gate.py` compares stage tables (WW_CELL_SPEED_DUMP files): the fastest
+  reference against the MEDIAN new run; it fails when the load (the stages until the window can paint) got more than
+  10 % slower, or when the document counts differ. Reference tables of 11-10: tests/spells/cell_load_ref/ (measured
+  with the files in the OS cache; a first run after a build or a reboot is slower and does not count).
+- **The lockup (P2).** Measured on the 11-09 flight's scene: the main thread sat in ONE WriteFile of the frame-end
+  stderr flush for 12.2 s and for 29.5 s (the log's disk stalled); live replies are printed to stderr first, so the
+  live port was silent for the same time. stderr is now a pipe and a writer thread puts the text into the log
+  (src/main.cpp, `stderr pump: on`; same bytes, same order; hard exits drain it first, src/wwloadwatch.h). Exit line:
+  `stderr pump: N bytes in N writes, slow writes N, longest N ms, most text waiting N KB`. Red `WW_STDERR_PUMP=0`.
+  A watch thread prints `main thread: over 1 s without handling events, in the step after "<stage>"` and then
+  `main thread: that step took N ms` (cell load stage marks name the step). Red `WW_MAIN_WATCH=0`.
+  Measured 11-10: one log write stalled for 37.1 s in a test run and the frames went on
+  (`stderr pump: one log write took 37109 ms; the main thread did not wait`).
+  Not done: the cell load itself still runs on the main thread without yielding; the watch names its long steps.
+- **Pass-time table (P5).** Switched on by `WW_CELL_PASSTIME` (env or live set) the table is no longer drawn over the
+  view; the Frame Timers menu row draws it as before. `WW_CELL_PASSTIME_TEXT=1` draws it (the old way), `=0` never.
+  A frame whose overlays zone passes 8 ms prints `overlays slow:` with its split (editor overlays, text and
+  readbacks, inspect refresh; at most one line a second), and place mode (Shift+A, a depth read under the cursor per
+  mouse move) prints `place mode: on` / `off`.
+- Sources: memoisation of an invariant directory scan and skipping redundant archive opens (ordinary call-site
+  cuts, found with the built-in sampler); asynchronous logging = a producer/consumer queue with one writer thread
+  (spdlog's async logger, github.com/gabime/spdlog, MIT); the watchdog = the heartbeat pattern of Chromium's
+  hang watcher / Android's ANR watchdog.
+
+## FARSEA1 (2026-11-09): the endless sea to the horizon
+- Past the baked map the far water used to stop and the void showed. One more water shape now hangs under the far LOD
+  node (src/features/water/endlesssea.cpp): a camera-centred disc of 128-segment rings, 256 u near and coarser by a
+  constant ratio out to the far rim (`WW_ENDLESS_SEA_FAR`, 4194304 u = 59.9 km), at the worldspace's sea level (the
+  .lodl's largest sea body, else the WRLD default water height). It follows the camera in 2048 u steps; the waves are
+  world-anchored, so nothing swims. No T-junctions: crack-free flat, curved or tessellated.
+- Same water programs and inputs as the baked ocean. The baked water stays in charge: the sheet discards inside the
+  bake's box; outside it the water lookup answers the open sea (sea body, no shore, deep, no flow). Seam band at the box
+  edge (`WW_ENDLESS_SEA_SEAM`, 98304 u = 1.4 km): the baked sea's shore distance and depth fade to open-sea values and
+  its flow to 0.
+- Ships ON: Settings, Water, "Endless sea" (`WW_ENDLESS_SEA`, live). Red `WW_ENDLESS_SEA_RED=off` = the old picture
+  (live). `WW_ENDLESS_SEA_CURVE=1` drops the rim by the earth's curvature (read at cell build). The far plane reaches the
+  rim while the sheet draws; the underwater fallback covers the camera below sea level past the box.
+- Telemetry: one `endless sea:` line at far-LOD build (rings, vertices, far sheet distance, seam band, coverage-mask
+  cells inside the bake's box, sea body and level, build ms).
+
+## MODULES1 part 20 (2026-11-06): the GI sky ships absolute with a physical ground term, every ray card draws
+- The GI volume's sky ships as the drawn sky's own colour and level (`WW_CELL_RTDDGI_SKY` unset or empty = absolute).
+  Reds: `WW_CELL_RTDDGI_SKY=level` (the old default), `=dalc` (the weather's DALC as it is), `=physical`.
+- In absolute mode the ground's light (-Z) is a Lambertian ground under the same sun and sky: albedo (the .recx
+  `groundAlbedo`, else 0.15) x (direct sun x mu + the sky's +Z), not the weather's DALC. Log line `GI sky -Z:`.
+  Red `WW_CELL_RTDDGI_GROUND_RED=1` = -Z keeps the weather's DALC.
+- Every vanilla ray card draws as in the game (BeamSimple*, BeamSmoky* join *LightBeam*); mist and glow veils stay
+  hidden under our air. Red `WW_CELL_FAKEAIR_BEAM_RED=1` hides them all again.
+
 ## MODULES1 part 19 (2026-11-06): previs ships on, the AO walk culls, the fog lumps read a .dds, the harness window fits
 - Previs (the cell's own rooms, portals and occlusion planes) ships ON outdoors too. Red `WW_CELL_PREVIS_RED=off` = the
   old default (off outdoors, interiors still take it).

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Writes the shipped default ground-fog .recx files (docs/RECX.md) for every weather in the official masters.
 
-  python src/features/weather/recx_weathers.py <game Data folder> [--out res/Data/Plugins/FO4CS/Weathers] [--table]
+  python src/features/weather/recx_weathers.py <game Data folder> [--out "<MO2>/mods/Fusion Shaders - Assets/Plugins/Fusion Shaders - Assets/Weathers"] [--table]
 
 One file per weather RECORD (a DLC entry that only overrides a base-game weather is not a new record: its values
 come from the winning entry in the load order below, its file names the defining plugin). The files hold only the
@@ -87,6 +87,9 @@ def law(a):
     return round(min(max(300.0 + 800.0 * a, 300.0), 1000.0)), round(min(max(6.0 * tau, 0.25), 8.0), 2)
 
 
+NOISE = 'FO4CS/Fog/GroundFogNoise.dds'
+
+
 def values(fnam):
     """(groundFog block, day haze, night haze)"""
     n = len(fnam) // 4
@@ -96,7 +99,8 @@ def values(fnam):
     an = haze(F[2], F[3], F[5], F[7])
     td, sd = law(ad)
     tn, sn = law(an)
-    g = {'thickness': td, 'strength': sd}
+    # MODULES1 part 22: our files name the shipped lumps texture; a weather .recx without the key has none
+    g = {'thickness': td, 'strength': sd, 'noiseTexture': NOISE}
     if (tn, sn) != (td, sd):
         g['hours'] = {'2': {'thickness': tn, 'strength': sn}, '14': {'thickness': td, 'strength': sd}}
     return g, ad, an
@@ -104,7 +108,7 @@ def values(fnam):
 
 def main():
     data = sys.argv[1]
-    out = 'res/Data/Plugins/FO4CS/Weathers'
+    out = 'E:/Projects/Fallout 4 Mods/mods/Fusion Shaders - Assets/Plugins/Fusion Shaders - Assets/Weathers'
     if '--out' in sys.argv:
         out = sys.argv[sys.argv.index('--out') + 1]
     win = {}    # (defining plugin, local id) -> (edid, fnam, from plugin)

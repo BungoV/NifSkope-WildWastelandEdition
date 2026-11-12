@@ -5,7 +5,7 @@
 
 uniform vec4 airMed;			// sigma0 (per game unit), zb, 1 / H (0: uniform), the top (the fog's height frame)
 uniform vec4 airLayer;			// the near band's share w, zn, 1 / Hn, the ground layer's strength s (cellvolair.cpp VaLayer)
-uniform vec4 airGround;			// the ground layer's anchor zg, 1 / its thickness
+uniform vec4 airGround;			// the ground layer's anchor zg, 1 / its thickness, G2: 1 / the top's falloff height (0: a hard top)
 uniform int airTerrOn;			// FOGTERRAIN1: the ground layer follows the low-pass terrain (red absolute: 0)
 uniform sampler2DArray airTerr;	// the low-pass terrain height, world z (R32F, clamped at its edge); FOGTERRAIN3: layer 1 the fine level
 uniform vec4 airTerrXf;			// u = x X.x + X.y, v = y X.z + X.w (world)
@@ -97,10 +97,10 @@ float air1mE( float tau )
 // the transmittance from height z toward a direction whose height grows mu per unit, to the top
 float airTup( float z, float mu )
 {
-	if ( z >= airMed.w )
+	if ( z >= wwAirEnd( airMed, airGround ) )	// MODULES1 G2: the column runs through the top's falloff (lookdev_fog.glsl wwAirColLaw)
 		return 1.0;
 	mu = max( mu, 0.02 );
-	return exp( -airMed.x * airCol( z, airMed.w ) / mu );
+	return exp( -airMed.x * airCol( z, wwAirEnd( airMed, airGround ) ) / mu );
 }
 
 /* lane FIX1101A (atmo, the fog-sun fault): the SUN's transmittance to height z. airSunLayer (shipped; set by
@@ -284,6 +284,14 @@ vec3 volCubeScatter( vec3 E[6], vec3 dW )
 	vec3 fl = ( 2.0 / 3.0 ) * ( E[0] + E[1] + E[2] + E[3] + E[4] + E[5] );
 	vec3 l1 = ( E[0] - E[1] ) * dW.x + ( E[2] - E[3] ) * dW.y + ( E[4] - E[5] ) * dW.z;
 	return 0.25 * max( fl + 3.0 * volGi.w * l1, vec3( 0.0 ) ) * volGi.rgb;
+}
+
+/* MODULES1 10b-3: what the flat ambient keeps where the ray-traced volume covers the point (the air's leak fix): fade =
+ * the volume's cover, r = its open-field share there (< 0: none, the volume's own read replaces the covered part). ONE
+ * law for the air's froxel (cell_volair.frag) and a lit card (cell_volpart.glsl vpAmbKeep): the same sky share. */
+float airAmbKeep( float fade, float r )
+{
+	return r >= 0.0 ? 1.0 - fade + fade * r : 1.0 - fade;
 }
 
 /* the haze's colour from the records (owner's ruling 10-14): the game's own fog colour at this distance and height

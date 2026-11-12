@@ -18,9 +18,15 @@ uniform bool cellExtDalc;			// an exterior's ambient is the weather's DALC, in c
 uniform float cellSunScale;			// the imagespace Sunlight Scale outdoors (1 indoors; cellDirColor has it in)
 // set by the caller before cellLit (exterior sun only): the cascades' light, the viewport ambient, the sun's specular (linear)
 float cellDirVis = 1.0;
+float cellBackK = 0.0;	// MODULES1 R6-1: the sun through a back-lit leaf, per unit sun x albedo (fo4_default.frag sets it)
+float cellAirDif = 0.0;	// MODULES1 G3: the sun the air scattered down onto a level surface, per unit sun (wwVolAirSunTD)
 vec3 cellExtAmb = vec3( 0.0 );
 vec3 cellExtSpec = vec3( 0.0 );
 vec3 cellReflAdd = vec3( 0.0 );	// lane REFLPROBE1: the probes' reflection, light already (cell_reflprobe.glsl)
+// lane DEBUGVIEW1: the live debug views (src/features/overlays/debugview.h), compiled only while one is on
+#ifdef WW_DEBUG_VIEWS
+#include "debug_view.glsl"
+#endif
 vec3 cellSpecTint = vec3( 1.0 );	// lane GAPFIX1: the colour cellLit puts on the lights' specular (probe 31)
 uniform vec3 cellDirColor;			// linear
 uniform vec3 cellDirTo;				// world, TO the light
@@ -115,7 +121,7 @@ uniform float cellShadowFade[16];
 // (Heitz 2018: the shadowed / unshadowed estimates of the shadow-casting lights) and the linear depth it was traced for
 uniform bool cellRestirOn;
 uniform samplerBuffer cellRestir;	// RG32F, bottom row first: ratio, linear depth
-uniform vec4 cellRestirSize;		// W, H
+uniform vec4 cellRestirSize;		// W, H, z = 1: red WW_CELL_RESTIR_MISS_RED (a fragment off the ratio's depth is unshadowed)
 #endif
 // distant light from the surfels (src/features/far-lod/farlight.h), set by celllights.cpp
 uniform bool cellFarOn;
@@ -138,6 +144,10 @@ uniform bool cellIsFoBloomOn;
 uniform sampler2D cellIsFoBloom;
 uniform vec4 cellIsFoBloomParams;	// radius (pixels), bloom weight, dispersion, 0
 uniform vec2 cellIsFoBloomFrame;	// the frame's size: the combine's uv
+// lane PHYSUNITS1: the energy-conserving glare's k (0: the additive FO4CS bloom); cellFoBloomHere is then blur x k
+uniform float cellIsFoBloomEc;
+// LATE 7 (PHYSUNITS1 note): the most the fog's gain may raise that k (x 2); red WW_CELL_FOGBLOOM_RED=glare: 1e9
+uniform float cellIsFoBloomFogCap;
 vec3 cellFoBloomHere = vec3( 0.0 );
 // lane FOGBLOOM1 (src/features/post/cellfogbloom.h): the bloom-intensity target, (gain - 1) / 4 per sample; cell_hdr.frag sets
 // cellBloomGain from it, which scales both blooms (1.0 exactly in clear air: the same bits)
@@ -167,7 +177,11 @@ vec3 cellImageSpace( vec3 sqrtColor )
 	x = x * ( ( cellIsRed & 2 ) != 0 ? 1.0 : cellIsExposure ) * 2.0;
 	x *= vec3( 1.0 ) + cellIsWbD;	// lane FIX1101A: the white balance (x 1 exactly by default)
 #if defined( WW_CELL_HDR )
-	if ( cellIsFoBloomOn )	// FO4CS adds its bloom to the exposed light, before the curve (x 2: the curve's input)
+	if ( cellIsFoBloomOn && cellIsFoBloomEc > 0.0 ) {
+		// lane PHYSUNITS1: the frame lerped toward its blur (moves light, adds none); the fog's gain raises k, at most 1
+		float kg = min( cellIsFoBloomEc * ( cellIsFoBloomFogCap > 0.0 ? min( cellBloomGain, cellIsFoBloomFogCap ) : cellBloomGain ), 1.0 );
+		x = x * ( 1.0 - kg ) + 2.0 * ( kg / cellIsFoBloomEc ) * cellFoBloomHere;
+	} else if ( cellIsFoBloomOn )	// FO4CS adds its bloom to the exposed light, before the curve (x 2: the curve's input)
 		x += 2.0 * cellBloomGain * cellFoBloomHere;
 #endif
 	vec3 c;
@@ -279,7 +293,18 @@ float cellShadowF( int i, vec3 P, vec3 N )
 		vec3 w = P - vec3( cellRow[0].w, cellRow[1].w, cellRow[2].w );
 		float s2 = 1.0 / max( dot( cellRow[0].xyz, cellRow[0].xyz ), 1e-12 );
 		float D = -s2 * ( cellRow[0].z * w.x + cellRow[1].z * w.y + cellRow[2].z * w.z );
-		return abs( D - rr.y ) <= 0.02 * rr.y + 2.0 ? rr.x : 1.0;
+		if ( abs( D - rr.y ) <= 0.02 * rr.y + 2.0 )
+			return rr.x;
+#ifdef CELL_RESTIR_MISS_PIXEL
+		/* MODULES1 R7 item 2 (bungo: one-frame flashes, stray lights): a SURFACE fragment (fo4_default, pbrm_default) off
+		 * the traced depth took 1.0 = EVERY shadow-casting lamp unshadowed. A shape the opaque pre-pass missed for one
+		 * frame then lit up with the light of a lamp behind a wall, sharp at the shape's outline, for that frame. Now it
+		 * takes the pixel's ratio (the surface behind it, traced this frame). No surface behind (the g-buffer's 1e6):
+		 * unshadowed, as before. Red WW_CELL_RESTIR_MISS_RED=1 (cellRestirSize.z). */
+		return ( cellRestirSize.z > 0.5 || rr.y > 9.0e5 ) ? 1.0 : rr.x;
+#else
+		return 1.0;	// an effect card, a particle, water, a froxel: free in the air, not the traced surface's shadow
+#endif
 	}
 #ifndef WW_CELL_RESTIR_CUBES_RED
 	/* lane PRESETPERF1 (PRESETPERM1): under WW_CELL_RESTIR no cube is drawn and every slot is let go (celllights.cpp, the
@@ -2066,10 +2091,20 @@ vec3 cellAmbientSum( vec3 N, vec3 P )
 }
 
 // PRTP2 section 4: ambient(n) = pow(max(dot(row, (n, 1)), 0), 2.2) per channel
+#ifdef WW_FX_AMBSHARE
+/* MODULES1 R8-1 (the effect and particle programs only, cell_fxlaw.glsl fxLocalSky): the share of the weather's ambient
+ * a lit card keeps, 1 - k of the GI volume's sky (cellGiSkyK), as a surface at the same place; 1 until it is set */
+float fxAmbShare = 1.0;
+vec3 cellAmbient( vec3 N, vec3 P )
+{
+	return pow( max( cellAmbientSum( N, P ), vec3( 0.0 ) ), vec3( 2.2 ) ) * fxAmbShare;
+}
+#else
 vec3 cellAmbient( vec3 N, vec3 P )
 {
 	return pow( max( cellAmbientSum( N, P ), vec3( 0.0 ) ), vec3( 2.2 ) );
 }
+#endif
 
 /* the interior ambient beside our GI, as WW_CELL_GI_AMB asks (gi = the GI's irradiance / pi): keep (0), replace (1,
  * default: ambient x (1 - the grid's valid share)), off (2), max (3), asgi (4, debug: ambient := GI).
@@ -2183,6 +2218,11 @@ vec3 cellLit( vec3 color, vec3 albedo, vec3 normalView, vec3 posView, vec3 Vview
 		diffOn += farW * farF;
 	}
 	vec3 add = alb * ( diffOn + gi ) + spec * specMask * specCol;	// albedo x the game's diffuse; the GI stays Lambert
+#ifdef WW_DV
+	wwDvGi = alb * gi;
+	wwDvAmb = color * color;
+	wwDvSpec = spec * specMask * specCol;
+#endif
 	/* an exterior with the weather's sun takes the game's terms: the sun through Oren-Nayar + rim, shadowed by the
 	 * cascades (cellDirVis), and the cube at the game's strength; color is then the viewport's ambient alone.
 	 * Without the sun: the viewport light plus the cell's lights. */
@@ -2192,8 +2232,11 @@ vec3 cellLit( vec3 color, vec3 albedo, vec3 normalView, vec3 posView, vec3 Vview
 		vec3 Ld = normalize( cellDirTo );
 		float nl = dot( N, Ld );
 		vec3 dir = cellDirColor * max( nl, 0.0 ) * cellDirVis;
-		vec3 Ex = diff + gi + dir + cellExtAmb;
-		vec3 Edx = diffOn + gi + dir * ( cellOren( N, Ld, Vw, nl, gloss ) + cellRim( N, Ld, Vw, gloss ) );
+		// MODULES1 G3: what the air took out of the beam, as soft light from the sky's half (no cascade shadow)
+		vec3 airDif = cellDirColor * ( cellAirDif * ( 0.5 + 0.5 * N.z ) );
+		vec3 Ex = diff + gi + dir + airDif + cellExtAmb;
+		vec3 Edx = diffOn + gi + airDif + dir * ( cellOren( N, Ld, Vw, nl, gloss ) + cellRim( N, Ld, Vw, gloss ) )
+		         + cellDirColor * ( cellBackK * cellDirVis );
 		vec3 ambDim = vec3( 1.0 );
 		float specDim = 1.0;
 #ifdef WW_SUNSHADOW
@@ -2201,6 +2244,12 @@ vec3 cellLit( vec3 color, vec3 albedo, vec3 normalView, vec3 posView, vec3 Vview
 #endif
 		vec3 linx = color * color * ambDim + alb * Edx + spec * specMask * specCol + cellExtSpec
 		          + cubeK * specDim * ( ( cellRed & 512 ) != 0 ? Ex : Edx + cellExtAmb ) + cellReflAdd;
+#ifdef WW_DV
+		wwDvSun = alb * ( Edx - diffOn - gi - airDif );
+		wwDvAmb = color * color * ambDim + alb * airDif;
+		wwDvSpec = spec * specMask * specCol + cellExtSpec;
+		wwDvRefl = cubeK * specDim * ( ( cellRed & 512 ) != 0 ? Ex : Edx + cellExtAmb ) + cellReflAdd;
+#endif
 		return sqrt( max( linx, vec3( 0.0 ) ) ) + emissive;
 	}
 	// the light reaching this point (a white surface would show it): the cubemap reflection is lit by it,
@@ -2213,15 +2262,22 @@ vec3 cellLit( vec3 color, vec3 albedo, vec3 normalView, vec3 posView, vec3 Vview
 			amb = cellAmbGi( amb, gi, P, N );
 		E += amb;
 		Ed += amb;
+#ifdef WW_DV
+		wwDvAmb = alb * amb;
+#endif
 	}
 	if ( cellHasDir ) {
 		vec3 Ld = normalize( cellDirTo );
 		float nl = dot( N, Ld );
 		vec3 dir = cellDirColor * max( nl, 0.0 );
 		E += dir;
-		Ed += dir * ( cellOren( N, Ld, Vw, nl, gloss ) + cellRim( N, Ld, Vw, gloss ) );
+		Ed += dir * ( cellOren( N, Ld, Vw, nl, gloss ) + cellRim( N, Ld, Vw, gloss ) ) + cellDirColor * cellBackK;
 	}
 	// the game multiplies its cube term by the diffuse light (Ed); debug cubeold takes the Lambert sum
+#ifdef WW_DV
+	wwDvRefl = cubeK * ( ( cellRed & 512 ) != 0 ? E : Ed ) + cellReflAdd;
+	wwDvSun = alb * ( Ed - diffOn - gi ) - ( cellHasDalc ? wwDvAmb : vec3( 0.0 ) );
+#endif
 	vec3 lin = alb * Ed + spec * specMask * specCol + cubeK * ( ( cellRed & 512 ) != 0 ? E : Ed ) + cellReflAdd;
 	return sqrt( max( lin, vec3( 0.0 ) ) ) + emissive;
 }

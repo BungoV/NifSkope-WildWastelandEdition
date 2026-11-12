@@ -5,6 +5,7 @@ BSD License - see nifskope.h
 ***** END LICENCE BLOCK *****/
 
 #include "features/near/cellgpucull.h"
+#include "gl/wwshadertext.h"	// lane VKCOMPUTE1: the cull kernels are files
 #include "features/near/cellbindless.h"	// lane BINDLESS2
 #include "features/near/cellgpucullgate.h"	// lane SIGNDROP1: the occluder gate (tests/signdrop1 compiles it too)
 
@@ -210,149 +211,12 @@ QHash<const void *, Gpu> & gpus()
 	return g;
 }
 
-const char * const kHiz0 = R"(
-layout( local_size_x = 8, local_size_y = 8 ) in;
-layout( std430, binding = 0 ) writeonly buffer HizBuf { float hiz[]; };
-#ifdef MS
-uniform sampler2DMS depthTex;
-#else
-uniform sampler2D depthTex;
-#endif
-uniform int samples;
-uniform ivec2 dim;
-void main()
-{
-	ivec2 p = ivec2( gl_GlobalInvocationID.xy );
-	if ( p.x >= dim.x || p.y >= dim.y )
-		return;
-#ifdef MS
-	float m = 0.0;
-	for ( int s = 0; s < samples; s++ )
-		m = max( m, texelFetch( depthTex, p, s ).r );
-#else
-	float m = texelFetch( depthTex, p, 0 ).r;
-#endif
-	hiz[p.y * dim.x + p.x] = m;
-}
-)";
+// lane VKCOMPUTE1: the kernels are res/shaders/features/near/cellgpucull_hiz0.glsl, _hizn.glsl and _cull.glsl (moved
+// out byte for byte); compile() puts the #version line and the defines in front.
 
-const char * const kHizN = R"(
-layout( local_size_x = 8, local_size_y = 8 ) in;
-layout( std430, binding = 0 ) buffer HizBuf { float hiz[]; };
-uniform int srcOff;
-uniform int dstOff;
-uniform ivec2 srcDim;
-uniform ivec2 dstDim;
-void main()
-{
-	ivec2 p = ivec2( gl_GlobalInvocationID.xy );
-	if ( p.x >= dstDim.x || p.y >= dstDim.y )
-		return;
-	ivec2 a = p * 2;
-	ivec2 b = min( a + 1, srcDim - 1 );
-	float m = max( max( hiz[srcOff + a.y * srcDim.x + a.x], hiz[srcOff + a.y * srcDim.x + b.x] ),
-		max( hiz[srcOff + b.y * srcDim.x + a.x], hiz[srcOff + b.y * srcDim.x + b.x] ) );
-	hiz[dstOff + p.y * dstDim.x + p.x] = m;
-}
-)";
-
-/* One thread per cluster. Culled: wholly outside a frustum plane (1), every triangle facing away (2, the
+/* cellgpucull_cull.glsl: one thread per cluster. Culled: wholly outside a frustum plane (1), every triangle facing away (2, the
  * meshoptimizer sphere-cone test), or nearer than nothing it covers (3): its nearest depth is farther than the
  * farthest prepass depth under its screen box, one pixel wider on every side. */
-const char * const kCull = R"(
-layout( local_size_x = 64 ) in;
-struct Meshlet { vec4 sphere; vec4 cone; uvec4 tri; };
-struct Job { mat4 mv; vec4 p; };
-layout( std430, binding = 0 ) readonly buffer HizBuf { float hiz[]; };
-layout( std430, binding = 1 ) readonly buffer MeshletBuf { Meshlet ml[]; };
-layout( std430, binding = 2 ) readonly buffer JobBuf { Job jobs[]; };
-layout( std430, binding = 3 ) readonly buffer ItemBuf { uvec2 items[]; };
-layout( std430, binding = 4 ) writeonly buffer CmdBuf { uint cmds[]; };
-layout( std430, binding = 5 ) buffer CensusBuf { uint census[8]; };
-uniform mat4 proj;
-uniform vec4 planes[5];
-uniform uint numItems;
-uniform ivec2 vpSize;
-uniform int levels;
-uniform int lvlOff[16];
-uniform ivec2 lvlDim[16];
-uniform int mode;	// 1 occlusion, 2 cone, 4 frustum, 8 red hard, 16 red nocull, 32 census
-uniform float depthEps;
-void main()
-{
-	uint i = gl_GlobalInvocationID.x;
-	if ( i >= numItems )
-		return;
-	uvec2 it = items[i];
-	Meshlet m = ml[it.y];
-	Job j = jobs[it.x];
-	vec3 c = ( j.mv * vec4( m.sphere.xyz, 1.0 ) ).xyz;
-	float r = m.sphere.w * j.p.x;
-	int why = 0;
-	if ( ( mode & 4 ) != 0 ) {
-		float margin = r * 1.001 + 1e-5 * length( c );
-		for ( int k = 0; k < 5; k++ ) {
-			if ( dot( planes[k].xyz, c ) + planes[k].w < -margin ) {
-				why = 1;
-				break;
-			}
-		}
-	}
-	if ( why == 0 && ( mode & 2 ) != 0 && j.p.y != 0.0 && m.cone.w <= 1.0 ) {
-		vec3 a = normalize( mat3( j.mv ) * m.cone.xyz ) * j.p.y;
-		if ( dot( c, a ) >= m.cone.w * length( c ) + r )
-			why = 2;
-	}
-	if ( why == 0 && ( mode & 1 ) != 0 ) {
-		bool front = true;
-		vec2 lo = vec2( 1e30 ), hi = vec2( -1e30 );
-		for ( int k = 0; k < 8; k++ ) {
-			vec3 o = vec3( ( k & 1 ) != 0 ? r : -r, ( k & 2 ) != 0 ? r : -r, ( k & 4 ) != 0 ? r : -r );
-			vec4 q = proj * vec4( c + o, 1.0 );
-			if ( q.w <= 0.0 || q.z < -q.w ) {
-				front = false;
-				break;
-			}
-			lo = min( lo, q.xy / q.w );
-			hi = max( hi, q.xy / q.w );
-		}
-		if ( front ) {
-			vec2 p0 = ( lo * 0.5 + 0.5 ) * vec2( vpSize ) - 1.0;
-			vec2 p1 = ( hi * 0.5 + 0.5 ) * vec2( vpSize ) + 1.0;
-			if ( p1.x >= 0.0 && p1.y >= 0.0 && p0.x < float( vpSize.x ) && p0.y < float( vpSize.y ) ) {
-				ivec2 a = clamp( ivec2( floor( p0 ) ), ivec2( 0 ), vpSize - 1 );
-				ivec2 b = clamp( ivec2( floor( p1 ) ), ivec2( 0 ), vpSize - 1 );
-				int span = max( b.x - a.x, b.y - a.y ) + 1;
-				int L = 0;
-				while ( L < levels - 1 && ( 1 << L ) < span )
-					L++;
-				ivec2 ta = a >> L, tb = b >> L;
-				float h = 0.0;
-				for ( int y = ta.y; y <= tb.y; y++ )
-					for ( int x = ta.x; x <= tb.x; x++ )
-						h = max( h, hiz[lvlOff[L] + y * lvlDim[L].x + x] );
-				float z = ( mode & 8 ) != 0 ? c.z : c.z + r;
-				vec4 q = proj * vec4( 0.0, 0.0, z, 1.0 );
-				if ( ( q.z / q.w ) * 0.5 + 0.5 > h + depthEps )
-					why = 3;
-			}
-		}
-	}
-	if ( ( mode & 16 ) != 0 )
-		why = 0;
-	uint o = i * 5u;
-	cmds[o] = m.tri.y * 3u;
-	cmds[o + 1u] = why == 0 ? 1u : 0u;
-	cmds[o + 2u] = m.tri.x * 3u;
-	cmds[o + 3u] = 0u;
-	cmds[o + 4u] = 0u;
-	if ( ( mode & 32 ) != 0 ) {
-		atomicAdd( census[why], 1u );
-		if ( why == 0 )
-			atomicAdd( census[4], m.tri.y );
-	}
-}
-)";
 
 GLuint compile( G43 * g, const char * body, const char * defines )
 {
@@ -397,10 +261,16 @@ Gpu * gpuOf()
 		if ( f.majorVersion() * 10 + f.minorVersion() >= 43 ) {
 			G.g = QOpenGLVersionFunctionsFactory::get<G43>( ctx );
 			if ( G.g && G.g->initializeOpenGLFunctions() ) {
-				G.progHiz0 = compile( G.g, kHiz0, "" );
-				G.progHiz0Ms = compile( G.g, kHiz0, "#define MS 1\n" );
-				G.progHizN = compile( G.g, kHizN, "" );
-				G.progCull = compile( G.g, kCull, "" );
+				QString miss;
+				const QByteArray kHiz0 = wwShaderText( "cellgpucull_hiz0.glsl", &miss );
+				const QByteArray kHizN = wwShaderText( "cellgpucull_hizn.glsl", &miss );
+				const QByteArray kCull = wwShaderText( "cellgpucull_cull.glsl", &miss );
+				if ( !miss.isEmpty() )
+					std::fprintf( stderr, "gpudriven b: %s\n", qPrintable( miss ) );
+				G.progHiz0 = compile( G.g, kHiz0.constData(), "" );
+				G.progHiz0Ms = compile( G.g, kHiz0.constData(), "#define MS 1\n" );
+				G.progHizN = compile( G.g, kHizN.constData(), "" );
+				G.progCull = compile( G.g, kCull.constData(), "" );
 				G.ok = G.progHiz0 && G.progHiz0Ms && G.progHizN && G.progCull;
 				if ( G.ok )
 					G.g->glGenQueries( 4, G.q );

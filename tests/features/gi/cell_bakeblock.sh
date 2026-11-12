@@ -1,4 +1,5 @@
 #!/bin/bash
+export WW_CELL_STREAM="${WW_CELL_STREAM:-0}"	# AIRPERF1 r4: this harness opens a fixed block (streaming is the default now)
 #
 # AN EXTERIOR BAKE SEES THE 5x5 BLOCK + THE FAR LOD (lane BAKEBLOCK1, 2026-10-03; src/cellview.cpp, src/features/gi/probefar.cpp).
 #

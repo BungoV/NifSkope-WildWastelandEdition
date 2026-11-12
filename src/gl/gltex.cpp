@@ -39,6 +39,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "features/near/celldrawpacket.h"	// lane GAPPERF-BINDLESS
 #include "features/near/cellbindless.h"	// lane BINDLESS2
 #include "texpool.h"	// lane PERFFIX4: the streaming pool
+#include "gl/wwuploadcap.h"	// lane EMPTY240 R4-1: the paint's upload budget
 
 #include "message.h"
 #include "gl/glscene.h"
@@ -52,6 +53,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <QSettings>
 
 #include <algorithm>
+#include <chrono>
 #include <cstdio>
 
 #ifndef GL_TEXTURE_MAX_ANISOTROPY_EXT
@@ -365,9 +367,11 @@ int TexCache::bind( const QStringView & fname, const NifModel * nif )
 	paramId = 0;	// lane PERF5
 	wwBound = 0;	// lane CELLUNI3
 	Tex *	tx;
+	bool	covKeyed = false;	// lane EMPTY240 R9-d: the poll below asks the workers for the coverage copy
 	// lane TREELEAF1: an alpha-tested base map (armed by setupProgramCE1) binds its coverage-preserving copy
 	if ( wwCovArmed > 0 && wwCovArmed < 255 && fname.size() > 4 && fname.front() != QChar( '#' )
 		&& fname.endsWith( QLatin1StringView( ".dds" ), Qt::CaseInsensitive ) ) {
+		covKeyed = true;
 		wwCovKey.resize( 0 );
 		wwCovKey.append( fname );
 		wwCovKey.append( QLatin1StringView( "|wwcov" ) );
@@ -386,6 +390,24 @@ int TexCache::bind( const QStringView & fname, const NifModel * nif )
 	if ( !tx->isLoaded() ) [[unlikely]] {
 		if ( tx->id[0] )
 			return 0;
+		// lane EMPTY240 R4-1: over this paint's upload budget: the next paint loads it (generated maps never wait)
+		if ( !fname.isEmpty() && fname.front() != QChar( '#' ) && WwUp::spent() ) {
+			WwDp::abortRecording();
+			WwUp::deferTex();
+			return 0;
+		}
+		// lane EMPTY240 R8-2: a file the workers have not read yet waits a paint (celltexahead.cpp poll)
+		WW_SWITCH_STATIC( bool, readWaitRed, wwEnvInt( "WW_TEXREADWAIT_RED" ) == 1 );
+		/* lane EMPTY240 R9-d: a coverage copy asks by its "|wwcov" name: the workers read AND rewrite its alpha mips
+		 * (build 83: BeachGrass01_d.dds 23.3 ms of decode on the drawing thread). Red WW_COVAHEAD_RED=1: by the file */
+		WW_SWITCH_STATIC( bool, covAheadRed, wwEnvInt( "WW_COVAHEAD_RED" ) == 1 );
+		if ( !readWaitRed && WwUp::st().inPaint && !fname.isEmpty() && fname.front() != QChar( '#' )
+			&& CellTexAhead::armedFor( nif )
+			&& CellTexAhead::poll( nif, covKeyed && !covAheadRed ? wwCovKey : fname.toString() ) == CellTexAhead::Wait ) {
+			WwDp::abortRecording();
+			WwUp::deferTex();
+			return 0;
+		}
 
 		return loadTex( *tx, nif );
 	}
@@ -524,9 +546,16 @@ bool TexCache::bindCube( const QString & fname, const NifModel * nif, bool useSe
 	return true;
 }
 
+// lane EMPTY240 R8-2: set by texLoad (gltexloaders.cpp) for the `texture load slow:` line
+extern double wwTexLoadBytesMs, wwTexLoadQueryMs;
+extern bool wwTexLoadTaken;
+extern qint64 wwTexLoadSize;
+
 std::uint16_t TexCache::loadTex( Tex & txIn, const NifModel * nif )
 {
 	WwDp::abortRecording();	// lane GAPPERF-BINDLESS: a load is never replayed
+	WwUp::Charge wwUpCharge;	// lane EMPTY240 R4-1: its time and bytes count against the paint's budget
+	WwUp::texMade();	// lane EMPTY240 R6-5: and its count
 	Tex *	t = &txIn;
 	Tex::ImageInfo *	i = t->imageInfo;
 	CellSpeed::Acc speedAcc( "texture loads (find, decode, upload)" );   // lane SPEED1
@@ -546,7 +575,9 @@ std::uint16_t TexCache::loadTex( Tex & txIn, const NifModel * nif )
 		return 0;
 	}
 
+	const auto wwT0 = std::chrono::steady_clock::now();	// lane EMPTY240 R8-2: the `texture load slow:` line's parts
 	i->filepath = find( fileName, nif );
+	const double wwFindMs = std::chrono::duration<double, std::milli>( std::chrono::steady_clock::now() - wwT0 ).count();
 
 	/* lane PERF1: before this file is read here (one at a time), the files the read-ahead workers already hold go
 	 * up first, so their byte bound frees and they read on in parallel; each binds on this unit, and this file's
@@ -556,6 +587,8 @@ std::uint16_t TexCache::loadTex( Tex & txIn, const NifModel * nif )
 		draining = true;
 		const QStringList names = CellTexAhead::ready( nif, 4096 );
 		for ( const QString & n : names ) {
+			if ( WwUp::spent() )	// lane EMPTY240 R4-1: the rest stay ready for a later paint
+				break;
 			if ( n == i->filename )
 				continue;
 			Tex * o = insertTex( n );	// may rehash the table: t is found again below
@@ -579,6 +612,10 @@ std::uint16_t TexCache::loadTex( Tex & txIn, const NifModel * nif )
 
 	wwCovLoadRef = covRef;	// lane TREELEAF1: read by texLoadDDS
 	const qint64	bytes0 = PassTime::cacheCounts().texBytes;	// lane STREAMTEX1
+	const auto wwT1 = std::chrono::steady_clock::now();	// lane EMPTY240 R8-2
+	wwTexLoadBytesMs = wwTexLoadQueryMs = 0.0;
+	wwTexLoadTaken = false;
+	wwTexLoadSize = 0;
 	try
 	{
 		i->mipmaps = texLoad( nif, i->filepath, i->format, t->target, i->width, i->height, t->id );
@@ -587,6 +624,21 @@ std::uint16_t TexCache::loadTex( Tex & txIn, const NifModel * nif )
 	catch ( QString & e )
 	{
 		i->status = e;
+	}
+	{	/* lane EMPTY240 R8-2: a load over 30 ms on the drawing thread names its parts: finding the file, its bytes (taken
+		 * from a worker, or read here), the decode and upload, and the driver's size queries after it (each one waits for
+		 * the driver's thread) */
+		const auto wwT2 = std::chrono::steady_clock::now();
+		const double loadMs = std::chrono::duration<double, std::milli>( wwT2 - wwT1 ).count();
+		const double allMs = std::chrono::duration<double, std::milli>( wwT2 - wwT0 ).count();
+		static int wwSlowN = 0;
+		if ( allMs > 30.0 && ( ++wwSlowN <= 40 || wwSlowN % 25 == 0 ) )
+			std::fprintf( stderr, "texture load slow: %s took %.1f ms on the drawing thread = find %.1f + ready files first "
+				"%.1f + file bytes %.1f (%s, %.0f KB) + decode and upload %.1f + driver size queries %.1f ms (R8-2: %d such "
+				"loads so far)\n", qPrintable( fileName ), allMs, wwFindMs, std::max( 0.0, allMs - loadMs - wwFindMs ),
+				wwTexLoadBytesMs, wwTexLoadTaken ? "taken from a worker" : "read here",
+				double( wwTexLoadSize ) / 1024.0, std::max( 0.0, loadMs - wwTexLoadBytesMs - wwTexLoadQueryMs ), wwTexLoadQueryMs,
+				wwSlowN );
 	}
 	wwCovLoadRef = 0;
 	paramForget( t->id[1] );	// lane CELLUNI4: FO76's second cube (a fresh name may reuse a freed one)
@@ -780,9 +832,20 @@ int TexCache::wwPump( const NifModel * nif, qint64 budgetBytes )
 	const qint64	bytes0 = pc.texBytes;
 	int	n = 0;
 	draining = true;
+	/* lane EMPTY240 R9-b: build 83's frame 4 pumped 183 textures (118.6 ms CPU) and frame 3 201: the pump capped bytes
+	 * only, past the paint's upload budget (WwUp: 16 ms, 32 textures). It now stops when that budget is spent too; the
+	 * rest stay ready for the next paints. Red WW_PUMPCAP_RED=1: bytes only, build 83. */
+	WW_SWITCH_STATIC( bool, pumpCapRed, wwEnvInt( "WW_PUMPCAP_RED" ) == 1 );
+	static int pumpCapped = 0, pumpCappedLeft = 0;
+	static auto pumpLineAt = std::chrono::steady_clock::now();
 	for ( const QString & name : names ) {
 		if ( n > 0 && pc.texBytes - bytes0 >= budgetBytes )
 			break;
+		if ( n > 0 && !pumpCapRed && WwUp::spent() ) {
+			pumpCapped++;
+			pumpCappedLeft += int( names.size() ) - n;
+			break;
+		}
 		Tex *	tx = insertTex( name );
 		if ( !tx )
 			continue;
@@ -797,6 +860,12 @@ int TexCache::wwPump( const NifModel * nif, qint64 budgetBytes )
 	draining = false;
 	pc.texPumped += n;
 	pc.texPumpedBytes += pc.texBytes - bytes0;
+	if ( pumpCapped > 0 && std::chrono::steady_clock::now() - pumpLineAt >= std::chrono::seconds( 5 ) ) {
+		pumpLineAt = std::chrono::steady_clock::now();
+		std::fprintf( stderr, "texture pump: %d paints stopped at the upload budget, %d ready textures left for later paints "
+			"(R9-b; red WW_PUMPCAP_RED=1: bytes only, build 83)\n", pumpCapped, pumpCappedLeft );
+		pumpCapped = pumpCappedLeft = 0;
+	}
 	if ( fn )
 		fn->glActiveTexture( GLenum( unit ) );
 	glBindTexture( GL_TEXTURE_2D, GLuint( b2d ) );

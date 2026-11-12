@@ -7,9 +7,9 @@
 // FOGSUN1: the sun through the air; a variant without the fog compiled in (fo4_default, fo4_csm) has no air between
 // the surface and the sun (lane VOLAIR1 10-15: calling wwVolAirSunT there broke both programs; the shader guard found it)
 #ifdef WW_FOG
-#define WW_AIR_SUN_T( p ) wwVolAirSunT( p )
+#define WW_AIR_SUN_TD( p ) wwVolAirSunTD( p )
 #else
-#define WW_AIR_SUN_T( p ) 1.0
+#define WW_AIR_SUN_TD( p ) vec2( 1.0, 0.0 )
 #endif
 #ifdef WW_SUNSHADOW
 // lane SUNCELL1: the cascades (fo4_cellcsm, fo4_csm, fo4_fogcsm); the loader takes nothing after an include's quote
@@ -51,6 +51,7 @@ uniform float alpha;
 uniform vec2 wwDecalPom;	// lane DECALS1: placed decal parallax (DODT scale x 0.1, step cap); x = 0 off
 uniform bool wwDecalAngle;	// lane DECALANGLE: a placed decal whose vertex alpha is dot(N, D) (src/celldecalangle.h)
 uniform bool wwDecalMapped;	// lane DECALANGLE2: and its vertex rgb is D as a signed byte (not a colour)
+uniform int wwMulDecal;	// MODULES1 M2: 1 a multiply decal (DestColor, Zero), 2 a 2x one (DestColor, SrcColor); 0 none
 uniform int alphaFlags;			// bits 0 to 2: alpha test mode, bit 3: alpha blending enabled
 uniform bool landSplat;		// lane TERRBLEND1: vertex alpha = this blended-ground pass's share
 uniform int landSplatDbg;	// lane ALLON2: 0 edge guard, 1 red WW_TERRBLEND_RED=edgepass (no guard), 2 probe WW_TERRBLEND_PROBE=edge
@@ -123,6 +124,7 @@ in vec4 C;
 flat in vec4 D;
 in float rawVertexAlpha;	// the vertex colour's own alpha (channel 11 G only)
 in float wwFarSkyVis;	// lane FIX1101A lodch: a far placement vertex's baked sky factor (fo4_default.vert), 1 elsewhere
+in float wwFarAo;	// MODULES1 round 10: a far placement vertex's baked AO (fo4_default.vert), 1 elsewhere
 #ifdef WW_FAR_SPLAT	// lane FARLOOK1101 (FARSHIMMER2): the far splat's coverage, 1 / (kx * ky) (fo4_default.vert)
 flat in float farSplatA;
 #endif
@@ -303,6 +305,7 @@ vec3 tonemap(vec3 x)
 #define WW_CELL_GI_MARCH_ONCE 1	// lane GIBLACKLINK1: the march red runs once (cellGiMarchPrime in main)
 #endif
 #define CELL_GI_ONEREAD 1	// DDGIREADPERF1: one volume read site (cellGiFirst in main, cell_lights.glsl)
+#define CELL_RESTIR_MISS_PIXEL 1	// MODULES1 R7 item 2: a surface off the traced depth takes the pixel's shadow ratio (cellShadowF)
 #include "cell_lights.glsl"
 #include "cell_reflprobe.glsl"
 #include "cell_ao.glsl"
@@ -421,9 +424,21 @@ vec2 wwDecalPomUv( vec2 uv0, vec3 P, vec3 N, vec3 E )
 	return uv0 + ofs * ( 1.0 - t );
 }
 
+#ifdef WW_CELLLIGHTS	// lane PERFLOAD1 P7 round 2: the far row's tree-ladder dither (fo4_default.vert), the cards' noise
+flat in vec2 farLadder;
+uniform float farFadeFrame;
+#endif
+
 void main()
 {
 #ifdef WW_CELLLIGHTS
+	// finer side keeps noise < w (x = 1 + w), coarser keeps noise >= 1 - w (x = -(1 + w)): impostor_oct.frag's noise
+	if ( farLadder.x != 0.0 ) {
+		vec2 fp = gl_FragCoord.xy + 5.588238 * farFadeFrame;
+		float n = fract( 52.9829189 * fract( dot( fp, vec2( 0.06711056, 0.00583715 ) ) ) );
+		if ( farLadder.x > 0.0 ? n >= farLadder.x - 1.0 : n < 2.0 + farLadder.x )
+			discard;
+	}
 	cellEmitOut = vec4( 0.0 );
 	float wwGrassK = wwGrassFadeK( ViewDir );	// lane GRASSMB1: exactly 1.0 on every non-grass shape
 	if ( wwGrassK <= 0.0 )
@@ -442,23 +457,27 @@ void main()
 #ifdef WW_CELLLIGHTS
 	/* MODULES1 p18: the obscurance pass (probe 20, early 1) returns at the normal and reads no sun: it skips the
 	 * cascades and the air here (cellAoEarly 4 = its red, the sun read as before) */
-	float csmF = cellOn && cellProbe == 20 && cellAoEarly == 1 ? 1.0
-		: wwSunShadow( -ViewDir ) * WW_AIR_SUN_T( -ViewDir );	// FOGSUN1: and the air's transmittance
+	bool airAoEarly = cellOn && cellProbe == 20 && cellAoEarly == 1;
+	vec2 airTD = airAoEarly ? vec2( 1.0, 0.0 ) : WW_AIR_SUN_TD( -ViewDir );	// MODULES1 G3: (direct T, the soft share)
+	float csmF = airAoEarly ? 1.0 : wwSunShadow( -ViewDir ) * airTD.x;	// FOGSUN1: and the air's transmittance
 #else
-	float csmF = wwSunShadow( -ViewDir ) * WW_AIR_SUN_T( -ViewDir );	// FOGSUN1: and the air's transmittance
+	float csmF = wwSunShadow( -ViewDir ) * WW_AIR_SUN_TD( -ViewDir ).x;	// FOGSUN1: and the air's transmittance
 #endif
 	vec4 Dcsm = vec4( D.rgb * sqrt( csmF ), D.a );
 #define D Dcsm
 #ifdef WW_CELLLIGHTS
 	cellDirVis = csmF;	// the exterior cell sun (cellLit) takes the same cascades
+	cellAirDif = airTD.y;	// MODULES1 G3: the sun the air scattered down, no cascades
 #endif
 #else
 	// FOGSUN1: no cascades compiled in; the sun still crosses the air
-	float airSunT = WW_AIR_SUN_T( -ViewDir );
+	vec2 airTD = WW_AIR_SUN_TD( -ViewDir );	// MODULES1 G3: (direct T, the soft share)
+	float airSunT = airTD.x;
 	vec4 Dair = vec4( D.rgb * sqrt( airSunT ), D.a );
 #define D Dair
 #ifdef WW_CELLLIGHTS
 	cellDirVis = airSunT;
+	cellAirDif = airTD.y;
 #endif
 #endif
 
@@ -855,6 +874,17 @@ void main()
 	if ( backlightPower > 0.0 ) {
 		backlight = albedo * NdotNegL * clamp( backlightPower, 0.0, 1.0 );
 
+#ifdef WW_CELLLIGHTS
+		/* MODULES1 R6-1: under the cell's sun the back light is the sun through the leaf, in the sun's own unit and
+		 * in linear light (cellLit adds albedo x sun x cellBackK x the sun's visibility). The old law added it to the
+		 * ROOT of the lit colour in the viewport light's 0..1 unit: (root + e)^2 took a cross term and no exposure,
+		 * a back-lit far crown (no cascades there) came out as bright as a white wall facing the sun.
+		 * Red WW_CELL_LIT_RED=backglow. A far placement's baked sky visibility stands in for the crown's own shade. */
+		if ( cellOn && cellHasDir && ( cellRed & 2048 ) == 0 ) {
+			float bk = NdotNegL * clamp( backlightPower, 0.0, 1.0 );
+			cellBackK = bk * bk * max( wwFarSkyVis, 0.0 );
+		} else
+#endif
 		emissive += backlight * D.rgb;
 	}
 
@@ -960,9 +990,12 @@ void main()
 	}
 	// lane AO1: the ambient obscurance on the whole lit colour (linear, so its root here), before the fog
 	if ( cellOn )
-		color.rgb *= sqrt( cellAoFactor() );
+		color.rgb *= sqrt( cellAoShared( wwFarAo ) );	// MODULES1 round 10: near (screen) and far (baked) through one rule
 #endif
 
+#ifdef WW_DV
+	vec3 wwDvLit = color.rgb * color.rgb;	// lane DEBUGVIEW1: the lit colour before the fog
+#endif
 	// lane FOG1 (Lookdev weather fog): this colour is sqrt of linear light (tonemap squares it),
 	// so the fog runs on its square, before the exposure and the curve
 #ifdef WW_FOG
@@ -1025,6 +1058,30 @@ void main()
 		color.a = 1.0;
 	}
 
+#ifdef WW_CELLLIGHTS
+	/* MODULES1 M2 (bungo 11-10, decal_tall_wall / decal_unfogged_wall: the whole grime rectangle showed, dark in the
+	 * sun, light in the fog). A multiply decal's material (GrimeSubtle01.BGSM: blend DestColor x Zero) multiplies the
+	 * ALBEDO under it in the game's g-buffer, before any light. Drawn lit and fogged here, its output multiplied the lit
+	 * frame by the decal's own light: the rectangle took the alley's darkness twice, and the fog's colour once. Now it
+	 * writes the albedo factor alone, its texture alpha as the coverage (GrimeSubtle01_d: rgb mean 31/255, alpha mean
+	 * 12/255: the dark rgb counts only where the alpha says grime), gamma-2 albedo -> linear: squared, pushed to neutral
+	 * by the fog's transmittance at the pixel (the fog's own affine split: wwFog(1) - wwFog(0)), so the decal fades
+	 * with the wall under it. */
+	if ( cellOn && wwMulDecal != 0 ) {
+		float m = wwMulDecal == 2 ? 2.0 : 1.0;	// the blend doubles a 2x decal: neutral grey is 0.5
+		float cov = clamp( wwDecalVertexA( C.a ) * baseMap.a * alpha, 0.0, 1.0 );
+		vec3 k = clamp( mix( vec3( 1.0 / m ), albedo, cov ) * m, vec3( 0.0 ), vec3( m ) );
+		vec3 F = k * k;
+#ifdef WW_FOG
+		if ( fogOn || wwApOn() ) {
+			vec3 f0 = wwFog( vec3( 0.0 ), -ViewDir );
+			vec3 T = clamp( wwFog( vec3( 1.0 ), -ViewDir ) - f0, vec3( 0.0 ), vec3( 1.0 ) );
+			F = mix( vec3( 1.0 ), F, T );
+		}
+#endif
+		color.rgb = ( cellIsOn && cellIsLinear ? F : sqrt( F ) ) / m;
+	}
+#endif
 	fragColor = color;
 #ifdef WW_CELLLIGHTS
 	/* lane FO4CELLGI1: the probe and pass views (cellProbeOut, cellPassOut) compile only under the loader's WW_CELL_VIEWS,
@@ -1070,6 +1127,27 @@ void main()
 	if ( cellOn && ( cellProbe == 60 || cellProbe == 61 ) )
 		fragColor = cellSsrProbeOut( cellSsrScene );	// lane SSR1
 #endif
+#ifdef WW_DV
+	if ( cellOn && wwDebugView != 0 ) {	// lane DEBUGVIEW1: one pass or term in place of the pixel (debug_view.glsl)
+		float dvSh = 1.0, dvCl = 1.0;
+#ifdef WW_SUNSHADOW
+		dvSh = wwSunShadowGeo( -ViewDir );
+		vec3 dvCi = ussCloudDvInfo( -ViewDir );	// SEAMCLOUD1: T, the height share, the far share
+		dvCl = dvCi.x;
+		wwDvCloud = dvCi.yz;
+#endif
+		vec3 dvT = vec3( 1.0 ), dvIn = vec3( 0.0 );
+#ifdef WW_FOG
+		if ( fogOn || wwApOn() ) {
+			dvIn = max( wwFog( vec3( 0.0 ), -ViewDir ), vec3( 0.0 ) );
+			dvT = clamp( wwFog( vec3( 1.0 ), -ViewDir ) - dvIn, 0.0, 1.0 );
+		}
+#endif
+		vec3 dvE = emissive * glowScaleSRGB;
+		fragColor = vec4( wwDvSurface( albedo * albedo, cellWorldDir( normal ), smoothness, specMask, wwFarAo, cellAoFactor(),
+			dvSh, dvCl, dvE * dvE, dvT, dvIn, wwDvLit, cellHdr, length( ViewDir ) * length( cellRow[0].xyz ), wwDvOwner ), fragColor.a );
+	}
+#endif
 	/* lane TERRBLEND1: a blended-ground pass (src/cellsplat.h). The vertex alpha
 	 * is this pass's SHARE of the engine's weighted sum: an opaque base is scaled
 	 * by it, a layer is ADDED at it (SRC_ALPHA, ONE). Never the texture's alpha, and
@@ -1099,6 +1177,15 @@ void main()
 		else
 			fragColor = vec4( fragColor.rgb * clamp( rawVertexAlpha, 0.0, 1.0 ), 1.0 );
 	}
+#ifdef WW_CELLLIGHTS
+	/* lane PERFLOAD1 P8: the LOD preview's tint (lodpreview.cpp's colours): the row's level code y (2 rep0 .. 5 rep3), its
+	 * luminance kept; a row mid ladder fade (x != 0) the band's magenta. LODLIVE1: code 1 = a full mesh, white */
+	if ( farLadder.y > 0.5 ) {
+		vec3 lt = farLadder.x != 0.0 ? vec3( 1.0, 0.2, 1.0 ) : farLadder.y < 1.5 ? vec3( 0.92 ) : farLadder.y < 2.5 ? vec3( 0.2, 0.85, 0.25 )
+			: farLadder.y < 3.5 ? vec3( 0.95, 0.9, 0.15 ) : farLadder.y < 4.5 ? vec3( 1.0, 0.55, 0.1 ) : vec3( 0.95, 0.15, 0.15 );
+		fragColor.rgb = lt * ( 0.25 + 0.75 * clamp( dot( fragColor.rgb, vec3( 0.2126, 0.7152, 0.0722 ) ), 0.0, 1.0 ) );
+	}
+#endif
 #ifdef WW_FAR_SPLAT	// lane FARLOOK1101: the splat pass blends at the row's true coverage (glBlendFuncSeparate keeps dst alpha)
 	fragColor.a = farSplatA;
 	cellEmitOut.a *= farSplatA;

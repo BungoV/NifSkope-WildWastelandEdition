@@ -18,7 +18,10 @@ extern "C"
 #endif
 
 #include <chrono>
+#include <cstdlib>
+#include <cstring>
 #include <mutex>
+#include <string>
 #include <vector>
 
 // MODULES1 (NifSkope WW, 11-06): every live mapped view, so trimMappedViews() can drop the pages that reads touched
@@ -76,10 +79,117 @@ std::uint64_t FileBuffer::mappedViewTrims(double *maxMs)
   return mappedTrims;
 }
 
+// EMPTY240 R3-2: one mapping per archive file. Every index (the game's, the mesh index, the resource stack) opened
+// and mapped each BA2 again; a later open of the same archive (same name, same size) now shares the first view.
+// Red WW_ARCHIVE_SHARE_RED=1 = a mapping per open.
+struct MappedShare
+{
+  std::string name;
+  const unsigned char *buf;
+  size_t  size;
+  std::uintptr_t  stream;
+  int     refs;
+};
+static std::vector< MappedShare > mappedShares;
+static std::uint64_t mappedOpens = 0;
+static std::uint64_t mappedShared = 0;
+
+static std::string mappedShareKey(const char *fileName)
+{
+  std::string s(fileName);
+  for (char& c : s)
+    c = (c == '\\' ? '/' : char(c >= 'A' && c <= 'Z' ? c + 32 : c));
+  return s;
+}
+
+static bool mappedShareable(const std::string& k)
+{
+  static const bool red = [] {
+    const char  *r = std::getenv("WW_ARCHIVE_SHARE_RED");
+    return r && std::strcmp(r, "1") == 0;
+  }();
+  return !red && k.size() > 4 &&
+         (k.compare(k.size() - 4, 4, ".ba2") == 0 ||
+          k.compare(k.size() - 4, 4, ".bsa") == 0);
+}
+
+// a live mapping of the same archive and size: take it (the caller's new handle is closed here)
+static bool mappedShareTake(const char *fileName, size_t size,
+                            const unsigned char *& buf, std::uintptr_t& stream)
+{
+  const std::string k = mappedShareKey(fileName);
+  if (!mappedShareable(k))
+    return false;
+  std::lock_guard< std::mutex > g(mappedViewsLock);
+  for (MappedShare& m : mappedShares)
+  {
+    if (m.name == k && m.size == size)
+    {
+#if defined(_WIN32) || defined(_WIN64)
+      CloseHandle(HANDLE(stream));
+#else
+      close(int(stream));
+#endif
+      m.refs++;
+      mappedOpens++;
+      mappedShared++;
+      buf = m.buf;
+      stream = m.stream;
+      return true;
+    }
+  }
+  return false;
+}
+
+static void mappedShareAdd(const char *fileName, const unsigned char *buf,
+                           size_t size, std::uintptr_t stream)
+{
+  const std::string k = mappedShareKey(fileName);
+  std::lock_guard< std::mutex > g(mappedViewsLock);
+  mappedOpens++;
+  if (mappedShareable(k))
+    mappedShares.push_back(MappedShare{ k, buf, size, stream, 1 });
+}
+
+// true while another FileBuffer still uses the view (nothing to unmap)
+static bool mappedShareRelease(const unsigned char *buf)
+{
+  std::lock_guard< std::mutex > g(mappedViewsLock);
+  for (size_t i = 0; i < mappedShares.size(); i++)
+  {
+    if (mappedShares[i].buf == buf)
+    {
+      if (--mappedShares[i].refs > 0)
+        return true;
+      mappedShares[i] = mappedShares.back();
+      mappedShares.pop_back();
+      return false;
+    }
+  }
+  return false;
+}
+
+void FileBuffer::archiveShareStats(std::uint64_t *opens, std::uint64_t *shared,
+                                   size_t *live)
+{
+  std::lock_guard< std::mutex > g(mappedViewsLock);
+  if (opens)
+    *opens = mappedOpens;
+  if (shared)
+    *shared = mappedShared;
+  if (live)
+    *live = mappedViews.size();
+}
+
 inline void FileBuffer::closeFileStream()
 {
   if (std::intptr_t(fileStream) >= 0L) [[unlikely]]
   {
+    if (mappedShareRelease(fileBuf))
+    {
+      fileStream = std::uintptr_t(-1);
+      return;
+    }
     mappedViewRemove(fileBuf);
     munmap((void *) fileBuf, fileBufSize);
 #if defined(_WIN32) || defined(_WIN64)
@@ -349,6 +459,8 @@ FileBuffer::FileBuffer(const char *fileName)
     if (!GetFileSizeEx(HANDLE(fileStream), &fsize) || fsize.QuadPart < 0L)
       throw NifSkopeError("error seeking input file \"%s\"", fileName);
     fileBufSize = size_t(fsize.QuadPart);
+    if (mappedShareTake(fileName, fileBufSize, fileBuf, fileStream))
+      return;
     fileBuf = (unsigned char *) mmap(0, fileBufSize, PROT_READ, MAP_PRIVATE,
                                      fileStream, 0);
 #else
@@ -363,6 +475,7 @@ FileBuffer::FileBuffer(const char *fileName)
     if ((void *) fileBuf == MAP_FAILED)
       throw NifSkopeError("error mapping input file \"%s\"", fileName);
     mappedViewAdd(fileBuf, fileBufSize);
+    mappedShareAdd(fileName, fileBuf, fileBufSize, fileStream);
   }
   catch (...)
   {

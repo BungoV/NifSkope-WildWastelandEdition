@@ -49,6 +49,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include <cfloat>
 #include <cmath>
+#include <cstdio>
 
 //! width of each side gutter, where the ‹ › arrows live
 static constexpr int WW_ARROW_W = 16;
@@ -731,6 +732,26 @@ void WwScrubChrome::restyle()
 	update();
 }
 
+/* lane EMPTY240 R7-1: build 80's between-paints held "Paint to QLineEdit 'qt_spinbox_lineedit' < QDoubleSpinBox
+ * 'CellEditScale' 2.886 ms (1.0/frame)" with CellEditYaw and the CellWorkspaceDock beside it, every frame with nothing
+ * set. The chrome asked its own repaint on each host paint: the chrome is see-through, so its repaint repaints the host
+ * (and the dock under it), whose paint asked the chrome again: a paint loop, one main-window sync and one posted
+ * UpdateRequest a frame (the message queue never empty). The chrome is the host's child, stacked over the editor, and
+ * Qt paints it after the host in the same sync anyway. Red WW_SCRUBPAINT_RED=1: the repaint asked on every host paint,
+ * build 80. Line `scrub chrome:`. */
+static bool wwScrubPaintRed()
+{
+	static const bool red = [] {
+		const bool r = qEnvironmentVariableIntValue( "WW_SCRUBPAINT_RED" ) == 1;
+		std::fprintf( stderr, "scrub chrome: %s\n", r
+			? "RED CONTROL WW_SCRUBPAINT_RED=1: the arrows ask a repaint on every host paint (a paint loop, one a frame, build 80)"
+			: "no repaint asked on the host's paint (Qt paints the arrows after the host; red WW_SCRUBPAINT_RED=1)" );
+		std::fflush( stderr );
+		return r;
+	}();
+	return red;
+}
+
 bool WwScrubChrome::eventFilter( QObject * o, QEvent * ev )
 {
 	if ( o != m_host ) {
@@ -757,8 +778,9 @@ bool WwScrubChrome::eventFilter( QObject * o, QEvent * ev )
 			update();
 			break;
 		case QEvent::Paint:
-			// repaint on top of whatever the host just drew
-			update();
+			// repaint on top of whatever the host just drew (R7-1: only the red; Qt paints the child after the host)
+			if ( wwScrubPaintRed() )
+				update();
 			break;
 		default:
 			break;

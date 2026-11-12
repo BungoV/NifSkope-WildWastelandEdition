@@ -1,5 +1,6 @@
 #include "cellmodelahead.h"
 #include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
+#include "wwhwuse.h"	// lane EMPTY240 R3-1: the stream pool's busy count
 
 #include "cellspeed.h"
 #include "data/nifitemcache.h"
@@ -9,6 +10,7 @@
 #include <QSet>
 #include <QThread>
 
+#include <atomic>
 #include <cstdio>
 
 // see cellmodelahead.h.
@@ -100,6 +102,19 @@ void CellModelAhead::want( const EsmWorld & world, quint32 base, quint32 swap )
 	jobs_.push_back( std::move( j ) );
 }
 
+void CellModelAhead::wantModel( const QString & model )
+{
+	if ( !on_ || model.isEmpty() )
+		return;
+	const QString key = keyOf( model, nullptr );
+	if ( byKey_.contains( key ) )
+		return;
+	byKey_.insert( key, int( jobs_.size() ) );
+	Job j;
+	j.model = model;
+	jobs_.push_back( std::move( j ) );
+}
+
 void CellModelAhead::load()
 {
 	if ( !on_ || jobs_.empty() )
@@ -107,12 +122,30 @@ void CellModelAhead::load()
 	CellSpeed::Acc speedAcc( "models read ahead on worker threads (wall)" );
 	lodgenWarmSharedIndices();   // the lazy indices and the first document, built on this thread
 	void * user = const_cast<QString *>( &dataRoot_ );
+	/* lane EMPTY240 R4-4: a streamed cell asks for fewer than 32 models, so the generator's size floor parsed and inflated
+	 * every one of them on the one builder thread (build 76: stream workers 0.5 of 14 busy). A model read is
+	 * milliseconds of archive inflate + NIF parse, far over a pooled hand-off: two models are enough to fan out.
+	 * Red WW_MODELPOOL_RED=1: the floor of 32 (build 76). */
+	const bool poolRed = wwEnvInt( "WW_MODELPOOL_RED" ) == 1;
+	const int floor = poolRed ? 32 : 2;
+	{
+		static std::atomic<int> said{ 0 };
+		static std::atomic<long long> fanned{ 0 }, serial{ 0 };
+		const bool fan = int( jobs_.size() ) >= floor && workerCap() > 1;
+		( fan ? fanned : serial ).fetch_add( 1, std::memory_order_relaxed );
+		const int s = said.fetch_add( 1, std::memory_order_relaxed );
+		if ( s == 0 || ( s & 255 ) == 0 )
+			std::fprintf( stderr, "stream model pool: %lld model sets parsed on up to %d workers, %lld on the asking thread; "
+				"this set %d models (red WW_MODELPOOL_RED=1: under 32 models on the asking thread, build 76)\n",
+				(long long) fanned.load(), workerCap(), (long long) serial.load(), int( jobs_.size() ) );
+	}
 	lodgenParallelFor( int( jobs_.size() ), [&]( int i ) {
 		Job & j = jobs_[size_t( i )];
 		NifItemThreadCache ownItems;
+		WwHw::Busy wwBusy( WwHw::BusyModels );	// lane EMPTY240 R3-1, R5-4: by kind
 		j.ok = lodgenNativeLoadModelPlacedOnce( user, j.model, j.subst.isEmpty() ? nullptr : &j.subst, &j.shapes );
 		j.done = true;
-	}, workerCap() );
+	}, workerCap(), floor );
 }
 
 bool CellModelAhead::take( const QString & model, const LodgenMaterialSubst * subst,

@@ -1,4 +1,5 @@
 #!/bin/bash
+export WW_CELL_STREAM="${WW_CELL_STREAM:-0}"	# AIRPERF1 r4: this harness opens a fixed block (streaming is the default now)
 # lane VOLAIR1: the .recx census over the whole base game + official add-ons. One shot with every master loaded and
 # the files NifSkope ships (no WW_RECX_ROOT pin); the census lines say, per weather record, which file and rung
 # matched. Verdict: every weather the masters define is matched by its own Plugins/FO4CS/Weathers file at the form

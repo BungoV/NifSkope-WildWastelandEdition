@@ -139,13 +139,15 @@ inline void lowTypeOf( unsigned flags, unsigned thunder, float recxType, float &
 /* the band parameters of one weather from its layers (role, cover); heights, density and tint are coverage-weighted
  * means, sheet = the share of the band's coverage that sheet layers give */
 inline void bandsOf( const int * role, const float * cover, const float ( *tint )[3], int n, BandParams out[3],
-	bool redMax = false, const float ( *heightM )[2] = nullptr )
+	bool redMax = false, const float ( *heightM )[2] = nullptr, bool heightsAlone = false )
 {
 	// lane WX1: heightM[i] = a layer's own base/top above the eye (a weather .recx clouds.layers entry), < 0 = its role's
+	// lane AIRPERF1 A9: heightsAlone (physicalWeather on) = a band with file heights takes them alone, no role height mixed in
 	for ( int b = 0; b < 3; b++ ) {
 		float cs[32], sheetC[32];
 		int k = 0, ks = 0;
 		double w = 0.0, base = 0.0, top = 0.0, den = 0.0, t[3] = { 0, 0, 0 };
+		double wOwn = 0.0, baseOwn = 0.0, topOwn = 0.0;
 		for ( int i = 0; i < n && k < 32; i++ ) {
 			const RoleInfo & r = roleInfo( role[i] );
 			if ( r.band != b || cover[i] <= 0.0f )
@@ -158,6 +160,11 @@ inline void bandsOf( const int * role, const float * cover, const float ( *tint 
 			const bool own = heightM && heightM[i][0] >= 0.0f && heightM[i][1] > heightM[i][0];
 			base += cover[i] * ( own ? heightM[i][0] : r.baseM );
 			top += cover[i] * ( own ? heightM[i][1] : r.topM );
+			if ( own ) {
+				wOwn += cover[i];
+				baseOwn += cover[i] * heightM[i][0];
+				topOwn += cover[i] * heightM[i][1];
+			}
 			den += cover[i] * r.density;
 			for ( int c = 0; c < 3; c++ )
 				t[c] += cover[i] * ( tint ? tint[i][c] : 1.0f );
@@ -173,6 +180,10 @@ inline void bandsOf( const int * role, const float * cover, const float ( *tint 
 		p.sheet = p.coverage > 0.0f ? unionCover( sheetC, ks, redMax ) / p.coverage : 0.0f;
 		p.baseM = float( base / w );
 		p.topM = float( top / w );
+		if ( heightsAlone && wOwn > 0.0 ) {
+			p.baseM = float( baseOwn / wOwn );
+			p.topM = float( topOwn / wOwn );
+		}
 		p.density = float( den / w );
 		for ( int c = 0; c < 3; c++ )
 			p.tint[c] = float( t[c] / w );

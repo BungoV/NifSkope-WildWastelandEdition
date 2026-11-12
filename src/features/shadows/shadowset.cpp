@@ -6,9 +6,12 @@ BSD License - see nifskope.h
 
 #include "features/shadows/shadowset.h"
 #include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
+#include "wwsyncred.h"	// lane PERFFIX6: ^WW_SYNC_RED
 
 #include "gl/cellunits.h"	// lane HARNESSMIN1 (testint): the terrain/contact maps registered on 31/32
 #include "gl/celluniform.h"	// lane CELLUNI2
+#include "features/shared/glstatememo.h"	// lane EMPTY240 R11-2: the contact pass's state reads kept
+#include "features/shared/camunired.h"	// lane EMPTY240 R12-1: the sun path's key strings kept
 #include "features/clouds/cloudshadow.h"	// lane CLOUD3: the clouds' shadow map joins the composition
 #include "gl/celllooks.h"	// lane GAPLOOK1: the contact far tier's switch
 #include "features/sky/skyephem.h"	// lane EPHEM1: FO4CS Solar's sun + moon arithmetic
@@ -24,6 +27,7 @@ BSD License - see nifskope.h
 #include "gl/renderer.h"
 #include "harnesswindow.h"
 #include "features/far-lod/impostorchunk.h"	// lane FAR5: the far cards as terrain-shadow casters
+#include "features/far-lod/lodpreview.h"	// lane PERFLOAD1 P10: the preview's ring alone and near grid
 #include "features/water/cellwater.h"	// lane FOGTERRAIN3: the water shapes the ground fog stands on
 #include "gl/fogterrain.h"	// lane FOGTERRAIN1: the ground fog's low-pass terrain (FOGTERRAIN2: its own job here)
 #include "features/shared/cellpasstime.h"	// lane PERFFIX2: the contact sub-timer
@@ -233,6 +237,9 @@ struct Contact
 	unsigned int up = 0, upFbo = 0;
 	int upW = 0, upH = 0;
 	bool upValid = false;
+	// lane EMPTY240 R11-2: the target shape that passed its status check (0: ask) and the pass's entry state
+	quint64 okKey = 0;
+	WwGlMemo<GLint, 10> entry;
 };
 
 struct SetState
@@ -246,7 +253,8 @@ struct SetState
 	unsigned frame = 0;
 	float airAmb = 0.3f;
 	bool pinPar = false, pinDist = false;
-	double dist = 14000.0;
+	double dist = 24000.0;	// DEBUGVIEW1 item 4: bungo 11-11, his FO4CS setting (~24k; FO4CS code default 14000 = red WW_SHADOW_DIST_RED=1)
+	const char * distSrc = "default";
 	double pinElev = 0, pinAz = 0;
 	int view = 0;
 	bool sync = false;
@@ -341,11 +349,18 @@ SetState & ss()
 		}
 		bool dok = false;
 		const double de = wwEnvStr( "WW_SHADOW_DISTANCE" ).toDouble( &dok );
+		// DEBUGVIEW1 item 4: the default reach is bungo's FO4CS fCascadeShadowDistanceUnits (~24k); FO4CS's code default is 14000 (the red)
+		const bool distRed = wwEnvInt( "WW_SHADOW_DIST_RED" ) == 1;
+		const double distDef = distRed ? 14000.0 : 24000.0;
+		s.dist = distDef;
+		s.distSrc = distRed ? "red 14000 (WW_SHADOW_DIST_RED; FO4CS code default)" : "bungo 11-11 (FO4CS user setting ~24k; FO4CS code default 14000)";
 		if ( dok ) {
 			s.dist = std::clamp( de, 2000.0, 24000.0 );
 			s.pinDist = true;
-		} else if ( !wwHarnessRun() ) {
-			s.dist = std::clamp( q.value( QLatin1StringView( kDistanceKey ), 14000.0 ).toDouble(), 2000.0, 24000.0 );
+			s.distSrc = "WW_SHADOW_DISTANCE";
+		} else if ( !wwHarnessRun() && q.contains( QLatin1StringView( kDistanceKey ) ) ) {
+			s.dist = std::clamp( q.value( QLatin1StringView( kDistanceKey ), distDef ).toDouble(), 2000.0, 24000.0 );
+			s.distSrc = "saved Shadow Distance setting";
 		}
 		const QStringList pin = wwEnvStr( "WW_SUNPATH_PIN" ).split( QChar( ',' ), Qt::SkipEmptyParts );
 		if ( pin.size() == 2 ) {
@@ -409,7 +424,7 @@ void timerRead( NifSkopeOpenGLContext::GLFunctions * fn, GpuTimer & t, int slot,
 	if ( !t.pending[slot] )
 		return;
 	const GLuint last = elapsedRed() ? t.q[slot * 2] : t.q[slot * 2 + 1];
-	if ( !wait ) {
+	if ( !wait || !wwSyncRed() ) {	// lane PERFFIX6: an unfinished query is read next frame
 		GLuint avail = 0;
 		fn->glGetQueryObjectuiv( last, GL_QUERY_RESULT_AVAILABLE, &avail );
 		if ( !avail )
@@ -546,7 +561,7 @@ void objLodCut( Scene * scene, float cut[4], double & reach )
 	float hi[2] = { -std::numeric_limits<float>::max(), -std::numeric_limits<float>::max() };
 	for ( Node * node : scene->nodes.list() ) {
 		const Shape * sh = dynamic_cast<const Shape *>( node );
-		if ( !sh || !sh->isVisible() || sh->verts.isEmpty() || !isLoadedLand( sh ) )
+		if ( !sh || !sh->isVisible() || sh->verts.isEmpty() || !isLoadedLand( sh ) || wwShadowPreviewDrops( scene, sh ) )
 			continue;
 		const Transform w = sh->worldTrans();
 		for ( const Vector3 & v : sh->verts ) {
@@ -580,7 +595,7 @@ void collectTerrain( Scene * scene, std::vector<const Shape *> & out, std::vecto
 	const bool cutOn = cut[0] <= cut[2];
 	for ( Node * node : scene->nodes.list() ) {
 		const Shape * sh = dynamic_cast<const Shape *>( node );
-		if ( !sh || !sh->isVisible() || sh->verts.isEmpty() || sh->triangles.isEmpty() )
+		if ( !sh || !sh->isVisible() || sh->verts.isEmpty() || sh->triangles.isEmpty() || wwShadowPreviewDrops( scene, sh ) )
 			continue;
 		const bool terr = isTerrainShape( sh );
 		if ( !terr ) {
@@ -1272,6 +1287,17 @@ float terrStrength( const double toSun[3], const float disc[3], double gameDay, 
 	return float( x * x * ( 3.0 - 2.0 * x ) );
 }
 
+/* MODULES1 M9 (bungo 11-10, 3 AM at eye -3046,65527,6437: a giant square). The terrain shadow map is the last tier past
+ * the cascades; it faded only over 2 % of its square's edges, and its window re-centred when the eye was a quarter of
+ * the map off, so from a high eye its lit square border stood in view, off to one side. Now the window re-centres at an
+ * eighth (its edge always 3/8 of the map from the eye) and the map fades out on a circle around the eye (80 to 100 % of
+ * the reach: 3/8 of the map, or the published map's nearest edge if nearer). Red WW_SHADOW_TERR_SQUARE_RED=1. */
+bool wwShadowTerrSquareRed()
+{
+	WW_SWITCH_STATIC( bool, red, wwEnvStr( "WW_SHADOW_TERR_SQUARE_RED" ).trimmed() == QLatin1StringView( "1" ) );
+	return red;
+}
+
 void terrainFrame( Scene * scene, const double toSun[3], const float disc[3] )
 {
 	SetState & s = ss();
@@ -1328,10 +1354,14 @@ void terrainFrame( Scene * scene, const double toSun[3], const float disc[3] )
 		cam[a] = c / sc;
 	}
 	const double snap = t.N * t.T / 8.0;
-	if ( std::fabs( cam[0] - t.cx ) > t.N * t.T / 4.0 || std::fabs( cam[1] - t.cy ) > t.N * t.T / 4.0 || regrid ) {
+	const double off = t.N * t.T / ( wwShadowTerrSquareRed() ? 4.0 : 8.0 );	// MODULES1 M9: re-centred at an eighth
+	if ( std::fabs( cam[0] - t.cx ) > off || std::fabs( cam[1] - t.cy ) > off || regrid ) {
 		t.cx = std::round( cam[0] / snap ) * snap;
 		t.cy = std::round( cam[1] / snap ) * snap;
 		regrid = true;
+		fprintf( stderr, "shadow terrain map: centre %.0f,%.0f half %.0f, eye %.0f,%.0f,%.0f (off %.0f,%.0f), fade circle %.0f "
+			"around the eye (red WW_SHADOW_TERR_SQUARE_RED=1: the square's edge)\n", t.cx, t.cy, t.N * t.T * 0.5, cam[0], cam[1],
+			cam[2], cam[0] - t.cx, cam[1] - t.cy, wwShadowTerrSquareRed() ? 0.0 : t.N * t.T * 0.375 );
 	}
 	t.x0 = t.cx - t.N * t.T * 0.5;
 	t.y0 = t.cy - t.N * t.T * 0.5;
@@ -1638,9 +1668,51 @@ bool wwCellIsTerrainShape( const Shape * sh )
 	return sh && isTerrainShape( sh );
 }
 
+bool wwShadowPreviewDrops( const Scene * scene, const Shape * sh )
+{
+	if ( LodPreview::ringHides( sh->getName() ) )
+		return true;
+	if ( LodPreview::grid() != LodPreview::Off )
+		return false;
+	// Stream::nearOffCell takes the cell's node off its parent: the draw walks the roots, the casters every node
+	const Node * top = sh;
+	while ( top->parentNode() )
+		top = top->parentNode();
+	return !scene->roots.list().contains( const_cast<Node *>( top ) );
+}
+
 bool wwShadowRed( const char * name )
 {
-	return ss().reds.contains( QString::fromLatin1( name ) );
+	const SetState & s = ss();
+	return !s.reds.isEmpty() && s.reds.contains( QString::fromLatin1( name ) );	// lane EMPTY240 R11-2: no string with no red
+}
+
+/* MODULES1 R6-8 (bungo 11-10: the shadow views are unreadable): the views wrote their value into the LIT frame, so the
+ * air, the bloom, the glare, the exposure and the tone map all ran over it, and the effects, cards and sky drew
+ * around it as lit pictures. Now the frame is a probe pass while a view is shown. */
+bool wwShadowViewPass( Scene * scene )
+{
+	const SetState & s = ss();
+	const int probe = wwSunShadowProbeMode();
+	const bool asked = ( s.view > 0 && s.view <= 5 ) || probe == 1 || ( probe >= 3 && probe <= 5 );	// probe 2 tints the lit picture
+	const bool red = wwShadowRed( "viewpost" );
+	const bool on = asked && !red && scene && !scene->selecting && wwSunShadowWanted( scene );
+	static int saidKey = 0;	// asked off at start: nothing to say (this runs per shape: no string work unless it changed)
+	const int key = !asked ? 0 : ( 1 | ( on ? 2 : 0 ) | ( red ? 4 : 0 ) | ( s.view << 3 ) | ( probe << 8 ) );
+	if ( scene && !scene->selecting && key != saidKey ) {
+		saidKey = key;
+		static QString said;
+		const QString line = !asked ? QStringLiteral( "shadow view: off" )
+			: QStringLiteral( "shadow view: WW_SHADOW_VIEW=%1 WW_CSM_PROBE=%2: %3" ).arg( s.view ).arg( probe )
+				.arg( on ? QStringLiteral( "readable pass ON: cell-lit surfaces write the view's value as drawn (0 black = shadowed, 1 white = lit; view 5 = the weights as colours), the sky is a flat 0.5; not drawn: effects, water, particles, far tree cards, clouds, precipitation, far bulbs; bypassed: the air / fog, the linear frame, bloom, glare, lens flare, exposure + tone map, depth of field, motion blur, TAA jitter + resolve + sharpen (red WW_SHADOW_RED=viewpost)" )
+					: red ? QStringLiteral( "RED WW_SHADOW_RED=viewpost: the value inside the lit frame, through the air and the post chain" )
+					: QStringLiteral( "asked, no receiver this frame (no cascade map and no terrain / contact producer): the plain picture" ) );
+		if ( line != said ) {
+			said = line;
+			fprintf( stderr, "%s\n", qPrintable( line ) );
+		}
+	}
+	return on;
 }
 
 bool wwShadowPar( int bit )
@@ -1648,6 +1720,8 @@ bool wwShadowPar( int bit )
 	const SetState & s = ss();
 	if ( ( s.par & bit ) == 0 )
 		return false;
+	if ( s.reds.isEmpty() )
+		return true;	// lane EMPTY240 R11-2: no string with no red
 	for ( int i = 0; i < 14; i++ )
 		if ( bit == ( 1 << i ) )
 			return !s.reds.contains( QStringLiteral( "no" ) + QLatin1StringView( kParNames[i] ) );
@@ -1668,12 +1742,16 @@ void wwShadowSetAirAmbientShare( float a ) { ss().airAmb = std::clamp( a, 0.05f,
 
 double wwShadowDistance() { return ss().dist; }
 
+const char * wwShadowDistanceSource() { return ss().distSrc; }
+
 void wwShadowSetDistance( double d )
 {
 	SetState & s = ss();
 	s.dist = std::clamp( d, 2000.0, 24000.0 );
-	if ( !s.pinDist )
+	if ( !s.pinDist ) {
 		QSettings().setValue( QLatin1StringView( kDistanceKey ), s.dist );
+		s.distSrc = "Shadow Distance setting";
+	}
 }
 
 int wwShadowCascadeTier() { return ss().cascade; }
@@ -1711,12 +1789,18 @@ WwSunPathKey wwSunPathKey()
 	WwSunPathKey k;
 	k.mode = s.sunPath;
 	k.pin = s.sunPin;
+	// lane EMPTY240 R12-1: the two reds read once per switch generation, not per call (red WW_CAMUNI_RED=envkeys)
+	WW_SWITCH_STATIC( bool, realClockRed, wwEnvStr( "WW_SUNPATH_RED" ).trimmed() == QLatin1String( "realclock" ) );
+	WW_SWITCH_STATIC( bool, juneRed, wwEnvStr( "WW_SKY_EPHEM_RED" ) == QLatin1String( "june" ) );
+	const bool perCall = wwCamUniRed( "envkeys" );
+	k.realClock = s.sunPath == 1 && ( perCall ? wwEnvStr( "WW_SUNPATH_RED" ).trimmed() == QLatin1String( "realclock" )
+		: realClockRed );
 	if ( s.sunPin ) {
 		k.elev = s.pinElev;
 		k.az = s.pinAz;
 	} else if ( s.sunPath == 1 && wwLookOn( WwLook::Ephemeris ) ) {
 		k.ephem = true;
-		k.june = wwEnvStr( "WW_SKY_EPHEM_RED" ) == QLatin1String( "june" );
+		k.june = perCall ? wwEnvStr( "WW_SKY_EPHEM_RED" ) == QLatin1String( "june" ) : juneRed;
 	}
 	return k;
 }
@@ -1744,7 +1828,7 @@ wwephem::Date ephemDate( double hour, double gameDay, double & lon, double * lat
 }
 }	// namespace
 
-double wwSunPathReal( double hour, double gameDay, double out[3] )
+static double sunPathRealRaw( double hour, double gameDay, double out[3] )
 {
 	const SetState & s = ss();
 	if ( s.sunPin ) {
@@ -1772,6 +1856,107 @@ double wwSunPathReal( double hour, double gameDay, double out[3] )
 	out[2] = std::sin( phi ) * std::sin( decl ) + std::cos( phi ) * std::cos( decl ) * std::cos( H );
 	norm3( out );
 	return std::asin( std::clamp( out[2], -1.0, 1.0 ) ) / kDeg;
+}
+
+/* ---- MODULES1 R6-6 (bungo 11-10: at 6:30 the sun's disc is under the horizon and the light comes from 21 degrees up):
+ * the real path ran on the real clock of the place and date (Boston, 23 October: sunrise 7:05), while the game's
+ * day starts by its climate record (the sky clock's A: the game's own disc is on the horizon then). At 6:30 the real
+ * sun was at -4 degrees, so the one light was the crossfade toward the moon (116 / 21) and the disc was not drawn.
+ * Now the real sky is read on the game's clock: game hours A..D map to the real sunrise..sunset of that day, the
+ * night to the real night; the arc (azimuths, noon height) stays the real one. Red WW_SUNPATH_RED=realclock. ---- */
+namespace {
+struct SunClock
+{
+	double gameRise = -1.0, gameSet = -1.0;
+	double key[4] = { -1e9, 0.0, 0.0, 0.0 };	// the day, the place and the reds the real crossings were found for
+	double realRise = -1.0, realSet = -1.0;
+	double lastIn = -1.0, lastOut = -1.0, lastElev = 0.0;
+	bool lastOn = false;
+};
+SunClock & sunClock()
+{
+	static SunClock c;
+	return c;
+}
+
+//! the hour of the real sky the game hour shows
+double sunClockHour( double hour, double gameDay )
+{
+	SunClock & c = sunClock();
+	c.lastOn = false;
+	if ( ss().sunPin || c.gameRise < 0.0 || !( c.gameSet > c.gameRise )
+		|| wwEnvStr( "WW_SUNPATH_RED" ).trimmed() == QLatin1String( "realclock" ) )
+		return hour;
+	const wwplace::Place & p = wwSkyPlaceNow();
+	const double key[4] = { std::floor( gameDay ), p.latDeg, p.lonDeg, ( wwLookOn( WwLook::Ephemeris ) ? 1.0 : 0.0 )
+		+ ( wwEnvStr( "WW_SKY_EPHEM_RED" ) == QLatin1String( "june" ) ? 2.0 : 0.0 ) };
+	if ( !std::equal( key, key + 4, c.key ) ) {
+		std::copy( key, key + 4, c.key );
+		c.realRise = c.realSet = -1.0;
+		double o[3], prev = sunPathRealRaw( 0.0, gameDay, o );
+		for ( int i = 1; i <= 240; i++ ) {
+			const double h = i * 0.1, e = sunPathRealRaw( h, gameDay, o );
+			if ( ( prev < 0.0 ) != ( e < 0.0 ) ) {
+				const double x = h - 0.1 + 0.1 * prev / ( prev - e );
+				if ( prev < 0.0 && c.realRise < 0.0 )
+					c.realRise = x;
+				else if ( prev >= 0.0 && c.realSet < 0.0 )
+					c.realSet = x;
+			}
+			prev = e;
+		}
+	}
+	if ( !( c.realRise >= 0.0 && c.realSet > c.realRise ) )
+		return hour;	// no sunrise or sunset that day: nothing to align
+	double h = std::fmod( hour, 24.0 );
+	if ( h < 0.0 )
+		h += 24.0;
+	double out;
+	if ( h >= c.gameRise && h <= c.gameSet ) {
+		out = c.realRise + ( h - c.gameRise ) / ( c.gameSet - c.gameRise ) * ( c.realSet - c.realRise );
+	} else {
+		const double tt = h > c.gameSet ? h - c.gameSet : h + 24.0 - c.gameSet;
+		out = c.realSet + tt / ( 24.0 - ( c.gameSet - c.gameRise ) ) * ( 24.0 - ( c.realSet - c.realRise ) );
+		if ( out >= 24.0 )
+			out -= 24.0;
+	}
+	c.lastOn = true;
+	return out;
+}
+}	// namespace
+
+void wwSunPathGameHorizon( double riseHour, double setHour )
+{
+	SunClock & c = sunClock();
+	c.gameRise = riseHour;
+	c.gameSet = setHour;
+}
+
+double wwSunPathReal( double hour, double gameDay, double out[3] )
+{
+	const double h = sunClockHour( hour, gameDay );
+	const double e = sunPathRealRaw( h, gameDay, out );
+	SunClock & c = sunClock();
+	c.lastIn = hour;
+	c.lastOut = h;
+	c.lastElev = e;
+	return e;
+}
+
+QString wwSunPathClockEcho()
+{
+	const SunClock & c = sunClock();
+	const SetState & s = ss();
+	if ( s.sunPath != 1 )
+		return QStringLiteral( "sky bodies sources: sun disc, body, lens, light = the engine's clock (the climate's sunrise and sunset, Sun Path off)" );
+	if ( s.sunPin )
+		return QStringLiteral( "sky bodies sources: sun disc, body, lens, light = the pinned sun (WW_SUNPATH)" );
+	if ( !c.lastOn )
+		return QStringLiteral( "sky bodies sources: sun disc, body, lens = the real path on the REAL clock (%1); light = that sun, crossfaded to the night light from 0 to -6 deg; engine = the climate's clock, not drawn" )
+			.arg( wwEnvStr( "WW_SUNPATH_RED" ).trimmed() == QLatin1String( "realclock" ) ? QStringLiteral( "RED WW_SUNPATH_RED=realclock" )
+				: QStringLiteral( "no game horizon or no sunrise that day" ) );
+	return QStringLiteral( "sky bodies sources: sun disc, body, lens = the real path on the GAME's clock (game horizon %1 / %2 h = real sunrise %3 / sunset %4 h); light = that sun, crossfaded to the night light from 0 to -6 deg; engine = the climate's clock, not drawn; red WW_SUNPATH_RED=realclock" )
+		.arg( c.gameRise, 0, 'f', 2 ).arg( c.gameSet, 0, 'f', 2 ).arg( c.realRise, 0, 'f', 2 ).arg( c.realSet, 0, 'f', 2 );
 }
 
 bool wwSunPathApply( double hour, double gameDay, float sunDir[3], float disc[3] )
@@ -2251,7 +2436,24 @@ void wwContactShadowPass( Scene * scene )
 	fn->glGetIntegerv( GL_DRAW_FRAMEBUFFER_BINDING, &prevFbo );
 	fn->glGetIntegerv( GL_READ_FRAMEBUFFER_BINDING, &prevRead );
 	fn->glGetIntegerv( GL_VIEWPORT, vp );
-	fn->glGetIntegerv( GL_ACTIVE_TEXTURE, &prevActive );
+	/* lane EMPTY240 R11-2: the active unit, four enables and the masks kept (build 86 read them every frame, contact
+	 * 0.10 ms CPU; glstatememo.h, red WW_GLSTATE_MEMO_RED=1); the targets, the binding and the viewport still asked */
+	if ( c.entry.due() ) {
+		GLint now[10] = { GL_TEXTURE0, 0, 0, 0, 0, 1, 1, 1, 1, 1 };
+		fn->glGetIntegerv( GL_ACTIVE_TEXTURE, &now[0] );
+		now[1] = fn->glIsEnabled( GL_DEPTH_TEST ) ? 1 : 0;
+		now[2] = fn->glIsEnabled( GL_BLEND ) ? 1 : 0;
+		now[3] = fn->glIsEnabled( GL_CULL_FACE ) ? 1 : 0;
+		now[4] = fn->glIsEnabled( GL_SCISSOR_TEST ) ? 1 : 0;
+		GLboolean dm = GL_TRUE, cm[4] = { GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE };
+		fn->glGetBooleanv( GL_DEPTH_WRITEMASK, &dm );
+		fn->glGetBooleanv( GL_COLOR_WRITEMASK, cm );
+		now[5] = dm ? 1 : 0;
+		for ( int k = 0; k < 4; k++ )
+			now[6 + k] = cm[k] ? 1 : 0;
+		c.entry.keep( now, "contact entry" );
+	}
+	prevActive = c.entry.v[0];
 	if ( c.w != mw || c.h != mh ) {
 		fn->glBindTexture( GL_TEXTURE_2D, c.tex );
 		fn->glTexImage2D( GL_TEXTURE_2D, 0, GL_R8, mw, mh, 0, GL_RED, GL_UNSIGNED_BYTE, nullptr );
@@ -2264,9 +2466,14 @@ void wwContactShadowPass( Scene * scene )
 		fn->glFramebufferTexture2D( GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, c.tex, 0 );
 		c.w = mw;
 		c.h = mh;
+		c.okKey = 0;
 	}
 	fn->glBindFramebuffer( GL_FRAMEBUFFER, c.fbo );
-	const bool complete = fn->glCheckFramebufferStatus( GL_FRAMEBUFFER ) == GL_FRAMEBUFFER_COMPLETE;
+	// lane EMPTY240 R11-2: asked once a shape (build 86 every frame); red WW_GLSTATE_MEMO_RED=1: every frame
+	const quint64 okKey = quint64( c.fbo & 0xFFFF ) | quint64( mw & 0xFFFF ) << 16 | quint64( mh & 0xFFFF ) << 32 | quint64( 1 ) << 48;
+	const bool complete = ( c.okKey == okKey && !wwGlStateMemoRed() )
+		|| fn->glCheckFramebufferStatus( GL_FRAMEBUFFER ) == GL_FRAMEBUFFER_COMPLETE;
+	c.okKey = complete ? okKey : 0;
 	NifSkopeOpenGLContext::Program * prog = complete ? r->useProgram( "ww_contact.prog" ) : nullptr;
 	if ( !prog ) {
 		fn->glBindFramebuffer( GL_DRAW_FRAMEBUFFER, GLuint( prevFbo ) );
@@ -2276,11 +2483,12 @@ void wwContactShadowPass( Scene * scene )
 	}
 	timerBegin( fn, s.tmContact );
 	PassTime::subBegin( PassTime::ContactMarch );	// lane PERFFIX2: "| sub contact" each frame
-	const bool wasDepth = fn->glIsEnabled( GL_DEPTH_TEST ), wasBlend = fn->glIsEnabled( GL_BLEND );
-	const bool wasCull = fn->glIsEnabled( GL_CULL_FACE ), wasScissor = fn->glIsEnabled( GL_SCISSOR_TEST );
-	GLboolean depthMask = GL_TRUE, colorMask[4];
-	fn->glGetBooleanv( GL_DEPTH_WRITEMASK, &depthMask );
-	fn->glGetBooleanv( GL_COLOR_WRITEMASK, colorMask );
+	const bool wasDepth = c.entry.v[1] != 0, wasBlend = c.entry.v[2] != 0;
+	const bool wasCull = c.entry.v[3] != 0, wasScissor = c.entry.v[4] != 0;
+	const GLboolean depthMask = c.entry.v[5] ? GL_TRUE : GL_FALSE;
+	GLboolean colorMask[4];
+	for ( int k = 0; k < 4; k++ )
+		colorMask[k] = c.entry.v[6 + k] ? GL_TRUE : GL_FALSE;
 	fn->glDisable( GL_DEPTH_TEST );
 	fn->glDisable( GL_BLEND );
 	fn->glDisable( GL_CULL_FACE );
@@ -2516,7 +2724,26 @@ void wwShadowSetUniforms( Scene * scene, NifSkopeOpenGLContext::Program * prog, 
 	prog->uni1i( "ussCsmOn", csmValid ? 1 : 0 );
 	WwCascadePreset cp;
 	const bool vogel = upgraded && wwShadowCascadePreset( cp ) && !wwShadowRed( "novogel" );
-	prog->uni4f( "ussCsmFilter", FloatVector4( vogel ? 1.0f : 0.0f, cp.radius, float( cp.taps ), ( vogel && !volume ) ? 1.0f : 0.0f ) );
+	/* MODULES1 R7 item 9: w 1 = the receiver plane's depth slope with each tap's walk held to 4 texels, 2 = the red
+	 * WW_SHADOW_RED=walk2000 (the walk clamped at 2000 u: a grazed wall reads half lit behind its own pier) */
+	const bool walkRed = wwShadowRed( "walk2000" );
+	prog->uni4f( "ussCsmFilter", FloatVector4( vogel ? 1.0f : 0.0f, cp.radius, float( cp.taps ),
+		( vogel && !volume ) ? ( walkRed ? 2.0f : 1.0f ) : 0.0f ) );
+	if ( vogel && !volume ) {
+		static int saidWalk = -1;
+		static float saidTexel = -1.0f;
+		if ( saidWalk != int( walkRed ) || saidTexel != csmTexel[0] ) {
+			saidWalk = int( walkRed );
+			saidTexel = csmTexel[0];
+			if ( walkRed )
+				std::fprintf( stderr, "sun cascades filter: RED walk2000: a tap's depth follows the receiver's slope up to 2000 u along the light "
+					"(a wall the sun grazes compares half of its taps past every caster)\n" );
+			else
+				std::fprintf( stderr, "sun cascades filter: a tap's depth follows the receiver's slope for at most 4 texels along the light "
+					"(%.2f / %.2f / %.2f u in cascades 0 / 1 / 2), a steeper tap is pulled toward the point (red WW_SHADOW_RED=walk2000)\n",
+					double( 4.0f * csmTexel[0] ), double( 4.0f * csmTexel[1] ), double( 4.0f * csmTexel[2] ) );
+		}
+	}
 	// lane SHADOWPAR1: FO4CS's world-unit radius clamp(r, 1, 6) x {0.8, 1, 1.2} x {1, 3, 10}, its taps per cascade
 	const float wr = std::clamp( cp.radius, 1.0f, 6.0f );
 	prog->uni4f( "ussCsmWorld", FloatVector4( vogel && wwShadowPar( WwParCascRadius ) ? 1.0f : 0.0f, wr * 0.8f, wr * 3.0f, wr * 12.0f ) );
@@ -2531,7 +2758,22 @@ void wwShadowSetUniforms( Scene * scene, NifSkopeOpenGLContext::Program * prog, 
 		const double span = t.pubN * t.pubT;
 		prog->uni4f( "ussTerrXform", FloatVector4( float( 1.0 / span ), float( -t.pubX0 / span ), float( 1.0 / span ), float( -t.pubY0 / span ) ) );
 		// zmin, span, the receiver's bias (world units up), the edge fade (uv)
-		prog->uni4f( "ussTerrRange", FloatVector4( t.pubZmin, t.pubSpan, float( 0.05 * t.pubT + 4.0 ), 0.02f ) );
+		/* MODULES1 M9: a negative w = the fade circle's radius around the eye (world units): 3/8 of the map, or the
+		 * published map's nearest edge from the eye if nearer (a map still being re-rastered behind a fast eye) */
+		float edgeFade = 0.02f;
+		if ( !wwShadowTerrSquareRed() ) {
+			const Transform & vt = scene->view;
+			const double sc = vt.scale != 0.0f ? double( vt.scale ) : 1.0;
+			double e[2] = { 0, 0 };
+			for ( int a = 0; a < 2; a++ ) {
+				for ( int k = 0; k < 3; k++ )
+					e[a] -= vt.rotation( k, a ) * vt.translation[k];
+				e[a] /= sc;
+			}
+			const double edge = std::min( { e[0] - t.pubX0, t.pubX0 + span - e[0], e[1] - t.pubY0, t.pubY0 + span - e[1] } );
+			edgeFade = -float( std::max( 1.0, std::min( span * 0.375, edge ) ) );
+		}
+		prog->uni4f( "ussTerrRange", FloatVector4( t.pubZmin, t.pubSpan, float( 0.05 * t.pubT + 4.0 ), edgeFade ) );
 		// lane SHADOWPAR1: the near tier's atlas rows and window (off: the far map alone, as before)
 		const float rowsAll = float( t.pubN + t.pubNn + t.pubExtra * t.pubN );
 		if ( t.pubNn > 0 ) {

@@ -7,7 +7,7 @@
  * DATA class flags: Rainy -> a rain layer, Snow -> a snow_fine layer). Each layer: a type (rain, hail, snow_fine,
  * snow_far_dot, snow_wet_clump, snow_big_clump), its rate or density, size, draw scale and texture (under Textures\,
  * looked up loose in the .recx roots: the loaded plugins' folders, the game's Data, the shipped Data; each type ships a
- * default, res/Data/Textures/FO4CS/Precip, the phase A atlases of notes/weatherlook1; a texture under the old
+ * default, Textures/FO4CS/Precip in the MO2 mod "Fusion Shaders - Assets" (lane WEATHERRECX1), the phase A atlases of notes/weatherlook1; a texture under the old
  * WW/Precip is still found there and the other way round).
  * The field (gl/precipmath.h, unit tests/features/weather/precip): a camera-centred box of world-anchored particles that fall at their
  * type's speed and ride the weather's wind (the fog drift's law and bearing); near ones are textured quads flat-on to
@@ -34,7 +34,7 @@ bool wwCellPrecipWantsFrames( Scene * scene );
 //! the last census line ("precip: off" when the row is off)
 QString wwCellPrecipEcho();
 
-/* lane FO76WEATHER1: rain wetness on every material (gl/rainwetlaw.h, res/shaders/features/weather/rain_wet.glsl), Fallout 76's law.
+/* lane WETWEATHER1: rain wetness on every material (gl/rainwetlaw.h, res/shaders/features/weather/rain_wet.glsl), [the reference game's] law.
  * The amount runs on Fallout 4's clock (+0.03 a second while it rains, -0.02 while dry) toward the rain's share of the
  * weather (a change blends both weathers); it starts settled when a document opens or the row turns on. Interiors 0.
  * Wet ground also takes the game's wet reflection (SSR) flag (renderer.cpp, src/features/far-ground/landlodspec.h landSsr), and a

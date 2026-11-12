@@ -11,10 +11,14 @@ BSD License - see nifskope.h
 #include "features/far-lod/impostordraw.h"
 #include "data/niftypes.h"	// Triangle (the card casters)
 
+#include <QHash>
+#include <QRect>
 #include <QSet>
 #include <QString>
 #include <QStringList>
 #include <QVector>
+
+struct LodiTreeCard;	// lodinative.h
 
 class Scene;
 class NifModel;
@@ -33,6 +37,12 @@ struct Placed
 	QString formId;					//!< for the log, so a card names its tree
 	int setIndex = -1;				//!< into `sets()`; -1 = its set did not load
 	QString ref;					//!< the row's REFR (manifest column `ref`), hex
+	/* lane PERFLOAD1 P7, the tree ladder (treeladder.h): bound radius (0 = not a handed tree), the ring step its mesh
+	 * row draws (1 + MNAM slot; -1 = none: always the impostor), the REFR that row hides by */
+	float ladderRadius = 0.0f;
+	qint8 ladderMeshStep = -1;
+	quint32 ladderRef = 0;
+	quint8 ladderSteps = 0;	//!< round 2: every mesh step its rows draw (bit = step; LodiTreeCard::stepMask)
 };
 
 //! THE MASTER. False unless the person turned it on, or `WW_IMPOSTOR_CHUNK` is
@@ -64,8 +74,15 @@ const QVector<Placed> & placements();
 // resets the chunk state, so the cards around a cell block live apart from it.
 int armCellFar( NifModel * nif, const QStringList & chunkPaths, const float shift[3],
 	float cx, float cy, float rMax, int hx0, int hy0, int hx1, int hy1,
-	QSet<quint32> * refs, QStringList * notes );
+	QSet<quint32> * refs, QStringList * notes, const QVector<QRect> * oursOnly = nullptr );
 int drawCellFar( Scene * scene, const ImpostorDraw::Options & opt );
+/*! lane PERFLOAD1 P1: the bake's card arrays (`<objectsDir>/<ws>.LodgenCards.*.lodm`, horizon ring sets left out) read
+ *  layer by layer: form -> its layer into `layerOf`, each layer loaded once as a set of the far cards. After armCellFar. */
+int cellFarTreeForms( const QString & objectsDir, const QString & ws, QHash<quint32, int> * layerOf, QStringList * notes );
+//! the trees the object rings handed over (LodiTreeCard), placed as cards of their form's set; returns how many
+int addCellFarTrees( const QVector<::LodiTreeCard> & trees );
+//! the armed far cards by kind: octahedral (N x N views), horizon ring, flat (one view)
+void cellFarCensus( int * octahedral, int * ring, int * flat );
 void forgetCellFar();
 int cellFarCount();
 
@@ -86,6 +103,9 @@ inline qint64 cellFarCellKey( int x, int y ) { return ( qint64( x ) << 32 ) ^ qi
 void cellFarHideSet( const QSet<qint64> & cells );
 //! The armed cards placed in `cells` that still draw
 int cellFarCardsShownIn( const QSet<qint64> & cells );
+/*! lane AIRPERF1 r6: of the armed cards placed in `cells` that still draw, how many there are and how many have no
+ *  authored mesh row beside the card (ladderMeshStep < 0): those the ray-traced GI cannot trace */
+void cellFarCardsMeshIn( const QSet<qint64> & cells, int * all, int * noMesh );
 
 } // namespace ImpostorChunk
 

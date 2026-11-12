@@ -4,6 +4,7 @@
 #include <charconv>
 #include <cmath>
 #include <cstdint>
+#include <initializer_list>
 #include <limits>
 
 namespace nifxl {
@@ -522,7 +523,9 @@ const char * triple( const Json & v )
 }
 
 const std::vector<std::string> kLightKeys = { "type", "lumens", "kelvin", "tint", "tier", "node", "follows",
-	"position", "direction", "cone", "fog", "radius" };
+	"position", "direction", "cone", "fog", "radius", "fixture" };
+const std::vector<std::string> kFixtures = { "incandescent", "halogen", "hps", "lps", "mercury", "fluorescent", "neon",
+	"argon" };
 const std::vector<std::string> kTypes = { "omni", "spot", "hemisphere" };
 const std::vector<std::string> kTiers = { "hero", "normal", "bulb" };
 const std::vector<std::string> kFogKeys = { "scale" };
@@ -560,11 +563,14 @@ bool readLight( const Json & entry, const std::string & at, Warn & warn, Light &
 			warn.unknown( at, key, kLightKeys );
 			continue;
 		}
-		if ( name == "type" || name == "tier" ) {
-			int w = word( v, name == "type" ? kTypes : kTiers, at, key, warn );
+		if ( name == "type" || name == "tier" || name == "fixture" ) {
+			int w = word( v, name == "type" ? kTypes : name == "tier" ? kTiers : kFixtures, at, key, warn );
 			if ( w < 0 )
 				continue;
-			if ( name == "type" ) {
+			if ( name == "fixture" ) {	// lane PHYSUNITS1
+				out.fixture = w;
+				out.hasFixture = true;
+			} else if ( name == "type" ) {
 				out.type = w;
 				out.hasType = true;
 			} else {
@@ -669,6 +675,10 @@ bool readLight( const Json & entry, const std::string & at, Warn & warn, Light &
 			if ( any )
 				out.hasFog = true;
 		}
+	}
+	if ( !hasLumens && out.hasFixture ) {
+		out.lumens = fixtureLumens( out.fixture );	// lane PHYSUNITS1: a fixture brings its own lumens
+		hasLumens = true;
 	}
 	if ( !hasLumens ) {
 		warn.value( at, "lumens", "missing" );
@@ -842,7 +852,10 @@ Lights read( const std::string & bytes )
 
 namespace {
 
-void kelvinXy( double kelvin, double & x, double & y )
+bool gKelvinRed = false;
+
+// Kang et al. 2002: the cubic fit of the Planckian locus (the red)
+void kangXy( double kelvin, double & x, double & y )
 {
 	const double t = std::min( 25000.0, std::max( 1667.0, kelvin ) );
 	if ( t <= 4000 )
@@ -855,6 +868,105 @@ void kelvinXy( double kelvin, double & x, double & y )
 		y = -0.9549476 * x * x * x - 1.37418593 * x * x + 2.09137015 * x - 0.16748867;
 	else
 		y = 3.0817580 * x * x * x - 5.87338670 * x * x + 3.75112997 * x - 0.37001483;
+}
+
+// The CIE 1931 2-degree observer (CIE 015:2018 table), 380..780 nm by 10 nm, linear between. (The Wyman, Sloan &
+// Shirley 2013 multi-lobe fit missed the locus by up to duv 0.0029 below 2200 K: lane PHYSUNITS1's kelvin gate.)
+void cmf( double l, double & X, double & Y, double & Z )
+{
+	static const double T[41][3] = { { 0.001368, 0.000039, 0.006450 }, { 0.004243, 0.000120, 0.020050 },
+		{ 0.014310, 0.000396, 0.067850 }, { 0.043510, 0.001210, 0.207400 }, { 0.134380, 0.004000, 0.645600 },
+		{ 0.283900, 0.011600, 1.385600 }, { 0.348280, 0.023000, 1.747060 }, { 0.336200, 0.038000, 1.772110 },
+		{ 0.290800, 0.060000, 1.669200 }, { 0.195360, 0.090980, 1.287640 }, { 0.095640, 0.139020, 0.812950 },
+		{ 0.032010, 0.208020, 0.465180 }, { 0.004900, 0.323000, 0.272000 }, { 0.009300, 0.503000, 0.158200 },
+		{ 0.063270, 0.710000, 0.078250 }, { 0.165500, 0.862000, 0.042160 }, { 0.290400, 0.954000, 0.020300 },
+		{ 0.433450, 0.994950, 0.008750 }, { 0.594500, 0.995000, 0.003900 }, { 0.762100, 0.952000, 0.002100 },
+		{ 0.916300, 0.870000, 0.001650 }, { 1.026300, 0.757000, 0.001100 }, { 1.062200, 0.631000, 0.000800 },
+		{ 1.002600, 0.503000, 0.000340 }, { 0.854450, 0.381000, 0.000190 }, { 0.642400, 0.265000, 0.000050 },
+		{ 0.447900, 0.175000, 0.000020 }, { 0.283500, 0.107000, 0 }, { 0.164900, 0.061000, 0 }, { 0.087400, 0.032000, 0 },
+		{ 0.046770, 0.017000, 0 }, { 0.022700, 0.008210, 0 }, { 0.011359, 0.004102, 0 }, { 0.005790, 0.002091, 0 },
+		{ 0.002899, 0.001047, 0 }, { 0.001440, 0.000520, 0 }, { 0.000690, 0.000249, 0 }, { 0.000332, 0.000120, 0 },
+		{ 0.000166, 0.000060, 0 }, { 0.000083, 0.000030, 0 }, { 0.000042, 0.000015, 0 } };
+	X = Y = Z = 0;
+	const double f = ( l - 380.0 ) / 10.0;
+	if ( f < 0 || f > 40 )
+		return;
+	const int i = std::min( 39, int( f ) );
+	const double w = f - i;
+	X = T[i][0] + w * ( T[i + 1][0] - T[i][0] );
+	Y = T[i][1] + w * ( T[i + 1][1] - T[i][1] );
+	Z = T[i][2] + w * ( T[i + 1][2] - T[i][2] );
+}
+
+// the observer's three integrals over 360..830 nm, so each channel is normalised to the same area (equal energy = E)
+const double * cmfArea()
+{
+	static double a[3] = { 0, 0, 0 };
+	if ( a[0] == 0 )
+		for ( int n = 360; n <= 830; ++n ) {
+			double p, q, r;
+			cmf( n, p, q, r );
+			a[0] += p;
+			a[1] += q;
+			a[2] += r;
+		}
+	return a;
+}
+
+// a black body (Planck, c2 = 1.4388e-2 m K) through the normalised observer, 360..830 nm by 1 nm
+void planckXy( double kelvin, double & x, double & y )
+{
+	const double t = std::min( 25000.0, std::max( 1667.0, kelvin ) );
+	double X = 0, Y = 0, Z = 0;
+	for ( int n = 360; n <= 830; ++n ) {
+		const double l = n * 1e-9, p = 1.0 / ( l * l * l * l * l * ( std::exp( 1.4388e-2 / ( l * t ) ) - 1.0 ) );
+		double a, b, c;
+		cmf( n, a, b, c );
+		X += p * a;
+		Y += p * b;
+		Z += p * c;
+	}
+	const double * A = cmfArea();
+	X /= A[0];
+	Y /= A[1];
+	Z /= A[2];
+	x = X / ( X + Y + Z );
+	y = Y / ( X + Y + Z );
+}
+
+// emission lines (nm, relative watts) through the observer
+void linesXy( std::initializer_list<std::pair<double, double>> lines, double & x, double & y )
+{
+	double X = 0, Y = 0, Z = 0;
+	for ( const auto & ln : lines ) {
+		double a, b, c;
+		cmf( ln.first, a, b, c );
+		X += ln.second * a;
+		Y += ln.second * b;
+		Z += ln.second * c;
+	}
+	const double * A = cmfArea();
+	X /= A[0];
+	Y /= A[1];
+	Z /= A[2];
+	x = X / ( X + Y + Z );
+	y = Y / ( X + Y + Z );
+}
+
+// linear sRGB (D65) of an xy point at luminance 1, negatives 0, divided by its brightest channel
+void xyRgb( double x, double y, double rgb[3] )
+{
+	const double X = x / y, Y = 1.0, Z = ( 1.0 - x - y ) / y;
+	rgb[0] = 3.2404542 * X - 1.5371385 * Y - 0.4985314 * Z;
+	rgb[1] = -0.9692660 * X + 1.8760108 * Y + 0.0415560 * Z;
+	rgb[2] = 0.0556434 * X - 0.2040259 * Y + 1.0572252 * Z;
+	double m = 0;
+	for ( int k = 0; k < 3; ++k ) {
+		rgb[k] = std::max( 0.0, rgb[k] );
+		m = std::max( m, rgb[k] );
+	}
+	for ( int k = 0; k < 3; ++k )
+		rgb[k] = m > 0 ? rgb[k] / m : 1.0;
 }
 
 // CIE 1960 uv of an xy point (the space correlated colour temperature is measured in)
@@ -876,21 +988,49 @@ double solidAngle( int type, double cone )
 
 } // namespace
 
+void setKelvinRed( bool red ) { gKelvinRed = red; }
+bool kelvinRed() { return gKelvinRed; }
+
+void kelvinXy( double kelvin, double & x, double & y )
+{
+	if ( gKelvinRed )
+		kangXy( kelvin, x, y );
+	else
+		planckXy( kelvin, x, y );
+}
+
 void kelvinRgb( double kelvin, double rgb[3] )
 {
 	double x, y;
 	kelvinXy( kelvin, x, y );
-	const double X = x / y, Y = 1.0, Z = ( 1.0 - x - y ) / y;
-	rgb[0] = 3.2404542 * X - 1.5371385 * Y - 0.4985314 * Z;
-	rgb[1] = -0.9692660 * X + 1.8760108 * Y + 0.0415560 * Z;
-	rgb[2] = 0.0556434 * X - 0.2040259 * Y + 1.0572252 * Z;
-	double m = 0;
-	for ( int k = 0; k < 3; ++k ) {
-		rgb[k] = std::max( 0.0, rgb[k] );
-		m = std::max( m, rgb[k] );
+	xyRgb( x, y, rgb );
+}
+
+// The presets (nifx/SPEC.md, "fixture"): a black body, CIE F11 (the 4000 K triband), or the visible lines of the gas
+void fixtureXy( int fixture, double & x, double & y )
+{
+	switch ( fixture ) {
+	case Halogen: planckXy( 3000, x, y ); return;
+	case Hps: planckXy( 2100, x, y ); return;
+	case Lps: linesXy( { { 589.0, 1.0 }, { 589.6, 0.5 } }, x, y ); return;	// the sodium D doublet
+	case Mercury: linesXy( { { 404.7, 0.18 }, { 435.8, 0.39 }, { 546.1, 0.36 }, { 578.0, 0.36 } }, x, y ); return;
+	case Fluorescent: x = 0.38052; y = 0.37713; return;	// CIE F11
+	case Neon: linesXy( { { 585.2, 0.2 }, { 614.3, 0.35 }, { 640.2, 1.0 }, { 650.7, 0.4 }, { 659.9, 0.3 },
+		{ 692.9, 0.5 }, { 703.2, 0.6 } }, x, y ); return;
+	case Argon: linesXy( { { 404.7, 0.4 }, { 435.8, 1.0 }, { 546.1, 0.25 }, { 578.0, 0.15 } }, x, y ); return;	// argon + mercury: the blue sign
+	default: planckXy( 2700, x, y ); return;
 	}
-	for ( int k = 0; k < 3; ++k )
-		rgb[k] /= m;
+}
+
+double fixtureLumens( int fixture )
+{
+	static const double lm[FixtureCount] = { 800, 1200, 16000, 13500, 7900, 2600, 300, 150 };
+	return lm[std::min( int( FixtureCount ) - 1, std::max( 0, fixture ) )];
+}
+
+const char * fixtureWord( int fixture )
+{
+	return kFixtures[std::min( int( FixtureCount ) - 1, std::max( 0, fixture ) )].c_str();
 }
 
 Converted convert( const Light & l, bool redTintDims, double lumensPerFade, double radiusPerSqrtCandela )
@@ -899,12 +1039,23 @@ Converted convert( const Light & l, bool redTintDims, double lumensPerFade, doub
 	Converted c;
 	c.radius = l.hasRadius ? l.radius : std::min( 16384.0, std::max( 16.0, radiusPerSqrtCandela * std::sqrt( intensity ) ) );
 	double rgb[3] = { 1, 1, 1 };
-	if ( l.hasKelvin )
-		kelvinRgb( l.kelvin, rgb );
-	if ( l.hasTint ) {
-		const double tm = std::max( { l.tint[0], l.tint[1], l.tint[2] } );
+	if ( gKelvinRed ) {	// the red: the tint a gel over the kelvin white
+		if ( l.hasKelvin )
+			kelvinRgb( l.kelvin, rgb );
+		if ( l.hasTint ) {
+			const double tm = std::max( { l.tint[0], l.tint[1], l.tint[2] } );
+			for ( int k = 0; k < 3; ++k )
+				rgb[k] = rgb[k] * l.tint[k] / tm;
+		}
+	} else if ( l.hasTint ) {	// lane PHYSUNITS1: tint > kelvin > fixture, the first one set is the colour
 		for ( int k = 0; k < 3; ++k )
-			rgb[k] = rgb[k] * l.tint[k] / tm;
+			rgb[k] = l.tint[k];
+	} else if ( l.hasKelvin ) {
+		kelvinRgb( l.kelvin, rgb );
+	} else if ( l.hasFixture ) {
+		double x, y;
+		fixtureXy( l.fixture, x, y );
+		xyRgb( x, y, rgb );
 	}
 	const double m = std::max( { rgb[0], rgb[1], rgb[2] } );
 	for ( int k = 0; k < 3; ++k )
@@ -975,6 +1126,17 @@ Light fromVanilla( const int color[3], double fade, double radius, int type, dou
 		}
 		double t = std::round( ( lo + hi ) / 2 ), w[3];
 		kelvinRgb( t, w );
+		if ( !gKelvinRed ) {	// lane PHYSUNITS1: the kelvin only when it gives the bytes back exactly, else the tint
+			l.kelvin = t;
+			l.hasKelvin = true;
+			if ( !same( l ) ) {
+				l.hasKelvin = false;
+				l.kelvin = 6500;
+				for ( int k = 0; k < 3; ++k )
+					l.tint[k] = lin[k] / m;
+				l.hasTint = true;
+			}
+		} else {
 		// a channel the colour has and the black body lacks (blue at 1667 K): warm the kelvin up until it has some
 		for ( int k = 0; k < 3; ++k )
 			while ( lin[k] > 0 && w[k] < 1e-3 && t < 25000 ) {
@@ -992,6 +1154,7 @@ Light fromVanilla( const int color[3], double fade, double radius, int type, dou
 			for ( int k = 0; k < 3; ++k )
 				l.tint[k] = std::min( 1.0, l.tint[k] / tm );
 			l.hasTint = true;
+		}
 		}
 	}
 	const double law = std::min( 16384.0, std::max( 16.0, radiusPerSqrtCandela * std::sqrt( l.lumens / omega ) ) );

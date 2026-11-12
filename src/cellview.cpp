@@ -18,6 +18,7 @@ BSD License - see nifskope.h
 #include "cellsplat.h"		// lane CELLVIEW4
 #include "features/far-ground/landlodspec.h"	// lane LANDSPEC6: fixedWorld
 #include "cellmodsource.h"	// lane LANDSPEC8: uGridsToLoad
+#include "recx.h"	// lane WEATHERRECX1: the provider's name and the .recx roots (the Volumes hand fixes)
 #include "cellidentity.h"	// lane CELLVIEW2
 #include "cellactor.h"		// lane PLACED1
 #include "gl/celllooks.h"	// lane GAPLOOK2: Actors outdoors, Weapon mod parts
@@ -34,6 +35,8 @@ BSD License - see nifskope.h
 #include "features/far-lod/lodgen.h"
 #include "nativeemit.h"
 #include "features/gi/probeplace.h"		// lane PRTPPLACE
+#include "features/gi/rttraceset.h"		// lane AIRPERF1 r4: a streamed cell's soup for the ray-traced GI
+#include "features/gi/rttracesetrule.h"	// lane AIRPERF1 r5: the soup's frame
 #include "features/gi/probebake.h"		// lane PRTPBAKE
 #include "features/gi/pgiwrite.h"
 #include "features/gi/probegi.h"
@@ -47,8 +50,10 @@ BSD License - see nifskope.h
 #include "cellmesh.h"		// the welded geometry beside the document
 #include "features/far-lod/cellfarlod.h"		// the far field around the block
 #include "features/far-lod/lodinative.h"		// lane FIX1101A lodch: the far LOD's baked AO / sky switches (liveFarKey)
+#include "features/far-lod/lodpreview.h"	// lane PERFLOAD1 P8: the forced level is part of liveFarKey
 #include "cellmodpick.h"
 #include "cellspeed.h"		// stage timers (WW_CELL_SPEED_DUMP)
+#include "wwloadwatch.h"	// lane PERFLOAD1 P6: the views parked around the live far rebuild
 #include "features/ao/cellaodecal.h"		// baked AO decals under big movable statics
 #include "cellstream.h"		// the cells round the camera
 #include "cellspawn.h"		// where the camera starts
@@ -62,6 +67,7 @@ BSD License - see nifskope.h
 #include "io/nifxfile.h"	// lane NIFXLIGHT1: a model's .nifx path
 #include "features/lights/cellnifxlights.h"	// lane NIFXLIGHT3: the .nifx path rule, kept live by src/gl/celllights.cpp
 #include "features/lights/lightphys.h"	// lane MUSGI1 round 4: the vanilla curve's flux for the lamp scale
+#include "features/exposure/physunits.h"	// lane PHYSUNITS1: lamps in lumens
 #include "features/shadows/sunshadow.h"	// lane LIVESET1: wwSunShadowForget
 #include "features/gi/cellprobeview.h"
 #include "gl/lookdevstage.h"	// lane SKYTOP1: the cell's load order feeds the weather
@@ -79,6 +85,7 @@ BSD License - see nifskope.h
 #include "features/near/cellcull.h"	// the per-placement culling runs
 #include "features/near/cellobjfade.h"	// the runs' fade class
 #include "features/near/cellprevisrule.h"	// lane PERFFIX4: the tome's staleness
+#include "features/near/cellpcmbload.h"	// lane PCMB1: the precombined meshes
 #include "gl/glproperty.h"	// lane FIXPACK1: the renderer's .pbrm resolve (pbrmResolveForMaterial)
 #include "gl/cellgrass.h"
 #include "features/post/cellpost.h"
@@ -268,6 +275,7 @@ struct Bucket
 	bool grass = false;   // blades of the game's grass (src/gl/cellgrass.h): the fade applies
 	float grassWave = 0.0f;   // its GRAS wave period (one bucket per grass type), the wind's phase
 	bool grassNoFade = false;   // lane CABLES1: a swaying cable: the grass wind, never the grass fade
+	bool noSpecLobe = false;    // MODULES1 R6-4: a cable: no material names a specular lobe, so none is drawn
 	bool treeWind = false;      // lane WINDTREE1: one placement's Tree_Anim shapes (gl/celltreewind.h)
 	float treeWindK[10] = { 0.0f, 0.0f, 0.0f, 0.0f, 3.4e38f, 0.0f, 1.0f, 1.0f, 1.0f, 1.0f };   // its constants (WwTreeWindK's order)
 	std::vector<OutVert> verts;
@@ -714,6 +722,8 @@ bool emitBucket( NifModel * nif, const QModelIndex & iRoot, const Bucket & b,
 		}
 		if ( b.emits )
 			nif->set<float>( iShader, "Emissive Multiple", b.emissiveScale );
+		if ( b.noSpecLobe )	// MODULES1 R6-4
+			nif->set<float>( iShader, "Specular Strength", 0.0f );
 		if ( b.blend )
 			nif->set<float>( iShader, "Alpha", b.alpha );
 		nif->setLink( iShape, "Shader Property", nif->getBlockNumber( iShader ) );
@@ -914,6 +924,8 @@ void cellApplyEnvModifiers( CellSceneSpec & spec )
 		spec.showDisabled = true;
 	if ( !wwEnv( "WW_CELL_MARKERS" ).isEmpty() )
 		spec.showMarkers = true;
+	if ( wwEnvInt( "WW_CELL_PROBES_SHOW_RED" ) == 1 )	// lane MODULES1 item 6: the old default, markers drawn
+		spec.probesShow = true;
 	if ( !wwEnv( "WW_CELL_PROBES_HIDE" ).isEmpty() ) {
 		spec.probesHiddenByEnv = spec.probesHiddenByEnv || spec.probesShow;	// lane LIVESET1: a live unset shows them
 		spec.probesShow = false;    // placed and baked, the markers not drawn (clean pictures)
@@ -1461,6 +1473,15 @@ static void cellPublishLighting( const NifModel * nif, const EsmWorld & world, c
 			l.xemi = xl.exists ? 0x01000000U | ( quint32( xl.color[0] ) << 16 ) | ( quint32( xl.color[1] ) << 8 ) | quint32( xl.color[2] )
 				: xr && *xr == "REGN" ? wwCellXemiRegionCode( r.emittance ) : 0U;
 		}
+		l.physIn = 1.0f;	// MODULES1 R6-13: the record's colour x fade; celllamps.cpp physTick moves it when the master flips
+		if ( wwPhysOn() ) {	// lane PHYSUNITS1: lumens (637 per fade, the .nifx SPEC's law) x Game Light Brightness
+			const float g = wwPhysGameLights();
+			const float k = wwPhysLighK( l.radius ) * g;	// LATE ITEM 11-08: the radius law (red WW_PHYSUNITS_LAMP_RED=1)
+			for ( int c = 0; c < 3; c++ )
+				l.color[c] *= k;
+			l.physG = g;
+			l.physIn = k;
+		}
 		if ( startOff ) {   // recorded, lights nothing at the start
 			L.offLights.append( l );
 			continue;
@@ -1479,7 +1500,37 @@ static void cellPublishLighting( const NifModel * nif, const EsmWorld & world, c
 	 * packs these colours), the air and the flares take the same factor. Other interiors keep theirs: no sun to stand
 	 * against, and the eye's cap (7) would black them out. Pin WW_CELL_LAMP_SCALE=<x> (0 = lamps off, a measurement);
 	 * red WW_CELL_LAMP_SCALE_RED=1 = the lamps as authored. Census `cell lamp scale:`. */
-	if ( spec.interior && !chunkOut ) {
+	/* lane PHYSUNITS1: the lamps' census in lumens (the law 637 x fade x Y before Game Light Brightness: the anchors) and
+	 * an interior's ambient factor, the median lamp factor (the cell's ambient keeps its authored ratio to its lamps) */
+	{	// MODULES1 R6-13: always (the master is live, the ambient factor must exist when it turns on later)
+		auto y709 = []( const float c[3] ) { return 0.2126f * c[0] + 0.7152f * c[1] + 0.0722f * c[2]; };
+		QVector<float> lm, ks, rs;
+		for ( const QVector<WwCellLight> * v : { &L.lights, &L.offLights } )
+			for ( const WwCellLight & l : *v ) {
+				if ( !( l.physIn > 0.0f ) || !( l.radius > 0.0f ) )
+					continue;
+				const float k = wwPhysLighK( l.radius );	// the drawn lumens: colour / its factor x 637 / wwPhysLampK
+				lm.append( wwphys::kLumenPerFade * y709( l.color ) / ( l.physIn * wwPhysLampK( l.radius ) ) );
+				ks.append( k );
+				rs.append( l.radius );
+			}
+		std::sort( lm.begin(), lm.end() );
+		std::sort( ks.begin(), ks.end() );
+		std::sort( rs.begin(), rs.end() );
+		auto q = []( const QVector<float> & a, double f ) {
+			return a.isEmpty() ? 0.0 : double( a.at( std::min( qsizetype( f * a.size() ), a.size() - 1 ) ) );
+		};
+		if ( spec.interior )
+			L.physAmbK = ks.isEmpty() ? wwPhysLighK( 400.0f ) : ks.at( ks.size() / 2 );
+		std::fprintf( stderr, "phys lamps: %s%s%s %lld lamps lumens (law, before x%.3f) p10 %.0f median %.0f p90 %.0f max %.0f; "
+			"radius p10 %.0f median %.0f p90 %.0f; factor median %.4f%s\n",
+			wwPhysOn() ? "" : "Physical Light Units OFF, the lamps drawn as recorded (x1), the law's census only: ",
+			spec.interior ? qPrintable( world.interior().edid ) : "exterior", chunkOut ? " (chunk)" : "", qint64( lm.size() ),
+			double( wwPhysGameLights() ), q( lm, 0.1 ), q( lm, 0.5 ), q( lm, 0.9 ), q( lm, 1.0 ), q( rs, 0.1 ), q( rs, 0.5 ),
+			q( rs, 0.9 ), q( ks, 0.5 ),
+			spec.interior ? qPrintable( QStringLiteral( "; ambient factor %1" ).arg( double( L.physAmbK ), 0, 'f', 4 ) ) : "" );
+	}
+	if ( spec.interior && !chunkOut && !wwPhysOn() ) {	// lane PHYSUNITS1: MUSGI1's scale is the red's
 		constexpr float kLumenPerFade = 637.0f, kSunLux = 128000.0f, kSkyLevelNoon = 4.816f;
 		auto y709 = []( const float c[3] ) { return 0.2126f * c[0] + 0.7152f * c[1] + 0.0722f * c[2]; };
 		QVector<float> per;
@@ -1502,7 +1553,13 @@ static void cellPublishLighting( const NifModel * nif, const EsmWorld & world, c
 		const float pinned = pin.toFloat( &pinOk );
 		const bool red = wwEnv( "WW_CELL_LAMP_SCALE_RED" ).trimmed() == "1";
 		const bool sunlit = wwCellSunlit( &L ).on;
-		const float s = ( red || !sunlit ) ? 1.0f : ( pinOk && pinned >= 0.0f ) ? pinned : derived;
+		/* MODULES1 R6-13: Physical Light Units off = the game's lamps, as recorded: the derived scale is no longer the
+		 * off state's default (a pin still applies; red WW_PHYSUNITS_VANILLA_RED=lampscale: the derived scale) */
+		const bool musgi = wwPhysVanillaRed( "lampscale" );
+		const float s = ( red || !sunlit ) ? 1.0f : ( pinOk && pinned >= 0.0f ) ? pinned : musgi ? derived : 1.0f;
+		if ( sunlit && !red && !musgi && !( pinOk && pinned >= 0.0f ) )
+			std::fprintf( stderr, "cell lamp scale: %s Physical Light Units off: the lamps as recorded (the derived %.6f is not "
+				"applied; red WW_PHYSUNITS_VANILLA_RED=lampscale)\n", qPrintable( world.interior().edid ), double( derived ) );
 		int scaled = 0;
 		if ( s != 1.0f )
 			for ( QVector<WwCellLight> * v : { &L.lights, &L.offLights, &L.nifxOffPlaced } )
@@ -1839,19 +1896,26 @@ static QString cellBakeFarSoup( const CellSceneSpec & spec, const QString & data
 		.arg( t.elapsed() ).arg( r.normalQuads ? QStringLiteral( ", ground vertex normals %1 quads" ).arg( r.normalQuads ) : QString() );
 }
 
-/* the Particles row (WW/CellParticles, env pin WW_CELL_PARTICLES, ships OFF). Read when a cell
- * opens: the row reopens the cell. */
+/* the Particles row (WW/CellParticles2, env pin WW_CELL_PARTICLES). Read when a cell opens: the row reopens the cell.
+ * lane PARTFX1: ships ON (the game always runs its placed particle systems; a new key so an old OFF does not stick);
+ * WW_DEFAULTS1_RED=1 = the old row (WW/CellParticles, default off). */
+static bool wwCellParticlesOldRow()
+{
+	return wwEnv( "WW_DEFAULTS1_RED" ).trimmed() == "1";
+}
+
 bool wwCellParticlesOn()
 {
 	const QByteArray pin = wwEnv( "WW_CELL_PARTICLES" ).trimmed();
 	if ( !pin.isEmpty() )
 		return pin != "0";
-	return QSettings().value( QStringLiteral( "WW/CellParticles" ), false ).toBool();
+	return wwCellParticlesOldRow() ? QSettings().value( QStringLiteral( "WW/CellParticles" ), false ).toBool()
+		: QSettings().value( QStringLiteral( "WW/CellParticles2" ), true ).toBool();
 }
 
 void wwCellParticlesSetOn( bool on )
 {
-	QSettings().setValue( QStringLiteral( "WW/CellParticles" ), on );
+	QSettings().setValue( wwCellParticlesOldRow() ? QStringLiteral( "WW/CellParticles" ) : QStringLiteral( "WW/CellParticles2" ), on );
 }
 
 // Copy / Paste Branch's per-block strings (src/spells/blocks.cpp)
@@ -2188,6 +2252,7 @@ struct LiveDoc
 	int tailEnd = -1;              //!< the block count our last step left: anything else appended = not our tail
 	bool interior = false;
 	bool farWanted = false;        //!< the far LOD was built (exterior, Far LOD on)
+	int lodLevel = -1;             //!< lane LODLIVE1: the map level the far LOD was built at (its timing line)
 	bool streamed = false;         //!< the cells come from the streamer, after the far LOD
 	QByteArray farType, farRed;    //!< the inputs that also move the near cells' load order (the bake's stack)
 	int farFirst = -1;             //!< the block count before the far section
@@ -2228,13 +2293,17 @@ QByteArray liveFarKey()
 	for ( const char * n : { "WW_CELL_FARLOD_RED", "WW_CELL_FARLOD_NEARONLY", "WW_CELL_FARLOD_MAX", "WW_CELL_FARLOD_L0",
 			"WW_CELL_FARLOD_L1", "WW_CELL_FARLOD_L2", "WW_CELL_FARLOD_TREE_DIST", "WW_CELL_FARLOD_RINGS",
 			"WW_CELL_FARLOD_BUDGET_MB", "WW_CELL_FARLOD_OURS", "WW_CELL_FARLOD_SWAY", "WW_CELL_FARLOD_SHORE",
-			"WW_CELL_FARLOD_PRESET", "WW_CELL_FARLOD_PRESET_RED" } )	// lane FARPRESET1: the preset's ring distances
+			"WW_CELL_FARLOD_PRESET", "WW_CELL_FARLOD_PRESET_RED",	// lane FARPRESET1: the preset's ring distances
+			"WW_CELL_FARLOD_SKIRT_RED" } )	// lane PERFLOAD1 P9: the skirts are written while the rings are built
 		k += wwEnv( n ) + '\x1f';
 	// lane FAR6: Game LOD trees sway is written into the .bto shapes at build; its menu tick lives in the settings
 	k += QByteArray( wwLookOn( WwLook::BtoSway ) ? "1" : "0" ) + wwEnv( "WW_CELL_FARLOD_BTOSWAY_RED" ) + '\x1f';
 	// lane FIX1101A lodch: the bake's AO and sky are written into the far rows and the far ground while it is built
 	k += QByteArray( lodlAoOn() ? "1" : "0" ) + QByteArray::number( lodlSkyMode() ) + wwEnv( "WW_LODL_AO_RED" )
 		+ wwEnv( "WW_LODL_SKY_RED" ) + '\x1f';
+	// lane PERFLOAD1 P8: the LOD preview's forced level picks the far object rows' MNAM slot at build
+	k += QByteArray::number( LodPreview::objectSlot() ) + '\x1f';
+	k += QByteArray::number( LodPreview::level() ) + '\x1f';	// lane LODLIVE1: the map level, every ring past the band
 	return k;
 }
 
@@ -2387,6 +2456,35 @@ int liveMarkers( NifModel * nif, LiveDoc & d, QString * why )
 {
 	const bool want = d.probesBand && wwEnvIsEmpty( "WW_CELL_PROBES_HIDE" ) && !d.probes.empty();
 	wwCellProbeViewSetShown( nif, d.probesBand && wwEnvIsEmpty( "WW_CELL_PROBES_HIDE" ) );
+	/* lane MODULES1 item 6 (bungo 11-09: the set replied ok, the cubes stayed): the marker shapes already in the
+	 * document (a streamed cell's too) take the hidden flag in place, so the switch works with no reopen. Red
+	 * WW_CELL_PROBES_LIVE_RED=1: blocks cut / appended, a reopen under streamed cells, as before. */
+	if ( wwEnvInt( "WW_CELL_PROBES_LIVE_RED" ) != 1 ) {
+		const bool hide = !( wwEnvIsEmpty( "WW_CELL_PROBES_HIDE" ) && d.probesBand );
+		int found = 0, moved = 0;
+		nif->holdUpdates( true );
+		for ( int b = 0; b < nif->getBlockCount(); b++ ) {
+			const QModelIndex iB = nif->getBlockIndex( b );
+			if ( !nif->blockInherits( iB, "BSTriShape" ) )
+				continue;
+			const QString name = nif->get<QString>( iB, "Name" );
+			if ( name != QLatin1String( "probes" ) && !name.startsWith( QLatin1String( "probes #" ) ) )
+				continue;
+			found++;
+			const quint32 f = nif->get<quint32>( iB, "Flags" );
+			const quint32 nf = hide ? ( f | 1u ) : ( f & ~1u );
+			if ( nf != f ) {
+				nif->set<quint32>( iB, "Flags", nf );
+				moved++;
+			}
+		}
+		nif->holdUpdates( false );
+		if ( found > 0 && ( hide || d.markersCount > 0 || d.streamed || d.markersAt < 0 ) ) {
+			*why = QStringLiteral( "probe markers %1 in place (%2 of %3 shapes flagged)" )
+				.arg( hide ? QStringLiteral( "hidden" ) : QStringLiteral( "shown" ) ).arg( moved ).arg( found );
+			return moved > 0 ? 1 : 0;
+		}
+	}
 	if ( want == ( d.markersCount > 0 ) )
 		return 0;
 	if ( d.markersAt < 0 || d.streamed || nif->getBlockCount() != d.tailEnd ) {
@@ -2463,10 +2561,20 @@ int liveFar( NifModel * nif, LiveDoc & d, QString * why )
 	const QByteArray red = wwEnv( "WW_CELL_FARLOD_RED" );
 	const bool wanted = !d.interior && cellFarLodWanted();
 	const QByteArray type = liveFarType(), key = liveFarKey(), cells = liveCellsKey( d.interior );
-	const bool farMoved = wanted != d.farWanted || ( wanted && ( type != d.farType || red != d.farRed || key != d.farKey ) );
+	/* lane LODLIVE1: on -> off hides the built far field at draw time (no cut, no stack check, no reopen); off -> on
+	 * shows it again, rebuilt only when a build-time value moved while it was hidden */
+	const bool hide = d.farWanted && !wanted;
+	const bool farMoved = d.farWanted ? wanted && ( type != d.farType || red != d.farRed || key != d.farKey ) : wanted;
 	const bool cellsMoved = cells != d.cellsKey;
-	if ( !farMoved && !cellsMoved )
-		return 0;	// no far LOD either way, or no build-time value moved
+	if ( !farMoved && !cellsMoved ) {
+		if ( hide == cellFarLodHidden() )
+			return 0;	// no far LOD either way, or no build-time value moved
+		cellFarLodSetHidden( hide );
+		*why = QStringLiteral( "far LOD %1 in place in 0 ms (a draw-time skip; the far data and the near stack kept)" )
+			.arg( hide ? QStringLiteral( "hidden" ) : QStringLiteral( "shown" ) );
+		return 1;
+	}
+	cellFarLodSetHidden( false );	// a rebuild below cuts the hidden far data or builds it shown
 	if ( cellsMoved && !d.streamed ) {
 		*why = d.interior ? QStringLiteral( "weapon parts: an interior is one fixed block, its weapons welded with the statics" )
 			: QStringLiteral( "actors outdoors / weapon parts: this fixed block (a harness or bake open) welds them with the "
@@ -2501,6 +2609,7 @@ int liveFar( NifModel * nif, LiveDoc & d, QString * why )
 	CellFarStream fs;
 	if ( seed )
 		fs.roam = seed->roam;
+	const bool parked = wwParkViews( nif, true );	// lane PERFLOAD1 P6: thousands of blocks cut and appended
 	nif->holdUpdates( true );
 	liveCut( nif, d, d.farFirst );
 	cellFarLodForget( nif );
@@ -2512,6 +2621,8 @@ int liveFar( NifModel * nif, LiveDoc & d, QString * why )
 	}
 	nif->holdUpdates( false );
 	nif->updateModel();
+	if ( parked )
+		wwParkViews( nif, false );
 	if ( seed ) {
 		auto next = std::make_shared<CellStreamSeed>( *seed );
 		/* lane LARGEREF4 (LARGEREF-MAP-LIVE): the restarted stream reads the rebuilt far map (cellStreamStart); a far LOD
@@ -2539,7 +2650,13 @@ int liveFar( NifModel * nif, LiveDoc & d, QString * why )
 		.arg( onOff ? ( wanted ? QStringLiteral( "far LOD added" ) : QStringLiteral( "far LOD removed" ) )
 			: farMoved ? QStringLiteral( "far LOD rebuilt" ) : QStringLiteral( "cells rebuilt (actors outdoors / weapon parts)" ) )
 		.arg( t.elapsed() )
-		.arg( seed ? QStringLiteral( " (streamed cells dropped and streamed again)" ) : QString() );
+		.arg( QString( seed ? QStringLiteral( " (streamed cells dropped and streamed again)" ) : QString() )
+			+ ( parked ? QStringLiteral( " (views parked)" ) : QString() ) );
+	if ( wanted && LodPreview::level() != d.lodLevel ) {	// lane LODLIVE1: the map level's cost, said as it is
+		d.lodLevel = LodPreview::level();
+		qInfo().noquote() << QStringLiteral( "lod level: %1 on the whole map, far rebuilt in place in %2 ms on the GUI thread "
+			"(the window waits that long: a stall, not a reopen)" ).arg( LodPreview::mapLevelName( d.lodLevel ) ).arg( t.elapsed() );
+	}
 	return 1;
 }
 
@@ -2556,6 +2673,8 @@ void liveKeep( NifModel * nif, const CellSceneSpec & spec, const std::shared_ptr
 	d.rootBlock = rootBlock;
 	d.interior = spec.interior;
 	d.farWanted = !spec.interior && cellFarLodWanted();
+	d.lodLevel = LodPreview::level();
+	cellFarLodSetHidden( false );	// lane LODLIVE1: a fresh open draws what it built
 	d.streamed = streamed;
 	d.farType = liveFarType();
 	d.farRed = wwEnv( "WW_CELL_FARLOD_RED" );
@@ -2607,7 +2726,7 @@ int liveTerrRed( NifModel * nif, LiveDoc & d, QString * why )
 	const QByteArray now = wwEnv( "WW_TERRBLEND_RED" );
 	if ( now == d.terrRed )
 		return 0;
-	auto inVerts = []( const QByteArray & v ) { return v == "nearest" || v == "facenormal"; };
+	auto inVerts = []( const QByteArray & v ) { return v == "nearest" || v == "facenormal" || v == "five"; };	// five: MODULES1 item 2
 	if ( inVerts( now ) || inVerts( d.terrRed ) ) {
 		*why = QStringLiteral( "WW_TERRBLEND_RED=%1 is written into the ground's vertices at build" )
 			.arg( QString::fromLatin1( inVerts( now ) ? now : d.terrRed ) );
@@ -2640,7 +2759,8 @@ int cellLiveSections( NifModel * nif, QString * why )
 	if ( !nif || it == liveDocs().end() )
 		return 0;
 	LiveDoc & d = it->second;
-	const bool farMoved = wwSwitchMovedFor( d.farSeen, { "WW_CELL_FARLOD", "WW_CELL_ACTORS_OUT", "WW_CELL_WEAP_PARTS" } );
+	const bool farMoved = wwSwitchMovedFor( d.farSeen, { "WW_CELL_FARLOD", "WW_CELL_ACTORS_OUT", "WW_CELL_WEAP_PARTS",
+		"WW_CELL_LOD_" } );	// lane LODLIVE1: the LOD level and map level move the far key
 	const bool probesMoved = wwSwitchMovedFor( d.probesSeen, { "WW_CELL_PROBES_HIDE" } );
 	const bool terrMoved = wwSwitchMovedFor( d.terrSeen, { "WW_TERRBLEND_RED" } );
 	int r = farMoved ? liveFar( nif, d, &w ) : 0;
@@ -2846,10 +2966,14 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 		liveForget( nif );	// lane LIVESET1: the old document's live context (and the world it holds) goes first
 	// lane CELLSTREAM1: an exterior view streams its cells round the camera (src/cellstream.h); this open builds
 	// the document, the far field and the lighting, and hands the world to the streamer instead of welding a block
-	const bool rtSoup = !chunk && cellRtSoupWanted();	// lane PRTOFF1: the ray-traced GI's soup (a welded block, no stream)
+	const bool rtSoup = !chunk && cellRtSoupWanted();	// lane PRTOFF1: the ray-traced GI's soup
+	/* lane AIRPERF1 r4: the Ray-traced GI no longer stops the stream: every streamed cell gathers its own soup and the
+	 * traced set follows the loaded cells (features/gi/rttraceset.h). Red WW_CELL_RTSET_WELD_RED=1 = the welded block */
+	const bool rtWeld = rtSoup && rtTraceSetWeldRed();
 	const bool streamInit = !chunk && !spec.interior && spec.overlay == CellOverlay::None && !bakeExterior
 		&& !spec.probes && wwEnvIsEmpty( "WW_CELL_PROBES" )
-		&& !cellGiFromWanted() && !rtSoup && cellStreamWanted();
+		&& !cellGiFromWanted() && !rtWeld && cellStreamWanted();
+	const bool chunkSoup = chunk && chunk->wantSoup;	// lane AIRPERF1 r4
 
 	QElapsedTimer clock;
 	clock.start();
@@ -3093,6 +3217,9 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 		bool cable = false;   //!< a placed cable (BNDS base); its tube is built (src/cellcable.h)
 		WwCableSpec cableSpec;
 		bool loadDoor = false;   //!< a door with a teleport (XTEL)
+		//! lane PCMB1: a precombined mesh (its geometry is in world space: identity placement); `ref` is one of its refs
+		QString pcmbModel;
+		int pcmbMesh = -1;   //!< lane PCMB1: this ref went into precombined mesh #n, and is drawn by it once that loads
 	};
 	QVector<Placement> placements;
 	QHash<QString, int> skippedByType;
@@ -3588,6 +3715,104 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 
 	if ( chunk )
 		origin = chunk->seed->origin;   // lane CELLSTREAM1: every streamed cell shares the open's origin
+
+	/* lane PCMB1: THE PRECOMBINED MESHES (src/features/near/cellpcmb.h), drawn merged as the game draws them. Each
+	 * loaded CELL's XCRI lists its meshes (meshes\precombined\<cell & 0xFFFFFF>_<key>_oc.nif) and the refs each one
+	 * replaced. A mesh is one static placement (its vertices are in world space) when none of its refs is stale -- the
+	 * previs rule's `moved` against the plugin of the winning CELL record: a later plugin moved, scaled, deleted or
+	 * disabled it. A mesh with one stale ref is not drawn at all (it still holds that ref's old geometry) and its
+	 * refs stay. The refs of a drawn mesh are left out once it has loaded; a missing or unreadable mesh leaves them
+	 * drawn. Red WW_CELL_PCMB_RED=refs: no mesh, every ref drawn (the code before the lane). */
+	struct PcmbMesh
+	{
+		QString model;
+		bool drawn = false;
+	};
+	std::vector<PcmbMesh> pcmbMeshes;
+	EsmLodBase pcmbBase;	// what a precombined placement stands on: a static with no base form
+	std::memcpy( &pcmbBase.type, "STAT", 4 );
+	pcmbBase.edid = QStringLiteral( "(precombined)" );
+	const bool pcmbRed = WwPcmb::redRefs();
+	int pcmbCells = 0, pcmbKeys = 0, pcmbStale = 0, pcmbOrphans = 0, pcmbTagged = 0;
+	{
+		QHash<quint32, int> pcmbOfRef;	// a ref -> the mesh that replaced it
+		auto pcmbCell = [&]( quint32 form, int cx, int cy ) {
+			const EsmCellPrevis c = world.cellPrevis( form );
+			if ( !c.exists || c.combinedMeshKeys.isEmpty() || c.combinedRefKeys.size() != c.combinedRefIds.size() )
+				return;
+			pcmbCells++;
+			pcmbKeys += int( c.combinedMeshKeys.size() );
+			QHash<quint32, EsmRefSource> srcOf;
+			const QVector<quint32> groups = spec.interior ? world.interiorChildGroups() : world.cellChildGroups( cx, cy );
+			for ( const EsmRefSource & r : world.refSources( groups ) )
+				srcOf.insert( r.form, r );
+			const std::vector<std::uint32_t> keys( c.combinedMeshKeys.begin(), c.combinedMeshKeys.end() );
+			const std::vector<std::uint32_t> pairKey( c.combinedRefKeys.begin(), c.combinedRefKeys.end() );
+			std::vector<bool> pairStale( pairKey.size(), false );
+			const std::vector<bool> fileOk( keys.size(), true );	// a file is judged by its load, below
+			for ( int k = 0; k < c.combinedRefIds.size(); k++ ) {
+				const auto it = srcOf.constFind( c.combinedRefIds[k] );
+				if ( it == srcOf.constEnd() )
+					continue;
+				const quint32 settled = it->settled == WwPrevisRule::RefSrc::kUnknown ? it->src : it->settled;
+				pairStale[size_t( k )] = it->owner <= c.srcFile && settled > c.srcFile;
+			}
+			const WwPcmb::Plan pl = WwPcmb::plan( keys, pairKey, pairStale, fileOk, pcmbRed );
+			pcmbStale += pl.staleMeshes;
+			pcmbOrphans += pl.orphanPairs;
+			std::vector<int> meshAt( keys.size(), -1 );
+			for ( size_t m = 0; m < keys.size(); m++ ) {
+				if ( !pl.meshDrawn[m] )
+					continue;
+				meshAt[m] = int( pcmbMeshes.size() );
+				PcmbMesh pm;
+				pm.model = QStringLiteral( "meshes\\precombined\\%1_%2_oc.nif" ).arg( form & 0xFFFFFFu, 8, 16, QLatin1Char( '0' ) )
+					.arg( keys[m], 8, 16, QLatin1Char( '0' ) );
+				Placement out;
+				out.pcmbModel = pm.model;
+				out.cellX = cx;
+				out.cellY = cy;
+				for ( size_t k = 0; k < pairKey.size(); k++ ) {	// the run's ref is one of its refs: the tome governs it
+					if ( pairKey[k] == keys[m] ) {
+						out.ref = c.combinedRefIds[int( k )];
+						break;
+					}
+				}
+				pcmbMeshes.push_back( pm );
+				placements.append( out );
+			}
+			for ( size_t k = 0; k < pairKey.size(); k++ ) {
+				if ( !pl.skipRef[k] )
+					continue;
+				for ( size_t m = 0; m < keys.size(); m++ ) {
+					if ( keys[m] == pairKey[k] ) {
+						pcmbOfRef.insert( c.combinedRefIds[int( k )], meshAt[m] );
+						break;
+					}
+				}
+			}
+		};
+		if ( !pcmbRed ) {
+			if ( spec.interior ) {
+				pcmbCell( world.interior().cellForm, 0, 0 );
+			} else {
+				for ( int y = y0; y <= y1; y++ )
+					for ( int x = x0; x <= x1; x++ )
+						if ( world.hasCell( x, y ) )
+							pcmbCell( world.cellForm( x, y ), x, y );
+			}
+		}
+		for ( Placement & p : placements ) {
+			if ( !p.pcmbModel.isEmpty() || !p.actorKey.isEmpty() )
+				continue;
+			const auto it = pcmbOfRef.constFind( p.ref );
+			if ( it != pcmbOfRef.constEnd() ) {
+				p.pcmbMesh = it.value();
+				pcmbTagged++;
+			}
+		}
+	}
+
 	CellPickTable & picks = chunk ? chunk->picks : cellPickTableMutable();
 	picks.clear();
 
@@ -4052,7 +4277,9 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 	 * blended glass and decals are dropped per shape. */
 	const QString probeOut = QString::fromLocal8Bit( wwEnv( "WW_CELL_PROBES" ) );
 	const bool probeAsked = !probeOut.isEmpty() || spec.probes;   // the env, or the PRTP band's Place
-	const bool probing = probeAsked || rtSoup;   // lane PRTOFF1: or the ray-traced GI's soup (no bake, no probes written)
+	// lane PRTOFF1: or the ray-traced GI's soup (no bake, no probes written); AIRPERF1 r4: of a fixed block's open, or
+	// of one streamed cell (the open of a streamed view gathers none: its cells are the stream's)
+	const bool probing = probeAsked || ( rtSoup && !streamInit ) || chunkSoup;
 	ProbeSoup probeSoup;
 	int soupRefs = 0, soupShapesDropped = 0;
 	/* the bake's albedo, one per soup triangle -- the band's Bake, or
@@ -4065,7 +4292,7 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 	 * is the surfaces' own colour, not a flat grey 0.5 (covered shade read 1.05-1.2x open shade in the probe census).
 	 * Albedo only: the smooth normals (VNM1) stay a bake's. WW_SOUPALB_RED=grey (any value) = the old grey soup;
 	 * read at the open (a reopen applies it). */
-	const bool soupAlb = baking || ( rtSoup && wwEnvIsEmpty( "WW_SOUPALB_RED" ) );
+	const bool soupAlb = baking || ( ( rtSoup || chunkSoup ) && wwEnvIsEmpty( "WW_SOUPALB_RED" ) );
 	ProbeAlbedo probeAlb( dataRoot );
 	/* WW_CELL_BAKE_ALBEDO=tri|hit|cube: where the surfels' albedo and normal come from (ProbeBakeSpec::albedoWay);
 	 * hit and cube need every triangle's UVs, colors, normals and maps in the soup.
@@ -4281,6 +4508,9 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 	 * keys): WW_CELL_ANIMOBJ_RED=origin (the animated objects and the door), WW_CELL_PFX_RED=origin (the particles). */
 	WW_SWITCH_STATIC( bool, copyRedOrigin, wwEnvStr( "WW_CELL_ANIMOBJ_RED" ).trimmed() == QLatin1String( "origin" ) );
 	WW_SWITCH_STATIC( bool, pfxRedOrigin, wwEnvStr( "WW_CELL_PFX_RED" ).trimmed() == QLatin1String( "origin" ) );
+	/* lane PARTFX1: a placed model's particle systems are found from the model itself (read once when no parse saw it:
+	 * a precombined ref's model never loads). Red WW_CELL_PFX_FIND_RED=noted: only the models parsed this process. */
+	WW_SWITCH_STATIC( bool, pfxFindRed, wwEnvStr( "WW_CELL_PFX_FIND_RED" ).trimmed() == QLatin1String( "noted" ) );
 	const Vector3 copyShift = copyRedOrigin ? origin : Vector3( 0.0f, 0.0f, 0.0f );
 	const Vector3 pfxShift = pfxRedOrigin ? origin : Vector3( 0.0f, 0.0f, 0.0f );
 	QSet<quint32> animObjRefs, animObjCapped;
@@ -4288,6 +4518,8 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 	int animObjShapes = 0;
 	int fakeAirShapes = 0;	// lane MUSGI1: the game's fake fog / shaft cards, by model
 	QMap<QString, int> fakeAirModels;
+	int beamShapes = 0;	// MODULES1 part 30: the game's light-beam cards (part 18 draws them), by model
+	QMap<QString, int> beamModels;
 	auto soupLeavesOut = [&]( const Placement & p, bool counted ) -> bool {
 		const EsmLodBase & lb = world.lodBase( p.base );
 		if ( !p.actorKey.isEmpty() ) {   // a placed actor never enters the soup
@@ -4352,10 +4584,60 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 	CellExportSink * const exportSink = chunk ? nullptr : g_cellExportSink;
 	if ( exportSink )
 		exportSink->begin( world, dataRoot );
+	/* lane PCMB1: the precombined meshes load first, on worker threads. One that loads with shapes is drawn and its
+	 * refs are left out of everything below; one that does not leaves its refs drawn. */
+	int pcmbDrawn = 0, pcmbFailed = 0, pcmbSkipped = 0, pcmbRefsFated = 0;
+	if ( !pcmbMeshes.empty() ) {
+		CellSpeed::Acc speedPcmb( "precombined meshes loaded" );
+		CellModelAhead pcmbAhead( dataRoot, true );
+		for ( const PcmbMesh & m : pcmbMeshes )
+			pcmbAhead.wantModel( m.model );
+		pcmbAhead.load();
+		for ( PcmbMesh & m : pcmbMeshes ) {
+			if ( !modelCache.contains( m.model ) && !modelsFailed.contains( m.model ) ) {
+				std::vector<NativeSrcShape> shapes;
+				bool ok = false;
+				if ( !pcmbAhead.take( m.model, nullptr, &shapes, &ok ) )
+					ok = lodgenNativeLoadModelPlaced( const_cast<QString *>( &dataRoot ), m.model, nullptr, &shapes );
+				if ( ok && !shapes.empty() ) {
+					modelCache.insert( m.model, shapes );
+					modelLoads++;
+				} else {
+					modelsFailed.insert( m.model );
+				}
+			}
+			m.drawn = modelCache.contains( m.model );
+			( m.drawn ? pcmbDrawn : pcmbFailed )++;
+		}
+		QSet<quint32> fated;
+		for ( const Placement & p : placements ) {
+			if ( p.pcmbMesh < 0 || !pcmbMeshes[size_t( p.pcmbMesh )].drawn )
+				continue;
+			pcmbSkipped++;
+			if ( fated.contains( p.ref ) )
+				continue;
+			fated.insert( p.ref );
+			const int row = refTable.indexOfForm( p.ref );
+			if ( row >= 0 ) {
+				refTable.setFate( row, CellRefFate::Precombined );
+				pcmbRefsFated++;
+			}
+		}
+	}
+	{
+		const WwPcmb::LoadStats ls = WwPcmb::loadStats();
+		fprintf( stderr, "cell pcmb: %d cells with XCRI, %d mesh keys; %d meshes placed, %d left out stale (a ref moved, "
+			"deleted or disabled after the writer); %d drawn, %d failed to load (their refs stay); %d placements of %d refs "
+			"left to their mesh (%d tagged); %d pairs name no listed mesh; loader: %lld shapes filled, %lld refused, %lld "
+			"chunks read, %lld cache hits%s\n", pcmbCells, pcmbKeys, int( pcmbMeshes.size() ), pcmbStale, pcmbDrawn,
+			pcmbFailed, pcmbSkipped, pcmbRefsFated, pcmbTagged, pcmbOrphans, (long long)ls.shapes, (long long)ls.refused,
+			(long long)ls.chunksRead, (long long)ls.chunkHits, pcmbRed ? "; RED=refs: every ref drawn" : "" );
+	}
 	// every model the loop below will ask for, read and parsed on worker threads first
 	CellModelAhead modelsAhead( dataRoot, refsRed != "root" );
 	for ( const Placement & p : placements )
-		if ( p.actorKey.isEmpty() && !p.cable && ( !bakeLean || !soupLeavesOut( p, false ) ) )   // an actor or cable is built, not read
+		if ( p.actorKey.isEmpty() && !p.cable && ( !bakeLean || !soupLeavesOut( p, false ) )   // an actor or cable is built, not read
+			&& ( p.pcmbMesh < 0 || !pcmbMeshes[size_t( p.pcmbMesh )].drawn ) )   // lane PCMB1: drawn by its mesh
 			modelsAhead.want( world, p.base, p.swap );
 	modelsAhead.load();
 	CellSpeed::mark( "models read ahead" );
@@ -4412,11 +4694,13 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 		return true;
 	};
 	for ( const Placement & p : placements ) {
-		const EsmLodBase & lb = world.lodBase( p.base );
+		if ( p.pcmbMesh >= 0 && pcmbMeshes[size_t( p.pcmbMesh )].drawn )
+			continue;   // lane PCMB1: drawn by its precombined mesh
+		const EsmLodBase & lb = p.pcmbModel.isEmpty() ? world.lodBase( p.base ) : pcmbBase;
 		const bool isActor = !p.actorKey.isEmpty();
 		const bool isWeap = !isActor && !p.cable && !lb.model.isEmpty() && weapons.wants( p.base );   // lane MISS1 (GAPLOOK2)
 		// lane CABLES1: each cable's tube is its own (the key names the reference)
-		const QString model = isActor ? p.actorKey
+		const QString model = !p.pcmbModel.isEmpty() ? p.pcmbModel : isActor ? p.actorKey
 			: p.cable ? QStringLiteral( "cable|%1" ).arg( p.ref, 8, 16, QLatin1Char( '0' ) )
 			: isWeap ? QStringLiteral( "weap|%1" ).arg( p.base, 8, 16, QLatin1Char( '0' ) ) : lb.model;
 		if ( model.isEmpty() ) {
@@ -4723,6 +5007,8 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 					paintIndex = cit.value();
 				}
 			}
+			if ( !havePaint && isActor && actors.hairPaint( model, s.nearFacts.name, &paintIndex ) )
+				havePaint = true;   // MODULES1 item 16: the actor's hair colour (NPC_ HCLF)
 			if ( !havePaint && lb.hasColorRemap ) {
 				havePaint = true;
 				paintIndex = lb.colorRemap;
@@ -5384,9 +5670,11 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 			 * (the wind, the colour's 2.2 power) and its wave period is the base's wind flexibility. One bucket per
 			 * base; the vertex alpha is the weight. The grass FADE is not applied (not measured for cables). */
 			const EsmBendable * cableLook = p.cable ? &world.bendable( p.base ) : nullptr;
-			const bool cableSway = cableLook && cableLook->windSensibility > 0.0f && wwCellCablesWind();
+			const bool cableSway = cableLook && cableLook->windSensibility > 0.0f;	// MODULES1 R6-7: the red nowind is a draw gate now (cellgrass.cpp), live
 			if ( cableSway )
 				bbOwn += QStringLiteral( "|CABLEWIND|%1" ).arg( p.base, 8, 16, QLatin1Char( '0' ) );
+			else if ( cableLook )
+				bbOwn += QLatin1String( "|CABLE" );	// MODULES1 R6-4: never one bucket with a static of the same texture
 			/* Lane WATER1: a placed water mesh (an ACTI whose WNAM names a WATR; its shape carries the water
 			 * shader) gets a bucket per record, drawn by src/features/water/cellwater.h with that record's terms. */
 			const WwWaterRecord * placedWater = nullptr;
@@ -5472,6 +5760,10 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 			 * BSShape hides it while our Volumetric Air is on (wwFakeAirHidden) */
 			WW_SWITCH_STATIC( bool, beamRed, wwEnvInt( "WW_CELL_FAKEAIR_BEAM_RED" ) == 1 );	// part 18: light beams draw
 			const bool fakeAir = s.nearFacts.effectShader && !isActor && wwFakeAirModel( model ) && ( beamRed || !wwFakeAirLightBeam( model ) );
+			if ( s.nearFacts.effectShader && !isActor && wwFakeAirModel( model ) && wwFakeAirLightBeam( model ) ) {	// part 30
+				beamShapes++;
+				beamModels[QString( model ).replace( QLatin1Char( '\\' ), QLatin1Char( '/' ) ).section( QLatin1Char( '/' ), -1 )]++;
+			}
 			if ( fakeAir ) {
 				bbOwn += QLatin1String( "|FA" );
 				fakeAirShapes++;
@@ -5480,6 +5772,12 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 			Bucket & b = bucketFor( s, colouring || ownColor || repaint, bbOwn );
 			if ( fakeAir && !b.name.startsWith( QLatin1String( "FakeAir " ) ) )
 				b.name.prepend( QLatin1String( "FakeAir " ) );
+			/* MODULES1 R6-4: a cable has textures and no material file, so its property kept the block's defaults
+			 * (Smoothness 1, Specular Strength 1): the sun's sharpest lobe at full strength on a 1-2 px tube drew it
+			 * flat white. Nothing authored that lobe (the game draws these with its grass shader): strength 0.
+			 * Red WW_CELL_CABLES_RED=spec keeps the defaults. */
+			if ( cableLook && wwEnv( "WW_CELL_CABLES_RED" ).trimmed() != "spec" )
+				b.noSpecLobe = true;
 			if ( cableSway ) {
 				b.grass = true;
 				b.grassWave = cableLook->windFlexibility;
@@ -5639,6 +5937,9 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 			.arg( cableBuilt ).arg( cableWind ).arg( cableVerts ).arg( cableTris ).arg( cableEndBad )
 			.arg( double( cableEndWorst ), 0, 'f', 4 ).arg( cableSagBad ).arg( double( cableSagWorst ), 0, 'f', 4 )
 			+ ( wwCellCablesWind() ? QString() : QStringLiteral( "; wind off (WW_CELL_CABLES_RED=nowind)" ) )
+			+ ( wwEnv( "WW_CELL_CABLES_RED" ).trimmed() == "spec"
+				? QStringLiteral( "; specular lobe: the block's defaults, smoothness 1 x strength 1 (RED WW_CELL_CABLES_RED=spec)" )
+				: QStringLiteral( "; specular lobe: strength 0 (no material names one; sun and lamps light it by diffuse only)" ) )
 		: QStringLiteral( "cables: off (WW_CELL_CABLES_RED=off), XBSD refs %1 (on a BNDS base %2), placed 0" )
 			.arg( cableXbsd ).arg( cableBnds );
 	qInfo().noquote() << cableLine;
@@ -6291,7 +6592,7 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 	std::shared_ptr<const ProbeVolumes> volGi;   // lane VOLFIT1: the Space rooms for the GI (WW_CELL_VOLUMES_GI=1); shared with the kept sky spec
 	bool volGiOn = false;
 	if ( probing ) {
-		if ( !spec.interior ) {
+		if ( !spec.interior && !( chunk && chunk->largeRef ) ) {	// AIRPERF1 r4: a large-ref unit has no ground of its own
 			// the ground is part of what a column ray meets, painted or not
 			QFile landDumpFile;   // WW_CELL_BAKE_LAND_DUMP: the land (heights + raw VNML)
 			if ( !landDump.isEmpty() && baking ) {
@@ -6304,7 +6605,9 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 					EsmLand l;
 					if ( !world.land( x, y, l ) )
 						continue;
-					const float ox = float( x ) * CELL_UNITS, oy = float( y ) * CELL_UNITS;
+					// lane AIRPERF1 r5: the soup's frame is the world's, whatever the document's origin (rttracesetrule.h)
+					const float ox = float( rttracesetrule::soupCellOrigin( x, double( origin[0] ) ) );
+					const float oy = float( rttracesetrule::soupCellOrigin( y, double( origin[1] ) ) );
 					const float st = CELL_UNITS / float( LAND_GRID - 1 );
 					if ( landDumpFile.isOpen() ) {
 						const qint32 xy[2] = { x, y };
@@ -6434,6 +6737,8 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 				probeSoup.waterApart = baking;   // the far ring's water, kind 0
 			}
 		}
+	}
+	if ( probing && !chunk ) {	// lane AIRPERF1 r4: a streamed cell places no probes, its soup goes to the traced set
 		ProbePlaceSpec ps;
 		int ownCells[4] = { 0, 0, -1, -1 };   // the probed cells x0, y0, x1, y1 (exterior only)
 		if ( spec.interior ) {
@@ -6559,10 +6864,29 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 						vs.keys << QStringLiteral( "%1_%2" ).arg( x ).arg( y );
 				recxName = spec.world;
 			}
-			// hand fixes: WW_CELL_VOLUMES_RECX=<dir>, else Data/Plugins/FO4CS/Volumes/<World or EDID>.recx when present
+			/* hand fixes: WW_CELL_VOLUMES_RECX=<dir>, else Plugins/Fusion Shaders - Assets/Volumes/<World or EDID>.recx
+			 * in the first .recx root that has it (lane WEATHERRECX1: the Assets mod, then Data); the old provider
+			 * folder Plugins/FO4CS is still read for one release, with a warning */
 			const QByteArray rxDir = wwEnv( "WW_CELL_VOLUMES_RECX" );
-			const QString rx = QDir( rxDir.isEmpty() ? dataRoot + QStringLiteral( "/Plugins/FO4CS/Volumes" ) : QString::fromLocal8Bit( rxDir ) )
-				.filePath( recxName + QStringLiteral( ".recx" ) );
+			QString rx = rxDir.isEmpty() ? QString()
+				: QDir( QString::fromLocal8Bit( rxDir ) ).filePath( recxName + QStringLiteral( ".recx" ) );
+			if ( rxDir.isEmpty() ) {
+				for ( const QString & prov : { wwRecxProvider(), wwRecxOldProvider() } ) {
+					for ( const QString & root : wwRecxRoots( QStringList(), dataRoot ) ) {
+						const QString c = root + QStringLiteral( "/Plugins/" ) + prov + QStringLiteral( "/Volumes/" ) + recxName
+							+ QStringLiteral( ".recx" );
+						if ( QFileInfo::exists( c ) ) {
+							rx = c;
+							if ( prov == wwRecxOldProvider() )
+								std::fprintf( stderr, "recx: WARNING volumes %s under the old provider \"FO4CS\": still read for one "
+									"release; move it to Plugins/%s/Volumes\n", qPrintable( c ), qPrintable( wwRecxProvider() ) );
+							break;
+						}
+					}
+					if ( !rx.isEmpty() )
+						break;
+				}
+			}
 			if ( QFileInfo::exists( rx ) ) {
 				vs.recxFile = rx;
 				vs.recxName = recxName;
@@ -6878,7 +7202,7 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 			}
 		}
 		// the markers (placed and counted always; drawn with the PRTP band's Show probes on)
-		if ( spec.probesShow )
+		if ( spec.probesShow && wwEnvIsEmpty( "WW_CELL_PROBES_HIDE" ) )	// MODULES1 item 6: a streamed chunk follows a live hide
 			cellProbeMarkerBuckets( pr.probes, origin, buckets );
 		if ( !chunk )
 			liveProbes = pr.probes;	// lane LIVESET1
@@ -6951,6 +7275,8 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 	// ---- emit
 	CellSpeed::mark( "ground, water, lights, probes" );
 	if ( chunk ) {	// lane CELLSTREAM1: a streamed cell stops here; src/cellstream.cpp writes it in slices
+		if ( chunkSoup )	// lane AIRPERF1 r4: what the ray-traced GI traces of this cell
+			chunk->soup = rtTraceSetIntern( std::move( probeSoup ) );
 		cellPublishLighting( nullptr, world, spec, lightRefs, primRefs, origin, &chunk->lights, &lightStartOff, &nifxFix );
 		chunk->buckets = std::make_shared<CellChunkBuckets>();
 		chunk->buckets->keys = buckets.keys();
@@ -6960,7 +7286,7 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 			if ( !p.actorKey.isEmpty() || p.disabled )
 				continue;
 			const QString model = world.lodBase( p.base ).model;
-			if ( !model.isEmpty() && lodgenModelHasParticles( model ) )
+			if ( !model.isEmpty() && ( pfxFindRed ? lodgenModelHasParticles( model ) : lodgenModelHasParticlesRead( dataRoot, model ) ) )
 				chunk->pfx.push_back( { model, p.pos - pfxShift, p.rot, p.scale } );	// lane FIREFX1: the world's frame
 		}
 		chunk->ok = true;
@@ -7056,6 +7382,7 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 			QHash<QString, std::shared_ptr<NifModel>> pfxSrc;	// one parse a model; null = unusable
 			QPersistentModelIndex iPfx;
 			int pfxCopies = 0, pfxSystems = 0, pfxModels = 0, pfxRefused = 0, pfxCapped = 0;
+			int pfxRead = 0, pfxRefs = 0, pfxPcmbRefs = 0;	// lane PARTFX1: models read for the question; refs with systems
 			int pfxLitSystems = 0, pfxLitModels = 0, pfxLitCapped = 0;
 			int pfxXemiSystems = 0, pfxXemiNoFlag = 0, pfxXemiLit = 0;	// lane LIGHTS3 (XEMI-PARTICLES)
 			QHash<QString, bool> pfxBgemLit;	// a BGEM path (lower case) -> lit
@@ -7064,8 +7391,15 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 				if ( !p.actorKey.isEmpty() || p.disabled )
 					continue;
 				const QString model = world.lodBase( p.base ).model;
-				if ( model.isEmpty() || !lodgenModelHasParticles( model ) )
+				bool readNow = false;
+				if ( model.isEmpty() || !( pfxFindRed ? lodgenModelHasParticles( model )
+						: lodgenModelHasParticlesRead( dataRoot, model, &readNow ) ) ) {
+					pfxRead += readNow ? 1 : 0;
 					continue;
+				}
+				pfxRead += readNow ? 1 : 0;
+				pfxRefs++;
+				pfxPcmbRefs += p.pcmbMesh >= 0 ? 1 : 0;
 				if ( pfxCopies >= cap ) {
 					pfxCapped++;
 					continue;
@@ -7187,6 +7521,11 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 			fprintf( stderr, "cell particles: %d systems in %d copies of %d models (%d refused%s%s, %d past the cap of %d)\n",
 				pfxSystems, pfxCopies, pfxModels, pfxRefused, pfxWhy.isEmpty() ? "" : ": last ",
 				qPrintable( pfxWhy ), pfxCapped, cap );
+			// lane PARTFX1: which question found them (red WW_CELL_PFX_FIND_RED=noted: only models parsed this process)
+			fprintf( stderr, "cell particles found: %d placed refs carry systems (%d of them drawn by a precombined mesh), "
+				"%d models read for the question (%s)\n", pfxRefs, pfxPcmbRefs, pfxRead,
+				pfxFindRed ? "red: parsed models only" : "every placed model" );
+			wwCellPfxFoundSet( nif, pfxSystems, pfxCopies, pfxModels );
 			fprintf( stderr, "cell particles lit: %d systems of %d placed models registered with their placed lights%s (%d past the lit cap)\n",
 				pfxLitSystems, pfxLitModels, fxLitOn ? ( spec.interior ? " (interior)" : " (exterior: the sun is the base)" )
 					: " (off: overlay)", pfxLitCapped );
@@ -7295,6 +7634,14 @@ static bool cellBuild( NifModel * nif, const CellSceneSpec & specAsked, CellChun
 		fprintf( stderr, "cell fake air: %d effect shapes of %d models tagged (hidden while our air is on%s)%s%s\n",
 			fakeAirShapes, int( fakeAirModels.size() ), wwFakeAirRed() ? ", red keep: drawn" : "",
 			names.isEmpty() ? "" : ": ", qPrintable( names.join( QStringLiteral( ", " ) ) ) );
+		/* MODULES1 part 30 (bungo 11-09 "the effect is gone"): the gate line for the light-beam cards. "drawn" unless
+		 * the red hides them; a hold row at a lamp fails when it reads 0 shapes or "hidden" without the red */
+		QStringList beams;
+		for ( auto it = beamModels.constBegin(); it != beamModels.constEnd(); ++it )
+			beams << QStringLiteral( "%1 x%2" ).arg( it.key() ).arg( it.value() );
+		fprintf( stderr, "cell fake air beams: %d light-beam shapes of %d models %s%s%s\n", beamShapes, int( beamModels.size() ),
+			wwEnvInt( "WW_CELL_FAKEAIR_BEAM_RED" ) == 1 ? "hidden (red WW_CELL_FAKEAIR_BEAM_RED=1)" : "drawn",
+			beams.isEmpty() ? "" : ": ", qPrintable( beams.join( QStringLiteral( ", " ) ) ) );
 	}
 
 	/* The pick highlight: created once here and moved on every click (src/cellclick.h), since the welded
@@ -8107,14 +8454,29 @@ static void cellChunkParticles( NifModel * nif, CellChunk & c, CellBlockSource &
 {
 	c.pfxDone = true;
 	QHash<QString, std::shared_ptr<NifModel>> * cache = src.pfxModels();
-	if ( c.pfx.empty() || !cache || !wwCellParticlesOn() )
+	/* FARWATER1 late item 5 (bungo b71: the ground fog gone after a goto jump, 5 systems in 25 cells): one line per
+	 * attach: what the cell placed, copied and refused, and the stream's cap left after it */
+	QString why;
+	int pfxUnread = 0, pfxEmpty = 0, pfxCapped = 0;
+	const auto say = [&]( const char * stop ) {
+		std::fprintf( stderr, "cell stream particles: %s: %d systems placed (refs with a particle model), %d copied, refused %d "
+			"(model unread or another version) + %d (the copy wrote nothing%s%s) + %d (over the cap); cap left %d of "
+			"WW_CELL_PARTICLES_MAX%s\n", qPrintable( nif->get<QString>( iCell, "Name" ) ), int( c.pfx.size() ), c.pfxCopies,
+			pfxUnread, pfxEmpty, why.isEmpty() ? "" : ": ", qPrintable( why ), pfxCapped, src.pfxRoom() - c.pfxCopies, stop );
+	};
+	if ( c.pfx.empty() || !cache || !wwCellParticlesOn() ) {
+		say( c.pfx.empty() ? "" : !cache ? "; no model cache" : "; the particles row is off" );
 		return;
+	}
 	QVector<qint32> written;	// lane LIVESET4: taken from the stream's pool (it records them for the cell)
 	QPersistentModelIndex iPfx;
-	QString why;
+	int pfxAt = 0;
 	for ( const CellChunk::Pfx & p : c.pfx ) {
-		if ( c.pfxCopies >= src.pfxRoom() )
+		if ( c.pfxCopies >= src.pfxRoom() ) {
+			pfxCapped = int( c.pfx.size() ) - pfxAt;
 			break;
+		}
+		pfxAt++;
 		const QString key = p.model.toLower();
 		auto it = cache->find( key );
 		if ( it == cache->end() ) {
@@ -8131,8 +8493,10 @@ static void cellChunkParticles( NifModel * nif, CellChunk & c, CellBlockSource &
 				m.reset();
 			it = cache->insert( key, m );
 		}
-		if ( !it.value() )
+		if ( !it.value() ) {
+			pfxUnread++;
 			continue;
+		}
 		if ( !iPfx.isValid() ) {
 			QModelIndex iP = src.take( nif, QStringLiteral( "NiNode" ) );
 			if ( !iP.isValid() )
@@ -8146,9 +8510,12 @@ static void cellChunkParticles( NifModel * nif, CellChunk & c, CellBlockSource &
 		}
 		if ( cellCopyParticleBranch( nif, QModelIndex( iPfx ), *it.value(), p.at, p.rot, p.scale, &why, nullptr, &src, &written ) > 0 )
 			c.pfxCopies++;
+		else
+			pfxEmpty++;
 	}
 	for ( const qint32 b : written )
 		nif->updateBlockLinks( b );
+	say( "" );
 }
 
 // lane CELLSTREAM1: the cell's buckets written under its node, as the open writes them, a slice at a time

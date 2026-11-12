@@ -262,8 +262,12 @@ HEADERS += \
 	src/features/weather/precipspec.h \
 	src/gl/progcachekeep.h \
 	src/features/near/cellcull.h \
+	src/features/near/cellpcmb.h \
+	src/features/near/cellpcmbload.h \
+	src/features/near/cellshadowocc.h \
 	src/features/near/cellumbra.h \
 	src/features/water/cellwater.h \
+	src/features/water/endlesssea.h \
 	src/features/water/cellocean.h \
 	src/features/water/oceanspectrum.h \
 	src/features/gi/cellwatergi.h \
@@ -273,21 +277,29 @@ HEADERS += \
 	src/features/post/cellpost.h \
 	src/features/exposure/cellhdr.h \
 	src/features/exposure/exposure.h \
+	src/features/exposure/physunits.h \
 	src/features/near/cellvrs.h \
 	src/features/particles/cellfxres.h \
 	src/features/post/cellbloom.h \
+	src/features/vkframe/vkframe.h \
+	src/features/vkframe/vkframegraph.h \
+	src/features/vkframe/vkpresent.h \
 	src/features/post/cellfogbloom.h \
 	src/features/sky/atmosphere.h \
 	src/features/clouds/cloudmap.h \
 	src/features/weather/weatherrecx.h \
+	src/features/weather/wxoverride.h \
 	src/features/weather/weatherrecxmath.h \
+	src/features/weather/weathergen.h \
 	src/features/clouds/cloudnoise.h \
 	src/features/clouds/cloudvol.h \
 	src/features/clouds/cloudshadow.h \
 	src/features/clouds/cloudshadowmath.h \
+	src/features/clouds/cloudfusionlaw.h \
 	src/features/clouds/cloudfly.h \
 	src/features/clouds/cloudflymath.h \
 	src/features/clouds/cloudvolmath.h \
+	src/features/clouds/cloudrecx14math.h \
 	src/features/sky/atmomath.h \
 	src/features/gi/cellprobeview.h \
 	src/features/gi/cellvolumeview.h \
@@ -298,6 +310,8 @@ HEADERS += \
 	src/features/gi/cellssgiplan.h \
 	src/features/shadows/contactlines.h \
 	src/features/lights/celllampshadow.h \
+	src/features/lights/lightmeas.h \
+	src/features/overlays/debugview.h \
 	src/gl/celllooks.h \
 	src/features/lights/cellnifxlights.h \
 	src/features/ao/cellaodecalgl.h \
@@ -321,6 +335,8 @@ HEADERS += \
 	src/features/far-ground/cellfgsched.h \
 	src/gl/cellunits.h \
 	src/ui/scenewindow.h \
+	src/ui/scenewxrows.h \
+	src/ui/livepanel.h \
 	src/features/far-lod/impostordraw.h \
 	src/features/far-lod/impostoroct.h \
 	src/features/far-lod/impostorcard.h \
@@ -440,13 +456,17 @@ HEADERS += \
 	src/cellmodsource.h \
 	src/features/far-lod/cellfarvanilla.h \
 	src/features/far-lod/cellfarhide.h \
+	src/features/far-lod/treeladder.h \
+	src/features/far-lod/lodpreview.h \
 	src/cellmesh.h \
 	src/cellspeed.h \
 	src/cellstream.h \
+	src/cellstreamrule.h \
 	src/cellstreamtex.h \
 	src/cellspawn.h \
 	src/cellcambounds.h \
 	src/celltexahead.h \
+	src/wwhwuse.h \
 	src/cellmodelahead.h \
 	src/features/gi/probealbedo.h \
 	src/features/gi/probebake.h \
@@ -462,6 +482,9 @@ HEADERS += \
 	src/features/gi/rtddgimath.h \
 	src/features/gi/rtddgi/rtddgi_gpu.h \
 	src/features/gi/rtddgicell.h \
+	src/features/gi/rttraceset.h \
+	src/features/gi/rtfartrace.h \
+	src/features/gi/rttracesetrule.h \
 	src/features/air/airzone.h \
 	src/features/air/airzonemath.h \
 	src/features/air/airzonepanel.h \
@@ -613,11 +636,13 @@ SOURCES += \
 	src/features/overlays/overlays.cpp \
 	src/features/weather/cellprecip.cpp \
 	src/features/near/cellcull.cpp \
+	src/features/near/cellpcmbload.cpp \
 	src/features/far-lod/cellfarinst.cpp \
 	src/features/far-ground/cellfarground.cpp \
 	src/features/near/cellumbra.cpp \
 	src/features/near/cellumbradepth.cpp \
 	src/features/water/cellwater.cpp \
+	src/features/water/endlesssea.cpp \
 	src/features/water/esmwater.cpp \
 	src/features/water/cellocean.cpp \
 	src/features/water/cellwaterinfo.cpp \
@@ -626,14 +651,18 @@ SOURCES += \
 	src/features/post/cellpost.cpp \
 	src/features/exposure/cellhdr.cpp \
 	src/features/exposure/exposure.cpp \
+	src/features/exposure/physunits.cpp \
 	src/features/near/cellvrs.cpp \
 	src/features/particles/cellfxres.cpp \
 	src/features/particles/particlepreroll.cpp \
 	src/features/post/cellbloom.cpp \
+	src/features/vkframe/vkframe.cpp \
+	src/features/vkframe/vkpresent.cpp \
 	src/features/post/cellfogbloom.cpp \
 	src/features/sky/atmosphere.cpp \
 	src/features/clouds/cloudmap.cpp \
 	src/features/weather/weatherrecx.cpp \
+	src/features/weather/wxoverride.cpp \
 	src/features/sky/skyplacerun.cpp \
 	src/features/clouds/cloudvol.cpp \
 	src/features/clouds/cloudshadow.cpp \
@@ -644,6 +673,8 @@ SOURCES += \
 	src/features/reflections/cellreflprobe.cpp \
 	src/features/gi/cellssgi.cpp \
 	src/features/lights/celllampshadow.cpp \
+	src/features/lights/lightmeas.cpp \
+	src/features/overlays/debugview.cpp \
 	src/gl/celllooks.cpp \
 	src/features/lights/cellnifxlights.cpp \
 	src/features/ao/cellaodecalgl.cpp \
@@ -660,6 +691,8 @@ SOURCES += \
 	src/features/near/cellbindless.cpp \
 	src/features/near/cellgpucull.cpp \
 	src/ui/scenewindow.cpp \
+	src/ui/scenewxrows.cpp \
+	src/ui/livepanel.cpp \
 	src/io/materialfile.cpp \
 	src/io/pbrmfile.cpp \
 	src/io/pbrmresolve.cpp \
@@ -779,6 +812,7 @@ SOURCES += \
 	src/esmdata.cpp \
 	src/features/weather/esmweather.cpp \
 	src/recx.cpp \
+	src/recxmodroots.cpp \
 	src/features/far-lod/lodgen.cpp 	src/features/far-lod/lodgenmanager.cpp 	src/features/far-lod/lodtfile.cpp \
 	src/features/far-lod/lodgenchunkpass.cpp \
 	src/features/far-lod/lodgengpu.cpp \
@@ -808,6 +842,7 @@ SOURCES += \
 	src/cellmodsource.cpp \
 	src/features/far-lod/cellfarvanilla.cpp \
 	src/features/far-lod/cellfarhide.cpp \
+	src/features/far-lod/lodpreview.cpp \
 	src/cellmesh.cpp \
 	src/cellspeed.cpp \
 	src/cellstream.cpp \
@@ -816,6 +851,7 @@ SOURCES += \
 	src/cellstreamwalk.cpp \
 	src/wwsharedread.cpp \
 	src/celltexahead.cpp \
+	src/wwhwuse.cpp \
 	src/cellmodelahead.cpp \
 	src/features/gi/probealbedo.cpp \
 	src/features/gi/probebake.cpp \
@@ -824,6 +860,8 @@ SOURCES += \
 	src/features/gi/rtddgi.cpp \
 	src/features/reflections/reflcensuscli.cpp \
 	src/features/gi/rtddgicell.cpp \
+	src/features/gi/rttraceset.cpp \
+	src/features/gi/rtfartrace.cpp \
 	src/features/air/airzone.cpp \
 	src/features/air/airzonepanel.cpp \
 	src/io/espwrite.cpp \
@@ -1119,8 +1157,8 @@ build_pass|!debug_and_release {
 		docs/CLI.md
 
 	copyDirs( $$SHADERS, shaders )
-	# the record extension files this program ships (docs/RECX.md): the vanilla weathers' ground fog
-	copyDirs( res/Data, Data )
+	# lane WEATHERRECX1: the data this program used to ship in res/Data (the weathers' .recx, the fog, precipitation and
+	# moon textures) lives in the MO2 mod "Fusion Shaders - Assets" (src/recx.h wwAssetsModRoot); nothing is copied
 	#copyDirs( $$LANG, lang )
 	copyFiles( $$XML $$QSS res/qt.conf )
 

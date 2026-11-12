@@ -5,6 +5,7 @@ BSD License - see nifskope.h
 ***** END LICENCE BLOCK *****/
 
 #include "lodgen.h"
+#include "wwloadwatch.h"	// lane PERFLOAD1: what a cell load saved
 #include "wwswitch.h"	// the WW_* switch store
 #include "features/gi/probeincr.h"
 #include "lodgenparallel.h"
@@ -12,6 +13,7 @@ BSD License - see nifskope.h
 #include "lodgengpu.h"
 #include "lodgenao.h"
 #include "cellspeed.h"
+#include "features/near/cellpcmbload.h"	// lane PCMB1: precombined shapes' geometry from the plugin's CSG
 
 #include <QMutex>
 #include <QWaitCondition>
@@ -41,6 +43,7 @@ BSD License - see nifskope.h
 #include <QDir>
 #include "gamemanager.h"
 #include "ba2file.hpp"
+#include "wwhwuse.h"	// lane EMPTY240: archive reads through the RAM cache and the read/inflate counters
 #include <QBuffer>
 #include <QPainter>
 #include <memory>
@@ -53,6 +56,7 @@ BSD License - see nifskope.h
 #include <QTextStream>
 #include <QtEndian>
 #include <QFileInfo>
+#include <QDateTime>
 #include <QMap>
 #include <QVector>
 
@@ -1449,7 +1453,7 @@ QStringList lodgenFolderArchives( const QString & folder )
 }
 
 //! Pass one then pass two, both walking the stack backwards: the index is first-wins.
-QStringList lodgenStackSearchPaths()
+QStringList lodgenStackSearchPathsBuild()
 {
 	QStringList out;
 	const QStringList & stack = lodgenStack();
@@ -1477,23 +1481,81 @@ QStringList lodgenStackSearchPaths()
 	return out;
 }
 
+//! lane PERFLOAD1 (P1): the list above, kept while the stack, the plugin order and every stack entry's change time
+//! stay the same (it was rebuilt per call: per .lodm of a far-LOD arm, ~25 % of that stage). A folder's change time
+//! moves when an archive or a data folder is added or removed. WW_LOADSPEED_RED=pathlist builds it per call again.
+QStringList lodgenStackSearchPaths()
+{
+	WW_SWITCH_STATIC( bool, redList, wwEnv( "WW_LOADSPEED_RED" ) == "pathlist" );
+	if ( redList ) {
+		wwLoadPathBuilt++;
+		return lodgenStackSearchPathsBuild();
+	}
+	const QStringList stack = lodgenStack();
+	const QHash<QString, int> rank = lodgenPluginRank();
+	QList<qint64> stamps;
+	stamps.reserve( stack.size() );
+	for ( const QString & e : stack ) {
+		const QFileInfo fi( QDir::cleanPath( e ) );
+		stamps.append( fi.exists() ? fi.lastModified().toMSecsSinceEpoch() * 2 + ( fi.isDir() ? 1 : 0 ) : -1 );
+	}
+	static QMutex mu;
+	static bool have = false;
+	static QStringList memoStack, memoOut;
+	static QHash<QString, int> memoRank;
+	static QList<qint64> memoStamps;
+	{
+		QMutexLocker lock( &mu );
+		if ( have && memoStack == stack && memoRank == rank && memoStamps == stamps ) {
+			wwLoadPathReused++;
+			return memoOut;
+		}
+	}
+	const QStringList out = lodgenStackSearchPathsBuild();
+	QMutexLocker lock( &mu );
+	have = true;
+	memoStack = stack;
+	memoRank = rank;
+	memoStamps = stamps;
+	memoOut = out;
+	wwLoadPathBuilt++;
+	return out;
+}
+
+namespace
+{
+struct StackIndex
+{
+	std::mutex mu;	// lane EMPTY240 R9-c: the stream builder and the drawing thread both ask
+	std::unique_ptr<BA2File> index;
+	QStringList builtFor;
+	QHash<QString, int> builtRank;
+	bool tried = false;
+	std::atomic<bool> warming{ false };
+};
+StackIndex & stackIx()
+{
+	static StackIndex * s = new StackIndex;	// never destroyed: a warm-up thread may still be inside it at exit
+	return *s;
+}
+} // namespace
+
 //! The stack's index: every extension, built once, dropped when the stack changes.
 BA2File * lodgenStackIndex()
 {
-	static std::unique_ptr<BA2File> index;
-	static QStringList builtFor;
-	static QHash<QString, int> builtRank;
-	static bool tried = false;
-	if ( tried && builtFor == lodgenStack() && builtRank == lodgenPluginRank() )
-		return index.get();
-	tried = true;
-	builtFor = lodgenStack();
-	builtRank = lodgenPluginRank();
-	index.reset();
+	StackIndex & s = stackIx();
+	std::lock_guard<std::mutex> g( s.mu );
+	if ( s.tried && s.builtFor == lodgenStack() && s.builtRank == lodgenPluginRank() )
+		return s.index.get();
+	s.tried = true;
+	s.builtFor = lodgenStack();
+	s.builtRank = lodgenPluginRank();
+	s.index.reset();
 	const QStringList paths = lodgenStackSearchPaths();
 	if ( paths.isEmpty() )
 		return nullptr;
-	index = std::make_unique<BA2File>();
+	WwHw::IndexScope wwIx( "resource stack index (every extension)" );
+	auto index = std::make_unique<BA2File>();
 	for ( const QString & p : paths ) {
 		try {
 			index->loadArchivePath( p.toLocal8Bit().constData() );
@@ -1501,8 +1563,45 @@ BA2File * lodgenStackIndex()
 			// an unreadable entry is skipped, as the game manager skips one
 		}
 	}
-	return index.get();
+	s.index = std::move( index );
+	return s.index.get();
 }
+
+} // namespace (manager build 84: the anonymous namespace was still open here, so this had no external linkage)
+
+/* lane EMPTY240 R9-c: build 83's frame 2 spent 185 ms in the cloud map, 164 of them building this index on the drawing
+ * thread ("archive index: resource stack index (every extension) built on the drawing thread, 91 archive files opened,
+ * 164 ms") for one sky mesh (clouds.nif). True when the index is built for the current stack; otherwise one worker builds
+ * it and the caller asks again a paint later (a build already running is never waited for). Red WW_STACKINDEXWARM_RED=1:
+ * the asking thread builds it, build 83. */
+bool lodgenStackIndexWarm()
+{
+	WW_SWITCH_STATIC( bool, warmRed, wwEnvInt( "WW_STACKINDEXWARM_RED" ) == 1 );
+	if ( warmRed )
+		return true;
+	StackIndex & s = stackIx();
+	if ( s.warming.load() )
+		return false;
+	{
+		std::unique_lock<std::mutex> g( s.mu, std::try_to_lock );
+		if ( !g.owns_lock() )
+			return false;	// another thread builds it now
+		if ( s.tried && s.builtFor == lodgenStack() && s.builtRank == lodgenPluginRank() )
+			return true;
+	}
+	if ( !s.warming.exchange( true ) ) {
+		std::fprintf( stderr, "archive index: resource stack index goes to a worker thread, the asker waits a paint (R9-c; red "
+			"WW_STACKINDEXWARM_RED=1: built on the asking thread, build 83)\n" );
+		std::thread( [] {
+			lodgenStackIndex();
+			stackIx().warming.store( false );
+		} ).detach();
+	}
+	return false;
+}
+
+namespace
+{
 
 static BA2File * lodgenMeshArchives()
 {
@@ -1513,6 +1612,7 @@ static BA2File * lodgenMeshArchives()
 		if ( Game::GameManager::status( Game::FALLOUT_4 ) ) {
 			const QStringList paths = Game::GameManager::folders( Game::FALLOUT_4 );
 			if ( !paths.isEmpty() ) {
+				WwHw::IndexScope wwIx( "mesh archive index (.nif only)" );
 				index = std::make_unique<BA2File>();
 				for ( const QString & path : paths ) {
 					try {
@@ -1546,7 +1646,7 @@ bool lodgenReadFromStack( const QString & relPath, const char * archiveFolder,
 	if ( !fd )
 		return false;
 	try {
-		ix->extractFile( &out, &lodgenByteArrayAlloc, *fd );
+		WwHw::extract( *ix, *fd, out, &lodgenByteArrayAlloc );
 	} catch ( ... ) {
 		out.clear();
 	}
@@ -1645,7 +1745,7 @@ static bool lodgenReadAssetRaw( const QString & dataRoot, const QString & relPat
 		if ( !fd )
 			return false;
 		try {
-			ix->extractFile( &out, &lodgenByteArrayAlloc, *fd );
+			WwHw::extract( *ix, *fd, out, &lodgenByteArrayAlloc );
 		} catch ( ... ) {
 			out.clear();
 		}
@@ -1831,6 +1931,16 @@ bool lodgenProbeAsset( const QString & dataRoot, const QString & relPath,
 		return false;
 	if ( bytes )
 		*bytes = out;
+
+	// lane PERFLOAD1 (P1): a caller that asks only for the bytes does not need the source walk below, which opened
+	// every archive of the stack again per asset (79-87 % of the cell weld stage). WW_LOADSPEED_RED=probewalk walks.
+	if ( !entry && !kind && !path ) {
+		WW_SWITCH_STATIC( bool, redWalk, wwEnv( "WW_LOADSPEED_RED" ) == "probewalk" );
+		if ( !redWalk ) {
+			wwLoadWalkSkipped++;
+			return true;
+		}
+	}
 
 	// Which entry supplied it.
 	const std::string full = Game::GameManager::get_full_path( relPath, folder, ext );
@@ -2194,6 +2304,34 @@ static void lodgenNoteParticleModel( const QString & model )
 	QMutexLocker lock( &particleModelMutex );
 	particleModels.insert( lodgenParticleKey( model ) );
 }
+/* lane PARTFX1: every model's answer, parsed or read. A precombined reference's model is never parsed (its mesh draws
+ * it) and the game still runs its particle systems, so a model no parse saw is read once and its bytes asked. */
+static QHash<QString, bool> particleAnswers;
+static void lodgenNoteParticleAnswer( const QString & model, bool has )
+{
+	QMutexLocker lock( &particleModelMutex );
+	particleAnswers.insert( lodgenParticleKey( model ), has );
+}
+bool lodgenModelHasParticlesRead( const QString & dataRoot, const QString & model, bool * read )
+{
+	const QString k = lodgenParticleKey( model );
+	{
+		QMutexLocker lock( &particleModelMutex );
+		if ( particleModels.contains( k ) )
+			return true;
+		auto it = particleAnswers.constFind( k );
+		if ( it != particleAnswers.constEnd() )
+			return it.value();
+	}
+	// a block type name in the header (NiParticleSystem, BSStripParticleSystem); a node named so only costs a parse
+	QByteArray bytes;
+	const bool has = lodgenReadModelBytes( dataRoot, model, bytes ) && bytes.contains( "ParticleSystem" );
+	if ( read )
+		*read = true;
+	QMutexLocker lock( &particleModelMutex );
+	particleAnswers.insert( k, has );
+	return has;
+}
 // the models that move on their own (a looping sequence, or a controller no sequence drives)
 static QSet<QString> movingModels;
 bool lodgenModelMoves( const QString & model )
@@ -2253,6 +2391,43 @@ QString lodgenLoadModelKey( const QString & meshPath, const LodgenMaterialSubst 
 	return key;
 }
 
+/* lane PCMB1: one precombined shape (no vertex data in the NIF) filled from the CSG its packed block names, in
+ * WORLD space, LOD0 only (src/features/near/cellpcmb.h). A refusal is said on stderr and the shape stays empty, as
+ * before. */
+static bool lodgenPcmbFill( const QString & dataRoot, const QByteArray & nif, const QVector<qint32> & extra,
+	const QString & meshPath, LodSrcShape & s )
+{
+	WwPcmb::Geometry g;
+	QString why;
+	if ( !WwPcmb::loadShape( dataRoot, nif, extra, g, &why ) ) {
+		fprintf( stderr, "cell pcmb: %s: %s\n", meshPath.toLocal8Bit().constData(), why.toLocal8Bit().constData() );
+		return false;
+	}
+	const int nv = int( g.vertexCount() );
+	if ( nv > 65536 ) {   // Triangle holds 16-bit indices; the shape's own Num Vertices is 16-bit too
+		fprintf( stderr, "cell pcmb: %s: %d vertices do not fit 16-bit indices\n", meshPath.toLocal8Bit().constData(), nv );
+		return false;
+	}
+	s.pos.reserve( nv );
+	s.nrm.reserve( nv );
+	s.tan.reserve( nv );
+	s.uv.reserve( nv );
+	s.col.reserve( nv );
+	for ( int v = 0; v < nv; v++ ) {
+		s.pos.append( Vector3( g.pos[3 * v], g.pos[3 * v + 1], g.pos[3 * v + 2] ) );
+		s.nrm.append( Vector3( g.nrm[3 * v], g.nrm[3 * v + 1], g.nrm[3 * v + 2] ) );
+		s.tan.append( Vector3( g.tan[3 * v], g.tan[3 * v + 1], g.tan[3 * v + 2] ) );
+		s.uv.append( Vector2( g.uv[2 * v], g.uv[2 * v + 1] ) );
+		s.col.append( Color4( g.rgba[4 * v] / 255.0f, g.rgba[4 * v + 1] / 255.0f, g.rgba[4 * v + 2] / 255.0f,
+			g.rgba[4 * v + 3] / 255.0f ) );
+	}
+	s.tris.reserve( int( g.tris.size() / 3 ) );
+	for ( std::size_t t = 0; t + 2 < g.tris.size(); t += 3 )
+		s.tris.append( Triangle( quint16( g.tris[t] ), quint16( g.tris[t + 1] ), quint16( g.tris[t + 2] ) ) );
+	s.colStream = g.colors;
+	return true;
+}
+
 //! Load every shape of a per-object LOD model, transforms applied, textures resolved from its shader property.
 //! Results cached per path.
 const QVector<LodSrcShape> & lodgenLoadModel( const QString & dataRoot,
@@ -2277,6 +2452,7 @@ const QVector<LodSrcShape> & lodgenLoadModel( const QString & dataRoot,
 	// fix.
 
 	QVector<LodSrcShape> shapes;
+	bool pcmbBroken = false;	// lane PCMB1: a precombined shape that could not be filled fails the whole mesh
 	QString path = meshPath;
 	path.replace( QChar( '\\' ), QChar( '/' ) );
 	if ( !path.startsWith( QStringLiteral( "meshes/" ), Qt::CaseInsensitive ) )
@@ -2329,6 +2505,8 @@ const QVector<LodSrcShape> & lodgenLoadModel( const QString & dataRoot,
 		}
 	if ( modelParticles )
 		lodgenNoteParticleModel( meshPath );
+	if ( loaded )
+		lodgenNoteParticleAnswer( meshPath, modelParticles );
 	if ( modelMoves )
 		lodgenNoteMovingModel( meshPath );
 	if ( loaded ) {
@@ -2373,9 +2551,15 @@ const QVector<LodSrcShape> & lodgenLoadModel( const QString & dataRoot,
 				}
 			}
 			QModelIndex iVD = src.getIndex( iShape, "Vertex Data" );
-			if ( !iVD.isValid() )
+			// lane PCMB1: a precombined shape stores no vertices; they come from the CSG, already in world space
+			const bool pcmbShape = !iVD.isValid() && !WwPcmb::redRefs()
+				&& meshPath.contains( QStringLiteral( "precombined" ), Qt::CaseInsensitive );
+			const bool pcmbFilled = pcmbShape
+				&& lodgenPcmbFill( dataRoot, bytes, src.getLinkArray( iShape, "Extra Data List" ), meshPath, s );
+			pcmbBroken |= pcmbShape && !pcmbFilled;
+			if ( !iVD.isValid() && !pcmbFilled )
 				continue;
-			for ( quint32 v = 0; v < numVerts; v++ ) {
+			for ( quint32 v = 0; !pcmbFilled && v < numVerts; v++ ) {
 				QModelIndex row = src.index( int( v ), 0, iVD );
 				const Vector3 p = fullPrec ? src.get<Vector3>( row, "Vertex" )
 					: Vector3( src.get<HalfVector3>( row, "Vertex" ) );
@@ -2388,13 +2572,13 @@ const QVector<LodSrcShape> & lodgenLoadModel( const QString & dataRoot,
 					: Color4( 1, 1, 1, 1 ) );
 			}
 			QModelIndex iTris = src.getIndex( iShape, "Triangles" );
-			if ( iTris.isValid() )
+			if ( !pcmbFilled && iTris.isValid() )
 				s.tris = src.getArray<Triangle>( iTris );
 			NearShapeFacts & nf = s.nearFacts;
 			nf.block = b;
 			nf.name = src.get<QString>( iShape, "Name" );
 			nf.sourceTris = quint32( s.tris.size() );
-			if ( src.blockInherits( iShape, "BSMeshLODTriShape" ) )
+			if ( !pcmbFilled && src.blockInherits( iShape, "BSMeshLODTriShape" ) )   // a filled shape holds LOD0 only
 				nf.lod0Tris = src.get<quint32>( iShape, "LOD0 Size" );
 			nf.modelControllers = modelControllers;
 			nf.modelAnimated = modelControllers > 0;
@@ -2661,6 +2845,13 @@ const QVector<LodSrcShape> & lodgenLoadModel( const QString & dataRoot,
 			if ( !s.tris.isEmpty() )
 				shapes.append( s );
 		}
+	}
+	if ( pcmbBroken && !shapes.isEmpty() ) {
+		/* lane PCMB1: drawing part of a precombined mesh would hide refs whose geometry is missing; with no shapes the
+		 * cell view counts the mesh failed and keeps every one of its refs */
+		fprintf( stderr, "lodgen: model %s: a precombined shape could not be filled, the mesh is dropped\n",
+			path.toLocal8Bit().constData() );
+		shapes.clear();
 	}
 	if ( loaded && shapes.isEmpty() )
 		fprintf( stderr, "lodgen: model %s: loaded, %d blocks, no BSTriShape with vertex data and triangles\n",

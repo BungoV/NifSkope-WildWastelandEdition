@@ -16,6 +16,14 @@ float cellAoFactor()
 	return texture( cellAo, vec2( uv.x, 1.0 - uv.y ) ).r;
 }
 
+// MODULES1 round 10: the ONE AO rule for near and far. The frame's screen obscurance x a baked obscurance (a far
+// placement's vertex AO with its ground-contact ramp; 1 on every other shape), on the whole lit colour before the fog:
+// the same factor for the ambient / GI, the sun or moon, the local lights, the emissive and the specular.
+float cellAoShared( float baked )
+{
+	return cellAoFactor() * clamp( baked, 0.0, 1.0 );
+}
+
 // the obscurance's opaque pass: view normal and linear depth in game units
 vec4 cellAoPassOut( vec3 normalView, vec3 posView )
 {

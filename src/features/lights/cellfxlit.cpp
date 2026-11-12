@@ -13,9 +13,11 @@ BSD License - see nifskope.h
 #include "gl/lookdevstage.h"	// lane LIGHTS3: a region's emittance at the clock
 #include "gl/celllooks.h"	// lane LIGHTS4: the emittance rows, read at draw time
 #include "gl/fxroomrule.h"	// lane HAZECARD1
+#include "features/air/cellvolair.h"	// MODULES1 10b-3: the air's env strata at the cards
 
 #include <QFile>
 #include <QHash>
+#include <QSet>
 #include <QTextStream>
 #include <QVector>
 
@@ -37,11 +39,13 @@ struct FxDoc
 struct FxState
 {
 	QHash<const void *, FxDoc> docs;
-	bool strongest = false;
+	int pick = WwFxLitPickOwn;	// LATE 7: own light first; red WW_CELL_FXLIT_PICK=game (the inferred order), =strong
 	int red = 0;        // 1 white, 2 all, 4 nopower, 8 nofade
 	int probe = 0;
 	QString dump;
 };
+
+QString g_fxDumpDone;	// FARWATER1 late item 4: the dump file last written (a live set of WW_CELL_FXLIT_DUMP writes again)
 
 FxState & st()
 {
@@ -52,7 +56,8 @@ FxState & st()
 		if ( !s )
 			s = new FxState;
 		liveGen = wwSwitchGen();
-		s->strongest = wwEnv( "WW_CELL_FXLIT_PICK" ) == "strong";
+		const QByteArray pk = wwEnv( "WW_CELL_FXLIT_PICK" );
+		s->pick = pk == "strong" ? WwFxLitPickStrong : pk == "game" ? WwFxLitPickGame : WwFxLitPickOwn;
 		const QByteArray r = wwEnv( "WW_CELL_FXLIT_RED" );
 		s->red = r == "white" ? 1 : r == "all" ? 2 : r == "nopower" ? 4 : r == "nofade" ? 8 : 0;
 		s->probe = wwEnvInt( "WW_CELL_LIT_PROBE" );
@@ -77,11 +82,13 @@ float falloff( float d, float r )
 }
 
 void wwCellFxLitPickLights( const QVector<WwCellLight> & lights, const float center[3], float radius,
-	bool strongest, int out[4] )
+	int pick, quint32 ownRef, int out[4] )
 {
+	const bool strongest = pick == WwFxLitPickStrong;
 	struct Cand
 	{
 		int index;
+		int tier;	// LATE 7: 2 the placement's own light, 1 a light inside the bound, 0 the rest
 		float key;
 	};
 	std::vector<Cand> cand;
@@ -95,10 +102,23 @@ void wwCellFxLitPickLights( const QVector<WwCellLight> & lights, const float cen
 			key = std::max( { l.color[0], l.color[1], l.color[2] } ) * falloff( d, l.radius );
 		else if ( radius < 150.0f )
 			key = ( d - radius ) / l.radius;
-		cand.push_back( { i, key } );
+		int tier = 0;
+		if ( pick == WwFxLitPickOwn ) {
+			if ( ownRef != 0 && l.ref == ownRef )
+				tier = 2;
+			else if ( d <= radius ) {
+				tier = 1;
+				key = -d;	// nearest first among the lights inside the bound
+			}
+		}
+		cand.push_back( { i, tier, key } );
 	}
-	// largest key first; a large model's list (every key 0) keeps the lights' own order
-	std::stable_sort( cand.begin(), cand.end(), []( const Cand & a, const Cand & b ) { return a.key > b.key; } );
+	/* LATE 7 (bungo: the lamp cone "is still not connected"): the inferred order sorts the largest relative distance
+	 * first, so a lamp's own light (d ~ 0) came LAST and dropped out under 4+ string bulbs. Own: the placement's own
+	 * light, then lights inside its bound, then that order. Largest key first; every key 0 keeps the lights' order */
+	std::stable_sort( cand.begin(), cand.end(), []( const Cand & a, const Cand & b ) {
+		return a.tier != b.tier ? a.tier > b.tier : a.key > b.key;
+	} );
 	for ( int k = 0; k < 4; k++ )
 		out[k] = size_t( k ) < cand.size() ? cand[size_t( k )].index : -1;
 }
@@ -157,17 +177,100 @@ void wwCellFxLitPick( const void * nif )
 		return;
 	}
 	for ( WwFxLitModel & m : it->models ) {
-		wwCellFxLitPickLights( L->lights, m.center, m.radius, s.strongest, m.light );
+		wwCellFxLitPickLights( L->lights, m.center, m.radius, s.pick, m.ref, m.light );
 		for ( int k = 0; k < 4; k++ )
 			m.scale[k] = it->noOffset.value( m.light[k], 1.0f );
 	}
+	{	/* MODULES1 R7-1 telemetry, one line per cell change: the lit effect models, the lights they sample, and the
+		 * lamp light at each model's centre (luminance, the game's falloff, no shadow; an estimate, the shader lights
+		 * per pixel): its range and how many models no lamp reaches (those show the sun + ambient alone) */
+		float lo = 1e30f, hi = 0.0f;
+		int dark = 0;
+		/* R8-1: three cards with their lamp terms in colour (the brightest, the median of the lit ones, one no lamp
+		 * reaches): lamp sum rgb at the centre, and the nearest lamp's distance against its radius (past the radius
+		 * the game's falloff is 0: such a card can take a lamp's colour only through the GI volume's bounce) */
+		struct Card { float e = 0.0f, rgb[3] = { 0, 0, 0 }, d = 1e30f, r = 0.0f; int i = -1; };
+		std::vector<Card> cards;
+		for ( const WwFxLitModel & m : it->models ) {
+			Card c;
+			c.i = int( &m - &it->models[0] );
+			for ( const WwCellLight & l : L->lights ) {
+				const float dx = l.pos[0] - m.center[0], dy = l.pos[1] - m.center[1], dz = l.pos[2] - m.center[2];
+				const float d = std::sqrt( dx * dx + dy * dy + dz * dz );
+				const float q = d / std::max( l.radius, 0.001f );
+				if ( d < c.d ) {
+					c.d = d;
+					c.r = l.radius;
+				}
+				if ( q < 1.0f ) {
+					const float f = std::pow( 1.0f - q * q, 2.2f );
+					c.e += ( 0.2126f * l.color[0] + 0.7152f * l.color[1] + 0.0722f * l.color[2] ) * f;
+					for ( int k = 0; k < 3; k++ )
+						c.rgb[k] += l.color[k] * f;
+				}
+			}
+			const float e = c.e;
+			cards.push_back( c );
+			lo = std::min( lo, e );
+			hi = std::max( hi, e );
+			if ( e <= 0.0f )
+				dark++;
+		}
+		QString three;
+		const bool thinLampsRed = wwEnvStr( "WW_CELL_FXLOCAL_RED" ).split( ',' ).contains( QStringLiteral( "thinlamps" ) );
+		float probeAt[3][3] = {};
+		int probeN = 0;
+		{
+			std::sort( cards.begin(), cards.end(), []( const Card & a, const Card & b ) { return a.e > b.e; } );
+			const int lit = int( cards.size() ) - dark;
+			const int pick[3] = { lit > 0 ? 0 : -1, lit > 2 ? lit / 2 : -1, dark > 0 ? lit : -1 };
+			const char * const tag[3] = { "brightest", "median", "no lamp" };
+			for ( int p = 0; p < 3; p++ ) {
+				if ( pick[p] < 0 )
+					continue;
+				const Card & c = cards[size_t( pick[p] )];
+				const WwFxLitModel & m = it->models[c.i];
+				three += QStringLiteral( " | %1 %2 at %3,%4,%5: lamps %6,%7,%8, nearest lamp %9 of radius %10" )
+					.arg( QLatin1String( tag[p] ) ).arg( m.model.section( QLatin1Char( '\\' ), -1 ) )
+					.arg( double( m.center[0] ), 0, 'f', 0 ).arg( double( m.center[1] ), 0, 'f', 0 ).arg( double( m.center[2] ), 0, 'f', 0 )
+					.arg( double( c.rgb[0] ), 0, 'g', 3 ).arg( double( c.rgb[1] ), 0, 'g', 3 ).arg( double( c.rgb[2] ), 0, 'g', 3 )
+					.arg( double( c.d ), 0, 'f', 0 ).arg( double( c.r ), 0, 'f', 0 );
+				// MODULES1 round 9: the same lamps as the air scatters them (an even phase: 1 / 4), a mesh mist card's light
+				three += QStringLiteral( ", as a slab of air %1,%2,%3 (a lump's surface share took up to %4,%5,%6)" )
+					.arg( double( 0.25f * c.rgb[0] ), 0, 'g', 3 ).arg( double( 0.25f * c.rgb[1] ), 0, 'g', 3 ).arg( double( 0.25f * c.rgb[2] ), 0, 'g', 3 )
+					.arg( double( c.rgb[0] ), 0, 'g', 3 ).arg( double( c.rgb[1] ), 0, 'g', 3 ).arg( double( c.rgb[2] ), 0, 'g', 3 );
+				// FARWATER1 late item 4: an opaque card's lamps as the plume's multiple scatter (diffuse, 1/2 at N.L 0)
+				three += thinLampsRed ? QStringLiteral( ", lamps thin only (RED WW_CELL_FXLOCAL_RED=thinlamps)" )
+					: QStringLiteral( ", an opaque card up to %1,%2,%3 (multiple scatter)" ).arg( double( 0.5f * c.rgb[0] ), 0, 'g', 3 )
+						.arg( double( 0.5f * c.rgb[1] ), 0, 'g', 3 ).arg( double( 0.5f * c.rgb[2] ), 0, 'g', 3 );
+				// MODULES1 10b-3: the card's sky share beside the air's at the same point (the env strata's read-back)
+				three += QStringLiteral( "; " ) + wwVolAirEnvProbeSay( probeN );
+				for ( int k = 0; k < 3; k++ )
+					probeAt[probeN][k] = m.center[k];
+				probeN++;
+			}
+			wwVolAirEnvProbeSet( probeAt, probeN );
+			three += QStringLiteral( " | " ) + wwVolPartFxSoftSay();
+			three += QStringLiteral( " (lamp shadow, the ambient's share 1 - GI sky share and the final colour are per pixel on the GPU)" );
+		}
+		static QString said;
+		const QString now = QStringLiteral( "cell fx local: %1 lit effect models (%2 cards + particle systems) sample %3 lights; lamp light at "
+				"their centres %4 .. %5 (linear luminance, estimate), %6 reached by no lamp" )
+			.arg( it->models.size() ).arg( it->shapeModel.size() ).arg( L->lights.size() )
+			.arg( double( it->models.isEmpty() ? 0.0f : lo ), 0, 'g', 4 ).arg( double( hi ), 0, 'g', 4 ).arg( dark ) + three;
+		if ( now != said ) {
+			said = now;
+			fprintf( stderr, "%s\n", qPrintable( now ) );
+		}
+	}
 	if ( s.dump.isEmpty() )
 		return;
+	g_fxDumpDone = s.dump;
 	QFile f( s.dump );
 	if ( !f.open( QIODevice::WriteOnly | QIODevice::Text ) )
 		return;
 	QTextStream o( &f );
-	o << "fxlit pick=" << ( s.strongest ? "strong" : "game" ) << " red=" << s.red << " models=" << it->models.size()
+	o << "fxlit pick=" << ( s.pick == WwFxLitPickStrong ? "strong" : s.pick == WwFxLitPickGame ? "game" : "own" ) << " red=" << s.red << " models=" << it->models.size()
 	  << " shapes=" << it->shapeModel.size() << " lights=" << L->lights.size() << "\n";
 	for ( int i = 0; i < it->models.size(); i++ ) {
 		const WwFxLitModel & m = it->models[i];
@@ -179,7 +282,25 @@ void wwCellFxLitPick( const void * nif )
 			const WwCellLight & l = L->lights[m.light[k]];
 			o << " " << m.light[k] << ":" << l.pos[0] << "," << l.pos[1] << "," << l.pos[2];
 		}
-		o << " model " << m.model << "\n";
+		// FARWATER1 late item 4: the lights of the full list that reach the centre, and the nearest one
+		int reach = 0, nearI = -1;
+		float nearD = 1e30f;
+		for ( int j = 0; j < L->lights.size(); j++ ) {
+			const float d = dist3( L->lights[j].pos, m.center );
+			if ( d < L->lights[j].radius )
+				reach++;
+			if ( d < nearD ) {
+				nearD = d;
+				nearI = j;
+			}
+		}
+		o << " model " << m.model << " reach " << reach;
+		if ( nearI >= 0 ) {
+			const WwCellLight & l = L->lights[nearI];
+			o << " nearest " << nearI << ":" << l.pos[0] << "," << l.pos[1] << "," << l.pos[2] << " d " << nearD << " radius "
+			  << l.radius << " colour " << l.color[0] << "," << l.color[1] << "," << l.color[2] << " ref " << QString::number( l.ref, 16 );
+		}
+		o << "\n";
 	}
 }
 
@@ -204,6 +325,8 @@ void wwCellFxLitUniforms( Scene * scene, int block )
 	NifSkopeOpenGLContext::Program * prog = scene->renderer->getCurrentProgram();
 	if ( !prog || prog->uniLocation( "fxLitMode" ) < 0 )
 		return;
+	if ( !st().dump.isEmpty() && st().dump != g_fxDumpDone && wwCellLightsWanted( scene ) )
+		wwCellFxLitPick( scene->nifModel );	// FARWATER1 late item 4: a live set of WW_CELL_FXLIT_DUMP writes it now
 	int serial = -1;
 	const WwFxLitModel * m = wwCellLightsWanted( scene ) ? wwCellFxLitFor( scene->nifModel, block, &serial ) : nullptr;
 	if ( !m ) {
@@ -217,6 +340,47 @@ void wwCellFxLitUniforms( Scene * scene, int block )
 	prog->uni4f( "fxLitScale", FloatVector4( m->scale[0], m->scale[1], m->scale[2], m->scale[3] ) );
 	const int id = serial + 1;
 	prog->uni3f( "fxLitId", float( id & 255 ) / 255.0f, float( ( id >> 8 ) & 255 ) / 255.0f, float( ( id >> 16 ) & 255 ) / 255.0f );
+}
+
+float wwCellFxLawBand( float overbright )
+{
+	if ( !std::isfinite( overbright ) || overbright <= 1.0f )
+		return 1.0f;
+	if ( overbright >= 2.0f )
+		return 0.0f;
+	const float t = overbright - 1.0f;
+	return 1.0f - t * t * ( 3.0f - 2.0f * t );
+}
+
+void wwCellFxLawUniforms( Scene * scene, int block, float overbright, const QString & name )
+{
+	if ( !scene || !scene->renderer )
+		return;
+	NifSkopeOpenGLContext::Program * prog = scene->renderer->getCurrentProgram();
+	if ( !prog || prog->uniLocation( "fxLaw" ) < 0 )
+		return;
+	// red: 1 both off (today), band = no bands, units = the unlit share at 1
+	WW_SWITCH_STATIC( int, red, [] { const QByteArray r = wwEnv( "WW_CELL_FXLAW_RED" ).trimmed(); return r == "1" ? 3 : r == "band" ? 1 : r == "units" ? 2 : 0; }() );
+	if ( !wwCellLightsWanted( scene ) ) {
+		prog->uni2f( "fxLaw", 0.0f, 0.0f );
+		return;
+	}
+	const float band = wwCellFxLawBand( overbright );
+	prog->uni2f( "fxLaw", ( red & 1 ) ? 0.0f : 1.0f - band, ( red & 2 ) ? 0.0f : 1.0f );
+	if ( !wwCellFxLitFor( scene->nifModel, block ) )
+		return;
+	static QHash<const void *, QSet<int>> seen;
+	QSet<int> & s = seen[scene->nifModel];
+	if ( s.contains( block ) )
+		return;
+	s.insert( block );
+	static int n[3] = { 0, 0, 0 };
+	const int k = band >= 1.0f ? 0 : band <= 0.0f ? 2 : 1;
+	++n[k];
+	const int total = n[0] + n[1] + n[2];
+	if ( ( total & ( total - 1 ) ) == 0 || ( k > 0 && n[k] == 1 ) )
+		fprintf( stderr, "fx law: lit %d graded %d emissive %d (last %s block %d overbright %.3f band %.3f) red %d\n",
+			n[0], n[1], n[2], qPrintable( name ), block, double( overbright ), double( band ), red );
 }
 
 bool wwCellFxLitProbeShape( Scene * scene, int block )

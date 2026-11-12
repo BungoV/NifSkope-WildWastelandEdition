@@ -9,13 +9,16 @@ BSD License - see nifskope.h
 
 #include "gamemanager.h"
 #include "gl/celllights.h"
+#include "features/clouds/cloudshadow.h"	// lane DEBUGVIEW1 item 2: the cards' sun under the clouds
 #include "features/exposure/cellhdr.h"
 #include "features/shared/cellpasstime.h"
 #include "gl/cellunits.h"
 #include "gl/lookdevstage.h"
 #include "gl/glscene.h"
 #include "gl/gltex.h"
+#include "gl/wwuploadcap.h"	// lane EMPTY240 R6-5: array-layer sheets in the paint's upload budget
 #include "features/far-lod/impostorpick.h"
+#include "features/far-lod/lodpreview.h"
 #include "gl/renderer.h"
 #include "impostorcard.h"
 #include "model/nifmodel.h"
@@ -120,6 +123,20 @@ Vector3 eyeWorld( const Scene * scene )
  *
  *  Cached per GL context, file and layer -- a refusal too, so 19,705 cards a
  *  frame do not re-read a file that failed once. */
+int sheetWaits = 0;	// lane EMPTY240 R6-5: array layers left for a later paint by the upload budget, all so far
+
+/* lane EMPTY240 R7-4: build 80's `far sheets: 111 array layers made from 111 file reads`: R6-5 kept only the file just
+ * read, and a set's sheets (colour, normal, mask, emissive) are four files bound in turn, so the next layer never found
+ * its file. The last 4 files read are held now; they go after 8 far-card draws that made no layer. Red
+ * WW_SHEETHOLD_RED=1: the last file only, build 80. */
+struct SheetHeld
+{
+	QString file;
+	gli::texture tex;
+};
+SheetHeld sheetHeld[4];
+int sheetHeldNext = 0, sheetsIdle = 0;
+
 GLuint arrayLayerTexture( Scene * scene, const QString & file, int layer, QString * err )
 {
 	struct Entry { GLuint id = 0; QString err; };
@@ -132,15 +149,48 @@ GLuint arrayLayerTexture( Scene * scene, const QString & file, int layer, QStrin
 			*err = it->err;
 		return it->id;
 	}
+	/* lane EMPTY240 R6-5: build 78's first paint spent 461 ms CPU in far-cards for 37 draws. Each layer read and decoded
+	 * its whole DDS file again (8 layers = 8 reads) and uploaded it outside the paint's upload budget. The file just
+	 * decoded now serves its next layers, every layer is charged to the budget, and past it a layer waits a paint (its
+	 * set waits with it). Red WW_FARSHEETCAP_RED=1: a read per layer, no budget (build 78). Line `far sheets:`. */
+	const bool capRed = wwEnvInt( "WW_FARSHEETCAP_RED" ) == 1;
+	if ( !capRed && WwUp::spent() ) {
+		sheetWaits++;
+		sheetsIdle = 0;	// R7-4: a layer waits a paint, its file stays held
+		WwUp::deferTex();
+		if ( err )
+			*err = QStringLiteral( "waits a paint (the upload budget)" );
+		return 0;
+	}
+	static const int holdN = wwEnvInt( "WW_SHEETHOLD_RED" ) == 1 ? 1 : 4;	// R7-4
+	sheetsIdle = 0;
+	static int saidMade = 0, made = 0, reads = 0;
+	static double madeMs = 0.0;
+	static QElapsedTimer sinceSaid;
+	QElapsedTimer took;
+	took.start();
+	WwUp::Charge wwUpCharge( !capRed );
 	Entry e;
 	do {
-		QFile f( file );
-		if ( !f.open( QIODevice::ReadOnly ) ) {
-			e.err = QStringLiteral( "cannot open %1" ).arg( file );
-			break;
+		gli::texture t;
+		for ( int h = 0; !capRed && h < holdN; h++ )
+			if ( !sheetHeld[h].tex.empty() && sheetHeld[h].file == file )
+				t = sheetHeld[h].tex;	// the next layer of a file held: no second read and decode
+		if ( t.empty() ) {
+			QFile f( file );
+			if ( !f.open( QIODevice::ReadOnly ) ) {
+				e.err = QStringLiteral( "cannot open %1" ).arg( file );
+				break;
+			}
+			const QByteArray bytes = f.readAll();
+			t = gli::load_dds( bytes.constData(), std::size_t( bytes.size() ) );
+			reads++;
+			if ( !capRed ) {
+				SheetHeld & h = sheetHeld[sheetHeldNext++ % holdN];
+				h.file = file;
+				h.tex = t;
+			}
 		}
-		const QByteArray bytes = f.readAll();
-		gli::texture t = gli::load_dds( bytes.constData(), std::size_t( bytes.size() ) );
 		if ( t.empty() ) {
 			e.err = QStringLiteral( "%1 is not a DDS this build reads" ).arg( file );
 			break;
@@ -174,9 +224,23 @@ GLuint arrayLayerTexture( Scene * scene, const QString & file, int layer, QStrin
 			else
 				fn->glTexImage2D( GL_TEXTURE_2D, GLint( level ), GLint( fmt.Internal ), ext.x, ext.y, 0,
 						GLenum( fmt.External ), GLenum( fmt.Type ), t.data( std::size_t( layer ), 0, level ) );
+			if ( !capRed )
+				WwUp::Charge::addBytes( qint64( t.size( level ) ) );
 		}
+		if ( !capRed )
+			WwUp::texMade();
+		made++;
 	} while ( false );
 	cache.insert( key, e );
+	madeMs += double( took.nsecsElapsed() ) * 1e-6;
+	if ( made != saidMade && ( !sinceSaid.isValid() || sinceSaid.elapsed() >= 1000 ) ) {
+		saidMade = made;
+		sinceSaid.start();
+		qInfo().noquote() << QStringLiteral( "far sheets: %1 array layers made from %2 file reads in %3 ms, %4 waited a "
+			"paint for the upload budget (red WW_FARSHEETCAP_RED=1: a read per layer, no budget, build 78; R7-4: the last 4 "
+			"files held, red WW_SHEETHOLD_RED=1: the last one, build 80)" )
+			.arg( made ).arg( reads ).arg( madeMs, 0, 'f', 1 ).arg( sheetWaits );
+	}
 	if ( err )
 		*err = e.err;
 	return e.id;
@@ -196,6 +260,24 @@ GLuint layerSheetId( Scene * scene, const ImpostorSheet & sheet, int layer )
 //! `layer` >= 0: the sheet is a cardArray's texture array (lane FARLOD2).
 bool bindSheet( Scene * scene, NifSkopeOpenGLContext::Program * prog,
 				const char * uniform, const ImpostorSheet & sheet, int unit, int layer = -1 );
+
+/* lane PERFLOAD1 P2: outdoors the far cards take the hour's DALC ambient and the hour's sun through cellLit, like the
+ * near trees (impostor_oct.frag). Red WW_CELL_FARLOD_RED=cardlight: the viewport's sun + NAM0 ambient, as before. */
+static bool wwCardLightRed()
+{
+	WW_SWITCH_STATIC( bool, red, !wwSwitchEcho( "far cards take the hour's light", wwEnv( "WW_CELL_FARLOD_RED" ) != "cardlight" ) );
+	return red;
+}
+
+/* lane DEBUGVIEW1 item 2 (bungo's glowing far trees under CommonwealthOvercast): the card's sun is cut by the clouds' shadow
+ * and the air's transmittance as the near trees' (impostor_oct.frag cardCloudT); before, it was never cut. Red
+ * WW_CELL_FARLOD_RED=cardsun: the uncut sun. */
+static bool wwCardSunRed()
+{
+	WW_SWITCH_STATIC( bool, red, !wwSwitchEcho( "far cards' sun through the clouds' shadow and the air (DEBUGVIEW1; red WW_CELL_FARLOD_RED=cardsun)",
+		wwEnv( "WW_CELL_FARLOD_RED" ) != "cardsun" ) );
+	return red;
+}
 
 /* lane PERF1: the card pass's state, bound once (ImpostorDraw::batchBegin). A street frame drew ~5,000
  * cards at ~40 us each, mostly re-binding the same program, uniforms and sheets (four file checks and a
@@ -243,8 +325,9 @@ bool bindSheet( Scene * scene, NifSkopeOpenGLContext::Program * prog,
 				return true;
 			}
 		}
+		const int waits0 = sheetWaits;
 		const GLuint id = layerSheetId( scene, sheet, layer );
-		if ( b.on )
+		if ( b.on && sheetWaits == waits0 )	// R6-5: a layer that waits a paint is asked again next paint
 			b.layerIds.insert( &sheet, id );
 		if ( !id )
 			return false;
@@ -509,10 +592,51 @@ void ImpostorDraw::batchEnd( Scene * scene )
 	}
 }
 
+/* lane EMPTY240 R7-4: build 80's `far cards slow draw: 196.3 ms = ... sheet roots 188.4`. Every card set walked up to 6
+ * folders (a directory listing each) from its .lodm to its `textures` root, and the sets share a few folders. A
+ * folder's answer (the root, or none) is now kept; the model still gets the root each time (addResourceRoot skips a
+ * root it has). Red WW_SHEETROOTS_RED=1: the walk for every set, build 80. Line `far sheet roots:` (impostorchunk). */
+static int g_rootSets = 0, g_rootWalks = 0;
+static qint64 g_rootWalkNs = 0, g_rootAddNs = 0;
+
+//! R7-4: a far-card draw ends; after 8 that made no layer the held sheet files go
+void wwFarSheetsIdle()
+{
+	if ( ++sheetsIdle < 8 )
+		return;
+	sheetsIdle = 8;
+	for ( SheetHeld & h : sheetHeld )
+		if ( !h.tex.empty() )
+			h = SheetHeld();
+}
+
+void wwFarSheetRootsTake( int & sets, int & walks, double & walkMs, double & addMs )
+{
+	sets = g_rootSets;
+	walks = g_rootWalks;
+	walkMs = double( g_rootWalkNs ) * 1e-6;
+	addMs = double( g_rootAddNs ) * 1e-6;
+	g_rootSets = g_rootWalks = 0;
+	g_rootWalkNs = g_rootAddNs = 0;
+}
+
 QString ImpostorDraw::registerLooseSheets( Scene * scene, const ImpostorCardSet & set )
 {
 	if ( !scene || !scene->nifModel || !set.ok )
 		return QString();
+	static const bool rootsRed = wwEnvInt( "WW_SHEETROOTS_RED" ) == 1;
+	static QHash<QString, QString> rootOf;	// R7-4: a .lodm folder -> its textures root ("" = none)
+	g_rootSets++;
+	QElapsedTimer rootClock;
+	rootClock.start();
+	const QString from = QFileInfo( set.lodmPath ).absolutePath();
+	const auto known = rootsRed ? rootOf.constEnd() : rootOf.constFind( from );
+	const bool walk = known == rootOf.constEnd();
+	QString root;
+	if ( !walk )
+		root = *known;
+	else
+		g_rootWalks++;
 	/* Registered whether or not the sheets are beside the `.lodm`. The earlier
 	 * `fromLocal` early-out read as "only loose sets need this", but it is the
 	 * OTHER case that needs it most: a set baked into a data-shaped tree has
@@ -520,7 +644,7 @@ QString ImpostorDraw::registerLooseSheets( Scene * scene, const ImpostorCardSet 
 	 * tree holding them is exactly what has to reach the resource list.
 	 * Registering a root that is already installed costs a duplicate entry. */
 	QDir dir = QFileInfo( set.lodmPath ).absoluteDir();
-	for ( int up = 0; up < 6; up++ ) {
+	for ( int up = 0; up < 6 && walk; up++ ) {
 		const QStringList hits = dir.entryList( { QStringLiteral( "textures" ) },
 												QDir::Dirs | QDir::NoDotAndDotDot );
 		if ( !hits.isEmpty() ) {
@@ -538,7 +662,7 @@ QString ImpostorDraw::registerLooseSheets( Scene * scene, const ImpostorCardSet 
 			 * the SUBFOLDERS of a data directory and not the directory
 			 * (`gamemanager.cpp:808`). The folder's own spelling is taken from
 			 * the listing rather than assumed, because the cut is by name. */
-			const QString root = QDir::toNativeSeparators( dir.absoluteFilePath( hits.first() ) );
+			root = QDir::toNativeSeparators( dir.absoluteFilePath( hits.first() ) );
 			/* THROUGH THE MODEL, NEVER THROUGH `GameManager` DIRECTLY.
 			 * `addNIFResourcePath` replaces the model's GameResources object and
 			 * deletes the old one; calling it here and dropping the result left
@@ -550,13 +674,20 @@ QString ImpostorDraw::registerLooseSheets( Scene * scene, const ImpostorCardSet 
 			 * is not const. Registering a resource root is exactly as const as
 			 * `findResourceFile`, which builds the archive index on demand
 			 * through the same pointer. */
-			const_cast< NifModel * >( scene->nifModel )->addResourceRoot( root );
-			return root;
+			break;
 		}
 		if ( !dir.cdUp() )
 			break;
 	}
-	return QString();
+	if ( walk && !rootsRed )
+		rootOf.insert( from, root );
+	g_rootWalkNs += rootClock.nsecsElapsed();
+	if ( root.isEmpty() )
+		return QString();
+	rootClock.restart();
+	const_cast< NifModel * >( scene->nifModel )->addResourceRoot( root );
+	g_rootAddNs += rootClock.nsecsElapsed();
+	return root;
 }
 
 QStringList ImpostorDraw::describeSelection( Scene * scene, const ImpostorCardSet & set,
@@ -638,6 +769,20 @@ ImpostorDraw::Resolved ImpostorDraw::resolve( const Options & opt )
 	return r;
 }
 
+/* The LOD coloration's card band (lane LODLIVE1): the caller's tint (the flat card blue, a fading card magenta), except
+ * an octahedral set at rest, which draws cyan with stripes for its frame size. 0 tint = off, no stripes. */
+template <class P> static void cardBandUniforms( P * prog, const ImpostorDraw::Options & opt, const ImpostorCardSet & set )
+{
+	float t[3] = { opt.lodTint[0], opt.lodTint[1], opt.lodTint[2] };
+	float stripe = 0.0f;
+	if ( t[0] + t[1] + t[2] > 0.0f && opt.fadeOut <= 0.0f && set.oct > 0 ) {
+		LodPreview::tintColour( LodPreview::Oct, t );
+		stripe = float( LodPreview::octStripe( set.frameW ) );
+	}
+	prog->uni3f( "cardLodTint", t[0], t[1], t[2] );
+	prog->uni1f( "cardLodStripe", stripe );
+}
+
 bool ImpostorDraw::drawCard( Scene * scene, const ImpostorCardSet & set,
 								const Vector3 & worldOffset, const Options & opt, QString * why )
 {
@@ -666,6 +811,9 @@ bool ImpostorDraw::drawCard( Scene * scene, const ImpostorCardSet & set,
 		// both act on the bound program and do nothing where it lacks their uniforms
 		wwLookdevFogUniforms( scene );
 		wwCellLightsUniforms( scene );
+		prog->uni1b( "cardLightRed", wwCardLightRed() );
+		prog->uni1b( "cardSunRed", wwCardSunRed() );	// lane DEBUGVIEW1 item 2
+		wwCloudShadowUniforms( scene, prog, false, 0.0f );
 	}
 	if ( batch.on && fresh ) {
 		batch.prog = prog;
@@ -678,6 +826,7 @@ bool ImpostorDraw::drawCard( Scene * scene, const ImpostorCardSet & set,
 	const bool sameSet = batch.on && !fresh && batch.set == &set;
 	bool haveColour = sameSet && batch.haveColour, haveNormal = sameSet && batch.haveNormal;
 	if ( !sameSet ) {
+		const int waits0 = sheetWaits;
 		haveColour = bindSheet( scene, prog, "ColourSheet", set.colour, 0, set.layer );
 		wwImpostorTrace( "C colour bound" );
 		haveNormal = bindSheet( scene, prog, "NormalSheet", set.normal, 1, set.nLayer() );
@@ -685,6 +834,8 @@ bool ImpostorDraw::drawCard( Scene * scene, const ImpostorCardSet & set,
 		const bool haveMask   = bindSheet( scene, prog, "MaskSheet",   set.mask,   2, set.layer );
 		const bool haveEmiss  = bindSheet( scene, prog, "EmissiveSheet", set.emissive, 3, set.layer );
 		wwImpostorTrace( "E aux bound" );
+		if ( sheetWaits != waits0 )
+			haveColour = false;	// R6-5: a sheet waits a paint, its set waits with it (no card without its mask)
 		if ( haveColour && haveNormal ) {
 			prog->uni1b( "hasMaskSheet", haveMask );
 			prog->uni1b( "hasEmissiveSheet", haveEmiss );
@@ -786,6 +937,9 @@ bool ImpostorDraw::drawCard( Scene * scene, const ImpostorCardSet & set,
 	prog->uni1i( "debugChannel", opt.debugChannel );
 	prog->uni1f( "swayAmplitude", opt.swayAmplitude );
 	prog->uni1f( "swayPhase", opt.swayPhase );
+	prog->uni1f( "cardFadeOut", opt.fadeOut );	// lane PERFLOAD1 P7
+	prog->uni1f( "cardFadeFrame", opt.fadeFrame );
+	cardBandUniforms( prog, opt, set );	// lane PERFLOAD1 P8, LODLIVE1
 
 	wwImpostorTrace( "H card uniforms" );
 	if ( fresh ) {
@@ -868,8 +1022,13 @@ bool bindInstSheet( Scene * scene, NifSkopeOpenGLContext::Program * prog, const 
 	if ( loc < 0 )
 		return false;
 	auto it = g.layerIds.constFind( &sheet );
-	if ( it == g.layerIds.constEnd() )
-		it = g.layerIds.insert( &sheet, layerSheetId( scene, sheet, layer ) );
+	if ( it == g.layerIds.constEnd() ) {
+		const int waits0 = sheetWaits;
+		const GLuint id = layerSheetId( scene, sheet, layer );
+		if ( sheetWaits != waits0 )	// R6-5: it waits a paint, asked again next paint
+			return false;
+		it = g.layerIds.insert( &sheet, id );
+	}
 	if ( !*it )
 		return false;
 	auto * fn = scene->renderer->fn;
@@ -1201,6 +1360,9 @@ bool ImpostorDraw::drawCardsInstanced( Scene * scene, const QVector< InstCard > 
 	if ( opt.cellLit ) {
 		wwLookdevFogUniforms( scene );
 		wwCellLightsUniforms( scene );
+		prog->uni1b( "cardLightRed", wwCardLightRed() );
+		prog->uni1b( "cardSunRed", wwCardSunRed() );	// lane DEBUGVIEW1 item 2
+		wwCloudShadowUniforms( scene, prog, false, 0.0f );
 	}
 	prog->uni1i( "cardData", WwCellUnit::CardData );
 	prog->uni1i( "cardFrames", WwCellUnit::CardFrames );
@@ -1222,6 +1384,7 @@ bool ImpostorDraw::drawCardsInstanced( Scene * scene, const QVector< InstCard > 
 	prog->uni1b( "useBakedAo", opt.bakedAo );
 	prog->uni1i( "debugChannel", opt.debugChannel );
 	prog->uni1f( "swayAmplitude", opt.swayAmplitude );
+	prog->uni3f( "cardLodTint", opt.lodTint[0], opt.lodTint[1], opt.lodTint[2] );	// lane PERFLOAD1 P8
 	if ( gpuPick ) {
 		prog->uni1i( "cardIndexBase", int( g.slotData.size() / 4 ) );
 		prog->uni1f( "cardSwayBase", opt.swayPhase );
@@ -1239,6 +1402,7 @@ bool ImpostorDraw::drawCardsInstanced( Scene * scene, const QVector< InstCard > 
 	// ---- one instanced draw per set ----
 	for ( int s = 0; s < sets.size(); s++ ) {
 		const ImpostorCardSet & set = *sets.at( s );
+		const int waits0 = sheetWaits;
 		const bool haveColour = bindInstSheet( scene, prog, "ColourSheet", set.colour, 0, set.layer, g );
 		const bool haveNormal = bindInstSheet( scene, prog, "NormalSheet", set.normal, 1, set.nLayer(), g );
 		if ( !haveColour || !haveNormal ) {
@@ -1249,6 +1413,12 @@ bool ImpostorDraw::drawCardsInstanced( Scene * scene, const QVector< InstCard > 
 		}
 		const bool haveMask = bindInstSheet( scene, prog, "MaskSheet", set.mask, 2, set.layer, g );
 		const bool haveEmiss = bindInstSheet( scene, prog, "EmissiveSheet", set.emissive, 3, set.layer, g );
+		if ( sheetWaits != waits0 ) {	// R6-5: a sheet waits a paint, its set waits with it (no card without its mask)
+			if ( !st.refused )
+				st.firstWhy = QFileInfo( set.lodmPath ).fileName() + QStringLiteral( ": a sheet waits a paint (the upload budget)" );
+			st.refused += count.at( s );
+			continue;
+		}
 		prog->uni1b( "hasMaskSheet", haveMask );
 		prog->uni1b( "hasEmissiveSheet", haveEmiss );
 		prog->uni1b( "familyPbr", set.pbr );
@@ -1258,6 +1428,7 @@ bool ImpostorDraw::drawCardsInstanced( Scene * scene, const QVector< InstCard > 
 		prog->uni1f( "cardCovBase",  set.covOk() ? float( set.covBase )  / 255.0f : 0.0f );
 		prog->uni1i( "cardBase", first.at( s ) );
 		prog->uni1i( "frameTableBase", g.tabBase.value( &set ) );
+		cardBandUniforms( prog, opt, set );	// lane LODLIVE1: the set's own band (octahedral cyan + stripes)
 		if ( gpuPick ) {	// the set's own pick: grid side or ring, its convention, the frames it draws
 			prog->uni1i( "pickN", set.oct );
 			prog->uni1i( "pickV", set.views );

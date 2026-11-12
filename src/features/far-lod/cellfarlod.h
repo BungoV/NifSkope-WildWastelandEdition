@@ -26,6 +26,11 @@ class Vector3;
 
 bool cellFarLodWanted();
 void cellFarLodSetWanted( bool on );
+/* lane LODLIVE1: Far LOD off set live keeps the far data built and skips it at draw time (Node::isHidden on the
+ * "FarLOD" subtree, the cards draw 0); on again shows the kept data, nothing rebuilt, nothing reopened. */
+extern bool g_wwFarLodHidden;
+inline bool cellFarLodHidden() { return g_wwFarLodHidden; }
+void cellFarLodSetHidden( bool on );
 
 /*! LOD type: Vanilla = only the game's .btr/.bto; FO4CS = our .lodl/.lodi/cards, the game's chunks filling gaps.
  *  QSettings CellView/FarLodType; WW_CELL_FARLOD_TYPE=vanilla|fo4cs pins it. */
@@ -109,9 +114,23 @@ bool wwCellFarLodWantsRepaint();
  *  HDR frame before its resolve, and after); they draw in the first call when the frame is HDR. Returns cards drawn. */
 int wwCellFarLodCards( Scene * scene, bool insideHdr, bool hdrFrame );
 
+/*! MODULES1 part 27 (bungo 11-08, "rendering order"): the lit cards drawn between the cell's opaque and sorted passes,
+ *  so smoke and every blended effect land over them and the soft fade reads their depth (they drew after the
+ *  particles: a far card stood crisp in front of the smoke around it). paintGL arms it before scene->draw();
+ *  Scene::drawShapes draws it once; wwCellFarLodDrewEarly() disarms and says whether the late call must still draw.
+ *  Red WW_CELL_FARLOD_LATE=1: the old place, after the scene. */
+void wwCellFarLodArmEarly( bool hdrFrame );
+void wwCellFarLodEarly( Scene * scene );
+bool wwCellFarLodDrewEarly();
+
 //! The near plane while the far field is on: `nr` raised to 16 (the game's fNearDistance 15, rounded up);
 //! WW_CELL_FARLOD_NEAR forces one.
 double wwCellFarLodNear( double nr );
+
+//! lane PERFLOAD1: the near plane never passes the far land. `nr` is the loaded block's own near plane (through
+//! wwCellFarLodNear); it comes back capped to the camera's height over the far field's top times the cosine of the
+//! frustum's corner angle, 16 at the least. Red WW_CELL_FARLOD_NEAR_RED=bounds (the loaded block's plane alone).
+double wwCellFarLodNearCap( const Scene * scene, double nr, double tanHalfFovY, double aspect );
 
 //! The planes the projection took with the far field on, logged on change with their depth step.
 void wwCellFarLodPlanes( double nearPlane, double farPlane );

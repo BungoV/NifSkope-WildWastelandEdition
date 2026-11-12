@@ -1,0 +1,71 @@
+#ifndef ENDLESSSEA_H
+#define ENDLESSSEA_H
+
+#include <QString>
+
+class NifModel;
+class QModelIndex;
+class Scene;
+class Transform;
+struct WwWaterRecord;
+
+/*! Lane FARSEA1 (2026-11-09): THE ENDLESS SEA TO THE HORIZON.
+ *
+ *  Past the baked map (the .lodl's box) the far water stopped and the void showed. One more water shape now hangs
+ *  under the far LOD node: a camera-centred disc of rings, fine near (256 u) and coarser by a constant ratio out to
+ *  the far sheet's rim (WW_ENDLESS_SEA_FAR, 4194304 u = 59.9 km), at the worldspace's sea level (the .lodl's largest
+ *  sea body, else the WRLD default water height). It follows the camera in whole steps of 2048 u (no swim: the
+ *  waves are world-anchored in the shader). Rings of one segment count (128) share every edge with the next ring,
+ *  so there are no T-junctions and no cracks, flat, curved or tessellated (fo4_waterdisp.tesc).
+ *  Prior art: Tessendorf 2001 (world-space wave field), Johanson 2004 (projected grid), Losasso & Hoppe 2004
+ *  (camera-centred nested levels snapped to a grid), Crest (MIT, wave-anchored LOD rings + snapping), Unreal Water
+ *  (a far-distance mesh around the water zone). notes/farsea1/RESEARCH.md.
+ *
+ *  It is drawn by the same water programs with the same inputs as the baked ocean (wwCellWaterShape with the
+ *  worldspace's default WATR). The baked water stays in charge: the sheet discards every pixel inside the bake's
+ *  box (water_info.glsl waterSeamBox; the baked water and the terrain own it), and outside it the water lookup
+ *  answers the open sea (the sea body, no shore, deep: depth code 255). The seam: over a band at the box edge
+ *  (WW_ENDLESS_SEA_SEAM, 98304 u = 1.4 km) the baked sea's shore distance and depth fade to those open-sea values
+ *  and its flow to 0, so no line shows where the bake stops.
+ *
+ *    WW_ENDLESS_SEA=0|1            the Endless sea row's pin (Settings: Water), ships ON, live
+ *    WW_ENDLESS_SEA_RED=off        the old picture: the sheet is not drawn and the baked water keeps its edge (live)
+ *    WW_ENDLESS_SEA_RED=seamcut    lane SKYSEA1's red: the sheet stops exactly at the box edge (a crack where the
+ *                                  baked water's last texels end); default it reaches 4096 u under the baked water
+ *    WW_ENDLESS_SEA_RED=worldrec   lane SKYSEA1's red: the sheet takes the worldspace default WATR, not the sea body's
+ *    WW_ENDLESS_SEA_RED=air        FARWATER1 round 2's red: the sea's air at its curved point with the column clamp, and
+ *                                  the sky band's far-plane point flat (the deep blue strip at the horizon)
+ *    WW_ENDLESS_SEA_RED=edge       FARWATER1 late item 2's red: the map water draws to its mesh edge at the box rim (the
+ *                                  dotted line); default it hands the outer 2048 u to the sheet under it
+ *    WW_ENDLESS_SEA_SEAM=<u>       the seam band (live; 0 = no fade)
+ *    WW_ENDLESS_SEA_FAR=<u>        the far rim (built with the cell)
+ *    WW_ENDLESS_SEA_CURVE=1        the earth's curvature: the rim drops d^2 / 2R (R = 6371 km; built with the cell) */
+
+//! Appends the sheet under `parent` and registers it; returns its census line (rings, rim, seam band, coverage).
+//! lane STREAMGN1: `drawnCells` (x0, y0, x1, y1, cells, inclusive) = the far water rings' footprint; the sheet starts
+//! at its edge, not at the bake box's (past the outer ring the box held no water: a land-coloured wedge).
+//! Red WW_ENDLESS_SEA_RED=bakebox: the old inner edge.
+QString wwEndlessSeaAppend( NifModel * nif, const QModelIndex & parent, const WwWaterRecord & rec, float defaultZ,
+	const QString & lodlPath, const int * drawnCells = nullptr );
+//! The Endless sea row and its red.
+bool wwEndlessSeaOn();
+//! Lane SKYSEA1: the sea body's own WATR form (the record the baked sea draws with), 0 = none or red worldrec.
+quint32 wwEndlessSeaBodyForm( const QString & lodlPath );
+//! Lane SKYSEA1: how far the sheet reaches under the baked water inside the box, world units (red seamcut: 0).
+float wwEndlessSeaOverlap();
+//! The seam band, world units (0 = no fade).
+float wwEndlessSeaSeam();
+//! FARWATER1 round 2: the sea reads the air at its point in the flat air frame, unclamped (false: red air).
+bool wwEndlessSeaAirFlat();
+//! FARWATER1 late item 2: how far inside the box rim the map water leaves the sea to the sheet, world units (red edge: 0).
+float wwEndlessSeaHandover();
+//! Once a frame before the scene's transform: the sheet moves to the camera's 2048 u step.
+void wwEndlessSeaFollow( Scene * scene, const Transform & view );
+//! MODULES1 10b-6: round the sheet's draw (bsshape.cpp): the triangles sent and the pixels that passed the depth
+//! test, said as `endless sea draw:` when they change. A no-op for every other shape.
+void wwEndlessSeaDrawBegin( Scene * scene, int block, long long triangles );
+void wwEndlessSeaDrawEnd();
+//! The rim's distance from the camera while the sheet draws, else 0 (the far plane reaches it).
+float wwEndlessSeaReach( Scene * scene );
+
+#endif

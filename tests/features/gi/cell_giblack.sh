@@ -1,4 +1,5 @@
 #!/bin/bash
+export WW_CELL_STREAM="${WW_CELL_STREAM:-0}"	# AIRPERF1 r4: this harness opens a fixed block (streaming is the default now)
 #
 # A RECESSED OUTDOOR WALL THE PROBE GI MUST NOT BLACK OUT (lane GIBLACK1, 2026-10-14; res/shaders/features/lights/cell_lights.glsl
 # cellGiSample's lend rule). Judged by tests/features/gi/cell_giblack_check.py, not by eye.

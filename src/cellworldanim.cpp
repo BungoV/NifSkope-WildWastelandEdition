@@ -8,6 +8,8 @@
 #include "features/particles/glparticles.h"
 #include "gl/glscene.h"
 #include "gl/glshape.h"
+#include "gl/cellgrass.h"	// wwGameWindAngle
+#include "gl/lookdevstage.h"	// wwLookdevWind
 
 #include <QElapsedTimer>
 #include <QHash>
@@ -42,6 +44,17 @@ QHash<const void *, Doc> & docs()
 	return d;
 }
 
+// lane PARTFX1: what the particle step found per cell document (systems, copies, models); -1 = the step did not run
+struct PfxFound
+{
+	int systems = -1, copies = 0, models = 0;
+};
+QHash<const void *, PfxFound> & pfxFound()
+{
+	static QHash<const void *, PfxFound> f;
+	return f;
+}
+
 // the scene's animate flag before the clock took it, given back when the row goes off
 QHash<Scene *, bool> & held()
 {
@@ -65,6 +78,15 @@ bool redStill()
 {
 	WW_SWITCH_STATIC( bool, still, wwEnvStr( "WW_CELL_WORLDANIM_RED" ).trimmed() == QLatin1String( "still" ) );
 	return still;
+}
+
+/* lane PARTFX1 (bungo 11-09: the game is never paused): the world clock runs in a test window and a flight too, so
+ * particles emit and move, effect UVs scroll and flipbooks play. A pinned WW_CELL_WORLDANIM_TIME still pins.
+ * Red WW_CELL_CLOCK_RED=harness: a harness stands at 0, as before. */
+bool clockLive()
+{
+	WW_SWITCH_STATIC( bool, red, wwEnvStr( "WW_CELL_CLOCK_RED" ).trimmed() == QLatin1String( "harness" ) );
+	return red ? wwWorldClockLive() : true;
 }
 
 // each copy plays its own looping sequence (Scene::make bound the document's first group on every node)
@@ -108,7 +130,7 @@ double wwCellWorldSeconds()
 		return 0.0;
 	if ( pinnedSeconds() >= 0.0 )
 		return pinnedSeconds();
-	if ( !wwWorldClockLive() )
+	if ( !clockLive() )
 		return 0.0;
 	static QElapsedTimer clock;
 	if ( !clock.isValid() )
@@ -140,12 +162,33 @@ bool wwCellWorldAnimFrame( Scene * scene, float & time )
 
 bool wwCellWorldAnimWantsFrames( Scene * scene )
 {
-	return isCell( scene ) && wwCellWorldAnimOn() && wwWorldClockLive() && pinnedSeconds() < 0.0 && !redStill();
+	return isCell( scene ) && wwCellWorldAnimOn() && clockLive() && pinnedSeconds() < 0.0 && !redStill();
 }
 
 bool wwCellWorldClockMoves()
 {
-	return wwWorldClockLive() && pinnedSeconds() < 0.0 && !redStill();
+	return clockLive() && pinnedSeconds() < 0.0 && !redStill();
+}
+
+bool wwCellClockLive()
+{
+	return clockLive();
+}
+
+bool wwCellParticleWind( const void * nif, float out[3] )
+{
+	WW_SWITCH_STATIC( bool, red, wwEnvStr( "WW_CELL_PFX_WIND_RED" ).trimmed() == QLatin1String( "1" ) );
+	const WwCellLighting * cl = nif ? wwCellLightsFor( nif ) : nullptr;
+	float w[5] = { 0, 0, 0, 0, 0 };
+	if ( red || !cl || cl->interior || !wwLookdevWind( w ) )
+		return false;	// the game: an interior has no wind
+	// the game's wind setter: speed (byte / 255) x 100 along the bearing, flat
+	const float speed = ( std::max( w[0], 0.0f ) * ( 1.0f / 255.0f ) ) * 100.0f;
+	const float a = wwGameWindAngle( quint8( std::clamp( w[1], 0.0f, 255.0f ) ), w[4] );
+	out[0] = std::cos( a ) * speed;
+	out[1] = std::sin( a ) * speed;
+	out[2] = 0.0f;
+	return true;
 }
 
 void wwCellAnimObjSet( const NifModel * nif, const QVector<WwAnimObjRoot> & roots )
@@ -153,6 +196,15 @@ void wwCellAnimObjSet( const NifModel * nif, const QVector<WwAnimObjRoot> & root
 	Doc d;
 	d.roots = roots;
 	docs().insert( nif, d );
+}
+
+void wwCellPfxFoundSet( const void * nif, int systems, int copies, int models )
+{
+	PfxFound f;
+	f.systems = systems;
+	f.copies = copies;
+	f.models = models;
+	pfxFound().insert( nif, f );
 }
 
 void wwCellAnimObjNoteDraw( const void * shape )
@@ -197,6 +249,7 @@ void wwCellAnimObjCensus( Scene * scene )
 		return e[2] < 0.0f && e[2] > -20000.0f && std::fabs( e[0] ) < -e[2] * 1.0f && std::fabs( e[1] ) < -e[2] * 0.55f;
 	};
 	int pfxSystems = 0, pfxFrame = 0, pfxLive = 0;
+	int pfxDrawn = 0, pfxEmitting = 0;	// lane PARTFX1
 	QString pfxProbe;
 	for ( Node * n : scene->nodes.list() ) {
 		if ( !n )
@@ -206,6 +259,8 @@ void wwCellAnimObjCensus( Scene * scene )
 			pfxSystems++;
 			pfxFrame += inFrame( e ) ? 1 : 0;
 			pfxLive += ps->liveCount();
+			pfxEmitting += ps->liveCount() > 0 ? 1 : 0;
+			pfxDrawn += censusDrawn().contains( static_cast<const Node *>( n ) ) ? 1 : 0;
 			if ( pfxProbe.isEmpty() )
 				pfxProbe = QStringLiteral( "first %1 world %2 %3 %4 view %5 %6 %7" ).arg( n->getName() )
 					.arg( n->worldTrans().translation[0], 0, 'f', 0 ).arg( n->worldTrans().translation[1], 0, 'f', 0 )
@@ -273,5 +328,14 @@ void wwCellAnimObjCensus( Scene * scene )
 		"than 20 km)\n", all.copies, int( rows.size() ), all.nodes, all.shapes, all.tree, all.hidden, all.drawn, all.frame );
 	std::fprintf( stderr, "cell particles placed: %d systems, %d in the frame, %d live sprites; %s\n", pfxSystems, pfxFrame,
 		pfxLive, qPrintable( pfxProbe ) );
+	const PfxFound found = pfxFound().value( scene->nifModel );
+	std::fprintf( stderr, "cell particles census: found %d systems in %d copies of %d placed models, in the scene %d, reached a "
+		"draw %d (second paint), emitting %d (live sprites %d)%s\n", qMax( found.systems, 0 ), found.copies, found.models,
+		pfxSystems, pfxDrawn, pfxEmitting, pfxLive, found.systems < 0 ? " (the Particles row was off at build)" : "" );
+	float wind[3] = { 0, 0, 0 };
+	const bool windOn = wwCellParticleWind( scene->nifModel, wind );
+	std::fprintf( stderr, "cell particles clock: world clock %s at %.2f s (scene time %.2f s); wind %s (%.2f, %.2f) units/s2 "
+		"per unit strength\n", wwCellWorldClockMoves() ? "runs" : "held", wwCellWorldSeconds(), double( scene->time ),
+		windOn ? "on" : "off", double( wind[0] ), double( wind[1] ) );
 	censusDrawn().clear();
 }

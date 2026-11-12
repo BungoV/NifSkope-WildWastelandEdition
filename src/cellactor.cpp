@@ -250,6 +250,111 @@ struct CellActors::Impl
 	};
 	QHash<QString, Pose> idleCache;                // skeleton -> its idle pose
 	QHash<QString, int> headPartType;                        // head part editor id (lower) -> its type
+	/* MODULES1 item 16: the hair colour. NPC_ HCLF names a CLFM whose FNAM is the row of the hair's palette
+	 * (HairColor_Lgrad, a Greyscale_To_PaletteColor material); hair, facial hair and eyebrows take it. Red
+	 * WW_CELL_ACTOR_RED=hairwhite: the material's own row (every head white-haired, as before). */
+	QHash<QString, float> hairRow;                           // actor key -> its palette row
+	QHash<QString, QSet<QString>> hairShapes;                // actor key -> its hair shapes' names (lower)
+	float hairRowOf( quint32 npcForm ) const
+	{
+		const ESMFile::ESMRecord * r = record( npcForm, "NPC_" );
+		if ( !r )
+			return -1.0f;
+		quint32 clfm = 0;
+		ESMFile::ESMField f( *esm, *r );
+		while ( f.next() )
+			if ( f == "HCLF" && f.size() >= 4 )
+				clfm = esm->mapFormID( *r, u32At( f.data() ) );
+		const ESMFile::ESMRecord * c = record( clfm, "CLFM" );
+		if ( !c )
+			return -1.0f;
+		ESMFile::ESMField g( *esm, *c );
+		while ( g.next() )
+			if ( g == "FNAM" && g.size() >= 4 )
+				return f32At( g.data() );
+		return -1.0f;
+	}
+	/* MODULES1 item 16: the skin tone. The engine tints every Skin_Tint shape (Shader Flags 1 bit 21) with the
+	 * NPC's Skin Tone layer (TESNPC::CalculateBodyTintColor): the race's tint option of slot 12 for the sex names
+	 * a TETI index, the NPC_'s layer of that index its TEND value and colour (a template colour's CLFM when the
+	 * colour is blank). Drawn as diffuse x lerp(1, colour, value) through the vertex colour. Red
+	 * WW_CELL_ACTOR_RED=skinwhite: the texture's own tone on every body, as before. */
+	int skinToned = 0, skinShapes = 0, skinNoLayer = 0, eyeWetOut = 0, msnFlat = 0;
+	bool skinToneOf( quint32 npcForm, quint32 raceForm, bool female, float rgb[3] ) const
+	{
+		const ESMFile::ESMRecord * rr = record( raceForm, "RACE" );
+		const ESMFile::ESMRecord * nr = record( npcForm, "NPC_" );
+		if ( !rr || !nr )
+			return false;
+		int index = -1;
+		QByteArray templates;   // the option's TTEC
+		{
+			int part = -1;
+			bool afterHead = false, inOption = false;
+			ESMFile::ESMField f( *esm, *rr );
+			while ( f.next() ) {
+				if ( f == "NAM0" ) {
+					afterHead = true;
+					continue;
+				}
+				if ( afterHead && ( f == "MNAM" || f == "FNAM" ) ) {
+					part = f == "FNAM" ? 1 : 0;
+					afterHead = false;
+					continue;
+				}
+				if ( part != ( female ? 1 : 0 ) )
+					continue;
+				if ( f == "TETI" && f.size() >= 4 ) {
+					inOption = u16At( f.data() ) == 12 && index < 0;
+					if ( inOption )
+						index = u16At( f.data() + 2 );
+				} else if ( inOption && f == "TTEC" ) {
+					templates = QByteArray( reinterpret_cast<const char *>( f.data() ), int( f.size() ) );
+					inOption = false;
+				}
+			}
+		}
+		if ( index < 0 )
+			return false;
+		ESMFile::ESMField g( *esm, *nr );
+		bool mine = false;
+		while ( g.next() ) {
+			if ( g == "TETI" && g.size() >= 4 ) {
+				mine = u16At( g.data() + 2 ) == index;
+				continue;
+			}
+			if ( !mine || !( g == "TEND" ) || g.size() < 1 )
+				continue;
+			const float value = std::clamp( float( g.data()[0] ) / 100.0f, 0.0f, 1.0f );
+			float c[3] = { -1.0f, -1.0f, -1.0f };
+			if ( g.size() >= 5 && ( g.data()[1] | g.data()[2] | g.data()[3] ) )
+				for ( int k = 0; k < 3; k++ )
+					c[k] = float( g.data()[1 + k] ) / 255.0f;
+			if ( c[0] < 0.0f && g.size() >= 7 ) {
+				const int tmpl = qint16( u16At( g.data() + 5 ) );
+				const unsigned char * t = reinterpret_cast<const unsigned char *>( templates.constData() );
+				for ( int at = 0; tmpl >= 0 && at + 14 <= templates.size(); at += 14 ) {
+					if ( u16At( t + at + 8 ) != tmpl )
+						continue;
+					const ESMFile::ESMRecord * cl = record( esm->mapFormID( *rr, u32At( t + at ) ), "CLFM" );
+					if ( !cl )
+						break;
+					ESMFile::ESMField h( *esm, *cl );
+					while ( h.next() )
+						if ( h == "CNAM" && h.size() >= 3 )
+							for ( int k = 0; k < 3; k++ )
+								c[k] = float( h.data()[k] ) / 255.0f;
+					break;
+				}
+			}
+			if ( c[0] < 0.0f )
+				return false;
+			for ( int k = 0; k < 3; k++ )
+				rgb[k] = 1.0f + ( c[k] - 1.0f ) * value;
+			return true;
+		}
+		return false;
+	}
 	bool headPartsRead = false;
 
 	Impl( const EsmWorld & w, const QString & root ) : world( w ), dataRoot( root )
@@ -1147,12 +1252,27 @@ bool CellActors::place( const EsmRefr & r, bool hidden, QString & key, float & s
 				if ( s.geom.pos.empty() || s.geom.tris.empty() )
 					continue;
 				if ( face ) {
+					/* MODULES1 item 16: the eyes' wet shell is a 0.9-alpha flat grey card the engine shows as a gloss
+					 * only; drawn as a surface it greyed every iris over. Left out; red WW_CELL_ACTOR_RED=eyewet. */
+					if ( d->red != QLatin1String( "eyewet" ) && s.nearFacts.name.endsWith( QLatin1String( "wet" ), Qt::CaseInsensitive ) ) {
+						d->eyeWetOut++;
+						continue;
+					}
 					// the face mesh names each shape after its head part: gore caps never, hair not under headgear
 					const int type = d->headPartType.value( s.nearFacts.name.toLower(), -1 );
 					if ( type == 7 || ( type == 3 && ( worn & 0x3U ) ) || ( type == 4 && ( worn & ( 1U << 18 ) ) ) )
 						continue;
+					if ( type == 3 || type == 4 || type == 6 )
+						d->hairShapes[key].insert( s.nearFacts.name.toLower() );
 				}
 				b.shapes.push_back( s );
+				/* MODULES1 item 16: a face's _msn is a MODEL-space map the cell view's buckets would read as tangent
+				 * space (blotched faces); drawn on the smooth vertex normal instead. Red WW_CELL_ACTOR_RED=msn. */
+				if ( face && d->red != QLatin1String( "msn" )
+					&& b.shapes.back().tex1.endsWith( QLatin1String( "_msn.dds" ), Qt::CaseInsensitive ) ) {
+					b.shapes.back().tex1 = QStringLiteral( "#FFFF8080n" );
+					d->msnFlat++;
+				}
 			}
 		};
 		for ( const QString & model : row.parts )
@@ -1173,6 +1293,30 @@ bool CellActors::place( const EsmRefr & r, bool hidden, QString & key, float & s
 				first = false;
 			}
 		}
+		float tone[3];
+		if ( d->red != QLatin1String( "skinwhite" ) ) {
+			if ( d->skinToneOf( looks, n.race, n.female, tone ) ) {
+				d->skinToned++;
+				for ( NativeSrcShape & s : b.shapes ) {
+					const size_t nv = s.geom.pos.size() / 3;
+					if ( !( s.shaderSF1 & ( 1U << 21 ) ) )
+						continue;
+					if ( s.geom.rgba.size() != nv * 4 )
+						s.geom.rgba.assign( nv * 4, 255 );
+					for ( size_t v = 0; v < nv; v++ )
+						for ( int k = 0; k < 3; k++ )
+							s.geom.rgba[v * 4 + size_t( k )] = quint8( std::lround( s.geom.rgba[v * 4 + size_t( k )] * tone[k] ) );
+					d->skinShapes++;
+				}
+			} else {
+				d->skinNoLayer++;
+			}
+		}
+		if ( d->red != QLatin1String( "hairwhite" ) ) {
+			const float row = d->hairRowOf( looks );
+			if ( row >= 0.0f )
+				d->hairRow.insert( key, row );
+		}
 		if ( b.shapes.empty() || !b.triangles ) {
 			d->builtEmpty.insert( key );
 			return refuse( CellActorFate::NoGeometry );
@@ -1191,6 +1335,15 @@ bool CellActors::shapes( const QString & key, std::vector<NativeSrcShape> * out 
 	if ( it == d->built.constEnd() || !out )
 		return false;
 	*out = it->shapes;
+	return true;
+}
+
+bool CellActors::hairPaint( const QString & key, const QString & shapeName, float * row ) const
+{
+	auto it = d->hairRow.constFind( key );
+	if ( it == d->hairRow.constEnd() || !d->hairShapes.value( key ).contains( shapeName.toLower() ) )
+		return false;
+	*row = it.value();
 	return true;
 }
 
@@ -1265,6 +1418,10 @@ QString CellActors::censusLine() const
 	t << ", refused " << total;
 	if ( total )
 		t << ": " << refused.join( QLatin1String( ", " ) );
+	// MODULES1 item 16: the hair, skin and eye facts per built actor
+	t << "; looks: hair coloured " << d->hairRow.size() << ", skin toned " << d->skinToned << " (" << d->skinShapes
+	  << " Skin_Tint shapes, " << d->skinNoLayer << " without a Skin Tone layer), eye wet shells left out "
+	  << d->eyeWetOut << ", face _msn drawn on vertex normals " << d->msnFlat;
 	if ( !d->red.isEmpty() )
 		t << " [RED CONTROL " << d->red << "]";
 	t << "\n";

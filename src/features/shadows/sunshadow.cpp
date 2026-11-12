@@ -9,11 +9,13 @@ BSD License - see nifskope.h
 #include "gl/cellunits.h"
 #include "gl/celluniform.h"	// lane CELLUNI2
 #include "gl/alphabgsm.h"	// lane ALPHABGSM1: the side passes' alpha-test census
+#include "gl/wwuploadcap.h"	// lane EMPTY240 R4-1: a layer drawn while uploads waited is drawn again
 #include "features/post/gametaa.h"
 #include "features/water/cellwater.h"	// lane SUNCELL1: water never casts
 #include "cellmesh.h"	// lane FARDRAW1: CellMeshInst
 #include "features/far-lod/cellfarinst.h"	// lane FARDRAW1: the instanced far rings cast
 #include "features/far-lod/cellfarhide.h"	// lane FARHOLE2: the rows a loaded near cell leaves out
+#include "features/far-lod/lodpreview.h"	// lane PERFLOAD1 P10: the casters the LOD preview leaves out
 #include "features/near/cellcull.h"	// lane SUNCELL1: each cascade culls its casters against its own window
 #include "gl/cellgrass.h"	// lane FAR5: a wind cable's shadow sways with it
 #include "gl/celltreewind.h"	// lane WINDTREE1: a tree-wind shape's caster sways with it
@@ -117,8 +119,8 @@ struct CsmState
 	double rc[3] = { 1, 0, 0 }, uc[3] = { 0, 1, 0 };	// the camera's right and up rows (world)
 	double split[2] = { kSplit0, kSplit1 };
 	int casters = 0, tris = 0, atCasters = 0;
-	bool bothFaces = false;	// lane INTSKY1: a sunlit interior's casters draw both faces
-	int decalsSkipped = 0;	// lane INTSKY1: decals the sunlit interior's sun passes
+	bool bothFaces = false;	// lane INTSKY1 / MODULES1 M1: the casters draw both faces (every cell; reds onesided)
+	int decalsSkipped = 0;	// lane INTSKY1 / MODULES1 M1: decals the sun passes (every cell; reds decals / decalscast)
 	int swayCables = -1;	// lane FAR5: wind cables cast where they sway (-1 = Cable shadows sway off)
 	int swayTrees = 0;		// lane WINDTREE1: tree-wind casters swayed on the CPU (gl/celltreewind.h)
 	int swayCasters = 0;	// lane SHADOWSHIMMER2: far tree-animation casters swayed as the colour pass sways them
@@ -788,6 +790,11 @@ bool wwSunShadowWanted( Scene * scene )
 	return ( s.valid || wwShadowSetActive( scene ) ) && scene && !scene->selecting && wwLookdevActive();
 }
 
+int wwSunShadowProbeMode()
+{
+	return cs().probe;
+}
+
 static void sunShadowPassImpl( Scene * scene );
 
 /* WW_CSM_DUMP=<ABSOLUTE path> (lane VOLAIR1, gates only): the cascade map the receivers read, rewritten whenever the
@@ -898,7 +905,10 @@ static void sunShadowPassImpl( Scene * scene )
 	s.valid = false;
 	const bool leak = !wwLookdevShadows() && red( "factorhalf" );
 	/* lane INTSKY1: a sunlit interior's sun is shadowed whatever the Shadows row says (an unshadowed sun would light every
-	 * floor through the roof): it pays the sun shadow like an exterior (bungo 11-01, LATE ITEM 29.5) */
+	 * floor through the roof): it pays the sun shadow like an exterior (bungo 11-01, LATE ITEM 29.5).
+	 * MODULES1 M1 (11-10 audit, interior-only gate kept, physical reason): outdoors nothing is forced because outdoors
+	 * the sun shadow is the Shadows row itself (on in every flight preset); an interior's sun is only physical behind a
+	 * roof, so a sunlit interior must shadow even with the row off. Nothing to extend. */
 	const WwCellLighting * forceCell = scene->nifModel ? wwCellLightsFor( scene->nifModel ) : nullptr;
 	const bool forceSunlit = forceCell && forceCell->interior && wwCellSunlitNow( forceCell );
 	if ( !wwLookdevActive() || ( !wwLookdevShadows() && !leak && !forceSunlit ) ) {
@@ -999,6 +1009,39 @@ static void sunShadowPassImpl( Scene * scene )
 		cst.frame++;
 	ShadowCache::chooseLights( s, false );
 	fitCascades( s, vt );
+	{	// MODULES1 M9: each cascade's sphere (centre, radius) against the eye; said when the eye moves 2048 units or the reach changes
+		static double saidEye[3] = { 1e300, 1e300, 1e300 }, saidD = -1.0;
+		const double moved = std::max( { std::fabs( s.C[0] - saidEye[0] ), std::fabs( s.C[1] - saidEye[1] ), std::fabs( s.C[2] - saidEye[2] ) } );
+		if ( moved > 2048.0 || std::fabs( s.D - saidD ) > 1.0 ) {
+			std::copy( s.C, s.C + 3, saidEye );
+			saidD = s.D;
+			QString line = QStringLiteral( "shadow cascades: eye %1,%2,%3" ).arg( s.C[0], 0, 'f', 0 ).arg( s.C[1], 0, 'f', 0 ).arg( s.C[2], 0, 'f', 0 );
+			for ( int i = 0; i < s.nCasc && i < kCascades; i++ ) {
+				const Cascade & c = s.c[i];
+				double m[3];
+				for ( int a = 0; a < 3; a++ )
+					m[a] = s.C[a] + s.fwd[a] * c.sphereZ;
+				line += QStringLiteral( " | c%1 centre %2,%3,%4 r %5 (eye %6 from it)" ).arg( i ).arg( m[0], 0, 'f', 0 ).arg( m[1], 0, 'f', 0 )
+					.arg( m[2], 0, 'f', 0 ).arg( c.sphereR, 0, 'f', 0 ).arg( std::fabs( c.sphereZ ), 0, 'f', 0 );
+			}
+			line += QStringLiteral( " | fade to 0 at %1 around the eye" ).arg( s.D, 0, 'f', 0 );
+			// DEBUGVIEW1 item 4: the Shadow Distance and its source (the reach follows it under the parity row's distance bit)
+			line += QStringLiteral( " | shadow distance %1 from %2%3" ).arg( wwShadowDistance(), 0, 'f', 0 ).arg( QLatin1StringView( wwShadowDistanceSource() ) )
+				.arg( wwShadowPar( WwParDistance ) ? QString() : QStringLiteral( " (not applied: the parity distance bit is off, the tier's reach is used)" ) );
+			std::fprintf( stderr, "%s\n", qPrintable( line ) );
+		}
+	}
+	/* lane PCMB1 part B: each cascade's receiver slab for the casters' receiver cull (features/near/cellshadowocc.h): the
+	 * view depths whose receivers read it (ww_sunshadow.glsl csmSelect picks by planar depth with the blend band; cascade
+	 * 0 also behind the camera, nothing past D + band), joined with the fit's own slice and widened by 32 of its texels
+	 * for the filter's and the normal offset's reach. Not with the red onecascade (every cascade spans the whole view). */
+	for ( int i = 0; i < kCascades; i++ ) {
+		const Cascade & c = s.c[i];
+		const double lo = i == 0 ? -1.0e30 : std::min( c.zn, s.split[i - 1] );
+		const double hi = std::max( c.zf, ( i < 2 ? s.split[i] : s.D ) + s.blend );
+		const double pad = 32.0 * c.texel;
+		wwCellCullCasterSlab( i, !red( "onecascade" ) && c.texel > 0.0, float( ( lo - pad ) * s.sc ), float( ( hi + pad ) * s.sc ) );
+	}
 
 	// the casters
 	std::vector<Caster> casters;
@@ -1048,11 +1091,21 @@ static void sunShadowPassImpl( Scene * scene )
 	s.swayStep = swayStepS;
 	/* lane INTSKY1 (bungo 11-01, LATE ITEMs 29-30): in a SUNLIT interior every caster draws BOTH faces (a one-sided wall
 	 * seen from behind is solid to the sun: the museum's shell would let the sun straight in through its back faces), and
-	 * decals pass the sun (as glass, blended cards and effect shaders already do: wwCastsSunShadow). Exteriors and
-	 * unflagged interiors are unchanged. Reds WW_INTSKY_RED=onesided (the casters' own culling), decals (decals cast). */
+	 * decals pass the sun (as glass, blended cards and effect shaders already do: wwCastsSunShadow). Reds
+	 * WW_INTSKY_RED=onesided (the casters' own culling), decals (decals cast).
+	 * lane MODULES1 M1 (bungo 11-10, sun_through_thin_wall: "the sun gets through a very thin surface"): the same two rules
+	 * hold in EVERY other cell, exteriors first. A wall is as opaque to the sun from behind as from the front; culling a
+	 * caster's back faces is a closed-mesh trick (the front face always wins the depth test, so the back face is free to
+	 * drop), and the game's walls are open shells: a thin one-sided wall cast nothing from behind and the sun went
+	 * through it (the "lit" wall of gi_weak_bounce was that leak). A decal is paint on a surface with no thickness: it
+	 * casts nothing of its own, its wall does (and from the sun's side its own shadow was acne on that wall). Two-sided
+	 * caster drawing is the engines' rule for open meshes (Unity "Cast Shadows: Two Sided", UE "Shadow Two Sided").
+	 * Reds WW_CSM_RED=onesided (back faces culled outdoors, as before), decalscast (decals cast outdoors). Cost in
+	 * `cpu sun-walk` and the sun pass's GPU time (PassTime), and the summary's bothfaces=/decalspass= fields. */
 	const WwCellLighting * sunCell = scene->nifModel ? wwCellLightsFor( scene->nifModel ) : nullptr;
 	const bool sunlitInt = sunCell && sunCell->interior && wwCellSunlitNow( sunCell );
-	const bool bothFaces = sunlitInt && !( wwIntSkyRed() & 4 ), decalsPass = sunlitInt && !( wwIntSkyRed() & 8 );
+	const bool bothFaces = sunlitInt ? !( wwIntSkyRed() & 4 ) : !red( "onesided" );
+	const bool decalsPass = sunlitInt ? !( wwIntSkyRed() & 8 ) : !red( "decalscast" );
 	s.bothFaces = bothFaces;
 	int decalsSkipped = 0;
 	/* lane INTSKY1 (LATE ITEM 17c / 29.3): the rare-mesh census of a sunlit interior's casters, by the cell's welded
@@ -1066,16 +1119,21 @@ static void sunShadowPassImpl( Scene * scene )
 		long long oneTris = 0;
 		std::vector<std::pair<long long, QString>> top;
 	} ic;
+	int previewDropped = 0;	// lane PERFLOAD1 P10
 	const qint64 walkT0 = PassTime::on() ? PassTime::nowNs() : 0;	// lane PERFHUNT2: `cpu sun-walk`, the walk inside sun-casters
 	for ( Node * node : scene->nodes.list() ) {
-		if ( sunlitInt ) {
-			const Shape * cs = dynamic_cast<const Shape *>( node );
-			if ( cs && cs->isVisible() && !cs->wwCastsSunShadow() )
-				ic.noCast++;
-		}
 		const Shape * sh = dynamic_cast<const Shape *>( node );
-		if ( !sh || !sh->isVisible() || !sh->wwCastsSunShadow() )
+		if ( !sh || !sh->isVisible() )
 			continue;
+		if ( !sh->wwCastsSunShadow() ) {
+			ic.noCast++;	// lane MODULES1 M1: the census counts in every cell (one cast per node, not two)
+			continue;
+		}
+		// lane PERFLOAD1 P10: the LOD preview's ring alone / near grid OFF: the shadows match what is drawn
+		if ( wwShadowPreviewDrops( scene, sh ) ) {
+			previewDropped++;
+			continue;
+		}
 		// lane SUNCELL1: a cell's water surface is no caster (the game's water casts no sun shadow; a creek's plane
 		// shadowed its whole bed). Red WW_CSM_RED=watercasts keeps it.
 		if ( !red( "watercasts" ) && wwCellWaterIsShape( scene->nifModel, sh->id() ) )
@@ -1093,16 +1151,15 @@ static void sunShadowPassImpl( Scene * scene )
 			continue;
 		}
 		Caster c { sh, bothFaces || sh->wwDoubleSided(), {} };
-		if ( sunlitInt ) {
-			if ( sh->wwDoubleSided() ) {
-				ic.twoSided++;
-			} else {
-				ic.oneSided++;
-				ic.oneTris += sh->triangles.size();
+		if ( sh->wwDoubleSided() ) {
+			ic.twoSided++;
+		} else {
+			ic.oneSided++;
+			ic.oneTris += sh->triangles.size();
+			if ( sunlitInt )	// lane MODULES1 M1: the counts in every cell; the top-20 list (a per-frame sort) indoors only
 				ic.top.emplace_back( (long long) sh->triangles.size(), sh->getName() );
-			}
-			ic.alphaTested += da.test ? 1 : 0;
 		}
+		ic.alphaTested += da.test ? 1 : 0;
 		// lane VOLAIR1 (10-15): an alpha-tested shape (a window's GlassWindows01 glass, a leaf card) casts what its
 		// alpha test keeps, as the colour pass draws it; it cast a solid card before, and the sun never reached the
 		// air behind a window. Red WW_CSM_RED=atsolid casts them solid again.
@@ -1145,17 +1202,26 @@ static void sunShadowPassImpl( Scene * scene )
 		PassTime::cpuSubAdd( PassTime::CpuSunWalk, PassTime::nowNs() - walkT0 );
 	s.casters = int( casters.size() );
 	s.decalsSkipped = decalsSkipped;
-	if ( sunlitInt ) {
+	static int saidPreviewDropped = 0;	// lane PERFLOAD1 P10: once per change
+	if ( previewDropped != saidPreviewDropped ) {
+		std::fprintf( stderr, "sun cascades: lod preview leaves out %d casters (ring %s, near grid %s)\n", previewDropped,
+			qPrintable( LodPreview::ringName( LodPreview::ring() ) ), qPrintable( LodPreview::gridName( LodPreview::grid() ) ) );
+		saidPreviewDropped = previewDropped;
+	}
+	{	// lane MODULES1 M1: the census in every cell (INTSKY1 printed it for a sunlit interior only), once per change
 		std::sort( ic.top.begin(), ic.top.end(), []( const auto & a, const auto & b ) { return a.first > b.first; } );
 		QStringList t;
 		for ( size_t i = 0; i < ic.top.size() && i < 20; i++ )
 			t << QStringLiteral( "%1 (%2)" ).arg( ic.top[i].second ).arg( ic.top[i].first );
 		static QString saidCensus;
-		const QString line = QStringLiteral( "sun cascades: sunlit interior %1: casters %2, one-sided made solid from behind %3 (%4 tris), "
-			"two-sided %5, alpha-tested %6, decals passed %7, never cast (glass, effects, particles) %8%9; one-sided by tris: %10" )
-			.arg( sunCell->cellEdid ).arg( casters.size() ).arg( ic.oneSided ).arg( ic.oneTris ).arg( ic.twoSided ).arg( ic.alphaTested )
-			.arg( decalsSkipped ).arg( ic.noCast ).arg( bothFaces ? QString() : QStringLiteral( " (RED onesided: culling kept)" ) )
-			.arg( t.join( QStringLiteral( ", " ) ) );
+		const QString line = QStringLiteral( "sun cascades: %1 %2: casters %3, one-sided %4 (%5 tris) %6, two-sided %7, alpha-tested %8, "
+			"decals %9 %10, never cast (glass, effects, particles) %11%12" )
+			.arg( sunlitInt ? QStringLiteral( "sunlit interior" ) : sunCell && sunCell->interior ? QStringLiteral( "interior" ) : QStringLiteral( "exterior" ) )
+			.arg( sunCell ? sunCell->cellEdid : QStringLiteral( "-" ) ).arg( casters.size() ).arg( ic.oneSided ).arg( ic.oneTris )
+			.arg( bothFaces ? QStringLiteral( "made solid from behind (both faces)" ) : QStringLiteral( "back faces culled (RED onesided)" ) )
+			.arg( ic.twoSided ).arg( ic.alphaTested ).arg( decalsPass ? decalsSkipped : 0 )
+			.arg( decalsPass ? QStringLiteral( "passed" ) : QStringLiteral( "passed (RED decalscast: they cast)" ) ).arg( ic.noCast )
+			.arg( t.isEmpty() ? QString() : QStringLiteral( "; one-sided by tris: " ) + t.join( QStringLiteral( ", " ) ) );
 		if ( line != saidCensus ) {
 			std::fprintf( stderr, "%s\n", qPrintable( line ) );
 			saidCensus = line;
@@ -1321,6 +1387,7 @@ static void sunShadowPassImpl( Scene * scene )
 		ht.p( progAt );
 		for ( const QString & rr : cs().reds )
 			ht.w( qHash( rr ) );
+		ht.w( WwUp::st().deferredAll );	// lane EMPTY240 R4-1: a caster's mesh or map that waited a paint redraws the layers
 		stateSig = ht.h;
 	}
 	bool anyScroll = false;
@@ -1390,6 +1457,29 @@ static void sunShadowPassImpl( Scene * scene )
 		addStrip( ix0, 0, ix1, iy0 );
 		addStrip( ix0, iy1, ix1, c.vh );
 	}
+	/* lane EMPTY240 R5-1: build 77's first paint filled every cascade's static layer at once (sun-cascades 528.9 ms on
+	 * the GPU). One first fill a paint now, the nearest cascade first; a cascade still waiting is cleared (lit) this
+	 * paint and fills on a later one. Red WW_CASCADEFILL_RED=1: every first fill in the same paint (build 77). */
+	bool waitFill[kCascades] = { false, false, false };
+	{
+		WW_SWITCH_STATIC( bool, fillRed, wwEnvInt( "WW_CASCADEFILL_RED" ) == 1 );
+		int firstFills = 0, waits = 0;
+		for ( int i = 0; i < kCascades && cacheOn && !fillRed && cst.red != 1; i++ ) {
+			if ( i >= s.nCasc || mode[i] != ShadowCache::Full || ( cst.c[i].valid && cst.c[i].map == s.map ) )
+				continue;	// not drawn, or a redraw of a filled layer
+			if ( firstFills++ > 0 ) {
+				waitFill[i] = true;
+				waits++;
+			}
+		}
+		static bool saidRed = false;
+		if ( waits > 0 )
+			std::fprintf( stderr, "sun cascades: first fills spread, %d of %d wait a paint (one first fill a paint; red "
+				"WW_CASCADEFILL_RED=1: all in one paint, build 77)\n", waits, firstFills );
+		else if ( fillRed && !saidRed )
+			std::fprintf( stderr, "sun cascades: first fills all in one paint (WW_CASCADEFILL_RED=1, build 77)\n" );
+		saidRed = fillRed;
+	}
 	NifSkopeOpenGLContext::Program * progRemap = nullptr;
 	if ( anyScroll ) {
 		progRemap = r->useProgram( "lookdev_csmremap.prog" );
@@ -1409,8 +1499,8 @@ static void sunShadowPassImpl( Scene * scene )
 	std::vector<Job> jobs;
 	std::vector<int> jobsOf[kCascades][3];
 	for ( int i = 0; i < kCascades; i++ ) {
-		if ( i >= s.nCasc )
-			continue;	// lane PERFFIX2 b: a cascade the tier does not draw (the receivers never select it)
+		if ( i >= s.nCasc || waitFill[i] )
+			continue;	// lane PERFFIX2 b: a cascade the tier does not draw (the receivers never select it); R5-1: one waiting
 		const Cascade & c = s.c[i];
 		auto add = [&]( int set, const int * rc ) {
 			Job j;
@@ -1504,7 +1594,7 @@ static void sunShadowPassImpl( Scene * scene )
 					const GpuDriven::PoolEntry & e = entry[n];
 					const Shape * sh = casters[n].sh;
 					if ( !inSet( casters[n], J.set, J.i ) ) {
-					} else if ( wwCellCullCaster( scene, sh, sh->id(), J.i, J.m, cullRanges ) ) {
+					} else if ( wwCellCullCaster( scene, sh, sh->id(), J.i, J.m, cullRanges, J.set == 1 ) ) {
 						for ( std::size_t r2 = 0; r2 + 1 < cullRanges.size(); r2 += 2 ) {
 							if ( cullRanges[r2 + 1] )
 								cmds.push_back( { cullRanges[r2 + 1] * 3, 1, e.firstIndex + cullRanges[r2] * 3, e.baseVertex,
@@ -1597,7 +1687,7 @@ static void sunShadowPassImpl( Scene * scene )
 			if ( ( progAt && k.alphaTested != bool( pass ) ) || queued[kn] || !inSet( k, J.set, J.i ) )
 				continue;
 			// lane SUNCELL1: a welded cell shape gives this cascade only the placements inside its own window
-			const bool runs = wwCellCullCaster( scene, k.sh, k.sh->id(), J.i, J.m, cullRanges );
+			const bool runs = wwCellCullCaster( scene, k.sh, k.sh->id(), J.i, J.m, cullRanges, J.set == 1 );	// PCMB1: set 1 is cached
 			if ( !runs && J.scissor && !ShadowCache::boundsInside( scene, k.sh, J.m ) )
 				continue;
 			perDraw++;
@@ -1817,6 +1907,12 @@ static void sunShadowPassImpl( Scene * scene )
 			continue;	// lane PERFFIX2 b: not drawn, not read
 		const Cascade & c = s.c[i];
 		ShadowCache::Layer & L = cst.c[i];
+		if ( waitFill[i] ) {	// lane EMPTY240 R5-1: lit this paint (no caster), filled on a later one (its layer stays unfilled)
+			L.live.known = false;
+			if ( attach( s.tex, i ) )
+				clearAll();
+			continue;
+		}
 		switch ( mode[i] ) {
 		case ShadowCache::Off:
 			L.live.known = false;	// lane PERFFIX2 b: the live layer is no static copy now
@@ -2141,8 +2237,8 @@ QString wwSunShadowSummary()
 	o += QString( " swaysplit=%1 swaytiles=%2,%3,%4 swaystep=%5" ).arg( s.swaySplit ).arg( s.swayTiles[0] ).arg( s.swayTiles[1] )
 		.arg( s.swayTiles[2] ).arg( s.swayStep );
 	o += QString( " csmat=%1 slopeclamp=%2 cascades=%3" ).arg( s.atCasters ).arg( s.slopeClamp ).arg( s.nCasc );	// lane PERFFIX2 b	// lane VOLAIR1: -1 = no program (they cast solid)
-	if ( s.bothFaces || s.decalsSkipped )	// lane INTSKY1: only in a sunlit interior (exteriors' summary unchanged)
-		o += QString( " sunlitinterior bothfaces=%1 decalspass=%2" ).arg( s.bothFaces ? 1 : 0 ).arg( s.decalsSkipped );
+	// lane INTSKY1 (a sunlit interior) / MODULES1 M1 (every cell): both faces drawn, decals the sun passed
+	o += QString( " bothfaces=%1 decalspass=%2" ).arg( s.bothFaces ? 1 : 0 ).arg( s.decalsSkipped );
 	if ( s.swayCables >= 0 )
 		o += QString( " cablesway=%1" ).arg( s.swayCables );	// lane FAR5: the wind cables cast where they sway
 	if ( s.swayTrees > 0 )

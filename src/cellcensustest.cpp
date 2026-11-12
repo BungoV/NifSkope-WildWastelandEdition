@@ -495,6 +495,7 @@ void stepBakeBefore( const CensusLoad & ld )
 	qputenv( "WW_CELL_PROBES_HIDE", "1" );      // the markers are not part of the cell's frame
 	// the builder is told the version here; stepBakeAfter reads the files back so a run never says one and writes another
 	qputenv( "WW_CELL_PROBE_BAKE_TBK", QByteArray::number( g.tbk ) );
+	wwEnvChanged();	// MODULES1 item 8: the env accessors' cache
 }
 
 //! The version a `.tbk` sector file says it is (its second 32-bit word), or -1.
@@ -516,6 +517,7 @@ void stepBakeAfter( const CensusLoad & ld, CensusRow & r )
 	qunsetenv( "WW_CELL_PROBES_N" );
 	qunsetenv( "WW_CELL_PROBES_HIDE" );
 	qunsetenv( "WW_CELL_PROBE_BAKE_TBK" );
+	wwEnvChanged();	// MODULES1 item 8: the env accessors' cache
 	const QString leadKey = g.plan.at( ld.cells.first() ).key;
 	r.bakeProbes = noteNumber( "bake: (\\d+) probes" );
 	// what the bake cost inside the build: placing the probes, the rays, the files
@@ -565,11 +567,13 @@ void stepSpaceBefore( const CensusLoad & ld )
 {
 	QDir().mkpath( g.spaceDir );
 	qputenv( "WW_CELL_VOLUMES", QDir::toNativeSeparators( g.spaceDir ).toLocal8Bit() );
+	wwEnvChanged();	// MODULES1 item 8: the env accessors' cache
 	if ( wwEnv( "WW_CELL_PROBES" ).isEmpty() ) {   // the bake step did not ask already: the placing only
 		QDir().mkpath( g.spaceDir + QStringLiteral( "/_probes" ) );
 		qputenv( "WW_CELL_PROBES", QDir::toNativeSeparators( g.spaceDir + QStringLiteral( "/_probes/%1.tsv" ).arg( loadFileBase( ld ) ) ).toLocal8Bit() );
 		qputenv( "WW_CELL_PROBES_N", QByteArray::number( ld.own ) );
 		qputenv( "WW_CELL_PROBES_HIDE", "1" );
+		wwEnvChanged();	// MODULES1 item 8: the env accessors' cache
 	}
 }
 
@@ -579,6 +583,7 @@ void stepSpaceAfter( const CensusLoad & ld, CensusRow & )
 	qunsetenv( "WW_CELL_PROBES" );
 	qunsetenv( "WW_CELL_PROBES_N" );
 	qunsetenv( "WW_CELL_PROBES_HIDE" );
+	wwEnvChanged();	// MODULES1 item 8: the env accessors' cache
 	const CensusUnit & unit = g.units.at( ld.unit );
 	const QString leadKey = g.plan.at( ld.cells.first() ).key;
 	const qint64 ms = noteNumber( "space stage (\\d+) ms \\(ok\\)" );
@@ -822,6 +827,7 @@ void refuseLoad( const QString & why )
 	// a refused load built nothing: what the steps asked of the builder must not follow into the next
 	for ( const char * v : { "WW_CELL_PROBES", "WW_CELL_PROBE_BAKE", "WW_CELL_PROBES_N", "WW_CELL_PROBES_HIDE", "WW_CELL_PROBE_BAKE_TBK" } )
 		qunsetenv( v );
+	wwEnvChanged();	// MODULES1 item 8: the env accessors' cache
 	r.buildMs = g.buildMs;
 	r.note = why.isEmpty() ? QStringLiteral( "refused, and the builder gave no reason" ) : why;
 	closeMessageBoxes();

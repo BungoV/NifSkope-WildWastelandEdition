@@ -1,4 +1,5 @@
 #!/bin/bash
+export WW_CELL_STREAM="${WW_CELL_STREAM:-0}"	# AIRPERF1 r4: this harness opens a fixed block (streaming is the default now)
 #
 # THE DECK'S 4 m BRICKS BETWEEN THE PROBES AND THE SURFELS (lane BRICK1, 2026-10-07; src/features/gi/probegi.h, PRTP_PLAN 2ar).
 #

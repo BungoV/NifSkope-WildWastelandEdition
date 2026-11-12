@@ -63,6 +63,10 @@ layout ( location = 10 ) in vec4	farInstRow0;
 layout ( location = 11 ) in vec4	farInstRow1;
 layout ( location = 12 ) in vec4	farInstRow2;
 layout ( location = 13 ) in vec4	farInstExtra;
+// lane PERFLOAD1 P7 round 2: the far row's tree-ladder dither (x; 0 = whole), unset (0) on every other draw
+layout ( location = 9 ) in vec2	farLadderIn;
+flat out vec2 farLadder;
+uniform float lodViewCode;	// lane LODLIVE1: the LOD coloration's band + 1 of a shape (0 = untinted), renderer.cpp
 /* lane FIX1101A lodch: the ring's per-vertex bake channels (gl/cellfarinst.cpp; src/cellmesh.h CellMeshInst::vstream).
  * On, the row's .y holds the int bits of its first texel minus the sub's base vertex: + gl_VertexID = this vertex's
  * RG8 texel, R the AO (into the colour, as the flat copy has it), G the ambient's sky factor (wwFarSkyVis). The
@@ -70,6 +74,17 @@ layout ( location = 13 ) in vec4	farInstExtra;
 uniform bool farStreamOn;
 uniform samplerBuffer farStream;
 out float wwFarSkyVis;
+/* MODULES1 round 10 (bungo 11-11: "Far baked AO needs to behave through regular AO rules"): the stream's AO leaves the
+ * vertex colour and goes to the fragment's one AO rule (cell_ao.glsl cellAoShared) as wwFarAo. farBakeK: x the AO's
+ * and y the sky occlusion's maximum (live keys WW_LODL_AO_MAX / WW_LODL_SKY_MAX, 0..1), z 1 = the red
+ * WW_LODL_AO_RED=albedo (the AO multiplied into the vertex colour, as before). Set with farStreamOn. */
+out float wwFarAo;
+uniform vec3 farBakeK;
+/* MODULES1 10b-2: the far draws whose baked AO is a grey in the vertex colour. x the AO's maximum strength, y the sky
+ * occlusion's, z the draw: 0 none, 1 the flat far copy (the grey is the AO: wwFarAo), 2 the far ground (the grey is
+ * its mask sheet's B, a sky AO: wwFarSkyVis), 3 instanced rows without the stream (mesh grey x row grey is the AO).
+ * w 1 = red WW_LODL_AO_RED=albedo (the grey stays in the colour). The colour is then white. */
+uniform vec4 farVcAo;
 #ifdef WW_FAR_SPLAT
 /* lane FARLOOK1101 (FARSHIMMER2): a far row whose projected box is under S px on an axis draws widened to S about its
  * projected centre at alpha 1 / (kx * ky) (exact ink: the area grows by kx * ky). farSplat = (S px, pass: 1 opaque =
@@ -97,6 +112,7 @@ void main()
 	vec2 uv0 = multiTexCoord0;
 	vec2 farXY = vertexPosition.xy;
 	wwFarSkyVis = 1.0;
+	wwFarAo = 1.0;
 	if ( farInst ) {
 		mat3 Mt = mat3( farInstRow0.xyz, farInstRow1.xyz, farInstRow2.xyz );	// n * Mt = M n
 		v.xyz = vec3( dot( farInstRow0, v ), dot( farInstRow1, v ), dot( farInstRow2, v ) );
@@ -111,10 +127,21 @@ void main()
 		}
 		if ( farStreamOn ) {
 			vec2 ch = texelFetch( farStream, floatBitsToInt( farInstExtra.y ) + gl_VertexID ).rg;
-			vc.rgb *= ch.r * e;
-			wwFarSkyVis = ch.g;
+			float ao = 1.0 - ( 1.0 - ch.r ) * farBakeK.x;
+			wwFarAo = farBakeK.z > 0.5 ? 1.0 : ao;
+			vc.rgb *= ( farBakeK.z > 0.5 ? ao : 1.0 ) * e;
+			wwFarSkyVis = 1.0 - ( 1.0 - ch.g ) * farBakeK.y;
+		} else if ( farVcAo.z > 2.5 && farVcAo.w < 0.5 ) {
+			wwFarAo = 1.0 - ( 1.0 - clamp( vc.r * farInstExtra.y, 0.0, 1.0 ) ) * farVcAo.x;
+			vc.rgb = vec3( 1.0 );
 		} else
 		vc.rgb *= vec3( farInstExtra.yz, e );
+	} else if ( farVcAo.z > 0.5 && farVcAo.w < 0.5 ) {
+		if ( farVcAo.z < 1.5 )
+			wwFarAo = 1.0 - ( 1.0 - vc.r ) * farVcAo.x;
+		else
+			wwFarSkyVis = 1.0 - ( 1.0 - vc.r ) * farVcAo.y;
+		vc.rgb = vec3( 1.0 );
 	}
 	if ( wwGrassWind2.w > 0.5 ) {
 		float L = length( b );
@@ -131,12 +158,14 @@ void main()
 		w = w * half_range + wwGrassWind2.x;
 		w = w * ( vertexColor.a * vertexColor.a * 0.5 );
 		vec3 d = vec3( cos( wwGrassWind.x ), sin( wwGrassWind.x ), 0.0 );	// sincos cb2[11].x
-		n = n + d * w;
-		n = n * inversesqrt( dot( n, n ) );
-		t = t + d * w;
-		t = t * inversesqrt( dot( t, t ) );
-		b = b + d * w;
-		b = b * inversesqrt( dot( b, b ) );
+		if ( wwGrassWind2.w < 1.5 ) {	// MODULES1 M4: a swaying cable (w 2) keeps its radial frame
+			n = n + d * w;
+			n = n * inversesqrt( dot( n, n ) );
+			t = t + d * w;
+			t = t * inversesqrt( dot( t, t ) );
+			b = b + d * w;
+			b = b * inversesqrt( dot( b, b ) );
+		}
 		v.xyz = d * w + v.xyz;
 		vc.rgb = exp2( log2( vertexColor.rgb ) * 2.2 );		// log, mul 2.2, exp: o6.rgb = (v4.rgb * v5.w)^2.2
 	}
@@ -152,6 +181,7 @@ void main()
 		v.xyz += viewMatrix * ( w * ( farSwayAmp * vertexColor.a ) );
 	}
 	gl_Position = projectionMatrix * v;
+	farLadder = farInst ? vec2( farLadderIn.x, farLadderIn.y > 0.5 ? farLadderIn.y : lodViewCode ) : vec2( 0.0, lodViewCode );
 #ifdef WW_FAR_SPLAT
 	farSplatA = 1.0;
 	if ( farInst && farSplat.x > 0.0 ) {

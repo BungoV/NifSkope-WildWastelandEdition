@@ -43,6 +43,12 @@ bool pinned();
 //! paintGL's first and last lines. GL calls only while on.
 void frameBegin();
 void frameEnd();
+//! lane EMPTY240 item 1: the last timed frame's pass CPU ms, summed over the zones (0 while the timers are off)
+double lastFrameCpuSumMs();
+/* lane VKFRAME1 build 88: a named frame wall part's seconds leave the open gap between top-level passes; the take gives
+ * the gaps by the pass before each, ms a frame since the last take (then reset): " | other-in-frame by ..." or "" */
+void gapNamed( double seconds );
+QByteArray otherInFrameTake();
 
 void begin( int pass );
 void end( int pass );
@@ -64,6 +70,8 @@ enum Sub { AirTile, AirInject, AirIntegrate, AoGeometry, AoStages, AoGi, ToneBli
 	ContactMarch,	// lane PERFFIX2 (item 7): the contact pass (near march, far tier, upsample) inside reflections
 	WaterDraw, WaterCopy, UnderwaterSub,	// lane PERFFIX3: the water's colour draws (each, summed; the copy inside), its refraction copies, the camera-under-water pass
 	PostDof, PostMblur, PostObjBlur, PostFlare,	// lane POSTFX1: the post zone's parts (cellpost.cpp, the lens flares)
+	AirLampVol,	// lane MODULES1 part 25: the air's stage 4, the lamps' in-scatter (LampVol)
+	VkBloom,	// lane VKFRAME1: the bloom chain on Vulkan (its own timestamps, added with subAddMs)
 	SubCount };	// lane FOGPERF1: the air before stage 0 (depth blit), its far grid, after it
 void subBegin( int sub );
 //! lane PERF2: CPU time inside the per-draw setup (setupProgram and the cell's uniform calls), summed per frame
@@ -89,13 +97,31 @@ private:
 	Q_DISABLE_COPY( DrawCpuScope )
 };
 void subEnd( int sub );
+//! lane VKFRAME1: GPU ms timed outside GL (a Vulkan pass's timestamps) added to this frame's sub; the log's "sub" field
+void subAddMs( int sub, double ms );
 qint64 nowNs();
+
+/*! lane EMPTY240 R3-0: the always-on GPU zones (the top-level passes and the named zones below, two timestamps each,
+ *  read once available). A paint over 250 ms on the GPU prints `frame gpu zones:`. Red WW_GPUZONES_RED=1. */
+void gpuWatchFrame( bool begin, quint64 frame );
+int zoneBegin( const char * name );
+void zoneEnd( int zone );
+class Zone
+{
+public:
+	explicit Zone( const char * name ) : z_( zoneBegin( name ) ) {}
+	~Zone() { zoneEnd( z_ ); }
+private:
+	int z_;
+	Q_DISABLE_COPY( Zone )
+};
 
 class Scope
 {
 public:
-	explicit Scope( int pass ) : p_( on() ? pass : -1 ) { if ( p_ >= 0 ) begin( p_ ); }
-	~Scope() { if ( p_ >= 0 ) end( p_ ); }
+	// EMPTY240 R3-0: begin/end run with the timers off too (they feed the GPU zones; the timers' part checks on())
+	explicit Scope( int pass ) : p_( pass ) { begin( p_ ); }
+	~Scope() { end( p_ ); }
 private:
 	int p_;
 	Q_DISABLE_COPY( Scope )

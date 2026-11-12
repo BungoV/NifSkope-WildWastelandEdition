@@ -7,6 +7,7 @@
 #include "gl/lookdevstage.h"
 #include "gl/renderer.h"
 #include "harnesswindow.h"
+#include "cellworldanim.h"	// MODULES1: the cell world clock (live in test windows too)
 #include "cellmodsource.h"	// lane PERFFIX4: the grass fade from the game's inis
 
 #include <QDebug>
@@ -89,8 +90,12 @@ GrassState & gs()
 			s.on = QSettings().value( QLatin1StringView( kGrassKey ), false ).toBool();
 		}
 		s.redSeed = wwEnvStr( "WW_CELL_GRASS_RED" ).contains( QLatin1StringView( "seed" ) );
-		s.treeBuild = wwEnvStr( "WW_CELL_TREEWIND" ).trimmed() == QLatin1StringView( "1" );
+		/* MODULES1 item 19: trees sway by default (the cell view never acts paused); red WW_CELL_TREEWIND=0 or
+		 * WW_CELL_TREEWIND_RED=off: no tree-wind buckets, still trees, as before */
+		s.treeBuild = wwEnvStr( "WW_CELL_TREEWIND" ).trimmed() != QLatin1StringView( "0" )
+			&& wwEnvStr( "WW_CELL_TREEWIND_RED" ).trimmed() != QLatin1StringView( "off" );
 		s.treeRed = wwEnvStr( "WW_CELL_TREEWIND_RED" ).trimmed() == QLatin1StringView( "1" );
+		qInfo().noquote() << "cell tree wind build:" << ( s.treeBuild ? "on" : "off (red WW_CELL_TREEWIND=0 / _RED=off)" );
 		s.dump = wwEnvStr( "WW_CELL_GRASS_DUMP" ).trimmed();
 		bool ok = false;
 		const double t = wwEnvStr( "WW_CELL_GRASS_WIND_T" ).toDouble( &ok );
@@ -98,7 +103,7 @@ GrassState & gs()
 			s.timePinned = true;
 			s.tCur = t;
 			s.tPrev = t - 1.0 / 60.0;
-		} else if ( !wwWorldClockLive() ) {	// a harness never reads the wall clock: t = 0, run to run identical
+		} else if ( !wwCellClockLive() ) {	// red WW_CELL_CLOCK_RED=harness: t = 0, run to run identical
 			s.timePinned = true;
 			s.tCur = 0.0;
 			s.tPrev = -1.0 / 60.0;
@@ -807,6 +812,9 @@ bool wwCellGrassCableWind( const void * nif, int block, float wind[4], float win
 	const auto nf = s.noFade.constFind( nif );
 	if ( nf == s.noFade.constEnd() || !nf->contains( block ) || !wwCellGrassWind( wind, wind2 ) )
 		return false;
+	WW_SWITCH_STATIC( bool, noWind, wwEnv( "WW_CELL_CABLES_RED" ).trimmed() == "nowind" );	// MODULES1 R6-7: live
+	if ( noWind )
+		return false;
 	const auto wit = s.wave.constFind( nif );
 	wind[3] = wwCellGrassPhase( s.tCur, wit != s.wave.constEnd() ? wit->value( block, 0.0f ) : 0.0f );
 	return true;
@@ -834,12 +842,24 @@ void wwCellGrassFrameEnd()
 		s.clock.start();
 	s.tPrev = s.tCur;
 	s.tCur = double( s.clock.nsecsElapsed() ) * 1e-9;
+	/* MODULES1 item 19: the wind's proof every ~5 s: the weather's speed and direction as the sway reads them, and
+	 * the sway clock advancing (never 0, never frozen) */
+	static double saidAt = -10.0;
+	if ( s.tCur - saidAt >= 5.0 ) {
+		saidAt = s.tCur;
+		float w[5] = { 0, 0, 0, 0, 0 };
+		const bool live = wwLookdevWind( w );
+		qInfo().noquote() << QStringLiteral( "cell wind: %1 speed %2/255 dir %3 deg range %4 turb %5/255, sway clock %6 s (prev %7)%8" )
+			.arg( live ? QStringLiteral( "live" ) : QStringLiteral( "none (no weather wind)" ) ).arg( double( w[0] ), 0, 'f', 2 )
+			.arg( double( w[1] ), 0, 'f', 1 ).arg( double( w[2] ), 0, 'f', 1 ).arg( double( w[3] ), 0, 'f', 2 )
+			.arg( s.tCur, 0, 'f', 3 ).arg( s.tPrev, 0, 'f', 3 ).arg( s.treeBuild ? QString() : QStringLiteral( ", trees still (red)" ) );
+	}
 }
 
 bool wwCellGrassWantsRepaint()
 {
 	GrassState & s = gs();
-	const bool want = s.windDrawn && !s.timePinned && wwWorldClockLive();
+	const bool want = s.windDrawn && !s.timePinned && wwCellClockLive();
 	s.windDrawn = false;
 	return want;
 }
@@ -941,6 +961,30 @@ void wwCellGrassUniforms( Scene * scene, int block )
 		wind[2] = wwCellGrassPhase( ws.tPrev, wave );
 		wind[3] = wwCellGrassPhase( ws.tCur, wave );
 		ws.windDrawn = ws.windDrawn || wind2[1] > 0.0f;
+	}
+	/* lane MODULES1 M4: a swaying cable moves as a whole tube (w 2): fo4_default.vert keeps its radial normal frame.
+	 * The grass bend (n + d x lean, lean in units) turned every side's normal to the wind's direction, so the sun lit
+	 * the whole tube flat white. Red WW_CELL_CABLES_RED=bent bends the frame as grass (as before). */
+	WW_SWITCH_STATIC( bool, bentRed, wwEnv( "WW_CELL_CABLES_RED" ).trimmed() == "bent" );
+	if ( nf != s.noFade.constEnd() && nf->contains( block ) ) {
+		if ( !bentRed )
+			wind2[3] = 2.0f;
+		// MODULES1 R6-7: the red nowind is live: the cable keeps its sway bucket and gets a wind of speed 0
+		WW_SWITCH_STATIC( bool, noWind, wwEnv( "WW_CELL_CABLES_RED" ).trimmed() == "nowind" );
+		if ( noWind )
+			wind2[0] = wind2[1] = 0.0f;
+		static int saidWind = -1;
+		if ( saidWind != int( noWind ) ) {
+			saidWind = int( noWind );
+			qInfo().noquote() << ( noWind ? QStringLiteral( "cable wind: OFF, speed 0 at the draw (red WW_CELL_CABLES_RED=nowind, live)" )
+				: QStringLiteral( "cable wind: the weather's wind at the draw (red WW_CELL_CABLES_RED=nowind, live)" ) );
+		}
+		static int saidCable = -1;
+		if ( saidCable != int( bentRed ) ) {
+			saidCable = int( bentRed );
+			qInfo().noquote() << ( bentRed ? QStringLiteral( "cable wind normals: bent as grass (red WW_CELL_CABLES_RED=bent)" )
+				: QStringLiteral( "cable wind normals: radial, the tube moves whole (red WW_CELL_CABLES_RED=bent)" ) );
+		}
 	}
 	const QString said = haveWind
 		? QStringLiteral( "cell grass wind: angle %1 min %2 max %3 freq %4%5" ).arg( double( wind[0] ) ).arg( double( wind2[0] ) )

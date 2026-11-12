@@ -23,6 +23,10 @@ uniform float atSunK;
 uniform float atMoonK;
 uniform float atTintOn;
 uniform vec3 atTint[17];
+uniform vec2 atRecNight;	// MODULES1 R7: atmo_sky.frag's twin
+// MODULES1 R7 night sky d: the record's dome's share of the sky (0 = none, the red WW_NIGHTAIR_RED=1): over it the globe
+// stands in the dome, with none of the physical sky's air; the cell's air (cell_volsky.frag) is then its one extinction
+uniform float atDomeAir;
 uniform vec3 moonD;	// TO the moon's centre (world, unit)
 uniform vec3 moonS;	// TO the sun from the moon (world, unit): the phase
 uniform vec3 bodyX;	// the moon's axes: x = longitude 0, y = 90 east, z = the spin pole
@@ -131,10 +135,15 @@ void main()
 		}
 		m = k > 0.0 ? m / k : moonShade( rad, 0.5 * ( q - 0.5 * pxAng + sinR ), 0.25 * pxAng / sinR );
 	}
-	m *= atTrans( atTransTex, atCamR, d.z );
+	m *= mix( atTrans( atTransTex, atCamR, d.z ), vec3( 1.0 ), atDomeAir );
 	vec3 sky = atSunK * atLookup( atSunView, d, atSunW );
 	if ( atMoonK > 0.0 )
 		sky += atMoonK * atLookup( atMoonView, d, atMoonW );
+	if ( atRecNight.y > 0.0 ) {
+		float tn = sqrt( clamp( degrees( asin( clamp( d.z, -1.0, 1.0 ) ) ), 0.0, 90.0 ) / 90.0 ) * 16.0;
+		int jn = min( int( tn ), 15 );
+		sky = sky * ( 1.0 - atRecNight.x ) + mix( atTint[jn], atTint[jn + 1], tn - float( jn ) ) * atRecNight.y;
+	}
 	if ( atTintOn > 0.5 )
 		sky = atWeatherTint( sky, degrees( asin( clamp( d.z, -1.0, 1.0 ) ) ) );
 	fragColor = vec4( studioOutput( sky + m ) * cov, cov );

@@ -6,6 +6,7 @@
 #include "features/far-ground/cellfarground.h"
 #include "features/lights/cellfxlit.h"
 #include "features/water/cellwater.h"	// lane WATER1
+#include "features/water/endlesssea.h"	// MODULES1 10b-6: the sheet's draw counter
 #include "features/near/cellcull.h"	// lane SUNCELL1
 #include "gl/celllooks.h"	// lane DECALS1: the Decal distance fade row
 #include "features/air/cellvolair.h"	// lane VOLPART1: volumetric lit effect cards
@@ -16,6 +17,7 @@
 #include "features/near/cellgpucull.h"	// lane GPUDRIVEN1 step B: the GPU cluster cull
 #include "features/far-lod/cellfarinst.h"	// lane FARDRAW1: the instanced far rings
 #include "features/near/celldrawpacket.h"	// lane BINDLESSMDI1: the follower tests
+#include "gl/wwuploadcap.h"	// lane EMPTY240 R4-1: this draw may wait a paint for its mesh
 #include "features/particles/cellfxres.h"
 #include "gl/cellgrass.h"
 #include "features/near/cellvrs.h"
@@ -32,6 +34,7 @@
 #include "io/material.h"
 #include "model/nifmodel.h"
 #include "glview.h"
+#include "features/far-lod/lodpreview.h"	// lane PERFLOAD1 P8: one far ring alone
 
 void BSShape::updateImpl( const NifModel * nif, const QModelIndex & index )
 {
@@ -313,6 +316,10 @@ void BSShape::drawShapes( NodeList * secondPass )
 	if ( name.contains( QLatin1StringView( "FakeAir " ) ) && wwFakeAirHidden() )
 		return;
 
+	// lane PERFLOAD1 P8: the LOD preview's one ring alone (terrain, water and objects of the other rings left out)
+	if ( name.startsWith( QLatin1StringView( "FarLOD " ) ) && LodPreview::ringHides( name ) )
+		return;
+
 	// flat shading: GLView fills the geometry with uniform grey instead
 	if ( scene->flatGrey && !scene->selecting )
 		return;
@@ -387,10 +394,16 @@ void BSShape::drawShapes( NodeList * secondPass )
 	const bool blDefer = !scene->selecting && scene->renderer && WwBl::fastOn();
 	if ( blDefer )
 		scene->renderer->wwVaoDefer = true;
+	WwUp::st().meshMayDefer = !scene->selecting;	// lane EMPTY240 R4-1: a new mesh over the budget waits a paint
 	const bool shapeBound = nif && bindShape();
+	WwUp::st().meshMayDefer = false;
 	if ( blDefer )
 		scene->renderer->wwVaoDefer = false;
 	if ( !shapeBound )
+		return;
+	// lane EMPTY240 R6-4: a shape's first program pick counts against the paint's upload budget; past it the shape waits
+	const bool wwFirstPick = !shader && !scene->selecting;
+	if ( wwFirstPick && WwUp::pickWaits() )
 		return;
 	const unsigned int blOwnVao = blDefer ? scene->renderer->wwShapeVao() : 0u;
 
@@ -442,6 +455,7 @@ void BSShape::drawShapes( NodeList * secondPass )
 		}
 		{
 			PassTime::CpuScope ptSetup( PassTime::ShapeSetup );	// lane PERF1
+			WwUp::Charge wwPickCharge( wwFirstPick, true );	// lane EMPTY240 R6-4
 			shader = context->setupProgram( this, shader );
 		}
 		wwCellAnimObjNoteDraw( static_cast<const Node *>( this ) );	// lane FIREFX1 (a no-op unless the census listens)
@@ -533,6 +547,8 @@ void BSShape::drawShapes( NodeList * secondPass )
 		}
 	}
 	// lane SUNCELL1: a welded cell shape draws only the placements that touch the camera's frustum (gl/cellcull.h)
+	if ( !selectionFlags && numTriangles > 0 )
+		wwEndlessSeaDrawBegin( scene, id(), (long long) numTriangles );	// MODULES1 10b-6: a no-op but for the sea sheet
 	static std::vector<std::uint32_t> cullRanges;
 	if ( !selectionFlags )
 		GpuDrivenB::learn( this, shader );	// step B: the state this draw runs with
@@ -634,6 +650,7 @@ void BSShape::drawShapes( NodeList * secondPass )
 			}
 		}
 	}
+	wwEndlessSeaDrawEnd();
 	WwBl::poolEnd( context->fn );	// lane BINDLESS2: the shape's own vertex array again
 	if ( singleSample )
 		glEnable( GL_MULTISAMPLE );
@@ -685,6 +702,7 @@ bool BSShape::wwMdiDraw( const void * hint, const std::vector<std::uint32_t> * r
 		return int( vrs ) | ( int( ssr ) << 1 ) | ( int( s->bslsp && s->bslsp->greyscaleColor ) << 2 );
 	};
 	const int leadHead = head( this );
+	const int leadVcAo = CellFarInst::vcAoType( name );	// MODULES1 10b-2: a run shares one farVcAo
 	const bool leadLand = wwCellLandIs( nif, id() ), leadTerr = wwCellIsTerrainShape( this );
 	const bool cullPass = !wwCellProbePass( scene ) && !wwCellAlbedoProbePass( scene );
 	const bool fadeLook = cullPass && wwLookOn( WwLook::DecalFade );
@@ -712,6 +730,8 @@ bool BSShape::wwMdiDraw( const void * hint, const std::vector<std::uint32_t> * r
 			|| scene->hiddenTris.contains( f->nodeId ) || head( f ) != leadHead )
 			break;
 		if ( !scene->hasOption( Scene::ShowMarkers ) && f->name.contains( QLatin1StringView( "EditorMarker" ) ) )
+			break;
+		if ( CellFarInst::vcAoType( f->name ) != leadVcAo )
 			break;
 		const int fid = f->id();
 		if ( wwCellWaterWanted( scene, fid ) || wwCellWaterIsShape( nif, fid ) || CellFarGround::twinFor( nif, fid ) != 0

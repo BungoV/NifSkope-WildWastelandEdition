@@ -34,6 +34,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #define GLCONTEXT_HPP_INCLUDED
 
 #include <QString>
+#include <vector>
 #include <QVector>
 #include <QModelIndex>
 #ifdef Q_OS_MACOS
@@ -128,7 +129,8 @@ public:
 		unsigned int id;
 		bool status;
 		bool isProgram;
-		std::uint64_t srcHash = 0;	// of the final source (lane PERF1: the program binary cache key)
+		std::uint64_t srcHash = 0;
+		std::string wwDefs;	// lane HLSLBULK1 R6: the loader defines in the source, sorted, joined with '+' (empty: the base variant)	// of the final source (lane PERF1: the program binary cache key)
 	};
 
 public:
@@ -152,6 +154,9 @@ public:
 		Program * wwTwin = nullptr;	// the program it stands in for (its sampler locations decide which maps bind)
 		WwCellUni::Cache wwUni;	// lane CELLUNI1: what the cell scope last wrote per location (reset at every link)
 		WwCellUni::Mirror wwMirror;	// lane PERFFIX3: every setter's value per location once on (the air reads it, no glGetUniform)
+		bool wwSpv = false;	// lane HLSLBULK1 R5: linked from the converted HLSL's SPIR-V (GL_ARB_gl_spirv), else from the GLSL
+		QString wwSpvWhy;	// why it stayed GLSL (the fallback telemetry)
+		std::vector< unsigned int > wwSpvIds, wwGlslIds;	// the SPIR-V shader objects, and the GLSL ones the program was listed with
 		bool patches = false;	// lane WATERLOOK1 step 2: has a tessellation stage, so it draws GL_PATCHES (triMode)
 
 		ConditionGroup conditions;

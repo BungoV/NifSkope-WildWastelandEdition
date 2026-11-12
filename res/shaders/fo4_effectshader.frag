@@ -81,7 +81,63 @@ out vec4 fragColor;
 #ifdef WW_SUNSHADOW
 #include "ww_sunshadow.glsl"
 #endif
+#ifndef WW_FX_DECALLIT
+#define WW_FX_AMBSHARE 1	// MODULES1 R8-1: a lit card's ambient keeps the share the GI volume leaves (cell_fxlaw.glsl)
+#endif
 #include "cell_lights.glsl"
+#ifndef WW_FX_DECALLIT
+/* MODULES1 R8-1 (bungo's fake volumetric rule: "Opacity gives the height, or rather 'depth' always"): a volumetric
+ * card is a lump whose depth is its opacity, alpha 1 = half a UV unit of the card. Its normal is tilted down the
+ * opacity's slope (Mikkelsen 2010, "Bump Mapping Unparametrized Surfaces on the GPU": the surface gradient from
+ * screen derivatives), so a flat card shades toward a lamp like a mound. No texture tap: three derivative pairs.
+ * With a normal map the two slopes ADD at weight 1 : 1 (Mikkelsen 2020, "Surface Gradient Based Bump Mapping
+ * Framework": heights add, so their gradients add; both are slopes in the same view units): the map's gradient
+ * against the card's face, N - n / ( n . N ), plus the opacity's, then one normalize.
+ * fxLumpRed (WW_CELL_FXLOCAL_RED): 1 `face` = no opacity slope at all, 2 `mapalone` = a card with a normal map takes
+ * the map alone (the first R8-1 commit), 4 `ball` = the UV ball stands in for the depth again (FX_PUFF_A). */
+uniform int fxLumpRed;
+/* MODULES1 round 9 (bungo: a mist card "is a slab of denser air"): a blended lit MESH card on the volumetric law takes
+ * the light the air at its pixel scatters toward the eye and nothing else: the lamps x the air's phase, each in its own
+ * colour with its own falloff (red by a red lamp, orange by a fire), + the sky's share under the record's cap, x its
+ * opacity as density. No surface share (the wrapped diffuse of a lump: up to 4 x the air's scatter per lamp) and no GI
+ * surface term (the volume's irradiance on an up face, uncapped: a bluish-white sum over warm lamps = a grey-white
+ * bank). So a card is never brighter, nor of another hue, than thick air under the same lights. fxAirCard: 1 = a mesh
+ * card (renderer.cpp), 0 = a particle system (still a lump). Red WW_CELL_FXLOCAL_RED=lump (fxLocalRed bit 4): the lump. */
+uniform int fxAirCard;
+vec3 fxLumpNormal( vec3 N, vec3 Nf, vec3 pv, float a )
+{
+	if ( ( fxLumpRed & 1 ) != 0 || ( hasNormalMap && ( fxLumpRed & 2 ) != 0 ) )
+		return N;
+	if ( hasNormalMap ) {	// the map's normal as a slope on the face, then the opacity's slope on the same face
+		vec3 n = N / max( dot( N, Nf ), 0.25 );
+		N = Nf;
+		vec3 dpx = dFdx( pv ), dpy = dFdy( pv );
+		vec3 r1 = cross( dpy, N ), r2 = cross( N, dpx );
+		float det = dot( dpx, r1 );
+		vec2 dux = dFdx( texCoord.st ), duy = dFdy( texCoord.st );
+		float duv = abs( dux.x * duy.y - dux.y * duy.x );
+		if ( abs( det ) < 1e-20 || duv < 1e-20 )
+			return normalize( n );
+		float L = 0.5 * sqrt( abs( det ) / duv );
+		return normalize( n - sign( det ) * L * ( dFdx( a ) * r1 + dFdy( a ) * r2 ) / abs( det ) );
+	}
+	vec3 dpx = dFdx( pv ), dpy = dFdy( pv );
+	vec3 r1 = cross( dpy, N ), r2 = cross( N, dpx );
+	float det = dot( dpx, r1 );
+	vec2 dux = dFdx( texCoord.st ), duy = dFdy( texCoord.st );
+	float duv = abs( dux.x * duy.y - dux.y * duy.x );
+	if ( abs( det ) < 1e-20 || duv < 1e-20 )
+		return N;
+	float L = 0.5 * sqrt( abs( det ) / duv );	// half a UV unit in view units: the lump's height at alpha 1
+	return normalize( abs( det ) * N - sign( det ) * L * ( dFdx( a ) * r1 + dFdy( a ) * r2 ) );
+}
+#define FX_LUMP_N( n, nf, pv, a ) fxLumpNormal( n, nf, pv, a )
+// the opacity is the card's depth: the thickness its light reads is the opacity itself, not a ball over its UV
+#define FX_PUFF_A( a, q ) ( ( fxLumpRed & 4 ) != 0 ? vpPuffAlpha( a, q ) : ( a ) )
+#else
+#define FX_LUMP_N( n, nf, pv, a ) ( n )
+#define FX_PUFF_A( a, q ) vpPuffAlpha( a, q )
+#endif
 #ifdef WW_FX_DECALLIT
 #include "cell_ao.glsl"
 #endif
@@ -91,7 +147,7 @@ uniform sampler2D fxDepth;		// the opaque pass's depth, the viewport's corner at
 uniform float fxSoftDepth;		// game units
 uniform float fxDistScale;		// view units -> game units
 uniform bool fxAdditive;
-uniform int fxRed;				// 2 nosoft, 4 nolin, 8 hide
+uniform int fxRed;				// 2 nosoft, 4 nolin, 8 hide, 32 unbound (MODULES1 item 2)
 // lane DECALLIT1 (WW_CELL_DECALLIT_PROBE, gates only): an effect decal in a probe pass draws a white colour, opaque
 // where it shows, so probe 6 holds the light it takes (lit as the wall, or self-lit under the red)
 uniform bool fxDecalProbe;
@@ -99,6 +155,8 @@ uniform bool fxDecalProbe;
 // stands in (fxRoomLitMul); cellFxBase = the game's lit-effect base (the weather's Effect Lighting x the sun scale)
 uniform bool fxRoomLit;
 uniform vec3 cellFxBase;
+// lane MODULES1 M3 (G7): the Effect Lighting law; cellFxEmitK / cellFxUnlitK live there
+#include "cell_fxlaw.glsl"
 vec3 fxRoomShare = vec3( 1.0 );	// probe 75
 // lane FXLIT1: this shape's model's placed lights (src/features/lights/cellfxlit.h)
 uniform int fxLitMode;			// 0 an unlit effect; 1 lit; red controls: 2 every light, 4 no 2.2 on the falloff, 8 self-lit
@@ -138,9 +196,12 @@ vec3 cellFxLight( int i, vec3 P )
 vec3 cellFxLit( vec3 P )
 {
 	// lane SUNCELL1 final: an exterior with no weather loaded has no sun to light it -- self-lit, as before
-	if ( ( fxLitMode & 8 ) != 0 || ( !cellInterior && !cellHasDir ) )
+	// MODULES1 R7-1: a blended lit card outdoors takes the local light: the surfaces' sun under its shadow + the ambient
+	bool loc = fxLocalOn() && !cellInterior && !fxAdditive;
+	if ( ( fxLitMode & 8 ) != 0 || ( !cellInterior && !cellHasDir && !loc ) )
 		return vec3( 1.0 );
-	vec3 E = cellHasDir ? cellDirColor : vec3( 0.0 );
+	// R8-1: the ambient's share and the GI as a surface there (fxLocalSky, set by the caller; 1 and 0 before it)
+	vec3 E = loc ? vpSun.rgb * fxLocalVis + cellAmbient( vec3( 0.0, 0.0, 1.0 ), P ) FX_LOCAL_GI : cellHasDir ? cellDirColor : vec3( 0.0 );
 	if ( ( fxLitMode & 2 ) != 0 ) {
 		// flat on purpose: an effect's light has no hemisphere clip, which the cluster lists cull by
 		for ( int i = 0; i < cellLightCount; i++ )
@@ -150,7 +211,7 @@ vec3 cellFxLit( vec3 P )
 			if ( fxLit[k] > -0.5 )
 				E += cellFxLight( int( fxLit[k] + 0.5 ), P ) * fxLitScale[k];
 	}
-	return mix( vec3( 1.0 ), E, lightingInfluence );
+	return fxLawMix( E, lightingInfluence, fxAdditive );	// MODULES1 M3: was mix( 1, E, lightingInfluence )
 }
 
 float cellFxFade()
@@ -245,7 +306,7 @@ vec3 fxRoomLitMul( vec3 Pv, vec3 normal )
 			if ( fxLit[j] > -0.5 )
 				E += cellFxLight( int( fxLit[j] + 0.5 ), Pw ) * fxLitScale[j];
 	}
-	return mix( vec3( 1.0 ), E, lightingInfluence );
+	return fxLawMix( E, lightingInfluence, fxAdditive );	// MODULES1 M3: was mix( 1, E, lightingInfluence )
 }
 #endif
 
@@ -354,7 +415,7 @@ void main()
 			vpFaceN = -vpFaceN;
 		vpVol.x = vpEdgeFade( abs( dot( vpFaceN, ViewDir_norm ) ) );
 		vpVol.y = vpNearFade( -pv.z * fxDistScale );
-		vpVol.z = vpPuffAlpha( color.a, clamp( texCoord.st, 0.0, 1.0 ) * 2.0 - 1.0 );
+		vpVol.z = FX_PUFF_A( color.a, clamp( texCoord.st, 0.0, 1.0 ) * 2.0 - 1.0 );
 		if ( !greyscaleAlpha )
 			color.a = vpVol.z * vpVol.x * vpVol.y;
 	}
@@ -495,6 +556,11 @@ void main()
 		vec3 lin = ( fxRed & 4 ) != 0 ? max( color.rgb, vec3( 0.0 ) ) : pow( max( color.rgb, vec3( 0.0 ) ), vec3( 2.2 ) );
 		if ( fxLitMode != 0 ) {	// lane FXLIT1: a lit effect, in linear light, before the fog
 			vec3 P = cellWorldPos( -ViewDir );
+#ifndef WW_FX_DECALLIT
+			if ( volPart == 0 && volCsm && fxLocalOn() && !cellInterior && !fxAdditive )
+				fxLocalVis = wwSunShadow( -ViewDir );	// R7-1: the plain lit card's sun, shadowed as the puff's
+			fxLocalSky( P, fxAdditive );	// R8-1: the sky light a surface takes here
+#endif
 			vec3 m = cellFxLit( P );
 			if ( cellProbe >= 70 && cellProbe <= 74 ) {
 				// its probes, opaque: 70 the model, 71 / 72 the position (as probes 2 / 3), 73 / 74 the multiplier / 4
@@ -528,8 +594,24 @@ void main()
 					fragColor = vpProbe( k, posView, aThick );
 				return;
 			}
+#ifdef WW_FX_AMBSHARE
+			if ( fxAirCard != 0 && !fxAdditive && ( fxLocalRed & 4 ) == 0 ) {	// round 9: a slab of air (vpLit's thin share alone)
+#ifndef WW_FX_DECALLIT
+				vpAirCardA = ( fxLocalRed & 8 ) == 0 ? clamp( aThick, 0.0, 1.0 ) : 0.0;	// FARWATER1 late item 4: lamps' multiple scatter
+#endif
+				aThick = 0.0;
+				fxLocalGi = vec3( 0.0 );
+			}
+#endif
 			if ( fxLitMode != 0 )
-				lin *= fxAdditive ? cellFxLit( cellWorldPos( posView ) ) : vpLit( posView, dot( normal, V ) < 0.0 ? -normal : normal, aThick );
+				lin *= fxAdditive ? cellFxLit( cellWorldPos( posView ) )
+					: vpLit( posView, FX_LUMP_N( dot( normal, V ) < 0.0 ? -normal : normal, vpFaceN, posView, clamp( vpVol.w, 0.0, 1.0 ) ), aThick )
+						FX_LOCAL_GI_LAW( lightingInfluence );
+		}
+		if ( fxLitMode == 0 ) {	// lane PHYSUNITS1: unlit effects in real units
+			float uk = fxAdditive ? cellFxEmitK : cellFxUnlitK;
+			if ( uk > 0.0 )
+				lin *= uk;
 		}
 		// the landed air (wwFogFx, as the surfaces take it); VOLPART1 red nofog: the game's fog alone
 		if ( volPart != 0 && ( volPartRed & 32 ) != 0 ) {
@@ -541,6 +623,16 @@ void main()
 			}
 		} else
 		lin = wwFogFx( lin, -ViewDir, fxAdditive );	// lane VOLAIR1: the air, as the surfaces take it (red fxfog: the game's fog alone)
+		/* lane MODULES1 item 2 (bungo 11-09, black shards on the ground in daylight): in real units the lit base is
+		 * ~25000, so a card brighter than ~2.6 overflows the RGBA16F frame to inf and TAA/bloom turn it into NaN = black.
+		 * The light is kept under half the half-float range and a non-finite value draws nothing. Red WW_CELL_FX_RED=unbound. */
+		if ( ( fxRed & 32 ) == 0 ) {
+			if ( any( isnan( lin ) ) || any( isinf( lin ) ) || isnan( color.a ) ) {
+				lin = vec3( 0.0 );
+				color.a = 0.0;
+			}
+			lin = min( lin, vec3( 32768.0 ) );
+		}
 		// probe 6 (the imagespace's measure): the linear value, blended as drawn
 		if ( cellProbe == 6 )
 			fragColor = vec4( lin * cellProbeGain, color.a );

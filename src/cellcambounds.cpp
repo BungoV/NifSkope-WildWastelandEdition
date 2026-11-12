@@ -191,6 +191,12 @@ void cellCamBoundsKeep( const NifModel * nif, const std::shared_ptr<EsmWorld> & 
 	docs()[nif] = std::move( d );
 }
 
+bool cellCamBoundsIsCell( const NifModel * nif )
+{
+	QMutexLocker lock( &g_lock );
+	return nif && docs().count( nif ) != 0;
+}
+
 void cellCamBoundsForget( const NifModel * nif )
 {
 	QMutexLocker lock( &g_lock );

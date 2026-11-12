@@ -57,6 +57,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "features/shared/cellpasstime.h"	// lane PERF1
 #include "features/near/cellvrs.h"	// lane VRS1
 #include "features/particles/cellfxres.h"	// lane FXRES1
+#include "features/far-lod/cellfarlod.h"	// MODULES1 part 27: the far cards before the sorted pass
 #include "features/near/cellqueue.h"	// lane GPUDRIVEN1
 #include "features/near/cellgpucull.h"	// lane GPUDRIVEN1 step B
 #include "features/post/taainputs.h"	// lane TAAINPUTS1
@@ -594,6 +595,8 @@ void Scene::drawShapes()
 	wwCellVrsPass( this, false, false );
 	PassTime::end( PassTime::Opaque );
 	wwCellDrawProbe( this, QStringLiteral( "after the first pass" ) );
+	wwCellFarLodEarly( this );	// MODULES1 part 27: the far cards under the smoke (paintGL arms it; no call unarmed)
+	wwCellDrawProbe( this, QStringLiteral( "after the far cards" ) );
 	drawGrid();
 
 	if ( !secondPass.list().isEmpty() )

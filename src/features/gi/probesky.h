@@ -42,6 +42,8 @@ void probeSkyCube( const float vis[8], const unsigned char ( *tint )[3], const P
 //! sky-lit) and a Probe sharing tick relights any cell.
 //! skyKept false = kept only so the emittance row can flip it live (an interior without sky).
 void probeSkyKeep( const void * nif, const ProbeSoup & soup, const QString & bakeDir, const ProbeGiSpec & spec, bool skyKept = true );
+//! lane AIRPERF1 r4: the same without a bake and without a copy (the streamed cells' traced set, features/gi/rttraceset.h)
+void probeSkyKeepMove( const void * nif, ProbeSoup && soup, const ProbeGiSpec & spec, bool skyKept );
 /*! the kept cell's soup when it is `nif`'s (else nullptr), the sky its last relight
  *  took (`on` false for an interior that shows none) and the lights that relight takes (the .nifx bulbs in): what the
  *  ray-traced GI volume traces and shades. The pointer lives until the next probeSkyKeep / probeSkyForget. */

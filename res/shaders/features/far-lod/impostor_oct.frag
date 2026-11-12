@@ -169,6 +169,12 @@ float covAt( vec2 uv )
 
 // --- what the viewer is asking for ------------------------------------------
 uniform float alphaThreshold;      // default 128/255, vanilla's LOD alpha test (IMPOSTORFIN1)
+// lane PERFLOAD1 P7: the tree ladder's cross-fade (0 = whole card), dithered with a pattern moved every frame so the
+// TAA resolves it (docs/FO4CS_IMPROVED_LOD_PLAN.md R3 item 5); 0 on every other path
+uniform float cardFadeOut;
+uniform float cardFadeFrame;
+uniform vec3 cardLodTint;	// lane PERFLOAD1 P8: the LOD preview's tint (0 = off)
+uniform float cardLodStripe;	// lane LODLIVE1: an octahedral set's stripes, 1 (64 px frames) .. 4 (512 px); 0 = none
 /* WHICH COVERAGE THE CUT READS (lane IMPOSTORTEAR1, 2026-09-23). 0 -- GL's
  * default, so also what an exe that never sets it gets -- is the STIPPLED
  * cut of section 1b; 1 is the way back, the 3-frame weighted mean the cut
@@ -185,7 +191,31 @@ uniform bool  useHeightBlend;      // the ghost-free blend, spec 286
 uniform int   depthSearchSteps;
 uniform bool  useDepthOffset;      // gl_FragDepth, spec 286
 uniform bool  useBakedAo;          // spec 293..295
+#ifdef WW_CELLLIGHTS
+uniform bool  cardLightRed;        // PERFLOAD1 P2 red (WW_CELL_FARLOD_RED=cardlight): the viewport's sun + NAM0 ambient again
+#endif
 uniform int   debugChannel;        // 0 = lit; otherwise one sheet channel raw
+#if defined( WW_CELLLIGHTS ) && !defined( WW_SUNSHADOW )
+/* lane DEBUGVIEW1 item 2: the card's sun takes what the near trees' sun takes outdoors (fo4_default.frag: cellDirVis =
+ * the clouds' shadow x the air's transmittance, cellAirDif = the air's soft share); before, the card's sun was never cut
+ * (cellDirVis 1), so under an overcast sky the far trees glowed past the near square. The cascades stay off (the cards
+ * stand past their reach). Red WW_CELL_FARLOD_RED=cardsun: the uncut sun. The cloud map is ww_sunshadow.glsl's. */
+uniform bool  cardSunRed;
+uniform int ussCloudOn;
+uniform sampler2D ussCloudMap;
+uniform mat4 ussCloudFromView;
+uniform vec4 ussCloudFar;
+float cardCloudT( vec3 posView )	// ww_sunshadow.glsl ussCloudT
+{
+	if ( ussCloudOn == 0 )
+		return 1.0;
+	vec3 q = ( ussCloudFromView * vec4( posView, 1.0 ) ).xyz;
+	vec3 m = textureLod( ussCloudMap, q.xy, 0.0 ).xyz;
+	float t = exp( -min( m.z, m.y * max( m.x - q.z, 0.0 ) ) );
+	vec2 e = abs( q.xy - 0.5 ) * 2.0;
+	return mix( t, ussCloudFar.x, smoothstep( 1.0 - ussCloudFar.y, 1.0, max( e.x, e.y ) ) );
+}
+#endif
 
 /* SWAY, AND WHAT A CARD CAN HONESTLY SHOW OF IT (spec 288..290).
  *
@@ -612,6 +642,11 @@ void main()
 		cutCov = colour.a;
 	if ( cutCov < alphaThreshold )
 		discard;
+	if ( cardFadeOut > 0.0 ) {	// interleaved gradient noise (Jimenez 2014), shifted per frame
+		vec2 fp = gl_FragCoord.xy + 5.588238 * cardFadeFrame;
+		if ( fract( 52.9829189 * fract( dot( fp, vec2( 0.06711056, 0.00583715 ) ) ) ) < cardFadeOut )
+			discard;
+	}
 
 	/* ------------------------------------------------------------------
 	 * 2. THE PIXEL DEPTH OFFSET (spec 286, SPEC GAP #4 on its sign).
@@ -763,6 +798,33 @@ void main()
 	 * Verbatim `fo4_default.frag`'s curve, with `A.a` = toneMapScale and
 	 * `D.a` = brightnessScale, which is what its vertex stage packs there. */
 	vec3 lc = colour.rgb * ( lit + ambient );
+#ifdef WW_CELLLIGHTS
+	/* lane PERFLOAD1 P2: outdoors with the weather's sun the card takes the near trees' inputs (fo4_default.frag,
+	 * SUNCELL1): cellLit gets the weather's directional ambient (DALC, the hour's keys) x the baked AO alone, and adds
+	 * the hour's sun itself (cellDirColor, Sunlight Scale in). The viewport sun and the flat NAM0 ambient above follow
+	 * the viewport, not the hour: with them the card was lit twice and glowed at 3 AM outside the near square. */
+	if ( cellOn && !cellInterior && cellHasDir && !cardLightRed ) {
+		vec3 cardPosV = ( modelViewMatrix * vec4( cardPosModel, 1.0 ) ).xyz;
+		vec3 Nw = cellWorldDir( nView );
+		vec3 Ax = cellExtDalc ? sqrt( max( cellAmbient( Nw, cellWorldPos( cardPosV ) ), vec3( 0.0 ) ) )
+		                      : sqrt( max( lightSourceAmbient.rgb, vec3( 0.0 ) ) ) * 0.375;
+		Ax *= ao;
+		if ( cellGiSky && ( cellRed & 131072 ) == 0 )
+			Ax *= sqrt( 1.0 - cellGiSkyK( cellWorldPos( cardPosV ), Nw ) );
+		cellExtAmb = Ax * Ax;
+		lc = colour.rgb * Ax;
+#ifndef WW_SUNSHADOW
+		if ( !cardSunRed ) {	// lane DEBUGVIEW1 item 2: the clouds and the air cut the card's sun as the near trees'
+			cellDirVis = cardCloudT( cardPosV );
+#ifdef WW_FOG
+			vec2 airTD = wwVolAirSunTD( cardPosV );
+			cellDirVis *= airTD.x;
+			cellAirDif = airTD.y;
+#endif
+		}
+#endif
+	}
+#endif
 	/* lane FARLOD1: the cell path, in fo4_default.frag's order -- the cell's lights on the sqrt-of-linear
 	 * colour, the fog on its square, then the cell's imagespace (linear into the HDR frame) in place of
 	 * the viewer's curve. Roughness 1, no specular and no cube: the card carries no gloss it shades. */
@@ -773,9 +835,15 @@ void main()
 	if ( cellOn )
 		lc = cellLit( lc, colour.rgb, nView, cardPosView, V, 0.0, vec3( 0.0 ), 1.0, 0.5, vec3( 0.0 ), vec3( 0.0 ) );
 #endif
+#ifdef WW_DV
+	vec3 wwDvLit = lc * lc;	// lane DEBUGVIEW1: the lit colour before the fog
+#endif
 #ifdef WW_FOG
 	if ( fogOn || wwApOn() )	// lane SKYA: the sky's aerial perspective with the fog off too (the far cards)
 		lc = sqrt( max( wwFog( lc * lc, cardPosView ), vec3( 0.0 ) ) );
+#endif
+#ifdef WW_DV
+	vec3 wwDvHdr = lc * lc;
 #endif
 #ifdef WW_CELLLIGHTS
 	if ( cellOn && cellIsOn )
@@ -788,5 +856,28 @@ void main()
 		z = ( z * ( a * z + b * c ) + d * e ) / ( z * ( a * z + b ) + d * f ) - e / f;
 		lc = sqrt( z / max( toneMapScale * 0.93333333, 1e-6 ) );
 	}
+	if ( cardLodTint.r + cardLodTint.g + cardLodTint.b > 0.0 ) {	// lane PERFLOAD1 P8: the level's colour, shaded by its luminance
+		lc = cardLodTint * ( 0.25 + 0.75 * clamp( dot( lc, vec3( 0.2126, 0.7152, 0.0722 ) ), 0.0, 1.0 ) );
+		// lane LODLIVE1: N dark diagonal stripes in every 32 px cell = the octahedral frame size (1 = 64 px .. 4 = 512 px)
+		if ( cardLodStripe > 0.5 && fract( ( gl_FragCoord.x + gl_FragCoord.y ) * cardLodStripe / 32.0 ) < 0.35 )
+			lc *= 0.4;
+	}
 	fragColor = vec4( lc, 1.0 );
+#ifdef WW_DV
+	if ( cellOn && wwDebugView != 0 ) {	// lane DEBUGVIEW1: the tree card's views (owner 4; no cascades, no gloss, no glow)
+		vec3 dvT = vec3( 1.0 ), dvIn = vec3( 0.0 );
+#ifdef WW_FOG
+		if ( fogOn || wwApOn() ) {
+			dvIn = max( wwFog( vec3( 0.0 ), cardPosView ), vec3( 0.0 ) );
+			dvT = clamp( wwFog( vec3( 1.0 ), cardPosView ) - dvIn, 0.0, 1.0 );
+		}
+#endif
+		float dvCl = 1.0;
+#ifndef WW_SUNSHADOW
+		dvCl = cardCloudT( cardPosView );
+#endif
+		fragColor = vec4( wwDvSurface( colour.rgb * colour.rgb, cellWorldDir( nView ), 0.0, 0.0, ao, 1.0, 1.0, dvCl, vec3( 0.0 ),
+			dvT, dvIn, wwDvLit, wwDvHdr, length( cardPosView ) * length( cellRow[0].xyz ), 4 ), 1.0 );
+	}
+#endif
 }

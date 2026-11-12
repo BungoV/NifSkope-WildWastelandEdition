@@ -87,6 +87,8 @@ struct WwCellLight
 	quint32 lens = 0;               //!< lane LIGHTS3 (LENSFLARE1): the base's LENS (0 none)
 	float byteColor[3] = { 0, 0, 0 };   //!< lane LIGHTS3: DATA colour bytes / 255 (the lens flare's colour influence)
 	quint32 xemi = 0;                   //!< lane LIGHTS4: the placement's XEMI code (cellfxlit.h wwCellXemiCode), 0 none
+	float physG = 0.0f;                 //!< lane PHYSUNITS1: the Game Light Brightness in its colour (0: none, a .nifx light)
+	float physIn = 0.0f;                //!< MODULES1 R6-13: the unit factor in its colour (1 = the record's own; 0: not a placed LIGH)
 	//! lane LIGHTFLICKER1: 0 steady, 1 flicker (LIGH flag 0x8), 2 pulse (0x80 | 0x100), with DATA's Flicker Effect
 	int flicker = 0;
 	float flickerPeriod = 0.0f, flickerIntensity = 0.0f, flickerMovement = 0.0f;
@@ -224,6 +226,9 @@ struct WwCellLighting
 	 *  lights take it (red WW_CELL_NIFX_SCALE_RED=1: 1) and as the emissive surfaces and their RT GI glow take it (red
 	 *  WW_CELL_GLOW_SCALE_RED=1: 1) */
 	float nifxScale = 1.0f, glowScale = 1.0f;
+	/*! lane PHYSUNITS1: an interior's ambient, directional and fog on its lamps' real scale (the median lamp factor
+	 *  wwPhysLampK over its lamps; x Game Light Brightness at upload); 0 = none (the red, an exterior) */
+	float physAmbK = 0.0f;
 	QString summary;                    //!< one census line
 };
 
@@ -298,10 +303,10 @@ int wwCellPassRed();
 const WwCellGi * wwCellGiFor( const void * nif );
 //! lane LIGHTPHYS4: moves on each wwCellGiPublish for the document (0: none yet)
 int wwCellGiVersion( const void * nif );
-//! the GI row (ships off); the pin WW_CELL_GI wins. Draws only while the Cell lights row is on.
+//! the old baked GI: on exactly under the PRT red (FARWATER1 item 6: its pin and row are gone). Draws only while Cell lights is on.
 bool wwCellGiOn();
 /*! lane PRTOFF1 (bungo 10-29): the old baked probe GI (PRT) draws only under the red WW_CELL_PRT_RED=1 (read once, at
- *  launch). Off: wwCellGiOn() is false whatever the row or WW_CELL_GI say, WW_CELL_GI_FROM loads no bake, nothing
+ *  launch). Off: wwCellGiOn() is false, WW_CELL_GI_FROM loads no bake, nothing
  *  relights one, the march is never compiled and the shaders hold no grid read (WW_CELL_PRT, src/gl/glcontext.cpp) */
 bool wwCellPrtOn();
 /*! lane PERF1: the GI's visibility, WW_CELL_GI_VIS: 0 the volumes (default: the pixel's volume, the threshold blend),
@@ -311,7 +316,6 @@ int wwCellGiVis();
  *  (the screen GI at full resolution), 2 inline (no screen pass: each surface reads the volumes), 3 red (the screen
  *  pass runs, the surfaces read inline). With WW_CELL_GI_VIS=march: no screen pass. */
 int wwCellGiRate();
-void wwCellGiSetOn( bool on );
 //! the GPU relight row (WW/CellGiGpu, WW_CELL_GI_GPU, read when a cell opens); the env pin wins over its row
 bool wwCellGiGpuOn();
 void wwCellGiGpuSetOn( bool on );

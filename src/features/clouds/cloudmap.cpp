@@ -4,11 +4,14 @@
 #include "cloudvol.h"	// lane CLOUD5: Cloud Variety raises the Low top for towers
 #include "cloudvolmath.h"
 #include "wwswitch.h"
+#include "wwsyncred.h"	// lane PERFFIX6: ^WW_SYNC_RED
 #include "gl/glscene.h"
 #include "gl/lookdevstage.h"
 #include "gl/renderer.h"
 #include "features/weather/weatherrecx.h"	// lane WX1
 #include "features/weather/weatherrecxmath.h"
+#include "cloudrecx14math.h"	// lane CLOUDRECX1
+#include "cloudsheetmath.h"	// SKYLIGHT1 round 3: the layer's zenith-cap fit (uv = J world / altitude + c)
 #include "harnesswindow.h"
 
 #include <QElapsedTimer>
@@ -87,6 +90,15 @@ struct CmState
 	int cur2 = 0;
 	double ms = 0.0;
 	quint64 builds = 0;
+	float anchor[2] = { 0.0f, 0.0f };	// SKYLIGHT1: the square's world centre (game units)
+	bool anchored = false;
+	float coverK[3] = { 1.0f, 1.0f, 1.0f };	// SKYLIGHT1 round 2: the texels x this per band (paramsOf)
+	int worldLaid = 0, worldSkipped = 0;	// SKYLIGHT1 round 3: layers laid on the world / without a zenith cap (left out)
+	// lane EMPTY240 R8-4: buildMap's parts (ms) for the `cloud map slow:` line; a refusal by the layers' shapes alone
+	double partTarget = 0.0, partProgram = 0.0, partLayers = 0.0;
+	bool bindTried = false;
+	QString refusedShape;
+	int refusedSkips = 0;
 };
 
 CmState & cs()
@@ -218,8 +230,11 @@ void addDraws( QVector<Draw> & ds, const WwCloudLayerIn & L )
 }
 
 void paramsOf( const QVector<Draw> & ds, BandParams out[3], bool redMax,
-	const std::vector<std::array<float, 2>> * heights = nullptr, const WwWeatherRecx * wx = nullptr, float eyeZ = 0.0f )
+	const std::vector<std::array<float, 2>> * heights = nullptr, const WwWeatherRecx * wx = nullptr, float eyeZ = 0.0f,
+	float * coverK = nullptr )
 {
+	if ( coverK )
+		coverK[0] = coverK[1] = coverK[2] = 1.0f;
 	std::vector<int> role;
 	std::vector<float> cover;
 	std::vector<std::array<float, 3>> tint;
@@ -240,14 +255,21 @@ void paramsOf( const QVector<Draw> & ds, BandParams out[3], bool redMax,
 	}
 	bandsOf( role.data(), cover.data(), reinterpret_cast<const float( * )[3]>( tint.data() ), int( role.size() ), out,
 		redMax, heights ? reinterpret_cast<const float( * )[2]>( heights->data() )
-				: own ? reinterpret_cast<const float( * )[2]>( height.data() ) : nullptr );
+				: own ? reinterpret_cast<const float( * )[2]>( height.data() ) : nullptr,
+		wx && wx->on && wx->heightsAlone );	// lane AIRPERF1 A9: file heights alone under physicalWeather
 	if ( !wx || !wx->on )
 		return;
 	// lane WX1: clouds.coverage (each band keeps its share) and clouds.density
 	float c[3] = { out[0].coverage, out[1].coverage, out[2].coverage };
 	float d[3] = { out[0].density, out[1].density, out[2].density };
-	WwWeatherRecxMath::cloudsFromFile( c, d, wx->coverage, wx->density, wx->recordFirst );
+	// lane AIRPERF1 A9: under physicalWeather a written cover / water content decides alone (weatherrecxmath.h)
+	WwWeatherRecxMath::cloudsFromFile( c, d, wx->coverage, wx->density, wx->recordFirst, wx->coverAlone, wx->densityAlone );
 	for ( int b = 0; b < 3; b++ ) {
+		/* SKYLIGHT1 round 2 (bungo set WW_WX_CLOUD_COVERAGE 0.25 then 0: the volume stayed exactly the same): the map's
+		 * texels are the layers' own alpha, which a file's or a live coverage never reached (only the band's number did,
+		 * read off the map's square). The texels now take the ratio. Red WW_CLOUDMAP_RED=coveralpha: the layers' alpha. */
+		if ( coverK && !red( "coveralpha" ) )
+			coverK[b] = out[b].coverage > 1e-4f ? std::clamp( c[b] / out[b].coverage, 0.0f, 1.0f / out[b].coverage ) : 1.0f;
 		out[b].coverage = c[b];
 		out[b].density = d[b];
 	}
@@ -281,7 +303,7 @@ void timeRead( NifSkopeOpenGLContext::GLFunctions * fn, CmState & s, int slot, b
 {
 	if ( !s.pending[slot] )
 		return;
-	if ( !wait ) {
+	if ( !wait || !wwSyncRed() ) {	// lane PERFFIX6: an unfinished query is read next frame
 		GLuint avail = 0;
 		fn->glGetQueryObjectuiv( s.q[slot * 2 + 1], GL_QUERY_RESULT_AVAILABLE, &avail );
 		if ( !avail )
@@ -362,7 +384,13 @@ bool buildMap( Scene * scene, CmState & s, const QVector<Draw> & ds, const QVect
 {
 	Renderer * r = scene->renderer;
 	auto fn = r->fn;
-	if ( !ensureTarget( fn, s, n ) ) {
+	QElapsedTimer partClock;	// lane EMPTY240 R8-4
+	partClock.start();
+	s.partTarget = s.partProgram = s.partLayers = 0.0;
+	s.bindTried = false;
+	const bool targetOk = ensureTarget( fn, s, n );
+	s.partTarget = double( partClock.nsecsElapsed() ) * 1e-6;
+	if ( !targetOk ) {
 		*why = QStringLiteral( "the map target is incomplete" );
 		return false;
 	}
@@ -384,18 +412,40 @@ bool buildMap( Scene * scene, CmState & s, const QVector<Draw> & ds, const QVect
 		fn->glBlendEquation( GL_FUNC_ADD );
 		fn->glBlendFunc( GL_ONE_MINUS_DST_COLOR, GL_ONE );
 	}
+	const qint64 progAt = partClock.nsecsElapsed();
 	auto prog = r->useProgram( "cloudmap.prog" );
+	s.partProgram = double( partClock.nsecsElapsed() - progAt ) * 1e-6;
 	if ( !prog ) {
 		*why = QStringLiteral( "cloudmap.prog did not link" );
 		return false;
 	}
+	const qint64 layersAt = partClock.nsecsElapsed();
 	int drawn = 0;
+	/* SKYLIGHT1 round 3 (bungo: a dark area around him, the shadows vanish as he nears them; Coverage 0 left the
+	 * volume as it was): the map was the dome seen from the square's centre, flattened: the zenith's dense texels
+	 * under the centre, the horizon's edge fade (and its stretch) out to the sides, so the cover fell off with the
+	 * distance from where the square was laid and jumped when it was laid again. Each layer is now laid on the world
+	 * as the cloud shadow's sheets are (cloudsheetmath.h: its zenith cap's uv = J g + c, a sheet at the band's base
+	 * maps world XY by J / base): a quad over the whole square, uv from the world point, the cap's own alpha. The
+	 * same cover everywhere on the square, fixed on the ground (only the wind moves it). A layer with no zenith cap
+	 * (a horizon band) is left out. Red WW_CLOUDMAP_RED=domeproj: the dome's projection (before). */
+	const bool worldLay = !red( "domeproj" );
+	s.worldLaid = s.worldSkipped = 0;
 	for ( int i = 0; i < ds.size(); i++ ) {
 		const Draw & d = ds[i];
 		if ( !d.in.pos || !d.in.idx || d.in.nIdx <= 0 || weight[i] <= 0.0f )
 			continue;
+		WwCloudSheetMath::Fit cf;
+		if ( worldLay ) {
+			cf = WwCloudSheetMath::fit( d.in.pos, d.in.uv, d.in.col, d.in.nv );
+			if ( !cf.valid ) {
+				s.worldSkipped++;
+				continue;
+			}
+		}
 		const RoleInfo & ri = roleInfo( d.role );
 		fn->glActiveTexture( GL_TEXTURE0 );
+		s.bindTried = true;	// lane EMPTY240 R8-4: a texture may come a paint later (the upload budget): never memo this refusal
 		if ( scene->bindTexture( QStringView( d.in.tex ), true ) <= 0 )
 			continue;
 		fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT );
@@ -417,18 +467,43 @@ bool buildMap( Scene * scene, CmState & s, const QVector<Draw> & ds, const QVect
 		prog->uni1i( "Tex2", 1 );
 		prog->uni1f( "texBlend", tb );
 		prog->uni1b( "cmShow", false );
+		prog->uni1b( "cmQuad", worldLay );
 		prog->uni1f( "cmHeight", std::max( 1.0f, bp[b].baseM ) * kUnitsPerM );
 		prog->uni1f( "cmHalfExtent", kHalfExtentM * kUnitsPerM );
 		prog->uni2f( "uvOffset", d.in.uvOffset[0], d.in.uvOffset[1] );
-		prog->uni1f( "alpha", std::clamp( d.in.alpha * weight[i], 0.0f, 1.0f ) );
-		const float * attrs[8] = { d.in.pos, d.in.col, nullptr, nullptr, nullptr, nullptr, nullptr, d.in.uv };
-		r->drawShape( unsigned( d.in.nv ), 0x20000043ULL, unsigned( d.in.nIdx ), GL_TRIANGLES, GL_UNSIGNED_SHORT, attrs,
-			d.in.idx );
+		prog->uni1f( "alpha", std::clamp( d.in.alpha * weight[i] * s.coverK[b], 0.0f, 1.0f ) );	// SKYLIGHT1 round 2
+		if ( worldLay ) {
+			float jm[4], c0[2];
+			WwCloudSheetMath::worldMap( cf, std::max( 1.0f, bp[b].baseM ) * kUnitsPerM, jm, c0 );
+			const float he = kHalfExtentM * kUnitsPerM;
+			const float cx[4] = { -1.0f, 1.0f, 1.0f, -1.0f }, cy[4] = { -1.0f, -1.0f, 1.0f, 1.0f };
+			float qp[12], qc[16], qu[8];
+			const unsigned short qi[6] = { 0, 1, 2, 0, 2, 3 };
+			for ( int k = 0; k < 4; k++ ) {
+				const float wx = s.anchor[0] + cx[k] * he, wy = s.anchor[1] + cy[k] * he;
+				qp[k * 3] = cx[k];
+				qp[k * 3 + 1] = cy[k];
+				qp[k * 3 + 2] = 1.0f;
+				qc[k * 4] = qc[k * 4 + 1] = qc[k * 4 + 2] = 1.0f;
+				qc[k * 4 + 3] = std::clamp( cf.capAlpha, 0.0f, 1.0f );
+				qu[k * 2] = jm[0] * wx + jm[1] * wy + c0[0];
+				qu[k * 2 + 1] = jm[2] * wx + jm[3] * wy + c0[1];
+			}
+			const float * qa[8] = { qp, qc, nullptr, nullptr, nullptr, nullptr, nullptr, qu };
+			r->drawShape( 4u, 0x20000043ULL, 6u, GL_TRIANGLES, GL_UNSIGNED_SHORT, qa, qi );
+			s.worldLaid++;
+		} else {
+			const float * attrs[8] = { d.in.pos, d.in.col, nullptr, nullptr, nullptr, nullptr, nullptr, d.in.uv };
+			r->drawShape( unsigned( d.in.nv ), 0x20000043ULL, unsigned( d.in.nIdx ), GL_TRIANGLES, GL_UNSIGNED_SHORT, attrs,
+				d.in.idx );
+		}
 		drawn++;
 	}
 	r->stopProgram();
+	s.partLayers = double( partClock.nsecsElapsed() - layersAt ) * 1e-6;
 	if ( !drawn && !ds.isEmpty() ) {
-		*why = QStringLiteral( "no layer drew (no mesh or texture resolved)" );
+		*why = s.worldSkipped > 0 && !drawn ? QStringLiteral( "no layer has a zenith cap to lay on the world (red "
+			"WW_CLOUDMAP_RED=domeproj: the dome's projection)" ) : QStringLiteral( "no layer drew (no mesh or texture resolved)" );
 		return false;
 	}
 	return true;
@@ -526,6 +601,30 @@ const WwCloudMap & wwCloudMap()
 const WwCloudMap & wwCloudMapUpdate( Scene * scene )
 {
 	CmState & s = cs();
+	/* lane EMPTY240 R8-4: build 82's load spent 139.1 ms in the cloud shadow's map part, a map that was then refused (no
+	 * layer has a zenith cap). An update over 20 ms names its parts: the layers (meshes from the lookdev stage), the
+	 * set-up and key, the build (its target, program and layer fits / binds / draws). */
+	struct Slow {
+		CmState & s;
+		QElapsedTimer t;
+		double layers = -1.0, setup = -1.0, build = -1.0;
+		const char * how = "kept";
+		explicit Slow( CmState & st ) : s( st ) { t.start(); }
+		double now() const { return double( t.nsecsElapsed() ) * 1e-6; }
+		~Slow()
+		{
+			const double all = now();
+			if ( all > 20.0 ) {
+				double lp[3] = { 0.0, 0.0, 0.0 };	// lane EMPTY240 R9-c: the layers part split (weather resolve, sky frame, meshes)
+				wwLookdevCloudLayersParts( lp );
+				std::fprintf( stderr, "cloud map slow: %.1f ms = layers %.1f (weather resolve %.1f, sky frame %.1f, sky meshes %.1f) "
+					"+ setup and key %.1f + build %.1f (target %.1f, program %.1f, layer fits/binds/draws %.1f) + after %.1f; %s "
+					"(R8-4, R9-c)\n", all, std::max( 0.0, layers ), lp[0], lp[1], lp[2],
+					std::max( 0.0, setup ), std::max( 0.0, build ), s.partTarget, s.partProgram, s.partLayers,
+					std::max( 0.0, all - std::max( 0.0, layers ) - std::max( 0.0, setup ) - std::max( 0.0, build ) ), how );
+			}
+		}
+	} slow( s );
 	if ( !s.tier || !scene || !scene->renderer ) {
 		if ( s.map.valid || s.map.tex )
 			drop( scene, s );
@@ -535,7 +634,10 @@ const WwCloudMap & wwCloudMapUpdate( Scene * scene )
 	QVector<WwCloudLayerIn> layers;
 	QString wkey, why;
 	float eye[3] = { 0, 0, 0 };
-	if ( !wwLookdevCloudLayers( scene, layers, wkey, eye, &why ) ) {
+	const bool layersOk = wwLookdevCloudLayers( scene, layers, wkey, eye, &why );
+	slow.layers = slow.now();
+	if ( !layersOk ) {
+		slow.how = "no layers";
 		if ( s.map.valid || s.map.tex )
 			drop( scene, s );
 		s.weather.clear();
@@ -559,14 +661,14 @@ const WwCloudMap & wwCloudMapUpdate( Scene * scene )
 		for ( const Draw & d : cur )
 			h.push_back( d.in.layer >= 0 && d.in.layer < 32 ? std::array<float, 2>{ lh[d.in.layer][0], lh[d.in.layer][1] }
 															 : std::array<float, 2>{ 0.0f, 0.0f } );
-		paramsOf( cur, now, redMax, &h, wx.on ? &wx : nullptr, eye[2] );
+		paramsOf( cur, now, redMax, &h, wx.on ? &wx : nullptr, eye[2], s.coverK );
 		float pb = 0.0f, pt = 0.0f;
 		if ( wwCloudFlyBandPin( pb, pt ) ) {
 			now[0].baseM = pb;
 			now[0].topM = pt;
 		}
 	} else {
-		paramsOf( cur, now, redMax, nullptr, wx.on ? &wx : nullptr, eye[2] );
+		paramsOf( cur, now, redMax, nullptr, wx.on ? &wx : nullptr, eye[2], s.coverK );
 	}
 	{	// lane CLOUD5: the Low band's cloud type from the record's class (DATA flags, thunder), a .recx clouds.type wins
 		// lane CLOUD6d: one profile set per weather (spread 0) unless WW_CLOUDVOL_PROFILESET=0 / RED=typemix
@@ -576,6 +678,42 @@ const WwCloudMap & wwCloudMapUpdate( Scene * scene )
 		wwLookdevWeatherClass( flags, thunder, &sounds, &precip );
 		lowTypeOf( flags, thunder, wx.on ? wx.type : -1.0f, now[0].type, now[0].typeSpread, wwCloudVolProfileSet(),
 			wwCloudVolTypeRule() ? sounds : -1, wwCloudVolPrecipRule() ? precip : -1 );	// lane CLOUDTYPE3: MNAM
+	}
+	/* lane CLOUDRECX1 (SPEC.md 1.4): the layers' liquidWater / dropletRadius (each band's sigma ratio against its default),
+	 * iceFraction, anvil; the weather's evolution, precipitationBase and droplet radius. Nothing set: ratio 1, ice 0, the
+	 * draw's defaults (today). Red WW_CLOUD_RECX14_RED: the reader read none of them. */
+	WwCloudRecx14Draw r14;
+	float bandIce[3] = { 0.0f, 0.0f, 0.0f };
+	if ( wx.on ) {
+		namespace C = WwCloudRecx14;
+		std::vector<C::LayerIn> li;
+		for ( const Draw & d : cur ) {
+			C::LayerIn x;
+			x.band = roleInfo( d.role ).band;
+			x.cover = d.cover;
+			if ( d.in.layer >= 0 && d.in.layer < 32 ) {
+				x.lwc = wx.layerLwc[d.in.layer];
+				x.rUm = wx.layerRadius[d.in.layer];
+				x.ice = wx.layerIce[d.in.layer];
+				x.anvil = wx.layerAnvil[d.in.layer];
+				x.type = wx.layerType[d.in.layer];
+			}
+			li.push_back( x );
+		}
+		const C::BandsOut bo = C::layersOntoBands( li.data(), int( li.size() ), wx.iceFraction, now[0].type );
+		for ( int b = 0; b < 3; b++ ) {
+			if ( bo.ratio[b] != 1.0f )
+				now[b].density *= bo.ratio[b];
+			bandIce[b] = bo.ice[b];
+		}
+		r14.anvil = bo.anvil;
+		r14.evolutionMin = std::max( wx.evolution, 0.0f );
+		r14.dropletUm = wx.dropletRadius >= 0.0f ? C::phaseDiameterUm( wx.dropletRadius, WwCloudVolMath::kDropletUm ) : -1.0f;
+		if ( wx.precipitationBase >= 0.0f ) {
+			r14.shaftSigma = C::shaftSigmaPerKm( std::max( wx.rainRate, 0.0f ), std::max( wx.snowRate, 0.0f ) );
+			r14.shaftZ = wx.precipitationBase * kUnitsPerM;	// metres above sea level = world z / kUnitsPerM (the layers' frame)
+			r14.virga = r14.shaftZ > eye[2];	// ends above the eye's height: thins out before the ground (the viewer's proxy)
+		}
 	}
 
 	// the transition: a new weather starts from the parameters shown at the change
@@ -626,6 +764,8 @@ const WwCloudMap & wwCloudMapUpdate( Scene * scene )
 		.arg( ds.size() );
 	if ( wx.on )
 		key += QStringLiteral( "|wx:" ) + wx.key;	// lane WX1: a file's value moves the map
+	key += QStringLiteral( "|k%1,%2,%3" ).arg( double( s.coverK[0] ), 0, 'f', 3 ).arg( double( s.coverK[1] ), 0, 'f', 3 )
+		.arg( double( s.coverK[2] ), 0, 'f', 3 );	// SKYLIGHT1 round 2
 	for ( const Draw & d : ds )
 		key += QStringLiteral( "|%1:%2,%3,%4" ).arg( d.in.layer ).arg( double( d.in.alpha ), 0, 'f', 5 )
 			.arg( double( d.in.uvOffset[0] ), 0, 'f', 5 ).arg( double( d.in.uvOffset[1] ), 0, 'f', 5 )
@@ -639,8 +779,25 @@ const WwCloudMap & wwCloudMapUpdate( Scene * scene )
 		key += QStringLiteral( "|var%1,%2" ).arg( double( shown[0].type ), 0, 'f', 3 ).arg( double( shown[0].typeSpread ), 0, 'f', 3 );
 
 	WwCloudMap & m = s.map;
-	m.centerX = eye[0];	// the sky follows the camera: only the square moves
-	m.centerY = eye[1];
+	/* SKYLIGHT1 (bungo: "they just have the same distance away from me, so they move away as I get closer"): the square
+	 * stays where it was laid, so its coverage sits on the world and a cloud ahead grows as the camera nears it; it is laid
+	 * again only when the camera is half a half-extent (24 km) from its centre (the map's content is the projection
+	 * around the eye either way, so a new anchor needs no rebuild). Red WW_CLOUDMAP_RED=eyesquare: the square under the
+	 * camera every frame (before). */
+	const bool eyeSquare = red( "eyesquare" );
+	const float reanchor = 0.5f * kHalfExtentM * kUnitsPerM;
+	if ( eyeSquare || !s.anchored || std::hypot( eye[0] - s.anchor[0], eye[1] - s.anchor[1] ) > reanchor ) {
+		s.anchor[0] = eye[0];
+		s.anchor[1] = eye[1];
+		s.anchored = !eyeSquare;
+		if ( !eyeSquare )
+			fprintf( stderr, "cloudmap: square=world@%.0f,%.0f (laid again past %.0f m; heights=%s; red WW_CLOUDMAP_RED=eyesquare)\n",
+				double( eye[0] ), double( eye[1] ), double( reanchor / kUnitsPerM ), world ? "world" : "eye" );
+	}
+	m.centerX = s.anchor[0];
+	m.centerY = s.anchor[1];
+	if ( !red( "domeproj" ) )	// SKYLIGHT1 round 3: the laid map's texels depend on where the square lies
+		key += QStringLiteral( "|a%1,%2" ).arg( double( s.anchor[0] ), 0, 'f', 0 ).arg( double( s.anchor[1] ), 0, 'f', 0 );
 	for ( int b = 0; b < 3; b++ ) {
 		m.band[b].baseZ = ( world ? 0.0f : eye[2] ) + shown[b].baseM * kUnitsPerM;
 		m.band[b].topZ = ( world ? 0.0f : eye[2] ) + shown[b].topM * kUnitsPerM;
@@ -656,7 +813,29 @@ const WwCloudMap & wwCloudMapUpdate( Scene * scene )
 		m.band[0].topZ = m.band[0].baseZ
 			+ 1000.0f * WwCloudVolMath::typeDepthKm( tmax, depthKm, WwCloudVolMath::kVarTowerKm ) * kUnitsPerM;
 	}
+	/* lane EMPTY240 R8-4: a map refused because no layer has a zenith cap was tried again every paint (the refusal kept no
+	 * key) and made its target again each time (the refusal drops it). That verdict follows the layers' meshes alone, not
+	 * the wind: it holds while the weather, size, blend and layer list stay. Red WW_CLOUDMAPMEMO_RED=1: try every paint,
+	 * build 82. */
+	WW_SWITCH_STATIC( bool, memoRed, wwEnvInt( "WW_CLOUDMAPMEMO_RED" ) == 1 );
+	QString shape = QStringLiteral( "%1|%2|%3|%4|%5" ).arg( wkey ).arg( n ).arg( double( t ), 0, 'f', 4 ).arg( ds.size() )
+		.arg( red( "domeproj" ) ? 1 : 0 );
+	for ( const Draw & d : ds )
+		shape += QStringLiteral( "|%1" ).arg( d.in.layer );
+	slow.setup = slow.now() - slow.layers;
+	if ( !memoRed && !s.refusedShape.isEmpty() && shape == s.refusedShape && !m.valid ) {
+		slow.how = "refusal kept (same layers)";
+		s.refusedSkips++;
+		return s.map;
+	}
 	if ( key != s.key || !m.valid ) {
+		slow.how = "built";
+		const double buildAt = slow.now();
+		struct BuildMark {
+			Slow & sl;
+			double at;
+			~BuildMark() { sl.build = sl.now() - at; }
+		} buildMark{ slow, buildAt };
 		Renderer * r = scene->renderer;
 		auto fn = r->fn;
 		while ( fn->glGetError() != GL_NO_ERROR ) {
@@ -679,8 +858,11 @@ const WwCloudMap & wwCloudMapUpdate( Scene * scene )
 		if ( !ok ) {
 			drop( scene, s );
 			say( s, QStringLiteral( "refused(%1)" ).arg( why ) );
+			slow.how = "refused";
+			s.refusedShape = !s.bindTried && s.worldSkipped > 0 ? shape : QString();	// lane EMPTY240 R8-4
 			return s.map;
 		}
+		s.refusedShape.clear();
 		m.valid = true;
 		m.stub = false;
 		m.size = n;
@@ -699,7 +881,10 @@ const WwCloudMap & wwCloudMapUpdate( Scene * scene )
 			bi.layers = counts[b];
 			bi.type = shown[b].type;	// lane CLOUD5
 			bi.typeSpread = shown[b].typeSpread;
+			bi.ice = bandIce[b];	// lane CLOUDRECX1
+			bi.coverK = s.coverK[b];	// SKYLIGHT1 round 2
 		}
+		m.recx14 = r14;
 		m.transition = t;
 		m.generation++;
 		s.key = key;
@@ -717,7 +902,17 @@ const WwCloudMap & wwCloudMapUpdate( Scene * scene )
 			+ ( variety ? QStringLiteral( " type=%1+-%2 lowtop=%3m" ).arg( double( shown[0].type ), 0, 'f', 3 )
 							  .arg( double( shown[0].typeSpread ), 0, 'f', 3 )
 							  .arg( double( ( m.band[0].topZ - m.band[0].baseZ ) / kUnitsPerM ), 0, 'f', 0 )
-						: QString() ) );
+						: QString() )
+			// SKYLIGHT1 round 2: the texels' coverage factor and where the bands sit (world = metres above sea level)
+			+ QStringLiteral( " texels x%1,%2 heights=%3 square=%4,%5" ).arg( double( s.coverK[0] ), 0, 'f', 3 )
+				.arg( double( s.coverK[1] ), 0, 'f', 3 ).arg( world ? QStringLiteral( "world" ) : QStringLiteral( "eye" ) )
+				.arg( double( s.anchor[0] ), 0, 'f', 0 ).arg( double( s.anchor[1] ), 0, 'f', 0 )
+			// SKYLIGHT1 round 3: how the layers were laid, and the density the bands carry
+			+ ( red( "domeproj" ) ? QStringLiteral( " laid=dome_projection(red domeproj)" )
+				: QStringLiteral( " laid=world(%1 layers on the world, %2 without a zenith cap left out)" ).arg( s.worldLaid )
+					.arg( s.worldSkipped ) )
+			+ QStringLiteral( " density=low %1 mid %2" ).arg( double( m.band[0].density ), 0, 'f', 2 )
+				.arg( double( m.band[1].density ), 0, 'f', 2 ) );
 	}
 	show( scene, s );
 	return m;

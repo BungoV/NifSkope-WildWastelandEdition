@@ -33,11 +33,12 @@ inline bool wwFakeAirModel( const QString & model )
 }
 
 /* lane MODULES1 part 18 (bungo 11-06): a light-beam card (*LightBeam*, e.g. the street lamp's LightBeamThinDusty01) is the
- * game's own lit cone and draws as in the game; red WW_CELL_FAKEAIR_BEAM_RED=1 hides it with the fake air again */
+ * game's own lit cone and draws as in the game; red WW_CELL_FAKEAIR_BEAM_RED=1 hides it with the fake air again.
+ * MODULES1 (11-06): every ray card draws, BeamSimple* and BeamSmoky* too (any stem with "beam"); mist and glow veils stay hidden */
 inline bool wwFakeAirLightBeam( const QString & model )
 {
 	const QString m = model.toLower();
-	return m.mid( std::max( m.lastIndexOf( QLatin1Char( '/' ) ), m.lastIndexOf( QLatin1Char( '\\' ) ) ) + 1 ).contains( QLatin1String( "lightbeam" ) );
+	return m.mid( std::max( m.lastIndexOf( QLatin1Char( '/' ) ), m.lastIndexOf( QLatin1Char( '\\' ) ) ) + 1 ).contains( QLatin1String( "beam" ) );
 }
 
 //! WW_CELL_FAKEAIR_RED=keep draws the cards (gl/cellvolair.cpp)

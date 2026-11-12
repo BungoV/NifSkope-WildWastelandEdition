@@ -1,4 +1,5 @@
 #!/bin/bash
+export WW_CELL_STREAM="${WW_CELL_STREAM:-0}"	# AIRPERF1 r4: this harness opens a fixed block (streaming is the default now)
 #
 # lane BAKEBLOCK1 (block rule): the cells are asked n=1; each bake loads the 5x5 + far LOD by itself (the exe
 #   promotes every exterior bake). The pictures stay one cell.

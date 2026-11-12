@@ -34,6 +34,7 @@ struct Texture {
  * fogged (an additive one dimmed, a blended one fogged toward the fog colour), then linear into the HDR frame,
  * or the cell's imagespace, or encoded again. */
 #include "lookdev_fog.glsl"
+#define WW_FX_AMBSHARE 1	// MODULES1 R8-1: a lit particle's ambient keeps the share the GI volume leaves (cell_fxlaw.glsl)
 #include "cell_lights.glsl"
 uniform bool fxAdditive;
 /* lane SUNCELL1 (last round): A LIT PARTICLE. The game's effect technique sets Lit from the property's lighting
@@ -42,6 +43,8 @@ uniform bool fxAdditive;
  * mix( 1, directional + the model's four lights, lighting influence ), in linear light, before the fog.
  * glparticles.cpp sets these from src/features/lights/cellfxlit.h; fxLitMode 0 = unlit, as before. */
 uniform float lightingInfluence;
+// lane MODULES1 M3 (G7): the Effect Lighting law and the unlit unit
+#include "cell_fxlaw.glsl"
 uniform vec4 fxEmit;			// lane LIGHTS3 (XEMI-PARTICLES): the placement's emittance colour ^2.2 on an unlit system; w 0 = none
 uniform int fxLitMode;			// 0 unlit; 1 lit; red controls: 2 every light, 4 no 2.2 on the falloff, 8 self-lit
 uniform vec4 fxLit;				// indices into cellLights, -1 = none
@@ -79,9 +82,12 @@ vec3 cellFxLight( int i, vec3 P )
 vec3 cellFxLit( vec3 P )
 {
 	// lane SUNCELL1 final: an exterior with no weather loaded has no sun to light it -- self-lit, as before
-	if ( ( fxLitMode & 8 ) != 0 || ( !cellInterior && !cellHasDir ) )
+	// MODULES1 R7-1: a blended lit particle outdoors takes the local light: the surfaces' sun + the ambient at it
+	bool loc = fxLocalOn() && !cellInterior && !fxAdditive;
+	if ( ( fxLitMode & 8 ) != 0 || ( !cellInterior && !cellHasDir && !loc ) )
 		return vec3( 1.0 );
-	vec3 E = cellHasDir ? cellDirColor : vec3( 0.0 );
+	// R8-1: the ambient's share and the GI as a surface there (fxLocalSky, set by the caller; 1 and 0 before it)
+	vec3 E = loc ? vpSun.rgb * fxLocalVis + cellAmbient( vec3( 0.0, 0.0, 1.0 ), P ) FX_LOCAL_GI : cellHasDir ? cellDirColor : vec3( 0.0 );
 	if ( ( fxLitMode & 2 ) != 0 ) {
 		// flat on purpose: an effect's light has no hemisphere clip, which the cluster lists cull by
 		for ( int i = 0; i < cellLightCount; i++ )
@@ -91,7 +97,7 @@ vec3 cellFxLit( vec3 P )
 			if ( fxLit[k] > -0.5 )
 				E += cellFxLight( int( fxLit[k] + 0.5 ), P ) * fxLitScale[k];
 	}
-	return mix( vec3( 1.0 ), E, lightingInfluence );
+	return fxLawMix( E, lightingInfluence, fxAdditive );	// MODULES1 M3: was mix( 1, E, lightingInfluence )
 }
 #endif
 
@@ -300,14 +306,18 @@ void main()
 		if ( fxEmit.a > 0.0 && fxLitMode == 0 )	// lane LIGHTS3 (XEMI-PARTICLES): the unlit effect's emittance, as fo4_effectshader
 			color.rgb = mix( color.rgb, color.rgb * fxEmit.rgb, lightingInfluence );
 		vec3 lin = pow( max( color.rgb, vec3( 0.0 ) ), vec3( 2.2 ) );
+		if ( fxLitMode == 0 )	// MODULES1 M3: an unlit system on the unlit effects' unit, as an unlit card (fo4_effectshader)
+			lin *= fxLawUnit( fxAdditive );
 		if ( volPart != 0 ) {
 			// lane VOLPART1: lit at its own point, seen through the integrated air, soft against the scene
 			if ( volPartDump > 0 ) {
 				fragColor = vpDump( color.a );
 				return;
 			}
-			if ( fxLitMode != 0 )
-				lin *= fxAdditive ? cellFxLit( cellWorldPos( -ViewDir ) ) : vpLit( pPos, vpNormal( uv ), color.a );
+			if ( fxLitMode != 0 ) {
+				fxLocalSky( cellWorldPos( pPos ), fxAdditive );	// R8-1: the sky light a surface takes at the particle
+				lin *= fxAdditive ? cellFxLit( cellWorldPos( -ViewDir ) ) : vpLit( pPos, vpNormal( uv ), color.a ) FX_LOCAL_GI_LAW( lightingInfluence );
+			}
 #if defined( WW_CELL_AIRZONE ) && !defined( WW_FX_DECALLIT )
 			color.a = azPartAlpha( color.a );	// lane AIRZONE1: the volume's particles density (no zone read: untouched)
 #endif
@@ -322,9 +332,19 @@ void main()
 				lin = fxAdditive ? lin * ( 1.0 - f ) : mix( lin, fc, f );
 			}
 		} else {
-		if ( fxLitMode != 0 )
+		if ( fxLitMode != 0 ) {
+			fxLocalSky( cellWorldPos( -ViewDir ), fxAdditive );	// R8-1
 			lin *= cellFxLit( cellWorldPos( -ViewDir ) );	// a lit particle, before the fog
+		}
 		lin = wwFogFx( lin, -ViewDir, fxAdditive );	// lane VOLAIR1: the air, as the surfaces take it (red fxfog: the game's fog alone)
+		}
+		// lane MODULES1 item 2: kept finite and inside the RGBA16F frame, as fo4_effectshader (pfxGame 4: red unbound)
+		if ( ( pfxGame & 4 ) == 0 ) {
+			if ( any( isnan( lin ) ) || any( isinf( lin ) ) || isnan( color.a ) ) {
+				lin = vec3( 0.0 );
+				color.a = 0.0;
+			}
+			lin = min( lin, vec3( 32768.0 ) );
 		}
 		if ( cellProbe == 6 )
 			fragColor = vec4( lin, color.a );	// the imagespace's measure: the linear value, blended as drawn

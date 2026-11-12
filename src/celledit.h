@@ -171,8 +171,16 @@ QString cellEditChangeText( const CellEditChange & c );
 enum class CellEditMouse { Press, Move, Release, Wheel };
 //! A mouse event; true = the place mode consumed it. `left` = the left button is the one pressed / held.
 bool cellEditMouse( GLView * view, CellEditMouse kind, double x, double y, bool left, int modifiers, int wheel = 0 );
-//! A key; true = consumed (Shift+A starts the mode in a cell document).
-bool cellEditKey( GLView * view, int key, int modifiers );
+//! lane AIRPERF1 r3: WW_FLYKEYS_RED=1 = the old rule (shortcuts fire in the free camera, movement keys can arm Place).
+bool cellEditArmRed();
+//! lane AIRPERF1 r3: the arm rule, pure so a test can call it. flyCamera: 0 orbit, 1 free camera, 2 walk view.
+//! true = Shift+A is NOT the arm key now (the camera owns WASD + Shift, or the press is a held key's repeat).
+inline bool cellEditArmSwallowed( int flyCamera, bool autoRepeat, bool red )
+{
+	return !red && ( flyCamera != 0 || autoRepeat );
+}
+//! A key; true = consumed (Shift+A starts the mode in a cell document, outside the fly / walk camera).
+bool cellEditKey( GLView * view, int key, int modifiers, int flyCamera = 0, bool autoRepeat = false );
 //! The overlay point of paintGL: the depth probe for the pending pixel, then the ghost and the placed edits.
 void cellEditFrame( GLView * view, Scene * scene, const Transform & viewTrans );
 

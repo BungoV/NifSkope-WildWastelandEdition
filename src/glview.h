@@ -55,6 +55,11 @@ class NifSkope;
 class QMenu;
 class QTimer;
 
+/* F3 (bungo 11-09: "I need to see my active framerate"): a corner overlay with the fps and the CPU frame ms, averaged
+ * over ~0.5 s of painted frames. Off by default; View > Show Framerate; saved in QSettings. Never in a clean grab. */
+bool wwFramerateOverlayOn();
+void wwSetFramerateOverlay( bool on );
+
 
 //! The main [Viewport](@ref viewport_details) class
 class GLView final : public QOpenGLWindow
@@ -502,6 +507,11 @@ public:
 	 *  contextual the way Blender's per-editor keymaps are.
 	 */
 	bool viewportClaimsKey( int key ) const;
+	//! lane AIRPERF1 r3 (bungo 11-11): the free camera is on, so NO shortcut may fire: only the camera's own keys
+	//! (move, look, zoom, Shift), F11 and the exit keys (Shift+F, Esc) do anything. False under WW_FLYKEYS_RED=1.
+	bool flyOwnsShortcuts() const;
+	//! One stderr line the first time each key is swallowed by the free camera.
+	static void flyKeySwallowed( int key, int modifiers );
 	void move( float, float, float );
 	void rotate( float, float, float );
 	void rotateLight( float, float );
@@ -646,6 +656,8 @@ public:
 	QString wwFlyRefocusCheck();
 	//! lane FLYFIX1: the view at eye looking at at, kept after (the live verb "camera PATHFILE"); residuals returned
 	QString wwPlaceCamera( const Vector3 & eye, const Vector3 & at );
+	//! MODULES1 M11: the live port's `where` (the eye, yaw and pitch, and the `goto` line that comes back here)
+	QString wwCameraWhere();
 	//! lane CELLSPAWN1: a level view standing at eye, looking along yawDeg (0 north, 90 east); a cell's first open
 	QString wwSpawnAt( const Vector3 & eye, float yawDeg );
 	/*! lane FAVCAM1: the camera now, for a favorite: the eye (world), Rot (pitch x, roll y, yaw z, degrees), the vertical
@@ -1466,6 +1478,9 @@ public:
 	float freeCamSpeed = 1.0f;
 	//! lane VIEWFULL1: Clean View (Blender's Overlays switch) draws the world only; live, menu row "Clean View"
 	bool cleanView = false;
+	//! AIRPERF1 round 3: full screen (F11) hides the navigation gizmo: not drawn, not hovered, not clicked
+	bool navGizmoOff = false;
+	void wwSetNavGizmoOff( bool off );
 	//! lane VIEWFULL1: the fly-mode crosshair (menu row "Crosshair"); Clean View hides it too
 	bool showCrosshair = true;
 	//! lane VIEWFULL1: a viewport mode owns Esc (flight, a modal tool, a paint mode, picks), so full screen keeps it

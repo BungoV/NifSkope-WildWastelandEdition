@@ -16,9 +16,11 @@ BSD License - see nifskope.h
 #include "model/nifmodel.h"
 
 #include "cellview.h"
+#include "cellstream.h"	// lane AIRPERF1 r4: the Cell Streaming row
 #include "cellsplat.h"
 #include "cellgroundlegend.h"	// lane DUNESAND3
 #include "features/far-lod/cellfarlod.h"
+#include "features/overlays/debugview.h"	// lane DEBUGVIEW1: Show > Debug view
 #include "cellmodpickbox.h"	// the Mods band
 #include "gl/celllights.h"
 #include "features/air/airzonepanel.h"	// lane AIRZONE1: the Air zones band
@@ -29,6 +31,7 @@ BSD License - see nifskope.h
 #include "features/reflections/cellreflprobe.h"	// lane REFLPROBE1: the Reflection probes row
 #include "features/gi/cellssgi.h"
 #include "features/far-ground/cellfarground.h"	// the Far ground rows
+#include "features/far-lod/lodpreview.h"	// lane PERFLOAD1 P8: the LOD preview rows
 #include "features/lights/celllampshadow.h"
 #include "gl/celllooks.h"
 #include "features/water/cellwater.h"	// the Water row
@@ -522,6 +525,59 @@ void CellWorkspacePanel::buildUi()
 			cellFarLodTypeGroup->addAction( a );
 		}
 	}
+	// lane PERFLOAD1 P8: the LOD preview (src/features/far-lod/lodpreview.h), live, not saved; greyed when its WW_ pin is set
+	auto lodChoice = [&]( const char * name, const QString & label, const QStringList & names, int first, int cur,
+		bool pinned ) {
+		QMenu * m = showMenu->addMenu( label );
+		m->setObjectName( QLatin1String( name ) );
+		m->setEnabled( !pinned );
+		auto * grp = new QActionGroup( m );
+		grp->setExclusive( true );
+		for ( int k = 0; k < names.size(); k++ ) {
+			QAction * a = m->addAction( names.at( k ) );
+			a->setCheckable( true );
+			a->setData( first + k );
+			a->setChecked( first + k == cur );
+			grp->addAction( a );
+		}
+		return grp;
+	};
+	QActionGroup * lodLevelGroup = lodChoice( "CellWorkspaceLodLevel", tr( "LOD level" ), { tr( "Auto" ), tr( "Full" ),
+		tr( "Rep 0" ), tr( "Rep 1" ), tr( "Rep 2" ), tr( "Rep 3" ), tr( "Impostor" ) }, -1, LodPreview::force(),
+		LodPreview::pinned( "force" ) );
+	// lane LODLIVE1: one LOD level on the whole map (WW_CELL_LOD_LEVEL), rebuilt in place; the coloration row was "LOD tint"
+	QActionGroup * lodMapLevelGroup = lodChoice( "CellWorkspaceLodMapLevel", tr( "LOD map level" ), { tr( "Auto" ),
+		tr( "LOD4" ), tr( "LOD8" ), tr( "LOD16" ), tr( "LOD32" ) }, -1, LodPreview::level(), LodPreview::pinned( "level" ) );
+	QActionGroup * lodTintGroup = lodChoice( "CellWorkspaceLodTint", tr( "LOD coloration" ), { tr( "Off" ), tr( "On" ) }, 0,
+		LodPreview::tint() ? 1 : 0, LodPreview::pinned( "tint" ) );
+	QActionGroup * lodRingGroup = lodChoice( "CellWorkspaceLodRing", tr( "LOD ring" ), { tr( "All" ), tr( "Band" ),
+		tr( "LOD4" ), tr( "LOD8" ), tr( "LOD16" ), tr( "LOD32" ) }, -1, LodPreview::ring(), LodPreview::pinned( "ring" ) );
+	QActionGroup * nearGridGroup = lodChoice( "CellWorkspaceNearGrid", tr( "Near grid" ), { tr( "Follow" ), tr( "Freeze" ),
+		tr( "Off" ) }, 0, LodPreview::grid(), LodPreview::pinned( "grid" ) );
+	connect( lodTintGroup, &QActionGroup::triggered, this, [this]( QAction * a ) {
+		LodPreview::setTint( a->data().toInt() != 0 );
+		if ( glView )
+			glView->update();
+	} );
+	connect( lodRingGroup, &QActionGroup::triggered, this, [this]( QAction * a ) {
+		LodPreview::setRing( a->data().toInt() );
+		if ( glView )
+			glView->update();
+	} );
+	connect( nearGridGroup, &QActionGroup::triggered, this, [this]( QAction * a ) {
+		LodPreview::setGrid( a->data().toInt() );
+		if ( glView )
+			glView->update();
+	} );
+	// lane AIRPERF1 r4: Cell Streaming, off and back on in the running view with no reopen (off: the loaded cells stay,
+	// nothing loads or unloads; on: the block follows the camera again). WW_CELL_STREAM pins it; this session only
+	QAction * cellStreamRow = tick( showMenu, tr( "Cell Streaming" ), "CellWorkspaceCellStream", cellStreamRowOn() );
+	cellStreamRow->setEnabled( !cellStreamPinned() );
+	connect( cellStreamRow, &QAction::toggled, this, [this]( bool on ) {
+		cellStreamSetRow( on );
+		if ( glView )
+			glView->update();
+	} );
 	// lane FARDRAW1: ring 0's ground -- the baked sheet (today), live layers + shader decals, or live layers + cached pages
 	cellFarGround = showMenu->addMenu( tr( "Far ground" ) );
 	cellFarGround->setObjectName( QStringLiteral( "CellWorkspaceFarGround" ) );
@@ -555,7 +611,6 @@ void CellWorkspacePanel::buildUi()
 	}
 	section( tr( "Lighting" ), "lighting" );
 	cellLights = tick( showMenu, tr( "Cell lights" ), "CellWorkspaceCellLights", wwCellLightsOn() );
-	cellGi = tick( showMenu, tr( "Precomputed Radiance Transfer" ), "CellWorkspaceCellGi", wwCellGiOn() );	// bungo 10-27 note 12: the label only
 	/* lane RTXGI1 M2 (src/features/gi/rtddgicell.h): the ray-traced GI volume in place of the baked grid where it reaches; ships Off.
 	 * Live: a tick reloads the shaders (the read is a #define) and the next frame builds or frees the volume. */
 	{
@@ -632,8 +687,9 @@ void CellWorkspacePanel::buildUi()
 			f->setEnabled( giOn && !pinned );
 		};
 		// lane PRTOFF1: without the PRT the row follows the Ray-traced GI row (the volume's sky visibility)
-		QAction * by = wwCellPrtOn() ? cellGi : showMenu->findChild<QAction *>( QStringLiteral( "CellWorkspaceRtDdgi" ) );
-		greys( by && by->isChecked() );
+		// FARWATER1 item 6: under the PRT red the old GI always draws (its row is gone), so the row is live
+		QAction * by = wwCellPrtOn() ? nullptr : showMenu->findChild<QAction *>( QStringLiteral( "CellWorkspaceRtDdgi" ) );
+		greys( wwCellPrtOn() || ( by && by->isChecked() ) );
 		if ( by )
 			connect( by, &QAction::toggled, this, greys );
 		connect( f, qOverload<double>( &QDoubleSpinBox::valueChanged ), this, [this]( double v ) {
@@ -649,7 +705,7 @@ void CellWorkspacePanel::buildUi()
 	}
 	cellFar = tick( showMenu, tr( "Far light" ), "CellWorkspaceCellFar", wwCellFarOn() );
 	// the Pass, live once a bake is relit
-	cellPass = showMenu->addMenu( tr( "Debug view" ) );	// bungo 10-27 note 13: under Precomputed Radiance Transfer
+	cellPass = showMenu->addMenu( tr( "PRT debug view" ) );	// bungo 10-27 note 13: under Precomputed Radiance Transfer (DEBUGVIEW1: renamed)
 	cellPass->setObjectName( QStringLiteral( "CellWorkspaceCellPass" ) );
 	cellPassGroup = new QActionGroup( cellPass );
 	cellPassGroup->setExclusive( true );
@@ -664,6 +720,29 @@ void CellWorkspacePanel::buildUi()
 		}
 	}
 	cellPass->setEnabled( false );
+	{	// lane DEBUGVIEW1: the live debug views (src/features/overlays/debugview.h), Off first; WW_DEBUG_VIEW pins it
+		QMenu * m = showMenu->addMenu( tr( "Debug view" ) );
+		m->setObjectName( QStringLiteral( "CellWorkspaceDebugView" ) );
+		QActionGroup * grp = new QActionGroup( m );
+		grp->setExclusive( true );
+		const QStringList names = wwDebugViewNames();
+		for ( int k = 0; k < names.size(); k++ ) {
+			QAction * a = m->addAction( names.at( k ) );
+			a->setCheckable( true );
+			a->setData( k );
+			a->setChecked( k == wwDebugViewId() );
+			grp->addAction( a );
+		}
+		m->setEnabled( !wwDebugViewPinned() );
+		connect( grp, &QActionGroup::triggered, this, [this]( QAction * a ) {
+			const bool was = wwDebugViewShaderDefine();
+			wwDebugViewSet( a->data().toInt() );
+			if ( glView && was != wwDebugViewShaderDefine() )
+				glView->updateShaders();	// the views are the loader's WW_DEBUG_VIEWS
+			if ( glView )
+				glView->update();
+		} );
+	}
 	{	// lane RTXGI1 M2: the ray-traced GI volume's probes over the frame (src/features/gi/rtddgicell.h), live; Off by default
 		QMenu * m = showMenu->addMenu( tr( "Ray-traced GI probes" ) );
 		m->setObjectName( QStringLiteral( "CellWorkspaceRtDdgiView" ) );
@@ -792,7 +871,7 @@ void CellWorkspacePanel::buildUi()
 	 * visibility, smoothing, out of walls). The actions stay, off the menu, for their slots. Emittance in bounce light and
 	 * Sky specular occlusion stay: the ray-traced GI's soup and its sky visibility take them. */
 	if ( !wwCellPrtOn() ) {
-		for ( QAction * a : { cellGi, cellFar, cellPass->menuAction(), cellGiGpu, cellEmissiveGrid, cellAoDecal } )
+		for ( QAction * a : { cellFar, cellPass->menuAction(), cellGiGpu, cellEmissiveGrid, cellAoDecal } )
 			showMenu->removeAction( a );
 		for ( QAction * a : lookActions ) {
 			const WwLook l = WwLook( a->data().toInt() );
@@ -1251,11 +1330,8 @@ void CellWorkspacePanel::buildUi()
 		head( V, "CellWorkspaceTemporalAa", "", -1, false, QStringList(), tr( "Temporal Anti-Aliasing" ) );	// round 4: Title Case
 		rows.last().overriddenBy = QStringLiteral( "CellWorkspaceModernTaa" );	// gametaa.cpp: a Modern tier replaces it
 		// Fusion Shaders
-		if ( wwCellPrtOn() )
-			head( F, "CellWorkspaceCellGi", "", -1, false,
-				{ QStringLiteral( "CellWorkspaceSkyVisRow" ), QStringLiteral( "CellWorkspaceCellPass" ) } );
-		else	// lane PRTOFF1: the GI group's row is the Ray-traced GI's; the PRT's rows below are off the menu (not drawn)
-			head( F, "CellWorkspaceRtDdgi", "", -1, false, { QStringLiteral( "CellWorkspaceSkyVisRow" ) } );
+		// lane PRTOFF1: the GI group's row is the Ray-traced GI's (FARWATER1 item 6: the PRT row is gone, also under its red)
+		head( F, "CellWorkspaceRtDdgi", "", -1, false, { QStringLiteral( "CellWorkspaceSkyVisRow" ) } );
 		rows.last().heavy = true;	// built-in Low: off (PRTP bounce light)
 		look( WwLook::ProbeShare, tr( "Probe sharing" ) );
 		look( WwLook::ProbeShareWide, tr( "Wide probe sharing" ) );
@@ -1323,10 +1399,16 @@ void CellWorkspacePanel::buildUi()
 		look( WwLook::WaterRefl, tr( "Reflections" ) );
 		look( WwLook::WaterGlint, tr( "Sun glare" ) );
 		look( WwLook::WaterOcean, tr( "Ocean waves" ) );
+		look( WwLook::EndlessSea, tr( "Endless sea" ) );	// lane FARSEA1: the sea past the bake, live
 		head( F, "CellWorkspaceFarLod", "", -1, false, QStringList(), tr( "LOD" ) );	// note 21 + 26b: one LOD group
 		kid( "", tr( "Source" ), "CellWorkspaceFarLodType" );
 		kid( "", tr( "Terrain" ), "CellWorkspaceFarGround" );
 		kid( "", tr( "Terrain pages" ), "CellWorkspaceFarGroundPages" );
+		kid( "", tr( "LOD level" ), "CellWorkspaceLodLevel" );	// lane PERFLOAD1 P8: the LOD preview
+		kid( "", tr( "LOD tint" ), "CellWorkspaceLodTint" );
+		kid( "", tr( "LOD ring" ), "CellWorkspaceLodRing" );
+		kid( "", tr( "Near grid" ), "CellWorkspaceNearGrid" );
+		kid( "CellWorkspaceCellStream", tr( "Cell Streaming" ) );	// lane AIRPERF1 r4
 		look( WwLook::BtoSway, tr( "Game trees sway" ) );
 		// LATE ITEM 25 (bungo 11-01): no menu row for the bake's channels: our LOD rendering always draws them
 		// (WwLook::FarLodAo / FarLodSky stay in the table only for the debug pins WW_LODL_AO=0 / WW_LODL_SKY=0)
@@ -1352,7 +1434,7 @@ void CellWorkspacePanel::buildUi()
 	probesShow = new QCheckBox( tr( "PRTP Debug View" ), prtpRow );
 	probesShow->setObjectName( QStringLiteral( "CellWorkspaceProbesShow" ) );
 	probesShow->setChecked( QSettings().value(
-		QString( "%1/probes" ).arg( QLatin1String( CELL_SHOW_GROUP ) ), true ).toBool() );
+		QString( "%1/probes" ).arg( QLatin1String( CELL_SHOW_GROUP ) ), false ).toBool() );	// MODULES1 item 6: off by default
 	probesPlace = new QPushButton( tr( "Place" ), prtpRow );
 	probesPlace->setObjectName( QStringLiteral( "CellWorkspaceProbesPlace" ) );
 	probesPlace->setStyleSheet( wwBoxedButtonQss( QStringLiteral( "3px 10px" ) ) );
@@ -1570,12 +1652,6 @@ void CellWorkspacePanel::buildUi()
 		if ( glView )
 			glView->update();
 	} );
-	// the bounce of the last bake, drawn while Cell lights is on
-	connect( cellGi, &QAction::toggled, this, [this]( bool on ) {
-		wwCellGiSetOn( on );
-		if ( glView )
-			glView->update();
-	} );
 	// a shader switch (the far sectors load with the cell)
 	connect( cellFar, &QAction::toggled, this, [this]( bool on ) {
 		wwCellFarSetOn( on );
@@ -1607,6 +1683,26 @@ void CellWorkspacePanel::buildUi()
 		g_haveOverrides = true;
 		say( tr( "rebuilding %1 ..." ).arg( QFileInfo( g_path ).fileName() ), false );
 		emit reopenRequested( g_path );
+	} );
+	// lane PERFLOAD1 P8: the far trees take the forced level per frame; the far object rows at a far rebuild in place
+	connect( lodLevelGroup, &QActionGroup::triggered, this, [this, liveFirst]( QAction * a ) {
+		const int slot = LodPreview::objectSlot();
+		LodPreview::setForce( a->data().toInt() );
+		if ( glView )
+			glView->update();
+		if ( LodPreview::objectSlot() == slot || syncing || g_path.isEmpty() || !cellFarLodWanted() )
+			return;
+		if ( !liveFirst() )
+			say( tr( "LOD level: the far objects take it at the next far build (no reopen)" ), false );
+	} );
+	connect( lodMapLevelGroup, &QActionGroup::triggered, this, [this, liveFirst]( QAction * a ) {	// lane LODLIVE1
+		LodPreview::setLevel( a->data().toInt() );
+		if ( glView )
+			glView->update();
+		if ( syncing || g_path.isEmpty() || !cellFarLodWanted() )
+			return;
+		if ( !liveFirst() )
+			say( tr( "LOD map level: the far LOD takes it at the next far build (no reopen)" ), false );
 	} );
 	connect( cellFarLod, &QAction::toggled, this, [this, liveFirst]( bool on ) {
 		cellFarLodSetWanted( on );

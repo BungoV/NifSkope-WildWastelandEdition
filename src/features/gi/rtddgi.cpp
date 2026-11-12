@@ -10,7 +10,8 @@
 #include "features/gi/probeplace.h"
 #include "features/gi/probesky.h"
 #include "features/gi/rtddgimath.h"
-#include "restirmath.h"   // lane RESTIRDI1: the twin of restir.comp (restirCli)
+#include "features/gi/rttracesetrule.h"   // lane AIRPERF1 r6: the BLAS parts' origin
+#include "restirmath.h"  // lane RESTIRDI1: the twin of restir.comp (restirCli)
 #include "features/gi/restirgimath.h"   // RTEMIS1 part 2: the twin of restirgi.comp (restirgiCli)
 #include "features/gi/rtddgi/rtddgi_gpu.h"
 #include "gl/celllights.h"
@@ -26,6 +27,7 @@
 #include <cstring>
 #include <chrono>
 #include <functional>
+#include "features/exposure/physunits.h"	// lane PHYSUNITS1: emissives in cd/m2
 #include <memory>
 #include <thread>
 
@@ -104,6 +106,7 @@ struct Packed
 {
 	probebvh::Bvh bvh;
 	double O[2] = { 0, 0 };
+	std::vector<uint32_t> parts;   // lane AIRPERF1 r6: the soup's parts (a BLAS each on the device); empty = one
 	std::vector<float> triAttr, lights, rotations;
 	bakert::DdgiGpuParams prm;
 	int nLights = 0;
@@ -517,6 +520,59 @@ void RtDdgiVolume::position( int p, float out[3] ) const
 }
 
 //! the volume's grid and every packed input both runs read (rtddgiRun and RtDdgiLive::open)
+/* MODULES1 11-09 item 3: the sun, the interior directional, the sky cube and the ground into P and out (groundAlbedo and
+ * skyBelowRule already set): packVolume's, and RtDdgiLive::relight's when a new hour or weather moves only these */
+static void packSky( const WwCellLighting & lighting, const ProbeSkyLight & sky, const RtDdgiSpec & spec, RtDdgiVolume * out,
+	bakert::DdgiGpuParams & P )
+{
+	const bool sunOn = sky.on && ( sky.sun[0] > 0.0f || sky.sun[1] > 0.0f || sky.sun[2] > 0.0f );
+	const V3 sunTo = normalize( V3( sky.sunTo[0], sky.sunTo[1], sky.sunTo[2] ) );
+	for ( int k = 0; k < 3; k++ ) {
+		P.sunTo[k] = sunTo[k];
+		P.sun[k] = sky.sun[k];
+	}
+	P.sunTo[3] = sunOn ? 1.0f : 0.0f;
+	P.sun[3] = spec.traceMax;
+	for ( int k = 0; k < 4; k++ ) {
+		P.dirTo[k] = k == 2 ? 1.0f : 0.0f;
+		P.dirColor[k] = 0.0f;
+	}
+	if ( lighting.interior && lighting.hasDirectional ) {   // probegi's interior directional: no shadow ray
+		const V3 to = normalize( V3( lighting.dirTo[0], lighting.dirTo[1], lighting.dirTo[2] ) );
+		for ( int k = 0; k < 3; k++ ) {
+			P.dirTo[k] = to[k];
+			P.dirColor[k] = lighting.dirColor[k];
+		}
+		P.dirTo[3] = 1.0f;
+	}
+	P.dirColor[3] = spec.fixtureClear;
+	for ( int f = 0; f < 6; f++ )
+		for ( int c = 0; c < 4; c++ ) {
+			P.sky[f][c] = 0.0f;
+			if ( c < 3 )
+				out->skyR[f][c] = 0.0f;
+		}
+	out->skyOn = false;
+	out->skyClamped = 0;
+	for ( int c = 0; c < 3; c++ )
+		out->ground[c] = 0.0f;
+	if ( sky.on && !spec.noSky ) {
+		float R[6][3];
+		out->skyClamped = skyRadianceCube( sky.amb, R );
+		for ( int f = 0; f < 6; f++ )
+			for ( int c = 0; c < 3; c++ )
+				P.sky[f][c] = out->skyR[f][c] = R[f][c];
+		out->skyOn = true;
+		P.sky[0][3] = 1.0f;
+	}
+	P.sky[4][3] = out->skyBelowRule ? 1.0f : 0.0f;   // lane SKYBELOW1 (packVolume's note)
+	if ( sky.on && !spec.noSky ) {
+		groundRadiance( out->groundAlbedo, sky.amb[4], lighting.interior, out->ground );
+		for ( int c = 0; c < 3; c++ )
+			P.sky[1 + c][3] = out->ground[c];
+	}
+}
+
 static bool packVolume( const ProbeSoup & soup, const WwCellLighting & lighting, const ProbeSkyLight & sky, const RtDdgiSpec & spec,
 	RtDdgiVolume * out, Packed & S, bool buildBvh = true )   // RTXCASCADE2: buildBvh false = S.bvh.t filled, its tree not built
 {
@@ -598,6 +654,17 @@ static bool packVolume( const ProbeSoup & soup, const WwCellLighting & lighting,
 
 	// ---- the packed inputs (the soup's local frame, probegi's: x, y moved by the floor of the box centre)
 	{
+		/* lane AIRPERF1 r6: the soup's parts (the stream's traced set names them; the CLI's --blas-parts cuts N equal
+		 * ones). With parts the origin snaps to a coarse grid, so a part that did not change has the same local floats in
+		 * the next set and the device finds its BLAS again (rttracesetrule.h stableOrigin) */
+		S.parts.assign( soup.parts.begin(), soup.parts.end() );
+		const uint32_t nSoupTri = uint32_t( soup.tris.size() / 9 );
+		if ( S.parts.empty() && spec.blasParts > 1 ) {
+			std::vector<uint32_t> cut;
+			for ( int k = 0; k < spec.blasParts; k++ )
+				cut.push_back( uint32_t( std::uint64_t( nSoupTri ) * std::uint64_t( k ) / std::uint64_t( spec.blasParts ) ) );
+			S.parts = rttracesetrule::blasParts( cut, nSoupTri, rttracesetrule::kBlasPartCap );
+		}
 		double mn[2] = { 1e300, 1e300 }, mx[2] = { -1e300, -1e300 };
 		for ( size_t i = 0; i < soup.tris.size(); i += 3 )
 			for ( int k = 0; k < 2; k++ ) {
@@ -605,7 +672,7 @@ static bool packVolume( const ProbeSoup & soup, const WwCellLighting & lighting,
 				mx[k] = std::max( mx[k], double( soup.tris[i + size_t( k )] ) );
 			}
 		for ( int k = 0; k < 2; k++ )
-			S.O[k] = std::floor( ( mn[k] + mx[k] ) * 0.5 );
+			S.O[k] = rttracesetrule::stableOrigin( mn[k], mx[k], S.parts.size() > 1 );
 	}
 	S.bvh.t.resize( soup.tris.size() );
 	for ( size_t i = 0; i < soup.tris.size(); i += 3 ) {
@@ -636,7 +703,7 @@ static bool packVolume( const ProbeSoup & soup, const WwCellLighting & lighting,
 			else
 				emitAreaMean( [&]( double b1, double b2, double v[3] ) { soup.glow.le( ti, b1, b2, v ); }, le );
 			for ( int c = 0; c < 3; c++ )
-				a[4 + c] = float( le[c] ) * lighting.glowScale;	// lane MUSGI1 r5: a sunlit interior's lamp scale
+				a[4 + c] = float( le[c] ) * ( wwPhysOn() ? wwPhysEmitScale() : lighting.glowScale );	// PHYSUNITS1; MUSGI1 r5
 			const double lum = 0.2126 * a[4] + 0.7152 * a[5] + 0.0722 * a[6];
 			if ( lum > 0.0 ) {
 				const float * v = &soup.tris[t * 9];
@@ -671,39 +738,12 @@ static bool packVolume( const ProbeSoup & soup, const WwCellLighting & lighting,
 	P.dims[3] = int( nP );
 	P.origin[3] = out->distClamp;
 	P.stepv[3] = std::min( st[0], std::min( st[1], st[2] ) );
-	const bool sunOn = sky.on && ( sky.sun[0] > 0.0f || sky.sun[1] > 0.0f || sky.sun[2] > 0.0f );
-	const V3 sunTo = normalize( V3( sky.sunTo[0], sky.sunTo[1], sky.sunTo[2] ) );
-	for ( int k = 0; k < 3; k++ ) {
-		P.sunTo[k] = sunTo[k];
-		P.sun[k] = sky.sun[k];
-	}
-	P.sunTo[3] = sunOn ? 1.0f : 0.0f;
-	P.sun[3] = spec.traceMax;
-	if ( lighting.interior && lighting.hasDirectional ) {   // probegi's interior directional: no shadow ray
-		const V3 to = normalize( V3( lighting.dirTo[0], lighting.dirTo[1], lighting.dirTo[2] ) );
-		for ( int k = 0; k < 3; k++ ) {
-			P.dirTo[k] = to[k];
-			P.dirColor[k] = lighting.dirColor[k];
-		}
-		P.dirTo[3] = 1.0f;
-	}
-	P.dirColor[3] = spec.fixtureClear;
-	if ( sky.on && !spec.noSky ) {
-		float R[6][3];
-		out->skyClamped = skyRadianceCube( sky.amb, R );
-		for ( int f = 0; f < 6; f++ )
-			for ( int c = 0; c < 3; c++ )
-				P.sky[f][c] = out->skyR[f][c] = R[f][c];
-		out->skyOn = true;
-		P.sky[0][3] = 1.0f;
-	}
 	/* lane SKYBELOW1 (bungo 10-30, "Shouldn't that be a rule for every probe"): a miss below the horizon returns the
 	 * GROUND, never sky, and no below-horizon direction is sky visibility (the rule is P.sky[4].w, on unless red; the
 	 * visibility half holds with no sky too). An exterior's ground = the soup's up-facing albedo (area-weighted, the
 	 * triangles' ALB1, 0.5 grey without it as at a hit) x the weather's +Z irradiance (an open up-facing surface's) / pi;
 	 * an interior's = 0, which replaces SKYINT1's zeroed ground-facing sky (rtddgicell.cpp skyLitSky) */
 	out->skyBelowRule = !hasRed( spec.red, "skybelow" );
-	P.sky[4][3] = out->skyBelowRule ? 1.0f : 0.0f;
 	{
 		double a[3] = { 0, 0, 0 }, w = 0;
 		for ( size_t t = 0; t < nTri; t++ ) {
@@ -720,11 +760,7 @@ static bool packVolume( const ProbeSoup & soup, const WwCellLighting & lighting,
 		for ( int c = 0; c < 3; c++ )
 			out->groundAlbedo[c] = w > 0.0 ? float( a[c] / w ) : 0.5f;
 	}
-	if ( sky.on && !spec.noSky ) {
-		groundRadiance( out->groundAlbedo, sky.amb[4], lighting.interior, out->ground );
-		for ( int c = 0; c < 3; c++ )
-			P.sky[1 + c][3] = out->ground[c];
-	}
+	packSky( lighting, sky, spec, out, P );
 	P.counts[0] = spec.rays;
 	P.counts[1] = S.nLights;
 	P.counts[2] = int( nTri );
@@ -808,6 +844,8 @@ bool rtddgiRun( const ProbeSoup & soup, const WwCellLighting & lighting, const P
 	if ( spec.gpu > 0 ) {
 		bakert::DdgiGpuJob job;
 		job.bvh = &S.bvh;
+		job.parts = S.parts;   // lane AIRPERF1 r6
+		job.partsRed = spec.blasPartsRed;
 		job.params = S.prm;
 		job.triAttr = S.triAttr;
 		job.lights = S.lights;
@@ -833,6 +871,12 @@ bool rtddgiRun( const ProbeSoup & soup, const WwCellLighting & lighting, const P
 			out->fixedDist = std::move( g.fixedDist );
 			lastRays = std::move( g.raysAll );
 			out->blasGrow = g.blasGrow;
+			out->blasParts = g.blasParts;   // lane AIRPERF1 r6
+			out->blasNew = g.blasNew;
+			out->blasKept = g.blasKept;
+			out->blasTrisNew = g.blasTrisNew;
+			out->blasTrisKept = g.blasTrisKept;
+			out->blasMs = g.blasMs;
 			out->rays = g.rays;
 			out->msBuild += g.msBuild;
 			out->msReloc = g.msReloc;
@@ -880,6 +924,9 @@ struct RtDdgiLive::Impl
 	bool builtBlas = false;
 	QString sceneWhy;
 	int skipped = 0;
+	// MODULES1 11-09 item 3: the params the session holds (open's), and a relight the next step still owes the device
+	bakert::DdgiGpuParams prm;
+	bool lightOwed = false;
 
 	//! RTXCASCADE2: one step's device order, made from an RtDdgiStep before the submit (step and stepGroup)
 	struct Prep
@@ -909,6 +956,17 @@ struct RtDdgiLive::Impl
 		in.host = order.host;
 		in.wait = order.wait;
 		in.beforeSubmit = order.beforeSubmit;
+		in.lightSet = lightOwed;
+		if ( lightOwed ) {
+			for ( int c = 0; c < 4; c++ ) {
+				in.sunTo[c] = prm.sunTo[c];
+				in.sun[c] = prm.sun[c];
+				in.dirTo[c] = prm.dirTo[c];
+				in.dirColor[c] = prm.dirColor[c];
+				for ( int f = 0; f < 6; f++ )
+					in.sky[f][c] = prm.sky[f][c];
+			}
+		}
 		for ( int c = 0; c < 3; c++ ) {
 			P.cells[c] = order.scroll[c];
 			P.origin[c] = v.origin[c];
@@ -984,6 +1042,8 @@ struct RtDdgiLive::Impl
 		}
 		if ( order.wait )
 			take( so );   // this step's own report (a scroll's states replace the CPU's guess)
+		if ( P.in.lightSet )
+			lightOwed = false;
 		updates += P.k;
 		sinceScroll += P.k;
 		wall = so.msWall;
@@ -1071,6 +1131,8 @@ bool RtDdgiLive::open( const ProbeSoup & soup, const WwCellLighting & lighting, 
 				h = ( h ^ b[i] ) * 0x100000001B3ULL;
 		};
 		eat( S.O, sizeof S.O );
+		if ( !S.parts.empty() )   // lane AIRPERF1 r6
+			eat( S.parts.data(), S.parts.size() * sizeof( uint32_t ) );
 		const size_t nt = S.bvh.t.size(), na = S.triAttr.size(), nl = S.lights.size();
 		eat( &nt, sizeof nt );
 		eat( &na, sizeof na );
@@ -1093,7 +1155,11 @@ bool RtDdgiLive::open( const ProbeSoup & soup, const WwCellLighting & lighting, 
 	bakert::DdgiGpuJob job;
 	job.sceneFrom = take ? sceneFrom->d->s : nullptr;
 	job.bvh = &S.bvh;
+	job.parts = S.parts;   // lane AIRPERF1 r6: a BLAS a part
+	job.partsRed = d->spec.blasPartsRed;
 	job.params = S.prm;
+	d->prm = S.prm;   // MODULES1 11-09 item 3: relight's base
+	d->lightOwed = false;
 	job.triAttr = std::move( S.triAttr );
 	d->lights = S.lights;   // lane RESTIRDI1
 	job.lights = std::move( S.lights );
@@ -1123,6 +1189,12 @@ bool RtDdgiLive::open( const ProbeSoup & soup, const WwCellLighting & lighting, 
 	}
 	d->count();
 	v.blasGrow = g.blasGrow;
+	v.blasParts = g.blasParts;   // lane AIRPERF1 r6
+	v.blasNew = g.blasNew;
+	v.blasKept = g.blasKept;
+	v.blasTrisNew = g.blasTrisNew;
+	v.blasTrisKept = g.blasTrisKept;
+	v.blasMs = g.blasMs;
 	v.rays = g.rays;
 	v.msBuild += g.msBuild;
 	v.msReloc = g.msReloc;
@@ -1134,6 +1206,15 @@ bool RtDdgiLive::open( const ProbeSoup & soup, const WwCellLighting & lighting, 
 }
 
 bool RtDdgiLive::isOpen() const { return d->s != nullptr; }
+
+void RtDdgiLive::relight( const WwCellLighting & lighting, const ProbeSkyLight & sky )
+{
+	if ( !d->s )
+		return;
+	packSky( lighting, sky, d->spec, &d->vol, d->prm );
+	d->lightOwed = true;
+	d->sinceScroll = 0;   // the spec's max counts again: the re-lit probes converge as a scroll's new planes do
+}
 
 bool RtDdgiLive::step( int k )
 {
@@ -1354,7 +1435,7 @@ bool rtddgiRunCascades( const ProbeSoup & soup, const WwCellLighting & lighting,
 	return true;
 }
 
-quint64 rtddgiLightsKey( const WwCellLighting & lighting )
+quint64 rtddgiLightsKey( const WwCellLighting & lighting, bool withDir )
 {
 	quint64 h = 0xCBF29CE484222325ULL;
 	auto eat = [&h]( const void * p, size_t n ) {
@@ -1372,8 +1453,10 @@ quint64 rtddgiLightsKey( const WwCellLighting & lighting )
 	}
 	const int flags[2] = { lighting.interior ? 1 : 0, lighting.hasDirectional ? 1 : 0 };
 	eat( flags, sizeof flags );
-	eat( lighting.dirTo, sizeof lighting.dirTo );
-	eat( lighting.dirColor, sizeof lighting.dirColor );
+	if ( withDir ) {
+		eat( lighting.dirTo, sizeof lighting.dirTo );
+		eat( lighting.dirColor, sizeof lighting.dirColor );
+	}
 	return h;
 }
 
@@ -1553,6 +1636,8 @@ int rtddgiCli( const QStringList & args )
 		else if ( a == QLatin1String( "--no-classify" ) ) spec.classify = false;
 		else if ( a == QLatin1String( "--trace-asleep" ) ) spec.skipAsleep = false;
 		else if ( a == QLatin1String( "--dump-fixed" ) ) spec.dumpFixed = true;
+		else if ( a == QLatin1String( "--blas-parts" ) ) { spec.blasParts = nx.toInt(); i++; }   // lane AIRPERF1 r6
+		else if ( a == QLatin1String( "--blas-red" ) ) spec.blasPartsRed = true;
 		else if ( a == QLatin1String( "--interior" ) ) forceInterior = true;   // SKYBELOW1: a sky-lit interior (SKYINT1's kind)
 		else if ( a == QLatin1String( "--sun" ) || a == QLatin1String( "--sky" ) ) {   // probegi's arguments
 			const QStringList v = nx.split( ',' );
@@ -1676,6 +1761,10 @@ int rtddgiCli( const QStringList & args )
 		(long long)vol.rays, vol.msBuild, vol.msReloc, spec.frames, vol.msFrames, vol.blasGrow );
 	std::printf( "%s\n", skyBelowLine( vol ).constData() );   // lane SKYBELOW1
 	std::printf( "%s\n", emissiveLine( vol, spec ).constData() );   // lane RTEMIS1
+	// lane AIRPERF1 r6: the gate reads this line (--blas-parts N against --blas-parts N --blas-red: the same dumps)
+	std::printf( "rtddgi BLAS parts %d: %d BLASes built (%lld triangles), %d found again (%lld triangles), %.1f ms%s\n", vol.blasParts,
+		vol.blasNew, (long long)vol.blasTrisNew, vol.blasKept, (long long)vol.blasTrisKept, vol.blasMs,
+		spec.blasPartsRed ? " (RED --blas-red: the parts' frame, one BLAS)" : ( vol.blasParts ? "" : " (one BLAS)" ) );
 	return 0;
 }
 

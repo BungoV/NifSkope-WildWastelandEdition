@@ -60,7 +60,7 @@ struct CellSceneSpec
 	QString interiorCell;
 	/* `probes` places the bake's probes over the whole loaded block; `probesShow` draws them. */
 	bool probes = false;
-	bool probesShow = true;
+	bool probesShow = false;	//!< lane MODULES1 item 6: hidden by default (red WW_CELL_PROBES_SHOW_RED=1: shown)
 	bool probesHiddenByEnv = false;	//!< lane LIVESET1: WW_CELL_PROBES_HIDE turned probesShow off
 	/* Place the probes, then bake them into `.tbk` sector files in `bakeDir` (empty =
 	 * `<app>/prtp_bake/<world or cell>`). One-shot: the workspace clears it once noted. */
@@ -145,7 +145,7 @@ int cellLiveProbesShow( NifModel * nif, bool show, QString * why );
  *  against the build's); 0 nothing moved, 1 rebuilt, 2 a reopen is needed (`why` says why) */
 int cellLiveRebuild( NifModel * nif, QString * why );
 
-/*! The Particles row (WW/CellParticles, env WW_CELL_PARTICLES, default off): copy a placed
+/*! The Particles row (WW/CellParticles2, env WW_CELL_PARTICLES, default on since PARTFX1): copy a placed
  *  model's particle systems into the cell when it opens. */
 bool wwCellParticlesOn();
 void wwCellParticlesSetOn( bool on );

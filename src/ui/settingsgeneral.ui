@@ -834,6 +834,123 @@
          </layout>
         </widget>
        </item>
+       <item>
+        <widget class="QGroupBox" name="groupBoxAsyncCompute">
+         <property name="title">
+          <string>Ray tracing device</string>
+         </property>
+         <property name="flat">
+          <bool>true</bool>
+         </property>
+         <layout class="QGridLayout" name="gridLayoutAsyncCompute">
+          <item row="0" column="0">
+           <widget class="QLabel" name="lblAsyncCompute">
+            <property name="text">
+             <string>Async Compute</string>
+            </property>
+            <property name="buddy">
+             <cstring>asyncCompute</cstring>
+            </property>
+           </widget>
+          </item>
+          <item row="0" column="1">
+           <widget class="QCheckBox" name="asyncCompute">
+            <property name="text">
+             <string/>
+            </property>
+            <property name="checked">
+             <bool>true</bool>
+            </property>
+           </widget>
+          </item>
+          <item row="0" column="2">
+           <spacer name="horizontalSpacerAsyncCompute">
+            <property name="orientation">
+             <enum>Qt::Horizontal</enum>
+            </property>
+            <property name="sizeHint" stdset="0">
+             <size>
+              <width>40</width>
+              <height>20</height>
+             </size>
+            </property>
+           </spacer>
+          </item>
+          <item row="1" column="0">
+           <widget class="QLabel" name="lblVulkanPost">
+            <property name="text">
+             <string>Vulkan Post</string>
+            </property>
+            <property name="buddy">
+             <cstring>vulkanPost</cstring>
+            </property>
+           </widget>
+          </item>
+          <item row="1" column="1">
+           <widget class="QCheckBox" name="vulkanPost">
+            <property name="text">
+             <string/>
+            </property>
+            <property name="checked">
+             <bool>true</bool>
+            </property>
+           </widget>
+          </item>
+          <item row="2" column="0">
+           <widget class="QLabel" name="lblVulkanPresent">
+            <property name="text">
+             <string>Vulkan Present</string>
+            </property>
+            <property name="buddy">
+             <cstring>vulkanPresent</cstring>
+            </property>
+           </widget>
+          </item>
+          <item row="2" column="1">
+           <widget class="QCheckBox" name="vulkanPresent">
+            <property name="text">
+             <string/>
+            </property>
+            <property name="checked">
+             <bool>true</bool>
+            </property>
+           </widget>
+          </item>
+          <item row="3" column="0">
+           <widget class="QLabel" name="lblVulkanPresentSignal">
+            <property name="text">
+             <string>Vulkan Present Signal</string>
+            </property>
+            <property name="buddy">
+             <cstring>vulkanPresentSignal</cstring>
+            </property>
+           </widget>
+          </item>
+          <item row="3" column="1">
+           <widget class="QComboBox" name="vulkanPresentSignal">
+            <property name="currentIndex">
+             <number>2</number>
+            </property>
+            <item>
+             <property name="text">
+              <string>Drawing thread</string>
+             </property>
+            </item>
+            <item>
+             <property name="text">
+              <string>Worker GL signal</string>
+             </property>
+            </item>
+            <item>
+             <property name="text">
+              <string>Worker CPU wait</string>
+             </property>
+            </item>
+           </widget>
+          </item>
+         </layout>
+        </widget>
+       </item>
       </layout>
      </widget>
      <widget class="QWidget" name="importex">

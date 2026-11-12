@@ -73,6 +73,15 @@ BSD License - see nifskope.h
 #include <vector>
 #include <unordered_map>	// lane PERFFIX1: the cell-uniform class records
 #include "features/lights/celllights_p.h"	// lane MODULES1 (lights): the state the lamps share
+#include "features/exposure/physunits.h"	// lane PHYSUNITS1: real units
+#include "gl/dalcfit.h"	// lane SKYLIGHT1: the up / down poles read exactly
+#include "features/overlays/debugview.h"	// lane DEBUGVIEW1: a debug view is a probe pass
+
+//! lane PHYSUNITS1: an interior's ambient, directional and fog factor (its lamps' median x Game Light Brightness); 1 else
+static float physInteriorK( const WwCellLighting * L )
+{
+	return ( L && L->interior && L->physAmbK > 0.0f && wwPhysSkyOn() ) ? L->physAmbK * wwPhysGameLights() : 1.0f;
+}
 
 using namespace WwCellLightsP;
 
@@ -96,7 +105,6 @@ ClState & st()
 		{
 			const ClState d {};
 			s.pinned = d.pinned;
-			s.giPinned = d.giPinned;
 			s.farPinned = d.farPinned;
 			s.isPinned = d.isPinned;
 			s.passPinned = d.passPinned;
@@ -112,15 +120,8 @@ ClState & st()
 			s.on = wwEnvInt( "WW_DEFAULTS1_RED" ) == 1 ? QSettings().value( QStringLiteral( "WW/CellLights" ), false ).toBool()
 				: QSettings().value( QStringLiteral( "WW/CellLights2" ), true ).toBool();
 		}
-		const QByteArray giPin = wwEnv( "WW_CELL_GI" );
-		if ( !wwCellPrtOn() ) {
-			s.giOn = false;	// lane PRTOFF1: the old GI never draws; its pin and its row do nothing
-		} else if ( !giPin.isEmpty() ) {
-			s.giPinned = true;
-			s.giOn = giPin.trimmed() != "0";
-		} else {
-			s.giOn = QSettings().value( QStringLiteral( "WW/CellGi" ), false ).toBool();
-		}
+		// FARWATER1 item 6 (bungo 11-11): the retired pin WW_CELL_GI and its row are gone; the PRT red draws the old GI whole
+		s.giOn = wwCellPrtOn();
 		const QByteArray farPin = wwEnv( "WW_CELL_FAR" );
 		if ( !farPin.isEmpty() ) {
 			s.farPinned = true;
@@ -185,6 +186,18 @@ ClState & st()
 			s.red = 1024;	// the Ambient Only lights' ambient adjustment ignored
 		else if ( red == "probefx" )
 			s.red = 4096;	// effects and refraction shapes drawn into the probe passes again
+		else if ( red == "backglow" )
+			s.red = 2048;	// MODULES1 R6-1: a material's back light added to the root in the viewport's unit again
+		{
+			static int backLast = -1;
+			const int backNow = ( s.red & 2048 ) ? 1 : 0;
+			if ( backNow != backLast ) {
+				backLast = backNow;
+				std::fprintf( stderr, "cell back light: %s\n", backNow
+					? "RED WW_CELL_LIT_RED=backglow: albedo x N.-L x power x the viewport light, added to the root (no exposure, no sun unit)"
+					: "the cell sun x albedo x (N.-L x power)^2 x the sun's visibility x a far placement's sky visibility, linear, in the sun's unit" );
+			}
+		}
 		// the lights' Non Specular flag ignored (a bit clear of WW_CELL_LIT_RED's)
 		if ( wwEnv( "WW_CELL_SPEC_RED" ).trimmed() == "nonspec" )
 			s.red |= 65536;
@@ -513,15 +526,6 @@ bool wwCellPrtOn()
 	return red;
 }
 
-void wwCellGiSetOn( bool on )
-{
-	ClState & s = st();
-	if ( s.giPinned || !wwCellPrtOn() )	// lane PRTOFF1: the row is gone; the stored value stays as it was
-		return;
-	s.giOn = on;
-	QSettings().setValue( QStringLiteral( "WW/CellGi" ), on );
-}
-
 void wwCellFarPublish( const void * nif, const WwCellFar & far )
 {
 	ClState & s = st();
@@ -664,7 +668,11 @@ bool wwCellProbePass( Scene * scene )
 	const ClState & s = st();
 	if ( s.red & 4096 )
 		return false;	// WW_CELL_LIT_RED=probefx: the effects write over the probes
-	return ( s.probe > 0 || s.fogProbe > 0 || ( scene && wwCellPassFor( scene->nifModel ) > 0 ) ) && wwCellLightsWanted( scene );
+	// MODULES1 R6-8: a shadow debug view is a probe pass too (no effects over it, no linear frame, no post chain)
+	// DEBUGVIEW1: so is a debug view (the pixel is a term, not light: no linear frame, no effects over it, no post)
+	return ( s.probe > 0 || s.fogProbe > 0 || ( scene && wwCellPassFor( scene->nifModel ) > 0 ) || wwShadowViewPass( scene )
+	         || wwDebugViewId() != 0 )
+		&& wwCellLightsWanted( scene );
 }
 
 /* lane FO4CELLGI1: the loader's WW_CELL_VIEWS (fo4_default.frag's probe and pass views in the programs with the GI volume
@@ -1053,6 +1061,8 @@ void wwCellLightsUniforms( Scene * scene )
 	Gpu & g = gpus()[r];
 	if ( on && !s.nifx.isEmpty() )
 		nifxTick( scene->nifModel );	// lane NIFXLIGHT1
+	if ( on )
+		physTick( scene->nifModel );	// lane PHYSUNITS1: Game Light Brightness, live
 	const WwCellLighting * L = on ? wwCellLightsFor( scene->nifModel ) : nullptr;
 	const bool flick = L && s.flickerOn && !s.flickerRed;	// lane LIGHTFLICKER1
 	// lane NIFXLIGHT3: the .nifx dimmer tracks play on the world clock (the buffer keeps a copy to patch, as for flicker)
@@ -1103,7 +1113,7 @@ void wwCellLightsUniforms( Scene * scene )
 				col[0], col[1], col[2], shape,
 				dir[0], dir[1], dir[2], l.cone,
 				l.bias, l.scale, l.exponent,
-				float( ( l.noSpecular ? 1 : 0 ) | ( l.noRim ? 2 : 0 ) | ( l.ignoreRoughness ? 4 : 0 ) ),
+				float( ( l.noSpecular ? 1 : 0 ) | ( l.noRim ? 2 : 0 ) | ( l.ignoreRoughness ? 4 : 0 ) | ( flick && l.flicker ? 8 : 0 ) ),
 				slotOf[size_t( i )], float( l.shadow ), l.nearClip, l.shadowBias,
 				l.box[0][0], l.box[0][1], l.box[0][2], l.box[0][3],
 				l.box[1][0], l.box[1][1], l.box[1][2], l.box[1][3],
@@ -1715,10 +1725,21 @@ void wwCellLightsUniforms( Scene * scene )
 	rec.b( prog, "cellIsOn", isDraw );
 	rec.b( prog, "cellIsLinear", isDraw && wwCellHdrActive() );	// write linear light, tone-mapped once
 	rec.b( prog, "cellIsLutOn", lutDraw );
+	/* lane PHYSUNITS1: unlit effects: additive ones in cd/m2 (the emissive ratio x G), the others on the light's scale
+	 * (0 = x 1: the red, or no cell HDR camera) */
+	{
+		const bool ps = wwPhysSkyOn();
+		rec.f( prog, "cellFxEmitK", ps ? wwPhysEmitScale() : 0.0f );
+		rec.f( prog, "cellFxUnlitK", !ps ? 0.0f : ( L && L->interior && !wwCellAsOutdoor( L ) ) ? physInteriorK( L ) : wwLookdevPhysLight() );
+	}
 	if ( isDraw ) {
 		const float * h = LI->isHdr;
+		if ( wwCellHdrActive() )
+			wwPhysNoteCellFrame();	// lane PHYSUNITS1: real units while the cell's HDR camera draws
 		// the tonemap PS: max( mid / (lum + 0.001), cb.y ) then min( .., cb.x ); cb (x, y) = HNAM (max, min)
-		const float e = wwCellExposure( h, adapted );
+		// lane PHYSUNITS1: the physical camera (EV100) on real units; the red the old law
+		wwPhysNoteOutdoor( L && ( !L->interior || wwCellAsOutdoor( L ) ) );	// MODULES1 item 14: the incident meter's daylight
+		const float e = wwPhysSkyOn() ? wwPhysExposure( h, adapted ) : wwCellExposure( h, adapted );
 		rec.f( prog, "cellIsExposure", e );
 		rec.f( prog, "cellIsE", h[1] );
 		rec.f( prog, "cellIsAdapted", adapted );
@@ -1789,13 +1810,15 @@ void wwCellLightsUniforms( Scene * scene )
 	}
 	const bool dalc = ( L->hasDalc || skyLitAmb ) && !( s.red & 4 );
 	rec.b( prog, "cellHasDalc", dalc );
+	// lane PHYSUNITS1: an interior's own DALC on its lamps' scale (stored gamma: the shader's 2.2 power takes k^(1/2.2))
+	const float dk = skyLitAmb ? 1.0f : std::pow( physInteriorK( L ), 1.0f / 2.2f );
 	for ( int c = 0; c < 3 && dalc; c++ ) {
 		float mean = 0.0f;
 		for ( int a = 0; a < 6; a++ )
 			mean += D[a][c] / 6.0f;
 		rec.f4l( prog, "cellDalc[%d]", c, FloatVector4(
-			( D[0][c] - D[1][c] ) * 0.5f, ( D[2][c] - D[3][c] ) * 0.5f,
-			( D[4][c] - D[5][c] ) * 0.5f, mean ) );
+			( D[0][c] - D[1][c] ) * 0.5f * dk, ( D[2][c] - D[3][c] ) * 0.5f * dk,
+			( D[4][c] - D[5][c] ) * 0.5f * dk, mean * dk ) );
 	}
 	if ( L->interior && L->skyLighting ) {	// telemetry, once per change
 		static QString skyLitLast;
@@ -1831,6 +1854,8 @@ void wwCellLightsUniforms( Scene * scene )
 	const bool outdoor = wwCellAsOutdoor( L );
 	bool hasDir = L->hasDirectional;
 	float dirTo[3] = { L->dirTo[0], L->dirTo[1], L->dirTo[2] }, dirColor[3] = { L->dirColor[0], L->dirColor[1], L->dirColor[2] };
+	for ( int c = 0; c < 3 && !outdoor; c++ )
+		dirColor[c] *= physInteriorK( L );	// lane PHYSUNITS1: an interior's directional on its lamps' scale
 	/* The game's lit surfaces take the sun x the imagespace Sunlight Scale, so the sun-to-ambient ratio (and the
 	 * bounce the probes carry) matches the game. 1 indoors. */
 	const float sunScale = ( outdoor && wwLookdevActive() ) ? wwLookdevSunlightScale() : 1.0f;
@@ -1838,7 +1863,13 @@ void wwCellLightsUniforms( Scene * scene )
 	/* lane VOLAIR1 (LAMPAIR1): the air takes the surfaces' exterior sun and sky (the weather's light x Sunlight Scale,
 	 * its DALC) so it is lit by the light the records give, not the fog-sun glare colour; red WW_CELL_AIR_RED=oldsun */
 	WW_SWITCH_STATIC( bool, airOldSun, wwEnvStr( "WW_CELL_AIR_RED" ).split( ',' ).contains( QStringLiteral( "oldsun" ) ) );
-	const bool extProg = wwIsCellProgramName( prog->name ) || wwIsCellDecalProgramName( prog->name ) || ( prog->name == "cell_volair.prog" && !airOldSun );
+	/* MODULES1 B9: the far cards (impostor_cell*) take the weather's sun and DALC too. An exterior has no XCLL
+	 * directional, so without this their cellHasDir was 0 and impostor_oct.frag lit them by the viewport light, which
+	 * follows no hour: white at noon, glowing at night. Red WW_CELL_FARLOD_RED=cardsun: the viewport light again */
+	WW_SWITCH_STATIC( bool, cardSunRed, wwEnv( "WW_CELL_FARLOD_RED" ) == "cardsun" );
+	const bool cardProg = !cardSunRed && std::string_view( prog->name ).substr( 0, 13 ) == "impostor_cell";
+	const bool extProg = wwIsCellProgramName( prog->name ) || wwIsCellDecalProgramName( prog->name ) || ( prog->name == "cell_volair.prog" && !airOldSun )
+		|| cardProg;
 	if ( outdoor && wwLookdevActive() && extProg ) {
 		float dalc[6][3], dif[4] = {}, amb[4] = {};
 		if ( wwLookdevDalc( dalc ) ) {
@@ -1852,7 +1883,7 @@ void wwCellLightsUniforms( Scene * scene )
 		static InputsLast sunIn;
 		const float sunKey[9] = { hasDir ? 1.0f : 0.0f, dirTo[0], dirTo[1], dirTo[2], dirColor[0], dirColor[1], dirColor[2],
 			prog->uniLocation( "csmMap" ) >= 0 ? 1.0f : 0.0f, sunScale };
-		const QString line = !sunIn.changed( sunKey, sizeof( sunKey ) ) ? sunLast : hasDir
+		const QString line = cardProg || !sunIn.changed( sunKey, sizeof( sunKey ) ) ? sunLast : hasDir
 			? QStringLiteral( "cell sun: %9 directional=weather to=%1,%2,%3 color=%4,%5,%6 (linear) shadows=%7 sunlight scale=%8" )
 				.arg( double( dirTo[0] ), 0, 'f', 5 ).arg( double( dirTo[1] ), 0, 'f', 5 ).arg( double( dirTo[2] ), 0, 'f', 5 )
 				.arg( double( dirColor[0] ), 0, 'f', 5 ).arg( double( dirColor[1] ), 0, 'f', 5 ).arg( double( dirColor[2] ), 0, 'f', 5 )
@@ -1865,6 +1896,27 @@ void wwCellLightsUniforms( Scene * scene )
 		}
 	}
 	prof.at( 17, "sun" );
+	/* MODULES1 R7-1 (bungo: the fog cards take "either darkness or colored lights" around them): a blended lit effect
+	 * card or particle outdoors takes the surfaces' sun / moon (vpSun, shadowed in the shader) and the weather's
+	 * ambient (cellDalc) in place of the game's one Effect Lighting colour: at Foggy 22:00 that base was 0.08-0.13
+	 * against a moon of 0.002, a white bank in a dark street. Additive cards keep the base (cellDirColor).
+	 * Red WW_CELL_FXLOCAL_RED=base (live): the game's base for every lit effect again. */
+	WW_SWITCH_STATIC( bool, fxLocalRed, wwEnvStr( "WW_CELL_FXLOCAL_RED" ).split( ',' ).contains( QStringLiteral( "base" ) ) );
+	/* MODULES1 R8-1 (bungo: "the fog here should be dark and match the environment lighting"): the card keeps only the
+	 * share of the weather's ambient a surface there keeps (1 - the GI volume's sky share) and takes the volume's
+	 * light for the rest (cell_fxlaw.glsl fxLocalSky). Red word `ambient` (live): round 7's whole ambient again. */
+	WW_SWITCH_STATIC( bool, fxLocalAmbRed, wwEnvStr( "WW_CELL_FXLOCAL_RED" ).split( ',' ).contains( QStringLiteral( "ambient" ) ) );
+	// the law's lit band is a receiver: weight = the band, not band x lighting influence. Red word `influence` (live)
+	WW_SWITCH_STATIC( bool, fxLocalInfRed, wwEnvStr( "WW_CELL_FXLOCAL_RED" ).split( ',' ).contains( QStringLiteral( "influence" ) ) );
+	/* MODULES1 round 9 (bungo: a mist card "is a slab of denser air"): a blended lit mesh card on the volumetric law
+	 * takes the air's own scatter at its pixel (fo4_effectshader.frag fxAirCard). Red word `lump` (live): the lump's
+	 * surface share + the GI surface term again. */
+	WW_SWITCH_STATIC( bool, fxLocalLumpRed, wwEnvStr( "WW_CELL_FXLOCAL_RED" ).split( ',' ).contains( QStringLiteral( "lump" ) ) );
+	/* FARWATER1 late item 4 (bungo b71: the barrel fire does not light its smoke): an air card's lamps take the dense
+	 * plume's multiple scatter x its opacity (cell_volpart.glsl vpLampMs). Red word `thinlamps` (live): thin share only. */
+	WW_SWITCH_STATIC( bool, fxLocalThinLampsRed, wwEnvStr( "WW_CELL_FXLOCAL_RED" ).split( ',' ).contains( QStringLiteral( "thinlamps" ) ) );
+	bool fxLocalHere = false;
+	float fxSunLocal[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
 	/* lane SUNCELL1 final: a lit effect or lit particle outdoors (fo4_effectcell / particles_cell) takes the game's
 	 * base term: the game's lit-effect setup puts pow(directional colour, 2.2) x the light's fade x
 	 * the imagespace Sunlight Scale (the imagespace HDR data's 7th float, HNAM's 7th float) in
@@ -1908,6 +1960,10 @@ void wwCellLightsUniforms( Scene * scene )
 			float dif[4] = {}, amb[4] = {};
 			wwLookdevLight( dirTo, dif, amb );
 			float fxCol[3] = { dif[0], dif[1], dif[2] };
+			for ( int c = 0; c < 3; c++ )
+				fxSunLocal[c] = std::max( dif[c], 0.0f ) * sunScale;	// R7-1: the surfaces' sun, before the effect row
+			fxLocalHere = !fxLocalRed;
+			fxSunLocal[3] = fxLocalHere ? 1.0f : 0.0f;
 			if ( !fxColorRed )
 				wwLookdevEffectLight( fxCol );	// the Effect Lighting row
 			WwLookdevIs is;
@@ -1933,6 +1989,27 @@ void wwCellLightsUniforms( Scene * scene )
 			if ( line != fxSunLast ) {
 				fprintf( stderr, "%s\n", qPrintable( line ) );
 				fxSunLast = line;
+			}
+			static QString fxLocLast;
+			const QString loc = QStringLiteral( "cell fx local: blended lit effect cards and particles take %1 (surfaces' sun %2,%3,%4 linear, "
+					"shadowed; the game's Effect Lighting base %5,%6,%7 stays on additive cards)" )
+				.arg( fxLocalHere ? ( fxLocalAmbRed
+						? QStringLiteral( "the surfaces' sun + the WHOLE weather ambient at the card + its lamps, RED WW_CELL_FXLOCAL_RED=ambient" )
+						: QStringLiteral( "the surfaces' sun + the weather ambient x (1 - the GI volume's sky share) + the volume's light + "
+							"its lamps, as a surface there (share and lamp shadows per pixel on the GPU)" ) )
+						+ ( fxLocalInfRed ? QStringLiteral( "; weight = band x lighting influence, RED WW_CELL_FXLOCAL_RED=influence" )
+							: QStringLiteral( "; a lit-band material is a receiver: weight = the band, the lighting influence reads 1" ) )
+						+ ( fxLocalLumpRed ? QStringLiteral( "; volumetric mesh cards are lumps: the surface share + the GI surface term, RED WW_CELL_FXLOCAL_RED=lump" )
+							: QStringLiteral( "; a volumetric mesh card is a slab of air: the air's scatter at its pixel (lamps x phase in their "
+								"own colours + the sky share under the record's cap) x its opacity, no surface share, no GI surface term" )
+							+ ( fxLocalThinLampsRed ? QStringLiteral( "; its lamps thin only (1/4 phase), RED WW_CELL_FXLOCAL_RED=thinlamps" )
+								: QStringLiteral( "; its lamps mix( thin, the multiple scatter's diffuse wrap( N.L, 1 ), opacity ) (FARWATER1)" ) ) )
+					: QStringLiteral( "the game's base + lamps, no ambient, RED WW_CELL_FXLOCAL_RED=base" ) )
+				.arg( double( fxSunLocal[0] ), 0, 'f', 5 ).arg( double( fxSunLocal[1] ), 0, 'f', 5 ).arg( double( fxSunLocal[2] ), 0, 'f', 5 )
+				.arg( double( dirColor[0] ), 0, 'f', 5 ).arg( double( dirColor[1] ), 0, 'f', 5 ).arg( double( dirColor[2] ), 0, 'f', 5 );
+			if ( loc != fxLocLast ) {
+				fprintf( stderr, "%s\n", qPrintable( loc ) );
+				fxLocLast = loc;
 			}
 		} else if ( outdoor && fxProg ) {
 			static bool fxSunSaid = false;
@@ -1962,12 +2039,17 @@ void wwCellLightsUniforms( Scene * scene )
 			}
 		}
 	}
+	if ( prog->uniLocation( "vpSun" ) >= 0 )
+		rec.f4( prog, "vpSun", FloatVector4( fxSunLocal[0], fxSunLocal[1], fxSunLocal[2], fxSunLocal[3] ) );
+	if ( prog->uniLocation( "fxLocalRed" ) >= 0 )
+		rec.i( prog, "fxLocalRed", ( fxLocalAmbRed ? 1 : 0 ) | ( fxLocalInfRed ? 2 : 0 ) | ( fxLocalLumpRed ? 4 : 0 )
+			| ( fxLocalThinLampsRed ? 8 : 0 ) );	// R8-1, round 9
 	prof.at( 18, "fxsun" );
 	/* An exterior's ambient is the weather's DALC, uploaded in the interior's form so cellAmbient is one law
 	 * indoors and out. The axis is the light's TRAVEL direction (Z- lights an up-facing normal). */
 	bool extDalc = false;
 	float ambLum = -1.0f;	// lane SHADOWPAR1: the DALC's mean luminance (linear) for the air tail's ambient share
-	if ( outdoor && hasDir && wwLookdevActive() && extProg ) {
+	if ( outdoor && ( hasDir || fxLocalHere ) && wwLookdevActive() && ( extProg || fxLocalHere ) ) {	// R7-1: the cards' ambient
 		WW_SWITCH_STATIC( QByteArray, extRed, wwEnv( "WW_CELL_EXTAMB_RED" ).trimmed() );
 		float w[6][3];
 		if ( extRed != "flat" && wwLookdevDalc( w ) ) {
@@ -1980,6 +2062,7 @@ void wwCellLightsUniforms( Scene * scene )
 					for ( int c = 0; c < 3; c++ )
 						w[a][c] += flash[a][c];
 			const bool flip = extRed == "flip";
+			WW_SWITCH_STATIC( bool, fitRed, wwEnvStr( "WW_CELL_DALC_FIT_RED" ).trimmed() == QLatin1StringView( "1" ) );
 			float g[6][3];
 			for ( int a = 0; a < 6; a++ )
 				for ( int c = 0; c < 3; c++ )
@@ -1990,8 +2073,10 @@ void wwCellLightsUniforms( Scene * scene )
 					mean += g[a][c] / 6.0f;
 				ambLum = std::max( ambLum, 0.0f ) + mean * mean * ( c == 0 ? 0.2126f : c == 1 ? 0.7152f : 0.0722f );
 				const float sgn = flip ? 0.5f : -0.5f;	// travel: n.z = +1 takes Z- (index 5)
-				rec.f4l( prog, "cellDalc[%d]", c, FloatVector4(
-					( g[0][c] - g[1][c] ) * sgn, ( g[2][c] - g[3][c] ) * sgn, ( g[4][c] - g[5][c] ) * sgn, mean ) );
+				const float gc[6] = { g[0][c], g[1][c], g[2][c], g[3][c], g[4][c], g[5][c] };
+				float e[4];
+				WwDalcFit::encode( gc, sgn, fitRed, e );
+				rec.f4l( prog, "cellDalc[%d]", c, FloatVector4( e[0], e[1], e[2], e[3] ) );
 			}
 			extDalc = true;
 			static QString ambLast;
@@ -2003,7 +2088,9 @@ void wwCellLightsUniforms( Scene * scene )
 				.arg( double( flip ? g[4][0] : g[5][0] ), 0, 'f', 4 ).arg( double( flip ? g[4][1] : g[5][1] ), 0, 'f', 4 )
 				.arg( double( flip ? g[4][2] : g[5][2] ), 0, 'f', 4 ).arg( double( flip ? g[5][0] : g[4][0] ), 0, 'f', 4 )
 				.arg( double( flip ? g[5][1] : g[4][1] ), 0, 'f', 4 ).arg( double( flip ? g[5][2] : g[4][2] ), 0, 'f', 4 )
-				.arg( flip ? QStringLiteral( " RED=flip" ) : QString() );
+				.arg( flip ? QStringLiteral( " RED=flip" ) : QString() )
+				+ ( fitRed ? QStringLiteral( " fit=RED mean of six (WW_CELL_DALC_FIT_RED=1)" )
+				           : QStringLiteral( " fit=up/down poles exact (red WW_CELL_DALC_FIT_RED=1)" ) );
 			if ( line != ambLast ) {
 				fprintf( stderr, "%s\n", qPrintable( line ) );
 				ambLast = line;
@@ -2017,9 +2104,22 @@ void wwCellLightsUniforms( Scene * scene )
 			}
 		}
 	}
+	if ( fxLocalHere ) {	// R7-1: cellDalc is uploaded for the card's own read; the surface-only paths and the air's share stay as they were
+		extDalc = false;
+		ambLum = -1.0f;
+	}
 	prof.at( 19, "extamb" );
 	rec.b( prog, "cellExtDalc", extDalc );
 	rec.b( prog, "cellHasDir", hasDir );
+	if ( std::string_view( prog->name ).substr( 0, 13 ) == "impostor_cell" && outdoor ) {	// MODULES1 B9's line, once per change
+		static int cardLast = -1;
+		const int key = ( hasDir ? 1 : 0 ) | ( extDalc ? 2 : 0 ) | ( cardSunRed ? 4 : 0 );
+		if ( key != cardLast ) {
+			fprintf( stderr, "far cards light: sun %s, ambient %s%s\n", hasDir ? "weather" : "none (the viewport light)",
+				extDalc ? "weather DALC" : "flat NAM0", cardSunRed ? " RED=cardsun" : "" );
+			cardLast = key;
+		}
+	}
 	rec.f3( prog, "cellDirColor", dirColor[0], dirColor[1], dirColor[2] );
 	rec.f3( prog, "cellDirTo", dirTo[0], dirTo[1], dirTo[2] );
 	if ( ambLum >= 0.0f ) {
@@ -2030,6 +2130,8 @@ void wwCellLightsUniforms( Scene * scene )
 	rec.b( prog, "cellInterior", !outdoor );	// lane INTSKY1: a sunlit interior shades as outdoors
 	rec.f3( prog, "cellCenter", L->center[0], L->center[1], L->center[2] );
 	rec.i( prog, "cellProbe", s.measuring ? 6 : s.probe );
+	if ( const int dv = wwDebugViewId() )
+		rec.i( prog, "wwDebugView", dv );	// lane DEBUGVIEW1: only while a view is on (off: no call)
 	// a harness reads a dark linear frame through 8 bits; the imagespace's own measure stays x 1
 	WW_SWITCH_STATIC( float, probeGain, wwEnvIsSet( "WW_CELL_LIT_PROBE_GAIN" )
 		? std::max( wwEnv( "WW_CELL_LIT_PROBE_GAIN" ).toFloat(), 0.0f ) : 1.0f );
@@ -2049,10 +2151,17 @@ void wwCellLightsUniforms( Scene * scene )
 		float fK[6][4];
 		std::memcpy( fK, L->fogK, sizeof fK );
 		WwFog wf;
-		if ( wwCellSkyLitNow( L ) && wwLookdevFogNow( wf ) )
+		const bool skyFog = wwCellSkyLitNow( L ) && wwLookdevFogNow( wf );
+		if ( skyFog )
 			for ( int k = 1; k <= 4; k++ )
 				for ( int c = 0; c < 3; c++ )
 					fK[k][c] = wf.K[k][c];
+		// lane PHYSUNITS1: the fog's colours in the light's units; fogUnit lets the gray weight read the old scale
+		const float fu = !wwPhysSkyOn() ? 1.0f : skyFog ? wwLookdevPhysLight() : physInteriorK( L );
+		for ( int k = 1; k <= 4; k++ )
+			for ( int c = 0; c < 3; c++ )
+				fK[k][c] *= fu;
+		rec.f( prog, "fogUnit", fu );
 		for ( int k = 0; k < 6; k++ )
 			rec.f4l( prog, "fogK[%d]", k,
 				FloatVector4( fK[k][0], fK[k][1], fK[k][2], fK[k][3] ) );
@@ -2086,6 +2195,7 @@ int wwCellSkyLitRed()
 bool wwCellSkyLitNow( const WwCellLighting * L )
 {
 	// lane INTSKY1: the interior takes the live weather (its sun or not); SKYINT1's rule (bits 7 + 8) without a file
+	// MODULES1 M1 (11-10 audit, physical reason): interior-only by nature, an exterior always takes the live weather
 	return L && L->interior && wwCellSunlit( L ).weather && wwLookdevActive() && !( wwCellSkyLitRed() & 1 );
 }
 
@@ -2329,7 +2439,8 @@ int wwCellFxRed()
 	WW_SWITCH_STATIC( int, red, [] {
 		int r = 0;
 		for ( const QByteArray & t : wwEnv( "WW_CELL_FX_RED" ).split( ',' ) )
-			r |= t == "legacy" ? 1 : t == "nosoft" ? 2 : t == "nolin" ? 4 : t == "hide" ? 8 : t == "prewater" ? 16 : 0;
+			r |= t == "legacy" ? 1 : t == "nosoft" ? 2 : t == "nolin" ? 4 : t == "hide" ? 8 : t == "prewater" ? 16
+				: t == "unbound" ? 32 : 0;	// MODULES1 item 2: 32 = no finite guard on a lit effect's light (the black shards)
 		return r;
 	}() );
 	return red;

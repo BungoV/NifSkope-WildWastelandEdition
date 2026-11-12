@@ -35,6 +35,9 @@ uniform vec4 cvPhasePrm;	// the droplet phase (gHG, gD, alpha, wD)
 uniform vec3 cvAmb;	// the sky's mean radiance at the clouds, scene units
 uniform float cvAmbOn;
 uniform float cvApOn;
+/* SKYLIGHT1 round 2 (bungo: the overcast sky does not look overcast): the deck over the eye (cloudvol.cpp
+ * wwCloudDeckThrough): x cover, y the key's diffuse transmission, z the clear sky's, w 1 = on. 0 = the red apdeck. */
+uniform vec4 cvDeckAp;
 uniform float cvFrame;	// the jitter's frame (0 = fixed)
 uniform float cvMaxKm;	// the march's reach along the ray
 uniform float cvSlab;	// > 0: a uniform slab of this density in the Low band (the dark-core gate)
@@ -44,10 +47,13 @@ uniform int cvProbeBand;
 uniform float cvMsOn;	// lane CLOUD2B: the multiple-scattering floor (0 = the reds noms and nooctaves)
 uniform float cvMsG;	// the droplet phase's mean cosine (uncapped), for the delta-Eddington scaling
 uniform vec3 cvTint[3];	// CLOUD1's band tints (Low, Mid, High): a linear albedo factor, white by default
+uniform vec3 cvWaterK;	// lane MODULES1: the droplets' absorption per unit optical depth (680 / 550 / 440 nm); 0 = red nowater
 uniform sampler2D cvScene;	// lane CLOUD2B: the scene's window depth (the last frame's), r = farthest sample
 uniform vec4 cvSceneZ;	// the projection's [2][2], [3][2]; km per view unit; 1 = clip the march at the scene
 uniform float cvTopOn;	// lane CLOUD2C: the light the cloud below reflects back up (0 = the red notop)
 uniform float cvAmbDark;	// lane CLOUDBAND1 (b): 1 = the sky's ambient through the cloud above (0 = Off: the height ramp)
+uniform vec3 cvIce;	// lane CLOUDRECX1: clouds.iceFraction per band (Low, Mid, High); 0 = the droplet phase (today)
+uniform vec4 cvShaft;	// lane CLOUDRECX1: precipitation shafts: x density (/ kCvSigma), y end km, z 1 = virga; x 0 = none
 #ifdef WW_CLOUD_VARIETY
 uniform float cvAmbKm;	// lane CLOUD5: the span of the ambient's height ramp (the bands without the towers), km
 #endif
@@ -61,6 +67,9 @@ layout ( location = 0 ) out vec4 cvOut;
 layout ( location = 1 ) out vec4 cvDepth;
 
 const float kCvAlbedo = 0.99;
+/* lane NIGHTHAZE1: the weather .recx clouds.albedo (the hazeType's default; glowing = the radstorm's green) minus 0.99,
+ * per colour; 0 0 0 (unset) = the grey march as before, one two-stream evaluation */
+uniform vec3 cvAlbedoD;
 
 float cvDens( vec3 p )
 {
@@ -123,12 +132,38 @@ vec3 cvSky( vec3 d )
 }
 
 vec4 cvPrm;	// the droplet phase, its forward peak widened to the march's footprint (main)
+float cvIceNow = 0.0;	// lane CLOUDRECX1: the sample's band's ice share (set before cvOctaveSum)
+
+/* lane CLOUDRECX1 (clouds.precipitationBase, SPEC.md 1.4): the shafts under the Low band, from its base down to cvShaft.y,
+ * where the band's cells are (its calibrated coverage against a coarse shape read 200 m into it); a virga thins out over
+ * its last 40 %. Twin: src/features/clouds/cloudrecx14math.h shaftProfile, shaftCell. */
+float cvShaftDens( vec3 p )
+{
+	float base = cvBands.baseKm.x;
+	float hb = ( base - p.z ) / max( base - cvShaft.y, 1e-3 );
+	if ( hb <= 0.0 || hb >= 1.0 )
+		return 0.0;
+	float f = 1.0;
+	if ( cvShaft.z > 0.5 ) {
+		float t = clamp( ( hb - 0.6 ) / 0.4, 0.0, 1.0 );
+		f = 1.0 - t * t * ( 3.0 - 2.0 * t );
+	}
+	float c = cvCalAt( 0, cvMapAt( p.xy ).r );
+	if ( c <= 0.0 )
+		return 0.0;
+	vec3 q = vec3( p.xy, base + 0.2 ) + cvBands.windKm;
+	float s = textureLod( cvShape, q / kCvShapeKm, 2.0 ).r;
+	return cvShaft.x * f * clamp( ( s - ( 1.0 - c ) ) / max( c, 1e-3 ), 0.0, 1.0 );
+}
 
 float cvOctaveSum( float cosT, float tauL )
 {
 	float s = 0.0, a = 1.0, b = 1.0, k = 1.0;
 	for ( int i = 0; i < cvOctaves; i++ ) {
-		s += a * exp( -b * tauL ) * wwDropletPhase( cvPrm, cosT, k );
+		float ph = wwDropletPhase( cvPrm, cosT, k );
+		if ( cvIceNow > 0.0 )
+			ph = mix( ph, wwIcePhase( cosT, k ), cvIceNow );
+		s += a * exp( -b * tauL ) * ph;
 		a *= 0.5;
 		b *= 0.5;
 		k *= 0.5;
@@ -236,6 +271,8 @@ void main()
 	float lo = min( cvBands.baseKm.x, cvBands.baseKm.y ), hi = max( cvBands.topKm.x, cvBands.topKm.y );
 	if ( cvBands.density.x <= 0.0 ) lo = cvBands.baseKm.y;
 	if ( cvBands.density.y <= 0.0 ) hi = cvBands.topKm.x;
+	if ( cvShaft.x > 0.0 && cvBands.density.x > 0.0 )
+		lo = min( lo, max( cvShaft.y, 0.0 ) );	// lane CLOUDRECX1: the shafts under the Low band are marched too
 	vec2 gnd = cvSphere( o.z, d, kRb );
 	float tGround = ( gnd.y > 0.0 && gnd.x > 0.0 ) ? gnd.x : 1e9;
 	vec2 sb = cvSphere( o.z, d, kRb + lo ), st = cvSphere( o.z, d, kRb + hi );
@@ -322,7 +359,8 @@ void main()
 		float tau = 2.0 * cvBands.density.z * a;
 		float al = 1.0 - exp( -tau );
 		vec3 key = cvKeyK * atTrans( cvTrans, kRb + p.z, dot( up, cvKeyW ) );
-		vec3 S = kCvAlbedo * cvTint[2] * ( key * cvOctaveSum( cosT, 0.5 * tau ) + cvAmbOn * cvAmb );
+		cvIceNow = cvIce.z;	// lane CLOUDRECX1
+		vec3 S = ( kCvAlbedo + cvAlbedoD ) * cvTint[2] * ( key * cvOctaveSum( cosT, 0.5 * tau ) + cvAmbOn * cvAmb );
 		L += T * al * S;
 		dsum += T * al * th;
 		wsum += T * al;
@@ -334,7 +372,17 @@ void main()
 		float r1 = length( pe ), mu1 = dot( pe, d ) / r1;
 		vec3 ta = atTrans( cvTrans, kRb + o.z, d.z ), tb = atTrans( cvTrans, r1, mu1 );
 		vec3 tair = clamp( ta / max( tb, vec3( 1e-6 ) ), 0.0, 1.0 );
-		L = L * tair + cvSky( d ) * ( 1.0 - tair ) * ( 1.0 - T );
+		/* SKYLIGHT1 round 2: the air in front of the deck, seen from under it, is lit by the deck's diffuse light, not
+		 * by the clear sun: the clear sky's in-scatter x (key tKey + sky tSky) / (key + sky) per colour, blended by the
+		 * cover (clouddeckmath.h apUnder, the twin). At the overcast spot it was ~60 % of the 15-40 deg sky. */
+		vec3 ap = cvSky( d );
+		if ( cvDeckAp.w > 0.5 && o.z < lo ) {
+			vec3 keyH = cvKeyK * atTrans( cvTrans, kRb + o.z, cvKeyW.z ) * max( cvKeyW.z, 0.0 ) / kPi;
+			vec3 clr = keyH + cvAmb;
+			vec3 und = keyH * cvDeckAp.y + cvAmb * cvDeckAp.z;
+			ap *= ( 1.0 - cvDeckAp.x ) + cvDeckAp.x * clamp( und / max( clr, vec3( 1e-9 ) ), 0.0, 1.0 );
+		}
+		L = L * tair + ap * ( 1.0 - tair ) * ( 1.0 - T );
 	}
 	cvOut = vec4( L, T );
 	cvDepth = vec4( dm );

@@ -471,12 +471,14 @@ bool probeFarBuild( const ProbeFarSpec & spec, ProbeSoup & soup, std::vector<Pro
 	if ( spec.sheetDim > 0 ) {
 		const QByteArray old = wwEnv( "WW_LODL_SHEET_DIM" );
 		qputenv( "WW_LODL_SHEET_DIM", QByteArray::number( spec.sheetDim ) );
+		wwEnvChanged();	// MODULES1 item 8: the env accessors' cache
 		QString why;
 		haveSheet = sheets.open( spec.lodl, &why ) && sheets.hasRole( LODV_ROLE_COLOR );
 		if ( old.isEmpty() )
 			qunsetenv( "WW_LODL_SHEET_DIM" );
 		else
 			qputenv( "WW_LODL_SHEET_DIM", old );
+		wwEnvChanged();	// MODULES1 item 8: the env accessors' cache
 		R.sheet = haveSheet ? sheets.containerPath() : QStringLiteral( "none (%1)" ).arg( why.isEmpty()
 			? QStringLiteral( "no colour sheet" ) : why );
 	} else {

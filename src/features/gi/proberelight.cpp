@@ -7,6 +7,7 @@ BSD License - see nifskope.h
 // the relight without rays, on the CPU (double) and the GPU (GL 4.3 compute). src/proberelight.h.
 
 #include "features/gi/proberelight.h"
+#include "gl/wwshadertext.h"	// lane VKCOMPUTE1: the relight kernels are files
 #include "features/gi/bakert.h"	// the bake pools' worker count
 
 #include "gl/celllights.h"
@@ -831,329 +832,15 @@ QString probeRelightCensusText( const ProbeRelightOps & X )
 
 // ======================================================================== the GPU relight
 
-namespace {
-
-const char * kGlslHead = R"(#version 430
-layout( local_size_x = 64 ) in;
-layout( std430, binding = 0 ) buffer Surf { float surf[]; };          // 16 a surfel: n, dirK, alb, sunK, le, -, B1, -
-layout( std430, binding = 1 ) readonly buffer PairStart { int pairStart[]; };
-layout( std430, binding = 2 ) readonly buffer Pairs { float pairs[]; };   // 8: light, d, nl, dl, doorRec, -, -, -
-layout( std430, binding = 3 ) readonly buffer DoorRec { float doorRec[]; }; // 12: door0, door1, -, -, T[8]
-layout( std430, binding = 4 ) readonly buffer Lights { float lights[]; }; // 16: pos, radius, color, bias, scale, exp, cone, cosOuter, spot, k, s|x0, kind
-layout( std430, binding = 5 ) coherent buffer Ctl { uint ctl[]; };       // 0 max change, 1 max B, 2.. door closed
-layout( std430, binding = 6 ) readonly buffer LinkStart { int linkStart[]; };
-layout( std430, binding = 7 ) readonly buffer Links { float links[]; };   // 12: surf, omega, tint, cos[6], doorRec
-layout( std430, binding = 8 ) readonly buffer ProbeK { float probeK[]; }; // 20: kUnl, -, sky[18]
-layout( std430, binding = 9 ) buffer PE { float pe[]; };                 // 18 a probe
-layout( std430, binding = 10 ) buffer Bsrc { float bsrc[]; };           // 4 a surfel
-layout( std430, binding = 11 ) buffer Bdst { float bdst[]; };
-layout( std430, binding = 12 ) readonly buffer FeedStart { int feedStart[]; };
-layout( std430, binding = 13 ) readonly buffer Feed { float feed[]; };    // 4: probe, w, doorRec, -
-layout( std430, binding = 14 ) readonly buffer Slots { int slots[]; };   // 2: voxel, which
-layout( std430, binding = 15 ) buffer Grid { float grid[]; };           // 2 x nVox x 24
-uniform int uN;
-uniform int uRed;          // 1 doorblanket, 2 glassopaque, 3 dooropen
-uniform int uHasDir;
-uniform vec3 uDirColor;
-uniform int uSunOn;
-uniform vec3 uSun;
-uniform int uSkyOn;
-uniform int uRedGrow;
-uniform int uNVox;
-uniform int uFirst;
-
-float doorF( int rec, int c, bool vis )
-{
-	if ( rec < 0 || uRed == 3 )
-		return 1.0;
-	float f = 1.0;
-	for ( int s = 0; s < 2; s++ ) {
-		int d = floatBitsToInt( doorRec[rec * 12 + s] );
-		if ( d < 0 || ctl[2 + d] == 0u )
-			continue;
-		float cl = uintBitsToFloat( ctl[2 + d] );   // lane DOORLIVE1: the slot's shut fraction (0u = open)
-		int o = rec * 12 + 4 + s * 4;
-		float tt;
-		if ( uRed == 1 )
-			tt = 0.0;
-		else if ( uRed == 2 )
-			tt = doorRec[o + 3];
-		else if ( vis )
-			tt = ( doorRec[o] > 0.0 || doorRec[o + 1] > 0.0 || doorRec[o + 2] > 0.0 ) ? 1.0 : 0.0;
-		else
-			tt = doorRec[o + c];
-		if ( cl >= 1.0 ) {
-			if ( uRed == 1 )
-				return 0.0;
-			f *= tt;
-		} else {
-			f *= 1.0 - cl * ( 1.0 - tt );
-		}
-	}
-	return f;
-}
-)";
-
-const char * kGlslDirect = R"(
-void main()
-{
-	int i = int( gl_GlobalInvocationID.x );
-	if ( i >= uN )
-		return;
-	vec3 E = vec3( 0.0 );
-	for ( int k = pairStart[i]; k < pairStart[i + 1]; k++ ) {
-		int li = floatBitsToInt( pairs[k * 8] );
-		float d = pairs[k * 8 + 1], nl = pairs[k * 8 + 2], dl = pairs[k * 8 + 3];
-		int rec = floatBitsToInt( pairs[k * 8 + 4] );
-		int lo = li * 16;
-		vec3 col = vec3( lights[lo + 4], lights[lo + 5], lights[lo + 6] );
-		float r = lights[lo + 3];
-		if ( col == vec3( 0.0 ) || d >= r )
-			continue;
-		float x = clamp( d / max( r, 0.001 ), 0.0, 1.0 );
-		float a;
-		float kind = lights[lo + 15];   // lane LIGHTPHYS2: wwlp::lightTerm, decided per light on the CPU
-		if ( kind < 0.5 ) {
-			float xe = lights[lo + 9] > 0.0 ? pow( x, lights[lo + 9] ) : 1.0;
-			float kk = 1.0 - clamp( lights[lo + 8] * xe + lights[lo + 7], 0.0, 1.0 );
-			a = kk > 0.0 ? pow( kk, 2.2 ) : 0.0;
-		} else if ( kind < 1.5 ) {   // wwlp::physRaw
-			float s = lights[lo + 14], x2 = x * x;
-			float w = clamp( 1.0 - x2 * x2, 0.0, 1.0 ), den = x2 + s * s;
-			a = den > 0.0 ? lights[lo + 13] * ( w * w / den ) : 0.0;
-		} else {   // wwlp::advAtt
-			float t = clamp( ( x - 0.8 ) / ( 1.0 - 0.8 ), 0.0, 1.0 );
-			float w = kind > 2.5 ? 1.0 : 1.0 - t * t * ( 3.0 - 2.0 * t );
-			float m = max( lights[lo + 14], x );
-			a = lights[lo + 13] * w / ( m * m );
-		}
-		if ( lights[lo + 12] > 0.5 ) {
-			float base = clamp( 1.0 - ( 1.0 - dl ) / max( 1.0 - lights[lo + 11], 1e-4 ), 0.0, 1.0 );
-			a *= base > 0.0 ? min( pow( base, max( lights[lo + 10], 1e-3 ) ), 1.0 ) : 0.0;
-		}
-		if ( a * nl <= 0.0 )
-			continue;
-		vec3 f = vec3( doorF( rec, 0, false ), doorF( rec, 1, false ), doorF( rec, 2, false ) );
-		E += col * ( a * nl ) * f;
-	}
-	int so = i * 16;
-	if ( uHasDir != 0 && surf[so + 3] > 0.0 )
-		E += uDirColor * surf[so + 3];
-	if ( uSunOn != 0 && surf[so + 7] > 0.0 )
-		E += uSun * surf[so + 7];
-	vec3 B = vec3( surf[so + 4], surf[so + 5], surf[so + 6] ) * E + vec3( surf[so + 8], surf[so + 9], surf[so + 10] );
-	surf[so + 12] = B.x;
-	surf[so + 13] = B.y;
-	surf[so + 14] = B.z;
-	bsrc[i * 4] = B.x;
-	bsrc[i * 4 + 1] = B.y;
-	bsrc[i * 4 + 2] = B.z;
-}
-)";
-
-const char * kGlslGather = R"(
-void main()
-{
-	int j = int( gl_GlobalInvocationID.x );
-	if ( j >= uN )
-		return;
-	float E[18];
-	for ( int q = 0; q < 18; q++ )
-		E[q] = 0.0;
-	for ( int k = linkStart[j]; k < linkStart[j + 1]; k++ ) {
-		int o = k * 12;
-		int s = floatBitsToInt( links[o] );
-		int rec = floatBitsToInt( links[o + 11] );
-		vec3 B = vec3( bsrc[s * 4], bsrc[s * 4 + 1], bsrc[s * 4 + 2] );
-		vec3 w = B * vec3( links[o + 2], links[o + 3], links[o + 4] ) * links[o + 1];
-		if ( rec >= 0 )
-			w *= vec3( doorF( rec, 0, false ), doorF( rec, 1, false ), doorF( rec, 2, false ) );
-		for ( int a = 0; a < 6; a++ ) {
-			float ca = links[o + 5 + a];
-			E[a * 3] += w.x * ca;
-			E[a * 3 + 1] += w.y * ca;
-			E[a * 3 + 2] += w.z * ca;
-		}
-	}
-	float kU = probeK[j * 20];
-	for ( int q = 0; q < 18; q++ ) {
-		float e = E[q] * kU;
-		if ( uSkyOn != 0 )
-			e += probeK[j * 20 + 2 + q];
-		pe[j * 18 + q] = e;
-	}
-}
-)";
-
-const char * kGlslFeed = R"(
-void main()
-{
-	int i = int( gl_GlobalInvocationID.x );
-	if ( i >= uN )
-		return;
-	int so = i * 16;
-	vec3 n = vec3( surf[so], surf[so + 1], surf[so + 2] );
-	vec3 E = vec3( 0.0 );
-	float ws = 0.0;
-	for ( int k = feedStart[i]; k < feedStart[i + 1]; k++ ) {
-		int rec = floatBitsToInt( feed[k * 4 + 2] );
-		float vf = rec >= 0 ? doorF( rec, 0, true ) : 1.0;
-		if ( vf <= 0.0 )
-			continue;
-		int p = floatBitsToInt( feed[k * 4] );
-		float w = feed[k * 4 + 1] * vf;
-		ws += w;
-		for ( int a = 0; a < 3; a++ ) {
-			int ax = 2 * a + ( n[a] >= 0.0 ? 0 : 1 );
-			int po = p * 18 + ax * 3;
-			E += w * n[a] * n[a] * vec3( pe[po], pe[po + 1], pe[po + 2] );
-		}
-	}
-	vec3 alb = uRedGrow != 0 ? vec3( 1.5 ) : vec3( surf[so + 4], surf[so + 5], surf[so + 6] );
-	vec3 B1 = vec3( surf[so + 12], surf[so + 13], surf[so + 14] );
-	vec3 Bn = B1 + ( ws > 0.0 ? alb * ( E / ws ) / 3.14159265358979 : vec3( 0.0 ) );
-	vec3 Bo = vec3( bsrc[i * 4], bsrc[i * 4 + 1], bsrc[i * 4 + 2] );
-	bdst[i * 4] = Bn.x;
-	bdst[i * 4 + 1] = Bn.y;
-	bdst[i * 4 + 2] = Bn.z;
-	vec3 ch = abs( Bn - Bo );
-	atomicMax( ctl[0], floatBitsToUint( max( max( ch.x, ch.y ), ch.z ) ) );
-	atomicMax( ctl[1], floatBitsToUint( max( max( max( Bn.x, Bn.y ), Bn.z ), 0.0 ) ) );
-}
-)";
-
-// blend: Feed's binding holds the blend entries, FeedStart the blend starts
-const char * kGlslBlend = R"(
-void main()
-{
-	int s = int( gl_GlobalInvocationID.x );
-	if ( s >= uN )
-		return;
-	int b = feedStart[s], e = feedStart[s + 1];
-	if ( b == e )
-		return;
-	float acc[18];
-	for ( int q = 0; q < 18; q++ )
-		acc[q] = 0.0;
-	float wsum = 0.0;
-	for ( int k = b; k < e; k++ ) {
-		int rec = floatBitsToInt( feed[k * 4 + 2] );
-		float vf = rec >= 0 ? doorF( rec, 0, true ) : 1.0;
-		if ( vf <= 0.0 )
-			continue;
-		int p = floatBitsToInt( feed[k * 4] );
-		float w = feed[k * 4 + 1] * vf;
-		wsum += w;
-		for ( int q = 0; q < 18; q++ )
-			acc[q] += w * pe[p * 18 + q];
-	}
-	int v = slots[s * 2], which = slots[s * 2 + 1];
-	int base = which * uNVox * 24;
-	for ( int a = 0; a < 6; a++ ) {
-		int o = base + ( a * uNVox + v ) * 4;
-		for ( int c = 0; c < 3; c++ )
-			grid[o + c] = wsum > 0.0 ? acc[a * 3 + c] / wsum : 0.0;
-		grid[o + 3] = 1.0;
-	}
-}
-)";
-
-// grow: PairStart holds growStart, LinkStart the grown slots, FeedStart (as ints) the sources
-const char * kGlslGrow = R"(
-void main()
-{
-	int g = uFirst + int( gl_GlobalInvocationID.x );
-	if ( int( gl_GlobalInvocationID.x ) >= uN )
-		return;
-	int s = linkStart[g];
-	int b = pairStart[g], e = pairStart[g + 1];
-	float acc[18];
-	for ( int q = 0; q < 18; q++ )
-		acc[q] = 0.0;
-	for ( int k = b; k < e; k++ ) {
-		int q = feedStart[k];
-		int base = slots[q * 2 + 1] * uNVox * 24;
-		for ( int a = 0; a < 6; a++ ) {
-			int o = base + ( a * uNVox + slots[q * 2] ) * 4;
-			for ( int c = 0; c < 3; c++ )
-				acc[a * 3 + c] += grid[o + c];
-		}
-	}
-	int base = slots[s * 2 + 1] * uNVox * 24;
-	float n = float( e - b );
-	for ( int a = 0; a < 6; a++ ) {
-		int o = base + ( a * uNVox + slots[s * 2] ) * 4;
-		for ( int c = 0; c < 3; c++ )
-			grid[o + c] = acc[a * 3 + c] / n;
-		grid[o + 3] = 1.0;
-	}
-}
-)";
-
-/* Probe sharing, 1: each probe's nu (proberelight.h probeShareNu) from the last pass's B
- * (Bsrc) through its links; written to Bdst (bound to the nu buffer) */
-const char * kGlslNu = R"(
-void main()
-{
-	int j = int( gl_GlobalInvocationID.x );
-	if ( j >= uN )
-		return;
-	float sum = 0.0, sq = 0.0;
-	for ( int k = linkStart[j]; k < linkStart[j + 1]; k++ ) {
-		int o = k * 12;
-		int s = floatBitsToInt( links[o] );
-		int rec = floatBitsToInt( links[o + 11] );
-		vec3 w = vec3( bsrc[s * 4], bsrc[s * 4 + 1], bsrc[s * 4 + 2] ) * vec3( links[o + 2], links[o + 3], links[o + 4] ) * links[o + 1];
-		if ( rec >= 0 )
-			w *= vec3( doorF( rec, 0, false ), doorF( rec, 1, false ), doorF( rec, 2, false ) );
-		float cs = 0.0;
-		for ( int a = 0; a < 6; a++ )
-			cs += links[o + 5 + a];
-		float x = dot( w, vec3( 0.2126, 0.7152, 0.0722 ) ) * cs / 6.0;
-		sum += x;
-		sq += x * x;
-	}
-	float sky = 0.0;
-	if ( uSkyOn != 0 ) {
-		for ( int a = 0; a < 6; a++ )
-			sky += dot( vec3( probeK[j * 20 + 2 + a * 3], probeK[j * 20 + 3 + a * 3], probeK[j * 20 + 4 + a * 3] ),
-				vec3( 0.2126, 0.7152, 0.0722 ) );
-		sky /= 6.0;
-	}
-	float kU = probeK[j * 20];
-	float m1 = kU * sum + sky;
-	bdst[j] = m1 > 0.0 ? min( kU * sqrt( sq ) / m1, 1.0 ) : 0.0;
-}
-)";
-
-// 2: E' = (E + sum nu g vf E_j) / (1 + sum nu g vf); FeedStart / Feed hold the share lists, Bsrc the output (18 a probe)
-const char * kGlslShare = R"(
-void main()
-{
-	int j = int( gl_GlobalInvocationID.x );
-	if ( j >= uN )
-		return;
-	float acc[18];
-	for ( int q = 0; q < 18; q++ )
-		acc[q] = pe[j * 18 + q];
-	float as = 0.0, nu = bdst[j];
-	for ( int k = feedStart[j]; k < feedStart[j + 1]; k++ ) {
-		int rec = floatBitsToInt( feed[k * 4 + 2] );
-		float vf = rec >= 0 ? doorF( rec, 0, true ) : 1.0;
-		float a = nu * feed[k * 4 + 1] * vf;
-		if ( a <= 0.0 )
-			continue;
-		as += a;
-		int p = floatBitsToInt( feed[k * 4] );
-		for ( int q = 0; q < 18; q++ )
-			acc[q] += a * pe[p * 18 + q];
-	}
-	for ( int q = 0; q < 18; q++ )
-		bsrc[j * 18 + q] = acc[q] / ( 1.0 + as );
-}
-)";
-
-}	// namespace
+/* lane VKCOMPUTE1: the kernels are res/shaders/features/gi/proberelight_<k>.glsl (moved out byte for byte), each
+ * compiled as proberelight_head.glsl + the kernel, in this order:
+ * direct, gather, feed;
+ * blend: Feed's binding holds the blend entries, FeedStart the blend starts;
+ * grow: PairStart holds growStart, LinkStart the grown slots, FeedStart (as ints) the sources;
+ * nu (probe sharing, 1): each probe's nu (proberelight.h probeShareNu) from the last pass's B (Bsrc) through its links;
+ *   written to Bdst (bound to the nu buffer);
+ * share (2): E' = (E + sum nu g vf E_j) / (1 + sum nu g vf); FeedStart / Feed hold the share lists, Bsrc the output
+ *   (18 a probe). */
 
 struct ProbeRelightGpu::Impl
 {
@@ -1262,9 +949,20 @@ bool ProbeRelightGpu::init( QString * why )
 	}
 	auto * gl = d->gl;
 	d->renderer = QString::fromLatin1( reinterpret_cast<const char *>( gl->glGetString( GL_RENDERER ) ) );
-	const char * bodies[7] = { kGlslDirect, kGlslGather, kGlslFeed, kGlslBlend, kGlslGrow, kGlslNu, kGlslShare };
+	QString miss;
+	const QByteArray kGlslHead = wwShaderText( "proberelight_head.glsl", &miss );
+	const QByteArray bodies[7] = {
+		wwShaderText( "proberelight_direct.glsl", &miss ), wwShaderText( "proberelight_gather.glsl", &miss ),
+		wwShaderText( "proberelight_feed.glsl", &miss ), wwShaderText( "proberelight_blend.glsl", &miss ),
+		wwShaderText( "proberelight_grow.glsl", &miss ), wwShaderText( "proberelight_nu.glsl", &miss ),
+		wwShaderText( "proberelight_share.glsl", &miss ) };
+	if ( !miss.isEmpty() ) {
+		*why = miss;
+		d->restore();
+		return false;
+	}
 	for ( int p = 0; p < 7; p++ ) {
-		const QByteArray src = QByteArray( kGlslHead ) + bodies[p];
+		const QByteArray src = kGlslHead + bodies[p];
 		const char * s = src.constData();
 		GLuint sh = gl->glCreateShader( GL_COMPUTE_SHADER );
 		gl->glShaderSource( sh, 1, &s, nullptr );

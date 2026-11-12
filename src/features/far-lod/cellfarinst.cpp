@@ -2,6 +2,8 @@
 
 #include "cellfarhide.h"
 #include "cellmesh.h"
+#include "features/far-lod/lodpreview.h"	// lane PERFLOAD1 P8: the LOD preview's tint (attribute 9, y)
+#include "features/far-lod/lodinative.h"	// MODULES1 10b-2: the far AO row and the channel view
 #include "wwswitch.h"
 #include "features/shared/cellpasstime.h"
 #include "gl/cellunits.h"	// lane FIX1101A lodch: the far stream's unit
@@ -20,6 +22,8 @@
 #include <string>
 #include <vector>
 
+quint64 wwGlPaintCount();	// glview.cpp
+
 namespace
 {
 
@@ -34,6 +38,13 @@ struct Copy
 	GLuint box = 0;	// lane FARLOOK1101: per row its mesh box (centre, half extent), made on the first splat draw
 	qint64 lastUse = 0;
 	std::size_t indBytes = 0;
+	// lane PERFLOAD1 P7 round 2: per row the ladder dither (attribute 9, x), the ladder rows of each REFR, the rows set
+	GLuint fade = 0;
+	std::vector<float> fadeCpu;
+	QHash<quint32, QVector<int>> refRows;
+	std::vector<int> fadeSet;
+	quint64 fadeFor = ~quint64( 0 ), fadePaint = ~quint64( 0 );
+	quint64 tintFor = 0;	// lane PERFLOAD1 P8: LodPreview::gen() the rows' tint codes (attribute 9, y) were written for
 };
 
 struct Ctx
@@ -110,6 +121,8 @@ Copy * copyOf( GLFunctions * fn, Ctx & c, const CellMeshInst & d )
 					fn->glDeleteTextures( 1, &it->streamTex );
 				if ( it->box )
 					fn->glDeleteBuffers( 1, &it->box );
+				if ( it->fade )
+					fn->glDeleteBuffers( 1, &it->fade );
 				c.gpuBytes -= qint64( it->indBytes );
 				it = c.copies.erase( it );
 			} else {
@@ -230,6 +243,87 @@ void ensureBox( GLFunctions * fn, Ctx & c, Copy & k, const CellMeshInst & d )
 	c.gpuBytes += qint64( box.size() * sizeof( float ) );
 }
 
+/* lane PERFLOAD1 P7 round 2: the tree ladder's per-row dither (attribute 9, read by fo4_default.vert as farLadder).
+ * Set once a paint, so the depth pre-pass and the main pass (drawn EQUAL) discard the same pixels.
+ * Made on the first draw of a bucket with ladder rows (zeros: every row whole); each frame the rows of the trees mid-fade
+ * (CellFarHide::ladderFades) take TreeLadder::rowFade and last frame's go back to 0, one sub-upload of the span. */
+void ladderFadeRows( GLFunctions * fn, Ctx & c, Copy & k, const CellMeshInst & d )
+{
+	// lane PERFLOAD1 P8: y = the LOD preview's tint code (CellMeshInst::rowLevel, 0 = untinted), written on each change
+	const bool tint = LodPreview::tint() && !d.rowLevel.isEmpty();
+	if ( d.rowStep.isEmpty() && !tint && !k.fade )
+		return;
+	const qsizetype nRows = d.inst.size() / 16;
+	if ( !k.fade ) {
+		k.fadeCpu.assign( std::size_t( nRows ) * 2, 0.0f );
+		for ( qsizetype i = 0; i < nRows && i < d.rowStep.size() && i < d.rowRef.size(); i++ )
+			if ( d.rowStep[i] && d.rowRef[i] )
+				k.refRows[d.rowRef[i]].append( int( i ) );
+		fn->glBindVertexArray( k.vao );
+		fn->glGenBuffers( 1, &k.fade );
+		fn->glBindBuffer( GL_ARRAY_BUFFER, k.fade );
+		fn->glBufferData( GL_ARRAY_BUFFER, GLsizeiptr( k.fadeCpu.size() * sizeof( float ) ), k.fadeCpu.data(), GL_DYNAMIC_DRAW );
+		fn->glEnableVertexAttribArray( 9 );
+		fn->glVertexAttribPointer( 9, 2, GL_FLOAT, GL_FALSE, 8, (const void *) 0 );
+		fn->glVertexAttribDivisor( 9, 1 );
+		fn->glBindVertexArray( 0 );
+		fn->glBindBuffer( GL_ARRAY_BUFFER, 0 );
+		k.indBytes += k.fadeCpu.size() * sizeof( float );
+		c.gpuBytes += qint64( k.fadeCpu.size() * sizeof( float ) );
+	}
+	if ( k.tintFor != LodPreview::gen() ) {
+		k.tintFor = LodPreview::gen();
+		int perCode[8] = {};	// lane LODLIVE1: the coloration's row counts (code = band + 1)
+		for ( qsizetype i = 0; i < nRows; i++ ) {
+			k.fadeCpu[std::size_t( i ) * 2 + 1] = tint && i < d.rowLevel.size() ? float( d.rowLevel[i] ) : 0.0f;
+			if ( tint && i < d.rowLevel.size() && d.rowLevel[i] > 0 && d.rowLevel[i] < 8 )
+				perCode[d.rowLevel[i]]++;
+		}
+		for ( int code = 1; code < 8; code++ )
+			if ( perCode[code] )
+				LodPreview::noteRows( code - 1, perCode[code] );
+		fn->glBindBuffer( GL_ARRAY_BUFFER, k.fade );
+		fn->glBufferSubData( GL_ARRAY_BUFFER, 0, GLsizeiptr( k.fadeCpu.size() * sizeof( float ) ), k.fadeCpu.data() );
+		fn->glBindBuffer( GL_ARRAY_BUFFER, 0 );
+	}
+	if ( d.rowStep.isEmpty() )
+		return;
+	const quint64 g = CellFarHide::ladderFadeGen(), paint = wwGlPaintCount();
+	if ( k.fadeFor == g || k.fadePaint == paint )
+		return;
+	k.fadeFor = g;
+	k.fadePaint = paint;
+	int lo = int( nRows ), hi = -1;
+	for ( int i : k.fadeSet ) {
+		k.fadeCpu[std::size_t( i ) * 2] = 0.0f;
+		lo = std::min( lo, i );
+		hi = std::max( hi, i );
+	}
+	k.fadeSet.clear();
+	const QHash<quint32, CellFarHide::LadderFade> & fades = CellFarHide::ladderFades();
+	for ( auto it = fades.cbegin(); it != fades.cend(); ++it ) {
+		const auto rr = k.refRows.constFind( it.key() );
+		if ( rr == k.refRows.cend() )
+			continue;
+		for ( int i : *rr ) {
+			const float f = TreeLadder::rowFade( it->st, it->draw, quint8( d.rowStep[i] & 0x7Fu ) );
+			if ( f == 0.0f )
+				continue;
+			k.fadeCpu[std::size_t( i ) * 2] = f;
+			k.fadeSet.push_back( i );
+			lo = std::min( lo, i );
+			hi = std::max( hi, i );
+		}
+	}
+	CellFarHide::ladderDitherRows() += qint64( k.fadeSet.size() );
+	if ( hi < lo )
+		return;
+	fn->glBindBuffer( GL_ARRAY_BUFFER, k.fade );
+	fn->glBufferSubData( GL_ARRAY_BUFFER, GLintptr( std::size_t( lo ) * 8 ), GLsizeiptr( std::size_t( hi - lo + 1 ) * 8 ),
+		&k.fadeCpu[std::size_t( lo ) * 2] );
+	fn->glBindBuffer( GL_ARRAY_BUFFER, 0 );
+}
+
 // the camera's four side planes in view space (gl/cellcull.cpp's Gribb-Hartmann, copied: it is file-local there)
 void cameraPlanes( Scene * scene, float pl[4][4] )
 {
@@ -288,6 +382,65 @@ Ctx * ctxOf()
 
 namespace CellFarInst
 {
+
+int vcAoType( const QString & shapeName )
+{
+	if ( !shapeName.startsWith( QLatin1String( "FarLOD " ) ) )
+		return 0;
+	const int t = shapeName.startsWith( QLatin1String( "FarLOD terrain r" ) ) ? 2
+		: shapeName.startsWith( QLatin1String( "FarLOD r" ) ) ? 1 : 0;
+	if ( !t )
+		return 0;
+	WW_SWITCH_STATIC( bool, view, lodlChannelFromEnv() != LodlChannel::None );
+	// the far ground's grey is its mask sheet's B only with the Far LOD AO row on (btdterrain.cpp ringMaskCh)
+	return view || ( t == 2 && !lodlAoOn() ) ? 0 : t;
+}
+
+void vcAoUniform( NifSkopeOpenGLContext::Program * prog, int type )
+{
+	if ( !prog || prog->uniLocation( "farVcAo" ) < 0 )
+		return;
+	auto key01 = []( const char * name ) {
+		bool ok = false;
+		const float v = wwEnvStr( name ).trimmed().toFloat( &ok );
+		return ok ? std::clamp( v, 0.0f, 1.0f ) : 1.0f;
+	};
+	WW_SWITCH_STATIC( float, aoMax, key01( "WW_LODL_AO_MAX" ) );
+	WW_SWITCH_STATIC( float, skyMax, key01( "WW_LODL_SKY_MAX" ) );
+	WW_SWITCH_STATIC( bool, albedo, wwEnv( "WW_LODL_AO_RED" ).trimmed() == "albedo" );
+	// MODULES1 10c: the PBR far draws (pbrm_* programs: fo4_default.vert + pbrm_default.frag) take the same path;
+	// red WW_LODL_AO_RED=nopbr: type 0 there (the grey stays in the vertex colour, as before 10c)
+	WW_SWITCH_STATIC( bool, noPbr, wwEnv( "WW_LODL_AO_RED" ).trimmed() == "nopbr" );
+	const bool pbr = std::string_view( prog->name ).rfind( "pbrm_", 0 ) == 0;
+	if ( pbr && noPbr )
+		type = 0;
+	prog->uni4f( "farVcAo", FloatVector4( aoMax, skyMax, float( type ), albedo ? 1.0f : 0.0f ) );
+	static int pbrSaid = -1;
+	if ( pbr && pbrSaid != ( noPbr ? 0 : 1 ) ) {
+		pbrSaid = noPbr ? 0 : 1;
+		std::fprintf( stderr, "far baked ao vc: PBR far draws (%s): %s\n", std::string( prog->name ).c_str(),
+			noPbr ? "RED WW_LODL_AO_RED=nopbr (the grey stays in the vertex colour)"
+			: "the same farVcAo path and the same two debug maxima as the legacy far draws" );
+	}
+	if ( type <= 0 )
+		return;
+	static int seen = 0;
+	static float said[3] = { -1.0f, -1.0f, -1.0f };
+	const int bit = 1 << ( type - 1 );
+	if ( ( seen & bit ) && said[0] == aoMax && said[1] == skyMax && said[2] == ( albedo ? 1.0f : 0.0f ) )
+		return;
+	seen |= bit;
+	said[0] = aoMax;
+	said[1] = skyMax;
+	said[2] = albedo ? 1.0f : 0.0f;
+	std::fprintf( stderr, "far baked ao vc: rule %s; drawn so far: flat far copy %s (its grey -> the AO rule x max %.3f, "
+		"WW_LODL_AO_MAX), far ground %s (far ground carries sky occlusion only, no baked contact AO: its mask sheet's B "
+		"-> the sky occlusion x max %.3f, WW_LODL_SKY_MAX), "
+		"instanced rows without the stream %s (mesh grey x row grey -> the AO rule x max %.3f)\n",
+		albedo ? "RED albedo (the grey stays in the vertex colour)" : "shared (cell_ao.glsl cellAoShared / the far sky occlusion)",
+		( seen & 1 ) ? "yes" : "not yet", double( aoMax ), ( seen & 2 ) ? "yes" : "not yet", double( skyMax ),
+		( seen & 4 ) ? "yes" : "not yet", double( aoMax ) );
+}
 
 bool draw( NifSkopeOpenGLContext * r, Scene * scene, const CellMeshInst & d, NifSkopeOpenGLContext::Program * prog,
 	const Transform & viewTrans, int splatPass )
@@ -363,6 +516,10 @@ bool draw( NifSkopeOpenGLContext * r, Scene * scene, const CellMeshInst & d, Nif
 	} else if ( prog->uniLocation( "farSplat" ) >= 0 ) {
 		prog->uni2f( "farSplat", 0.0f, 0.0f );	// a twin drawn without a second pass (no blending): every row, as before
 	}
+	if ( !d.rowStep.isEmpty() || !d.rowLevel.isEmpty() ) {	// lane PERFLOAD1 P7 round 2: the ladder rows' dither, the cards' noise frame; P8 the tint
+		ladderFadeRows( r->fn, *cp, *k, d );
+		prog->uni1f( "farFadeFrame", float( wwGlPaintCount() & 1023u ) );	// the cards' frame (impostorchunk.cpp)
+	}
 	const bool uniRow = prog->wwBindless && bindlessUniformRow();	// FARINSTBL1: the shape's own row for every command
 	if ( uniRow )
 		prog->uni1i( "wwBlUniformRow", 1 );
@@ -374,8 +531,40 @@ bool draw( NifSkopeOpenGLContext * r, Scene * scene, const CellMeshInst & d, Nif
 		r->fn->glBindTexture( GL_TEXTURE_BUFFER, k->streamTex );
 		r->fn->glActiveTexture( GLenum( was ) );
 		prog->uni1i( "farStreamOn", 1 );
+		{	/* MODULES1 round 10: the far rows' baked AO enters the one AO rule (cell_ao.glsl cellAoShared), scaled by a
+			 * live maximum; the baked sky occlusion ( 1 - visibility ) takes its own. Debug keys only (no menu row, no
+			 * INI): WW_LODL_AO_MAX, WW_LODL_SKY_MAX, 0..1, unset = 1. Red WW_LODL_AO_RED=albedo: the AO in the vertex
+			 * colour (the diffuse light only), as before. */
+			auto key01 = []( const char * name ) {
+				bool ok = false;
+				const float v = wwEnvStr( name ).trimmed().toFloat( &ok );
+				return ok ? std::clamp( v, 0.0f, 1.0f ) : 1.0f;
+			};
+			WW_SWITCH_STATIC( float, aoMax, key01( "WW_LODL_AO_MAX" ) );
+			WW_SWITCH_STATIC( float, skyMax, key01( "WW_LODL_SKY_MAX" ) );
+			WW_SWITCH_STATIC( bool, albedo, wwEnv( "WW_LODL_AO_RED" ).trimmed() == "albedo" );
+			prog->uni3f( "farBakeK", aoMax, skyMax, albedo ? 1.0f : 0.0f );
+			static float said[3] = { -1.0f, -1.0f, -1.0f };
+			if ( said[0] != aoMax || said[1] != skyMax || said[2] != ( albedo ? 1.0f : 0.0f ) ) {
+				said[0] = aoMax;
+				said[1] = skyMax;
+				said[2] = albedo ? 1.0f : 0.0f;
+				std::fprintf( stderr, "far baked ao: max %.3f (WW_LODL_AO_MAX), sky occlusion max %.3f (WW_LODL_SKY_MAX), rule %s; "
+					"the far rows with the AO + sky stream (the flat copy, the far ground and the rows without the stream: line `far baked ao vc:`)\n",
+					double( aoMax ), double( skyMax ), albedo ? "RED albedo (the vertex colour)" : "shared (cell_ao.glsl cellAoShared: the whole lit colour)" );
+			}
+		}
 	}
+	// MODULES1 10b-2: rows without the stream carry the AO as mesh grey x row grey (lodinative.cpp), unless a channel view
+	bool rowsAo = false;
+	if ( !k->streamTex ) {
+		WW_SWITCH_STATIC( bool, view, lodlChannelFromEnv() != LodlChannel::None );
+		rowsAo = !view && lodlAoOn();
+	}
+	vcAoUniform( prog, rowsAo ? 3 : 0 );
 	submit( r, *cp, *k, cmds );
+	if ( rowsAo )
+		vcAoUniform( prog, 0 );
 	if ( k->streamTex )
 		prog->uni1i( "farStreamOn", 0 );
 	prog->uni1i( "farInst", 0 );
@@ -415,8 +604,16 @@ static bool redBlRow()
 
 bool bindlessUniformRow()
 {
+	/* lane EMPTY240 R4-3: on unless set off (FARINSTBL1 shipped it off: every far ring then refused the bindless twin and
+	 * ran the whole setupProgram walk). Red WW_BLROUTE_RED=1: off unless set, build 76. */
 	WW_SWITCH_STATIC( bool, on, [] {
 		const QString v = wwEnvStr( "WW_CELL_FARINST_BL" ).trimmed().toLower();
+		if ( v.isEmpty() ) {
+			const bool red = wwEnvInt( "WW_BLROUTE_RED" ) == 1;
+			std::fprintf( stderr, "far ring bindless: %s\n", red ? "off (red WW_BLROUTE_RED=1: build 76)"
+				: "on by default (the uniform row; WW_CELL_FARINST_BL=0 or the red WW_BLROUTE_RED=1 = off)" );
+			return !red;
+		}
 		return v == QLatin1String( "1" ) || v == QLatin1String( "on" );
 	}() );
 	return on && !redBlRow();
@@ -455,7 +652,7 @@ static bool tileInSlice( const CellMeshInst::Tile & t, const float * mv, const W
 
 int sliceTiles( const CellMeshInst & d, const float mv[16], const WwFarSwaySlice::Slice & s, quint64 & hash )
 {
-	const CellFarHide::View vw = CellFarHide::view( d );
+	const CellFarHide::View vw = CellFarHide::view( d, true );	// lane PERFLOAD1 P7 round 2: the casters
 	int n = 0;
 	for ( qsizetype i = 0; i < vw.tiles->size(); i++ ) {
 		if ( !tileInSlice( ( *vw.tiles )[i], mv, s ) )
@@ -469,7 +666,7 @@ int sliceTiles( const CellMeshInst & d, const float mv[16], const WwFarSwaySlice
 bool tileBounds( const CellMeshInst & d, const float m[16], const float * mv, const WwFarSwaySlice::Slice * slice,
 	float grow, float out[4] )
 {
-	const CellFarHide::View vw = CellFarHide::view( d );
+	const CellFarHide::View vw = CellFarHide::view( d, true );	// lane PERFLOAD1 P7 round 2: the casters
 	const float sx = std::sqrt( m[0] * m[0] + m[4] * m[4] + m[8] * m[8] );
 	const float sy = std::sqrt( m[1] * m[1] + m[5] * m[5] + m[9] * m[9] );
 	bool any = false;
@@ -506,7 +703,7 @@ bool drawCascade( NifSkopeOpenGLContext * r, const CellMeshInst & d, NifSkopeOpe
 	Copy * k = copyOf( r->fn, *cp, d );
 	if ( !k )
 		return false;
-	const CellFarHide::View vw = CellFarHide::view( d );   // lane FARHOLE2
+	const CellFarHide::View vw = CellFarHide::view( d, true );   // lane FARHOLE2; PERFLOAD1 P7 round 2: the ladder's cast step
 	std::vector<CellMeshInst::Cmd> cmds;
 	cmds.reserve( std::size_t( vw.cmds->size() ) );
 	const bool split = slice && mv && part != WwFarSwaySlice::Both;

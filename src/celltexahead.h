@@ -21,7 +21,8 @@ bool armedFor( const NifModel * nif );
 //! A shape of `nif` will bind these textures.
 void want( const NifModel * nif, const QStringList & names );
 //! The bytes of `filepath` as TexCache::texLoad is about to read it. False = read it yourself.
-bool take( const NifModel * nif, const QString & filepath, QByteArray & data );
+//! lane EMPTY240 R9-d: covRef > 0 = a "|wwcov<covRef>" load; *covDone = the workers already rewrote its alpha mips.
+bool take( const NifModel * nif, const QString & filepath, QByteArray & data, int covRef = 0, bool * covDone = nullptr );
 //! lane PERF1: the names whose bytes are read and waiting (at most `max`), for the drawing thread to upload now:
 //! the workers stop at AHEAD_BYTES, and the drawing thread asks in another order than they read, so without this
 //! it read ~40% of a cell's files itself, one at a time.
@@ -34,6 +35,12 @@ void stop( const NifModel * nif );
 void forget( const NifModel * nif, const QString & name );
 //! lane GAPFIX1: names read ahead again after a forget; handed-out names the drawing thread had to read itself
 void counts( qint64 & again, qint64 & drawRead );
+
+/*! lane EMPTY240 R8-2: may the drawing thread load `name` now without reading or waiting? Ready: its bytes are read
+ *  (texLoad takes them); Wait: queued or being read, so the bind waits a paint (a name nobody asked for is queued now,
+ *  first in line); Own: read it here, the old way (not armed, a read that failed, or the byte bound is full). */
+enum Poll { Own, Ready, Wait };
+Poll poll( const NifModel * nif, const QString & name );
 
 //! The end of a frame: one that asked for no texture ends the read-ahead.
 void frameEnd();

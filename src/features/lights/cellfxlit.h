@@ -15,7 +15,7 @@ struct WwCellLight;
  *  mix(1, directional + up to four placed lights x fade x pow(1 - saturate(d / r)^2, 2.2), lighting influence),
  *  per pixel, no N.L or shadow. The four lights belong to the placed MODEL; the renderer asks this table per draw.
  *  Outdoors the directional is the weather's sun x the imagespace Sunlight Scale; no weather loaded = self-lit.
- *  WW_CELL_FXLIT_PICK=strong, WW_CELL_FXLIT_RED=white|nofade|all|nopower, WW_CELL_FXLIT_DUMP=<file>,
+ *  WW_CELL_FXLIT_PICK=game|strong, WW_CELL_FXLIT_RED=white|nofade|all|nopower, WW_CELL_FXLIT_DUMP=<file>,
  *  WW_CELL_LIT_PROBE 70..74: debug aids. */
 struct WwFxLitModel
 {
@@ -27,11 +27,13 @@ struct WwFxLitModel
 	float scale[4] = { 1, 1, 1, 1 };            //!< 1, or the nofade red control's ratio
 };
 
-/*! The game's light pick: candidates reach the model's bound (distance - bound radius < light radius); under a
- *  150-unit bound they sort by (distance - bound r) / light r, largest first, else record order (inferred); the
- *  first four win. `strongest` instead takes the four largest color x falloff at the bound's center. */
+enum { WwFxLitPickOwn = 0, WwFxLitPickGame = 1, WwFxLitPickStrong = 2 };
+/*! The light pick: candidates reach the model's bound (distance - bound radius < light radius). Game (red
+ *  WW_CELL_FXLIT_PICK=game): under a 150-unit bound they sort by (distance - bound r) / light r, largest first, else
+ *  record order (inferred); the first four win. Own (default, LATE 7): the light placed by `ownRef` first, then
+ *  lights inside the bound (nearest first), then the game order. Strong: the four largest color x falloff. */
 void wwCellFxLitPickLights( const QVector<WwCellLight> & lights, const float center[3], float radius,
-	bool strongest, int out[4] );
+	int pick, quint32 ownRef, int out[4] );
 
 //! A new scene for this document: its table is emptied.
 void wwCellFxLitBegin( const void * nif );
@@ -51,6 +53,14 @@ void wwCellFxLitPick( const void * nif );
 const WwFxLitModel * wwCellFxLitFor( const void * nif, int block, int * serial = nullptr );
 //! Called with the effect program bound for `block`: the shape's lights (fxLit, fxLitScale, fxLitMode, fxLitId).
 void wwCellFxLitUniforms( Scene * scene, int block );
+/*! Lane MODULES1 M3 (G7, the Fusion Shaders Effect Lighting law): the band weight of a lit effect's material by its
+ *  brightness, max( base colour ) x base colour scale: 1 at or under 1.0 (lit), 0 at or over 2.0 (emissive), a
+ *  smoothstep fall between (graded). A non-finite brightness is 1 (as before the law). */
+float wwCellFxLawBand( float overbright );
+/*! Called with an effect or particle program bound: uploads fxLaw (cell_fxlaw.glsl), the emissive share 1 - band and
+ *  the unlit share's unit; (0, 0) outside the cell view. Counts lit / graded / emissive lit effects once per shape
+ *  ("fx law:" line). Red WW_CELL_FXLAW_RED=1 today, =band no bands, =units the unlit share at 1. */
+void wwCellFxLawUniforms( Scene * scene, int block, float overbright, const QString & name );
 //! True when this shape draws in the running probe pass (a lit effect, probe 70..74).
 bool wwCellFxLitProbeShape( Scene * scene, int block );
 /*! True when this exterior lit effect draws with fxRoomLit: its base scales by the open-air light reaching it, so a

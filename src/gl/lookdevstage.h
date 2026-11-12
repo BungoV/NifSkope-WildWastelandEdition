@@ -104,6 +104,11 @@ bool wwLookdevWeatherClass( unsigned & flags, unsigned & thunder, int * thunderS
 /*! lane WEATHERLOOK1 B: while a change blends, the weather left behind: its load-order FormID, EditorID, the plugin
  *  that defines it, its class flags (DATA byte 11) and the NEW weather's share pct; false when no change runs */
 bool wwLookdevWeatherLeaving( quint32 & formID, QString & edid, QString & owner, unsigned & classFlags, float & pct );
+namespace WwWeatherGen { struct In; }
+/*! lane WEATHERRECX1: the generated rung's inputs (features/weather/weathergen.h) of the loaded weather [0] and, while
+ *  a change blends, the one left behind [1] (EditorID, defining plugin, DATA bytes, MNAM type / density, thunder SNAM),
+ *  their load-order FormIDs; returns how many (0 = no weather) and pct = the NEW weather's share */
+int wwLookdevWeatherGen( WwWeatherGen::In in[2], quint32 formID[2], float & pct );
 /*! lane CLOUD6f: the storm's lightning for the volume clouds (gl/cloudlightning.h): share = how much of a storm the sky is
  *  (1 in a storm weather, 0 otherwise, the fade bytes' ramps during a change), rgb = its Lightning Color (DATA 12..14,
  *  0..1; the storm side's while a change blends), seed = the storm weather's FormID (the strikes' draws); false when
@@ -133,6 +138,8 @@ bool wwLookdevMoon();
 void wwLookdevSetMoon( bool on );
 //! the weather fog row (lane FOG1), OFF by default
 bool wwLookdevFog();
+//! FARWATER1 late item 3: the night haze's tint for the "cell air:" line (" night haze=r,g,b R/B x ...")
+QString wwNightHazeNote();
 void wwLookdevSetFog( bool on );
 //! the cascaded sun shadows row (lane CSM1, gl/sunshadow.h), OFF by default
 bool wwLookdevShadows();
@@ -170,6 +177,8 @@ struct WwCloudLayerIn
 /*! the active layers (not disabled, alpha > 0, a texture), key = plugin|weather|load generation, eye = the view's
  *  world position (game units); false + why when no weather resolved */
 bool wwLookdevCloudLayers( Scene * scene, QVector<WwCloudLayerIn> & out, QString & key, float eye[3], QString * why );
+//! lane EMPTY240 R9-c: the last wwLookdevCloudLayers call's parts (ms): the weather resolve, the sky frame, the meshes
+void wwLookdevCloudLayersParts( double ms[3] );
 //! lane CLOUD1: fills io's mesh pointers for layer io.layer (a previous weather's layer during a transition)
 bool wwLookdevCloudMesh( Scene * scene, WwCloudLayerIn & io );
 //! the scene cube (the material's own EnvmapTexture wins per shape, in the renderer)
@@ -218,6 +227,8 @@ bool wwLookdevImageSpace( WwLookdevIs & out );
  *  exterior surfaces and the probe GI's sun take it too. 1 without a weather or an imagespace. Red
  *  WW_CELL_SUNSCALE_RED=one keeps the sun unscaled (the viewer before lane BOUNCE1). */
 float wwLookdevSunlightScale();
+//! lane PHYSUNITS1: the weather's light in real units over the weather's own (sun + ambient; 1 off the physical scale)
+float wwLookdevPhysLight();
 //! lane WATER1: the water's sky (linear): the weather's Horizon, Sky-Lower and Sky-Upper rows at the dome's hour;
 //! false (the outputs untouched) when no weather is loaded
 bool wwLookdevWaterSky( float horizon[3], float lower[3], float upper[3] );

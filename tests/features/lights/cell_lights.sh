@@ -1,4 +1,5 @@
 #!/bin/bash
+export WW_CELL_STREAM="${WW_CELL_STREAM:-0}"	# AIRPERF1 r4: this harness opens a fixed block (streaming is the default now)
 #
 # Lane PRTP1 (2026-09-30): INTERIOR cells open in the cell view, and every
 # placed light is read (LIGH DATA, REFR XRDS / XLIG, initially disabled).

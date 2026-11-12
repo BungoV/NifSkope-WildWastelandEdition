@@ -1,4 +1,5 @@
 #!/bin/bash
+export WW_CELL_STREAM="${WW_CELL_STREAM:-0}"	# AIRPERF1 r4: this harness opens a fixed block (streaming is the default now)
 #
 # THE CELL VIEW'S SCREEN-SPACE GI, first live smoke (lane SSGI1; src/features/gi/cellssgi.h). Vault 111 cryo walkway, interior,
 # probe GI off (WW_CELL_GI=0: the bounce is then the screen's alone), DOF/MBLUR off, effects hidden, decals pinned.

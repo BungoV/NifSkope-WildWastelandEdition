@@ -13,7 +13,9 @@ class Scene;
  *  WW_CELL_BLOOM=vanilla / WW_CELL_GLARE=0 are the reds).
  *  Only cell-lit pixels feed it; glow over non-imagespace pixels is added in display space.
  *  Switches: WW_CELL_BLOOM=vanilla|fo4cs, WW_CELL_GLARE=0|1, WW_CELL_BLOOM_<setting> / WW_CELL_GLARE_<setting> pin
- *  a row; WW_CELL_BLOOM_RED=nokaris, WW_CELL_BLOOM_IMPULSE=<value>, WW_CELL_BLOOM_DUMP=<dir> are debug aids. */
+ *  a row; WW_CELL_BLOOM_RED=nokaris, WW_CELL_BLOOM_IMPULSE=<value>, WW_CELL_BLOOM_DUMP=<dir> are debug aids.
+ *  MODULES1 R8-2: on a jittered frame level 0 is held over the jitter's 8 frames while the view stands still
+ *  (cell_bloom_hold.frag); red WW_CELL_BLOOM_RED=nohold. */
 
 struct WwCellBloomSettings
 {

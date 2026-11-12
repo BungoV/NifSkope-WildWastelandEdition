@@ -32,7 +32,13 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "glview.h"
 #include "wwswitch.h"	// the WW_* switch store
-#include "libfo76utils/src/filebuf.hpp"	// MODULES1: FileBuffer::trimMappedViews
+#include "features/overlays/debugview.h"	// lane DEBUGVIEW1: the live debug views
+#include "filebuf.hpp"	// MODULES1: FileBuffer::trimMappedViews
+#include "wwhwuse.h"	// lane EMPTY240 round 3: the stream pool, the RAM cache and the archive census in `hardware use:`
+#include "features/vkframe/vkframe.h"	// lane VKFRAME1: the Vulkan frame's words in `hardware use:`, the `vk frame:` line
+#include "features/vkframe/vkpresent.h"	// lane VKFRAME1 PRESENT FIRST: the frame to the screen through a Vulkan swapchain
+#include "features/near/cellbindless.h"	// lane EMPTY240 R3-4: the `near draws:` line's bindless and multi-draw verdict
+#include "features/ao/ao.h"	// lane EMPTY240 R3-4: and the depth prepass's note
 #include "wwflyfix.h"	// FLYFIX1's free-camera rules (their old way is a test twin now)
 #include "cellspeed.h"
 #include "cellcambounds.h"	// the camera never shows an out-of-bounds or under-terrain view
@@ -62,6 +68,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "features/far-lod/impostorchunk.h"
 #include "features/far-lod/cellfarlod.h"		// the far field's planes, sway and cards
 #include "features/water/cellwater.h"	// far water held until its dry mask's lookup lands
+#include "features/water/endlesssea.h"	// lane FARSEA1: the endless sea follows the camera; the far plane reaches its rim
 #include "features/far-ground/landlodspec.h"		// the land-LOD blend centre's glide
 #include "cellmodpick.h"	// "Mods differ from the far LOD bake" over the view
 #include "features/far-lod/impostorpreviewtest.h"
@@ -78,6 +85,9 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "features/gi/rtddgicell.h"	// the ray-traced GI volume, one call a frame
 #include "celldoorlive.h"	// one call a frame
 #include "cellworldanim.h"	// the cell's world clock
+#include "gl/wwuploadcap.h"	// lane EMPTY240 R4-1: the paint's upload budget
+#include "wwsyncwait.h"	// lane EMPTY240 R4-2: the `frame overlap:` line
+#include "wwbetweenpaints.h"	// lane EMPTY240 R5-3: the `between paints:` line
 #include "shortcutregistry.h"
 #include "wwskin.h"
 #include "features/near/cellqueue.h"
@@ -118,6 +128,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <QScreen>
 #include <QTimer>
 #include <QElapsedTimer>
+#include <QThreadPool>	// lane EMPTY240 LATE ITEM 5: the workers in the `hardware use:` line
 
 namespace {
 //! A QMenu that cancels itself once the pointer moves well clear of it, so the small operator pop-ups (Delete /
@@ -173,6 +184,10 @@ private:
 #include "features/water/cellocean.h"
 #include "features/water/cellunderwater.h"
 #include "features/clouds/cloudvol.h"	// the volume clouds' depth test
+#include "features/exposure/physunits.h"	// lane PHYSUNITS1: emissives in cd/m2
+#include "wwloadwatch.h"	// lane PERFLOAD1 P5: the frame's unbracketed steps name themselves to the main-thread watch
+#include "framepacer.h"	// lane EMPTY240 ITEM 0: the next frame starts when the last one is done
+#include "harnesswindow.h"	// wwWorldClockLive: a harness keeps the old pacing
 
 // NOTE: The FPS define is a frame limiter,
 //	NOT the guaranteed FPS in the viewport.
@@ -350,8 +365,8 @@ GLView::GLView( QWindow * p )
 	fmt.setProfile( QSurfaceFormat::CoreProfile );
 	fmt.setOption( QSurfaceFormat::DeprecatedFunctions, false );
 
-	// V-Sync
-	fmt.setSwapInterval( DEBUG_FRAME_TIME ? 0 : 1 );
+	// V-Sync: off unless the View > Vertical Sync row (or WW_VSYNC=1, or the red WW_FRAMETIMER_RED=1) asks (EMPTY240)
+	fmt.setSwapInterval( ( DEBUG_FRAME_TIME || !wwVsyncOn() ) ? 0 : 1 );
 	fmt.setSwapBehavior( QSurfaceFormat::DoubleBuffer );
 
 	fmt.setDepthBufferSize( 24 );
@@ -3237,7 +3252,10 @@ void GLView::glProjection( [[maybe_unused]] int x, [[maybe_unused]] int y )
 		if ( const float farReach = wwCellFarLodReach( scene ); farReach > 0.0f ) {
 			const Vector3 o = scene->view * wwCellFarLodOrigin( scene );	// the reach is measured from the far centre
 			fr = std::max< GLdouble >( fr, GLdouble( o.length() ) + GLdouble( farReach ) * 1.05 );
+			fr = std::max< GLdouble >( fr, GLdouble( wwEndlessSeaReach( scene ) ) * 1.05 );	// lane FARSEA1: the sea's rim
 			nr = wwCellFarLodNear( nr );
+			nr = wwCellFarLodNearCap( scene, nr, std::tan( ( wwPathActive ? GLdouble( wwPathFov ) : GLdouble( cfg.fov / Zoom ) )
+				/ 360 * M_PI ), aspect );	// lane PERFLOAD1: never past the far land
 			fr = std::max< GLdouble >( fr, nr + scale() );
 			wwCellFarLodPlanes( nr, fr );	// the near gate reads these
 		}
@@ -3266,6 +3284,9 @@ void GLView::glProjection( [[maybe_unused]] int x, [[maybe_unused]] int y )
 static quint64 wwPaintCounter = 0;
 static qint64 wwPaintNanos = 0;
 quint64 wwGlPaintCount() { return wwPaintCounter; }
+//! lane EMPTY240 R12-1: one step per resizeGL (valid context or not): the TAA jitter's kept viewport is asked again
+static quint64 wwResizeGen = 0;
+quint64 wwGlResizeGen() { return wwResizeGen; }
 qint64 wwGlPaintNanos() { return wwPaintNanos; }
 
 // the imagespace's measure (src/gl/celllights.h).
@@ -3305,11 +3326,14 @@ static void wwCellImageSpaceMeasurePass( Scene * scene )
 	std::vector<float> px( size_t( w ) * size_t( h ) * 4 );
 	// the stencil (renderer.cpp): bit 0 a cell-lit fragment landed, bit 1 the last one was blended/not cell-lit
 	std::vector<unsigned char> cover( size_t( w ) * size_t( h ) );
+	QElapsedTimer wwReadClock;	// lane EMPTY240 R4-2: a same-frame read-back (only when the linear frame could not measure)
+	wwReadClock.start();
 	fn->glBindFramebuffer( GL_READ_FRAMEBUFFER, fbo->handle() );
 	glPixelStorei( GL_PACK_ALIGNMENT, 4 );
 	glReadPixels( 0, 0, w, h, GL_RGBA, GL_FLOAT, px.data() );
 	glPixelStorei( GL_PACK_ALIGNMENT, 1 );
 	glReadPixels( 0, 0, w, h, GL_STENCIL_INDEX, GL_UNSIGNED_BYTE, cover.data() );
+	WwSync::add( WwSync::ReadPixels, double( wwReadClock.nsecsElapsed() ) );
 	glPixelStorei( GL_PACK_ALIGNMENT, 4 );
 	fn->glBindFramebuffer( GL_FRAMEBUFFER, GLuint( prevFbo ) );
 	glViewport( vp[0], vp[1], vp[2], vp[3] );
@@ -3326,7 +3350,9 @@ static void wwCellImageSpaceMeasurePass( Scene * scene )
 			if ( std::isfinite( px[i * 4 + c] ) )
 				sum += wgt[c] * px[i * 4 + c];
 	}
-	wwCellImageSpaceSetAdapted( scene, wwAtmoAdapted( float( sum / double( std::max( counted, 1 ) ) ), counted,
+	// lane PHYSUNITS1 (RESUME 11-09 b): the seed takes the physical camera's meter too (one law, wwPhysMeter)
+	const float physMeter = wwPhysMeter( px.data(), int( cover.size() ), cover.data() );
+	wwCellImageSpaceSetAdapted( scene, wwAtmoAdapted( physMeter >= 0.0f ? physMeter : float( sum / double( std::max( counted, 1 ) ) ), counted,
 		int( cover.size() ) ), counted );
 	// the game blooms a quarter-size copy of the HDR; a full-size (dump) measure is averaged 4x4
 	wwCellImageSpaceSetBloom( scene, px.data(), w, h, div == 1 ? 4 : 1 );
@@ -3350,8 +3376,779 @@ static void wwCellImageSpaceMeasurePass( Scene * scene )
 	}
 }
 
+namespace
+{
+constexpr const char * kFpsKey = "Settings/Render/View/Show Framerate";
+struct WwFpsMeter
+{
+	bool init = false, on = false;
+	QElapsedTimer win;
+	int frames = 0;
+	double cpuMs = 0.0;
+	QString line;
+	// lane MODULES1 item 7: the GPU's own frame time, GL_TIMESTAMP pairs read 4 frames late (no stall)
+	double gpuMs = 0.0;
+	int gpuN = 0;
+	GLuint q[4][2] = {};
+	bool pending[4] = {};
+	bool qMade = false, qOk = false;
+	int slot = 0;
+};
+WwFpsMeter & wwFps()
+{
+	static WwFpsMeter m;
+	if ( !m.init ) {
+		m.init = true;
+		m.on = QSettings().value( QLatin1StringView( kFpsKey ), false ).toBool();
+	}
+	return m;
+}
+}	// namespace
+
+bool wwFramerateOverlayOn()
+{
+	return wwFps().on;
+}
+
+/* lane MODULES1 item 7 (bungo 11-09: the CPU ms of ~200 included the GPU wait): mark 0 at the paint's start, mark 1
+ * before the 2D overlays; the pair from 4 paints ago is read only when its result is there. Red
+ * WW_FPS_GPU_RED=1: no GPU figure, as before. */
+static void wwFpsGpuMark( int which )
+{
+	WwFpsMeter & m = wwFps();
+	WW_SWITCH_STATIC( bool, gpuRed, wwEnvInt( "WW_FPS_GPU_RED" ) == 1 );
+	QOpenGLContext * c = QOpenGLContext::currentContext();
+	if ( !m.on || gpuRed || !c )
+		return;
+	using QueryCounterFn = void ( QOPENGLF_APIENTRYP )( GLuint, GLenum );
+	using QueryU64Fn = void ( QOPENGLF_APIENTRYP )( GLuint, GLenum, GLuint64 * );
+	static QueryCounterFn qc = nullptr;
+	static QueryU64Fn qu = nullptr;
+	QOpenGLExtraFunctions * xf = c->extraFunctions();
+	if ( !m.qMade ) {
+		m.qMade = true;
+		qc = reinterpret_cast<QueryCounterFn>( c->getProcAddress( "glQueryCounter" ) );
+		qu = reinterpret_cast<QueryU64Fn>( c->getProcAddress( "glGetQueryObjectui64v" ) );
+		m.qOk = qc && qu && xf;
+		if ( m.qOk )
+			xf->glGenQueries( 8, &m.q[0][0] );
+	}
+	if ( !m.qOk )
+		return;
+	constexpr GLenum kTimestamp = 0x8E28;	// GL_TIMESTAMP
+	constexpr GLenum kAvailable = 0x8867;	// GL_QUERY_RESULT_AVAILABLE
+	const int s = m.slot;
+	if ( which == 0 ) {
+		if ( m.pending[s] ) {
+			GLuint avail = 0;
+			xf->glGetQueryObjectuiv( m.q[s][1], kAvailable, &avail );
+			if ( avail ) {
+				GLuint64 t0 = 0, t1 = 0;
+				qu( m.q[s][0], GL_QUERY_RESULT, &t0 );
+				qu( m.q[s][1], GL_QUERY_RESULT, &t1 );
+				if ( t1 > t0 ) {
+					m.gpuMs += double( t1 - t0 ) * 1.0e-6;
+					m.gpuN++;
+				}
+			}
+			m.pending[s] = false;
+		}
+		qc( m.q[s][0], kTimestamp );
+		m.pending[s] = false;
+	} else {
+		qc( m.q[s][1], kTimestamp );
+		m.pending[s] = true;
+		m.slot = ( s + 1 ) % 4;
+	}
+}
+
+void wwSetFramerateOverlay( bool on )
+{
+	WwFpsMeter & m = wwFps();
+	m.on = on;
+	m.frames = 0;
+	m.cpuMs = 0.0;
+	m.line.clear();
+	m.win.invalidate();
+	QSettings().setValue( QLatin1StringView( kFpsKey ), on );
+}
+
+/* lane EMPTY240 ITEM 0: the frame pacer (framepacer.h). The rows are read from QSettings once, then held here. */
+namespace
+{
+struct WwPacingRows
+{
+	bool init = false;
+	bool vsync = false;
+	int cap = 0;
+};
+WwPacingRows & wwPacingRows()
+{
+	static WwPacingRows r;
+	if ( !r.init ) {
+		r.init = true;
+		QSettings s;
+		r.vsync = s.value( QStringLiteral( "GLView/Display/VSync" ), false ).toBool();
+		r.cap = s.value( QStringLiteral( "GLView/Display/FrameCap" ), 0 ).toInt();
+	}
+	return r;
+}
+
+bool wwFrameTimerRed()
+{
+	return wwEnvInt( "WW_FRAMETIMER_RED" ) == 1;
+}
+
+struct WwPacer
+{
+	bool queued = false;
+	int cap = 0;	// Hz, 0 = off
+	int interval = -1;	// the swap interval set on the view's context (-1 = not yet)
+	bool swapOk = true;
+	WwFramePacer::Clock clock;
+	QString said;	// the last pacing line's facts
+	double saidAt = -10.0;
+	// R3-0b: request to paint, the `frame request:` line every 5 s
+	double requestAt = -1.0, reqSum = 0.0, reqMax = 0.0, reqWinAt = -1.0;
+	int reqN = 0;
+	// R5-3: a paint sent by the tick asks for the next one here; the frames started straight from the last / by a post
+	bool inTick = false, wantNext = false;
+	int straight = 0, posted = 0;
+	// R6-2: the view's 6 ms gears timer, stopped while the pacer drives frames; R6-3: ticks that sent a paint, requests dropped
+	QPointer<QTimer> gearsTimer;
+	bool gearsLooked = false, gearsRed = false, gearsStopped = false;
+	int gearsSaid = 0, ticks = 0, dropped = 0;
+	int straightPosted = 0;	// R7-3: straight frames that left only posted messages / due timers to the loop
+};
+WwPacer & wwPacer()
+{
+	static WwPacer p;
+	return p;
+}
+
+//! the pacing and frame-wall clock (QueryPerformanceCounter; processSeconds() steps with the system tick)
+double wwPaceNowS()
+{
+	static QElapsedTimer t;
+	if ( !t.isValid() )
+		t.start();
+	return double( t.nsecsElapsed() ) * 1e-9;
+}
+
+//! lane EMPTY240 item 1: this paint's marks and the second's sums (framepacer.h WwFrameWall)
+struct WwWall
+{
+	WwFrameWall::Marks cur;
+	WwFrameWall::Window win;
+	bool connected = false;
+};
+WwWall & wwWall()
+{
+	static WwWall w;
+	return w;
+}
+
+//! adds the scope's seconds to one named part of this paint
+struct WwWallPart
+{
+	double & part;
+	const double t0;
+	explicit WwWallPart( double & p ) : part( p ), t0( wwPaceNowS() ) {}
+	~WwWallPart()
+	{
+		const double d = wwPaceNowS() - t0;
+		part += d;
+		PassTime::gapNamed( d );	// lane VKFRAME1 build 88: named, so out of the gaps' other-in-frame
+	}
+};
+
+/* lane VKFRAME1 build 91: other-in-frame's frame-start (the pass timers' frame start to the first pass, the wall's
+ * named transform left out) by step, summed over the frame wall's window: a clock read at each step's end */
+struct WwStartSteps
+{
+	static constexpr int Count = 5;
+	double ms[Count] = {};
+	double last = -1.0;
+	// lane EMPTY240 R12-1: "camera and uniforms" by call
+	static constexpr int CamCount = 7;
+	double cam[CamCount] = {};
+	double camLast = -1.0;
+};
+WwStartSteps & wwStartSteps()
+{
+	static WwStartSteps s;
+	return s;
+}
+void wwStartStepBegin()
+{
+	wwStartSteps().last = wwStartSteps().camLast = wwPaceNowS();
+}
+//! lane EMPTY240 R12-1: the end of one call inside "camera and uniforms" (a clock read)
+void wwCamStepMark( int step )
+{
+	WwStartSteps & s = wwStartSteps();
+	const double now = wwPaceNowS();
+	if ( s.camLast >= 0.0 )
+		s.cam[step] += ( now - s.camLast ) * 1e3;
+	s.camLast = now;
+}
+void wwStartStepEnd( int step )
+{
+	WwStartSteps & s = wwStartSteps();
+	const double now = wwPaceNowS();
+	if ( s.last >= 0.0 )
+		s.ms[step] += ( now - s.last ) * 1e3;
+	s.last = now;
+}
+QByteArray wwStartStepsTake( double frames )
+{
+	static const char * const names[WwStartSteps::Count] = { "texture params", "clear, compile, centre", "camera and uniforms",
+		"cell cull frame", "cell lights" };
+	WwStartSteps & s = wwStartSteps();
+	QByteArray out = " | frame-start by step =";
+	for ( int i = 0; i < WwStartSteps::Count; i++ )
+		out += QByteArray( i ? " + " : " " ) + names[i] + " " + QByteArray::number( frames > 0.0 ? s.ms[i] / frames : 0.0, 'f', 3 );
+	static const char * const camNames[WwStartSteps::CamCount] = { "cam dump", "shadow view", "debug view", "projection",
+		"view and light", "global uniforms", "vertex attribs" };
+	out += " | camera and uniforms by call (EMPTY240 R12-1) =";
+	for ( int i = 0; i < WwStartSteps::CamCount; i++ )
+		out += QByteArray( i ? " + " : " " ) + camNames[i] + " " + QByteArray::number( frames > 0.0 ? s.cam[i] / frames : 0.0, 'f', 3 );
+	s = WwStartSteps();
+	return out;
+}
+
+/* lane EMPTY240 R10-5: build 84's spikes after the goto sat in gaps outside the GPU zones (frame 296: 647 ms CPU after
+ * the texture pump; frame 402: 1264 ms CPU after the sun cascades). A drawing-thread step over 50 ms prints its name;
+ * a clock read each end, no GL, at most 32 lines. */
+struct WwSlowStep
+{
+	const char * name;
+	const double t0;
+	explicit WwSlowStep( const char * n ) : name( n ), t0( wwPaceNowS() ) {}
+	~WwSlowStep()
+	{
+		const double ms = ( wwPaceNowS() - t0 ) * 1e3;
+		static int said = 0;
+		if ( ms < 50.0 || said >= 32 )
+			return;
+		said++;
+		std::fprintf( stderr, "frame slow step: %s %.1f ms CPU in paint %llu (EMPTY240 R10-5: a drawing-thread step "
+			"outside the GPU zones over 50 ms)\n", name, ms, static_cast<unsigned long long>( wwPaintCounter ) );
+	}
+};
+}	// namespace
+
+bool wwVsyncOn()
+{
+	if ( wwEnvIsSet( "WW_VSYNC" ) )
+		return wwEnvInt( "WW_VSYNC" ) != 0;
+	if ( wwFrameTimerRed() )
+		return true;	// build 71
+	return wwPacingRows().vsync;
+}
+
+void wwSetVsync( bool on )
+{
+	wwPacingRows().vsync = on;
+	QSettings().setValue( QStringLiteral( "GLView/Display/VSync" ), on );
+}
+
+int wwFrameCapRow()
+{
+	if ( wwEnvIsSet( "WW_FRAME_CAP" ) ) {
+		const QString v = wwEnvStr( "WW_FRAME_CAP" ).trimmed();
+		return v.compare( QLatin1String( "refresh" ), Qt::CaseInsensitive ) == 0 ? -1 : v.toInt();
+	}
+	return wwPacingRows().cap;
+}
+
+void wwSetFrameCap( int row )
+{
+	wwPacingRows().cap = row;
+	QSettings().setValue( QStringLiteral( "GLView/Display/FrameCap" ), row );
+}
+
+/* At the paint's start: the cap's clock, the swap interval when the row changed, and the pacing line on a change.
+ * `wants` = this view wants the next frame (a cell view with a live clock, a playing animation, a held key). */
+static void wwPacerFrameStart( GLView * v, bool wants, bool cellView )
+{
+	WwPacer & p = wwPacer();
+	const bool red = wwFrameTimerRed();
+	const double refresh = v->screen() ? v->screen()->refreshRate() : 0.0;
+	const int row = wwFrameCapRow();
+	p.cap = red ? 0 : WwFramePacer::capHz( row, refresh );
+	const double now = wwPaceNowS();
+	WwFramePacer::started( p.clock, p.cap, now );
+	if ( p.requestAt >= 0.0 ) {
+		const double ms = ( now - p.requestAt ) * 1e3;
+		p.requestAt = -1.0;
+		p.reqSum += ms;
+		p.reqMax = std::max( p.reqMax, ms );
+		p.reqN++;
+	}
+	if ( p.reqWinAt < 0.0 )
+		p.reqWinAt = now;
+	if ( now - p.reqWinAt >= 5.0 && p.reqN > 0 ) {
+		std::fprintf( stderr, "frame request: the paint starts %.2f ms after the frame's request (mean of %d, longest %.2f), "
+			"delivered %s; %d frames started straight after the last one's swap (the message queue empty), %d through the "
+			"event loop (red WW_PACERLOOP_RED=1: every frame through the loop, build 77); %d paints for %d pacer ticks, %d ticks "
+			"dropped the requests left posted (red WW_PAINTONCE_RED=1: a tick's posted request painted the frame again, build 78); "
+			"%d straight frames left only posted messages or due timers to the loop, at most 3 frames (red WW_STRAIGHTPOST_RED=1: "
+			"any posted message, Qt's own wake too, sends the frame through the loop, build 80)\n",
+			p.reqSum / double( p.reqN ), p.reqN,
+			p.reqMax, wwEnvInt( "WW_PAINTDIRECT_RED" ) == 1
+				? "by Qt's update timer (WW_PAINTDIRECT_RED=1: QWindow::requestUpdate, 5 ms + the timer's rounding)"
+				: "at once (the update request sent by the pacer, Qt's timer not waited for)", p.straight, p.posted,
+			p.reqN, p.ticks, p.dropped, p.straightPosted );
+		p.reqWinAt = now;
+		p.reqSum = p.reqMax = 0.0;
+		p.reqN = 0;
+		p.straight = p.posted = 0;
+		p.ticks = p.dropped = 0;
+		p.straightPosted = 0;
+	}
+	const int interval = ( DEBUG_FRAME_TIME || !wwVsyncOn() ) ? 0 : 1;
+	if ( interval != p.interval ) {
+		using SwapFn = int ( QOPENGLF_APIENTRYP )( int );	// wglSwapIntervalEXT
+		QOpenGLContext * c = QOpenGLContext::currentContext();
+		const auto swap = c ? reinterpret_cast<SwapFn>( c->getProcAddress( "wglSwapIntervalEXT" ) ) : nullptr;
+		p.swapOk = swap && swap( interval ) != 0;
+		p.interval = interval;
+	}
+	const QString driver = red ? QStringLiteral( "the 6 ms timer (WW_FRAMETIMER_RED=1)" )
+		: wants ? ( cellView && wwEnvInt( "WW_FRAMETIMER_RED" ) != 2
+			? QStringLiteral( "frames (a cell view draws continuously, each starts when the last is done)" )
+			: QStringLiteral( "frames (each starts when the last is done)" ) )
+		: cellView ? QStringLiteral( "the 6 ms timer (WW_FRAMETIMER_RED=2: a cell view with its clock stopped)" )
+		: QStringLiteral( "the 6 ms timer (an editing view, nothing moves)" );
+	const QString cap = p.cap <= 0 ? QStringLiteral( "off" )
+		: row < 0 ? QStringLiteral( "%1 fps (monitor refresh)" ).arg( p.cap ) : QStringLiteral( "%1 fps" ).arg( p.cap );
+	const QString facts = driver + cap + QString::number( interval ) + QString::number( int( p.swapOk ) );
+	if ( facts != p.said && now - p.saidAt >= 1.0 ) {
+		p.said = facts;
+		p.saidAt = now;
+		const double res = wwTimerResolutionMs();
+		std::fprintf( stderr, "frame pacing: driven by %s, cap %s, vsync %s%s, timer resolution %s\n", qPrintable( driver ),
+			qPrintable( cap ), interval ? "on" : "off", p.swapOk ? "" : " (wglSwapIntervalEXT refused: the driver's own setting)",
+			res > 0.0 ? qPrintable( QStringLiteral( "%1 ms" ).arg( res, 0, 'f', 2 ) ) : "unknown" );
+	}
+}
+
+static void wwPacerTick( GLView * v );
+
+/* lane EMPTY240 R6-2: build 78's between-paints held "Timer to QTimer" 1.6 times a frame at load: the view's own 6 ms
+ * timer (GLView ctor, 1000 / FPS) runs advanceGears (cell stream step, physics, animation) beside the pacer's tick, which
+ * already runs it once a frame. While the pacer drives frames the timer is stopped; it starts again when the view stops
+ * wanting frames (an editing view, nothing moves). Red WW_GEARSTIMER_RED=1: the timer always runs, build 78. */
+static void wwGearsTimer( GLView * v, bool pacerDrives )
+{
+	WwPacer & p = wwPacer();
+	if ( !p.gearsLooked ) {
+		p.gearsLooked = true;
+		p.gearsRed = wwEnvInt( "WW_GEARSTIMER_RED" ) == 1;
+		for ( QTimer * t : v->findChildren<QTimer *>( Qt::FindDirectChildrenOnly ) )
+			if ( !t->isSingleShot() && t->interval() == 1000 / FPS )
+				p.gearsTimer = t;
+	}
+	QTimer * t = p.gearsTimer.data();
+	const bool stop = pacerDrives && !p.gearsRed;
+	if ( !t || stop == p.gearsStopped )
+		return;
+	p.gearsStopped = stop;
+	if ( stop )
+		t->stop();
+	else
+		t->start();
+	if ( p.gearsSaid < 4 || p.gearsSaid % 100 == 0 )
+		std::fprintf( stderr, "frame gears: the view's %d ms gears timer %s (change %d; red WW_GEARSTIMER_RED=1: it runs beside "
+			"the pacer, build 78)\n", t->interval(), stop ? "stopped, the pacer's tick steps the gears once a frame"
+			: "running, the pacer is idle", p.gearsSaid + 1 );
+	p.gearsSaid++;
+}
+
+//! at the paint's end (every return): queue the next frame when the view wants one
+static void wwPacerAfterPaint( GLView * v, bool wants )
+{
+	WwPacer & p = wwPacer();
+	wwGearsTimer( v, wants && !wwFrameTimerRed() );
+	if ( !wants || p.queued || wwFrameTimerRed() )
+		return;
+	if ( p.inTick ) {
+		p.wantNext = true;	// lane EMPTY240 R5-3: the tick that sent this paint goes on (or posts) after the swap
+		return;
+	}
+	p.queued = true;
+	p.posted++;
+	QTimer::singleShot( 0, v, [v]() { wwPacerTick( v ); } );
+}
+
+/*! the queued frame: wait out the cap (short sleeps, then re-posts so input still runs), then a tick and a paint.
+ * lane EMPTY240 R5-3: build 77 spent 1.47 ms a frame between the swap and the next paint going round the event loop for
+ * the posted tick. A paint this tick sent asks for the next one here instead: with the thread's message queue empty
+ * (no input, timer, paint, posted or sent message waits) the next frame starts straight away, up to 4 frames before
+ * the loop gets a turn; anything waiting: posted as before. Red WW_PACERLOOP_RED=1: every frame through the loop. */
+static void wwPacerTick( GLView * v )
+{
+	WwPacer & p = wwPacer();
+	p.queued = false;
+	const bool loopRed = wwEnvInt( "WW_PACERLOOP_RED" ) == 1;
+	for ( int run = 0;; run++ ) {
+		const double wait = WwFramePacer::waitSeconds( p.clock, p.cap, wwPaceNowS() );
+		if ( wait > 0.0 ) {
+			{
+				WwWallPart wallPart( wwWall().cur.capWait );
+				wwPreciseSleep( WwFramePacer::sleepSeconds( wait ) );
+			}
+			p.queued = true;
+			QTimer::singleShot( 0, v, [v]() { wwPacerTick( v ); } );
+			return;
+		}
+		{
+			WwWallPart wallPart( wwWall().cur.gears );	// lane EMPTY240 R4-2: named out of between-paints
+			QMetaObject::invokeMethod( v, "advanceGears", Qt::DirectConnection );
+		}
+		p.requestAt = wwPaceNowS();
+		v->update();
+		/* lane EMPTY240 R3-0b (build 74: 9 ms between paints of a 4 ms frame): update() asks QWindow::requestUpdate, whose
+		 * UpdateRequest comes from the platform's update timer (5 ms + the timer's rounding). The pacer sends it now; the
+		 * timer's own request later finds nothing dirty. Red WW_PAINTDIRECT_RED=1: wait for Qt's timer. */
+		if ( wwEnvInt( "WW_PAINTDIRECT_RED" ) != 1 && v->isExposed() ) {
+			QEvent ev( QEvent::UpdateRequest );
+			p.inTick = !loopRed;
+			p.wantNext = false;
+			QCoreApplication::sendEvent( v, &ev );
+			p.inTick = false;
+			p.ticks++;
+			/* lane EMPTY240 R6-3: update() above (and advanceGears' own update calls) posted an UpdateRequest at high
+			 * priority; the paint just sent cleared updatePending, so that post stayed in the queue: the message queue was
+			 * never empty (build 78: 0 straight frames) and it painted the same frame again with no gears step (849 paints
+			 * for ~425 ticks). When the pacer paints next anyway (asked or queued), the leftover requests go. Red
+			 * WW_PAINTONCE_RED=1: they stay, build 78. */
+			if ( ( p.wantNext || p.queued ) && wwEnvInt( "WW_PAINTONCE_RED" ) != 1 ) {
+				QCoreApplication::removePostedEvents( v, QEvent::UpdateRequest );
+				p.dropped++;
+			}
+		}
+		if ( !p.wantNext )
+			return;	// no paint asked for the next frame here (or it posted it itself)
+		p.wantNext = false;
+		/* lane EMPTY240 R7-3: build 80 started 0 frames straight (622 through the loop): every tick's update() posts an
+		 * UpdateRequest, and the post leaves Qt's wake message in the queue after R6-3 drops the request, so the queue
+		 * was never empty. Posted messages and due timers now wait for the loop's turn (at most 3 straight frames); input,
+		 * a paint or a sent message still sends the frame through the loop. Red WW_STRAIGHTPOST_RED=1: any posted
+		 * message too, build 80. */
+		if ( run < 3 && !p.queued ) {
+			const int waits = WwBetween::queueWaits();
+			if ( waits == 0 || ( waits == 1 && wwEnvInt( "WW_STRAIGHTPOST_RED" ) != 1 ) ) {
+				p.straightPosted += waits;
+				p.straight++;
+				continue;
+			}
+		}
+		p.queued = true;
+		p.posted++;
+		QTimer::singleShot( 0, v, [v]() { wwPacerTick( v ); } );
+		return;
+	}
+}
+
+/* lane EMPTY240 item 1: at a paint's start the last paint is closed (its wall = start to start); with the pass timers
+ * on, the second's line: every part named, and how much of the wall the pass timers hold. */
+static void wwWallStart( GLView * v )
+{
+	WwWall & w = wwWall();
+	if ( !w.connected ) {
+		w.connected = true;
+		QObject::connect( v, &QOpenGLWindow::frameSwapped, v, []() {
+			wwWall().cur.swapAt = wwPaceNowS();
+			WwBetween::swapped();	// lane EMPTY240 R5-3
+		} );
+	}
+	const double now = wwPaceNowS();
+	if ( w.cur.start >= 0.0 && w.cur.finish >= w.cur.start ) {	// lane EMPTY240 R4-2: the paint's CPU time, to the swap's return
+		const bool swapped = w.cur.swapAt >= w.cur.finish && w.cur.swapAt <= now;
+		WwSync::cpuFrame( ( ( swapped ? w.cur.swapAt : w.cur.finish ) - w.cur.start ) * 1.0e3,
+			swapped ? ( w.cur.swapAt - w.cur.finish ) * 1.0e3 : 0.0 );
+	}
+	WwFrameWall::add( w.win, w.cur, now );
+	w.cur = WwFrameWall::Marks();
+	w.cur.start = now;
+	if ( w.win.frames > 0 && now - w.win.t0 >= 1.0 ) {
+		if ( PassTime::on() && w.win.wall > 0.0 ) {
+			const double n = double( w.win.frames ), ms = 1e3 / n;
+			QByteArray line = QByteArray( "frame wall: " ) + QByteArray::number( w.win.wall * ms, 'f', 2 ) + " ms a frame ("
+				+ QByteArray::number( n / w.win.wall, 'f', 1 ) + " fps, " + QByteArray::number( w.win.frames ) + " frames) =";
+			for ( int p = 0; p < WwFrameWall::PartCount; p++ )
+				line += QByteArray( p ? " + " : " " ) + WwFrameWall::partName( p ) + " "
+					+ QByteArray::number( w.win.part[p] * ms, 'f', 2 );
+			line += QByteArray( " | the pass timers hold " )
+				+ QByteArray::number( 100.0 * w.win.part[WwFrameWall::Passes] / w.win.wall, 'f', 0 ) + " %"
+				+ PassTime::otherInFrameTake()	// lane VKFRAME1 build 88
+				+ wwStartStepsTake( n );	// lane VKFRAME1 build 91
+			std::fprintf( stderr, "%s\n", line.constData() );
+		}
+		w.win = WwFrameWall::Window();
+		wwStartSteps() = WwStartSteps();
+	}
+}
+
+/* lane EMPTY240 R2-3 (build 72: a GPU reset, TDR, at the first goto; the cascade rebuilds of the jump ran 105-548 ms
+ * while the uncapped pacer queued 64-160 ms cell frames): two jobs per frame, always on.
+ * 1. The frames-in-flight cap: each paint's end sets a fence, the next paint but one waits on it (1 s at most), so the
+ *    driver never holds more than WwFramePacer::framesInFlight frames of GL work. Red WW_FRAMEQUEUE_RED=1: no cap.
+ * 2. Each paint's GPU time (GL_TIMESTAMP at its start and end, read only once available: no stall). A camera jump
+ *    opens a 240-frame window; when it closes, `frame gpu longest:` names the longest frame (a frame's GPU time bounds
+ *    every GL job in it; the Vulkan steps have their own gpu ms on the rtddgi lines). Any frame over 250 ms says so. */
+namespace
+{
+struct WwGpuFrames
+{
+	static constexpr int kSlots = 8;
+	bool made = false, ok = false;
+	GLuint q[kSlots][2] = {};
+	quint64 frameOf[kSlots] = {};
+	bool pending[kSlots] = {};
+	bool begun = false;
+	int slot = 0;
+	GLsync fence[4] = {};
+	int capSaid = -1;
+	int waits = 0, timeouts = 0;
+	double waitLongestMs = 0.0, jumpU = 0.0;
+	WwFramePacer::GpuLongest win;
+	Vector3 lastPos;
+	bool havePos = false;
+	// LATE ITEM 5: the `hardware use:` window (5 s)
+	QElapsedTimer hwWin, paintT;
+	double hwGpuMs = 0.0, hwPaintMs = 0.0, hwWorkers = 0.0, hwOwn = 0.0;	// hwOwn: EMPTY240 R3-1, the stream pool
+	double hwKind[WwHw::BusyKinds] = {};	// EMPTY240 R5-4: hwOwn by what the workers do
+	int hwFrames = 0;
+};
+WwGpuFrames & wwGpuFrames()
+{
+	static WwGpuFrames g;
+	return g;
+}
+using WwQueryCounterFn = void ( QOPENGLF_APIENTRYP )( GLuint, GLenum );
+using WwQueryU64Fn = void ( QOPENGLF_APIENTRYP )( GLuint, GLenum, GLuint64 * );
+WwQueryCounterFn wwGpuQc = nullptr;
+WwQueryU64Fn wwGpuQu = nullptr;
+}	// namespace
+
+static void wwGpuFrameBegin( const Vector3 & pos )
+{
+	WwGpuFrames & g = wwGpuFrames();
+	QOpenGLContext * c = QOpenGLContext::currentContext();
+	QOpenGLExtraFunctions * xf = c ? c->extraFunctions() : nullptr;
+	if ( !xf )
+		return;
+	if ( !g.made ) {
+		g.made = true;
+		wwGpuQc = reinterpret_cast<WwQueryCounterFn>( c->getProcAddress( "glQueryCounter" ) );
+		wwGpuQu = reinterpret_cast<WwQueryU64Fn>( c->getProcAddress( "glGetQueryObjectui64v" ) );
+		g.ok = wwGpuQc && wwGpuQu;
+		if ( g.ok )
+			xf->glGenQueries( 2 * WwGpuFrames::kSlots, &g.q[0][0] );
+	}
+	const quint64 frame = wwPaintCounter;
+	// 1. the cap (re-read each paint: a live set takes the next frame)
+	const int cap = WwFramePacer::framesInFlight( wwEnvInt( "WW_FRAMEQUEUE_RED" ) );
+	if ( cap != g.capSaid ) {
+		g.capSaid = cap;
+		std::fprintf( stderr, "frame queue: %s\n", cap > 0
+			? QByteArray( "at most " ).append( QByteArray::number( cap ) )
+				.append( " frames queued ahead of the GPU (each paint waits on the fence of the paint 2 back, 1 s at most; red WW_FRAMEQUEUE_RED=1: no cap)" ).constData()
+			: "no cap (WW_FRAMEQUEUE_RED=1: the driver queues as many frames as it likes, build 72)" );
+	}
+	for ( int i = 0; i < 4; i++ ) {
+		const bool mine = cap > 0 && i == int( frame % quint64( cap ) );
+		if ( !g.fence[i] || ( cap > 0 && !mine ) )
+			continue;
+		if ( mine ) {
+			QElapsedTimer t;
+			t.start();
+			const GLenum r = xf->glClientWaitSync( g.fence[i], 0x00000001 /* GL_SYNC_FLUSH_COMMANDS_BIT */, 1000000000ull );
+			const double ms = double( t.nsecsElapsed() ) * 1.0e-6;
+			WwSync::add( WwSync::CapFence, ms * 1.0e6 );	// lane EMPTY240 R4-2
+			if ( r == 0x911B /* GL_TIMEOUT_EXPIRED */ ) {
+				g.timeouts++;
+				std::fprintf( stderr, "frame queue: the paint 2 back still runs on the GPU after 1 s (frame %llu): going on\n",
+					(unsigned long long)frame );
+			}
+			if ( ms > 0.05 ) {
+				g.waits++;
+				g.waitLongestMs = std::max( g.waitLongestMs, ms );
+			}
+		}
+		xf->glDeleteSync( g.fence[i] );
+		g.fence[i] = nullptr;
+	}
+	// 2. a jump opens the window
+	if ( g.havePos ) {
+		const double dx = double( pos[0] ) - double( g.lastPos[0] );
+		const double dy = double( pos[1] ) - double( g.lastPos[1] );
+		const double dz = double( pos[2] ) - double( g.lastPos[2] );
+		if ( WwFramePacer::GpuLongest::jumped( dx, dy, dz, 4096.0 ) ) {
+			if ( g.win.left <= 0 ) {
+				g.waits = 0;
+				g.timeouts = 0;
+				g.waitLongestMs = 0.0;
+			}
+			g.jumpU = std::sqrt( dx * dx + dy * dy + dz * dz );
+			g.win.open( (long long)frame, 240 );
+		}
+	}
+	g.lastPos = pos;
+	g.havePos = true;
+	g.paintT.start();
+	PassTime::gpuWatchFrame( true, frame );	// lane EMPTY240 R3-0: the GPU zones of this paint
+	if ( !g.ok )
+		return;
+	constexpr GLenum kTimestamp = 0x8E28;	// GL_TIMESTAMP
+	constexpr GLenum kAvailable = 0x8867;	// GL_QUERY_RESULT_AVAILABLE
+	for ( int s = 0; s < WwGpuFrames::kSlots; s++ ) {
+		if ( !g.pending[s] )
+			continue;
+		GLuint avail = 0;
+		xf->glGetQueryObjectuiv( g.q[s][1], kAvailable, &avail );
+		if ( !avail )
+			continue;
+		g.pending[s] = false;
+		GLuint64 t0 = 0, t1 = 0;
+		wwGpuQu( g.q[s][0], GL_QUERY_RESULT, &t0 );
+		wwGpuQu( g.q[s][1], GL_QUERY_RESULT, &t1 );
+		if ( t1 <= t0 )
+			continue;
+		const double ms = double( t1 - t0 ) * 1.0e-6;
+		g.hwGpuMs += ms;
+		WwSync::gpuFrame( ms );	// lane EMPTY240 R4-2
+		if ( ms > 250.0 )
+			std::fprintf( stderr, "frame gpu long: frame %llu took %.1f ms on the GPU (a reset comes at 2000)\n",
+				(unsigned long long)g.frameOf[s], ms );
+		if ( g.win.add( (long long)g.frameOf[s], ms ) )
+			std::fprintf( stderr, "frame gpu longest: %.1f ms at frame %lld, of the %d frames after a camera jump of %.0f u "
+				"(from frame %lld, mean %.1f ms a frame); frames queued ahead of the GPU: %s, the cap waited %d times, "
+				"longest %.1f ms, %d waits over 1 s (a frame's GPU time bounds every GL job in it; the Vulkan steps: the rtddgi lines)\n",
+				g.win.longestMs, g.win.longestAt, g.win.frames, g.jumpU, g.win.from, g.win.sumMs / double( std::max( 1, g.win.frames ) ),
+				cap > 0 ? "capped at 2" : "no cap (WW_FRAMEQUEUE_RED=1)", g.waits, g.waitLongestMs, g.timeouts );
+	}
+	// this paint's start, in a free slot (one still in flight after 8 paints: this paint goes untimed)
+	g.begun = false;
+	g.slot = int( frame % quint64( WwGpuFrames::kSlots ) );
+	if ( !g.pending[g.slot] ) {
+		wwGpuQc( g.q[g.slot][0], kTimestamp );
+		g.begun = true;
+	}
+}
+
+static void wwGpuFrameFinish()
+{
+	WwGpuFrames & g = wwGpuFrames();
+	QOpenGLContext * c = QOpenGLContext::currentContext();
+	QOpenGLExtraFunctions * xf = c ? c->extraFunctions() : nullptr;
+	if ( !xf )
+		return;
+	PassTime::gpuWatchFrame( false, wwPaintCounter );
+	if ( g.ok && g.begun ) {
+		wwGpuQc( g.q[g.slot][1], 0x8E28 );
+		g.pending[g.slot] = true;
+		g.frameOf[g.slot] = wwPaintCounter;
+		g.begun = false;
+	}
+	if ( g.capSaid > 0 ) {
+		const int i = int( wwPaintCounter % quint64( g.capSaid ) );
+		if ( g.fence[i] )
+			xf->glDeleteSync( g.fence[i] );
+		g.fence[i] = xf->glFenceSync( 0x9117 /* GL_SYNC_GPU_COMMANDS_COMPLETE */, 0 );
+	}
+	/* LATE ITEM 5 (bungo 11-12: "fully utilized, just as if a game would"): one line each 5 s of painting. GPU busy = the
+	 * GL frames' GPU time over the wall (the Vulkan traces overlap on the same queue and are not in it); draw thread =
+	 * the paints' CPU time over the wall; workers = Qt's pool, mean active / size; the cache = the GPU geometry cache. */
+	if ( g.paintT.isValid() ) {
+		g.hwPaintMs += double( g.paintT.nsecsElapsed() ) * 1.0e-6;
+		g.paintT.invalidate();
+	}
+	const QThreadPool * pool = QThreadPool::globalInstance();
+	g.hwWorkers += double( pool->activeThreadCount() );
+	g.hwOwn += double( WwHw::busyCount().load( std::memory_order_relaxed ) );
+	for ( int k = 0; k < WwHw::BusyKinds; k++ )
+		g.hwKind[k] += double( WwHw::busyKind( k ).load( std::memory_order_relaxed ) );
+	g.hwFrames++;
+	if ( !g.hwWin.isValid() ) {
+		g.hwWin.start();
+		g.hwGpuMs = g.hwPaintMs = g.hwWorkers = g.hwOwn = 0.0;
+		std::fill( g.hwKind, g.hwKind + WwHw::BusyKinds, 0.0 );
+		g.hwFrames = 0;
+		return;
+	}
+	const double wallMs = double( g.hwWin.nsecsElapsed() ) * 1.0e-6;
+	if ( wallMs < 5000.0 )
+		return;
+	const PassTime::CacheCounts & cc = PassTime::cacheCounts();
+	// EMPTY240 round 3: the stream pool (R3-1), the RAM cache (R3-3) and the archive opens (R3-2)
+	const WwHw::Cache rc = WwHw::cache();
+	std::uint64_t arOpens = 0, arShared = 0;
+	std::size_t arLive = 0;
+	WwHw::archiveOpens( &arOpens, &arShared, &arLive );
+	const double fr = double( std::max( 1, g.hwFrames ) );
+	std::fprintf( stderr, "hardware use: GPU busy %.0f %% (GL frames' GPU time over the wall), draw thread busy %.0f %%, "
+		"workers busy %.1f / %d (stream pool: the one cell builder %.2f, model parse %.2f, texture read-ahead %.2f, archive "
+		"trim %.2f, other %.2f) + %.1f / %d (Qt's pool), %.1f fps; RAM cache %lld / %lld MB (%lld files, %lld hits, %lld misses, %lld evicted%s), archives opened %llu "
+		"(%llu shared a live mapping, %zu mapped now), GPU geometry cache %lld / %lld MB; "
+		"%s\n",
+		std::min( 100.0, 100.0 * g.hwGpuMs / wallMs ), std::min( 100.0, 100.0 * g.hwPaintMs / wallMs ),
+		g.hwOwn / fr, WwHw::poolSlots(), g.hwKind[WwHw::BusyBuilder] / fr, g.hwKind[WwHw::BusyModels] / fr,
+		g.hwKind[WwHw::BusyTextures] / fr, g.hwKind[WwHw::BusyTrim] / fr, g.hwKind[WwHw::BusyOther] / fr, g.hwWorkers / fr, pool->maxThreadCount(), 1000.0 * double( g.hwFrames ) / wallMs,
+		(long long)( rc.bytes >> 20 ), (long long)( rc.budget >> 20 ), (long long) rc.files, (long long) rc.hits,
+		(long long) rc.misses, (long long) rc.evicted, rc.on ? "" : "; off: WW_RAMCACHE_RED=1",
+		(unsigned long long) arOpens, (unsigned long long) arShared, arLive,
+		(long long)( cc.usedBytes >> 20 ), (long long)( cc.maxBytes >> 20 ),
+		qPrintable( rtddgiAsyncUse( g.hwFrames ) + wwVkFrameUse( g.hwFrames, g.hwGpuMs, wallMs ) ) );
+	/* EMPTY240 R3-4: the draws' program routes in the same window. A cell-lit draw that asks the bindless twin sets only
+	 * its row (the twin is the per-draw program cache); one that does not runs the whole setupProgram walk. */
+	std::int64_t rt[WwHw::RouteCount];
+	WwHw::routeTake( rt );
+	std::fprintf( stderr, "near draws: %.0f program setups a frame: %.0f cell-lit, %.0f asked the bindless twin, %.0f drawn "
+		"bindless, %.0f PBR material, %.0f water; bindless row %s, multi-draw %s; depth prepass: %s\n",
+		double( rt[WwHw::RouteCalls] ) / fr, double( rt[WwHw::RouteCell] ) / fr, double( rt[WwHw::RouteAsked] ) / fr,
+		double( rt[WwHw::RouteBindless] ) / fr, double( rt[WwHw::RoutePbrm] ) / fr, double( rt[WwHw::RouteWater] ) / fr,
+		WwBl::on() ? "on" : "off (the look is off or the context lacks the extensions)", WwBl::mdiOn() ? "on" : "off",
+		wwCellAoPrepassEcho().toUtf8().constData() );
+	std::fprintf( stderr, "near draws not asking the twin, a frame: %.0f no lighting shader, %.0f bindless off, %.0f far ring "
+		"(WW_CELL_FARINST_BL off), %.0f not FO4, %.0f selecting, %.0f refraction, %.0f census; %.0f asked but the twin was "
+		"missing (EMPTY240 R4-3)\n",
+		double( rt[WwHw::RouteNoLsp] ) / fr, double( rt[WwHw::RouteBlOff] ) / fr, double( rt[WwHw::RouteFarRing] ) / fr,
+		double( rt[WwHw::RouteVersion] ) / fr, double( rt[WwHw::RouteSelecting] ) / fr,
+		double( rt[WwHw::RouteRefraction] ) / fr, double( rt[WwHw::RouteCensus] ) / fr,
+		double( rt[WwHw::RouteTwinMissing] ) / fr );
+	WwSync::line( wallMs, g.hwFrames );	// lane EMPTY240 R4-2: CPU, GPU and the waits beside the wall
+	g.hwWin.start();
+	g.hwGpuMs = g.hwPaintMs = g.hwWorkers = g.hwOwn = 0.0;
+	std::fill( g.hwKind, g.hwKind + WwHw::BusyKinds, 0.0 );
+	g.hwFrames = 0;
+}
+
 void GLView::paintGL()
 {
+	wwWallStart( this );	// lane EMPTY240 item 1: the last paint's wall, start to start
+	WwBetween::paintStart();	// lane EMPTY240 R5-3: the `between paints:` line
+	struct WwWallEnd
+	{
+		~WwWallEnd() { wwWall().cur.finish = wwPaceNowS(); }
+	} wwWallEnd;
+	/* lane EMPTY240 ITEM 0: the next frame is queued when this one is done (build 71 waited for the 6 ms coarse timer:
+	 * ~64 frames a second). R2-1: a cell view always (bungo's flight has no WW_FLY, so its clock read "stopped" and
+	 * build 72 fell back to the timer); an editing view while something moves. Red WW_FRAMETIMER_RED=2 = build 72. */
+	const bool wwPacerCell = scene && scene->nifModel && wwCellLightsFor( scene->nifModel );
+	const bool wwPacerWants = WwFramePacer::wantsFrames( wwPacerCell, wwWorldClockLive(),
+		( animState & AnimEnabled ) && ( animState & AnimPlay ) && scene && scene->timeMin() != scene->timeMax(),
+		kbdState != 0, wwEnvInt( "WW_FRAMETIMER_RED" ) );
+	wwPacerFrameStart( this, wwPacerWants, wwPacerCell );
+	struct WwPacerEnd
+	{
+		GLView * v;
+		bool wants;
+		~WwPacerEnd() { wwPacerAfterPaint( v, wants ); }
+	} wwPacerEnd{ this, wwPacerWants };
 	CellSpeed::Acc speedAcc( "frames painted (paintGL, with first-use uploads)" );
 	CellTexAhead::Frame texAheadFrame;   // a frame that loads no texture ends the read-ahead
 	wwPaintCounter++;
@@ -3361,7 +4158,17 @@ void GLView::paintGL()
 	} wwFirstFrame{ wwPaintCounter == 1 };
 	QElapsedTimer wwStream1Clock;	// lane STREAM1: the whole paint, for the hitch figures
 	wwStream1Clock.start();
-	wwCellStreamEvict();
+	wwFpsGpuMark( 0 );	// lane MODULES1 item 7: F3's GPU ms
+	wwGpuFrameBegin( Pos );	// lane EMPTY240 R2-3: the frames-in-flight cap and the `frame gpu longest:` window
+	struct WwGpuFrameDone
+	{
+		~WwGpuFrameDone() { wwGpuFrameFinish(); }
+	} wwGpuFrameDone;
+	WwUp::Paint wwUpPaint( &PassTime::cacheCounts().texBytes );	// lane EMPTY240 R4-1: this paint's upload budget
+	{
+		PassTime::Zone wwZone( "stream evict" );
+		wwCellStreamEvict();
+	}
 	// the streaming read-ahead's ready files go up before anything draws, a few MB a
 	// paint (WW_TEX_PUMP_MB, default 24), so a cell that comes into view finds them loaded. Red: texpump.
 	static const bool wwPumpRed = PassTime::stream1Red( "texpump" );
@@ -3371,6 +4178,7 @@ void GLView::paintGL()
 			return qint64( v > 0 ? v : 24 );
 		}() );
 		textures->setPumpOwnsDrain( PassTime::stream1Loaded() );
+		PassTime::Zone wwZone( "texture pump" );
 		textures->wwPump( model, wwPumpMb << 20 );
 	}
 	PassTime::stream1PaintBegin();
@@ -3394,15 +4202,28 @@ void GLView::paintGL()
 		QElapsedTimer & clock;
 		~WwPaintTime() { wwPaintNanos += clock.nsecsElapsed(); }
 	} wwPaintTime{ wwPaintClock };
+	wwEnvChanged();	// MODULES1 item 8: the env accessors' cache lives one frame at most (a backstop for any writer)
 	// the frame's per-pass timers (one bool test while the Frame Timers row is off)
-	PassTime::frameBegin();
-	if ( scene && scene->textures )
-		scene->textures->wwParamFrame();	// the texture parameter shadow trusts nothing from an older frame
+	wwWall().cur.begin = wwPaceNowS();
+	{
+		WwWallPart wallPart( wwWall().cur.timers );	// lane EMPTY240 R10-4: named out of other-in-frame
+		PassTime::frameBegin();
+	}
+	wwStartStepBegin();	// lane VKFRAME1 build 91
+	if ( scene && scene->textures ) {
+		WwSlowStep slowStep( "texture parameter frame" );
+		scene->textures->wwParamFrame();
+	}	// the texture parameter shadow trusts nothing from an older frame
+	wwStartStepEnd( 0 );
 	struct WwPassFrame
 	{
 		~WwPassFrame()
 		{
+			const double t0 = wwPaceNowS();
 			PassTime::frameEnd();
+			wwWall().cur.end = wwPaceNowS();
+			wwWall().cur.timers += wwWall().cur.end - t0;	// lane EMPTY240 R10-4
+			wwWall().cur.passes = PassTime::lastFrameCpuSumMs() * 1e-3;
 			extern bool wwStderrFrameFlush;	// the frame's log lines in one write
 			if ( wwStderrFrameFlush )
 				std::fflush( stderr );
@@ -3511,8 +4332,11 @@ void GLView::paintGL()
 		// avoid potential infinite recursion in case a message box is opened while initializing the scene
 		isDisabled = true;
 		textures->setNifFolder( model->getFolder() );
-		scene->make( model );
-		scene->transform( Transform(), scene->timeMin() );
+		{
+			WwSlowStep slowStep( "scene make (a document compile)" );
+			scene->make( model );
+			scene->transform( Transform(), scene->timeMin() );
+		}
 
 		axis = (scene->bounds().radius <= 0) ? 1024.0 * scale() : scene->bounds().radius;
 
@@ -3562,18 +4386,41 @@ void GLView::paintGL()
 	// Scene::transform only skips when scene content is untouched).
 	if ( gizmoMode != 0 || elemTransform || riggingWeightPaintMode || vertexPaintMode || segmentPaintMode )
 		scene->transformDirty = true;
+	wwStartStepEnd( 1 );
 	// Before anything transforms: pose the marked skeleton and hand its pose to
 	// every scene that snaps to it. No-op, and costs one branch, when unmarked.
-	applyWorkspaceSkeleton( viewTrans );
-	wwDoorLiveTick( scene, this );	// the live door's pose (a no-op unless WW_CELL_DOOR_ANIM)
-	wwCellWorldAnimFrame( scene, time );	// a cell's world clock (a no-op unless World animation)
-	scene->transform( viewTrans, time );
+	{
+		WwWallPart wallPart( wwWall().cur.transform );	// lane EMPTY240 R10-4: named out of other-in-frame
+		{
+			WwSlowStep slowStep( "workspace skeleton and live door" );
+			applyWorkspaceSkeleton( viewTrans );
+			wwDoorLiveTick( scene, this );	// the live door's pose (a no-op unless WW_CELL_DOOR_ANIM)
+		}
+		{
+			WwSlowStep slowStep( "cell world animation" );
+			wwCellWorldAnimFrame( scene, time );	// a cell's world clock (a no-op unless World animation)
+		}
+		{
+			WwSlowStep slowStep( "endless sea follow" );
+			wwEndlessSeaFollow( scene, viewTrans );	// lane FARSEA1: the endless sea to the camera's step (a no-op without one)
+		}
+		WwSlowStep slowStep( "scene transform" );
+		scene->transform( viewTrans, time );
+	}
+	wwStartStepBegin();	// the transform is the wall's own named part
 	wwCellCamDump( scene );	// the eye, with or without the Cell lights row (a no-op when unset)
+	wwCamStepMark( 0 );	// lane EMPTY240 R12-1: the step by call
 
 	// Setup projection mode
-	wwGameTaaArmJitter( true );
+	const bool shView = wwShadowViewPass( scene );	// MODULES1 R6-8: a shadow debug view: no jitter, no post chain
+	wwCamStepMark( 1 );
+	const bool dvView = wwDebugViewId() != 0;	// lane DEBUGVIEW1: a debug view: the same, the far cards kept, the clear black
+	wwDebugViewFrame();
+	wwCamStepMark( 2 );
+	wwGameTaaArmJitter( !shView && !dvView );
 	glProjection();
 	wwGameTaaArmJitter( false );
+	wwCamStepMark( 3 );
 
 	cx->setViewTransform( scene->view, int( cfg.upAxis ), envMapRotation );
 	auto &	globalUniforms = *( cx->globalUniforms );
@@ -3581,7 +4428,8 @@ void GLView::paintGL()
 	globalUniforms.brightnessScale = brightnessScale;
 	globalUniforms.glowScale = ( scene->hasOption(Scene::DoGlow) ? glowScale : 0.0f );
 	if ( const WwCellLighting * cl = wwCellLightsFor( scene->nifModel ) )
-		globalUniforms.glowScale *= cl->glowScale;	// lane MUSGI1 r5: a sunlit interior's lamp scale on the emissive surfaces
+		globalUniforms.glowScale *= wwPhysSkyOn() ? wwPhysEmitScale()	// lane PHYSUNITS1: cd/m2 per emissive unit x G
+			: cl->glowScale;	// lane MUSGI1 r5: a sunlit interior's lamp scale on the emissive surfaces
 	FloatVector4	mat_amb( 0.0f );
 	FloatVector4	mat_diff( 0.0f );
 	FloatVector4	lightDir( 0.0f, 0.0f, 1.0f, 0.0f );
@@ -3651,36 +4499,73 @@ void GLView::paintGL()
 	globalUniforms.glowScaleSRGB = float( std::sqrt( globalUniforms.glowScale ) );
 	globalUniforms.doSkinning = std::int32_t( scene->hasOption(Scene::DoSkinning) );
 	globalUniforms.sceneOptions = std::int32_t( scene->options );
+	wwCamStepMark( 4 );
 	cx->setGlobalUniforms();
+	wwCamStepMark( 5 );
 
 	cx->setDefaultVertexAttribs( Scene::defaultAttrMask, Scene::defaultVertexAttrs );
+	wwCamStepMark( 6 );
 
 	if ( scene->hasOption(Scene::DoMultisampling) )
 		glEnable( GL_MULTISAMPLE );
 
+	wwStartStepEnd( 2 );
 	/* Lookdev: the three sun-shadow cascade maps, rendered before
 	 * anything else this frame so the ground and the PBR shapes can receive.
 	 * A no-op with the Shadows row off (the default): no map, no program swap. */
-	wwCellCullFrame();	// the last frame's culling counts, printed when they change
-	wwCellCullCameraView( scene->view );	// previs culls only through this eye
-	wwCellUnderwaterFrame( scene );	// the eye under water, decided before anything draws
+	{
+		WwSlowStep slowStep( "cell cull frame and underwater test" );
+		wwCellCullFrame();	// the last frame's culling counts, printed when they change
+		wwCellCullCameraView( scene->view );	// previs culls only through this eye
+		wwCellUnderwaterFrame( scene );	// the eye under water, decided before anything draws
+		wwStartStepEnd( 3 );
+	}
 	if ( wwLookdevActive() ) {
 		PassTime::Scope pt( PassTime::SunShadows );
 		wwSunShadowPass( scene );
 	}
-	wwCellFlickerFrame( scene );	// this frame's flicker, before any pass reads the lights
-	wwCellXemiLightsFrame( scene );	// placed lights recoloured by their XEMI source, before the lights are read
+	{
+		WwSlowStep slowStep( "cell light flicker" );
+		wwStartStepBegin();	// after the lookdev sun cascades (a pass)
+		wwCellFlickerFrame( scene );	// this frame's flicker, before any pass reads the lights
+	}
+	{
+		WwSlowStep slowStep( "cell XEMI lights" );
+		wwCellXemiLightsFrame( scene );	// placed lights recoloured by their XEMI source, before the lights are read
+	}
+	wwStartStepEnd( 4 );
 	// the cell lights' depth cubes (a no-op unless the document draws cell-lit)
 	PassTime::begin( PassTime::CellShadows );
 	wwCellShadowPass( scene );
 	PassTime::end( PassTime::CellShadows );
-	probeSkyTick( scene, scene->nifModel, this );	// an exterior's bounce follows the weather
-	rtddgiCellFrame( scene );	// the ray-traced GI volume builds, updates and uploads (off: nothing)
+	wwMainStep( "probe sky tick (the bounce follows the hour)" );	// lane PERFLOAD1 P5
+	{
+		WwWallPart wallPart( wwWall().cur.probe );
+		PassTime::Zone wwZone( "probe sky" );
+		probeSkyTick( scene, scene->nifModel, this );	// an exterior's bounce follows the weather
+	}
+	wwMainStep( "rtddgi cell frame (GI relight, builds, uploads)" );
+	{
+		WwWallPart wallPart( wwWall().cur.gi );
+		PassTime::Zone wwZone( "gi frame" );
+		rtddgiCellFrame( scene );	// the ray-traced GI volume builds, updates and uploads (off: nothing)
+	}
 
 	PassTime::begin( PassTime::Background );	// the sky (or background) and the ground plane
 	if ( perspectiveMode ) {
 		// Lookdev: the lookdev cube background replaces the (FO76+) skybox
-		bool	colorBufCleared = wwLookdevActive() ? wwLookdevDrawBackground( scene ) : scene->renderer->drawSkyBox( scene );
+		bool	colorBufCleared = false;
+		if ( shView || dvView ) {	// MODULES1 R6-8: the sky is a flat neutral under a shadow debug view (black under a debug view)
+			GLfloat pc[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+			glGetFloatv( GL_COLOR_CLEAR_VALUE, pc );
+			const float g = shView ? 0.5f : 0.0f;
+			glClearColor( g, g, g, 1.0f );
+			glClear( GL_COLOR_BUFFER_BIT );
+			glClearColor( pc[0], pc[1], pc[2], pc[3] );
+			colorBufCleared = true;
+		} else {
+			colorBufCleared = wwLookdevActive() ? wwLookdevDrawBackground( scene ) : scene->renderer->drawSkyBox( scene );
+		}
 		if ( clearNeeded ) {
 			glClear( colorBufCleared ? GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT
 										: GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT );
@@ -3799,8 +4684,16 @@ void GLView::paintGL()
 	PassTime::begin( PassTime::Obscurance );	// one bracket per pass
 	wwCellAoPass( scene, cellPasses );
 	PassTime::end( PassTime::Obscurance );
-	rtddgiRestirPass( scene );	// lane RESTIRDI1: the RT quality preset's ReSTIR DI on that pass's g-buffer (Low: nothing)
-	rtddgiRestirGiPass( scene );	// RTEMIS1 part 2: ReSTIR GI on the same g-buffer (below High: nothing)
+	{
+		WwWallPart wallPart( wwWall().cur.restir );
+		PassTime::Zone wwZone( "restir" );
+		rtddgiRestirPass( scene );	// lane RESTIRDI1: the RT quality preset's ReSTIR DI on that pass's g-buffer (Low: nothing)
+	}
+	{
+		WwWallPart wallPart( wwWall().cur.restir );
+		PassTime::Zone wwZone( "restirgi" );
+		rtddgiRestirGiPass( scene );	// RTEMIS1 part 2: ReSTIR GI on the same g-buffer (the ReSTIR GI row; off: nothing)
+	}
 	PassTime::begin( PassTime::Water );	// lane TIMING1: the water zone (its draws in the sorted pass join it)
 	wwCellOceanPass( scene, cellPasses );	// lane WATERLOOK1: the wind's waves, before any pass that draws water
 	PassTime::end( PassTime::Water );
@@ -3854,12 +4747,13 @@ void GLView::paintGL()
 				wwLookdevDrawGroundCellFrame( scene );	// the booth floor (a harness pin; no GL call unset)
 			}
 			PassTime::end( PassTime::Background );
+			wwCellFarLodArmEarly( hdr );	// MODULES1 part 27: the lit far cards draw inside, before the sorted pass
 			scene->draw();	// opaque / sorted / effects timed inside (Scene::drawShapes)
 			wwCellAoPrepassEnd( scene );	// MODULES1: depth func back to LEQUAL, the pre-pass census line
 			wwVolAirSkyDraw( scene, true );	// the sky's air probes (gates only; no GL call otherwise)
 			if ( hdr )
 				rtddgiCellViewDrawLinear( scene, viewTrans );	// the Ray-traced GI probes inside the linear frame (fog, exposure)
-			if ( !hdr )
+			if ( !hdr && !shView )
 				wwCloudVolLookdevFront( scene );	// clouds in front of a single NIF (its opaque depth)
 			if ( hdr ) {
 				PassTime::begin( PassTime::FarCards );
@@ -3867,7 +4761,8 @@ void GLView::paintGL()
 				wwCellFarDotsDraw( scene );	// the far bulbs, into the linear frame
 				PassTime::subEnd( PassTime::FarDots );
 				PassTime::subBegin( PassTime::FarCardsLit );
-				wwCellFarLodCards( scene, true, true );	// the far tree cards, lit, into the linear frame
+				if ( !wwCellFarLodDrewEarly() )	// MODULES1 part 27: here only with the red WW_CELL_FARLOD_LATE=1
+					wwCellFarLodCards( scene, true, true );	// the far tree cards, lit, into the linear frame
 				PassTime::subEnd( PassTime::FarCardsLit );
 				PassTime::end( PassTime::FarCards );
 				PassTime::begin( PassTime::Precip );
@@ -3894,7 +4789,8 @@ void GLView::paintGL()
 			// the cards when the frame is not HDR (lit and toned by their own program), then the
 			// census a gate reads
 			PassTime::begin( PassTime::FarCards );
-			wwCellFarLodCards( scene, false, hdr );
+			if ( !shView )	// R6-8
+				wwCellFarLodCards( scene, false, hdr );
 			wwCellFarLodSkyCensus( scene );
 			PassTime::end( PassTime::FarCards );
 			// the game's temporal AA on the finished (tone-mapped) frame; inert when the row is off
@@ -3907,11 +4803,13 @@ void GLView::paintGL()
 					if ( !wwGameTaaInputsRan() )	// the before-tone-map resolve ran it already
 						wwTaaInputsPass( scene );	// inert unless asked for (gl/taainputs.h)
 				}
-				wwCellPostApply( scene );
+				if ( !shView && !dvView )	// R6-8: no depth of field or motion blur over a shadow debug view
+					wwCellPostApply( scene );
 				PassTime::subBegin( PassTime::PostFlare );	// the post zone's parts
-				wwCellLensFlareDraw( scene );	// the lights' flares, a screen pass; inert when off
+				if ( !shView && !dvView )
+					wwCellLensFlareDraw( scene );	// the lights' flares, a screen pass; inert when off
 				PassTime::subEnd( PassTime::PostFlare );
-				{
+				if ( !shView && !dvView ) {
 					PassTime::Swap taaT( PassTime::Post, PassTime::Taa );	// blits + vectors + resolve + copy-back
 					wwGameTaaResolve( scene );
 				}
@@ -3946,7 +4844,11 @@ void GLView::paintGL()
 	}
 
 	PassTime::begin( PassTime::Overlays );	// everything after the frame (closed by frameEnd)
-	paintEditorOverlays( viewTrans );	// features/overlays: the editor overlays after the frame
+	static QElapsedTimer wwOvlClock;	// lane PERFLOAD1 (P5): the overlays zone's cost split, printed for slow frames only
+	wwOvlClock.start();
+	paintEditorOverlays( viewTrans );
+	const qint64 wwOvlEditorNs = wwOvlClock.nsecsElapsed();
+	//	// features/overlays: the editor overlays after the frame
 
 	// The old GL corner axes indicator is replaced by the Blender-style
 	// navigation gizmo drawn with QPainter at the end of paintGL().
@@ -3972,10 +4874,32 @@ void GLView::paintGL()
 	 * SHOTFIX1: not in a harness grab either (the log still says it): it was OPENREDS g10's 468 px "blob" */
 	const QString modPickNote = ( model && !passTimeClean ) ? cellModPickViewNote( model ) : QString();
 	const QStringList passTimeLines = ( passTimeClean || scene->selecting ) ? QStringList() : PassTime::overlay();
+	// F3: the framerate overlay, this paint's CPU time so far (the whole frame but the 2D overlays)
+	QString fpsLine;
+	if ( !passTimeClean && !scene->selecting && wwFps().on ) {
+		WwFpsMeter & fm = wwFps();
+		if ( !fm.win.isValid() )
+			fm.win.start();
+		fm.frames++;
+		fm.cpuMs += double( wwStream1Clock.nsecsElapsed() ) * 1.0e-6;
+		wwFpsGpuMark( 1 );
+		const qint64 ms = fm.win.elapsed();
+		if ( ms >= 500 ) {
+			fm.line = QStringLiteral( "%1 fps   %2 ms CPU   %3 ms GPU" ).arg( double( fm.frames ) * 1000.0 / double( ms ), 0, 'f', 1 )
+				.arg( fm.cpuMs / double( fm.frames ), 0, 'f', 2 )
+				.arg( fm.gpuN > 0 ? QString::number( fm.gpuMs / double( fm.gpuN ), 'f', 2 ) : QStringLiteral( "--" ) );
+			fm.frames = 0;
+			fm.cpuMs = 0.0;
+			fm.gpuMs = 0.0;
+			fm.gpuN = 0;
+			fm.win.restart();
+		}
+		fpsLine = fm.line.isEmpty() ? QStringLiteral( "-- fps" ) : fm.line;
+	}
 	// the PRTP Debug View's room and threshold labels (empty when the view is off)
 	const std::vector<WwCellVolumeLabel> volLabels = scene->selecting ? std::vector<WwCellVolumeLabel>()
 		: wwCellVolumeViewLabels( scene->nifModel );
-	if ( !cleanView && ( scene->hasOption( Scene::ShowAxes ) || ( model && showCursor ) || freeCamera || drawSnapMarker || boxSelectDrag || circleSelecting || knifeActive || loopCutActive || riggingWeightPaintMode || vertexPaintMode || segmentPaintMode || !modPickNote.isEmpty() || !passTimeLines.isEmpty() || !volLabels.empty() ) ) {
+	if ( !cleanView && ( scene->hasOption( Scene::ShowAxes ) || ( model && showCursor ) || freeCamera || drawSnapMarker || boxSelectDrag || circleSelecting || knifeActive || loopCutActive || riggingWeightPaintMode || vertexPaintMode || segmentPaintMode || !modPickNote.isEmpty() || !passTimeLines.isEmpty() || !volLabels.empty() || !fpsLine.isEmpty() ) ) {
 		// The scene passes (esp.
 		if ( QOpenGLContext * glCtx = QOpenGLContext::currentContext() ) {
 			QOpenGLFunctions * f = glCtx->functions();
@@ -4045,6 +4969,18 @@ void GLView::paintGL()
 			}
 			f.setBold( false );
 			f.setPointSizeF( base );
+			painter.setFont( f );
+		}
+		if ( !fpsLine.isEmpty() ) {	// F3: top left
+			QFont f = painter.font();
+			f.setPointSizeF( 9.5 );
+			f.setBold( true );
+			painter.setFont( f );
+			painter.setPen( QColor( 0, 0, 0, 210 ) );
+			painter.drawText( QPointF( 11, 21 ), fpsLine );
+			painter.setPen( QColor( 235, 240, 200 ) );
+			painter.drawText( QPointF( 10, 20 ), fpsLine );
+			f.setBold( false );
 			painter.setFont( f );
 		}
 		if ( !passTimeLines.isEmpty() ) {	// top right, one pass a line (CPU / GPU ms)
@@ -4187,7 +5123,7 @@ void GLView::paintGL()
 		}
 		if ( model && showCursor )
 			drawCursorOverlay( painter );
-		if ( scene->hasOption( Scene::ShowAxes ) )
+		if ( scene->hasOption( Scene::ShowAxes ) && !navGizmoOff )	// AIRPERF1 round 3: none in full screen
 			drawNavGizmo( painter );
 		if ( drawSnapMarker ) {
 			// Blender snap marker: orange square outline + white center dot
@@ -4449,7 +5385,23 @@ void GLView::paintGL()
 	else if ( wwCellWaterWantsRepaint() )
 		QTimer::singleShot( 16, this, [this]() { update(); } );
 
+	const qint64 wwOvlBodyNs = wwOvlClock.nsecsElapsed();
 	emit paintUpdate();
+	const qint64 wwOvlAllNs = wwOvlClock.nsecsElapsed();
+	if ( wwOvlAllNs >= 8000000 ) {	// 8 ms; at most one line a second
+		static double wwOvlSaid = -10.0;
+		static int wwOvlSlow = 0;
+		wwOvlSlow++;
+		const double now = PassTime::processSeconds();
+		if ( now - wwOvlSaid >= 1.0 ) {
+			std::fprintf( stderr, "overlays slow: t=%.1f %.1f ms = editor overlays %.1f (place mode %s) + text, meters and readbacks %.1f"
+				" + inspect refresh %.1f; slow frames since the last line %d\n", now, wwOvlAllNs / 1e6, wwOvlEditorNs / 1e6,
+				cellEditSession().placing ? "on" : "off", ( wwOvlBodyNs - wwOvlEditorNs ) / 1e6,
+				( wwOvlAllNs - wwOvlBodyNs ) / 1e6, wwOvlSlow );
+			wwOvlSaid = now;
+			wwOvlSlow = 0;
+		}
+	}
 }
 
 void GLView::update()
@@ -4487,6 +5439,7 @@ bool GLView::wwPaintNow()
 
 void GLView::resizeGL( int width, int height )
 {
+	wwResizeGen++;	// lane EMPTY240 R12-1
 	pixelWidth = width;
 	pixelHeight = height;
 
@@ -5475,7 +6428,11 @@ void GLView::wwCellStreamEvict()
 		static std::atomic<bool> trimBusy { false };	// on a worker: the walk over the views must not hold a paint
 		if ( !trimRed && model && ( !trimClock.isValid() || trimClock.elapsed() >= 2000 ) && !trimBusy.exchange( true ) ) {
 			trimClock.start();
-			std::thread( [] { FileBuffer::trimMappedViews(); trimBusy = false; } ).detach();
+			std::thread( [] {
+				WwHw::Busy wwBusy( WwHw::BusyTrim );	// lane EMPTY240 R3-1, R5-4: by kind
+				FileBuffer::trimMappedViews();
+				trimBusy = false;
+			} ).detach();
 		}
 	}
 	if ( !textures || !model || !cellStreamOn( model ) )
@@ -5484,7 +6441,11 @@ void GLView::wwCellStreamEvict()
 	static std::uint32_t nextEvict = 0;
 	static std::uint32_t paintSec[4] = { 0, 0, 0, 0 };
 	static std::uint32_t paints = 0;
-	static const std::uint32_t keep = std::uint32_t( cellStreamTexKeepSec() );
+	/* MODULES1 R7 item 7: both keeps follow a live set of WW_CELL_STREAM_TEXKEEP / _GEOKEEP (their readers re-read, but
+	 * the first value was held here). Red WW_R7LIVE_RED=1 (launch): the first values stay. */
+	static const std::uint32_t keepOnce = std::uint32_t( cellStreamTexKeepSec() );
+	static const bool keepStuck = qgetenv( "WW_R7LIVE_RED" ).trimmed() == "1";
+	const std::uint32_t keep = keepStuck ? keepOnce : std::uint32_t( cellStreamTexKeepSec() );
 	if ( !clock.isValid() )
 		clock.start();
 	const std::uint32_t sec = std::uint32_t( clock.elapsed() / 1000 ) + 1U;
@@ -5492,7 +6453,14 @@ void GLView::wwCellStreamEvict()
 	// cached meshes by the same rule (undrawn for the keep and by the last 3 paints), on the
 	// cache's paint counter; red WW_STREAM1_RED=geokeep leaves them to the cache's own ~1800 paints
 	static GeoKeepClock geoClock;
-	static const std::uint32_t geoKeep = std::uint32_t( cellStreamGeoKeepSec() );
+	static const std::uint32_t geoKeepOnce = std::uint32_t( cellStreamGeoKeepSec() );
+	const std::uint32_t geoKeep = keepStuck ? geoKeepOnce : std::uint32_t( cellStreamGeoKeepSec() );
+	static std::uint32_t keepSaid = ~0U;
+	if ( keepSaid != keep * 1000U + geoKeep ) {
+		keepSaid = keep * 1000U + geoKeep;
+		fprintf( stderr, "stream keep: an undrawn texture stays %u s, an undrawn mesh %u s%s\n", keep, geoKeep,
+			keepStuck ? " (RED WW_R7LIVE_RED: the first values, a live set changes nothing)" : " (WW_CELL_STREAM_TEXKEEP / _GEOKEEP, live)" );
+	}
 	static const bool geoRed = PassTime::stream1Red( "geokeep" );
 	if ( NifSkopeOpenGLContext * cx = scene ? scene->renderer : nullptr; cx && !geoRed ) {
 		if ( const std::uint32_t since = geoClock.paint( sec, cx->wwCacheEpoch(), geoKeep ) )
@@ -5744,8 +6712,21 @@ void GLView::navGizmoBalls( QPointF pos[6], float depth[6] ) const
 	}
 }
 
+void GLView::wwSetNavGizmoOff( bool off )
+{
+	// AIRPERF1 round 3: full screen on = no gizmo. The draw and the hit test both read navGizmoOff.
+	navGizmoOff = off;
+	if ( off ) {
+		navGizmoHover = -1;
+		navGizmoDrag = false;
+	}
+	update();
+}
+
 int GLView::navGizmoHitTest( const QPointF & p ) const
 {
+	if ( navGizmoOff )
+		return -1;	// AIRPERF1 round 3: no hover, no axis snap, no ring drag while it is not drawn
 	QPointF center;
 	float R, ballR;
 	navGizmoLayout( center, R, ballR );
@@ -18647,6 +19628,16 @@ void GLView::selectAll( int action )
 	// deselect), 1 = select all, 2 = deselect all
 	if ( !model )
 		return;
+	/* lane NIGHTHAZE1: select all in a cell view (thousands of refs, A key, Select > All, every caller) froze the
+	 * window: refused there, deselect kept; a plain NIF view selects all as before */
+	if ( action != 2 && cellCamBoundsIsCell( model ) ) {
+		const bool clears = action == 0 && ( editMode ? !pickedElems.isEmpty() : !objSelection.isEmpty() );
+		if ( !clears ) {
+			std::fprintf( stderr, "select all: refused in the cell view (%d shapes; deselect still works)\n",
+				scene ? int( scene->shapes.size() ) : 0 );
+			return;
+		}
+	}
 	if ( riggingWeightPaintMode )
 		setRiggingWeightPaintBrushEnabled( false );
 	if ( vertexPaintMode )
@@ -20709,6 +21700,28 @@ QString GLView::wwCameraGoTo( const float eye[3], const float rot[3], float fovD
 		.arg( double( fovDeg ), 0, 'f', 2 ).arg( double( back.length() ), 0, 'f', 3 );
 }
 
+/* MODULES1 M11: the camera as the live port's `goto` takes it: the eye (world units), yaw in degrees from +Y (north)
+ * toward +X (east), pitch in degrees above the horizon */
+QString GLView::wwCameraWhere()
+{
+	const Transform vt = viewTransform();
+	const double sc = vt.scale != 0.0f ? double( vt.scale ) : 1.0;
+	double eye[3], fwd[3];
+	for ( int a = 0; a < 3; a++ ) {
+		double c = 0.0;
+		for ( int k = 0; k < 3; k++ )
+			c -= double( vt.rotation( k, a ) ) * double( vt.translation[k] );
+		eye[a] = c / sc;
+		fwd[a] = -double( vt.rotation( 2, a ) );
+	}
+	const double yaw = std::atan2( fwd[0], fwd[1] ) * 57.29577951308232;
+	const double pitch = std::asin( std::clamp( fwd[2], -1.0, 1.0 ) ) * 57.29577951308232;
+	const QString g = QStringLiteral( "goto %1 %2 %3 %4 %5" ).arg( eye[0], 0, 'f', 1 ).arg( eye[1], 0, 'f', 1 ).arg( eye[2], 0, 'f', 1 )
+		.arg( yaw, 0, 'f', 2 ).arg( pitch, 0, 'f', 2 );
+	return QStringLiteral( "camera where: eye %1,%2,%3 yaw %4 pitch %5 | %6" ).arg( eye[0], 0, 'f', 1 ).arg( eye[1], 0, 'f', 1 )
+		.arg( eye[2], 0, 'f', 1 ).arg( yaw, 0, 'f', 2 ).arg( pitch, 0, 'f', 2 ).arg( g );
+}
+
 QString GLView::wwPlaceCamera( const Vector3 & eye, const Vector3 & at )
 {
 	Vector3 f = at - eye;
@@ -21314,6 +22327,14 @@ bool GLView::event( QEvent * e )
 		flyResync = true;
 		mouseRot = Vector3();
 		break;
+	case QEvent::UpdateRequest:
+		// lane VKFRAME1: painted and presented through a Vulkan flip-model swapchain (not GL's SwapBuffers); false =
+		// WW_VKPRESENT_RED=1, the row off or a new size: QOpenGLWindow's own paint and swap
+		if ( WwVkPresent::frame( this, [this]() { paintGL(); } ) ) {
+			emit frameSwapped();
+			return true;
+		}
+		break;
 	default:
 		break;
 	}
@@ -21414,9 +22435,58 @@ int GLView::convertKeyCode( int n, Qt::KeyboardModifiers mods, bool anyModifiers
 	return -1;
 }
 
+bool GLView::flyOwnsShortcuts() const
+{
+	return freeCamera && !cellEditArmRed();
+}
+
+void GLView::flyKeySwallowed( int key, int modifiers )
+{
+	switch ( key ) {
+	case Qt::Key_Shift: case Qt::Key_Control: case Qt::Key_Alt: case Qt::Key_Meta: case Qt::Key_AltGr:
+	case Qt::Key_CapsLock: case Qt::Key_NumLock: case Qt::Key_unknown: case 0:
+		return;	// a modifier on its own is no shortcut
+	default:
+		break;
+	}
+	static QSet<quint64> seen;
+	const quint64 id = ( quint64( quint32( modifiers ) ) << 32 ) | quint32( key );
+	if ( seen.contains( id ) )
+		return;
+	seen.insert( id );
+	const int mods = modifiers & int( Qt::ShiftModifier | Qt::ControlModifier | Qt::AltModifier | Qt::MetaModifier );
+	std::fprintf( stderr, "fly keys: %s swallowed (free camera on: only move / look / zoom keys, Shift, F11 and the exit keys Shift+F / Esc work)\n",
+		qPrintable( QKeySequence( key | mods ).toString( QKeySequence::PortableText ) ) );
+}
+
 void GLView::keyPressEvent( QKeyEvent * event )
 {
-	if ( cellEditKey( this, event->key(), int( event->modifiers() ) ) ) {	// Shift+A, the place mode's keys
+	// lane AIRPERF1 r3 (bungo 11-11: "no other shortcuts are toggled if I am in the free cam mode"): the free camera's
+	// lockout is the FIRST thing here now; before, the place mode, the physics sim, the paint modes and the modal
+	// tools all read the key ahead of it. Red WW_FLYKEYS_RED=1 = the old order.
+	if ( flyOwnsShortcuts() ) {
+		if ( ShortcutRegistry::get().matches( "viewport.free_camera", event->key(), event->modifiers() )
+			|| event->key() == Qt::Key_Escape ) {
+			setFreeCamera( false );
+			event->accept();
+			return;
+		}
+		const int fk = convertKeyCode( event->key(), event->modifiers() );
+		const bool cameraKey = fk == Key_Shift
+			|| fk == Key_MoveLeft || fk == Key_MoveRight || fk == Key_MoveForward || fk == Key_MoveBack
+			|| fk == Key_MoveDown || fk == Key_MoveUp
+			|| fk == Key_RotateUp || fk == Key_RotateDown || fk == Key_RotateLeft || fk == Key_RotateRight
+			|| fk == Key_ZoomIn || fk == Key_ZoomOut;
+		if ( cameraKey )
+			kbdState = kbdState | ( 1ULL << fk );
+		else
+			flyKeySwallowed( event->key(), int( event->modifiers() ) );
+		event->accept();
+		return;
+	}
+	// lane AIRPERF1 r3: this runs ahead of the free camera's key lockout, so it is told which camera owns WASD
+	if ( cellEditKey( this, event->key(), int( event->modifiers() ),
+			freeCamera ? 1 : ( view == ViewWalk ? 2 : 0 ), event->isAutoRepeat() ) ) {	// Shift+A, the place mode's keys
 		event->accept();
 		return;
 	}
@@ -21694,8 +22764,13 @@ void GLView::keyPressEvent( QKeyEvent * event )
 	// duplicate the selection and start a move (object + edit mode)
 	if ( !riggingWeightPaintMode && !vertexPaintMode && !segmentPaintMode
 		&& shortcuts.matches( "viewport.duplicate", event->key(), mods ) && model ) {
-		duplicateSelection();
-		return;
+		// lane AIRPERF1 r3: in the walk view Shift+D is a fast "move right", never a duplicate
+		if ( view != ViewWalk || cellEditArmRed() ) {
+			duplicateSelection();
+			return;
+		}
+		if ( !event->isAutoRepeat() )
+			std::fprintf( stderr, "place arm: Shift+D duplicate swallowed (the camera owns the keys: camera=walk repeat=0)\n" );
 	}
 
 	// join the selected compatible meshes into the active one (object)

@@ -6,6 +6,11 @@ BSD License - see nifskope.h
 
 #include "impostorchunk.h"
 #include "wwswitch.h"	// the WW_* switch store
+#include "lodinative.h"	// lane PERFLOAD1 P1: LodiTreeCard
+#include "cellfarhide.h"	// lane PERFLOAD1 P7: the ladder hides mesh rows by REFR
+#include "treeladder.h"
+#include "lodmfile.h"
+#include "recx.h"	// lane PERFLOAD1 P1: wwAssetsModRoot, where the shipped impostor sets live
 
 #include "gl/glscene.h"
 #include "gl/renderer.h"
@@ -14,8 +19,11 @@ BSD License - see nifskope.h
 
 #include <QDebug>
 #include <QDir>
+#include <QElapsedTimer>
 #include <QFile>
 #include <QFileInfo>
+#include <QJsonArray>
+#include <QJsonObject>
 #include <QSettings>
 #include <QTextStream>
 
@@ -54,6 +62,11 @@ struct CellFarState
 {
 	ChunkState cards;
 	float shift[3] = { 0.0f, 0.0f, 0.0f };
+	QHash<quint32, int> treeSet;	//!< lane PERFLOAD1 P1: base form -> its set in cards.sets (cellFarTreeForms)
+	//! lane PERFLOAD1 P7: per placement its ladder step and fade, and whether its mesh row is hidden now
+	QVector<TreeLadder::State> ladder;
+	QVector<char> ladderHid;
+	quint64 ladderFor = ~quint64( 0 );
 };
 // cells a streamed near cell holds; their cards do not draw. Kept apart from CellFarState so a far
 // rebuild (forgetCellFar + arm) keeps the stream's cells. hideGen bumps on each change (the shadow casters rebuild).
@@ -139,6 +152,11 @@ QString resolveLodm( NifModel * nif, const QString & chunkDir, const QString & g
 			roots << QDir::cleanPath( stack.at( i ) );
 		for ( const QString & p : lodgenResourceSearchPaths() )
 			roots << QDir::cleanPath( p + QStringLiteral( "/.." ) );
+		// lane PERFLOAD1 P1: the MO2 mod "Fusion Shaders - Assets" (no plugin, so no stack names it) is a Data root
+		// too: the impostor sets ship there, Data\FO4CSLOD\Cards\<id>_oct.lodm
+		const QString assets = wwAssetsModRoot();
+		if ( !assets.isEmpty() )
+			roots << QDir::cleanPath( assets );
 		for ( const QString & root : roots ) {
 			if ( !QFileInfo( root ).isDir() )
 				continue;
@@ -275,11 +293,10 @@ int ImpostorChunk::arm( NifModel * nif, const QString & chunkPath )
 			// the C line names the model's own octahedral set AND the array atlas the same bake wrote with the
 			// model's layer in it.
 			WW_SWITCH_STATIC( bool, noAtlas, wwEnv( "WW_CELL_FARLOD_RED" ) == "noatlas" );
+			bool viaAtlas = false;
 			if ( path.isEmpty() && !p.c.arrayLodm.isEmpty() && !noAtlas ) {
 				path = resolveLodm( nif, s.chunkDir, p.c.arrayLodm );
-				if ( !path.isEmpty() )
-					s.notes << QStringLiteral( "impostor chunk: %1 not installed -- served by the bake's array atlas %2 layer %3" )
-						.arg( p.c.lodm, QFileInfo( path ).fileName() ).arg( p.c.layer );
+				viaAtlas = !path.isEmpty();
 			}
 			ImpostorCardSet set;
 			if ( path.isEmpty() ) {
@@ -287,9 +304,15 @@ int ImpostorChunk::arm( NifModel * nif, const QString & chunkPath )
 				set.error = QStringLiteral( "not found beside the chunk or on the resource stack" );
 				s.notes << QStringLiteral( "impostor chunk: %1 -- %2" ).arg( p.c.lodm, set.error );
 			} else {
-				set = impostorCardLoad( path, p.c.arrayLodm.isEmpty() ? -1 : p.c.layer );
+				set = impostorCardLoad( path, ( viaAtlas || !p.c.arrayLodm.isEmpty() ) ? p.c.layer : -1 );
 				if ( !set.ok )
 					s.notes << QStringLiteral( "impostor chunk: %1 -- %2" ).arg( path, set.error );
+				else if ( viaAtlas )	// lane PERFLOAD1 P1: the atlas layer IS the octahedral set, say which kind it is
+					s.notes << QStringLiteral( "impostor chunk: %1 not installed -- served by the bake's array atlas %2 "
+						"layer %3, %4" ).arg( p.c.lodm, QFileInfo( path ).fileName() ).arg( p.c.layer )
+						.arg( set.ring() ? QStringLiteral( "a horizon ring of %1 views" ).arg( set.views )
+							: set.oct > 1 ? QStringLiteral( "the same octahedral impostor (%1 x %1 views)" ).arg( set.oct )
+							: QStringLiteral( "a FLAT card (one view)" ) );
 			}
 			s.lodmKeys << key;
 			s.sets << set;
@@ -416,7 +439,7 @@ int ImpostorChunk::draw( Scene * scene, const ImpostorDraw::Options & opt )
 /* ---- the cell view's far tree cards (impostorchunk.h) ---- */
 int ImpostorChunk::armCellFar( NifModel * nif, const QStringList & chunkPaths, const float shift[3],
 	float cx, float cy, float rMax, int hx0, int hy0, int hx1, int hy1,
-	QSet<quint32> * refs, QStringList * notes )
+	QSet<quint32> * refs, QStringList * notes, const QVector<QRect> * oursOnly )
 {
 	CellFarState & F = farSt();
 	F = CellFarState();
@@ -427,7 +450,7 @@ int ImpostorChunk::armCellFar( NifModel * nif, const QStringList & chunkPaths, c
 
 	// the chunk state is borrowed per manifest and put back as it was found
 	const ChunkState saved = st();
-	int read = 0, kept = 0, inHole = 0, beyond = 0;
+	int read = 0, kept = 0, inHole = 0, beyond = 0, notOurs = 0;
 	QSet<QString> said;   // a set's note once, not once a chunk
 	for ( const QString & chunk : chunkPaths ) {
 		const int got = arm( nif, chunk );
@@ -446,6 +469,17 @@ int ImpostorChunk::armCellFar( NifModel * nif, const QStringList & chunkPaths, c
 			if ( cellX >= hx0 && cellX <= hx1 && cellY >= hy0 && cellY <= hy1 ) {
 				inHole++;
 				continue;
+			}
+			/* lane PERFLOAD1 P3: with our files limited to a rectangle (WW_CELL_FARLOD_OURS) a card of ours stands only
+			 * on a ring we built; the game's .bto carries its own trees everywhere else */
+			if ( oursOnly ) {
+				bool in = false;
+				for ( const QRect & q : *oursOnly )
+					in = in || q.contains( cellX, cellY );
+				if ( !in ) {
+					notOurs++;
+					continue;
+				}
 			}
 			const float dx = p0.world[0] - cx, dy = p0.world[1] - cy;
 			if ( rMax > 0.0f && dx * dx + dy * dy > rMax * rMax ) {
@@ -490,9 +524,17 @@ int ImpostorChunk::armCellFar( NifModel * nif, const QStringList & chunkPaths, c
 	if ( notes )
 		*notes << QStringLiteral( "far lod: cards %1 read from %2 chunk manifests, %3 kept, %4 in the hole, "
 			"%5 past %6 units, %7 sets" ).arg( read ).arg( chunkPaths.size() ).arg( kept ).arg( inHole )
-			.arg( beyond ).arg( double( rMax ), 0, 'f', 0 ).arg( F.cards.sets.size() );
+			.arg( beyond ).arg( double( rMax ), 0, 'f', 0 ).arg( F.cards.sets.size() )
+			+ ( oursOnly ? QStringLiteral( ", %1 outside our built rings (the game's .bto there)" ).arg( notOurs ) : QString() );
 	return kept;
 }
+
+quint64 wwGlPaintCount();	// glview.cpp
+#include "features/far-lod/lodpreview.h"	// lane PERFLOAD1 P8
+
+// lane EMPTY240 R7-4 (impostordraw.cpp): the sheet roots' parts since the last call; a far-card draw's end
+void wwFarSheetRootsTake( int & sets, int & walks, double & walkMs, double & addMs );
+void wwFarSheetsIdle();
 
 int ImpostorChunk::drawCellFar( Scene * scene, const ImpostorDraw::Options & opt )
 {
@@ -500,14 +542,132 @@ int ImpostorChunk::drawCellFar( Scene * scene, const ImpostorDraw::Options & opt
 	ChunkState & s = F.cards;
 	if ( !scene || s.placed.isEmpty() )
 		return 0;
+	// lane EMPTY240 R6-5: a far-cards draw over 50 ms names its parts (build 78's first: 461 ms CPU, 37 draws)
+	QElapsedTimer wwSlow;
+	wwSlow.start();
+	qint64 wwCommitNs = 0, wwCastNs = 0, wwSheetsNs = 0, wwLadderNs = 0;
+	/* lane PERFLOAD1 P7, THE TREE LADDER (treeladder.h, docs/FO4CS_IMPROVED_LOD_PLAN.md R3 4-5): every handed tree
+	 * takes its step from its size on screen (bound radius x scale / distance x P11 / 2 of the live projection); a
+	 * tree on its mesh step leaves its card out, a tree on the impostor hides its mesh row (CellFarHide), and every
+	 * switch cross-fades (the card dithered per frame). Red WW_CELL_FARLOD_RED=edgecut keeps no mesh row: P1's cut. */
+	static QElapsedTimer ladderClock, sinceCommit, sinceCast;
+	const float dt = ladderClock.isValid() ? std::fmin( 0.25f, float( ladderClock.restart() ) / 1000.0f ) : 0.0f;
+	if ( !ladderClock.isValid() )
+		ladderClock.start();
+	// the paint's number: the mesh rows' dither (CellFarInst) shifts its noise by the same frame
+	const int fadeFrame = int( wwGlPaintCount() & 1023u );
+	if ( F.ladderFor != farGen() || F.ladder.size() != s.placed.size() ) {
+		F.ladderFor = farGen();
+		F.ladder.fill( TreeLadder::State(), s.placed.size() );
+		F.ladderHid.fill( 0, s.placed.size() );
+		CellFarHide::ladderClear();
+		sinceCommit.invalidate();
+		sinceCast.invalidate();
+	}
+	CellFarHide::ladderFadesBegin( fadeFrame );
+	const bool ladderPersp = scene->renderer && scene->renderer->globalUniforms->projectionMatrix[3][3] != 1.0f;
+	const float p11 = ladderPersp ? scene->renderer->globalUniforms->projectionMatrix[1][1] : 0.0f;	// pm[column][row]
+	static const TreeLadder::Thresholds ladderThr;
+	int atStep[TreeLadder::Steps] = {};
+	int ladderTrees = 0, ladderRows = 0, ladderFades = 0, ladderCards = 0, ladderCardsFading = 0;
+	int ladderHeld = 0, ladderGoing = 0, ladderMeshCast = 0;	// round 2: fades held for a commit, rows dithering out
+	const int forcedStep = LodPreview::force();	// lane PERFLOAD1 P8: the preview's level (-1 = the ladder)
+	int ladderNearest = 0;
+	if ( p11 > 0.0f ) {
+		for ( int i = 0; i < s.placed.size(); i++ ) {
+			const Placed & p = s.placed.at( i );
+			if ( p.ladderRadius <= 0.0f )
+				continue;
+			/* round 2: every step the tree has rows for (one a distinct MNAM mesh), then the impostor; both sides of a
+			 * switch dither (the rows by attribute 9, TreeLadder::rowFade), the casters take the target step */
+			const uint8_t meshSteps = p.ladderRef ? uint8_t( p.ladderSteps & 0x1Eu ) : uint8_t( 0 );
+			const bool row = meshSteps != 0;
+			const uint8_t avail = uint8_t( ( 1u << TreeLadder::Impostor ) | meshSteps );
+			const float sc = std::fabs( p.scale );
+			const Vector3 v = scene->view * Vector3( p.world[0] - F.shift[0], p.world[1] - F.shift[1],
+				p.world[2] - F.shift[2] + p.c.center[2] * sc );
+			const float f = TreeLadder::screenFraction( p.ladderRadius * sc, v.length(), p11 );
+			TreeLadder::State & st = F.ladder[i];
+			int want = TreeLadder::select( f, avail, ladderThr, st.step );
+			if ( forcedStep >= 0 ) {	// P8: the forced level, else the nearest step the tree has (counted)
+				want = TreeLadder::forced( forcedStep, avail );
+				if ( want != forcedStep )
+					ladderNearest++;
+			}
+			TreeLadder::advance( st, want, dt );
+			ladderTrees++;
+			if ( st.step >= 0 && st.step < TreeLadder::Steps )
+				atStep[st.step]++;
+			if ( TreeLadder::fading( st ) )
+				ladderFades++;
+			if ( row ) {
+				ladderRows++;
+				const uint8_t draw = uint8_t( TreeLadder::drawMask( st ) & meshSteps );
+				const uint8_t cast = uint8_t( ( 1u << st.step ) & meshSteps );
+				if ( cast )
+					ladderMeshCast++;
+				const int how = CellFarHide::setLadder( p.ladderRef, draw, cast );
+				if ( how == 1 && TreeLadder::fading( st ) ) {
+					st.t = 0.0f;	// a row not live yet: the fade waits for the commit, so no side opens a hole
+					ladderHeld++;
+				}
+				if ( how == 2 )
+					ladderGoing++;
+				if ( how == 2 || TreeLadder::fading( st ) )
+					CellFarHide::ladderFade( p.ladderRef, st, draw );
+			}
+		}
+	}
+	wwLadderNs = wwSlow.nsecsElapsed();
+	// the mesh rows see the change at most every 100 ms (one row filter a bucket per commit); the first frame at once
+	if ( CellFarHide::ladderDirty() && ( !sinceCommit.isValid() || sinceCommit.elapsed() >= 100 ) ) {
+		const qint64 t0 = wwSlow.nsecsElapsed();
+		CellFarHide::ladderCommit();
+		wwCommitNs = wwSlow.nsecsElapsed() - t0;
+		sinceCommit.start();
+	}
+	// the casters (cascade rows + card pyramids) take the target step at most once a second: each commit rebuilds them
+	if ( CellFarHide::castDirty() && ( !sinceCast.isValid() || sinceCast.elapsed() >= 1000 ) ) {
+		const qint64 t0 = wwSlow.nsecsElapsed();
+		CellFarHide::castCommit();
+		wwCastNs = wwSlow.nsecsElapsed() - t0;
+		sinceCast.start();
+	}
+	// lane PERFLOAD1 P8: the LOD preview's line on each change (the far trees by the step they go to)
+	static quint64 saidPreview = 0;
+	if ( ladderTrees > 0 && LodPreview::gen() != saidPreview ) {
+		saidPreview = LodPreview::gen();
+		qInfo().noquote() << QStringLiteral( "lod preview: level %1 (far trees per frame, far objects at the far rebuild), "
+			"tint %2, ring %3, near grid %4; far trees per level full %5, rep0 %6, rep1 %7, rep2 %8, rep3 %9, impostor %10; "
+			"%11 drawn at their nearest level (no %1 step)" )
+			.arg( LodPreview::levelName( forcedStep ) ).arg( LodPreview::tint() ? "on" : "off" )
+			.arg( LodPreview::ringName( LodPreview::ring() ) ).arg( LodPreview::gridName( LodPreview::grid() ) )
+			.arg( atStep[0] ).arg( atStep[1] ).arg( atStep[2] ).arg( atStep[3] ).arg( atStep[4] ).arg( atStep[5] )
+			.arg( ladderNearest );
+	}
+	const bool lodTint = LodPreview::tint();
 	if ( !s.sheetsRegistered ) {
+		const qint64 t0 = wwSlow.nsecsElapsed();
 		s.sheetsRegistered = true;
 		for ( const ImpostorCardSet & set : std::as_const( s.sets ) )
 			if ( set.ok )
 				ImpostorDraw::registerLooseSheets( scene, set );
+		wwSheetsNs = wwSlow.nsecsElapsed() - t0;
+		int rootSets = 0, rootWalks = 0;
+		double walkMs = 0.0, addMs = 0.0;
+		wwFarSheetRootsTake( rootSets, rootWalks, walkMs, addMs );
+		static int rootsSaid = 0;
+		if ( rootsSaid < 8 ) {
+			rootsSaid++;
+			qInfo().noquote() << QStringLiteral( "far sheet roots: %1 sets in %2 ms = %3 folder walks %4 ms + model roots %5 ms "
+				"(R7-4: a folder's root kept; red WW_SHEETROOTS_RED=1: a walk a set, build 80)" ).arg( rootSets )
+				.arg( double( wwSheetsNs ) * 1e-6, 0, 'f', 1 ).arg( rootWalks ).arg( walkMs, 0, 'f', 1 ).arg( addMs, 0, 'f', 1 );
+		}
 	}
+	const qint64 wwCardsT0 = wwSlow.nsecsElapsed();
 	static int saidDrawn = -1, saidOut = -1;
 	int drawn = 0, outside = 0, refused = 0;
+	int bandFlat = 0, bandOct = 0, bandFade = 0;	// lane LODLIVE1
 	QString firstWhy;	// a card the drawer refuses says why, once (was thrown away)
 	// THE CAMERA'S CULL: a card whose bounding sphere is outside one of the four side planes is not drawn, the
 	// game's per-object test (SUNCELL1's cellcull uses the same planes for the document's shapes).
@@ -541,6 +701,14 @@ int ImpostorChunk::drawCellFar( Scene * scene, const ImpostorDraw::Options & opt
 			continue;
 		if ( cardHidden( p ) )   // the near cell draws it
 			continue;
+		float fadeOut = 0.0f;	// lane PERFLOAD1 P7: the ladder's card weight
+		if ( p.ladderRadius > 0.0f && p11 > 0.0f ) {
+			const TreeLadder::State & st = F.ladder.at( int( &p - s.placed.constData() ) );
+			const float w = st.step >= 0 ? TreeLadder::weight( st, TreeLadder::Impostor ) : 1.0f;
+			if ( w <= 0.0f )
+				continue;	// on its mesh step: the ring row draws it
+			fadeOut = 1.0f - w;
+		}
 		if ( cull ) {
 			const float sc = std::fabs( p.scale );
 			const Vector3 cw( p.world[0] - F.shift[0] + p.c.center[0] * sc, p.world[1] - F.shift[1] + p.c.center[1] * sc,
@@ -562,7 +730,18 @@ int ImpostorChunk::drawCellFar( Scene * scene, const ImpostorDraw::Options & opt
 			swayOff = 0.0021f * p.world[0] + 0.0017f * p.world[1];
 			o.swayPhase += swayOff;
 		}
-		if ( inst && s.sets.at( p.setIndex ).ok ) {
+		if ( p.ladderRadius > 0.0f ) {
+			ladderCards++;
+			if ( fadeOut > 0.0f )
+				ladderCardsFading++;
+		}
+		o.fadeOut = fadeOut;
+		o.fadeFrame = float( fadeFrame );
+		if ( lodTint )	// P8: the impostor's colour, a card mid-fade the band's
+			LodPreview::tintColour( fadeOut > 0.0f ? 6 : int( TreeLadder::Impostor ), o.lodTint );
+		if ( lodTint )	// lane LODLIVE1: the coloration's card counts (flat, octahedral, fading)
+			( fadeOut > 0.0f ? bandFade : s.sets.at( p.setIndex ).oct > 0 ? bandOct : bandFlat )++;
+		if ( inst &&s.sets.at( p.setIndex ).ok && fadeOut <= 0.0f ) {	// a fading card goes one by one (its own fade)
 			ImpostorDraw::InstCard c;
 			c.set = &s.sets.at( p.setIndex );
 			c.offset[0] = p.world[0] - F.shift[0];
@@ -585,7 +764,10 @@ int ImpostorChunk::drawCellFar( Scene * scene, const ImpostorDraw::Options & opt
 	ImpostorDraw::batchEnd( scene );
 	ImpostorDraw::InstStats ist;
 	if ( !instCards.isEmpty() ) {
-		if ( ImpostorDraw::drawCardsInstanced( scene, instCards, opt, farGen(), &ist ) ) {
+		ImpostorDraw::Options io = opt;
+		if ( lodTint )	// P8
+			LodPreview::tintColour( TreeLadder::Impostor, io.lodTint );
+		if ( ImpostorDraw::drawCardsInstanced( scene, instCards, io, farGen(), &ist ) ) {
 			drawn += ist.drawn;
 			if ( ist.refused && !refused )
 				firstWhy = ist.firstWhy;
@@ -593,7 +775,7 @@ int ImpostorChunk::drawCellFar( Scene * scene, const ImpostorDraw::Options & opt
 		} else {	// the instanced program is missing: the cards the old way, so nothing vanishes
 			ImpostorDraw::batchBegin();
 			for ( const ImpostorDraw::InstCard & c : std::as_const( instCards ) ) {
-				ImpostorDraw::Options o = opt;
+				ImpostorDraw::Options o = io;	// LODLIVE1: io, so the tint is kept (was opt)
 				o.worldScale = c.scale;
 				o.swayPhase = c.swayPhase;
 				QString why;
@@ -605,6 +787,20 @@ int ImpostorChunk::drawCellFar( Scene * scene, const ImpostorDraw::Options & opt
 			ImpostorDraw::batchEnd( scene );
 			ist.sets = -1;
 		}
+	}
+	if ( lodTint )
+		LodPreview::noteCards( bandFlat, bandOct, bandFade );
+	wwFarSheetsIdle();	// R7-4
+	static int wwSlowSaid = 0;
+	if ( wwSlow.elapsed() > 50 && wwSlowSaid < 8 ) {
+		wwSlowSaid++;
+		const qint64 cardsNs = wwSlow.nsecsElapsed() - wwCardsT0;
+		qInfo().noquote() << QStringLiteral( "far cards slow draw: %1 ms = ladder %2 + ladder commit %3 + caster commit %4 + "
+			"sheet roots %5 + cards %6 (%7 drawn, %8 instanced draws, %9 refused; the `far sheets:` line has the layers made)" )
+			.arg( double( wwSlow.nsecsElapsed() ) * 1e-6, 0, 'f', 1 ).arg( double( wwLadderNs ) * 1e-6, 0, 'f', 1 )
+			.arg( double( wwCommitNs ) * 1e-6, 0, 'f', 1 ).arg( double( wwCastNs ) * 1e-6, 0, 'f', 1 )
+			.arg( double( wwSheetsNs ) * 1e-6, 0, 'f', 1 ).arg( double( cardsNs ) * 1e-6, 0, 'f', 1 )
+			.arg( drawn ).arg( ist.draws ).arg( refused );
 	}
 	static int saidSets = -2, saidDraws = -1, sinceSaid = 0;
 	// once more 60 frames after a change: the GPU pick's first frame sends the whole static buffer
@@ -621,6 +817,32 @@ int ImpostorChunk::drawCellFar( Scene * scene, const ImpostorDraw::Options & opt
 				.arg( ist.gpuPick ? QStringLiteral( "GPU" ) : QStringLiteral( "CPU" ) )
 				.arg( steady ? QStringLiteral( ", steady" ) : QString() ) );
 	}
+	// lane PERFLOAD1 P7: the ladder's census, once a second at most while it changes
+	static QString saidLadder;
+	static QElapsedTimer sinceLadderSaid;
+	if ( ladderTrees > 0 && wwFrameLog() && ( !sinceLadderSaid.isValid() || sinceLadderSaid.elapsed() >= 1000 ) ) {
+		const QString line = QStringLiteral( "far trees ladder: of %1 trees (%2 with a mesh row) full %3, rep0 %4, rep1 %5, "
+			"rep2 %6, rep3 %7, impostor %8; cards drawn %9 (%10 fading), cross-fades in flight %11, mesh rows hidden %12; "
+			"thresholds %13 of the screen height (x%14 back), fade %15 s, P11 %16 (live projection, fovY %17 deg)%18" )
+			.arg( ladderTrees ).arg( ladderRows ).arg( atStep[0] ).arg( atStep[1] ).arg( atStep[2] ).arg( atStep[3] )
+			.arg( atStep[4] ).arg( atStep[5] ).arg( ladderCards ).arg( ladderCardsFading ).arg( ladderFades )
+			.arg( CellFarHide::ladderHiddenCount() )
+			.arg( QStringLiteral( "%1/%2/%3/%4/%5" ).arg( ladderThr.thr[0] ).arg( ladderThr.thr[1] ).arg( ladderThr.thr[2] )
+				.arg( ladderThr.thr[3] ).arg( ladderThr.thr[4] ) )
+			.arg( TreeLadder::kHysteresis ).arg( TreeLadder::kFadeSeconds ).arg( p11, 0, 'f', 3 )
+			.arg( p11 > 0.0f ? 2.0 * std::atan( 1.0 / p11 ) * 57.29577951 : 0.0, 0, 'f', 1 )
+			.arg( wwEnv( "WW_CELL_FARLOD_RED" ) == "edgecut" ? QStringLiteral( " (RED edgecut)" ) : QString() )
+			+ QStringLiteral( "; round 2: rows dithered %1 (since the last census), fades held for a commit %2, rows "
+				"dithering out %3, mesh casters %4 of %5 (card casters the rest, commits <= 1/s)" )
+				.arg( CellFarHide::ladderDitherRows() ).arg( ladderHeld ).arg( ladderGoing ).arg( ladderMeshCast )
+				.arg( ladderRows );
+		CellFarHide::ladderDitherRows() = 0;
+		if ( line != saidLadder ) {
+			saidLadder = line;
+			sinceLadderSaid.start();
+			qInfo().noquote() << line;
+		}
+	}
 	if ( ( drawn != saidDrawn || outside != saidOut ) && wwFrameLog() ) {
 		saidDrawn = drawn;
 		saidOut = outside;
@@ -633,10 +855,133 @@ int ImpostorChunk::drawCellFar( Scene * scene, const ImpostorDraw::Options & opt
 	return drawn;
 }
 
+int ImpostorChunk::cellFarTreeForms( const QString & objectsDir, const QString & ws, QHash<quint32, int> * layerOf,
+	QStringList * notes )
+{
+	CellFarState & F = farSt();
+	F.treeSet.clear();
+	if ( layerOf )
+		layerOf->clear();
+	const QStringList files = QDir( objectsDir ).entryList( { ws + QStringLiteral( ".LodgenCards.*.lodm" ) },
+		QDir::Files, QDir::Name | QDir::IgnoreCase );
+	int arrays = 0, ringFiles = 0, dup = 0, refused = 0, flat = 0, oct = 0;
+	QString firstRefusal;
+	for ( const QString & fn : files ) {
+		if ( fn.endsWith( QLatin1String( ".ring.lodm" ), Qt::CaseInsensitive ) ) {
+			ringFiles++;	// horizon ring sets: not the octahedral impostor of a form
+			continue;
+		}
+		const QString path = QDir( objectsDir ).filePath( fn );
+		QFile f( path );
+		if ( !f.open( QIODevice::ReadOnly ) )
+			continue;
+		const LodmMaterial m = lodmParse( f.readAll() );
+		if ( !m.ok || m.kind != QLatin1String( "cardArray" ) )
+			continue;
+		arrays++;
+		const QJsonArray layers = m.root.value( QLatin1String( "array" ) ).toObject().value( QLatin1String( "layers" ) ).toArray();
+		for ( int i = 0; i < layers.size(); i++ ) {
+			bool ok = false;
+			const quint32 form = layers.at( i ).toObject().value( QLatin1String( "id" ) ).toString().toUInt( &ok, 16 );
+			if ( !ok )
+				continue;
+			if ( F.treeSet.contains( form ) ) {
+				dup++;	// an older array naming the same form: the first file by name wins
+				continue;
+			}
+			const ImpostorCardSet set = impostorCardLoad( path, i );
+			if ( !set.ok || set.ring() ) {
+				if ( refused++ == 0 )
+					firstRefusal = set.ok ? QStringLiteral( "%1 layer %2: a horizon ring" ).arg( fn ).arg( i ) : set.error;
+				continue;
+			}
+			( set.oct > 1 ? oct : flat )++;
+			F.cards.sets << set;
+			F.cards.lodmKeys << path.toLower() + QStringLiteral( "#" ) + QString::number( i );
+			F.treeSet.insert( form, F.cards.sets.size() - 1 );
+			if ( layerOf )
+				layerOf->insert( form, i );
+		}
+	}
+	if ( notes )
+		*notes << QStringLiteral( "far lod: tree impostors: %1 forms from %2 card arrays in %3 (%4 octahedral, %5 flat; "
+			"%6 ring files left out, %7 duplicate forms, %8 refused%9)" ).arg( F.treeSet.size() ).arg( arrays )
+			.arg( QDir::toNativeSeparators( objectsDir ) ).arg( oct ).arg( flat ).arg( ringFiles ).arg( dup ).arg( refused )
+			.arg( refused ? QStringLiteral( ", first: " ) + firstRefusal : QString() );
+	return F.treeSet.size();
+}
+
+int ImpostorChunk::addCellFarTrees( const QVector<LodiTreeCard> & trees )
+{
+	CellFarState & F = farSt();
+	int added = 0;
+	for ( const LodiTreeCard & t : trees ) {
+		const auto it = F.treeSet.constFind( t.form );
+		if ( it == F.treeSet.constEnd() )
+			continue;
+		const ImpostorCardSet & set = F.cards.sets.at( it.value() );
+		Placed p;
+		p.c.ok = true;
+		p.c.index = -1;
+		p.c.center[0] = set.center[0];
+		p.c.center[1] = set.center[1];
+		p.c.center[2] = set.center[2];
+		p.c.halfW = set.halfW;
+		p.c.halfH = set.halfH;
+		p.c.oct = set.oct;
+		p.c.depthSpan = set.depthSpan;
+		p.c.lodm = set.lodmPath;
+		p.c.arrayLodm = set.lodmPath;
+		p.c.layer = set.layer;
+		p.world[0] = t.xyz[0];
+		p.world[1] = t.xyz[1];
+		p.world[2] = t.xyz[2];
+		p.scale = t.scale > 0.0f ? t.scale : 1.0f;
+		p.formId = QString::number( t.form, 16 ).rightJustified( 8, QLatin1Char( '0' ) );
+		if ( t.ref )
+			p.ref = QString::number( t.ref, 16 ).rightJustified( 8, QLatin1Char( '0' ) );
+		p.setIndex = it.value();
+		// lane PERFLOAD1 P7: the ladder's inputs (no .lodo radius: the card's own half diagonal)
+		p.ladderRadius = t.radius > 0.0f ? t.radius : std::sqrt( set.halfW * set.halfW + set.halfH * set.halfH );
+		p.ladderMeshStep = qint8( t.meshStep );
+		p.ladderRef = t.meshStep >= 0 ? t.ref : 0u;
+		p.ladderSteps = t.meshStep >= 0 ? quint8( t.stepMask | ( 1u << t.meshStep ) ) : quint8( 0 );
+		F.cards.placed << p;
+		added++;
+	}
+	if ( added )
+		farGenRef()++;
+	return added;
+}
+
+void ImpostorChunk::cellFarCensus( int * octahedral, int * ring, int * flat )
+{
+	const ChunkState & s = farSt().cards;
+	int o = 0, r = 0, f = 0;
+	for ( const Placed & p : s.placed ) {
+		if ( p.setIndex < 0 || p.setIndex >= s.sets.size() )
+			continue;
+		const ImpostorCardSet & set = s.sets.at( p.setIndex );
+		if ( set.ring() )
+			r++;
+		else if ( set.oct > 1 )
+			o++;
+		else
+			f++;
+	}
+	if ( octahedral )
+		*octahedral = o;
+	if ( ring )
+		*ring = r;
+	if ( flat )
+		*flat = f;
+}
+
 void ImpostorChunk::forgetCellFar()
 {
 	farSt() = CellFarState();
 	farGenRef()++;
+	CellFarHide::ladderClear();	// lane PERFLOAD1 P7: no mesh row stays hidden for a tree gone
 }
 
 int ImpostorChunk::cellFarCount()
@@ -646,7 +991,8 @@ int ImpostorChunk::cellFarCount()
 
 quint64 ImpostorChunk::cellFarGen()
 {
-	return farGen() + ( cardHide().gen << 32 );
+	// lane PERFLOAD1 P7 round 2: a ladder cast commit moves the card casters too
+	return farGen() + ( ( cardHide().gen + CellFarHide::ladderCastGen() ) << 32 );
 }
 
 void ImpostorChunk::cellFarHideSet( const QSet<qint64> & cells )
@@ -667,6 +1013,21 @@ int ImpostorChunk::cellFarCardsShownIn( const QSet<qint64> & cells )
 	return n;
 }
 
+void ImpostorChunk::cellFarCardsMeshIn( const QSet<qint64> & cells, int * all, int * noMesh )
+{
+	int n = 0, bare = 0;
+	for ( const Placed & p : farSt().cards.placed )
+		if ( cells.contains( cardCell( p ) ) && !cardHidden( p ) ) {
+			n++;
+			if ( p.ladderMeshStep < 0 )
+				bare++;
+		}
+	if ( all )
+		*all = n;
+	if ( noMesh )
+		*noMesh = bare;
+}
+
 int ImpostorChunk::cellFarCasters( QVector<FarCasterPiece> & out, float apexScale, const float * keep, int * cut )
 {
 	out.clear();
@@ -679,6 +1040,10 @@ int ImpostorChunk::cellFarCasters( QVector<FarCasterPiece> & out, float apexScal
 		if ( p.setIndex < 0 || p.setIndex >= s.sets.size() || !s.sets.at( p.setIndex ).ok )
 			continue;
 		if ( cardHidden( p ) )
+			continue;
+		// lane PERFLOAD1 P7 round 2: a ladder tree on a mesh step casts with its mesh row (CellFarHide view( d, true ))
+		if ( p.ladderRef && p.ladderSteps && ( CellFarHide::ladderCast( p.ladderRef ) & p.ladderSteps )
+			&& CellFarHide::ladderCast( p.ladderRef ) != 0xFF )
 			continue;
 		const float sc = std::fabs( p.scale );
 		const float cx = p.world[0] - F.shift[0] + p.c.center[0] * sc, cy = p.world[1] - F.shift[1] + p.c.center[1] * sc;

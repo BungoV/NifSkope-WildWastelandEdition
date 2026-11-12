@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+export WW_CELL_STREAM="${WW_CELL_STREAM:-0}"	# AIRPERF1 r4: this harness opens a fixed block (streaming is the default now)
 # terrshadow1_gates.sh -- the gates of lane TERRSHADOW1, the unified sun-shadow set (src/features/shadows/shadowset.h):
 # (A) Cascade Quality, (B) Contact Shadows, (C) Terrain Shadows, (D) Sun Path, one composition.
 # Judged by terrshadow1_gates.py (pictures + echoes) and terrshadow1_march.py (an independent CPU

@@ -13,15 +13,19 @@
 #include "features/weather/precipmath.h"
 #include "features/weather/preciproof.h"	// lane INTSKY1: rain only under open sky in a sunlit interior
 #include "gl/cellunits.h"	// lane BUGS1102B: the roof map's unit
-#include "features/weather/rainfogmath.h"	// lane FO76WEATHER1: the rain's share of a weather change
+#include "features/weather/rainfogmath.h"	// lane WETWEATHER1: the rain's share of a weather change
 #include "features/weather/rainwetlaw.h"
-#include "features/shadows/shadowset.h"	// lane FO76WEATHER2: the cover map leaves the terrain out
+#include "features/weather/weatherrecx.h"	// lane WEATHERRECX1: precipitation.wetting / drying
+#include "features/weather/recxphysical.h"	// lane AIRPERF1 A9: the entry's physicalWeather switch
+#include "features/shadows/shadowset.h"	// lane WETWEATHER2: the cover map leaves the terrain out
 #include "gl/glshape.h"
 #include "features/weather/precipspec.h"
 #include "gl/renderer.h"
 #include "features/shadows/sunshadow.h"
 
 #include <QElapsedTimer>
+#include <QJsonArray>
+#include <QJsonObject>
 #include <QFile>
 #include <QFileInfo>
 #include <QHash>
@@ -263,10 +267,23 @@ QVector<PcLayer> layersOf( const QStringList & roots, const QStringList & files,
 		QStringLiteral( "precipitation" ), true );
 	QVector<WwPrecipLayerSpec> specs;
 	QString source;
-	if ( h.ok ) {
+	/* lane AIRPERF1 A9 (bungo 11-11): the layers are a physical addition: they replace the record's precipitation only
+	 * under their own entry's physicalWeather switch; off or absent, the record's shader decides as for a weather with
+	 * no file. Red WW_WEATHER_RECX_RED=noswitch-precipitation (or noswitch), live: a file replaces without the switch */
+	const bool physOff = h.ok && !wwRecxPhysicalWeather( h.entry ) && !wwWeatherRecxSwitchRed( "precipitation" );
+	if ( h.ok && !physOff ) {
 		QStringList n;
-		specs = wwPrecipParse( h.block, n );
-		source = QStringLiteral( "recx:" ) + h.file.section( QLatin1Char( '/' ), -3 );
+		/* MODULES1 part 24: a key our file added to a dry record (radstorm rain, weathertranslate.py radstorm_rain) is
+		 * listed in `_added`; red ^WW_RADSTORM_RAIN_RED=1 drops them (dry, as vanilla) */
+		WW_SWITCH_STATIC( bool, rainRed, wwEnv( "WW_RADSTORM_RAIN_RED" ).trimmed() == QLatin1String( "1" ) );
+		QJsonObject b = h.block;
+		const bool dropAdded = rainRed && b.contains( QStringLiteral( "_added" ) );
+		if ( dropAdded )
+			for ( const QJsonValue & k : b.value( QStringLiteral( "_added" ) ).toArray() )
+				b.remove( k.toString() );
+		specs = wwPrecipParse( b, n );
+		source = QStringLiteral( "recx:" ) + h.file.section( QLatin1Char( '/' ), -3 ) + ( dropAdded
+			? QStringLiteral( " (rain red: added keys dropped)" ) : QString() );
 		for ( const QString & l : n )
 			notes << QStringLiteral( "%1 /precipitation/%2" ).arg( h.file.section( QLatin1Char( '/' ), -3 ), l );
 	} else {
@@ -275,6 +292,8 @@ QVector<PcLayer> layersOf( const QStringList & roots, const QStringList & files,
 		specs = wwPrecipFromSpgd( spgdType, spgdDensity, classFlags, spgdRed );
 		source = ( spgdRed & WwPrecip::SpgdRedFlags ) ? QStringLiteral( "record(flags 0x%1)" ).arg( classFlags, 2, 16, QLatin1Char( '0' ) )
 			: QStringLiteral( "record(spgd %1 density %2)" ).arg( spgdType ).arg( spgdDensity );
+		if ( physOff )
+			source += QStringLiteral( " (switch=off: recx:%1 layers not read)" ).arg( h.file.section( QLatin1Char( '/' ), -3 ) );
 	}
 	for ( int i = 0; i < specs.size(); i++ ) {
 		PcLayer L;
@@ -484,8 +503,11 @@ float wwCellRainWetAmount( Scene * scene )
 		s.doc = scene->nifModel;
 		s.wet = s.target;
 	} else {	// lane WETSNAP1: the game's snap to dry (red nosnap = the FO76WEATHER1 slow dry in every case)
+		// lane WEATHERRECX1: the .recx's wetting / drying minutes (red WW_WEATHER_RECORD_RED=precip: the game's speeds)
+		const WwWeatherRecx & wx = wwWeatherRecx();
+		const bool fromFile = !wwWeatherRecordRed( WwRecPrecip );
 		s.wet = WwRainWet::update( s.wet, s.target, float( now - s.lastMs ) * 0.001f, rainNow, rainPrev, !interior,
-			red != "nosnap" );
+			red != "nosnap", fromFile ? wx.wetting : -1.0f, fromFile ? wx.drying : -1.0f );
 	}
 	s.lastMs = now;
 	s.moving = s.wet != s.target;

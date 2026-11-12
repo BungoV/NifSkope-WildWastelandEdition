@@ -4,8 +4,15 @@
 #include "features/gi/bakert.h"
 #include "features/gi/bakertwalk.h"
 #include "features/gi/probebvh.h"
+#include "features/gi/rttracesetrule.h"   // lane AIRPERF1 r6: the BLAS parts' plan
+#include "features/gi/vkasyncrule.h"     // lane VKCOMPUTE1: the queue family
 #include "harnesswindow.h"   // wwHarnessSettingsSuffix
 #include "version.h"
+// lane VKFRAME1: the Vulkan frame takes this device (notes/vkframe1/BAKERT_REQUEST.md); until vkframe.h lands the call drops out
+#if __has_include( "features/vkframe/vkframe.h" )
+#include "features/vkframe/vkframe.h"   // wwVkFrameSetDevice
+#define BAKERT_VKFRAME 1
+#endif
 
 #include <QSettings>
 
@@ -88,6 +95,8 @@ struct Dev
 	VkDevice dev = VK_NULL_HANDLE;
 	VkQueue q = VK_NULL_HANDLE;
 	uint32_t qf = 0;
+	bool async = false;      // lane VKCOMPUTE1: qf is a compute-only family (runs beside GL's graphics queue)
+	std::string queueWhy;
 	VkPhysicalDeviceMemoryProperties mem {};
 	VkCommandPool pool = VK_NULL_HANDLE;
 	VkCommandBuffer cb = VK_NULL_HANDLE;
@@ -104,6 +113,14 @@ struct Dev
 };
 
 const char * kRed = "WW_BAKE_RT_RED";
+
+//! lane VKCOMPUTE1: the Async compute row (Settings, General; default on), read once at the device's creation
+bool asyncComputeRow()
+{
+	QSettings s( QStringLiteral( "NifTools" ),
+		QStringLiteral( "NifSkope " ) + NifSkopeVersion::rawToMajMin( NIFSKOPE_VERSION ) + wwHarnessSettingsSuffix() );
+	return s.value( QLatin1String( "Settings/Nif/Async Compute" ), true ).toBool();
+}
 
 uint32_t memType( const Dev & D, uint32_t bits, VkMemoryPropertyFlags want )
 {
@@ -372,6 +389,23 @@ void init( Dev & D )
 	}
 	D.pd = pds[size_t( best )];
 	D.qf = bestQf;
+	{   // lane VKCOMPUTE1: a compute-only family when the device has one (vkasyncrule.h); red WW_VKASYNC_RED=1 = as before
+		uint32_t nq = 0;
+		vk.vkGetPhysicalDeviceQueueFamilyProperties( D.pd, &nq, nullptr );
+		std::vector<VkQueueFamilyProperties> qs( nq );
+		vk.vkGetPhysicalDeviceQueueFamilyProperties( D.pd, &nq, qs.data() );
+		std::vector<uint32_t> fl( nq ), ts( nq );
+		for ( uint32_t k = 0; k < nq; k++ ) {
+			fl[k] = qs[k].queueFlags;
+			ts[k] = qs[k].timestampValidBits;
+		}
+		const char * ar = std::getenv( "WW_VKASYNC_RED" );
+		const vkasync::Pick pk = vkasync::pickFamily( fl.data(), ts.data(), nq, asyncComputeRow(), ar && !std::strcmp( ar, "1" ) );
+		if ( pk.family >= 0 )
+			D.qf = uint32_t( pk.family );
+		D.async = pk.why == vkasync::Why::Async;
+		D.queueWhy = vkasync::whyText( pk.why );
+	}
 	VkPhysicalDeviceProperties pp;
 	vk.vkGetPhysicalDeviceProperties( D.pd, &pp );
 	D.name = pp.deviceName;
@@ -434,6 +468,7 @@ void init( Dev & D )
 	}
 	vk.vkGetDeviceQueue( D.dev, D.qf, 0, &D.q );
 	D.share = share;
+	std::fprintf( stderr, "vk async: device %s queue family %u: %s\n", D.name.c_str(), D.qf, D.queueWhy.c_str() );
 	{
 		VkPhysicalDeviceIDProperties idp { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ID_PROPERTIES };
 		VkPhysicalDeviceProperties2 p2 { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2 };
@@ -491,6 +526,11 @@ void init( Dev & D )
 		&& makeBuf( D, D.cap * 8, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, { kHost | VK_MEMORY_PROPERTY_HOST_CACHED_BIT, kHost }, D.xhits );
 	if ( wantX && !D.x && D.why.empty() )
 		D.why = "no memory for the whole-ray batch";
+#ifdef BAKERT_VKFRAME
+	// every vkQueueSubmit on D.q holds D.m (bakert, rtddgi_vk.inc, restir_vk.inc, airrays_vk.inc): the frame's submits take it too
+	if ( D.ok && D.share )
+		wwVkFrameSetDevice( D.inst, D.pd, D.dev, D.qf, D.q, (void *) vk.vkGetDeviceProcAddr, D.deviceUuid, &D.m );
+#endif
 }
 
 Dev & dev()
@@ -502,6 +542,18 @@ Dev & dev()
 }
 
 } // namespace
+
+bool asyncQueue()
+{
+	Dev & D = dev();
+	return D.ok && D.async;
+}
+
+std::string queueInfo()
+{
+	Dev & D = dev();
+	return D.ok ? "q" + std::to_string( D.qf ) + ( D.async ? " async" : " shared with graphics" ) : std::string( "no device" );
+}
 
 const char * pathName( Path p )
 {
@@ -565,8 +617,43 @@ std::string deviceName()
 	return dev().ok ? dev().name : std::string();
 }
 
+/* lane AIRPERF1 r6: one BLAS of a soup in parts (rttracesetrule.h blasPlan), kept on the device while any scene holds
+ * it and found again by its triangles' bytes: a new traced set builds only the parts that changed. A BLAS needs its
+ * vertex buffer only while it is built, so a kept one outlives the scene it was built for. All under D.m. */
+struct PartBlas
+{
+	uint64_t key = 0, key2 = 0;   // two hashes of the part's true triangles (+ how far they grew, alpha-tested or not)
+	uint32_t tris = 0;
+	bool alpha = false;
+	VkAccelerationStructureKHR as = VK_NULL_HANDLE;
+	Buf buf;
+	VkDeviceAddress addr = 0;
+	int refs = 0;
+};
+
+std::vector<PartBlas *> & partCache()
+{
+	static std::vector<PartBlas *> c;
+	return c;
+}
+
+void partDrop( Dev & D, PartBlas * p )
+{
+	if ( !p || --p->refs > 0 )
+		return;
+	std::vector<PartBlas *> & c = partCache();
+	c.erase( std::remove( c.begin(), c.end(), p ), c.end() );
+	if ( p->as )
+		vk.vkDestroyAccelerationStructureKHR( D.dev, p->as, nullptr );
+	freeBuf( D, p->buf );
+	delete p;
+}
+
 struct Scene::Impl
 {
+	std::vector<PartBlas *> parts;      // AIRPERF1 r6: the BLASes of a soup in parts (empty: the one `blas`)
+	int partCount = 0, partNew = 0, partReused = 0;   // the soup's parts; BLASes built here / found again
+	long long partTrisNew = 0, partTrisReused = 0;
 	Buf triOf, maskTris, maps, alpha;   // the alpha masks (both tracers)
 	Buf verts, remap, blasBuf, tlasBuf; // rt
 	Buf vertsBlas;                      // lane GIBAKE2: the grown triangles the BLAS is built from (whole rays only)
@@ -589,6 +676,9 @@ struct Scene::Impl
 			vk.vkDestroyAccelerationStructureKHR( D.dev, tlas, nullptr );
 		if ( blas )
 			vk.vkDestroyAccelerationStructureKHR( D.dev, blas, nullptr );
+		for ( PartBlas * p : parts )
+			partDrop( D, p );
+		parts.clear();
 		for ( Buf * b : { &triOf, &maskTris, &maps, &alpha, &verts, &vertsBlas, &remap, &blasBuf, &tlasBuf, &nodes, &idx, &tris } )
 			freeBuf( D, *b );
 	}
@@ -646,7 +736,161 @@ bool buildCompute( Dev & D, const probebvh::Bvh & bvh, Scene::Impl & I )
 		&& upload( D, bvh.t.data(), bvh.t.size() * 4, u, I.tris );
 }
 
-bool buildRt( Dev & D, const probebvh::Bvh & bvh, Scene::Impl & I )
+/*! lane AIRPERF1 r6: the soup's BLAS in parts. Each planned part is one single-geometry BLAS over its rows of the
+ *  vertex table (opaque, or alpha-tested with the any-hit candidates); one found in the cache by its key is taken as it
+ *  is, the others are built in ONE build command. The TLAS holds an identity instance a BLAS whose custom index is the
+ *  part's first table row: the kernels add it to the primitive (trace.comp ddgiPrim; rttracesetrule.h blasRow). */
+bool buildRtParts( Dev & D, Scene::Impl & I, const std::vector<rttracesetrule::BlasPart> & plan,
+	const std::vector<std::pair<uint64_t, uint64_t>> & keys, VkDeviceAddress blasVerts, VkBufferUsageFlags in )
+{
+	const VkBufferUsageFlags asu = VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
+	const size_t n = plan.size();
+	const VkDeviceSize al = std::max<VkDeviceSize>( D.scratchAlign, 1 );
+	std::vector<VkAccelerationStructureGeometryKHR> geo( n );
+	std::vector<VkAccelerationStructureBuildRangeInfoKHR> ranges( n );
+	std::vector<VkAccelerationStructureBuildGeometryInfoKHR> bis;
+	std::vector<const VkAccelerationStructureBuildRangeInfoKHR *> pr;
+	std::vector<VkDeviceSize> scratchAt;
+	bis.reserve( n );
+	pr.reserve( n );
+	I.parts.reserve( n );
+	VkDeviceSize scratchSum = 0;
+	std::vector<PartBlas *> & cache = partCache();
+	for ( size_t k = 0; k < n; k++ ) {
+		const rttracesetrule::BlasPart & b = plan[k];
+		PartBlas * hit = nullptr;
+		for ( PartBlas * c : cache )
+			if ( c->key == keys[k].first && c->key2 == keys[k].second && c->tris == b.count && c->alpha == b.alpha ) {
+				hit = c;
+				break;
+			}
+		if ( hit ) {
+			hit->refs++;
+			I.parts.push_back( hit );
+			I.partReused++;
+			I.partTrisReused += b.count;
+			continue;
+		}
+		VkAccelerationStructureGeometryKHR & x = geo[k];
+		x.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR;
+		x.geometryType = VK_GEOMETRY_TYPE_TRIANGLES_KHR;
+		x.flags = b.alpha ? 0 : VK_GEOMETRY_OPAQUE_BIT_KHR;
+		auto & tr = x.geometry.triangles;
+		tr.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_TRIANGLES_DATA_KHR;
+		tr.vertexFormat = VK_FORMAT_R32G32B32_SFLOAT;
+		tr.vertexData.deviceAddress = blasVerts + VkDeviceAddress( b.row ) * 36;
+		tr.vertexStride = 12;
+		tr.maxVertex = b.count * 3 - 1;
+		tr.indexType = VK_INDEX_TYPE_NONE_KHR;
+		ranges[k].primitiveCount = b.count;
+		VkAccelerationStructureBuildGeometryInfoKHR bi { VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR };
+		bi.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
+		bi.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR;
+		bi.mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR;
+		bi.geometryCount = 1;
+		bi.pGeometries = &geo[k];
+		VkAccelerationStructureBuildSizesInfoKHR bs { VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR };
+		vk.vkGetAccelerationStructureBuildSizesKHR( D.dev, VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR, &bi, &b.count, &bs );
+		PartBlas * p = new PartBlas;
+		p->key = keys[k].first;
+		p->key2 = keys[k].second;
+		p->tris = b.count;
+		p->alpha = b.alpha;
+		p->refs = 1;
+		// in the cache and the scene at once: a failure below is undone by the scene's release (the last holder frees it)
+		cache.push_back( p );
+		I.parts.push_back( p );
+		if ( !makeBuf( D, bs.accelerationStructureSize, asu, { kDevLocal, kHost }, p->buf ) )
+			return false;
+		VkAccelerationStructureCreateInfoKHR ci { VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_KHR };
+		ci.buffer = p->buf.b;
+		ci.size = bs.accelerationStructureSize;
+		ci.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
+		if ( vk.vkCreateAccelerationStructureKHR( D.dev, &ci, nullptr, &p->as ) != VK_SUCCESS )
+			return false;
+		VkAccelerationStructureDeviceAddressInfoKHR ai { VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_DEVICE_ADDRESS_INFO_KHR };
+		ai.accelerationStructure = p->as;
+		p->addr = vk.vkGetAccelerationStructureDeviceAddressKHR( D.dev, &ai );
+		bi.dstAccelerationStructure = p->as;
+		scratchAt.push_back( scratchSum );
+		scratchSum += ( bs.buildScratchSize + al - 1 ) / al * al;
+		bis.push_back( bi );
+		pr.push_back( &ranges[k] );
+		I.partNew++;
+		I.partTrisNew += b.count;
+	}
+
+	// the TLAS: an identity instance a BLAS, double-sided; its custom index = the part's first row of the tables
+	std::vector<VkAccelerationStructureInstanceKHR> inst( n );
+	for ( size_t k = 0; k < n; k++ ) {
+		VkAccelerationStructureInstanceKHR & x = inst[k];
+		x.transform.matrix[0][0] = x.transform.matrix[1][1] = x.transform.matrix[2][2] = 1.0f;
+		x.instanceCustomIndex = plan[k].row & 0xFFFFFFu;
+		x.mask = 0xFF;
+		x.flags = VK_GEOMETRY_INSTANCE_TRIANGLE_FACING_CULL_DISABLE_BIT_KHR;
+		x.accelerationStructureReference = I.parts[k]->addr;
+	}
+	Buf ib;
+	if ( !makeBuf( D, n * sizeof( VkAccelerationStructureInstanceKHR ), in, { kHost }, ib ) )
+		return false;
+	std::memcpy( ib.map, inst.data(), n * sizeof( VkAccelerationStructureInstanceKHR ) );
+	VkAccelerationStructureGeometryKHR tg { VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR };
+	tg.geometryType = VK_GEOMETRY_TYPE_INSTANCES_KHR;
+	tg.geometry.instances.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_INSTANCES_DATA_KHR;
+	tg.geometry.instances.data.deviceAddress = ib.addr;
+	VkAccelerationStructureBuildGeometryInfoKHR ti { VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR };
+	ti.type = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR;
+	ti.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR;
+	ti.mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR;
+	ti.geometryCount = 1;
+	ti.pGeometries = &tg;
+	const uint32_t nInst = uint32_t( n );
+	VkAccelerationStructureBuildSizesInfoKHR ts { VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR };
+	vk.vkGetAccelerationStructureBuildSizesKHR( D.dev, VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR, &ti, &nInst, &ts );
+	bool ok = makeBuf( D, ts.accelerationStructureSize, asu, { kDevLocal, kHost }, I.tlasBuf );
+	if ( ok ) {
+		VkAccelerationStructureCreateInfoKHR tci { VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_KHR };
+		tci.buffer = I.tlasBuf.b;
+		tci.size = ts.accelerationStructureSize;
+		tci.type = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR;
+		ok = vk.vkCreateAccelerationStructureKHR( D.dev, &tci, nullptr, &I.tlas ) == VK_SUCCESS;
+	}
+	Buf scratch;
+	// every new BLAS has its own stretch of the scratch (they build in one command); the TLAS, built after, takes it again
+	const VkDeviceSize sz = std::max( scratchSum, ts.buildScratchSize ) + al;
+	ok = ok && makeBuf( D, sz, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, { kDevLocal, kHost }, scratch );
+	if ( ok ) {
+		const VkDeviceAddress sa = ( scratch.addr + al - 1 ) / al * al;
+		for ( size_t k = 0; k < bis.size(); k++ )
+			bis[k].scratchData.deviceAddress = sa + scratchAt[k];
+		ti.dstAccelerationStructure = I.tlas;
+		ti.scratchData.deviceAddress = sa;
+		VkAccelerationStructureBuildRangeInfoKHR tr {};
+		tr.primitiveCount = nInst;
+		const VkAccelerationStructureBuildRangeInfoKHR * ptr = &tr;
+		ok = begin( D );
+		if ( ok ) {
+			if ( !bis.empty() ) {
+				vk.vkCmdBuildAccelerationStructuresKHR( D.cb, uint32_t( bis.size() ), bis.data(), pr.data() );
+				VkMemoryBarrier mb { VK_STRUCTURE_TYPE_MEMORY_BARRIER };
+				mb.srcAccessMask = VK_ACCESS_ACCELERATION_STRUCTURE_WRITE_BIT_KHR;
+				mb.dstAccessMask = VK_ACCESS_ACCELERATION_STRUCTURE_READ_BIT_KHR | VK_ACCESS_ACCELERATION_STRUCTURE_WRITE_BIT_KHR;
+				vk.vkCmdPipelineBarrier( D.cb, VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
+					VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR, 0, 1, &mb, 0, nullptr, 0, nullptr );
+			}
+			vk.vkCmdBuildAccelerationStructuresKHR( D.cb, 1, &ti, &ptr );
+			ok = submitWait( D );
+		}
+	}
+	freeBuf( D, scratch );
+	freeBuf( D, ib );
+	return ok;
+}
+
+/*! AIRPERF1 r6: `parts` = the soup's parts (first triangle of each; null or under two = the one BLAS, as before) builds
+ *  a BLAS a part (buildRtParts). `partsRed` keeps the parts' frame and grown amount but builds the one BLAS: the CLI's
+ *  old-against-new gate */
+bool buildRt( Dev & D, const probebvh::Bvh & bvh, Scene::Impl & I, const std::vector<uint32_t> * parts = nullptr, bool partsRed = false )
 {
 	// the opaque triangles first (geometry 0), then the alpha-tested ones (geometry 1); remap = their soup numbers
 	const probebvh::AlphaMask * m = I.useMask ? bvh.mask : nullptr;
@@ -663,6 +907,12 @@ bool buildRt( Dev & D, const probebvh::Bvh & bvh, Scene::Impl & I )
 	std::vector<float> v( size_t( I.nTri ) * 9 );
 	for ( size_t i = 0; i < remap.size(); i++ )
 		std::memcpy( &v[i * 9], &bvh.t[size_t( remap[i] ) * 9], 36 );
+	// AIRPERF1 r6: the soup in parts (a custom index holds 24 bits: a bigger soup stays one BLAS)
+	const bool wantParts = parts && parts->size() > 1 && I.nTri < ( 1u << 24 );
+	std::vector<rttracesetrule::BlasPart> plan;
+	if ( wantParts && !partsRed )
+		plan = rttracesetrule::blasPlan( *parts, I.nTri, masked );
+	I.partCount = plan.empty() ? 0 : int( parts->size() );
 	const VkBufferUsageFlags in = VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR
 		| VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
 	// lane RTGI1: the whole-ray tracer reads the vertices too (its double re-test)
@@ -684,7 +934,9 @@ bool buildRt( Dev & D, const probebvh::Bvh & bvh, Scene::Impl & I )
 			mag = std::max( mag, std::max( std::abs( lo[k] ), std::abs( hi[k] ) ) );
 			diag2 += ( hi[k] - lo[k] ) * ( hi[k] - lo[k] );
 		}
-		const double del = 4e-6 * ( mag + std::sqrt( diag2 ) + 1.0 );   // rqx.comp's kErr x (|o| + t + 1), t <= diag
+		double del = 4e-6 * ( mag + std::sqrt( diag2 ) + 1.0 );   // rqx.comp's kErr x (|o| + t + 1), t <= diag
+		if ( wantParts )
+			del = rttracesetrule::growQuant( del );   // AIRPERF1 r6: a part grown under one set's bound serves the next
 		I.inflate = del;
 		std::vector<float> g( v.size() );
 		int capped = 0;
@@ -694,8 +946,24 @@ bool buildRt( Dev & D, const probebvh::Bvh & bvh, Scene::Impl & I )
 		if ( !upload( D, g.data(), g.size() * 4, in, I.vertsBlas ) )
 			return false;
 	}
+	// AIRPERF1 r6: a part's key = its true triangles' bytes, how far they grew, alpha-tested or not
+	std::vector<std::pair<uint64_t, uint64_t>> keys;
+	if ( !plan.empty() ) {
+		uint64_t delBits = 0;
+		std::memcpy( &delBits, &I.inflate, sizeof delBits );
+		keys.reserve( plan.size() );
+		for ( const rttracesetrule::BlasPart & b : plan ) {
+			const uint64_t seed = delBits ^ ( b.alpha ? 0xA1FAull << 40 : 0ull );
+			const void * p = &v[size_t( b.row ) * 9];
+			const size_t nb = size_t( b.count ) * 36;
+			keys.push_back( { rttracesetrule::bytesKey( p, nb, seed ^ 0x9E3779B97F4A7C15ull ),
+				rttracesetrule::bytesKey( p, nb, ~seed * 0xD6E8FEB86659FD93ull ) } );
+		}
+	}
 	std::vector<float>().swap( v );
 	const VkDeviceAddress blasVerts = I.vertsBlas.addr ? I.vertsBlas.addr : I.verts.addr;
+	if ( !plan.empty() )
+		return buildRtParts( D, I, plan, keys, blasVerts, in );
 
 	VkAccelerationStructureGeometryKHR g[2] {};
 	uint32_t counts[2] = { I.nOpaque, I.nTri - I.nOpaque };

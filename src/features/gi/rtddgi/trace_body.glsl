@@ -1,7 +1,9 @@
 // Lane RTEMIS1: the probe trace's helpers (ddgiNearest, ddgiShadow, ddgiDirect, ddgiIrradianceAt, ddgiHitRadiance),
 // split out of trace.comp so restirgi.comp shades its rays with the same rules. Include after ddgi_common.glsl.
-// BLAS (geometry g, primitive i) -> its row in remap[] / verts[] (geometry 1 follows the P.counts.w opaque rows)
-uint ddgiPrim( uint g, uint i ) { return i + ( g == 1u ? uint( P.counts.w ) : 0u ); }
+// BLAS (geometry g, primitive i) -> its row in remap[] / verts[] (geometry 1 follows the P.counts.w opaque rows).
+// AIRPERF1 r6: c = the instance's custom index, the first row of a BLAS part (0: the single soup's one instance).
+// MIRROR rttracesetrule.h blasRow
+uint ddgiPrim( uint c, uint g, uint i ) { return c + i + ( g == 1u ? uint( P.counts.w ) : 0u ); }
 
 // MIRROR probebvh.h Bvh::tri (in float): the ray against BLAS row pr's TRUE triangle (binding 8, not the grown copy
 // the BLAS was built from); u weighs vertex 1, v vertex 2 (the barycentrics ddgiHole and AlphaMask::hole take)
@@ -54,7 +56,7 @@ bool ddgiShadow( vec3 o, vec3 d, float tmax )
 	while ( rayQueryProceedEXT( q ) ) {
 		if ( rayQueryGetIntersectionTypeEXT( q, false ) != gl_RayQueryCandidateIntersectionTriangleEXT )
 			continue;
-		const uint pr = ddgiPrim( rayQueryGetIntersectionGeometryIndexEXT( q, false ), rayQueryGetIntersectionPrimitiveIndexEXT( q, false ) );
+		const uint pr = ddgiPrim( uint( rayQueryGetIntersectionInstanceCustomIndexEXT( q, false ) ), rayQueryGetIntersectionGeometryIndexEXT( q, false ), rayQueryGetIntersectionPrimitiveIndexEXT( q, false ) );
 		if ( hw ) {
 			const vec2 bc = rayQueryGetIntersectionBarycentricsEXT( q, false );
 			if ( !ddgiHole( remap[pr], bc.x, bc.y ) )
@@ -81,7 +83,7 @@ bool ddgiNearest( vec3 o, vec3 d, float tmax, out uint bestPr, out float bestT )
 		while ( rayQueryProceedEXT( q ) ) {
 			if ( rayQueryGetIntersectionTypeEXT( q, false ) != gl_RayQueryCandidateIntersectionTriangleEXT )
 				continue;
-			const uint pr = ddgiPrim( rayQueryGetIntersectionGeometryIndexEXT( q, false ), rayQueryGetIntersectionPrimitiveIndexEXT( q, false ) );
+			const uint pr = ddgiPrim( uint( rayQueryGetIntersectionInstanceCustomIndexEXT( q, false ) ), rayQueryGetIntersectionGeometryIndexEXT( q, false ), rayQueryGetIntersectionPrimitiveIndexEXT( q, false ) );
 			const vec2 bc = rayQueryGetIntersectionBarycentricsEXT( q, false );
 			if ( !ddgiHole( remap[pr], bc.x, bc.y ) )
 				rayQueryConfirmIntersectionEXT( q );
@@ -89,7 +91,7 @@ bool ddgiNearest( vec3 o, vec3 d, float tmax, out uint bestPr, out float bestT )
 		if ( rayQueryGetIntersectionTypeEXT( q, true ) != gl_RayQueryCommittedIntersectionTriangleEXT )
 			return false;
 		bestT = rayQueryGetIntersectionTEXT( q, true );
-		bestPr = ddgiPrim( rayQueryGetIntersectionGeometryIndexEXT( q, true ), rayQueryGetIntersectionPrimitiveIndexEXT( q, true ) );
+		bestPr = ddgiPrim( uint( rayQueryGetIntersectionInstanceCustomIndexEXT( q, true ) ), rayQueryGetIntersectionGeometryIndexEXT( q, true ), rayQueryGetIntersectionPrimitiveIndexEXT( q, true ) );
 		return true;
 	}
 	bool hit = false;
@@ -99,7 +101,7 @@ bool ddgiNearest( vec3 o, vec3 d, float tmax, out uint bestPr, out float bestT )
 		while ( rayQueryProceedEXT( q ) ) {
 			if ( rayQueryGetIntersectionTypeEXT( q, false ) != gl_RayQueryCandidateIntersectionTriangleEXT )
 				continue;
-			const uint pr = ddgiPrim( rayQueryGetIntersectionGeometryIndexEXT( q, false ), rayQueryGetIntersectionPrimitiveIndexEXT( q, false ) );
+			const uint pr = ddgiPrim( uint( rayQueryGetIntersectionInstanceCustomIndexEXT( q, false ) ), rayQueryGetIntersectionGeometryIndexEXT( q, false ), rayQueryGetIntersectionPrimitiveIndexEXT( q, false ) );
 			float t, u, v;
 			if ( ddgiTriTest( pr, o, d, t, u, v ) && t > DDGI_TMIN && t <= bestT && !ddgiHole( remap[pr], u, v ) ) {
 				bestT = t;
@@ -121,7 +123,7 @@ bool ddgiNearest( vec3 o, vec3 d, float tmax, out uint bestPr, out float bestT )
 	while ( rayQueryProceedEXT( q2 ) ) {
 		if ( rayQueryGetIntersectionTypeEXT( q2, false ) != gl_RayQueryCandidateIntersectionTriangleEXT )
 			continue;
-		const uint pr = ddgiPrim( rayQueryGetIntersectionGeometryIndexEXT( q2, false ), rayQueryGetIntersectionPrimitiveIndexEXT( q2, false ) );
+		const uint pr = ddgiPrim( uint( rayQueryGetIntersectionInstanceCustomIndexEXT( q2, false ) ), rayQueryGetIntersectionGeometryIndexEXT( q2, false ), rayQueryGetIntersectionPrimitiveIndexEXT( q2, false ) );
 		float t, u, v;
 		if ( ddgiTriTest( pr, o, d, t, u, v ) && t > DDGI_TMIN && t >= t0 - w && t <= t0 + w && !ddgiHole( remap[pr], u, v ) ) {
 			const bool back = ddgiBackFace( pr, d );

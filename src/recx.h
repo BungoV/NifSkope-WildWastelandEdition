@@ -44,6 +44,28 @@ struct WwRecxHit
 //! the roots, first wins (above); pluginFiles = the loaded plugins' full paths, in load order
 QStringList wwRecxRoots( const QStringList & pluginFiles, const QString & gameData );
 
+/*! lane WEATHERRECX1: the mod folders of the mod manager's profile, lowest first (MO2's resource stack). A mod with no
+ *  plugin (Fusion Shaders - Assets) is a root when it holds Plugins/. Set once by the application (recxmodroots.cpp);
+ *  unset (the offline gates) = only WW_RECX_MODS. */
+using WwRecxModRootsFn = QStringList ( * )();
+void wwRecxSetModRoots( WwRecxModRootsFn fn );
+
+/* lane WEATHERRECX1: the graphics provider (the Fusion Shaders data mod, MO2 mods\Fusion Shaders - Assets): every
+ * graphics .recx NifSkope writes goes under Plugins/<this>/; the old name "FO4CS" is still read for one release */
+inline QString wwRecxProvider()
+{
+	return QStringLiteral( "Fusion Shaders - Assets" );
+}
+inline QString wwRecxOldProvider()
+{
+	return QStringLiteral( "FO4CS" );
+}
+
+/*! lane WEATHERRECX1: the Fusion Shaders data mod's folder (its Textures and Plugins), empty when there is none:
+ *  WW_ASSETS_MOD=<dir>, else <MO2>/mods/<wwRecxProvider()> beside the profile NifSkope reads, enabled or not.
+ *  Defined in recxmodroots.cpp (the application only; the offline gates never call it). */
+QString wwAssetsModRoot();
+
 /*! The winning `block` ("groundFog") for one record of `category` ("Weathers"), its record key `key` ("weather"):
  *  the plugin that defines the record (file name with extension), its id inside that plugin, its EditorID.
  *  pluginFiles (load order) set the providers' merge order. Re-scans the roots when a file changed (at most every

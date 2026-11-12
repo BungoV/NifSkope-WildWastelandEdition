@@ -1,5 +1,5 @@
 #!/bin/bash
-# lane FO76WEATHER1: bash tests/features/weather/rainwet/run.sh <outdir>. Green must exit 0; the red (-DRAINWET_RED, the base: no rain
+# lane WETWEATHER1: bash tests/features/weather/rainwet/run.sh <outdir>. Green must exit 0; the red (-DRAINWET_RED, the base: no rain
 # wetness) must fail. Pure headers, UCRT64 g++ (its runtime first on PATH in the same call).
 set -u
 OUT=${1:?outdir}

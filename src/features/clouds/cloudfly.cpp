@@ -6,6 +6,7 @@
 #include "features/sky/atmomath.h"
 #include "recx.h"
 #include "wwswitch.h"
+#include "wwsyncred.h"	// lane PERFFIX6: ^WW_SYNC_RED
 #include "gl/glscene.h"
 #include "gl/lookdevstage.h"
 #include "gl/renderer.h"
@@ -30,7 +31,11 @@ namespace
 
 namespace F = WwCloudFlyMath;
 using WwAtmoMath::kUnitKm;
-constexpr const char * kKey = "Settings/Render/Scene/Fly-through Clouds";
+/* SKYLIGHT1 (bungo: the clouds "don't have a defined height"): the row ships Low, so the bands sit at world heights
+ * (wwCloudFlyWorldHeights) and the camera can fly up to and through them; a new key, so a saved Off from before does not
+ * keep the eye-relative bands. Red: WW_CLOUDFLY=0 (the row Off), WW_CLOUDFLY_RED=eyeheights (the bands above the eye). */
+constexpr const char * kKey = "Settings/Render/Scene/Fly-through Clouds 2";
+constexpr int kTierDef = 1;
 constexpr GLenum kTimestamp = 0x8E28;	// GL_TIMESTAMP
 constexpr double kMaxAgeS = 2.0;	// an older grid is rebuilt at once (the map's scroll is bounded by kSlackKm, not by time)
 
@@ -55,6 +60,8 @@ struct FlState
 	QElapsedTimer hAge;
 };
 
+bool red( const char * word );
+
 FlState & cs()
 {
 	static FlState s;
@@ -71,12 +78,19 @@ FlState & cs()
 				: e == QLatin1StringView( "high" ) ? 3 : e == QLatin1StringView( "ultra" ) ? 4 : 0;
 			s.pinned = true;
 		} else if ( wwHarnessRun() ) {
-			s.tier = 0;	// a harness measures what it pins
+			/* SKYLIGHT1 round 2: any WW_ variable in the environment makes a "harness" run (nifskope.cpp wwHeadlessRun),
+			 * bungo's flights included, so the row's default never reached them (cloudmap heights=eye: the bands rode with
+			 * the camera and ran away from it). A harness now takes the shipped default; it pins WW_CLOUDFLY to measure
+			 * another. Red WW_CLOUDFLY_RED=harnessoff: a harness pinned Off (before). */
+			s.tier = red( "harnessoff" ) ? 0 : kTierDef;
 			s.pinned = true;
 		} else {
-			s.tier = std::clamp( QSettings().value( QLatin1StringView( kKey ), 0 ).toInt(), 0, 4 );
+			s.tier = std::clamp( QSettings().value( QLatin1StringView( kKey ), kTierDef ).toInt(), 0, 4 );
 		}
 		s.hKey.clear();
+		fprintf( stderr, "cloudfly: tier=%s (%s) heights=%s (red WW_CLOUDFLY_RED=harnessoff,eyeheights)\n", tierName( s.tier ),
+			!e.isEmpty() ? "WW_CLOUDFLY" : wwHarnessRun() ? ( red( "harnessoff" ) ? "harness: Off, the red" : "harness: the shipped default" )
+				: "the row's saved setting", s.tier >= 1 && !red( "eyeheights" ) ? "world" : "eye" );
 	}
 	return s;
 }
@@ -136,7 +150,7 @@ void timeRead( NifSkopeOpenGLContext::GLFunctions * fn, FlGpu & g, int slot, boo
 {
 	if ( !g.pending[slot] )
 		return;
-	if ( !wait ) {
+	if ( !wait || !wwSyncRed() ) {	// lane PERFFIX6: an unfinished query is read next frame
 		GLuint avail = 0;
 		fn->glGetQueryObjectuiv( g.q[slot * 2 + 1], GL_QUERY_RESULT_AVAILABLE, &avail );
 		if ( !avail )

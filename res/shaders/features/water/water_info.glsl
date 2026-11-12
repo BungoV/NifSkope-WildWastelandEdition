@@ -6,9 +6,20 @@ uniform sampler2D waterInfoBodies;	// RGBA32F, 256 bodies a row: height, class, 
 uniform vec4 waterInfoGrid;		// world x, y of texel (0, 0), world units a texel, world units a shore step
 uniform vec4 waterInfoLayout;		// tiles x, tiles y, texels a tile edge, tiles an atlas row
 uniform bool waterInfoOn;		// built, uploaded, and not WW_CELL_WATER_INFO_RED=off
+// lane FARSEA1 (src/features/water/endlesssea.h): the endless sea. x = the seam band (u; 0 = no endless sea, every word
+// as baked), y = the sea body's id, z = 1 on the endless sheet's own draw; the bake's box (x0, y0, x1, y1)
+uniform vec4 waterSeam;
+uniform vec4 waterSeamBox;
 
-// The packed word at a world position: body id | shore steps << 16 | depth code << 24; the neutral word off the map
-uint wwWaterInfoWord( vec2 worldXY )
+// lane FARSEA1: 1 a band inside the bake's box, 0 at its edge (the open sea)
+float wwSeamFade( vec2 worldXY )
+{
+	vec2 a = worldXY - waterSeamBox.xy, b = waterSeamBox.zw - worldXY;
+	return clamp( min( min( a.x, a.y ), min( b.x, b.y ) ) / max( waterSeam.x, 1.0 ), 0.0, 1.0 );
+}
+
+// The packed word as baked: body id | shore steps << 16 | depth code << 24; the neutral word off the map
+uint wwWaterInfoRaw( vec2 worldXY )
 {
 	const uint neutral = 255u << 16;
 	if ( !waterInfoOn )
@@ -25,10 +36,29 @@ uint wwWaterInfoWord( vec2 worldXY )
 	return texelFetch( waterInfoAtlas, ivec2( slot % perRow, slot / perRow ) * E + ( t - tile * E ), 0 ).r;
 }
 
+/* The word every reader takes. With the endless sea (lane FARSEA1): the sea's words fade to the open sea over the
+ * seam band at the box edge (shore steps and depth code to 255), and on the endless sheet a dry or off-map word is
+ * the open sea itself (the sea body, no shore, deep). Without it, the word as baked. */
+uint wwWaterInfoWord( vec2 worldXY )
+{
+	uint w = wwWaterInfoRaw( worldXY );
+	if ( waterSeam.x <= 0.0 || !waterInfoOn )
+		return w;
+	uint id = w & 0xFFFFu, sea = uint( waterSeam.y );
+	if ( id == 0u )
+		return waterSeam.z > 0.0 ? ( sea | 0xFFFF0000u ) : w;
+	if ( id != sea )
+		return w;
+	float f = wwSeamFade( worldXY );
+	uint sh = uint( mix( 255.0, float( ( w >> 16 ) & 0xFFu ), f ) + 0.5 );
+	uint dc = uint( mix( 255.0, float( w >> 24 ), f ) + 0.5 );
+	return id | ( sh << 16 ) | ( dc << 24 );
+}
+
 // lane SHORE2: a far water fragment on a sample the .lodl calls dry (body 0); never while the lookup is not built
 bool wwFarWaterDry( vec2 worldXY )
 {
-	return waterInfoOn && ( wwWaterInfoWord( worldXY ) & 0xFFFFu ) == 0u;
+	return waterInfoOn && ( wwWaterInfoRaw( worldXY ) & 0xFFFFu ) == 0u;
 }
 
 // lane WATERFLOWBAKE1: the baked flow plane as a velocity, the same sparse layout at the flow plane's rate
@@ -54,7 +84,8 @@ vec2 wwWaterFlow( vec2 worldXY )
 		int slot = int( ix.r ) - 1, perRow = int( waterFlowLayout.w );
 		w = texelFetch( waterFlowAtlas, ivec2( slot % perRow, slot / perRow ) * E + ( t - tile * E ), 0 ).r;
 	}
-	return vec2( float( int( w << 16u ) >> 16 ), float( int( w ) >> 16 ) ) / waterFlowGrid.w;
+	vec2 v = vec2( float( int( w << 16u ) >> 16 ), float( int( w ) >> 16 ) ) / waterFlowGrid.w;
+	return waterSeam.x > 0.0 ? v * wwSeamFade( worldXY ) : v;	// lane FARSEA1: still at the bake's edge
 }
 
 // (shore distance in world units, depth in world units, body id, class 0 sea 1 river 2 lake); neutral = (8160, 0, 0, -1)

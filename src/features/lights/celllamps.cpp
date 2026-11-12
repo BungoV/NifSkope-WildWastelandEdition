@@ -74,6 +74,7 @@ BSD License - see nifskope.h
 #include <vector>
 #include <unordered_map>	// lane PERFFIX1: the cell-uniform class records
 #include "celllights_p.h"
+#include "features/exposure/physunits.h"	// lane PHYSUNITS1: Game Light Brightness
 
 using namespace WwCellLightsP;
 
@@ -479,7 +480,7 @@ void WwCellLightsP::nifxTick( const void * nif )
 		x.key.clear();
 		return;
 	}
-	QByteArray key = QByteArray::number( red );
+	QByteArray key = QByteArray::number( red ) + ( wwPhysOn() ? "|phys" : "|van" );	// MODULES1 R6-13: the master is live
 	for ( const QString & p : files ) {
 		const QFileInfo fi( p );
 		key += '|' + p.toUtf8() + ':' + QByteArray::number( fi.exists() ? fi.size() : -1 ) + ':'
@@ -511,6 +512,60 @@ void WwCellLightsP::nifxTick( const void * nif )
 	s.docs.insert( nif, L );
 	s.version.insert( nif, s.nextVersion++ );
 	s.nifxStamp.insert( nif, s.nextNifxStamp++ );	// lane NIFXLIGHT2: src/features/gi/probesky.cpp relights the GI
+}
+
+/* lane PHYSUNITS1: Game Light Brightness, live. A placed lamp carries the G its colour took (physG, cellview.cpp); a
+ * published document (and the .nifx base it is rebuilt from) whose lamps took another G is rescaled by G / physG and
+ * republished (the clusters, the cubes and the GI take the new version). .nifx lights (physG 0) never move. Looked at
+ * when G or the document's version moves (a streamed chunk built under the old G is caught too). */
+void WwCellLightsP::physTick( const void * nif )
+{
+	/* MODULES1 R6-13: the master (Physical Light Units) is live too. A placed lamp carries the unit factor in its colour
+	 * (physIn: 1 = the record's colour x fade, the game's; the law x G while on); the wanted one is taken per lamp. */
+	ClState & s = st();
+	static QHash<const void *, QPair<int, float>> seen;
+	const bool on = wwPhysOn();
+	const float g = on ? wwPhysGameLights() : -1.0f;	// -1: vanilla
+	const int ver = s.version.value( nif, 0 );
+	const auto it = seen.constFind( nif );
+	if ( it != seen.cend() && it->first == ver && it->second == g )
+		return;
+	auto rescale = [g, on]( WwCellLighting & L ) {
+		int n = 0;
+		for ( QVector<WwCellLight> * v : { &L.lights, &L.offLights, &L.nifxOffPlaced, &L.nifxBulbs, &L.nifxOffBulbs } )
+			for ( WwCellLight & l : *v ) {
+				if ( !( l.physIn > 0.0f ) )
+					continue;
+				const float want = on ? wwPhysLighK( l.radius ) * g : 1.0f;
+				if ( l.physIn != want ) {
+					const float k = want / l.physIn;
+					for ( int c = 0; c < 3; c++ )
+						l.color[c] *= k;
+					l.physIn = want;	// 0 (a G pinned to 0): the lamp stays off, as before
+					l.physG = on ? g : 0.0f;
+					n++;
+				}
+			}
+		return n;
+	};
+	int n = 0;
+	auto d = s.docs.find( nif );
+	if ( d != s.docs.end() )
+		n += rescale( *d );
+	auto x = s.nifx.find( nif );
+	if ( x != s.nifx.end() )
+		rescale( x->base );
+	if ( n > 0 ) {
+		s.version.insert( nif, s.nextVersion++ );
+		if ( s.nifxStamp.contains( nif ) )
+			s.nifxStamp.insert( nif, s.nextNifxStamp++ );
+		if ( on )
+			std::fprintf( stderr, "phys lamps: Game Light Brightness %.3f on %d placed lamps (live)%s\n", double( g ), n,
+				wwPhysGameLightsPinned() ? " PINNED WW_PHYSUNITS_LIGHTS" : "" );
+		else
+			std::fprintf( stderr, "phys lamps: Physical Light Units off: %d placed lamps back on the record's colour x fade (x1, live)\n", n );
+	}
+	seen.insert( nif, qMakePair( s.version.value( nif, 0 ), g ) );
 }
 
 //! WW_CELL_SHADOW_DUMP=<file>: the echo, rewritten whenever the slots change

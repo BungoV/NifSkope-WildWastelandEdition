@@ -130,7 +130,9 @@ def main():
     P = A.params()
     base = dict(atRay=tuple(P['ray']), atMieS=(P['mieS'],), atMieE=(P['mieE'],),
                 atOzone=(0.0, 0.0, 0.0) if red == 'noozone' else tuple(P['oz']), atG=(P['g'],),
-                atHaze=(P['hazeE'], P['hazeH'], P['hazeMid']))
+                atHaze=(P['hazeE'], P['hazeH'], P['hazeMid']),
+                # WEATHERRECX1 haze optics at their grey defaults (atmomath.h HazeOptics); unset = 0 = no haze
+                atHazeAlbedo=(3.996 / 4.40,) * 3, atHazeSpec=(1.0, 1.0, 1.0))
     g = Gl()
     fails = 0
 

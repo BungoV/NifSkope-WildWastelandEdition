@@ -1,7 +1,9 @@
 #include "gamemanager.h"
 
 #include "celltexahead.h"
+#include "recx.h"	// lane WEATHERRECX1: the Fusion Shaders data mod (the moon maps' home)
 #include "ba2file.hpp"
+#include "wwhwuse.h"	// lane EMPTY240: archive reads through the RAM cache and the read/inflate counters
 #include "bsrefl.hpp"
 #include "material.hpp"
 #include "message.h"
@@ -194,6 +196,7 @@ void GameManager::GameResources::init_archives()
 	}
 	if ( tmp.isEmpty() )
 		return;
+	WwHw::IndexScope wwIx( parent ? "game archive index (child)" : "game archive index (every extension but .nif)" );
 	ba2File = new BA2File();
 	for ( const auto & i : tmp ) {
 		try {
@@ -222,6 +225,20 @@ void GameManager::GameResources::init_archives()
 				ba2File->loadArchivePath( own.toLocal8Bit().constData(), archiveFilterFuncTable[game] );
 #else
 				ba2File->loadArchivePath( own.toStdString().c_str(), archiveFilterFuncTable[game] );
+#endif
+			} catch ( NifSkopeError & ) {
+			}
+		}
+		/* lane WEATHERRECX1: the shipped data moved out of release/Data into the MO2 mod "Fusion Shaders - Assets"
+		 * (recx.h wwAssetsModRoot: enabled in the profile or not), read after NifSkope's own Data, so last of all */
+		const QString assets = wwAssetsModRoot();
+		if ( !assets.isEmpty() && QFileInfo( assets + QStringLiteral( "/Textures" ) ).isDir()
+			&& !tmp.contains( assets, Qt::CaseInsensitive ) ) {
+			try {
+#ifdef Q_OS_WIN32
+				ba2File->loadArchivePath( assets.toLocal8Bit().constData(), archiveFilterFuncTable[game] );
+#else
+				ba2File->loadArchivePath( assets.toStdString().c_str(), archiveFilterFuncTable[game] );
 #endif
 			} catch ( NifSkopeError & ) {
 			}
@@ -348,7 +365,7 @@ bool GameManager::GameResources::get_file( QByteArray & data, const std::string_
 		return false;
 	}
 	try {
-		ba2File->extractFile( &data, &byteArrayAllocFunc, *fd );
+		WwHw::extract( *ba2File, *fd, data, &byteArrayAllocFunc );
 	} catch ( NifSkopeError & e ) {
 		if ( std::string_view(e.what()).starts_with( "BA2File: unexpected change to size of loose file" ) ) {
 			// drop the READ lock before close_archives() takes the write one

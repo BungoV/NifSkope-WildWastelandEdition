@@ -9,6 +9,7 @@ BSD License - see nifskope.h
 #include "gl/glproperty.h"
 #include "gl/scenelighting.h"
 #include "gl/lookdevstage.h"
+#include "cellworldanim.h"	// MODULES1: the cell world clock (nothing acts paused; red WW_CELL_CLOCK_RED=harness)
 #include "features/air/cellvolair.h"	// lane VOLAIR1
 #include "features/shared/cellpasstime.h"	// lane PERF1
 #include "features/post/gametaa.h"
@@ -24,6 +25,8 @@ BSD License - see nifskope.h
 #include "features/particles/fxparity.h"	// lane FXPARITY1
 #include "ui/cellshowpanel.h"	// lane OPENCELLFIX2: the Display tab's fog and shadow rows share these settings
 #include "features/weather/esmweather.h"
+#include "features/exposure/physunits.h"	// lane PHYSUNITS1: Game Light Brightness
+#include "ui/scenewxrows.h"	// lane MODULES1 items 4 + 12: weather overrides, row layout
 #include "harnesswindow.h"
 #include "ui/widgets/wwnumberfield.h"
 #include "wwskin.h"
@@ -35,12 +38,10 @@ BSD License - see nifskope.h
 #include <QFileInfo>
 #include <QHash>
 #include <QLabel>
-#include <QHeaderView>
 #include <QScreen>
 #include <QSettings>
 #include <QSignalBlocker>
 #include <QTimer>
-#include <QTreeWidget>
 #include <QVBoxLayout>
 
 #include <algorithm>
@@ -66,36 +67,15 @@ SceneWindow::SceneWindow( QWidget * mainWindow, std::function<void()> repaint, s
 	page->setContentsMargins( 6, 6, 6, 6 );
 	page->setSpacing( 4 );
 
-	tree = new QTreeWidget( this );
-	tree->setObjectName( QStringLiteral( "SceneRows" ) );
-	tree->setColumnCount( 2 );
-	tree->setHeaderLabels( { tr( "Name" ), tr( "Value" ) } );
-	tree->setRootIsDecorated( false );
-	tree->setUniformRowHeights( true );
-	tree->setAlternatingRowColors( false );
-	tree->setSelectionMode( QAbstractItemView::NoSelection );
-	tree->setEditTriggers( QAbstractItemView::NoEditTriggers );
-	tree->setFocusPolicy( Qt::NoFocus );
-	tree->header()->setSectionResizeMode( 0, QHeaderView::ResizeToContents );
-	tree->header()->setSectionResizeMode( 1, QHeaderView::Stretch );
-	tree->setStyleSheet( wwSelectionTreeQss() );
-	page->addWidget( tree, 1 );
+	// MODULES1 R6-11: the panel standard's rows (a scroll area, one label | field grid, wwHeading groups)
+	tree = wwSceneRowsCreate( this );
+	page->addWidget( wwSceneRowsArea( tree ), 1 );
 
 	auto heading = [this]( const QString & text ) {
-		auto * it = new QTreeWidgetItem( tree );
-		it->setText( 0, text );
-		it->setFirstColumnSpanned( true );
-		QFont f = it->font( 0 );
-		f.setWeight( QFont::DemiBold );
-		it->setFont( 0, f );
-		it->setFlags( Qt::ItemIsEnabled );
+		wwSceneRowsHeading( tree, text );
 	};
 	auto row = [this]( const QString & name, QWidget * w, bool enabled ) {
-		auto * it = new QTreeWidgetItem( tree );
-		it->setText( 0, name );
-		it->setFlags( enabled ? Qt::ItemIsEnabled : Qt::NoItemFlags );
-		w->setEnabled( enabled );
-		tree->setItemWidget( it, 1, w );
+		wwSceneRowsAdd( tree, name, w, enabled );
 	};
 
 	/* ---- Mode (R2a: real) ---- */
@@ -117,6 +97,27 @@ SceneWindow::SceneWindow( QWidget * mainWindow, std::function<void()> repaint, s
 	exposureBox->setValue( double( wwSceneExposureEV() ) );
 	wwMakeScrubField( exposureBox );
 	row( tr( "Exposure" ), exposureBox, true );
+	wwSceneRowsReset( tree, exposureBox, 0.0 );	// R7 item 10: scenelighting.cpp ev = 0
+
+	// MODULES1 R6-13: the master of the real light units; Off = vanilla Fallout 4 lighting (ships), live
+	physUnitsBox = new QComboBox( tree );
+	physUnitsBox->setObjectName( QStringLiteral( "physicalLightUnits" ) );
+	physUnitsBox->addItems( { tr( "Off" ), tr( "On" ) } );
+	physUnitsBox->setCurrentIndex( std::clamp( wwPhysMaster(), 0, 1 ) );
+	physUnitsBox->setToolTip( tr( "Off is the game's own lighting. On lights the scene in real units: lamps, sun, sky, glowing surfaces and the camera's exposure." ) );
+	wwMatchFieldStyle( physUnitsBox );
+	row( tr( "Physical Light Units" ), physUnitsBox, true );
+
+	gameLightsBox = new QDoubleSpinBox( tree );	// lane PHYSUNITS1: one scale for the game's lamps and emissives
+	gameLightsBox->setObjectName( QStringLiteral( "gameLightBrightness" ) );
+	gameLightsBox->setRange( 0.25, 4.0 );
+	gameLightsBox->setSingleStep( 0.05 );
+	gameLightsBox->setDecimals( 2 );
+	gameLightsBox->setSuffix( QStringLiteral( " x" ) );
+	gameLightsBox->setValue( double( wwPhysGameLights() ) );
+	wwMakeScrubField( gameLightsBox );
+	row( tr( "Game Light Brightness" ), gameLightsBox, true );
+	wwSceneRowsReset( tree, gameLightsBox, 1.0 );
 
 	viewBox = new QComboBox( tree );
 	viewBox->setObjectName( QStringLiteral( "sceneViewTransform" ) );
@@ -148,10 +149,8 @@ SceneWindow::SceneWindow( QWidget * mainWindow, std::function<void()> repaint, s
 	hourBox->setValue( wwLookdevHour() );
 	wwMakeScrubField( hourBox );
 	row( tr( "Hour" ), hourBox, true );
-	statusLabel = new QLabel( tree );
+	statusLabel = wwSceneElideLabel( tree );	// R6-11: one line, elided; the whole text is the tooltip
 	statusLabel->setObjectName( QStringLiteral( "lookdevStatus" ) );
-	statusLabel->setWordWrap( true );
-	statusLabel->setTextInteractionFlags( Qt::TextSelectableByMouse );
 	row( tr( "Status" ), statusLabel, true );
 
 	/* ---- the weather preview (lane PBRWX1): every part its own live row, all OFF as shipped ---- */
@@ -212,6 +211,14 @@ SceneWindow::SceneWindow( QWidget * mainWindow, std::function<void()> repaint, s
 	giSkyFromPhysicalBox->setCurrentIndex( std::clamp( wwAtmoGi(), 0, 1 ) );
 	wwMatchFieldStyle( giSkyFromPhysicalBox );
 	row( tr( "GI Sky From Physical Sky" ), giSkyFromPhysicalBox, true );
+	// MODULES1 R6-12 b: the drawn sun and moon, true size / the game's / larger (needs Physical Sky), ships Game
+	bodySizeBox = new QComboBox( tree );
+	bodySizeBox->setObjectName( QStringLiteral( "sunMoonSize" ) );
+	bodySizeBox->addItems( { tr( "Physical" ), tr( "Medium" ), tr( "Game" ), tr( "Large" ) } );
+	bodySizeBox->setCurrentIndex( std::clamp( wwAtmoBodySize(), 0, 3 ) );
+	bodySizeBox->setToolTip( tr( "The drawn size of the sun and the moon. Physical is the real size in the sky, Medium draws the moon 4 degrees across, Game is the game's own, Large is half again bigger. The light does not change." ) );
+	wwMatchFieldStyle( bodySizeBox );
+	row( tr( "Sun and Moon Size" ), bodySizeBox, true );
 	liveCheck( cloudsBox, "lookdevClouds", tr( "Clouds" ), wwLookdevClouds() );
 	// lane CLOUD1: the per-weather cloud map (cloud volumes read it); ships Off
 	cloudMapBox = new QComboBox( tree );
@@ -237,8 +244,8 @@ SceneWindow::SceneWindow( QWidget * mainWindow, std::function<void()> repaint, s
 	// lane CLOUD3: the clouds' shadows on the ground, in the fog and in the GI's sun; ships Off
 	cloudShadowsBox = new QComboBox( tree );
 	cloudShadowsBox->setObjectName( QStringLiteral( "cloudShadows" ) );
-	cloudShadowsBox->addItems( { tr( "Off" ), tr( "Low" ), tr( "Medium" ), tr( "High" ), tr( "Ultra" ) } );
-	cloudShadowsBox->setCurrentIndex( std::clamp( wwCloudShadowTier(), 0, 4 ) );
+	cloudShadowsBox->addItems( { tr( "Follows Clouds" ), tr( "Low" ), tr( "Medium" ), tr( "High" ), tr( "Ultra" ) } );
+	cloudShadowsBox->setCurrentIndex( std::clamp( wwCloudShadowChoice(), 0, 4 ) );
 	wwMatchFieldStyle( cloudShadowsBox );
 	row( tr( "Cloud Shadows" ), cloudShadowsBox, true );
 	// lane CLOUD4: a camera at cloud height flies through the volume clouds; ships Off
@@ -265,6 +272,7 @@ SceneWindow::SceneWindow( QWidget * mainWindow, std::function<void()> repaint, s
 	gameDayBox->setValue( wwLookdevGameDay() );
 	wwMakeScrubField( gameDayBox );
 	row( tr( "Game Day" ), gameDayBox, true );
+	wwSceneRowsReset( tree, gameDayBox, 0.0 );	// lookdevstage.cpp gameDay = 0
 	heading( tr( "Ground" ) );
 	groundBox = new QCheckBox( tree );
 	groundBox->setObjectName( QStringLiteral( "lookdevGround" ) );
@@ -310,6 +318,7 @@ SceneWindow::SceneWindow( QWidget * mainWindow, std::function<void()> repaint, s
 	shadowDistanceBox->setValue( wwShadowDistance() );
 	wwMakeScrubField( shadowDistanceBox );
 	row( tr( "Shadow Distance" ), shadowDistanceBox, true );
+	wwSceneRowsReset( tree, shadowDistanceBox, 14000.0 );	// shadowset.cpp dist = 14000
 	// lane GAPTOOL1: SSAO and Bloom were greyed placeholders; now the cell view's own AO and bloom mode (a pin greys them)
 	liveCheck( aoBox, "cellAo", tr( "Screen-Space Ambient Occlusion" ), wwCellAoOn() );
 	aoBox->setEnabled( !wwCellAoPinned() );
@@ -334,6 +343,19 @@ SceneWindow::SceneWindow( QWidget * mainWindow, std::function<void()> repaint, s
 		syncEnabled();
 		if ( i == 2 )
 			refreshLookdev();
+		if ( m_repaint )
+			m_repaint();
+	} );
+	connect( physUnitsBox, qOverload<int>( &QComboBox::currentIndexChanged ), this, [this, live]( int i ) {
+		if ( live )
+			wwPhysSetMaster( i );	// MODULES1 R6-13: live, the lamps and the frame follow on the next paint
+		syncEnabled();	// Game Light Brightness greys while off
+		if ( m_repaint )
+			m_repaint();
+	} );
+	connect( gameLightsBox, qOverload<double>( &QDoubleSpinBox::valueChanged ), this, [this, live]( double v ) {
+		if ( live )
+			wwPhysSetGameLights( v );	// lane PHYSUNITS1: live, the lamps rescale on the next frame
 		if ( m_repaint )
 			m_repaint();
 	} );
@@ -452,6 +474,7 @@ SceneWindow::SceneWindow( QWidget * mainWindow, std::function<void()> repaint, s
 	liveTier( exposureFromSkyBox, &wwAtmoSetExpo );
 	liveTier( skyColorBox, &wwAtmoSetTint );
 	liveTier( giSkyFromPhysicalBox, &wwAtmoSetGi );
+	liveTier( bodySizeBox, &wwAtmoSetBodySize );	// MODULES1 R6-12 b
 	liveTier( cloudMapBox, &wwCloudMapSetTier );	// lane CLOUD1
 	liveTier( volumeCloudsBox, &wwCloudVolSetTier );	// lane CLOUD2
 	liveTier( cloudVarietyBox, &wwCloudVolSetVariety );	// lane CLOUD5
@@ -516,6 +539,10 @@ SceneWindow::SceneWindow( QWidget * mainWindow, std::function<void()> repaint, s
 		if ( m_repaint )
 			m_repaint();
 	} );
+	// lane MODULES1 item 12: live weather and fog overrides (WW_WX_*), each starting at the weather's own value
+	wwSceneAddWeatherOverrides( [&]( const QString & t ) { heading( t ); },
+		[&]( const QString & n, QWidget * w ) { row( n, w, true ); }, tree );
+	wwSceneTidyRows( tree );	// lane MODULES1 item 4: rows line up, whole values
 	m_cloudTimer = new QTimer( this );
 	m_cloudTimer->setInterval( 100 );
 	connect( m_cloudTimer, &QTimer::timeout, this, [this]() {
@@ -573,6 +600,9 @@ void SceneWindow::syncEnabled()
 	// The weather and ground rows act in Lookdev only.
 	const int m = modeBox ? modeBox->currentIndex() : 0;
 	exposureBox->setEnabled( m >= 1 );
+	gameLightsBox->setEnabled( wwPhysOn() && !wwPhysGameLightsPinned() );	// lane PHYSUNITS1: greyed on the red or a pin
+	if ( physUnitsBox )	// MODULES1 R6-13: greyed while WW_PHYSUNITS_RED pins it
+		physUnitsBox->setEnabled( !wwPhysMasterPinned() );
 	viewBox->setEnabled( m >= 1 );
 	const bool ld = m == 2;
 	for ( QWidget * w : { static_cast<QWidget *>( pluginBox ), static_cast<QWidget *>( weatherBox ),
@@ -584,6 +614,7 @@ void SceneWindow::syncEnabled()
 			static_cast<QWidget *>( aerialPerspectiveBox ), static_cast<QWidget *>( sunlightFromSkyBox ),
 			static_cast<QWidget *>( moonPhaseStarsBox ), static_cast<QWidget *>( exposureFromSkyBox ),
 			static_cast<QWidget *>( skyColorBox ), static_cast<QWidget *>( giSkyFromPhysicalBox ),
+			static_cast<QWidget *>( bodySizeBox ),
 			static_cast<QWidget *>( cloudMapBox ), static_cast<QWidget *>( volumeCloudsBox ),
 			static_cast<QWidget *>( cloudVarietyBox ),
 			static_cast<QWidget *>( cloudShadowsBox ), static_cast<QWidget *>( flyThroughCloudsBox ),
@@ -600,8 +631,8 @@ void SceneWindow::syncCloudTimer()
 {
 	if ( !m_cloudTimer )
 		return;
-	// a harness run pins the cloud clock (WW_LOOKDEV_CLOUDTIME, else 0 s): nothing to animate
-	const bool run = modeBox && modeBox->currentIndex() == 2 && wwLookdevClouds() && wwWorldClockLive();
+	// red WW_CELL_CLOCK_RED=harness: a harness pins the cloud clock (WW_LOOKDEV_CLOUDTIME, else 0 s), nothing animates
+	const bool run = modeBox && modeBox->currentIndex() == 2 && wwLookdevClouds() && wwCellClockLive();
 	if ( run && !m_cloudTimer->isActive() )
 		m_cloudTimer->start();
 	else if ( !run && m_cloudTimer->isActive() )
@@ -656,7 +687,7 @@ void SceneWindow::refreshStatus()
 {
 	if ( !statusLabel )
 		return;
-	statusLabel->setText( wwLookdevActive() ? wwLookdevSummary() : tr( "Lookdev off" ) );
+	wwSceneElideSet( statusLabel, wwLookdevActive() ? wwLookdevSummary() : tr( "Lookdev off" ) );
 }
 
 void SceneWindow::saveGeometryNow()
@@ -668,6 +699,9 @@ void SceneWindow::saveGeometryNow()
 
 void SceneWindow::showEvent( QShowEvent * e )
 {
+	const QSize want = wwSceneWantedSize( tree, this );	// lane MODULES1 item 4: never too small for its rows
+	if ( want.isValid() && ( width() < want.width() || height() < want.height() ) )
+		resize( std::max( width(), want.width() ), std::max( height(), want.height() ) );
 	if ( !m_placed ) {
 		m_placed = true;
 		// first ever open: beside the main window's right edge, on its screen
@@ -727,5 +761,5 @@ QWidget * wwSceneWindowEnsure( QObject * owner )
 
 bool wwSceneCloudsAnimate()
 {
-	return wwSceneMode() == WwSceneLookdev && wwLookdevClouds() && wwWorldClockLive();
+	return wwSceneMode() == WwSceneLookdev && wwLookdevClouds() && wwCellClockLive();
 }

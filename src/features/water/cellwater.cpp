@@ -16,12 +16,14 @@
 #include "features/water/cellocean.h"	// lane WATERLOOK1: the wind's wave spectrum
 #include "features/water/cellunderwater.h"	// lane WATERUNDER3: the sun under water
 #include "features/water/waterplanefit.h"	// lane WATERUNDER5: the placed-water polygon, mean plane and room test
+#include "features/water/endlesssea.h"	// lane FARSEA1: the endless sea sheet
 #include "gl/glscene.h"
 #include "gl/glshape.h"
 #include "model/nifmodel.h"
 #include "gl/gltex.h"
 #include "gl/renderer.h"
 #include "gl/celluniform.h"	// lane CELLUNI3: the blend note
+#include "features/overlays/debugview.h"	// lane DEBUGVIEW1: the water draws under a debug view
 
 #include <QFile>
 #include <QHash>
@@ -53,6 +55,10 @@ struct WaterDoc
 	QHash<quint32, int> byForm;
 	QHash<int, int> shapeBody;	// written shape's block -> index into bodies
 	QSet<int> farMask;		// lane SHORE2: far shore-law water blocks (dry samples discarded)
+	QSet<int> endless;		// lane FARSEA1: the endless sea sheet (one block)
+	float seaBox[4] = { 0.0f, 0.0f, 0.0f, 0.0f };	// lane FARSEA1: the bake's box, the sea level, the rim, the sea body
+	float seaZ = 0.0f, seaReach = 0.0f;
+	quint32 seaId = 0;
 	// lane WATERUNDER1: the shapes' world surfaces, measured once per change of shapeBody (WATERUNDER5: polygons)
 	quint64 gen = 1, planesGen = 0;
 	std::vector<WwWaterPoly> planes;
@@ -248,6 +254,7 @@ void wwCellWaterForget( const void * nif, int block )
 	if ( d != st().docs.end() ) {
 		d->shapeBody.remove( block );
 		d->farMask.remove( block );
+		d->endless.remove( block );
 		d->gen++;
 	}
 }
@@ -258,8 +265,33 @@ void wwCellWaterRemap( const void * nif, const WwBlockMap & m )
 	if ( d != st().docs.end() ) {
 		wwRemapKeys( d->shapeBody, m );
 		wwRemapKeys( d->farMask, m );
+		wwRemapKeys( d->endless, m );
 		d->gen++;
 	}
+}
+
+void wwCellWaterEndless( const void * nif, int block, const float box[4], float seaZ, float reach, quint32 seaId )
+{
+	WaterDoc & d = st().docs[nif];
+	d.endless = { block };
+	std::copy( box, box + 4, d.seaBox );
+	d.seaZ = seaZ;
+	d.seaReach = reach;
+	d.seaId = seaId;
+	d.gen++;
+}
+
+int wwCellWaterEndlessBlock( const void * nif, float box[4], float & seaZ, float & reach, quint32 & seaId )
+{
+	const WaterState & s = st();
+	const auto it = s.docs.constFind( nif );
+	if ( it == s.docs.constEnd() || it->endless.isEmpty() || !it->shapeBody.contains( *it->endless.constBegin() ) )
+		return -1;
+	std::copy( it->seaBox, it->seaBox + 4, box );
+	seaZ = it->seaZ;
+	reach = it->seaReach;
+	seaId = it->seaId;
+	return *it->endless.constBegin();
 }
 
 bool wwCellWaterOn()
@@ -279,7 +311,8 @@ void wwCellWaterSetOn( bool on )
 bool wwCellWaterWanted( Scene * scene, int block )
 {
 	const WaterState & s = st();
-	if ( s.pinOff || !scene || scene->selecting || !wwCellLightsWanted( scene ) || wwCellProbePass( scene ) )
+	// DEBUGVIEW1: a debug view is a probe pass, but its water views need the water drawn
+	if ( s.pinOff || !scene || scene->selecting || !wwCellLightsWanted( scene ) || ( wwCellProbePass( scene ) && wwDebugViewId() == 0 ) )
 		return false;
 	const auto it = s.docs.constFind( scene->nifModel );
 	return it != s.docs.constEnd() && it->shapeBody.contains( block );
@@ -295,7 +328,11 @@ bool wwCellWaterHeld( Scene * scene, int block )
 		return false;
 	const WaterState & s = st();
 	const auto it = s.docs.constFind( scene->nifModel );
-	if ( it == s.docs.constEnd() || !it->farMask.contains( block ) )
+	if ( it == s.docs.constEnd() )
+		return false;
+	if ( it->endless.contains( block ) )
+		return !wwEndlessSeaOn();	// lane FARSEA1: the Endless sea row off (or its red) skips the sheet, no repaint
+	if ( !it->farMask.contains( block ) )
 		return false;
 	WW_SWITCH_STATIC( QByteArray, red, wwEnv( "WW_CELL_FARWATER_RED" ).trimmed() );
 	if ( red == "nomask" || red == "early" || !wwCellWaterInfoBuilding( scene->nifModel ) )
@@ -360,6 +397,59 @@ void wwCellWaterSurfConsts( float surfK[4], float shoreK2[4], float shoreK3[4] )
 	}
 }
 
+namespace {
+// DEBUGVIEW1 item 5: the water draws of one frame per tier (0 near, 1 far map, 2 endless sea) and the widest far fade
+struct WaterTierTally {
+	int n[3] = { 0, 0, 0 };
+	float fade[3] = { 0.0f, 0.0f, 0.0f };
+	int ssr[3] = { 0, 0, 0 };	// FARWATER1: the draws with the march's reflections bound
+	int air[3] = { 0, 0, 0 };	// FARWATER1 round 2: the draws' waterAir (the last one per tier)
+	float handover = 0.0f;	// FARWATER1 late item 2: the map water's hand-over band at the box rim
+};
+WaterTierTally g_waterTierNow;
+QString g_waterTierSaid;
+}
+
+void wwCellWaterTierFrame()
+{
+	const WaterTierTally t = g_waterTierNow;
+	g_waterTierNow = WaterTierTally();
+	if ( t.n[0] + t.n[1] + t.n[2] == 0 && g_waterTierSaid.isEmpty() )
+		return;
+	const auto reflSrc = []( const WaterTierTally & a, int k ) {
+		return a.n[k] == 0 ? QStringLiteral( "none" ) : a.ssr[k] == a.n[k] ? QStringLiteral( "march + sky + clouds" )
+			: a.ssr[k] == 0 ? QStringLiteral( "sky + clouds" ) : QStringLiteral( "march on %1 of %2 + sky + clouds" ).arg( a.ssr[k] ).arg( a.n[k] );
+	};
+	WW_SWITCH_STATIC( QByteArray, rr, wwEnv( "WW_CELL_WATER_REFL_RED" ).trimmed() );
+	const bool nearLaw = wwCellWaterLookOn() && ( wwLookOn( WwLook::WaterRefl ) || wwLookOn( WwLook::WaterClear ) )
+		&& rr != "farcolour";
+	const QString line = QStringLiteral( "water tiers: near %1 draws, far map %2, endless sea %3 (far water draws %4); "
+		"far fade 8192 -> %5 / %6 / %7 u from the eye per tier (the WATR's own distance, eye-relative: the band moves "
+		"with the camera); far colour: %8; program %9; reflection per tier: near %10, far map %11, endless sea %12; "
+		"grazing sky (R.z < 0.08, flat water past 12.5 x the eye's height): %13; air per tier: near %14, far map %15, endless "
+		"sea %16; seam: %17" )
+		.arg( t.n[0] ).arg( t.n[1] ).arg( t.n[2] ).arg( t.n[1] + t.n[2] )
+		.arg( double( t.fade[0] ), 0, 'f', 0 ).arg( double( t.fade[1] ), 0, 'f', 0 ).arg( double( t.fade[2] ), 0, 'f', 0 )
+		.arg( nearLaw ? QStringLiteral( "the near law to the horizon (one shading for every tier)" )
+			: QStringLiteral( "the game's far swap past the fade (red farcolour or the looks off)" ) )
+		.arg( QLatin1StringView( wwCellWaterProgram() ) )
+		.arg( reflSrc( t, 0 ) ).arg( reflSrc( t, 1 ) ).arg( reflSrc( t, 2 ) )
+		.arg( rr == "grazing" ? QStringLiteral( "the clear WTHR gradient, the clouds faded out (red WW_CELL_WATER_REFL_RED=grazing)" )
+			: QStringLiteral( "the WTHR horizon row under the clouds' mean cover, the deck the drawn sky shows (FARWATER1)" ) );
+	const auto airSrc = []( const WaterTierTally & a, int k ) {
+		return a.n[k] == 0 ? QStringLiteral( "none" ) : a.air[k] == 3 ? QStringLiteral( "its point in the flat air frame (+ g^2 / 2R), no column clamp" )
+			: a.air[k] == 1 ? QStringLiteral( "no column clamp" ) : QStringLiteral( "clamped to the column (RED WW_ENDLESS_SEA_RED=air)" );
+	};
+	const QString line2 = line.arg( airSrc( t, 0 ) ).arg( airSrc( t, 1 ) ).arg( airSrc( t, 2 ) )
+		.arg( t.handover > 0.0f ? QStringLiteral( "the map water leaves the outer %1 u of the box rim to the endless sheet under it "
+			"(a per-pixel cut, no mesh edge; red WW_ENDLESS_SEA_RED=edge)" ).arg( double( t.handover ), 0, 'f', 0 )
+			: QStringLiteral( "the map water draws to its mesh edge (RED edge, or no endless sea)" ) );
+	if ( line2 == g_waterTierSaid )
+		return;
+	g_waterTierSaid = line2;
+	std::fprintf( stderr, "%s\n", qPrintable( line2 ) );
+}
+
 bool wwCellWaterUniforms( Scene * scene, int block, int unit )
 {
 	WaterState & s = st();
@@ -377,6 +467,11 @@ bool wwCellWaterUniforms( Scene * scene, int block, int unit )
 		return false;
 	const WaterBody & b = dit->bodies[sit.value()];
 	auto fn = r->fn;
+	{	// DEBUGVIEW1 item 5: this draw's tier for the "water tiers:" line
+		const int tier = dit->endless.contains( block ) ? 2 : dit->farMask.contains( block ) ? 1 : 0;
+		g_waterTierNow.n[tier]++;
+		g_waterTierNow.fade[tier] = std::max( g_waterTierNow.fade[tier], b.mat.params1[0] );
+	}
 
 	// the record's constant block, in the order the game's shader reads it (src/features/water/esmwater.h)
 	const float * rows[13] = { b.mat.shallow, b.mat.deep, b.mat.reflection, b.mat.underwater, b.mat.lightSilt,
@@ -539,10 +634,29 @@ bool wwCellWaterUniforms( Scene * scene, int block, int unit )
 	fn->glBindTexture( GL_TEXTURE_2D, ssrOn ? ssrFin : 0 );
 	prog->uni1i_l( prog->uniLocation( "waterSsrFin" ), unit++ );
 	prog->uni1b( "waterSsrOn", ssrOn );
+	if ( ssrOn )	// FARWATER1: the "water tiers:" line's reflection source per tier
+		g_waterTierNow.ssr[dit->endless.contains( block ) ? 2 : dit->farMask.contains( block ) ? 1 : 0]++;
 	unit += wwCellWaterInfoUniforms( scene, unit );	// lane WATERDATA1: units 7..9 when the program reads them (WATERFLOWBAKE1's flow: cell units 66/67)
 	{	// lane SHORE2: per draw; the red keeps SHORE1's quads whole
 		WW_SWITCH_STATIC( bool, maskRed, wwSwitchEcho( "far water dry mask red", wwEnv( "WW_CELL_FARWATER_RED" ).trimmed() == "nomask" ) );
 		prog->uni1b( "waterFarMask", dit->farMask.contains( block ) && !maskRed );
+	}
+	if ( prog->uniLocation( "waterSeam" ) >= 0 ) {	// lane FARSEA1: the endless sea and its seam (water_info.glsl)
+		const bool seaOn = !dit->endless.isEmpty() && wwEndlessSeaOn();
+		// FARWATER1 late item 2: on the map water w = the hand-over band (fo4_water.frag), inside the sheet's overlap
+		const float handover = seaOn && !dit->endless.contains( block ) ? std::min( wwEndlessSeaHandover(), 0.5f * wwEndlessSeaOverlap() ) : 0.0f;
+		if ( handover > 0.0f )
+			g_waterTierNow.handover = handover;
+		prog->uni4f( "waterSeam", FloatVector4( seaOn ? wwEndlessSeaSeam() : 0.0f, float( dit->seaId ),
+			seaOn && dit->endless.contains( block ) ? 1.0f : 0.0f,
+			seaOn && dit->endless.contains( block ) ? wwEndlessSeaOverlap() : handover ) );	// lane SKYSEA1: under the baked edge
+		prog->uni4f( "waterSeamBox", FloatVector4( dit->seaBox[0], dit->seaBox[1], dit->seaBox[2], dit->seaBox[3] ) );
+	}
+	if ( prog->uniLocation( "waterAir" ) >= 0 ) {	// FARWATER1 round 2: the air the far land at the same distance gets
+		const bool endless = dit->endless.contains( block ) && wwEndlessSeaOn();
+		const int air = wwEndlessSeaAirFlat() ? ( endless ? 3 : 1 ) : 0;
+		prog->uni1i( "waterAir", air );
+		g_waterTierNow.air[endless ? 2 : dit->farMask.contains( block ) ? 1 : 0] = air;
 	}
 	if ( prog->uniLocation( "waterShoreOn" ) >= 0 ) {
 		/* lane WATERSHORE1 (fo4_waterlook.prog, water_shore.glsl). Engineering choices in world units, no game value
@@ -601,7 +715,15 @@ bool wwCellWaterUniforms( Scene * scene, int block, int unit )
 		WW_SWITCH_STATIC( QByteArray, gr, wwEnv( "WW_CELL_WATER_GLINT_RED" ).trimmed() );
 		prog->uni1b( "waterReflOn", reflOn );
 		prog->uni1b( "waterGlintOn", glintOn );
-		prog->uni1i( "waterReflRed", rr == "record" ? 1 : rr == "farcolour" ? 2 : rr == "sharp" ? 4 : 0 );
+		prog->uni1i( "waterReflRed", rr == "record" ? 1 : rr == "farcolour" ? 2 : rr == "sharp" ? 4
+			: rr == "cloudedge" ? 16 : rr == "grazing" ? 32 : 0 );	// FARWATER1: grazing = the clear sky at the horizon	// lane SKYSEA1: cloudedge = the cloud map's hard square edge in the water
+		static bool edgeSaid = false;
+		if ( reflOn && !edgeSaid ) {
+			edgeSaid = true;
+			fprintf( stderr, "cell water: reflected clouds %s\n", rr == "cloudedge"
+				? "cut at the cloud map's square edge (red WW_CELL_WATER_REFL_RED=cloudedge)"
+				: "fade to the band's mean cover over the cloud map's outer 15% (no square line on the sea; lane SKYSEA1)" );
+		}
 		prog->uni1i( "waterGlintRed", gr == "game" ? 1 : gr == "nolean" ? 2 : gr == "noshoulder" ? 4
 			: gr == "noglitter" ? 8 : gr == "nodisc" ? 16 : gr == "pixel" ? 32 : gr == "nolodblend" ? 64
 			: gr == "sparse" ? 128 : 0 );	// WATERLOOK1 step 9; FIX1031B: sparse = the bare count, then the shoulder
@@ -723,6 +845,8 @@ bool wwCellWaterPlaneOver( Scene * scene, float x, float y, float z, float maxDe
 		bool whole = true;
 		std::vector<float> tri;
 		for ( auto b = d.shapeBody.constBegin(); b != d.shapeBody.constEnd(); ++b ) {
+			if ( d.endless.contains( b.key() ) )
+				continue;	// lane FARSEA1: the endless sheet follows the camera; it answers below, past the box
 			auto * sh = dynamic_cast<Shape *>( scene->findNode( scene->nifModel, scene->nifModel->getBlockIndex( b.key() ) ) );
 			if ( !sh || sh->verts.isEmpty() ) {
 				whole = false;	// not built yet: measured again next frame
@@ -745,8 +869,17 @@ bool wwCellWaterPlaneOver( Scene * scene, float x, float y, float z, float maxDe
 	}
 	float h = 0.0f;
 	const int best = wwWaterPolyPick( d.planes, x, y, z, maxDepth, oldRule, h );
-	if ( best < 0 )
-		return false;
+	if ( best < 0 ) {
+		// lane FARSEA1: past the bake's box the endless sea is the water over the camera
+		const bool inBox = x > d.seaBox[0] && y > d.seaBox[1] && x < d.seaBox[2] && y < d.seaBox[3];
+		if ( d.endless.isEmpty() || !wwEndlessSeaOn() || inBox || z >= d.seaZ || d.seaZ - z > maxDepth )
+			return false;
+		height = d.seaZ;
+		rec = d.bodies[d.shapeBody.value( *d.endless.constBegin() )].rec;
+		if ( sea )
+			*sea = !oldRule;
+		return true;
+	}
 	if ( !oldRule ) {
 		// the room test: a non-water surface between the camera and the water above it = a room below the water
 		const float key[5] = { x, y, z, h, roofOnly ? 1.0f : 0.0f };

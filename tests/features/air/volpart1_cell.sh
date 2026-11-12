@@ -1,4 +1,5 @@
 #!/bin/bash
+export WW_CELL_STREAM="${WW_CELL_STREAM:-0}"	# AIRPERF1 r4: this harness opens a fixed block (streaming is the default now)
 #
 # VOLUMETRIC PARTICLES IN THE CELL VIEW (lane VOLPART1, 2026-10-14; src/features/air/cellvolair.h, res/shaders/features/particles/particles.frag).
 #

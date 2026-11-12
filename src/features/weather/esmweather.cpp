@@ -813,6 +813,8 @@ bool EsmWeather::read( quint32 formID, WwWeatherData & out, QString * why )
 				if ( f.size() >= 15 ) {	// lane CLOUD6f: the lightning's fade bytes and colour (gl/cloudlightning.h)
 					out.thunderFadeIn = quint8( f.data()[8] );
 					out.thunderFadeOut = quint8( f.data()[9] );
+					out.precipFadeIn = quint8( f.data()[6] );	// lane WEATHERRECX1: the generated rung's transitions
+					out.precipFadeOut = quint8( f.data()[7] );
 					for ( int c = 0; c < 3; c++ )
 						out.lightningRgb[c] = quint8( f.data()[12 + c] );
 				}

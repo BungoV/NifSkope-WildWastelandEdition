@@ -54,7 +54,7 @@ void wwSunPathSetMode( int mode );
 struct WwSunPathKey
 {
 	int mode = -1;
-	bool pin = false, ephem = false, june = false;
+	bool pin = false, ephem = false, june = false, realClock = false;	// realClock: MODULES1 R6-6's red
 	double elev = 0.0, az = 0.0;
 	bool operator==( const WwSunPathKey & ) const = default;
 };
@@ -62,6 +62,11 @@ WwSunPathKey wwSunPathKey();
 
 //! (D) the real sun, TO the sun, world (x east, y north, z up), unit; returns the elevation in degrees
 double wwSunPathReal( double hour, double gameDay, double out[3] );
+/*! MODULES1 R6-6: the hours the game's own sun disc is on the horizon (the sky clock's A and D, from the climate's
+ *  TNAM). The real path is read on the game's clock: its sunrise and sunset land on these hours. */
+void wwSunPathGameHorizon( double riseHour, double setHour );
+//! R6-6: one telemetry line: which clock the drawn sun, the light and the engine's point use
+QString wwSunPathClockEcho();
 /*! (D) with Sun Path = Real: replaces the shaded light direction (TO the light) and the disc, crossfading to
  *  `sunDir`'s own night light between 0 and -6 degrees of elevation. False (nothing changed) on Engine. */
 bool wwSunPathApply( double hour, double gameDay, float sunDir[3], float disc[3] );
@@ -138,14 +143,24 @@ void wwShadowSetParMask( int mask );
 //! the air tail's ambient share (celllights.cpp, from the weather's DALC and sun; 0.3 until set)
 void wwShadowSetAirAmbientShare( float a );
 double wwShadowDistance();
+//! DEBUGVIEW1 item 4: where the Shadow Distance came from (the env pin, his saved setting, the default, the red)
+const char * wwShadowDistanceSource();
 void wwShadowSetDistance( double d );
 //! fix 10-22: a terrain shadow sweep is owed, running or uploading (the live driver's pictures wait for it)
 bool wwTerrainShadowPending();
 //! the census line
 QString wwShadowSetSummary();
 bool wwShadowRed( const char * name );
+/*! MODULES1 R6-8: true while a shadow debug view (WW_SHADOW_VIEW 1-5, WW_CSM_PROBE 1 / 3 / 4 / 5) is shown. The frame
+ *  is then a probe pass (gl/celllights.h wwCellProbePass): the surfaces write the view's value as drawn, the sky is
+ *  a flat 0.5, and nothing else draws or filters the picture. Red WW_SHADOW_RED=viewpost: the old rule (the value
+ *  inside the lit frame, through the air and the whole post chain). Says so once per change. */
+bool wwShadowViewPass( Scene * scene );
 //! lane WATERWETBAKE1: the shadow set's terrain test (the cells' LAND under "ground", the far LOD's terrain)
 class Shape;
 bool wwCellIsTerrainShape( const Shape * sh );
+//! lane PERFLOAD1 P10: a shape the LOD preview leaves out of the draw casts no sun shadow either (a far ring the
+//! "ring alone" hides; under the near grid's OFF, a loaded cell or large-ref unit taken out of the scene)
+bool wwShadowPreviewDrops( const Scene * scene, const Shape * sh );
 
 #endif

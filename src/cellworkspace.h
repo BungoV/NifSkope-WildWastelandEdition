@@ -163,7 +163,6 @@ private:
 	 *  kind rows are read from the builder's notes. */
 	QCheckBox * probesShow = nullptr;
 	QAction * cellLights = nullptr;   // light the view with the cell's own lights
-	QAction * cellGi = nullptr;       // add the bake's bounce of those lights
 	QAction * cellFar = nullptr;      // past the band, the surfels' baked light in place of the lights
 	QAction * cellIs = nullptr;       // the cell's imagespace (exposure, curve, grade, LUT)
 	QAction * cellCull = nullptr;     // per-placement culling (gl/cellcull.h); ships off

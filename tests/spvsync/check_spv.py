@@ -10,15 +10,29 @@
 import os, re, shutil, subprocess, sys
 
 # (source dir, kernel, --target-env, --vn) == src/features/gi/bakert_spirv.sh + src/features/gi/rtddgi_spirv.sh
-SPECS = [
-	('src/features/gi/bakert', 'rq', 'vulkan1.2', 'bakert_rq_spv'),
+SPECS = [('src/features/gi/rtddgi', k, 'vulkan1.2', 'rtddgi_%s_spv' % k) for k in ('restirgi',)] \
+  + [('src/features/gi/rtddgi', 'restirgi_filt', 'vulkan1.2', 'rtddgi_restirgi_filt_spv')]   # RTEMIS1: GLSL only (VKCOMPUTE1 took the rest)
+# lane VKCOMPUTE1: kernels converted to HLSL, built by DXC from res/shaders/hlsl/<dir>/<k>.hlsl + tools/spv_header.py
+# (rtddgi_spirv.sh's DXC loop; bakert_spirv.sh's `hk <k> <env>` lines)
+HLSL_SPECS = [('src/features/gi/rtddgi', k, 'vulkan1.2', 'rtddgi_%s_spv' % k) for k in ('border', 'reloc', 'blend', 'trace', 'airrays', 'restir')] + [
 	('src/features/gi/bakert', 'bvh', 'vulkan1.1', 'bakert_bvh_spv'),
+	('src/features/gi/bakert', 'rq', 'vulkan1.2', 'bakert_rq_spv'),
 	('src/features/gi/bakert', 'rqx', 'vulkan1.2', 'bakert_rqx_spv'),
-] + [('src/features/gi/rtddgi', k, 'vulkan1.2', 'rtddgi_%s_spv' % k) for k in ('trace', 'blend', 'border', 'reloc', 'restir', 'airrays', 'restirgi')] \
-  + [('src/features/gi/rtddgi', 'restirgi_filt', 'vulkan1.2', 'rtddgi_restirgi_filt_spv')]
+]
 # RTEMIS1 11-09: a header built from another kernel's source under defines (rtddgi_spirv.sh's own line, outside its loop)
 FROM = {'restirgi_filt': ('restirgi', ['-DRESTIRGI_FILTER'])}
+BAKERT_HK = '\t"$DXC" -spirv -fspv-target-env="$2" -T "${T:-cs_6_0}" -E main -O0 -Fo "$1.hlsl.spv" '
+# lane VKFRAME1: the bloom chain, built by src/features/vkframe/vkframe_spirv.sh from res/shaders/hlsl/post/<k>.hlsl
+VKFRAME_KERNELS = ('down', 'hold', 'up', 'src', 'comb')
+HLSL_SPECS += [('src/features/vkframe', 'bloom_' + k, 'vulkan1.2', 'vkframe_bloom_%s_spv' % k) for k in VKFRAME_KERNELS]
+VKFRAME_POST = ('tonemap',)	# the script's second loop: res/shaders/hlsl/post/<k>.hlsl -> <k>.spv.h
+HLSL_SPECS += [('src/features/vkframe', k, 'vulkan1.2', 'vkframe_%s_spv' % k) for k in VKFRAME_POST]
+VKFRAME_EXPOSURE = ('measure_q',)	# the script's third loop: res/shaders/hlsl/exposure/<k>.hlsl -> <k>.spv.h
+HLSL_SPECS += [('src/features/vkframe', k, 'vulkan1.2', 'vkframe_%s_spv' % k) for k in VKFRAME_EXPOSURE]
+HLSL_DIR = {'src/features/gi/rtddgi': 'res/shaders/hlsl/rtddgi', 'src/features/vkframe': 'res/shaders/hlsl/post'}
+HLSL_SRC = dict((k, 'res/shaders/hlsl/exposure') for k in VKFRAME_EXPOSURE)	# a kernel outside its folder's HLSL dir
 DEFAULT_G = 'E:/Tools/RenderDoc/RenderDoc_1.45_64/plugins/spirv/glslangValidator.exe'
+DEFAULT_DXC = 'E:/Tools/dxc/bin/x64/dxc.exe'
 
 
 def script_ok(tree):
@@ -26,9 +40,10 @@ def script_ok(tree):
 	bad = []
 	b = open(os.path.join(tree, 'src/features/gi/bakert_spirv.sh'), encoding='utf-8', errors='replace').read()
 	r = open(os.path.join(tree, 'src/features/gi/rtddgi_spirv.sh'), encoding='utf-8', errors='replace').read()
-	m = re.search(r'^for k in ([a-z ]+); do$', r, re.M)
+	# the glslang loop: a `for` line followed by the "$G" compile line (none once every kernel builds from HLSL)
+	m = re.search(r'^for k in ([a-z ]+); do\n\t"\$G" ', r, re.M)
 	loop = m.group(1).split() if m else []
-	if '"$G" --target-env vulkan1.2 -V --vn "rtddgi_${k}_spv" -o "${k}.spv.h" "${k}.comp"' not in r:
+	if loop and '"$G" --target-env vulkan1.2 -V --vn "rtddgi_${k}_spv" -o "${k}.spv.h" "${k}.comp"' not in r:
 		bad.append('src/features/gi/rtddgi_spirv.sh: its compile line changed')
 	for d, k, env, vn in SPECS:
 		if d == 'src/features/gi/bakert':
@@ -44,6 +59,32 @@ def script_ok(tree):
 	for k in loop:
 		if k not in known:
 			bad.append('src/features/gi/rtddgi_spirv.sh: kernel %s is not in this checker' % k)
+	m = re.search(r'^for k in ([a-z ]+); do\n\tT=.*\n\t"\$DXC" -spirv -fspv-target-env=vulkan1\.2 -T "\$\{T:-cs_6_0\}" -E main -O0 ', r, re.M)
+	hloop = m.group(1).split() if m else []
+	if sorted(hloop) != sorted(k for d, k, e, v in HLSL_SPECS if d == 'src/features/gi/rtddgi'):
+		bad.append('src/features/gi/rtddgi_spirv.sh: its DXC loop (%s) is not this checker\'s HLSL kernels' % ' '.join(hloop))
+	bk = [k for d, k, e, v in HLSL_SPECS if d == 'src/features/gi/bakert']
+	if bk and BAKERT_HK not in b:
+		bad.append('src/features/gi/bakert_spirv.sh: its hk compile line changed')
+	for d, k, env, vn in HLSL_SPECS:
+		if d == 'src/features/gi/bakert' and not re.search(r'^hk %s %s(\s|$)' % (k, re.escape(env)), b, re.M):
+			bad.append('src/features/gi/bakert_spirv.sh: no `hk %s %s` line' % (k, env))
+	for k, env in re.findall(r'^hk ([a-z]+) (\S+)', b, re.M):
+		if k not in bk:
+			bad.append('src/features/gi/bakert_spirv.sh: hk %s is not in this checker' % k)
+	vf = open(os.path.join(tree, 'src/features/vkframe/vkframe_spirv.sh'), encoding='utf-8', errors='replace').read()
+	m = re.search(r'^for k in ([a-z ]+); do\n\t"\$DXC" -spirv -fspv-target-env=vulkan1\.2 -T cs_6_0 -E main ', vf, re.M)
+	vloop = m.group(1).split() if m else []
+	if sorted(vloop) != sorted(VKFRAME_KERNELS):
+		bad.append('src/features/vkframe/vkframe_spirv.sh: its DXC loop (%s) is not this checker\'s bloom kernels' % ' '.join(vloop))
+	m = re.search(r'^for t in ([a-z ]+); do\n\t"\$DXC" -spirv -fspv-target-env=vulkan1\.2 -T cs_6_0 -E main ', vf, re.M)
+	ploop = m.group(1).split() if m else []
+	if sorted(ploop) != sorted(VKFRAME_POST):
+		bad.append('src/features/vkframe/vkframe_spirv.sh: its post loop (%s) is not this checker\'s post kernels' % ' '.join(ploop))
+	m = re.search(r'^for e in ([a-z_ ]+); do\n\t"\$DXC" -spirv -fspv-target-env=vulkan1\.2 -T cs_6_0 -E main ', vf, re.M)
+	eloop = m.group(1).split() if m else []
+	if sorted(eloop) != sorted(VKFRAME_EXPOSURE):
+		bad.append('src/features/vkframe/vkframe_spirv.sh: its exposure loop (%s) is not this checker\'s exposure kernels' % ' '.join(eloop))
 	return bad
 
 
@@ -82,7 +123,7 @@ def main(argv):
 	for s in script_ok(tree):
 		fails.append(s)
 	# every committed SPIR-V header has a generator line
-	listed = set('%s/%s.spv.h' % (d, k) for d, k, e, v in SPECS)
+	listed = set('%s/%s.spv.h' % (d, k) for d, k, e, v in SPECS + HLSL_SPECS)
 	for root, dirs, files in os.walk(os.path.join(tree, 'src')):
 		for f in files:
 			if f.endswith('.spv.h'):
@@ -93,11 +134,13 @@ def main(argv):
 		if not os.path.isfile(os.path.join(tree, n)):
 			fails.append('%s: listed but not on disk' % n)
 	for n in swap:
-		if not any(n == '%s.spv.h' % k for d, k, e, v in SPECS):
+		if not any(n == '%s.spv.h' % k for d, k, e, v in SPECS + HLSL_SPECS):
 			fails.append('--committed %s: no such header' % n)
 	g = g or os.environ.get('GLSLANG') or (DEFAULT_G if os.path.isfile(DEFAULT_G) else None) \
 		or shutil.which('glslangValidator')
-	if not g or not os.path.isfile(g):
+	if not SPECS:   # every kernel builds from HLSL: no glslang header to compare
+		stamp = None
+	elif not g or not os.path.isfile(g):
 		skips.append('no glslangValidator (set GLSLANG=<exe>; RenderDoc ships one under plugins/spirv)')
 		stamp = None
 	else:
@@ -132,6 +175,36 @@ def main(argv):
 				why = 'line endings only' if a.replace(b'\r\n', b'\n') == c.replace(b'\r\n', b'\n') else first_diff(a, c)
 				fails.append('%s/%s: STALE, rebuilt %d B vs committed %d B (%s); run tools/%s_spirv.sh'
 				             % (d, name, len(a), len(c), why, 'bakert' if d == 'src/features/gi/bakert' else 'rtddgi'))
+	dxc = os.environ.get('DXC') or (DEFAULT_DXC if os.path.isfile(DEFAULT_DXC) else None) or shutil.which('dxc')
+	if not dxc or not os.path.isfile(dxc):
+		skips.append('no dxc (set DXC=<exe>): the HLSL kernels are not compared')
+	else:
+		for d, k, env, vn in HLSL_SPECS:
+			name = '%s.spv.h' % k
+			committed = swap.get(name, os.path.join(tree, d, name))
+			spv = os.path.join(scratch, 'hlsl_' + k + '.spv')
+			out = os.path.join(scratch, 'hlsl_' + name)
+			for f in (spv, out):
+				if os.path.exists(f):
+					os.remove(f)
+			src = os.path.join(tree, HLSL_SRC.get(k, HLSL_DIR.get(d, 'res/shaders/hlsl/' + os.path.basename(d))), k + '.hlsl')
+			m = re.search(r'hlsl profile: (cs_6_[0-9])', open(src, encoding='utf-8', errors='replace').read())
+			opt = [] if d == 'src/features/vkframe' else ['-O0']   # vkframe_spirv.sh builds optimised
+			r = subprocess.run([dxc, '-spirv', '-fspv-target-env=' + env, '-T', m.group(1) if m else 'cs_6_0', '-E', 'main']
+			                   + opt + ['-Fo', spv, src], capture_output=True, text=True, timeout=300)
+			if r.returncode == 0:
+				r = subprocess.run([sys.executable, '-I', os.path.join(tree, 'tools/spv_header.py'), spv, vn, out],
+				                   capture_output=True, text=True, timeout=60, stdin=subprocess.DEVNULL)
+			if r.returncode != 0 or not os.path.isfile(out):
+				fails.append('%s: dxc / spv_header rc %d: %s' % (name, r.returncode, (r.stdout + r.stderr).strip()[-300:]))
+				continue
+			a, c = open(out, 'rb').read(), open(committed, 'rb').read()
+			if a == c:
+				print('OK    %s/%s %d B (HLSL)' % (d, name, len(c)))
+			else:
+				fails.append('%s/%s: STALE, rebuilt %d B vs committed %d B (%s); run %s'
+				             % (d, name, len(a), len(c), first_diff(a, c), 'src/features/vkframe/vkframe_spirv.sh'
+				                if d == 'src/features/vkframe' else 'src/features/gi/%s_spirv.sh' % os.path.basename(d)))
 	for f in fails:
 		print('FAIL  ' + f)
 	for s in skips:
@@ -140,7 +213,7 @@ def main(argv):
 		print('SPVSYNC FAIL %d' % len(fails)); return 1
 	if skips:
 		print('SPVSYNC SKIP %d' % len(skips)); return 77
-	print('SPVSYNC PASS %d' % len(SPECS)); return 0
+	print('SPVSYNC PASS %d' % len(SPECS + HLSL_SPECS)); return 0
 
 
 if __name__ == '__main__':

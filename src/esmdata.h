@@ -104,6 +104,9 @@ struct EsmCellPrevis
 	quint32 combinedMeshes = 0, combinedRefs = 0, previsRefs = 0;
 	//! XCRI's refs (each pair's first word, mapped to the load order): the refs a precombined mesh replaced
 	QVector<quint32> combinedRefIds;
+	/*! lane PCMB1: XCRI's mesh keys (meshes\precombined\<cell form & 0xFFFFFF, 8 hex>_<key, 8 hex>_oc.nif) and, parallel
+	 *  to combinedRefIds, the key of the mesh each ref went into (each pair's second word) */
+	QVector<quint32> combinedMeshKeys, combinedRefKeys;
 	//! the winning CELL record's plugin (load-order index) and whether it carries XPRI / VISI
 	quint32 srcFile = 0;
 	bool hasPrevisFields = false;
@@ -115,6 +118,7 @@ struct EsmRefSource
 {
 	quint32 owner = 0, src = 0;
 	bool deleted = false, disabled = false;
+	quint32 form = 0;	//!< lane PCMB1: the REFR's form id (load order), to match XCRI's refs
 	//! the plugin of the first version in the trailing run of versions whose placement
 	//! (DATA, XSCL, deleted/disabled, XESP) equals the winner's (WwPrevisRule::RefSrc::settled)
 	quint32 settled = 0xFFFFFFFFu;
@@ -396,6 +400,11 @@ public:
 
 	//! The worldspace's default water type (WRLD NAM2), 0 when absent.
 	quint32 defaultWaterType() const { return defWaterType; }
+	//! MODULES1 R6-2: the sea this worldspace lies in: its own NAM2, else the first one up its WNAM parents
+	//! (Goodneighbor has none of its own and lies in the Commonwealth's); 0 when the chain has none.
+	quint32 seaWaterType() const { return seaType; }
+	//! the worldspace that names seaWaterType() (its EDID)
+	QString seaWaterFrom() const { return seaFrom; }
 
 	//! the WATR record `form` (src/features/water/esmwater.h), false when it is no WATR
 	bool waterRecord( quint32 form, struct WwWaterRecord & out ) const;
@@ -546,6 +555,8 @@ private:
 	float defLandH = 0.0f;
 	float defWaterH = 0.0f;
 	quint32 defWaterType = 0;
+	quint32 seaType = 0;
+	QString seaFrom;
 	/*! a child worldspace that takes its parent's land (WRLD
 	 *  WNAM parent + PNAM bit 0 "Use Land Data": in Fallout4.esm only Goodneighbor) holds no LAND of its own; the game
 	 *  draws the PARENT's LAND at the same cell grid. Cell grid -> the parent cell's type-6 group, indexed cells only. */

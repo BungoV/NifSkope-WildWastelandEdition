@@ -25,7 +25,15 @@ bool wwCellWorldAnimWantsFrames( Scene * scene );
 
 //! lane PERFFIX2 a: the world clock runs (a live window's wall clock), whatever the World animation row: false under
 //! any harness (it stands at the pinned WW_CELL_WORLDANIM_TIME) and with WW_CELL_WORLDANIM_RED=still
+//! lane PARTFX1: a harness's clock runs too unless pinned (red WW_CELL_CLOCK_RED=harness: held, as before)
 bool wwCellWorldClockMoves();
+//! MODULES1: the wall clock may run here (test windows and flights too); false only under a harness with red
+//! WW_CELL_CLOCK_RED=harness. The grass, air and far-LOD sway read it; their own pins (..._T, SWAYTIME) still pin
+bool wwCellClockLive();
+//! lane PARTFX1: the weather's wind as the game hands it to every BSWindModifier, world units/s2 per unit of Strength:
+//! (cos, sin, 0) of the bearing x speed (byte / 255) x 100; false (out untouched) in an interior, outside a cell
+//! document, without a weather or with red WW_CELL_PFX_WIND_RED=1 (no wind, as before)
+bool wwCellParticleWind( const void * nif, float out[3] );
 
 //! an animated object copied in whole: its root block and the looping sequence it plays (empty: free controllers only)
 struct WwAnimObjRoot
@@ -44,5 +52,9 @@ void wwCellAnimObjSet( const NifModel * nif, const QVector<WwAnimObjRoot> & root
 void wwCellAnimObjCensus( Scene * scene );
 //! BSShape::drawShapes: this shape got its program this paint (a no-op unless the census is listening)
 void wwCellAnimObjNoteDraw( const void * shape );
+/*! lane PARTFX1: cellBuild's particle step: the systems it found in the placed models (copies, models). The census then
+ *  prints one line per cell document: `cell particles census: found F systems ..., in the scene S, reached a draw D,
+ *  emitting E (live sprites L)`; "reached a draw" = Particles::drawShapes got its program on the second paint. */
+void wwCellPfxFoundSet( const void * nif, int systems, int copies, int models );
 
 #endif // CELLWORLDANIM_H

@@ -67,6 +67,9 @@ bool gpuWanted( std::string * why = nullptr );
 Path pickPath( std::string * why = nullptr, bool fastest = false );
 //! the GPU's name ("" without one)
 std::string deviceName();
+//! lane VKCOMPUTE1: the device's queue is a compute-only family (async beside GL), and "q<family> async|shared ..."
+bool asyncQueue();
+std::string queueInfo();
 
 /* One tree on the GPU. Built from a probebvh::Bvh (its triangles, BVH and alpha masks); traces batches of rays in
  * order. Thread-safe (one GPU queue, a lock). Keep the Bvh alive as long as the Scene (refine reads it). */

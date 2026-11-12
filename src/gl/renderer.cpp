@@ -32,6 +32,8 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "renderer.h"
 #include "features/shared/cellpasstime.h"	// lane PERF2: the draws' CPU setup time
+#include "wwhwuse.h"	// lane EMPTY240 R3-4: the draws' program routes for the `near draws:` line
+#include "features/overlays/debugview.h"	// lane DEBUGVIEW1: the farowner view's owner
 #include "features/near/celldrawstate.h"	// lane PERF3
 #include "features/near/celldrawpacket.h"	// lane GAPPERF-BINDLESS
 #include "features/near/cellbindless.h"	// lane BINDLESS2
@@ -41,6 +43,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "gl/celluniform.h"	// lane CELLUNI1
 #include "gl/glasspanerules.h"	// lane GLASSPANE1: the effect shader's env mask channel
 #include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
+#include "gl/wwuploadcap.h"	// lane EMPTY240 R7-4: a band chunk's read that waits a paint
 
 #include "message.h"
 #include "nifskope.h"
@@ -60,7 +63,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "features/near/cellcull.h"	// lane DECALS1: the placed decals' parallax
 #include "gl/celllooks.h"
 #include "features/water/cellwaterinfo.h"	// lane WATERWETBAKE1: the land side of the shore plane
-#include "features/weather/cellprecip.h"	// lane FO76WEATHER1: rain wetness
+#include "features/weather/cellprecip.h"	// lane WETWEATHER1: rain wetness
 #include "features/shadows/shadowset.h"	// lane WATERWETBAKE1: wwCellIsTerrainShape
 #include "features/reflections/cellssr.h"
 #include "features/reflections/cellreflprobe.h"	// lane REFLPROBE1
@@ -77,6 +80,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "features/air/cellvolair.h"	// lane VOLPART1: volumetric lit effect cards
 #include "features/far-ground/cellfarground.h"	// lane FARDRAW1: the far ring 0's live ground
 #include "features/far-lod/cellfarinst.h"	// lane SKYSHARDS3: the far ring keeps its own program
+#include "features/far-lod/lodpreview.h"	// lane LODLIVE1: the LOD coloration's bands
 #include "features/far-ground/landlodspec.h"	// lane LANDSPEC1
 #include "libfo76utils/src/ddstxt16.hpp"
 #include "glview.h"
@@ -423,11 +427,26 @@ static int wwLandLodMode( Scene * scene, const Shape * mesh )
  *  LANDSPEC4: camwin (the camera's 4 x 4 window only) | perlayer (each splat layer its own detail frame);
  *  LANDSPEC6: fixedfollow (a fixed world's centre follows the camera) | page28 (no outer window past the page);
  *  LANDSPEC8: firstload (a chunk's loading bind is not repeated) | outer45 (no packed outer window).
+ *  PERFLOAD1: askdims (a window rebuild asks the driver for every chunk's size again).
  *  LANDSPEC8 retired off and notex with their paths (SHOTPASS1 confirmed them live). */
 static const QByteArray & wwLandSpecRed()
 {
 	WW_SWITCH_STATIC( QByteArray, v, qgetenv( "WW_LANDSPEC_RED" ).trimmed() );
 	return v;
+}
+
+/* lane LODLIVE1: the far LOD ground draws its own baked sheet tile alone. The world-tiled noise.dds multiply and the
+ * detail normals laid one 4000-unit pattern over every far chunk. Red WW_LANDSPEC_RED=farnoise = the LANDSPEC3 look. */
+static bool wwLandFarNoise()
+{
+	WW_SWITCH_STATIC( int, v, [] {
+		const bool on = wwLandSpecRed() == "farnoise";
+		fprintf( stderr, "landspec: far LOD ground %s\n", on
+			? "x noise.dds + detail normals (RED farnoise: one world-tiled pattern over every chunk)"
+			: "= each chunk's baked sheet tile alone (noise.dds multiply and detail normals off; red WW_LANDSPEC_RED=farnoise)" );
+		return on ? 1 : 0;
+	}() );
+	return v != 0;
 }
 
 /* lane LANDSPEC2: the blend centre's glide (src/features/far-ground/landlodspec.h). Harness pins: WW_LANDSPEC_GLIDEFROM=dx,dy (cells) starts
@@ -510,7 +529,14 @@ static WwLandLodBits wwLandLodWindow( Scene * scene, const QString & ws, int fx,
 	using PfnStorage3D = void ( APIENTRY * )( GLenum, GLsizei, GLenum, GLsizei, GLsizei, GLsizei );
 	using PfnCopyImage = void ( APIENTRY * )( GLuint, GLenum, GLint, GLint, GLint, GLint, GLuint, GLenum, GLint, GLint,
 		GLint, GLint, GLsizei, GLsizei, GLsizei );
-	struct Win { GLuint tex = 0; QString key; WwLandLodBits bits; };
+	struct Win
+	{
+		GLuint tex = 0;
+		QString key;
+		WwLandLodBits bits;
+		WwLandLodBits pending;	// R7-4: chunks whose read waited a paint (the upload budget)
+		GLint w0 = 0, h0 = 0, f0 = 0, levels = 0;	// R7-4: the array's size, kept for a later paint's chunks
+	};
 	static QHash<const void *, Win> wins[2];	// per GL context; [1] the outer window
 	QOpenGLContext * q = QOpenGLContext::currentContext();
 	auto fn = scene->renderer->fn;
@@ -525,34 +551,80 @@ static WwLandLodBits wwLandLodWindow( Scene * scene, const QString & ws, int fx,
 		fn->glBindTexture( GL_TEXTURE_2D_ARRAY, 0 );
 		return WwLandLodBits();
 	}
-	if ( win.key != key ) {
-		win.key = key;
-		win.bits = WwLandLodBits();
-		if ( win.tex )
-			fn->glDeleteTextures( 1, &win.tex );
-		win.tex = 0;
+	/* lane EMPTY240 R7-4: build 80's frame 185 (a live set) spent 363.7 ms CPU in the obscurance pass's geometry; the
+	 * log's line before it: "landspec: band window rebuild took 340.9 ms on the main thread: 3 chunk files read now"
+	 * (3 of 25 chunks). The first ground draw of the paint (the obscurance pre-pass) rebuilds the band window. A chunk
+	 * whose read the upload budget sent to a later paint came back 0 and stayed out (its bit clear) until the window
+	 * moved. Such a chunk is now asked again on the next paint (only the chunks that waited), and the rebuild line
+	 * names its parts (reads, size asks, copies). Red WW_LANDSPECWAIT_RED=1: a chunk that waited stays out, build 80. */
+	static const bool waitRed = wwEnvInt( "WW_LANDSPECWAIT_RED" ) == 1;
+	const bool fresh = win.key != key;
+	if ( fresh || win.pending.any() ) {
+		const WwLandLodBits retry = win.pending;
+		win.pending = WwLandLodBits();
+		if ( fresh ) {
+			win.key = key;
+			win.bits = WwLandLodBits();
+			if ( win.tex )
+				fn->glDeleteTextures( 1, &win.tex );
+			win.tex = 0;
+			win.w0 = win.h0 = win.f0 = win.levels = 0;
+		}
+		/* lane PERFLOAD1 (P4, the drop at height): a rebuild asked the driver 13 questions a chunk
+		 * (glGetTexLevelParameteriv; each one waits for the driver's thread), 256 chunks at the highest point, on
+		 * every window move. A chunk's size is now asked once and remembered with its texture id. The rebuild
+		 * prints its own time. Red WW_LANDSPEC_RED=askdims: every size asked again. */
+		struct ChunkDim { GLuint id = 0; GLint w = 0, h = 0, f = 0, l = 0; };
+		static QHash<QString, ChunkDim> dimMemo;
+		const bool askDims = wwLandSpecRed() == "askdims";
+		int readNow = 0, asked = 0, known = 0;
+		const auto t0 = std::chrono::steady_clock::now();
 		const auto storage = q ? reinterpret_cast<PfnStorage3D>( q->getProcAddress( "glTexStorage3D" ) ) : nullptr;
 		const auto copy = q ? reinterpret_cast<PfnCopyImage>( q->getProcAddress( "glCopyImageSubData" ) ) : nullptr;	// GL 4.3
-		GLint w0 = 0, h0 = 0, f0 = 0, levels = 0;
+		GLint w0 = win.w0, h0 = win.h0, f0 = win.f0, levels = win.levels;
+		double readMs = 0.0, askMs = 0.0, copyMs = 0.0;	// R7-4: the rebuild's parts
+		int waited = 0;
+		auto msAt = [t0]() { return std::chrono::duration<double, std::milli>( std::chrono::steady_clock::now() - t0 ).count(); };
 		for ( int k = 0; k < n * n && storage && copy; k++ ) {
+			if ( !fresh && !( ( retry.w[k >> 6] >> ( k & 63 ) ) & 1u ) )
+				continue;	// R7-4: a later paint asks only the chunks that waited
+			const quint64 deferred0 = WwUp::st().deferredAll;
+			const double readT0 = msAt();
 			const QString path = QStringLiteral( "textures\\terrain\\%1\\%1.4.%2.%3.dds" ).arg( w )
 				.arg( fx + LandLodSpec::kLodLevel * ( k % n ) )
 				.arg( fy + LandLodSpec::kLodLevel * ( k / n ) );
 			const GLuint src = LandLodSpec::chunkTex( [&]( unsigned & id ) {	// LANDSPEC8: SHOTPASS1 D6
 				const int m = scene->textures->bind( QStringView( path ), scene->nifModel );
 				id = scene->textures->wwBound;
+				readNow += m > 0 && !id ? 1 : 0;	// lane PERFLOAD1: the bind that read the file
 				return m;
 			}, wwLandSpecRed() == "firstload" );
+			readMs += msAt() - readT0;
+			if ( !src && !waitRed && WwUp::st().deferredAll != deferred0 ) {	// R7-4: the read waits a paint
+				win.pending.w[k >> 6] |= quint64( 1 ) << ( k & 63 );
+				waited++;
+				continue;
+			}
 			if ( !src )
 				continue;
+			const double askT0 = msAt();
 			GLint cw = 0, ch = 0, cf = 0, cl = 0;
-			fn->glGetTexLevelParameteriv( GL_TEXTURE_2D, 0, GL_TEXTURE_WIDTH, &cw );
-			fn->glGetTexLevelParameteriv( GL_TEXTURE_2D, 0, GL_TEXTURE_HEIGHT, &ch );
-			fn->glGetTexLevelParameteriv( GL_TEXTURE_2D, 0, GL_TEXTURE_INTERNAL_FORMAT, &cf );
-			for ( GLint lw = 1; cl < 16 && lw > 0; ) {	// the chunk's filled mip levels
-				fn->glGetTexLevelParameteriv( GL_TEXTURE_2D, cl, GL_TEXTURE_WIDTH, &lw );
-				cl += lw > 0 ? 1 : 0;
+			ChunkDim & dim = dimMemo[path];
+			if ( dim.id == src && !askDims ) {	// lane PERFLOAD1: known from an earlier window
+				cw = dim.w, ch = dim.h, cf = dim.f, cl = dim.l;
+				known++;
+			} else {
+				fn->glGetTexLevelParameteriv( GL_TEXTURE_2D, 0, GL_TEXTURE_WIDTH, &cw );
+				fn->glGetTexLevelParameteriv( GL_TEXTURE_2D, 0, GL_TEXTURE_HEIGHT, &ch );
+				fn->glGetTexLevelParameteriv( GL_TEXTURE_2D, 0, GL_TEXTURE_INTERNAL_FORMAT, &cf );
+				for ( GLint lw = 1; cl < 16 && lw > 0; ) {	// the chunk's filled mip levels
+					fn->glGetTexLevelParameteriv( GL_TEXTURE_2D, cl, GL_TEXTURE_WIDTH, &lw );
+					cl += lw > 0 ? 1 : 0;
+				}
+				dim.id = src, dim.w = cw, dim.h = ch, dim.f = cf, dim.l = cl;
+				asked++;
 			}
+			askMs += msAt() - askT0;
 			if ( cw <= 0 || ch <= 0 || cl <= mip )
 				continue;
 			cw = std::max( cw >> mip, 1 ), ch = std::max( ch >> mip, 1 ), cl -= mip;	// LANDSPEC6: the outer's mip 1 up
@@ -576,18 +648,27 @@ static WwLandLodBits wwLandLodWindow( Scene * scene, const QString & ws, int fx,
 				continue;	// a chunk unlike the first stays out (its bit clear)
 			int ox = 0, oy = 0;
 			const int layer = packed ? LandLodSpec::packLayer( k % n, k / n, n, ox, oy ) : k;
+			const double copyT0 = msAt();
 			for ( GLint l = 0; l < levels; l++ ) {
 				const int lw = std::max( w0 >> l, 1 ), lh = std::max( h0 >> l, 1 );
 				copy( src, GL_TEXTURE_2D, l + mip, 0, 0, 0, win.tex, GL_TEXTURE_2D_ARRAY, l, ox * lw, oy * lh, layer, lw, lh, 1 );
 			}
+			copyMs += msAt() - copyT0;
 			win.bits.w[k >> 6] |= quint64( 1 ) << ( k & 63 );
 		}
 		fn->glBindTexture( GL_TEXTURE_2D, 0 );
+		win.w0 = w0, win.h0 = h0, win.f0 = f0, win.levels = levels;
 		const int pk = packed ? 2 : 1, side = packed ? LandLodSpec::packSide( n ) : n;
 		std::fprintf( stderr, "landspec: band %s %s %d,%d: %d of %d chunks, %dx%d, %d levels, mip %d, %s%d layers, %.1f MiB\n",
 			outer ? "outer window" : "window", qPrintable( w ), fx, fy, win.bits.count(), n * n, w0, h0, levels, mip,
 			packed ? "packed 2x2, " : "", side * side,
 			double( LandLodSpec::arrayBytes( w0 * pk, h0 * pk, levels, side * side ) ) / 1048576.0 );
+		std::fprintf( stderr, "landspec: band %s rebuild took %.1f ms on the main thread: %d chunk files read now, "
+			"%d chunk sizes asked from the driver, %d known%s; %s, parts: reads %.1f + size asks %.1f + copies %.1f ms; %d chunks "
+			"wait a paint for the upload budget (R7-4; red WW_LANDSPECWAIT_RED=1: they stay out, build 80)\n",
+			outer ? "outer window" : "window", msAt(), readNow, asked, known,
+			askDims ? " (WW_LANDSPEC_RED=askdims: every size asked again)" : "", fresh ? "a new window" : "the chunks that waited",
+			readMs, askMs, copyMs, waited );
 	}
 	fn->glBindTexture( GL_TEXTURE_2D_ARRAY, win.bits.any() ? win.tex : 0 );
 	return win.bits;
@@ -645,8 +726,9 @@ static void wwLandLodTextures( Scene * scene, NifSkopeOpenGLContext::Program * p
 	for ( int k = 0; k < 3; k++ )
 		prog->uni1i_l( prog->uniLocation( names[k] ), units[k] );
 	prog->uni1i_l( prog->uniLocation( "LandLodOuter" ), WwCellUnit::LandLodOuter );	// lane LANDSPEC6
-	const bool albedo = noise && ( mode == LandLodSpec::Far || bits.any() || outerBits.any() );
-	prog->uni4f( "landLodTex", FloatVector4( ox, oy, albedo ? 1.0f : 0.0f, detail ? 1.0f : 0.0f ) );
+	const bool farBare = mode == LandLodSpec::Far && !wwLandFarNoise();	// lane LODLIVE1
+	const bool albedo = noise && !farBare && ( mode == LandLodSpec::Far || bits.any() || outerBits.any() );
+	prog->uni4f( "landLodTex", FloatVector4( ox, oy, albedo ? 1.0f : 0.0f, detail && !farBare ? 1.0f : 0.0f ) );
 	// LANDSPEC4: z the window's chunks a side, w 1 = red perlayer; landLodBits the bound layers, 16 bits a component
 	// LANDSPEC5: landLodBits[4], one 64-bit word a vec4
 	prog->uni4f( "landLodWin", FloatVector4( float( win.fx ) * LandLodSpec::kCell, float( win.fy ) * LandLodSpec::kCell,
@@ -668,6 +750,27 @@ static void wwLandLodTextures( Scene * scene, NifSkopeOpenGLContext::Program * p
 			float( ( b >> 48 ) & 0xFFFF ) );
 	}
 	prog->uni4fv( "landLodOuterBits", obitv, size_t( LandLodSpec::kOuterBitWords ) );
+}
+
+/* lane LODLIVE1: the LOD coloration's band of a document shape (fo4_default.vert lodViewCode = band + 1, 0 untinted):
+ * a far ring shape its ring's level (lodpreview.cpp bandOfFarName), anything else the full mesh. The instanced far rows
+ * keep their own row code (attribute 9) and take this one where they have none. */
+static void wwLodViewUniform( NifSkopeOpenGLContext::Program * prog, const Shape * mesh )
+{
+	if ( prog->uniLocation( "lodViewCode" ) < 0 )
+		return;
+	int band = -1;
+	if ( LodPreview::tint() ) {
+		band = LodPreview::Full;
+		for ( const Node * p = mesh; p; p = p->parentNode() ) {
+			const int b = LodPreview::bandOfFarName( p->getName() );
+			if ( b >= 0 ) {
+				band = b;
+				break;
+			}
+		}
+	}
+	prog->uni1f( "lodViewCode", float( band + 1 ) );
 }
 
 static void wwLandLodUniforms( Scene * scene, NifSkopeOpenGLContext::Program * prog, const Shape * mesh )
@@ -773,7 +876,15 @@ bool envOn( const char * sw, const char * red )
 {
 	return qgetenv( sw ).trimmed() != "0" && qgetenv( red ).trimmed() != "1" && qgetenv( "WW_PERF3_RED" ).trimmed() != "1";
 }
-bool drawGlOn() { static const bool on = envOn( "WW_DRAW_GLCACHE", "WW_DRAW_GLCACHE_RED" ); return on; }
+bool drawGlOn()
+{
+	/* MODULES1 R7 item 7: read again on every set (sets land between paints, where no draw scope is open; it was read
+	 * once per process). Red WW_R7LIVE_RED=1 (launch): the first value stays. */
+	static const bool once = envOn( "WW_DRAW_GLCACHE", "WW_DRAW_GLCACHE_RED" );
+	static const bool stuck = qgetenv( "WW_R7LIVE_RED" ).trimmed() == "1";
+	WW_SWITCH_STATIC( bool, on, wwSwitchEcho( "draw gl cache (WW_DRAW_GLCACHE, live)", envOn( "WW_DRAW_GLCACHE", "WW_DRAW_GLCACHE_RED" ) ) );
+	return stuck ? once : on;
+}
 }
 
 WwDrawGlScope::WwDrawGlScope()
@@ -1077,6 +1188,7 @@ float wwCellCubeDecodeMode( TexCache * tc )
 NifSkopeOpenGLContext::Program * Renderer::setupProgram( Shape * mesh, Program * hint )
 {
 	PassTime::DrawCpuScope wwSetupT( PassTime::CpuSetup );	// lane PERF2
+	WwHw::route( WwHw::RouteCalls );	// lane EMPTY240 R3-4
 	WwCellUni::forgetBlend();	// lane CELLUNI3: the census takes the blend from this draw's own writes, or asks
 	wwRestoreSrgbDecode();
 	const NifModel *	nif = mesh->scene->nifModel;
@@ -1139,6 +1251,7 @@ NifSkopeOpenGLContext::Program * Renderer::setupProgram( Shape * mesh, Program *
 		&& nif->getBSVersion() >= 130 && nif->getBSVersion() < 140 ) {
 		if ( Program * program = useProgram( "pbr_route.prog" ) ) {
 			routeProgramSeen = program;
+			WwHw::route( WwHw::RoutePbrm );
 			if ( setupProgramRoute( nif, program, mesh ) )
 				return wwProgramCensus( nif, mesh, wwSp, wwKind, wwMsn, wwLodLand, program,
 				globalUniforms->lightSourcePosition[0] );
@@ -1157,6 +1270,7 @@ NifSkopeOpenGLContext::Program * Renderer::setupProgram( Shape * mesh, Program *
 		else if ( !waterProg && std::string_view( wwCellWaterProgram() ) == "fo4_waterlookm.prog" )
 			waterProg = useProgram( "fo4_waterlook.prog" );	// lane FIX1101A: the Medium twin refused, the full one
 		if ( Program * program = waterProg ) {
+			WwHw::route( WwHw::RouteWater );
 			if ( setupProgramCE1( nif, program, mesh ) && wwCellWaterUniforms( mesh->scene, mesh->id(), 0 ) )
 				return wwProgramCensus( nif, mesh, wwSp, wwKind, wwMsn, wwLodLand, program,
 				globalUniforms->lightSourcePosition[0] );
@@ -1183,6 +1297,7 @@ NifSkopeOpenGLContext::Program * Renderer::setupProgram( Shape * mesh, Program *
 			: wwSunShadowWanted( mesh->scene ) ? "pbrm_csm.prog" : "pbrm_default.prog";
 		if ( Program * program = useProgram( pbrmWant ) ) {
 			pbrmProgramSeen = program;
+			WwHw::route( WwHw::RoutePbrm );
 			if ( setupProgramPBRM( nif, program, mesh ) )
 				return wwProgramCensus( nif, mesh, wwSp, wwKind, wwMsn, wwLodLand, program,
 				globalUniforms->lightSourcePosition[0] );
@@ -1241,16 +1356,24 @@ NifSkopeOpenGLContext::Program * Renderer::setupProgram( Shape * mesh, Program *
 	 * in by name only while this draw fogs (a hint is swapped either way). */
 	/* lane BINDLESS2: a cell-lit FO4 lighting draw takes the bindless twin of fo4_cell / fo4_cellcsm while the Bindless
 	 * draws row is on: the shapes the draw packets record (no selection, refraction or census pass) */
-	auto wwBlWants = [mesh]() -> bool {
-		if ( !mesh->bslsp || !WwBl::on() )
-			return false;
+	/* lane EMPTY240 R4-3: the answer is the refusal's route (RouteAsked = wants the twin), counted for the `near draws:` line */
+	auto wwBlWants = [mesh]() -> WwHw::Route {
+		if ( !mesh->bslsp )
+			return WwHw::RouteNoLsp;
+		if ( !WwBl::on() )
+			return WwHw::RouteBlOff;
 		// lane SKYSHARDS3: an instanced far ring's base instance is a placement row, not the row offset the twin reads
 		if ( mesh->wwFarInstData() && !CellFarInst::bindlessTwinAllowed() )
-			return false;
+			return WwHw::RouteFarRing;
 		const Scene * scene = mesh->scene;
 		const auto v = scene->nifModel->getBSVersion();
-		return v >= 130 && v < 151 && !scene->selecting && !( mesh->bslsp->hasRefraction && scene->showRefraction )
-			&& !GpuDriven::census();
+		if ( v < 130 || v >= 151 )
+			return WwHw::RouteVersion;
+		if ( scene->selecting )
+			return WwHw::RouteSelecting;
+		if ( mesh->bslsp->hasRefraction && scene->showRefraction )
+			return WwHw::RouteRefraction;
+		return GpuDriven::census() ? WwHw::RouteCensus : WwHw::RouteAsked;
 	};
 	auto fogVariant = [&]( Program * p ) -> Program * {
 		/* lane EFX2: a cell-lit effect draw takes fo4_effectcell.prog (the effect shader the game's way: unlit,
@@ -1308,7 +1431,13 @@ NifSkopeOpenGLContext::Program * Renderer::setupProgram( Shape * mesh, Program *
 				fgTwin = true;
 			}
 		}
-		if ( !fgTwin && ( want[4] == 'c' && want[5] == 'e' ) && wwBlWants() ) {	// lane BINDLESS2: fo4_cell / fo4_cellcsm
+		if ( !fgTwin && want[4] == 'c' && want[5] == 'e' )
+			WwHw::route( WwHw::RouteCell );	// lane EMPTY240 R3-4: a cell-lit draw, then whether it asked the bindless twin
+		const WwHw::Route wwBlRoute = !fgTwin && ( want[4] == 'c' && want[5] == 'e' ) ? wwBlWants() : WwHw::RouteCount;
+		if ( wwBlRoute != WwHw::RouteAsked && wwBlRoute != WwHw::RouteCount )
+			WwHw::route( wwBlRoute );	// lane EMPTY240 R4-3: the refusal by reason
+		if ( wwBlRoute == WwHw::RouteAsked ) {	// lane BINDLESS2: fo4_cell / fo4_cellcsm
+			WwHw::route( WwHw::RouteAsked );
 			const char * bl = want[8] == 'c' ? "fo4_cellcsmbl.prog" : "fo4_cellbl.prog";
 			if ( WwBl::red() != 5 ) {	// lane BINDLESSPERF1: the twin first; its base is looked up once
 				Program * q = useProgram( bl );
@@ -1325,6 +1454,7 @@ NifSkopeOpenGLContext::Program * Renderer::setupProgram( Shape * mesh, Program *
 					return q;
 				}
 			}
+			WwHw::route( WwHw::RouteTwinMissing );	// lane EMPTY240 R4-3
 		}
 		if ( p->name == std::string_view( want ) )
 			return p;
@@ -1344,6 +1474,7 @@ NifSkopeOpenGLContext::Program * Renderer::setupProgram( Shape * mesh, Program *
 			setupStatus = setupProgramFO3( nif, program, mesh );
 		if ( setupStatus ) {
 			if ( program->wwBindless ) {	// lane BINDLESS2: the draw's row
+				WwHw::route( WwHw::RouteBindless );	// lane EMPTY240 R3-4
 				PassTime::DrawCpuScope blT( PassTime::CpuBlRow );	// lane BINDLESSPERF1
 				WwBl::commit( fn, program );
 			}
@@ -1378,8 +1509,10 @@ NifSkopeOpenGLContext::Program * Renderer::setupProgram( Shape * mesh, Program *
 			else
 				setupStatus = setupProgramFO3( nif, program, mesh );
 			if ( setupStatus ) {
-				if ( program->wwBindless )	// lane BINDLESS2
+				if ( program->wwBindless ) {	// lane BINDLESS2
+					WwHw::route( WwHw::RouteBindless );	// lane EMPTY240 R4-3: the scanned path's twin counts too
 					WwBl::commit( fn, program );
+				}
 				return wwProgramCensus( nif, mesh, wwSp, wwKind, wwMsn, wwLodLand, program,
 				globalUniforms->lightSourcePosition[0] );
 			}
@@ -1889,6 +2022,23 @@ bool wwLegacyRouteRed()
 	return v;
 }
 
+/* MODULES1 round 5 B10: on a Greyscale_To_PaletteColor material the vertex R is the palette ROW (the cell view writes
+ * the hair colour's row there), never a colour. A draw that skips the palette (the PBR route, or material tint off)
+ * multiplied the diffuse by (row, 1, 1) and NPC hair drew cyan; such a draw now holds R at 1 (the vertex colour's
+ * override per channel). Telemetry: "palette draw: <shape> route=..." once per shape. Red WW_CELL_PALETTE_ROW_RED=1. */
+static bool wwPaletteRowHeld( const Shape * mesh, bool palette, const char * route )
+{
+	WW_SWITCH_STATIC( bool, red, wwEnv( "WW_CELL_PALETTE_ROW_RED" ).trimmed() == "1" );
+	static QSet<QString> said;
+	if ( mesh && said.size() < 64 && !said.contains( mesh->getName() ) ) {
+		said.insert( mesh->getName() );
+		qInfo().noquote() << QStringLiteral( "palette draw: %1 route=%2%3" ).arg( mesh->getName(), QLatin1String( route ) )
+			.arg( palette ? QString() : red ? QStringLiteral( " (row reaches the colour: red WW_CELL_PALETTE_ROW_RED=1)" )
+			                                : QStringLiteral( " (row held at 1)" ) );
+	}
+	return !palette && !red;
+}
+
 bool Renderer::setupProgramPBRM( const NifModel * nif, Program * prog, Shape * mesh )
 {
 	auto scene = mesh->scene;
@@ -2211,6 +2361,10 @@ bool Renderer::setupProgramPBRM( const NifModel * nif, Program * prog, Shape * m
 	if ( prog->uniLocation( "landSplatDbg" ) >= 0 )	// lane ALLON2: the layer-edge guard, its red and its probe
 		prog->uni1i( "landSplatDbg", wwLandSplatDbg() );
 	wwCellGrassUniforms( scene, mesh->id() );	// lane GRASSMB1: the grass fade, zero on every other shape
+	CellFarInst::vcAoUniform( prog, CellFarInst::vcAoType( mesh->getName() ) );	// MODULES1 10c: the PBR far draws too
+	wwLodViewUniform( prog, mesh );	// lane LODLIVE1
+	if ( wwDebugViewId() && prog->uniLocation( "wwDvOwner" ) >= 0 )	// lane DEBUGVIEW1: who drew the shape
+		prog->uni1i( "wwDvOwner", wwDebugViewOwner( scene, mesh ) );
 	if ( prog->uniLocation( "landShoreIndex" ) >= 0 )	// lane WATERWETBAKE1: the cell programs (the Wet shore row)
 		wwCellLandShoreUniforms( scene, wwCellIsTerrainShape( mesh ) );
 	if ( prog->uniLocation( "rainWet" ) >= 0 ) {	// lane FO76WEATHER1: rain wetness (gl/cellprecip.h)
@@ -2301,10 +2455,14 @@ bool Renderer::setupProgramPBRM( const NifModel * nif, Program * prog, Shape * m
 	mesh->setUniforms( prog );
 	/* Q14 (lane PBRR3): vertex colour reaches the PBR base colour only when the shader
 	 * property's SLSF2_Vertex_Colors flag is set, the flag the game applies them under. */
-	prog->uni4f( "vertexColorOverride",
-		( mesh->hasVertexColors && mesh->colors.size() >= mesh->verts.size()
+	{
+		FloatVector4 pc = ( mesh->hasVertexColors && mesh->colors.size() >= mesh->verts.size()
 			&& scene->hasOption( Scene::DoVertexColors ) && lsp->hasSF2( ShaderFlags::SLSF2_Vertex_Colors ) )
-			? FloatVector4( 0.0f ) : FloatVector4( 1.0f ) );
+			? FloatVector4( 0.0f ) : FloatVector4( 1.0f );
+		if ( lsp->greyscaleColor && wwPaletteRowHeld( mesh, false, "pbr" ) )	// B10: this route has no palette
+			pc[0] = 1.0f;
+		prog->uni4f( "vertexColorOverride", pc );
+	}
 
 	return true;
 }
@@ -2334,6 +2492,25 @@ bool Renderer::setupProgramRoute( const NifModel * nif, Program * prog, Shape * 
 	mesh->setUniforms( prog );
 	prog->uni4f( "vertexColorOverride", FloatVector4( 1.0f ) );
 	return true;
+}
+
+/* MODULES1 R7 item 9 (sun on faces turned away from it): fo4_default.frag adds a material's back light whenever its
+ * power is above 0 and never read the back-lighting flag. 171 of the 6616 vanilla BGSM carry a power with the flag off
+ * (Window01 2.0, BrickSteamTPlaster01 1000): their faces glowed with the sun behind them. The power now reaches the
+ * shader only with the flag. Red WW_BACKLIGHT_FLAG_RED=1 (live): the power alone, as before. */
+static float wwBackLightPower( bool flag, float power, const QString & name )
+{
+	WW_SWITCH_STATIC( bool, red, qEnvironmentVariableIntValue( "WW_BACKLIGHT_FLAG_RED" ) == 1 );
+	if ( flag || !( power > 0.0f ) )
+		return power;
+	static int said = -1;
+	if ( said != int( red ) ) {
+		said = int( red );
+		std::fprintf( stderr, "back light flag: '%s' has back light power %.2f and no back-lighting flag: %s (red WW_BACKLIGHT_FLAG_RED=1)\n",
+			qPrintable( name ), double( power ),
+			red ? "RED: lit from behind by the power alone" : "no back light, as its flag says (said for the first such shape only)" );
+	}
+	return red ? power : 0.0f;
 }
 
 bool Renderer::setupProgramCE1( const NifModel * nif, Program * prog, Shape * mesh )
@@ -2376,6 +2553,31 @@ bool Renderer::setupProgramCE1( const NifModel * nif, Program * prog, Shape * me
 			WW_SWITCH_STATIC( bool, deep, wwEnv( "WW_CELL_DECAL_POM_RED" ).trimmed() == "deep" );
 			prog->uni2f( "wwDecalPom", on ? sc * ( deep ? 4.0f : 1.0f ) : 0.0f, steps );
 		}
+		if ( prog->uniLocation( "wwMulDecal" ) >= 0 ) {
+			/* MODULES1 M2: a multiply decal (material blend DestColor x Zero, or DestColor x SrcColor = 2x) writes its
+			 * albedo factor, unlit, fogged to neutral (fo4_default.frag). Red WW_DECALMUL_RED=1: lit and fogged, as before. */
+			WW_SWITCH_STATIC( bool, mulRed, wwEnv( "WW_DECALMUL_RED" ).trimmed() == "1" );
+			const Material * mm = mesh->bslsp ? mesh->bslsp->getMaterial() : nullptr;
+			int mul = 0;
+			if ( !mulRed && mm && mm->hasAlphaBlend() && scene->hasOption( Scene::DoBlending ) && mm->alphaSourceBlend() == 4 )
+				mul = mm->alphaDestinationBlend() == 1 ? 1 : mm->alphaDestinationBlend() == 2 ? 2 : 0;
+			prog->uni1i( "wwMulDecal", mul );
+			// the census: every blended surface decal's material once (its blend, and the vertex alpha that edges it)
+			static QSet<QString> mulTold;
+			if ( mm && mm->hasAlphaBlend() && mesh->wwSurfaceDecal() && !mulTold.contains( mesh->bslsp->materialFileName() ) ) {
+				mulTold.insert( mesh->bslsp->materialFileName() );
+				float vaMin = 1.0f, vaMax = 0.0f;
+				for ( const Color4 & vc : mesh->colors ) {
+					vaMin = std::min( vaMin, vc[3] );
+					vaMax = std::max( vaMax, vc[3] );
+				}
+				fprintf( stderr, "decal blend: %s src %u dst %u -> %s; vertex alpha %s %.2f..%.2f (red WW_DECALMUL_RED=1)\n",
+					qPrintable( mesh->bslsp->materialFileName() ), mm->alphaSourceBlend(), mm->alphaDestinationBlend(),
+					mul ? "multiply: albedo factor x coverage, unlit, fogged to neutral" : mulRed ? "lit and fogged (red)"
+					: "lit and fogged (alpha blend)", mesh->hasVertexColors && !mesh->colors.isEmpty() ? "yes" : "none",
+					double( vaMin ), double( vaMax ) );
+			}
+		}
 		if ( prog->uniLocation( "wwDecalAngle" ) >= 0 ) {	// lane DECALANGLE: the vertex alpha is dot(N, D) on this shape
 			const bool angle = wwCellDecalAngleFor( scene->nifModel, mesh->id() );
 			const bool mapped = angle && wwCellDecalMappedFor( scene->nifModel, mesh->id() );
@@ -2390,6 +2592,10 @@ bool Renderer::setupProgramCE1( const NifModel * nif, Program * prog, Shape * me
 			setupMemo().stamps.erase( prog );	// per shape: the next shape's scene globals run again (PERF1's memo)
 		}
 		wwCellGrassUniforms( scene, mesh->id() );	// lane GRASSMB1: the grass fade, zero on every other shape
+		CellFarInst::vcAoUniform( prog, CellFarInst::vcAoType( mesh->getName() ) );	// MODULES1 10b-2: zero on every other shape
+		wwLodViewUniform( prog, mesh );	// lane LODLIVE1
+		if ( wwDebugViewId() && prog->uniLocation( "wwDvOwner" ) >= 0 )	// lane DEBUGVIEW1: who drew the shape
+			prog->uni1i( "wwDvOwner", wwDebugViewOwner( scene, mesh ) );
 		if ( prog->uniLocation( "fgMode" ) >= 0 )	// lane FARDRAW1: a live-ground twin's grid, layers and decals
 			CellFarGround::uniforms( scene, prog );
 		if ( prog->uniLocation( "landShoreIndex" ) >= 0 )	// lane WATERWETBAKE1: the cell programs (the Wet shore row)
@@ -2610,7 +2816,7 @@ bool Renderer::setupProgramCE1( const NifModel * nif, Program * prog, Shape * me
 			if ( nifVersion < 151 ) {
 				prog->uni1f( "subsurfaceRolloff", lsp->lightingEffect1 );
 				prog->uni1f( "rimPower", lsp->rimPower );
-				prog->uni1f( "backlightPower", lsp->backlightPower );
+				prog->uni1f( "backlightPower", wwBackLightPower( lsp->hasBacklight, lsp->backlightPower, mesh->getName() ) );
 			} else {
 				FloatVector4	translucencyColorAndScale( 1.0f, 1.0f, 1.0f, -1.0f );
 				if ( mat && mat->isShaderMaterial() ) {
@@ -2746,6 +2952,9 @@ bool Renderer::setupProgramCE1( const NifModel * nif, Program * prog, Shape * me
 				: FloatVector4( 0.0f, 0.0f, 0.0f, 0.0f ) );
 		}
 		prog->uni1f( "glowMult", scene->hasOption(Scene::DoGlow) ? esp->emissiveMult : 0.0f );
+		// lane MODULES1 M3 (G7): the Effect Lighting law's band from max( base colour ) x base colour scale
+		wwCellFxLawUniforms( scene, mesh->id(), std::max( { esp->emissiveColor.red(), esp->emissiveColor.green(),
+			esp->emissiveColor.blue() } ) * esp->emissiveMult, mesh->getName() );
 
 		// Falloff params
 
@@ -2763,6 +2972,46 @@ bool Renderer::setupProgramCE1( const NifModel * nif, Program * prog, Shape * me
 			constexpr float kVpCardDepth = 64.0f;
 			const bool fxLit = wwCellFxLitFor( scene->nifModel, mesh->id() ) != nullptr;
 			const bool vp = wwVolPartUniforms( scene ) && fxLit;
+			/* MODULES1 M3 (steam top band): the puff's ball spans the card's UV 0..1 (one sprite). The vanilla steam
+			 * cards tile (MistGroundWaterSteam01Long:3 u 0.41..5.95, v -1.01..-0.38) or sit in an atlas cell (Puff015
+			 * 0..0.26): the clamped UV put the whole tiled card on the ball's rim (opacity 0) and drew the rim's arc
+			 * across the atlas cell as a hard band. Such a card is a slab: its own alpha, thickened by the soft slab */
+			if ( vp && prog->uniLocation( "vpTiled" ) >= 0 ) {
+				float u0 = 1e30f, v0 = 1e30f, u1 = -1e30f, v1 = -1e30f;
+				if ( !mesh->coords.isEmpty() )
+					for ( const Vector2 & t : mesh->coords.at( 0 ) ) {
+						u0 = std::min( u0, t[0] ); u1 = std::max( u1, t[0] );
+						v0 = std::min( v0, t[1] ); v1 = std::max( v1, t[1] );
+					}
+				const bool sprite = u0 > -0.05f && v0 > -0.05f && u1 < 1.05f && v1 < 1.05f && u1 - u0 > 0.75f && v1 - v0 > 0.75f;
+				const bool red = wwEnv( "WW_FX_PUFF_SLAB_RED" ).trimmed() == "1";
+				prog->uni1i( "vpTiled", sprite || red || u0 > u1 ? 0 : 1 );
+				static QSet<qint64> saidPuff;
+				const qint64 key = ( qint64( quintptr( mesh ) ) << 1 ) | ( red ? 1 : 0 );
+				if ( !saidPuff.contains( key ) && saidPuff.size() < 4096 ) {
+					saidPuff.insert( key );
+					// MODULES1 R7-1: the fake volumetric's inputs per card: shape from its normal map (else the card's facing),
+					// thickness from its alpha (the material's here; x texture x vertex alpha per pixel)
+					static int nmYes = 0, nmNo = 0;
+					static double alphaSum = 0.0;
+					( esp->hasNormalMap ? nmYes : nmNo )++;
+					alphaSum += double( esp->getAlpha() );
+					// R8-1: the Effect Lighting law's numbers for this card (band 1 = lit: a pure receiver of the scene's light)
+					const float lawB = std::max( { esp->emissiveColor.red(), esp->emissiveColor.green(), esp->emissiveColor.blue() } ) * esp->emissiveMult;
+					const float lawBand = wwCellFxLawBand( lawB );
+					fprintf( stderr, "cell effects puff: shape %d '%s' uv u %.2f..%.2f v %.2f..%.2f -> %s%s | normal map %s, material alpha %.2f "
+						"(so far %d cards with a normal map, %d without: facing; mean material alpha %.2f) | law: base colour %.3f,%.3f,%.3f x "
+						"scale %.3f = brightness %.3f, band %.3f (%s), lighting influence %.3f (reads 1 outdoors), receiver weight %.3f, own light %.3f\n", mesh->id(),
+						qPrintable( mesh->getName() ),
+						double( u0 ), double( u1 ), double( v0 ), double( v1 ), sprite || u0 > u1 ? "ball (one sprite)" : "slab (tiled or atlas cell)",
+						red ? " | red WW_FX_PUFF_SLAB_RED: ball for every card" : "", esp->hasNormalMap ? "yes" : "no", double( esp->getAlpha() ),
+						nmYes, nmNo, alphaSum / double( nmYes + nmNo ),
+						double( esp->emissiveColor.red() ), double( esp->emissiveColor.green() ), double( esp->emissiveColor.blue() ),
+						double( esp->emissiveMult ), double( lawB ), double( lawBand ),
+						lawBand >= 1.0f ? "lit" : lawBand <= 0.0f ? "emissive" : "graded", double( esp->lightingInfluence ),
+						double( lawBand ), double( 1.0f - lawBand ) );
+				}
+			}
 			if ( wwEnv( "WW_CELL_PARTICLES_AIR_RED" ).trimmed() == "1" && prog->uniLocation( "cellGiAirOn" ) >= 0 )
 				prog->uni1b( "cellGiAirOn", false );	// SKY3 red: a lit card's puff reads the grid's shell, as before
 			if ( !vp && prog->uniLocation( "volPart" ) >= 0 )
@@ -2772,9 +3021,24 @@ bool Renderer::setupProgramCE1( const NifModel * nif, Program * prog, Shape * me
 			prog->uni1b( "fxSoft", soft );
 			prog->uni1f( "fxSoftDepth", espSoft ? std::max( esp->falloff.softDepth, 1.0f ) : vp ? kVpCardDepth : 1.0f );
 			wwVolPartFxSet( vp ? 1 | ( soft && !( wwVolPartRed() & 4 ) ? 2 : 0 ) : 0 );
+			/* MODULES1 R8-1: the opacity is a card's depth, always: its slope tilts the normal (added to the normal
+			 * map's when there is one), and the UV ball no longer stands in for it. Red words on WW_CELL_FXLOCAL_RED:
+			 * `face` (no opacity slope), `mapalone` (a normal map alone), `ball` (the ball again) */
+			const QStringList lumpWords = wwEnvStr( "WW_CELL_FXLOCAL_RED" ).split( ',' );
+			const bool lumpRed = lumpWords.contains( QStringLiteral( "face" ) );
+			const bool lumpMapRed = lumpWords.contains( QStringLiteral( "mapalone" ) ), lumpBallRed = lumpWords.contains( QStringLiteral( "ball" ) );
+			if ( prog->uniLocation( "fxLumpRed" ) >= 0 )
+				prog->uni1i( "fxLumpRed", ( lumpRed ? 1 : 0 ) | ( lumpMapRed ? 2 : 0 ) | ( lumpBallRed ? 4 : 0 ) );
+			if ( prog->uniLocation( "fxAirCard" ) >= 0 )	// MODULES1 round 9: a volumetric mesh card is a slab of air
+				prog->uni1i( "fxAirCard", vp ? 1 : 0 );
 			if ( vp ) {
 				static QString said;
-				const QString now = wwVolPartSummary() + QStringLiteral( " soft=%1" ).arg( soft ? 1 : 0 );
+				const QString now = wwVolPartSummary() + QStringLiteral( " soft=%1 | normal: %2; depth: %3; density: opacity" )
+					.arg( soft ? 1 : 0 ).arg( lumpRed ? QStringLiteral( "the normal map, else the card's face, RED WW_CELL_FXLOCAL_RED=face" )
+						: lumpMapRed ? QStringLiteral( "the normal map alone, else the opacity-depth's slope, RED WW_CELL_FXLOCAL_RED=mapalone" )
+						: QStringLiteral( "the normal map's slope + the opacity-depth's slope at 1 : 1 (no map: the opacity-depth's alone)" ),
+						lumpBallRed ? QStringLiteral( "a ball over the card's UV, RED WW_CELL_FXLOCAL_RED=ball" )
+						: QStringLiteral( "the opacity (the UV ball does nothing)" ) );
 				if ( now != said ) {
 					said = now;
 					fprintf( stderr, "cell effects volumetric: %s\n", qPrintable( now ) );
@@ -2893,6 +3157,11 @@ bool Renderer::setupProgramCE1( const NifModel * nif, Program * prog, Shape * me
 		// alpha) regardless of the vertex-colour display toggle or shader flags.
 		if ( scene->hasVisMode(Scene::VisVertexColors) )
 			c = ( mesh->hasVertexColors && !mesh->colors.isEmpty() ) ? FloatVector4( 0.0f ) : FloatVector4( 1.0f );
+		else if ( lsp && lsp->greyscaleColor ) {	// MODULES1 round 5 B10: the row only where the palette reads it
+			const bool tint = scene->hasOption( Scene::DoMaterialTint );
+			if ( wwPaletteRowHeld( mesh, tint, tint ? "legacy palette" : "material tint off" ) )
+				c[0] = 1.0f;
+		}
 
 		prog->uni4f( "vertexColorOverride", c );
 	}

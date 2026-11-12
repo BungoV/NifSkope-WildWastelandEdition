@@ -50,10 +50,15 @@ QString lodgenNativeCacheMemLine();
 /*! did this model's parse (lodgenLoadModel, this process) find a particle system? The cell view
  *  copies those systems into its document (the welded load takes triangle shapes only). */
 bool lodgenModelHasParticles( const QString & model );
+/*! lane PARTFX1: the same question for any model: a parse's answer, else the model's bytes read once (loose, then the
+ *  archives) and kept for the process. `read` is set when this call read the file. */
+bool lodgenModelHasParticlesRead( const QString & dataRoot, const QString & model, bool * read = nullptr );
 //! did this model's parse find a looping sequence or a controller no sequence drives (it moves alone)?
 bool lodgenModelMoves( const QString & model );
 //! a model's file bytes, found the way the model loader finds them (loose, then the archives)
 bool lodgenReadModelBytes( const QString & dataRoot, const QString & model, QByteArray & bytes );
+//! lane EMPTY240 R9-c: true when the resource stack's index is built; else a worker builds it (ask again a paint later)
+bool lodgenStackIndexWarm();
 //! a previs file (`vis/<plugin>/<form>.uvd`), loose or from the archives
 bool lodgenReadVisFile( const QString & dataRoot, const QString & relPath, QByteArray & bytes );
 /*! is this BGEM (a material path as an effect property names it) lit by the placed lights in the

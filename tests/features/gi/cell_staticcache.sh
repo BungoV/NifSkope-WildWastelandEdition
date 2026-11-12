@@ -1,4 +1,5 @@
 #!/bin/bash
+export WW_CELL_STREAM="${WW_CELL_STREAM:-0}"	# AIRPERF1 r4: this harness opens a fixed block (streaming is the default now)
 #
 # THE PLACED LIGHTS KEPT BETWEEN RELIGHTS (lane STATICCACHE1, 2026-10-11; src/features/gi/probegi.cpp, PRTP_PLAN 2as, deck C6).
 #

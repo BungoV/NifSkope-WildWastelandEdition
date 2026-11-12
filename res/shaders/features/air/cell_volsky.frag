@@ -21,6 +21,19 @@ uniform int atApSkyRule;	// lane HORIZONBAND1: 1 the horizon band (atmo_skyband.
 uniform sampler2D atSkyTransTex;
 uniform float atSkyCamR;
 uniform bool volSkyOn;
+/* MODULES1 R7 night sky d (bungo 11-11, Foggy h22: "the sky is pitch black, why"): the share of the drawn sky that is the
+ * weather record's night dome (atmo_sky.frag atRecNight.x: the master Off's night share; 0 with the master On, by day and
+ * under the reds). The dome holds none of the physical sky's air, so over that share the backdrop takes the air's own
+ * (L, T) once: not the residual T / tSky (a credit for air the dome does not hold) and not the horizon band's cap (the
+ * physical sky's opaque air hiding a backdrop it is not in front of). fogNight (lookdev_fog.glsl): the saturated air's
+ * night colour, the cover's light is at least that x its coverage. Red WW_NIGHTAIR_RED=1 (live): both 0, as before. */
+uniform float volSkyDome;
+/* FARWATER1 round 2 (bungo b71: a deep blue strip over the sea's edge, gone with WW_ENDLESS_SEA=0): the endless sea pushes
+ * the far plane to its rim (glview.cpp: x 1.05, ~4.4 M u), and the band's far-plane point on a ray between eye level and
+ * the sea's dip then lay ~20000 u under the flat air frame's ground (deep blue). True while the sea draws: the point as the
+ * flat frame sees the curved earth (lookdev_fog.glsl wwAirFlatPos, the sea's own rule) and no column clamp. Red
+ * WW_ENDLESS_SEA_RED=air: false. */
+uniform bool volSkySea;
 
 out vec4 fragColor;
 
@@ -46,11 +59,19 @@ void main()
 		return;
 	}
 	vec4 a = volSkyOn ? wwVolAirSky( wwSkyRay() ) : vec4( 0.0, 0.0, 0.0, 1.0 );
+	vec4 air = a;	// the air alone
 	if ( volSkyMode == 0 && wwApOn() && atSkyCamR > 0.0 ) {
 		vec3 vr = wwSkyRay();
 		float mu = dot( vr, viewMatrix[2] );	// world up: viewMatrix's columns are the world axes in view space
 		float muH = -sqrt( max( 0.0, 1.0 - kRb * kRb / ( atSkyCamR * atSkyCamR ) ) );
 		vec3 ts = atTrans( atSkyTransTex, atSkyCamR, max( mu, muH + 1e-4 ) );	// below the horizon: the horizon's
+		if ( atApSkyRule >= 3 && mu < muH ) {
+			// MODULES1 item 18 (rule 3): a ray that meets the planet keeps the air's transmittance to the ground
+			// (T(ground, up) / T(camera, up) along the reversed ray), not the horizon's ~0 that banded a high view black
+			float dg = atDistGround( atSkyCamR, mu );
+			float mg = clamp( ( atSkyCamR * mu + dg ) / kRb, -1.0, 0.0 );
+			ts = min( atTrans( atSkyTransTex, kRb, -mg ) / max( atTrans( atSkyTransTex, atSkyCamR, -mu ), vec3( 1e-30 ) ), vec3( 1.0 ) );
+		}
 		float tSky = dot( ts, vec3( 1.0 / 3.0 ) );
 		if ( atApSkyRule >= 1 && atApDouble <= 0.5 && volSkyOn ) {
 			// lane HORIZONBAND1: the horizon band, coloured by the aerial perspective's far end along this ray (rule 1, now
@@ -60,20 +81,36 @@ void main()
 			// night ambient and the aerial perspective does not: rule 1 drew a dark flat stripe (spot 3 22:00, 18,19,21
 			// between a 25,40,60 sky and a 36,59,90 far land, hard edges).
 			vec4 ap = vec4( 0.0 );	// unused where the band's weight is 0 (wwSkyBandL mixes it by w)
-			if ( atApSkyRule == 2 ) {
+			float tFar = 1.0;	// MODULES1 round 10 (rule 4): the far path's transmittance; 1 = no air, no band
+			if ( atApSkyRule >= 2 ) {
 				if ( wwSkyBandW( tSky ) > 0.0 ) {	// the fog path only in the band (~2 deg above the horizon and under it)
 					float farV = projectionMatrix[3][2] / min( projectionMatrix[2][2] + 1.0, -1e-6 );	// the far plane (view units)
-					ap = vec4( wwFog( vec3( 0.0 ), vr * abs( farV ) ), 0.0 );
+					float dV = abs( farV );
+					// MODULES1 item 18 (rule 3): a ray that meets the planet ends there (km to units: / 1.42875e-5)
+					if ( atApSkyRule >= 3 && mu < muH )
+						dV = min( dV, atDistGround( atSkyCamR, mu ) / 1.42875e-5 );
+					vec3 pFar = vr * dV;
+					if ( volSkySea ) {
+						pFar = wwAirFlatPos( pFar );
+						wwAirFree = true;
+					}
+					ap = vec4( wwFog( vec3( 0.0 ), pFar ), 0.0 );
+					if ( atApSkyRule >= 4 )	// wwFog is linear in the surface's colour on the air's path: white - black = T
+						tFar = clamp( dot( wwFog( vec3( 1.0 ), pFar ) - ap.rgb, vec3( 1.0 / 3.0 ) ), 0.0, 1.0 );
 				}
 			} else {
 				ap = wwAtmoApAt( vr * ( atAp.y / max( atAp.z, 1e-12 ) ) );
 			}
-			float tb = wwSkyBandT( a.a, tSky, 1 );
-			a = vec4( wwSkyBandL( a.rgb, a.a, ap.rgb, ap.a, tSky, tb, 1 ), tb );
+			float tb = atApSkyRule >= 4 ? wwSkyBandT4( a.a, tSky, tFar ) : wwSkyBandT( a.a, tSky, 1 );
+			a = vec4( atApSkyRule >= 4 ? wwSkyBandL4( a.rgb, a.a, ap.rgb, tFar, tSky, tb ) : wwSkyBandL( a.rgb, a.a, ap.rgb, ap.a, tSky, tb, 1 ), tb );
 		} else {
 			float tr = wwApFogResidualT( tSky, a.a, atApDouble > 0.5 );
 			a = vec4( atApDouble > 0.5 ? a.rgb : wwApFogResidualL( a.rgb, a.a, tr ), tr );
 		}
+	}
+	if ( volSkyMode == 0 && volSkyOn && fogNight.a > 0.0 ) {	// MODULES1 R7 night sky d
+		a = mix( a, air, volSkyDome );
+		a.rgb = max( wwAirNightHue( a.rgb ), fogNight.rgb * ( 1.0 - a.a ) );	// FARWATER1 late 3: the night sky's tint
 	}
 	if ( volSkyMode == 1 ) {
 		fragColor = vec4( volProbe == 1 ? a.rgb : vec3( a.a ), 1.0 );

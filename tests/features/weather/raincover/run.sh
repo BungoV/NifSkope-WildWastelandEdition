@@ -1,5 +1,5 @@
 #!/bin/bash
-# lane FO76WEATHER2: bash tests/features/weather/raincover/run.sh <outdir>. CPU: green must exit 0, the red (-DRAINCOVER_RED, the base:
+# lane WETWEATHER2: bash tests/features/weather/raincover/run.sh <outdir>. CPU: green must exit 0, the red (-DRAINCOVER_RED, the base:
 # no cover test) must fail. GPU (raincover_gpu.py, the real driver): green PASS, reds cover and off FAIL. Pure headers,
 # UCRT64 g++ (its runtime first on PATH in the same call).
 set -u

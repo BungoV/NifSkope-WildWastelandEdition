@@ -6,11 +6,18 @@ BSD License - see nifskope.h
 
 #include "features/air/cellvolair.h"
 #include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
+#include "wwsyncwait.h"	// lane EMPTY240 R4-2: the env strata's read-back by name
+#include "features/weather/wxoverride.h"	// lane MODULES1 item 12: live air overrides
 #include "gl/cellunits.h"
 
 #include "features/air/airbouncelamp.h"	// lane AIRBOUNCE1: the lamps' floor-bounce law
 #include "features/air/airmslamp.h"	// lane AIRMS1: the lamps' multiple-scattering law
 #include "features/air/airlampatlas.h"	// lane MODULES1 route (a): the lamps' shadows in the air
+#include "features/lights/cellclustergl.h"	// lane AIRPERF1 A6: the surfaces' light lists' echo (what the air walks)
+#include "features/air/airfarspread.h"	// lane AIRPERF1 A4: the far grid's refresh over its frames
+#include "features/air/airrecxfit.h"	// lane AIRPERF1 A8: the air under the entry's physicalWeather switch
+#include "features/weather/recxphysical.h"	// lane AIRPERF1 A8: the switch
+#include "features/weather/weatherrecx.h"	// lane AIRPERF1 A8: the file's visibility, the sky's own number
 #include "features/gi/rtddgicell.h"	// lane MODULES1 route (b): the lamps' shadows traced on the volume's BVH
 #include "features/sky/atmomath.h"	// lane CLOUD6e: kUnitKm, the cloud map's units
 #include "features/sky/atmosphere.h"	// SHAFTS1b: the aerial perspective's haze, for the no-double-count fit
@@ -18,6 +25,7 @@ BSD License - see nifskope.h
 #include "features/clouds/cloudmap.h"	// lane CLOUD6e: the rain fog follows the Low band's coverage
 #include "features/weather/rainfogmath.h"	// lane CLOUD6e: the rain fog's law
 #include "gl/cellgrass.h"	// lane FOGWIND1: the game's wind angle, shared with the grass
+#include "cellworldanim.h"	// MODULES1: the cell world clock (live in test windows too)
 #include "features/exposure/cellhdr.h"
 #include "gl/celllights.h"
 #include "gl/celluniform.h"	// lane CELLUNI3: the units bound without a unit ask
@@ -36,6 +44,7 @@ BSD License - see nifskope.h
 #include "harnesswindow.h"
 #include "recx.h"
 #include "features/air/fognoise.h"	// MODULES1 part 19: the lumps' texture file
+#include "features/water/endlesssea.h"	// FARWATER1 round 2: the sky band over the endless sea
 
 #include <QDebug>
 #include <QElapsedTimer>
@@ -110,6 +119,10 @@ struct VaState
 	// lane FARCITYWASH1 (bungo 11-02, far city washed out): red WW_CELL_AIR_RED=veilphys = the sky-lit share of the air at
 	// its physical level, as before; shipped: brought down to the records' fog colour where brighter (cell_volair.frag airVeilK)
 	bool veilPhys = false;
+	// lane NIGHTHAZE1: red WW_CELL_AIR_RED=greyalbedo = the grey air (albedo 1 in every colour); shipped: the sky haze's
+	// albedo per colour (atmomath.h hazeAirAlbedo, cell_volair.frag airAlbedoD), so near fog and far haze match
+	bool greyAlbedo = false;
+	QString albedoNote = QStringLiteral( "grey" );
 	/* lane FOGLEAK1 (fog lit where no light reaches; only under the loader's WW_CELL_FOGLEAK, cell_volair.frag
 	 * WW_AIR_LEAK): reds WW_CELL_AIR_RED= 1 dalcenv (the env share the flat weather ambient), 2 nosungate (the sun past
 	 * the cascades unshadowed), 4 lightleak (unshadowed lights / the pixel ReSTIR ratio in the air), 8 nofartailshadow
@@ -169,6 +182,7 @@ VaState & vs()
 			s.sunColumn = d.sunColumn;
 			s.envHue = d.envHue;
 			s.veilPhys = d.veilPhys;
+			s.greyAlbedo = d.greyAlbedo;
 			s.leakRed = d.leakRed;
 			s.openEnv = d.openEnv;
 			s.askRed = d.askRed;
@@ -196,6 +210,7 @@ VaState & vs()
 			s.sunColumn = s.sunColumn || r == "suncolumn";	// lane FIX1101A
 			s.envHue = s.envHue || r == "envhue";	// lane FIX1101A
 			s.veilPhys = s.veilPhys || r == "veilphys";	// lane FARCITYWASH1
+			s.greyAlbedo = s.greyAlbedo || r == "greyalbedo";	// lane NIGHTHAZE1
 			s.openEnv = s.openEnv || r == "openenv";	// lane DARKAIR1
 			s.farOffRed = s.farOffRed || r == "faroff";	// SHAFTS1b
 			s.apStackRed = s.apStackRed || r == "apstack";	// SHAFTS1b
@@ -320,7 +335,7 @@ VaDrift & vd()
 		if ( ok ) {	// a fixed clock (the shots' frames): the drift integrated from 0 to t in fixed steps
 			d.timePinned = true;
 			d.tPin = std::max( t, 0.0 );
-		} else if ( !wwWorldClockLive() ) {	// a harness never reads the wall clock
+		} else if ( !wwCellClockLive() ) {	// red WW_CELL_CLOCK_RED=harness: the drift holds
 			d.timePinned = true;
 		}
 	}
@@ -491,6 +506,7 @@ struct VaGpu
 	// last pass's view (posView = sc R world + t: rows sc R | t) and grid
 	GLuint hist[2] = { 0, 0 };
 	int histCur = 0, histCols = 0, histRows = 0, histSlices = 0;
+	int histStrata = 0;	// MODULES1 item 8: 6 = the four strata + the env walk's two (envspread), 4 = red
 	bool half = false;	// lane PERFFIX3: the volumes are RGBA16F (WW_CELL_AIR_RED=f32: RGBA32F, as before)
 	// lane PERFFIX3: the stages whose framebuffer was found complete for this layout of targets (bit per site; asked once)
 	int fbOk = 0;
@@ -500,6 +516,11 @@ struct VaGpu
 	float prevGrid[4] = { 0, 0, 0, 0 }, prevScale = 0.0f;
 	unsigned frame = 0;
 	int tmode = 0;
+	// lane MODULES1 part 25 (LampVol): the lamps' history (RGBA16F: steady rgb, N) and this frame's lamp term (RGBA32F:
+	// rgb, the light-set hash), cols x rows x kSlices, ping-pong on histCur; the blue-noise mask (R8 2D array, once)
+	GLuint lvHist[2] = { 0, 0 }, lvNow[2] = { 0, 0 }, stbn = 0;
+	int lvCols = 0, lvRows = 0;
+	bool lvOk = false, stbnTried = false;
 	// lane VOLAIRPATH1: the path frame this history last drew (-1 none), the path run it belongs to, and the state
 	// that frame started from (a repaint of the same frame redoes it from the same history)
 	int pathDone = -1;
@@ -749,6 +770,12 @@ static void vaPhaseMie( VaPhase & p )
 	p.gi[3] = wf * g + wb * gb;
 }
 
+bool vaPhaseRecordHue()
+{
+	WW_SWITCH_STATIC( bool, rec, wwEnvStr( "WW_CELL_AIR_PHASE_RED" ) == QLatin1String( "recordhue" ) );
+	return rec;
+}
+
 VaPhase vaPhase( const float m[12], bool coloured )
 {
 	VaPhase p;
@@ -785,7 +812,25 @@ struct VaMedium
 	float sigma0 = 0.0f, zb = 0.0f, invH = 0.0f, dFull = 0.0f, farD = 0.0f;
 	bool band = false;
 	bool apCut = false;	// SHAFTS1b: the sky's haze share taken off (the aerial perspective drawn)
+	float sStreet = 0.0f, apShare = 0.0f;	// AIRPERF1 A7: the record's street fit alone; the sky's haze the fit was given
 };
+
+// lane AIRPERF1 A7 red (live): WW_CELL_AIR_FIT_RED=apcut = the fit before (the sky's haze taken off the street fit)
+bool vaFitCutRed()
+{
+	WW_SWITCH_STATIC( bool, cut, wwEnvStr( "WW_CELL_AIR_FIT_RED" ) == QLatin1String( "apcut" ) );
+	return cut;
+}
+
+/* lane AIRPERF1 A8 red (live): WW_CELL_AIR_FIT_RED=wthr = the rule before the physicalWeather switch (the record's
+ * fit is the air's density whatever the .recx says, a file's ground layer divided back out of the street); apcut,
+ * the older fit, implies it */
+bool vaFitWthrRed()
+{
+	WW_SWITCH_STATIC( bool, old, wwEnvStr( "WW_CELL_AIR_FIT_RED" ) == QLatin1String( "wthr" )
+		|| wwEnvStr( "WW_CELL_AIR_FIT_RED" ) == QLatin1String( "apcut" ) );
+	return old;
+}
 
 // the game's fog alpha at distance d and fog-frame height z (lookdev_fog.glsl wwFogEval, the same formula)
 double vaGameAlpha( const float K[6][4], double d, double z )
@@ -808,6 +853,20 @@ double vaGameAlpha( const float K[6][4], double d, double z )
  * thinner than the far-end fit (1 - exp(-sigma0 dFull) = min(max, 0.99)) unless the record's curve ends inside the
  * street range (an interior's short steep curve; there the street fit alone). The slices end where the air reaches that
  * opacity (tau_max / sigma0, at most dFull), so what lies beyond keeps the game's 1 - max showing through. */
+// measurement pin (bungo 10-16): WW_CELL_AIR_DENSITY=<x> scales the air's density (bungo's live fog slider).
+// MODULES1 round 4 F1b: it multiplies the FINAL medium, once, after the ground layer is derived (vaKeepStreet
+// renormalised an early pin back to the game's anchor density, so the slider barely moved the street).
+float vaDensPin()
+{
+	WW_SWITCH_STATIC( float, densPin, wwEnvIsSet( "WW_CELL_AIR_DENSITY" ) ? wwEnv( "WW_CELL_AIR_DENSITY" ).toFloat() : 1.0f );
+	return densPin;
+}
+bool vaDensPinEarly()
+{
+	WW_SWITCH_STATIC( bool, early, wwEnvStr( "WW_CELL_AIR_DENSITY_RED" ) == QLatin1String( "early" ) );
+	return early;
+}
+
 VaMedium vaFit( const float K[6][4], bool wrong, bool farFit, float apPerUnit = 0.0f )
 {
 	VaMedium m;
@@ -839,9 +898,20 @@ VaMedium vaFit( const float K[6][4], bool wrong, bool farFit, float apPerUnit = 
 	 * from this same fog record (atmosphere.cpp hazeFromFog), apPerUnit its ground extinction. The far-end floor is
 	 * the sky's then (the air past the street is its), and the air keeps only the street fit's share above the sky's:
 	 * one count of the record's haze, not the air's on top of the sky's. Red apstack: today's fit. */
+	/* lane AIRPERF1 A7 (bungo 11-11, CommonwealthFoggy at Goodneighbor h22 far too thin): the surfaces take the MIN of
+	 * the two transmittances (atmo_apfog.glsl: the air keeps only the share the sky's air has not taken, and its
+	 * light is scaled to that share). Taking the sky's haze off the fit as well counted it out twice: the eye saw
+	 * max(street - sky, sky), not the record's street, and wherever the sky's haze was half the street fit or more
+	 * (Foggy: 19.5 /km fitted, 9.8 /km in the sky from the 400 m visibility) the air's own light (lamps, shafts) was
+	 * scaled to nothing. Now the air keeps the record's whole street fit and the min alone counts the haze once; the
+	 * far-end floor stays the sky's. One rule for every weather: a clear one changes by its thin sky haze only
+	 * (0.11 /km) and never passes its record's street fit. Offline: notes/modules1/airperf1/tools/a7_fit_twin.py.
+	 * Red WW_CELL_AIR_FIT_RED=apcut (live): the cut, as before. */
+	m.sStreet = sStreet;
+	m.apShare = farFit ? 0.0f : apPerUnit;
 	if ( apPerUnit > 0.0f && !farFit ) {
-		m.sigma0 = std::max( sStreet - apPerUnit, 0.0f );
-		m.apCut = true;
+		m.apCut = vaFitCutRed();
+		m.sigma0 = m.apCut ? std::max( sStreet - apPerUnit, 0.0f ) : sStreet;
 	}
 	m.farD = m.dFull;
 	if ( m.sigma0 > sFar && m.sigma0 > 0.0f )
@@ -851,10 +921,9 @@ VaMedium vaFit( const float K[6][4], bool wrong, bool farFit, float apPerUnit = 
 		m.invH = 0.0f;
 		m.band = false;
 	}
-	// measurement pin (bungo 10-16): WW_CELL_AIR_DENSITY=<x> scales the fitted density, to show a lamp's haze alone
-	WW_SWITCH_STATIC( float, densPin, wwEnvIsSet( "WW_CELL_AIR_DENSITY" ) ? wwEnv( "WW_CELL_AIR_DENSITY" ).toFloat() : 1.0f );
-	if ( densPin > 0.0f )
-		m.sigma0 *= densPin;
+	// red WW_CELL_AIR_DENSITY_RED=early: the pin scales the fit here, so the derived layer's visibility reads it
+	if ( vaDensPinEarly() && vaDensPin() > 0.0f )
+		m.sigma0 *= vaDensPin();
 	return m;
 }
 
@@ -871,6 +940,7 @@ struct VaLayer
 	QString recx = QStringLiteral( "none" );	// the census: rung:file of the entry applied, or why none
 	QString conflict;	// "conflict: <losers>" (one provider claimed it twice) or "overrides: <losers>", "" when alone
 	bool derived = false;	// FOGHEIGHT1: the layer came from the record (vaDerived): the caller keeps the street density
+	bool physKey = false, phys = false;	// AIRPERF1 A8: the entry's physicalWeather switch as written; as applied (red wthr: off)
 	QString noiseLink;		// MODULES1 part 19: the entry's groundFog "noiseTexture" ("": the shipped default)
 	QStringList noiseRoots;	// the .recx roots it resolves under ("": the shipped files' only)
 };
@@ -895,9 +965,9 @@ void vaNearShare( const float K[6][4], const VaMedium & M, VaLayer & L )
 	if ( std::fabs( L.zn - M.zb ) < 0.5f && std::fabs( L.invHn - M.invH ) <= 1e-4f * M.invH )
 		return;
 	static float lastK[24] = {};
-	static float lastW = 0.0f;
+	static float lastW = 0.0f, lastS = 0.0f;	// AIRPERF1 A7: the share is fitted with sigma0 held, so it is keyed on it too
 	static bool have = false;
-	if ( have && std::equal( &K[0][0], &K[0][0] + 24, lastK ) ) {
+	if ( have && lastS == M.sigma0 && std::equal( &K[0][0], &K[0][0] + 24, lastK ) ) {
 		L.w = lastW;
 		return;
 	}
@@ -934,6 +1004,7 @@ void vaNearShare( const float K[6][4], const VaMedium & M, VaLayer & L )
 	}
 	std::copy( &K[0][0], &K[0][0] + 24, lastK );
 	lastW = L.w;
+	lastS = M.sigma0;
 	have = true;
 }
 
@@ -1036,13 +1107,24 @@ void vaDerived( const VaMedium & M, const QString & why, VaLayer & L )
 		.arg( burnt, 0, 'f', 2 ).arg( why );
 }
 
-// a derived layer keeps the game's density at its anchor: sigma0 x rho(zg) is what it was without the layer
-void vaKeepStreet( VaMedium & M, const VaLayer & G )
+// a ground layer keeps the game's density at its anchor: sigma0 x rho(zg) is what it was without the layer.
+// MODULES1 R5A-2 (bungo b60 11-10, Memory Den street fog much thicker than 10-31): a FILE layer (Fusion Shaders'
+// CommonwealthFoggy.recx, 61 m x3) stacked on the game's fitted density, so the street took 1 + s = 4x the game's
+// Foggy night fog; on 10-31 the older 11 m file gave way to the derived layer, which kept it (1.00x). The file now
+// shapes the layer (thickness, strength = ground over aloft) and the game's fog sets the street. Red
+// WW_CELL_AIR_STREET_RED=stack: a file layer adds on top. Census: recx=... street=kept|stack.
+void vaKeepStreet( VaMedium & M, VaLayer & G )
 {
 	auto b = []( float z, float z0, float ih ) { return ih > 0.0f ? std::min( 1.0f, std::exp( -( z - z0 ) * ih ) ) : 1.0f; };
 	const float rb = ( 1.0f - G.w ) * b( G.zg, M.zb, M.invH ) + G.w * b( G.zg, G.zn, G.invHn );
-	if ( G.derived && rb > 0.0f )
-		M.sigma0 *= rb / ( rb + G.s );
+	if ( !( G.s > 0.0f ) || !( G.invHg > 0.0f ) )
+		return;
+	// lane AIRPERF1 A8: under the entry's physicalWeather switch the file's layer is ADDED (the spec's "added on top":
+	// strength is no longer divided back out of the street); airrecxfit.h layerBaseFactor
+	const bool onTop = !G.derived && G.phys;
+	const bool stack = !G.derived && wwEnvStr( "WW_CELL_AIR_STREET_RED" ) == QLatin1String( "stack" );
+	M.sigma0 *= airrecx::layerBaseFactor( rb, G.s, onTop || stack );
+	G.recx += onTop ? QStringLiteral( " street=ontop" ) : stack ? QStringLiteral( " street=stack" ) : QStringLiteral( " street=kept" );
 }
 
 // the ground layer of the Lookdev weather from its .recx entry (recx.h); red nosidecar: the files ignored
@@ -1075,6 +1157,8 @@ void vaGround( const float K[6][4], const VaMedium & M, bool interior, bool igno
 		return;
 	}
 	L.recx = hit.rung + QLatin1Char( ':' ) + hit.file.section( QLatin1Char( '/' ), -3 );
+	L.physKey = wwRecxPhysicalWeather( hit.entry );	// AIRPERF1 A8: the switch of the entry the layer came from
+	L.phys = L.physKey && !vaFitWthrRed();
 	if ( !hit.overridden.isEmpty() )
 		L.conflict = QStringLiteral( "%1 %2" ).arg( hit.conflict ? QStringLiteral( "conflict:" ) : QStringLiteral( "overrides:" ),
 			hit.overridden.join( QStringLiteral( ", " ) ) );
@@ -1093,10 +1177,34 @@ void vaGround( const float K[6][4], const VaMedium & M, bool interior, bool igno
 		return;
 	}
 	const double hour = wwLookdevHour();
-	const double thick = vaRecxValue( g, QStringLiteral( "thickness" ), hour, 0.0 );
-	const double str = vaRecxValue( g, QStringLiteral( "strength" ), hour, 0.0 );
+	// lane MODULES1 round 4 (bungo ".recx owns weather"): an authored groundFog field always wins; the weather's derived
+	// layer only fills a field the file leaves out. Red WW_CELL_AIR_RECX_RED=derivedwins: FOGHEIGHT2's law (a file
+	// thinner than the derived layer gives way to it whole; a missing field reads 0).
+	const bool derivedWins = wwEnvStr( "WW_CELL_AIR_RECX_RED" ) == QLatin1String( "derivedwins" );
+	double thick = vaRecxValue( g, QStringLiteral( "thickness" ), hour, -1.0 );
+	double str = vaRecxValue( g, QStringLiteral( "strength" ), hour, -1.0 );
+	const bool fileThick = thick >= 0.0, fileStr = str >= 0.0;
+	QString srcThick = QLatin1String( fileThick ? "file" : "none" ), srcStr = QLatin1String( fileStr ? "file" : "none" );
+	if ( !derivedWins && ( !fileThick || !fileStr ) ) {
+		VaLayer D;
+		D.zg = L.zg;
+		vaDerived( M, QString(), D );
+		if ( D.derived && D.invHg > 0.0f ) {
+			if ( !fileThick ) {
+				thick = 1.0 / double( D.invHg );
+				srcThick = QStringLiteral( "derived" );
+			}
+			if ( !fileStr ) {
+				str = double( D.s );
+				srcStr = QStringLiteral( "derived" );
+			}
+		}
+	}
+	thick = std::max( thick, 0.0 );
+	str = std::max( str, 0.0 );
+	const QString srcNote = QStringLiteral( "(thickness=%1 strength=%2)" ).arg( srcThick, srcStr );
 	if ( !( thick > 0.0 ) || !( str > 0.0 ) || !( M.sigma0 > 0.0f ) ) {
-		L.recx += QStringLiteral( "(thickness %1 strength %2: no layer)" ).arg( thick ).arg( str );
+		L.recx += QStringLiteral( "(thickness %1 strength %2: no layer)" ).arg( thick ).arg( str ) + srcNote;
 		return;
 	}
 	L.s = float( str );
@@ -1105,16 +1213,21 @@ void vaGround( const float K[6][4], const VaMedium & M, bool interior, bool igno
 	// section 0: gone 2-5 h after sunrise, the top coming down; pooling again from about 1 h after sunset)
 	if ( wwLookOn( WwLook::GroundBurnOff ) && g.value( QStringLiteral( "hours" ) ).toObject().isEmpty() ) {
 		const double burnt = vaBurnt( hour );
-		L.s = float( str * ( 1.0 - burnt ) );
-		L.invHg = float( 1.0 / ( thick * ( 1.0 - 0.75 * burnt ) ) );
+		// a derived field already carries the derived law's own burn-off
+		if ( fileStr || derivedWins )
+			L.s = float( str * ( 1.0 - burnt ) );
+		if ( fileThick || derivedWins )
+			L.invHg = float( 1.0 / ( thick * ( 1.0 - 0.75 * burnt ) ) );
 		L.recx += QStringLiteral( "(burn-off %1)" ).arg( burnt, 0, 'f', 2 );
 	}
+	L.recx += srcNote;
 	// lane FOGHEIGHT2 (bungo 10-27 "the fog is uniform everywhere"): the FO4CS groundFog files shipped for every vanilla
 	// weather are a 4-12 m skin, so with them the air above the street stayed flat. A file layer THINNER than the
 	// weather's derived layer now gives way to it (the derived law keeps the game's street density); a file that asks
 	// for a layer at least as thick (a weather mod's own fog) still wins. Red WW_CELL_AIR_GROUND_DERIVED_RED=filewins:
 	// any file wins (FOGHEIGHT1's precedence).
-	if ( wwEnvStr( "WW_CELL_AIR_GROUND_DERIVED_RED" ) != QLatin1String( "filewins" ) && L.invHg > 0.0f ) {
+	// Round 4: only under the derivedwins red.
+	if ( derivedWins && wwEnvStr( "WW_CELL_AIR_GROUND_DERIVED_RED" ) != QLatin1String( "filewins" ) && L.invHg > 0.0f ) {
 		VaLayer D;
 		D.zg = L.zg;
 		vaDerived( M, QString(), D );
@@ -1154,6 +1267,23 @@ int vaLeakBits( const WwCellLighting * L, int leakRed )
 	const bool live = L && L->interior && wwCellAsOutdoor( L ) && wwEnv( "WW_CELL_AIR_INTLEAK_RED" ).trimmed() != "1";
 	return live ? leakRed : ( leakRed | 1 | 2 | 4 | 8 | 16 );
 }
+
+// MODULES1 10b-3: the env strata's read-back at the cards cellfxlit.cpp names (wwVolAirEnvProbeSet / Say)
+struct VaEnvProbe
+{
+	int n = 0;
+	bool dirty = false, held = false, cardOn = false;
+	float world[3][3] = {};
+	int state[3] = { 0, 0, 0 };	// 0 not read yet, 1 outside the air's grid, 2 read, 3 read: no walk stored there
+	int cell[3][3] = {};
+	float fade[3] = {}, r[3] = {};
+};
+VaEnvProbe & vaEnvProbe()
+{
+	static VaEnvProbe p;
+	return p;
+}
+int vpFxSoftSeen = 0;	// the volumetric cards set up since the last ask: 1 one with the soft fade on, 2 one with it off
 }	// namespace
 
 // lane AIRBOUNCE1: the lamps' floor bounce in the air (src/gl/glcontext.cpp injects WW_CELL_AIR_BOUNCE; read per load)
@@ -1246,7 +1376,7 @@ void wwVolAirSetDriftOn( bool on )
 bool wwVolAirWantsRepaint()
 {
 	VaDrift & d = vd();
-	const bool want = d.moving && vs().on && d.on && !d.timePinned && wwWorldClockLive();
+	const bool want = d.moving && vs().on && d.on && !d.timePinned && wwCellClockLive();
 	d.moving = false;
 	return want;
 }
@@ -1287,6 +1417,145 @@ static VaPub & vaPub()
 {
 	static VaPub p;
 	return p;
+}
+
+/* MODULES1 10c: red WW_CELL_AIR_THINSRC_RED=1: a column too thin for the volume's T gives its tail no light, as before
+ * (lookdev_fog.glsl wwAirThinJ, volAirFlags 32768) */
+static bool vaThinSrcRed()
+{
+	WW_SWITCH_STATIC( bool, red, wwEnv( "WW_CELL_AIR_THINSRC_RED" ).trimmed() == "1" );
+	return red;
+}
+
+/* MODULES1 G3 (bungo 11-09 items 6, 10e: the lit fog far brighter than the sunlit land beside it): the ground layer
+ * took the sun out of the surfaces' direct beam (flag 128) and nothing gave it back, so under its column the land kept
+ * a few percent of the sun while the air over it stayed fully lit. What the column scatters forward now reaches the
+ * surfaces as soft light (lookdev_fog.glsl wwVolAirSunTD). The air's phase g rides in volAirGround.w as 1 + g.
+ * Red WW_CELL_AIR_SUNDIF_RED=1: 0 there, the direct beam alone, as before */
+static bool vaSunDifRed()
+{
+	WW_SWITCH_STATIC( bool, red, wwEnv( "WW_CELL_AIR_SUNDIF_RED" ).trimmed() == "1" );
+	return red;
+}
+
+// wwVolAirSunTD's soft share on the CPU (delta-Eddington + the low-sun divisor; notes/modules1/tools/g3_sundif_mc.py)
+static double vaSunDif( double tau, double mu, double g )
+{
+	const double gp = g / ( 1.0 + g ), tp = ( 1.0 - g * g ) * tau, g1 = 0.75 * ( 1.0 - gp ), td = std::exp( -tau / mu );
+	double tt = 1.0 - ( g1 * tp + ( 0.25 * ( 2.0 - 3.0 * gp * mu ) - g1 * mu ) * ( 1.0 - std::exp( -tp / mu ) ) ) / ( 1.0 + g1 * tp );
+	tt /= 1.0 + 0.035 * std::max( g, 0.0 ) * ( 1.0 / mu - 1.0 ) * ( 1.0 - td );
+	return std::max( tt - td, 0.0 );
+}
+
+// MODULES1 M12 (G4b, G5): lookdev_fog.glsl wwAirColOne on the CPU, for the column line (vaColumnEcho)
+static double vaColOne( double lo, double hi, double z0, double invH )
+{
+	if ( hi <= lo )
+		return 0.0;
+	if ( invH <= 0.0 )
+		return hi - lo;
+	const double below = std::max( std::min( hi, z0 ) - lo, 0.0 );
+	const double a = std::max( lo, z0 );
+	if ( hi <= a )
+		return below;
+	const double w = hi - a, u = w * invH;
+	const double e1 = u < 1e-3 ? 1.0 - u * ( 0.5 - u / 6.0 ) : ( 1.0 - std::exp( -u ) ) / u;
+	return below + std::exp( -( a - z0 ) * invH ) * w * e1;
+}
+
+/* MODULES1 M12 (G4b, G5; bungo 11-09 items 6, 23:22): the air's height profile and the sun through it, said when the
+ * medium changes (a weather change): the band's base and scale height, the top and its falloff, the ground layer's anchor,
+ * thickness and strength, whether the layer follows the terrain grid (FOGTERRAIN2) or one height; the optical depth
+ * straight up from the ground anchor (the shipped sun's: the ground layer alone, flag 128; the whole band beside it) and
+ * the direct sun's transmittance exp(-tau / mu) at sun heights mu 1, 0.5, 0.2, 0.05 (lookdev_fog.glsl wwVolAirSunT);
+ * the band's optical depth along the horizon over 1 km at the anchor (70028 units). Telemetry only. */
+static void vaColumnEcho( const float med[4], const float layer[4], const float ground[4], bool terr, bool sunColumn )
+{
+	static float said[13] = { -1.0f };
+	const float key[13] = { med[0], med[1], med[2], med[3], layer[0], layer[1], layer[2], layer[3], ground[0], ground[1],
+		ground[2], terr ? 1.0f : 0.0f, sunColumn ? 1.0f : 0.0f };
+	bool same = true;
+	for ( int i = 0; i < 13; i++ )
+		same = same && std::fabs( key[i] - said[i] ) <= 1e-4f * std::max( 1.0f, std::fabs( key[i] ) );
+	if ( same || !( med[0] > 0.0f ) )
+		return;
+	std::copy( key, key + 13, said );
+	const double s0 = med[0], zb = med[1], invH = med[2], top = med[3], zg = ground[0];
+	const double end = ground[2] > 0.0f ? top + 16.0 / double( ground[2] ) : top;
+	const double tauLayer = layer[3] > 0.0f ? s0 * double( layer[3] ) * vaColOne( zg, top, zg, double( ground[1] ) ) : 0.0;
+	const double tauBand = s0 * vaColOne( zg, end, zb, invH );
+	const double tauSun = sunColumn ? tauBand : tauLayer;
+	const double rhoG = std::min( 1.0, std::exp( -( zg - zb ) * invH ) );
+	std::fprintf( stderr, "air column: base %.0f scale height %.0f top %.0f (falloff %.0f), ground layer at %.0f thick %.0f "
+		"strength %.3f near share %.3f (%s) | tau up: sun's %.4f (%s), whole band %.4f | sun T at mu 1 %.3f, 0.5 %.3f, "
+		"0.2 %.3f, 0.05 %.3f | band tau along the horizon per km at the anchor %.3f\n", zb, invH > 0.0 ? 1.0 / invH : 0.0, top,
+		ground[2] > 0.0f ? 1.0 / double( ground[2] ) : 0.0, zg, ground[1] > 0.0f ? 1.0 / double( ground[1] ) : 0.0,
+		double( layer[3] ), double( layer[0] ), terr ? "follows the terrain grid" : "one height", tauSun,
+		sunColumn ? "the whole column, red suncolumn" : "the ground layer", tauBand, std::exp( -tauSun ),
+		std::exp( -tauSun / 0.5 ), std::exp( -tauSun / 0.2 ), std::exp( -tauSun / 0.05 ), s0 * rhoG * 70028.0 );
+	/* MODULES1 G3: the soft share of the sun under that column, and the land vs the lit air for the same sun (sun 30
+	 * degrees up, per unit of the sun's light): a level land of albedo 0.18 with and without the soft share, the air
+	 * clear of the layer scattering once (pi x HG(g), single lobe) to the side and toward the sun */
+	const bool difOn = ground[3] > 0.0f;
+	const double gPh = difOn ? double( ground[3] ) - 1.0 : 0.0, mu = 0.5, td = std::exp( -tauSun / mu );
+	auto dif = [&]( double m ) { return difOn ? vaSunDif( tauSun, m, gPh ) : 0.0; };
+	auto hgPi = [&]( double c ) { return ( 1.0 - gPh * gPh ) / ( 4.0 * std::pow( 1.0 + gPh * gPh - 2.0 * gPh * c, 1.5 ) ); };
+	const double landNow = 0.18 * mu * ( td + dif( mu ) ), landWas = 0.18 * mu * td;
+	const double side = hgPi( 0.0 ), toSun = hgPi( std::sqrt( 1.0 - mu * mu ) );
+	std::fprintf( stderr, "air sun soft: %s, phase g %.2f | soft share at mu 1 %.3f, 0.5 %.3f, 0.2 %.3f | sun 30 deg up, per "
+		"unit sun: land %.4f (direct only %.4f) | air single scattering side %.3f, toward the sun %.3f | air:land side %.1f "
+		"(direct only %.1f)\n", difOn ? "on" : "red WW_CELL_AIR_SUNDIF_RED=1 (the direct beam alone)", gPh, dif( 1.0 ),
+		dif( 0.5 ), dif( 0.2 ), landNow, landWas, side, toSun, side / std::max( landNow, 1e-9 ), side / std::max( landWas, 1e-9 ) );
+}
+
+// MODULES1 G4: lookdev_fog.glsl wwAirColLaw on the CPU (the ground layer at its one height, not the terrain grid)
+static double vaColLaw( double lo, double hi, const float med[4], const float layer[4], const float ground[4] )
+{
+	const double top = med[3];
+	double up = 0.0;
+	if ( ground[2] > 0.0f && hi > top ) {	// wwAirRhoLaw at the top x the falloff's column
+		double r = med[2] > 0.0f ? std::min( 1.0, std::exp( -( top - med[1] ) * med[2] ) ) : 1.0;
+		if ( layer[0] > 0.0f )
+			r = ( 1.0 - layer[0] ) * r + layer[0] * ( layer[2] > 0.0f ? std::min( 1.0, std::exp( -( top - layer[1] ) * layer[2] ) ) : 1.0 );
+		if ( layer[3] > 0.0f )
+			r += layer[3] * ( ground[1] > 0.0f ? std::min( 1.0, std::exp( -( top - ground[0] ) * ground[1] ) ) : 1.0 );
+		up = r * vaColOne( std::max( lo, top ), hi, top, ground[2] );
+	}
+	hi = std::min( hi, top );
+	double c = vaColOne( lo, hi, med[1], med[2] );
+	if ( layer[0] > 0.0f )
+		c = ( 1.0 - layer[0] ) * c + layer[0] * vaColOne( lo, hi, layer[1], layer[2] );
+	if ( layer[3] > 0.0f )
+		c += layer[3] * vaColOne( lo, hi, ground[0], ground[1] );
+	return c + up;
+}
+
+/* MODULES1 G4 (bungo 11-09 items 5, 10b, 12: "sky and clouds visible, fog thickness permitting"): what shows of the sky
+ * and of the 12 vanilla layers from the camera. The layers draw into the backdrop at the deck, past the air's end; the
+ * sky pass (cell_volsky.frag) lays the air over the backdrop as sky x T + the air's light, T = exp(-sigma0 x the
+ * column from the camera to the air's end / sin(elevation)) -- the same T for every layer at that elevation, no cover
+ * of its own. Said when the medium changes or the camera moves 5 % of the air's height. Telemetry only. */
+static void vaSkyEcho( const float med[4], const float layer[4], const float ground[4], float zc )
+{
+	static float said[6] = { -1.0f };
+	static float saidZ = 1e30f;
+	const float key[6] = { med[0], med[1], med[2], med[3], layer[3], ground[0] };
+	bool same = true;
+	for ( int i = 0; i < 6; i++ )
+		same = same && std::fabs( key[i] - said[i] ) <= 1e-4f * std::max( 1.0f, std::fabs( key[i] ) );
+	const double end = ground[2] > 0.0f ? double( med[3] ) + 16.0 / double( ground[2] ) : double( med[3] );
+	const double span = std::max( end - std::min( double( ground[0] ), double( med[1] ) ), 1.0 );
+	if ( !( med[0] > 0.0f ) || ( same && std::fabs( double( zc ) - double( saidZ ) ) < 0.05 * span ) )
+		return;
+	std::copy( key, key + 6, said );
+	saidZ = zc;
+	const double tau = zc < end ? double( med[0] ) * vaColLaw( zc, end, med, layer, ground ) : 0.0;
+	auto T = [&]( double deg ) { return std::exp( -tau / std::sin( deg * 0.017453292519943295 ) ); };
+	std::fprintf( stderr, "air sky: camera %+.0f over the ground layer's anchor (%s the top %.0f, end %.0f) | optical depth "
+		"straight up %.3f | the sky's and every vanilla cloud layer's T through the air at 90 deg %.3f, 30 %.3f, 10 %.3f, "
+		"3 %.4f | sky x T + the air's light (cell_volsky.frag), no cover of its own\n", double( zc ) - double( ground[0] ),
+		zc < med[3] ? "under" : zc < end ? "in the falloff over" : "above the end of", double( med[3] ), end, tau, T( 90.0 ),
+		T( 30.0 ), T( 10.0 ), T( 3.0 ) );
 }
 
 bool wwVolAirMediumNow( float med[4], float layer[4], float ground[2] )
@@ -1341,7 +1610,7 @@ void wwVolAirPass( Scene * scene, bool run )
 	for ( int k : { PassTime::AirPre, PassTime::AirFar, PassTime::AirPost } )
 		PassTime::subEnd( k );	// no-ops unless an early return left one open
 	const qint64 tInner = pt.nsecsElapsed();
-	if ( vs().on && run )
+	if ( run || !vs().on )	// MODULES1 M8: the air off is said too (the log kept noon's "Day,Day" phase at 3 AM)
 		vaEcho();
 	vaCpu.mark( PassTime::CpuAirEcho );
 	if ( prof )
@@ -1706,6 +1975,35 @@ static void vaPassInner( Scene * scene, bool run )
 	const float apHazeKm = wwAtmoApActive() && wwAtmoFrame().valid ? wwAtmoFrame().haze[0] : 0.0f;	// SHAFTS1b
 	VaMedium M = vaFit( K, ( s.red & 32 ) != 0, ( s.red & 128 ) != 0,
 		s.apStackRed ? 0.0f : apHazeKm / kUnitsPerKm );
+	/* lane AIRPERF1 A8 (bungo 11-11: "our recx needs to override these things", one switch for the physically based
+	 * weather): with the atmosphere entry's physicalWeather switch on and its visibility from the file, the air's base
+	 * density is that visibility's (Koschmieder less clear air, the sky's own number), even over height, and the
+	 * record's fog distances, power, max and height bands are no fit target, clamp or floor for it. Outdoors only.
+	 * Switch off or absent: the record's fit above, unchanged. Red WW_CELL_AIR_FIT_RED=wthr. */
+	bool physAtmoKey = false, physBase = false;
+	float physVisM = -1.0f;
+	{
+		const WwWeatherRecx & wr = wwWeatherRecx();
+		const WwCellLighting * Lp = wwCellLightsWanted( scene ) ? wwCellLightsFor( scene->nifModel ) : nullptr;
+		physAtmoKey = wr.on && wwRecxSourceIsFile( wr.sources, "physicalWeather" );
+		physVisM = wr.on && wwRecxSourceIsFile( wr.sources, "visibility" ) ? wr.visibilityM : -1.0f;
+		physBase = physAtmoKey && physVisM > 0.0f && !vaFitWthrRed() && !( Lp && Lp->interior ) && !( s.red & ( 32 | 128 ) );
+		if ( physBase ) {
+			M.sigma0 = airrecx::baseSigmaPerUnit( physVisM, WwAtmoMath::kRay[1] + WwAtmoMath::kMieE, kUnitsPerKm );
+			M.apCut = false;
+			M.band = false;
+			M.invH = 0.0f;
+			M.farD = airrecx::reach( M.sigma0 );
+			if ( vaDensPinEarly() && vaDensPin() > 0.0f )
+				M.sigma0 *= vaDensPin();
+		}
+	}
+	{	// lane MODULES1 item 12: the live air overrides (per km and metres, as the Scene window shows them)
+		const float unitsPerM = kUnitsPerKm / 1000.0f;
+		M.sigma0 = wwWxOv( WwWx::AirDensity, M.sigma0 * kUnitsPerKm ) / kUnitsPerKm;
+		const float hM = wwWxOv( WwWx::AirHeightScale, M.invH > 0.0f ? 1.0f / ( M.invH * unitsPerM ) : 0.0f );
+		M.invH = hM > 0.0f ? 1.0f / ( hM * unitsPerM ) : 0.0f;
+	}
 	/* lane LIGHTBOOTH1 (the light test booth; a harness pin, never a user toggle): WW_CELL_BOOTH_AIR = <sigma0 per
 	 * unit> replaces the fitted medium with EVEN air of that density at every height (no band, no ground layer), so a
 	 * fixture's glow is measured in the same air wherever it stands. The slices end where the air reaches 99%
@@ -1732,6 +2030,7 @@ static void vaPassInner( Scene * scene, bool run )
 	 * before past it. Red farseam: the far grid starts 30 % past the near grid's end (a gap of air: the seam gate's red). */
 	const VaFarPreset & fp = kFarPresets[std::clamp( s.farTier, 0, 4 )];
 	const float farEnd = std::min( fp.endKm * kUnitsPerKm, M.farD );
+	// MODULES1 M1 (11-10 audit, physical reason): the far grid is the land past the cells; an interior has no land past its walls
 	const bool farOn = s.farTier > 0 && !( L && L->interior ) && farEnd > kFarHandoff * 2.0f;
 	const float farStart = kFarHandoff * ( ( s.red & 33554432 ) ? 1.3f : 1.0f );
 	// the slices: exponential from 16 units to where the air reaches the records' max opacity (vaFit)
@@ -1748,6 +2047,13 @@ static void vaPassInner( Scene * scene, bool run )
 	const float topW = s.sphereTop ? bs.center[2] + bs.radius : vaShapesTop( scene, bs );
 	// the booth's even air has no top: a lone fixture would otherwise end the air at its own crown (lane LIGHTBOOTH1)
 	const float zTop = boothAir > 0.0f ? 1.0e6f : topW + fogView[3] - camZw;
+	/* MODULES1 G2 (bungo 11-09, flight items 10b, 10c: the fog a flat slab with a hard, stair-stepped top, no haze above
+	 * it): outdoors the air does not end at its top, its density there falls off with height Ht (lookdev_fog.glsl
+	 * wwAirColLaw, ground.z = 1 / Ht). 120 m: the height the haze band's own census falls off with (0.120 km); item G4b
+	 * sets it per weather. Red WW_CELL_AIR_TOPFALL_RED=1: empty above the top, as before. */
+	WW_SWITCH_STATIC( bool, topFallRed, wwEnv( "WW_CELL_AIR_TOPFALL_RED" ).trimmed() == "1" );
+	// MODULES1 M1 (11-10 audit, physical reason): above an interior is its ceiling, not the open atmosphere's thinning column
+	const float invTopH = topFallRed || boothAir > 0.0f || ( L && L->interior ) ? 0.0f : 1.0f / ( 0.120f * kUnitsPerKm );
 
 	// the phase: indoors the cell's god-ray record, outdoors the weather's, else the fallback
 	float med[12] = { 0.60f, 1.52f, 3.31f, 2, 2, 2, 1, 1, 1, 0.75f, 0, 1 };
@@ -1760,7 +2066,21 @@ static void vaPassInner( Scene * scene, bool run )
 	}
 	if ( vaPhaseMieOn() )	// lane FOGMATCH1: the droplet phase replaces the record's lobes (its hue is unchanged)
 		medNote += QStringLiteral( " mie(g %1 w 0.9, back -0.4 w 0.1)" ).arg( double( vaPhaseMieG() ), 0, 'f', 2 );
-	const VaPhase ph = vaPhase( med, ( s.red & 524288 ) != 0 );
+	/* MODULES1 round 4 F2 (bungo 11-10, brown haze on a clear day): the haze takes its colour from the light falling on
+	 * it, never from the god-ray record: the lobes keep the record's shape (g, weights) at a neutral hue. Red
+	 * WW_CELL_AIR_PHASE_RED=recordhue (or the bluescatter red): the record's hue on the lobes. */
+	const bool recordHue = ( s.red & 524288 ) != 0 || vaPhaseRecordHue();
+	medNote += recordHue ? QStringLiteral( " hue=record" ) : QStringLiteral( " hue=neutral" );
+	medNote += wwNightHazeNote();	// FARWATER1 late item 3: the night haze's tint
+	VaPhase ph = vaPhase( med, recordHue );
+	ph.gi[3] = wwWxOv( WwWx::AirPhaseG, ph.gi[3] );	// lane MODULES1 item 12: live phase g and tint
+	{
+		const float was[3] = { ph.gi[0], ph.gi[1], ph.gi[2] };
+		wwWxOv3( WwWx::AirTint, ph.gi );
+		for ( int c = 0; c < 3; c++ )	// the lobes' weights follow the tint
+			for ( int k = 0; k < 3; k++ )
+				ph.w[k][c] *= was[c] > 1e-6f ? ph.gi[c] / was[c] : 0.0f;
+	}
 	// the ground layer (vaNearShare, vaGround); red noground: the far band alone, as before it
 	VaLayer G;
 	if ( boothAir > 0.0f ) {
@@ -1771,6 +2091,35 @@ static void vaPassInner( Scene * scene, bool run )
 		vaKeepStreet( M, G );	// FOGHEIGHT1: the street keeps the game's density, the air above thins
 	} else {
 		G.recx = QStringLiteral( "none(red noground)" );
+	}
+	{	// F1b: the density pin on the final medium (band, derived and authored layer alike: rho scales with sigma0)
+		const float before = M.sigma0;
+		const bool late = !vaDensPinEarly() && boothAir <= 0.0f && vaDensPin() > 0.0f;
+		if ( late )
+			M.sigma0 *= vaDensPin();
+		medNote += QStringLiteral( " dens=%1%2 sigma0 %3->%4" ).arg( double( vaDensPin() ), 0, 'g', 4 )
+			.arg( vaDensPinEarly() ? QStringLiteral( "(red early)" ) : late ? QString() : QStringLiteral( "(off)" ) )
+			.arg( double( before ), 0, 'g', 6 ).arg( double( M.sigma0 ), 0, 'g', 6 );
+	}
+	if ( invTopH > 0.0f ) {	// MODULES1 G2: the fix's telemetry, in the census line: the top's density, the column above it
+		const auto band = []( float z, float z0, float invH ) { return invH > 0.0f ? std::min( 1.0f, std::exp( -( z - z0 ) * invH ) ) : 1.0f; };
+		float rTop = band( zTop, M.zb, M.invH );
+		if ( G.w > 0.0f )
+			rTop = ( 1.0f - G.w ) * rTop + G.w * band( zTop, G.zn, G.invHn );
+		if ( G.s > 0.0f )
+			rTop += G.s * band( zTop, G.zg, G.invHg );
+		const float odUp = M.sigma0 * rTop / invTopH;
+		medNote += QStringLiteral( " topfall=on(H=%1 rho_top=%2 od_up=%3 T_up=%4)" ).arg( double( 1.0f / invTopH ), 0, 'f', 1 )
+			.arg( double( rTop ), 0, 'f', 4 ).arg( double( odUp ), 0, 'f', 4 ).arg( double( std::exp( -odUp ) ), 0, 'f', 4 );
+		// MODULES1 10c: the heights above the top between which a level column over the near grid is too thin for the
+		// volume's T (an optical depth under 0.02) and its tail takes the grid's light over the law's depth
+		const float odLevel = M.sigma0 * rTop * farD;
+		medNote += vaThinSrcRed() ? QStringLiteral( " thinsrc=red(no source)" )
+			: QStringLiteral( " thinsrc=on(level od at top %1, thin from +%2 to +%3)" ).arg( double( odLevel ), 0, 'g', 4 )
+				.arg( double( std::max( 0.0f, std::log( odLevel / 0.02f ) ) / invTopH ), 0, 'f', 0 )
+				.arg( double( std::min( 16.0f, std::max( 0.0f, std::log( odLevel / 1.0e-7f ) ) ) / invTopH ), 0, 'f', 0 );
+	} else {
+		medNote += topFallRed ? QStringLiteral( " topfall=red(hard top)" ) : QStringLiteral( " topfall=off(indoors)" );
 	}
 	{
 		static QString saidRecx;
@@ -1784,7 +2133,13 @@ static void vaPassInner( Scene * scene, bool run )
 	const int W = std::max( vp[2], 1 ), H = std::max( vp[3], 1 );
 	// lane PERFFIX3: the near grid's preset (0 / Low = the grid as before: 12 px, 64 slices)
 	const VaGrid grid = vaGridOf( s.grid );
-	const int kColumnPx = grid.px, kSlices = grid.slices;
+	/* lane AIRPERF1 A2: the near grid's slice count of the 128-slice presets by a live key, to time and to judge:
+	 * WW_CELL_AIR_SLICES=64 / 96 (unset or 128 = the preset's own count, the rule before). Offline
+	 * (notes/modules1/airperf1/tools/slices_twin.py) 128 slices buy nothing in the thin ground layer (64 reads it within
+	 * 0.3 of an 8-bit step) and 1 to 2 steps where a surface cuts a sun shaft's edge inside a slice */
+	WW_SWITCH_STATIC( QString, slicesKey, wwEnv( "WW_CELL_AIR_SLICES" ).trimmed() );
+	const int slicesAsk = slicesKey == QLatin1String( "64" ) ? 64 : slicesKey == QLatin1String( "96" ) ? 96 : 0;
+	const int kColumnPx = grid.px, kSlices = slicesAsk && grid.slices > 64 ? slicesAsk : grid.slices;
 	const int cols = ( W + kColumnPx - 1 ) / kColumnPx, rows = ( H + kColumnPx - 1 ) / kColumnPx;
 	// lane FARGRID1: one volume, the far grid's layers after the near grid's (no new sampler on the surfaces)
 	const int texW = farOn ? std::max( cols, fp.cols ) : cols, texH = farOn ? std::max( rows, fp.rows ) : rows;
@@ -1823,16 +2178,77 @@ static void vaPassInner( Scene * scene, bool run )
 	}
 	// lane PERF2, temporal: not with red lightmid (its single light sample has no strata)
 	const bool temporal = s.temporal && g.mrtOk == 1 && !( s.red & 262144 );
-	if ( temporal && ( !g.hist[0] || g.histCols != cols || g.histRows != rows || g.histSlices != kSlices ) ) {
+	QString apNote;	// lane AIRPERF1: the frame-cost rules' echo (appended to the `cell air:` line)
+	/* MODULES1 item 8: the leak walk's env read (airLeakEnv, the 8 probes round each froxel: 9.0 ms of a 13.8 ms
+	 * inject, Goodneighbor night, all on) rides the temporal history as two more strata: a froxel walks one frame in
+	 * four (2 x 2 columns, offset by layer and frame) and reuses the reprojected walk otherwise, as the sun's strata do.
+	 * Red WW_CELL_AIR_ENVSPREAD_RED=1: the walk every froxel every frame, four strata, as before */
+	WW_SWITCH_STATIC( bool, envSpreadRed, wwEnv( "WW_CELL_AIR_ENVSPREAD_RED" ).trimmed() == "1" );
+	const int strata = envSpreadRed ? 4 : 6;
+	apNote += kSlices == grid.slices ? QStringLiteral( " slices=%1(preset)" ).arg( kSlices )
+		: QStringLiteral( " slices=%1(key, preset %2)" ).arg( kSlices ).arg( grid.slices );	// AIRPERF1 A2
+	if ( temporal && ( !g.hist[0] || g.histCols != cols || g.histRows != rows || g.histSlices != kSlices
+		|| g.histStrata != strata ) ) {
 		for ( GLuint & h : g.hist )
-			vaAlloc3D( fn, h, cols, rows, 4 * kSlices, true, false );
+			vaAlloc3D( fn, h, cols, rows, strata * kSlices, true, false );
 		g.histCols = cols;
 		g.histRows = rows;
 		g.histSlices = kSlices;
+		g.histStrata = strata;
 		g.histOk = false;
 	}
 	if ( !temporal || g.doc != scene->nifModel )
 		g.histOk = false;	// another document: its history is not this one's
+	/* lane MODULES1 part 25 (LampVol, notes/foggrid22a/HANDBACK.md): the placed lights' in-scatter is its own stage (4),
+	 * one blue-noise sample a froxel a frame into a history, before the inject reads it. Temporal only (it rides the
+	 * strata's ping-pong and reprojection). Red WW_CELL_AIR_LAMPS_RED (live): pixel = the inject's own lamp loop, as
+	 * before; else a comma list of gates: white (the twin's hash, not the mask), noramp (a = the floor only), onemiss (one
+	 * sample on a miss), blendflicker (the flickering lamps into the history too), nohash (no light-set rejection), nochord (MODULES1 R5A-4: every lamp at the froxel's one sample
+	 * point, not on its own chord) */
+	const QByteArray lampRedS = wwEnv( "WW_CELL_AIR_LAMPS_RED" ).trimmed().toLower();
+	const bool lampPixel = lampRedS == "pixel";
+	const int lampRed = ( lampRedS.contains( "white" ) ? 1 : 0 ) | ( lampRedS.contains( "noramp" ) ? 2 : 0 )
+		| ( lampRedS.contains( "onemiss" ) ? 4 : 0 ) | ( lampRedS.contains( "blendflicker" ) ? 8 : 0 ) | ( lampRedS.contains( "nohash" ) ? 16 : 0 )
+		| ( lampRedS.contains( "nochord" ) ? 32 : 0 )
+		| ( lampRedS.contains( "walkempty" ) ? 64 : 0 );	// AIRPERF1 A3: the stage on froxels with an empty lamp list too
+	apNote += QStringLiteral( " lampempty=%1" ).arg( lampPixel ? "n/a(pixel)" : ( lampRed & 80 ) ? "walk(red)" : "skip" );
+	if ( temporal && !lampPixel && !g.stbnTried ) {
+		g.stbnTried = true;
+		QFile mf( QStringLiteral( ":/air/stbn_scalar_128x128x64.r8" ) );
+		const QByteArray mask = mf.open( QIODevice::ReadOnly ) ? mf.readAll() : QByteArray();
+		if ( mask.size() == 128 * 128 * 64 ) {	// 64 slices of 128 rows of 128 bytes, x fastest (res/air/README.md)
+			fn->glGenTextures( 1, &g.stbn );
+			fn->glBindTexture( GL_TEXTURE_2D_ARRAY, g.stbn );
+			fn->glTexImage3D( GL_TEXTURE_2D_ARRAY, 0, GL_R8, 128, 128, 64, 0, GL_RED, GL_UNSIGNED_BYTE, mask.constData() );
+			fn->glTexParameteri( GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MIN_FILTER, GL_NEAREST );
+			fn->glTexParameteri( GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAG_FILTER, GL_NEAREST );
+			fn->glTexParameteri( GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_S, GL_REPEAT );
+			fn->glTexParameteri( GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_T, GL_REPEAT );
+			fn->glTexParameteri( GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAX_LEVEL, 0 );
+			fn->glBindTexture( GL_TEXTURE_2D_ARRAY, 0 );
+		}
+	}
+	const bool lampVol = temporal && !lampPixel && g.stbn != 0;
+	if ( lampVol && ( !g.lvHist[0] || g.lvCols != cols || g.lvRows != rows ) ) {
+		for ( int i = 0; i < 2; i++ ) {
+			vaAlloc3D( fn, g.lvHist[i], cols, rows, kSlices, false, true );
+			vaAlloc3D( fn, g.lvNow[i], cols, rows, kSlices, false, false );	// 32-bit: the hash's 24 bits exact
+		}
+		g.lvCols = cols;
+		g.lvRows = rows;
+		g.lvOk = false;
+	}
+	if ( !lampVol )
+		g.lvOk = false;
+	{
+		static QByteArray lampSaid;
+		const QByteArray say = lampVol ? QByteArray( "froxel" )
+			: QByteArray( "pixel (" ) + ( lampPixel ? "red" : !temporal ? "not temporal" : "no mask" ) + ")";
+		if ( say != lampSaid ) {
+			lampSaid = say;
+			std::fprintf( stderr, "cell air lamps: %s\n", say.constData() );
+		}
+	}
 	/* lane VOLAIRPATH1: a camera path keys the history on its frame, so every repeat of a path draws the same strata
 	 * from the same history: a run's first frame (or a step back) starts a fresh history, a repaint of the same frame
 	 * redoes it from the state that frame started from, and the stratum is the frame's (volQ = frame & 3). No path
@@ -1914,9 +2330,15 @@ static void vaPassInner( Scene * scene, bool run )
 		prog->uni1i( "volLampRays", WwCellUnit::AirLampRays );
 		prog->uni1i( "volLampN", lampN );
 		WW_SWITCH_STATIC( bool, lampPcfRed, wwEnv( "WW_CELL_AIR_LAMPPCF_RED" ).trimmed() == "1" );	// part 18: one atlas tap
-		prog->uni1i( "volLampAtlasRed", ( wwAirLampAtlasRed() & 1 ) | ( lampPcfRed ? 2 : 0 ) );
+		WW_SWITCH_STATIC( bool, nsLampOff, wwEnv( "WW_AIR_NSLAMP_OFF" ).trimmed() == "1" );	// part 24 probe: no air from lamps without the shadow flag
+		prog->uni1i( "volLampAtlasRed", ( wwAirLampAtlasRed() & 1 ) | ( lampPcfRed ? 2 : 0 ) | ( wwAirAtlasAllRed() ? 4 : 0 ) | ( nsLampOff ? 8 : 0 ) );
 		prog->uni1i( "volLampAtlas", WwCellUnit::AirLampAtlas );
 		prog->uni1i( "volLampTable", WwCellUnit::AirLampTable );
+		prog->uni1i( "volLampNow", WwCellUnit::AirLampNow );	// part 25 (LampVol): own units, never shared
+		prog->uni1i( "volLampHist", WwCellUnit::AirLampHist );
+		prog->uni1i( "volStbn", WwCellUnit::AirStbn );
+		prog->uni1i( "volLampRed", lampRed );
+		prog->uni1i( "volLampVol", 0 );
 	}
 	const bool csm = wwSunShadowWanted( scene );
 	fn->glDisable( GL_DEPTH_TEST );
@@ -1937,10 +2359,37 @@ static void vaPassInner( Scene * scene, bool run )
 	prog->uni4f( "volSlices", FloatVector4( nearD, logRatio, float( kSlices ), 1.0f ) );
 	prog->uni4f( "airMed", FloatVector4( M.sigma0, M.zb, M.invH, zTop ) );
 	prog->uni4f( "airLayer", FloatVector4( G.w, G.zn, G.invHn, G.s ) );
-	prog->uni4f( "airGround", FloatVector4( G.zg, G.invHg, 0.0f, 0.0f ) );
+	prog->uni4f( "airGround", FloatVector4( G.zg, G.invHg, invTopH, 0.0f ) );	// MODULES1 G2: z = 1 / the top's falloff height
 	prog->uni1b( "airSunLayer", !s.sunColumn );	// lane FIX1101A: the sun dimmed by the ground layer only (cell_airmed.glsl airTupSun)
 	prog->uni1b( "airEnvFogHue", !s.envHue );	// lane FIX1101A: the env share without the sun glare hue (airEnvColourEnv)
 	prog->uni1b( "volVeil", !s.veilPhys );	// lane FARCITYWASH1: the sky-lit share at most the records' fog (airVeilK)
+	float alb[3] = { 1.0f, 1.0f, 1.0f };
+	if ( !s.greyAlbedo )
+		WwAtmoMath::hazeAirAlbedo( alb );
+	prog->uni3f( "airAlbedoD", alb[0] - 1.0f, alb[1] - 1.0f, alb[2] - 1.0f );	// lane NIGHTHAZE1
+	s.albedoNote = s.greyAlbedo ? QStringLiteral( "grey(red)" )
+		: QStringLiteral( "%1,%2,%3" ).arg( double( alb[0] ), 0, 'f', 3 ).arg( double( alb[1] ), 0, 'f', 3 ).arg( double( alb[2] ), 0, 'f', 3 );
+	{	// lane NIGHTHAZE1: the haze's glow and the last-resort overrides, the sky's own values (atmosphere.cpp); the red
+		// greyalbedo: none (the near air as before)
+		WwAtmoAirExtras ax;
+		const bool axOn = !s.greyAlbedo && wwAtmoAirExtras( ax );
+		prog->uni1i( "airXOn", axOn ? 1 : 0 );
+		if ( axOn ) {
+			float lv[3];
+			for ( int i = 0; i < 3; i++ )
+				lv[i] = vt.rotation( i, 0 ) * ax.lightW[0] + vt.rotation( i, 1 ) * ax.lightW[1] + vt.rotation( i, 2 ) * ax.lightW[2];
+			const float ll = std::sqrt( lv[0] * lv[0] + lv[1] * lv[1] + lv[2] * lv[2] );
+			prog->uni3f( "airEmit", ax.glow[0], ax.glow[1], ax.glow[2] );
+			prog->uni3f( "airInsc", ax.inscatter[0], ax.inscatter[1], ax.inscatter[2] );
+			prog->uni3f( "airDirC", ax.dir[0], ax.dir[1], ax.dir[2] );
+			prog->uni3f( "airDirV", lv[0] / std::max( ll, 1e-6f ), lv[1] / std::max( ll, 1e-6f ), lv[2] / std::max( ll, 1e-6f ) );
+			prog->uni1f( "airDirExp", ax.dirExp );
+			prog->uni1f( "airDirStart", ax.dirStartM * 0.001f / WwAtmoMath::kUnitKm );
+		}
+		s.albedoNote += axOn ? QStringLiteral( " glow=%1,%2,%3%4" ).arg( double( ax.glow[0] ), 0, 'g', 3 ).arg( double( ax.glow[1] ), 0, 'g', 3 )
+			.arg( double( ax.glow[2] ), 0, 'g', 3 ).arg( ax.inscatter[0] + ax.inscatter[1] + ax.inscatter[2] + ax.dir[0] + ax.dir[1] + ax.dir[2] > 0.0f
+				? QStringLiteral( " override" ) : QString() ) : QString();
+	}
 	if ( !( s.red & 65536 ) ) {	// lane FIX1101A (moon): the medium the sky's disc gain reads (none under the red nosky)
 		VaPub & pub = vaPub();
 		const float m4[4] = { M.sigma0, M.zb, M.invH, zTop }, l4[4] = { G.w, G.zn, G.invHn, G.s };
@@ -2077,7 +2526,17 @@ static void vaPassInner( Scene * scene, bool run )
 		// MODULES1 step 5: the sun read of the fresh stratum steps by the golden ratio each refresh, into a running mean
 		// (1/4 with a still camera, 1/2 while it moves); red WW_CELL_AIR_SUNJIT_RED=1: the middle, no mean (live)
 		const bool red = wwEnv( "WW_CELL_AIR_SUNJIT_RED" ).trimmed() == "1";
-		const double k = double( g.frame >> 2 ) * 0.6180339887498949;
+		/* lane AIRPERF1 A3: with the camera standing, a layer refreshes its sun / light strata every second 4-frame cycle
+		 * (even layers one cycle, odd layers the next) and reads its history in the other: whole draws rest. The jitter
+		 * series step once per refresh of a layer (cyc), so each layer still walks the whole series. The running mean
+		 * keeps its weight, so a light that changes under a still camera settles in twice the frames. A moving camera
+		 * refreshes every cycle, as before. WW_CELL_AIR_SUNRATE=1: the red, every cycle; =2: always every second */
+		WW_SWITCH_STATIC( QString, sunRateKey, wwEnv( "WW_CELL_AIR_SUNRATE" ).trimmed() );
+		const int sunRate = !temporal || sunRateKey == QLatin1String( "1" ) ? 1 : sunRateKey == QLatin1String( "2" ) || g.tmode == 2 ? 2 : 1;
+		const unsigned cyc = ( g.frame >> 2 ) / unsigned( sunRate );
+		fn->glUniform2i( prog->uniLocation( "volSunRate" ), sunRate, int( ( g.frame >> 2 ) % unsigned( sunRate ) ) );
+		apNote += QStringLiteral( " sunrate=%1%2" ).arg( sunRate ).arg( sunRateKey == QLatin1String( "1" ) ? "(red)" : "" );
+		const double k = double( cyc ) * 0.6180339887498949;
 		prog->uni1f( "volSunJit", red ? 0.0f : float( k - std::floor( k ) ) - 0.5f );
 		prog->uni1f( "volSunBlend", red ? 1.0f : g.tmode == 2 ? 0.25f : 0.5f );
 		// part 18: the fresh stratum's sun and lamp samples move inside the column each refresh, Halton (2, 3), into the
@@ -2091,11 +2550,28 @@ static void vaPassInner( Scene * scene, bool run )
 			}
 			return r;
 		};
-		const unsigned hi = ( ( g.frame >> 2 ) & 15u ) + 1u;
+		const unsigned hi = ( cyc & 15u ) + 1u;
 		prog->uni2f( "volJitXY", jitRed || g.tmode == 0 ? 0.0f : halton( hi, 2 ) - 0.5f, jitRed || g.tmode == 0 ? 0.0f : halton( hi, 3 ) - 0.5f );
 	}
 	prog->uni1b( "volHistOk", temporal && g.histOk );
 	prog->uni1i( "volHist", kInjectUnit );
+	prog->uni1i( "volHistStrata", temporal ? g.histStrata : 4 );	// MODULES1 item 8: the env walk's strata 4, 5
+	prog->uni1i( "volEnvSpread", temporal && g.histStrata == 6 ? 1 : 0 );
+	/* lane AIRPERF1 A1: item 8's 2 x 2 column phase put a walking froxel in every pixel quad, and the GPU then runs the
+	 * walk's code for the whole quad group: offline (notes/modules1/airperf1/tools/envrate_bench.py) it saved 7 % of the
+	 * walk, not 75 %. The walk's frame is now the LAYER's: every froxel of a layer walks on the same frame (one draw
+	 * either walks or reads its history), one frame in 8 while the camera stands (nothing can drift), one in 4 while it
+	 * moves (the reprojected walk is at most 3 frames old, as item 8's). Same froxels, same history, same answer on a
+	 * still camera. WW_CELL_AIR_ENVRATE=dither: the red, item 8's phase; =4 / =8: that rate always */
+	{
+		WW_SWITCH_STATIC( QString, envRateKey, wwEnv( "WW_CELL_AIR_ENVRATE" ).trimmed() );
+		const bool spread = temporal && g.histStrata == 6;
+		const int rate = envRateKey == QLatin1String( "dither" ) ? 0 : envRateKey == QLatin1String( "4" ) ? 4
+			: envRateKey == QLatin1String( "8" ) ? 8 : g.tmode == 2 ? 8 : 4;
+		fn->glUniform2i( prog->uniLocation( "volEnvRate" ), rate, rate ? int( g.frame % unsigned( rate ) ) : 0 );
+		apNote += !spread ? QStringLiteral( " envwalk=every-froxel(%1)" ).arg( temporal ? "red envspread" : "no history" )
+			: rate ? QStringLiteral( " envwalk=layer/%1" ).arg( rate ) : QStringLiteral( " envwalk=dither/4(red)" );
+	}
 	{
 		const int pf = wwCellPostPathFrame();
 		const bool shifted = s.shiftFrame >= 0 && pf >= s.shiftFrame;
@@ -2111,6 +2587,7 @@ static void vaPassInner( Scene * scene, bool run )
 		static GLint combined = -1;
 		if ( combined < 0 )
 			fn->glGetIntegerv( GL_MAX_COMBINED_TEXTURE_IMAGE_UNITS, &combined );
+		// MODULES1 M1 (11-10 audit, physical reason): only a sealed room has no wind; every exterior and open interior drifts
 		const bool sealed = L && L->interior && !L->showSky;
 		dr.moving = false;
 		if ( !dr.on ) {
@@ -2121,6 +2598,11 @@ static void vaPassInner( Scene * scene, bool run )
 			dr.note = QStringLiteral( "none(no cell lights or texture units)" );
 		} else if ( sealed ) {
 			dr.note = QStringLiteral( "still(sealed interior)" );
+		} else if ( G.noiseLink.isEmpty() && dr.red != 7 && wwEnv( "WW_FOG_NOISE_DEFAULT_RED" ).trimmed() != "1" ) {
+			// part 22: a weather without groundFog noiseTexture has no lumps (red WW_FOG_NOISE_DEFAULT_RED=1: the shipped default)
+			if ( dr.note != QLatin1String( "none(unset)" ) )
+				std::fprintf( stderr, "cell fog noise: none (unset)\n" );
+			dr.note = QStringLiteral( "none(unset)" );
 		} else {
 			// MODULES1 part 19: the texture is the weather's linked .dds, else the shipped default (red codenoise: the code's)
 			static const QStringList shippedRoots = wwRecxRoots( QStringList(), QString() );
@@ -2217,6 +2699,8 @@ static void vaPassInner( Scene * scene, bool run )
 	{
 		float skyBase = 0.0f;
 		uniF( "cellSpecSkyBase", -1, &skyBase, 1 );
+		// MODULES1 M1 (11-10 audit, physical reason): cellInterior is an UNSUNLIT interior (a sunlit one reads 0 and gates as an
+		// exterior); its directional is the lighting template's, not a sun, so it has no sun to gate
 		sunGateNote = !sunGate ? QStringLiteral( "off(red sun)" ) : uniI( "cellInterior" ) ? QStringLiteral( "off(interior)" )
 			: QStringLiteral( "on(rooms=%1 sky=%2)" ).arg( uniI( "cellGiOn" ) && uniI( "cellGiRooms" ) ? 1 : 0 )
 				.arg( uniI( "cellGiOn" ) && uniI( "cellGiSky" ) && skyBase >= 1.0f ? 1 : 0 );
@@ -2224,6 +2708,9 @@ static void vaPassInner( Scene * scene, bool run )
 	// lane GLAREBLOW1: the octaves' a capped by the air's own re-scatter chance (src/features/air/airmsweight.h); red off: a = 1/2
 	const bool msMedium = wwEnvStr( "WW_CELL_GLAREBLOW_RED" ) != QLatin1String( "off" );
 	prog->uni1b( "volMsMedium", msMedium );
+	// MODULES1 R5A-3: the sun's diffusion term in thick air (cell_volair.frag airMsDiffuse); red WW_CELL_AIR_MS_RED=single
+	const bool msDiff = wwLookOn( WwLook::AirMultiScatter ) && wwEnvStr( "WW_CELL_AIR_MS_RED" ) != QLatin1String( "single" );
+	prog->uni1b( "volMsDiff", msDiff );
 	// lane AIRMS1 (AIR-MS-LAMPS): the placed lights' orders >= 2 (WW_CELL_AIR_MS_LAMPS=1, off by default); red off: the term 0
 	const bool msLampOn = wwEnvStr( "WW_CELL_AIR_MS_LAMPS" ) == QLatin1String( "1" );
 	const bool msLampRed = msLampOn && wwEnvStr( "WW_CELL_AIR_MS_LAMPS_RED" ) == QLatin1String( "off" );
@@ -2345,7 +2832,8 @@ static void vaPassInner( Scene * scene, bool run )
 		for ( std::uint64_t v : { std::uint64_t( g.texW ), std::uint64_t( g.texH ), std::uint64_t( g.texD ), std::uint64_t( g.half ),
 				std::uint64_t( g.tileCols ), std::uint64_t( g.tileRows ), std::uint64_t( g.histCols ), std::uint64_t( g.histRows ),
 				std::uint64_t( g.histSlices ), std::uint64_t( temporal ), std::uint64_t( g.mrtOk ), std::uint64_t( g.inject ),
-				std::uint64_t( g.integ ), std::uint64_t( g.tile ), std::uint64_t( g.hist[0] ), std::uint64_t( g.hist[1] ) } )
+				std::uint64_t( g.integ ), std::uint64_t( g.tile ), std::uint64_t( g.hist[0] ), std::uint64_t( g.hist[1] ),
+				std::uint64_t( g.lvHist[0] ), std::uint64_t( g.lvHist[1] ), std::uint64_t( g.lvNow[0] ), std::uint64_t( g.lvNow[1] ) } )
 			lay = ( lay ^ v ) * 1099511628211ull;
 		if ( lay != g.fbLayout ) {
 			g.fbLayout = lay;
@@ -2381,6 +2869,43 @@ static void vaPassInner( Scene * scene, bool run )
 		fn->glBindTexture( GL_TEXTURE_2D, g.tile );
 	}
 	vaCpu.mark( PassTime::CpuAirTile );
+	/* lane MODULES1 part 25 (LampVol): stage 4, the lamps' in-scatter a froxel: last frame's pair (the term + its hash,
+	 * the history) on AirLampNow / AirLampHist, this frame's pair the targets; then the inject reads this frame's term on
+	 * AirLampNow. A framebuffer refusal falls back to the inject's own lamp loop (volLampVol 0), not to no air */
+	bool lampRan = false;
+	if ( lampVol && complete ) {
+		fn->glActiveTexture( GLenum( GL_TEXTURE0 + WwCellUnit::AirLampNow ) );
+		fn->glBindTexture( GL_TEXTURE_3D, g.lvNow[g.histCur] );
+		fn->glActiveTexture( GLenum( GL_TEXTURE0 + WwCellUnit::AirLampHist ) );
+		fn->glBindTexture( GL_TEXTURE_3D, g.lvHist[g.histCur] );
+		fn->glActiveTexture( GLenum( GL_TEXTURE0 + WwCellUnit::AirStbn ) );
+		fn->glBindTexture( GL_TEXTURE_2D_ARRAY, g.stbn );
+		prog->uni1i( "volStage", 4 );
+		prog->uni1b( "volLampHistOk", g.histOk && g.lvOk );
+		prog->uni1f( "volLampA", g.tmode == 1 ? 0.2f : 0.1f );
+		prog->uni1i( "volFrame", int( g.frame ) );
+		const GLenum bufs[2] = { GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1 };
+		fn->glDrawBuffers( 2, bufs );
+		PassTime::subBegin( PassTime::AirLampVol );
+		lampRan = true;
+		for ( int k = 0; k < kSlices; k++ ) {
+			fn->glFramebufferTextureLayer( GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, g.lvHist[g.histCur ^ 1], 0, k );
+			fn->glFramebufferTextureLayer( GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1, g.lvNow[g.histCur ^ 1], 0, k );
+			if ( k == 0 && !fbComplete( 5 ) ) {
+				lampRan = false;
+				break;
+			}
+			prog->uni1i( "volLayer", k );
+			r->drawShape( 4, 3, 6, GL_TRIANGLES, GL_UNSIGNED_SHORT, &attrs, idx );
+		}
+		PassTime::subEnd( PassTime::AirLampVol );
+		fn->glFramebufferTexture2D( GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1, GL_TEXTURE_2D, 0, 0 );
+		const GLenum first = GL_COLOR_ATTACHMENT0;
+		fn->glDrawBuffers( 1, &first );
+		fn->glActiveTexture( GLenum( GL_TEXTURE0 + WwCellUnit::AirLampNow ) );
+		fn->glBindTexture( GL_TEXTURE_3D, lampRan ? g.lvNow[g.histCur ^ 1] : 0 );
+	}
+	prog->uni1i( "volLampVol", lampRan ? 1 : 0 );
 	// lane PERF2: the O(S) integrate (stage 3, 7 layers a draw); red oldint: stage 2, every layer re-summed from 0
 	const bool oneSum = g.mrtOk == 1 && !( s.red & 268435456 );
 	for ( int stage = 1; stage <= 2 && complete; stage++ ) {
@@ -2391,11 +2916,13 @@ static void vaPassInner( Scene * scene, bool run )
 		if ( stage == 1 && temporal ) {
 			// lane PERF2, temporal: the inject at attachment 0, the four strata of this layer into the other history
 			const GLuint out = g.hist[g.histCur ^ 1];
-			const GLenum bufs[5] = { GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1, GL_COLOR_ATTACHMENT2, GL_COLOR_ATTACHMENT3, GL_COLOR_ATTACHMENT4 };
-			fn->glDrawBuffers( 5, bufs );
+			const GLenum bufs[7] = { GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1, GL_COLOR_ATTACHMENT2, GL_COLOR_ATTACHMENT3,
+				GL_COLOR_ATTACHMENT4, GL_COLOR_ATTACHMENT5, GL_COLOR_ATTACHMENT6 };
+			const int ns = g.histStrata;	// MODULES1 item 8: 6 with the env walk's strata, 4 = red envspread
+			fn->glDrawBuffers( 1 + ns, bufs );
 			for ( int k = 0; k < kSlices; k++ ) {
 				fn->glFramebufferTextureLayer( GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, g.inject, 0, k );
-				for ( int p = 0; p < 4; p++ )
+				for ( int p = 0; p < ns; p++ )
 					fn->glFramebufferTextureLayer( GL_FRAMEBUFFER, GLenum( GL_COLOR_ATTACHMENT1 + p ), out, 0, p * kSlices + k );
 				if ( k == 0 && !fbComplete( 1 ) ) {
 					complete = false;
@@ -2404,7 +2931,7 @@ static void vaPassInner( Scene * scene, bool run )
 				prog->uni1i( "volLayer", k );
 				r->drawShape( 4, 3, 6, GL_TRIANGLES, GL_UNSIGNED_SHORT, &attrs, idx );
 			}
-			for ( int p = 1; p <= 4; p++ )
+			for ( int p = 1; p <= ns; p++ )
 				fn->glFramebufferTexture2D( GL_FRAMEBUFFER, GLenum( GL_COLOR_ATTACHMENT0 + p ), GL_TEXTURE_2D, 0, 0 );
 			const GLenum first = GL_COLOR_ATTACHMENT0;
 			fn->glDrawBuffers( 1, &first );
@@ -2449,6 +2976,7 @@ static void vaPassInner( Scene * scene, bool run )
 		PassTime::subEnd( stage == 1 ? PassTime::AirInject : PassTime::AirIntegrate );
 		vaCpu.mark( stage == 1 ? PassTime::CpuAirInject : PassTime::CpuAirInteg );
 	}
+	prog->uni1i( "volLampVol", 0 );	// part 25: the far grid has no placed lights
 	/* lane FARGRID1: THE FAR GRID. The same program and medium on a fixed grid from the handoff to farEnd: the sun
 	 * (shadowed by airFarVis: the cascades where they reach, the terrain's shadow-height map, the clouds' input) and
 	 * the sky's ambient; no placed lights, no GI grid (neither reaches 250 m), no depth skip. Rebuilt when what it is
@@ -2489,7 +3017,18 @@ static void vaPassInner( Scene * scene, bool run )
 		if ( wwTerrainShadowMap( tm ) )
 			key.insert( key.end(), { float( tm.tex ), float( tm.elevDeg ), float( tm.azDeg ), float( tm.x0 ), float( tm.y0 ) } );
 		const bool jitter = ( s.red & 67108864 ) != 0;
-		const bool rebuild = jitter || key != g.farKey || ++g.farAge >= fp.refresh;
+		/* lane AIRPERF1 A4: the refresh of an UNCHANGED view (every `refresh` frames, 8 ms in one frame) is spread over
+		 * those frames: each injects a run of layers, the last one sums them all (airfarspread.h; the surfaces read only
+		 * the sum, so they keep the last whole grid until then). A changed view (camera, sun, medium) rebuilds whole
+		 * in its own frame, as before. Red WW_CELL_AIR_FARSPREAD_RED=1 (live): the whole refresh in one frame */
+		WW_SWITCH_STATIC( bool, farSpreadRed, wwEnv( "WW_CELL_AIR_FARSPREAD_RED" ).trimmed() == "1" );
+		const bool farMoved = jitter || key != g.farKey;
+		const bool farSpread = !farSpreadRed && !farMoved && fp.refresh >= 2;
+		const airfar::Share farShare = farSpread ? airfar::spreadShare( g.farAge++, fp.refresh, fp.slices )
+			: airfar::Share { 0, fp.slices, true };
+		apNote += farSpreadRed ? QStringLiteral( " farspread=off(red)" ) : fp.refresh < 2 ? QStringLiteral( " farspread=off(refresh 1)" )
+			: QStringLiteral( " farspread=on(%1 frames, %2)" ).arg( fp.refresh ).arg( farMoved ? "view moved: whole" : "still: in runs" );
+		const bool rebuild = farMoved || farSpread || ++g.farAge >= fp.refresh;
 		bool farOk = true;
 		if ( rebuild ) {
 			const float farLog = std::log( farEnd / farStart );
@@ -2514,9 +3053,10 @@ static void vaPassInner( Scene * scene, bool run )
 				prog->uni1i( "volStage", stage );
 				fn->glActiveTexture( GLenum( GL_TEXTURE0 + kInjectUnit ) );
 				fn->glBindTexture( GL_TEXTURE_3D, stage == 2 ? g.inject : 0 );
-				for ( int k = 0; k < fp.slices; k++ ) {
+				const int k0 = stage == 1 ? farShare.inj0 : farShare.sum ? 0 : fp.slices, k1 = stage == 1 ? farShare.inj1 : fp.slices;	// AIRPERF1 A4
+				for ( int k = k0; k < k1; k++ ) {
 					fn->glFramebufferTextureLayer( GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, stage == 1 ? g.inject : g.integ, 0, kSlices + k );
-					if ( k == 0 && !fbComplete( stage == 1 ? 5 : 6 ) ) {
+					if ( k == k0 && !fbComplete( stage == 1 ? 5 : 6 ) ) {
 						farOk = false;
 						break;
 					}
@@ -2536,8 +3076,10 @@ static void vaPassInner( Scene * scene, bool run )
 				g.farQPending = false;
 			}
 			g.farKey = farOk ? key : std::vector<float>();
-			g.farAge = 0;
-			g.farBuilds++;
+			if ( farShare.sum || !farOk ) {	// AIRPERF1 A4: a run of layers is not a build yet
+				g.farAge = 0;
+				g.farBuilds++;
+			}
 		}
 		g.farOn = farOk;
 		g.farCols = fp.cols;
@@ -2571,6 +3113,12 @@ static void vaPassInner( Scene * scene, bool run )
 	fn->glBindTexture( GL_TEXTURE_2D, 0 );
 	fn->glActiveTexture( GLenum( GL_TEXTURE0 + WwCellUnit::AirTerrain ) );
 	fn->glBindTexture( GL_TEXTURE_2D_ARRAY, 0 );
+	fn->glActiveTexture( GLenum( GL_TEXTURE0 + WwCellUnit::AirLampNow ) );	// part 25
+	fn->glBindTexture( GL_TEXTURE_3D, 0 );
+	fn->glActiveTexture( GLenum( GL_TEXTURE0 + WwCellUnit::AirLampHist ) );
+	fn->glBindTexture( GL_TEXTURE_3D, 0 );
+	fn->glActiveTexture( GLenum( GL_TEXTURE0 + WwCellUnit::AirStbn ) );
+	fn->glBindTexture( GL_TEXTURE_2D_ARRAY, 0 );
 	if ( !complete ) {
 		s.last = QStringLiteral( "refused(froxel framebuffer incomplete)" );
 		restore();
@@ -2581,6 +3129,7 @@ static void vaPassInner( Scene * scene, bool run )
 	if ( temporal ) {
 		g.histCur ^= 1;
 		g.histOk = true;
+		g.lvOk = lampRan;	// part 25: the lamps' history is this frame's only if stage 4 drew it
 		g.frame++;
 		if ( pathFrame >= 0 ) {
 			g.pathDone = pathFrame;
@@ -2593,7 +3142,7 @@ static void vaPassInner( Scene * scene, bool run )
 		if ( s.settlePending )
 			s.settlePending = false;
 		else
-			s.settleLeft = 3;
+			s.settleLeft = lampRan ? 8 : 3;	// part 25: the lamps' history ramp (N 4 -> 12) needs more frames than the strata
 	}
 	g.near = nearD;
 	g.logRatio = logRatio;
@@ -2601,9 +3150,11 @@ static void vaPassInner( Scene * scene, bool run )
 	g.med[1] = M.zb;
 	g.med[2] = M.invH;
 	g.med[3] = zTop;
-	const float layerV[4] = { G.w, G.zn, G.invHn, G.s }, groundV[4] = { G.zg, G.invHg, 0.0f, 0.0f };
+	const float layerV[4] = { G.w, G.zn, G.invHn, G.s }, groundV[4] = { G.zg, G.invHg, invTopH,
+		vaSunDifRed() ? 0.0f : 1.0f + std::clamp( ph.gi[3], -0.9f, 0.9f ) };	// MODULES1 G3: w = 1 + the phase g
 	std::copy( layerV, layerV + 4, g.layer );
 	std::copy( groundV, groundV + 4, g.ground );
+	vaSkyEcho( g.med, g.layer, g.ground, fogView[3] );	// MODULES1 G4: the camera's sky through the air
 	std::copy( &ph.w[0][0], &ph.w[0][0] + 12, &g.phase[0][0] );	// lane VOLPART1
 	std::copy( ph.gi, ph.gi + 4, g.gi );
 	g.csm = csm;
@@ -2620,14 +3171,37 @@ static void vaPassInner( Scene * scene, bool run )
 		.arg( double( zTop ), 0, 'f', 1 ).arg( medNote )
 		.arg( double( ph.gi[0] ), 0, 'f', 4 ).arg( double( ph.gi[1] ), 0, 'f', 4 ).arg( double( ph.gi[2] ), 0, 'f', 4 )
 		.arg( cellLightCountV ).arg( cellGiOnV ).arg( csm ? 1 : 0 ).arg( s.terms ).arg( s.red ).arg( ms, 0, 'f', 3 )
-		.arg( !wwLookOn( WwLook::AirMultiScatter ) ? QStringLiteral( "off" ) : msMedium ? QStringLiteral( "medium" ) : QStringLiteral( "half(red)" ) )
+		.arg( !wwLookOn( WwLook::AirMultiScatter ) ? QStringLiteral( "off" )
+			: ( msMedium ? QStringLiteral( "medium" ) : QStringLiteral( "half(red)" ) )
+				+ ( msDiff ? QStringLiteral( " msdiff=on" ) : QStringLiteral( " msdiff=single(red)" ) ) )
 		.arg( !msLampOn ? QStringLiteral( "off" ) : msLampRed ? QStringLiteral( "off(red)" ) : QStringLiteral( "on" ) )
 		.arg( !gndLampOn ? QStringLiteral( "off" ) : gndLampRed ? QStringLiteral( "off(red)" ) : QStringLiteral( "on" ) );
 	// the optimisation's echo: the mode, the clusters (all / non-empty / mean list over the non-empty), the CPU build,
 	// the depth skip (0 off, 1 on, 2 the red)
-	const QString optNote = QStringLiteral( "opt=%1 clusters=%2 nonempty=%3 meanlist=%4 buildms=%5 depthskip=%6 zsource=%7 farclamp=%8 temporal=%9" )
-		.arg( s.opt ).arg( clOn ? cl.ncx * cl.ncy * cl.ncz : 0 ).arg( clOn ? cl.nonEmpty : 0 )
-		.arg( clOn && cl.nonEmpty ? double( cl.refs ) / double( cl.nonEmpty ) : 0.0, 0, 'f', 2 ).arg( clMs, 0, 'f', 3 )
+	/* lane AIRPERF1 A6: the list numbers are those of the lists the air WALKS. With the surfaces' clustered lists on
+	 * (volSurfClusters) the air builds none of its own, and this line printed clusters=0 nonempty=0 meanlist=0.00 as
+	 * if it looped every light: now lists=surfaces(...) with the surfaces' own numbers (their build's echo; nonempty is
+	 * refs / mean list, to the echo's one decimal). lists=air: the air's own clusters; lists=flat: every light a froxel */
+	int lsClusters = clOn ? cl.ncx * cl.ncy * cl.ncz : 0, lsNonEmpty = clOn ? cl.nonEmpty : 0;
+	double lsMean = clOn && cl.nonEmpty ? double( cl.refs ) / double( cl.nonEmpty ) : 0.0;
+	QString listTag = clOn ? QStringLiteral( "air" ) : QStringLiteral( "flat(%1 lights a froxel)" ).arg( cellLightCountV );
+	if ( surfCl ) {
+		static const QRegularExpression re( QStringLiteral( "cell cluster: (\\d+)x(\\d+) tiles of \\d+ px x (\\d+) slices, (\\d+) lights, "
+			"refs (\\d+), mean list ([0-9.]+), max list (\\d+), clusters over the cap (\\d+)" ) );
+		const QRegularExpressionMatch m = re.match( wwCellClusterEcho() );
+		listTag = QStringLiteral( "surfaces(no echo yet)" );
+		if ( m.hasMatch() ) {
+			lsClusters = m.captured( 1 ).toInt() * m.captured( 2 ).toInt() * m.captured( 3 ).toInt();
+			lsMean = m.captured( 6 ).toDouble();
+			lsNonEmpty = lsMean > 0.0 ? int( m.captured( 5 ).toDouble() / lsMean + 0.5 ) : 0;
+			listTag = QStringLiteral( "surfaces(tiles=%1x%2x%3 lights=%4 refs=%5 maxlist=%6 overcap=%7)" ).arg( m.captured( 1 ), m.captured( 2 ),
+				m.captured( 3 ), m.captured( 4 ), m.captured( 5 ), m.captured( 7 ), m.captured( 8 ) );
+		}
+	}
+	const QString optNote = QStringLiteral( "opt=%1 lists=" ).arg( s.opt ) + listTag
+		+ QStringLiteral( " clusters=%2 nonempty=%3 meanlist=%4 buildms=%5 depthskip=%6 zsource=%7 farclamp=%8 temporal=%9" )
+		.arg( lsClusters ).arg( lsNonEmpty )
+		.arg( lsMean, 0, 'f', 2 ).arg( clMs, 0, 'f', 3 )
 		.arg( depthOn ? ( ( s.red & 8192 ) ? 2 : 1 ) : 0 )
 		.arg( !tileOn ? QStringLiteral( "none" ) : zDepth ? QStringLiteral( "depth" ) : QStringLiteral( "colour" ) )
 		.arg( g.tileValid && !( s.red & 2097152 ) ? 1 : 0 )
@@ -2654,12 +3228,41 @@ static void vaPassInner( Scene * scene, bool run )
 	const QString hazeNote = QStringLiteral( "haze=(src=%6 air=%1/km ap=%2/km vis=%3km apcut=%4%5)" ).arg( airKm, 0, 'f', 3 )
 		.arg( apKm, 0, 'f', 3 ).arg( 3.912 / std::max( std::max( airKm, apKm ), 1e-4 ), 0, 'f', 1 ).arg( M.apCut ? 1 : 0 )
 		.arg( s.apStackRed ? QStringLiteral( ",RED=apstack" ) : QString() ).arg( QLatin1StringView( wwAtmoHazeSource() ) );
+	/* lane AIRPERF1 A7 telemetry: the air at the STREET (haze=(air=...) is the density aloft, under a ground layer a
+	 * quarter of the street's), the record's street fit, the sky's share, and the air's transmittance against the
+	 * record's fog (1 - alpha) at 500 / 1000 / 2000 / 4000 units; light = the share of the air's own light the min
+	 * with the sky's air leaves at 2000 units (0 = the air is not seen at all) */
+	QString fitNote;
+	{
+		const double rhoSt = ( 1.0 - G.w ) * vaB( G.zg, M.zb, M.invH ) + G.w * vaB( G.zg, G.zn, G.invHn ) + G.s;
+		const double stU = double( M.sigma0 ) * rhoSt, zLow = M.band ? double( M.zb ) - 10.0 : 0.0;
+		fitNote = QStringLiteral( " fit=(rule=%1 street=%2/km record=%3/km sky=%4/km T air/game" )
+			.arg( M.apCut ? QStringLiteral( "apcut(red)" ) : M.apShare > 0.0f ? QStringLiteral( "full" ) : QStringLiteral( "full(no sky share)" ) )
+			.arg( stU * kUnitsPerKm, 0, 'f', 3 ).arg( double( M.sStreet ) * kUnitsPerKm, 0, 'f', 3 ).arg( apKm, 0, 'f', 3 );
+		for ( const double d : { 500.0, 1000.0, 2000.0, 4000.0 } )
+			fitNote += QStringLiteral( " %1:%2/%3" ).arg( d, 0, 'f', 0 ).arg( std::exp( -stU * d ), 0, 'f', 3 )
+				.arg( 1.0 - vaGameAlpha( K, d, zLow ), 0, 'f', 3 );
+		const double tA = std::exp( -stU * 2000.0 ), tS = std::exp( -apKm / kUnitsPerKm * 2000.0 );
+		fitNote += QStringLiteral( " light=%1)" ).arg( tA < 1.0 ? ( 1.0 - std::min( 1.0, tA / tS ) ) / ( 1.0 - tA ) : 0.0, 0, 'f', 2 );
+		/* lane AIRPERF1 A8 telemetry: the physicalWeather switch of the two entries, who decides each part (record |
+		 * recx), the file's numbers as read and the density they give: base aloft, at the layer's floor, and T there */
+		fitNote += QStringLiteral( " phys=(switch=atmosphere:%1,groundFog:%2%3 base=%4 vis=%5m base=%6/km layer=%7 strength=%8 thickness=%9" )
+			.arg( physAtmoKey ? "on" : "off" ).arg( G.physKey ? "on" : "off" ).arg( vaFitWthrRed() ? QStringLiteral( ",RED=wthr" ) : QString() )
+			.arg( physBase ? "recx" : "record" ).arg( double( physVisM ), 0, 'f', 0 ).arg( double( M.sigma0 ) * kUnitsPerKm, 0, 'f', 3 )
+			.arg( G.derived || !( G.s > 0.0f ) ? "record" : G.phys ? "recx(ontop)" : "recx(street kept)" )
+			.arg( double( G.s ), 0, 'g', 4 ).arg( G.invHg > 0.0f ? double( 1.0f / G.invHg ) : 0.0, 0, 'f', 0 )
+			+ QStringLiteral( " heights=%1 colours=record street=%2/km T" ).arg( physBase ? "recx(even)" : "record" ).arg( stU * kUnitsPerKm, 0, 'f', 3 );
+		for ( const double d : { 500.0, 1000.0, 2000.0, 4000.0 } )
+			fitNote += QStringLiteral( " %1:%2" ).arg( d, 0, 'f', 0 ).arg( std::exp( -stU * d ), 0, 'f', 4 );
+		fitNote += QStringLiteral( ")" );
+	}
 	s.last.chop( 1 );
-	s.last += QStringLiteral( " " ) + optNote + QStringLiteral( " " ) + groundNote + QStringLiteral( " " ) + farNote + QStringLiteral( " " ) + hazeNote
+	s.last += QStringLiteral( " " ) + optNote + QStringLiteral( " " ) + groundNote + QStringLiteral( " " ) + farNote + QStringLiteral( " " ) + hazeNote + fitNote
 		+ ( dr.on ? QStringLiteral( " drift=" ) + dr.note : QString() ) + QStringLiteral( " sungate=" ) + sunGateNote
 		+ QStringLiteral( " rainfog=" ) + g.rfNote
 		+ QStringLiteral( " fogleak=%1(red=%2)" ).arg( !wwFogLeakShaderDefine() ? "off" : vaLeakBits( L, s.leakRed ) == s.leakRed ? "live" : "compiled,old-path" ).arg( vaLeakBits( L, s.leakRed ) ) +QStringLiteral( " intenv=%1" ).arg( L && L->interior && wwCellAsOutdoor( L ) ? ( ( s.leakRed & 128 ) ? "ratio(red)" : "direct" ) : "n/a" )	// lane FOGLEAK1
 		+ QStringLiteral( " veil=%1" ).arg( s.veilPhys ? "phys" : "record" )	// lane FARCITYWASH1
+		+ QStringLiteral( " albedo=" ) + s.albedoNote	// lane NIGHTHAZE1
 		+ QStringLiteral( " fogleak=%1(red=%2)" ).arg( wwFogLeakShaderDefine() ? "on" : "off" ).arg( s.leakRed )	// lane FOGLEAK1
 		+ QStringLiteral( " envocc=%1" ).arg( !wwAirSkyViewShaderDefine() ? "off" : s.openEnv ? "red(open)" : "sky" )	// lane DARKAIR1
 		// lane PERFFIX3: the grid preset, the integrated volume's format, the sun's read in the air, the uniform reads
@@ -2667,8 +3270,44 @@ static void vaPassInner( Scene * scene, bool run )
 		+ QStringLiteral( " grid=%1 vol=%2 sunread=%3 reads=%4/%5/%6 state=%7%8" ).arg( s.grid ).arg( g.half ? "16f" : "32f" )
 			.arg( s.sunPcf ? "pcf(red)" : s.airSoft ? "air(soft red)" : s.bead ? "air(tap x2)" : "air(tap)" ).arg( s.mirrorKept ).arg( s.mirrorAsked ).arg( s.mirrorStale )
 			.arg( s.stateNoted ? "noted" : "asked" ).arg( s.stateStale ? QStringLiteral( "(stale)" ) : QString() )
+		+ apNote	// lane AIRPERF1
 		+ QStringLiteral( ")" );
 
+	{	// MODULES1 10b-3: the env strata at the cards cellfxlit.cpp named (one texel each: a new set, then every 600 frames)
+		VaEnvProbe & ep = vaEnvProbe();
+		ep.held = temporal && g.histStrata == 6 && g.hist[g.histCur] != 0;
+		if ( ep.n > 0 && ep.held && ( ep.dirty || g.frame % 600u == 0u ) ) {
+			ep.dirty = false;
+			const Transform & pv = scene->view;
+			fn->glPixelStorei( GL_PACK_ALIGNMENT, 4 );
+			fn->glBindFramebuffer( GL_READ_FRAMEBUFFER, g.fbo );
+			for ( int i = 0; i < ep.n; i++ ) {
+				const Vector3 q = pv * Vector3( ep.world[i][0], ep.world[i][1], ep.world[i][2] );
+				const float d = q.length();
+				ep.state[i] = 1;
+				if ( !( q[2] < 0.0f ) || d <= nearD )
+					continue;
+				const float pu = 0.5f + 0.5f * p00 * q[0] / -q[2], pv2 = 0.5f + 0.5f * p11 * q[1] / -q[2];
+				const float fk = std::log( d / nearD ) / logRatio * float( kSlices );
+				if ( pu < 0.0f || pu >= 1.0f || pv2 < 0.0f || pv2 >= 1.0f || fk >= float( kSlices ) )
+					continue;
+				const int x = std::min( int( pu * float( cols ) ), cols - 1 ), y = std::min( int( pv2 * float( rows ) ), rows - 1 );
+				const int k = std::min( int( fk ), kSlices - 1 );
+				float h0[4] = { 0.0f, 0.0f, 0.0f, 0.0f }, h1[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+				WwSync::Wait wwWait( WwSync::ReadPixels );	// a new set, then every 600 frames
+				fn->glFramebufferTextureLayer( GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, g.hist[g.histCur], 0, 4 * kSlices + k );
+				fn->glReadPixels( x, y, 1, 1, GL_RGBA, GL_FLOAT, h0 );
+				fn->glFramebufferTextureLayer( GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, g.hist[g.histCur], 0, 5 * kSlices + k );
+				fn->glReadPixels( x, y, 1, 1, GL_RGBA, GL_FLOAT, h1 );
+				ep.cell[i][0] = x;
+				ep.cell[i][1] = y;
+				ep.cell[i][2] = k;
+				ep.fade[i] = h0[3];
+				ep.r[i] = h1[1];
+				ep.state[i] = h1[2] > 0.9999f ? 2 : 3;
+			}
+		}
+	}
 	/* WW_CELL_AIR_DUMP=<file>: int32 cols rows slices; the injected and the integrated volumes (cols x rows RGBA float
 	 * per layer, layer 0 first, bottom row first); <file>.txt the numbers an independent rebuild needs */
 	if ( !s.dump.isEmpty() ) {
@@ -2772,6 +3411,16 @@ void wwVolAirUniforms( Scene * scene )
 		u.bind( WwCellUnit::AirTerrain, GL_TEXTURE_2D_ARRAY, terr ? g.terr : 0 );
 		prog->uni1i_l( terrLoc, WwCellUnit::AirTerrain );
 	}
+	// MODULES1 10b-3: the env strata the air kept, for a lit card's sky share (cell_volpart.glsl vpAmbKeep)
+	const int envLoc = prog->uniLocation( "volEnvHist" );
+	if ( envLoc >= 0 ) {
+		const bool envRed = wwEnvStr( "WW_CELL_FXLOCAL_RED" ).split( ',' ).contains( QStringLiteral( "noleakfade" ) );
+		const bool env = on && g.histOk && g.histStrata == 6 && g.hist[g.histCur] != 0 && !envRed;
+		u.bind( WwCellUnit::AirEnvHist, GL_TEXTURE_3D, env ? g.hist[g.histCur] : 0 );
+		prog->uni1i_l( envLoc, WwCellUnit::AirEnvHist );
+		prog->uni4f( "volEnvGrid", FloatVector4( float( g.histCols ), float( g.histRows ), float( g.histSlices ), env ? 1.0f : 0.0f ) );
+		vaEnvProbe().cardOn = env;
+	}
 	// lane WEATHERBLEND4: the air's drift noise, for the sun's column and the puffs (lookdev_fog.glsl wwAirDriftAt)
 	const int noiseLoc = prog->uniLocation( "volAirNoise" );
 	const VaDrift & dr = vd();
@@ -2869,12 +3518,41 @@ void wwVolAirUniforms( Scene * scene )
 	// part 18 (bungo 11-06, the blocks in his crop): RDR2's single dithered froxel tap, TAA resolves it (Bauer 2019 slides 48,
 	// 57; notes/modules1/research/fog_temporal.md); red WW_CELL_AIR_DITHER_RED=1: the plain read at the pixel's own column
 	WW_SWITCH_STATIC( bool, ditherRed, wwEnv( "WW_CELL_AIR_DITHER_RED" ).trimmed() == "1" );
+	WW_SWITCH_STATIC( bool, aboveRed, wwEnv( "WW_CELL_AIR_ABOVE_RED" ).trimmed() == "1" );	// MODULES1 item 18
+	// MODULES1 M5: 65536 = a downward sky ray's air ends at the ground (lookdev_fog.glsl wwVolAirSky); red: never ends
+	WW_SWITCH_STATIC( bool, groundEndRed, wwEnv( "WW_CELL_AIR_GROUNDEND_RED" ).trimmed() == "1" );
+	// lane SKYSEA1: 131072 = a sky ray's air column over the curved ground (lookdev_fog.glsl wwAirCurvedTau); red: flat
+	WW_SWITCH_STATIC( bool, curveRed, wwEnv( "WW_CELL_AIR_CURVE_RED" ).trimmed() == "1" );
+	{
+		static int saidC = -1;
+		if ( fl >= 0 && saidC != int( curveRed ) ) {
+			saidC = int( curveRed );
+			fprintf( stderr, "air sky curve: %s\n", curveRed
+				? "off, flat ground: rows near eye level read the air's own colour (red WW_CELL_AIR_CURVE_RED=1)"
+				: "on, a sky ray's air over the curved ground (R 6371 km): a near-level ray dips and leaves, no horizon band (lane SKYSEA1)" );
+		}
+	}
+	{
+		static int said = -1;
+		if ( fl >= 0 && said != int( groundEndRed ) ) {
+			said = int( groundEndRed );
+			fprintf( stderr, "air sky ground end: %s (ground anchor %.1f, top %.1f)\n", groundEndRed
+				? "off, a downward sky ray never leaves the air (red WW_CELL_AIR_GROUNDEND_RED=1)"
+				: "on, a downward sky ray ends at the ground", double( g.ground[0] ), double( g.med[3] ) );
+		}
+	}
+	if ( fl >= 0 )
+		vaColumnEcho( g.med, g.layer, g.ground, terr, s.sunColumn );	// MODULES1 M12 (G4b, G5)
 	if ( fl >= 0 )
 		prog->uni1i_l( fl, ( ( s.red & 512 ) ? 0 : 1 ) | ( ( s.red & 1024 ) ? 0 : 2 ) | ( ( s.red & 256 ) ? 0 : 4 )
 			| ( ( s.red & 65536 ) ? 0 : 8 ) | ( ( s.red & 131072 ) ? 0 : 16 ) | ( s.tricubic ? 32 : 0 ) | ( terr ? 64 : 0 )
 			| ( s.sunColumn ? 0 : 128 )	// lane FIX1101A: 128 = the surfaces' sun dimmed by the ground layer only
 			| ( ( vaLeakBits( scene && wwCellLightsWanted( scene ) ? wwCellLightsFor( scene->nifModel ) : nullptr, s.leakRed ) & 8 ) ? 0 : 256 )	// lane FOGLEAK1: 256 = the far grid's tail takes the sun's shadow (WW_CELL_FOGLEAK only)
-			| ( ditherRed ? 0 : 512 | int( ( g.frame & 15u ) << 10 ) ) );	// part 18: 512 = the dithered froxel read, bits 10-13 its frame
+			| ( ditherRed ? 0 : 512 | int( ( g.frame & 15u ) << 10 ) )	// part 18: 512 = the dithered froxel read, bits 10-13 its frame
+			| ( aboveRed ? 0 : 16384 )	// MODULES1 item 18: 16384 = a downward tail still above the air's top is clear
+			| ( vaThinSrcRed() ? 0 : 32768 )	// MODULES1 10c: 32768 = a too-thin column's tail takes the grid's light over the law's depth
+			| ( groundEndRed ? 0 : 65536 )	// MODULES1 M5: 65536 = a downward sky ray ends at the ground
+			| ( curveRed ? 0 : 131072 ) );	// lane SKYSEA1: 131072 = the sky ray's air over the curved ground
 }
 
 /* lane VOLAIR1 (bungo 10-14, cellvolair.h): the sky through the air. The far tower stood out against a sky the air never
@@ -2933,6 +3611,9 @@ void wwVolAirSkyDraw( Scene * scene, bool probes )
 	wwLookdevFogUniforms( scene );	// fogOn, the view and the sun; wwVolAirUniforms: the volume, the medium, the flags
 	prog->uni1i( "volSkyMode", probes ? 1 : 0 );
 	prog->uni1b( "volSkyOn", !( s.red & 65536 ) );
+	// FARWATER1 round 2: the band's far-plane point as the flat air frame sees the curved earth while the sea pushes the far plane
+	const bool skySea = wwEndlessSeaReach( scene ) > 0.0f && wwEndlessSeaAirFlat();
+	prog->uni1b( "volSkySea", skySea );
 	auto fn = r->fn;
 	GLboolean colorMask[4], depthMask = GL_TRUE;
 	fn->glGetBooleanv( GL_COLOR_WRITEMASK, colorMask );
@@ -2989,8 +3670,10 @@ void wwVolAirSkyDraw( Scene * scene, bool probes )
 	fn->glColorMask( colorMask[0], colorMask[1], colorMask[2], colorMask[3] );
 	fn->glDepthMask( depthMask );
 	note( probes ? QStringLiteral( "probes (red nosky %1)" ).arg( ( s.red & 65536 ) ? 1 : 0 )
-		: overSky ? QStringLiteral( "through the air (linear frame, over the sky in the frame: sky x T + L)" )
-		: QStringLiteral( "through the air (linear frame, composited by 1 - T over the backdrop)" ) );
+		: ( overSky ? QStringLiteral( "through the air (linear frame, over the sky in the frame: sky x T + L)" )
+		: QStringLiteral( "through the air (linear frame, composited by 1 - T over the backdrop)" ) )
+		+ ( skySea ? QStringLiteral( "; band over the endless sea: the far-plane point in the flat air frame (+ g^2 / 2R), no column clamp (red WW_ENDLESS_SEA_RED=air)" )
+			: wwEndlessSeaReach( scene ) > 0.0f ? QStringLiteral( "; band over the endless sea: RED air (the far-plane point under the flat ground)" ) : QString() ) );
 }
 
 /* ---- lane VOLPART1: volumetric particles (cellvolair.h, res/shaders/features/particles/particles.frag) ---- */
@@ -3043,11 +3726,63 @@ int vpFxFlags = 0;	// the effect card being set up: 1 a volumetric card, 2 its s
 void wwVolPartFxSet( int flags )
 {
 	vpFxFlags = flags;
+	if ( flags & 1 )
+		vpFxSoftSeen |= ( flags & 2 ) ? 1 : 2;
 }
 
 int wwVolPartFx()
 {
 	return vpFxFlags;
+}
+
+QString wwVolPartFxSoftSay()
+{
+	const int seen = vpFxSoftSeen;
+	vpFxSoftSeen = 0;
+	// one rule for every volumetric card (renderer.cpp): the scene depth grabbed and no red (WW_CELL_VOLPART_RED nosoft)
+	return QStringLiteral( "depth soft fade (the card reads the scene's depth, drawn with no depth test): %1" )
+		.arg( seen == 1 ? QStringLiteral( "ON for every volumetric card set up" ) : seen == 2 ? QStringLiteral( "OFF for every volumetric card set up" )
+			: seen == 3 ? QStringLiteral( "ON for some, OFF for some" ) : QStringLiteral( "no volumetric card set up yet" ) );
+}
+
+void wwVolAirEnvProbeSet( const float ( *world )[3], int n )
+{
+	VaEnvProbe & ep = vaEnvProbe();
+	n = std::clamp( n, 0, 3 );
+	bool same = n == ep.n;
+	for ( int i = 0; i < n && same; i++ )
+		for ( int c = 0; c < 3; c++ )
+			same = same && world[i][c] == ep.world[i][c];
+	if ( same )
+		return;
+	ep.n = n;
+	ep.dirty = true;
+	for ( int i = 0; i < n; i++ ) {
+		ep.state[i] = 0;
+		for ( int c = 0; c < 3; c++ )
+			ep.world[i][c] = world[i][c];
+	}
+}
+
+QString wwVolAirEnvProbeSay( int i )
+{
+	const VaEnvProbe & ep = vaEnvProbe();
+	if ( i < 0 || i >= ep.n )
+		return QString();
+	if ( !ep.held )
+		return QStringLiteral( "ambient kept: air 1.00, card 1.00 (the air holds no env strata this frame)" );
+	if ( ep.state[i] == 0 )
+		return QStringLiteral( "ambient kept: not read yet" );
+	if ( ep.state[i] == 1 )
+		return QStringLiteral( "ambient kept: outside the air's grid, card 1.00" );
+	// the shader's airAmbKeep (cell_airmed.glsl) on the texel both the froxel and the card read
+	const float keep = ep.state[i] == 3 ? 1.0f : ep.r[i] >= 0.0f ? 1.0f - ep.fade[i] + ep.fade[i] * ep.r[i] : 1.0f - ep.fade[i];
+	return QStringLiteral( "ambient kept (x the weather ambient after the GI's sky share): air %1, card %2 (froxel %3,%4,%5: leak fade %6, open-field share %7%8%9)" )
+		.arg( double( keep ), 0, 'f', 2 ).arg( double( ep.cardOn ? keep : 1.0f ), 0, 'f', 2 )
+		.arg( ep.cell[i][0] ).arg( ep.cell[i][1] ).arg( ep.cell[i][2] )
+		.arg( double( ep.fade[i] ), 0, 'f', 2 ).arg( double( ep.r[i] ), 0, 'f', 2 )
+		.arg( ep.state[i] == 3 ? QStringLiteral( ", no walk stored" ) : QString() )
+		.arg( ep.cardOn ? QString() : QStringLiteral( "; the card does not read the strata: RED WW_CELL_FXLOCAL_RED=noleakfade or none bound" ) );
 }
 
 bool wwVolPartHidden()
@@ -3126,7 +3861,7 @@ void wwVolPartMediumUniforms( Scene * scene )
 			std::copy( L->godRay, L->godRay + 12, med );
 		else
 			wwLookdevGodRays( med, nullptr );
-		fb = vaPhase( med, ( vs().red & 524288 ) != 0 );
+		fb = vaPhase( med, ( vs().red & 524288 ) != 0 || vaPhaseRecordHue() );	// F2: neutral hue unless the red
 	}
 	prog->uni4f( "airMed", air ? FloatVector4( g.med[0], g.med[1], g.med[2], g.med[3] ) : FloatVector4( 0.0f, 0.0f, 0.0f, 1e30f ) );
 	// the landed air's layered law (its near band, its ground layer) and its GPU reds (roomstep, physcol), as the pass

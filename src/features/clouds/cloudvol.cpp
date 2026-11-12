@@ -2,6 +2,8 @@
 #include "cloudmap.h"
 #include "cloudnoise.h"
 #include "cloudvolmath.h"
+#include "clouddeckmath.h"	// lane SKYLIGHT1: the deck's light on the ground
+#include "cloudrecx14math.h"	// lane CLOUDRECX1
 #include "cloudcaljobs.h"	// lane PERFFIX3: the coverage tables off the GL thread
 #include "cloudfly.h"
 #include "cloudlightning.h"	// lane CLOUD6f: the storm's lightning inside the clouds
@@ -11,6 +13,7 @@
 #include "features/exposure/cellhdr.h"
 #include "features/water/cellunderwater.h"	// lane WATERUNDER3: no clouds over a camera under water
 #include "wwswitch.h"
+#include "wwsyncred.h"	// lane PERFFIX6: ^WW_SYNC_RED
 #include "gl/glscene.h"
 #include "gl/renderer.h"
 #include "harnesswindow.h"
@@ -292,7 +295,7 @@ void timeRead( NifSkopeOpenGLContext::GLFunctions * fn, CvGpu & g, int slot, boo
 {
 	if ( !g.pending[slot] )
 		return;
-	if ( !wait ) {
+	if ( !wait || !wwSyncRed() ) {	// lane PERFFIX6: an unfinished query is read next frame
 		GLuint avail = 0;
 		fn->glGetQueryObjectuiv( g.q[slot * 2 + 1], GL_QUERY_RESULT_AVAILABLE, &avail );
 		if ( !avail )
@@ -331,6 +334,8 @@ Bands bandsOf( const WwCloudMap & m )
 		b.var.depthKm = std::max( m.band[0].depthZ * kUnitKm, 0.05f );
 		b.var.curlKm = red( "nocurl" ) ? 0.0f : V::kVarCurlKm;
 		b.typeMax = std::min( 1.0f, b.var.type + b.var.spread );
+		if ( m.recx14.anvil >= 0.0f )	// lane CLOUDRECX1: clouds.layers.<n>.anvil over the Low band (SPEC.md 1.4)
+			b.var.anvil = m.recx14.anvil;
 	}
 	for ( int i = 0; i < 3; i++ ) {
 		b.baseKm[i] = m.band[i].baseZ * kUnitKm;
@@ -461,7 +466,7 @@ float varAmbKm( const Bands & b )
 
 //! cloud_common.glsl's uniforms and samplers on the current program
 void densityUniforms( Renderer * r, NifSkopeOpenGLContext::Program * p, CvGpu & g, const Bands & b, const WwCloudMap & m,
-	float windKm, int unit )
+	float windKm, int unit, float evolveKm = 0.0f )
 {
 	auto fn = r->fn;
 	p->uni3f( "cvBands.baseKm", b.baseKm[0], b.baseKm[1], b.baseKm[2] );
@@ -470,7 +475,7 @@ void densityUniforms( Renderer * r, NifSkopeOpenGLContext::Program * p, CvGpu & 
 	p->uni3f( "cvBands.coverage", b.coverage[0], b.coverage[1], b.coverage[2] );
 	p->uni1f( "cvBands.sheet", b.sheet );
 	p->uni4f( "cvBands.mapRect", FloatVector4( b.rect[0], b.rect[1], b.rect[2], b.rect[3] ) );
-	p->uni3f( "cvBands.windKm", windKm, 0.0f, 0.0f );
+	p->uni3f( "cvBands.windKm", windKm, 0.0f, evolveKm );	// lane CLOUDRECX1: z = clouds.evolution (0 = still, today)
 	float cal[2 * V::kCalN];
 	calibrated( g, b, cal );
 	if ( b.variety ) {	// lane CLOUD5: the twins' uniforms (an old program has no cvVarA: never set there)
@@ -585,7 +590,7 @@ bool keyLight( const WwAtmoFrame & f, float w[3], float & k )
 		k = f.sunK;
 	} else {
 		std::copy( f.moonW, f.moonW + 3, w );
-		k = f.moonK;
+		k = f.moonKey;	// MODULES1 round 10: the moon's direct light, without the night sky's factor
 	}
 	return k > 0.0f;
 }
@@ -597,6 +602,7 @@ struct CvRedo
 	Bands b{};
 	Cam cam{};
 	float keyW[3] = {}, keyK = 0.0f, amb[3] = {};
+	float deckAp[4] = { 0.0f, 1.0f, 1.0f, 0.0f };	// SKYLIGHT1 round 2: cloud_march.frag cvDeckAp
 	int tier = 0, hw = 1, hh = 1, mw = 1, mh = 1, stride = 1, cur = 0, prev = 1;
 	float phase[2] = {}, frameNo = 0.0f;
 	int blueSlice = 0;	// lane CLOUD5 round 2: the blue noise slice of this 16-frame refresh cycle
@@ -636,10 +642,11 @@ bool marchPass( Renderer * r, CvGpu & g, const CvRedo & d, const WwAtmoFrame & f
 		return false;
 	const Preset & pr = preset( d.tier );
 	const bool noOct = red( "nooctaves" ), noMs = noOct || red( "noms" );
-	const V::Droplet drop = V::dropletParams( V::kDropletUm );
+	// lane CLOUDRECX1: clouds.dropletRadius sets the phase's diameter (unset: today's 20 um)
+	const V::Droplet drop = V::dropletParams( m.recx14.dropletUm > 0.0f ? m.recx14.dropletUm : V::kDropletUm );
 	fn->glBindFramebuffer( GL_FRAMEBUFFER, g.march.fbo );
 	fn->glViewport( 0, 0, d.mw, d.mh );
-	densityUniforms( r, p, g, d.b, m, V::windKm( d.secs ), 0 );
+	densityUniforms( r, p, g, d.b, m, V::windKm( d.secs ), 0, WwCloudRecx14::evolveKm( d.secs, m.recx14.evolutionMin ) );
 	fn->glActiveTexture( GL_TEXTURE3 );
 	fn->glBindTexture( GL_TEXTURE_2D, f.trans );
 	p->uni1i( "cvTrans", 3 );
@@ -654,7 +661,7 @@ bool marchPass( Renderer * r, CvGpu & g, const CvRedo & d, const WwAtmoFrame & f
 	p->uni3f( "cvSunW", f.sunW[0], f.sunW[1], f.sunW[2] );
 	p->uni3f( "cvMoonW", f.moonW[0], f.moonW[1], f.moonW[2] );
 	p->uni1f( "cvSunK", f.sunK );
-	p->uni1f( "cvMoonK", f.moonK );
+	p->uni1f( "cvMoonK", f.moonKey );
 	p->uni3f( "cvKeyW", d.keyW[0], d.keyW[1], d.keyW[2] );
 	p->uni1f( "cvKeyK", d.keyK );
 	setMat3( r, p, "cvCam", d.cam.m );
@@ -677,15 +684,26 @@ bool marchPass( Renderer * r, CvGpu & g, const CvRedo & d, const WwAtmoFrame & f
 		p->uni1i( "cvBlueSlice", g.blue && !red( "ign" ) ? d.blueSlice : -1 );
 	}
 	p->uni4f( "cvPhasePrm", FloatVector4( drop.gHg, drop.gD, drop.alpha, drop.wD ) );
+	/* lane CLOUDRECX1 (SPEC.md 1.4): the ice phase's share per band (0 = the droplet phase, today) and the shafts under the
+	 * Low band: x their density (extinction / kSigma), y where they end (km), z 1 = virga (they thin out), 0 = none */
+	p->uni3f( "cvIce", m.band[0].ice, m.band[1].ice, m.band[2].ice );
+	p->uni4f( "cvShaft", FloatVector4( m.recx14.shaftSigma / V::kSigma, m.recx14.shaftZ * kUnitKm, m.recx14.virga ? 1.0f : 0.0f, 0.0f ) );
 	p->uni3f( "cvAmb", d.amb[0], d.amb[1], d.amb[2] );
 	p->uni1f( "cvAmbOn", 1.0f );
 	p->uni1f( "cvApOn", 1.0f );
+	p->uni4f( "cvDeckAp", FloatVector4( d.deckAp[0], d.deckAp[1], d.deckAp[2], d.deckAp[3] ) );	// SKYLIGHT1 round 2
 	p->uni1f( "cvFrame", d.frameNo );
 	p->uni1f( "cvMaxKm", pr.maxKm );
 	p->uni1f( "cvSlab", 0.0f );
 	p->uni1i( "cvProbe", 0 );
 	p->uni1f( "cvMsOn", noMs ? 0.0f : 1.0f );
 	p->uni1f( "cvMsG", V::msMeanCosine( drop ) );
+	{	// lane MODULES1: the droplets' red absorption (cloudvolmath.h waterAbsorbK); red nowater: none (before)
+		float wk[3] = { 0.0f, 0.0f, 0.0f };
+		if ( !red( "nowater" ) )
+			V::waterAbsorbK( m.recx14.dropletUm > 0.0f ? m.recx14.dropletUm : V::kDropletUm, V::msMeanCosine( drop ), wk );
+		p->uni3f( "cvWaterK", wk[0], wk[1], wk[2] );
+	}
 	// lane CLOUD2C: the light the cloud below reflects up; lane CLOUDLIGHT1: 2 = its slab as the column under the sample
 	// (no read, the default), 1 = CLOUD2C's taps down (WW_CLOUDVOL_TOPCOLUMN=0 / RED=toptaps)
 	p->uni1f( "cvTopOn", red( "notop" ) ? 0.0f : d.topColumn ? 2.0f : 1.0f );
@@ -700,6 +718,11 @@ bool marchPass( Renderer * r, CvGpu & g, const CvRedo & d, const WwAtmoFrame & f
 		} else {
 			p->uni3f( kTint[i], d.b.tint[i][0], d.b.tint[i][1], d.b.tint[i][2] );
 		}
+	}
+	{	// lane NIGHTHAZE1: clouds.albedo, the haze's shared source (atmomath.h HazeOptics); red greyalbedo: 0.99 grey
+		const float * ca = WwAtmoMath::hazeOptics().cloudAlbedo;
+		const bool grey = red( "greyalbedo" );
+		p->uni3f( "cvAlbedoD", grey ? 0.0f : ca[0] - 0.99f, grey ? 0.0f : ca[1] - 0.99f, grey ? 0.0f : ca[2] - 0.99f );
 	}
 	fn->glActiveTexture( GL_TEXTURE6 );
 	fn->glBindTexture( GL_TEXTURE_2D, sceneTex );
@@ -1248,7 +1271,8 @@ bool wwLightningGround( float add[6][3] )
 bool wwCloudVolLowColour( float out[3] )
 {
 	CvState & s = cs();
-	if ( s.tier != 1 )
+	// MODULES1 round 10: red WW_CLOUDVOL_RED=vanillalit (live): the 2D layers keep the record's cloud colours
+	if ( s.tier != 1 || red( "vanillalit" ) )
 		return false;
 	const WwAtmoFrame & f = wwAtmoFrame();
 	if ( !f.valid )
@@ -1265,7 +1289,11 @@ bool wwCloudVolLowColour( float out[3] )
 			skyAmbient( s, w[2], f.haze, E );
 			for ( float & e : E )
 				e *= WwAtmoMath::kPi;	// lowColour takes the irradiance
-			V::lowColour( k, T, w[2], k, E, s.low );
+			/* MODULES1 round 10: by night the layers' sky share takes the lifted night sky (the frame's moonK = the
+			 * drawn sky's unit x the one factor); the key share keeps the moon's direct light */
+			const float skyK = ( f.sunW[2] > -0.1f || f.moonK <= 0.0f ) ? k : f.moonK;
+			V::lowColour( k, T, w[2], skyK, E, s.low );
+			wwAtmoNightSkyGot( WwNsClouds, skyK / WwAtmoMath::kPi, 0.2126f * s.low[0] + 0.7152f * s.low[1] + 0.0722f * s.low[2] );
 			if ( m.valid )
 				for ( int c = 0; c < 3; c++ )
 					s.low[c] *= red( "notint" ) ? 1.0f : m.band[0].tint[c];	// lane CLOUD2B: CLOUD1's Low band tint
@@ -1274,6 +1302,81 @@ bool wwCloudVolLowColour( float out[3] )
 	if ( s.lowOk )
 		std::copy( s.low, s.low + 3, out );
 	return s.lowOk;
+}
+
+bool wwCloudDeckThrough( float mu0, float out[4] )
+{
+	const WwCloudMap & m = wwCloudMap();
+	if ( !m.valid )
+		return false;
+	const Bands b = bandsOf( m );
+	WwCloudDeck::Band d[2];
+	for ( int k = 0; k < 2; k++ ) {
+		// the tables' key quantised (0.1 km, density 0.1, sheet 1/32): a weather fade rebuilds them a few times, not per frame
+		d[k].baseKm = std::round( b.baseKm[k] * 10.0f ) / 10.0f;
+		d[k].topKm = std::max( std::round( b.topKm[k] * 10.0f ) / 10.0f, d[k].baseKm + 0.1f );
+		d[k].density = std::round( b.density[k] * 10.0f ) / 10.0f;
+		d[k].sheet = k == 0 ? std::round( b.sheet * 32.0f ) / 32.0f : 0.0f;
+		d[k].cov = std::round( std::clamp( b.coverage[k], 0.0f, 1.0f ) * 100.0f ) / 100.0f;
+	}
+	if ( !WwCloudDeck::bandOn( d[0] ) && !WwCloudDeck::bandOn( d[1] ) )
+		return false;
+	struct Memo
+	{
+		float shapeKey[2][4] = { { -1, -1, -1, -1 }, { -1, -1, -1, -1 } };
+		float cal[2][V::kCalN] = {};
+		float covKey[2] = { -1, -1 }, muKey = -1;
+		WwCloudDeck::Through t;
+	};
+	static Memo memo;
+	const std::vector<std::uint8_t> & sh = noise( false ), & de = noise( true );
+	bool redo = false;
+	for ( int k = 0; k < 2; k++ ) {
+		const float key[4] = { d[k].baseKm, d[k].topKm, d[k].density, d[k].sheet };
+		if ( WwCloudDeck::bandOn( d[k] ) && !std::equal( key, key + 4, memo.shapeKey[k] ) ) {
+			WwCloudDeck::bandCal( sh.data(), WwCloudNoise::kShapeN, de.data(), WwCloudNoise::kDetailN, k, d[k], memo.cal[k] );
+			std::copy( key, key + 4, memo.shapeKey[k] );
+			redo = true;
+		}
+		if ( !WwCloudDeck::bandOn( d[k] ) )
+			d[k].cov = 0.0f;
+		redo = redo || d[k].cov != memo.covKey[k];
+		memo.covKey[k] = d[k].cov;
+	}
+	const float mu = std::round( std::clamp( mu0, 0.02f, 1.0f ) * 100.0f ) / 100.0f;
+	if ( redo || mu != memo.muKey ) {
+		const float * const cal[2] = { memo.cal[0], memo.cal[1] };
+		memo.t = WwCloudDeck::through( sh.data(), WwCloudNoise::kShapeN, de.data(), WwCloudNoise::kDetailN, d, cal, mu );
+		memo.muKey = mu;
+	}
+	out[0] = memo.t.cover;
+	out[1] = memo.t.tKey;
+	out[2] = memo.t.tSky;
+	out[3] = memo.t.tauMean;
+	return true;
+}
+
+float wwCloudDeckOnAxes( float ax[6][3], int up, const float sunHorizC[3], float mu0, float rhoG, bool pi, const char * who )
+{
+	WW_SWITCH_STATIC( bool, deckRed, wwEnvStr( "WW_SKY_CLOUDDECK_RED" ).trimmed() == QLatin1StringView( "1" ) );
+	float dk[4];
+	if ( deckRed || mu0 <= 0.0f || !wwCloudDeckThrough( mu0, dk ) )
+		return 0.0f;
+	const WwCloudDeck::Through t = { dk[0], dk[1], dk[2], dk[3] };
+	WW_SWITCH_STATIC( bool, floorRed, wwEnvStr( "WW_SKY_CLOUDDECK_RED" ).trimmed() == QLatin1StringView( "floor" ) );
+	const float x = WwCloudDeck::overAxes( ax, up, t, sunHorizC, rhoG, pi, floorRed );
+	// the line on change only (per caller; the stage's light is read many times a frame): cover, through, x and up to 1e-3
+	static QHash<const void *, quint64> said;
+	auto q = []( float v ) { return quint64( std::clamp( std::lround( double( v ) * 1000.0 ), 0L, 65535L ) ); };
+	const quint64 key = q( dk[0] ) | q( dk[1] ) << 16 | q( dk[2] ) << 32 | q( x * 0.1f ) << 48;
+	if ( said.value( who, ~quint64( 0 ) ) != key ) {
+		said.insert( who, key );
+		fprintf( stderr, "sky deck: %s cover %.3f tau %.2f sun through %.3f sky through %.3f -> up x%.3f = %.4f %.4f %.4f floor=%s"
+			" (red WW_SKY_CLOUDDECK_RED=1, =floor)\n", who, double( dk[0] ), double( dk[3] ), double( dk[1] ), double( dk[2] ),
+			double( x ), double( ax[up][0] ), double( ax[up][1] ), double( ax[up][2] ),
+			floorRed ? "clear sky (red)" : "clear sky x (1 - cover)" );
+	}
+	return x;
 }
 
 bool wwCloudVolBindDensity( Scene * scene, int firstUnit )
@@ -1289,7 +1392,8 @@ bool wwCloudVolBindDensity( Scene * scene, int firstUnit )
 	if ( !ensureNoise( r, g ) )
 		return false;
 	// lane CLOUD2C: the wind the last draw used, so a reader's clouds (CLOUD3's shadows) move with the drawn ones
-	densityUniforms( r, p, g, bandsOf( m ), m, V::readerWindKm( cs().drawnSecs, red( "wind0" ) ), firstUnit );
+	densityUniforms( r, p, g, bandsOf( m ), m, V::readerWindKm( cs().drawnSecs, red( "wind0" ) ), firstUnit,
+		red( "wind0" ) ? 0.0f : WwCloudRecx14::evolveKm( cs().drawnSecs, m.recx14.evolutionMin ) );
 	r->fn->glActiveTexture( GL_TEXTURE0 );
 	return true;
 }
@@ -1306,7 +1410,7 @@ bool wwCloudVolBindDensityAt( Scene * scene, int firstUnit, double secs )
 	CvGpu & g = gpus()[r];
 	if ( !ensureNoise( r, g ) )
 		return false;
-	densityUniforms( r, p, g, bandsOf( m ), m, V::windKm( secs ), firstUnit );
+	densityUniforms( r, p, g, bandsOf( m ), m, V::windKm( secs ), firstUnit, WwCloudRecx14::evolveKm( secs, m.recx14.evolutionMin ) );
 	r->fn->glActiveTexture( GL_TEXTURE0 );
 	return true;
 }
@@ -1322,6 +1426,8 @@ bool wwCloudVolDraw( Scene * scene, const WwCloudVolView & view, QStringList & d
 			? QStringLiteral( "volclouds:low(2d layers lit by the model, %1 %2 %3)" ).arg( double( c[0] ), 0, 'g', 4 )
 				.arg( double( c[1] ), 0, 'g', 4 ).arg( double( c[2] ), 0, 'g', 4 )
 			: QStringLiteral( "volclouds:low(no physical sky: the weather's colour)" ) );
+		// MODULES1 10c: where the Fusion Shaders cloud model is active on this tier
+		drew.last() += QStringLiteral( " fusion=2d_layers(scatter: the clouds: line; shadow sheets: the cloudshadow: line)" );
 		return false;
 	}
 	if ( view.capture )
@@ -1414,6 +1520,14 @@ bool wwCloudVolDraw( Scene * scene, const WwCloudVolView & view, QStringList & d
 	std::copy( keyW, keyW + 3, d.keyW );
 	d.keyK = keyK;
 	std::copy( amb, amb + 3, d.amb );
+	{	// SKYLIGHT1 round 2: the deck over the eye lights the air in front of it (cloud_march.frag cvDeckAp); red apdeck
+		float dk[4];
+		const bool on = !red( "apdeck" ) && keyW[2] > 0.0f && wwCloudDeckThrough( keyW[2], dk );
+		d.deckAp[0] = on ? dk[0] : 0.0f;
+		d.deckAp[1] = on ? dk[1] : 1.0f;
+		d.deckAp[2] = on ? dk[2] : 1.0f;
+		d.deckAp[3] = on ? 1.0f : 0.0f;
+	}
 	d.tier = s.tier;
 	d.hw = hw;
 	d.hh = hh;
@@ -1608,6 +1722,22 @@ bool wwCloudVolDraw( Scene * scene, const WwCloudVolView & view, QStringList & d
 		: refusal( s, why );
 	if ( ok && wwCloudFlyTier() > 0 )	// lane CLOUD4
 		s.last += QStringLiteral( " fly=" ) + wwCloudFlySummary();
+	if ( ok ) {	// SKYLIGHT1 round 2: the path drawing the volume, the cover it reads and where the bands sit
+		const float he = m.halfExtent * kUnitKm;
+		s.last += QStringLiteral( " path=%1 cover=low %2 mid %3 (map texels x%4) heights=%5 base %6 km square=%7,%8 km +-%9"
+								  " apdeck=%10" )
+			.arg( wwCloudFlyTier() > 0 ? QStringLiteral( "cloud_fly(march + fly grid)" ) : QStringLiteral( "cloud_march" ) )
+			.arg( double( m.band[0].coverage ), 0, 'f', 3 ).arg( double( m.band[1].coverage ), 0, 'f', 3 )
+			.arg( double( m.band[0].coverK ), 0, 'f', 3 )
+			.arg( wwCloudFlyWorldHeights() ? QStringLiteral( "world" ) : QStringLiteral( "eye" ) )
+			.arg( double( m.band[0].baseZ * kUnitKm ), 0, 'f', 2 )
+			.arg( double( m.centerX * kUnitKm ), 0, 'f', 1 ).arg( double( m.centerY * kUnitKm ), 0, 'f', 1 ).arg( double( he ), 0, 'f', 0 )
+			.arg( d.deckAp[3] > 0.5f ? QStringLiteral( "cover %1 key through %2 sky through %3" ).arg( double( d.deckAp[0] ), 0, 'f', 3 )
+					.arg( double( d.deckAp[1] ), 0, 'f', 3 ).arg( double( d.deckAp[2] ), 0, 'f', 3 )
+				: red( "apdeck" ) ? QStringLiteral( "RED" ) : QStringLiteral( "none" ) );
+	}
+	if ( ok )	// MODULES1 10c: the volume tiers have no counterpart in the Fusion Shaders cloud model
+		s.last += QStringLiteral( " fusion=none(the volume tiers have no Fusion Shaders counterpart: left as they are)" );
 	drew << s.last;
 	return ok;
 }

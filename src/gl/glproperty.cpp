@@ -1115,8 +1115,12 @@ static int wwEnvAutoReplace()
 bool wwRenderParticlesPin()
 {
 	// Unset (and unusable) keeps what the shot hook always did: particles ON.
-	static const int v = wwEnvBool( "WW_RENDER_PARTICLES" );
-	return v != 0;
+	// MODULES1 R7 item 7: read again on every set, so the reopen's handler run sees it (red WW_R7LIVE_RED=1: the first value)
+	static const int once = wwEnvBool( "WW_RENDER_PARTICLES" );
+	static const bool stuck = qgetenv( "WW_R7LIVE_RED" ).trimmed() == "1";
+	WW_SWITCH_STATIC( int, v, ( wwSwitchEcho( "render particles pin (WW_RENDER_PARTICLES)", wwEnvBool( "WW_RENDER_PARTICLES" ) != 0 ),
+		wwEnvBool( "WW_RENDER_PARTICLES" ) ) );
+	return ( stuck ? once : v ) != 0;
 }
 
 static bool pbrmAutoReplaceCached = true;
@@ -1237,7 +1241,12 @@ void setPbrmRouteView( bool on )
 
 bool pbrmRouteView()
 {
-	static const int pin = wwEnvBool( "WW_PBRM_ROUTE_VIEW" );
+	// MODULES1 R7 item 7: the pin is read again on every set (red WW_R7LIVE_RED=1: the first value stays)
+	static const int once = wwEnvBool( "WW_PBRM_ROUTE_VIEW" );
+	static const bool stuck = qgetenv( "WW_R7LIVE_RED" ).trimmed() == "1";
+	WW_SWITCH_STATIC( int, live, ( wwSwitchEcho( "pbrm route view pin (WW_PBRM_ROUTE_VIEW, live)", wwEnvBool( "WW_PBRM_ROUTE_VIEW" ) > 0 ),
+		wwEnvBool( "WW_PBRM_ROUTE_VIEW" ) ) );
+	const int pin = stuck ? once : live;
 	return ( pin >= 0 ) ? ( pin != 0 ) : pbrmRouteViewCached;
 }
 

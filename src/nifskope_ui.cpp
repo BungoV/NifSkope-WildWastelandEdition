@@ -44,6 +44,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "features/far-lod/lodgengpu.h"
 #include "features/far-lod/lodgenlayout.h"
 #include "esmdata.h"
+#include "cellcambounds.h"	// lane NIGHTHAZE1: cellCamBoundsIsCell (select all refused in a cell view)
 #include "cellclick.h"		// lane CELLVIEW2
 #include "cellpanel.h"		// lane CELLVIEW2
 #include "cellpicktest.h"	// lane CELLVIEW2
@@ -72,6 +73,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "features/gi/bakegeom.h"
 #include "bsamodel.h"
 #include "glview.h"
+#include "framepacer.h"	// lane EMPTY240: View > Vertical Sync and View > Frame Cap
 #include "features/far-lod/impostorchunk.h"
 #include "features/far-lod/impostorpreviewtest.h"
 #include "ui/wwglyphs.h"
@@ -116,6 +118,8 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "gl/glproperty.h"
 #include "gl/scenelighting.h"
 #include "ui/scenewindow.h"
+#include "ui/livepanel.h"	// lane MODULES1 item 13
+#include "features/weather/wxoverride.h"	// lane MODULES1 item 12: wxsave
 #include "features/far-lod/lodmfile.h"
 #include "io/pbrmfile.h"
 #include "io/pbrmresolve.h"
@@ -239,6 +243,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "features/shared/cellpasstime.h"
 #include "celltexahead.h"
 #include "features/shared/wwtelemetry.h"	// lane MODULES1
+#include "features/exposure/physunits.h"	// lane PHYSUNITS1: wwPhysEcho on the path's side file
 #include <vector>
 
 namespace {
@@ -2009,8 +2014,10 @@ static void wwRenderPathRun( GLView * ogl, const QString & pathFile, const QStri
 	// the stepped hour went on into every later row of the launch; put the pinned hour back
 	if ( stepHour )
 		wwLookdevSetHour( hour0 );
-	if ( sideOk )
+	if ( sideOk ) {
 		log << "paints " << ( preroll + frames - unpainted ) << " of " << ( preroll + frames ) << " frames painted\n";
+		log << wwPhysEcho() << "\n";	// lane PHYSUNITS1: the row's camera (EV100 metered / applied) and scale
+	}
 	wwGameTaaSetFrame( -1 );
 	wwCellPostSetPath( -1, 0.0f );
 	wwCellSsgiSetPath( -1 );
@@ -2111,6 +2118,8 @@ QString wwLiveSettleBackground( GLView * ogl )
 }
 
 //! Runs the stages the sets since the last picture owe; the reply says what was redone
+static bool g_wwLiveForceApply = false;	// lane MODULES1 item 10: an explicit `apply` retries a timed-out reopen
+
 QString wwLiveApply( NifSkope * skope )
 {
 	WwLiveState & L = wwLive();
@@ -2143,13 +2152,26 @@ QString wwLiveApply( NifSkope * skope )
 	const quint64 refusedBefore = wwLiveShaderRefusals();
 	const QSize viewBefore( ogl->width(), ogl->height() );
 	const QStringList chromeBefore = wwLiveChrome( skope );
+	bool owedSkip = false;
 	if ( liveSec == 1 )
 		did << liveWhy;
 	if ( owed & 1 ) {
 		ogl->updateShaders();
 		did << QStringLiteral( "shaders" );
 	}
-	if ( owed & 2 ) {
+	/* lane MODULES1 item 10: a reopen that timed out is not retried by every later step (a shot froze the window
+	 * 3 min each time); it waits for a new set or an explicit `apply`, and the reply says so. Red
+	 * WW_LIVE_REOPEN_RETRY_RED=1: every step retries, as before. */
+	static quint64 timedOutGen = ~0ull;
+	if ( ( owed & 2 ) && !g_wwLiveForceApply && timedOutGen == wwSwitchGen()
+		&& wwEnvStr( "WW_LIVE_REOPEN_RETRY_RED" ).trimmed() != QLatin1String( "1" ) ) {
+		std::fprintf( stderr, "live: reopen not retried (the last one timed out at gen %llu; set a switch or send apply)\n",
+			(unsigned long long)timedOutGen );
+		std::fflush( stderr );
+		did << QStringLiteral( "reopen NOT retried: the last one timed out with nothing set since (send apply to retry)" );
+		owedSkip = true;
+	}
+	if ( ( owed & 2 ) && !owedSkip ) {
 		// the handler's next run ends at the hook (wwLiveReopenHook) once the cells are in
 		L.reopening = true;
 		L.reopenDone = false;
@@ -2187,8 +2209,9 @@ QString wwLiveApply( NifSkope * skope )
 		L.reopening = false;
 		std::fprintf( stderr, "live: reopen %s in %lld ms\n", L.reopenDone ? "done" : "TIMED OUT", (long long)reopenMs );
 		std::fflush( stderr );
+		timedOutGen = L.reopenDone ? ~0ull : wwSwitchGen();
 		if ( !L.reopenDone || reopenMs > 180000 )
-			L.reopenRefused = QStringLiteral( "reopen %1 in %2 ms (limit 180000)" )
+			L.reopenRefused =QStringLiteral( "reopen %1 in %2 ms (limit 180000)" )
 				.arg( L.reopenDone ? QStringLiteral( "too slow" ) : QStringLiteral( "TIMED OUT" ) ).arg( reopenMs );
 		did << ( L.reopenDone ? QStringLiteral( "reopen %1 ms" ).arg( reopenMs ) : QStringLiteral( "reopen TIMED OUT" ) );
 		/* the reopen must hand back the viewport the rows before it drew in (port run: 1920x1026 became
@@ -2298,6 +2321,10 @@ QString wwLiveCommand( NifSkope * skope, const QString & line )
 			}
 		return r;
 	}
+	if ( verb == QLatin1StringView( "panel" ) )	// lane MODULES1 item 13: `panel <path>` builds the Live Panel dock
+		return wwLivePanelOpen( skope, rest );
+	if ( verb == QLatin1StringView( "wxsave" ) )	// lane MODULES1 item 12: the overrides as a new .recx
+		return wwWxSaveRecx();
 	if ( verb == QLatin1StringView( "status" ) )
 		return QStringLiteral( "gen %1 owed %2 %3" ).arg( wwSwitchGen() ).arg( L.owed ).arg( L.owedNames.join( QLatin1Char( ',' ) ) );
 	if ( verb == QLatin1StringView( "quit" ) ) {
@@ -2306,7 +2333,9 @@ QString wwLiveCommand( NifSkope * skope, const QString & line )
 	}
 	if ( L.rowRefused && verb != QLatin1StringView( "apply" ) )
 		return QStringLiteral( "skipped (a set of this row was refused: relaunch)" );
+	g_wwLiveForceApply = verb == QLatin1StringView( "apply" );
 	const QString applied = wwLiveApply( skope );
+	g_wwLiveForceApply = false;
 	if ( verb == QLatin1StringView( "apply" ) )
 		return applied;
 	QElapsedTimer t;
@@ -2335,6 +2364,28 @@ QString wwLiveCommand( NifSkope * skope, const QString & line )
 		float fov = 70.0f;
 		cp.sample( 0, eye, at, fov );
 		return ogl->wwPlaceCamera( eye, at ) + QStringLiteral( " (path fov %1 not applied)" ).arg( double( fov ), 0, 'f', 1 );
+	}
+	/* MODULES1 M11: `goto X Y Z YAW PITCH` puts the eye there (yaw degrees from +Y toward +X, pitch degrees up; both 0 when
+	 * left out), `where` prints the camera and its `goto` line (notes/modules1/bungo_refs/SPOTS_1110_goto.txt: one per spot) */
+	if ( verb == QLatin1StringView( "where" ) ) {
+		const QString r = ogl->wwCameraWhere();
+		std::fprintf( stderr, "%s\n", qPrintable( r ) );
+		return r;
+	}
+	if ( verb == QLatin1StringView( "goto" ) ) {
+		const QStringList a = rest.split( QRegularExpression( QStringLiteral( "[\\s,]+" ) ), Qt::SkipEmptyParts );
+		double v[5] = { 0, 0, 0, 0, 0 };
+		bool ok = a.size() >= 3 && a.size() <= 5;
+		for ( int i = 0; ok && i < a.size(); i++ )
+			v[i] = a[i].toDouble( &ok );
+		if ( !ok )
+			return QStringLiteral( "goto refused: X Y Z [YAW [PITCH]] (got \"%1\")" ).arg( rest );
+		const double y = v[3] / 57.29577951308232, p = std::clamp( v[4], -89.0, 89.0 ) / 57.29577951308232;
+		const Vector3 eye = Vector3( static_cast<float>( v[0] ), static_cast<float>( v[1] ), static_cast<float>( v[2] ) );
+		const Vector3 at = eye + Vector3( float( std::sin( y ) * std::cos( p ) ), float( std::cos( y ) * std::cos( p ) ), float( std::sin( p ) ) ) * 100.0f;
+		const QString r = ogl->wwPlaceCamera( eye, at ) + QStringLiteral( " | " ) + ogl->wwCameraWhere();
+		std::fprintf( stderr, "camera goto: %s\n", qPrintable( r ) );
+		return r;
 	}
 	if ( verb != QLatin1StringView( "shot" ) && verb != QLatin1StringView( "path" ) && verb != QLatin1StringView( "gpums" ) )
 		return QStringLiteral( "refused unknown verb: %1" ).arg( verb );
@@ -2518,6 +2569,7 @@ static void wwCardBatchNext()
 		QDir( bakeDir ).removeRecursively();
 		QDir().mkpath( bakeDir );
 		qputenv( "WW_IMPOSTOR_BAKE", QDir::toNativeSeparators( bakeDir ).toLocal8Bit() );
+		wwEnvChanged();	// MODULES1 item 8: the env accessors' cache
 		// every window starts from the process-start look, as each per-base launch's one window did
 		QCoreApplication::sendPostedEvents( nullptr, QEvent::DeferredDelete );
 		QApplication::setStyle( QStyleFactory::create( b.style ) );
@@ -23412,6 +23464,13 @@ void NifSkope::initDockWidgets()
 	hostLayout->addWidget( leftColumnStack, 1 );
 	dLeft->setWidget( host );
 	addDockWidget( Qt::LeftDockWidgetArea, dLeft );
+	// lane MODULES1 item 13: the Live Panel (WW_LIVEPANEL opens it at start; the live port's `panel <path>` any time)
+	wwLivePanelSetHooks( [this]( const QString & step ) { return wwLiveCommand( this, step ); }, [this]() {
+		if ( GLView * v = getGLView() )
+			v->update();
+	} );
+	if ( !wwEnvStr( "WW_LIVEPANEL" ).trimmed().isEmpty() )
+		QTimer::singleShot( 0, this, [this]() { std::fprintf( stderr, "%s\n", qPrintable( wwLivePanelOpen( this, QString() ) ) ); } );
 	setLeftColumnMode( LeftBlocks );
 	connect( leftColumnSelector, &QTabBar::currentChanged, this, [this]( int tab ) {
 		if ( tab >= 0 )
@@ -25799,6 +25858,54 @@ void NifSkope::initDockWidgets()
 			fullButton->setDefaultAction( aFull );
 			fullButton->setAutoRaise( true );
 			ui->tRender->addWidget( fullButton );
+		}
+		// F3 (bungo 11-09): the live framerate in the viewport's corner (glview.h wwFramerateOverlayOn)
+		{
+			QAction * aFps = new QAction( tr( "Show Framerate" ), this );
+			aFps->setObjectName( QStringLiteral( "aViewportFramerate" ) );
+			aFps->setShortcut( QKeySequence( Qt::Key_F3 ) );
+			aFps->setCheckable( true );
+			aFps->setChecked( wwFramerateOverlayOn() );
+			connect( aFps, &QAction::toggled, this, [this]( bool on ) {
+				wwSetFramerateOverlay( on );
+				if ( ogl )
+					ogl->update();
+			} );
+			addAction( aFps );	// the key works while every bar is hidden
+			if ( ui->mView )
+				ui->mView->addAction( aFps );
+		}
+		// lane EMPTY240 ITEM 0 (bungo 11-11: "Vsync should never be on by default"): vsync, and the frame cap
+		if ( ui->mView ) {
+			QAction * aVsync = new QAction( tr( "Vertical Sync" ), this );
+			aVsync->setObjectName( QStringLiteral( "aViewportVsync" ) );
+			aVsync->setCheckable( true );
+			aVsync->setChecked( wwVsyncOn() );
+			connect( aVsync, &QAction::toggled, this, [this]( bool on ) {
+				wwSetVsync( on );
+				if ( ogl )
+					ogl->update();
+			} );
+			ui->mView->addAction( aVsync );
+			QMenu * capMenu = ui->mView->addMenu( tr( "Frame Cap" ) );
+			capMenu->setObjectName( QStringLiteral( "mViewportFrameCap" ) );
+			QActionGroup * capGroup = new QActionGroup( capMenu );
+			const int capNow = wwFrameCapRow();
+			const std::pair<int, QString> caps[] = { { 0, tr( "Off" ) }, { -1, tr( "Monitor Refresh" ) }, { 30, QStringLiteral( "30" ) },
+				{ 60, QStringLiteral( "60" ) }, { 120, QStringLiteral( "120" ) }, { 144, QStringLiteral( "144" ) },
+				{ 240, QStringLiteral( "240" ) }, { 360, QStringLiteral( "360" ) }, { 500, QStringLiteral( "500" ) } };
+			for ( const auto & [hz, name] : caps ) {
+				QAction * a = capMenu->addAction( name );
+				a->setCheckable( true );
+				a->setChecked( hz == capNow );
+				capGroup->addAction( a );
+				const int capHz = hz;
+				connect( a, &QAction::triggered, this, [this, capHz]() {
+					wwSetFrameCap( capHz );
+					if ( ogl )
+						ogl->update();
+				} );
+			}
 		}
 
 		auto currentShadeMode = std::make_shared<int>( 2 );
@@ -29451,7 +29558,7 @@ void NifSkope::openDlg()
 void NifSkope::onLoadBegin()
 {
 	// Disconnect the models from the views
-	swapModels();
+	swapModels( true );
 	if ( header ) header->setEmptyMessage( tr( "Loading header…" ) );
 
 	ogl->setDisabled( true );
@@ -29473,7 +29580,7 @@ void NifSkope::onLoadComplete( bool success, QString & fname )
 	updateImportExportMenu(mImport);
 
 	// Reconnect the models to the views
-	swapModels();
+	swapModels( false );
 	// Set List vs Tree
 	setListMode();
 
@@ -30310,8 +30417,15 @@ void NifSkope::toggleViewportFullScreen()
 {
 	viewFull.setExtraChrome( { viewportHeader } );
 	viewFull.toggle();
-	if ( ogl )
+	if ( ogl ) {
+		// AIRPERF1 round 3 (bungo 11-11): no navigation gizmo in full screen. Red WW_VIEWFULL_GIZMO_RED=1: it stays.
+		WW_SWITCH_STATIC( bool, gizmoRed, wwEnvInt( "WW_VIEWFULL_GIZMO_RED" ) == 1 );
+		const bool off = viewFull.active() && !gizmoRed;
+		ogl->wwSetNavGizmoOff( off );
+		fprintf( stderr, "view full screen: %s, navigation gizmo %s%s\n", viewFull.active() ? "on" : "off",
+			off ? "hidden (not drawn, no clicks)" : "shown", gizmoRed ? " (red WW_VIEWFULL_GIZMO_RED=1: it stays)" : "" );
 		ogl->update();
+	}
 }
 
 bool NifSkope::eventFilter( QObject * o, QEvent * e )
@@ -30433,6 +30547,26 @@ bool NifSkope::eventFilter( QObject * o, QEvent * e )
 		// Shift+F toggles the free camera whenever the pointer is over the viewport, no matter which widget
 		// currently has key focus.
 		auto ke = static_cast<QKeyEvent *>( e );
+		// lane AIRPERF1 r3 (bungo 11-11: "no other shortcuts are toggled if I am in the free cam mode"): the one gate
+		// for every QAction and QShortcut of the window and for every key branch of this filter. Accepting the
+		// override stops Qt's shortcut matching, so the key arrives as a plain KeyPress at the view (it holds the
+		// keyboard grab), which moves the camera or swallows it. Kept: F11 (full screen), Shift+F / Esc (leave).
+		// Red WW_FLYKEYS_RED=1 = the old rule.
+		if ( ogl && ogl->flyOwnsShortcuts() && !QApplication::activePopupWidget() && !QApplication::activeModalWidget()
+			&& !( ke->key() == Qt::Key_F11 && !( ke->modifiers() & ~Qt::KeypadModifier ) ) ) {
+			if ( e->type() == QEvent::ShortcutOverride ) {
+				e->accept();
+				return true;
+			}
+			if ( ShortcutRegistry::get().matches( "viewport.free_camera", ke->key(), ke->modifiers() )
+				|| ke->key() == Qt::Key_Escape ) {
+				if ( !ke->isAutoRepeat() )
+					ogl->setFreeCamera( false );
+				e->accept();
+				return true;
+			}
+			return false;
+		}
 		// Block List: X or Delete removes the selected block(s) and their branches, on a multi-selection,
 		// exactly as the viewport does — and with the viewport's split between the two keys.
 		if ( o == list && ogl && nif
@@ -30464,6 +30598,16 @@ bool NifSkope::eventFilter( QObject * o, QEvent * e )
 			&& !( ke->modifiers() & ( Qt::ControlModifier | Qt::AltModifier | Qt::ShiftModifier ) ) ) {
 			if ( e->type() == QEvent::KeyPress && !ke->isAutoRepeat() )
 				removeSelectedWorkspaceDocuments();
+			return true;
+		}
+		/* lane NIGHTHAZE1: Ctrl+A on the Block List in a cell view selected every block (tens of thousands) and the
+		 * selection sync froze the window: refused there, a click or deselect still works; a plain NIF keeps it */
+		if ( ( o == list || ( list && o == list->viewport() ) ) && ke->matches( QKeySequence::SelectAll )
+			&& nif && cellCamBoundsIsCell( nif ) ) {
+			if ( e->type() == QEvent::KeyPress && !ke->isAutoRepeat() )
+				std::fprintf( stderr, "select all: refused in the cell view (Block List Ctrl+A, %d blocks)\n",
+					nif->getBlockCount() );
+			e->accept();
 			return true;
 		}
 		// Block List Ctrl+C / Ctrl+V are the Copy Branch / Paste Branch spells (QKeySequence::Copy/Paste

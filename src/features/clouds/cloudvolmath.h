@@ -204,6 +204,20 @@ inline float msMeanCosine( const Droplet & p )
 	return ( 1.0f - p.wD ) * p.gHg + p.wD * gDr;
 }
 
+/*! lane MODULES1 (radstorm green, 11-09): liquid water absorbs red (Bohren & Fraser 1993, green thunderstorms). The
+ *  bulk absorption of pure water at 680 / 550 / 440 nm (Pope & Fry 1997: 0.465, 0.0565, 0.00635 /m); a droplet's
+ *  co-albedo in the weak-absorption limit Q_abs / Q_ext = (4/3) alpha r (n^3 - (n^2 - 1)^1.5) / 2 = 1.12 alpha r
+ *  (n 1.333; Bohren & Huffman 1983, sec. 7.2); the diffuse light then decays per unit optical depth by the diffusion
+ *  exponent k = sqrt(3 (1 - w)(1 - g)). k per channel for a droplet diameter in um. A 1000-deep storm column keeps
+ *  0.25 / 0.62 / 0.85 at 20 um (g 0.879), a tau-20 cumulus 0.97 / 0.99 / 1.00. cloud_march_step.glsl cvWaterK. */
+inline void waterAbsorbK( float diameterUm, float g, float k[3] )
+{
+	static const float kAlphaPerM[3] = { 0.465f, 0.0565f, 0.00635f };
+	const float rM = 0.5f * diameterUm * 1e-6f;
+	for ( int c = 0; c < 3; c++ )
+		k[c] = std::sqrt( 3.0f * 1.12f * kAlphaPerM[c] * rM * std::max( 1.0f - g, 0.0f ) );
+}
+
 /*! lane CLOUD2B: the diffuse transmission of a slab of optical depth tau, per unit flux on its top, sun at mu0:
  *  delta-Eddington scaling (Joseph, Wiscombe & Weinman 1976) + the two-stream solution for albedo w < 1 (Meador &
  *  Weaver 1980, Eddington coefficients), the direct e^(-tau'/mu0) taken out. Twin of cloud_march.frag cvTdif. */

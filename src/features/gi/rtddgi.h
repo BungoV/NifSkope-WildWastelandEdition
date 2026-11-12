@@ -67,6 +67,10 @@ struct RtDdgiSpec
 	 *  placement; unused while hi <= lo on any axis */
 	float box[6] = { 0, 0, 0, 0, 0, 0 };
 	bool fitProbes = false;     //!< M2: over maxProbes the spacing grows until the grid fits (else the run refuses)
+	/*! lane AIRPERF1 r6, the CLI's gate (--blas-parts N, --blas-red): a soup without parts is cut in N equal ones (a
+	 *  BLAS each); blasPartsRed keeps the parts' frame and grown amount and builds the one BLAS: the dumps must match */
+	int blasParts = 0;
+	bool blasPartsRed = false;
 };
 
 struct RtDdgiVolume
@@ -84,6 +88,10 @@ struct RtDdgiVolume
 	std::vector<float> dist;        //!< 16 x 16 x 2 a probe: mean, mean^2
 	std::vector<float> fixedDist;   //!< 32 a probe: its fixed rays' stored distances (spec.dumpFixed only)
 	double blasGrow = 0.0;          //!< GPU: how far bakert grew the BLAS's edges (the trace re-tests the true triangles)
+	//! lane AIRPERF1 r6: the scene's BLAS parts (0: the single BLAS), the BLASes this open built / found again, the ms
+	int blasParts = 0, blasNew = 0, blasKept = 0;
+	qint64 blasTrisNew = 0, blasTrisKept = 0;
+	double blasMs = 0.0;
 	// census
 	QString path;                   //!< "gpu (<device>)" or "cpu" + why
 	int probes = 0, off = 0, asleep = 0, vigilant = 0, moved = 0;
@@ -161,6 +169,10 @@ public:
 	bool open( const ProbeSoup & soup, const WwCellLighting & lighting, const ProbeSkyLight & sky, const RtDdgiSpec & spec,
 		bool share = false, const RtDdgiLive * sceneFrom = nullptr );
 	bool isOpen() const;
+	/*! MODULES1 11-09 item 3: a new sun, interior directional and sky (an hour or weather change) for the open volume; the
+	 *  next step writes them to the device and the probes re-light by their hysteresis (no BLAS, soup or lights rebuild);
+	 *  updatesSinceScroll() starts again from 0 */
+	void relight( const WwCellLighting & lighting, const ProbeSkyLight & sky );
 	//! k updates (0..16), host copies, waits; false: the device was busy (busy() true: nothing ran, try next frame) or failed (why())
 	bool step( int k );
 	//! M3: the whole order (see RtDdgiStep)
@@ -211,7 +223,8 @@ private:
 };
 
 //! M2: a key of everything in `lighting` the volume's shading reads (the cell view rebuilds when it moves)
-quint64 rtddgiLightsKey( const WwCellLighting & lighting );
+//! MODULES1 11-09 item 3: withDir false = the packed local lights only (the interior directional is relight's)
+quint64 rtddgiLightsKey( const WwCellLighting & lighting, bool withDir = true );
 
 /*! The gate's dump in folder `dir`:
  *    rtddgi_probes.tsv  per probe: index, ix iy iz, x y z (world, offset in), state, age, then E (decoded x 2 pi) on

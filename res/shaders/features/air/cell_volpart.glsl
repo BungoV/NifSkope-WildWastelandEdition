@@ -1,5 +1,7 @@
 // lane VOLPART1: the volumetric law shared by particles.frag (a sprite) and fo4_effectshader.frag (a lit effect
 // card, as the street steam): included once, after cell_lights.glsl, lookdev_fog.glsl, lightingInfluence and fxLitMode.
+// lane MODULES1 M3 (G7): the lit mix of vpLit (guarded: the effect and particle shaders include it too)
+#include "cell_fxlaw.glsl"
 /* lane VOLPART1: VOLUMETRIC PARTICLES (src/features/particles/glparticles.cpp; the row "Volumetric Particles" ships off). A puff of
  * steam or fog is a little piece of the air: lit by the light that is really there, from the very list the air
  * (Volumetric Air, cell_volair.frag) reads -- the directional light x its cascade shadow, every placed light (colour x
@@ -50,21 +52,63 @@ uniform int volPart;			// 0 off: the law above, as before; 1 on
 uniform int volPartRed;			// gates only: 1 flat, 2 nothick, 4 nosoft, 8 nolights, 16 white, 32 nofog, 64 noshadow,
 								// 128 noedge, 256 nophase, 512 nonear, 1024 flatloop
 uniform int volPartDump;		// gates only: the probe row's width in pixels (particles.geom), 0 off
+uniform int vpTiled;			// MODULES1 M3: 1 the lit card's UVs tile or sit in an atlas cell (no one sprite): a slab, a0 as drawn
 uniform bool volCsm;			// the sun's cascades are drawn this frame
 uniform int volTerms;			// the air's mask (WW_CELL_AIR_TERMS): 1 directional, 2 placed, 4 GI, 8 ambient
 /* FARCITYWASH1-PART: the air's veil (cell_volair.frag airVeilK, the same law and guards) on the puff's sky-lit share,
  * so a daytime puff sits at the air's level around it; lamps keep theirs. Red WW_CELL_AIR_RED=veilphys: off. */
 uniform bool volVeil;
+/* MODULES1 10b-3 (bungo: the same sky visibility as the air): the air's env strata (its froxel history: stratum 4 =
+ * env rgb + leak fade, stratum 5 = sun gate, open-field share, 1 = valid), fetched nearest at the card's own froxel,
+ * through the air's own law airAmbKeep. volEnvGrid = columns, rows, slices, 1 = held (0: no strata, the keep is 1, as
+ * the air's with no leak fix). Red WW_CELL_FXLOCAL_RED=noleakfade. MODULES1 10c: the lit-decal programs (the mist
+ * cards) take it too (measured room: 8.6k instructions under the limit); offline way back WW_FX_DECAL_NOKEEP. */
+#if !( defined( WW_FX_DECALLIT ) && defined( WW_FX_DECAL_NOKEEP ) )
+uniform sampler3D volEnvHist;
+uniform vec4 volEnvGrid;
+float vpAmbKeep( vec3 posView )
+{
+	if ( volEnvGrid.w < 0.5 )
+		return 1.0;
+	float d = length( posView );
+	vec4 c = projectionMatrix * vec4( posView, 1.0 );
+	if ( d <= volSlices.x || c.w <= 0.0 || any( greaterThan( abs( c.xy ), vec2( c.w ) ) ) )
+		return 1.0;
+	ivec3 n = ivec3( volEnvGrid.xyz + 0.5 );
+	float f = log( d / volSlices.x ) / volSlices.y * float( n.z );
+	if ( f >= float( n.z ) )
+		return 1.0;
+	ivec2 xc = clamp( ivec2( ( c.xy / c.w * 0.5 + 0.5 ) * vec2( n.xy ) ), ivec2( 0 ), n.xy - 1 );
+	int xk = clamp( int( f ), 0, n.z - 1 );
+	vec4 h1 = texelFetch( volEnvHist, ivec3( xc, 5 * n.z + xk ), 0 );
+	if ( h1.z <= 0.9999 )
+		return 1.0;
+	return airAmbKeep( texelFetch( volEnvHist, ivec3( xc, 4 * n.z + xk ), 0 ).a, h1.y );
+}
+#endif
+// MODULES1 R7-1: the sun a puff takes: the surfaces' (cell_fxlaw.glsl vpSun) under the local law, else the game's base
+bool vpLocal()
+{
+	return fxLocalOn() && !cellInterior;
+}
+vec3 vpSunColour()
+{
+	return vpLocal() ? vpSun.rgb : cellDirColor;
+}
+bool vpHasSun()
+{
+	return vpLocal() ? any( greaterThan( vpSun.rgb, vec3( 0.0 ) ) ) : cellHasDir;
+}
 float vpVeilK( vec3 Jenv, float t, float z )
 {
-	if ( !volVeil || cellInterior || !( cellOn && cellHasDir ) || ( volTerms & 1 ) == 0 )
+	if ( !volVeil || cellInterior || !( cellOn && vpHasSun() ) || ( volTerms & 1 ) == 0 )
 		return 1.0;
 	float hb;
 	vec3 fc;
 	wwFogEval( t, z, hb, fc );
 	const vec3 lumK = vec3( 0.2126, 0.7152, 0.0722 );
 	float rec = dot( max( fc, vec3( 0.0 ) ), lumK );
-	float open = 0.25 * dot( cellDirColor, lumK ) + dot( Jenv, lumK );
+	float open = 0.25 * dot( vpSunColour(), lumK ) + dot( Jenv, lumK );
 	return open > rec && open > 1e-8 ? rec / open : 1.0;
 }
 
@@ -138,7 +182,7 @@ float vpNearFade( float depth )
 // the card's opacity at q (-1..1 over it) from its own a0; red nothick: a0 as drawn
 float vpPuffAlpha( float a0, vec2 q )
 {
-	if ( ( volPartRed & 2 ) != 0 )
+	if ( ( volPartRed & 2 ) != 0 || vpTiled != 0 )
 		return a0;
 	float l = sqrt( max( 1.0 - dot( q, q ), 0.0 ) );
 	return 1.0 - pow( 1.0 - clamp( a0, 0.0, 0.999 ), 1.5 * l );
@@ -186,12 +230,25 @@ int vpLightsBegin( vec3 P, vec3 posView, out int n )
 	return cellClusterBase + texelFetch( cellCluster, 2 * cl ).r;
 }
 
+#ifndef WW_FX_DECALLIT
+/* FARWATER1 late item 4 (bungo b71: the barrel fire does not light its smoke): an air card's lamps past the thin share.
+ * A dense plume scatters many times and its light tends to the isotropic diffuse of the irradiance (wrap 1, no phase):
+ * per lamp e x max( wrap( N.L, 1 ) - phase, 0 ), added by vpLit x the card's opacity (vpAirCardA), so each lamp gives
+ * max( thin, mix( thin, diffuse, a ) ): a lamp's forward lobe toward the eye is kept. The env and the GI stay thin
+ * (round 9). Red WW_CELL_FXLOCAL_RED=thinlamps (fxLocalRed 8). */
+vec3 vpLampMs = vec3( 0.0 );
+float vpAirCardA = 0.0;
+#endif
+
 /* the light at the sprite's point (posView, world P, height z in the fog's frame) toward the eye along dW (world):
  * thin = the air's J there (pi x radiance per unit opacity), thick = the wrapped diffuse at world normal N */
 void vpLight( vec3 posView, vec3 P, vec3 dW, float z, vec3 N, float w, out vec3 thin, out vec3 thick )
 {
 	thin = vec3( 0.0 );
 	thick = vec3( 0.0 );
+#ifndef WW_FX_DECALLIT
+	vpLampMs = vec3( 0.0 );
+#endif
 	vec3 skyThin = vec3( 0.0 ), skyThick = vec3( 0.0 );	// the sky's share: the records' colour at the end (the air's rule)
 	vec3 jEnv = vec3( 0.0 );	// the env share alone, as the air's Jenv (the veil's open level)
 	airGroundAt( P );	// FOGTERRAIN2: the ground layer on the pass's terrain grid, as the froxels at this point
@@ -201,11 +258,11 @@ void vpLight( vec3 posView, vec3 P, vec3 dW, float z, vec3 N, float w, out vec3 
 #endif
 	if ( ( volPartRed & 1 ) != 0 )
 		N = cellWorldDir( vec3( 0.0, 0.0, 1.0 ) );	// red flat: every pixel faces the eye's axis
-	if ( ( volTerms & 1 ) != 0 && cellHasDir ) {
+	if ( ( volTerms & 1 ) != 0 && vpHasSun() ) {
 		vec3 to = normalize( cellDirTo );
 		float vis = ( !cellInterior && volCsm && ( volPartRed & 64 ) == 0 ) ? wwSunShadow( posView ) : 1.0;
 		// lane WEATHERBLEND4: the sun's column through the drifting air (lookdev_fog.glsl wwAirDriftSunK)
-		vec3 e = vpTint( cellDirColor ) * vis * pow( airTupSun( z, to.z ), wwAirDriftSunK( posView, z, to.z, airMed.w ) );	// FIX1101A: airTupSun
+		vec3 e = vpTint( vpSunColour() ) * vis * pow( airTupSun( z, to.z ), wwAirDriftSunK( posView, z, to.z, airMed.w ) );	// FIX1101A: airTupSun
 		skyThin += e * vpPhase( dot( to, dW ) );
 		skyThick += e * vpWrap( dot( N, to ), w ) * vpPhaseN( dot( to, dW ) );
 #ifdef PC_LOOK
@@ -245,6 +302,9 @@ void vpLight( vec3 posView, vec3 P, vec3 dW, float z, vec3 N, float w, out vec3 
 			e = vpTint( e ) * exp( -airOd( z, t0.z + zOff, d ) * dL );
 			thin += e * vpPhase( dot( L, dW ) );
 			thick += e * vpWrap( dot( N, L ), w ) * vpPhaseN( dot( L, dW ) );
+#ifndef WW_FX_DECALLIT
+			vpLampMs += e * max( vpWrap( dot( N, L ), 1.0 ) - vpPhase( dot( L, dW ) ), vec3( 0.0 ) );
+#endif
 #ifdef PC_LOOK
 			vpDom += vec4( L, 1.0 ) * dot( e, vec3( 0.2126, 0.7152, 0.0722 ) );
 			vpDomC += e;
@@ -252,7 +312,7 @@ void vpLight( vec3 posView, vec3 P, vec3 dW, float z, vec3 N, float w, out vec3 
 		}
 	}
 	bool wantGi = ( volTerms & 4 ) != 0 && cellGiOn;
-	bool ambDalc = cellInterior ? cellHasDalc : cellExtDalc;
+	bool ambDalc = cellInterior ? cellHasDalc : ( cellExtDalc || vpLocal() );	// R7-1: the weather's ambient at the card
 	bool wantAmb = ( volTerms & 8 ) != 0 && ambDalc && !( cellInterior && cellGiAmb == 2 );
 	if ( wantGi || wantAmb ) {
 	vec3 E[6];
@@ -279,8 +339,12 @@ void vpLight( vec3 posView, vec3 P, vec3 dW, float z, vec3 N, float w, out vec3 
 		bool replace = cellGiOn && ( cellInterior ? cellGiAmb == 1 : cellGiSky );
 		const vec3 axes[6] = vec3[6]( vec3( 1, 0, 0 ), vec3( -1, 0, 0 ), vec3( 0, 1, 0 ), vec3( 0, -1, 0 ), vec3( 0, 0, 1 ), vec3( 0, 0, -1 ) );
 		vec3 Am[6];
+		float keepA = 1.0;
+#if !( defined( WW_FX_DECALLIT ) && defined( WW_FX_DECAL_NOKEEP ) )
+		keepA = vpAmbKeep( posView );
+#endif
 		for ( int a = 0; a < 6; a++ )
-			Am[a] = cellAmbient( axes[a], P ) * ( replace ? 1.0 - share[a] : 1.0 );
+			Am[a] = cellAmbient( axes[a], P ) * ( ( replace ? 1.0 - share[a] : 1.0 ) * keepA );
 #ifdef PC_LOOK
 		skyThin += pcLook == 1 ? pcDropCube( Am, dW ) : volCubeScatter( Am, dW );
 #else
@@ -300,17 +364,20 @@ void vpLight( vec3 posView, vec3 P, vec3 dW, float z, vec3 N, float w, out vec3 
 // the lit factor at this pixel (linear), in place of cellFxLit
 vec3 vpLit( vec3 posView, vec3 Nview, float a )
 {
-	if ( ( fxLitMode & 8 ) != 0 || ( !cellInterior && !cellHasDir ) )
+	if ( ( fxLitMode & 8 ) != 0 || ( !cellInterior && !cellHasDir && !vpLocal() ) )
 		return vec3( 1.0 );	// self-lit, as cellFxLit
 	float m = ( volPartRed & 2 ) != 0 ? 1.0 : 1.0 - clamp( a, 0.0, 1.0 );
 	vec3 thin, thick;
 	vpLight( posView, cellWorldPos( posView ), cellWorldDir( posView ), dot( fogView.xyz, posView ) + fogView.w,
 		cellWorldDir( Nview ), m, thin, thick );
+#ifndef WW_FX_DECALLIT
+	thin += vpAirCardA * vpLampMs;	// FARWATER1 late item 4: an air card's lamps, the multiple scatter x its opacity
+#endif
 #if defined( WW_CELL_AIRZONE ) && !defined( WW_FX_DECALLIT )
 	if ( azCount > 0 )	// lane AIRZONE1: a volume's particles block at the puff, one read (the alpha takes its density after)
-		return mix( vec3( 1.0 ), azPartLit( cellWorldPos( posView ), m * thin + ( 1.0 - m ) * thick ), lightingInfluence );
+		return fxLawMix( azPartLit( cellWorldPos( posView ), m * thin + ( 1.0 - m ) * thick ), lightingInfluence, false );
 #endif
-	return mix( vec3( 1.0 ), m * thin + ( 1.0 - m ) * thick, lightingInfluence );
+	return fxLawMix( m * thin + ( 1.0 - m ) * thick, lightingInfluence, false );	// MODULES1 M3: was mix( 1, ., influence )
 }
 
 /* gates only: the lit share (no influence) of ONE white light from direction `to` (world, toward the light) on a puff

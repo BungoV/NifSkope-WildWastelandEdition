@@ -146,6 +146,34 @@ bool EsmWorld::load( const QString & esmPath, quint32 worldspaceFormID, QString 
 				}
 			}
 		}
+		/* MODULES1 R6-2: a child worldspace with no water type of its own (Goodneighbor) lies in its parent's sea.
+		 * Only the sea past the baked map asks for this; defaultWaterType() stays the record's own NAM2.
+		 * Red WW_CELL_PARENTWATER_RED: the worldspace's own NAM2 only (the sea ends at the bake's box). */
+		seaType = defWaterType;
+		seaFrom = wsEdid;
+		if ( !seaType && wnam && !wwEnvIsSet( "WW_CELL_PARENTWATER_RED" ) ) {
+			const ESMFile::ESMRecord * cur = &w;
+			quint32 wn = wnam;
+			for ( int hop = 0; hop < 8 && wn && !seaType; hop++ ) {
+				const ESMFile::ESMRecord * pr = esm->findRecord( esm->mapFormID( *cur, wn ) );
+				if ( !pr || !( *pr == "WRLD" ) )
+					break;
+				wn = 0;
+				ESMFile::ESMField pf( *esm, *pr );
+				while ( pf.next() ) {
+					if ( pf == "EDID" )
+						seaFrom = fieldString( pf );
+					else if ( pf == "WNAM" && pf.size() >= 4 )
+						wn = pf.readUInt32();
+					else if ( pf == "NAM2" && pf.size() >= 4 )
+						seaType = esm->mapFormID( *pr, pf.readUInt32() );
+				}
+				cur = pr;
+			}
+		}
+		std::fprintf( stderr, "esm world: %s sea water type %08X (%s%s)\n", qPrintable( wsEdid ), seaType,
+			!seaType ? "none up the parent chain" : seaType == defWaterType ? "its own NAM2" : "the NAM2 of parent ",
+			seaType && seaType != defWaterType ? qPrintable( seaFrom ) : "" );
 		if ( LandLodSpec::fixedWorld( wsFlags ) )
 			std::fprintf( stderr, "esm world: %s has Fixed Dimensions (DATA 0x%02X), centre cell %d,%d%s\n",
 				qPrintable( wsEdid ), wsFlags, wsCentreX, wsCentreY, wsHasCentre ? "" : " (no WCTR: 0,0)" );
@@ -162,7 +190,7 @@ bool EsmWorld::load( const QString & esmPath, quint32 worldspaceFormID, QString 
 			landParent = esm->mapFormID( w, wnam );
 			indexParentLand();
 		}
-		std::fprintf( stderr, "esm world: %s parent %08X use land data %d -> parent land for %d of %d cells%s\n",
+		std::fprintf( stderr, "esm world: %s parent %08X use land data %d -> parent land at %d grid positions, own cells %d%s\n",
 			qPrintable( wsEdid ), wnam, int( pnam & 1 ), int( parentLandGroups.size() ), int( cellIndex.size() ),
 			wnam && ( pnam & 1 ) && !landParent ? " (RED WW_CELL_PARENTLAND_RED: none)" : "" );
 		if ( cellIndex.isEmpty() ) {
@@ -770,10 +798,10 @@ EsmCellPrevis EsmWorld::cellPrevis( quint32 cellForm ) const
 			 * read from Todd's treat) */
 			if ( quint64( f.size() ) >= 8ULL + 4ULL * ( quint64( out.combinedMeshes ) + quint64( words ) ) ) {
 				for ( quint32 k = 0; k < out.combinedMeshes; k++ )
-					(void)f.readUInt32();
+					out.combinedMeshKeys.append( f.readUInt32() );
 				for ( quint32 k = 0; k + 1 < words; k += 2 ) {
 					out.combinedRefIds.append( esm->mapFormID( *cr, f.readUInt32() ) );
-					(void)f.readUInt32();
+					out.combinedRefKeys.append( f.readUInt32() );	// the mesh key: a hash, not a form id
 				}
 			}
 		} else if ( f == "XPRI" ) {
@@ -841,6 +869,7 @@ QVector<EsmRefSource> EsmWorld::refSources( const QVector<quint32> & groups ) co
 			if ( r->type != GRUP && *r == "REFR" && !seen.contains( r->formID ) ) {
 				seen.insert( r->formID );
 				EsmRefSource s;
+				s.form = r->formID;
 				s.owner = esm->getFormIDFile( r->formID );
 				s.src = r->srcFile;
 				s.disabled = ( r->flags & 0x00000800 ) != 0;
@@ -1320,7 +1349,9 @@ void EsmWorld::indexParentLand()
 						const int cx = int( f.readInt32() ), cy = int( f.readInt32() );
 						const QPair<int, int> k( cx, cy );
 						const ESMFile::ESMRecord * cg = r->next ? esm->findRecord( r->next ) : nullptr;
-						if ( cellIndex.contains( k ) && cg && cg->type == GRUP && cg->flags == r->formID )
+						/* Every parent position, not only the child's own cells: the game looks the parent's land up at
+						 * any grid of a use-land child world, CELL record or not (STREAMGN1). */
+						if ( cg && cg->type == GRUP && cg->flags == r->formID )
 							parentLandGroups.insert( k, r->next );
 						break;
 					}

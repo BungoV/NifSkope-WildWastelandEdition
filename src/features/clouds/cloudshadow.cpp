@@ -1,7 +1,11 @@
 #include "features/clouds/cloudshadow.h"
 #include "features/clouds/cloudshadowmath.h"
+#include "features/clouds/cloudfusionlaw.h"	// MODULES1 10b-7: the map mode's law and its constants
+#include "features/clouds/cloudsheetmath.h"	// MODULES1 10c: the sheets of that model, the host half
+#include "features/weather/weatherrecx.h"	// MODULES1 10c: the weather .recx clouds block feeds the law
 #include "features/clouds/cloudmap.h"
 #include "features/clouds/cloudvol.h"
+#include "features/clouds/cloudfly.h"	// SKYLIGHT1 round 3: where the bands sit (the anchor line)
 #include "features/sky/atmomath.h"
 #include "gl/cellunits.h"
 #include "gl/celluniform.h"	// lane CELLUNI2
@@ -12,12 +16,14 @@
 #include "harnesswindow.h"
 #include "wwswitch.h"
 
+#include <QElapsedTimer>
 #include <QHash>
 #include <QSettings>
 
 #include <algorithm>
 #include <atomic>
 #include <cmath>
+#include <cstdint>
 #include <cstdio>
 #include <cstring>
 
@@ -61,6 +67,8 @@ struct CsState
 	quint64 liveGen = 0;
 	int tier = 0;
 	bool pinned = false;
+	bool follow = false;	// MODULES1 10b-1: no stored step, the row follows the clouds' own step
+	int chosen = 0;	// the row's own step (1..4), 0 = none; the step in use is never under the clouds' own
 	QString last;
 	std::atomic<float> gi{ 1.0f };
 };
@@ -68,10 +76,11 @@ struct CsState
 CsState & cs()
 {
 	static CsState s;
-	if ( !s.init || wwSwitchMovedFor( s.liveGen, { "WW_CLOUDSHADOW" } ) ) {
+	if ( !s.init || wwSwitchMovedFor( s.liveGen, { "WW_CLOUDSHADOW", "WW_CLOUDVOL" } ) ) {
 		s.init = true;
 		s.liveGen = wwSwitchGen();
 		s.pinned = false;
+		s.follow = false;
 		const QString e = wwEnvStr( "WW_CLOUDSHADOW" ).trimmed().toLower();
 		if ( !e.isEmpty() ) {
 			bool ok = false;
@@ -84,9 +93,21 @@ CsState & cs()
 			s.tier = 0;	// a harness measures what it pins
 			s.pinned = true;
 		} else {
+			/* MODULES1 round 10 (bungo 11-11: "Cloud shadows always need to be on"): with no saved choice and no pin
+			 * the row starts at the clouds' own step (Volume Clouds Low or Off, the 2D layers: Low, the Cloud Map's
+			 * field; Medium and up: the same step). It was Off: red WW_CLOUDSHADOW_DEFAULT_RED=1. A saved choice stays. */
+			/* MODULES1 10b-1: a stored 0 no longer means Off. The row's lowest choice is "Follows Clouds": stored 0 (an
+			 * Off saved by an older build included) and no stored value both follow the clouds' own step, every frame.
+			 * Off is left only as the pin WW_CLOUDSHADOW=off, a harness scope, or the red (stored 0 = Off again). */
 			s.tier = std::clamp( QSettings().value( QLatin1StringView( kKey ), 0 ).toInt(), 0, 4 );
+			s.follow = s.tier == 0 && wwEnvStr( "WW_CLOUDSHADOW_DEFAULT_RED" ).trimmed() != QLatin1StringView( "1" );
+			s.chosen = s.tier;
 		}
 	}
+	if ( s.follow )
+		s.tier = std::clamp( wwCloudVolTier(), 1, 4 );
+	else if ( !s.pinned && s.chosen > 0 && wwEnvStr( "WW_CLOUDSHADOW_DEFAULT_RED" ).trimmed() != QLatin1StringView( "1" ) )
+		s.tier = std::max( s.chosen, std::clamp( wwCloudVolTier(), 1, 4 ) );	// a chosen step is a floor: at least the clouds' own
 	return s;
 }
 
@@ -99,8 +120,188 @@ bool red( const char * word )
 	return false;
 }
 
+namespace SH = WwCloudSheetMath;
+static_assert( WwCellUnit::CloudSheetBlend == WwCellUnit::CloudSheetBase + SH::kMaxSheets, "the sheets' units are one run" );
+
+// MODULES1 10c: the sheets law's inputs: the weather .recx clouds block (weatherrecx.h) over cloudfusionlaw.h
+struct LawIn
+{
+	float opacity = WwCloudFusionLaw::kOpacity, strength = WwCloudFusionLaw::kStrength;
+	float exponent = WwCloudFusionLaw::kLayerDensity, deck = WwCloudFusionLaw::kDeckUnits;
+	bool file[4] = {};
+};
+
+LawIn lawIn()
+{
+	LawIn l;
+	if ( red( "norecx" ) )
+		return l;
+	const WwWeatherRecx & wx = wwWeatherRecx();
+	if ( wx.shadowOpacity >= 0.0f ) {
+		l.opacity = std::clamp( wx.shadowOpacity, 0.0f, 1.0f );
+		l.file[0] = true;
+	}
+	if ( wx.shadowStrength >= 0.0f ) {
+		l.strength = std::clamp( wx.shadowStrength, 0.0f, 8.0f );
+		l.file[1] = true;
+	}
+	if ( wx.shadowLayerDensity >= 0.0f ) {	// percent: the exponent on a layer's alpha = 100 / percent
+		l.exponent = 100.0f / std::clamp( wx.shadowLayerDensity, 25.0f, 400.0f );
+		l.file[2] = true;
+	}
+	if ( wx.shadowDeck >= 0.0f ) {	// metres -> world units
+		l.deck = std::clamp( wx.shadowDeck, 200.0f, 20000.0f ) * 0.001f / WwAtmoMath::kUnitKm;
+		l.file[3] = true;
+	}
+	return l;
+}
+
+// MODULES1 10c: the sheets of this frame's map rows (cloud_shadowmap.frag csSheet*); n 0 = 10b's band law
+struct SheetSet
+{
+	int n = 0, taps = 1;
+	bool hex = false;
+	float a[SH::kMaxSheets][4] = {}, b[SH::kMaxSheets][4] = {}, c[SH::kMaxSheets][4] = {};
+	QString sig;	//!< a change of it rebuilds the map whole (the casting layers, their textures, taps, hex)
+	QString note;	//!< the status line's part
+};
+
+/*! one sheet a weather cloud layer: the layer's dome mesh is fitted as a flat sheet (cloudsheetmath.h fit), the
+ *  highest shell sits at the deck, the others at their share; the densest layers cast (the step's count). The
+ *  layers' textures are bound here (units CloudSheetBase.., CloudSheetBlend.. during a weather change). The scroll
+ *  and the alphas are this frame's: the rolling rows follow them (as the band law follows the Cloud Map). */
+SheetSet sheetsOf( Scene * scene, Renderer * r, const CsState & s, const LawIn & law, GLint units )
+{
+	SheetSet o;
+	auto none = [&o]( const QString & why ) {
+		o.n = 0;
+		o.sig.clear();
+		o.note = QStringLiteral( " sheets=0(band_law_of_10b:%1)" ).arg( why );
+		return o;
+	};
+	if ( red( "bandsheets" ) )
+		return none( QStringLiteral( "red=bandsheets" ) );
+	if ( units < WwCellUnit::CloudSheetBlend + SH::kMaxSheets )
+		return none( QStringLiteral( "too_few_texture_units" ) );
+	QVector<WwCloudLayerIn> layers;
+	QString key, why;
+	float eye[3] = {};
+	if ( !wwLookdevCloudLayers( scene, layers, key, eye, &why ) )
+		return none( QStringLiteral( "no_layers," ) + why );
+	if ( layers.isEmpty() )
+		return none( QStringLiteral( "no_active_layer" ) );
+	static QString fitKey;
+	static SH::Fit fits[32];
+	static float zmax = 0.0f;
+	static unsigned tick = 0;
+	if ( fitKey != key || ( zmax <= 0.0f && ++tick % 60 == 0 ) ) {	// per weather (and again while no mesh fitted)
+		fitKey = key;
+		zmax = 0.0f;
+		for ( int i = 0; i < 32; i++ ) {
+			WwCloudLayerIn io;
+			io.layer = i;
+			fits[i] = SH::Fit();
+			if ( wwLookdevCloudMesh( scene, io ) && io.pos && io.uv && io.nv > 0 )
+				fits[i] = SH::fit( io.pos, io.uv, io.col, io.nv );
+			if ( fits[i].valid )
+				zmax = std::max( zmax, fits[i].zenithHeight );
+		}
+	}
+	const bool noDensity = red( "nodensity" );
+	const float ex = noDensity ? 1.0f : law.exponent;
+	SH::Candidate cand[32];
+	const WwCloudLayerIn * by[32] = {};
+	int nc = 0;
+	QStringList rej;
+	for ( const WwCloudLayerIn & L : std::as_const( layers ) ) {
+		if ( L.layer < 0 || L.layer > 31 || by[L.layer] )
+			continue;
+		const SH::Fit & f = fits[L.layer];
+		if ( !f.valid ) {
+			rej << QStringLiteral( "L%1:%2" ).arg( L.layer ).arg( QLatin1StringView( SH::rejectName( f.reject ) ) );
+			continue;
+		}
+		by[L.layer] = &L;
+		cand[nc++] = { L.layer, f.capAlpha * SH::layerAlpha( L.alpha, ex ) };
+	}
+	const QString rejNote = rej.isEmpty() ? QString() : QStringLiteral( " rejected=" ) + rej.join( QChar( ',' ) );
+	// the step: the model's own default (Medium) while the row follows the clouds, else the row's step
+	const int step = s.follow ? 2 : std::clamp( s.tier, 1, 4 );
+	SH::Axes ax = SH::preset( step );
+	const bool noTaps = red( "notaps" ), noHex = red( "nohex" ), noScroll = red( "noscroll" );
+	if ( noTaps )
+		ax.taps = 1;
+	if ( noHex )
+		ax.hex = false;
+	int pick[SH::kMaxSheets];
+	const int n = SH::select( cand, nc, ax.layers, pick );
+	if ( n <= 0 )
+		return none( QStringLiteral( "no_layer_fits_a_sheet" ) + rejNote );
+	auto fn = r->fn;
+	const float unitKm = WwAtmoMath::kUnitKm;
+	QStringList parts;
+	GLint minf = 0;
+	o.sig = QStringLiteral( "%1/%2/%3" ).arg( n ).arg( ax.taps ).arg( ax.hex ? 1 : 0 );
+	for ( int i = 0; i < n; i++ ) {
+		const WwCloudLayerIn & L = *by[pick[i]];
+		const SH::Fit & f = fits[L.layer];
+		const float alt = SH::altitude( f.zenithHeight, zmax, law.deck );
+		float off[2];
+		if ( !SH::worldMap( f, alt, o.a[i], off ) )
+			return none( QStringLiteral( "L%1:no_world_map" ).arg( L.layer ) + rejNote );
+		o.b[i][0] = off[0] + ( noScroll ? 0.0f : L.uvOffset[0] );
+		o.b[i][1] = off[1] + ( noScroll ? 0.0f : L.uvOffset[1] );
+		o.b[i][2] = alt * unitKm;
+		o.b[i][3] = std::clamp( f.capAlpha * SH::layerAlpha( L.alpha, ex ), 0.0f, 1.0f );
+		o.c[i][1] = SH::kHexCellsPerTile;
+		fn->glActiveTexture( GLenum( GL_TEXTURE0 + WwCellUnit::CloudSheetBase + i ) );
+		if ( scene->bindTexture( QStringView( L.tex ), true ) <= 0 )
+			return none( QStringLiteral( "L%1:texture_did_not_resolve" ).arg( L.layer ) + rejNote );
+		fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT );
+		fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT );
+		if ( i == 0 )
+			fn->glGetTexParameteriv( GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, &minf );
+		bool blend = false;
+		if ( L.texBlend > 0.0f && !L.tex2.isEmpty() ) {
+			fn->glActiveTexture( GLenum( GL_TEXTURE0 + WwCellUnit::CloudSheetBlend + i ) );
+			if ( scene->bindTexture( QStringView( L.tex2 ), true ) > 0 ) {
+				fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT );
+				fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT );
+				blend = true;
+				o.c[i][0] = std::clamp( L.texBlend, 0.0f, 1.0f );
+			}
+		}
+		o.sig += QChar( '|' ) + QString::number( L.layer ) + QChar( ':' ) + L.tex + QChar( ':' ) + ( blend ? L.tex2 : QString() );
+		parts << QStringLiteral( "L%1@%2km:a=%3" ).arg( L.layer ).arg( double( o.b[i][2] ), 0, 'f', 2 )
+			.arg( double( o.b[i][3] ), 0, 'f', 2 );
+	}
+	o.n = n;
+	o.taps = ax.taps;
+	o.hex = ax.hex;
+	auto src = [&law]( int i ) { return law.file[i] ? QStringLiteral( "file" ) : QStringLiteral( "default" ); };
+	QStringList reds;
+	for ( const char * w : { "notaps", "nohex", "nodensity", "norecx", "noscroll" } )
+		if ( red( w ) )
+			reds << QLatin1StringView( w );
+	o.note = QStringLiteral( " sheets=%1/%2[%3]" ).arg( n ).arg( nc ).arg( parts.join( QChar( ',' ) ) )
+		+ QStringLiteral( " taps=%1 hex=%2 exponent=%3(%4)" ).arg( ax.taps ).arg( ax.hex ? 1 : 0 ).arg( double( ex ), 0, 'f', 3 )
+			.arg( noDensity ? QStringLiteral( "red=nodensity" ) : QStringLiteral( "applied" ) )
+		+ QStringLiteral( " step=%1(%2)" ).arg( QLatin1StringView( SH::presetName( step ) ) )
+			.arg( s.follow ? QStringLiteral( "the_model_default_while_following" ) : QStringLiteral( "row_step" ) )
+		+ QStringLiteral( " penumbra=sun_disc(tan_radius=%1,from=eye_height) parallax=texel_sun_line anchor=world"
+			" above_receiver=map_height_ramp mips=%2" ).arg( double( SH::kTanSunRadius ), 0, 'f', 5 )
+			.arg( minf >= 0x2700 && minf <= 0x2703 ? QStringLiteral( "yes" ) : QStringLiteral( "no" ) )
+		+ QStringLiteral( " values=opacity:%1(%2),strength:%3(%4)" ).arg( double( law.opacity ), 0, 'f', 2 ).arg( src( 0 ) )
+			.arg( double( law.strength ), 0, 'f', 2 ).arg( src( 1 ) )
+		+ QStringLiteral( ",layerDensity_exponent:%1(%2),deck_km:%3(%4)" ).arg( double( law.exponent ), 0, 'f', 3 ).arg( src( 2 ) )
+			.arg( double( law.deck * unitKm ), 0, 'f', 3 ).arg( src( 3 ) )
+		+ ( reds.isEmpty() ? QString() : QStringLiteral( " reds=" ) + reds.join( QChar( ',' ) ) ) + rejNote;
+	return o;
+}
+
 struct CsGpu
 {
+	QString sheetSig;	// MODULES1 10c: the sheets the front map was built with
 	GLuint fbo = 0, tex = 0;
 	// lane PERFFIX3: the back map, built size/16 rows a frame under a moved fit, then swapped in (cloudshadowslice.h)
 	GLuint fbo2 = 0, tex2 = 0;
@@ -133,6 +334,11 @@ struct CsGpu
 	int fenceN = 0;
 	double fenceZKm = 0.0;
 	quint64 frame = 0;
+	// lane SEAMCLOUD1: the far value's readback (25 texels spread over the map's inner square), -1 = none yet
+	GLuint pboFar = 0;
+	GLsync fenceFar = nullptr;
+	quint64 fenceFarBuild = 0;
+	float farMean = -1.0f;
 };
 
 QHash<Renderer *, CsGpu> & gpus()
@@ -299,6 +505,63 @@ void giIssue( NifSkopeOpenGLContext::GLFunctions * fn, CsGpu & g, const double e
 	g.fenceZKm = eyeW[2] * double( WwAtmoMath::kUnitKm );
 }
 
+/* lane SEAMCLOUD1: the far value from the map itself. Past the map the receivers took the bands' statistical law
+ * (bandFarT, or the sheets law on the bands' mean cover), not the law the map was built with, so the same sky read one
+ * value inside the map and another past it. Now: the mean of receiverT over a 5 x 5 grid spread over the map's inner
+ * 80 %, at the ground (0 km), read back like the GI's. Red WW_CLOUDSHADOW_RED=farbands: the old far value. */
+constexpr int kFarGrid = 5;
+
+void farRead( NifSkopeOpenGLContext::GLFunctions * fn, CsGpu & g )
+{
+	if ( !g.fenceFar )
+		return;
+	const GLenum w = fn->glClientWaitSync( g.fenceFar, 0, 0 );
+	if ( w != GL_ALREADY_SIGNALED && w != GL_CONDITION_SATISFIED )
+		return;
+	fn->glDeleteSync( g.fenceFar );
+	g.fenceFar = nullptr;
+	if ( g.fenceFarBuild != g.builds || !g.valid )
+		return;
+	fn->glBindBuffer( GL_PIXEL_PACK_BUFFER, g.pboFar );
+	const int nT = kFarGrid * kFarGrid;
+	const auto * px = static_cast<const float *>( fn->glMapBufferRange( GL_PIXEL_PACK_BUFFER, 0,
+		GLsizeiptr( nT * 4 * sizeof( float ) ), GL_MAP_READ_BIT ) );
+	if ( px ) {
+		double sum = 0.0;
+		for ( int i = 0; i < nT; i++ )
+			sum += M::receiverT( px + i * 4, 0.0 );
+		fn->glUnmapBuffer( GL_PIXEL_PACK_BUFFER );
+		g.farMean = float( sum / nT );
+	}
+	fn->glBindBuffer( GL_PIXEL_PACK_BUFFER, 0 );
+}
+
+void farIssue( NifSkopeOpenGLContext::GLFunctions * fn, CsGpu & g )
+{
+	const int n = g.size;
+	if ( n < kFarGrid )
+		return;
+	if ( !g.pboFar ) {
+		fn->glGenBuffers( 1, &g.pboFar );
+		fn->glBindBuffer( GL_PIXEL_PACK_BUFFER, g.pboFar );
+		fn->glBufferData( GL_PIXEL_PACK_BUFFER, GLsizeiptr( kFarGrid * kFarGrid * 4 * sizeof( float ) ), nullptr, GL_STREAM_READ );
+	}
+	fn->glBindBuffer( GL_PIXEL_PACK_BUFFER, g.pboFar );
+	fn->glBindFramebuffer( GL_READ_FRAMEBUFFER, g.fbo );
+	fn->glReadBuffer( GL_COLOR_ATTACHMENT0 );
+	fn->glPixelStorei( GL_PACK_ALIGNMENT, 4 );
+	for ( int j = 0; j < kFarGrid; j++ )
+		for ( int i = 0; i < kFarGrid; i++ ) {
+			const int x = std::clamp( int( ( 0.1 + 0.8 * ( i + 0.5 ) / kFarGrid ) * n ), 0, n - 1 );
+			const int y = std::clamp( int( ( 0.1 + 0.8 * ( j + 0.5 ) / kFarGrid ) * n ), 0, n - 1 );
+			fn->glReadPixels( x, y, 1, 1, GL_RGBA, GL_FLOAT,
+				reinterpret_cast<void *>( std::uintptr_t( ( j * kFarGrid + i ) * 4 * sizeof( float ) ) ) );
+		}
+	fn->glBindBuffer( GL_PIXEL_PACK_BUFFER, 0 );
+	g.fenceFar = fn->glFenceSync( GL_SYNC_GPU_COMMANDS_COMPLETE, 0 );
+	g.fenceFarBuild = g.builds;
+}
+
 void status( CsState & s, const QString & line )
 {
 	if ( line == s.last )
@@ -321,6 +584,14 @@ void wwCloudShadowSetTier( int tier )
 		return;
 	s.tier = std::clamp( tier, 0, 4 );
 	QSettings().setValue( QLatin1StringView( kKey ), s.tier );
+	s.follow = s.tier == 0 && wwEnvStr( "WW_CLOUDSHADOW_DEFAULT_RED" ).trimmed() != QLatin1StringView( "1" );
+	s.chosen = s.tier;
+}
+
+int wwCloudShadowChoice()
+{
+	const CsState & s = cs();
+	return s.pinned ? s.tier : s.follow ? 0 : s.chosen;
 }
 
 bool wwCloudShadowPinned()
@@ -359,11 +630,47 @@ bool wwCloudShadowPending()
 	return false;
 }
 
+namespace
+{
+/* lane EMPTY240 R7-5: build 80's first paint spent 135.4 ms CPU in the cloud-shadow part (and 466.4 ms GPU in the sun
+ * cascades zone round it). A pass that takes over 20 ms names its parts (at most 8 lines): the cloud map, the
+ * target (state reads and the map's FBO), the program (a first link), the inputs (density, uniforms, sheets) and
+ * the draws (the rest). A line only; no behaviour changes. */
+struct CsSlowParts
+{
+	QElapsedTimer clock;
+	qint64 at[6] = { -1, -1, -1, -1, -1, -1 };	// EMPTY240 R10-5: + the draw, + the gi/far issues
+	CsSlowParts() { clock.start(); }
+	void mark( int i ) { at[i] = clock.nsecsElapsed(); }
+	~CsSlowParts()
+	{
+		static int said = 0;
+		const qint64 end = clock.nsecsElapsed();
+		if ( said >= 8 || end < 20000000 )
+			return;
+		said++;
+		double part[7];
+		qint64 prev = 0;
+		for ( int i = 0; i < 6; i++ ) {
+			const qint64 t = at[i] < 0 ? prev : at[i];
+			part[i] = double( t - prev ) * 1e-6;
+			prev = t;
+		}
+		part[6] = double( end - prev ) * 1e-6;
+		std::fprintf( stderr, "cloud shadow slow: %.1f ms CPU = map %.1f + target %.1f + program %.1f + inputs %.1f + "
+			"draw %.1f + gi/far issue %.1f + after (restore, law and status lines) %.1f (R7-5, R10-5: the parts of a pass "
+			"over 20 ms; a part not reached reads 0)\n", double( end ) * 1e-6,
+			part[0], part[1], part[2], part[3], part[4], part[5], part[6] );
+	}
+};
+}	// namespace
+
 void wwCloudShadowPass( Scene * scene )
 {
 	CsState & s = cs();
 	if ( !scene || !scene->renderer || scene->selecting )
 		return;
+	CsSlowParts slow;	// R7-5
 	Renderer * r = scene->renderer;
 	g_last = r;
 	CsGpu & g = gpus()[r];
@@ -385,6 +692,7 @@ void wwCloudShadowPass( Scene * scene )
 	if ( disc[2] <= 0.0f )
 		return off( QStringLiteral( "refused(the light is under the horizon)" ) );
 	const WwCloudMap & m = wwCloudMapUpdate( scene );
+	slow.mark( 0 );
 	if ( !m.valid )
 		return off( QStringLiteral( "refused(needs the Cloud Map row)" ) );
 	auto fn = r->fn;
@@ -419,6 +727,7 @@ void wwCloudShadowPass( Scene * scene )
 	GLboolean depthMask = GL_TRUE, cmask[4] = { GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE };
 	fn->glGetBooleanv( GL_DEPTH_WRITEMASK, &depthMask );
 	fn->glGetBooleanv( GL_COLOR_WRITEMASK, cmask );
+	bool sheetBound = false;	// MODULES1 10c: the sheets' units were touched
 	auto restore = [&]() {
 		fn->glBindFramebuffer( GL_DRAW_FRAMEBUFFER, GLuint( prevDraw ) );
 		fn->glBindFramebuffer( GL_READ_FRAMEBUFFER, GLuint( prevRead ) );
@@ -429,6 +738,11 @@ void wwCloudShadowPass( Scene * scene )
 			fn->glBindTexture( GL_TEXTURE_2D, 0 );
 			fn->glBindTexture( GL_TEXTURE_3D, 0 );
 		}
+		if ( sheetBound )
+			for ( int u = WwCellUnit::CloudSheetBase; u < WwCellUnit::CloudSheetBlend + SH::kMaxSheets; u++ ) {
+				fn->glActiveTexture( GLenum( GL_TEXTURE0 + u ) );
+				fn->glBindTexture( GL_TEXTURE_2D, 0 );
+			}
 		fn->glActiveTexture( GLenum( prevActive ) );
 		( wasDepth ? fn->glEnable( GL_DEPTH_TEST ) : fn->glDisable( GL_DEPTH_TEST ) );
 		( wasBlend ? fn->glEnable( GL_BLEND ) : fn->glDisable( GL_BLEND ) );
@@ -441,6 +755,7 @@ void wwCloudShadowPass( Scene * scene )
 	fn->glGetIntegerv( GL_TEXTURE_BINDING_2D, &prevTex );
 	const bool fboOk = ensure( fn, g, pr.size );
 	fn->glBindTexture( GL_TEXTURE_2D, GLuint( prevTex ) );
+	slow.mark( 1 );
 	if ( !fboOk ) {
 		restore();
 		return off( QStringLiteral( "refused(the map's target is incomplete)" ) );
@@ -450,26 +765,45 @@ void wwCloudShadowPass( Scene * scene )
 	timeRead( fn, g, 0 );
 	timeRead( fn, g, 1 );
 	giRead( fn, g, s );
+	farRead( fn, g );
 
 	// lane CLOUD5: Cloud Variety on, the twin over the variety density (wwCloudVolBindDensity sets its uniforms)
 	const bool variety = wwCloudVolVarietyOn() && m.variety;
 	NifSkopeOpenGLContext::Program * p = r->useProgram( variety ? "cloud_shadowmap_v.prog" : "cloud_shadowmap.prog" );
+	slow.mark( 2 );
 	if ( !p ) {
 		restore();
 		return off( variety ? QStringLiteral( "refused(cloud_shadowmap_v.prog did not link)" )
 							: QStringLiteral( "refused(cloud_shadowmap.prog did not link)" ) );
 	}
 	// the volume's density at Medium and up (it needs the Volume Clouds row at Medium or up), else the map's coverage
-	int mode = 2;
+	/* MODULES1 10b-7: the map mode's law is the Fusion Shaders sheets law (mode 3, cloudfusionlaw.h); the old Beer
+	 * law of the map mode (mode 2) is the red WW_CLOUDSHADOW_RED=beer. The volume mode has no counterpart there. */
+	const bool beerRed = red( "beer" );
+	int mode = beerRed ? 2 : 3;
 	if ( pr.steps > 0 && wwCloudVolBindDensity( scene, WwCellUnit::CloudBuildShape ) )
 		mode = 1;
 	else
 		mapUniforms( r, p, m );
+	/* MODULES1 10c: the map mode's sheets (one a cloud layer, the rest of the Fusion Shaders model); none = 10b's
+	 * band law. The volume mode has no counterpart in that model and is left as it is. */
+	const LawIn law = lawIn();
+	SheetSet sheets;
+	if ( mode == 3 ) {
+		sheetBound = true;
+		sheets = sheetsOf( scene, r, s, law, units );
+	} else {
+		sheets.note = mode == 1
+			? QStringLiteral( " sheets=0(volume_mode: the volume tiers have no Fusion Shaders counterpart, left as they are)" )
+			: QStringLiteral( " sheets=0(red=beer)" );
+	}
+	slow.mark( 3 );
 	/* lane PERFFIX3: a hard change rebuilds the front whole (as before); a moved fit or sun builds the back size/16
 	 * rows a frame under the new fit while the receivers keep the front, then swaps (cloudshadowslice.h). Red
 	 * WW_CLOUDSHADOW_RED=fullmove: a move rebuilds the front whole at once (CLOUD3) */
 	namespace SL = WwCloudShadowSlice;
-	const bool hard = every || !g.valid || g.mode != mode || g.redVertical != redV || g.variety != variety;
+	const bool hard = every || !g.valid || g.mode != mode || g.redVertical != redV || g.variety != variety
+		|| g.sheetSig != sheets.sig;
 	const bool moved = f.a0 != g.fit.a0 || f.b0 != g.fit.b0 || f.extentKm != g.fit.extentKm || M::angleDeg( b.s, g.basis.s ) > 0.25;
 	if ( !g.valid )
 		g.sl.frontValid = false;
@@ -482,6 +816,7 @@ void wwCloudShadowPass( Scene * scene )
 		g.mode = mode;
 		g.redVertical = redV;
 		g.variety = variety;
+		g.sheetSig = sheets.sig;
 		M::lightFromWorld( b, f, unitKm, g.lightFromWorld );
 	}
 	if ( st.startBack ) {
@@ -511,6 +846,29 @@ void wwCloudShadowPass( Scene * scene )
 	p->uni4f( "csFit", FloatVector4( float( bf.a0 ), float( bf.b0 ), float( bf.extentKm ), float( bf.texelKm() ) ) );
 	p->uni2f( "csSize", float( n ), float( n ) );
 	p->uni1i( "csMode", mode );
+	p->uni3f( "csFs", law.opacity, law.strength, WwCloudFusionLaw::kSheetThinKm );
+	{	// MODULES1 10c: the sheets (csSheetN 0: the band law, or another mode); the samplers always get their own units
+		int su[SH::kMaxSheets], su2[SH::kMaxSheets];
+		FloatVector4 sa[SH::kMaxSheets], sbv[SH::kMaxSheets], sc[SH::kMaxSheets];
+		for ( int i = 0; i < SH::kMaxSheets; i++ ) {
+			su[i] = WwCellUnit::CloudSheetBase + i;
+			su2[i] = WwCellUnit::CloudSheetBlend + i;
+			sa[i] = FloatVector4( sheets.a[i][0], sheets.a[i][1], sheets.a[i][2], sheets.a[i][3] );
+			sbv[i] = FloatVector4( sheets.b[i][0], sheets.b[i][1], sheets.b[i][2], sheets.b[i][3] );
+			sc[i] = FloatVector4( sheets.c[i][0], sheets.c[i][1], sheets.c[i][2], sheets.c[i][3] );
+		}
+		p->uni1iv( "csSheetTex", su, SH::kMaxSheets );
+		p->uni1iv( "csSheetTex2", su2, SH::kMaxSheets );
+		p->uni4fv( "csSheetA", sa, SH::kMaxSheets );
+		p->uni4fv( "csSheetB", sbv, SH::kMaxSheets );
+		p->uni4fv( "csSheetC", sc, SH::kMaxSheets );
+		p->uni1i( "csSheetN", mode == 3 ? sheets.n : 0 );
+		/* lane SEAMCLOUD1: the penumbra's receiver height is the world's datum (0 km, the bands' heights' zero), not the
+		 * eye's: the sun disc's blur on the ground no longer changes as the eye climbs. Red eyepenumbra: the eye's. */
+		p->uni4f( "csSheetP", FloatVector4( float( sheets.taps ), sheets.hex ? 1.0f : 0.0f, SH::kTanSunRadius,
+			red( "eyepenumbra" ) ? float( eyeKm[2] ) : 0.0f ) );
+		p->uni1f( "csUnitKm", float( unitKm ) );
+	}
 	p->uni1i( "csSteps", std::max( pr.steps, 1 ) );
 	const int slot = g.qcur;
 	const bool timing = !g.pending[slot];
@@ -524,6 +882,7 @@ void wwCloudShadowPass( Scene * scene )
 		g.qcur = 1 - g.qcur;
 	}
 	r->stopProgram();
+	slow.mark( 4 );	// EMPTY240 R10-5
 	if ( st.swap ) {	// lane PERFFIX3: the back is whole: the receivers take it (and its fit) from now
 		std::swap( g.fbo, g.fbo2 );
 		std::swap( g.tex, g.tex2 );
@@ -539,6 +898,9 @@ void wwCloudShadowPass( Scene * scene )
 	const M::Basis & cb = g.basis;
 	if ( !red( "nogi" ) && !g.fence && g.frame % kGiEvery == 0 )
 		giIssue( fn, g, eyeW );
+	if ( !g.fenceFar && ( g.frame % kGiEvery == kGiEvery / 2 || g.farMean < 0.0f ) )
+		farIssue( fn, g );	// lane SEAMCLOUD1
+	slow.mark( 5 );	// EMPTY240 R10-5
 	restore();
 
 	// the far value: the bands' statistical transmittance at this sun; the edge fade; Ultra's air taps
@@ -547,15 +909,65 @@ void wwCloudShadowPass( Scene * scene )
 		std::max( m.band[1].topZ - m.band[1].baseZ, 0.0f ) * WwAtmoMath::kUnitKm };
 	const float dens[2] = { m.band[0].layers > 0 ? m.band[0].density : 0.0f, m.band[1].layers > 0 ? m.band[1].density : 0.0f };
 	g.far[0] = float( M::bandFarT( cov, thick, dens, cb.s[2], kSigma ) );
+	if ( mode == 3 ) {	// past the map: the same sheets law on the bands' mean cover
+		float kept = 1.0f;
+		for ( int i = 0; i < 2; i++ )
+			if ( dens[i] > 0.0f && thick[i] > 0.0f )
+				kept *= 1.0f - std::clamp( cov[i], 0.0f, 1.0f );
+		g.far[0] = WwCloudFusionLaw::mask( kept, law.opacity, law.strength );
+	}
+	const float farBands = g.far[0];
+	const bool farOld = red( "farbands" ) || g.farMean < 0.0f;
+	if ( !farOld )
+		g.far[0] = g.farMean;	// lane SEAMCLOUD1: the map's own law past the map
 	g.far[1] = 0.1f;
 	g.far[2] = pr.tail ? 1.0f : 0.0f;
-	status( s, QStringLiteral( "on tier=%1 mode=%2 size=%3 side_km=%4 texel_m=%5 sun=%6,%7,%8 far_t=%9 gi=%10 mem_mb=%11%12%13" )
+	{	// lane SEAMCLOUD1: one line on change (0.01 steps)
+		const QString l = QStringLiteral( "law: penumbra_ref=%1 far=%2 far_t=%3 bands_far_t=%4 [WW_CLOUDSHADOW_RED=eyepenumbra,farbands]" )
+			.arg( red( "eyepenumbra" ) ? QStringLiteral( "eye(red,%1km)" ).arg( eyeKm[2], 0, 'f', 2 ) : QStringLiteral( "world(0km)" ) )
+			.arg( farOld ? ( red( "farbands" ) ? QStringLiteral( "bands(red)" ) : QStringLiteral( "bands(no_readback_yet)" ) )
+				: QStringLiteral( "map_mean(%1x%1 texels,inner_80pct,ground)" ).arg( kFarGrid ) )
+			.arg( double( g.far[0] ), 0, 'f', 2 ).arg( double( farBands ), 0, 'f', 2 );
+		static QString saidL;
+		if ( l != saidL ) {
+			saidL = l;
+			std::fprintf( stderr, "cloudshadow %s\n", qPrintable( l ) );
+		}
+	}
+	status( s, QStringLiteral( "on tier=%1 mode=%2 size=%3 side_km=%4 texel_m=%5 sun=%6,%7,%8 far_t=%9 gi=%10 mem_mb=%11%12%13 field=%14 choice=%15 law=%16 light=key(sun_by_day,moon_by_night) receivers=terrain,objects,far_lod,water,effects,air" )
 		.arg( QLatin1StringView( tierName( s.tier ) ) ).arg( mode == 1 ? QStringLiteral( "volume" ) : QStringLiteral( "map" ) )
 		.arg( n ).arg( g.fit.extentKm, 0, 'f', 1 ).arg( g.fit.texelKm() * 1000.0, 0, 'f', 1 )
 		.arg( cb.s[0], 0, 'f', 3 ).arg( cb.s[1], 0, 'f', 3 ).arg( cb.s[2], 0, 'f', 3 ).arg( double( g.far[0] ), 0, 'f', 3 )
 		.arg( double( s.gi.load() ), 0, 'f', 4 ).arg( double( n ) * n * 16.0 / ( 1024.0 * 1024.0 ), 0, 'f', 1 )
 		.arg( redV ? QStringLiteral( " red=vertical" ) : QString() )
-		.arg( red( "fullmove" ) ? QStringLiteral( " red=fullmove" ) : QStringLiteral( " sliced=%1" ).arg( g.swaps ) ) );
+		.arg( red( "fullmove" ) ? QStringLiteral( " red=fullmove" ) : QStringLiteral( " sliced=%1" ).arg( g.swaps ) )
+		// MODULES1 round 10: the field the map was built from (the 2D layers and their shadows are one field)
+		.arg( mode == 1 ? QStringLiteral( "cloud_density" ) : QStringLiteral( "cloud_map_2d_layers" ) )
+		// MODULES1 10b-1 / 10b-7: who chose the step, and which law darkened the map
+		.arg( s.pinned ? QStringLiteral( "pinned" ) : s.follow ? QStringLiteral( "follows(clouds_step)" ) : QStringLiteral( "explicit(row_step=%1,never_under_clouds_step)" ).arg( s.chosen ) )
+		.arg( mode == 3 ? QStringLiteral( "fusion(sheets,opacity=%1,strength=%2)" )
+				.arg( double( law.opacity ), 0, 'f', 2 ).arg( double( law.strength ), 0, 'f', 2 )
+			: mode == 2 ? QStringLiteral( "beer(red)" ) : QStringLiteral( "beer(volume_march,sigma=%1/km)" ).arg( double( kSigma ), 0, 'f', 0 ) ) + sheets.note );
+	{	/* SKYLIGHT1 round 3 (bungo: a dark area around him, shadows vanish as he nears them): where the field the shadow
+		 * is cast from lies on the world, on every change of 0.1 km. The volume mode reads the cloud map (its square laid
+		 * on the world, cloudmap.cpp laid=world), the sheets the same layers by the same fit; the bands' heights are
+		 * metres above sea level unless heights=eye. */
+		const double uk = double( WwAtmoMath::kUnitKm );
+		const QString a = QStringLiteral( "anchor: field=%1 cloud map square %2,%3 km +-%4 km heights=%5 low base %6 km cover %7 "
+			"density %8 | shadow map %9 km around the eye %10,%11 km (outside: far_t %12)" )
+			.arg( mode == 1 ? QStringLiteral( "cloud_density(map laid on the world)" ) : mode == 3 ? QStringLiteral( "sheets(world fit)" )
+				: QStringLiteral( "map(red beer)" ) )
+			.arg( double( m.centerX ) * uk, 0, 'f', 1 ).arg( double( m.centerY ) * uk, 0, 'f', 1 ).arg( double( m.halfExtent ) * uk, 0, 'f', 0 )
+			.arg( wwCloudFlyWorldHeights() ? QStringLiteral( "world" ) : QStringLiteral( "eye" ) )
+			.arg( double( m.band[0].baseZ ) * uk, 0, 'f', 2 ).arg( double( m.band[0].coverage ), 0, 'f', 3 )
+			.arg( double( m.band[0].density ), 0, 'f', 2 ).arg( g.fit.extentKm, 0, 'f', 1 )
+			.arg( eyeKm[0], 0, 'f', 1 ).arg( eyeKm[1], 0, 'f', 1 ).arg( double( g.far[0] ), 0, 'f', 3 );
+		static QString saidA;
+		if ( a != saidA ) {
+			saidA = a;
+			std::fprintf( stderr, "cloudshadow %s\n", qPrintable( a ) );
+		}
+	}
 }
 
 void wwCloudShadowUniforms( Scene * scene, NifSkopeOpenGLContext::Program * prog, bool volume, float airAmb )

@@ -791,20 +791,19 @@ void shadowsLeg( NifSkope * skope, WwScState & st )
 void rowsLeg( NifSkope * skope, WwScState & st )
 {
 	QWidget * w = skope->findChild<QWidget *>( QStringLiteral( "SceneWindow" ) );
-	auto * tree = w ? w->findChild<QTreeWidget *>( QStringLiteral( "SceneRows" ) ) : nullptr;
+	auto * tree = w ? w->findChild<QWidget *>( QStringLiteral( "SceneRows" ) ) : nullptr;	// R6-11: a scroll area of rows
 	check( st, QStringLiteral( "(floor) the Scene window's rows exist (rows leg)" ), tree != nullptr );
 	if ( !tree )
 		return;
 	int rows = 0;
 	QStringList dead;
-	for ( int i = 0; i < tree->topLevelItemCount(); i++ ) {
-		QTreeWidgetItem * it = tree->topLevelItem( i );
-		QWidget * cw = tree->itemWidget( it, 1 );
+	for ( QLabel * it : tree->findChildren<QLabel *>( QStringLiteral( "sceneRowName" ) ) ) {
+		QWidget * cw = it->buddy();
 		if ( !cw )
-			continue;	// a heading
+			continue;
 		rows++;
-		if ( cw->objectName().isEmpty() || it->flags() == Qt::NoItemFlags )
-			dead << it->text( 0 );
+		if ( cw->objectName().isEmpty() || cw->property( "wwSceneRowDead" ).toBool() )
+			dead << it->text();
 	}
 	say( st, QStringLiteral( "  %1 rows; placeholders (no name or never enabled): %2" ).arg( rows )
 		.arg( dead.isEmpty() ? QStringLiteral( "none" ) : dead.join( QLatin1String( ", " ) ) ) );

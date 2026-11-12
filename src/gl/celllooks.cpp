@@ -35,7 +35,7 @@ const LookRow kRows[] = {
 	{ "Actors outdoors", "WW/CellActorsOutdoors2", true, "WW/CellActorsOutdoors" },
 	{ "Weapon mod parts", "WW/CellWeaponParts2", true, "WW/CellWeaponParts" },
 	{ "World animation", "WW/CellWorldAnim2", true, "WW/CellWorldAnim" },
-	{ "Animated objects", "WW/CellAnimObjects" },
+	{ "Animated objects", "WW/CellAnimObjects2", true, "WW/CellAnimObjects" },	// MODULES1 item 19 + PARTFX1: ships on (reds WW_CELL_ANIMOBJ=0, WW_DEFAULTS1_RED=1)
 	{ "Wide exposure range", "WW/CellExposureWide" },
 	{ "Probe sharing", "WW/CellGiShare" },
 	{ "Decal distance fade", "WW/CellDecalFade2", true, "WW/CellDecalFade" },	// DEFAULTS1
@@ -60,7 +60,7 @@ const LookRow kRows[] = {
 	{ "Light patterns", "WW/CellLightPatterns2", true, "WW/CellLightPatterns" },	// DEFAULTS1
 	{ "Mesh lights (.nifx)", "WW/CellNifxLights" },
 	{ "Bindless draws", "WW/CellBindlessDraws", true },	// BINDLESSPERF1: faster on c3 + Memory Den; new key so an old OFF does not stick
-	{ "Weather .recx (sky, clouds, night)", "WW/WeatherRecx" },
+	{ "Weather .recx (every condition)", "WW/WeatherRecx2", true, "WW/WeatherRecx" },	// WEATHERRECX1: the .recx owns the weather (bungo 11-06); new key so the old shipped OFF does not stick
 	{ "Ground fog from weather", "WW/CellAirGroundDerived2", true },	// FOGHEIGHT2: on by default (gate tests/features/air/fogheight2); new key so the old shipped OFF does not stick
 	{ "Water depth colour", "WW/CellWaterDepth" },
 	{ "Water caustics", "WW/CellWaterCaustics" },
@@ -88,6 +88,7 @@ const LookRow kRows[] = {
 	{ "Variable rate shading", "WW/CellVrs", true },	// lane PERFFIX4 row; PERFHUNT2 show 11-03: ships on (Concord -1.9 ms GPU, stills within noise); red WW_CELL_VRS_RED=1x1
 	{ "Object distance fade", "WW/CellObjectFade" },	// lane OBJFADE1: ships off until bungo sees it
 	{ "Rain wetness", "WW/CellRainWet" },	// lane FO76WEATHER1: ships off until bungo sees it
+	{ "Endless sea", "WW/CellEndlessSea", true },	// lane FARSEA1: ships on (bungo 11-09); red WW_ENDLESS_SEA_RED=off
 };
 static_assert( sizeof( kRows ) / sizeof( kRows[0] ) == size_t( WwLook::Count ), "a row per look" );
 
@@ -359,6 +360,10 @@ QByteArray pinOf( WwLook l )
 		WW_SWITCH_STATIC( QByteArray, p, wwEnv( "WW_CELL_RAINWET" ).trimmed() );
 		return p;
 	}
+	case WwLook::EndlessSea: {
+		WW_SWITCH_STATIC( QByteArray, p, wwEnv( "WW_ENDLESS_SEA" ).trimmed() );
+		return p;
+	}
 	default:
 		return QByteArray();
 	}
@@ -436,6 +441,7 @@ const char * wwLookPinName( WwLook l )
 	case WwLook::Vrs: return "WW_CELL_VRS";
 	case WwLook::ObjectFade: return "WW_CELL_OBJFADE";
 	case WwLook::RainWet: return "WW_CELL_RAINWET";
+	case WwLook::EndlessSea: return "WW_ENDLESS_SEA";
 	default: return "";
 	}
 }
@@ -561,6 +567,7 @@ WwGroup wwLookGroup( WwLook l )
 		return WwGroup::Sky;
 	case WwLook::WaterDepth: case WwLook::WaterCaustics: case WwLook::WaterSoftEdge: case WwLook::ShoreFoam:
 	case WwLook::WaterSwell: case WwLook::WaterRefl: case WwLook::WaterGlint: case WwLook::WaterOcean:
+	case WwLook::EndlessSea:
 		return WwGroup::Water;
 	case WwLook::DecalFade: case WwLook::DecalParallax:
 		return WwGroup::Decals;

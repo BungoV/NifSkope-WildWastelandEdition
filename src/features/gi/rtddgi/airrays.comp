@@ -31,7 +31,8 @@ layout( std430, set = 1, binding = 2 ) readonly buffer AAccPrev { vec4 accPrev[]
 layout( std430, set = 1, binding = 3 ) buffer AOut { vec2 outRatio[]; };            // the ratio, its frames (0: none)
 
 // MIRROR restir.comp rsPrim / rsTriTest / rsBlocked (the TRUE triangle; the BLAS is grown; skill ww-bake-gpu-rays)
-uint arPrim( uint g, uint i ) { return i + ( g == 1u ? uint( P.counts.w ) : 0u ); }
+// AIRPERF1 r6: c = the instance's custom index, a BLAS part's first row (MIRROR rttracesetrule.h blasRow)
+uint arPrim( uint c, uint g, uint i ) { return c + i + ( g == 1u ? uint( P.counts.w ) : 0u ); }
 
 bool arTriTest( uint pr, vec3 o, vec3 d, out float t, out float u, out float v )
 {
@@ -69,7 +70,7 @@ bool arBlocked( vec3 o, vec3 d, float tmax )
 	while ( rayQueryProceedEXT( q ) ) {
 		if ( rayQueryGetIntersectionTypeEXT( q, false ) != gl_RayQueryCandidateIntersectionTriangleEXT )
 			continue;
-		const uint pr = arPrim( rayQueryGetIntersectionGeometryIndexEXT( q, false ), rayQueryGetIntersectionPrimitiveIndexEXT( q, false ) );
+		const uint pr = arPrim( uint( rayQueryGetIntersectionInstanceCustomIndexEXT( q, false ) ), rayQueryGetIntersectionGeometryIndexEXT( q, false ), rayQueryGetIntersectionPrimitiveIndexEXT( q, false ) );
 		float t, u, v;
 		if ( arTriTest( pr, o, d, t, u, v ) && t > DDGI_TMIN && t <= tmax && ( noHole || !ddgiHole( remap[pr], u, v ) ) )
 			rayQueryConfirmIntersectionEXT( q );

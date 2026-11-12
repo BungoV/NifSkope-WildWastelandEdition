@@ -1,4 +1,5 @@
 #!/bin/bash
+export WW_CELL_STREAM="${WW_CELL_STREAM:-0}"	# AIRPERF1 r4: this harness opens a fixed block (streaming is the default now)
 # lane AODECAL1 (2026-10-04): the baked AO decals in a real cell (Concord, the street). The probe bake is READ
 # (WW_CELL_GI_FROM, cell_gi.sh's own concord bake), so every run below differs only in the decal keys.
 #   census   which placed statics got a decal and why the rest did not (WW_CELL_AODECAL_CENSUS)

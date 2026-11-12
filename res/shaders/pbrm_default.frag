@@ -11,6 +11,7 @@
 #define WW_CELL_GI_MARCH_ONCE 1	// lane PBRMCSMHEADROOM: the march (PRT red + march red) once a fragment, as fo4_default
 #endif
 #define CELL_GI_ONEREAD 1	// DDGIREADPERF1: one volume read site (cellGiFirst in main, cell_lights.glsl)
+#define CELL_RESTIR_MISS_PIXEL 1	// MODULES1 R7 item 2: a surface off the traced depth takes the pixel's shadow ratio (cellShadowF)
 #include "cell_lights.glsl"
 #include "cell_ao.glsl"
 #include "cell_ssr.glsl"
@@ -47,6 +48,9 @@ uniform samplerCube CubeMap;
 // mirror the reader's resolved values (src/io/pbrmfile.h).
 uniform vec3 pbrBaseColor;
 uniform float pbrOpacity;
+#ifdef WW_CELLLIGHTS
+flat in vec2 farLadder;	// lane LODLIVE1: the LOD coloration's band (fo4_default.vert)
+#endif
 uniform float pbrRoughness;
 uniform float pbrMetallic;
 uniform float pbrAo;
@@ -132,6 +136,8 @@ in vec2 texCoord;
 flat in vec4 A;
 in vec4 C;
 in float rawVertexAlpha;	// the vertex color's own alpha (fo4_default.vert)
+in float wwFarSkyVis;	// MODULES1 10c: a far draw's baked sky factor (fo4_default.vert), 1 elsewhere
+in float wwFarAo;	// MODULES1 10c: a far draw's baked AO (fo4_default.vert farVcAo), 1 elsewhere
 flat in vec4 D;
 
 in mat3 btnMatrix;
@@ -579,8 +585,13 @@ void main()
 
 	// --- ambient + environment ---
 	// AO belongs on ambient only: applying it to a direct lobe double-darkens contact shadows.
+	s.ao *= clamp( wwFarSkyVis, 0.0, 1.0 );	// MODULES1 10c: the far bake's sky occlusion on the ambient (1 elsewhere)
 	vec3 preAmbDiff = outDiff;	// what the block below adds is the ambient's diffuse
 	vec3 preAmbSpec = outSpec;	// lane SPECOCC1: what the block below adds is the cube reflection
+#ifdef WW_DV
+	wwDvSun = preAmbDiff;	// lane DEBUGVIEW1: outdoors the key light's direct terms (the cascades and the air in)
+	wwDvSpec = preAmbSpec;
+#endif
 	if ( sceneMode >= 1 && hasStudioCube ) {
 		// Studio: the irradiance cube is the radiance average, so Lambert takes it without 1/PI.
 		// FO76's roughness->lod law m = r*(10-4r) over the 7 filtered levels (f76_default.frag:188).
@@ -676,9 +687,16 @@ void main()
 			giE = max( giE - farW * farGP, vec3( 0.0 ) );
 		}
 		vec3 giDiff = rho * keepInd * giE;
+#ifdef WW_DV
+		wwDvGi = giDiff;
+#endif
 		if ( cellInterior ) {
 			outDiff = cDiff + giDiff;
 			outSpec = cSpec;
+#ifdef WW_DV
+			wwDvSun = vec3( 0.0 );	// indoors the sun is the block below's alone
+			wwDvSpec = vec3( 0.0 );
+#endif
 			cE += giE;
 			if ( cellHasDalc && cellGiAmb == 0 ) {
 				outDiff += cellAmbient( sw.N, Pw ) * rho * keepInd * s.ao;	// P picks the Ambient Only volume
@@ -698,6 +716,10 @@ void main()
 				vec3 sunC = cellDirColor * ( cellInterior ? 1.0 : airSunT );	// FOGSUN1: outdoors the sun through the air
 				outDiff += dD * sunC * M_PI;
 				outSpec += dS * sunC * M_PI;
+#ifdef WW_DV
+				wwDvSun = dD * sunC * M_PI;
+				wwDvSpec = dS * sunC * M_PI;
+#endif
 				cE += sunC * max( dot( sw.N, normalize( cellDirTo ) ), 0.0 );
 			}
 			// the material's cubemap, lit by the light reaching this point (a dark corner reflects dark);
@@ -719,6 +741,9 @@ void main()
 				                    mix( cellCubeMat.x * sg.r, landLodK.y, landLodV ), envReflection );
 			}
 			outSpec += cubeK * cE;
+#ifdef WW_DV
+			wwDvRefl = cubeK * cE;
+#endif
 		} else if ( cellGiSky ) {
 			// the grid's sky stands in for the weather's unshadowed ambient by its valid share,
 			// and takes the material's AO as that ambient did
@@ -767,7 +792,10 @@ void main()
 	}
 	// lane AO1: the ambient obscurance on the whole lit colour, before the fog
 	if ( cellOn )
-		color.rgb *= cellAoFactor();
+		color.rgb *= cellAoShared( wwFarAo );	// MODULES1 10c: near (screen) and far (baked) through one rule
+#ifdef WW_DV
+	vec3 wwDvLit = max( color.rgb, vec3( 0.0 ) );	// lane DEBUGVIEW1: the lit colour before the fog
+#endif
 	// a cell-lit draw fogs here, once (the interior's fog, or the Lookdev weather's outdoors)
 	if ( cellOn && ( fogOn || wwApOn() ) )	// lane SKYA: the sky's aerial perspective with the fog off too
 		color.rgb = wwFog( max( color.rgb, vec3( 0.0 ) ), -ViewDir );
@@ -827,6 +855,28 @@ void main()
 	if ( cellOn && ( cellProbe == 60 || cellProbe == 61 ) )
 		fragColor = cellSsrProbeOut( cellSsrScene );
 #endif
+#ifdef WW_DV
+	if ( cellOn && wwDebugView != 0 ) {	// lane DEBUGVIEW1: one pass or term in place of the pixel (debug_view.glsl)
+		wwDvAmb = max( outDiff - wwDvSun, vec3( 0.0 ) );	// PBR: the ambient, the GI and the lamps, one sum
+		if ( !cellInterior )
+			wwDvRefl = max( outSpec - wwDvSpec, vec3( 0.0 ) );	// outdoors the environment and the lamps' specular
+		float dvSh = 1.0, dvCl = 1.0;
+#ifdef WW_SUNSHADOW
+		dvSh = wwSunShadowGeo( -ViewDir );
+		vec3 dvCi = ussCloudDvInfo( -ViewDir );	// SEAMCLOUD1: T, the height share, the far share
+		dvCl = dvCi.x;
+		wwDvCloud = dvCi.yz;
+#endif
+		vec3 dvT = vec3( 1.0 ), dvIn = vec3( 0.0 );
+		if ( fogOn || wwApOn() ) {
+			dvIn = max( wwFog( vec3( 0.0 ), -ViewDir ), vec3( 0.0 ) );
+			dvT = clamp( wwFog( vec3( 1.0 ), -ViewDir ) - dvIn, 0.0, 1.0 );
+		}
+		fragColor = vec4( wwDvSurface( s.base, cellWorldDir( s.N ), 1.0 - s.rough, s.metal, wwFarAo, cellAoFactor(),
+			dvSh, dvCl, pbrEmitLin, dvT, dvIn, wwDvLit, cellHdr, length( ViewDir ) * length( cellRow[0].xyz ), wwDvOwner ),
+			fragColor.a );
+	}
+#endif
 	/* a blended-ground pass (src/cellsplat.h): the RAW vertex alpha (C.a may be overridden) is this pass's share;
 	 * an opaque base is scaled by it, a layer is added at it (SRC_ALPHA, ONE). */
 	/* never over the data passes (20, 60/61): the ground would write depth 1 there and the water SSR march
@@ -834,6 +884,15 @@ void main()
 	bool splatData = false;
 #ifdef WW_CELLLIGHTS
 	splatData = cellOn && ( cellProbe == 20 || cellProbe == 60 || cellProbe == 61 );
+#endif
+#ifdef WW_CELLLIGHTS
+	/* lane LODLIVE1: the LOD coloration in the PBR path too (fo4_default.frag's colours; farLadder from fo4_default.vert:
+	 * y = band + 1, x != 0 mid ladder fade) */
+	if ( farLadder.y > 0.5 ) {
+		vec3 lt = farLadder.x != 0.0 ? vec3( 1.0, 0.2, 1.0 ) : farLadder.y < 1.5 ? vec3( 0.92 ) : farLadder.y < 2.5 ? vec3( 0.2, 0.85, 0.25 )
+			: farLadder.y < 3.5 ? vec3( 0.95, 0.9, 0.15 ) : farLadder.y < 4.5 ? vec3( 1.0, 0.55, 0.1 ) : vec3( 0.95, 0.15, 0.15 );
+		fragColor.rgb = lt * ( 0.25 + 0.75 * clamp( dot( fragColor.rgb, vec3( 0.2126, 0.7152, 0.0722 ) ), 0.0, 1.0 ) );
+	}
 #endif
 	if ( landSplat && !splatData ) {
 		/* lane ALLON2 (bungo's thin dark lines along the ground's edges, 21.png): with MSAA a pixel on the

@@ -20,7 +20,7 @@ class EsmWorld;
  * per-quad mosaic of cellground.h. The VTXT opacities are SHARES of one sum,
  *     color = ( w0 * base + sum( w_i * layer_i ) ) * VCLR,  w0 = 1 - sum( w_i )
  * (bytes truncated, matching layers merged, a quadrant with no BTXT takes the engine default base,
- * only the first five layers drawn). The 33x33 land grid maps one-to-one onto the four 17x17
+ * every layer drawn: MODULES1 item 2; red five = the engine's first five). The 33x33 land grid maps one-to-one onto the four 17x17
  * quadrant grids, so each quad corner already has a stored weight and the rasterizer's
  * interpolation IS the bilinear blend. Seams across quadrant center lines can exist in the data.
  * One quad per contributing layer, share in vertex alpha: the base pass is opaque, layers are
@@ -82,7 +82,7 @@ struct CellSplatBuild
 	int quadrantsDefaultBase = 0;   //!< quadrants with no BTXT
 	int quadsBaseFallback = 0;      //!< a BTXT whose LTEX named no texture: default drawn instead
 	int layersMerged = 0;           //!< slots summed into a matching layer or dropped into the base
-	int layersDropped = 0;          //!< layers past the fifth (read into the base sum, not drawn)
+	int layersDropped = 0;          //!< layers past the fifth (in the base sum; drawn unless WW_TERRBLEND_RED=five)
 	int layersFormZero = 0;         //!< ATXT layers naming form 0: the engine's default set
 	int layersRead = 0;
 	int ltexUnresolved = 0;

@@ -1,0 +1,349 @@
+atmo_ap.prog	13e86dd8c068824a3b9f1ecf44b5dc8b999c0052	sky	BOUND	max rel 4.47e-08 over 410 of 20480 values
+atmo_apl.prog	edbe43d7c4fe93a36471956e0bc749290c6d957e	sky	BOUND	max rel 1.49e-08 over 418 of 20480 values
+atmo_ms.prog	8ddb6522b0ad9b9005724c8e2f0b9f4bf5ce3249	sky	EXACT	
+atmo_sky.prog	339f0e89db578f4eb9f7b4a83a651529972ce590	sky	BOUND	max rel 2.62e-06 over 1165 of 20480 values
+atmo_skyview.prog	7ec5a0fa106bc6948307d0e7152672812c1526f6	sky	BOUND	max rel 3.73e-09 over 214 of 20480 values
+atmo_transmittance.prog	ef780be813271859cdfd1595c4b2a3c6d312579e	sky	BOUND	max rel 3.57e-06 over 1238 of 20480 values
+boltstrip.prog	6aa2ea358e9e4beb22ff54462fbf42b96fd988e1	core	EXACT	
+cell_ao.prog	14a5ae05531c819f887478b81a8453513e69ec54	ao	EXACT	
+cell_aodecal.prog	50e17cdaf294e45e82a81e931ce850bbaafbf7a9	ao	EXACT	
+cell_aox.prog	e6528b81c729a0c7b8ee99804cf97b3168ba76ed	ao	EXACT	
+cell_aozms.prog	fafcc84b5efc71d1d7bbde4cd28975de4e550766	ao	EXACT	
+cell_bloom_comb.prog	10d3062c88aa93d63f9083ecd828de64e30d84e2	post	EXACT	
+cell_bloom_down.prog	146d9a7620cb6cb30340af7083c494a064495228	post	EXACT	
+cell_bloom_hold.prog	6862fb3912d8e38943e16873f62304688078b377	post	EXACT	
+cell_bloom_src.prog	7d034bcf9c4401678c06275d84711aca75636a22	post	EXACT	
+cell_bloom_src.prog@WW_CELL_RESTIR+WW_CELL_RTDDGI+WW_CELL_RTDDGI_CASCADES	d1141c09c785ffee93cabd1e6f13f9a0f741f815	post	EXACT	
+cell_bloom_src.prog@WW_CELL_RTDDGI+WW_CELL_RTDDGI_CASCADES	9aed76abdf79c8e6551553a94a5ddbd773dcba73	post	EXACT	
+cell_bloom_up.prog	bb065f1645aff57d6bdf51fd9c64da6aafc1e63a	post	EXACT	
+cell_bloomblur.prog	bad2e39c6971c6ddaf8e695aa2645d3f2dc38ac4	post	EXACT	
+cell_ddgiprobe.prog	3af204ab9062933bb97a445a39e3722616d136e8	gi	NOCOV	the GLSL render wrote no pixel over 3 seeds
+cell_ddgiprobe.prog@WW_CELL_FOGLEAK	9ba11c2baea51cf24129f78e1b7da98fc95a26d5	gi	NOCOV	the GLSL render wrote no pixel over 3 seeds
+cell_ddgiprobe.prog@WW_CELL_FOGLEAK+WW_CELL_RTDDGI+WW_CELL_RTDDGI_CASCADES	cefbf1af97890ebb3de3c3274f38f01832fc2c4d	gi	NOCOV	the GLSL render wrote no pixel over 3 seeds
+cell_depthmax.prog	fc626482cad58318c7cfec77c28c14fba36b1b78	exposure	EXACT	
+cell_fgbc1.prog	3563cfdaaba5b71e82d7eaa51dab89deffed3cad	far-ground	EXACT	
+cell_fgpage.prog	46483d3ac2fe1b6064e6ba0bd1b137a320b47d77	far-ground	EXACT	
+cell_fgstamp.prog	f00768384c68038e3eb7d74346e902dd38921a78	far-ground	EXACT	
+cell_fogbloom.prog	93ee6b85ef29fc2fa86b949c9efafbc73294b338	post	EXACT	
+cell_fogbloom.prog@WW_CELL_FOGLEAK	71a3921b71d649f76f6b5994d82460cdeada1121	post	EXACT	
+cell_fxres_comp.prog	fab88d6b9e664e879506d1fbe1a691c1418e5936	particles	EXACT	
+cell_fxres_down.prog	61b925ef60ddc3c534ad161b91239e40f3690521	particles	EXACT	
+cell_gihalf.prog	b51e89f254f79c7c4187ac80b85cd75aeb682159	ao	EXACT	
+cell_gihalf.prog@WW_CELL_FOGLEAK+WW_CELL_RESTIR+WW_CELL_RTDDGI+WW_CELL_RTDDGI_CASCADES+WW_FRAME_UBO	0d565afdcae1d9573e4190d2692d62d5ec939732	ao	EXACT	
+cell_gihalf.prog@WW_CELL_FOGLEAK+WW_CELL_RTDDGI+WW_CELL_RTDDGI_CASCADES+WW_FRAME_UBO	fc47458ea102fd43dc6cd5f44c68ed5d322a35c5	ao	EXACT	
+cell_gihalf.prog@WW_CELL_FOGLEAK+WW_FRAME_UBO	62950bdd883af80b7b702b8fc13b4f67fedd404e	ao	EXACT	
+cell_givol.prog	1924fb50fae25e2e275d93f618dafe3a9c4df127	ao	NOCOV	the GLSL render wrote no pixel over 3 seeds
+cell_hdr.prog	0a9ece14fb5eb670136550f7cfe721db38bb9bd9	exposure	EXACT	
+cell_hdr.prog@WW_CELL_RESTIR+WW_CELL_RTDDGI+WW_CELL_RTDDGI_CASCADES	8e0ed4ab4639c15fd70bc7355a86d366f0870afc	exposure	EXACT	
+cell_hdr.prog@WW_CELL_RTDDGI+WW_CELL_RTDDGI_CASCADES	64607c9b14e3f9f9f8d3a49d867bb0ee3c8bc6a0	exposure	EXACT	
+cell_hdr_fd.prog	487e3e38c6da54cb5510d56c6c47c05fa8fc21e2	exposure	EXACT	
+cell_hdr_fd.prog@WW_CELL_RESTIR+WW_CELL_RTDDGI+WW_CELL_RTDDGI_CASCADES	a7e07775f0323a2095457071624681c2bdba2505	exposure	EXACT	
+cell_hdr_fd.prog@WW_CELL_RTDDGI+WW_CELL_RTDDGI_CASCADES	ce6c26bf2fa2e51f88327164a86cf74e04541039	exposure	EXACT	
+cell_is_measure.prog	9fb2020a436f9b66e67d2cc5eb5ada4e6cde22c5	exposure	EXACT	
+cell_is_measure_q.prog	f566b5fb359519e2bd62b2c8fa5d71125e026958	exposure	EXACT	
+cell_lensflare.prog	9ed51716761d23856960ee0126b8792f908cfd2f	post	EXACT	
+cell_objblur.prog	b4fe40fd6c6bafa04f47a4edac65d33ec3d09018	post	EXACT	
+cell_objblur_tile.prog	b0996a077343efd7104d604b584c88a290c1e6da	post	EXACT	
+cell_objblur_vec.prog	7a93ed9d2eb600d1a251e567207e0bd8887a9e25	post	EXACT	
+cell_post_mscopy.prog	6c1dd640701e45ce9ebd245847596136812b59b6	post	EXACT	
+cell_precip.prog	0e1a00590d3d42d09127b4e96092c4d6866d77e4	weather	NOCOV	the GLSL render wrote no pixel over 3 seeds
+cell_precip.prog@WW_CELL_AIRZONE+WW_CELL_FOGLEAK+WW_CELL_RESTIR+WW_CELL_RTDDGI+WW_CELL_RTDDGI_CASCADES+WW_FRAME_UBO	48f725f958004fc55643daa985796b69c4529f74	weather	NOCOV	the GLSL render wrote no pixel over 3 seeds
+cell_precip.prog@WW_CELL_AIRZONE+WW_CELL_FOGLEAK+WW_CELL_RTDDGI+WW_CELL_RTDDGI_CASCADES+WW_FRAME_UBO	1084705ecc2014873221372c0c39fe4b1a20e2b7	weather	NOCOV	the GLSL render wrote no pixel over 3 seeds
+cell_precip.prog@WW_CELL_AIRZONE+WW_CELL_FOGLEAK+WW_FRAME_UBO	eada558aa921b0d12a0a405033134676e03cd99d	weather	NOCOV	the GLSL render wrote no pixel over 3 seeds
+cell_precip.prog@WW_CELL_FOGLEAK+WW_CELL_RESTIR+WW_CELL_RTDDGI+WW_CELL_RTDDGI_CASCADES+WW_FRAME_UBO	83ae9e1d8ed0eff02b73858bd6d5275fdef7ceda	weather	NOCOV	the GLSL render wrote no pixel over 3 seeds
+cell_precip.prog@WW_CELL_FOGLEAK+WW_CELL_RTDDGI+WW_CELL_RTDDGI_CASCADES+WW_FRAME_UBO	ceb1af5c069ca72e4ae3edacf70e70d242ac39ee	weather	NOCOV	the GLSL render wrote no pixel over 3 seeds
+cell_precip.prog@WW_CELL_FOGLEAK+WW_FRAME_UBO	ff49b7cb30efa6b2442b15ff4fe5887b891bfcbb	weather	NOCOV	the GLSL render wrote no pixel over 3 seeds
+cell_precip_gpu.prog	b46edaa12f1931b35c49842d77486a075eb54aa7	weather	NOCOV	the GLSL render wrote no pixel over 3 seeds
+cell_precip_gpu.prog@WW_CELL_AIRZONE+WW_CELL_FOGLEAK+WW_CELL_RESTIR+WW_CELL_RTDDGI+WW_CELL_RTDDGI_CASCADES+WW_FRAME_UBO	21f181b99db3a8f6374bfa8708dde62523202b47	weather	NOCOV	the GLSL render wrote no pixel over 3 seeds
+cell_precip_gpu.prog@WW_CELL_AIRZONE+WW_CELL_FOGLEAK+WW_CELL_RTDDGI+WW_CELL_RTDDGI_CASCADES+WW_FRAME_UBO	e0631b56a6b2e4c08eae70a36190ecb62e9b9705	weather	NOCOV	the GLSL render wrote no pixel over 3 seeds
+cell_precip_gpu.prog@WW_CELL_AIRZONE+WW_CELL_FOGLEAK+WW_FRAME_UBO	17ef8f1e259514ecbf742145b91199225bf0d7b3	weather	NOCOV	the GLSL render wrote no pixel over 3 seeds
+cell_precip_gpu.prog@WW_CELL_FOGLEAK+WW_CELL_RESTIR+WW_CELL_RTDDGI+WW_CELL_RTDDGI_CASCADES+WW_FRAME_UBO	f5f1ea13feb1eee9f8fcc069d5e54b7434062301	weather	NOCOV	the GLSL render wrote no pixel over 3 seeds
+cell_precip_gpu.prog@WW_CELL_FOGLEAK+WW_CELL_RTDDGI+WW_CELL_RTDDGI_CASCADES+WW_FRAME_UBO	9a9ad0556def72de7ee79001ff2c5c65e1827d73	weather	NOCOV	the GLSL render wrote no pixel over 3 seeds
+cell_precip_gpu.prog@WW_CELL_FOGLEAK+WW_FRAME_UBO	037518c6187ab1a315ccca71d0513b6ab441d798	weather	NOCOV	the GLSL render wrote no pixel over 3 seeds
+cell_precip_look.prog	568ac4bbb5711c23b83deda5107dbc95b173b5cd	weather	NOCOV	the GLSL render wrote no pixel over 3 seeds
+cell_precip_look.prog@WW_CELL_AIRZONE+WW_CELL_FOGLEAK+WW_CELL_RESTIR+WW_CELL_RTDDGI+WW_CELL_RTDDGI_CASCADES+WW_FRAME_UBO	314250599446fd470060eec5484a80f67f9d50c7	weather	NOCOV	the GLSL render wrote no pixel over 3 seeds
+cell_precip_look.prog@WW_CELL_AIRZONE+WW_CELL_FOGLEAK+WW_CELL_RTDDGI+WW_CELL_RTDDGI_CASCADES+WW_FRAME_UBO	86c873a499a7d6ff5c70b0ca8dbda43ea972f8a6	weather	NOCOV	the GLSL render wrote no pixel over 3 seeds
+cell_precip_look.prog@WW_CELL_AIRZONE+WW_CELL_FOGLEAK+WW_FRAME_UBO	7a7a5ce5a73af09df8b868d838af2f2a902f83f8	weather	NOCOV	the GLSL render wrote no pixel over 3 seeds
+cell_precip_look.prog@WW_CELL_FOGLEAK+WW_CELL_RESTIR+WW_CELL_RTDDGI+WW_CELL_RTDDGI_CASCADES+WW_FRAME_UBO	853d35c6af876ee01eb29c2dc0513ac89d976a04	weather	NOCOV	the GLSL render wrote no pixel over 3 seeds
+cell_precip_look.prog@WW_CELL_FOGLEAK+WW_CELL_RTDDGI+WW_CELL_RTDDGI_CASCADES+WW_FRAME_UBO	606063a2eeac9355487b3ad1a6f188972476fb3b	weather	NOCOV	the GLSL render wrote no pixel over 3 seeds
+cell_precip_look.prog@WW_CELL_FOGLEAK+WW_FRAME_UBO	871ff0b75d3f9c4b7a9e43948ac8807b22a0bca6	weather	NOCOV	the GLSL render wrote no pixel over 3 seeds
+cell_reflcap.prog	138ee74613cca8bdf49326df96c8197df69515ba	reflections	EXACT	
+cell_reflrelight.prog	1ece363a45fd19b40b7c6cc2bb2de58987ce318d	reflections	EXACT	
+cell_reflrelight.prog@WW_CELL_FOGLEAK+WW_CELL_RESTIR+WW_CELL_RTDDGI+WW_CELL_RTDDGI_CASCADES+WW_FRAME_UBO	4716aeeb4428329d19a7ed6b05dab54060c810c9	reflections	EXACT	
+cell_reflrelight.prog@WW_CELL_FOGLEAK+WW_CELL_RTDDGI+WW_CELL_RTDDGI_CASCADES+WW_FRAME_UBO	dc74a988036cd41790fdd03a83544e2dec56f3d8	reflections	EXACT	
+cell_reflrelight.prog@WW_CELL_FOGLEAK+WW_FRAME_UBO	a5463a3054b9cb6dbed51af7245537a0dd2da086	reflections	EXACT	
+cell_shadowdepth.prog	1730a241dd84654f00785b629b1ddbb45c887c67	lights	EXACT	
+cell_shadowdepth6.prog	6e6eb51e33f20528ca1fbeed70532a0e294f20c1	air	EXACT	
+cell_ssgi.prog	1ddd1e83062f8b551fe97633878113529d14a32c	gi	EXACT	
+cell_ssr.prog	d5cb6c83890d51bed101231c2b556a40548ade79	reflections	EXACT	
+cell_ssrwater.prog	ae901bd5c01e21b1c1c42d20c94d58be29a9c8ea	reflections	EXACT	
+cell_underwater.prog	8a55fd1e7397a18ce8d382c1f49a1ecffe26848c	water	BOUND	max rel 5.59e-09 over 632 of 20480 values
+cell_underwater_ms.prog	5e1e71edc67e600d747cd58b519bda9a6114d09c	water	NOCOV	the GLSL render wrote no pixel over 3 seeds
+cell_volair.prog	f41c98ce54961bd53f0e10c355f0076fd10a34d6	air	FAIL	max rel 0.00676 over 425 of 20480 values
+cell_volair.prog@WW_CELL_AIRZONE+WW_CELL_AIR_BOUNCE+WW_CELL_AIR_SKYVIEW+WW_CELL_FOGLEAK+WW_CELL_RESTIR+WW_CELL_RTDDGI+WW_CELL_RTDDGI_CASCADES+WW_FRAME_UBO	54d4577db6e6fabcce595cb74089c787e258ee82	air	EXACT	
+cell_volair.prog@WW_CELL_AIRZONE+WW_CELL_AIR_BOUNCE+WW_CELL_AIR_SKYVIEW+WW_CELL_FOGLEAK+WW_CELL_RTDDGI+WW_CELL_RTDDGI_CASCADES+WW_FRAME_UBO	fc743aa45531026a99e1b6ea60f51155f2b1ff89	air	EXACT	
+cell_volair.prog@WW_CELL_AIRZONE+WW_CELL_AIR_BOUNCE+WW_CELL_AIR_SKYVIEW+WW_CELL_FOGLEAK+WW_FRAME_UBO	650f86d0d77e4fc8b5a1c23002a1a698909498fd	air	EXACT	
+cell_volair.prog@WW_CELL_AIRZONE+WW_CELL_AIR_BOUNCE+WW_CELL_FOGLEAK+WW_CELL_RESTIR+WW_CELL_RTDDGI+WW_CELL_RTDDGI_CASCADES+WW_FRAME_UBO	d84a3b79a42fc3dfc7850cd978014f8826f551cc	air	EXACT	
+cell_volair.prog@WW_CELL_AIRZONE+WW_CELL_AIR_BOUNCE+WW_CELL_FOGLEAK+WW_CELL_RTDDGI+WW_CELL_RTDDGI_CASCADES+WW_FRAME_UBO	25e616f6d42eba64f1533c1b5407d0c6823cc184	air	EXACT	
+cell_volair.prog@WW_CELL_AIRZONE+WW_CELL_AIR_BOUNCE+WW_CELL_FOGLEAK+WW_FRAME_UBO	3239b6508d789f18fafeccfe6edf2864f6d14586	air	EXACT	
+cell_volair.prog@WW_CELL_AIRZONE+WW_CELL_AIR_SKYVIEW+WW_CELL_FOGLEAK+WW_CELL_RESTIR+WW_CELL_RTDDGI+WW_CELL_RTDDGI_CASCADES+WW_FRAME_UBO	e7e95b0275f0f070b19bfa50653cf9135913c54b	air	EXACT	
+cell_volair.prog@WW_CELL_AIRZONE+WW_CELL_AIR_SKYVIEW+WW_CELL_FOGLEAK+WW_CELL_RTDDGI+WW_CELL_RTDDGI_CASCADES+WW_FRAME_UBO	4ac55a0a2733e6e2bcfd110b9f404c395ca67ec2	air	EXACT	
+cell_volair.prog@WW_CELL_AIRZONE+WW_CELL_AIR_SKYVIEW+WW_CELL_FOGLEAK+WW_FRAME_UBO	8ebab1dacbbca5cd2e4b95f31f2e0259ae36e675	air	EXACT	
+cell_volair.prog@WW_CELL_AIRZONE+WW_CELL_FOGLEAK+WW_CELL_RESTIR+WW_CELL_RTDDGI+WW_CELL_RTDDGI_CASCADES+WW_FRAME_UBO	7aadf75df771c8c338fe74c4f413f1dbc47e1785	air	EXACT	
+cell_volair.prog@WW_CELL_AIRZONE+WW_CELL_FOGLEAK+WW_CELL_RTDDGI+WW_CELL_RTDDGI_CASCADES+WW_FRAME_UBO	8fd8a520c3636183c75d39ccdef384c658df6488	air	EXACT	
+cell_volair.prog@WW_CELL_AIRZONE+WW_CELL_FOGLEAK+WW_FRAME_UBO	6ef77f4267a41155f9621e2134b9817e2735293b	air	EXACT	
+cell_volair.prog@WW_CELL_AIR_BOUNCE+WW_CELL_AIR_SKYVIEW+WW_CELL_FOGLEAK+WW_CELL_RESTIR+WW_CELL_RTDDGI+WW_CELL_RTDDGI_CASCADES+WW_FRAME_UBO	aff1133eeb2b2b24debad4d9f2415226e3812ad3	air	EXACT	
+cell_volair.prog@WW_CELL_AIR_BOUNCE+WW_CELL_AIR_SKYVIEW+WW_CELL_FOGLEAK+WW_CELL_RTDDGI+WW_CELL_RTDDGI_CASCADES+WW_FRAME_UBO	e6a5cf9aceb62b488a48dab08a6f6da1ebd9b0e5	air	EXACT	
+cell_volair.prog@WW_CELL_AIR_BOUNCE+WW_CELL_AIR_SKYVIEW+WW_CELL_FOGLEAK+WW_FRAME_UBO	65c941ce79c32e62a6a9416e0feb0dd7a1e01ab2	air	EXACT	
+cell_volair.prog@WW_CELL_AIR_BOUNCE+WW_CELL_FOGLEAK+WW_CELL_RESTIR+WW_CELL_RTDDGI+WW_CELL_RTDDGI_CASCADES+WW_FRAME_UBO	52509bcbd39007efb36c5f21ff397627fe892353	air	EXACT	
+cell_volair.prog@WW_CELL_AIR_BOUNCE+WW_CELL_FOGLEAK+WW_CELL_RTDDGI+WW_CELL_RTDDGI_CASCADES+WW_FRAME_UBO	198e3281c6e0d7ea5bf0ad16e1699d51b85cfcde	air	EXACT	
+cell_volair.prog@WW_CELL_AIR_BOUNCE+WW_CELL_FOGLEAK+WW_FRAME_UBO	ff8e7e402e612d899aee2baabb749b6740f1afa3	air	EXACT	
+cell_volair.prog@WW_CELL_AIR_SKYVIEW+WW_CELL_FOGLEAK+WW_CELL_RESTIR+WW_CELL_RTDDGI+WW_CELL_RTDDGI_CASCADES+WW_FRAME_UBO	d6ca038d73f93430688ad7008a5c06f3c8a00b1e	air	EXACT	
+cell_volair.prog@WW_CELL_AIR_SKYVIEW+WW_CELL_FOGLEAK+WW_CELL_RTDDGI+WW_CELL_RTDDGI_CASCADES+WW_FRAME_UBO	d9d972a5a83daa398710a4890a6ee42d589721e7	air	EXACT	
+cell_volair.prog@WW_CELL_AIR_SKYVIEW+WW_CELL_FOGLEAK+WW_FRAME_UBO	682ab11d9b02b134021538addf7963973da0565e	air	EXACT	
+cell_volair.prog@WW_CELL_FOGLEAK+WW_CELL_RESTIR+WW_CELL_RTDDGI+WW_CELL_RTDDGI_CASCADES+WW_FRAME_UBO	071241e1d55b6d86a91a0d62b6dd8e0399c27730	air	EXACT	
+cell_volair.prog@WW_CELL_FOGLEAK+WW_CELL_RTDDGI+WW_CELL_RTDDGI_CASCADES+WW_FRAME_UBO	640d16361e13bd9bfe4ba36f22f30cee73b48efa	air	EXACT	
+cell_volair.prog@WW_CELL_FOGLEAK+WW_FRAME_UBO	2cf0395ae59fa550cd6a93f1993b98e07a849532	air	EXACT	
+cell_volsky.prog	d26aed4a9a2d74f0320fe56bef5b407a42e190e0	air	EXACT	
+cell_volsky.prog@WW_CELL_FOGLEAK	cc36cee3178486cb29ebeec4b1f0a6382aa96e72	air	EXACT	
+cell_vrs_rate.prog	f0efa5d468dd6677298ac6dba0481dde7fd27eec	near	EXACT	
+cloud_composite.prog	c44ed7b2f023367bc92b48dcb18394f373404ee2	clouds	EXACT	
+cloud_fly.prog	45e4984f78c0bf4ecd272ff85151b5726272a6a6	clouds	EXACT	
+cloud_fly_a.prog	8142ec7033646514b34446f13a9e1cc2bc962e29	clouds	EXACT	
+cloud_fly_v.prog	49bc02cd744d0e699d62a0e38165309dd799ce72	clouds	EXACT	
+cloud_flybake.prog	56ce1ad1dd762fc6dd19edd9170b00a98b29da2a	clouds	EXACT	
+cloud_flybake_v.prog	6aadaf9b557177e8450f32578a122ff902aeb157	clouds	EXACT	
+cloud_flysdf.prog	8839a5ce345df6a0c8bf0bb2695871b1388889da	clouds	EXACT	
+cloud_march.prog	5ed7e7bf91c45397705629b44ccacc6781ae078c	clouds	EXACT	
+cloud_march_a.prog	a428f337ee9d6b1d578d90bb4f5d18df0cfbf8aa	clouds	EXACT	
+cloud_march_v.prog	92a5acdc217203a3dec3dfe2e60e9c7e42abefbb	clouds	EXACT	
+cloud_resolve.prog	8de9a501415111453d05cbea0e0902b473c9d042	clouds	EXACT	
+cloud_resolve_a.prog	f924dd9299861651279fec43f9191ecc5f2f9e15	clouds	EXACT	
+cloud_shadowmap.prog	5ae01a4f23800faa7dbeb3a2cbdf10858b6ccfe7	clouds	EXACT	
+cloud_shadowmap_v.prog	689a5a4a4ab1208d6dfca49007d50d3322f70d40	clouds	EXACT	
+cloudmap.prog	17a22895b32d10d9ee5844e14767b873d190c55b	clouds	EXACT	
+default.prog	aa38ca993e8f90d4abd3a0f610331f6d57f88dd6	core	EXACT	
+f76_default.prog	e8ae6db94ccf8dca80231bcf144e23e864e02874	core	BOUND	max rel 1.63e-08 over 13 of 20480 values
+f76_effectshader.prog	30cdbce1227f37cdf8249e8febe6a919b8f37c18	core	EXACT	
+fo4_cell.prog	f6bb8694e6562690f980fa44d49834c5340a0dc5	core	BOUND	ints and bools all zero | max rel 5.96e-08 over 42 of 20480 values
+fo4_cell.prog@WW_CELL_FOGLEAK+WW_CELL_RESTIR+WW_CELL_RTDDGI+WW_CELL_RTDDGI_CASCADES+WW_FRAME_UBO	4ac0cffc736f805cdfa0e75ffd40f2096d9dd607	core	BOUND	ints and bools all zero | max rel 5.96e-08 over 42 of 20480 values
+fo4_cell.prog@WW_CELL_FOGLEAK+WW_CELL_RTDDGI+WW_CELL_RTDDGI_CASCADES+WW_FRAME_UBO	4b1d799330e96b40776996781f470afdbef3e792	core	BOUND	ints and bools all zero | max rel 5.96e-08 over 42 of 20480 values
+fo4_cell.prog@WW_CELL_FOGLEAK+WW_FRAME_UBO	f47410545e8a4d66ebc3189a4b5251e556f538ec	core	BOUND	ints and bools all zero | max rel 5.96e-08 over 42 of 20480 values
+fo4_cellcsm.prog	c57b5b4a05a2bb582de8c786c170f9487f3a8f70	core	BOUND	ints and bools all zero | max rel 5.96e-08 over 54 of 20480 values
+fo4_cellcsm.prog@WW_CELL_FOGLEAK+WW_CELL_RESTIR+WW_CELL_RTDDGI+WW_CELL_RTDDGI_CASCADES+WW_FRAME_UBO	7a874ee8412236ef292175a0db4a9eda98cf77b0	core	BOUND	ints and bools all zero | max rel 5.96e-08 over 33 of 20480 values
+fo4_cellcsm.prog@WW_CELL_FOGLEAK+WW_CELL_RTDDGI+WW_CELL_RTDDGI_CASCADES+WW_FRAME_UBO	a4111344c434d3ac43d8b60a7b305ce5fbb7417e	core	BOUND	ints and bools all zero | max rel 5.96e-08 over 33 of 20480 values
+fo4_cellcsm.prog@WW_CELL_FOGLEAK+WW_FRAME_UBO	19bc5e758405093aefad96e5922b3341112704a0	core	BOUND	ints and bools all zero | max rel 5.96e-08 over 33 of 20480 values
+fo4_cellcsmfgc.prog	1fd66d5e5f765e49be95051a84d165086e11e5ea	far-ground	BOUND	ints and bools all zero | max rel 5.96e-08 over 54 of 20480 values
+fo4_cellcsmfgc.prog@WW_CELL_FOGLEAK+WW_CELL_RESTIR+WW_CELL_RTDDGI+WW_CELL_RTDDGI_CASCADES+WW_FRAME_UBO	da86997c7ad7e9781764bbb9ca930cc2c333be5a	far-ground	BOUND	ints and bools all zero | max rel 5.96e-08 over 33 of 20480 values
+fo4_cellcsmfgc.prog@WW_CELL_FOGLEAK+WW_CELL_RTDDGI+WW_CELL_RTDDGI_CASCADES+WW_FRAME_UBO	64ff12b27d12c1b888feb882cc570c084d728c6f	far-ground	BOUND	ints and bools all zero | max rel 5.96e-08 over 33 of 20480 values
+fo4_cellcsmfgc.prog@WW_CELL_FOGLEAK+WW_FRAME_UBO	669de7b53a89dcd699f504cf4d33d311693c4bc4	far-ground	BOUND	ints and bools all zero | max rel 5.96e-08 over 33 of 20480 values
+fo4_cellcsmfgl.prog	3679d36b23ab498d6d92b5fabb83c0b66b845ad2	far-ground	BOUND	ints and bools all zero | max rel 5.96e-08 over 54 of 20480 values
+fo4_cellcsmfgl.prog@WW_CELL_FOGLEAK+WW_CELL_RESTIR+WW_CELL_RTDDGI+WW_CELL_RTDDGI_CASCADES+WW_FRAME_UBO	86f9a5c172cee4ac399f769e354cee74ea0b968b	far-ground	BOUND	ints and bools all zero | max rel 5.96e-08 over 33 of 20480 values
+fo4_cellcsmfgl.prog@WW_CELL_FOGLEAK+WW_CELL_RTDDGI+WW_CELL_RTDDGI_CASCADES+WW_FRAME_UBO	7ec8cc070a5a211d8b388e2224d207426d82c651	far-ground	BOUND	ints and bools all zero | max rel 5.96e-08 over 33 of 20480 values
+fo4_cellcsmfgl.prog@WW_CELL_FOGLEAK+WW_FRAME_UBO	e6e438acef6dac674697e003c3c32f6372887d6b	far-ground	BOUND	ints and bools all zero | max rel 5.96e-08 over 33 of 20480 values
+fo4_cellcsmfgp.prog	b4fc9a5d193975da7038b8a7f8fdb62e9a42c5b7	far-ground	BOUND	ints and bools all zero | max rel 5.96e-08 over 54 of 20480 values
+fo4_cellcsmfgp.prog@WW_CELL_FOGLEAK+WW_CELL_RESTIR+WW_CELL_RTDDGI+WW_CELL_RTDDGI_CASCADES+WW_FRAME_UBO	91f0e8172d1d53157b22b4da1ccee58fc03017f0	far-ground	BOUND	ints and bools all zero | max rel 5.96e-08 over 33 of 20480 values
+fo4_cellcsmfgp.prog@WW_CELL_FOGLEAK+WW_CELL_RTDDGI+WW_CELL_RTDDGI_CASCADES+WW_FRAME_UBO	9dda0ed646ef6ae1e5fbc48649751b22d643749e	far-ground	BOUND	ints and bools all zero | max rel 5.96e-08 over 33 of 20480 values
+fo4_cellcsmfgp.prog@WW_CELL_FOGLEAK+WW_FRAME_UBO	97b756075e8d21128822f890d4504a7bed0610a4	far-ground	BOUND	ints and bools all zero | max rel 5.96e-08 over 33 of 20480 values
+fo4_cellcsmfs.prog	28bddf6621c88e06ac3730e83eea48d83749fc20	core	BOUND	ints and bools all zero | max rel 5.96e-08 over 54 of 20480 values
+fo4_cellcsmfs.prog@WW_CELL_FOGLEAK+WW_CELL_RESTIR+WW_CELL_RTDDGI+WW_CELL_RTDDGI_CASCADES+WW_FRAME_UBO	0475afc82095baf222a3756cf43f9913eedeaaf0	core	BOUND	ints and bools all zero | max rel 5.96e-08 over 33 of 20480 values
+fo4_cellcsmfs.prog@WW_CELL_FOGLEAK+WW_CELL_RTDDGI+WW_CELL_RTDDGI_CASCADES+WW_FRAME_UBO	dcd1f0a17a2a0d1fd5368bf5ae8ed3e65ceebb6d	core	BOUND	ints and bools all zero | max rel 5.96e-08 over 33 of 20480 values
+fo4_cellcsmfs.prog@WW_CELL_FOGLEAK+WW_FRAME_UBO	c5492f24b8ad1a1b9fd3cd15322d3326852b1434	core	BOUND	ints and bools all zero | max rel 5.96e-08 over 33 of 20480 values
+fo4_cellfgc.prog	bfe92fce83c54bdce40ddff64c1cc8461f979302	far-ground	BOUND	ints and bools all zero | max rel 5.96e-08 over 42 of 20480 values
+fo4_cellfgc.prog@WW_CELL_FOGLEAK+WW_CELL_RESTIR+WW_CELL_RTDDGI+WW_CELL_RTDDGI_CASCADES+WW_FRAME_UBO	87feca01ec111a7acf637e24a1cdd58792e9442b	far-ground	BOUND	ints and bools all zero | max rel 5.96e-08 over 42 of 20480 values
+fo4_cellfgc.prog@WW_CELL_FOGLEAK+WW_CELL_RTDDGI+WW_CELL_RTDDGI_CASCADES+WW_FRAME_UBO	c8313448ad34e9a014295d8db91a77f8cfa4a2b7	far-ground	BOUND	ints and bools all zero | max rel 5.96e-08 over 42 of 20480 values
+fo4_cellfgc.prog@WW_CELL_FOGLEAK+WW_FRAME_UBO	878b3cd5dd6b21a80c11f261e9b7a1b83204db51	far-ground	BOUND	ints and bools all zero | max rel 5.96e-08 over 42 of 20480 values
+fo4_cellfgl.prog	5b5531affcbbf4e74067eed0191608ae614b82ac	far-ground	BOUND	ints and bools all zero | max rel 5.96e-08 over 42 of 20480 values
+fo4_cellfgl.prog@WW_CELL_FOGLEAK+WW_CELL_RESTIR+WW_CELL_RTDDGI+WW_CELL_RTDDGI_CASCADES+WW_FRAME_UBO	dd486bd539d68ef0a212dbf2d47b2ac6ca99e2dc	far-ground	BOUND	ints and bools all zero | max rel 5.96e-08 over 42 of 20480 values
+fo4_cellfgl.prog@WW_CELL_FOGLEAK+WW_CELL_RTDDGI+WW_CELL_RTDDGI_CASCADES+WW_FRAME_UBO	c7315923295ca78858ef1af2de71aca7abf79a48	far-ground	BOUND	ints and bools all zero | max rel 5.96e-08 over 42 of 20480 values
+fo4_cellfgl.prog@WW_CELL_FOGLEAK+WW_FRAME_UBO	1c2217b916991d18dcc140a2201b91862ab30a05	far-ground	BOUND	ints and bools all zero | max rel 5.96e-08 over 42 of 20480 values
+fo4_cellfgp.prog	025d58cf11652d2ee22d25c724a179c5601f0503	far-ground	BOUND	ints and bools all zero | max rel 5.96e-08 over 42 of 20480 values
+fo4_cellfgp.prog@WW_CELL_FOGLEAK+WW_CELL_RESTIR+WW_CELL_RTDDGI+WW_CELL_RTDDGI_CASCADES+WW_FRAME_UBO	f6ef91a821e4e59f6086dd246c45532485cbf3f6	far-ground	BOUND	ints and bools all zero | max rel 5.96e-08 over 42 of 20480 values
+fo4_cellfgp.prog@WW_CELL_FOGLEAK+WW_CELL_RTDDGI+WW_CELL_RTDDGI_CASCADES+WW_FRAME_UBO	b12c6c80d9f75b544100b61d4e7902641d487e78	far-ground	BOUND	ints and bools all zero | max rel 5.96e-08 over 42 of 20480 values
+fo4_cellfgp.prog@WW_CELL_FOGLEAK+WW_FRAME_UBO	2bbdc6f8e44134d0bf48c5c28ac477107986da15	far-ground	BOUND	ints and bools all zero | max rel 5.96e-08 over 42 of 20480 values
+fo4_cellfs.prog	fcc8b043b53cf243f41df190b6b517c1764cb5ce	core	BOUND	ints and bools all zero | max rel 5.96e-08 over 42 of 20480 values
+fo4_cellfs.prog@WW_CELL_FOGLEAK+WW_CELL_RESTIR+WW_CELL_RTDDGI+WW_CELL_RTDDGI_CASCADES+WW_FRAME_UBO	0f93799186c3cf1d40e7c2cc19b2b03a2a8cc736	core	BOUND	ints and bools all zero | max rel 5.96e-08 over 42 of 20480 values
+fo4_cellfs.prog@WW_CELL_FOGLEAK+WW_CELL_RTDDGI+WW_CELL_RTDDGI_CASCADES+WW_FRAME_UBO	2c36a43bbdfc6d98488d84c33630ce6c483f90bd	core	BOUND	ints and bools all zero | max rel 5.96e-08 over 42 of 20480 values
+fo4_cellfs.prog@WW_CELL_FOGLEAK+WW_FRAME_UBO	2fea9a3d70e52c6db71fd7d9b55afe3c1ee7a49c	core	BOUND	ints and bools all zero | max rel 5.96e-08 over 42 of 20480 values
+fo4_csm.prog	dcf288774576a90a52c79e4bdecd98d027c833b8	core	BOUND	max rel 1.19e-07 over 6 of 20480 values
+fo4_csm.prog@WW_CELL_FOGLEAK+WW_CELL_RESTIR+WW_CELL_RTDDGI+WW_CELL_RTDDGI_CASCADES+WW_FRAME_UBO	57668421291746ee8e9f1d3cea5d38685c1a762b	core	BOUND	max rel 1.19e-07 over 6 of 20480 values
+fo4_csm.prog@WW_CELL_FOGLEAK+WW_CELL_RTDDGI+WW_CELL_RTDDGI_CASCADES+WW_FRAME_UBO	a74a9db22135a9359622adab587d7c3d4d26902c	core	BOUND	max rel 1.19e-07 over 6 of 20480 values
+fo4_csm.prog@WW_CELL_FOGLEAK+WW_FRAME_UBO	661c39b3793b5420331a2f5d4a78850a705bc46a	core	BOUND	max rel 1.19e-07 over 6 of 20480 values
+fo4_default.prog	1399f4418ae15d7beaf2defefc7bdfc481ce4d95	core	BOUND	max rel 1.19e-07 over 6 of 20480 values
+fo4_default.prog@WW_CELL_FOGLEAK+WW_CELL_RESTIR+WW_CELL_RTDDGI+WW_CELL_RTDDGI_CASCADES+WW_FRAME_UBO	58f2aa8f5bde4dbd7dedcbc6f216dd3fbaffa685	core	BOUND	max rel 1.19e-07 over 6 of 20480 values
+fo4_default.prog@WW_CELL_FOGLEAK+WW_CELL_RTDDGI+WW_CELL_RTDDGI_CASCADES+WW_FRAME_UBO	b6e15e62061d2ebfc1562d23289e4ce15c98d85c	core	BOUND	max rel 1.19e-07 over 6 of 20480 values
+fo4_default.prog@WW_CELL_FOGLEAK+WW_FRAME_UBO	701aae65b2c44881616d0b351274b387079b7f08	core	BOUND	max rel 1.19e-07 over 6 of 20480 values
+fo4_effectcell.prog	9ddd01c5934c52c73760cf16b524196592f92d41	core	BOUND	max rel 5.96e-08 over 34 of 20480 values
+fo4_effectcell.prog@WW_CELL_AIRZONE+WW_CELL_FOGLEAK+WW_CELL_RESTIR+WW_CELL_RTDDGI+WW_CELL_RTDDGI_CASCADES+WW_FRAME_UBO	0bef28a0f11bbaf34c7e948d9d2ff1675bd83ef9	core	BOUND	max rel 5.96e-08 over 34 of 20480 values
+fo4_effectcell.prog@WW_CELL_AIRZONE+WW_CELL_FOGLEAK+WW_CELL_RTDDGI+WW_CELL_RTDDGI_CASCADES+WW_FRAME_UBO	10c24a7da84aa94f6660d724fa13deefa06b67d0	core	BOUND	max rel 5.96e-08 over 34 of 20480 values
+fo4_effectcell.prog@WW_CELL_AIRZONE+WW_CELL_FOGLEAK+WW_FRAME_UBO	bdd2fc66fb519cbdae5c2aeb01e027394b02e9f9	core	BOUND	max rel 5.96e-08 over 34 of 20480 values
+fo4_effectcell.prog@WW_CELL_FOGLEAK+WW_CELL_RESTIR+WW_CELL_RTDDGI+WW_CELL_RTDDGI_CASCADES+WW_FRAME_UBO	00fd60a166f83dd18dfaa95d7e320266e46e2228	core	BOUND	max rel 5.96e-08 over 34 of 20480 values
+fo4_effectcell.prog@WW_CELL_FOGLEAK+WW_CELL_RTDDGI+WW_CELL_RTDDGI_CASCADES+WW_FRAME_UBO	740fd0f0f0958d74413d3bc920b98346d2a7b076	core	BOUND	max rel 5.96e-08 over 34 of 20480 values
+fo4_effectcell.prog@WW_CELL_FOGLEAK+WW_FRAME_UBO	baa83e1dbe2995a71fb56b39c3f45ba4c728f776	core	BOUND	max rel 5.96e-08 over 34 of 20480 values
+fo4_effectcellfx.prog	c786818d6cc1c6211dccead761173a70f82835e7	particles	BOUND	max rel 5.96e-08 over 34 of 20480 values
+fo4_effectcellfx.prog@WW_CELL_AIRZONE+WW_CELL_FOGLEAK+WW_CELL_RESTIR+WW_CELL_RTDDGI+WW_CELL_RTDDGI_CASCADES+WW_FRAME_UBO	82ec126b62255dd1ad653314fada05754de18405	particles	BOUND	max rel 5.96e-08 over 34 of 20480 values
+fo4_effectcellfx.prog@WW_CELL_AIRZONE+WW_CELL_FOGLEAK+WW_CELL_RTDDGI+WW_CELL_RTDDGI_CASCADES+WW_FRAME_UBO	107dd9d9841f10d82092593c1a2aa44c70c950fa	particles	BOUND	max rel 5.96e-08 over 34 of 20480 values
+fo4_effectcellfx.prog@WW_CELL_AIRZONE+WW_CELL_FOGLEAK+WW_FRAME_UBO	09aa6a067b0d379604234a8e59eeb9c98bb983bb	particles	BOUND	max rel 5.96e-08 over 34 of 20480 values
+fo4_effectcellfx.prog@WW_CELL_FOGLEAK+WW_CELL_RESTIR+WW_CELL_RTDDGI+WW_CELL_RTDDGI_CASCADES+WW_FRAME_UBO	7a7689ead7a7ba7275466954ccee73267a334df6	particles	BOUND	max rel 5.96e-08 over 34 of 20480 values
+fo4_effectcellfx.prog@WW_CELL_FOGLEAK+WW_CELL_RTDDGI+WW_CELL_RTDDGI_CASCADES+WW_FRAME_UBO	d1db772d55b29d10fae64f01eb46472eadd3dd7b	particles	BOUND	max rel 5.96e-08 over 34 of 20480 values
+fo4_effectcellfx.prog@WW_CELL_FOGLEAK+WW_FRAME_UBO	a2b770792778907cf4eb4495f3345dce78e32057	particles	BOUND	max rel 5.96e-08 over 34 of 20480 values
+fo4_effectdecal.prog	d13c2120ab64b62e7e375a6deaa79fccc36f8fe5	core	BOUND	max rel 5.96e-08 over 34 of 20480 values
+fo4_effectdecal.prog@WW_CELL_AIRZONE+WW_CELL_FOGLEAK+WW_CELL_RESTIR+WW_CELL_RTDDGI+WW_CELL_RTDDGI_CASCADES+WW_FRAME_UBO	81771088bbc4c5e765ac64fa34d1ce2466d4261a	core	BOUND	max rel 5.96e-08 over 34 of 20480 values
+fo4_effectdecal.prog@WW_CELL_AIRZONE+WW_CELL_FOGLEAK+WW_CELL_RTDDGI+WW_CELL_RTDDGI_CASCADES+WW_FRAME_UBO	fa1a688be23d6d37303b330fe74dbb8d8b06f569	core	BOUND	max rel 5.96e-08 over 34 of 20480 values
+fo4_effectdecal.prog@WW_CELL_AIRZONE+WW_CELL_FOGLEAK+WW_FRAME_UBO	1bb7d92215c4b63ed76ee131abe3bb59d96b1898	core	BOUND	max rel 5.96e-08 over 34 of 20480 values
+fo4_effectdecal.prog@WW_CELL_FOGLEAK+WW_CELL_RESTIR+WW_CELL_RTDDGI+WW_CELL_RTDDGI_CASCADES+WW_FRAME_UBO	43b69e6b177f49f4600ce13e2b6013c8cf2a6f4c	core	BOUND	max rel 5.96e-08 over 34 of 20480 values
+fo4_effectdecal.prog@WW_CELL_FOGLEAK+WW_CELL_RTDDGI+WW_CELL_RTDDGI_CASCADES+WW_FRAME_UBO	2f2c1c5d843efd08321ae6df09b5bcae6e19c5c4	core	BOUND	max rel 5.96e-08 over 34 of 20480 values
+fo4_effectdecal.prog@WW_CELL_FOGLEAK+WW_FRAME_UBO	f6866b02dc0b1455fc3a16f298acf8f0646880f5	core	BOUND	max rel 5.96e-08 over 34 of 20480 values
+fo4_effectdecalcsm.prog	8a1de02ca0c5e37ebc7056898d28502387804770	core	BOUND	max rel 5.96e-08 over 34 of 20480 values
+fo4_effectdecalcsm.prog@WW_CELL_AIRZONE+WW_CELL_FOGLEAK+WW_CELL_RESTIR+WW_CELL_RTDDGI+WW_CELL_RTDDGI_CASCADES+WW_FRAME_UBO	a81cf8032519d62602f4c1b7f642c10d9f31ff54	core	BOUND	max rel 5.96e-08 over 34 of 20480 values
+fo4_effectdecalcsm.prog@WW_CELL_AIRZONE+WW_CELL_FOGLEAK+WW_CELL_RTDDGI+WW_CELL_RTDDGI_CASCADES+WW_FRAME_UBO	de6e4b77c0333bc9762821d544cf10b56defe61d	core	BOUND	max rel 5.96e-08 over 34 of 20480 values
+fo4_effectdecalcsm.prog@WW_CELL_AIRZONE+WW_CELL_FOGLEAK+WW_FRAME_UBO	4d9355a0bed7d059db2b7bea093a0822e013e91b	core	BOUND	max rel 5.96e-08 over 34 of 20480 values
+fo4_effectdecalcsm.prog@WW_CELL_FOGLEAK+WW_CELL_RESTIR+WW_CELL_RTDDGI+WW_CELL_RTDDGI_CASCADES+WW_FRAME_UBO	a7823a52cb1a5681e13a8195c21852143e64ea81	core	BOUND	max rel 5.96e-08 over 34 of 20480 values
+fo4_effectdecalcsm.prog@WW_CELL_FOGLEAK+WW_CELL_RTDDGI+WW_CELL_RTDDGI_CASCADES+WW_FRAME_UBO	8391f602cd72f104c1f85c0e0a00dbb3df45e1de	core	BOUND	max rel 5.96e-08 over 34 of 20480 values
+fo4_effectdecalcsm.prog@WW_CELL_FOGLEAK+WW_FRAME_UBO	cb0f3b13ca21f6190253773ea8cb0061f1476a21	core	BOUND	max rel 5.96e-08 over 34 of 20480 values
+fo4_effectshader.prog	154bf7fe96badf50a3961541afc04a271327dd26	core	BOUND	max rel 5.96e-08 over 34 of 20480 values
+fo4_effectshader.prog@WW_CELL_AIRZONE+WW_CELL_FOGLEAK+WW_CELL_RESTIR+WW_CELL_RTDDGI+WW_CELL_RTDDGI_CASCADES+WW_FRAME_UBO	29c52be942274dcbfe3b6895c7c3fa298c10540d	core	BOUND	max rel 5.96e-08 over 34 of 20480 values
+fo4_effectshader.prog@WW_CELL_AIRZONE+WW_CELL_FOGLEAK+WW_CELL_RTDDGI+WW_CELL_RTDDGI_CASCADES+WW_FRAME_UBO	beccb7dc4579ef294db636e2b6f74b7c5a4185d5	core	BOUND	max rel 5.96e-08 over 34 of 20480 values
+fo4_effectshader.prog@WW_CELL_AIRZONE+WW_CELL_FOGLEAK+WW_FRAME_UBO	16f0286b7d9ab175626ed85816e03ec93e1ba4ec	core	BOUND	max rel 5.96e-08 over 34 of 20480 values
+fo4_effectshader.prog@WW_CELL_FOGLEAK+WW_CELL_RESTIR+WW_CELL_RTDDGI+WW_CELL_RTDDGI_CASCADES+WW_FRAME_UBO	36ed7a531ee5cd0f7c5dd202f0b05721a3a98d69	core	BOUND	max rel 5.96e-08 over 34 of 20480 values
+fo4_effectshader.prog@WW_CELL_FOGLEAK+WW_CELL_RTDDGI+WW_CELL_RTDDGI_CASCADES+WW_FRAME_UBO	b1acaf18928f267ed589c60972071560fd6d11d5	core	BOUND	max rel 5.96e-08 over 34 of 20480 values
+fo4_effectshader.prog@WW_CELL_FOGLEAK+WW_FRAME_UBO	07deceeff2419917da5df675db0d2d3d05fdcb67	core	BOUND	max rel 5.96e-08 over 34 of 20480 values
+fo4_fog.prog	22ce50dbcd0a7f90acf8e10866aa0b158ddd11c6	core	BOUND	max rel 1.19e-07 over 6 of 20480 values
+fo4_fog.prog@WW_CELL_FOGLEAK+WW_CELL_RESTIR+WW_CELL_RTDDGI+WW_CELL_RTDDGI_CASCADES+WW_FRAME_UBO	f4defed0e654063d6e0b42d020fc83beac4a1abf	core	BOUND	max rel 1.19e-07 over 6 of 20480 values
+fo4_fog.prog@WW_CELL_FOGLEAK+WW_CELL_RTDDGI+WW_CELL_RTDDGI_CASCADES+WW_FRAME_UBO	415dd4190f8ee93236c60f01d58a1af3faafac5b	core	BOUND	max rel 1.19e-07 over 6 of 20480 values
+fo4_fog.prog@WW_CELL_FOGLEAK+WW_FRAME_UBO	a20fc56d9a1b2c8077d441c52374d4f31ecc4daa	core	BOUND	max rel 1.19e-07 over 6 of 20480 values
+fo4_fogcsm.prog	94c71af51078a9bcfa17283763f5a964cce81fb7	core	BOUND	max rel 1.19e-07 over 6 of 20480 values
+fo4_fogcsm.prog@WW_CELL_FOGLEAK+WW_CELL_RESTIR+WW_CELL_RTDDGI+WW_CELL_RTDDGI_CASCADES+WW_FRAME_UBO	a76d79d3e2f05f2116d55f51e9b4d49acdbe701c	core	BOUND	max rel 1.19e-07 over 6 of 20480 values
+fo4_fogcsm.prog@WW_CELL_FOGLEAK+WW_CELL_RTDDGI+WW_CELL_RTDDGI_CASCADES+WW_FRAME_UBO	cd3620cf5d86c198229ff17f38baa033bd8f9af6	core	BOUND	max rel 1.19e-07 over 6 of 20480 values
+fo4_fogcsm.prog@WW_CELL_FOGLEAK+WW_FRAME_UBO	a05728aa352a93b433ddc91caebb2eeeb9c7ec5f	core	BOUND	max rel 1.19e-07 over 6 of 20480 values
+fo4_water.prog	2135c6b3a9e044d79a08a72644ee5852cf5deb0c	water	BOUND	max rel 5.96e-08 over 2 of 20480 values
+fo4_water.prog@WW_CELL_FOGLEAK+WW_CELL_RESTIR+WW_CELL_RTDDGI+WW_CELL_RTDDGI_CASCADES+WW_FRAME_UBO	67efee7ac22067fa3842d109b18c83393f59ce86	water	BOUND	max rel 5.96e-08 over 2 of 20480 values
+fo4_water.prog@WW_CELL_FOGLEAK+WW_CELL_RTDDGI+WW_CELL_RTDDGI_CASCADES+WW_FRAME_UBO	b4bf45fe0be0b33c3257fab25efa4511b4ae8f64	water	BOUND	max rel 5.96e-08 over 2 of 20480 values
+fo4_water.prog@WW_CELL_FOGLEAK+WW_FRAME_UBO	0f6a063179af0a910fb51e2845d4b01e2a9111c5	water	BOUND	max rel 5.96e-08 over 2 of 20480 values
+fo4_waterlook.prog	d715ecc6f24441c9909417d7ea686f31b82d3bec	water	BOUND	max rel 5.96e-08 over 2 of 20480 values
+fo4_waterlook.prog@WW_CELL_FOGLEAK+WW_CELL_RESTIR+WW_CELL_RTDDGI+WW_CELL_RTDDGI_CASCADES+WW_FRAME_UBO	dd339b2fdc82897c70c03a38e350e099aab15f33	water	BOUND	max rel 5.96e-08 over 2 of 20480 values
+fo4_waterlook.prog@WW_CELL_FOGLEAK+WW_CELL_RTDDGI+WW_CELL_RTDDGI_CASCADES+WW_FRAME_UBO	edc5f3ec1e4ddb2c883b1d1c1c4d446c06b448b8	water	BOUND	max rel 5.96e-08 over 2 of 20480 values
+fo4_waterlook.prog@WW_CELL_FOGLEAK+WW_FRAME_UBO	df310c3d058831fa9f75c739fc9833434a08d8e6	water	BOUND	max rel 5.96e-08 over 2 of 20480 values
+fo4_waterlookm.prog	ae8e7326455f9c30fcbfb0a57d0269f0074bfb02	water	BOUND	max rel 5.96e-08 over 30 of 20480 values
+fo4_waterlookm.prog@WW_CELL_FOGLEAK+WW_CELL_RESTIR+WW_CELL_RTDDGI+WW_CELL_RTDDGI_CASCADES+WW_FRAME_UBO	b71c944a9c0169043a040fc4d89fc6694ff27eb3	water	BOUND	max rel 5.96e-08 over 58 of 20480 values
+fo4_waterlookm.prog@WW_CELL_FOGLEAK+WW_CELL_RTDDGI+WW_CELL_RTDDGI_CASCADES+WW_FRAME_UBO	267b2ce488115a90ff53fdad5b0dbdcd862cbcde	water	BOUND	max rel 5.96e-08 over 58 of 20480 values
+fo4_waterlookm.prog@WW_CELL_FOGLEAK+WW_FRAME_UBO	f3661ac8c72450a8694becb4774cd06b039daa43	water	BOUND	max rel 5.96e-08 over 58 of 20480 values
+fo4_waterlookp.prog	e908ec1bb17953ca6a0ffb05d6c6aff0fd9f8e9b	water	BOUND	max rel 5.96e-08 over 2 of 20480 values
+fo4_waterlookp.prog@WW_CELL_FOGLEAK+WW_CELL_RESTIR+WW_CELL_RTDDGI+WW_CELL_RTDDGI_CASCADES+WW_FRAME_UBO	d83aff9c2ba49c8559b2544fba401f995c73fc71	water	BOUND	max rel 5.96e-08 over 2 of 20480 values
+fo4_waterlookp.prog@WW_CELL_FOGLEAK+WW_CELL_RTDDGI+WW_CELL_RTDDGI_CASCADES+WW_FRAME_UBO	5ba122272d0d346fd2211df5cc0591086ac9377f	water	BOUND	max rel 5.96e-08 over 2 of 20480 values
+fo4_waterlookp.prog@WW_CELL_FOGLEAK+WW_FRAME_UBO	f2bfec28359b8f37249d03bb1e265f05f12c8adb	water	BOUND	max rel 5.96e-08 over 2 of 20480 values
+game_dof.prog	4cdc47f88ff2f526b5ecb69751bba60912b3de7e	post	EXACT	
+game_dof_blur.prog	8b90b2c1fccaa409001236bbd81953b5d33e3ae2	post	EXACT	
+game_dof_down.prog	2982b4cf7ac187cfe52ac59a95e655f959e87063	post	EXACT	
+game_doflens.prog	b785247daf7461ba8b4380ca270f963bab6e528d	post	EXACT	
+game_doflens_gather.prog	091d0331e01c390684be114a317b293f464b5731	post	BOUND	max rel 2.38e-07 over 1115 of 20480 values
+game_doflens_prep.prog	6f49f038ee71ba60ff16b1668a39ecfaa0a4560d	post	EXACT	
+game_doflens_tile.prog	cec4bcf25849eafd614d0f904fc0f5e4bc740407	post	EXACT	
+game_doflensmblur.prog	1ff40ecbd67593ec0ff6953fd53b7902b5f8c611	post	EXACT	
+game_dofmblur.prog	5b33e2c0518388c60a979d86d1ce3b7a91104438	post	EXACT	
+game_mblur.prog	8786ef0f5088865077472d2e816dcb654acf483d	post	EXACT	
+game_taa.prog	93f23b9dc8907e0d5b808a9466675f7c0cc7f5d8	post	EXACT	
+game_taa_copy.prog	c453acd4e87832bd4eb2812acfd8a48c1eedeabd	post	EXACT	
+game_taa_mv.prog	9a31a90e63642bc62c33dc14462b4e56cf5689fa	post	EXACT	
+impostor_cell.prog	1776efc442da8108605b81f015b4112a42d96df5	far-lod	BOUND	max rel 7.45e-09 over 1 of 20480 values
+impostor_cell.prog@WW_CELL_FOGLEAK	80baf49f4e49e3145f254f3806bd4923750695b3	far-lod	BOUND	max rel 7.45e-09 over 1 of 20480 values
+impostor_cell.prog@WW_CELL_FOGLEAK+WW_CELL_RESTIR+WW_CELL_RTDDGI+WW_CELL_RTDDGI_CASCADES	ecf0baad08cd738b6be71160b7699557d0be42c2	far-lod	BOUND	max rel 7.45e-09 over 1 of 20480 values
+impostor_cell.prog@WW_CELL_FOGLEAK+WW_CELL_RTDDGI+WW_CELL_RTDDGI_CASCADES	19bf40377209c1f5ce30e9abbf741ea4c4f45763	far-lod	BOUND	max rel 7.45e-09 over 1 of 20480 values
+impostor_cellinst.prog	175a5153857b5353695a839c7008515513c955f5	far-lod	NOCOV	the GLSL render wrote no pixel over 3 seeds
+impostor_cellinst.prog@WW_CELL_FOGLEAK	f2d7d4806b68e4d815bffb32251c4b432c87445e	far-lod	NOCOV	the GLSL render wrote no pixel over 3 seeds
+impostor_cellinst.prog@WW_CELL_FOGLEAK+WW_CELL_RESTIR+WW_CELL_RTDDGI+WW_CELL_RTDDGI_CASCADES	7ce8ea0a883b4ca935864c81b660c89ecbbd5dc9	far-lod	NOCOV	the GLSL render wrote no pixel over 3 seeds
+impostor_cellinst.prog@WW_CELL_FOGLEAK+WW_CELL_RTDDGI+WW_CELL_RTDDGI_CASCADES	51a7c48f8e60a65e2e3c93e007315d7b3466438d	far-lod	NOCOV	the GLSL render wrote no pixel over 3 seeds
+impostor_cellinstez.prog	559192ef9816f89c4e0686afb92366120109027f	far-lod	NOCOV	the GLSL render wrote no pixel over 3 seeds
+impostor_cellinstez.prog@WW_CELL_FOGLEAK	153a82d292039745157480a0d7a03427ad7a0fac	far-lod	NOCOV	the GLSL render wrote no pixel over 3 seeds
+impostor_cellinstez.prog@WW_CELL_FOGLEAK+WW_CELL_RESTIR+WW_CELL_RTDDGI+WW_CELL_RTDDGI_CASCADES	c7f1be80f95c907583ad1310174bfc63ed569e5d	far-lod	NOCOV	the GLSL render wrote no pixel over 3 seeds
+impostor_cellinstez.prog@WW_CELL_FOGLEAK+WW_CELL_RTDDGI+WW_CELL_RTDDGI_CASCADES	65c2883cd2d8b1ee65114cd2ef5cbc230097faa6	far-lod	NOCOV	the GLSL render wrote no pixel over 3 seeds
+impostor_cellinstezgp.prog	e18c74353eea6f299d5b7758c7149a5f3c1d62e0	far-lod	NOCOV	the GLSL render wrote no pixel over 3 seeds
+impostor_cellinstezgp.prog@WW_CELL_FOGLEAK	2f2fbc07a9aa603813231af8e543963d98e21a01	far-lod	NOCOV	the GLSL render wrote no pixel over 3 seeds
+impostor_cellinstezgp.prog@WW_CELL_FOGLEAK+WW_CELL_RESTIR+WW_CELL_RTDDGI+WW_CELL_RTDDGI_CASCADES	184bbec21703c71125eb4968fd2b897b1725ace3	far-lod	NOCOV	the GLSL render wrote no pixel over 3 seeds
+impostor_cellinstezgp.prog@WW_CELL_FOGLEAK+WW_CELL_RTDDGI+WW_CELL_RTDDGI_CASCADES	0f680c236a6bc064e32c834ba4bd15f663cc31c9	far-lod	NOCOV	the GLSL render wrote no pixel over 3 seeds
+impostor_cellinstgp.prog	f7733223b63b579dd159a408db1841d2c7723b15	far-lod	NOCOV	the GLSL render wrote no pixel over 3 seeds
+impostor_cellinstgp.prog@WW_CELL_FOGLEAK	a61a3daac668b0b1f98be87c517ac74697973eb7	far-lod	NOCOV	the GLSL render wrote no pixel over 3 seeds
+impostor_cellinstgp.prog@WW_CELL_FOGLEAK+WW_CELL_RESTIR+WW_CELL_RTDDGI+WW_CELL_RTDDGI_CASCADES	7f3cb86447d2bdcaf620303382299a099d9f2ca8	far-lod	NOCOV	the GLSL render wrote no pixel over 3 seeds
+impostor_cellinstgp.prog@WW_CELL_FOGLEAK+WW_CELL_RTDDGI+WW_CELL_RTDDGI_CASCADES	b26fd74d7c6d57224c46bf4721a50ed1ef14b630	far-lod	NOCOV	the GLSL render wrote no pixel over 3 seeds
+impostor_oct.prog	71bdfbe35f433a20c5b115760b7d040d96adb296	far-lod	BOUND	max rel 7.45e-09 over 1 of 20480 values
+impostor_oct.prog@WW_CELL_FOGLEAK	bf83cdc04cdd7e0b5d4948263dc938997ad8e1d3	far-lod	BOUND	max rel 7.45e-09 over 1 of 20480 values
+impostor_oct.prog@WW_CELL_FOGLEAK+WW_CELL_RESTIR+WW_CELL_RTDDGI+WW_CELL_RTDDGI_CASCADES	09cd23ca6ed317613c5d1b2253104132dfa50966	far-lod	BOUND	max rel 7.45e-09 over 1 of 20480 values
+impostor_oct.prog@WW_CELL_FOGLEAK+WW_CELL_RTDDGI+WW_CELL_RTDDGI_CASCADES	306a6d6adaa32848b1726a244957c2c1066b8cec	far-lod	BOUND	max rel 7.45e-09 over 1 of 20480 values
+lines.prog	26fdc4cad55c1ca44aeb17b9888a400c0dbf599a	core	EXACT	
+lookdev_bill.prog	fa3b8a43f0000022ed4d7bde1282dc3d90ff3b21	core	BOUND	max rel 9.54e-07 over 51 of 20480 values
+lookdev_clouds.prog	5d25fada915e0a2dda0570b8c927edda2cfc17d8	clouds	BOUND	max rel 5.36e-07 over 326 of 20480 values
+lookdev_csmdepth.prog	2b82e1de8dda02526580ea86d7f1117076ceb9e5	shadows	EXACT	
+lookdev_csmdepth_at.prog	ba3898c17019d8cf3071992041d44d11dda3af75	shadows	EXACT	
+lookdev_csmdepth_atq.prog	bf85d5ea300670bb2dcb3847e33de893c5428803	near	EXACT	
+lookdev_csmdepth_q.prog	c01cd9967df547e496f20b4d5089b6a3497863fc	near	EXACT	
+lookdev_csmremap.prog	fe3e425fdf564d562f3a297418d4986ad6d3218d	shadows	NOCOV	the GLSL render wrote no pixel over 3 seeds
+lookdev_dome.prog	45017be32d0ebb854f77c0d91cfcf581dbcebe61	core	BOUND	max rel 1.07e-06 over 727 of 20480 values
+lookdev_ground.prog	318369750f0c9099f9050fc65ddbb90830993d9a	core	BOUND	max rel 1.61e-06 over 1084 of 20480 values
+lookdev_ground.prog@WW_CELL_FOGLEAK+WW_CELL_RESTIR+WW_CELL_RTDDGI+WW_CELL_RTDDGI_CASCADES+WW_FRAME_UBO	978660bdfc6e03a27e07d9e373214030aeee0289	core	BOUND	max rel 1.61e-06 over 1084 of 20480 values
+lookdev_ground.prog@WW_CELL_FOGLEAK+WW_CELL_RTDDGI+WW_CELL_RTDDGI_CASCADES+WW_FRAME_UBO	02dc1b82f31f9d5b7640793516b80a4258efb4d9	core	BOUND	max rel 1.61e-06 over 1084 of 20480 values
+lookdev_ground.prog@WW_CELL_FOGLEAK+WW_FRAME_UBO	7ca3174710d680b0e3163bdad6536904bc6270b4	core	BOUND	max rel 1.61e-06 over 1084 of 20480 values
+lookdev_ground_cell.prog	a7b02f8ac3650ab061655b07a975929004dc77f7	core	BOUND	max rel 1.61e-06 over 1084 of 20480 values
+lookdev_ground_cell.prog@WW_CELL_FOGLEAK+WW_CELL_RESTIR+WW_CELL_RTDDGI+WW_CELL_RTDDGI_CASCADES+WW_FRAME_UBO	f4c775d44a86ea7be6d886edbd3705d619580715	core	BOUND	max rel 1.61e-06 over 1084 of 20480 values
+lookdev_ground_cell.prog@WW_CELL_FOGLEAK+WW_CELL_RTDDGI+WW_CELL_RTDDGI_CASCADES+WW_FRAME_UBO	3358cbdfc12440890c1ec12ee83fb20371cb0a02	core	BOUND	max rel 1.61e-06 over 1084 of 20480 values
+lookdev_ground_cell.prog@WW_CELL_FOGLEAK+WW_FRAME_UBO	ad84b9406e5f833a3e4d58ff476f7fc0f0d36025	core	BOUND	max rel 1.61e-06 over 1084 of 20480 values
+lookdev_ground_csm.prog	ab2f07d5082dd0e7b739a4d6c206bcf1dcd58552	core	BOUND	max rel 1.31e-06 over 1053 of 20480 values
+lookdev_ground_csm.prog@WW_CELL_FOGLEAK+WW_CELL_RESTIR+WW_CELL_RTDDGI+WW_CELL_RTDDGI_CASCADES+WW_FRAME_UBO	6a4fbbee3c6c4042ff04c29f2779b670279beb34	core	BOUND	max rel 1.31e-06 over 1041 of 20480 values
+lookdev_ground_csm.prog@WW_CELL_FOGLEAK+WW_CELL_RTDDGI+WW_CELL_RTDDGI_CASCADES+WW_FRAME_UBO	0277832611a43c35f26fba5a7d6af3410ac7d14e	core	BOUND	max rel 1.31e-06 over 1041 of 20480 values
+lookdev_ground_csm.prog@WW_CELL_FOGLEAK+WW_FRAME_UBO	ac06a55313e2885deafd41f0992b462f950bd7f4	core	BOUND	max rel 1.31e-06 over 1041 of 20480 values
+lookdev_sky.prog	bc907279ada10a250a5a15758dfe6ceed188fc22	core	BOUND	max rel 3.58e-07 over 1275 of 20480 values
+normals.prog	b0711e3f41c87e897d0c86f5e962dbd8ebb535f0	core	EXACT	
+ob_default.prog	65005d60bba19c8c03f12d802b1fcb972e4c408d	core	EXACT	
+ocean_fft.prog	3578bcc958db4e0e76e19897ab959795f950fa32	water	EXACT	
+ocean_final.prog	41b1f4660ae462626d7781f843676d9ee5f30ae0	water	EXACT	
+ocean_mip.prog	baf56353495c2664c1c3ecb5a7cb998080c4e53e	water	EXACT	
+ocean_spectrum.prog	783bac4794316d98234b3dcd94ca71b8075d715b	water	EXACT	
+particles.prog	47c2df1a0b7fb28f3029c324cee4496bca7423f5	particles	EXACT	
+particles.prog@WW_CELL_AIRZONE+WW_CELL_FOGLEAK+WW_CELL_RESTIR+WW_CELL_RTDDGI+WW_CELL_RTDDGI_CASCADES+WW_FRAME_UBO	b6dee14d07dddccc9935c5d177e53559d4d16d10	particles	EXACT	
+particles.prog@WW_CELL_AIRZONE+WW_CELL_FOGLEAK+WW_CELL_RTDDGI+WW_CELL_RTDDGI_CASCADES+WW_FRAME_UBO	9153d37b87b6b510533388c3b43dd18738e2ee8f	particles	EXACT	
+particles.prog@WW_CELL_AIRZONE+WW_CELL_FOGLEAK+WW_FRAME_UBO	c151491bfb75ad554406be3cd0ec3959544c2b13	particles	EXACT	
+particles.prog@WW_CELL_FOGLEAK+WW_CELL_RESTIR+WW_CELL_RTDDGI+WW_CELL_RTDDGI_CASCADES+WW_FRAME_UBO	60dc29fde528934c8e10f24b5fb465465018a50c	particles	EXACT	
+particles.prog@WW_CELL_FOGLEAK+WW_CELL_RTDDGI+WW_CELL_RTDDGI_CASCADES+WW_FRAME_UBO	d9a59d2cd345fc6fd8d9111b76ddc19d9a35e00f	particles	EXACT	
+particles.prog@WW_CELL_FOGLEAK+WW_FRAME_UBO	eb7fb84e342dd78ff201ea69f7a3ff16640c338b	particles	EXACT	
+particles_cell.prog	ec7fdf7510fdb2f93a5a74219e81b08e3ec81315	particles	FAIL	max rel 0.174 over 1017 of 20480 values
+particles_cell.prog@WW_CELL_AIRZONE+WW_CELL_FOGLEAK+WW_CELL_RESTIR+WW_CELL_RTDDGI+WW_CELL_RTDDGI_CASCADES+WW_FRAME_UBO	7066f7eda81d81dc0251537aabcda2b0bca7b63a	particles	FAIL	max rel 0.174 over 1017 of 20480 values
+particles_cell.prog@WW_CELL_AIRZONE+WW_CELL_FOGLEAK+WW_CELL_RTDDGI+WW_CELL_RTDDGI_CASCADES+WW_FRAME_UBO	85be8f14511fe47e74f411eea0173082e0cff36c	particles	FAIL	max rel 0.174 over 1017 of 20480 values
+particles_cell.prog@WW_CELL_AIRZONE+WW_CELL_FOGLEAK+WW_FRAME_UBO	131713c2ca5cb07b81a5b01d399c73e447b0dee6	particles	FAIL	max rel 0.174 over 1017 of 20480 values
+particles_cell.prog@WW_CELL_FOGLEAK+WW_CELL_RESTIR+WW_CELL_RTDDGI+WW_CELL_RTDDGI_CASCADES+WW_FRAME_UBO	e3dbfa4adbd9d0c36c4bea54102b4a4c5a3cf138	particles	FAIL	max rel 0.174 over 1017 of 20480 values
+particles_cell.prog@WW_CELL_FOGLEAK+WW_CELL_RTDDGI+WW_CELL_RTDDGI_CASCADES+WW_FRAME_UBO	2065198a107bd314c879fcf26066df5a402184ca	particles	FAIL	max rel 0.174 over 1017 of 20480 values
+particles_cell.prog@WW_CELL_FOGLEAK+WW_FRAME_UBO	34dd7c1242643d9abffd86dbcfe5b1a22ef81e0f	particles	FAIL	max rel 0.174 over 1017 of 20480 values
+pbr_route.prog	5cea730627de346d6670fe494df6cc74d076dae8	core	BOUND	max rel 2.24e-07 over 79 of 20480 values
+pbrm_cell.prog	55d8b5f763e48ee88e8d5d8fe9fbdee96bce5a39	core	BOUND	max rel 1.79e-07 over 123 of 20480 values
+pbrm_cell.prog@WW_CELL_FOGLEAK+WW_CELL_RESTIR+WW_CELL_RTDDGI+WW_CELL_RTDDGI_CASCADES+WW_FRAME_UBO	e816503d75bec289349da78461f7475937e1e68c	core	BOUND	max rel 1.79e-07 over 123 of 20480 values
+pbrm_cell.prog@WW_CELL_FOGLEAK+WW_CELL_RTDDGI+WW_CELL_RTDDGI_CASCADES+WW_FRAME_UBO	ce4310443f4d78ce7f9a5a0b7e45434d5817c318	core	BOUND	max rel 1.79e-07 over 123 of 20480 values
+pbrm_cell.prog@WW_CELL_FOGLEAK+WW_FRAME_UBO	6eab7b1d0eee60079a3ea4b2eefb16e91963aa69	core	BOUND	max rel 1.79e-07 over 123 of 20480 values
+pbrm_cellcsm.prog	754b58321150bff53c29ab298b0b57e93889f9d1	core	BOUND	max rel 1.79e-07 over 123 of 20480 values
+pbrm_cellcsm.prog@WW_CELL_FOGLEAK+WW_CELL_RESTIR+WW_CELL_RTDDGI+WW_CELL_RTDDGI_CASCADES+WW_FRAME_UBO	a2c37226fd028ee41b805830d31b112fddcdf4ab	core	BOUND	max rel 1.79e-07 over 123 of 20480 values
+pbrm_cellcsm.prog@WW_CELL_FOGLEAK+WW_CELL_RTDDGI+WW_CELL_RTDDGI_CASCADES+WW_FRAME_UBO	bc18a00830fed33c04d0e27037bb1e4aaa9063e5	core	BOUND	max rel 1.79e-07 over 123 of 20480 values
+pbrm_cellcsm.prog@WW_CELL_FOGLEAK+WW_FRAME_UBO	dc965a4dce9d7385fb48017e4ed9feee1461db59	core	BOUND	max rel 1.79e-07 over 123 of 20480 values
+pbrm_csm.prog	48ffc73d3138730cbdc464241be08d8af27019aa	core	BOUND	max rel 1.79e-07 over 123 of 20480 values
+pbrm_csm.prog@WW_CELL_FOGLEAK+WW_CELL_RESTIR+WW_CELL_RTDDGI+WW_CELL_RTDDGI_CASCADES+WW_FRAME_UBO	ca3826b11b3f10badd06a35faf2d7b44b20e908a	core	BOUND	max rel 1.79e-07 over 123 of 20480 values
+pbrm_csm.prog@WW_CELL_FOGLEAK+WW_CELL_RTDDGI+WW_CELL_RTDDGI_CASCADES+WW_FRAME_UBO	19d9be31c9ecc8e9bf524cd9c69384b1f335009f	core	BOUND	max rel 1.79e-07 over 123 of 20480 values
+pbrm_csm.prog@WW_CELL_FOGLEAK+WW_FRAME_UBO	20bfd0650255a41fd966a01558e3fae6f4c0f0f3	core	BOUND	max rel 1.79e-07 over 123 of 20480 values
+pbrm_default.prog	d453ae396dc1ca8a77a2c1b58fd1d6c3810b10ad	core	BOUND	max rel 1.79e-07 over 123 of 20480 values
+pbrm_default.prog@WW_CELL_FOGLEAK+WW_CELL_RESTIR+WW_CELL_RTDDGI+WW_CELL_RTDDGI_CASCADES+WW_FRAME_UBO	064248689a56718670840b92a310f02aff406d4b	core	BOUND	max rel 1.79e-07 over 123 of 20480 values
+pbrm_default.prog@WW_CELL_FOGLEAK+WW_CELL_RTDDGI+WW_CELL_RTDDGI_CASCADES+WW_FRAME_UBO	64222e853cb11c904768b5f2a09af9cd6585b7d3	core	BOUND	max rel 1.79e-07 over 123 of 20480 values
+pbrm_default.prog@WW_CELL_FOGLEAK+WW_FRAME_UBO	c7e52f013a3fc29294da88ad0b3014ccc1a510a1	core	BOUND	max rel 1.79e-07 over 123 of 20480 values
+sk_default.prog	0784fb83272716c4bf388e7a3592d46320fe5885	core	EXACT	
+sk_effectshader.prog	f917087ec54e8bf0e068f05288f60d8d5c831484	core	EXACT	
+sk_msn.prog	f3230493d901b124c4f579edef3454ede5f62181	core	EXACT	
+sk_multilayer.prog	97c577f13f34cb9b8fdd0989b3cf0f00aa74f382	core	EXACT	
+sky_moon.prog	51648cf23d2e179045d7581ea8122e77340ffc1c	sky	BOUND	max rel 3.58e-07 over 54 of 20480 values
+skybox.prog	6f92951d76508cf425dca80dd593e3bc8a858481	core	EXACT	
+stf_default.prog	447721b222485c1f83e66d45af11b418d49655fa	core	FAIL	max rel 0.0331 over 945 of 20480 values | uniform refused: lm.alphaSettings.hasOpacity,lm.alphaSettings.opacityUVstream.useChannelTwo,lm.alphaSettings.useDetailBlendMask,lm.alphaSettings.useVertexColor,lm.blenders[0].boolParams[0],lm.blenders[0].uvStream.useChannelTwo
+taa2.prog	f4fc8ca8b357145e189031a1f43cc85055a9ff81	post	EXACT	
+taa2_msresolve.prog	1ffd11ed80d2745a6e7bb45f05c778914ecbafd1	post	EXACT	
+taa2_rcas.prog	5fb592a657781be4995ff67e11f2e41f78749d00	post	EXACT	
+taa_inputs_view.prog	38e8aba3a2dc12926e4abb9bd545eeecd49fc202	post	EXACT	
+taa_objvel.prog	6593e2b24e5e8ca03febbec071c2895816c18ac6	post	BOUND	max rel 5.96e-08 over 192 of 20480 values
+taa_reactive.prog	b97a43e91e8afc095a2088d63aaebecefd024f70	post	EXACT	
+uvedit.prog	8f9e52c504a2d4fe2b5bbe43d76658457957dadc	core	BOUND	max rel 5.96e-08 over 50 of 20480 values
+wireframe.prog	33498d3bcb4a165e088a2916f896c783e77d6994	core	EXACT	
+ww_contact.prog	5a2ddba9c64f89d9601202eb9af696737e6a0b24	shadows	EXACT	
+ww_contact_farcomp.prog	972b45e5b85dcd823afc876cc4019edfcc2cd0c1	shadows	EXACT	
+ww_contact_farmin.prog	272e79e335498dc31e47a4eb999fc6028073c80f	shadows	EXACT	
+ww_contact_up.prog	d5564b3a56abdc18f27f70a2c3a869ba20af8e7e	shadows	EXACT	

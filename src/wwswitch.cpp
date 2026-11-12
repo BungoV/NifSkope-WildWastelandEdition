@@ -4,6 +4,7 @@
 #include <QMutex>
 #include <QStringList>
 #include <QMutexLocker>
+#include <QReadWriteLock>
 #include <QVector>
 
 #include <algorithm>
@@ -13,34 +14,112 @@
 
 std::atomic<quint64> g_wwSwitchGen { 0 };
 
+/* MODULES1 item 8 (PERFCPU1's finding: qgetenv / qEnvironmentVariable take Qt's environment lock, scan the whole
+ * block and convert, per call, uncached: 6-9 % of the frame's CPU, thousands of calls a frame): a name's answer is
+ * kept until the environment may have moved (wwEnvChanged: every writer in the tree, a live set, and each frame's
+ * start as a backstop). Same answers as the direct reads. Red WW_ENV_CACHE_RED=1 (read at the first call): direct. */
+namespace {
+struct EnvEntry
+{
+	bool set = false;
+	QByteArray bytes;
+	bool strDone = false;
+	QString str;
+};
+QReadWriteLock & envLock()
+{
+	static QReadWriteLock l;
+	return l;
+}
+QHash<QByteArray, EnvEntry> & envCache()
+{
+	static QHash<QByteArray, EnvEntry> c;
+	return c;
+}
+bool envCacheRed()
+{
+	static const bool red = qgetenv( "WW_ENV_CACHE_RED" ).trimmed() == "1";
+	return red;
+}
+EnvEntry envEntry( const char * name, bool wantStr )
+{
+	const QByteArray key = QByteArray::fromRawData( name, int( std::strlen( name ) ) );
+	{
+		QReadLocker l( &envLock() );
+		const auto it = envCache().constFind( key );
+		if ( it != envCache().constEnd() && ( !wantStr || it->strDone ) )
+			return *it;
+	}
+	EnvEntry e;
+	e.set = qEnvironmentVariableIsSet( name );
+	e.bytes = qgetenv( name );
+	if ( wantStr ) {
+		e.str = qEnvironmentVariable( name );
+		e.strDone = true;
+	}
+	QWriteLocker l( &envLock() );
+	envCache().insert( QByteArray( name ), e );
+	return e;
+}
+}	// namespace
+
+namespace {
+std::atomic<quint64> g_wwEnvEpoch { 0 };
+}
+
+void wwEnvChanged()
+{
+	QWriteLocker l( &envLock() );
+	envCache().clear();
+	g_wwEnvEpoch.fetch_add( 1, std::memory_order_acq_rel );
+}
+
+quint64 wwEnvEpoch()
+{
+	return g_wwEnvEpoch.load( std::memory_order_acquire );
+}
+
 QByteArray wwEnv( const char * name )
 {
-	return qgetenv( name );
+	if ( envCacheRed() )
+		return qgetenv( name );
+	return envEntry( name, false ).bytes;
 }
 
 QString wwEnvStr( const char * name )
 {
-	return qEnvironmentVariable( name );
+	if ( envCacheRed() )
+		return qEnvironmentVariable( name );
+	return envEntry( name, true ).str;
 }
 
 QString wwEnvStr( const char * name, const QString & defaultValue )
 {
-	return qEnvironmentVariable( name, defaultValue );
+	if ( envCacheRed() )
+		return qEnvironmentVariable( name, defaultValue );
+	const EnvEntry e = envEntry( name, true );
+	return e.set ? e.str : defaultValue;
 }
 
 int wwEnvInt( const char * name, bool * ok )
 {
-	return qEnvironmentVariableIntValue( name, ok );
+	if ( envCacheRed() )
+		return qEnvironmentVariableIntValue( name, ok );
+	return envEntry( name, false ).bytes.toInt( ok, 0 );	// qEnvironmentVariableIntValue = qgetenv( name ).toInt( ok, 0 )
 }
 
 bool wwEnvIsSet( const char * name )
 {
-	return qEnvironmentVariableIsSet( name );
+	if ( envCacheRed() )
+		return qEnvironmentVariableIsSet( name );
+	return envEntry( name, false ).set;
 }
 
 bool wwEnvIsEmpty( const char * name )
 {
-	return qEnvironmentVariableIsEmpty( name );
+	if ( envCacheRed() )
+		return qEnvironmentVariableIsEmpty( name );
+	return envEntry( name, false ).bytes.isEmpty();
 }
 
 namespace {
@@ -212,6 +291,7 @@ QString wwSwitchSet( const QByteArray & name, const QByteArray & value, bool uns
 		qunsetenv( name.constData() );
 	else
 		qputenv( name.constData(), value );
+	wwEnvChanged();	// MODULES1 item 8: the accessors' cache
 	{
 		QMutexLocker l( &changeLock() );
 		const quint64 g = g_wwSwitchGen.load( std::memory_order_relaxed ) + 1;

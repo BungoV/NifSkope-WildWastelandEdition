@@ -15,7 +15,11 @@
  * as soon as the camera enters the neighbour cell.
  *
  * Environment (harness pins, reds and dumps only):
- *   WW_CELL_STREAM=1|0             pin streaming on / off (unset: on, unless WW_CELL_OPEN asked a fixed block)
+ *   WW_CELL_STREAM=1|0             pin streaming on / off (unset: on in every exterior view, opened by a spec or not; lane
+ *                                  AIRPERF1 r4). 0 at the open = a fixed block; in a streamed view 0 / 1 set live hold the
+ *                                  block where it is / let it follow again, as the Cell Streaming row does
+ *   WW_CELL_STREAM_RED=specfixed   an open by WW_CELL_OPEN is a fixed block again (the rule before AIRPERF1 r4)
+ *   WW_CELL_STREAM_ROW_RED=1       the row and the live pin hold nothing (live)
  *   WW_CELL_STREAM_BUDGET=<ms>     main-thread write slice a frame (default 4)
  *   WW_CELL_STREAM_SHIFT=<units>   how far into the neighbour cell the block moves (default 2048)
  *   WW_CELL_STREAM_PATH=<file>     camera steps: lines "ex ey ez ax ay az [fov]" (eye, look-at), each waits for idle
@@ -83,6 +87,7 @@ public:
 };
 
 struct CellChunkBuckets;    // cellview.cpp: the welded buckets, freed as they are written
+struct RtTraceUnitSoup;     // features/gi/rttraceset.h: what the ray-traced GI traces of one cell
 
 //! One streamed cell: built on the worker, written on the main thread.
 struct CellChunk
@@ -119,10 +124,20 @@ struct CellChunk
 	int pfxCopies = 0;
 	std::vector<std::pair<int, quint32>> xemiShapes;   //!< lane LIGHTS2 (XEMI1): written block, emittance colour
 	qint64 shapes = 0, verts = 0, tris = 0;
+	//! lane AIRPERF1 r4: the Ray-traced GI is on (set on the main thread with the job): the build gathers the cell's
+	//! soup too, and the traced set follows the loaded cells (features/gi/rttraceset.h)
+	bool wantSoup = false;
+	std::shared_ptr<const RtTraceUnitSoup> soup;
 };
 
-//! Streaming applies to this open (WW_CELL_STREAM, WW_CELL_OPEN).
+//! Streaming applies to this open: every exterior view, unless WW_CELL_STREAM=0 pins a fixed block (cellstreamrule.h).
 bool cellStreamWanted();
+//! lane AIRPERF1 r4: the Cell Streaming row (this session; default on), and whether WW_CELL_STREAM pins it
+bool cellStreamRowOn();
+void cellStreamSetRow( bool on );
+bool cellStreamPinned();
+//! a streamed view follows the camera now (the pin, else the row); off = the block stays, nothing loads or unloads
+bool cellStreamLiveOn();
 //! The open is done: start streaming round `seed` for this document.
 void cellStreamStart( NifModel * nif, std::shared_ptr<CellStreamSeed> seed );
 //! This document is about to be rebuilt or closed: drop its streamer (waits for its worker).

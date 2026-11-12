@@ -11,9 +11,17 @@
 #include "features/gi/rtddgi.h"
 #include "features/gi/rtddgimath.h"
 #include "features/gi/rtddgi/rtddgi_gpu.h"
+#include "features/gi/rttraceset.h"   // lane AIRPERF1 r4: the traced set follows the streamed cells
+#include "features/gi/rttracesetrule.h"   // lane AIRPERF1 r5: warmUpdates
+#include "features/gi/bakert.h"          // lane VKCOMPUTE1: asyncQueue
+#include "features/gi/vkasyncrule.h"     // lane VKCOMPUTE1: GL's wait placement
+#include <chrono>
 #include "version.h"
 #include "wwswitch.h"
+#include "features/sky/atmosphere.h"	// MODULES1 round 10: the one night sky's factor (WwNightSky)
 #include "features/sky/atmomath.h"    // FIX1101A: giSkyFromPhysical
+#include "features/weather/weatherrecx.h"   // MODULES1: the ground albedo for the GI sky's -Z
+#include "features/clouds/cloudvol.h"   // SKYLIGHT1 round 2: the deck on the miss sky
 #include "gl/celllights.h"
 #include "gl/cellunits.h"
 #include "gl/celluniform.h"	// lane PERFFIX1: the volume's unit bound without asking the driver
@@ -136,6 +144,9 @@ constexpr int kPathPerCascade = 8;
 /* FIX1101A: WW_CELL_RTDDGI_RED=noalbkey, today's main: the build key leaves the soup's albedo out, so a reopen that changes
  * only the albedo (WW_SOUPALB_RED) keeps the old volume. Live (a set moves the key: the volume rebuilds). */
 constexpr int kPathNoAlbKey = 16;
+/* MODULES1 11-09 item 3: WW_CELL_RTDDGI_RED=skyrebuild, the old way: a sun, sky or hour change is in the build key and
+ * rebuilds the whole volume (soup copy, BLAS, relocation: ~1 s a cascade). Ours re-lights the open volume. Live. */
+constexpr int kPathSkyRebuild = 32;
 
 /*! WW_CELL_RTDDGI_RED, live: [0] the read's red bits (rtddgimath.h kSample*, the shader's cellDdgiRed), [1] the path
  *  reds (kPath*). One list, both parts: "trilinear,readback" sets one of each */
@@ -160,6 +171,7 @@ const int * cellRedParts()
 			if ( t == QLatin1String( "nowait" ) ) b.v[1] |= kPathNoWait;   // lane RTXFIX1
 			if ( t == QLatin1String( "perblas" ) ) b.v[1] |= kPathPerCascade;   // lane RTXCASCADE2
 			if ( t == QLatin1String( "noalbkey" ) ) b.v[1] |= kPathNoAlbKey;   // FIX1101A
+			if ( t == QLatin1String( "skyrebuild" ) ) b.v[1] |= kPathSkyRebuild;   // MODULES1 11-09 item 3
 		}
 		return b;
 	}() );
@@ -181,8 +193,12 @@ struct Build
 	QString box;              // the census's words for the box
 	int lights = 0;
 	QString skyLabel;
+	quint64 lightKey = 0;     // MODULES1 11-09 item 3: the sun, sky and directional it is lit by (relight moves it)
 	// M3: the window the scroll keeps the camera in (world): the grid it stays inside, its size on each axis
 	double gridLo[3] = { 0, 0, 0 }, gridHi[3] = { 0, 0, 0 }, window[3] = { 0, 0, 0 };
+	// lane AIRPERF1 r5: the updates the worker ran before the volume is handed over (startBuild `warm`)
+	int warmWant = 0, warmRan = 0, warmBusy = 0;
+	double warmMs = 0;
 };
 
 // M3: GL_EXT_memory_object(_win32) + GL_EXT_semaphore(_win32), loaded for the current context
@@ -264,6 +280,7 @@ struct Cell
 	int guiView = 0;
 	const void * nif = nullptr;
 	quint64 key = 0;
+	quint64 setGen = 0;   // lane AIRPERF1 r4: the traced set's generation this volume was built (or is building) from
 	std::shared_ptr<Build> pending, live;
 	QString refused;
 	int sets = 0, busy = 0;
@@ -274,6 +291,7 @@ struct Cell
 	GLuint mem = 0, semVk = 0, semGl = 0;   // M3: the imported memory object and the two semaphores
 	bool interop = false;                   // M3: buf is the device's atlas (no upload)
 	bool glRead = false;                    // M3: GL waited on vkDone since its last glDone (it owes a signal before the next submit)
+	vkasync::Ledger vk;                     // lane VKCOMPUTE1: GL's wait on the last submit, owed until the first read
 	QString interopWhy;                     // M3: why this volume reads back (the census)
 	size_t bytes = 0;
 	bool uploaded = false, attach = false, probesPacked = false;
@@ -391,13 +409,20 @@ bool rtddgiGiSkyPhysical()
 
 /* GITRUTH1: WW_CELL_RTDDGI_SKY=level (live): the weather's sky at the physical sky's absolute level against the frame's
  * sun (atmomath giSkyLevel); =absolute: the physical sky's own colour and shares at that level (giSkyAbsolute).
- * LAND5 (GISKYTWIN-FLIP, HOLDS1101's hold): level SHIPS ON (unset or empty = level). Reds: "dalc" (the old default, the
- * weather's DALC as it is), "physical" (the physical colour anchored to the weather's +Z luminance).
+ * MODULES1 (bungo 11-06 "stick to what physically based engines do"): absolute SHIPS ON (unset or empty = absolute), the
+ * drawn sky's own colour and level. Reds: "level" (the old default), "dalc" (the weather's DALC as it is), "physical".
  * 0 none, 1 level, 2 absolute */
 int rtddgiGiSkyAbsolute()
 {
 	const QByteArray v = wwEnvIsSet( "WW_CELL_RTDDGI_SKY" ) ? wwEnv( "WW_CELL_RTDDGI_SKY" ).trimmed().toLower() : QByteArray();
-	return v.isEmpty() || v == "level" ? 1 : v == "absolute" ? 2 : 0;
+	return v.isEmpty() || v == "absolute" ? 2 : v == "level" ? 1 : 0;
+}
+
+//! MODULES1: WW_CELL_RTDDGI_GROUND_RED=dalc = in absolute mode -Z keeps the weather's DALC (the old ground term)
+bool rtddgiGroundRed()
+{
+	const QByteArray v = wwEnvIsSet( "WW_CELL_RTDDGI_GROUND_RED" ) ? wwEnv( "WW_CELL_RTDDGI_GROUND_RED" ).trimmed() : QByteArray();
+	return !v.isEmpty() && v != "0";
 }
 
 //! lane MUSGI1 (11-03): WW_CELL_RTDDGI_INTLEVEL_RED=1 = a sunlit interior's volume takes the weather's DALC as it is
@@ -503,6 +528,9 @@ struct Combined
 	bool attach = false;
 	int count = 0;
 	int base[rtddgi::kMaxCascades] = {}, nP[rtddgi::kMaxCascades] = {};
+	// lane VKCOMPUTE1: each cascade's origin / step / dims at its last copy (the tiles' own; a later step may scroll)
+	GLfloat org[4 * rtddgi::kMaxCascades] = {}, stp[4 * rtddgi::kMaxCascades] = {};
+	GLint dims[4 * rtddgi::kMaxCascades] = {};
 	double copyMs = 0;
 	qint64 copies = 0;
 };
@@ -551,10 +579,53 @@ void refuse( Cell & c, const QString & why )
 	say( c.tag + QStringLiteral( "refused(%1)" ).arg( why ) );
 }
 
+//! lane VKCOMPUTE1 item 4: device ms of the submits GL did not wait on right after (they ran beside GL's frame)
+struct AsyncUse
+{
+	double ms = 0.0;
+	int submits = 0, beside = 0;
+};
+
+AsyncUse & asyncUse()
+{
+	static AsyncUse u;
+	return u;
+}
+
+void asyncUseAdd( bool beside, double ms )
+{
+	AsyncUse & u = asyncUse();
+	u.submits++;
+	if ( beside ) {
+		u.beside++;
+		u.ms += std::max( 0.0, ms );
+	}
+}
+
+/* lane VKCOMPUTE1: GL's wait on a submit's vkDone (a GL server wait). With a compute-only queue (bakert::asyncQueue) it
+ * is owed until the first GL read of the atlas (bindOne, the cascades' copy, the debug view, a drop) or the next signal,
+ * so the device runs beside GL's frame; the red WW_VKASYNC_RED=1 waits right after the submit, as before */
+void glWaitVk( Cell & c )
+{
+	QElapsedTimer t;
+	t.start();
+	glShare().waitSem( c.semVk, 1, &c.buf, 0, nullptr, nullptr );
+	c.glWaitMs = double( t.nsecsElapsed() ) / 1e6;
+	c.glRead = true;
+	c.syncWaits++;
+}
+
+void glSettle( Cell & c )
+{
+	if ( c.vk.owed && c.semVk && glShare().ok )
+		c.vk.settle( [&c]() { glWaitVk( c ); } );
+}
+
 //! the GL side: the texture buffer, and with interop the imported memory and semaphores (before the session closes)
 void freeGl( Cell & c, Renderer * r )
 {
 	if ( r && c.glOwner == r ) {
+		glSettle( c );   // lane VKCOMPUTE1: the device's last write ordered before the objects go
 		if ( c.tex )
 			r->fn->glDeleteTextures( 1, &c.tex );
 		if ( c.buf )
@@ -576,6 +647,7 @@ void freeGl( Cell & c, Renderer * r )
 	c.uploaded = c.attach = c.probesPacked = false;
 	c.interop = c.glRead = false;
 	c.fresh = false;
+	c.vk.reset();
 }
 
 //! the volume and its GL objects (GL first: its import holds the device's memory)
@@ -841,9 +913,17 @@ bool upload( Cell & c, Renderer * r, const RtDdgiLive & L )
 /* RTXCASCADE2: `from` = cascade 0's built volume for a coarse cascade (it opens on that BLAS: one BLAS for every cascade;
  * the worker holds it until the open returns, so a drop of cascade 0 meanwhile cannot free the scene under it) */
 void startBuild( Cell & c, const ProbeSoup & soup, const WwCellLighting & lights, const ProbeSkyLight & sky, const WwCellGi * G,
-	const float eye[3], const CellSpec & sp, int paths, std::shared_ptr<Build> from = nullptr )
+	const float eye[3], const CellSpec & sp, int paths, std::shared_ptr<Build> from = nullptr,
+	std::shared_ptr<const ProbeSoup> shared = nullptr,    // AIRPERF1 r4: the traced set's own builder copy (no copy here)
+	int warm = 0 )
 {
+	/* lane AIRPERF1 r5: `warm` = the updates the worker runs after the open, before the volume is reported done. A
+	 * hand-over at a cell crossing passes rttracesetrule.h warmUpdates( kHysteresis ): the old volume stays drawn until
+	 * the new one's every texel is the mean of that many updates, so no unconverged volume is drawn. The step holds the
+	 * device for its wait (rtddgi_vk.inc ddgiGpuStepEx); the drawn volume's own step that frame reads busy and runs
+	 * the next frame. No GL is involved: the session is not imported yet, a step without beforeSubmit signals nothing */
 	auto b = std::make_shared<Build>();
+	b->warmWant = std::max( warm, 0 );
 	b->spec = sp;
 	b->paths = paths;
 	b->lights = int( lights.lights.size() );
@@ -883,14 +963,44 @@ void startBuild( Cell & c, const ProbeSoup & soup, const WwCellLighting & lights
 	const bool share = !( paths & kPathReadback );
 	QElapsedTimer t;
 	t.start();
-	auto soupCopy = std::make_shared<ProbeSoup>( soup );   // the kept soup may be replaced while the worker reads
+	// the kept soup may be replaced while the worker reads
+	std::shared_ptr<const ProbeSoup> soupCopy = shared ? shared : std::make_shared<const ProbeSoup>( soup );
 	b->msCopy = double( t.nsecsElapsed() ) / 1e6;
 	c.pending = b;
 	std::thread( [b, soupCopy, lights, sky = skyUsed, spec, share, from]() {
 		QElapsedTimer tm;
 		tm.start();
 		const bool ok = b->live.open( *soupCopy, lights, sky, spec, share, from ? &from->live : nullptr );
+		int ran = 0, busyN = 0;
+		double warmMs = 0;
+		if ( ok && b->warmWant > 0 ) {
+			QElapsedTimer tw;
+			tw.start();
+			while ( ran < b->warmWant && busyN < 4000 ) {
+				{
+					std::lock_guard<std::mutex> lk( b->m );
+					if ( b->cancel )
+						break;
+				}
+				RtDdgiStep o;
+				o.k = std::min( 16, b->warmWant - ran );
+				o.host = false;
+				o.wait = true;
+				if ( b->live.step( o ) ) {
+					ran += o.k;
+					continue;
+				}
+				if ( !b->live.busy() )
+					break;   // the step failed: handed over as far as it got (the line says so)
+				busyN++;
+				std::this_thread::sleep_for( std::chrono::milliseconds( 1 ) );
+			}
+			warmMs = double( tw.nsecsElapsed() ) / 1e6;
+		}
 		std::lock_guard<std::mutex> lk( b->m );
+		b->warmRan = ran;
+		b->warmBusy = busyN;
+		b->warmMs = warmMs;
 		b->ok = ok;
 		b->why = b->live.why();
 		b->ms = double( tm.nsecsElapsed() ) / 1e6;
@@ -910,6 +1020,13 @@ void censusBuilt( const Cell & c, const Build & b )
 	const QString blas = c.level == 0 ? QString() : b.live.builtBlas()
 		? QStringLiteral( "; BLAS: its own%1" ).arg( b.live.sceneWhy().isEmpty() ? QString() : QStringLiteral( " (%1)" ).arg( b.live.sceneWhy() ) )
 		: QStringLiteral( "; BLAS: cascade 0's (one BLAS)" );
+	// lane AIRPERF1 r6: the traced set's parts, a BLAS each: what this build made and what it found again on the device
+	if ( b.live.builtBlas() )
+		say( c.tag + ( v.blasParts > 0
+			? QStringLiteral( "BLAS parts %1: %2 BLASes built (%3 triangles), %4 found again (%5 triangles), masks + BLAS + TLAS %6 ms" )
+				.arg( v.blasParts ).arg( v.blasNew ).arg( v.blasTrisNew ).arg( v.blasKept ).arg( v.blasTrisKept ).arg( v.blasMs, 0, 'f', 1 )
+			: QStringLiteral( "BLAS parts 0: the single soup, one BLAS built whole, masks + BLAS + TLAS %1 ms%2" ).arg( v.blasMs, 0, 'f', 1 )
+				.arg( rtTraceSetRed( "oneblas" ) ? QStringLiteral( " (RED WW_CELL_RTSET_RED=oneblas)" ) : QString() ) ) );
 	say( c.tag + QStringLiteral( "built %1 in %2 ms (soup copy %3 ms); grid %4 x %5 x %6, spacing %7 x %8 x %9%10; box %11; first probe %12 %13 "
 		"%14; %15; relocate+classify %16 ms; BLAS grown %17 u; rays %18 a probe, %19 updates a frame%20; atlas bytes %21 (irr %22, "
 		"dist %23, probes %24); lights %25; sky %26; %27; %28" )
@@ -946,8 +1063,9 @@ void censusSet( const Cell & c, const RtDdgiLive & L, int k, const QString & tai
 	QString rb;
 	if ( c.interop )   // nothing comes back: the census's readback is 0 (the brief's key), the GL wait is the GPU-side order
 		rb = QStringLiteral( "readback ms 0.000 (interop: no copy, no upload; GL waits on the device %1 ms on the CPU); sync glDone %2 "
-			"vkDone waits %3%4" ).arg( c.glWaitMs, 0, 'f', 3 ).arg( c.syncSignals ).arg( c.syncWaits )
-			.arg( ( cellRedPaths() & kPathNoWait ) ? QStringLiteral( " (the nowait red: no order)" ) : QString() );   // lane RTXFIX1
+			"vkDone waits %3%4; vk async: %5, %6 of %7 waits at the reader" ).arg( c.glWaitMs, 0, 'f', 3 ).arg( c.syncSignals ).arg( c.syncWaits )
+			.arg( ( cellRedPaths() & kPathNoWait ) ? QStringLiteral( " (the nowait red: no order)" ) : QString() )   // lane RTXFIX1
+			.arg( QString::fromStdString( bakert::queueInfo() ) ).arg( c.vk.deferred ).arg( c.vk.submits );   // lane VKCOMPUTE1
 	else
 		rb = QStringLiteral( "readback ms %1 (device copy %2 + GL upload %3; interop owed when over 0.2: %4)" )
 			.arg( msText( ms[3] < 0.0 ? -1.0 : ms[3] + c.uploadMs ) ).arg( msText( ms[3] ) ).arg( c.uploadMs, 0, 'f', 3 ).arg( c.interopWhy );
@@ -1100,6 +1218,13 @@ int restirRedBits()
 	return b;
 }
 
+//! lane AIRPERF1 round 2. WW_CELL_RESTIR_WAIT_RED=1 (live, read every frame): the frame waits on the device for the
+//! pass, the rule before (the wait is GL's own queue up to the hand-over: 18-40 ms in a 104 ms frame)
+bool restirWaitRed()
+{
+	return wwEnvStr( "WW_CELL_RESTIR_WAIT_RED" ).trimmed() == QLatin1StringView( "1" );
+}
+
 //! the pass's GL side: the shared g-buffer copy (a pixel-pack buffer) and the ratio (a texture buffer, RG32F)
 struct RestirGl
 {
@@ -1110,8 +1235,11 @@ struct RestirGl
 	bool ready = false, history = false;
 	quint32 frame = 0;
 	qint64 runs = 0, busy = 0;
+	bool valid = false;         // the ratio holds a submit GL has ordered its reads after (a late frame keeps it)
+	qint64 late = 0, steps = 0; // frames without a hand-over (the last submit still on the device) of frames asked
 	float prows[12] = { 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0 }, pproj[4] = { 1, 1, 0, 0 };
 	QString last;
+	vkasync::Ledger vk;         // lane VKCOMPUTE1: GL's wait on the last submit, owed until the ratio's first read
 };
 
 RestirGl & restirGl()
@@ -1127,6 +1255,13 @@ RestirGl & restirGiGl()
 	return *g;
 }
 
+//! lane VKCOMPUTE1: the owed wait on the last ReSTIR submit (before a read of the ratio, a g-buffer copy, a signal, a drop)
+void restirSettle( RestirGl & G )
+{
+	if ( G.vk.owed && G.semVk && glShare().ok )
+		G.vk.settle( [&G]() { glShare().waitSem( G.semVk, 2, G.buf, 0, nullptr, nullptr ); } );
+}
+
 void restirSay( RestirGl & G, const QString & line )
 {
 	if ( line == G.last )
@@ -1139,6 +1274,7 @@ void restirSay( RestirGl & G, const QString & line )
 void restirDropGl( RestirGl & G, Renderer * r )
 {
 	if ( r && G.owner == r ) {
+		restirSettle( G );   // lane VKCOMPUTE1
 		auto fn = r->fn;
 		GlShare & sh = glShare();
 		if ( G.tex )
@@ -1222,6 +1358,8 @@ void restirUniforms( Renderer * r, NifSkopeOpenGLContext::Program * prog )
 		return;
 	RestirGl & G = restirGl();
 	const bool on = G.ready && G.owner == r && G.tex;
+	if ( on )
+		restirSettle( G );   // lane VKCOMPUTE1: the ratio's first read this frame waits on the submit that wrote it
 	auto fn = r->fn;
 	{	// lane PERFFIX1: through the CELLUNI kit (DSA: the active unit never asked; WW_CELL_UNI_RED=1 the old calls)
 		WwCellUni::Units<std::remove_pointer_t<decltype( fn )>> u( fn, wwCellUniDsa() );
@@ -1231,7 +1369,15 @@ void restirUniforms( Renderer * r, NifSkopeOpenGLContext::Program * prog )
 	}
 	prog->uni1i( "cellRestir", WwCellUnit::Restir );
 	prog->uni1b_l( loc, on );
-	prog->uni4f( "cellRestirSize", FloatVector4( float( G.W ), float( G.H ), 0.0f, 0.0f ) );
+	// MODULES1 R7 item 2: a fragment off the ratio's depth (cell_lights.glsl cellShadowF); the red is live
+	const bool missRed = wwEnvStr( "WW_CELL_RESTIR_MISS_RED" ).trimmed() == QLatin1StringView( "1" );
+	static int saidMiss = -1;
+	if ( on && saidMiss != int( missRed ) ) {
+		saidMiss = int( missRed );
+		fprintf( stderr, "restir ratio miss: a surface fragment off the traced depth (2 %% + 2 units) takes %s (ratio %dx%d; red WW_CELL_RESTIR_MISS_RED=1: unshadowed)\n",
+			missRed ? "1.0 = every shadow lamp unshadowed (RED, the old rule)" : "the pixel's ratio; 1.0 only with no surface behind it", G.W, G.H );
+	}
+	prog->uni4f( "cellRestirSize", FloatVector4( float( G.W ), float( G.H ), missRed ? 1.0f : 0.0f, 0.0f ) );
 }
 
 //! WW_CELL_RESTIRGI_RED (live): off (the pass and the shader read gone), nojacobian, novis, nopdf, notemporal, white, r2,
@@ -1376,7 +1522,10 @@ void rtddgiRestirPass( Scene * scene )
 	}
 	auto fn = r->fn;
 	GlShare & sh = glShare();
+	restirSettle( G );   // lane VKCOMPUTE1: the last submit's reads of the g-buffer copy before GL overwrites it
 	// the shared g-buffer into the device's buffer (a GPU copy through the pixel-pack binding)
+	QElapsedTimer copyTimer;
+	copyTimer.start();
 	GLint prevActive = 0, prevPack = 0;
 	fn->glGetIntegerv( GL_ACTIVE_TEXTURE, &prevActive );
 	fn->glGetIntegerv( GL_PIXEL_PACK_BUFFER_BINDING, &prevPack );
@@ -1388,6 +1537,7 @@ void rtddgiRestirPass( Scene * scene )
 	fn->glBindBuffer( GL_PIXEL_PACK_BUFFER, GLuint( prevPack ) );
 	fn->glBindTexture( GL_TEXTURE_2D, 0 );
 	fn->glActiveTexture( GLenum( prevActive ) );
+	const double msCopy = double( copyTimer.nsecsElapsed() ) / 1e6;   // the CPU side of the queued GPU copy + two state asks
 	bakert::RestirGpuIn in;
 	restirCamera( scene, c, in.rows, in.proj );
 	std::copy( G.prows, G.prows + 12, in.prows );
@@ -1397,32 +1547,62 @@ void rtddgiRestirPass( Scene * scene )
 	in.H = t.h;
 	in.frame = G.frame++;
 	in.red = restirRedBits();
+	in.wait = restirWaitRed();   // lane AIRPERF1 round 2: the frame does not wait on the device (the red: it does)
+	G.steps++;
 	const std::vector<float> & pl = c.live->live.packedLights();
 	for ( size_t i = 0; i + 31 < pl.size(); i += 32 )
 		if ( pl[i + 30] > 0.5f )
 			in.cand.push_back( int( i / 32 ) );
 	in.beforeSubmit = [&G, &sh, fn]() {
+		restirSettle( G );   // lane VKCOMPUTE1: one GL wait per signal
 		sh.signalSem( G.semGl, 2, G.buf, 0, nullptr, nullptr );
 		fn->glFlush();
 		return true;
 	};
 	bakert::RestirGpuOut out;
 	if ( !bakert::restirGpuStep( s, in, &out ) ) {
+		if ( out.late && G.valid ) {
+			// lane AIRPERF1 round 2: the last submit is still on the device. No hand-over this frame (no signal, no wait:
+			// the pair stays balanced); the last ratio stays, and GL's wait on vkDone queued with that submit already
+			// orders this frame's reads after it. The history stays the last stepped frame's.
+			G.frame--;
+			G.late++;
+			G.ready = true;
+			return;
+		}
 		G.history = false;
+		G.valid = false;
 		G.busy += out.busy ? 1 : 0;
 		restirSay( G, out.busy ? QStringLiteral( "busy (a bake holds the device): this frame unshadowed" )
 			: QStringLiteral( "refused(%1)" ).arg( QString::fromStdString( out.why ) ) );
 		return;
 	}
-	sh.waitSem( G.semVk, 2, G.buf, 0, nullptr, nullptr );
+	G.vk.afterSubmit( bakert::asyncQueue(), [&G, &sh]() { sh.waitSem( G.semVk, 2, G.buf, 0, nullptr, nullptr ); } );   // lane VKCOMPUTE1
+	asyncUseAdd( bakert::asyncQueue(), out.ms );
 	G.ready = true;
+	G.valid = true;
 	G.history = true;
 	std::copy( in.rows, in.rows + 12, G.prows );
 	std::copy( in.proj, in.proj + 4, G.pproj );
-	if ( ( G.runs++ % 64 ) == 0 )
-		restirSay( G, QStringLiteral( "on %1 x %2, %3 shadow lights of %4 (candidates %5, neighbours %6), frame %7, device wall %8 ms, red %9" )
+	if ( ( G.runs++ % 64 ) == 0 ) {
+		// lane AIRPERF1 round 2: the wall split into its parts. "wait" is this submit's fence on the CPU: with the frame
+		// waiting (the red) it holds GL's queue up to the hand-over + the kernels, so wait - device gpu = behind GL's queue
+		const QString gpu = out.ms < 0.0 ? QStringLiteral( "- (no finished submit with timestamps yet)" )
+			: QStringLiteral( "%1 ms (%2)" ).arg( out.ms, 0, 'f', 3 )
+				.arg( out.pending ? QStringLiteral( "the last finished submit's" ) : QStringLiteral( "this submit's" ) );
+		const QString split = QStringLiteral( "last submit %1 + upload %2 + record %3 + submit %4 + wait %5 + read %6" )
+			.arg( out.msPrev, 0, 'f', 3 ).arg( out.msUpload, 0, 'f', 3 ).arg( out.msRecord, 0, 'f', 3 ).arg( out.msSubmit, 0, 'f', 3 )
+			.arg( out.msWait, 0, 'f', 3 ).arg( out.msRead, 0, 'f', 3 );
+		const QString mode = in.wait
+			? QStringLiteral( "the frame waits (RED WW_CELL_RESTIR_WAIT_RED=1): behind GL's queue %1 ms" )
+				.arg( out.ms < 0.0 ? out.msWait : std::max( 0.0, out.msWait - out.ms ), 0, 'f', 3 )
+			: QStringLiteral( "no wait on the frame (red WW_CELL_RESTIR_WAIT_RED=1)" );
+		restirSay( G, QStringLiteral( "on %1 x %2, %3 shadow lights of %4 (candidates %5, neighbours %6), frame %7, device wall %8 ms = %9" )
 			.arg( t.w ).arg( t.h ).arg( in.cand.size() ).arg( pl.size() / 32 ).arg( in.candidates ).arg( in.spatial ).arg( in.frame )
-			.arg( out.msWall, 0, 'f', 3 ).arg( in.red ) );
+			.arg( out.msWall, 0, 'f', 3 ).arg( split )
+			+ QStringLiteral( "; device gpu %1; gl copy %2 ms cpu (shared buffer: no CPU copy); hand-over: %3; late %4 of %5 frames; red %6" )
+				.arg( gpu ).arg( msCopy, 0, 'f', 3 ).arg( mode ).arg( G.late ).arg( G.steps ).arg( in.red ) );
+	}
 }
 
 void rtddgiRestirGiPass( Scene * scene )
@@ -1740,6 +1920,16 @@ bool rtddgiAirRaysFrame( Scene * scene, int cols, int rows, int slices, float ne
 	return true;
 }
 
+QString rtddgiAsyncUse( int frames )
+{
+	AsyncUse & u = asyncUse();
+	const QString s = QStringLiteral( "async queue: %1, overlapped up to %2 ms a frame (%3 of %4 submits ran beside GL)" )
+		.arg( QString::fromStdString( bakert::queueInfo() ) ).arg( u.ms / double( std::max( 1, frames ) ), 0, 'f', 2 )
+		.arg( u.beside ).arg( u.submits );
+	u = AsyncUse();
+	return s;
+}
+
 QString rtddgiAirRaysEcho()
 {
 	const AirRaysGl & G = airRaysGl();
@@ -1832,6 +2022,7 @@ static bool stepGlBefore( Cell & c, RtDdgiStep & o, F * fn )
 		Cell * cp = &c;
 		GlShare * gp = &g;
 		o.beforeSubmit = [cp, gp, fn]() {
+			glSettle( *cp );   // lane VKCOMPUTE1: an owed wait first (one GL wait per signal)
 			if ( !cp->glRead )
 				return false;
 			gp->signalSem( cp->semGl, 1, &cp->buf, 0, nullptr, nullptr );
@@ -1846,14 +2037,14 @@ static bool stepGlBefore( Cell & c, RtDdgiStep & o, F * fn )
 
 static void stepGlAfter( Cell & c, const RtDdgiLive & L, bool ok, bool gl )
 {
-	GlShare & g = glShare();
 	if ( ok && gl && L.submitted() ) {   // every such submit signalled vkDone: GL waits on it exactly once
-		QElapsedTimer t;
-		t.start();
-		g.waitSem( c.semVk, 1, &c.buf, 0, nullptr, nullptr );
-		c.glWaitMs = double( t.nsecsElapsed() ) / 1e6;
-		c.glRead = true;
-		c.syncWaits++;
+		Cell * cp = &c;
+		c.vk.afterSubmit( bakert::asyncQueue(), [cp]() { glWaitVk( *cp ); } );   // lane VKCOMPUTE1: async = at the first read
+		const double * m = L.lastMs();
+		double d = 0.0;
+		for ( int i : { 0, 1, 2, 4 } )
+			d += m ? std::max( 0.0, m[i] ) : 0.0;
+		asyncUseAdd( bakert::asyncQueue(), d );   // the last finished step's device ms (one step late)
 		c.uploaded = true;
 		c.fresh = true;
 	} else if ( ok && c.interop && !gl && L.submitted() ) {
@@ -1982,7 +2173,9 @@ static void volumeFrame( Scene * scene, Cell & c, const CellSpec * spIn, bool du
 			dropLive( c, r );
 			c.key = 0;
 		}
-		refuse( c, QStringLiteral( "no relit cell in this view: the volume traces the soup the Precomputed Radiance Transfer relight keeps" ) );
+		refuse( c, rtTraceSetFollows() ? QStringLiteral( "no traced set yet: the streamed cells' soups are still being gathered "
+			"(lines 'rtddgi traced set:')" )
+			: QStringLiteral( "no relit cell in this view: the volume traces the soup the Precomputed Radiance Transfer relight keeps" ) );
 		return;
 	}
 	/* FIX1101A LATE ITEM 17 (bungo 11-01: "places like Concord museum, they have a sky, but it's fake, doesn't provide
@@ -1997,6 +2190,9 @@ static void volumeFrame( Scene * scene, Cell & c, const CellSpec * spIn, bool du
 	 * back faces stay hits (radiance 0) and the below-horizon void stays 0 (SKYBELOW1), so sky and sun come in only
 	 * through the openings. Every other interior keeps FIX1101A's rule. */
 	const bool sunlit = lights.interior && wwCellSunlitNow( wwCellLightsFor( nif ) );
+	/* MODULES1 M1 (11-10 audit, interior-only gate kept, physical reason): a SEALED interior sees no sky, so its
+	 * volume takes none; an exterior always sees the sky and always takes the weather's (below), so there is no
+	 * exterior case to extend. */
 	if ( lights.interior && !sunlit && !rtddgiIntSkyRed() ) {
 		sky.on = false;
 	} else if ( lights.interior && ( sunlit || lights.skyLighting ) ) {
@@ -2051,9 +2247,35 @@ static void volumeFrame( Scene * scene, Cell & c, const CellSpec * spIn, bool du
 			if ( absMode ) {
 				const float k = absMode == 1 ? WwAtmoMath::giSkyLevel( phys, T, sky.sun, sky.amb, mixed )
 				                             : WwAtmoMath::giSkyAbsolute( phys, T, sky.sun, sky.amb, mixed );
-				static float saidK = -1.0f;
-				if ( std::fabs( k - saidK ) > 1e-5f ) {
-					saidK = k;
+				/* MODULES1 round 10: the one night sky's factor (atmosphere.h WwNightSky): the miss sky's five sky
+				 * faces x the same gain the drawn sky takes; the key (sky.sun) is not lifted */
+				const WwNightSky & nsk = wwAtmoNightSky();
+				if ( absMode == 2 && k > 0.0f && nsk.mode == 0 )
+					for ( int a = 0; a < 5; a++ )
+						for ( int ch = 0; ch < 3; ch++ )
+							mixed[a][ch] *= nsk.gain;
+				if ( absMode == 2 )
+					wwAtmoNightSkyGot( WwNsVolumes, k * ( nsk.mode == 0 ? nsk.gain : 1.0f ), WwAtmoMath::lum( mixed[4] ) );
+				// MODULES1: absolute -Z = a Lambertian ground under the same sun and sky, not the weather's DALC
+				const float rho = wwWeatherRecx().groundAlbedo >= 0.0f ? wwWeatherRecx().groundAlbedo : 0.15f;
+				const bool ground = absMode == 2 && k > 0.0f && !rtddgiGroundRed();
+				if ( ground )
+					WwAtmoMath::giSkyGround( sky.sun, sky.sunTo[2], rho, mixed );
+				/* SKYLIGHT1 round 2: the miss sky is the clear physical sky; on near land it replaces a share of the DALC,
+				 * so it takes the same deck (key x mu on a level face, the sky's own units). Red WW_SKY_CLOUDDECK_RED=1. */
+				if ( absMode == 2 && k > 0.0f ) {
+					const float mu = std::max( sky.sunTo[2], 0.0f );
+					const float sH[3] = { sky.sun[0] * mu, sky.sun[1] * mu, sky.sun[2] * mu };
+					wwCloudDeckOnAxes( mixed, 4, sH, mu, rho, false, "GI miss sky (rtddgi, face order; up = [4])" );
+				}
+				static float saidK = -1.0f, saidG = -1.0f;
+				if ( std::fabs( k * nsk.gain - saidK ) > 1e-5f || std::fabs( mixed[5][1] - saidG ) > 1e-6f ) {
+					saidK = k * nsk.gain;
+					saidG = mixed[5][1];
+					say( c.tag + ( ground ? QStringLiteral( "GI sky -Z: the ground, albedo %1 x (sun + sky on +Z) = %2 %3 %4 (MODULES1)" )
+						.arg( double( rho ), 0, 'f', 3 ).arg( double( mixed[5][0] ), 0, 'f', 4 ).arg( double( mixed[5][1] ), 0, 'f', 4 )
+						.arg( double( mixed[5][2] ), 0, 'f', 4 ) : QStringLiteral( "GI sky -Z: the weather's DALC%1" )
+						.arg( absMode == 2 && rtddgiGroundRed() ? QStringLiteral( " (the red WW_CELL_RTDDGI_GROUND_RED)" ) : QString() ) ) );
 					const float lz = WwAtmoMath::lum( mixed[4] );
 					say( c.tag + QStringLiteral( "sky at the absolute level (GITRUTH1, %4): %1 %5; direct / diffuse "
 						"horizontal %2 (the weather's +Z: %3; IES clear sky ~3.9 at 33.5 deg)" )
@@ -2110,12 +2332,20 @@ static void volumeFrame( Scene * scene, Cell & c, const CellSpec * spIn, bool du
 		for ( size_t i = 0; i + 3 <= nAlb; i += stride )
 			key = fnv( key, &soup->alb[i], 3 );
 	}
+	/* MODULES1 11-09 item 3: the sun, sky and interior directional are the light key, not the build key: a new hour or
+	 * weather re-lights the open volume (relight) instead of rebuilding it; red WW_CELL_RTDDGI_RED=skyrebuild */
+	const bool skyRebuild = ( paths & kPathSkyRebuild ) != 0;
+	quint64 lightKey = 0xCBF29CE484222325ULL;
 	const int skyOn = sky.on ? 1 : 0;
-	key = fnv( key, &skyOn, sizeof skyOn );
-	key = fnv( key, sky.amb, sizeof sky.amb );
-	key = fnv( key, sky.sun, sizeof sky.sun );
-	key = fnv( key, sky.sunTo, sizeof sky.sunTo );
-	const quint64 lk = rtddgiLightsKey( lights );
+	lightKey = fnv( lightKey, &skyOn, sizeof skyOn );
+	lightKey = fnv( lightKey, sky.amb, sizeof sky.amb );
+	lightKey = fnv( lightKey, sky.sun, sizeof sky.sun );
+	lightKey = fnv( lightKey, sky.sunTo, sizeof sky.sunTo );
+	lightKey = fnv( lightKey, lights.dirTo, sizeof lights.dirTo );
+	lightKey = fnv( lightKey, lights.dirColor, sizeof lights.dirColor );
+	if ( skyRebuild )
+		key = fnv( key, &lightKey, sizeof lightKey );
+	const quint64 lk = rtddgiLightsKey( lights, skyRebuild );
 	key = fnv( key, &lk, sizeof lk );
 	const QByteArray st = sp.text.toUtf8();
 	key = fnv( key, st.constData(), size_t( st.size() ) );
@@ -2134,7 +2364,21 @@ static void volumeFrame( Scene * scene, Cell & c, const CellSpec * spIn, bool du
 		key = fnv( key, &G->voxel, sizeof G->voxel );
 		key = fnv( key, &G->pad, sizeof G->pad );
 	}
-	QString rebuildWhy = QStringLiteral( "the soup, lights, sky, spec, reds or GI grid moved" );
+	/* lane AIRPERF1 r4: in a streamed view the traced geometry follows the loaded cells (features/gi/rttraceset.h). Each
+	 * published set is a new generation and part of the key. Two holds keep the volume from being built twice for one
+	 * crossing: a coarse cascade waits for cascade 0's new build (it opens on that BLAS), and a change that arrives
+	 * while the set is about to publish (the streamed cells' lights come a moment before their geometry) waits for it */
+	const bool setFollows = rtTraceSetActive( nif );
+	const quint64 setGen = setFollows ? rtTraceSetGen( nif ) : 0;
+	key = fnv( key, &setGen, sizeof setGen );
+	if ( setFollows && c.nif == nif && c.live && key != c.key && !rtTraceSetRed( "drop" ) ) {
+		if ( ( c.level > 0 && cell().pending ) || ( setGen == c.setGen && rtTraceSetPending( nif ) ) )
+			key = c.key;
+	}
+	QString rebuildWhy = skyRebuild ? QStringLiteral( "the soup, lights, sky, spec, reds or GI grid moved" )
+		: QStringLiteral( "the soup, local lights, spec, reds or GI grid moved" );
+	if ( setFollows && setGen != c.setGen )
+		rebuildWhy = QStringLiteral( "the traced set moved with the stream (generation %1 to %2)" ).arg( c.setGen ).arg( setGen );
 	int cells[3] = { 0, 0, 0 };
 	bool moved = false;
 	if ( due && key == c.key && c.nif == nif && c.live )
@@ -2149,13 +2393,36 @@ static void volumeFrame( Scene * scene, Cell & c, const CellSpec * spIn, bool du
 	}
 	if ( key != c.key || c.nif != nif ) {
 		const bool had = c.pending || c.live;
-		dropLive( c, r );
+		/* lane AIRPERF1 r4: a streamed view hands over: the built volume stays drawn (and keeps scrolling with the
+		 * camera) while the new set's volume builds; it is freed when the new one is up (below). Dropping it here left
+		 * the view without GI at every cell crossing. Red WW_CELL_RTSET_RED=drop = the drop */
+		const bool handover = setFollows && c.nif == nif && c.live && !rtTraceSetRed( "drop" );
+		if ( handover ) {
+			if ( c.pending ) {
+				std::lock_guard<std::mutex> lk3( c.pending->m );
+				c.pending->cancel = true;
+				if ( c.pending->done )
+					c.pending->live.close();
+			}
+			c.pending.reset();
+		} else {
+			dropLive( c, r );
+		}
 		c.key = key;
 		c.nif = nif;
+		c.setGen = setGen;
 		c.refused.clear();
+		// RTXCASCADE2: one BLAS. AIRPERF1 r4: during a handover a coarse cascade is held until cascade 0's build is up
 		startBuild( c, *soup, lights, sky, G, eye, sp, paths,
-			c.level > 0 && !( paths & kPathPerCascade ) ? cell().live : nullptr );   // RTXCASCADE2: one BLAS
-		say( c.tag + QStringLiteral( "%1 (%2 triangles)" ).arg( had ? QStringLiteral( "rebuilding: " ) + rebuildWhy : QStringLiteral( "building" ) )
+			c.level > 0 && !( paths & kPathPerCascade ) ? cell().live : nullptr,
+			setFollows ? rtTraceSetBuildSoup( nif, soup ) : nullptr,
+			// lane AIRPERF1 r5: a hand-over's new volume is warmed before it is drawn (red WW_CELL_RTSET_RED=nowarm)
+			handover && !rtTraceSetRed( "nowarm" ) ? rttracesetrule::warmUpdates( double( rtddgi::kHysteresis ) ) : 0 );
+		if ( c.pending )
+			c.pending->lightKey = lightKey;
+		say( c.tag + QStringLiteral( "%1 (%2 triangles)" ).arg( !had ? QStringLiteral( "building" )
+			: ( handover ? QStringLiteral( "handover (the built volume stays drawn until the new one is up): " )
+				: QStringLiteral( "rebuilding: " ) ) + rebuildWhy )
 			.arg( qint64( nTris / 9 ) ) );
 	}
 	if ( c.pending ) {
@@ -2164,6 +2431,19 @@ static void volumeFrame( Scene * scene, Cell & c, const CellSpec * spIn, bool du
 		if ( b->done ) {
 			c.pending.reset();
 			if ( b->ok ) {
+				if ( c.live ) {   // lane AIRPERF1 r4: the handover: the old volume's GL side and session go now
+					freeGl( c, r );
+					c.live.reset();
+					c.sets = c.busy = 0;
+					c.syncSignals = c.syncWaits = 0;
+					c.stopped = c.dumped = c.censusBuilt = false;
+					say( c.tag + QStringLiteral( "handover done: the volume of traced set generation %1 is drawn" ).arg( c.setGen )
+						+ ( b->warmWant > 0
+							? QStringLiteral( "; warmed %1 of %2 updates before it was drawn (%3 ms on the build worker, the device "
+								"was busy %4 times)%5" ).arg( b->warmRan ).arg( b->warmWant ).arg( b->warmMs, 0, 'f', 1 ).arg( b->warmBusy )
+								.arg( b->warmRan < b->warmWant ? QStringLiteral( " NOT WARM: drawn short of the bar" ) : QString() )
+							: QStringLiteral( "; not warmed (RED WW_CELL_RTSET_RED=nowarm, or no hand-over): drawn from its first update" ) ) );
+				}
 				c.live = b;
 				c.interopWhy.clear();
 				if ( !( b->paths & kPathReadback ) ) {
@@ -2180,6 +2460,18 @@ static void volumeFrame( Scene * scene, Cell & c, const CellSpec * spIn, bool du
 				refuse( c, b->why );
 			}
 		}
+	}
+	// MODULES1 11-09 item 3: the volume (built, or finished building with an older sky) takes the new sun and sky in place
+	if ( c.live && c.live->lightKey != lightKey && c.live->live.isOpen() ) {
+		c.live->live.relight( lights, sky );
+		c.live->lightKey = lightKey;
+		c.stopped = false;
+		static int relits = 0;
+		if ( ++relits <= 40 || relits % 100 == 0 )
+			say( c.tag + QStringLiteral( "relit: the sun or sky moved, no rebuild (%1; sun %2 %3 %4 to %5 %6 %7; relight %8)" )
+				.arg( c.live->skyLabel ).arg( double( sky.sun[0] ), 0, 'g', 5 ).arg( double( sky.sun[1] ), 0, 'g', 5 )
+				.arg( double( sky.sun[2] ), 0, 'g', 5 ).arg( double( sky.sunTo[0] ), 0, 'f', 3 ).arg( double( sky.sunTo[1] ), 0, 'f', 3 )
+				.arg( double( sky.sunTo[2] ), 0, 'f', 3 ).arg( relits ) );
 	}
 	if ( c.level == 0 && moved && c.live )   // RTXCASCADE2: every plane of cascade 0 reset = the camera jumped
 		s_jump = rtddgi::cascadeJump( cells, c.live->live.volume().dims );
@@ -2320,7 +2612,9 @@ static void combinedUpdate( Renderer * r, int n, const void * nif )
 		freeCombined( nullptr );
 	int m = 0, nP[rtddgi::kMaxCascades] = {};
 	for ( int l = 0; l < n; l++ ) {
-		const Cell & c = cascCell( l );
+		Cell & c = cascCell( l );
+		if ( c.glOwner == r )
+			glSettle( c );   // lane VKCOMPUTE1: the copy below reads the atlas
 		if ( !c.live || !c.uploaded || !c.buf || c.glOwner != r || c.nif != nif )
 			break;
 		nP[l] = c.live->live.volume().probeCount();
@@ -2364,6 +2658,15 @@ static void combinedUpdate( Renderer * r, int n, const void * nif )
 			GLsizeiptr( size_t( nP[l] ) * kAtlasTexels * 16 ) );
 		c.fresh = false;
 		K.copies++;
+		const RtDdgiVolume & v = c.live->live.volume();   // lane VKCOMPUTE1: the params of the tiles just copied
+		for ( int a = 0; a < 3; a++ ) {
+			K.org[4 * l + a] = v.origin[a];
+			K.stp[4 * l + a] = v.step[a];
+			K.dims[4 * l + a] = v.dims[a];
+		}
+		K.org[4 * l + 3] = std::min( v.step[0], std::min( v.step[1], v.step[2] ) );
+		K.stp[4 * l + 3] = c.live->live.spec().bias;
+		K.dims[4 * l + 3] = v.probeCount();
 	}
 	fn->glBindBuffer( GL_COPY_READ_BUFFER, 0 );
 	fn->glBindBuffer( GL_COPY_WRITE_BUFFER, 0 );
@@ -2433,9 +2736,16 @@ static void cascadesFrame( Scene * scene, std::vector<Deferred> * defer )
 			c.key = 0;
 		volumeFrame( scene, c, &q, due, resetAll, defer );
 	}
+	/* lane VKCOMPUTE1: with a compute-only queue the copies take the LAST frame's tiles before this frame's submit (its
+	 * glDone orders the device's writes after them), so the device's work runs beside the rest of GL's frame; the red
+	 * WW_VKASYNC_RED=1 copies after the submit, as before */
+	const bool early = bakert::asyncQueue();
+	if ( early )
+		combinedUpdate( r, n, scene->nifModel );
 	if ( defer )
 		groupStep( r, *defer );   // RTXCASCADE2: every cascade due this frame in one submit, before the copies read them
-	combinedUpdate( r, n, scene->nifModel );
+	if ( !early )
+		combinedUpdate( r, n, scene->nifModel );
 }
 
 void rtddgiCellFrame( Scene * scene )
@@ -2450,6 +2760,13 @@ void rtddgiCellFrame( Scene * scene )
 	std::vector<Deferred> * defer = n > 1 && !( cellRedPaths() & kPathPerCascade ) ? &jobs : nullptr;
 	volumeFrame( scene, cell(), nullptr, true, false, defer );   // M3's volume, cascade 0
 	cascadesFrame( scene, defer );                               // RTXCASCADE1: nothing while WW_CELL_RTDDGI_CASCADES is 1
+	if ( scene && scene->nifModel && rtTraceSetActive( scene->nifModel ) ) {   // lane AIRPERF1 r4: the far ring's reach
+		bool building = false;
+		for ( int l = 0; l < std::max( n, 1 ); l++ )
+			building = building || bool( cascCell( l ).pending );
+		rtTraceSetFrame( scene->nifModel,
+			float( double( cellSpecNow().reach ) * rtddgi::cascadeScale( std::max( n, 1 ) - 1 ) ), building );
+	}
 	if ( !jobs.empty() && scene && scene->renderer )
 		groupStep( scene->renderer, jobs );   // cascade 0's, when cascadesFrame left early
 }
@@ -2511,6 +2828,8 @@ static void openEUniform( Renderer * r, NifSkopeOpenGLContext::Program * prog, c
 
 static void bindOne( Scene * scene, Renderer * r, NifSkopeOpenGLContext::Program * prog, int locOn, Cell & c )
 {
+	if ( c.glOwner == r )
+		glSettle( c );   // lane VKCOMPUTE1: the first read of the atlas waits on the submit that wrote it
 	const bool ready = c.live && c.uploaded && c.tex && c.glOwner == r && c.nif == scene->nifModel;
 	auto fn = r->fn;
 	{	// lane PERFFIX1: through the CELLUNI kit (DSA: the active unit never asked; WW_CELL_UNI_RED=1 the old calls)
@@ -2574,17 +2893,12 @@ void rtddgiCellUniforms( Scene * scene )
 			return;
 		GLfloat org[4 * rtddgi::kMaxCascades] = {}, stp[4 * rtddgi::kMaxCascades] = {};
 		GLint dims[4 * rtddgi::kMaxCascades] = {}, base[rtddgi::kMaxCascades] = {};
-		for ( int l = 0; l < cnt; l++ ) {
-			const RtDdgiLive & L = cascCell( l ).live->live;
-			const RtDdgiVolume & v = L.volume();
-			for ( int a = 0; a < 3; a++ ) {
-				org[4 * l + a] = v.origin[a];
-				stp[4 * l + a] = v.step[a];
-				dims[4 * l + a] = v.dims[a];
+		for ( int l = 0; l < cnt; l++ ) {   // lane VKCOMPUTE1: the params the copied tiles were traced with (combinedUpdate)
+			for ( int a = 0; a < 4; a++ ) {
+				org[4 * l + a] = K.org[4 * l + a];
+				stp[4 * l + a] = K.stp[4 * l + a];
+				dims[4 * l + a] = K.dims[4 * l + a];
 			}
-			org[4 * l + 3] = std::min( v.step[0], std::min( v.step[1], v.step[2] ) );
-			stp[4 * l + 3] = L.spec().bias;
-			dims[4 * l + 3] = v.probeCount();
 			base[l] = K.base[l];
 		}
 		fn->glUniform1i( locCount, cnt );
@@ -2788,6 +3102,8 @@ void rtddgiCellViewDrawLinear( Scene * scene, const Transform & viewTrans )
 	Cell & c = cell();
 	Renderer * r = scene->renderer;
 	Cell & vc = cascCell( viewLevel() );   // RTXCASCADE2: the picked cascade's volume and atlas (0 = M3's volume)
+	if ( vc.glOwner == r )
+		glSettle( vc );   // lane VKCOMPUTE1
 	if ( !mode || !vc.live || vc.nif != scene->nifModel || !vc.uploaded || !vc.tex || vc.glOwner != r )
 		return;
 	QElapsedTimer t;

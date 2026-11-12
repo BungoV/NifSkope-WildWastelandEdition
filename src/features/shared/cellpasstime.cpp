@@ -1,8 +1,10 @@
 #include "cellpasstime.h"
 #include "features/shared/wwtelemetry.h"	// lane MODULES1: the shared telemetry module
 #include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
+#include "wwloadwatch.h"	// lane PERFLOAD1 P5: every pass names itself to the main-thread watch
 #include "gl/gpustage.h"	// MODULES1: the staged-upload counts in the stream1 mem line
-#include "libfo76utils/src/filebuf.hpp"	// MODULES1: the archive trims in the ram owners line
+#include "filebuf.hpp"	// MODULES1: the archive trims in the ram owners line
+#include "framepacer.h"	// lane EMPTY240: the timer resolution helpers live here (Windows headers)
 
 #include <QByteArray>
 #include <QMap>
@@ -162,6 +164,7 @@ namespace
 {
 
 constexpr int kSlots = 3;	// GPU results are read two frames after they were issued
+constexpr int kStampEvery = 8;	// lane EMPTY240 R10-1: the GPU stamps and the pass line, 1 frame in 8
 
 struct Mark
 {
@@ -176,7 +179,10 @@ struct Slot
 	qint64 frame = -1;
 	std::vector<Mark> marks;
 	std::vector<Mark> subs;	// lane PERF2: the sub-stages (Mark::pass = the Sub)
+	double subExt[SubCount] = {};	// lane VKFRAME1: sub ms timed outside GL (subAddMs)
+	bool subExtSeen[SubCount] = {};
 	GLuint f0 = 0, f1 = 0;	// the whole frame
+	bool stamped = false;	// lane EMPTY240 R10-1: this frame took GPU stamps (and prints the pass line)
 	double cpu[Count] = {};
 	double wait[Count] = {};	// sync mode: the closing glFinish's wait (the GPU still working after the CPU issued it all)
 	qint64 calls[Count] = {}, ranges[Count] = {};
@@ -195,6 +201,8 @@ struct State
 	bool census = false;	// WW_CELL_PASSTIME_CENSUS=1: each pass's samples passed (overdraw) and primitives, in the log line
 	bool frags = false;	// MODULES1 p18: WW_CELL_PASSTIME_CENSUS=2: + fragment shader invocations (a pipeline statistics query)
 	bool lightLoop = false;	// lane TIMING1: WW_CELL_PASSTIME_LIGHTLOOP=1, odd frames unlit (cellpasstime.h lightLoopOff)
+	bool sampleRed = false;	// lane EMPTY240 R10-1: WW_PASSLINE_RED=1, the GPU stamps and the pass line every frame (build 83)
+	bool stamp = true;	// lane EMPTY240 R10-1: the open frame takes GPU stamps
 	double llSum[2][5] = {};	// [unlit, lit] x opaque, sorted, water, ssr-donor, frame GPU ms
 	int llN[2] = {};
 	QOpenGLContext * ctx = nullptr;
@@ -217,6 +225,13 @@ struct State
 	double winCpu[Count] = {}, winGpu[Count] = {}, winCpuFrame = 0.0, winGpuFrame = 0.0;
 	QStringList lines;
 	int memArmed = 0;
+	bool text = true;	// lane PERFLOAD1 (P5): the table is drawn on screen (WW_CELL_PASSTIME_TEXT)
+	// lane VKFRAME1 build 88: the frame wall's other-in-frame by name: the gaps between top-level passes, by the pass before
+	qint64 gapT0 = -1;	// the open gap's start (-1: inside a pass, or no frame)
+	int gapAfter = -1;	// the top-level pass before it (-1: the frame's start)
+	qint64 gapNamed = 0;	// of the open gap, the wall's named parts (gi-frame, restir, probe-sky, scene-transform)
+	double gapSum[Count + 1] = {};	// ms since the last take; [Count] = after the frame's start
+	int gapFrames = 0;
 };
 
 State & st()
@@ -242,10 +257,22 @@ State & st()
 			s.on = QSettings().value( QStringLiteral( "WW/PassTimers" ), false ).toBool();
 		}
 		s.log = wwEnvInt( "WW_CELL_PASSTIME_LOG" ) == 1;
+		// lane PERFLOAD1 (P5): switched on by WW_CELL_PASSTIME (the measuring route) the table is not drawn over the
+		// view unless asked; the Frame Timers menu row draws it as before. WW_CELL_PASSTIME_TEXT=1 is the old way.
+		s.text = wwEnvIsSet( "WW_CELL_PASSTIME_TEXT" ) ? wwEnvInt( "WW_CELL_PASSTIME_TEXT" ) == 1 : pin.isEmpty();
+		if ( s.on && s.log )
+			std::fprintf( stderr, "pass time text: table on screen %s (WW_CELL_PASSTIME_TEXT=1 draws it)\n", s.text ? "drawn" : "not drawn" );
 		s.sync = wwEnvInt( "WW_CELL_PASSTIME_SYNC" ) == 1;
 		s.census = wwEnvInt( "WW_CELL_PASSTIME_CENSUS" ) >= 1;
 		s.frags = wwEnvInt( "WW_CELL_PASSTIME_CENSUS" ) == 2;
 		s.lightLoop = wwEnvInt( "WW_CELL_PASSTIME_LIGHTLOOP" ) == 1;
+		/* lane EMPTY240 R10-1: build 83 took a GPU timestamp pair per pass and sub-stage, read them back and printed the
+		 * pass line every frame (other-in-frame 0.33-0.40 ms). Now 1 frame in 8 (every frame with sync, census or the
+		 * light loop on); the window averages count the stamped frames only. Red WW_PASSLINE_RED=1: every frame */
+		s.sampleRed = wwEnvInt( "WW_PASSLINE_RED" ) == 1;
+		if ( s.on )
+			std::fprintf( stderr, "pass time sample: GPU stamps and the pass line 1 frame in %d%s\n", s.sampleRed ? 1 : kStampEvery,
+				s.sampleRed ? " (WW_PASSLINE_RED=1)" : "" );
 		for ( int k = 0; k < 2; k++ ) {
 			s.llN[k] = 0;
 			for ( double & v : s.llSum[k] )
@@ -341,11 +368,32 @@ static void costRow( const Slot & sl, const double * gpu, double gpuFrame, const
 		+ "},\"sub\":{" + subs + "},\"cpusub\":{" + cpus + "},\"modules\":{" + mods + "}" );
 }
 
+const char * const kSubName[SubCount] = { "air-tile", "air-inject", "air-integrate", "ao-geometry",
+	"ao-stages", "ao-gi", "tone-blit", "tone-measure", "tone-bloom", "tone-quads", "far-dots",
+	"far-cards-lit", "tone-vrs", "fxres-down", "fxres-layer", "fxres-comp", "air-pre", "air-far", "air-post", "far-ground-paint",
+	"far-ground-draw", "sun-casters", "sun-terrstep", "cloud-shadow", "far-ground-pass",	// lane PERFFIX2 b
+	"ssgi-hiz", "ssgi-mips", "ssgi-ecast", "ssgi-echain", "ssgi-cast", "ssgi-temporal",
+	"ssgi-denoise", "contact",	// lane PERFFIX2 c
+	"water", "water-copy", "underwater",
+	"post-dof", "post-mblur", "post-objblur", "post-flare",
+	"air-lampvol",	// lane MODULES1 part 25	// lane POSTFX1
+	"vk-bloom" };	// lane VKFRAME1
+
 void collect( Slot & sl )
 {
 	State & s = st();
 	if ( sl.frame < 0 )
 		return;
+	if ( !sl.stamped ) {	// lane EMPTY240 R10-1: no queries were taken; its CPU went into the window at its end
+		sl.marks.clear();
+		sl.subs.clear();
+		for ( int k = 0; k < SubCount; k++ ) {
+			sl.subExt[k] = 0.0;
+			sl.subExtSeen[k] = false;
+		}
+		sl.frame = -1;
+		return;
+	}
 	double gpu[Count] = {};
 	GLuint64 samples[Count] = {}, prims[Count] = {}, frags[Count] = {};
 	for ( const Mark & m : sl.marks ) {
@@ -377,6 +425,14 @@ void collect( Slot & sl )
 		s.pool.push_back( m.q1 );
 	}
 	sl.subs.clear();
+	for ( int k = 0; k < SubCount; k++ ) {	// lane VKFRAME1
+		if ( sl.subExtSeen[k] ) {
+			sub[k] += sl.subExt[k];
+			subSeen[k] = true;
+		}
+		sl.subExt[k] = 0.0;
+		sl.subExtSeen[k] = false;
+	}
 	const double gpuFrame = gpuMs( sl.f0, sl.f1 );
 	s.pool.push_back( sl.f0 );
 	s.pool.push_back( sl.f1 );
@@ -431,14 +487,7 @@ void collect( Slot & sl )
 			+ QByteArray::number( sl.cache.maxBytes >> 20 ) + " MB | textures made " + QByteArray::number( sl.cache.texMade )
 			+ " (" + QByteArray::number( double( sl.cache.texBytes ) / 1048576.0, 'f', 1 ) + " MB) | private "
 			+ QByteArray::number( sl.privMb ) + " MB";
-		static const char * const subName[SubCount] = { "air-tile", "air-inject", "air-integrate", "ao-geometry",
-			"ao-stages", "ao-gi", "tone-blit", "tone-measure", "tone-bloom", "tone-quads", "far-dots",
-			"far-cards-lit", "tone-vrs", "fxres-down", "fxres-layer", "fxres-comp", "air-pre", "air-far", "air-post", "far-ground-paint",
-			"far-ground-draw", "sun-casters", "sun-terrstep", "cloud-shadow", "far-ground-pass",	// lane PERFFIX2 b
-			"ssgi-hiz", "ssgi-mips", "ssgi-ecast", "ssgi-echain", "ssgi-cast", "ssgi-temporal",
-			"ssgi-denoise", "contact",	// lane PERFFIX2 c
-			"water", "water-copy", "underwater",
-			"post-dof", "post-mblur", "post-objblur", "post-flare" };	// lane POSTFX1
+		const char * const * subName = kSubName;	// lane EMPTY240 R5-1: at file scope (the GPU zones name them too)
 		for ( int k = 0; k < SubCount; k++ )
 			if ( subSeen[k] )
 				line += QByteArray( " | sub " ) + subName[k] + " " + QByteArray::number( sub[k], 'f', 2 );
@@ -482,6 +531,490 @@ const char * name( int pass )
 	return pass >= 0 && pass < Count ? k[pass] : "?";
 }
 
+/* lane EMPTY240 R3-0 (build 74: GPU paints of 1.4 s at the first frames and after cell attaches): the GL work of each
+ * paint split by its top-level passes and named zones, always on, read only once available (no stall). A paint over
+ * 250 ms on the GPU prints `frame gpu zones:` with every zone, the gap no zone holds and what the paint uploaded.
+ * Red WW_GPUZONES_RED=1: no zones. */
+namespace
+{
+struct WatchZone
+{
+	const char * name;
+	GLuint q0, q1;
+	bool closed;
+	// lane EMPTY240 R5-1: the CPU's ns, the draws and the uploads at its start (0) and end (1)
+	qint64 c0 = 0, c1 = 0, d0 = 0, d1 = 0, t0 = 0, t1 = 0, m0 = 0, m1 = 0;
+	int parent = -1;	// a part (a sub-stage): the zone it sits in
+};
+struct WatchSlot
+{
+	bool pending = false;
+	quint64 frame = 0;
+	GLuint f0 = 0, f1 = 0;
+	std::vector<WatchZone> zones;
+	std::vector<WatchZone> parts;	// lane EMPTY240 R5-1: the sub-stages (PassTime::subBegin) inside the zones
+	WatchZone whole{ "frame", 0, 0, false };	// the paint's own CPU ns, draws and uploads
+	CacheCounts c0, c;
+};
+constexpr int kWatchSlots = 8;
+constexpr int kNotOpen = -100;
+constexpr size_t kWatchParts = 96;	// parts a paint records at most (a sub opened per draw stops there)
+struct Watch
+{
+	bool loaded = false, red = false, inFrame = false;
+	bool partGpu = false;	// lane EMPTY240 R6-1: parts take a GPU timestamp pair (red WW_WATCHPART_RED=1, build 78)
+	QOpenGLContext * ctx = nullptr;
+	QOpenGLFunctions_3_3_Core * gl = nullptr;
+	std::vector<GLuint> pool;
+	WatchSlot ring[kWatchSlots];
+	int cur = 0, depth = 0, top = -1;
+	int open[Count];
+	int partOpen[SubCount];
+	quint64 n = 0;
+	qint64 draws = 0;	// PassTime::countDraw calls, timers on or off
+};
+Watch & watch()
+{
+	static Watch w;
+	if ( !w.loaded ) {
+		w.loaded = true;
+		w.red = wwEnvInt( "WW_GPUZONES_RED" ) == 1;
+		/* lane EMPTY240 R6-1: build 78 put two glQueryCounter calls round every sub-stage of every paint (96 at most);
+		 * a part's GPU figure also read an unflushed timestamp across a CPU stall (frame 526's 286 ms "tone-vrs" was
+		 * the CPU's ram census). Parts now take the CPU clock, draws and uploads only; zones keep their GPU pairs. */
+		w.partGpu = wwEnvInt( "WW_WATCHPART_RED" ) == 1;
+		if ( !w.red )
+			std::fprintf( stderr, "frame gpu zones: parts %s (WW_WATCHPART_RED=1 = a GPU timestamp pair per part, build 78)\n",
+				w.partGpu ? "take GPU timestamps" : "take CPU stamps only" );
+		for ( int & o : w.open )
+			o = kNotOpen;
+		for ( int & o : w.partOpen )
+			o = -1;
+	}
+	return w;
+}
+GLuint watchQuery()
+{
+	Watch & w = watch();
+	if ( w.pool.empty() ) {
+		GLuint q[64];
+		w.gl->glGenQueries( 64, q );
+		w.pool.insert( w.pool.end(), q, q + 64 );
+	}
+	const GLuint q = w.pool.back();
+	w.pool.pop_back();
+	return q;
+}
+double watchMs( GLuint a, GLuint b )
+{
+	GLuint64 t0 = 0, t1 = 0;
+	watch().gl->glGetQueryObjectui64v( a, GL_QUERY_RESULT, &t0 );
+	watch().gl->glGetQueryObjectui64v( b, GL_QUERY_RESULT, &t1 );
+	return t1 > t0 ? double( t1 - t0 ) * 1e-6 : 0.0;
+}
+// lane EMPTY240 R5-1: the CPU clock, the draws and the uploads now, into a zone's start or end
+void watchStamp( WatchZone & z, bool end )
+{
+	const CacheCounts & cc = cacheCounts();
+	( end ? z.c1 : z.c0 ) = nowNs();
+	( end ? z.d1 : z.d0 ) = watch().draws;
+	( end ? z.t1 : z.t0 ) = cc.texMade;
+	( end ? z.m1 : z.m0 ) = cc.made;
+}
+// one figure of the `frame gpu zones:` line: GPU ms [cpu ms, draws, textures, meshes]
+struct WatchSum
+{
+	const char * name = nullptr;
+	double gpu = 0.0, cpu = 0.0;
+	qint64 draws = 0, tex = 0, meshes = 0;
+	int times = 0;
+};
+void watchAdd( std::vector<WatchSum> & sums, const char * name, double gpu, qint64 cpuNs, qint64 draws, qint64 tex, qint64 meshes )
+{
+	size_t k = 0;
+	while ( k < sums.size() && std::strcmp( sums[k].name, name ) != 0 )
+		k++;
+	if ( k == sums.size() ) {
+		sums.push_back( WatchSum() );
+		sums[k].name = name;
+	}
+	sums[k].gpu += gpu;
+	sums[k].cpu += double( std::max<qint64>( 0, cpuNs ) ) * 1e-6;
+	sums[k].draws += draws;
+	sums[k].tex += tex;
+	sums[k].meshes += meshes;
+	sums[k].times++;
+}
+QByteArray watchFigure( const WatchSum & s, bool times, bool gpu = true )
+{
+	QByteArray f = gpu ? QByteArray::number( s.gpu, 'f', 1 ) : QByteArray( "-" );
+	if ( times && s.times > 1 )
+		f += " (x" + QByteArray::number( s.times ) + ")";
+	f += " [cpu " + QByteArray::number( s.cpu, 'f', 1 ) + ", " + QByteArray::number( s.draws ) + " draws";
+	if ( s.tex > 0 )
+		f += ", " + QByteArray::number( s.tex ) + " textures";
+	if ( s.meshes > 0 )
+		f += ", " + QByteArray::number( s.meshes ) + " meshes";
+	return f + "]";
+}
+/* lane EMPTY240 R9-a: build 83's first stall line read "148237 evictions (2067050 MB)": the NVX counters (0x904A count,
+ * 0x904B KB) are the driver's totals since the device started, not this process's, and 2067050 MB = 2.1e9 KB sits at the
+ * top of a 32-bit GLint. The first collected paint now reads both as the base, the stall line prints unsigned 32-bit
+ * differences from it ("since this view's first paint", then "since the last stall line"), and the page faults likewise.
+ * Red WW_STALLBASE_RED=1: the raw totals on the first line, build 83. */
+struct StallBase
+{
+	GLint evictions = -1, evictedKb = 0;
+	unsigned long faults = 0;
+	bool based = false, firstLine = true, red = false;
+};
+StallBase & stallBase()
+{
+	static StallBase s;
+	return s;
+}
+void stallBaseTake( Watch & w )
+{
+	StallBase & s = stallBase();
+	if ( s.based )
+		return;
+	s.based = true;
+	s.red = wwEnvInt( "WW_STALLBASE_RED" ) == 1 || wwEnvInt( "WW_GPUSTALL_RED" ) == 1;
+	if ( s.red )
+		return;
+	QOpenGLContext * ctx = QOpenGLContext::currentContext();
+	if ( ctx && ctx->hasExtension( QByteArrayLiteral( "GL_NVX_gpu_memory_info" ) ) ) {
+		while ( w.gl->glGetError() != GL_NO_ERROR ) {
+		}
+		GLint e = -1, kb = 0;
+		w.gl->glGetIntegerv( 0x904A, &e );
+		w.gl->glGetIntegerv( 0x904B, &kb );
+		while ( w.gl->glGetError() != GL_NO_ERROR ) {
+		}
+		if ( e >= 0 ) {
+			s.evictions = e;
+			s.evictedKb = kb;
+		}
+	}
+#ifdef Q_OS_WIN
+	PROCESS_MEMORY_COUNTERS pm0;
+	std::memset( &pm0, 0, sizeof( pm0 ) );
+	pm0.cb = sizeof( pm0 );
+	if ( GetProcessMemoryInfo( GetCurrentProcess(), &pm0, sizeof( pm0 ) ) )
+		s.faults = pm0.PageFaultCount;
+#endif
+}
+void watchCollect( WatchSlot & sl )
+{
+	Watch & w = watch();
+	if ( !sl.pending )
+		return;
+	GLuint avail = 0;
+	w.gl->glGetQueryObjectuiv( sl.f1, GL_QUERY_RESULT_AVAILABLE, &avail );
+	if ( !avail )
+		return;
+	sl.pending = false;
+	const double total = watchMs( sl.f0, sl.f1 );
+	stallBaseTake( w );	// lane EMPTY240 R9-a: the counters' base, at the first collected paint
+	if ( total > 250.0 ) {
+		/* zones of one name summed, in first-seen order. R5-1: each with the CPU ms the paint spent in it, its draws and
+		 * its uploads (a zone whose CPU ms match its GPU ms is the CPU's: the GPU waited for the commands); the gaps
+		 * between the zones named by the zone before them; the sub-stages inside the zones as parts */
+		std::vector<WatchSum> zones, gaps, parts;
+		double held = 0.0;
+		GLuint prevQ = sl.f0;
+		const WatchZone * prev = &sl.whole;
+		bool prevEnd = false;
+		auto gap = [&]( GLuint q, const WatchZone & z ) {
+			const qint64 c = prevEnd ? prev->c1 : prev->c0, d = prevEnd ? prev->d1 : prev->d0;
+			const qint64 t = prevEnd ? prev->t1 : prev->t0, m = prevEnd ? prev->m1 : prev->m0;
+			watchAdd( gaps, prevEnd ? prev->name : "before the first zone", watchMs( prevQ, q ), z.c0 - c, z.d0 - d,
+				z.t0 - t, z.m0 - m );
+		};
+		for ( const WatchZone & z : sl.zones ) {
+			if ( !z.closed )
+				continue;
+			const double m = watchMs( z.q0, z.q1 );
+			held += m;
+			watchAdd( zones, z.name, m, z.c1 - z.c0, z.d1 - z.d0, z.t1 - z.t0, z.m1 - z.m0 );
+			gap( z.q0, z );
+			prevQ = z.q1;
+			prev = &z;
+			prevEnd = true;
+		}
+		{	// the last zone's end to the paint's end
+			WatchZone fin = sl.whole;
+			fin.c0 = fin.c1;
+			fin.d0 = fin.d1;
+			fin.t0 = fin.t1;
+			fin.m0 = fin.m1;
+			gap( sl.f1, fin );
+		}
+		for ( const WatchZone & z : sl.parts )
+			if ( z.closed )
+				watchAdd( parts, z.name, z.q0 ? watchMs( z.q0, z.q1 ) : 0.0, z.c1 - z.c0, z.d1 - z.d0, z.t1 - z.t0, z.m1 - z.m0 );
+		const WatchZone & a = sl.whole;
+		QByteArray line = "frame gpu zones: frame " + QByteArray::number( sl.frame ) + " took "
+			+ QByteArray::number( total, 'f', 1 ) + " ms on the GPU [cpu " + QByteArray::number( double( a.c1 - a.c0 ) * 1e-6, 'f', 1 )
+			+ ", " + QByteArray::number( a.d1 - a.d0 ) + " draws] =";
+		for ( const WatchSum & s : zones ) {
+			if ( s.gpu < 0.5 && s.cpu < 0.5 )
+				continue;
+			line += " " + QByteArray( s.name ) + " " + watchFigure( s, true ) + " +";
+		}
+		line += " outside the zones " + QByteArray::number( std::max( 0.0, total - held ), 'f', 1 );
+		QByteArray after;
+		for ( const WatchSum & s : gaps ) {
+			if ( s.gpu < 0.5 && s.cpu < 0.5 )
+				continue;
+			after += QByteArray( after.isEmpty() ? "" : " +" ) + " after " + s.name + " " + watchFigure( s, false );
+		}
+		if ( !after.isEmpty() )
+			line += " (" + after.mid( 1 ) + ")";
+		QByteArray inside;
+		for ( const WatchSum & s : parts ) {
+			if ( s.gpu < 0.5 && s.cpu < 0.5 )
+				continue;
+			inside += QByteArray( inside.isEmpty() ? "" : " +" ) + " " + s.name + " " + watchFigure( s, true, w.partGpu );
+		}
+		if ( !inside.isEmpty() )
+			line += " | parts:" + inside;
+		line += " | this paint uploaded " + QByteArray::number( sl.c.texMade ) + " textures ("
+			+ QByteArray::number( double( sl.c.texBytes ) / 1048576.0, 'f', 1 ) + " MB; "
+			+ QByteArray::number( sl.c.texPumped ) + " by the pump), " + QByteArray::number( sl.c.made ) + " meshes ("
+			+ QByteArray::number( double( sl.c.madeBytes ) / 1048576.0, 'f', 1 ) + " MB)";
+		std::fprintf( stderr, "%s\n", line.constData() );
+		/* lane EMPTY240 R8-1: build 82's frame 152 spent 7206.8 ms in opaque on the GPU with 7.6 ms of CPU and 256 draws:
+		 * the GPU waited on something no zone holds. A paint over a second names what it waited on: the driver's
+		 * evictions (video memory paged out to make room) and the process's page faults since the last such line, the
+		 * free video memory, and the process's private bytes and working set beside the free RAM. Evictions or hard
+		 * faults growing with the stall = the memory manager paged; none = a wait on another queue (the Vulkan frame's
+		 * semaphores) or the device itself. Red WW_GPUSTALL_RED=1: no line, build 82. */
+		WW_SWITCH_STATIC( bool, stallRed, wwEnvInt( "WW_GPUSTALL_RED" ) == 1 );
+		StallBase & sb = stallBase();
+		const bool baseRed = sb.red;
+		GLint & lastEvictions = sb.evictions;
+		GLint & lastEvictedKb = sb.evictedKb;
+		unsigned long & lastFaults = sb.faults;
+		bool & stallFirstLine = sb.firstLine;
+		if ( total > 1000.0 && !stallRed ) {
+			GLint evictions = -1, evictedKb = 0, freeKb = -1, totalKb = -1;
+			QOpenGLContext * ctx = QOpenGLContext::currentContext();
+			if ( ctx && ctx->hasExtension( QByteArrayLiteral( "GL_NVX_gpu_memory_info" ) ) ) {
+				while ( w.gl->glGetError() != GL_NO_ERROR ) {
+				}
+				w.gl->glGetIntegerv( 0x904A, &evictions );	// GPU_MEMORY_INFO_EVICTION_COUNT_NVX
+				w.gl->glGetIntegerv( 0x904B, &evictedKb );	// GPU_MEMORY_INFO_EVICTED_MEMORY_NVX
+				w.gl->glGetIntegerv( 0x9049, &freeKb );	// GPU_MEMORY_INFO_CURRENT_AVAILABLE_VIDMEM_NVX
+				w.gl->glGetIntegerv( 0x9048, &totalKb );	// GPU_MEMORY_INFO_TOTAL_AVAILABLE_MEMORY_NVX
+				while ( w.gl->glGetError() != GL_NO_ERROR ) {
+				}
+			}
+			const WatchSum * worst = nullptr;
+			for ( const WatchSum & s : zones )
+				if ( !worst || s.gpu > worst->gpu )
+					worst = &s;
+			QByteArray stall = "frame gpu stall: frame " + QByteArray::number( sl.frame ) + " " + QByteArray::number( total, 'f', 1 )
+				+ " ms on the GPU, longest zone " + QByteArray( worst ? worst->name : "none" ) + " "
+				+ QByteArray::number( worst ? worst->gpu : 0.0, 'f', 1 ) + " ms against its cpu "
+				+ QByteArray::number( worst ? worst->cpu : 0.0, 'f', 1 ) + " ms | video memory: ";
+			const char * since = stallFirstLine ? ( baseRed ? "since the device started" : "since this view's first paint" )
+				: "since the last stall line";
+			if ( evictions >= 0 ) {
+				const quint32 dn = lastEvictions >= 0 ? quint32( evictions ) - quint32( lastEvictions ) : quint32( evictions );
+				const quint32 dkb = lastEvictions >= 0 ? quint32( evictedKb ) - quint32( lastEvictedKb ) : quint32( evictedKb );
+				stall += QByteArray::number( dn ) + " evictions (" + QByteArray::number( double( dkb ) / 1024.0, 'f', 1 )
+					+ " MB) " + since + ", " + QByteArray::number( freeKb / 1024 ) + " of "
+					+ QByteArray::number( totalKb / 1024 ) + " MB free";
+				lastEvictions = evictions;
+				lastEvictedKb = evictedKb;
+			} else {
+				stall += "no NVX memory counters on this driver";
+			}
+#ifdef Q_OS_WIN
+			PROCESS_MEMORY_COUNTERS_EX pm;
+			std::memset( &pm, 0, sizeof( pm ) );
+			pm.cb = sizeof( pm );
+			MEMORYSTATUSEX ms;
+			std::memset( &ms, 0, sizeof( ms ) );
+			ms.dwLength = sizeof( ms );
+			if ( GetProcessMemoryInfo( GetCurrentProcess(), reinterpret_cast<PROCESS_MEMORY_COUNTERS *>( &pm ), sizeof( pm ) )
+				&& GlobalMemoryStatusEx( &ms ) ) {
+				stall += " | process: " + QByteArray::number( qint64( pm.PageFaultCount - lastFaults ) ) + " page faults " + since
+					+ ", private " + QByteArray::number( qint64( pm.PrivateUsage >> 20 ) ) + " MB, working set "
+					+ QByteArray::number( qint64( pm.WorkingSetSize >> 20 ) ) + " MB, RAM free "
+					+ QByteArray::number( qint64( ms.ullAvailPhys >> 20 ) ) + " of " + QByteArray::number( qint64( ms.ullTotalPhys >> 20 ) )
+					+ " MB, commit free " + QByteArray::number( qint64( ms.ullAvailPageFile >> 20 ) ) + " MB";
+				lastFaults = pm.PageFaultCount;
+			}
+#endif
+			stall += " (R8-1, R9-a; red WW_GPUSTALL_RED=1: no line, build 82; WW_STALLBASE_RED=1: device totals, build 83)";
+			stallFirstLine = false;
+			std::fprintf( stderr, "%s\n", stall.constData() );
+		}
+	}
+	for ( const WatchZone & z : sl.zones ) {
+		w.pool.push_back( z.q0 );
+		w.pool.push_back( z.q1 );
+	}
+	for ( const WatchZone & z : sl.parts ) {
+		if ( !z.q0 )
+			continue;
+		w.pool.push_back( z.q0 );
+		w.pool.push_back( z.q1 );
+	}
+	sl.zones.clear();
+	sl.parts.clear();
+	w.pool.push_back( sl.f0 );
+	w.pool.push_back( sl.f1 );
+}
+void watchPass( int pass, bool opening )
+{
+	Watch & w = watch();
+	if ( pass < 0 || pass >= CullCamera )
+		return;
+	if ( opening ) {
+		if ( w.open[pass] == kNotOpen && w.inFrame )
+			w.open[pass] = zoneBegin( name( pass ) );
+	} else if ( w.open[pass] != kNotOpen ) {
+		zoneEnd( w.open[pass] );
+		w.open[pass] = kNotOpen;
+	}
+}
+// lane EMPTY240 R5-1: a sub-stage (PassTime::subBegin/subEnd, timers on or off) as a part of the open zone
+void watchPart( int sub, bool opening )
+{
+	Watch & w = watch();
+	if ( !w.inFrame || sub < 0 || sub >= SubCount )
+		return;
+	WatchSlot & sl = w.ring[w.cur];
+	if ( opening ) {
+		if ( w.partOpen[sub] >= 0 || sl.parts.size() >= kWatchParts )
+			return;
+		WatchZone z{ kSubName[sub], w.partGpu ? watchQuery() : 0u, w.partGpu ? watchQuery() : 0u, false };
+		z.parent = w.top;
+		watchStamp( z, false );
+		if ( z.q0 )
+			w.gl->glQueryCounter( z.q0, GL_TIMESTAMP );
+		sl.parts.push_back( z );
+		w.partOpen[sub] = int( sl.parts.size() ) - 1;
+		return;
+	}
+	if ( w.partOpen[sub] < 0 )
+		return;
+	WatchZone & z = sl.parts[size_t( w.partOpen[sub] )];
+	if ( z.q1 )
+		w.gl->glQueryCounter( z.q1, GL_TIMESTAMP );
+	watchStamp( z, true );
+	z.closed = true;
+	w.partOpen[sub] = -1;
+}
+}	// namespace
+
+void gpuWatchFrame( bool opening, quint64 frame )
+{
+	Watch & w = watch();
+	if ( w.red )
+		return;
+	if ( opening ) {
+		w.inFrame = false;
+		QOpenGLContext * c = QOpenGLContext::currentContext();
+		if ( !c )
+			return;
+		if ( c != w.ctx ) {
+			w.ctx = c;
+			w.gl = QOpenGLVersionFunctionsFactory::get<QOpenGLFunctions_3_3_Core>( c );
+			w.pool.clear();
+			for ( WatchSlot & sl : w.ring ) {
+				sl.pending = false;
+				sl.zones.clear();
+				sl.parts.clear();
+			}
+		}
+		if ( !w.gl )
+			return;
+		for ( WatchSlot & sl : w.ring )
+			watchCollect( sl );
+		const int k = int( w.n++ % quint64( kWatchSlots ) );
+		WatchSlot & sl = w.ring[k];
+		if ( sl.pending )
+			return;	// still on the GPU after 8 paints: this paint goes untimed
+		sl.frame = frame;
+		sl.f0 = watchQuery();
+		sl.f1 = watchQuery();
+		sl.c0 = cacheCounts();
+		watchStamp( sl.whole, false );
+		w.gl->glQueryCounter( sl.f0, GL_TIMESTAMP );
+		w.cur = k;
+		w.depth = 0;
+		w.top = -1;
+		for ( int & o : w.open )
+			o = kNotOpen;
+		for ( int & o : w.partOpen )
+			o = -1;
+		w.inFrame = true;
+		return;
+	}
+	if ( !w.inFrame )
+		return;
+	WatchSlot & sl = w.ring[w.cur];
+	for ( WatchZone & z : sl.parts )
+		if ( !z.closed ) {
+			w.gl->glQueryCounter( z.q1, GL_TIMESTAMP );
+			watchStamp( z, true );
+			z.closed = true;
+		}
+	for ( WatchZone & z : sl.zones )
+		if ( !z.closed ) {
+			w.gl->glQueryCounter( z.q1, GL_TIMESTAMP );
+			watchStamp( z, true );
+			z.closed = true;
+		}
+	w.gl->glQueryCounter( sl.f1, GL_TIMESTAMP );
+	watchStamp( sl.whole, true );
+	const CacheCounts & cc = cacheCounts();
+	sl.c.made = cc.made - sl.c0.made;
+	sl.c.madeBytes = cc.madeBytes - sl.c0.madeBytes;
+	sl.c.texMade = cc.texMade - sl.c0.texMade;
+	sl.c.texBytes = cc.texBytes - sl.c0.texBytes;
+	sl.c.texPumped = cc.texPumped - sl.c0.texPumped;
+	sl.pending = true;
+	w.inFrame = false;
+	w.top = -1;
+}
+
+int zoneBegin( const char * zoneName )
+{
+	Watch & w = watch();
+	if ( !w.inFrame )
+		return -1;
+	if ( w.depth++ > 0 )
+		return -2;	// nested: the outer zone holds it
+	WatchSlot & sl = w.ring[w.cur];
+	WatchZone z{ zoneName, watchQuery(), watchQuery(), false };
+	watchStamp( z, false );
+	w.gl->glQueryCounter( z.q0, GL_TIMESTAMP );
+	sl.zones.push_back( z );
+	w.top = int( sl.zones.size() ) - 1;
+	return w.top;
+}
+
+void zoneEnd( int zone )
+{
+	Watch & w = watch();
+	if ( zone == -1 || !w.inFrame )
+		return;
+	if ( w.depth > 0 )
+		w.depth--;
+	WatchSlot & sl = w.ring[w.cur];
+	if ( zone < 0 || size_t( zone ) >= sl.zones.size() || sl.zones[size_t( zone )].closed )
+		return;
+	w.gl->glQueryCounter( sl.zones[size_t( zone )].q1, GL_TIMESTAMP );
+	watchStamp( sl.zones[size_t( zone )], true );
+	sl.zones[size_t( zone )].closed = true;
+	w.top = -1;
+}
+
 int openPass()
 {
 	const State & s = st();
@@ -519,8 +1052,17 @@ qint64 nowNs()
 	return st().clock.nsecsElapsed();
 }
 
+static void gapClose( State & s )	// lane VKFRAME1 build 88
+{
+	if ( s.gapT0 >= 0 )
+		s.gapSum[s.gapAfter < 0 ? Count : s.gapAfter] += double( nowNs() - s.gapT0 - s.gapNamed ) * 1e-6;
+	s.gapT0 = -1;
+	s.gapNamed = 0;
+}
+
 void frameBegin()
 {
+	::wwMainStep( "a frame's start" );	// lane PERFLOAD1 P5: a stall inside a frame names its pass, timers on or off
 	State & s = st();
 	if ( !s.on ) {
 		s.inFrame = false;
@@ -563,28 +1105,40 @@ void frameBegin()
 		m = -1;
 	Sampler::start();
 	Sampler::pass = -1;
-	sl.f0 = query();
-	sl.f1 = query();
+	s.stamp = s.sampleRed || s.sync || s.census || s.lightLoop || s.frame % kStampEvery == 0
+		|| WwTelemetry::costDue( s.frame );	// lane EMPTY240 R10-1
+	sl.stamped = s.stamp;
+	sl.f0 = s.stamp ? query() : 0u;
+	sl.f1 = s.stamp ? query() : 0u;
 	sl.cache0 = cacheCounts();
-	s.gl->glQueryCounter( sl.f0, GL_TIMESTAMP );
+	if ( s.stamp )
+		s.gl->glQueryCounter( sl.f0, GL_TIMESTAMP );
 	s.frameT0 = nowNs();
 	s.inFrame = true;
+	s.gapT0 = s.frameT0;	// lane VKFRAME1 build 88
+	s.gapAfter = -1;
+	s.gapNamed = 0;
 }
 
 void begin( int pass )
 {
+	::wwMainStep( name( pass ) );	// lane PERFLOAD1 P5
+	watchPass( pass, true );	// lane EMPTY240 R3-0
 	State & s = st();
 	if ( !s.inFrame || pass < 0 || pass >= Count || s.openMark[pass] >= 0 )
 		return;
 	if ( pass < CullCamera && !s.stack.empty() )
 		return;	// nested (the measure's own scene draw): the outer pass holds its time and its draws
 	Slot & sl = s.ring[s.frame % kSlots];
+	if ( pass < CullCamera )
+		gapClose( s );	// lane VKFRAME1 build 88
 	if ( s.sync && pass < CullCamera )
 		s.gl->glFinish();
 	s.open[pass] = nowNs();
 	if ( pass < CullCamera ) {
-		Mark m{ pass, query(), query() };
-		s.gl->glQueryCounter( m.q0, GL_TIMESTAMP );
+		Mark m{ pass, s.stamp ? query() : 0u, s.stamp ? query() : 0u };	// lane EMPTY240 R10-1
+		if ( m.q0 )
+			s.gl->glQueryCounter( m.q0, GL_TIMESTAMP );
 		if ( s.census ) {	// top-level passes never nest (above), so one query of each target is open at a time
 			m.qs = cquery();
 			m.qp = cquery();
@@ -606,6 +1160,7 @@ void begin( int pass )
 
 void end( int pass )
 {
+	watchPass( pass, false );	// lane EMPTY240 R3-0
 	State & s = st();
 	if ( !s.inFrame || pass < 0 || pass >= Count || s.openMark[pass] < 0 )
 		return;
@@ -617,7 +1172,8 @@ void end( int pass )
 	}
 	sl.cpu[pass] += double( nowNs() - s.open[pass] ) * 1e-6;
 	if ( pass < CullCamera ) {
-		s.gl->glQueryCounter( sl.marks[s.openMark[pass]].q1, GL_TIMESTAMP );
+		if ( sl.marks[s.openMark[pass]].q1 )	// lane EMPTY240 R10-1
+			s.gl->glQueryCounter( sl.marks[s.openMark[pass]].q1, GL_TIMESTAMP );
 		if ( sl.marks[s.openMark[pass]].qs ) {
 			s.gl->glEndQuery( GL_SAMPLES_PASSED );
 			s.gl->glEndQuery( GL_PRIMITIVES_GENERATED );
@@ -630,8 +1186,46 @@ void end( int pass )
 				break;
 			}
 		Sampler::pass = s.stack.empty() ? -1 : s.stack.back();
+		if ( s.stack.empty() ) {	// lane VKFRAME1 build 88: a gap opens
+			s.gapT0 = nowNs();
+			s.gapAfter = pass;
+			s.gapNamed = 0;
+		}
 	}
 	s.openMark[pass] = -1;
+}
+
+void gapNamed( double seconds )
+{
+	State & s = st();
+	if ( !s.inFrame || s.gapT0 < 0 )
+		return;
+	const qint64 ns = qint64( seconds * 1e9 ), open = nowNs() - s.gapT0;	// a part that began before the gap: its share
+	s.gapNamed += ns < open ? ns : open;
+}
+
+QByteArray otherInFrameTake()
+{
+	State & s = st();
+	QByteArray out;
+	if ( s.gapFrames > 0 ) {
+		int order[Count + 1];
+		double sum = 0.0;
+		for ( int i = 0; i <= Count; i++ ) {
+			order[i] = i;
+			sum += s.gapSum[i];
+		}
+		std::sort( order, order + Count + 1, [&s]( int a, int b ) { return s.gapSum[a] > s.gapSum[b]; } );
+		const double n = double( s.gapFrames );
+		out = " | other-in-frame by the pass before it " + QByteArray::number( sum / n, 'f', 2 ) + " =";
+		for ( int i = 0; i < 6 && s.gapSum[order[i]] / n >= 0.005; i++ )
+			out += QByteArray( i ? " + " : " " ) + ( order[i] == Count ? QByteArray( "frame-start" )
+				: QByteArray( "after " ) + name( order[i] ) ) + " " + QByteArray::number( s.gapSum[order[i]] / n, 'f', 2 );
+	}
+	for ( double & g : s.gapSum )
+		g = 0.0;
+	s.gapFrames = 0;
+	return out;
 }
 
 void cpuSubAdd( int sub, qint64 ns )
@@ -653,6 +1247,7 @@ void addCpu( int pass, qint64 ns )
 
 void countDraw( qint64 ranges )
 {
+	watch().draws++;	// lane EMPTY240 R5-1: the GPU zones' draws (timers on or off)
 	State & s = st();
 	if ( !s.inFrame )
 		return;
@@ -664,8 +1259,9 @@ void countDraw( qint64 ranges )
 
 void subBegin( int sub )
 {
+	watchPart( sub, true );	// lane EMPTY240 R5-1
 	State & s = st();
-	if ( !s.inFrame || sub < 0 || sub >= SubCount || s.openSub[sub] >= 0 )
+	if ( !s.inFrame || !s.stamp || sub < 0 || sub >= SubCount || s.openSub[sub] >= 0 )	// lane EMPTY240 R10-1: !stamp
 		return;
 	Slot & sl = s.ring[s.frame % kSlots];
 	Mark m{ sub, query(), query() };
@@ -676,6 +1272,7 @@ void subBegin( int sub )
 
 void subEnd( int sub )
 {
+	watchPart( sub, false );	// lane EMPTY240 R5-1
 	State & s = st();
 	if ( !s.inFrame || sub < 0 || sub >= SubCount || s.openSub[sub] < 0 )
 		return;
@@ -683,11 +1280,29 @@ void subEnd( int sub )
 	s.openSub[sub] = -1;
 }
 
+void subAddMs( int sub, double ms )
+{
+	State & s = st();
+	if ( !s.inFrame || sub < 0 || sub >= SubCount )
+		return;
+	Slot & sl = s.ring[s.frame % kSlots];
+	sl.subExt[sub] += ms;
+	sl.subExtSeen[sub] = true;
+}
+
+static double s_lastCpuSum = 0.0;	// lane EMPTY240 item 1
+
+double lastFrameCpuSumMs()
+{
+	return s_lastCpuSum;
+}
+
 void frameEnd()
 {
 	State & s = st();
 	if ( s.memArmed > 0 && --s.memArmed == 0 )
 		memLog( "first frames drawn" );
+	s_lastCpuSum = 0.0;
 	if ( !s.inFrame )
 		return;
 	Slot & sl = s.ring[s.frame % kSlots];
@@ -697,10 +1312,15 @@ void frameEnd()
 	}
 	for ( int k = 0; k < SubCount; k++ )
 		subEnd( k );
+	gapClose( s );	// lane VKFRAME1 build 88: the last pass to the frame's end
+	s.gapFrames++;
 	s.inFrame = false;
 	Sampler::pass = -2;
-	s.gl->glQueryCounter( sl.f1, GL_TIMESTAMP );
+	if ( sl.stamped )	// lane EMPTY240 R10-1
+		s.gl->glQueryCounter( sl.f1, GL_TIMESTAMP );
 	sl.cpuFrame = double( nowNs() - s.frameT0 ) * 1e-6;
+	for ( int p = 0; p < CullCamera; p++ )	// the CPU-only rows after it sit inside the passes
+		s_lastCpuSum += sl.cpu[p];
 	const CacheCounts & cc = cacheCounts();
 	sl.cache.made = cc.made - sl.cache0.made;
 	sl.cache.madeBytes = cc.madeBytes - sl.cache0.madeBytes;
@@ -709,7 +1329,7 @@ void frameEnd()
 	sl.cache.maxBytes = cc.maxBytes;
 	sl.cache.texMade = cc.texMade - sl.cache0.texMade;
 	sl.cache.texBytes = cc.texBytes - sl.cache0.texBytes;
-	if ( s.log ) {
+	if ( s.log && sl.stamped ) {	// lane EMPTY240 R10-1: the pass line's private MB, on its frames only
 		qint64 wm = 0;
 		memory( sl.privMb, wm );
 	}
@@ -750,7 +1370,7 @@ void frameEnd()
 
 QStringList overlay()
 {
-	return st().on ? st().lines : QStringList();
+	return st().on && st().text ? st().lines : QStringList();
 }
 
 void memory( qint64 & privateMb, qint64 & workingMb )
@@ -835,8 +1455,13 @@ qint64 videoMemoryMb( qint64 * usedMb )
 /* MODULES1 (11-06): where the working set lives, once at the first full frame. Committed regions by type (private
  * <1 MB / 1-64 MB / >=64 MB, mapped files, images) with the resident share sampled through QueryWorkingSetEx (up to 64
  * pages a region, scaled), plus the process heaps' busy bytes. Private >=64 MB with little resident is driver commit. */
+/* lane EMPTY240 R6-4: build 78's frame 526 (the first full frame) held the paint thread 285.8 ms "after overlays": the
+ * HeapLock + HeapWalk over every heap block (~3M under 256 B), read as 286 ms of "tone-vrs" on the GPU. The region census
+ * now runs on a worker (VirtualQuery / QueryWorkingSetEx need no lock) and the block walk only on the red, since a walk
+ * holds every heap's lock and stops each thread that allocates. Red WW_RAMOWNERS_RED=1: the full census on the paint
+ * thread, build 78. */
 #ifdef Q_OS_WIN
-static QString ramOwnersLine()
+static QString ramOwnersLine( bool heapWalk, const QString & tail )
 {
 	static const char * kName[5] = { "private<1MB", "private1-64MB", "private>=64MB", "mapped", "image" };
 	double commit[5] = {}, res[5] = {};
@@ -871,6 +1496,8 @@ static QString ramOwnersLine()
 	QString s = QStringLiteral( "ram owners:" );
 	for ( int b = 0; b < 5; b++ )
 		s += QString::asprintf( " %s commit=%.0f ws~%.0f MB", kName[b], commit[b] / 1048576.0, res[b] / 1048576.0 );
+	if ( !heapWalk )
+		return s + tail;
 	PROCESS_HEAP_ENTRY e;
 	double busy = 0;
 	// MODULES1 p18: busy heap bytes by block size (who owns the heaps: many small = document items, big = arrays)
@@ -893,11 +1520,7 @@ static QString ramOwnersLine()
 			}
 		HeapUnlock( heaps[i] );
 	}
-	double trimMs = 0.0;
-	const unsigned long long trims = (unsigned long long)FileBuffer::mappedViewTrims( &trimMs );
-	s += QString::asprintf( " | heaps %lu busy=%.0f MB | staged=%.0f MB direct=%.0f MB | archive trims=%llu (max %.1f ms)",
-		(unsigned long)nh, busy / 1048576.0, double( gpuStageCounts().stagedBytes.load() ) / 1048576.0,
-		double( gpuStageCounts().directBytes.load() ) / 1048576.0, trims, trimMs );
+	s += QString::asprintf( " | heaps %lu busy=%.0f MB", (unsigned long)nh, busy / 1048576.0 ) + tail;
 	static const char * kSz[6] = { "<256B", "<4K", "<64K", "<1M", "<16M", ">=16M" };
 	s += QStringLiteral( " | heap blocks" );
 	for ( int k = 0; k < 6; k++ )
@@ -980,7 +1603,25 @@ void stream1PaintEnd( bool ready, double paintMs )
 				(long long)( cc.made - l.made0 ), (long long)made, (long long)madeBytes );
 			std::fprintf( stderr, "%s\n", qPrintable( stream1MemLine( "first full frame" ) ) );
 #ifdef Q_OS_WIN
-			std::fprintf( stderr, "%s\n", qPrintable( ramOwnersLine() ) );
+			{	// lane EMPTY240 R6-4: the staged counts and archive trims read here, the census on a worker
+				double trimMs = 0.0;
+				const unsigned long long trims = (unsigned long long)FileBuffer::mappedViewTrims( &trimMs );
+				const QString tail = QString::asprintf( " | staged=%.0f MB direct=%.0f MB | archive trims=%llu (max %.1f ms)",
+					double( gpuStageCounts().stagedBytes.load() ) / 1048576.0,
+					double( gpuStageCounts().directBytes.load() ) / 1048576.0, trims, trimMs );
+				if ( wwEnvInt( "WW_RAMOWNERS_RED" ) == 1 ) {
+					const qint64 at = nowNs();
+					const QString line = ramOwnersLine( true, tail );
+					std::fprintf( stderr, "%s | census %.1f ms on the paint thread (WW_RAMOWNERS_RED=1, build 78)\n",
+						qPrintable( line ), double( nowNs() - at ) * 1e-6 );
+				} else
+					std::thread( [tail]() {
+						const qint64 at = nowNs();
+						const QString line = ramOwnersLine( false, tail );
+						std::fprintf( stderr, "%s | census %.1f ms on a worker, heap block walk off (WW_RAMOWNERS_RED=1 = on the "
+							"paint thread with the walk, build 78)\n", qPrintable( line ), double( nowNs() - at ) * 1e-6 );
+					} ).detach();
+			}
 #endif
 		}
 		return;
@@ -1050,3 +1691,37 @@ void stream1Hitch( double * maxMs, int * over, int * frames, bool reset )
 }
 
 } // namespace PassTime
+
+// lane EMPTY240 ITEM 0: the system timer's resolution, said in the frame pacing line (framepacer.h)
+double wwTimerResolutionMs()
+{
+#ifdef Q_OS_WIN
+	using QueryFn = LONG ( WINAPI * )( PULONG, PULONG, PULONG );
+	static const QueryFn query = reinterpret_cast<QueryFn>(
+		reinterpret_cast<void *>( GetProcAddress( GetModuleHandleW( L"ntdll.dll" ), "NtQueryTimerResolution" ) ) );
+	ULONG coarsest = 0, finest = 0, current = 0;
+	if ( query && query( &coarsest, &finest, &current ) == 0 )
+		return double( current ) * 1.0e-4;	// 100 ns units
+#endif
+	return -1.0;
+}
+
+bool wwPreciseSleep( double seconds )
+{
+#ifdef Q_OS_WIN
+	// a Sleep( 1 ) took 14-24 ms on bungo's PC even after timeBeginPeriod( 1 ); this timer 0.55 ms for 0.5 (11-12)
+	static HANDLE timer = CreateWaitableTimerExW( nullptr, nullptr, 0x00000002 /* CREATE_WAITABLE_TIMER_HIGH_RESOLUTION */,
+		TIMER_ALL_ACCESS );
+	if ( !timer || seconds <= 0.0 )
+		return false;
+	LARGE_INTEGER due;
+	due.QuadPart = -LONGLONG( seconds * 1.0e7 );	// relative, 100 ns units
+	if ( !SetWaitableTimerEx( timer, &due, 0, nullptr, nullptr, nullptr, 0 ) )
+		return false;
+	WaitForSingleObject( timer, 50 );
+	return true;
+#else
+	(void) seconds;
+	return false;
+#endif
+}

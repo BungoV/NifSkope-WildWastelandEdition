@@ -6,8 +6,9 @@
 // IOR 1.333) with Frostbite's rough Schlick (Lagarde and de Rousiers 2014). Sun: GGX with height-correlated Smith.
 uniform bool waterReflOn;		// the Water reflections row
 uniform bool waterGlintOn;		// the Water sun glare row
-uniform int waterReflRed;		// 1 record (the WATR's F0 and reflectivity cap), 2 farcolour (the 8192 u colour swap),
-								// 4 sharp (no roughness in the reflection), 8 noclouds (the plain sky gradient)
+uniform int waterReflRed;		// 32 grazing (FARWATER1: the clear gradient at the horizon); 1 record (the WATR's F0 and reflectivity cap), 2 farcolour (the 8192 u colour swap),
+								// 4 sharp (no roughness in the reflection), 8 noclouds (the plain sky gradient),
+								// 16 cloudedge (the cloud map's hard square edge; lane SKYSEA1)
 uniform int waterGlintRed;		// 1 game (today's sun + fixed-direction sparkle), 2 nolean (no slope variance), 4 noshoulder
 uniform vec4 waterGlintK;		// the glare's highlight shoulder (x the sun colour), F0, footprint clamp, sharp-SSR alpha
 uniform sampler2D waterMoment0;	// per noise layer: (E[t.x^2], E[t.y^2]) of the decoded slope t = 2 texel - 1
@@ -93,7 +94,11 @@ float wwWaterCloudBand( vec3 P, vec3 R, float z, float outside, int ch )
 	vec2 uv = ( P.xy + t * R.xy - waterCloudGeo.xy ) / ( 2.0 * waterCloudGeo.z ) + 0.5;
 	if ( any( lessThan( uv, vec2( 0.0 ) ) ) || any( greaterThan( uv, vec2( 1.0 ) ) ) )
 		return outside;
-	return texture( waterCloudMap, uv )[ch];
+	if ( ( waterReflRed & 16 ) != 0 )
+		return texture( waterCloudMap, uv )[ch];
+	// lane SKYSEA1: fade to the band's mean cover over the map's outer 15% (the hard square drew a line on the sea)
+	vec2 e2 = min( uv, 1.0 - uv );
+	return mix( outside, texture( waterCloudMap, uv )[ch], smoothstep( 0.0, 0.15, min( e2.x, e2.y ) ) );
 }
 
 /* the reflected sky with the weather's clouds: the reflected ray meets each band's base over CLOUD1's map, as the
@@ -101,13 +106,22 @@ float wwWaterCloudBand( vec3 P, vec3 R, float z, float outside, int ch )
  * APPROXIMATE colour: a lit cloud at 1.5 x the brightest sky colour's luminance, x the weather's tint */
 vec3 wwWaterCloudSky( vec3 sky, vec3 P, vec3 R )
 {
-	if ( waterCloudGeo.w < 0.5 || ( waterReflRed & 8 ) != 0 || R.z <= 0.0 )
+	bool graze = ( waterReflRed & 32 ) == 0;
+	if ( waterCloudGeo.w < 0.5 || ( waterReflRed & 8 ) != 0 || ( R.z <= 0.0 && !graze ) )
 		return sky;
-	float cl = wwWaterCloudBand( P, R, waterCloudZ.x, waterCloudCov.x, 0 );
-	float cm = wwWaterCloudBand( P, R, waterCloudZ.y, waterCloudCov.y, 1 );
-	float ch = wwWaterCloudBand( P, R, waterCloudZ.z, waterCloudCov.z, 3 );
-	float cov = 1.0 - ( 1.0 - cl ) * ( 1.0 - cm ) * ( 1.0 - ch );
-	cov *= smoothstep( 0.0, 0.08, R.z );	// the far band crowds into the horizon line: let it go to the sky there
+	float covMean = 1.0 - ( 1.0 - waterCloudCov.x ) * ( 1.0 - waterCloudCov.y ) * ( 1.0 - waterCloudCov.z );
+	float cov = covMean;
+	if ( R.z > 0.0 ) {
+		float cl = wwWaterCloudBand( P, R, waterCloudZ.x, waterCloudCov.x, 0 );
+		float cm = wwWaterCloudBand( P, R, waterCloudZ.y, waterCloudCov.y, 1 );
+		float ch = wwWaterCloudBand( P, R, waterCloudZ.z, waterCloudCov.z, 3 );
+		cov = 1.0 - ( 1.0 - cl ) * ( 1.0 - cm ) * ( 1.0 - ch );
+	}
+	/* the far band crowds into the horizon line under R.z 0.08 (flat water: past 12.5 x the eye's height). Lane FARWATER1:
+	 * there the cover goes to the bands' mean, the deck the drawn sky shows at the horizon; the red (WW_CELL_WATER_REFL_RED=
+	 * grazing) lets it go to the clear WTHR gradient, the deep blue band on the far water under an overcast */
+	float g = smoothstep( 0.0, 0.08, R.z );
+	cov = graze ? mix( covMean, cov, g ) : cov * g;
 	const vec3 lumW = vec3( 0.2126, 0.7152, 0.0722 );
 	float l = max( max( dot( waterSky[0].rgb, lumW ), dot( waterSky[1].rgb, lumW ) ), dot( waterSky[2].rgb, lumW ) );
 	return mix( sky, waterCloudTint * ( 1.5 * l ), clamp( cov, 0.0, 1.0 ) );

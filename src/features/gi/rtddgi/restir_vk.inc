@@ -97,6 +97,11 @@ struct RestirGpu
 	VkCommandBuffer cb = VK_NULL_HANDLE;
 	VkFence fence = VK_NULL_HANDLE;
 	VkSemaphore vkDone = VK_NULL_HANDLE, glDone = VK_NULL_HANDLE;
+	// lane AIRPERF1 round 2: two timestamps a submit (before the first kernel, after the last copy); msGpu = the last
+	// finished submit's, read when its fence is known signalled (never a wait of its own)
+	VkQueryPool qp = VK_NULL_HANDLE;
+	bool stamped = false;
+	double msGpu = -1.0;
 };
 
 std::map<const DdgiGpuSession *, RestirGpu *> & restirStates()
@@ -140,6 +145,8 @@ void restirFreeFor( Dev & D, DdgiGpuSession * s )
 		X.freeCbs( D.dev, D.pool, 1, &g->cb );
 	if ( g->fence && X.destroyFence )
 		X.destroyFence( D.dev, g->fence, nullptr );
+	if ( g->qp && ddgiTimer( D ).destroy )
+		ddgiTimer( D ).destroy( D.dev, g->qp, nullptr );
 	delete g;
 	m.erase( it );
 }
@@ -160,6 +167,14 @@ RestirGpu * restirStateFor( Dev & D, DdgiGpuSession * s )
 	if ( vk.vkAllocateCommandBuffers( D.dev, &cai, &g->cb ) != VK_SUCCESS || vk.vkCreateFence( D.dev, &fi, nullptr, &g->fence ) != VK_SUCCESS ) {
 		delete g;
 		return nullptr;
+	}
+	DdgiTimer & T = ddgiTimer( D );
+	if ( T.ok ) {
+		VkQueryPoolCreateInfo qi { VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO };
+		qi.queryType = VK_QUERY_TYPE_TIMESTAMP;
+		qi.queryCount = 2;
+		if ( T.create( D.dev, &qi, nullptr, &g->qp ) != VK_SUCCESS )
+			g->qp = VK_NULL_HANDLE;   // no timer: the echo says so (device gpu -1)
 	}
 	m[s] = g;
 	return g;
@@ -332,7 +347,39 @@ bool restirGpuStep( DdgiGpuSession * s, const RestirGpuIn & in, RestirGpuOut * o
 		out->why = "no command buffer for ReSTIR";
 		return false;
 	}
-	vk.vkWaitForFences( D.dev, 1, &g->fence, VK_TRUE, UINT64_MAX );   // our own last submit (a step always waits: never pending)
+	// lane AIRPERF1 round 2: our own last submit. restirhandover.h: a caller that does not wait (the GL frame) never blocks
+	// here; a submit still on the device = no new one this step (its parameters and command buffer are in use)
+	DdgiTimer & T = ddgiTimer( D );
+	DdgiExtra & X = ddgiExtra( D );
+	const bool wait = in.wait || in.readBack || in.gbuf != nullptr;
+	const auto msSince = []( std::chrono::steady_clock::time_point a ) {
+		return std::chrono::duration<double, std::milli>( std::chrono::steady_clock::now() - a ).count();
+	};
+	const auto tPrev = std::chrono::steady_clock::now();
+	{
+		const VkResult fs = X.fenceStatus ? X.fenceStatus( D.dev, g->fence ) : vk.vkWaitForFences( D.dev, 1, &g->fence, VK_TRUE, 0 );
+		const bool running = fs == VK_NOT_READY || fs == VK_TIMEOUT;   // an error counts as done: the submit below reports it
+		const restirhand::Act act = restirhand::before( !running, wait );
+		if ( act == restirhand::Late ) {
+			out->late = true;
+			out->ms = g->msGpu;
+			out->why = "the last ReSTIR submit is still on the device";
+			out->msWall = msSince( t0 );
+			return false;
+		}
+		if ( act == restirhand::Block )
+			vk.vkWaitForFences( D.dev, 1, &g->fence, VK_TRUE, UINT64_MAX );
+	}
+	out->msPrev = msSince( tPrev );
+	const auto harvest = [&D, &T, g]() {   // the finished submit's two stamps: kernels + copies on the device's clock
+		if ( !g->stamped || !g->qp || !T.ok )
+			return;
+		g->stamped = false;
+		uint64_t ts[2] = { 0, 0 };
+		if ( T.get( D.dev, g->qp, 0, 2, sizeof ts, ts, 8, VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT ) == VK_SUCCESS )
+			g->msGpu = double( ts[1] - ts[0] ) * T.nsPerTick / 1e6;
+	};
+	harvest();
 	if ( g->W != in.W || g->H != in.H || ( g->shared && in.gbuf ) ) {
 		if ( !in.gbuf && g->shared ) {
 			out->why = "the shared g-buffer is for another size (restirGpuShare first)";
@@ -367,10 +414,14 @@ bool restirGpuStep( DdgiGpuSession * s, const RestirGpuIn & in, RestirGpuOut * o
 		if ( !in.cand.empty() )
 			std::memcpy( g->cand.map, in.cand.data(), std::min( in.cand.size(), g->candCap ) * 4 );
 	}
+	const auto tUpload = std::chrono::steady_clock::now();
 	if ( in.gbuf && !ddgiPut( D, in.gbuf, size_t( n ) * 16, g->gbuf ) ) {
 		out->why = "the g-buffer upload failed";
 		return false;
 	}
+	out->msUpload = msSince( tUpload );
+	const auto tRecord = std::chrono::steady_clock::now();
+	auto tSubmit = tRecord;
 	if ( in.readBack && !g->ratioRb.b ) {
 		const VkMemoryPropertyFlags cached = kHost | VK_MEMORY_PROPERTY_HOST_CACHED_BIT;
 		const VkBufferUsageFlags rb = VK_BUFFER_USAGE_TRANSFER_DST_BIT;
@@ -391,6 +442,10 @@ bool restirGpuStep( DdgiGpuSession * s, const RestirGpuIn & in, RestirGpuOut * o
 				ddgiOwner( D, g->gbuf.b, true );
 				ddgiOwner( D, g->out.b, true );
 			}
+			if ( g->qp && T.ok ) {
+				T.reset( D.cb, g->qp, 0, 2 );
+				T.write( D.cb, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, g->qp, 0 );
+			}
 			for ( uint32_t mode = 0; mode < 4; mode++ ) {
 				restirDispatch( D, S, R, s, g, mode, groups );
 				ddgiBarrier( D );
@@ -404,6 +459,8 @@ bool restirGpuStep( DdgiGpuSession * s, const RestirGpuIn & in, RestirGpuOut * o
 				ddgiCopy( D, g->hist, g->resRb, n * 16 );
 				ddgiCopy( D, g->acc, g->accRb, n * 16 );
 			}
+			if ( g->qp && T.ok )
+				T.write( D.cb, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, g->qp, 1 );
 			ddgiEndBarrier( D );
 			if ( gl ) {
 				ddgiOwner( D, g->gbuf.b, false );
@@ -412,6 +469,7 @@ bool restirGpuStep( DdgiGpuSession * s, const RestirGpuIn & in, RestirGpuOut * o
 			ok = vk.vkEndCommandBuffer( D.cb ) == VK_SUCCESS;
 		}
 		if ( ok ) {
+			tSubmit = std::chrono::steady_clock::now();
 			const bool waitGl = gl ? in.beforeSubmit() : false;
 			const VkPipelineStageFlags ws = VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_TRANSFER_BIT;
 			VkSubmitInfo si { VK_STRUCTURE_TYPE_SUBMIT_INFO };
@@ -426,13 +484,26 @@ bool restirGpuStep( DdgiGpuSession * s, const RestirGpuIn & in, RestirGpuOut * o
 			ok = vk.vkQueueSubmit( D.q, 1, &si, g->fence ) == VK_SUCCESS;
 		}
 	}
-	if ( ok )
+	out->msRecord = std::chrono::duration<double, std::milli>( tSubmit - tRecord ).count();
+	out->msSubmit = msSince( tSubmit );
+	// the submit waits on GL's signal: its fence fires after the GPU has run GL's queue up to it. Only a caller that
+	// needs the results on the CPU waits (restirhandover.h); the GL frame orders its read on the GPU (vkDone)
+	const auto tWait = std::chrono::steady_clock::now();
+	const bool waited = ok && restirhand::after( wait );
+	if ( waited )
 		ok = vk.vkWaitForFences( D.dev, 1, &g->fence, VK_TRUE, UINT64_MAX ) == VK_SUCCESS;
 	if ( !ok ) {
 		out->why = "a ReSTIR submit failed (lost device or out of memory)";
 		return false;
 	}
+	out->msWait = msSince( tWait );
 	g->released = gl;
+	g->stamped = g->qp != VK_NULL_HANDLE && T.ok;
+	if ( waited )
+		harvest();
+	out->pending = !waited;
+	out->ms = g->msGpu;
+	const auto tRead = std::chrono::steady_clock::now();
 	if ( in.readBack ) {
 		const float * r = static_cast<const float *>( g->ratioRb.map );
 		const float * nd = static_cast<const float *>( g->numDenRb.map );
@@ -449,6 +520,7 @@ bool restirGpuStep( DdgiGpuSession * s, const RestirGpuIn & in, RestirGpuOut * o
 			std::memcpy( &out->res[i * 4 + 1], rs + i * 16 + 4, 12 );
 		}
 	}
+	out->msRead = msSince( tRead );
 	out->msWall = std::chrono::duration<double, std::milli>( std::chrono::steady_clock::now() - t0 ).count();
 	out->ok = true;
 	return true;

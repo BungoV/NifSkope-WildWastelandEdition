@@ -17,6 +17,7 @@
 #include "gl/cellunits.h"
 #include "gl/celllights.h"
 #include "features/lights/cubefacecull.h"
+#include "features/air/airlampmover.h"	// lane AIRPERF1 A5: when a moved caster redraws a lamp
 #include "gl/glscene.h"
 #include "gl/glshape.h"
 #include "gl/renderer.h"
@@ -76,7 +77,13 @@ int wwAirLampAtlasRed()
 	const QByteArray v = wwEnv( "WW_CELL_AIR_LAMPATLAS_RED" ).trimmed();	// read live; "twice,faces,perface"
 	const bool perface = v.contains( "perface" );
 	const bool faces = QByteArray( v ).replace( "perface", "" ).contains( "faces" );
-	return ( v.contains( "twice" ) ? 1 : 0 ) | ( faces ? 2 : 0 ) | ( perface ? 4 : 0 ) | ( v.contains( "frozen" ) ? 8 : 0 );
+	return ( v.contains( "twice" ) ? 1 : 0 ) | ( faces ? 2 : 0 ) | ( perface ? 4 : 0 ) | ( v.contains( "frozen" ) ? 8 : 0 )
+		| ( v.contains( "exactsig" ) ? 16 : 0 );	// AIRPERF1 A5: any changed bit of a caster redraws its lamps, at once
+}
+
+bool wwAirAtlasAllRed()
+{
+	return wwEnv( "WW_AIR_ATLAS_ALL_RED" ).trimmed() == "1";	// read live
 }
 
 namespace {
@@ -158,6 +165,7 @@ struct Lamp
 {
 	Tiles cur, next;
 	bool redraw = false;	// AUDIT 11: a caster in its sphere moved; next is drawn at cur's size
+	bool again = false;	// AIRPERF1 A5: a caster moved while the tiles were being drawn: once more when they are whole
 };
 
 //! AUDIT 11: a caster's world rotation, translation, scale and two vertices (a CPU-skinned shape moves its vertices)
@@ -179,9 +187,15 @@ struct State
 	bool tableDirty = true;
 	qint64 frames = 0, facesTotal = 0;
 	int lastReady = -1, lastPending = -1;
+	int lastTop = -2, lastTopRoute = -1;	// MODULES1 R5A-4: the "air lamp top:" line
+	float lastTopPow = 0.0f;
 	double drawMs = 0.0, maxMs = 0.0;	// since the cell's key last changed
 	std::unordered_map<const Shape *, Sig> hist;	// AUDIT 11: last frame's signature a caster
 	qint64 moves = 0, redraws = 0;	// AUDIT 11: since the cell's key last changed
+	// AIRPERF1 A5: the pose a caster's lamps were last drawn for, the changed frames that redrew nothing, the names said
+	std::unordered_map<const Shape *, Sig> ref;
+	qint64 held = 0;
+	std::set<const Shape *> said;
 };
 
 State & st()
@@ -357,7 +371,9 @@ int wwAirLampAtlasFrame( Scene * scene, const WwCellLighting * L, const float ca
 		s.frames = s.facesTotal = 0;
 		s.drawMs = s.maxMs = 0.0;
 		s.hist.clear();
-		s.moves = s.redraws = 0;
+		s.ref.clear();
+		s.said.clear();
+		s.moves = s.redraws = s.held = 0;
 	}
 
 	// AUDIT 11: what moved since the last frame redraws the lamps it touches (red "frozen": movers frozen at the draw)
@@ -371,17 +387,61 @@ int wwAirLampAtlasFrame( Scene * scene, const WwCellLighting * L, const float ca
 			auto it = s.hist.find( c.sh );
 			if ( it != s.hist.end() && std::memcmp( it->second.v, g.v, sizeof g.v ) != 0 ) {
 				s.moves++;
+				/* lane AIRPERF1 A5 (airlampmover.h): the move is measured from the pose the lamps were last drawn for,
+				 * and redraws them when it reaches half a tile texel at the caster's nearest point for the most
+				 * sensitive lamp it touches, or when it enters or leaves a lamp's reach. A redraw already under way
+				 * is finished first and then done once more (before, every changed frame started it over, so under a
+				 * caster that never rests it never became whole). Red "exactsig": any changed bit, at once */
+				const bool exact = ( wwAirLampAtlasRed() & 16 ) != 0;
+				const auto rf = s.ref.find( c.sh );
+				const Sig ref = rf != s.ref.end() ? rf->second : it->second;
+				const airmover::Parts mv = airmover::bound( ref.v, ref.c, ref.rad, g.v, g.c, g.rad );
+				float thrMin = 3.0e38f;
+				int touched = 0;
+				bool crossed = false;
 				for ( int i = 0; i < n; i++ ) {
-					Lamp & m = s.lamps[i];
+					const Lamp & m = s.lamps[i];
 					if ( !m.cur.s && !m.next.s )
 						continue;
 					const WwCellLight & l = L->lights.at( i );
-					if ( touches( l, it->second.c, it->second.rad ) || touches( l, g.c, g.rad ) ) {
+					const bool in0 = touches( l, ref.c, ref.rad ), in1 = touches( l, g.c, g.rad );
+					if ( !in0 && !in1 )
+						continue;
+					touched++;
+					crossed = crossed || in0 != in1;
+					thrMin = std::min( thrMin, airmover::threshold( l.pos, g.c, g.rad, std::max( m.cur.s, m.next.s ) ) );
+				}
+				const bool go = airmover::decide( mv.sum(), thrMin, touched, crossed, exact );
+				if ( go ) {
+					for ( int i = 0; i < n; i++ ) {
+						Lamp & m = s.lamps[i];
+						if ( !m.cur.s && !m.next.s )
+							continue;
+						const WwCellLight & l = L->lights.at( i );
+						if ( !touches( l, ref.c, ref.rad ) && !touches( l, g.c, g.rad ) )
+							continue;
+						if ( !exact && m.next.drawn > 0 && m.next.drawn < 6 ) {
+							m.again = true;
+							continue;
+						}
 						s.redraws += m.redraw ? 0 : 1;
 						m.redraw = true;
 						m.next.drawn = 0;
 					}
 				}
+				if ( go || !touched )
+					s.ref[c.sh] = g;
+				else {
+					s.ref[c.sh] = ref;
+					s.held++;
+				}
+				if ( s.said.size() < 16 && s.said.insert( c.sh ).second )	// each mover's name once a cell, 16 at most
+					std::fprintf( stderr, "air lamp atlas mover: \"%s\" moved %.4f u (centre %.4f turn %.4f scale %.4f verts %.4f radius %.4f), "
+						"sphere r %.0f, touches %d lamps, smallest threshold %.4f u -> %s\n", qPrintable( c.sh->getName() ),
+						double( mv.sum() ), double( mv.centre ), double( mv.turn ), double( mv.scale ), double( mv.verts ), double( mv.radius ),
+						double( g.rad ), touched, touched ? double( thrMin ) : 0.0,
+						!touched ? "no lamp in reach" : !go ? "held (under half a texel)" : exact ? "redraw (red exactsig)"
+						: crossed ? "redraw (entered or left a lamp's reach)" : "redraw" );
 			}
 			s.hist[c.sh] = g;
 		}
@@ -390,12 +450,15 @@ int wwAirLampAtlasFrame( Scene * scene, const WwCellLighting * L, const float ca
 	// the sizes: half the lamp's screen extent, on the ladder; away from the air the tiles go back to the pool
 	std::vector<int> want( size_t( n ), 0 );
 	std::vector<float> px( size_t( n ), 0.0f ), dist( size_t( n ), 0.0f );
+	const bool allRed = wwAirAtlasAllRed();	// part 22: only shadow-flagged lamps take a tile
 	for ( int i = 0; i < n; i++ ) {
 		const WwCellLight & l = L->lights.at( i );
 		const float dx = l.pos[0] - cam[0], dy = l.pos[1] - cam[1], dz = l.pos[2] - cam[2];
 		dist[i] = std::sqrt( dx * dx + dy * dy + dz * dz );
 		Lamp & m = s.lamps[i];
 		const int have = m.cur.s;
+		if ( l.shadow == 0 && !allRed )
+			continue;
 		if ( l.radius <= 0.0f || dist[i] - l.radius >= farD * ( have ? 1.25f : 1.0f ) )
 			continue;
 		px[i] = 0.5f * float( viewH ) * p11 * l.radius / std::max( dist[i], l.radius );
@@ -445,7 +508,7 @@ int wwAirLampAtlasFrame( Scene * scene, const WwCellLighting * L, const float ca
 				s.tableDirty = true;
 			freeTiles( s, m.next );
 			freeTiles( s, m.cur );
-			m.redraw = false;
+			m.redraw = m.again = false;
 			continue;
 		}
 		if ( m.cur.s == want[i] && !m.redraw ) {
@@ -610,7 +673,9 @@ int wwAirLampAtlasFrame( Scene * scene, const WwCellLighting * L, const float ca
 					freeTiles( s, m.cur );
 					m.cur = m.next;
 					m.next = Tiles();
-					m.redraw = false;
+					m.redraw = m.again;	// AIRPERF1 A5: a caster moved meanwhile: once more, from the new pose
+					s.redraws += m.again ? 1 : 0;
+					m.again = false;
 					s.tableDirty = true;
 				}
 			}
@@ -681,11 +746,58 @@ int wwAirLampAtlasFrame( Scene * scene, const WwCellLighting * L, const float ca
 		tiled += w ? 1 : 0;
 	const int pend = int( pending.size() );
 	if ( ready != s.lastReady || ( pend == 0 ) != ( s.lastPending == 0 ) || ( pend && s.frames % 120 == 0 ) ) {
-		std::fprintf( stderr, "air lamp atlas: lamps %d in air %d ready %d pending %d faces %lld used %.1f%% cpu %.2f ms (%lld frames, max %.2f) tiles 32/64/128/256 %d/%d/%d/%d movers %lld redraws %lld%s\n",
+		std::fprintf( stderr, "air lamp atlas: lamps %d in air %d ready %d pending %d faces %lld used %.1f%% cpu %.2f ms (%lld frames, max %.2f) tiles 32/64/128/256 %d/%d/%d/%d movers %lld redraws %lld held %lld%s\n",
 			n, tiled, ready, pend, (long long)s.facesTotal, 100.0 * used / ( double( kAtlas ) * kAtlas ), s.drawMs, (long long)s.frames,
-			s.maxMs, bySize[0], bySize[1], bySize[2], bySize[3], (long long)s.moves, (long long)s.redraws, haveCasters ? "" : " (frozen)" );
+			s.maxMs, bySize[0], bySize[1], bySize[2], bySize[3], (long long)s.moves, (long long)s.redraws, (long long)s.held, haveCasters ? "" : " (frozen)" );
 		s.lastReady = ready;
 		s.lastPending = pend;
+	}
+
+	/* MODULES1 R5A-4 (bungo b60 11-10, Memory Den street flashes): the lamp that puts the most light into the air, its
+	 * power and its shadow route, on a change of lamp, route or power (25 %), and every 600 frames. Score = lum(colour)
+	 * x radius / max(distance, radius) (a lamp's in-scatter down a ray past it); reach = within the air's far.
+	 * Route: tiles <size> (shadowed through the atlas), untiled (flagged, no tile ready: unshadowed), none (unflagged). */
+	{
+		int top = -1, inReach = 0, flagged = 0, flaggedReady = 0;
+		float best = 0.0f, topPow = 0.0f;
+		for ( int i = 0; i < n; i++ ) {
+			const WwCellLight & l = L->lights.at( i );
+			if ( l.radius <= 0.0f || dist[i] - l.radius >= farD )
+				continue;
+			inReach++;
+			flagged += l.shadow ? 1 : 0;
+			flaggedReady += ( l.shadow && s.lamps[i].cur.s ) ? 1 : 0;
+			const float pw = 0.2126f * l.color[0] + 0.7152f * l.color[1] + 0.0722f * l.color[2];
+			const float sc = pw * l.radius / std::max( dist[i], l.radius );
+			if ( sc > best ) {
+				best = sc;
+				top = i;
+				topPow = pw;
+			}
+		}
+		const int route = top < 0 ? -1 : !L->lights.at( top ).shadow ? 0 : s.lamps[top].cur.s ? s.lamps[top].cur.s : 1;
+		const bool powJump = top >= 0 && std::fabs( topPow - s.lastTopPow ) > 0.25f * std::max( s.lastTopPow, 1e-6f );
+		if ( top != s.lastTop || route != s.lastTopRoute || powJump || s.frames % 600 == 0 ) {
+			if ( top < 0 ) {
+				std::fprintf( stderr, "air lamp top: none in reach (frame %lld)\n", (long long)s.frames );
+			} else {
+				const WwCellLight & l = L->lights.at( top );
+				char rt[32];
+				if ( route == 0 )
+					std::snprintf( rt, sizeof rt, "none" );
+				else if ( route == 1 )
+					std::snprintf( rt, sizeof rt, "untiled" );
+				else
+					std::snprintf( rt, sizeof rt, "tiles %d", route );
+				std::fprintf( stderr, "air lamp top: id %d ref %08X power %.3f radius %.0f dist %.0f score %.3f shadow %d (%s) flicker %d"
+					" | in reach %d flagged %d ready %d unflagged %d (frame %lld)\n",
+					top, unsigned( l.ref ), topPow, l.radius, dist[top], best, l.shadow, rt, l.flicker,
+					inReach, flagged, flaggedReady, inReach - flagged, (long long)s.frames );
+			}
+			s.lastTop = top;
+			s.lastTopRoute = route;
+			s.lastTopPow = topPow;
+		}
 	}
 	return n;
 }

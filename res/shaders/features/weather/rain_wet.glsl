@@ -1,9 +1,9 @@
-// lane FO76WEATHER1: rain wetness on every material, Fallout 76's law (src/features/weather/rainwetlaw.h). Set by
+// lane WETWEATHER1: rain wetness on every material, [the reference game's] law (src/features/weather/rainwetlaw.h). Set by
 // src/features/weather/cellprecip.cpp wwCellRainWetUniforms: x the wet amount (0 = off, the old path), y the material's custom
 // porosity, z its weight (BGSM bCustomPorosity), w 1 = test the cover map (lane FO76WEATHER2). (No name "smooth": it
 // is a GLSL keyword.)
 uniform vec4 rainWet;
-// lane FO76WEATHER2: the cover map (src/features/weather/preciproof.h WwRoofMap, R32F: the highest z over a texel, -1e30 open),
+// lane WETWEATHER2: the cover map (src/features/weather/preciproof.h WwRoofMap, R32F: the highest z over a texel, -1e30 open),
 // rainCoverGrid = ( world x, y of texel (0, 0)'s corner, 1 / texel side, texel side )
 uniform sampler2D rainCover;
 uniform vec4 rainCoverGrid;
@@ -49,6 +49,6 @@ float wwRainWetExposed( vec3 P, vec3 N )
 	float e01 = wwRainCoverOpen( t + ivec2( 0, 1 ), n, z ), e11 = wwRainCoverOpen( t + ivec2( 1, 1 ), n, z );
 	return mix( mix( e00, e10, f.x ), mix( e01, e11, f.x ), f.y );
 #else
-	return 1.0;	// tests/features/weather/raincover red: no cover test (FO76WEATHER1)
+	return 1.0;	// tests/features/weather/raincover red: no cover test (WETWEATHER1)
 #endif
 }

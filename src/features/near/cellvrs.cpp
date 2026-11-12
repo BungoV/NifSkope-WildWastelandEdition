@@ -94,6 +94,7 @@ struct VrsGpu
 	bool trusted = false;	// a build on these targets raised no GL error
 	bool ready = false;	// the images hold a frame of size w x h
 	int built = 0;
+	unsigned asked = 0;	// lane EMPTY240 R10-3: builds asked with the images ready
 };
 
 struct VrsState
@@ -291,6 +292,17 @@ void wwCellVrsBuild( Scene * scene, int prevDraw, int prevRead, int W, int H, co
 	Renderer * r = scene->renderer;
 	VrsGpu & g = vrsGpus()[r];
 	if ( !initGpu( r, g ) )
+		return;
+	/* lane EMPTY240 R10-3: the rate images every 2nd frame (the resolve blit + the tile draw, tone-vrs 0.26 ms GPU in
+	 * build 82); the other frame shades with the last ones. A new size or untrusted targets build at once.
+	 * Red WW_VRSEVERY_RED=1: every frame */
+	const bool everyRed = wwEnvInt( "WW_VRSEVERY_RED" ) == 1;
+	static int saidEvery = -1;
+	if ( saidEvery != int( everyRed ) ) {
+		saidEvery = int( everyRed );
+		qInfo().noquote() << "cell vrs: rate images built" << ( everyRed ? "every frame (WW_VRSEVERY_RED=1)" : "every 2nd frame" );
+	}
+	if ( g.ready && g.trusted && g.w == W && g.h == H && ( g.asked++ & 1u ) != 0u && !everyRed )
 		return;
 	auto fn = r->fn;
 	PassTime::subBegin( PassTime::ToneVrs );

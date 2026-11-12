@@ -29,6 +29,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <cstring>
 #include <functional>
 #include <memory>
@@ -256,6 +257,13 @@ QStringList cellEditWarnings()
 QString cellEditRed()
 {
 	return QString::fromLocal8Bit( qgetenv( "WW_CELLEDIT_RED" ) ).trimmed().toLower();
+}
+
+// lane AIRPERF1 r3: WW_FLYKEYS_RED=1 = the old rule (shortcuts fire in the free camera; Shift+A arms Place and
+// Shift+D duplicates even while the fly / walk camera owns WASD)
+bool cellEditArmRed()
+{
+	return qgetenv( "WW_FLYKEYS_RED" ).toInt() != 0;
 }
 
 bool cellEditEnabled()
@@ -1190,12 +1198,16 @@ bool cellEditStartPlace( GLView * view )
 		return false;
 	defaultTarget( s, spec );
 	s.placing = true;
+	std::fprintf( stderr, "place mode: on (Shift+A; every mouse move reads the depth under the cursor; Esc leaves)\n" );
 	s.facing = s.locked = s.turning = false;
 	s.ghostValid = false;
 	x.queue.clear();
 	say( QStringLiteral( "Place %1: click to drop it, drag to turn it, T faces it toward a second click, Esc leaves" )
 		.arg( s.ghost.baseEdid ), false );
 	if ( x.view ) {
+		// lane AIRPERF1 r3: say() reaches only the panel; the view's own status line shows the armed mode too
+		emit x.view->gizmoStatus( QCoreApplication::translate( "CellEdit",
+			"Place mode ON (%1): click drops, drag turns, Esc leaves" ).arg( s.ghost.baseEdid ) );
 		x.view->requestActivate();
 		x.view->update();
 	}
@@ -1206,6 +1218,11 @@ bool cellEditStartPlace( GLView * view )
 void cellEditStopPlace()
 {
 	CellEditSession & s = cellEditSession();
+	if ( s.placing ) {
+		std::fprintf( stderr, "place mode: off\n" );
+		if ( extra().view )
+			emit extra().view->gizmoStatus( QString() );
+	}
 	s.placing = s.facing = s.locked = s.turning = false;
 	s.ghostValid = false;
 	extra().queue.clear();
@@ -2039,13 +2056,24 @@ bool cellEditMouse( GLView * view, CellEditMouse kind, double x, double y, bool 
 	return false;
 }
 
-bool cellEditKey( GLView * view, int key, int modifiers )
+bool cellEditKey( GLView * view, int key, int modifiers, int flyCamera, bool autoRepeat )
 {
 	CellEditSession & s = cellEditSession();
 	if ( !s.placing ) {
 		if ( key == Qt::Key_A && ( modifiers & Qt::ShiftModifier ) && !( modifiers & ( Qt::ControlModifier | Qt::AltModifier ) )
-			&& cellEditEnabled() && !cellWorkspacePath().isEmpty() )
+			&& cellEditEnabled() && !cellWorkspacePath().isEmpty() ) {
+			// lane AIRPERF1 r3: in the free camera (1) and the walk view (2) A is "move left" and Shift is "fast", so
+			// Shift+A is a fast strafe there, never the arm key; a held key's repeats never arm either
+			if ( cellEditArmSwallowed( flyCamera, autoRepeat, cellEditArmRed() ) ) {
+				if ( !autoRepeat )
+					std::fprintf( stderr, "place arm: Shift+A swallowed (the camera owns the keys: camera=%s repeat=0)\n",
+						flyCamera == 1 ? "free" : ( flyCamera == 2 ? "walk" : "orbit" ) );
+				return false;
+			}
+			std::fprintf( stderr, "place arm: armed by Shift+A (camera=%s)\n",
+				flyCamera == 1 ? "free" : ( flyCamera == 2 ? "walk" : "orbit" ) );
 			return cellEditStartPlace( view ) || true;
+		}
 		return false;
 	}
 	extra().view = view;

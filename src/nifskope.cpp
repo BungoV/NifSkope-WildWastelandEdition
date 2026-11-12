@@ -31,6 +31,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ***** END LICENCE BLOCK *****/
 
 #include "nifskope.h"
+#include "wwloadwatch.h"	// lane PERFLOAD1: the log drain before a hard exit
 #include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 #include "ui_nifskope.h"
 
@@ -7536,7 +7537,18 @@ bool NifSkope::blockListDragEvent( QEvent * event )
 	return true;
 }
 
-void NifSkope::swapModels()
+/* lane PERFLOAD1 P4: swapModels was a toggle keyed on the details tree. With no block selected the tree sits on the
+ * empty model (the blank-panel rule below), so the toggle read "already parked" at the next load and ATTACHED the block
+ * list proxy and the tree to the document being built: every inserted block signalled the views. 11-10 flight: the
+ * reopen's weld write took 218 s against 1.2 s at launch (301 s vs 58 s in all). Now loading parks, completing
+ * attaches. Red WW_LOAD_PARK_RED=1: the old toggle. */
+static bool wwLoadParkRed()
+{
+	WW_SWITCH_STATIC( bool, red, !wwSwitchEcho( "views parked while a file loads", wwEnv( "WW_LOAD_PARK_RED" ) != "1" ) );
+	return red;
+}
+
+void NifSkope::swapModels( bool park )
 {
 	// Swap out the models with empty versions while loading the file
 	// This is so that the views do not update while loading the file
@@ -7555,8 +7567,14 @@ void NifSkope::swapModels()
 	 * doing.
 	 */
 	const bool listMode = ( list->model() == nif || list->model() == nifEmpty );
+	const bool toggle = ( tree->model() == nif );
+	if ( park && !toggle ) {
+		std::fprintf( stderr, "load: views parked%s (the details panel was on the empty model: the old toggle %s them)\n",
+			wwLoadParkRed() ? " NOT" : "", wwLoadParkRed() ? "ATTACHES" : "would have attached" );
+		std::fflush( stderr );
+	}
 	wwReleaseBlockListColumns();
-	if ( tree->model() == nif ) {
+	if ( wwLoadParkRed() ? toggle : park ) {
 		list->setModel( listMode ? static_cast<QAbstractItemModel *>( nifEmpty )
 			: static_cast<QAbstractItemModel *>( proxyEmpty ) );
 		tree->setModel( nifEmpty );
@@ -7574,6 +7592,36 @@ void NifSkope::swapModels()
 	wireBlockListSelection();
 	QTimer::singleShot( 0, this, [this]() { applyBlockListFilter(); } );
 }
+
+/* lane PERFLOAD1 P6: the live far LOD rebuild (cellview.cpp liveFar) cuts and appends thousands of blocks in the shown
+ * document while its views are attached: the 11-10 flight's "far LOD rebuilt in place in 32945 ms". Parked like a
+ * load; only views that showed this document are parked, and only those are attached again. Red WW_LOAD_PARK_RED=1. */
+bool NifSkope::wwParkViews( bool park )
+{
+	static QSet<NifSkope *> parked;
+	if ( wwLoadParkRed() )
+		return false;
+	if ( park ) {
+		if ( parked.contains( this ) || !( list->model() == nif || list->model() == proxy ) )
+			return false;
+		parked.insert( this );
+		swapModels( true );
+		return true;
+	}
+	if ( !parked.remove( this ) )
+		return false;
+	swapModels( false );
+	return true;
+}
+
+static bool wwParkViewsOf( NifModel * m, bool park )
+{
+	for ( NifSkope * w : NifSkope::openDocuments() )
+		if ( w && w->getNifModel() == m )
+			return w->wwParkViews( park );
+	return false;
+}
+static const bool wwParkViewsSet = ( wwParkViewsFn = wwParkViewsOf, true );
 
 void NifSkope::updateSettings()
 {
@@ -10553,7 +10601,7 @@ void NifSkope::load()
 			const QByteArray line = ( QStringLiteral( "CELL OPEN REFUSED: " ) + cverr ).toUtf8();
 			std::fprintf( stderr, "%s\n", line.constData() );
 			std::fflush( stderr );
-			std::_Exit( 88 );
+			( wwStderrPumpDrain(), std::_Exit( 88 ) );
 		}
 		if ( !fromEnv ) {
 			cverr.clear();
@@ -10766,7 +10814,7 @@ void NifSkope::MessageOutput( QtMsgType type, const QMessageLogContext & context
 		Message::message( qApp->activeWindow(), str, &context, QMessageBox::Critical );
 		break;
 	case QtFatalMsg:
-		fprintf( stderr, "[Fatal] %s\n", qPrintable( str ) );
+		fprintf( stderr, "[Fatal] %s\n", qPrintable( str ) ), wwStderrPumpDrain();
 		fflush( stderr );
 		break;
 	case QtInfoMsg:

@@ -69,8 +69,9 @@ constexpr int WaterOceanB = 68;	// lane WATERLOOK1: the wave spectrum's slopes +
 constexpr int WaterOceanC = 69;	// lane WATERLOOK1: its slope moments (sampler2DArray RGBA32F)
 constexpr int WaterSkyIndex = 70;	// lane WATERSKYVISFAR1: the .lodl sky plane's tile index (usampler2D R32UI)
 constexpr int WaterSkyAtlas = 71;	// its sparse tiles (usampler2D R8UI)
-constexpr int LandLodDiff = 72;	// lane LANDSPEC2/3: the near ground's band, the 4 x 4 level-4 LOD diffuse chunks (sampler2DArray; 75 free)
-constexpr int RestirGi = 74;	// RTEMIS1 part 2: ReSTIR GI's irradiance a pixel (samplerBuffer RGBA32F, E rgb + depth; rtddgicell.cpp), WW_CELL_RESTIRGI programs only
+constexpr int LandLodDiff = 72;	// lane LANDSPEC2/3: the near ground's band, the 4 x 4 level-4 LOD diffuse chunks (sampler2DArray; 74 AirEnvHist, 75 RestirGi)
+constexpr int AirEnvHist = 74;	// MODULES1 10b-3: the air's env strata for a lit card's sky share (sampler3D, cell_volpart.glsl)
+constexpr int RestirGi = 75;	// RTEMIS1 part 2: ReSTIR GI's irradiance a pixel (samplerBuffer RGBA32F, E rgb + depth; rtddgicell.cpp), WW_CELL_RESTIRGI programs only (74 in the lane, AirEnvHist holds it)
 constexpr int LandLodOuter = 73;	// lane LANDSPEC6: the band's outer window past the page (sampler2DArray, the chunks' mip 1)
 constexpr int LandLodNoise = 76;	// Textures\Terrain\Noise.dds
 constexpr int LandLodDetail = 77;	// Textures\Terrain\DetailNormals.dds
@@ -84,10 +85,15 @@ constexpr int PrecipRoof = 87;	// lane BUGS1102B: the GPU precipitation field's 
 constexpr int RainCover = 88;	// lane FO76WEATHER2: the rain wetness's cover map, the same roof map for the surfaces (sampler2D R32F; cellprecip.cpp)
 constexpr int AirLampAtlas = 89;	// lane MODULES1 route (a): the air's lamp depth atlas (sampler2DShadow; features/air/airlampatlas.cpp)
 constexpr int AirLampTable = 90;	// lane MODULES1 route (a): its tile table (samplerBuffer RGBA32F, 4 texels a light)
+constexpr int AirLampNow = 92;	// lane MODULES1 part 25 (LampVol): the lamps' in-scatter a froxel (sampler3D RGBA32F; cellvolair.cpp stage 4)
+constexpr int AirLampHist = 93;	// lane MODULES1 part 25: its history (sampler3D RGBA16F, stage 4 only)
+constexpr int AirStbn = 94;	// lane MODULES1 part 25: the blue-noise mask (sampler2DArray R8; res/air/stbn_scalar_128x128x64.r8)
 constexpr int AirLampRays = 91;	// lane MODULES1 route (b): the lamps' shadowed share a froxel (samplerBuffer RG32F; rtddgicell.cpp rtddgiAirRaysFrame)
 constexpr int FxDepth = 83;	// lane WATERFIX7: a particle's soft-depth read of the opaque pass (sampler2D; was 9, a TexCache unit)
 constexpr int WaterFlowAtlas = 67;	// lane WATERFLOWBAKE1: its sparse tiles (usampler2D R32UI; was 11, under Bloom)	// lane WATERWETBAKE1: its sparse tiles (usampler2D R8UI; 47 in the lane)
 
+constexpr int CloudSheetBase = 95;	// lane MODULES1 10c: the cloud shadow map's sheets, a cloud layer's texture each (sampler2D x 8: 95-102)
+constexpr int CloudSheetBlend = 103;	// lane MODULES1 10c: their blend targets during a weather change (sampler2D x 8: 103-110)
 constexpr int kAll[] = { Shadow, Bloom, Lut, Gi, Lights, Csm, Ao, Ssr, GiSlot, Room, FarSlot, FarRec, FarPlaced, AoDecal,
 	AirVol, AirInject, AirCluster, AirGbuf, AirTile, GiHalf, GiHalfKey, TerrShadow, ContactShadow, Ssgi, LightCluster,
 	CardData, CardFrames, ReflProbe, ReflGbufAlb, ReflGbufNd, AirNoise, AtmoAp, AtmoTrans, ContactGbuf, GiAir, CardDepth,
@@ -97,7 +103,10 @@ constexpr int kAll[] = { Shadow, Bloom, Lut, Gi, Lights, Csm, Ao, Ssr, GiSlot, R
 	LandShoreIndex, LandShoreAtlas, WaterFlowIndex, WaterFlowAtlas, WaterOceanB, WaterOceanC, WaterSkyIndex, WaterSkyAtlas, AirTerrain,
 	LandLodDiff, LandLodOuter, LandLodNoise, LandLodDetail, WaterOceanD,
 	LandWaterInfo, LandWaterInfo + 1, LandWaterInfo + 2, UnderDepthMs, FxDepth, DdgiAtlas, Restir, FarStream, PrecipRoof, RainCover,
-	AirLampAtlas, AirLampTable, AirLampRays, RestirGi };
+	AirLampAtlas, AirLampTable, AirLampRays, AirLampNow, AirLampHist, AirStbn, AirEnvHist,
+	CloudSheetBase, CloudSheetBase + 1, CloudSheetBase + 2, CloudSheetBase + 3, CloudSheetBase + 4, CloudSheetBase + 5,
+	CloudSheetBase + 6, CloudSheetBase + 7, CloudSheetBlend, CloudSheetBlend + 1, CloudSheetBlend + 2, CloudSheetBlend + 3,
+	CloudSheetBlend + 4, CloudSheetBlend + 5, CloudSheetBlend + 6, CloudSheetBlend + 7, RestirGi };
 
 constexpr bool distinct()
 {

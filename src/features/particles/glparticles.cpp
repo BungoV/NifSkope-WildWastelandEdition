@@ -50,10 +50,12 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "features/particles/fxparity.h"	// lane FXPARITY1: Particle Game Rules
 #include "gl/controllers.h"
 #include "gl/lookdevstage.h"	// lane SUNCELL1: the weather fog
+#include "cellworldanim.h"	// lane PARTFX1: the per-cell particle census
 #include "gl/glproperty.h"
 #include "gl/glscene.h"
 #include "gl/renderer.h"
 #include "features/shadows/sunshadow.h"	// lane VOLPART1: the sun's cascades on a puff
+#include "features/shadows/shadowset.h"	// MODULES1 R6-8: the shadow debug view's pass
 #include "glview.h"
 #include "model/nifmodel.h"
 
@@ -333,13 +335,15 @@ void Particles::drawShapes( NodeList * secondPass )
 	const bool cellPfx = !scene->selecting && !cellPfxRed && wwCellLightsWanted( scene );
 	// lane VOLPART1, gates only: WW_CELL_VOLPART_HIDE=1 draws no cell particle (the plate the hard-edge gate subtracts)
 	WW_SWITCH_STATIC( bool, vpHide, qEnvironmentVariableIntValue( "WW_CELL_VOLPART_HIDE" ) == 1 );	// lane LIVESET1: follows a live set
-	if ( cellPfx && vpHide )
+	if ( cellPfx && ( vpHide || wwShadowViewPass( scene ) ) )	// MODULES1 R6-8: no particle over a shadow debug view
 		return;
 	bool volPart = false, vpAlways = false;
 	auto	prog = scene->renderer->useProgram( scene->selecting ? "selection.prog"
 		: cellPfx ? "particles_cell.prog" : "particles.prog" );
 	if ( !prog )
 		return;
+	if ( !scene->selecting )
+		wwCellAnimObjNoteDraw( static_cast<const Node *>( this ) );	// lane PARTFX1 (a no-op unless the census listens)
 
 	prog->uni4m( "modelViewMatrix", viewTrans().toMatrix4() );
 
@@ -373,7 +377,8 @@ void Particles::drawShapes( NodeList * secondPass )
 
 		// lane FXPARITY1: Particle Game Rules (fxparity.h), the shader's part: 1 the effect law, 2 the soft fade
 		const int fxRules = wwFxParityRules();
-		prog->uni1i( "pfxGame", ( ( fxRules & WwFxLaw ) ? 1 : 0 ) | ( ( fxRules & WwFxSoft ) ? 2 : 0 ) );
+		prog->uni1i( "pfxGame", ( ( fxRules & WwFxLaw ) ? 1 : 0 ) | ( ( fxRules & WwFxSoft ) ? 2 : 0 )
+			| ( ( wwCellFxRed() & 32 ) ? 4 : 0 ) );	// MODULES1 item 2: red WW_CELL_FX_RED=unbound
 
 		// setup blending: honour the linked NiAlphaProperty (FO4 electricity is
 		// additive: SRC_ALPHA, ONE), else fall back to additive
@@ -409,6 +414,9 @@ void Particles::drawShapes( NodeList * secondPass )
 			const int litBlock = scene->nifModel->getBlockNumber( iBlock );
 			const auto * espLit = dynamic_cast<const BSEffectShaderProperty *>( shaderProp );
 			wwCellFxLitUniforms( scene, litBlock );
+			// lane MODULES1 M3 (G7): the Effect Lighting law's band, and an unlit system on the unlit effects' unit
+			wwCellFxLawUniforms( scene, litBlock, espLit ? std::max( { espLit->emissiveColor.red(), espLit->emissiveColor.green(),
+				espLit->emissiveColor.blue() } ) * espLit->emissiveMult : 1.0f, getName() );
 			prog->uni1f( "lightingInfluence", espLit ? espLit->lightingInfluence : 0.0f );
 			{	// lane LIGHTS3 (XEMI-PARTICLES): the placement's emittance colour ^2.2 (w 0 = none), as an unlit effect card
 				float xe[3];
@@ -423,6 +431,8 @@ void Particles::drawShapes( NodeList * secondPass )
 			 * program, the opaque pass's depth for the soft ball; off: volPart 0 and nothing else read */
 			wwSunShadowUniforms( scene );
 			volPart = wwVolPartUniforms( scene );
+			if ( prog->uniLocation( "fxAirCard" ) >= 0 )
+				prog->uni1i( "fxAirCard", 0 );	// MODULES1 round 9: a particle system stays a lump (the air law is the mesh cards')
 			if ( wwEnv( "WW_CELL_PARTICLES_AIR_RED" ).trimmed() == "1" )
 				prog->uni1b( "cellGiAirOn", false );	// SKY3 red: the puff reads the grid's shell, as before
 			{
