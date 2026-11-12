@@ -261,4 +261,19 @@ inline bool queueEmpty()
 #endif
 }
 
+/* lane EMPTY240 R7-3: what waits in the thread's queue. 0 = nothing; 1 = only posted messages or due timers (Qt's own
+ * wake message among them: every QCoreApplication::postEvent posts one, and removePostedEvents leaves it); 2 = input,
+ * a paint or a sent message. */
+inline int queueWaits()
+{
+#ifdef Q_OS_WIN
+	const unsigned w = unsigned( GetQueueStatus( 0x04FF /* QS_ALLINPUT */ ) >> 16 );
+	if ( w & 0x04E7u )	// QS_ALLINPUT without QS_POSTMESSAGE (0x08) and QS_TIMER (0x10)
+		return 2;
+	return w ? 1 : 0;
+#else
+	return 2;
+#endif
+}
+
 }	// namespace WwBetween

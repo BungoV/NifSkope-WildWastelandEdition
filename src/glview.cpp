@@ -3513,6 +3513,7 @@ struct WwPacer
 	QPointer<QTimer> gearsTimer;
 	bool gearsLooked = false, gearsRed = false, gearsStopped = false;
 	int gearsSaid = 0, ticks = 0, dropped = 0;
+	int straightPosted = 0;	// R7-3: straight frames that left only posted messages / due timers to the loop
 };
 WwPacer & wwPacer()
 {
@@ -3606,17 +3607,20 @@ static void wwPacerFrameStart( GLView * v, bool wants, bool cellView )
 		std::fprintf( stderr, "frame request: the paint starts %.2f ms after the frame's request (mean of %d, longest %.2f), "
 			"delivered %s; %d frames started straight after the last one's swap (the message queue empty), %d through the "
 			"event loop (red WW_PACERLOOP_RED=1: every frame through the loop, build 77); %d paints for %d pacer ticks, %d ticks "
-			"dropped the requests left posted (red WW_PAINTONCE_RED=1: a tick's posted request painted the frame again, build 78)\n",
+			"dropped the requests left posted (red WW_PAINTONCE_RED=1: a tick's posted request painted the frame again, build 78); "
+			"%d straight frames left only posted messages or due timers to the loop, at most 3 frames (red WW_STRAIGHTPOST_RED=1: "
+			"any posted message, Qt's own wake too, sends the frame through the loop, build 80)\n",
 			p.reqSum / double( p.reqN ), p.reqN,
 			p.reqMax, wwEnvInt( "WW_PAINTDIRECT_RED" ) == 1
 				? "by Qt's update timer (WW_PAINTDIRECT_RED=1: QWindow::requestUpdate, 5 ms + the timer's rounding)"
 				: "at once (the update request sent by the pacer, Qt's timer not waited for)", p.straight, p.posted,
-			p.reqN, p.ticks, p.dropped );
+			p.reqN, p.ticks, p.dropped, p.straightPosted );
 		p.reqWinAt = now;
 		p.reqSum = p.reqMax = 0.0;
 		p.reqN = 0;
 		p.straight = p.posted = 0;
 		p.ticks = p.dropped = 0;
+		p.straightPosted = 0;
 	}
 	const int interval = ( DEBUG_FRAME_TIME || !wwVsyncOn() ) ? 0 : 1;
 	if ( interval != p.interval ) {
@@ -3743,9 +3747,18 @@ static void wwPacerTick( GLView * v )
 		if ( !p.wantNext )
 			return;	// no paint asked for the next frame here (or it posted it itself)
 		p.wantNext = false;
-		if ( run < 3 && !p.queued && WwBetween::queueEmpty() ) {
-			p.straight++;
-			continue;
+		/* lane EMPTY240 R7-3: build 80 started 0 frames straight (622 through the loop): every tick's update() posts an
+		 * UpdateRequest, and the post leaves Qt's wake message in the queue after R6-3 drops the request, so the queue
+		 * was never empty. Posted messages and due timers now wait for the loop's turn (at most 3 straight frames); input,
+		 * a paint or a sent message still sends the frame through the loop. Red WW_STRAIGHTPOST_RED=1: any posted
+		 * message too, build 80. */
+		if ( run < 3 && !p.queued ) {
+			const int waits = WwBetween::queueWaits();
+			if ( waits == 0 || ( waits == 1 && wwEnvInt( "WW_STRAIGHTPOST_RED" ) != 1 ) ) {
+				p.straightPosted += waits;
+				p.straight++;
+				continue;
+			}
 		}
 		p.queued = true;
 		p.posted++;

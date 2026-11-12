@@ -22,6 +22,45 @@
 #include <QVBoxLayout>
 
 #include <cmath>
+#include <cstdio>
+
+/* lane EMPTY240 R7-1: QDoubleSpinBox::setValue repaints the field even when the value shown is the same, setStyleSheet
+ * re-polishes and repaints on every call and the list was cleared and filled again: each ring of the edit or pick bus
+ * repainted the whole panel. Now a field, the summary's sheet and the list are set only when what they show changes.
+ * Red WW_EDITPANELSET_RED=1: all set on every refresh, build 80. Line `cell edit panel:` (first skip). */
+static bool wwPanelSetRed()
+{
+	static const bool red = [] {
+		const bool r = qEnvironmentVariableIntValue( "WW_EDITPANELSET_RED" ) == 1;
+		if ( r ) {
+			std::fprintf( stderr, "cell edit panel: RED CONTROL WW_EDITPANELSET_RED=1: every field, sheet and list set on "
+				"each refresh (build 80)\n" );
+			std::fflush( stderr );
+		}
+		return r;
+	}();
+	return red;
+}
+
+static void wwPanelSkipped()
+{
+	static bool said = false;
+	if ( said )
+		return;
+	said = true;
+	std::fprintf( stderr, "cell edit panel: a value, sheet or list already shown is not set again (no repaint; red "
+		"WW_EDITPANELSET_RED=1)\n" );
+	std::fflush( stderr );
+}
+
+static void wwSpinSet( QDoubleSpinBox * b, double v )
+{
+	if ( !wwPanelSetRed() && b->textFromValue( v ) == b->cleanText() ) {
+		wwPanelSkipped();
+		return;
+	}
+	b->setValue( v );
+}
 
 namespace {
 constexpr double kDeg = 180.0 / 3.14159265358979323846;
@@ -303,19 +342,28 @@ void CellEditPanel::refresh()
 	double deg = double( s.yaw ) * kDeg;
 	deg = std::fmod( deg, 360.0 );
 	if ( !yawSpin->hasFocus() )
-		yawSpin->setValue( deg );
+		wwSpinSet( yawSpin, deg );	// R7-1
 	alignBox->setCurrentIndex( s.flat ? 1 : 0 );
 	snapBox->setChecked( s.snap );
 	persistBox->setChecked( s.ghost.persistent );
 	placeBtn->setChecked( s.placing );
 	const int cur = list->currentRow();
-	list->clear();
+	QStringList rows;	// R7-1: the list is filled again only when its rows change
 	for ( const CellEditItem & it : s.edits )
-		list->addItem( cellEditRowText( it ) );
+		rows << cellEditRowText( it );
 	for ( const CellEditChange & c : s.changes )
-		list->addItem( cellEditChangeText( c ) );
-	if ( cur >= 0 && cur < list->count() )
-		list->setCurrentRow( cur );
+		rows << cellEditChangeText( c );
+	bool same = !wwPanelSetRed() && list->count() == rows.size();
+	for ( int k = 0; same && k < rows.size(); k++ )
+		same = list->item( k )->text() == rows.at( k );
+	if ( same ) {
+		wwPanelSkipped();
+	} else {
+		list->clear();
+		list->addItems( rows );
+		if ( cur >= 0 && cur < list->count() )
+			list->setCurrentRow( cur );
+	}
 	removeBtn->setEnabled( list->count() > 0 );
 	if ( !pathEdit->hasFocus() )
 		pathEdit->setText( s.target.path );
@@ -359,9 +407,9 @@ void CellEditPanel::refreshPicked()
 		e.precombined ? tr( "  (precombined)" ) : QString() ) );
 	for ( int k = 0; k < 3; k++ )
 		if ( !moveSpin[k]->hasFocus() )
-			moveSpin[k]->setValue( double( pos[k] ) );
+			wwSpinSet( moveSpin[k], double( pos[k] ) );	// R7-1
 	if ( !scaleSpin->hasFocus() )
-		scaleSpin->setValue( double( scale ) );
+		wwSpinSet( scaleSpin, double( scale ) );
 }
 
 void CellEditPanel::refreshSummary()
@@ -370,7 +418,11 @@ void CellEditPanel::refreshSummary()
 	const QString t = cellEditSummary( &ref );
 	refusal = ref;
 	summary->setText( t );
-	summary->setStyleSheet( QStringLiteral( "color: %1;" ).arg( wwSkinColor( ref ? "danger" : "textMuted" ) ) );
+	const QString sheet = QStringLiteral( "color: %1;" ).arg( wwSkinColor( ref ? "danger" : "textMuted" ) );
+	if ( wwPanelSetRed() || summary->styleSheet() != sheet )	// R7-1: a sheet set again re-polishes and repaints
+		summary->setStyleSheet( sheet );
+	else
+		wwPanelSkipped();
 	saveBtn->setEnabled( !ref );
 }
 
