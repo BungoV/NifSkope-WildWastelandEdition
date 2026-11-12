@@ -910,6 +910,7 @@
 { "WW_FARCENSUS_CACHE", 0, "src/features/far-lod/cellfarvanilla.cpp:980 wwFarVanObjectCensus | re-read per frame or per call (a)" },
 { "WW_FARCENSUS_RED", 1, "src/features/far-lod/cellfarvanilla.cpp wwFarVanObjectCensus | (a) hand: MODULES1 item 9 red, the open parses every chunk (read at open)" },
 { "WW_FAROBJ_SWAYDUMP", 1, "src/features/far-lod/lodinative.cpp:270 instSwayDump | (a) written while the far instanced buckets are appended to the cell (census of that build)" },
+{ "WW_FARSHEETCAP_RED", 0, "src/features/far-lod/impostordraw.cpp:144 arrayLayerTexture | hand: read at each new layer; 1 = each array layer of a far-card sheet reads its whole file again, outside the paint's upload budget, build 78 (EMPTY240 R6-5)" },
 { "WW_FFMPEG", 0, "src/nifskope_ui.cpp:2020 wwRenderPathRun | re-read per frame or per call (a)" },
 { "WW_FILESTAB_CLIP", 3, "src/filestabtest.cpp:649 wwFilesTabHarness | bake/CLI/test path" },
 { "WW_FILESTAB_EXPECT", 3, "src/filestabtest.cpp:651 wwFilesTabHarness | bake/CLI/test path" },

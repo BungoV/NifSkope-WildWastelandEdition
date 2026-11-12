@@ -538,6 +538,10 @@ int ImpostorChunk::drawCellFar( Scene * scene, const ImpostorDraw::Options & opt
 	ChunkState & s = F.cards;
 	if ( !scene || s.placed.isEmpty() )
 		return 0;
+	// lane EMPTY240 R6-5: a far-cards draw over 50 ms names its parts (build 78's first: 461 ms CPU, 37 draws)
+	QElapsedTimer wwSlow;
+	wwSlow.start();
+	qint64 wwCommitNs = 0, wwCastNs = 0, wwSheetsNs = 0, wwLadderNs = 0;
 	/* lane PERFLOAD1 P7, THE TREE LADDER (treeladder.h, docs/FO4CS_IMPROVED_LOD_PLAN.md R3 4-5): every handed tree
 	 * takes its step from its size on screen (bound radius x scale / distance x P11 / 2 of the live projection); a
 	 * tree on its mesh step leaves its card out, a tree on the impostor hides its mesh row (CellFarHide), and every
@@ -610,14 +614,19 @@ int ImpostorChunk::drawCellFar( Scene * scene, const ImpostorDraw::Options & opt
 			}
 		}
 	}
+	wwLadderNs = wwSlow.nsecsElapsed();
 	// the mesh rows see the change at most every 100 ms (one row filter a bucket per commit); the first frame at once
 	if ( CellFarHide::ladderDirty() && ( !sinceCommit.isValid() || sinceCommit.elapsed() >= 100 ) ) {
+		const qint64 t0 = wwSlow.nsecsElapsed();
 		CellFarHide::ladderCommit();
+		wwCommitNs = wwSlow.nsecsElapsed() - t0;
 		sinceCommit.start();
 	}
 	// the casters (cascade rows + card pyramids) take the target step at most once a second: each commit rebuilds them
 	if ( CellFarHide::castDirty() && ( !sinceCast.isValid() || sinceCast.elapsed() >= 1000 ) ) {
+		const qint64 t0 = wwSlow.nsecsElapsed();
 		CellFarHide::castCommit();
+		wwCastNs = wwSlow.nsecsElapsed() - t0;
 		sinceCast.start();
 	}
 	// lane PERFLOAD1 P8: the LOD preview's line on each change (the far trees by the step they go to)
@@ -634,11 +643,14 @@ int ImpostorChunk::drawCellFar( Scene * scene, const ImpostorDraw::Options & opt
 	}
 	const bool lodTint = LodPreview::tint();
 	if ( !s.sheetsRegistered ) {
+		const qint64 t0 = wwSlow.nsecsElapsed();
 		s.sheetsRegistered = true;
 		for ( const ImpostorCardSet & set : std::as_const( s.sets ) )
 			if ( set.ok )
 				ImpostorDraw::registerLooseSheets( scene, set );
+		wwSheetsNs = wwSlow.nsecsElapsed() - t0;
 	}
+	const qint64 wwCardsT0 = wwSlow.nsecsElapsed();
 	static int saidDrawn = -1, saidOut = -1;
 	int drawn = 0, outside = 0, refused = 0;
 	int bandFlat = 0, bandOct = 0, bandFade = 0;	// lane LODLIVE1
@@ -764,6 +776,17 @@ int ImpostorChunk::drawCellFar( Scene * scene, const ImpostorDraw::Options & opt
 	}
 	if ( lodTint )
 		LodPreview::noteCards( bandFlat, bandOct, bandFade );
+	static int wwSlowSaid = 0;
+	if ( wwSlow.elapsed() > 50 && wwSlowSaid < 8 ) {
+		wwSlowSaid++;
+		const qint64 cardsNs = wwSlow.nsecsElapsed() - wwCardsT0;
+		qInfo().noquote() << QStringLiteral( "far cards slow draw: %1 ms = ladder %2 + ladder commit %3 + caster commit %4 + "
+			"sheet roots %5 + cards %6 (%7 drawn, %8 instanced draws, %9 refused; the `far sheets:` line has the layers made)" )
+			.arg( double( wwSlow.nsecsElapsed() ) * 1e-6, 0, 'f', 1 ).arg( double( wwLadderNs ) * 1e-6, 0, 'f', 1 )
+			.arg( double( wwCommitNs ) * 1e-6, 0, 'f', 1 ).arg( double( wwCastNs ) * 1e-6, 0, 'f', 1 )
+			.arg( double( wwSheetsNs ) * 1e-6, 0, 'f', 1 ).arg( double( cardsNs ) * 1e-6, 0, 'f', 1 )
+			.arg( drawn ).arg( ist.draws ).arg( refused );
+	}
 	static int saidSets = -2, saidDraws = -1, sinceSaid = 0;
 	// once more 60 frames after a change: the GPU pick's first frame sends the whole static buffer
 	const bool steady = inst && ++sinceSaid == 60;
