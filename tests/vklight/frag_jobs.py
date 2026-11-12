@@ -1,7 +1,8 @@
 """Lane VKLIGHT1 round 2 (2026-11-12): the jobs tests/vklight/frag_gate.py runs (GL .frag vs HLSL ps on Vulkan).
 
-Inputs are synthetic but shaped like the frame's (no flight dump of the packed air volume exists yet; the extended
-WW_CELL_AIR_DUMP writes one): a camera 731 u over the ground pitched 6 deg down, so the frame holds rays above, at and
+Inputs are synthetic but shaped like the frame's (no flight dump of the packed air volume exists yet;
+WW_CELL_AIR_APPLY_DUMP=<folder> (cellvolair.cpp vaApplyDump) writes every uniform and sampler cell_volsky reads, once,
+not yet run: no launches in this lane): a camera 731 u over the ground pitched 6 deg down, so the frame holds rays above, at and
 under the horizon; the packed volume (near grid 40x24x64 over 64..20000 u, far grid 20x12x32 to 200000 u) from the
 air's own height law along each column; the aerial-perspective LUTs smooth and monotone; a terrain grid and a cloud map.
 """
