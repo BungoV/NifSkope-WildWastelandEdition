@@ -113,4 +113,26 @@ struct ObjBlTexUnit
 };
 //! the module's set-0 images, texel buffers and samplers with GL's units and textures (the active unit restored)
 bool objBlTextures( GlProc gp, unsigned prog, const SpvModule & m, std::vector<ObjBlTexUnit> & out, std::string & why );
+
+/* Slice 6 (the pools as vertex buffers): a class pool of cellbindless.cpp (setupVao: attribute i = nibble i of attrMask
+ * floats, its own buffer, tightly packed GL_FLOATs; GL_UNSIGNED_SHORT indices) */
+struct ObjBlPool
+{
+	std::uint64_t attrMask = 0;
+	unsigned vbo[16] = {}, ebo = 0;  //!< GL's names
+	std::size_t verts = 0, indices = 0;
+};
+/*! the class's VAO as the pipeline's vertex input: attribute i on buffer binding i, stride 4 n, R32..._SFLOAT, GL location i.
+ * A GL location in `need` (bit L) the class does not carry reads GL's generic default (0,0,0,1: the cell pass never sets a
+ * current value): binding 16, stride 0, one R32G32B32A32 (the twins' constant buffer) */
+constexpr std::uint32_t kObjBlConstBinding = 16;
+void objBlPoolLayout( std::uint64_t attrMask, std::vector<ObjBlBuffer> & buffers, std::vector<ObjBlAttr> & attrs, std::uint32_t need = 0 );
+/*! GL's pool into the class's twins on the present device (glCopyNamedBufferSubData into buffers GL imports; the twins grow
+ * by doubling), GL's order: call before the run's signal and list `glNames` in it. false with a reason (nothing copied).
+ * red 1 copies each attribute from the buffer of the attribute before it (gates only) */
+bool objBlPoolCopy( std::uintptr_t key, const ObjBlPool & p, std::vector<unsigned> & glNames, std::string & why, int red = 0 );
+//! the class went (its arena dropped): its twins go with the next free
+void objBlPoolDrop( std::uintptr_t key );
+//! the twins held (and their bytes)
+int objBlPoolCount( std::size_t * bytes = nullptr );
 }  // namespace WwVkPresent

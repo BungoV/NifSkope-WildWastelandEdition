@@ -62,10 +62,20 @@ struct OpEntry
 	VkPipeline pipe = VK_NULL_HANDLE;
 };
 
+// a class pool's twins: one exported buffer per attribute, the indices (GL imports each: the copy target)
+struct OpPool
+{
+	CsmBuf vb[16], ib;
+	std::uint64_t attrMask = 0;
+	bool gone = false;
+};
+
 struct Op
 {
 	std::vector<OpEntry> made;
 	int refused = 0;
+	std::map<std::uintptr_t, OpPool> pools;
+	CsmBuf constVb;  // GL's generic attribute default (0,0,0,1) for the locations a class does not carry (host-visible)
 };
 
 Op & opS()
@@ -601,14 +611,130 @@ int objBlPipes( int * refused )
 	return int( opS().made.size() );
 }
 
+void objBlPoolLayout( std::uint64_t attrMask, std::vector<ObjBlBuffer> & buffers, std::vector<ObjBlAttr> & attrs, std::uint32_t need )
+{
+	buffers.clear();
+	attrs.clear();
+	const VkFormat fmt[5] = { VK_FORMAT_UNDEFINED, VK_FORMAT_R32_SFLOAT, VK_FORMAT_R32G32_SFLOAT, VK_FORMAT_R32G32B32_SFLOAT,
+		VK_FORMAT_R32G32B32A32_SFLOAT };
+	std::uint32_t have = 0;
+	std::uint64_t m = attrMask;
+	for ( std::uint32_t i = 0; m && i < 16; i++, m >>= 4 ) {
+		const std::uint32_t n = std::uint32_t( m & 15 );
+		if ( !n || n > 4 )
+			continue;
+		buffers.push_back( { i, n * 4, false } );
+		attrs.push_back( { i, i, std::uint32_t( fmt[n] ), 0 } );
+		have |= 1u << i;
+	}
+	const std::uint32_t miss = need & ~have;
+	if ( !miss )
+		return;
+	buffers.push_back( { kObjBlConstBinding, 0, false } );
+	for ( std::uint32_t l = 0; l < 32; l++ )
+		if ( miss >> l & 1u )
+			attrs.push_back( { l, kObjBlConstBinding, std::uint32_t( VK_FORMAT_R32G32B32A32_SFLOAT ), 0 } );
+}
+
+// the twins of class `key` as vertex / index buffers ([16] = the constant (0,0,0,1)); false: no such class or none copied yet
+bool objBlPoolBinds( std::uintptr_t key, VkBuffer ( &vb )[17], VkBuffer & ib )
+{
+	Op & O = opS();
+	const auto it = O.pools.find( key );
+	if ( it == O.pools.end() || it->second.gone || !it->second.ib.buf )
+		return false;
+	for ( int i = 0; i < 16; i++ )
+		vb[i] = it->second.vb[i].buf;
+	vb[16] = O.constVb.buf;
+	ib = it->second.ib.buf;
+	return true;
+}
+
+bool objBlPoolCopy( std::uintptr_t key, const ObjBlPool & p, std::vector<unsigned> & glNames, std::string & why, int red )
+{
+	Gl & g = gl();
+	glNames.clear();
+	if ( !vk().ok || !g.ok || !g.copyNamedBufferSubData || !g.namedBufferStorageMem )
+		return why = "no present device or no glCopyNamedBufferSubData / glNamedBufferStorageMemEXT", false;
+	if ( !p.ebo || !p.indices || !p.verts )
+		return why = "an empty pool", false;
+	if ( p.attrMask >> 60 )
+		return why = "more than 15 attributes", false;
+	std::string w;
+	CsmBuf & cv = opS().constVb;
+	if ( !cv.buf ) {
+		if ( !csmBuf( cv, 16, false, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, w ) )
+			return why = "the constant attribute buffer: " + w, false;
+		const float one[4] = { 0.0f, 0.0f, 0.0f, 1.0f };
+		std::memcpy( cv.ptr, one, 16 );
+	}
+	OpPool & t = opS().pools[key];
+	t.gone = false;
+	t.attrMask = p.attrMask;
+	std::uint64_t m = p.attrMask;
+	unsigned prev = 0;
+	std::size_t prevBytes = 0;
+	for ( int i = 0; m && i < 16; i++, m >>= 4 ) {
+		const std::size_t n = std::size_t( m & 15 );
+		if ( !n )
+			continue;
+		if ( n > 4 || !p.vbo[i] )
+			return why = "attribute " + std::to_string( i ) + ": " + ( n > 4 ? "more than 4 floats" : "no GL buffer" ), false;
+		const std::size_t bytes = p.verts * n * 4;
+		if ( !csmBuf( t.vb[i], VkDeviceSize( bytes ), true, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, w ) )
+			return why = "attribute " + std::to_string( i ) + "'s twin: " + w, false;
+		const bool r = red == 1 && prev;
+		g.copyNamedBufferSubData( GLuint( r ? prev : p.vbo[i] ), t.vb[i].gl, 0, 0, std::intptr_t( r ? std::min( bytes, prevBytes ) : bytes ) );
+		glNames.push_back( t.vb[i].gl );
+		prev = p.vbo[i];
+		prevBytes = bytes;
+	}
+	if ( !csmBuf( t.ib, VkDeviceSize( p.indices * 2 ), true, VK_BUFFER_USAGE_INDEX_BUFFER_BIT, w ) )
+		return why = "the indices' twin: " + w, false;
+	g.copyNamedBufferSubData( GLuint( p.ebo ), t.ib.gl, 0, 0, std::intptr_t( p.indices * 2 ) );
+	glNames.push_back( t.ib.gl );
+	return true;
+}
+
+void objBlPoolDrop( std::uintptr_t key )
+{
+	auto it = opS().pools.find( key );
+	if ( it != opS().pools.end() )
+		it->second.gone = true;
+}
+
+int objBlPoolCount( std::size_t * bytes )
+{
+	std::size_t b = 0;
+	int n = 0;
+	for ( auto & e : opS().pools ) {
+		if ( e.second.gone )
+			continue;
+		n++;
+		for ( const CsmBuf & c : e.second.vb )
+			b += std::size_t( c.cap );
+		b += std::size_t( e.second.ib.cap );
+	}
+	if ( bytes )
+		*bytes = b;
+	return n;
+}
+
 void objBlPipeFree()
 {
 	Op & O = opS();
-	if ( !O.made.empty() && vk().ok ) {
+	if ( ( !O.made.empty() || !O.pools.empty() ) && vk().ok ) {
 		drain();
 		vk().vkDeviceWaitIdle( vk().dev );
 		for ( OpEntry & e : O.made )
 			opDestroy( e );
+		for ( auto & p : O.pools ) {
+			for ( CsmBuf & c : p.second.vb )
+				csmBufFree( c, gl().ok && c.glCtx == gl().ctx );
+			csmBufFree( p.second.ib, gl().ok && p.second.ib.glCtx == gl().ctx );
+		}
+		O.pools.clear();
+		csmBufFree( O.constVb, false );
 	}
 	O.made.clear();
 	O.refused = 0;
