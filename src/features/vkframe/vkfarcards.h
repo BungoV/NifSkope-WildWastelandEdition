@@ -30,5 +30,25 @@ bool farTexelBuffer( std::uintptr_t key, unsigned glFmt, std::size_t bytes, unsi
 void farTexelBufferDrop( std::uintptr_t key );
 bool farTexelBufferRead( std::uintptr_t key, std::vector<std::uint8_t> & out, std::string & why );  //!< for the gates
 std::uint32_t farTexelBufferMax();  //!< the device's maxTexelBufferElements (0: no device)
+
+//! one binding of the far cards' set as the SPIR-V declares it (registers shifted: b n -> n, t n -> 64 + n, s n -> 128 + n)
+struct FarSetSlot
+{
+	std::uint32_t binding = 0;
+	int kind = 0;  // 0 uniform buffer, 1 sampled image, 2 uniform texel buffer, 3 sampler
+	int dim = 0;   // SPIR-V Dim: 0 1D, 1 2D, 2 3D, 3 Cube, 5 Buffer
+	bool arrayed = false;
+	bool compare = false;  // a sampler a depth-compare sample reads (its VkSampler needs compareEnable)
+};
+struct FarSetCounts
+{
+	int ubos = 0, images = 0, texelBuffers = 0, samplers = 0, compareSamplers = 0, cubeArrays = 0;
+	std::vector<FarSetSlot> slots;  // by binding
+};
+//! reflect a fragment module's descriptor set 0 (pure: the gates feed it altered words for their reds)
+bool farSetReflect( const std::uint32_t * words, std::size_t count, FarSetCounts & out, std::string & why );
+/*! the shipped far-card module (farcards_view_ps, impostor_cellinstez_ps FOGLEAK): reflected, then its set layout, pool,
+ * one set, pipeline layout and shader module on the present device (once; farCardsFree releases them) */
+bool farCardsSet( FarSetCounts & out, std::string & why );
 void farCardsFree( bool glAlive );  //!< shutdown(): everything above goes with the view
 }  // namespace WwVkPresent

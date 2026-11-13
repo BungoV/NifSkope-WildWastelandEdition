@@ -3,7 +3,9 @@
  * parts: Shared, sharedFree, memType, oneShot, imageView, vkFormatOf).
  * 1. twins sharedTarget does not make: the card sheets' BC formats (GL's compressed names) and cube-map arrays (the
  *    placed lights' shadow cubes, GL_DEPTH_COMPONENT16). Same contract as sharedTarget (one image both APIs see, keyed,
- *    GENERAL on both sides, GL copies into it), its own key map so sharedTarget's twins and stats stay as they were. */
+ *    GENERAL on both sides, GL copies into it), its own key map so sharedTarget's twins and stats stay as they were.
+ * 2. texel buffers both APIs see (farTexelBuffer). 3. the cards' descriptor set, reflected from their module (farCardsSet). */
+#include "features/vkframe/farcards_view_ps.spv.h"
 namespace
 {
 constexpr GLenum kFcCubeArray = 0x9009, kFcBindingCubeArray = 0x900A, kFcDepth16 = 0x81A5;
@@ -91,6 +93,13 @@ struct FarCards
 	std::map<std::uintptr_t, Shared> twins;
 	std::map<std::uintptr_t, FcBuf> bufs;
 	FcDev d;
+	// 3. the far cards' set (farCardsSet)
+	VkDescriptorSetLayout setLayout = VK_NULL_HANDLE;
+	VkDescriptorPool pool = VK_NULL_HANDLE;
+	VkDescriptorSet set = VK_NULL_HANDLE;
+	VkPipelineLayout pipeLayout = VK_NULL_HANDLE;
+	VkShaderModule ps = VK_NULL_HANDLE;
+	WwVkPresent::FarSetCounts counts;
 	WwVkPresent::FarTwinStat st;
 	int features = -1;  // -1 unread; bit 0 textureCompressionBC, bit 1 imageCubeArray (the device enables what is offered)
 };
@@ -409,6 +418,27 @@ bool fcBufMake( FcBuf & b, GLenum glFmt, VkFormat fmt, VkDeviceSize bytes, std::
 	b.glCtx = g.ctx;
 	return true;
 }
+
+// the caller drained the worker and waited the device idle
+void fcSetFree()
+{
+	Vk & v = vk();
+	FarCards & C = farCards();
+	if ( C.ps )
+		v.vkDestroyShaderModule( v.dev, C.ps, nullptr );
+	if ( C.pipeLayout )
+		v.vkDestroyPipelineLayout( v.dev, C.pipeLayout, nullptr );
+	if ( C.pool )
+		v.vkDestroyDescriptorPool( v.dev, C.pool, nullptr );  // frees the set
+	if ( C.setLayout )
+		v.vkDestroyDescriptorSetLayout( v.dev, C.setLayout, nullptr );
+	C.ps = VK_NULL_HANDLE;
+	C.pipeLayout = VK_NULL_HANDLE;
+	C.pool = VK_NULL_HANDLE;
+	C.set = VK_NULL_HANDLE;
+	C.setLayout = VK_NULL_HANDLE;
+	C.counts = WwVkPresent::FarSetCounts();
+}
 }  // namespace
 
 namespace WwVkPresent
@@ -568,7 +598,7 @@ FarTwinStat farTwinStat()
 void farCardsFree( bool glAlive )
 {
 	FarCards & C = farCards();
-	if ( C.twins.empty() && C.bufs.empty() )
+	if ( C.twins.empty() && C.bufs.empty() && !C.setLayout && !C.ps )
 		return;
 	drain();
 	vk().vkDeviceWaitIdle( vk().dev );
@@ -576,6 +606,7 @@ void farCardsFree( bool glAlive )
 		sharedFree( kv.second, glAlive && kv.second.glCtx == gl().ctx );
 	for ( auto & kv : C.bufs )
 		fcBufFree( kv.second, glAlive );
+	fcSetFree();
 	C.twins.clear();
 	C.bufs.clear();
 	C.d = FcDev();
@@ -715,5 +746,184 @@ std::uint32_t farTexelBufferMax()
 	std::string why;
 	fcDev( why );  // the Vulkan half reads the limit even where GL's entry points are missing
 	return farCards().d.maxTexels;
+}
+
+// 3. the far cards' set, read from the module itself (the HLSL's registers after fx()'s shifts), so the layout follows
+//    the shader and a resource the HLSL gains or drops cannot leave the two apart
+bool farSetReflect( const std::uint32_t * w, std::size_t n, FarSetCounts & out, std::string & why )
+{
+	out = FarSetCounts();
+	if ( !w || n < 5 || w[0] != 0x07230203u ) {
+		why = "not SPIR-V";
+		return false;
+	}
+	struct Img
+	{
+		std::uint32_t dim = 0, arrayed = 0, sampled = 0;
+	};
+	std::map<std::uint32_t, std::uint32_t> binding, setOf, ptrTo, varPtr, varStorage, loadOf;
+	std::map<std::uint32_t, Img> images;
+	std::map<std::uint32_t, int> samplerTypes, structs;
+	std::vector<std::uint32_t> drefSampled;  // OpSampledImage results a depth-compare sample reads
+	std::map<std::uint32_t, std::uint32_t> sampledSampler;  // OpSampledImage result -> the sampler value
+	for ( std::size_t i = 5; i < n; ) {
+		const std::uint32_t op = w[i] & 0xFFFFu, wc = w[i] >> 16;
+		if ( !wc || i + wc > n ) {
+			why = "a broken instruction at word " + std::to_string( i );
+			return false;
+		}
+		const std::uint32_t * a = w + i + 1;
+		switch ( op ) {
+		case 71:  // OpDecorate
+			if ( wc >= 4 && a[1] == 33 )
+				binding[a[0]] = a[2];
+			else if ( wc >= 4 && a[1] == 34 )
+				setOf[a[0]] = a[2];
+			break;
+		case 25:  // OpTypeImage
+			if ( wc >= 9 )
+				images[a[0]] = { a[2], a[4], a[6] };
+			break;
+		case 26: samplerTypes[a[0]] = 1; break;  // OpTypeSampler
+		case 30: structs[a[0]] = 1; break;       // OpTypeStruct
+		case 32:                                  // OpTypePointer
+			if ( wc >= 4 )
+				ptrTo[a[0]] = a[2];
+			break;
+		case 59:  // OpVariable
+			if ( wc >= 4 ) {
+				varPtr[a[1]] = a[0];
+				varStorage[a[1]] = a[2];
+			}
+			break;
+		case 61:  // OpLoad
+		case 83:  // OpCopyObject
+			if ( wc >= 4 )
+				loadOf[a[1]] = loadOf.count( a[2] ) ? loadOf[a[2]] : a[2];
+			break;
+		case 86:  // OpSampledImage
+			if ( wc >= 5 )
+				sampledSampler[a[1]] = loadOf.count( a[3] ) ? loadOf[a[3]] : a[3];
+			break;
+		case 89: case 90: case 91: case 92: case 97:  // the Dref samples and gathers
+			if ( wc >= 4 )
+				drefSampled.push_back( loadOf.count( a[2] ) ? loadOf[a[2]] : a[2] );
+			break;
+		default: break;
+		}
+		i += wc;
+	}
+	std::map<std::uint32_t, int> compareVars;
+	for ( std::uint32_t s : drefSampled ) {
+		auto it = sampledSampler.find( s );
+		if ( it != sampledSampler.end() )
+			compareVars[it->second] = 1;
+	}
+	std::map<std::uint32_t, FarSetSlot> slots;
+	for ( const auto & kv : binding ) {
+		const std::uint32_t var = kv.first;
+		if ( !varPtr.count( var ) )
+			continue;  // a binding on something other than a variable
+		if ( setOf.count( var ) && setOf[var] != 0 ) {
+			why = "binding " + std::to_string( kv.second ) + " is in set " + std::to_string( setOf[var] ) + ", the far cards use set 0";
+			return false;
+		}
+		const std::uint32_t t = ptrTo.count( varPtr[var] ) ? ptrTo[varPtr[var]] : 0;
+		FarSetSlot s;
+		s.binding = kv.second;
+		if ( images.count( t ) ) {
+			const Img & im = images[t];
+			if ( im.sampled != 1 ) {
+				why = "binding " + std::to_string( s.binding ) + " is a storage image / texel buffer: the far cards read only";
+				return false;
+			}
+			s.kind = im.dim == 5 ? 2 : 1;
+			s.dim = int( im.dim );
+			s.arrayed = im.arrayed != 0;
+		} else if ( samplerTypes.count( t ) ) {
+			s.kind = 3;
+			s.compare = compareVars.count( var ) != 0;
+		} else if ( structs.count( t ) && varStorage[var] == 2 ) {
+			s.kind = 0;
+		} else {
+			why = "binding " + std::to_string( s.binding ) + " has a type the far cards' set does not take (an array, a combined sampler, a storage buffer)";
+			return false;
+		}
+		if ( slots.count( s.binding ) ) {
+			why = "binding " + std::to_string( s.binding ) + " is declared twice";
+			return false;
+		}
+		slots[s.binding] = s;
+	}
+	for ( const auto & kv : slots ) {
+		const FarSetSlot & s = kv.second;
+		out.slots.push_back( s );
+		out.ubos += s.kind == 0;
+		out.images += s.kind == 1;
+		out.texelBuffers += s.kind == 2;
+		out.samplers += s.kind == 3;
+		out.compareSamplers += s.kind == 3 && s.compare;
+		out.cubeArrays += s.kind == 1 && s.dim == 3 && s.arrayed;
+	}
+	return true;
+}
+
+bool farCardsSet( FarSetCounts & out, std::string & why )
+{
+	Vk & v = vk();
+	FarCards & C = farCards();
+	if ( !v.ok ) {
+		why = "no present device";
+		return false;
+	}
+	if ( C.set ) {
+		out = C.counts;
+		return true;
+	}
+	if ( !farSetReflect( vkframe_farcards_view_ps_spv, sizeof( vkframe_farcards_view_ps_spv ) / 4, C.counts, why ) )
+		return false;
+	if ( C.counts.cubeArrays && !fcFeatures( false, true, why ) )
+		return false;
+	std::vector<VkDescriptorSetLayoutBinding> lb;
+	std::map<VkDescriptorType, std::uint32_t> sizes;
+	for ( const FarSetSlot & s : C.counts.slots ) {
+		const VkDescriptorType t = s.kind == 0 ? VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER : s.kind == 1 ? VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE
+			: s.kind == 2 ? VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER : VK_DESCRIPTOR_TYPE_SAMPLER;
+		lb.push_back( { s.binding, t, 1, VK_SHADER_STAGE_FRAGMENT_BIT, nullptr } );
+		sizes[t]++;
+	}
+	std::vector<VkDescriptorPoolSize> ps;
+	for ( const auto & kv : sizes )
+		ps.push_back( { kv.first, kv.second } );
+	VkDescriptorSetLayoutCreateInfo li { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
+	li.bindingCount = std::uint32_t( lb.size() );
+	li.pBindings = lb.data();
+	VkDescriptorPoolCreateInfo pi { VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO };
+	pi.maxSets = 1;
+	pi.poolSizeCount = std::uint32_t( ps.size() );
+	pi.pPoolSizes = ps.data();
+	bool ok = v.vkCreateDescriptorSetLayout( v.dev, &li, nullptr, &C.setLayout ) == VK_SUCCESS
+		&& v.vkCreateDescriptorPool( v.dev, &pi, nullptr, &C.pool ) == VK_SUCCESS;
+	if ( ok ) {
+		VkDescriptorSetAllocateInfo ai { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO };
+		ai.descriptorPool = C.pool;
+		ai.descriptorSetCount = 1;
+		ai.pSetLayouts = &C.setLayout;
+		VkPipelineLayoutCreateInfo pl { VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO };
+		pl.setLayoutCount = 1;
+		pl.pSetLayouts = &C.setLayout;
+		ok = v.vkAllocateDescriptorSets( v.dev, &ai, &C.set ) == VK_SUCCESS
+			&& v.vkCreatePipelineLayout( v.dev, &pl, nullptr, &C.pipeLayout ) == VK_SUCCESS
+			&& fxModule( vkframe_farcards_view_ps_spv, sizeof( vkframe_farcards_view_ps_spv ), C.ps );
+	}
+	if ( !ok ) {
+		why = "the far cards' set layout / pool / set / pipeline layout / module failed on the present device";
+		drain();
+		v.vkDeviceWaitIdle( v.dev );
+		fcSetFree();
+		return false;
+	}
+	out = C.counts;
+	return true;
 }
 }  // namespace WwVkPresent

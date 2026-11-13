@@ -11,5 +11,5 @@ if powershell -NoProfile -Command "if (Get-Process NifSkope,Fallout4 -ErrorActio
 mkdir -p "$OUT"
 g++ -O2 -std=c++17 -pthread -I"$ROOT/src" "$ROOT/tests/vkframe/fartwin.cpp" -o "$OUT/fartwin.exe" -lopengl32 -lgdi32 -luser32 \
 	|| { echo "FARTWIN GATE FAILED (g++)"; exit 1; }
-"$OUT/fartwin.exe" 2>&1 | tee "$OUT/fartwin.txt"
+"$OUT/fartwin.exe" "$ROOT" 2>&1 | tee "$OUT/fartwin.txt"
 tail -1 "$OUT/fartwin.txt" | grep -q "FARTWIN GATE OK"

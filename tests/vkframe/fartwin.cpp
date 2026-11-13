@@ -12,6 +12,7 @@
 #include "fxview.cpp"
 #undef main
 
+#include <functional>
 #include <random>
 
 namespace fartw
@@ -79,7 +80,70 @@ size_t differ( const std::vector<std::uint8_t> & a, const std::vector<std::uint8
 }
 }  // namespace fartw
 
-int main()
+namespace fartw
+{
+// the HLSL's own declarations (register lines) as the set should hold them after fx()'s shifts
+std::map<std::uint32_t, WwVkPresent::FarSetSlot> hlslSlots( const std::string & path )
+{
+	std::map<std::uint32_t, WwVkPresent::FarSetSlot> m;
+	std::istringstream in( readFile( path ) );
+	std::string line;
+	while ( std::getline( in, line ) ) {
+		const size_t r = line.find( "register(" );
+		if ( r == std::string::npos )
+			continue;
+		const char c = line[r + 9];
+		const std::uint32_t n = std::uint32_t( std::atoi( line.c_str() + r + 10 ) );
+		WwVkPresent::FarSetSlot s;
+		auto has = [&]( const char * k ) { return line.compare( 0, std::strlen( k ), k ) == 0; };
+		if ( c == 'b' && has( "cbuffer" ) ) {
+			s.binding = n;
+			s.kind = 0;
+		} else if ( c == 's' ) {
+			s.binding = 128 + n;
+			s.kind = 3;
+			s.compare = has( "SamplerComparisonState" );
+		} else if ( c == 't' ) {
+			s.binding = 64 + n;
+			s.kind = has( "Buffer<" ) ? 2 : 1;
+			s.dim = has( "Buffer<" ) ? 5 : has( "TextureCube" ) ? 3 : has( "Texture3D" ) ? 2 : has( "Texture1D" ) ? 0 : 1;
+			s.arrayed = line.find( "Array<" ) != std::string::npos && line.find( "Array<" ) < r;
+		} else
+			continue;
+		m[s.binding] = s;
+	}
+	return m;
+}
+
+// reflected against declared: the bindings that differ (missing, extra, or another kind / dim / arrayed / compare)
+size_t setDiff( const WwVkPresent::FarSetCounts & got, const std::map<std::uint32_t, WwVkPresent::FarSetSlot> & want, bool print )
+{
+	size_t bad = 0;
+	std::map<std::uint32_t, WwVkPresent::FarSetSlot> g;
+	for ( const auto & s : got.slots )
+		g[s.binding] = s;
+	for ( const auto & kv : want ) {
+		auto it = g.find( kv.first );
+		const auto & w = kv.second;
+		if ( it == g.end() || it->second.kind != w.kind || it->second.dim != w.dim || it->second.arrayed != w.arrayed
+			|| it->second.compare != w.compare ) {
+			bad++;
+			if ( print )
+				std::printf( "FARTWIN set binding %u: declared kind %d dim %d arrayed %d compare %d, module %s\n", kv.first, w.kind, w.dim,
+					int( w.arrayed ), int( w.compare ), it == g.end() ? "has none" : "differs" );
+		}
+	}
+	for ( const auto & kv : g )
+		if ( !want.count( kv.first ) ) {
+			bad++;
+			if ( print )
+				std::printf( "FARTWIN set binding %u: in the module, not declared\n", kv.first );
+		}
+	return bad;
+}
+}  // namespace fartw
+
+int main( int argc, char ** argv )
 {
 	using namespace fartw;
 	setvbuf( stdout, nullptr, _IONBF, 0 );
@@ -262,6 +326,111 @@ int main()
 		}
 		for ( auto & b : tb )
 			WwVkPresent::farTexelBufferDrop( reinterpret_cast<std::uintptr_t>( &b.key ) );
+	}
+	// the far cards' set: reflected from the shipped module, against the HLSL's declarations and the counts the pass needs
+	{
+		if ( argc < 2 )
+			return fatal( "usage: fartwin.exe <tree root>" );
+		const auto want = hlslSlots( std::string( argv[1] ) + "/res/shaders/hlsl/far-lod/impostor_cellinstez_ps__WW_CELL_FOGLEAK.hlsl" );
+		WwVkPresent::FarSetCounts sc;
+		const bool made = WwVkPresent::farCardsSet( sc, why );
+		int tSlots = 0;
+		bool b0 = false, b31 = false, cubeAt74 = false, compareAt138 = false;
+		for ( const auto & s : sc.slots ) {
+			tSlots += s.binding >= 64 && s.binding < 128;
+			b0 = b0 || ( s.binding == 0 && s.kind == 0 );
+			b31 = b31 || ( s.binding == 31 && s.kind == 0 );
+			cubeAt74 = cubeAt74 || ( s.binding == 74 && s.kind == 1 && s.dim == 3 && s.arrayed );
+			compareAt138 = compareAt138 || ( s.binding == 138 && s.compare );
+		}
+		const size_t diff = made ? setDiff( sc, want, true ) : want.size();
+		std::printf( "FARTWIN set: %s (%s); %zu bindings (HLSL declares %zu), %d uniform buffers, %d images, %d texel buffers, %d samplers "
+			"(%d compare), %d cube arrays, %d t-registers; b0 %d b31 %d cube array at t10 %d compare sampler at s10 %d; %zu differ\n",
+			made ? "made" : "FAILED", made ? "layout, pool, set, pipeline layout, module" : why.c_str(), sc.slots.size(), want.size(), sc.ubos,
+			sc.images, sc.texelBuffers, sc.samplers, sc.compareSamplers, sc.cubeArrays, tSlots, int( b0 ), int( b31 ), int( cubeAt74 ),
+			int( compareAt138 ), diff );
+		ok = ok && made && diff == 0 && tSlots == 26 && sc.texelBuffers == 4 && sc.cubeArrays == 1 && sc.compareSamplers == 1 && b0 && b31
+			&& cubeAt74 && compareAt138;
+		// reds: altered modules must be refused or differ from the declarations
+		const std::vector<std::uint32_t> base( vkframe_farcards_view_ps_spv,
+			vkframe_farcards_view_ps_spv + sizeof( vkframe_farcards_view_ps_spv ) / 4 );
+		auto redRun = [&]( const char * name, const std::function<int( std::vector<std::uint32_t> & )> & alter ) {
+			std::vector<std::uint32_t> w = base;
+			const int hits = alter( w );
+			WwVkPresent::FarSetCounts rc;
+			std::string rw;
+			const bool refl = WwVkPresent::farSetReflect( w.data(), w.size(), rc, rw );
+			const size_t d = refl ? setDiff( rc, want, false ) : want.size();
+			std::printf( "FARTWIN red %s (%d words altered): %s\n", name, hits, !refl ? ( "refused: " + rw ).c_str() : d ? "differs" : "SAME" );
+			if ( !hits || ( refl && !d ) ) {
+				std::printf( "FARTWIN red %s PASSED: the gate cannot see it\n", name );
+				ok = false;
+			}
+		};
+		auto walk = [&]( std::vector<std::uint32_t> & w, const std::function<int( std::uint32_t, std::uint32_t *, std::uint32_t )> & f ) {
+			int hits = 0;
+			for ( size_t i = 5; i < w.size(); ) {
+				const std::uint32_t wc = w[i] >> 16;
+				if ( !wc )
+					break;
+				hits += f( w[i] & 0xFFFFu, &w[i], wc );
+				i += wc;
+			}
+			return hits;
+		};
+		redRun( "the shadow's cube array typed 2D array", [&]( std::vector<std::uint32_t> & w ) {
+			return walk( w, []( std::uint32_t op, std::uint32_t * p, std::uint32_t wc ) {
+				if ( op == 25 && wc >= 9 && p[3] == 3 && p[5] == 1 ) {
+					p[3] = 1;
+					return 1;
+				}
+				return 0;
+			} );
+		} );
+		redRun( "cellCluster's binding moved onto cellLights'", [&]( std::vector<std::uint32_t> & w ) {
+			return walk( w, []( std::uint32_t op, std::uint32_t * p, std::uint32_t wc ) {
+				if ( op == 71 && wc >= 4 && p[2] == 33 && p[3] == 70 ) {
+					p[3] = 73;
+					return 1;
+				}
+				return 0;
+			} );
+		} );
+		redRun( "the depth-compare samples made plain", [&]( std::vector<std::uint32_t> & w ) {
+			return walk( w, []( std::uint32_t op, std::uint32_t * p, std::uint32_t ) {
+				if ( op == 89 || op == 90 ) {
+					p[0] = ( p[0] & 0xFFFF0000u ) | ( op - 2 );  // OpImageSampleImplicitLod / ExplicitLod
+					return 1;
+				}
+				return 0;
+			} );
+		} );
+		redRun( "cellFarRecs typed Texture2D", [&]( std::vector<std::uint32_t> & w ) {
+			// the image type of binding 77's variable: follow decoration -> variable -> pointer -> image
+			std::uint32_t var = 0, ptr = 0, img = 0;
+			walk( w, [&]( std::uint32_t op, std::uint32_t * p, std::uint32_t wc ) {
+				if ( op == 71 && wc >= 4 && p[2] == 33 && p[3] == 77 )
+					var = p[1];
+				return 0;
+			} );
+			walk( w, [&]( std::uint32_t op, std::uint32_t * p, std::uint32_t wc ) {
+				if ( op == 59 && wc >= 4 && p[2] == var )
+					ptr = p[1];
+				return 0;
+			} );
+			walk( w, [&]( std::uint32_t op, std::uint32_t * p, std::uint32_t wc ) {
+				if ( op == 32 && wc >= 4 && p[1] == ptr )
+					img = p[3];
+				return 0;
+			} );
+			return walk( w, [&]( std::uint32_t op, std::uint32_t * p, std::uint32_t wc ) {
+				if ( op == 25 && wc >= 9 && p[1] == img && p[3] == 5 ) {
+					p[3] = 1;  // shared with the other float4 buffers: they all change, the set must still differ
+					return 1;
+				}
+				return 0;
+			} );
+		} );
 	}
 	const WwVkPresent::FarTwinStat st = WwVkPresent::farTwinStat();
 	std::printf( "FARTWIN stat: %d made, %d dropped, %d fails (%s), %.2f MB\n", st.made, st.dropped, st.fails, st.failWhy.c_str(), st.mb );
