@@ -44,6 +44,35 @@ def bool_names(src, path=None, seen=None):
     return out
 
 
+def with_loose_halves(path, src, seen=None):
+    """HLSLSRC2: a readable source's LooseUniforms take members from its .hlsli loose halves (`#elif defined(WW_LOOSE_UNIFORMS)`):
+    append each included file's half (and its types half) as a cbuffer / struct text so bool_names sees those bools too"""
+    if 'WW_HLSL_SRC' not in src and 'WW_LOOSE_UNIFORMS' not in src:
+        return src
+    seen = set() if seen is None else seen
+    add = []
+    for inc in re.findall(r'#\s*include\s+"([^"]+)"', src):
+        d = os.path.dirname(path)
+        for p in (os.path.join(d, inc), os.path.join(d, '..', inc)):
+            p = os.path.normpath(p)
+            if os.path.isfile(p):
+                break
+        else:
+            continue
+        if p in seen:
+            continue
+        seen.add(p)
+        t = open(p, encoding='utf-8', errors='replace').read()
+        m = re.search(r'#elif defined\(WW_LOOSE_UNIFORMS\)(.*?)\n#else', t, re.S)
+        if m:
+            add.append('\ncbuffer LooseUniforms {%s\n};' % m.group(1))
+        m = re.search(r'#if defined\(WW_LOOSE_TYPES\)(.*?)\n#elif', t, re.S)
+        if m:
+            add.append(m.group(1))
+        add.append(with_loose_halves(p, t, seen)[len(t):])
+    return src + ''.join(add)
+
+
 def compile_raw(hlsl, raw, defines=()):
     '''R7: the DXC step alone (thread safe: no shared state), so build_all can run many at once -> (ok, stderr tail)'''
     f, extra = stamps.real(hlsl)   # HLSLSRC: a virtual variant = its readable source + the tag's defines
@@ -68,6 +97,7 @@ def build(hlsl, out, defines=(), locs=None, precompiled=False, ps_remap=None):
     raw = out + '.raw'
     real = stamps.real(hlsl)[0]
     src = open(real, encoding='utf-8', errors='replace').read()
+    src = with_loose_halves(real, src)
     if not precompiled:
         ok, err = compile_raw(hlsl, raw, defines)
         if not ok:
