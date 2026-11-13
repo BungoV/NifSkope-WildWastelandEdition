@@ -1,7 +1,7 @@
 #pragma once
 
-// Lane VKWATER3 (2026-11-13, row G5): the water draw's loose uniforms (b71 of water_view_vs, b31 of water_view_ps), from
-// spirv-cross --reflect of the shipped SPIR-V (notes/vkwater3/tools/reflect_table.py; the vs block at b71).
+// Lane VKWATER3 (2026-11-13, row G5): the water draw's loose uniforms (b287 of water_view_vs, b31 of water_view_ps), from
+// spirv-cross --reflect of the shipped SPIR-V (notes/vkwater3/tools/reflect_table.py; the vs block at 256 + 31).
 #include "features/vkframe/vkpresent.h"
 
 namespace WwVkPresent

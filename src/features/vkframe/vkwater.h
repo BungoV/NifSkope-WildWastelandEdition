@@ -72,8 +72,12 @@ inline int waterKindOf( unsigned t )
 	case 0x8B60: case 0x8DC5: case 0x8DCC: case 0x8DD4: return 3;              // samplerCube, Shadow, i, u
 	case 0x900C: case 0x900D: case 0x900E: case 0x900F: return 4;              // samplerCubeMapArray, Shadow, i, u
 	case 0x8DC2: case 0x8DD0: case 0x8DD8: return 5;                           // samplerBuffer, i, u
-	default: return t >= 0x8B5D && t <= 0x9108 ? 6 : -1;                       // another sampler kind; -1 not a sampler
+	default: break;
 	}
+	// another sampler / image kind (refused) -- the uvec2-4 (0x8DC6-8) and non-square matrices (0x8B65-A) between are not
+	const bool other = ( t >= 0x8B5D && t <= 0x8B64 ) || ( t >= 0x8DC0 && t <= 0x8DC5 ) || ( t >= 0x8DC9 && t <= 0x8DD8 )
+		|| ( t >= 0x9050 && t <= 0x906C ) || ( t >= 0x9108 && t <= 0x910D );
+	return other ? 6 : -1;
 }
 
 inline bool waterIsSampler( unsigned t )

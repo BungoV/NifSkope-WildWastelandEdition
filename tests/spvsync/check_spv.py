@@ -69,7 +69,7 @@ VKFRAME_FXK = {'farcards_view_ps': 'far-lod/impostor_cellinstez_ps__WW_CELL_FOGL
 	'water_view_ps': 'water/fo4_waterlook_ps__WW_CELL_FOGLEAK+WW_FRAME_UBO'}	# lane VKWATER3
 HLSL_SPECS += [('src/features/vkframe', k, 'vulkan1.2', 'vkframe_%s_spv' % k) for k in VKFRAME_FXK]
 # lane VKWATER3: the water's vertex stage, the script's `fxw <name> <dir/file>` lines (vs_6_0, own shifts, bindings kept)
-VKFRAME_FXW_ARGS = ['-fvk-b-shift', '40', '0', '-fvk-t-shift', '110', '0', '-fvk-s-shift', '180', '0', '-fvk-u-shift', '220', '0',
+VKFRAME_FXW_ARGS = ['-fvk-b-shift', '256', '0', '-fvk-t-shift', '110', '0', '-fvk-s-shift', '180', '0', '-fvk-u-shift', '220', '0',
 	'-fspv-preserve-bindings']
 VKFRAME_FXW = {'water_view_vs': 'core/fo4_default_vs'}
 HLSL_SPECS += [('src/features/vkframe', k, 'vulkan1.2', 'vkframe_%s_spv' % k) for k in VKFRAME_FXW]

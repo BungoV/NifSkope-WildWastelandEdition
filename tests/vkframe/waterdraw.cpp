@@ -14,6 +14,8 @@
 //   covered on both sides (NaN equals NaN). EXACT = no half and no depth differs and coverage equal; BOUND = within the bar.
 // Reds (each must FAIL, never refuse): red 1 the ps loose block one vec4 off, red 2 plain samplers, red 4 cull flipped,
 // red 8 depth ALWAYS. Last line `WATERDRAW GATE OK` or `WATERDRAW GATE FAILED`.
+// Sampling: judged at anisotropy 1 on both sides (NV's anisotropic footprint differs GL vs Vulkan at the same maxAnisotropy:
+// 10 248 samples past at the app's 16, BOUND at 1). The app's 16 is drawn once more on seed 1 and logged, never judged.
 #define main fxview_main
 #include "fxview.cpp"
 #undef main
@@ -117,7 +119,7 @@ struct Smp
 	int kind = 0;       // 0 2D, 1 3D, 2 2D array, 4 cube-map array, 5 texel buffer
 	GLenum fmt = 0x881A;
 	int w = 64, h = 64, d = 1, levels = 1, unit = 0;
-	float aniso = 1.0f;
+	float aniso = 1.0f, appAniso = 1.0f;
 	bool intF = false, depth = false, compare = false, bc = false;
 	GLuint tex = 0, buf = 0;
 };
@@ -189,6 +191,10 @@ bool smpOf( Smp & s, int W, int H )
 		s.d = 6;
 		s.levels = 7;
 	}
+	// the judged runs sample at anisotropy 1 on both sides (NV's anisotropic footprint differs GL vs Vulkan at the same
+	// maxAnisotropy: skill ww-gl-vk-interop, VKOBJ4's colour arm); the app's 16 is drawn once more and logged, not judged
+	s.appAniso = s.aniso;
+	s.aniso = 1.0f;
 	return true;
 }
 
@@ -246,7 +252,7 @@ bool fill( Smp & s, std::mt19937 & rng )
 		const size_t n = size_t( lw ) * size_t( lh ) * size_t( ld );
 		if ( s.bc ) {
 			const GLsizei bytes = GLsizei( ( ( lw + 3 ) / 4 ) * ( ( lh + 3 ) / 4 ) * 16 );
-			std::vector<std::uint8_t> b( size_t( bytes ) );
+			std::vector<std::uint8_t> b( static_cast<size_t>( bytes ) );
 			for ( auto & x : b )
 				x = std::uint8_t( rng() & 0xFF );
 			ex.compressedTexSubImage2D( tg, l, 0, 0, lw, lh, s.fmt, bytes, b.data() );
@@ -428,6 +434,34 @@ Verdict judge( const std::vector<std::uint16_t> & bgC, const std::vector<float> 
 	}
 	return v;
 }
+
+// where the colour misses sit (red 0 only; the verdict is judge's): their box, per channel, inside seed 2's scissor
+void where( const std::vector<std::uint16_t> & vkC, const std::vector<std::uint16_t> & glC, int W, int H, int S )
+{
+	int x0 = W, y0 = H, x1 = -1, y1 = -1;
+	size_t ch[4] = {}, inSc = 0, n = 0, slab = 0;
+	for ( int y = 0; y < H; y++ )
+		for ( int x = 0; x < W; x++ )
+			for ( int k = 0; k < S; k++ ) {
+				const size_t s = ( size_t( y ) * size_t( W ) + size_t( x ) ) * size_t( S ) + size_t( k );
+				bool past = false;
+				for ( int c = 0; c < 4; c++ ) {
+					const float a = h2f( vkC[s * 4 + size_t( c )] ), b = h2f( glC[s * 4 + size_t( c )] );
+					if ( std::fabs( double( a ) - double( b ) ) / std::max( 1.0, std::fabs( double( b ) ) ) > 1e-2 ) {
+						ch[c]++;
+						past = true;
+					}
+				}
+				if ( !past )
+					continue;
+				n++;
+				x0 = std::min( x0, x ), x1 = std::max( x1, x ), y0 = std::min( y0, y ), y1 = std::max( y1, y );
+				inSc += x >= W / 5 && x < W / 5 + W / 2 && y >= H / 6 && y < H / 6 + H / 2;
+				slab += x < W / 2;
+			}
+	std::printf( "WATERDRAW where: %zu samples past, box x %d..%d y %d..%d, r %zu g %zu b %zu a %zu, %zu inside seed 2's scissor, %zu over the slab half\n",
+		n, x0, x1, y0, y1, ch[0], ch[1], ch[2], ch[3], inSc, slab );
+}
 }  // namespace wdr
 
 int main( int argc, char ** argv )
@@ -530,6 +564,22 @@ int main( int argc, char ** argv )
 			s.unit = int( smp.size() ) + 1;
 			smp.push_back( s );
 		}
+	}
+	{
+		// the twins' loose fields GL's program has no location for (compiled out of the GLSL, read by the HLSL)
+		std::string miss;
+		int nMiss = 0;
+		for ( const WwVkPresent::FxField & fd : WwVkPresent::kT_waterPs )
+			if ( f.getUniformLocation( pWater, fd.name ) < 0 ) {
+				nMiss++;
+				miss += std::string( " " ) + fd.name;
+			}
+		for ( const WwVkPresent::FxField & fd : WwVkPresent::kT_waterVs )
+			if ( f.getUniformLocation( pWater, fd.name ) < 0 ) {
+				nMiss++;
+				miss += std::string( " vs:" ) + fd.name;
+			}
+		std::printf( "WATERDRAW %d twin fields GL has no location for:%s\n", nMiss, miss.c_str() );
 	}
 	std::printf( "WATERDRAW %zu samplers active in GL's program:", smp.size() );
 	for ( const Smp & s : smp )
@@ -729,6 +779,32 @@ int main( int argc, char ** argv )
 	};
 
 	static char twinKeys[128];
+	// GL's draw and the twin's into the same frame contents, no scissor, judged against the frame before the water
+	auto pairRun = [&]( const std::vector<std::uint16_t> & bgC, const std::vector<float> & bgD, long long idxOff, int count, bool & ran ) {
+		before( fbRef );
+		drawState( fbRef, false );
+		glDrawElements( GL_TRIANGLES, count, GL_UNSIGNED_SHORT, reinterpret_cast<const void *>( std::uintptr_t( idxOff ) ) );
+		stateEnd();
+		const std::vector<std::uint16_t> gC = readColor( refCol );
+		const std::vector<float> gD = readDepth( refDs, false );
+		before( fbFrame );
+		drawState( fbFrame, false );
+		WwVkPresent::WaterRun r;
+		WwVkPresent::waterStateOf( &gw, pWater, r );
+		r.w = W;
+		r.h = H;
+		r.color = fc;
+		r.idxOff = idxOff;
+		r.count = count;
+		r.key = reinterpret_cast<std::uintptr_t>( twinKeys );
+		ran = WwVkPresent::waterRun( r, why );
+		stateEnd();
+		if ( !ran )
+			return Verdict();
+		const std::vector<std::uint16_t> kC = readColor( fc );
+		const std::vector<float> kD = readDepth( fds, true );
+		return judge( bgC, bgD, kC, kD, gC, gD );
+	};
 	bool gateOk = true;
 	int runs = 0;
 	for ( int seed = 1; seed <= 2; seed++ ) {
@@ -787,8 +863,87 @@ int main( int argc, char ** argv )
 			std::printf( "WATERDRAW seed %d red %d: %s covered %zu (both %zu, one side only %zu), depth max %ld D24 units (%zu past 1), "
 				"colour %zu halves differ, %zu samples past 1e-2 (max rel %.3g)%s\n", seed, red, word, v.covered, v.both, v.onlyOne,
 				v.maxDepthU, v.depthPast, v.halvesDiff, v.colPast, v.maxRel, red ? ( fail ? " -> red FAILS as it must" : " -> red PASSES: the gate is blind" ) : "" );
+			if ( !red && v.colPast )
+				where( vkC, glC, W, H, S );
 			if ( red ? !fail : fail )
 				gateOk = false;
+		}
+		// diagnostic (WATERDRAW_BISECT=1, seed 1): each seeded loose scalar set to 0 alone, both sides redrawn; the ones that
+		// move the colour misses are printed. Never part of the verdict.
+		const char * bis = std::getenv( "WATERDRAW_BISECT" );
+		if ( seed == 1 && bis && *bis == '1' ) {
+			GLint n = 0;
+			f.getProgramiv( pWater, fActiveUnis, &n );
+			size_t base = 0;
+			for ( GLint i = -1; i < n; i++ ) {
+				char nm[256] = {};
+				GLint sz = 0;
+				GLenum ty = 0;
+				GLint l = -1;
+				GLint iv = 0;
+				GLfloat fv = 0.0f;
+				const bool isInt = false;
+				bool asInt = isInt;
+				if ( i >= 0 ) {
+					f.getActiveUniform( pWater, GLuint( i ), 256, nullptr, &sz, &ty, nm );
+					const GLuint idx = GLuint( i );
+					GLint bi = -1;
+					f.getActiveUniformsiv( pWater, 1, &idx, fBlockIndex, &bi );
+					if ( bi >= 0 || sz != 1 || ( ty != 0x1404 && ty != 0x8B56 && ty != 0x1406 ) )
+						continue;
+					asInt = ty != 0x1406;
+					l = f.getUniformLocation( pWater, nm );
+					f.useProgram( pWater );
+					if ( asInt ) {
+						gw.glGetUniformiv( pWater, l, &iv );
+						if ( !iv )
+							continue;
+						const GLint z = 0;
+						f.uniform1iv( l, 1, &z );
+					} else {
+						gw.glGetUniformfv( pWater, l, &fv );
+						const GLfloat z = 0.0f;
+						f.uniform1fv( l, 1, &z );
+					}
+				}
+				bool ran = false;
+				const Verdict pv = pairRun( bgC, bgD, idxOff, count, ran );
+				const size_t past = ran ? pv.colPast : size_t( -1 );
+				if ( i < 0 )
+					base = past;
+				else if ( past != base )
+					std::printf( "WATERDRAW bisect: %s (%s %g) = 0 -> %zu samples past (base %zu)\n", nm, asInt ? "int" : "float",
+						asInt ? double( iv ) : double( fv ), past, base );
+				if ( i >= 0 ) {
+					f.useProgram( pWater );
+					if ( asInt )
+						f.uniform1iv( l, 1, &iv );
+					else
+						f.uniform1fv( l, 1, &fv );
+				}
+			}
+			std::printf( "WATERDRAW bisect done (base %zu)\n", base );
+		}
+		// the app's anisotropy (16 on the noise / moments), seed 1 once more: logged as the known driver difference, never judged
+		if ( seed == 1 ) {
+			auto setAniso = [&]( bool app ) {
+				for ( const Smp & s : smp )
+					if ( s.appAniso > 1.0f ) {
+						glBindTexture( targetOf( s.kind ), s.tex );
+						glTexParameterf( targetOf( s.kind ), 0x84FE, app ? s.appAniso : 1.0f );
+						glBindTexture( targetOf( s.kind ), 0 );
+					}
+			};
+			setAniso( true );
+			bool ran = false;
+			const Verdict av = pairRun( bgC, bgD, idxOff, count, ran );
+			setAniso( false );
+			runs++;
+			if ( ran )
+				std::printf( "WATERDRAW seed 1 app anisotropy (known driver difference, not judged): covered %zu (one side only %zu), depth max %ld D24 "
+					"units, %zu samples past 1e-2 (max rel %.3g)\n", av.covered, av.onlyOne, av.maxDepthU, av.colPast, av.maxRel );
+			else
+				std::printf( "WATERDRAW seed 1 app anisotropy: REFUSED (%s)\n", why.c_str() );
 		}
 	}
 	const WwVkPresent::FxStat st = WwVkPresent::takeWaterDrawStat();

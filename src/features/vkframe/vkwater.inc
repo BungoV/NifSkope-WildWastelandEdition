@@ -32,11 +32,14 @@ struct WaterImgName
 // the twins' image bindings (water_view_ps t n -> 64 + n, water_view_vs t 0 -> 110), their samplers at + 64
 const WaterImgName kWaterImg[] = { { 64, "atApTex" }, { 65, "volAirTerr" }, { 66, "volAirRainMap" }, { 67, "volTex" },
 	{ 68, "volTile" }, { 69, "cellIsBloom" }, { 70, "cellIsLut" }, { 71, "waterInfoIndex" }, { 72, "waterInfoAtlas" },
-	{ 73, "waterFlowIndex" }, { 74, "waterFlowAtlas" }, { 75, "waterInfoBodies" }, { 77, "csmMap" }, { 78, "ussTerrMap" },
+	{ 73, "waterFlowIndex" }, { 74, "waterFlowAtlas" }, { 75, "waterInfoBodies" }, { 76, "cellGi" }, { 77, "csmMap" }, { 78, "ussTerrMap" },
 	{ 79, "ussContactMap" }, { 80, "ussCloudMap" }, { 81, "waterMoment0" }, { 82, "waterMoment1" }, { 83, "waterMoment2" },
 	{ 84, "waterCloudMap" }, { 85, "waterOceanB" }, { 86, "waterOceanC" }, { 87, "waterNoise2" }, { 88, "waterSkyIndex" },
 	{ 89, "waterSkyAtlas" }, { 90, "waterDepth" }, { 91, "waterNoise0" }, { 92, "waterNoise1" }, { 93, "waterSsrRaw" },
-	{ 94, "waterSsrFin" }, { 95, "waterScene" }, { 110, "farStream" } };
+	{ 94, "waterSsrFin" }, { 95, "waterScene" }, { 96, "volAirNoise" }, { 97, "cellLights" }, { 98, "cellCluster" },
+	{ 99, "cellGiSlots" }, { 100, "cellRooms" }, { 101, "cellShadow" }, { 102, "cellFarSlots" }, { 103, "cellFarRecs" },
+	{ 104, "cellFarPlaced" }, { 105, "cellCtGbuf" }, { 106, "cellAoDecal" }, { 107, "cellSsgi" }, { 108, "waterOceanD" },
+	{ 110, "farStream" } };
 constexpr VkDeviceSize kWaterAlign = 256;
 // the host buffer: zeros (a block GL has no buffer for), the loose blocks, the disabled attributes' values
 constexpr VkDeviceSize kWaterZeroAt = 0, kWaterVsLooseAt = 12288, kWaterPsLooseAt = 12800, kWaterConstAt = 18176, kWaterHostBytes = 18432;
@@ -57,6 +60,10 @@ struct WaterDraw
 	int pipeSamples = 0;
 	std::map<std::string, VkSampler> smp;
 	CsmBuf geo, host;
+	// the zero shadow cube (an input GL compiled out and the twin keeps): D16 1x1, one cube, depth 1, GENERAL
+	VkImage zeroCube = VK_NULL_HANDLE;
+	VkDeviceMemory zeroCubeMem = VK_NULL_HANDLE;
+	VkImageView zeroCubeView = VK_NULL_HANDLE;
 	PFN_vkCmdDrawIndexed drawIndexed = nullptr;  // not in the device table (Vk): loaded here
 	// this run's record (written before the hand)
 	VkPipeline pipe = VK_NULL_HANDLE;
@@ -105,6 +112,81 @@ int waterAttrBytes( const WwVkPresent::WaterAttrib & a )
 {
 	const int c = a.type == 0x1406 ? 4 : ( a.type == 0x140B || a.type == 0x1403 || a.type == 0x1402 ) ? 2 : 1;
 	return c * std::clamp( a.size, 1, 4 );
+}
+
+bool waterZeroCube( WaterDraw & D, std::string & why )
+{
+	Vk & v = vk();
+	const auto clearDs = reinterpret_cast<PFN_vkCmdClearDepthStencilImage>( v.vkGetDeviceProcAddr( v.dev, "vkCmdClearDepthStencilImage" ) );
+	if ( !clearDs ) {
+		why = "no vkCmdClearDepthStencilImage";
+		return false;
+	}
+	VkImageCreateInfo ci { VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO };
+	ci.flags = VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT;
+	ci.imageType = VK_IMAGE_TYPE_2D;
+	ci.format = VK_FORMAT_D16_UNORM;
+	ci.extent = { 1, 1, 1 };
+	ci.mipLevels = 1;
+	ci.arrayLayers = 6;
+	ci.samples = VK_SAMPLE_COUNT_1_BIT;
+	ci.tiling = VK_IMAGE_TILING_OPTIMAL;
+	ci.usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+	if ( v.vkCreateImage( v.dev, &ci, nullptr, &D.zeroCube ) != VK_SUCCESS ) {
+		why = "the water draw's zero cube: vkCreateImage failed";
+		return false;
+	}
+	VkMemoryRequirements r;
+	v.vkGetImageMemoryRequirements( v.dev, D.zeroCube, &r );
+	VkMemoryAllocateInfo ai { VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO };
+	ai.allocationSize = r.size;
+	ai.memoryTypeIndex = memType( r.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT );
+	if ( ai.memoryTypeIndex == UINT32_MAX || v.vkAllocateMemory( v.dev, &ai, nullptr, &D.zeroCubeMem ) != VK_SUCCESS
+		|| v.vkBindImageMemory( v.dev, D.zeroCube, D.zeroCubeMem, 0 ) != VK_SUCCESS ) {
+		why = "the water draw's zero cube: no device memory";
+		return false;
+	}
+	VkCommandBufferAllocateInfo cai { VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO };
+	cai.commandPool = v.pool;
+	cai.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+	cai.commandBufferCount = 1;
+	VkCommandBuffer cmd = VK_NULL_HANDLE;
+	VkFence fence = VK_NULL_HANDLE;
+	VkFenceCreateInfo fi { VK_STRUCTURE_TYPE_FENCE_CREATE_INFO };
+	bool laid = false;
+	if ( v.vkAllocateCommandBuffers( v.dev, &cai, &cmd ) == VK_SUCCESS && v.vkCreateFence( v.dev, &fi, nullptr, &fence ) == VK_SUCCESS ) {
+		VkCommandBufferBeginInfo bi { VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
+		bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+		v.vkBeginCommandBuffer( cmd, &bi );
+		const VkImageSubresourceRange rr { VK_IMAGE_ASPECT_DEPTH_BIT, 0, 1, 0, 6 };
+		VkImageMemoryBarrier b { VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER };
+		b.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+		b.newLayout = VK_IMAGE_LAYOUT_GENERAL;
+		b.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+		b.srcQueueFamilyIndex = b.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+		b.image = D.zeroCube;
+		b.subresourceRange = rr;
+		v.vkCmdPipelineBarrier( cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1, &b );
+		const VkClearDepthStencilValue one { 1.0f, 0 };
+		clearDs( cmd, D.zeroCube, VK_IMAGE_LAYOUT_GENERAL, &one, 1, &rr );
+		b.oldLayout = b.newLayout = VK_IMAGE_LAYOUT_GENERAL;
+		b.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+		b.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+		v.vkCmdPipelineBarrier( cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0, nullptr, 0, nullptr, 1, &b );
+		v.vkEndCommandBuffer( cmd );
+		laid = oneShot( cmd, fence );
+	}
+	if ( cmd )
+		v.vkFreeCommandBuffers( v.dev, v.pool, 1, &cmd );
+	if ( fence )
+		v.vkDestroyFence( v.dev, fence, nullptr );
+	D.zeroCubeView = laid ? imageView( D.zeroCube, VK_IMAGE_VIEW_TYPE_CUBE_ARRAY, VK_FORMAT_D16_UNORM, VK_IMAGE_ASPECT_DEPTH_BIT, 1, 6 )
+		: VK_NULL_HANDLE;
+	if ( !D.zeroCubeView ) {
+		why = "the water draw's zero cube: clear / view failed";
+		return false;
+	}
+	return true;
 }
 
 // the device-time parts (once): modules, the merged set (vs + ps reflected), its pool, one set, the pipeline layout
@@ -180,6 +262,9 @@ bool waterStatic( std::string & why )
 		why = "no vkCmdDrawIndexed";
 		return false;
 	}
+	std::string cw;
+	if ( fcFeatures( false, true, cw ) && !waterZeroCube( D, why ) )
+		return false;
 	D.made = true;
 	return true;
 }
@@ -609,11 +694,12 @@ bool waterRun( const WaterRun & r, std::string & why )
 		x.descriptorCount = 1;
 		if ( b.kind == 0 ) {
 			x.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-			const int k = ( b.binding == 41 || b.binding == 1 ) ? 0 : b.binding == 0 ? 1 : b.binding == 40 ? 2 : -1;
+			// vs blocks at 256 + n (fxw's b-shift), ps blocks at n
+			const int k = ( b.binding == 257 || b.binding == 1 ) ? 0 : b.binding == 0 ? 1 : b.binding == 256 ? 2 : -1;
 			if ( k >= 0 )
 				bi[i] = uboHost[k] ? VkDescriptorBufferInfo { D.host.buf, kWaterZeroAt, uboNeed[k] }
 					: VkDescriptorBufferInfo { D.geo.buf, uboAt[k], uboNeed[k] };
-			else if ( b.binding == 71 )
+			else if ( b.binding == 256 + 31 )
 				bi[i] = { D.host.buf, kWaterVsLooseAt, VkDeviceSize( kT_waterVsBytes ) };
 			else if ( b.binding == 31 )
 				bi[i] = { D.host.buf, kWaterPsLooseAt, VkDeviceSize( kT_waterPsBytes ) };
@@ -641,7 +727,8 @@ bool waterRun( const WaterRun & r, std::string & why )
 			if ( b.kind == 2 ) {  // a texel buffer (farStream): GL's data store into the twin, or a zero one
 				const bool bound = s && s->tex && s->dataBuf && s->bufBytes > 0;
 				unsigned tb = 0, tt = 0;
-				if ( !farTexelBuffer( key, bound ? s->glFmt : 0x8814u, bound ? std::size_t( s->bufBytes ) : 16u, tb, tt, w ) )
+				const unsigned zeroFmt = std::strcmp( nm, "cellCluster" ) == 0 ? 0x8D82u : 0x8814u;  // Buffer<int4>: RGBA32I
+				if ( !farTexelBuffer( key, bound ? s->glFmt : zeroFmt, bound ? std::size_t( s->bufBytes ) : 16u, tb, tt, w ) )
 					return refuse( std::string( nm ) + ": " + w );
 				if ( bound )
 					g.copyNamedBufferSubData( s->dataBuf, tb, 0, 0, std::intptr_t( s->bufBytes ) );
@@ -654,7 +741,11 @@ bool waterRun( const WaterRun & r, std::string & why )
 			}
 			VkImageView view = VK_NULL_HANDLE;
 			if ( !s || !s->tex ) {
-				if ( b.dim == 2 )
+				if ( b.dim == 3 && !( b.arrayed && D.zeroCubeView ) )
+					return refuse( std::string( nm ) + ": an unbound cube input (no zero cube view)" );
+				if ( b.dim == 3 )
+					view = D.zeroCubeView;
+				else if ( b.dim == 2 )
 					view = F.d3;
 				else if ( b.arrayed )
 					view = F.d2a;
