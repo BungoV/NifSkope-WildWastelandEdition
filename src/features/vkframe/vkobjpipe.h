@@ -188,6 +188,7 @@ struct ObjBlDraw
 	std::vector<std::pair<std::uint32_t, std::vector<std::uint8_t>>> ubos;  //!< binding -> bytes (objBlMirror)
 	std::vector<std::pair<std::uint32_t, std::uintptr_t>> images;          //!< binding -> a shared target
 	std::vector<std::pair<std::uint32_t, ObjBlSampler>> samplers;          //!< binding -> GL's state, else the default
+	std::vector<std::pair<std::uint32_t, unsigned>> texels;                //!< binding -> GL's buffer texture (objBlTexelCopy made its twin)
 	const void * glRows = nullptr;  //!< GL's draw rows (the bindless ring, GL form), translated into wwDraws
 	std::size_t rows = 0;
 	const void * cmds = nullptr;    //!< GL's indirect commands
@@ -197,6 +198,7 @@ struct ObjBlDrawStat
 {
 	int ubos = 0, images = 0, standIns = 0, texels = 0, samplers = 0, rowBuffers = 0;
 	int glSamplers = 0;     //!< samplers with GL's state (the rest the default)
+	int texelsGl = 0;       //!< texel buffers from GL's twins (the rest the zero texel)
 	std::size_t whole = 0;  //!< rows with every handle known
 };
 //! what objBlBindUnits found on GL's units
@@ -206,14 +208,21 @@ struct ObjBlBindStat
 	int glOwn = 0;     //!< a GL texture that is no shared target (a stand-in)
 	int misfit = 0;    //!< a shared target the binding cannot take (shape or samples; a stand-in)
 	int unbound = 0;   //!< no unit or no texture
-	int texelGl = 0;   //!< a texel buffer GL binds (the zero texel on Vulkan)
+	int texelGl = 0;   //!< a texel buffer GL binds
+	int texelShared = 0, texelRefused = 0;  //!< of those, copied into a twin (d.texels) / refused (the zero texel on Vulkan)
 	int samplers = 0;  //!< samplers given GL's state
 	int compare = 0;   //!< of those, depth compare
-	std::string misfitWhy;
+	std::string misfitWhy, texelWhy;
+	std::vector<unsigned> glBufs;  //!< the texel twins GL wrote (the crossing's signal takes them)
 };
 /*! GL's texture units of `prog` for both of d's modules: a set-0 image GL binds a shared target to joins d.images
- * (shape and samples checked), each sampler takes GL's state of its texture. The rest stay stand-ins. */
+ * (shape and samples checked), each sampler takes GL's state of its texture, each texel buffer GL binds is copied into its
+ * twin (objBlTexelCopy) and joins d.texels. The rest stay stand-ins. */
 bool objBlBindUnits( GlProc gp, unsigned prog, ObjBlDraw & d, ObjBlBindStat & st, std::string & why );
+/*! GL's buffer texture `tex` (its range: glTexBufferRange's, else the whole buffer) copied into its twin on the present device,
+ * a buffer GL imports (glCopyNamedBufferSubData, ordered before the crossing's signal; glNames gets the twin's GL name).
+ * Formats: R / RG / RGBA 32F, 32I, 32UI, RGBA16F, RGBA8; others are refused. red 1 copies from 16 bytes past the start. */
+bool objBlTexelCopy( GlProc gp, unsigned tex, std::vector<unsigned> & glNames, std::string & why, int red = 0 );
 //! the shared target `key` fits a set-0 image of SPIR-V Dim `dim` / Arrayed (2D, 3D, 2D array, cube array; one sample)
 bool objBlSharedFits( std::uintptr_t key, std::uint32_t dim, std::uint32_t arrayed, std::string & why );
 //! GL program `prog`'s state for both modules' uniform blocks (LooseUniforms by objBlLoose, the named blocks by objBlBlock)
@@ -235,6 +244,7 @@ struct ObjBlRunStat
 {
 	int runs = 0, draws = 0, cmds = 0, gl = 0, fails = 0;
 	int shared = 0, glOwn = 0, texelGl = 0, compare = 0;  //!< objBlShade's units: shared images, GL-only textures, GL texel buffers, compare samplers
+	int texelShared = 0;  //!< of the texel buffers, those drawn from their twins
 	double cpuMs = 0.0, maxMs = 0.0;
 	std::string glWhy, failWhy;
 };

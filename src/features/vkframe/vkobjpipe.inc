@@ -101,6 +101,19 @@ struct OpPool
 	bool gone = false;
 };
 
+// GL's buffer texture's twin (objBlTexelCopy: a buffer GL imports) and its view (opTexelView)
+struct OpTexel
+{
+	CsmBuf buf;
+	VkFormat fmt = VK_FORMAT_UNDEFINED;
+	std::uint32_t cls = 0;  // the element class as SPIR-V's sampled type: 0 float, 1 int, 2 uint
+	VkDeviceSize range = 0;
+	VkBufferView view = VK_NULL_HANDLE;
+	VkBuffer viewBuf = VK_NULL_HANDLE;
+	VkFormat viewFmt = VK_FORMAT_UNDEFINED;
+	VkDeviceSize viewRange = 0;
+};
+
 struct Op
 {
 	std::vector<OpEntry> made;
@@ -115,6 +128,7 @@ struct Op
 	std::map<std::uint32_t, OpStandIn> stand;  // key: view type * 4 + element type
 	CsmBuf zeroTexel;
 	VkBufferView texelView[3] = {};             // float / int / uint
+	std::map<unsigned, OpTexel> texTwins;       // GL's buffer texture -> its twin
 	std::map<std::string, VkSampler> smps;      // GL's sampler states met (key: the ObjBlSampler's bytes)
 	VkCommandBuffer cmd = VK_NULL_HANDLE;
 	VkFence fence = VK_NULL_HANDLE;
@@ -821,7 +835,7 @@ void objBlPipeFree()
 {
 	Op & O = opS();
 	if ( ( !O.made.empty() || !O.pools.empty() || !O.draws.empty() || !O.stand.empty() || O.zeroTexel.buf || O.fence || O.runFence || O.glDone
-		|| !O.smps.empty() ) && vk().ok ) {
+		|| !O.smps.empty() || !O.texTwins.empty() ) && vk().ok ) {
 		Vk & v = vk();
 		drain();
 		v.vkDeviceWaitIdle( v.dev );
@@ -847,6 +861,12 @@ void objBlPipeFree()
 				destroyView( v.dev, bv, nullptr );
 			bv = VK_NULL_HANDLE;
 		}
+		for ( auto & t : O.texTwins ) {
+			if ( t.second.view && destroyView )
+				destroyView( v.dev, t.second.view, nullptr );
+			csmBufFree( t.second.buf, gl().ok && t.second.buf.glCtx == gl().ctx );
+		}
+		O.texTwins.clear();
 		csmBufFree( O.zeroTexel, false );
 		csmBufFree( O.rows, false );
 		O.rowCount = 0;
@@ -1282,8 +1302,20 @@ bool objBlBindUnits( GlProc gp, unsigned prog, ObjBlDraw & d, ObjBlBindStat & st
 			return false;
 		for ( const ObjBlTexUnit & u : units ) {
 			if ( u.type == VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER ) {
-				st.texelGl += u.glTex != 0;
-				st.unbound += u.glTex == 0;
+				if ( !u.glTex ) {
+					st.unbound++;
+					continue;
+				}
+				st.texelGl++;
+				std::string w;
+				if ( objBlTexelCopy( gp, u.glTex, st.glBufs, w ) ) {
+					d.texels.emplace_back( u.binding, u.glTex );
+					st.texelShared++;
+				} else {
+					st.texelRefused++;
+					if ( st.texelWhy.empty() )
+						st.texelWhy = u.name + ": " + w;
+				}
 				continue;
 			}
 			if ( !u.glTex ) {
@@ -1526,6 +1558,37 @@ bool opZeroTexel( std::uint32_t sampled, VkBufferView & out, std::string & why )
 			return why = "the zero texel's view failed", false;
 	}
 	out = O.texelView[sampled];
+	return true;
+}
+
+// GL buffer texture `tex`'s twin as a view of the binding's element class (objBlTexelCopy first; remade when the twin moved)
+bool opTexelView( unsigned tex, std::uint32_t sampled, VkBufferView & out, std::string & why )
+{
+	Vk & v = vk();
+	const auto it = opS().texTwins.find( tex );
+	if ( it == opS().texTwins.end() || !it->second.buf.buf || !it->second.range )
+		return why = "GL's buffer texture " + std::to_string( tex ) + " has no twin (objBlTexelCopy first)", false;
+	OpTexel & t = it->second;
+	static const char * cls[3] = { "float", "int", "uint" };
+	if ( t.cls != sampled )
+		return why = std::string( "GL's buffer texture holds " ) + cls[t.cls % 3] + " texels, the binding reads " + ( sampled < 3 ? cls[sampled] : "another class" ), false;
+	if ( !t.view || t.viewBuf != t.buf.buf || t.viewFmt != t.fmt || t.viewRange != t.range ) {
+		const auto create = reinterpret_cast<PFN_vkCreateBufferView>( v.vkGetDeviceProcAddr( v.dev, "vkCreateBufferView" ) );
+		const auto destroy = reinterpret_cast<PFN_vkDestroyBufferView>( v.vkGetDeviceProcAddr( v.dev, "vkDestroyBufferView" ) );
+		if ( t.view && destroy )
+			destroy( v.dev, t.view, nullptr );
+		t.view = VK_NULL_HANDLE;
+		VkBufferViewCreateInfo ci { VK_STRUCTURE_TYPE_BUFFER_VIEW_CREATE_INFO };
+		ci.buffer = t.buf.buf;
+		ci.format = t.fmt;
+		ci.range = t.range;
+		if ( !create || create( v.dev, &ci, nullptr, &t.view ) != VK_SUCCESS )
+			return why = "the texel twin's view failed", false;
+		t.viewBuf = t.buf.buf;
+		t.viewFmt = t.fmt;
+		t.viewRange = t.range;
+	}
+	out = t.view;
 	return true;
 }
 
@@ -1989,11 +2052,13 @@ bool objBlShade( GlProc gp, const ObjBlShade & s, std::string & why )
 		rs.shared += bst.shared;
 		rs.glOwn += bst.glOwn + bst.misfit;
 		rs.texelGl += bst.texelGl;
+		rs.texelShared += bst.texelShared;
 		rs.compare += bst.compare;
 	}
 	std::vector<unsigned> names;
 	if ( !objBlPoolCopy( s.poolKey, s.pool, names, w2 ) )
 		return fail( "the pool: " + w2 );
+	names.insert( names.end(), bst.glBufs.begin(), bst.glBufs.end() );  // the texel twins GL wrote
 	d.glRows = s.rows;
 	d.rows = s.nRows;
 	d.cmds = s.cmds;
@@ -2004,6 +2069,65 @@ bool objBlShade( GlProc gp, const ObjBlShade & s, std::string & why )
 		return fail( "the draw: " + w2 );
 	if ( !objBlRun( names, 0, w2 ) )
 		return fail( "the crossing: " + w2 );
+	return true;
+}
+
+bool objBlTexelCopy( GlProc gp, unsigned tex, std::vector<unsigned> & glNames, std::string & why, int red )
+{
+	Gl & g = gl();
+	using LevelIv = void( WINAPI * )( unsigned, int, unsigned, int * );
+	using BufIv = void( WINAPI * )( unsigned, unsigned, int * );
+	const auto lv = gp ? reinterpret_cast<LevelIv>( gp( "glGetTextureLevelParameteriv" ) ) : nullptr;
+	const auto bv = gp ? reinterpret_cast<BufIv>( gp( "glGetNamedBufferParameteriv" ) ) : nullptr;
+	if ( !vk().ok || !g.ok || !g.copyNamedBufferSubData || !g.namedBufferStorageMem || !lv || !bv || !tex )
+		return why = "no present device, no glCopyNamedBufferSubData / glGetTextureLevelParameteriv (GL 4.5), or no texture", false;
+	int buf = 0, fmt = 0, off = 0, size = 0, whole = 0;
+	lv( tex, 0, 0x8C2D, &buf );   // TEXTURE_BUFFER_DATA_STORE_BINDING
+	lv( tex, 0, 0x1003, &fmt );   // TEXTURE_INTERNAL_FORMAT
+	lv( tex, 0, 0x919D, &off );   // TEXTURE_BUFFER_OFFSET
+	lv( tex, 0, 0x919E, &size );  // TEXTURE_BUFFER_SIZE
+	if ( !buf )
+		return why = "the buffer texture has no buffer", false;
+	bv( unsigned( buf ), 0x8764, &whole );  // BUFFER_SIZE
+	if ( size <= 0 )
+		size = whole - off;
+	struct Fmt
+	{
+		int gl;
+		VkFormat vk;
+		std::uint32_t cls, bytes;
+	};
+	static const Fmt fmts[] = { { 0x8814, VK_FORMAT_R32G32B32A32_SFLOAT, 0, 16 }, { 0x8D82, VK_FORMAT_R32G32B32A32_SINT, 1, 16 },
+		{ 0x8D70, VK_FORMAT_R32G32B32A32_UINT, 2, 16 }, { 0x822E, VK_FORMAT_R32_SFLOAT, 0, 4 }, { 0x8235, VK_FORMAT_R32_SINT, 1, 4 },
+		{ 0x8236, VK_FORMAT_R32_UINT, 2, 4 }, { 0x8230, VK_FORMAT_R32G32_SFLOAT, 0, 8 }, { 0x823B, VK_FORMAT_R32G32_SINT, 1, 8 },
+		{ 0x823C, VK_FORMAT_R32G32_UINT, 2, 8 }, { 0x881A, VK_FORMAT_R16G16B16A16_SFLOAT, 0, 8 }, { 0x8058, VK_FORMAT_R8G8B8A8_UNORM, 0, 4 } };
+	const Fmt * f = nullptr;
+	for ( const Fmt & e : fmts )
+		if ( e.gl == fmt )
+			f = &e;
+	if ( !f ) {
+		char hex[16];
+		std::snprintf( hex, sizeof( hex ), "0x%X", unsigned( fmt ) );
+		return why = std::string( "GL internal format " ) + hex + " has no texel twin", false;
+	}
+	const int from = off + ( red == 1 ? 16 : 0 );
+	const int bytes = std::min( size, whole - from );
+	if ( off < 0 || bytes < int( f->bytes ) )
+		return why = "the buffer texture's range holds no texel", false;
+	OpTexel & t = opS().texTwins[tex];
+	const VkDeviceSize need = VkDeviceSize( bytes );
+	if ( t.buf.buf && ( t.buf.cap < need || t.buf.glCtx != g.ctx ) ) {
+		if ( opS().live )
+			return why = "the texel twin would move under prepared draws", false;
+		opRunWait();
+	}
+	if ( !csmBuf( t.buf, need, true, VK_BUFFER_USAGE_UNIFORM_TEXEL_BUFFER_BIT, why ) )
+		return false;
+	g.copyNamedBufferSubData( GLuint( buf ), t.buf.gl, std::intptr_t( from ), 0, std::intptr_t( bytes ) );
+	t.fmt = f->vk;
+	t.cls = f->cls;
+	t.range = need / f->bytes * f->bytes;
+	glNames.push_back( t.buf.gl );
 	return true;
 }
 
@@ -2140,7 +2264,13 @@ bool objBlDrawPrep( const ObjBlDraw & d, ObjBlDrawStat & st, std::string & why )
 			const std::size_t first = tvs.size();
 			for ( std::uint32_t a = 0; a < b.count; a++ ) {
 				VkBufferView tv = VK_NULL_HANDLE;
-				if ( !opZeroTexel( b.sampled, tv, w ) )
+				for ( const auto & tx : d.texels )
+					if ( tx.first == b.binding + a ) {
+						if ( !opTexelView( tx.second, b.sampled, tv, w ) )
+							return why = where + ": " + w, false;
+						st.texelsGl++;
+					}
+				if ( !tv && !opZeroTexel( b.sampled, tv, w ) )
 					return why = where + ": " + w, false;
 				tvs.push_back( tv );
 				st.texels++;

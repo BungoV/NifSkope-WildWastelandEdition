@@ -605,6 +605,210 @@ bool unitsGate( const std::string & spvDir )
 	return ok;
 }
 
+/* lane VKOBJ4 open item 4: GL's light texel buffers shared. A GL program binds cellLights (a samplerBuffer, RGBA32F over bytes
+ * 256..767 of a 1 KiB buffer by glTextureBufferRange) and cellCluster (an isamplerBuffer, RGBA32I over a whole 512-byte buffer by
+ * glTextureBuffer) on units 7 and 8, both buffers known bytes. BAR: objBlBindUnits copies both (2 GL texel buffers, 2 shared,
+ * 0 refused, each on the CSM twin's own binding in d.texels, 2 twin names); each twin read back through GL holds GL's range with
+ * 0 bytes differing; an RGB32F buffer texture is refused by objBlTexelCopy; prep writes both from their twins (2 from GL) and the
+ * crossing runs. Reds (each must FAIL): shift (the copy from 16 bytes past the range's start), class (cellLights' float twin given
+ * to cellCluster's int binding straight to prep). */
+struct TexelFix
+{
+	GLuint lightBuf = 0, clusterBuf = 0, rgbBuf = 0, lightTex = 0, clusterTex = 0, rgbTex = 0, prog = 0;
+	std::vector<std::uint8_t> light, cluster;  // GL's ranges' bytes
+	std::uint32_t lightB = ~0u, clusterB = ~0u;
+	bool rgbRefused = false;
+	std::string rgbWhy;
+};
+TexelFix tx;
+
+bool texelBuild( std::string & why )
+{
+	using namespace WwVkPresent;
+	void( WINAPI * createBuffers )( GLsizei, GLuint * ) = nullptr;
+	void( WINAPI * namedBufferData )( GLuint, std::intptr_t, const void *, GLenum ) = nullptr;
+	void( WINAPI * textureBuffer )( GLuint, GLenum, GLuint ) = nullptr;
+	void( WINAPI * textureBufferRange )( GLuint, GLenum, GLuint, std::intptr_t, std::intptr_t ) = nullptr;
+	if ( !ux.prog || !ux.createTextures )
+		return why = "no units fixture", false;
+	if ( !load( createBuffers, "glCreateBuffers" ) || !load( namedBufferData, "glNamedBufferData" ) || !load( textureBuffer, "glTextureBuffer" )
+		|| !load( textureBufferRange, "glTextureBufferRange" ) )
+		return why = "a GL entry point is missing", false;
+	std::vector<std::uint8_t> lightAll( 1024 ), clusterAll( 512 );
+	std::uint32_t seed = 0x9E3779B9u;
+	for ( std::uint8_t & b : lightAll )
+		b = std::uint8_t( ( seed = seed * 1664525u + 1013904223u ) >> 24 );
+	for ( std::uint8_t & b : clusterAll )
+		b = std::uint8_t( ( seed = seed * 1664525u + 1013904223u ) >> 24 );
+	tx.light.assign( lightAll.begin() + 256, lightAll.begin() + 768 );
+	tx.cluster = clusterAll;
+	createBuffers( 1, &tx.lightBuf );
+	createBuffers( 1, &tx.clusterBuf );
+	createBuffers( 1, &tx.rgbBuf );
+	namedBufferData( tx.lightBuf, 1024, lightAll.data(), 0x88E4 );  // STATIC_DRAW
+	namedBufferData( tx.clusterBuf, 512, clusterAll.data(), 0x88E4 );
+	namedBufferData( tx.rgbBuf, 384, lightAll.data(), 0x88E4 );
+	ux.createTextures( 0x8C2A, 1, &tx.lightTex );  // TEXTURE_BUFFER
+	ux.createTextures( 0x8C2A, 1, &tx.clusterTex );
+	ux.createTextures( 0x8C2A, 1, &tx.rgbTex );
+	textureBufferRange( tx.lightTex, 0x8814, tx.lightBuf, 256, 512 );  // RGBA32F
+	textureBuffer( tx.clusterTex, 0x8D82, tx.clusterBuf );              // RGBA32I
+	textureBuffer( tx.rgbTex, 0x8815, tx.rgbBuf );                      // RGB32F
+	{
+		std::vector<unsigned> names;
+		tx.rgbRefused = !objBlTexelCopy( glProc, tx.rgbTex, names, tx.rgbWhy ) && names.empty();
+	}
+	const std::string vs = "#version 460 core\nvoid main() { gl_Position = vec4( 0.0 ); }\n";
+	const std::string fs = "#version 460 core\nlayout ( binding = 7 ) uniform samplerBuffer cellLights;\n"
+		"layout ( binding = 8 ) uniform isamplerBuffer cellCluster;\nlayout ( location = 0 ) out vec4 o;\n"
+		"void main() { o = texelFetch( cellLights, 3 ) + vec4( texelFetch( cellCluster, 5 ) ); }\n";
+	tx.prog = program( vs, fs );
+	if ( !tx.prog )
+		return why = "the texel program did not link", false;
+	SpvModule m;
+	if ( !spvReflect( ux.ps.data(), ux.ps.size(), m, why ) )
+		return false;
+	for ( const SpvBind & b : m.binds )
+		if ( b.set == 0 && b.type == VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER ) {
+			if ( b.name == "cellLights" )
+				tx.lightB = b.binding;
+			else if ( b.name == "cellCluster" )
+				tx.clusterB = b.binding;
+		}
+	if ( tx.lightB == ~0u || tx.clusterB == ~0u )
+		return why = "the csm twin has no cellLights / cellCluster texel buffer", false;
+	if ( const GLenum e = glGetError(); e != GL_NO_ERROR )
+		return why = "GL error " + std::to_string( e ) + " making the texel fixture", false;
+	return true;
+}
+
+struct TexelOut
+{
+	WwVkPresent::ObjBlBindStat bind;
+	WwVkPresent::ObjBlDrawStat prep;
+	bool placed = false, prepped = false, ran = false;
+	std::size_t differ = ~std::size_t( 0 );
+	std::string why;
+	bool good() const
+	{
+		return bind.texelGl == 2 && bind.texelShared == 2 && bind.texelRefused == 0 && bind.glBufs.size() == 2 && placed && differ == 0
+			&& tx.rgbRefused && prepped && prep.texelsGl == 2 && ran;
+	}
+};
+
+void texelRun( int red, TexelOut & o )
+{
+	using namespace WwVkPresent;
+	void( WINAPI * getSub )( GLuint, std::intptr_t, std::intptr_t, void * ) = nullptr;
+	if ( !load( getSub, "glGetNamedBufferSubData" ) ) {
+		o.why = "no glGetNamedBufferSubData";
+		return;
+	}
+	ux.bindTextureUnit( 7, tx.lightTex );
+	ux.bindTextureUnit( 8, tx.clusterTex );
+	f.useProgram( tx.prog );
+	ObjBlDraw d;
+	d.twin = 1;
+	d.vs = sx.vs.data();
+	d.vsWords = sx.vs.size();
+	d.ps = ux.ps.data();
+	d.psWords = ux.ps.size();
+	const bool bound = objBlBindUnits( glProc, tx.prog, d, o.bind, o.why );
+	f.useProgram( 0 );
+	ux.bindTextureUnit( 7, 0 );
+	ux.bindTextureUnit( 8, 0 );
+	if ( !bound )
+		return;
+	int lightAt = 0, clusterAt = 0;
+	for ( const auto & t : d.texels ) {
+		lightAt += t.first == tx.lightB && t.second == tx.lightTex;
+		clusterAt += t.first == tx.clusterB && t.second == tx.clusterTex;
+	}
+	o.placed = lightAt == 1 && clusterAt == 1 && d.texels.size() == 2;
+	if ( red == 1 ) {
+		std::vector<unsigned> extra;
+		if ( !objBlTexelCopy( glProc, tx.lightTex, extra, o.why, 1 ) )
+			return;
+	}
+	glFinish();
+	// each twin read back through GL against GL's own range (d.texels and glBufs pair up in order)
+	if ( d.texels.size() == o.bind.glBufs.size() ) {
+		o.differ = 0;
+		for ( std::size_t i = 0; i < d.texels.size(); i++ ) {
+			const std::vector<std::uint8_t> & want = d.texels[i].second == tx.lightTex ? tx.light : tx.cluster;
+			std::vector<std::uint8_t> got( want.size(), 0 );
+			getSub( o.bind.glBufs[i], 0, std::intptr_t( got.size() ), got.data() );
+			for ( std::size_t k = 0; k < want.size(); k++ )
+				o.differ += got[k] != want[k];
+		}
+	}
+	if ( red == 2 )
+		for ( auto & t : d.texels )
+			if ( t.first == tx.clusterB )
+				t.second = tx.lightTex;
+	shadeClear();
+	std::vector<unsigned> names;
+	if ( !objBlPoolCopy( sx.key, sx.pool, names, o.why ) )
+		return;
+	names.insert( names.end(), o.bind.glBufs.begin(), o.bind.glBufs.end() );
+	d.target.colors[0] = d.target.colors[1] = VK_FORMAT_R16G16B16A16_SFLOAT;
+	d.target.colorCount = 2;
+	d.target.depth = VK_FORMAT_D32_SFLOAT;
+	d.target.depthOp = VK_COMPARE_OP_LESS;
+	d.target.depthWrite = true;
+	d.colorKeys[0] = sx.c0;
+	d.colorKeys[1] = sx.c1;
+	d.depthKey = sx.dk;
+	d.w = kSW;
+	d.h = kSH;
+	d.poolKey = sx.key;
+	d.attrMask = sx.pool.attrMask;
+	d.need = 0x3EFFu;
+	d.ubos = ux.ubos;
+	d.glRows = sx.rows.data();
+	d.rows = sx.rows.size() / kBlRowBytes;
+	d.cmds = sx.cmds.data();
+	d.cmdCount = sx.cmds.size() / 5;
+	objBlDrawsReset();
+	o.prepped = objBlDrawPrep( d, o.prep, o.why );
+	if ( !o.prepped )
+		return;
+	o.ran = objBlRun( names, 0, o.why );
+	glFinish();
+}
+
+bool texelGate()
+{
+	std::string why;
+	if ( !texelBuild( why ) ) {
+		std::printf( "BLVIEW texel FAIL (the fixture: %s)\n", why.c_str() );
+		return false;
+	}
+	TexelOut o;
+	texelRun( 0, o );
+	bool ok = o.good();
+	std::printf( "BLVIEW texel lights %s (%d GL texel buffers, %d shared, %d refused, %zu twins; placed %d; %zu bytes differ read back; "
+		"RGB32F refused %d (%s); set 0: %d from GL of %d texel buffers; crossing %s)%s%s%s%s\n", ok ? "OK" : "FAIL", o.bind.texelGl,
+		o.bind.texelShared, o.bind.texelRefused, o.bind.glBufs.size(), int( o.placed ), o.differ, int( tx.rgbRefused ), tx.rgbWhy.c_str(),
+		o.prep.texelsGl, o.prep.texels, o.ran ? "OK" : "no", o.bind.texelWhy.empty() ? "" : "; ", o.bind.texelWhy.c_str(),
+		o.why.empty() ? "" : ": ", o.why.c_str() );
+	const char * reds[2] = { "shift", "class" };
+	const char * redWhy[2] = { "the copy from 16 bytes past the range's start", "cellLights' float twin on cellCluster's int binding" };
+	for ( int r = 1; r <= 2; r++ ) {
+		TexelOut x;
+		texelRun( r, x );
+		const bool fails = !x.good();
+		std::printf( "BLVIEW RED texel%s %s (%s; %zu bytes differ, placed %d, prep %d%s%s)\n", reds[r - 1], fails ? "FAIL" : "OK", redWhy[r - 1],
+			x.differ, int( x.placed ), int( x.prepped ), x.why.empty() ? "" : ": ", x.why.c_str() );
+		ok = ok && fails;
+	}
+	if ( const GLenum e = glGetError(); e != GL_NO_ERROR ) {
+		std::printf( "BLVIEW texel FAIL (GL error 0x%x left)\n", unsigned( e ) );
+		ok = false;
+	}
+	return ok;
+}
+
 /* lane VKOBJ4 open item 6: GL's blend as the pipeline's (objBlTargetState, ObjBlTarget.blend).
  * BAR (stated before the first run, never widened):
  * (a) GL's state SRC_ALPHA / ONE_MINUS_SRC_ALPHA on colour, ONE / ONE on alpha, equations ADD / MAX, the mask RGB on and
@@ -796,6 +1000,7 @@ bool shadeGate( const std::string & spvDir )
 		ok = ok && fails;
 	}
 	ok = unitsGate( spvDir ) && ok;
+	ok = texelGate() && ok;  // lane VKOBJ4 open item 4
 	ok = blendGate() && ok;
 	if ( const GLenum e = glGetError(); e != GL_NO_ERROR ) {
 		std::printf( "BLVIEW shade FAIL (GL error 0x%x left)\n", unsigned( e ) );
