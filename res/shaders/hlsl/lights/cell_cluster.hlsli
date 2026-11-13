@@ -23,8 +23,8 @@ int cellLightsBegin(float3 P, out int n)
     {
         return -1;
     }
-    float3 tmp1 = P;
-    int c = cellClusterOf(tmp1);
+    float3 cPart = P;
+    int c = cellClusterOf(cPart);
     int k = cellCluster.Load((2 * c) + 1).x;
     if (k < 0)
     {
@@ -38,15 +38,15 @@ int cellLightsBegin(float3 P, out int n)
 #if defined(WW_FN_cellLightAt) || defined(WW_FN_ALL)
 int cellLightAt(int base, int k)
 {
-    int tmp1;
+    int cPart;
     if (base < 0)
     {
-        tmp1 = k;
+        cPart = k;
     }
     else
     {
-        tmp1 = cellCluster.Load(base + k).x;
+        cPart = cellCluster.Load(base + k).x;
     }
-    return tmp1;
+    return cPart;
 }
 #endif

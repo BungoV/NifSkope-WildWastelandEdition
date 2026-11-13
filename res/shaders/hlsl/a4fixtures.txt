@@ -1,0 +1,16 @@
+# HLSLFIX2: A4 fixtures (tests/hlsllive/a4_diff.py). `<program>\t<name=value,...>`, the A4_FORCE form: uniforms pinned in BOTH runs
+# (GLSL and SPIR-V) for a program that random inputs never cover. A row for the base .prog name covers its define variants.
+# Values: a scalar, or every component ':'-joined (vectors, arrays, matrices column-major); an array is named without [0].
+# Pin only what gates coverage (a range, a cull, a discard); leave the branches random so the coverage retries still split them.
+# lookdev_csmremap: the source rectangle must lie inside the 32x32 target (random ints 0..2 give a 0-size rect)
+lookdev_csmremap.prog	srcX=0,srcY=0,srcW=64,srcH=64
+# cell_givol: a volume clip / grid that holds the test triangles (random matrices put every cell outside)
+cell_givol.prog	volClip=1:0:0:0:0:1:0:0:0:0:1:0:0:0:0:1,volGrow=2,volRow=1:0:0:0:0:1:0:0:0:0:-1:0,volProj=4:4,volFull=32:32,volBias=0
+# impostor_cellinst(ez): the alpha cut and the fade-out discard every random card
+impostor_cellinst.prog	alphaThreshold=-1,cardFadeOut=0
+impostor_cellinstez.prog	alphaThreshold=-1,cardFadeOut=0
+# cell_precip: view rows that put the points 5 units in front of the eye, a perspective projection, no shutter streak, no near fade
+cell_precip.prog	pcRow=1:0:0:0:0:1:0:0:0:0:0:-5,pcProj=1:0:0:0:0:1:0:0:0:0:-1:-1:0:0:-2:0,pcFocal=500,pcMinPx=0,pcShutter=0,pcNear=0:0.001
+# cell_precip_gpu / _look: the particles from gl_VertexID in a 40-unit box round the eye (random pcL < 1 culls them all), no roof, no inner box
+cell_precip_gpu.prog	pcL=40,pcInner=0,pcRoofOn=0,pcRow=1:0:0:0:0:1:0:0:0:0:1:0,pcProj=1:0:0:0:0:1:0:0:0:0:-1:-1:0:0:-2:0,pcFocal=500,pcMinPx=0,pcShutter=0,pcNear=0:0.001,pcThin=1
+cell_precip_look.prog	pcL=40,pcInner=0,pcRoofOn=0,pcRow=1:0:0:0:0:1:0:0:0:0:1:0,pcProj=1:0:0:0:0:1:0:0:0:0:-1:-1:0:0:-2:0,pcFocal=500,pcMinPx=0,pcShutter=0,pcNear=0:0.001,pcThin=1

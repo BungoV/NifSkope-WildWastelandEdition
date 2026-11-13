@@ -68,16 +68,16 @@ struct SPIRV_Cross_Output
 void vert_main()
 {
     texCoord = multiTexCoord0;
-    bool tmp29;
+    bool cond3;
     if (farInst)
     {
-        tmp29 = farInstExtra.w > 1.5f;
+        cond3 = farInstExtra.w > 1.5f;
     }
     else
     {
-        tmp29 = farInst;
+        cond3 = farInst;
     }
-    if (tmp29)
+    if (cond3)
     {
         texCoord.x = farInstExtra.x - texCoord.x;
     }
@@ -85,36 +85,38 @@ void vert_main()
     float2 farXY = vertexPosition.xy;
     if (farInst)
     {
-        float4 tmp60 = v;
-        float4 tmp64 = v;
-        float4 tmp68 = v;
-        float3 tmp70 = float3(dot(farInstRow0, tmp60), dot(farInstRow1, tmp64), dot(farInstRow2, tmp68));
-        v.x = tmp70.x;
-        v.y = tmp70.y;
-        v.z = tmp70.z;
+        float4 vPart6 = v;
+        float4 vPart5 = v;
+        float4 vPart4 = v;
+        float3 vPart3 = float3(dot(farInstRow0, vPart6), dot(farInstRow1, vPart5), dot(farInstRow2, vPart4));
+        v.x = vPart3.x;
+        v.y = vPart3.y;
+        v.z = vPart3.z;
         farXY = v.xy;
     }
     v = mul(v, modelViewMatrix);
+    // world-axis offset from the block's centre
     float3 farRel = mul(v.xyz - farSwayBlock.xyz, transpose(viewMatrix));
-    bool tmp118 = (farSwayAmp > 0.0f) && lodTreeAnim;
-    bool tmp131;
-    if (tmp118)
+    bool cond2 = (farSwayAmp > 0.0f) && lodTreeAnim;
+    bool cond;
+    if (cond2)
     {
-        tmp131 = max(abs(farRel.x), abs(farRel.y)) > farSwayBlock.w;
+        cond = max(abs(farRel.x), abs(farRel.y)) > farSwayBlock.w;
     }
     else
     {
-        tmp131 = tmp118;
+        cond = cond2;
     }
-    if (tmp131)
+    if (cond)
     {
+        // world-horizontal offset, phase by the vertex's own place so a forest does not move as one
         float ph = dot(farXY, float2(0.00209999992512166500091552734375f, 0.001700000022538006305694580078125f));
         float3 w = float3(sin((farSwayTime * 1.2999999523162841796875f) + ph), cos((farSwayTime * 0.89999997615814208984375f) + (ph * 1.7000000476837158203125f)) * 0.60000002384185791015625f, 0.0f);
-        float4 tmp169 = v;
-        float3 tmp171 = tmp169.xyz + mul(w * (farSwayAmp * vertexColor.w), viewMatrix);
-        v.x = tmp171.x;
-        v.y = tmp171.y;
-        v.z = tmp171.z;
+        float4 vPart2 = v;
+        float3 vPart = vPart2.xyz + mul(w * (farSwayAmp * vertexColor.w), viewMatrix);
+        v.x = vPart.x;
+        v.y = vPart.y;
+        v.z = vPart.z;
     }
     gl_Position = mul(v, csmClipFromView);
 }

@@ -36,17 +36,17 @@ struct SPIRV_Cross_Output
 float linAt(float2 maskPx, out bool valid)
 {
     int2 q = int2(floor(maskPx * maskScale));
-    bool tmp103 = any(bool2(q.x < int2(0, 0).x, q.y < int2(0, 0).y));
-    bool tmp111;
-    if (!tmp103)
+    bool cond2 = any(bool2(q.x < int2(0, 0).x, q.y < int2(0, 0).y));
+    bool cond;
+    if (!cond2)
     {
-        tmp111 = any(bool2(q.x >= fullSize.x, q.y >= fullSize.y));
+        cond = any(bool2(q.x >= fullSize.x, q.y >= fullSize.y));
     }
     else
     {
-        tmp111 = tmp103;
+        cond = cond2;
     }
-    if (tmp111)
+    if (cond)
     {
         valid = false;
         return 1000000.0f;
@@ -72,11 +72,11 @@ float3 normalAt(float2 maskPx)
 void frag_main()
 {
     float2 p = gl_FragCoord.xy;
-    float2 param = p;
-    bool param_1;
-    float tmp140 = linAt(param, param_1);
-    bool v0 = param_1;
-    float lin0 = tmp140;
+    float2 maskPxArg8 = p;
+    bool validArg5;
+    float linAtRet5 = linAt(maskPxArg8, validArg5);
+    bool v0 = validArg5;
+    float lin0 = linAtRet5;
     fragMask = 1.0f;
     bool wwh0 = (lin0 <= 0.0f);
     if ((!v0) || wwh0)
@@ -85,67 +85,73 @@ void frag_main()
     }
     float2 delta = p - lightCoord.xy;
     bool majorX = abs(delta.x) > abs(delta.y);
-    float tmp170;
+    float dist0Pick;
     if (majorX)
     {
-        tmp170 = abs(delta.x);
+        dist0Pick = abs(delta.x);
     }
     else
     {
-        tmp170 = abs(delta.y);
+        dist0Pick = abs(delta.y);
     }
-    float dist0 = tmp170;
+    float dist0 = dist0Pick;
     if (dist0 < 1.0f)
     {
         return;
     }
+    // light in front (w > 0): the march heads for its vanishing point; behind: away from it
     float direction = (lightCoord.w > 0.0f) ? (-1.0f) : 1.0f;
+    // one mask pixel along the major axis
     float2 stepXY = (delta / dist0.xx) * direction;
     int n = int(sssParams.w);
     float contrast = sssParams.z;
     float4 lanes = 1.0f.xxxx;
     bool par = sssPar != 0;
-    float2 param_2 = p + (stepXY * 4.0f);
-    bool param_3;
-    float tmp226 = linAt(param_2, param_3);
-    bool va4 = param_3;
-    float lf = tmp226;
-    float2 param_4 = p - (stepXY * 4.0f);
-    bool param_5;
-    float tmp236 = linAt(param_4, param_5);
-    bool vb4 = param_5;
-    float lr = tmp236;
-    bool tmp243 = (par && va4) && vb4;
-    bool tmp254;
-    if (tmp243)
+    float2 maskPxArg7 = p + (stepXY * 4.0f);
+    bool validArg4;
+    float linAtRet4 = linAt(maskPxArg7, validArg4);
+    bool va4 = validArg4;
+    float lf = linAtRet4;
+    float2 maskPxArg6 = p - (stepXY * 4.0f);
+    bool validArg3;
+    float linAtRet3 = linAt(maskPxArg6, validArg3);
+    bool vb4 = validArg3;
+    float lr = linAtRet3;
+    bool cond14 = (par && va4) && vb4;
+    bool planePick;
+    if (cond14)
     {
-        tmp254 = abs(lf - lr) < (0.25f * lin0);
+        planePick = abs(lf - lr) < (0.25f * lin0);
     }
     else
     {
-        tmp254 = tmp243;
+        planePick = cond14;
     }
-    bool plane = tmp254;
-    float tmp257;
+    bool plane = planePick;
+    float invSlopePick;
     if (plane)
     {
-        tmp257 = ((1.0f / lf) - (1.0f / lr)) / 8.0f;
+        invSlopePick = ((1.0f / lf) - (1.0f / lr)) / 8.0f;
     }
     else
     {
-        tmp257 = 0.0f;
+        invSlopePick = 0.0f;
     }
-    float invSlope = tmp257;
+    float invSlope = invSlopePick;
     float hard = 1.0f;
     float support = 0.0f;
     int exitK = n;
+    // lane FIX1101A (LATE ITEM 14): inside the cascades' reach the march stops past sssReach.x + sssReach.y x depth game
+    // units from the receiver: a thin caster further off (a power line 85 u in front of a wall) hit only a sample or two
+    // of the 4 lanes, so its shadow came out as a row of dashes beside the cascades' own soft line (bungo's "banding");
+    // the cascade map holds such casters. Past the reach it opens up as the cascades fade out.
     float reachEff = 1000000015047466219876688855040.0f;
     float3 pv0 = 0.0f.xxx;
     if (sssReach.x > 0.0f)
     {
-        float2 param_6 = p;
-        float param_7 = lin0;
-        pv0 = sssViewPos(param_6, param_7);
+        float2 maskPxArg5 = p;
+        float zArg2 = lin0;
+        pv0 = sssViewPos(maskPxArg5, zArg2);
         float s = clamp(dot(pv0, pv0) / max(sssReach.z * sssReach.z, 1.0f), 0.0f, 1.0f);
         float s2 = s * s;
         float wgt = 1.0f - (s2 * s2);
@@ -154,12 +160,12 @@ void frag_main()
             reachEff = (sssReach.x + (sssReach.y * lin0)) / wgt;
         }
     }
-    float tmp409;
-    float2 tmp425;
-    bool param_11;
-    bool param_13;
-    float tmp477;
-    float tmp572;
+    float minorPick;
+    float2 offPick;
+    bool validArg2;
+    bool validArg;
+    float lsPick;
+    float fadeOutPick;
     for (int k = 1; k <= 384; k++)
     {
         if (k > n)
@@ -172,100 +178,102 @@ void frag_main()
             break;
         }
         float2 q = p + (stepXY * float(k));
-        bool tmp359 = sssReach.x > 0.0f;
-        bool tmp375;
-        if (tmp359)
+        bool cond13 = sssReach.x > 0.0f;
+        bool cond12;
+        if (cond13)
         {
-            float2 param_8 = q;
-            float param_9 = (lin0 * dist0) / dist;
-            tmp375 = distance(sssViewPos(param_8, param_9), pv0) > reachEff;
+            float2 maskPxArg4 = q;
+            float zArg = (lin0 * dist0) / dist;
+            cond12 = distance(sssViewPos(maskPxArg4, zArg), pv0) > reachEff;
         }
         else
         {
-            tmp375 = tmp359;
+            cond12 = cond13;
         }
-        if (tmp375)
+        if (cond12)
         {
             break;
         }
-        bool tmp383 = par && (exitK == n);
-        bool tmp403;
-        if (tmp383)
+        bool cond11 = par && (exitK == n);
+        bool cond10;
+        if (cond11)
         {
-            float2 tmp388 = q * maskScale;
-            bool tmp391 = any(bool2(tmp388.x < 0.0f.xx.x, tmp388.y < 0.0f.xx.y));
-            bool tmp402;
-            if (!tmp391)
+            float2 condPart = q * maskScale;
+            bool cond9 = any(bool2(condPart.x < 0.0f.xx.x, condPart.y < 0.0f.xx.y));
+            bool condPick;
+            if (!cond9)
             {
-                float2 tmp397 = q * maskScale;
-                float2 tmp399 = float2(fullSize);
-                tmp402 = any(bool2(tmp397.x >= tmp399.x, tmp397.y >= tmp399.y));
+                float2 condPart4 = q * maskScale;
+                float2 condPart3 = float2(fullSize);
+                condPick = any(bool2(condPart4.x >= condPart3.x, condPart4.y >= condPart3.y));
             }
             else
             {
-                tmp402 = tmp391;
+                condPick = cond9;
             }
-            tmp403 = tmp402;
+            cond10 = condPick;
         }
         else
         {
-            tmp403 = tmp383;
+            cond10 = cond11;
         }
-        if (tmp403)
+        if (cond10)
         {
             exitK = k;
         }
         if (majorX)
         {
-            tmp409 = q.y;
+            minorPick = q.y;
         }
         else
         {
-            tmp409 = q.x;
+            minorPick = q.x;
         }
-        float minor = tmp409;
+        // Bend's minor-axis bilinear pair: the nearer neighbour across the line, point-filtered at an edge
+        float minor = minorPick;
         float f = frac(minor) - 0.5f;
         if (majorX)
         {
-            tmp425 = float2(0.0f, (f > 0.0f) ? 1.0f : (-1.0f));
+            offPick = float2(0.0f, (f > 0.0f) ? 1.0f : (-1.0f));
         }
         else
         {
-            tmp425 = float2((f > 0.0f) ? 1.0f : (-1.0f), 0.0f);
+            offPick = float2((f > 0.0f) ? 1.0f : (-1.0f), 0.0f);
         }
-        float2 off = tmp425;
-        float2 param_10 = q;
-        float tmp443 = linAt(param_10, param_11);
-        bool va = param_11;
-        float la = tmp443;
-        float2 param_12 = q + off;
-        float tmp452 = linAt(param_12, param_13);
-        bool vb = param_13;
-        float lb = tmp452;
+        float2 off = offPick;
+        float2 maskPxArg3 = q;
+        float linAtRet2 = linAt(maskPxArg3, validArg2);
+        bool va = validArg2;
+        float la = linAtRet2;
+        float2 maskPxArg2 = q + off;
+        float linAtRet = linAt(maskPxArg2, validArg);
+        bool vb = validArg;
+        float lb = linAtRet;
         if (!va)
         {
             continue;
         }
-        bool tmp461 = !vb;
-        bool tmp474;
-        if (!tmp461)
+        bool cond8 = !vb;
+        bool edgePick;
+        if (!cond8)
         {
-            tmp474 = abs(la - lb) > (la * sssParams.y);
+            edgePick = abs(la - lb) > (la * sssParams.y);
         }
         else
         {
-            tmp474 = tmp461;
+            edgePick = cond8;
         }
-        bool edge = tmp474;
+        bool edge = edgePick;
         if (edge)
         {
-            tmp477 = la;
+            lsPick = la;
         }
         else
         {
-            tmp477 = lerp(la, lb, abs(f));
+            lsPick = lerp(la, lb, abs(f));
         }
-        float ls = tmp477;
+        float ls = lsPick;
+        // the ray's depth at this pixel (1/z is affine along the line)
         float rayLin = (lin0 * dist0) / dist;
         float thick = max(sssFloor, sssParams.x * rayLin);
         float d = abs(((rayLin - ls) / thick) - 1.0f);
@@ -279,31 +287,32 @@ void frag_main()
                     d = 10000000000.0f;
                 }
             }
-            bool tmp543 = d < 1.0f;
-            bool tmp556;
-            if (tmp543)
+            bool cond7 = d < 1.0f;
+            bool cond6;
+            if (cond7)
             {
-                float2 param_14 = q;
-                tmp556 = abs(dot(normalAt(param_14), sssLightView)) <= 0.100000001490116119384765625f;
+                float2 maskPxArg = q;
+                cond6 = abs(dot(normalAt(maskPxArg), sssLightView)) <= 0.100000001490116119384765625f;
             }
             else
             {
-                tmp556 = tmp543;
+                cond6 = cond7;
             }
-            if (tmp556)
+            if (cond6)
             {
                 d = 10000000000.0f;
             }
+            // the completion fade: the last 16 samples weigh less
             float c = float(n - k) / 16.0f;
             if (k > (n - 16))
             {
-                tmp572 = clamp(1.0f - c, 0.0f, 1.0f) * 0.75f;
+                fadeOutPick = clamp(1.0f - c, 0.0f, 1.0f) * 0.75f;
             }
             else
             {
-                tmp572 = 0.0f;
+                fadeOutPick = 0.0f;
             }
-            float fadeOut = tmp572;
+            float fadeOut = fadeOutPick;
             if (k <= 4)
             {
                 hard = min(hard, d);
@@ -313,27 +322,27 @@ void frag_main()
         }
         int lane = k & 3;
         lanes[lane] = min(lanes[lane], d);
-        bool tmp616 = (sssExit != 0) && (k >= 4);
-        bool tmp624;
-        if (tmp616)
+        bool cond5 = (sssExit != 0) && (k >= 4);
+        bool cond4;
+        if (cond5)
         {
-            tmp624 = (float(k) * maskScale) >= 16.0f;
+            cond4 = (float(k) * maskScale) >= 16.0f;
         }
         else
         {
-            tmp624 = tmp616;
+            cond4 = cond5;
         }
-        bool tmp635;
-        if (tmp624)
+        bool cond3;
+        if (cond4)
         {
-            float4 tmp631 = (1.0f - (1.0f / contrast)).xxxx;
-            tmp635 = all(bool4(lanes.x <= tmp631.x, lanes.y <= tmp631.y, lanes.z <= tmp631.z, lanes.w <= tmp631.w));
+            float4 condPart2 = (1.0f - (1.0f / contrast)).xxxx;
+            cond3 = all(bool4(lanes.x <= condPart2.x, lanes.y <= condPart2.y, lanes.z <= condPart2.z, lanes.w <= condPart2.w));
         }
         else
         {
-            tmp635 = tmp624;
+            cond3 = cond4;
         }
-        if (tmp635)
+        if (cond3)
         {
             break;
         }
@@ -342,6 +351,7 @@ void frag_main()
     fragMask = dot(lanes, 0.25f.xxxx);
     if (par)
     {
+        // the hard samples count only with enough evidence; the ray that leaves the screen early fades out
         float h = lerp(1.0f, clamp((hard * contrast) + (1.0f - contrast), 0.0f, 1.0f), clamp(support / 4.0f, 0.0f, 1.0f));
         fragMask = min(h, fragMask);
         fragMask = lerp(1.0f, fragMask, smoothstep(0.0f, 16.0f, float(exitK) * maskScale));

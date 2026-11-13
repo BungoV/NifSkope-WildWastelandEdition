@@ -15,55 +15,55 @@ float3 bloomSanitize(float3 c)
     uint3 bits = asuint(c);
     uint3 e = bits & uint3(2139095040u, 2139095040u, 2139095040u);
     uint3 m = bits & uint3(8388607u, 8388607u, 8388607u);
-    bool tmp1 = e.x == 2139095040u;
-    bool tmp2;
-    if (tmp1)
+    bool cond6 = e.x == 2139095040u;
+    bool cond5;
+    if (cond6)
     {
-        tmp2 = m.x != 0u;
+        cond5 = m.x != 0u;
     }
     else
     {
-        tmp2 = tmp1;
+        cond5 = cond6;
     }
-    bool tmp3;
-    if (!tmp2)
+    bool cond4;
+    if (!cond5)
     {
-        bool tmp4 = e.y == 2139095040u;
-        bool tmp5;
-        if (tmp4)
+        bool cond3 = e.y == 2139095040u;
+        bool condPick2;
+        if (cond3)
         {
-            tmp5 = m.y != 0u;
+            condPick2 = m.y != 0u;
         }
         else
         {
-            tmp5 = tmp4;
+            condPick2 = cond3;
         }
-        tmp3 = tmp5;
+        cond4 = condPick2;
     }
     else
     {
-        tmp3 = tmp2;
+        cond4 = cond5;
     }
-    bool tmp6;
-    if (!tmp3)
+    bool cond2;
+    if (!cond4)
     {
-        bool tmp7 = e.z == 2139095040u;
-        bool tmp8;
-        if (tmp7)
+        bool cond = e.z == 2139095040u;
+        bool condPick;
+        if (cond)
         {
-            tmp8 = m.z != 0u;
+            condPick = m.z != 0u;
         }
         else
         {
-            tmp8 = tmp7;
+            condPick = cond;
         }
-        tmp6 = tmp8;
+        cond2 = condPick;
     }
     else
     {
-        tmp6 = tmp3;
+        cond2 = cond4;
     }
-    if (tmp6)
+    if (cond2)
     {
         return 0.0f.xxx;
     }
@@ -76,24 +76,24 @@ float3 bloomSanitize(float3 c)
 float3 bloomTent(Texture2D<float4> m, SamplerState _m_sampler, float2 uv, float2 texel, float radiusPixels)
 {
     float2 o = texel * max(radiusPixels, 0.0f);
-    float3 tmp1 = m.SampleLevel(_m_sampler, uv, 0.0f).xyz;
-    float3 c = bloomSanitize(tmp1) * 4.0f;
-    float3 tmp2 = m.SampleLevel(_m_sampler, uv + float2(-o.x, 0.0f), 0.0f).xyz;
-    c += (bloomSanitize(tmp2) * 2.0f);
-    float3 tmp3 = m.SampleLevel(_m_sampler, uv + float2(o.x, 0.0f), 0.0f).xyz;
-    c += (bloomSanitize(tmp3) * 2.0f);
-    float3 tmp4 = m.SampleLevel(_m_sampler, uv + float2(0.0f, -o.y), 0.0f).xyz;
-    c += (bloomSanitize(tmp4) * 2.0f);
-    float3 tmp5 = m.SampleLevel(_m_sampler, uv + float2(0.0f, o.y), 0.0f).xyz;
-    c += (bloomSanitize(tmp5) * 2.0f);
-    float3 tmp6 = m.SampleLevel(_m_sampler, uv + float2(-o.x, -o.y), 0.0f).xyz;
-    c += bloomSanitize(tmp6);
-    float3 tmp7 = m.SampleLevel(_m_sampler, uv + float2(o.x, -o.y), 0.0f).xyz;
-    c += bloomSanitize(tmp7);
-    float3 tmp8 = m.SampleLevel(_m_sampler, uv + float2(-o.x, o.y), 0.0f).xyz;
-    c += bloomSanitize(tmp8);
-    float3 tmp9 = m.SampleLevel(_m_sampler, uv + float2(o.x, o.y), 0.0f).xyz;
-    c += bloomSanitize(tmp9);
+    float3 cond6 = m.SampleLevel(_m_sampler, uv, 0.0f).xyz;
+    float3 c = bloomSanitize(cond6) * 4.0f;
+    float3 cond5 = m.SampleLevel(_m_sampler, uv + float2(-o.x, 0.0f), 0.0f).xyz;
+    c += (bloomSanitize(cond5) * 2.0f);
+    float3 cond4 = m.SampleLevel(_m_sampler, uv + float2(o.x, 0.0f), 0.0f).xyz;
+    c += (bloomSanitize(cond4) * 2.0f);
+    float3 cond3 = m.SampleLevel(_m_sampler, uv + float2(0.0f, -o.y), 0.0f).xyz;
+    c += (bloomSanitize(cond3) * 2.0f);
+    float3 condPick2 = m.SampleLevel(_m_sampler, uv + float2(0.0f, o.y), 0.0f).xyz;
+    c += (bloomSanitize(condPick2) * 2.0f);
+    float3 cond2 = m.SampleLevel(_m_sampler, uv + float2(-o.x, -o.y), 0.0f).xyz;
+    c += bloomSanitize(cond2);
+    float3 cond = m.SampleLevel(_m_sampler, uv + float2(o.x, -o.y), 0.0f).xyz;
+    c += bloomSanitize(cond);
+    float3 condPick = m.SampleLevel(_m_sampler, uv + float2(-o.x, o.y), 0.0f).xyz;
+    c += bloomSanitize(condPick);
+    float3 mTexel = m.SampleLevel(_m_sampler, uv + float2(o.x, o.y), 0.0f).xyz;
+    c += bloomSanitize(mTexel);
     return c * 0.0625f;
 }
 #endif
@@ -102,24 +102,24 @@ float3 bloomTent(Texture2D<float4> m, SamplerState _m_sampler, float2 uv, float2
 float3 bloomTentLod(Texture2D<float4> m, SamplerState _m_sampler, float2 uv, float2 texel, float radiusPixels, float lod)
 {
     float2 o = (texel * exp2(lod)) * max(radiusPixels, 0.0f);
-    float3 tmp1 = m.SampleLevel(_m_sampler, uv, lod).xyz;
-    float3 c = bloomSanitize(tmp1) * 4.0f;
-    float3 tmp2 = m.SampleLevel(_m_sampler, uv + float2(-o.x, 0.0f), lod).xyz;
-    c += (bloomSanitize(tmp2) * 2.0f);
-    float3 tmp3 = m.SampleLevel(_m_sampler, uv + float2(o.x, 0.0f), lod).xyz;
-    c += (bloomSanitize(tmp3) * 2.0f);
-    float3 tmp4 = m.SampleLevel(_m_sampler, uv + float2(0.0f, -o.y), lod).xyz;
-    c += (bloomSanitize(tmp4) * 2.0f);
-    float3 tmp5 = m.SampleLevel(_m_sampler, uv + float2(0.0f, o.y), lod).xyz;
-    c += (bloomSanitize(tmp5) * 2.0f);
-    float3 tmp6 = m.SampleLevel(_m_sampler, uv + float2(-o.x, -o.y), lod).xyz;
-    c += bloomSanitize(tmp6);
-    float3 tmp7 = m.SampleLevel(_m_sampler, uv + float2(o.x, -o.y), lod).xyz;
-    c += bloomSanitize(tmp7);
-    float3 tmp8 = m.SampleLevel(_m_sampler, uv + float2(-o.x, o.y), lod).xyz;
-    c += bloomSanitize(tmp8);
-    float3 tmp9 = m.SampleLevel(_m_sampler, uv + float2(o.x, o.y), lod).xyz;
-    c += bloomSanitize(tmp9);
+    float3 cond6 = m.SampleLevel(_m_sampler, uv, lod).xyz;
+    float3 c = bloomSanitize(cond6) * 4.0f;
+    float3 cond5 = m.SampleLevel(_m_sampler, uv + float2(-o.x, 0.0f), lod).xyz;
+    c += (bloomSanitize(cond5) * 2.0f);
+    float3 cond4 = m.SampleLevel(_m_sampler, uv + float2(o.x, 0.0f), lod).xyz;
+    c += (bloomSanitize(cond4) * 2.0f);
+    float3 cond3 = m.SampleLevel(_m_sampler, uv + float2(0.0f, -o.y), lod).xyz;
+    c += (bloomSanitize(cond3) * 2.0f);
+    float3 condPick2 = m.SampleLevel(_m_sampler, uv + float2(0.0f, o.y), lod).xyz;
+    c += (bloomSanitize(condPick2) * 2.0f);
+    float3 cond2 = m.SampleLevel(_m_sampler, uv + float2(-o.x, -o.y), lod).xyz;
+    c += bloomSanitize(cond2);
+    float3 cond = m.SampleLevel(_m_sampler, uv + float2(o.x, -o.y), lod).xyz;
+    c += bloomSanitize(cond);
+    float3 condPick = m.SampleLevel(_m_sampler, uv + float2(-o.x, o.y), lod).xyz;
+    c += bloomSanitize(condPick);
+    float3 mTexel = m.SampleLevel(_m_sampler, uv + float2(o.x, o.y), lod).xyz;
+    c += bloomSanitize(mTexel);
     return c * 0.0625f;
 }
 #endif
@@ -130,34 +130,34 @@ float3 bloomTentDispersedLod(Texture2D<float4> m, SamplerState _m_sampler, float
     float2 texel = 1.0f.xx / float2(max(int2(spvTextureSize(m, uint(0), dummy_parameter)), int2(1, 1)));
     float2 radial = uv - 0.5f.xx;
     float len = length(radial);
-    float2 tmp1;
+    float2 cond6;
     if (len > 9.9999997473787516355514526367188e-06f)
     {
-        tmp1 = ((radial / len.xx) * texel) * max(dispersion, 0.0f);
+        cond6 = ((radial / len.xx) * texel) * max(dispersion, 0.0f);
     }
     else
     {
-        tmp1 = 0.0f.xx;
+        cond6 = 0.0f.xx;
     }
-    float2 d = tmp1;
-    float2 tmp2 = uv;
-    float2 tmp3 = texel;
-    float tmp4 = radiusPixels;
-    float tmp5 = lod;
-    float3 g = bloomTentLod(m, _m_sampler, tmp2, tmp3, tmp4, tmp5);
+    float2 d = cond6;
+    float2 cond5 = uv;
+    float2 cond4 = texel;
+    float cond3 = radiusPixels;
+    float condPick2 = lod;
+    float3 g = bloomTentLod(m, _m_sampler, cond5, cond4, cond3, condPick2);
     if (all(bool2(d.x == 0.0f.xx.x, d.y == 0.0f.xx.y)))
     {
         return g;
     }
-    float2 tmp6 = uv + d;
-    float2 tmp7 = texel;
-    float tmp8 = radiusPixels;
-    float tmp9 = lod;
-    float2 tmp10 = uv - d;
-    float2 tmp11 = texel;
-    float tmp12 = radiusPixels;
-    float tmp13 = lod;
-    return float3(bloomTentLod(m, _m_sampler, tmp6, tmp7, tmp8, tmp9).x, g.y, bloomTentLod(m, _m_sampler, tmp10, tmp11, tmp12, tmp13).z);
+    float2 cond2 = uv + d;
+    float2 cond = texel;
+    float condPick = radiusPixels;
+    float mTexel = lod;
+    float2 bloomTentDispersedLodRet4 = uv - d;
+    float2 bloomTentDispersedLodRet3 = texel;
+    float bloomTentDispersedLodRet2 = radiusPixels;
+    float bloomTentDispersedLodRet = lod;
+    return float3(bloomTentLod(m, _m_sampler, cond2, cond, condPick, mTexel).x, g.y, bloomTentLod(m, _m_sampler, bloomTentDispersedLodRet4, bloomTentDispersedLodRet3, bloomTentDispersedLodRet2, bloomTentDispersedLodRet).z);
 }
 #endif
 
@@ -167,32 +167,32 @@ float3 bloomTentDispersed(Texture2D<float4> m, SamplerState _m_sampler, float2 u
     float2 texel = 1.0f.xx / float2(max(int2(spvTextureSize(m, uint(0), dummy_parameter)), int2(1, 1)));
     float2 radial = uv - 0.5f.xx;
     float len = length(radial);
-    float2 tmp1;
+    float2 cond6;
     if (len > 9.9999997473787516355514526367188e-06f)
     {
-        tmp1 = ((radial / len.xx) * texel) * max(dispersion, 0.0f);
+        cond6 = ((radial / len.xx) * texel) * max(dispersion, 0.0f);
     }
     else
     {
-        tmp1 = 0.0f.xx;
+        cond6 = 0.0f.xx;
     }
-    float2 d = tmp1;
-    float2 tmp2 = uv;
-    float2 tmp3 = texel;
-    float tmp4 = radiusPixels;
-    float3 g = bloomTent(m, _m_sampler, tmp2, tmp3, tmp4);
+    float2 d = cond6;
+    float2 cond5 = uv;
+    float2 cond4 = texel;
+    float cond3 = radiusPixels;
+    float3 g = bloomTent(m, _m_sampler, cond5, cond4, cond3);
     if (all(bool2(d.x == 0.0f.xx.x, d.y == 0.0f.xx.y)))
     {
         return g;
     }
-    float2 tmp5 = uv + d;
-    float2 tmp6 = texel;
-    float tmp7 = radiusPixels;
-    float3 r = bloomTent(m, _m_sampler, tmp5, tmp6, tmp7);
-    float2 tmp8 = uv - d;
-    float2 tmp9 = texel;
-    float tmp10 = radiusPixels;
-    float3 b = bloomTent(m, _m_sampler, tmp8, tmp9, tmp10);
+    float2 condPick2 = uv + d;
+    float2 cond2 = texel;
+    float cond = radiusPixels;
+    float3 r = bloomTent(m, _m_sampler, condPick2, cond2, cond);
+    float2 condPick = uv - d;
+    float2 mTexel = texel;
+    float bloomTentDispersedLodRet4 = radiusPixels;
+    float3 b = bloomTent(m, _m_sampler, condPick, mTexel, bloomTentDispersedLodRet4);
     return float3(r.x, g.y, b.z);
 }
 #endif

@@ -116,20 +116,20 @@ void vert_main()
     }
     else
     {
-        bool tmp219 = gl_VertexID == selectionParam;
-        bool tmp225;
-        if (tmp219)
+        bool cond2 = gl_VertexID == selectionParam;
+        bool cond;
+        if (cond2)
         {
-            tmp225 = (selectionFlags & 2) != 0;
+            cond = (selectionFlags & 2) != 0;
         }
         else
         {
-            tmp225 = tmp219;
+            cond = cond2;
         }
-        if (!tmp225)
+        if (!cond)
         {
-            bool4 tmp237 = bool4(vertexColorOverride.x > 0.0f.xxxx.x, vertexColorOverride.y > 0.0f.xxxx.y, vertexColorOverride.z > 0.0f.xxxx.z, vertexColorOverride.w > 0.0f.xxxx.w);
-            C = float4(tmp237.x ? vertexColorOverride.x : vertexColor.x, tmp237.y ? vertexColorOverride.y : vertexColor.y, tmp237.z ? vertexColorOverride.z : vertexColor.z, tmp237.w ? vertexColorOverride.w : vertexColor.w);
+            bool4 CPart = bool4(vertexColorOverride.x > 0.0f.xxxx.x, vertexColorOverride.y > 0.0f.xxxx.y, vertexColorOverride.z > 0.0f.xxxx.z, vertexColorOverride.w > 0.0f.xxxx.w);
+            C = float4(CPart.x ? vertexColorOverride.x : vertexColor.x, CPart.y ? vertexColorOverride.y : vertexColor.y, CPart.z ? vertexColorOverride.z : vertexColor.z, CPart.w ? vertexColorOverride.w : vertexColor.w);
         }
         else
         {
@@ -141,9 +141,9 @@ void vert_main()
     {
         if (doSkinning != 0u)
         {
-            float4 param = v;
-            boneTransform(param);
-            v = param;
+            float4 vArg = v;
+            boneTransform(vArg);
+            v = vArg;
         }
         if ((selectionFlags & 8) != 0)
         {

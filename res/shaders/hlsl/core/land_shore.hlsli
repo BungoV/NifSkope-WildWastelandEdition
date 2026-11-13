@@ -15,35 +15,35 @@ uint wwLandShoreTexel(int2 t)
     }
     int E = int(landShoreLayout.z);
     int2 tile = t / E.xx;
-    bool tmp1 = t.x < 0;
-    bool tmp2;
-    if (!tmp1)
+    bool cond4 = t.x < 0;
+    bool cond3;
+    if (!cond4)
     {
-        tmp2 = t.y < 0;
+        cond3 = t.y < 0;
     }
     else
     {
-        tmp2 = tmp1;
+        cond3 = cond4;
     }
-    bool tmp3;
-    if (!tmp2)
+    bool cond2;
+    if (!cond3)
     {
-        tmp3 = tile.x >= int(landShoreLayout.x);
+        cond2 = tile.x >= int(landShoreLayout.x);
     }
     else
     {
-        tmp3 = tmp2;
+        cond2 = cond3;
     }
-    bool tmp4;
-    if (!tmp3)
+    bool cond;
+    if (!cond2)
     {
-        tmp4 = tile.y >= int(landShoreLayout.y);
+        cond = tile.y >= int(landShoreLayout.y);
     }
     else
     {
-        tmp4 = tmp3;
+        cond = cond2;
     }
-    if (tmp4)
+    if (cond)
     {
         return 255u;
     }
@@ -64,23 +64,23 @@ float wwLandShoreSmooth(float2 worldXY)
     float2 p = ((worldXY - landShoreGrid.xy) / max(landShoreGrid.z, 1.0f).xx) - 0.5f.xx;
     int2 t = int2(floor(p));
     float2 f = p - float2(t);
-    int2 tmp1 = t;
-    float a = float(wwLandShoreTexel(tmp1));
-    int2 tmp2 = t + int2(1, 0);
-    float b = float(wwLandShoreTexel(tmp2));
-    int2 tmp3 = t + int2(0, 1);
-    float c = float(wwLandShoreTexel(tmp3));
-    int2 tmp4 = t + int2(1, 1);
-    float d = float(wwLandShoreTexel(tmp4));
-    float tmp5;
+    int2 cond4 = t;
+    float a = float(wwLandShoreTexel(cond4));
+    int2 cond3 = t + int2(1, 0);
+    float b = float(wwLandShoreTexel(cond3));
+    int2 cond2 = t + int2(0, 1);
+    float c = float(wwLandShoreTexel(cond2));
+    int2 cond = t + int2(1, 1);
+    float d = float(wwLandShoreTexel(cond));
+    float wwLandShoreSmoothRet;
     if (landShoreOn)
     {
-        tmp5 = landShoreGrid.w;
+        wwLandShoreSmoothRet = landShoreGrid.w;
     }
     else
     {
-        tmp5 = 32.0f;
+        wwLandShoreSmoothRet = 32.0f;
     }
-    return lerp(lerp(a, b, f.x), lerp(c, d, f.x), f.y) * tmp5;
+    return lerp(lerp(a, b, f.x), lerp(c, d, f.x), f.y) * wwLandShoreSmoothRet;
 }
 #endif

@@ -30,14 +30,14 @@ void fxLocalSky(float3 P, bool additive)
     {
         return;
     }
-    float3 tmp1 = P;
-    float3 tmp2 = float3(0.0f, 0.0f, 1.0f);
-    fxAmbShare = 1.0f - cellGiSkyK(tmp1, tmp2);
+    float3 fxAmbSharePart2 = P;
+    float3 fxAmbSharePart = float3(0.0f, 0.0f, 1.0f);
+    fxAmbShare = 1.0f - cellGiSkyK(fxAmbSharePart2, fxAmbSharePart);
     if (false)
     {
-        float3 tmp3 = P;
-        float3 tmp4 = float3(0.0f, 0.0f, 1.0f);
-        fxLocalGi = cellGiE(tmp3, tmp4) * 0.31830990314483642578125f;
+        float3 fxLocalGiPart2 = P;
+        float3 fxLocalGiPart = float3(0.0f, 0.0f, 1.0f);
+        fxLocalGi = cellGiE(fxLocalGiPart2, fxLocalGiPart) * 0.31830990314483642578125f;
     }
 }
 #endif
@@ -61,15 +61,15 @@ float fxLawUnit(bool additive)
 float3 fxLawMix(float3 E, inout float influence, bool additive)
 {
     influence = max(influence, fxLawRecv);
-    bool tmp1 = additive;
-    return lerp(fxLawUnit(tmp1).xxx, E, (influence * (1.0f - fxLaw.x)).xxx);
+    bool fxAmbSharePart2 = additive;
+    return lerp(fxLawUnit(fxAmbSharePart2).xxx, E, (influence * (1.0f - fxLaw.x)).xxx);
 }
 #endif
 
 #if defined(WW_FN_fxLawMix_V2) || defined(WW_FN_ALL)
 float3 fxLawMix(float3 E, float influence, bool additive)
 {
-    bool tmp1 = additive;
-    return lerp(fxLawUnit(tmp1).xxx, E, (influence * (1.0f - fxLaw.x)).xxx);
+    bool fxAmbSharePart2 = additive;
+    return lerp(fxLawUnit(fxAmbSharePart2).xxx, E, (influence * (1.0f - fxLaw.x)).xxx);
 }
 #endif

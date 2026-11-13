@@ -5,8 +5,11 @@ Verdict per program: EXACT (every byte equal) | BOUND (equal NaN mask, max |diff
 DXC path contract multiply-adds differently) | FAIL (anything else) | NOCOV (the GLSL render wrote no pixel over all seeds: nothing
 was proven) | SKIP (a program did not build here). --plant adds 0.37 to one float uniform in the SPIR-V run only: the gate must
 turn at least one program FAIL (the red). --apply rewrites <spv dir>/spirv/programs.txt: FAIL programs become `FAIL a4 ...` (the loader
-then keeps GLSL for them); the old file is kept as programs_prea4.txt. Writes <spv dir>/spirv/a4.txt."""
-import ctypes, os, sys, zlib
+then keeps GLSL for them); the old file is kept as programs_prea4.txt. Writes <spv dir>/spirv/a4.txt.
+HLSLFIX2 shards: `--shard i/N` renders only the programs whose crc32(name) % N == i (one hidden context per process) and writes
+a4.shard<i>of<N>.txt + a4cache.shard<i>of<N>.txt (no a4.txt, no --apply); `--merge N` (no GL) joins the N parts in the serial
+order into a4.txt / a4cache.txt and then does --apply, so the files equal a serial run's byte for byte (tests/hlsllive/a4_shards.sh)."""
+import ctypes, json, os, sys, zlib
 import numpy as np
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -39,10 +42,13 @@ SAMP = {0x8B5E: (0x0DE1, 0x8814, 0x1908, 0x1406), 0x8B5F: (0x806F, 0x8814, 0x190
         0x8DCB: (0x806F, 0x8D70, 0x8D99, 0x1405), 0x8DD3: (0x806F, 0x8D70, 0x8D99, 0x1405),
         0x8B63: (0x84F5, 0x8814, 0x1908, 0x1406)}
 SAMP[0x8DCA] = (0x0DE1, 0x8D82, 0x8D99, 0x1404)
+# HLSLFIX2: buffer textures (cell_givol, cell_ddgiprobe, impostor_inst, the light lists): before, they were left unbound (read 0)
+SAMP.update({0x8DC2: (0x8C2A, 0x8814, 0x1908, 0x1406), 0x8DD0: (0x8C2A, 0x8D82, 0x8D99, 0x1404), 0x8DD8: (0x8C2A, 0x8D70, 0x8D99, 0x1405),
+             0x9108: (0x9100, 0x8814, 0x1908, 0x1406), 0x9109: (0x9100, 0x8D82, 0x8D99, 0x1404), 0x910A: (0x9100, 0x8D70, 0x8D99, 0x1405)})
 SAMP[0x8DCB] = (0x806F, 0x8D82, 0x8D99, 0x1404)
 SAMP[0x8DD2] = (0x0DE1, 0x8D70, 0x8D99, 0x1405)
 SAMP[0x8DD3] = (0x806F, 0x8D70, 0x8D99, 0x1405)
-DIM = {0x0DE0: (16, 1, 1), 0x0DE1: (16, 16, 1), 0x806F: (8, 8, 8), 0x8513: (16, 16, 6), 0x8C1A: (16, 16, 4), 0x8C18: (16, 1, 4), 0x84F5: (16, 16, 1)}
+DIM = {0x0DE0: (16, 1, 1), 0x0DE1: (16, 16, 1), 0x806F: (8, 8, 8), 0x8513: (16, 16, 6), 0x8C1A: (16, 16, 4), 0x8C18: (16, 1, 4), 0x84F5: (16, 16, 1), 0x8C2A: (256, 1, 1), 0x9100: (32, 32, 1)}
 
 
 def rng_for(name, seed):
@@ -139,18 +145,46 @@ def int_uniform(ty, name):
 
 
 MODE = ''   # R6 coverage retry: '' random ints and bools | 'zero' all 0 | 'one' all 1 (a state the random draw never reaches)
+# HLSLFIX2: res/shaders/hlsl/a4fixtures.txt, `<program>\t<name=value,...>` (the A4_FORCE form): uniforms pinned in BOTH runs for a
+# program that random inputs never cover (a range test on a few ints, a depth-only output). <program> is the .prog name; a row
+# for the base name covers its define variants too. The row is part of the program's cache key.
+FIXTURE = ''
+
+
+def fixtures(tree):
+    out = {}
+    p = os.path.join(tree, 'res/shaders/hlsl/a4fixtures.txt')
+    if os.path.exists(p):
+        for ln in open(p, encoding='utf-8').read().splitlines():
+            if ln.strip() and not ln.startswith('#') and '\t' in ln:
+                k, v = ln.split('\t', 1)
+                out[k.strip()] = v.strip()
+    return out
 
 
 def set_uniform(prog, name, loc, ty, size, seed, plant):
     r = rng_for(name, seed)
-    force = dict(kv.split('=') for kv in os.environ.get('A4_FORCE', '').split(',') if kv)   # debug: A4_FORCE=useFalloff=0,pfxGame=1
-    if name in force and ty in FLOAT_T and size == 1 and ':' in force[name]:   # A4_FORCE=falloffParams=0.1:0.5:0.7:0.8
+    force = dict(kv.split('=') for kv in FIXTURE.split(',') if kv)   # HLSLFIX2: the program's a4fixtures.txt row, same form as A4_FORCE
+    force.update(kv.split('=') for kv in os.environ.get('A4_FORCE', '').split(',') if kv)   # debug: A4_FORCE=useFalloff=0,pfxGame=1
+    if name.endswith('[0]') and name[:-3] in force:   # an array is named `x[0]` by GL; a force names it `x`
+        force[name] = force[name[:-3]]
+    if name in force and ty in MAT_T and len(force[name].split(':')) == MAT_T[ty][0] * MAT_T[ty][1] * size:
+        # a matrix (array), column-major, every component ':'-joined
+        c, rr = MAT_T[ty]
         v = np.array([float(x) for x in force[name].split(':')], dtype=np.float32)
-        g('glUniform%dfv' % FLOAT_T[ty], None, GLint, GLsizei, c_p)(loc, 1, v.ctypes.data)
+        nm = 'glUniformMatrix%d' % c if c == rr else 'glUniformMatrix%dx%d' % (c, rr)
+        g(nm + 'fv', None, GLint, GLsizei, ctypes.c_ubyte, c_p)(loc, size, 0, v.ctypes.data)
         return True
-    if name in force and ty in (INT_T.keys() | BOOL_T.keys()) and size == 1:
-        v = np.array([int(force[name])], dtype=np.int32)
-        g('glUniform1iv', None, GLint, GLsizei, c_p)(loc, 1, v.ctypes.data)
+    if name in force and ty in FLOAT_T and (size == 1 or len(force[name].split(':')) == FLOAT_T[ty] * size) and (':' in force[name] or FLOAT_T[ty] == 1):
+        # A4_FORCE=falloffParams=0.1:0.5:0.7:0.8; HLSLFIX2: a scalar float, and a whole array (every component, ':'-joined)
+        v = np.array([float(x) for x in force[name].split(':')], dtype=np.float32)
+        g('glUniform%dfv' % FLOAT_T[ty], None, GLint, GLsizei, c_p)(loc, max(len(v) // FLOAT_T[ty], 1), v.ctypes.data)
+        return True
+    if name in force and ty in (INT_T.keys() | BOOL_T.keys()) and len(force[name].split(':')) == (INT_T.get(ty) or BOOL_T[ty]) * size:
+        # an int / bool (HLSLFIX2: and an ivec, ':'-joined)
+        n = INT_T.get(ty) or BOOL_T[ty]
+        v = np.array([int(x) for x in force[name].split(':')], dtype=np.int32)
+        g('glUniform%div' % n, None, GLint, GLsizei, c_p)(loc, size, v.ctypes.data)
         return True
     if ty in FLOAT_T:
         n = FLOAT_T[ty]
@@ -193,6 +227,29 @@ def make_texture(ty, seed):
     w, h, d = DIM[tgt]
     r = np.random.default_rng(1000 + seed + ty)
     nc = 1 if fmt == 0x1902 else 4
+    if tgt == 0x8C2A:   # HLSLFIX2: a buffer texture (samplerBuffer): RGBA32F / RGBA32I / RGBA32UI texels in a buffer object
+        data = ((r.random(w * 4) * 0.9 + 0.05).astype(np.float32) if dt == 0x1406 else r.integers(0, 3, w * 4).astype(np.int32 if dt == 0x1404 else np.uint32))
+        b = GLuint(); g('glGenBuffers', None, GLsizei, ctypes.POINTER(GLuint))(1, ctypes.byref(b))
+        g('glBindBuffer', None, GLenum, GLuint)(0x8C2A, b.value)
+        g('glBufferData', None, GLenum, ctypes.c_ssize_t, c_p, GLenum)(0x8C2A, data.nbytes, data.ctypes.data, 0x88E4)
+        g('glTexBuffer', None, GLenum, GLenum, GLuint)(0x8C2A, ifmt, b.value)
+        return t.value, tgt
+    if tgt == 0x9100:   # HLSLFIX2: a multisample texture (sampler2DMS; before: unbound, so it shared unit 0 with a sampler2D and
+        # the draw was refused: cell_underwater_ms NOCOV). 4 samples, cleared to one seeded value (no upload path for MS texels)
+        g('glTexImage2DMultisample', None, GLenum, GLsizei, GLenum, GLsizei, GLsizei, ctypes.c_ubyte)(tgt, 4, ifmt, w, h, 1)
+        prev = GLint(); gl.glGetIntegerv(0x8CA6, ctypes.byref(prev))
+        f = GLuint(); g('glGenFramebuffers', None, GLsizei, ctypes.POINTER(GLuint))(1, ctypes.byref(f))
+        g('glBindFramebuffer', None, GLenum, GLuint)(0x8D40, f.value)
+        g('glFramebufferTexture2D', None, GLenum, GLenum, GLenum, GLuint, GLint)(0x8D40, 0x8CE0, tgt, t.value, 0)
+        g('glDrawBuffers', None, GLsizei, c_p)(1, ctypes.cast((GLenum * 1)(0x8CE0), c_p))
+        v = float(r.random() * 0.9 + 0.05)
+        if dt == 0x1406:
+            g('glClearBufferfv', None, GLenum, GLint, c_p)(0x1800, 0, ctypes.cast((c_f * 4)(v, v, v, v), c_p))
+        else:
+            k = int(v * 3)
+            g('glClearBuffer%sv' % ('i' if dt == 0x1404 else 'ui'), None, GLenum, GLint, c_p)(0x1800, 0, ctypes.cast((ctypes.c_int * 4)(k, k, k, k), c_p))
+        g('glBindFramebuffer', None, GLenum, GLuint)(0x8D40, prev.value)
+        return t.value, tgt
     if dt == 0x1406:
         data = (r.random(w * h * d * nc) * 0.9 + 0.05).astype(np.float32)
     elif dt == 0x1404:
@@ -251,7 +308,10 @@ class Rig:
         self.tex = {}
 
     def ubo_for(self, name, size, seed, members=()):
-        k = (name, size, seed, MODE)
+        # HLSLFIX2: the member layout is in the key; without it the first program to use a block name decided the int lanes for
+        # every later one, so a verdict hung on render order (cell_volair AIRZONE+BOUNCE rows: EXACT serial, FAIL sharded)
+        members = tuple(sorted(members))
+        k = (name, size, seed, MODE, members)
         if k not in self.ubo:
             b = GLuint(); g('glGenBuffers', None, GLsizei, ctypes.POINTER(GLuint))(1, ctypes.byref(b))
             a = (rng_for(name, seed).random(max(size, 16) // 4 + 4) * 0.8 + 0.1).astype(np.float32)
@@ -279,6 +339,10 @@ class Rig:
 
     def tex_for(self, ty, seed):
         if (ty, seed) not in self.tex:
+            # HLSLFIX2: made on a spare unit. make_texture binds the new texture on the ACTIVE unit, which was the previous
+            # sampler's: on the first use of a (type, seed) that sampler read the wrong texture in the GLSL run only, so a
+            # verdict hung on which program came first (cell_hdr: FAIL 0.869 / 0.412 / 0.131 shifting with the order)
+            g('glActiveTexture', None, GLenum)(0x84C0 + 79)   # the last unit GL 4.x guarantees; no program binds 80 samplers
             self.tex[(ty, seed)] = make_texture(ty, seed)
         return self.tex[(ty, seed)]
 
@@ -404,12 +468,69 @@ def compare(a, b):
     return 'FAIL', 'max rel %.3g over %d of %d values' % (mx, nd, a.size)
 
 
+def summary(rows, plant):
+    cnt = {}
+    for _n, grp, v, _d in rows:
+        cnt.setdefault(grp, {}).setdefault(v, 0)
+        cnt[grp][v] += 1
+    print('--- per group')
+    for grp in sorted(cnt):
+        print('%-22s %s' % (grp, ' '.join('%s=%d' % kv for kv in sorted(cnt[grp].items()))))
+    allv = {}
+    for r in rows:
+        allv[r[2]] = allv.get(r[2], 0) + 1
+    print('A4 %d programs: %s%s' % (len(rows), ' '.join('%s=%d' % kv for kv in sorted(allv.items())), '  (planted fault run)' if plant else ''))
+
+
+def cache_text(cache):
+    return ''.join('%s\t%s\t%s\t%s\t%s\n' % (n, v[0], v[1], v[2], v[3].replace('\t', ' ').replace('\n', ' ')) for n, v in sorted(cache.items()))
+
+
+def finish(spvdir, rows, plant, apply_):
+    out = os.path.join(spvdir, 'spirv', 'a4_plant.txt' if plant else 'a4.txt')
+    open(out, 'w', newline='\n').write(''.join('%s\t%s\t%s\t%s\n' % r for r in rows))
+    if apply_ and not plant:
+        old = os.path.join(spvdir, 'spirv', 'programs.txt')
+        os.replace(old, os.path.join(spvdir, 'spirv', 'programs_prea4.txt'))
+        bad = {r[0]: (r[3] if r[2] == 'FAIL' else 'NOCOV unproven: the GLSL render covered no pixel') for r in rows if r[2] in ('FAIL', 'NOCOV')}
+        lines = []
+        for l in open(os.path.join(spvdir, 'spirv', 'programs_prea4.txt')).read().splitlines():
+            n = l.split('\t')[0]
+            lines.append('%s\tFAIL a4 %s' % (n, bad[n]) if n in bad else l)
+        open(old, 'w', newline='\n').write('\n'.join(lines) + '\n')
+        print('applied: %d programs moved to GLSL' % len(bad))
+
+
+def merge(spvdir, n, plant, apply_):
+    """HLSLFIX2: join the --shard parts (index-ordered rows, cache lines) into the serial run's files; every part must exist"""
+    tag = 'a4_plant' if plant else 'a4'
+    rows, cache = [], {}
+    for i in range(n):
+        pf = os.path.join(spvdir, 'spirv', '%s.shard%dof%d.txt' % (tag, i, n))
+        for ln in open(pf, encoding='utf-8').read().splitlines():
+            p, js = ln.split('\t', 1)
+            rows.append((int(p), tuple(json.loads(js))))
+        if not plant:
+            cache.update(stamps.load_table(os.path.join(spvdir, 'spirv', 'a4cache.shard%dof%d.txt' % (i, n)), 5))
+    rows = [r for _i, r in sorted(rows)]
+    for name, group, v, d in rows:
+        print('%-6s %-22s %-34s %s' % (v, group, name, d))
+    summary(rows, plant)
+    print('A4 merged %d shards' % n)
+    if not plant:
+        open(os.path.join(spvdir, 'spirv', 'a4cache.txt'), 'w', newline='\n').write(cache_text(cache))
+    finish(spvdir, rows, plant, apply_)
+
+
 def main():
     a = sys.argv[1:]
     tree, spvdir = a[0], a[1]
     only = a[a.index('--only') + 1] if '--only' in a else None
     plant, apply_ = '--plant' in a, '--apply' in a
     seeds = int(a[a.index('--seeds') + 1]) if '--seeds' in a else 3
+    if '--merge' in a:
+        return merge(spvdir, int(a[a.index('--merge') + 1]), plant, apply_)
+    shard = tuple(int(x) for x in a[a.index('--shard') + 1].split('/')) if '--shard' in a else None
     glctx.context() if False else context()
     units = GLint(0); gl.glGetIntegerv(0x8872, ctypes.byref(units))
     units = min(max(units.value, 1), 32) - 2
@@ -426,10 +547,19 @@ def main():
         cache = stamps.load_table(os.path.join(tree, 'res/shaders/hlsl/a4cache.txt'), 5)
         cache.update(stamps.load_table(cachef, 5))
     tk = stamps.tools_key(['spvgl.py', 'build_spv.py'])
-    atool = stamps.sha(stamps.tools_key(['a4_diff.py', 'a2_iface.py', 'glctx.py', 'spirv_probe.py']), units, seeds, os.environ.get('A4_BASEONLY', ''))
+    # HLSLFIX2: the harness files' CODE (stamps.code_key: comments and docstrings dropped), not their bytes; a2_iface.py and
+    # remap.py are read too (items, glsl_program, the source lookup); a code edit anywhere in them still re-renders every program
+    atool = stamps.sha(stamps.code_key(['a4_diff.py', 'a2_iface.py', 'glctx.py', 'spirv_probe.py', 'remap.py', 'stamps.py']),
+                       units, seeds, os.environ.get('A4_BASEONLY', ''))
     gfind = lambda n: os.path.join(tree, byn[n]) if n in byn else None
     newcache = dict(cache)
-    for pf, st, vdefs, name in a2_iface.items(tree):
+    fix = fixtures(tree)
+    ridx = []   # each row's position in the serial order (a2_iface.items), for --merge
+    for pos, (pf, st, vdefs, name) in enumerate(a2_iface.items(tree)):
+        if shard and zlib.crc32(name.encode('utf-8')) % shard[1] != shard[0]:
+            continue
+        del ridx[len(rows):]
+        ridx.append(pos)   # the row this program may append is rows[len(rows)]
         txt = open(os.path.join(tree, pf), encoding='utf-8', errors='replace').read()
         if '.geom' not in txt:
             st = [x for x in st if not x[1].endswith('_points_gs.hlsl')]
@@ -442,7 +572,9 @@ def main():
         group = pf.replace('\\', '/').split('/')[3] if pf.replace('\\', '/').startswith('res/shaders/features/') else 'core'
         specs = [(a2_iface.STG[e], os.path.join(spvdir, 'spirv', os.path.basename(pth).rsplit('.', 1)[0] + '.spv')) for e, pth, _s in st]
         shaders = [w for ln in txt.splitlines() if ln.startswith('shaders') for w in ln.split()[1:]]
-        ckey = stamps.sha(name, atool, ','.join(vdefs), *([stamps.stage_key(pth_, [], tk) for _e, pth_, _s in st]
+        global FIXTURE
+        FIXTURE = fix.get(name, fix.get(name.split('@')[0], ''))
+        ckey = stamps.sha(name, atool, ','.join(vdefs), *([FIXTURE] if FIXTURE else []), *([stamps.stage_key(pth_, [], tk) for _e, pth_, _s in st]
                                                          + [stamps.source_key(os.path.join(tree, byn.get(s_, 'res/shaders/' + s_)), gfind) for s_ in shaders]))
         hit = cache.get(name)
         if hit and hit[0] == ckey:
@@ -532,33 +664,20 @@ def main():
         if verdict != 'SKIP':
             newcache[name] = [ckey, group, verdict, detail]
         print('%-6s %-22s %-34s %s' % (verdict, group, name, detail), flush=True)
-    cnt = {}
-    for _n, grp, v, _d in rows:
-        cnt.setdefault(grp, {}).setdefault(v, 0)
-        cnt[grp][v] += 1
-    print('--- per group')
-    for grp in sorted(cnt):
-        print('%-22s %s' % (grp, ' '.join('%s=%d' % kv for kv in sorted(cnt[grp].items()))))
-    allv = {}
-    for r in rows:
-        allv[r[2]] = allv.get(r[2], 0) + 1
-    print('A4 %d programs: %s%s' % (len(rows), ' '.join('%s=%d' % kv for kv in sorted(allv.items())), '  (planted fault run)' if plant else ''))
+    summary(rows, plant)
+    names_now = {r[0] for r in rows}
+    keep = {n: v for n, v in newcache.items() if n in names_now or (only and not shard)}
+    if shard:
+        tag = 'a4_plant' if plant else 'a4'
+        sp = lambda base: os.path.join(spvdir, 'spirv', '%s.shard%dof%d.txt' % (base, shard[0], shard[1]))
+        open(sp(tag), 'w', newline='\n').write(''.join('%d\t%s\n' % (p, json.dumps(list(r))) for p, r in zip(ridx, rows)))
+        if not plant:
+            open(sp('a4cache'), 'w', newline='\n').write(cache_text(keep))
+        print('A4 shard %d of %d written' % shard)
+        return
     if not plant:
-        names_now = {r[0] for r in rows}
-        open(cachef, 'w', newline='\n').write(''.join('%s\t%s\t%s\t%s\t%s\n' % (n, v[0], v[1], v[2], v[3].replace('\t', ' ').replace('\n', ' '))
-                                                      for n, v in sorted(newcache.items()) if n in names_now or only))
-    out = os.path.join(spvdir, 'spirv', 'a4_plant.txt' if plant else 'a4.txt')
-    open(out, 'w', newline='\n').write(''.join('%s\t%s\t%s\t%s\n' % r for r in rows))
-    if apply_ and not plant:
-        old = os.path.join(spvdir, 'spirv', 'programs.txt')
-        os.replace(old, os.path.join(spvdir, 'spirv', 'programs_prea4.txt'))
-        bad = {r[0]: (r[3] if r[2] == 'FAIL' else 'NOCOV unproven: the GLSL render covered no pixel') for r in rows if r[2] in ('FAIL', 'NOCOV')}
-        lines = []
-        for l in open(os.path.join(spvdir, 'spirv', 'programs_prea4.txt')).read().splitlines():
-            n = l.split('\t')[0]
-            lines.append('%s\tFAIL a4 %s' % (n, bad[n]) if n in bad else l)
-        open(old, 'w', newline='\n').write('\n'.join(lines) + '\n')
-        print('applied: %d programs moved to GLSL' % len(bad))
+        open(cachef, 'w', newline='\n').write(cache_text(keep))
+    finish(spvdir, rows, plant, apply_)
 
 
 if __name__ == "__main__":

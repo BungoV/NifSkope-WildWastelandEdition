@@ -4,7 +4,7 @@
 // named in notes/vkcompute1/hlsl_plan.md. Not wired: nothing loads this file.
 // profile: ps_6_0
 #include "GiBindingsVk.hlsli"
-static const float2 tmp1114[16] = { float2(-0.94201624393463134765625f, -0.39906215667724609375f), float2(0.94558608531951904296875f, -0.768907248973846435546875f), float2(-0.094184100627899169921875f, -0.929388701915740966796875f), float2(0.34495937824249267578125f, 0.29387760162353515625f), float2(-0.91588580608367919921875f, 0.4577143192291259765625f), float2(-0.8154423236846923828125f, -0.87912464141845703125f), float2(-0.38277542591094970703125f, 0.2767684459686279296875f), float2(0.9748439788818359375f, 0.7564837932586669921875f), float2(0.4432332515716552734375f, -0.9751155376434326171875f), float2(0.5374298095703125f, -0.473734200000762939453125f), float2(-0.2649691104888916015625f, -0.418930232524871826171875f), float2(0.79197514057159423828125f, 0.19090187549591064453125f), float2(-0.24188840389251708984375f, 0.997065067291259765625f), float2(-0.8140995502471923828125f, 0.91437590122222900390625f), float2(0.1998412609100341796875f, 0.786413669586181640625f), float2(0.14383161067962646484375f, -0.141007900238037109375f) };
+static const float2 kPoisson[16] = { float2(-0.94201624393463134765625f, -0.39906215667724609375f), float2(0.94558608531951904296875f, -0.768907248973846435546875f), float2(-0.094184100627899169921875f, -0.929388701915740966796875f), float2(0.34495937824249267578125f, 0.29387760162353515625f), float2(-0.91588580608367919921875f, 0.4577143192291259765625f), float2(-0.8154423236846923828125f, -0.87912464141845703125f), float2(-0.38277542591094970703125f, 0.2767684459686279296875f), float2(0.9748439788818359375f, 0.7564837932586669921875f), float2(0.4432332515716552734375f, -0.9751155376434326171875f), float2(0.5374298095703125f, -0.473734200000762939453125f), float2(-0.2649691104888916015625f, -0.418930232524871826171875f), float2(0.79197514057159423828125f, 0.19090187549591064453125f), float2(-0.24188840389251708984375f, 0.997065067291259765625f), float2(-0.8140995502471923828125f, 0.91437590122222900390625f), float2(0.1998412609100341796875f, 0.786413669586181640625f), float2(0.14383161067962646484375f, -0.141007900238037109375f) };
 
 Texture2D<float4> gbuf : register(t0, space0);
 SamplerState _gbuf_sampler : register(s0, space0);
@@ -109,16 +109,16 @@ float3 viewPos(float2 uv, float z)
 // the normal turned toward the eye (the gbuf keeps a two-sided surface's drawn normal)
 float3 faceN(float3 n, float3 P)
 {
-    float3 tmp225;
+    float3 faceNRet;
     if (dot(n, -P) < 0.0f)
     {
-        tmp225 = -n;
+        faceNRet = -n;
     }
     else
     {
-        tmp225 = n;
+        faceNRet = n;
     }
-    return tmp225;
+    return faceNRet;
 }
 
 // interleaved gradient noise, rotated each frame (the FO4CS cast reads a spatiotemporal blue-noise sheet; this is
@@ -131,6 +131,7 @@ float ign(inout float2 p, int f)
 
 uint sectorBits(float a0, float a1)
 {
+    // a0 <= a1 in 0..1 across the slice: the sectors they cover
     int b0 = int(floor(clamp(a0, 0.0f, 1.0f) * 32.0f));
     int b1 = int(ceil(clamp(a1, 0.0f, 1.0f) * 32.0f));
     int n = b1 - b0;
@@ -138,16 +139,16 @@ uint sectorBits(float a0, float a1)
     {
         return 0u;
     }
-    uint tmp281;
+    uint mPick;
     if (n >= 32)
     {
-        tmp281 = 4294967295u;
+        mPick = 4294967295u;
     }
     else
     {
-        tmp281 = (1u << uint(n)) - 1u;
+        mPick = (1u << uint(n)) - 1u;
     }
-    uint m = tmp281;
+    uint m = mPick;
     return m << uint(b0);
 }
 
@@ -155,34 +156,36 @@ float4 cast(int2 wp)
 {
     float2 uv = (float2(wp) + 0.5f.xx) / float2(workSize);
     int2 ft = int2(uv * float2(fullSize));
-    int2 param = ft;
-    float4 g = gAt(param);
+    int2 fullTexelArg2 = ft;
+    float4 g = gAt(fullTexelArg2);
     if (g.w <= 0.0f)
     {
         return float4(0.0f, 0.0f, 0.0f, 1.0f);
     }
-    float2 param_1 = (float2(ft) + 0.5f.xx) / float2(fullSize);
-    float param_2 = g.w;
-    float3 P = viewPos(param_1, param_2);
+    float2 uvArg2 = (float2(ft) + 0.5f.xx) / float2(fullSize);
+    float zArg2 = g.w;
+    float3 P = viewPos(uvArg2, zArg2);
     float3 V = normalize(-P);
-    float3 param_3 = normalize(g.xyz);
-    float3 param_4 = P;
-    float3 N = faceN(param_3, param_4);
+    float3 nArg = normalize(g.xyz);
+    float3 PArg = P;
+    float3 N = faceN(nArg, PArg);
+    // the radius in full-size pixels at this depth
     float rPx = (((radius * proj.y) * 0.5f) * float(fullSize.y)) / g.w;
     if (rPx < 1.0f)
     {
         return float4(0.0f, 0.0f, 0.0f, 1.0f);
     }
-    float2 param_5 = float2(wp);
-    int param_6 = frameIndex;
-    float tmp376 = ign(param_5, param_6);
-    float n0 = tmp376;
-    float2 param_7 = float2(wp) + float2(37.0f, 11.0f);
-    int param_8 = frameIndex + 17;
-    float tmp389 = ign(param_7, param_8);
-    float n1 = tmp389;
+    float2 pArg2 = float2(wp);
+    int fArg2 = frameIndex;
+    float ignRet2 = ign(pArg2, fArg2);
+    float n0 = ignRet2;
+    float2 pArg = float2(wp) + float2(37.0f, 11.0f);
+    int fArg = frameIndex + 17;
+    float ignRet = ign(pArg, fArg);
+    float n1 = ignRet;
     if (blueNoise)
     {
+        // FO4CS's SpatioTemporalNoise: x the slice rotation, y the step jitter
         float2 bn = noiseTex.Load(int3(int2(wp.x & 127, ((frameIndex & 63) * 128) + (wp.y & 127)), 0)).xy;
         n0 = bn.x;
         n1 = bn.y;
@@ -190,9 +193,9 @@ float4 cast(int2 wp)
     float3 il = 0.0f.xxx;
     float vis = 0.0f;
     float wsum = 0.0f;
-    float tmp547;
-    float tmp856;
-    float tmp920;
+    float tPick;
+    float lvlPick;
+    float visPick;
     for (int s = 0; s < slices; s++)
     {
         float phi = ((float(s) + n0) * 3.1415927410125732421875f) / float(slices);
@@ -209,11 +212,14 @@ float4 cast(int2 wp)
         float n = sign(dot(Np, ortho)) * acos(clamp(dot(Np, V) / npLen, -1.0f, 1.0f));
         uint occ = 0u;
         float3 sil = 0.0f.xxx;
+        // lane SSGI3: the cosine-weighted share whose probe light the screen replaces
         float taken = 0.0f;
+        // FO4CS: one step jitter per slice, slid by the golden ratio
         float sliceStep = frac(n1 + (float(s) * 0.61803400516510009765625f));
         for (int side = 0; side < 2; side++)
         {
             float sgn = (side == 0) ? 1.0f : (-1.0f);
+            // every later tap of this slice adds no fresh sector (FO4CS breaks the same way)
             if (((hizLevels > 0) || fullBreak) && (occ == 4294967295u))
             {
                 break;
@@ -222,119 +228,126 @@ float4 cast(int2 wp)
             {
                 if (blueNoise)
                 {
-                    tmp547 = sliceStep;
+                    tPick = sliceStep;
                 }
                 else
                 {
-                    tmp547 = frac(n1 + (float(k) * 0.61803400516510009765625f));
+                    tPick = frac(n1 + (float(k) * 0.61803400516510009765625f));
                 }
-                float t = (float(k) + tmp547) / float(steps);
+                float t = (float(k) + tPick) / float(steps);
                 float off = max((t * t) * rPx, 1.0f + float(k));
                 float2 sp = (float2(ft) + 0.5f.xx) + ((dir * sgn) * off);
-                bool tmp586 = sp.x < 0.0f;
-                bool tmp593;
-                if (!tmp586)
+                bool cond6 = sp.x < 0.0f;
+                bool cond5;
+                if (!cond6)
                 {
-                    tmp593 = sp.y < 0.0f;
+                    cond5 = sp.y < 0.0f;
                 }
                 else
                 {
-                    tmp593 = tmp586;
+                    cond5 = cond6;
                 }
-                bool tmp603;
-                if (!tmp593)
+                bool cond4;
+                if (!cond5)
                 {
-                    tmp603 = sp.x >= float(fullSize.x);
+                    cond4 = sp.x >= float(fullSize.x);
                 }
                 else
                 {
-                    tmp603 = tmp593;
+                    cond4 = cond5;
                 }
-                bool tmp613;
-                if (!tmp603)
+                bool cond3;
+                if (!cond4)
                 {
-                    tmp613 = sp.y >= float(fullSize.y);
+                    cond3 = sp.y >= float(fullSize.y);
                 }
                 else
                 {
-                    tmp613 = tmp603;
+                    cond3 = cond4;
                 }
-                if (tmp613)
+                if (cond3)
                 {
                     break;
                 }
+                // lane PERFFIX2 (3c): the full-mask early out without the interval pyramid (fullBreak; exact)
                 if (((hizLevels > 0) || fullBreak) && (occ == 4294967295u))
                 {
                     break;
                 }
                 if (hizLevels > 0)
                 {
+                    // FO4CS's geometry mip: a cell whose whole depth interval is beyond z +- (radius + 1) holds no tap
+                    // within the radius (|dz| <= distance), so the skip drops exactly the taps `len > radius` drops
                     int m = min(int(max(clamp(log2(off) - 3.2999999523162841796875f, 0.0f, 5.0f) - 1.0f, 0.0f) + 0.5f), hizLevels);
                     if (m > 0)
                     {
                         int2 c = min((int2(sp) >> m.xx), (int2(spvTextureSize(hiz, uint(m - 1), dummy_parameter)) - int2(1, 1)));
                         float2 iv = hiz.Load(int3(c, m - 1)).xy;
-                        bool tmp678 = iv.x > ((g.w + radius) + 1.0f);
-                        bool tmp690;
-                        if (!tmp678)
+                        bool cond2 = iv.x > ((g.w + radius) + 1.0f);
+                        bool cond;
+                        if (!cond2)
                         {
-                            tmp690 = iv.y < ((g.w - radius) - 1.0f);
+                            cond = iv.y < ((g.w - radius) - 1.0f);
                         }
                         else
                         {
-                            tmp690 = tmp678;
+                            cond = cond2;
                         }
-                        if (tmp690)
+                        if (cond)
                         {
                             continue;
                         }
                     }
                 }
-                int2 param_9 = int2(sp);
-                float4 gs = gAt(param_9);
+                int2 fullTexelArg = int2(sp);
+                float4 gs = gAt(fullTexelArg);
                 if (gs.w <= 0.0f)
                 {
                     continue;
                 }
-                float2 param_10 = sp / float2(fullSize);
-                float param_11 = gs.w;
-                float3 S = viewPos(param_10, param_11);
+                float2 uvArg = sp / float2(fullSize);
+                float zArg = gs.w;
+                float3 S = viewPos(uvArg, zArg);
                 float3 dF = S - P;
                 float len = length(dF);
                 bool wwh0 = (len > radius);
                 bool wwh1 = (len < 0.001000000047497451305389404296875f);
-                if (wwh0 || wwh1)
+                if (or(wwh0, wwh1))   // HLSLFIX2 orfix.py: no short-circuit branch (NV took the wrong side)
                 {
                     continue;
                 }
                 float3 dB = dF - (V * thickness);
+                // signed angles from V toward this side, then relative to the normal's angle, mapped by sin (cosine-weighted)
                 float aF = sgn * acos(clamp(dot(dF / len.xxx, V), -1.0f, 1.0f));
                 float aB = sgn * acos(clamp(dot(normalize(dB), V), -1.0f, 1.0f));
                 float uF = 0.5f + (0.5f * sin(clamp(aF - n, -1.57079637050628662109375f, 1.57079637050628662109375f)));
                 float uB = 0.5f + (0.5f * sin(clamp(aB - n, -1.57079637050628662109375f, 1.57079637050628662109375f)));
-                float param_12 = min(uF, uB);
-                float param_13 = max(uF, uB);
-                uint bits = sectorBits(param_12, param_13);
+                float a0Arg = min(uF, uB);
+                float a1Arg = max(uF, uB);
+                uint bits = sectorBits(a0Arg, a1Arg);
                 uint fresh = bits & (~occ);
                 if (fresh != 0u)
                 {
+                    // FO4CS's donor range weight: a smoothstep band over the outer quarter of the radius
                     float rt = clamp((radius - len) / max(0.25f * radius, 1.0f), 0.0f, 1.0f);
                     float share = (((float(int(countbits(fresh))) / 32.0f) * rt) * rt) * (3.0f - (2.0f * rt));
                     float3 Ns = normalize(gs.xyz);
                     float facing = clamp(dot(Ns, (-dF) / len.xxx), 0.0f, 1.0f);
+                    // FO4CS's radiance mips: farther taps read a prefiltered level (log2 offset - 3.3, levels 0..4)
                     float lod = clamp(log2(off) - 3.2999999523162841796875f, 0.0f, 4.0f);
                     float3 L = scene.SampleLevel(_scene_sampler, sp / float2(fullSize), lod).xyz;
                     if (emitSub)
                     {
                         if (lod <= 0.5f)
                         {
-                            tmp856 = 0.0f;
+                            lvlPick = 0.0f;
                         }
                         else
                         {
-                            tmp856 = ceil(lod + 0.5f) - 1.0f;
+                            lvlPick = ceil(lod + 0.5f) - 1.0f;
                         }
-                        float lvl = tmp856;
+                        // emission comes off the same box mean
+                        float lvl = lvlPick;
                         L -= emitTex.SampleLevel(_emitTex_sampler, sp / float2(fullSize), lvl).xyz;
                     }
                     if (oldLaw)
@@ -343,6 +356,8 @@ float4 cast(int2 wp)
                     }
                     else
                     {
+                        // lane SSGI3, the fill law: a diffuse donor's radiance does not fall with its cosine, and a sector
+                        // takes the probe's light only in the share the screen refills (band, front face); the rest keeps it
                         float front = clamp(facing * 10.0f, 0.0f, 1.0f);
                         sil += (max(L, 0.0f.xxx) * (share * front));
                         taken += (share * front);
@@ -354,19 +369,20 @@ float4 cast(int2 wp)
         il += (sil * npLen);
         if (oldLaw)
         {
-            tmp920 = 1.0f - (float(int(countbits(occ))) / 32.0f);
+            visPick = 1.0f - (float(int(countbits(occ))) / 32.0f);
         }
         else
         {
-            tmp920 = 1.0f - taken;
+            visPick = 1.0f - taken;
         }
-        vis += (tmp920 * npLen);
+        vis += (visPick * npLen);
         wsum += npLen;
     }
     if (wsum <= 0.0f)
     {
         return float4(0.0f, 0.0f, 0.0f, 1.0f);
     }
+    // cosine-weighted share x radiance x pi = irradiance
     il = ((il / wsum.xxx) * 3.1415927410125732421875f) * sourceBrightness;
     float y = dot(il, float3(0.2125999927520751953125f, 0.715200006961822509765625f, 0.072200000286102294921875f));
     il = max(lerp(y.xxx, il, saturation.xxx), 0.0f.xxx);
@@ -384,10 +400,10 @@ void addLod(inout float4 w, float lod, float scale)
     int lo = int(floor(l));
     int hi = min((lo + 1), 4);
     float f = frac(l);
-    int tmp2615 = lo - 1;
-    w[tmp2615] += (scale * (1.0f - f));
-    int tmp2625 = hi - 1;
-    w[tmp2625] += (scale * f);
+    int wPart2 = lo - 1;
+    w[wPart2] += (scale * (1.0f - f));
+    int wPart = hi - 1;
+    w[wPart] += (scale * f);
 }
 
 // ---- lane SSGI2 (row 16): FO4CS's emissive cast (GICastCS PASS 2, SampleEmissionImportance) ----
@@ -403,9 +419,9 @@ uint impHash(inout uint v)
 
 float impRand(uint key, uint dim)
 {
-    uint param = key ^ (dim * 2654435769u);
-    uint tmp2531 = impHash(param);
-    return min((float(tmp2531) + 0.5f) * 2.3283064365386962890625e-10f, 0.999999940395355224609375f);
+    uint vArg = key ^ (dim * 2654435769u);
+    uint impHashRet = impHash(vArg);
+    return min((float(impHashRet) + 0.5f) * 2.3283064365386962890625e-10f, 0.999999940395355224609375f);
 }
 
 int selectIdx(float4 w, float r, inout float p)
@@ -430,17 +446,17 @@ int selectIdx(float4 w, float r, inout float p)
     }
     for (;;)
     {
-        bool tmp2581 = i > 0;
-        bool tmp2588;
-        if (tmp2581)
+        bool cond8 = i > 0;
+        bool cond7;
+        if (cond8)
         {
-            tmp2588 = w[i] <= 0.0f;
+            cond7 = w[i] <= 0.0f;
         }
         else
         {
-            tmp2588 = tmp2581;
+            cond7 = cond8;
         }
-        if (tmp2588)
+        if (cond7)
         {
             i--;
             continue;
@@ -463,45 +479,46 @@ bool sampleEmission(float2 fuv, float emip, uint key, out int2 leaf, out float3 
     cov = 0.0f;
     selMip = emip;
     float coarseMip = min(emip + 1.0f, 4.0f);
+    // FO4CS kEmissionFootprintCoarseWeight
     float coarseW = 0.5f * clamp(4.0f - emip, 0.0f, 1.0f);
     float4 fp = max(lerp(emitTex.SampleLevel(_emitTex_sampler, fuv, emip), emitTex.SampleLevel(_emitTex_sampler, fuv, coarseMip), coarseW.xxxx), 0.0f.xxxx);
-    float3 param = fp.xyz;
-    if (lumaOf(param) <= 9.9999999747524270787835121154785e-07f)
+    float3 vArg5 = fp.xyz;
+    if (lumaOf(vArg5) <= 9.9999999747524270787835121154785e-07f)
     {
         return false;
     }
     float4 tw = 0.0f.xxxx;
-    float4 param_1 = tw;
-    float param_2 = emip;
-    float param_3 = 1.0f - coarseW;
-    addLod(param_1, param_2, param_3);
-    tw = param_1;
-    float4 param_4 = tw;
-    float param_5 = coarseMip;
-    float param_6 = coarseW;
-    addLod(param_4, param_5, param_6);
-    tw = param_4;
+    float4 wArg5 = tw;
+    float lodArg2 = emip;
+    float scaleArg2 = 1.0f - coarseW;
+    addLod(wArg5, lodArg2, scaleArg2);
+    tw = wArg5;
+    float4 wArg4 = tw;
+    float lodArg = coarseMip;
+    float scaleArg = coarseW;
+    addLod(wArg4, lodArg, scaleArg);
+    tw = wArg4;
     float4 sw = 0.0f.xxxx;
     for (int i = 0; i < 4; i++)
     {
         if (tw[i] > 0.0f)
         {
-            float3 param_7 = emitTex.SampleLevel(_emitTex_sampler, fuv, float(i + 1)).xyz;
-            sw[i] = tw[i] * lumaOf(param_7);
+            float3 vArg4 = emitTex.SampleLevel(_emitTex_sampler, fuv, float(i + 1)).xyz;
+            sw[i] = tw[i] * lumaOf(vArg4);
         }
     }
     if (dot(sw, 1.0f.xxxx) <= 9.9999999392252902907785028219223e-09f)
     {
         return false;
     }
-    uint param_8 = key;
-    uint param_9 = 0u;
-    float4 param_10 = sw;
-    float param_11 = impRand(param_8, param_9);
-    float param_12;
-    int tmp2732 = selectIdx(param_10, param_11, param_12);
-    float p = param_12;
-    int mi = tmp2732;
+    uint keyArg3 = key;
+    uint dimArg3 = 0u;
+    float4 wArg3 = sw;
+    float rArg3 = impRand(keyArg3, dimArg3);
+    float pArg5;
+    int selectIdxRet3 = selectIdx(wArg3, rArg3, pArg5);
+    float p = pArg5;
+    int mi = selectIdxRet3;
     int sm = mi + 1;
     selMip = float(sm);
     float norm = tw[mi] / max(p, 9.9999999392252902907785028219223e-09f);
@@ -517,27 +534,27 @@ bool sampleEmission(float2 fuv, float emip, uint key, out int2 leaf, out float3 
     {
         cc[c] = clamp(mb + int2(c & 1, c >> 1), int2(0, 0), ms - int2(1, 1));
         cp[c] = max(emitTex.Load(int3(cc[c], sm)), 0.0f.xxxx);
-        float3 param_13 = cp[c].xyz;
-        cw[c] = bw[c] * lumaOf(param_13);
+        float3 vArg3 = cp[c].xyz;
+        cw[c] = bw[c] * lumaOf(vArg3);
     }
     if (dot(cw, 1.0f.xxxx) <= 9.9999999392252902907785028219223e-09f)
     {
         return false;
     }
-    uint param_14 = key;
-    uint param_15 = 1u;
-    float4 param_16 = cw;
-    float param_17 = impRand(param_14, param_15);
-    float param_18;
-    int tmp2857 = selectIdx(param_16, param_17, param_18);
-    p = param_18;
-    int sc = tmp2857;
+    uint keyArg2 = key;
+    uint dimArg2 = 1u;
+    float4 wArg2 = cw;
+    float rArg2 = impRand(keyArg2, dimArg2);
+    float pArg4;
+    int selectIdxRet2 = selectIdx(wArg2, rArg2, pArg4);
+    p = pArg4;
+    int sc = selectIdxRet2;
     norm *= (bw[sc] / max(p, 9.9999999392252902907785028219223e-09f));
     int2 coord = cc[sc];
     float4 pay = cp[sc];
     int2 kc[4];
     float4 kp[4];
-    float param_24;
+    float pArg3;
     for (int pm = sm; pm > 0; pm--)
     {
         int chm = pm - 1;
@@ -547,20 +564,20 @@ bool sampleEmission(float2 fuv, float emip, uint key, out int2 leaf, out float3 
         {
             kc[k] = clamp((coord * int2(2, 2)) + int2(k & 1, k >> 1), int2(0, 0), chs - int2(1, 1));
             kp[k] = max(emitTex.Load(int3(kc[k], chm)), 0.0f.xxxx);
-            float3 param_19 = kp[k].xyz;
-            kw[k] = lumaOf(param_19);
+            float3 vArg2 = kp[k].xyz;
+            kw[k] = lumaOf(vArg2);
         }
         if (dot(kw, 1.0f.xxxx) <= 9.9999999392252902907785028219223e-09f)
         {
             return false;
         }
-        uint param_20 = key;
-        uint param_21 = uint(2 + pm);
-        float4 param_22 = kw;
-        float param_23 = impRand(param_20, param_21);
-        int tmp2957 = selectIdx(param_22, param_23, param_24);
-        p = param_24;
-        int sk = tmp2957;
+        uint keyArg = key;
+        uint dimArg = uint(2 + pm);
+        float4 wArg = kw;
+        float rArg = impRand(keyArg, dimArg);
+        int selectIdxRet = selectIdx(wArg, rArg, pArg3);
+        p = pArg3;
+        int sk = selectIdxRet;
         norm *= (0.25f / max(p, 9.9999999392252902907785028219223e-09f));
         coord = kc[sk];
         pay = kp[sk];
@@ -576,32 +593,32 @@ float4 castEmissive(int2 wp)
 {
     float2 uv = (float2(wp) + 0.5f.xx) / float2(workSize);
     int2 ft = int2(uv * float2(fullSize));
-    int2 param = ft;
-    float4 g = gAt(param);
+    int2 fullTexelArg4 = ft;
+    float4 g = gAt(fullTexelArg4);
     if (g.w <= 0.0f)
     {
         return 0.0f.xxxx;
     }
-    float2 param_1 = (float2(ft) + 0.5f.xx) / float2(fullSize);
-    float param_2 = g.w;
-    float3 P = viewPos(param_1, param_2);
+    float2 uvArg4 = (float2(ft) + 0.5f.xx) / float2(fullSize);
+    float zArg4 = g.w;
+    float3 P = viewPos(uvArg4, zArg4);
     float3 V = normalize(-P);
-    float3 param_3 = normalize(g.xyz);
-    float3 param_4 = P;
-    float3 N = faceN(param_3, param_4);
+    float3 nArg2 = normalize(g.xyz);
+    float3 PArg2 = P;
+    float3 N = faceN(nArg2, PArg2);
     float rPx = (((radius * proj.y) * 0.5f) * float(fullSize.y)) / g.w;
     if (rPx < 1.0f)
     {
         return 0.0f.xxxx;
     }
-    float2 param_5 = float2(wp);
-    int param_6 = frameIndex;
-    float tmp3055 = ign(param_5, param_6);
-    float n0 = tmp3055;
-    float2 param_7 = float2(wp) + float2(37.0f, 11.0f);
-    int param_8 = frameIndex + 17;
-    float tmp3064 = ign(param_7, param_8);
-    float n1 = tmp3064;
+    float2 pArg7 = float2(wp);
+    int fArg4 = frameIndex;
+    float ignRet4 = ign(pArg7, fArg4);
+    float n0 = ignRet4;
+    float2 pArg6 = float2(wp) + float2(37.0f, 11.0f);
+    int fArg3 = frameIndex + 17;
+    float ignRet3 = ign(pArg6, fArg3);
+    float n1 = ignRet3;
     if (blueNoise)
     {
         float2 bn = noiseTex.Load(int3(int2(wp.x & 127, ((frameIndex & 63) * 128) + (wp.y & 127)), 0)).xy;
@@ -610,11 +627,11 @@ float4 castEmissive(int2 wp)
     }
     float3 il = 0.0f.xxx;
     float wsum = 0.0f;
-    int2 param_12;
-    float3 param_13;
-    float param_14;
-    float param_15;
-    float2 tmp3330;
+    int2 leafArg;
+    float3 radArg;
+    float covArg;
+    float selMipArg;
+    float2 dpPick;
     for (int s = 0; s < emitSlices; s++)
     {
         float phi = ((float(s) + n0) * 3.1415927410125732421875f) / float(emitSlices);
@@ -640,76 +657,77 @@ float4 castEmissive(int2 wp)
                 float t = (float(k) + sliceStep) / float(steps);
                 float off = max((t * t) * rPx, 1.0f + float(k));
                 float2 sp = (float2(ft) + 0.5f.xx) + ((dir * sgn) * off);
-                bool tmp3230 = sp.x < 0.0f;
-                bool tmp3237;
-                if (!tmp3230)
+                bool cond12 = sp.x < 0.0f;
+                bool cond11;
+                if (!cond12)
                 {
-                    tmp3237 = sp.y < 0.0f;
+                    cond11 = sp.y < 0.0f;
                 }
                 else
                 {
-                    tmp3237 = tmp3230;
+                    cond11 = cond12;
                 }
-                bool tmp3247;
-                if (!tmp3237)
+                bool cond10;
+                if (!cond11)
                 {
-                    tmp3247 = sp.x >= float(fullSize.x);
+                    cond10 = sp.x >= float(fullSize.x);
                 }
                 else
                 {
-                    tmp3247 = tmp3237;
+                    cond10 = cond11;
                 }
-                bool tmp3257;
-                if (!tmp3247)
+                bool cond9;
+                if (!cond10)
                 {
-                    tmp3257 = sp.y >= float(fullSize.y);
+                    cond9 = sp.y >= float(fullSize.y);
                 }
                 else
                 {
-                    tmp3257 = tmp3247;
+                    cond9 = cond10;
                 }
-                if (tmp3257)
+                if (cond9)
                 {
                     break;
                 }
+                // FO4CS's emission level for this step (its radianceMip), in full-size levels 1..4
                 float emip = clamp(max(clamp(log2(off) - 3.2999999523162841796875f, 0.0f, 5.0f), 2.0f) - 1.0f, 1.0f, 4.0f);
                 uint key = uint(wp.x) + (uint(wp.y) * uint(workSize.x));
                 key ^= (uint(frameIndex) * 2769414579u);
                 key ^= (uint(s) * 1675113877u);
                 key ^= (uint(k) * 3039394381u);
                 key ^= (uint(side) * 1759714724u);
-                float2 param_9 = sp / float2(fullSize);
-                float param_10 = emip;
-                uint param_11 = key;
-                bool tmp3323 = sampleEmission(param_9, param_10, param_11, param_12, param_13, param_14, param_15);
-                int2 leaf = param_12;
-                float3 rad = param_13;
-                float cov = param_14;
-                float selMip = param_15;
-                bool hit = tmp3323;
+                float2 fuvArg = sp / float2(fullSize);
+                float emipArg = emip;
+                uint keyArg4 = key;
+                bool sampleEmissionRet = sampleEmission(fuvArg, emipArg, keyArg4, leafArg, radArg, covArg, selMipArg);
+                int2 leaf = leafArg;
+                float3 rad = radArg;
+                float cov = covArg;
+                float selMip = selMipArg;
+                bool hit = sampleEmissionRet;
                 if (hit)
                 {
-                    tmp3330 = float2(leaf) + 0.5f.xx;
+                    dpPick = float2(leaf) + 0.5f.xx;
                 }
                 else
                 {
-                    tmp3330 = sp;
+                    dpPick = sp;
                 }
-                float2 dp = tmp3330;
-                int2 param_16 = int2(dp);
-                float4 gs = gAt(param_16);
+                float2 dp = dpPick;
+                int2 fullTexelArg3 = int2(dp);
+                float4 gs = gAt(fullTexelArg3);
                 if (gs.w <= 0.0f)
                 {
                     continue;
                 }
-                float2 param_17 = dp / float2(fullSize);
-                float param_18 = gs.w;
-                float3 S = viewPos(param_17, param_18);
+                float2 uvArg3 = dp / float2(fullSize);
+                float zArg3 = gs.w;
+                float3 S = viewPos(uvArg3, zArg3);
                 float3 dF = S - P;
                 float len = length(dF);
                 bool wwh2 = (len > radius);
                 bool wwh3 = (len < 0.001000000047497451305389404296875f);
-                if (wwh2 || wwh3)
+                if (or(wwh2, wwh3))   // HLSLFIX2 orfix.py: no short-circuit branch (NV took the wrong side)
                 {
                     continue;
                 }
@@ -718,9 +736,9 @@ float4 castEmissive(int2 wp)
                 float aB = sgn * acos(clamp(dot(normalize(dB), V), -1.0f, 1.0f));
                 float uF = 0.5f + (0.5f * sin(clamp(aF - n, -1.57079637050628662109375f, 1.57079637050628662109375f)));
                 float uB = 0.5f + (0.5f * sin(clamp(aB - n, -1.57079637050628662109375f, 1.57079637050628662109375f)));
-                float param_19 = min(uF, uB);
-                float param_20 = max(uF, uB);
-                uint bits = sectorBits(param_19, param_20);
+                float a0Arg2 = min(uF, uB);
+                float a1Arg2 = max(uF, uB);
+                uint bits = sectorBits(a0Arg2, a1Arg2);
                 uint fresh = bits & (~occ);
                 occ |= bits;
                 bool wwh4 = (fresh == 0u);
@@ -728,8 +746,9 @@ float4 castEmissive(int2 wp)
                 {
                     continue;
                 }
-                float3 param_21 = rad;
-                float el = lumaOf(param_21);
+                float3 vArg6 = rad;
+                float el = lumaOf(vArg6);
+                // FO4CS's small-emitter boost: min(1/sqrt(coverage), 16), for footprints of 1..3 game units only
                 float wpp = (2.0f * gs.w) / (proj.y * float(fullSize.y));
                 float foot = wpp * exp2(clamp(floor(selMip + 0.5f), 1.0f, 4.0f));
                 float boost = 1.0f;
@@ -739,10 +758,12 @@ float4 castEmissive(int2 wp)
                 }
                 float raw = dot(normalize(gs.xyz), (-dF) / len.xxx);
                 float facing = clamp(raw, 0.0f, 1.0f);
+                // FO4CS: an emitter turned away still lights what lies within 64 units, at a wrapped facing
                 if (facing <= 0.0f)
                 {
                     facing = clamp((raw + 0.5f) / 1.5f, 0.0f, 1.0f) * (1.0f - smoothstep(48.0f, 64.0f, len));
                 }
+                // FO4CS's emissive world range (256): the ordinary band's shape
                 float rt = clamp((radius - len) / max(0.25f * radius, 1.0f), 0.0f, 1.0f);
                 float share = (((float(int(countbits(fresh))) / 32.0f) * rt) * rt) * (3.0f - (2.0f * rt));
                 sil += ((rad * (share * facing)) * boost);
@@ -764,23 +785,23 @@ float4 castEmissive(int2 wp)
 float4 guideAt(int2 w)
 {
     int2 f = int2(((float2(w) + 0.5f.xx) / float2(workSize)) * float2(fullSize));
-    int2 param = f;
-    float4 g = gAt(param);
+    int2 fullTexelArg5 = f;
+    float4 g = gAt(fullTexelArg5);
     if (g.w <= 0.0f)
     {
         return float4(0.0f, 0.0f, 1.0f, 0.0f);
     }
-    float2 param_1 = (float2(f) + 0.5f.xx) / float2(fullSize);
-    float param_2 = g.w;
-    float3 param_3 = normalize(g.xyz);
-    float3 param_4 = viewPos(param_1, param_2);
-    return float4(faceN(param_3, param_4), g.w);
+    float2 uvArg5 = (float2(f) + 0.5f.xx) / float2(fullSize);
+    float zArg5 = g.w;
+    float3 nArg3 = normalize(g.xyz);
+    float3 PArg3 = viewPos(uvArg5, zArg5);
+    return float4(faceN(nArg3, PArg3), g.w);
 }
 
 float logLuma(float3 v)
 {
-    float3 param = v;
-    return log2(1.0f + lumaOf(param));
+    float3 vArg7 = v;
+    return log2(1.0f + lumaOf(vArg7));
 }
 
 float2 viewToUv(float3 p)
@@ -792,73 +813,74 @@ float2 viewToUv(float3 p)
 float tapWeight(int tap, float3 P, float3 N, float3 T, float3 B, float halfAngle, float tol, inout int2 q)
 {
     q = int2(0, 0);
-    float3 pp = (P + (T * tmp1114[tap].x)) + (B * tmp1114[tap].y);
+    float3 pp = (P + (T * kPoisson[tap].x)) + (B * kPoisson[tap].y);
     if (pp.z > (-0.001000000047497451305389404296875f))
     {
         return 0.0f;
     }
-    float3 param = pp;
-    float2 puv = viewToUv(param);
-    bool tmp1144 = any(bool2(puv.x < 0.0f.xx.x, puv.y < 0.0f.xx.y));
-    bool tmp1152;
-    if (!tmp1144)
+    float3 pArg8 = pp;
+    float2 puv = viewToUv(pArg8);
+    bool cond14 = any(bool2(puv.x < 0.0f.xx.x, puv.y < 0.0f.xx.y));
+    bool cond13;
+    if (!cond14)
     {
-        tmp1152 = any(bool2(puv.x > 1.0f.xx.x, puv.y > 1.0f.xx.y));
+        cond13 = any(bool2(puv.x > 1.0f.xx.x, puv.y > 1.0f.xx.y));
     }
     else
     {
-        tmp1152 = tmp1144;
+        cond13 = cond14;
     }
-    if (tmp1152)
+    if (cond13)
     {
         return 0.0f;
     }
     q = clamp(int2(puv * float2(workSize)), int2(0, 0), workSize - int2(1, 1));
-    int2 param_1 = q;
-    float4 gs = guideAt(param_1);
+    int2 wArg6 = q;
+    float4 gs = guideAt(wArg6);
     if (gs.w <= 0.0f)
     {
         return 0.0f;
     }
-    float2 param_2 = puv;
-    float param_3 = gs.w;
-    float3 S = viewPos(param_2, param_3);
-    float w = exp((-0.660000026226043701171875f) * dot(tmp1114[tap], tmp1114[tap]));
+    float2 uvArg6 = puv;
+    float zArg6 = gs.w;
+    float3 S = viewPos(uvArg6, zArg6);
+    float w = exp((-0.660000026226043701171875f) * dot(kPoisson[tap], kPoisson[tap]));
     w *= clamp(1.0f - (abs(dot(N, S - P)) / tol), 0.0f, 1.0f);
     float c = dot(gs.xyz, N);
     w *= smoothstep(0.100000001490116119384765625f, 0.60000002384185791015625f, c);
+    // one normal serves as both geometric and shading normal here
     w *= (1.0f - clamp(acos(clamp(c, -1.0f, 1.0f)) / max(halfAngle, 9.9999997473787516355514526367188e-05f), 0.0f, 1.0f));
     return w;
 }
 
 float logScale(float3 v, float target)
 {
-    float3 param = v;
-    float s = lumaOf(param);
-    float tmp998;
+    float3 vArg8 = v;
+    float s = lumaOf(vArg8);
+    float logScaleRet;
     if (s <= 9.9999999392252902907785028219223e-09f)
     {
-        tmp998 = 1.0f;
+        logScaleRet = 1.0f;
     }
     else
     {
-        tmp998 = max(exp2(max(target, 0.0f)) - 1.0f, 0.0f) / s;
+        logScaleRet = max(exp2(max(target, 0.0f)) - 1.0f, 0.0f) / s;
     }
-    return tmp998;
+    return logScaleRet;
 }
 
 float4 robustBlur(int2 wp)
 {
     float4 c0 = src.Load(int3(wp, 0));
-    int2 param = wp;
-    float4 gd = guideAt(param);
+    int2 wArg7 = wp;
+    float4 gd = guideAt(wArg7);
     if (gd.w <= 0.0f)
     {
         return c0;
     }
-    float2 param_1 = (float2(int2(((float2(wp) + 0.5f.xx) / float2(workSize)) * float2(fullSize))) + 0.5f.xx) / float2(fullSize);
-    float param_2 = gd.w;
-    float3 P = viewPos(param_1, param_2);
+    float2 uvArg7 = (float2(int2(((float2(wp) + 0.5f.xx) / float2(workSize)) * float2(fullSize))) + 0.5f.xx) / float2(fullSize);
+    float zArg7 = gd.w;
+    float3 P = viewPos(uvArg7, zArg7);
     float3 N = gd.xyz;
     float4 ts = tstate.Load(int3(wp, 0));
     float conf = clamp(ts.z, 0.0f, 1.0f);
@@ -866,6 +888,7 @@ float4 robustBlur(int2 wp)
     float need = max(1.0f - conf, clamp(sqrt(tvar) * 2.0f, 0.0f, 1.0f));
     float rad = robustRadius * lerp(0.85000002384185791015625f, 2.0f, need);
     float worldR = ((rad * gd.w) * 2.0f) / (proj.x * float(workSize.x));
+    // FO4CS GetBasis (branchless orthonormal basis)
     float sz = (N.z >= 0.0f) ? 1.0f : (-1.0f);
     float a = 1.0f / (sz + N.z);
     float ya = N.y * a;
@@ -875,59 +898,59 @@ float4 robustBlur(int2 wp)
     float3 B = float3(b, (N.y * ya) - sz, N.y) * worldR;
     float tol = max(0.25f * worldR, 0.5f);
     float halfAngle = lerp(1.57079637050628662109375f, 0.785398185253143310546875f, sqrt(conf));
-    float3 param_3 = c0.xyz;
-    float cl = logLuma(param_3);
+    float3 vArg17 = c0.xyz;
+    float cl = logLuma(vArg17);
     float refL = lerp(cl, max(ts.x, 0.0f), conf);
     float loc = cl;
     int2 wm = workSize - int2(1, 1);
-    float3 param_4 = src.Load(int3(clamp(wp + int2(1, 0), int2(0, 0), wm), 0)).xyz;
-    loc += logLuma(param_4);
-    float3 param_5 = src.Load(int3(clamp(wp + int2(-1, 0), int2(0, 0), wm), 0)).xyz;
-    loc += logLuma(param_5);
-    float3 param_6 = src.Load(int3(clamp(wp + int2(0, 1), int2(0, 0), wm), 0)).xyz;
-    loc += logLuma(param_6);
-    float3 param_7 = src.Load(int3(clamp(wp + int2(0, -1), int2(0, 0), wm), 0)).xyz;
-    loc += logLuma(param_7);
+    float3 vArg16 = src.Load(int3(clamp(wp + int2(1, 0), int2(0, 0), wm), 0)).xyz;
+    loc += logLuma(vArg16);
+    float3 vArg15 = src.Load(int3(clamp(wp + int2(-1, 0), int2(0, 0), wm), 0)).xyz;
+    loc += logLuma(vArg15);
+    float3 vArg14 = src.Load(int3(clamp(wp + int2(0, 1), int2(0, 0), wm), 0)).xyz;
+    loc += logLuma(vArg14);
+    float3 vArg13 = src.Load(int3(clamp(wp + int2(0, -1), int2(0, 0), wm), 0)).xyz;
+    loc += logLuma(vArg13);
     loc *= 0.20000000298023223876953125f;
     float spanScale = clamp(max(max(refL, cl), loc), 0.0f, 1.0f);
     float spanEps = 9.9999997473787516355514526367188e-05f * spanScale;
     float tSigma = sqrt(tvar + spanEps);
-    float tmp1477;
+    float prePick;
     if (emissivePass)
     {
-        tmp1477 = max(6.0f * tSigma, 1.25f * spanScale);
+        prePick = max(6.0f * tSigma, 1.25f * spanScale);
     }
     else
     {
-        tmp1477 = max(4.0f * tSigma, 0.75f * spanScale);
+        prePick = max(4.0f * tSigma, 0.75f * spanScale);
     }
-    float pre = tmp1477;
+    float pre = prePick;
     float ls = cl;
     float ls2 = cl * cl;
     float lw = 1.0f;
     int nTaps = clamp(robustTaps, 1, 16);
     float ws[16];
     int2 qs[16];
-    int2 param_15;
+    int2 qArg;
     for (int i = 0; i < nTaps; i++)
     {
-        int param_8 = i;
-        float3 param_9 = P;
-        float3 param_10 = N;
-        float3 param_11 = T;
-        float3 param_12 = B;
-        float param_13 = halfAngle;
-        float param_14 = tol;
-        float tmp1539 = tapWeight(param_8, param_9, param_10, param_11, param_12, param_13, param_14, param_15);
-        qs[i] = param_15;
-        ws[i] = tmp1539;
+        int tapArg = i;
+        float3 PArg4 = P;
+        float3 NArg = N;
+        float3 TArg = T;
+        float3 BArg = B;
+        float halfAngleArg = halfAngle;
+        float tolArg = tol;
+        float tapWeightRet = tapWeight(tapArg, PArg4, NArg, TArg, BArg, halfAngleArg, tolArg, qArg);
+        qs[i] = qArg;
+        ws[i] = tapWeightRet;
         if (ws[i] <= 9.9999997473787516355514526367188e-05f)
         {
             continue;
         }
         float rel = lerp(0.5f, 1.0f, clamp(tstate.Load(int3(qs[i], 0)).z, 0.0f, 1.0f));
-        float3 param_16 = src.Load(int3(qs[i], 0)).xyz;
-        float l = clamp(logLuma(param_16), max(refL - pre, 0.0f), refL + pre);
+        float3 vArg12 = src.Load(int3(qs[i], 0)).xyz;
+        float l = clamp(logLuma(vArg12), max(refL - pre, 0.0f), refL + pre);
         float w = ws[i] * rel;
         ls += (l * w);
         ls2 += ((l * l) * w);
@@ -937,22 +960,22 @@ float4 robustBlur(int2 wp)
     float lv = max((ls2 / lw) - (lm * lm), 0.0f);
     float rSigma = sqrt(max(lv, tvar) + spanEps);
     float rScale = clamp(max(lm, spanScale), 0.0f, 1.0f);
-    float tmp1628;
+    float spanPick;
     if (emissivePass)
     {
-        tmp1628 = max(4.0f * rSigma, 0.64999997615814208984375f * rScale);
+        spanPick = max(4.0f * rSigma, 0.64999997615814208984375f * rScale);
     }
     else
     {
-        tmp1628 = max(2.5f * rSigma, 0.300000011920928955078125f * rScale);
+        spanPick = max(2.5f * rSigma, 0.300000011920928955078125f * rScale);
     }
-    float span = tmp1628;
+    float span = spanPick;
     float lo = max(lm - span, 0.0f);
     float hi = lm + span;
     float cRel = lerp(0.3499999940395355224609375f, 1.0f, conf) / (1.0f + (2.0f * sqrt(tvar + 9.9999997473787516355514526367188e-05f)));
-    float3 param_17 = c0.xyz;
-    float param_18 = clamp(cl, lo, hi);
-    float3 sum = c0.xyz * (logScale(param_17, param_18) * cRel);
+    float3 vArg11 = c0.xyz;
+    float targetArg2 = clamp(cl, lo, hi);
+    float3 sum = c0.xyz * (logScale(vArg11, targetArg2) * cRel);
     float sumA = c0.w * cRel;
     float wsum = cRel;
     for (int i_1 = 0; i_1 < nTaps; i_1++)
@@ -964,12 +987,13 @@ float4 robustBlur(int2 wp)
         float4 cq = src.Load(int3(qs[i_1], 0));
         float4 sq = tstate.Load(int3(qs[i_1], 0));
         float rel_1 = lerp(0.3499999940395355224609375f, 1.0f, clamp(sq.z, 0.0f, 1.0f)) / (1.0f + (2.0f * sqrt(max(sq.y - (sq.x * sq.x), 0.0f) + 9.9999997473787516355514526367188e-05f)));
-        float3 param_19 = cq.xyz;
-        float l_1 = logLuma(param_19);
+        float3 vArg10 = cq.xyz;
+        float l_1 = logLuma(vArg10);
         float w_1 = ws[i_1] * rel_1;
-        float3 param_20 = cq.xyz;
-        float param_21 = clamp(l_1, lo, hi);
-        sum += (cq.xyz * (logScale(param_20, param_21) * w_1));
+        float3 vArg9 = cq.xyz;
+        float targetArg = clamp(l_1, lo, hi);
+        sum += (cq.xyz * (logScale(vArg9, targetArg) * w_1));
+        // the open share rides the same guide weights, unclamped (SSGI1's blur smoothed it too)
         sumA += (cq.w * w_1);
         wsum += w_1;
     }
@@ -991,11 +1015,11 @@ void quarterDown(int2 qp)
     for (int i = 0; i < 4; i++)
     {
         px[i] = clamp(o + int2(i & 1, i >> 1), int2(0, 0), workSize - int2(1, 1));
-        int2 param = px[i];
-        gd[i] = guideAt(param);
-        float param_1 = gd[i].w;
-        float param_2 = gd[ref].w;
-        if (depthMetric(param_1) < depthMetric(param_2))
+        int2 wArg8 = px[i];
+        gd[i] = guideAt(wArg8);
+        float zArg9 = gd[i].w;
+        float zArg8 = gd[ref].w;
+        if (depthMetric(zArg9) < depthMetric(zArg8))
         {
             ref = i;
         }
@@ -1066,8 +1090,8 @@ float4 quarterFilter(int2 qp)
 float4 quarterReconstruct(int2 wp)
 {
     float4 rb = src.Load(int3(wp, 0));
-    int2 param = wp;
-    float4 gd = guideAt(param);
+    int2 wArg9 = wp;
+    float4 gd = guideAt(wArg9);
     if (gd.w <= 0.0f)
     {
         return rb;
@@ -1078,9 +1102,9 @@ float4 quarterReconstruct(int2 wp)
     float3 raw = 0.0f.xxx;
     float3 filt = 0.0f.xxx;
     float ws = 0.0f;
-    float tmp2181;
-    float tmp2193;
-    float tmp2208;
+    float blPick2;
+    float blPick;
+    float wdPick;
     for (int y = 0; y <= 1; y++)
     {
         for (int x = 0; x <= 1; x++)
@@ -1089,30 +1113,30 @@ float4 quarterReconstruct(int2 wp)
             float4 s = qguide.Load(int3(q, 0));
             if (x == 0)
             {
-                tmp2181 = 1.0f - fr.x;
+                blPick2 = 1.0f - fr.x;
             }
             else
             {
-                tmp2181 = fr.x;
+                blPick2 = fr.x;
             }
             if (y == 0)
             {
-                tmp2193 = 1.0f - fr.y;
+                blPick = 1.0f - fr.y;
             }
             else
             {
-                tmp2193 = fr.y;
+                blPick = fr.y;
             }
-            float bl = tmp2181 * tmp2193;
+            float bl = blPick2 * blPick;
             if (s.w > 0.0f)
             {
-                tmp2208 = clamp(1.0f - (abs(s.w - gd.w) / max(0.0599999986588954925537109375f * gd.w, 0.100000001490116119384765625f)), 0.0f, 1.0f);
+                wdPick = clamp(1.0f - (abs(s.w - gd.w) / max(0.0599999986588954925537109375f * gd.w, 0.100000001490116119384765625f)), 0.0f, 1.0f);
             }
             else
             {
-                tmp2208 = 0.0f;
+                wdPick = 0.0f;
             }
-            float wd = tmp2208;
+            float wd = wdPick;
             float wn = pow(clamp((dot(gd.xyz, s.xyz) - 0.25f) / 0.75f, 0.0f, 1.0f), 3.0f);
             float w = (bl * wd) * wn;
             raw += (qraw.Load(int3(q, 0)).xyz * w);
@@ -1134,16 +1158,16 @@ float4 quarterReconstruct(int2 wp)
     float4 ts = tstate.Load(int3(wp, 0));
     float var = max(ts.y - (ts.x * ts.x), 0.0f);
     float relRes = dot(abs(rb.xyz - raw), float3(0.2125999927520751953125f, 0.715200006961822509765625f, 0.072200000286102294921875f)) / max(dot(max(filt, 0.0f.xxx), float3(0.2125999927520751953125f, 0.715200006961822509765625f, 0.072200000286102294921875f)), 9.9999997473787516355514526367188e-06f);
-    float tmp2328;
+    float keepPick;
     if (emissivePass)
     {
-        tmp2328 = (lerp(0.07999999821186065673828125f, 0.3499999940395355224609375f, clamp(ts.z, 0.0f, 1.0f)) / (1.0f + (relRes * 1.25f))) / (1.0f + (sqrt(var) * 4.0f));
+        keepPick = (lerp(0.07999999821186065673828125f, 0.3499999940395355224609375f, clamp(ts.z, 0.0f, 1.0f)) / (1.0f + (relRes * 1.25f))) / (1.0f + (sqrt(var) * 4.0f));
     }
     else
     {
-        tmp2328 = (lerp(0.039999999105930328369140625f, 0.23999999463558197021484375f, clamp(ts.z, 0.0f, 1.0f)) / (1.0f + (relRes * 2.0f))) / (1.0f + (sqrt(var) * 6.0f));
+        keepPick = (lerp(0.039999999105930328369140625f, 0.23999999463558197021484375f, clamp(ts.z, 0.0f, 1.0f)) / (1.0f + (relRes * 2.0f))) / (1.0f + (sqrt(var) * 6.0f));
     }
-    float keep = tmp2328;
+    float keep = keepPick;
     return float4(max(filt + ((rb.xyz - raw) * keep), 0.0f.xxx), rb.w);
 }
 
@@ -1151,44 +1175,44 @@ float4 quarterReconstruct(int2 wp)
 // row/column of an odd-sized finer level, 2i+2 as well, so every finer texel lies in the cell the cast looks up
 float2 hizReduce(int2 p, bool fromGbuf)
 {
-    int2 tmp2380;
+    int2 fsPick;
     if (fromGbuf)
     {
-        tmp2380 = fullSize;
+        fsPick = fullSize;
     }
     else
     {
-        tmp2380 = int2(spvTextureSize(hiz, uint(0), dummy_parameter));
+        fsPick = int2(spvTextureSize(hiz, uint(0), dummy_parameter));
     }
-    int2 fs = tmp2380;
+    int2 fs = fsPick;
     int2 os = max((fs / int2(2, 2)), int2(1, 1));
-    int2 tmp2400 = os - int2(1, 1);
-    int2 tmp2406 = os * int2(2, 2);
-    int2 n = int2(2, 2) + (int2(bool2(p.x == tmp2400.x, p.y == tmp2400.y)) * int2(bool2(fs.x > tmp2406.x, fs.y > tmp2406.y)));
+    int2 nPart2 = os - int2(1, 1);
+    int2 nPart = os * int2(2, 2);
+    int2 n = int2(2, 2) + (int2(bool2(p.x == nPart2.x, p.y == nPart2.y)) * int2(bool2(fs.x > nPart.x, fs.y > nPart.y)));
     float2 r = float2(1000000015047466219876688855040.0f, 0.0f);
     for (int y = 0; y < 3; y++)
     {
         for (int x = 0; x < 3; x++)
         {
-            bool tmp2433 = x >= n.x;
-            bool tmp2441;
-            if (!tmp2433)
+            bool cond16 = x >= n.x;
+            bool cond15;
+            if (!cond16)
             {
-                tmp2441 = y >= n.y;
+                cond15 = y >= n.y;
             }
             else
             {
-                tmp2441 = tmp2433;
+                cond15 = cond16;
             }
-            if (tmp2441)
+            if (cond15)
             {
                 continue;
             }
             int2 q = min(((p * int2(2, 2)) + int2(x, y)), (fs - int2(1, 1)));
             if (fromGbuf)
             {
-                int2 param = q;
-                float z = gAt(param).w;
+                int2 fullTexelArg6 = q;
+                float z = gAt(fullTexelArg6).w;
                 if (z > 0.0f)
                 {
                     r = float2(min(r.x, z), max(r.y, z));
@@ -1219,63 +1243,63 @@ void frag_main()
     fragState = 0.0f.xxxx;
     bool wwh5 = (ssgiStage == 1);
     bool wwh6 = (ssgiStage == 8);
-    if (wwh5 || wwh6)
+    if (or(wwh5, wwh6))   // HLSLFIX2 orfix.py: no short-circuit branch (NV took the wrong side)
     {
-        float4 tmp3632;
+        float4 fragColorPick;
         if (ssgiStage == 1)
         {
-            int2 param = wp;
-            tmp3632 = cast(param);
+            int2 wpArg4 = wp;
+            fragColorPick = cast(wpArg4);
         }
         else
         {
-            int2 param_1 = wp;
-            tmp3632 = castEmissive(param_1);
+            int2 wpArg3 = wp;
+            fragColorPick = castEmissive(wpArg3);
         }
-        fragColor = tmp3632;
+        fragColor = fragColorPick;
         return;
     }
     if (ssgiStage >= 4)
     {
         if (ssgiStage == 4)
         {
-            int2 param_2 = wp;
-            fragColor = robustBlur(param_2);
+            int2 wpArg2 = wp;
+            fragColor = robustBlur(wpArg2);
         }
         else
         {
             if (ssgiStage == 5)
             {
-                int2 param_3 = wp;
-                quarterDown(param_3);
+                int2 qpArg2 = wp;
+                quarterDown(qpArg2);
             }
             else
             {
                 if (ssgiStage == 6)
                 {
-                    int2 param_4 = wp;
-                    fragColor = quarterFilter(param_4);
+                    int2 qpArg = wp;
+                    fragColor = quarterFilter(qpArg);
                 }
                 else
                 {
                     if (ssgiStage == 7)
                     {
-                        int2 param_5 = wp;
-                        fragColor = quarterReconstruct(param_5);
+                        int2 wpArg = wp;
+                        fragColor = quarterReconstruct(wpArg);
                         if (emitAdd)
                         {
-                            float4 tmp3692 = fragColor;
-                            float3 tmp3694 = tmp3692.xyz + emitFin.Load(int3(wp, 0)).xyz;
-                            fragColor.x = tmp3694.x;
-                            fragColor.y = tmp3694.y;
-                            fragColor.z = tmp3694.z;
+                            float4 fragColorPart2 = fragColor;
+                            float3 fragColorPart = fragColorPart2.xyz + emitFin.Load(int3(wp, 0)).xyz;
+                            fragColor.x = fragColorPart.x;
+                            fragColor.y = fragColorPart.y;
+                            fragColor.z = fragColorPart.z;
                         }
                     }
                     else
                     {
-                        int2 param_6 = wp;
-                        bool param_7 = ssgiStage == 10;
-                        fragColor = float4(hizReduce(param_6, param_7), 0.0f, 1.0f);
+                        int2 pArg10 = wp;
+                        bool fromGbufArg = ssgiStage == 10;
+                        fragColor = float4(hizReduce(pArg10, fromGbufArg), 0.0f, 1.0f);
                     }
                 }
             }
@@ -1284,8 +1308,8 @@ void frag_main()
     }
     float2 uv = (float2(wp) + 0.5f.xx) / float2(workSize);
     int2 ft = int2(uv * float2(fullSize));
-    int2 param_8 = ft;
-    float4 g = gAt(param_8);
+    int2 fullTexelArg8 = ft;
+    float4 g = gAt(fullTexelArg8);
     if (ssgiStage == 2)
     {
         float4 now = src.Load(int3(wp, 0));
@@ -1293,83 +1317,84 @@ void frag_main()
         float4 outc = now;
         float4 ps = 0.0f.xxxx;
         bool accepted = false;
-        bool tmp3753;
+        bool cond23;
         if (historyValid)
         {
-            tmp3753 = g.w > 0.0f;
+            cond23 = g.w > 0.0f;
         }
         else
         {
-            tmp3753 = historyValid;
+            cond23 = historyValid;
         }
-        if (tmp3753)
+        if (cond23)
         {
-            float2 param_9 = (float2(ft) + 0.5f.xx) / float2(fullSize);
-            float param_10 = g.w;
-            float3 P = viewPos(param_9, param_10);
+            float2 uvArg9 = (float2(ft) + 0.5f.xx) / float2(fullSize);
+            float zArg11 = g.w;
+            float3 P = viewPos(uvArg9, zArg11);
             float3 Pp = mul(P, curToPrev) + curToPrevT;
-            float3 param_11 = Pp;
-            float2 puv = viewToUv(param_11);
-            bool tmp3786 = all(bool2(puv.x >= 0.0f.xx.x, puv.y >= 0.0f.xx.y));
-            bool tmp3792;
-            if (tmp3786)
+            float3 pArg9 = Pp;
+            float2 puv = viewToUv(pArg9);
+            bool cond22 = all(bool2(puv.x >= 0.0f.xx.x, puv.y >= 0.0f.xx.y));
+            bool cond21;
+            if (cond22)
             {
-                tmp3792 = all(bool2(puv.x < 1.0f.xx.x, puv.y < 1.0f.xx.y));
+                cond21 = all(bool2(puv.x < 1.0f.xx.x, puv.y < 1.0f.xx.y));
             }
             else
             {
-                tmp3792 = tmp3786;
+                cond21 = cond22;
             }
-            if (tmp3792)
+            if (cond21)
             {
                 int2 pt = int2(puv * float2(workSize));
+                // depth, n, normal xy (z toward the eye)
                 float4 m = histMeta.Load(int3(pt, 0));
                 float3 pn = float3(m.zw, sqrt(max(1.0f - dot(m.zw, m.zw), 0.0f)));
                 float nz = -Pp.z;
-                bool tmp3828 = m.x > 0.0f;
-                bool tmp3839;
-                if (tmp3828)
+                bool cond20 = m.x > 0.0f;
+                bool sameZPick;
+                if (cond20)
                 {
-                    tmp3839 = abs(m.x - nz) <= (0.0500000007450580596923828125f * nz);
+                    sameZPick = abs(m.x - nz) <= (0.0500000007450580596923828125f * nz);
                 }
                 else
                 {
-                    tmp3839 = tmp3828;
+                    sameZPick = cond20;
                 }
-                bool sameZ = tmp3839;
-                float3 param_12 = normalize(g.xyz);
-                float3 param_13 = P;
-                float3 nNow = normalize(mul(faceN(param_12, param_13), curToPrev));
+                bool sameZ = sameZPick;
+                float3 nArg5 = normalize(g.xyz);
+                float3 PArg6 = P;
+                float3 nNow = normalize(mul(faceN(nArg5, PArg6), curToPrev));
                 bool sameN = dot(pn, nNow) > 0.800000011920928955078125f;
                 if (sameZ && sameN)
                 {
                     float4 h = hist.Load(int3(pt, 0));
-                    float tmp3873;
+                    float nPick;
                     if (moving)
                     {
-                        tmp3873 = min(maxAccum, motionAccum);
+                        nPick = min(maxAccum, motionAccum);
                     }
                     else
                     {
-                        tmp3873 = maxAccum;
+                        nPick = maxAccum;
                     }
-                    n = min(m.y + 1.0f, tmp3873);
+                    n = min(m.y + 1.0f, nPick);
                     float w = max(1.0f / n, 1.0f - historyBlend);
                     outc = lerp(h, now, w.xxxx);
                     if (wantState)
                     {
                         ps = tstate.Load(int3(pt, 0));
-                        bool tmp3907 = ps.w >= 1.0f;
-                        bool tmp3913;
-                        if (tmp3907)
+                        bool cond19 = ps.w >= 1.0f;
+                        bool acceptedPick;
+                        if (cond19)
                         {
-                            tmp3913 = ps.z > 9.9999997473787516355514526367188e-05f;
+                            acceptedPick = ps.z > 9.9999997473787516355514526367188e-05f;
                         }
                         else
                         {
-                            tmp3913 = tmp3907;
+                            acceptedPick = cond19;
                         }
-                        accepted = tmp3913;
+                        accepted = acceptedPick;
                     }
                 }
             }
@@ -1377,104 +1402,107 @@ void frag_main()
         fragColor = outc;
         if (wantState)
         {
-            float3 param_14 = now.xyz;
-            float l = logLuma(param_14);
-            float tmp3925;
+            float3 vArg18 = now.xyz;
+            // FO4CS's temporal moments of the raw cast's log-luma: age cap 16, confidence grows with maturity
+            float l = logLuma(vArg18);
+            float agePick;
             if (accepted)
             {
-                tmp3925 = min(ps.w + 1.0f, 16.0f);
+                agePick = min(ps.w + 1.0f, 16.0f);
             }
             else
             {
-                tmp3925 = 1.0f;
+                agePick = 1.0f;
             }
-            float age = tmp3925;
+            float age = agePick;
             float rw = 1.0f / age;
-            float tmp3939;
+            float confPick;
             if (accepted)
             {
-                tmp3939 = clamp(lerp(ps.z, 1.0f, 0.1500000059604644775390625f + (0.100000001490116119384765625f * clamp((age - 1.0f) / 15.0f, 0.0f, 1.0f))), 0.0f, 1.0f);
+                confPick = clamp(lerp(ps.z, 1.0f, 0.1500000059604644775390625f + (0.100000001490116119384765625f * clamp((age - 1.0f) / 15.0f, 0.0f, 1.0f))), 0.0f, 1.0f);
             }
             else
             {
-                tmp3939 = 0.25f;
+                confPick = 0.25f;
             }
-            float conf = tmp3939;
-            float4 tmp3959;
+            float conf = confPick;
+            float4 fragStatePick;
             if (g.w > 0.0f)
             {
-                float tmp3963;
+                float fragStatePick3;
                 if (accepted)
                 {
-                    tmp3963 = lerp(ps.x, l, rw);
+                    fragStatePick3 = lerp(ps.x, l, rw);
                 }
                 else
                 {
-                    tmp3963 = l;
+                    fragStatePick3 = l;
                 }
-                float tmp3975;
+                float fragStatePick2;
                 if (accepted)
                 {
-                    tmp3975 = lerp(ps.y, l * l, rw);
+                    fragStatePick2 = lerp(ps.y, l * l, rw);
                 }
                 else
                 {
-                    tmp3975 = l * l;
+                    fragStatePick2 = l * l;
                 }
-                tmp3959 = float4(tmp3963, tmp3975, conf, age);
+                fragStatePick = float4(fragStatePick3, fragStatePick2, conf, age);
             }
             else
             {
-                tmp3959 = 0.0f.xxxx;
+                fragStatePick = 0.0f.xxxx;
             }
-            fragState = tmp3959;
+            fragState = fragStatePick;
         }
-        float3 tmp3999;
+        float3 nmPick;
         if (g.w > 0.0f)
         {
-            float2 param_15 = (float2(ft) + 0.5f.xx) / float2(fullSize);
-            float param_16 = g.w;
-            float3 param_17 = normalize(g.xyz);
-            float3 param_18 = viewPos(param_15, param_16);
-            tmp3999 = faceN(param_17, param_18);
+            float2 uvArg8 = (float2(ft) + 0.5f.xx) / float2(fullSize);
+            float zArg10 = g.w;
+            float3 nArg4 = normalize(g.xyz);
+            float3 PArg5 = viewPos(uvArg8, zArg10);
+            nmPick = faceN(nArg4, PArg5);
         }
         else
         {
-            tmp3999 = float3(0.0f, 0.0f, 1.0f);
+            nmPick = float3(0.0f, 0.0f, 1.0f);
         }
-        float3 nm = tmp3999;
-        float tmp4026;
+        float3 nm = nmPick;
+        float fragMetaPick;
         if (g.w > 0.0f)
         {
-            tmp4026 = g.w;
+            fragMetaPick = g.w;
         }
         else
         {
-            tmp4026 = 0.0f;
+            fragMetaPick = 0.0f;
         }
-        fragMeta = float4(tmp4026, n, nm.xy);
+        fragMeta = float4(fragMetaPick, n, nm.xy);
         return;
     }
+    // stage 3: the denoise
     float4 c0 = src.Load(int3(wp, 0));
-    float3 tmp4047;
+    float3 eAddPick;
     if (emitAdd)
     {
-        tmp4047 = emitFin.Load(int3(wp, 0)).xyz;
+        eAddPick = emitFin.Load(int3(wp, 0)).xyz;
     }
     else
     {
-        tmp4047 = 0.0f.xxx;
+        eAddPick = 0.0f.xxx;
     }
-    float3 eAdd = tmp4047;
+    float3 eAdd = eAddPick;
     bool wwh7 = (g.w <= 0.0f);
     bool wwh8 = (blurRadius <= 0.0f);
-    if (wwh7 || wwh8)
+    if (or(wwh7, wwh8))   // HLSLFIX2 orfix.py: no short-circuit branch (NV took the wrong side)
     {
         fragColor = c0 + float4(eAdd, 0.0f);
         return;
     }
     float3 n0 = normalize(g.xyz);
     float stepPx = max(blurRadius * 0.5f, 1.0f);
+    // FO4CS's firefly suppression: every tap's log-luma is held to the footprint's mean +- max(2.5 sigma, 0.3)
     float lm = 0.0f;
     float lv = 0.0f;
     for (int y = -2; y <= 2; y++)
@@ -1489,10 +1517,10 @@ void frag_main()
     }
     lm /= 25.0f;
     float span = max(2.5f * sqrt(max((lv / 25.0f) - (lm * lm), 0.0f)), 0.300000011920928955078125f);
-    float3 param_19 = c0.xyz;
-    float param_20 = lm;
-    float param_21 = span;
-    float4 sum = float4(ffClamp(param_19, param_20, param_21), c0.w);
+    float3 cArg2 = c0.xyz;
+    float meanArg2 = lm;
+    float spanArg2 = span;
+    float4 sum = float4(ffClamp(cArg2, meanArg2, spanArg2), c0.w);
     float ws = 1.0f;
     for (int y_1 = -2; y_1 <= 2; y_1++)
     {
@@ -1503,22 +1531,22 @@ void frag_main()
                 continue;
             }
             int2 q_1 = wp + int2(float2(float(x_1), float(y_1)) * stepPx);
-            bool tmp4203 = any(bool2(q_1.x < int2(0, 0).x, q_1.y < int2(0, 0).y));
-            bool tmp4211;
-            if (!tmp4203)
+            bool cond18 = any(bool2(q_1.x < int2(0, 0).x, q_1.y < int2(0, 0).y));
+            bool cond17;
+            if (!cond18)
             {
-                tmp4211 = any(bool2(q_1.x >= workSize.x, q_1.y >= workSize.y));
+                cond17 = any(bool2(q_1.x >= workSize.x, q_1.y >= workSize.y));
             }
             else
             {
-                tmp4211 = tmp4203;
+                cond17 = cond18;
             }
-            if (tmp4211)
+            if (cond17)
             {
                 continue;
             }
-            int2 param_22 = int2(((float2(q_1) + 0.5f.xx) / float2(workSize)) * float2(fullSize));
-            float4 gq = gAt(param_22);
+            int2 fullTexelArg7 = int2(((float2(q_1) + 0.5f.xx) / float2(workSize)) * float2(fullSize));
+            float4 gq = gAt(fullTexelArg7);
             if (gq.w <= 0.0f)
             {
                 continue;
@@ -1528,10 +1556,10 @@ void frag_main()
             float wd = exp((-float((x_1 * x_1) + (y_1 * y_1))) / 4.5f);
             float w_1 = (wz * wn) * wd;
             float4 cq = src.Load(int3(q_1, 0));
-            float3 param_23 = cq.xyz;
-            float param_24 = lm;
-            float param_25 = span;
-            sum += (float4(ffClamp(param_23, param_24, param_25), cq.w) * w_1);
+            float3 cArg = cq.xyz;
+            float meanArg = lm;
+            float spanArg = span;
+            sum += (float4(ffClamp(cArg, meanArg, spanArg), cq.w) * w_1);
             ws += w_1;
         }
     }

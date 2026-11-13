@@ -275,38 +275,40 @@ uint3 spvTextureSize(Texture3D<float4> Tex, uint Level, out uint Param)
 
 float3 dalcAmbient(float3 n)
 {
+    // the axis name is the light's TRAVEL direction (assumption, owed to Todd's treat):
+    // an up-facing normal takes the Z- colour
     float3 n2 = n * n;
     bool fx = dalcFlip;
-    float3 tmp5739;
+    float3 xPick;
     if ((n.x > 0.0f) != fx)
     {
-        tmp5739 = dalc[1];
+        xPick = dalc[1];
     }
     else
     {
-        tmp5739 = dalc[0];
+        xPick = dalc[0];
     }
-    float3 x = tmp5739;
-    float3 tmp5758;
+    float3 x = xPick;
+    float3 yPick;
     if ((n.y > 0.0f) != fx)
     {
-        tmp5758 = dalc[3];
+        yPick = dalc[3];
     }
     else
     {
-        tmp5758 = dalc[2];
+        yPick = dalc[2];
     }
-    float3 y = tmp5758;
-    float3 tmp5773;
+    float3 y = yPick;
+    float3 zPick;
     if ((n.z > 0.0f) != fx)
     {
-        tmp5773 = dalc[5];
+        zPick = dalc[5];
     }
     else
     {
-        tmp5773 = dalc[4];
+        zPick = dalc[4];
     }
-    float3 z = tmp5773;
+    float3 z = zPick;
     return ((x * n2.x) + (y * n2.y)) + (z * n2.z);
 }
 
@@ -506,38 +508,42 @@ void frag_main()
     float3 base = 0.180000007152557373046875f.xxx;
     if (hasBaseMap)
     {
-        float3 param = BaseMap.Sample(_BaseMap_sampler, uv).xyz;
-        base = srgbToLinear(param);
+        float3 cArg2 = BaseMap.Sample(_BaseMap_sampler, uv).xyz;
+        base = srgbToLinear(cArg2);
     }
     float3 n = float3(0.0f, 0.0f, 1.0f);
     if (hasNormalMap)
     {
         float2 g = (NormalMap.Sample(_NormalMap_sampler, uv).xy * 2.0f) - 1.0f.xx;
+        // DirectX-style green (+G = image down = world -Y here)
         n = normalize(float3(g.x, -g.y, sqrt(max(1.0f - dot(g, g), 0.0f))));
     }
     float NdotL = max(dot(n, sunDirWorld), 0.0f);
-    float3 param_1 = n;
-    float3 color = ((base * sunLinear) * NdotL) + (base * dalcAmbient(param_1));
+    float3 nArg = n;
+    float3 color = ((base * sunLinear) * NdotL) + (base * dalcAmbient(nArg));
+    // each placed light: its colour x radial curve x cone x shadow cube (cellLightE), x N.L, on the ground's albedo
     if (cellOn)
     {
-        float3 param_5;
-        bool param_6;
+        float3 LArg;
+        bool noSpecArg;
         for (int i = 0; i < cellLightCount; i++)
         {
-            int param_2 = i;
-            float3 param_3 = worldPos;
-            float3 param_4 = n;
-            float3 tmp5897 = cellLightE(param_2, param_3, param_4, param_5, param_6);
-            float3 Ld = param_5;
-            bool noSpec = param_6;
-            float3 E = tmp5897;
+            int iArg = i;
+            float3 PArg = worldPos;
+            float3 NArg = n;
+            float3 cellLightERet = cellLightE(iArg, PArg, NArg, LArg, noSpecArg);
+            float3 Ld = LArg;
+            bool noSpec = noSpecArg;
+            float3 E = cellLightERet;
             color += ((base * E) * max(dot(n, Ld), 0.0f));
         }
     }
-    float3 param_7 = color;
-    float3 param_8 = viewPos;
-    float3 tmp5917 = wwFog(param_7, param_8);
-    color = tmp5917;
+    float3 preFogArg = color;
+    float3 posViewArg2 = viewPos;
+    float3 wwFogRet = wwFog(preFogArg, posViewArg2);
+    // lane FOG1: linear, before the exposure
+    color = wwFogRet;
+    // lane LIGHTBOOTH1: inside the cell's HDR frame, linear light like the cell's own programs (tone-mapped once)
     if (cellOn && cellIsLinear)
     {
         fragColor = float4(max(color, 0.0f.xxx), 1.0f);
@@ -547,18 +553,18 @@ void frag_main()
     {
         color = lerp(0.0f.xxx, color, groundLeak.xxx);
     }
-    float3 param_9 = color;
-    float3 tmp5944 = studioOutput(param_9);
-    fragColor = float4(tmp5944, 1.0f);
+    float3 cArg = color;
+    float3 studioOutputRet = studioOutput(cArg);
+    fragColor = float4(studioOutputRet, 1.0f);
     if (groundLeak >= 0.0f)
     {
         fragColor.w = groundLeak;
     }
-    float3 param_10 = viewPos;
-    float3 param_11;
-    bool tmp5960 = wwFogProbe(param_10, param_11);
-    float3 probe = param_11;
-    if (tmp5960)
+    float3 posViewArg = viewPos;
+    float3 oArg;
+    bool wwFogProbeRet = wwFogProbe(posViewArg, oArg);
+    float3 probe = oArg;
+    if (wwFogProbeRet)
     {
         fragColor = float4(probe, 1.0f);
     }

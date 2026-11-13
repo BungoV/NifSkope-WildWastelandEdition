@@ -255,29 +255,35 @@ void frag_main()
     cellGiPath = 0;
     cellFarIters = 0;
     float4 x = hdrSrc.Load(int2(gl_FragCoord.xy), gl_SampleID);
+    // lane SKYHOLE1: the passes sort the pixels by depth too (the far plane = no opaque draw reached them)
     gl_FragDepth = 1.0f;
+    // and blue pushed by the glare's dispersion, times the bloom weight. cellImageSpace adds it before its curve.
     float3 foBloom = 0.0f.xxx;
     if (cellIsFoBloomOn)
     {
-        float2 param = (floor(gl_FragCoord.xy) + 0.5f.xx) / cellIsFoBloomFrame;
-        float param_1 = cellIsFoBloomParams.x;
-        float param_2 = cellIsFoBloomParams.z;
-        foBloom = bloomTentDispersed(cellIsFoBloom, _cellIsFoBloom_sampler, param, param_1, param_2) * cellIsFoBloomParams.y;
+        float2 uvArg = (floor(gl_FragCoord.xy) + 0.5f.xx) / cellIsFoBloomFrame;
+        float radiusPixelsArg = cellIsFoBloomParams.x;
+        float dispersionArg = cellIsFoBloomParams.z;
+        foBloom = bloomTentDispersed(cellIsFoBloom, _cellIsFoBloom_sampler, uvArg, radiusPixelsArg, dispersionArg) * cellIsFoBloomParams.y;
     }
     if (hdrMode == 3)
     {
         cellFoBloomHere = foBloom;
-        float3 param_3 = 0.0f.xxx;
-        float3 lit = cellImageSpace(param_3);
+        float3 sqrtColorArg6 = 0.0f.xxx;
+        float3 lit = cellImageSpace(sqrtColorArg6);
         cellFoBloomHere = 0.0f.xxx;
-        float3 param_4 = 0.0f.xxx;
-        fragColor = float4(max(lit - cellImageSpace(param_4), 0.0f.xxx), 0.0f);
+        float3 sqrtColorArg5 = 0.0f.xxx;
+        fragColor = float4(max(lit - cellImageSpace(sqrtColorArg5), 0.0f.xxx), 0.0f);
         return;
     }
-    bool3 tmp986 = (hdrMode == 0).xxx;
-    cellFoBloomHere = float3(tmp986.x ? foBloom.x : 0.0f.xxx.x, tmp986.y ? foBloom.y : 0.0f.xxx.y, tmp986.z ? foBloom.z : 0.0f.xxx.z);
+    bool3 cellFoBloomHerePart = (hdrMode == 0).xxx;
+    cellFoBloomHere = float3(cellFoBloomHerePart.x ? foBloom.x : 0.0f.xxx.x, cellFoBloomHerePart.y ? foBloom.y : 0.0f.xxx.y, cellFoBloomHerePart.z ? foBloom.z : 0.0f.xxx.z);
     if (hdrMode == 2)
     {
+        // lane SKYHOLE1: a cell effect over the backdrop (the sky). The game draws its sky into the HDR target and
+        // blends the effect over it; here the sky is in the view, not the linear frame, so the effect went over 0.
+        // Its value un-premultiplied by its coverage (the frame's alpha: the effects blend alpha as ONE, dst),
+        // tone-mapped, then laid over the backdrop by that coverage (blend ONE, ONE_MINUS_SRC_ALPHA).
         float A = clamp(x.w, 0.0f, 1.0f);
         float3 v = max(x.xyz, 0.0f.xxx);
         if ((!cellOn) || (!cellIsOn))
@@ -287,14 +293,14 @@ void frag_main()
         }
         if (A > 0.0009765625f)
         {
-            float3 param_5 = sqrt(v / A.xxx);
-            fragColor = float4(cellImageSpace(param_5) * A, A);
+            float3 sqrtColorArg4 = sqrt(v / A.xxx);
+            fragColor = float4(cellImageSpace(sqrtColorArg4) * A, A);
         }
         else
         {
-            float3 param_6 = sqrt(v);
-            float3 param_7 = 0.0f.xxx;
-            fragColor = float4(max(cellImageSpace(param_6) - cellImageSpace(param_7), 0.0f.xxx), 0.0f);
+            float3 sqrtColorArg3 = sqrt(v);
+            float3 sqrtColorArg2 = 0.0f.xxx;
+            fragColor = float4(max(cellImageSpace(sqrtColorArg3) - cellImageSpace(sqrtColorArg2), 0.0f.xxx), 0.0f);
         }
         return;
     }
@@ -304,8 +310,8 @@ void frag_main()
         fragColor = x;
         return;
     }
-    float3 param_8 = sqrt(max(x.xyz, 0.0f.xxx));
-    fragColor = float4(cellImageSpace(param_8), 1.0f);
+    float3 sqrtColorArg = sqrt(max(x.xyz, 0.0f.xxx));
+    fragColor = float4(cellImageSpace(sqrtColorArg), 1.0f);
 }
 
 SPIRV_Cross_Output main(SPIRV_Cross_Input stage_input)

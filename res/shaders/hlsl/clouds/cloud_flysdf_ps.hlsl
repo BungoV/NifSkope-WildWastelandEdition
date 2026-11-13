@@ -31,60 +31,60 @@ void frag_main()
     int3 c = int3(int2(gl_FragCoord.xy), cfLayer);
     int3 ax = int3(int(cfAxis == 0), int(cfAxis == 1), int(cfAxis == 2));
     int3 dim = int3(cfDim + 0.5f.xxx);
-    int tmp54;
+    int nPick;
     if (cfAxis == 0)
     {
-        tmp54 = dim.x;
+        nPick = dim.x;
     }
     else
     {
-        int tmp64;
+        int nPick2;
         if (cfAxis == 1)
         {
-            tmp64 = dim.y;
+            nPick2 = dim.y;
         }
         else
         {
-            tmp64 = dim.z;
+            nPick2 = dim.z;
         }
-        tmp54 = tmp64;
+        nPick = nPick2;
     }
-    int n = tmp54;
-    int tmp79;
+    int n = nPick;
+    int atPick;
     if (cfAxis == 0)
     {
-        tmp79 = c.x;
+        atPick = c.x;
     }
     else
     {
-        int tmp87;
+        int atPick2;
         if (cfAxis == 1)
         {
-            tmp87 = c.y;
+            atPick2 = c.y;
         }
         else
         {
-            tmp87 = c.z;
+            atPick2 = c.z;
         }
-        tmp79 = tmp87;
+        atPick = atPick2;
     }
-    int at = tmp79;
+    int at = atPick;
     int best = 15;
-    int tmp143;
-    int tmp148;
+    int dPick;
+    int dPick2;
     for (int k = -15; k <= 15; k++)
     {
-        bool tmp111 = (at + k) < 0;
-        bool tmp120;
-        if (!tmp111)
+        bool cond2 = (at + k) < 0;
+        bool cond;
+        if (!cond2)
         {
-            tmp120 = (at + k) >= n;
+            cond = (at + k) >= n;
         }
         else
         {
-            tmp120 = tmp111;
+            cond = cond2;
         }
-        if (tmp120)
+        if (cond)
         {
             continue;
         }
@@ -93,19 +93,19 @@ void frag_main()
         {
             if (v > 0.5f)
             {
-                tmp148 = abs(k);
+                dPick2 = abs(k);
             }
             else
             {
-                tmp148 = 15;
+                dPick2 = 15;
             }
-            tmp143 = tmp148;
+            dPick = dPick2;
         }
         else
         {
-            tmp143 = max(abs(k), int((v * 255.0f) + 0.5f));
+            dPick = max(abs(k), int((v * 255.0f) + 0.5f));
         }
-        int d = tmp143;
+        int d = dPick;
         best = min(best, d);
     }
     cfOut = (float(best) / 255.0f).xxxx;

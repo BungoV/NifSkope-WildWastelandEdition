@@ -16,7 +16,7 @@ struct CellDdgiOut
     float vis5;
 };
 
-static const float2 tmp1711[16] = { float2(0.493393003940582275390625f, 0.39426898956298828125f), float2(0.7985470294952392578125f, 0.885922014713287353515625f), float2(0.2473219931125640869140625f, 0.9264500141143798828125f), float2(0.051454000174999237060546875f, 0.14078199863433837890625f), float2(0.83184301853179931640625f, 0.00955200009047985076904296875f), float2(0.4286319911479949951171875f, 0.01715099997818470001220703125f), float2(0.01565600000321865081787109375f, 0.7497789859771728515625f), float2(0.758385002613067626953125f, 0.4961700141429901123046875f), float2(0.22348700463771820068359375f, 0.562151014804840087890625f), float2(0.01162800006568431854248046875f, 0.406994998455047607421875f), float2(0.24146200716495513916015625f, 0.3046360015869140625f), float2(0.4303109943866729736328125f, 0.7272260189056396484375f), float2(0.981810986995697021484375f, 0.278358995914459228515625f), float2(0.4070560038089752197265625f, 0.500533998012542724609375f), float2(0.123478002846240997314453125f, 0.4635460078716278076171875f), float2(0.809534013271331787109375f, 0.682272017002105712890625f) };
+static const float2 csmPoisson[16] = { float2(0.493393003940582275390625f, 0.39426898956298828125f), float2(0.7985470294952392578125f, 0.885922014713287353515625f), float2(0.2473219931125640869140625f, 0.9264500141143798828125f), float2(0.051454000174999237060546875f, 0.14078199863433837890625f), float2(0.83184301853179931640625f, 0.00955200009047985076904296875f), float2(0.4286319911479949951171875f, 0.01715099997818470001220703125f), float2(0.01565600000321865081787109375f, 0.7497789859771728515625f), float2(0.758385002613067626953125f, 0.4961700141429901123046875f), float2(0.22348700463771820068359375f, 0.562151014804840087890625f), float2(0.01162800006568431854248046875f, 0.406994998455047607421875f), float2(0.24146200716495513916015625f, 0.3046360015869140625f), float2(0.4303109943866729736328125f, 0.7272260189056396484375f), float2(0.981810986995697021484375f, 0.278358995914459228515625f), float2(0.4070560038089752197265625f, 0.500533998012542724609375f), float2(0.123478002846240997314453125f, 0.4635460078716278076171875f), float2(0.809534013271331787109375f, 0.682272017002105712890625f) };
 
 cbuffer wwShadowFrame : register(b0, space0)
 {
@@ -346,28 +346,29 @@ float4 cellDdgiTile(int p, float3 d, int S)
     if (d.z < 0.0f)
     {
         float ou = u;
-        float param = ou;
-        u = (1.0f - abs(v)) * cellDdgiSignNotZero(param);
-        float param_1 = v;
-        v = (1.0f - abs(ou)) * cellDdgiSignNotZero(param_1);
+        float vArg2 = ou;
+        u = (1.0f - abs(v)) * cellDdgiSignNotZero(vArg2);
+        float vArg = v;
+        v = (1.0f - abs(ou)) * cellDdgiSignNotZero(vArg);
     }
+    // a loop on a uniform count: one copy of the noise reads (three unrolled copies broke the decal program's limit)
     int n = S - 2;
     float fx = (1.0f + (((u * 0.5f) + 0.5f) * float(n))) - 0.5f;
     float fy = (1.0f + (((v * 0.5f) + 0.5f) * float(n))) - 0.5f;
-    int param_2 = int(floor(fx));
-    int param_3 = 0;
-    int param_4 = cellDdgiIMax(param_2, param_3);
-    int param_5 = S - 2;
-    int x0 = cellDdgiIMin(param_4, param_5);
-    int param_6 = int(floor(fy));
-    int param_7 = 0;
-    int param_8 = cellDdgiIMax(param_6, param_7);
-    int param_9 = S - 2;
-    int y0 = cellDdgiIMin(param_8, param_9);
+    int aArg4 = int(floor(fx));
+    int bArg4 = 0;
+    int aArg3 = cellDdgiIMax(aArg4, bArg4);
+    int bArg3 = S - 2;
+    int x0 = cellDdgiIMin(aArg3, bArg3);
+    int aArg2 = int(floor(fy));
+    int bArg2 = 0;
+    int aArg = cellDdgiIMax(aArg2, bArg2);
+    int bArg = S - 2;
+    int y0 = cellDdgiIMin(aArg, bArg);
     float ax = clamp(fx - float(x0), 0.0f, 1.0f);
     float ay = clamp(fy - float(y0), 0.0f, 1.0f);
     float4 t[4];
-    float4 tmp449;
+    float4 tPick;
     for (int k = 0; k < 4; k++)
     {
         int x = x0 + (k % 2);
@@ -382,15 +383,16 @@ float4 cellDdgiTile(int p, float3 d, int S)
             float4 q = cellDdgiAtlas.Load(((cellDdgiCBase[cellDdgiC] + (64 * cellDdgiCDims[cellDdgiC].w)) + (128 * p)) + (i / 2));
             if ((i % 2) == 0)
             {
-                tmp449 = float4(q.x, q.y, 0.0f, 0.0f);
+                tPick = float4(q.x, q.y, 0.0f, 0.0f);
             }
             else
             {
-                tmp449 = float4(q.z, q.w, 0.0f, 0.0f);
+                tPick = float4(q.z, q.w, 0.0f, 0.0f);
             }
-            t[k] = tmp449;
+            t[k] = tPick;
         }
     }
+    // ( a (1 - ax) + b ax ) (1 - ay) + ( e (1 - ax) + f ax ) ay, as the header writes it
     return (((t[0] * (1.0f - ax)) + (t[1] * ax)) * (1.0f - ay)) + (((t[2] * (1.0f - ax)) + (t[3] * ax)) * ay);
 }
 
@@ -429,27 +431,27 @@ CellDdgiOut cellDdgiReadOne(float3 P, float3 n, float3 o, float3 d)
     float gx = (Pb.x - cellDdgiCOrigin[cellDdgiC].x) / cellDdgiCStep[cellDdgiC].x;
     float gy = (Pb.y - cellDdgiCOrigin[cellDdgiC].y) / cellDdgiCStep[cellDdgiC].y;
     float gz = (Pb.z - cellDdgiCOrigin[cellDdgiC].z) / cellDdgiCStep[cellDdgiC].z;
-    int param = int(floor(gx));
-    int param_1 = 0;
-    int param_2 = cellDdgiCDims[cellDdgiC].x - 2;
-    int param_3 = 0;
-    int param_4 = cellDdgiIMax(param, param_1);
-    int param_5 = cellDdgiIMax(param_2, param_3);
-    int bx = cellDdgiIMin(param_4, param_5);
-    int param_6 = int(floor(gy));
-    int param_7 = 0;
-    int param_8 = cellDdgiCDims[cellDdgiC].y - 2;
-    int param_9 = 0;
-    int param_10 = cellDdgiIMax(param_6, param_7);
-    int param_11 = cellDdgiIMax(param_8, param_9);
-    int by = cellDdgiIMin(param_10, param_11);
-    int param_12 = int(floor(gz));
-    int param_13 = 0;
-    int param_14 = cellDdgiCDims[cellDdgiC].z - 2;
-    int param_15 = 0;
-    int param_16 = cellDdgiIMax(param_12, param_13);
-    int param_17 = cellDdgiIMax(param_14, param_15);
-    int bz = cellDdgiIMin(param_16, param_17);
+    int aArg16 = int(floor(gx));
+    int bArg16 = 0;
+    int aArg15 = cellDdgiCDims[cellDdgiC].x - 2;
+    int bArg15 = 0;
+    int aArg14 = cellDdgiIMax(aArg16, bArg16);
+    int bArg14 = cellDdgiIMax(aArg15, bArg15);
+    int bx = cellDdgiIMin(aArg14, bArg14);
+    int aArg13 = int(floor(gy));
+    int bArg13 = 0;
+    int aArg12 = cellDdgiCDims[cellDdgiC].y - 2;
+    int bArg12 = 0;
+    int aArg11 = cellDdgiIMax(aArg13, bArg13);
+    int bArg11 = cellDdgiIMax(aArg12, bArg12);
+    int by = cellDdgiIMin(aArg11, bArg11);
+    int aArg10 = int(floor(gz));
+    int bArg10 = 0;
+    int aArg9 = cellDdgiCDims[cellDdgiC].z - 2;
+    int bArg9 = 0;
+    int aArg8 = cellDdgiIMax(aArg10, bArg10);
+    int bArg8 = cellDdgiIMax(aArg9, bArg9);
+    int bz = cellDdgiIMin(aArg8, bArg8);
     float ax = clamp(gx - float(bx), 0.0f, 1.0f);
     float ay = clamp(gy - float(by), 0.0f, 1.0f);
     float az = clamp(gz - float(bz), 0.0f, 1.0f);
@@ -458,17 +460,17 @@ CellDdgiOut cellDdgiReadOne(float3 P, float3 n, float3 o, float3 d)
     fade = min(fade, clamp(min(gy, float(cellDdgiCDims[cellDdgiC].y - 1) - gy) - 1.0f, 0.0f, 1.0f));
     fade = min(fade, clamp(min(gz, float(cellDdgiCDims[cellDdgiC].z - 1) - gz) - 1.0f, 0.0f, 1.0f));
     r.fade = fade;
-    bool tmp725 = fade <= 0.0f;
-    bool tmp731;
-    if (tmp725)
+    bool cond2 = fade <= 0.0f;
+    bool cond;
+    if (cond2)
     {
-        tmp731 = (cellDdgiRed & 16) == 0;
+        cond = (cellDdgiRed & 16) == 0;
     }
     else
     {
-        tmp731 = tmp725;
+        cond = cond2;
     }
-    if (tmp731)
+    if (cond)
     {
         return r;
     }
@@ -478,51 +480,52 @@ CellDdgiOut cellDdgiReadOne(float3 P, float3 n, float3 o, float3 d)
     float v3sum = 0.0f;
     float wsum = 0.0f;
     float cover = 0.0f;
-    float tmp827;
-    float tmp837;
-    float tmp848;
-    float tmp977;
+    float triPick3;
+    float triPick2;
+    float triPick;
+    float wPick;
     for (int c = 0; c < cellGiLoop8; c++)
     {
         int ox = c % 2;
         int oy = (c / 2) % 2;
         int oz = c / 4;
-        int param_18 = bx + ox;
-        int param_19 = cellDdgiCDims[cellDdgiC].x - 1;
-        int px = cellDdgiIMin(param_18, param_19);
-        int param_20 = by + oy;
-        int param_21 = cellDdgiCDims[cellDdgiC].y - 1;
-        int py = cellDdgiIMin(param_20, param_21);
-        int param_22 = bz + oz;
-        int param_23 = cellDdgiCDims[cellDdgiC].z - 1;
-        int pz = cellDdgiIMin(param_22, param_23);
+        int aArg7 = bx + ox;
+        int bArg7 = cellDdgiCDims[cellDdgiC].x - 1;
+        int px = cellDdgiIMin(aArg7, bArg7);
+        int aArg6 = by + oy;
+        int bArg6 = cellDdgiCDims[cellDdgiC].y - 1;
+        int py = cellDdgiIMin(aArg6, bArg6);
+        int aArg5 = bz + oz;
+        int bArg5 = cellDdgiCDims[cellDdgiC].z - 1;
+        // GOBO2: one half, no bleed into the other
+        int pz = cellDdgiIMin(aArg5, bArg5);
         int p = px + (cellDdgiCDims[cellDdgiC].x * (py + (cellDdgiCDims[cellDdgiC].y * pz)));
         float4 pr = cellDdgiAtlas.Load((cellDdgiCBase[cellDdgiC] + (192 * cellDdgiCDims[cellDdgiC].w)) + p);
         if (ox == 1)
         {
-            tmp827 = ax;
+            triPick3 = ax;
         }
         else
         {
-            tmp827 = 1.0f - ax;
+            triPick3 = 1.0f - ax;
         }
         if (oy == 1)
         {
-            tmp837 = ay;
+            triPick2 = ay;
         }
         else
         {
-            tmp837 = 1.0f - ay;
+            triPick2 = 1.0f - ay;
         }
         if (oz == 1)
         {
-            tmp848 = az;
+            triPick = az;
         }
         else
         {
-            tmp848 = 1.0f - az;
+            triPick = 1.0f - az;
         }
-        float tri = (tmp827 * tmp837) * tmp848;
+        float tri = (triPick3 * triPick2) * triPick;
         int st = int(pr.w + 0.5f);
         if (st != 2)
         {
@@ -540,59 +543,59 @@ CellDdgiOut cellDdgiReadOne(float3 P, float3 n, float3 o, float3 d)
             float rr = length(bp);
             if (((cellDdgiRed & 2) == 0) && (rr > 0.0f))
             {
-                int param_24 = p;
-                float3 param_25 = bp * ((-1.0f) / rr);
-                int param_26 = 16;
-                float4 m = cellDdgiTile(param_24, param_25, param_26);
-                float param_27 = rr;
-                float param_28 = m.x;
-                float param_29 = m.y;
-                w *= cellDdgiChebyshev(param_27, param_28, param_29);
+                int pArg6 = p;
+                float3 dArg6 = bp * ((-1.0f) / rr);
+                int SArg6 = 16;
+                float4 m = cellDdgiTile(pArg6, dArg6, SArg6);
+                float rArg = rr;
+                float meanArg = m.x;
+                float mean2Arg = m.y;
+                w *= cellDdgiChebyshev(rArg, meanArg, mean2Arg);
             }
             w = max(w, 9.9999999747524270787835121154785e-07f);
             if (w < 0.20000000298023223876953125f)
             {
-                tmp977 = ((w * w) * w) / 0.039999999105930328369140625f;
+                wPick = ((w * w) * w) / 0.039999999105930328369140625f;
             }
             else
             {
-                tmp977 = w;
+                wPick = w;
             }
-            w = tmp977;
+            w = wPick;
         }
         w *= tri;
-        int param_30 = p;
-        float3 param_31 = d;
-        int param_32 = 8;
-        float4 e = cellDdgiTile(param_30, param_31, param_32);
+        int pArg5 = p;
+        float3 dArg5 = d;
+        int SArg5 = 8;
+        float4 e = cellDdgiTile(pArg5, dArg5, SArg5);
         sum += (float3(pow(max(e.x, 0.0f), 2.5f), pow(max(e.y, 0.0f), 2.5f), pow(max(e.z, 0.0f), 2.5f)) * w);
         vsum += (w * e.w);
         if (cellDdgiTwo)
         {
-            int param_33 = p;
-            float3 param_34 = cellDdgiD2;
-            int param_35 = 8;
-            float4 e2 = cellDdgiTile(param_33, param_34, param_35);
+            int pArg4 = p;
+            float3 dArg4 = cellDdgiD2;
+            int SArg4 = 8;
+            float4 e2 = cellDdgiTile(pArg4, dArg4, SArg4);
             v2sum += (w * e2.w);
         }
         if (cellDdgiThree)
         {
-            int param_36 = p;
-            float3 param_37 = cellDdgiD3;
-            int param_38 = 8;
-            float4 e3 = cellDdgiTile(param_36, param_37, param_38);
+            int pArg3 = p;
+            float3 dArg3 = cellDdgiD3;
+            int SArg3 = 8;
+            float4 e3 = cellDdgiTile(pArg3, dArg3, SArg3);
             v3sum += (w * e3.w);
         }
         if (cellDdgiFive)
         {
-            int param_39 = p;
-            float3 param_40 = cellDdgiD4;
-            int param_41 = 8;
-            v4sum += (w * cellDdgiTile(param_39, param_40, param_41).w);
-            int param_42 = p;
-            float3 param_43 = cellDdgiD5;
-            int param_44 = 8;
-            v5sum += (w * cellDdgiTile(param_42, param_43, param_44).w);
+            int pArg2 = p;
+            float3 dArg2 = cellDdgiD4;
+            int SArg2 = 8;
+            v4sum += (w * cellDdgiTile(pArg2, dArg2, SArg2).w);
+            int pArg = p;
+            float3 dArg = cellDdgiD5;
+            int SArg = 8;
+            v5sum += (w * cellDdgiTile(pArg, dArg, SArg).w);
         }
         wsum += w;
     }
@@ -632,22 +635,22 @@ CellDdgiOut cellDdgiRead(float3 P, float3 n, float3 o, float3 d)
     for (int c = 0; c < cellDdgiCount; c++)
     {
         cellDdgiC = c;
-        float3 param = P;
-        float3 param_1 = n;
-        float3 param_2 = o;
-        float3 param_3 = d;
-        CellDdgiOut q = cellDdgiReadOne(param, param_1, param_2, param_3);
-        bool tmp1171 = q.w > 0.0f;
-        bool tmp1177;
-        if (tmp1171)
+        float3 PArg = P;
+        float3 nArg = n;
+        float3 oArg = o;
+        float3 dArg7 = d;
+        CellDdgiOut q = cellDdgiReadOne(PArg, nArg, oArg, dArg7);
+        bool cond4 = q.w > 0.0f;
+        bool cond3;
+        if (cond4)
         {
-            tmp1177 = q.fade > 0.0f;
+            cond3 = q.fade > 0.0f;
         }
         else
         {
-            tmp1177 = tmp1171;
+            cond3 = cond4;
         }
-        if (!tmp1177)
+        if (!cond3)
         {
             continue;
         }
@@ -680,6 +683,7 @@ CellDdgiOut cellDdgiRead(float3 P, float3 n, float3 o, float3 d)
 
 float cellGiHalfBits10(float e, float v, uint hi)
 {
+    // 1/4, 1/2, 3/4, 1
     uint b = asuint(max(e, 9.9999996826552253889678874634872e-21f));
     return asfloat(((b & 4294966272u) | (hi << uint(8))) | uint(floor((clamp(v, 0.0f, 1.0f) * 255.0f) + 0.5f)));
 }
@@ -688,19 +692,19 @@ float cellGiHalfBits10(float e, float v, uint hi)
 float4 cellGiHalfPack5(float3 e, float fade, float v0, float v1, float v2, float v3, float v4)
 {
     uint q = uint(floor((clamp(v3, 0.0f, 1.0f) * 255.0f) + 0.5f));
-    float param = e.x;
-    float param_1 = v0;
-    uint param_2 = q & 3u;
-    float param_3 = e.y;
-    float param_4 = v2;
-    uint param_5 = (q >> uint(2)) & 3u;
-    float param_6 = e.z;
-    float param_7 = v4;
-    uint param_8 = (q >> uint(4)) & 3u;
-    float param_9 = fade;
-    float param_10 = v1;
-    uint param_11 = q >> uint(6);
-    return float4(cellGiHalfBits10(param, param_1, param_2), cellGiHalfBits10(param_3, param_4, param_5), cellGiHalfBits10(param_6, param_7, param_8), cellGiHalfBits10(param_9, param_10, param_11));
+    float eArg4 = e.x;
+    float vArg6 = v0;
+    uint hiArg4 = q & 3u;
+    float eArg3 = e.y;
+    float vArg5 = v2;
+    uint hiArg3 = (q >> uint(2)) & 3u;
+    float eArg2 = e.z;
+    float vArg4 = v4;
+    uint hiArg2 = (q >> uint(4)) & 3u;
+    float eArg = fade;
+    float vArg3 = v1;
+    uint hiArg = q >> uint(6);
+    return float4(cellGiHalfBits10(eArg4, vArg6, hiArg4), cellGiHalfBits10(eArg3, vArg5, hiArg3), cellGiHalfBits10(eArg2, vArg4, hiArg2), cellGiHalfBits10(eArg, vArg3, hiArg));
 }
 
 // a unit normal as one float: octahedral, 11 bits a component, exact in a float's mantissa
@@ -719,6 +723,7 @@ void frag_main()
 {
     wwAirFree = false;
     ussLastTerr = 1.0f;
+    // lane SHADOWSHIMMER2: probes 1 / 3 as drawn
     csmNOff = 0.0f.xxx;
     cellDirVis = 1.0f;
     cellBackK = 0.0f;
@@ -749,39 +754,44 @@ void frag_main()
     cellFarIters = 0;
     int2 f = min((giStep.xx * int2(gl_FragCoord.xy)), (giFull - int2(1, 1)));
     float4 g = giGbuf.Load(int3(f, 0));
-    bool tmp1404 = (!cellOn) || (!cellDdgiOn);
-    bool tmp1412;
-    if (!tmp1404)
+    bool cond9 = (!cellOn) || (!cellDdgiOn);
+    bool cond8;
+    if (!cond9)
     {
-        tmp1412 = g.w >= 100000.0f;
+        cond8 = g.w >= 100000.0f;
     }
     else
     {
-        tmp1412 = tmp1404;
+        cond8 = cond9;
     }
-    bool tmp1422;
-    if (!tmp1412)
+    bool cond7;
+    if (!cond8)
     {
-        tmp1422 = dot(g.xyz, g.xyz) < 0.5f;
+        cond7 = dot(g.xyz, g.xyz) < 0.5f;
     }
     else
     {
-        tmp1422 = tmp1412;
+        cond7 = cond8;
     }
-    if (tmp1422)
+    if (cond7)
     {
         giOut = 0.0f.xxxx;
         giKey = float4(0.0f, 0.0f, 0.0f, -1.0f);
         return;
     }
+    // lane SHADOWPAR1: FO4CS's bias 12 (1 + slope) / sin(elevation); else TERRSHADOW1's 0.05 T + 4
+    // back to view units
     float z = (-g.w) / length(cellRow[0].xyz);
     float2 ndc = (((float2(f) + 0.5f.xx) / float2(giFull)) * 2.0f) - 1.0f.xx;
     float3 posView = float3((ndc * (-z)) / giProj, z);
-    float3 param = posView;
-    float3 P = cellWorldPos(param);
-    float3 param_1 = g.xyz;
-    float3 N = cellWorldDir(param_1);
+    float3 posViewArg = posView;
+    float3 P = cellWorldPos(posViewArg);
+    float3 dirViewArg = g.xyz;
+    float3 N = cellWorldDir(dirViewArg);
+    // PERFFIX2: the volume's own read (cellGiSample's: o to the eye, d the normal), with the mirror direction's sky
+    // visibility riding it (FIX1101A's cellDdgiTwo: the same 8 probes and weights), packed for the specular occlusion
     float3 V = normalize(float3(cellRow[0].w, cellRow[1].w, cellRow[2].w) - P);
+    // columns = rows of view-to-world: R = its transpose
     float3 R = reflect(-V, N);
     cellDdgiTwo = true;
     cellDdgiD2 = normalize(N + R);
@@ -790,45 +800,45 @@ void frag_main()
     cellDdgiFive = true;
     cellDdgiD4 = normalize(N + cellDdgiD2);
     cellDdgiD5 = normalize(cellDdgiD2 + R);
-    float3 param_2 = P;
-    float3 param_3 = N;
-    float3 param_4 = V;
-    float3 param_5 = N;
-    CellDdgiOut tmp1512 = cellDdgiRead(param_2, param_3, param_4, param_5);
-    CellDdgiOut d = tmp1512;
+    float3 PArg2 = P;
+    float3 nArg3 = N;
+    float3 oArg2 = V;
+    float3 dArg8 = N;
+    CellDdgiOut cellDdgiReadRet = cellDdgiRead(PArg2, nArg3, oArg2, dArg8);
+    CellDdgiOut d = cellDdgiReadRet;
     cellDdgiTwo = false;
     cellDdgiThree = false;
     cellDdgiFive = false;
     float3 e = d.E * d.fade;
-    bool tmp1521 = d.w > 0.0f;
-    bool tmp1527;
-    if (tmp1521)
+    bool cond6 = d.w > 0.0f;
+    bool cond5;
+    if (cond6)
     {
-        tmp1527 = d.fade > 0.0f;
+        cond5 = d.fade > 0.0f;
     }
     else
     {
-        tmp1527 = tmp1521;
+        cond5 = cond6;
     }
-    float4 tmp1528;
-    if (tmp1527)
+    float4 giOutPick;
+    if (cond5)
     {
-        float3 param_6 = e;
-        float param_7 = d.fade;
-        float param_8 = d.vis;
-        float param_9 = d.vis4;
-        float param_10 = d.vis2;
-        float param_11 = d.vis5;
-        float param_12 = d.vis3;
-        tmp1528 = cellGiHalfPack5(param_6, param_7, param_8, param_9, param_10, param_11, param_12);
+        float3 eArg5 = e;
+        float fadeArg = d.fade;
+        float v0Arg = d.vis;
+        float v1Arg = d.vis4;
+        float v2Arg = d.vis2;
+        float v3Arg = d.vis5;
+        float v4Arg = d.vis3;
+        giOutPick = cellGiHalfPack5(eArg5, fadeArg, v0Arg, v1Arg, v2Arg, v3Arg, v4Arg);
     }
     else
     {
-        tmp1528 = 0.0f.xxxx;
+        giOutPick = 0.0f.xxxx;
     }
-    giOut = tmp1528;
-    float3 param_13 = N;
-    giKey = float4(P, cellGiKeyPack(param_13));
+    giOut = giOutPick;
+    float3 nArg2 = N;
+    giKey = float4(P, cellGiKeyPack(nArg2));
 }
 
 SPIRV_Cross_Output main(SPIRV_Cross_Input stage_input)

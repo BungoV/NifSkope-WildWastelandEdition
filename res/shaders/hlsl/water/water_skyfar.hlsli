@@ -10,35 +10,35 @@ uint wwWaterSkyTexel(int2 t)
 {
     int E = int(waterSkyLayout.z);
     int2 tile = t / E.xx;
-    bool tmp1 = t.x < 0;
-    bool tmp2;
-    if (!tmp1)
+    bool cond4 = t.x < 0;
+    bool cond3;
+    if (!cond4)
     {
-        tmp2 = t.y < 0;
+        cond3 = t.y < 0;
     }
     else
     {
-        tmp2 = tmp1;
+        cond3 = cond4;
     }
-    bool tmp3;
-    if (!tmp2)
+    bool cond2;
+    if (!cond3)
     {
-        tmp3 = tile.x >= int(waterSkyLayout.x);
+        cond2 = tile.x >= int(waterSkyLayout.x);
     }
     else
     {
-        tmp3 = tmp2;
+        cond2 = cond3;
     }
-    bool tmp4;
-    if (!tmp3)
+    bool cond;
+    if (!cond2)
     {
-        tmp4 = tile.y >= int(waterSkyLayout.y);
+        cond = tile.y >= int(waterSkyLayout.y);
     }
     else
     {
-        tmp4 = tmp3;
+        cond = cond2;
     }
-    if (tmp4)
+    if (cond)
     {
         return 0u;
     }
@@ -63,22 +63,22 @@ float wwWaterSkyFar(float3 P)
     float2 p = ((P.xy - waterSkyGrid.xy) / max(waterSkyGrid.z, 1.0f).xx) - 0.5f.xx;
     int2 t = int2(floor(p));
     float2 f = p - float2(t);
-    int2 tmp1 = t;
-    int2 tmp2 = t + int2(1, 0);
-    int2 tmp3 = t + int2(0, 1);
-    int2 tmp4 = t + int2(1, 1);
-    float4 b = float4(float(wwWaterSkyTexel(tmp1)), float(wwWaterSkyTexel(tmp2)), float(wwWaterSkyTexel(tmp3)), float(wwWaterSkyTexel(tmp4)));
+    int2 cond4 = t;
+    int2 cond3 = t + int2(1, 0);
+    int2 cond2 = t + int2(0, 1);
+    int2 cond = t + int2(1, 1);
+    float4 b = float4(float(wwWaterSkyTexel(cond4)), float(wwWaterSkyTexel(cond3)), float(wwWaterSkyTexel(cond2)), float(wwWaterSkyTexel(cond)));
     float4 w = float4((1.0f - f.x) * (1.0f - f.y), f.x * (1.0f - f.y), (1.0f - f.x) * f.y, f.x * f.y) * step(0.5f.xxxx, b);
     float den = dot(w, 1.0f.xxxx);
-    float tmp5;
+    float wwWaterSkyFarRet;
     if (den > 9.9999997473787516355514526367188e-05f)
     {
-        tmp5 = dot(w, (b - 1.0f.xxxx) / waterSkyGrid.w.xxxx) / den;
+        wwWaterSkyFarRet = dot(w, (b - 1.0f.xxxx) / waterSkyGrid.w.xxxx) / den;
     }
     else
     {
-        tmp5 = 1.0f;
+        wwWaterSkyFarRet = 1.0f;
     }
-    return tmp5;
+    return wwWaterSkyFarRet;
 }
 #endif

@@ -32,47 +32,47 @@ void frag_main()
 {
     int2 p = int2(gl_FragCoord.xy) + int2(srcX, srcY);
     float d = 1.0f;
-    bool tmp35 = p.x >= 0;
-    bool tmp42;
-    if (tmp35)
+    bool cond4 = p.x >= 0;
+    bool cond3;
+    if (cond4)
     {
-        tmp42 = p.y >= 0;
+        cond3 = p.y >= 0;
     }
     else
     {
-        tmp42 = tmp35;
+        cond3 = cond4;
     }
-    bool tmp50;
-    if (tmp42)
+    bool cond2;
+    if (cond3)
     {
-        tmp50 = p.x < srcW;
+        cond2 = p.x < srcW;
     }
     else
     {
-        tmp50 = tmp42;
+        cond2 = cond3;
     }
-    bool tmp58;
-    if (tmp50)
+    bool cond;
+    if (cond2)
     {
-        tmp58 = p.y < srcH;
+        cond = p.y < srcH;
     }
     else
     {
-        tmp58 = tmp50;
+        cond = cond2;
     }
-    if (tmp58)
+    if (cond)
     {
         float o = srcMap.Load(int4(int3(p, 0), 0)).x;
-        float tmp77;
+        float dPick;
         if (o >= 1.0f)
         {
-            tmp77 = 1.0f;
+            dPick = 1.0f;
         }
         else
         {
-            tmp77 = clamp((o * zScale) + zBias, 0.0f, 1.0f);
+            dPick = clamp((o * zScale) + zBias, 0.0f, 1.0f);
         }
-        d = tmp77;
+        d = dPick;
     }
     gl_FragDepth = d;
 }

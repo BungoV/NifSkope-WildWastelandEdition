@@ -64,8 +64,8 @@ struct SPIRV_Cross_Output
 
 void vert_main()
 {
-    bool3 tmp21 = probe.xxx;
-    wdir = float3(tmp21.x ? float3(0.0f, 0.0f, 1.0f).x : vertexPosition.x, tmp21.y ? float3(0.0f, 0.0f, 1.0f).y : vertexPosition.y, tmp21.z ? float3(0.0f, 0.0f, 1.0f).z : vertexPosition.z);
+    bool3 wdirPart = probe.xxx;
+    wdir = float3(wdirPart.x ? float3(0.0f, 0.0f, 1.0f).x : vertexPosition.x, wdirPart.y ? float3(0.0f, 0.0f, 1.0f).y : vertexPosition.y, wdirPart.z ? float3(0.0f, 0.0f, 1.0f).z : vertexPosition.z);
     if (probe)
     {
         ndc = vertexPosition.xy;

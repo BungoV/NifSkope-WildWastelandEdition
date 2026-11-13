@@ -84,18 +84,18 @@ float4 cvCatmull(float t)
 
 float4 cvMoveBox(float2 q, float2 uv, float2 pv, float4 c)
 {
-    bool tmp68 = cvMoveClamp < 0.5f;
-    bool tmp85;
-    if (!tmp68)
+    bool cond2 = cvMoveClamp < 0.5f;
+    bool cond;
+    if (!cond2)
     {
-        float2 tmp79 = abs(pv - uv) * cvHistSize;
-        tmp85 = all(bool2(tmp79.x < 0.00999999977648258209228515625f.xx.x, tmp79.y < 0.00999999977648258209228515625f.xx.y));
+        float2 condPart = abs(pv - uv) * cvHistSize;
+        cond = all(bool2(condPart.x < 0.00999999977648258209228515625f.xx.x, condPart.y < 0.00999999977648258209228515625f.xx.y));
     }
     else
     {
-        tmp85 = tmp68;
+        cond = cond2;
     }
-    if (tmp85)
+    if (cond)
     {
         return c;
     }
@@ -141,6 +141,7 @@ void frag_main()
         float2 ndc = (uv * 2.0f) - 1.0f.xx;
         float3 du = mul(float3((ndc.x + cvProj.z) / cvProj.x, (ndc.y + cvProj.w) / cvProj.y, -1.0f), cvCam);
         float3 d = du * rsqrt(mad(du.z, du.z, mad(du.y, du.y, du.x * du.x)));	// NV GL's normalize: x*x first
+        // the cloud this pixel saw last frame: the previous depth along the ray (a sky pixel: far away)
         float dp = cvPrevDepth.Sample(_cvPrevDepth_sampler, uv).x;
         float dist = min((dp < 1000.0f) ? dp : dk, 400.0f);
         // NV GL: u = fma(d, dist, cam) - prev; transpose(M) * u per GL column fma(c.z, u.z, fma(c.x, u.x, c.y * u.y))
@@ -157,31 +158,33 @@ void frag_main()
         float2 vr = v.xy / (-v.z).xx;
         float2 pn = float2((vr.x * cvPrevProj.x) - cvPrevProj.z, (vr.y * cvPrevProj.y) - cvPrevProj.w);
         pv = (pn * 0.5f) + 0.5f.xx;
-        bool tmp349 = any(bool2(pv.x < 0.0f.xx.x, pv.y < 0.0f.xx.y));
-        bool tmp357;
-        if (!tmp349)
+        bool cond4 = any(bool2(pv.x < 0.0f.xx.x, pv.y < 0.0f.xx.y));
+        bool cond3;
+        if (!cond4)
         {
-            tmp357 = any(bool2(pv.x > 1.0f.xx.x, pv.y > 1.0f.xx.y));
+            cond3 = any(bool2(pv.x > 1.0f.xx.x, pv.y > 1.0f.xx.y));
         }
         else
         {
-            tmp357 = tmp349;
+            cond3 = cond4;
         }
-        if (tmp357)
+        if (cond3)
         {
             cvOut = coarse;
             cvDepth = dk.xxxx;
             return;
         }
     }
+    // Catmull-Rom: a bilinear read each frame blurs the history over the up to 16 resamples before a refresh, and the
+    // nearest texel drifts; the depth stays nearest (it is a distance, not a picture)
     float2 xy = mad(pv, cvHistSize, -0.5f.xx);
     float2 f = frac(xy);
     int2 i0 = int2(floor(xy)) - int2(1, 1);
     int2 hi = int2(cvHistSize) - int2(1, 1);
-    float param = f.x;
-    float4 wx = cvCatmull(param);
-    float param_1 = f.y;
-    float4 wy = cvCatmull(param_1);
+    float tArg2 = f.x;
+    float4 wx = cvCatmull(tArg2);
+    float tArg = f.y;
+    float4 wy = cvCatmull(tArg);
     float4 c = 0.0f.xxxx;
     for (int j = 0; j < 4; j++)
     {
@@ -190,11 +193,12 @@ void frag_main()
             c += (cvPrev.Load(int3(clamp(i0 + int2(i, j), int2(0, 0), hi), 0)) * (wx[i] * wy[j]));
         }
     }
-    float2 param_2 = q;
-    float2 param_3 = uv;
-    float2 param_4 = pv;
-    float4 param_5 = float4(max(c.xyz, 0.0f.xxx), clamp(c.w, 0.0f, 1.0f));
-    cvOut = cvMoveBox(param_2, param_3, param_4, param_5);
+    float2 qArg = q;
+    float2 uvArg = uv;
+    float2 pvArg = pv;
+    float4 cArg = float4(max(c.xyz, 0.0f.xxx), clamp(c.w, 0.0f, 1.0f));
+    // lane CLOUD6g
+    cvOut = cvMoveBox(qArg, uvArg, pvArg, cArg);
     cvDepth = cvPrevDepth.Load(int3(clamp(int2(floor(pv * cvHistSize)), int2(0, 0), hi), 0));
 }
 

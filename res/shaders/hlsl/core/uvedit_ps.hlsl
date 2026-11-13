@@ -39,12 +39,12 @@ struct SPIRV_Cross_Output
 float4 srgbCompress(float4 c)
 {
     float3 tmp = max(c.xyz, 0.0f.xxx) + 0.0008580249850638210773468017578125f.xxx;
-    float3 tmp1 = tmp;
-    float3 tmp2 = tmp * tmp;
-    tmp = rsqrt(tmp) * tmp1;
-    tmp1 = (tmp1 * 0.593028843402862548828125f) + 1.42598056793212890625f.xxx;
-    tmp2 = (tmp2 * (-0.18732370436191558837890625f)) - 0.0411060191690921783447265625f.xxx;
-    tmp = (((tmp * (-0.790954530239105224609375f)) + tmp1) * tmp) + tmp2;
+    float3 part2 = tmp;
+    float3 part = tmp * tmp;
+    tmp = rsqrt(tmp) * part2;
+    part2 = (part2 * 0.593028843402862548828125f) + 1.42598056793212890625f.xxx;
+    part = (part * (-0.18732370436191558837890625f)) - 0.0411060191690921783447265625f.xxx;
+    tmp = (((tmp * (-0.790954530239105224609375f)) + part2) * tmp) + part;
     return float4(tmp, c.w);
 }
 
@@ -52,23 +52,25 @@ float4 srgbCompress(float4 c)
 // edge is, so it only firms up when zoomed in enough to matter
 float3 drawPixelGrid(float3 color)
 {
-    bool tmp213 = pixelGrid.x < 0.5f;
-    bool tmp220;
-    if (!tmp213)
+    bool cond2 = pixelGrid.x < 0.5f;
+    bool cond;
+    if (!cond2)
     {
-        tmp220 = pixelGrid.y < 0.5f;
+        cond = pixelGrid.y < 0.5f;
     }
     else
     {
-        tmp220 = tmp213;
+        cond = cond2;
     }
-    if (tmp220)
+    if (cond)
     {
         return color;
     }
     float2 texel = texCoord * pixelGrid.xy;
     float2 d = abs(texel - round(texel));
+    // pixel size on screen, in the same units as pixelScale (texels/screenpx)
     float2 px = pixelScale / pixelGrid.xy;
+    // fade the whole grid in as pixels grow past a few screen pixels
     float vis = clamp((min(px.x, px.y) - 2.0f) * 0.5f, 0.0f, 1.0f);
     if (vis <= 0.0f)
     {
@@ -80,46 +82,49 @@ float3 drawPixelGrid(float3 color)
 
 float3 drawGridLines(float3 color, float x, float s)
 {
+    // Blender-style zoom-adaptive grid: the base level rescales with zoom so
+    // its lines stay readable at any distance, finer ×8 levels fade in when
+    // zoomed (gridEnabled/gridColors alpha are driven host-side)
     float3 divs = float3(1.0f, 8.0f, 64.0f) * max(gridBaseDiv, 9.999999717180685365747194737196e-10f);
     float3 f = x.xxx * divs;
     f = (abs(f - round(f)) / divs) * s;
     f = max(f - ((gridLineWidths * 0.5f) - 0.5f.xxx), 0.0f.xxx);
-    bool tmp127;
+    bool cond5;
     if (gridEnabled[0])
     {
-        tmp127 = f.x < 1.0f;
+        cond5 = f.x < 1.0f;
     }
     else
     {
-        tmp127 = gridEnabled[0];
+        cond5 = gridEnabled[0];
     }
-    if (tmp127)
+    if (cond5)
     {
         return lerp(color, gridColors[0].xyz, (((cos(f.x * 3.1415927410125732421875f) * 0.5f) + 0.5f) * gridColors[0].w).xxx);
     }
-    bool tmp160;
+    bool cond4;
     if (gridEnabled[1])
     {
-        tmp160 = f.y < 1.0f;
+        cond4 = f.y < 1.0f;
     }
     else
     {
-        tmp160 = gridEnabled[1];
+        cond4 = gridEnabled[1];
     }
-    if (tmp160)
+    if (cond4)
     {
         return lerp(color, gridColors[1].xyz, (((cos(f.y * 3.1415927410125732421875f) * 0.5f) + 0.5f) * gridColors[1].w).xxx);
     }
-    bool tmp188;
+    bool cond3;
     if (gridEnabled[2])
     {
-        tmp188 = f.z < 1.0f;
+        cond3 = f.z < 1.0f;
     }
     else
     {
-        tmp188 = gridEnabled[2];
+        cond3 = gridEnabled[2];
     }
-    if (tmp188)
+    if (cond3)
     {
         return lerp(color, gridColors[2].xyz, (((cos(f.z * 3.1415927410125732421875f) * 0.5f) + 0.5f) * gridColors[2].w).xxx);
     }
@@ -129,66 +134,66 @@ float3 drawGridLines(float3 color, float x, float s)
 void frag_main()
 {
     float4 color = 0.0f.xxxx;
-    bool tmp297 = texCoord.x >= (-1.0f);
-    bool tmp303;
-    if (tmp297)
+    bool cond19 = texCoord.x >= (-1.0f);
+    bool cond18;
+    if (cond19)
     {
-        tmp303 = texCoord.x <= 2.0f;
+        cond18 = texCoord.x <= 2.0f;
     }
     else
     {
-        tmp303 = tmp297;
+        cond18 = cond19;
     }
-    bool tmp309;
-    if (tmp303)
+    bool cond17;
+    if (cond18)
     {
-        tmp309 = texCoord.y >= (-1.0f);
+        cond17 = texCoord.y >= (-1.0f);
     }
     else
     {
-        tmp309 = tmp303;
+        cond17 = cond18;
     }
-    bool tmp315;
-    if (tmp309)
+    bool inTilePick2;
+    if (cond17)
     {
-        tmp315 = texCoord.y <= 2.0f;
+        inTilePick2 = texCoord.y <= 2.0f;
     }
     else
     {
-        tmp315 = tmp309;
+        inTilePick2 = cond17;
     }
-    bool inTile = tmp315;
+    bool inTile = inTilePick2;
     if (tileMode == 1)
     {
-        bool tmp324 = texCoord.x >= 0.0f;
-        bool tmp330;
-        if (tmp324)
+        bool cond16 = texCoord.x >= 0.0f;
+        bool cond15;
+        if (cond16)
         {
-            tmp330 = texCoord.x <= 1.0f;
+            cond15 = texCoord.x <= 1.0f;
         }
         else
         {
-            tmp330 = tmp324;
+            cond15 = cond16;
         }
-        bool tmp336;
-        if (tmp330)
+        bool cond14;
+        if (cond15)
         {
-            tmp336 = texCoord.y >= 0.0f;
+            cond14 = texCoord.y >= 0.0f;
         }
         else
         {
-            tmp336 = tmp330;
+            cond14 = cond15;
         }
-        bool tmp342;
-        if (tmp336)
+        bool inTilePick;
+        if (cond14)
         {
-            tmp342 = texCoord.y <= 1.0f;
+            inTilePick = texCoord.y <= 1.0f;
         }
         else
         {
-            tmp342 = tmp336;
+            inTilePick = cond14;
         }
-        inTile = tmp342;
+        inTile = inTilePick;
     }
     if (inTile)
     {
@@ -211,116 +216,118 @@ void frag_main()
         {
             if ((textureColorMode & 1) != 0)
             {
-                float4 param = color;
-                color = srgbCompress(param);
+                float4 cArg = color;
+                color = srgbCompress(cArg);
             }
         }
         if ((textureColorMode & 4) != 0)
         {
             color.w = 1.0f;
         }
-        bool tmp441 = texCoord.x >= 0.0f;
-        bool tmp447;
-        if (tmp441)
+        bool cond13 = texCoord.x >= 0.0f;
+        bool cond12;
+        if (cond13)
         {
-            tmp447 = texCoord.x <= 1.0f;
+            cond12 = texCoord.x <= 1.0f;
         }
         else
         {
-            tmp447 = tmp441;
+            cond12 = cond13;
         }
-        bool tmp453;
-        if (tmp447)
+        bool cond11;
+        if (cond12)
         {
-            tmp453 = texCoord.y >= 0.0f;
-        }
-        else
-        {
-            tmp453 = tmp447;
-        }
-        bool tmp459;
-        if (tmp453)
-        {
-            tmp459 = texCoord.y <= 1.0f;
+            cond11 = texCoord.y >= 0.0f;
         }
         else
         {
-            tmp459 = tmp453;
+            cond11 = cond12;
         }
-        if (tmp459)
+        bool cond10;
+        if (cond11)
         {
-            float4 tmp465 = color;
-            float3 tmp467 = tmp465.xyz * textureColorScale.x;
-            color.x = tmp467.x;
-            color.y = tmp467.y;
-            color.z = tmp467.z;
+            cond10 = texCoord.y <= 1.0f;
         }
         else
         {
-            float4 tmp477 = color;
-            float3 tmp479 = tmp477.xyz * textureColorScale.y;
-            color.x = tmp479.x;
-            color.y = tmp479.y;
-            color.z = tmp479.z;
+            cond10 = cond11;
+        }
+        if (cond10)
+        {
+            float4 colorPart4 = color;
+            float3 colorPart3 = colorPart4.xyz * textureColorScale.x;
+            color.x = colorPart3.x;
+            color.y = colorPart3.y;
+            color.z = colorPart3.z;
+        }
+        else
+        {
+            float4 colorPart2 = color;
+            float3 colorPart = colorPart2.xyz * textureColorScale.y;
+            color.x = colorPart.x;
+            color.y = colorPart.y;
+            color.z = colorPart.z;
         }
     }
     color = float4(lerp(backgroundColor.xyz, color.xyz, color.w.xxx), 1.0f);
-    bool tmp501 = tileMode != 1;
-    bool tmp526;
-    if (!tmp501)
+    bool cond9 = tileMode != 1;
+    bool inGridTilePick;
+    if (!cond9)
     {
-        bool tmp507 = texCoord.x >= 0.0f;
-        bool tmp513;
-        if (tmp507)
+        bool cond8 = texCoord.x >= 0.0f;
+        bool cond7;
+        if (cond8)
         {
-            tmp513 = texCoord.x <= 1.0f;
+            cond7 = texCoord.x <= 1.0f;
         }
         else
         {
-            tmp513 = tmp507;
+            cond7 = cond8;
         }
-        bool tmp519;
-        if (tmp513)
+        bool cond6;
+        if (cond7)
         {
-            tmp519 = texCoord.y >= 0.0f;
+            cond6 = texCoord.y >= 0.0f;
         }
         else
         {
-            tmp519 = tmp513;
+            cond6 = cond7;
         }
-        bool tmp525;
-        if (tmp519)
+        bool inGridTilePick2;
+        if (cond6)
         {
-            tmp525 = texCoord.y <= 1.0f;
+            inGridTilePick2 = texCoord.y <= 1.0f;
         }
         else
         {
-            tmp525 = tmp519;
+            inGridTilePick2 = cond6;
         }
-        tmp526 = tmp525;
+        inGridTilePick = inGridTilePick2;
     }
     else
     {
-        tmp526 = tmp501;
+        inGridTilePick = cond9;
     }
-    bool inGridTile = tmp526;
+    // When not repeating, confine grid + pixel lines to the 0-1 tile (Blender):
+    // outside is plain background, no lines.
+    bool inGridTile = inGridTilePick;
     if (inGridTile)
     {
-        float3 param_1 = color.xyz;
-        float3 tmp533 = drawPixelGrid(param_1);
-        color.x = tmp533.x;
-        color.y = tmp533.y;
-        color.z = tmp533.z;
-        float3 param_2 = color.xyz;
-        float param_3 = texCoord.x;
-        float param_4 = pixelScale.x;
-        float3 param_5 = drawGridLines(param_2, param_3, param_4);
-        float param_6 = texCoord.y;
-        float param_7 = pixelScale.y;
-        float3 tmp557 = drawGridLines(param_5, param_6, param_7);
-        color.x = tmp557.x;
-        color.y = tmp557.y;
-        color.z = tmp557.z;
+        float3 colorArg3 = color.xyz;
+        float3 drawPixelGridRet = drawPixelGrid(colorArg3);
+        color.x = drawPixelGridRet.x;
+        color.y = drawPixelGridRet.y;
+        color.z = drawPixelGridRet.z;
+        float3 colorArg2 = color.xyz;
+        float xArg2 = texCoord.x;
+        float sArg2 = pixelScale.x;
+        float3 colorArg = drawGridLines(colorArg2, xArg2, sArg2);
+        float xArg = texCoord.y;
+        float sArg = pixelScale.y;
+        float3 drawGridLinesRet = drawGridLines(colorArg, xArg, sArg);
+        color.x = drawGridLinesRet.x;
+        color.y = drawGridLinesRet.y;
+        color.z = drawGridLinesRet.z;
     }
     fragColor = color;
 }

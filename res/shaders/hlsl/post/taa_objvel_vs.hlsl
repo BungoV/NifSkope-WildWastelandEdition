@@ -56,16 +56,16 @@ struct SPIRV_Cross_Output
 float3 grassOffset(float phase)
 {
     float L = length(bitangentVector);
-    float tmp23;
+    float offPick;
     if (L > 2.0f)
     {
-        tmp23 = L - 1024.0f;
+        offPick = L - 1024.0f;
     }
     else
     {
-        tmp23 = 0.0f;
+        offPick = 0.0f;
     }
-    float off = tmp23;
+    float off = offPick;
     float p = (phase - off) * wwGrassWind2.z;
     float half_range = (wwGrassWind2.y - wwGrassWind2.x) * 0.5f;
     float sp = sin(p);
@@ -81,24 +81,24 @@ float3 grassOffset(float phase)
 void vert_main()
 {
     float3 cur = vertexPosition;
-    bool3 tmp128 = (velMode == 1).xxx;
-    float3 prev = float3(tmp128.x ? prevPosition.x : vertexPosition.x, tmp128.y ? prevPosition.y : vertexPosition.y, tmp128.z ? prevPosition.z : vertexPosition.z);
-    bool tmp132 = velMode == 2;
-    bool tmp138;
-    if (tmp132)
+    bool3 prevPart = (velMode == 1).xxx;
+    float3 prev = float3(prevPart.x ? prevPosition.x : vertexPosition.x, prevPart.y ? prevPosition.y : vertexPosition.y, prevPart.z ? prevPosition.z : vertexPosition.z);
+    bool cond2 = velMode == 2;
+    bool cond;
+    if (cond2)
     {
-        tmp138 = wwGrassWind2.w > 0.5f;
+        cond = wwGrassWind2.w > 0.5f;
     }
     else
     {
-        tmp138 = tmp132;
+        cond = cond2;
     }
-    if (tmp138)
+    if (cond)
     {
-        float param = wwGrassWind.w;
-        cur += grassOffset(param);
-        float param_1 = wwGrassWind.z;
-        prev += grassOffset(param_1);
+        float phaseArg2 = wwGrassWind.w;
+        cur += grassOffset(phaseArg2);
+        float phaseArg = wwGrassWind.z;
+        prev += grassOffset(phaseArg);
     }
     cCur = mul(float4(cur, 1.0f), clipCur);
     cPrev = mul(float4(prev, 1.0f), clipPrev);

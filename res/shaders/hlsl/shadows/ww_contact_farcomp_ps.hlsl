@@ -41,7 +41,7 @@ void frag_main()
     float fine = gbuf.Load(int3(fq, 0)).w;
     bool wwh0 = (fine >= 900000.0f);
     bool wwh1 = (fine <= 0.0f);
-    if (wwh0 || wwh1)
+    if (or(wwh0, wwh1))   // HLSLFIX2 orfix.py: no short-circuit branch (NV took the wrong side)
     {
         return;
     }
@@ -50,48 +50,48 @@ void frag_main()
     float2 fr = cp - float2(base);
     float wsum = 0.0f;
     float acc = 0.0f;
-    float tmp127;
-    float tmp140;
+    float bwPick2;
+    float bwPick;
     for (int j = 0; j < 2; j++)
     {
         for (int i = 0; i < 2; i++)
         {
             int2 c = base + int2(i, j);
-            bool tmp111 = any(bool2(c.x < int2(0, 0).x, c.y < int2(0, 0).y));
-            bool tmp120;
-            if (!tmp111)
+            bool cond2 = any(bool2(c.x < int2(0, 0).x, c.y < int2(0, 0).y));
+            bool cond;
+            if (!cond2)
             {
-                tmp120 = any(bool2(c.x >= coarseSize.x, c.y >= coarseSize.y));
+                cond = any(bool2(c.x >= coarseSize.x, c.y >= coarseSize.y));
             }
             else
             {
-                tmp120 = tmp111;
+                cond = cond2;
             }
-            if (tmp120)
+            if (cond)
             {
                 continue;
             }
             if (i == 0)
             {
-                tmp127 = 1.0f - fr.x;
+                bwPick2 = 1.0f - fr.x;
             }
             else
             {
-                tmp127 = fr.x;
+                bwPick2 = fr.x;
             }
             if (j == 0)
             {
-                tmp140 = 1.0f - fr.y;
+                bwPick = 1.0f - fr.y;
             }
             else
             {
-                tmp140 = fr.y;
+                bwPick = fr.y;
             }
-            float bw = tmp127 * tmp140;
+            float bw = bwPick2 * bwPick;
             float cd = farDepth.Load(int3(c, 0)).w;
             bool wwh2 = (bw <= 0.0f);
             bool wwh3 = (cd >= 900000.0f);
-            if (wwh2 || wwh3)
+            if (or(wwh2, wwh3))   // HLSLFIX2 orfix.py: no short-circuit branch (NV took the wrong side)
             {
                 continue;
             }
@@ -108,6 +108,9 @@ void frag_main()
     {
         fragMask = acc / wsum;
     }
+    // lane SHADOWBAND1: inside the cascades' reach the cascade map holds the far casters (to the texel); the tier's
+    // 250-unit slab there turns a thin caster in front (a cable) into a long false band. It counts by 1 - the cascades'
+    // own fade weight, (r / D)^8 at the radial distance r: the cascades' complement, today's tier past D
     if (farFade.y > 0.5f)
     {
         float2 ndc = ((full / float2(fullSize)) * 2.0f) - 1.0f.xx;

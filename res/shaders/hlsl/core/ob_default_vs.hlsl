@@ -90,24 +90,26 @@ void vert_main()
     float3 b = bitangentVector;
     if ((boneWeights[0].x > 0.0f) && (doSkinning != 0u))
     {
-        float4 param = v;
-        float3 param_1 = n;
-        float3 param_2 = t;
-        float3 param_3 = b;
-        boneTransform(param, param_1, param_2, param_3);
-        v = param;
-        n = param_1;
-        t = param_2;
-        b = param_3;
+        float4 vArg = v;
+        float3 nArg = n;
+        float3 tArg = t;
+        float3 bArg = b;
+        boneTransform(vArg, nArg, tArg, bArg);
+        v = vArg;
+        n = nArg;
+        t = tArg;
+        b = bArg;
     }
     v = mul(v, modelViewMatrix);
     gl_Position = mul(v, projectionMatrix);
     texCoord = multiTexCoord0;
+    // NOTE: b<->t
     float3x3 btnMatrix = float3x3(float3(normalize(mul(normalMatrix, b))), float3(normalize(mul(normalMatrix, t))), float3(normalize(mul(normalMatrix, n))));
     btnMatrix = transpose(btnMatrix);
     reflMatrix = mul(envMapRotation, btnMatrix);
     if (projectionMatrix[3].w == 1.0f)
     {
+        // orthographic view
         ViewDir = mul(float3(0.0f, 0.0f, 1.0f), btnMatrix);
     }
     else
@@ -116,8 +118,8 @@ void vert_main()
     }
     LightDir = mul(lightSourcePosition[0].xyz, btnMatrix);
     A = float4(sqrt(lightSourceAmbient.xyz) * 0.375f, toneMapScale);
-    bool4 tmp289 = bool4(vertexColorOverride.x > 0.0f.xxxx.x, vertexColorOverride.y > 0.0f.xxxx.y, vertexColorOverride.z > 0.0f.xxxx.z, vertexColorOverride.w > 0.0f.xxxx.w);
-    C = float4(tmp289.x ? vertexColorOverride.x : vertexColor.x, tmp289.y ? vertexColorOverride.y : vertexColor.y, tmp289.z ? vertexColorOverride.z : vertexColor.z, tmp289.w ? vertexColorOverride.w : vertexColor.w);
+    bool4 CPart = bool4(vertexColorOverride.x > 0.0f.xxxx.x, vertexColorOverride.y > 0.0f.xxxx.y, vertexColorOverride.z > 0.0f.xxxx.z, vertexColorOverride.w > 0.0f.xxxx.w);
+    C = float4(CPart.x ? vertexColorOverride.x : vertexColor.x, CPart.y ? vertexColorOverride.y : vertexColor.y, CPart.z ? vertexColorOverride.z : vertexColor.z, CPart.w ? vertexColorOverride.w : vertexColor.w);
     D = float4(sqrt(lightSourceDiffuse[0].xyz), brightnessScale);
 }
 

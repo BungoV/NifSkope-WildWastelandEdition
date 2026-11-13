@@ -140,15 +140,15 @@ void vert_main()
     float3 b = bitangentVector;
     if ((boneWeights[0].x > 0.0f) && (doSkinning != 0u))
     {
-        float4 param = v;
-        float3 param_1 = n;
-        float3 param_2 = t;
-        float3 param_3 = b;
-        boneTransform(param, param_1, param_2, param_3);
-        v = param;
-        n = param_1;
-        t = param_2;
-        b = param_3;
+        float4 vArg = v;
+        float3 nArg = n;
+        float3 tArg = t;
+        float3 bArg = b;
+        boneTransform(vArg, nArg, tArg, bArg);
+        v = vArg;
+        n = nArg;
+        t = tArg;
+        b = bArg;
     }
     float4 vc = vertexColor;
     float2 uv0 = multiTexCoord0;
@@ -157,17 +157,19 @@ void vert_main()
     wwFarAo = 1.0f;
     if (farInst)
     {
+        // n * Mt = M n
         float3x3 Mt = float3x3(float3(farInstRow0.xyz), float3(farInstRow1.xyz), float3(farInstRow2.xyz));
-        float4 tmp437 = v;
-        float4 tmp440 = v;
-        float4 tmp443 = v;
-        float3 tmp445 = float3(dot(farInstRow0, tmp437), dot(farInstRow1, tmp440), dot(farInstRow2, tmp443));
-        v.x = tmp445.x;
-        v.y = tmp445.y;
-        v.z = tmp445.z;
+        float4 vPart8 = v;
+        float4 vPart7 = v;
+        float4 vPart6 = v;
+        float3 vPart5 = float3(dot(farInstRow0, vPart8), dot(farInstRow1, vPart7), dot(farInstRow2, vPart6));
+        v.x = vPart5.x;
+        v.y = vPart5.y;
+        v.z = vPart5.z;
         n = mul(Mt, n);
         t = mul(Mt, t);
         b = mul(Mt, b);
+        // the sway phase by the placed position, as the flat copy had it
         farXY = v.xy;
         float e = farInstExtra.w;
         if (e > 1.5f)
@@ -180,26 +182,26 @@ void vert_main()
             float2 ch = farStream.Load(asint(farInstExtra.y) + gl_VertexID).xy;
             float ao = 1.0f - ((1.0f - ch.x) * farBakeK.x);
             wwFarAo = (farBakeK.z > 0.5f) ? 1.0f : ao;
-            float4 tmp521 = vc;
-            float3 tmp523 = tmp521.xyz * (((farBakeK.z > 0.5f) ? ao : 1.0f) * e);
-            vc.x = tmp523.x;
-            vc.y = tmp523.y;
-            vc.z = tmp523.z;
+            float4 vcPart5 = vc;
+            float3 vcPart4 = vcPart5.xyz * (((farBakeK.z > 0.5f) ? ao : 1.0f) * e);
+            vc.x = vcPart4.x;
+            vc.y = vcPart4.y;
+            vc.z = vcPart4.z;
             wwFarSkyVis = 1.0f - ((1.0f - ch.y) * farBakeK.y);
         }
         else
         {
-            bool tmp542 = farVcAo.z > 2.5f;
-            bool tmp548;
-            if (tmp542)
+            bool cond7 = farVcAo.z > 2.5f;
+            bool cond6;
+            if (cond7)
             {
-                tmp548 = farVcAo.w < 0.5f;
+                cond6 = farVcAo.w < 0.5f;
             }
             else
             {
-                tmp548 = tmp542;
+                cond6 = cond7;
             }
-            if (tmp548)
+            if (cond6)
             {
                 wwFarAo = 1.0f - ((1.0f - clamp(vc.x * farInstExtra.y, 0.0f, 1.0f)) * farVcAo.x);
                 vc.x = 1.0f;
@@ -208,27 +210,27 @@ void vert_main()
             }
             else
             {
-                float4 tmp576 = vc;
-                float3 tmp578 = tmp576.xyz * float3(farInstExtra.yz, e);
-                vc.x = tmp578.x;
-                vc.y = tmp578.y;
-                vc.z = tmp578.z;
+                float4 vcPart3 = vc;
+                float3 vcPart2 = vcPart3.xyz * float3(farInstExtra.yz, e);
+                vc.x = vcPart2.x;
+                vc.y = vcPart2.y;
+                vc.z = vcPart2.z;
             }
         }
     }
     else
     {
-        bool tmp588 = farVcAo.z > 0.5f;
-        bool tmp594;
-        if (tmp588)
+        bool cond5 = farVcAo.z > 0.5f;
+        bool cond4;
+        if (cond5)
         {
-            tmp594 = farVcAo.w < 0.5f;
+            cond4 = farVcAo.w < 0.5f;
         }
         else
         {
-            tmp594 = tmp588;
+            cond4 = cond5;
         }
-        if (tmp594)
+        if (cond4)
         {
             if (farVcAo.z < 1.5f)
             {
@@ -246,21 +248,23 @@ void vert_main()
     if (wwGrassWind2.w > 0.5f)
     {
         float L = length(b);
-        float tmp635;
+        float offPick;
         if (L > 2.0f)
         {
-            tmp635 = L - 1024.0f;
+            offPick = L - 1024.0f;
         }
         else
         {
-            tmp635 = 0.0f;
+            offPick = 0.0f;
         }
-        float off = tmp635;
+        float off = offPick;
         b *= rsqrt(dot(b, b));
         n *= rsqrt(dot(n, n));
         t *= rsqrt(dot(t, t));
+        // mad -(v5.x + v5.y), 0.0078125, cb2[11].w; mul cb2[12].z
         float p = (wwGrassWind.w - off) * wwGrassWind2.z;
         float half_range = (wwGrassWind2.y - wwGrassWind2.x) * 0.5f;
+        // sincos
         float sp = sin(p);
         float cp = cos(p);
         float w = sin(sp * 3.1415927410125732421875f) + sin(sp * 6.283185482025146484375f);
@@ -268,7 +272,9 @@ void vert_main()
         w += 1.0f;
         w = (w * half_range) + wwGrassWind2.x;
         w *= ((vertexColor.w * vertexColor.w) * 0.5f);
+        // sincos cb2[11].x
         float3 d = float3(cos(wwGrassWind.x), sin(wwGrassWind.x), 0.0f);
+        // MODULES1 M4: a swaying cable (w 2) keeps its radial frame
         if (wwGrassWind2.w < 1.5f)
         {
             n += (d * w);
@@ -278,81 +284,84 @@ void vert_main()
             b += (d * w);
             b *= rsqrt(dot(b, b));
         }
-        float4 tmp764 = v;
-        float3 tmp766 = (d * w) + tmp764.xyz;
-        v.x = tmp766.x;
-        v.y = tmp766.y;
-        v.z = tmp766.z;
-        float3 tmp778 = exp2(log2(vertexColor.xyz) * 2.2000000476837158203125f);
-        vc.x = tmp778.x;
-        vc.y = tmp778.y;
-        vc.z = tmp778.z;
+        float4 vPart4 = v;
+        float3 vPart3 = (d * w) + vPart4.xyz;
+        v.x = vPart3.x;
+        v.y = vPart3.y;
+        v.z = vPart3.z;
+        float3 vcPart = exp2(log2(vertexColor.xyz) * 2.2000000476837158203125f);
+        vc.x = vcPart.x;
+        vc.y = vcPart.y;
+        vc.z = vcPart.z;
     }
+    // lane WINDTREE1: a loaded cell's Tree_Anim shape in the weather's wind
     if (wwTreeWind2.w > 0.5f)
     {
-        float3 param_4 = v.xyz;
-        float3 param_5 = normalVector;
-        float param_6 = length(bitangentVector);
-        float4x4 param_7 = modelViewMatrix;
-        float3 tmp802 = wwTreeWindApply(param_4, param_5, param_6, param_7);
-        v.x = tmp802.x;
-        v.y = tmp802.y;
-        v.z = tmp802.z;
+        float3 pArg = v.xyz;
+        float3 nrmArg = normalVector;
+        float bitLenArg = length(bitangentVector);
+        float4x4 mvArg = modelViewMatrix;
+        float3 wwTreeWindApplyRet = wwTreeWindApply(pArg, nrmArg, bitLenArg, mvArg);
+        v.x = wwTreeWindApplyRet.x;
+        v.y = wwTreeWindApplyRet.y;
+        v.z = wwTreeWindApplyRet.z;
     }
     v = mul(v, modelViewMatrix);
+    // world-axis offset from the block's centre
     float3 farRel = mul(v.xyz - farSwayBlock.xyz, transpose(viewMatrix));
-    bool tmp829 = (farSwayAmp > 0.0f) && lodTreeAnim;
-    bool tmp842;
-    if (tmp829)
+    bool cond3 = (farSwayAmp > 0.0f) && lodTreeAnim;
+    bool cond2;
+    if (cond3)
     {
-        tmp842 = max(abs(farRel.x), abs(farRel.y)) > farSwayBlock.w;
+        cond2 = max(abs(farRel.x), abs(farRel.y)) > farSwayBlock.w;
     }
     else
     {
-        tmp842 = tmp829;
+        cond2 = cond3;
     }
-    if (tmp842)
+    if (cond2)
     {
+        // world-horizontal offset, phase by the vertex's own place so a forest does not move as one
         float ph = dot(farXY, float2(0.00209999992512166500091552734375f, 0.001700000022538006305694580078125f));
         float3 w_1 = float3(sin((farSwayTime * 1.2999999523162841796875f) + ph), cos((farSwayTime * 0.89999997615814208984375f) + (ph * 1.7000000476837158203125f)) * 0.60000002384185791015625f, 0.0f);
-        float4 tmp879 = v;
-        float3 tmp881 = tmp879.xyz + mul(w_1 * (farSwayAmp * vertexColor.w), viewMatrix);
-        v.x = tmp881.x;
-        v.y = tmp881.y;
-        v.z = tmp881.z;
+        float4 vPart2 = v;
+        float3 vPart = vPart2.xyz + mul(w_1 * (farSwayAmp * vertexColor.w), viewMatrix);
+        v.x = vPart.x;
+        v.y = vPart.y;
+        v.z = vPart.z;
     }
-    float4 tmp896 = mul(v, projectionMatrix);
-    gl_Position = tmp896;
-    float2 tmp902;
+    float4 gl_PositionPart12 = mul(v, projectionMatrix);
+    gl_Position = gl_PositionPart12;
+    float2 farLadderPick;
     if (farInst)
     {
-        float tmp911;
+        float farLadderPick2;
         if (farLadderIn.y > 0.5f)
         {
-            tmp911 = farLadderIn.y;
+            farLadderPick2 = farLadderIn.y;
         }
         else
         {
-            tmp911 = lodViewCode;
+            farLadderPick2 = lodViewCode;
         }
-        tmp902 = float2(farLadderIn.x, tmp911);
+        farLadderPick = float2(farLadderIn.x, farLadderPick2);
     }
     else
     {
-        tmp902 = float2(0.0f, lodViewCode);
+        farLadderPick = float2(0.0f, lodViewCode);
     }
-    farLadder = tmp902;
+    farLadder = farLadderPick;
     farSplatA = 1.0f;
-    bool tmp934;
+    bool cond;
     if (farInst)
     {
-        tmp934 = farSplat.x > 0.0f;
+        cond = farSplat.x > 0.0f;
     }
     else
     {
-        tmp934 = farInst;
+        cond = farInst;
     }
-    if (tmp934)
+    if (cond)
     {
         float4x4 PMV = mul(modelViewMatrix, projectionMatrix);
         float2 lo = 1000000015047466219876688855040.0f.xx;
@@ -363,31 +372,31 @@ void vert_main()
             float3 s = float3(((k & 4) != 0) ? 1.0f : (-1.0f), ((k & 2) != 0) ? 1.0f : (-1.0f), ((k & 1) != 0) ? 1.0f : (-1.0f));
             float4 m = float4(farInstBoxC.xyz + (s * farInstBoxE.xyz), 1.0f);
             float4 p_1 = mul(float4(dot(farInstRow0, m), dot(farInstRow1, m), dot(farInstRow2, m), 1.0f), PMV);
-            bool tmp1011;
+            bool frontPick;
             if (front)
             {
-                tmp1011 = p_1.w > 0.001000000047497451305389404296875f;
+                frontPick = p_1.w > 0.001000000047497451305389404296875f;
             }
             else
             {
-                tmp1011 = front;
+                frontPick = front;
             }
-            front = tmp1011;
+            front = frontPick;
             float2 q = p_1.xy / max(p_1.w, 0.001000000047497451305389404296875f).xx;
             lo = min(lo, q);
             hi = max(hi, q);
         }
         float2 px = ((hi - lo) * 0.5f) * float2(viewportDimensions.zw);
-        float2 tmp1043;
+        float2 kkPick;
         if (front)
         {
-            tmp1043 = max(1.0f.xx, farSplat.x.xx / max(px, 9.9999997473787516355514526367188e-05f.xx));
+            kkPick = max(1.0f.xx, farSplat.x.xx / max(px, 9.9999997473787516355514526367188e-05f.xx));
         }
         else
         {
-            tmp1043 = 1.0f.xx;
+            kkPick = 1.0f.xx;
         }
-        float2 kk = tmp1043;
+        float2 kk = kkPick;
         bool splat = (kk.x * kk.y) > 1.00010001659393310546875f;
         if (splat != (farSplat.y > 1.5f))
         {
@@ -398,19 +407,19 @@ void vert_main()
             if (splat)
             {
                 float2 c = (lo + hi) * 0.5f;
-                float4 tmp1086 = gl_Position;
-                float tmp1089 = gl_Position.w;
-                float2 tmp1090 = tmp1089.xx;
-                float2 tmp1091 = tmp1086.xy / tmp1090;
-                float2 tmp1093 = tmp1091 - c;
-                float2 tmp1095 = tmp1093 * kk;
-                float2 tmp1096 = c + tmp1095;
-                float tmp1098 = gl_Position.w;
-                float2 tmp1099 = tmp1096 * tmp1098;
-                float tmp1101 = tmp1099.x;
-                gl_Position.x = tmp1101;
-                float tmp1103 = tmp1099.y;
-                gl_Position.y = tmp1103;
+                float4 gl_PositionPart11 = gl_Position;
+                float gl_PositionPart10 = gl_Position.w;
+                float2 gl_PositionPart9 = gl_PositionPart10.xx;
+                float2 gl_PositionPart8 = gl_PositionPart11.xy / gl_PositionPart9;
+                float2 gl_PositionPart7 = gl_PositionPart8 - c;
+                float2 gl_PositionPart6 = gl_PositionPart7 * kk;
+                float2 gl_PositionPart5 = c + gl_PositionPart6;
+                float gl_PositionPart4 = gl_Position.w;
+                float2 gl_PositionPart3 = gl_PositionPart5 * gl_PositionPart4;
+                float gl_PositionPart2 = gl_PositionPart3.x;
+                gl_Position.x = gl_PositionPart2;
+                float gl_PositionPart = gl_PositionPart3.y;
+                gl_Position.y = gl_PositionPart;
                 farSplatA = 1.0f / (kk.x * kk.y);
             }
         }
@@ -425,6 +434,7 @@ void vert_main()
     reflMatrix[2].z *= (-1.0f);
     if (projectionMatrix[3].w == 1.0f)
     {
+        // orthographic view
         ViewDir = float3(0.0f, 0.0f, 1.0f);
     }
     else
@@ -433,8 +443,8 @@ void vert_main()
     }
     LightDir = lightSourcePosition[0].xyz;
     A = float4(sqrt(lightSourceAmbient.xyz) * 0.375f, toneMapScale);
-    bool4 tmp1185 = bool4(vertexColorOverride.x > 0.0f.xxxx.x, vertexColorOverride.y > 0.0f.xxxx.y, vertexColorOverride.z > 0.0f.xxxx.z, vertexColorOverride.w > 0.0f.xxxx.w);
-    C = float4(tmp1185.x ? vertexColorOverride.x : vc.x, tmp1185.y ? vertexColorOverride.y : vc.y, tmp1185.z ? vertexColorOverride.z : vc.z, tmp1185.w ? vertexColorOverride.w : vc.w);
+    bool4 CPart = bool4(vertexColorOverride.x > 0.0f.xxxx.x, vertexColorOverride.y > 0.0f.xxxx.y, vertexColorOverride.z > 0.0f.xxxx.z, vertexColorOverride.w > 0.0f.xxxx.w);
+    C = float4(CPart.x ? vertexColorOverride.x : vc.x, CPart.y ? vertexColorOverride.y : vc.y, CPart.z ? vertexColorOverride.z : vc.z, CPart.w ? vertexColorOverride.w : vc.w);
     rawVertexAlpha = vertexColor.w;
     D = float4(sqrt(lightSourceDiffuse[0].xyz), brightnessScale);
 }

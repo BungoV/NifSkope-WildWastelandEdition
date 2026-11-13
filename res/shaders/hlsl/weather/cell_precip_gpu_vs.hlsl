@@ -90,16 +90,16 @@ float pcU01(uint h)
 float pcWrap(float x, float L)
 {
     float r = x - (L * floor(x / L));
-    float tmp143;
+    float pcWrapRet;
     if (r >= L)
     {
-        tmp143 = r - L;
+        pcWrapRet = r - L;
     }
     else
     {
-        tmp143 = max(r, 0.0f);
+        pcWrapRet = max(r, 0.0f);
     }
-    return tmp143;
+    return pcWrapRet;
 }
 
 //! roofAt's rule: the texel holding the particle; off the map is open sky
@@ -107,17 +107,17 @@ bool pcRoofOpen(float3 rel)
 {
     int2 t = int2(floor(pcRoofCam.xy + (rel.xy * pcRoofInv)));
     int2 n = int2(spvTextureSize(pcRoof, uint(0), dummy_parameter));
-    bool tmp71 = any(bool2(t.x < int2(0, 0).x, t.y < int2(0, 0).y));
-    bool tmp79;
-    if (!tmp71)
+    bool cond2 = any(bool2(t.x < int2(0, 0).x, t.y < int2(0, 0).y));
+    bool cond;
+    if (!cond2)
     {
-        tmp79 = any(bool2(t.x >= n.x, t.y >= n.y));
+        cond = any(bool2(t.x >= n.x, t.y >= n.y));
     }
     else
     {
-        tmp79 = tmp71;
+        cond = cond2;
     }
-    if (tmp79)
+    if (cond)
     {
         return true;
     }
@@ -126,120 +126,121 @@ bool pcRoofOpen(float3 rel)
 
 bool pcParticle(uint i, inout float3 rel, out float3 vel, out float hs, out float angle, out float2 cellUv)
 {
-    uint param = i ^ pcSeedS;
-    uint tmp163 = pcHash(param);
-    uint h = tmp163;
-    uint param_1 = h;
-    float u0 = pcU01(param_1);
-    uint param_2 = h + 461845907u;
-    uint tmp172 = pcHash(param_2);
-    h = tmp172;
-    uint param_3 = h;
-    float u1 = pcU01(param_3);
-    uint param_4 = h + 461845907u;
-    uint tmp180 = pcHash(param_4);
-    h = tmp180;
-    uint param_5 = h;
-    float u2 = pcU01(param_5);
-    uint param_6 = h + 461845907u;
-    uint tmp188 = pcHash(param_6);
-    h = tmp188;
-    int tmp195;
+    uint xArg11 = i ^ pcSeedS;
+    uint pcHashRet8 = pcHash(xArg11);
+    uint h = pcHashRet8;
+    uint hArg7 = h;
+    float u0 = pcU01(hArg7);
+    uint xArg10 = h + 461845907u;
+    uint pcHashRet7 = pcHash(xArg10);
+    h = pcHashRet7;
+    uint hArg6 = h;
+    float u1 = pcU01(hArg6);
+    uint xArg9 = h + 461845907u;
+    uint pcHashRet6 = pcHash(xArg9);
+    h = pcHashRet6;
+    uint hArg5 = h;
+    float u2 = pcU01(hArg5);
+    uint xArg8 = h + 461845907u;
+    uint pcHashRet5 = pcHash(xArg8);
+    h = pcHashRet5;
+    int varPick;
     if (pcNCand > 0)
     {
-        tmp195 = pcCand[int(h % uint(pcNCand))];
+        varPick = pcCand[int(h % uint(pcNCand))];
     }
     else
     {
-        tmp195 = pcBest;
+        varPick = pcBest;
     }
-    int var = tmp195;
-    uint param_7 = h + 461845907u;
-    uint tmp216 = pcHash(param_7);
-    h = tmp216;
-    uint param_8 = h;
-    float a0 = pcU01(param_8) * 6.283185482025146484375f;
-    uint param_9 = h + 461845907u;
-    uint tmp226 = pcHash(param_9);
-    h = tmp226;
-    uint param_10 = h;
-    float spin = pcSpin * ((2.0f * pcU01(param_10)) - 1.0f);
-    uint param_11 = h + 461845907u;
-    uint tmp241 = pcHash(param_11);
-    h = tmp241;
-    uint param_12 = h;
-    float ph = pcU01(param_12) * 6.283185482025146484375f;
-    uint param_13 = h ^ 2246822507u;
-    uint tmp253 = pcHash(param_13);
-    uint param_14 = tmp253;
-    float om = 0.800000011920928955078125f + (0.800000011920928955078125f * pcU01(param_14));
+    int var = varPick;
+    uint xArg7 = h + 461845907u;
+    uint pcHashRet4 = pcHash(xArg7);
+    h = pcHashRet4;
+    uint hArg4 = h;
+    float a0 = pcU01(hArg4) * 6.283185482025146484375f;
+    uint xArg6 = h + 461845907u;
+    uint pcHashRet3 = pcHash(xArg6);
+    h = pcHashRet3;
+    uint hArg3 = h;
+    float spin = pcSpin * ((2.0f * pcU01(hArg3)) - 1.0f);
+    uint xArg5 = h + 461845907u;
+    uint pcHashRet2 = pcHash(xArg5);
+    h = pcHashRet2;
+    uint hArg2 = h;
+    float ph = pcU01(hArg2) * 6.283185482025146484375f;
+    uint xArg4 = h ^ 2246822507u;
+    uint pcHashRet = pcHash(xArg4);
+    uint hArg = pcHashRet;
+    float om = 0.800000011920928955078125f + (0.800000011920928955078125f * pcU01(hArg));
     float fall = pcFallU[var];
     float sx = pcSway * sin((om * pcT) + ph);
     float sy = pcSway * cos(((0.699999988079071044921875f * om) * pcT) + (1.2999999523162841796875f * ph));
     vel = float3(pcWind.x + ((pcSway * om) * cos((om * pcT) + ph)), pcWind.y - (((pcSway * 0.699999988079071044921875f) * om) * sin(((0.699999988079071044921875f * om) * pcT) + (1.2999999523162841796875f * ph))), -fall);
     float L = pcL;
-    float param_15 = ((u0 * L) + pcOffXY.x) + sx;
-    float param_16 = L;
-    float param_17 = ((u1 * L) + pcOffXY.y) + sy;
-    float param_18 = L;
-    float param_19 = (u2 * L) + pcOffZ[var];
-    float param_20 = L;
-    rel = float3(pcWrap(param_15, param_16), pcWrap(param_17, param_18), pcWrap(param_19, param_20)) - (0.5f * L).xxx;
+    float xArg3 = ((u0 * L) + pcOffXY.x) + sx;
+    float LArg3 = L;
+    float xArg2 = ((u1 * L) + pcOffXY.y) + sy;
+    float LArg2 = L;
+    float xArg = (u2 * L) + pcOffZ[var];
+    float LArg = L;
+    rel = float3(pcWrap(xArg3, LArg3), pcWrap(xArg2, LArg2), pcWrap(xArg, LArg)) - (0.5f * L).xxx;
     hs = pcHalfU[var];
     angle = a0 + (spin * pcT);
     int cell = var % max(pcCells, 1);
     cellUv = float2(float(cell % max(pcCols, 1)), float(cell / max(pcCols, 1))) * pcCellUv;
-    bool tmp403 = pcInner > 0.0f;
-    bool tmp414;
-    if (tmp403)
+    bool cond5 = pcInner > 0.0f;
+    bool cond4;
+    if (cond5)
     {
-        float3 tmp407 = abs(rel);
-        float3 tmp410 = (0.5f * pcInner).xxx;
-        tmp414 = all(bool3(tmp407.x < tmp410.x, tmp407.y < tmp410.y, tmp407.z < tmp410.z));
+        float3 condPart2 = abs(rel);
+        float3 condPart = (0.5f * pcInner).xxx;
+        cond4 = all(bool3(condPart2.x < condPart.x, condPart2.y < condPart.y, condPart2.z < condPart.z));
     }
     else
     {
-        tmp414 = tmp403;
+        cond4 = cond5;
     }
-    if (tmp414)
+    if (cond4)
     {
         return false;
     }
-    bool tmp422 = !pcRoofOn;
-    bool tmp429;
-    if (!tmp422)
+    bool cond3 = !pcRoofOn;
+    bool pcParticleRet;
+    if (!cond3)
     {
-        float3 param_21 = rel;
-        tmp429 = pcRoofOpen(param_21);
+        float3 relArg = rel;
+        pcParticleRet = pcRoofOpen(relArg);
     }
     else
     {
-        tmp429 = tmp422;
+        pcParticleRet = cond3;
     }
-    return tmp429;
+    return pcParticleRet;
 }
 
 void vert_main()
 {
-    uint param = uint(gl_VertexID);
-    float3 param_1;
-    float3 param_2;
-    float param_3;
-    float param_4;
-    float2 param_5;
-    bool tmp449 = pcParticle(param, param_1, param_2, param_3, param_4, param_5);
-    float3 rel = param_1;
-    float3 vel = param_2;
-    float hs = param_3;
-    float angle = param_4;
-    float2 cellUv = param_5;
-    bool keep = tmp449;
+    uint iArg = uint(gl_VertexID);
+    float3 relArg2;
+    float3 velArg;
+    float hsArg;
+    float angleArg;
+    float2 cellUvArg;
+    bool pcParticleRet2 = pcParticle(iArg, relArg2, velArg, hsArg, angleArg, cellUvArg);
+    float3 rel = relArg2;
+    float3 vel = velArg;
+    float hs = hsArg;
+    float angle = angleArg;
+    float2 cellUv = cellUvArg;
+    bool keep = pcParticleRet2;
     vsView = float3(dot(pcRow[0].xyz, rel), dot(pcRow[1].xyz, rel), dot(pcRow[2].xyz, rel));
     vsVel = float3(dot(pcRow[0].xyz, vel), dot(pcRow[1].xyz, vel), dot(pcRow[2].xyz, vel));
     vsHalf = hs * length(pcRow[0].xyz);
     vsColor = float4(1.0f, 1.0f, 1.0f, pcThin);
     vsCell = cellUv;
     vsAngle = angle;
+    // the cull: the quad's corners lie within R = 2 hd + travel of the centre, in the centre's depth plane
     float depth = -vsView.z;
     bool cull = (!keep) || (depth < 1.0f);
     if (!cull)
@@ -249,35 +250,35 @@ void vert_main()
         float4 c = mul(float4(vsView, 1.0f), pcProj);
         float rx = abs(pcProj[0].x) * R;
         float ry = abs(pcProj[1].y) * R;
-        bool tmp578 = (c.x - rx) > c.w;
-        bool tmp590;
-        if (!tmp578)
+        bool cond8 = (c.x - rx) > c.w;
+        bool cond7;
+        if (!cond8)
         {
-            tmp590 = (c.x + rx) < (-c.w);
+            cond7 = (c.x + rx) < (-c.w);
         }
         else
         {
-            tmp590 = tmp578;
+            cond7 = cond8;
         }
-        bool tmp601;
-        if (!tmp590)
+        bool cond6;
+        if (!cond7)
         {
-            tmp601 = (c.y - ry) > c.w;
+            cond6 = (c.y - ry) > c.w;
         }
         else
         {
-            tmp601 = tmp590;
+            cond6 = cond7;
         }
-        bool tmp613;
-        if (!tmp601)
+        bool cullPick;
+        if (!cond6)
         {
-            tmp613 = (c.y + ry) < (-c.w);
+            cullPick = (c.y + ry) < (-c.w);
         }
         else
         {
-            tmp613 = tmp601;
+            cullPick = cond6;
         }
-        cull = tmp613;
+        cull = cullPick;
     }
     vsCull = float(cull);
     gl_Position = float4(vsView, 1.0f);

@@ -138,16 +138,17 @@ void frag_main()
     int2 size = int2(spvTextureSize(curTex, uint(0), dummy_parameter));
     int2 ip = int2(gl_FragCoord.xy);
     float2 uv = gl_FragCoord.xy * invSize;
-    float2 tmp516;
+    float2 jitPick;
     if ((taa2Red & 4) != 0)
     {
-        tmp516 = -jitterPx;
+        jitPick = -jitterPx;
     }
     else
     {
-        tmp516 = jitterPx;
+        jitPick = jitterPx;
     }
-    float2 jit = tmp516;
+    float2 jit = jitPick;
+    // the 3x3: its colour moments, min/max, the filtered current value, the closest depth
     float3 m1 = 0.0f.xxx;
     float3 m2 = 0.0f.xxx;
     float3 mn = 1000000000.0f.xxx;
@@ -162,10 +163,10 @@ void frag_main()
         for (int dx = -1; dx <= 1; dx++)
         {
             int2 q = clamp(ip + int2(dx, dy), int2(0, 0), size - int2(1, 1));
-            float3 param = curTex.Load(int3(q, 0)).xyz;
-            float3 tmp574 = tonemapIn(param);
-            float3 param_1 = tmp574;
-            float3 c = toYCoCg(param_1);
+            float3 cArg5 = curTex.Load(int3(q, 0)).xyz;
+            float3 tonemapInRet = tonemapIn(cArg5);
+            float3 cArg4 = tonemapInRet;
+            float3 c = toYCoCg(cArg4);
             float d = depthTex.Load(int3(q, 0)).x;
             if (d < dMin)
             {
@@ -176,7 +177,10 @@ void frag_main()
             m2 += (c * c);
             mn = min(mn, c);
             mx = max(mx, c);
+            // where that pixel's sample lies, from this pixel's centre
             float2 o = float2(float(dx), float(dy)) - jit;
+            // lane TAA4: 4.0, not the Blackman-Harris fit 2.29: the wider filter kept the picture 10-21% behind the
+            // frame (live lag vs the game's), the narrower one stays under the game's still shimmer
             float w = exp((-(((taa2Red & 64) != 0) ? 2.28999996185302734375f : 4.0f)) * dot(o, o));
             sumC += (c * w);
             sumW += w;
@@ -186,26 +190,27 @@ void frag_main()
             }
         }
     }
-    float3 tmp652;
+    float3 curPick;
     if (taa2Tier >= 2)
     {
-        tmp652 = sumC / sumW.xxx;
+        curPick = sumC / sumW.xxx;
     }
     else
     {
-        tmp652 = cC;
+        curPick = cC;
     }
-    float3 cur = tmp652;
-    float2 tmp667;
+    float3 cur = curPick;
+    float2 mvPick;
     if ((taa2Inputs & 1) != 0)
     {
-        tmp667 = velTex.Load(int3(dTap, 0)).xy;
+        mvPick = velTex.Load(int3(dTap, 0)).xy;
     }
     else
     {
-        tmp667 = mvTex.Load(int3(dTap, 0)).xy;
+        mvPick = mvTex.Load(int3(dTap, 0)).xy;
     }
-    float2 mv = tmp667;
+    // lane TAA3: TAAINPUTS1's vectors know what moved on its own; its mask what the history cannot hold
+    float2 mv = mvPick;
     float3 msk = 0.0f.xxx;
     if ((taa2Inputs & 2) != 0)
     {
@@ -213,19 +218,27 @@ void frag_main()
     }
     float2 huv = uv + mv;
     float motionPx = length(mv * float2(size));
-    bool tmp720 = any(bool2(huv.x < 0.0f.xx.x, huv.y < 0.0f.xx.y));
-    bool tmp728;
-    if (!tmp720)
+    bool cond5 = any(bool2(huv.x < 0.0f.xx.x, huv.y < 0.0f.xx.y));
+    bool offscreenPick;
+    if (!cond5)
     {
-        tmp728 = any(bool2(huv.x > 1.0f.xx.x, huv.y > 1.0f.xx.y));
+        offscreenPick = any(bool2(huv.x > 1.0f.xx.x, huv.y > 1.0f.xx.y));
     }
     else
     {
-        tmp728 = tmp720;
+        offscreenPick = cond5;
     }
-    bool offscreen = tmp728;
+    bool offscreen = offscreenPick;
     float3 res = cur;
     float2 lockOut = 0.0f.xx;
+    // lane FARTOGGLE3: a far object under a pixel in size is caught by the jitter in some frames only. In the frames
+    // it misses, the 3x3 holds no trace of it, so the clip threw its history away and the object blinked on a still
+    // camera (offline twin tests/features/post/taafar_twin: 75 of 228 seen objects at Medium). Lock b, a carry how far this pixel's
+    // luma recently stood above / below the mean of its 8 neighbours (an isolated peak or dip: a sub-pixel thing, never
+    // the inside or the edge of a broad mover), each fading by kRangeRelax a frame, so a dip the jitter brings back
+    // within its 8-frame cycle is still there on the frames it misses. A history inside [cur - below, cur + above] is
+    // kept (no clip, no depth disocclusion, and a longer average); a mover's trail never raised that range, so the
+    // clip still takes it (the twin's ghost bar). taa2Red 128 is the resolve before this.
     float4 lk4 = 0.0f.xxxx;
     float m8 = (m1.x - cC.x) / 8.0f;
     float2 rng = float2(max(cC.x - m8, 0.0f), max(m8 - cC.x, 0.0f));
@@ -236,123 +249,139 @@ void frag_main()
     }
     if ((taa2NoHist == 0) && (!offscreen))
     {
-        bool tmp791 = taa2Tier >= 2;
-        bool tmp797;
-        if (tmp791)
+        bool cond4 = taa2Tier >= 2;
+        bool bicubicPick;
+        if (cond4)
         {
-            tmp797 = (taa2Red & 2) == 0;
+            bicubicPick = (taa2Red & 2) == 0;
         }
         else
         {
-            tmp797 = tmp791;
+            bicubicPick = cond4;
         }
-        bool bicubic = tmp797;
-        float3 tmp800;
+        bool bicubic = bicubicPick;
+        float3 cPick;
         if (bicubic)
         {
-            float2 param_2 = huv;
-            tmp800 = histCatmullRom(param_2);
+            float2 uvArg = huv;
+            cPick = histCatmullRom(uvArg);
         }
         else
         {
-            tmp800 = histTex.Sample(_histTex_sampler, huv).xyz;
+            cPick = histTex.Sample(_histTex_sampler, huv).xyz;
         }
-        float3 param_3 = tmp800;
-        float3 h = toYCoCg(param_3);
+        float3 cArg3 = cPick;
+        float3 h = toYCoCg(cArg3);
         float3 h0 = h;
         float3 bmn = mn;
         float3 bmx = mx;
+        // Low's looser box (1.25) keeps its shimmer under the game's without the current filter
         float3 mu = m1 / 9.0f.xxx;
         float3 sigma = sqrt(max((m2 / 9.0f.xxx) - (mu * mu), 0.0f.xxx));
-        float tmp838;
+        float gammaPick;
         if (taa2Tier >= 4)
         {
-            tmp838 = lerp(1.0f, 0.75f, clamp(motionPx / 8.0f, 0.0f, 1.0f));
+            gammaPick = lerp(1.0f, 0.75f, clamp(motionPx / 8.0f, 0.0f, 1.0f));
         }
         else
         {
-            tmp838 = (taa2Tier == 1) ? 1.25f : 1.0f;
+            gammaPick = (taa2Tier == 1) ? 1.25f : 1.0f;
         }
-        float gamma = tmp838;
+        float gamma = gammaPick;
         bmn = max(mn, mu - (sigma * gamma));
         bmx = min(mx, mu + (sigma * gamma));
+        // lane TAA3: a sub-pixel wire the jitter hits every other frame empties the 3x3 on the misses, and the clip
+        // threw its history away (detail 0.17 vs the game's 0.29). Where the current keeps flipping sides of the
+        // history (aliasing, not change) the history is kept; a real change flips once, so the clip still takes it.
         float2 lk = lk4.xy;
         float dY = cur.x - h0.x;
-        float tmp880;
+        float sgnPick;
         if (abs(dY) > 0.0199999995529651641845703125f)
         {
-            tmp880 = sign(dY);
+            sgnPick = sign(dY);
         }
         else
         {
-            tmp880 = lk.y;
+            sgnPick = lk.y;
         }
-        float sgn = tmp880;
+        float sgn = sgnPick;
         float flipRate = lerp(lk.x, float((sgn * lk.y) < 0.0f), 0.20000000298023223876953125f);
         lockOut = float2(flipRate, sgn);
-        float tmp907;
+        float keepPick;
         if ((taa2Red & 8) == 0)
         {
-            tmp907 = smoothstep(0.25f, 0.5f, flipRate) * (1.0f - clamp(motionPx / 4.0f, 0.0f, 1.0f));
+            keepPick = smoothstep(0.25f, 0.5f, flipRate) * (1.0f - clamp(motionPx / 4.0f, 0.0f, 1.0f));
         }
         else
         {
-            tmp907 = 0.0f;
+            keepPick = 0.0f;
         }
-        float keep = tmp907;
+        float keep = keepPick;
         float keepR = 0.0f;
         if ((taa2Red & 136) == 0)
         {
+            // (the 8-neighbour mean is inside too: on a frame the jitter hits it, the history lies between the hit and
+            // the ground around it, and the depth test below must not drop it there either)
             float outside = max(h0.x - max(cur.x + rng.x, m8), min(cur.x - rng.y, m8) - h0.x);
+            // (fading out over 6 8-bit steps past it: 2 left a few 0.3 px objects going at Low / High / Ultra)
+            // (gone by 2 px a frame of camera motion: by 4 the chart's 0.5 px pan read 0.0117 -> 0.0136 at Low)
             keepR = ((1.0f - smoothstep(0.0f, 0.02352941222488880157470703125f, outside)) * (1.0f - clamp(motionPx / 2.0f, 0.0f, 1.0f))) * (1.0f - max(msk.x, msk.z));
             keep = max(keep, keepR);
         }
+        // an effect or a thing moving on its own is no thin wire
         keep *= (1.0f - max(msk.x, msk.z));
         float3 hc = h;
         if ((taa2Red & 1) == 0)
         {
-            float3 param_4 = h;
-            float3 param_5 = clamp(cur, bmn, bmx);
-            float3 param_6 = bmn;
-            float3 param_7 = bmx;
-            hc = clipToward(param_4, param_5, param_6, param_7);
+            float3 hArg = h;
+            float3 cArg2 = clamp(cur, bmn, bmx);
+            float3 mnArg = bmn;
+            float3 mxArg = bmx;
+            hc = clipToward(hArg, cArg2, mnArg, mxArg);
         }
         h = lerp(hc, h0, keep.xxx);
+        // a history the box had to pull far is likely stale (an unvectored mover): trust it less, so trails die fast
         float rej = clamp(length(h0 - hc) / max(length(bmx - bmn), 0.001000000047497451305389404296875f), 0.0f, 1.0f) * (1.0f - keep);
         float rest = (taa2Tier >= 2) ? 0.930000007152557373046875f : 0.89999997615814208984375f;
+        // lane TAA4: moving, the history weight falls to 0.4 by 2 px a frame (was 0.8 by 32 px: the lag over the game's)
         bool oldMotion = (taa2Red & 32) != 0;
         float alpha = lerp(rest, oldMotion ? 0.800000011920928955078125f : 0.4000000059604644775390625f, clamp(motionPx / (oldMotion ? 32.0f : 2.0f), 0.0f, 1.0f)) * (1.0f - rej);
         alpha = lerp(alpha, max(alpha, 0.959999978542327880859375f), keepR);
+        // reactive: particles and effects follow this frame
         alpha *= (1.0f - msk.x);
+        // water, glass: their depth is the thing behind them
         alpha = min(alpha, lerp(alpha, 0.5f, msk.y));
         if (taa2Tier >= 3)
         {
+            // disoccluded: the history there was clearly nearer than where this pixel's surface was last frame
+            // (only for the camera's own vectors: a thing that moved on its own was not where reproj puts it)
             float4 p = mul(float4((((float2(dTap) + 0.5f.xx) * invSize) * 2.0f) - 1.0f.xx, (dMin * 2.0f) - 1.0f, 1.0f), reproj);
             float expect = 1.0f - (((p.z / p.w) * 0.5f) + 0.5f);
             float was = histTex.Load(int3(clamp(int2(huv * float2(size)), int2(0, 0), size - int2(1, 1)), 0)).w;
-            bool tmp1110 = msk.z < 0.5f;
-            bool tmp1120;
-            if (tmp1110)
+            bool cond3 = msk.z < 0.5f;
+            bool cond2;
+            if (cond3)
             {
-                tmp1120 = was > ((expect * 1.0499999523162841796875f) + 9.9999997473787516355514526367188e-05f);
+                cond2 = was > ((expect * 1.0499999523162841796875f) + 9.9999997473787516355514526367188e-05f);
             }
             else
             {
-                tmp1120 = tmp1110;
+                cond2 = cond3;
             }
-            bool tmp1130;
-            if (tmp1120)
+            bool cond;
+            if (cond2)
             {
-                tmp1130 = ((taa2Red & 128) != 0) || (keep < 0.5f);
+                cond = ((taa2Red & 128) != 0) || (keep < 0.5f);
             }
             else
             {
-                tmp1130 = tmp1120;
+                cond = cond2;
             }
-            if (tmp1130)
+            if (cond)
             {
                 alpha = 0.0f;
             }
+            // Karis 2014: each side weighted by 1 / (1 + luma), so a lone bright sample cannot flicker the pixel
             float wc = (1.0f - alpha) / (1.0f + cur.x);
             float wh = alpha / (1.0f + h.x);
             res = ((cur * wc) + (h * wh)) / max(wc + wh, 9.9999999747524270787835121154785e-07f).xxx;
@@ -362,23 +391,25 @@ void frag_main()
             res = lerp(cur, h, alpha.xxx);
         }
     }
-    float3 param_8 = res;
-    float3 rgb = max(toRgb(param_8), 0.0f.xxx);
+    float3 yArg = res;
+    float3 rgb = max(toRgb(yArg), 0.0f.xxx);
     o0 = float4(rgb, 1.0f - min(dMin, 1.0f));
-    float4 tmp1183;
+    float4 o1Pick;
     if (taa2Linear != 0)
     {
-        float3 param_9 = rgb;
-        float3 tmp1188 = tonemapOut(param_9);
-        tmp1183 = float4(tmp1188, 1.0f);
+        float3 tArg = rgb;
+        float3 tonemapOutRet = tonemapOut(tArg);
+        o1Pick = float4(tonemapOutRet, 1.0f);
     }
     else
     {
-        float3 param_10 = clamp(rgb, 0.0f.xxx, 1.0f.xxx);
-        float2 param_11 = gl_FragCoord.xy;
-        tmp1183 = float4(wwDither8(param_10, param_11), 1.0f);
+        float3 cArg = clamp(rgb, 0.0f.xxx, 1.0f.xxx);
+        float2 fragCoordArg = gl_FragCoord.xy;
+        o1Pick = float4(wwDither8(cArg, fragCoordArg), 1.0f);
     }
-    o1 = tmp1183;
+    // lane FOGGLOW1: into the 8-bit picture, dithered; lane POSTFX3: the linear frame's picture back to light (half floats)
+    o1 = o1Pick;
+    // lane FARTOGGLE3: b, a the recent range (was 0, 1; the lock is RGBA16F now)
     o2 = float4(lockOut, rng);
 }
 

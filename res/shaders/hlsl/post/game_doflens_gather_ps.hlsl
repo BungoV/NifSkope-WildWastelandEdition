@@ -39,16 +39,16 @@ uint2 spvTextureSize(Texture2D<float4> Tex, uint Level, out uint Param)
 
 float sat(float v)
 {
-    float tmp16;
+    float satRet;
     if (v >= 0.0f)
     {
-        tmp16 = min(v, 1.0f);
+        satRet = min(v, 1.0f);
     }
     else
     {
-        tmp16 = 0.0f;
+        satRet = 0.0f;
     }
-    return tmp16;
+    return satRet;
 }
 
 void frag_main()
@@ -58,25 +58,25 @@ void frag_main()
     float4 c0 = t0.Load(int3(q, 0));
     float cc = c0.w;
     float rc = max(cc, 0.0f) * 0.5f;
-    float tmp72;
+    float rnPick;
     if (lensQ.y == 0.0f)
     {
-        tmp72 = 0.0f;
+        rnPick = 0.0f;
     }
     else
     {
-        float tmp79;
+        float rnPick2;
         if (lensQ.w > 0.5f)
         {
-            tmp79 = t1.Load(int3(q / int2(8, 8), 0)).x;
+            rnPick2 = t1.Load(int3(q / int2(8, 8), 0)).x;
         }
         else
         {
-            tmp79 = lensQ.x * 0.5f;
+            rnPick2 = lensQ.x * 0.5f;
         }
-        tmp72 = tmp79;
+        rnPick = rnPick2;
     }
-    float rn = tmp72;
+    float rn = rnPick;
     float rk = max(rc, rn);
     if (rk < 0.5f)
     {
@@ -92,6 +92,7 @@ void frag_main()
     float share = (rk * rk) / 32.0f;
     for (int i = 0; i < 32; i++)
     {
+        // full px
         float t = sqrt((float(i) + 0.5f) / 32.0f) * rk;
         float an = float(i) * 2.3999631404876708984375f;
         float2 o = float2(cos(an), sin(an)) * t;
@@ -101,38 +102,38 @@ void frag_main()
         {
             rf = min(rf, rc);
         }
-        float param = (rf - t) + 0.5f;
-        float w = sat(param);
+        float vArg3 = (rf - t) + 0.5f;
+        float w = sat(vArg3);
         fa += (cs.xyz * w);
         fw += w;
         float rN = max(-cs.w, 0.0f) * 0.5f;
-        float param_1 = (rN - t) + 0.5f;
-        float d = (sat(param_1) * share) / max(rN * rN, 1.0f);
+        float vArg2 = (rN - t) + 0.5f;
+        float d = (sat(vArg2) * share) / max(rN * rN, 1.0f);
         na += (cs.xyz * d);
         nd += d;
     }
-    float3 tmp243;
+    float3 farOutPick;
     if (fw > 9.9999997473787516355514526367188e-05f)
     {
-        tmp243 = fa / fw.xxx;
+        farOutPick = fa / fw.xxx;
     }
     else
     {
-        tmp243 = c0.xyz;
+        farOutPick = c0.xyz;
     }
-    farOut = float4(tmp243, 1.0f);
-    float param_2 = nd;
-    float a = sat(param_2);
-    float4 tmp264;
+    farOut = float4(farOutPick, 1.0f);
+    float vArg = nd;
+    float a = sat(vArg);
+    float4 nearOutPick;
     if (nd > 0.0f)
     {
-        tmp264 = float4((na / nd.xxx) * a, a);
+        nearOutPick = float4((na / nd.xxx) * a, a);
     }
     else
     {
-        tmp264 = 0.0f.xxxx;
+        nearOutPick = 0.0f.xxxx;
     }
-    nearOut = tmp264;
+    nearOut = nearOutPick;
 }
 
 SPIRV_Cross_Output main(SPIRV_Cross_Input stage_input)

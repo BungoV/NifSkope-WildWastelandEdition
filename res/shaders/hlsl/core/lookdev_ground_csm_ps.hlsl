@@ -4,8 +4,8 @@
 // named in notes/vkcompute1/hlsl_plan.md. Not wired: nothing loads this file.
 // profile: ps_6_0
 #include "CoreBindingsVk.hlsli"
-static const float2 tmp4887[16] = { float2(0.493393003940582275390625f, 0.39426898956298828125f), float2(0.7985470294952392578125f, 0.885922014713287353515625f), float2(0.2473219931125640869140625f, 0.9264500141143798828125f), float2(0.051454000174999237060546875f, 0.14078199863433837890625f), float2(0.83184301853179931640625f, 0.00955200009047985076904296875f), float2(0.4286319911479949951171875f, 0.01715099997818470001220703125f), float2(0.01565600000321865081787109375f, 0.7497789859771728515625f), float2(0.758385002613067626953125f, 0.4961700141429901123046875f), float2(0.22348700463771820068359375f, 0.562151014804840087890625f), float2(0.01162800006568431854248046875f, 0.406994998455047607421875f), float2(0.24146200716495513916015625f, 0.3046360015869140625f), float2(0.4303109943866729736328125f, 0.7272260189056396484375f), float2(0.981810986995697021484375f, 0.278358995914459228515625f), float2(0.4070560038089752197265625f, 0.500533998012542724609375f), float2(0.123478002846240997314453125f, 0.4635460078716278076171875f), float2(0.809534013271331787109375f, 0.682272017002105712890625f) };
-static const float3 tmp6928[3] = { float3(1.0f, 0.25f, 0.25f), float3(0.25f, 1.0f, 0.25f), float3(0.300000011920928955078125f, 0.449999988079071044921875f, 1.0f) };
+static const float2 csmPoisson[16] = { float2(0.493393003940582275390625f, 0.39426898956298828125f), float2(0.7985470294952392578125f, 0.885922014713287353515625f), float2(0.2473219931125640869140625f, 0.9264500141143798828125f), float2(0.051454000174999237060546875f, 0.14078199863433837890625f), float2(0.83184301853179931640625f, 0.00955200009047985076904296875f), float2(0.4286319911479949951171875f, 0.01715099997818470001220703125f), float2(0.01565600000321865081787109375f, 0.7497789859771728515625f), float2(0.758385002613067626953125f, 0.4961700141429901123046875f), float2(0.22348700463771820068359375f, 0.562151014804840087890625f), float2(0.01162800006568431854248046875f, 0.406994998455047607421875f), float2(0.24146200716495513916015625f, 0.3046360015869140625f), float2(0.4303109943866729736328125f, 0.7272260189056396484375f), float2(0.981810986995697021484375f, 0.278358995914459228515625f), float2(0.4070560038089752197265625f, 0.500533998012542724609375f), float2(0.123478002846240997314453125f, 0.4635460078716278076171875f), float2(0.809534013271331787109375f, 0.682272017002105712890625f) };
+static const float3 tint[3] = { float3(1.0f, 0.25f, 0.25f), float3(0.25f, 1.0f, 0.25f), float3(0.300000011920928955078125f, 0.449999988079071044921875f, 1.0f) };
 
 cbuffer globalUniforms : register(b0, space0)
 {
@@ -220,25 +220,26 @@ uint3 spvTextureSize(Texture3D<float4> Tex, uint Level, out uint Param)
 //! the 16-tap Poisson filter, radius 3 texels
 float csmFiltered(int i, float3 posView, float offsetWorld)
 {
-    int param = i;
-    float3 param_1 = posView + (csmNOff * ussCsmTexel[i]);
-    float3 q = csmUvd(param, param_1);
-    float tmp4806;
+    int iArg = i;
+    float3 posViewArg = posView + (csmNOff * ussCsmTexel[i]);
+    // lane SHADOWSHIMMER2: as csmHard
+    float3 q = csmUvd(iArg, posViewArg);
+    float zRefPick;
     if (ussCsmStable.w != 0.0f)
     {
-        tmp4806 = ussCsmBias[i];
+        zRefPick = ussCsmBias[i];
     }
     else
     {
-        tmp4806 = offsetWorld;
+        zRefPick = offsetWorld;
     }
-    float zRef = q.z - (tmp4806 * csmInvRange[i]);
+    float zRef = q.z - (zRefPick * csmInvRange[i]);
     float k = 6.0f / csmParams.z;
     float sum = 0.0f;
     for (int t = 0; t < 16; t++)
     {
-        float4 tmp4903 = float4(q.xy + ((tmp4887[t] - 0.5f.xx) * k), float(i), zRef);
-        sum += csmMap.SampleCmp(_csmMap_sampler, tmp4903.xyz, tmp4903.w);
+        float4 sumPart = float4(q.xy + ((csmPoisson[t] - 0.5f.xx) * k), float(i), zRef);
+        sum += csmMap.SampleCmp(_csmMap_sampler, sumPart.xyz, sumPart.w);
     }
     return sum / 16.0f;
 }
@@ -316,38 +317,40 @@ float csmFiltered(int i, float3 posView, float offsetWorld)
 
 float3 dalcAmbient(float3 n)
 {
+    // the axis name is the light's TRAVEL direction (assumption, owed to Todd's treat):
+    // an up-facing normal takes the Z- colour
     float3 n2 = n * n;
     bool fx = dalcFlip;
-    float3 tmp7304;
+    float3 xPick;
     if ((n.x > 0.0f) != fx)
     {
-        tmp7304 = dalc[1];
+        xPick = dalc[1];
     }
     else
     {
-        tmp7304 = dalc[0];
+        xPick = dalc[0];
     }
-    float3 x = tmp7304;
-    float3 tmp7322;
+    float3 x = xPick;
+    float3 yPick;
     if ((n.y > 0.0f) != fx)
     {
-        tmp7322 = dalc[3];
+        yPick = dalc[3];
     }
     else
     {
-        tmp7322 = dalc[2];
+        yPick = dalc[2];
     }
-    float3 y = tmp7322;
-    float3 tmp7337;
+    float3 y = yPick;
+    float3 zPick;
     if ((n.z > 0.0f) != fx)
     {
-        tmp7337 = dalc[5];
+        zPick = dalc[5];
     }
     else
     {
-        tmp7337 = dalc[4];
+        zPick = dalc[4];
     }
-    float3 z = tmp7337;
+    float3 z = zPick;
     return ((x * n2.x) + (y * n2.y)) + (z * n2.z);
 }
 
@@ -524,24 +527,25 @@ bool wwSunShadowProbe(float3 posView, float3 shaded, out float3 outc)
     outc = shaded;
     if ((ussOn != 0) && (ussView > 0))
     {
+        // lane TERRSHADOW1: the debug ladder (raw grey, or the weights as numbers)
         float3 dPx = ddx(posView);
         float3 dPy = ddy(posView);
-        float3 param = posView;
-        float3 param_1 = dPx;
-        float3 param_2 = dPy;
-        float param_3;
-        float tmp6770 = ussCascades(param, param_1, param_2, param_3);
-        float w = param_3;
-        float casc = tmp6770;
-        float3 param_4 = dPx;
-        float3 param_5 = dPy;
-        float3 param_6 = posView;
-        float param_8 = ussSlope(param_4, param_5);
-        bool param_9 = true;
-        float param_7;
-        float tmp6784 = ussTerrain(param_6, param_7, param_8, param_9);
-        float inMap = param_7;
-        float terr = tmp6784;
+        float3 posViewArg9 = posView;
+        float3 dPxArg3 = dPx;
+        float3 dPyArg3 = dPy;
+        float wArg;
+        float ussCascadesRet = ussCascades(posViewArg9, dPxArg3, dPyArg3, wArg);
+        float w = wArg;
+        float casc = ussCascadesRet;
+        float3 dPxArg2 = dPx;
+        float3 dPyArg2 = dPy;
+        float3 posViewArg8 = posView;
+        float gradArg = ussSlope(dPxArg2, dPyArg2);
+        bool penArg = true;
+        float inMapArg;
+        float ussTerrainRet = ussTerrain(posViewArg8, inMapArg, gradArg, penArg);
+        float inMap = inMapArg;
+        float terr = ussTerrainRet;
         float con = ussContact();
         if (ussView == 1)
         {
@@ -563,9 +567,9 @@ bool wwSunShadowProbe(float3 posView, float3 shaded, out float3 outc)
                 {
                     if (ussView == 4)
                     {
-                        float3 param_10 = posView;
-                        float tmp6817 = ussCompose(param_10);
-                        outc = tmp6817.xxx;
+                        float3 posViewArg7 = posView;
+                        float ussComposeRet = ussCompose(posViewArg7);
+                        outc = ussComposeRet.xxx;
                     }
                     else
                     {
@@ -582,98 +586,102 @@ bool wwSunShadowProbe(float3 posView, float3 shaded, out float3 outc)
     }
     if (ussCsmStable.w > 0.0f)
     {
-        float3 param_11 = posView;
-        float3 param_12 = ddx(posView);
-        float3 param_13 = ddy(posView);
-        csmNOff = csmNormalOff(param_11, param_12, param_13);
+        float3 posViewArg6 = posView;
+        float3 dPxArg = ddx(posView);
+        float3 dPyArg = ddy(posView);
+        // lane SHADOWSHIMMER2: probes 1 / 3 as drawn
+        csmNOff = csmNormalOff(posViewArg6, dPxArg, dPyArg);
     }
     float dv = (-posView.z) * csmParams.x;
-    float3 param_14 = posView;
-    int param_15;
-    int param_16;
-    float param_17;
-    csmSelect(param_14, param_15, param_16, param_17);
-    int a = param_15;
-    int b = param_16;
-    float t = param_17;
+    float3 posViewArg5 = posView;
+    int aArg;
+    int bArg;
+    float tArg;
+    csmSelect(posViewArg5, aArg, bArg, tArg);
+    // lane FARGRID1: the near grid's end, then the far grid's, the tail from the far grid's last slice
+    int a = aArg;
+    int b = bArg;
+    float t = tArg;
     if (csmProbe == 1)
     {
         int i = (t < 0.5f) ? a : b;
-        float tmp6881;
+        float outcPick3;
         if (dv > (csmParams.y + csmParams.w))
         {
-            tmp6881 = 1.0f;
+            outcPick3 = 1.0f;
         }
         else
         {
-            float tmp6888;
+            float offsetWorldPick;
             if (i == a)
             {
-                tmp6888 = csmSplitOffset.z;
+                offsetWorldPick = csmSplitOffset.z;
             }
             else
             {
-                tmp6888 = csmSplitOffset.w;
+                offsetWorldPick = csmSplitOffset.w;
             }
-            int param_18 = i;
-            float3 param_19 = posView;
-            float param_20 = tmp6888;
-            tmp6881 = csmHard(param_18, param_19, param_20);
+            int iArg2 = i;
+            float3 posViewArg4 = posView;
+            float offsetWorldArg = offsetWorldPick;
+            outcPick3 = csmHard(iArg2, posViewArg4, offsetWorldArg);
         }
-        outc = tmp6881.xxx;
+        outc = outcPick3.xxx;
     }
     else
     {
         if (csmProbe == 2)
         {
-            float3 tmp6918;
+            float3 cPick;
             if (dv > (csmParams.y + csmParams.w))
             {
-                tmp6918 = 1.0f.xxx;
+                cPick = 1.0f.xxx;
             }
             else
             {
-                tmp6918 = lerp(tmp6928[a], tmp6928[b], t.xxx);
+                cPick = lerp(tint[a], tint[b], t.xxx);
             }
-            float3 c = tmp6918;
+            float3 c = cPick;
             outc = shaded * c;
         }
         else
         {
             if (csmProbe == 3)
             {
-                float tmp6957;
+                float outcPick2;
                 if (dv > (csmParams.y + csmParams.w))
                 {
-                    tmp6957 = 1.0f;
+                    outcPick2 = 1.0f;
                 }
                 else
                 {
-                    float3 param_21 = posView;
-                    tmp6957 = csmBlended(param_21);
+                    float3 posViewArg3 = posView;
+                    outcPick2 = csmBlended(posViewArg3);
                 }
-                outc = tmp6957.xxx;
+                outc = outcPick2.xxx;
             }
             else
             {
                 if (csmProbe == 5)
                 {
-                    float3 tmp6978;
+                    float3 outcPick;
                     if (dv > (csmParams.y + csmParams.w))
                     {
-                        tmp6978 = 1.0f.xxx;
+                        outcPick = 1.0f.xxx;
                     }
                     else
                     {
-                        tmp6978 = float3(float(a) * 0.5f, float(b) * 0.5f, t);
+                        outcPick = float3(float(a) * 0.5f, float(b) * 0.5f, t);
                     }
-                    outc = tmp6978;
+                    // the selection as numbers: R = cascade A / 2, G = cascade B / 2, B = the blend weight;
+                    // past D + B all three are 1
+                    outc = outcPick;
                 }
                 else
                 {
-                    float3 param_22 = posView;
-                    float tmp6994 = wwSunShadow(param_22);
-                    outc = tmp6994.xxx;
+                    float3 posViewArg2 = posView;
+                    float wwSunShadowRet = wwSunShadow(posViewArg2);
+                    outc = wwSunShadowRet.xxx;
                 }
             }
         }
@@ -690,49 +698,52 @@ void frag_main()
     float3 base = 0.180000007152557373046875f.xxx;
     if (hasBaseMap)
     {
-        float3 param = BaseMap.Sample(_BaseMap_sampler, uv).xyz;
-        base = srgbToLinear(param);
+        float3 cArg2 = BaseMap.Sample(_BaseMap_sampler, uv).xyz;
+        base = srgbToLinear(cArg2);
     }
     float3 n = float3(0.0f, 0.0f, 1.0f);
     if (hasNormalMap)
     {
         float2 g = (NormalMap.Sample(_NormalMap_sampler, uv).xy * 2.0f) - 1.0f.xx;
+        // DirectX-style green (+G = image down = world -Y here)
         n = normalize(float3(g.x, -g.y, sqrt(max(1.0f - dot(g, g), 0.0f))));
     }
     float NdotL = max(dot(n, sunDirWorld), 0.0f);
-    float3 param_1 = viewPos;
-    float tmp7434 = wwSunShadow(param_1);
-    float3 param_2 = n;
-    float3 color = (((base * sunLinear) * NdotL) * tmp7434) + (base * dalcAmbient(param_2));
-    float3 param_3 = color;
-    float3 param_4 = viewPos;
-    float3 tmp7446 = wwFog(param_3, param_4);
-    color = tmp7446;
+    float3 posViewArg13 = viewPos;
+    float wwSunShadowRet2 = wwSunShadow(posViewArg13);
+    float3 nArg = n;
+    // lane CSM1 (spec 2.8): the cascade factor on the sun term only
+    float3 color = (((base * sunLinear) * NdotL) * wwSunShadowRet2) + (base * dalcAmbient(nArg));
+    float3 preFogArg = color;
+    float3 posViewArg12 = viewPos;
+    float3 wwFogRet = wwFog(preFogArg, posViewArg12);
+    // lane FOG1: linear, before the exposure
+    color = wwFogRet;
     if (groundLeak >= 0.0f)
     {
         color = lerp(0.0f.xxx, color, groundLeak.xxx);
     }
-    float3 param_5 = color;
-    float3 tmp7460 = studioOutput(param_5);
-    fragColor = float4(tmp7460, 1.0f);
+    float3 cArg = color;
+    float3 studioOutputRet = studioOutput(cArg);
+    fragColor = float4(studioOutputRet, 1.0f);
     if (groundLeak >= 0.0f)
     {
         fragColor.w = groundLeak;
     }
-    float3 param_6 = viewPos;
-    float3 param_7;
-    bool tmp7476 = wwFogProbe(param_6, param_7);
-    float3 probe = param_7;
-    if (tmp7476)
+    float3 posViewArg11 = viewPos;
+    float3 oArg;
+    bool wwFogProbeRet = wwFogProbe(posViewArg11, oArg);
+    float3 probe = oArg;
+    if (wwFogProbeRet)
     {
         fragColor = float4(probe, 1.0f);
     }
-    float3 param_8 = viewPos;
-    float3 param_9 = fragColor.xyz;
-    float3 param_10;
-    bool tmp7492 = wwSunShadowProbe(param_8, param_9, param_10);
-    float3 csmProbeOut = param_10;
-    if (tmp7492)
+    float3 posViewArg10 = viewPos;
+    float3 shadedArg = fragColor.xyz;
+    float3 outcArg;
+    bool wwSunShadowProbeRet = wwSunShadowProbe(posViewArg10, shadedArg, outcArg);
+    float3 csmProbeOut = outcArg;
+    if (wwSunShadowProbeRet)
     {
         fragColor = float4(csmProbeOut, 1.0f);
     }

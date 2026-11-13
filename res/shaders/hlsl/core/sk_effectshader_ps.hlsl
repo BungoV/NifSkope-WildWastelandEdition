@@ -81,13 +81,17 @@ void frag_main()
 {
     float4 baseMap = BaseMap.Sample(_BaseMap_sampler, (texCoord * uvScale) + uvOffset);
     float3 normal = normalize(N);
+    // Reconstructed normal
+    // normal = normalize(cross(dFdy(v.xyz), dFdx(v.xyz)));
     float3 E = normalize(ViewDir);
-    float tmp2 = falloffDepth;
+    float part = falloffDepth;
+    // Falloff
     float falloff = 1.0f;
     if (useFalloff)
     {
         float startO = min(falloffParams.z, 1.0f);
         float stopO = max(falloffParams.w, 0.0f);
+        // TODO: When X and Y are both 0.0 or both 1.0 the effect is reversed.
         falloff = smoothstep(falloffParams.y, falloffParams.x, abs(E.z));
         falloff = lerp(max(falloffParams.w, 0.0f), min(falloffParams.z, 1.0f), falloff);
     }
@@ -95,48 +99,50 @@ void frag_main()
     float4 color = baseMap;
     if (hasWeaponBlood)
     {
-        float3 tmp114 = float3(1.0f, 0.0f, 0.0f) * baseMap.x;
-        color.x = tmp114.x;
-        color.y = tmp114.y;
-        color.z = tmp114.z;
+        float3 colorPart3 = float3(1.0f, 0.0f, 0.0f) * baseMap.x;
+        color.x = colorPart3.x;
+        color.y = colorPart3.y;
+        color.z = colorPart3.z;
         color.w = baseMap.w * baseMap.y;
     }
     color *= C;
-    float4 tmp134 = color;
-    float3 tmp136 = tmp134.xyz * glowColor.xyz;
-    color.x = tmp136.x;
-    color.y = tmp136.y;
-    color.z = tmp136.z;
+    float4 colorPart2 = color;
+    float3 colorPart = colorPart2.xyz * glowColor.xyz;
+    color.x = colorPart.x;
+    color.y = colorPart.y;
+    color.z = colorPart.z;
     color.w *= (falloff * alphaMult);
     if (greyscaleColor)
     {
+        // Only Red emissive channel is used
         float emRGB = glowColor.x;
-        float param = baseMap.y;
-        float param_1 = (C.y * falloff) * emRGB;
-        float4 luG = colorLookup(param, param_1);
+        float xArg2 = baseMap.y;
+        float yArg2 = (C.y * falloff) * emRGB;
+        float4 luG = colorLookup(xArg2, yArg2);
         color.x = luG.xyz.x;
         color.y = luG.xyz.y;
         color.z = luG.xyz.z;
     }
     if (greyscaleAlpha)
     {
-        float param_2 = baseMap.w;
-        float param_3 = (C.w * falloff) * alphaMult;
-        float4 luA = colorLookup(param_2, param_3);
+        float xArg = baseMap.w;
+        float yArg = (C.w * falloff) * alphaMult;
+        float4 luA = colorLookup(xArg, yArg);
         color.w = luA.w;
     }
     if (alphaFlags > 0)
     {
-        int tmp212;
+        int mPick;
         if (color.w < alphaThreshold)
         {
-            tmp212 = 11051;
+            mPick = 11051;
         }
         else
         {
-            tmp212 = (color.w > alphaThreshold) ? 29041 : 19789;
+            mPick = (color.w > alphaThreshold) ? 29041 : 19789;
         }
-        int m = tmp212;
+        // 0: always, 1: <, 2: ==, 3: <=, 4: >, 5: !=, 6: >=, 7: never
+        int m = mPick;
         if ((m & (1 << alphaFlags)) == 0)
         {
             discard;

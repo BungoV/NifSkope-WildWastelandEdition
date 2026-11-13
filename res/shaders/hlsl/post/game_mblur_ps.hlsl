@@ -43,45 +43,45 @@ float2 V(float2 d)
 
 float2 mvAt(float2 d)
 {
-    float2 param = d;
-    float2 m = t1.Sample(_t1_sampler, V(param)).xy;
+    float2 dArg = d;
+    float2 m = t1.Sample(_t1_sampler, V(dArg)).xy;
     return float2(m.x, -m.y);
 }
 
 float sat(float v)
 {
-    float tmp30;
+    float satRet;
     if (v >= 0.0f)
     {
-        tmp30 = min(v, 1.0f);
+        satRet = min(v, 1.0f);
     }
     else
     {
-        tmp30 = 0.0f;
+        satRet = 0.0f;
     }
-    return tmp30;
+    return satRet;
 }
 
 float tapW(float2 m, float L)
 {
     float l = sqrt(dot(m, m));
-    float param = ((-abs(L - l)) * c0.z) + 1.0f;
-    return sat(param);
+    float vArg = ((-abs(L - l)) * c0.z) + 1.0f;
+    return sat(vArg);
 }
 
 void frag_main()
 {
     float2 g = gl_FragCoord.xy / float2(int2(spvTextureSize(t0, uint(0), dummy_parameter)));
-    float2 param = g;
-    float2 v1 = V(param);
-    float2 param_1 = v1;
-    float2 m = mvAt(param_1);
+    float2 dArg11 = g;
+    float2 v1 = V(dArg11);
+    float2 dArg10 = v1;
+    float2 m = mvAt(dArg10);
     float l2 = dot(m, m);
     float L = sqrt(l2);
     float2 dc = v1 - c1.zw;
     float rr = sqrt(dot(dc, dc));
-    float param_2 = (rr * 0.100000001490116119384765625f) + (-0.017999999225139617919921875f);
-    rr = sat(param_2);
+    float vArg2 = (rr * 0.100000001490116119384765625f) + (-0.017999999225139617919921875f);
+    rr = sat(vArg2);
     rr = L * rr;
     if (rr < 0.001000000047497451305389404296875f)
     {
@@ -93,36 +93,36 @@ void frag_main()
     dir *= len;
     dir *= c0.x;
     float2 p0 = min(v1, c1.xy);
-    float2 param_3 = p0;
-    float2 param_4 = mvAt(param_3);
-    float param_5 = L;
-    float w0 = tapW(param_4, param_5);
-    float2 param_6 = p0;
-    float3 col = t0.Sample(_t0_sampler, V(param_6)).xyz;
+    float2 dArg9 = p0;
+    float2 mArg4 = mvAt(dArg9);
+    float LArg4 = L;
+    float w0 = tapW(mArg4, LArg4);
+    float2 dArg8 = p0;
+    float3 col = t0.Sample(_t0_sampler, V(dArg8)).xyz;
     float4 p12 = min((dir.xyxy * float4(0.25f, 0.25f, 0.5f, 0.5f)) + v1.xyxy, c1.xyxy);
-    float2 param_7 = p12.xy;
-    float2 param_8 = mvAt(param_7);
-    float param_9 = L;
-    float w1 = tapW(param_8, param_9);
+    float2 dArg7 = p12.xy;
+    float2 mArg3 = mvAt(dArg7);
+    float LArg3 = L;
+    float w1 = tapW(mArg3, LArg3);
     float ws = w0 + w1;
-    float2 param_10 = p12.xy;
-    float3 c1t = t0.Sample(_t0_sampler, V(param_10)).xyz * w1;
+    float2 dArg6 = p12.xy;
+    float3 c1t = t0.Sample(_t0_sampler, V(dArg6)).xyz * w1;
     col = (col * w0) + c1t;
-    float2 param_11 = p12.zw;
-    float2 param_12 = mvAt(param_11);
-    float param_13 = L;
-    float w2 = tapW(param_12, param_13);
+    float2 dArg5 = p12.zw;
+    float2 mArg2 = mvAt(dArg5);
+    float LArg2 = L;
+    float w2 = tapW(mArg2, LArg2);
     ws = w2 + ws;
-    float2 param_14 = p12.zw;
-    col = (t0.Sample(_t0_sampler, V(param_14)).xyz * w2) + col;
+    float2 dArg4 = p12.zw;
+    col = (t0.Sample(_t0_sampler, V(dArg4)).xyz * w2) + col;
     float2 p3 = min((dir * 0.75f) + v1, c1.xy);
-    float2 param_15 = p3;
-    float2 param_16 = mvAt(param_15);
-    float param_17 = L;
-    float w3 = tapW(param_16, param_17);
+    float2 dArg3 = p3;
+    float2 mArg = mvAt(dArg3);
+    float LArg = L;
+    float w3 = tapW(mArg, LArg);
     ws = w3 + ws;
-    float2 param_18 = p3;
-    col = (t0.Sample(_t0_sampler, V(param_18)).xyz * w3) + col;
+    float2 dArg2 = p3;
+    col = (t0.Sample(_t0_sampler, V(dArg2)).xyz * w3) + col;
     ws += 0.001000000047497451305389404296875f;
     fragColor = float4(col / ws.xxx, 1.0f);
 }

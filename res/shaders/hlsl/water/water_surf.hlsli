@@ -24,10 +24,10 @@ float wwSurfFoamAlpha(float D_1, float2 P, float foot, float t)
     {
         return 0.0f;
     }
-    float2 tmp1 = P;
-    float tmp2 = foot;
-    float tmp3 = t;
-    float3 det = wwFoamDetail(tmp1, tmp2, tmp3);
+    float2 detPart3 = P;
+    float detPart2 = foot;
+    float detPart = t;
+    float3 det = wwFoamDetail(detPart3, detPart2, detPart);
     float s = lerp(0.5f, waterShoreK0.w, det.z);
     float a = smoothstep((1.0f - D_1) - s, (1.0f - D_1) + s, det.x);
     return ((a * lerp(det.y, 1.0f, D_1 * D_1)) * min(1.0f, 1.5f * D_1)) * waterSurfK.w;

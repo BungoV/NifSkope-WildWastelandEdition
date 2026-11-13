@@ -37,17 +37,17 @@ uint2 spvTextureSize(Texture2DMS<float4> Tex, uint Level, out uint Param)
 
 float finiteOr0(float v)
 {
-    bool tmp14 = isnan(v);
-    bool tmp20;
-    if (!tmp14)
+    bool cond = isnan(v);
+    bool finiteOr0Ret;
+    if (!cond)
     {
-        tmp20 = isinf(v);
+        finiteOr0Ret = isinf(v);
     }
     else
     {
-        tmp20 = tmp14;
+        finiteOr0Ret = cond;
     }
-    return tmp20 ? 0.0f : v;
+    return finiteOr0Ret ? 0.0f : v;
 }
 
 void frag_main()
@@ -61,17 +61,17 @@ void frag_main()
         for (int x = 0; x < 4; x++)
         {
             int2 p = base + int2(x, y);
-            bool tmp83 = p.x >= size.x;
-            bool tmp93;
-            if (!tmp83)
+            bool cond3 = p.x >= size.x;
+            bool cond2;
+            if (!cond3)
             {
-                tmp93 = p.y >= size.y;
+                cond2 = p.y >= size.y;
             }
             else
             {
-                tmp93 = tmp83;
+                cond2 = cond3;
             }
-            if (tmp93)
+            if (cond2)
             {
                 continue;
             }
@@ -83,10 +83,10 @@ void frag_main()
             for (int i = 0; i < hdrSamples; i++)
             {
                 float3 v = hdrSrc.Load(p, i).xyz;
-                float param = v.x;
-                float param_1 = v.y;
-                float param_2 = v.z;
-                px += float3(finiteOr0(param), finiteOr0(param_1), finiteOr0(param_2));
+                float vArg3 = v.x;
+                float vArg2 = v.y;
+                float vArg = v.z;
+                px += float3(finiteOr0(vArg3), finiteOr0(vArg2), finiteOr0(vArg));
             }
             sum += (px / float(max(hdrSamples, 1)).xxx);
             cover += 1.0f;

@@ -4,8 +4,8 @@
 // named in notes/vkcompute1/hlsl_plan.md. Not wired: nothing loads this file.
 // profile: ps_6_0
 #include "AirBindingsVk.hlsli"
-static const float2 tmp1358[16] = { float2(0.493393003940582275390625f, 0.39426898956298828125f), float2(0.7985470294952392578125f, 0.885922014713287353515625f), float2(0.2473219931125640869140625f, 0.9264500141143798828125f), float2(0.051454000174999237060546875f, 0.14078199863433837890625f), float2(0.83184301853179931640625f, 0.00955200009047985076904296875f), float2(0.4286319911479949951171875f, 0.01715099997818470001220703125f), float2(0.01565600000321865081787109375f, 0.7497789859771728515625f), float2(0.758385002613067626953125f, 0.4961700141429901123046875f), float2(0.22348700463771820068359375f, 0.562151014804840087890625f), float2(0.01162800006568431854248046875f, 0.406994998455047607421875f), float2(0.24146200716495513916015625f, 0.3046360015869140625f), float2(0.4303109943866729736328125f, 0.7272260189056396484375f), float2(0.981810986995697021484375f, 0.278358995914459228515625f), float2(0.4070560038089752197265625f, 0.500533998012542724609375f), float2(0.123478002846240997314453125f, 0.4635460078716278076171875f), float2(0.809534013271331787109375f, 0.682272017002105712890625f) };
-static const float3 tmp11206[6] = { float3(1.0f, 0.0f, 0.0f), float3(-1.0f, 0.0f, 0.0f), float3(0.0f, 1.0f, 0.0f), float3(0.0f, -1.0f, 0.0f), float3(0.0f, 0.0f, 1.0f), float3(0.0f, 0.0f, -1.0f) };
+static const float2 csmPoisson[16] = { float2(0.493393003940582275390625f, 0.39426898956298828125f), float2(0.7985470294952392578125f, 0.885922014713287353515625f), float2(0.2473219931125640869140625f, 0.9264500141143798828125f), float2(0.051454000174999237060546875f, 0.14078199863433837890625f), float2(0.83184301853179931640625f, 0.00955200009047985076904296875f), float2(0.4286319911479949951171875f, 0.01715099997818470001220703125f), float2(0.01565600000321865081787109375f, 0.7497789859771728515625f), float2(0.758385002613067626953125f, 0.4961700141429901123046875f), float2(0.22348700463771820068359375f, 0.562151014804840087890625f), float2(0.01162800006568431854248046875f, 0.406994998455047607421875f), float2(0.24146200716495513916015625f, 0.3046360015869140625f), float2(0.4303109943866729736328125f, 0.7272260189056396484375f), float2(0.981810986995697021484375f, 0.278358995914459228515625f), float2(0.4070560038089752197265625f, 0.500533998012542724609375f), float2(0.123478002846240997314453125f, 0.4635460078716278076171875f), float2(0.809534013271331787109375f, 0.682272017002105712890625f) };
+static const float3 axes[6] = { float3(1.0f, 0.0f, 0.0f), float3(-1.0f, 0.0f, 0.0f), float3(0.0f, 1.0f, 0.0f), float3(0.0f, -1.0f, 0.0f), float3(0.0f, 0.0f, 1.0f), float3(0.0f, 0.0f, -1.0f) };
 
 cbuffer wwShadowFrame : register(b0, space0)
 {
@@ -475,17 +475,17 @@ int volSurfNext(inout int4 p, int4 e)
     }
     for (int k_1 = 0; k_1 < 4; k_1++)
     {
-        bool tmp10251 = p[k_1] < e[k_1];
-        bool tmp10263;
-        if (tmp10251)
+        bool cond2 = p[k_1] < e[k_1];
+        bool cond;
+        if (cond2)
         {
-            tmp10263 = cellCluster.Load(p[k_1]).x == best;
+            cond = cellCluster.Load(p[k_1]).x == best;
         }
         else
         {
-            tmp10263 = tmp10251;
+            cond = cond2;
         }
-        if (tmp10263)
+        if (cond)
         {
             p[k_1]++;
         }
@@ -497,17 +497,17 @@ bool volSurfBegin(float3 P, float3 Dw, float sA, float sB, inout int4 p, inout i
 {
     p = int4(0, 0, 0, 0);
     e = int4(0, 0, 0, 0);
-    bool tmp10282 = (!volSurfClusters) || (!cellClusterOn);
-    bool tmp10290;
-    if (!tmp10282)
+    bool cond4 = (!volSurfClusters) || (!cellClusterOn);
+    bool cond3;
+    if (!cond4)
     {
-        tmp10290 = any(bool3(volLightShift.x != 0.0f.xxx.x, volLightShift.y != 0.0f.xxx.y, volLightShift.z != 0.0f.xxx.z));
+        cond3 = any(bool3(volLightShift.x != 0.0f.xxx.x, volLightShift.y != 0.0f.xxx.y, volLightShift.z != 0.0f.xxx.z));
     }
     else
     {
-        tmp10290 = tmp10282;
+        cond3 = cond4;
     }
-    if (tmp10290)
+    if (cond3)
     {
         return false;
     }
@@ -538,10 +538,10 @@ bool volSurfBegin(float3 P, float3 Dw, float sA, float sB, inout int4 p, inout i
     }
     if (volSurfRed)
     {
-        int4 param = p;
-        int4 param_1 = e;
-        int tmp10467 = volSurfNext(param, param_1);
-        p = param;
+        int4 pArg = p;
+        int4 eArg = e;
+        int volSurfNextRet = volSurfNext(pArg, eArg);
+        p = pArg;
     }
     return true;
 }
@@ -563,13 +563,13 @@ float3 airLampJitter(int2 col, int layer, int s)
     {
         if ((volLampRed & 1) != 0)
         {
-            uint param = ((uint(col.x) * 73856093u) ^ (uint(col.y) * 19349663u)) ^ (uint(layer) * 83492791u);
-            uint tmp11878 = airMix32(param);
-            uint param_1 = tmp11878 ^ (uint(volFrame) * 2654435761u);
-            uint tmp11886 = airMix32(param_1);
-            uint param_2 = tmp11886 ^ (uint(((s * 3) + c) + 1) * 2246822519u);
-            uint tmp11897 = airMix32(param_2);
-            uint h = tmp11897;
+            uint hArg3 = ((uint(col.x) * 73856093u) ^ (uint(col.y) * 19349663u)) ^ (uint(layer) * 83492791u);
+            uint airMix32Ret3 = airMix32(hArg3);
+            uint hArg2 = airMix32Ret3 ^ (uint(volFrame) * 2654435761u);
+            uint airMix32Ret2 = airMix32(hArg2);
+            uint hArg = airMix32Ret2 ^ (uint(((s * 3) + c) + 1) * 2246822519u);
+            uint airMix32Ret = airMix32(hArg);
+            uint h = airMix32Ret;
             u[c] = (float(h >> uint(8)) + 0.5f) / 16777216.0f;
         }
         else
@@ -592,31 +592,31 @@ float airTerrH(float2 Pw)
     float hc = airTerr.Sample(_airTerr_sampler, float3((Pw.x * airTerrXf.x) + airTerrXf.y, (Pw.y * airTerrXf.z) + airTerrXf.w, 0.0f)).x;
     float2 uf = float2((Pw.x * airTerrFineXf.x) + airTerrFineXf.y, (Pw.y * airTerrFineXf.z) + airTerrFineXf.w);
     float wf = clamp(min(min(uf.x, 1.0f - uf.x), min(uf.y, 1.0f - uf.y)) * 16.0f, 0.0f, 1.0f);
-    float tmp5026;
+    float airTerrHRet;
     if (wf > 0.0f)
     {
-        tmp5026 = lerp(hc, airTerr.Sample(_airTerr_sampler, float3(uf, 1.0f)).x, wf);
+        airTerrHRet = lerp(hc, airTerr.Sample(_airTerr_sampler, float3(uf, 1.0f)).x, wf);
     }
     else
     {
-        tmp5026 = hc;
+        airTerrHRet = hc;
     }
-    return tmp5026;
+    return airTerrHRet;
 }
 
 float airGndZ(float3 L)
 {
-    float tmp8890;
+    float airGndZRet;
     if (airTerrOn != 0)
     {
-        float2 param = L.xy;
-        tmp8890 = airTerrH(param);
+        float2 PwArg = L.xy;
+        airGndZRet = airTerrH(PwArg);
     }
     else
     {
-        tmp8890 = L.z - volGndLamp.w;
+        airGndZRet = L.z - volGndLamp.w;
     }
-    return tmp8890;
+    return airGndZRet;
 }
 
 bool cellShapeIn(int i, float3 P, float3 Lpos, float shape)
@@ -633,22 +633,22 @@ bool cellShapeIn(int i, float3 P, float3 Lpos, float shape)
     float4 b1 = cellLights.Load((i * 8) + 6);
     float4 b2 = cellLights.Load((i * 8) + 7);
     float3 k = float3(dot(b0.xyz, P) + b0.w, dot(b1.xyz, P) + b1.w, dot(b2.xyz, P) + b2.w);
-    float3 tmp4643 = abs(k);
-    return all(bool3(tmp4643.x <= 1.0f.xxx.x, tmp4643.y <= 1.0f.xxx.y, tmp4643.z <= 1.0f.xxx.z));
+    float3 cellShapeInRet = abs(k);
+    return all(bool3(cellShapeInRet.x <= 1.0f.xxx.x, cellShapeInRet.y <= 1.0f.xxx.y, cellShapeInRet.z <= 1.0f.xxx.z));
 }
 
 float cellAttVan(float x, float3 c)
 {
-    float tmp3289;
+    float xePick;
     if (c.z > 0.0f)
     {
-        tmp3289 = pow(x, c.z);
+        xePick = pow(x, c.z);
     }
     else
     {
-        tmp3289 = 1.0f;
+        xePick = 1.0f;
     }
-    float xe = tmp3289;
+    float xe = xePick;
     return pow(1.0f - clamp((c.y * xe) + c.x, 0.0f, 1.0f), 2.2000000476837158203125f);
 }
 
@@ -657,171 +657,173 @@ float cellPhysRaw(float x, float s)
     float x2 = x * x;
     float w = clamp(1.0f - (x2 * x2), 0.0f, 1.0f);
     float den = x2 + (s * s);
-    float tmp3329;
+    float cellPhysRawRet;
     if (den > 0.0f)
     {
-        tmp3329 = (w * w) / den;
+        cellPhysRawRet = (w * w) / den;
     }
     else
     {
-        tmp3329 = 0.0f;
+        cellPhysRawRet = 0.0f;
     }
-    return tmp3329;
+    return cellPhysRawRet;
 }
 
 // lane LIGHTPHYS1: the physical or advanced falloff for the game's value `van` at x = d / r (lightphys.h falloff)
 float cellPhysFalloff(float van, float x, float r, float3 c)
 {
     float a = clamp(cellLightPhys.y, 0.0f, 1.0f);
-    bool tmp3349 = !(c.z > 0.0f);
-    bool tmp3364;
-    if (!tmp3349)
+    bool cond7 = !(c.z > 0.0f);
+    bool cond6;
+    if (!cond7)
     {
-        tmp3364 = !(clamp(c.y + c.x, 0.0f, 1.0f) > clamp(c.x, 0.0f, 1.0f));
+        cond6 = !(clamp(c.y + c.x, 0.0f, 1.0f) > clamp(c.x, 0.0f, 1.0f));
     }
     else
     {
-        tmp3364 = tmp3349;
+        cond6 = cond7;
     }
-    bool tmp3374;
-    if (!tmp3364)
+    bool cond5;
+    if (!cond6)
     {
-        float param = 1.0f;
-        float3 param_1 = c;
-        tmp3374 = cellAttVan(param, param_1) >= 0.0039215688593685626983642578125f;
+        float xArg4 = 1.0f;
+        float3 cArg2 = c;
+        cond5 = cellAttVan(xArg4, cArg2) >= 0.0039215688593685626983642578125f;
     }
     else
     {
-        tmp3374 = tmp3364;
+        cond5 = cond6;
     }
-    if (tmp3374)
+    if (cond5)
     {
+        // an authored curve that is no falloff keeps the game's
         return van;
     }
-    float param_2 = a;
-    float3 param_3 = c;
-    float vA = cellAttVan(param_2, param_3);
+    float xArg3 = a;
+    float3 cArg = c;
+    float vA = cellAttVan(xArg3, cArg);
     float b = 1.0f - (a * a);
-    float tmp3393;
+    float test2;
     if (b > 0.0f)
     {
-        tmp3393 = pow(b, 1.10000002384185791015625f);
+        test2 = pow(b, 1.10000002384185791015625f);
     }
     else
     {
-        tmp3393 = 0.0f;
+        test2 = 0.0f;
     }
-    if (vA > tmp3393)
+    if (vA > test2)
     {
         return van;
     }
+    // one loop for both: the program's size (GIDARK1's link limit)
     int red = int(cellLightPhysB.z + 0.5f);
     if (cellLightPhys.x > 1.5f)
     {
-        float tmp3420;
+        float x0Pick;
         if (r > 0.0f)
         {
-            tmp3420 = clamp((max(max(cellLightPhysB.x, 0.001000000047497451305389404296875f), max((0.100000001490116119384765625f * r) / 69.98999786376953125f, 0.20000000298023223876953125f)) * 69.98999786376953125f) / r, 9.9999997473787516355514526367188e-05f, 0.5f);
+            x0Pick = clamp((max(max(cellLightPhysB.x, 0.001000000047497451305389404296875f), max((0.100000001490116119384765625f * r) / 69.98999786376953125f, 0.20000000298023223876953125f)) * 69.98999786376953125f) / r, 9.9999997473787516355514526367188e-05f, 0.5f);
         }
         else
         {
-            tmp3420 = 0.5f;
+            x0Pick = 0.5f;
         }
-        float x0 = tmp3420;
+        float x0 = x0Pick;
         float den = 0.89999997615814208984375f - (0.666666686534881591796875f * x0);
         float t = clamp((x - 0.800000011920928955078125f) / 0.20000000298023223876953125f, 0.0f, 1.0f);
-        float tmp3454;
+        float wPick;
         if ((red & 2) != 0)
         {
-            tmp3454 = 1.0f;
+            wPick = 1.0f;
         }
         else
         {
-            tmp3454 = 1.0f - ((t * t) * (3.0f - (2.0f * t)));
+            wPick = 1.0f - ((t * t) * (3.0f - (2.0f * t)));
         }
-        float w = tmp3454;
+        float w = wPick;
         float m = max(x0, x);
-        float tmp3473;
+        float cellPhysFalloffRet2;
         if (den > 0.0f)
         {
-            tmp3473 = ((cellLightPhys.w / den) * w) / (m * m);
+            cellPhysFalloffRet2 = ((cellLightPhys.w / den) * w) / (m * m);
         }
         else
         {
-            tmp3473 = 0.0f;
+            cellPhysFalloffRet2 = 0.0f;
         }
-        return tmp3473;
+        return cellPhysFalloffRet2;
     }
     float s = cellLightPhys.z;
-    float param_4 = a;
-    float param_5 = s;
-    float raw = cellPhysRaw(param_4, param_5);
-    float tmp3502;
+    float xArg2 = a;
+    float sArg2 = s;
+    float raw = cellPhysRaw(xArg2, sArg2);
+    float kPick;
     if ((red & 1) != 0)
     {
-        tmp3502 = 1.0f;
+        kPick = 1.0f;
     }
     else
     {
-        float tmp3508;
+        float kPick2;
         if (raw > 0.0f)
         {
-            tmp3508 = vA / raw;
+            kPick2 = vA / raw;
         }
         else
         {
-            tmp3508 = 0.0f;
+            kPick2 = 0.0f;
         }
-        tmp3502 = tmp3508;
+        kPick = kPick2;
     }
-    float k = tmp3502;
-    float tmp3519;
+    float k = kPick;
+    float cellPhysFalloffRet;
     if (k > 0.0f)
     {
-        float param_6 = x;
-        float param_7 = s;
-        tmp3519 = k * cellPhysRaw(param_6, param_7);
+        float xArg = x;
+        float sArg = s;
+        cellPhysFalloffRet = k * cellPhysRaw(xArg, sArg);
     }
     else
     {
-        tmp3519 = van;
+        cellPhysFalloffRet = van;
     }
-    return tmp3519;
+    return cellPhysFalloffRet;
 }
 
 // PRTP2 section 1: x = saturate(d / r); atten = pow(1 - saturate(scale * x^exponent + bias), 2.2)
 float cellRadial(float d, float r, float3 bse)
 {
     float x = clamp(d / max(r, 0.001000000047497451305389404296875f), 0.0f, 1.0f);
-    float tmp3544;
+    float xePick2;
     if (bse.z > 0.0f)
     {
-        tmp3544 = pow(x, bse.z);
+        xePick2 = pow(x, bse.z);
     }
     else
     {
-        tmp3544 = 1.0f;
+        xePick2 = 1.0f;
     }
-    float xe = tmp3544;
+    float xe = xePick2;
     float k = 1.0f - clamp((bse.y * xe) + bse.x, 0.0f, 1.0f);
     if ((cellRed & 1) != 0)
     {
         return k;
     }
-    float tmp3574;
+    float cellRadialRet;
     if (cellLightPhys.x > 0.5f)
     {
-        float param = pow(k, 2.2000000476837158203125f);
-        float param_1 = x;
-        float param_2 = r;
-        float3 param_3 = bse;
-        tmp3574 = cellPhysFalloff(param, param_1, param_2, param_3);
+        float vanArg = pow(k, 2.2000000476837158203125f);
+        float xArg5 = x;
+        float rArg = r;
+        float3 cArg3 = bse;
+        cellRadialRet = cellPhysFalloff(vanArg, xArg5, rArg, cArg3);
     }
     else
     {
-        tmp3574 = pow(k, 2.2000000476837158203125f);
+        cellRadialRet = pow(k, 2.2000000476837158203125f);
     }
-    return tmp3574;
+    return cellRadialRet;
 }
 
 float3 cellGobo(int i, float3 D, float3 axis, bool spot)
@@ -830,6 +832,7 @@ float3 cellGobo(int i, float3 D, float3 axis, bool spot)
     {
         return 1.0f.xxx;
     }
+    // GOBO2: the half of a non-spot pattern (0 top, 1 bottom)
     int hf = -1;
     int h;
     float2 uv;
@@ -857,28 +860,28 @@ float3 cellGobo(int i, float3 D, float3 axis, bool spot)
         }
         float4 a0 = cellLights.Load(r);
         h = int(a0.w + 0.5f) - 1;
-        float3 tmp4245;
+        float3 lPick;
         if ((cellGoboMap & 4) != 0)
         {
-            tmp4245 = D;
+            lPick = D;
         }
         else
         {
-            tmp4245 = float3(dot(D, a0.xyz), dot(D, cellLights.Load(r + 1).xyz), dot(D, cellLights.Load(r + 2).xyz));
+            lPick = float3(dot(D, a0.xyz), dot(D, cellLights.Load(r + 1).xyz), dot(D, cellLights.Load(r + 2).xyz));
         }
-        float3 l = tmp4245;
+        float3 l = lPick;
         if ((cellGoboMap & 8) != 0)
         {
-            float3 tmp4281;
+            float3 dPick;
             if ((cellGoboMap & 2) != 0)
             {
-                tmp4281 = l.yzx;
+                dPick = l.yzx;
             }
             else
             {
-                tmp4281 = l;
+                dPick = l;
             }
-            float3 d = normalize(tmp4281);
+            float3 d = normalize(dPick);
             hf = ((d.z >= 0.0f) == ((cellGoboMap & 1) == 0)) ? 0 : 1;
             uv = ((d.xy / (1.0f + abs(d.z)).xx) * 0.5f) + 0.5f.xx;
         }
@@ -886,54 +889,54 @@ float3 cellGobo(int i, float3 D, float3 axis, bool spot)
         {
             float3 d_1 = normalize(l);
             hf = int(l.x < (-1.0f));
-            float2 tmp4321;
+            float2 ePick;
             if ((cellGoboMap & 2) != 0)
             {
-                tmp4321 = d_1.yz;
+                ePick = d_1.yz;
             }
             else
             {
-                tmp4321 = d_1.zy;
+                ePick = d_1.zy;
             }
-            float2 e = tmp4321;
-            bool tmp4331 = hf == 1;
-            bool tmp4337;
-            if (tmp4331)
+            float2 e = ePick;
+            bool cond9 = hf == 1;
+            bool cond8;
+            if (cond9)
             {
-                tmp4337 = (cellGoboMap & 1) == 0;
+                cond8 = (cellGoboMap & 1) == 0;
             }
             else
             {
-                tmp4337 = tmp4331;
+                cond8 = cond9;
             }
-            if (tmp4337)
+            if (cond8)
             {
                 e.x = -e.x;
             }
-            float tmp4347;
+            float uvPick;
             if (hf == 1)
             {
-                tmp4347 = 1.0f - d_1.x;
+                uvPick = 1.0f - d_1.x;
             }
             else
             {
-                tmp4347 = 1.0f + d_1.x;
+                uvPick = 1.0f + d_1.x;
             }
-            uv = ((e / max(tmp4347, 9.9999997473787516355514526367188e-05f).xx) * 0.5f) + 0.5f.xx;
+            uv = ((e / max(uvPick, 9.9999997473787516355514526367188e-05f).xx) * 0.5f) + 0.5f.xx;
         }
     }
     if (cellGoboFlat)
     {
-        float3 tmp4370;
+        float3 cellGoboRet2;
         if (cellGoboGam)
         {
-            tmp4370 = pow(cellLights.Load(h + 1).xyz, 2.2000000476837158203125f.xxx);
+            cellGoboRet2 = pow(cellLights.Load(h + 1).xyz, 2.2000000476837158203125f.xxx);
         }
         else
         {
-            tmp4370 = cellLights.Load(h + 1).xyz;
+            cellGoboRet2 = cellLights.Load(h + 1).xyz;
         }
-        return tmp4370;
+        return cellGoboRet2;
     }
     if ((cellGoboRot & 4) != 0)
     {
@@ -948,16 +951,17 @@ float3 cellGobo(int i, float3 D, float3 axis, bool spot)
         uv.y = 1.0f - uv.y;
     }
     int2 sz = int2(cellLights.Load(h).xy + 0.5f.xx);
-    int2 tmp4428;
+    int2 pzPick;
     if (hf < 0)
     {
-        tmp4428 = sz;
+        pzPick = sz;
     }
     else
     {
-        tmp4428 = int2(sz.x, sz.y / 2);
+        pzPick = int2(sz.x, sz.y / 2);
     }
-    int2 pz = tmp4428;
+    // GOBO2: one half, no bleed into the other
+    int2 pz = pzPick;
     float2 p = (clamp(uv, 0.0f.xx, 1.0f.xx) * float2(pz)) - 0.5f.xx;
     int2 q = int2(floor(p));
     float2 f = p - float2(q);
@@ -966,56 +970,56 @@ float3 cellGobo(int i, float3 D, float3 axis, bool spot)
     int b = (h + 2) + ((max(hf, 0) * pz.y) * sz.x);
     float3 c0 = lerp(cellLights.Load((b + (q0.y * sz.x)) + q0.x).xyz, cellLights.Load((b + (q0.y * sz.x)) + q1.x).xyz, f.x.xxx);
     float3 c1 = lerp(cellLights.Load((b + (q1.y * sz.x)) + q0.x).xyz, cellLights.Load((b + (q1.y * sz.x)) + q1.x).xyz, f.x.xxx);
-    float3 tmp4553;
+    float3 cellGoboRet;
     if (cellGoboGam)
     {
-        tmp4553 = pow(lerp(c0, c1, f.y.xxx), 2.2000000476837158203125f.xxx);
+        cellGoboRet = pow(lerp(c0, c1, f.y.xxx), 2.2000000476837158203125f.xxx);
     }
     else
     {
-        tmp4553 = lerp(c0, c1, f.y.xxx);
+        cellGoboRet = lerp(c0, c1, f.y.xxx);
     }
-    return tmp4553;
+    return cellGoboRet;
 }
 
 float cellShadowF(int i, float3 P, float3 N)
 {
     float4 t4 = cellLights.Load((i * 8) + 4);
-    bool tmp3607 = !cellShadowOn;
-    bool tmp3614;
-    if (!tmp3607)
+    bool cond14 = !cellShadowOn;
+    bool cond13;
+    if (!cond14)
     {
-        tmp3614 = t4.y < 0.5f;
+        cond13 = t4.y < 0.5f;
     }
     else
     {
-        tmp3614 = tmp3607;
+        cond13 = cond14;
     }
-    if (tmp3614)
+    if (cond13)
     {
         return 1.0f;
     }
     float4 t0 = cellLights.Load(i * 8);
-    bool tmp3626 = t4.y > 1.5f;
-    bool tmp3632;
-    if (tmp3626)
+    bool cond12 = t4.y > 1.5f;
+    bool cond11;
+    if (cond12)
     {
-        tmp3632 = t4.y < 2.5f;
+        cond11 = t4.y < 2.5f;
     }
     else
     {
-        tmp3632 = tmp3626;
+        cond11 = cond12;
     }
-    bool tmp3648;
-    if (tmp3632)
+    bool cond10;
+    if (cond11)
     {
-        tmp3648 = dot(P - t0.xyz, cellLights.Load((i * 8) + 2).xyz) < 0.0f;
+        cond10 = dot(P - t0.xyz, cellLights.Load((i * 8) + 2).xyz) < 0.0f;
     }
     else
     {
-        tmp3648 = tmp3632;
+        cond10 = cond11;
     }
-    if (tmp3648)
+    if (cond10)
     {
         return 0.0f;
     }
@@ -1028,8 +1032,8 @@ float cellShadowF(int i, float3 P, float3 N)
     float d = length(rn);
     float ref = (d - 1.0f) / max(t0.w, 0.001000000047497451305389404296875f);
     float3 a = rn / max(d, 0.001000000047497451305389404296875f).xxx;
-    bool3 tmp3699 = (abs(a.z) < 0.89999997615814208984375f).xxx;
-    float3 u = normalize(cross(a, float3(tmp3699.x ? float3(0.0f, 0.0f, 1.0f).x : float3(1.0f, 0.0f, 0.0f).x, tmp3699.y ? float3(0.0f, 0.0f, 1.0f).y : float3(1.0f, 0.0f, 0.0f).y, tmp3699.z ? float3(0.0f, 0.0f, 1.0f).z : float3(1.0f, 0.0f, 0.0f).z)));
+    bool3 uPart = (abs(a.z) < 0.89999997615814208984375f).xxx;
+    float3 u = normalize(cross(a, float3(uPart.x ? float3(0.0f, 0.0f, 1.0f).x : float3(1.0f, 0.0f, 0.0f).x, uPart.y ? float3(0.0f, 0.0f, 1.0f).y : float3(1.0f, 0.0f, 0.0f).y, uPart.z ? float3(0.0f, 0.0f, 1.0f).z : float3(1.0f, 0.0f, 0.0f).z)));
     float3 v = cross(a, u);
     float s = 0.0f;
     for (int y = -1; y <= 1; y++)
@@ -1039,16 +1043,16 @@ float cellShadowF(int i, float3 P, float3 N)
             s += cellShadow.SampleCmp(_cellShadow_sampler, float4(a + (((u * float(x)) + (v * float(y))) * cellShadowTexel), t4.x), ref);
         }
     }
-    float tmp3759;
+    float cellShadowFRet;
     if (cellShadowFadeOn)
     {
-        tmp3759 = lerp(1.0f, s / 9.0f, cellShadowFade[clamp(int(t4.x + 0.5f), 0, 15)]);
+        cellShadowFRet = lerp(1.0f, s / 9.0f, cellShadowFade[clamp(int(t4.x + 0.5f), 0, 15)]);
     }
     else
     {
-        tmp3759 = s / 9.0f;
+        cellShadowFRet = s / 9.0f;
     }
-    return tmp3759;
+    return cellShadowFRet;
 }
 
 float3 cellLightE(int i, float3 P, float3 N, inout float3 L, out bool noSpec)
@@ -1058,34 +1062,35 @@ float3 cellLightE(int i, float3 P, float3 N, inout float3 L, out bool noSpec)
     float d = length(Lv);
     L = Lv / max(d, 0.001000000047497451305389404296875f).xxx;
     noSpec = true;
-    bool tmp4670 = d >= t0.w;
-    bool tmp4678;
-    if (!tmp4670)
+    bool cond16 = d >= t0.w;
+    bool cond15;
+    if (!cond16)
     {
-        tmp4678 = dot(N, L) <= 0.0f;
+        cond15 = dot(N, L) <= 0.0f;
     }
     else
     {
-        tmp4678 = tmp4670;
+        cond15 = cond16;
     }
-    if (tmp4678)
+    if (cond15)
     {
         return 0.0f.xxx;
     }
     float4 t1 = cellLights.Load((i * 8) + 1);
-    int param = i;
-    float3 param_1 = P;
-    float3 param_2 = t0.xyz;
-    float param_3 = t1.w;
-    if (!cellShapeIn(param, param_1, param_2, param_3))
+    int iArg3 = i;
+    float3 PArg2 = P;
+    float3 LposArg = t0.xyz;
+    float shapeArg = t1.w;
+    if (!cellShapeIn(iArg3, PArg2, LposArg, shapeArg))
     {
         return 0.0f.xxx;
     }
     float4 t3 = cellLights.Load((i * 8) + 3);
-    float param_4 = d;
-    float param_5 = t0.w;
-    float3 param_6 = t3.xyz;
-    float a = cellRadial(param_4, param_5, param_6);
+    float dArg = d;
+    float rArg2 = t0.w;
+    float3 bseArg = t3.xyz;
+    float a = cellRadial(dArg, rArg2, bseArg);
+    // lane LIGHTS5 (GOBO1)
     float3 g = 1.0f.xxx;
     float3 gAx = 0.0f.xxx;
     if (t1.w > (-1.5f))
@@ -1097,18 +1102,19 @@ float3 cellLightE(int i, float3 P, float3 N, inout float3 L, out bool noSpec)
     }
     if (a > 0.0f)
     {
-        int param_7 = i;
-        float3 param_8 = -Lv;
-        float3 param_9 = gAx;
-        bool param_10 = t1.w > (-1.5f);
-        g = cellGobo(param_7, param_8, param_9, param_10);
+        int iArg2 = i;
+        float3 DArg = -Lv;
+        float3 axisArg = gAx;
+        bool spotArg = t1.w > (-1.5f);
+        // one call for every shape
+        g = cellGobo(iArg2, DArg, axisArg, spotArg);
     }
     if (a > 0.0f)
     {
-        int param_11 = i;
-        float3 param_12 = P;
-        float3 param_13 = N;
-        a *= cellShadowF(param_11, param_12, param_13);
+        int iArg = i;
+        float3 PArg = P;
+        float3 NArg = N;
+        a *= cellShadowF(iArg, PArg, NArg);
     }
     noSpec = (int(t3.w + 0.5f) & 1) != 0;
     return (t1.xyz * g) * a;
@@ -1116,16 +1122,16 @@ float3 cellLightE(int i, float3 P, float3 N, inout float3 L, out bool noSpec)
 
 float cellFogK(int i)
 {
-    float tmp4945;
+    float cellFogKRet;
     if (cellFogScaleOn)
     {
-        tmp4945 = cellLights.Load(cellFogScaleBase + (i / 4))[i % 4];
+        cellFogKRet = cellLights.Load(cellFogScaleBase + (i / 4))[i % 4];
     }
     else
     {
-        tmp4945 = 1.0f;
+        cellFogKRet = 1.0f;
     }
-    return tmp4945;
+    return cellFogKRet;
 }
 
 // the density per unit sigma0 at height z (cell_volair.frag airRho)
@@ -1138,58 +1144,59 @@ float wwAirRhoLaw(inout float z, float4 med, float4 layer, float4 ground)
         {
             return 0.0f;
         }
+        // G2: the top's density, falling off
         k = exp((-(z - med.w)) * ground.z);
         z = med.w;
     }
-    float tmp883;
+    float rPick3;
     if (med.z > 0.0f)
     {
-        tmp883 = min(1.0f, exp((-(z - med.y)) * med.z));
+        rPick3 = min(1.0f, exp((-(z - med.y)) * med.z));
     }
     else
     {
-        tmp883 = 1.0f;
+        rPick3 = 1.0f;
     }
-    float r = tmp883;
-    bool tmp900 = layer.x <= 0.0f;
-    bool tmp906;
-    if (tmp900)
+    float r = rPick3;
+    bool cond18 = layer.x <= 0.0f;
+    bool cond17;
+    if (cond18)
     {
-        tmp906 = layer.w <= 0.0f;
+        cond17 = layer.w <= 0.0f;
     }
     else
     {
-        tmp906 = tmp900;
+        cond17 = cond18;
     }
-    if (tmp906)
+    if (cond17)
     {
         return k * r;
     }
     if (layer.x > 0.0f)
     {
-        float tmp928;
+        float rPick2;
         if (layer.z > 0.0f)
         {
-            tmp928 = min(1.0f, exp((-(z - layer.y)) * layer.z));
+            rPick2 = min(1.0f, exp((-(z - layer.y)) * layer.z));
         }
         else
         {
-            tmp928 = 1.0f;
+            rPick2 = 1.0f;
         }
-        r = ((1.0f - layer.x) * r) + (layer.x * tmp928);
+        r = ((1.0f - layer.x) * r) + (layer.x * rPick2);
     }
     if (layer.w > 0.0f)
     {
-        float tmp955;
+        float rPick;
         if (ground.y > 0.0f)
         {
-            tmp955 = min(1.0f, exp((-(z - ground.x)) * ground.y));
+            rPick = min(1.0f, exp((-(z - ground.x)) * ground.y));
         }
         else
         {
-            tmp955 = 1.0f;
+            rPick = 1.0f;
         }
-        r += (layer.w * tmp955);
+        r += (layer.w * rPick);
     }
     return k * r;
 }
@@ -1197,12 +1204,12 @@ float wwAirRhoLaw(inout float z, float4 med, float4 layer, float4 ground)
 // the density per unit sigma0 (lookdev_fog.glsl wwAirRhoLaw: the far band, the near band's share, the ground layer)
 float airRho(float z)
 {
-    float param = z;
-    float4 param_1 = airMed;
-    float4 param_2 = airLayer;
-    float4 param_3 = float4(airGround.x + airGz, airGround.yzw);
-    float tmp5139 = wwAirRhoLaw(param, param_1, param_2, param_3);
-    return tmp5139;
+    float zArg = z;
+    float4 medArg = airMed;
+    float4 layerArg = airLayer;
+    float4 groundArg = float4(airGround.x + airGz, airGround.yzw);
+    float wwAirRhoLawRet = wwAirRhoLaw(zArg, medArg, layerArg, groundArg);
+    return wwAirRhoLawRet;
 }
 
 // the column between heights lo < hi of one term B(z) = min(1, exp(-(z - z0) invH)): flat under z0, exponential
@@ -1225,85 +1232,85 @@ float wwAirColOne(float lo, float hi, float z0, float invH)
     }
     float w = hi - a;
     float u = w * invH;
-    float tmp802;
+    float e1Pick;
     if (u < 0.001000000047497451305389404296875f)
     {
-        tmp802 = 1.0f - (u * (0.5f - (u / 6.0f)));
+        e1Pick = 1.0f - (u * (0.5f - (u / 6.0f)));
     }
     else
     {
-        tmp802 = (1.0f - exp(-u)) / u;
+        e1Pick = (1.0f - exp(-u)) / u;
     }
-    float e1 = tmp802;
+    float e1 = e1Pick;
     return below + ((exp((-(a - z0)) * invH) * w) * e1);
 }
 
 float wwAirColLaw(float lo, inout float hi, float4 med, float4 layer, float4 ground)
 {
-    bool tmp981 = ground.z > 0.0f;
-    bool tmp988;
-    if (tmp981)
+    bool cond22 = ground.z > 0.0f;
+    bool cond21;
+    if (cond22)
     {
-        tmp988 = hi > med.w;
+        cond21 = hi > med.w;
     }
     else
     {
-        tmp988 = tmp981;
+        cond21 = cond22;
     }
-    float tmp989;
-    if (tmp988)
+    float upPick;
+    if (cond21)
     {
-        float param = med.w;
-        float4 param_1 = med;
-        float4 param_2 = layer;
-        float4 param_3 = ground;
-        float tmp1001 = wwAirRhoLaw(param, param_1, param_2, param_3);
-        float param_4 = max(lo, med.w);
-        float param_5 = hi;
-        float param_6 = med.w;
-        float param_7 = ground.z;
-        tmp989 = tmp1001 * wwAirColOne(param_4, param_5, param_6, param_7);
+        float zArg2 = med.w;
+        float4 medArg2 = med;
+        float4 layerArg2 = layer;
+        float4 groundArg2 = ground;
+        float wwAirRhoLawRet2 = wwAirRhoLaw(zArg2, medArg2, layerArg2, groundArg2);
+        float loArg4 = max(lo, med.w);
+        float hiArg4 = hi;
+        float z0Arg4 = med.w;
+        float invHArg4 = ground.z;
+        upPick = wwAirRhoLawRet2 * wwAirColOne(loArg4, hiArg4, z0Arg4, invHArg4);
     }
     else
     {
-        tmp989 = 0.0f;
+        upPick = 0.0f;
     }
-    float up = tmp989;
+    float up = upPick;
     hi = min(hi, med.w);
-    float param_8 = lo;
-    float param_9 = hi;
-    float param_10 = med.y;
-    float param_11 = med.z;
-    float c = wwAirColOne(param_8, param_9, param_10, param_11);
-    bool tmp1037 = layer.x <= 0.0f;
-    bool tmp1043;
-    if (tmp1037)
+    float loArg3 = lo;
+    float hiArg3 = hi;
+    float z0Arg3 = med.y;
+    float invHArg3 = med.z;
+    float c = wwAirColOne(loArg3, hiArg3, z0Arg3, invHArg3);
+    bool cond20 = layer.x <= 0.0f;
+    bool cond19;
+    if (cond20)
     {
-        tmp1043 = layer.w <= 0.0f;
+        cond19 = layer.w <= 0.0f;
     }
     else
     {
-        tmp1043 = tmp1037;
+        cond19 = cond20;
     }
-    if (tmp1043)
+    if (cond19)
     {
         return c + up;
     }
     if (layer.x > 0.0f)
     {
-        float param_12 = lo;
-        float param_13 = hi;
-        float param_14 = layer.y;
-        float param_15 = layer.z;
-        c = ((1.0f - layer.x) * c) + (layer.x * wwAirColOne(param_12, param_13, param_14, param_15));
+        float loArg2 = lo;
+        float hiArg2 = hi;
+        float z0Arg2 = layer.y;
+        float invHArg2 = layer.z;
+        c = ((1.0f - layer.x) * c) + (layer.x * wwAirColOne(loArg2, hiArg2, z0Arg2, invHArg2));
     }
     if (layer.w > 0.0f)
     {
-        float param_16 = lo;
-        float param_17 = hi;
-        float param_18 = ground.x;
-        float param_19 = ground.y;
-        c += (layer.w * wwAirColOne(param_16, param_17, param_18, param_19));
+        float loArg = lo;
+        float hiArg = hi;
+        float z0Arg = ground.x;
+        float invHArg = ground.y;
+        c += (layer.w * wwAirColOne(loArg, hiArg, z0Arg, invHArg));
     }
     return c + up;
 }
@@ -1313,13 +1320,13 @@ float wwAirColLaw(float lo, inout float hi, float4 med, float4 layer, float4 gro
 // near the horizon (the gate's R found it at Sanctuary's foggy band)
 float airCol(float lo, float hi)
 {
-    float param = lo;
-    float param_1 = hi;
-    float4 param_2 = airMed;
-    float4 param_3 = airLayer;
-    float4 param_4 = float4(airGround.x + airGz, airGround.yzw);
-    float tmp5161 = wwAirColLaw(param, param_1, param_2, param_3, param_4);
-    return tmp5161;
+    float loArg5 = lo;
+    float hiArg5 = hi;
+    float4 medArg3 = airMed;
+    float4 layerArg3 = airLayer;
+    float4 groundArg3 = float4(airGround.x + airGz, airGround.yzw);
+    float wwAirColLawRet = wwAirColLaw(loArg5, hiArg5, medArg3, layerArg3, groundArg3);
+    return wwAirColLawRet;
 }
 
 // the optical depth of a straight segment of length len (game units) from height za to height zb
@@ -1328,12 +1335,12 @@ float airOd(float za, float zb, float len)
     float dz = zb - za;
     if (abs(dz) < 0.5f)
     {
-        float param = 0.5f * (za + zb);
-        return (airMed.x * len) * airRho(param);
+        float zArg3 = 0.5f * (za + zb);
+        return (airMed.x * len) * airRho(zArg3);
     }
-    float param_1 = min(za, zb);
-    float param_2 = max(za, zb);
-    return ((airMed.x * len) * airCol(param_1, param_2)) / abs(dz);
+    float loArg6 = min(za, zb);
+    float hiArg6 = max(za, zb);
+    return ((airMed.x * len) * airCol(loArg6, hiArg6)) / abs(dz);
 }
 
 float volHg(float c, float g)
@@ -1345,21 +1352,21 @@ float volHg(float c, float g)
 // pi x the phase (display units): c = the cosine between the light's travel and the scattered ray's (to the eye)
 float3 volPhasePi(float c)
 {
-    float param = c;
-    float param_1 = volPhase[1].w;
-    float param_2 = c;
-    float param_3 = volPhase[2].w;
-    return ((((volPhase[0].xyz * 0.0596831031143665313720703125f) * (1.0f + (c * c))) + (volPhase[1].xyz * volHg(param, param_1))) + (volPhase[2].xyz * volHg(param_2, param_3))) * 3.1415927410125732421875f;
+    float cArg5 = c;
+    float gArg2 = volPhase[1].w;
+    float cArg4 = c;
+    float gArg = volPhase[2].w;
+    return ((((volPhase[0].xyz * 0.0596831031143665313720703125f) * (1.0f + (c * c))) + (volPhase[1].xyz * volHg(cArg5, gArg2))) + (volPhase[2].xyz * volHg(cArg4, gArg))) * 3.1415927410125732421875f;
 }
 
 float3 airLampMs(float c, float od)
 {
     float s = volMsLamp.w;
-    float param = c;
-    float param_1 = volPhase[1].w * s;
-    float param_2 = c;
-    float param_3 = volPhase[2].w * s;
-    float3 ph = ((((volPhase[0].xyz * 0.0596831031143665313720703125f) * (1.0f + (c * c))) + (volPhase[1].xyz * volHg(param, param_1))) + (volPhase[2].xyz * volHg(param_2, param_3))) * 3.1415927410125732421875f;
+    float cArg7 = c;
+    float gArg4 = volPhase[1].w * s;
+    float cArg6 = c;
+    float gArg3 = volPhase[2].w * s;
+    float3 ph = ((((volPhase[0].xyz * 0.0596831031143665313720703125f) * (1.0f + (c * c))) + (volPhase[1].xyz * volHg(cArg7, gArg4))) + (volPhase[2].xyz * volHg(cArg6, gArg3))) * 3.1415927410125732421875f;
     return ph * ((max(volMsLamp.x + (volMsLamp.y * volGi.w), 0.0f) * od) * exp((-volMsLamp.z) * od));
 }
 
@@ -1369,7 +1376,7 @@ float3 airLampGnd(float3 L, float hf, float3 Pk, float3 dW, float d, float od)
     float hx = Pk.z - hf;
     bool wwh0 = (hl <= 0.0f);
     bool wwh1 = (hx < 0.0f);
-    if (wwh0 || wwh1)
+    if (or(wwh0, wwh1))   // HLSLFIX2 orfix.py: no short-circuit branch (NV took the wrong side)
     {
         return 0.0f.xxx;
     }
@@ -1377,11 +1384,11 @@ float3 airLampGnd(float3 L, float hf, float3 Pk, float3 dW, float d, float od)
     float D2 = dot(v, v);
     float D = sqrt(D2);
     float c = dot(v, dW) / D;
-    float param = c;
-    float param_1 = volPhase[1].w * volGndLamp.z;
-    float param_2 = c;
-    float param_3 = volPhase[2].w * volGndLamp.z;
-    float3 ph = ((((volPhase[0].xyz * 0.0596831031143665313720703125f) * (1.0f + (c * c))) + (volPhase[1].xyz * volHg(param, param_1))) + (volPhase[2].xyz * volHg(param_2, param_3))) * 3.1415927410125732421875f;
+    float cArg9 = c;
+    float gArg6 = volPhase[1].w * volGndLamp.z;
+    float cArg8 = c;
+    float gArg5 = volPhase[2].w * volGndLamp.z;
+    float3 ph = ((((volPhase[0].xyz * 0.0596831031143665313720703125f) * (1.0f + (c * c))) + (volPhase[1].xyz * volHg(cArg9, gArg6))) + (volPhase[2].xyz * volHg(cArg8, gArg5))) * 3.1415927410125732421875f;
     return (ph * (((volGndLamp.x * (1.0f + ((volGndLamp.y * (od / d)) * D))) * 2.0f) * ((hx + hl) / D))) * ((d * d) / D2);
 }
 
@@ -1398,26 +1405,26 @@ float airLampAtlasVis(int i, float3 P, float3 Lp)
     }
     float3 r = P - Lp;
     float3 a = abs(r);
-    bool tmp7536 = a.x >= a.y;
-    bool tmp7544;
-    if (tmp7536)
+    bool cond24 = a.x >= a.y;
+    bool cond23;
+    if (cond24)
     {
-        tmp7544 = a.x >= a.z;
+        cond23 = a.x >= a.z;
     }
     else
     {
-        tmp7544 = tmp7536;
+        cond23 = cond24;
     }
     int f;
     float m;
     float3 u;
     float3 v;
-    if (tmp7544)
+    if (cond23)
     {
         f = (r.x > 0.0f) ? 0 : 1;
         m = a.x;
-        bool3 tmp7560 = (r.x > 0.0f).xxx;
-        u = float3(tmp7560.x ? float3(0.0f, 0.0f, -1.0f).x : float3(0.0f, 0.0f, 1.0f).x, tmp7560.y ? float3(0.0f, 0.0f, -1.0f).y : float3(0.0f, 0.0f, 1.0f).y, tmp7560.z ? float3(0.0f, 0.0f, -1.0f).z : float3(0.0f, 0.0f, 1.0f).z);
+        bool3 uPart3 = (r.x > 0.0f).xxx;
+        u = float3(uPart3.x ? float3(0.0f, 0.0f, -1.0f).x : float3(0.0f, 0.0f, 1.0f).x, uPart3.y ? float3(0.0f, 0.0f, -1.0f).y : float3(0.0f, 0.0f, 1.0f).y, uPart3.z ? float3(0.0f, 0.0f, -1.0f).z : float3(0.0f, 0.0f, 1.0f).z);
         v = float3(0.0f, -1.0f, 0.0f);
     }
     else
@@ -1427,29 +1434,29 @@ float airLampAtlasVis(int i, float3 P, float3 Lp)
             f = (r.y > 0.0f) ? 2 : 3;
             m = a.y;
             u = float3(1.0f, 0.0f, 0.0f);
-            bool3 tmp7581 = (r.y > 0.0f).xxx;
-            v = float3(tmp7581.x ? float3(0.0f, 0.0f, 1.0f).x : float3(0.0f, 0.0f, -1.0f).x, tmp7581.y ? float3(0.0f, 0.0f, 1.0f).y : float3(0.0f, 0.0f, -1.0f).y, tmp7581.z ? float3(0.0f, 0.0f, 1.0f).z : float3(0.0f, 0.0f, -1.0f).z);
+            bool3 vPart = (r.y > 0.0f).xxx;
+            v = float3(vPart.x ? float3(0.0f, 0.0f, 1.0f).x : float3(0.0f, 0.0f, -1.0f).x, vPart.y ? float3(0.0f, 0.0f, 1.0f).y : float3(0.0f, 0.0f, -1.0f).y, vPart.z ? float3(0.0f, 0.0f, 1.0f).z : float3(0.0f, 0.0f, -1.0f).z);
         }
         else
         {
             f = (r.z > 0.0f) ? 4 : 5;
             m = a.z;
-            bool3 tmp7594 = (r.z > 0.0f).xxx;
-            u = float3(tmp7594.x ? float3(1.0f, 0.0f, 0.0f).x : float3(-1.0f, 0.0f, 0.0f).x, tmp7594.y ? float3(1.0f, 0.0f, 0.0f).y : float3(-1.0f, 0.0f, 0.0f).y, tmp7594.z ? float3(1.0f, 0.0f, 0.0f).z : float3(-1.0f, 0.0f, 0.0f).z);
+            bool3 uPart2 = (r.z > 0.0f).xxx;
+            u = float3(uPart2.x ? float3(1.0f, 0.0f, 0.0f).x : float3(-1.0f, 0.0f, 0.0f).x, uPart2.y ? float3(1.0f, 0.0f, 0.0f).y : float3(-1.0f, 0.0f, 0.0f).y, uPart2.z ? float3(1.0f, 0.0f, 0.0f).z : float3(-1.0f, 0.0f, 0.0f).z);
             v = float3(0.0f, -1.0f, 0.0f);
         }
     }
     float4 o4 = volLampTable.Load((i * 4) + (f >> 1));
-    float2 tmp7609;
+    float2 oPick;
     if ((f & 1) == 0)
     {
-        tmp7609 = o4.xy;
+        oPick = o4.xy;
     }
     else
     {
-        tmp7609 = o4.zw;
+        oPick = o4.zw;
     }
-    float2 o = tmp7609;
+    float2 o = oPick;
     float s = t3.x;
     float2 ndc = float2(dot(u, r), dot(v, r)) / max(m, 9.9999997473787516355514526367188e-05f).xx;
     float2 px = clamp(o + (((ndc * 0.5f) + 0.5f.xx) * s), o + 1.0f.xx, (o + s.xx) - 1.0f.xx);
@@ -1459,8 +1466,8 @@ float airLampAtlasVis(int i, float3 P, float3 Lp)
     float2 tsz = float2(int2(spvTextureSize(volLampAtlas, uint(0), dummy_parameter)));
     if ((volLampAtlasRed & 2) != 0)
     {
-        float3 tmp7695 = float3(px / tsz, ref);
-        return volLampAtlas.SampleCmp(_volLampAtlas_sampler, tmp7695.xy, tmp7695.z);
+        float3 airLampAtlasVisRet = float3(px / tsz, ref);
+        return volLampAtlas.SampleCmp(_volLampAtlas_sampler, airLampAtlasVisRet.xy, airLampAtlasVisRet.z);
     }
     float ang = 6.283185482025146484375f * (volJitXY.x + 0.5f);
     float2x2 rot = float2x2(float2(cos(ang), sin(ang)), float2(-sin(ang), cos(ang)));
@@ -1469,8 +1476,8 @@ float airLampAtlasVis(int i, float3 P, float3 Lp)
     {
         float th = float(k) * 2.3999631404876708984375f;
         float2 pk = clamp(px + (mul(float2(cos(th), sin(th)), rot) * (sqrt((float(k) + 0.5f) * 0.125f) * 2.5f)), o + 1.0f.xx, (o + s.xx) - 1.0f.xx);
-        float3 tmp7767 = float3(pk / tsz, ref);
-        sv += volLampAtlas.SampleCmp(_volLampAtlas_sampler, tmp7767.xy, tmp7767.z);
+        float3 svPart = float3(pk / tsz, ref);
+        sv += volLampAtlas.SampleCmp(_volLampAtlas_sampler, svPart.xy, svPart.z);
     }
     return sv * 0.125f;
 }
@@ -1499,28 +1506,28 @@ float4 cellDdgiTile(int p, float3 d, int S)
     if (d.z < 0.0f)
     {
         float ou = u;
-        float param = ou;
-        u = (1.0f - abs(v)) * cellDdgiSignNotZero(param);
-        float param_1 = v;
-        v = (1.0f - abs(ou)) * cellDdgiSignNotZero(param_1);
+        float vArg2 = ou;
+        u = (1.0f - abs(v)) * cellDdgiSignNotZero(vArg2);
+        float vArg = v;
+        v = (1.0f - abs(ou)) * cellDdgiSignNotZero(vArg);
     }
     int n = S - 2;
     float fx = (1.0f + (((u * 0.5f) + 0.5f) * float(n))) - 0.5f;
     float fy = (1.0f + (((v * 0.5f) + 0.5f) * float(n))) - 0.5f;
-    int param_2 = int(floor(fx));
-    int param_3 = 0;
-    int param_4 = cellDdgiIMax(param_2, param_3);
-    int param_5 = S - 2;
-    int x0 = cellDdgiIMin(param_4, param_5);
-    int param_6 = int(floor(fy));
-    int param_7 = 0;
-    int param_8 = cellDdgiIMax(param_6, param_7);
-    int param_9 = S - 2;
-    int y0 = cellDdgiIMin(param_8, param_9);
+    int aArg4 = int(floor(fx));
+    int bArg4 = 0;
+    int aArg3 = cellDdgiIMax(aArg4, bArg4);
+    int bArg3 = S - 2;
+    int x0 = cellDdgiIMin(aArg3, bArg3);
+    int aArg2 = int(floor(fy));
+    int bArg2 = 0;
+    int aArg = cellDdgiIMax(aArg2, bArg2);
+    int bArg = S - 2;
+    int y0 = cellDdgiIMin(aArg, bArg);
     float ax = clamp(fx - float(x0), 0.0f, 1.0f);
     float ay = clamp(fy - float(y0), 0.0f, 1.0f);
     float4 t[4];
-    float4 tmp4062;
+    float4 tPick;
     for (int k = 0; k < 4; k++)
     {
         int x = x0 + (k % 2);
@@ -1535,15 +1542,16 @@ float4 cellDdgiTile(int p, float3 d, int S)
             float4 q = cellDdgiAtlas.Load(((cellDdgiCBase[cellDdgiC] + (64 * cellDdgiCDims[cellDdgiC].w)) + (128 * p)) + (i / 2));
             if ((i % 2) == 0)
             {
-                tmp4062 = float4(q.x, q.y, 0.0f, 0.0f);
+                tPick = float4(q.x, q.y, 0.0f, 0.0f);
             }
             else
             {
-                tmp4062 = float4(q.z, q.w, 0.0f, 0.0f);
+                tPick = float4(q.z, q.w, 0.0f, 0.0f);
             }
-            t[k] = tmp4062;
+            t[k] = tPick;
         }
     }
+    // ( a (1 - ax) + b ax ) (1 - ay) + ( e (1 - ax) + f ax ) ay, as the header writes it
     return (((t[0] * (1.0f - ax)) + (t[1] * ax)) * (1.0f - ay)) + (((t[2] * (1.0f - ax)) + (t[3] * ax)) * ay);
 }
 
@@ -1605,28 +1613,28 @@ float airLeakLightVis(float3 P, float3 Lp)
             float rr = length(bp);
             if (rr > 0.0f)
             {
-                int param = p;
-                float3 param_1 = bp * ((-1.0f) / rr);
-                int param_2 = 16;
-                float4 m = cellDdgiTile(param, param_1, param_2);
-                float param_3 = rr;
-                float param_4 = m.x;
-                float param_5 = m.y;
-                w *= cellDdgiChebyshev(param_3, param_4, param_5);
+                int pArg3 = p;
+                float3 dArg3 = bp * ((-1.0f) / rr);
+                int SArg2 = 16;
+                float4 m = cellDdgiTile(pArg3, dArg3, SArg2);
+                float rArg4 = rr;
+                float meanArg2 = m.x;
+                float mean2Arg2 = m.y;
+                w *= cellDdgiChebyshev(rArg4, meanArg2, mean2Arg2);
             }
             float3 bl = Lp - pp;
             float rl = length(bl);
             float cl = 1.0f;
             if (rl > 0.0f)
             {
-                int param_6 = p;
-                float3 param_7 = bl * (1.0f / rl);
-                int param_8 = 16;
-                float4 m_1 = cellDdgiTile(param_6, param_7, param_8);
-                float param_9 = max(rl - (0.5f * O.w), 0.0f);
-                float param_10 = m_1.x;
-                float param_11 = m_1.y;
-                cl = cellDdgiChebyshev(param_9, param_10, param_11);
+                int pArg2 = p;
+                float3 dArg2 = bl * (1.0f / rl);
+                int SArg = 16;
+                float4 m_1 = cellDdgiTile(pArg2, dArg2, SArg);
+                float rArg3 = max(rl - (0.5f * O.w), 0.0f);
+                float meanArg = m_1.x;
+                float mean2Arg = m_1.y;
+                cl = cellDdgiChebyshev(rArg3, meanArg, mean2Arg);
             }
             v += (w * cl);
             ws += w;
@@ -1645,53 +1653,53 @@ float airLeakLightVis(float3 P, float3 Lp)
 float airLeakLightK(int i, float3 P, float3 Lp)
 {
     float4 t4 = cellLights.Load((i * 8) + 4);
-    bool tmp7787 = t4.y < 0.5f;
-    bool tmp7793;
-    if (tmp7787)
+    bool cond32 = t4.y < 0.5f;
+    bool cond31;
+    if (cond32)
     {
-        tmp7793 = (volLampAtlasRed & 8) != 0;
+        cond31 = (volLampAtlasRed & 8) != 0;
     }
     else
     {
-        tmp7793 = tmp7787;
+        cond31 = cond32;
     }
-    if (tmp7793)
+    if (cond31)
     {
         return 0.0f;
     }
-    bool tmp7799 = t4.y < 0.5f;
-    bool tmp7805;
-    if (tmp7799)
+    bool cond30 = t4.y < 0.5f;
+    bool cond29;
+    if (cond30)
     {
-        tmp7805 = (volLampAtlasRed & 4) == 0;
+        cond29 = (volLampAtlasRed & 4) == 0;
     }
     else
     {
-        tmp7805 = tmp7799;
+        cond29 = cond30;
     }
-    if (tmp7805)
+    if (cond29)
     {
         return 1.0f;
     }
-    bool tmp7816;
+    bool cond28;
     if (cellShadowOn)
     {
-        tmp7816 = t4.y > 0.5f;
+        cond28 = t4.y > 0.5f;
     }
     else
     {
-        tmp7816 = cellShadowOn;
+        cond28 = cellShadowOn;
     }
-    bool tmp7822;
-    if (tmp7816)
+    bool cubedPick;
+    if (cond28)
     {
-        tmp7822 = t4.x > (-0.5f);
+        cubedPick = t4.x > (-0.5f);
     }
     else
     {
-        tmp7822 = tmp7816;
+        cubedPick = cond28;
     }
-    bool cubed = tmp7822;
+    bool cubed = cubedPick;
     if ((volLampVis == 2) && (!cubed))
     {
         float2 rr = volLampRays.Load(airRayFroxel).xy;
@@ -1700,32 +1708,32 @@ float airLeakLightK(int i, float3 P, float3 Lp)
             return rr.x;
         }
     }
-    bool tmp7848 = volLampVis == 1;
-    bool tmp7860;
-    if (tmp7848)
+    bool cond27 = volLampVis == 1;
+    bool cond26;
+    if (cond27)
     {
-        bool tmp7852 = !cubed;
-        bool tmp7859;
-        if (!tmp7852)
+        bool cond25 = !cubed;
+        bool condPick;
+        if (!cond25)
         {
-            tmp7859 = (volLampAtlasRed & 1) != 0;
+            condPick = (volLampAtlasRed & 1) != 0;
         }
         else
         {
-            tmp7859 = tmp7852;
+            condPick = cond25;
         }
-        tmp7860 = tmp7859;
+        cond26 = condPick;
     }
     else
     {
-        tmp7860 = tmp7848;
+        cond26 = cond27;
     }
-    if (tmp7860)
+    if (cond26)
     {
-        int param = i;
-        float3 param_1 = P;
-        float3 param_2 = Lp;
-        float av = airLampAtlasVis(param, param_1, param_2);
+        int iArg4 = i;
+        float3 PArg4 = P;
+        float3 LpArg2 = Lp;
+        float av = airLampAtlasVis(iArg4, PArg4, LpArg2);
         if (av >= 0.0f)
         {
             return av;
@@ -1735,46 +1743,46 @@ float airLeakLightK(int i, float3 P, float3 Lp)
     {
         return 1.0f;
     }
-    float tmp7884;
+    float airLeakLightKRet;
     if (cubed)
     {
-        tmp7884 = 1.0f;
+        airLeakLightKRet = 1.0f;
     }
     else
     {
-        float3 param_3 = P;
-        float3 param_4 = Lp;
-        float tmp7892 = airLeakLightVis(param_3, param_4);
-        tmp7884 = tmp7892;
+        float3 PArg3 = P;
+        float3 LpArg = Lp;
+        float airLeakLightVisRet = airLeakLightVis(PArg3, LpArg);
+        airLeakLightKRet = airLeakLightVisRet;
     }
-    return tmp7884;
+    return airLeakLightKRet;
 }
 
 float3 airLampSan(float3 x)
 {
     float3 r;
-    float tmp11984;
+    float rPick4;
     for (int c = 0; c < 3; c++)
     {
-        bool tmp11975 = isnan(x[c]);
-        bool tmp11983;
-        if (!tmp11975)
+        bool cond34 = isnan(x[c]);
+        bool cond33;
+        if (!cond34)
         {
-            tmp11983 = isinf(x[c]);
+            cond33 = isinf(x[c]);
         }
         else
         {
-            tmp11983 = tmp11975;
+            cond33 = cond34;
         }
-        if (tmp11983)
+        if (cond33)
         {
-            tmp11984 = 0.0f;
+            rPick4 = 0.0f;
         }
         else
         {
-            tmp11984 = clamp(x[c], 0.0f, 65504.0f);
+            rPick4 = clamp(x[c], 0.0f, 65504.0f);
         }
-        r[c] = tmp11984;
+        r[c] = rPick4;
     }
     return r;
 }
@@ -1817,30 +1825,30 @@ void airLampVolStage(int2 col)
     float t1 = volSlices.x * exp((volSlices.y * float(volLayer + 1)) / volSlices.z);
     float tm = 0.5f * (t0 + t1);
     float3 posM = dirView * (tm / fogDistScale);
-    float3 param = posM;
-    float3 P = cellWorldPos(param);
-    float3 param_1 = dirView * (1.0f / fogDistScale);
-    float3 param_2 = 0.0f.xxx;
-    float3 Dw = cellWorldPos(param_1) - cellWorldPos(param_2);
-    bool tmp12199;
+    float3 posViewArg6 = posM;
+    float3 P = cellWorldPos(posViewArg6);
+    float3 posViewArg5 = dirView * (1.0f / fogDistScale);
+    float3 posViewArg4 = 0.0f.xxx;
+    float3 Dw = cellWorldPos(posViewArg5) - cellWorldPos(posViewArg4);
+    bool cond47;
     if (cellOn)
     {
-        tmp12199 = (volTerms & 2) != 0;
+        cond47 = (volTerms & 2) != 0;
     }
     else
     {
-        tmp12199 = cellOn;
+        cond47 = cellOn;
     }
-    bool tmp12205;
-    if (tmp12199)
+    bool lightsOnPick;
+    if (cond47)
     {
-        tmp12205 = (volRed & 16) == 0;
+        lightsOnPick = (volRed & 16) == 0;
     }
     else
     {
-        tmp12205 = tmp12199;
+        lightsOnPick = cond47;
     }
-    bool lightsOn = tmp12205;
+    bool lightsOn = lightsOnPick;
     uint hsh = 0u;
     int n = cellLightCount;
     int base = -1;
@@ -1851,46 +1859,46 @@ void airLampVolStage(int2 col)
     int4 se;
     if (lightsOn)
     {
-        float3 param_3 = P;
-        float3 param_4 = Dw;
-        float param_5 = t0 - tm;
-        float param_6 = t1 - tm;
-        int4 param_7;
-        int4 param_8;
-        bool tmp12232 = volSurfBegin(param_3, param_4, param_5, param_6, param_7, param_8);
-        sp = param_7;
-        se = param_8;
-        surf = tmp12232;
-        bool tmp12236 = !surf;
-        bool tmp12242;
-        if (tmp12236)
+        float3 PArg8 = P;
+        float3 DwArg2 = Dw;
+        float sAArg2 = t0 - tm;
+        float sBArg2 = t1 - tm;
+        int4 pArg7;
+        int4 eArg5;
+        bool volSurfBeginRet2 = volSurfBegin(PArg8, DwArg2, sAArg2, sBArg2, pArg7, eArg5);
+        sp = pArg7;
+        se = eArg5;
+        surf = volSurfBeginRet2;
+        bool cond46 = !surf;
+        bool cond45;
+        if (cond46)
         {
-            tmp12242 = volClusterDims.x > 0;
+            cond45 = volClusterDims.x > 0;
         }
         else
         {
-            tmp12242 = tmp12236;
+            cond45 = cond46;
         }
-        if (tmp12242)
+        if (cond45)
         {
             int2 c = col / volClusterDims.z.xx;
             int ci = ((((volLayer / volClusterDims.w) * volClusterDims.y) + c.y) * volClusterDims.x) + c.x;
             base = volClusters.Load(2 * ci).x;
             n = volClusters.Load((2 * ci) + 1).x;
         }
-        int tmp12298;
-        int tmp12311;
-        int tmp12316;
-        uint tmp12376;
+        int iPick2;
+        int iPick4;
+        int iPick6;
+        uint ibPick;
         for (int j = 0; (surf || (j < n)) || (jb < cellBulbCount); j++)
         {
             if (surf)
             {
-                int4 param_9 = sp;
-                int4 param_10 = se;
-                int tmp12305 = volSurfNext(param_9, param_10);
-                sp = param_9;
-                tmp12298 = tmp12305;
+                int4 pArg6 = sp;
+                int4 eArg4 = se;
+                int volSurfNextRet3 = volSurfNext(pArg6, eArg4);
+                sp = pArg6;
+                iPick2 = volSurfNextRet3;
             }
             else
             {
@@ -1898,30 +1906,30 @@ void airLampVolStage(int2 col)
                 {
                     if (base < 0)
                     {
-                        tmp12316 = j;
+                        iPick6 = j;
                     }
                     else
                     {
-                        tmp12316 = volClusters.Load(base + j).x;
+                        iPick6 = volClusters.Load(base + j).x;
                     }
-                    tmp12311 = tmp12316;
+                    iPick4 = iPick6;
                 }
                 else
                 {
-                    tmp12311 = -1;
+                    iPick4 = -1;
                 }
-                tmp12298 = tmp12311;
+                iPick2 = iPick4;
             }
-            int i = tmp12298;
+            int i = iPick2;
             if (i < 0)
             {
                 if (jb >= cellBulbCount)
                 {
                     break;
                 }
-                int tmp12343 = jb;
-                jb = tmp12343 + 1;
-                i = cellBulbBase + tmp12343;
+                int jbPart2 = jb;
+                jb = jbPart2 + 1;
+                i = cellBulbBase + jbPart2;
                 surf = false;
                 j = n;
             }
@@ -1931,41 +1939,41 @@ void airLampVolStage(int2 col)
             bool fl = (int(cellLights.Load((i * 8) + 3).w + 0.5f) & 8) != 0;
             if (fl)
             {
-                tmp12376 = 0u;
+                ibPick = 0u;
             }
             else
             {
-                tmp12376 = ((asuint(a1.x) ^ (asuint(a1.y) * 3u)) ^ (asuint(a1.z) * 5u)) ^ (asuint(a0.w) * 7u);
+                ibPick = ((asuint(a1.x) ^ (asuint(a1.y) * 3u)) ^ (asuint(a1.z) * 5u)) ^ (asuint(a0.w) * 7u);
             }
-            uint ib = tmp12376;
-            uint param_11 = (uint(i + 1) * 2654435769u) ^ ib;
-            uint tmp12408 = airMix32(param_11);
-            hsh += tmp12408;
+            uint ib = ibPick;
+            uint hArg7 = (uint(i + 1) * 2654435769u) ^ ib;
+            uint airMix32Ret7 = airMix32(hArg7);
+            hsh += airMix32Ret7;
             if (!fl)
             {
                 int3 q = int3(floor(a0.xyz * 64.0f));
-                uint param_12 = uint(q.x) ^ uint(i + 1);
-                uint tmp12430 = airMix32(param_12);
-                uint param_13 = tmp12430 ^ uint(q.y);
-                uint tmp12436 = airMix32(param_13);
-                uint param_14 = tmp12436 ^ uint(q.z);
-                uint tmp12442 = airMix32(param_14);
-                hsh += tmp12442;
+                uint hArg6 = uint(q.x) ^ uint(i + 1);
+                uint airMix32Ret6 = airMix32(hArg6);
+                uint hArg5 = airMix32Ret6 ^ uint(q.y);
+                uint airMix32Ret5 = airMix32(hArg5);
+                uint hArg4 = airMix32Ret5 ^ uint(q.z);
+                uint airMix32Ret4 = airMix32(hArg4);
+                hsh += airMix32Ret4;
             }
         }
     }
     hsh &= 16777215u;
-    bool tmp12451 = nl == 0;
-    bool tmp12458;
-    if (tmp12451)
+    bool cond44 = nl == 0;
+    bool cond43;
+    if (cond44)
     {
-        tmp12458 = (volLampRed & 80) == 0;
+        cond43 = (volLampRed & 80) == 0;
     }
     else
     {
-        tmp12458 = tmp12451;
+        cond43 = cond44;
     }
-    if (tmp12458)
+    if (cond43)
     {
         fragColor = 0.0f.xxxx;
         volMrt[0] = 0.0f.xxxx;
@@ -1981,69 +1989,69 @@ void airLampVolStage(int2 col)
         float2 uv = ((float2(pp.x * volPrevGrid.x, pp.y * volPrevGrid.y) / max(-pp.z, 1.0000000031710768509710513471353e-30f).xx) * 0.5f) + 0.5f.xx;
         float kc = (log(tm / volSlices.x) / volSlices.y) * volSlices.z;
         float kp = ((log(max(length(pp) * volPrevScale, 9.9999999747524270787835121154785e-07f) / volPrevGrid.z) / volPrevGrid.w) * volSlices.z) + ((float(volLayer) + 0.5f) - kc);
-        bool tmp12554 = (pp.z < 0.0f) && (kp >= 0.0f);
-        bool tmp12561;
-        if (tmp12554)
+        bool cond42 = (pp.z < 0.0f) && (kp >= 0.0f);
+        bool keepPick2;
+        if (cond42)
         {
-            tmp12561 = kp <= volSlices.z;
+            keepPick2 = kp <= volSlices.z;
         }
         else
         {
-            tmp12561 = tmp12554;
+            keepPick2 = cond42;
         }
-        keep = tmp12561;
+        keep = keepPick2;
         float3 f = float3(uv * float2(volDims.xy), kp) - 0.5f.xxx;
         int3 b = int3(floor(f));
         float3 w = f - float3(b);
         float4 acc = 0.0f.xxxx;
         float ws = 0.0f;
-        float tmp12608;
-        float tmp12621;
-        float tmp12635;
+        float wqPick3;
+        float wqPick2;
+        float wqPick;
         for (int q_1 = 0; (q_1 < 8) && keep; q_1++)
         {
             int3 o = int3(q_1 & 1, (q_1 >> 1) & 1, q_1 >> 2);
             if (o.x == 1)
             {
-                tmp12608 = w.x;
+                wqPick3 = w.x;
             }
             else
             {
-                tmp12608 = 1.0f - w.x;
+                wqPick3 = 1.0f - w.x;
             }
             if (o.y == 1)
             {
-                tmp12621 = w.y;
+                wqPick2 = w.y;
             }
             else
             {
-                tmp12621 = 1.0f - w.y;
+                wqPick2 = 1.0f - w.y;
             }
             if (o.z == 1)
             {
-                tmp12635 = w.z;
+                wqPick = w.z;
             }
             else
             {
-                tmp12635 = 1.0f - w.z;
+                wqPick = 1.0f - w.z;
             }
-            float wq = (tmp12608 * tmp12621) * tmp12635;
+            float wq = (wqPick3 * wqPick2) * wqPick;
             if (wq < 9.9999999747524270787835121154785e-07f)
             {
                 continue;
             }
             int3 x = b + o;
-            bool tmp12657 = any(bool3(x.x < int3(0, 0, 0).x, x.y < int3(0, 0, 0).y, x.z < int3(0, 0, 0).z));
-            bool tmp12665;
-            if (!tmp12657)
+            bool cond41 = any(bool3(x.x < int3(0, 0, 0).x, x.y < int3(0, 0, 0).y, x.z < int3(0, 0, 0).z));
+            bool cond40;
+            if (!cond41)
             {
-                tmp12665 = any(bool3(x.x >= volDims.x, x.y >= volDims.y, x.z >= volDims.z));
+                cond40 = any(bool3(x.x >= volDims.x, x.y >= volDims.y, x.z >= volDims.z));
             }
             else
             {
-                tmp12665 = tmp12657;
+                cond40 = cond41;
             }
-            if (tmp12665)
+            if (cond40)
             {
                 keep = false;
                 break;
@@ -2062,45 +2070,45 @@ void airLampVolStage(int2 col)
         {
             h = acc.xyz / ws.xxx;
             hn = acc.w / ws;
-            bool tmp12711 = !any(isnan(h));
-            bool tmp12718;
-            if (tmp12711)
+            bool cond39 = !any(isnan(h));
+            bool keepPick;
+            if (cond39)
             {
-                tmp12718 = !any(isinf(h));
+                keepPick = !any(isinf(h));
             }
             else
             {
-                tmp12718 = tmp12711;
+                keepPick = cond39;
             }
-            keep = tmp12718;
+            keep = keepPick;
         }
-        bool tmp12725;
+        bool cond38;
         if (keep)
         {
-            tmp12725 = (volLampRed & 16) == 0;
+            cond38 = (volLampRed & 16) == 0;
         }
         else
         {
-            tmp12725 = keep;
+            cond38 = keep;
         }
-        if (tmp12725)
+        if (cond38)
         {
             int3 xn = clamp(int3(floor(f + 0.5f.xxx)), int3(0, 0, 0), volDims - int3(1, 1, 1));
             keep = uint(volLampNow.Load(int4(xn, 0)).w + 0.5f) == hsh;
         }
     }
-    bool tmp12755;
+    bool nsPick;
     if (!keep)
     {
-        tmp12755 = (volLampRed & 4) != 0;
+        nsPick = (volLampRed & 4) != 0;
     }
     else
     {
-        tmp12755 = keep;
+        nsPick = keep;
     }
-    int ns = tmp12755 ? 1 : 4;
-    float3 param_15 = 0.0f.xxx;
-    float3 Ow = cellWorldPos(param_15);
+    int ns = nsPick ? 1 : 4;
+    float3 posViewArg3 = 0.0f.xxx;
+    float3 Ow = cellWorldPos(posViewArg3);
     float3 Ps[4];
     float3 dWs[4];
     float zs[4];
@@ -2109,20 +2117,20 @@ void airLampVolStage(int2 col)
     float zks[4];
     for (int s = 0; s < ns; s++)
     {
-        int2 param_16 = col;
-        int param_17 = volLayer;
-        int param_18 = s;
-        float3 u = airLampJitter(param_16, param_17, param_18);
+        int2 colArg = col;
+        int layerArg4 = volLayer;
+        int sArg3 = s;
+        float3 u = airLampJitter(colArg, layerArg4, sArg3);
         float2 ndcJ = (((float2(col) + u.xy) / float2(volDims.xy)) * 2.0f) - 1.0f.xx;
         float3 dJ = normalize(float3(ndcJ.x / volProj.x, ndcJ.y / volProj.y, -1.0f));
         float t = lerp(t0, t1, u.z);
-        float3 param_19 = dJ * (t / fogDistScale);
-        Ps[s] = cellWorldPos(param_19);
-        float3 param_20 = dJ;
-        dWs[s] = cellWorldDir(param_20);
+        float3 posViewArg2 = dJ * (t / fogDistScale);
+        Ps[s] = cellWorldPos(posViewArg2);
+        float3 dirViewArg = dJ;
+        dWs[s] = cellWorldDir(dirViewArg);
         zs[s] = fogView.w + ((dot(fogView.xyz, dJ) / fogDistScale) * t);
-        float3 param_21 = dJ * (1.0f / fogDistScale);
-        Dws[s] = cellWorldPos(param_21) - Ow;
+        float3 posViewArg = dJ * (1.0f / fogDistScale);
+        Dws[s] = cellWorldPos(posViewArg) - Ow;
         uzs[s] = u.z;
         zks[s] = dot(fogView.xyz, dJ) / fogDistScale;
     }
@@ -2133,48 +2141,48 @@ void airLampVolStage(int2 col)
         n = cellLightCount;
         base = -1;
         jb = 0;
-        float3 param_22 = P;
-        float3 param_23 = Dw;
-        float param_24 = t0 - tm;
-        float param_25 = t1 - tm;
-        int4 param_26;
-        int4 param_27;
-        bool tmp12888 = volSurfBegin(param_22, param_23, param_24, param_25, param_26, param_27);
-        sp = param_26;
-        se = param_27;
-        surf = tmp12888;
-        bool tmp12892 = !surf;
-        bool tmp12898;
-        if (tmp12892)
+        float3 PArg7 = P;
+        float3 DwArg = Dw;
+        float sAArg = t0 - tm;
+        float sBArg = t1 - tm;
+        int4 pArg5;
+        int4 eArg3;
+        bool volSurfBeginRet = volSurfBegin(PArg7, DwArg, sAArg, sBArg, pArg5, eArg3);
+        sp = pArg5;
+        se = eArg3;
+        surf = volSurfBeginRet;
+        bool cond37 = !surf;
+        bool cond36;
+        if (cond37)
         {
-            tmp12898 = volClusterDims.x > 0;
+            cond36 = volClusterDims.x > 0;
         }
         else
         {
-            tmp12898 = tmp12892;
+            cond36 = cond37;
         }
-        if (tmp12898)
+        if (cond36)
         {
             int2 c_1 = col / volClusterDims.z.xx;
             int ci_1 = ((((volLayer / volClusterDims.w) * volClusterDims.y) + c_1.y) * volClusterDims.x) + c_1.x;
             base = volClusters.Load(2 * ci_1).x;
             n = volClusters.Load((2 * ci_1) + 1).x;
         }
-        int tmp12954;
-        int tmp12967;
-        int tmp12972;
-        float tmp13031;
-        float3 param_34;
-        bool param_35;
+        int iPick;
+        int iPick3;
+        int iPick5;
+        float hfPick;
+        float3 LArg3;
+        bool noSpecArg;
         for (int j_1 = 0; (surf || (j_1 < n)) || (jb < cellBulbCount); j_1++)
         {
             if (surf)
             {
-                int4 param_28 = sp;
-                int4 param_29 = se;
-                int tmp12961 = volSurfNext(param_28, param_29);
-                sp = param_28;
-                tmp12954 = tmp12961;
+                int4 pArg4 = sp;
+                int4 eArg2 = se;
+                int volSurfNextRet2 = volSurfNext(pArg4, eArg2);
+                sp = pArg4;
+                iPick = volSurfNextRet2;
             }
             else
             {
@@ -2182,55 +2190,55 @@ void airLampVolStage(int2 col)
                 {
                     if (base < 0)
                     {
-                        tmp12972 = j_1;
+                        iPick5 = j_1;
                     }
                     else
                     {
-                        tmp12972 = volClusters.Load(base + j_1).x;
+                        iPick5 = volClusters.Load(base + j_1).x;
                     }
-                    tmp12967 = tmp12972;
+                    iPick3 = iPick5;
                 }
                 else
                 {
-                    tmp12967 = -1;
+                    iPick3 = -1;
                 }
-                tmp12954 = tmp12967;
+                iPick = iPick3;
             }
-            int i_1 = tmp12954;
+            int i_1 = iPick;
             if (i_1 < 0)
             {
                 if (jb >= cellBulbCount)
                 {
                     break;
                 }
-                int tmp12999 = jb;
-                jb = tmp12999 + 1;
-                i_1 = cellBulbBase + tmp12999;
+                int jbPart = jb;
+                jb = jbPart + 1;
+                i_1 = cellBulbBase + jbPart;
                 surf = false;
                 j_1 = n;
             }
             float4 a0_1 = cellLights.Load(i_1 * 8);
-            bool tmp13012 = (volLampRed & 8) == 0;
-            bool tmp13026;
-            if (tmp13012)
+            bool cond35 = (volLampRed & 8) == 0;
+            bool flPick;
+            if (cond35)
             {
-                tmp13026 = (int(cellLights.Load((i_1 * 8) + 3).w + 0.5f) & 8) != 0;
+                flPick = (int(cellLights.Load((i_1 * 8) + 3).w + 0.5f) & 8) != 0;
             }
             else
             {
-                tmp13026 = tmp13012;
+                flPick = cond35;
             }
-            bool fl_1 = tmp13026;
+            bool fl_1 = flPick;
             if (volGndLamp.x > 0.0f)
             {
-                float3 param_30 = a0_1.xyz;
-                tmp13031 = airGndZ(param_30);
+                float3 LArg2 = a0_1.xyz;
+                hfPick = airGndZ(LArg2);
             }
             else
             {
-                tmp13031 = 0.0f;
+                hfPick = 0.0f;
             }
-            float hf = tmp13031;
+            float hf = hfPick;
             float3 Ji = 0.0f.xxx;
             for (int s_1 = 0; s_1 < ns; s_1++)
             {
@@ -2246,7 +2254,7 @@ void airLampVolStage(int2 col)
                     float disc = (qb * qb) - (qa * qc);
                     bool wwh2 = (disc <= 0.0f);
                     bool wwh3 = (qa <= 0.0f);
-                    if (wwh2 || wwh3)
+                    if (or(wwh2, wwh3))   // HLSLFIX2 orfix.py: no short-circuit branch (NV took the wrong side)
                     {
                         continue;
                     }
@@ -2266,52 +2274,52 @@ void airLampVolStage(int2 col)
                 float d = length(a0_1.xyz - Pk);
                 bool wwh4 = (d >= a0_1.w);
                 bool wwh5 = (d < 0.001000000047497451305389404296875f);
-                if (wwh4 || wwh5)
+                if (or(wwh4, wwh5))   // HLSLFIX2 orfix.py: no short-circuit branch (NV took the wrong side)
                 {
                     continue;
                 }
                 float3 L = (a0_1.xyz - Pk) / d.xxx;
-                int param_31 = i_1;
-                float3 param_32 = Pk;
-                float3 param_33 = L;
-                float3 tmp13207 = cellLightE(param_31, param_32, param_33, param_34, param_35);
-                float3 Lo = param_34;
-                bool noSpec = param_35;
-                int param_36 = i_1;
-                float3 e = tmp13207 * cellFogK(param_36);
+                int iArg7 = i_1;
+                float3 PArg6 = Pk;
+                float3 NArg2 = L;
+                float3 cellLightERet = cellLightE(iArg7, PArg6, NArg2, LArg3, noSpecArg);
+                float3 Lo = LArg3;
+                bool noSpec = noSpecArg;
+                int iArg6 = i_1;
+                float3 e = cellLightERet * cellFogK(iArg6);
                 if (all(bool3(e.x == 0.0f.xxx.x, e.y == 0.0f.xxx.y, e.z == 0.0f.xxx.z)))
                 {
                     continue;
                 }
                 float zOff = zw - Pw.z;
-                float param_37 = Pk.z + zOff;
-                float param_38 = a0_1.z + zOff;
-                float param_39 = d;
-                float od = airOd(param_37, param_38, param_39);
+                float zaArg = Pk.z + zOff;
+                float zbArg = a0_1.z + zOff;
+                float lenArg = d;
+                float od = airOd(zaArg, zbArg, lenArg);
                 float c_2 = dot(L, dWs[s_1]);
-                float param_40 = c_2;
-                float3 jv = (e * exp(-od)) * volPhasePi(param_40);
+                float cArg11 = c_2;
+                float3 jv = (e * exp(-od)) * volPhasePi(cArg11);
                 if (volMsLamp.x > 0.0f)
                 {
-                    float param_41 = c_2;
-                    float param_42 = od;
-                    jv += (e * airLampMs(param_41, param_42));
+                    float cArg10 = c_2;
+                    float odArg2 = od;
+                    jv += (e * airLampMs(cArg10, odArg2));
                 }
                 if (volGndLamp.x > 0.0f)
                 {
-                    float3 param_43 = a0_1.xyz;
-                    float param_44 = hf;
-                    float3 param_45 = Pk;
-                    float3 param_46 = dWs[s_1];
-                    float param_47 = d;
-                    float param_48 = od;
-                    jv += ((e * airLampGnd(param_43, param_44, param_45, param_46, param_47, param_48)) * airGndK);
+                    float3 LArg = a0_1.xyz;
+                    float hfArg = hf;
+                    float3 PkArg = Pk;
+                    float3 dWArg = dWs[s_1];
+                    float dArg4 = d;
+                    float odArg = od;
+                    jv += ((e * airLampGnd(LArg, hfArg, PkArg, dWArg, dArg4, odArg)) * airGndK);
                 }
-                int param_49 = i_1;
-                float3 param_50 = Pw;
-                float3 param_51 = a0_1.xyz + volLightShift;
-                float tmp13305 = airLeakLightK(param_49, param_50, param_51);
-                jv *= tmp13305;
+                int iArg5 = i_1;
+                float3 PArg5 = Pw;
+                float3 LpArg3 = a0_1.xyz + volLightShift;
+                float airLeakLightKRet2 = airLeakLightK(iArg5, PArg5, LpArg3);
+                jv *= airLeakLightKRet2;
                 Ji += (jv * wc);
             }
             if (fl_1)
@@ -2330,16 +2338,16 @@ void airLampVolStage(int2 col)
     float nOut;
     if (keep)
     {
-        float tmp13344;
+        float akPick;
         if ((volLampRed & 2) != 0)
         {
-            tmp13344 = volLampA;
+            akPick = volLampA;
         }
         else
         {
-            tmp13344 = max(volLampA, 1.0f / (hn + 1.0f));
+            akPick = max(volLampA, 1.0f / (hn + 1.0f));
         }
-        float ak = tmp13344;
+        float ak = akPick;
         s3 = h + ((St - h) * ak);
         nOut = min(hn + 1.0f, 64.0f);
     }
@@ -2348,27 +2356,27 @@ void airLampVolStage(int2 col)
         s3 = St;
         nOut = float(ns);
     }
-    float3 param_52 = s3;
-    s3 = airLampSan(param_52);
+    float3 xArg7 = s3;
+    s3 = airLampSan(xArg7);
     fragColor = float4(s3, nOut);
-    float3 param_53 = Fl;
-    volMrt[0] = float4(min(s3 + airLampSan(param_53), 65504.0f.xxx), float(hsh));
+    float3 xArg6 = Fl;
+    volMrt[0] = float4(min(s3 + airLampSan(xArg6), 65504.0f.xxx), float(hsh));
 }
 
 // FOGTERRAIN1: set the ground layer's anchor for world point Pw (the froxel pass; FOGTERRAIN2: the particles too)
 void airGroundAt(float3 Pw)
 {
-    float tmp5047;
+    float airGzPick;
     if (airTerrOn != 0)
     {
-        float2 param = Pw.xy;
-        tmp5047 = airTerrH(param) - airTerrRef;
+        float2 PwArg2 = Pw.xy;
+        airGzPick = airTerrH(PwArg2) - airTerrRef;
     }
     else
     {
-        tmp5047 = 0.0f;
+        airGzPick = 0.0f;
     }
-    airGz = tmp5047;
+    airGz = airGzPick;
 }
 
 float airDriftW(float3 P, float t)
@@ -2386,10 +2394,10 @@ float airDriftW(float3 P, float t)
 
 float airDrift(float3 dirView, float t)
 {
-    float3 param = dirView * (t / fogDistScale);
-    float3 param_1 = cellWorldPos(param);
-    float param_2 = t;
-    return airDriftW(param_1, param_2);
+    float3 posViewArg7 = dirView * (t / fogDistScale);
+    float3 PArg9 = cellWorldPos(posViewArg7);
+    float tArg = t;
+    return airDriftW(PArg9, tArg);
 }
 
 // the rain fog's extinction per game unit at view point posView
@@ -2398,47 +2406,47 @@ float rfSigma(float3 posView)
     float3 q = mul(float4(posView, 1.0f), rfFromView).xyz;
     float2 e = abs(q.xy - 0.5f.xx) * 2.0f;
     float c = lerp(rfMap.SampleLevel(_rfMap_sampler, q.xy, 0.0f).x, rfFar.x, smoothstep(1.0f - rfFar.y, 1.0f, max(e.x, e.y)));
-    float tmp6419;
+    float pPick;
     if (q.z >= 0.0f)
     {
-        tmp6419 = 1.0f + (rfLaw.y * exp((-q.z) * rfLaw.z));
+        pPick = 1.0f + (rfLaw.y * exp((-q.z) * rfLaw.z));
     }
     else
     {
-        tmp6419 = (1.0f + rfLaw.y) * max(1.0f + (q.z * rfLaw.w), 0.0f);
+        pPick = (1.0f + rfLaw.y) * max(1.0f + (q.z * rfLaw.w), 0.0f);
     }
-    float p = tmp6419;
+    float p = pPick;
     return (rfLaw.x * c) * p;
 }
 
 // 1 - exp(-tau), precise for small tau
 float air1mE(float tau)
 {
-    float tmp5206;
+    float air1mERet;
     if (tau < 0.001000000047497451305389404296875f)
     {
-        tmp5206 = tau * (1.0f - (tau * (0.5f - (tau / 6.0f))));
+        air1mERet = tau * (1.0f - (tau * (0.5f - (tau / 6.0f))));
     }
     else
     {
-        tmp5206 = 1.0f - exp(-tau);
+        air1mERet = 1.0f - exp(-tau);
     }
-    return tmp5206;
+    return air1mERet;
 }
 
 float airCsmCover(float3 posView)
 {
-    bool tmp6486 = !volCsm;
-    bool tmp6502;
-    if (!tmp6486)
+    bool cond49 = !volCsm;
+    bool cond48;
+    if (!cond49)
     {
-        tmp6502 = ((-posView.z) * csmParams.x) > (csmParams.y + csmParams.w);
+        cond48 = ((-posView.z) * csmParams.x) > (csmParams.y + csmParams.w);
     }
     else
     {
-        tmp6502 = tmp6486;
+        cond48 = cond49;
     }
-    if (tmp6502)
+    if (cond48)
     {
         return 0.0f;
     }
@@ -2452,67 +2460,67 @@ float3 airLeakEnvWalk(float3 P, float3 dW, out float fade, float csmCover)
     fade = 0.0f;
     airLeakSun = 1.0f;
     airLeakR = -1.0f;
-    bool tmp6537 = (volTerms & 8) != 0;
-    bool tmp6544;
-    if (tmp6537)
+    bool cond56 = (volTerms & 8) != 0;
+    bool needEnvPick;
+    if (cond56)
     {
-        tmp6544 = (volLeakRed & 1) == 0;
+        needEnvPick = (volLeakRed & 1) == 0;
     }
     else
     {
-        tmp6544 = tmp6537;
+        needEnvPick = cond56;
     }
-    bool needEnv = tmp6544;
-    bool tmp6551 = ((volTerms & 1) != 0) && cellHasDir;
-    bool tmp6561;
-    if (tmp6551)
+    bool needEnv = needEnvPick;
+    bool cond55 = ((volTerms & 1) != 0) && cellHasDir;
+    bool needSunPick;
+    if (cond55)
     {
-        tmp6561 = (volLeakRed & (cellInterior ? 18 : 2)) == 0;
+        needSunPick = (volLeakRed & (cellInterior ? 18 : 2)) == 0;
     }
     else
     {
-        tmp6561 = tmp6551;
+        needSunPick = cond55;
     }
-    bool needSun = tmp6561;
+    bool needSun = needSunPick;
     bool sunHeavy = (volLeakRed & 256) != 0;
-    bool tmp6567 = !cellInterior;
-    bool tmp6574;
-    if (tmp6567)
+    bool cond54 = !cellInterior;
+    bool cond53;
+    if (cond54)
     {
-        tmp6574 = (volLeakRed & 320) == 0;
+        cond53 = (volLeakRed & 320) == 0;
     }
     else
     {
-        tmp6574 = tmp6567;
+        cond53 = cond54;
     }
-    if (tmp6574 && (csmCover >= 1.0f))
+    if (cond53 && (csmCover >= 1.0f))
     {
         needSun = false;
     }
-    bool tmp6581 = !cellDdgiOn;
-    bool tmp6589;
-    if (!tmp6581)
+    bool cond52 = !cellDdgiOn;
+    bool cond51;
+    if (!cond52)
     {
-        tmp6589 = !(needEnv || needSun);
+        cond51 = !(needEnv || needSun);
     }
     else
     {
-        tmp6589 = tmp6581;
+        cond51 = cond52;
     }
-    if (tmp6589)
+    if (cond51)
     {
         return 0.0f.xxx;
     }
-    float3 tmp6595;
+    float3 sdPick;
     if (needSun)
     {
-        tmp6595 = normalize(cellDirTo);
+        sdPick = normalize(cellDirTo);
     }
     else
     {
-        tmp6595 = float3(0.0f, 0.0f, 1.0f);
+        sdPick = float3(0.0f, 0.0f, 1.0f);
     }
-    float3 sd = tmp6595;
+    float3 sd = sdPick;
     float3 Ep = 0.0f.xxx;
     float3 Em = 0.0f.xxx;
     float vs = 0.0f;
@@ -2543,17 +2551,17 @@ float3 airLeakEnvWalk(float3 P, float3 dW, out float fade, float csmCover)
         float wn = 0.0f;
         float svd = 0.0f;
         float vdn = 0.0f;
-        bool tmp6708 = (volLeakRed & 64) != 0;
-        bool tmp6720;
-        if (!tmp6708)
+        bool cond50 = (volLeakRed & 64) != 0;
+        bool sun8Pick;
+        if (!cond50)
         {
-            tmp6720 = ((!cellInterior) && (!sunHeavy)) && (csmCover > 0.0f);
+            sun8Pick = ((!cellInterior) && (!sunHeavy)) && (csmCover > 0.0f);
         }
         else
         {
-            tmp6720 = tmp6708;
+            sun8Pick = cond50;
         }
-        bool sun8 = tmp6720;
+        bool sun8 = sun8Pick;
         for (int k = 0; k < cellGiLoop8; k++)
         {
             int3 o = int3(k % 2, (k / 2) % 2, k / 4);
@@ -2563,6 +2571,7 @@ float3 airLeakEnvWalk(float3 P, float3 dW, out float fade, float csmCover)
             float3 t = lerp(1.0f.xxx - a, a, float3(o));
             float w = (t.x * t.y) * t.z;
             int st = int(pr.w + 0.5f);
+            // rtddgimath.h probeUsable / probeMissing: 2 usable, 0 Off (keeps its cover), else missing
             if (st != 2)
             {
                 cover += ((st == 0) ? w : 0.0f);
@@ -2573,35 +2582,35 @@ float3 airLeakEnvWalk(float3 P, float3 dW, out float fade, float csmCover)
             float rr = length(bp);
             if (rr > 0.0f)
             {
-                int param = p;
-                float3 param_1 = bp * ((-1.0f) / rr);
-                int param_2 = 16;
-                float4 m = cellDdgiTile(param, param_1, param_2);
-                float param_3 = rr;
-                float param_4 = m.x;
-                float param_5 = m.y;
-                w *= cellDdgiChebyshev(param_3, param_4, param_5);
+                int pArg12 = p;
+                float3 dArg9 = bp * ((-1.0f) / rr);
+                int SArg7 = 16;
+                float4 m = cellDdgiTile(pArg12, dArg9, SArg7);
+                float rArg5 = rr;
+                float meanArg3 = m.x;
+                float mean2Arg3 = m.y;
+                w *= cellDdgiChebyshev(rArg5, meanArg3, mean2Arg3);
             }
-            int param_6 = p;
-            float3 param_7 = dW;
-            int param_8 = 8;
-            float4 ea = cellDdgiTile(param_6, param_7, param_8);
+            int pArg11 = p;
+            float3 dArg8 = dW;
+            int SArg6 = 8;
+            float4 ea = cellDdgiTile(pArg11, dArg8, SArg6);
             sp += (pow(max(ea.xyz, 0.0f.xxx), 2.5f.xxx) * w);
             svd += (ea.w * w);
             if (needEnv)
             {
-                int param_9 = p;
-                float3 param_10 = -dW;
-                int param_11 = 8;
-                float4 eb = cellDdgiTile(param_9, param_10, param_11);
+                int pArg10 = p;
+                float3 dArg7 = -dW;
+                int SArg5 = 8;
+                float4 eb = cellDdgiTile(pArg10, dArg7, SArg5);
                 sm += (pow(max(eb.xyz, 0.0f.xxx), 2.5f.xxx) * w);
             }
             if (needSun && sun8)
             {
-                int param_12 = p;
-                float3 param_13 = sd;
-                int param_14 = 8;
-                sv += (cellDdgiTile(param_12, param_13, param_14).w * w);
+                int pArg9 = p;
+                float3 dArg6 = sd;
+                int SArg4 = 8;
+                sv += (cellDdgiTile(pArg9, dArg6, SArg4).w * w);
             }
             if (w > wn)
             {
@@ -2617,10 +2626,10 @@ float3 airLeakEnvWalk(float3 P, float3 dW, out float fade, float csmCover)
         }
         if ((needSun && (!sun8)) && (pn >= 0))
         {
-            int param_15 = pn;
-            float3 param_16 = sd;
-            int param_17 = 8;
-            sv = clamp((cellDdgiTile(param_15, param_16, param_17).w + (svd / ws)) - vdn, 0.0f, 1.0f) * ws;
+            int pArg8 = pn;
+            float3 dArg5 = sd;
+            int SArg3 = 8;
+            sv = clamp((cellDdgiTile(pArg8, dArg5, SArg3).w + (svd / ws)) - vdn, 0.0f, 1.0f) * ws;
         }
         float take = (fd * min(cover, 1.0f)) * left;
         float3 mp = sp / ws.xxx;
@@ -2678,13 +2687,13 @@ float3 airLeakEnv(float3 P, float3 dW, inout float fade, float csmCover)
         airEnvO1 = airEnvH1;
         return airEnvH0.xyz;
     }
-    float3 param = P;
-    float3 param_1 = dW;
-    float param_3 = csmCover;
-    float param_2;
-    float3 tmp7184 = airLeakEnvWalk(param, param_1, param_2, param_3);
-    fade = param_2;
-    float3 j = tmp7184;
+    float3 PArg10 = P;
+    float3 dWArg2 = dW;
+    float csmCoverArg = csmCover;
+    float fadeArg;
+    float3 airLeakEnvWalkRet = airLeakEnvWalk(PArg10, dWArg2, fadeArg, csmCoverArg);
+    fade = fadeArg;
+    float3 j = airLeakEnvWalkRet;
     airEnvO0 = float4(j, fade);
     airEnvO1 = float4(airLeakSun, airLeakR, 1.0f, 0.0f);
     return j;
@@ -2701,98 +2710,98 @@ int2 cellRoomUnpack(float v)
 int2 cellRoomAt(float3 q)
 {
     float3 c = floor((q - cellRoomsOrigin) / cellRoomsCell.xxx);
-    bool tmp3811 = any(bool3(c.x < 0.0f.xxx.x, c.y < 0.0f.xxx.y, c.z < 0.0f.xxx.z));
-    bool tmp3820;
-    if (!tmp3811)
+    bool cond58 = any(bool3(c.x < 0.0f.xxx.x, c.y < 0.0f.xxx.y, c.z < 0.0f.xxx.z));
+    bool cond57;
+    if (!cond58)
     {
-        tmp3820 = any(bool3(c.x >= cellRoomsDims.x, c.y >= cellRoomsDims.y, c.z >= cellRoomsDims.z));
+        cond57 = any(bool3(c.x >= cellRoomsDims.x, c.y >= cellRoomsDims.y, c.z >= cellRoomsDims.z));
     }
     else
     {
-        tmp3820 = tmp3811;
+        cond57 = cond58;
     }
-    if (tmp3820)
+    if (cond57)
     {
         return int2(-1, -1);
     }
-    float param = cellRooms.Load(int4(int3(c), 0)).x;
-    return cellRoomUnpack(param);
+    float vArg3 = cellRooms.Load(int4(int3(c), 0)).x;
+    return cellRoomUnpack(vArg3);
 }
 
 float4 volRoomAxis(int3 c0, float3 f, int2 L, int a, float4 plain, int3 dm)
 {
     float4 s = 0.0f.xxxx;
     float ws = 0.0f;
-    int tmp5384;
-    int tmp5408;
+    int basePick;
+    int basePick2;
     for (int k = 0; k < 8; k++)
     {
         int3 o = int3(k & 1, (k >> 1) & 1, (k >> 2) & 1);
         int3 c = clamp(c0 + o, int3(0, 0, 0), dm - int3(1, 1, 1));
         float3 t = lerp(1.0f.xxx - f, f, float3(o));
         float w = (t.x * t.y) * t.z;
-        float param = cellGiSlots.Load(int4(c, 0)).x;
-        int2 S = cellRoomUnpack(param);
-        bool tmp5366 = S.x >= 0;
-        bool tmp5383;
-        if (tmp5366)
+        float vArg4 = cellGiSlots.Load(int4(c, 0)).x;
+        int2 S = cellRoomUnpack(vArg4);
+        bool cond64 = S.x >= 0;
+        bool cond63;
+        if (cond64)
         {
-            bool tmp5373 = S.x == L.x;
-            bool tmp5382;
-            if (!tmp5373)
+            bool cond62 = S.x == L.x;
+            bool condPick3;
+            if (!cond62)
             {
-                tmp5382 = S.x == L.y;
+                condPick3 = S.x == L.y;
             }
             else
             {
-                tmp5382 = tmp5373;
+                condPick3 = cond62;
             }
-            tmp5383 = tmp5382;
+            cond63 = condPick3;
         }
         else
         {
-            tmp5383 = tmp5366;
+            cond63 = cond64;
         }
-        if (tmp5383)
+        if (cond63)
         {
-            tmp5384 = 0;
+            basePick = 0;
         }
         else
         {
-            bool tmp5390 = S.y >= 0;
-            bool tmp5407;
-            if (tmp5390)
+            bool cond61 = S.y >= 0;
+            bool cond60;
+            if (cond61)
             {
-                bool tmp5397 = S.y == L.x;
-                bool tmp5406;
-                if (!tmp5397)
+                bool cond59 = S.y == L.x;
+                bool condPick2;
+                if (!cond59)
                 {
-                    tmp5406 = S.y == L.y;
+                    condPick2 = S.y == L.y;
                 }
                 else
                 {
-                    tmp5406 = tmp5397;
+                    condPick2 = cond59;
                 }
-                tmp5407 = tmp5406;
+                cond60 = condPick2;
             }
             else
             {
-                tmp5407 = tmp5390;
+                cond60 = cond61;
             }
-            if (tmp5407)
+            if (cond60)
             {
-                tmp5408 = 6 * dm.z;
+                basePick2 = 6 * dm.z;
             }
             else
             {
-                tmp5408 = -1;
+                basePick2 = -1;
             }
-            tmp5384 = tmp5408;
+            basePick = basePick2;
         }
-        int base = tmp5384;
+        int base = basePick;
         bool wwh7 = (base < 0);
         bool wwh8 = (w <= 0.0f);
-        if (wwh7 || wwh8)
+        if (or(wwh7, wwh8))   // HLSLFIX2 orfix.py: no short-circuit branch (NV took the wrong side)
         {
             continue;
         }
@@ -2805,27 +2814,27 @@ float4 volRoomAxis(int3 c0, float3 f, int2 L, int a, float4 plain, int3 dm)
     }
     if ((volRed & 4194304) != 0)
     {
-        float4 tmp5468;
+        float4 volRoomAxisRet2;
         if (ws > 0.0f)
         {
-            tmp5468 = s / ws.xxxx;
+            volRoomAxisRet2 = s / ws.xxxx;
         }
         else
         {
-            tmp5468 = plain;
+            volRoomAxisRet2 = plain;
         }
-        return tmp5468;
+        return volRoomAxisRet2;
     }
-    float4 tmp5482;
+    float4 volRoomAxisRet;
     if (ws >= 0.25f)
     {
-        tmp5482 = s / ws.xxxx;
+        volRoomAxisRet = s / ws.xxxx;
     }
     else
     {
-        tmp5482 = (s + (plain * (0.25f - ws))) / 0.25f.xxxx;
+        volRoomAxisRet = (s + (plain * (0.25f - ws))) / 0.25f.xxxx;
     }
-    return tmp5482;
+    return volRoomAxisRet;
 }
 
 void volCubeAll(float3 P, inout float3 E[6], inout float share[6])
@@ -2845,6 +2854,7 @@ void volCubeAll(float3 P, inout float3 E[6], inout float share[6])
     float3 g = (P - cellGiOrigin) / cellGiVoxel.xxx;
     float2 xy = g.xy / cellGiDims.xy;
     float z = clamp(g.z, 0.5f, cellGiDims.z - 0.5f);
+    // lanes EMISSIVEGRID1 + SPECOCC1: the fine atlas / sky slabs may follow
     float depth = float(int3(spvTextureSize(cellGi, uint(0), dummy_parameter)).z);
     float4 plain[6];
     float4 r[6];
@@ -2853,40 +2863,41 @@ void volCubeAll(float3 P, inout float3 E[6], inout float share[6])
         plain[a_1] = cellGi.Sample(_cellGi_sampler, float3(xy, (z + (float(a_1) * cellGiDims.z)) / depth));
         r[a_1] = plain[a_1];
     }
-    bool tmp5635;
+    bool cond72;
     if (cellGiRooms)
     {
-        tmp5635 = (cellPassRed & 8) == 0;
+        cond72 = (cellPassRed & 8) == 0;
     }
     else
     {
-        tmp5635 = cellGiRooms;
+        cond72 = cellGiRooms;
     }
-    if (tmp5635)
+    if (cond72)
     {
         float3 gv = g - 0.5f.xxx;
         int3 c0 = int3(floor(gv));
         float3 f = gv - float3(c0);
         if ((volRed & 4194304) != 0)
         {
-            float3 param = P;
-            int2 L = cellRoomAt(param);
+            float3 qArg = P;
+            int2 L = cellRoomAt(qArg);
             if (L.x >= 0)
             {
                 for (int a_2 = 0; a_2 < 6; a_2++)
                 {
-                    int3 param_1 = c0;
-                    float3 param_2 = f;
-                    int2 param_3 = L;
-                    int param_4 = a_2;
-                    float4 param_5 = plain[a_2];
-                    int3 param_6 = dm;
-                    r[a_2] = volRoomAxis(param_1, param_2, param_3, param_4, param_5, param_6);
+                    int3 c0Arg3 = c0;
+                    float3 fArg3 = f;
+                    int2 LArg6 = L;
+                    int aArg7 = a_2;
+                    float4 plainArg3 = plain[a_2];
+                    int3 dmArg3 = dm;
+                    r[a_2] = volRoomAxis(c0Arg3, fArg3, LArg6, aArg7, plainArg3, dmArg3);
                 }
             }
         }
         else
         {
+            // the 8 room cells around P: labels, trilinear weights; solid cells drop out, outside the grid = plain
             float3 gr = ((P - cellRoomsOrigin) / cellRoomsCell.xxx) - 0.5f.xxx;
             int3 r0 = int3(floor(gr));
             float3 fr = gr - float3(r0);
@@ -2900,42 +2911,44 @@ void volCubeAll(float3 P, inout float3 E[6], inout float share[6])
                 int3 c = r0 + o;
                 float3 t = lerp(1.0f.xxx - fr, fr, float3(o));
                 wk[k] = (t.x * t.y) * t.z;
-                bool tmp5759 = any(bool3(c.x < int3(0, 0, 0).x, c.y < int3(0, 0, 0).y, c.z < int3(0, 0, 0).z));
-                bool tmp5768;
-                if (!tmp5759)
+                bool cond71 = any(bool3(c.x < int3(0, 0, 0).x, c.y < int3(0, 0, 0).y, c.z < int3(0, 0, 0).z));
+                bool cond70;
+                if (!cond71)
                 {
-                    int3 tmp5765 = int3(cellRoomsDims);
-                    tmp5768 = any(bool3(c.x >= tmp5765.x, c.y >= tmp5765.y, c.z >= tmp5765.z));
+                    int3 condPart = int3(cellRoomsDims);
+                    cond70 = any(bool3(c.x >= condPart.x, c.y >= condPart.y, c.z >= condPart.z));
                 }
                 else
                 {
-                    tmp5768 = tmp5759;
+                    cond70 = cond71;
                 }
-                if (tmp5768)
+                if (cond70)
                 {
+                    // outside the room grid: the plain read
                     Lk[k] = int2(-2, -2);
                 }
                 else
                 {
-                    float param_7 = cellRooms.Load(int4(c, 0)).x;
-                    Lk[k] = cellRoomUnpack(param_7);
+                    float vArg5 = cellRooms.Load(int4(c, 0)).x;
+                    Lk[k] = cellRoomUnpack(vArg5);
                 }
                 if (Lk[k].x == (-1))
                 {
+                    // solid
                     wk[k] = 0.0f;
                 }
                 wAir += wk[k];
-                bool tmp5802 = k > 0;
-                bool tmp5812;
-                if (tmp5802)
+                bool cond69 = k > 0;
+                bool cond68;
+                if (cond69)
                 {
-                    tmp5812 = any(bool2(Lk[k].x != Lk[0].x, Lk[k].y != Lk[0].y));
+                    cond68 = any(bool2(Lk[k].x != Lk[0].x, Lk[k].y != Lk[0].y));
                 }
                 else
                 {
-                    tmp5812 = tmp5802;
+                    cond68 = cond69;
                 }
-                if (tmp5812)
+                if (cond68)
                 {
                     same = false;
                 }
@@ -2948,13 +2961,13 @@ void volCubeAll(float3 P, inout float3 E[6], inout float share[6])
                     {
                         for (int a_3 = 0; a_3 < 6; a_3++)
                         {
-                            int3 param_8 = c0;
-                            float3 param_9 = f;
-                            int2 param_10 = Lk[0];
-                            int param_11 = a_3;
-                            float4 param_12 = plain[a_3];
-                            int3 param_13 = dm;
-                            r[a_3] = volRoomAxis(param_8, param_9, param_10, param_11, param_12, param_13);
+                            int3 c0Arg2 = c0;
+                            float3 fArg2 = f;
+                            int2 LArg5 = Lk[0];
+                            int aArg6 = a_3;
+                            float4 plainArg2 = plain[a_3];
+                            int3 dmArg2 = dm;
+                            r[a_3] = volRoomAxis(c0Arg2, fArg2, LArg5, aArg6, plainArg2, dmArg2);
                         }
                     }
                 }
@@ -2964,8 +2977,8 @@ void volCubeAll(float3 P, inout float3 E[6], inout float share[6])
                     {
                         r[a_4] = 0.0f.xxxx;
                     }
-                    float tmp5939;
-                    float4 tmp5968;
+                    float wlPick;
+                    float4 rPick5;
                     for (int k_1 = 0; k_1 < 8; k_1++)
                     {
                         if (wk[k_1] <= 0.0f)
@@ -2975,26 +2988,26 @@ void volCubeAll(float3 P, inout float3 E[6], inout float share[6])
                         bool seen = false;
                         for (int j = 0; j < k_1; j++)
                         {
-                            bool tmp5914;
+                            bool seenPick;
                             if (!seen)
                             {
-                                bool tmp5902 = wk[j] > 0.0f;
-                                bool tmp5913;
-                                if (tmp5902)
+                                bool cond67 = wk[j] > 0.0f;
+                                bool seenPick2;
+                                if (cond67)
                                 {
-                                    tmp5913 = all(bool2(Lk[j].x == Lk[k_1].x, Lk[j].y == Lk[k_1].y));
+                                    seenPick2 = all(bool2(Lk[j].x == Lk[k_1].x, Lk[j].y == Lk[k_1].y));
                                 }
                                 else
                                 {
-                                    tmp5913 = tmp5902;
+                                    seenPick2 = cond67;
                                 }
-                                tmp5914 = tmp5913;
+                                seenPick = seenPick2;
                             }
                             else
                             {
-                                tmp5914 = seen;
+                                seenPick = seen;
                             }
-                            seen = tmp5914;
+                            seen = seenPick;
                         }
                         if (seen)
                         {
@@ -3005,49 +3018,49 @@ void volCubeAll(float3 P, inout float3 E[6], inout float share[6])
                         {
                             if (all(bool2(Lk[j_1].x == Lk[k_1].x, Lk[j_1].y == Lk[k_1].y)))
                             {
-                                tmp5939 = wk[j_1];
+                                wlPick = wk[j_1];
                             }
                             else
                             {
-                                tmp5939 = 0.0f;
+                                wlPick = 0.0f;
                             }
-                            wl += tmp5939;
+                            wl += wlPick;
                         }
                         wl /= wAir;
                         for (int a_5 = 0; a_5 < 6; a_5++)
                         {
                             if (Lk[k_1].x >= 0)
                             {
-                                int3 param_14 = c0;
-                                float3 param_15 = f;
-                                int2 param_16 = Lk[k_1];
-                                int param_17 = a_5;
-                                float4 param_18 = plain[a_5];
-                                int3 param_19 = dm;
-                                tmp5968 = volRoomAxis(param_14, param_15, param_16, param_17, param_18, param_19);
+                                int3 c0Arg = c0;
+                                float3 fArg = f;
+                                int2 LArg4 = Lk[k_1];
+                                int aArg5 = a_5;
+                                float4 plainArg = plain[a_5];
+                                int3 dmArg = dm;
+                                rPick5 = volRoomAxis(c0Arg, fArg, LArg4, aArg5, plainArg, dmArg);
                             }
                             else
                             {
-                                tmp5968 = plain[a_5];
+                                rPick5 = plain[a_5];
                             }
-                            r[a_5] += (tmp5968 * wl);
+                            r[a_5] += (rPick5 * wl);
                         }
                     }
                 }
             }
         }
     }
-    bool tmp6004 = volShell > 0.0f;
-    bool tmp6012;
-    if (tmp6004)
+    bool cond66 = volShell > 0.0f;
+    bool cond65;
+    if (cond66)
     {
-        tmp6012 = cellGiSky && cellDdgiOn;
+        cond65 = cellGiSky && cellDdgiOn;
     }
     else
     {
-        tmp6012 = tmp6004;
+        cond65 = cond66;
     }
-    if (tmp6012)
+    if (cond65)
     {
         float4 wide[6];
         for (int a_6 = 0; a_6 < 6; a_6++)
@@ -3063,53 +3076,55 @@ void volCubeAll(float3 P, inout float3 E[6], inout float share[6])
                 wide[a_7] += (cellGi.Sample(_cellGi_sampler, float3(q.xy / cellGiDims.xy, (qz + (float(a_7) * cellGiDims.z)) / depth)) * 0.125f);
             }
         }
-        float3 tmp6115;
-        float3 tmp6132;
+        float3 vPick;
+        float3 vPick2;
         for (int a_8 = 0; a_8 < 6; a_8++)
         {
             if (r[a_8].w > 0.00999999977648258209228515625f)
             {
-                tmp6115 = r[a_8].xyz / r[a_8].w.xxx;
+                vPick = r[a_8].xyz / r[a_8].w.xxx;
             }
             else
             {
                 if (wide[a_8].w > 9.9999997473787516355514526367188e-05f)
                 {
-                    tmp6132 = wide[a_8].xyz / wide[a_8].w.xxx;
+                    vPick2 = wide[a_8].xyz / wide[a_8].w.xxx;
                 }
                 else
                 {
-                    tmp6132 = 0.0f.xxx;
+                    vPick2 = 0.0f.xxx;
                 }
-                tmp6115 = tmp6132;
+                vPick = vPick2;
             }
-            float3 v = tmp6115;
+            // the GI's own value (P's room answer, else the wide mean), weighted by the wide share; the ambient takes the rest
+            float3 v = vPick;
             share[a_8] = clamp(wide[a_8].w, 0.0f, 1.0f);
             E[a_8] = max(v * share[a_8], 0.0f.xxx);
         }
         return;
     }
-    float3 tmp6176;
-    float3 tmp6189;
+    float3 EPick;
+    float3 EPick2;
     for (int a_9 = 0; a_9 < 6; a_9++)
     {
         if (cellGiSky && cellDdgiOn)
         {
-            tmp6176 = max(r[a_9].xyz, 0.0f.xxx);
+            EPick = max(r[a_9].xyz, 0.0f.xxx);
         }
         else
         {
             if (r[a_9].w > 0.00999999977648258209228515625f)
             {
-                tmp6189 = max(r[a_9].xyz / r[a_9].w.xxx, 0.0f.xxx);
+                EPick2 = max(r[a_9].xyz / r[a_9].w.xxx, 0.0f.xxx);
             }
             else
             {
-                tmp6189 = 0.0f.xxx;
+                EPick2 = 0.0f.xxx;
             }
-            tmp6176 = tmp6189;
+            EPick = EPick2;
         }
-        E[a_9] = tmp6176;
+        // as cellGiE0: a sky grid keeps the valid share, else the mean over the valid share
+        E[a_9] = EPick;
         share[a_9] = clamp(plain[a_9].w, 0.0f, 1.0f);
     }
 }
@@ -3128,14 +3143,15 @@ float3 cellAmboScale(float3 P)
 {
     for (int i = 0; i < cellAmboCount; i++)
     {
+        // linked to a box, it fills the box (not the sphere)
         if (cellAmboK[i].w > 0.5f)
         {
             float4 b0 = cellAmboBox[i * 3];
             float4 b1 = cellAmboBox[(i * 3) + 1];
             float4 b2 = cellAmboBox[(i * 3) + 2];
             float3 k = float3(dot(b0.xyz, P) + b0.w, dot(b1.xyz, P) + b1.w, dot(b2.xyz, P) + b2.w);
-            float3 tmp4867 = abs(k);
-            if (all(bool3(tmp4867.x < 1.0f.xxx.x, tmp4867.y < 1.0f.xxx.y, tmp4867.z < 1.0f.xxx.z)))
+            float3 cond73 = abs(k);
+            if (all(bool3(cond73.x < 1.0f.xxx.x, cond73.y < 1.0f.xxx.y, cond73.z < 1.0f.xxx.z)))
             {
                 return cellAmboK[i].xyz;
             }
@@ -3154,29 +3170,29 @@ float3 cellAmboScale(float3 P)
 float3 cellAmbientSum(float3 N, float3 P)
 {
     float4 n1 = float4(N, 1.0f);
-    float3 param = P;
-    return float3(dot(cellDalc[0], n1), dot(cellDalc[1], n1), dot(cellDalc[2], n1)) * cellAmboScale(param);
+    float3 PArg11 = P;
+    return float3(dot(cellDalc[0], n1), dot(cellDalc[1], n1), dot(cellDalc[2], n1)) * cellAmboScale(PArg11);
 }
 
 float3 cellAmbient(float3 N, float3 P)
 {
-    float3 param = N;
-    float3 param_1 = P;
-    return pow(max(cellAmbientSum(param, param_1), 0.0f.xxx), 2.2000000476837158203125f.xxx);
+    float3 NArg3 = N;
+    float3 PArg12 = P;
+    return pow(max(cellAmbientSum(NArg3, PArg12), 0.0f.xxx), 2.2000000476837158203125f.xxx);
 }
 
 float airAmbKeep(float fade, float r)
 {
-    float tmp6277;
+    float airAmbKeepRet;
     if (r >= 0.0f)
     {
-        tmp6277 = (1.0f - fade) + (fade * r);
+        airAmbKeepRet = (1.0f - fade) + (fade * r);
     }
     else
     {
-        tmp6277 = 1.0f - fade;
+        airAmbKeepRet = 1.0f - fade;
     }
-    return tmp6277;
+    return airAmbKeepRet;
 }
 
 float3 airRest(float3 posView, float3 dirView, float z, float sA, float sB, inout float3 Jenv, bool lights)
@@ -3187,126 +3203,126 @@ float3 airRest(float3 posView, float3 dirView, float z, float sA, float sB, inou
         return 0.0f.xxx;
     }
     float3 J = 0.0f.xxx;
-    float3 param = posView;
-    float3 P = cellWorldPos(param);
-    float3 param_1 = dirView;
-    float3 dW = cellWorldDir(param_1);
+    float3 posViewArg11 = posView;
+    float3 P = cellWorldPos(posViewArg11);
+    float3 dirViewArg2 = dirView;
+    float3 dW = cellWorldDir(dirViewArg2);
     float zOff = z - P.z;
-    float3 param_2 = dirView * (1.0f / fogDistScale);
-    float3 param_3 = 0.0f.xxx;
-    float3 Dw = cellWorldPos(param_2) - cellWorldPos(param_3);
+    float3 posViewArg10 = dirView * (1.0f / fogDistScale);
+    float3 posViewArg9 = 0.0f.xxx;
+    float3 Dw = cellWorldPos(posViewArg10) - cellWorldPos(posViewArg9);
     float3 Pl = P - volLightShift;
-    float3 param_4 = posView;
-    float3 param_5 = P;
-    float3 param_6 = dW;
-    float param_8 = airCsmCover(param_4);
-    float param_7;
-    float3 tmp10515 = airLeakEnv(param_5, param_6, param_7, param_8);
-    float leakFade = param_7;
-    float3 Jddgi = tmp10515;
-    bool tmp10521 = ((volTerms & 4) != 0) && false;
-    bool tmp10527;
-    if (tmp10521)
+    float3 posViewArg8 = posView;
+    float3 PArg20 = P;
+    float3 dWArg7 = dW;
+    float csmCoverArg2 = airCsmCover(posViewArg8);
+    float fadeArg4;
+    float3 airLeakEnvRet = airLeakEnv(PArg20, dWArg7, fadeArg4, csmCoverArg2);
+    float leakFade = fadeArg4;
+    float3 Jddgi = airLeakEnvRet;
+    bool cond83 = ((volTerms & 4) != 0) && false;
+    bool wantGiPick;
+    if (cond83)
     {
-        tmp10527 = (volRed & 2) == 0;
+        wantGiPick = (volRed & 2) == 0;
     }
     else
     {
-        tmp10527 = tmp10521;
+        wantGiPick = cond83;
     }
-    bool wantGi = tmp10527;
+    bool wantGi = wantGiPick;
     bool ambDalc = cellInterior ? cellHasDalc : cellExtDalc;
-    bool tmp10540 = ((volTerms & 8) != 0) && ambDalc;
-    bool tmp10549;
-    if (tmp10540)
+    bool cond82 = ((volTerms & 8) != 0) && ambDalc;
+    bool wantAmbPick;
+    if (cond82)
     {
-        tmp10549 = !(cellInterior && (cellGiAmb == 2));
+        wantAmbPick = !(cellInterior && (cellGiAmb == 2));
     }
     else
     {
-        tmp10549 = tmp10540;
+        wantAmbPick = cond82;
     }
-    bool wantAmb = tmp10549;
-    bool tmp10556;
+    bool wantAmb = wantAmbPick;
+    bool cond81;
     if (wantAmb)
     {
-        tmp10556 = (volLeakRed & 1) == 0;
+        cond81 = (volLeakRed & 1) == 0;
     }
     else
     {
-        tmp10556 = wantAmb;
+        cond81 = wantAmb;
     }
-    float tmp10557;
-    if (tmp10556)
+    float airGndKPick;
+    if (cond81)
     {
-        tmp10557 = 1.0f - leakFade;
+        airGndKPick = 1.0f - leakFade;
     }
     else
     {
-        tmp10557 = 1.0f;
+        airGndKPick = 1.0f;
     }
-    airGndK = tmp10557;
-    bool tmp10566 = volLampVol != 0;
-    bool tmp10572;
-    if (tmp10566)
+    airGndK = airGndKPick;
+    bool cond80 = volLampVol != 0;
+    bool condPick4;
+    if (cond80)
     {
-        tmp10572 = (volTerms & 2) != 0;
+        condPick4 = (volTerms & 2) != 0;
     }
     else
     {
-        tmp10572 = tmp10566;
+        condPick4 = cond80;
     }
-    bool tmp10574 = tmp10572 && lights;
-    bool tmp10580;
-    if (tmp10574)
+    bool cond79 = condPick4 && lights;
+    bool cond78;
+    if (cond79)
     {
-        tmp10580 = (volRed & 16) == 0;
+        cond78 = (volRed & 16) == 0;
     }
     else
     {
-        tmp10580 = tmp10574;
+        cond78 = cond79;
     }
-    if (tmp10580)
+    if (cond78)
     {
         J = volLampNow.Load(int4(int3(int2(gl_FragCoord.xy), volLayer), 0)).xyz;
     }
     else
     {
-        bool tmp10601 = ((volTerms & 2) != 0) && lights;
-        bool tmp10607;
-        if (tmp10601)
+        bool cond77 = ((volTerms & 2) != 0) && lights;
+        bool cond76;
+        if (cond77)
         {
-            tmp10607 = (volRed & 16) == 0;
+            cond76 = (volRed & 16) == 0;
         }
         else
         {
-            tmp10607 = tmp10601;
+            cond76 = cond77;
         }
-        if (tmp10607)
+        if (cond76)
         {
             int n = cellLightCount;
             int base = -1;
-            float3 param_9 = P;
-            float3 param_10 = Dw;
-            float param_11 = sA;
-            float param_12 = sB;
-            int4 param_13;
-            int4 param_14;
-            bool tmp10627 = volSurfBegin(param_9, param_10, param_11, param_12, param_13, param_14);
-            int4 sp = param_13;
-            int4 se = param_14;
-            bool surf = tmp10627;
-            bool tmp10631 = !surf;
-            bool tmp10638;
-            if (tmp10631)
+            float3 PArg19 = P;
+            float3 DwArg3 = Dw;
+            float sAArg3 = sA;
+            float sBArg3 = sB;
+            int4 pArg14;
+            int4 eArg7;
+            bool volSurfBeginRet3 = volSurfBegin(PArg19, DwArg3, sAArg3, sBArg3, pArg14, eArg7);
+            int4 sp = pArg14;
+            int4 se = eArg7;
+            bool surf = volSurfBeginRet3;
+            bool cond75 = !surf;
+            bool cond74;
+            if (cond75)
             {
-                tmp10638 = volClusterDims.x > 0;
+                cond74 = volClusterDims.x > 0;
             }
             else
             {
-                tmp10638 = tmp10631;
+                cond74 = cond75;
             }
-            if (tmp10638)
+            if (cond74)
             {
                 int2 c = int2(gl_FragCoord.xy) / volClusterDims.z.xx;
                 int ci = ((((volLayer / volClusterDims.w) * volClusterDims.y) + c.y) * volClusterDims.x) + c.x;
@@ -3314,23 +3330,23 @@ float3 airRest(float3 posView, float3 dirView, float z, float sA, float sB, inou
                 n = volClusters.Load((2 * ci) + 1).x;
             }
             int jb = 0;
-            int tmp10699;
-            int tmp10712;
-            int tmp10717;
-            float3 param_20;
-            bool param_21;
-            float tmp10915;
-            float3 param_34;
-            bool param_35;
+            int iPick7;
+            int iPick8;
+            int iPick9;
+            float3 LArg10;
+            bool noSpecArg3;
+            float hfPick2;
+            float3 LArg9;
+            bool noSpecArg2;
             for (int j = 0; (surf || (j < n)) || (jb < cellBulbCount); j++)
             {
                 if (surf)
                 {
-                    int4 param_15 = sp;
-                    int4 param_16 = se;
-                    int tmp10706 = volSurfNext(param_15, param_16);
-                    sp = param_15;
-                    tmp10699 = tmp10706;
+                    int4 pArg13 = sp;
+                    int4 eArg6 = se;
+                    int volSurfNextRet4 = volSurfNext(pArg13, eArg6);
+                    sp = pArg13;
+                    iPick7 = volSurfNextRet4;
                 }
                 else
                 {
@@ -3338,30 +3354,30 @@ float3 airRest(float3 posView, float3 dirView, float z, float sA, float sB, inou
                     {
                         if (base < 0)
                         {
-                            tmp10717 = j;
+                            iPick9 = j;
                         }
                         else
                         {
-                            tmp10717 = volClusters.Load(base + j).x;
+                            iPick9 = volClusters.Load(base + j).x;
                         }
-                        tmp10712 = tmp10717;
+                        iPick8 = iPick9;
                     }
                     else
                     {
-                        tmp10712 = -1;
+                        iPick8 = -1;
                     }
-                    tmp10699 = tmp10712;
+                    iPick7 = iPick8;
                 }
-                int i = tmp10699;
+                int i = iPick7;
                 if (i < 0)
                 {
                     if (jb >= cellBulbCount)
                     {
                         break;
                     }
-                    int tmp10745 = jb;
-                    jb = tmp10745 + 1;
-                    i = cellBulbBase + tmp10745;
+                    int jbPart3 = jb;
+                    jb = jbPart3 + 1;
+                    i = cellBulbBase + jbPart3;
                     surf = false;
                     j = n;
                 }
@@ -3371,33 +3387,33 @@ float3 airRest(float3 posView, float3 dirView, float z, float sA, float sB, inou
                     float d = length(t0.xyz - Pl);
                     bool wwh9 = (d >= t0.w);
                     bool wwh10 = (d < 0.001000000047497451305389404296875f);
-                    if (wwh9 || wwh10)
+                    if (or(wwh9, wwh10))   // HLSLFIX2 orfix.py: no short-circuit branch (NV took the wrong side)
                     {
                         continue;
                     }
                     float3 L = (t0.xyz - Pl) / d.xxx;
-                    int param_17 = i;
-                    float3 param_18 = Pl;
-                    float3 param_19 = L;
-                    float3 tmp10796 = cellLightE(param_17, param_18, param_19, param_20, param_21);
-                    float3 Lo = param_20;
-                    bool noSpec = param_21;
-                    int param_22 = i;
-                    float3 e = tmp10796 * cellFogK(param_22);
+                    int iArg13 = i;
+                    float3 PArg18 = Pl;
+                    float3 NArg6 = L;
+                    float3 cellLightERet3 = cellLightE(iArg13, PArg18, NArg6, LArg10, noSpecArg3);
+                    float3 Lo = LArg10;
+                    bool noSpec = noSpecArg3;
+                    int iArg12 = i;
+                    float3 e = cellLightERet3 * cellFogK(iArg12);
                     if (all(bool3(e.x == 0.0f.xxx.x, e.y == 0.0f.xxx.y, e.z == 0.0f.xxx.z)))
                     {
                         continue;
                     }
-                    int param_23 = i;
-                    float3 param_24 = P;
-                    float3 param_25 = t0.xyz + volLightShift;
-                    float tmp10818 = airLeakLightK(param_23, param_24, param_25);
-                    e *= tmp10818;
-                    float param_26 = z;
-                    float param_27 = t0.z + zOff;
-                    float param_28 = d;
-                    float param_29 = dot(L, dW);
-                    J += ((e * exp(-airOd(param_26, param_27, param_28))) * volPhasePi(param_29));
+                    int iArg11 = i;
+                    float3 PArg17 = P;
+                    float3 LpArg5 = t0.xyz + volLightShift;
+                    float airLeakLightKRet4 = airLeakLightK(iArg11, PArg17, LpArg5);
+                    e *= airLeakLightKRet4;
+                    float zaArg3 = z;
+                    float zbArg3 = t0.z + zOff;
+                    float lenArg3 = d;
+                    float cArg14 = dot(L, dW);
+                    J += ((e * exp(-airOd(zaArg3, zbArg3, lenArg3))) * volPhasePi(cArg14));
                     continue;
                 }
                 float3 m = Pl - t0.xyz;
@@ -3407,7 +3423,7 @@ float3 airRest(float3 posView, float3 dirView, float z, float sA, float sB, inou
                 float disc = (qb * qb) - (qa * qc);
                 bool wwh11 = (disc <= 0.0f);
                 bool wwh12 = (qa <= 0.0f);
-                if (wwh11 || wwh12)
+                if (or(wwh11, wwh12))   // HLSLFIX2 orfix.py: no short-circuit branch (NV took the wrong side)
                 {
                     continue;
                 }
@@ -3421,68 +3437,68 @@ float3 airRest(float3 posView, float3 dirView, float z, float sA, float sB, inou
                 float3 Ji = 0.0f.xxx;
                 if (volGndLamp.x > 0.0f)
                 {
-                    float3 param_30 = t0.xyz;
-                    tmp10915 = airGndZ(param_30);
+                    float3 LArg8 = t0.xyz;
+                    hfPick2 = airGndZ(LArg8);
                 }
                 else
                 {
-                    tmp10915 = 0.0f;
+                    hfPick2 = 0.0f;
                 }
-                float hf = tmp10915;
+                float hf = hfPick2;
                 for (int k = 0; k < 4; k++)
                 {
                     float3 Pk = Pl + (Dw * lerp(s0, s1, (float(k) + 0.5f) * 0.25f));
                     float d_1 = length(t0.xyz - Pk);
                     bool wwh13 = (d_1 >= t0.w);
                     bool wwh14 = (d_1 < 0.001000000047497451305389404296875f);
-                    if (wwh13 || wwh14)
+                    if (or(wwh13, wwh14))   // HLSLFIX2 orfix.py: no short-circuit branch (NV took the wrong side)
                     {
                         continue;
                     }
                     float3 L_1 = (t0.xyz - Pk) / d_1.xxx;
-                    int param_31 = i;
-                    float3 param_32 = Pk;
-                    float3 param_33 = L_1;
-                    float3 tmp10979 = cellLightE(param_31, param_32, param_33, param_34, param_35);
-                    float3 Lo_1 = param_34;
-                    bool noSpec_1 = param_35;
-                    int param_36 = i;
-                    float3 e_1 = tmp10979 * cellFogK(param_36);
+                    int iArg10 = i;
+                    float3 PArg16 = Pk;
+                    float3 NArg5 = L_1;
+                    float3 cellLightERet2 = cellLightE(iArg10, PArg16, NArg5, LArg9, noSpecArg2);
+                    float3 Lo_1 = LArg9;
+                    bool noSpec_1 = noSpecArg2;
+                    int iArg9 = i;
+                    float3 e_1 = cellLightERet2 * cellFogK(iArg9);
                     if (all(bool3(e_1.x == 0.0f.xxx.x, e_1.y == 0.0f.xxx.y, e_1.z == 0.0f.xxx.z)))
                     {
                         continue;
                     }
-                    float param_37 = Pk.z + zOff;
-                    float param_38 = t0.z + zOff;
-                    float param_39 = d_1;
-                    float od = airOd(param_37, param_38, param_39);
+                    float zaArg2 = Pk.z + zOff;
+                    float zbArg2 = t0.z + zOff;
+                    float lenArg2 = d_1;
+                    float od = airOd(zaArg2, zbArg2, lenArg2);
                     float c_1 = dot(L_1, dW);
-                    float param_40 = c_1;
-                    Ji += ((e_1 * exp(-od)) * volPhasePi(param_40));
+                    float cArg13 = c_1;
+                    Ji += ((e_1 * exp(-od)) * volPhasePi(cArg13));
                     if (volMsLamp.x > 0.0f)
                     {
-                        float param_41 = c_1;
-                        float param_42 = od;
-                        Ji += (e_1 * airLampMs(param_41, param_42));
+                        float cArg12 = c_1;
+                        float odArg4 = od;
+                        Ji += (e_1 * airLampMs(cArg12, odArg4));
                     }
                     if (volGndLamp.x > 0.0f)
                     {
-                        float3 param_43 = t0.xyz;
-                        float param_44 = hf;
-                        float3 param_45 = Pk;
-                        float3 param_46 = dW;
-                        float param_47 = d_1;
-                        float param_48 = od;
-                        Ji += ((e_1 * airLampGnd(param_43, param_44, param_45, param_46, param_47, param_48)) * airGndK);
+                        float3 LArg7 = t0.xyz;
+                        float hfArg2 = hf;
+                        float3 PkArg2 = Pk;
+                        float3 dWArg6 = dW;
+                        float dArg10 = d_1;
+                        float odArg3 = od;
+                        Ji += ((e_1 * airLampGnd(LArg7, hfArg2, PkArg2, dWArg6, dArg10, odArg3)) * airGndK);
                     }
                 }
                 if (any(bool3(Ji.x > 0.0f.xxx.x, Ji.y > 0.0f.xxx.y, Ji.z > 0.0f.xxx.z)))
                 {
-                    int param_49 = i;
-                    float3 param_50 = P;
-                    float3 param_51 = t0.xyz + volLightShift;
-                    float tmp11076 = airLeakLightK(param_49, param_50, param_51);
-                    Ji *= tmp11076;
+                    int iArg8 = i;
+                    float3 PArg15 = P;
+                    float3 LpArg4 = t0.xyz + volLightShift;
+                    float airLeakLightKRet3 = airLeakLightK(iArg8, PArg15, LpArg4);
+                    Ji *= airLeakLightKRet3;
                 }
                 J += (Ji * ((0.25f * (s1 - s0)) / max(sB - sA, 9.9999999747524270787835121154785e-07f)));
             }
@@ -3510,12 +3526,12 @@ float3 airRest(float3 posView, float3 dirView, float z, float sA, float sB, inou
         }
         else
         {
-            float3 param_52 = P;
-            float3 param_53[6];
-            float param_54[6];
-            volCubeAll(param_52, param_53, param_54);
-            E = param_53;
-            share = param_54;
+            float3 PArg14 = P;
+            float3 EArg4[6];
+            float shareArg[6];
+            volCubeAll(PArg14, EArg4, shareArg);
+            E = EArg4;
+            share = shareArg;
         }
     }
     if (wantGi)
@@ -3525,62 +3541,62 @@ float3 airRest(float3 posView, float3 dirView, float z, float sA, float sB, inou
         {
             Eg[a_2] = E[a_2] * 0.3183098733425140380859375f;
         }
-        float3 param_55[6] = Eg;
-        float3 param_56 = dW;
-        Jenv += volCubeScatter(param_55, param_56);
+        float3 EArg3[6] = Eg;
+        float3 dWArg5 = dW;
+        Jenv += volCubeScatter(EArg3, dWArg5);
     }
     if (wantAmb)
     {
-        bool tmp11194;
+        bool replacePick;
         if (false)
         {
-            bool tmp11184;
+            bool replacePick2;
             if (cellInterior)
             {
-                tmp11184 = cellGiAmb == 1;
+                replacePick2 = cellGiAmb == 1;
             }
             else
             {
-                tmp11184 = cellGiSky && cellDdgiOn;
+                replacePick2 = cellGiSky && cellDdgiOn;
             }
-            tmp11194 = tmp11184;
+            replacePick = replacePick2;
         }
         else
         {
-            tmp11194 = false;
+            replacePick = false;
         }
-        bool replace = tmp11194;
+        bool replace = replacePick;
         float3 A[6];
-        float tmp11216;
+        float APick;
         for (int a_3 = 0; a_3 < 6; a_3++)
         {
-            float3 param_57 = tmp11206[a_3];
-            float3 param_58 = P;
+            float3 NArg4 = axes[a_3];
+            float3 PArg13 = P;
             if (replace)
             {
-                tmp11216 = 1.0f - share[a_3];
+                APick = 1.0f - share[a_3];
             }
             else
             {
-                tmp11216 = 1.0f;
+                APick = 1.0f;
             }
-            A[a_3] = cellAmbient(param_57, param_58) * (tmp11216 * 1.0f);
+            A[a_3] = cellAmbient(NArg4, PArg13) * (APick * 1.0f);
         }
         if (airLeakR >= 0.0f)
         {
-            float3 param_59[6] = A;
-            float3 param_60 = dW;
-            float param_61 = leakFade;
-            float param_62 = airLeakR;
-            Jenv += (volCubeScatter(param_59, param_60) * airAmbKeep(param_61, param_62));
+            float3 EArg2[6] = A;
+            float3 dWArg4 = dW;
+            float fadeArg3 = leakFade;
+            float rArg7 = airLeakR;
+            Jenv += (volCubeScatter(EArg2, dWArg4) * airAmbKeep(fadeArg3, rArg7));
         }
         else
         {
-            float3 param_63[6] = A;
-            float3 param_64 = dW;
-            float param_65 = leakFade;
-            float param_66 = airLeakR;
-            Jenv += ((volCubeScatter(param_63, param_64) * airAmbKeep(param_65, param_66)) + Jddgi);
+            float3 EArg[6] = A;
+            float3 dWArg3 = dW;
+            float fadeArg2 = leakFade;
+            float rArg6 = airLeakR;
+            Jenv += ((volCubeScatter(EArg, dWArg3) * airAmbKeep(fadeArg2, rArg6)) + Jddgi);
         }
     }
     return J;
@@ -3598,56 +3614,56 @@ float wwFogEval(float d, inout float z, inout float hb, out float3 fogCol)
     float2 pair = clamp((fogK[5].xy * z) - fogK[5].zw, 0.0f.xx, 1.0f.xx);
     hb = lerp(pair.x, pair.y, f);
     float mx = fogK[2].w;
-    bool tmp665 = ramp > 0.75f;
-    bool tmp672;
-    if (tmp665)
+    bool cond87 = ramp > 0.75f;
+    bool cond86;
+    if (cond87)
     {
-        tmp672 = (fogRed & 1) == 0;
+        cond86 = (fogRed & 1) == 0;
     }
     else
     {
-        tmp672 = tmp665;
+        cond86 = cond87;
     }
-    float tmp673;
-    if (tmp672)
+    float clampTPick;
+    if (cond86)
     {
-        tmp673 = min((((f - 0.75f) * 4.0f) * (1.0f - mx)) + mx, 1.0f);
+        clampTPick = min((((f - 0.75f) * 4.0f) * (1.0f - mx)) + mx, 1.0f);
     }
     else
     {
-        tmp673 = mx;
+        clampTPick = mx;
     }
-    float clampT = tmp673;
-    bool tmp692 = ramp < 0.014999999664723873138427734375f;
-    bool tmp698;
-    if (tmp692)
+    float clampT = clampTPick;
+    bool cond85 = ramp < 0.014999999664723873138427734375f;
+    bool cond84;
+    if (cond85)
     {
-        tmp698 = (fogRed & 2) == 0;
+        cond84 = (fogRed & 2) == 0;
     }
     else
     {
-        tmp698 = tmp692;
+        cond84 = cond85;
     }
-    float tmp699;
-    if (tmp698)
+    float escapePick;
+    if (cond84)
     {
-        tmp699 = f * 66.6666717529296875f;
+        escapePick = f * 66.6666717529296875f;
     }
     else
     {
-        tmp699 = 1.0f;
+        escapePick = 1.0f;
     }
-    float escape = tmp699;
-    float tmp710;
+    float escape = escapePick;
+    float IPick;
     if (f > 0.0f)
     {
-        tmp710 = min(clampT, pow(f, fogK[1].w));
+        IPick = min(clampT, pow(f, fogK[1].w));
     }
     else
     {
-        tmp710 = 0.0f;
+        IPick = 0.0f;
     }
-    float I = tmp710;
+    float I = IPick;
     float weight = (hb * fogK[3].w) + (1.0f - hb);
     fogCol = lerp(lerp(fogK[1].xyz, fogK[3].xyz, I.xxx), lerp(fogK[2].xyz, fogK[4].xyz, I.xxx), hb.xxx);
     return (weight * I) * escape;
@@ -3655,48 +3671,48 @@ float wwFogEval(float d, inout float z, inout float hb, out float3 fogCol)
 
 float airVeilK(float3 Jenv, float t, float z)
 {
-    bool tmp11270 = (!volVeil) || cellInterior;
-    bool tmp11278;
-    if (!tmp11270)
+    bool cond90 = (!volVeil) || cellInterior;
+    bool cond89;
+    if (!cond90)
     {
-        tmp11278 = !(cellOn && cellHasDir);
+        cond89 = !(cellOn && cellHasDir);
     }
     else
     {
-        tmp11278 = tmp11270;
+        cond89 = cond90;
     }
-    bool tmp11285;
-    if (!tmp11278)
+    bool cond88;
+    if (!cond89)
     {
-        tmp11285 = (volTerms & 1) == 0;
+        cond88 = (volTerms & 1) == 0;
     }
     else
     {
-        tmp11285 = tmp11278;
+        cond88 = cond89;
     }
-    if (tmp11285)
+    if (cond88)
     {
         return 1.0f;
     }
-    float param = t;
-    float param_1 = z;
-    float param_2;
-    float3 param_3;
-    float tmp11297 = wwFogEval(param, param_1, param_2, param_3);
-    float hb = param_2;
-    float3 fc = param_3;
+    float dArg11 = t;
+    float zArg4 = z;
+    float hbArg;
+    float3 fogColArg;
+    float wwFogEvalRet = wwFogEval(dArg11, zArg4, hbArg, fogColArg);
+    float hb = hbArg;
+    float3 fc = fogColArg;
     float rec = dot(max(fc, 0.0f.xxx), float3(0.2125999927520751953125f, 0.715200006961822509765625f, 0.072200000286102294921875f));
     float open = (0.25f * dot(cellDirColor, float3(0.2125999927520751953125f, 0.715200006961822509765625f, 0.072200000286102294921875f))) + dot(Jenv, float3(0.2125999927520751953125f, 0.715200006961822509765625f, 0.072200000286102294921875f));
-    float tmp11317;
+    float airVeilKRet;
     if ((open > rec) && (open > 9.9999999392252902907785028219223e-09f))
     {
-        tmp11317 = rec / open;
+        airVeilKRet = rec / open;
     }
     else
     {
-        tmp11317 = 1.0f;
+        airVeilKRet = 1.0f;
     }
-    return tmp11317;
+    return airVeilKRet;
 }
 
 // lane PERF2 (temporal): airRest's four light samples one by one (the strata in `need` only), each x the stretch's
@@ -3707,26 +3723,26 @@ void airLightsQ(float3 posView, float3 dirView, float z, float sA, float sB, int
     {
         Jq[k] = 0.0f.xxx;
     }
-    bool tmp11340 = !cellOn;
-    bool tmp11347;
-    if (!tmp11340)
+    bool cond95 = !cellOn;
+    bool cond94;
+    if (!cond95)
     {
-        tmp11347 = (volTerms & 2) == 0;
+        cond94 = (volTerms & 2) == 0;
     }
     else
     {
-        tmp11347 = tmp11340;
+        cond94 = cond95;
     }
-    bool tmp11354;
-    if (!tmp11347)
+    bool cond93;
+    if (!cond94)
     {
-        tmp11354 = (volRed & 16) != 0;
+        cond93 = (volRed & 16) != 0;
     }
     else
     {
-        tmp11354 = tmp11347;
+        cond93 = cond94;
     }
-    if (tmp11354)
+    if (cond93)
     {
         return;
     }
@@ -3742,38 +3758,38 @@ void airLightsQ(float3 posView, float3 dirView, float z, float sA, float sB, int
         }
         return;
     }
-    float3 param = posView;
-    float3 P = cellWorldPos(param);
-    float3 param_1 = dirView;
-    float3 dW = cellWorldDir(param_1);
+    float3 posViewArg14 = posView;
+    float3 P = cellWorldPos(posViewArg14);
+    float3 dirViewArg3 = dirView;
+    float3 dW = cellWorldDir(dirViewArg3);
     float zOff = z - P.z;
-    float3 param_2 = dirView * (1.0f / fogDistScale);
-    float3 param_3 = 0.0f.xxx;
-    float3 Dw = cellWorldPos(param_2) - cellWorldPos(param_3);
+    float3 posViewArg13 = dirView * (1.0f / fogDistScale);
+    float3 posViewArg12 = 0.0f.xxx;
+    float3 Dw = cellWorldPos(posViewArg13) - cellWorldPos(posViewArg12);
     float3 Pl = P - volLightShift;
     int n = cellLightCount;
     int base = -1;
-    float3 param_4 = P;
-    float3 param_5 = Dw;
-    float param_6 = sA;
-    float param_7 = sB;
-    int4 param_8;
-    int4 param_9;
-    bool tmp11438 = volSurfBegin(param_4, param_5, param_6, param_7, param_8, param_9);
-    int4 sp = param_8;
-    int4 se = param_9;
-    bool surf = tmp11438;
-    bool tmp11442 = !surf;
-    bool tmp11448;
-    if (tmp11442)
+    float3 PArg23 = P;
+    float3 DwArg4 = Dw;
+    float sAArg4 = sA;
+    float sBArg4 = sB;
+    int4 pArg16;
+    int4 eArg9;
+    bool volSurfBeginRet4 = volSurfBegin(PArg23, DwArg4, sAArg4, sBArg4, pArg16, eArg9);
+    int4 sp = pArg16;
+    int4 se = eArg9;
+    bool surf = volSurfBeginRet4;
+    bool cond92 = !surf;
+    bool cond91;
+    if (cond92)
     {
-        tmp11448 = volClusterDims.x > 0;
+        cond91 = volClusterDims.x > 0;
     }
     else
     {
-        tmp11448 = tmp11442;
+        cond91 = cond92;
     }
-    if (tmp11448)
+    if (cond91)
     {
         int2 c = int2(gl_FragCoord.xy) / volClusterDims.z.xx;
         int ci = ((((volLayer / volClusterDims.w) * volClusterDims.y) + c.y) * volClusterDims.x) + c.x;
@@ -3781,21 +3797,21 @@ void airLightsQ(float3 posView, float3 dirView, float z, float sA, float sB, int
         n = volClusters.Load((2 * ci) + 1).x;
     }
     int jb = 0;
-    int tmp11507;
-    int tmp11520;
-    int tmp11525;
-    float tmp11653;
-    float3 param_19;
-    bool param_20;
+    int iPick10;
+    int iPick11;
+    int iPick12;
+    float hfPick3;
+    float3 LArg13;
+    bool noSpecArg4;
     for (int j = 0; (surf || (j < n)) || (jb < cellBulbCount); j++)
     {
         if (surf)
         {
-            int4 param_10 = sp;
-            int4 param_11 = se;
-            int tmp11514 = volSurfNext(param_10, param_11);
-            sp = param_10;
-            tmp11507 = tmp11514;
+            int4 pArg15 = sp;
+            int4 eArg8 = se;
+            int volSurfNextRet5 = volSurfNext(pArg15, eArg8);
+            sp = pArg15;
+            iPick10 = volSurfNextRet5;
         }
         else
         {
@@ -3803,30 +3819,30 @@ void airLightsQ(float3 posView, float3 dirView, float z, float sA, float sB, int
             {
                 if (base < 0)
                 {
-                    tmp11525 = j;
+                    iPick12 = j;
                 }
                 else
                 {
-                    tmp11525 = volClusters.Load(base + j).x;
+                    iPick12 = volClusters.Load(base + j).x;
                 }
-                tmp11520 = tmp11525;
+                iPick11 = iPick12;
             }
             else
             {
-                tmp11520 = -1;
+                iPick11 = -1;
             }
-            tmp11507 = tmp11520;
+            iPick10 = iPick11;
         }
-        int i = tmp11507;
+        int i = iPick10;
         if (i < 0)
         {
             if (jb >= cellBulbCount)
             {
                 break;
             }
-            int tmp11552 = jb;
-            jb = tmp11552 + 1;
-            i = cellBulbBase + tmp11552;
+            int jbPart4 = jb;
+            jb = jbPart4 + 1;
+            i = cellBulbBase + jbPart4;
             surf = false;
             j = n;
         }
@@ -3838,7 +3854,7 @@ void airLightsQ(float3 posView, float3 dirView, float z, float sA, float sB, int
         float disc = (qb * qb) - (qa * qc);
         bool wwh15 = (disc <= 0.0f);
         bool wwh16 = (qa <= 0.0f);
-        if (wwh15 || wwh16)
+        if (or(wwh15, wwh16))   // HLSLFIX2 orfix.py: no short-circuit branch (NV took the wrong side)
         {
             continue;
         }
@@ -3850,21 +3866,21 @@ void airLightsQ(float3 posView, float3 dirView, float z, float sA, float sB, int
             continue;
         }
         float share = (s1 - s0) / max(sB - sA, 9.9999999747524270787835121154785e-07f);
-        int param_12 = i;
-        float3 param_13 = P;
-        float3 param_14 = t0.xyz + volLightShift;
-        float tmp11646 = airLeakLightK(param_12, param_13, param_14);
-        share *= tmp11646;
+        int iArg16 = i;
+        float3 PArg22 = P;
+        float3 LpArg6 = t0.xyz + volLightShift;
+        float airLeakLightKRet5 = airLeakLightK(iArg16, PArg22, LpArg6);
+        share *= airLeakLightKRet5;
         if (volGndLamp.x > 0.0f)
         {
-            float3 param_15 = t0.xyz;
-            tmp11653 = airGndZ(param_15);
+            float3 LArg12 = t0.xyz;
+            hfPick3 = airGndZ(LArg12);
         }
         else
         {
-            tmp11653 = 0.0f;
+            hfPick3 = 0.0f;
         }
-        float hf = tmp11653;
+        float hf = hfPick3;
         for (int k_2 = 0; k_2 < 4; k_2++)
         {
             if ((need & (1 << k_2)) == 0)
@@ -3875,45 +3891,45 @@ void airLightsQ(float3 posView, float3 dirView, float z, float sA, float sB, int
             float d = length(t0.xyz - Pk);
             bool wwh17 = (d >= t0.w);
             bool wwh18 = (d < 0.001000000047497451305389404296875f);
-            if (wwh17 || wwh18)
+            if (or(wwh17, wwh18))   // HLSLFIX2 orfix.py: no short-circuit branch (NV took the wrong side)
             {
                 continue;
             }
             float3 L = (t0.xyz - Pk) / d.xxx;
-            int param_16 = i;
-            float3 param_17 = Pk;
-            float3 param_18 = L;
-            float3 tmp11725 = cellLightE(param_16, param_17, param_18, param_19, param_20);
-            float3 Lo = param_19;
-            bool noSpec = param_20;
-            int param_21 = i;
-            float3 e = tmp11725 * cellFogK(param_21);
+            int iArg15 = i;
+            float3 PArg21 = Pk;
+            float3 NArg7 = L;
+            float3 cellLightERet4 = cellLightE(iArg15, PArg21, NArg7, LArg13, noSpecArg4);
+            float3 Lo = LArg13;
+            bool noSpec = noSpecArg4;
+            int iArg14 = i;
+            float3 e = cellLightERet4 * cellFogK(iArg14);
             if (all(bool3(e.x == 0.0f.xxx.x, e.y == 0.0f.xxx.y, e.z == 0.0f.xxx.z)))
             {
                 continue;
             }
-            float param_22 = Pk.z + zOff;
-            float param_23 = t0.z + zOff;
-            float param_24 = d;
-            float od = airOd(param_22, param_23, param_24);
+            float zaArg4 = Pk.z + zOff;
+            float zbArg4 = t0.z + zOff;
+            float lenArg4 = d;
+            float od = airOd(zaArg4, zbArg4, lenArg4);
             float c_1 = dot(L, dW);
-            float param_25 = c_1;
-            Jq[k_2] += (((e * exp(-od)) * volPhasePi(param_25)) * share);
+            float cArg16 = c_1;
+            Jq[k_2] += (((e * exp(-od)) * volPhasePi(cArg16)) * share);
             if (volMsLamp.x > 0.0f)
             {
-                float param_26 = c_1;
-                float param_27 = od;
-                Jq[k_2] += ((e * airLampMs(param_26, param_27)) * share);
+                float cArg15 = c_1;
+                float odArg6 = od;
+                Jq[k_2] += ((e * airLampMs(cArg15, odArg6)) * share);
             }
             if (volGndLamp.x > 0.0f)
             {
-                float3 param_28 = t0.xyz;
-                float param_29 = hf;
-                float3 param_30 = Pk;
-                float3 param_31 = dW;
-                float param_32 = d;
-                float param_33 = od;
-                Jq[k_2] += ((e * airLampGnd(param_28, param_29, param_30, param_31, param_32, param_33)) * (share * airGndK));
+                float3 LArg11 = t0.xyz;
+                float hfArg3 = hf;
+                float3 PkArg3 = Pk;
+                float3 dWArg8 = dW;
+                float dArg12 = d;
+                float odArg5 = od;
+                Jq[k_2] += ((e * airLampGnd(LArg11, hfArg3, PkArg3, dWArg8, dArg12, odArg5)) * (share * airGndK));
             }
         }
     }
@@ -3937,16 +3953,16 @@ void csmSelect(float3 posView, out int a, out int b, out float t)
         bound = csmSplitOffset.y;
     }
     float x = clamp((dv - bound) / csmParams.w, 0.0f, 1.0f);
-    float tmp1418;
+    float tPick2;
     if ((csmRed & 1) != 0)
     {
-        tmp1418 = step(0.5f, x);
+        tPick2 = step(0.5f, x);
     }
     else
     {
-        tmp1418 = smoothstep(0.0f, 1.0f, x);
+        tPick2 = smoothstep(0.0f, 1.0f, x);
     }
-    t = tmp1418;
+    t = tPick2;
 }
 
 float3 csmUvd(int i, float3 posView)
@@ -3963,9 +3979,9 @@ float ussIgn(float2 p)
 //! nOff: the normal offset per world unit of this cascade's texel (view space; 0 off)
 float ussVogel(int i, float3 posView, float offsetWorld, float3 dPx, float3 dPy, float3 nOff)
 {
-    int param = i;
-    float3 param_1 = posView + (nOff * ussCsmTexel[i]);
-    float3 q = csmUvd(param, param_1);
+    int iArg17 = i;
+    float3 posViewArg15 = posView + (nOff * ussCsmTexel[i]);
+    float3 q = csmUvd(iArg17, posViewArg15);
     float zRef = q.z - (offsetWorld * csmInvRange[i]);
     float2 rpdb = 0.0f.xx;
     if (ussCsmFilter.w > 0.5f)
@@ -3982,35 +3998,43 @@ float ussVogel(int i, float3 posView, float offsetWorld, float3 dPx, float3 dPy,
     int n = max(int(ussCsmFilter.z), 1);
     if (ussCsmWorld.x > 0.5f)
     {
+        // lane SHADOWPAR1: FO4CS's radius in world units over this cascade's texel, its taps 32 (r / 3)^2 in 8..48
         R = clamp(ussCsmWorld[i + 1] / max(ussCsmTexel[i], 9.9999999747524270787835121154785e-07f), 0.5f, 16.0f);
         n = int(clamp(floor(((32.0f * (R / 3.0f)) * (R / 3.0f)) + 0.5f), 8.0f, 48.0f));
     }
-    float2 tmp1639;
+    float2 rpPick;
     if (ussCsmStable.x > 0.5f)
     {
-        tmp1639 = mod(floor(q.xy * (csmParams.z * 4.0f)) + float2(ussCsmCellX[i], ussCsmCellY[i]), 4096.0f.xx);
+        rpPick = mod(floor(q.xy * (csmParams.z * 4.0f)) + float2(ussCsmCellX[i], ussCsmCellY[i]), 4096.0f.xx);
     }
     else
     {
-        tmp1639 = gl_FragCoord.xy + (float2(32.66500091552734375f, 11.81499958038330078125f) * ussCsmPhase);
+        rpPick = gl_FragCoord.xy + (float2(32.66500091552734375f, 11.81499958038330078125f) * ussCsmPhase);
     }
-    float2 rp = tmp1639;
-    float2 param_2 = rp;
-    float rot = 6.283185482025146484375f * ussIgn(param_2);
+    // lane SHADOWSHIMMER1: the rotation of the absolute light-space lattice cell (4 per texel, wrapped at 4096): the same
+    // for a still world point in every frame and from every camera. Red (x 0): the pixel's, plus the TAA frame's phase
+    float2 rp = rpPick;
+    float2 pArg17 = rp;
+    float rot = 6.283185482025146484375f * ussIgn(pArg17);
     float k = 1.0f / csmParams.z;
     float lim = 2000.0f * csmInvRange[i];
-    float tmp1696;
+    float capPick;
     if (ussCsmFilter.w > 1.5f)
     {
-        tmp1696 = lim;
+        capPick = lim;
     }
     else
     {
-        tmp1696 = (4.0f * ussCsmTexel[i]) * csmInvRange[i];
+        capPick = (4.0f * ussCsmTexel[i]) * csmInvRange[i];
     }
-    float cap = tmp1696;
+    // MODULES1 R7 item 9 (bungo b60/b61: "Still the same leak", the sun on a wall panel inside a shadowed alley): on a
+    // wall the sun grazes, the receiver plane's depth slope has no bound, so half of the taps compared 2000 u toward the
+    // sun, past every caster (50 % lit at N.L 0). A tap is now pulled toward the centre until its depth walk is at most
+    // 4 texels of its cascade: it stays on the receiver's plane, near the point. ussCsmFilter.w 2 = the red
+    // WW_SHADOW_RED=walk2000.
+    float cap = capPick;
     float sum = 0.0f;
-    float tmp1761;
+    float pullPick;
     for (int t = 0; t < 48; t++)
     {
         if (t >= n)
@@ -4023,15 +4047,15 @@ float ussVogel(int i, float3 posView, float offsetWorld, float3 dPx, float3 dPy,
         float dz = dot(rpdb, o);
         if (ussCsmFilter.w > 1.5f)
         {
-            tmp1761 = 1.0f;
+            pullPick = 1.0f;
         }
         else
         {
-            tmp1761 = min(1.0f, cap / max(abs(dz), 1.0000000031710768509710513471353e-30f));
+            pullPick = min(1.0f, cap / max(abs(dz), 1.0000000031710768509710513471353e-30f));
         }
-        float pull = tmp1761;
-        float4 tmp1793 = float4(q.xy + (o * pull), float(i), zRef + clamp(dz * pull, -lim, lim));
-        sum += csmMap.SampleCmp(_csmMap_sampler, tmp1793.xyz, tmp1793.w);
+        float pull = pullPick;
+        float4 sumPart = float4(q.xy + (o * pull), float(i), zRef + clamp(dz * pull, -lim, lim));
+        sum += csmMap.SampleCmp(_csmMap_sampler, sumPart.xyz, sumPart.w);
     }
     return sum / float(n);
 }
@@ -4039,25 +4063,26 @@ float ussVogel(int i, float3 posView, float offsetWorld, float3 dPx, float3 dPy,
 //! the 16-tap Poisson filter, radius 3 texels
 float csmFiltered(int i, float3 posView, float offsetWorld)
 {
-    int param = i;
-    float3 param_1 = posView + (csmNOff * ussCsmTexel[i]);
-    float3 q = csmUvd(param, param_1);
-    float tmp1272;
+    int iArg18 = i;
+    float3 posViewArg16 = posView + (csmNOff * ussCsmTexel[i]);
+    // lane SHADOWSHIMMER2: as csmHard
+    float3 q = csmUvd(iArg18, posViewArg16);
+    float zRefPick;
     if (ussCsmStable.w != 0.0f)
     {
-        tmp1272 = ussCsmBias[i];
+        zRefPick = ussCsmBias[i];
     }
     else
     {
-        tmp1272 = offsetWorld;
+        zRefPick = offsetWorld;
     }
-    float zRef = q.z - (tmp1272 * csmInvRange[i]);
+    float zRef = q.z - (zRefPick * csmInvRange[i]);
     float k = 6.0f / csmParams.z;
     float sum = 0.0f;
     for (int t = 0; t < 16; t++)
     {
-        float4 tmp1374 = float4(q.xy + ((tmp1358[t] - 0.5f.xx) * k), float(i), zRef);
-        sum += csmMap.SampleCmp(_csmMap_sampler, tmp1374.xyz, tmp1374.w);
+        float4 sumPart2 = float4(q.xy + ((csmPoisson[t] - 0.5f.xx) * k), float(i), zRef);
+        sum += csmMap.SampleCmp(_csmMap_sampler, sumPart2.xyz, sumPart2.w);
     }
     return sum / 16.0f;
 }
@@ -4075,100 +4100,102 @@ float ussCascades(float3 posView, float3 dPx, float3 dPy, out float w)
     {
         return 1.0f;
     }
-    float3 param = posView;
-    int param_1;
-    int param_2;
-    float param_3;
-    csmSelect(param, param_1, param_2, param_3);
-    int a = param_1;
-    int b = param_2;
-    float t = param_3;
+    float3 posViewArg21 = posView;
+    int aArg8;
+    int bArg5;
+    float tArg2;
+    csmSelect(posViewArg21, aArg8, bArg5, tArg2);
+    int a = aArg8;
+    int b = bArg5;
+    float t = tArg2;
     float sA = 1.0f;
     float sB = 1.0f;
     if (ussCsmFilter.x > 0.5f)
     {
+        // lane SHADOWSHIMMER1: the normal offset, ussCsmStable.y texels of the cascade x sin(the light's angle to the
+        // surface), along the geometric normal (the position's derivatives) turned toward the eye; once for both cascades
         float3 nOff = 0.0f.xxx;
         if (ussCsmStable.y > 0.0f)
         {
             float3 n = cross(dPx, dPy);
             float ln = length(n);
             float3 lv = float3(csmMat[a][0].z, csmMat[a][1].z, csmMat[a][2].z);
-            bool tmp1873 = ln > 9.9999996826552253889678874634872e-21f;
-            bool tmp1880;
-            if (tmp1873)
+            bool cond97 = ln > 9.9999996826552253889678874634872e-21f;
+            bool cond96;
+            if (cond97)
             {
-                tmp1880 = dot(lv, lv) > 0.0f;
+                cond96 = dot(lv, lv) > 0.0f;
             }
             else
             {
-                tmp1880 = tmp1873;
+                cond96 = cond97;
             }
-            if (tmp1880)
+            if (cond96)
             {
-                float3 tmp1887;
+                float3 nPick;
                 if (dot(n, posView) > 0.0f)
                 {
-                    tmp1887 = (-n) / ln.xxx;
+                    nPick = (-n) / ln.xxx;
                 }
                 else
                 {
-                    tmp1887 = n / ln.xxx;
+                    nPick = n / ln.xxx;
                 }
-                n = tmp1887;
+                n = nPick;
                 float c = dot(n, normalize(lv));
                 nOff = n * ((ussCsmStable.y * sqrt(max(1.0f - (c * c), 0.0f))) / csmParams.x);
             }
         }
         if (t < 1.0f)
         {
-            int param_4 = a;
-            float3 param_5 = posView;
-            float param_6 = ussCsmBias[a];
-            float3 param_7 = dPx;
-            float3 param_8 = dPy;
-            float3 param_9 = nOff;
-            sA = ussVogel(param_4, param_5, param_6, param_7, param_8, param_9);
+            int iArg22 = a;
+            float3 posViewArg20 = posView;
+            float offsetWorldArg4 = ussCsmBias[a];
+            float3 dPxArg2 = dPx;
+            float3 dPyArg2 = dPy;
+            float3 nOffArg2 = nOff;
+            sA = ussVogel(iArg22, posViewArg20, offsetWorldArg4, dPxArg2, dPyArg2, nOffArg2);
         }
         if (t > 0.0f)
         {
-            int param_10 = b;
-            float3 param_11 = posView;
-            float param_12 = ussCsmBias[b];
-            float3 param_13 = dPx;
-            float3 param_14 = dPy;
-            float3 param_15 = nOff;
-            sB = ussVogel(param_10, param_11, param_12, param_13, param_14, param_15);
+            int iArg21 = b;
+            float3 posViewArg19 = posView;
+            float offsetWorldArg3 = ussCsmBias[b];
+            float3 dPxArg = dPx;
+            float3 dPyArg = dPy;
+            float3 nOffArg = nOff;
+            sB = ussVogel(iArg21, posViewArg19, offsetWorldArg3, dPxArg, dPyArg, nOffArg);
         }
     }
     else
     {
         if (t < 1.0f)
         {
-            int param_16 = a;
-            float3 param_17 = posView;
-            float param_18 = csmSplitOffset.z;
-            sA = csmFiltered(param_16, param_17, param_18);
+            int iArg20 = a;
+            float3 posViewArg18 = posView;
+            float offsetWorldArg2 = csmSplitOffset.z;
+            sA = csmFiltered(iArg20, posViewArg18, offsetWorldArg2);
         }
         if (t > 0.0f)
         {
-            int param_19 = b;
-            float3 param_20 = posView;
-            float param_21 = csmSplitOffset.w;
-            sB = csmFiltered(param_19, param_20, param_21);
+            int iArg19 = b;
+            float3 posViewArg17 = posView;
+            float offsetWorldArg = csmSplitOffset.w;
+            sB = csmFiltered(iArg19, posViewArg17, offsetWorldArg);
         }
     }
     float s = clamp(((dot(posView, posView) * csmParams.x) * csmParams.x) / (csmParams.y * csmParams.y), 0.0f, 1.0f);
     float s2 = s * s;
-    float tmp2008;
+    float wPick2;
     if ((csmRed & 2) != 0)
     {
-        tmp2008 = 1.0f;
+        wPick2 = 1.0f;
     }
     else
     {
-        tmp2008 = 1.0f - (s2 * s2);
+        wPick2 = 1.0f - (s2 * s2);
     }
-    w = tmp2008;
+    w = wPick2;
     return lerp(sA, sB, t);
 }
 
@@ -4184,37 +4211,37 @@ float2 ussTerrExtraUv(inout float2 uv, float off)
 float4 ussTerrHeights(float2 uv)
 {
     float d = 1.0f / ussTerrSize.x;
-    float2 param = uv;
-    float param_1 = ussTerrExtra.x;
-    float2 tmp2350 = ussTerrExtraUv(param, param_1);
-    float c = ussTerrMap.Sample(_ussTerrMap_sampler, tmp2350).x;
-    float2 param_2 = uv + float2(d, 0.0f);
-    float param_3 = ussTerrExtra.x;
-    float2 tmp2363 = ussTerrExtraUv(param_2, param_3);
-    float hE = ussTerrMap.Sample(_ussTerrMap_sampler, tmp2363).x;
-    float2 param_4 = uv - float2(d, 0.0f);
-    float param_5 = ussTerrExtra.x;
-    float2 tmp2376 = ussTerrExtraUv(param_4, param_5);
-    float hW = ussTerrMap.Sample(_ussTerrMap_sampler, tmp2376).x;
-    float2 param_6 = uv + float2(0.0f, d);
-    float param_7 = ussTerrExtra.x;
-    float2 tmp2389 = ussTerrExtraUv(param_6, param_7);
-    float hN = ussTerrMap.Sample(_ussTerrMap_sampler, tmp2389).x;
-    float2 param_8 = uv - float2(0.0f, d);
-    float param_9 = ussTerrExtra.x;
-    float2 tmp2402 = ussTerrExtraUv(param_8, param_9);
-    float hS = ussTerrMap.Sample(_ussTerrMap_sampler, tmp2402).x;
-    bool tmp2406 = c <= 0.0f;
-    bool tmp2418;
-    if (!tmp2406)
+    float2 uvArg5 = uv;
+    float offArg5 = ussTerrExtra.x;
+    float2 ussTerrExtraUvRet5 = ussTerrExtraUv(uvArg5, offArg5);
+    float c = ussTerrMap.Sample(_ussTerrMap_sampler, ussTerrExtraUvRet5).x;
+    float2 uvArg4 = uv + float2(d, 0.0f);
+    float offArg4 = ussTerrExtra.x;
+    float2 ussTerrExtraUvRet4 = ussTerrExtraUv(uvArg4, offArg4);
+    float hE = ussTerrMap.Sample(_ussTerrMap_sampler, ussTerrExtraUvRet4).x;
+    float2 uvArg3 = uv - float2(d, 0.0f);
+    float offArg3 = ussTerrExtra.x;
+    float2 ussTerrExtraUvRet3 = ussTerrExtraUv(uvArg3, offArg3);
+    float hW = ussTerrMap.Sample(_ussTerrMap_sampler, ussTerrExtraUvRet3).x;
+    float2 uvArg2 = uv + float2(0.0f, d);
+    float offArg2 = ussTerrExtra.x;
+    float2 ussTerrExtraUvRet2 = ussTerrExtraUv(uvArg2, offArg2);
+    float hN = ussTerrMap.Sample(_ussTerrMap_sampler, ussTerrExtraUvRet2).x;
+    float2 uvArg = uv - float2(0.0f, d);
+    float offArg = ussTerrExtra.x;
+    float2 ussTerrExtraUvRet = ussTerrExtraUv(uvArg, offArg);
+    float hS = ussTerrMap.Sample(_ussTerrMap_sampler, ussTerrExtraUvRet).x;
+    bool cond99 = c <= 0.0f;
+    bool cond98;
+    if (!cond99)
     {
-        tmp2418 = min(min(hE, hW), min(hN, hS)) <= 0.0f;
+        cond98 = min(min(hE, hW), min(hN, hS)) <= 0.0f;
     }
     else
     {
-        tmp2418 = tmp2406;
+        cond98 = cond99;
     }
-    if (tmp2418)
+    if (cond98)
     {
         return float4(ussTerrRange.x + (c * ussTerrRange.y), 0.0f, 0.0f, float(c > 0.0f));
     }
@@ -4227,41 +4254,43 @@ float4 ussTerrHeights(float2 uv)
 //! one tier's uv into the shared texture (lane SHADOWPAR1: the near tier sits under the far map)
 float2 ussTerrAtlasUv(inout float2 uv, int tier)
 {
-    bool tmp2027 = ussTerrSize.y <= 0.0f;
-    bool tmp2034;
-    if (tmp2027)
+    bool cond101 = ussTerrSize.y <= 0.0f;
+    bool cond100;
+    if (cond101)
     {
-        tmp2034 = ussTerrExtra.z <= 0.0f;
+        cond100 = ussTerrExtra.z <= 0.0f;
     }
     else
     {
-        tmp2034 = tmp2027;
+        cond100 = cond101;
     }
-    if (tmp2034)
+    if (cond100)
     {
+        // one tier: the map as TERRSHADOW1 made it
         return uv;
     }
-    float tmp2042;
+    float nPick2;
     if (tier == 0)
     {
-        tmp2042 = ussTerrSize.x;
+        nPick2 = ussTerrSize.x;
     }
     else
     {
-        tmp2042 = ussTerrSize.y;
+        nPick2 = ussTerrSize.y;
     }
-    float n = tmp2042;
+    float n = nPick2;
+    // no bleed across the tiers' seam
     uv = clamp(uv, (0.5f / n).xx, (1.0f - (0.5f / n)).xx);
-    float2 tmp2062;
+    float2 ussTerrAtlasUvRet;
     if (tier == 0)
     {
-        tmp2062 = float2(uv.x, uv.y * ussTerrAtlas.x);
+        ussTerrAtlasUvRet = float2(uv.x, uv.y * ussTerrAtlas.x);
     }
     else
     {
-        tmp2062 = float2(uv.x * ussTerrAtlas.y, ussTerrAtlas.z + (uv.y * ussTerrAtlas.w));
+        ussTerrAtlasUvRet = float2(uv.x * ussTerrAtlas.y, ussTerrAtlas.z + (uv.y * ussTerrAtlas.w));
     }
-    return tmp2062;
+    return ussTerrAtlasUvRet;
 }
 
 //! the visibility at height z from the limb heights rg (0 = no shadow height: lit)
@@ -4269,118 +4298,122 @@ float ussTerrVis(float2 rg, float z)
 {
     float lo = ussTerrRange.x + (rg.x * ussTerrRange.y);
     float hi = ussTerrRange.x + (rg.y * ussTerrRange.y);
-    float tmp2114;
+    float ussTerrVisRet;
     if (rg.x <= 0.0f)
     {
-        tmp2114 = 1.0f;
+        ussTerrVisRet = 1.0f;
     }
     else
     {
-        float tmp2122;
+        float ussTerrVisPick;
         if ((lo - hi) > 0.001000000047497451305389404296875f)
         {
-            tmp2122 = clamp((z - hi) / (lo - hi), 0.0f, 1.0f);
+            ussTerrVisPick = clamp((z - hi) / (lo - hi), 0.0f, 1.0f);
         }
         else
         {
-            tmp2122 = float(z >= lo);
+            ussTerrVisPick = float(z >= lo);
         }
-        tmp2114 = tmp2122;
+        ussTerrVisRet = ussTerrVisPick;
     }
-    return tmp2114;
+    return ussTerrVisRet;
 }
 
 float ussTerrTier(float2 uv, int tier, float z, float texel, bool pen, float2 wxy)
 {
-    float2 param = uv;
-    int param_1 = tier;
-    float2 tmp2152 = ussTerrAtlasUv(param, param_1);
-    float2 rg = ussTerrMap.Sample(_ussTerrMap_sampler, tmp2152).xy;
-    float2 param_2 = rg;
-    float param_3 = z;
-    float c = ussTerrVis(param_2, param_3);
-    bool tmp2162 = !pen;
-    bool tmp2170;
-    if (!tmp2162)
+    float2 uvArg7 = uv;
+    int tierArg2 = tier;
+    float2 ussTerrAtlasUvRet3 = ussTerrAtlasUv(uvArg7, tierArg2);
+    float2 rg = ussTerrMap.Sample(_ussTerrMap_sampler, ussTerrAtlasUvRet3).xy;
+    float2 rgArg2 = rg;
+    float zArg6 = z;
+    float c = ussTerrVis(rgArg2, zArg6);
+    bool cond104 = !pen;
+    bool cond103;
+    if (!cond104)
     {
-        tmp2170 = ussTerrPen.x < 0.5f;
+        cond103 = ussTerrPen.x < 0.5f;
     }
     else
     {
-        tmp2170 = tmp2162;
+        cond103 = cond104;
     }
-    bool tmp2177;
-    if (!tmp2170)
+    bool cond102;
+    if (!cond103)
     {
-        tmp2177 = rg.x <= 0.0f;
+        cond102 = rg.x <= 0.0f;
     }
     else
     {
-        tmp2177 = tmp2170;
+        cond102 = cond103;
     }
-    if (tmp2177)
+    if (cond102)
     {
         return c;
     }
     float dist = (max(rg.x - rg.y, 0.0f) * ussTerrRange.y) / max(ussTerrPen.w - ussTerrPen.z, 9.9999999747524270787835121154785e-07f);
+    // tan(0.265 deg)
     float r = min((dist * 0.0046251001767814159393310546875f) / max(texel, 9.9999999747524270787835121154785e-07f), 16.0f);
     if (r <= 0.5f)
     {
         return c;
     }
-    float tmp2216;
+    float nPick3;
     if (tier == 0)
     {
-        tmp2216 = ussTerrSize.x;
+        nPick3 = ussTerrSize.x;
     }
     else
     {
-        tmp2216 = ussTerrSize.y;
+        nPick3 = ussTerrSize.y;
     }
-    float n = tmp2216;
+    float n = nPick3;
     if (n <= 0.0f)
     {
+        // one tier: N = span / texel
         n = 1.0f / max(ussTerrXform.x * texel, 9.9999999600419720025001879548654e-13f);
     }
-    float2 tmp2241;
+    float2 pPick2;
     if (ussCsmStable.z > 0.5f)
     {
-        tmp2241 = gl_FragCoord.xy;
+        pPick2 = gl_FragCoord.xy;
     }
     else
     {
-        tmp2241 = mod(floor(wxy * (4.0f / max(texel, 9.9999999747524270787835121154785e-07f))), 4096.0f.xx);
+        pPick2 = mod(floor(wxy * (4.0f / max(texel, 9.9999999747524270787835121154785e-07f))), 4096.0f.xx);
     }
-    float2 param_4 = tmp2241;
-    float rot = 6.283185482025146484375f * ussIgn(param_4);
+    float2 pArg18 = pPick2;
+    // lane SHADOWSHIMMER2 (TERRPENSTABLE): the rotation of the world lattice cell (4 per tier texel, wrapped at 4096), the
+    // cascades' hash: a still world point keeps it in every frame and from every camera. Red (z 1): the screen pixel's
+    float rot = 6.283185482025146484375f * ussIgn(pArg18);
     float sum = c;
     for (int t = 0; t < 8; t++)
     {
         float th = (float(t) * 2.3999631404876708984375f) + rot;
         float2 o = float2(cos(th), sin(th)) * ((sqrt((float(t) + 0.5f) / 8.0f) * r) / n);
-        float2 param_5 = clamp(uv + o, 0.0f.xx, 1.0f.xx);
-        int param_6 = tier;
-        float2 tmp2300 = ussTerrAtlasUv(param_5, param_6);
-        float2 param_7 = ussTerrMap.Sample(_ussTerrMap_sampler, tmp2300).xy;
-        float param_8 = z;
-        sum += ussTerrVis(param_7, param_8);
+        float2 uvArg6 = clamp(uv + o, 0.0f.xx, 1.0f.xx);
+        int tierArg = tier;
+        float2 ussTerrAtlasUvRet2 = ussTerrAtlasUv(uvArg6, tierArg);
+        float2 rgArg = ussTerrMap.Sample(_ussTerrMap_sampler, ussTerrAtlasUvRet2).xy;
+        float zArg5 = z;
+        sum += ussTerrVis(rgArg, zArg5);
     }
     return sum / 9.0f;
 }
 
 float ussTerrSelfWeight(float2 uv, float wz, float4 h)
 {
-    float2 param = uv;
-    int param_1 = 0;
-    float2 tmp2492 = ussTerrAtlasUv(param, param_1);
-    float2 rg = ussTerrMap.Sample(_ussTerrMap_sampler, tmp2492).xy;
-    float2 param_2 = uv;
-    float param_3 = ussTerrExtra.x;
-    float2 tmp2502 = ussTerrExtraUv(param_2, param_3);
-    float cast = ussTerrMap.Sample(_ussTerrMap_sampler, tmp2502).y;
+    float2 uvArg9 = uv;
+    int tierArg3 = 0;
+    float2 ussTerrAtlasUvRet4 = ussTerrAtlasUv(uvArg9, tierArg3);
+    float2 rg = ussTerrMap.Sample(_ussTerrMap_sampler, ussTerrAtlasUvRet4).xy;
+    float2 uvArg8 = uv;
+    float offArg6 = ussTerrExtra.x;
+    float2 ussTerrExtraUvRet6 = ussTerrExtraUv(uvArg8, offArg6);
+    float cast = ussTerrMap.Sample(_ussTerrMap_sampler, ussTerrExtraUvRet6).y;
     bool wwh19 = (rg.x <= 0.0f);
     bool wwh20 = (cast <= 0.0f);
-    if (wwh19 || wwh20)
+    if (or(wwh19, wwh20))   // HLSLFIX2 orfix.py: no short-circuit branch (NV took the wrong side)
     {
         return 1.0f;
     }
@@ -4388,21 +4421,23 @@ float ussTerrSelfWeight(float2 uv, float wz, float4 h)
     float hc = ussTerrRange.x + (cast * ussTerrRange.y);
     float tanE = max(ussTerrPen.z, 9.9999997473787516355514526367188e-05f);
     float cosE = rsqrt(1.0f + (tanE * tanE));
+    // the gap to the first hit along the light: the caster's distance (s = hc - d tanE) over cos(elevation)
     float delta = max(hc - s, 0.0f) / (tanE * cosE);
+    // the stored depth's change per texel here
     float grad = (ussTerrPen.y * cosE) * (1.0f + (h.z * tanE));
     float margin = (4.0f * ussTerrSelf.w) + min(1.5f * grad, ussTerrSelf.z);
     float fade = clamp((delta - margin) / max(grad, 8.0f * ussTerrSelf.w), 0.0f, 1.0f);
     float lo = ussTerrSelf.y;
-    float tmp2589;
+    float ussTerrSelfWeightRet;
     if (lo > 0.0f)
     {
-        tmp2589 = fade * smoothstep(0.0f, 1.0f, ((hc - wz) - lo) / lo);
+        ussTerrSelfWeightRet = fade * smoothstep(0.0f, 1.0f, ((hc - wz) - lo) / lo);
     }
     else
     {
-        tmp2589 = fade;
+        ussTerrSelfWeightRet = fade;
     }
-    return tmp2589;
+    return ussTerrSelfWeightRet;
 }
 
 //! (C) the terrain's shadow-height map; inMap = 1 inside it. grad: the receiver's slope (rise over run, the slope
@@ -4416,163 +4451,170 @@ float ussTerrain(float3 posView, out float inMap, inout float grad, bool pen)
     }
     float3 wp = mul(float4(posView, 1.0f), ussWorldFromView).xyz;
     float2 uv = float2((wp.x * ussTerrXform.x) + ussTerrXform.y, (wp.y * ussTerrXform.z) + ussTerrXform.w);
-    bool tmp2645 = any(bool2(uv.x < 0.0f.xx.x, uv.y < 0.0f.xx.y));
-    bool tmp2652;
-    if (!tmp2645)
+    bool cond111 = any(bool2(uv.x < 0.0f.xx.x, uv.y < 0.0f.xx.y));
+    bool cond110;
+    if (!cond111)
     {
-        tmp2652 = any(bool2(uv.x > 1.0f.xx.x, uv.y > 1.0f.xx.y));
+        cond110 = any(bool2(uv.x > 1.0f.xx.x, uv.y > 1.0f.xx.y));
     }
     else
     {
-        tmp2652 = tmp2645;
+        cond110 = cond111;
     }
-    if (tmp2652)
+    if (cond110)
     {
         return 1.0f;
     }
     inMap = 1.0f;
+    // lane FAR5: bias.x 2 = FO4CS's LocalGradient from the terrain-only heights instead of the screen slope; 3 = 0.
+    // Surface receivers only (pen): the air's taps would push the decal/GI-march programs over the instruction limit
     float4 h = 0.0f.xxxx;
-    bool tmp2671;
+    bool cond109;
     if (pen)
     {
-        bool tmp2663 = ussTerrBias.x > 1.5f;
-        bool tmp2670;
-        if (!tmp2663)
+        bool cond108 = ussTerrBias.x > 1.5f;
+        bool condPick5;
+        if (!cond108)
         {
-            tmp2670 = ussTerrExtra.y > 0.0f;
+            condPick5 = ussTerrExtra.y > 0.0f;
         }
         else
         {
-            tmp2670 = tmp2663;
+            condPick5 = cond108;
         }
-        tmp2671 = tmp2670;
+        cond109 = condPick5;
     }
     else
     {
-        tmp2671 = pen;
+        cond109 = pen;
     }
-    if (tmp2671)
+    if (cond109)
     {
-        float2 param = uv;
-        h = ussTerrHeights(param);
+        float2 uvArg15 = uv;
+        h = ussTerrHeights(uvArg15);
     }
-    bool tmp2683;
+    bool cond107;
     if (pen)
     {
-        tmp2683 = ussTerrBias.x > 1.5f;
+        cond107 = ussTerrBias.x > 1.5f;
     }
     else
     {
-        tmp2683 = pen;
+        cond107 = pen;
     }
-    if (tmp2683)
+    if (cond107)
     {
-        float tmp2690;
+        float gradPick;
         if (ussTerrBias.x > 2.5f)
         {
-            tmp2690 = 0.0f;
+            gradPick = 0.0f;
         }
         else
         {
-            tmp2690 = h.z;
+            gradPick = h.z;
         }
-        grad = tmp2690;
+        grad = gradPick;
     }
-    float tmp2703;
+    float zPick;
     if (ussTerrBias.x > 0.5f)
     {
-        tmp2703 = (12.0f * (1.0f + clamp(grad, 0.0f, 4.0f))) / ussTerrBias.y;
+        zPick = (12.0f * (1.0f + clamp(grad, 0.0f, 4.0f))) / ussTerrBias.y;
     }
     else
     {
-        tmp2703 = ussTerrRange.z;
+        zPick = ussTerrRange.z;
     }
-    float z = wp.z + tmp2703;
-    float2 param_1 = uv;
-    int param_2 = 0;
-    float param_3 = z;
-    float param_4 = ussTerrPen.y;
-    bool param_5 = pen;
-    float2 param_6 = wp.xy;
-    float vis = ussTerrTier(param_1, param_2, param_3, param_4, param_5, param_6);
+    // lane SHADOWPAR1: FO4CS's bias 12 (1 + slope) / sin(elevation); else TERRSHADOW1's 0.05 T + 4
+    float z = wp.z + zPick;
+    float2 uvArg14 = uv;
+    int tierArg5 = 0;
+    float zArg10 = z;
+    float texelArg2 = ussTerrPen.y;
+    bool penArg2 = pen;
+    float2 wxyArg2 = wp.xy;
+    float vis = ussTerrTier(uvArg14, tierArg5, zArg10, texelArg2, penArg2, wxyArg2);
     if (ussTerrSize.y > 0.0f)
     {
+        // the near tier, faded in over 128 of its texels from its window's edge
         float2 un = float2((wp.x * ussTerrNearXform.x) + ussTerrNearXform.y, (wp.y * ussTerrNearXform.z) + ussTerrNearXform.w);
         float2 en = (min(un, 1.0f.xx - un) * ussTerrSize.y) / 128.0f.xx;
         float w = smoothstep(0.0f, 1.0f, clamp(min(en.x, en.y), 0.0f, 1.0f));
         if (w > 0.0f)
         {
-            float2 param_7 = un;
-            int param_8 = 1;
-            float param_9 = z;
-            float param_10 = ussTerrBias.w;
-            bool param_11 = pen;
-            float2 param_12 = wp.xy;
-            vis = lerp(vis, ussTerrTier(param_7, param_8, param_9, param_10, param_11, param_12), w);
+            float2 uvArg13 = un;
+            int tierArg4 = 1;
+            float zArg9 = z;
+            float texelArg = ussTerrBias.w;
+            bool penArg = pen;
+            float2 wxyArg = wp.xy;
+            vis = lerp(vis, ussTerrTier(uvArg13, tierArg4, zArg9, texelArg, penArg, wxyArg), w);
         }
     }
     if (ussTerrExtra.y > 0.0f)
     {
-        bool tmp2806 = h.w > 0.0f;
-        bool tmp2812;
-        if (tmp2806)
+        bool cond106 = h.w > 0.0f;
+        bool cond105;
+        if (cond106)
         {
-            tmp2812 = ussTerrSelf.x > 0.5f;
+            cond105 = ussTerrSelf.x > 0.5f;
         }
         else
         {
-            tmp2812 = tmp2806;
+            cond105 = cond106;
         }
-        if (tmp2812)
+        if (cond105)
         {
-            float2 param_13 = uv;
-            float param_14 = ussTerrExtra.y;
-            float2 tmp2821 = ussTerrExtraUv(param_13, param_14);
-            float2 param_15 = ussTerrMap.Sample(_ussTerrMap_sampler, tmp2821).xy;
-            float param_16 = z;
-            float2 param_17 = uv;
-            float param_18 = wp.z;
-            float4 param_19 = h;
-            vis = min(ussTerrVis(param_15, param_16), lerp(1.0f, vis, ussTerrSelfWeight(param_17, param_18, param_19)));
+            float2 uvArg12 = uv;
+            float offArg8 = ussTerrExtra.y;
+            float2 ussTerrExtraUvRet8 = ussTerrExtraUv(uvArg12, offArg8);
+            float2 rgArg4 = ussTerrMap.Sample(_ussTerrMap_sampler, ussTerrExtraUvRet8).xy;
+            float zArg8 = z;
+            float2 uvArg11 = uv;
+            float wzArg = wp.z;
+            float4 hArg8 = h;
+            // lane FAR6: FO4CS composes its terrain sweep and the self-tested LOD term by min()
+            vis = min(ussTerrVis(rgArg4, zArg8), lerp(1.0f, vis, ussTerrSelfWeight(uvArg11, wzArg, hArg8)));
         }
         else
         {
             if (h.w > 0.0f)
             {
-                float tmp2849;
+                float mPick;
                 if (ussTerrExtra.w < 0.0f)
                 {
-                    tmp2849 = 1.0f;
+                    mPick = 1.0f;
                 }
                 else
                 {
-                    tmp2849 = smoothstep(0.75f * ussTerrExtra.w, 1.25f * ussTerrExtra.w, (wp.z - h.x) - min(h.y, 4.0f * ussTerrPen.y));
+                    mPick = smoothstep(0.75f * ussTerrExtra.w, 1.25f * ussTerrExtra.w, (wp.z - h.x) - min(h.y, 4.0f * ussTerrPen.y));
                 }
-                float m = tmp2849;
+                float m = mPick;
                 if (m > 0.0f)
                 {
-                    float2 param_20 = uv;
-                    float param_21 = ussTerrExtra.y;
-                    float2 tmp2885 = ussTerrExtraUv(param_20, param_21);
-                    float2 param_22 = ussTerrMap.Sample(_ussTerrMap_sampler, tmp2885).xy;
-                    float param_23 = z;
-                    vis = lerp(vis, ussTerrVis(param_22, param_23), m);
+                    float2 uvArg10 = uv;
+                    float offArg7 = ussTerrExtra.y;
+                    float2 ussTerrExtraUvRet7 = ussTerrExtraUv(uvArg10, offArg7);
+                    float2 rgArg3 = ussTerrMap.Sample(_ussTerrMap_sampler, ussTerrExtraUvRet7).xy;
+                    float zArg7 = z;
+                    vis = lerp(vis, ussTerrVis(rgArg3, zArg7), m);
                 }
             }
         }
     }
+    // MODULES1 M9: w < 0 = a circle around the eye, radius -w (world units), faded over its outer fifth; w > 0 the square's edge
     float2 e = min(uv, 1.0f.xx - uv) / max(ussTerrRange.w, 9.9999999747524270787835121154785e-07f).xx;
-    float tmp2909;
+    float edgeWPick;
     if (ussTerrRange.w < 0.0f)
     {
-        tmp2909 = 1.0f - smoothstep(0.800000011920928955078125f, 1.0f, length(wp.xy - ussWorldFromView[3].xy) / (-ussTerrRange.w));
+        edgeWPick = 1.0f - smoothstep(0.800000011920928955078125f, 1.0f, length(wp.xy - ussWorldFromView[3].xy) / (-ussTerrRange.w));
     }
     else
     {
-        tmp2909 = clamp(min(e.x, e.y), 0.0f, 1.0f);
+        edgeWPick = clamp(min(e.x, e.y), 0.0f, 1.0f);
     }
-    float edgeW = tmp2909;
+    float edgeW = edgeWPick;
     vis = lerp(1.0f, vis, edgeW);
+    // the low sun's fade and the moon's strength (1 when off)
     return lerp(1.0f, vis, ussTerrBias.z);
 }
 
@@ -4581,30 +4623,30 @@ float3 csmNormalOff(float3 posView, float3 dPx, float3 dPy)
     float3 n = cross(dPx, dPy);
     float ln = length(n);
     float3 lv = float3(csmMat[0][0].z, csmMat[0][1].z, csmMat[0][2].z);
-    bool tmp1200 = ln <= 9.9999996826552253889678874634872e-21f;
-    bool tmp1208;
-    if (!tmp1200)
+    bool cond113 = ln <= 9.9999996826552253889678874634872e-21f;
+    bool cond112;
+    if (!cond113)
     {
-        tmp1208 = dot(lv, lv) <= 0.0f;
+        cond112 = dot(lv, lv) <= 0.0f;
     }
     else
     {
-        tmp1208 = tmp1200;
+        cond112 = cond113;
     }
-    if (tmp1208)
+    if (cond112)
     {
         return 0.0f.xxx;
     }
-    float3 tmp1216;
+    float3 nPick4;
     if (dot(n, posView) > 0.0f)
     {
-        tmp1216 = (-n) / ln.xxx;
+        nPick4 = (-n) / ln.xxx;
     }
     else
     {
-        tmp1216 = n / ln.xxx;
+        nPick4 = n / ln.xxx;
     }
-    n = tmp1216;
+    n = nPick4;
     float c = dot(n, normalize(lv));
     return n * ((ussCsmStable.w * sqrt(max(1.0f - (c * c), 0.0f))) / csmParams.x);
 }
@@ -4614,17 +4656,17 @@ float ussSlope(float3 dPx, float3 dPy)
 {
     float3 n = cross(dPx, dPy);
     float l = length(n);
-    bool tmp2950 = l < 9.9999996826552253889678874634872e-21f;
-    bool tmp2957;
-    if (!tmp2950)
+    bool cond115 = l < 9.9999996826552253889678874634872e-21f;
+    bool cond114;
+    if (!cond115)
     {
-        tmp2957 = ussTerrBias.x < 0.5f;
+        cond114 = ussTerrBias.x < 0.5f;
     }
     else
     {
-        tmp2957 = tmp2950;
+        cond114 = cond115;
     }
-    if (tmp2957)
+    if (cond114)
     {
         return 0.0f;
     }
@@ -4645,33 +4687,36 @@ float ussContact()
 //! min( mix( 1, cascades, fade ), terrain, contact ): each producer fails to lit; min never darkens twice
 float ussCompose(float3 posView)
 {
+    // lane TERRSHADOW1: the debug ladder (raw grey, or the weights as numbers)
     float3 dPx = ddx(posView);
     float3 dPy = ddy(posView);
-    float3 param = posView;
-    float3 param_1 = dPx;
-    float3 param_2 = dPy;
-    float param_3;
-    float tmp3024 = ussCascades(param, param_1, param_2, param_3);
-    float w = param_3;
-    float casc = tmp3024;
-    float3 param_4 = dPx;
-    float3 param_5 = dPy;
-    float3 param_6 = posView;
-    float param_8 = ussSlope(param_4, param_5);
-    bool param_9 = true;
-    float param_7;
-    float tmp3039 = ussTerrain(param_6, param_7, param_8, param_9);
-    float inMap = param_7;
-    float terr = tmp3039;
+    float3 posViewArg23 = posView;
+    float3 dPxArg4 = dPx;
+    float3 dPyArg4 = dPy;
+    float wArg;
+    float ussCascadesRet = ussCascades(posViewArg23, dPxArg4, dPyArg4, wArg);
+    float w = wArg;
+    float casc = ussCascadesRet;
+    float3 dPxArg3 = dPx;
+    float3 dPyArg3 = dPy;
+    float3 posViewArg22 = posView;
+    float gradArg = ussSlope(dPxArg3, dPyArg3);
+    bool penArg3 = true;
+    float inMapArg;
+    float ussTerrainRet = ussTerrain(posViewArg22, inMapArg, gradArg, penArg3);
+    float inMap = inMapArg;
+    float terr = ussTerrainRet;
     float con = ussContact();
     if (((ussRed & 1) != 0) && (w > 0.0f))
     {
+        // red terrseam: the terrain only past the cascades' reach
         terr = 1.0f;
     }
     ussLastTerr = terr;
     float c = lerp(1.0f, casc, w);
     if ((ussRed & 2) != 0)
     {
+        // red mulcompose
         return (c * terr) * con;
     }
     return min(min(c, terr), con);
@@ -4680,40 +4725,40 @@ float ussCompose(float3 posView)
 //! the filtered factor with the seam blend, before the distance fade
 float csmBlended(float3 posView)
 {
-    float3 param = posView;
-    int param_1;
-    int param_2;
-    float param_3;
-    csmSelect(param, param_1, param_2, param_3);
-    int a = param_1;
-    int b = param_2;
-    float t = param_3;
-    float tmp1442;
+    float3 posViewArg26 = posView;
+    int aArg9;
+    int bArg6;
+    float tArg3;
+    csmSelect(posViewArg26, aArg9, bArg6, tArg3);
+    int a = aArg9;
+    int b = bArg6;
+    float t = tArg3;
+    float sAPick;
     if (t < 1.0f)
     {
-        int param_4 = a;
-        float3 param_5 = posView;
-        float param_6 = csmSplitOffset.z;
-        tmp1442 = csmFiltered(param_4, param_5, param_6);
+        int iArg24 = a;
+        float3 posViewArg25 = posView;
+        float offsetWorldArg6 = csmSplitOffset.z;
+        sAPick = csmFiltered(iArg24, posViewArg25, offsetWorldArg6);
     }
     else
     {
-        tmp1442 = 1.0f;
+        sAPick = 1.0f;
     }
-    float sA = tmp1442;
-    float tmp1458;
+    float sA = sAPick;
+    float sBPick;
     if (t > 0.0f)
     {
-        int param_7 = b;
-        float3 param_8 = posView;
-        float param_9 = csmSplitOffset.w;
-        tmp1458 = csmFiltered(param_7, param_8, param_9);
+        int iArg23 = b;
+        float3 posViewArg24 = posView;
+        float offsetWorldArg5 = csmSplitOffset.w;
+        sBPick = csmFiltered(iArg23, posViewArg24, offsetWorldArg5);
     }
     else
     {
-        tmp1458 = 1.0f;
+        sBPick = 1.0f;
     }
-    float sB = tmp1458;
+    float sB = sBPick;
     return lerp(sA, sB, t);
 }
 
@@ -4728,26 +4773,27 @@ float wwSunShadowGeo(float3 posView)
     {
         return csmForce;	// WW_CSM_FORCE: >= 0 replaces the factor (the factor-site wiring test); -1 off
     }
+    // lane SHADOWSHIMMER2 (CSMOFFBIAS): the Off tier's normal offset, before any per-pixel branch (derivatives)
     if (ussCsmStable.w > 0.0f)
     {
-        float3 param = posView;
-        float3 param_1 = ddx(posView);
-        float3 param_2 = ddy(posView);
-        csmNOff = csmNormalOff(param, param_1, param_2);
+        float3 posViewArg29 = posView;
+        float3 dPxArg5 = ddx(posView);
+        float3 dPyArg5 = ddy(posView);
+        csmNOff = csmNormalOff(posViewArg29, dPxArg5, dPyArg5);
     }
     if (ussOn != 0)
     {
-        float3 param_3 = posView;
-        float tmp3172 = ussCompose(param_3);
-        return tmp3172;
+        float3 posViewArg28 = posView;
+        float ussComposeRet = ussCompose(posViewArg28);
+        return ussComposeRet;
     }
     float dv = (-posView.z) * csmParams.x;
     if (dv > (csmParams.y + csmParams.w))
     {
         return 1.0f;
     }
-    float3 param_4 = posView;
-    float sh = csmBlended(param_4);
+    float3 posViewArg27 = posView;
+    float sh = csmBlended(posViewArg27);
     if ((csmRed & 2) == 0)
     {
         float s = clamp(((dot(posView, posView) * csmParams.x) * csmParams.x) / (csmParams.y * csmParams.y), 0.0f, 1.0f);
@@ -4775,8 +4821,8 @@ float ussCloudT(float3 posView)
 // row is off or its red noinject keeps the clouds out of the air)
 float airCloudShadow(float3 posView)
 {
-    float3 param = posView;
-    return ussCloudT(param);
+    float3 posViewArg30 = posView;
+    return ussCloudT(posViewArg30);
 }
 
 // lane FARGRID1: the sun's visibility with the far grid on: min(cascades where they reach, the terrain's shadow-height
@@ -4791,53 +4837,53 @@ float airFarVis(float3 posView)
     float t = 1.0f;
     if (ussOn != 0)
     {
-        float3 param = posView;
-        float3 param_1 = 0.0f.xxx;
-        float3 param_2 = 0.0f.xxx;
-        float param_3;
-        float tmp8076 = ussCascades(param, param_1, param_2, param_3);
-        float w = param_3;
-        c = lerp(1.0f, tmp8076, w);
+        float3 posViewArg34 = posView;
+        float3 dPxArg6 = 0.0f.xxx;
+        float3 dPyArg6 = 0.0f.xxx;
+        float wArg2;
+        float ussCascadesRet2 = ussCascades(posViewArg34, dPxArg6, dPyArg6, wArg2);
+        float w = wArg2;
+        c = lerp(1.0f, ussCascadesRet2, w);
         if ((volFarMode & 6) != 6)
         {
-            float3 param_4 = posView;
-            float param_6 = 0.0f;
-            bool param_7 = false;
-            float param_5;
-            float tmp8092 = ussTerrain(param_4, param_5, param_6, param_7);
-            float inMap = param_5;
-            t = tmp8092;
+            float3 posViewArg33 = posView;
+            float gradArg2 = 0.0f;
+            bool penArg4 = false;
+            float inMapArg2;
+            float ussTerrainRet2 = ussTerrain(posViewArg33, inMapArg2, gradArg2, penArg4);
+            float inMap = inMapArg2;
+            t = ussTerrainRet2;
         }
     }
     else
     {
         if (volCsm)
         {
-            float3 param_8 = posView;
-            float tmp8100 = wwSunShadowGeo(param_8);
-            c = tmp8100;
+            float3 posViewArg32 = posView;
+            float wwSunShadowGeoRet = wwSunShadowGeo(posViewArg32);
+            c = wwSunShadowGeoRet;
         }
     }
-    float3 param_9 = posView;
-    return min(c, t) * airCloudShadow(param_9);
+    float3 posViewArg31 = posView;
+    return min(c, t) * airCloudShadow(posViewArg31);
 }
 
 //! the sun's shadow factor: the geometry's x the clouds' (lane CLOUD3; x exactly 1 with the row off)
 float wwSunShadow(float3 posView)
 {
-    float3 param = posView;
-    float tmp3235 = wwSunShadowGeo(param);
-    float3 param_1 = posView;
-    return tmp3235 * ussCloudT(param_1);
+    float3 posViewArg36 = posView;
+    float wwSunShadowGeoRet2 = wwSunShadowGeo(posViewArg36);
+    float3 posViewArg35 = posView;
+    return wwSunShadowGeoRet2 * ussCloudT(posViewArg35);
 }
 
 // the Vogel disc at 32 taps (r = sqrt((t + 0.5) / 32), t x 2.39996323 rad): literal offsets, the pattern fixed in the
 // map's texels (so world-locked); 32 = 8..48 of the presets' range, as accurate as the rotated preset disc (tests/features/air/airsun A)
 float airCsmVogel(int i, float3 posView)
 {
-    int param = i;
-    float3 param_1 = posView;
-    float3 q = csmUvd(param, param_1);
+    int iArg25 = i;
+    float3 posViewArg37 = posView;
+    float3 q = csmUvd(iArg25, posViewArg37);
     float zRef = q.z - (ussCsmBias[i] * csmInvRange[i]);
     float R = ussCsmFilter.y * lerp(0.800000011920928955078125f, 1.2000000476837158203125f, clamp(float(i) * 0.5f, 0.0f, 1.0f));
     if (ussCsmWorld.x > 0.5f)
@@ -4848,195 +4894,195 @@ float airCsmVogel(int i, float3 posView)
     {
         if (!volSunBead)
         {
-            float4 tmp9075 = float4(q.xy, float(i), zRef);
-            return csmMap.SampleCmp(_csmMap_sampler, tmp9075.xyz, tmp9075.w);
+            float4 airCsmVogelRet3 = float4(q.xy, float(i), zRef);
+            return csmMap.SampleCmp(_csmMap_sampler, airCsmVogelRet3.xyz, airCsmVogelRet3.w);
         }
         float3 d = mul(airSunDs, float3x3(csmMat[i][0].xyz, csmMat[i][1].xyz, csmMat[i][2].xyz));
-        float4 tmp9106 = float4(q.xy - d.xy, float(i), zRef - d.z);
-        float4 tmp9123 = float4(q.xy + d.xy, float(i), zRef + d.z);
-        return 0.5f * (csmMap.SampleCmp(_csmMap_sampler, tmp9106.xyz, tmp9106.w) + csmMap.SampleCmp(_csmMap_sampler, tmp9123.xyz, tmp9123.w));
+        float4 airCsmVogelRet2 = float4(q.xy - d.xy, float(i), zRef - d.z);
+        float4 airCsmVogelRet = float4(q.xy + d.xy, float(i), zRef + d.z);
+        return 0.5f * (csmMap.SampleCmp(_csmMap_sampler, airCsmVogelRet2.xyz, airCsmVogelRet2.w) + csmMap.SampleCmp(_csmMap_sampler, airCsmVogelRet.xyz, airCsmVogelRet.w));
     }
     float2 k = (R / csmParams.z).xx;
     float s = 0.0f;
-    float4 tmp9148 = float4(q.xy + (float2(0.125f, 0.0f) * k), float(i), zRef);
-    s += csmMap.SampleCmp(_csmMap_sampler, tmp9148.xyz, tmp9148.w);
-    float4 tmp9167 = float4(q.xy + (float2(-0.15964500606060028076171875f, 0.1462478935718536376953125f) * k), float(i), zRef);
-    s += csmMap.SampleCmp(_csmMap_sampler, tmp9167.xyz, tmp9167.w);
-    float4 tmp9186 = float4(q.xy + (float2(0.02443620003759860992431640625f, -0.2784382998943328857421875f) * k), float(i), zRef);
-    s += csmMap.SampleCmp(_csmMap_sampler, tmp9186.xyz, tmp9186.w);
-    float4 tmp9205 = float4(q.xy + (float2(0.20122219622135162353515625f, 0.26245880126953125f) * k), float(i), zRef);
-    s += csmMap.SampleCmp(_csmMap_sampler, tmp9205.xyz, tmp9205.w);
-    float4 tmp9224 = float4(q.xy + (float2(-0.3692676126956939697265625f, -0.0653181970119476318359375f) * k), float(i), zRef);
-    s += csmMap.SampleCmp(_csmMap_sampler, tmp9224.xyz, tmp9224.w);
-    float4 tmp9243 = float4(q.xy + (float2(0.349802494049072265625f, -0.22251570224761962890625f) * k), float(i), zRef);
-    s += csmMap.SampleCmp(_csmMap_sampler, tmp9243.xyz, tmp9243.w);
-    float4 tmp9262 = float4(q.xy + (float2(-0.1170020997524261474609375f, 0.4352419078350067138671875f) * k), float(i), zRef);
-    s += csmMap.SampleCmp(_csmMap_sampler, tmp9262.xyz, tmp9262.w);
-    float4 tmp9281 = float4(q.xy + (float2(-0.22313569486141204833984375f, -0.42963409423828125f) * k), float(i), zRef);
-    s += csmMap.SampleCmp(_csmMap_sampler, tmp9281.xyz, tmp9281.w);
-    float4 tmp9300 = float4(q.xy + (float2(0.4841150939464569091796875f, 0.1767981052398681640625f) * k), float(i), zRef);
-    s += csmMap.SampleCmp(_csmMap_sampler, tmp9300.xyz, tmp9300.w);
-    float4 tmp9319 = float4(q.xy + (float2(-0.5036411285400390625f, 0.207895696163177490234375f) * k), float(i), zRef);
-    s += csmMap.SampleCmp(_csmMap_sampler, tmp9319.xyz, tmp9319.w);
-    float4 tmp9338 = float4(q.xy + (float2(0.24278829991817474365234375f, -0.518824517726898193359375f) * k), float(i), zRef);
-    s += csmMap.SampleCmp(_csmMap_sampler, tmp9338.xyz, tmp9338.w);
-    float4 tmp9357 = float4(q.xy + (float2(0.17941440641880035400390625f, 0.572001278400421142578125f) * k), float(i), zRef);
-    s += csmMap.SampleCmp(_csmMap_sampler, tmp9357.xyz, tmp9357.w);
-    float4 tmp9376 = float4(q.xy + (float2(-0.540757000446319580078125f, -0.313379704952239990234375f) * k), float(i), zRef);
-    s += csmMap.SampleCmp(_csmMap_sampler, tmp9376.xyz, tmp9376.w);
-    float4 tmp9395 = float4(q.xy + (float2(0.63436949253082275390625f, -0.13946439325809478759765625f) * k), float(i), zRef);
-    s += csmMap.SampleCmp(_csmMap_sampler, tmp9395.xyz, tmp9395.w);
-    float4 tmp9414 = float4(q.xy + (float2(-0.3871457874774932861328125f, 0.550675094127655029296875f) * k), float(i), zRef);
-    s += csmMap.SampleCmp(_csmMap_sampler, tmp9414.xyz, tmp9414.w);
-    float4 tmp9433 = float4(q.xy + (float2(-0.089439697563648223876953125f, -0.6901996135711669921875f) * k), float(i), zRef);
-    s += csmMap.SampleCmp(_csmMap_sampler, tmp9433.xyz, tmp9433.w);
-    float4 tmp9452 = float4(q.xy + (float2(0.549071788787841796875f, 0.4627583026885986328125f) * k), float(i), zRef);
-    s += csmMap.SampleCmp(_csmMap_sampler, tmp9452.xyz, tmp9452.w);
-    float4 tmp9471 = float4(q.xy + (float2(-0.7388784885406494140625f, 0.03055489994585514068603515625f) * k), float(i), zRef);
-    s += csmMap.SampleCmp(_csmMap_sampler, tmp9471.xyz, tmp9471.w);
-    float4 tmp9490 = float4(q.xy + (float2(0.53895509243011474609375f, -0.536332309246063232421875f) * k), float(i), zRef);
-    s += csmMap.SampleCmp(_csmMap_sampler, tmp9490.xyz, tmp9490.w);
-    float4 tmp9509 = float4(q.xy + (float2(-0.0360581986606121063232421875f, 0.77979147434234619140625f) * k), float(i), zRef);
-    s += csmMap.SampleCmp(_csmMap_sampler, tmp9509.xyz, tmp9509.w);
-    float4 tmp9528 = float4(q.xy + (float2(-0.51281750202178955078125f, -0.614526808261871337890625f) * k), float(i), zRef);
-    s += csmMap.SampleCmp(_csmMap_sampler, tmp9528.xyz, tmp9528.w);
-    float4 tmp9547 = float4(q.xy + (float2(0.8123595714569091796875f, 0.109301798045635223388671875f) * k), float(i), zRef);
-    s += csmMap.SampleCmp(_csmMap_sampler, tmp9547.xyz, tmp9547.w);
-    float4 tmp9566 = float4(q.xy + (float2(-0.6883106231689453125f, 0.478908598423004150390625f) * k), float(i), zRef);
-    s += csmMap.SampleCmp(_csmMap_sampler, tmp9566.xyz, tmp9566.w);
-    float4 tmp9585 = float4(q.xy + (float2(0.18808610737323760986328125f, -0.836061418056488037109375f) * k), float(i), zRef);
-    s += csmMap.SampleCmp(_csmMap_sampler, tmp9585.xyz, tmp9585.w);
-    float4 tmp9604 = float4(q.xy + (float2(0.4350332915782928466796875f, 0.759191095829010009765625f) * k), float(i), zRef);
-    s += csmMap.SampleCmp(_csmMap_sampler, tmp9604.xyz, tmp9604.w);
-    float4 tmp9623 = float4(q.xy + (float2(-0.850448429584503173828125f, -0.2713162004947662353515625f) * k), float(i), zRef);
-    s += csmMap.SampleCmp(_csmMap_sampler, tmp9623.xyz, tmp9623.w);
-    float4 tmp9642 = float4(q.xy + (float2(0.82610237598419189453125f, -0.381680309772491455078125f) * k), float(i), zRef);
-    s += csmMap.SampleCmp(_csmMap_sampler, tmp9642.xyz, tmp9642.w);
-    float4 tmp9661 = float4(q.xy + (float2(-0.3578881919384002685546875f, 0.85515558719635009765625f) * k), float(i), zRef);
-    s += csmMap.SampleCmp(_csmMap_sampler, tmp9661.xyz, tmp9661.w);
-    float4 tmp9680 = float4(q.xy + (float2(-0.3194073140621185302734375f, -0.888033807277679443359375f) * k), float(i), zRef);
-    s += csmMap.SampleCmp(_csmMap_sampler, tmp9680.xyz, tmp9680.w);
-    float4 tmp9699 = float4(q.xy + (float2(0.8499085903167724609375f, 0.4466882050037384033203125f) * k), float(i), zRef);
-    s += csmMap.SampleCmp(_csmMap_sampler, tmp9699.xyz, tmp9699.w);
-    float4 tmp9718 = float4(q.xy + (float2(-0.944034576416015625f, 0.24884450435638427734375f) * k), float(i), zRef);
-    s += csmMap.SampleCmp(_csmMap_sampler, tmp9718.xyz, tmp9718.w);
-    float4 tmp9737 = float4(q.xy + (float2(0.536595821380615234375f, -0.834529817104339599609375f) * k), float(i), zRef);
-    s += csmMap.SampleCmp(_csmMap_sampler, tmp9737.xyz, tmp9737.w);
+    float4 sPart32 = float4(q.xy + (float2(0.125f, 0.0f) * k), float(i), zRef);
+    s += csmMap.SampleCmp(_csmMap_sampler, sPart32.xyz, sPart32.w);
+    float4 sPart31 = float4(q.xy + (float2(-0.15964500606060028076171875f, 0.1462478935718536376953125f) * k), float(i), zRef);
+    s += csmMap.SampleCmp(_csmMap_sampler, sPart31.xyz, sPart31.w);
+    float4 sPart30 = float4(q.xy + (float2(0.02443620003759860992431640625f, -0.2784382998943328857421875f) * k), float(i), zRef);
+    s += csmMap.SampleCmp(_csmMap_sampler, sPart30.xyz, sPart30.w);
+    float4 sPart29 = float4(q.xy + (float2(0.20122219622135162353515625f, 0.26245880126953125f) * k), float(i), zRef);
+    s += csmMap.SampleCmp(_csmMap_sampler, sPart29.xyz, sPart29.w);
+    float4 sPart28 = float4(q.xy + (float2(-0.3692676126956939697265625f, -0.0653181970119476318359375f) * k), float(i), zRef);
+    s += csmMap.SampleCmp(_csmMap_sampler, sPart28.xyz, sPart28.w);
+    float4 sPart27 = float4(q.xy + (float2(0.349802494049072265625f, -0.22251570224761962890625f) * k), float(i), zRef);
+    s += csmMap.SampleCmp(_csmMap_sampler, sPart27.xyz, sPart27.w);
+    float4 sPart26 = float4(q.xy + (float2(-0.1170020997524261474609375f, 0.4352419078350067138671875f) * k), float(i), zRef);
+    s += csmMap.SampleCmp(_csmMap_sampler, sPart26.xyz, sPart26.w);
+    float4 sPart25 = float4(q.xy + (float2(-0.22313569486141204833984375f, -0.42963409423828125f) * k), float(i), zRef);
+    s += csmMap.SampleCmp(_csmMap_sampler, sPart25.xyz, sPart25.w);
+    float4 sPart24 = float4(q.xy + (float2(0.4841150939464569091796875f, 0.1767981052398681640625f) * k), float(i), zRef);
+    s += csmMap.SampleCmp(_csmMap_sampler, sPart24.xyz, sPart24.w);
+    float4 sPart23 = float4(q.xy + (float2(-0.5036411285400390625f, 0.207895696163177490234375f) * k), float(i), zRef);
+    s += csmMap.SampleCmp(_csmMap_sampler, sPart23.xyz, sPart23.w);
+    float4 sPart22 = float4(q.xy + (float2(0.24278829991817474365234375f, -0.518824517726898193359375f) * k), float(i), zRef);
+    s += csmMap.SampleCmp(_csmMap_sampler, sPart22.xyz, sPart22.w);
+    float4 sPart21 = float4(q.xy + (float2(0.17941440641880035400390625f, 0.572001278400421142578125f) * k), float(i), zRef);
+    s += csmMap.SampleCmp(_csmMap_sampler, sPart21.xyz, sPart21.w);
+    float4 sPart20 = float4(q.xy + (float2(-0.540757000446319580078125f, -0.313379704952239990234375f) * k), float(i), zRef);
+    s += csmMap.SampleCmp(_csmMap_sampler, sPart20.xyz, sPart20.w);
+    float4 sPart19 = float4(q.xy + (float2(0.63436949253082275390625f, -0.13946439325809478759765625f) * k), float(i), zRef);
+    s += csmMap.SampleCmp(_csmMap_sampler, sPart19.xyz, sPart19.w);
+    float4 sPart18 = float4(q.xy + (float2(-0.3871457874774932861328125f, 0.550675094127655029296875f) * k), float(i), zRef);
+    s += csmMap.SampleCmp(_csmMap_sampler, sPart18.xyz, sPart18.w);
+    float4 sPart17 = float4(q.xy + (float2(-0.089439697563648223876953125f, -0.6901996135711669921875f) * k), float(i), zRef);
+    s += csmMap.SampleCmp(_csmMap_sampler, sPart17.xyz, sPart17.w);
+    float4 sPart16 = float4(q.xy + (float2(0.549071788787841796875f, 0.4627583026885986328125f) * k), float(i), zRef);
+    s += csmMap.SampleCmp(_csmMap_sampler, sPart16.xyz, sPart16.w);
+    float4 sPart15 = float4(q.xy + (float2(-0.7388784885406494140625f, 0.03055489994585514068603515625f) * k), float(i), zRef);
+    s += csmMap.SampleCmp(_csmMap_sampler, sPart15.xyz, sPart15.w);
+    float4 sPart14 = float4(q.xy + (float2(0.53895509243011474609375f, -0.536332309246063232421875f) * k), float(i), zRef);
+    s += csmMap.SampleCmp(_csmMap_sampler, sPart14.xyz, sPart14.w);
+    float4 sPart13 = float4(q.xy + (float2(-0.0360581986606121063232421875f, 0.77979147434234619140625f) * k), float(i), zRef);
+    s += csmMap.SampleCmp(_csmMap_sampler, sPart13.xyz, sPart13.w);
+    float4 sPart12 = float4(q.xy + (float2(-0.51281750202178955078125f, -0.614526808261871337890625f) * k), float(i), zRef);
+    s += csmMap.SampleCmp(_csmMap_sampler, sPart12.xyz, sPart12.w);
+    float4 sPart11 = float4(q.xy + (float2(0.8123595714569091796875f, 0.109301798045635223388671875f) * k), float(i), zRef);
+    s += csmMap.SampleCmp(_csmMap_sampler, sPart11.xyz, sPart11.w);
+    float4 sPart10 = float4(q.xy + (float2(-0.6883106231689453125f, 0.478908598423004150390625f) * k), float(i), zRef);
+    s += csmMap.SampleCmp(_csmMap_sampler, sPart10.xyz, sPart10.w);
+    float4 sPart9 = float4(q.xy + (float2(0.18808610737323760986328125f, -0.836061418056488037109375f) * k), float(i), zRef);
+    s += csmMap.SampleCmp(_csmMap_sampler, sPart9.xyz, sPart9.w);
+    float4 sPart8 = float4(q.xy + (float2(0.4350332915782928466796875f, 0.759191095829010009765625f) * k), float(i), zRef);
+    s += csmMap.SampleCmp(_csmMap_sampler, sPart8.xyz, sPart8.w);
+    float4 sPart7 = float4(q.xy + (float2(-0.850448429584503173828125f, -0.2713162004947662353515625f) * k), float(i), zRef);
+    s += csmMap.SampleCmp(_csmMap_sampler, sPart7.xyz, sPart7.w);
+    float4 sPart6 = float4(q.xy + (float2(0.82610237598419189453125f, -0.381680309772491455078125f) * k), float(i), zRef);
+    s += csmMap.SampleCmp(_csmMap_sampler, sPart6.xyz, sPart6.w);
+    float4 sPart5 = float4(q.xy + (float2(-0.3578881919384002685546875f, 0.85515558719635009765625f) * k), float(i), zRef);
+    s += csmMap.SampleCmp(_csmMap_sampler, sPart5.xyz, sPart5.w);
+    float4 sPart4 = float4(q.xy + (float2(-0.3194073140621185302734375f, -0.888033807277679443359375f) * k), float(i), zRef);
+    s += csmMap.SampleCmp(_csmMap_sampler, sPart4.xyz, sPart4.w);
+    float4 sPart3 = float4(q.xy + (float2(0.8499085903167724609375f, 0.4466882050037384033203125f) * k), float(i), zRef);
+    s += csmMap.SampleCmp(_csmMap_sampler, sPart3.xyz, sPart3.w);
+    float4 sPart2 = float4(q.xy + (float2(-0.944034576416015625f, 0.24884450435638427734375f) * k), float(i), zRef);
+    s += csmMap.SampleCmp(_csmMap_sampler, sPart2.xyz, sPart2.w);
+    float4 sPart = float4(q.xy + (float2(0.536595821380615234375f, -0.834529817104339599609375f) * k), float(i), zRef);
+    s += csmMap.SampleCmp(_csmMap_sampler, sPart.xyz, sPart.w);
     return s * 0.03125f;
 }
 
 float airSunVis(float3 posView)
 {
-    bool tmp9752 = (!volSunAir) || (ussOn == 0);
-    bool tmp9759;
-    if (!tmp9752)
+    bool cond123 = (!volSunAir) || (ussOn == 0);
+    bool cond122;
+    if (!cond123)
     {
-        tmp9759 = ussCsmFilter.x < 0.5f;
+        cond122 = ussCsmFilter.x < 0.5f;
     }
     else
     {
-        tmp9759 = tmp9752;
+        cond122 = cond123;
     }
-    bool tmp9766;
-    if (!tmp9759)
+    bool cond121;
+    if (!cond122)
     {
-        tmp9766 = ussCsmFilter.w > 0.5f;
-    }
-    else
-    {
-        tmp9766 = tmp9759;
-    }
-    bool tmp9773;
-    if (!tmp9766)
-    {
-        tmp9773 = csmForce >= 0.0f;
+        cond121 = ussCsmFilter.w > 0.5f;
     }
     else
     {
-        tmp9773 = tmp9766;
+        cond121 = cond122;
     }
-    bool tmp9780;
-    if (!tmp9773)
+    bool cond120;
+    if (!cond121)
     {
-        tmp9780 = csmRed != 0;
-    }
-    else
-    {
-        tmp9780 = tmp9773;
-    }
-    bool tmp9787 = (tmp9780 || (ussView != 0)) || (ussRed != 0);
-    bool tmp9794;
-    if (!tmp9787)
-    {
-        tmp9794 = ussCsmStable.w > 0.0f;
+        cond120 = csmForce >= 0.0f;
     }
     else
     {
-        tmp9794 = tmp9787;
+        cond120 = cond121;
     }
-    if (tmp9794)
+    bool condPick6;
+    if (!cond120)
     {
-        float3 param = posView;
-        float tmp9799 = wwSunShadow(param);
-        return tmp9799;
+        condPick6 = csmRed != 0;
+    }
+    else
+    {
+        condPick6 = cond120;
+    }
+    bool cond119 = (condPick6 || (ussView != 0)) || (ussRed != 0);
+    bool cond118;
+    if (!cond119)
+    {
+        cond118 = ussCsmStable.w > 0.0f;
+    }
+    else
+    {
+        cond118 = cond119;
+    }
+    if (cond118)
+    {
+        float3 posViewArg43 = posView;
+        float wwSunShadowRet = wwSunShadow(posViewArg43);
+        return wwSunShadowRet;
     }
     float c = 1.0f;
-    bool tmp9803 = ussCsmOn != 0;
-    bool tmp9818;
-    if (tmp9803)
+    bool cond117 = ussCsmOn != 0;
+    bool cond116;
+    if (cond117)
     {
-        tmp9818 = ((-posView.z) * csmParams.x) <= (csmParams.y + csmParams.w);
+        cond116 = ((-posView.z) * csmParams.x) <= (csmParams.y + csmParams.w);
     }
     else
     {
-        tmp9818 = tmp9803;
+        cond116 = cond117;
     }
-    if (tmp9818)
+    if (cond116)
     {
-        float3 param_1 = posView;
-        int param_2;
-        int param_3;
-        float param_4;
-        csmSelect(param_1, param_2, param_3, param_4);
-        int a = param_2;
-        int b = param_3;
-        float t = param_4;
-        float tmp9836;
+        float3 posViewArg42 = posView;
+        int aArg10;
+        int bArg7;
+        float tArg4;
+        csmSelect(posViewArg42, aArg10, bArg7, tArg4);
+        int a = aArg10;
+        int b = bArg7;
+        float t = tArg4;
+        float sAPick2;
         if (t < 1.0f)
         {
-            int param_5 = a;
-            float3 param_6 = posView;
-            tmp9836 = airCsmVogel(param_5, param_6);
+            int iArg27 = a;
+            float3 posViewArg41 = posView;
+            sAPick2 = airCsmVogel(iArg27, posViewArg41);
         }
         else
         {
-            tmp9836 = 1.0f;
+            sAPick2 = 1.0f;
         }
-        float sA = tmp9836;
-        float tmp9849;
+        float sA = sAPick2;
+        float sBPick2;
         if (t > 0.0f)
         {
-            int param_7 = b;
-            float3 param_8 = posView;
-            tmp9849 = airCsmVogel(param_7, param_8);
+            int iArg26 = b;
+            float3 posViewArg40 = posView;
+            sBPick2 = airCsmVogel(iArg26, posViewArg40);
         }
         else
         {
-            tmp9849 = 1.0f;
+            sBPick2 = 1.0f;
         }
-        float sB = tmp9849;
+        float sB = sBPick2;
         float f = clamp(((dot(posView, posView) * csmParams.x) * csmParams.x) / (csmParams.y * csmParams.y), 0.0f, 1.0f);
         f *= f;
         c = lerp(1.0f, lerp(sA, sB, t), 1.0f - (f * f));
     }
-    float3 param_9 = posView;
-    float param_11 = 0.0f;
-    bool param_12 = true;
-    float param_10;
-    float tmp9895 = ussTerrain(param_9, param_10, param_11, param_12);
-    float inMap = param_10;
-    float3 param_13 = posView;
-    return min(c, tmp9895) * ussCloudT(param_13);
+    float3 posViewArg39 = posView;
+    float gradArg3 = 0.0f;
+    bool penArg5 = true;
+    float inMapArg3;
+    float ussTerrainRet3 = ussTerrain(posViewArg39, inMapArg3, gradArg3, penArg5);
+    float inMap = inMapArg3;
+    float3 posViewArg38 = posView;
+    return min(c, ussTerrainRet3) * ussCloudT(posViewArg38);
 }
 
 float airIndoorK(float3 P)
@@ -5056,54 +5102,54 @@ float airIndoorK(float3 P)
         int3 c = r0 + o;
         float3 t = lerp(1.0f.xxx - fr, fr, float3(o));
         float w = (t.x * t.y) * t.z;
-        bool tmp8177 = any(bool3(c.x < int3(0, 0, 0).x, c.y < int3(0, 0, 0).y, c.z < int3(0, 0, 0).z));
-        bool tmp8186;
-        if (!tmp8177)
+        bool cond127 = any(bool3(c.x < int3(0, 0, 0).x, c.y < int3(0, 0, 0).y, c.z < int3(0, 0, 0).z));
+        bool cond126;
+        if (!cond127)
         {
-            int3 tmp8183 = int3(cellRoomsDims);
-            tmp8186 = any(bool3(c.x >= tmp8183.x, c.y >= tmp8183.y, c.z >= tmp8183.z));
+            int3 condPart2 = int3(cellRoomsDims);
+            cond126 = any(bool3(c.x >= condPart2.x, c.y >= condPart2.y, c.z >= condPart2.z));
         }
         else
         {
-            tmp8186 = tmp8177;
+            cond126 = cond127;
         }
-        if (tmp8186)
+        if (cond126)
         {
             wAir += w;
             continue;
         }
-        float param = cellRooms.Load(int4(c, 0)).x;
-        int2 L = cellRoomUnpack(param);
+        float vArg6 = cellRooms.Load(int4(c, 0)).x;
+        int2 L = cellRoomUnpack(vArg6);
         if (L.x == (-1))
         {
             continue;
         }
         wAir += w;
-        bool tmp8212 = L.x != 0;
-        bool tmp8218;
-        if (tmp8212)
+        bool cond125 = L.x != 0;
+        bool cond124;
+        if (cond125)
         {
-            tmp8218 = L.y != 0;
+            cond124 = L.y != 0;
         }
         else
         {
-            tmp8218 = tmp8212;
+            cond124 = cond125;
         }
-        if (tmp8218)
+        if (cond124)
         {
             wIn += w;
         }
     }
-    float tmp8228;
+    float airIndoorKRet;
     if (wAir > 0.0f)
     {
-        tmp8228 = wIn / wAir;
+        airIndoorKRet = wIn / wAir;
     }
     else
     {
-        tmp8228 = 0.0f;
+        airIndoorKRet = 0.0f;
     }
-    return tmp8228;
+    return airIndoorKRet;
 }
 
 float cellGiEdgeFade(float2 g)
@@ -5118,17 +5164,17 @@ float cellGiEdgeFade(float2 g)
 
 float airSkyToward(float3 P, float3 D)
 {
-    bool tmp8245;
+    bool cond128;
     if (!true)
     {
-        tmp8245 = !(cellGiSky && cellDdgiOn);
+        cond128 = !(cellGiSky && cellDdgiOn);
     }
     else
     {
-        tmp8245 = true;
+        cond128 = true;
     }
     bool wwh21 = (cellSpecSkyBase < 1.0f);
-    if (tmp8245 || wwh21)
+    if (or(cond128, wwh21))   // HLSLFIX2 orfix.py: no short-circuit branch (NV took the wrong side)
     {
         return 0.0f;
     }
@@ -5143,17 +5189,17 @@ float airSkyToward(float3 P, float3 D)
         float4 s = cellGi.Sample(_cellGi_sampler, float3(t.xy / cellGiDims.xy, (((cellSpecSkyBase + sl[k]) * cellGiDims.z) + z) / depth));
         a += (s.xw * w[k]);
     }
-    float tmp8337;
+    float airSkyTowardRet;
     if (a.y < 0.00999999977648258209228515625f)
     {
-        tmp8337 = 0.0f;
+        airSkyTowardRet = 0.0f;
     }
     else
     {
-        float2 param = t.xy;
-        tmp8337 = cellGiEdgeFade(param) * clamp(a.x / a.y, 0.0f, 1.0f);
+        float2 gArg7 = t.xy;
+        airSkyTowardRet = cellGiEdgeFade(gArg7) * clamp(a.x / a.y, 0.0f, 1.0f);
     }
-    return tmp8337;
+    return airSkyTowardRet;
 }
 
 // 0 the sun as before .. 1 the sun only where its shadow map says lit (P world, to the way to the sun)
@@ -5163,20 +5209,20 @@ float airSunGate(float3 P, float3 to)
     {
         return 0.0f;
     }
-    float3 param = P;
-    float k = airIndoorK(param);
-    float tmp8369;
+    float3 PArg25 = P;
+    float k = airIndoorK(PArg25);
+    float airSunGateRet;
     if (k > 0.0f)
     {
-        float3 param_1 = P;
-        float3 param_2 = to;
-        tmp8369 = k * (1.0f - airSkyToward(param_1, param_2));
+        float3 PArg24 = P;
+        float3 DArg2 = to;
+        airSunGateRet = k * (1.0f - airSkyToward(PArg24, DArg2));
     }
     else
     {
-        tmp8369 = 0.0f;
+        airSunGateRet = 0.0f;
     }
-    return tmp8369;
+    return airSunGateRet;
 }
 
 float airSunMapVis(float3 posView)
@@ -5194,23 +5240,23 @@ float airSunMapVis(float3 posView)
     {
         if (ussOn != 0)
         {
-            float3 param = posView;
-            float3 param_1 = 0.0f.xxx;
-            float3 param_2 = 0.0f.xxx;
-            float param_3;
-            float tmp8410 = ussCascades(param, param_1, param_2, param_3);
-            float w = param_3;
-            float casc = tmp8410;
+            float3 posViewArg47 = posView;
+            float3 dPxArg7 = 0.0f.xxx;
+            float3 dPyArg7 = 0.0f.xxx;
+            float wArg3;
+            float ussCascadesRet3 = ussCascades(posViewArg47, dPxArg7, dPyArg7, wArg3);
+            float w = wArg3;
+            float casc = ussCascadesRet3;
             c = w * casc;
             if ((volFarMode & 6) != 6)
             {
-                float3 param_4 = posView;
-                float param_6 = 0.0f;
-                bool param_7 = false;
-                float param_5;
-                float tmp8427 = ussTerrain(param_4, param_5, param_6, param_7);
-                float inMap = param_5;
-                c = min(c, tmp8427);
+                float3 posViewArg46 = posView;
+                float gradArg4 = 0.0f;
+                bool penArg6 = false;
+                float inMapArg4;
+                float ussTerrainRet4 = ussTerrain(posViewArg46, inMapArg4, gradArg4, penArg6);
+                float inMap = inMapArg4;
+                c = min(c, ussTerrainRet4);
             }
         }
         else
@@ -5222,110 +5268,110 @@ float airSunMapVis(float3 posView)
                 {
                     float s = clamp(((dot(posView, posView) * csmParams.x) * csmParams.x) / (csmParams.y * csmParams.y), 0.0f, 1.0f);
                     float s2 = s * s;
-                    float3 param_8 = posView;
-                    c = csmBlended(param_8) * (1.0f - (s2 * s2));
+                    float3 posViewArg45 = posView;
+                    c = csmBlended(posViewArg45) * (1.0f - (s2 * s2));
                 }
             }
         }
     }
-    float3 param_9 = posView;
-    return c * airCloudShadow(param_9);
+    float3 posViewArg44 = posView;
+    return c * airCloudShadow(posViewArg44);
 }
 
 float airLeakSunGate(float3 posView, float vis)
 {
     bool wwh22 = ((volLeakRed & 2) != 0);
     bool wwh23 = (airLeakSun >= 1.0f);
-    if (wwh22 || wwh23)
+    if (or(wwh22, wwh23))   // HLSLFIX2 orfix.py: no short-circuit branch (NV took the wrong side)
     {
         return vis;
     }
-    float3 param = posView;
-    return lerp(min(vis, airLeakSun), vis, airCsmCover(param));
+    float3 posViewArg48 = posView;
+    return lerp(min(vis, airLeakSun), vis, airCsmCover(posViewArg48));
 }
 
 float wwAirEnd(float4 med, float4 ground)
 {
-    float tmp839;
+    float wwAirEndRet;
     if (ground.z > 0.0f)
     {
-        tmp839 = med.w + (16.0f / ground.z);
+        wwAirEndRet = med.w + (16.0f / ground.z);
     }
     else
     {
-        tmp839 = med.w;
+        wwAirEndRet = med.w;
     }
-    return tmp839;
+    return wwAirEndRet;
 }
 
 // the transmittance from height z toward a direction whose height grows mu per unit, to the top
 float airTup(float z, inout float mu)
 {
-    float4 param = airMed;
-    float4 param_1 = airGround;
-    if (z >= wwAirEnd(param, param_1))
+    float4 medArg5 = airMed;
+    float4 groundArg5 = airGround;
+    if (z >= wwAirEnd(medArg5, groundArg5))
     {
         return 1.0f;
     }
     mu = max(mu, 0.0199999995529651641845703125f);
-    float4 param_2 = airMed;
-    float4 param_3 = airGround;
-    float param_4 = z;
-    float param_5 = wwAirEnd(param_2, param_3);
-    return exp(((-airMed.x) * airCol(param_4, param_5)) / mu);
+    float4 medArg4 = airMed;
+    float4 groundArg4 = airGround;
+    float loArg7 = z;
+    float hiArg7 = wwAirEnd(medArg4, groundArg4);
+    return exp(((-airMed.x) * airCol(loArg7, hiArg7)) / mu);
 }
 
 float airTupSun(float z, float mu)
 {
     if (!airSunLayer)
     {
-        float param = z;
-        float param_1 = mu;
-        float tmp5265 = airTup(param, param_1);
-        return tmp5265;
+        float zArg11 = z;
+        float muArg = mu;
+        float airTupRet = airTup(zArg11, muArg);
+        return airTupRet;
     }
-    bool tmp5270 = z >= airMed.w;
-    bool tmp5277;
-    if (!tmp5270)
+    bool cond130 = z >= airMed.w;
+    bool cond129;
+    if (!cond130)
     {
-        tmp5277 = airLayer.w <= 0.0f;
+        cond129 = airLayer.w <= 0.0f;
     }
     else
     {
-        tmp5277 = tmp5270;
+        cond129 = cond130;
     }
-    if (tmp5277)
+    if (cond129)
     {
         return 1.0f;
     }
-    float param_2 = z;
-    float param_3 = airMed.w;
-    float param_4 = airGround.x + airGz;
-    float param_5 = airGround.y;
-    return exp((((-airMed.x) * airLayer.w) * wwAirColOne(param_2, param_3, param_4, param_5)) / max(mu, 0.0199999995529651641845703125f));
+    float loArg8 = z;
+    float hiArg8 = airMed.w;
+    float z0Arg5 = airGround.x + airGz;
+    float invHArg5 = airGround.y;
+    return exp((((-airMed.x) * airLayer.w) * wwAirColOne(loArg8, hiArg8, z0Arg5, invHArg5)) / max(mu, 0.0199999995529651641845703125f));
 }
 
 // lane WEATHERBLEND4: the factor on the sun column's optical depth from posView (height z, the sun's rise mu): the drift's
 // mean at 1/6, 1/2, 5/6 of the column, at most the noise's tile (4096 units) (lookdev_fog.glsl wwAirDriftSunK; WEATHERBLEND5)
 float airDriftSunK(float3 posView, float z, float mu)
 {
-    float3 param = posView;
-    float3 P = cellWorldPos(param);
+    float3 posViewArg49 = posView;
+    float3 P = cellWorldPos(posViewArg49);
     float3 s = normalize(cellDirTo) * min(max(airMed.w - z, 0.0f) / max(mu, 0.0199999995529651641845703125f), 4096.0f);
     float t = length(posView) * fogDistScale;
     if ((volAirDriftRed & 1) != 0)
     {
-        float3 param_1 = P + (s * 0.5f);
-        float param_2 = t;
-        return airDriftW(param_1, param_2);
+        float3 PArg29 = P + (s * 0.5f);
+        float tArg8 = t;
+        return airDriftW(PArg29, tArg8);
     }
-    float3 param_3 = P + (s / 6.0f.xxx);
-    float param_4 = t;
-    float3 param_5 = P + (s * 0.5f);
-    float param_6 = t;
-    float3 param_7 = P + (s * 0.833333313465118408203125f);
-    float param_8 = t;
-    return ((airDriftW(param_3, param_4) + airDriftW(param_5, param_6)) + airDriftW(param_7, param_8)) * 0.3333333432674407958984375f;
+    float3 PArg28 = P + (s / 6.0f.xxx);
+    float tArg7 = t;
+    float3 PArg27 = P + (s * 0.5f);
+    float tArg6 = t;
+    float3 PArg26 = P + (s * 0.833333313465118408203125f);
+    float tArg5 = t;
+    return ((airDriftW(PArg28, tArg7) + airDriftW(PArg27, tArg6)) + airDriftW(PArg26, tArg5)) * 0.3333333432674407958984375f;
 }
 
 float airMsEsc(float tau)
@@ -5339,38 +5385,38 @@ float airMsA(float z)
     {
         return volMs.x;
     }
-    float4 param = airMed;
-    float4 param_1 = airGround;
-    float tmp8534;
-    if (z < wwAirEnd(param, param_1))
+    float4 medArg7 = airMed;
+    float4 groundArg7 = airGround;
+    float tauPick;
+    if (z < wwAirEnd(medArg7, groundArg7))
     {
-        float4 param_2 = airMed;
-        float4 param_3 = airGround;
-        float param_4 = z;
-        float param_5 = wwAirEnd(param_2, param_3);
-        tmp8534 = airMed.x * airCol(param_4, param_5);
+        float4 medArg6 = airMed;
+        float4 groundArg6 = airGround;
+        float loArg10 = z;
+        float hiArg10 = wwAirEnd(medArg6, groundArg6);
+        tauPick = airMed.x * airCol(loArg10, hiArg10);
     }
     else
     {
-        tmp8534 = 0.0f;
+        tauPick = 0.0f;
     }
-    float param_6 = tmp8534;
-    float eu = airMsEsc(param_6);
-    float param_7 = min(airGz, z);
-    float param_8 = z;
-    float param_9 = airMed.x * airCol(param_7, param_8);
-    float ed = airMsEsc(param_9);
+    float tauArg2 = tauPick;
+    float eu = airMsEsc(tauArg2);
+    float loArg9 = min(airGz, z);
+    float hiArg9 = z;
+    float tauArg = airMed.x * airCol(loArg9, hiArg9);
+    float ed = airMsEsc(tauArg);
     return min(volMs.x, ((0.5f * (1.0f - eu)) + (0.5f * (1.0f - ed))) + ((0.5f * ed) * 0.20000000298023223876953125f));
 }
 
 float3 airMsSum(float vis, float T, float c, float hard, float a0)
 {
-    float param = c;
-    float3 r = volPhasePi(param) * (vis * T);
+    float cArg19 = c;
+    float3 r = volPhasePi(cArg19) * (vis * T);
     float a = 1.0f;
     float b = 1.0f;
     float g = 1.0f;
-    float tmp8616;
+    float vPick3;
     for (int i = 1; i < 3; i++)
     {
         a *= a0;
@@ -5378,18 +5424,18 @@ float3 airMsSum(float vis, float T, float c, float hard, float a0)
         g *= volMs.z;
         if (volMs.w > 0.5f)
         {
-            tmp8616 = lerp(lerp(1.0f, vis, b), vis, hard);
+            vPick3 = lerp(lerp(1.0f, vis, b), vis, hard);
         }
         else
         {
-            tmp8616 = vis;
+            vPick3 = vis;
         }
-        float v = tmp8616;
-        float param_1 = c;
-        float param_2 = volPhase[1].w * g;
-        float param_3 = c;
-        float param_4 = volPhase[2].w * g;
-        float3 ph = ((((volPhase[0].xyz * 0.0596831031143665313720703125f) * (1.0f + (c * c))) + (volPhase[1].xyz * volHg(param_1, param_2))) + (volPhase[2].xyz * volHg(param_3, param_4))) * 3.1415927410125732421875f;
+        float v = vPick3;
+        float cArg18 = c;
+        float gArg9 = volPhase[1].w * g;
+        float cArg17 = c;
+        float gArg8 = volPhase[2].w * g;
+        float3 ph = ((((volPhase[0].xyz * 0.0596831031143665313720703125f) * (1.0f + (c * c))) + (volPhase[1].xyz * volHg(cArg18, gArg9))) + (volPhase[2].xyz * volHg(cArg17, gArg8))) * 3.1415927410125732421875f;
         r += (ph * ((a * v) * pow(T, b)));
     }
     return r;
@@ -5403,43 +5449,43 @@ float3 airMsDiffuse(float3 rSum, float vis, float T, float c, float hard, float 
         return rSum;
     }
     float g1 = 1.0f - clamp(volGi.w, 0.0f, 0.949999988079071044921875f);
-    float4 param = airMed;
-    float4 param_1 = airGround;
-    float tmp8705;
-    if (z < wwAirEnd(param, param_1))
+    float4 medArg9 = airMed;
+    float4 groundArg9 = airGround;
+    float tuPick;
+    if (z < wwAirEnd(medArg9, groundArg9))
     {
-        float4 param_2 = airMed;
-        float4 param_3 = airGround;
-        float param_4 = z;
-        float param_5 = wwAirEnd(param_2, param_3);
-        tmp8705 = airMed.x * airCol(param_4, param_5);
+        float4 medArg8 = airMed;
+        float4 groundArg8 = airGround;
+        float loArg12 = z;
+        float hiArg12 = wwAirEnd(medArg8, groundArg8);
+        tuPick = airMed.x * airCol(loArg12, hiArg12);
     }
     else
     {
-        tmp8705 = 0.0f;
+        tuPick = 0.0f;
     }
-    float tu = tmp8705;
-    float param_6 = min(airGz, z);
-    float param_7 = z;
-    float td = airMed.x * airCol(param_6, param_7);
+    float tu = tuPick;
+    float loArg11 = min(airGz, z);
+    float hiArg11 = z;
+    float td = airMed.x * airCol(loArg11, hiArg11);
     float m = max(mu, 0.0199999995529651641845703125f);
     float eb = exp((-tu) / m);
     float R = ((g1 * tu) + ((0.666666686534881591796875f - m) * (1.0f - eb))) / (1.33333337306976318359375f + (g1 * tu));
     float dn = m * max((1.0f - R) - eb, 0.0f);
     float Rb = ((g1 * td) + (0.16666667163372039794921875f * (1.0f - exp((-2.0f) * td)))) / (1.33333337306976318359375f + (g1 * td));
     float rho = Rb + ((1.0f - Rb) * 0.20000000298023223876953125f);
-    float tmp8792;
+    float vPick4;
     if (volMs.w > 0.5f)
     {
-        tmp8792 = lerp(1.0f, vis, hard);
+        vPick4 = lerp(1.0f, vis, hard);
     }
     else
     {
-        tmp8792 = vis;
+        vPick4 = vis;
     }
-    float v = tmp8792;
-    float param_8 = c;
-    float3 r1 = volPhasePi(param_8) * (vis * T);
+    float v = vPick4;
+    float cArg20 = c;
+    float3 r1 = volPhasePi(cArg20) * (vis * T);
     return r1 + max(rSum - r1, (((v * 0.5f) * (1.0f + rho)) * dn).xxx);
 }
 
@@ -5453,208 +5499,208 @@ float3 airSun(float3 posView, float3 dirView, float z)
     if (cellOn && cellHasDir)
     {
         float3 to = normalize(cellDirTo);
-        float tmp9924;
+        float visPick3;
         if ((volFarMode != 0) && (!cellInterior))
         {
-            float3 param = posView;
-            float tmp9929 = airFarVis(param);
-            tmp9924 = tmp9929;
+            float3 posViewArg59 = posView;
+            float airFarVisRet2 = airFarVis(posViewArg59);
+            visPick3 = airFarVisRet2;
         }
         else
         {
-            bool tmp9938;
+            bool cond132;
             if (!cellInterior)
             {
-                tmp9938 = (volRed & 8) != 0;
+                cond132 = (volRed & 8) != 0;
             }
             else
             {
-                tmp9938 = cellInterior;
+                cond132 = cellInterior;
             }
-            float tmp9939;
-            if (tmp9938)
+            float visPick5;
+            if (cond132)
             {
-                tmp9939 = 1.0f;
+                visPick5 = 1.0f;
             }
             else
             {
-                float tmp9944;
+                float visPick7;
                 if (volCsm)
                 {
-                    float3 param_1 = posView;
-                    float tmp9949 = airSunVis(param_1);
-                    tmp9944 = tmp9949;
+                    float3 posViewArg58 = posView;
+                    float airSunVisRet2 = airSunVis(posViewArg58);
+                    visPick7 = airSunVisRet2;
                 }
                 else
                 {
-                    float3 param_2 = posView;
-                    tmp9944 = airCloudShadow(param_2);
+                    float3 posViewArg57 = posView;
+                    visPick7 = airCloudShadow(posViewArg57);
                 }
-                tmp9939 = tmp9944;
+                visPick5 = visPick7;
             }
-            tmp9924 = tmp9939;
+            visPick3 = visPick5;
         }
-        float vis = tmp9924;
-        float3 param_3 = posView;
-        float3 param_4 = cellWorldPos(param_3);
-        float3 param_5 = to;
-        float hard = airSunGate(param_4, param_5);
+        float vis = visPick3;
+        float3 posViewArg56 = posView;
+        float3 PArg30 = cellWorldPos(posViewArg56);
+        float3 toArg = to;
+        float hard = airSunGate(PArg30, toArg);
         if (hard > 0.0f)
         {
-            float3 param_6 = posView;
-            vis = lerp(vis, min(vis, airSunMapVis(param_6)), hard);
+            float3 posViewArg55 = posView;
+            vis = lerp(vis, min(vis, airSunMapVis(posViewArg55)), hard);
         }
-        float tmp9978;
+        float visPick2;
         if (cellInterior)
         {
-            tmp9978 = min(vis, airLeakSun);
+            visPick2 = min(vis, airLeakSun);
         }
         else
         {
-            float3 param_7 = posView;
-            float param_8 = vis;
-            tmp9978 = airLeakSunGate(param_7, param_8);
+            float3 posViewArg54 = posView;
+            float visArg5 = vis;
+            visPick2 = airLeakSunGate(posViewArg54, visArg5);
         }
-        vis = tmp9978;
-        float param_9 = z;
-        float param_10 = to.z;
-        float Ts = airTupSun(param_9, param_10);
-        bool tmp10005;
+        vis = visPick2;
+        float zArg20 = z;
+        float muArg8 = to.z;
+        float Ts = airTupSun(zArg20, muArg8);
+        bool cond131;
         if (volDriftSun)
         {
-            tmp10005 = volDrift.x > 0.0f;
+            cond131 = volDrift.x > 0.0f;
         }
         else
         {
-            tmp10005 = volDriftSun;
+            cond131 = volDriftSun;
         }
-        if (tmp10005)
+        if (cond131)
         {
-            float3 param_11 = posView;
-            float param_12 = z;
-            float param_13 = to.z;
-            Ts = pow(Ts, airDriftSunK(param_11, param_12, param_13));
+            float3 posViewArg53 = posView;
+            float zArg19 = z;
+            float muArg7 = to.z;
+            Ts = pow(Ts, airDriftSunK(posViewArg53, zArg19, muArg7));
         }
         if (volMs.x > 0.0f)
         {
-            float3 param_14 = dirView;
-            float param_15 = z;
-            float param_16 = vis;
-            float param_17 = Ts;
-            float param_18 = dot(to, cellWorldDir(param_14));
-            float param_19 = hard;
-            float param_20 = airMsA(param_15);
-            float3 param_21 = dirView;
-            float3 param_22 = airMsSum(param_16, param_17, param_18, param_19, param_20);
-            float param_23 = vis;
-            float param_24 = Ts;
-            float param_25 = dot(to, cellWorldDir(param_21));
-            float param_26 = hard;
-            float param_27 = z;
-            float param_28 = to.z;
-            return cellDirColor * airMsDiffuse(param_22, param_23, param_24, param_25, param_26, param_27, param_28);
+            float3 dirViewArg6 = dirView;
+            float zArg18 = z;
+            float visArg4 = vis;
+            float TArg4 = Ts;
+            float cArg26 = dot(to, cellWorldDir(dirViewArg6));
+            float hardArg4 = hard;
+            float a0Arg2 = airMsA(zArg18);
+            float3 dirViewArg5 = dirView;
+            float3 rSumArg2 = airMsSum(visArg4, TArg4, cArg26, hardArg4, a0Arg2);
+            float visArg3 = vis;
+            float TArg3 = Ts;
+            float cArg25 = dot(to, cellWorldDir(dirViewArg5));
+            float hardArg3 = hard;
+            float zArg17 = z;
+            float muArg6 = to.z;
+            return cellDirColor * airMsDiffuse(rSumArg2, visArg3, TArg3, cArg25, hardArg3, zArg17, muArg6);
         }
-        float3 param_29 = dirView;
-        float param_30 = dot(to, cellWorldDir(param_29));
-        return ((cellDirColor * vis) * Ts) * volPhasePi(param_30);
+        float3 dirViewArg4 = dirView;
+        float cArg24 = dot(to, cellWorldDir(dirViewArg4));
+        return ((cellDirColor * vis) * Ts) * volPhasePi(cArg24);
     }
     if (fogSun.w > 0.0f)
     {
-        float tmp10085;
+        float visPick;
         if (volFarMode != 0)
         {
-            float3 param_31 = posView;
-            float tmp10090 = airFarVis(param_31);
-            tmp10085 = tmp10090;
+            float3 posViewArg52 = posView;
+            float airFarVisRet = airFarVis(posViewArg52);
+            visPick = airFarVisRet;
         }
         else
         {
-            float tmp10095;
+            float visPick4;
             if ((volRed & 8) != 0)
             {
-                tmp10095 = 1.0f;
+                visPick4 = 1.0f;
             }
             else
             {
-                float tmp10100;
+                float visPick6;
                 if (volCsm)
                 {
-                    float3 param_32 = posView;
-                    float tmp10105 = airSunVis(param_32);
-                    tmp10100 = tmp10105;
+                    float3 posViewArg51 = posView;
+                    float airSunVisRet = airSunVis(posViewArg51);
+                    visPick6 = airSunVisRet;
                 }
                 else
                 {
-                    float3 param_33 = posView;
-                    tmp10100 = airCloudShadow(param_33);
+                    float3 posViewArg50 = posView;
+                    visPick6 = airCloudShadow(posViewArg50);
                 }
-                tmp10095 = tmp10100;
+                visPick4 = visPick6;
             }
-            tmp10085 = tmp10095;
+            visPick = visPick4;
         }
-        float vis_1 = tmp10085;
+        float vis_1 = visPick;
         float mu = dot(fogView.xyz, fogSun.xyz) / length(fogView.xyz);
         if (volMs.x > 0.0f)
         {
-            float param_34 = z;
-            float param_35 = mu;
-            float param_36 = z;
-            float param_37 = vis_1;
-            float param_38 = airTupSun(param_34, param_35);
-            float param_39 = dot(dirView, fogSun.xyz);
-            float param_40 = 0.0f;
-            float param_41 = airMsA(param_36);
-            float param_42 = z;
-            float param_43 = mu;
-            float3 param_44 = airMsSum(param_37, param_38, param_39, param_40, param_41);
-            float param_45 = vis_1;
-            float param_46 = airTupSun(param_42, param_43);
-            float param_47 = dot(dirView, fogSun.xyz);
-            float param_48 = 0.0f;
-            float param_49 = z;
-            float param_50 = mu;
-            return (fogSunColour.xyz * fogSun.w) * airMsDiffuse(param_44, param_45, param_46, param_47, param_48, param_49, param_50);
+            float zArg16 = z;
+            float muArg5 = mu;
+            float zArg15 = z;
+            float visArg2 = vis_1;
+            float TArg2 = airTupSun(zArg16, muArg5);
+            float cArg23 = dot(dirView, fogSun.xyz);
+            float hardArg2 = 0.0f;
+            float a0Arg = airMsA(zArg15);
+            float zArg14 = z;
+            float muArg4 = mu;
+            float3 rSumArg = airMsSum(visArg2, TArg2, cArg23, hardArg2, a0Arg);
+            float visArg = vis_1;
+            float TArg = airTupSun(zArg14, muArg4);
+            float cArg22 = dot(dirView, fogSun.xyz);
+            float hardArg = 0.0f;
+            float zArg13 = z;
+            float muArg3 = mu;
+            return (fogSunColour.xyz * fogSun.w) * airMsDiffuse(rSumArg, visArg, TArg, cArg22, hardArg, zArg13, muArg3);
         }
-        float param_51 = z;
-        float param_52 = mu;
-        float param_53 = dot(dirView, fogSun.xyz);
-        return (((fogSunColour.xyz * fogSun.w) * vis_1) * airTupSun(param_51, param_52)) * volPhasePi(param_53);
+        float zArg12 = z;
+        float muArg2 = mu;
+        float cArg21 = dot(dirView, fogSun.xyz);
+        return (((fogSunColour.xyz * fogSun.w) * vis_1) * airTupSun(zArg12, muArg2)) * volPhasePi(cArg21);
     }
     return 0.0f.xxx;
 }
 
 float3 wwAirRecordColour(float d, float z, float3 dirView, inout bool ok)
 {
-    float param = d;
-    float param_1 = z;
-    float param_2;
-    float3 param_3;
-    float tmp1109 = wwFogEval(param, param_1, param_2, param_3);
-    float hb = param_2;
-    float3 fc = param_3;
-    float tmp1117;
+    float dArg13 = d;
+    float zArg21 = z;
+    float hbArg2;
+    float3 fogColArg2;
+    float wwFogEvalRet2 = wwFogEval(dArg13, zArg21, hbArg2, fogColArg2);
+    float hb = hbArg2;
+    float3 fc = fogColArg2;
+    float sunWPick;
     if (fogSun.w > 0.0f)
     {
-        tmp1117 = pow(max(dot(dirView, fogSun.xyz), 0.0f), fogSunColour.w) * fogSun.w;
+        sunWPick = pow(max(dot(dirView, fogSun.xyz), 0.0f), fogSunColour.w) * fogSun.w;
     }
     else
     {
-        tmp1117 = 0.0f;
+        sunWPick = 0.0f;
     }
-    float sunW = tmp1117;
+    float sunW = sunWPick;
     float3 c = max(lerp(fc, fogSunColour.xyz, sunW.xxx), 0.0f.xxx);
     float lc = dot(c, float3(0.2125999927520751953125f, 0.715200006961822509765625f, 0.072200000286102294921875f));
     ok = lc > 9.9999999392252902907785028219223e-09f;
-    float3 tmp1153;
+    float3 wwAirRecordColourRet;
     if (ok)
     {
-        tmp1153 = c / lc.xxx;
+        wwAirRecordColourRet = c / lc.xxx;
     }
     else
     {
-        tmp1153 = 1.0f.xxx;
+        wwAirRecordColourRet = 1.0f.xxx;
     }
-    return tmp1153;
+    return wwAirRecordColourRet;
 }
 
 float3 airEnvColour(float3 J, float t, float z, float3 dirView)
@@ -5663,64 +5709,64 @@ float3 airEnvColour(float3 J, float t, float z, float3 dirView)
     {
         return J;
     }
-    float param = t;
-    float param_1 = z;
-    float3 param_2 = dirView;
-    bool param_3;
-    float3 tmp6309 = wwAirRecordColour(param, param_1, param_2, param_3);
-    bool ok = param_3;
-    float3 c = tmp6309;
-    float3 tmp6312;
+    float dArg14 = t;
+    float zArg22 = z;
+    float3 dirViewArg7 = dirView;
+    bool okArg;
+    float3 wwAirRecordColourRet2 = wwAirRecordColour(dArg14, zArg22, dirViewArg7, okArg);
+    bool ok = okArg;
+    float3 c = wwAirRecordColourRet2;
+    float3 airEnvColourRet;
     if (ok)
     {
-        tmp6312 = c * dot(J, float3(0.2125999927520751953125f, 0.715200006961822509765625f, 0.072200000286102294921875f));
+        airEnvColourRet = c * dot(J, float3(0.2125999927520751953125f, 0.715200006961822509765625f, 0.072200000286102294921875f));
     }
     else
     {
-        tmp6312 = J;
+        airEnvColourRet = J;
     }
-    return tmp6312;
+    return airEnvColourRet;
 }
 
 float3 airEnvColourEnv(float3 J, float t, float z, float3 dirView)
 {
-    bool tmp6326 = !airEnvFogHue;
-    bool tmp6333;
-    if (!tmp6326)
+    bool cond134 = !airEnvFogHue;
+    bool cond133;
+    if (!cond134)
     {
-        tmp6333 = (volRed & 256) != 0;
+        cond133 = (volRed & 256) != 0;
     }
     else
     {
-        tmp6333 = tmp6326;
+        cond133 = cond134;
     }
-    if (tmp6333)
+    if (cond133)
     {
-        float3 param = J;
-        float param_1 = t;
-        float param_2 = z;
-        float3 param_3 = dirView;
-        return airEnvColour(param, param_1, param_2, param_3);
+        float3 JArg = J;
+        float tArg9 = t;
+        float zArg24 = z;
+        float3 dirViewArg8 = dirView;
+        return airEnvColour(JArg, tArg9, zArg24, dirViewArg8);
     }
-    float param_4 = t;
-    float param_5 = z;
-    float param_6;
-    float3 param_7;
-    float tmp6354 = wwFogEval(param_4, param_5, param_6, param_7);
-    float hb = param_6;
-    float3 fc = param_7;
+    float dArg15 = t;
+    float zArg23 = z;
+    float hbArg3;
+    float3 fogColArg3;
+    float wwFogEvalRet3 = wwFogEval(dArg15, zArg23, hbArg3, fogColArg3);
+    float hb = hbArg3;
+    float3 fc = fogColArg3;
     fc = max(fc, 0.0f.xxx);
     float lc = dot(fc, float3(0.2125999927520751953125f, 0.715200006961822509765625f, 0.072200000286102294921875f));
-    float3 tmp6364;
+    float3 airEnvColourEnvRet;
     if (lc > 9.9999999392252902907785028219223e-09f)
     {
-        tmp6364 = fc * (dot(J, float3(0.2125999927520751953125f, 0.715200006961822509765625f, 0.072200000286102294921875f)) / lc);
+        airEnvColourEnvRet = fc * (dot(J, float3(0.2125999927520751953125f, 0.715200006961822509765625f, 0.072200000286102294921875f)) / lc);
     }
     else
     {
-        tmp6364 = J;
+        airEnvColourEnvRet = J;
     }
-    return tmp6364;
+    return airEnvColourEnvRet;
 }
 
 float3 airExtra(float3 dirView, float t)
@@ -5730,6 +5776,7 @@ float3 airExtra(float3 dirView, float t)
     {
         e += (airDirC * pow(max(dot(dirView, airDirV), 0.0f), max(airDirExp, 1.0f)));
     }
+    // lane PRTOFF1: the AO decals are the PRT relight's
     return e;
 }
 
@@ -5775,8 +5822,8 @@ void frag_main()
     int2 col = int2(gl_FragCoord.xy);
     if (volStage == 4)
     {
-        int2 param = col;
-        airLampVolStage(param);
+        int2 colArg2 = col;
+        airLampVolStage(colArg2);
         return;
     }
     if (volStage == 2)
@@ -5908,43 +5955,43 @@ void frag_main()
         float tb = lerp(t0, t1, float(q + 1) * 0.25f);
         if (airTerrOn != 0)
         {
-            float3 param_1 = dirView * ((0.5f * (ta + tb)) / fogDistScale);
-            float3 param_2 = cellWorldPos(param_1);
-            airGroundAt(param_2);
+            float3 posViewArg67 = dirView * ((0.5f * (ta + tb)) / fogDistScale);
+            float3 PwArg4 = cellWorldPos(posViewArg67);
+            airGroundAt(PwArg4);
         }
-        float param_3 = zc + (dzdt * ta);
-        float param_4 = zc + (dzdt * tb);
-        float param_5 = tb - ta;
-        tauQ[q] = airOd(param_3, param_4, param_5);
+        float zaArg5 = zc + (dzdt * ta);
+        float zbArg5 = zc + (dzdt * tb);
+        float lenArg5 = tb - ta;
+        tauQ[q] = airOd(zaArg5, zbArg5, lenArg5);
         if (volDrift.x > 0.0f)
         {
-            float3 param_6 = dirView;
-            float param_7 = 0.5f * (ta + tb);
-            tauQ[q] *= airDrift(param_6, param_7);
+            float3 dirViewArg20 = dirView;
+            float tArg18 = 0.5f * (ta + tb);
+            tauQ[q] *= airDrift(dirViewArg20, tArg18);
         }
         if (rfOn != 0)
         {
-            float3 param_8 = dirView * ((0.5f * (ta + tb)) / fogDistScale);
-            tauQ[q] += (rfSigma(param_8) * (tb - ta));
+            float3 posViewArg66 = dirView * ((0.5f * (ta + tb)) / fogDistScale);
+            tauQ[q] += (rfSigma(posViewArg66) * (tb - ta));
         }
-        bool tmp14029;
+        bool scattersPick;
         if (!scatters)
         {
-            float param_9 = tauQ[q];
-            tmp14029 = air1mE(param_9) > 0.0f;
+            float tauArg5 = tauQ[q];
+            scattersPick = air1mE(tauArg5) > 0.0f;
         }
         else
         {
-            tmp14029 = scatters;
+            scattersPick = scatters;
         }
-        scatters = tmp14029;
+        scatters = scattersPick;
     }
     float keep = ((((fogK[0].x + fogK[1].x) + fogK[2].x) + fogK[3].x) + fogK[4].x) + fogK[5].x;
     if (airTerrOn != 0)
     {
-        float3 param_10 = dirView * (tm / fogDistScale);
-        float3 param_11 = cellWorldPos(param_10);
-        airGroundAt(param_11);
+        float3 posViewArg65 = dirView * (tm / fogDistScale);
+        float3 PwArg3 = cellWorldPos(posViewArg65);
+        airGroundAt(PwArg3);
     }
     if (volTemporal != 0)
     {
@@ -5955,22 +6002,22 @@ void frag_main()
         for (int q_1 = 0; q_1 < 4; q_1++)
         {
             Tq[q_1] = T_2;
-            float param_12 = tauQ[q_1];
-            wq[q_1] = air1mE(param_12);
+            float tauArg4 = tauQ[q_1];
+            wq[q_1] = air1mE(tauArg4);
             W += (T_2 * wq[q_1]);
             T_2 *= exp(-tauQ[q_1]);
         }
-        bool tmp14107 = !scatters;
-        bool tmp14114;
-        if (!tmp14107)
+        bool cond147 = !scatters;
+        bool cond146;
+        if (!cond147)
         {
-            tmp14114 = !(W > 0.0f);
+            cond146 = !(W > 0.0f);
         }
         else
         {
-            tmp14114 = tmp14107;
+            cond146 = cond147;
         }
-        if (tmp14114)
+        if (cond146)
         {
             volMrt[3] = float4(0.0f, 0.0f, 0.0f, 1.0f);
             volMrt[2] = float4(0.0f, 0.0f, 0.0f, 1.0f);
@@ -6003,49 +6050,49 @@ void frag_main()
                 float2 uv = ((float2(pp.x * volPrevGrid.x, pp.y * volPrevGrid.y) / max(-pp.z, 1.0000000031710768509710513471353e-30f).xx) * 0.5f) + 0.5f.xx;
                 float kc = (log(tm / volSlices.x) / volSlices.y) * volSlices.z;
                 float kp = ((log(max(length(pp) * volPrevScale, 9.9999999747524270787835121154785e-07f) / volPrevGrid.z) / volPrevGrid.w) * volSlices.z) + ((float(volLayer) + 0.5f) - kc);
-                bool tmp14257 = pp.z < 0.0f;
-                bool tmp14263;
-                if (tmp14257)
+                bool cond145 = pp.z < 0.0f;
+                bool cond144;
+                if (cond145)
                 {
-                    tmp14263 = all(bool2(uv.x >= 0.0f.xx.x, uv.y >= 0.0f.xx.y));
+                    cond144 = all(bool2(uv.x >= 0.0f.xx.x, uv.y >= 0.0f.xx.y));
                 }
                 else
                 {
-                    tmp14263 = tmp14257;
+                    cond144 = cond145;
                 }
-                bool tmp14269;
-                if (tmp14263)
+                bool condPick7;
+                if (cond144)
                 {
-                    tmp14269 = all(bool2(uv.x <= 1.0f.xx.x, uv.y <= 1.0f.xx.y));
+                    condPick7 = all(bool2(uv.x <= 1.0f.xx.x, uv.y <= 1.0f.xx.y));
                 }
                 else
                 {
-                    tmp14269 = tmp14263;
+                    condPick7 = cond144;
                 }
-                bool tmp14272 = tmp14269 && (kp >= 0.0f);
-                bool tmp14279;
-                if (tmp14272)
+                bool cond143 = condPick7 && (kp >= 0.0f);
+                bool havePick;
+                if (cond143)
                 {
-                    tmp14279 = kp <= volSlices.z;
+                    havePick = kp <= volSlices.z;
                 }
                 else
                 {
-                    tmp14279 = tmp14272;
+                    havePick = cond143;
                 }
-                have = tmp14279;
+                have = havePick;
                 kp = clamp(kp, 0.5f, volSlices.z - 0.5f);
-                float4 tmp14295;
+                float4 hPick;
                 for (int p_1 = 0; p_1 < 4; p_1++)
                 {
                     if (have)
                     {
-                        tmp14295 = volHist.Sample(_volHist_sampler, float3(uv, ((float(p_1) * volSlices.z) + kp) / (float(volHistStrata) * volSlices.z)));
+                        hPick = volHist.Sample(_volHist_sampler, float3(uv, ((float(p_1) * volSlices.z) + kp) / (float(volHistStrata) * volSlices.z)));
                     }
                     else
                     {
-                        tmp14295 = 0.0f.xxxx;
+                        hPick = 0.0f.xxxx;
                     }
-                    h[p_1] = tmp14295;
+                    h[p_1] = hPick;
                 }
                 if (have && (hn == 6))
                 {
@@ -6061,111 +6108,111 @@ void frag_main()
         {
             bool stale = (volRed & 134217728) != 0;
             bool ok = true;
-            bool tmp14404;
+            bool restPick;
             if (!stale)
             {
-                bool tmp14392 = volSunRate.x > 1;
-                bool tmp14403;
-                if (tmp14392)
+                bool cond142 = volSunRate.x > 1;
+                bool restPick2;
+                if (cond142)
                 {
-                    tmp14403 = ((volLayer + volSunRate.y) % volSunRate.x) != 0;
+                    restPick2 = ((volLayer + volSunRate.y) % volSunRate.x) != 0;
                 }
                 else
                 {
-                    tmp14403 = tmp14392;
+                    restPick2 = cond142;
                 }
-                tmp14404 = tmp14403;
+                restPick = restPick2;
             }
             else
             {
-                tmp14404 = stale;
+                restPick = stale;
             }
-            bool rest = tmp14404;
+            bool rest = restPick;
             for (int p_2 = 0; p_2 < 4; p_2++)
             {
-                bool tmp14432;
+                bool okPick;
                 if (ok)
                 {
-                    bool tmp14422 = (p_2 == volQ) && (!rest);
-                    bool tmp14431;
-                    if (!tmp14422)
+                    bool cond141 = (p_2 == volQ) && (!rest);
+                    bool okPick2;
+                    if (!cond141)
                     {
-                        tmp14431 = h[p_2].w > 0.99989998340606689453125f;
+                        okPick2 = h[p_2].w > 0.99989998340606689453125f;
                     }
                     else
                     {
-                        tmp14431 = tmp14422;
+                        okPick2 = cond141;
                     }
-                    tmp14432 = tmp14431;
+                    okPick = okPick2;
                 }
                 else
                 {
-                    tmp14432 = ok;
+                    okPick = ok;
                 }
-                ok = tmp14432;
+                ok = okPick;
             }
             if (ok)
             {
-                int tmp14439;
+                int needPick;
                 if (rest)
                 {
-                    tmp14439 = 0;
+                    needPick = 0;
                 }
                 else
                 {
-                    tmp14439 = 1 << volQ;
+                    needPick = 1 << volQ;
                 }
-                need = tmp14439;
+                need = needPick;
             }
         }
         float3 Jenv = 0.0f.xxx;
-        bool tmp14452;
+        bool envDuePick;
         if (volEnvRate.x > 0)
         {
-            tmp14452 = ((volLayer + volEnvRate.y) % volEnvRate.x) == 0;
+            envDuePick = ((volLayer + volEnvRate.y) % volEnvRate.x) == 0;
         }
         else
         {
-            tmp14452 = (((((col.x & 1) + (2 * (col.y & 1))) + volLayer) + volQ) & 3) == 0;
+            envDuePick = (((((col.x & 1) + (2 * (col.y & 1))) + volLayer) + volQ) & 3) == 0;
         }
-        bool envDue = tmp14452;
-        bool tmp14485 = ((volEnvSpread != 0) && have) && (!envDue);
-        bool tmp14491;
-        if (tmp14485)
+        bool envDue = envDuePick;
+        bool cond140 = ((volEnvSpread != 0) && have) && (!envDue);
+        bool airEnvModePick;
+        if (cond140)
         {
-            tmp14491 = h[5].z > 0.99989998340606689453125f;
+            airEnvModePick = h[5].z > 0.99989998340606689453125f;
         }
         else
         {
-            tmp14491 = tmp14485;
+            airEnvModePick = cond140;
         }
-        airEnvMode = int(tmp14491);
+        airEnvMode = int(airEnvModePick);
         airEnvH0 = h[4];
         airEnvH1 = h[5];
-        float3 param_13 = posM;
-        float3 param_14 = dirView;
-        float param_15 = zc + (dzdt * tm);
-        float param_16 = t0 - tm;
-        float param_17 = t1 - tm;
-        bool param_19 = false;
-        float3 param_18;
-        float3 tmp14517 = airRest(param_13, param_14, param_15, param_16, param_17, param_18, param_19);
-        Jenv = param_18;
-        float3 param_20 = Jenv;
-        float param_21 = tm;
-        float param_22 = zc + (dzdt * tm);
-        float vk = airVeilK(param_20, param_21, param_22);
+        float3 posViewArg64 = posM;
+        float3 dirViewArg19 = dirView;
+        float zArg35 = zc + (dzdt * tm);
+        float sAArg7 = t0 - tm;
+        float sBArg7 = t1 - tm;
+        bool lightsArg2 = false;
+        float3 JenvArg4;
+        float3 airRestRet2 = airRest(posViewArg64, dirViewArg19, zArg35, sAArg7, sBArg7, JenvArg4, lightsArg2);
+        Jenv = JenvArg4;
+        float3 JenvArg3 = Jenv;
+        float tArg17 = tm;
+        float zArg34 = zc + (dzdt * tm);
+        float vk = airVeilK(JenvArg3, tArg17, zArg34);
         float2 ndcJ = ndc + ((volJitXY * 2.0f) / float2(volDims.xy));
         float3 dirJ = normalize(float3(ndcJ.x / volProj.x, ndcJ.y / volProj.y, -1.0f));
-        float3 param_23 = dirJ * (tm / fogDistScale);
-        float3 param_24 = dirView;
-        float param_25 = zc + (dzdt * tm);
-        float param_26 = t0 - tm;
-        float param_27 = t1 - tm;
-        int param_28 = need;
-        float3 param_29[4];
-        airLightsQ(param_23, param_24, param_25, param_26, param_27, param_28, param_29);
-        float3 Jq[4] = param_29;
+        float3 posViewArg63 = dirJ * (tm / fogDistScale);
+        float3 dirViewArg18 = dirView;
+        float zArg33 = zc + (dzdt * tm);
+        float sAArg6 = t0 - tm;
+        float sBArg6 = t1 - tm;
+        int needArg = need;
+        float3 JqArg[4];
+        airLightsQ(posViewArg63, dirViewArg18, zArg33, sAArg6, sBArg6, needArg, JqArg);
+        float3 Jq[4] = JqArg;
         float3 acc = 0.0f.xxx;
         airSunDs = dirView * ((0.0625f * (t1 - t0)) / fogDistScale);
         float3 Cq;
@@ -6182,43 +6229,43 @@ void frag_main()
                 if (wq[q_2] > 0.0f)
                 {
                     float ts = t_1 + (volSunJit * (tb_1 - ta_1));
-                    float3 param_30 = dirJ * (ts / fogDistScale);
-                    float3 param_31 = dirView;
-                    float param_32 = zt;
-                    float3 tmp14677 = airSun(param_30, param_31, param_32);
-                    float3 param_33 = tmp14677;
-                    float param_34 = t_1;
-                    float param_35 = zt;
-                    float3 param_36 = dirView;
-                    Cq += ((airEnvColour(param_33, param_34, param_35, param_36) * ((Tq[q_2] * wq[q_2]) * vk)) * (1.0f.xxx + airAlbedoD));
+                    float3 posViewArg62 = dirJ * (ts / fogDistScale);
+                    float3 dirViewArg17 = dirView;
+                    float zArg32 = zt;
+                    float3 airSunRet2 = airSun(posViewArg62, dirViewArg17, zArg32);
+                    float3 JArg5 = airSunRet2;
+                    float tArg16 = t_1;
+                    float zArg31 = zt;
+                    float3 dirViewArg16 = dirView;
+                    Cq += ((airEnvColour(JArg5, tArg16, zArg31, dirViewArg16) * ((Tq[q_2] * wq[q_2]) * vk)) * (1.0f.xxx + airAlbedoD));
                 }
                 so[q_2] = float4(Cq / W.xxx, 1.0f);
-                bool tmp14705 = volSunBlend < 1.0f;
-                bool tmp14712;
-                if (tmp14705)
+                bool cond139 = volSunBlend < 1.0f;
+                bool cond138;
+                if (cond139)
                 {
-                    tmp14712 = need == (1 << q_2);
+                    cond138 = need == (1 << q_2);
                 }
                 else
                 {
-                    tmp14712 = tmp14705;
+                    cond138 = cond139;
                 }
-                bool tmp14719;
-                if (tmp14712)
+                bool cond137;
+                if (cond138)
                 {
-                    tmp14719 = h[q_2].w > 0.99989998340606689453125f;
+                    cond137 = h[q_2].w > 0.99989998340606689453125f;
                 }
                 else
                 {
-                    tmp14719 = tmp14712;
+                    cond137 = cond138;
                 }
-                if (tmp14719)
+                if (cond137)
                 {
-                    float4 tmp14729 = so[q_2];
-                    float3 tmp14733 = lerp(h[q_2].xyz, tmp14729.xyz, volSunBlend.xxx);
-                    so[q_2].x = tmp14733.x;
-                    so[q_2].y = tmp14733.y;
-                    so[q_2].z = tmp14733.z;
+                    float4 soPart2 = so[q_2];
+                    float3 soPart = lerp(h[q_2].xyz, soPart2.xyz, volSunBlend.xxx);
+                    so[q_2].x = soPart.x;
+                    so[q_2].y = soPart.y;
+                    so[q_2].z = soPart.z;
                     Cq = so[q_2].xyz * W;
                 }
             }
@@ -6229,27 +6276,27 @@ void frag_main()
             }
             if (wq[q_2] > 0.0f)
             {
-                float3 param_37 = Jenv;
-                float param_38 = t_1;
-                float param_39 = zt;
-                float3 param_40 = dirView;
-                acc += ((airEnvColourEnv(param_37, param_38, param_39, param_40) * ((Tq[q_2] * wq[q_2]) * vk)) * (1.0f.xxx + airAlbedoD));
+                float3 JArg4 = Jenv;
+                float tArg15 = t_1;
+                float zArg30 = zt;
+                float3 dirViewArg15 = dirView;
+                acc += ((airEnvColourEnv(JArg4, tArg15, zArg30, dirViewArg15) * ((Tq[q_2] * wq[q_2]) * vk)) * (1.0f.xxx + airAlbedoD));
             }
-            bool tmp14795 = airXOn != 0;
-            bool tmp14802;
-            if (tmp14795)
+            bool cond136 = airXOn != 0;
+            bool cond135;
+            if (cond136)
             {
-                tmp14802 = wq[q_2] > 0.0f;
+                cond135 = wq[q_2] > 0.0f;
             }
             else
             {
-                tmp14802 = tmp14795;
+                cond135 = cond136;
             }
-            if (tmp14802)
+            if (cond135)
             {
-                float3 param_41 = dirView;
-                float param_42 = t_1;
-                acc += (airExtra(param_41, param_42) * (Tq[q_2] * wq[q_2]));
+                float3 dirViewArg14 = dirView;
+                float tArg14 = t_1;
+                acc += (airExtra(dirViewArg14, tArg14) * (Tq[q_2] * wq[q_2]));
             }
             acc += Cq;
         }
@@ -6271,21 +6318,21 @@ void frag_main()
     float3 Jrest = 0.0f.xxx;
     if (scatters)
     {
-        float3 param_43 = dirView * (tm / fogDistScale);
-        float3 param_44 = dirView;
-        float param_45 = zc + (dzdt * tm);
-        float param_46 = t0 - tm;
-        float param_47 = t1 - tm;
-        bool param_49 = true;
-        float3 param_48;
-        float3 tmp14886 = airRest(param_43, param_44, param_45, param_46, param_47, param_48, param_49);
-        Jenv_1 = param_48;
-        Jrest = tmp14886;
+        float3 posViewArg61 = dirView * (tm / fogDistScale);
+        float3 dirViewArg13 = dirView;
+        float zArg29 = zc + (dzdt * tm);
+        float sAArg5 = t0 - tm;
+        float sBArg5 = t1 - tm;
+        bool lightsArg = true;
+        float3 JenvArg2;
+        float3 airRestRet = airRest(posViewArg61, dirViewArg13, zArg29, sAArg5, sBArg5, JenvArg2, lightsArg);
+        Jenv_1 = JenvArg2;
+        Jrest = airRestRet;
     }
-    float3 param_50 = Jenv_1;
-    float param_51 = tm;
-    float param_52 = zc + (dzdt * tm);
-    float vk_1 = airVeilK(param_50, param_51, param_52);
+    float3 JenvArg = Jenv_1;
+    float tArg13 = tm;
+    float zArg28 = zc + (dzdt * tm);
+    float vk_1 = airVeilK(JenvArg, tArg13, zArg28);
     float3 acc_1 = 0.0f.xxx;
     float T_3 = 1.0f;
     airSunDs = dirView * ((0.0625f * (t1 - t0)) / fogDistScale);
@@ -6294,30 +6341,30 @@ void frag_main()
         float ta_2 = lerp(t0, t1, float(q_3) * 0.25f);
         float tb_2 = lerp(t0, t1, float(q_3 + 1) * 0.25f);
         float tau = tauQ[q_3];
-        float param_53 = tau;
-        float w = air1mE(param_53);
+        float tauArg3 = tau;
+        float w = air1mE(tauArg3);
         if (w > 0.0f)
         {
             float t_2 = 0.5f * (ta_2 + tb_2);
             float zt_1 = zc + (dzdt * t_2);
-            float3 param_54 = Jenv_1;
-            float param_55 = t_2;
-            float param_56 = zt_1;
-            float3 param_57 = dirView;
-            float3 param_58 = dirView * (t_2 / fogDistScale);
-            float3 param_59 = dirView;
-            float param_60 = zt_1;
-            float3 tmp14980 = airSun(param_58, param_59, param_60);
-            float3 param_61 = tmp14980;
-            float param_62 = t_2;
-            float param_63 = zt_1;
-            float3 param_64 = dirView;
-            acc_1 += (((Jrest + ((airEnvColourEnv(param_54, param_55, param_56, param_57) + airEnvColour(param_61, param_62, param_63, param_64)) * vk_1)) * (T_3 * w)) * (1.0f.xxx + airAlbedoD));
+            float3 JArg3 = Jenv_1;
+            float tArg12 = t_2;
+            float zArg27 = zt_1;
+            float3 dirViewArg12 = dirView;
+            float3 posViewArg60 = dirView * (t_2 / fogDistScale);
+            float3 dirViewArg11 = dirView;
+            float zArg26 = zt_1;
+            float3 airSunRet = airSun(posViewArg60, dirViewArg11, zArg26);
+            float3 JArg2 = airSunRet;
+            float tArg11 = t_2;
+            float zArg25 = zt_1;
+            float3 dirViewArg10 = dirView;
+            acc_1 += (((Jrest + ((airEnvColourEnv(JArg3, tArg12, zArg27, dirViewArg12) + airEnvColour(JArg2, tArg11, zArg25, dirViewArg10)) * vk_1)) * (T_3 * w)) * (1.0f.xxx + airAlbedoD));
             if (airXOn != 0)
             {
-                float3 param_65 = dirView;
-                float param_66 = t_2;
-                acc_1 += (airExtra(param_65, param_66) * (T_3 * w));
+                float3 dirViewArg9 = dirView;
+                float tArg10 = t_2;
+                acc_1 += (airExtra(dirViewArg9, tArg10) * (T_3 * w));
             }
         }
         T_3 *= exp(-tau);

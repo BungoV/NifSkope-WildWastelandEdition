@@ -38,17 +38,17 @@ uint2 spvTextureSize(Texture2D<float4> Tex, uint Level, out uint Param)
 
 float finiteOr0(float v)
 {
-    bool tmp14 = isnan(v);
-    bool tmp20;
-    if (!tmp14)
+    bool cond = isnan(v);
+    bool finiteOr0Ret;
+    if (!cond)
     {
-        tmp20 = isinf(v);
+        finiteOr0Ret = isinf(v);
     }
     else
     {
-        tmp20 = tmp14;
+        finiteOr0Ret = cond;
     }
-    return tmp20 ? 0.0f : v;
+    return finiteOr0Ret ? 0.0f : v;
 }
 
 void frag_main()
@@ -56,25 +56,25 @@ void frag_main()
     int2 p = int2(gl_FragCoord.xy);
     int2 sz = int2(spvTextureSize(bloomSrc, uint(bloomLod), dummy_parameter));
     float3 a = 0.0f.xxx;
-    int2 tmp68;
+    int2 qPick;
     for (int k = -7; k <= 7; k++)
     {
         if (bloomVertical == 1)
         {
-            tmp68 = int2(p.x, clamp(p.y + k, 0, sz.y - 1));
+            qPick = int2(p.x, clamp(p.y + k, 0, sz.y - 1));
         }
         else
         {
-            tmp68 = int2(clamp(p.x + k, 0, sz.x - 1), p.y);
+            qPick = int2(clamp(p.x + k, 0, sz.x - 1), p.y);
         }
-        int2 q = tmp68;
+        int2 q = qPick;
         float3 v = bloomSrc.Load(int3(q, bloomLod)).xyz;
         if (bloomVertical == 1)
         {
-            float param = v.x;
-            float param_1 = v.y;
-            float param_2 = v.z;
-            v = max(0.0f.xxx, float3(finiteOr0(param), finiteOr0(param_1), finiteOr0(param_2)) - bloomPass.x.xxx) * bloomPass.y;
+            float vArg3 = v.x;
+            float vArg2 = v.y;
+            float vArg = v.z;
+            v = max(0.0f.xxx, float3(finiteOr0(vArg3), finiteOr0(vArg2), finiteOr0(vArg)) - bloomPass.x.xxx) * bloomPass.y;
         }
         a += (v * bloomW[k + 7]);
     }

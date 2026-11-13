@@ -72,31 +72,31 @@ void frag_main()
     float2 texel = 1.0f.xx / float2(max(int2(spvTextureSize(bloomSrc, uint(0), dummy_parameter)), int2(1, 1)));
     float prefilter = clamp(bloomParams.z, 0.0f, 1.0f);
     float karis = (bloomRed == 1) ? 0.0f : prefilter;
-    float3 param = bloomSrc.SampleLevel(_bloomSrc_sampler, uv + (texel * (-0.5f).xx), 0.0f).xyz;
+    float3 cArg6 = bloomSrc.SampleLevel(_bloomSrc_sampler, uv + (texel * (-0.5f).xx), 0.0f).xyz;
     float3 taps[4];
-    taps[0] = bloomSanitize(param);
-    float3 param_1 = bloomSrc.SampleLevel(_bloomSrc_sampler, uv + (texel * float2(0.5f, -0.5f)), 0.0f).xyz;
-    taps[1] = bloomSanitize(param_1);
-    float3 param_2 = bloomSrc.SampleLevel(_bloomSrc_sampler, uv + (texel * float2(-0.5f, 0.5f)), 0.0f).xyz;
-    taps[2] = bloomSanitize(param_2);
-    float3 param_3 = bloomSrc.SampleLevel(_bloomSrc_sampler, uv + (texel * 0.5f.xx), 0.0f).xyz;
-    taps[3] = bloomSanitize(param_3);
+    taps[0] = bloomSanitize(cArg6);
+    float3 cArg5 = bloomSrc.SampleLevel(_bloomSrc_sampler, uv + (texel * float2(0.5f, -0.5f)), 0.0f).xyz;
+    taps[1] = bloomSanitize(cArg5);
+    float3 cArg4 = bloomSrc.SampleLevel(_bloomSrc_sampler, uv + (texel * float2(-0.5f, 0.5f)), 0.0f).xyz;
+    taps[2] = bloomSanitize(cArg4);
+    float3 cArg3 = bloomSrc.SampleLevel(_bloomSrc_sampler, uv + (texel * 0.5f.xx), 0.0f).xyz;
+    taps[3] = bloomSanitize(cArg3);
     float3 color = 0.0f.xxx;
     float weightSum = 0.0f;
     for (int t = 0; t < 4; t++)
     {
-        float3 param_4 = taps[t];
-        float w = lerp(1.0f, 1.0f / (1.0f + bloomLuma(param_4)), karis);
+        float3 cArg2 = taps[t];
+        float w = lerp(1.0f, 1.0f / (1.0f + bloomLuma(cArg2)), karis);
         color += (taps[t] * w);
         weightSum += w;
     }
     color /= max(weightSum, 9.9999997473787516355514526367188e-05f).xxx;
-    float3 param_5 = color;
-    float param_6 = bloomLuma(param_5);
-    float param_7 = bloomParams.x;
-    float param_8 = bloomParams.y;
-    float tmp305 = bloomThresholdWeight(param_6, param_7, param_8);
-    float extract = lerp(1.0f, tmp305, prefilter);
+    float3 cArg = color;
+    float luminanceArg = bloomLuma(cArg);
+    float thresholdArg = bloomParams.x;
+    float softKneeArg = bloomParams.y;
+    float bloomThresholdWeightRet = bloomThresholdWeight(luminanceArg, thresholdArg, softKneeArg);
+    float extract = lerp(1.0f, bloomThresholdWeightRet, prefilter);
     fragColor = float4((color * extract) * max(bloomParams.w, 0.0f), 1.0f);
 }
 

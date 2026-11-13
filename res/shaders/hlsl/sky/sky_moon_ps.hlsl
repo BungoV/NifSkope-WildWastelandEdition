@@ -4,7 +4,7 @@
 // named in notes/vkcompute1/hlsl_plan.md. Not wired: nothing loads this file.
 // profile: ps_6_0
 #include "SkyBindingsVk.hlsli"
-static const float2 tmp1052[4] = { float2(0.125f, 0.375f), float2(0.375f, -0.125f), float2(-0.125f, -0.375f), float2(-0.375f, 0.125f) };
+static const float2 kRgss[4] = { float2(0.125f, 0.375f), float2(0.375f, -0.125f), float2(-0.125f, -0.375f), float2(-0.375f, 0.125f) };
 
 cbuffer globalUniforms : register(b0, space0)
 {
@@ -101,46 +101,51 @@ float3 moonShade(float3 rad, float qs, float pr)
 {
     float3 ds = (moonD * sqrt(1.0f - (qs * qs))) + (rad * qs);
     float h = sqrt(max(0.0f, (sinR * sinR) - (qs * qs)));
+    // the sphere normal
     float3 n = normalize((ds * (dot(ds, moonD) - h)) - moonD);
     float lon = atan2(dot(n, bodyY), dot(n, bodyX));
     float lat = asin(clamp(dot(n, bodyZ), -1.0f, 1.0f));
     float2 tuv = float2((lon / 6.283185482025146484375f) + 0.5f, 0.5f - (lat / 3.1415927410125732421875f));
     float3 east = cross(bodyZ, n);
     float le = length(east);
-    float3 tmp715;
+    float3 eastPick;
     if (le > 9.9999997473787516355514526367188e-05f)
     {
-        tmp715 = east / le.xxx;
+        eastPick = east / le.xxx;
     }
     else
     {
-        tmp715 = bodyX;
+        eastPick = bodyX;
     }
-    east = tmp715;
+    east = eastPick;
     float3 north = cross(n, east);
+    // the pixel's footprint on the unit sphere: radially the arc its q span covers (wide at the limb), across it one
+    // pixel (one mip for the whole disc aliased at the limb)
     float qr = qs / sinR;
     float arcR = max(asin(min(qr + pr, 1.0f)) - asin(max(qr - pr, -1.0f)), 2.0f * pr);
     float3 tr = rad - (n * dot(rad, n));
     float lr = length(tr);
-    float3 tmp762;
+    float3 trPick;
     if (lr > 9.9999999747524270787835121154785e-07f)
     {
-        tmp762 = tr / lr.xxx;
+        trPick = tr / lr.xxx;
     }
     else
     {
-        tmp762 = east;
+        trPick = east;
     }
-    tr = tmp762;
+    tr = trPick;
     float3 tt = cross(n, tr);
     float2 uvPer = float2(1.0f / (6.283185482025146484375f * max(le, 0.001000000047497451305389404296875f)), -0.3183098733425140380859375f);
     float2 gR = (float2(dot(tr, east), dot(tr, north)) * uvPer) * arcR;
     float2 gT = (float2(dot(tt, east), dot(tt, north)) * uvPer) * (2.0f * pr);
-    float3 param = atAlbedo.SampleGrad(_atAlbedo_sampler, tuv, gR, gT).xyz;
-    float3 alb = srgbToLinear(param) * albedoInv;
+    float3 cArg = atAlbedo.SampleGrad(_atAlbedo_sampler, tuv, gR, gT).xyz;
+    float3 alb = srgbToLinear(cArg) * albedoInv;
     float2 sl = (atRelief.SampleGrad(_atRelief_sampler, tuv, gR, gT).xy * 2.0f) - 1.0f.xx;
+    // the relief fades to the sphere as the view grazes: at the limb a slope flipped mu and mu0 per texel
     sl *= smoothstep(0.0f, 0.300000011920928955078125f, max(0.0f, dot(n, -ds)));
     float3 nm = normalize(((east * sl.x) + (north * sl.y)) + (n * sqrt(max(0.0f, 1.0f - dot(sl, sl)))));
+    // the sphere's terminator, not the slopes'
     float lit = clamp((dot(n, moonS) / 0.00999999977648258209228515625f) + 0.5f, 0.0f, 1.0f);
     float mu0 = max(0.0f, dot(nm, moonS)) * lit;
     float mu = max(0.001000000047497451305389404296875f, dot(nm, -ds));
@@ -180,11 +185,11 @@ float2 atSkyDirToUv(float r, float cosZ, float cosAz, float2 n)
         uv_1.y = (sqrt(clamp(c_1, 0.0f, 1.0f)) * 0.5f) + 0.5f;
     }
     uv_1.x = sqrt(clamp(((-cosAz) * 0.5f) + 0.5f, 0.0f, 1.0f));
-    float param = uv_1.x;
-    float param_1 = n.x;
-    float param_2 = uv_1.y;
-    float param_3 = n.y;
-    return float2(atUnitToSub(param, param_1), atUnitToSub(param_2, param_3));
+    float uArg2 = uv_1.x;
+    float nArg2 = n.x;
+    float uArg = uv_1.y;
+    float nArg = n.y;
+    return float2(atUnitToSub(uArg2, nArg2), atUnitToSub(uArg, nArg));
 }
 
 float3 atLookup(Texture2D<float4> lut, SamplerState _lut_sampler, float3 d, float3 l)
@@ -193,21 +198,21 @@ float3 atLookup(Texture2D<float4> lut, SamplerState _lut_sampler, float3 d, floa
     float2 b = l.xy;
     float la = length(a);
     float lb = length(b);
-    float tmp555;
+    float cosAzPick;
     if ((la > 9.9999997473787516355514526367188e-06f) && (lb > 9.9999997473787516355514526367188e-06f))
     {
-        tmp555 = dot(a / la.xx, b / lb.xx);
+        cosAzPick = dot(a / la.xx, b / lb.xx);
     }
     else
     {
-        tmp555 = 1.0f;
+        cosAzPick = 1.0f;
     }
-    float cosAz = tmp555;
-    float param = atCamR;
-    float param_1 = d.z;
-    float param_2 = cosAz;
-    float2 param_3 = atViewSize;
-    return lut.Sample(_lut_sampler, atSkyDirToUv(param, param_1, param_2, param_3)).xyz;
+    float cosAz = cosAzPick;
+    float rArg = atCamR;
+    float cosZArg = d.z;
+    float cosAzArg = cosAz;
+    float2 nArg3 = atViewSize;
+    return lut.Sample(_lut_sampler, atSkyDirToUv(rArg, cosZArg, cosAzArg, nArg3)).xyz;
 }
 
 float3 atWeatherTint(float3 c, float elevDeg)
@@ -216,16 +221,16 @@ float3 atWeatherTint(float3 c, float elevDeg)
     int i = min(int(t), 15);
     float3 w = lerp(atTint[i], atTint[i + 1], (t - float(i)).xxx);
     float lw = dot(w, float3(0.2125999927520751953125f, 0.715200006961822509765625f, 0.072200000286102294921875f));
-    float3 tmp630;
+    float3 atWeatherTintRet;
     if (lw > 9.9999999392252902907785028219223e-09f)
     {
-        tmp630 = w * (dot(c, float3(0.2125999927520751953125f, 0.715200006961822509765625f, 0.072200000286102294921875f)) / lw);
+        atWeatherTintRet = w * (dot(c, float3(0.2125999927520751953125f, 0.715200006961822509765625f, 0.072200000286102294921875f)) / lw);
     }
     else
     {
-        tmp630 = c;
+        atWeatherTintRet = c;
     }
-    return tmp630;
+    return atWeatherTintRet;
 }
 
 // AgX, Benjamin Wrensch's minimal fit (sRGB display out, the "base" look)
@@ -253,32 +258,34 @@ void frag_main()
     float3 vr = normalize(float3((ndc.x + projectionMatrix[2].x) / projectionMatrix[0].x, (ndc.y + projectionMatrix[2].y) / projectionMatrix[1].y, -1.0f));
     float3 d = normalize(mul(viewMatrix, vr));
     float b = dot(d, moonD);
+    // sine of the angle off the centre
     float q = length(cross(d, moonD));
     float cov = clamp(((sinR - q) / pxAng) + 0.5f, 0.0f, 1.0f) * clamp((d.z / pxAng) + 0.5f, 0.0f, 1.0f);
     cov *= alpha;
     bool wwh0 = (b <= 0.0f);
     bool wwh1 = (cov <= 0.0f);
-    if (wwh0 || wwh1)
+    if (or(wwh0, wwh1))   // HLSLFIX2 orfix.py: no short-circuit branch (NV took the wrong side)
     {
         discard;
     }
-    float3 tmp992;
+    float3 radPick;
     if (q > 1.0000000116860974230803549289703e-07f)
     {
-        tmp992 = (d - (moonD * b)) / q.xxx;
+        radPick = (d - (moonD * b)) / q.xxx;
     }
     else
     {
-        tmp992 = bodyX;
+        radPick = bodyX;
     }
-    float3 rad = tmp992;
+    // SKYDISC1B: a limb pixel averages 4 shading points of its covered part (one point past the edge chipped the rim)
+    float3 rad = radPick;
     float3 m = 0.0f.xxx;
     if (q < (sinR - pxAng))
     {
-        float3 param = rad;
-        float param_1 = q;
-        float param_2 = (0.5f * pxAng) / sinR;
-        m = moonShade(param, param_1, param_2);
+        float3 radArg3 = rad;
+        float qsArg3 = q;
+        float prArg3 = (0.5f * pxAng) / sinR;
+        m = moonShade(radArg3, qsArg3, prArg3);
     }
     else
     {
@@ -286,42 +293,42 @@ void frag_main()
         float k = 0.0f;
         for (int i = 0; i < 4; i++)
         {
-            float3 v = (rad * (q + (tmp1052[i].x * pxAng))) + (tng * (tmp1052[i].y * pxAng));
+            float3 v = (rad * (q + (kRgss[i].x * pxAng))) + (tng * (kRgss[i].y * pxAng));
             float qv = length(v);
             if (qv < sinR)
             {
-                float3 param_3 = v / qv.xxx;
-                float param_4 = qv;
-                float param_5 = (0.25f * pxAng) / sinR;
-                m += moonShade(param_3, param_4, param_5);
+                float3 radArg2 = v / qv.xxx;
+                float qsArg2 = qv;
+                float prArg2 = (0.25f * pxAng) / sinR;
+                m += moonShade(radArg2, qsArg2, prArg2);
                 k += 1.0f;
             }
         }
-        float3 tmp1101;
+        float3 mPick;
         if (k > 0.0f)
         {
-            tmp1101 = m / k.xxx;
+            mPick = m / k.xxx;
         }
         else
         {
-            float3 param_6 = rad;
-            float param_7 = 0.5f * ((q - (0.5f * pxAng)) + sinR);
-            float param_8 = (0.25f * pxAng) / sinR;
-            tmp1101 = moonShade(param_6, param_7, param_8);
+            float3 radArg = rad;
+            float qsArg = 0.5f * ((q - (0.5f * pxAng)) + sinR);
+            float prArg = (0.25f * pxAng) / sinR;
+            mPick = moonShade(radArg, qsArg, prArg);
         }
-        m = tmp1101;
+        m = mPick;
     }
-    float param_9 = atCamR;
-    float param_10 = d.z;
-    m *= lerp(atTrans(atTransTex, _atTransTex_sampler, param_9, param_10), 1.0f.xxx, atDomeAir.xxx);
-    float3 param_11 = d;
-    float3 param_12 = atSunW;
-    float3 sky = atLookup(atSunView, _atSunView_sampler, param_11, param_12) * atSunK;
+    float rArg2 = atCamR;
+    float muArg = d.z;
+    m *= lerp(atTrans(atTransTex, _atTransTex_sampler, rArg2, muArg), 1.0f.xxx, atDomeAir.xxx);
+    float3 dArg2 = d;
+    float3 lArg2 = atSunW;
+    float3 sky = atLookup(atSunView, _atSunView_sampler, dArg2, lArg2) * atSunK;
     if (atMoonK > 0.0f)
     {
-        float3 param_13 = d;
-        float3 param_14 = atMoonW;
-        sky += (atLookup(atMoonView, _atMoonView_sampler, param_13, param_14) * atMoonK);
+        float3 dArg = d;
+        float3 lArg = atMoonW;
+        sky += (atLookup(atMoonView, _atMoonView_sampler, dArg, lArg) * atMoonK);
     }
     if (atRecNight.y > 0.0f)
     {
@@ -331,13 +338,13 @@ void frag_main()
     }
     if (atTintOn > 0.5f)
     {
-        float3 param_15 = sky;
-        float param_16 = degrees(asin(clamp(d.z, -1.0f, 1.0f)));
-        sky = atWeatherTint(param_15, param_16);
+        float3 cArg3 = sky;
+        float elevDegArg = degrees(asin(clamp(d.z, -1.0f, 1.0f)));
+        sky = atWeatherTint(cArg3, elevDegArg);
     }
-    float3 param_17 = sky + m;
-    float3 tmp1229 = studioOutput(param_17);
-    fragColor = float4(tmp1229 * cov, cov);
+    float3 cArg2 = sky + m;
+    float3 studioOutputRet = studioOutput(cArg2);
+    fragColor = float4(studioOutputRet * cov, cov);
 }
 
 SPIRV_Cross_Output main(SPIRV_Cross_Input stage_input)

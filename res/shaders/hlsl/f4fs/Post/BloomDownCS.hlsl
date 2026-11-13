@@ -10,7 +10,7 @@ Texture2D<float4> SourceColor : register(t0);
 Texture2D<float4> EmissiveMaterialMask : register(t1);
 Texture2D<float4> EmissiveEffectMask : register(t2);
 // RT24 (kGbufferMaterial): the material code rides .w (5 = skin, 84 = PBR).
-// RT23 is DUAL-USE -- on code-84 pixels it holds the TruePBR F0 and on code-5
+// RT23 is DUAL-USE -- on code-84 pixels it holds the OpenPBR F0 and on code-5
 // it is skin-composited, never emission (Fire.rdc 2026-09-02: the power armor's
 // plates fill RT23 with grey F0). The gate below is the one base-combine and
 // the SSGI radiance strip already apply when they read RT23 as emissive.
@@ -33,13 +33,13 @@ RWTexture2D<float4> BloomTarget : register(u0);
 
 // FP16 maximum. The bloom pyramid is forced to FP16 (PostChain.cpp:1285-1294),
 // so this is the largest value a mip can carry.
-static const float F4FX_BLOOM_MAX_FINITE = 65504.0;
+static const float F4FS_BLOOM_MAX_FINITE = 65504.0;
 // The sky's depth: the far plane the engine clears its 24-bit depth to. One
 // 24-bit step below it, so that a cleared texel (exactly 1.0) is sky and the
 // farthest drawn texel is not. Host twin: kBloomSkyDepth (BloomEmissiveMask.h).
-static const float F4FX_BLOOM_SKY_DEPTH = 0.99999994;
+static const float F4FS_BLOOM_SKY_DEPTH = 0.99999994;
 
-float3 F4FX_SanitizeBloomSample(float3 color)
+float3 F4FS_SanitizeBloomSample(float3 color)
 {
 	// A single non-finite HDR texel can survive every downsample and then expand
 	// into a large black rectangle through bilinear upsampling. Reject each
@@ -64,14 +64,14 @@ float3 F4FX_SanitizeBloomSample(float3 color)
 	// brightest surfaces (sun glint, lamp cores), which is the opposite of what
 	// a sanitizer should do. `sign(x) * min(abs(x), M)` is the identity on every
 	// finite value, including signed zero, so nothing else moves.
-	float3 bounded = sign(color) * min(abs(color), F4FX_BLOOM_MAX_FINITE.xxx);
-	return clamp(bounded, 0.0.xxx, F4FX_BLOOM_MAX_FINITE.xxx);
+	float3 bounded = sign(color) * min(abs(color), F4FS_BLOOM_MAX_FINITE.xxx);
+	return clamp(bounded, 0.0.xxx, F4FS_BLOOM_MAX_FINITE.xxx);
 }
 
-float F4FX_BloomThresholdWeight(float luminance, float threshold, float softKnee)
+float F4FS_BloomThresholdWeight(float luminance, float threshold, float softKnee)
 {
 	luminance = max(luminance, 0.0);
-	if (luminance <= F4FX_LUM_EPSILON) {
+	if (luminance <= F4FS_LUM_EPSILON) {
 		return 0.0;
 	}
 
@@ -80,7 +80,7 @@ float F4FX_BloomThresholdWeight(float luminance, float threshold, float softKnee
 	float hardContribution = luminance - threshold;
 	float contribution = max(hardContribution, 0.0);
 
-	if (knee > F4FX_LUM_EPSILON) {
+	if (knee > F4FS_LUM_EPSILON) {
 		float softContribution = clamp(hardContribution + knee, 0.0, 2.0 * knee);
 		float curvedContribution = (softContribution * softContribution) / (4.0 * knee);
 		contribution = max(contribution, curvedContribution);
@@ -89,35 +89,49 @@ float F4FX_BloomThresholdWeight(float luminance, float threshold, float softKnee
 	return saturate(contribution / luminance);
 }
 
-// BLOOM FLICKER FIX F1 (2026-08-07, bloom-flicker-investigation.md M-B).
-// `karisAverage` = 1 weights each tap by 1/(1 + luma) before averaging (Karis /
-// "partial average", COD-Jimenez). One texel at 200 used to become 50 in mip 1,
-// sail past the threshold and be smeared across seven mips into a large soft
-// blob whose entire existence depended on that single texel; any subpixel
-// movement — the 8-frame Halton jitter, a slow pan, a swaying light — toggled
-// it. The reciprocal-luma weight caps how much of the average one bright texel
-// can own, which is the cheapest real firefly control available here.
-// `karisAverage` = 0 is the shipped plain 2x2 box, bit for bit, and that is what
-// every mip below the prefilter still gets: coarser levels are already averages
-// of averages, and Karis-weighting them would dim genuine large highlights.
-float3 F4FX_DownsampleTent(float2 uv, float2 texel, float karisAverage)
+// BLOOM DOWNSAMPLE (13-tap). Ported from Open Shaders (open-shaders@4470b8f,
+// features/Post Processing/Shaders/PostProcessing/common.hlsli: KarisAverage,
+// DownsampleCOD, DownsampleCODFirstMip; GPL-3.0), after the Call of Duty:
+// Advanced Warfare bloom (Jimenez, "Next Generation Post Processing"). Tap
+// spacing here is in SOURCE texels for every level: four taps at +-1 and a 3x3
+// grid at {-2, 0, +2}, so each output texel reads a 4x4-texel footprint and the
+// weights sum to 1 (host twin: BloomDownsample13Weights, Bloom.h).
+//
+// The prefilter level weights each overlapping 2x2 group of taps by 1/(1 + luma)
+// before averaging (Karis), which caps how much one hot texel can own of the
+// output (BLOOM FLICKER FIX F1, bloom-flicker-investigation.md M-B). Coarser
+// levels average plainly: they already hold averages of averages.
+float3 F4FS_BloomTap(float2 uv, float2 offset, float2 uvMax)
 {
-	float3 taps[4];
-	taps[0] = F4FX_SanitizeBloomSample(SourceColor.SampleLevel(LinearClamp, uv + texel * float2(-0.5, -0.5), 0).rgb);
-	taps[1] = F4FX_SanitizeBloomSample(SourceColor.SampleLevel(LinearClamp, uv + texel * float2(0.5, -0.5), 0).rgb);
-	taps[2] = F4FX_SanitizeBloomSample(SourceColor.SampleLevel(LinearClamp, uv + texel * float2(-0.5, 0.5), 0).rgb);
-	taps[3] = F4FX_SanitizeBloomSample(SourceColor.SampleLevel(LinearClamp, uv + texel * float2(0.5, 0.5), 0).rgb);
+	return F4FS_SanitizeBloomSample(SourceColor.SampleLevel(LinearClamp, min(uv + offset, uvMax), 0).rgb);
+}
 
-	float3 color = 0.0;
-	float weightSum = 0.0;
+float3 F4FS_BloomGroupAverage(float3 a, float3 b, float3 c, float3 d, float karisAverage)
+{
+	float4 weights = lerp(1.0.xxxx,
+		rcp(1.0 + float4(F4FS_Luminance(a), F4FS_Luminance(b), F4FS_Luminance(c), F4FS_Luminance(d))),
+		saturate(karisAverage));
+	return (a * weights.x + b * weights.y + c * weights.z + d * weights.w) / max(dot(weights, 1.0.xxxx), F4FS_LUM_EPSILON);
+}
+
+float3 F4FS_Downsample13(float2 uv, float2 texel, float karisAverage, float2 uvMax)
+{
+	float3 outer[9];
 	[unroll]
-	for (uint tap = 0u; tap < 4u; ++tap) {
-		float weight = lerp(1.0,
-			rcp(1.0 + F4FX_Luminance(taps[tap])), saturate(karisAverage));
-		color += taps[tap] * weight;
-		weightSum += weight;
+	for (uint i = 0u; i < 9u; ++i) {
+		outer[i] = F4FS_BloomTap(uv, texel * 2.0 * float2((float)(i % 3u) - 1.0, (float)(i / 3u) - 1.0), uvMax);
 	}
-	return color / max(weightSum, F4FX_LUM_EPSILON);
+	float3 center = F4FS_BloomGroupAverage(
+		F4FS_BloomTap(uv, texel * float2(-1.0, -1.0), uvMax),
+		F4FS_BloomTap(uv, texel * float2(1.0, -1.0), uvMax),
+		F4FS_BloomTap(uv, texel * float2(-1.0, 1.0), uvMax),
+		F4FS_BloomTap(uv, texel * float2(1.0, 1.0), uvMax),
+		karisAverage);
+	return 0.5 * center + 0.125 * (
+		F4FS_BloomGroupAverage(outer[0], outer[1], outer[3], outer[4], karisAverage) +
+		F4FS_BloomGroupAverage(outer[1], outer[2], outer[4], outer[5], karisAverage) +
+		F4FS_BloomGroupAverage(outer[3], outer[4], outer[6], outer[7], karisAverage) +
+		F4FS_BloomGroupAverage(outer[4], outer[5], outer[7], outer[8], karisAverage));
 }
 
 [numthreads(8, 8, 1)]
@@ -137,6 +151,28 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	uint2 sourceSize = max(uint2(sourceWidth, sourceHeight), uint2(1, 1));
 	float2 uv = ((float2)dispatchThreadId.xy + 0.5) / (float2)targetSize;
 	float2 sourceTexel = 1.0 / (float2)sourceSize;
+
+	// Params[0].z is the PREFILTER flag (Bloom.cpp:637, `a_level == 0`). It
+	// already gates the threshold; F1 gates the Karis average on the same flag,
+	// so the extraction level is the only one whose weighting changes.
+	float prefilter = saturate(Params[0].z);
+	// RENDER SUBRECT MAPPING. Params[3].xy is the render subrect as a fraction
+	// of the source allocation, uploaded on the prefilter only (Bloom.cpp).
+	// Under an upscaler the scene fills only that top-left subrect of the
+	// display-sized source. The pyramid keeps its display-sized plan and maps
+	// its texels over the subrect: mip 0 then spans the scene exactly as it
+	// spans a native frame, so the glow keeps its screen size at every render
+	// scale and no mip holds the stale border. The 13 taps step half a mip-0
+	// texel, mapped into source uv, which at native resolution is one source
+	// texel. A zero row (coarser levels) and (1, 1) are the native mapping, op
+	// for op.
+	bool subrectBound = prefilter > 0.0 && Params[3].x > 0.0 && Params[3].y > 0.0;
+	float2 subrect = subrectBound ? min(Params[3].xy, 1.0.xx) : 1.0.xx;
+	bool mapped = any(subrect < 1.0);
+	float2 tapTexel = mapped ? 0.5 * subrect / (float2)targetSize : sourceTexel;
+	if (mapped) {
+		uv *= subrect;
+	}
 
 	// SOURCE DE-JITTER (lane BLOOMSHIM, 2026-09-03). Params[2].xy is the UV
 	// offset that puts this texel back where the scene would be WITHOUT the
@@ -160,11 +196,15 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	// offset uv stays strictly positive and the Load below cannot underflow.
 	uv += Params[2].xy;
 
-	// Params[0].z is the PREFILTER flag (Bloom.cpp:637, `a_level == 0`). It
-	// already gates the threshold; F1 gates the Karis average on the same flag,
-	// so the extraction level is the only one whose weighting changes.
-	float prefilter = saturate(Params[0].z);
-	float3 color = F4FX_DownsampleTent(uv, sourceTexel, prefilter);
+	// RENDER SUBRECT CLAMP. Everything right of / below the subrect is stale
+	// full-size content (the last loading screen); clamping every tap to the
+	// subrect's last texel centre repeats the scene's edge there instead,
+	// exactly what LinearClamp does at a native screen edge. The lower bound
+	// keeps a de-jittered uv that the mapping made smaller than half a source
+	// texel (Ultra Performance) from turning the masks' Load index negative.
+	float2 uvMax = subrectBound ? Params[3].xy - 0.5 * sourceTexel : 1.0.xx;
+	uv = clamp(uv, 0.0.xx, uvMax);
+	float3 color = F4FS_Downsample13(uv, tapTexel, prefilter, uvMax);
 	// EMISSIVE BLOOM BOOST: input = frameColour * (1 + materialBoost * maskMaterial
 	// + effectBoost * maskEffect), BEFORE the threshold and knee, on the
 	// prefilter level only. A scalar on the frame's own colour, so tint and
@@ -184,14 +224,16 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		float matCode = EmissiveMaterialCode.Load(int3(codePixel, 0)).w * 255.0;
 		// The native Pip-Boy screen writes code 4 and already carries its CRT glow.
 		// Boosting that emission again washes out the UI's text and scan lines.
-		bool legacyEmissive = abs(matCode - 84.0) >= 0.25 && abs(matCode - 5.0) >= 0.25 &&
+		// 86 is F4FS_BGSM22_PBR_CODE: like 84, RT23 holds F0 there, never emission.
+		bool legacyEmissive = abs(matCode - 84.0) >= 0.25 && abs(matCode - 86.0) >= 0.25 &&
+			abs(matCode - 5.0) >= 0.25 &&
 			abs(matCode - 4.0) >= 0.25;
 		// THE SKY GATE (lane SKY2): a pixel the G-buffer did not write this
 		// frame has no material to boost, whatever RT23 still holds there.
 		// Same full-resolution pixel as the code, LOADed like the code. The
 		// host mirror is BloomPrefilterMaterialMaskAdmits (BloomEmissiveMask.h).
 		bool drawnThisFrame = Params[1].w > 0.0
-			? SceneDepth.Load(int3(codePixel, 0)) < F4FX_BLOOM_SKY_DEPTH
+			? SceneDepth.Load(int3(codePixel, 0)) < F4FS_BLOOM_SKY_DEPTH
 			: true;
 		float3 maskWeights = float3(0.2126, 0.7152, 0.0722);
 		float maskMaterial = (legacyEmissive && drawnThisFrame) ?
@@ -199,8 +241,8 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 		float maskEffect = max(dot(EmissiveEffectMask.SampleLevel(LinearClamp, uv, 0).rgb, maskWeights), 0.0);
 		color *= 1.0 + Params[1].x * maskMaterial + Params[1].y * maskEffect;
 	}
-	float luminance = F4FX_Luminance(color);
-	float thresholdWeight = F4FX_BloomThresholdWeight(luminance, Params[0].x, Params[0].y);
+	float luminance = F4FS_Luminance(color);
+	float thresholdWeight = F4FS_BloomThresholdWeight(luminance, Params[0].x, Params[0].y);
 	float extractWeight = lerp(1.0, thresholdWeight, prefilter);
 	float prefilterScale = max(Params[0].w, 0.0);
 

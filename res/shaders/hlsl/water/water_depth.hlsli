@@ -26,40 +26,40 @@ float wwWaterBedDepth(float3 P)
     float h = 0.0f;
     bool wet = false;
     float d[4];
-    float tmp1;
+    float dPick;
     for (int k = 0; k < 4; k++)
     {
         float2 tk = t0 + float2(float(k & 1), float(k >> 1));
-        float2 tmp2 = waterInfoGrid.xy + ((tk + 0.5f.xx) * waterInfoGrid.z);
-        uint w = wwWaterInfoWord(tmp2);
+        float2 wPart = waterInfoGrid.xy + ((tk + 0.5f.xx) * waterInfoGrid.z);
+        uint w = wwWaterInfoWord(wPart);
         uint id = w & 65535u;
         float code = float(w >> uint(24)) / 255.0f;
         if (id != 0u)
         {
-            tmp1 = (code * code) * 8192.0f;
+            dPick = (code * code) * 8192.0f;
         }
         else
         {
-            tmp1 = 0.0f;
+            dPick = 0.0f;
         }
-        d[k] = tmp1;
+        d[k] = dPick;
         if ((id != 0u) && (!wet))
         {
             wet = true;
             h = waterInfoBodies.Load(int3(int2(int(id % 256u), int(id / 256u)), 0)).x;
         }
     }
-    bool tmp3 = !wet;
-    bool tmp4;
-    if (!tmp3)
+    bool cond2 = !wet;
+    bool cond;
+    if (!cond2)
     {
-        tmp4 = abs(P.z - h) > 128.0f;
+        cond = abs(P.z - h) > 128.0f;
     }
     else
     {
-        tmp4 = tmp3;
+        cond = cond2;
     }
-    if (tmp4)
+    if (cond)
     {
         return -1.0f;
     }
@@ -75,58 +75,58 @@ float wwWaterBedDepth(float3 P)
 #if defined(WW_FN_wwWaterAbsorb) || defined(WW_FN_ALL)
 float3 wwWaterAbsorb(float units)
 {
-    float3 tmp1;
+    float3 dPick;
     if (waterDepthRed == 2)
     {
-        tmp1 = 1.0f.xxx;
+        dPick = 1.0f.xxx;
     }
     else
     {
-        tmp1 = exp(float3(-0.3400000035762786865234375f, -0.0564999990165233612060546875f, -0.0092200003564357757568359375f) * (units * 0.01428749971091747283935546875f));
+        dPick = exp(float3(-0.3400000035762786865234375f, -0.0564999990165233612060546875f, -0.0092200003564357757568359375f) * (units * 0.01428749971091747283935546875f));
     }
-    return tmp1;
+    return dPick;
 }
 #endif
 
 #if defined(WW_FN_wwWaterBedAt) || defined(WW_FN_ALL)
 WwWaterBed wwWaterBedAt(float3 P, float3 V, float sceneVert, float sceneAlong)
 {
-    float3 tmp1 = P;
-    float bd = wwWaterBedDepth(tmp1);
-    bool tmp2 = bd >= 0.0f;
-    bool tmp3;
-    if (tmp2)
+    float3 dPick = P;
+    float bd = wwWaterBedDepth(dPick);
+    bool wPart = bd >= 0.0f;
+    bool cond2;
+    if (wPart)
     {
-        bool tmp4 = sceneVert > 100000000.0f;
-        bool tmp5;
-        if (!tmp4)
+        bool cond = sceneVert > 100000000.0f;
+        bool condPick;
+        if (!cond)
         {
-            tmp5 = sceneVert > (bd + 256.0f);
+            condPick = sceneVert > (bd + 256.0f);
         }
         else
         {
-            tmp5 = tmp4;
+            condPick = cond;
         }
-        tmp3 = tmp5;
+        cond2 = condPick;
     }
     else
     {
-        tmp3 = tmp2;
+        cond2 = wPart;
     }
     WwWaterBed b;
-    b.baked = tmp3;
+    b.baked = cond2;
     b.known = b.baked || (sceneVert < 100000000.0f);
     b.vert = b.baked ? bd : sceneVert;
-    float tmp6;
+    float bPick;
     if (b.baked)
     {
-        tmp6 = bd / max(-V.z, 0.001000000047497451305389404296875f);
+        bPick = bd / max(-V.z, 0.001000000047497451305389404296875f);
     }
     else
     {
-        tmp6 = sceneAlong;
+        bPick = sceneAlong;
     }
-    b.along = tmp6;
+    b.along = bPick;
     b.bd = bd;
     return b;
 }
@@ -143,29 +143,29 @@ float wwWaterBedBakeW(float bd, float sceneVert, bool soft)
     {
         return 1.0f;
     }
-    float tmp1;
+    float dPick;
     if (soft)
     {
-        tmp1 = smoothstep(bd + 64.0f, bd + 768.0f, sceneVert);
+        dPick = smoothstep(bd + 64.0f, bd + 768.0f, sceneVert);
     }
     else
     {
-        tmp1 = float(sceneVert > (bd + 256.0f));
+        dPick = float(sceneVert > (bd + 256.0f));
     }
-    return tmp1;
+    return dPick;
 }
 #endif
 
 #if defined(WW_FN_wwWaterBedNearW) || defined(WW_FN_ALL)
 float wwWaterBedNearW(float bd, float sceneVert, float dist, bool on)
 {
-    float tmp1 = bd;
-    float tmp2 = sceneVert;
-    bool tmp3 = true;
-    float far = wwWaterBedBakeW(tmp1, tmp2, tmp3);
+    float dPick = bd;
+    float wPart = sceneVert;
+    bool cond2 = true;
+    float far = wwWaterBedBakeW(dPick, wPart, cond2);
     bool wwh0 = ((!on) || (bd < 0.0f));
     bool wwh1 = (sceneVert > 100000000.0f);
-    if (wwh0 || wwh1)
+    if (or(wwh0, wwh1))   // HLSLFIX2 orfix.py: no short-circuit branch (NV took the wrong side)
     {
         return far;
     }
@@ -180,8 +180,8 @@ float3 wwWaterDepthMix(float3 c, float3 fogC, float a, float along)
     float3 T = (1.0f - a).xxx;
     if (along < 100000000.0f)
     {
-        float tmp1 = along;
-        T *= wwWaterAbsorb(tmp1);
+        float dPick = along;
+        T *= wwWaterAbsorb(dPick);
     }
     return lerp(fogC, c, T);
 }
@@ -190,15 +190,15 @@ float3 wwWaterDepthMix(float3 c, float3 fogC, float a, float along)
 #if defined(WW_FN_wwWaterDepthFar) || defined(WW_FN_ALL)
 float3 wwWaterDepthFar(float3 far, float3 body, float F, bool known)
 {
-    float3 tmp1;
+    float3 dPick;
     if (known)
     {
-        tmp1 = lerp(body, far, F.xxx);
+        dPick = lerp(body, far, F.xxx);
     }
     else
     {
-        tmp1 = far;
+        dPick = far;
     }
-    return tmp1;
+    return dPick;
 }
 #endif

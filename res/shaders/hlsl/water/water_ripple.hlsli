@@ -18,11 +18,12 @@ float3 wwContactRipple(float d, float2 dir, float foot, float s0)
         float k = waterOceanRip[i];
         float lam = 6.283185482025146484375f / k;
         float a = (0.699999988079071044921875f * s0) * exp((-d) / (3.0f * lam));
+        // full under a quarter wavelength a pixel, none from half
         float keep = 1.0f - smoothstep(0.25f, 0.5f, foot / lam);
-        float3 tmp1 = o;
-        float2 tmp2 = tmp1.xy + (dir * ((keep * a) * cos((k * d) - waterOceanRip[2 + i])));
-        o.x = tmp2.x;
-        o.y = tmp2.y;
+        float3 oPart2 = o;
+        float2 oPart = oPart2.xy + (dir * ((keep * a) * cos((k * d) - waterOceanRip[2 + i])));
+        o.x = oPart.x;
+        o.y = oPart.y;
         o.z += ((((1.0f - (keep * keep)) * 0.5f) * a) * a);
     }
     return o;
@@ -37,64 +38,66 @@ float wwContactDist(float vert, float3 P, float3 S, float3 eye, out float2 dir, 
     float3 Vs = normalize(S - eye);
     float ang = max(length(ddx(Vs)), length(ddy(Vs)));
     foot = max(length(ddx(P.xy)), length(ddy(P.xy)));
+    // a smooth face moves |S - eye| * angle / cos( incidence ) a pixel; a jump far more
     trust = 1.0f - smoothstep(4.0f, 8.0f, max(length(sx), length(sy)) / max(length(S - eye) * ang, 9.9999999747524270787835121154785e-07f));
     float3 n = cross(sx, sy);
     float nl = length(n);
     n /= max(nl, 9.9999999600419720025001879548654e-13f).xxx;
     float e = dot(P - S, n);
     float h = length(n.xy);
+    // a face seen edge-on holds the ray itself, so the line it gives runs past P: an object's flank, not a contact
     trust *= smoothstep(0.1500000059604644775390625f, 0.300000011920928955078125f, abs(dot(n, Vs)));
     dir = (n.xy * sign(e)) / max(h, 9.9999999747524270787835121154785e-07f).xx;
-    float tmp1;
+    float oPart2;
     bool wwh0 = ((vert > 100000000.0f) || (nl < 9.9999999600419720025001879548654e-13f));
     bool wwh1 = (h < 0.001000000047497451305389404296875f);
-    if (wwh0 || wwh1)
+    if (or(wwh0, wwh1))   // HLSLFIX2 orfix.py: no short-circuit branch (NV took the wrong side)
     {
-        tmp1 = 1000000000.0f;
+        oPart2 = 1000000000.0f;
     }
     else
     {
-        tmp1 = abs(e) / h;
+        oPart2 = abs(e) / h;
     }
-    return tmp1;
+    return oPart2;
 }
 #endif
 
 #if defined(WW_FN_wwContactRippleAt) || defined(WW_FN_ALL)
 float3 wwContactRippleAt(float vert, float3 P, float3 S, float3 eye, float s0)
 {
-    float tmp1 = vert;
-    float3 tmp2 = P;
-    float3 tmp3 = S;
-    float3 tmp4 = eye;
-    float2 tmp5;
-    float tmp6;
-    float tmp7;
-    float tmp8 = wwContactDist(tmp1, tmp2, tmp3, tmp4, tmp5, tmp6, tmp7);
-    float2 dir = tmp5;
-    float foot = tmp6;
-    float trust = tmp7;
-    float d = tmp8;
+    float oPart2 = vert;
+    float3 oPart = P;
+    float3 wwContactDistPart2 = S;
+    float3 wwContactDistPart = eye;
+    float2 wwContactDistPick3;
+    float wwContactDistPick2;
+    float wwContactDistPick;
+    float wwContactDistRet = wwContactDist(oPart2, oPart, wwContactDistPart2, wwContactDistPart, wwContactDistPick3, wwContactDistPick2, wwContactDistPick);
+    float2 dir = wwContactDistPick3;
+    float foot = wwContactDistPick2;
+    float trust = wwContactDistPick;
+    float d = wwContactDistRet;
     float lamMax = 6.283185482025146484375f / min(waterOceanRip.x, waterOceanRip.y);
-    bool tmp9 = (s0 <= 0.0f) || (trust <= 0.0f);
-    bool tmp10;
-    if (!tmp9)
+    bool cond2 = (s0 <= 0.0f) || (trust <= 0.0f);
+    bool cond;
+    if (!cond2)
     {
-        tmp10 = d > (12.0f * lamMax);
+        cond = d > (12.0f * lamMax);
     }
     else
     {
-        tmp10 = tmp9;
+        cond = cond2;
     }
-    if (tmp10)
+    if (cond)
     {
         return 0.0f.xxx;
     }
-    float tmp11 = d;
-    float2 tmp12 = dir;
-    float tmp13 = foot;
-    float tmp14 = s0;
-    float3 o = wwContactRipple(tmp11, tmp12, tmp13, tmp14);
+    float oPart6 = d;
+    float2 oPart5 = dir;
+    float oPart4 = foot;
+    float oPart3 = s0;
+    float3 o = wwContactRipple(oPart6, oPart5, oPart4, oPart3);
     return float3(o.xy * trust, o.z);
 }
 #endif

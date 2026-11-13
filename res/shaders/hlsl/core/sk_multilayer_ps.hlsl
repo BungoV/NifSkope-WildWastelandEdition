@@ -101,12 +101,20 @@ struct SPIRV_Cross_Output
 // fLayerThickness: Distance from outer layer to inner layer
 float3 ParallaxOffsetAndDepth(float2 vTexCoord, float2 vInnerScale, float3 vViewTS, float3 vNormalTS, float fLayerThickness)
 {
+    // Tangent space reflection vector
     float3 vReflectionTS = reflect(-vViewTS, vNormalTS);
+    // Tangent space transmission vector (reflect about surface plane)
     float3 vTransTS = float3(vReflectionTS.xy, -vReflectionTS.z);
+    // Distance along transmission vector to intersect inner layer
     float fTransDist = fLayerThickness / abs(vTransTS.z);
+    // Texel size
+    // Bethesda's version does indeed seem to assume 1024, which is why they
+    // introduced the additional parameter.
     float2 vTexelSize = float2(1.0f / (1024.0f * vInnerScale.x), 1.0f / (1024.0f * vInnerScale.y));
+    // Inner layer's texture coordinate due to parallax
     float2 vOffset = (vTexelSize * fTransDist) * vTransTS.xy;
     float2 vOffsetTexCoord = vTexCoord + vOffset;
+    // Return offset texture coordinate in xy and transmission dist in z
     return float3(vOffsetTexCoord, fTransDist);
 }
 
@@ -131,16 +139,17 @@ void frag_main()
     if (alphaFlags > 0)
     {
         float a = (C.w * baseMap.w) * alpha;
-        int tmp205;
+        int mPick;
         if (a < alphaThreshold)
         {
-            tmp205 = 11051;
+            mPick = 11051;
         }
         else
         {
-            tmp205 = (a > alphaThreshold) ? 29041 : 19789;
+            mPick = (a > alphaThreshold) ? 29041 : 19789;
         }
-        int m = tmp205;
+        // 0: always, 1: <, 2: ==, 3: <=, 4: >, 5: !=, 6: >=, 7: never
+        int m = mPick;
         if ((m & (1 << alphaFlags)) == 0)
         {
             discard;
@@ -153,6 +162,8 @@ void frag_main()
     float4 normalMap = NormalMap.Sample(_NormalMap_sampler, offset);
     float3 normalTS = normalize((normalMap.xyz * 2.0f) - 1.0f.xxx);
     float3 normal = normalize(mul(normalTS, btnMatrix));
+    // Sample the non-parallax offset alpha channel of the inner map
+    // Used to modulate the innerThickness
     float innerMapAlpha = InnerMap.Sample(_InnerMap_sampler, offset).w;
     float3 L = normalize(LightDir);
     float3 E = normalize(ViewDir);
@@ -162,55 +173,64 @@ void frag_main()
     float NdotH = max(dot(normal, H), 0.0f);
     float EdotN = max(dot(normal, E), 0.0f);
     float NdotNegL = max(dot(normal, -L), 0.0f);
+    // Mix between the face normal and the normal map based on the refraction scale
     float3 mixedNormal = lerp(float3(0.0f, 0.0f, 1.0f), normalTS, clamp(outerRefraction, 0.0f, 1.0f).xxx);
-    float2 param = offset;
-    float2 param_1 = innerScale;
-    float3 param_2 = normalize(mul(btnMatrix, E));
-    float3 param_3 = mixedNormal;
-    float param_4 = innerThickness * innerMapAlpha;
-    float3 parallax = ParallaxOffsetAndDepth(param, param_1, param_2, param_3, param_4);
+    float2 vTexCoordArg = offset;
+    float2 vInnerScaleArg = innerScale;
+    float3 vViewTSArg = normalize(mul(btnMatrix, E));
+    float3 vNormalTSArg = mixedNormal;
+    float fLayerThicknessArg = innerThickness * innerMapAlpha;
+    float3 parallax = ParallaxOffsetAndDepth(vTexCoordArg, vInnerScaleArg, vViewTSArg, vNormalTSArg, fLayerThicknessArg);
+    // Sample the inner map at the offset coords
     float4 innerMap = InnerMap.Sample(_InnerMap_sampler, parallax.xy * innerScale);
     float3 reflected = reflect(-E, normal);
     float3 reflectedWS = mul(reflected, envMapRotation);
     float3 diffuse = A.xyz + (D.xyz * NdotL);
     float3 inner = innerMap.xyz * C.xyz;
     float3 outer = baseMap.xyz * C.xyz;
+    // Mix inner/outer layer based on fresnel
     float outerMix = max(1.0f - EdotN, baseMap.w);
     float3 albedo = lerp(inner, outer, outerMix.xxx);
+    // Environment
     if (hasCubeMap)
     {
         float4 cube = CubeMap.Sample(_CubeMap_sampler, reflectedWS);
-        float4 tmp401 = cube;
-        float3 tmp403 = tmp401.xyz * outerReflection;
-        cube.x = tmp403.x;
-        cube.y = tmp403.y;
-        cube.z = tmp403.z;
+        float4 cubePart6 = cube;
+        float3 cubePart5 = cubePart6.xyz * outerReflection;
+        cube.x = cubePart5.x;
+        cube.y = cubePart5.y;
+        cube.z = cubePart5.z;
         if (hasEnvMask)
         {
             float4 env = EnvironmentMap.Sample(_EnvironmentMap_sampler, offset);
-            float4 tmp421 = cube;
-            float3 tmp423 = tmp421.xyz * env.x;
-            cube.x = tmp423.x;
-            cube.y = tmp423.y;
-            cube.z = tmp423.z;
+            float4 cubePart4 = cube;
+            float3 cubePart3 = cubePart4.xyz * env.x;
+            cube.x = cubePart3.x;
+            cube.y = cubePart3.y;
+            cube.z = cubePart3.z;
         }
         else
         {
-            float4 tmp433 = cube;
-            float3 tmp435 = tmp433.xyz * normalMap.w;
-            cube.x = tmp435.x;
-            cube.y = tmp435.y;
-            cube.z = tmp435.z;
+            float4 cubePart2 = cube;
+            float3 cubePart = cubePart2.xyz * normalMap.w;
+            cube.x = cubePart.x;
+            cube.y = cubePart.y;
+            cube.z = cubePart.z;
         }
         albedo += cube.xyz;
     }
+    // Specular
     float3 spec = clamp(((specColor * specStrength) * normalMap.w) * pow(NdotH, useGloss ? specGlossiness : 1.0f), 0.0f.xxx, 1.0f.xxx);
     spec *= D.xyz;
+    // Emissive
+    // Mixed with outer map
     float3 emissive = 0.0f.xxx;
     if (hasEmit)
     {
         emissive += (glowColor * glowMult);
     }
+    // Backlight
+    // Mixed with inner and outer map
     float3 backlight = 0.0f.xxx;
     if (hasBacklight)
     {
@@ -218,8 +238,9 @@ void frag_main()
         backlight *= NdotNegL;
         emissive += (backlight * D.xyz);
     }
+    // TODO: Test rim and soft light mixing with inner/outer layer
     float4 mask = 0.0f.xxxx;
-    if (hasRimlight || hasSoftlight)
+    if (or(hasRimlight, hasSoftlight))   // HLSLFIX2 orfix.py: no short-circuit branch (NV took the wrong side)
     {
         mask = LightMask.Sample(_LightMask_sampler, offset);
     }
@@ -238,15 +259,15 @@ void frag_main()
         soft *= sqrt(clamp(lightingEffect1, 0.0f, 1.0f));
         emissive += (soft * D.xyz);
     }
-    float3 tmp588 = (albedo * (diffuse + (emissive * glowScaleSRGB))) + spec;
-    color.x = tmp588.x;
-    color.y = tmp588.y;
-    color.z = tmp588.z;
-    float3 param_5 = color.xyz;
-    float3 tmp598 = tonemap(param_5);
-    color.x = tmp598.x;
-    color.y = tmp598.y;
-    color.z = tmp598.z;
+    float3 colorPart = (albedo * (diffuse + (emissive * glowScaleSRGB))) + spec;
+    color.x = colorPart.x;
+    color.y = colorPart.y;
+    color.z = colorPart.z;
+    float3 xArg = color.xyz;
+    float3 tonemapRet = tonemap(xArg);
+    color.x = tonemapRet.x;
+    color.y = tonemapRet.y;
+    color.z = tonemapRet.z;
     fragColor = color;
 }
 

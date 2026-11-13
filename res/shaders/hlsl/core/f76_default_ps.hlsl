@@ -108,10 +108,13 @@ float srgbCompress(float x)
 float3 LightingFuncGGX_REF(float NdotL, float NdotH, float NdotV, float roughness)
 {
     float alpha_1 = roughness * roughness;
+    // D (GGX normal distribution)
     float alphaSqr = alpha_1 * alpha_1;
     float denom = NdotH * NdotH;
     denom = (denom * alphaSqr) + (1.0f - denom);
     float D = alphaSqr / ((denom * denom) * 4.0f);
+    // no pi because BRDF -> lighting
+    // G (roughness is not remapped)
     float k = alpha_1 * 0.5f;
     float G = NdotL / (lerp(NdotL, 1.0f, k) * lerp(NdotV, 1.0f, k));
     return (D * G).xxx;
@@ -140,16 +143,17 @@ void frag_main()
     if (alphaFlags > 0)
     {
         float a = (C.w * baseMap.w) * alpha;
-        int tmp253;
+        int mPick;
         if (a < alphaThreshold)
         {
-            tmp253 = 11051;
+            mPick = 11051;
         }
         else
         {
-            tmp253 = (a > alphaThreshold) ? 29041 : 19789;
+            mPick = (a > alphaThreshold) ? 29041 : 19789;
         }
-        int m = tmp253;
+        // 0: always, 1: <, 2: ==, 3: <=, 4: >, 5: !=, 6: >=, 7: never
+        int m = mPick;
         if ((m & (1 << alphaFlags)) == 0)
         {
             discard;
@@ -168,6 +172,7 @@ void frag_main()
     float4 reflMap = ReflMap.Sample(_ReflMap_sampler, offset);
     float4 glowMap = GlowMap.Sample(_GlowMap_sampler, offset);
     float3 normal = normalMap.xyz;
+    // Calculate missing blue channel
     normal.z = sqrt(max(1.0f - dot(normal.xy, normal.xy), 0.0f));
     normal = normalize(mul(normal, btnMatrix_norm));
     if (!gl_FrontFacing)
@@ -188,9 +193,10 @@ void frag_main()
     float3 albedo = baseMap.xyz * C.xyz;
     if (greyscaleColor)
     {
-        float param = baseMap.y;
-        albedo = GreyscaleMap.SampleLevel(_GreyscaleMap_sampler, float2(srgbCompress(param), paletteScale * C.x), 0.0f).xyz;
+        float xArg2 = baseMap.y;
+        albedo = GreyscaleMap.SampleLevel(_GreyscaleMap_sampler, float2(srgbCompress(xArg2), paletteScale * C.x), 0.0f).xyz;
     }
+    // Emissive
     float3 emissive = 0.0f.xxx;
     if (hasEmit)
     {
@@ -209,19 +215,23 @@ void frag_main()
     }
     emissive *= (lightingMap.w * glowScale);
     float3 f0 = max(reflMap.xyz, 0.0199999995529651641845703125f.xxx);
+    // Specular
     float roughness = 1.0f - lightingMap.x;
-    float param_1 = NdotL0;
-    float param_2 = NdotH;
-    float param_3 = NdotV;
-    float param_4 = max(roughness, 0.0199999995529651641845703125f);
-    float3 spec = LightingFuncGGX_REF(param_1, param_2, param_3, param_4) * lightSourceDiffuse[0].xyz;
+    float NdotLArg = NdotL0;
+    float NdotHArg = NdotH;
+    float NdotVArg = NdotV;
+    float roughnessArg = max(roughness, 0.0199999995529651641845703125f);
+    float3 spec = LightingFuncGGX_REF(NdotLArg, NdotHArg, NdotVArg, roughnessArg) * lightSourceDiffuse[0].xyz;
+    // Diffuse
     float3 diffuse = NdotL0.xxx;
+    // Fresnel
     float2 fDirect = EnvironmentMap.SampleLevel(_EnvironmentMap_sampler, float2(LdotH, NdotL0), 0.0f).zw;
     spec *= lerp(f0, 1.0f.xxx, fDirect.x.xxx);
     float4 envLUT = EnvironmentMap.SampleLevel(_EnvironmentMap_sampler, float2(NdotV, roughness), 0.0f);
     float2 fDiff = float2(fDirect.y, envLUT.z);
     fDiff = (fDiff * ((((LdotH * LdotH) * roughness) * 2.0f) - 0.5f)) + 1.0f.xx;
     diffuse *= (((1.0f.xxx - f0) * fDiff.x) * fDiff.y);
+    // Environment
     float3 refl = 0.0f.xxx;
     float3 ambient = lightSourceAmbient.xyz;
     if (hasCubeMap)
@@ -252,64 +262,66 @@ void frag_main()
     }
     float ao = lightingMap.y;
     float specOcc = max(((ao - 1.0f) * ((((NdotV * 1.125f) - 2.625f) * NdotV) + 2.5f)) + 1.0f, 0.0f);
+    // apply AO to all diffuse lighting, and specular occlusion to indirect specular only
     albedo *= ao;
     refl *= ((f * envLUT.y) * specOcc);
-    float3 tmp651 = (diffuse * albedo) * lightSourceDiffuse[0].xyz;
-    color.x = tmp651.x;
-    color.y = tmp651.y;
-    color.z = tmp651.z;
-    float4 tmp661 = color;
-    float3 tmp663 = tmp661.xyz + (ambient * albedo);
-    color.x = tmp663.x;
-    color.y = tmp663.y;
-    color.z = tmp663.z;
-    float4 tmp671 = color;
-    float3 tmp673 = tmp671.xyz + spec;
-    color.x = tmp673.x;
-    color.y = tmp673.y;
-    color.z = tmp673.z;
-    float4 tmp681 = color;
-    float3 tmp683 = tmp681.xyz + refl;
-    color.x = tmp683.x;
-    color.y = tmp683.y;
-    color.z = tmp683.z;
-    float4 tmp691 = color;
-    float3 tmp693 = tmp691.xyz + emissive;
-    color.x = tmp693.x;
-    color.y = tmp693.y;
-    color.z = tmp693.z;
+    float3 colorPart15 = (diffuse * albedo) * lightSourceDiffuse[0].xyz;
+    color.x = colorPart15.x;
+    color.y = colorPart15.y;
+    color.z = colorPart15.z;
+    float4 colorPart14 = color;
+    float3 colorPart13 = colorPart14.xyz + (ambient * albedo);
+    color.x = colorPart13.x;
+    color.y = colorPart13.y;
+    color.z = colorPart13.z;
+    float4 colorPart12 = color;
+    float3 colorPart11 = colorPart12.xyz + spec;
+    color.x = colorPart11.x;
+    color.y = colorPart11.y;
+    color.z = colorPart11.z;
+    float4 colorPart10 = color;
+    float3 colorPart9 = colorPart10.xyz + refl;
+    color.x = colorPart9.x;
+    color.y = colorPart9.y;
+    color.z = colorPart9.z;
+    float4 colorPart8 = color;
+    float3 colorPart7 = colorPart8.xyz + emissive;
+    color.x = colorPart7.x;
+    color.y = colorPart7.y;
+    color.z = colorPart7.z;
+    // Transmissive
     if (translucencyColorAndScale.w > 0.0f)
     {
         float3 transmissive = (albedo * translucencyColorAndScale.xyz) * (1.0f.xxx - f);
         transmissive *= (translucencyColorAndScale.w * lightingMap.z);
-        float4 tmp731 = color;
-        float3 tmp733 = tmp731.xyz + ((transmissive * lightSourceDiffuse[0].xyz) * max(-NdotL, 0.0f));
-        color.x = tmp733.x;
-        color.y = tmp733.y;
-        color.z = tmp733.z;
+        float4 colorPart6 = color;
+        float3 colorPart5 = colorPart6.xyz + ((transmissive * lightSourceDiffuse[0].xyz) * max(-NdotL, 0.0f));
+        color.x = colorPart5.x;
+        color.y = colorPart5.y;
+        color.z = colorPart5.z;
         if (hasCubeMap)
         {
-            float4 tmp754 = color;
-            float3 tmp756 = tmp754.xyz + ((CubeMap2.SampleLevel(_CubeMap2_sampler, -normalWS, 0.0f).xyz * transmissive) * lightSourceAmbient.xyz);
-            color.x = tmp756.x;
-            color.y = tmp756.y;
-            color.z = tmp756.z;
+            float4 colorPart4 = color;
+            float3 colorPart3 = colorPart4.xyz + ((CubeMap2.SampleLevel(_CubeMap2_sampler, -normalWS, 0.0f).xyz * transmissive) * lightSourceAmbient.xyz);
+            color.x = colorPart3.x;
+            color.y = colorPart3.y;
+            color.z = colorPart3.z;
         }
         else
         {
-            float4 tmp770 = color;
-            float3 tmp772 = tmp770.xyz + ((transmissive * lightSourceAmbient.xyz) * 0.066666670143604278564453125f);
-            color.x = tmp772.x;
-            color.y = tmp772.y;
-            color.z = tmp772.z;
+            float4 colorPart2 = color;
+            float3 colorPart = colorPart2.xyz + ((transmissive * lightSourceAmbient.xyz) * 0.066666670143604278564453125f);
+            color.x = colorPart.x;
+            color.y = colorPart.y;
+            color.z = colorPart.z;
         }
     }
-    float3 param_5 = color.xyz * brightnessScale;
-    float param_6 = toneMapScale;
-    float3 tmp790 = tonemap(param_5, param_6);
-    color.x = tmp790.x;
-    color.y = tmp790.y;
-    color.z = tmp790.z;
+    float3 xArg = color.xyz * brightnessScale;
+    float yArg = toneMapScale;
+    float3 tonemapRet = tonemap(xArg, yArg);
+    color.x = tonemapRet.x;
+    color.y = tonemapRet.y;
+    color.z = tonemapRet.z;
     fragColor = color;
 }
 

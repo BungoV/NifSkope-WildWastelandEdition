@@ -15,16 +15,16 @@ float airTerrH(float2 Pw)
     float hc = airTerr.Sample(_airTerr_sampler, float3((Pw.x * airTerrXf.x) + airTerrXf.y, (Pw.y * airTerrXf.z) + airTerrXf.w, 0.0f)).x;
     float2 uf = float2((Pw.x * airTerrFineXf.x) + airTerrFineXf.y, (Pw.y * airTerrFineXf.z) + airTerrFineXf.w);
     float wf = clamp(min(min(uf.x, 1.0f - uf.x), min(uf.y, 1.0f - uf.y)) * 16.0f, 0.0f, 1.0f);
-    float tmp1;
+    float airTerrHRet;
     if (wf > 0.0f)
     {
-        tmp1 = lerp(hc, airTerr.Sample(_airTerr_sampler, float3(uf, 1.0f)).x, wf);
+        airTerrHRet = lerp(hc, airTerr.Sample(_airTerr_sampler, float3(uf, 1.0f)).x, wf);
     }
     else
     {
-        tmp1 = hc;
+        airTerrHRet = hc;
     }
-    return tmp1;
+    return airTerrHRet;
 }
 #endif
 
@@ -34,33 +34,33 @@ float airTerrH(float2 Pw)
     float hc = airTerr.SampleLevel(_airTerr_sampler, float3((Pw.x * airTerrXf.x) + airTerrXf.y, (Pw.y * airTerrXf.z) + airTerrXf.w, 0.0f), 0.0f).x;
     float2 uf = float2((Pw.x * airTerrFineXf.x) + airTerrFineXf.y, (Pw.y * airTerrFineXf.z) + airTerrFineXf.w);
     float wf = clamp(min(min(uf.x, 1.0f - uf.x), min(uf.y, 1.0f - uf.y)) * 16.0f, 0.0f, 1.0f);
-    float tmp1;
+    float airTerrHRet;
     if (wf > 0.0f)
     {
-        tmp1 = lerp(hc, airTerr.SampleLevel(_airTerr_sampler, float3(uf, 1.0f), 0.0f).x, wf);
+        airTerrHRet = lerp(hc, airTerr.SampleLevel(_airTerr_sampler, float3(uf, 1.0f), 0.0f).x, wf);
     }
     else
     {
-        tmp1 = hc;
+        airTerrHRet = hc;
     }
-    return tmp1;
+    return airTerrHRet;
 }
 #endif
 
 #if defined(WW_FN_airGroundAt) || defined(WW_FN_ALL)
 void airGroundAt(float3 Pw)
 {
-    float tmp1;
+    float airTerrHRet;
     if (airTerrOn != 0)
     {
-        float2 tmp2 = Pw.xy;
-        tmp1 = airTerrH(tmp2) - airTerrRef;
+        float2 airTerrHPart = Pw.xy;
+        airTerrHRet = airTerrH(airTerrHPart) - airTerrRef;
     }
     else
     {
-        tmp1 = 0.0f;
+        airTerrHRet = 0.0f;
     }
-    airGz = tmp1;
+    airGz = airTerrHRet;
 }
 #endif
 
@@ -75,36 +75,36 @@ float volHg(float c, float g)
 #if defined(WW_FN_volPhasePi) || defined(WW_FN_ALL)
 float3 volPhasePi(float c)
 {
-    float tmp1 = c;
-    float tmp2 = volPhase[1].w;
-    float tmp3 = c;
-    float tmp4 = volPhase[2].w;
-    return ((((volPhase[0].xyz * 0.0596831031143665313720703125f) * (1.0f + (c * c))) + (volPhase[1].xyz * volHg(tmp1, tmp2))) + (volPhase[2].xyz * volHg(tmp3, tmp4))) * 3.1415927410125732421875f;
+    float airTerrHRet = c;
+    float airTerrHPart = volPhase[1].w;
+    float volPhasePiRet2 = c;
+    float volPhasePiRet = volPhase[2].w;
+    return ((((volPhase[0].xyz * 0.0596831031143665313720703125f) * (1.0f + (c * c))) + (volPhase[1].xyz * volHg(airTerrHRet, airTerrHPart))) + (volPhase[2].xyz * volHg(volPhasePiRet2, volPhasePiRet))) * 3.1415927410125732421875f;
 }
 #endif
 
 #if defined(WW_FN_airRho) || defined(WW_FN_ALL)
 float airRho(float z)
 {
-    float tmp1 = z;
-    float4 tmp2 = airMed;
-    float4 tmp3 = airLayer;
-    float4 tmp4 = float4(airGround.x + airGz, airGround.yzw);
-    float tmp5 = wwAirRhoLaw(tmp1, tmp2, tmp3, tmp4);
-    return tmp5;
+    float airTerrHRet = z;
+    float4 airTerrHPart = airMed;
+    float4 volPhasePiRet2 = airLayer;
+    float4 volPhasePiRet = float4(airGround.x + airGz, airGround.yzw);
+    float airRhoRet = wwAirRhoLaw(airTerrHRet, airTerrHPart, volPhasePiRet2, volPhasePiRet);
+    return airRhoRet;
 }
 #endif
 
 #if defined(WW_FN_airCol) || defined(WW_FN_ALL)
 float airCol(float lo, float hi)
 {
-    float tmp1 = lo;
-    float tmp2 = hi;
-    float4 tmp3 = airMed;
-    float4 tmp4 = airLayer;
-    float4 tmp5 = float4(airGround.x + airGz, airGround.yzw);
-    float tmp6 = wwAirColLaw(tmp1, tmp2, tmp3, tmp4, tmp5);
-    return tmp6;
+    float airTerrHRet = lo;
+    float airTerrHPart = hi;
+    float4 volPhasePiRet2 = airMed;
+    float4 volPhasePiRet = airLayer;
+    float4 airRhoRet = float4(airGround.x + airGz, airGround.yzw);
+    float airColRet = wwAirColLaw(airTerrHRet, airTerrHPart, volPhasePiRet2, volPhasePiRet, airRhoRet);
+    return airColRet;
 }
 #endif
 
@@ -114,30 +114,30 @@ float airOd(float za, float zb, float len)
     float dz = zb - za;
     if (abs(dz) < 0.5f)
     {
-        float tmp1 = 0.5f * (za + zb);
-        return (airMed.x * len) * airRho(tmp1);
+        float airTerrHRet = 0.5f * (za + zb);
+        return (airMed.x * len) * airRho(airTerrHRet);
     }
-    float tmp2 = min(za, zb);
-    float tmp3 = max(za, zb);
-    return ((airMed.x * len) * airCol(tmp2, tmp3)) / abs(dz);
+    float airTerrHPart = min(za, zb);
+    float volPhasePiRet2 = max(za, zb);
+    return ((airMed.x * len) * airCol(airTerrHPart, volPhasePiRet2)) / abs(dz);
 }
 #endif
 
 #if defined(WW_FN_airTup) || defined(WW_FN_ALL)
 float airTup(float z, inout float mu)
 {
-    float4 tmp1 = airMed;
-    float4 tmp2 = airGround;
-    if (z >= wwAirEnd(tmp1, tmp2))
+    float4 airTerrHRet = airMed;
+    float4 airTerrHPart = airGround;
+    if (z >= wwAirEnd(airTerrHRet, airTerrHPart))
     {
         return 1.0f;
     }
     mu = max(mu, 0.0199999995529651641845703125f);
-    float4 tmp3 = airMed;
-    float4 tmp4 = airGround;
-    float tmp5 = z;
-    float tmp6 = wwAirEnd(tmp3, tmp4);
-    return exp(((-airMed.x) * airCol(tmp5, tmp6)) / mu);
+    float4 volPhasePiRet2 = airMed;
+    float4 volPhasePiRet = airGround;
+    float airRhoRet = z;
+    float airColRet = wwAirEnd(volPhasePiRet2, volPhasePiRet);
+    return exp(((-airMed.x) * airCol(airRhoRet, airColRet)) / mu);
 }
 #endif
 
@@ -146,30 +146,30 @@ float airTupSun(float z, float mu)
 {
     if (!airSunLayer)
     {
-        float tmp1 = z;
-        float tmp2 = mu;
-        float tmp3 = airTup(tmp1, tmp2);
-        return tmp3;
+        float airTerrHRet = z;
+        float airTerrHPart = mu;
+        float volPhasePiRet2 = airTup(airTerrHRet, airTerrHPart);
+        return volPhasePiRet2;
     }
-    bool tmp4 = z >= airMed.w;
-    bool tmp5;
-    if (!tmp4)
+    bool volPhasePiRet = z >= airMed.w;
+    bool airRhoRet;
+    if (!volPhasePiRet)
     {
-        tmp5 = airLayer.w <= 0.0f;
+        airRhoRet = airLayer.w <= 0.0f;
     }
     else
     {
-        tmp5 = tmp4;
+        airRhoRet = volPhasePiRet;
     }
-    if (tmp5)
+    if (airRhoRet)
     {
         return 1.0f;
     }
-    float tmp6 = z;
-    float tmp7 = airMed.w;
-    float tmp8 = airGround.x + airGz;
-    float tmp9 = airGround.y;
-    return exp((((-airMed.x) * airLayer.w) * wwAirColOne(tmp6, tmp7, tmp8, tmp9)) / max(mu, 0.0199999995529651641845703125f));
+    float airColRet = z;
+    float airTupSunRet3 = airMed.w;
+    float airTupSunRet2 = airGround.x + airGz;
+    float airTupSunRet = airGround.y;
+    return exp((((-airMed.x) * airLayer.w) * wwAirColOne(airColRet, airTupSunRet3, airTupSunRet2, airTupSunRet)) / max(mu, 0.0199999995529651641845703125f));
 }
 #endif
 
@@ -178,76 +178,76 @@ float4 volRoomAxis(int3 c0, float3 f, int2 L, int a, float4 plain, int3 dm)
 {
     float4 s = 0.0f.xxxx;
     float ws = 0.0f;
-    int tmp1;
-    int tmp2;
+    int airTerrHRet;
+    int airTerrHPart;
     for (int k = 0; k < 8; k++)
     {
         int3 o = int3(k & 1, (k >> 1) & 1, (k >> 2) & 1);
         int3 c = clamp(c0 + o, int3(0, 0, 0), dm - int3(1, 1, 1));
         float3 t = lerp(1.0f.xxx - f, f, float3(o));
         float w = (t.x * t.y) * t.z;
-        float tmp3 = cellGiSlots.Load(int4(c, 0)).x;
-        int2 S = cellRoomUnpack(tmp3);
-        bool tmp4 = S.x >= 0;
-        bool tmp5;
-        if (tmp4)
+        float volPhasePiRet2 = cellGiSlots.Load(int4(c, 0)).x;
+        int2 S = cellRoomUnpack(volPhasePiRet2);
+        bool volPhasePiRet = S.x >= 0;
+        bool airRhoRet;
+        if (volPhasePiRet)
         {
-            bool tmp6 = S.x == L.x;
-            bool tmp7;
-            if (!tmp6)
+            bool airColRet = S.x == L.x;
+            bool airTupSunRet3;
+            if (!airColRet)
             {
-                tmp7 = S.x == L.y;
+                airTupSunRet3 = S.x == L.y;
             }
             else
             {
-                tmp7 = tmp6;
+                airTupSunRet3 = airColRet;
             }
-            tmp5 = tmp7;
+            airRhoRet = airTupSunRet3;
         }
         else
         {
-            tmp5 = tmp4;
+            airRhoRet = volPhasePiRet;
         }
-        if (tmp5)
+        if (airRhoRet)
         {
-            tmp1 = 0;
+            airTerrHRet = 0;
         }
         else
         {
-            bool tmp8 = S.y >= 0;
-            bool tmp9;
-            if (tmp8)
+            bool airTupSunRet2 = S.y >= 0;
+            bool airTupSunRet;
+            if (airTupSunRet2)
             {
-                bool tmp10 = S.y == L.x;
-                bool tmp11;
-                if (!tmp10)
+                bool cond = S.y == L.x;
+                bool airTupSunPick;
+                if (!cond)
                 {
-                    tmp11 = S.y == L.y;
+                    airTupSunPick = S.y == L.y;
                 }
                 else
                 {
-                    tmp11 = tmp10;
+                    airTupSunPick = cond;
                 }
-                tmp9 = tmp11;
+                airTupSunRet = airTupSunPick;
             }
             else
             {
-                tmp9 = tmp8;
+                airTupSunRet = airTupSunRet2;
             }
-            if (tmp9)
+            if (airTupSunRet)
             {
-                tmp2 = 6 * dm.z;
+                airTerrHPart = 6 * dm.z;
             }
             else
             {
-                tmp2 = -1;
+                airTerrHPart = -1;
             }
-            tmp1 = tmp2;
+            airTerrHRet = airTerrHPart;
         }
-        int base = tmp1;
+        int base = airTerrHRet;
         bool wwh0 = (base < 0);
         bool wwh1 = (w <= 0.0f);
-        if (wwh0 || wwh1)
+        if (or(wwh0, wwh1))   // HLSLFIX2 orfix.py: no short-circuit branch (NV took the wrong side)
         {
             continue;
         }
@@ -260,27 +260,27 @@ float4 volRoomAxis(int3 c0, float3 f, int2 L, int a, float4 plain, int3 dm)
     }
     if ((volRed & 4194304) != 0)
     {
-        float4 tmp12;
+        float4 volRoomAxisRet2;
         if (ws > 0.0f)
         {
-            tmp12 = s / ws.xxxx;
+            volRoomAxisRet2 = s / ws.xxxx;
         }
         else
         {
-            tmp12 = plain;
+            volRoomAxisRet2 = plain;
         }
-        return tmp12;
+        return volRoomAxisRet2;
     }
-    float4 tmp13;
+    float4 volRoomAxisRet;
     if (ws >= 0.25f)
     {
-        tmp13 = s / ws.xxxx;
+        volRoomAxisRet = s / ws.xxxx;
     }
     else
     {
-        tmp13 = (s + (plain * (0.25f - ws))) / 0.25f.xxxx;
+        volRoomAxisRet = (s + (plain * (0.25f - ws))) / 0.25f.xxxx;
     }
-    return tmp13;
+    return volRoomAxisRet;
 }
 #endif
 
@@ -310,35 +310,35 @@ void volCubeAll(float3 P, inout float3 E[6], inout float share[6])
         plain[a_1] = cellGi.Sample(_cellGi_sampler, float3(xy, (z + (float(a_1) * cellGiDims.z)) / depth));
         r[a_1] = plain[a_1];
     }
-    bool tmp1;
+    bool airTerrHRet;
     if (cellGiRooms)
     {
-        tmp1 = (cellPassRed & 8) == 0;
+        airTerrHRet = (cellPassRed & 8) == 0;
     }
     else
     {
-        tmp1 = cellGiRooms;
+        airTerrHRet = cellGiRooms;
     }
-    if (tmp1)
+    if (airTerrHRet)
     {
         float3 gv = g - 0.5f.xxx;
         int3 c0 = int3(floor(gv));
         float3 f = gv - float3(c0);
         if ((volRed & 4194304) != 0)
         {
-            float3 tmp2 = P;
-            int2 L = cellRoomAt(tmp2);
+            float3 airTerrHPart = P;
+            int2 L = cellRoomAt(airTerrHPart);
             if (L.x >= 0)
             {
                 for (int a_2 = 0; a_2 < 6; a_2++)
                 {
-                    int3 tmp3 = c0;
-                    float3 tmp4 = f;
-                    int2 tmp5 = L;
-                    int tmp6 = a_2;
-                    float4 tmp7 = plain[a_2];
-                    int3 tmp8 = dm;
-                    r[a_2] = volRoomAxis(tmp3, tmp4, tmp5, tmp6, tmp7, tmp8);
+                    int3 volPhasePiRet2 = c0;
+                    float3 volPhasePiRet = f;
+                    int2 airRhoRet = L;
+                    int airColRet = a_2;
+                    float4 airTupSunRet3 = plain[a_2];
+                    int3 airTupSunRet2 = dm;
+                    r[a_2] = volRoomAxis(volPhasePiRet2, volPhasePiRet, airRhoRet, airColRet, airTupSunRet3, airTupSunRet2);
                 }
             }
         }
@@ -357,42 +357,42 @@ void volCubeAll(float3 P, inout float3 E[6], inout float share[6])
                 int3 c = r0 + o;
                 float3 t = lerp(1.0f.xxx - fr, fr, float3(o));
                 wk[k] = (t.x * t.y) * t.z;
-                bool tmp9 = any(bool3(c.x < int3(0, 0, 0).x, c.y < int3(0, 0, 0).y, c.z < int3(0, 0, 0).z));
-                bool tmp10;
-                if (!tmp9)
+                bool airTupSunRet = any(bool3(c.x < int3(0, 0, 0).x, c.y < int3(0, 0, 0).y, c.z < int3(0, 0, 0).z));
+                bool cond;
+                if (!airTupSunRet)
                 {
-                    int3 tmp11 = int3(cellRoomsDims);
-                    tmp10 = any(bool3(c.x >= tmp11.x, c.y >= tmp11.y, c.z >= tmp11.z));
+                    int3 airTupSunPick = int3(cellRoomsDims);
+                    cond = any(bool3(c.x >= airTupSunPick.x, c.y >= airTupSunPick.y, c.z >= airTupSunPick.z));
                 }
                 else
                 {
-                    tmp10 = tmp9;
+                    cond = airTupSunRet;
                 }
-                if (tmp10)
+                if (cond)
                 {
                     Lk[k] = int2(-2, -2);
                 }
                 else
                 {
-                    float tmp12 = cellRooms.Load(int4(c, 0)).x;
-                    Lk[k] = cellRoomUnpack(tmp12);
+                    float volRoomAxisRet2 = cellRooms.Load(int4(c, 0)).x;
+                    Lk[k] = cellRoomUnpack(volRoomAxisRet2);
                 }
                 if (Lk[k].x == (-1))
                 {
                     wk[k] = 0.0f;
                 }
                 wAir += wk[k];
-                bool tmp13 = k > 0;
-                bool tmp14;
-                if (tmp13)
+                bool volRoomAxisRet = k > 0;
+                bool cond5;
+                if (volRoomAxisRet)
                 {
-                    tmp14 = any(bool2(Lk[k].x != Lk[0].x, Lk[k].y != Lk[0].y));
+                    cond5 = any(bool2(Lk[k].x != Lk[0].x, Lk[k].y != Lk[0].y));
                 }
                 else
                 {
-                    tmp14 = tmp13;
+                    cond5 = volRoomAxisRet;
                 }
-                if (tmp14)
+                if (cond5)
                 {
                     same = false;
                 }
@@ -405,13 +405,13 @@ void volCubeAll(float3 P, inout float3 E[6], inout float share[6])
                     {
                         for (int a_3 = 0; a_3 < 6; a_3++)
                         {
-                            int3 tmp15 = c0;
-                            float3 tmp16 = f;
-                            int2 tmp17 = Lk[0];
-                            int tmp18 = a_3;
-                            float4 tmp19 = plain[a_3];
-                            int3 tmp20 = dm;
-                            r[a_3] = volRoomAxis(tmp15, tmp16, tmp17, tmp18, tmp19, tmp20);
+                            int3 rPart6 = c0;
+                            float3 rPart5 = f;
+                            int2 rPart4 = Lk[0];
+                            int rPart3 = a_3;
+                            float4 rPart2 = plain[a_3];
+                            int3 rPart = dm;
+                            r[a_3] = volRoomAxis(rPart6, rPart5, rPart4, rPart3, rPart2, rPart);
                         }
                     }
                 }
@@ -421,8 +421,8 @@ void volCubeAll(float3 P, inout float3 E[6], inout float share[6])
                     {
                         r[a_4] = 0.0f.xxxx;
                     }
-                    float tmp21;
-                    float4 tmp22;
+                    float wlPick;
+                    float4 rPick;
                     for (int k_1 = 0; k_1 < 8; k_1++)
                     {
                         if (wk[k_1] <= 0.0f)
@@ -432,26 +432,26 @@ void volCubeAll(float3 P, inout float3 E[6], inout float share[6])
                         bool seen = false;
                         for (int j = 0; j < k_1; j++)
                         {
-                            bool tmp23;
+                            bool seenPick;
                             if (!seen)
                             {
-                                bool tmp24 = wk[j] > 0.0f;
-                                bool tmp25;
-                                if (tmp24)
+                                bool cond4 = wk[j] > 0.0f;
+                                bool seenPick2;
+                                if (cond4)
                                 {
-                                    tmp25 = all(bool2(Lk[j].x == Lk[k_1].x, Lk[j].y == Lk[k_1].y));
+                                    seenPick2 = all(bool2(Lk[j].x == Lk[k_1].x, Lk[j].y == Lk[k_1].y));
                                 }
                                 else
                                 {
-                                    tmp25 = tmp24;
+                                    seenPick2 = cond4;
                                 }
-                                tmp23 = tmp25;
+                                seenPick = seenPick2;
                             }
                             else
                             {
-                                tmp23 = seen;
+                                seenPick = seen;
                             }
-                            seen = tmp23;
+                            seen = seenPick;
                         }
                         if (seen)
                         {
@@ -462,49 +462,49 @@ void volCubeAll(float3 P, inout float3 E[6], inout float share[6])
                         {
                             if (all(bool2(Lk[j_1].x == Lk[k_1].x, Lk[j_1].y == Lk[k_1].y)))
                             {
-                                tmp21 = wk[j_1];
+                                wlPick = wk[j_1];
                             }
                             else
                             {
-                                tmp21 = 0.0f;
+                                wlPick = 0.0f;
                             }
-                            wl += tmp21;
+                            wl += wlPick;
                         }
                         wl /= wAir;
                         for (int a_5 = 0; a_5 < 6; a_5++)
                         {
                             if (Lk[k_1].x >= 0)
                             {
-                                int3 tmp26 = c0;
-                                float3 tmp27 = f;
-                                int2 tmp28 = Lk[k_1];
-                                int tmp29 = a_5;
-                                float4 tmp30 = plain[a_5];
-                                int3 tmp31 = dm;
-                                tmp22 = volRoomAxis(tmp26, tmp27, tmp28, tmp29, tmp30, tmp31);
+                                int3 rPart12 = c0;
+                                float3 rPart11 = f;
+                                int2 rPart10 = Lk[k_1];
+                                int rPart9 = a_5;
+                                float4 rPart8 = plain[a_5];
+                                int3 rPart7 = dm;
+                                rPick = volRoomAxis(rPart12, rPart11, rPart10, rPart9, rPart8, rPart7);
                             }
                             else
                             {
-                                tmp22 = plain[a_5];
+                                rPick = plain[a_5];
                             }
-                            r[a_5] += (tmp22 * wl);
+                            r[a_5] += (rPick * wl);
                         }
                     }
                 }
             }
         }
     }
-    bool tmp32 = volShell > 0.0f;
-    bool tmp33;
-    if (tmp32)
+    bool cond3 = volShell > 0.0f;
+    bool cond2;
+    if (cond3)
     {
-        tmp33 = cellGiSky && false;
+        cond2 = cellGiSky && false;
     }
     else
     {
-        tmp33 = tmp32;
+        cond2 = cond3;
     }
-    if (tmp33)
+    if (cond2)
     {
         float4 wide[6];
         for (int a_6 = 0; a_6 < 6; a_6++)
@@ -520,53 +520,53 @@ void volCubeAll(float3 P, inout float3 E[6], inout float share[6])
                 wide[a_7] += (cellGi.Sample(_cellGi_sampler, float3(q.xy / cellGiDims.xy, (qz + (float(a_7) * cellGiDims.z)) / depth)) * 0.125f);
             }
         }
-        float3 tmp34;
-        float3 tmp35;
+        float3 vPick;
+        float3 vPick2;
         for (int a_8 = 0; a_8 < 6; a_8++)
         {
             if (r[a_8].w > 0.00999999977648258209228515625f)
             {
-                tmp34 = r[a_8].xyz / r[a_8].w.xxx;
+                vPick = r[a_8].xyz / r[a_8].w.xxx;
             }
             else
             {
                 if (wide[a_8].w > 9.9999997473787516355514526367188e-05f)
                 {
-                    tmp35 = wide[a_8].xyz / wide[a_8].w.xxx;
+                    vPick2 = wide[a_8].xyz / wide[a_8].w.xxx;
                 }
                 else
                 {
-                    tmp35 = 0.0f.xxx;
+                    vPick2 = 0.0f.xxx;
                 }
-                tmp34 = tmp35;
+                vPick = vPick2;
             }
-            float3 v = tmp34;
+            float3 v = vPick;
             share[a_8] = clamp(wide[a_8].w, 0.0f, 1.0f);
             E[a_8] = max(v * share[a_8], 0.0f.xxx);
         }
         return;
     }
-    float3 tmp36;
-    float3 tmp37;
+    float3 EPick;
+    float3 EPick2;
     for (int a_9 = 0; a_9 < 6; a_9++)
     {
         if (cellGiSky && false)
         {
-            tmp36 = max(r[a_9].xyz, 0.0f.xxx);
+            EPick = max(r[a_9].xyz, 0.0f.xxx);
         }
         else
         {
             if (r[a_9].w > 0.00999999977648258209228515625f)
             {
-                tmp37 = max(r[a_9].xyz / r[a_9].w.xxx, 0.0f.xxx);
+                EPick2 = max(r[a_9].xyz / r[a_9].w.xxx, 0.0f.xxx);
             }
             else
             {
-                tmp37 = 0.0f.xxx;
+                EPick2 = 0.0f.xxx;
             }
-            tmp36 = tmp37;
+            EPick = EPick2;
         }
-        E[a_9] = tmp36;
+        E[a_9] = EPick;
         share[a_9] = clamp(plain[a_9].w, 0.0f, 1.0f);
     }
 }
@@ -598,35 +598,35 @@ void volCubeAll(float3 P, inout float3 E[6], inout float share[6])
         plain[a_1] = cellGi.SampleLevel(_cellGi_sampler, float3(xy, (z + (float(a_1) * cellGiDims.z)) / depth), 0.0f);
         r[a_1] = plain[a_1];
     }
-    bool tmp1;
+    bool airTerrHRet;
     if (cellGiRooms)
     {
-        tmp1 = (cellPassRed & 8) == 0;
+        airTerrHRet = (cellPassRed & 8) == 0;
     }
     else
     {
-        tmp1 = cellGiRooms;
+        airTerrHRet = cellGiRooms;
     }
-    if (tmp1)
+    if (airTerrHRet)
     {
         float3 gv = g - 0.5f.xxx;
         int3 c0 = int3(floor(gv));
         float3 f = gv - float3(c0);
         if ((volRed & 4194304) != 0)
         {
-            float3 tmp2 = P;
-            int2 L = cellRoomAt(tmp2);
+            float3 airTerrHPart = P;
+            int2 L = cellRoomAt(airTerrHPart);
             if (L.x >= 0)
             {
                 for (int a_2 = 0; a_2 < 6; a_2++)
                 {
-                    int3 tmp3 = c0;
-                    float3 tmp4 = f;
-                    int2 tmp5 = L;
-                    int tmp6 = a_2;
-                    float4 tmp7 = plain[a_2];
-                    int3 tmp8 = dm;
-                    r[a_2] = volRoomAxis(tmp3, tmp4, tmp5, tmp6, tmp7, tmp8);
+                    int3 volPhasePiRet2 = c0;
+                    float3 volPhasePiRet = f;
+                    int2 airRhoRet = L;
+                    int airColRet = a_2;
+                    float4 airTupSunRet3 = plain[a_2];
+                    int3 airTupSunRet2 = dm;
+                    r[a_2] = volRoomAxis(volPhasePiRet2, volPhasePiRet, airRhoRet, airColRet, airTupSunRet3, airTupSunRet2);
                 }
             }
         }
@@ -645,42 +645,42 @@ void volCubeAll(float3 P, inout float3 E[6], inout float share[6])
                 int3 c = r0 + o;
                 float3 t = lerp(1.0f.xxx - fr, fr, float3(o));
                 wk[k] = (t.x * t.y) * t.z;
-                bool tmp9 = any(bool3(c.x < int3(0, 0, 0).x, c.y < int3(0, 0, 0).y, c.z < int3(0, 0, 0).z));
-                bool tmp10;
-                if (!tmp9)
+                bool airTupSunRet = any(bool3(c.x < int3(0, 0, 0).x, c.y < int3(0, 0, 0).y, c.z < int3(0, 0, 0).z));
+                bool cond;
+                if (!airTupSunRet)
                 {
-                    int3 tmp11 = int3(cellRoomsDims);
-                    tmp10 = any(bool3(c.x >= tmp11.x, c.y >= tmp11.y, c.z >= tmp11.z));
+                    int3 airTupSunPick = int3(cellRoomsDims);
+                    cond = any(bool3(c.x >= airTupSunPick.x, c.y >= airTupSunPick.y, c.z >= airTupSunPick.z));
                 }
                 else
                 {
-                    tmp10 = tmp9;
+                    cond = airTupSunRet;
                 }
-                if (tmp10)
+                if (cond)
                 {
                     Lk[k] = int2(-2, -2);
                 }
                 else
                 {
-                    float tmp12 = cellRooms.Load(int4(c, 0)).x;
-                    Lk[k] = cellRoomUnpack(tmp12);
+                    float volRoomAxisRet2 = cellRooms.Load(int4(c, 0)).x;
+                    Lk[k] = cellRoomUnpack(volRoomAxisRet2);
                 }
                 if (Lk[k].x == (-1))
                 {
                     wk[k] = 0.0f;
                 }
                 wAir += wk[k];
-                bool tmp13 = k > 0;
-                bool tmp14;
-                if (tmp13)
+                bool volRoomAxisRet = k > 0;
+                bool cond5;
+                if (volRoomAxisRet)
                 {
-                    tmp14 = any(bool2(Lk[k].x != Lk[0].x, Lk[k].y != Lk[0].y));
+                    cond5 = any(bool2(Lk[k].x != Lk[0].x, Lk[k].y != Lk[0].y));
                 }
                 else
                 {
-                    tmp14 = tmp13;
+                    cond5 = volRoomAxisRet;
                 }
-                if (tmp14)
+                if (cond5)
                 {
                     same = false;
                 }
@@ -693,13 +693,13 @@ void volCubeAll(float3 P, inout float3 E[6], inout float share[6])
                     {
                         for (int a_3 = 0; a_3 < 6; a_3++)
                         {
-                            int3 tmp15 = c0;
-                            float3 tmp16 = f;
-                            int2 tmp17 = Lk[0];
-                            int tmp18 = a_3;
-                            float4 tmp19 = plain[a_3];
-                            int3 tmp20 = dm;
-                            r[a_3] = volRoomAxis(tmp15, tmp16, tmp17, tmp18, tmp19, tmp20);
+                            int3 rPart6 = c0;
+                            float3 rPart5 = f;
+                            int2 rPart4 = Lk[0];
+                            int rPart3 = a_3;
+                            float4 rPart2 = plain[a_3];
+                            int3 rPart = dm;
+                            r[a_3] = volRoomAxis(rPart6, rPart5, rPart4, rPart3, rPart2, rPart);
                         }
                     }
                 }
@@ -709,8 +709,8 @@ void volCubeAll(float3 P, inout float3 E[6], inout float share[6])
                     {
                         r[a_4] = 0.0f.xxxx;
                     }
-                    float tmp21;
-                    float4 tmp22;
+                    float wlPick;
+                    float4 rPick;
                     for (int k_1 = 0; k_1 < 8; k_1++)
                     {
                         if (wk[k_1] <= 0.0f)
@@ -720,26 +720,26 @@ void volCubeAll(float3 P, inout float3 E[6], inout float share[6])
                         bool seen = false;
                         for (int j = 0; j < k_1; j++)
                         {
-                            bool tmp23;
+                            bool seenPick;
                             if (!seen)
                             {
-                                bool tmp24 = wk[j] > 0.0f;
-                                bool tmp25;
-                                if (tmp24)
+                                bool cond4 = wk[j] > 0.0f;
+                                bool seenPick2;
+                                if (cond4)
                                 {
-                                    tmp25 = all(bool2(Lk[j].x == Lk[k_1].x, Lk[j].y == Lk[k_1].y));
+                                    seenPick2 = all(bool2(Lk[j].x == Lk[k_1].x, Lk[j].y == Lk[k_1].y));
                                 }
                                 else
                                 {
-                                    tmp25 = tmp24;
+                                    seenPick2 = cond4;
                                 }
-                                tmp23 = tmp25;
+                                seenPick = seenPick2;
                             }
                             else
                             {
-                                tmp23 = seen;
+                                seenPick = seen;
                             }
-                            seen = tmp23;
+                            seen = seenPick;
                         }
                         if (seen)
                         {
@@ -750,49 +750,49 @@ void volCubeAll(float3 P, inout float3 E[6], inout float share[6])
                         {
                             if (all(bool2(Lk[j_1].x == Lk[k_1].x, Lk[j_1].y == Lk[k_1].y)))
                             {
-                                tmp21 = wk[j_1];
+                                wlPick = wk[j_1];
                             }
                             else
                             {
-                                tmp21 = 0.0f;
+                                wlPick = 0.0f;
                             }
-                            wl += tmp21;
+                            wl += wlPick;
                         }
                         wl /= wAir;
                         for (int a_5 = 0; a_5 < 6; a_5++)
                         {
                             if (Lk[k_1].x >= 0)
                             {
-                                int3 tmp26 = c0;
-                                float3 tmp27 = f;
-                                int2 tmp28 = Lk[k_1];
-                                int tmp29 = a_5;
-                                float4 tmp30 = plain[a_5];
-                                int3 tmp31 = dm;
-                                tmp22 = volRoomAxis(tmp26, tmp27, tmp28, tmp29, tmp30, tmp31);
+                                int3 rPart12 = c0;
+                                float3 rPart11 = f;
+                                int2 rPart10 = Lk[k_1];
+                                int rPart9 = a_5;
+                                float4 rPart8 = plain[a_5];
+                                int3 rPart7 = dm;
+                                rPick = volRoomAxis(rPart12, rPart11, rPart10, rPart9, rPart8, rPart7);
                             }
                             else
                             {
-                                tmp22 = plain[a_5];
+                                rPick = plain[a_5];
                             }
-                            r[a_5] += (tmp22 * wl);
+                            r[a_5] += (rPick * wl);
                         }
                     }
                 }
             }
         }
     }
-    bool tmp32 = volShell > 0.0f;
-    bool tmp33;
-    if (tmp32)
+    bool cond3 = volShell > 0.0f;
+    bool cond2;
+    if (cond3)
     {
-        tmp33 = cellGiSky && false;
+        cond2 = cellGiSky && false;
     }
     else
     {
-        tmp33 = tmp32;
+        cond2 = cond3;
     }
-    if (tmp33)
+    if (cond2)
     {
         float4 wide[6];
         for (int a_6 = 0; a_6 < 6; a_6++)
@@ -808,53 +808,53 @@ void volCubeAll(float3 P, inout float3 E[6], inout float share[6])
                 wide[a_7] += (cellGi.SampleLevel(_cellGi_sampler, float3(q.xy / cellGiDims.xy, (qz + (float(a_7) * cellGiDims.z)) / depth), 0.0f) * 0.125f);
             }
         }
-        float3 tmp34;
-        float3 tmp35;
+        float3 vPick;
+        float3 vPick2;
         for (int a_8 = 0; a_8 < 6; a_8++)
         {
             if (r[a_8].w > 0.00999999977648258209228515625f)
             {
-                tmp34 = r[a_8].xyz / r[a_8].w.xxx;
+                vPick = r[a_8].xyz / r[a_8].w.xxx;
             }
             else
             {
                 if (wide[a_8].w > 9.9999997473787516355514526367188e-05f)
                 {
-                    tmp35 = wide[a_8].xyz / wide[a_8].w.xxx;
+                    vPick2 = wide[a_8].xyz / wide[a_8].w.xxx;
                 }
                 else
                 {
-                    tmp35 = 0.0f.xxx;
+                    vPick2 = 0.0f.xxx;
                 }
-                tmp34 = tmp35;
+                vPick = vPick2;
             }
-            float3 v = tmp34;
+            float3 v = vPick;
             share[a_8] = clamp(wide[a_8].w, 0.0f, 1.0f);
             E[a_8] = max(v * share[a_8], 0.0f.xxx);
         }
         return;
     }
-    float3 tmp36;
-    float3 tmp37;
+    float3 EPick;
+    float3 EPick2;
     for (int a_9 = 0; a_9 < 6; a_9++)
     {
         if (cellGiSky && false)
         {
-            tmp36 = max(r[a_9].xyz, 0.0f.xxx);
+            EPick = max(r[a_9].xyz, 0.0f.xxx);
         }
         else
         {
             if (r[a_9].w > 0.00999999977648258209228515625f)
             {
-                tmp37 = max(r[a_9].xyz / r[a_9].w.xxx, 0.0f.xxx);
+                EPick2 = max(r[a_9].xyz / r[a_9].w.xxx, 0.0f.xxx);
             }
             else
             {
-                tmp37 = 0.0f.xxx;
+                EPick2 = 0.0f.xxx;
             }
-            tmp36 = tmp37;
+            EPick = EPick2;
         }
-        E[a_9] = tmp36;
+        E[a_9] = EPick;
         share[a_9] = clamp(plain[a_9].w, 0.0f, 1.0f);
     }
 }
@@ -872,16 +872,16 @@ float3 volCubeScatter(float3 E[6], float3 dW)
 #if defined(WW_FN_airAmbKeep) || defined(WW_FN_ALL)
 float airAmbKeep(float fade, float r)
 {
-    float tmp1;
+    float airTerrHRet;
     if (r >= 0.0f)
     {
-        tmp1 = (1.0f - fade) + (fade * r);
+        airTerrHRet = (1.0f - fade) + (fade * r);
     }
     else
     {
-        tmp1 = 1.0f - fade;
+        airTerrHRet = 1.0f - fade;
     }
-    return tmp1;
+    return airTerrHRet;
 }
 #endif
 
@@ -892,22 +892,22 @@ float3 airEnvColour(float3 J, float t, float z, float3 dirView)
     {
         return J;
     }
-    float tmp1 = t;
-    float tmp2 = z;
-    float3 tmp3 = dirView;
-    bool tmp4;
-    float3 tmp5 = wwAirRecordColour(tmp1, tmp2, tmp3, tmp4);
-    bool ok = tmp4;
-    float3 c = tmp5;
-    float3 tmp6;
+    float airTerrHRet = t;
+    float airTerrHPart = z;
+    float3 volPhasePiRet2 = dirView;
+    bool volPhasePiRet;
+    float3 airRhoRet = wwAirRecordColour(airTerrHRet, airTerrHPart, volPhasePiRet2, volPhasePiRet);
+    bool ok = volPhasePiRet;
+    float3 c = airRhoRet;
+    float3 airColRet;
     if (ok)
     {
-        tmp6 = c * dot(J, float3(0.2125999927520751953125f, 0.715200006961822509765625f, 0.072200000286102294921875f));
+        airColRet = c * dot(J, float3(0.2125999927520751953125f, 0.715200006961822509765625f, 0.072200000286102294921875f));
     }
     else
     {
-        tmp6 = J;
+        airColRet = J;
     }
-    return tmp6;
+    return airColRet;
 }
 #endif

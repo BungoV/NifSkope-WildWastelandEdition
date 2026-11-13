@@ -66,17 +66,17 @@ void frag_main()
 {
     float texel = 4096.0f / fgStampSide;
     float2 w = fgStampCell + (gl_FragCoord.xy * texel);
-    float2 param = w;
-    float2 param_1 = float2(texel, 0.0f);
-    float2 param_2 = float2(0.0f, texel);
-    float3 col = fgSplat(param, param_1, param_2);
+    float2 wArg2 = w;
+    float2 wdxArg = float2(texel, 0.0f);
+    float2 wdyArg = float2(0.0f, texel);
+    float3 col = fgSplat(wArg2, wdxArg, wdyArg);
     if (fgPageDecals != 0)
     {
         float2 g = (w - fgGridMap.xy) * fgGridMap.z;
         float z = fgHeight.Sample(_fgHeight_sampler, (g + 0.5f.xx) / fgGridN).x;
-        float3 param_3 = float3(w, z);
-        float param_4 = texel;
-        float4 d = fgDecals(param_3, param_4);
+        float3 wArg = float3(w, z);
+        float pixArg = texel;
+        float4 d = fgDecals(wArg, pixArg);
         col = (col * (1.0f - d.w)) + d.xyz;
     }
     fragColor = float4(col, 1.0f);

@@ -29,15 +29,21 @@ struct SPIRV_Cross_Output
 
 void frag_main()
 {
+    // the ceil(W/4) x ceil(H/4) target's uv
     float2 v1 = gl_FragCoord.xy / dstSize;
     float3 acc = 0.0f.xxx;
+    // loop / ige / breakc_nz
     for (int i = 0; i < 4; i++)
     {
+        // mad, mul
         float2 uv = ((taps[i].xy * c7.xy) + v1) * c4.xy;
         float3 c = t0.Sample(_t0_sampler, uv).xyz;
-        uint3 tmp75 = asuint(c) & uint3(2139095040u, 2139095040u, 2139095040u);
-        bool3 bad = bool3(tmp75.x == uint3(2139095040u, 2139095040u, 2139095040u).x, tmp75.y == uint3(2139095040u, 2139095040u, 2139095040u).y, tmp75.z == uint3(2139095040u, 2139095040u, 2139095040u).z);
+        uint3 badPart = asuint(c) & uint3(2139095040u, 2139095040u, 2139095040u);
+        // and, ieq
+        bool3 bad = bool3(badPart.x == uint3(2139095040u, 2139095040u, 2139095040u).x, badPart.y == uint3(2139095040u, 2139095040u, 2139095040u).y, badPart.z == uint3(2139095040u, 2139095040u, 2139095040u).z);
+        // movc
         c = float3(bad.x ? 0.0f.xxx.x : c.x, bad.y ? 0.0f.xxx.y : c.y, bad.z ? 0.0f.xxx.z : c.z);
+        // mad
         acc = (c * taps[i].z) + acc;
     }
     fragColor = float4(acc, c7.z);

@@ -8,16 +8,16 @@
 #if defined(WW_FN_wwTreeWindApply) || defined(WW_FN_ALL)
 float3 wwTreeWindApply(float3 p, float3 nrm, float bitLen, float4x4 mv)
 {
-    float tmp1;
+    float aPick;
     if (bitLen > 1.5f)
     {
-        tmp1 = clamp(bitLen - 2.0f, 0.0f, 1.0f);
+        aPick = clamp(bitLen - 2.0f, 0.0f, 1.0f);
     }
     else
     {
-        tmp1 = 0.0f;
+        aPick = 0.0f;
     }
-    float a = tmp1;
+    float a = aPick;
     float3 n = nrm * rsqrt(max(dot(nrm, nrm), 1.0000000031710768509710513471353e-30f));
     float s = dot(n, wwTreeWind5.xyz);
     float base = (3.0f * s) + wwTreeWind3.w;
@@ -33,15 +33,15 @@ float3 wwTreeWindApply(float3 p, float3 nrm, float bitLen, float4x4 mv)
     float b = ((h * g) / 3.0f) * a;
     float3 q = off + float3(cos(wwTreeWind.x) * b, sin(wwTreeWind.x) * b, 0.0f);
     float ql = length(q);
-    float3 tmp2;
+    float3 wwTreeWindApplyRet;
     if (ql > 0.0f)
     {
-        tmp2 = q * (length(off) / ql);
+        wwTreeWindApplyRet = q * (length(off) / ql);
     }
     else
     {
-        tmp2 = q;
+        wwTreeWindApplyRet = q;
     }
-    return tmp2 + wwTreeWind3.xyz;
+    return wwTreeWindApplyRet + wwTreeWind3.xyz;
 }
 #endif

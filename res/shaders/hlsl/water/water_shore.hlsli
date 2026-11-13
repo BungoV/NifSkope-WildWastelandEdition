@@ -31,6 +31,7 @@ float2 wwShoreField(float2 worldXY)
     {
         return 0.0f.xx;
     }
+    // in texel centres
     float2 g = ((worldXY - waterInfoGrid.xy) / waterInfoGrid.z.xx) - 0.5f.xx;
     int2 t0 = int2(floor(g));
     float2 f = g - float2(t0);
@@ -46,58 +47,59 @@ float2 wwShoreField(float2 worldXY)
     bool i11 = true;
     int2 tile = t0 / E.xx;
     int2 in0 = t0 - (tile * E.xx);
-    bool tmp1 = t0.x >= 0;
-    bool tmp2;
-    if (tmp1)
+    bool cond10 = t0.x >= 0;
+    bool cond9;
+    if (cond10)
     {
-        tmp2 = t0.y >= 0;
+        cond9 = t0.y >= 0;
     }
     else
     {
-        tmp2 = tmp1;
+        cond9 = cond10;
     }
-    bool tmp3;
-    if (tmp2)
+    bool cond8;
+    if (cond9)
     {
-        tmp3 = (t0.x + 1) < n.x;
-    }
-    else
-    {
-        tmp3 = tmp2;
-    }
-    bool tmp4;
-    if (tmp3)
-    {
-        tmp4 = (t0.y + 1) < n.y;
+        cond8 = (t0.x + 1) < n.x;
     }
     else
     {
-        tmp4 = tmp3;
+        cond8 = cond9;
     }
-    bool tmp5;
-    if (tmp4)
+    bool cond7;
+    if (cond8)
     {
-        tmp5 = in0.x < (E - 1);
-    }
-    else
-    {
-        tmp5 = tmp4;
-    }
-    bool tmp6;
-    if (tmp5)
-    {
-        tmp6 = in0.y < (E - 1);
+        cond7 = (t0.y + 1) < n.y;
     }
     else
     {
-        tmp6 = tmp5;
+        cond7 = cond8;
+    }
+    bool cond6;
+    if (cond7)
+    {
+        cond6 = in0.x < (E - 1);
+    }
+    else
+    {
+        cond6 = cond7;
+    }
+    bool cond5;
+    if (cond6)
+    {
+        cond5 = in0.y < (E - 1);
+    }
+    else
+    {
+        cond5 = cond6;
     }
     uint w00;
     uint w10;
     uint w01;
     uint w11;
-    if (tmp6)
+    if (cond5)
     {
+        // the 2 x 2 inside one tile (15 of 16 per axis): one index fetch, and the atlas only for a sparse tile
         uint2 ix = waterInfoIndex.Load(int3(tile, 0)).xy;
         if (ix.x == 0u)
         {
@@ -121,77 +123,77 @@ float2 wwShoreField(float2 worldXY)
     {
         float2 c = waterInfoGrid.xy + ((float2(t0) + 0.5f.xx) * waterInfoGrid.z);
         float z = waterInfoGrid.z;
-        float2 tmp7 = c;
-        w00 = wwWaterInfoWord(tmp7);
-        float2 tmp8 = c + float2(z, 0.0f);
-        w10 = wwWaterInfoWord(tmp8);
-        float2 tmp9 = c + float2(0.0f, z);
-        w01 = wwWaterInfoWord(tmp9);
-        float2 tmp10 = c + z.xx;
-        w11 = wwWaterInfoWord(tmp10);
-        bool tmp11 = all(bool2(t0.x >= int2(0, 0).x, t0.y >= int2(0, 0).y));
-        bool tmp12;
-        if (tmp11)
+        float2 w00Part = c;
+        w00 = wwWaterInfoWord(w00Part);
+        float2 w10Part = c + float2(z, 0.0f);
+        w10 = wwWaterInfoWord(w10Part);
+        float2 w01Part = c + float2(0.0f, z);
+        w01 = wwWaterInfoWord(w01Part);
+        float2 w11Part = c + z.xx;
+        w11 = wwWaterInfoWord(w11Part);
+        bool cond4 = all(bool2(t0.x >= int2(0, 0).x, t0.y >= int2(0, 0).y));
+        bool i00Pick;
+        if (cond4)
         {
-            tmp12 = all(bool2(t0.x < n.x, t0.y < n.y));
+            i00Pick = all(bool2(t0.x < n.x, t0.y < n.y));
         }
         else
         {
-            tmp12 = tmp11;
+            i00Pick = cond4;
         }
-        i00 = tmp12;
-        int2 tmp13 = t0 + int2(1, 0);
-        bool tmp14 = all(bool2(tmp13.x >= int2(0, 0).x, tmp13.y >= int2(0, 0).y));
-        bool tmp15;
-        if (tmp14)
+        i00 = i00Pick;
+        int2 condPart3 = t0 + int2(1, 0);
+        bool cond3 = all(bool2(condPart3.x >= int2(0, 0).x, condPart3.y >= int2(0, 0).y));
+        bool i10Pick;
+        if (cond3)
         {
-            int2 tmp16 = t0 + int2(1, 0);
-            tmp15 = all(bool2(tmp16.x < n.x, tmp16.y < n.y));
+            int2 i10Part = t0 + int2(1, 0);
+            i10Pick = all(bool2(i10Part.x < n.x, i10Part.y < n.y));
         }
         else
         {
-            tmp15 = tmp14;
+            i10Pick = cond3;
         }
-        i10 = tmp15;
-        int2 tmp17 = t0 + int2(0, 1);
-        bool tmp18 = all(bool2(tmp17.x >= int2(0, 0).x, tmp17.y >= int2(0, 0).y));
-        bool tmp19;
-        if (tmp18)
+        i10 = i10Pick;
+        int2 condPart2 = t0 + int2(0, 1);
+        bool cond2 = all(bool2(condPart2.x >= int2(0, 0).x, condPart2.y >= int2(0, 0).y));
+        bool i01Pick;
+        if (cond2)
         {
-            int2 tmp20 = t0 + int2(0, 1);
-            tmp19 = all(bool2(tmp20.x < n.x, tmp20.y < n.y));
+            int2 i01Part = t0 + int2(0, 1);
+            i01Pick = all(bool2(i01Part.x < n.x, i01Part.y < n.y));
         }
         else
         {
-            tmp19 = tmp18;
+            i01Pick = cond2;
         }
-        i01 = tmp19;
-        int2 tmp21 = t0 + int2(1, 1);
-        bool tmp22 = all(bool2(tmp21.x >= int2(0, 0).x, tmp21.y >= int2(0, 0).y));
-        bool tmp23;
-        if (tmp22)
+        i01 = i01Pick;
+        int2 condPart = t0 + int2(1, 1);
+        bool cond = all(bool2(condPart.x >= int2(0, 0).x, condPart.y >= int2(0, 0).y));
+        bool i11Pick;
+        if (cond)
         {
-            int2 tmp24 = t0 + int2(1, 1);
-            tmp23 = all(bool2(tmp24.x < n.x, tmp24.y < n.y));
+            int2 i11Part = t0 + int2(1, 1);
+            i11Pick = all(bool2(i11Part.x < n.x, i11Part.y < n.y));
         }
         else
         {
-            tmp23 = tmp22;
+            i11Pick = cond;
         }
-        i11 = tmp23;
+        i11 = i11Pick;
     }
-    uint tmp25 = w00;
-    bool tmp26 = i00;
-    float2 v00 = wwShoreTexelValue(tmp25, tmp26);
-    uint tmp27 = w10;
-    bool tmp28 = i10;
-    float2 v10 = wwShoreTexelValue(tmp27, tmp28);
-    uint tmp29 = w01;
-    bool tmp30 = i01;
-    float2 v01 = wwShoreTexelValue(tmp29, tmp30);
-    uint tmp31 = w11;
-    bool tmp32 = i11;
-    float2 v11 = wwShoreTexelValue(tmp31, tmp32);
+    uint v00Part2 = w00;
+    bool v00Part = i00;
+    float2 v00 = wwShoreTexelValue(v00Part2, v00Part);
+    uint v10Part2 = w10;
+    bool v10Part = i10;
+    float2 v10 = wwShoreTexelValue(v10Part2, v10Part);
+    uint v01Part2 = w01;
+    bool v01Part = i01;
+    float2 v01 = wwShoreTexelValue(v01Part2, v01Part);
+    uint v11Part2 = w11;
+    bool v11Part = i11;
+    float2 v11 = wwShoreTexelValue(v11Part2, v11Part);
     float d = lerp(lerp(v00.x, v10.x, f.x), lerp(v01.x, v11.x, f.x), f.y);
     return float2(d, ((v00.y + v10.y) + v01.y) + v11.y);
 }
@@ -211,8 +213,8 @@ float wwShoreEdge(float2 field)
     {
         return 0.0f;
     }
-    float tmp1 = clamp((field.x - waterShoreK0.x) / waterShoreK0.y, 0.0f, 1.0f);
-    return 1.0f - wwShoreSmooth(tmp1);
+    float cond10 = clamp((field.x - waterShoreK0.x) / waterShoreK0.y, 0.0f, 1.0f);
+    return 1.0f - wwShoreSmooth(cond10);
 }
 #endif
 
@@ -229,8 +231,8 @@ float wwShoreEdgeSoft(float2 field, float along, float viewZ)
         return 0.0f;
     }
     float w = lerp(waterShoreK4.y, waterShoreK4.x, clamp(abs(viewZ), 0.0f, 1.0f));
-    float tmp1 = clamp(d / w, 0.0f, 1.0f);
-    return 1.0f - wwShoreSmooth(tmp1);
+    float cond10 = clamp(d / w, 0.0f, 1.0f);
+    return 1.0f - wwShoreSmooth(cond10);
 }
 #endif
 
@@ -253,14 +255,14 @@ float wwShoreNoise(float2 p)
     int2 c = int2(floor(p));
     float2 f = p - float2(c);
     f = (f * f) * (3.0f.xx - (f * 2.0f));
-    int2 tmp1 = c;
-    float a = float(wwShoreHash(tmp1) >> uint(8)) * 5.9604651880817982601001858711243e-08f;
-    int2 tmp2 = c + int2(1, 0);
-    float b = float(wwShoreHash(tmp2) >> uint(8)) * 5.9604651880817982601001858711243e-08f;
-    int2 tmp3 = c + int2(0, 1);
-    float e = float(wwShoreHash(tmp3) >> uint(8)) * 5.9604651880817982601001858711243e-08f;
-    int2 tmp4 = c + int2(1, 1);
-    float g = float(wwShoreHash(tmp4) >> uint(8)) * 5.9604651880817982601001858711243e-08f;
+    int2 cond10 = c;
+    float a = float(wwShoreHash(cond10) >> uint(8)) * 5.9604651880817982601001858711243e-08f;
+    int2 cond9 = c + int2(1, 0);
+    float b = float(wwShoreHash(cond9) >> uint(8)) * 5.9604651880817982601001858711243e-08f;
+    int2 cond8 = c + int2(0, 1);
+    float e = float(wwShoreHash(cond8) >> uint(8)) * 5.9604651880817982601001858711243e-08f;
+    int2 cond7 = c + int2(1, 1);
+    float g = float(wwShoreHash(cond7) >> uint(8)) * 5.9604651880817982601001858711243e-08f;
     return lerp(lerp(a, b, f.x), lerp(e, g, f.x), f.y);
 }
 #endif
@@ -273,13 +275,13 @@ float wwShoreFoam(float2 field, float2 worldXY, float t)
         return 0.0f;
     }
     float x = max(field.x - waterShoreK0.x, 0.0f);
-    float tmp1 = clamp(x / waterShoreK0.z, 0.0f, 1.0f);
-    float env = 1.0f - wwShoreSmooth(tmp1);
+    float cond10 = clamp(x / waterShoreK0.z, 0.0f, 1.0f);
+    float env = 1.0f - wwShoreSmooth(cond10);
     float wave = 0.5f + (0.5f * cos(6.283185482025146484375f * ((x / waterShoreK1.x) + (t / waterShoreK1.y))));
     float cover = env * lerp(waterShoreK1.z, 1.0f, wave);
-    float2 tmp2 = worldXY * 0.02083333395421504974365234375f;
-    float2 tmp3 = (worldXY * 0.0588235296308994293212890625f) + 0.37000000476837158203125f.xx;
-    float n = (0.64999997615814208984375f * wwShoreNoise(tmp2)) + (0.3499999940395355224609375f * wwShoreNoise(tmp3));
+    float2 cond9 = worldXY * 0.02083333395421504974365234375f;
+    float2 cond8 = (worldXY * 0.0588235296308994293212890625f) + 0.37000000476837158203125f.xx;
+    float n = (0.64999997615814208984375f * wwShoreNoise(cond9)) + (0.3499999940395355224609375f * wwShoreNoise(cond8));
     return clamp((n - (1.0f - cover)) / waterShoreK0.w, 0.0f, 1.0f);
 }
 #endif
@@ -296,28 +298,28 @@ float4 wwShoreWave(float2 P)
     float2 t0 = floor(g);
     float2 f = g - t0;
     float2 c0 = waterInfoGrid.xy + ((t0 + 0.5f.xx) * tex);
-    float2 tmp1 = c0;
-    float2 tmp2 = c0 + float2(tex, 0.0f);
-    float2 tmp3 = c0 + float2(0.0f, tex);
-    float2 tmp4 = c0 + tex.xx;
-    uint4 w = uint4(wwWaterInfoWord(tmp1), wwWaterInfoWord(tmp2), wwWaterInfoWord(tmp3), wwWaterInfoWord(tmp4));
+    float2 cond10 = c0;
+    float2 cond9 = c0 + float2(tex, 0.0f);
+    float2 cond8 = c0 + float2(0.0f, tex);
+    float2 cond7 = c0 + tex.xx;
+    uint4 w = uint4(wwWaterInfoWord(cond10), wwWaterInfoWord(cond9), wwWaterInfoWord(cond8), wwWaterInfoWord(cond7));
     float4 bw = float4((1.0f - f.x) * (1.0f - f.y), f.x * (1.0f - f.y), (1.0f - f.x) * f.y, f.x * f.y);
     uint4 id = w & uint4(65535u, 65535u, 65535u, 65535u);
     uint body = 0u;
     float best = -1.0f;
     for (int k = 0; k < 4; k++)
     {
-        bool tmp5 = id[k] != 0u;
-        bool tmp6;
-        if (tmp5)
+        bool cond6 = id[k] != 0u;
+        bool cond5;
+        if (cond6)
         {
-            tmp6 = bw[k] > best;
+            cond5 = bw[k] > best;
         }
         else
         {
-            tmp6 = tmp5;
+            cond5 = cond6;
         }
-        if (tmp6)
+        if (cond5)
         {
             best = bw[k];
             body = id[k];
@@ -328,51 +330,52 @@ float4 wwShoreWave(float2 P)
         return 0.0f.xxxx;
     }
     float4 code = float4(w >> uint4(int4(24, 24, 24, 24))) / 255.0f.xxxx;
-    uint4 tmp7 = body.xxxx;
-    float depth = dot(bw, ((float4(bool4(id.x == tmp7.x, id.y == tmp7.y, id.z == tmp7.z, id.w == tmp7.w)) * code) * code) * 8192.0f);
+    uint4 w00Part = body.xxxx;
+    // dry = 0
+    float depth = dot(bw, ((float4(bool4(id.x == w00Part.x, id.y == w00Part.y, id.z == w00Part.z, id.w == w00Part.w)) * code) * code) * 8192.0f);
     float4 row = waterInfoBodies.Load(int3(int2(int(body % 256u), int(body / 256u)), 0));
     int cls = clamp(int(row.y + 0.5f), 0, 2);
     float len = (sqrt(max(row.w, 1.0f)) * tex) * 0.01428749971091747283935546875f;
-    float tmp8;
+    float w10Part;
     if (cls == 1)
     {
-        tmp8 = min(len, waterShoreK2.z);
+        w10Part = min(len, waterShoreK2.z);
     }
     else
     {
-        tmp8 = len;
+        w10Part = len;
     }
-    float fetch = tmp8;
+    float fetch = w10Part;
     float U = waterShoreK2.x;
     float hw = min((0.001599999959580600261688232421875f * U) * sqrt(fetch / 9.81000041961669921875f), ((0.20999999344348907470703125f * U) * U) / 9.81000041961669921875f);
-    float tmp9;
+    float w01Part;
     if (cls == 0)
     {
-        tmp9 = sqrt((hw * hw) + (waterShoreK2.y * waterShoreK2.y));
+        w01Part = sqrt((hw * hw) + (waterShoreK2.y * waterShoreK2.y));
     }
     else
     {
-        tmp9 = hw;
+        w01Part = hw;
     }
-    float hs = tmp9;
-    float tmp10;
+    float hs = w01Part;
+    float w11Part;
     if (cls == 0)
     {
-        tmp10 = 1.0f;
+        w11Part = 1.0f;
     }
     else
     {
-        tmp10 = waterShoreK3.x;
+        w11Part = waterShoreK3.x;
     }
-    return float4(hs / 0.01428749971091747283935546875f, tmp10, depth, 1.0f);
+    return float4(hs / 0.01428749971091747283935546875f, w11Part, depth, 1.0f);
 }
 #endif
 
 #if defined(WW_FN_wwFoamHash01) || defined(WW_FN_ALL)
 float wwFoamHash01(int2 c)
 {
-    int2 tmp1 = c;
-    return float(wwShoreHash(tmp1) >> uint(8)) * 5.9604651880817982601001858711243e-08f;
+    int2 cond10 = c;
+    return float(wwShoreHash(cond10) >> uint(8)) * 5.9604651880817982601001858711243e-08f;
 }
 #endif
 
@@ -382,16 +385,17 @@ float wwFoamNoise(float2 p, int k, int2 seed)
     float2 fl = floor(p);
     float2 f = p - fl;
     f = (f * f) * (3.0f.xx - (f * 2.0f));
+    // p is in [0, k]: no negative %
     int2 c = int2(fl) % k.xx;
     int2 c1 = (c + int2(1, 1)) % k.xx;
-    int2 tmp1 = c + seed;
-    float a = wwFoamHash01(tmp1);
-    int2 tmp2 = int2(c1.x, c.y) + seed;
-    float b = wwFoamHash01(tmp2);
-    int2 tmp3 = int2(c.x, c1.y) + seed;
-    float e = wwFoamHash01(tmp3);
-    int2 tmp4 = c1 + seed;
-    float h = wwFoamHash01(tmp4);
+    int2 cond10 = c + seed;
+    float a = wwFoamHash01(cond10);
+    int2 cond9 = int2(c1.x, c.y) + seed;
+    float b = wwFoamHash01(cond9);
+    int2 cond8 = int2(c.x, c1.y) + seed;
+    float e = wwFoamHash01(cond8);
+    int2 cond7 = c1 + seed;
+    float h = wwFoamHash01(cond7);
     return lerp(lerp(a, b, f.x), lerp(e, h, f.x), f.y);
 }
 #endif
@@ -402,25 +406,26 @@ float wwFoamLace(float2 p, int k)
     float2 c = floor(p);
     float f1 = 8.0f;
     float f2 = 8.0f;
-    float tmp1;
+    float cond10;
     for (int y = -1; y <= 1; y++)
     {
         for (int x = -1; x <= 1; x++)
         {
             int2 cc = int2(c) + int2(x, y);
-            int2 tmp2 = ((cc + k.xx) % k.xx) + int2(331, 977);
-            uint h = wwShoreHash(tmp2);
+            int2 cond9 = ((cc + k.xx) % k.xx) + int2(331, 977);
+            // cc >= -1
+            uint h = wwShoreHash(cond9);
             float2 q = float2(cc) + (float2(float(h & 65535u), float(h >> uint(16))) * 1.525902189314365386962890625e-05f);
             float d = length(p - q);
             if (d < f1)
             {
-                tmp1 = f1;
+                cond10 = f1;
             }
             else
             {
-                tmp1 = min(f2, d);
+                cond10 = min(f2, d);
             }
-            f2 = tmp1;
+            f2 = cond10;
             f1 = min(f1, d);
         }
     }
@@ -436,35 +441,39 @@ float wwShoreFoamWave(float2 field, float2 P, float t, float column, float colFo
     {
         return 0.0f;
     }
-    float2 tmp1 = P;
-    float4 wv = wwShoreWave(tmp1);
+    float2 cond10 = P;
+    float4 wv = wwShoreWave(cond10);
     if (wv.w < 0.5f)
     {
         return 0.0f;
     }
+    // no wind on a river: no foam, and no empty smoothstep
     float hs = max(wv.x, 0.001000000047497451305389404296875f);
     bool scene = column < 100000000.0f;
-    float tmp2;
+    float cond9;
     if (scene)
     {
-        tmp2 = column;
+        cond9 = column;
     }
     else
     {
-        tmp2 = wv.z;
+        cond9 = wv.z;
     }
-    float dep = tmp2;
+    float dep = cond9;
     float dF = scene ? colFoot : 0.0f;
     float amount = clamp(pow((hs * 0.01428749971091747283935546875f) / waterShoreK2.w, 2.5f) * wv.y, 0.0f, 1.0f);
     dbg = float3(hs / 64.0f, amount, dep / 64.0f);
+    // the surf: breaking where the column is under H / gamma, crests running in as before
     float db = hs / waterShoreK3.y;
     float surf = 1.0f - smoothstep(0.60000002384185791015625f * db, (1.2000000476837158203125f * db) + dF, dep);
     float x = max(field.x - waterShoreK0.x, 0.0f);
     float wave = 0.5f + (0.5f * cos(6.283185482025146484375f * ((x / waterShoreK1.x) + (t / waterShoreK1.y))));
     surf *= lerp(waterShoreK1.z, 1.0f, wave);
+    // the lap line: run-up of about H on the bank; thinner than a pixel = fainter, not wider
     float lap = ((1.0f - smoothstep(0.0f, hs + dF, dep)) * (hs / ((hs + dF) + 9.9999997473787516355514526367188e-05f))) * smoothstep(0.0f, waterShoreK3.w, hs * 0.01428749971091747283935546875f);
     if (waterShoreEdgeLaw == 1)
     {
+        // off the contact itself: no white seam on the sand
         lap *= smoothstep(0.0f, 0.300000011920928955078125f * (hs + dF), dep);
     }
     float D_1 = max(surf * amount, lap * waterShoreK3.z);
@@ -472,10 +481,11 @@ float wwShoreFoamWave(float2 field, float2 P, float t, float column, float colFo
     {
         return 0.0f;
     }
-    float2 tmp3 = P;
-    float tmp4 = foot;
-    float tmp5 = t;
-    float3 det = wwFoamDetail(tmp3, tmp4, tmp5);
+    float2 cond8 = P;
+    float cond7 = foot;
+    float cond6 = t;
+    float3 det = wwFoamDetail(cond8, cond7, cond6);
+    // a soft threshold where the detail has faded: alpha ~ D on average
     float s = lerp(0.5f, waterShoreK0.w, det.z);
     float a = smoothstep((1.0f - D_1) - s, (1.0f - D_1) + s, det.x);
     return (a * lerp(det.y, 1.0f, D_1 * D_1)) * min(1.0f, 1.5f * D_1);

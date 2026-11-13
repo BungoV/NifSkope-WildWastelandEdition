@@ -24,30 +24,30 @@ float3 fgSplat(float2 w, float2 wdx, float2 wdy)
     int2 n = int2(fgGridN);
     float3 acc = 0.0f.xxx;
     float3 vc = 0.0f.xxx;
-    float tmp1;
-    float tmp2;
-    float3 tmp3;
+    float bwPick2;
+    float bwPick;
+    float3 tPick;
     for (int c = 0; c < 4; c++)
     {
         int2 o = int2(c & 1, c >> 1);
         int2 p = clamp(int2(g0) + o, int2(0, 0), n - int2(1, 1));
         if (o.x == 1)
         {
-            tmp1 = f.x;
+            bwPick2 = f.x;
         }
         else
         {
-            tmp1 = 1.0f - f.x;
+            bwPick2 = 1.0f - f.x;
         }
         if (o.y == 1)
         {
-            tmp2 = f.y;
+            bwPick = f.y;
         }
         else
         {
-            tmp2 = 1.0f - f.y;
+            bwPick = 1.0f - f.y;
         }
-        float bw = tmp1 * tmp2;
+        float bw = bwPick2 * bwPick;
         uint4 s = fgGrid.Load(int3(p, 0));
         vc += (spvUnpackUnorm4x8(s.w).xyz * bw);
         if (bw <= 0.0f)
@@ -55,8 +55,8 @@ float3 fgSplat(float2 w, float2 wdx, float2 wdy)
             continue;
         }
         float4 wt = spvUnpackUnorm4x8(s.z);
-        uint tmp4[4] = { s.x & 65535u, s.x >> uint(16), s.y & 65535u, s.y >> uint(16) };
-        uint id[4] = tmp4;
+        uint idPart[4] = { s.x & 65535u, s.x >> uint(16), s.y & 65535u, s.y >> uint(16) };
+        uint id[4] = idPart;
         for (int k = 0; k < 4; k++)
         {
             if (wt[k] <= 0.0f)
@@ -65,13 +65,13 @@ float3 fgSplat(float2 w, float2 wdx, float2 wdy)
             }
             if (id[k] == 65535u)
             {
-                tmp3 = 0.5f.xxx;
+                tPick = 0.5f.xxx;
             }
             else
             {
-                tmp3 = fgLtex.SampleGrad(_fgLtex_sampler, float3(uv, float(id[k])), dx, dy).xyz;
+                tPick = fgLtex.SampleGrad(_fgLtex_sampler, float3(uv, float(id[k])), dx, dy).xyz;
             }
-            float3 t = tmp3;
+            float3 t = tPick;
             acc += (t * (bw * wt[k]));
         }
     }
@@ -84,35 +84,35 @@ float4 fgDecals(float3 w, float pix)
 {
     int2 b = int2(floor((w.xy - fgBinMap.xy) * fgBinMap.z));
     int2 bn = int2(fgBinN.xy);
-    bool tmp1 = b.x < 0;
-    bool tmp2;
-    if (!tmp1)
+    bool bwPick2 = b.x < 0;
+    bool bwPick;
+    if (!bwPick2)
     {
-        tmp2 = b.y < 0;
+        bwPick = b.y < 0;
     }
     else
     {
-        tmp2 = tmp1;
+        bwPick = bwPick2;
     }
-    bool tmp3;
-    if (!tmp2)
+    bool tPick;
+    if (!bwPick)
     {
-        tmp3 = b.x >= bn.x;
+        tPick = b.x >= bn.x;
     }
     else
     {
-        tmp3 = tmp2;
+        tPick = bwPick;
     }
-    bool tmp4;
-    if (!tmp3)
+    bool idPart;
+    if (!tPick)
     {
-        tmp4 = b.y >= bn.y;
+        idPart = b.y >= bn.y;
     }
     else
     {
-        tmp4 = tmp3;
+        idPart = tPick;
     }
-    if (tmp4)
+    if (idPart)
     {
         return 0.0f.xxxx;
     }
@@ -128,56 +128,56 @@ float4 fgDecals(float3 w, float pix)
         float4 q = fgDecal.Load(r + 1);
         float4 b0 = fgDecal.Load(r + 2);
         float4 b1 = fgDecal.Load(r + 3);
-        float4 tmp5 = float4(-q.xyz, q.w);
-        float3 tmp6 = w - ps.xyz;
-        float3 l = fgQrot(tmp5, tmp6) / ps.w.xxx;
-        bool tmp7 = l.x < b0.x;
-        bool tmp8;
-        if (!tmp7)
+        float4 lPart2 = float4(-q.xyz, q.w);
+        float3 lPart = w - ps.xyz;
+        float3 l = fgQrot(lPart2, lPart) / ps.w.xxx;
+        bool cond6 = l.x < b0.x;
+        bool cond5;
+        if (!cond6)
         {
-            tmp8 = l.x > b0.z;
+            cond5 = l.x > b0.z;
         }
         else
         {
-            tmp8 = tmp7;
+            cond5 = cond6;
         }
-        bool tmp9;
-        if (!tmp8)
+        bool cond4;
+        if (!cond5)
         {
-            tmp9 = l.y < b0.y;
+            cond4 = l.y < b0.y;
         }
         else
         {
-            tmp9 = tmp8;
+            cond4 = cond5;
         }
-        bool tmp10;
-        if (!tmp9)
+        bool cond3;
+        if (!cond4)
         {
-            tmp10 = l.y > b0.w;
+            cond3 = l.y > b0.w;
         }
         else
         {
-            tmp10 = tmp9;
+            cond3 = cond4;
         }
-        bool tmp11;
-        if (!tmp10)
+        bool cond2;
+        if (!cond3)
         {
-            tmp11 = l.z < b1.x;
+            cond2 = l.z < b1.x;
         }
         else
         {
-            tmp11 = tmp10;
+            cond2 = cond3;
         }
-        bool tmp12;
-        if (!tmp11)
+        bool cond;
+        if (!cond2)
         {
-            tmp12 = l.z > b1.y;
+            cond = l.z > b1.y;
         }
         else
         {
-            tmp12 = tmp11;
+            cond = cond2;
         }
-        if (tmp12)
+        if (cond)
         {
             continue;
         }
@@ -200,10 +200,10 @@ float3 fgGround(float3 w, float3 sheet)
     }
     float2 wdx = ddx(w.xy);
     float2 wdy = ddy(w.xy);
-    float2 tmp1 = w.xy;
-    float2 tmp2 = wdx;
-    float2 tmp3 = wdy;
-    float3 col = fgSplat(tmp1, tmp2, tmp3);
+    float2 bwPick2 = w.xy;
+    float2 bwPick = wdx;
+    float2 tPick = wdy;
+    float3 col = fgSplat(bwPick2, bwPick, tPick);
     if (fgDecalsOn == 0)
     {
         return col;
@@ -230,18 +230,18 @@ float3 fgGround(float3 w, float3 sheet)
     }
     float2 wdx = ddx(w.xy);
     float2 wdy = ddy(w.xy);
-    float2 tmp1 = w.xy;
-    float2 tmp2 = wdx;
-    float2 tmp3 = wdy;
-    float3 col = fgSplat(tmp1, tmp2, tmp3);
+    float2 bwPick2 = w.xy;
+    float2 bwPick = wdx;
+    float2 tPick = wdy;
+    float3 col = fgSplat(bwPick2, bwPick, tPick);
     if (fgDecalsOn == 0)
     {
         return col;
     }
     float pix = max(length(ddx(w)), length(ddy(w)));
-    float3 tmp4 = w;
-    float tmp5 = pix;
-    float4 d = fgDecals(tmp4, tmp5);
+    float3 idPart = w;
+    float lPart2 = pix;
+    float4 d = fgDecals(idPart, lPart2);
     return (col * (1.0f - d.w)) + d.xyz;
 }
 #endif
@@ -258,64 +258,64 @@ float3 fgGround(float3 w, float3 sheet)
     float2 rdy = ddy(rel);
     int2 cn = int2(spvTextureSize(fgCells, uint(0), dummy_parameter));
     int2 ci = int2(floor(rel));
-    bool tmp1 = ci.x < 0;
-    bool tmp2;
-    if (!tmp1)
+    bool bwPick2 = ci.x < 0;
+    bool bwPick;
+    if (!bwPick2)
     {
-        tmp2 = ci.y < 0;
+        bwPick = ci.y < 0;
     }
     else
     {
-        tmp2 = tmp1;
+        bwPick = bwPick2;
     }
-    bool tmp3;
-    if (!tmp2)
+    bool tPick;
+    if (!bwPick)
     {
-        tmp3 = ci.x >= cn.x;
+        tPick = ci.x >= cn.x;
     }
     else
     {
-        tmp3 = tmp2;
+        tPick = bwPick;
     }
-    bool tmp4;
-    if (!tmp3)
+    bool idPart;
+    if (!tPick)
     {
-        tmp4 = ci.y >= cn.y;
+        idPart = ci.y >= cn.y;
     }
     else
     {
-        tmp4 = tmp3;
+        idPart = tPick;
     }
-    if (tmp4)
+    if (idPart)
     {
         return sheet;
     }
     uint4 c = fgCells.Load(int3(ci, 0));
-    bool tmp5 = c.x == 0u;
-    bool tmp6;
-    if (!tmp5)
+    bool lPart2 = c.x == 0u;
+    bool lPart;
+    if (!lPart2)
     {
-        tmp6 = c.z == 0u;
+        lPart = c.z == 0u;
     }
     else
     {
-        tmp6 = tmp5;
+        lPart = lPart2;
     }
-    if (tmp6)
+    if (lPart)
     {
         return sheet;
     }
     float3 uvl = float3(rel - float2(ci), float(c.y));
-    float3 tmp7;
+    float3 cond6;
     if (c.x == 1u)
     {
-        tmp7 = fgPagesN.SampleGrad(_fgPagesN_sampler, uvl, rdx, rdy).xyz;
+        cond6 = fgPagesN.SampleGrad(_fgPagesN_sampler, uvl, rdx, rdy).xyz;
     }
     else
     {
-        tmp7 = fgPagesF.SampleGrad(_fgPagesF_sampler, uvl, rdx, rdy).xyz;
+        cond6 = fgPagesF.SampleGrad(_fgPagesF_sampler, uvl, rdx, rdy).xyz;
     }
-    float3 page = tmp7;
+    float3 page = cond6;
     return lerp(sheet, page, (float(c.z) / 255.0f).xxx);
 }
 #endif

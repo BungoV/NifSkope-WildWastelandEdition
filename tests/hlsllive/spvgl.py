@@ -7,8 +7,11 @@ A word-level editor, no SPIRV-Tools needed. What it changes (each one found with
   4. a separate Texture + SamplerState pair becomes ONE combined sampler uniform (GL has no separate samplers), named after
      the texture, with a Location; a texture with no sampler (texelFetch only) gets a combined sampler too;
   5. a real uniform block (globalUniforms, skinningUniforms, ...) keeps its layout and gets Binding = BLOCK_BINDING[name];
-  6. VertexIndex / InstanceIndex built-ins become VertexId / InstanceId (the GL names).
+  6. VertexIndex / InstanceIndex built-ins become VertexId / InstanceId (the GL names);
+  7. tessellation control: an element taken out of a whole Input-array load (OpLoad %arr %in + OpCompositeExtract k) is read
+     through its own access chain (NV C5025 "lvalue in array access too complex" otherwise; fo4_waterdisp_hs). Red: SPVGL_TESC_RED=1.
 Usage: patch(spv_bytes, block_bindings) -> (new bytes, report dict)."""
+import os
 import re
 import struct
 
@@ -283,6 +286,47 @@ def ptr_type(mod, sc, pointee, cache):
     return cache[k]
 
 
+def uint_const(mod, k):
+    u32 = next((g.a[0] for g in mod.glob if g.op == OP_TYPE_INT and g.a[1] == 32 and g.a[2] == 0), None)
+    if u32 is None:
+        u32 = mod.new_id()
+        mod.add_glob(Inst(OP_TYPE_INT, [u32, 32, 0]))
+    kc = next((g.a[1] for g in mod.glob if g.op == OP_CONSTANT and g.a[0] == u32 and g.a[2] == k), None)
+    if kc is None:
+        kc = mod.new_id()
+        mod.add_glob(Inst(OP_CONSTANT, [u32, kc, k]))
+    return kc
+
+
+def tesc_input_elements(mod, ptrs):
+    """7. OpCompositeExtract T (OpLoad %arr %input) k... -> OpAccessChain ptr(Input, T) %input k... + OpLoad T; -> the count.
+    The whole-array load stays (dead once every extract is rewritten; the driver drops it)."""
+    ins = {}
+    for x in mod.glob:
+        if x.op == OP_VARIABLE and x.a[2] == SC_INPUT and mod.defn[mod.defn[x.a[0]].a[2]].op == OP_TYPE_ARRAY:
+            ins[x.a[1]] = mod.defn[x.a[0]].a[2]
+    whole = {}   # load result -> (input variable, array type)
+    n = 0
+    newf = []
+    for x in mod.funcs:
+        if x.op == OP_LOAD and x.a[2] in ins:
+            whole[x.a[1]] = (x.a[2], ins[x.a[2]])
+        elif x.op == 81 and x.a[2] in whole:
+            var, tid = whole[x.a[2]]
+            for k in x.a[3:]:
+                t = mod.defn[tid]
+                tid = t.a[1 + k] if t.op == OP_TYPE_STRUCT else t.a[1]
+            assert tid == x.a[0], 'tesc extract type'
+            p = mod.new_id()
+            newf.append(Inst(OP_ACCESS_CHAIN, [ptr_type(mod, SC_INPUT, tid, ptrs), p, var] + [uint_const(mod, k) for k in x.a[3:]]))
+            newf.append(Inst(OP_LOAD, [x.a[0], x.a[1], p]))
+            n += 1
+            continue
+        newf.append(x)
+    mod.funcs = newf
+    return n
+
+
 def patch(data, block_bindings, report=None, locs=None, bool_names=(), ps_remap=None):
     locs = locs if locs is not None else {}   # name -> (location, slots), shared by every stage of one program
     mod = Module(data)
@@ -304,6 +348,10 @@ def patch(data, block_bindings, report=None, locs=None, bool_names=(), ps_remap=
     for x in mod.glob:
         if x.op == 1:
             x.op = OP_CONSTANT_NULL
+
+    # ---- 7. tessellation control (execution model 1): per-element input reads
+    if stage == 1 and os.environ.get('SPVGL_TESC_RED') != '1':
+        rep['notes'].append('tesc input elements %d' % tesc_input_elements(mod, ptrs))
 
     # ---- 6. built-ins
     for e in [e for e in mod.annot if e.op == OP_DECORATE and e.a[1] == DEC_BUILTIN]:

@@ -15,8 +15,8 @@ struct CloudBands
     float3 windKm;
 };
 
-static const float tmp665[4] = { 0.100000001490116119384765625f, 0.07999999821186065673828125f, 0.070000000298023223876953125f, 0.02999999932944774627685546875f };
-static const float tmp683[4] = { 0.60000002384185791015625f, 0.449999988079071044921875f, 0.550000011920928955078125f, 0.85000002384185791015625f };
+static const float table4[4] = { 0.100000001490116119384765625f, 0.07999999821186065673828125f, 0.070000000298023223876953125f, 0.02999999932944774627685546875f };
+static const float table42[4] = { 0.60000002384185791015625f, 0.449999988079071044921875f, 0.550000011920928955078125f, 0.85000002384185791015625f };
 
 cbuffer LooseUniforms : register(b31, space0)
 {
@@ -115,15 +115,16 @@ float cvTypeProfile(float T, float hf)
 {
     float u = clamp(T, 0.0f, 1.0f) * 3.0f;
     int k = min(int(u), 2);
-    float r = lerp(tmp665[k], tmp665[k + 1], u - float(k));
-    float f = lerp(tmp683[k], tmp683[k + 1], u - float(k));
-    float param = 0.0f;
-    float param_1 = r;
-    float param_2 = hf;
-    float param_3 = f;
-    float param_4 = 1.0f;
-    float param_5 = hf;
-    return cvSmooth(param, param_1, param_2) * (1.0f - cvSmooth(param_3, param_4, param_5));
+    // the rise and fall heights blend, not the profiles' values (cloudvolmath.h typeProfile: no shoulder half way up)
+    float r = lerp(table4[k], table4[k + 1], u - float(k));
+    float f = lerp(table42[k], table42[k + 1], u - float(k));
+    float aArg2 = 0.0f;
+    float bArg2 = r;
+    float xArg2 = hf;
+    float aArg = f;
+    float bArg = 1.0f;
+    float xArg = hf;
+    return cvSmooth(aArg2, bArg2, xArg2) * (1.0f - cvSmooth(aArg, bArg, xArg));
 }
 
 #define WW_FN_cvCalAt
@@ -149,39 +150,41 @@ float2 cfCoverMax(float2 xy0, float2 xy1)
     float2 uv0 = (xy0 - cvBands.mapRect.xy) * cvBands.mapRect.z;
     float2 uv1 = (xy1 - cvBands.mapRect.xy) * cvBands.mapRect.z;
     float2 r = 0.0f.xx;
-    bool tmp1218 = any(bool2(uv0.x < 0.0f.xx.x, uv0.y < 0.0f.xx.y));
-    bool tmp1225;
-    if (!tmp1218)
+    bool cond8 = any(bool2(uv0.x < 0.0f.xx.x, uv0.y < 0.0f.xx.y));
+    bool cond7;
+    if (!cond8)
     {
-        tmp1225 = any(bool2(uv1.x > 1.0f.xx.x, uv1.y > 1.0f.xx.y));
+        cond7 = any(bool2(uv1.x > 1.0f.xx.x, uv1.y > 1.0f.xx.y));
     }
     else
     {
-        tmp1225 = tmp1218;
+        cond7 = cond8;
     }
-    if (tmp1225)
+    if (cond7)
     {
+        // part of the rect is off the map
         r = cvBands.coverage.xy;
     }
-    bool tmp1233 = any(bool2(uv0.x > 1.0f.xx.x, uv0.y > 1.0f.xx.y));
-    bool tmp1240;
-    if (!tmp1233)
+    bool cond6 = any(bool2(uv0.x > 1.0f.xx.x, uv0.y > 1.0f.xx.y));
+    bool cond5;
+    if (!cond6)
     {
-        tmp1240 = any(bool2(uv1.x < 0.0f.xx.x, uv1.y < 0.0f.xx.y));
+        cond5 = any(bool2(uv1.x < 0.0f.xx.x, uv1.y < 0.0f.xx.y));
     }
     else
     {
-        tmp1240 = tmp1233;
+        cond5 = cond6;
     }
-    if (tmp1240)
+    if (cond5)
     {
+        // all of it
         return r;
     }
     int2 n = int2(spvTextureSize(cvMap, uint(0), dummy_parameter));
     int2 a = clamp(int2(floor((clamp(uv0, 0.0f.xx, 1.0f.xx) * float2(n)) - 0.5f.xx)), int2(0, 0), n - int2(1, 1));
     int2 b = clamp(int2(floor((clamp(uv1, 0.0f.xx, 1.0f.xx) * float2(n)) - 0.5f.xx)) + int2(1, 1), int2(0, 0), n - int2(1, 1));
-    int2 tmp1286 = b - a;
-    if (any(bool2(tmp1286.x > int2(15, 15).x, tmp1286.y > int2(15, 15).y)))
+    int2 cond4 = b - a;
+    if (any(bool2(cond4.x > int2(15, 15).x, cond4.y > int2(15, 15).y)))
     {
         return 1.0f.xx;
     }
@@ -203,8 +206,8 @@ float cfShapeMip(float3 q0, float3 q1, int lod)
     float3 u1 = ((q1 / 6.0f.xxx) * float(n)) - 0.5f.xxx;
     int3 a = int3(floor(u0));
     int3 b = int3(floor(u1)) + int3(1, 1, 1);
-    int3 tmp1118 = b - a;
-    if (any(bool3(tmp1118.x > int3(7, 7, 7).x, tmp1118.y > int3(7, 7, 7).y, tmp1118.z > int3(7, 7, 7).z)))
+    int3 cond9 = b - a;
+    if (any(bool3(cond9.x > int3(7, 7, 7).x, cond9.y > int3(7, 7, 7).y, cond9.z > int3(7, 7, 7).z)))
     {
         return 1.0f;
     }
@@ -215,6 +218,7 @@ float cfShapeMip(float3 q0, float3 q1, int lod)
         {
             for (int x = a.x; x <= b.x; x++)
             {
+                // REPEAT, n a power of 2
                 m = max(m, cvShape.Load(int4(int3(x, y, z) & (n - 1).xxx, lod)).x);
             }
         }
@@ -227,18 +231,18 @@ float cfGradMax(int b, float h0, float h1)
 {
     if (b == 0)
     {
-        int param = 0;
-        float param_1 = clamp(0.070000000298023223876953125f, h0, h1);
-        float param_2 = 0.0f;
-        int param_3 = 0;
-        float param_4 = clamp(0.039999999105930328369140625f, h0, h1);
-        float param_5 = 1.0f;
-        return max(cvGradient(param, param_1, param_2), cvGradient(param_3, param_4, param_5));
+        int bArg5 = 0;
+        float hfArg3 = clamp(0.070000000298023223876953125f, h0, h1);
+        float sheetArg3 = 0.0f;
+        int bArg4 = 0;
+        float hfArg2 = clamp(0.039999999105930328369140625f, h0, h1);
+        float sheetArg2 = 1.0f;
+        return max(cvGradient(bArg5, hfArg3, sheetArg3), cvGradient(bArg4, hfArg2, sheetArg2));
     }
-    int param_6 = b;
-    float param_7 = clamp(0.1500000059604644775390625f, h0, h1);
-    float param_8 = 0.0f;
-    return cvGradient(param_6, param_7, param_8);
+    int bArg3 = b;
+    float hfArg = clamp(0.1500000059604644775390625f, h0, h1);
+    float sheetArg = 0.0f;
+    return cvGradient(bArg3, hfArg, sheetArg);
 }
 
 void frag_main()
@@ -254,69 +258,73 @@ void frag_main()
         for (int k = 0; k < 216; k++)
         {
             float3 f = (float3(float(k % 6), float((k / 6) % 6), float(k / 36)) + 0.5f.xxx) / 6.0f.xxx;
-            float3 param = lerp(lo, hi, f);
-            m = max(m, cloudDensity(param));
+            float3 pArg = lerp(lo, hi, f);
+            m = max(m, cloudDensity(pArg));
         }
         cfOut = m.xxxx;
         return;
     }
-    float2 param_1 = lo.xy - cfSlackKm.xx;
-    float2 param_2 = hi.xy + cfSlackKm.xx;
-    float2 cov = cfCoverMax(param_1, param_2);
+    float2 xy0Arg = lo.xy - cfSlackKm.xx;
+    float2 xy1Arg = hi.xy + cfSlackKm.xx;
+    float2 cov = cfCoverMax(xy0Arg, xy1Arg);
+    // the shape bound, read once a band needs it
     float s = -1.0f;
     float occ = 0.0f;
-    float tmp1509;
-    float tmp1530;
-    float tmp1608;
+    float cvPick;
+    float cPick;
+    float gmPick;
     for (int b = 0; b < 2; b++)
     {
         float base = cvBands.baseKm[b];
         float top = cvBands.topKm[b];
         float h0 = (lo.z - base) / max(top - base, 0.001000000047497451305389404296875f);
         float h1 = (hi.z - base) / max(top - base, 0.001000000047497451305389404296875f);
-        bool tmp1494 = (h1 <= 0.0f) || (h0 >= 1.0f);
-        bool tmp1502;
-        if (!tmp1494)
+        bool cond11 = (h1 <= 0.0f) || (h0 >= 1.0f);
+        bool cond10;
+        if (!cond11)
         {
-            tmp1502 = cvBands.density[b] <= 0.0f;
+            cond10 = cvBands.density[b] <= 0.0f;
         }
         else
         {
-            tmp1502 = tmp1494;
+            cond10 = cond11;
         }
-        if (tmp1502)
+        if (cond10)
         {
             continue;
         }
         if (b == 0)
         {
-            tmp1509 = cov.x;
+            cvPick = cov.x;
         }
         else
         {
-            tmp1509 = cov.y;
+            cvPick = cov.y;
         }
-        float cv = tmp1509;
+        // lane CLOUD5: the weather noise's swing raises the coverage by at most swing x min(c, 1 - c) (rising in c); the
+        // type tables are bounded by their largest anchor (a blend never exceeds both), the anvil by sqrt (its power >=
+        // 0.5); every type profile is <= 1 (gm below); the curl moves only the detail read, which only erodes
+        float cv = cvPick;
         cv += (cvVarA.z * min(cv, 1.0f - cv));
         if (b == 0)
         {
-            float param_3 = 0.0f;
-            float param_4 = cv;
-            float param_5 = 0.3333333432674407958984375f;
-            float param_6 = cv;
-            float param_7 = 0.666666686534881591796875f;
-            float param_8 = cv;
-            float param_9 = 1.0f;
-            float param_10 = cv;
-            tmp1530 = sqrt(max(max(cvCalAtT(param_3, param_4), cvCalAtT(param_5, param_6)), max(cvCalAtT(param_7, param_8), cvCalAtT(param_9, param_10))));
+            float TArg4 = 0.0f;
+            float cArg5 = cv;
+            float TArg3 = 0.3333333432674407958984375f;
+            float cArg4 = cv;
+            float TArg2 = 0.666666686534881591796875f;
+            float cArg3 = cv;
+            float TArg = 1.0f;
+            float cArg2 = cv;
+            cPick = sqrt(max(max(cvCalAtT(TArg4, cArg5), cvCalAtT(TArg3, cArg4)), max(cvCalAtT(TArg2, cArg3), cvCalAtT(TArg, cArg2))));
         }
         else
         {
-            int param_11 = 1;
-            float param_12 = cv;
-            tmp1530 = cvCalAt(param_11, param_12);
+            int bArg7 = 1;
+            float cArg = cv;
+            cPick = cvCalAt(bArg7, cArg);
         }
-        float c = tmp1530;
+        float c = cPick;
         if (c <= 0.0f)
         {
             continue;
@@ -325,30 +333,30 @@ void frag_main()
         {
             float3 q0 = lo + cvBands.windKm;
             float3 q1 = hi + cvBands.windKm;
-            float3 param_13 = q0;
-            float3 param_14 = q1;
-            int param_15 = 0;
-            float3 param_16 = q0;
-            float3 param_17 = q1;
-            int param_18 = 1;
-            float3 param_19 = q0;
-            float3 param_20 = q1;
-            int param_21 = 2;
-            s = max(cfShapeMip(param_13, param_14, param_15), max(cfShapeMip(param_16, param_17, param_18), cfShapeMip(param_19, param_20, param_21)));
+            float3 q0Arg3 = q0;
+            float3 q1Arg3 = q1;
+            int lodArg3 = 0;
+            float3 q0Arg2 = q0;
+            float3 q1Arg2 = q1;
+            int lodArg2 = 1;
+            float3 q0Arg = q0;
+            float3 q1Arg = q1;
+            int lodArg = 2;
+            s = max(cfShapeMip(q0Arg3, q1Arg3, lodArg3), max(cfShapeMip(q0Arg2, q1Arg2, lodArg2), cfShapeMip(q0Arg, q1Arg, lodArg)));
             s = min(s + cfMargin, 1.0f);
         }
         if (b == 0)
         {
-            tmp1608 = 1.0f;
+            gmPick = 1.0f;
         }
         else
         {
-            int param_22 = b;
-            float param_23 = clamp(h0, 0.0f, 1.0f);
-            float param_24 = clamp(h1, 0.0f, 1.0f);
-            tmp1608 = cfGradMax(param_22, param_23, param_24);
+            int bArg6 = b;
+            float h0Arg = clamp(h0, 0.0f, 1.0f);
+            float h1Arg = clamp(h1, 0.0f, 1.0f);
+            gmPick = cfGradMax(bArg6, h0Arg, h1Arg);
         }
-        float gm = tmp1608;
+        float gm = gmPick;
         if ((s * gm) > (1.0f - c))
         {
             occ = 1.0f;
