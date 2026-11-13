@@ -174,9 +174,10 @@ void toneCachePath( const std::string & path );
  * GL_RGBA16F / RGBA32F / RGBA8 / RG32F / RG16F / R32F / R8 / DEPTH24_STENCIL8. GL current. Same key and shape: the same
  * name; another shape: the old one goes first (a full drain). false: why; tex 0 (the owner makes GL's own). The GL
  * texture has NEAREST filters; the owner sets its own. levels (lane VKAIR1): a mip chain (colour formats; the clouds'
- * noise volumes), the owner fills each level. */
+ * noise volumes), the owner fills each level. samples (lane VKOBJ1): a multisample 2D (type 0, one level; the objects'
+ * depth prepass in GL_DEPTH_COMPONENT24 / 32F), GL_TEXTURE_2D_MULTISAMPLE with fixed sample locations. */
 bool sharedTarget( std::uintptr_t key, int type, int w, int h, int d, unsigned glFmt, unsigned & tex, std::string & why,
-	int levels = 1 );
+	int levels = 1, int samples = 1 );
 //! tex is key's live shared name in the current GL context (a shutdown drops every one: the owner makes GL's own again)
 bool sharedTargetIs( std::uintptr_t key, unsigned tex );
 //! key's target goes (GL current: its GL names too)
@@ -558,6 +559,42 @@ CsmStat takeCsmStat();
 //! what csmRun cannot take on this device (empty: none); asked before GL skips its queued draws
 std::string csmRefusal();
 
+/* Lane VKOBJ1 (plan row G4, slice 1): the objects' opaque depth prepass (cellgpucull.cpp, lookdev_csmdepth_q.prog) on the
+ * present device into a shared multisample depth target (sharedTarget type 0 with samples, GL_DEPTH_COMPONENT24 / 32F) that
+ * GL's Hi-Z then reads. GL clears it; the two spans (back faces culled, then two-sided) run in one crossing (depth-only
+ * LEQUAL: order-free), GL's clip z through VK_EXT_depth_clip_control, glPolygonOffset( slope, unit ) as the depth bias.
+ * The pool is copied each run as for the cascades. Red WW_VKVIEW_OBJ_RED=1: GL's prepass. */
+struct ObjRun
+{
+	int w = 0, h = 0, samples = 1;  //!< the target (viewport 0, 0, w, h)
+	unsigned tex = 0;               //!< the shared target's GL name
+	std::uintptr_t key = 0;         //!< its sharedTarget key
+	unsigned pos = 0, idx = 0;      //!< GL's pool buffers
+	std::size_t posBytes = 0, idxBytes = 0;
+	const float * mats = nullptr;   //!< 16 floats per occluder, GL column-major
+	std::size_t nMats = 0;
+	const std::uint32_t * cmds = nullptr;  //!< 5 words per command (VkDrawIndexedIndirectCommand)
+	std::size_t nCmds = 0;
+	std::size_t split = 0;          //!< [0, split) back faces culled (GL CCW front), [split, nCmds) two-sided
+	float clip[16] = {};            //!< csmClipFromView, GL column-major
+	float unit = 2.0f, slope = 1.0f;  //!< glPolygonOffset( slope, unit )
+	int red = 0;                    //!< gates only: 1 depth test off, 2 GL's winding taken as Vulkan's
+};
+//! GL current, the target cleared: the prepass runs on Vulkan. false: why (GL draws it)
+bool objRun( const ObjRun & t, std::string & why );
+void objOnGl( const char * why );
+struct ObjStat
+{
+	int runs = 0, gl = 0, fails = 0;
+	double cpuMs = 0.0, maxMs = 0.0;
+	std::string glWhy, failWhy;
+	int pipelines = 0, cmds = 0, twoSided = 0;
+	double buildMs = 0.0;
+};
+ObjStat takeObjStat();
+//! what objRun cannot take on this device (empty: none)
+std::string objRefusal();
+
 /* lane VKAIR1: a pass's b31 bytes from the program GL is about to draw with (glGetUniform*, arrays element by element,
  * a matrix's GL column k at + 16 k as the row_major HLSL reads it). Fn: the caller's GL functions (Qt's 4.x core) */
 template <class Fn> void fxPack( Fn * fn, unsigned prog, const FxField * f, int n, std::uint8_t * out )
@@ -674,5 +711,7 @@ bool shareWanted( const char * redEnv );
 void lightSay( int pass, bool wanted, const char * glWhy );
 //! lane VKSHADOW1: the cascades' route line ("vk csm:"), one a 5 s window while on Vulkan
 void csmSay( bool wanted, const char * glWhy );
+//! lane VKOBJ1: the objects' prepass route line ("vk obj:"), one a 5 s window while on Vulkan
+void objSay( bool wanted, const char * glWhy );
 }
 #endif

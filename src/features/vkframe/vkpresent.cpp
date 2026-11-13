@@ -51,6 +51,7 @@
 #include "features/vkframe/cloud_resolve_view_ps.spv.h"
 #include "features/vkframe/cloud_resolve_a_view_ps.spv.h"
 #include "features/vkframe/csm_view_vs.spv.h"  // lane VKSHADOW1
+#include "features/vkframe/obj_depth_vs.spv.h"  // lane VKOBJ1
 
 #include <algorithm>
 #include <chrono>
@@ -85,6 +86,7 @@ constexpr GLenum kTexture2D = 0x0DE1, kRgba8 = 0x8058, kScissorTest = 0x0C11, kR
 constexpr GLenum kTexture3D = 0x806F, kTexBinding3D = 0x806A, kTexture2DArray = 0x8C1A, kTexBinding2DArray = 0x8C1D,
 	kGlRg32f = 0x8230, kGlRg16f = 0x822F, kGlR32f = 0x822E, kGlR8 = 0x8229, kGlRg8 = 0x822B;
 constexpr GLenum kDepth16 = 0x81A5;  // lane VKSHADOW1: the sun cascades' D16 2D array
+constexpr GLenum kDepth24 = 0x81A6, kDepth32f = 0x8CAC;  // lane VKOBJ1: the objects' prepass (X8_D24 / D32F, multisample)
 constexpr GLuint64 kTimeoutIgnored = ~0ull;
 
 struct Gl
@@ -244,6 +246,9 @@ struct Vk
 	// lane VKSHADOW1: the sun cascades' depth draws (indexed indirect, GL's polygon offset as the depth bias)
 	bool depthBiasClamp = false, multiDrawIndirect = false, firstInstance = false;
 	VKP( vkCmdBindVertexBuffers ); VKP( vkCmdBindIndexBuffer ); VKP( vkCmdDrawIndexedIndirect ); VKP( vkCmdSetDepthBias );
+	// lane VKOBJ1: GL's clip z in [-w, w] for the objects' perspective prepass (VK_EXT_depth_clip_control)
+	bool clipControl = false;
+	VKP( vkEnumerateDeviceExtensionProperties ); VKP( vkGetPhysicalDeviceFeatures2 );
 };
 #undef VKP
 
@@ -433,6 +438,7 @@ bool makeDevice( std::string & why )
 	LI( vkCreateWin32SurfaceKHR ); LI( vkDestroySurfaceKHR ); LI( vkGetPhysicalDeviceSurfaceSupportKHR );
 	LI( vkGetPhysicalDeviceSurfaceCapabilitiesKHR ); LI( vkGetPhysicalDeviceSurfaceFormatsKHR );
 	LI( vkGetPhysicalDeviceSurfacePresentModesKHR ); LI( vkGetPhysicalDeviceFeatures );
+	LI( vkEnumerateDeviceExtensionProperties ); LI( vkGetPhysicalDeviceFeatures2 );
 #undef LI
 	std::uint8_t want[VK_UUID_SIZE] = {};
 	const bool haveUuid = glUuid( want );
@@ -471,7 +477,28 @@ bool makeDevice( std::string & why )
 	qi.queueCount = 1;
 	qi.pQueuePriorities = &prio;
 	const char * dext[] = { VK_KHR_SWAPCHAIN_EXTENSION_NAME, VK_KHR_EXTERNAL_MEMORY_WIN32_EXTENSION_NAME,
-		VK_KHR_EXTERNAL_SEMAPHORE_WIN32_EXTENSION_NAME };
+		VK_KHR_EXTERNAL_SEMAPHORE_WIN32_EXTENSION_NAME, VK_EXT_DEPTH_CLIP_CONTROL_EXTENSION_NAME };
+	std::uint32_t nDext = 3;
+	// lane VKOBJ1: depth clip control when offered (the objects' prepass refuses without it)
+	VkPhysicalDeviceDepthClipControlFeaturesEXT clipFeat { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DEPTH_CLIP_CONTROL_FEATURES_EXT };
+	if ( v.vkEnumerateDeviceExtensionProperties && v.vkGetPhysicalDeviceFeatures2 ) {
+		std::uint32_t ne = 0;
+		v.vkEnumerateDeviceExtensionProperties( v.phys, nullptr, &ne, nullptr );
+		std::vector<VkExtensionProperties> ep( ne );
+		v.vkEnumerateDeviceExtensionProperties( v.phys, nullptr, &ne, ep.data() );
+		bool has = false;
+		for ( const VkExtensionProperties & e : ep )
+			has = has || std::strcmp( e.extensionName, VK_EXT_DEPTH_CLIP_CONTROL_EXTENSION_NAME ) == 0;
+		if ( has ) {
+			VkPhysicalDeviceFeatures2 f2 { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2 };
+			f2.pNext = &clipFeat;
+			v.vkGetPhysicalDeviceFeatures2( v.phys, &f2 );
+			v.clipControl = clipFeat.depthClipControl == VK_TRUE;
+		}
+	}
+	if ( v.clipControl )
+		nDext = 4;
+	clipFeat.pNext = nullptr;
 	// round 11: the tone pass's fragment shader reads SV_SampleIndex (the SampleRateShading capability)
 	VkPhysicalDeviceFeatures offered {}, en {};
 	if ( v.vkGetPhysicalDeviceFeatures )
@@ -492,8 +519,9 @@ bool makeDevice( std::string & why )
 	di.pEnabledFeatures = &en;
 	di.queueCreateInfoCount = 1;
 	di.pQueueCreateInfos = &qi;
-	di.enabledExtensionCount = 3;
+	di.enabledExtensionCount = nDext;
 	di.ppEnabledExtensionNames = dext;
+	di.pNext = v.clipControl ? &clipFeat : nullptr;
 	if ( v.vkCreateDevice( v.phys, &di, nullptr, &v.dev ) != VK_SUCCESS )
 		return fail( "vkCreateDevice (swapchain + external memory / semaphore win32) failed" );
 #define LD( fn ) v.fn = reinterpret_cast<PFN_##fn>( v.vkGetDeviceProcAddr( v.dev, #fn ) )
@@ -604,6 +632,7 @@ void ssrDrop();
 bool fxWork( std::string & why );
 void fxDrop();
 void csmDrop();  // lane VKSHADOW1
+void objDrop();  // lane VKOBJ1
 
 struct Worker
 {
@@ -1128,7 +1157,8 @@ bool makeShared( VkImage & img, VkDeviceMemory & mem, GLuint & tex, GLuint & obj
 	Vk & v = vk();
 	Gl & g = gl();
 	const bool is3d = type == VK_IMAGE_TYPE_3D, layered = !is3d && layers > 1;
-	const bool depthOnly = fmt == VK_FORMAT_D16_UNORM;  // lane VKSHADOW1: the sun cascades (a layered D16 is allowed)
+	const bool depthOnly = fmt == VK_FORMAT_D16_UNORM  // lane VKSHADOW1: the sun cascades (a layered D16 is allowed)
+		|| fmt == VK_FORMAT_X8_D24_UNORM_PACK32 || fmt == VK_FORMAT_D32_SFLOAT;  // lane VKOBJ1: the objects' prepass
 	if ( ( is3d || layered ) && ( samples != 1 || ( depth && !( layered && depthOnly ) ) || !g.texStorageMem3D ) ) {
 		why = !g.texStorageMem3D ? "no glTexStorageMem3DEXT (a 3D / layered shared target)" : "a 3D / layered shared target is single-sample colour or D16 only";
 		return false;
@@ -1279,6 +1309,7 @@ struct Shared
 	GLuint tex = 0, obj = 0;
 	void * glCtx = nullptr;
 	int type = 0, w = 0, h = 0, d = 0, levels = 1;
+	int samples = 1;  // lane VKOBJ1: the objects' multisample depth
 	GLenum glFmt = 0;
 	VkFormat fmt = VK_FORMAT_UNDEFINED;
 	double mb = 0.0;
@@ -1298,9 +1329,11 @@ WwVkPresent::SharedStat & sharedStat()
 
 VkFormat vkFormatOf( GLenum f, bool & depth )
 {
-	depth = f == kDepth24Stencil8 || f == kDepth16;
+	depth = f == kDepth24Stencil8 || f == kDepth16 || f == kDepth24 || f == kDepth32f;
 	switch ( f ) {
 	case kDepth16: return VK_FORMAT_D16_UNORM;  // lane VKSHADOW1
+	case kDepth24: return VK_FORMAT_X8_D24_UNORM_PACK32;  // lane VKOBJ1 (EXT_external_objects' pairing)
+	case kDepth32f: return VK_FORMAT_D32_SFLOAT;
 	case kRgba16f: return VK_FORMAT_R16G16B16A16_SFLOAT;
 	case kRgba32f: return VK_FORMAT_R32G32B32A32_SFLOAT;
 	case kRgba8: return VK_FORMAT_R8G8B8A8_UNORM;
@@ -3483,6 +3516,7 @@ void shutdown()
 		toneSemsDrop( gl().ok && T.semCtx == gl().ctx );
 	}
 	csmDrop();  // lane VKSHADOW1: the cascades' layer views go before the shared arrays they view
+	objDrop();  // lane VKOBJ1: the prepass framebuffer goes before the shared depth it holds
 	// lane VKSHARE1: the keyed shared targets (their owners see sharedTargetIs false and make GL's own again)
 	if ( !shareds().empty() ) {
 		drain();
@@ -3682,7 +3716,8 @@ void toneFrameDrop()
 	toneFrameFree( gl().ok && T.glCtx == gl().ctx );
 }
 
-bool sharedTarget( std::uintptr_t key, int type, int w, int h, int d, unsigned glFmt, unsigned & tex, std::string & why, int levels )
+bool sharedTarget( std::uintptr_t key, int type, int w, int h, int d, unsigned glFmt, unsigned & tex, std::string & why, int levels,
+	int samples )
 {
 	Gl & g = gl();
 	Vk & v = vk();
@@ -3703,11 +3738,15 @@ bool sharedTarget( std::uintptr_t key, int type, int w, int h, int d, unsigned g
 	if ( fmt == VK_FORMAT_UNDEFINED )
 		return fail( "GL format " + std::to_string( glFmt ) + " has no shared twin" );
 	d = type == 0 ? 1 : std::max( d, 1 );
-	levels = depth ? 1 : std::max( levels, 1 );
+	samples = std::max( samples, 1 );
+	if ( samples > 1 && type != 0 )
+		return fail( "a multisample shared target is 2D only" );
+	levels = depth || samples > 1 ? 1 : std::max( levels, 1 );
 	auto it = shareds().find( key );
 	if ( it != shareds().end() ) {
 		Shared & s = it->second;
-		if ( s.glCtx == g.ctx && s.type == type && s.w == w && s.h == h && s.d == d && s.glFmt == glFmt && s.levels == levels ) {
+		if ( s.glCtx == g.ctx && s.type == type && s.w == w && s.h == h && s.d == d && s.glFmt == glFmt && s.levels == levels
+			&& s.samples == samples ) {
 			tex = s.tex;
 			return true;
 		}
@@ -3722,7 +3761,7 @@ bool sharedTarget( std::uintptr_t key, int type, int w, int h, int d, unsigned g
 	}
 	Shared s;
 	const VkImageType vt = type == 1 ? VK_IMAGE_TYPE_3D : VK_IMAGE_TYPE_2D;
-	if ( !makeShared( s.img, s.mem, s.tex, s.obj, fmt, GLenum( glFmt ), 1, w, h, depth, s.mb, why, vt, type == 1 ? d : 1, type == 2 ? d : 1, levels ) ) {
+	if ( !makeShared( s.img, s.mem, s.tex, s.obj, fmt, GLenum( glFmt ), samples, w, h, depth, s.mb, why, vt, type == 1 ? d : 1, type == 2 ? d : 1, levels ) ) {
 		sharedFree( s, true );
 		return fail( why );
 	}
@@ -3739,6 +3778,7 @@ bool sharedTarget( std::uintptr_t key, int type, int w, int h, int d, unsigned g
 	s.h = h;
 	s.d = d;
 	s.levels = levels;
+	s.samples = samples;
 	s.glFmt = GLenum( glFmt );
 	s.fmt = fmt;
 	st.made++;
@@ -7614,6 +7654,459 @@ CsmStat takeCsmStat()
 }
 }  // namespace WwVkPresent
 
+// ---- lane VKOBJ1 (plan row G4, slice 1): the objects' opaque depth prepass into the shared multisample depth target
+namespace
+{
+struct ObjPipes
+{
+	VkFormat fmt = VK_FORMAT_UNDEFINED;
+	int samples = 0;
+	VkRenderPass pass = VK_NULL_HANDLE;
+	VkPipeline pipe[3][2] = {};  // [red][0 culled, 1 two-sided]; red 0 = GL's state, 1 depth test off, 2 GL's winding unmapped
+};
+struct Obj
+{
+	bool broken = false;
+	std::string brokenWhy;
+	VkPipelineLayout layout = VK_NULL_HANDLE;
+	VkShaderModule vs = VK_NULL_HANDLE;
+	std::vector<ObjPipes> sets;
+	VkSemaphore glDone = VK_NULL_HANDLE, vkDone = VK_NULL_HANDLE;
+	GLuint glDoneGl = 0, vkDoneGl = 0;
+	void * semCtx = nullptr;
+	VkCommandBuffer cmd = VK_NULL_HANDLE;
+	VkFence fence = VK_NULL_HANDLE;
+	bool pending = false;
+	CsmBuf pos, idx, mats, cmds;
+	// the framebuffer over the shared target (remade when a shared target is made or goes: sharedGen)
+	std::uintptr_t fbKey = 0;
+	std::uint64_t fbGen = 0;
+	VkFramebuffer fb = VK_NULL_HANDLE;
+	// this run
+	const ObjPipes * set = nullptr;
+	int w = 0, h = 0, red = 0;
+	std::uint32_t split = 0, n = 0;
+	float clip[16] = {};
+	float unit = 0.0f, slope = 0.0f;
+	int pipelines = 0;
+	double buildMs = 0.0;
+	WwVkPresent::ObjStat st;
+};
+
+Obj & objS()
+{
+	static Obj s;
+	return s;
+}
+
+// the layout (one 64-byte vertex push block), the module, the command buffer and its fence (once)
+bool objStatic( std::string & why )
+{
+	Vk & v = vk();
+	Obj & S = objS();
+	if ( S.layout )
+		return true;
+	VkPushConstantRange pr { VK_SHADER_STAGE_VERTEX_BIT, 0, 64 };
+	VkPipelineLayoutCreateInfo plci { VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO };
+	plci.pushConstantRangeCount = 1;
+	plci.pPushConstantRanges = &pr;
+	VkShaderModuleCreateInfo mci { VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO };
+	mci.codeSize = sizeof( vkframe_obj_depth_vs_spv );
+	mci.pCode = vkframe_obj_depth_vs_spv;
+	VkFenceCreateInfo fi { VK_STRUCTURE_TYPE_FENCE_CREATE_INFO };
+	VkCommandBufferAllocateInfo cai { VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO };
+	cai.commandPool = v.pool;
+	cai.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+	cai.commandBufferCount = 1;
+	if ( v.vkCreateShaderModule( v.dev, &mci, nullptr, &S.vs ) != VK_SUCCESS || v.vkCreateFence( v.dev, &fi, nullptr, &S.fence ) != VK_SUCCESS
+		|| v.vkAllocateCommandBuffers( v.dev, &cai, &S.cmd ) != VK_SUCCESS
+		|| v.vkCreatePipelineLayout( v.dev, &plci, nullptr, &S.layout ) != VK_SUCCESS ) {
+		why = "the objects' prepass layout / module / fence / command buffer failed";
+		return false;
+	}
+	return true;
+}
+
+/* the render pass (one depth attachment at the frame's samples, LOAD / STORE, GENERAL: GL cleared it) and the pipeline
+ * of red r and cull state c for this format and sample count, made when first asked */
+VkPipeline objPipe( VkFormat fmt, int samples, int r, int c, VkRenderPass & pass, std::string & why )
+{
+	Vk & v = vk();
+	Obj & S = objS();
+	ObjPipes * P = nullptr;
+	for ( ObjPipes & p : S.sets )
+		if ( p.fmt == fmt && p.samples == samples )
+			P = &p;
+	const double t0 = nowMs();
+	if ( !P ) {
+		ObjPipes np;
+		np.fmt = fmt;
+		np.samples = samples;
+		VkAttachmentDescription at {};
+		at.format = fmt;
+		at.samples = VkSampleCountFlagBits( samples );
+		at.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
+		at.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+		at.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+		at.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+		at.initialLayout = at.finalLayout = VK_IMAGE_LAYOUT_GENERAL;
+		const VkAttachmentReference dr { 0, VK_IMAGE_LAYOUT_GENERAL };
+		VkSubpassDescription sp {};
+		sp.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+		sp.pDepthStencilAttachment = &dr;
+		VkRenderPassCreateInfo rci { VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO };
+		rci.attachmentCount = 1;
+		rci.pAttachments = &at;
+		rci.subpassCount = 1;
+		rci.pSubpasses = &sp;
+		if ( v.vkCreateRenderPass( v.dev, &rci, nullptr, &np.pass ) != VK_SUCCESS ) {
+			why = "vkCreateRenderPass (the objects' prepass) failed";
+			return VK_NULL_HANDLE;
+		}
+		S.sets.push_back( np );
+		P = &S.sets.back();
+	}
+	pass = P->pass;
+	if ( P->pipe[r][c] )
+		return P->pipe[r][c];
+	VkPipelineShaderStageCreateInfo st { VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO };
+	st.stage = VK_SHADER_STAGE_VERTEX_BIT;
+	st.module = S.vs;
+	st.pName = "main";
+	// binding 0: the pool's vec3 positions; binding 1: one model-view matrix per occluder (baseInstance), GL columns at 1-4
+	const VkVertexInputBindingDescription vb[2] = { { 0, 12, VK_VERTEX_INPUT_RATE_VERTEX }, { 1, 64, VK_VERTEX_INPUT_RATE_INSTANCE } };
+	const VkVertexInputAttributeDescription va[5] = { { 0, 0, VK_FORMAT_R32G32B32_SFLOAT, 0 },
+		{ 1, 1, VK_FORMAT_R32G32B32A32_SFLOAT, 0 }, { 2, 1, VK_FORMAT_R32G32B32A32_SFLOAT, 16 },
+		{ 3, 1, VK_FORMAT_R32G32B32A32_SFLOAT, 32 }, { 4, 1, VK_FORMAT_R32G32B32A32_SFLOAT, 48 } };
+	VkPipelineVertexInputStateCreateInfo vi { VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO };
+	vi.vertexBindingDescriptionCount = 2;
+	vi.pVertexBindingDescriptions = vb;
+	vi.vertexAttributeDescriptionCount = 5;
+	vi.pVertexAttributeDescriptions = va;
+	VkPipelineInputAssemblyStateCreateInfo ia { VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO };
+	ia.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+	// GL's clip z in [-w, w] as GL maps it (a perspective w: halving in the shader would round differently)
+	VkPipelineViewportDepthClipControlCreateInfoEXT cc { VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_DEPTH_CLIP_CONTROL_CREATE_INFO_EXT };
+	cc.negativeOneToOne = VK_TRUE;
+	VkPipelineViewportStateCreateInfo vps { VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO };
+	vps.pNext = &cc;
+	vps.viewportCount = vps.scissorCount = 1;
+	VkPipelineRasterizationStateCreateInfo rs { VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO };
+	rs.polygonMode = VK_POLYGON_MODE_FILL;
+	// no y flip: GL's window rows from the bottom are the image's rows from the top, so GL's CCW front is Vulkan's CW
+	rs.frontFace = r == 2 ? VK_FRONT_FACE_COUNTER_CLOCKWISE : VK_FRONT_FACE_CLOCKWISE;
+	rs.cullMode = c ? VK_CULL_MODE_NONE : VK_CULL_MODE_BACK_BIT;
+	rs.depthBiasEnable = VK_TRUE;
+	rs.lineWidth = 1.0f;
+	VkPipelineMultisampleStateCreateInfo ms { VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO };
+	ms.rasterizationSamples = VkSampleCountFlagBits( samples );
+	VkPipelineDepthStencilStateCreateInfo ds { VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO };
+	ds.depthTestEnable = VK_TRUE;
+	ds.depthWriteEnable = VK_TRUE;
+	ds.depthCompareOp = r == 1 ? VK_COMPARE_OP_ALWAYS : VK_COMPARE_OP_LESS_OR_EQUAL;
+	VkPipelineColorBlendStateCreateInfo cbs { VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO };
+	const VkDynamicState dyn[3] = { VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR, VK_DYNAMIC_STATE_DEPTH_BIAS };
+	VkPipelineDynamicStateCreateInfo dy { VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO };
+	dy.dynamicStateCount = 3;
+	dy.pDynamicStates = dyn;
+	VkGraphicsPipelineCreateInfo gp { VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO };
+	gp.stageCount = 1;
+	gp.pStages = &st;
+	gp.pVertexInputState = &vi;
+	gp.pInputAssemblyState = &ia;
+	gp.pViewportState = &vps;
+	gp.pRasterizationState = &rs;
+	gp.pMultisampleState = &ms;
+	gp.pDepthStencilState = &ds;
+	gp.pColorBlendState = &cbs;
+	gp.pDynamicState = &dy;
+	gp.layout = S.layout;
+	gp.renderPass = P->pass;
+	if ( v.vkCreateGraphicsPipelines( v.dev, tone().cache, 1, &gp, nullptr, &P->pipe[r][c] ) != VK_SUCCESS ) {
+		why = std::string( "vkCreateGraphicsPipelines (the objects' prepass, " ) + ( c ? "two-sided" : "culled" ) + ") failed";
+		return VK_NULL_HANDLE;
+	}
+	S.pipelines++;
+	S.buildMs += nowMs() - t0;
+	toneCacheSave();
+	return P->pipe[r][c];
+}
+
+void objSemsDrop( bool glAlive )
+{
+	Vk & v = vk();
+	Gl & g = gl();
+	Obj & S = objS();
+	if ( glAlive )
+		for ( GLuint * s : { &S.glDoneGl, &S.vkDoneGl } )
+			if ( *s )
+				g.deleteSemaphores( 1, s );
+	for ( VkSemaphore * s : { &S.glDone, &S.vkDone } )
+		if ( *s )
+			v.vkDestroySemaphore( v.dev, *s, nullptr );
+	S.glDoneGl = S.vkDoneGl = 0;
+	S.glDone = S.vkDone = VK_NULL_HANDLE;
+	S.semCtx = nullptr;
+}
+
+bool objSems( std::string & why )
+{
+	Gl & g = gl();
+	Obj & S = objS();
+	if ( S.glDone && S.semCtx == g.ctx )
+		return true;
+	objSemsDrop( false );  // another context's names: that context went
+	if ( !exportSem( S.glDone, S.glDoneGl, why ) || !exportSem( S.vkDone, S.vkDoneGl, why ) ) {
+		objSemsDrop( true );
+		return false;
+	}
+	S.semCtx = g.ctx;
+	return true;
+}
+
+void objFbDrop()
+{
+	Obj & S = objS();
+	if ( S.fb )
+		vk().vkDestroyFramebuffer( vk().dev, S.fb, nullptr );
+	S.fb = VK_NULL_HANDLE;
+	S.fbKey = 0;
+}
+
+// the worker: both spans in one render pass (depth-only LEQUAL: the order does not matter), GL's signal waited, ours back
+bool objWork( std::string & why )
+{
+	Vk & v = vk();
+	Obj & S = objS();
+	v.vkResetFences( v.dev, 1, &S.fence );
+	v.vkResetCommandBuffer( S.cmd, 0 );
+	VkCommandBufferBeginInfo bi { VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
+	bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+	v.vkBeginCommandBuffer( S.cmd, &bi );
+	VkRenderPassBeginInfo rbi { VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO };
+	rbi.renderPass = S.set->pass;
+	rbi.framebuffer = S.fb;
+	rbi.renderArea = { { 0, 0 }, { std::uint32_t( S.w ), std::uint32_t( S.h ) } };
+	v.vkCmdBeginRenderPass( S.cmd, &rbi, VK_SUBPASS_CONTENTS_INLINE );
+	const VkBuffer vbs[2] = { S.pos.buf, S.mats.buf };
+	const VkDeviceSize vbo[2] = { 0, 0 };
+	v.vkCmdBindVertexBuffers( S.cmd, 0, 2, vbs, vbo );
+	v.vkCmdBindIndexBuffer( S.cmd, S.idx.buf, 0, VK_INDEX_TYPE_UINT16 );
+	const VkViewport vp { 0.0f, 0.0f, float( S.w ), float( S.h ), 0.0f, 1.0f };
+	const VkRect2D sc { { 0, 0 }, { std::uint32_t( S.w ), std::uint32_t( S.h ) } };
+	v.vkCmdSetViewport( S.cmd, 0, 1, &vp );
+	v.vkCmdSetScissor( S.cmd, 0, 1, &sc );
+	v.vkCmdSetDepthBias( S.cmd, S.unit, 0.0f, S.slope );  // glPolygonOffset( slope, unit )
+	v.vkCmdPushConstants( S.cmd, S.layout, VK_SHADER_STAGE_VERTEX_BIT, 0, 64, S.clip );
+	const std::uint32_t span[2][2] = { { 0, S.split }, { S.split, S.n } };
+	for ( int c = 0; c < 2; c++ ) {
+		if ( span[c][1] <= span[c][0] )
+			continue;
+		v.vkCmdBindPipeline( S.cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, S.set->pipe[S.red][c] );
+		if ( v.multiDrawIndirect ) {
+			for ( std::uint32_t at = span[c][0]; at < span[c][1]; at += 65535u )
+				v.vkCmdDrawIndexedIndirect( S.cmd, S.cmds.buf, VkDeviceSize( at ) * kCsmCmdBytes, std::min( span[c][1] - at, 65535u ),
+					kCsmCmdBytes );
+		} else {
+			for ( std::uint32_t at = span[c][0]; at < span[c][1]; at++ )
+				v.vkCmdDrawIndexedIndirect( S.cmd, S.cmds.buf, VkDeviceSize( at ) * kCsmCmdBytes, 1, kCsmCmdBytes );
+		}
+	}
+	v.vkCmdEndRenderPass( S.cmd );
+	if ( v.vkEndCommandBuffer( S.cmd ) != VK_SUCCESS ) {
+		why = "vkEndCommandBuffer (the objects' prepass) failed";
+		return false;
+	}
+	const VkPipelineStageFlags waitAt = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
+	VkSubmitInfo si { VK_STRUCTURE_TYPE_SUBMIT_INFO };
+	si.waitSemaphoreCount = 1;
+	si.pWaitSemaphores = &S.glDone;
+	si.pWaitDstStageMask = &waitAt;
+	si.commandBufferCount = 1;
+	si.pCommandBuffers = &S.cmd;
+	si.signalSemaphoreCount = 1;
+	si.pSignalSemaphores = &S.vkDone;
+	const VkResult r = v.vkQueueSubmit( v.queue, 1, &si, S.fence );
+	if ( r != VK_SUCCESS ) {
+		why = "vkQueueSubmit (the objects' prepass) returned " + std::to_string( int( r ) );
+		return false;
+	}
+	return true;
+}
+
+// shutdown: the crossing's semaphores, the buffers (GL's names), the framebuffer; pipelines stay with the device
+void objDrop()
+{
+	Obj & S = objS();
+	if ( !S.glDone && !S.pending && !S.fb && !S.pos.buf && !S.mats.buf )
+		return;
+	drain();
+	vk().vkDeviceWaitIdle( vk().dev );
+	S.pending = false;
+	objFbDrop();
+	S.fbGen = 0;
+	for ( CsmBuf * b : { &S.pos, &S.idx, &S.mats, &S.cmds } )
+		csmBufFree( *b, gl().ok && b->glCtx == gl().ctx );
+	objSemsDrop( gl().ok && S.semCtx == gl().ctx );
+}
+}  // namespace
+
+namespace WwVkPresent
+{
+std::string objRefusal()
+{
+	Vk & v = vk();
+	Gl & g = gl();
+	if ( objS().broken )
+		return objS().brokenWhy;
+	if ( !v.ok || !g.ok )
+		return "the present device or GL's entry points are not ready";
+	if ( !v.clipControl )
+		return "no VK_EXT_depth_clip_control (GL's clip z in [-w, w])";
+	if ( !g.createBuffers || !g.deleteBuffers || !g.namedBufferStorageMem || !g.copyNamedBufferSubData )
+		return "no glNamedBufferStorageMemEXT / glCopyNamedBufferSubData (the pool's copy)";
+	if ( !g.texStorageMem2DMultisample )
+		return "no glTexStorageMem2DMultisampleEXT (the shared multisample depth)";
+	if ( !v.firstInstance )
+		return "no drawIndirectFirstInstance (the occluders' matrices by baseInstance)";
+	return std::string();
+}
+
+bool objRun( const ObjRun & t, std::string & why )
+{
+	Obj & S = objS();
+	Gl & g = gl();
+	Vk & v = vk();
+	const double t0 = nowMs();
+	auto refuse = [&]( const std::string & w ) {
+		why = w;
+		S.st.fails++;
+		S.st.failWhy = w;
+		return false;
+	};
+	auto breakOff = [&]( const std::string & w ) {
+		S.broken = true;
+		S.brokenWhy = "the objects' prepass on Vulkan broke: " + w;
+		return refuse( S.brokenWhy );
+	};
+	if ( S.broken )
+		return refuse( S.brokenWhy );
+	if ( !v.ok || !g.ok || g.ctx != reinterpret_cast<void *>( wglGetCurrentContext() ) )
+		return refuse( "the present device or GL's entry points are not ready in this context" );
+	if ( const std::string no = objRefusal(); !no.empty() )
+		return refuse( no );
+	if ( !t.nCmds )
+		return true;  // nothing to draw: GL's clear is the pass
+	if ( !t.pos || !t.idx || !t.posBytes || !t.idxBytes || !t.mats || !t.nMats || !t.cmds || t.split > t.nCmds || t.red < 0 || t.red > 2 )
+		return refuse( "no pool, matrices or commands" );
+	const Shared * sh = sharedFind( t.key );
+	if ( !t.tex || !sharedTargetIs( t.key, t.tex ) || !sh || sh->w != t.w || sh->h != t.h || sh->samples != t.samples
+		|| ( sh->fmt != VK_FORMAT_X8_D24_UNORM_PACK32 && sh->fmt != VK_FORMAT_D32_SFLOAT && sh->fmt != VK_FORMAT_D16_UNORM ) )
+		return refuse( "the prepass target is not the shared depth one" );
+	// the last run is done before its command buffer, buffers and framebuffer are touched again
+	if ( S.pending ) {
+		v.vkWaitForFences( v.dev, 1, &S.fence, VK_TRUE, 1000000000ull );
+		S.pending = false;
+	}
+	std::string w;
+	if ( !objStatic( w ) || !objSems( w ) )
+		return breakOff( w );
+	VkRenderPass pass = VK_NULL_HANDLE;
+	for ( int c = 0; c < 2; c++ )
+		if ( !objPipe( sh->fmt, t.samples, t.red, c, pass, w ) )
+			return breakOff( w );
+	for ( const ObjPipes & p : S.sets )
+		if ( p.fmt == sh->fmt && p.samples == t.samples )
+			S.set = &p;
+	if ( S.fbGen != sharedGen() || S.fbKey != t.key || !S.fb ) {
+		objFbDrop();
+		VkFramebufferCreateInfo fci { VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO };
+		fci.renderPass = pass;
+		fci.attachmentCount = 1;
+		fci.pAttachments = &sh->view;
+		fci.width = std::uint32_t( t.w );
+		fci.height = std::uint32_t( t.h );
+		fci.layers = 1;
+		if ( v.vkCreateFramebuffer( v.dev, &fci, nullptr, &S.fb ) != VK_SUCCESS )
+			return breakOff( "the prepass framebuffer failed" );
+		S.fbKey = t.key;
+		S.fbGen = sharedGen();
+	}
+	if ( !csmBuf( S.pos, VkDeviceSize( t.posBytes ), true, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, w )
+		|| !csmBuf( S.idx, VkDeviceSize( t.idxBytes ), true, VK_BUFFER_USAGE_INDEX_BUFFER_BIT, w )
+		|| !csmBuf( S.mats, VkDeviceSize( t.nMats ) * 64, false, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, w )
+		|| !csmBuf( S.cmds, VkDeviceSize( t.nCmds ) * kCsmCmdBytes, false, VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT, w ) )
+		return breakOff( w );
+	std::memcpy( S.mats.ptr, t.mats, t.nMats * 64 );
+	std::memcpy( S.cmds.ptr, t.cmds, t.nCmds * kCsmCmdBytes );
+	S.w = t.w;
+	S.h = t.h;
+	S.red = t.red;
+	S.split = std::uint32_t( t.split );
+	S.n = std::uint32_t( t.nCmds );
+	std::memcpy( S.clip, t.clip, sizeof( S.clip ) );
+	// NV GL's float-depth unit is 2^(e-23), Vulkan's 2^(e-24) (measured: GL's offset is twice Vulkan's at every exponent;
+	// the slope term and the UNORM units agree)
+	S.unit = sh->fmt == VK_FORMAT_D32_SFLOAT ? 2.0f * t.unit : t.unit;
+	S.slope = t.slope;
+	// the pool into its twins (every run: GL appends and compacts it), then GL's clear -> the worker -> GL's Hi-Z
+	g.copyNamedBufferSubData( GLuint( t.pos ), S.pos.gl, 0, 0, std::intptr_t( t.posBytes ) );
+	g.copyNamedBufferSubData( GLuint( t.idx ), S.idx.gl, 0, 0, std::intptr_t( t.idxBytes ) );
+	GLuint bufs[2] = { S.pos.gl, S.idx.gl };
+	GLuint tex = GLuint( t.tex );
+	GLenum lay = kLayoutGeneral;
+	g.signalSemaphore( S.glDoneGl, 2, bufs, 1, &tex, &lay );
+	g.flush();
+	Worker & W = wk();
+	std::uint64_t want = 0;
+	{
+		std::lock_guard<std::mutex> lk( W.m );
+		want = W.toneDone + 1;
+	}
+	Work j;
+	j.k = -1;
+	j.fn = objWork;
+	hand( j );
+	bool ok = false;
+	{
+		std::unique_lock<std::mutex> lk( W.m );
+		W.idle.wait( lk, [&W, want]() { return W.toneDone >= want; } );
+		ok = W.toneOk;
+		w = W.toneWhy;
+	}
+	if ( !ok )
+		return breakOff( w );  // nothing signals vkDone: GL does not wait it; GL draws the prepass this frame
+	g.waitSemaphore( S.vkDoneGl, 2, bufs, 1, &tex, &lay );
+	S.pending = true;
+	const double ms = nowMs() - t0;
+	S.st.runs++;
+	S.st.cmds += int( t.nCmds );
+	S.st.twoSided += int( t.nCmds - t.split );
+	S.st.cpuMs += ms;
+	S.st.maxMs = std::max( S.st.maxMs, ms );
+	return true;
+}
+
+void objOnGl( const char * why )
+{
+	Obj & S = objS();
+	S.st.gl++;
+	S.st.glWhy = why ? why : "";
+}
+
+ObjStat takeObjStat()
+{
+	Obj & S = objS();
+	ObjStat s = S.st;
+	s.pipelines = S.pipelines;
+	s.buildMs = S.buildMs;
+	if ( S.broken && s.failWhy.empty() )
+		s.failWhy = S.brokenWhy;
+	S.st = ObjStat();
+	return s;
+}
+}  // namespace WwVkPresent
+
 namespace
 {
 
@@ -7979,6 +8472,40 @@ void csmSay( bool wanted, const char * glWhy )
 		line = head + QStringLiteral( "on Vulkan wanted, 0 passes run" );
 	if ( st.gl > 0 )
 		line += QStringLiteral( ", on GL %1 passes (last: %2)" ).arg( st.gl ).arg( QString::fromStdString( st.glWhy ) );
+	if ( st.fails > 0 )
+		line += QStringLiteral( ", %1 refused to GL (last: %2)" ).arg( st.fails ).arg( QString::fromStdString( st.failWhy ) );
+	said = line;
+	qInfo().noquote() << line;
+}
+
+void objSay( bool wanted, const char * glWhy )
+{
+	static QString said;
+	static double at = 0.0;
+	const QString head = QStringLiteral( "vk obj: " );
+	if ( !wanted ) {
+		const QString line = head + QStringLiteral( "prepass on GL (%1)" ).arg( QString::fromUtf8( glWhy ? glWhy : "" ) );
+		if ( line != said ) {
+			said = line;
+			qInfo().noquote() << line;
+		}
+		return;
+	}
+	const double now = nowMs();
+	if ( now - at < 5000.0 && said.startsWith( head + QStringLiteral( "prepass on V" ) ) )
+		return;
+	at = now;
+	const ObjStat st = takeObjStat();
+	QString line;
+	if ( st.runs > 0 )
+		line = head + QStringLiteral( "prepass on Vulkan %1 frames (%2 commands, %3 two-sided; one crossing; %4 pipelines built in "
+			"%5 ms; drawing thread %6 ms, max %7)" )
+			.arg( st.runs ).arg( st.cmds ).arg( st.twoSided ).arg( st.pipelines ).arg( st.buildMs, 0, 'f', 1 )
+			.arg( st.cpuMs / st.runs, 0, 'f', 3 ).arg( st.maxMs, 0, 'f', 3 );
+	else
+		line = head + QStringLiteral( "prepass on Vulkan wanted, 0 frames run" );
+	if ( st.gl > 0 )
+		line += QStringLiteral( ", on GL %1 frames (last: %2)" ).arg( st.gl ).arg( QString::fromStdString( st.glWhy ) );
 	if ( st.fails > 0 )
 		line += QStringLiteral( ", %1 refused to GL (last: %2)" ).arg( st.fails ).arg( QString::fromStdString( st.failWhy ) );
 	said = line;
