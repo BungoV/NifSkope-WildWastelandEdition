@@ -85,4 +85,27 @@ quint64 wwRecxScan( const QStringList & roots, const QString & category, int * f
 //! the files read and the parse errors of the last scan of `category`, one line each (the census)
 QString wwRecxScanSummary( const QString & category );
 
+/* lane WEATHERRECX2 (spec COMMON "override"): what an entry replaces of its record.
+ *   absent or false: augment (the file adds to the record); true: the file is the whole record (it may stand alone);
+ *   a list of function names (the category's list, spec): only those replace the record's, the rest augments.
+ * A name not in `valid` is dropped with a line in `dropped` ("override "<n>" dropped (not-function: <valid>)"). */
+struct WwRecxOverride
+{
+	bool set = false;	// the key is there (false counts: an explicit augment)
+	bool all = false;	// true
+	QStringList funcs;	// the list's valid names, in the spelling of `valid`
+	QStringList dropped;
+	//! the function (or a part of it: "clouds.layers" under "clouds") is replaced by the file
+	bool covers( const QString & func ) const;
+	//! "override", "override[fog,clouds.layers]" or "augment"
+	QString word() const;
+};
+WwRecxOverride wwRecxOverride( const QJsonObject & entry, const QStringList & valid );
+
+/* lane WEATHERRECX2 (spec COMMON "base"): an entry's "base" (a part file name or a list of them) merged under its own
+ * keys. A name is looked for beside the file, then in <category folder>/Parts/<name>.recx. A part file is
+ * { "version": "1.7", "part": { <blocks>, "base": ... } }; later parts win over earlier ones, the entry over all;
+ * objects merge key by key. A cycle or a missing part is dropped with a line in `log`. Done for every entry on read. */
+QJsonObject wwRecxExpandEntry( const QJsonObject & entry, const QString & filePath, const QString & catDir, QStringList & log );
+
 #endif

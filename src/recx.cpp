@@ -112,9 +112,21 @@ void rescan( RecxCategory & c, const QStringList & roots, const QString & catego
 		RecxFile rf;
 		rf.path = paths.at( i );
 		rf.provider = providerOf.at( i );
+		// lane WEATHERRECX2: the file's "version" on each entry that gives none, then its "base" parts merged in
+		const QJsonValue fileVersion = doc.object().value( QStringLiteral( "version" ) );
+		const QString tail = QStringLiteral( "/Plugins/%1/%2/" ).arg( rf.provider, category );
+		const int at = rf.path.lastIndexOf( tail, -1, Qt::CaseInsensitive );
+		const QString catDir = at >= 0 ? rf.path.left( at + tail.size() - 1 ) : QFileInfo( rf.path ).absolutePath();
 		for ( const QJsonValue & v : doc.object().value( QStringLiteral( "entries" ) ).toArray() )
-			if ( v.isObject() )
-				rf.entries << v.toObject();
+			if ( v.isObject() ) {
+				QJsonObject e = v.toObject();
+				if ( !fileVersion.isUndefined() && !e.contains( QStringLiteral( "version" ) ) )
+					e.insert( QStringLiteral( "version" ), fileVersion );
+				QStringList log;
+				rf.entries << wwRecxExpandEntry( e, rf.path, catDir, log );
+				for ( const QString & l : std::as_const( log ) )
+					std::fprintf( stderr, "recx: %s\n", qPrintable( l ) );
+			}
 		lines << QStringLiteral( "%1: %2 entries" ).arg( paths.at( i ) ).arg( rf.entries.size() );
 		c.files << rf;
 	}
@@ -310,4 +322,145 @@ quint64 wwRecxScan( const QStringList & roots, const QString & category, int * f
 QString wwRecxScanSummary( const QString & category )
 {
 	return cats().value( category ).summary;
+}
+
+namespace {
+
+//! a's keys with b's merged on top (b wins; objects merge key by key, case-free, b's spelling kept)
+QJsonObject deepMerge( const QJsonObject & a, const QJsonObject & b )
+{
+	QJsonObject out = a;
+	for ( auto it = b.constBegin(); it != b.constEnd(); ++it ) {
+		QString hit;
+		for ( auto jt = out.constBegin(); jt != out.constEnd(); ++jt )
+			if ( jt.key().compare( it.key(), Qt::CaseInsensitive ) == 0 )
+				hit = jt.key();
+		if ( !hit.isEmpty() && out.value( hit ).isObject() && it.value().isObject() ) {
+			const QJsonObject m = deepMerge( out.value( hit ).toObject(), it.value().toObject() );
+			out.remove( hit );
+			out.insert( it.key(), m );
+		} else {
+			if ( !hit.isEmpty() )
+				out.remove( hit );
+			out.insert( it.key(), it.value() );
+		}
+	}
+	return out;
+}
+
+//! one part file's blocks, its own "base" parts under them; depth and the visited set guard a cycle
+QJsonObject partBlocks( const QString & name, const QString & fromDir, const QString & catDir, QSet<QString> & visiting,
+	int depth, QStringList & log, const QString & who )
+{
+	QString path = QDir::cleanPath( QDir( fromDir ).absoluteFilePath( name ) );
+	if ( !QFileInfo( path ).isFile() ) {
+		const QString n = name.endsWith( QStringLiteral( ".recx" ), Qt::CaseInsensitive ) ? name : name + QStringLiteral( ".recx" );
+		path = QDir::cleanPath( catDir + QStringLiteral( "/Parts/" ) + n );
+	}
+	if ( !QFileInfo( path ).isFile() ) {
+		log << QStringLiteral( "%1: base \"%2\" dropped (not-found: %3, %4/Parts)" ).arg( who, name, fromDir, catDir );
+		return {};
+	}
+	const QString key = path.toLower();
+	if ( visiting.contains( key ) || depth > 8 ) {
+		log << QStringLiteral( "%1: base \"%2\" dropped (cycle: %3)" ).arg( who, name, path );
+		return {};
+	}
+	QFile f( path );
+	QJsonParseError err;
+	const QJsonDocument doc = f.open( QIODevice::ReadOnly ) ? QJsonDocument::fromJson( f.readAll(), &err ) : QJsonDocument();
+	const QJsonObject part = doc.object().value( QStringLiteral( "part" ) ).toObject();
+	if ( !doc.isObject() || part.isEmpty() ) {
+		log << QStringLiteral( "%1: base \"%2\" dropped (not-part: %3 holds no \"part\" object)" ).arg( who, name, path );
+		return {};
+	}
+	visiting.insert( key );
+	QJsonObject under;
+	const QJsonValue bv = part.value( QStringLiteral( "base" ) );
+	for ( const QJsonValue & n : bv.isArray() ? bv.toArray() : QJsonArray{ bv } )
+		if ( n.isString() )
+			under = deepMerge( under, partBlocks( n.toString(), QFileInfo( path ).absolutePath(), catDir, visiting, depth + 1, log, who ) );
+	visiting.remove( key );
+	QJsonObject own = part;
+	own.remove( QStringLiteral( "base" ) );
+	log << QStringLiteral( "%1: base \"%2\" merged (%3, %4 block(s))" ).arg( who, name, path ).arg( own.size() );
+	return deepMerge( under, own );
+}
+
+}	// namespace
+
+QJsonObject wwRecxExpandEntry( const QJsonObject & entry, const QString & filePath, const QString & catDir, QStringList & log )
+{
+	const QJsonValue bv = entry.value( QStringLiteral( "base" ) );
+	if ( bv.isUndefined() )
+		return entry;
+	const QString who = QStringLiteral( "%1 entry %2" ).arg( filePath, entry.value( QStringLiteral( "name" ) ).toString(
+		entry.value( QStringLiteral( "editorId" ) ).toString( entry.value( QStringLiteral( "_editorId" ) ).toString() ) ) );
+	if ( !bv.isString() && !bv.isArray() ) {
+		log << who + QStringLiteral( ": base dropped (not-path: a part file name or a list of them)" );
+		return entry;
+	}
+	QSet<QString> visiting;
+	visiting.insert( QDir::cleanPath( filePath ).toLower() );
+	QJsonObject under;
+	for ( const QJsonValue & n : bv.isArray() ? bv.toArray() : QJsonArray{ bv } )
+		if ( n.isString() )
+			under = deepMerge( under, partBlocks( n.toString(), QFileInfo( filePath ).absolutePath(), catDir, visiting, 1, log, who ) );
+		else
+			log << who + QStringLiteral( ": base item dropped (not-path)" );
+	QJsonObject own = entry;
+	own.remove( QStringLiteral( "base" ) );
+	QJsonObject out = deepMerge( under, own );
+	out.insert( QStringLiteral( "_base" ), bv );	// kept for the echo (the entry's own keys won)
+	return out;
+}
+
+WwRecxOverride wwRecxOverride( const QJsonObject & entry, const QStringList & valid )
+{
+	WwRecxOverride o;
+	const QJsonValue v = wwRecxBlockValue( entry, QStringLiteral( "override" ), true );
+	if ( v.isUndefined() )
+		return o;
+	o.set = true;
+	if ( v.isBool() ) {
+		o.all = v.toBool();
+		return o;
+	}
+	if ( !v.isArray() ) {
+		o.dropped << QStringLiteral( "override dropped (not-override: true, false or a list of functions)" );
+		o.set = false;
+		return o;
+	}
+	for ( const QJsonValue & f : v.toArray() ) {
+		const QString n = f.toString().trimmed();
+		QString hit;
+		for ( const QString & k : valid )
+			if ( k.compare( n, Qt::CaseInsensitive ) == 0 )
+				hit = k;
+		if ( hit.isEmpty() )
+			o.dropped << QStringLiteral( "override \"%1\" dropped (not-function: %2)" ).arg( f.isString() ? n : QStringLiteral( "?" ),
+				valid.join( QStringLiteral( ", " ) ) );
+		else if ( !o.funcs.contains( hit ) )
+			o.funcs << hit;
+	}
+	return o;
+}
+
+bool WwRecxOverride::covers( const QString & func ) const
+{
+	if ( all )
+		return true;
+	for ( const QString & f : funcs )
+		if ( f == func || func.startsWith( f + QLatin1Char( '.' ) ) )
+			return true;
+	return false;
+}
+
+QString WwRecxOverride::word() const
+{
+	if ( all )
+		return QStringLiteral( "override" );
+	if ( !funcs.isEmpty() )
+		return QStringLiteral( "override[%1]" ).arg( funcs.join( QLatin1Char( ',' ) ) );
+	return QStringLiteral( "augment" );
 }

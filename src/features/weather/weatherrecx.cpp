@@ -7,6 +7,7 @@
 #include "features/weather/wxoverride.h"
 #include "features/weather/weatherrecxmath.h"
 #include "features/weather/recxphysical.h"	// lane AIRPERF1 A8: the entry's physicalWeather switch
+#include "features/weather/weatherrecxcanon.h"	// lane WEATHERRECX2: the 1.7 names, units by version
 #include "features/clouds/cloudrecx14math.h"
 #include "recx.h"
 
@@ -95,6 +96,10 @@ struct Obj
 			const QString k = it.key();
 			if ( k.startsWith( QLatin1Char( '_' ) ) || k.compare( QLatin1String( "comment" ), Qt::CaseInsensitive ) == 0 )
 				continue;
+			if ( k.contains( QLatin1Char( ':' ) ) ) {	// lane WEATHERRECX2: "<mod>:<key>" belongs to a mod's own reader
+				sayOnce( QStringLiteral( "weather recx: %1: mod key \"%2\" kept, not read" ).arg( where, k ) );
+				continue;
+			}
 			bool ok = false;
 			for ( const QString & n : known )
 				ok = ok || k.compare( n, Qt::CaseInsensitive ) == 0;
@@ -152,9 +157,9 @@ const Key kAtmo[] = { { "visibility", kVisMin, kVisMax, &WwWeatherRecx::visibili
 	{ "humidity", 0.0f, 100.0f, &WwWeatherRecx::humidity }, { "groundAlbedo", 0.0f, 1.0f, &WwWeatherRecx::groundAlbedo },
 	{ "angstrom", 0.0f, 3.0f, &WwWeatherRecx::angstrom }, { "hazeAnisotropy", 0.0f, 0.95f, &WwWeatherRecx::hazeAnisotropy },
 	{ "airglow", 0.0f, 10.0f, &WwWeatherRecx::airglow } };
-const Key kClouds[] = { { "coverage", 0.0f, 1.0f, &WwWeatherRecx::coverage },
-	{ "density", 0.0f, kDensityMax, &WwWeatherRecx::density }, { "type", 0.0f, 1.0f, &WwWeatherRecx::type } };
-// lane CLOUDRECX1: the 1.4 clouds keys (SPEC.md 1.4; src/features/clouds/cloudrecx14math.h ranges): kClouds and five more
+/* lane CLOUDRECX1: the 1.4 clouds keys (SPEC.md 1.4; src/features/clouds/cloudrecx14math.h ranges). Lane WEATHERRECX2:
+ * the 1.3 table is gone; the red WW_CLOUD_RECX14_RED reads the first kClouds13 keys of this one (the same three) */
+constexpr size_t kClouds13 = 3;
 const Key kClouds14[] = { { "coverage", 0.0f, 1.0f, &WwWeatherRecx::coverage },
 	{ "density", 0.0f, kDensityMax, &WwWeatherRecx::density }, { "type", 0.0f, 1.0f, &WwWeatherRecx::type },
 	{ "liquidWater", 0.0f, WwCloudRecx14::kLwcMax, &WwWeatherRecx::liquidWater },
@@ -172,11 +177,97 @@ const Key kWind[] = { { "speed", 0.0f, 60.0f, &WwWeatherRecx::windSpeed },
 	{ "turbulence", 0.0f, 1.0f, &WwWeatherRecx::turbulence } };
 const Key kTemp[] = { { "air", -60.0f, 60.0f, &WwWeatherRecx::airTemp } };
 const Key kLightning[] = { { "frequency", 0.0f, 120.0f, &WwWeatherRecx::lightningFreq },
-	{ "cloudToGround", 0.0f, 1.0f, &WwWeatherRecx::cloudToGround }, { "distance", 0.3f, 50.0f, &WwWeatherRecx::lightningDistance } };
+	{ "cloudToGround", 0.0f, 1.0f, &WwWeatherRecx::cloudToGround }, { "distance", 0.3f, 50.0f, &WwWeatherRecx::lightningDistance },
+	// lane WEATHERRECX2 (1.7): lightning.fadeIn / fadeOut (weatherrecxcanon.h gives them these names)
+	{ "lightningStart", 0.0f, 1.0f, &WwWeatherRecx::lightningStart }, { "lightningEnd", 0.0f, 1.0f, &WwWeatherRecx::lightningEnd } };
 const Key kTrans[] = { { "duration", 0.01f, 24.0f, &WwWeatherRecx::transHours },
 	{ "precipitationStart", 0.0f, 1.0f, &WwWeatherRecx::precipStart }, { "precipitationEnd", 0.0f, 1.0f, &WwWeatherRecx::precipEnd },
 	{ "lightningStart", 0.0f, 1.0f, &WwWeatherRecx::lightningStart }, { "lightningEnd", 0.0f, 1.0f, &WwWeatherRecx::lightningEnd } };
-const Key kPrecip[] = { { "wetting", 0.0f, 600.0f, &WwWeatherRecx::wetting }, { "drying", 0.0f, 2880.0f, &WwWeatherRecx::drying } };
+const Key kPrecip[] = { { "wetting", 0.0f, 600.0f, &WwWeatherRecx::wetting }, { "drying", 0.0f, 2880.0f, &WwWeatherRecx::drying },
+	// lane WEATHERRECX2 (1.7): precipitation.base / fadeIn / fadeOut (weatherrecxcanon.h gives them these names)
+	{ "precipitationBase", 0.0f, WwCloudRecx14::kPrecipBaseMax, &WwWeatherRecx::precipitationBase },
+	{ "precipitationStart", 0.0f, 1.0f, &WwWeatherRecx::precipStart }, { "precipitationEnd", 0.0f, 1.0f, &WwWeatherRecx::precipEnd } };
+
+/* lane WEATHERRECX2 (SPEC.md 1.7, notes UNREAL_GAPS rows 1-14 and F1-F16): keys stored for later. Read, range-checked,
+ * logged, kept in WwWeatherRecx::stored and echoed; nothing draws them yet. A nested group arrives dotted
+ * (weatherrecxcanon.h). Kinds: 0 number, 1 rgb, 2 bool. No hours. */
+struct Stored
+{
+	const char * block, * key;
+	float lo, hi;
+	int kind;
+	const char * unit;
+};
+const Stored kStored[] = {
+	{ "atmosphere", "secondFog.density", 0.0f, 50.0f, 0, "per km" }, { "atmosphere", "secondFog.falloff", 0.0f, 10.0f, 0, "per km" },
+	{ "atmosphere", "secondFog.offset", -2000.0f, 20000.0f, 0, "m" }, { "atmosphere", "fogStart", 0.0f, 100000.0f, 0, "m" },
+	{ "atmosphere", "fogCutoff", 0.0f, 400000.0f, 0, "m" }, { "atmosphere", "fogMaxOpacity", 0.0f, 1.0f, 0, "share" },
+	{ "atmosphere", "skyLightInFog", 0.0f, 4.0f, 0, "x" }, { "atmosphere", "volumetric.extinctionScale", 0.0f, 10.0f, 0, "x" },
+	{ "atmosphere", "volumetric.nearFadeIn", 0.0f, 5000.0f, 0, "m" }, { "atmosphere", "volumetric.viewDistance", 100.0f, 20000.0f, 0, "m" },
+	{ "atmosphere", "multiScattering", 0.0f, 2.0f, 0, "x" }, { "atmosphere", "skyLuminance", 0.0f, 10.0f, 1, "x rgb" },
+	{ "atmosphere", "aerialPerspectiveScale", 0.0f, 10.0f, 0, "x" }, { "atmosphere", "localFogScale", 0.0f, 8.0f, 0, "x" },
+	{ "atmosphere", "rayleighScale", 0.0f, 4.0f, 0, "x" }, { "atmosphere", "rayleighHeight", 1000.0f, 20000.0f, 0, "m" },
+	{ "atmosphere", "sunIlluminance", 0.0f, 150000.0f, 0, "lux" },
+	{ "clouds", "skyOcclusion", 0.0f, 1.0f, 0, "share" }, { "clouds", "groundBounce", 0.0f, 1.0f, 0, "share" },
+	{ "clouds", "multiScattering.octaves", 1.0f, 8.0f, 0, "count" }, { "clouds", "multiScattering.contribution", 0.0f, 1.0f, 0, "share" },
+	{ "clouds", "multiScattering.occlusion", 0.0f, 1.0f, 0, "share" }, { "clouds", "multiScattering.eccentricity", 0.0f, 1.0f, 0, "share" },
+	{ "clouds", "powder", 0.0f, 1.0f, 0, "share" },
+	{ "precipitation", "puddles", 0.0f, 1.0f, 0, "share" }, { "precipitation", "snowCover.rate", 0.0f, 50.0f, 0, "mm/h" },
+	{ "precipitation", "snowCover.max", 0.0f, 500.0f, 0, "mm" }, { "precipitation", "snowCover.melt", 0.0f, 50.0f, 0, "mm/h" },
+	{ "precipitation", "occlusion", 0.0f, 1.0f, 2, "bool" }, { "precipitation", "fogExtinctionScale", 0.0f, 4.0f, 0, "x" },
+	{ "wind", "foliage", 0.0f, 4.0f, 0, "x" }, { "wind", "cloth", 0.0f, 4.0f, 0, "x" },
+	{ "night", "moonGameFactor", 1.0f, 20.0f, 0, "x" }, { "night", "adaptFloor", 0.0f, 1.0f, 0, "cd/m2" },
+};
+
+QStringList storedNames( const QString & block )
+{
+	QStringList out;
+	for ( const Stored & s : kStored )
+		if ( block == QLatin1String( s.block ) )
+			out << QLatin1String( s.key );
+	return out;
+}
+
+void readStored( const QString & block, const QJsonObject & o, const QString & where, QMap<QString, QString> & out )
+{
+	for ( const Stored & s : kStored ) {
+		if ( block != QLatin1String( s.block ) )
+			continue;
+		const QString k = WwWeatherCanon::keyOf( o, QLatin1String( s.key ) );
+		if ( k.isEmpty() )
+			continue;
+		const QJsonValue v = o.value( k );
+		const QString name = block + QLatin1Char( '.' ) + QLatin1String( s.key );
+		auto inRange = [&]( double x ) { return std::isfinite( x ) && x >= s.lo && x <= s.hi; };
+		if ( s.kind == 2 ) {
+			if ( v.isBool() )
+				out[name] = v.toBool() ? QStringLiteral( "1" ) : QStringLiteral( "0" );
+			else
+				sayOnce( QStringLiteral( "weather recx: %1: %2 dropped (not-bool)" ).arg( where, k ) );
+		} else if ( s.kind == 1 ) {
+			const QJsonArray a = v.toArray();
+			const bool ok = ( v.isDouble() && inRange( v.toDouble() ) ) || ( a.size() == 3 && inRange( a[0].toDouble( -1e30 ) )
+				&& inRange( a[1].toDouble( -1e30 ) ) && inRange( a[2].toDouble( -1e30 ) ) );
+			if ( !ok ) {
+				sayOnce( QStringLiteral( "weather recx: %1: %2 dropped (not-rgb: %3..%4 or three of them)" ).arg( where, k )
+					.arg( double( s.lo ) ).arg( double( s.hi ) ) );
+				continue;
+			}
+			for ( int i = 0; i < 3; i++ )
+				out[name + QLatin1String( i == 0 ? ".r" : i == 1 ? ".g" : ".b" )] = QString::number( v.isDouble() ? v.toDouble() : a[i].toDouble(), 'g', 6 );
+		} else if ( !v.isDouble() ) {
+			sayOnce( QStringLiteral( "weather recx: %1: %2 dropped (not-number)" ).arg( where, k ) );
+		} else {
+			double x = v.toDouble();
+			if ( !inRange( x ) ) {
+				sayOnce( QStringLiteral( "weather recx: %1: %2 %3 clamped to %4..%5 %6" ).arg( where, k ).arg( x ).arg( double( s.lo ) )
+					.arg( double( s.hi ) ).arg( QLatin1String( s.unit ) ) );
+				x = std::clamp( x, double( s.lo ), double( s.hi ) );
+			}
+			out[name] = QString::number( x, 'g', 6 );
+		}
+	}
+}
 
 /* lane CLOUD5: clouds.type may be a word (the draft's modder words, notes/atmores1/RESEARCH.md sec. 7.2): the block and
  * each hours/<h> object get the word replaced by its number before the keys are read; an unknown word is dropped */
@@ -583,7 +674,7 @@ const Input kInputs[] = {
 	{ "dropletRadius", &WwWeatherRecx::dropletRadius, WwRecClouds, nullptr },
 	{ "iceFraction", &WwWeatherRecx::iceFraction, WwRecClouds, nullptr },
 	{ "evolution", &WwWeatherRecx::evolution, WwRecClouds, nullptr },
-	{ "precipitationBase", &WwWeatherRecx::precipitationBase, WwRecClouds, nullptr },
+	{ "precipitation.base", &WwWeatherRecx::precipitationBase, WwRecClouds, nullptr },	// WEATHERRECX2: was clouds.precipitationBase
 	{ "stars", &WwWeatherRecx::stars, WwRecSky, []( const WwWeatherGen::Out & o, double ) { return o.stars; } },
 	{ "moonlight", &WwWeatherRecx::moonlight, WwRecSky, []( const WwWeatherGen::Out & o, double ) { return o.moonlight; } },
 	{ "wind.speed", &WwWeatherRecx::windSpeed, WwRecWind, []( const WwWeatherGen::Out & o, double ) { return o.windSpeed; } },
@@ -598,13 +689,14 @@ const Input kInputs[] = {
 	{ "lightning.distance", &WwWeatherRecx::lightningDistance, WwRecLightning, nullptr },
 	{ "transitions.duration", &WwWeatherRecx::transHours, WwRecTransitions,
 		[]( const WwWeatherGen::Out & o, double ) { return o.transHours; } },
-	{ "transitions.precipitationStart", &WwWeatherRecx::precipStart, WwRecTransitions,
+	// lane WEATHERRECX2 (1.7 names; the record red channel stays transitions)
+	{ "precipitation.fadeIn", &WwWeatherRecx::precipStart, WwRecTransitions,
 		[]( const WwWeatherGen::Out & o, double ) { return o.precipStart; } },
-	{ "transitions.precipitationEnd", &WwWeatherRecx::precipEnd, WwRecTransitions,
+	{ "precipitation.fadeOut", &WwWeatherRecx::precipEnd, WwRecTransitions,
 		[]( const WwWeatherGen::Out & o, double ) { return o.precipEnd; } },
-	{ "transitions.lightningStart", &WwWeatherRecx::lightningStart, WwRecTransitions,
+	{ "lightning.fadeIn", &WwWeatherRecx::lightningStart, WwRecTransitions,
 		[]( const WwWeatherGen::Out & o, double ) { return o.lightningStart; } },
-	{ "transitions.lightningEnd", &WwWeatherRecx::lightningEnd, WwRecTransitions,
+	{ "lightning.fadeOut", &WwWeatherRecx::lightningEnd, WwRecTransitions,
 		[]( const WwWeatherGen::Out & o, double ) { return o.lightningEnd; } },
 	{ "precipitation.wetting", &WwWeatherRecx::wetting, WwRecPrecip, []( const WwWeatherGen::Out & o, double ) { return o.wetting; } },
 	{ "precipitation.drying", &WwWeatherRecx::drying, WwRecPrecip, []( const WwWeatherGen::Out & o, double ) { return o.drying; } },
@@ -695,6 +787,7 @@ struct Who
 	QString edid, owner;
 	WwWeatherGen::In gen;
 	bool haveGen = false;
+	bool record = true;	// lane WEATHERRECX2: a WTHR record exists (false: only a file with "override": true loads)
 };
 
 /* lane MODULES1 part 24 (SPEC.md 1.5): the red drops the keys a block lists in `_translated` (the WTHR translation of
@@ -735,7 +828,56 @@ int physFamOf( const QString & block )
 
 bool recordPart( const char * key )
 {
-	return !std::strcmp( key, "wind.direction" ) || !std::strcmp( key, "wind.turbulence" );
+	// WEATHERRECX2: the fades moved from transitions into precipitation / lightning in 1.7; still WTHR DATA bytes 6..9
+	return !std::strcmp( key, "wind.direction" ) || !std::strcmp( key, "wind.turbulence" ) || std::strstr( key, ".fadeIn" )
+		|| std::strstr( key, ".fadeOut" );
+}
+
+/* lane WEATHERRECX2 (spec Weathers "override" functions): what a list may name. fog = the haze inputs, atmosphere = fog
+ * + sky; sky / sun / ambient / imagespace are the record's colour channels; clouds.layers is a part of clouds. */
+const char * const kFunctions[] = { "atmosphere", "fog", "sky", "sun", "ambient", "imagespace", "clouds", "clouds.layers",
+	"night", "precipitation", "wind", "temperature", "lightning", "transitions", "textures" };
+
+//! the override function an input belongs to (its 1.7 block, the haze inputs = fog)
+QString funcOf( const Input & in )
+{
+	const QString n = QLatin1String( in.name );
+	for ( const char * p : { "wind", "lightning", "precipitation", "transitions", "temperature" } )
+		if ( n == QLatin1String( p ) || n.startsWith( QString::fromLatin1( p ) + QLatin1Char( '.' ) ) )
+			return QLatin1String( p );
+	if ( in.field == &WwWeatherRecx::stars || in.field == &WwWeatherRecx::moonlight )
+		return QStringLiteral( "night" );
+	if ( in.channel == WwRecClouds )
+		return QStringLiteral( "clouds" );
+	if ( in.channel == WwRecFog )
+		return QStringLiteral( "fog" );
+	return QStringLiteral( "atmosphere" );
+}
+
+bool covered( const WwRecxOverride & ov, const QString & func )
+{
+	return ov.covers( func ) || ( func == QLatin1String( "fog" ) && ov.covers( QStringLiteral( "atmosphere" ) ) );
+}
+
+//! the record colour channels an override takes from the record (their reds and useRecordColors no longer apply)
+unsigned coveredChannels( const WwRecxOverride & ov )
+{
+	if ( ov.all )
+		return WwRecAll;
+	const QPair<const char *, unsigned> m[] = { { "fog", WwRecFog }, { "sky", WwRecSky }, { "sun", WwRecSun },
+		{ "ambient", WwRecAmbient }, { "imagespace", WwRecImagespace }, { "clouds", WwRecClouds }, { "precipitation", WwRecPrecip },
+		{ "wind", WwRecWind }, { "lightning", WwRecLightning }, { "transitions", WwRecTransitions } };
+	unsigned c = ov.covers( QStringLiteral( "atmosphere" ) ) ? WwRecSky : 0u;
+	for ( const auto & p : m )
+		if ( covered( ov, QLatin1String( p.first ) ) )
+			c |= p.second;
+	return c;
+}
+
+//! the gate reds WW_WEATHER_OVERRIDE_RED: noskip (a file with no record and no override loads), nolist (lists ignored)
+bool overrideRed( const char * word )
+{
+	return wwEnvStr( "WW_WEATHER_OVERRIDE_RED" ).toLower().split( QLatin1Char( ',' ) ).contains( QLatin1String( word ) );
 }
 
 /* one weather at the hour: the files' blocks (per key: the file), then the generated rung for every key no file set,
@@ -749,31 +891,67 @@ WwWeatherRecx resolveOne( const Who & w, const QStringList & roots, const QStrin
 	QMap<QString, QString> src;
 	unsigned useRecord = 0;
 	QString famState[5], famIgnored[5];	// lane AIRPERF1 A9: per family "<switch>:<who decides>", the keys not read
-	for ( const char * block : { "atmosphere", "clouds", "night", "precipitation", "wind", "temperature", "lightning",
-			  "transitions", "textures" } ) {
+	/* lane WEATHERRECX2: the union of the winning entries' "override" (spec COMMON), the stored-for-later keys, the
+	 * record fields the translator wrote. transitions is read before precipitation and lightning: their 1.7 fadeIn /
+	 * fadeOut win over the old transitions keys. */
+	WwRecxOverride cover;
+	bool anyHit = false;
+	QMap<QString, QString> stored;
+	for ( const char * block : { "atmosphere", "clouds", "night", "transitions", "precipitation", "wind", "temperature",
+			  "lightning", "textures" } ) {
 		const QString bn = QLatin1String( block );
 		const WwRecxHit h = wwRecxFind( roots, files, QStringLiteral( "Weathers" ), QStringLiteral( "weather" ), w.owner, lid,
 			w.edid, bn, true );
 		if ( !h.ok )
 			continue;
+		anyHit = true;
 		const QString rel = h.file.section( QLatin1Char( '/' ), -3 );
 		fileLine += QStringLiteral( " %1 %2:%3" ).arg( bn, h.rung, rel );
+		WwRecxOverride ov = wwRecxOverride( h.entry, wwWeatherRecxFunctions() );
+		for ( const QString & d : ov.dropped )
+			sayOnce( QStringLiteral( "weather recx: %1: %2" ).arg( rel, d ) );
+		if ( overrideRed( "nolist" ) )
+			ov.funcs.clear();
+		cover.set = cover.set || ov.set;
+		cover.all = cover.all || ov.all;
+		for ( const QString & f : ov.funcs )
+			if ( !cover.funcs.contains( f ) )
+				cover.funcs << f;
+		if ( r.recordFields.isEmpty() ) {	// the WTHR fields the translator wrote (vanillaRecord), for the census
+			const QJsonObject vr = wwRecxBlockValue( h.entry, QStringLiteral( "vanillaRecord" ), true ).toObject();
+			r.recordFields = vr.keys();
+		}
 		const bool trRed = weatherTranslateRed() && h.block.contains( QStringLiteral( "_translated" ) );
 		if ( trRed )
 			fileLine += QStringLiteral( " (translate red: %1 dropped)" ).arg( bn );
-		const Obj b{ trRed ? untranslated( h.block ) : h.block, rel + QStringLiteral( " /" ) + bn };
+		QJsonObject raw = trRed ? untranslated( h.block ) : h.block;
+		if ( bn != QLatin1String( "textures" ) ) {	// the 1.7 names and units (weatherrecxcanon.h)
+			QStringList notes;
+			raw = WwWeatherCanon::canon( bn, raw, WwWeatherCanon::versionOf( h.entry ), rel + QStringLiteral( " /" ) + bn, notes );
+			for ( const QString & n : notes )
+				sayOnce( QStringLiteral( "weather recx: " ) + n );
+			readStored( bn, raw, rel + QStringLiteral( " /" ) + bn, stored );
+		}
+		const Obj b{ raw, rel + QStringLiteral( " /" ) + bn };
 		WwWeatherRecx before = r;
+		// an old key that moved into this block (clouds.precipitationBase, transitions.*) loses to the 1.7 one here
+		auto movedWins = [&]( const char * key, float WwWeatherRecx::* f, const char * old, const char * now ) {
+			if ( before.*f >= 0.0f && !b.get( key ).isUndefined() )
+				sayOnce( QStringLiteral( "weather recx: %1: %2 ignored (%3 set)" ).arg( b.where, QLatin1String( old ), QLatin1String( now ) ) );
+		};
 		if ( bn == QLatin1String( "atmosphere" ) ) {
-			b.unknownKeys( { QStringLiteral( "visibility" ), QStringLiteral( "hazeHeight" ), QStringLiteral( "ozone" ),
+			b.unknownKeys( QStringList{ QStringLiteral( "visibility" ), QStringLiteral( "hazeHeight" ), QStringLiteral( "ozone" ),
 				QStringLiteral( "hours" ), QStringLiteral( "hazeType" ), QStringLiteral( "humidity" ),
 				QStringLiteral( "groundAlbedo" ), QStringLiteral( "angstrom" ), QStringLiteral( "hazeAnisotropy" ),
 				QStringLiteral( "airglow" ), QStringLiteral( "hazeAlbedo" ), QStringLiteral( "useRecordColors" ),
 				QStringLiteral( "hazeGlow" ), QStringLiteral( "inscatterColor" ), QStringLiteral( "directionalInscatter" ),
-				QStringLiteral( "directionalInscatterExponent" ), QStringLiteral( "directionalInscatterStart" ) } );
+				QStringLiteral( "directionalInscatterExponent" ), QStringLiteral( "directionalInscatterStart" ) } + storedNames( bn ) );
 			readKeys( b, kAtmo, hour, r );
 			readAtmoWords( b, r, useRecord );
 			if ( wwRecxPhysicalWeather( h.entry ) )	// lane AIRPERF1 A8: the entry's switch, read where its values are
 				src[QStringLiteral( "physicalWeather" )] = QStringLiteral( "file:" ) + rel;
+			else if ( covered( ov, QStringLiteral( "fog" ) ) )	// WEATHERRECX2: an override of the haze is the physical haze
+				src[QStringLiteral( "physicalWeather" )] = QStringLiteral( "file:" ) + rel + QStringLiteral( " (override)" );
 			if ( !r.hazeType.isEmpty() )
 				src[QStringLiteral( "hazeType" )] = QStringLiteral( "file:" ) + rel;
 			if ( r.hazeAlbedo[0] >= 0.0f )
@@ -792,7 +970,7 @@ WwWeatherRecx resolveOne( const Who & w, const QStringList & roots, const QStrin
 				known << QStringLiteral( "liquidWater" ) << QStringLiteral( "dropletRadius" ) << QStringLiteral( "iceFraction" )
 					  << QStringLiteral( "evolution" ) << QStringLiteral( "precipitationBase" )
 					  << QStringLiteral( "shadowOpacity" ) << QStringLiteral( "shadowStrength" )
-					  << QStringLiteral( "shadowLayerDensity" ) << QStringLiteral( "shadowDeck" );
+					  << QStringLiteral( "shadowLayerDensity" ) << QStringLiteral( "shadowDeck" ) << storedNames( bn );
 			b.unknownKeys( known );
 			const Obj bc{ typeWords( b.o, b.where ), b.where };	// lane CLOUD5: clouds.type words -> numbers
 			if ( v14 ) {
@@ -810,7 +988,8 @@ WwWeatherRecx resolveOne( const Who & w, const QStringList & roots, const QStrin
 					}
 				}
 			} else {
-				readKeys( bc, kClouds, hour, r );
+				const Key k13[kClouds13] = { kClouds14[0], kClouds14[1], kClouds14[2] };
+				readKeys( bc, k13, hour, r );
 			}
 			readLayers( b, r );
 			if ( r.layers )
@@ -819,24 +998,33 @@ WwWeatherRecx resolveOne( const Who & w, const QStringList & roots, const QStrin
 			if ( r.cloudAlbedo[0] >= 0.0f )
 				src[QStringLiteral( "clouds.albedo" )] = QStringLiteral( "file:" ) + rel;
 		} else if ( bn == QLatin1String( "night" ) ) {
-			b.unknownKeys( { QStringLiteral( "stars" ), QStringLiteral( "moonlight" ), QStringLiteral( "hours" ) } );
+			b.unknownKeys( QStringList{ QStringLiteral( "stars" ), QStringLiteral( "moonlight" ), QStringLiteral( "hours" ) }
+				+ storedNames( bn ) );
 			readKeys( b, kNight, hour, r );
 		} else if ( bn == QLatin1String( "wind" ) ) {
-			b.unknownKeys( { QStringLiteral( "speed" ), QStringLiteral( "direction" ), QStringLiteral( "gusts" ),
-				QStringLiteral( "turbulence" ), QStringLiteral( "heights" ), QStringLiteral( "hours" ) } );
+			b.unknownKeys( QStringList{ QStringLiteral( "speed" ), QStringLiteral( "direction" ), QStringLiteral( "gusts" ),
+				QStringLiteral( "turbulence" ), QStringLiteral( "heights" ), QStringLiteral( "hours" ) } + storedNames( bn ) );
 			readKeys( b, kWind, hour, r );
 		} else if ( bn == QLatin1String( "temperature" ) ) {
 			b.unknownKeys( { QStringLiteral( "air" ), QStringLiteral( "hours" ) } );
 			readKeys( b, kTemp, hour, r );
 		} else if ( bn == QLatin1String( "lightning" ) ) {
-			b.unknownKeys( { QStringLiteral( "frequency" ), QStringLiteral( "cloudToGround" ), QStringLiteral( "distance" ) } );
+			b.unknownKeys( { QStringLiteral( "frequency" ), QStringLiteral( "cloudToGround" ), QStringLiteral( "distance" ),
+				QStringLiteral( "lightningStart" ), QStringLiteral( "lightningEnd" ) } );
+			movedWins( "lightningStart", &WwWeatherRecx::lightningStart, "transitions.lightningStart", "lightning.fadeIn" );
+			movedWins( "lightningEnd", &WwWeatherRecx::lightningEnd, "transitions.lightningEnd", "lightning.fadeOut" );
 			readKeys( b, kLightning, hour, r, false );
 		} else if ( bn == QLatin1String( "transitions" ) ) {
 			b.unknownKeys( { QStringLiteral( "duration" ), QStringLiteral( "precipitationStart" ), QStringLiteral( "precipitationEnd" ),
 				QStringLiteral( "lightningStart" ), QStringLiteral( "lightningEnd" ) } );
 			readKeys( b, kTrans, hour, r, false );
 		} else if ( bn == QLatin1String( "precipitation" ) ) {
-			b.unknownKeys( { QStringLiteral( "layers" ), QStringLiteral( "wetting" ), QStringLiteral( "drying" ) } );
+			b.unknownKeys( QStringList{ QStringLiteral( "layers" ), QStringLiteral( "wetting" ), QStringLiteral( "drying" ),
+				QStringLiteral( "precipitationBase" ), QStringLiteral( "precipitationStart" ), QStringLiteral( "precipitationEnd" ) }
+				+ storedNames( bn ) );
+			movedWins( "precipitationBase", &WwWeatherRecx::precipitationBase, "clouds.precipitationBase", "precipitation.base" );
+			movedWins( "precipitationStart", &WwWeatherRecx::precipStart, "transitions.precipitationStart", "precipitation.fadeIn" );
+			movedWins( "precipitationEnd", &WwWeatherRecx::precipEnd, "transitions.precipitationEnd", "precipitation.fadeOut" );
 			readKeys( b, kPrecip, hour, r, false );
 			readPrecip( b, r );
 			if ( !b.get( "layers" ).isUndefined() ) {	// a layers list says it all: a family it lacks is dry
@@ -854,7 +1042,8 @@ WwWeatherRecx resolveOne( const Who & w, const QStringList & roots, const QStrin
 		 * below gives what a weather with no file gets; the record parts it writes stay. The family's red: build 62. */
 		const int fi = physFamOf( bn );
 		if ( fi >= 0 ) {
-			const bool sw = wwRecxPhysicalWeather( h.entry ), redF = switchRed( block );
+			// WEATHERRECX2: an override of the block stands like the switch on (the file decides alone)
+			const bool sw = wwRecxPhysicalWeather( h.entry ) || ov.covers( bn ), redF = switchRed( block );
 			QStringList ign;
 			if ( sw && !redF ) {
 				r.phys |= kPhysFam[fi].bit;
@@ -893,28 +1082,66 @@ WwWeatherRecx resolveOne( const Who & w, const QStringList & roots, const QStrin
 			if ( !isSet( before, in ) && isSet( r, in ) )
 				src[QLatin1String( in.name )] = QStringLiteral( "file:" ) + rel;
 	}
-	// rung 2: the generated rung for every key no file set (weathergen.h; never a colour or fog distance)
-	if ( w.haveGen ) {
-		const WwWeatherGen::Out o = WwWeatherGen::generate( w.gen );
-		r.genClass = QLatin1String( o.cls );
-		r.genRegion = QLatin1String( o.region );
+	/* lane WEATHERRECX2 (spec COMMON "override"): no record to augment and no "override": true = the file is skipped
+	 * (red WW_WEATHER_OVERRIDE_RED=noskip loads it anyway) */
+	r.overrideAll = cover.all;
+	r.overrideFuncs = cover.funcs;
+	r.source = cover.word();
+	if ( !w.record && !cover.all && anyHit && !overrideRed( "noskip" ) ) {
+		sayOnce( QStringLiteral( "weather recx: %1 skipped (no record to augment; set \"override\": true to stand alone)" ).arg( w.edid ) );
+		sayOnce( QStringLiteral( "weather recx: %1 source skipped" ).arg( w.edid ) );
+		WwWeatherRecx skipped;
+		skipped.source = QStringLiteral( "skipped" );
+		return skipped;
+	}
+	if ( anyHit )
+		sayOnce( QStringLiteral( "weather recx: %1 source %2" ).arg( w.edid, r.source ) );
+	/* rung 2: the generated rung for every key no file set (weathergen.h; never a colour or fog distance). A key of an
+	 * overridden function takes the class default (the rung of the EditorID alone, no record field): the same with or
+	 * without a record. */
+	WwWeatherGen::In defIn;
+	defIn.edid = w.edid.toStdString();
+	const WwWeatherGen::Out od = WwWeatherGen::generate( defIn );
+	if ( w.haveGen || cover.all || !cover.funcs.isEmpty() ) {
+		const WwWeatherGen::Out o = w.haveGen ? WwWeatherGen::generate( w.gen ) : od;
+		const bool own = w.haveGen && !cover.all;
+		r.genClass = QLatin1String( own ? o.cls : od.cls );
+		r.genRegion = QLatin1String( own ? o.region : od.region );
+		QStringList silent;
 		for ( const Input & in : kInputs )
 			if ( !isSet( r, in ) && in.gen ) {
-				r.*( in.field ) = float( in.gen( o, hour ) );
-				src[QLatin1String( in.name )] = QStringLiteral( "generated" );
+				if ( covered( cover, funcOf( in ) ) ) {
+					r.*( in.field ) = float( in.gen( od, hour ) );
+					src[QLatin1String( in.name )] = QStringLiteral( "class-default" );
+					silent << QLatin1String( in.name );
+				} else if ( w.haveGen ) {
+					r.*( in.field ) = float( in.gen( o, hour ) );
+					src[QLatin1String( in.name )] = QStringLiteral( "generated" );
+				}
 			}
-		if ( r.hazeType.isEmpty() ) {
-			r.hazeType = QLatin1String( o.hazeType );
-			src[QStringLiteral( "hazeType" )] = QStringLiteral( "generated" );
+		const bool fogCov = covered( cover, QStringLiteral( "fog" ) );
+		if ( r.hazeType.isEmpty() && ( fogCov || w.haveGen ) ) {
+			r.hazeType = QLatin1String( fogCov ? od.hazeType : o.hazeType );
+			src[QStringLiteral( "hazeType" )] = fogCov ? QStringLiteral( "class-default" ) : QStringLiteral( "generated" );
+			if ( fogCov )
+				silent << QStringLiteral( "hazeType" );
 		}
-		if ( r.precipLayer.isEmpty() && o.precipType )
-			r.precipLayer = QLatin1String( o.precipType );
+		const bool preCov = covered( cover, QStringLiteral( "precipitation" ) );
+		if ( r.precipLayer.isEmpty() && ( preCov || w.haveGen ) ) {
+			const char * t = preCov ? od.precipType : o.precipType;
+			if ( t )
+				r.precipLayer = QLatin1String( t );
+		}
+		if ( !silent.isEmpty() )
+			sayOnce( QStringLiteral( "weather recx: %1 %2: silent keys take the class default (%3): %4" ).arg( w.edid, r.source,
+				QLatin1String( od.cls ), silent.join( QLatin1Char( ',' ) ) ) );
 	}
 	for ( int i = 0; i < 9; i++ )
 		if ( r.textures[i].isEmpty() )
 			src[QStringLiteral( "textures.%1" ).arg( QLatin1String( kSlots[i] ) )] = QStringLiteral( "default" );
-	// the record reds: the channel's keys are unset (the record's own path decides, as before 1.3)
-	r.recordRed = red | useRecord;
+	// the record reds: the channel's keys are unset (the record's own path decides, as before 1.3); an overridden
+	// channel is the file's (lane WEATHERRECX2)
+	r.recordRed = ( red | useRecord ) & ~coveredChannels( cover );
 	for ( const Input & in : kInputs )
 		if ( in.channel && ( r.recordRed & in.channel ) ) {
 			unset( r, in );
@@ -967,6 +1194,12 @@ WwWeatherRecx resolveOne( const Who & w, const QStringList & roots, const QStrin
 	}
 	for ( auto it = src.constBegin(); it != src.constEnd(); ++it )
 		r.sources << it.key() + QLatin1Char( '=' ) + it.value();
+	// lane WEATHERRECX2: the keys stored for later, echoed (nothing draws them yet)
+	for ( auto it = stored.constBegin(); it != stored.constEnd(); ++it )
+		r.stored << it.key() + QLatin1Char( '=' ) + it.value();
+	if ( !r.stored.isEmpty() )
+		sayOnce( QStringLiteral( "weather recx stored: %1 %2 (stored for later, nothing reads them yet)" ).arg( w.edid,
+			r.stored.join( QLatin1Char( ' ' ) ) ) );
 	return r;
 }
 
@@ -1032,6 +1265,29 @@ unsigned wwWeatherRecordChannels( const QString & words )
 bool wwWeatherRecxSwitchRed( const char * family )
 {
 	return switchRed( family );
+}
+
+QStringList wwWeatherRecxFunctions()
+{
+	QStringList l;
+	for ( const char * f : kFunctions )
+		l << QLatin1String( f );
+	return l;
+}
+
+WwWeatherRecx wwWeatherRecxResolveForTest( const QString & edid, const QString & owner, unsigned formID, bool haveRecord,
+	const void * genIn, const QStringList & roots, double hour, QString & line )
+{
+	Who w;
+	w.formID = formID;
+	w.edid = edid;
+	w.owner = owner;
+	w.record = haveRecord;
+	if ( genIn ) {
+		w.gen = *static_cast<const WwWeatherGen::In *>( genIn );
+		w.haveGen = true;
+	}
+	return resolveOne( w, roots, owner.isEmpty() ? QStringList() : QStringList{ owner }, hour, envRecordRed(), line );
 }
 
 bool wwCloudRecx14Red()

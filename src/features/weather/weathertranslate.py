@@ -126,7 +126,8 @@ def record_block(f):
         rec['fog'] = metres(f['fog'])
     for k in ('fogScale', 'colors', 'cloudTextures', 'cloudLayersMax', 'cloudDisabledMask', 'cloudColors',
               'cloudSpeed', 'directionalAmbient', 'imageSpaces', 'precipitationForm', 'visualEffect', 'aurora',
-              'sounds', 'skyStatics', 'godRays', 'visibilityMult', 'volatilityMult'):
+              'sounds', 'skyStatics', 'godRays', 'visibilityMult', 'volatilityMult',
+              'lensFlare', 'magic'):  # WEATHERRECX2: GNAM, UNAM (every WTHR field of xEdit's FO4 definition)
         if k in f:
             rec[k] = f[k]
     d = dict(f.get('data', {}))

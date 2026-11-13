@@ -76,6 +76,16 @@ struct WwWeatherRecx
 	float lightningFreqLast = -1.0f;	//!< ... and its own lightning.frequency
 	QString blocksState, blocksLine;	//!< the echo per block family: switch, who decides (and the numbers)
 	QStringList sources;	//!< "<key>=<source>" per input (file:<path> | generated | record)
+	/* lane WEATHERRECX2 (SPEC.md 1.7). source: "override", "override[fog,clouds.layers]", "augment" or "skipped" (the
+	 * spec COMMON "override" key of the entries that won); overrideAll / overrideFuncs: what it replaces of the record.
+	 * stored: the keys the spec lists as "stored for later" ("atmosphere.rayleighScale" -> value; an rgb as .r/.g/.b,
+	 * a bool as 0/1), read, range-checked and echoed, no user yet. recordFields: the WTHR fields the entry's
+	 * vanillaRecord block carries (part 8: the file holds the whole record; xEdit's FO4 WTHR names) */
+	QString source;
+	bool overrideAll = false;
+	QStringList overrideFuncs;
+	QStringList stored;	//!< "<block>.<key>=<value>", sorted
+	QStringList recordFields;
 	unsigned long long stamp = 0;	//!< moves whenever a value moves (memo keys)
 	QString key;	//!< the values as text (rebuild keys); empty when off
 	WwWeatherRecx()
@@ -132,5 +142,13 @@ bool wwWeatherRecxWindBytes( float & speed, float & dir, float & turb );
 int wwWeatherRecxTextureSlot( const char * name );
 //! lane WEATHERRECX1: the slot's texture, the weather's or the shared default (Textures\FO4CS\<slot>\...)
 QString wwWeatherRecxTexture( const char * slot );
+
+/*! lane WEATHERRECX2: the weather functions an entry's "override" list may name (spec, Weathers) */
+QStringList wwWeatherRecxFunctions();
+/*! lane WEATHERRECX2: one weather resolved with no window (the offline gates): `haveRecord` false = a weather that
+ *  exists only as a file (formID 0, no owner); the generated rung's inputs are the record's when given. Returns the
+ *  values; `line` = the source line. Not used by the application. */
+WwWeatherRecx wwWeatherRecxResolveForTest( const QString & edid, const QString & owner, unsigned formID, bool haveRecord,
+	const void * genIn, const QStringList & roots, double hour, QString & line );
 
 #endif
