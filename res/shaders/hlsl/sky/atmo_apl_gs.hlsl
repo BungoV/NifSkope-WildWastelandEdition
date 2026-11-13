@@ -5,6 +5,7 @@
 #include "SkyBindingsVk.hlsli"
 #define WW_HLSL_SRC 1	// the shared .hlsli files give their readable half
 #define Sample( s, uv ) SampleLevel( s, uv, 0 )	// GLSL: texture() outside a fragment shader reads level 0
+#define SampleCmp SampleCmpLevelZero	// the same for a shadow compare (SampleCmp is fragment-only)
 struct WW_GL_PerVertex { float4 gl_Position; };
 static WW_GL_PerVertex gl_in[3];
 static float4 gl_Position;
