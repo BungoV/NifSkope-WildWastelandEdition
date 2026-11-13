@@ -446,12 +446,12 @@ bool spvReflect( const std::uint32_t * w, std::size_t n, SpvModule & out, std::s
 }
 
 bool objBlPipe( int twin, const std::uint32_t * vs, std::size_t vsN, const std::uint32_t * ps, std::size_t psN, const ObjBlTarget & target,
-	const std::vector<ObjBlBuffer> & buffers, const std::vector<ObjBlAttr> & attrs, ObjBlPipeInfo & info, std::string & why )
+	const std::vector<ObjBlBuffer> & buffers, const std::vector<ObjBlAttr> & attrs, ObjBlPipeInfo & info, std::string & why, int red )
 {
 	Vk & v = vk();
 	Op & O = opS();
 	for ( const OpEntry & e : O.made )
-		if ( opSame( e, twin, vs, vsN, ps, psN, target, buffers, attrs ) ) {
+		if ( !red && opSame( e, twin, vs, vsN, ps, psN, target, buffers, attrs ) ) {
 			info = e.info;
 			return true;
 		}
@@ -513,13 +513,25 @@ bool objBlPipe( int twin, const std::uint32_t * vs, std::size_t vsN, const std::
 			return refuse( "the pixel stage's " + i.name + " (Location " + std::to_string( i.location ) + ") is no vertex output of its shape" );
 		in.varyings++;
 	}
-	// the targets: Locations 0 .. colorCount - 1, one each
-	if ( target.colorCount > 4 || m[1].outputs.size() != target.colorCount )
-		return refuse( "the pixel stage writes " + std::to_string( m[1].outputs.size() ) + " targets, the frame has "
+	// the targets: Locations 0 .. colorCount - 1, one each. An output past the frame's attachments has no attachment and
+	// Vulkan discards its writes (the frame matches GL's draw buffers; fo4_cellbl's SV_Target1 is a constant 0); red 1 is
+	// the old strict count
+	const std::size_t outs = m[1].outputs.size();
+	if ( target.colorCount > 4 || outs < target.colorCount || ( red == 1 && outs != target.colorCount ) )
+		return refuse( "the pixel stage writes " + std::to_string( outs ) + " targets, the frame has "
 			+ std::to_string( target.colorCount ) );
-	for ( const SpvIo & o : m[1].outputs )
-		if ( o.location >= target.colorCount || o.locs != 1 )
+	std::uint32_t written = 0;
+	for ( const SpvIo & o : m[1].outputs ) {
+		if ( o.locs != 1 || o.location >= 4 )
 			return refuse( "the pixel stage's " + o.name + " is at Location " + std::to_string( o.location ) );
+		if ( o.location < target.colorCount )
+			written |= 1u << o.location;
+		else
+			in.dropped++;
+	}
+	if ( written != ( 1u << target.colorCount ) - 1u )
+		return refuse( "the pixel stage writes " + std::to_string( outs ) + " targets, the frame has "
+			+ std::to_string( target.colorCount ) + " (a frame Location has no output)" );
 	// the attributes: an input in_var_TEXCOORD<k> (locs s) reads GL's locations k .. k + s - 1
 	std::vector<VkVertexInputAttributeDescription> va;
 	for ( const SpvIo & i : m[0].inputs ) {
@@ -2122,6 +2134,7 @@ bool objBlShade( GlProc gp, const ObjBlShade & s, std::string & why )
 		return fail( "no twin, program, rows or commands" );
 	ObjBlDraw d;
 	d.twin = s.twin;
+	d.pipeRed = s.red;
 	d.vs = vkframe_objbl_vs_spv;
 	d.vsWords = sizeof( vkframe_objbl_vs_spv ) / 4;
 	d.ps = s.twin ? vkframe_objbl_cellcsm_ps_spv : vkframe_objbl_cell_ps_spv;
@@ -2248,8 +2261,9 @@ bool objBlDrawPrep( const ObjBlDraw & d, ObjBlDrawStat & st, std::string & why )
 	std::vector<ObjBlAttr> attrs;
 	objBlPoolLayout( d.attrMask, bufs, attrs, d.need );
 	ObjBlPipeInfo info;
-	if ( !objBlPipe( d.twin, d.vs, d.vsWords, d.ps, d.psWords, d.target, bufs, attrs, info, why ) )
+	if ( !objBlPipe( d.twin, d.vs, d.vsWords, d.ps, d.psWords, d.target, bufs, attrs, info, why, d.pipeRed ) )
 		return false;
+	O.st.dropped += info.dropped;
 	std::size_t entry = O.made.size();
 	for ( std::size_t i = 0; i < O.made.size(); i++ )
 		if ( opSame( O.made[i], d.twin, d.vs, d.vsWords, d.ps, d.psWords, d.target, bufs, attrs ) )

@@ -24,7 +24,15 @@
  * Reds (each must FAIL against GL): glow (glowMult 0 after GL drew: the mirror carries GL's state), slot (each row's maps
  * one slot on in the rows given to objBlShade). Each red must also move the Vulkan colour off the Vulkan base (a red
  * that changes nothing tests nothing). No registry red here: NV reflects OpName, so this program's names resolve and
- * the registry is not on its path; the locs gate holds that red on a nameless program. */
+ * the registry is not on its path; the locs gate holds that red on a nameless program.
+ * 1-buffer arm (manager 11-13; stated before its first run, never widened): the app's cell frame has one draw buffer while
+ * fo4_cellbl writes two (SV_Target1 the constant 0). GL's frame with draw buffer 0 only, both targets cleared to 0.25: GL
+ * draws, then objBlShade takes the frame as 1 colour target and objBlPipe builds the twin with SV_Target1 dropped (Vulkan
+ * discards an output with no attachment). BAR: not refused, 1 run 0 failed, 1 output dropped; depth vs GL as the shade
+ * bar; target 0 vs GL over the pixels both cover as the colour bar above (EXACT, or BOUND 4e-3), >= 2000 of them; target
+ * 0 vs the 2-buffer Vulkan run EXACT over those pixels (dropping the output moves nothing); target 1 still 0.25 in every
+ * value on both sides. Red strict (ObjBlShade.red 1: objBlPipe's old strict count) must refuse with "the pixel stage writes
+ * 2 targets, the frame has 1". Check under: a 3-colour target still refuses ("writes 2 targets, the frame has 3"). */
 bool colourGate( const std::string & spirvDir, const std::vector<GLuint64> & fixture, int anisoAt, GLuint64 aniso1 )
 {
 	using namespace WwVkPresent;
@@ -260,11 +268,12 @@ bool colourGate( const std::string & spirvDir, const std::vector<GLuint64> & fix
 	f.bindBuffer( 0x8893, sx.pool.ebo );
 	f.bindVertexArray( 0 );
 	f.bindBuffer( 0x8892, 0 );
-	// GL's frame and fixed state, as the app's opaque pass
+	// GL's frame and fixed state, as the app's opaque pass (nBufs: the 1-buffer arm's draw buffer 0 only)
+	int nBufs = 2;
 	auto frameState = [&]() {
 		f.bindFramebuffer( kFb, sx.fbo );
 		const GLenum dbs[2] = { kColorAtt0, kColorAtt0 + 1 };
-		sf.drawBuffers( 2, dbs );
+		sf.drawBuffers( nBufs, dbs );
 		glViewport( 0, 0, kSW, kSH );
 		glDisable( GL_BLEND );
 		glDisable( GL_SCISSOR_TEST );
@@ -351,11 +360,11 @@ bool colourGate( const std::string & spirvDir, const std::vector<GLuint64> & fix
 		std::printf( "BLVIEW colour FAIL (GL error 0x%x reading GL's fo4_cellbl draw)\n", unsigned( e ) );
 		return false;
 	}
-	// the app's crossing, the same state; red: 1 glow, 2 slot
-	auto vkRun = [&]( int red, ColOut & out, std::string & w ) {
+	// the app's crossing, the same state; red: 1 glow, 2 slot, 10 strict (objBlPipe's old target count); clearK: both targets
+	auto vkRun = [&]( int red, ColOut & out, std::string & w, float clearK = 0.0f ) {
 		if ( red == 1 )
 			put( "glowMult", { 0 } );
-		shadeClear();
+		shadeClear( clearK );
 		frameState();
 		ObjBlShade s;
 		s.twin = 0;
@@ -366,6 +375,7 @@ bool colourGate( const std::string & spirvDir, const std::vector<GLuint64> & fix
 		s.nRows = nRows;
 		s.cmds = sx.cmds.data();
 		s.nCmds = sx.cmds.size() / 5;
+		s.red = red == 10 ? 1 : 0;
 		const bool ran = objBlShade( glProc, s, w );
 		frameOff();
 		if ( red == 1 )
@@ -471,6 +481,82 @@ bool colourGate( const std::string & spirvDir, const std::vector<GLuint64> & fix
 		std::printf( "BLVIEW RED colour%s %s (%zu values over the bound, %zu Vulkan colour values moved off the Vulkan base%s%s)\n", redName[r - 1],
 			passes ? "PASSED" : vch ? "FAIL" : "TESTS NOTHING", over, vch, rr ? "" : "; refused: ", rr ? "" : rw.c_str() );
 		ok = ok && !passes && vch > 0;
+	}
+	{  // the 1-buffer arm: GL's frame with draw buffer 0 only, both targets cleared to 0.25
+		const float k = 0.25f;
+		nBufs = 1;
+		ColOut g1;
+		shadeClear( k );
+		frameState();
+		f.bindVertexArray( vao );
+		f.bindBuffer( 0x8F3F, sx.ind );
+		sf.multiDrawElementsIndirect( GL_TRIANGLES, GL_UNSIGNED_SHORT, nullptr, GLsizei( sx.cmds.size() / 5 ), 20 );
+		f.bindBuffer( 0x8F3F, 0 );
+		f.bindVertexArray( 0 );
+		frameOff();
+		shadeRead( g1.depth, &g1.c0, &g1.c1 );
+		takeObjBlRunStat();
+		ColOut v1;
+		std::string w1;
+		const bool r1 = vkRun( 0, v1, w1, k );
+		const ObjBlRunStat rs1 = takeObjBlRunStat();
+		std::size_t both = 0, differ = 0, over = 0, vsTwo = 0, t1Gl = 0, t1Vk = 0;
+		float maxRel = 0.0f;
+		bool armOk = r1 && rs1.runs == 1 && rs1.fails == 0 && rs1.dropped == 1;
+		if ( r1 ) {
+			const DepthCmp dc = depthCmp( v1.depth, g1.depth );
+			const std::uint16_t hk = 0x3400;  // 0.25 as a half
+			for ( std::size_t i = 0; i < g1.c1.size(); i++ ) {
+				t1Gl += g1.c1[i] != hk;
+				t1Vk += v1.c1[i] != hk;
+			}
+			for ( std::size_t i = 0; i < g1.depth.size(); i++ ) {
+				if ( !( g1.depth[i] < 1.0f ) || !( v1.depth[i] < 1.0f ) )
+					continue;
+				both++;
+				for ( int ch = 0; ch < 4; ch++ ) {
+					const std::uint16_t hg = g1.c0[i * 4 + ch], hv = v1.c0[i * 4 + ch];
+					vsTwo += ran && hv != vk0.c0[i * 4 + ch];
+					if ( hg == hv )
+						continue;
+					differ++;
+					const float g = fromHalf( hg ), rel = std::fabs( fromHalf( hv ) - g ) / std::max( 1.0f, std::fabs( g ) );
+					over += !( rel <= 4e-3f );
+					if ( rel > maxRel || rel != rel )
+						maxRel = rel != rel ? 1e30f : rel;
+				}
+			}
+			armOk = armOk && ran && ( dc.exact() || dc.bound() ) && both >= 2000 && over == 0 && vsTwo == 0 && t1Gl == 0 && t1Vk == 0;
+			std::printf( "BLVIEW colour 1buf depth vs GL %s (%zu covered, %zu on one side, %zu differ)\n", dc.word(), dc.covered, dc.oneSide,
+				dc.differ );
+		}
+		std::printf( "BLVIEW colour 1buf %s (refused %d%s%s; %d runs, %d failed, %d outputs dropped; target 0 vs GL %s: %zu pixels both cover, "
+			"%zu values differ, %zu over the bound, max %.3g; vs the 2-buffer Vulkan run %zu values differ; target 1 off 0.25: GL %zu, Vulkan %zu)\n",
+			armOk ? "OK" : "FAIL", int( !r1 ), r1 ? "" : ": ", r1 ? "" : w1.c_str(), rs1.runs, rs1.fails, rs1.dropped,
+			differ == 0 ? "EXACT" : over == 0 ? "BOUND" : "FAIL", both, differ, over, double( maxRel ), vsTwo, t1Gl, t1Vk );
+		ok = ok && armOk;
+		// red strict: the old count must refuse this frame
+		ColOut vr;
+		std::string wr;
+		const bool rr = vkRun( 10, vr, wr, k );
+		takeObjBlRunStat();
+		const bool said = wr.find( "the pixel stage writes 2 targets, the frame has 1" ) != std::string::npos;
+		std::printf( "BLVIEW RED colour1bufstrict %s (the strict target count; %s%s)\n", !rr && said ? "FAIL" : "PASSED",
+			rr ? "drew" : "refused: ", rr ? "" : wr.c_str() );
+		ok = ok && !rr && said;
+		nBufs = 2;
+		// under: a frame with more targets than the stage writes still refuses
+		WwVkPresent::ObjBlTarget t3;
+		t3.colors[0] = t3.colors[1] = t3.colors[2] = 97;  // VK_FORMAT_R16G16B16A16_SFLOAT
+		t3.colorCount = 3;
+		t3.depth = 129;  // VK_FORMAT_D24_UNORM_S8_UINT
+		WwVkPresent::ObjBlPipeInfo i3;
+		std::string w3;
+		const bool b3 = objBlPipe( 0, vkframe_objbl_vs_spv, sizeof( vkframe_objbl_vs_spv ) / 4, vkframe_objbl_cell_ps_spv,
+			sizeof( vkframe_objbl_cell_ps_spv ) / 4, t3, {}, {}, i3, w3 );
+		const bool under = !b3 && w3.find( "the pixel stage writes 2 targets, the frame has 3" ) != std::string::npos;
+		std::printf( "BLVIEW colour 1buf under %s (a 3-colour frame: %s%s)\n", under ? "OK" : "FAIL", b3 ? "built" : "refused: ", w3.c_str() );
+		ok = ok && under;
 	}
 	// where the gap lives: every slot of every row on one texture, GL against Vulkan (a reading, not the bar); the last
 	// reading is the fixture's own texture anisoAt at its anisotropy (the known driver difference)

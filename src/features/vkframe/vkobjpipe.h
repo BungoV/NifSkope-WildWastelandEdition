@@ -96,15 +96,18 @@ struct ObjBlPipeInfo
 {
 	int set0 = 0, ubos = 0, images = 0, texels = 0, samplers = 0, ssbos = 0, vsOnly = 0, psOnly = 0, both = 0;
 	int inputs = 0, varyings = 0, targets = 0;
+	int dropped = 0;  //!< pixel outputs past the frame's attachments (Vulkan discards their writes)
 	double ms = 0.0;
 };
 /*! the pipeline of twin `twin` (0 fo4_cellbl, 1 fo4_cellcsmbl) from these modules for this frame and these attributes: the
  * set-0 layout, the pipeline layout {set 0, the table} and the graphics pipeline, made once per twin and target. false with
  * a reason (nothing made) when the modules disagree with each other, with the table or with the attributes. The words are
- * keyed by address: they must outlive the pipeline (the app's are the .spv.h arrays) */
+ * keyed by address: they must outlive the pipeline (the app's are the .spv.h arrays). Pixel outputs past the frame's colour
+ * count are taken (counted in info.dropped; Vulkan discards them); every frame Location needs one. red 1: the strict count
+ * (gates only: must refuse "the pixel stage writes N targets, the frame has M") */
 bool objBlPipe( int twin, const std::uint32_t * vs, std::size_t vsWords, const std::uint32_t * ps, std::size_t psWords,
 	const ObjBlTarget & target, const std::vector<ObjBlBuffer> & buffers, const std::vector<ObjBlAttr> & attrs,
-	ObjBlPipeInfo & info, std::string & why );
+	ObjBlPipeInfo & info, std::string & why, int red = 0 );
 //! the twins' pipelines made so far (and refused)
 int objBlPipes( int * refused = nullptr );
 //! shutdown(): the pipelines, layouts and render passes (before blFree: the layouts name the table's)
@@ -202,6 +205,7 @@ struct ObjBlDraw
 	std::size_t rows = 0;
 	const void * cmds = nullptr;    //!< GL's indirect commands
 	std::size_t cmdCount = 0;
+	int pipeRed = 0;                //!< gates only: objBlPipe's red
 };
 struct ObjBlDrawStat
 {
@@ -254,6 +258,7 @@ struct ObjBlRunStat
 	int runs = 0, draws = 0, cmds = 0, gl = 0, fails = 0;
 	int shared = 0, glOwn = 0, texelGl = 0, compare = 0;  //!< objBlShade's units: shared images, GL-only textures, GL texel buffers, compare samplers
 	int texelShared = 0;  //!< of the texel buffers, those drawn from their twins
+	int dropped = 0;      //!< pixel outputs past the frame's targets in the draws' pipelines (objBlPipe; Vulkan discards them)
 	double cpuMs = 0.0, maxMs = 0.0;
 	std::string glWhy, failWhy;
 };
@@ -276,6 +281,7 @@ struct ObjBlShade
 	std::size_t nRows = 0;
 	const void * cmds = nullptr;  //!< 5 words a command (the base instance relative to the leader)
 	std::size_t nCmds = 0;
+	int red = 0;  //!< gates only: 1 objBlPipe's strict target count (a 1-buffer frame must refuse)
 };
 bool objBlShade( GlProc gp, const ObjBlShade & s, std::string & why );
 /*! objBlShade's frame read on its own: GL's draw framebuffer as d's targets (every colour draw buffer and the depth / stencil
