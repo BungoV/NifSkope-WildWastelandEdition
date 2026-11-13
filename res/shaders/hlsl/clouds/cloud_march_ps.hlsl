@@ -417,7 +417,7 @@ void frag_main()
     }
     float h0Arg4 = o.z;
     float3 dArg7 = d;
-    float param_3 = 6360.0f;
+    float RArg4 = 6360.0f;
     float2 gnd = cvSphereGnd(h0Arg4, dArg7);
     bool cond10 = gnd.y > 0.0f;
     bool cond9;

@@ -44,13 +44,13 @@
 #include "features/vkframe/ssr_view_s3.spv.h"
 #include "features/vkframe/ssr_view_s4.spv.h"
 #include "features/vkframe/ssr_view_s5.spv.h"
+#include "features/vkframe/csm_view_vs.spv.h"  // lane VKSHADOW1
 // lane VKAIR1: the air over the sky (cell_volsky), the clouds' march + resolve (and their accumulation twins)
 #include "features/vkframe/volsky_view_ps.spv.h"
 #include "features/vkframe/cloud_march_view_ps.spv.h"
 #include "features/vkframe/cloud_march_a_view_ps.spv.h"
 #include "features/vkframe/cloud_resolve_view_ps.spv.h"
 #include "features/vkframe/cloud_resolve_a_view_ps.spv.h"
-#include "features/vkframe/csm_view_vs.spv.h"  // lane VKSHADOW1
 #include "features/vkframe/obj_depth_vs.spv.h"  // lane VKOBJ1
 
 #include <algorithm>
@@ -241,11 +241,11 @@ struct Vk
 	bool storageExt = false;
 	bool float64 = false;  // lane VKLIGHT1: the AO raw kernel's integer-exact doubles (AoCommon.hlsli)
 	VKP( vkCmdDispatch ); VKP( vkCreateComputePipelines );
-	// lane VKAIR1: the air's stencil reference, the zero textures' clear
-	VKP( vkCmdSetStencilReference ); VKP( vkCmdClearColorImage );
 	// lane VKSHADOW1: the sun cascades' depth draws (indexed indirect, GL's polygon offset as the depth bias)
 	bool depthBiasClamp = false, multiDrawIndirect = false, firstInstance = false;
 	VKP( vkCmdBindVertexBuffers ); VKP( vkCmdBindIndexBuffer ); VKP( vkCmdDrawIndexedIndirect ); VKP( vkCmdSetDepthBias );
+	// lane VKAIR1: the air's stencil reference, the zero textures' clear
+	VKP( vkCmdSetStencilReference ); VKP( vkCmdClearColorImage );
 	// lane VKOBJ1: GL's clip z in [-w, w] for the objects' perspective prepass (VK_EXT_depth_clip_control)
 	bool clipControl = false;
 	VKP( vkEnumerateDeviceExtensionProperties ); VKP( vkGetPhysicalDeviceFeatures2 );
@@ -545,8 +545,8 @@ bool makeDevice( std::string & why )
 	LD( vkCmdSetViewport ); LD( vkCmdSetScissor ); LD( vkCmdCopyBufferToImage );
 	LD( vkCreatePipelineCache ); LD( vkDestroyPipelineCache ); LD( vkGetPipelineCacheData );
 	LD( vkCmdDispatch ); LD( vkCreateComputePipelines );
-	LD( vkCmdSetStencilReference ); LD( vkCmdClearColorImage );
 	LD( vkCmdBindVertexBuffers ); LD( vkCmdBindIndexBuffer ); LD( vkCmdDrawIndexedIndirect ); LD( vkCmdSetDepthBias );
+	LD( vkCmdSetStencilReference ); LD( vkCmdClearColorImage );
 #undef LD
 	if ( !v.vkGetMemoryWin32HandleKHR || !v.vkGetSemaphoreWin32HandleKHR || !v.vkCreateSwapchainKHR )
 		return fail( "the device lacks a swapchain / win32 export entry point" );
@@ -615,8 +615,8 @@ struct Work
 	bool sky = false;   // lane VKSKY1 (k = -1): the cell sky into the tone frame (skyWork); shares tone's counters
 	int light = -1;     // lane VKLIGHT1 (k = -1): this LightPass's dispatches (lightWork); shares tone's counters
 	bool ssr = false;   // lane VKLIGHT2 (k = -1): the reflections' stages (ssrWork); shares tone's counters
-	bool fx = false;    // lane VKAIR1 (k = -1): the air's sky pass or the clouds' march + resolve (fxWork); tone's counters
 	bool ( *fn )( std::string & ) = nullptr;  // lane VKSHADOW1 (k = -1): a pass's own record + submit; shares tone's counters
+	bool fx = false;    // lane VKAIR1 (k = -1): the air's sky pass or the clouds' march + resolve (fxWork); tone's counters
 };
 
 // round 11: the tone pass's record + submit, on the worker (the queue is the worker's)
@@ -629,9 +629,9 @@ bool lightWork( int pass, std::string & why );
 void lightDrop();
 bool ssrWork( std::string & why );
 void ssrDrop();
+void csmDrop();  // lane VKSHADOW1
 bool fxWork( std::string & why );
 void fxDrop();
-void csmDrop();  // lane VKSHADOW1
 void objDrop();  // lane VKOBJ1
 
 struct Worker
