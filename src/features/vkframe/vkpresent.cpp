@@ -249,6 +249,10 @@ struct Vk
 	// lane VKOBJ1: GL's clip z in [-w, w] for the objects' perspective prepass (VK_EXT_depth_clip_control)
 	bool clipControl = false;
 	VKP( vkEnumerateDeviceExtensionProperties ); VKP( vkGetPhysicalDeviceFeatures2 );
+	// lane VKOBJ2: the bindless maps as descriptor indexing (vkbindless.inc), the row by BaseInstance, GL's anisotropy
+	bool descIndexing = false, drawParams = false, anisotropy = false;
+	std::uint32_t blImageCap = 0, blSamplerCap = 0;
+	float maxAniso = 1.0f;
 };
 #undef VKP
 
@@ -515,6 +519,44 @@ bool makeDevice( std::string & why )
 	v.multiDrawIndirect = offered.multiDrawIndirect == VK_TRUE;
 	en.drawIndirectFirstInstance = offered.drawIndirectFirstInstance;
 	v.firstInstance = offered.drawIndirectFirstInstance == VK_TRUE;
+	// lane VKOBJ2: descriptor indexing + draw parameters for the bindless maps (Vulkan 1.2 core structs; the table refuses
+	// without them), GL's anisotropic filtering for their samplers
+	en.samplerAnisotropy = offered.samplerAnisotropy;
+	v.anisotropy = offered.samplerAnisotropy == VK_TRUE;
+	VkPhysicalDeviceDescriptorIndexingFeatures ixEn { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES };
+	VkPhysicalDeviceShaderDrawParametersFeatures dpEn { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_DRAW_PARAMETERS_FEATURES };
+	{
+		VkPhysicalDeviceProperties2 pp { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2 };
+		v.vkGetPhysicalDeviceProperties2( v.phys, &pp );
+		v.maxAniso = pp.properties.limits.maxSamplerAnisotropy;
+		if ( pp.properties.apiVersion >= VK_API_VERSION_1_2 && v.vkGetPhysicalDeviceFeatures2 ) {
+			VkPhysicalDeviceDescriptorIndexingFeatures ix { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES };
+			VkPhysicalDeviceShaderDrawParametersFeatures dp { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_DRAW_PARAMETERS_FEATURES };
+			ix.pNext = &dp;
+			VkPhysicalDeviceFeatures2 f2 { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2 };
+			f2.pNext = &ix;
+			v.vkGetPhysicalDeviceFeatures2( v.phys, &f2 );
+			VkPhysicalDeviceDescriptorIndexingProperties ixp { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_PROPERTIES };
+			pp.pNext = &ixp;
+			v.vkGetPhysicalDeviceProperties2( v.phys, &pp );
+			v.drawParams = dp.shaderDrawParameters == VK_TRUE;
+			dpEn.shaderDrawParameters = dp.shaderDrawParameters;
+			v.descIndexing = ix.runtimeDescriptorArray && ix.shaderSampledImageArrayNonUniformIndexing && ix.descriptorBindingPartiallyBound
+				&& ix.descriptorBindingSampledImageUpdateAfterBind && ix.descriptorBindingUpdateUnusedWhilePending;
+			if ( v.descIndexing ) {
+				ixEn.runtimeDescriptorArray = ixEn.shaderSampledImageArrayNonUniformIndexing = VK_TRUE;
+				ixEn.descriptorBindingPartiallyBound = ixEn.descriptorBindingSampledImageUpdateAfterBind = VK_TRUE;
+				ixEn.descriptorBindingUpdateUnusedWhilePending = VK_TRUE;
+				v.blSamplerCap = std::min( { ixp.maxDescriptorSetUpdateAfterBindSamplers, ixp.maxPerStageDescriptorUpdateAfterBindSamplers, 256u } );
+				v.blImageCap = std::min( { ixp.maxDescriptorSetUpdateAfterBindSampledImages,
+					ixp.maxPerStageDescriptorUpdateAfterBindSampledImages, 65536u } );
+				if ( v.blImageCap + v.blSamplerCap > ixp.maxPerStageUpdateAfterBindResources )
+					v.blImageCap = ixp.maxPerStageUpdateAfterBindResources > v.blSamplerCap
+						? ixp.maxPerStageUpdateAfterBindResources - v.blSamplerCap : 0u;
+				v.descIndexing = v.blImageCap >= 2 && v.blSamplerCap >= 2;
+			}
+		}
+	}
 	VkDeviceCreateInfo di { VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO };
 	di.pEnabledFeatures = &en;
 	di.queueCreateInfoCount = 1;
@@ -522,6 +564,11 @@ bool makeDevice( std::string & why )
 	di.enabledExtensionCount = nDext;
 	di.ppEnabledExtensionNames = dext;
 	di.pNext = v.clipControl ? &clipFeat : nullptr;
+	if ( v.descIndexing || v.drawParams ) {  // lane VKOBJ2: ahead of the clip control chain
+		dpEn.pNext = const_cast<void *>( di.pNext );
+		ixEn.pNext = &dpEn;
+		di.pNext = &ixEn;
+	}
 	if ( v.vkCreateDevice( v.phys, &di, nullptr, &v.dev ) != VK_SUCCESS )
 		return fail( "vkCreateDevice (swapchain + external memory / semaphore win32) failed" );
 #define LD( fn ) v.fn = reinterpret_cast<PFN_##fn>( v.vkGetDeviceProcAddr( v.dev, #fn ) )
@@ -633,6 +680,7 @@ void csmDrop();  // lane VKSHADOW1
 bool fxWork( std::string & why );
 void fxDrop();
 void objDrop();  // lane VKOBJ1
+void blFree();  // lane VKOBJ2
 
 struct Worker
 {
@@ -3517,6 +3565,7 @@ void shutdown()
 	}
 	csmDrop();  // lane VKSHADOW1: the cascades' layer views go before the shared arrays they view
 	objDrop();  // lane VKOBJ1: the prepass framebuffer goes before the shared depth it holds
+	blFree();  // lane VKOBJ2: the bindless table's set and samplers (it holds the shared targets' views)
 	// lane VKSHARE1: the keyed shared targets (their owners see sharedTargetIs false and make GL's own again)
 	if ( !shareds().empty() ) {
 		drain();
@@ -8106,6 +8155,8 @@ ObjStat takeObjStat()
 	return s;
 }
 }  // namespace WwVkPresent
+
+#include "features/vkframe/vkbindless.inc"  // lane VKOBJ2: the bindless maps as descriptor indexing
 
 namespace
 {
