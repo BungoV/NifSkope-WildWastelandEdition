@@ -88,7 +88,8 @@ struct ObjBlTarget
 };
 /*! GL's fixed state as the pipeline takes it, for `colorCount` draw buffers: depth test / function / mask, culling, stencil
  * (front and back: function, reference, masks, ops), blend (per draw buffer: they must agree; a constant factor is refused)
- * and the colour mask. Refused with a reason: scissor on, depth test off, culling other than back faces with CCW front.
+ * and the colour mask. Refused with a reason: depth test off, culling other than back faces with CCW front (GL's scissor:
+ * objBlFrameRead, a dynamic state).
  * red 1 reads source and destination swapped, red 2 reads the stencil test as off (gates only: each must FAIL) */
 bool objBlTargetState( GlProc gp, std::uint32_t colorCount, ObjBlTarget & t, std::string & why, int red = 0 );
 struct ObjBlPipeInfo
@@ -189,6 +190,7 @@ struct ObjBlDraw
 	ObjBlTarget target;
 	std::uintptr_t colorKeys[4] = {}, depthKey = 0;
 	int w = 0, h = 0;
+	int scissor[4] = { 0, 0, -1, -1 };  //!< x, y, w, h in the frame's rows (objBlFrameRead: GL's box, else the frame); -1: the frame
 	std::uintptr_t poolKey = 0;  //!< the class objBlPoolCopy filled
 	std::uint64_t attrMask = 0;
 	std::uint32_t need = 0;      //!< the GL locations the vertex stage reads (bit L)
@@ -277,7 +279,9 @@ struct ObjBlShade
 };
 bool objBlShade( GlProc gp, const ObjBlShade & s, std::string & why );
 /*! objBlShade's frame read on its own: GL's draw framebuffer as d's targets (every colour draw buffer and the depth / stencil
- * a shared target: keys, formats, size, samples), the viewport the whole frame, the fixed state (objBlTargetState with `red`).
+ * a shared target: keys, formats, size, samples; the tone frame's too, as borrowed shared targets), the viewport the whole
+ * frame, the fixed state (objBlTargetState with `red`), GL's scissor box clamped to the frame (d.scissor; the frame when the
+ * test is off). red 3 reads the scissor test as off, red 4 finds no borrowed target (gates only: each must FAIL).
  * false: why (d's target untouched past the first refusal) */
 bool objBlFrameRead( GlProc gp, ObjBlDraw & d, std::string & why, int red = 0 );
 /*! lane VKOBJ4 open item 3: the cell frame's colour (GL format colorFmt) and depth / stencil (dsFmt) as shared targets of

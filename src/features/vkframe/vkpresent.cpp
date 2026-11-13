@@ -1385,6 +1385,7 @@ struct Shared
 	GLenum glFmt = 0;
 	VkFormat fmt = VK_FORMAT_UNDEFINED;
 	double mb = 0.0;
+	bool borrowed = false;  // lane VKOBJ4 open item 3: another owner's images (the tone frame), found by key, never freed here
 };
 
 std::map<std::uintptr_t, Shared> & shareds()
@@ -1427,6 +1428,10 @@ VkFormat vkFormatOf( GLenum f, bool & depth )
 void sharedFree( Shared & s, bool glAlive )
 {
 	Vk & v = vk();
+	if ( s.borrowed ) {  // the owner frees them
+		s = Shared();
+		return;
+	}
 	if ( glAlive ) {
 		if ( s.tex )
 			gl().deleteTextures( 1, &s.tex );
@@ -2281,12 +2286,48 @@ bool toneBloomBack( int samples, std::string & why )
 	return true;
 }
 
+std::uint64_t & sharedGen();
+char kToneShareColor, kToneShareDs;  // lane VKOBJ4 open item 3: the tone frame's keys among the shared targets (their addresses)
+
+/* lane VKOBJ4 open item 3: the tone frame (where the tone and the bloom read the cell frame) joins the shared targets as
+ * borrowed entries, so objBlFrameRead finds GL's draw framebuffer over it and objBlShade draws into it: one frame for GL,
+ * the cell runs on Vulkan, the tone and the bloom. Off: the entries go (the images stay the tone's). */
+void toneShare( bool on )
+{
+	Tone & T = tone();
+	const std::uintptr_t keys[2] = { reinterpret_cast<std::uintptr_t>( &kToneShareColor ), reinterpret_cast<std::uintptr_t>( &kToneShareDs ) };
+	bool moved = false;
+	for ( std::uintptr_t k : keys )
+		moved = shareds().erase( k ) > 0 || moved;
+	if ( on && T.color && T.ds && T.colorView && T.dsView ) {
+		for ( int i = 0; i < 2; i++ ) {
+			Shared s;
+			s.borrowed = true;
+			s.img = i ? T.ds : T.color;
+			s.view = i ? T.dsView : T.colorView;
+			s.attView = i ? T.dsView : VK_NULL_HANDLE;
+			s.tex = i ? T.dsTex : T.colorTex;
+			s.glCtx = T.glCtx;
+			s.w = T.w;
+			s.h = T.h;
+			s.samples = T.samples;
+			s.glFmt = i ? kDepth24Stencil8 : kRgba16f;
+			s.fmt = i ? VK_FORMAT_D24_UNORM_S8_UINT : VK_FORMAT_R16G16B16A16_SFLOAT;
+			shareds()[keys[i]] = s;
+		}
+		moved = true;
+	}
+	if ( moved )
+		sharedGen()++;
+}
+
 // the shared frame goes (GL alive: its textures and memory objects too); the caller waited the device
 void toneFrameFree( bool glAlive )
 {
 	Vk & v = vk();
 	Gl & g = gl();
 	Tone & T = tone();
+	toneShare( false );  // lane VKOBJ4 open item 3: the borrowed entries go before the images
 	if ( glAlive ) {
 		for ( GLuint * t : { &T.colorTex, &T.dsTex } )
 			if ( *t )
@@ -3778,6 +3819,7 @@ bool toneFrame( int w, int h, int samples, unsigned & color, unsigned & ds, std:
 	T.h = h;
 	T.samples = samples;
 	T.descDirty = true;
+	toneShare( true );  // lane VKOBJ4 open item 3: the cell runs on Vulkan draw into this frame
 	color = T.colorTex;
 	ds = T.dsTex;
 	return true;

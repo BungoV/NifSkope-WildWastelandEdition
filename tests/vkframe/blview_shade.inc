@@ -816,19 +816,37 @@ bool texelGate()
  * takes both colour draw buffers and the depth / stencil as shared targets with GL's stencil state (on, ALWAYS, ref 1,
  * REPLACE on pass, front = back); after the run the stencil is 1 exactly where the depth is under 1 and 0 elsewhere (0
  * mismatches, >= 2000 covered); once dropped the frame is no longer known. Reds (each must FAIL): stoff (the stencil read
- * as off: none written), glown (GL's own D24S8 texture as the depth: the read refuses it). */
+ * as off: none written), glown (GL's own D24S8 texture as the depth: the read refuses it).
+ * Scissor arm (stated before its first run, never widened): GL's scissor on with the box (64, 21) 128x42 (rows not centred,
+ * so a flipped box lands elsewhere); the run is the frame run's with 0 pixels outside the box touched (depth 1, stencil 0)
+ * and every pixel inside the box equal, depth and stencil bits, to the same run without a scissor; that run covers >= 200
+ * pixels inside the box and >= 200 outside. Red scoff (objBlFrameRead red 3: the test read as off) must FAIL.
+ * Tone arm (stated before its first run, never widened): the tone frame (toneFrame, 4 samples) with a 4-sample shared second
+ * target as GL's draw framebuffer: the read takes the tone frame as shared targets (4 samples, both colour draw buffers, D24S8
+ * with GL's stencil state), the run goes, and after a sample resolve of the depth / stencil the frame bar holds (0
+ * mismatches, >= 2000 covered); dropped, the tone frame is no longer known. Red toneunshared (red 4: the borrowed entries
+ * not found, as before the share) must FAIL. */
 struct FrameOut
 {
 	bool made4 = false, read = false, stateOk = false, prepped = false, ran = false, dropped = false;
-	std::size_t covered = 0, mismatch = ~std::size_t( 0 );
+	std::size_t covered = 0, mismatch = ~std::size_t( 0 ), outside = 0;  // outside: pixels touched outside the scissor box
+	std::size_t minCovered = 2000;  // the scissor arm: 0 (its floor is frameGate's: >= 200 inside the box, from the base run)
+	std::vector<std::uint32_t> px;  // the depth / stencil after the run (1 sample)
 	std::string why;
 	bool good() const
 	{
-		return made4 && read && stateOk && prepped && ran && covered >= 2000 && mismatch == 0 && dropped;
+		return made4 && read && stateOk && prepped && ran && covered >= minCovered && mismatch == 0 && outside == 0 && dropped;
 	}
 };
+constexpr int kScX = kSW / 4, kScY = kSH / 6, kScW = kSW / 2, kScH = kSH / 3;  // the scissor arm's box
+bool inBox( std::size_t i )
+{
+	const int x = int( i % kSW ), y = int( i / kSW );
+	return x >= kScX && x < kScX + kScW && y >= kScY && y < kScY + kScH;
+}
 
-void frameRun( int red, FrameOut & o )
+// arm 0 the cell frame (objBlFrame), 1 the same with GL's scissor on (base: the arm-0 run inside the box), 2 the tone frame
+void frameRun( int red, FrameOut & o, int arm = 0, const FrameOut * base = nullptr )
 {
 	using namespace WwVkPresent;
 	void( WINAPI * clearBufferfi )( GLenum, GLint, GLfloat, GLint ) = nullptr;
@@ -836,10 +854,23 @@ void frameRun( int red, FrameOut & o )
 		o.why = "no glClearBufferfi";
 		return;
 	}
-	unsigned color = 0, ds = 0;
-	o.made4 = objBlFrame( kSW, kSH, 4, kRgba16fi, 0x88F0, color, ds, o.why ) && objBlFrameIs( color );  // DEPTH24_STENCIL8
-	if ( !o.made4 || !objBlFrame( kSW, kSH, 1, kRgba16fi, 0x88F0, color, ds, o.why ) )
-		return;
+	unsigned color = 0, ds = 0, t1 = sx.t1;
+	static char toneT1;  // the tone arm's second colour target (4 samples, as the frame)
+	const bool tone = arm == 2;
+	if ( tone ) {
+		o.made4 = toneFrame( kSW, kSH, 4, color, ds, o.why ) && toneFrameIs( color )
+			&& sharedTarget( reinterpret_cast<std::uintptr_t>( &toneT1 ), 0, kSW, kSH, 1, kRgba16fi, t1, o.why, 1, 4 );
+		if ( !o.made4 ) {
+			toneFrameDrop();
+			sharedTargetDrop( reinterpret_cast<std::uintptr_t>( &toneT1 ) );
+			return;
+		}
+	} else {
+		o.made4 = objBlFrame( kSW, kSH, 4, kRgba16fi, 0x88F0, color, ds, o.why ) && objBlFrameIs( color );  // DEPTH24_STENCIL8
+		if ( !o.made4 || !objBlFrame( kSW, kSH, 1, kRgba16fi, 0x88F0, color, ds, o.why ) )
+			return;
+	}
+	const GLenum texT = tone ? 0x9100 : GL_TEXTURE_2D;  // TEXTURE_2D_MULTISAMPLE
 	GLuint own = 0, fbo = 0;
 	if ( red == 2 ) {  // GL's own depth / stencil texture
 		ux.createTextures( GL_TEXTURE_2D, 1, &own );
@@ -847,9 +878,9 @@ void frameRun( int red, FrameOut & o )
 	}
 	f.genFramebuffers( 1, &fbo );
 	f.bindFramebuffer( kFb, fbo );
-	f.framebufferTexture2D( kFb, kColorAtt0, GL_TEXTURE_2D, color, 0 );
-	f.framebufferTexture2D( kFb, kColorAtt0 + 1, GL_TEXTURE_2D, sx.t1, 0 );
-	f.framebufferTexture2D( kFb, 0x821A, GL_TEXTURE_2D, red == 2 ? own : ds, 0 );  // DEPTH_STENCIL_ATTACHMENT
+	f.framebufferTexture2D( kFb, kColorAtt0, texT, color, 0 );
+	f.framebufferTexture2D( kFb, kColorAtt0 + 1, texT, t1, 0 );
+	f.framebufferTexture2D( kFb, 0x821A, red == 2 ? GL_TEXTURE_2D : texT, red == 2 ? own : ds, 0 );  // DEPTH_STENCIL_ATTACHMENT
 	const GLenum dbs[2] = { kColorAtt0, kColorAtt0 + 1 };
 	sf.drawBuffers( 2, dbs );
 	if ( f.checkFramebufferStatus( kFb ) != kComplete ) {
@@ -872,8 +903,13 @@ void frameRun( int red, FrameOut & o )
 	glEnable( GL_STENCIL_TEST );
 	glStencilFunc( GL_ALWAYS, 1, 0xFF );
 	glStencilOp( GL_KEEP, GL_KEEP, GL_REPLACE );
+	if ( arm == 1 ) {
+		glEnable( GL_SCISSOR_TEST );
+		glScissor( kScX, kScY, kScW, kScH );
+	}
 	ObjBlDraw d;
-	o.read = objBlFrameRead( glProc, d, o.why, red == 1 ? 2 : 0 );
+	o.read = objBlFrameRead( glProc, d, o.why, red == 1 ? 2 : red >= 3 ? red : 0 );
+	glDisable( GL_SCISSOR_TEST );
 	glDisable( GL_STENCIL_TEST );
 	glDisable( GL_CULL_FACE );
 	glDisable( GL_DEPTH_TEST );
@@ -884,7 +920,7 @@ void frameRun( int red, FrameOut & o )
 			&& sg.depthFail[0] == sg.depthFail[1];
 		o.stateOk = d.target.colorCount == 2 && d.target.depth == VK_FORMAT_D24_UNORM_S8_UINT && d.w == kSW && d.h == kSH && sg.on == 1
 			&& sg.func[0] == VK_COMPARE_OP_ALWAYS && sg.ref[0] == 1 && sg.pass[0] == VK_STENCIL_OP_REPLACE && sg.fail[0] == VK_STENCIL_OP_KEEP
-			&& sg.depthFail[0] == VK_STENCIL_OP_KEEP && same;
+			&& sg.depthFail[0] == VK_STENCIL_OP_KEEP && same && d.target.samples == ( tone ? 4u : 1u );
 		if ( red == 1 )
 			o.stateOk = d.target.colorCount == 2 && d.target.depth == VK_FORMAT_D24_UNORM_S8_UINT;  // the red draws on, stencil off
 		std::vector<unsigned> names;
@@ -909,23 +945,56 @@ void frameRun( int red, FrameOut & o )
 				o.ran = objBlRun( names, 0, o.why );
 		}
 		glFinish();
+		GLuint readDs = ds, one = 0, rfbo = 0;
+		void( WINAPI * blit )( GLint, GLint, GLint, GLint, GLint, GLint, GLint, GLint, GLbitfield, GLenum ) = nullptr;
+		if ( tone && load( blit, "glBlitFramebuffer" ) ) {  // the 4 samples resolved to one (depth and stencil from one sample)
+			ux.createTextures( GL_TEXTURE_2D, 1, &one );
+			ux.textureStorage2D( one, 1, 0x88F0, kSW, kSH );
+			f.genFramebuffers( 1, &rfbo );
+			f.bindFramebuffer( kFb, rfbo );
+			f.framebufferTexture2D( kFb, 0x821A, GL_TEXTURE_2D, one, 0 );
+			f.bindFramebuffer( 0x8CA8, fbo );  // READ_FRAMEBUFFER
+			blit( 0, 0, kSW, kSH, 0, 0, kSW, kSH, GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT, GL_NEAREST );
+			f.bindFramebuffer( kFb, 0 );
+			readDs = one;
+		}
 		std::vector<std::uint32_t> px( std::size_t( kSW ) * kSH, 0 );
-		f.getTextureImage( ds, 0, 0x84F9, 0x84FA, GLsizei( px.size() * 4 ), px.data() );  // DEPTH_STENCIL, UNSIGNED_INT_24_8
+		f.getTextureImage( readDs, 0, 0x84F9, 0x84FA, GLsizei( px.size() * 4 ), px.data() );  // DEPTH_STENCIL, UNSIGNED_INT_24_8
 		o.covered = 0;
 		o.mismatch = 0;
-		for ( const std::uint32_t p : px ) {
+		o.outside = 0;
+		for ( std::size_t i = 0; i < px.size(); i++ ) {
+			const std::uint32_t p = px[i];
 			const bool covered = ( p >> 8 ) < 0xFFFFFFu;
 			o.covered += covered;
 			o.mismatch += ( p & 0xFFu ) != ( covered ? 1u : 0u );
+			if ( arm == 1 && !inBox( i ) )
+				o.outside += p != 0xFFFFFF00u;
+			else if ( arm == 1 )
+				o.mismatch += !base || base->px.size() != px.size() || base->px[i] != p;
 		}
+		if ( arm == 1 )
+			o.minCovered = 0;
+		o.px = px;
+		if ( one )
+			glDeleteTextures( 1, &one );
+		void( WINAPI * delFbo )( GLsizei, const GLuint * ) = nullptr;
+		if ( rfbo && load( delFbo, "glDeleteFramebuffers" ) )
+			delFbo( 1, &rfbo );
 	}
 	void( WINAPI * deleteFramebuffers )( GLsizei, const GLuint * ) = nullptr;
 	if ( load( deleteFramebuffers, "glDeleteFramebuffers" ) )
 		deleteFramebuffers( 1, &fbo );
 	if ( own )
 		glDeleteTextures( 1, &own );
-	objBlFrameDrop();
-	o.dropped = !objBlFrameIs( color );
+	if ( tone ) {
+		toneFrameDrop();
+		sharedTargetDrop( reinterpret_cast<std::uintptr_t>( &toneT1 ) );
+		o.dropped = !toneFrameIs( color );
+	} else {
+		objBlFrameDrop();
+		o.dropped = !objBlFrameIs( color );
+	}
 }
 
 bool frameGate()
@@ -945,6 +1014,35 @@ bool frameGate()
 		std::printf( "BLVIEW RED frame%s %s (%s; read %d, %zu covered, %zu mismatches%s%s)\n", reds[r - 1], fails ? "FAIL" : "OK", redWhy[r - 1],
 			int( x.read ), x.covered, x.mismatch, x.why.empty() ? "" : ": ", x.why.c_str() );
 		ok = ok && fails;
+	}
+	{  // the scissor arm: GL's box as the draw's
+		FrameOut b, s, r;
+		frameRun( 0, b );
+		frameRun( 0, s, 1, &b );
+		frameRun( 3, r, 1, &b );
+		std::size_t bIn = 0, bOut = 0;
+		for ( std::size_t i = 0; i < b.px.size(); i++ )
+			( inBox( i ) ? bIn : bOut ) += ( b.px[i] >> 8 ) < 0xFFFFFFu;
+		const bool sOk = b.good() && s.good() && bIn >= 200 && bOut >= 200;
+		std::printf( "BLVIEW frame scissor %s (box %d,%d %dx%d; without it %zu covered inside, %zu outside; with it %zu touched outside, %zu "
+			"inside mismatches%s%s)\n", sOk ? "OK" : "FAIL", kScX, kScY, kScW, kScH, bIn, bOut, s.outside, s.mismatch, s.why.empty() ? "" : ": ",
+			s.why.c_str() );
+		const bool rFails = !r.good();
+		std::printf( "BLVIEW RED framescoff %s (the scissor read as off; %zu touched outside the box, %zu inside mismatches)\n", rFails ? "FAIL" : "OK",
+			r.outside, r.mismatch );
+		ok = ok && sOk && rFails;
+	}
+	{  // the tone arm: the tone frame as the shared frame
+		FrameOut t, r;
+		frameRun( 0, t, 2 );
+		frameRun( 4, r, 2 );
+		std::printf( "BLVIEW frame tone %s (4-sample tone frame made %d; read %d, state %d; prep %d, crossing %d; %zu covered, %zu stencil "
+			"mismatches; dropped %d)%s%s\n", t.good() ? "OK" : "FAIL", int( t.made4 ), int( t.read ), int( t.stateOk ), int( t.prepped ),
+			int( t.ran ), t.covered, t.mismatch, int( t.dropped ), t.why.empty() ? "" : ": ", t.why.c_str() );
+		const bool rFails = !r.good();
+		std::printf( "BLVIEW RED frametoneunshared %s (the borrowed entries not found; read %d%s%s)\n", rFails ? "FAIL" : "OK", int( r.read ),
+			r.why.empty() ? "" : ": ", r.why.c_str() );
+		ok = ok && t.good() && rFails;
 	}
 	if ( const GLenum e = glGetError(); e != GL_NO_ERROR ) {
 		std::printf( "BLVIEW frame FAIL (GL error 0x%x left)\n", unsigned( e ) );

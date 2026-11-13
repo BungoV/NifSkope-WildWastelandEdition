@@ -82,6 +82,7 @@ struct OpDraw
 	VkFramebuffer fb = VK_NULL_HANDLE;
 	std::vector<VkImageView> fbViews;
 	int w = 0, h = 0;
+	VkRect2D scissor {};  // lane VKOBJ4 open item 3: GL's scissor box (objBlFrameRead), the whole frame when GL's test is off
 	std::vector<std::uintptr_t> keys;  // the shared targets it draws into or reads (the crossing hands them over)
 };
 
@@ -1651,7 +1652,7 @@ bool objBlDrawRecord( VkCommandBuffer cmd, int mode, std::string & why )
 		rbi.renderArea = { { 0, 0 }, { std::uint32_t( d.w ), std::uint32_t( d.h ) } };
 		v.vkCmdBeginRenderPass( cmd, &rbi, VK_SUBPASS_CONTENTS_INLINE );
 		const VkViewport vp { 0.0f, 0.0f, float( d.w ), float( d.h ), 0.0f, 1.0f };
-		const VkRect2D sc { { 0, 0 }, { std::uint32_t( d.w ), std::uint32_t( d.h ) } };
+		const VkRect2D sc = d.scissor;
 		v.vkCmdSetViewport( cmd, 0, 1, &vp );
 		v.vkCmdSetScissor( cmd, 0, 1, &sc );
 		v.vkCmdBindPipeline( cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, e.pipe );
@@ -1886,8 +1887,6 @@ bool objBlTargetState( GlProc gp, std::uint32_t colorCount, ObjBlTarget & t, std
 	const auto getBiv = reinterpret_cast<GetBiv>( gp( "glGetBooleani_v" ) );
 	if ( !getIv || !getIiv || !isOn || !isOni || !getBv || !getBiv )
 		return why = "GL's state queries are not loaded", false;
-	if ( isOn( 0x0C11 ) )  // GL_SCISSOR_TEST
-		return why = "scissor is on (the pipeline takes none)", false;
 	if ( !isOn( 0x0B71 ) )  // GL_DEPTH_TEST
 		return why = "depth test is off", false;
 	GLint func = 0, cullMode = 0, front = 0;
@@ -2020,7 +2019,7 @@ bool objBlFrameRead( GlProc gp, ObjBlDraw & d, std::string & why, int red )
 			return false;
 		getAtt( 0x8CA9, att, 0x8CD1, &name );  // _OBJECT_NAME
 		for ( const auto & e : shareds() )
-			if ( e.second.tex == GLuint( name ) && e.second.glCtx == gl().ctx ) {
+			if ( e.second.tex == GLuint( name ) && e.second.glCtx == gl().ctx && !( red == 4 && e.second.borrowed ) ) {
 				key = e.first;
 				sh = &e.second;
 				return true;
@@ -2062,6 +2061,23 @@ bool objBlFrameRead( GlProc gp, ObjBlDraw & d, std::string & why, int red )
 		return fail( "the viewport is not the whole frame" );
 	if ( !objBlTargetState( gp, d.target.colorCount, d.target, why, red ) )
 		return false;
+	// GL's scissor as the draw's (a dynamic state): its box clamped to the frame (GL's rows are the image's rows); off: the frame
+	using IsOn = GLubyte( WINAPI * )( GLenum );
+	const auto isOn = reinterpret_cast<IsOn>( gp( "glIsEnabled" ) );
+	d.scissor[0] = d.scissor[1] = 0;
+	d.scissor[2] = d.w;
+	d.scissor[3] = d.h;
+	if ( isOn && isOn( 0x0C11 ) && red != 3 ) {  // GL_SCISSOR_TEST
+		GLint box[4] = {};
+		getIv( 0x0C10, box );  // GL_SCISSOR_BOX
+		const int x0 = std::min( std::max( int( box[0] ), 0 ), d.w ), y0 = std::min( std::max( int( box[1] ), 0 ), d.h );
+		const int x1 = std::min( std::max( int( box[0] ) + std::max( int( box[2] ), 0 ), x0 ), d.w );
+		const int y1 = std::min( std::max( int( box[1] ) + std::max( int( box[3] ), 0 ), y0 ), d.h );
+		d.scissor[0] = x0;
+		d.scissor[1] = y0;
+		d.scissor[2] = x1 - x0;
+		d.scissor[3] = y1 - y0;
+	}
 	if ( d.target.stencil.on && dsh->fmt != VK_FORMAT_D24_UNORM_S8_UINT && dsh->fmt != VK_FORMAT_D32_SFLOAT_S8_UINT )
 		d.target.stencil = ObjBlStencil();  // no stencil buffer: GL's test passes, as none
 	return true;
@@ -2421,6 +2437,9 @@ bool objBlDrawPrep( const ObjBlDraw & d, ObjBlDrawStat & st, std::string & why )
 	}
 	s.w = d.w;
 	s.h = d.h;
+	const bool whole = d.scissor[2] < 0 || d.scissor[3] < 0;  // not read from GL (a hand-made draw): the whole frame
+	s.scissor.offset = { whole ? 0 : d.scissor[0], whole ? 0 : d.scissor[1] };
+	s.scissor.extent = { std::uint32_t( whole ? d.w : d.scissor[2] ), std::uint32_t( whole ? d.h : d.scissor[3] ) };
 	s.keys.assign( d.colorKeys, d.colorKeys + d.target.colorCount );
 	if ( d.target.depth )
 		s.keys.push_back( d.depthKey );
