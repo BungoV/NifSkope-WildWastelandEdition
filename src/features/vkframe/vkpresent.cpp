@@ -51,6 +51,10 @@
 #include "features/vkframe/cloud_march_a_view_ps.spv.h"
 #include "features/vkframe/cloud_resolve_view_ps.spv.h"
 #include "features/vkframe/cloud_resolve_a_view_ps.spv.h"
+// lane VKFAR1: the far bulb dots as instanced quads (cell_fardots)
+#include "features/vkframe/fardots_view_vs.spv.h"
+#include "features/vkframe/fardots_view_ps.spv.h"
+#include "features/vkframe/vkfarcards.h"  // lane VKFAR1 round 2: the far cards' inputs (vkfarcards.inc)
 #include "features/vkframe/obj_depth_vs.spv.h"  // lane VKOBJ1
 
 #include <algorithm>
@@ -509,6 +513,9 @@ bool makeDevice( std::string & why )
 	v.storageExt = offered.shaderStorageImageExtendedFormats == VK_TRUE;
 	en.shaderFloat64 = offered.shaderFloat64;
 	v.float64 = offered.shaderFloat64 == VK_TRUE;
+	// lane VKFAR1 round 2: the far cards' BC sheets and shadow cube arrays (vkfarcards.inc reads what is offered)
+	en.textureCompressionBC = offered.textureCompressionBC;
+	en.imageCubeArray = offered.imageCubeArray;
 	en.depthBiasClamp = offered.depthBiasClamp;  // lane VKSHADOW1: GL's glPolygonOffsetClamp twin
 	v.depthBiasClamp = offered.depthBiasClamp == VK_TRUE;
 	en.multiDrawIndirect = offered.multiDrawIndirect;
@@ -632,6 +639,7 @@ void ssrDrop();
 void csmDrop();  // lane VKSHADOW1
 bool fxWork( std::string & why );
 void fxDrop();
+bool farRecord( std::string & why );  // lane VKFAR1 (vkfardots.inc): fxWork's kind 2
 void objDrop();  // lane VKOBJ1
 
 struct Worker
@@ -3527,6 +3535,7 @@ void shutdown()
 		sharedStat().mb = 0.0;
 		sharedGen()++;
 	}
+	farCardsFree( gl().ok );  // lane VKFAR1 round 2: the far cards' twins
 	// the temporal AA's crossing semaphores (GL's names); its pipelines stay with the device
 	Taa & A = taa();
 	if ( A.glDone || A.pending ) {
@@ -5122,7 +5131,7 @@ struct Fx
 	VkFence fence = VK_NULL_HANDLE;
 	bool pending = false;
 	// this run's job, written by the drawing thread before the hand
-	int kind = 0;  // 0 the air, 1 the clouds
+	int kind = 0;  // 0 the air, 1 the clouds, 2 the far dots (lane VKFAR1)
 	VkFramebuffer fbAir = VK_NULL_HANDLE, fbM = VK_NULL_HANDLE, fbR = VK_NULL_HANDLE;
 	int w = 0, h = 0, vp[4] = {}, stencilRef = 1, march = kFxMarch, resolve = kFxResolve, mw = 0, mh = 0, hw = 0, hh = 0;
 	bool blend = false, skipMarch = false;
@@ -5545,6 +5554,11 @@ bool fxWork( std::string & why )
 		}
 		FxProg & P = F.prog[kFxVolsky];
 		fxDraw( P, P.pipe[F.blend ? 1 : 0], F.fbAir, F.airPass, F.w, F.h, F.vp, F.stencilRef );
+	} else if ( F.kind == 2 ) {  // lane VKFAR1: the far dots
+		if ( !farRecord( why ) ) {
+			v.vkEndCommandBuffer( F.cmd );
+			return false;
+		}
 	} else {
 		if ( !F.fbR || ( !F.skipMarch && !F.fbM ) ) {
 			v.vkEndCommandBuffer( F.cmd );
@@ -5974,6 +5988,9 @@ FxStat takeCloudStat()
 	return s;
 }
 }  // namespace WwVkPresent
+
+#include "features/vkframe/vkfardots.inc"  // lane VKFAR1 (row G3): the far bulb dots on the view
+#include "features/vkframe/vkfarcards.inc"  // lane VKFAR1 round 2: the far cards' inputs
 
 // lane VKLIGHT1: AO, the contact shadow lines and the SSGI cast as compute on the present device (vkpresent.h LightRun)
 namespace
