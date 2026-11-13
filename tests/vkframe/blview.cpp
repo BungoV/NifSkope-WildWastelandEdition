@@ -595,7 +595,9 @@ bool pipeGate( const std::string & spvDir )
 		ok = ok && own;
 	}
 	int refused = 0;
-	std::printf( "BLVIEW pipe: %d pipelines, %d refused\n", objBlPipes( &refused ), refused );
+	const int pipes = objBlPipes( &refused );
+	std::printf( "BLVIEW pipe: %d pipelines, %d refused (the 4 reds)\n", pipes, refused );
+	ok = ok && pipes == 2 && refused == 4;
 	return ok;
 }
 }  // namespace blv
