@@ -1127,12 +1127,12 @@ bool objBlSharedFits( std::uintptr_t key, std::uint32_t dim, std::uint32_t array
 	const Shared * sh = sharedFind( key );
 	if ( !sh )
 		return why = "no shared target", false;
-	const int want = dim == 1 && !arrayed ? 0 : dim == 2 ? 1 : dim == 1 && arrayed ? 2 : -1;
-	static const char * names[3] = { "2D", "3D", "2D array" };
+	const int want = dim == 1 && !arrayed ? 0 : dim == 2 ? 1 : dim == 1 && arrayed ? 2 : dim == 3 && arrayed ? 3 : -1;
+	static const char * names[4] = { "2D", "3D", "2D array", "cube array" };
 	if ( want < 0 )
-		return why = "the binding is no 2D, 3D or 2D array image", false;
+		return why = "the binding is no 2D, 3D, 2D array or cube array image", false;
 	if ( sh->type != want )
-		return why = std::string( "the binding takes a " ) + names[want] + " image, the shared target is " + ( sh->type >= 0 && sh->type <= 2 ? names[sh->type] : "?" ), false;
+		return why = std::string( "the binding takes a " ) + names[want] + " image, the shared target is " + ( sh->type >= 0 && sh->type <= 3 ? names[sh->type] : "?" ), false;
 	if ( sh->samples > 1 )
 		return why = "the shared target is multisampled", false;
 	return true;

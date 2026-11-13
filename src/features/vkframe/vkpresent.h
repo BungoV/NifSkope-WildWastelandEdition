@@ -175,7 +175,9 @@ void toneCachePath( const std::string & path );
  * name; another shape: the old one goes first (a full drain). false: why; tex 0 (the owner makes GL's own). The GL
  * texture has NEAREST filters; the owner sets its own. levels (lane VKAIR1): a mip chain (colour formats; the clouds'
  * noise volumes), the owner fills each level. samples (lane VKOBJ1): a multisample 2D (type 0, one level; the objects'
- * depth prepass in GL_DEPTH_COMPONENT24 / 32F), GL_TEXTURE_2D_MULTISAMPLE with fixed sample locations. */
+ * depth prepass in GL_DEPTH_COMPONENT24 / 32F), GL_TEXTURE_2D_MULTISAMPLE with fixed sample locations. type 3 (lane
+ * VKOBJ4): a cube array of w x w, d layers (6 a cube, as farTwin counts) as GL_TEXTURE_CUBE_MAP_ARRAY (the lamps' D16 shadow
+ * cubes, cellShadow). */
 bool sharedTarget( std::uintptr_t key, int type, int w, int h, int d, unsigned glFmt, unsigned & tex, std::string & why,
 	int levels = 1, int samples = 1 );
 //! tex is key's live shared name in the current GL context (a shutdown drops every one: the owner makes GL's own again)

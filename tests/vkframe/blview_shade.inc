@@ -367,13 +367,18 @@ bool shadeBuild( const std::string & spvDir, std::string & why )
  * 0 misfits, the csmMap sampler GL's compare state; prep writes both images and GL's samplers; the run crosses.
  * Reds (each must FAIL): swap (the two shared textures on each other's unit), fit (the CSM given to volTex's binding
  * straight to prep), cmp (the CSM's compare mode off in GL). */
+/* Open item 5 (a cube-array shared type): cellShadow is a shared type 3 (32 x 32, 12 layers = 2 cubes, DEPTH_COMPONENT16, compare
+ * LEQUAL, as celllamps makes it). BAR: it imports as GL_TEXTURE_CUBE_MAP_ARRAY (GL clears layer 7 to 0.5 and reads 0.5 back), a
+ * type 3 of 8 layers is refused, objBlBindUnits places it on cellShadow's binding with GL's compare sampler (3 shared images,
+ * 2 compare samplers), prep writes 3 images. Red cubefit (must FAIL): the cube given to csmMap's binding straight to prep. */
 struct UnitsFix
 {
-	GLuint csm = 0, vol = 0, own = 0, prog = 0;
-	std::uintptr_t csmKey = 0, volKey = 0;
+	GLuint csm = 0, vol = 0, own = 0, cube = 0, prog = 0;
+	std::uintptr_t csmKey = 0, volKey = 0, cubeKey = 0, cubeBadKey = 0;
 	std::vector<std::uint32_t> ps;
 	std::vector<std::pair<std::uint32_t, std::vector<std::uint8_t>>> ubos;
-	std::uint32_t csmB = ~0u, volB = ~0u, csmS = ~0u;
+	std::uint32_t csmB = ~0u, volB = ~0u, csmS = ~0u, cubeB = ~0u, cubeS = ~0u;
+	bool cubeRead = false, cubeBadRefused = false;
 	void( WINAPI * bindTextureUnit )( GLuint, GLuint ) = nullptr;
 	void( WINAPI * textureParameteri )( GLuint, GLenum, GLint ) = nullptr;
 	void( WINAPI * createTextures )( GLenum, GLsizei, GLuint * ) = nullptr;
@@ -390,26 +395,59 @@ bool unitsBuild( const std::string & spvDir, std::string & why )
 	ux.ps = readSpv( spvDir + "/fo4_cellcsmbl_ps.pipe.spv" );
 	if ( ux.ps.empty() )
 		return why = "no csm pixel module", false;
-	static int keys[2];
+	static int keys[4];
 	ux.csmKey = reinterpret_cast<std::uintptr_t>( &keys[0] );
 	ux.volKey = reinterpret_cast<std::uintptr_t>( &keys[1] );
-	if ( !sharedTarget( ux.csmKey, 2, 64, 64, 4, 0x81A5, ux.csm, why ) || !sharedTarget( ux.volKey, 1, 16, 16, 16, kRgba16fi, ux.vol, why ) )
+	ux.cubeKey = reinterpret_cast<std::uintptr_t>( &keys[2] );
+	ux.cubeBadKey = reinterpret_cast<std::uintptr_t>( &keys[3] );
+	if ( !sharedTarget( ux.csmKey, 2, 64, 64, 4, 0x81A5, ux.csm, why ) || !sharedTarget( ux.volKey, 1, 16, 16, 16, kRgba16fi, ux.vol, why )
+		|| !sharedTarget( ux.cubeKey, 3, 32, 32, 12, 0x81A5, ux.cube, why ) )
 		return why = "sharedTarget: " + why, false;
-	for ( GLuint t : { ux.csm, ux.vol } ) {
+	{
+		GLuint bad = 0;
+		std::string w;
+		ux.cubeBadRefused = !sharedTarget( ux.cubeBadKey, 3, 32, 32, 8, 0x81A5, bad, w ) && !bad;
+		while ( glGetError() != GL_NO_ERROR ) {}
+	}
+	{
+		// GL's view of the import: a cube array (its binding query), layer 7 cleared to 0.5 and read back
+		void( WINAPI * clearSub )( GLuint, GLint, GLint, GLint, GLint, GLsizei, GLsizei, GLsizei, GLenum, GLenum, const void * ) = nullptr;
+		void( WINAPI * getSub )( GLuint, GLint, GLint, GLint, GLint, GLsizei, GLsizei, GLsizei, GLenum, GLenum, GLsizei, void * ) = nullptr;
+		if ( !load( clearSub, "glClearTexSubImage" ) || !load( getSub, "glGetTextureSubImage" ) )
+			return why = "no glClearTexSubImage / glGetTextureSubImage", false;
+		GLint was = 0, now = 0;
+		glGetIntegerv( 0x900A, &was );  // TEXTURE_BINDING_CUBE_MAP_ARRAY
+		glBindTexture( 0x9009, ux.cube );
+		glGetIntegerv( 0x900A, &now );
+		const bool isCube = glGetError() == GL_NO_ERROR && GLuint( now ) == ux.cube;
+		glBindTexture( 0x9009, GLuint( was ) );
+		const float half = 0.5f;
+		clearSub( ux.cube, 0, 0, 0, 7, 32, 32, 1, 0x1902, GL_FLOAT, &half );  // DEPTH_COMPONENT
+		std::vector<float> back( 32 * 32, 0.0f );
+		getSub( ux.cube, 0, 0, 0, 7, 32, 32, 1, 0x1902, GL_FLOAT, GLsizei( back.size() * 4 ), back.data() );
+		std::size_t at = 0;
+		for ( float x : back )
+			at += std::fabs( x - 0.5f ) <= 1.0f / 65535.0f;
+		ux.cubeRead = isCube && at == back.size() && glGetError() == GL_NO_ERROR;
+	}
+	for ( GLuint t : { ux.csm, ux.vol, ux.cube } ) {
 		ux.textureParameteri( t, 0x2801, 0x2601 );  // LINEAR
 		ux.textureParameteri( t, 0x2800, 0x2601 );
 		for ( GLenum wr : { 0x2802u, 0x2803u, 0x8072u } )
 			ux.textureParameteri( t, wr, 0x812F );  // CLAMP_TO_EDGE
 	}
-	ux.textureParameteri( ux.csm, 0x884C, 0x884E );  // COMPARE_REF_TO_TEXTURE
-	ux.textureParameteri( ux.csm, 0x884D, 0x0203 );  // LEQUAL
+	for ( GLuint t : { ux.csm, ux.cube } ) {
+		ux.textureParameteri( t, 0x884C, 0x884E );  // COMPARE_REF_TO_TEXTURE
+		ux.textureParameteri( t, 0x884D, 0x0203 );  // LEQUAL
+	}
 	ux.createTextures( GL_TEXTURE_2D, 1, &ux.own );
 	ux.textureStorage2D( ux.own, 1, 0x8058, 8, 8 );
 	const std::string vs = "#version 460 core\nvoid main() { gl_Position = vec4( 0.0 ); }\n";
 	const std::string fs = "#version 460 core\nlayout ( binding = 3 ) uniform sampler2DArrayShadow csmMap;\n"
 		"layout ( binding = 4 ) uniform sampler3D volTex;\nlayout ( binding = 5 ) uniform sampler2D ussContactMap;\n"
+		"layout ( binding = 6 ) uniform samplerCubeArrayShadow cellShadow;\n"
 		"layout ( location = 0 ) out vec4 o;\nvoid main() { o = vec4( texture( csmMap, vec4( 0.5, 0.5, 0.0, 0.5 ) ) + texture( volTex, vec3( 0.5 ) ).x"
-		" + texture( ussContactMap, vec2( 0.5 ) ).x ); }\n";
+		" + texture( ussContactMap, vec2( 0.5 ) ).x + texture( cellShadow, vec4( 1.0, 0.0, 0.0, 1.0 ), 0.5 ) ); }\n";
 	ux.prog = program( vs, fs );
 	if ( !ux.prog )
 		return why = "the units program did not link", false;
@@ -433,10 +471,14 @@ bool unitsBuild( const std::string & spvDir, std::string & why )
 				ux.volB = b.binding;
 			else if ( b.name == "_csmMap_sampler" )
 				ux.csmS = b.binding;
+			else if ( b.name == "cellShadow" )
+				ux.cubeB = b.binding;
+			else if ( b.name == "_cellShadow_sampler" )
+				ux.cubeS = b.binding;
 		}
 	}
-	if ( ux.csmB == ~0u || ux.volB == ~0u || ux.csmS == ~0u )
-		return why = "the csm twin has no csmMap / volTex / _csmMap_sampler", false;
+	if ( ux.csmB == ~0u || ux.volB == ~0u || ux.csmS == ~0u || ux.cubeB == ~0u || ux.cubeS == ~0u )
+		return why = "the csm twin has no csmMap / volTex / _csmMap_sampler / cellShadow / _cellShadow_sampler", false;
 	if ( const GLenum e = glGetError(); e != GL_NO_ERROR )
 		return why = "GL error " + std::to_string( e ) + " making the units fixture", false;
 	return true;
@@ -446,12 +488,12 @@ struct UnitsOut
 {
 	WwVkPresent::ObjBlBindStat bind;
 	WwVkPresent::ObjBlDrawStat prep;
-	bool placed = false, cmp = false, prepped = false, ran = false;
+	bool placed = false, cmp = false, cubeCmp = false, prepped = false, ran = false;
 	std::string why;
 	bool good() const
 	{
-		return bind.shared == 2 && bind.compare == 1 && bind.glOwn == 1 && bind.misfit == 0 && placed && cmp && prepped && ran && prep.images == 2
-			&& prep.glSamplers >= 3;
+		return bind.shared == 3 && bind.compare == 2 && bind.glOwn == 1 && bind.misfit == 0 && placed && cmp && cubeCmp && prepped && ran
+			&& prep.images == 3 && prep.glSamplers >= 4 && ux.cubeRead && ux.cubeBadRefused;
 	}
 };
 
@@ -461,6 +503,7 @@ void unitsRun( int red, UnitsOut & o )
 	ux.bindTextureUnit( 3, red == 1 ? ux.vol : ux.csm );
 	ux.bindTextureUnit( 4, red == 1 ? ux.csm : ux.vol );
 	ux.bindTextureUnit( 5, ux.own );
+	ux.bindTextureUnit( 6, ux.cube );  // a cube array on unit 6
 	if ( red == 3 )
 		ux.textureParameteri( ux.csm, 0x884C, 0 );
 	f.useProgram( ux.prog );
@@ -472,7 +515,7 @@ void unitsRun( int red, UnitsOut & o )
 	d.psWords = ux.ps.size();
 	const bool bound = objBlBindUnits( glProc, ux.prog, d, o.bind, o.why );
 	f.useProgram( 0 );
-	for ( GLuint u : { 3u, 4u, 5u } )
+	for ( GLuint u : { 3u, 4u, 5u, 6u } )
 		ux.bindTextureUnit( u, 0 );
 	if ( red == 3 )
 		ux.textureParameteri( ux.csm, 0x884C, 0x884E );
@@ -480,15 +523,22 @@ void unitsRun( int red, UnitsOut & o )
 		return;
 	if ( red == 2 )
 		d.images.emplace_back( ux.volB, ux.csmKey );
-	int csmAt = 0, volAt = 0;
+	if ( red == 4 )
+		d.images.emplace_back( ux.csmB, ux.cubeKey );
+	int csmAt = 0, volAt = 0, cubeAt = 0;
 	for ( const auto & im : d.images ) {
 		csmAt += im.first == ux.csmB && im.second == ux.csmKey;
 		volAt += im.first == ux.volB && im.second == ux.volKey;
+		cubeAt += im.first == ux.cubeB && im.second == ux.cubeKey;
 	}
-	o.placed = csmAt == 1 && volAt == 1 && d.images.size() == 2;
-	for ( const auto & s : d.samplers )
+	o.placed = csmAt == 1 && volAt == 1 && cubeAt == 1 && d.images.size() == 3;
+	for ( const auto & s : d.samplers ) {
+		const bool c = s.second.compareMode == 0x884E && s.second.compareFunc == 0x0203 && s.second.minFilter == 0x2601;
 		if ( s.first == ux.csmS )
-			o.cmp = s.second.compareMode == 0x884E && s.second.compareFunc == 0x0203 && s.second.minFilter == 0x2601;
+			o.cmp = c;
+		if ( s.first == ux.cubeS )
+			o.cubeCmp = c;
+	}
 	shadeClear();
 	std::vector<unsigned> names;
 	if ( !objBlPoolCopy( sx.key, sx.pool, names, o.why ) )
@@ -534,9 +584,13 @@ bool unitsGate( const std::string & spvDir )
 		ok ? "OK" : "FAIL", o.bind.shared, o.bind.compare, o.bind.samplers, o.bind.glOwn, o.bind.misfit, o.bind.unbound, o.bind.texelGl,
 		int( o.placed ), int( o.cmp ), o.prep.images, o.prep.glSamplers, o.prep.standIns, o.ran ? "OK" : "no", o.why.empty() ? "" : ": ",
 		o.why.c_str() );
-	const char * reds[3] = { "swap", "fit", "cmp" };
-	const char * redWhy[3] = { "the shared textures on each other's unit", "the CSM given to volTex's binding", "the CSM's compare mode off" };
-	for ( int r = 1; r <= 3; r++ ) {
+	std::printf( "BLVIEW units cube %s (cellShadow a shared cube array: GL reads layer 7 back %d, 8 layers refused %d, placed on its binding %d, "
+		"compare %d)\n", ux.cubeRead && ux.cubeBadRefused && o.placed && o.cubeCmp ? "OK" : "FAIL", int( ux.cubeRead ), int( ux.cubeBadRefused ),
+		int( o.placed ), int( o.cubeCmp ) );
+	const char * reds[4] = { "swap", "fit", "cmp", "cubefit" };
+	const char * redWhy[4] = { "the shared textures on each other's unit", "the CSM given to volTex's binding", "the CSM's compare mode off",
+		"the cube given to csmMap's binding" };
+	for ( int r = 1; r <= 4; r++ ) {
 		UnitsOut x;
 		unitsRun( r, x );
 		const bool fails = !x.good();

@@ -144,6 +144,7 @@ struct Gpu
 	int bloomVersion = 0;
 	// the depth cube array, the light each slot holds (-1 free), and a stamp the light buffer re-uploads on
 	GLuint shTex = 0, shFbo = 0;
+	bool shShared = false;	// lane VKOBJ4: shTex is a shared cube array on the present device (WW_VKOBJ_SHADE, keyed &shTex)
 	const void * shDoc = nullptr;
 	int shVersion = 0;
 	int shSlot[kShadowSlots];

@@ -1214,7 +1214,8 @@ bool makeSlot( Slot & s, int w, int h, std::string & why )
  * overlay) take the same steps: this is the one place they are written. Lane VKSHARE1: type 3D (d deep) or a 2D array
  * (layers), single-sample, GL_TEXTURE_3D / GL_TEXTURE_2D_ARRAY through glTexStorageMem3DEXT; one mip level always. */
 bool makeShared( VkImage & img, VkDeviceMemory & mem, GLuint & tex, GLuint & obj, VkFormat fmt, GLenum glFmt, int samples, int w,
-	int h, bool depth, double & mb, std::string & why, VkImageType type = VK_IMAGE_TYPE_2D, int d = 1, int layers = 1, int levels = 1 )
+	int h, bool depth, double & mb, std::string & why, VkImageType type = VK_IMAGE_TYPE_2D, int d = 1, int layers = 1, int levels = 1,
+	bool cube = false )  // lane VKOBJ4: a cube array (layers = 6 per cube; GL_TEXTURE_CUBE_MAP_ARRAY), the lamps' shadow cubes
 {
 	levels = ( samples == 1 && !depth ) ? std::max( levels, 1 ) : 1;  // lanes VKLIGHT1 / VKAIR1: a mipped 2D, 2D array or 3D input
 	Vk & v = vk();
@@ -1235,9 +1236,14 @@ bool makeShared( VkImage & img, VkDeviceMemory & mem, GLuint & tex, GLuint & obj
 		| ( depth ? VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT : VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT );
 	if ( samples == 1 && !depth )
 		usage |= VK_IMAGE_USAGE_STORAGE_BIT;
+	if ( cube && ( is3d || w != h || layers % 6 ) ) {
+		why = "a cube array is square, 2D and six layers a cube";
+		return false;
+	}
+	const VkImageCreateFlags flags = cube ? VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT : 0;
 	VkImageFormatProperties ip {};
 	auto offered = [&]() {
-		return v.vkGetPhysicalDeviceImageFormatProperties( v.phys, fmt, type, VK_IMAGE_TILING_OPTIMAL, usage, 0, &ip ) == VK_SUCCESS
+		return v.vkGetPhysicalDeviceImageFormatProperties( v.phys, fmt, type, VK_IMAGE_TILING_OPTIMAL, usage, flags, &ip ) == VK_SUCCESS
 			&& ( ip.sampleCounts & sc ) && ip.maxExtent.width >= std::uint32_t( w ) && ip.maxExtent.height >= std::uint32_t( h )
 			&& ip.maxExtent.depth >= std::uint32_t( d ) && ip.maxArrayLayers >= std::uint32_t( layers ) && ip.maxMipLevels >= std::uint32_t( levels );
 	};
@@ -1255,6 +1261,7 @@ bool makeShared( VkImage & img, VkDeviceMemory & mem, GLuint & tex, GLuint & obj
 	ext.handleTypes = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_WIN32_BIT;
 	VkImageCreateInfo ci { VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO };
 	ci.pNext = &ext;
+	ci.flags = flags;
 	ci.imageType = type;
 	ci.format = fmt;
 	ci.extent = { std::uint32_t( w ), std::uint32_t( h ), std::uint32_t( d ) };
@@ -1325,10 +1332,11 @@ bool makeShared( VkImage & img, VkDeviceMemory & mem, GLuint & tex, GLuint & obj
 		why = "vkGetMemoryWin32HandleKHR (a view image) failed";
 		return false;
 	}
-	const GLenum target = is3d ? kTexture3D : layered ? kTexture2DArray : samples > 1 ? kTexture2DMs : kTexture2D;
+	const GLenum target = cube ? 0x9009u : is3d ? kTexture3D : layered ? kTexture2DArray : samples > 1 ? kTexture2DMs : kTexture2D;
 	while ( g.getError() != 0 ) {}
 	GLint was = 0;
-	g.getIntegerv( is3d ? kTexBinding3D : layered ? kTexBinding2DArray : samples > 1 ? kTexBinding2DMs : kTexBinding2D, &was );
+	g.getIntegerv( cube ? 0x900Au : is3d ? kTexBinding3D : layered ? kTexBinding2DArray : samples > 1 ? kTexBinding2DMs : kTexBinding2D,
+		&was );  // GL_TEXTURE_CUBE_MAP_ARRAY / its binding
 	g.createMemoryObjects( 1, &obj );
 	const GLint one = 1;
 	g.memoryObjectParameteriv( obj, kDedicated, &one );
@@ -3804,7 +3812,7 @@ bool sharedTarget( std::uintptr_t key, int type, int w, int h, int d, unsigned g
 	};
 	if ( !v.ok || !g.ok || g.ctx != reinterpret_cast<void *>( wglGetCurrentContext() ) )
 		return fail( "the present device or GL's entry points are not ready in this context" );
-	if ( w < 1 || h < 1 || type < 0 || type > 2 )
+	if ( w < 1 || h < 1 || type < 0 || type > 3 )
 		return fail( "a shared target of size " + std::to_string( w ) + "x" + std::to_string( h ) + " type " + std::to_string( type ) );
 	bool depth = false;
 	const VkFormat fmt = vkFormatOf( GLenum( glFmt ), depth );
@@ -3834,13 +3842,16 @@ bool sharedTarget( std::uintptr_t key, int type, int w, int h, int d, unsigned g
 	}
 	Shared s;
 	const VkImageType vt = type == 1 ? VK_IMAGE_TYPE_3D : VK_IMAGE_TYPE_2D;
-	if ( !makeShared( s.img, s.mem, s.tex, s.obj, fmt, GLenum( glFmt ), samples, w, h, depth, s.mb, why, vt, type == 1 ? d : 1, type == 2 ? d : 1, levels ) ) {
+	const int layers = type >= 2 ? d : 1;  // lane VKOBJ4: type 3 = a cube array of d layers, 6 a cube (farTwin's count)
+	if ( !makeShared( s.img, s.mem, s.tex, s.obj, fmt, GLenum( glFmt ), samples, w, h, depth, s.mb, why, vt, type == 1 ? d : 1, layers, levels,
+			type == 3 ) ) {
 		sharedFree( s, true );
 		return fail( why );
 	}
-	const VkImageViewType viewType = type == 1 ? VK_IMAGE_VIEW_TYPE_3D : type == 2 ? VK_IMAGE_VIEW_TYPE_2D_ARRAY : VK_IMAGE_VIEW_TYPE_2D;
+	const VkImageViewType viewType = type == 1 ? VK_IMAGE_VIEW_TYPE_3D : type == 2 ? VK_IMAGE_VIEW_TYPE_2D_ARRAY
+		: type == 3 ? VK_IMAGE_VIEW_TYPE_CUBE_ARRAY : VK_IMAGE_VIEW_TYPE_2D;
 	s.view = imageView( s.img, viewType, fmt, depth ? VK_IMAGE_ASPECT_DEPTH_BIT : VK_IMAGE_ASPECT_COLOR_BIT, std::uint32_t( levels ),
-		std::uint32_t( type == 2 ? d : 1 ) );
+		std::uint32_t( layers ) );
 	if ( !s.view ) {
 		sharedFree( s, true );
 		return fail( "a shared target's image view failed" );

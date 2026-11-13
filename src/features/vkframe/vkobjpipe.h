@@ -206,7 +206,7 @@ struct ObjBlBindStat
 /*! GL's texture units of `prog` for both of d's modules: a set-0 image GL binds a shared target to joins d.images
  * (shape and samples checked), each sampler takes GL's state of its texture. The rest stay stand-ins. */
 bool objBlBindUnits( GlProc gp, unsigned prog, ObjBlDraw & d, ObjBlBindStat & st, std::string & why );
-//! the shared target `key` fits a set-0 image of SPIR-V Dim `dim` / Arrayed (2D, 3D, 2D array; one sample)
+//! the shared target `key` fits a set-0 image of SPIR-V Dim `dim` / Arrayed (2D, 3D, 2D array, cube array; one sample)
 bool objBlSharedFits( std::uintptr_t key, std::uint32_t dim, std::uint32_t arrayed, std::string & why );
 //! GL program `prog`'s state for both modules' uniform blocks (LooseUniforms by objBlLoose, the named blocks by objBlBlock)
 bool objBlMirror( GlProc gp, unsigned prog, const std::uint32_t * vs, std::size_t vsWords, const std::uint32_t * ps, std::size_t psWords,
