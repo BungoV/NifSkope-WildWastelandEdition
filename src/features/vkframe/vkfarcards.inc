@@ -6,9 +6,11 @@
  *    GENERAL on both sides, GL copies into it), its own key map so sharedTarget's twins and stats stay as they were.
  * 2. texel buffers both APIs see (farTexelBuffer). 3. the cards' descriptor set, reflected from their module (farCardsSet). */
 #include "features/vkframe/farcards_view_ps.spv.h"
+#include "features/vkframe/farcards_view_vs.spv.h"  // lane VKFAR2: impostor_instez_vs, its bindings 0 / 32 / 96 / 97 in the same set
 namespace
 {
 constexpr GLenum kFcCubeArray = 0x9009, kFcBindingCubeArray = 0x900A, kFcDepth16 = 0x81A5;
+constexpr std::uint32_t kFcSets = 256;  // lane VKFAR2: descriptor sets, one a card set drawn in a pass (more: GL draws the pass)
 
 struct FcFormat
 {
@@ -96,10 +98,11 @@ struct FarCards
 	// 3. the far cards' set (farCardsSet)
 	VkDescriptorSetLayout setLayout = VK_NULL_HANDLE;
 	VkDescriptorPool pool = VK_NULL_HANDLE;
-	VkDescriptorSet set = VK_NULL_HANDLE;
+	VkDescriptorSet set = VK_NULL_HANDLE;  // sets[0]
+	std::vector<VkDescriptorSet> sets;     // lane VKFAR2: one a drawn card set (kFcSets)
 	VkPipelineLayout pipeLayout = VK_NULL_HANDLE;
-	VkShaderModule ps = VK_NULL_HANDLE;
-	WwVkPresent::FarSetCounts counts;
+	VkShaderModule ps = VK_NULL_HANDLE, vs = VK_NULL_HANDLE;
+	WwVkPresent::FarSetCounts counts;  // the pixel stage's (the vertex stage's 0 / 32 / 96 / 97 join the layout only)
 	WwVkPresent::FarTwinStat st;
 	int features = -1;  // -1 unread; bit 0 textureCompressionBC, bit 1 imageCubeArray (the device enables what is offered)
 };
@@ -426,6 +429,10 @@ void fcSetFree()
 	FarCards & C = farCards();
 	if ( C.ps )
 		v.vkDestroyShaderModule( v.dev, C.ps, nullptr );
+	if ( C.vs )
+		v.vkDestroyShaderModule( v.dev, C.vs, nullptr );
+	C.vs = VK_NULL_HANDLE;
+	C.sets.clear();
 	if ( C.pipeLayout )
 		v.vkDestroyPipelineLayout( v.dev, C.pipeLayout, nullptr );
 	if ( C.pool )
@@ -884,13 +891,49 @@ bool farCardsSet( FarSetCounts & out, std::string & why )
 		return false;
 	if ( C.counts.cubeArrays && !fcFeatures( false, true, why ) )
 		return false;
+	// lane VKFAR2: the vertex stage (impostor_instez_vs) shares the set: b0 with the pixel stage, its own b31 at 32 and its
+	// texel buffers at 96 / 97, as vkframe_spirv.sh's fxc() places them (read from its module; anything else refuses)
+	FarSetCounts vsc;
+	if ( !farSetReflect( vkframe_farcards_view_vs_spv, sizeof( vkframe_farcards_view_vs_spv ) / 4, vsc, why ) ) {
+		why = "the far cards' vertex stage: " + why;
+		return false;
+	}
 	std::vector<VkDescriptorSetLayoutBinding> lb;
 	std::map<VkDescriptorType, std::uint32_t> sizes;
+	auto typeOf = []( int kind ) {
+		return kind == 0 ? VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER : kind == 1 ? VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE
+			: kind == 2 ? VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER : VK_DESCRIPTOR_TYPE_SAMPLER;
+	};
 	for ( const FarSetSlot & s : C.counts.binds ) {
-		const VkDescriptorType t = s.kind == 0 ? VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER : s.kind == 1 ? VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE
-			: s.kind == 2 ? VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER : VK_DESCRIPTOR_TYPE_SAMPLER;
+		const VkDescriptorType t = typeOf( s.kind );
 		lb.push_back( { s.binding, t, 1, VK_SHADER_STAGE_FRAGMENT_BIT, nullptr } );
-		sizes[t]++;
+		sizes[t] += kFcSets;
+	}
+	for ( const FarSetSlot & s : vsc.binds ) {
+		const bool want = ( s.binding == 0 || s.binding == 32 ) ? s.kind == 0 : ( s.binding == 96 || s.binding == 97 ) && s.kind == 2;
+		if ( !want ) {
+			why = "the far cards' vertex stage has binding " + std::to_string( s.binding ) + " of kind " + std::to_string( s.kind )
+				+ " (it takes b0 at 0, b31 at 32, two texel buffers at 96 / 97)";
+			return false;
+		}
+		bool shared = false;
+		for ( VkDescriptorSetLayoutBinding & b : lb )
+			if ( b.binding == s.binding ) {
+				if ( b.descriptorType != typeOf( s.kind ) ) {
+					why = "binding " + std::to_string( s.binding ) + " has another type in the vertex stage";
+					return false;
+				}
+				b.stageFlags |= VK_SHADER_STAGE_VERTEX_BIT;
+				shared = true;
+			}
+		if ( !shared ) {
+			lb.push_back( { s.binding, typeOf( s.kind ), 1, VK_SHADER_STAGE_VERTEX_BIT, nullptr } );
+			sizes[typeOf( s.kind )] += kFcSets;
+		}
+	}
+	if ( vsc.binds.size() != 4 ) {
+		why = "the far cards' vertex stage declares " + std::to_string( vsc.binds.size() ) + " bindings, not 4";
+		return false;
 	}
 	std::vector<VkDescriptorPoolSize> ps;
 	for ( const auto & kv : sizes )
@@ -899,22 +942,26 @@ bool farCardsSet( FarSetCounts & out, std::string & why )
 	li.bindingCount = std::uint32_t( lb.size() );
 	li.pBindings = lb.data();
 	VkDescriptorPoolCreateInfo pi { VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO };
-	pi.maxSets = 1;
+	pi.maxSets = kFcSets;
 	pi.poolSizeCount = std::uint32_t( ps.size() );
 	pi.pPoolSizes = ps.data();
 	bool ok = v.vkCreateDescriptorSetLayout( v.dev, &li, nullptr, &C.setLayout ) == VK_SUCCESS
 		&& v.vkCreateDescriptorPool( v.dev, &pi, nullptr, &C.pool ) == VK_SUCCESS;
 	if ( ok ) {
+		std::vector<VkDescriptorSetLayout> lays( kFcSets, C.setLayout );
+		C.sets.assign( kFcSets, VK_NULL_HANDLE );
 		VkDescriptorSetAllocateInfo ai { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO };
 		ai.descriptorPool = C.pool;
-		ai.descriptorSetCount = 1;
-		ai.pSetLayouts = &C.setLayout;
+		ai.descriptorSetCount = kFcSets;
+		ai.pSetLayouts = lays.data();
 		VkPipelineLayoutCreateInfo pl { VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO };
 		pl.setLayoutCount = 1;
 		pl.pSetLayouts = &C.setLayout;
-		ok = v.vkAllocateDescriptorSets( v.dev, &ai, &C.set ) == VK_SUCCESS
+		ok = v.vkAllocateDescriptorSets( v.dev, &ai, C.sets.data() ) == VK_SUCCESS
 			&& v.vkCreatePipelineLayout( v.dev, &pl, nullptr, &C.pipeLayout ) == VK_SUCCESS
-			&& fxModule( vkframe_farcards_view_ps_spv, sizeof( vkframe_farcards_view_ps_spv ), C.ps );
+			&& fxModule( vkframe_farcards_view_ps_spv, sizeof( vkframe_farcards_view_ps_spv ), C.ps )
+			&& fxModule( vkframe_farcards_view_vs_spv, sizeof( vkframe_farcards_view_vs_spv ), C.vs );
+		C.set = ok ? C.sets[0] : VK_NULL_HANDLE;
 	}
 	if ( !ok ) {
 		why = "the far cards' set layout / pool / set / pipeline layout / module failed on the present device";

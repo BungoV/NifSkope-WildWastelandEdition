@@ -67,6 +67,11 @@ HLSL_SPECS += [('src/features/vkframe', k, 'vulkan1.2', 'vkframe_%s_spv' % k) fo
 # lane VKFAR1 round 2: the far cards' pixel stage, the script's `fxk <name> <dir/file>` lines (fx() + every declared binding kept)
 VKFRAME_FXK = {'farcards_view_ps': 'far-lod/impostor_cellinstez_ps__WW_CELL_FOGLEAK'}
 HLSL_SPECS += [('src/features/vkframe', k, 'vulkan1.2', 'vkframe_%s_spv' % k) for k in VKFRAME_FXK]
+# lane VKFAR2: the far cards' vertex stage, the script's `fxc <name> <dir/file>` lines (its own bindings in the cards' set)
+VKFRAME_FXC = {'farcards_view_vs': 'far-lod/impostor_instez_vs'}
+VKFRAME_FXC_ARGS = ['-fvk-bind-register', 'b0', '0', '0', '0', '-fvk-bind-register', 'b31', '0', '32', '0', '-fvk-bind-register',
+	't0', '0', '96', '0', '-fvk-bind-register', 't1', '0', '97', '0', '-fspv-preserve-bindings']
+HLSL_SPECS += [('src/features/vkframe', k, 'vulkan1.2', 'vkframe_%s_spv' % k) for k in VKFRAME_FXC]
 DEFAULT_G = 'E:/Tools/RenderDoc/RenderDoc_1.45_64/plugins/spirv/glslangValidator.exe'
 DEFAULT_DXC = 'E:/Tools/dxc/bin/x64/dxc.exe'
 
@@ -164,6 +169,11 @@ def script_ok(tree):
 	klines = dict(re.findall(r'^fxk ([a-z0-9_]+) ([A-Za-z0-9_/+-]+)$', vf, re.M))
 	if klines != VKFRAME_FXK:
 		bad.append('src/features/vkframe/vkframe_spirv.sh: its fxk lines (%s) are not this checker\'s far cards' % ' '.join(sorted(klines)))
+	if '\t"$DXC" -spirv -fspv-target-env=vulkan1.2 -T vs_6_0 -E main ' + ' '.join(VKFRAME_FXC_ARGS) + ' -Fo "$1.spv" ' not in vf:
+		bad.append('src/features/vkframe/vkframe_spirv.sh: its fxc() compile line changed')
+	clines = dict(re.findall(r'^fxc ([a-z0-9_]+) ([A-Za-z0-9_/+-]+)$', vf, re.M))
+	if clines != VKFRAME_FXC:
+		bad.append('src/features/vkframe/vkframe_spirv.sh: its fxc lines (%s) are not this checker\'s far-card vertex stages' % ' '.join(sorted(clines)))
 	return bad
 
 
@@ -289,8 +299,11 @@ def main(argv):
 			if k in VKFRAME_FXK:
 				src = os.path.join(tree, 'res/shaders/hlsl', VKFRAME_FXK[k] + '.hlsl')
 				hdefs = VKFRAME_SKY_ARGS + ['-fspv-preserve-bindings']
+			if k in VKFRAME_FXC:
+				src = os.path.join(tree, 'res/shaders/hlsl', VKFRAME_FXC[k] + '.hlsl')
+				hdefs = VKFRAME_FXC_ARGS
 			m = re.search(r'hlsl profile: ([cvp]s_6_[0-9])', open(src, encoding='utf-8', errors='replace').read())
-			if k in VKFRAME_FXV:
+			if k in VKFRAME_FXV or k in VKFRAME_FXC:
 				m = re.match(r'(vs_6_0)', 'vs_6_0')
 			opt = [] if d == 'src/features/vkframe' else ['-O0']   # vkframe_spirv.sh builds optimised
 			r = subprocess.run([dxc, '-spirv', '-fspv-target-env=' + env, '-T', m.group(1) if m else 'ps_6_0' if k in VKFRAME_SKY or k in VKFRAME_FX or k in VKFRAME_FXK else 'cs_6_0', '-E', 'main']

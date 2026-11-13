@@ -687,6 +687,7 @@ void csmDrop();  // lane VKSHADOW1
 bool fxWork( std::string & why );
 void fxDrop();
 bool farRecord( std::string & why );  // lane VKFAR1 (vkfardots.inc): fxWork's kind 2
+bool fcRecord( std::string & why );   // lane VKFAR2 (vkfarcardsdraw.inc): fxWork's kind 3
 void objDrop();  // lane VKOBJ1
 void blFree();  // lane VKOBJ2
 
@@ -5608,6 +5609,11 @@ bool fxWork( std::string & why )
 			v.vkEndCommandBuffer( F.cmd );
 			return false;
 		}
+	} else if ( F.kind == 3 ) {  // lane VKFAR2: the far cards
+		if ( !fcRecord( why ) ) {
+			v.vkEndCommandBuffer( F.cmd );
+			return false;
+		}
 	} else {
 		if ( !F.fbR || ( !F.skipMarch && !F.fbM ) ) {
 			v.vkEndCommandBuffer( F.cmd );
@@ -5685,18 +5691,39 @@ bool fxFb( VkFramebuffer & fb, VkRenderPass pass, const VkImageView * views, int
 // the GL names a crossing hands over (the frame, the targets, every twin), each once
 struct FxNames
 {
-	GLuint tex[24] = {};
-	GLenum lay[24] = {};
+	static constexpr GLuint kMax = 256;  // lane VKFAR2: the far cards' sheets (4 a card set) and texel buffers
+	GLuint tex[kMax] = {};
+	GLenum lay[kMax] = {};
 	GLuint n = 0;
+	GLuint buf[32] = {};
+	GLuint nb = 0;
+	bool full = false;  // a name did not fit: the caller refuses (GL would not hand it over)
 	void add( GLuint t )
 	{
-		if ( !t || n >= 24 )
+		if ( !t )
 			return;
 		for ( GLuint k = 0; k < n; k++ )
 			if ( tex[k] == t )
 				return;
+		if ( n >= kMax ) {
+			full = true;
+			return;
+		}
 		tex[n] = t;
 		lay[n++] = kLayoutGeneral;
+	}
+	void addBuf( GLuint b )
+	{
+		if ( !b )
+			return;
+		for ( GLuint k = 0; k < nb; k++ )
+			if ( buf[k] == b )
+				return;
+		if ( nb >= 32 ) {
+			full = true;
+			return;
+		}
+		buf[nb++] = b;
 	}
 };
 
@@ -5795,7 +5822,11 @@ bool fxCross( FxNames & names, std::string & why )
 {
 	Gl & g = gl();
 	Fx & F = fx();
-	g.signalSemaphore( F.glDoneGl, 0, nullptr, names.n, names.tex, names.lay );
+	if ( names.full ) {
+		why = "more GL names than a crossing hands over";
+		return false;
+	}
+	g.signalSemaphore( F.glDoneGl, names.nb, names.buf, names.n, names.tex, names.lay );
 	g.flush();
 	Worker & W = wk();
 	std::uint64_t want = 0;
@@ -5816,7 +5847,7 @@ bool fxCross( FxNames & names, std::string & why )
 	}
 	if ( !ok )
 		return false;
-	g.waitSemaphore( F.vkDoneGl, 0, nullptr, names.n, names.tex, names.lay );
+	g.waitSemaphore( F.vkDoneGl, names.nb, names.buf, names.n, names.tex, names.lay );
 	F.pending = true;
 	return true;
 }
@@ -6040,6 +6071,7 @@ FxStat takeCloudStat()
 
 #include "features/vkframe/vkfardots.inc"  // lane VKFAR1 (row G3): the far bulb dots on the view
 #include "features/vkframe/vkfarcards.inc"  // lane VKFAR1 round 2: the far cards' inputs
+#include "features/vkframe/vkfarcardsdraw.inc"  // lane VKFAR2: the far cards drawn on the view
 
 // lane VKLIGHT1: AO, the contact shadow lines and the SSGI cast as compute on the present device (vkpresent.h LightRun)
 namespace

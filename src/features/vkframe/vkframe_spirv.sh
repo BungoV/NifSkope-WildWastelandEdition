@@ -93,4 +93,12 @@ fxk() {
 	rm -f "$1.spv"
 }
 fxk farcards_view_ps far-lod/impostor_cellinstez_ps__WW_CELL_FOGLEAK
+# lane VKFAR2: the far cards' vertex stage shares the pixel stage's set: b0 at 0 (both stages), its own b31 at 32 and
+# its texel buffers cardData / cardFrames at 96 / 97, clear of the pixel stage's 31 and 64..89
+fxc() {
+	"$DXC" -spirv -fspv-target-env=vulkan1.2 -T vs_6_0 -E main -fvk-bind-register b0 0 0 0 -fvk-bind-register b31 0 32 0 -fvk-bind-register t0 0 96 0 -fvk-bind-register t1 0 97 0 -fspv-preserve-bindings -Fo "$1.spv" "$(cygpath -m "$ROOT/res/shaders/hlsl/$2.hlsl" 2>/dev/null || echo "$ROOT/res/shaders/hlsl/$2.hlsl")"
+	python -I "$ROOT/tools/spv_header.py" "$1.spv" "vkframe_$1_spv" "$1.spv.h" < /dev/null
+	rm -f "$1.spv"
+}
+fxc farcards_view_vs far-lod/impostor_instez_vs
 ls -la csm_view_vs.spv.h obj_depth_vs.spv.h sky_view_ps.spv.h bloom_down.spv.h bloom_hold.spv.h bloom_up.spv.h bloom_src.spv.h bloom_comb.spv.h bloom_back.spv.h tonemap.spv.h measure_q.spv.h tone_view_vs.spv.h tone_view_ps.spv.h taa_view_mv_cs.spv.h taa_view_resolve_cs.spv.h taa_view_rcas_ps.spv.h

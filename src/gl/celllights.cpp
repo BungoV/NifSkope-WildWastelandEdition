@@ -564,7 +564,7 @@ int wwCellFarRed()
 
 
 /* lane VKFAR1 (row G3): the far dots on the present device's tone frame, cell_fardots' uniforms already set on prog.
- * false: GL draws its points (the reason is in the "vk far:" line). The far cards and the far ground stay on GL. */
+ * false: GL draws its points (the reason is in the "vk far:" line). The far cards: impostordraw.cpp (lane VKFAR2). */
 static bool farDotsOnVulkan( Renderer * r, NifSkopeOpenGLContext::Program * prog, const WwCellFar * Fr, const std::vector<float> & pos,
 	const std::vector<float> & I, const float * row, const float * cam, const float * proj, const GLint * vp, float focal )
 {
@@ -648,7 +648,7 @@ static bool farDotsOnVulkan( Renderer * r, NifSkopeOpenGLContext::Program * prog
 			line += QStringLiteral( ", on GL %1 frames (last: %2)" ).arg( sum.gl ).arg( QString::fromStdString( sum.glWhy ) );
 		if ( sum.fails > 0 )
 			line += QStringLiteral( ", refused %1 (last: %2)" ).arg( sum.fails ).arg( QString::fromStdString( sum.failWhy ) );
-		line += QStringLiteral( "; far cards + far ground on GL (blocked: BC textures, cube-array shadows, texel buffers not shared)" );
+		line += QStringLiteral( "; far cards: their own line; far ground on GL" );
 		said.clear();
 		say( line );
 		sum = WwVkPresent::FxStat();

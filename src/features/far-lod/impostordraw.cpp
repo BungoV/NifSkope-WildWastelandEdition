@@ -22,6 +22,7 @@ BSD License - see nifskope.h
 #include "gl/renderer.h"
 #include "impostorcard.h"
 #include "model/nifmodel.h"
+#include "features/vkframe/vkfarcards.h"	// lane VKFAR2 (row G3): the far cards on the Vulkan view
 
 #include <QCoreApplication>
 #include <QDir>
@@ -33,10 +34,16 @@ BSD License - see nifskope.h
 
 #include <gli.hpp>
 
+#include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <functional>
 #include <limits>
+
+const void * wwGlobalUboBytes( const NifSkopeOpenGLContext * ctx );	// glcontext.cpp: b0's bytes (lane VKAIR1)
+bool wwFogLeakShaderDefine();	// glcontext.cpp: WW_CELL_FOGLEAK in the cell programs (the Vulkan twin's define)
 
 /* WW_IMPOSTOR_TRACE -- a bracket trace for THIS draw path, written with the
  * file closed again at every step so a segfault cannot lose the last line.
@@ -1146,6 +1153,182 @@ bool ImpostorDraw::instancedOn( Scene * scene )
 	return units > WwCellUnit::CardFrames;
 }
 
+/* lane VKFAR2 (row G3): the far cards on the present device's tone frame (vkfarcardsdraw.inc). impostor_cellinstez's
+ * pass-wide uniforms are set on prog and the card buffers bound; setUp( s ) binds set s's sheets and sets its uniforms as
+ * GL's loop does (false: GL skips the set too). true: every set drew there; false: GL's loop draws them (the "vk far:" line). */
+static bool farCardsOnVulkan( Renderer * r, NifSkopeOpenGLContext::Program * prog, int nSets, const std::function< bool( int ) > & setUp,
+	const QVector< int > & count, int & draws, int & drawn )
+{
+	auto * fn = r->fn;
+	GLint drawFb = 0;
+	fn->glGetIntegerv( GL_DRAW_FRAMEBUFFER_BINDING, &drawFb );
+	const GLuint color = wwCellHdrVkToneColor( GLuint( drawFb ) );
+	if ( !color )
+		return false;	// not the present device's tone frame: GL's, as before
+	static QString said;
+	static auto at = std::chrono::steady_clock::now();
+	auto say = [&]( const QString & line ) {
+		if ( line == said )
+			return;
+		said = line;
+		at = std::chrono::steady_clock::now();
+		qInfo().noquote() << line;
+	};
+	if ( !WwVkPresent::shareWanted( "WW_VKVIEW_FARCARDS_RED" ) ) {
+		say( QStringLiteral( "vk far: cards on GL (red WW_VKVIEW_FARCARDS_RED=1 or the view not on Vulkan)" ) );
+		return false;
+	}
+	static WwVkPresent::FarCardsRun t;
+	t.sets.clear();
+	t.red = 0;
+	std::string why;
+	bool drew = false;
+	int nDraws = 0, nDrawn = 0;
+	const void * ubo = wwGlobalUboBytes( r );
+	auto onGl = [&]( const std::string & w ) { WwVkPresent::farCardsOnGl( w.c_str() ); };
+	// GL state the pipeline does not take from GL: refused rather than drawn otherwise
+	GLboolean cm[4] = {};
+	fn->glGetBooleanv( GL_COLOR_WRITEMASK, cm );
+	GLdouble dr[2] = {};
+	fn->glGetDoublev( GL_DEPTH_RANGE, dr );
+	const char * stateWhy = fn->glIsEnabled( GL_SCISSOR_TEST ) ? "the scissor test is on"
+		: fn->glIsEnabled( GL_POLYGON_OFFSET_FILL ) ? "a polygon offset is on"
+		: fn->glIsEnabled( GL_SAMPLE_ALPHA_TO_COVERAGE ) ? "alpha to coverage is on"
+		: fn->glIsEnabled( GL_DEPTH_CLAMP ) ? "depth clamp is on"
+		: fn->glIsEnabled( GL_SAMPLE_SHADING ) ? "sample shading is on"
+		: ( !cm[0] || !cm[1] || !cm[2] || !cm[3] ) ? "a colour channel is masked"
+		: ( dr[0] != 0.0 || dr[1] != 1.0 ) ? "the depth range is not 0..1" : nullptr;
+	if ( !wwFogLeakShaderDefine() ) {
+		onGl( "WW_CELL_FOGLEAK=0: GL's program is not the Vulkan pass's twin" );
+	} else if ( !ubo ) {
+		onGl( "the global uniform buffer's bytes are not known for this context" );
+	} else if ( stateWhy ) {
+		onGl( stateWhy );
+	} else {
+		wwCellHdrFrameSize( t.w, t.h );
+		GLint vp[4] = {};
+		fn->glGetIntegerv( GL_VIEWPORT, vp );
+		std::memcpy( t.vp, vp, sizeof( t.vp ) );
+		t.color = color;
+		std::memcpy( t.global, ubo, sizeof( t.global ) );
+		// GL's stencil: the cards leave it as the pass before set it; both faces must agree (one Vulkan state for both)
+		WwVkPresent::FarCardsStencil & sc = t.stencil;
+		sc = WwVkPresent::FarCardsStencil();
+		sc.on = fn->glIsEnabled( GL_STENCIL_TEST );
+		static const GLenum kFront[7] = { GL_STENCIL_FUNC, GL_STENCIL_REF, GL_STENCIL_VALUE_MASK, GL_STENCIL_WRITEMASK, GL_STENCIL_FAIL,
+			GL_STENCIL_PASS_DEPTH_FAIL, GL_STENCIL_PASS_DEPTH_PASS };
+		static const GLenum kBack[7] = { 0x8800, 0x8CA3, 0x8CA4, 0x8CA5, 0x8801, 0x8802, 0x8803 };
+		GLint f[7] = {}, b[7] = {};
+		for ( int i = 0; i < 7; i++ ) {
+			fn->glGetIntegerv( kFront[i], &f[i] );
+			fn->glGetIntegerv( kBack[i], &b[i] );
+		}
+		bool ok = !sc.on || std::equal( f, f + 7, b );
+		if ( !ok )
+			why = "GL's front and back stencil differ";
+		sc.func = f[0];
+		sc.ref = f[1];
+		sc.mask = f[2] & 0xFF;
+		sc.write = f[3] & 0xFF;
+		sc.sfail = f[4];
+		sc.zfail = f[5];
+		sc.zpass = f[6];
+		// impostor_cellinstez_ps's t0..t25 (vkframe_spirv.sh, farcards_view_ps); the sheets' four come from each set
+		static const char * const kName[26] = { "atApTex", "volAirTerr", "volAirRainMap", "volTex", "volTile", "volAirNoise",
+			"cellCluster", "cellIsBloom", "cellIsLut", "cellLights", "cellShadow", "cellCtGbuf", "cellFarSlots", "cellFarRecs",
+			"cellFarPlaced", "cellSsgi", nullptr, "ussCloudMap", "cardSceneDepth", nullptr, nullptr, nullptr, "cellGi", "cellGiSlots",
+			"cellRooms", "cellAoDecal" };
+		static const int kType[26] = { 1, 2, 0, 1, 0, 1, 5, 0, 1, 5, 3, 0, 5, 5, 1, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0 };
+		for ( int k = 0; k < 26 && ok; k++ ) {
+			t.tex[k] = WwVkPresent::FarCardTex();
+			if ( kName[k] )
+				ok = WwVkPresent::fcTexOf( fn, prog->id, kName[k], kType[k], t.tex[k], why );
+		}
+		if ( ok )
+			ok = WwVkPresent::fcTexOf( fn, prog->id, "cardData", 5, t.cardData, why )
+				&& WwVkPresent::fcTexOf( fn, prog->id, "cardFrames", 5, t.cardFrames, why );
+		if ( ok && nSets > int( t.sets.capacity() ) )
+			t.sets.reserve( size_t( nSets ) );
+		if ( ok ) {
+			// the pass-wide b31 once; per set only the uniforms GL's loop sets per set
+			static std::uint8_t base[WwVkPresent::kT_farcardsBytes];
+			std::memset( base, 0, sizeof( base ) );
+			WwVkPresent::fxPack( fn, prog->id, WwVkPresent::kT_farcards, int( std::size( WwVkPresent::kT_farcards ) ), base );
+			static const std::vector< WwVkPresent::FxField > perSet = [] {
+				static const char * const kPer[] = { "hasMaskSheet", "hasEmissiveSheet", "familyPbr", "emissiveScale", "cardMipCap",
+					"cardCovFloor", "cardCovBase", "cardBase", "frameTableBase", "cardLodTint", "cardLodStripe" };
+				std::vector< WwVkPresent::FxField > out;
+				for ( const WwVkPresent::FxField & x : WwVkPresent::kT_farcards )
+					for ( const char * n : kPer )
+						if ( std::strcmp( x.name, n ) == 0 )
+							out.push_back( x );
+				return out;
+			}();
+			static const char * const kSheet[4] = { "ColourSheet", "NormalSheet", "MaskSheet", "EmissiveSheet" };
+			for ( int s = 0; s < nSets && ok; s++ ) {
+				if ( !setUp( s ) )
+					continue;
+				t.sets.emplace_back();
+				WwVkPresent::FarCardsSet & cs = t.sets.back();
+				cs.count = count.at( s );
+				for ( int j = 0; j < 4 && ok; j++ )
+					ok = WwVkPresent::fcTexOf( fn, prog->id, kSheet[j], 0, cs.sheet[j], why );
+				std::memcpy( cs.loose, base, sizeof( cs.loose ) );
+				WwVkPresent::fxPack( fn, prog->id, perSet.data(), int( perSet.size() ), cs.loose );
+				std::memset( cs.vsLoose, 0, sizeof( cs.vsLoose ) );
+				WwVkPresent::fxPack( fn, prog->id, WwVkPresent::kT_farcardsVs, int( std::size( WwVkPresent::kT_farcardsVs ) ), cs.vsLoose );
+				nDraws++;
+				nDrawn += cs.count;
+			}
+		}
+		if ( !ok )
+			onGl( why );
+		else if ( t.sets.empty() )
+			drew = true;	// every set skipped (GL's loop skips them too): nothing to draw on either side
+		else
+			drew = WwVkPresent::farCardsRun( t, why );
+	}
+	if ( drew ) {
+		draws = nDraws;
+		drawn = nDrawn;
+	}
+	const WwVkPresent::FxStat st = WwVkPresent::takeFarCardsStat();
+	static WwVkPresent::FxStat sum;
+	static int sumSets = 0, sumCards = 0;
+	sum.runs += st.runs;
+	sum.gl += st.gl;
+	sum.fails += st.fails;
+	sum.cpuMs += st.cpuMs;
+	sum.maxMs = std::max( sum.maxMs, st.maxMs );
+	sum.copies += st.copies;
+	sum.pipelines = st.pipelines;
+	sum.buildMs = st.buildMs;
+	if ( st.runs > 0 ) {
+		sumSets = nDraws;
+		sumCards = nDrawn;
+	}
+	if ( !st.glWhy.empty() )
+		sum.glWhy = st.glWhy;
+	if ( !st.failWhy.empty() )
+		sum.failWhy = st.failWhy;
+	if ( std::chrono::duration< double >( std::chrono::steady_clock::now() - at ).count() >= 5.0 || !said.startsWith( QStringLiteral( "vk far: cards on V" ) ) ) {
+		QString line = sum.runs > 0
+			? QStringLiteral( "vk far: cards on Vulkan %1 passes (last %2 sets, %3 cards; impostor_instez + impostor_cellinstez into the tone frame "
+				"+ depth + GL's stencil, one crossing; %4 pipelines built in %5 ms; %6 input copies; drawing thread %7 ms, max %8)" )
+				.arg( sum.runs ).arg( sumSets ).arg( sumCards ).arg( sum.pipelines ).arg( sum.buildMs, 0, 'f', 1 ).arg( sum.copies )
+				.arg( sum.cpuMs / sum.runs, 0, 'f', 3 ).arg( sum.maxMs, 0, 'f', 3 )
+			: QStringLiteral( "vk far: cards on Vulkan wanted, 0 passes drawn" );
+		if ( sum.gl > 0 )
+			line += QStringLiteral( ", on GL %1 passes (last: %2)" ).arg( sum.gl ).arg( QString::fromStdString( sum.glWhy ) );
+		if ( sum.fails > 0 )
+			line += QStringLiteral( ", refused %1 (last: %2)" ).arg( sum.fails ).arg( QString::fromStdString( sum.failWhy ) );
+		said.clear();
+		say( line );
+		sum = WwVkPresent::FxStat();
+	}
+	return drew;
+}
+
 bool ImpostorDraw::drawCardsInstanced( Scene * scene, const QVector< InstCard > & cards, const Options & opt,
 										quint64 tableKey, InstStats * stats )
 {
@@ -1212,8 +1395,11 @@ bool ImpostorDraw::drawCardsInstanced( Scene * scene, const QVector< InstCard > 
 				: QStringLiteral( "far cards: frame pick on the CPU (default; WW_FARCARD_GPICK=1 picks on the GPU)" ) );
 		}
 	}
-	if ( !prog )
+	bool ezProg = false;	// lane VKFAR2: impostor_cellinstez.prog, the program the Vulkan twin is built from
+	if ( !prog ) {
 		prog = earlyZRed ? nullptr : r->useProgram( "impostor_cellinstez.prog" );
+		ezProg = prog != nullptr;
+	}
 	{
 		static int said = -1;
 		const int now = earlyZRed ? 2 : prog ? 1 : 0;
@@ -1400,7 +1586,8 @@ bool ImpostorDraw::drawCardsInstanced( Scene * scene, const QVector< InstCard > 
 	fn->glBindVertexArray( g.vao );
 
 	// ---- one instanced draw per set ----
-	for ( int s = 0; s < sets.size(); s++ ) {
+	// set s's sheets bound and its uniforms set (false: skipped, counted as refused)
+	auto setUp = [&]( int s ) -> bool {
 		const ImpostorCardSet & set = *sets.at( s );
 		const int waits0 = sheetWaits;
 		const bool haveColour = bindInstSheet( scene, prog, "ColourSheet", set.colour, 0, set.layer, g );
@@ -1409,7 +1596,7 @@ bool ImpostorDraw::drawCardsInstanced( Scene * scene, const QVector< InstCard > 
 			if ( !st.refused )
 				st.firstWhy = QFileInfo( set.lodmPath ).fileName() + QStringLiteral( ": " ) + sheetRefusal( scene, set, haveColour );
 			st.refused += count.at( s );
-			continue;
+			return false;
 		}
 		const bool haveMask = bindInstSheet( scene, prog, "MaskSheet", set.mask, 2, set.layer, g );
 		const bool haveEmiss = bindInstSheet( scene, prog, "EmissiveSheet", set.emissive, 3, set.layer, g );
@@ -1417,7 +1604,7 @@ bool ImpostorDraw::drawCardsInstanced( Scene * scene, const QVector< InstCard > 
 			if ( !st.refused )
 				st.firstWhy = QFileInfo( set.lodmPath ).fileName() + QStringLiteral( ": a sheet waits a paint (the upload budget)" );
 			st.refused += count.at( s );
-			continue;
+			return false;
 		}
 		prog->uni1b( "hasMaskSheet", haveMask );
 		prog->uni1b( "hasEmissiveSheet", haveEmiss );
@@ -1436,6 +1623,25 @@ bool ImpostorDraw::drawCardsInstanced( Scene * scene, const QVector< InstCard > 
 			prog->uni1b( "pickAsBaked", effectiveConvention( set, opt ) == ImpostorOct::Convention::AsBaked );
 			prog->uni1i( "pickFrameCount", ImpostorPick::framesDrawn( set.ring(), rs.frameCount ) );
 		}
+		return true;
+	};
+	// lane VKFAR2 (row G3): impostor_cellinstez on the present device; refused there, GL's loop below draws every set
+	bool onVk = false;
+	if ( ezProg && !gpuPick ) {
+		const int refused0 = st.refused;
+		const QString why0 = st.firstWhy;
+		onVk = farCardsOnVulkan( r, prog, sets.size(), setUp, count, st.draws, st.drawn );
+		if ( onVk ) {
+			for ( int s = 0; s < sets.size(); s++ )
+				PassTime::countDraw( count.at( s ) );
+		} else {
+			st.refused = refused0;	// GL's loop below asks every set again
+			st.firstWhy = why0;
+		}
+	}
+	for ( int s = 0; s < sets.size() && !onVk; s++ ) {
+		if ( !setUp( s ) )
+			continue;
 		fn->glDrawElementsInstanced( GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, nullptr, GLsizei( count.at( s ) ) );
 		PassTime::countDraw( count.at( s ) );
 		st.draws++;
