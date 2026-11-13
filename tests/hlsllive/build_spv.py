@@ -66,6 +66,11 @@ def with_loose_halves(path, src, seen=None):
         m = re.search(r'#elif defined\(WW_LOOSE_UNIFORMS\)(.*?)\n#else', t, re.S)
         if m:
             add.append('\ncbuffer LooseUniforms {%s\n};' % m.group(1))
+        m = re.search(r'\ncbuffer LooseUniforms[^{]*\{.*?\n\};', t, re.S)
+        if m:
+            # HLSLSRC3: a wrapper includes another readable ENTRY (fo4_waterlook -> fo4_water_ps.hlsl): its own LooseUniforms
+            # cbuffer holds the bools (waterUnderOn, waterSsrOn ...); without it they stay uint and glUniform1i is refused
+            add.append(m.group(0))
         m = re.search(r'#if defined\(WW_LOOSE_TYPES\)(.*?)\n#elif', t, re.S)
         if m:
             add.append(m.group(1))

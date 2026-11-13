@@ -1,4 +1,4 @@
-// HLSL source of features/post/game_doflens_prep.frag (fragment shader), lane HLSLSRC2 (notes/hlslsrc2/tools/glsl2hlsl.py): one readable file for every
+// HLSL source of features/post/game_doflens_prep.frag (fragment shader), lane HLSLSRC3 (notes/hlslsrc3/tools/glsl2hlsl.py): one readable file for every
 // variant, the GLSL's comments, names and order kept. Loose uniforms are the LooseUniforms cbuffer (b31).
 // variants: #if none (the loader's defines; res/shaders/hlsl/variants.txt lists the sets built)
 // profile: ps_6_0
@@ -43,7 +43,7 @@ void frag_main()
 		int2 o = int2( ( i & 1 ) * 2 + 1, ( i >> 1 ) * 2 + 1 );
 		float2 pc = float2( q * 4 + o );
 		float3 c = t0.Sample( _t0_sampler, pc / fs ).rgb;
-		bool3 bad = (asuint( c ) & 0x7f800000u == (uint3)( 0x7f800000u ));
+		bool3 bad = ((asuint( c ) & 0x7f800000u) == (uint3)( 0x7f800000u ));
 		acc += select(bad, (float3)( 0.0 ), c) * 0.25;
 		float z = lensDist( t1.Load( int3(min( q * 4 + o, hi ), 0) ).r );
 		if ( z >= 0.0 ) {

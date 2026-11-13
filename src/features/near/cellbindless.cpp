@@ -24,6 +24,8 @@
 
 bool wwFrameLog();	// gl/cellcull.cpp
 
+#include "features/vkframe/vkobjtex.h"	// lane VKOBJ3: the cache's BC twins in the Vulkan bindless table
+
 #ifndef GL_SHADER_STORAGE_BUFFER
 #define GL_SHADER_STORAGE_BUFFER 0x90D2
 #endif
@@ -257,6 +259,36 @@ bool mdiOn()
 	return want && ( r == 0 || r == 6 || r == 7 || r == 8 ) && on() && cx().mdi;
 }
 
+bool vkTexOn()
+{
+	WW_SWITCH_STATIC( bool, want, wwEnv( "WW_VKOBJ_TEX" ).trimmed() == "1" );
+	return want;
+}
+
+int vkTexRed()
+{
+	WW_SWITCH_STATIC( int, r, wwEnv( "WW_VKOBJ_TEX_RED" ).trimmed() == "key" ? 1 : 0 );
+	return r;
+}
+
+void texGone( GLuint tex )
+{
+	WwVkPresent::objTexGone( unsigned( tex ) );
+}
+
+namespace
+{
+std::vector<Row> vkRows;  // lane VKOBJ3: the frame's rows, translated by the Vulkan table at frame()
+bool vkTexEver = false;
+std::string vkLine;
+
+void vkRowCensus()
+{
+	if ( vkTexOn() )
+		vkRows.push_back( row );
+}
+}  // namespace
+
 bool frozenSkip( GLuint tex, int wrapS, int wrapT, int minFilter, float aniso )
 {
 	if ( !anyFrozen || !tex )
@@ -339,6 +371,11 @@ std::uint64_t handleOfBound( NifSkopeOpenGLContext::GLFunctions * f )
 	}
 	c.resident( h );
 	map[GLuint( tex )] = Ctx::Held{ h, c.frameNo };
+	if ( !r && WwVkPresent::objTexIs( unsigned( tex ) ) )	// lane VKOBJ3: a BC twin's handle joins the Vulkan table
+		WwVkPresent::objTexHandle( unsigned( tex ), h, []( const char * n ) -> void * {
+			QOpenGLContext * gc = QOpenGLContext::currentContext();
+			return gc ? reinterpret_cast<void *>( gc->getProcAddress( n ) ) : nullptr;
+		}, vkTexRed() );
 	if ( !c.frozen.count( GLuint( tex ) ) )
 		c.frozen[GLuint( tex )] = lastKeyValid ? lastKey : Key{};
 	lastKeyValid = false;
@@ -412,6 +449,7 @@ void commit( NifSkopeOpenGLContext::GLFunctions * f, NifSkopeOpenGLContext::Prog
 		}
 	}
 	std::memcpy( c.map + size_t( idx ) * sizeof( Row ), &row, sizeof( Row ) );
+	vkRowCensus();	// lane VKOBJ3
 	f->glUniform1ui( prog->wwDrawIdLoc, GLuint( idx ) );
 	c.cursor = ( idx + 1 ) % kRows;
 	c.draws++;
@@ -475,6 +513,7 @@ std::uint32_t runRow()
 	Ctx & c = cx();
 	const std::uint32_t idx = c.cursor;
 	std::memcpy( c.map + size_t( idx ) * sizeof( Row ), &row, sizeof( Row ) );
+	vkRowCensus();	// lane VKOBJ3
 	c.cursor = ( idx + 1 ) % kRows;
 	c.draws++;
 	c.pooled++;
@@ -554,6 +593,7 @@ bool stillQueued( Ctx & c, std::uint32_t frame )
 
 void forget( GLuint tex )
 {
+	texGone( tex );	// lane VKOBJ3
 	if ( !anyFrozen )
 		return;
 	Ctx & c = cx();
@@ -1119,6 +1159,24 @@ void frame()
 	c.runs = c.merged = c.mdiCalls = c.longest = 0;
 	c.freedLive = c.stale = 0;
 	c.capped = 0;
+	// lane VKOBJ3: the frame's rows through the Vulkan table, the twins gone since the last frame freed, the line
+	vkTexEver |= vkTexOn();
+	if ( vkTexEver ) {
+		if ( !vkRows.empty() )
+			WwVkPresent::objTexRows( vkRows.data(), vkRows.size() );
+		vkRows.clear();
+		const WwVkPresent::ObjTexStat s = WwVkPresent::objTexFrame();
+		char b[640];
+		std::snprintf( b, sizeof( b ), "vk objtex: twins=%d made=%d refused=%d gone=%d freed=%d handles=%d adds=%d "
+			"addFails=%d rows=%zu whole=%zu misses=%d images=%d samplers=%d mb=%.1f makeMs=%.2f freeMs=%.2f%s%s%s%s%s",
+			s.twins, s.made, s.refused, s.gone, s.freed, s.handles, s.adds, s.addFails, s.rows, s.whole, s.misses, s.images,
+			s.samplers, s.mb, s.makeMs, s.freeMs, s.why.empty() ? "" : " refusedWhy=", s.why.c_str(),
+			s.addWhy.empty() ? "" : " addWhy=", s.addWhy.c_str(), vkTexRed() == 1 ? " RED key" : "" );
+		if ( vkLine != b && wwFrameLog() ) {
+			vkLine = b;
+			std::fprintf( stderr, "%s\n", b );
+		}
+	}
 }
 }
 

@@ -70,7 +70,10 @@ float4 mod(float4 x, float y) { return x - y * floor(x / y); }
 Texture2DArray<float4> csmMap : register(t31, space0); SamplerComparisonState _csmMap_sampler : register(s31, space0);
 #ifdef WW_FRAME_UBO
 // lane PERF3: the frame's cascade values, one buffer for every program (gl/sunshadow.cpp CsmFrameBlock mirrors it)
-cbuffer wwShadowFrame : register(b1, space0)
+#ifndef WW_REG_wwShadowFrame
+#define WW_REG_wwShadowFrame b1
+#endif
+cbuffer wwShadowFrame : register(WW_REG_wwShadowFrame, space0)
 {
 	row_major float4x4 csmMat[3] : packoffset(c0);
 	float3 csmInvRange : packoffset(c12);

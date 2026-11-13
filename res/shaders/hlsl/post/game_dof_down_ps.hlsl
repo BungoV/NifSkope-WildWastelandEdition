@@ -1,4 +1,4 @@
-// HLSL source of features/post/game_dof_down.frag (fragment shader), lane HLSLSRC2 (notes/hlslsrc2/tools/glsl2hlsl.py): one readable file for every
+// HLSL source of features/post/game_dof_down.frag (fragment shader), lane HLSLSRC3 (notes/hlslsrc3/tools/glsl2hlsl.py): one readable file for every
 // variant, the GLSL's comments, names and order kept. Loose uniforms are the LooseUniforms cbuffer (b31).
 // variants: #if none (the loader's defines; res/shaders/hlsl/variants.txt lists the sets built)
 // profile: ps_6_0
@@ -30,7 +30,7 @@ void frag_main()
 	for ( int i = 0; i < 4; i++ ) {						// loop / ige / breakc_nz
 		float2 uv = ( taps[i].xy * c7.xy + v1 ) * c4.xy;		// mad, mul
 		float3 c = t0.Sample( _t0_sampler, uv ).rgb;
-		bool3 bad = (asuint( c ) & 0x7f800000u == (uint3)( 0x7f800000u ));	// and, ieq
+		bool3 bad = ((asuint( c ) & 0x7f800000u) == (uint3)( 0x7f800000u ));	// and, ieq
 		c = select(bad, (float3)( 0.0 ), c);					// movc
 		acc = c * taps[i].z + acc;							// mad
 	}
