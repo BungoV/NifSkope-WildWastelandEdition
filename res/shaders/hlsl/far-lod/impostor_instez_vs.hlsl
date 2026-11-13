@@ -151,10 +151,12 @@ void vert_main()
     if ((!orthoCam) && useDepthOffset)
     {
         float4 e = mul(float4(p, 1.0f), modelViewMatrix);
-        float dist = length(e.xyz);
+        // NV GL's float order, bit-exact (lane VKFAR2): length as an x-first fma chain, e * (1 - q) as fma(-e, q, e)
+        float dist = sqrt(mad(e.z, e.z, mad(e.y, e.y, e.x * e.x)));
         float s = length(float3(modelViewMatrix[0].xyz));
         float pull = min((((s * cardDepthSpan) * 0.5f) * 1.0499999523162841796875f) + 4.0f, dist * 0.5f);
-        gl_Position = mul(float4(e.xyz * (1.0f - (pull / dist)), 1.0f), projectionMatrix);
+        float3 ek = mad(-e.xyz, (pull / dist).xxx, e.xyz);
+        gl_Position = mul(float4(ek, 1.0f), projectionMatrix);
     }
 }
 
