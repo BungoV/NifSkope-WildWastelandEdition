@@ -47,7 +47,8 @@ def bool_names(src, path=None, seen=None):
 def with_loose_halves(path, src, seen=None):
     """HLSLSRC2: a readable source's LooseUniforms take members from its .hlsli loose halves (`#elif defined(WW_LOOSE_UNIFORMS)`):
     append each included file's half (and its types half) as a cbuffer / struct text so bool_names sees those bools too"""
-    if 'WW_HLSL_SRC' not in src and 'WW_LOOSE_UNIFORMS' not in src:
+    # HLSLSRC1: a wrapper (`#define X` + `#include "<entry>_ps.hlsl"`) mentions neither; its included entry's halves count
+    if 'WW_HLSL_SRC' not in src and 'WW_LOOSE_UNIFORMS' not in src and not re.search(r'#\s*include\s+"[^"]+\.hlsl"', src):
         return src
     seen = set() if seen is None else seen
     add = []
