@@ -155,7 +155,7 @@ struct FarCardsRun
 	FarCardsStencil stencil;
 	std::uint8_t global[kFxGlobalBytes] = {};
 	std::vector<FarCardsSet> sets;
-	int red = 0;  //!< gates only: 1 no depth write, 2 the vertex stage's cardBase one card on, 4 the shadow compare inverted
+	int red = 0;  //!< gates only: 1 no depth write, 2 every set's cardBase 0, 4 the shadow compare inverted
 };
 /* GL current, the tone frame bound, impostor_cellinstez's uniforms set: the sets drawn on Vulkan, one crossing.
  * false: why; nothing drawn (GL draws them) */
@@ -251,6 +251,12 @@ template <class Fn> bool fcTexOf( Fn * fn, unsigned prog, const char * sampler, 
 		} else if ( w < 1 || h < 1 ) {
 			ok = false;
 			why = std::string( sampler ) + ": no level 0";
+		}
+		int sw[4] = { 0x1903, 0x1904, 0x1905, 0x1906 };
+		fn->glGetTexParameteriv( target, 0x8E46, sw );  // GL_TEXTURE_SWIZZLE_RGBA: the twin copies the bytes, not the swizzle
+		if ( ok && ( sw[0] != 0x1903 || sw[1] != 0x1904 || sw[2] != 0x1905 || sw[3] != 0x1906 ) ) {
+			ok = false;
+			why = std::string( sampler ) + ": a texture swizzle";
 		}
 	}
 	if ( name && sobj ) {

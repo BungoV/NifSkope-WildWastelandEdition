@@ -13,7 +13,6 @@ constexpr std::uintptr_t kFcSlotKey = std::uintptr_t( 0xFCA0ull << 32 );   // + 
 constexpr std::uintptr_t kFcSheetKey = std::uintptr_t( 0xFCB0ull << 32 );  // + GL name (farTwin, the sheets)
 constexpr std::uintptr_t kFcCubeKey = std::uintptr_t( 0xFCC0ull << 32 );   // + 0 the shadow cubes, + 1 the zero cube
 constexpr std::uintptr_t kFcBufKey = std::uintptr_t( 0xFCD0ull << 32 );    // + slot (0..25, 26 cardData, 27 cardFrames); 64+ zero
-constexpr GLenum kFcRgba32f = 0x8814, kFcRgba32i = 0x8D82, kFcRgba32ui = 0x8D70;
 
 struct FcDraw
 {
@@ -586,10 +585,8 @@ bool farCardsRun( const FarCardsRun & t, std::string & why )
 		}
 		const VkDeviceSize at = kFcSetAt + kFcSetStride * VkDeviceSize( i );
 		std::memcpy( D.uboPtr + at, cs.vsLoose, size_t( kT_farcardsVsBytes ) );
-		if ( t.red & 2 ) {  // red: the vertex stage's cardBase one card on
-			int base = 0;
-			std::memcpy( &base, D.uboPtr + at, 4 );
-			base++;
+		if ( t.red & 2 ) {  // red: the vertex stage's per-set cardBase dropped (every set draws from card 0)
+			const int base = 0;
 			std::memcpy( D.uboPtr + at, &base, 4 );
 		}
 		std::memcpy( D.uboPtr + at + kFcPsAt, cs.loose, size_t( kT_farcardsBytes ) );

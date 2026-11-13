@@ -44,6 +44,13 @@ BSD License - see nifskope.h
 
 const void * wwGlobalUboBytes( const NifSkopeOpenGLContext * ctx );	// glcontext.cpp: b0's bytes (lane VKAIR1)
 bool wwFogLeakShaderDefine();	// glcontext.cpp: WW_CELL_FOGLEAK in the cell programs (the Vulkan twin's define)
+// the other loader defines impostor_cellinstez.frag's source takes (glcontext.cpp Shader::load); the twin has none of them
+int wwCellGiVis();
+bool wwCellPrtOn();
+bool rtddgiCellShaderDefine();
+bool rtddgiRestirShaderDefine();
+bool rtddgiRestirGiShaderDefine();
+bool wwDebugViewShaderDefine();
 
 /* WW_IMPOSTOR_TRACE -- a bracket trace for THIS draw path, written with the
  * file closed again at every step so a segfault cannot lose the last line.
@@ -1200,6 +1207,9 @@ static bool farCardsOnVulkan( Renderer * r, NifSkopeOpenGLContext::Program * pro
 		: ( dr[0] != 0.0 || dr[1] != 1.0 ) ? "the depth range is not 0..1" : nullptr;
 	if ( !wwFogLeakShaderDefine() ) {
 		onGl( "WW_CELL_FOGLEAK=0: GL's program is not the Vulkan pass's twin" );
+	} else if ( wwCellGiVis() == 1 || wwCellPrtOn() || rtddgiCellShaderDefine() || rtddgiRestirShaderDefine() || rtddgiRestirGiShaderDefine()
+		|| wwDebugViewShaderDefine() ) {
+		onGl( "GL's program carries a loader define the Vulkan twin (FOGLEAK alone) has not (GI march, PRT, RTDDGI, ReSTIR, debug views)" );
 	} else if ( !ubo ) {
 		onGl( "the global uniform buffer's bytes are not known for this context" );
 	} else if ( stateWhy ) {
