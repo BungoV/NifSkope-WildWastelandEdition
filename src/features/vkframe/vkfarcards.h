@@ -43,7 +43,7 @@ struct FarSetSlot
 struct FarSetCounts
 {
 	int ubos = 0, images = 0, texelBuffers = 0, samplers = 0, compareSamplers = 0, cubeArrays = 0;
-	std::vector<FarSetSlot> slots;  // by binding
+	std::vector<FarSetSlot> binds;  // by binding (never `slots`: a Qt keyword macro in the app build)
 };
 //! reflect a fragment module's descriptor set 0 (pure: the gates feed it altered words for their reds)
 bool farSetReflect( const std::uint32_t * words, std::size_t count, FarSetCounts & out, std::string & why );

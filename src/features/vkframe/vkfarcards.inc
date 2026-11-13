@@ -819,7 +819,7 @@ bool farSetReflect( const std::uint32_t * w, std::size_t n, FarSetCounts & out, 
 		if ( it != sampledSampler.end() )
 			compareVars[it->second] = 1;
 	}
-	std::map<std::uint32_t, FarSetSlot> slots;
+	std::map<std::uint32_t, FarSetSlot> binds;
 	for ( const auto & kv : binding ) {
 		const std::uint32_t var = kv.first;
 		if ( !varPtr.count( var ) )
@@ -849,15 +849,15 @@ bool farSetReflect( const std::uint32_t * w, std::size_t n, FarSetCounts & out, 
 			why = "binding " + std::to_string( s.binding ) + " has a type the far cards' set does not take (an array, a combined sampler, a storage buffer)";
 			return false;
 		}
-		if ( slots.count( s.binding ) ) {
+		if ( binds.count( s.binding ) ) {
 			why = "binding " + std::to_string( s.binding ) + " is declared twice";
 			return false;
 		}
-		slots[s.binding] = s;
+		binds[s.binding] = s;
 	}
-	for ( const auto & kv : slots ) {
+	for ( const auto & kv : binds ) {
 		const FarSetSlot & s = kv.second;
-		out.slots.push_back( s );
+		out.binds.push_back( s );
 		out.ubos += s.kind == 0;
 		out.images += s.kind == 1;
 		out.texelBuffers += s.kind == 2;
@@ -886,7 +886,7 @@ bool farCardsSet( FarSetCounts & out, std::string & why )
 		return false;
 	std::vector<VkDescriptorSetLayoutBinding> lb;
 	std::map<VkDescriptorType, std::uint32_t> sizes;
-	for ( const FarSetSlot & s : C.counts.slots ) {
+	for ( const FarSetSlot & s : C.counts.binds ) {
 		const VkDescriptorType t = s.kind == 0 ? VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER : s.kind == 1 ? VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE
 			: s.kind == 2 ? VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER : VK_DESCRIPTOR_TYPE_SAMPLER;
 		lb.push_back( { s.binding, t, 1, VK_SHADER_STAGE_FRAGMENT_BIT, nullptr } );

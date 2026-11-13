@@ -120,7 +120,7 @@ size_t setDiff( const WwVkPresent::FarSetCounts & got, const std::map<std::uint3
 {
 	size_t bad = 0;
 	std::map<std::uint32_t, WwVkPresent::FarSetSlot> g;
-	for ( const auto & s : got.slots )
+	for ( const auto & s : got.binds )
 		g[s.binding] = s;
 	for ( const auto & kv : want ) {
 		auto it = g.find( kv.first );
@@ -336,7 +336,7 @@ int main( int argc, char ** argv )
 		const bool made = WwVkPresent::farCardsSet( sc, why );
 		int tSlots = 0;
 		bool b0 = false, b31 = false, cubeAt74 = false, compareAt138 = false;
-		for ( const auto & s : sc.slots ) {
+		for ( const auto & s : sc.binds ) {
 			tSlots += s.binding >= 64 && s.binding < 128;
 			b0 = b0 || ( s.binding == 0 && s.kind == 0 );
 			b31 = b31 || ( s.binding == 31 && s.kind == 0 );
@@ -346,7 +346,7 @@ int main( int argc, char ** argv )
 		const size_t diff = made ? setDiff( sc, want, true ) : want.size();
 		std::printf( "FARTWIN set: %s (%s); %zu bindings (HLSL declares %zu), %d uniform buffers, %d images, %d texel buffers, %d samplers "
 			"(%d compare), %d cube arrays, %d t-registers; b0 %d b31 %d cube array at t10 %d compare sampler at s10 %d; %zu differ\n",
-			made ? "made" : "FAILED", made ? "layout, pool, set, pipeline layout, module" : why.c_str(), sc.slots.size(), want.size(), sc.ubos,
+			made ? "made" : "FAILED", made ? "layout, pool, set, pipeline layout, module" : why.c_str(), sc.binds.size(), want.size(), sc.ubos,
 			sc.images, sc.texelBuffers, sc.samplers, sc.compareSamplers, sc.cubeArrays, tSlots, int( b0 ), int( b31 ), int( cubeAt74 ),
 			int( compareAt138 ), diff );
 		ok = ok && made && diff == 0 && tSlots == 26 && sc.texelBuffers == 4 && sc.cubeArrays == 1 && sc.compareSamplers == 1 && b0 && b31
