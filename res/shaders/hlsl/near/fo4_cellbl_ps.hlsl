@@ -3,7 +3,8 @@
 // sampler2D( wwDraws[wwDrawIdx].tex[i] ) (GL_ARB_bindless_texture handles); here the same row (struct WwDraw below) holds
 // descriptor-heap indices and the maps are ResourceDescriptorHeap / SamplerDescriptorHeap lookups (SM 6.6; Vulkan
 // descriptor indexing), NonUniformResourceIndex because a multi-draw's pixels read different rows. Everything else is the
-// twin's code. Fusion Shaders (F4FS) fills the row buffer and the heaps. Not wired: nothing loads this file.
+// twin's code. Fusion Shaders (F4FS) fills the row buffer and the heaps. The GL build (WW_GL_BINDLESS, HLSLFIX3) reads the
+// row's tex[i] as GL bindless handles instead (ww_bindless_gl.hlsli).
 // profile: ps_6_6
 #include "NearBindingsVk.hlsli"
 cbuffer globalUniforms : register(b0, space0)
@@ -323,6 +324,10 @@ struct WwDraw
 StructuredBuffer<WwDraw> wwDraws : register(t48, space0);	// GL binding 12
 static uint wwBlRow;	// wwDrawIdx: the vertex stage's row, flat to the pixel stage
 
+#if defined(__spirv__) && defined(WW_GL_BINDLESS)
+// GL (GL_ARB_gl_spirv): tex[i] is the 64-bit GL_ARB_bindless_texture handle, sampled through SPV_NV_bindless_texture
+#include "ww_bindless_gl.hlsli"
+#else
 Texture2D<float4> wwBlMap(uint i)
 {
     return ResourceDescriptorHeap[NonUniformResourceIndex(wwDraws[wwBlRow].tex[i].x)];
@@ -347,6 +352,7 @@ SamplerState wwBlSmp(uint i)
 #define _GreyscaleMap_sampler wwBlSmp(5)
 #define EnvironmentMap wwBlMap(6)
 #define _EnvironmentMap_sampler wwBlSmp(6)
+#endif
 #define normalMatrix float3x3(wwDraws[wwBlRow].nm[0].xyz, wwDraws[wwBlRow].nm[1].xyz, wwDraws[wwBlRow].nm[2].xyz)
 Texture2D<float4> LandLodNoise : register(t27, space0);
 SamplerState _LandLodNoise_sampler : register(s27, space0);
@@ -824,7 +830,15 @@ float3 TorranceSparrow(float NdotL, float NdotH, float NdotV, float VdotH, float
 #define WW_FN_cellReflOct
 #define WW_FN_cellReflSample
 #define WW_FN_cellReflProbe
+#if defined(__spirv__) && defined(WW_GL_BINDLESS)
+#define Texture2D WwBlTexT	// the atlas parameter takes a bindless map (GreyscaleMap)
+#define SamplerState uint
+#endif
 #include "../reflections/cell_reflprobe.hlsli"
+#if defined(__spirv__) && defined(WW_GL_BINDLESS)
+#undef Texture2D
+#undef SamplerState
+#endif
 #undef WW_FN_cellReflOct
 #undef WW_FN_cellReflSample
 #undef WW_FN_cellReflProbe

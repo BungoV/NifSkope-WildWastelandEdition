@@ -696,10 +696,10 @@ float3 cellFxLight(int i, float3 P)
     if (a > 0.0f)
     {
         int iArg2 = i;
-        float3 param_5 = -Lv;
+        float3 DArg = -Lv;
         float3 axisArg = gAx;
         bool spotArg = t1.w > (-1.5f);
-        g = cellGobo(iArg2, param_5, axisArg, spotArg);
+        g = cellGobo(iArg2, DArg, axisArg, spotArg);
     }
     return (t1.xyz * g) * a;
 }
@@ -1620,9 +1620,9 @@ void vpLight(float3 posView, float3 P, float3 dW, float z, inout float3 N, float
             float3 EArg6[6] = Eg;
             float3 dWArg4 = dW;
             skyThin += volCubeScatter(EArg6, dWArg4);
-            float3 param_39[6] = Eg;
+            float3 CArg[6] = Eg;
             float3 NArg11 = N;
-            skyThick += vpCubeAt(param_39, NArg11);
+            skyThick += vpCubeAt(CArg, NArg11);
             float3 EArg5[6] = Eg;
             float3 dWArg3 = dW;
             jEnv += volCubeScatter(EArg5, dWArg3);
@@ -1670,9 +1670,9 @@ void vpLight(float3 posView, float3 P, float3 dW, float z, inout float3 N, float
             float3 EArg4[6] = Am;
             float3 dWArg2 = dW;
             skyThin += volCubeScatter(EArg4, dWArg2);
-            float3 param_48[6] = Am;
+            float3 CArg2[6] = Am;
             float3 NArg9 = N;
-            skyThick += vpCubeAt(param_48, NArg9);
+            skyThick += vpCubeAt(CArg2, NArg9);
             float3 EArg3[6] = Am;
             float3 dWArg = dW;
             jEnv += volCubeScatter(EArg3, dWArg);

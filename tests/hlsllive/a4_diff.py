@@ -123,6 +123,19 @@ class Prog:
             self.outs = outs
         except Exception:
             self.outs = None
+        # HLSLFIX3: shader storage blocks (name, binding, data size); the bindless twins read their per-draw rows from binding 12
+        self.ssbos = []
+        try:
+            gpi(p, 0x92E6, 0x92F5, ctypes.byref(v))
+            for i in range(v.value):
+                nm = cstr_buf()
+                g('glGetProgramResourceName', None, GLuint, GLenum, GLuint, GLsizei, c_p, c_c)(p, 0x92E6, i, 512, None, nm)
+                props = (GLenum * 2)(0x9302, 0x9303)   # BUFFER_BINDING, BUFFER_DATA_SIZE
+                res = (GLint * 2)()
+                gpr(p, 0x92E6, i, 2, ctypes.cast(props, c_p), 2, None, ctypes.cast(res, c_p))
+                self.ssbos.append((nm.value.decode(), res[0], res[1]))
+        except Exception:
+            self.ssbos = []
         self.members = {}
         for bname, bi, _sz, _bd in self.blocks:
             cnt = GLint()
@@ -306,6 +319,7 @@ class Rig:
         g('glDrawBuffers', None, GLsizei, c_p)(4, ctypes.cast(bufs, c_p))
         self.ubo = {}
         self.tex = {}
+        self.rows = {}
 
     def ubo_for(self, name, size, seed, members=()):
         # HLSLFIX2: the member layout is in the key; without it the first program to use a block name decided the int lanes for
@@ -336,6 +350,41 @@ class Rig:
             g('glBufferData', None, GLenum, ctypes.c_ssize_t, c_p, GLenum)(0x8A11, a.nbytes, a.ctypes.data, 0x88E4)
             self.ubo[k] = b.value
         return self.ubo[k]
+
+    def rows_for(self, seed):
+        """HLSLFIX3: the bindless row buffer (ww_bindless.glsl WwDraw, std430 176 B: mat4 mv, vec4 nm[3], uvec2 tex[8]). ROWS rows
+        cover wwDrawBase 0..2 plus the base instance 0 of glDrawArrays. Each row's eight maps are their own RGBA32F textures (a slot
+        or row mix-up reads different texels), made resident as GL_ARB_bindless_texture handles; mv and nm are the identity plus a
+        small skew, like the matrix uniforms."""
+        if seed not in self.rows:
+            ROWS = 4
+            gh = g('glGetTextureHandleARB', ctypes.c_uint64, GLuint)
+            mk = g('glMakeTextureHandleResidentARB', None, ctypes.c_uint64)
+            a = np.zeros(ROWS * 44, dtype=np.uint32)
+            f = a.view(np.float32)
+            r = rng_for('wwDraws', seed)
+            for row in range(ROWS):
+                base = row * 44
+                sk = (r.random(16) - 0.5) * 0.05
+                for c in range(4):
+                    for k in range(4):
+                        f[base + c * 4 + k] = (1.0 if c == k else 0.0) + sk[c * 4 + k]
+                sk = (r.random(12) - 0.5) * 0.05
+                for c in range(3):
+                    for k in range(4):
+                        f[base + 16 + c * 4 + k] = ((1.0 if c == k else 0.0) + sk[c * 4 + k]) if k < 3 else 0.0
+                for slot in range(8):
+                    g('glActiveTexture', None, GLenum)(0x84C0 + 79)
+                    t, _tgt = make_texture(0x8B5E, seed * 64 + row * 8 + slot + 7)
+                    h = gh(t)
+                    mk(h)
+                    a[base + 28 + slot * 2] = h & 0xFFFFFFFF
+                    a[base + 28 + slot * 2 + 1] = h >> 32
+            b = GLuint(); g('glGenBuffers', None, GLsizei, ctypes.POINTER(GLuint))(1, ctypes.byref(b))
+            g('glBindBuffer', None, GLenum, GLuint)(0x90D2, b.value)
+            g('glBufferData', None, GLenum, ctypes.c_ssize_t, c_p, GLenum)(0x90D2, a.nbytes, a.ctypes.data, 0x88E4)
+            self.rows[seed] = b.value
+        return self.rows[seed]
 
     def tex_for(self, ty, seed):
         if (ty, seed) not in self.tex:
@@ -421,6 +470,9 @@ class Rig:
         for name, idx, size, bind in pr.blocks:
             ref_sz = next((s for n2, _i, s, _b in ref.blocks if n2 == name), size)
             bu(0x8A11, bind, self.ubo_for(name, ref_sz, seed, ref.members.get(name, ())))
+        for name, bind, size in ref.ssbos:   # HLSLFIX3: at the GLSL program's binding, so a SPIR-V one elsewhere reads nothing
+            if bind == 12:
+                bu(0x90D2, bind, self.rows_for(seed))
         if patch_n:
             g('glPatchParameteri', None, GLenum, GLint)(0x8E72, patch_n)
         # transform: the SPIR-V program has no glGetError cleanup trouble; clear errors before the draw

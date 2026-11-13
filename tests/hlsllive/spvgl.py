@@ -35,7 +35,8 @@ EM_VERTEX = 0
 EM_FRAGMENT = 4
 BI_POINT_COORD = 16
 
-HEAD_OPS = {OP_CAP, OP_EXT, 11, 14, OP_ENTRY, OP_EXECMODE, 3, 4, 5, 6, 7, 8}   # up to the debug names
+OP_EXECMODE_ID, OP_SAMPLER_ADDR_NV, CAP_BINDLESS_NV = 331, 5397, 5390
+HEAD_OPS = {OP_CAP, OP_EXT, 11, 14, OP_ENTRY, OP_EXECMODE, OP_EXECMODE_ID, OP_SAMPLER_ADDR_NV, 3, 4, 5, 6, 7, 8}   # up to the debug names
 ANNOT_OPS = {71, 72, 73, 74, 75, 5632}
 
 
@@ -343,6 +344,13 @@ def patch(data, block_bindings, report=None, locs=None, bool_names=(), ps_remap=
             ptrs.setdefault((x.a[1], x.a[2]), x.a[0])
     stripc = {}
     twinc = {}
+
+    # ---- 8. HLSLFIX3: SPV_NV_bindless_texture (the GL bindless maps, ww_bindless_gl.hlsli) requires OpSamplerImageAddressingModeNV
+    # after the execution modes; DXC cannot write it (built with -Vd). 64: a GL_ARB_bindless_texture handle is 64 bits.
+    if any(x.op == OP_CAP and x.a[0] == CAP_BINDLESS_NV for x in mod.head) and not any(x.op == OP_SAMPLER_ADDR_NV for x in mod.head):
+        k = max(i for i, x in enumerate(mod.head) if x.op in (OP_ENTRY, OP_EXECMODE, OP_EXECMODE_ID))
+        mod.head.insert(k + 1, Inst(OP_SAMPLER_ADDR_NV, [64]))
+        rep['notes'].append('bindless handles 64-bit')
 
     # ---- 0. OpUndef -> OpConstantNull (the NV GL SPIR-V path mis-compiles a conditional insert into an undef, particles falloff)
     for x in mod.glob:
@@ -677,6 +685,23 @@ def patch(data, block_bindings, report=None, locs=None, bool_names=(), ps_remap=
             if pt is not None:
                 keep_ids.add(pt.a[2])
                 keep_struct.add(pt.a[2])
+                if [DEC_BUFFER_BLOCK] in mod.decs.get(pt.a[2], []):
+                    # HLSLFIX3: a storage block (wwDraws) keeps its nested member names too: GL matches the block between
+                    # stages member by member, and unnamed members are named after their ids, which differ per stage
+                    stack = [pt.a[2]]
+                    while stack:
+                        tt = mod.defn.get(stack.pop())
+                        if tt is None:
+                            continue
+                        if tt.op in (OP_TYPE_ARRAY, OP_TYPE_RTARRAY):
+                            stack.append(tt.a[1])
+                        elif tt.op == OP_TYPE_STRUCT:
+                            keep_struct.add(tt.a[0])
+                            stack.extend(tt.a[1:])
+                            for m in range(len(tt.a) - 1):   # DXC leaves the StructuredBuffer's array member unnamed
+                                if (tt.a[0], m) not in mod.mnames:
+                                    mod.head.append(Inst(OP_MEMBER_NAME, [tt.a[0], m] + str_words('m%d' % m)))
+                                    mod.mnames[(tt.a[0], m)] = 'm%d' % m
     # R6: a stage-interface variable keeps a name of its own (by storage and location). The driver names an unnamed one after its
     # SPIR-V id, and a geometry output and a fragment input with the same id read as one variable of two types (cell_precip_look).
     for x in mod.glob:
