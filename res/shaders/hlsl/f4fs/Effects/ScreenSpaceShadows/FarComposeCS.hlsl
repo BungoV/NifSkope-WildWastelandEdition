@@ -1,11 +1,9 @@
-// SPDX-License-Identifier: GPL-3.0-or-later WITH FO4-CS-Modding-Exception
-//
 // S43 - THE FAR TIER'S RESOLVE. Reads the coarse far mask back to full
 // resolution with a DEPTH-AWARE (bilateral) upsample and composes it into the
 // near tier's mask by min().
 //
 // WHY min() AND NOT A MULTIPLY. It is the operation this module already
-// composes with: bsdf_light_sun.hlsl's F4FX_SSS_MIN_COMPOSITION, and the
+// composes with: bsdf_light_sun.hlsl's F4FS_SSS_MIN_COMPOSITION, and the
 // operation CP3 round 5's whole safety argument is stated over (monotone
 // non-decreasing in the mask, identity at 1.0). Two independent estimates of
 // "is this pixel occluded" combined by min() take the more occluded answer and
@@ -57,10 +55,10 @@ void main(uint3 dispatchThreadID : SV_DispatchThreadID)
         SSSFar_InvFullMaskSize * SSSFar_DynamicResolution;
     const float rawDepth = SSSFar_SourceDepth.SampleLevel(SSSFar_PointBorder, uv, 0.0f);
     float fineDepth;
-    if (!F4FXFarDecodeDomainDepth(rawDepth, 0u, fineDepth)) {
+    if (!F4FSFarDecodeDomainDepth(rawDepth, 0u, fineDepth)) {
         return;
     }
-    const float fineViewDepth = F4FXFarViewDepth(
+    const float fineViewDepth = F4FSFarViewDepth(
         SSSFar_DepthLinearAndTolerance.xyz, max(abs(1.0f - fineDepth), 1.0e-4f));
     if (!(fineViewDepth > 0.0f)) {
         return;
@@ -96,10 +94,10 @@ void main(uint3 dispatchThreadID : SV_DispatchThreadID)
             const float coarseRaw =
                 SSSFar_CoarseDepth.SampleLevel(SSSFar_PointBorder, coarseUv, 0.0f);
             float coarseDepth;
-            if (!F4FXFarDecodeDomainDepth(coarseRaw, 0u, coarseDepth)) {
+            if (!F4FSFarDecodeDomainDepth(coarseRaw, 0u, coarseDepth)) {
                 continue;
             }
-            const float coarseViewDepth = F4FXFarViewDepth(
+            const float coarseViewDepth = F4FSFarViewDepth(
                 SSSFar_DepthLinearAndTolerance.xyz,
                 max(abs(1.0f - coarseDepth), 1.0e-4f));
             if (!(coarseViewDepth > 0.0f)) {

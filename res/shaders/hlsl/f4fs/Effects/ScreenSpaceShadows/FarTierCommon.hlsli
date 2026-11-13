@@ -1,5 +1,3 @@
-// SPDX-License-Identifier: GPL-3.0-or-later WITH FO4-CS-Modding-Exception
-//
 // S43 - THE FAR TIER'S SHARED CONSTANT BUFFER AND THE TWO HELPERS IT NEEDS.
 //
 // Deliberately does NOT #include bend_sss_gpu.hlsli. That file declares the
@@ -12,23 +10,23 @@
 // effects headers; SurfelExtractCS.hlsl sets the same verbatim-copy precedent").
 // If either expression ever changes there, it changes here.
 
-#ifndef F4FX_SSS_FAR_TIER_COMMON_HLSLI_INCLUDED
-#define F4FX_SSS_FAR_TIER_COMMON_HLSLI_INCLUDED
+#ifndef F4FS_SSS_FAR_TIER_COMMON_HLSLI_INCLUDED
+#define F4FS_SSS_FAR_TIER_COMMON_HLSLI_INCLUDED
 
 // bend_sss_gpu.hlsli's depth-domain constants, verbatim. S44: the first two ARE
 // the first-person band, and tests/screen_space_shadows_tests.cpp text-pins them
 // here as well as there against src/Effects/FirstPersonDepthDomain.h.
-static const float F4FX_SSS_VIEWMODEL_DEPTH_MAX = 0.01f;
-static const float F4FX_SSS_FIRST_PERSON_DEPTH_MIN = 1.0e-6f;
-static const float F4FX_SSS_SKY_DEPTH = 0.99999f;
-static const float F4FX_SSS_DEPTH_WINDOW_EPSILON = 1.0e-6f;
+static const float F4FS_SSS_VIEWMODEL_DEPTH_MAX = 0.01f;
+static const float F4FS_SSS_FIRST_PERSON_DEPTH_MIN = 1.0e-6f;
+static const float F4FS_SSS_SKY_DEPTH = 0.99999f;
+static const float F4FS_SSS_DEPTH_WINDOW_EPSILON = 1.0e-6f;
 
 // S44. The far tier's half of the first-person band lever, same define, same
 // default, same meaning (see bend_sss_gpu.hlsli). It is passed to ALL THREE far
 // shaders so the tier cannot end up half-levered: the reduction, the coarse
 // march and the resolve must agree about what the band is.
-#ifndef F4FX_SSS_FP_BAND_OCCLUDERS
-    #define F4FX_SSS_FP_BAND_OCCLUDERS 0
+#ifndef F4FS_SSS_FP_BAND_OCCLUDERS
+    #define F4FS_SSS_FP_BAND_OCCLUDERS 0
 #endif
 
 // The far tier's own constants. Mirrored field for field by
@@ -61,26 +59,26 @@ cbuffer ScreenSpaceShadowsFarCB : register(b0)
     float4 SSSFar_DepthLinearAndTolerance;
 };
 
-// bend_sss_gpu.hlsli's F4FXDecodeDomainDepth, verbatim - S44 lever included, so
+// bend_sss_gpu.hlsli's F4FSDecodeDomainDepth, verbatim - S44 lever included, so
 // the two files cannot disagree about the band.
-bool F4FXFarDecodeDomainDepth(float rawDepth, uint depthDomain, out float domainDepth)
+bool F4FSFarDecodeDomainDepth(float rawDepth, uint depthDomain, out float domainDepth)
 {
     if (depthDomain == 0u) {
         domainDepth = rawDepth;
-#if F4FX_SSS_FP_BAND_OCCLUDERS
-        return rawDepth > F4FX_SSS_FIRST_PERSON_DEPTH_MIN && rawDepth < F4FX_SSS_SKY_DEPTH;
+#if F4FS_SSS_FP_BAND_OCCLUDERS
+        return rawDepth > F4FS_SSS_FIRST_PERSON_DEPTH_MIN && rawDepth < F4FS_SSS_SKY_DEPTH;
 #else
-        return rawDepth > F4FX_SSS_VIEWMODEL_DEPTH_MAX && rawDepth < F4FX_SSS_SKY_DEPTH;
+        return rawDepth > F4FS_SSS_VIEWMODEL_DEPTH_MAX && rawDepth < F4FS_SSS_SKY_DEPTH;
 #endif
     }
 
     domainDepth = saturate(rawDepth * 100.0f);
-    return rawDepth > F4FX_SSS_FIRST_PERSON_DEPTH_MIN &&
-        rawDepth <= F4FX_SSS_VIEWMODEL_DEPTH_MAX;
+    return rawDepth > F4FS_SSS_FIRST_PERSON_DEPTH_MIN &&
+        rawDepth <= F4FS_SSS_VIEWMODEL_DEPTH_MAX;
 }
 
-// bend_sss_gpu.hlsli:682-691, verbatim (F4FXBendViewDepthFromOneMinusDepth).
-float F4FXFarViewDepth(float3 depthLinearParams, float oneMinusDepth)
+// bend_sss_gpu.hlsli:682-691, verbatim (F4FSBendViewDepthFromOneMinusDepth).
+float F4FSFarViewDepth(float3 depthLinearParams, float oneMinusDepth)
 {
     const float numerator = depthLinearParams.x;
     const float range = depthLinearParams.y;
@@ -88,7 +86,7 @@ float F4FXFarViewDepth(float3 depthLinearParams, float oneMinusDepth)
         return 0.0f;
     }
     const float denominator = oneMinusDepth * range + depthLinearParams.z;
-    return numerator / max(denominator, F4FX_SSS_DEPTH_WINDOW_EPSILON);
+    return numerator / max(denominator, F4FS_SSS_DEPTH_WINDOW_EPSILON);
 }
 
 #endif
