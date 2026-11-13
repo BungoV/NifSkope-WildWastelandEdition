@@ -1,41 +1,41 @@
-// HLSL source of uvedit.vert, translated by notes/hlslsrc1/tools/glsl2hlsl.py (text level: comments, names and
-// #if variants kept from the GLSL). Matrices hold GL's columns as rows (row_major blocks), so a GL product A * B
-// reads mul(B, A).
+// HLSL source of uvedit.vert (vertex shader), lane HLSLSRC1 (notes/hlsltools/glsl2hlsl.py): one readable file for every
+// variant, the GLSL's comments, names and order kept. Loose uniforms are the LooseUniforms cbuffer (b31).
+// variants: #if none (the loader's defines; res/shaders/hlsl/variants.txt lists the sets built)
 // profile: vs_6_0
-// variants: #if (the loader's WW_* defines select the variant; built with -D per set)
 #include "CoreBindingsVk.hlsli"
-#include "GlslCompat.hlsli"
-#define WW_STAGE_VS 1
+#define WW_HLSL_SRC 1	// the shared .hlsli files give their readable half
+#define Sample( s, uv ) SampleLevel( s, uv, 0 )	// GLSL: texture() outside a fragment shader reads level 0
+#define SampleCmp SampleCmpLevelZero	// the same for a shadow compare (SampleCmp is fragment-only)
 static float4 gl_Position;
-
 static float2 texCoord;
+cbuffer LooseUniforms : register(b31, space0)
+{
+	float4 viewScaleAndOffset;
+};
 
-uniform float4 viewScaleAndOffset;
 
-static float2	multiTexCoord0;
+static float2 multiTexCoord0;
 
-// stage I/O: the members (locations, semantics) of the generated port, each under its GLSL declaration's #if
+void vert_main()
+{
+	float2	offs = multiTexCoord0;
+
+	gl_Position = float4( offs * float2( 2.0, -2.0 ) + float2( -1.0, 1.0 ), (float2)( 1.0 ) );
+
+	texCoord = offs * viewScaleAndOffset.xy + viewScaleAndOffset.zw;
+}
+
 struct SPIRV_Cross_Input
 {
     float2 multiTexCoord0 : TEXCOORD7;
 };
+
 struct SPIRV_Cross_Output
 {
     float2 texCoord : TEXCOORD0;
     float4 gl_Position : SV_Position;
 };
 
-
-void vert_main()
-{
-	float2	offs = multiTexCoord0;
-
-	gl_Position = float4( offs * float2( 2.0, -2.0 ) + float2( -1.0, 1.0 ), (float2)(1.0) );
-
-	texCoord = offs * viewScaleAndOffset.xy + viewScaleAndOffset.zw;
-}
-
-// entry: copies the stage inputs into the GLSL-named globals, runs the GLSL main, returns the outputs
 SPIRV_Cross_Output main(SPIRV_Cross_Input stage_input)
 {
     multiTexCoord0 = stage_input.multiTexCoord0;

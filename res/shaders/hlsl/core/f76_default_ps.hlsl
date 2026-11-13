@@ -1,56 +1,48 @@
-// HLSL source of f76_default.frag, translated by notes/hlslsrc1/tools/glsl2hlsl.py (text level: comments, names and
-// #if variants kept from the GLSL). Matrices hold GL's columns as rows (row_major blocks), so a GL product A * B
-// reads mul(B, A).
+// HLSL source of f76_default.frag (fragment shader), lane HLSLSRC1 (notes/hlsltools/glsl2hlsl.py): one readable file for every
+// variant, the GLSL's comments, names and order kept. Loose uniforms are the LooseUniforms cbuffer (b31).
+// variants: #if none (the loader's defines; res/shaders/hlsl/variants.txt lists the sets built)
 // profile: ps_6_0
-// variants: #if (the loader's WW_* defines select the variant; built with -D per set)
 #include "CoreBindingsVk.hlsli"
-#include "GlslCompat.hlsli"
-#define WW_STAGE_PS 1
+#define WW_HLSL_SRC 1	// the shared .hlsli files give their readable half
 static bool gl_FrontFacing;
+#include "uniforms.hlsli"
 
-#include "uniforms.src.hlsli"
+Texture2D<float4> BaseMap : register(t0, space0); SamplerState _BaseMap_sampler : register(s0, space0);
+Texture2D<float4> NormalMap : register(t1, space0); SamplerState _NormalMap_sampler : register(s1, space0);
+Texture2D<float4> GlowMap : register(t2, space0); SamplerState _GlowMap_sampler : register(s2, space0);
+Texture2D<float4> ReflMap : register(t3, space0); SamplerState _ReflMap_sampler : register(s3, space0);
+Texture2D<float4> LightingMap : register(t4, space0); SamplerState _LightingMap_sampler : register(s4, space0);
+Texture2D<float4> GreyscaleMap : register(t5, space0); SamplerState _GreyscaleMap_sampler : register(s5, space0);
+Texture2D<float4> EnvironmentMap : register(t6, space0); SamplerState _EnvironmentMap_sampler : register(s6, space0);	// environment BRDF LUT
+TextureCube<float4> CubeMap : register(t7, space0); SamplerState _CubeMap_sampler : register(s7, space0);	// pre-filtered cube maps (specular, diffuse)
+TextureCube<float4> CubeMap2 : register(t8, space0); SamplerState _CubeMap2_sampler : register(s8, space0);
+cbuffer LooseUniforms : register(b31, space0)
+{
+	float3 specColor;
+	bool hasSpecular;
+	float specStrength;
+	float fresnelPower;
+	float paletteScale;
+	float3 glowColor;
+	float glowMult;
+	float alpha;
+	int alphaFlags;			// bits 0 to 2: alpha test mode, bit 3: alpha blending enabled
+	float alphaThreshold;
+	float3 tintColor;
+	float2 uvScale;
+	float2 uvOffset;
+	bool hasEmit;
+	bool hasGlowMap;
+	bool hasSoftlight;
+	bool hasTintColor;
+	bool hasCubeMap;
+	bool hasSpecularMap;
+	bool greyscaleColor;
+	// RGB = subsurface tint color, A = transmissive scale (> 0: translucency enabled)
+	float4 translucencyColorAndScale;
+	float envReflection;
+};
 
-Texture2D<float4> BaseMap; SamplerState _BaseMap_sampler;
-Texture2D<float4> NormalMap; SamplerState _NormalMap_sampler;
-Texture2D<float4> GlowMap; SamplerState _GlowMap_sampler;
-Texture2D<float4> ReflMap; SamplerState _ReflMap_sampler;
-Texture2D<float4> LightingMap; SamplerState _LightingMap_sampler;
-Texture2D<float4> GreyscaleMap; SamplerState _GreyscaleMap_sampler;
-Texture2D<float4> EnvironmentMap; SamplerState _EnvironmentMap_sampler;	// environment BRDF LUT
-TextureCube<float4> CubeMap; SamplerState _CubeMap_sampler;	// pre-filtered cube maps (specular, diffuse)
-TextureCube<float4> CubeMap2; SamplerState _CubeMap2_sampler;
-
-uniform float3 specColor;
-uniform bool hasSpecular;
-uniform float specStrength;
-uniform float fresnelPower;
-
-uniform float paletteScale;
-
-uniform float3 glowColor;
-uniform float glowMult;
-
-uniform float alpha;
-uniform int alphaFlags;			// bits 0 to 2: alpha test mode, bit 3: alpha blending enabled
-uniform float alphaThreshold;
-
-uniform float3 tintColor;
-
-uniform float2 uvScale;
-uniform float2 uvOffset;
-
-uniform bool hasEmit;
-uniform bool hasGlowMap;
-uniform bool hasSoftlight;
-uniform bool hasTintColor;
-uniform bool hasCubeMap;
-uniform bool hasSpecularMap;
-uniform bool greyscaleColor;
-
-// RGB = subsurface tint color, A = transmissive scale (> 0: translucency enabled)
-uniform float4 translucencyColorAndScale;
-
-uniform float envReflection;
 
 static float3 LightDir;
 static float3 ViewDir;
@@ -64,25 +56,8 @@ static float3x3 reflMatrix;
 
 static float4 fragColor;
 
-// stage I/O: the members (locations, semantics) of the generated port, each under its GLSL declaration's #if
-struct SPIRV_Cross_Input
-{
-    WW_LOC(3) float3 LightDir : TEXCOORD3;
-    WW_LOC(4) float3 ViewDir : TEXCOORD4;
-    WW_LOC(8) float2 texCoord : TEXCOORD8;
-    WW_LOC(1) float4 C : TEXCOORD1;
-    WW_LOC(5) float3x3 btnMatrix : TEXCOORD5;
-    WW_LOC(9) nointerpolation float3x3 reflMatrix : TEXCOORD9;
-    bool gl_FrontFacing : SV_IsFrontFace;
-};
-struct SPIRV_Cross_Output
-{
-    float4 fragColor : SV_Target0;
-};
-
-
-static float3 ViewDir_norm;
-static float3x3 btnMatrix_norm;
+static float3 ViewDir_norm	/* = normalize( ViewDir ) : set in main() after the stage inputs */;
+static float3x3 btnMatrix_norm	/* = float3x3( normalize( btnMatrix[0] ), normalize( btnMatrix[1] ), normalize( btnMatrix[2] ) ) : set in main() after the stage inputs */;
 
 #ifndef M_PI
 	#define M_PI 3.1415926535897932384626433832795
@@ -256,7 +231,7 @@ void frag_main()
 		transmissive *= translucencyColorAndScale.a * lightingMap.b;
 		color.rgb += transmissive * lightSourceDiffuse[0].rgb * max( -NdotL, 0.0 );
 		if ( hasCubeMap )
-			color.rgb += CubeMap2.SampleLevel(_CubeMap2_sampler, -normalWS, 0.0).rgb * transmissive * lightSourceAmbient.rgb;
+			color.rgb += CubeMap2.SampleLevel( _CubeMap2_sampler, -normalWS, 0.0 ).rgb * transmissive * lightSourceAmbient.rgb;
 		else
 			color.rgb += transmissive * lightSourceAmbient.rgb * 0.06666667;
 	}
@@ -266,17 +241,31 @@ void frag_main()
 	fragColor = color;
 }
 
-// entry: copies the stage inputs into the GLSL-named globals, runs the GLSL main, returns the outputs
+struct SPIRV_Cross_Input
+{
+    WW_LOC(3) float3 LightDir : TEXCOORD3;
+    WW_LOC(4) float3 ViewDir : TEXCOORD4;
+    WW_LOC(8) float2 texCoord : TEXCOORD8;
+    WW_LOC(1) float4 C : TEXCOORD1;
+    WW_LOC(5) float3x3 btnMatrix : TEXCOORD5;
+    WW_LOC(9) nointerpolation float3x3 reflMatrix : TEXCOORD9;
+    bool gl_FrontFacing : SV_IsFrontFace;
+};
+
+struct SPIRV_Cross_Output
+{
+    float4 fragColor : SV_Target0;
+};
+
 SPIRV_Cross_Output main(SPIRV_Cross_Input stage_input)
 {
-    gl_FrontFacing = stage_input.gl_FrontFacing;
+    LightDir = stage_input.LightDir;
     ViewDir = stage_input.ViewDir;
-    btnMatrix = stage_input.btnMatrix;
     texCoord = stage_input.texCoord;
     C = stage_input.C;
-    LightDir = stage_input.LightDir;
+    btnMatrix = stage_input.btnMatrix;
     reflMatrix = stage_input.reflMatrix;
-    // the GLSL global initializers, which GLSL runs here (they read inputs, uniforms or globals)
+    gl_FrontFacing = stage_input.gl_FrontFacing;
     ViewDir_norm = normalize( ViewDir );
     btnMatrix_norm = float3x3( normalize( btnMatrix[0] ), normalize( btnMatrix[1] ), normalize( btnMatrix[2] ) );
     frag_main();

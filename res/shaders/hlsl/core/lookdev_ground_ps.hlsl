@@ -1,82 +1,97 @@
-// HLSL source of lookdev_ground.frag, translated by notes/hlslsrc1/tools/glsl2hlsl.py (text level: comments, names and
-// #if variants kept from the GLSL). Matrices hold GL's columns as rows (row_major blocks), so a GL product A * B
-// reads mul(B, A).
+// HLSL source of lookdev_ground.frag (fragment shader), lane HLSLSRC1 (notes/hlsltools/glsl2hlsl.py): one readable file for every
+// variant, the GLSL's comments, names and order kept. Loose uniforms are the LooseUniforms cbuffer (b31).
+// variants: #if WW_CELL_FOGLEAK, WW_CELL_RESTIR, WW_CELL_RESTIRGI, WW_CELL_RTDDGI, WW_CELL_RTDDGI_CASCADES, WW_FRAME_UBO (the loader's defines; res/shaders/hlsl/variants.txt lists the sets built)
 // profile: ps_6_0
-// variants: #if (the loader's WW_* defines select the variant; built with -D per set)
 #include "CoreBindingsVk.hlsli"
-#include "GlslCompat.hlsli"
-#define WW_STAGE_PS 1
-#define WW_HLSL_SRC 1	// the readable half of the other modules' includes
-#ifdef WW_GROUND_CELL
-#define WW_CELL_FX 1
-#endif
-#define WW_LOOSE_TYPES 1
-#include "../air/lookdev_fog.hlsli"
-#include "../shadows/ww_sunshadow.hlsli"
-#include "../lights/cell_lights.hlsli"
-#include "../lights/cell_cluster.hlsli"
-#include "../overlays/debug_view.hlsli"
-#include "../ao/cell_gihalfat.hlsli"
-#include "../gi/cell_ddgi.hlsli"
-#undef WW_LOOSE_TYPES
-#define WW_LOOSE_UNIFORMS 1
-#include "../air/lookdev_fog.hlsli"
-#include "../shadows/ww_sunshadow.hlsli"
-#include "../lights/cell_lights.hlsli"
-#include "../lights/cell_cluster.hlsli"
-#include "../overlays/debug_view.hlsli"
-#include "../ao/cell_gihalfat.hlsli"
-#include "../gi/cell_ddgi.hlsli"
-#undef WW_LOOSE_UNIFORMS
-// this program's registers for blocks its includes declare (glslang numbers them per program and variant)
-#ifndef WW_REGS_SET
-#define WW_REGS_SET
-#if defined(WW_CELL_FOGLEAK) && defined(WW_FRAME_UBO)
-#define WW_REG_wwShadowFrame b1
-#endif
-#endif
+#define WW_HLSL_SRC 1	// the shared .hlsli files give their readable half
 static float4 gl_FragCoord;
-
 /* Lookdev ground plane (lane PBRR2B, docs s6.2 stage 1). Vanilla Commonwealth
  * ground (textures\landscape\Ground\CommonwealthDefault01_d/_n), tiled every
  * `tileSize` world units, lit by the lookdev sun (Lambert, linear units: a white
  * surface facing a sun of L reads L) and the DALC 6-axis ambient. Out through
  * the Studio output path. The _d is a legacy-header DXT5 (UNORM), decoded here. */
 
-#include "uniforms.src.hlsli"
+#include "uniforms.hlsli"
 
-Texture2D<float4> BaseMap; SamplerState _BaseMap_sampler;
-Texture2D<float4> NormalMap; SamplerState _NormalMap_sampler;
-uniform bool hasBaseMap;
-uniform bool hasNormalMap;
-uniform float tileSize;
-uniform float3 sunDirWorld;	// unit, TO the light
-uniform float3 sunLinear;
-uniform float3 dalc[6];		// linear: X+ X- Y+ Y- Z+ Z-
-uniform bool dalcFlip;
-uniform float groundLeak;	// < 0: normal draw; >= 0: red "groundleak" (the OFF path drawing a faint ground)
-uniform float sceneExposure;
-uniform int viewTransform;
+Texture2D<float4> BaseMap : register(t46, space0); SamplerState _BaseMap_sampler : register(s46, space0);
+Texture2D<float4> NormalMap : register(t47, space0); SamplerState _NormalMap_sampler : register(s47, space0);
+#define WW_LOOSE_TYPES 1
+#include "../air/lookdev_fog.hlsli"
+#if defined(WW_SUNSHADOW)
+#include "../shadows/ww_sunshadow.hlsli"
+#endif
+#if defined(WW_GROUND_CELL)
+#if defined(WW_GROUND_CELL)
+#ifndef WW_CELL_FX
+#define WW_CELL_FX 1	// as below, before this file
+#endif
+#endif
+#include "../lights/cell_lights.hlsli"
+#include "../lights/cell_cluster.hlsli"
+#endif
+#if defined(WW_GROUND_CELL) && defined(WW_DEBUG_VIEWS)
+#include "../overlays/debug_view.hlsli"
+#endif
+#if defined(WW_GROUND_CELL) && defined(WW_CELL_PRT) && !(defined(WW_CELL_GI_MARCH))
+#include "../ao/cell_gihalfat.hlsli"
+#endif
+#if defined(WW_GROUND_CELL) && defined(WW_CELL_PRT) && !(defined(WW_CELL_GI_MARCH)) && defined(WW_CELL_RTDDGI)
+#include "../gi/cell_ddgi.hlsli"
+#endif
+#if defined(WW_GROUND_CELL) && !(defined(WW_CELL_PRT)) && defined(WW_CELL_RTDDGI)
+#include "../gi/cell_ddgi.hlsli"
+#include "../ao/cell_gihalfat.hlsli"
+#endif
+#undef WW_LOOSE_TYPES
+cbuffer LooseUniforms : register(b31, space0)
+{
+#define WW_LOOSE_UNIFORMS 1
+#include "../air/lookdev_fog.hlsli"
+#if defined(WW_SUNSHADOW)
+#include "../shadows/ww_sunshadow.hlsli"
+#endif
+#if defined(WW_GROUND_CELL)
+#if defined(WW_GROUND_CELL)
+#ifndef WW_CELL_FX
+#define WW_CELL_FX 1	// as below, before this file
+#endif
+#endif
+#include "../lights/cell_lights.hlsli"
+#include "../lights/cell_cluster.hlsli"
+#endif
+#if defined(WW_GROUND_CELL) && defined(WW_DEBUG_VIEWS)
+#include "../overlays/debug_view.hlsli"
+#endif
+#if defined(WW_GROUND_CELL) && defined(WW_CELL_PRT) && !(defined(WW_CELL_GI_MARCH))
+#include "../ao/cell_gihalfat.hlsli"
+#endif
+#if defined(WW_GROUND_CELL) && defined(WW_CELL_PRT) && !(defined(WW_CELL_GI_MARCH)) && defined(WW_CELL_RTDDGI)
+#include "../gi/cell_ddgi.hlsli"
+#endif
+#if defined(WW_GROUND_CELL) && !(defined(WW_CELL_PRT)) && defined(WW_CELL_RTDDGI)
+#include "../gi/cell_ddgi.hlsli"
+#include "../ao/cell_gihalfat.hlsli"
+#endif
+#undef WW_LOOSE_UNIFORMS
+	bool hasBaseMap;
+	bool hasNormalMap;
+	float tileSize;
+	float3 sunDirWorld;	// unit, TO the light
+	float3 sunLinear;
+	float3 dalc[6];		// linear: X+ X- Y+ Y- Z+ Z-
+	bool dalcFlip;
+	float groundLeak;	// < 0: normal draw; >= 0: red "groundleak" (the OFF path drawing a faint ground)
+	float sceneExposure;
+	int viewTransform;
+};
+
 
 static float3 worldPos;
 static float3 viewPos;
 
 static float4 fragColor;
 
-// stage I/O: the members (locations, semantics) of the generated port, each under its GLSL declaration's #if
-struct SPIRV_Cross_Input
-{
-    float3 worldPos : TEXCOORD0;
-    float3 viewPos : TEXCOORD1;
-    float4 gl_FragCoord : SV_Position;
-};
-struct SPIRV_Cross_Output
-{
-    float4 fragColor : SV_Target0;
-};
-
-
-#include "lookdev_output.src.hlsli"
+#include "lookdev_output.hlsli"
 #include "../air/lookdev_fog.hlsli"
 #ifdef WW_SUNSHADOW
 #include "../shadows/ww_sunshadow.hlsli"
@@ -102,12 +117,12 @@ float3 dalcAmbient( float3 n )
 void frag_main()
 {
 	float2 uv = float2( worldPos.x, -worldPos.y ) / tileSize;
-	float3 base = (float3)(0.18);
+	float3 base = (float3)( 0.18 );
 	if ( hasBaseMap )
-		base = srgbToLinear( BaseMap.Sample(_BaseMap_sampler, uv).rgb );
+		base = srgbToLinear( BaseMap.Sample( _BaseMap_sampler, uv ).rgb );
 	float3 n = float3( 0.0, 0.0, 1.0 );
 	if ( hasNormalMap ) {
-		float2 g = NormalMap.Sample(_NormalMap_sampler, uv).rg * 2.0 - 1.0;
+		float2 g = NormalMap.Sample( _NormalMap_sampler, uv ).rg * 2.0 - 1.0;
 		// DirectX-style green (+G = image down = world -Y here)
 		n = normalize( float3( g.x, -g.y, sqrt( max( 1.0 - dot( g, g ), 0.0 ) ) ) );
 	}
@@ -133,12 +148,12 @@ void frag_main()
 #ifdef WW_GROUND_CELL
 	// lane LIGHTBOOTH1: inside the cell's HDR frame, linear light like the cell's own programs (tone-mapped once)
 	if ( cellOn && cellIsLinear ) {
-		fragColor = float4( max( color, (float3)(0.0) ), 1.0 );
+		fragColor = float4( max( color, (float3)( 0.0 ) ), 1.0 );
 		return;
 	}
 #endif
 	if ( groundLeak >= 0.0 )
-		color = lerp( (float3)(0.0), color, groundLeak );
+		color = lerp( (float3)( 0.0 ), color, groundLeak );
 	fragColor = float4( studioOutput( color ), 1.0 );
 	if ( groundLeak >= 0.0 )
 		fragColor.a = groundLeak;
@@ -152,7 +167,18 @@ void frag_main()
 #endif
 }
 
-// entry: copies the stage inputs into the GLSL-named globals, runs the GLSL main, returns the outputs
+struct SPIRV_Cross_Input
+{
+    float3 worldPos : TEXCOORD0;
+    float3 viewPos : TEXCOORD1;
+    float4 gl_FragCoord : SV_Position;
+};
+
+struct SPIRV_Cross_Output
+{
+    float4 fragColor : SV_Target0;
+};
+
 SPIRV_Cross_Output main(SPIRV_Cross_Input stage_input)
 {
     gl_FragCoord = stage_input.gl_FragCoord;

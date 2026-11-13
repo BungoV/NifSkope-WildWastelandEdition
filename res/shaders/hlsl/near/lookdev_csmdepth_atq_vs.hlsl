@@ -1,17 +1,20 @@
-// HLSL source of lookdev_csmdepth_atq.vert, translated by notes/hlslsrc1/tools/glsl2hlsl.py (text level: comments, names and
-// #if variants kept from the GLSL). Matrices hold GL's columns as rows (row_major blocks), so a GL product A * B
-// reads mul(B, A).
+// HLSL source of features/near/lookdev_csmdepth_atq.vert (vertex shader), lane HLSLSRC1 (notes/hlsltools/glsl2hlsl.py): one readable file for every
+// variant, the GLSL's comments, names and order kept. Loose uniforms are the LooseUniforms cbuffer (b31).
+// variants: #if none (the loader's defines; res/shaders/hlsl/variants.txt lists the sets built)
 // profile: vs_6_0
-// variants: #if (the loader's WW_* defines select the variant; built with -D per set)
 #include "NearBindingsVk.hlsli"
-#include "../core/GlslCompat.hlsli"
-#define WW_STAGE_VS 1
+#define WW_HLSL_SRC 1	// the shared .hlsli files give their readable half
+#define Sample( s, uv ) SampleLevel( s, uv, 0 )	// GLSL: texture() outside a fragment shader reads level 0
+#define SampleCmp SampleCmpLevelZero	// the same for a shadow compare (SampleCmp is fragment-only)
 static float4 gl_Position;
-
 /* The alpha-tested casters through the render queues (lane GPUDRIVEN1): lookdev_csmdepth_at.vert with the
  * model-view matrix per draw from the queue's matrix buffer (locations 8-11). */
 
-uniform row_major float4x4 csmClipFromView;
+cbuffer LooseUniforms : register(b31, space0)
+{
+	row_major float4x4 csmClipFromView;
+};
+
 
 static float3 vertexPosition;
 static float2 multiTexCoord0;
@@ -19,7 +22,12 @@ static float4x4 modelViewMatrix;
 
 static float2 texCoord;
 
-// stage I/O: the members (locations, semantics) of the generated port, each under its GLSL declaration's #if
+void vert_main()
+{
+	texCoord = multiTexCoord0;
+	gl_Position = mul(( mul(float4( vertexPosition, 1.0 ), modelViewMatrix) ), csmClipFromView);
+}
+
 struct SPIRV_Cross_Input
 {
     float3 vertexPosition : TEXCOORD0;
@@ -29,28 +37,21 @@ struct SPIRV_Cross_Input
     float4 modelViewMatrix_2 : TEXCOORD8_2;
     float4 modelViewMatrix_3 : TEXCOORD8_3;
 };
+
 struct SPIRV_Cross_Output
 {
     float2 texCoord : TEXCOORD0;
     float4 gl_Position : SV_Position;
 };
 
-
-void vert_main()
-{
-	texCoord = multiTexCoord0;
-	gl_Position = mul(( mul(float4( vertexPosition, 1.0 ), modelViewMatrix) ), csmClipFromView);
-}
-
-// entry: copies the stage inputs into the GLSL-named globals, runs the GLSL main, returns the outputs
 SPIRV_Cross_Output main(SPIRV_Cross_Input stage_input)
 {
+    vertexPosition = stage_input.vertexPosition;
     multiTexCoord0 = stage_input.multiTexCoord0;
     modelViewMatrix[0] = stage_input.modelViewMatrix_0;
     modelViewMatrix[1] = stage_input.modelViewMatrix_1;
     modelViewMatrix[2] = stage_input.modelViewMatrix_2;
     modelViewMatrix[3] = stage_input.modelViewMatrix_3;
-    vertexPosition = stage_input.vertexPosition;
     vert_main();
     SPIRV_Cross_Output stage_output;
     stage_output.gl_Position = gl_Position;

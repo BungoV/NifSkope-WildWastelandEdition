@@ -1,51 +1,187 @@
-// HLSL source of pbrm_default.frag, translated by notes/hlslsrc1/tools/glsl2hlsl.py (text level: comments, names and
-// #if variants kept from the GLSL). Matrices hold GL's columns as rows (row_major blocks), so a GL product A * B
-// reads mul(B, A).
+// HLSL source of pbrm_default.frag (fragment shader), lane HLSLSRC1 (notes/hlsltools/glsl2hlsl.py): one readable file for every
+// variant, the GLSL's comments, names and order kept. Loose uniforms are the LooseUniforms cbuffer (b31).
+// variants: #if WW_CELL_FOGLEAK, WW_CELL_RESTIR, WW_CELL_RESTIRGI, WW_CELL_RTDDGI, WW_CELL_RTDDGI_CASCADES, WW_FRAME_UBO (the loader's defines; res/shaders/hlsl/variants.txt lists the sets built)
 // profile: ps_6_0
-// variants: #if (the loader's WW_* defines select the variant; built with -D per set)
 #include "CoreBindingsVk.hlsli"
-#include "GlslCompat.hlsli"
-#define WW_STAGE_PS 1
-#define WW_HLSL_SRC 1	// the readable half of the other modules' includes
-#define WW_LOOSE_TYPES 1
-#include "../air/lookdev_fog.hlsli"
-#include "../shadows/ww_sunshadow.hlsli"
-#include "../lights/cell_lights.hlsli"
-#include "../lights/cell_cluster.hlsli"
-#include "../overlays/debug_view.hlsli"
-#include "../ao/cell_gihalfat.hlsli"
-#include "../gi/cell_ddgi.hlsli"
-#include "../ao/cell_ao.hlsli"
-#include "../reflections/cell_ssr.hlsli"
-#include "../water/water_info.hlsli"
-#include "../water/water_shore.hlsli"
-#include "../weather/rain_wet.hlsli"
-#undef WW_LOOSE_TYPES
-#define WW_LOOSE_UNIFORMS 1
-#include "../air/lookdev_fog.hlsli"
-#include "../shadows/ww_sunshadow.hlsli"
-#include "../lights/cell_lights.hlsli"
-#include "../lights/cell_cluster.hlsli"
-#include "../overlays/debug_view.hlsli"
-#include "../ao/cell_gihalfat.hlsli"
-#include "../gi/cell_ddgi.hlsli"
-#include "../ao/cell_ao.hlsli"
-#include "../reflections/cell_ssr.hlsli"
-#include "../water/water_info.hlsli"
-#include "../water/water_shore.hlsli"
-#include "../weather/rain_wet.hlsli"
-#undef WW_LOOSE_UNIFORMS
-// this program's registers for blocks its includes declare (glslang numbers them per program and variant)
-#ifndef WW_REGS_SET
-#define WW_REGS_SET
-#if defined(WW_CELL_FOGLEAK) && defined(WW_FRAME_UBO)
-#define WW_REG_wwShadowFrame b1
-#endif
-#endif
+#define WW_HLSL_SRC 1	// the shared .hlsli files give their readable half
 static float4 gl_FragCoord;
 static bool gl_FrontFacing;
-
-#include "uniforms.src.hlsli"
+#include "uniforms.hlsli"
+#define WW_LOOSE_TYPES 1
+#include "../air/lookdev_fog.hlsli"
+#if defined(WW_SUNSHADOW)
+#include "../shadows/ww_sunshadow.hlsli"
+#endif
+#if defined(WW_CELLLIGHTS)
+#if defined(WW_CELLLIGHTS)
+#ifndef WW_CELL_PBR
+#define WW_CELL_PBR 1	// as below, before this file
+#endif
+#endif
+#if defined(WW_CELLLIGHTS) && !defined(WW_CELL_GI_MARCH_COPIES)
+#ifndef WW_CELL_GI_MARCH_ONCE
+#define WW_CELL_GI_MARCH_ONCE 1	// as below, before this file
+#endif
+#endif
+#if defined(WW_CELLLIGHTS)
+#ifndef CELL_GI_ONEREAD
+#define CELL_GI_ONEREAD 1	// as below, before this file
+#endif
+#endif
+#if defined(WW_CELLLIGHTS)
+#ifndef CELL_RESTIR_MISS_PIXEL
+#define CELL_RESTIR_MISS_PIXEL 1	// as below, before this file
+#endif
+#endif
+#include "../lights/cell_lights.hlsli"
+#include "../lights/cell_cluster.hlsli"
+#endif
+#if defined(WW_CELLLIGHTS) && defined(WW_DEBUG_VIEWS)
+#include "../overlays/debug_view.hlsli"
+#endif
+#if defined(WW_CELLLIGHTS) && defined(WW_CELL_PRT) && !(defined(WW_CELL_GI_MARCH))
+#include "../ao/cell_gihalfat.hlsli"
+#endif
+#if defined(WW_CELLLIGHTS) && defined(WW_CELL_PRT) && !(defined(WW_CELL_GI_MARCH)) && defined(WW_CELL_RTDDGI)
+#include "../gi/cell_ddgi.hlsli"
+#endif
+#if defined(WW_CELLLIGHTS) && !(defined(WW_CELL_PRT)) && defined(WW_CELL_RTDDGI)
+#include "../gi/cell_ddgi.hlsli"
+#include "../ao/cell_gihalfat.hlsli"
+#endif
+#if defined(WW_CELLLIGHTS)
+#include "../ao/cell_ao.hlsli"
+#include "../reflections/cell_ssr.hlsli"
+#include "cell_grass.hlsli"
+#include "land_shore.hlsli"
+#include "land_wet.hlsli"
+#include "../water/water_info.hlsli"
+#include "../water/water_shore.hlsli"
+#include "land_swash.hlsli"
+#include "../weather/rain_wet.hlsli"
+#endif
+#undef WW_LOOSE_TYPES
+cbuffer LooseUniforms : register(b31, space0)
+{
+#define WW_LOOSE_UNIFORMS 1
+#include "../air/lookdev_fog.hlsli"
+#if defined(WW_SUNSHADOW)
+#include "../shadows/ww_sunshadow.hlsli"
+#endif
+#if defined(WW_CELLLIGHTS)
+#if defined(WW_CELLLIGHTS)
+#ifndef WW_CELL_PBR
+#define WW_CELL_PBR 1	// as below, before this file
+#endif
+#endif
+#if defined(WW_CELLLIGHTS) && !defined(WW_CELL_GI_MARCH_COPIES)
+#ifndef WW_CELL_GI_MARCH_ONCE
+#define WW_CELL_GI_MARCH_ONCE 1	// as below, before this file
+#endif
+#endif
+#if defined(WW_CELLLIGHTS)
+#ifndef CELL_GI_ONEREAD
+#define CELL_GI_ONEREAD 1	// as below, before this file
+#endif
+#endif
+#if defined(WW_CELLLIGHTS)
+#ifndef CELL_RESTIR_MISS_PIXEL
+#define CELL_RESTIR_MISS_PIXEL 1	// as below, before this file
+#endif
+#endif
+#include "../lights/cell_lights.hlsli"
+#include "../lights/cell_cluster.hlsli"
+#endif
+#if defined(WW_CELLLIGHTS) && defined(WW_DEBUG_VIEWS)
+#include "../overlays/debug_view.hlsli"
+#endif
+#if defined(WW_CELLLIGHTS) && defined(WW_CELL_PRT) && !(defined(WW_CELL_GI_MARCH))
+#include "../ao/cell_gihalfat.hlsli"
+#endif
+#if defined(WW_CELLLIGHTS) && defined(WW_CELL_PRT) && !(defined(WW_CELL_GI_MARCH)) && defined(WW_CELL_RTDDGI)
+#include "../gi/cell_ddgi.hlsli"
+#endif
+#if defined(WW_CELLLIGHTS) && !(defined(WW_CELL_PRT)) && defined(WW_CELL_RTDDGI)
+#include "../gi/cell_ddgi.hlsli"
+#include "../ao/cell_gihalfat.hlsli"
+#endif
+#if defined(WW_CELLLIGHTS)
+#include "../ao/cell_ao.hlsli"
+#include "../reflections/cell_ssr.hlsli"
+#include "cell_grass.hlsli"
+#include "land_shore.hlsli"
+#include "land_wet.hlsli"
+#include "../water/water_info.hlsli"
+#include "../water/water_shore.hlsli"
+#include "land_swash.hlsli"
+#include "../weather/rain_wet.hlsli"
+#endif
+#undef WW_LOOSE_UNIFORMS
+#if defined(WW_CELLLIGHTS)
+	float4 landLod;	// lane LANDSPEC2: as fo4_default.frag (src/features/far-ground/landlodspec.h), for ground with a .pbrm
+	float4 landLodK;
+#endif
+	// Constants stand in wherever the corresponding channel is overridden. These
+	// mirror the reader's resolved values (src/io/pbrmfile.h).
+	float3 pbrBaseColor;
+	float pbrOpacity;
+	float pbrRoughness;
+	float pbrMetallic;
+	float pbrAo;
+	float pbrF0;            // the untinted F0 of a weight-1 surface (v6 IorF0(ior), v4/v5 min(f0, .16))
+	bool pbrSpecV6;         // bit 7 is the specular WEIGHT map (v6), not an F0 map (v4/v5)
+	float pbrSpecWeight;    // v6 specularWeight (1 for v4/v5)
+	float3 pbrSpecTint;       // the constant specular colour, linear (white = none)
+	float pbrIorMax;        // the IOR map's ceiling
+	float pbrDiffuseRoughness;	// EON above 0
+	float pbrNormalStrength;
+	float3 pbrEmissiveColor;		// raw sRGB as authored; decoded pow 2.2 here (the editor's)
+	float pbrEmissiveIntensity;	// luminance / 100
+	float pbrEmissiveMask;		// the constant A mask
+	bool pbrEmissiveMapColor;	// the map's RGB replaces the constant (!overrideColor)
+	bool pbrEmissiveMapMask;	// the map's A replaces the constant mask (!overrideMask)
+	// Tint masks: the editor's special layer 0 (ED:2310-2316)
+	bool pbrTintEnabled;
+	int pbrTintUseTex;			// bit c: mask c comes from TintMaskMap
+	float4 pbrTintMasks;			// the constant masks
+	float3 pbrTintColors[4];		// raw sRGB (Q13: the editor does not decode them)
+	int pbrTintMode;			// 0 Normalize, 1 Add, 2 Priority RGBA
+	// Composition: -1 = the NIF alpha property (derived/legacy shapes);
+	// 0 Opaque, 1 Alpha Test, 2 Alpha Blend, 3 Premultiplied, 4 Additive, 5 Multiply,
+	// 6 Physical Transmission, 7 Water (6/7 blend like 2 until the merge)
+	int pbrComposition;
+	float pbrGlobalOpacity;
+	float pbrAlphaThreshold;
+	bool pbrAlphaConst;			// alphaSource "Constant"
+	// Feature bits, matching PbrmMaterial::Feature so the shader never guesses which
+	// channels are real. Bit set = sample the texture; clear = use the constant.
+	int pbrFeatures;
+	bool hasCubeMap;
+	float envReflection;
+	// Scene lighting. Only this program reads these, so the
+	// legacy programs cannot move. sceneMode 0 = Legacy, 1 = Studio, 2 = Lookdev (Studio + the weather DALC).
+	int sceneMode;
+	float sceneExposure;		// 2^EV, Studio only
+	int viewTransform;			// 0 Standard (clamp + sRGB), 1 AgX, 2 Khronos PBR Neutral
+	bool baseIsSrgbTex;			// the bound base texture is sRGB-tagged: GL already decoded it
+	bool emissiveIsSrgbTex;
+	bool specIsSrgbTex;
+	bool hasStudioCube;
+	float studioProbe;			// >= 0: replace the lit result by this linear value (debug output)
+	float3 lookdevDalc[6];		// Lookdev (sceneMode 2): DALC ambient, linear, X+ X- Y+ Y- Z+ Z-
+	bool lookdevDalcFlip;		// debug "dalcflip": the other axis-sign convention
+	float studioSun;			// WW_STUDIO_SUN: the Studio/Lookdev sun scale (0 = the white furnace)
+	int r3Term;					// WW_R3_TERM: 0 all, 1 diffuse only, 2 specular only
+	int r3Red;					// WW_R3_RED: 1 noms, 2 nosplit, 4 fo4csweight, 8 notint, 16 f90scaled, 32 lambert
+	int r4Red;					// WW_R4_RED: 1 nodiv, 2 emitmul, 4 notintmask, 8 emitraw, 16 nocomp
+	float alpha;
+	int alphaFlags;
+	bool landSplat;		// vertex alpha = this blended-ground pass's share
+	int landSplatDbg;	// lane ALLON2: 0 edge guard, 1 red WW_TERRBLEND_RED=edgepass (no guard), 2 probe WW_TERRBLEND_PROBE=edge
+	float alphaThreshold;
+	float2 uvScale;
+	float2 uvOffset;
+};
 #include "../air/lookdev_fog.hlsli"
 #ifdef WW_SUNSHADOW
 #include "../shadows/ww_sunshadow.hlsli"
@@ -60,19 +196,17 @@ static bool gl_FrontFacing;
 #include "../lights/cell_lights.hlsli"
 #include "../ao/cell_ao.hlsli"
 #include "../reflections/cell_ssr.hlsli"
-#include "cell_grass.src.hlsli"
+#include "cell_grass.hlsli"
 // lane WATERWETBAKE1: the land side of the shore plane; WATERLOOK1 step 13: the Wet shore band on it
-#include "land_shore.src.hlsli"
-#include "land_wet.src.hlsli"
+#include "land_shore.hlsli"
+#include "land_wet.hlsli"
 // lane WATERLOOK1 step 14: the Wave run-up row reads the baked water's bodies and wave heights too
 #include "../water/water_info.hlsli"
 #include "../water/water_shore.hlsli"
-#include "land_swash.src.hlsli"
+#include "land_swash.hlsli"
 #include "../weather/rain_wet.hlsli"
 #define WW_CELL_FOGGED cellOn	// a cell-lit draw is fogged before its imagespace
-Texture2D<float4> CellSpecMap; SamplerState _CellSpecMap_sampler;	// a legacy material's specular map (R scale, G smoothness), for the cube term
-uniform float4 landLod;	// lane LANDSPEC2: as fo4_default.frag (src/features/far-ground/landlodspec.h), for ground with a .pbrm
-uniform float4 landLodK;
+Texture2D<float4> CellSpecMap : register(t49, space0); SamplerState _CellSpecMap_sampler : register(s49, space0);	// a legacy material's specular map (R scale, G smoothness), for the cube term
 #else
 #define WW_CELL_FOGGED false
 #endif
@@ -81,55 +215,17 @@ uniform float4 landLodK;
 // specular, evaluated from one resolved surface (evalSurface). GGX + height-correlated Smith, Lazarov env DFG with
 // multiscatter, Burley or EON diffuse, OpenPBR v1.1.1 specular weight; tint/emission/opacity follow the editor.
 
-Texture2D<float4> BaseMap; SamplerState _BaseMap_sampler;      // sRGB RGB, A opacity
-Texture2D<float4> NormalMap; SamplerState _NormalMap_sampler;    // linear RG (+B height, A curvature)
-Texture2D<float4> RmaosMap; SamplerState _RmaosMap_sampler;     // R rough, G metal, B AO, A dielectric F0/porosity
-Texture2D<float4> EmissiveMap; SamplerState _EmissiveMap_sampler;  // sRGB RGB, A intensity mask
-Texture2D<float4> SpecColorMap; SamplerState _SpecColorMap_sampler; // v6: sRGB RGB specular tint (bit 25), A = IOR / iorMax (bit 30)
-Texture2D<float4> TintMaskMap; SamplerState _TintMaskMap_sampler;  // linear RGBA: the four tint masks (special layer 0)
-TextureCube<float4> CubeMap; SamplerState _CubeMap_sampler;
-
-// Constants stand in wherever the corresponding channel is overridden. These
-// mirror the reader's resolved values (src/io/pbrmfile.h).
-uniform float3 pbrBaseColor;
-uniform float pbrOpacity;
+Texture2D<float4> BaseMap : register(t50, space0); SamplerState _BaseMap_sampler : register(s50, space0);      // sRGB RGB, A opacity
+Texture2D<float4> NormalMap : register(t51, space0); SamplerState _NormalMap_sampler : register(s51, space0);    // linear RG (+B height, A curvature)
+Texture2D<float4> RmaosMap : register(t52, space0); SamplerState _RmaosMap_sampler : register(s52, space0);     // R rough, G metal, B AO, A dielectric F0/porosity
+Texture2D<float4> EmissiveMap : register(t53, space0); SamplerState _EmissiveMap_sampler : register(s53, space0);  // sRGB RGB, A intensity mask
+Texture2D<float4> SpecColorMap : register(t54, space0); SamplerState _SpecColorMap_sampler : register(s54, space0); // v6: sRGB RGB specular tint (bit 25), A = IOR / iorMax (bit 30)
+Texture2D<float4> TintMaskMap : register(t55, space0); SamplerState _TintMaskMap_sampler : register(s55, space0);  // linear RGBA: the four tint masks (special layer 0)
+TextureCube<float4> CubeMap : register(t56, space0); SamplerState _CubeMap_sampler : register(s56, space0);
 #ifdef WW_CELLLIGHTS
 static float2 farLadder;	// lane LODLIVE1: the LOD coloration's band (fo4_default.vert)
 #endif
-uniform float pbrRoughness;
-uniform float pbrMetallic;
-uniform float pbrAo;
-uniform float pbrF0;            // the untinted F0 of a weight-1 surface (v6 IorF0(ior), v4/v5 min(f0, .16))
-uniform bool pbrSpecV6;         // bit 7 is the specular WEIGHT map (v6), not an F0 map (v4/v5)
-uniform float pbrSpecWeight;    // v6 specularWeight (1 for v4/v5)
-uniform float3 pbrSpecTint;       // the constant specular colour, linear (white = none)
-uniform float pbrIorMax;        // the IOR map's ceiling
-uniform float pbrDiffuseRoughness;	// EON above 0
-uniform float pbrNormalStrength;
-uniform float3 pbrEmissiveColor;		// raw sRGB as authored; decoded pow 2.2 here (the editor's)
-uniform float pbrEmissiveIntensity;	// luminance / 100
-uniform float pbrEmissiveMask;		// the constant A mask
-uniform bool pbrEmissiveMapColor;	// the map's RGB replaces the constant (!overrideColor)
-uniform bool pbrEmissiveMapMask;	// the map's A replaces the constant mask (!overrideMask)
 
-// Tint masks: the editor's special layer 0 (ED:2310-2316)
-uniform bool pbrTintEnabled;
-uniform int pbrTintUseTex;			// bit c: mask c comes from TintMaskMap
-uniform float4 pbrTintMasks;			// the constant masks
-uniform float3 pbrTintColors[4];		// raw sRGB (Q13: the editor does not decode them)
-uniform int pbrTintMode;			// 0 Normalize, 1 Add, 2 Priority RGBA
-
-// Composition: -1 = the NIF alpha property (derived/legacy shapes);
-// 0 Opaque, 1 Alpha Test, 2 Alpha Blend, 3 Premultiplied, 4 Additive, 5 Multiply,
-// 6 Physical Transmission, 7 Water (6/7 blend like 2 until the merge)
-uniform int pbrComposition;
-uniform float pbrGlobalOpacity;
-uniform float pbrAlphaThreshold;
-uniform bool pbrAlphaConst;			// alphaSource "Constant"
-
-// Feature bits, matching PbrmMaterial::Feature so the shader never guesses which
-// channels are real. Bit set = sample the texture; clear = use the constant.
-uniform int pbrFeatures;
 #define F_BASECOLOR   1
 #define F_NORMAL      2
 #define F_HEIGHTBLUE  4
@@ -143,36 +239,9 @@ uniform int pbrFeatures;
 #define F_SPECCOLOR   0x2000000	// bit 25: the spec map's RGB is the tint
 #define F_SPECIOR     0x40000000	// bit 30: the spec map's A x iorMax is the IOR
 
-uniform bool hasCubeMap;
-uniform float envReflection;
 
-// Scene lighting. Only this program reads these, so the
-// legacy programs cannot move. sceneMode 0 = Legacy, 1 = Studio, 2 = Lookdev (Studio + the weather DALC).
-uniform int sceneMode;
-uniform float sceneExposure;		// 2^EV, Studio only
-uniform int viewTransform;			// 0 Standard (clamp + sRGB), 1 AgX, 2 Khronos PBR Neutral
-uniform bool baseIsSrgbTex;			// the bound base texture is sRGB-tagged: GL already decoded it
-uniform bool emissiveIsSrgbTex;
-uniform bool specIsSrgbTex;
-uniform bool hasStudioCube;
-TextureCube<float4> StudioCube; SamplerState _StudioCube_sampler;		// SFCubeMapCache GGX-prefiltered specular cube (Studio)
-TextureCube<float4> IrradianceMap; SamplerState _IrradianceMap_sampler;	// its 32 px diffuse cube (Studio)
-uniform float studioProbe;			// >= 0: replace the lit result by this linear value (debug output)
-uniform float3 lookdevDalc[6];		// Lookdev (sceneMode 2): DALC ambient, linear, X+ X- Y+ Y- Z+ Z-
-uniform bool lookdevDalcFlip;		// debug "dalcflip": the other axis-sign convention
-uniform float studioSun;			// WW_STUDIO_SUN: the Studio/Lookdev sun scale (0 = the white furnace)
-uniform int r3Term;					// WW_R3_TERM: 0 all, 1 diffuse only, 2 specular only
-uniform int r3Red;					// WW_R3_RED: 1 noms, 2 nosplit, 4 fo4csweight, 8 notint, 16 f90scaled, 32 lambert
-uniform int r4Red;					// WW_R4_RED: 1 nodiv, 2 emitmul, 4 notintmask, 8 emitraw, 16 nocomp
-
-uniform float alpha;
-uniform int alphaFlags;
-uniform bool landSplat;		// vertex alpha = this blended-ground pass's share
-uniform int landSplatDbg;	// lane ALLON2: 0 edge guard, 1 red WW_TERRBLEND_RED=edgepass (no guard), 2 probe WW_TERRBLEND_PROBE=edge
-uniform float alphaThreshold;
-
-uniform float2 uvScale;
-uniform float2 uvOffset;
+TextureCube<float4> StudioCube : register(t57, space0); SamplerState _StudioCube_sampler : register(s57, space0);		// SFCubeMapCache GGX-prefiltered specular cube (Studio)
+TextureCube<float4> IrradianceMap : register(t58, space0); SamplerState _IrradianceMap_sampler : register(s58, space0);	// its 32 px diffuse cube (Studio)
 
 static float3 LightDir;
 static float3 ViewDir;
@@ -194,41 +263,12 @@ static float4 fragColor;
 static float4 cellEmitOut;
 #endif
 
-// stage I/O: the members (locations, semantics) of the generated port, each under its GLSL declaration's #if
-struct SPIRV_Cross_Input
-{
-    WW_LOC(3) float3 LightDir : TEXCOORD3;
-    WW_LOC(4) float3 ViewDir : TEXCOORD4;
-    WW_LOC(8) float2 texCoord : TEXCOORD8;
-    WW_LOC(0) nointerpolation float4 A : TEXCOORD0;
-    WW_LOC(1) float4 C : TEXCOORD1;
-    WW_LOC(12) float rawVertexAlpha : TEXCOORD12;
-    WW_LOC(15) float wwFarSkyVis : TEXCOORD15;
-    WW_LOC(14) float wwFarAo : TEXCOORD14;
-    WW_LOC(2) nointerpolation float4 D : TEXCOORD2;
-    WW_LOC(5) float3x3 btnMatrix : TEXCOORD5;
-    WW_LOC(9) nointerpolation float3x3 reflMatrix : TEXCOORD9;
-    float4 gl_FragCoord : SV_Position;
-    bool gl_FrontFacing : SV_IsFrontFace;
-#ifdef WW_CELLLIGHTS
-    WW_LOC(13) nointerpolation float2 farLadder : TEXCOORD13;
-#endif
-};
-struct SPIRV_Cross_Output
-{
-    float4 fragColor : SV_Target0;
-#ifdef WW_CELLLIGHTS
-    float4 cellEmitOut : SV_Target1;
-#endif
-};
-
-
 #ifndef M_PI
 	#define M_PI 3.1415926535897932384626433832795
 #endif
 
-static float3 ViewDir_norm;
-static float3x3 btnMatrix_norm;
+static float3 ViewDir_norm	/* = normalize( ViewDir ) : set in main() after the stage inputs */;
+static float3x3 btnMatrix_norm	/* = float3x3( normalize( btnMatrix[0] ), normalize( btnMatrix[1] ), normalize( btnMatrix[2] ) ) : set in main() after the stage inputs */;
 
 bool hasFeature( int bit ) { return ( pbrFeatures & bit ) != 0; }
 
@@ -240,7 +280,7 @@ float pow5( float x )
 
 float3 fresnelSchlick( float c, float3 F0 )
 {
-	return F0 + ( (float3)(1.0) - F0 ) * pow5( clamp( 1.0 - c, 0.0, 1.0 ) );
+	return F0 + ( (float3)( 1.0 ) - F0 ) * pow5( clamp( 1.0 - c, 0.0, 1.0 ) );
 }
 
 // OpenPBR F82 conductor Fresnel (the editor's, materialpreviewwidget.cpp:1789):
@@ -250,7 +290,7 @@ float3 fresnelF82( float mu, float3 f0, float3 tint )
 	const float mb = 1.0 / 7.0;
 	float3 fs = fresnelSchlick( mu, f0 );
 	float3 fsb = fresnelSchlick( mb, f0 );
-	float3 b = fsb * ( (float3)(1.0) - tint ) / ( mb * pow( 1.0 - mb, 6.0 ) );
+	float3 b = fsb * ( (float3)( 1.0 ) - tint ) / ( mb * pow( 1.0 - mb, 6.0 ) );
 	return clamp( fs - b * mu * pow( 1.0 - mu, 6.0 ), 0.0, 1.0 );
 }
 
@@ -273,14 +313,14 @@ float eonAlbedo( float mu, float r )
 
 float3 srgbToLinear( float3 c )
 {
-	return lerp( c / 12.92, pow( ( c + 0.055 ) / 1.055, (float3)(2.4) ), step( (float3)(0.04045), c ) );
+	return lerp( c / 12.92, pow( ( c + 0.055 ) / 1.055, (float3)( 2.4 ) ), step( (float3)( 0.04045 ), c ) );
 }
 
 // the sRGB OETF: the encode is here, never GL_FRAMEBUFFER_SRGB
 float3 linearToSrgb( float3 c )
 {
 	c = clamp( c, 0.0, 1.0 );
-	return lerp( c * 12.92, 1.055 * pow( c, (float3)(1.0 / 2.4) ) - 0.055, step( (float3)(0.0031308), c ) );
+	return lerp( c * 12.92, 1.055 * pow( c, (float3)( 1.0 / 2.4 ) ) - 0.055, step( (float3)( 0.0031308 ), c ) );
 }
 
 // AgX, Benjamin Wrensch's minimal fit (sRGB display out, the "base" look)
@@ -301,7 +341,7 @@ float3 agxDisplay( float3 c )
 	                             -0.0990297440797205, -0.0989611768448433, 1.15107367264116 );
 	const float minEv = -12.47393;
 	const float maxEv = 4.026069;
-	c = mul(max( c, (float3)(1e-10) ), agxMat);
+	c = mul(max( c, (float3)( 1e-10 ) ), agxMat);
 	c = clamp( log2( c ), minEv, maxEv );
 	c = ( c - minEv ) / ( maxEv - minEv );
 	c = agxContrast( c );
@@ -323,12 +363,12 @@ float3 pbrNeutral( float3 color )
 	float newPeak = 1.0 - d * d / ( peak + d - startCompression );
 	color *= newPeak / peak;
 	float g = 1.0 - 1.0 / ( desaturation * ( peak - newPeak ) + 1.0 );
-	return lerp( color, (float3)(newPeak), g );
+	return lerp( color, (float3)( newPeak ), g );
 }
 
 float3 studioOutput( float3 c )
 {
-	c = max( c, (float3)(0.0) ) * sceneExposure;
+	c = max( c, (float3)( 0.0 ) ) * sceneExposure;
 	if ( viewTransform == 1 )
 		return agxDisplay( c );
 	if ( viewTransform == 2 )
@@ -372,7 +412,7 @@ float3 dielF0( Surface s ) { return clamp( s.weight * s.f0d, 0.0, 1.0 ); }
 float3 dielF90( Surface s )
 {
 	if ( ( r3Red & 4 ) != 0 )
-		return (float3)(1.0);
+		return (float3)( 1.0 );
 	return clamp( 50.0 * dielF0( s ), 0.0, 1.0 );
 }
 
@@ -400,9 +440,9 @@ float3 surfaceF0( Surface s )
 float3 multiScatter( Surface s, float2 dfg )
 {
 	if ( ( r3Red & 1 ) != 0 )
-		return (float3)(1.0);
+		return (float3)( 1.0 );
 	float Ess = max( clamp( dfg.x + dfg.y, 0.0, 1.0 ), 0.05 );
-	return (float3)(1.0) + clamp( surfaceF0( s ), 0.0, 1.0 ) * ( 1.0 / Ess - 1.0 );
+	return (float3)( 1.0 ) + clamp( surfaceF0( s ), 0.0, 1.0 ) * ( 1.0 / Ess - 1.0 );
 }
 
 // E_spec: the specular lobe's directional albedo, multiscatter included -- the env
@@ -438,7 +478,7 @@ void directLightA( Surface s, float3 L, float3 Ls, float rS, float3 V, float3 ms
 	dSpec = D * Vis * F * ms * NoLs;
 
 	float3 rho = ( 1.0 - s.metal ) * s.base;
-	float3 keep = clamp( (float3)(1.0) - F, 0.0, 1.0 );
+	float3 keep = clamp( (float3)( 1.0 ) - F, 0.0, 1.0 );
 	if ( s.diffRough > 0.0 ) {
 		// EON (OpenPBR base_diffuse_roughness; the editor's lines 2683-2689)
 		float dr = s.diffRough, AF = 1.0 / ( 1.0 + 0.287861 * dr );
@@ -446,7 +486,7 @@ void directLightA( Surface s, float3 L, float3 Ls, float rS, float3 V, float3 ms
 		float stinv = sON > 0.0 ? sON / max( max( NoL, NoV ), 0.001 ) : sON;
 		float3 fss = rho / M_PI * AF * ( 1.0 + dr * stinv );
 		float EFo = eonAlbedo( NoV, dr ), EFi = eonAlbedo( NoL, dr ), avgEF = AF * ( 1.0 + 0.072488 * dr );
-		float3 rhoMs = rho * rho * avgEF / max( (float3)(1.0) - rho * ( 1.0 - avgEF ), (float3)(0.001) );
+		float3 rhoMs = rho * rho * avgEF / max( (float3)( 1.0 ) - rho * ( 1.0 - avgEF ), (float3)( 0.001 ) );
 		float3 fms = rhoMs / M_PI * max( 0.01, 1.0 - EFo ) * max( 0.01, 1.0 - EFi ) / max( 0.01, 1.0 - avgEF );
 		dDiff = keep * ( fss + fms ) * NoL;
 	} else {
@@ -468,7 +508,7 @@ void directLight( Surface s, float3 L, float3 V, float3 ms, out float3 dDiff, ou
 void frag_main()
 {
 #ifdef WW_CELLLIGHTS
-	cellEmitOut = (float4)(0.0);
+	cellEmitOut = (float4)( 0.0 );
 #endif
 	float2 offset = texCoord.xy * uvScale + uvOffset;
 
@@ -476,7 +516,7 @@ void frag_main()
 	float3 base = pbrBaseColor;
 	float op = pbrOpacity;
 	if ( hasFeature( F_BASECOLOR ) ) {
-		float4 bc = BaseMap.Sample(_BaseMap_sampler, offset);
+		float4 bc = BaseMap.Sample( _BaseMap_sampler, offset );
 		// decoded as sRGB whatever the DXGI tag says: an sRGB-tagged
 		// texture arrives decoded by GL, an UNORM one is decoded here
 		base = ( baseIsSrgbTex ? bc.rgb : srgbToLinear( bc.rgb ) ) * pbrBaseColor;
@@ -489,19 +529,19 @@ void frag_main()
 	if ( pbrTintEnabled && ( r4Red & 4 ) == 0 ) {
 		float4 masks = pbrTintMasks;
 		if ( pbrTintUseTex != 0 ) {
-			float4 tm = TintMaskMap.Sample(_TintMaskMap_sampler, offset);
+			float4 tm = TintMaskMap.Sample( _TintMaskMap_sampler, offset );
 			if ( ( pbrTintUseTex & 1 ) != 0 ) masks.r = tm.r;
 			if ( ( pbrTintUseTex & 2 ) != 0 ) masks.g = tm.g;
 			if ( ( pbrTintUseTex & 4 ) != 0 ) masks.b = tm.b;
 			if ( ( pbrTintUseTex & 8 ) != 0 ) masks.a = tm.a;
 		}
-		float total = dot( masks, (float4)(1.0) );
+		float total = dot( masks, (float4)( 1.0 ) );
 		if ( pbrTintMode == 0 && total > 1.0 && ( r4Red & 1 ) == 0 )
 			masks /= total;
 		else if ( pbrTintMode == 2 )
 			masks = float4( masks.r, masks.g * ( 1.0 - masks.r ), masks.b * ( 1.0 - masks.r ) * ( 1.0 - masks.g ),
 				masks.a * ( 1.0 - masks.r ) * ( 1.0 - masks.g ) * ( 1.0 - masks.b ) );
-		float3 tintMix = max( (float3)(0.0), (float3)(1.0 - dot( masks, (float4)(1.0) )) + pbrTintColors[0] * masks.r
+		float3 tintMix = max( (float3)( 0.0 ), (float3)( 1.0 - dot( masks, (float4)( 1.0 ) ) ) + pbrTintColors[0] * masks.r
 			+ pbrTintColors[1] * masks.g + pbrTintColors[2] * masks.b + pbrTintColors[3] * masks.a );
 		base *= tintMix;
 	}
@@ -542,7 +582,7 @@ void frag_main()
 	// height when the material says so, never a normal component)
 	float3 normal = float3( 0.0, 0.0, 1.0 );
 	if ( hasFeature( F_NORMAL ) ) {
-		float4 nm = NormalMap.Sample(_NormalMap_sampler, offset);
+		float4 nm = NormalMap.Sample( _NormalMap_sampler, offset );
 		normal.rg = clamp( ( nm.rg * 255.0 - 128.0 ) / 127.0, -1.0, 1.0 ) * pbrNormalStrength;
 		normal.b = sqrt( max( 1.0 - dot( normal.rg, normal.rg ), 0.0 ) );
 	}
@@ -556,7 +596,7 @@ void frag_main()
 	s.base = base;
 	s.N = normalize( mul(normal, tbn) );
 #ifdef WW_CELLLIGHTS
-	if ( cellOn && cellProbe == 20 && ( cellAoEarly == 1 || cellAoEarly == 4 ) ) {	// lane PERF1: the obscurance pass reads the normal and depth only
+	if ( cellOn && cellProbe == 20 && ( or( cellAoEarly == 1, cellAoEarly == 4 ) ) ) {	// lane PERF1: the obscurance pass reads the normal and depth only
 		fragColor = cellAoPassOut( s.N, -ViewDir );
 		return;
 	}
@@ -567,7 +607,7 @@ void frag_main()
 	s.weight = pbrSpecWeight;
 	float f0ior = pbrF0;
 	if ( hasFeature( F_RMAOS ) ) {
-		float4 rm = RmaosMap.Sample(_RmaosMap_sampler, offset);
+		float4 rm = RmaosMap.Sample( _RmaosMap_sampler, offset );
 		if ( hasFeature( F_ROUGHNESS ) ) s.rough = rm.r;
 		if ( hasFeature( F_METALLIC ) )  s.metal = rm.g;
 		if ( hasFeature( F_AO ) )        s.ao    = rm.b;
@@ -581,8 +621,8 @@ void frag_main()
 		}
 	}
 	s.tint = pbrSpecTint;
-	if ( hasFeature( F_SPECCOLOR ) || hasFeature( F_SPECIOR ) ) {
-		float4 sc = SpecColorMap.Sample(_SpecColorMap_sampler, offset);
+	if ( or( hasFeature( F_SPECCOLOR ), hasFeature( F_SPECIOR ) ) ) {
+		float4 sc = SpecColorMap.Sample( _SpecColorMap_sampler, offset );
 		if ( hasFeature( F_SPECCOLOR ) )
 			s.tint = specIsSrgbTex ? sc.rgb : srgbToLinear( sc.rgb );
 		if ( hasFeature( F_SPECIOR ) ) {
@@ -592,7 +632,7 @@ void frag_main()
 		}
 	}
 	if ( ( r3Red & 8 ) != 0 )
-		s.tint = (float3)(1.0);
+		s.tint = (float3)( 1.0 );
 	s.f0d = s.tint * f0ior;
 	s.rough = clamp( s.rough, 0.035, 1.0 );	// the design's floor (FO4CS uses 0.045)
 	s.metal = clamp( s.metal, 0.0, 1.0 );
@@ -610,14 +650,14 @@ void frag_main()
 	const float landLodV = 0.0;
 #endif
 #ifdef WW_CELLLIGHTS
-	if ( cellOn && ( landWetOn || landSwashOn ) ) {	// lane WATERLOOK1 steps 13-14: the Wet shore and Wave run-up rows
+	if ( cellOn && ( or( landWetOn, landSwashOn ) ) ) {	// lane WATERLOOK1 steps 13-14: the Wet shore and Wave run-up rows
 		float3 Pl = cellWorldPos( -ViewDir ), Nl = cellWorldDir( normalize( tbn[2] ) );
 		float2 wet = wwLandWet( Pl, Nl );
 		float4 sw = wwLandSwash( Pl, Nl, landSwashTime );
 		wet = max( wet, sw.zx );
 		float por = landShoreTerrain ? 1.0 - s.metal : 0.0;
 		s.base *= wwLandWetBase( wet.x, por );
-		s.base = lerp( s.base, (float3)(0.8), sw.y );	// the run-up's foam
+		s.base = lerp( s.base, (float3)( 0.8 ), sw.y );	// the run-up's foam
 		s.rough = max( wwLandWetRough( s.rough, wet, por ), 0.035 );
 	}
 	if ( cellOn && rainWet.x > 0.0 ) {	// lane [reference game]WEATHER1: rain wetness, [reference game]'s law (metal from the F0)
@@ -635,7 +675,7 @@ void frag_main()
 	float3 ms = multiScatter( s, dfg );
 	float3 Espec = specAlbedo( s, dfg, ms );
 	// the indirect diffuse gives up the energy the specular lobe took. Debug "nosplit".
-	float3 keepInd = ( ( r3Red & 2 ) != 0 ) ? (float3)(1.0) : clamp( (float3)(1.0) - Espec, 0.0, 1.0 );
+	float3 keepInd = ( ( r3Red & 2 ) != 0 ) ? (float3)( 1.0 ) : clamp( (float3)( 1.0 ) - Espec, 0.0, 1.0 );
 	float3 rho = s.base * ( 1.0 - s.metal );
 
 	// Linear throughout. The sun's irradiance is the uploaded diffuse color x PI, so a white Lambert surface
@@ -669,7 +709,7 @@ void frag_main()
 	if ( sceneMode >= 1 && hasStudioCube ) {
 		// Studio: the irradiance cube is the radiance average, so Lambert takes it without 1/PI.
 		// [reference game]'s roughness->lod law m = r*(10-4r) over the 7 filtered levels (f76_default.frag:188).
-		float3 irr = IrradianceMap.Sample(_IrradianceMap_sampler, mul(s.N, reflMatrix)).rgb;
+		float3 irr = IrradianceMap.Sample( _IrradianceMap_sampler, mul(s.N, reflMatrix) ).rgb;
 		if ( sceneMode == 2 ) {
 			// Lookdev: the weather's DALC 6-axis ambient on the WORLD normal (Z up); an up-facing normal
 			// takes the Z- color (measured). The engine blends linearly in gamma space; this n^2 pick approximates it.
@@ -681,14 +721,14 @@ void frag_main()
 			irr = n2.x * ax + n2.y * ay + n2.z * az;
 		}
 		outDiff += irr * rho * keepInd * s.ao;
-		float3 env = StudioCube.SampleLevel(_StudioCube_sampler, mul(R, reflMatrix), s.rough * ( 10.0 - 4.0 * s.rough )).rgb;
+		float3 env = StudioCube.SampleLevel( _StudioCube_sampler, mul(R, reflMatrix), s.rough * ( 10.0 - 4.0 * s.rough ) ).rgb;
 		outSpec += env * Espec * s.ao;
 	} else {
 		// Legacy (or Studio without a cube): A.rgb = sqrt(ambient) * 0.375, so A.rgb^2 is the
 		// ambient the legacy shapes see in linear terms.
 		outDiff += A.rgb * A.rgb * rho * keepInd * s.ao;
 		if ( hasCubeMap ) {
-			float3 cube = CubeMap.SampleLevel(_CubeMap_sampler, mul(R, reflMatrix), s.rough * 8.0).rgb;
+			float3 cube = CubeMap.SampleLevel( _CubeMap_sampler, mul(R, reflMatrix), s.rough * 8.0 ).rgb;
 			// the legacy cube is display-encoded: squared into the same linear space
 			outSpec += cube * cube * envReflection * Espec * s.ao;
 		}
@@ -706,7 +746,7 @@ void frag_main()
 #ifdef WW_CELLLIGHTS
 	/* the cell's own lights through this BRDF (irradiance x PI, as the sun above) and the bake's bounce.
 	 * Interior: they replace the viewport light and ambient (DALC for the cube); exterior: they add. */
-	float3 cubeK = (float3)(0.0);	// the interior cube reflection before its light (probe 50)
+	float3 cubeK = (float3)( 0.0 );	// the interior cube reflection before its light (probe 50)
 #ifdef CELL_GI_ONE
 	cellGiOneRead = true;	// DDGIREADPERF1: every cellGiSample below takes cellGiFirst's answer (unconditional: no read compiled there)
 #endif
@@ -721,7 +761,7 @@ void frag_main()
 			cellGiMarchPrime( Pw, cellPass > 0 && cellPass != 6 && cellProbe == 0 && ( cellPassRed & 2 ) != 0
 			                      ? float3( 0.0, 0.0, 1.0 ) : sw.N );
 #endif
-		float3 cDiff = (float3)(0.0), cSpec = (float3)(0.0), cE = (float3)(0.0);
+		float3 cDiff = (float3)( 0.0 ), cSpec = (float3)( 0.0 ), cE = (float3)( 0.0 );
 		float3 farF, farGP;	// the real lights fade over the band, the surfels take over (diffuse only)
 		float farW = cellFarTerms( Pw, sw.N, farF, farGP );
 		int farN;
@@ -753,12 +793,12 @@ void frag_main()
 		cellGiFirst( Pw, sw.N, cellPass > 0 && cellPass != 6 && cellProbe == 0 && ( cellPassRed & 2 ) != 0 ? float3( 0.0, 0.0, 1.0 ) : sw.N,
 		             cellWorldDir( R ), s.rough );
 #endif
-		float3 giE = cellSsgiE( CELL_GI_UP ? cellGiE( Pw, sw.N ) : (float3)(0.0) ) / M_PI;	// lane PRTOFF1: the PRT's grid or the ray-traced volume
+		float3 giE = cellSsgiE( CELL_GI_UP ? cellGiE( Pw, sw.N ) : (float3)( 0.0 ) ) / M_PI;	// lane PRTOFF1: the PRT's grid or the ray-traced volume
 		if ( farW > 0.0 ) {
 			cDiff = cDiff * ( 1.0 - farW ) + farW * rho * farF;
 			cSpec *= 1.0 - farW;
 			cE = cE * ( 1.0 - farW ) + farW * farF;
-			giE = max( giE - farW * farGP, (float3)(0.0) );
+			giE = max( giE - farW * farGP, (float3)( 0.0 ) );
 		}
 		float3 giDiff = rho * keepInd * giE;
 #ifdef WW_DV
@@ -768,8 +808,8 @@ void frag_main()
 			outDiff = cDiff + giDiff;
 			outSpec = cSpec;
 #ifdef WW_DV
-			wwDvSun = (float3)(0.0);	// indoors the sun is the block below's alone
-			wwDvSpec = (float3)(0.0);
+			wwDvSun = (float3)( 0.0 );	// indoors the sun is the block below's alone
+			wwDvSpec = (float3)( 0.0 );
 #endif
 			cE += giE;
 			if ( cellHasDalc && cellGiAmb == 0 ) {
@@ -800,17 +840,17 @@ void frag_main()
 			// legacy materials take the game's term, .pbrm shapes (and WW_CELL_LIT_RED=cubeold) the old law
 			if ( hasCubeMap ) {
 				if ( cellCubeGameOn() && ( cellRed & 512 ) == 0 ) {
-					float2 sg = CellSpecMap.Sample(_CellSpecMap_sampler, offset).rg;
+					float2 sg = CellSpecMap.Sample( _CellSpecMap_sampler, offset ).rg;
 					cubeK = cellCubeGame( CubeMap, _CubeMap_sampler, mul(R, reflMatrix), lerp( cellCubeMat.y * sg.g, landLodK.x, landLodV ),
 					                      lerp( cellCubeMat.x * sg.r, landLodK.y, landLodV ), envReflection, -ViewDir );
 				} else {
-					float3 cube = CubeMap.SampleLevel(_CubeMap_sampler, mul(R, reflMatrix), s.rough * 8.0).rgb;
+					float3 cube = CubeMap.SampleLevel( _CubeMap_sampler, mul(R, reflMatrix), s.rough * 8.0 ).rgb;
 					cubeK = cube * cube * envReflection * Espec * s.ao;
 				}
 			}
 			// the screen-space reflection over the cube term, by the march's confidence (cell_ssr.glsl)
-			if ( or(cellSsrOn, cellProbe == 60) ) {
-				float2 sg = CellSpecMap.Sample(_CellSpecMap_sampler, offset).rg;
+			if ( or( cellSsrOn, cellProbe == 60 ) ) {
+				float2 sg = CellSpecMap.Sample( _CellSpecMap_sampler, offset ).rg;
 				cubeK = cellSsrMix( cubeK, lerp( cellCubeMat.y * sg.g, landLodK.x, landLodV ),
 				                    lerp( cellCubeMat.x * sg.r, landLodK.y, landLodV ), envReflection );
 			}
@@ -839,12 +879,12 @@ void frag_main()
 
 	// --- emission (ED:2519-2521): color x mask x luminance/100, added before exposure; a map REPLACES the
 	// constant unless overridden. Debug "emitmul": constant x map, "emitraw": no /100.
-	float3 pbrEmitLin = (float3)(0.0);	// lane SSGI2: the emission alone (cellEmitOut)
+	float3 pbrEmitLin = (float3)( 0.0 );	// lane SSGI2: the emission alone (cellEmitOut)
 	if ( pbrEmissiveIntensity > 0.0 && r3Term == 0 ) {
-		float3 ecol = pow( max( pbrEmissiveColor, (float3)(0.0) ), (float3)(2.2) );
+		float3 ecol = pow( max( pbrEmissiveColor, (float3)( 0.0 ) ), (float3)( 2.2 ) );
 		float emask = pbrEmissiveMask;
 		if ( hasFeature( F_EMISSIVE ) ) {
-			float4 em = EmissiveMap.Sample(_EmissiveMap_sampler, offset);
+			float4 em = EmissiveMap.Sample( _EmissiveMap_sampler, offset );
 			float3 emap = emissiveIsSrgbTex ? em.rgb : srgbToLinear( em.rgb );
 			if ( ( r4Red & 2 ) != 0 ) {
 				ecol *= emap;
@@ -861,20 +901,20 @@ void frag_main()
 #ifdef WW_CELLLIGHTS
 	float3 cellSsrScene = color.rgb;	// what the reflections' march samples (probe 60)
 	if ( cellOn && cellProbe == 60 ) {
-		float3 em = clamp( pbrEmitLin, (float3)(0.0), max( cellSsrScene, (float3)(0.0) ) );	// coverage in a
+		float3 em = clamp( pbrEmitLin, (float3)( 0.0 ), max( cellSsrScene, (float3)( 0.0 ) ) );	// coverage in a
 		cellEmitOut = float4( em, dot( em, float3( 0.2126, 0.7152, 0.0722 ) ) > 1.0e-6 ? 1.0 : 0.0 );
 	}
 	// lane AO1: the ambient obscurance on the whole lit colour, before the fog
 	if ( cellOn )
 		color.rgb *= cellAoShared( wwFarAo );	// MODULES1 10c: near (screen) and far (baked) through one rule
 #ifdef WW_DV
-	float3 wwDvLit = max( color.rgb, (float3)(0.0) );	// lane DEBUGVIEW1: the lit colour before the fog
+	float3 wwDvLit = max( color.rgb, (float3)( 0.0 ) );	// lane DEBUGVIEW1: the lit colour before the fog
 #endif
 	// a cell-lit draw fogs here, once (the interior's fog, or the Lookdev weather's outdoors)
-	if ( cellOn && ( fogOn || wwApOn() ) )	// lane SKYA: the sky's aerial perspective with the fog off too
-		color.rgb = wwFog( max( color.rgb, (float3)(0.0) ), -ViewDir );
+	if ( cellOn && ( or( fogOn, wwApOn() ) ) )	// lane SKYA: the sky's aerial perspective with the fog off too
+		color.rgb = wwFog( max( color.rgb, (float3)( 0.0 ) ), -ViewDir );
 	// the cell's imagespace in place of the viewer's curve; probe 6 writes the linear color raw
-	float3 cellHdr = max( color.rgb, (float3)(0.0) );
+	float3 cellHdr = max( color.rgb, (float3)( 0.0 ) );
 	if ( cellOn && cellIsOn )
 		color.rgb = cellIsLinear ? cellHdr : cellImageSpace( sqrt( cellHdr ) );	// linear into the HDR frame
 	else
@@ -883,11 +923,11 @@ void frag_main()
 		if ( sceneMode == 2 && !WW_CELL_FOGGED )
 			color.rgb = wwFog( color.rgb, -ViewDir );	// linear, before the exposure
 		if ( studioProbe >= 0.0 )
-			color.rgb = (float3)(studioProbe);
+			color.rgb = (float3)( studioProbe );
 		color.rgb = studioOutput( color.rgb );
 	} else {
 		// Legacy lighting: the linear result goes out through the legacy Hable + sqrt (sqrt-space input).
-		color.rgb = tonemap( sqrt( max( color.rgb, (float3)(0.0) ) ) );
+		color.rgb = tonemap( sqrt( max( color.rgb, (float3)( 0.0 ) ) ) );
 	}
 	// Premultiplied: the mapped color times opacity (ED:2921), blended ONE, 1 - SRC_ALPHA
 	if ( pbrComposition == 3 && ( r4Red & 16 ) == 0 )
@@ -926,14 +966,14 @@ void frag_main()
 		if ( cellAoEarly == 2 )
 			fragColor.w *= 1.001;	// lane PERF1 red: full shading runs (the old cost), and the gate must see the mark
 	}
-	if ( cellOn && ( cellProbe == 60 || cellProbe == 61 ) )
+	if ( cellOn && ( or( cellProbe == 60, cellProbe == 61 ) ) )
 		fragColor = cellSsrProbeOut( cellSsrScene );
 #endif
 #ifdef WW_DV
 	if ( cellOn && wwDebugView != 0 ) {	// lane DEBUGVIEW1: one pass or term in place of the pixel (debug_view.glsl)
-		wwDvAmb = max( outDiff - wwDvSun, (float3)(0.0) );	// PBR: the ambient, the GI and the lamps, one sum
+		wwDvAmb = max( outDiff - wwDvSun, (float3)( 0.0 ) );	// PBR: the ambient, the GI and the lamps, one sum
 		if ( !cellInterior )
-			wwDvRefl = max( outSpec - wwDvSpec, (float3)(0.0) );	// outdoors the environment and the lamps' specular
+			wwDvRefl = max( outSpec - wwDvSpec, (float3)( 0.0 ) );	// outdoors the environment and the lamps' specular
 		float dvSh = 1.0, dvCl = 1.0;
 #ifdef WW_SUNSHADOW
 		dvSh = wwSunShadowGeo( -ViewDir );
@@ -941,10 +981,10 @@ void frag_main()
 		dvCl = dvCi.x;
 		wwDvCloud = dvCi.yz;
 #endif
-		float3 dvT = (float3)(1.0), dvIn = (float3)(0.0);
-		if ( fogOn || wwApOn() ) {
-			dvIn = max( wwFog( (float3)(0.0), -ViewDir ), (float3)(0.0) );
-			dvT = clamp( wwFog( (float3)(1.0), -ViewDir ) - dvIn, 0.0, 1.0 );
+		float3 dvT = (float3)( 1.0 ), dvIn = (float3)( 0.0 );
+		if ( or( fogOn, wwApOn() ) ) {
+			dvIn = max( wwFog( (float3)( 0.0 ), -ViewDir ), (float3)( 0.0 ) );
+			dvT = clamp( wwFog( (float3)( 1.0 ), -ViewDir ) - dvIn, 0.0, 1.0 );
 		}
 		fragColor = float4( wwDvSurface( s.base, cellWorldDir( s.N ), 1.0 - s.rough, s.metal, wwFarAo, cellAoFactor(),
 			dvSh, dvCl, pbrEmitLin, dvT, dvIn, wwDvLit, cellHdr, length( ViewDir ) * length( cellRow[0].xyz ), wwDvOwner ),
@@ -957,13 +997,13 @@ void frag_main()
 	 * would die on it */
 	bool splatData = false;
 #ifdef WW_CELLLIGHTS
-	splatData = cellOn && ( cellProbe == 20 || cellProbe == 60 || cellProbe == 61 );
+	splatData = cellOn && ( or( or( cellProbe == 20, cellProbe == 60 ), cellProbe == 61 ) );
 #endif
 #ifdef WW_CELLLIGHTS
 	/* lane LODLIVE1: the LOD coloration in the PBR path too (fo4_default.frag's colours; farLadder from fo4_default.vert:
 	 * y = band + 1, x != 0 mid ladder fade) */
 	if ( farLadder.y > 0.5 ) {
-		float3 lt = farLadder.x != 0.0 ? float3( 1.0, 0.2, 1.0 ) : farLadder.y < 1.5 ? (float3)(0.92) : farLadder.y < 2.5 ? float3( 0.2, 0.85, 0.25 )
+		float3 lt = farLadder.x != 0.0 ? float3( 1.0, 0.2, 1.0 ) : farLadder.y < 1.5 ? (float3)( 0.92 ) : farLadder.y < 2.5 ? float3( 0.2, 0.85, 0.25 )
 			: farLadder.y < 3.5 ? float3( 0.95, 0.9, 0.15 ) : farLadder.y < 4.5 ? float3( 1.0, 0.55, 0.1 ) : float3( 0.95, 0.15, 0.15 );
 		fragColor.rgb = lt * ( 0.25 + 0.75 * clamp( dot( fragColor.rgb, float3( 0.2126, 0.7152, 0.0722 ) ), 0.0, 1.0 ) );
 	}
@@ -977,11 +1017,11 @@ void frag_main()
 		 * below zero adds nothing, so it is written as exactly nothing; a non-finite colour likewise.
 		 * Red WW_TERRBLEND_RED=edgepass: the old output. Probe WW_TERRBLEND_PROBE=edge: such pixels green. */
 		float	w = rawVertexAlpha;
-		bool	bad = any( isnan( fragColor.rgb ) ) || any( isinf( fragColor.rgb ) ) || isnan( w ) || isinf( w );
+		bool	bad = or( or( or( any( isnan( fragColor.rgb ) ), any( isinf( fragColor.rgb ) ) ), isnan( w ) ), isinf( w ) );
 		if ( landSplatDbg == 2 ) {
-			fragColor = bad ? float4( 0.0, 1.0, 0.0, 1.0 ) : ( ( alphaFlags & 8 ) != 0 ? (float4)(0.0) : float4( 0.0, 0.0, 0.0, 1.0 ) );
-		} else if ( landSplatDbg == 0 && ( bad || ( ( alphaFlags & 8 ) != 0 && !( w > 0.0 ) ) ) ) {
-			fragColor = ( alphaFlags & 8 ) != 0 ? (float4)(0.0) : float4( 0.0, 0.0, 0.0, 1.0 );
+			fragColor = bad ? float4( 0.0, 1.0, 0.0, 1.0 ) : ( ( alphaFlags & 8 ) != 0 ? (float4)( 0.0 ) : float4( 0.0, 0.0, 0.0, 1.0 ) );
+		} else if ( landSplatDbg == 0 && ( or( bad, ( ( alphaFlags & 8 ) != 0 && !( w > 0.0 ) ) ) ) ) {
+			fragColor = ( alphaFlags & 8 ) != 0 ? (float4)( 0.0 ) : float4( 0.0, 0.0, 0.0, 1.0 );
 		} else if ( ( alphaFlags & 8 ) != 0 )
 			fragColor.a = clamp( rawVertexAlpha, 0.0, 1.0 );
 		else
@@ -989,34 +1029,60 @@ void frag_main()
 	}
 }
 
-// entry: copies the stage inputs into the GLSL-named globals, runs the GLSL main, returns the outputs
+struct SPIRV_Cross_Input
+{
+    WW_LOC(3) float3 LightDir : TEXCOORD3;
+    WW_LOC(4) float3 ViewDir : TEXCOORD4;
+    WW_LOC(8) float2 texCoord : TEXCOORD8;
+    WW_LOC(0) nointerpolation float4 A : TEXCOORD0;
+    WW_LOC(1) float4 C : TEXCOORD1;
+    WW_LOC(12) float rawVertexAlpha : TEXCOORD12;
+    WW_LOC(15) float wwFarSkyVis : TEXCOORD15;
+    WW_LOC(14) float wwFarAo : TEXCOORD14;
+    WW_LOC(2) nointerpolation float4 D : TEXCOORD2;
+    WW_LOC(5) float3x3 btnMatrix : TEXCOORD5;
+    WW_LOC(9) nointerpolation float3x3 reflMatrix : TEXCOORD9;
+    float4 gl_FragCoord : SV_Position;
+    bool gl_FrontFacing : SV_IsFrontFace;
+#if defined(WW_CELLLIGHTS)
+    WW_LOC(13) nointerpolation float2 farLadder : TEXCOORD13;
+#endif
+};
+
+struct SPIRV_Cross_Output
+{
+    float4 fragColor : SV_Target0;
+#if defined(WW_CELLLIGHTS)
+    float4 cellEmitOut : SV_Target1;
+#endif
+};
+
 SPIRV_Cross_Output main(SPIRV_Cross_Input stage_input)
 {
     gl_FragCoord = stage_input.gl_FragCoord;
     gl_FragCoord.w = 1.0 / gl_FragCoord.w;
-    gl_FrontFacing = stage_input.gl_FrontFacing;
-    ViewDir = stage_input.ViewDir;
-    btnMatrix = stage_input.btnMatrix;
-    D = stage_input.D;
-    A = stage_input.A;
-    texCoord = stage_input.texCoord;
-    C = stage_input.C;
-    LightDir = stage_input.LightDir;
-    wwFarSkyVis = stage_input.wwFarSkyVis;
-    reflMatrix = stage_input.reflMatrix;
-    rawVertexAlpha = stage_input.rawVertexAlpha;
-    wwFarAo = stage_input.wwFarAo;
-#ifdef WW_CELLLIGHTS
+#if defined(WW_CELLLIGHTS)
     farLadder = stage_input.farLadder;
 #endif
-    // the GLSL global initializers, which GLSL runs here (they read inputs, uniforms or globals)
+    LightDir = stage_input.LightDir;
+    ViewDir = stage_input.ViewDir;
+    texCoord = stage_input.texCoord;
+    A = stage_input.A;
+    C = stage_input.C;
+    rawVertexAlpha = stage_input.rawVertexAlpha;
+    wwFarSkyVis = stage_input.wwFarSkyVis;
+    wwFarAo = stage_input.wwFarAo;
+    D = stage_input.D;
+    btnMatrix = stage_input.btnMatrix;
+    reflMatrix = stage_input.reflMatrix;
+    gl_FrontFacing = stage_input.gl_FrontFacing;
     ViewDir_norm = normalize( ViewDir );
     btnMatrix_norm = float3x3( normalize( btnMatrix[0] ), normalize( btnMatrix[1] ), normalize( btnMatrix[2] ) );
     frag_main();
     SPIRV_Cross_Output stage_output;
-#ifdef WW_CELLLIGHTS
+    stage_output.fragColor = fragColor;
+#if defined(WW_CELLLIGHTS)
     stage_output.cellEmitOut = cellEmitOut;
 #endif
-    stage_output.fragColor = fragColor;
     return stage_output;
 }

@@ -1,19 +1,13 @@
-// HLSL source of fo4_default.vert, translated by notes/hlslsrc1/tools/glsl2hlsl.py (text level: comments, names and
-// #if variants kept from the GLSL). Matrices hold GL's columns as rows (row_major blocks), so a GL product A * B
-// reads mul(B, A).
+// HLSL source of fo4_default.vert (vertex shader), lane HLSLSRC1 (notes/hlsltools/glsl2hlsl.py): one readable file for every
+// variant, the GLSL's comments, names and order kept. Loose uniforms are the LooseUniforms cbuffer (b31).
+// variants: #if none (the loader's defines; res/shaders/hlsl/variants.txt lists the sets built)
 // profile: vs_6_0
-// variants: #if (the loader's WW_* defines select the variant; built with -D per set)
 #include "CoreBindingsVk.hlsli"
-#include "GlslCompat.hlsli"
-#define WW_STAGE_VS 1
-// this program's registers for blocks its includes declare (glslang numbers them per program and variant)
-#ifndef WW_REGS_SET
-#define WW_REGS_SET
-#define WW_REG_globalUniforms b1
-#endif
+#define WW_HLSL_SRC 1	// the shared .hlsli files give their readable half
+#define Sample( s, uv ) SampleLevel( s, uv, 0 )	// GLSL: texture() outside a fragment shader reads level 0
+#define SampleCmp SampleCmpLevelZero	// the same for a shadow compare (SampleCmp is fragment-only)
 static float4 gl_Position;
 static int gl_VertexID;
-
 static float3 LightDir;
 static float3 ViewDir;
 
@@ -32,128 +26,106 @@ static float3x3 reflMatrix;
 
 // RESUME 15: the depth pre-pass and the main pass draw a shape through different programs (and passes) over one depth
 // at EQUAL: the same inputs must give the same bits whichever program computes them
+// invariant gl_Position; (GLSL only: HLSL has no invariant qualifier)
 
-#include "uniforms.src.hlsli"
+#include "uniforms.hlsli"
 
+#define WW_LOOSE_TYPES 1
+#if defined(WW_BINDLESS)
+#include "../near/ww_bindless.hlsli"
+#endif
+#include "ww_treewind.hlsli"
+#undef WW_LOOSE_TYPES
+cbuffer LooseUniforms : register(b31, space0)
+{
+#define WW_LOOSE_UNIFORMS 1
+#if defined(WW_BINDLESS)
+#include "../near/ww_bindless.hlsli"
+#endif
+#include "ww_treewind.hlsli"
+#undef WW_LOOSE_UNIFORMS
+#if !(defined(WW_BINDLESS))
+	row_major float3x3 normalMatrix;			// in row-major order
+	row_major float4x4 modelViewMatrix;
+#endif
+	float4 vertexColorOverride;	// components greater than zero replace the vertex color
+	// lane FARLOD1: the far field's wind. 0 (the default, and whenever the Far LOD row is off) = no sway;
+	// a tree-animation shape's vertex alpha is the weight, as in the game
+	float farSwayAmp;
+	float farSwayTime;
+	// the loaded block in view space: xyz its centre, w its half edge -- the cell's own trees stand inside it, unswayed
+	float4 farSwayBlock;
+	bool lodTreeAnim;
+	/* lane GRASSMB1: the game's grass wind, op for op from its grass vertex shader (Shaders011 entry 02183, the deferred
+	 * prepass's grass technique; src/gl/cellgrass.h). wwGrassWind = cb2[11] = (angle, 0, previous phase, phase),
+	 * wwGrassWind2 = cb2[12] = (min speed * 300, max speed * 300, frequency) with .w = 1 on a grass shape, 0 on
+	 * every other (where nothing below runs). The blade's (h0 + h1) * 0.0078125 rides in the bitangent's length
+	 * (1024 + it). The game's world position  is the bucket's model position plus its translation, so the offset
+	 * adds here in model space. */
+	float4 wwGrassWind;
+	float4 wwGrassWind2;
+	// lane FARDRAW1: an instanced far ring (gl/cellfarinst.h): rows 0-2 of the placement's (scale*R | t), then
+	// (u mirror sum, r, g, b + 2 when mirrored). false (the default) = every other shape, untouched
+	bool farInst;
+	float lodViewCode;	// lane LODLIVE1: the LOD coloration's band + 1 of a shape (0 = untinted), renderer.cpp
+	/* lane FIX1101A lodch: the ring's per-vertex bake channels (gl/cellfarinst.cpp; src/cellmesh.h CellMeshInst::vstream).
+	 * On, the row's .y holds the int bits of its first texel minus the sub's base vertex: + gl_VertexID = this vertex's
+	 * RG8 texel, R the AO (into the colour, as the flat copy has it), G the ambient's sky factor (wwFarSkyVis). The
+	 * sampler's unit is set at link (gl/glcontext.cpp). Off (every other draw): wwFarSkyVis 1, nothing read. */
+	bool farStreamOn;
+	float3 farBakeK;
+	/* MODULES1 10b-2: the far draws whose baked AO is a grey in the vertex colour. x the AO's maximum strength, y the sky
+	 * occlusion's, z the draw: 0 none, 1 the flat far copy (the grey is the AO: wwFarAo), 2 the far ground (the grey is
+	 * its mask sheet's B, a sky AO: wwFarSkyVis), 3 instanced rows without the stream (mesh grey x row grey is the AO).
+	 * w 1 = red WW_LODL_AO_RED=albedo (the grey stays in the colour). The colour is then white. */
+	float4 farVcAo;
+#if defined(WW_FAR_SPLAT)
+	/* lane FARLOOK1101 (FARSHIMMER2): a far row whose projected box is under S px on an axis draws widened to S about its
+	 * projected centre at alpha 1 / (kx * ky) (exact ink: the area grows by kx * ky). farSplat = (S px, pass: 1 opaque =
+	 * the rows at or over S, 2 the blended splat pass = the rows under it); the box = the row's mesh box (model space) */
+	float2 farSplat;
+#endif
+};
 #ifdef WW_BINDLESS
 // lane BINDLESS2: the draw's matrices from its row of the per-draw buffer (the same values the uniforms carry)
-#include "../near/ww_bindless.src.hlsli"
+#include "../near/ww_bindless.hlsli"
 #define modelViewMatrix ( wwDraws[wwDrawIdx].mv )
 #define normalMatrix float3x3( wwDraws[wwDrawIdx].nm[0].xyz, wwDraws[wwDrawIdx].nm[1].xyz, wwDraws[wwDrawIdx].nm[2].xyz )
 #else
-uniform row_major float3x3 normalMatrix;			// in row-major order
-uniform row_major float4x4 modelViewMatrix;
+
 #endif
 
-uniform float4 vertexColorOverride;	// components greater than zero replace the vertex color
 
-// lane FARLOD1: the far field's wind. 0 (the default, and whenever the Far LOD row is off) = no sway;
-// a tree-animation shape's vertex alpha is the weight, as in the game
-uniform float farSwayAmp;
-uniform float farSwayTime;
-// the loaded block in view space: xyz its centre, w its half edge -- the cell's own trees stand inside it, unswayed
-uniform float4 farSwayBlock;
-uniform bool lodTreeAnim;
-/* lane GRASSMB1: the game's grass wind, op for op from its grass vertex shader (Shaders011 entry 02183, the deferred
- * prepass's grass technique; src/gl/cellgrass.h). wwGrassWind = cb2[11] = (angle, 0, previous phase, phase),
- * wwGrassWind2 = cb2[12] = (min speed * 300, max speed * 300, frequency) with .w = 1 on a grass shape, 0 on
- * every other (where nothing below runs). The blade's (h0 + h1) * 0.0078125 rides in the bitangent's length
- * (1024 + it). The game's world position  is the bucket's model position plus its translation, so the offset
- * adds here in model space. */
-uniform float4 wwGrassWind;
-uniform float4 wwGrassWind2;
 
-static float3	vertexPosition;
-static float4	vertexColor;
-static float3	normalVector;
-static float3	tangentVector;
-static float3	bitangentVector;
-static float2	multiTexCoord0;
-// lane FARDRAW1: an instanced far ring (gl/cellfarinst.h): rows 0-2 of the placement's (scale*R | t), then
-// (u mirror sum, r, g, b + 2 when mirrored). false (the default) = every other shape, untouched
-uniform bool farInst;
-static float4	farInstRow0;
-static float4	farInstRow1;
-static float4	farInstRow2;
-static float4	farInstExtra;
+static float3 vertexPosition;
+static float4 vertexColor;
+static float3 normalVector;
+static float3 tangentVector;
+static float3 bitangentVector;
+static float2 multiTexCoord0;
+static float4 farInstRow0;
+static float4 farInstRow1;
+static float4 farInstRow2;
+static float4 farInstExtra;
 // lane PERFLOAD1 P7 round 2: the far row's tree-ladder dither (x; 0 = whole), unset (0) on every other draw
-static float2	farLadderIn;
+static float2 farLadderIn;
 static float2 farLadder;
-uniform float lodViewCode;	// lane LODLIVE1: the LOD coloration's band + 1 of a shape (0 = untinted), renderer.cpp
-/* lane FIX1101A lodch: the ring's per-vertex bake channels (gl/cellfarinst.cpp; src/cellmesh.h CellMeshInst::vstream).
- * On, the row's .y holds the int bits of its first texel minus the sub's base vertex: + gl_VertexID = this vertex's
- * RG8 texel, R the AO (into the colour, as the flat copy has it), G the ambient's sky factor (wwFarSkyVis). The
- * sampler's unit is set at link (gl/glcontext.cpp). Off (every other draw): wwFarSkyVis 1, nothing read. */
-uniform bool farStreamOn;
-Buffer<float4> farStream;
+Buffer<float4> farStream : register(t50, space0);
 static float wwFarSkyVis;
 /* MODULES1 round 10 (bungo 11-11: "Far baked AO needs to behave through regular AO rules"): the stream's AO leaves the
  * vertex colour and goes to the fragment's one AO rule (cell_ao.glsl cellAoShared) as wwFarAo. farBakeK: x the AO's
  * and y the sky occlusion's maximum (live keys WW_LODL_AO_MAX / WW_LODL_SKY_MAX, 0..1), z 1 = the red
  * WW_LODL_AO_RED=albedo (the AO multiplied into the vertex colour, as before). Set with farStreamOn. */
 static float wwFarAo;
-uniform float3 farBakeK;
-/* MODULES1 10b-2: the far draws whose baked AO is a grey in the vertex colour. x the AO's maximum strength, y the sky
- * occlusion's, z the draw: 0 none, 1 the flat far copy (the grey is the AO: wwFarAo), 2 the far ground (the grey is
- * its mask sheet's B, a sky AO: wwFarSkyVis), 3 instanced rows without the stream (mesh grey x row grey is the AO).
- * w 1 = red WW_LODL_AO_RED=albedo (the grey stays in the colour). The colour is then white. */
-uniform float4 farVcAo;
 #ifdef WW_FAR_SPLAT
-/* lane FARLOOK1101 (FARSHIMMER2): a far row whose projected box is under S px on an axis draws widened to S about its
- * projected centre at alpha 1 / (kx * ky) (exact ink: the area grows by kx * ky). farSplat = (S px, pass: 1 opaque =
- * the rows at or over S, 2 the blended splat pass = the rows under it); the box = the row's mesh box (model space) */
-uniform float2 farSplat;
-static float4	farInstBoxC;
-static float4	farInstBoxE;
+
+static float4 farInstBoxC;
+static float4 farInstBoxE;
 static float farSplatA;
 #endif
 
-#include "bonetransform.src.hlsli"
-
-// stage I/O: the members (locations, semantics) of the generated port, each under its GLSL declaration's #if
-struct SPIRV_Cross_Input
-{
-    float3 vertexPosition : TEXCOORD0;
-    float4 vertexColor : TEXCOORD1;
-    float3 normalVector : TEXCOORD2;
-    float3 tangentVector : TEXCOORD3;
-    float3 bitangentVector : TEXCOORD4;
-    float4 boneWeights[2] : TEXCOORD5;
-    float2 multiTexCoord0 : TEXCOORD7;
-    float2 farLadderIn : TEXCOORD9;
-    float4 farInstRow0 : TEXCOORD10;
-    float4 farInstRow1 : TEXCOORD11;
-    float4 farInstRow2 : TEXCOORD12;
-    float4 farInstExtra : TEXCOORD13;
-#ifdef WW_FAR_SPLAT
-    float4 farInstBoxC : TEXCOORD14;
-#endif
-#ifdef WW_FAR_SPLAT
-    float4 farInstBoxE : TEXCOORD15;
-#endif
-    uint gl_VertexID : SV_VertexID;
-};
-struct SPIRV_Cross_Output
-{
-    WW_LOC(3) float3 LightDir : TEXCOORD3;
-    WW_LOC(4) float3 ViewDir : TEXCOORD4;
-    WW_LOC(8) float2 texCoord : TEXCOORD8;
-    WW_LOC(5) float3x3 btnMatrix : TEXCOORD5;
-    WW_LOC(0) nointerpolation float4 A : TEXCOORD0;
-    WW_LOC(1) float4 C : TEXCOORD1;
-    WW_LOC(2) nointerpolation float4 D : TEXCOORD2;
-    WW_LOC(12) float rawVertexAlpha : TEXCOORD12;
-    WW_LOC(9) nointerpolation float3x3 reflMatrix : TEXCOORD9;
-    WW_LOC(13) nointerpolation float2 farLadder : TEXCOORD13;
-    WW_LOC(15) float wwFarSkyVis : TEXCOORD15;
-    WW_LOC(14) float wwFarAo : TEXCOORD14;
-#ifdef WW_FAR_SPLAT
-    WW_LOC(16) nointerpolation float farSplatA : TEXCOORD16;
-#endif
-    precise float4 gl_Position : SV_Position;
-};
-
-#include "ww_treewind.src.hlsli"
+#include "bonetransform.hlsli"
+#include "ww_treewind.hlsli"
 
 void vert_main()
 {
@@ -183,14 +155,14 @@ void vert_main()
 			e -= 2.0;
 		}
 		if ( farStreamOn ) {
-			float2 ch = farStream.Load(asint( farInstExtra.y ) + gl_VertexID).rg;
+			float2 ch = farStream.Load( asint( farInstExtra.y ) + gl_VertexID ).rg;
 			float ao = 1.0 - ( 1.0 - ch.r ) * farBakeK.x;
 			wwFarAo = farBakeK.z > 0.5 ? 1.0 : ao;
 			vc.rgb *= ( farBakeK.z > 0.5 ? ao : 1.0 ) * e;
 			wwFarSkyVis = 1.0 - ( 1.0 - ch.g ) * farBakeK.y;
 		} else if ( farVcAo.z > 2.5 && farVcAo.w < 0.5 ) {
 			wwFarAo = 1.0 - ( 1.0 - clamp( vc.r * farInstExtra.y, 0.0, 1.0 ) ) * farVcAo.x;
-			vc.rgb = (float3)(1.0);
+			vc.rgb = (float3)( 1.0 );
 		} else
 		vc.rgb *= float3( farInstExtra.yz, e );
 	} else if ( farVcAo.z > 0.5 && farVcAo.w < 0.5 ) {
@@ -198,7 +170,7 @@ void vert_main()
 			wwFarAo = 1.0 - ( 1.0 - vc.r ) * farVcAo.x;
 		else
 			wwFarSkyVis = 1.0 - ( 1.0 - vc.r ) * farVcAo.y;
-		vc.rgb = (float3)(1.0);
+		vc.rgb = (float3)( 1.0 );
 	}
 	if ( wwGrassWind2.w > 0.5 ) {
 		float L = length( b );
@@ -243,8 +215,8 @@ void vert_main()
 	farSplatA = 1.0;
 	if ( farInst && farSplat.x > 0.0 ) {
 		float4x4 PMV = mul(modelViewMatrix, projectionMatrix);
-		float2 lo = (float2)(1.0e30), hi = (float2)(-1.0e30);
-		bool front = dot( farInstBoxE.xyz, (float3)(1.0) ) > 0.0;
+		float2 lo = (float2)( 1.0e30 ), hi = (float2)( -1.0e30 );
+		bool front = dot( farInstBoxE.xyz, (float3)( 1.0 ) ) > 0.0;
 		for ( int k = 0; k < 8; k++ ) {
 			float3 s = float3( ( k & 4 ) != 0 ? 1.0 : -1.0, ( k & 2 ) != 0 ? 1.0 : -1.0, ( k & 1 ) != 0 ? 1.0 : -1.0 );
 			float4 m = float4( farInstBoxC.xyz + s * farInstBoxE.xyz, 1.0 );
@@ -254,8 +226,8 @@ void vert_main()
 			lo = min( lo, q );
 			hi = max( hi, q );
 		}
-		float2 px = ( hi - lo ) * 0.5 * (float2)(viewportDimensions.zw);
-		float2 kk = front ? max( (float2)(1.0), (float2)(farSplat.x) / max( px, (float2)(1.0e-4) ) ) : (float2)(1.0);
+		float2 px = ( hi - lo ) * 0.5 * float2( viewportDimensions.zw );
+		float2 kk = front ? max( (float2)( 1.0 ), (float2)( farSplat.x ) / max( px, (float2)( 1.0e-4 ) ) ) : (float2)( 1.0 );
 		bool splat = kk.x * kk.y > 1.0001;
 		if ( splat != ( farSplat.y > 1.5 ) ) {
 			gl_Position = float4( 0.0, 0.0, 2.0, 1.0 );	// the other pass draws this row: outside the clip volume
@@ -284,50 +256,88 @@ void vert_main()
 	LightDir = lightSourcePosition[0].xyz;
 
 	A = float4( sqrt(lightSourceAmbient.rgb) * 0.375, toneMapScale );
-	C = select((vertexColorOverride > (float4)(0.0)), vertexColorOverride, vc);
+	C = select((vertexColorOverride > (float4)( 0.0 )), vertexColorOverride, vc);
 	rawVertexAlpha = vertexColor.a;
 	D = float4( sqrt(lightSourceDiffuse[0].rgb), brightnessScale );
 }
 
-// entry: copies the stage inputs into the GLSL-named globals, runs the GLSL main, returns the outputs
+struct SPIRV_Cross_Input
+{
+    float3 vertexPosition : TEXCOORD0;
+    float4 vertexColor : TEXCOORD1;
+    float3 normalVector : TEXCOORD2;
+    float3 tangentVector : TEXCOORD3;
+    float3 bitangentVector : TEXCOORD4;
+    float4 boneWeights[2] : TEXCOORD5;
+    float2 multiTexCoord0 : TEXCOORD7;
+    float2 farLadderIn : TEXCOORD9;
+    float4 farInstRow0 : TEXCOORD10;
+    float4 farInstRow1 : TEXCOORD11;
+    float4 farInstRow2 : TEXCOORD12;
+    float4 farInstExtra : TEXCOORD13;
+    uint gl_VertexID : SV_VertexID;
+#if defined(WW_FAR_SPLAT)
+    float4 farInstBoxC : TEXCOORD14;
+    float4 farInstBoxE : TEXCOORD15;
+#endif
+};
+
+struct SPIRV_Cross_Output
+{
+    WW_LOC(3) float3 LightDir : TEXCOORD3;
+    WW_LOC(4) float3 ViewDir : TEXCOORD4;
+    WW_LOC(8) float2 texCoord : TEXCOORD8;
+    WW_LOC(5) float3x3 btnMatrix : TEXCOORD5;
+    WW_LOC(0) nointerpolation float4 A : TEXCOORD0;
+    WW_LOC(1) float4 C : TEXCOORD1;
+    WW_LOC(2) nointerpolation float4 D : TEXCOORD2;
+    WW_LOC(12) float rawVertexAlpha : TEXCOORD12;
+    WW_LOC(9) nointerpolation float3x3 reflMatrix : TEXCOORD9;
+    WW_LOC(13) nointerpolation float2 farLadder : TEXCOORD13;
+    WW_LOC(15) float wwFarSkyVis : TEXCOORD15;
+    WW_LOC(14) float wwFarAo : TEXCOORD14;
+#if defined(WW_FAR_SPLAT)
+    WW_LOC(16) nointerpolation float farSplatA : TEXCOORD16;
+#endif
+    precise float4 gl_Position : SV_Position;
+};
+
 SPIRV_Cross_Output main(SPIRV_Cross_Input stage_input)
 {
-    gl_VertexID = int(stage_input.gl_VertexID);
-    boneWeights = stage_input.boneWeights;
     vertexPosition = stage_input.vertexPosition;
+    vertexColor = stage_input.vertexColor;
     normalVector = stage_input.normalVector;
     tangentVector = stage_input.tangentVector;
     bitangentVector = stage_input.bitangentVector;
-    vertexColor = stage_input.vertexColor;
     multiTexCoord0 = stage_input.multiTexCoord0;
     farInstRow0 = stage_input.farInstRow0;
     farInstRow1 = stage_input.farInstRow1;
     farInstRow2 = stage_input.farInstRow2;
     farInstExtra = stage_input.farInstExtra;
     farLadderIn = stage_input.farLadderIn;
-#ifdef WW_FAR_SPLAT
+#if defined(WW_FAR_SPLAT)
+    farInstBoxC = stage_input.farInstBoxC;
     farInstBoxE = stage_input.farInstBoxE;
 #endif
-#ifdef WW_FAR_SPLAT
-    farInstBoxC = stage_input.farInstBoxC;
-#endif
+    boneWeights = stage_input.boneWeights;
+    gl_VertexID = int(stage_input.gl_VertexID);
     vert_main();
     SPIRV_Cross_Output stage_output;
     stage_output.gl_Position = gl_Position;
-    stage_output.wwFarSkyVis = wwFarSkyVis;
-    stage_output.wwFarAo = wwFarAo;
-    stage_output.farLadder = farLadder;
-#ifdef WW_FAR_SPLAT
-    stage_output.farSplatA = farSplatA;
-#endif
+    stage_output.LightDir = LightDir;
+    stage_output.ViewDir = ViewDir;
     stage_output.texCoord = texCoord;
     stage_output.btnMatrix = btnMatrix;
-    stage_output.reflMatrix = reflMatrix;
-    stage_output.ViewDir = ViewDir;
-    stage_output.LightDir = LightDir;
     stage_output.A = A;
     stage_output.C = C;
-    stage_output.rawVertexAlpha = rawVertexAlpha;
     stage_output.D = D;
+    stage_output.rawVertexAlpha = rawVertexAlpha;
+    stage_output.reflMatrix = reflMatrix;
+    stage_output.farLadder = farLadder;
+    stage_output.wwFarSkyVis = wwFarSkyVis;
+    stage_output.wwFarAo = wwFarAo;
+#if defined(WW_FAR_SPLAT)
+    stage_output.farSplatA = farSplatA;
+#endif
     return stage_output;
 }

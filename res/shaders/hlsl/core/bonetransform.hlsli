@@ -1,3 +1,71 @@
+// HLSL source of bonetransform.glsl (include-only GLSL), lane HLSLSRC1 (notes/hlsltools/glsl2hlsl.py): the GLSL's comments,
+// names and order kept. Its loose uniforms sit at the top under WW_LOOSE_UNIFORMS: the entry that includes this
+// file includes it once more inside its LooseUniforms cbuffer with that defined (HLSL has one cbuffer for them).
+#ifdef WW_HLSL_SRC
+#ifndef WW_GLSL_MATDIAG3x4
+#define WW_GLSL_MATDIAG3x4
+float3x4 wwMat3x4Diag(float s) { return float3x4(s, 0.0, 0.0, 0.0, 0.0, s, 0.0, 0.0, 0.0, 0.0, s, 0.0); }
+#endif
+#ifndef WW_REG_skinningUniforms
+#define WW_REG_skinningUniforms b1
+#endif
+cbuffer skinningUniforms : register(WW_REG_skinningUniforms, space0)
+{
+	row_major float3x4	boneTransforms[256] : packoffset(c0);		// bone transforms in row-major order
+};
+
+static float4 boneWeights[2];
+
+#ifdef BT_POSITION_ONLY
+void boneTransform( inout float4 v )
+#elif defined( BT_NO_TANGENTS )
+void boneTransform( inout float4 v, inout float3 n )
+#else
+void boneTransform( inout float4 v, inout float3 n, inout float3 t, inout float3 b )
+#endif
+{
+#if defined( BT_POSITION_ONLY ) || defined( BT_NO_TANGENTS )
+	float3	vTmp = (float3)( 0.0 );
+#ifndef BT_POSITION_ONLY
+	float3	nTmp = (float3)( 0.0 );
+#endif
+#else
+	float3x4	mTmp = wwMat3x4Diag( 0.0 );
+#endif
+	float	wSum = 0.0;
+	for ( int i = 0; i < 8; i++ ) {
+		float	bw = boneWeights[i >> 2][i & 3];
+		if ( !( bw > 0.0 ) )
+			break;
+		int	bone = int( bw ) & 0xFF;
+		float	w = frac( bw );
+#if defined( BT_POSITION_ONLY ) || defined( BT_NO_TANGENTS )
+		float3x4	m = boneTransforms[bone];
+		vTmp += mul(m, v) * w;
+#ifndef BT_POSITION_ONLY
+		nTmp += mul((float3x3)( m ), n) * w;
+#endif
+#else
+		mTmp += boneTransforms[bone] * w;
+#endif
+		wSum += w;
+	}
+	if ( wSum > 0.0 ) {
+#if defined( BT_POSITION_ONLY ) || defined( BT_NO_TANGENTS )
+		v = float4( vTmp / wSum, 1.0 );
+#ifndef BT_POSITION_ONLY
+		n = nTmp;
+#endif
+#else
+		v = float4( mul(mTmp, v) / wSum, 1.0 );
+		float3x3	r = (float3x3)( mTmp );
+		n = mul(r, n);
+		t = mul(r, t);
+		b = mul(r, b);
+#endif
+	}
+}
+#else	// WW_HLSL_SRC: the per-variant files' half (HLSLBULK1, WW_FN_<name> picks functions); it goes with the last of them
 // Shared HLSL for res/shaders/bonetransform.glsl (include-only GLSL), HLSLBULK1 round 2 (notes/hlslbulk1/tools/factor.py). No bindings: the
 // functions below are the converted ones, they read the declarations of the shader that includes them (its cbuffers,
 // resources, statics and LooseUniforms: the per-module shim and the entry own those). Define WW_FN_<name> for each
@@ -86,3 +154,4 @@ void boneTransform(inout float4 v)
     }
 }
 #endif
+#endif	// WW_HLSL_SRC

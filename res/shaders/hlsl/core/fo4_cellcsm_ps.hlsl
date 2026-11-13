@@ -1,17 +1,9 @@
-// HLSL source of fo4_cellcsm.frag, translated by notes/hlslsrc1/tools/glsl2hlsl.py (text level: comments, names and
-// #if variants kept from the GLSL). Matrices hold GL's columns as rows (row_major blocks), so a GL product A * B
-// reads mul(B, A).
+// HLSL source of fo4_cellcsm.frag (fragment shader), lane HLSLSRC1 (notes/hlsltools/glsl2hlsl.py): one readable file for every
+// variant, the GLSL's comments, names and order kept. Loose uniforms are the LooseUniforms cbuffer (b31).
+// variants: #if WW_CELL_FOGLEAK, WW_CELL_RESTIR, WW_CELL_RESTIRGI, WW_CELL_RTDDGI, WW_CELL_RTDDGI_CASCADES, WW_FRAME_UBO (the loader's defines; res/shaders/hlsl/variants.txt lists the sets built)
 // profile: ps_6_0
-// variants: #if (the loader's WW_* defines select the variant; built with -D per set)
-// stage structs and main() come with the included fo4_default_ps.hlsl
-// this program's registers for blocks its includes declare (glslang numbers them per program and variant)
-#ifndef WW_REGS_SET
-#define WW_REGS_SET
-#if defined(WW_CELL_FOGLEAK) && defined(WW_FRAME_UBO)
-#define WW_REG_wwShadowFrame b1
-#endif
-#endif
-
+#include "CoreBindingsVk.hlsli"
+#define WW_HLSL_SRC 1	// the shared .hlsli files give their readable half
 // fo4_cell.frag with the cascaded sun shadows compiled in.
 // Renderer::setupProgram picks it by name only while a cell-lit draw receives shadows.
 #define WW_FOG 1

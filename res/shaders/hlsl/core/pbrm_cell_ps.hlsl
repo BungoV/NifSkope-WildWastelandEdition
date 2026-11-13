@@ -1,11 +1,9 @@
-// HLSL source of pbrm_cell.frag, translated by notes/hlslsrc1/tools/glsl2hlsl.py (text level: comments, names and
-// #if variants kept from the GLSL). Matrices hold GL's columns as rows (row_major blocks), so a GL product A * B
-// reads mul(B, A).
+// HLSL source of pbrm_cell.frag (fragment shader), lane HLSLSRC1 (notes/hlsltools/glsl2hlsl.py): one readable file for every
+// variant, the GLSL's comments, names and order kept. Loose uniforms are the LooseUniforms cbuffer (b31).
+// variants: #if WW_CELL_FOGLEAK, WW_CELL_RESTIR, WW_CELL_RESTIRGI, WW_CELL_RTDDGI, WW_CELL_RTDDGI_CASCADES, WW_FRAME_UBO (the loader's defines; res/shaders/hlsl/variants.txt lists the sets built)
 // profile: ps_6_0
-// variants: #if (the loader's WW_* defines select the variant; built with -D per set)
-// stage structs and main() come with the included pbrm_default_ps.hlsl
-#define WW_REGS_SET   // this program keeps the includes' registers
-
+#include "CoreBindingsVk.hlsli"
+#define WW_HLSL_SRC 1	// the shared .hlsli files give their readable half
 // pbrm_default.frag with the cell's own lights and the bake's bounce compiled in (src/gl/celllights.h).
 // Renderer::setupProgram picks it by name only while a draw is cell-lit.
 #define WW_CELLLIGHTS 1

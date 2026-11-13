@@ -1,51 +1,45 @@
-// HLSL source of sk_multilayer.frag, translated by notes/hlslsrc1/tools/glsl2hlsl.py (text level: comments, names and
-// #if variants kept from the GLSL). Matrices hold GL's columns as rows (row_major blocks), so a GL product A * B
-// reads mul(B, A).
+// HLSL source of sk_multilayer.frag (fragment shader), lane HLSLSRC1 (notes/hlsltools/glsl2hlsl.py): one readable file for every
+// variant, the GLSL's comments, names and order kept. Loose uniforms are the LooseUniforms cbuffer (b31).
+// variants: #if none (the loader's defines; res/shaders/hlsl/variants.txt lists the sets built)
 // profile: ps_6_0
-// variants: #if (the loader's WW_* defines select the variant; built with -D per set)
 #include "CoreBindingsVk.hlsli"
-#include "GlslCompat.hlsli"
-#define WW_STAGE_PS 1
+#define WW_HLSL_SRC 1	// the shared .hlsli files give their readable half
+#include "uniforms.hlsli"
 
-#include "uniforms.src.hlsli"
+Texture2D<float4> BaseMap : register(t0, space0); SamplerState _BaseMap_sampler : register(s0, space0);
+Texture2D<float4> NormalMap : register(t1, space0); SamplerState _NormalMap_sampler : register(s1, space0);
+Texture2D<float4> LightMask : register(t2, space0); SamplerState _LightMask_sampler : register(s2, space0);
+Texture2D<float4> BacklightMap : register(t3, space0); SamplerState _BacklightMap_sampler : register(s3, space0);
+Texture2D<float4> InnerMap : register(t4, space0); SamplerState _InnerMap_sampler : register(s4, space0);
+Texture2D<float4> EnvironmentMap : register(t5, space0); SamplerState _EnvironmentMap_sampler : register(s5, space0);
+TextureCube<float4> CubeMap : register(t6, space0); SamplerState _CubeMap_sampler : register(s6, space0);
+cbuffer LooseUniforms : register(b31, space0)
+{
+	float3 specColor;
+	float specStrength;
+	float specGlossiness;
+	bool useGloss;
+	float3 glowColor;
+	float glowMult;
+	float alpha;
+	int alphaFlags;			// bits 0 to 2: alpha test mode, bit 3: alpha blending enabled
+	float alphaThreshold;
+	float2 uvScale;
+	float2 uvOffset;
+	bool hasEmit;
+	bool hasSoftlight;
+	bool hasBacklight;
+	bool hasRimlight;
+	bool hasCubeMap;
+	bool hasEnvMask;
+	float lightingEffect1;
+	float lightingEffect2;
+	float2 innerScale;
+	float innerThickness;
+	float outerRefraction;
+	float outerReflection;
+};
 
-Texture2D<float4> BaseMap; SamplerState _BaseMap_sampler;
-Texture2D<float4> NormalMap; SamplerState _NormalMap_sampler;
-Texture2D<float4> LightMask; SamplerState _LightMask_sampler;
-Texture2D<float4> BacklightMap; SamplerState _BacklightMap_sampler;
-Texture2D<float4> InnerMap; SamplerState _InnerMap_sampler;
-Texture2D<float4> EnvironmentMap; SamplerState _EnvironmentMap_sampler;
-TextureCube<float4> CubeMap; SamplerState _CubeMap_sampler;
-
-uniform float3 specColor;
-uniform float specStrength;
-uniform float specGlossiness;
-uniform bool useGloss;
-
-uniform float3 glowColor;
-uniform float glowMult;
-
-uniform float alpha;
-uniform int alphaFlags;			// bits 0 to 2: alpha test mode, bit 3: alpha blending enabled
-uniform float alphaThreshold;
-
-uniform float2 uvScale;
-uniform float2 uvOffset;
-
-uniform bool hasEmit;
-uniform bool hasSoftlight;
-uniform bool hasBacklight;
-uniform bool hasRimlight;
-uniform bool hasCubeMap;
-uniform bool hasEnvMask;
-
-uniform float lightingEffect1;
-uniform float lightingEffect2;
-
-uniform float2 innerScale;
-uniform float innerThickness;
-uniform float outerRefraction;
-uniform float outerReflection;
 
 static float3 LightDir;
 static float3 ViewDir;
@@ -59,23 +53,6 @@ static float4 D;
 static float3x3 btnMatrix;
 
 static float4 fragColor;
-
-// stage I/O: the members (locations, semantics) of the generated port, each under its GLSL declaration's #if
-struct SPIRV_Cross_Input
-{
-    WW_LOC(3) float3 LightDir : TEXCOORD3;
-    WW_LOC(4) float3 ViewDir : TEXCOORD4;
-    WW_LOC(8) float2 texCoord : TEXCOORD8;
-    WW_LOC(0) nointerpolation float4 A : TEXCOORD0;
-    WW_LOC(1) float4 C : TEXCOORD1;
-    WW_LOC(2) nointerpolation float4 D : TEXCOORD2;
-    WW_LOC(5) float3x3 btnMatrix : TEXCOORD5;
-};
-struct SPIRV_Cross_Output
-{
-    float4 fragColor : SV_Target0;
-};
-
 
 
 float3 tonemap(float3 x)
@@ -130,7 +107,7 @@ void frag_main()
 {
 	float2 offset = texCoord.xy * uvScale + uvOffset;
 
-	float4 baseMap = BaseMap.Sample(_BaseMap_sampler, offset);
+	float4 baseMap = BaseMap.Sample( _BaseMap_sampler, offset );
 
 	float4 color = float4( baseMap.rgb, 1.0 );
 	if ( alphaFlags > 0 ) {
@@ -143,14 +120,14 @@ void frag_main()
 			color.a = a;
 	}
 
-	float4 normalMap = NormalMap.Sample(_NormalMap_sampler, offset);
+	float4 normalMap = NormalMap.Sample( _NormalMap_sampler, offset );
 
 	float3 normalTS = normalize(normalMap.rgb * 2.0 - 1.0);
 	float3 normal = normalize(mul(normalTS, btnMatrix));
 
 	// Sample the non-parallax offset alpha channel of the inner map
 	//	Used to modulate the innerThickness
-	float innerMapAlpha = InnerMap.Sample(_InnerMap_sampler, offset).a;
+	float innerMapAlpha = InnerMap.Sample( _InnerMap_sampler, offset ).a;
 
 
 	float3 L = normalize(LightDir);
@@ -169,7 +146,7 @@ void frag_main()
 	float3 parallax = ParallaxOffsetAndDepth( offset, innerScale, normalize(mul(btnMatrix, E)), mixedNormal, innerThickness * innerMapAlpha );
 
 	// Sample the inner map at the offset coords
-	float4 innerMap = InnerMap.Sample(_InnerMap_sampler, parallax.xy * innerScale);
+	float4 innerMap = InnerMap.Sample( _InnerMap_sampler, parallax.xy * innerScale );
 
 	float3 reflected = reflect( -E, normal );
 	float3 reflectedWS = mul(reflected, envMapRotation);
@@ -188,11 +165,11 @@ void frag_main()
 
 	// Environment
 	if ( hasCubeMap ) {
-		float4 cube = CubeMap.Sample(_CubeMap_sampler, reflectedWS);
+		float4 cube = CubeMap.Sample( _CubeMap_sampler, reflectedWS );
 		cube.rgb *= outerReflection;
 
 		if ( hasEnvMask ) {
-			float4 env = EnvironmentMap.Sample(_EnvironmentMap_sampler, offset);
+			float4 env = EnvironmentMap.Sample( _EnvironmentMap_sampler, offset );
 			cube.rgb *= env.r;
 		} else {
 			cube.rgb *= normalMap.a;
@@ -216,7 +193,7 @@ void frag_main()
 	// 	Mixed with inner and outer map
 	float3 backlight = (float3)(0.0);
 	if ( hasBacklight ) {
-		backlight = BacklightMap.Sample(_BacklightMap_sampler, offset).rgb;
+		backlight = BacklightMap.Sample( _BacklightMap_sampler, offset ).rgb;
 		backlight *= NdotNegL;
 
 		emissive += backlight * D.rgb;
@@ -225,8 +202,8 @@ void frag_main()
 	// TODO: Test rim and soft light mixing with inner/outer layer
 
 	float4 mask = (float4)(0.0);
-	if ( or(hasRimlight, hasSoftlight) ) {
-		mask = LightMask.Sample(_LightMask_sampler, offset);
+	if ( or( hasRimlight, hasSoftlight ) ) {
+		mask = LightMask.Sample( _LightMask_sampler, offset );
 	}
 
 	float3 rim = (float3)(0.0);
@@ -253,16 +230,31 @@ void frag_main()
 	fragColor = color;
 }
 
-// entry: copies the stage inputs into the GLSL-named globals, runs the GLSL main, returns the outputs
+struct SPIRV_Cross_Input
+{
+    WW_LOC(3) float3 LightDir : TEXCOORD3;
+    WW_LOC(4) float3 ViewDir : TEXCOORD4;
+    WW_LOC(8) float2 texCoord : TEXCOORD8;
+    WW_LOC(0) nointerpolation float4 A : TEXCOORD0;
+    WW_LOC(1) float4 C : TEXCOORD1;
+    WW_LOC(2) nointerpolation float4 D : TEXCOORD2;
+    WW_LOC(5) float3x3 btnMatrix : TEXCOORD5;
+};
+
+struct SPIRV_Cross_Output
+{
+    float4 fragColor : SV_Target0;
+};
+
 SPIRV_Cross_Output main(SPIRV_Cross_Input stage_input)
 {
-    D = stage_input.D;
-    A = stage_input.A;
-    texCoord = stage_input.texCoord;
-    C = stage_input.C;
-    btnMatrix = stage_input.btnMatrix;
     LightDir = stage_input.LightDir;
     ViewDir = stage_input.ViewDir;
+    texCoord = stage_input.texCoord;
+    A = stage_input.A;
+    C = stage_input.C;
+    D = stage_input.D;
+    btnMatrix = stage_input.btnMatrix;
     frag_main();
     SPIRV_Cross_Output stage_output;
     stage_output.fragColor = fragColor;

@@ -1,44 +1,53 @@
-// HLSL source of lines.geom, translated by notes/hlslsrc1/tools/glsl2hlsl.py (text level: comments, names and
-// #if variants kept from the GLSL). Matrices hold GL's columns as rows (row_major blocks), so a GL product A * B
-// reads mul(B, A).
+// HLSL source of lines.geom (geometry shader), lane HLSLSRC1 (notes/hlsltools/glsl2hlsl.py): one readable file for every
+// variant, the GLSL's comments, names and order kept. Loose uniforms are the LooseUniforms cbuffer (b31).
+// variants: #if none (the loader's defines; res/shaders/hlsl/variants.txt lists the sets built)
 // profile: gs_6_0
-// variants: #if (the loader's WW_* defines select the variant; built with -D per set)
 #include "CoreBindingsVk.hlsli"
-#include "GlslCompat.hlsli"
-#define WW_STAGE_GS 1
-#define WW_GS_STREAM TriangleStream<SPIRV_Cross_Output>
-static float4 gl_PositionIn[2];
+#define WW_HLSL_SRC 1	// the shared .hlsli files give their readable half
+#define Sample( s, uv ) SampleLevel( s, uv, 0 )	// GLSL: texture() outside a fragment shader reads level 0
+#define SampleCmp SampleCmpLevelZero	// the same for a shadow compare (SampleCmp is fragment-only)
+struct WW_GL_PerVertex { float4 gl_Position; };
+static WW_GL_PerVertex gl_in[2];
 static float4 gl_Position;
+// GLSL: layout ( lines ) in; (main's signature)
+// GLSL: layout ( triangle_strip , max_vertices = 4 ) out; (main's signature)
 
-
-#include "uniforms.src.hlsli"
+#include "uniforms.hlsli"
 
 static float4 vsColor[2];
 static float4 C;
 
-// stage I/O: the members (locations, semantics) of the generated port, each under its GLSL declaration's #if
-struct SPIRV_Cross_Input
+#define WW_LOOSE_TYPES 1
+#include "drawline.hlsli"
+#undef WW_LOOSE_TYPES
+cbuffer LooseUniforms : register(b31, space0)
 {
-    WW_LOC(0) float4 vsColor : TEXCOORD0;
-    float4 gl_PositionIn : SV_Position;
+#define WW_LOOSE_UNIFORMS 1
+#include "drawline.hlsli"
+#undef WW_LOOSE_UNIFORMS
 };
+
 struct SPIRV_Cross_Output
 {
     WW_LOC(1) float4 C : TEXCOORD1;
     float4 gl_Position : SV_Position;
 };
 
-// GLSL EmitVertex(): the current outputs become one vertex of the strip
+#define WW_GS_STREAM TriangleStream<SPIRV_Cross_Output>
 void EmitVertex(inout WW_GS_STREAM geometry_stream)
 {
     SPIRV_Cross_Output stage_output;
-    stage_output.C = C;
     stage_output.gl_Position = gl_Position;
+    stage_output.C = C;
     geometry_stream.Append(stage_output);
 }
 
+void EndPrimitive(inout WW_GS_STREAM geometry_stream)
+{
+    geometry_stream.RestartStrip();
+}
 
-#include "drawline.src.hlsli"
+#include "drawline.hlsli"
 
 void geom_main(inout WW_GS_STREAM geometry_stream)
 {
@@ -47,23 +56,24 @@ void geom_main(inout WW_GS_STREAM geometry_stream)
 	float4	c0 = float4( vsColor[0].rgb, vsColor[0].a * a );
 	float4	c1 = float4( vsColor[1].rgb, vsColor[1].a * a );
 
-	float4	p0 = mul(gl_PositionIn[0], projectionMatrix);
-	float4	p1 = mul(gl_PositionIn[1], projectionMatrix);
+	float4	p0 = mul(gl_in[0].gl_Position, projectionMatrix);
+	float4	p1 = mul(gl_in[1].gl_Position, projectionMatrix);
 
-	drawLine( p0, p1, c0, c1 , geometry_stream);
+	drawLine( geometry_stream, p0, p1, c0, c1 );
 }
 
-// entry: copies the stage inputs into the GLSL-named globals, runs the GLSL main, returns the outputs
+struct SPIRV_Cross_Input
+{
+    WW_LOC(0) float4 vsColor : TEXCOORD0;
+    float4 gl_PositionIn : SV_Position;
+};
+
 [maxvertexcount(4)]
-void main(line SPIRV_Cross_Input stage_input[2], inout TriangleStream<SPIRV_Cross_Output> geometry_stream)
+void main(line SPIRV_Cross_Input stage_input[2], inout WW_GS_STREAM geometry_stream)
 {
     for (int i = 0; i < 2; i++)
-    {
-        gl_PositionIn[i] = stage_input[i].gl_PositionIn;
-    }
+        gl_in[i].gl_Position = stage_input[i].gl_PositionIn;
     for (int i = 0; i < 2; i++)
-    {
         vsColor[i] = stage_input[i].vsColor;
-    }
     geom_main(geometry_stream);
 }

@@ -1,12 +1,9 @@
-// HLSL source of default.frag, translated by notes/hlslsrc1/tools/glsl2hlsl.py (text level: comments, names and
-// #if variants kept from the GLSL). Matrices hold GL's columns as rows (row_major blocks), so a GL product A * B
-// reads mul(B, A).
+// HLSL source of default.frag (fragment shader), lane HLSLSRC1 (notes/hlsltools/glsl2hlsl.py): one readable file for every
+// variant, the GLSL's comments, names and order kept. Loose uniforms are the LooseUniforms cbuffer (b31).
+// variants: #if none (the loader's defines; res/shaders/hlsl/variants.txt lists the sets built)
 // profile: ps_6_0
-// variants: #if (the loader's WW_* defines select the variant; built with -D per set)
 #include "CoreBindingsVk.hlsli"
-#include "GlslCompat.hlsli"
-#define WW_STAGE_PS 1
-
+#define WW_HLSL_SRC 1	// the shared .hlsli files give their readable half
 struct Texture {
 	float2 uvCenter;
 	float2 uvScale;
@@ -16,25 +13,26 @@ struct Texture {
 	int textureUnit;
 };
 
-#include "uniforms.src.hlsli"
+#include "uniforms.hlsli"
 
-Texture2D<float4> textureUnits[10]; SamplerState _textureUnits_sampler[10];
-uniform Texture textures[10];
+Texture2D<float4> textureUnits[10] : register(t0, space0); SamplerState _textureUnits_sampler[10] : register(s0, space0);
+cbuffer LooseUniforms : register(b31, space0)
+{
+	Texture textures[10];
+	// bits 0 to 2: color mode
+	// bit 3: lighting mode
+	// bits 4 to 5: vertex mode
+	int vertexColorFlags;
+	float alpha;
+	int alphaFlags;			// bits 0 to 2: alpha test mode, bit 3: alpha blending enabled
+	float alphaThreshold;
+	float4 frontMaterialDiffuse;
+	float4 frontMaterialSpecular;
+	float4 frontMaterialAmbient;
+	float4 frontMaterialEmission;
+	float frontMaterialShininess;
+};
 
-// bits 0 to 2: color mode
-// bit 3: lighting mode
-// bits 4 to 5: vertex mode
-uniform int vertexColorFlags;
-
-uniform float alpha;
-uniform int alphaFlags;			// bits 0 to 2: alpha test mode, bit 3: alpha blending enabled
-uniform float alphaThreshold;
-
-uniform float4 frontMaterialDiffuse;
-uniform float4 frontMaterialSpecular;
-uniform float4 frontMaterialAmbient;
-uniform float4 frontMaterialEmission;
-uniform float frontMaterialShininess;
 
 static float3 LightDir;
 static float3 ViewDir;
@@ -49,23 +47,6 @@ static float3 N;
 
 static float4 fragColor;
 
-// stage I/O: the members (locations, semantics) of the generated port, each under its GLSL declaration's #if
-struct SPIRV_Cross_Input
-{
-    float3 LightDir : TEXCOORD0;
-    float3 ViewDir : TEXCOORD1;
-    float2 texCoords[9] : TEXCOORD2;
-    nointerpolation float4 A : TEXCOORD11;
-    float4 C : TEXCOORD12;
-    nointerpolation float4 D : TEXCOORD13;
-    float3 N : TEXCOORD14;
-};
-struct SPIRV_Cross_Output
-{
-    float4 fragColor : SV_Target0;
-};
-
-
 
 float4 getTexture( int n )
 {
@@ -75,7 +56,7 @@ float4 getTexture( int n )
 	offs = float2( offs.x * r_c - offs.y * r_s, offs.x * r_s + offs.y * r_c );
 	offs = offs * textures[n].uvScale + textures[n].uvCenter + textures[n].uvOffset;
 
-	return textureUnits[textures[n].textureUnit - 1].Sample(_textureUnits_sampler[textures[n].textureUnit - 1], offs);
+	return textureUnits[textures[n].textureUnit - 1].Sample( _textureUnits_sampler[textures[n].textureUnit - 1], offs );
 }
 
 void frag_main()
@@ -83,7 +64,7 @@ void frag_main()
 	float3 L = normalize( LightDir );
 	float3 E = normalize( ViewDir );
 
-	float4 color = (float4)(1.0);
+	float4 color = (float4)( 1.0 );
 
 	float3 normal = normalize( N );
 
@@ -171,16 +152,31 @@ void frag_main()
 	fragColor = float4( color.rgb * D.a, a );
 }
 
-// entry: copies the stage inputs into the GLSL-named globals, runs the GLSL main, returns the outputs
+struct SPIRV_Cross_Input
+{
+    float3 LightDir : TEXCOORD0;
+    float3 ViewDir : TEXCOORD1;
+    float2 texCoords[9] : TEXCOORD2;
+    nointerpolation float4 A : TEXCOORD11;
+    float4 C : TEXCOORD12;
+    nointerpolation float4 D : TEXCOORD13;
+    float3 N : TEXCOORD14;
+};
+
+struct SPIRV_Cross_Output
+{
+    float4 fragColor : SV_Target0;
+};
+
 SPIRV_Cross_Output main(SPIRV_Cross_Input stage_input)
 {
-    texCoords = stage_input.texCoords;
     LightDir = stage_input.LightDir;
     ViewDir = stage_input.ViewDir;
-    N = stage_input.N;
-    C = stage_input.C;
+    texCoords = stage_input.texCoords;
     A = stage_input.A;
+    C = stage_input.C;
     D = stage_input.D;
+    N = stage_input.N;
     frag_main();
     SPIRV_Cross_Output stage_output;
     stage_output.fragColor = fragColor;

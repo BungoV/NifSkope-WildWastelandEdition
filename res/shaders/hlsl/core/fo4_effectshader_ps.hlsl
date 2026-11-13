@@ -1,99 +1,204 @@
-// HLSL source of fo4_effectshader.frag, translated by notes/hlslsrc1/tools/glsl2hlsl.py (text level: comments, names and
-// #if variants kept from the GLSL). Matrices hold GL's columns as rows (row_major blocks), so a GL product A * B
-// reads mul(B, A).
+// HLSL source of fo4_effectshader.frag (fragment shader), lane HLSLSRC1 (notes/hlsltools/glsl2hlsl.py): one readable file for every
+// variant, the GLSL's comments, names and order kept. Loose uniforms are the LooseUniforms cbuffer (b31).
+// variants: #if WW_CELL_AIRZONE, WW_CELL_FOGLEAK, WW_CELL_RESTIR, WW_CELL_RESTIRGI, WW_CELL_RTDDGI, WW_CELL_RTDDGI_CASCADES, WW_FRAME_UBO (the loader's defines; res/shaders/hlsl/variants.txt lists the sets built)
 // profile: ps_6_0
-// variants: #if (the loader's WW_* defines select the variant; built with -D per set)
 #include "CoreBindingsVk.hlsli"
-#include "GlslCompat.hlsli"
-#define WW_STAGE_PS 1
-#define WW_HLSL_SRC 1	// the readable half of the other modules' includes
-#ifdef WW_CELLLIGHTS
-#ifndef WW_FX_DECALLIT
-#define WW_FX_AMBSHARE 1
+#define WW_HLSL_SRC 1	// the shared .hlsli files give their readable half
+#ifndef WW_GLSL_MOD
+#define WW_GLSL_MOD	// GLSL mod: x - y floor(x / y) (HLSL fmod truncates)
+float mod(float x, float y) { return x - y * floor(x / y); }
+float2 mod(float2 x, float2 y) { return x - y * floor(x / y); }
+float3 mod(float3 x, float3 y) { return x - y * floor(x / y); }
+float4 mod(float4 x, float4 y) { return x - y * floor(x / y); }
+float2 mod(float2 x, float y) { return x - y * floor(x / y); }
+float3 mod(float3 x, float y) { return x - y * floor(x / y); }
+float4 mod(float4 x, float y) { return x - y * floor(x / y); }
 #endif
-#endif
-#ifdef WW_CELLLIGHTS
-#ifndef WW_AIR_GIVOL
-#define WW_AIR_GIVOL 1
-#endif
-#endif
-#define WW_LOOSE_TYPES 1
-#include "../air/lookdev_fog.hlsli"
-#include "../shadows/ww_sunshadow.hlsli"
-#include "../lights/cell_lights.hlsli"
-#include "../lights/cell_cluster.hlsli"
-#include "../overlays/debug_view.hlsli"
-#include "../ao/cell_gihalfat.hlsli"
-#include "../gi/cell_ddgi.hlsli"
-#include "../ao/cell_ao.hlsli"
-#include "../lights/cell_fxlaw.hlsli"
-#include "../air/cell_volpart.hlsli"
-#include "../air/cell_airmed.hlsli"
-#include "../air/cell_airzone.hlsli"
-#undef WW_LOOSE_TYPES
-#define WW_LOOSE_UNIFORMS 1
-#include "../air/lookdev_fog.hlsli"
-#include "../shadows/ww_sunshadow.hlsli"
-#include "../lights/cell_lights.hlsli"
-#include "../lights/cell_cluster.hlsli"
-#include "../overlays/debug_view.hlsli"
-#include "../ao/cell_gihalfat.hlsli"
-#include "../gi/cell_ddgi.hlsli"
-#include "../ao/cell_ao.hlsli"
-#include "../lights/cell_fxlaw.hlsli"
-#include "../air/cell_volpart.hlsli"
-#include "../air/cell_airmed.hlsli"
-#include "../air/cell_airzone.hlsli"
-#undef WW_LOOSE_UNIFORMS
-// this program's registers for blocks its includes declare (glslang numbers them per program and variant)
-#ifndef WW_REGS_SET
-#define WW_REGS_SET
-#if defined(WW_CELL_FOGLEAK) && defined(WW_FRAME_UBO)
-#define WW_REG_wwShadowFrame b1
-#endif
-#endif
-static bool gl_FrontFacing;
 static float4 gl_FragCoord;
+static bool gl_FrontFacing;
+Texture2D<float4> BaseMap : register(t46, space0); SamplerState _BaseMap_sampler : register(s46, space0);
+Texture2D<float4> GreyscaleMap : register(t47, space0); SamplerState _GreyscaleMap_sampler : register(s47, space0);
+TextureCube<float4> CubeMap : register(t48, space0); SamplerState _CubeMap_sampler : register(s48, space0);
+Texture2D<float4> NormalMap : register(t49, space0); SamplerState _NormalMap_sampler : register(s49, space0);
+Texture2D<float4> SpecularMap : register(t50, space0); SamplerState _SpecularMap_sampler : register(s50, space0);
+#define WW_LOOSE_TYPES 1
+#if defined(WW_CELLLIGHTS)
+#include "../air/lookdev_fog.hlsli"
+#endif
+#if defined(WW_CELLLIGHTS) && defined(WW_SUNSHADOW)
+#include "../shadows/ww_sunshadow.hlsli"
+#endif
+#if defined(WW_CELLLIGHTS)
+#if defined(WW_CELLLIGHTS) && !defined(WW_FX_DECALLIT)
+#ifndef WW_FX_AMBSHARE
+#define WW_FX_AMBSHARE 1	// as below, before this file
+#endif
+#endif
+#include "../lights/cell_lights.hlsli"
+#include "../lights/cell_cluster.hlsli"
+#endif
+#if defined(WW_CELLLIGHTS) && defined(WW_DEBUG_VIEWS)
+#include "../overlays/debug_view.hlsli"
+#endif
+#if defined(WW_CELLLIGHTS) && defined(WW_CELL_PRT) && !(defined(WW_CELL_GI_MARCH))
+#include "../ao/cell_gihalfat.hlsli"
+#endif
+#if defined(WW_CELLLIGHTS) && defined(WW_CELL_PRT) && !(defined(WW_CELL_GI_MARCH)) && defined(WW_CELL_RTDDGI)
+#include "../gi/cell_ddgi.hlsli"
+#endif
+#if defined(WW_CELLLIGHTS) && !(defined(WW_CELL_PRT)) && defined(WW_CELL_RTDDGI)
+#include "../gi/cell_ddgi.hlsli"
+#include "../ao/cell_gihalfat.hlsli"
+#endif
+#if defined(WW_CELLLIGHTS) && defined(WW_FX_DECALLIT)
+#include "../ao/cell_ao.hlsli"
+#endif
+#if defined(WW_CELLLIGHTS)
+#if defined(WW_CELLLIGHTS) && !defined(WW_FX_DECALLIT)
+#ifndef WW_FX_AMBSHARE
+#define WW_FX_AMBSHARE 1	// as below, before this file
+#endif
+#endif
+#include "../lights/cell_fxlaw.hlsli"
+#include "../air/cell_volpart.hlsli"
+#endif
+#if defined(WW_CELLLIGHTS) && !defined(WW_SUNSHADOW)
+#include "../shadows/ww_sunshadow.hlsli"
+#endif
+#if defined(WW_CELLLIGHTS)
+#ifndef WW_AIR_GIVOL
+#define WW_AIR_GIVOL 1	// as below, before this file
+#endif
+#include "../air/cell_airmed.hlsli"
+#endif
+#if defined(WW_CELLLIGHTS) && ((defined( WW_CELL_AIRZONE ) && !defined( WW_FX_DECALLIT )))
+#include "../air/cell_airzone.hlsli"
+#endif
+#undef WW_LOOSE_TYPES
+cbuffer LooseUniforms : register(b31, space0)
+{
+#define WW_LOOSE_UNIFORMS 1
+#if defined(WW_CELLLIGHTS)
+#include "../air/lookdev_fog.hlsli"
+#endif
+#if defined(WW_CELLLIGHTS) && defined(WW_SUNSHADOW)
+#include "../shadows/ww_sunshadow.hlsli"
+#endif
+#if defined(WW_CELLLIGHTS)
+#if defined(WW_CELLLIGHTS) && !defined(WW_FX_DECALLIT)
+#ifndef WW_FX_AMBSHARE
+#define WW_FX_AMBSHARE 1	// as below, before this file
+#endif
+#endif
+#include "../lights/cell_lights.hlsli"
+#include "../lights/cell_cluster.hlsli"
+#endif
+#if defined(WW_CELLLIGHTS) && defined(WW_DEBUG_VIEWS)
+#include "../overlays/debug_view.hlsli"
+#endif
+#if defined(WW_CELLLIGHTS) && defined(WW_CELL_PRT) && !(defined(WW_CELL_GI_MARCH))
+#include "../ao/cell_gihalfat.hlsli"
+#endif
+#if defined(WW_CELLLIGHTS) && defined(WW_CELL_PRT) && !(defined(WW_CELL_GI_MARCH)) && defined(WW_CELL_RTDDGI)
+#include "../gi/cell_ddgi.hlsli"
+#endif
+#if defined(WW_CELLLIGHTS) && !(defined(WW_CELL_PRT)) && defined(WW_CELL_RTDDGI)
+#include "../gi/cell_ddgi.hlsli"
+#include "../ao/cell_gihalfat.hlsli"
+#endif
+#if defined(WW_CELLLIGHTS) && defined(WW_FX_DECALLIT)
+#include "../ao/cell_ao.hlsli"
+#endif
+#if defined(WW_CELLLIGHTS)
+#if defined(WW_CELLLIGHTS) && !defined(WW_FX_DECALLIT)
+#ifndef WW_FX_AMBSHARE
+#define WW_FX_AMBSHARE 1	// as below, before this file
+#endif
+#endif
+#include "../lights/cell_fxlaw.hlsli"
+#include "../air/cell_volpart.hlsli"
+#endif
+#if defined(WW_CELLLIGHTS) && !defined(WW_SUNSHADOW)
+#include "../shadows/ww_sunshadow.hlsli"
+#endif
+#if defined(WW_CELLLIGHTS)
+#ifndef WW_AIR_GIVOL
+#define WW_AIR_GIVOL 1	// as below, before this file
+#endif
+#include "../air/cell_airmed.hlsli"
+#endif
+#if defined(WW_CELLLIGHTS) && ((defined( WW_CELL_AIRZONE ) && !defined( WW_FX_DECALLIT )))
+#include "../air/cell_airzone.hlsli"
+#endif
+#undef WW_LOOSE_UNIFORMS
+	bool hasSourceTexture;
+	bool hasGreyscaleMap;
+	bool hasCubeMap;
+	bool hasNormalMap;
+	bool hasEnvMask;
+	bool greyscaleAlpha;
+	bool greyscaleColor;
+	bool useFalloff;
+	bool hasRGBFalloff;
+	bool hasWeaponBlood;
+	float4 glowColor;
+	float glowMult;
+	int alphaFlags;			// bits 0 to 2: alpha test mode, bit 3: alpha blending enabled
+	float alphaThreshold;
+	float2 uvScale;
+	float2 uvOffset;
+	float4 falloffParams;
+	float falloffDepth;
+	float lightingInfluence;
+	float envReflection;
+	// lane FXCHECK1: the game masks an effect's cube with the env mask's R (the _s specular); false = G, as before
+	bool envMaskR;
+	// lane GLASSPANE2 (FXNORMALA1): the game's env cube is also x the normal map's alpha; true = the red (the old cube
+	// without it, WW_FX_NORMALA_RED). Red sense, so a program that never sets it keeps the game's rule.
+	bool envNormalAlphaRed;
+#if defined(WW_CELLLIGHTS) && !defined(WW_FX_DECALLIT)
+	/* MODULES1 R8-1 (bungo's fake volumetric rule: "Opacity gives the height, or rather 'depth' always"): a volumetric
+	 * card is a lump whose depth is its opacity, alpha 1 = half a UV unit of the card. Its normal is tilted down the
+	 * opacity's slope (Mikkelsen 2010, "Bump Mapping Unparametrized Surfaces on the GPU": the surface gradient from
+	 * screen derivatives), so a flat card shades toward a lamp like a mound. No texture tap: three derivative pairs.
+	 * With a normal map the two slopes ADD at weight 1 : 1 (Mikkelsen 2020, "Surface Gradient Based Bump Mapping
+	 * Framework": heights add, so their gradients add; both are slopes in the same view units): the map's gradient
+	 * against the card's face, N - n / ( n . N ), plus the opacity's, then one normalize.
+	 * fxLumpRed (WW_CELL_FXLOCAL_RED): 1 `face` = no opacity slope at all, 2 `mapalone` = a card with a normal map takes
+	 * the map alone (the first R8-1 commit), 4 `ball` = the UV ball stands in for the depth again (FX_PUFF_A). */
+	int fxLumpRed;
+	/* MODULES1 round 9 (bungo: a mist card "is a slab of denser air"): a blended lit MESH card on the volumetric law takes
+	 * the light the air at its pixel scatters toward the eye and nothing else: the lamps x the air's phase, each in its own
+	 * colour with its own falloff (red by a red lamp, orange by a fire), + the sky's share under the record's cap, x its
+	 * opacity as density. No surface share (the wrapped diffuse of a lump: up to 4 x the air's scatter per lamp) and no GI
+	 * surface term (the volume's irradiance on an up face, uncapped: a bluish-white sum over warm lamps = a grey-white
+	 * bank). So a card is never brighter, nor of another hue, than thick air under the same lights. fxAirCard: 1 = a mesh
+	 * card (renderer.cpp), 0 = a particle system (still a lump). Red WW_CELL_FXLOCAL_RED=lump (fxLocalRed bit 4): the lump. */
+	int fxAirCard;
+#endif
+#if defined(WW_CELLLIGHTS)
+	bool fxSoft;
+	float fxSoftDepth;		// game units
+	float fxDistScale;		// view units -> game units
+	bool fxAdditive;
+	int fxRed;				// 2 nosoft, 4 nolin, 8 hide, 32 unbound (MODULES1 item 2)
+	// lane DECALLIT1 (WW_CELL_DECALLIT_PROBE, gates only): an effect decal in a probe pass draws a white colour, opaque
+	// where it shows, so probe 6 holds the light it takes (lit as the wall, or self-lit under the red)
+	bool fxDecalProbe;
+	// lane GIDARK1: a lit effect outdoors drawn by this program (fo4_effectdecal / csm) takes the light of the spot it
+	// stands in (fxRoomLitMul); cellFxBase = the game's lit-effect base (the weather's Effect Lighting x the sun scale)
+	bool fxRoomLit;
+	float3 cellFxBase;
+	// lane FXLIT1: this shape's model's placed lights (src/features/lights/cellfxlit.h)
+	int fxLitMode;			// 0 an unlit effect; 1 lit; red controls: 2 every light, 4 no 2.2 on the falloff, 8 self-lit
+	float4 fxLit;				// indices into cellLights, -1 = none
+	float4 fxLitScale;		// 1 (a red control's per-light ratio)
+	float3 fxLitId;			// probe 70: the model's serial + 1, 24 bits
+	float4 fxEmit;			// lane LIGHTS2 (XEMI1): the placement's emittance colour ^2.2 on an unlit effect; w 0 = none
+	float2 vpDumpScale;		// gates only: the full-size pixels a quarter-size dump pixel stands for (0 off)
+#endif
+};
 
-Texture2D<float4> BaseMap; SamplerState _BaseMap_sampler;
-Texture2D<float4> GreyscaleMap; SamplerState _GreyscaleMap_sampler;
-TextureCube<float4> CubeMap; SamplerState _CubeMap_sampler;
-Texture2D<float4> NormalMap; SamplerState _NormalMap_sampler;
-Texture2D<float4> SpecularMap; SamplerState _SpecularMap_sampler;
-
-uniform bool hasSourceTexture;
-uniform bool hasGreyscaleMap;
-uniform bool hasCubeMap;
-uniform bool hasNormalMap;
-uniform bool hasEnvMask;
-
-uniform bool greyscaleAlpha;
-uniform bool greyscaleColor;
-
-uniform bool useFalloff;
-uniform bool hasRGBFalloff;
-
-uniform bool hasWeaponBlood;
-
-uniform float4 glowColor;
-uniform float glowMult;
-
-uniform int alphaFlags;			// bits 0 to 2: alpha test mode, bit 3: alpha blending enabled
-uniform float alphaThreshold;
-
-uniform float2 uvScale;
-uniform float2 uvOffset;
-
-uniform float4 falloffParams;
-uniform float falloffDepth;
-
-uniform float lightingInfluence;
-uniform float envReflection;
-// lane FXCHECK1: the game masks an effect's cube with the env mask's R (the _s specular); false = G, as before
-uniform bool envMaskR;
-// lane GLASSPANE2 (FXNORMALA1): the game's env cube is also x the normal map's alpha; true = the red (the old cube
-// without it, WW_FX_NORMALA_RED). Red sense, so a program that never sets it keeps the game's rule.
-uniform bool envNormalAlphaRed;
 
 static float3 LightDir;
 static float3 ViewDir;
@@ -117,32 +222,6 @@ static float4 fxResCov;
 static float4 fragColor;
 #endif
 
-// stage I/O: the members (locations, semantics) of the generated port, each under its GLSL declaration's #if
-struct SPIRV_Cross_Input
-{
-    WW_LOC(3) float3 LightDir : TEXCOORD3;
-    WW_LOC(4) float3 ViewDir : TEXCOORD4;
-    WW_LOC(8) float2 texCoord : TEXCOORD8;
-    WW_LOC(0) nointerpolation float4 A : TEXCOORD0;
-    WW_LOC(1) float4 C : TEXCOORD1;
-    WW_LOC(2) nointerpolation float4 D : TEXCOORD2;
-    WW_LOC(5) float3x3 btnMatrix : TEXCOORD5;
-    WW_LOC(9) nointerpolation float3x3 reflMatrix : TEXCOORD9;
-    float4 gl_FragCoord : SV_Position;
-    bool gl_FrontFacing : SV_IsFrontFace;
-};
-struct SPIRV_Cross_Output
-{
-    float4 fragColor : SV_Target0;
-#ifdef WW_FXRES
-    float4 fxResT : SV_Target1;
-#endif
-#ifdef WW_FXRES
-    float4 fxResCov : SV_Target2;
-#endif
-};
-
-
 #ifdef WW_CELLLIGHTS
 /* lane EFX2 (fo4_effectcell.frag; src/gl/celllights.h wwCellFxRed): the game's effect pixel shader in the
  * cell view, transcribed from Shaders011.fxp (docs/PRTP_PLAN.md 2q):
@@ -157,7 +236,7 @@ struct SPIRV_Cross_Output
  *   fog      = mix( c, fog colour, f ) for a blended effect, c x (1 - f) for an additive one; with the cell air on,
  *              the air as the surfaces take it, c T + L, or c T for an additive one (lane VOLAIR1, wwFogFx)
  * then the cell's imagespace on its own (an effect blends over a surface that already took the bloom). */
-#include "uniforms.src.hlsli"
+#include "uniforms.hlsli"
 #include "../air/lookdev_fog.hlsli"
 #ifdef WW_SUNSHADOW
 #include "../shadows/ww_sunshadow.hlsli"
@@ -167,27 +246,10 @@ struct SPIRV_Cross_Output
 #endif
 #include "../lights/cell_lights.hlsli"
 #ifndef WW_FX_DECALLIT
-/* MODULES1 R8-1 (bungo's fake volumetric rule: "Opacity gives the height, or rather 'depth' always"): a volumetric
- * card is a lump whose depth is its opacity, alpha 1 = half a UV unit of the card. Its normal is tilted down the
- * opacity's slope (Mikkelsen 2010, "Bump Mapping Unparametrized Surfaces on the GPU": the surface gradient from
- * screen derivatives), so a flat card shades toward a lamp like a mound. No texture tap: three derivative pairs.
- * With a normal map the two slopes ADD at weight 1 : 1 (Mikkelsen 2020, "Surface Gradient Based Bump Mapping
- * Framework": heights add, so their gradients add; both are slopes in the same view units): the map's gradient
- * against the card's face, N - n / ( n . N ), plus the opacity's, then one normalize.
- * fxLumpRed (WW_CELL_FXLOCAL_RED): 1 `face` = no opacity slope at all, 2 `mapalone` = a card with a normal map takes
- * the map alone (the first R8-1 commit), 4 `ball` = the UV ball stands in for the depth again (FX_PUFF_A). */
-uniform int fxLumpRed;
-/* MODULES1 round 9 (bungo: a mist card "is a slab of denser air"): a blended lit MESH card on the volumetric law takes
- * the light the air at its pixel scatters toward the eye and nothing else: the lamps x the air's phase, each in its own
- * colour with its own falloff (red by a red lamp, orange by a fire), + the sky's share under the record's cap, x its
- * opacity as density. No surface share (the wrapped diffuse of a lump: up to 4 x the air's scatter per lamp) and no GI
- * surface term (the volume's irradiance on an up face, uncapped: a bluish-white sum over warm lamps = a grey-white
- * bank). So a card is never brighter, nor of another hue, than thick air under the same lights. fxAirCard: 1 = a mesh
- * card (renderer.cpp), 0 = a particle system (still a lump). Red WW_CELL_FXLOCAL_RED=lump (fxLocalRed bit 4): the lump. */
-uniform int fxAirCard;
+
 float3 fxLumpNormal( float3 N, float3 Nf, float3 pv, float a )
 {
-	if ( or(( fxLumpRed & 1 ) != 0, ( hasNormalMap && ( fxLumpRed & 2 ) != 0 )) )
+	if ( or( ( fxLumpRed & 1 ) != 0, ( hasNormalMap && ( fxLumpRed & 2 ) != 0 ) ) )
 		return N;
 	if ( hasNormalMap ) {	// the map's normal as a slope on the face, then the opacity's slope on the same face
 		float3 n = N / max( dot( N, Nf ), 0.25 );
@@ -197,7 +259,7 @@ float3 fxLumpNormal( float3 N, float3 Nf, float3 pv, float a )
 		float det = dot( dpx, r1 );
 		float2 dux = ddx( texCoord.xy ), duy = ddy( texCoord.xy );
 		float duv = abs( dux.x * duy.y - dux.y * duy.x );
-		if ( or(abs( det ) < 1e-20, duv < 1e-20) )
+		if ( or( abs( det ) < 1e-20, duv < 1e-20 ) )
 			return normalize( n );
 		float L = 0.5 * sqrt( abs( det ) / duv );
 		return normalize( n - sign( det ) * L * ( ddx( a ) * r1 + ddy( a ) * r2 ) / abs( det ) );
@@ -207,7 +269,7 @@ float3 fxLumpNormal( float3 N, float3 Nf, float3 pv, float a )
 	float det = dot( dpx, r1 );
 	float2 dux = ddx( texCoord.xy ), duy = ddy( texCoord.xy );
 	float duv = abs( dux.x * duy.y - dux.y * duy.x );
-	if ( or(abs( det ) < 1e-20, duv < 1e-20) )
+	if ( or( abs( det ) < 1e-20, duv < 1e-20 ) )
 		return N;
 	float L = 0.5 * sqrt( abs( det ) / duv );	// half a UV unit in view units: the lump's height at alpha 1
 	return normalize( abs( det ) * N - sign( det ) * L * ( ddx( a ) * r1 + ddy( a ) * r2 ) );
@@ -223,34 +285,17 @@ float3 fxLumpNormal( float3 N, float3 Nf, float3 pv, float a )
 #include "../ao/cell_ao.hlsli"
 #endif
 
-uniform bool fxSoft;
-Texture2D<float4> fxDepth; SamplerState _fxDepth_sampler;		// the opaque pass's depth, the viewport's corner at texel 0
-uniform float fxSoftDepth;		// game units
-uniform float fxDistScale;		// view units -> game units
-uniform bool fxAdditive;
-uniform int fxRed;				// 2 nosoft, 4 nolin, 8 hide, 32 unbound (MODULES1 item 2)
-// lane DECALLIT1 (WW_CELL_DECALLIT_PROBE, gates only): an effect decal in a probe pass draws a white colour, opaque
-// where it shows, so probe 6 holds the light it takes (lit as the wall, or self-lit under the red)
-uniform bool fxDecalProbe;
-// lane GIDARK1: a lit effect outdoors drawn by this program (fo4_effectdecal / csm) takes the light of the spot it
-// stands in (fxRoomLitMul); cellFxBase = the game's lit-effect base (the weather's Effect Lighting x the sun scale)
-uniform bool fxRoomLit;
-uniform float3 cellFxBase;
+
+Texture2D<float4> fxDepth : register(t51, space0); SamplerState _fxDepth_sampler : register(s51, space0);		// the opaque pass's depth, the viewport's corner at texel 0
 // lane MODULES1 M3 (G7): the Effect Lighting law; cellFxEmitK / cellFxUnlitK live there
 #include "../lights/cell_fxlaw.hlsli"
-static float3 fxRoomShare = (float3)(1.0);	// probe 75
-// lane FXLIT1: this shape's model's placed lights (src/features/lights/cellfxlit.h)
-uniform int fxLitMode;			// 0 an unlit effect; 1 lit; red controls: 2 every light, 4 no 2.2 on the falloff, 8 self-lit
-uniform float4 fxLit;				// indices into cellLights, -1 = none
-uniform float4 fxLitScale;		// 1 (a red control's per-light ratio)
-uniform float3 fxLitId;			// probe 70: the model's serial + 1, 24 bits
-uniform float4 fxEmit;			// lane LIGHTS2 (XEMI1): the placement's emittance colour ^2.2 on an unlit effect; w 0 = none
+static float3 fxRoomShare = (float3)( 1.0 );	// probe 75
 
 // one placed light on a lit effect at world point P, as the game's lit effect shader sums it
 float3 cellFxLight( int i, float3 P )
 {
-	float4 t0 = cellLights.Load(i * CELL_TPL);	// lane FXLIT1: the stride is HEMI1's 8 texels a light
-	float4 t1 = cellLights.Load(i * CELL_TPL + 1);
+	float4 t0 = cellLights.Load( i * CELL_TPL );	// lane FXLIT1: the stride is HEMI1's 8 texels a light
+	float4 t1 = cellLights.Load( i * CELL_TPL + 1 );
 	float3 Lv = t0.xyz - P;
 	float d = length( Lv );
 	float q = clamp( d / max( t0.w, 0.001 ), 0.0, 1.0 );
@@ -259,10 +304,10 @@ float3 cellFxLight( int i, float3 P )
 		a = pow( a, 2.2 );
 	if ( cellLightPhys.x > 0.5 && ( fxLitMode & 4 ) == 0 )	// lane LIGHTPHYS1: the surfaces' physical curve, so effects and air agree
 		a = cellPhysFalloff( a, q, t0.w, float3( 0.0, 1.0, 2.0 ) );
-	float3 g = (float3)(1.0);	// lane LIGHTS5 (GOBO-FX): the light's pattern, as on surfaces (GOBO2: every shape)
-	float3 gAx = (float3)(0.0);
+	float3 g = (float3)( 1.0 );	// lane LIGHTS5 (GOBO-FX): the light's pattern, as on surfaces (GOBO2: every shape)
+	float3 gAx = (float3)( 0.0 );
 	if ( t1.w > -1.5 ) {	// a spot: the game's cone, its cosine + 0.001
-		float4 t2 = cellLights.Load(i * CELL_TPL + 2);
+		float4 t2 = cellLights.Load( i * CELL_TPL + 2 );
 		float c = clamp( dot( -Lv / max( d, 0.001 ), t2.xyz ), 0.0, 1.0 );
 		float base = clamp( 1.0 - ( 1.0 - c ) / max( 1.0 - ( t1.w + 0.001 ), 1e-4 ), 0.0, 1.0 );
 		a *= min( pow( base, max( t2.w, 1e-3 ) ), 1.0 );
@@ -279,10 +324,10 @@ float3 cellFxLit( float3 P )
 	// lane SUNCELL1 final: an exterior with no weather loaded has no sun to light it -- self-lit, as before
 	// MODULES1 R7-1: a blended lit card outdoors takes the local light: the surfaces' sun under its shadow + the ambient
 	bool loc = fxLocalOn() && !cellInterior && !fxAdditive;
-	if ( or(( fxLitMode & 8 ) != 0, ( !cellInterior && !cellHasDir && !loc )) )
-		return (float3)(1.0);
+	if ( or( ( fxLitMode & 8 ) != 0, ( !cellInterior && !cellHasDir && !loc ) ) )
+		return (float3)( 1.0 );
 	// R8-1: the ambient's share and the GI as a surface there (fxLocalSky, set by the caller; 1 and 0 before it)
-	float3 E = loc ? vpSun.rgb * fxLocalVis + cellAmbient( float3( 0.0, 0.0, 1.0 ), P ) FX_LOCAL_GI : cellHasDir ? cellDirColor : (float3)(0.0);
+	float3 E = loc ? vpSun.rgb * fxLocalVis + cellAmbient( float3( 0.0, 0.0, 1.0 ), P ) FX_LOCAL_GI : cellHasDir ? cellDirColor : (float3)( 0.0 );
 	if ( ( fxLitMode & 2 ) != 0 ) {
 		// flat on purpose: an effect's light has no hemisphere clip, which the cluster lists cull by
 		for ( int i = 0; i < cellLightCount; i++ )
@@ -290,16 +335,16 @@ float3 cellFxLit( float3 P )
 	} else {
 		for ( int k = 0; k < 4; k++ )
 			if ( fxLit[k] > -0.5 )
-				E += cellFxLight( (int)(fxLit[k] + 0.5), P ) * fxLitScale[k];
+				E += cellFxLight( int( fxLit[k] + 0.5 ), P ) * fxLitScale[k];
 	}
 	return fxLawMix( E, lightingInfluence, fxAdditive );	// MODULES1 M3: was mix( 1, E, lightingInfluence )
 }
 
 float cellFxFade()
 {
-	if ( or(!fxSoft, ( fxRed & 2 ) != 0) )
+	if ( or( !fxSoft, ( fxRed & 2 ) != 0 ) )
 		return 1.0;
-	float d = fxDepth.Load(int3((int2)(gl_FragCoord.xy) - viewportDimensions.xy, 0)).r;
+	float d = fxDepth.Load( int3(int2( gl_FragCoord.xy ) - viewportDimensions.xy, 0) ).r;
 	// view depth from the projection: w = B / (A + z_ndc)
 	float sceneW = projectionMatrix[3][2] / ( projectionMatrix[2][2] + ( 2.0 * d - 1.0 ) );
 	float k = fxDistScale / fxSoftDepth;
@@ -350,8 +395,8 @@ float3 fxDecalLin( float3 albedo, float3 normal )
 		else if ( cellGiSky )
 			color -= WW_FX_DECAL_SKYK * A.rgb * albedo;
 	}
-	cellExtSpec = (float3)(0.0);
-	float3 lit = cellLit( color, albedo, normal, Pv, Vv, 0.0, (float3)(0.0), 1.0, 0.0, (float3)(0.0), (float3)(0.0) );
+	cellExtSpec = (float3)( 0.0 );
+	float3 lit = cellLit( color, albedo, normal, Pv, Vv, 0.0, (float3)( 0.0 ), 1.0, 0.0, (float3)( 0.0 ), (float3)( 0.0 ) );
 	lit *= sqrt( cellAoFactor() );
 	return lit * lit;
 }
@@ -366,17 +411,17 @@ float3 fxDecalLin( float3 albedo, float3 normal )
  * The model's placed lights add as before. Red WW_CELL_FXROOM_RED=game draws the game's base (fo4_effectcell). */
 float3 fxRoomLitMul( float3 Pv, float3 normal )
 {
-	if ( or(( fxLitMode & 8 ) != 0, !cellHasDir) )
-		return (float3)(1.0);
+	if ( or( ( fxLitMode & 8 ) != 0, !cellHasDir ) )
+		return (float3)( 1.0 );
 	float3 Pw = cellWorldPos( Pv );
 	float3 Nw = cellWorldDir( normal );
 	float nl = max( dot( Nw, normalize( cellDirTo ) ), 0.0 );
 	float3 amb = cellExtDalc ? cellAmbient( Nw, Pw ) : A.rgb * A.rgb;
 	float k = cellGiSkyK( Pw, Nw );
-	float3 gi = CELL_GI_UP ? cellGiE( Pw, Nw ) * 0.31830989 : (float3)(0.0);	// lane PRTOFF1: the PRT's grid or the ray-traced volume
+	float3 gi = CELL_GI_UP ? cellGiE( Pw, Nw ) * 0.31830989 : (float3)( 0.0 );	// lane PRTOFF1: the PRT's grid or the ray-traced volume
 	float3 open = cellDirColor * nl + amb;
 	float3 here = cellDirColor * nl * cellDirVis + amb * ( 1.0 - k ) + gi;
-	fxRoomShare = clamp( here / max( open, (float3)(1e-5) ), (float3)(0.0), (float3)(4.0) );
+	fxRoomShare = clamp( here / max( open, (float3)( 1e-5 ) ), (float3)( 0.0 ), (float3)( 4.0 ) );
 	float3 E = cellFxBase * fxRoomShare;
 	if ( ( fxLitMode & 2 ) != 0 ) {
 		// flat on purpose: an effect's light has no hemisphere clip, which the cluster lists cull by
@@ -385,7 +430,7 @@ float3 fxRoomLitMul( float3 Pv, float3 normal )
 	} else {
 		for ( int j = 0; j < 4; j++ )
 			if ( fxLit[j] > -0.5 )
-				E += cellFxLight( (int)(fxLit[j] + 0.5), Pw ) * fxLitScale[j];
+				E += cellFxLight( int( fxLit[j] + 0.5 ), Pw ) * fxLitScale[j];
 	}
 	return fxLawMix( E, lightingInfluence, fxAdditive );	// MODULES1 M3: was mix( 1, E, lightingInfluence )
 }
@@ -399,28 +444,28 @@ float3 fxRoomLitMul( float3 Pv, float3 normal )
  * occlusion: a surface h in front of the card takes it all), so no hard line where a card meets the ground or a wall. */
 #include "../air/cell_volpart.hlsli"
 
-uniform float2 vpDumpScale;		// gates only: the full-size pixels a quarter-size dump pixel stands for (0 off)
+
 
 // the soft slab's inputs: (the scene's view depth, the card's, the half-depth h) in view units
 float3 vpCardSlab()
 {
-	int2 px = vpDumpScale.x > 0.0 ? (int2)(gl_FragCoord.xy * vpDumpScale) : (int2)(gl_FragCoord.xy) - viewportDimensions.xy;
-	float d = fxDepth.Load(int3(px, 0)).r;
+	int2 px = vpDumpScale.x > 0.0 ? int2( gl_FragCoord.xy * vpDumpScale ) : int2( gl_FragCoord.xy ) - viewportDimensions.xy;
+	float d = fxDepth.Load( int3(px, 0) ).r;
 	float sceneW = projectionMatrix[3][2] / ( projectionMatrix[2][2] + ( 2.0 * d - 1.0 ) );
 	return float3( sceneW, 1.0 / gl_FragCoord.w, max( fxSoftDepth, 1.0 ) / max( fxDistScale, 1e-6 ) );
 }
 
 float vpCardSoft()
 {
-	if ( or(!fxSoft, ( volPartRed & 4 ) != 0) )
+	if ( or( !fxSoft, ( volPartRed & 4 ) != 0 ) )
 		return 1.0;
 	float3 s = vpCardSlab();
 	return clamp( ( s.x - ( s.y - s.z ) ) / ( 2.0 * s.z ), 0.0, 1.0 );
 }
 #endif
 
-static float3 ViewDir_norm;
-static float3x3 btnMatrix_norm;
+static float3 ViewDir_norm	/* = normalize( ViewDir ) : set in main() after the stage inputs */;
+static float3x3 btnMatrix_norm	/* = float3x3( normalize( btnMatrix[0] ), normalize( btnMatrix[1] ), normalize( btnMatrix[2] ) ) : set in main() after the stage inputs */;
 
 
 #ifdef WW_FXRES
@@ -434,9 +479,9 @@ void frag_main()
 #endif
 	float2 offset = texCoord.xy * uvScale + uvOffset;
 
-	float4 baseMap = BaseMap.Sample(_BaseMap_sampler, offset);
-	float4 normalMap = NormalMap.Sample(_NormalMap_sampler, offset);
-	float4 specMap = SpecularMap.Sample(_SpecularMap_sampler, offset);
+	float4 baseMap = BaseMap.Sample( _BaseMap_sampler, offset );
+	float4 normalMap = NormalMap.Sample( _NormalMap_sampler, offset );
+	float4 specMap = SpecularMap.Sample( _SpecularMap_sampler, offset );
 
 	float3 normal = normalize(normalMap.rgb * 2.0 - 1.0);
 	// Calculate missing blue channel
@@ -467,7 +512,7 @@ void frag_main()
 
 	// Falloff
 	float falloff = 1.0;
-	if ( or(useFalloff, hasRGBFalloff) ) {
+	if ( or( useFalloff, hasRGBFalloff ) ) {
 		falloff = smoothstep( falloffParams.x, falloffParams.y, abs(dot(normal, V)) );
 		falloff = lerp( max(falloffParams.z, 0.0), min(falloffParams.w, 1.0), falloff );
 
@@ -509,10 +554,10 @@ void frag_main()
 #define WW_FX_FADE
 #endif
 	if ( greyscaleColor )
-		color.rgb = GreyscaleMap.SampleLevel(_GreyscaleMap_sampler, float2( BaseMap.Sample(_BaseMap_sampler, offset).g, baseColor.r * C.r * falloff WW_FX_FADE ), 0.0).rgb;
+		color.rgb = GreyscaleMap.SampleLevel( _GreyscaleMap_sampler, float2( BaseMap.Sample( _BaseMap_sampler, offset ).g, baseColor.r * C.r * falloff WW_FX_FADE ), 0.0 ).rgb;
 
 	if ( greyscaleAlpha )
-		color.a = GreyscaleMap.SampleLevel(_GreyscaleMap_sampler, float2( BaseMap.Sample(_BaseMap_sampler, offset).a, color.a WW_FX_FADE ), 0.0).a;
+		color.a = GreyscaleMap.SampleLevel( _GreyscaleMap_sampler, float2( BaseMap.Sample( _BaseMap_sampler, offset ).a, color.a WW_FX_FADE ), 0.0 ).a;
 
 	if ( alphaFlags > 0 ) {
 		// 0: always, 1: <, 2: ==, 3: <=, 4: >, 5: !=, 6: >=, 7: never
@@ -542,7 +587,7 @@ void frag_main()
 	}
 
 	// Environment
-	float4 cube = CubeMap.Sample(_CubeMap_sampler, reflectedWS);
+	float4 cube = CubeMap.Sample( _CubeMap_sampler, reflectedWS );
 	if ( hasCubeMap ) {
 		cube.rgb *= envReflection * s;
 		if ( !envNormalAlphaRed )
@@ -570,7 +615,7 @@ void frag_main()
 #define WW_FX_SUNVIS_ONCE 1
 #endif
 	if ( cellOn && fxRoomLit ) {	// lane GIDARK1: a lit effect outdoors, lit by the spot it stands in (fxRoomLitMul)
-		float3 lin = ( fxRed & 4 ) != 0 ? max( color.rgb, (float3)(0.0) ) : pow( max( color.rgb, (float3)(0.0) ), (float3)(2.2) );
+		float3 lin = ( fxRed & 4 ) != 0 ? max( color.rgb, (float3)( 0.0 ) ) : pow( max( color.rgb, (float3)( 0.0 ) ), (float3)( 2.2 ) );
 		float3 Ng = normalize( btnMatrix[2] );	// the face the eye sees
 		if ( !gl_FrontFacing )
 			Ng = -Ng;
@@ -584,7 +629,7 @@ void frag_main()
 			float3 v = cellProbe == 75 ? fxRoomShare : m;
 			float3 q = cellProbe >= 73 ? floor( clamp( v * 0.25, 0.0, 1.0 ) * 65535.0 + 0.5 )
 				: clamp( floor( P - cellCenter + 32768.0 ), 0.0, 65535.0 );
-			bool high = cellProbe == 71 || cellProbe == 73 || cellProbe == 75;
+			bool high = or( or( cellProbe == 71, cellProbe == 73 ), cellProbe == 75 );
 			fragColor = float4( cellProbe == 70 ? fxLitId : high ? floor( q / 256.0 ) / 255.0 : mod( q, 256.0 ) / 255.0, 1.0 );
 			return;
 		}
@@ -595,15 +640,15 @@ void frag_main()
 		if ( cellProbe == 6 )
 			fragColor = float4( lin * cellProbeGain, color.a );
 		else
-			fragColor = float4( cellIsLinear ? lin : cellIsOn ? cellImageSpace( sqrt( lin ) ) : pow( lin, (float3)(1.0 / 2.2) ), color.a );
+			fragColor = float4( cellIsLinear ? lin : cellIsOn ? cellImageSpace( sqrt( lin ) ) : pow( lin, (float3)( 1.0 / 2.2 ) ), color.a );
 		return;
 	}
 	if ( cellOn ) {
-		float3 alb = max( color.rgb, (float3)(0.0) );
+		float3 alb = max( color.rgb, (float3)( 0.0 ) );
 		if ( fxDecalProbe ) {
 			if ( color.a < 0.1 )
 				discard;
-			alb = (float3)(1.0);
+			alb = (float3)( 1.0 );
 		}
 		float3 Ng = normalize( btnMatrix[2] );	// the decal's plane: the surface it lies on
 		if ( !gl_FrontFacing )
@@ -612,13 +657,13 @@ void frag_main()
 		cellDirVis = wwSunShadow( -ViewDir );
 #endif
 		float3 lin = fxDecalLin( alb, Ng );
-		if ( fogOn || wwApOn() )	// lane SKYA: the sky's aerial perspective with the fog off too
-			lin = max( wwFog( lin, -ViewDir ), (float3)(0.0) );
+		if ( or( fogOn, wwApOn() ) )	// lane SKYA: the sky's aerial perspective with the fog off too
+			lin = max( wwFog( lin, -ViewDir ), (float3)( 0.0 ) );
 		float a = fxDecalProbe ? 1.0 : color.a;
 		if ( cellProbe == 6 )
 			fragColor = float4( lin * cellProbeGain, a );
 		else
-			fragColor = float4( cellIsLinear ? lin : cellIsOn ? cellImageSpace( sqrt( lin ) ) : pow( lin, (float3)(1.0 / 2.2) ), a );
+			fragColor = float4( cellIsLinear ? lin : cellIsOn ? cellImageSpace( sqrt( lin ) ) : pow( lin, (float3)( 1.0 / 2.2 ) ), a );
 		return;
 	}
 #endif
@@ -631,10 +676,10 @@ void frag_main()
 	if ( cellOn && fxDecalProbe ) {
 		if ( color.a < 0.1 )
 			discard;
-		color = (float4)(1.0);
+		color = (float4)( 1.0 );
 	}
 	if ( cellOn ) {
-		float3 lin = ( fxRed & 4 ) != 0 ? max( color.rgb, (float3)(0.0) ) : pow( max( color.rgb, (float3)(0.0) ), (float3)(2.2) );
+		float3 lin = ( fxRed & 4 ) != 0 ? max( color.rgb, (float3)( 0.0 ) ) : pow( max( color.rgb, (float3)( 0.0 ) ), (float3)( 2.2 ) );
 		if ( fxLitMode != 0 ) {	// lane FXLIT1: a lit effect, in linear light, before the fog
 			float3 P = cellWorldPos( -ViewDir );
 #ifndef WW_FX_DECALLIT
@@ -647,7 +692,7 @@ void frag_main()
 				// its probes, opaque: 70 the model, 71 / 72 the position (as probes 2 / 3), 73 / 74 the multiplier / 4
 				float3 q = cellProbe >= 73 ? floor( clamp( m * 0.25, 0.0, 1.0 ) * 65535.0 + 0.5 )
 					: clamp( floor( P - cellCenter + 32768.0 ), 0.0, 65535.0 );
-				bool high = cellProbe == 71 || cellProbe == 73;
+				bool high = or( cellProbe == 71, cellProbe == 73 );
 				fragColor = float4( cellProbe == 70 ? fxLitId : high ? floor( q / 256.0 ) / 255.0 : mod( q, 256.0 ) / 255.0, 1.0 );
 				return;
 			}
@@ -681,7 +726,7 @@ void frag_main()
 				vpAirCardA = ( fxLocalRed & 8 ) == 0 ? clamp( aThick, 0.0, 1.0 ) : 0.0;	// FARWATER1 late item 4: lamps' multiple scatter
 #endif
 				aThick = 0.0;
-				fxLocalGi = (float3)(0.0);
+				fxLocalGi = (float3)( 0.0 );
 			}
 #endif
 			if ( fxLitMode != 0 )
@@ -708,18 +753,18 @@ void frag_main()
 		 * ~25000, so a card brighter than ~2.6 overflows the RGBA16F frame to inf and TAA/bloom turn it into NaN = black.
 		 * The light is kept under half the half-float range and a non-finite value draws nothing. Red WW_CELL_FX_RED=unbound. */
 		if ( ( fxRed & 32 ) == 0 ) {
-			if ( or(or(any( isnan( lin ) ), any( isinf( lin ) )), isnan( color.a )) ) {
-				lin = (float3)(0.0);
+			if ( or( or( any( isnan( lin ) ), any( isinf( lin ) ) ), isnan( color.a ) ) ) {
+				lin = (float3)( 0.0 );
 				color.a = 0.0;
 			}
-			lin = min( lin, (float3)(32768.0) );
+			lin = min( lin, (float3)( 32768.0 ) );
 		}
 		// probe 6 (the imagespace's measure): the linear value, blended as drawn
 		if ( cellProbe == 6 )
 			fragColor = float4( lin * cellProbeGain, color.a );
 		else
 			fragColor = float4( cellIsLinear ? lin	// lane HDR1: linear, summed in the HDR frame, tone-mapped once
-				: cellIsOn ? cellImageSpace( sqrt( lin ) ) : pow( lin, (float3)(1.0 / 2.2) ), color.a );
+				: cellIsOn ? cellImageSpace( sqrt( lin ) ) : pow( lin, (float3)( 1.0 / 2.2 ) ), color.a );
 		return;
 	}
 #endif
@@ -732,35 +777,60 @@ void frag_main()
 {
 	wwFxResMain();
 	fxResT = float4( 0.0, 0.0, 0.0, fragColor.a );
-	fxResCov = (float4)(1.0);
+	fxResCov = (float4)( 1.0 );
 }
 #endif
 
-// entry: copies the stage inputs into the GLSL-named globals, runs the GLSL main, returns the outputs
+struct SPIRV_Cross_Input
+{
+    WW_LOC(3) float3 LightDir : TEXCOORD3;
+    WW_LOC(4) float3 ViewDir : TEXCOORD4;
+    WW_LOC(8) float2 texCoord : TEXCOORD8;
+    WW_LOC(0) nointerpolation float4 A : TEXCOORD0;
+    WW_LOC(1) float4 C : TEXCOORD1;
+    WW_LOC(2) nointerpolation float4 D : TEXCOORD2;
+    WW_LOC(5) float3x3 btnMatrix : TEXCOORD5;
+    WW_LOC(9) nointerpolation float3x3 reflMatrix : TEXCOORD9;
+    bool gl_FrontFacing : SV_IsFrontFace;
+    float4 gl_FragCoord : SV_Position;
+};
+
+struct SPIRV_Cross_Output
+{
+#if defined(WW_FXRES)
+    float4 fragColor : SV_Target0;
+    float4 fxResT : SV_Target1;
+    float4 fxResCov : SV_Target2;
+#endif
+#if !(defined(WW_FXRES))
+    float4 fragColor : SV_Target0;
+#endif
+};
+
 SPIRV_Cross_Output main(SPIRV_Cross_Input stage_input)
 {
-    gl_FrontFacing = stage_input.gl_FrontFacing;
-    ViewDir = stage_input.ViewDir;
-    btnMatrix = stage_input.btnMatrix;
-    texCoord = stage_input.texCoord;
-    LightDir = stage_input.LightDir;
-    reflMatrix = stage_input.reflMatrix;
-    C = stage_input.C;
-    A = stage_input.A;
-    D = stage_input.D;
     gl_FragCoord = stage_input.gl_FragCoord;
     gl_FragCoord.w = 1.0 / gl_FragCoord.w;
-    // the GLSL global initializers, which GLSL runs here (they read inputs, uniforms or globals)
+    LightDir = stage_input.LightDir;
+    ViewDir = stage_input.ViewDir;
+    texCoord = stage_input.texCoord;
+    A = stage_input.A;
+    C = stage_input.C;
+    D = stage_input.D;
+    btnMatrix = stage_input.btnMatrix;
+    reflMatrix = stage_input.reflMatrix;
+    gl_FrontFacing = stage_input.gl_FrontFacing;
     ViewDir_norm = normalize( ViewDir );
     btnMatrix_norm = float3x3( normalize( btnMatrix[0] ), normalize( btnMatrix[1] ), normalize( btnMatrix[2] ) );
     frag_main();
     SPIRV_Cross_Output stage_output;
+#if defined(WW_FXRES)
     stage_output.fragColor = fragColor;
-#ifdef WW_FXRES
     stage_output.fxResT = fxResT;
-#endif
-#ifdef WW_FXRES
     stage_output.fxResCov = fxResCov;
+#endif
+#if !(defined(WW_FXRES))
+    stage_output.fragColor = fragColor;
 #endif
     return stage_output;
 }

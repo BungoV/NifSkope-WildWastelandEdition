@@ -1,43 +1,33 @@
-// HLSL source of lookdev_dome.frag, translated by notes/hlslsrc1/tools/glsl2hlsl.py (text level: comments, names and
-// #if variants kept from the GLSL). Matrices hold GL's columns as rows (row_major blocks), so a GL product A * B
-// reads mul(B, A).
+// HLSL source of lookdev_dome.frag (fragment shader), lane HLSLSRC1 (notes/hlsltools/glsl2hlsl.py): one readable file for every
+// variant, the GLSL's comments, names and order kept. Loose uniforms are the LooseUniforms cbuffer (b31).
+// variants: #if none (the loader's defines; res/shaders/hlsl/variants.txt lists the sets built)
 // profile: ps_6_0
-// variants: #if (the loader's WW_* defines select the variant; built with -D per set)
 #include "CoreBindingsVk.hlsli"
-#include "GlslCompat.hlsli"
-#define WW_STAGE_PS 1
-
+#define WW_HLSL_SRC 1	// the shared .hlsli files give their readable half
 /* Lookdev weather sky dome (lane PBRWX1, spec_weather_sky.md s2.1):
  * linear = SkyScale * (r*Horizon + g*SkyLower + b*SkyUpper), each colour the
  * CIELab-blended NAM0 row to the power 2.2 (done on the CPU). Out through the
  * Studio output path. Not fogged (ruling). */
 
-#include "uniforms.src.hlsli"
+#include "uniforms.hlsli"
 
-uniform float3 skyH;
-uniform float3 skyL;
-uniform float3 skyU;
-uniform float skyScale;
-uniform float alphaMul;
-uniform float sceneExposure;
-uniform int viewTransform;
+cbuffer LooseUniforms : register(b31, space0)
+{
+	float3 skyH;
+	float3 skyL;
+	float3 skyU;
+	float skyScale;
+	float alphaMul;
+	float sceneExposure;
+	int viewTransform;
+};
+
 
 static float4 vcol;
 
 static float4 fragColor;
 
-// stage I/O: the members (locations, semantics) of the generated port, each under its GLSL declaration's #if
-struct SPIRV_Cross_Input
-{
-    float4 vcol : TEXCOORD0;
-};
-struct SPIRV_Cross_Output
-{
-    float4 fragColor : SV_Target0;
-};
-
-
-#include "lookdev_output.src.hlsli"
+#include "lookdev_output.hlsli"
 
 void frag_main()
 {
@@ -45,7 +35,16 @@ void frag_main()
 	fragColor = float4( studioOutput( c ), alphaMul );
 }
 
-// entry: copies the stage inputs into the GLSL-named globals, runs the GLSL main, returns the outputs
+struct SPIRV_Cross_Input
+{
+    float4 vcol : TEXCOORD0;
+};
+
+struct SPIRV_Cross_Output
+{
+    float4 fragColor : SV_Target0;
+};
+
 SPIRV_Cross_Output main(SPIRV_Cross_Input stage_input)
 {
     vcol = stage_input.vcol;

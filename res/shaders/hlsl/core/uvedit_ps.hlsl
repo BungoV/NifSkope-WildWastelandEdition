@@ -1,63 +1,47 @@
-// HLSL source of uvedit.frag, translated by notes/hlslsrc1/tools/glsl2hlsl.py (text level: comments, names and
-// #if variants kept from the GLSL). Matrices hold GL's columns as rows (row_major blocks), so a GL product A * B
-// reads mul(B, A).
+// HLSL source of uvedit.frag (fragment shader), lane HLSLSRC1 (notes/hlsltools/glsl2hlsl.py): one readable file for every
+// variant, the GLSL's comments, names and order kept. Loose uniforms are the LooseUniforms cbuffer (b31).
+// variants: #if none (the loader's defines; res/shaders/hlsl/variants.txt lists the sets built)
 // profile: ps_6_0
-// variants: #if (the loader's WW_* defines select the variant; built with -D per set)
 #include "CoreBindingsVk.hlsli"
-#include "GlslCompat.hlsli"
-#define WW_STAGE_PS 1
+#define WW_HLSL_SRC 1	// the shared .hlsli files give their readable half
+Texture2D<float4> BaseMap : register(t0, space0); SamplerState _BaseMap_sampler : register(s0, space0);
+cbuffer LooseUniforms : register(b31, space0)
+{
+	//  0 = no color conversion
+	//  1 = sRGB texture
+	//  2 = unsigned BC5 normal map
+	//  3 = signed BC5 normal map
+	// +4 = disable alpha channel
+	int textureColorMode;
+	float2 uvCenter;
+	float4 uvScaleAndOffset;
+	float uvRotation;
+	float2 pixelScale;
+	float4 gridColors[3];
+	float3 gridLineWidths;
+	bool gridEnabled[3];
+	// zoom-adaptive base subdivision (lines per UV unit, may be < 1 when zoomed
+	// far out); the finer levels are fixed x8 / x64 multiples of it
+	float gridBaseDiv;
+	float4 backgroundColor;
+	float2 textureColorScale;
+	// 0 = repeat the image across every tile (legacy default when unset);
+	// 1 = show only the 0-1 tile, dark outside (Blender default)
+	int tileMode;
+	// texture-pixel grid: xy = texture resolution in texels, 0 = disabled;
+	// z = line alpha, w = fade-in start (view UV span below which it appears)
+	float4 pixelGrid;
+};
 
-Texture2D<float4> BaseMap; SamplerState _BaseMap_sampler;
-
-//  0 = no color conversion
-//  1 = sRGB texture
-//  2 = unsigned BC5 normal map
-//  3 = signed BC5 normal map
-// +4 = disable alpha channel
-uniform int textureColorMode;
-
-uniform float2 uvCenter;
-uniform float4 uvScaleAndOffset;
-uniform float uvRotation;
-
-uniform float2 pixelScale;
-
-uniform float4 gridColors[3];
-uniform float3 gridLineWidths;
-uniform bool gridEnabled[3];
-// zoom-adaptive base subdivision (lines per UV unit, may be < 1 when zoomed
-// far out); the finer levels are fixed x8 / x64 multiples of it
-uniform float gridBaseDiv;
-
-uniform float4 backgroundColor;
-uniform float2 textureColorScale;
-
-// 0 = repeat the image across every tile (legacy default when unset);
-// 1 = show only the 0-1 tile, dark outside (Blender default)
-uniform int tileMode;
-// texture-pixel grid: xy = texture resolution in texels, 0 = disabled;
-// z = line alpha, w = fade-in start (view UV span below which it appears)
-uniform float4 pixelGrid;
 
 static float2 texCoord;
 
 static float4 fragColor;
 
-// stage I/O: the members (locations, semantics) of the generated port, each under its GLSL declaration's #if
-struct SPIRV_Cross_Input
-{
-    float2 texCoord : TEXCOORD0;
-};
-struct SPIRV_Cross_Output
-{
-    float4 fragColor : SV_Target0;
-};
-
-
 
 float4 srgbCompress( float4 c )
 {
-	float3	tmp = max( c.rgb, (float3)(0.0) ) + 0.000858025;
+	float3	tmp = max( c.rgb, (float3)( 0.0 ) ) + 0.000858025;
 	float3	tmp1 = tmp;
 	float3	tmp2 = tmp * tmp;
 	tmp = rsqrt( tmp ) * tmp1;
@@ -73,9 +57,9 @@ float3 drawGridLines( float3 color, float x, float s )
 	// its lines stay readable at any distance, finer ×8 levels fade in when
 	// zoomed (gridEnabled/gridColors alpha are driven host-side)
 	float3	divs = max( gridBaseDiv, 1.0e-9 ) * float3( 1.0, 8.0, 64.0 );
-	float3	f = (float3)(x) * divs;
+	float3	f = (float3)( x ) * divs;
 	f = abs( f - round( f ) ) / divs * s;
-	f = max( f - ( gridLineWidths * 0.5 - 0.5 ), (float3)(0.0) );
+	f = max( f - ( gridLineWidths * 0.5 - 0.5 ), (float3)( 0.0 ) );
 	if ( gridEnabled[0] && f.x < 1.0 )
 		return lerp( color, gridColors[0].rgb, ( cos( f.x * 3.14159265 ) * 0.5 + 0.5 ) * gridColors[0].a );
 	if ( gridEnabled[1] && f.y < 1.0 )
@@ -89,7 +73,7 @@ float3 drawGridLines( float3 color, float x, float s )
 // edge is, so it only firms up when zoomed in enough to matter
 float3 drawPixelGrid( float3 color )
 {
-	if ( or(pixelGrid.x < 0.5, pixelGrid.y < 0.5) )
+	if ( or( pixelGrid.x < 0.5, pixelGrid.y < 0.5 ) )
 		return color;
 	float2	texel = texCoord.xy * pixelGrid.xy;
 	float2	d = abs( texel - round( texel ) );
@@ -99,13 +83,13 @@ float3 drawPixelGrid( float3 color )
 	float	vis = clamp( ( min( px.x, px.y ) - 2.0 ) * 0.5, 0.0, 1.0 );
 	if ( vis <= 0.0 )
 		return color;
-	float	line_ = 1.0 - smoothstep( 0.0, 1.0, min( d.x * px.x, d.y * px.y ) );
-	return lerp( color, (float3)(1.0), line_ * pixelGrid.z * vis );
+	float	lineWw = 1.0 - smoothstep( 0.0, 1.0, min( d.x * px.x, d.y * px.y ) );
+	return lerp( color, (float3)( 1.0 ), lineWw * pixelGrid.z * vis );
 }
 
 void frag_main()
 {
-	float4	color = (float4)(0.0);
+	float4	color = (float4)( 0.0 );
 
 	bool	inTile = texCoord.x >= -1.0 && texCoord.x <= 2.0 && texCoord.y >= -1.0 && texCoord.y <= 2.0;
 	if ( tileMode == 1 )
@@ -117,7 +101,7 @@ void frag_main()
 		offs = float2( offs.x * r_c - offs.y * r_s, offs.x * r_s + offs.y * r_c ) * uvScaleAndOffset.xy;
 		offs = offs + uvCenter + uvScaleAndOffset.zw;
 
-		color = BaseMap.Sample(_BaseMap_sampler, offs);
+		color = BaseMap.Sample( _BaseMap_sampler, offs );
 
 		if ( ( textureColorMode & 2 ) != 0 ) {
 			// BC5 normal map
@@ -145,8 +129,7 @@ void frag_main()
 
 	// When not repeating, confine grid + pixel lines to the 0-1 tile (Blender):
 	// outside is plain background, no lines.
-	bool inGridTile = tileMode != 1
-		|| ( texCoord.x >= 0.0 && texCoord.x <= 1.0 && texCoord.y >= 0.0 && texCoord.y <= 1.0 );
+	bool inGridTile = or( tileMode != 1, ( texCoord.x >= 0.0 && texCoord.x <= 1.0 && texCoord.y >= 0.0 && texCoord.y <= 1.0 ) );
 	if ( inGridTile ) {
 		color.rgb = drawPixelGrid( color.rgb );
 		color.rgb = drawGridLines( drawGridLines( color.rgb, texCoord.x, pixelScale.x ), texCoord.y, pixelScale.y );
@@ -155,7 +138,16 @@ void frag_main()
 	fragColor = color;
 }
 
-// entry: copies the stage inputs into the GLSL-named globals, runs the GLSL main, returns the outputs
+struct SPIRV_Cross_Input
+{
+    float2 texCoord : TEXCOORD0;
+};
+
+struct SPIRV_Cross_Output
+{
+    float4 fragColor : SV_Target0;
+};
+
 SPIRV_Cross_Output main(SPIRV_Cross_Input stage_input)
 {
     texCoord = stage_input.texCoord;
