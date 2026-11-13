@@ -284,6 +284,50 @@ struct SkyStat
 };
 SkyStat takeSkyStat();
 
+/* Lane VKLIGHT1 (plan rows L1-L3): AO (ao_vk.hlsl: gbuf, 4 mips, raw, across, fin), the contact shadow lines
+ * (contact_vk.hlsl) and the SSGI cast (ssgi_vk.hlsl) as Vulkan compute on the present device. The caller lists GL's own
+ * textures and the dispatches its GL stages would draw; lightRun copies the `in` textures into shared twins, GL signals,
+ * the worker records the dispatches (LightBindingsVk.hlsli's set, a 128-byte push block each), GL waits and copies the
+ * `out` twins back into GL's textures, so every consumer reads what it read before. false: why; nothing changed (GL draws
+ * its stages). Reds WW_VKVIEW_AO_RED / _CONTACT_RED / _SSGI_RED = 1 (or WW_VKVIEW off): GL. */
+enum LightPass { LightAo = 0, LightContact = 1, LightSsgi = 2, LightPasses = 3 };
+enum LightKernel { LightAoGbuf = 0, LightAoMip, LightAoRaw, LightAoBlur, LightAoBlurF, LightContactK, LightSsgiK, LightKernels };
+struct LightImage
+{
+	unsigned tex = 0;              //!< GL's texture (GL_TEXTURE_2D)
+	unsigned glFmt = 0;            //!< its internal format: RGBA32F / RGBA16F / RG32F / R32F / R8 / RG8
+	int w = 0, h = 0, levels = 1;  //!< levels > 1: every level is copied in (an input only)
+	bool in = false, out = false;  //!< copied into the twin before / back into GL's texture after
+};
+struct LightDispatch
+{
+	int kernel = 0;
+	std::uint8_t pc[128] = {};     //!< LpxJob
+	int out0 = -1, out1 = -1;      //!< image indices (storage targets)
+	int t[5] = { -1, -1, -1, -1, -1 };  //!< sampled images (-1: unbound)
+	int gx = 0, gy = 0;            //!< gx > 0: these groups; else 8x8 groups over out0
+};
+struct LightRun
+{
+	int pass = 0;
+	std::vector<LightImage> img;
+	std::vector<LightDispatch> d;
+	std::vector<std::uint8_t> buf; //!< binding 9 (the contact bands); empty: 256 zero bytes
+};
+//! GL current, its inputs drawn: the dispatches run on Vulkan and the outputs are back in GL's textures
+bool lightRun( const LightRun & t, std::string & why );
+//! a frame whose pass stayed on GL while it was wanted, and why (the telemetry)
+void lightOnGl( int pass, const char * why );
+struct LightStat
+{
+	int runs = 0, gl = 0, fails = 0;   //!< since the last take
+	double cpuMs = 0.0, maxMs = 0.0;   //!< the drawing thread's lightRun ms
+	std::string glWhy, failWhy;
+	int pipelines = 0;
+	double buildMs = 0.0;
+};
+LightStat takeLightStat( int pass );
+
 }
 
 #ifndef WW_VKPRESENT_NO_QT
@@ -304,5 +348,7 @@ bool toneWanted();
 /* lane VKSHARE1: a pass's targets go on the present device this frame (sharedTarget): the view on Vulkan with its size
  * settled (viewFbo), and the pass's red (redEnv=1) unset */
 bool shareWanted( const char * redEnv );
+//! lane VKLIGHT1: the pass's route line ("vk ao:", "vk contact:", "vk ssgi:"), one a 5 s window while on Vulkan
+void lightSay( int pass, bool wanted, const char * glWhy );
 }
 #endif

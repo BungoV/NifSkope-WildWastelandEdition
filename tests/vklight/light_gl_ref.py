@@ -324,7 +324,7 @@ def ao_chain(name, srcd, W, H, depth, proj, unit, zlin_route, angles, no_reset, 
 
 def ao_main():
     W, H, px, proj, depth = load_dump()
-    srcd = os.path.join(OUT, 'in_real')
+    srcd = os.path.join(OUT, 'in_real_ao')
     os.makedirs(srcd, exist_ok=True)
     put(os.path.join(srcd, 'depth.bin'), depth, W, H)
     print('real input %s %dx%d, sky %.3f' % (HDR, W, H, float((depth >= 1.0).mean())))
@@ -342,7 +342,7 @@ def ao_main():
         sd[y0:y0 + rng.integers(5, 60), x0:x0 + rng.integers(5, 80)] -= np.float32(rng.uniform(0.0002, 0.0008))
     sd[: sh // 7] = 1.0
     sd[:, : 3] = 1.0
-    sdir = os.path.join(OUT, 'in_syn')
+    sdir = os.path.join(OUT, 'in_syn_ao')
     os.makedirs(sdir, exist_ok=True)
     put(os.path.join(sdir, 'depth.bin'), sd, sw, sh)
     ao_chain('ao_S', sdir, sw, sh, sd, proj, 1.0, False, 6, 0, False, [])
@@ -466,7 +466,7 @@ def contact_job(name, srcd, gb, W, H, proj, lv, scale, samples, reach_d, time_it
 
 def contact_main():
     W, H, px, proj, depth = load_dump()
-    srcd = os.path.join(OUT, 'in_real')
+    srcd = os.path.join(OUT, 'in_real_ct')
     os.makedirs(srcd, exist_ok=True)
     gb = gl_gbuf(srcd, W, H, depth, proj)
     # the default tier (96 samples, full mask) with the cascades' reach, a sun up-right in front of the camera
@@ -485,7 +485,7 @@ def contact_main():
         sdp[y0:y0 + rng.integers(5, 60), x0:x0 + rng.integers(5, 80)] -= np.float32(rng.uniform(0.0002, 0.0008))
     sdp[: sh // 7] = 1.0
     sdp[:, : 3] = 1.0
-    sdir = os.path.join(OUT, 'in_syn')
+    sdir = os.path.join(OUT, 'in_syn_ct')
     os.makedirs(sdir, exist_ok=True)
     sg = gl_gbuf(sdir, sw, sh, sdp, proj)
     contact_job('ct_S', sdir, sg, sw, sh, proj, (-0.2, 0.3, -0.93), 1, 96, 3000.0, False, [])
@@ -547,7 +547,7 @@ def ssgi_main():
     NOISE = half(nz)
     os.makedirs(OUT, exist_ok=True)
     put(os.path.join(OUT, 'noise.bin'), NOISE, 128, 64 * 128)
-    srcd = os.path.join(OUT, 'in_real')
+    srcd = os.path.join(OUT, 'in_real_sg')
     os.makedirs(srcd, exist_ok=True)
     gl_gbuf(srcd, W, H, depth, proj)
     SCENE[srcd] = mip_img('scene', srcd, W, H, np.nan_to_num(px, posinf=6.0e4, neginf=0.0).astype(np.float32), 5)
@@ -563,7 +563,7 @@ def ssgi_main():
         x0, y0 = rng.integers(0, sw - 40), rng.integers(0, sh - 40)
         sdp[y0:y0 + rng.integers(5, 60), x0:x0 + rng.integers(5, 80)] -= np.float32(rng.uniform(0.0002, 0.0008))
     sdp[: sh // 7] = 1.0
-    sdir = os.path.join(OUT, 'in_syn')
+    sdir = os.path.join(OUT, 'in_syn_sg')
     os.makedirs(sdir, exist_ok=True)
     gl_gbuf(sdir, sw, sh, sdp, proj)
     col = np.zeros((sh, sw, 4), np.float32)

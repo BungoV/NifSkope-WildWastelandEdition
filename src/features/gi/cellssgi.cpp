@@ -20,6 +20,7 @@ BSD License - see nifskope.h
 #include "gl/renderer.h"
 #include "harnesswindow.h"	// lane SSGI2FRAMES
 #include "features/gi/rtddgicell.h"	// lane INTGI1: the traced volume's spacing (the interior march radius)
+#include "features/vkframe/vkpresent.h"	// lane VKLIGHT1: the cast on the present device
 
 #include <QFile>
 #include <QHash>
@@ -532,12 +533,58 @@ void wwCellSsgiPass( Scene * scene, bool run )
 	fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 4 );
 	fn->glGenerateMipmap( GL_TEXTURE_2D );
 	fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_NEAREST );
+	/* lane VKLIGHT1 (L3): the ordinary cast as Vulkan compute (ssgi_vk.hlsl) into GL's own target; the rest of the chain
+	 * stays GL. Only the cast the kernel holds: no emissive chain or subtraction, no interval pyramid, the fill law */
+	const bool castVkWant = WwVkPresent::shareWanted( "WW_VKVIEW_SSGI_RED" );
+	const char * castVkNo = emis || emisOff ? "the emissive chain or its subtraction" : hizN > 0 ? "red hiz"
+		: ( s.red & 256 ) ? "red oldlaw" : nullptr;
+	if ( !castVkWant )
+		WwVkPresent::lightSay( WwVkPresent::LightSsgi, false, "red WW_VKVIEW_SSGI_RED=1 or the view not on Vulkan" );
+	else
+		WwVkPresent::lightSay( WwVkPresent::LightSsgi, true, nullptr );
+	auto castVk = [&]( const Target & cst ) {
+		if ( !castVkWant )
+			return false;
+		if ( castVkNo ) {
+			WwVkPresent::lightOnGl( WwVkPresent::LightSsgi, castVkNo );
+			return false;
+		}
+		WwVkPresent::LightRun t;
+		t.pass = WwVkPresent::LightSsgi;
+		auto img = [&]( GLuint tex, unsigned fmt, int w, int h, int levels, bool out ) {
+			WwVkPresent::LightImage i;
+			i.tex = tex;
+			i.glFmt = fmt;
+			i.w = w;
+			i.h = h;
+			i.levels = levels;
+			i.in = !out;
+			i.out = out;
+			t.img.push_back( i );
+			return int( t.img.size() ) - 1;
+		};
+		WwVkPresent::LightDispatch d;
+		d.kernel = WwVkPresent::LightSsgiK;
+		d.t[0] = img( ao.gbuf, GL_RGBA32F, W, H, 1, false );
+		d.t[1] = img( sceneTex, GL_RGBA32F, W, H, 5, false );
+		d.t[2] = blue ? img( g.noiseTex, GL_RG8, 128, 8192, 1, false ) : -1;
+		d.out0 = img( cst.tex, GL_RGBA16F, cst.w, cst.h, 1, true );
+		const float c[3][4] = { { float( W ), float( H ), float( ww ), float( wh ) }, { pm[0][0], pm[1][1], radius, kThickness },
+			{ kSource, kSaturation, 0.0f, 0.0f } };
+		const int i[4] = { tier.slices, tier.steps, g.frame & 63, ( blue ? 1 : 0 ) | ( wwSsgiFullBreak( s.red ) ? 2 : 0 ) };
+		std::memcpy( d.pc, c, sizeof( c ) );
+		std::memcpy( d.pc + 112, i, sizeof( i ) );
+		t.d.push_back( d );
+		std::string why;
+		return WwVkPresent::lightRun( t, why );
+	};
 	// one chain: cast, temporal, denoise into out (the emissive one with its spans, then the ordinary adding it)
 	auto chain = [&]( int castStage, Target & cst, const Target & pv, Target & nw, Target & out ) {
 		bind( 3, pv.tex );
 		bind( 4, pv.tex2 );
 		bind( 7, newBlur ? pv.tex3 : 0 );
-		pass( castStage, cst, 0, 1 );
+		if ( castStage != 1 || !castVk( cst ) )
+			pass( castStage, cst, 0, 1 );
 		pass( 2, nw, cst.tex, newBlur ? 3 : 2 );
 		const bool add = emis && castStage == 1;
 		if ( add )
