@@ -269,12 +269,20 @@ const Shared * farTwinFind( std::uintptr_t key )
 	return it == m.end() ? nullptr : &it->second;
 }
 
-constexpr GLenum kFcTexBuffer = 0x8C2A, kFcBindingTexBuffer = 0x8C2C, kFcRgba32f = 0x8814, kFcRgba32i = 0x8D82, kFcRgba32ui = 0x8D70;
+constexpr GLenum kFcTexBuffer = 0x8C2A, kFcBindingTexBuffer = 0x8C2C, kFcRgba32f = 0x8814, kFcRgba32i = 0x8D82, kFcRgba32ui = 0x8D70,
+	kFcR32i = 0x8235, kFcRg8 = 0x822B;
 
 VkFormat fcTexelFormat( GLenum f )
 {
+	// lane VKFAR2: R32I (the cell lights' cluster) and RG8 (the far objects' AO / sky stream) beside the 16-byte ones
 	return f == kFcRgba32f ? VK_FORMAT_R32G32B32A32_SFLOAT : f == kFcRgba32i ? VK_FORMAT_R32G32B32A32_SINT
-		: f == kFcRgba32ui ? VK_FORMAT_R32G32B32A32_UINT : VK_FORMAT_UNDEFINED;
+		: f == kFcRgba32ui ? VK_FORMAT_R32G32B32A32_UINT : f == kFcR32i ? VK_FORMAT_R32_SINT : f == kFcRg8 ? VK_FORMAT_R8G8_UNORM
+		: VK_FORMAT_UNDEFINED;
+}
+
+std::size_t fcTexelBytes( GLenum f )
+{
+	return f == kFcR32i ? 4u : f == kFcRg8 ? 2u : 16u;
 }
 
 bool fcDev( std::string & why )
@@ -345,8 +353,8 @@ bool fcBufMake( FcBuf & b, GLenum glFmt, VkFormat fmt, VkDeviceSize bytes, std::
 		why = "format " + std::to_string( int( fmt ) ) + " is no uniform texel buffer on the present device";
 		return false;
 	}
-	if ( bytes / 16 > d.maxTexels ) {
-		why = std::to_string( bytes / 16 ) + " texels, the device's texel buffers hold " + std::to_string( d.maxTexels );
+	if ( bytes / fcTexelBytes( glFmt ) > d.maxTexels ) {
+		why = std::to_string( bytes / fcTexelBytes( glFmt ) ) + " texels, the device's texel buffers hold " + std::to_string( d.maxTexels );
 		return false;
 	}
 	VkExternalMemoryBufferCreateInfo ext { VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_BUFFER_CREATE_INFO };
@@ -636,9 +644,10 @@ bool farTexelBuffer( std::uintptr_t key, unsigned glFmt, std::size_t bytes, unsi
 		return fail( "the present device or GL's entry points are not ready in this context" );
 	const VkFormat fmt = fcTexelFormat( GLenum( glFmt ) );
 	if ( fmt == VK_FORMAT_UNDEFINED )
-		return fail( "GL format " + std::to_string( glFmt ) + " has no far-card texel buffer (RGBA32F / RGBA32I / RGBA32UI)" );
-	if ( bytes < 16 || bytes % 16 )
-		return fail( "a far-card texel buffer of " + std::to_string( bytes ) + " bytes (whole 16-byte texels)" );
+		return fail( "GL format " + std::to_string( glFmt ) + " has no far-card texel buffer (RGBA32F / RGBA32I / RGBA32UI / R32I / RG8)" );
+	const std::size_t tb = fcTexelBytes( GLenum( glFmt ) );
+	if ( bytes < tb || bytes % tb )
+		return fail( "a far-card texel buffer of " + std::to_string( bytes ) + " bytes (whole " + std::to_string( tb ) + "-byte texels)" );
 	if ( !fcDev( why ) )
 		return fail( why );
 	auto it = C.bufs.find( key );

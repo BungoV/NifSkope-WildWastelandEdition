@@ -3,6 +3,8 @@
 #include "features/vkframe/vkwater.h"
 #include "features/vkframe/water_view_vs.spv.h"  // lane VKWATER3: the shaded draw's twins (vkframe_spirv.sh)
 #include "features/vkframe/water_view_ps.spv.h"
+#include "features/vkframe/farlod_view_vs.spv.h"  // lane VKFAR2: the far LOD rings' twins (fo4_default, fo4_cellcsm)
+#include "features/vkframe/farlod_view_ps.spv.h"
 
 namespace
 {
@@ -40,14 +42,62 @@ const WaterImgName kWaterImg[] = { { 64, "atApTex" }, { 65, "volAirTerr" }, { 66
 	{ 99, "cellGiSlots" }, { 100, "cellRooms" }, { 101, "cellShadow" }, { 102, "cellFarSlots" }, { 103, "cellFarRecs" },
 	{ 104, "cellFarPlaced" }, { 105, "cellCtGbuf" }, { 106, "cellAoDecal" }, { 107, "cellSsgi" }, { 108, "waterOceanD" },
 	{ 110, "farStream" } };
+// lane VKFAR2: the far LOD rings' twins (farlod_view_ps t n -> 64 + n, farlod_view_vs t 0 -> 120)
+const WaterImgName kFarlodImg[] = { { 64, "atApTex" }, { 65, "volAirTerr" }, { 66, "volAirRainMap" }, { 67, "volTex" },
+	{ 68, "volTile" }, { 69, "volAirNoise" }, { 70, "csmMap" }, { 71, "ussTerrMap" }, { 72, "ussContactMap" }, { 73, "ussCloudMap" },
+	{ 74, "cellCluster" }, { 75, "cellIsBloom" }, { 76, "cellIsLut" }, { 77, "cellLights" }, { 78, "cellShadow" }, { 79, "cellCtGbuf" },
+	{ 80, "cellFarSlots" }, { 81, "cellFarRecs" }, { 82, "cellFarPlaced" }, { 83, "cellSsgi" }, { 84, "cellAo" }, { 85, "cellSsr" },
+	{ 86, "landShoreIndex" }, { 87, "landShoreAtlas" }, { 88, "waterInfoIndex" }, { 89, "waterInfoAtlas" }, { 90, "waterInfoBodies" },
+	{ 91, "rainCover" }, { 92, "LandLodDetail" }, { 93, "GlowMap" }, { 94, "BaseMap" }, { 95, "LandLodNoise" }, { 96, "LandLodDiff" },
+	{ 97, "LandLodOuter" }, { 98, "SpecularMap" }, { 99, "NormalMap" }, { 100, "GreyscaleMap" }, { 101, "CubeMap" },
+	{ 102, "EnvironmentMap" }, { 103, "RefractionSrc" }, { 104, "BacklightMap" }, { 105, "cellGi" }, { 106, "cellGiSlots" },
+	{ 107, "cellRooms" }, { 108, "cellAoDecal" }, { 109, "waterFlowIndex" }, { 110, "waterFlowAtlas" }, { 120, "farStream" } };
+// the integer images (usampler): GL's unbound one reads zero only through an integer view
+const std::uint32_t kWaterInts[] = { 71, 72, 73, 74, 88, 89 };
+const std::uint32_t kFarlodInts[] = { 86, 87, 88, 89, 109, 110 };
 constexpr VkDeviceSize kWaterAlign = 256;
 // the host buffer: zeros (a block GL has no buffer for), the loose blocks, the disabled attributes' values
 constexpr VkDeviceSize kWaterZeroAt = 0, kWaterVsLooseAt = 12288, kWaterPsLooseAt = 12800, kWaterConstAt = 18176, kWaterHostBytes = 18432;
+// lane VKFAR2: the rings' pixel block is larger (kT_farlodPsBytes 6976): the constants after it
+constexpr VkDeviceSize kFarlodConstAt = 19968, kFarlodHostBytes = 20224;
+static_assert( kWaterPsLooseAt + WwVkPresent::kT_waterPsBytes <= kWaterConstAt && kWaterPsLooseAt + WwVkPresent::kT_farlodPsBytes <= kFarlodConstAt
+		&& kFarlodConstAt + 16 * WwVkPresent::kWaterAttribs <= kFarlodHostBytes && kWaterConstAt + 16 * WwVkPresent::kWaterAttribs <= kWaterHostBytes,
+	"the twins' host buffer layout" );
+
+/* lane VKFAR2: one shaded twin pair over GL's draw (the water's, the far LOD rings'). rings: instanced commands
+ * (divisor-1 inputs at instance rate), GL's polygon offset as the depth bias, zero integer / colour cube views. */
+struct TwinSpec
+{
+	const char * what;
+	const std::uint32_t * vs;
+	std::size_t vsBytes;
+	const std::uint32_t * ps;
+	std::size_t psBytes;
+	const WaterImgName * img;
+	std::size_t nImg;
+	const std::uint32_t * ints;
+	std::size_t nInts;
+	int psLoose;
+	VkDeviceSize constAt, hostBytes;
+	bool rings;
+	int kind;  //!< fxWork's kind
+};
+const TwinSpec kWaterSpec { "water", vkframe_water_view_vs_spv, sizeof( vkframe_water_view_vs_spv ), vkframe_water_view_ps_spv,
+	sizeof( vkframe_water_view_ps_spv ), kWaterImg, sizeof( kWaterImg ) / sizeof( kWaterImg[0] ), kWaterInts,
+	sizeof( kWaterInts ) / sizeof( kWaterInts[0] ), WwVkPresent::kT_waterPsBytes, kWaterConstAt, kWaterHostBytes, false, 4 };
+const TwinSpec kFarlodSpec { "far LOD", vkframe_farlod_view_vs_spv, sizeof( vkframe_farlod_view_vs_spv ), vkframe_farlod_view_ps_spv,
+	sizeof( vkframe_farlod_view_ps_spv ), kFarlodImg, sizeof( kFarlodImg ) / sizeof( kFarlodImg[0] ), kFarlodInts,
+	sizeof( kFarlodInts ) / sizeof( kFarlodInts[0] ), WwVkPresent::kT_farlodPsBytes, kFarlodConstAt, kFarlodHostBytes, true, 5 };
 
 struct WaterDraw
 {
 	bool made = false, broken = false;
 	std::string brokenWhy;
+	// lane VKFAR2 (rings): zero R32UI 2D and RGBA8 cube views (GL's unbound usampler2D / samplerCube read 0)
+	VkImage zeroU = VK_NULL_HANDLE, zeroCol = VK_NULL_HANDLE;
+	VkDeviceMemory zeroUMem = VK_NULL_HANDLE, zeroColMem = VK_NULL_HANDLE;
+	VkImageView zeroUView = VK_NULL_HANDLE, zeroColView = VK_NULL_HANDLE;
+	std::vector<WwVkPresent::WaterCmd> cmds;  //!< this run's commands (rings)
 	VkShaderModule vs = VK_NULL_HANDLE, ps = VK_NULL_HANDLE;
 	std::vector<WwVkPresent::FarSetSlot> binds;
 	std::vector<VkShaderStageFlags> stages;
@@ -83,6 +133,11 @@ WaterDraw & waterD()
 	static WaterDraw D;
 	return D;
 }
+WaterDraw & farLodD()
+{
+	static WaterDraw D;
+	return D;
+}
 
 VkFormat waterAttrFormat( const WwVkPresent::WaterAttrib & a )
 {
@@ -104,12 +159,16 @@ VkFormat waterAttrFormat( const WwVkPresent::WaterAttrib & a )
 	case 0x1400: return a.norm ? s8n[n] : s8s[n];
 	case 0x1403: return a.norm ? u16n[n] : u16s[n];
 	case 0x1402: return a.norm ? s16n[n] : s16s[n];
+	case 0x8D9F:  // lane VKFAR2: GL_INT_2_10_10_10_REV (the rings' normals): x in the low bits, as Vulkan's A2B10G10R10
+		return a.size != 4 ? VK_FORMAT_UNDEFINED : a.norm ? VK_FORMAT_A2B10G10R10_SNORM_PACK32 : VK_FORMAT_A2B10G10R10_SSCALED_PACK32;
 	default: return VK_FORMAT_UNDEFINED;
 	}
 }
 
 int waterAttrBytes( const WwVkPresent::WaterAttrib & a )
 {
+	if ( a.type == 0x8D9F )
+		return 4;
 	const int c = a.type == 0x1406 ? 4 : ( a.type == 0x140B || a.type == 0x1403 || a.type == 0x1402 ) ? 2 : 1;
 	return c * std::clamp( a.size, 1, 4 );
 }
@@ -189,17 +248,95 @@ bool waterZeroCube( WaterDraw & D, std::string & why )
 	return true;
 }
 
-// the device-time parts (once): modules, the merged set (vs + ps reflected), its pool, one set, the pipeline layout
-bool waterStatic( std::string & why )
+// lane VKFAR2 (rings): a 1x1 R32UI 2D and a 1x1 RGBA8 cube, cleared to zero, GENERAL
+bool twinZeros( WaterDraw & D, std::string & why )
 {
 	Vk & v = vk();
-	WaterDraw & D = waterD();
+	auto make = [&]( VkFormat f, bool cube, VkImage & img, VkDeviceMemory & mem ) {
+		VkImageCreateInfo ci { VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO };
+		ci.flags = cube ? VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT : 0;
+		ci.imageType = VK_IMAGE_TYPE_2D;
+		ci.format = f;
+		ci.extent = { 1, 1, 1 };
+		ci.mipLevels = 1;
+		ci.arrayLayers = cube ? 6 : 1;
+		ci.samples = VK_SAMPLE_COUNT_1_BIT;
+		ci.tiling = VK_IMAGE_TILING_OPTIMAL;
+		ci.usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+		if ( v.vkCreateImage( v.dev, &ci, nullptr, &img ) != VK_SUCCESS )
+			return false;
+		VkMemoryRequirements r;
+		v.vkGetImageMemoryRequirements( v.dev, img, &r );
+		VkMemoryAllocateInfo ai { VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO };
+		ai.allocationSize = r.size;
+		ai.memoryTypeIndex = memType( r.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT );
+		return ai.memoryTypeIndex != UINT32_MAX && v.vkAllocateMemory( v.dev, &ai, nullptr, &mem ) == VK_SUCCESS
+			&& v.vkBindImageMemory( v.dev, img, mem, 0 ) == VK_SUCCESS;
+	};
+	if ( !make( VK_FORMAT_R32_UINT, false, D.zeroU, D.zeroUMem ) || !make( VK_FORMAT_R8G8B8A8_UNORM, true, D.zeroCol, D.zeroColMem ) ) {
+		why = std::string( "the zero integer / cube images: no image or device memory" );
+		return false;
+	}
+	VkCommandBufferAllocateInfo cai { VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO };
+	cai.commandPool = v.pool;
+	cai.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+	cai.commandBufferCount = 1;
+	VkCommandBuffer cmd = VK_NULL_HANDLE;
+	VkFence fence = VK_NULL_HANDLE;
+	VkFenceCreateInfo fi { VK_STRUCTURE_TYPE_FENCE_CREATE_INFO };
+	bool laid = false;
+	if ( v.vkAllocateCommandBuffers( v.dev, &cai, &cmd ) == VK_SUCCESS && v.vkCreateFence( v.dev, &fi, nullptr, &fence ) == VK_SUCCESS ) {
+		VkCommandBufferBeginInfo bi { VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
+		bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+		v.vkBeginCommandBuffer( cmd, &bi );
+		const VkImage im[2] = { D.zeroU, D.zeroCol };
+		const std::uint32_t layers[2] = { 1, 6 };
+		// GL's incomplete texture reads (0, 0, 0, 1): R32UI has no alpha (Vulkan reads it 1), the cube is cleared to it
+		VkClearColorValue zero[2] {};
+		zero[1].float32[3] = 1.0f;
+		for ( int k = 0; k < 2; k++ ) {
+			const VkImageSubresourceRange rr { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, layers[k] };
+			VkImageMemoryBarrier b { VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER };
+			b.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+			b.newLayout = VK_IMAGE_LAYOUT_GENERAL;
+			b.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+			b.srcQueueFamilyIndex = b.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+			b.image = im[k];
+			b.subresourceRange = rr;
+			v.vkCmdPipelineBarrier( cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1, &b );
+			v.vkCmdClearColorImage( cmd, im[k], VK_IMAGE_LAYOUT_GENERAL, &zero[k], 1, &rr );
+			b.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
+			b.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+			b.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+			v.vkCmdPipelineBarrier( cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0, nullptr, 0, nullptr, 1, &b );
+		}
+		v.vkEndCommandBuffer( cmd );
+		laid = oneShot( cmd, fence );
+	}
+	if ( cmd )
+		v.vkFreeCommandBuffers( v.dev, v.pool, 1, &cmd );
+	if ( fence )
+		v.vkDestroyFence( v.dev, fence, nullptr );
+	if ( laid ) {
+		D.zeroUView = imageView( D.zeroU, VK_IMAGE_VIEW_TYPE_2D, VK_FORMAT_R32_UINT, VK_IMAGE_ASPECT_COLOR_BIT, 1, 1 );
+		D.zeroColView = imageView( D.zeroCol, VK_IMAGE_VIEW_TYPE_CUBE, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_ASPECT_COLOR_BIT, 1, 6 );
+	}
+	if ( !D.zeroUView || !D.zeroColView ) {
+		why = "the zero integer / cube images: clear / view failed";
+		return false;
+	}
+	return true;
+}
+
+// the device-time parts (once): modules, the merged set (vs + ps reflected), its pool, one set, the pipeline layout
+bool twinStatic( WaterDraw & D, const TwinSpec & P, std::string & why )
+{
+	Vk & v = vk();
 	if ( D.made )
 		return true;
 	WwVkPresent::FarSetCounts cv, cp;
-	if ( !WwVkPresent::farSetReflect( vkframe_water_view_vs_spv, sizeof( vkframe_water_view_vs_spv ) / 4, cv, why )
-		|| !WwVkPresent::farSetReflect( vkframe_water_view_ps_spv, sizeof( vkframe_water_view_ps_spv ) / 4, cp, why ) ) {
-		why = "the water twins' reflection: " + why;
+	if ( !WwVkPresent::farSetReflect( P.vs, P.vsBytes / 4, cv, why ) || !WwVkPresent::farSetReflect( P.ps, P.psBytes / 4, cp, why ) ) {
+		why = std::string( "the " ) + P.what + " twins' reflection: " + why;
 		return false;
 	}
 	D.binds.clear();
@@ -208,7 +345,7 @@ bool waterStatic( std::string & why )
 		for ( const WwVkPresent::FarSetSlot & b : ( s ? cp : cv ).binds ) {
 			for ( const WwVkPresent::FarSetSlot & o : D.binds )
 				if ( o.binding == b.binding ) {
-					why = "the water twins both declare binding " + std::to_string( b.binding );
+					why = std::string( "the " ) + P.what + " twins both declare binding " + std::to_string( b.binding );
 					return false;
 				}
 			D.binds.push_back( b );
@@ -252,9 +389,8 @@ bool waterStatic( std::string & why )
 	pli.pSetLayouts = &D.dsl;
 	if ( v.vkAllocateDescriptorSets( v.dev, &ai, &D.set ) != VK_SUCCESS
 		|| v.vkCreatePipelineLayout( v.dev, &pli, nullptr, &D.layout ) != VK_SUCCESS
-		|| !fxModule( vkframe_water_view_vs_spv, sizeof( vkframe_water_view_vs_spv ), D.vs )
-		|| !fxModule( vkframe_water_view_ps_spv, sizeof( vkframe_water_view_ps_spv ), D.ps ) ) {
-		why = "the water draw's set / layout / modules failed";
+		|| !fxModule( P.vs, P.vsBytes, D.vs ) || !fxModule( P.ps, P.psBytes, D.ps ) ) {
+		why = std::string( "the " ) + P.what + " draw's set / layout / modules failed";
 		return false;
 	}
 	D.drawIndexed = reinterpret_cast<PFN_vkCmdDrawIndexed>( v.vkGetDeviceProcAddr( v.dev, "vkCmdDrawIndexed" ) );
@@ -265,15 +401,16 @@ bool waterStatic( std::string & why )
 	std::string cw;
 	if ( fcFeatures( false, true, cw ) && !waterZeroCube( D, why ) )
 		return false;
+	if ( P.rings && !twinZeros( D, why ) )
+		return false;
 	D.made = true;
 	return true;
 }
 
 // one VkSampler per GL sampling state (plain: the red's linear clamp, no mips)
-VkSampler waterSampler( const WwVkPresent::WaterSlot & s, bool compare, bool plain, std::string & why )
+VkSampler waterSampler( WaterDraw & D, const WwVkPresent::WaterSlot & s, bool compare, bool plain, std::string & why )
 {
 	Vk & v = vk();
-	WaterDraw & D = waterD();
 	const bool aniso = !plain && s.aniso > 1.0f && v.anisotropy;
 	const bool cmp = compare && s.cmpMode == 0x884E;  // GL_COMPARE_REF_TO_TEXTURE
 	char key[160];
@@ -318,11 +455,10 @@ VkSampler waterSampler( const WwVkPresent::WaterSlot & s, bool compare, bool pla
 }
 
 // the pipeline for GL's state this draw (vertex layout, cull, depth, colour mask, the reds), over the air's render pass
-VkPipeline waterPipe( const WwVkPresent::WaterRun & r, const VkFormat * fmt, std::string & why )
+VkPipeline waterPipe( WaterDraw & D, const TwinSpec & P, const WwVkPresent::WaterRun & r, const VkFormat * fmt, std::string & why )
 {
 	Vk & v = vk();
 	Fx & F = fx();
-	WaterDraw & D = waterD();
 	if ( D.pipePass != F.airPass || D.pipeSamples != F.airSamples ) {
 		for ( auto & kv : D.pipes )
 			v.vkDestroyPipeline( v.dev, kv.second, nullptr );
@@ -337,13 +473,18 @@ VkPipeline waterPipe( const WwVkPresent::WaterRun & r, const VkFormat * fmt, std
 		const WwVkPresent::WaterAttrib & a = r.attr[i];
 		vb[i].binding = std::uint32_t( i );
 		vb[i].stride = a.on ? std::uint32_t( a.stride ? a.stride : waterAttrBytes( a ) ) : 0u;
-		vb[i].inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
+		// lane VKFAR2: a divisor-1 array steps per instance (the rings' ladder and rows)
+		vb[i].inputRate = a.on && a.divisor == 1 ? VK_VERTEX_INPUT_RATE_INSTANCE : VK_VERTEX_INPUT_RATE_VERTEX;
 		va[i].location = std::uint32_t( WwVkPresent::kWaterVsIn[i].spv );
 		va[i].binding = std::uint32_t( i );
 		va[i].format = fmt[i];
 		va[i].offset = 0;
-		key += std::to_string( int( fmt[i] ) ) + "/" + std::to_string( vb[i].stride ) + " ";
+		key += std::to_string( int( fmt[i] ) ) + "/" + std::to_string( vb[i].stride ) + ( vb[i].inputRate ? "i " : " " );
 	}
+	// GL's polygon offset (rings): factor = slope, units = the constant (both in the depth format's units)
+	const bool bias = P.rings && r.polyOffset && ( r.polyFactor != 0.0f || r.polyUnits != 0.0f ) && !( r.red & 16 );
+	if ( bias )
+		key += "b" + std::to_string( r.polyFactor ) + "/" + std::to_string( r.polyUnits ) + " ";
 	const bool flip = ( r.red & 4 ) != 0;
 	const bool ccw = ( r.frontFace != 0x0900 ) != flip;  // GL_CW 0x0900
 	const VkCullModeFlags cull = !r.cullOn ? VK_CULL_MODE_NONE : r.cullFace == 0x0404 ? VK_CULL_MODE_FRONT_BIT
@@ -383,6 +524,11 @@ VkPipeline waterPipe( const WwVkPresent::WaterRun & r, const VkFormat * fmt, std
 	rs.frontFace = ccw ? VK_FRONT_FACE_CLOCKWISE : VK_FRONT_FACE_COUNTER_CLOCKWISE;
 	rs.cullMode = cull;
 	rs.lineWidth = 1.0f;
+	if ( bias ) {
+		rs.depthBiasEnable = VK_TRUE;
+		rs.depthBiasConstantFactor = r.polyUnits;
+		rs.depthBiasSlopeFactor = r.polyFactor;
+	}
 	VkPipelineMultisampleStateCreateInfo ms { VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO };
 	ms.rasterizationSamples = VkSampleCountFlagBits( F.airSamples );
 	VkPipelineDepthStencilStateCreateInfo ds { VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO };
@@ -414,7 +560,7 @@ VkPipeline waterPipe( const WwVkPresent::WaterRun & r, const VkFormat * fmt, std
 	gp.renderPass = F.airPass;
 	VkPipeline out = VK_NULL_HANDLE;
 	if ( v.vkCreateGraphicsPipelines( v.dev, tone().cache, 1, &gp, nullptr, &out ) != VK_SUCCESS ) {
-		why = "vkCreateGraphicsPipelines (the water draw) failed";
+		why = std::string( "vkCreateGraphicsPipelines (the " ) + P.what + " draw) failed";
 		return VK_NULL_HANDLE;
 	}
 	D.pipes[key] = out;
@@ -424,12 +570,12 @@ VkPipeline waterPipe( const WwVkPresent::WaterRun & r, const VkFormat * fmt, std
 	return out;
 }
 
-// fxWork's kind 3 (the worker): the shape into the tone frame
+// fxWork's kind 4 (the worker): the shape into the tone frame; kind 5 (lane VKFAR2): the far LOD rings' commands
 bool waterRecord( std::string & why )
 {
 	Vk & v = vk();
 	Fx & F = fx();
-	WaterDraw & D = waterD();
+	WaterDraw & D = F.kind == 5 ? farLodD() : waterD();
 	if ( !F.fbAir || !D.pipe ) {
 		why = "no framebuffer / pipeline for the water draw";
 		return false;
@@ -446,7 +592,10 @@ bool waterRecord( std::string & why )
 	v.vkCmdBindDescriptorSets( F.cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, D.layout, 0, 1, &D.set, 0, nullptr );
 	v.vkCmdBindVertexBuffers( F.cmd, 0, std::uint32_t( WwVkPresent::kWaterAttribs ), D.vb, D.vbOff );
 	v.vkCmdBindIndexBuffer( F.cmd, D.geo.buf, D.ibOff, VK_INDEX_TYPE_UINT16 );
-	D.drawIndexed( F.cmd, D.count, 1, D.first, D.baseVertex, 0 );
+	if ( D.cmds.empty() )
+		D.drawIndexed( F.cmd, D.count, 1, D.first, D.baseVertex, 0 );
+	for ( const WwVkPresent::WaterCmd & c : D.cmds )
+		D.drawIndexed( F.cmd, c.count, c.instanceCount, c.firstIndex, c.baseVertex, c.baseInstance );
 	v.vkCmdEndRenderPass( F.cmd );
 	return true;
 }
@@ -454,12 +603,13 @@ bool waterRecord( std::string & why )
 // shutdown (after fxDrop waited the device): the exported copy is GL's name too
 void waterDrop()
 {
-	WaterDraw & D = waterD();
-	if ( !D.geo.buf && !D.host.buf )
-		return;
-	vk().vkDeviceWaitIdle( vk().dev );
-	csmBufFree( D.geo, gl().ok && D.geo.glCtx == gl().ctx );
-	csmBufFree( D.host, false );
+	for ( WaterDraw * D : { &waterD(), &farLodD() } ) {
+		if ( !D->geo.buf && !D->host.buf )
+			continue;
+		vk().vkDeviceWaitIdle( vk().dev );
+		csmBufFree( D->geo, gl().ok && D->geo.glCtx == gl().ctx );
+		csmBufFree( D->host, false );
+	}
 }
 }  // namespace
 
@@ -532,12 +682,31 @@ WaterStat takeWaterStat()
 	return s;
 }
 
-std::string waterDrawRefusal()
+// lane VKFAR2: the far LOD rings' draws GL kept (the `vk far:` rings line)
+static WaterStat & farLodGlS()
+{
+	static WaterStat s;
+	return s;
+}
+
+void farLodOnGl( const char * why )
+{
+	WaterStat & s = farLodGlS();
+	s.gl++;
+	s.glWhy = why ? why : "";
+}
+
+WaterStat takeFarLodGlStat()
+{
+	WaterStat s = farLodGlS();
+	farLodGlS() = WaterStat();
+	return s;
+}
+
+std::string twinDrawRefusal()
 {
 	Vk & v = vk();
 	Gl & g = gl();
-	if ( waterD().broken )
-		return waterD().brokenWhy;
 	if ( !v.ok || !g.ok )
 		return "the present device or GL's entry points are not ready";
 	if ( !v.clipControl )
@@ -547,10 +716,31 @@ std::string waterDrawRefusal()
 	return std::string();
 }
 
+std::string waterDrawRefusal()
+{
+	return waterD().broken ? waterD().brokenWhy : twinDrawRefusal();
+}
+
+std::string farLodDrawRefusal()
+{
+	return farLodD().broken ? farLodD().brokenWhy : twinDrawRefusal();
+}
+
+static bool twinRun( WaterDraw & D, const TwinSpec & P, const WaterRun & r, std::string & why );
+
 bool waterRun( const WaterRun & r, std::string & why )
 {
+	return twinRun( waterD(), kWaterSpec, r, why );
+}
+
+bool farLodRun( const WaterRun & r, std::string & why )
+{
+	return twinRun( farLodD(), kFarlodSpec, r, why );
+}
+
+static bool twinRun( WaterDraw & D, const TwinSpec & P, const WaterRun & r, std::string & why )
+{
 	Fx & F = fx();
-	WaterDraw & D = waterD();
 	Tone & T = tone();
 	Vk & v = vk();
 	Gl & g = gl();
@@ -564,29 +754,42 @@ bool waterRun( const WaterRun & r, std::string & why )
 	};
 	auto breakOff = [&]( const std::string & w ) {
 		D.broken = true;
-		D.brokenWhy = "the water draw on Vulkan broke: " + w;
+		D.brokenWhy = std::string( "the " ) + P.what + " draw on Vulkan broke: " + w;
 		return refuse( D.brokenWhy );
 	};
 	if ( D.broken )
 		return refuse( D.brokenWhy );
 	if ( !v.ok || !g.ok || g.ctx != reinterpret_cast<void *>( wglGetCurrentContext() ) )
 		return refuse( "the present device or GL's entry points are not ready in this context" );
-	if ( const std::string no = waterDrawRefusal(); !no.empty() )
+	if ( const std::string no = twinDrawRefusal(); !no.empty() )
 		return refuse( no );
 	if ( !toneFrameIs( r.color ) || !T.colorView || !T.dsView )
 		return refuse( "the draw target is not the shared tone frame" );
 	if ( T.w != r.w || T.h != r.h )
-		return refuse( "the water draw's size is not the tone frame's" );
+		return refuse( std::string( "the " ) + P.what + " draw's size is not the tone frame's" );
 	if ( r.census.tess )
-		return refuse( "a tessellated water program (its own twin is not in yet)" );
+		return refuse( std::string( "a tessellated " ) + P.what + " program (its own twin is not in yet)" );
+	if ( r.psBytes != P.psLoose )
+		return refuse( "the pixel loose block was packed from another twin's table" );
 	WaterCaps caps = waterCaps();
 	caps.shadedDraw = true;
 	const std::string verdict = waterVerdict( r.census, caps );
 	if ( !verdict.empty() )
 		return refuse( verdict );
-	if ( r.blend || r.stencil || r.polyOffset )
-		return refuse( "GL draws the water with blending / a stencil test / a polygon offset" );
-	if ( r.count < 3 || r.vp[2] < 1 || r.vp[3] < 1 || ( r.idxOff & 1 ) || !r.ebo || r.idxOff + 2LL * r.count > r.eboBytes )
+	if ( r.blend || r.stencil || ( r.polyOffset && !P.rings ) )
+		return refuse( std::string( "GL draws the " ) + P.what + " with blending / a stencil test / a polygon offset" );
+	if ( P.rings ) {
+		// the rings' program writes a second target and is linear: GL must have neither on
+		if ( r.srgb )
+			return refuse( "GL_FRAMEBUFFER_SRGB is on" );
+		if ( r.drawBuf1 != 0 )
+			return refuse( "a second draw buffer is bound (the tone frame has one colour)" );
+		if ( r.cmds.empty() || r.vp[2] < 1 || r.vp[3] < 1 || !r.ebo )
+			return refuse( "no commands / viewport / element buffer" );
+		for ( const WaterCmd & c : r.cmds )
+			if ( c.count < 3 || !c.instanceCount || 2LL * ( static_cast<long long>( c.firstIndex ) + c.count ) > r.eboBytes )
+				return refuse( "a command past its element buffer" );
+	} else if ( r.count < 3 || r.vp[2] < 1 || r.vp[3] < 1 || ( r.idxOff & 1 ) || !r.ebo || r.idxOff + 2LL * r.count > r.eboBytes )
 		return refuse( "no triangles / viewport / element range" );
 	VkFormat fmt[kWaterAttribs] = {};
 	for ( int i = 0; i < kWaterAttribs; i++ ) {
@@ -599,7 +802,8 @@ bool waterRun( const WaterRun & r, std::string & why )
 		VkFormatProperties fp {};
 		if ( fmt[i] != VK_FORMAT_UNDEFINED )
 			v.vkGetPhysicalDeviceFormatProperties( v.phys, fmt[i], &fp );
-		if ( a.integer || a.divisor || !a.buf || fmt[i] == VK_FORMAT_UNDEFINED || !( fp.bufferFeatures & VK_FORMAT_FEATURE_VERTEX_BUFFER_BIT ) )
+		const bool stepOk = !a.divisor || ( P.rings && a.divisor == 1 );
+		if ( a.integer || !stepOk || !a.buf || fmt[i] == VK_FORMAT_UNDEFINED || !( fp.bufferFeatures & VK_FORMAT_FEATURE_VERTEX_BUFFER_BIT ) )
 			return refuse( "vertex input " + std::to_string( kWaterVsIn[i].gl ) + ": an integer / instanced / client / unsupported array" );
 		if ( a.bufBytes <= 0 || std::int64_t( a.off ) >= a.bufBytes )
 			return refuse( "vertex input " + std::to_string( kWaterVsIn[i].gl ) + ": its offset is past its buffer" );
@@ -613,7 +817,7 @@ bool waterRun( const WaterRun & r, std::string & why )
 	}
 	std::string w;
 	const int samples = T.samples > 0 ? T.samples : std::max( F.airSamples, 1 );
-	if ( !fxStatic( w ) || !fxSems( w ) || !fxPasses( samples, w ) || !waterStatic( w ) )
+	if ( !fxStatic( w ) || !fxSems( w ) || !fxPasses( samples, w ) || !twinStatic( D, P, w ) )
 		return breakOff( w );
 	if ( F.airSamples != T.samples )
 		return breakOff( "the air's render pass is not at the frame's sample count" );
@@ -655,18 +859,18 @@ bool waterRun( const WaterRun & r, std::string & why )
 		uboAt[k] = place( u.buf, u.off, std::min( u.size, need ), need );
 	}
 	if ( !csmBuf( D.geo, total, true, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, w )
-		|| !csmBuf( D.host, kWaterHostBytes, false, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, w ) )
+		|| !csmBuf( D.host, P.hostBytes, false, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, w ) )
 		return breakOff( w );
 	std::uint8_t * host = static_cast<std::uint8_t *>( D.host.ptr );
 	std::memset( host + kWaterZeroAt, 0, size_t( kWaterVsLooseAt - kWaterZeroAt ) );
 	std::memcpy( host + kWaterVsLooseAt, r.vsLoose, size_t( kT_waterVsBytes ) );
-	std::memcpy( host + kWaterPsLooseAt, r.psLoose, size_t( kT_waterPsBytes ) );
+	std::memcpy( host + kWaterPsLooseAt, r.psLoose, size_t( P.psLoose ) );
 	if ( r.red & 1 ) {  // red: the ps's loose block one vec4 off (a table offset wrong by a row)
-		std::memmove( host + kWaterPsLooseAt + 16, r.psLoose, size_t( kT_waterPsBytes - 16 ) );
+		std::memmove( host + kWaterPsLooseAt + 16, r.psLoose, size_t( P.psLoose - 16 ) );
 		std::memset( host + kWaterPsLooseAt, 0, 16 );
 	}
 	for ( int i = 0; i < kWaterAttribs; i++ )
-		std::memcpy( host + kWaterConstAt + 16 * i, r.attr[i].cur, 16 );
+		std::memcpy( host + P.constAt + 16 * i, r.attr[i].cur, 16 );
 	// the images and texel buffers: GL's names into their twins (each level), the zero ones where GL has none
 	std::vector<GLuint> texNames { T.colorTex, T.dsTex };
 	std::vector<GLuint> bufNames { D.geo.gl };
@@ -675,8 +879,8 @@ bool waterRun( const WaterRun & r, std::string & why )
 	std::vector<VkBufferView> tv( D.binds.size() );
 	std::vector<VkWriteDescriptorSet> ws;
 	auto slotOf = [&]( std::uint32_t binding, const char ** nameOut ) -> const WaterSlot * {
-		for ( const WaterImgName & n : kWaterImg )
-			if ( n.binding == binding ) {
+		for ( std::size_t k = 0; k < P.nImg; k++ )
+			if ( const WaterImgName & n = P.img[k]; n.binding == binding ) {
 				*nameOut = n.name;
 				for ( const WaterSlot & s : r.census.inputs )
 					if ( s.name == n.name )
@@ -702,7 +906,7 @@ bool waterRun( const WaterRun & r, std::string & why )
 			else if ( b.binding == 256 + 31 )
 				bi[i] = { D.host.buf, kWaterVsLooseAt, VkDeviceSize( kT_waterVsBytes ) };
 			else if ( b.binding == 31 )
-				bi[i] = { D.host.buf, kWaterPsLooseAt, VkDeviceSize( kT_waterPsBytes ) };
+				bi[i] = { D.host.buf, kWaterPsLooseAt, VkDeviceSize( P.psLoose ) };
 			else
 				return breakOff( "the twins read a block at b" + std::to_string( b.binding ) + " the draw does not fill" );
 			x.pBufferInfo = &bi[i];
@@ -710,7 +914,7 @@ bool waterRun( const WaterRun & r, std::string & why )
 			const char * nm = nullptr;
 			const WaterSlot * s = slotOf( b.binding - 64, &nm );
 			WaterSlot plain;
-			VkSampler sm = waterSampler( s ? *s : plain, b.compare, ( r.red & 2 ) != 0 || !s, w );
+			VkSampler sm = waterSampler( D, s ? *s : plain, b.compare, ( r.red & 2 ) != 0 || !s, w );
 			if ( !sm )
 				return breakOff( w );
 			if ( b.compare && s && s->tex && s->cmpMode != 0x884E )
@@ -730,8 +934,10 @@ bool waterRun( const WaterRun & r, std::string & why )
 				const unsigned zeroFmt = std::strcmp( nm, "cellCluster" ) == 0 ? 0x8D82u : 0x8814u;  // Buffer<int4>: RGBA32I
 				if ( !farTexelBuffer( key, bound ? s->glFmt : zeroFmt, bound ? std::size_t( s->bufBytes ) : 16u, tb, tt, w ) )
 					return refuse( std::string( nm ) + ": " + w );
-				if ( bound )
-					g.copyNamedBufferSubData( s->dataBuf, tb, 0, 0, std::intptr_t( s->bufBytes ) );
+				if ( bound ) {  // red 32: the data store copied 64 bytes late (the objects' sky / AO stream shifted)
+					const std::intptr_t skip = ( r.red & 32 ) && s->bufBytes > 64 ? 64 : 0;
+					g.copyNamedBufferSubData( s->dataBuf, tb, skip, 0, std::intptr_t( s->bufBytes ) - skip );
+				}
 				bufNames.push_back( tb );
 				tv[i] = farCards().bufs[key].view;
 				x.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER;
@@ -741,9 +947,12 @@ bool waterRun( const WaterRun & r, std::string & why )
 			}
 			VkImageView view = VK_NULL_HANDLE;
 			if ( !s || !s->tex ) {
-				if ( b.dim == 3 && !( b.arrayed && D.zeroCubeView ) )
+				const bool colCube = P.rings && b.dim == 3 && !b.arrayed;  // the rings' CubeMap: the zero RGBA8 cube
+				if ( b.dim == 3 && !colCube && !( b.arrayed && D.zeroCubeView ) )
 					return refuse( std::string( nm ) + ": an unbound cube input (no zero cube view)" );
-				if ( b.dim == 3 )
+				if ( colCube )
+					view = D.zeroColView;
+				else if ( b.dim == 3 )
 					view = D.zeroCubeView;
 				else if ( b.dim == 2 )
 					view = F.d3;
@@ -751,11 +960,13 @@ bool waterRun( const WaterRun & r, std::string & why )
 					view = F.d2a;
 				else
 					view = F.d2;
-				// an integer image reads GL's unbound zero only through an integer view: refuse it
-				for ( const WaterImgName & n : { WaterImgName { 71, "" }, WaterImgName { 72, "" }, WaterImgName { 73, "" },
-						 WaterImgName { 74, "" }, WaterImgName { 88, "" }, WaterImgName { 89, "" } } )
-					if ( n.binding == b.binding )
-						return refuse( std::string( nm ) + ": an unbound integer input" );
+				// an integer image reads GL's unbound zero only through an integer view: the rings' zero R32UI, else refuse
+				for ( std::size_t k = 0; k < P.nInts; k++ )
+					if ( P.ints[k] == b.binding ) {
+						if ( !P.rings || b.dim != 1 || b.arrayed )
+							return refuse( std::string( nm ) + ": an unbound integer input" );
+						view = D.zeroUView;
+					}
 			} else if ( s->tex == T.colorTex || s->tex == T.dsTex ) {
 				return refuse( std::string( nm ) + ": samples the frame it draws into" );
 			} else if ( s->baseLevel != 0 ) {
@@ -792,7 +1003,7 @@ bool waterRun( const WaterRun & r, std::string & why )
 	const VkImageView att[2] = { T.colorView, T.dsView };
 	if ( !fxFb( F.fbAir, F.airPass, att, 2, T.w, T.h ) )
 		return breakOff( "the water draw's framebuffer over the tone frame failed" );
-	D.pipe = waterPipe( r, fmt, w );
+	D.pipe = waterPipe( D, P, r, fmt, w );
 	if ( !D.pipe )
 		return breakOff( w );
 	v.vkUpdateDescriptorSets( v.dev, std::uint32_t( ws.size() ), ws.data(), 0, nullptr );
@@ -801,12 +1012,13 @@ bool waterRun( const WaterRun & r, std::string & why )
 		g.copyNamedBufferSubData( GLuint( p.buf ), D.geo.gl, std::intptr_t( p.src ), std::intptr_t( p.at ), std::intptr_t( p.bytes ) );
 	for ( int i = 0; i < kWaterAttribs; i++ ) {
 		D.vb[i] = r.attr[i].on ? D.geo.buf : D.host.buf;
-		D.vbOff[i] = r.attr[i].on ? vbAt[i] : kWaterConstAt + 16 * VkDeviceSize( i );
+		D.vbOff[i] = r.attr[i].on ? vbAt[i] : P.constAt + 16 * VkDeviceSize( i );
 	}
 	D.ibOff = ibAt;
 	D.count = std::uint32_t( r.count );
 	D.first = std::uint32_t( r.idxOff / 2 );
 	D.baseVertex = r.baseVertex;
+	D.cmds = P.rings ? r.cmds : std::vector<WaterCmd>();
 	std::memcpy( D.vp, r.vp, sizeof( D.vp ) );
 	int x0 = r.vp[0], y0 = r.vp[1], x1 = r.vp[0] + r.vp[2], y1 = r.vp[1] + r.vp[3];
 	if ( r.scissorOn ) {
@@ -820,7 +1032,7 @@ bool waterRun( const WaterRun & r, std::string & why )
 	x1 = std::clamp( x1, 0, T.w );
 	y1 = std::clamp( y1, 0, T.h );
 	D.sc = { { x0, y0 }, { std::uint32_t( std::max( x1 - x0, 0 ) ), std::uint32_t( std::max( y1 - y0, 0 ) ) } };
-	F.kind = 4;	// fxWork's kind 4 (3 = VKFAR2's far cards)
+	F.kind = P.kind;  // fxWork's kind 4 water, 5 the far LOD rings (3 = VKFAR2's far cards)
 	F.w = r.w;
 	F.h = r.h;
 	// GL's work so far signalled (the frame, every twin, the copies) -> the worker's job -> GL waits
@@ -855,9 +1067,20 @@ bool waterRun( const WaterRun & r, std::string & why )
 	return true;
 }
 
+static FxStat takeTwinStat( WaterDraw & D );
+
 FxStat takeWaterDrawStat()
 {
-	WaterDraw & D = waterD();
+	return takeTwinStat( waterD() );
+}
+
+FxStat takeFarLodDrawStat()
+{
+	return takeTwinStat( farLodD() );
+}
+
+static FxStat takeTwinStat( WaterDraw & D )
+{
 	FxStat s = D.st;
 	s.pipelines = D.pipelines;
 	s.buildMs = D.buildMs;
@@ -897,6 +1120,35 @@ void waterSay( bool wanted, const char * glWhy )
 		line += QStringLiteral( " (blocked: %1)" ).arg( QString::fromStdString( st.glWhy ) );
 	if ( st.census > 0 )
 		line += QStringLiteral( "; %1 censuses, %2 ms each" ).arg( st.census ).arg( st.censusMs / st.census, 0, 'f', 3 );
+	said = line;
+	qInfo().noquote() << line;
+}
+
+void farLodSay( bool wanted, const char * glWhy )
+{
+	static QString said;
+	static double at = 0.0;
+	const QString head = QStringLiteral( "vk far: LOD rings " );
+	if ( !wanted ) {
+		const QString line = head + QStringLiteral( "on GL (%1)" ).arg( QString::fromUtf8( glWhy ? glWhy : "" ) );
+		if ( line != said ) {
+			said = line;
+			qInfo().noquote() << line;
+		}
+		return;
+	}
+	const double now = nowMs();
+	if ( now - at < 5000.0 && said.startsWith( head + QStringLiteral( "wanted" ) ) )
+		return;
+	at = now;
+	const WaterStat st = takeFarLodGlStat();
+	const FxStat ds = takeFarLodDrawStat();
+	QString line = head + QStringLiteral( "wanted on Vulkan, %1 draws run (fo4_cellcsm twins, instanced, into the tone frame; %2 ms CPU "
+		"each, max %3, %4 copies, %5 fails%6); on GL %7 draws" )
+		.arg( ds.runs ).arg( ds.runs ? ds.cpuMs / ds.runs : 0.0, 0, 'f', 3 ).arg( ds.maxMs, 0, 'f', 3 ).arg( ds.copies ).arg( ds.fails )
+		.arg( ds.failWhy.empty() ? QString() : QStringLiteral( ": " ) + QString::fromStdString( ds.failWhy ) ).arg( st.gl );
+	if ( !st.glWhy.empty() )
+		line += QStringLiteral( " (blocked: %1)" ).arg( QString::fromStdString( st.glWhy ) );
 	said = line;
 	qInfo().noquote() << line;
 }

@@ -114,4 +114,13 @@ fxw() {
 	rm -f "$1.spv"
 }
 fxw water_view_vs core/water_view_vs
+# lane VKFAR2: the far LOD rings (terrain chunks, .lodi objects): fo4_cellcsm's FOGLEAK + FRAME_UBO twin through fxk()
+# (t0..t46 at 64..110); fo4_default's twin on fxw()'s shifts but t at 120, so its farStream clears the pixel stage's t46
+fxk farlod_view_ps core/farlod_view_ps
+fxl() {
+	"$DXC" -spirv -fspv-target-env=vulkan1.2 -T vs_6_0 -E main -fvk-b-shift 256 0 -fvk-t-shift 120 0 -fvk-s-shift 180 0 -fvk-u-shift 220 0 -fspv-preserve-bindings -Fo "$1.spv" "$(cygpath -m "$ROOT/res/shaders/hlsl/$2.hlsl" 2>/dev/null || echo "$ROOT/res/shaders/hlsl/$2.hlsl")"
+	python -I "$ROOT/tools/spv_header.py" "$1.spv" "vkframe_$1_spv" "$1.spv.h" < /dev/null
+	rm -f "$1.spv"
+}
+fxl farlod_view_vs core/water_view_vs
 ls -la csm_view_vs.spv.h obj_depth_vs.spv.h sky_view_ps.spv.h bloom_down.spv.h bloom_hold.spv.h bloom_up.spv.h bloom_src.spv.h bloom_comb.spv.h bloom_back.spv.h tonemap.spv.h measure_q.spv.h tone_view_vs.spv.h tone_view_ps.spv.h taa_view_mv_cs.spv.h taa_view_resolve_cs.spv.h taa_view_rcas_ps.spv.h

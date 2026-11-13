@@ -68,7 +68,8 @@ VKFRAME_FXV = {'fardots_view_vs': 'far-lod/cell_fardots_view_vs'}
 HLSL_SPECS += [('src/features/vkframe', k, 'vulkan1.2', 'vkframe_%s_spv' % k) for k in VKFRAME_FXV]
 # lane VKFAR1 round 2: the far cards' pixel stage, the script's `fxk <name> <dir/file>` lines (fx() + every declared binding kept)
 VKFRAME_FXK = {'farcards_view_ps': 'far-lod/farcards_view_ps',
-	'water_view_ps': 'water/water_view_ps'}	# lane VKWATER3 (frozen twins, as HLSLSRC2's)
+	'water_view_ps': 'water/water_view_ps',	# lane VKWATER3 (frozen twins, as HLSLSRC2's)
+	'farlod_view_ps': 'core/farlod_view_ps'}	# lane VKFAR2: the far LOD rings
 HLSL_SPECS += [('src/features/vkframe', k, 'vulkan1.2', 'vkframe_%s_spv' % k) for k in VKFRAME_FXK]
 # lane VKFAR2: the far cards' vertex stage, the script's `fxc <name> <dir/file>` lines (its own bindings in the cards' set)
 VKFRAME_FXC = {'farcards_view_vs': 'far-lod/farcards_view_vs'}	# frozen twin, as HLSLSRC2's
@@ -80,6 +81,11 @@ VKFRAME_FXW_ARGS = ['-fvk-b-shift', '256', '0', '-fvk-t-shift', '110', '0', '-fv
 	'-fspv-preserve-bindings']
 VKFRAME_FXW = {'water_view_vs': 'core/water_view_vs'}
 HLSL_SPECS += [('src/features/vkframe', k, 'vulkan1.2', 'vkframe_%s_spv' % k) for k in VKFRAME_FXW]
+# lane VKFAR2: the far LOD rings' vertex stage, the script's `fxl <name> <dir/file>` lines (fxw's shifts, t at 120)
+VKFRAME_FXL_ARGS = ['-fvk-b-shift', '256', '0', '-fvk-t-shift', '120', '0', '-fvk-s-shift', '180', '0', '-fvk-u-shift', '220', '0',
+	'-fspv-preserve-bindings']
+VKFRAME_FXL = {'farlod_view_vs': 'core/water_view_vs'}
+HLSL_SPECS += [('src/features/vkframe', k, 'vulkan1.2', 'vkframe_%s_spv' % k) for k in VKFRAME_FXL]
 DEFAULT_G = 'E:/Tools/RenderDoc/RenderDoc_1.45_64/plugins/spirv/glslangValidator.exe'
 DEFAULT_DXC = 'E:/Tools/dxc/bin/x64/dxc.exe'
 
@@ -187,6 +193,11 @@ def script_ok(tree):
 	wlines = dict(re.findall(r'^fxw ([a-z0-9_]+) ([A-Za-z0-9_/+-]+)$', vf, re.M))
 	if wlines != VKFRAME_FXW:
 		bad.append('src/features/vkframe/vkframe_spirv.sh: its fxw lines (%s) are not this checker\'s water vertex stages' % ' '.join(sorted(wlines)))
+	if '\t"$DXC" -spirv -fspv-target-env=vulkan1.2 -T vs_6_0 -E main ' + ' '.join(VKFRAME_FXL_ARGS) + ' -Fo "$1.spv" ' not in vf:
+		bad.append('src/features/vkframe/vkframe_spirv.sh: its fxl() compile line changed')
+	llines = dict(re.findall(r'^fxl ([a-z0-9_]+) ([A-Za-z0-9_/+-]+)$', vf, re.M))
+	if llines != VKFRAME_FXL:
+		bad.append('src/features/vkframe/vkframe_spirv.sh: its fxl lines (%s) are not this checker\'s far LOD vertex stages' % ' '.join(sorted(llines)))
 	return bad
 
 
@@ -318,8 +329,11 @@ def main(argv):
 			if k in VKFRAME_FXW:
 				src = os.path.join(tree, 'res/shaders/hlsl', VKFRAME_FXW[k] + '.hlsl')
 				hdefs = VKFRAME_FXW_ARGS
+			if k in VKFRAME_FXL:
+				src = os.path.join(tree, 'res/shaders/hlsl', VKFRAME_FXL[k] + '.hlsl')
+				hdefs = VKFRAME_FXL_ARGS
 			m = re.search(r'hlsl profile: ([cvp]s_6_[0-9])', open(src, encoding='utf-8', errors='replace').read())
-			if k in VKFRAME_FXV or k in VKFRAME_FXC or k in VKFRAME_FXW:
+			if k in VKFRAME_FXV or k in VKFRAME_FXC or k in VKFRAME_FXW or k in VKFRAME_FXL:
 				m = re.match(r'(vs_6_0)', 'vs_6_0')
 			opt = [] if d == 'src/features/vkframe' else ['-O0']   # vkframe_spirv.sh builds optimised
 			r = subprocess.run([dxc, '-spirv', '-fspv-target-env=' + env, '-T', m.group(1) if m else 'ps_6_0' if k in VKFRAME_SKY or k in VKFRAME_FX or k in VKFRAME_FXK else 'cs_6_0', '-E', 'main']

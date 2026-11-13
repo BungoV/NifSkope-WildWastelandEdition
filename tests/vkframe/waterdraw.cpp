@@ -39,6 +39,7 @@ struct GlFn
 	void( WINAPI * glActiveTexture )( GLenum ) = nullptr;
 	void( WINAPI * glGetIntegerv )( GLenum, GLint * ) = nullptr;
 	void( WINAPI * glGetBooleanv )( GLenum, GLboolean * ) = nullptr;
+	void( WINAPI * glGetFloatv )( GLenum, GLfloat * ) = nullptr;  // lane VKFAR2: twinStateOf reads the polygon offset
 	GLboolean( WINAPI * glIsEnabled )( GLenum ) = nullptr;
 	void( WINAPI * glGetTexLevelParameteriv )( GLenum, GLint, GLenum, GLint * ) = nullptr;
 	void( WINAPI * glGetTexParameteriv )( GLenum, GLenum, GLint * ) = nullptr;
@@ -89,7 +90,7 @@ bool loadMore()
 	bool ok = true;
 #define WD_L( n ) ok = ldx( gw.n, #n ) && ok
 	WD_L( glGetProgramiv ); WD_L( glGetActiveUniform ); WD_L( glGetActiveUniformsiv ); WD_L( glGetUniformLocation );
-	WD_L( glGetUniformiv ); WD_L( glGetUniformfv ); WD_L( glActiveTexture ); WD_L( glGetIntegerv ); WD_L( glGetBooleanv );
+	WD_L( glGetUniformiv ); WD_L( glGetUniformfv ); WD_L( glActiveTexture ); WD_L( glGetIntegerv ); WD_L( glGetBooleanv ); WD_L( glGetFloatv );
 	WD_L( glIsEnabled ); WD_L( glGetTexLevelParameteriv ); WD_L( glGetTexParameteriv ); WD_L( glGetTexParameterfv );
 	WD_L( glGetAttachedShaders ); WD_L( glGetShaderiv ); WD_L( glBindBuffer ); WD_L( glGetBufferParameteriv );
 	WD_L( glGetVertexAttribiv ); WD_L( glGetVertexAttribfv ); WD_L( glGetVertexAttribPointerv ); WD_L( glGetIntegeri_v );

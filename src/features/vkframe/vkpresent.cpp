@@ -694,7 +694,7 @@ bool fxWork( std::string & why );
 void fxDrop();
 bool farRecord( std::string & why );  // lane VKFAR1 (vkfardots.inc): fxWork's kind 2
 bool fcRecord( std::string & why );   // lane VKFAR2 (vkfarcardsdraw.inc): fxWork's kind 3
-bool waterRecord( std::string & why );  // lane VKWATER3 (vkwater.inc): fxWork's kind 4
+bool waterRecord( std::string & why );  // lane VKWATER3 (vkwater.inc): fxWork's kind 4 (VKFAR2: and 5, the far LOD rings)
 void waterDrop();
 void objDrop();  // lane VKOBJ1
 void blFree();  // lane VKOBJ2
@@ -5635,7 +5635,7 @@ bool fxWork( std::string & why )
 			v.vkEndCommandBuffer( F.cmd );
 			return false;
 		}
-	} else if ( F.kind == 4 ) {  // lane VKWATER3: the shaded water draw
+	} else if ( F.kind == 4 || F.kind == 5 ) {  // lane VKWATER3: the shaded water draw; lane VKFAR2: 5 the far LOD rings
 		if ( !waterRecord( why ) ) {
 			v.vkEndCommandBuffer( F.cmd );
 			return false;
