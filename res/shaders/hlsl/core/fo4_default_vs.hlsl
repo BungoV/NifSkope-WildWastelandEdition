@@ -8,6 +8,7 @@
 #define SampleCmp SampleCmpLevelZero	// the same for a shadow compare (SampleCmp is fragment-only)
 static float4 gl_Position;
 static int gl_VertexID;
+static int gl_BaseInstanceARB;	// the draw's base instance: stage input BaseInstance
 static float3 LightDir;
 static float3 ViewDir;
 
@@ -280,6 +281,13 @@ struct SPIRV_Cross_Input
     float4 farInstBoxC : TEXCOORD14;
     float4 farInstBoxE : TEXCOORD15;
 #endif
+#if defined(WW_BINDLESS) && defined(WW_BL_VERT) && defined(GL_ARB_shader_draw_parameters)
+#ifdef __spirv__
+    [[vk::builtin("BaseInstance")]] uint gl_BaseInstanceARB : BASEINSTANCE;
+#else
+    uint gl_BaseInstanceARB : SV_StartInstanceLocation;
+#endif
+#endif
 };
 
 struct SPIRV_Cross_Output
@@ -299,8 +307,16 @@ struct SPIRV_Cross_Output
 #if defined(WW_FAR_SPLAT)
     WW_LOC(16) nointerpolation float farSplatA : TEXCOORD16;
 #endif
+#if defined(WW_BINDLESS) && defined(WW_BL_VERT)
+    WW_LOC(16) nointerpolation uint wwBlRow : TEXCOORD16;
+#endif
     precise float4 gl_Position : SV_Position;
 };
+
+#ifdef vert_main	// a wrapper renamed this file's vert_main and defines its own after the include
+#undef vert_main
+void vert_main();
+#endif
 
 SPIRV_Cross_Output main(SPIRV_Cross_Input stage_input)
 {
@@ -321,6 +337,9 @@ SPIRV_Cross_Output main(SPIRV_Cross_Input stage_input)
 #endif
     boneWeights = stage_input.boneWeights;
     gl_VertexID = int(stage_input.gl_VertexID);
+#if defined(WW_BINDLESS) && defined(WW_BL_VERT) && defined(GL_ARB_shader_draw_parameters)
+    gl_BaseInstanceARB = int(stage_input.gl_BaseInstanceARB);
+#endif
     vert_main();
     SPIRV_Cross_Output stage_output;
     stage_output.gl_Position = gl_Position;
@@ -338,6 +357,9 @@ SPIRV_Cross_Output main(SPIRV_Cross_Input stage_input)
     stage_output.wwFarAo = wwFarAo;
 #if defined(WW_FAR_SPLAT)
     stage_output.farSplatA = farSplatA;
+#endif
+#if defined(WW_BINDLESS) && defined(WW_BL_VERT)
+    stage_output.wwBlRow = wwBlRow;
 #endif
     return stage_output;
 }

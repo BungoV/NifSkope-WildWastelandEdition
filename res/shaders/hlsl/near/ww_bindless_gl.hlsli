@@ -64,20 +64,24 @@ WwBlTex wwBlTex(uint i)
     return t;
 }
 
-#define BaseMap wwBlTex(0)
-#define _BaseMap_sampler 0u
-#define NormalMap wwBlTex(1)
-#define _NormalMap_sampler 0u
-#define GlowMap wwBlTex(2)
-#define _GlowMap_sampler 0u
-#define BacklightMap wwBlTex(3)
-#define _BacklightMap_sampler 0u
-#define SpecularMap wwBlTex(4)
-#define _SpecularMap_sampler 0u
-#define GreyscaleMap wwBlTex(5)
-#define _GreyscaleMap_sampler 0u
-#define EnvironmentMap wwBlTex(6)
-#define _EnvironmentMap_sampler 0u
+// the names ww_bindless_vk.hlsli gives too, so the readable source's map defines (glsl2hlsl.py: `#define BaseMap
+// wwBlMap(0)`) read the same text on both routes
+#define wwBlMap(i) wwBlTex(i)
+#define wwBlSmp(i) 0u
+#define BaseMap wwBlMap(0)
+#define _BaseMap_sampler wwBlSmp(0)
+#define NormalMap wwBlMap(1)
+#define _NormalMap_sampler wwBlSmp(1)
+#define GlowMap wwBlMap(2)
+#define _GlowMap_sampler wwBlSmp(2)
+#define BacklightMap wwBlMap(3)
+#define _BacklightMap_sampler wwBlSmp(3)
+#define SpecularMap wwBlMap(4)
+#define _SpecularMap_sampler wwBlSmp(4)
+#define GreyscaleMap wwBlMap(5)
+#define _GreyscaleMap_sampler wwBlSmp(5)
+#define EnvironmentMap wwBlMap(6)
+#define _EnvironmentMap_sampler wwBlSmp(6)
 
 // a shared include that takes a map as a Texture2D<float4> + SamplerState parameter (cell_reflprobe.hlsli's atlas) is
 // included with `#define Texture2D WwBlTexT` and `#define SamplerState uint` around it (the including file does that).
