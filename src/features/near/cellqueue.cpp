@@ -543,6 +543,18 @@ void poolUnbind( NifSkopeOpenGLContext * r )
 	r->fn->glBindBuffer( GL_DRAW_INDIRECT_BUFFER, 0 );
 }
 
+bool poolBuffers( unsigned int & pos, unsigned int & ebo, std::size_t & posBytes, std::size_t & idxBytes )
+{
+	const Pool * p = poolOf();
+	if ( !p || !p->pos || !p->ebo )
+		return false;
+	pos = p->pos;
+	ebo = p->ebo;
+	posBytes = p->vUsed * 12;
+	idxBytes = p->iUsed * 2;
+	return true;
+}
+
 QString poolCensus( NifSkopeOpenGLContext * r )
 {
 	Q_UNUSED( r );

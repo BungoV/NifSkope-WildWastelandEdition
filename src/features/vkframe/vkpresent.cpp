@@ -44,6 +44,7 @@
 #include "features/vkframe/ssr_view_s3.spv.h"
 #include "features/vkframe/ssr_view_s4.spv.h"
 #include "features/vkframe/ssr_view_s5.spv.h"
+#include "features/vkframe/csm_view_vs.spv.h"  // lane VKSHADOW1
 // lane VKAIR1: the air over the sky (cell_volsky), the clouds' march + resolve (and their accumulation twins)
 #include "features/vkframe/volsky_view_ps.spv.h"
 #include "features/vkframe/cloud_march_view_ps.spv.h"
@@ -87,6 +88,7 @@ constexpr GLenum kTexture2D = 0x0DE1, kRgba8 = 0x8058, kScissorTest = 0x0C11, kR
 // lane VKSHARE1: volumes and layered targets, and the single-channel formats the cloud / TAA targets use
 constexpr GLenum kTexture3D = 0x806F, kTexBinding3D = 0x806A, kTexture2DArray = 0x8C1A, kTexBinding2DArray = 0x8C1D,
 	kGlRg32f = 0x8230, kGlRg16f = 0x822F, kGlR32f = 0x822E, kGlR8 = 0x8229, kGlRg8 = 0x822B;
+constexpr GLenum kDepth16 = 0x81A5;  // lane VKSHADOW1: the sun cascades' D16 2D array
 constexpr GLuint64 kTimeoutIgnored = ~0ull;
 
 struct Gl
@@ -132,6 +134,11 @@ struct Gl
 	// lane VKSHARE1 (optional, GL 4.3): TAA's velocity and mask into their shared copies
 	void( WINAPI * copyImageSubData )( GLuint, GLenum, GLint, GLint, GLint, GLint, GLuint, GLenum, GLint, GLint, GLint, GLint, GLsizei,
 		GLsizei, GLsizei ) = nullptr;
+	// lane VKSHADOW1 (optional): the cascade draws' vertex and index buffers, Vulkan memory GL copies its pool into
+	void( WINAPI * createBuffers )( GLsizei, GLuint * ) = nullptr;
+	void( WINAPI * deleteBuffers )( GLsizei, const GLuint * ) = nullptr;
+	void( WINAPI * namedBufferStorageMem )( GLuint, std::intptr_t, GLuint, GLuint64 ) = nullptr;
+	void( WINAPI * copyNamedBufferSubData )( GLuint, GLuint, std::intptr_t, std::intptr_t, std::intptr_t ) = nullptr;
 };
 
 template <class F> void load( F & f, WwVkPresent::GlProc gp, const char * name )
@@ -174,6 +181,10 @@ bool loadGl( Gl & g, WwVkPresent::GlProc gp, std::string & why )
 	load( g.texStorageMem2DMultisample, gp, "glTexStorageMem2DMultisampleEXT" );
 	load( g.texStorageMem3D, gp, "glTexStorageMem3DEXT" );
 	load( g.copyImageSubData, gp, "glCopyImageSubData" );
+	load( g.createBuffers, gp, "glCreateBuffers" );
+	load( g.deleteBuffers, gp, "glDeleteBuffers" );
+	load( g.namedBufferStorageMem, gp, "glNamedBufferStorageMemEXT" );
+	load( g.copyNamedBufferSubData, gp, "glCopyNamedBufferSubData" );
 	g.ok = g.getIntegerv && g.getError && g.enable && g.disable && g.isEnabled && g.flush && g.genTextures && g.deleteTextures
 		&& g.bindTexture && g.texParameteri && g.genFramebuffers && g.deleteFramebuffers && g.bindFramebuffer
 		&& g.framebufferTexture2D && g.checkFramebufferStatus && g.blitFramebuffer && g.createMemoryObjects
@@ -232,6 +243,9 @@ struct Vk
 	bool storageExt = false;
 	bool float64 = false;  // lane VKLIGHT1: the AO raw kernel's integer-exact doubles (AoCommon.hlsli)
 	VKP( vkCmdDispatch ); VKP( vkCreateComputePipelines );
+	// lane VKSHADOW1: the sun cascades' depth draws (indexed indirect, GL's polygon offset as the depth bias)
+	bool depthBiasClamp = false, multiDrawIndirect = false, firstInstance = false;
+	VKP( vkCmdBindVertexBuffers ); VKP( vkCmdBindIndexBuffer ); VKP( vkCmdDrawIndexedIndirect ); VKP( vkCmdSetDepthBias );
 	// lane VKAIR1: the air's stencil reference, the zero textures' clear
 	VKP( vkCmdSetStencilReference ); VKP( vkCmdClearColorImage );
 };
@@ -475,6 +489,12 @@ bool makeDevice( std::string & why )
 	// lane VKFAR1 round 2: the far cards' BC sheets and shadow cube arrays (vkfarcards.inc reads what is offered)
 	en.textureCompressionBC = offered.textureCompressionBC;
 	en.imageCubeArray = offered.imageCubeArray;
+	en.depthBiasClamp = offered.depthBiasClamp;  // lane VKSHADOW1: GL's glPolygonOffsetClamp twin
+	v.depthBiasClamp = offered.depthBiasClamp == VK_TRUE;
+	en.multiDrawIndirect = offered.multiDrawIndirect;
+	v.multiDrawIndirect = offered.multiDrawIndirect == VK_TRUE;
+	en.drawIndirectFirstInstance = offered.drawIndirectFirstInstance;
+	v.firstInstance = offered.drawIndirectFirstInstance == VK_TRUE;
 	VkDeviceCreateInfo di { VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO };
 	di.pEnabledFeatures = &en;
 	di.queueCreateInfoCount = 1;
@@ -504,6 +524,7 @@ bool makeDevice( std::string & why )
 	LD( vkCmdSetViewport ); LD( vkCmdSetScissor ); LD( vkCmdCopyBufferToImage );
 	LD( vkCreatePipelineCache ); LD( vkDestroyPipelineCache ); LD( vkGetPipelineCacheData );
 	LD( vkCmdDispatch ); LD( vkCreateComputePipelines );
+	LD( vkCmdBindVertexBuffers ); LD( vkCmdBindIndexBuffer ); LD( vkCmdDrawIndexedIndirect ); LD( vkCmdSetDepthBias );
 	LD( vkCmdSetStencilReference ); LD( vkCmdClearColorImage );
 #undef LD
 	if ( !v.vkGetMemoryWin32HandleKHR || !v.vkGetSemaphoreWin32HandleKHR || !v.vkCreateSwapchainKHR )
@@ -573,6 +594,7 @@ struct Work
 	bool sky = false;   // lane VKSKY1 (k = -1): the cell sky into the tone frame (skyWork); shares tone's counters
 	int light = -1;     // lane VKLIGHT1 (k = -1): this LightPass's dispatches (lightWork); shares tone's counters
 	bool ssr = false;   // lane VKLIGHT2 (k = -1): the reflections' stages (ssrWork); shares tone's counters
+	bool ( *fn )( std::string & ) = nullptr;  // lane VKSHADOW1 (k = -1): a pass's own record + submit; shares tone's counters
 	bool fx = false;    // lane VKAIR1 (k = -1): the air's sky pass or the clouds' march + resolve (fxWork); tone's counters
 };
 
@@ -586,6 +608,7 @@ bool lightWork( int pass, std::string & why );
 void lightDrop();
 bool ssrWork( std::string & why );
 void ssrDrop();
+void csmDrop();  // lane VKSHADOW1
 bool fxWork( std::string & why );
 void fxDrop();
 bool farRecord( std::string & why );  // lane VKFAR1 (vkfardots.inc): fxWork's kind 2
@@ -653,6 +676,19 @@ void workerLoop()
 			j = W.q.front();
 			W.q.pop_front();
 			W.busy = true;
+		}
+		if ( j.fn ) {  // lane VKSHADOW1: a pass that brings its own work function (the sun cascades)
+			std::string why;
+			const bool ok = j.fn( why );
+			{
+				std::lock_guard<std::mutex> lk( W.m );
+				W.toneDone++;
+				W.toneOk = ok;
+				W.toneWhy = why;
+				W.busy = false;
+			}
+			W.idle.notify_all();
+			continue;
 		}
 		if ( j.tone || j.taa || j.merge || j.sky || j.ssr || j.light >= 0 || j.fx ) {
 			std::string why;
@@ -1100,8 +1136,9 @@ bool makeShared( VkImage & img, VkDeviceMemory & mem, GLuint & tex, GLuint & obj
 	Vk & v = vk();
 	Gl & g = gl();
 	const bool is3d = type == VK_IMAGE_TYPE_3D, layered = !is3d && layers > 1;
-	if ( ( is3d || layered ) && ( samples != 1 || depth || !g.texStorageMem3D ) ) {
-		why = !g.texStorageMem3D ? "no glTexStorageMem3DEXT (a 3D / layered shared target)" : "a 3D / layered shared target is single-sample colour only";
+	const bool depthOnly = fmt == VK_FORMAT_D16_UNORM;  // lane VKSHADOW1: the sun cascades (a layered D16 is allowed)
+	if ( ( is3d || layered ) && ( samples != 1 || ( depth && !( layered && depthOnly ) ) || !g.texStorageMem3D ) ) {
+		why = !g.texStorageMem3D ? "no glTexStorageMem3DEXT (a 3D / layered shared target)" : "a 3D / layered shared target is single-sample colour or D16 only";
 		return false;
 	}
 	d = is3d ? std::max( d, 1 ) : 1;
@@ -1180,7 +1217,8 @@ bool makeShared( VkImage & img, VkDeviceMemory & mem, GLuint & tex, GLuint & obj
 		b.newLayout = VK_IMAGE_LAYOUT_GENERAL;
 		b.srcQueueFamilyIndex = b.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
 		b.image = img;
-		b.subresourceRange = { VkImageAspectFlags( depth ? VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT : VK_IMAGE_ASPECT_COLOR_BIT ),
+		b.subresourceRange = { VkImageAspectFlags( depthOnly ? VK_IMAGE_ASPECT_DEPTH_BIT
+			: depth ? VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT : VK_IMAGE_ASPECT_COLOR_BIT ),
 			0, std::uint32_t( levels ), 0, std::uint32_t( layers ) };
 		v.vkCmdPipelineBarrier( cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0, 0, nullptr, 0, nullptr, 1, &b );
 		v.vkEndCommandBuffer( cmd );
@@ -1268,8 +1306,9 @@ WwVkPresent::SharedStat & sharedStat()
 
 VkFormat vkFormatOf( GLenum f, bool & depth )
 {
-	depth = f == kDepth24Stencil8;
+	depth = f == kDepth24Stencil8 || f == kDepth16;
 	switch ( f ) {
+	case kDepth16: return VK_FORMAT_D16_UNORM;  // lane VKSHADOW1
 	case kRgba16f: return VK_FORMAT_R16G16B16A16_SFLOAT;
 	case kRgba32f: return VK_FORMAT_R32G32B32A32_SFLOAT;
 	case kRgba8: return VK_FORMAT_R8G8B8A8_UNORM;
@@ -3451,6 +3490,7 @@ void shutdown()
 		toneFrameFree( gl().ok && T.glCtx == gl().ctx );
 		toneSemsDrop( gl().ok && T.semCtx == gl().ctx );
 	}
+	csmDrop();  // lane VKSHADOW1: the cascades' layer views go before the shared arrays they view
 	// lane VKSHARE1: the keyed shared targets (their owners see sharedTargetIs false and make GL's own again)
 	if ( !shareds().empty() ) {
 		drain();
@@ -7009,6 +7049,588 @@ SsrStat takeSsrStat()
 }
 }  // namespace WwVkPresent
 
+// lane VKSHADOW1: the sun cascades' queued solid casters on the present device (plan row G6), one crossing after GL's pass
+namespace
+{
+struct CsmBuf
+{
+	VkBuffer buf = VK_NULL_HANDLE;
+	VkDeviceMemory mem = VK_NULL_HANDLE;
+	VkDeviceSize cap = 0;
+	void * ptr = nullptr;      // a host-visible one, mapped
+	GLuint gl = 0, obj = 0;    // an exported one: GL's buffer over the same memory
+	void * glCtx = nullptr;
+};
+struct CsmFb
+{
+	std::uintptr_t key = 0;
+	int layer = 0, w = 0, h = 0;
+	VkImageView view = VK_NULL_HANDLE;
+	VkFramebuffer fb = VK_NULL_HANDLE;
+};
+struct Csm
+{
+	bool made = false, broken = false;
+	std::string brokenWhy;
+	VkPipelineLayout layout = VK_NULL_HANDLE;
+	VkShaderModule vs = VK_NULL_HANDLE;
+	VkRenderPass pass = VK_NULL_HANDLE;
+	VkPipeline pipe[2] = { VK_NULL_HANDLE, VK_NULL_HANDLE };  // 0 back faces culled, 1 two-sided
+	VkSemaphore glDone = VK_NULL_HANDLE, vkDone = VK_NULL_HANDLE;
+	GLuint glDoneGl = 0, vkDoneGl = 0;
+	void * semCtx = nullptr;
+	VkCommandBuffer cmd = VK_NULL_HANDLE;
+	VkFence fence = VK_NULL_HANDLE;
+	bool pending = false;
+	CsmBuf pos, idx, mats, cmds;
+	std::vector<CsmFb> fbs;
+	std::uint64_t fbGen = 0;
+	std::vector<WwVkPresent::CsmDraw> d;
+	std::vector<int> dFb;  // per draw: its framebuffer in fbs
+	int pipelines = 0;
+	double buildMs = 0.0;
+	WwVkPresent::CsmStat st;
+};
+constexpr std::uint32_t kCsmCmdBytes = 20;  // GpuDriven::DrawCmd = VkDrawIndexedIndirectCommand
+
+Csm & csmS()
+{
+	static Csm s;
+	return s;
+}
+
+// the device-time parts (once): the pipeline layout (one 64-byte vertex push block), the module, the render pass (one
+// D16 attachment, LOAD / STORE, GENERAL), both pipelines, the command buffer and its fence
+bool csmStatic( std::string & why )
+{
+	Vk & v = vk();
+	Csm & S = csmS();
+	if ( S.made )
+		return true;
+	const double t0 = nowMs();
+	VkPushConstantRange pr { VK_SHADER_STAGE_VERTEX_BIT, 0, 64 };
+	VkPipelineLayoutCreateInfo plci { VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO };
+	plci.pushConstantRangeCount = 1;
+	plci.pPushConstantRanges = &pr;
+	VkShaderModuleCreateInfo mci { VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO };
+	mci.codeSize = sizeof( vkframe_csm_view_vs_spv );
+	mci.pCode = vkframe_csm_view_vs_spv;
+	if ( v.vkCreatePipelineLayout( v.dev, &plci, nullptr, &S.layout ) != VK_SUCCESS
+		|| v.vkCreateShaderModule( v.dev, &mci, nullptr, &S.vs ) != VK_SUCCESS ) {
+		why = "the cascades' pipeline layout / shader module failed";
+		return false;
+	}
+	VkAttachmentDescription at {};
+	at.format = VK_FORMAT_D16_UNORM;
+	at.samples = VK_SAMPLE_COUNT_1_BIT;
+	at.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
+	at.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+	at.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+	at.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+	at.initialLayout = at.finalLayout = VK_IMAGE_LAYOUT_GENERAL;
+	const VkAttachmentReference dr { 0, VK_IMAGE_LAYOUT_GENERAL };
+	VkSubpassDescription sp {};
+	sp.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+	sp.pDepthStencilAttachment = &dr;
+	VkRenderPassCreateInfo rci { VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO };
+	rci.attachmentCount = 1;
+	rci.pAttachments = &at;
+	rci.subpassCount = 1;
+	rci.pSubpasses = &sp;
+	if ( v.vkCreateRenderPass( v.dev, &rci, nullptr, &S.pass ) != VK_SUCCESS ) {
+		why = "vkCreateRenderPass (the cascades) failed";
+		return false;
+	}
+	VkPipelineShaderStageCreateInfo st { VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO };
+	st.stage = VK_SHADER_STAGE_VERTEX_BIT;
+	st.module = S.vs;
+	st.pName = "main";
+	// binding 0: the pool's vec3 positions; binding 1: one model-view matrix per caster (baseInstance), GL columns at 1-4
+	const VkVertexInputBindingDescription vb[2] = { { 0, 12, VK_VERTEX_INPUT_RATE_VERTEX }, { 1, 64, VK_VERTEX_INPUT_RATE_INSTANCE } };
+	const VkVertexInputAttributeDescription va[5] = { { 0, 0, VK_FORMAT_R32G32B32_SFLOAT, 0 },
+		{ 1, 1, VK_FORMAT_R32G32B32A32_SFLOAT, 0 }, { 2, 1, VK_FORMAT_R32G32B32A32_SFLOAT, 16 },
+		{ 3, 1, VK_FORMAT_R32G32B32A32_SFLOAT, 32 }, { 4, 1, VK_FORMAT_R32G32B32A32_SFLOAT, 48 } };
+	VkPipelineVertexInputStateCreateInfo vi { VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO };
+	vi.vertexBindingDescriptionCount = 2;
+	vi.pVertexBindingDescriptions = vb;
+	vi.vertexAttributeDescriptionCount = 5;
+	vi.pVertexAttributeDescriptions = va;
+	VkPipelineInputAssemblyStateCreateInfo ia { VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO };
+	ia.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+	VkPipelineViewportStateCreateInfo vps { VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO };
+	vps.viewportCount = vps.scissorCount = 1;
+	VkPipelineRasterizationStateCreateInfo rs { VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO };
+	rs.polygonMode = VK_POLYGON_MODE_FILL;
+	// no y flip: GL's window rows from the bottom are the image's rows from the top, so GL's CCW front is Vulkan's CW
+	rs.frontFace = VK_FRONT_FACE_CLOCKWISE;
+	rs.depthBiasEnable = VK_TRUE;
+	rs.lineWidth = 1.0f;
+	VkPipelineMultisampleStateCreateInfo ms { VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO };
+	ms.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+	VkPipelineDepthStencilStateCreateInfo ds { VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO };
+	ds.depthTestEnable = VK_TRUE;
+	ds.depthWriteEnable = VK_TRUE;
+	ds.depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
+	VkPipelineColorBlendStateCreateInfo cbs { VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO };
+	const VkDynamicState dyn[3] = { VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR, VK_DYNAMIC_STATE_DEPTH_BIAS };
+	VkPipelineDynamicStateCreateInfo dy { VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO };
+	dy.dynamicStateCount = 3;
+	dy.pDynamicStates = dyn;
+	VkGraphicsPipelineCreateInfo gp { VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO };
+	gp.stageCount = 1;
+	gp.pStages = &st;
+	gp.pVertexInputState = &vi;
+	gp.pInputAssemblyState = &ia;
+	gp.pViewportState = &vps;
+	gp.pRasterizationState = &rs;
+	gp.pMultisampleState = &ms;
+	gp.pDepthStencilState = &ds;
+	gp.pColorBlendState = &cbs;
+	gp.pDynamicState = &dy;
+	gp.layout = S.layout;
+	gp.renderPass = S.pass;
+	for ( int k = 0; k < 2; k++ ) {
+		rs.cullMode = k ? VK_CULL_MODE_NONE : VK_CULL_MODE_BACK_BIT;
+		if ( v.vkCreateGraphicsPipelines( v.dev, tone().cache, 1, &gp, nullptr, &S.pipe[k] ) != VK_SUCCESS ) {
+			why = std::string( "vkCreateGraphicsPipelines (the cascades, " ) + ( k ? "two-sided" : "culled" ) + ") failed";
+			return false;
+		}
+	}
+	VkFenceCreateInfo fi { VK_STRUCTURE_TYPE_FENCE_CREATE_INFO };
+	VkCommandBufferAllocateInfo cai { VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO };
+	cai.commandPool = v.pool;
+	cai.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+	cai.commandBufferCount = 1;
+	if ( v.vkCreateFence( v.dev, &fi, nullptr, &S.fence ) != VK_SUCCESS || v.vkAllocateCommandBuffers( v.dev, &cai, &S.cmd ) != VK_SUCCESS ) {
+		why = "the cascades' fence / command buffer failed";
+		return false;
+	}
+	S.pipelines = 2;
+	S.buildMs = nowMs() - t0;
+	toneCacheSave();
+	S.made = true;
+	return true;
+}
+
+void csmSemsDrop( bool glAlive )
+{
+	Vk & v = vk();
+	Gl & g = gl();
+	Csm & S = csmS();
+	if ( glAlive )
+		for ( GLuint * s : { &S.glDoneGl, &S.vkDoneGl } )
+			if ( *s )
+				g.deleteSemaphores( 1, s );
+	for ( VkSemaphore * s : { &S.glDone, &S.vkDone } )
+		if ( *s )
+			v.vkDestroySemaphore( v.dev, *s, nullptr );
+	S.glDoneGl = S.vkDoneGl = 0;
+	S.glDone = S.vkDone = VK_NULL_HANDLE;
+	S.semCtx = nullptr;
+}
+
+bool csmSems( std::string & why )
+{
+	Gl & g = gl();
+	Csm & S = csmS();
+	if ( S.glDone && S.semCtx == g.ctx )
+		return true;
+	csmSemsDrop( false );  // another context's names: that context went
+	if ( !exportSem( S.glDone, S.glDoneGl, why ) || !exportSem( S.vkDone, S.vkDoneGl, why ) ) {
+		csmSemsDrop( true );
+		return false;
+	}
+	S.semCtx = g.ctx;
+	return true;
+}
+
+// the GPU no longer reads the buffer (the caller waited the fence)
+void csmBufFree( CsmBuf & b, bool glAlive )
+{
+	Vk & v = vk();
+	Gl & g = gl();
+	if ( glAlive && b.gl )
+		g.deleteBuffers( 1, &b.gl );
+	if ( glAlive && b.obj )
+		g.deleteMemoryObjects( 1, &b.obj );
+	if ( b.buf )
+		v.vkDestroyBuffer( v.dev, b.buf, nullptr );
+	if ( b.mem )
+		v.vkFreeMemory( v.dev, b.mem, nullptr );  // unmaps a mapped one
+	b = CsmBuf();
+}
+
+/* a buffer of at least need bytes (grown by doubling): exported = device-local memory GL imports as a buffer of its own
+ * (the pool's copy target), else host-visible and mapped (the matrices and commands) */
+bool csmBuf( CsmBuf & b, VkDeviceSize need, bool exported, VkBufferUsageFlags usage, std::string & why )
+{
+	Vk & v = vk();
+	Gl & g = gl();
+	if ( b.buf && b.cap >= need && ( !exported || b.glCtx == g.ctx ) )
+		return true;
+	csmBufFree( b, exported && b.glCtx == g.ctx );
+	VkDeviceSize cap = 65536;
+	while ( cap < need )
+		cap *= 2;
+	VkExternalMemoryBufferCreateInfo ext { VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_BUFFER_CREATE_INFO };
+	ext.handleTypes = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_WIN32_BIT;
+	VkBufferCreateInfo bci { VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
+	bci.pNext = exported ? &ext : nullptr;
+	bci.size = cap;
+	bci.usage = usage | ( exported ? VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT : 0 );
+	if ( v.vkCreateBuffer( v.dev, &bci, nullptr, &b.buf ) != VK_SUCCESS ) {
+		why = "vkCreateBuffer (the cascades) failed";
+		return false;
+	}
+	VkMemoryRequirements r {};
+	v.vkGetBufferMemoryRequirements( v.dev, b.buf, &r );
+	VkMemoryDedicatedAllocateInfo ded { VK_STRUCTURE_TYPE_MEMORY_DEDICATED_ALLOCATE_INFO };
+	ded.buffer = b.buf;
+	VkExportMemoryAllocateInfo exp { VK_STRUCTURE_TYPE_EXPORT_MEMORY_ALLOCATE_INFO };
+	exp.pNext = &ded;
+	exp.handleTypes = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_WIN32_BIT;
+	VkMemoryAllocateInfo ai { VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO };
+	ai.pNext = exported ? &exp : nullptr;
+	ai.allocationSize = r.size;
+	ai.memoryTypeIndex = memType( r.memoryTypeBits, exported ? VkMemoryPropertyFlags( VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT )
+		: VkMemoryPropertyFlags( VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT ) );
+	if ( ai.memoryTypeIndex == UINT32_MAX || v.vkAllocateMemory( v.dev, &ai, nullptr, &b.mem ) != VK_SUCCESS
+		|| v.vkBindBufferMemory( v.dev, b.buf, b.mem, 0 ) != VK_SUCCESS ) {
+		why = "no memory for a cascades buffer";
+		return false;
+	}
+	b.cap = cap;
+	if ( !exported ) {
+		if ( v.vkMapMemory( v.dev, b.mem, 0, VK_WHOLE_SIZE, 0, &b.ptr ) != VK_SUCCESS || !b.ptr ) {
+			why = "vkMapMemory (a cascades buffer) failed";
+			return false;
+		}
+		return true;
+	}
+	VkMemoryGetWin32HandleInfoKHR mi { VK_STRUCTURE_TYPE_MEMORY_GET_WIN32_HANDLE_INFO_KHR };
+	mi.memory = b.mem;
+	mi.handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_WIN32_BIT;
+	HANDLE mh = nullptr;
+	if ( v.vkGetMemoryWin32HandleKHR( v.dev, &mi, &mh ) != VK_SUCCESS || !mh ) {
+		why = "vkGetMemoryWin32HandleKHR (a cascades buffer) failed";
+		return false;
+	}
+	while ( g.getError() != 0 ) {}
+	g.createMemoryObjects( 1, &b.obj );
+	const GLint one = 1;
+	g.memoryObjectParameteriv( b.obj, kDedicated, &one );
+	g.importMemoryWin32Handle( b.obj, GLuint64( r.size ), kHandleOpaqueWin32, mh );
+	const GLenum errImport = g.getError();
+	CloseHandle( mh );
+	g.createBuffers( 1, &b.gl );
+	g.namedBufferStorageMem( b.gl, std::intptr_t( cap ), b.obj, 0 );
+	const GLenum errStorage = g.getError();
+	b.glCtx = g.ctx;
+	if ( errImport || errStorage || !b.gl ) {
+		why = "the GL import of a cascades buffer failed (GL error at the import " + std::to_string( errImport ) + ", the storage "
+			+ std::to_string( errStorage ) + ")";
+		return false;
+	}
+	return true;
+}
+
+void csmFbsDrop()
+{
+	Vk & v = vk();
+	Csm & S = csmS();
+	for ( CsmFb & f : S.fbs ) {
+		if ( f.fb )
+			v.vkDestroyFramebuffer( v.dev, f.fb, nullptr );
+		if ( f.view )
+			v.vkDestroyImageView( v.dev, f.view, nullptr );
+	}
+	S.fbs.clear();
+}
+
+// the framebuffer over one layer of a shared target (kept until a shared target is made or goes: sharedGen)
+int csmFb( std::uintptr_t key, int layer, std::string & why )
+{
+	Vk & v = vk();
+	Csm & S = csmS();
+	for ( std::size_t k = 0; k < S.fbs.size(); k++ )
+		if ( S.fbs[k].key == key && S.fbs[k].layer == layer )
+			return int( k );
+	const Shared * sh = sharedFind( key );
+	if ( !sh || !sh->img || sh->fmt != VK_FORMAT_D16_UNORM ) {
+		why = "a cascade target is not a shared D16 array";
+		return -1;
+	}
+	CsmFb f;
+	f.key = key;
+	f.layer = layer;
+	f.w = sh->w;
+	f.h = sh->h;
+	VkImageViewCreateInfo ci { VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO };
+	ci.image = sh->img;
+	ci.viewType = VK_IMAGE_VIEW_TYPE_2D;
+	ci.format = VK_FORMAT_D16_UNORM;
+	ci.subresourceRange = { VK_IMAGE_ASPECT_DEPTH_BIT, 0, 1, std::uint32_t( layer ), 1 };
+	if ( v.vkCreateImageView( v.dev, &ci, nullptr, &f.view ) != VK_SUCCESS ) {
+		why = "a cascade layer's image view failed";
+		return -1;
+	}
+	VkFramebufferCreateInfo fci { VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO };
+	fci.renderPass = S.pass;
+	fci.attachmentCount = 1;
+	fci.pAttachments = &f.view;
+	fci.width = std::uint32_t( f.w );
+	fci.height = std::uint32_t( f.h );
+	fci.layers = 1;
+	if ( v.vkCreateFramebuffer( v.dev, &fci, nullptr, &f.fb ) != VK_SUCCESS ) {
+		v.vkDestroyImageView( v.dev, f.view, nullptr );
+		why = "a cascade layer's framebuffer failed";
+		return -1;
+	}
+	S.fbs.push_back( f );
+	return int( S.fbs.size() ) - 1;
+}
+
+// the worker: every layer's draws in one render pass each (depth-only LEQUAL: the order does not matter), GL's signal
+// waited, signalled back, with the fence
+bool csmWork( std::string & why )
+{
+	Vk & v = vk();
+	Csm & S = csmS();
+	v.vkResetFences( v.dev, 1, &S.fence );
+	v.vkResetCommandBuffer( S.cmd, 0 );
+	VkCommandBufferBeginInfo bi { VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
+	bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+	v.vkBeginCommandBuffer( S.cmd, &bi );
+	const VkBuffer vbs[2] = { S.pos.buf, S.mats.buf };
+	const VkDeviceSize vbo[2] = { 0, 0 };
+	for ( std::size_t f = 0; f < S.fbs.size(); f++ ) {
+		const CsmFb & F = S.fbs[f];
+		bool any = false;
+		for ( int df : S.dFb )
+			any = any || df == int( f );
+		if ( !any )
+			continue;
+		VkRenderPassBeginInfo rbi { VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO };
+		rbi.renderPass = S.pass;
+		rbi.framebuffer = F.fb;
+		rbi.renderArea = { { 0, 0 }, { std::uint32_t( F.w ), std::uint32_t( F.h ) } };
+		v.vkCmdBeginRenderPass( S.cmd, &rbi, VK_SUBPASS_CONTENTS_INLINE );
+		v.vkCmdBindVertexBuffers( S.cmd, 0, 2, vbs, vbo );
+		v.vkCmdBindIndexBuffer( S.cmd, S.idx.buf, 0, VK_INDEX_TYPE_UINT16 );
+		int bound = -1;
+		for ( std::size_t k = 0; k < S.d.size(); k++ ) {
+			if ( S.dFb[k] != int( f ) )
+				continue;
+			const WwVkPresent::CsmDraw & D = S.d[k];
+			const int p = D.cull ? 0 : 1;
+			if ( p != bound )
+				v.vkCmdBindPipeline( S.cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, S.pipe[p] );
+			bound = p;
+			const VkViewport vp { 0.0f, 0.0f, float( D.vw ), float( D.vh ), 0.0f, 1.0f };
+			VkRect2D sc { { 0, 0 }, { std::uint32_t( F.w ), std::uint32_t( F.h ) } };
+			if ( D.sc[2] > D.sc[0] ) {
+				const int x0 = std::clamp( D.sc[0], 0, F.w ), y0 = std::clamp( D.sc[1], 0, F.h );
+				const int x1 = std::clamp( D.sc[2], 0, F.w ), y1 = std::clamp( D.sc[3], 0, F.h );
+				sc = { { x0, y0 }, { std::uint32_t( std::max( x1 - x0, 0 ) ), std::uint32_t( std::max( y1 - y0, 0 ) ) } };
+			}
+			v.vkCmdSetViewport( S.cmd, 0, 1, &vp );
+			v.vkCmdSetScissor( S.cmd, 0, 1, &sc );
+			v.vkCmdSetDepthBias( S.cmd, D.unit, D.clamp, D.slope );  // glPolygonOffset( slope, unit ): the same D16 law
+			v.vkCmdPushConstants( S.cmd, S.layout, VK_SHADER_STAGE_VERTEX_BIT, 0, 64, D.clip );
+			if ( v.multiDrawIndirect ) {
+				for ( std::uint32_t at = 0; at < D.n; at += 65535u )
+					v.vkCmdDrawIndexedIndirect( S.cmd, S.cmds.buf, VkDeviceSize( D.first + at ) * kCsmCmdBytes,
+						std::min( D.n - at, 65535u ), kCsmCmdBytes );
+			} else {
+				for ( std::uint32_t at = 0; at < D.n; at++ )
+					v.vkCmdDrawIndexedIndirect( S.cmd, S.cmds.buf, VkDeviceSize( D.first + at ) * kCsmCmdBytes, 1, kCsmCmdBytes );
+			}
+		}
+		v.vkCmdEndRenderPass( S.cmd );
+	}
+	if ( v.vkEndCommandBuffer( S.cmd ) != VK_SUCCESS ) {
+		why = "vkEndCommandBuffer (the cascades) failed";
+		return false;
+	}
+	const VkPipelineStageFlags waitAt = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
+	VkSubmitInfo si { VK_STRUCTURE_TYPE_SUBMIT_INFO };
+	si.waitSemaphoreCount = 1;
+	si.pWaitSemaphores = &S.glDone;
+	si.pWaitDstStageMask = &waitAt;
+	si.commandBufferCount = 1;
+	si.pCommandBuffers = &S.cmd;
+	si.signalSemaphoreCount = 1;
+	si.pSignalSemaphores = &S.vkDone;
+	const VkResult r = v.vkQueueSubmit( v.queue, 1, &si, S.fence );
+	if ( r != VK_SUCCESS ) {
+		why = "vkQueueSubmit (the cascades) returned " + std::to_string( int( r ) );
+		return false;
+	}
+	return true;
+}
+
+// shutdown: the crossing's semaphores and the buffers (GL's names), the framebuffers; the pipelines stay with the device
+void csmDrop()
+{
+	Csm & S = csmS();
+	if ( !S.glDone && !S.pending && S.fbs.empty() && !S.pos.buf && !S.mats.buf )
+		return;
+	drain();
+	vk().vkDeviceWaitIdle( vk().dev );
+	S.pending = false;
+	csmFbsDrop();
+	S.fbGen = 0;
+	for ( CsmBuf * b : { &S.pos, &S.idx, &S.mats, &S.cmds } )
+		csmBufFree( *b, gl().ok && b->glCtx == gl().ctx );
+	csmSemsDrop( gl().ok && S.semCtx == gl().ctx );
+}
+}  // namespace
+
+namespace WwVkPresent
+{
+std::string csmRefusal()
+{
+	Vk & v = vk();
+	Gl & g = gl();
+	if ( csmS().broken )
+		return csmS().brokenWhy;
+	if ( !v.ok || !g.ok )
+		return "the present device or GL's entry points are not ready";
+	if ( !g.createBuffers || !g.deleteBuffers || !g.namedBufferStorageMem || !g.copyNamedBufferSubData )
+		return "no glNamedBufferStorageMemEXT / glCopyNamedBufferSubData (the pool's copy)";
+	if ( !g.texStorageMem3D )
+		return "no glTexStorageMem3DEXT (the shared D16 arrays)";
+	if ( !v.firstInstance )
+		return "no drawIndirectFirstInstance (the casters' matrices by baseInstance)";
+	return std::string();
+}
+
+bool csmRun( const CsmRun & t, std::string & why )
+{
+	Csm & S = csmS();
+	Gl & g = gl();
+	Vk & v = vk();
+	const double t0 = nowMs();
+	auto refuse = [&]( const std::string & w ) {
+		why = w;
+		S.st.fails++;
+		S.st.failWhy = w;
+		return false;
+	};
+	auto breakOff = [&]( const std::string & w ) {
+		S.broken = true;
+		S.brokenWhy = "the cascades on Vulkan broke: " + w;
+		return refuse( S.brokenWhy );
+	};
+	if ( S.broken )
+		return refuse( S.brokenWhy );
+	if ( !v.ok || !g.ok || g.ctx != reinterpret_cast<void *>( wglGetCurrentContext() ) )
+		return refuse( "the present device or GL's entry points are not ready in this context" );
+	if ( const std::string no = csmRefusal(); !no.empty() )
+		return refuse( no );
+	if ( t.d.empty() )
+		return true;  // nothing queued this pass
+	if ( !t.pos || !t.idx || !t.posBytes || !t.idxBytes || !t.mats || !t.nMats || !t.cmds || !t.nCmds )
+		return refuse( "no pool, matrices or commands" );
+	for ( const CsmDraw & D : t.d ) {
+		if ( D.target < 0 || D.target > 1 || !t.tex[D.target] || !t.key[D.target] || D.layer < 0 || D.layer >= t.layers )
+			return refuse( "a draw names no shared target layer" );
+		if ( std::size_t( D.first ) + D.n > t.nCmds || D.vw < 1 || D.vh < 1 )
+			return refuse( "a draw's commands or viewport are out of range" );
+		if ( D.clamp != 0.0f && !v.depthBiasClamp )
+			return refuse( "no depthBiasClamp (glPolygonOffsetClamp's twin)" );
+	}
+	for ( int k = 0; k < 2; k++ )
+		if ( t.tex[k] && !sharedTargetIs( t.key[k], t.tex[k] ) )
+			return refuse( "a cascade target is not the shared one" );
+	// the last run is done before its command buffer, buffers and framebuffers are touched again
+	if ( S.pending ) {
+		v.vkWaitForFences( v.dev, 1, &S.fence, VK_TRUE, 1000000000ull );
+		S.pending = false;
+	}
+	std::string w;
+	if ( !csmStatic( w ) || !csmSems( w ) )
+		return breakOff( w );
+	if ( S.fbGen != sharedGen() ) {
+		csmFbsDrop();
+		S.fbGen = sharedGen();
+	}
+	S.d = t.d;
+	S.dFb.assign( t.d.size(), -1 );
+	for ( std::size_t k = 0; k < t.d.size(); k++ ) {
+		S.dFb[k] = csmFb( t.key[t.d[k].target], t.d[k].layer, w );
+		if ( S.dFb[k] < 0 )
+			return breakOff( w );
+	}
+	if ( !csmBuf( S.pos, VkDeviceSize( t.posBytes ), true, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, w )
+		|| !csmBuf( S.idx, VkDeviceSize( t.idxBytes ), true, VK_BUFFER_USAGE_INDEX_BUFFER_BIT, w )
+		|| !csmBuf( S.mats, VkDeviceSize( t.nMats ) * 64, false, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, w )
+		|| !csmBuf( S.cmds, VkDeviceSize( t.nCmds ) * kCsmCmdBytes, false, VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT, w ) )
+		return breakOff( w );
+	std::memcpy( S.mats.ptr, t.mats, t.nMats * 64 );
+	std::memcpy( S.cmds.ptr, t.cmds, t.nCmds * kCsmCmdBytes );
+	// the pool into its twins (every run: GL appends and compacts it), then GL's pass so far -> the worker -> GL's readers
+	g.copyNamedBufferSubData( GLuint( t.pos ), S.pos.gl, 0, 0, std::intptr_t( t.posBytes ) );
+	g.copyNamedBufferSubData( GLuint( t.idx ), S.idx.gl, 0, 0, std::intptr_t( t.idxBytes ) );
+	GLuint bufs[2] = { S.pos.gl, S.idx.gl };
+	GLuint tex[2] = {};
+	GLenum lay[2] = { kLayoutGeneral, kLayoutGeneral };
+	GLuint nt = 0;
+	for ( int k = 0; k < 2; k++ )
+		if ( t.tex[k] )
+			tex[nt++] = GLuint( t.tex[k] );
+	g.signalSemaphore( S.glDoneGl, 2, bufs, nt, tex, lay );
+	g.flush();
+	Worker & W = wk();
+	std::uint64_t want = 0;
+	{
+		std::lock_guard<std::mutex> lk( W.m );
+		want = W.toneDone + 1;
+	}
+	Work j;
+	j.k = -1;
+	j.fn = csmWork;
+	hand( j );
+	bool ok = false;
+	{
+		std::unique_lock<std::mutex> lk( W.m );
+		W.idle.wait( lk, [&W, want]() { return W.toneDone >= want; } );
+		ok = W.toneOk;
+		w = W.toneWhy;
+	}
+	if ( !ok )
+		return breakOff( w );  // nothing signals vkDone: GL does not wait it; GL draws the queues this pass
+	g.waitSemaphore( S.vkDoneGl, 2, bufs, nt, tex, lay );
+	S.pending = true;
+	const double ms = nowMs() - t0;
+	S.st.runs++;
+	S.st.draws += int( t.d.size() );
+	S.st.cmds += int( t.nCmds );
+	S.st.cpuMs += ms;
+	S.st.maxMs = std::max( S.st.maxMs, ms );
+	return true;
+}
+
+void csmOnGl( const char * why )
+{
+	Csm & S = csmS();
+	S.st.gl++;
+	S.st.glWhy = why ? why : "";
+}
+
+CsmStat takeCsmStat()
+{
+	Csm & S = csmS();
+	CsmStat s = S.st;
+	s.pipelines = S.pipelines;
+	s.buildMs = S.buildMs;
+	if ( S.broken && s.failWhy.empty() )
+		s.failWhy = S.brokenWhy;
+	S.st = CsmStat();
+	return s;
+}
+}  // namespace WwVkPresent
+
 namespace
 {
 
@@ -7342,6 +7964,41 @@ void lightSay( int pass, bool wanted, const char * glWhy )
 	if ( st.fails > 0 )
 		line += QStringLiteral( ", %1 refused to GL (last: %2)" ).arg( st.fails ).arg( QString::fromStdString( st.failWhy ) );
 	said[pass] = line;
+	qInfo().noquote() << line;
+}
+
+// lane VKSHADOW1: the sun cascades' route line, one a 5 s window while they are wanted on Vulkan
+void csmSay( bool wanted, const char * glWhy )
+{
+	static QString said;
+	static double at = 0.0;
+	const QString head = QStringLiteral( "vk csm: " );
+	if ( !wanted ) {
+		const QString line = head + QStringLiteral( "on GL (%1)" ).arg( QString::fromUtf8( glWhy ? glWhy : "" ) );
+		if ( line != said ) {
+			said = line;
+			qInfo().noquote() << line;
+		}
+		return;
+	}
+	const double now = nowMs();
+	if ( now - at < 5000.0 && said.startsWith( head + QStringLiteral( "on V" ) ) )
+		return;
+	at = now;
+	const CsmStat st = takeCsmStat();
+	QString line;
+	if ( st.runs > 0 )
+		line = head + QStringLiteral( "on Vulkan %1 passes (queued solid + two-sided casters, %2 draws, %3 commands; one crossing; "
+			"%4 pipelines built in %5 ms; drawing thread %6 ms, max %7)" )
+			.arg( st.runs ).arg( st.draws ).arg( st.cmds ).arg( st.pipelines ).arg( st.buildMs, 0, 'f', 1 )
+			.arg( st.cpuMs / st.runs, 0, 'f', 3 ).arg( st.maxMs, 0, 'f', 3 );
+	else
+		line = head + QStringLiteral( "on Vulkan wanted, 0 passes run" );
+	if ( st.gl > 0 )
+		line += QStringLiteral( ", on GL %1 passes (last: %2)" ).arg( st.gl ).arg( QString::fromStdString( st.glWhy ) );
+	if ( st.fails > 0 )
+		line += QStringLiteral( ", %1 refused to GL (last: %2)" ).arg( st.fails ).arg( QString::fromStdString( st.failWhy ) );
+	said = line;
 	qInfo().noquote() << line;
 }
 
