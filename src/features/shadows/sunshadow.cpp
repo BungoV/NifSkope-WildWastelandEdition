@@ -23,6 +23,7 @@ BSD License - see nifskope.h
 #include "gl/celllooks.h"
 #include "features/shared/cellpasstime.h"	// lane PERF1: the casters' draw count
 #include "features/near/cellqueue.h"	// lane GPUDRIVEN1: the casters' render queues
+#include "features/vkframe/vkpresent.h"	// lane VKSHADOW1: the queued casters on the present device
 
 #include "gl/glnode.h"
 #include "gl/glproperty.h"	// lane VOLAIR1: alpha-tested casters read the base map
@@ -108,6 +109,8 @@ struct CsmState
 	const void * ctx = nullptr;
 	unsigned int tex = 0, fbo = 0;
 	int texMap = 0;
+	bool shared = false;	// lane VKSHADOW1: tex is a shared D16 array on the present device (sharedTarget, keyed &tex)
+	std::string vkWhy;	// lane VKSHADOW1: why the live map is GL's own while the route is wanted
 
 	// the last pass
 	bool valid = false;
@@ -453,6 +456,70 @@ bool cableSway( const Scene * scene, const Shape * sh, std::vector<Vector3> & ou
 	return true;
 }
 
+/* lane VKSHADOW1 (plan row G6): the cascade maps are shared D16 arrays on the present device while the view is on Vulkan
+ * (WW_VKVIEW=1, its size settled) and the casters' queues are on; red WW_VKVIEW_CSM_RED=1 keeps GL's own textures */
+bool csmShareWanted()
+{
+	return GpuDriven::csm() && WwVkPresent::shareWanted( "WW_VKVIEW_CSM_RED" );
+}
+
+//! lane VKSHADOW1: the D16 array tex (bound to nothing after) with the sampler state of the live map (live) or a static layer
+void csmTexParams( NifSkopeOpenGLContext::GLFunctions * fn, unsigned int tex, bool live )
+{
+	GLint prevTex = 0;
+	fn->glGetIntegerv( GL_TEXTURE_BINDING_2D_ARRAY, &prevTex );
+	fn->glBindTexture( GL_TEXTURE_2D_ARRAY, tex );
+	fn->glTexParameteri( GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MIN_FILTER, live ? GL_LINEAR : GL_NEAREST );
+	fn->glTexParameteri( GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAG_FILTER, live ? GL_LINEAR : GL_NEAREST );
+	if ( live ) {
+		fn->glTexParameteri( GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_BORDER );
+		fn->glTexParameteri( GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_BORDER );
+		const GLfloat border[4] = { 1.0f, 1.0f, 1.0f, 1.0f };
+		fn->glTexParameterfv( GL_TEXTURE_2D_ARRAY, GL_TEXTURE_BORDER_COLOR, border );
+		fn->glTexParameteri( GL_TEXTURE_2D_ARRAY, GL_TEXTURE_COMPARE_MODE, GL_COMPARE_REF_TO_TEXTURE );
+		fn->glTexParameteri( GL_TEXTURE_2D_ARRAY, GL_TEXTURE_COMPARE_FUNC, GL_LEQUAL );
+	} else {
+		fn->glTexParameteri( GL_TEXTURE_2D_ARRAY, GL_TEXTURE_COMPARE_MODE, GL_NONE );
+	}
+	fn->glBindTexture( GL_TEXTURE_2D_ARRAY, GLuint( prevTex ) );
+}
+
+/* lane VKSHADOW1: tex (owned by key) becomes a shared D16 array of map x map x kCascades while wanted, else GL's own
+ * again (tex 0: the caller makes it). true: tex changed (its content is gone) */
+bool csmShare( NifSkopeOpenGLContext::GLFunctions * fn, unsigned int & tex, bool & shared, int & texMap, int map, bool wanted, bool live,
+	std::string & why )
+{
+	const std::uintptr_t key = reinterpret_cast<std::uintptr_t>( &tex );
+	if ( shared && ( !wanted || !WwVkPresent::sharedTargetIs( key, tex ) ) ) {
+		if ( !wanted )
+			WwVkPresent::sharedTargetDrop( key );
+		tex = 0;
+		shared = false;
+		texMap = 0;
+		return true;
+	}
+	if ( !wanted || ( shared && texMap == map ) )
+		return false;
+	unsigned int t = 0;
+	if ( !WwVkPresent::sharedTarget( key, 2, map, map, kCascades, GL_DEPTH_COMPONENT16, t, why ) || !t ) {
+		if ( shared ) {
+			WwVkPresent::sharedTargetDrop( key );
+			tex = 0;
+			shared = false;
+			texMap = 0;
+		}
+		return true;
+	}
+	if ( tex && !shared )
+		fn->glDeleteTextures( 1, &tex );
+	tex = t;
+	shared = true;
+	texMap = map;
+	csmTexParams( fn, tex, live );
+	why.clear();
+	return true;
+}
+
 bool ensureTargets( CsmState & s, Renderer * r, QString & why )
 {
 	auto fn = r->fn;
@@ -462,7 +529,9 @@ bool ensureTargets( CsmState & s, Renderer * r, QString & why )
 		s.ctx = ctx;
 		s.tex = s.fbo = 0;
 		s.texMap = 0;
+		s.shared = false;
 	}
+	csmShare( fn, s.tex, s.shared, s.texMap, s.map, csmShareWanted(), true, s.vkWhy );
 	if ( !s.tex || s.texMap != s.map ) {
 		if ( !s.tex )
 			fn->glGenTextures( 1, &s.tex );
@@ -572,6 +641,8 @@ struct State
 	unsigned int tex = 0, scratch = 0, fbo = 0, vao = 0;
 	unsigned int liveTex = 0;
 	int texMap = 0;
+	bool shared = false;	// lane VKSHADOW1: tex is a shared D16 array (keyed &tex) while the live map is one
+	std::string vkWhy;
 	qint64 frame = 0;
 	Layer c[kCascades];
 	QHash<const Shape *, Track> track;
@@ -704,7 +775,7 @@ void invalidate()
 }
 
 //! the static layers, the one-layer scratch and their framebuffer, per context and map size
-bool ensure( Renderer * r, int map, unsigned int liveTex )
+bool ensure( Renderer * r, int map, unsigned int liveTex, bool shared )
 {
 	State & s = st();
 	auto fn = r->fn;
@@ -713,7 +784,16 @@ bool ensure( Renderer * r, int map, unsigned int liveTex )
 		s.ctx = ctx;
 		s.tex = s.scratch = s.fbo = s.vao = 0;
 		s.texMap = 0;
+		s.shared = false;
 		invalidate();
+	}
+	// lane VKSHADOW1: the static layers are shared with the live map (the queued static casters go into both on Vulkan)
+	{
+		const int was = s.texMap;
+		if ( csmShare( fn, s.tex, s.shared, s.texMap, map, shared, false, s.vkWhy ) )
+			invalidate();
+		if ( s.shared && was != map )
+			s.texMap = was;	// the scratch below follows the new size
 	}
 	if ( liveTex != s.liveTex ) {
 		s.liveTex = liveTex;	// the live map was made again: its content is gone
@@ -731,6 +811,8 @@ bool ensure( Renderer * r, int map, unsigned int liveTex )
 		GLint prevTex = 0;
 		fn->glGetIntegerv( GL_TEXTURE_BINDING_2D_ARRAY, &prevTex );
 		for ( unsigned int t : { s.tex, s.scratch } ) {
+			if ( t == s.tex && s.shared )
+				continue;	// lane VKSHADOW1: made by sharedTarget
 			fn->glBindTexture( GL_TEXTURE_2D_ARRAY, t );
 			fn->glTexImage3D( GL_TEXTURE_2D_ARRAY, 0, GL_DEPTH_COMPONENT16, map, map, t == s.tex ? kCascades : 1, 0,
 				GL_DEPTH_COMPONENT, GL_UNSIGNED_SHORT, nullptr );
@@ -1332,7 +1414,7 @@ static void sunShadowPassImpl( Scene * scene )
 	 * static layer, 2 = the dynamic casters over the live layer. */
 	using ShadowCache::Mode;
 	Mode mode[kCascades] = { ShadowCache::Off, ShadowCache::Off, ShadowCache::Off };
-	const bool cacheOn = cst.on && ShadowCache::ensure( r, s.map, s.tex );
+	const bool cacheOn = cst.on && ShadowCache::ensure( r, s.map, s.tex, s.shared );
 	std::uint64_t setSig = 0, stateSig = 0, key[kCascades] = {};
 	// lane SHADOWSHIMMER4: per cascade (was one anyDyn): something is drawn over that cascade's static layer
 	bool dynC[kCascades] = { false, false, false };
@@ -1557,6 +1639,8 @@ static void sunShadowPassImpl( Scene * scene )
 			progAtQ = r->useProgram( "lookdev_csmdepth_atq.prog" );
 		r->useProgram( "lookdev_csmdepth.prog" );
 	}
+	std::vector<float> mats;	// lane VKSHADOW1: kept past the queues' upload (the present device reads them too)
+	std::vector<GpuDriven::DrawCmd> cmds;
 	if ( progQ ) {
 		for ( std::size_t n = 0; n < casters.size(); n++ ) {
 			const Caster & k = casters[n];
@@ -1574,7 +1658,6 @@ static void sunShadowPassImpl( Scene * scene )
 				std::shuffle( q.begin(), q.end(), g );
 		}
 		// the frame's matrices, one per queued caster, and every job's commands, uploaded once
-		std::vector<float> mats;
 		std::vector<std::uint32_t> matOf( casters.size(), 0 );
 		for ( const auto & q : queue ) {
 			for ( int n : q ) {
@@ -1583,7 +1666,6 @@ static void sunShadowPassImpl( Scene * scene )
 				mats.insert( mats.end(), m.data(), m.data() + 16 );
 			}
 		}
-		std::vector<GpuDriven::DrawCmd> cmds;
 		atSpan.resize( jobs.size() * queue[QAlpha].size() );
 		for ( std::size_t jb = 0; jb < jobs.size(); jb++ ) {
 			const Job & J = jobs[jb];
@@ -1612,6 +1694,30 @@ static void sunShadowPassImpl( Scene * scene )
 		GpuDriven::poolBind( r, mats, cmds );
 	}
 
+	/* lane VKSHADOW1 (plan row G6): the solid and two-sided queues go on the present device. drawJob records (job, layer)
+	 * instead of drawing them; after the cascades one crossing draws the list (depth-only LEQUAL keeps the nearest depth
+	 * in any order). GL keeps the clears, copies, remap, scratch, alpha-tested queue, per-draw casters and ground. */
+	static_assert( sizeof( GpuDriven::DrawCmd ) == 20, "VkDrawIndexedIndirectCommand" );
+	const bool vkWanted = progQ && csmShareWanted();
+	bool vkCsm = false;
+	std::string vkWhy;
+	if ( vkWanted ) {
+		if ( !s.shared )
+			vkWhy = "the live map is GL's own (" + s.vkWhy + ")";
+		else if ( cacheOn && !cst.shared )
+			vkWhy = "the static layers are GL's own (" + cst.vkWhy + ")";
+		else if ( shadowCacheCheck() )
+			vkWhy = "WW_SHADOWCACHE_CHECK=1 reads the live layer inside the pass";
+		else
+			vkWhy = WwVkPresent::csmRefusal();
+		vkCsm = vkWhy.empty();
+	} else if ( progQ ) {
+		vkWhy = "the view is not on Vulkan, or WW_VKVIEW_CSM_RED=1";
+	}
+	struct VkRec { std::size_t jb; int target, layer; };
+	std::vector<VkRec> vkRec;
+	int curTarget = -1, curLayer = 0;	// the attached layer: 0 the live map, 1 the static layers, -1 another
+
 	// one job into whatever layer is attached
 	auto drawJob = [&]( std::size_t jb ) {
 		const Job & J = jobs[jb];
@@ -1634,8 +1740,11 @@ static void sunShadowPassImpl( Scene * scene )
 			r->useProgram( "lookdev_csmdepth_q.prog" );
 			if ( const int l = progQ->uniLocation( "csmClipFromView" ); l >= 0 )
 				fn->glUniformMatrix4fv( l, 1, GL_FALSE, c.clipFromView );
+			const bool vkThis = vkCsm && curTarget >= 0;	// lane VKSHADOW1
+			if ( vkThis && ( span[jb][QSolid].n || span[jb][QTwoSided].n ) )
+				vkRec.push_back( { jb, curTarget, curLayer } );
 			for ( int q : { int( QSolid ), int( QTwoSided ) } ) {
-				if ( !span[jb][q].n )
+				if ( !span[jb][q].n || vkThis )
 					continue;
 				q == QTwoSided ? fn->glDisable( GL_CULL_FACE ) : fn->glEnable( GL_CULL_FACE );
 				GpuDriven::poolDraw( r, span[jb][q].first, span[jb][q].n );
@@ -1782,6 +1891,8 @@ static void sunShadowPassImpl( Scene * scene )
 			fn->glDisable( GL_SCISSOR_TEST );
 	};
 	auto attach = [&]( unsigned int tex, int layer ) {
+		curTarget = tex == s.tex ? 0 : ( cacheOn && tex == cst.tex ) ? 1 : -1;	// lane VKSHADOW1
+		curLayer = layer;
 		fn->glFramebufferTextureLayer( GL_DRAW_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, tex, 0, layer );
 		if ( fn->glCheckFramebufferStatus( GL_DRAW_FRAMEBUFFER ) != GL_FRAMEBUFFER_COMPLETE )
 			complete = false;
@@ -2003,6 +2114,95 @@ static void sunShadowPassImpl( Scene * scene )
 			L.liveDyn = dynReuse ? dynSig[i] : 0;	// lane SHADOWSHIMMER4
 		}
 	}
+	/* lane VKSHADOW1: the recorded queue draws, one crossing. A static layer's draws go into the live layer too (GL copied
+	 * that layer into it before they were drawn). Refused: GL draws the same list now (late, the same depths). */
+	if ( vkCsm && complete && !vkRec.empty() ) {
+		const std::size_t nRec = vkRec.size();
+		for ( std::size_t k = 0; k < nRec; k++ )
+			if ( vkRec[k].target == 1 )
+				vkRec.push_back( { vkRec[k].jb, 0, vkRec[k].layer } );
+		WwVkPresent::CsmRun run;
+		run.map = s.map;
+		run.layers = kCascades;
+		run.tex[0] = s.tex;
+		run.tex[1] = cacheOn ? cst.tex : 0;
+		run.key[0] = reinterpret_cast<std::uintptr_t>( &s.tex );
+		run.key[1] = cacheOn ? reinterpret_cast<std::uintptr_t>( &cst.tex ) : 0;
+		const bool havePool = GpuDriven::poolBuffers( run.pos, run.idx, run.posBytes, run.idxBytes );
+		run.mats = mats.data();
+		run.nMats = mats.size() / 16;
+		run.cmds = reinterpret_cast<const std::uint32_t *>( cmds.data() );
+		run.nCmds = cmds.size();
+		const bool noBias = red( "nobias" );
+		for ( const VkRec & v : vkRec ) {
+			const Job & J = jobs[v.jb];
+			const Cascade & c = s.c[J.i];
+			if ( J.scissor && ( J.rc[2] <= J.rc[0] || J.rc[3] <= J.rc[1] ) )
+				continue;	// GL's empty scissor draws nothing
+			for ( int q : { int( QSolid ), int( QTwoSided ) } ) {
+				if ( !span[v.jb][q].n )
+					continue;
+				WwVkPresent::CsmDraw d;
+				d.target = v.target;
+				d.layer = v.layer;
+				d.vw = c.vw;
+				d.vh = c.vh;
+				if ( J.scissor )
+					std::memcpy( d.sc, J.rc, sizeof( d.sc ) );
+				std::memcpy( d.clip, c.clipFromView, sizeof( d.clip ) );
+				d.unit = noBias ? 0.0f : s.unitBias;
+				d.slope = noBias ? 0.0f : s.slopeBias;
+				d.clamp = ( offsetClamp && !cslopeZero )
+					? float( s.unitBias / 65536.0 + s.slopeBias * c.texel * 4.0 / std::max( c.far - kNear, 1e-6 ) ) : 0.0f;
+				d.cull = q == QSolid;
+				d.first = std::uint32_t( span[v.jb][q].first );
+				d.n = std::uint32_t( span[v.jb][q].n );
+				run.d.push_back( d );
+			}
+		}
+		std::string w;
+		if ( !havePool ) {
+			w = "no pool buffers";
+			WwVkPresent::csmOnGl( w.c_str() );
+		}
+		if ( !havePool || !WwVkPresent::csmRun( run, w ) ) {
+			vkWhy = w;
+			for ( const VkRec & v : vkRec ) {
+				const Job & J = jobs[v.jb];
+				const Cascade & c = s.c[J.i];
+				if ( !attach( v.target ? cst.tex : s.tex, v.layer ) )
+					break;
+				fn->glViewport( 0, 0, c.vw, c.vh );
+				if ( J.scissor ) {
+					fn->glEnable( GL_SCISSOR_TEST );
+					fn->glScissor( J.rc[0], J.rc[1], J.rc[2] - J.rc[0], J.rc[3] - J.rc[1] );
+				}
+				if ( offsetClamp )
+					offsetClamp( s.slopeBias, s.unitBias, cslopeZero ? 0.0f
+						: float( s.unitBias / 65536.0 + s.slopeBias * c.texel * 4.0 / std::max( c.far - kNear, 1e-6 ) ) );
+				GpuDriven::poolRebind( r );
+				r->useProgram( "lookdev_csmdepth_q.prog" );
+				if ( const int l = progQ->uniLocation( "csmClipFromView" ); l >= 0 )
+					fn->glUniformMatrix4fv( l, 1, GL_FALSE, c.clipFromView );
+				for ( int q : { int( QSolid ), int( QTwoSided ) } ) {
+					if ( !span[v.jb][q].n )
+						continue;
+					q == QTwoSided ? fn->glDisable( GL_CULL_FACE ) : fn->glEnable( GL_CULL_FACE );
+					GpuDriven::poolDraw( r, span[v.jb][q].first, span[v.jb][q].n );
+					PassTime::countDraw( qint64( span[v.jb][q].n ) );
+					qCalls++;
+					qCommands += qint64( span[v.jb][q].n );
+				}
+				r->useProgram( "lookdev_csmdepth.prog" );
+				if ( J.scissor )
+					fn->glDisable( GL_SCISSOR_TEST );
+			}
+		}
+	} else if ( vkWanted && !vkCsm ) {
+		WwVkPresent::csmOnGl( vkWhy.c_str() );
+	}
+	if ( progQ )
+		WwVkPresent::csmSay( vkWanted, vkWhy.c_str() );
 	if ( cacheOn && !complete )
 		ShadowCache::invalidate();
 	if ( progQ )

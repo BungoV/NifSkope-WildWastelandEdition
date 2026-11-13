@@ -515,6 +515,49 @@ bool cloudRun( const CloudRun & t, std::string & why );
 void cloudOnGl( const char * why );
 FxStat takeCloudStat();
 
+/* Lane VKSHADOW1 (plan row G6): the sun cascades' queued solid casters (one-sided and two-sided) as depth-only draws on the
+ * present device into the shared D16 2D arrays GL samples (sharedTarget type 2, GL_DEPTH_COMPONENT16). GL keeps the clears,
+ * copies, remaps, the alpha-tested queue and the per-draw casters; a depth-only LEQUAL pass keeps the nearest depth in any
+ * order, so the queued draws run once, after GL's pass, in one crossing. The pool (vec3 float positions, u16 indices) is
+ * copied each run into buffers GL imports; matrices and commands are host-visible. Red WW_VKVIEW_CSM_RED=1: GL's draws. */
+struct CsmDraw
+{
+	int target = 0, layer = 0;      //!< tex[target], its layer
+	int vw = 0, vh = 0;             //!< the cascade's viewport (0, 0, vw, vh)
+	int sc[4] = {};                 //!< scissor x0, y0, x1, y1 (GL window rows from the bottom); x1 <= x0: none
+	float clip[16] = {};            //!< csmClipFromView, GL column-major
+	float unit = 0.0f, slope = 0.0f, clamp = 0.0f;  //!< glPolygonOffset( slope, unit ), its clamp (0: none)
+	bool cull = true;               //!< back faces culled (GL CCW front); false: two-sided
+	std::uint32_t first = 0, n = 0; //!< commands [first, first + n)
+};
+struct CsmRun
+{
+	int map = 0, layers = 0;        //!< the targets' size and layer count
+	unsigned tex[2] = {};           //!< the shared targets' GL names (0: unused)
+	std::uintptr_t key[2] = {};     //!< their sharedTarget keys
+	unsigned pos = 0, idx = 0;      //!< GL's pool buffers
+	std::size_t posBytes = 0, idxBytes = 0;
+	const float * mats = nullptr;   //!< 16 floats per caster, GL column-major
+	std::size_t nMats = 0;
+	const std::uint32_t * cmds = nullptr;  //!< 5 words per command (VkDrawIndexedIndirectCommand)
+	std::size_t nCmds = 0;
+	std::vector<CsmDraw> d;
+};
+//! GL current, its own cascade draws issued: the queued draws run on Vulkan into the shared targets. false: why (GL draws them)
+bool csmRun( const CsmRun & t, std::string & why );
+void csmOnGl( const char * why );
+struct CsmStat
+{
+	int runs = 0, gl = 0, fails = 0;
+	double cpuMs = 0.0, maxMs = 0.0;
+	std::string glWhy, failWhy;
+	int pipelines = 0, draws = 0, cmds = 0;
+	double buildMs = 0.0;
+};
+CsmStat takeCsmStat();
+//! what csmRun cannot take on this device (empty: none); asked before GL skips its queued draws
+std::string csmRefusal();
+
 /* lane VKAIR1: a pass's b31 bytes from the program GL is about to draw with (glGetUniform*, arrays element by element,
  * a matrix's GL column k at + 16 k as the row_major HLSL reads it). Fn: the caller's GL functions (Qt's 4.x core) */
 template <class Fn> void fxPack( Fn * fn, unsigned prog, const FxField * f, int n, std::uint8_t * out )
@@ -629,5 +672,7 @@ bool toneWanted();
 bool shareWanted( const char * redEnv );
 //! lane VKLIGHT1: the pass's route line ("vk ao:", "vk contact:", "vk ssgi:"), one a 5 s window while on Vulkan
 void lightSay( int pass, bool wanted, const char * glWhy );
+//! lane VKSHADOW1: the cascades' route line ("vk csm:"), one a 5 s window while on Vulkan
+void csmSay( bool wanted, const char * glWhy );
 }
 #endif
