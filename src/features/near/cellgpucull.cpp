@@ -21,6 +21,7 @@ BSD License - see nifskope.h
 #include "gl/glshape.h"
 #include "gl/renderer.h"
 #include "wwswitch.h"	// lane MSAABLACK1: WW_MSAABLACK1_RED
+#include "features/vkframe/vkpresent.h"	// lane VKOBJ1: the prepass on the present device
 
 #include <QElapsedTimer>
 #include <QHash>
@@ -190,6 +191,9 @@ struct Gpu
 	GLuint fbo = 0, depthTex = 0;
 	int w = 0, h = 0, samples = -1;
 	GLenum depthFmt = 0;
+	bool shared = false, aoShared = false;	// lane VKOBJ1: depthTex is a shared target on the present device (key &shareKey)
+	int shareKey = 0;
+	std::string vkWhy, aoVkWhy;	// lane VKOBJ1: why the shared target was refused (not retried until the row moves)
 	// MODULES1 part 19: the obscurance walk's own prepass target (its size / samples / format), swapped in for that walk
 	GLuint aoFbo = 0, aoDepthTex = 0;
 	int aoW = 0, aoH = 0, aoSamples = -1;
@@ -563,18 +567,43 @@ void restore( G43 * g, const GlSaved & s )
 	g->glActiveTexture( GLenum( s.active ) );
 }
 
-// the prepass target: the main frame's size, samples and depth format (the same rasterization, the same depths)
-bool target( G43 * g, Gpu & G, int w, int h, int samples, GLenum fmt )
+/* the prepass target: the main frame's size, samples and depth format (the same rasterization, the same depths).
+ * lane VKOBJ1: share = a shared target on the present device (sharedTarget), where the prepass draws on Vulkan; refused:
+ * GL's own, G.vkWhy says why, and it is not retried until share goes off and on or the shape changes */
+bool target( G43 * g, Gpu & G, int w, int h, int samples, GLenum fmt, bool share )
 {
-	if ( G.fbo && G.w == w && G.h == h && G.samples == samples && G.depthFmt == fmt )
+	const std::uintptr_t key = reinterpret_cast<std::uintptr_t>( &G.shareKey );
+	if ( !share )
+		G.vkWhy.clear();
+	const bool keep = G.shared ? ( share && WwVkPresent::sharedTargetIs( key, G.depthTex ) ) : ( !share || !G.vkWhy.empty() );
+	if ( G.fbo && G.w == w && G.h == h && G.samples == samples && G.depthFmt == fmt && keep )
 		return true;
-	if ( G.depthTex )
+	if ( G.shared )
+		WwVkPresent::sharedTargetDrop( key );	// a shutdown already dropped a name that is not live
+	else if ( G.depthTex )
 		g->glDeleteTextures( 1, &G.depthTex );
+	G.depthTex = 0;
+	G.shared = false;
+	G.vkWhy.clear();
 	if ( !G.fbo )
 		g->glGenFramebuffers( 1, &G.fbo );
-	g->glGenTextures( 1, &G.depthTex );
+	if ( share ) {
+		unsigned t = 0;
+		std::string why;
+		if ( WwVkPresent::sharedTarget( key, 0, w, h, 1, fmt, t, why, 1, std::max( 1, samples ) ) && t ) {
+			G.depthTex = t;
+			G.shared = true;
+		} else {
+			G.vkWhy = why.empty() ? std::string( "no shared target" ) : why;
+		}
+	}
+	if ( !G.shared )
+		g->glGenTextures( 1, &G.depthTex );
 	g->glBindFramebuffer( GL_DRAW_FRAMEBUFFER, G.fbo );
-	if ( samples > 1 ) {
+	if ( G.shared ) {
+		g->glFramebufferTexture2D( GL_DRAW_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, samples > 1 ? GL_TEXTURE_2D_MULTISAMPLE : GL_TEXTURE_2D,
+			G.depthTex, 0 );
+	} else if ( samples > 1 ) {
 		g->glBindTexture( GL_TEXTURE_2D_MULTISAMPLE, G.depthTex );
 		g->glTexImage2DMultisample( GL_TEXTURE_2D_MULTISAMPLE, samples, fmt, w, h, GL_TRUE );
 		g->glFramebufferTexture2D( GL_DRAW_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D_MULTISAMPLE, G.depthTex, 0 );
@@ -662,6 +691,8 @@ void prepare( Scene * scene )
 		std::swap( G.h, G.aoH );
 		std::swap( G.samples, G.aoSamples );
 		std::swap( G.depthFmt, G.aoDepthFmt );
+		std::swap( G.shared, G.aoShared );	// lane VKOBJ1: the obscurance walk's target stays GL's own
+		std::swap( G.vkWhy, G.aoVkWhy );
 	};
 	if ( aoWalk )
 		swapTarget();
@@ -826,8 +857,17 @@ void prepare( Scene * scene )
 	f.occluders = qint64( occluders.size() );
 	occ = occ && !occluders.empty();
 
+	/* lane VKOBJ1 (plan row G4): the prepass on the present device into a shared target while the view is on Vulkan
+	 * (WW_VKVIEW=1, its size settled), not for the obscurance walk; red WW_VKVIEW_OBJ_RED=1 keeps GL's prepass */
+	static_assert( sizeof( GpuDriven::DrawCmd ) == 20, "VkDrawIndexedIndirectCommand" );
+	const bool vkWanted = occ && !aoWalk && WwVkPresent::shareWanted( "WW_VKVIEW_OBJ_RED" );
+	std::string vkWhy = occ && !aoWalk && !vkWanted ? std::string( "the view is not on Vulkan, or WW_VKVIEW_OBJ_RED=1" ) : std::string();
+	if ( vkWanted )
+		vkWhy = WwVkPresent::objRefusal();
 	// 1. the prepass: the occluders' kept ranges from the step A pool, one indirect multi-draw per cull state
-	if ( occ && target( g, G, vw, vh, samples, depthFmt ) && GpuDriven::poolBegin( r ) ) {
+	if ( occ && target( g, G, vw, vh, samples, depthFmt, vkWanted && vkWhy.empty() ) && GpuDriven::poolBegin( r ) ) {
+		if ( vkWanted && vkWhy.empty() && !G.shared )
+			vkWhy = "the prepass target is GL's own (" + G.vkWhy + ")";
 		std::vector<float> mats;
 		std::vector<GpuDriven::DrawCmd> cmds;
 		std::size_t split = 0;
@@ -853,7 +893,35 @@ void prepare( Scene * scene )
 		g->glClearDepth( 1.0 );
 		g->glClear( GL_DEPTH_BUFFER_BIT );
 		auto prog = r->useProgram( "lookdev_csmdepth_q.prog" );
-		if ( prog && !cmds.empty() ) {
+		bool onVk = false;
+		if ( prog && !cmds.empty() && vkWanted && vkWhy.empty() ) {
+			WwVkPresent::ObjRun run;
+			run.w = vw;
+			run.h = vh;
+			run.samples = std::max( 1, int( samples ) );
+			run.tex = G.depthTex;
+			run.key = reinterpret_cast<std::uintptr_t>( &G.shareKey );
+			const bool havePool = GpuDriven::poolBuffers( run.pos, run.idx, run.posBytes, run.idxBytes );
+			run.mats = mats.data();
+			run.nMats = mats.size() / 16;
+			run.cmds = reinterpret_cast<const std::uint32_t *>( cmds.data() );
+			run.nCmds = cmds.size();
+			run.split = split;
+			std::memcpy( run.clip, &pm[0][0], sizeof( run.clip ) );
+			run.unit = 2.0f;	// glPolygonOffset( 1.0f, 2.0f ) below
+			run.slope = 1.0f;
+			std::string w;
+			if ( !havePool ) {
+				w = "no pool buffers";
+				WwVkPresent::objOnGl( w.c_str() );
+			}
+			onVk = havePool && WwVkPresent::objRun( run, w );
+			if ( !onVk )
+				vkWhy = w;	// GL draws it below, this frame
+		} else if ( vkWanted && !vkWhy.empty() ) {
+			WwVkPresent::objOnGl( vkWhy.c_str() );
+		}
+		if ( prog && !cmds.empty() && !onVk ) {
 			if ( const int l = prog->uniLocation( "csmClipFromView" ); l >= 0 )
 				g->glUniformMatrix4fv( l, 1, GL_FALSE, &pm[0][0] );
 			g->glEnable( GL_DEPTH_TEST );
@@ -875,13 +943,15 @@ void prepare( Scene * scene )
 				GpuDriven::poolDraw( r, split, cmds.size() - split );
 			}
 			GpuDriven::poolUnbind( r );
-		} else {
+		} else if ( !onVk ) {
 			occ = false;
 		}
 		r->stopProgram();
 	} else {
 		occ = false;
 	}
+	if ( occ && !aoWalk )
+		WwVkPresent::objSay( vkWanted, vkWhy.c_str() );
 	if ( timed )
 		g->glQueryCounter( G.q[1], GL_TIMESTAMP );
 

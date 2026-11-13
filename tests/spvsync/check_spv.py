@@ -52,7 +52,8 @@ VKFRAME_SSR = {'ssr_view_s1': '-DSSR_STAGE=1', 'ssr_view_s1w': '-DSSR_STAGE=1 -D
 	'ssr_view_s3': '-DSSR_STAGE=3', 'ssr_view_s4': '-DSSR_STAGE=4', 'ssr_view_s5': '-DSSR_STAGE=5'}
 HLSL_SPECS += [('src/features/vkframe', k, 'vulkan1.2', 'vkframe_%s_spv' % k) for k in VKFRAME_SSR]
 # lane VKSHADOW1: the sun cascades' queued casters, the script's csm loop (res/shaders/hlsl/near/<k>.hlsl, vs_6_0)
-VKFRAME_CSM = {'csm_view_vs': ('res/shaders/hlsl/near', 'csm_view_vs')}
+VKFRAME_CSM = {'csm_view_vs': ('res/shaders/hlsl/near', 'csm_view_vs'),
+	'obj_depth_vs': ('res/shaders/hlsl/near', 'obj_depth_vs')}  # lane VKOBJ1: the objects' prepass
 HLSL_SPECS += [('src/features/vkframe', k, 'vulkan1.2', 'vkframe_%s_spv' % k) for k in VKFRAME_CSM]
 # lane VKAIR1: the air's sky pass and the clouds, the script's `fx <name> <dir/file>` lines (sky's register shifts, ps_6_0)
 VKFRAME_FX = {'volsky_view_ps': 'air/cell_volsky_ps__WW_CELL_FOGLEAK', 'cloud_march_view_ps': 'clouds/cloud_march_ps',
