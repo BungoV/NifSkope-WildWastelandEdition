@@ -45,6 +45,12 @@
 #include "features/vkframe/ssr_view_s4.spv.h"
 #include "features/vkframe/ssr_view_s5.spv.h"
 #include "features/vkframe/csm_view_vs.spv.h"  // lane VKSHADOW1
+// lane VKAIR1: the air over the sky (cell_volsky), the clouds' march + resolve (and their accumulation twins)
+#include "features/vkframe/volsky_view_ps.spv.h"
+#include "features/vkframe/cloud_march_view_ps.spv.h"
+#include "features/vkframe/cloud_march_a_view_ps.spv.h"
+#include "features/vkframe/cloud_resolve_view_ps.spv.h"
+#include "features/vkframe/cloud_resolve_a_view_ps.spv.h"
 
 #include <algorithm>
 #include <chrono>
@@ -77,7 +83,7 @@ constexpr GLenum kTexture2D = 0x0DE1, kRgba8 = 0x8058, kScissorTest = 0x0C11, kR
 	kTexBinding2DMs = 0x9104, kRgba16f = 0x881A, kRgba32f = 0x8814, kDsTexMode = 0x90EA, kStencilIndex = 0x1901;
 // lane VKSHARE1: volumes and layered targets, and the single-channel formats the cloud / TAA targets use
 constexpr GLenum kTexture3D = 0x806F, kTexBinding3D = 0x806A, kTexture2DArray = 0x8C1A, kTexBinding2DArray = 0x8C1D,
-	kGlRg32f = 0x8230, kGlRg16f = 0x822F, kGlR32f = 0x822E, kGlR8 = 0x8229;
+	kGlRg32f = 0x8230, kGlRg16f = 0x822F, kGlR32f = 0x822E, kGlR8 = 0x8229, kGlRg8 = 0x822B;
 constexpr GLenum kDepth16 = 0x81A5;  // lane VKSHADOW1: the sun cascades' D16 2D array
 constexpr GLuint64 kTimeoutIgnored = ~0ull;
 
@@ -236,6 +242,8 @@ struct Vk
 	// lane VKSHADOW1: the sun cascades' depth draws (indexed indirect, GL's polygon offset as the depth bias)
 	bool depthBiasClamp = false, multiDrawIndirect = false, firstInstance = false;
 	VKP( vkCmdBindVertexBuffers ); VKP( vkCmdBindIndexBuffer ); VKP( vkCmdDrawIndexedIndirect ); VKP( vkCmdSetDepthBias );
+	// lane VKAIR1: the air's stencil reference, the zero textures' clear
+	VKP( vkCmdSetStencilReference ); VKP( vkCmdClearColorImage );
 };
 #undef VKP
 
@@ -510,6 +518,7 @@ bool makeDevice( std::string & why )
 	LD( vkCreatePipelineCache ); LD( vkDestroyPipelineCache ); LD( vkGetPipelineCacheData );
 	LD( vkCmdDispatch ); LD( vkCreateComputePipelines );
 	LD( vkCmdBindVertexBuffers ); LD( vkCmdBindIndexBuffer ); LD( vkCmdDrawIndexedIndirect ); LD( vkCmdSetDepthBias );
+	LD( vkCmdSetStencilReference ); LD( vkCmdClearColorImage );
 #undef LD
 	if ( !v.vkGetMemoryWin32HandleKHR || !v.vkGetSemaphoreWin32HandleKHR || !v.vkCreateSwapchainKHR )
 		return fail( "the device lacks a swapchain / win32 export entry point" );
@@ -579,6 +588,7 @@ struct Work
 	int light = -1;     // lane VKLIGHT1 (k = -1): this LightPass's dispatches (lightWork); shares tone's counters
 	bool ssr = false;   // lane VKLIGHT2 (k = -1): the reflections' stages (ssrWork); shares tone's counters
 	bool ( *fn )( std::string & ) = nullptr;  // lane VKSHADOW1 (k = -1): a pass's own record + submit; shares tone's counters
+	bool fx = false;    // lane VKAIR1 (k = -1): the air's sky pass or the clouds' march + resolve (fxWork); tone's counters
 };
 
 // round 11: the tone pass's record + submit, on the worker (the queue is the worker's)
@@ -592,6 +602,8 @@ void lightDrop();
 bool ssrWork( std::string & why );
 void ssrDrop();
 void csmDrop();  // lane VKSHADOW1
+bool fxWork( std::string & why );
+void fxDrop();
 
 struct Worker
 {
@@ -670,9 +682,9 @@ void workerLoop()
 			W.idle.notify_all();
 			continue;
 		}
-		if ( j.tone || j.taa || j.merge || j.sky || j.ssr || j.light >= 0 ) {
+		if ( j.tone || j.taa || j.merge || j.sky || j.ssr || j.light >= 0 || j.fx ) {
 			std::string why;
-			const bool ok = j.light >= 0 ? lightWork( j.light, why )
+			const bool ok = j.fx ? fxWork( why ) : j.light >= 0 ? lightWork( j.light, why )
 				: j.ssr ? ssrWork( why ) : j.merge ? mergeWork( why ) : j.sky ? skyWork( why ) : j.taa ? taaWork( why ) : toneWork( why );
 			{
 				std::lock_guard<std::mutex> lk( W.m );
@@ -1112,7 +1124,7 @@ bool makeSlot( Slot & s, int w, int h, std::string & why )
 bool makeShared( VkImage & img, VkDeviceMemory & mem, GLuint & tex, GLuint & obj, VkFormat fmt, GLenum glFmt, int samples, int w,
 	int h, bool depth, double & mb, std::string & why, VkImageType type = VK_IMAGE_TYPE_2D, int d = 1, int layers = 1, int levels = 1 )
 {
-	levels = ( type == VK_IMAGE_TYPE_2D && samples == 1 && layers <= 1 ) ? std::max( levels, 1 ) : 1;  // lane VKLIGHT1: a mipped 2D input
+	levels = ( samples == 1 && !depth ) ? std::max( levels, 1 ) : 1;  // lanes VKLIGHT1 / VKAIR1: a mipped 2D, 2D array or 3D input
 	Vk & v = vk();
 	Gl & g = gl();
 	const bool is3d = type == VK_IMAGE_TYPE_3D, layered = !is3d && layers > 1;
@@ -1123,6 +1135,7 @@ bool makeShared( VkImage & img, VkDeviceMemory & mem, GLuint & tex, GLuint & obj
 	}
 	d = is3d ? std::max( d, 1 ) : 1;
 	layers = is3d ? 1 : std::max( layers, 1 );
+	levels = ( samples == 1 && !depth ) ? std::max( levels, 1 ) : 1;  // lane VKAIR1: a mip chain (the clouds' noise volumes)
 	const VkSampleCountFlagBits sc = VkSampleCountFlagBits( samples );
 	// every use GL's texture could have (the import fails with fewer); multisample storage is optional: never asked
 	VkImageUsageFlags usage = VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT
@@ -1235,7 +1248,7 @@ bool makeShared( VkImage & img, VkDeviceMemory & mem, GLuint & tex, GLuint & obj
 		g.texStorageMem2DMultisample( target, samples, glFmt, w, h, 1, obj, 0 );
 	else {
 		if ( is3d || layered )
-			g.texStorageMem3D( target, 1, glFmt, w, h, is3d ? d : layers, obj, 0 );
+			g.texStorageMem3D( target, levels, glFmt, w, h, is3d ? d : layers, obj, 0 );
 		else
 			g.texStorageMem2D( target, levels, glFmt, w, h, obj, 0 );
 		g.texParameteri( target, kTexMinFilter, GLint( kNearest ) );
@@ -1265,7 +1278,7 @@ struct Shared
 	VkImageView view = VK_NULL_HANDLE;
 	GLuint tex = 0, obj = 0;
 	void * glCtx = nullptr;
-	int type = 0, w = 0, h = 0, d = 0;
+	int type = 0, w = 0, h = 0, d = 0, levels = 1;
 	GLenum glFmt = 0;
 	VkFormat fmt = VK_FORMAT_UNDEFINED;
 	double mb = 0.0;
@@ -1295,6 +1308,7 @@ VkFormat vkFormatOf( GLenum f, bool & depth )
 	case kGlRg16f: return VK_FORMAT_R16G16_SFLOAT;
 	case kGlR32f: return VK_FORMAT_R32_SFLOAT;
 	case kGlR8: return VK_FORMAT_R8_UNORM;
+	case kGlRg8: return VK_FORMAT_R8G8_UNORM;
 	case kDepth24Stencil8: return VK_FORMAT_D24_UNORM_S8_UINT;
 	default: return VK_FORMAT_UNDEFINED;
 	}
@@ -1474,6 +1488,7 @@ struct Tone
 	VkDeviceMemory colorMem = VK_NULL_HANDLE, dsMem = VK_NULL_HANDLE;
 	GLuint colorTex = 0, dsTex = 0, colorObj = 0, dsObj = 0;
 	VkImageView colorView = VK_NULL_HANDLE, stencilView = VK_NULL_HANDLE;
+	VkImageView dsView = VK_NULL_HANDLE;  // lane VKAIR1: depth + stencil, the air pass's stencil attachment
 	double frameMb = 0.0;
 	// the measure's bloom, copied by GL into an image of this device (RGBA32F, 1 sample) when it changes
 	int mw = 0, mh = 0;
@@ -1547,14 +1562,15 @@ Tone & tone()
 	return t;
 }
 
-VkImageView imageView( VkImage img, VkImageViewType type, VkFormat fmt, VkImageAspectFlags aspect )
+VkImageView imageView( VkImage img, VkImageViewType type, VkFormat fmt, VkImageAspectFlags aspect, std::uint32_t levels = 1,
+	std::uint32_t layers = 1 )
 {
 	Vk & v = vk();
 	VkImageViewCreateInfo ci { VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO };
 	ci.image = img;
 	ci.viewType = type;
 	ci.format = fmt;
-	ci.subresourceRange = { aspect, 0, 1, 0, 1 };
+	ci.subresourceRange = { aspect, 0, levels, 0, layers };
 	VkImageView out = VK_NULL_HANDLE;
 	if ( v.vkCreateImageView( v.dev, &ci, nullptr, &out ) != VK_SUCCESS )
 		return VK_NULL_HANDLE;
@@ -2168,7 +2184,7 @@ void toneFrameFree( bool glAlive )
 			if ( *o )
 				g.deleteMemoryObjects( 1, o );
 	}
-	for ( VkImageView * iv : { &T.colorView, &T.stencilView } )
+	for ( VkImageView * iv : { &T.colorView, &T.stencilView, &T.dsView } )
 		if ( *iv )
 			v.vkDestroyImageView( v.dev, *iv, nullptr );
 	for ( VkImage * i : { &T.color, &T.ds } )
@@ -2180,7 +2196,7 @@ void toneFrameFree( bool glAlive )
 	toneMeasureDrop( glAlive );
 	toneBloomFree( glAlive );
 	T.colorTex = T.dsTex = T.colorObj = T.dsObj = 0;
-	T.colorView = T.stencilView = VK_NULL_HANDLE;
+	T.colorView = T.stencilView = T.dsView = VK_NULL_HANDLE;
 	T.color = T.ds = VK_NULL_HANDLE;
 	T.colorMem = T.dsMem = VK_NULL_HANDLE;
 	T.w = T.h = T.samples = 0;
@@ -3488,6 +3504,7 @@ void shutdown()
 	lightDrop();  // lane VKLIGHT1: AO / contact / SSGI images, pipelines and semaphores
 	skyDrop();  // lane VKSKY1: the sky's crossing semaphores and framebuffer
 	ssrDrop();  // lane VKLIGHT2: the reflections' crossing semaphores
+	fxDrop();   // lane VKAIR1: the air's and the clouds' crossing semaphores and framebuffers
 }
 
 bool viewBegin( int w, int h, int samples, GlProc gp, std::string & why )
@@ -3633,7 +3650,8 @@ bool toneFrame( int w, int h, int samples, unsigned & color, unsigned & ds, std:
 	T.colorView = imageView( T.color, VK_IMAGE_VIEW_TYPE_2D, VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT );
 	T.stencilView = imageView( T.ds, VK_IMAGE_VIEW_TYPE_2D, VK_FORMAT_D24_UNORM_S8_UINT, VK_IMAGE_ASPECT_STENCIL_BIT );
 	const GLenum err = g.getError();
-	if ( !T.colorView || !T.stencilView || err != 0 ) {
+	T.dsView = imageView( T.ds, VK_IMAGE_VIEW_TYPE_2D, VK_FORMAT_D24_UNORM_S8_UINT, VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT );
+	if ( !T.colorView || !T.stencilView || !T.dsView || err != 0 ) {
 		why = "the tone frame's views / stencil mode failed (GL error " + std::to_string( err ) + ")";
 		toneFrameFree( true );
 		return false;
@@ -3664,7 +3682,7 @@ void toneFrameDrop()
 	toneFrameFree( gl().ok && T.glCtx == gl().ctx );
 }
 
-bool sharedTarget( std::uintptr_t key, int type, int w, int h, int d, unsigned glFmt, unsigned & tex, std::string & why )
+bool sharedTarget( std::uintptr_t key, int type, int w, int h, int d, unsigned glFmt, unsigned & tex, std::string & why, int levels )
 {
 	Gl & g = gl();
 	Vk & v = vk();
@@ -3685,10 +3703,11 @@ bool sharedTarget( std::uintptr_t key, int type, int w, int h, int d, unsigned g
 	if ( fmt == VK_FORMAT_UNDEFINED )
 		return fail( "GL format " + std::to_string( glFmt ) + " has no shared twin" );
 	d = type == 0 ? 1 : std::max( d, 1 );
+	levels = depth ? 1 : std::max( levels, 1 );
 	auto it = shareds().find( key );
 	if ( it != shareds().end() ) {
 		Shared & s = it->second;
-		if ( s.glCtx == g.ctx && s.type == type && s.w == w && s.h == h && s.d == d && s.glFmt == glFmt ) {
+		if ( s.glCtx == g.ctx && s.type == type && s.w == w && s.h == h && s.d == d && s.glFmt == glFmt && s.levels == levels ) {
 			tex = s.tex;
 			return true;
 		}
@@ -3703,12 +3722,13 @@ bool sharedTarget( std::uintptr_t key, int type, int w, int h, int d, unsigned g
 	}
 	Shared s;
 	const VkImageType vt = type == 1 ? VK_IMAGE_TYPE_3D : VK_IMAGE_TYPE_2D;
-	if ( !makeShared( s.img, s.mem, s.tex, s.obj, fmt, GLenum( glFmt ), 1, w, h, depth, s.mb, why, vt, type == 1 ? d : 1, type == 2 ? d : 1 ) ) {
+	if ( !makeShared( s.img, s.mem, s.tex, s.obj, fmt, GLenum( glFmt ), 1, w, h, depth, s.mb, why, vt, type == 1 ? d : 1, type == 2 ? d : 1, levels ) ) {
 		sharedFree( s, true );
 		return fail( why );
 	}
 	const VkImageViewType viewType = type == 1 ? VK_IMAGE_VIEW_TYPE_3D : type == 2 ? VK_IMAGE_VIEW_TYPE_2D_ARRAY : VK_IMAGE_VIEW_TYPE_2D;
-	s.view = imageView( s.img, viewType, fmt, depth ? VK_IMAGE_ASPECT_DEPTH_BIT : VK_IMAGE_ASPECT_COLOR_BIT );
+	s.view = imageView( s.img, viewType, fmt, depth ? VK_IMAGE_ASPECT_DEPTH_BIT : VK_IMAGE_ASPECT_COLOR_BIT, std::uint32_t( levels ),
+		std::uint32_t( type == 2 ? d : 1 ) );
 	if ( !s.view ) {
 		sharedFree( s, true );
 		return fail( "a shared target's image view failed" );
@@ -3718,6 +3738,7 @@ bool sharedTarget( std::uintptr_t key, int type, int w, int h, int d, unsigned g
 	s.w = w;
 	s.h = h;
 	s.d = d;
+	s.levels = levels;
 	s.glFmt = GLenum( glFmt );
 	s.fmt = fmt;
 	st.made++;
@@ -5011,6 +5032,905 @@ SkyStat takeSkyStat()
 	if ( S.broken && s.failWhy.empty() )
 		s.failWhy = S.brokenWhy;
 	S.st = SkyStat();
+	return s;
+}
+}  // namespace WwVkPresent
+
+// lane VKAIR1 (rows L5, L6): the air's sky pass (cell_volsky) and the clouds' march + resolve as Vulkan fragment passes,
+// one crossing a pass on the present worker. Inputs GL owns go over as shared twins (a level each, glCopyImageSubData).
+namespace
+{
+enum FxProgId { kFxVolsky, kFxMarch, kFxMarchA, kFxResolve, kFxResolveA, kFxProgs };
+constexpr int kFxMaxTex = 8;
+constexpr VkDeviceSize kFxLooseAt = 512;  // b31 past b0 (336), on any minUniformBufferOffsetAlignment up to 256
+
+struct FxProg
+{
+	const std::uint32_t * code = nullptr;
+	size_t bytes = 0;
+	int ntex = 0, looseBytes = 0;
+	VkDescriptorSetLayout dsl = VK_NULL_HANDLE;
+	VkDescriptorPool dpool = VK_NULL_HANDLE;
+	VkDescriptorSet set = VK_NULL_HANDLE;
+	VkPipelineLayout layout = VK_NULL_HANDLE;
+	VkShaderModule ps = VK_NULL_HANDLE;
+	VkBuffer ubo = VK_NULL_HANDLE;  // b0 at 0, b31 at kFxLooseAt
+	VkDeviceMemory uboMem = VK_NULL_HANDLE;
+	std::uint8_t * uboPtr = nullptr;
+	VkPipeline pipe[2] = {};  // the air: [0] no blend, [1] premultiplied over the sky; the clouds: [0]
+	int pipeSamples = 0;
+};
+
+struct Fx
+{
+	bool made = false, broken[2] = {};
+	std::string brokenWhy[2];
+	VkSampler smp[WwVkPresent::kFxSamplers] = {};
+	VkShaderModule vs = VK_NULL_HANDLE;
+	FxProg prog[kFxProgs];
+	// zero textures for an unbound slot (GL's unbound unit reads 0, 0, 0, 1): a 2D (also as a 1-layer array) and a 3D
+	VkImage dummy2 = VK_NULL_HANDLE, dummy3 = VK_NULL_HANDLE;
+	VkDeviceMemory dummy2Mem = VK_NULL_HANDLE, dummy3Mem = VK_NULL_HANDLE;
+	VkImageView d2 = VK_NULL_HANDLE, d2a = VK_NULL_HANDLE, d3 = VK_NULL_HANDLE;
+	double dummyMb = 0.0;
+	VkRenderPass airPass = VK_NULL_HANDLE, cloudPass = VK_NULL_HANDLE;
+	int airSamples = 0;
+	VkSemaphore glDone = VK_NULL_HANDLE, vkDone = VK_NULL_HANDLE;
+	GLuint glDoneGl = 0, vkDoneGl = 0;
+	void * semCtx = nullptr;
+	VkCommandBuffer cmd = VK_NULL_HANDLE;
+	VkFence fence = VK_NULL_HANDLE;
+	bool pending = false;
+	// this run's job, written by the drawing thread before the hand
+	int kind = 0;  // 0 the air, 1 the clouds
+	VkFramebuffer fbAir = VK_NULL_HANDLE, fbM = VK_NULL_HANDLE, fbR = VK_NULL_HANDLE;
+	int w = 0, h = 0, vp[4] = {}, stencilRef = 1, march = kFxMarch, resolve = kFxResolve, mw = 0, mh = 0, hw = 0, hh = 0;
+	bool blend = false, skipMarch = false;
+	int pipelines = 0;
+	double buildMs = 0.0;
+	WwVkPresent::FxStat st[2];
+	std::map<std::uintptr_t, std::pair<GLuint, std::uint64_t>> still;  // twin key -> the source copied, at which sharedGen
+};
+
+Fx & fx()
+{
+	static Fx f;
+	return f;
+}
+
+bool fxModule( const std::uint32_t * code, size_t bytes, VkShaderModule & out )
+{
+	Vk & v = vk();
+	VkShaderModuleCreateInfo mci { VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO };
+	mci.codeSize = bytes;
+	mci.pCode = code;
+	return v.vkCreateShaderModule( v.dev, &mci, nullptr, &out ) == VK_SUCCESS;
+}
+
+// the device-time parts (once): samplers, the zero textures, per program its set, layout, module and uniform buffer
+bool fxStatic( std::string & why )
+{
+	Vk & v = vk();
+	Fx & F = fx();
+	if ( F.made )
+		return true;
+	const double t0 = nowMs();
+	// GL's sampling states of the inputs: LUTs / volumes LINEAR CLAMP, the tile NEAREST, the noise trilinear REPEAT
+	for ( int k = 0; k < WwVkPresent::kFxSamplers; k++ ) {
+		const bool nearest = k == WwVkPresent::kFxNearestClamp || k == WwVkPresent::kFxNearestRepeat;
+		const bool repeat = k == WwVkPresent::kFxLinearRepeat || k == WwVkPresent::kFxMipRepeat || k == WwVkPresent::kFxNearestRepeat;
+		VkSamplerCreateInfo sci { VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO };
+		sci.magFilter = sci.minFilter = nearest ? VK_FILTER_NEAREST : VK_FILTER_LINEAR;
+		sci.mipmapMode = k == WwVkPresent::kFxMipRepeat ? VK_SAMPLER_MIPMAP_MODE_LINEAR : VK_SAMPLER_MIPMAP_MODE_NEAREST;
+		sci.addressModeU = sci.addressModeV = sci.addressModeW = repeat ? VK_SAMPLER_ADDRESS_MODE_REPEAT : VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+		sci.maxLod = k == WwVkPresent::kFxMipRepeat ? VK_LOD_CLAMP_NONE : 0.0f;
+		if ( v.vkCreateSampler( v.dev, &sci, nullptr, &F.smp[k] ) != VK_SUCCESS ) {
+			why = "vkCreateSampler (the air / clouds) failed";
+			return false;
+		}
+	}
+	F.prog[kFxVolsky].code = vkframe_volsky_view_ps_spv;
+	F.prog[kFxVolsky].bytes = sizeof( vkframe_volsky_view_ps_spv );
+	F.prog[kFxVolsky].ntex = 7;
+	F.prog[kFxVolsky].looseBytes = WwVkPresent::kT_volskyBytes;
+	F.prog[kFxMarch].code = vkframe_cloud_march_view_ps_spv;
+	F.prog[kFxMarch].bytes = sizeof( vkframe_cloud_march_view_ps_spv );
+	F.prog[kFxMarch].ntex = 7;
+	F.prog[kFxMarch].looseBytes = WwVkPresent::kT_marchBytes;
+	F.prog[kFxMarchA].code = vkframe_cloud_march_a_view_ps_spv;
+	F.prog[kFxMarchA].bytes = sizeof( vkframe_cloud_march_a_view_ps_spv );
+	F.prog[kFxMarchA].ntex = 8;
+	F.prog[kFxMarchA].looseBytes = WwVkPresent::kT_march_aBytes;
+	F.prog[kFxResolve].code = vkframe_cloud_resolve_view_ps_spv;
+	F.prog[kFxResolve].bytes = sizeof( vkframe_cloud_resolve_view_ps_spv );
+	F.prog[kFxResolve].ntex = 4;
+	F.prog[kFxResolve].looseBytes = WwVkPresent::kT_resolveBytes;
+	F.prog[kFxResolveA].code = vkframe_cloud_resolve_a_view_ps_spv;
+	F.prog[kFxResolveA].bytes = sizeof( vkframe_cloud_resolve_a_view_ps_spv );
+	F.prog[kFxResolveA].ntex = 4;
+	F.prog[kFxResolveA].looseBytes = WwVkPresent::kT_resolve_aBytes;
+	if ( !fxModule( vkframe_tone_view_vs_spv, sizeof( vkframe_tone_view_vs_spv ), F.vs ) ) {
+		why = "the air / clouds' vertex module failed";
+		return false;
+	}
+	for ( FxProg & P : F.prog ) {
+		// b0 / b31 uniform buffers, t0.. at 64.., s0.. at 128.. (vkframe_spirv.sh's shifts)
+		VkDescriptorSetLayoutBinding b[2 + 2 * kFxMaxTex] = {};
+		const int nb = 2 + 2 * P.ntex;
+		for ( int k = 0; k < nb; k++ ) {
+			b[k].binding = k < 2 ? ( k ? 31u : 0u ) : k < 2 + P.ntex ? std::uint32_t( 64 + k - 2 ) : std::uint32_t( 128 + k - 2 - P.ntex );
+			b[k].descriptorType = k < 2 ? VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER : k < 2 + P.ntex ? VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE : VK_DESCRIPTOR_TYPE_SAMPLER;
+			b[k].descriptorCount = 1;
+			b[k].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+		}
+		VkDescriptorSetLayoutCreateInfo lci { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
+		lci.bindingCount = std::uint32_t( nb );
+		lci.pBindings = b;
+		VkDescriptorPoolSize ps[3] = { { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 2 }, { VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, std::uint32_t( P.ntex ) },
+			{ VK_DESCRIPTOR_TYPE_SAMPLER, std::uint32_t( P.ntex ) } };
+		VkDescriptorPoolCreateInfo pci { VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO };
+		pci.maxSets = 1;
+		pci.poolSizeCount = 3;
+		pci.pPoolSizes = ps;
+		if ( v.vkCreateDescriptorSetLayout( v.dev, &lci, nullptr, &P.dsl ) != VK_SUCCESS
+			|| v.vkCreateDescriptorPool( v.dev, &pci, nullptr, &P.dpool ) != VK_SUCCESS ) {
+			why = "the air / clouds' descriptor set layout / pool failed";
+			return false;
+		}
+		VkDescriptorSetAllocateInfo dai { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO };
+		dai.descriptorPool = P.dpool;
+		dai.descriptorSetCount = 1;
+		dai.pSetLayouts = &P.dsl;
+		VkPipelineLayoutCreateInfo plci { VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO };
+		plci.setLayoutCount = 1;
+		plci.pSetLayouts = &P.dsl;
+		if ( v.vkAllocateDescriptorSets( v.dev, &dai, &P.set ) != VK_SUCCESS
+			|| v.vkCreatePipelineLayout( v.dev, &plci, nullptr, &P.layout ) != VK_SUCCESS ) {
+			why = "the air / clouds' descriptor set / pipeline layout failed";
+			return false;
+		}
+		if ( !fxModule( P.code, P.bytes, P.ps ) ) {
+			why = "the air / clouds' fragment module failed";
+			return false;
+		}
+		VkBufferCreateInfo bci { VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
+		bci.size = kFxLooseAt + VkDeviceSize( P.looseBytes );
+		bci.usage = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
+		bool mapped = v.vkCreateBuffer( v.dev, &bci, nullptr, &P.ubo ) == VK_SUCCESS;
+		if ( mapped ) {
+			VkMemoryRequirements br {};
+			v.vkGetBufferMemoryRequirements( v.dev, P.ubo, &br );
+			VkMemoryAllocateInfo ai { VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO };
+			ai.allocationSize = br.size;
+			ai.memoryTypeIndex = memType( br.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT );
+			void * p = nullptr;
+			mapped = ai.memoryTypeIndex != UINT32_MAX && v.vkAllocateMemory( v.dev, &ai, nullptr, &P.uboMem ) == VK_SUCCESS
+				&& v.vkBindBufferMemory( v.dev, P.ubo, P.uboMem, 0 ) == VK_SUCCESS
+				&& v.vkMapMemory( v.dev, P.uboMem, 0, VK_WHOLE_SIZE, 0, &p ) == VK_SUCCESS;
+			P.uboPtr = static_cast<std::uint8_t *>( p );
+		}
+		if ( !mapped || !P.uboPtr ) {
+			why = "the air / clouds' uniform buffer failed";
+			return false;
+		}
+		std::memset( P.uboPtr, 0, size_t( bci.size ) );
+	}
+	VkFenceCreateInfo fi { VK_STRUCTURE_TYPE_FENCE_CREATE_INFO };
+	VkCommandBufferAllocateInfo cai { VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO };
+	cai.commandPool = v.pool;
+	cai.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+	cai.commandBufferCount = 1;
+	if ( v.vkCreateFence( v.dev, &fi, nullptr, &F.fence ) != VK_SUCCESS || v.vkAllocateCommandBuffers( v.dev, &cai, &F.cmd ) != VK_SUCCESS ) {
+		why = "the air / clouds' fence / command buffer failed";
+		return false;
+	}
+	// the zero textures, cleared once to (0, 0, 0, 1) and left GENERAL (the queue is the worker's: drained first)
+	if ( !makeLocal( F.dummy2, F.dummy2Mem, VK_IMAGE_TYPE_2D, VK_FORMAT_R16G16B16A16_SFLOAT, 1, 1, 1, F.dummyMb )
+		|| !makeLocal( F.dummy3, F.dummy3Mem, VK_IMAGE_TYPE_3D, VK_FORMAT_R16G16B16A16_SFLOAT, 1, 1, 1, F.dummyMb ) ) {
+		why = "the air / clouds' zero textures failed";
+		return false;
+	}
+	F.d2 = imageView( F.dummy2, VK_IMAGE_VIEW_TYPE_2D, VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT );
+	F.d2a = imageView( F.dummy2, VK_IMAGE_VIEW_TYPE_2D_ARRAY, VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT );
+	F.d3 = imageView( F.dummy3, VK_IMAGE_VIEW_TYPE_3D, VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_ASPECT_COLOR_BIT );
+	if ( !F.d2 || !F.d2a || !F.d3 ) {
+		why = "the air / clouds' zero texture views failed";
+		return false;
+	}
+	drain();
+	v.vkResetCommandBuffer( F.cmd, 0 );
+	VkCommandBufferBeginInfo bi { VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
+	bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+	v.vkBeginCommandBuffer( F.cmd, &bi );
+	const VkImageSubresourceRange rr { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
+	VkImageMemoryBarrier ib[2] = { { VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER }, { VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER } };
+	for ( int k = 0; k < 2; k++ ) {
+		ib[k].dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+		ib[k].oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+		ib[k].newLayout = VK_IMAGE_LAYOUT_GENERAL;
+		ib[k].srcQueueFamilyIndex = ib[k].dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+		ib[k].image = k ? F.dummy3 : F.dummy2;
+		ib[k].subresourceRange = rr;
+	}
+	v.vkCmdPipelineBarrier( F.cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 2, ib );
+	VkClearColorValue zero {};
+	zero.float32[3] = 1.0f;
+	v.vkCmdClearColorImage( F.cmd, F.dummy2, VK_IMAGE_LAYOUT_GENERAL, &zero, 1, &rr );
+	v.vkCmdClearColorImage( F.cmd, F.dummy3, VK_IMAGE_LAYOUT_GENERAL, &zero, 1, &rr );
+	VkMemoryBarrier mb { VK_STRUCTURE_TYPE_MEMORY_BARRIER };
+	mb.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+	mb.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+	v.vkCmdPipelineBarrier( F.cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 1, &mb, 0, nullptr, 0, nullptr );
+	if ( v.vkEndCommandBuffer( F.cmd ) != VK_SUCCESS || !oneShot( F.cmd, F.fence ) ) {
+		why = "the air / clouds' zero texture clear failed";
+		return false;
+	}
+	F.buildMs = nowMs() - t0;
+	F.made = true;
+	return true;
+}
+
+void fxSemsDrop( bool glAlive )
+{
+	Vk & v = vk();
+	Gl & g = gl();
+	Fx & F = fx();
+	if ( glAlive )
+		for ( GLuint * s : { &F.glDoneGl, &F.vkDoneGl } )
+			if ( *s )
+				g.deleteSemaphores( 1, s );
+	for ( VkSemaphore * s : { &F.glDone, &F.vkDone } )
+		if ( *s )
+			v.vkDestroySemaphore( v.dev, *s, nullptr );
+	F.glDoneGl = F.vkDoneGl = 0;
+	F.glDone = F.vkDone = VK_NULL_HANDLE;
+	F.semCtx = nullptr;
+}
+
+bool fxSems( std::string & why )
+{
+	Gl & g = gl();
+	Fx & F = fx();
+	if ( F.glDone && F.semCtx == g.ctx )
+		return true;
+	fxSemsDrop( false );  // another context's names: that context went
+	if ( !exportSem( F.glDone, F.glDoneGl, why ) || !exportSem( F.vkDone, F.vkDoneGl, why ) ) {
+		fxSemsDrop( true );
+		return false;
+	}
+	F.semCtx = g.ctx;
+	return true;
+}
+
+// one pipeline: the tone frame's vertex triangle, the program's fragment, cull none, dynamic viewport + scissor
+bool fxPipe( FxProg & P, VkRenderPass pass, int samples, int outs, bool air, bool blend, VkPipeline & out, std::string & why )
+{
+	Vk & v = vk();
+	const VkSampleCountFlagBits sc = VkSampleCountFlagBits( samples );
+	VkPipelineShaderStageCreateInfo st[2] = { { VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO },
+		{ VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO } };
+	st[0].stage = VK_SHADER_STAGE_VERTEX_BIT;
+	st[0].module = fx().vs;
+	st[0].pName = "main";
+	st[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+	st[1].module = P.ps;
+	st[1].pName = "main";
+	VkPipelineVertexInputStateCreateInfo vi { VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO };
+	VkPipelineInputAssemblyStateCreateInfo ia { VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO };
+	ia.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+	VkPipelineViewportStateCreateInfo vps { VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO };
+	vps.viewportCount = vps.scissorCount = 1;
+	VkPipelineRasterizationStateCreateInfo rs { VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO };
+	rs.polygonMode = VK_POLYGON_MODE_FILL;
+	rs.cullMode = VK_CULL_MODE_NONE;
+	rs.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
+	rs.lineWidth = 1.0f;
+	VkPipelineMultisampleStateCreateInfo ms { VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO };
+	ms.rasterizationSamples = sc;
+	// the air: GL's state in wwVolAirSkyDraw: no depth test or write; stencil ALWAYS, REPLACE, write mask 0x03, the
+	// reference dynamic (1; the gate's red 2)
+	VkPipelineDepthStencilStateCreateInfo ds { VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO };
+	ds.stencilTestEnable = VK_TRUE;
+	ds.front.failOp = ds.front.depthFailOp = VK_STENCIL_OP_KEEP;
+	ds.front.passOp = VK_STENCIL_OP_REPLACE;
+	ds.front.compareOp = VK_COMPARE_OP_ALWAYS;
+	ds.front.compareMask = 0xFF;
+	ds.front.writeMask = 0x03;
+	ds.back = ds.front;
+	VkPipelineColorBlendAttachmentState cb[2] = {};
+	for ( VkPipelineColorBlendAttachmentState & c : cb )
+		c.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+	if ( blend ) {  // glBlendFuncSeparate( ONE, ONE_MINUS_SRC_ALPHA, ZERO, ONE )
+		cb[0].blendEnable = VK_TRUE;
+		cb[0].srcColorBlendFactor = VK_BLEND_FACTOR_ONE;
+		cb[0].dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+		cb[0].colorBlendOp = VK_BLEND_OP_ADD;
+		cb[0].srcAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
+		cb[0].dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+		cb[0].alphaBlendOp = VK_BLEND_OP_ADD;
+	}
+	VkPipelineColorBlendStateCreateInfo cbs { VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO };
+	cbs.attachmentCount = std::uint32_t( outs );
+	cbs.pAttachments = cb;
+	const VkDynamicState dyn[3] = { VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR, VK_DYNAMIC_STATE_STENCIL_REFERENCE };
+	VkPipelineDynamicStateCreateInfo dy { VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO };
+	dy.dynamicStateCount = air ? 3 : 2;
+	dy.pDynamicStates = dyn;
+	VkGraphicsPipelineCreateInfo gp { VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO };
+	gp.stageCount = 2;
+	gp.pStages = st;
+	gp.pVertexInputState = &vi;
+	gp.pInputAssemblyState = &ia;
+	gp.pViewportState = &vps;
+	gp.pRasterizationState = &rs;
+	gp.pMultisampleState = &ms;
+	gp.pDepthStencilState = air ? &ds : nullptr;
+	gp.pColorBlendState = &cbs;
+	gp.pDynamicState = &dy;
+	gp.layout = P.layout;
+	gp.renderPass = pass;
+	if ( v.vkCreateGraphicsPipelines( v.dev, tone().cache, 1, &gp, nullptr, &out ) != VK_SUCCESS ) {
+		why = std::string( "vkCreateGraphicsPipelines (" ) + ( air ? "the air" : "the clouds" ) + ") failed";
+		return false;
+	}
+	fx().pipelines++;
+	return true;
+}
+
+/* the render passes: the air's (the tone frame's RGBA16F colour + its D24S8, the frame's samples, LOAD / STORE, GENERAL)
+ * and the clouds' (RGBA16F + RG32F, 1 sample, LOAD / STORE, GENERAL; the march and the resolve share it) */
+bool fxPasses( int samples, std::string & why )
+{
+	Vk & v = vk();
+	Fx & F = fx();
+	const double t0 = nowMs();
+	bool built = false;
+	if ( !F.airPass || F.airSamples != samples ) {
+		for ( VkPipeline & p : F.prog[kFxVolsky].pipe )
+			if ( p ) {
+				v.vkDestroyPipeline( v.dev, p, nullptr );
+				p = VK_NULL_HANDLE;
+			}
+		if ( F.airPass )
+			v.vkDestroyRenderPass( v.dev, F.airPass, nullptr );
+		F.airPass = VK_NULL_HANDLE;
+		F.airSamples = 0;
+		VkAttachmentDescription at[2] = {};
+		at[0].format = VK_FORMAT_R16G16B16A16_SFLOAT;
+		at[1].format = VK_FORMAT_D24_UNORM_S8_UINT;
+		for ( VkAttachmentDescription & a : at ) {
+			a.samples = VkSampleCountFlagBits( samples );
+			a.loadOp = a.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
+			a.storeOp = a.stencilStoreOp = VK_ATTACHMENT_STORE_OP_STORE;
+			a.initialLayout = a.finalLayout = VK_IMAGE_LAYOUT_GENERAL;
+		}
+		const VkAttachmentReference cr { 0, VK_IMAGE_LAYOUT_GENERAL }, dr { 1, VK_IMAGE_LAYOUT_GENERAL };
+		VkSubpassDescription sp {};
+		sp.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+		sp.colorAttachmentCount = 1;
+		sp.pColorAttachments = &cr;
+		sp.pDepthStencilAttachment = &dr;
+		VkRenderPassCreateInfo rci { VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO };
+		rci.attachmentCount = 2;
+		rci.pAttachments = at;
+		rci.subpassCount = 1;
+		rci.pSubpasses = &sp;
+		if ( v.vkCreateRenderPass( v.dev, &rci, nullptr, &F.airPass ) != VK_SUCCESS ) {
+			why = "vkCreateRenderPass (the air) failed";
+			return false;
+		}
+		FxProg & P = F.prog[kFxVolsky];
+		if ( !fxPipe( P, F.airPass, samples, 1, true, false, P.pipe[0], why ) || !fxPipe( P, F.airPass, samples, 1, true, true, P.pipe[1], why ) )
+			return false;
+		F.airSamples = samples;
+		built = true;
+	}
+	if ( !F.cloudPass ) {
+		VkAttachmentDescription at[2] = {};
+		at[0].format = VK_FORMAT_R16G16B16A16_SFLOAT;
+		at[1].format = VK_FORMAT_R32G32_SFLOAT;
+		for ( VkAttachmentDescription & a : at ) {
+			a.samples = VK_SAMPLE_COUNT_1_BIT;
+			a.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
+			a.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+			a.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+			a.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+			a.initialLayout = a.finalLayout = VK_IMAGE_LAYOUT_GENERAL;
+		}
+		const VkAttachmentReference cr[2] = { { 0, VK_IMAGE_LAYOUT_GENERAL }, { 1, VK_IMAGE_LAYOUT_GENERAL } };
+		VkSubpassDescription sp {};
+		sp.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+		sp.colorAttachmentCount = 2;
+		sp.pColorAttachments = cr;
+		VkRenderPassCreateInfo rci { VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO };
+		rci.attachmentCount = 2;
+		rci.pAttachments = at;
+		rci.subpassCount = 1;
+		rci.pSubpasses = &sp;
+		if ( v.vkCreateRenderPass( v.dev, &rci, nullptr, &F.cloudPass ) != VK_SUCCESS ) {
+			why = "vkCreateRenderPass (the clouds) failed";
+			return false;
+		}
+		for ( int k = kFxMarch; k <= kFxResolveA; k++ )
+			if ( !fxPipe( F.prog[k], F.cloudPass, 1, 2, false, false, F.prog[k].pipe[0], why ) )
+				return false;
+		built = true;
+	}
+	if ( built ) {
+		F.buildMs += nowMs() - t0;
+		toneCacheSave();
+	}
+	return true;
+}
+
+void fxDraw( FxProg & P, VkPipeline pipe, VkFramebuffer fb, VkRenderPass pass, int fw, int fh, const int vp[4], int stencilRef )
+{
+	Vk & v = vk();
+	Fx & F = fx();
+	VkRenderPassBeginInfo rbi { VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO };
+	rbi.renderPass = pass;
+	rbi.framebuffer = fb;
+	rbi.renderArea = { { 0, 0 }, { std::uint32_t( fw ), std::uint32_t( fh ) } };
+	v.vkCmdBeginRenderPass( F.cmd, &rbi, VK_SUBPASS_CONTENTS_INLINE );
+	// GL's viewport rows from the bottom = the image's rows from the top in memory: no flip (FragCoord.y = GL's)
+	const VkViewport vpt { float( vp[0] ), float( vp[1] ), float( vp[2] ), float( vp[3] ), 0.0f, 1.0f };
+	const int x0 = std::clamp( vp[0], 0, fw ), y0 = std::clamp( vp[1], 0, fh );
+	const int x1 = std::clamp( vp[0] + vp[2], 0, fw ), y1 = std::clamp( vp[1] + vp[3], 0, fh );
+	const VkRect2D sc { { x0, y0 }, { std::uint32_t( std::max( x1 - x0, 0 ) ), std::uint32_t( std::max( y1 - y0, 0 ) ) } };
+	v.vkCmdSetViewport( F.cmd, 0, 1, &vpt );
+	v.vkCmdSetScissor( F.cmd, 0, 1, &sc );
+	v.vkCmdBindPipeline( F.cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipe );
+	if ( stencilRef >= 0 )
+		v.vkCmdSetStencilReference( F.cmd, VK_STENCIL_FACE_FRONT_AND_BACK, std::uint32_t( stencilRef ) );
+	v.vkCmdBindDescriptorSets( F.cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, P.layout, 0, 1, &P.set, 0, nullptr );
+	v.vkCmdDraw( F.cmd, 3, 1, 0, 0 );
+	v.vkCmdEndRenderPass( F.cmd );
+}
+
+// the worker: the air's triangle into the tone frame, or the march then the resolve, waiting GL's signal, signalling back
+bool fxWork( std::string & why )
+{
+	Vk & v = vk();
+	Fx & F = fx();
+	v.vkResetFences( v.dev, 1, &F.fence );
+	v.vkResetCommandBuffer( F.cmd, 0 );
+	VkCommandBufferBeginInfo bi { VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
+	bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+	v.vkBeginCommandBuffer( F.cmd, &bi );
+	if ( F.kind == 0 ) {
+		if ( !F.fbAir ) {
+			v.vkEndCommandBuffer( F.cmd );
+			why = "no framebuffer over the tone frame";
+			return false;
+		}
+		FxProg & P = F.prog[kFxVolsky];
+		fxDraw( P, P.pipe[F.blend ? 1 : 0], F.fbAir, F.airPass, F.w, F.h, F.vp, F.stencilRef );
+	} else {
+		if ( !F.fbR || ( !F.skipMarch && !F.fbM ) ) {
+			v.vkEndCommandBuffer( F.cmd );
+			why = "no framebuffer over the clouds' targets";
+			return false;
+		}
+		if ( !F.skipMarch ) {
+			const int vm[4] = { 0, 0, F.mw, F.mh };
+			fxDraw( F.prog[F.march], F.prog[F.march].pipe[0], F.fbM, F.cloudPass, F.mw, F.mh, vm, -1 );
+			VkMemoryBarrier mb { VK_STRUCTURE_TYPE_MEMORY_BARRIER };  // the march's targets written -> the resolve reads them
+			mb.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+			mb.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+			v.vkCmdPipelineBarrier( F.cmd, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 1, &mb, 0,
+				nullptr, 0, nullptr );
+		}
+		const int vr[4] = { 0, 0, F.hw, F.hh };
+		fxDraw( F.prog[F.resolve], F.prog[F.resolve].pipe[0], F.fbR, F.cloudPass, F.hw, F.hh, vr, -1 );
+	}
+	if ( v.vkEndCommandBuffer( F.cmd ) != VK_SUCCESS ) {
+		why = "vkEndCommandBuffer (the air / clouds) failed";
+		return false;
+	}
+	const VkPipelineStageFlags waitAt = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
+	VkSubmitInfo si { VK_STRUCTURE_TYPE_SUBMIT_INFO };
+	si.waitSemaphoreCount = 1;
+	si.pWaitSemaphores = &F.glDone;
+	si.pWaitDstStageMask = &waitAt;
+	si.commandBufferCount = 1;
+	si.pCommandBuffers = &F.cmd;
+	si.signalSemaphoreCount = 1;
+	si.pSignalSemaphores = &F.vkDone;
+	const VkResult r = v.vkQueueSubmit( v.queue, 1, &si, F.fence );
+	if ( r != VK_SUCCESS ) {
+		why = "vkQueueSubmit (the air / clouds) returned " + std::to_string( int( r ) );
+		return false;
+	}
+	return true;
+}
+
+// shutdown: the crossing's semaphores (GL's names) and the framebuffers; the pipelines stay with the device
+void fxDrop()
+{
+	Fx & F = fx();
+	if ( !F.glDone && !F.pending && !F.fbAir && !F.fbM && !F.fbR )
+		return;
+	drain();
+	vk().vkDeviceWaitIdle( vk().dev );
+	F.pending = false;
+	for ( VkFramebuffer * fb : { &F.fbAir, &F.fbM, &F.fbR } ) {
+		if ( *fb )
+			vk().vkDestroyFramebuffer( vk().dev, *fb, nullptr );
+		*fb = VK_NULL_HANDLE;
+	}
+	F.still.clear();
+	fxSemsDrop( gl().ok && F.semCtx == gl().ctx );
+}
+
+// a framebuffer over views (made again each run: the targets may be remade between runs)
+bool fxFb( VkFramebuffer & fb, VkRenderPass pass, const VkImageView * views, int n, int w, int h )
+{
+	Vk & v = vk();
+	if ( fb )
+		v.vkDestroyFramebuffer( v.dev, fb, nullptr );
+	fb = VK_NULL_HANDLE;
+	VkFramebufferCreateInfo fci { VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO };
+	fci.renderPass = pass;
+	fci.attachmentCount = std::uint32_t( n );
+	fci.pAttachments = views;
+	fci.width = std::uint32_t( w );
+	fci.height = std::uint32_t( h );
+	fci.layers = 1;
+	return v.vkCreateFramebuffer( v.dev, &fci, nullptr, &fb ) == VK_SUCCESS;
+}
+
+// the GL names a crossing hands over (the frame, the targets, every twin), each once
+struct FxNames
+{
+	GLuint tex[24] = {};
+	GLenum lay[24] = {};
+	GLuint n = 0;
+	void add( GLuint t )
+	{
+		if ( !t || n >= 24 )
+			return;
+		for ( GLuint k = 0; k < n; k++ )
+			if ( tex[k] == t )
+				return;
+		tex[n] = t;
+		lay[n++] = kLayoutGeneral;
+	}
+};
+
+/* one texture slot: a shared target read as is, a GL texture copied (each level) into its shared twin, or the zero
+ * texture of the slot's type. view: what the set binds; GL's name of what Vulkan reads goes into names */
+bool fxSlot( const WwVkPresent::FxTex & t, VkImageView & view, FxNames & names, int & copies, std::string & why )
+{
+	Gl & g = gl();
+	Fx & F = fx();
+	if ( t.shared ) {
+		const Shared * s = sharedFind( t.shared );
+		if ( !s || !s->view ) {
+			why = "a shared input has no view";
+			return false;
+		}
+		view = s->view;
+		names.add( s->tex );
+		return true;
+	}
+	if ( !t.tex ) {
+		view = t.type == 1 ? F.d3 : t.type == 2 ? F.d2a : F.d2;
+		return true;
+	}
+	if ( !t.twin ) {
+		why = "an input with no twin key";
+		return false;
+	}
+	GLuint twin = 0;
+	if ( !WwVkPresent::sharedTarget( t.twin, t.type, t.w, t.h, t.d, t.glFmt, twin, why, t.levels ) )
+		return false;
+	const Shared * s = sharedFind( t.twin );
+	if ( !s || !s->view ) {
+		why = "an input's twin has no view";
+		return false;
+	}
+	if ( s->levels != std::max( t.levels, 1 ) ) {
+		why = "an input's twin has " + std::to_string( s->levels ) + " levels, the input " + std::to_string( t.levels );
+		return false;
+	}
+	view = s->view;
+	names.add( twin );
+	const std::uint64_t gen = sharedGen();
+	auto it = F.still.find( t.twin );
+	if ( t.still && it != F.still.end() && it->second.first == t.tex && it->second.second == gen )
+		return true;  // a still source already in this twin
+	const GLenum target = t.type == 1 ? kTexture3D : t.type == 2 ? kTexture2DArray : kTexture2D;
+	for ( int l = 0; l < std::max( t.levels, 1 ); l++ ) {
+		const int lw = std::max( t.w >> l, 1 ), lh = std::max( t.h >> l, 1 );
+		const int ld = t.type == 1 ? std::max( t.d >> l, 1 ) : t.type == 2 ? t.d : 1;
+		g.copyImageSubData( t.tex, target, l, 0, 0, 0, twin, target, l, 0, 0, 0, lw, lh, ld );
+	}
+	copies++;
+	F.still[t.twin] = { t.tex, gen };
+	return true;
+}
+
+void fxWrite( FxProg & P, const VkImageView * views, const int * smp, const std::uint8_t * global, const std::uint8_t * loose )
+{
+	Vk & v = vk();
+	Fx & F = fx();
+	if ( global )
+		std::memcpy( P.uboPtr, global, size_t( WwVkPresent::kFxGlobalBytes ) );
+	std::memcpy( P.uboPtr + kFxLooseAt, loose, size_t( P.looseBytes ) );
+	VkDescriptorBufferInfo bi[2] = { { P.ubo, 0, VkDeviceSize( WwVkPresent::kFxGlobalBytes ) },
+		{ P.ubo, kFxLooseAt, VkDeviceSize( P.looseBytes ) } };
+	VkDescriptorImageInfo ii[2 * kFxMaxTex] = {};
+	VkWriteDescriptorSet ws[2 + 2 * kFxMaxTex] = {};
+	const int n = 2 + 2 * P.ntex;
+	for ( int k = 0; k < n; k++ ) {
+		ws[k].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+		ws[k].dstSet = P.set;
+		ws[k].descriptorCount = 1;
+		if ( k < 2 ) {
+			ws[k].dstBinding = k ? 31 : 0;
+			ws[k].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+			ws[k].pBufferInfo = &bi[k];
+		} else if ( k < 2 + P.ntex ) {
+			ii[k - 2].imageView = views[k - 2];
+			ii[k - 2].imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+			ws[k].dstBinding = std::uint32_t( 64 + k - 2 );
+			ws[k].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+			ws[k].pImageInfo = &ii[k - 2];
+		} else {
+			const int s = smp[k - 2 - P.ntex];
+			ii[k - 2].sampler = F.smp[std::clamp( s, 0, int( WwVkPresent::kFxSamplers ) - 1 )];
+			ws[k].dstBinding = std::uint32_t( 128 + k - 2 - P.ntex );
+			ws[k].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER;
+			ws[k].pImageInfo = &ii[k - 2];
+		}
+	}
+	v.vkUpdateDescriptorSets( v.dev, std::uint32_t( n ), ws, 0, nullptr );
+}
+
+// GL's work so far signalled -> the worker's job -> GL waits; false: the worker's reason (nothing signals back)
+bool fxCross( FxNames & names, std::string & why )
+{
+	Gl & g = gl();
+	Fx & F = fx();
+	g.signalSemaphore( F.glDoneGl, 0, nullptr, names.n, names.tex, names.lay );
+	g.flush();
+	Worker & W = wk();
+	std::uint64_t want = 0;
+	{
+		std::lock_guard<std::mutex> lk( W.m );
+		want = W.toneDone + 1;
+	}
+	Work j;
+	j.k = -1;
+	j.fx = true;
+	hand( j );
+	bool ok = false;
+	{
+		std::unique_lock<std::mutex> lk( W.m );
+		W.idle.wait( lk, [&W, want]() { return W.toneDone >= want; } );
+		ok = W.toneOk;
+		why = W.toneWhy;
+	}
+	if ( !ok )
+		return false;
+	g.waitSemaphore( F.vkDoneGl, 0, nullptr, names.n, names.tex, names.lay );
+	F.pending = true;
+	return true;
+}
+
+// the checks and the device-time parts both passes share; false: why (refused) or broken (the pass breaks off)
+bool fxBegin( int which, bool & broken, std::string & why )
+{
+	Fx & F = fx();
+	Gl & g = gl();
+	Vk & v = vk();
+	broken = false;
+	if ( F.broken[which] ) {
+		why = F.brokenWhy[which];
+		return false;
+	}
+	if ( !v.ok || !g.ok || g.ctx != reinterpret_cast<void *>( wglGetCurrentContext() ) ) {
+		why = "the present device or GL's entry points are not ready in this context";
+		return false;
+	}
+	if ( !g.copyImageSubData ) {
+		why = "no glCopyImageSubData (the inputs' copies into their shared twins)";
+		return false;
+	}
+	// the last run is done before its command buffer, sets, framebuffers and uniforms are written again
+	if ( F.pending ) {
+		v.vkWaitForFences( v.dev, 1, &F.fence, VK_TRUE, 1000000000ull );
+		F.pending = false;
+	}
+	const int samples = tone().samples > 0 ? tone().samples : std::max( F.airSamples, 1 );
+	if ( !fxStatic( why ) || !fxSems( why ) || !fxPasses( samples, why ) ) {
+		broken = true;
+		return false;
+	}
+	return true;
+}
+}  // namespace
+
+namespace WwVkPresent
+{
+bool volSkyRun( const VolSkyRun & t, std::string & why )
+{
+	Fx & F = fx();
+	Tone & T = tone();
+	FxStat & S = F.st[0];
+	const double t0 = nowMs();
+	auto refuse = [&]( const std::string & w ) {
+		why = w;
+		S.fails++;
+		S.failWhy = w;
+		return false;
+	};
+	auto breakOff = [&]( const std::string & w ) {
+		F.broken[0] = true;
+		F.brokenWhy[0] = "the air on Vulkan broke: " + w;
+		return refuse( F.brokenWhy[0] );
+	};
+	if ( !toneFrameIs( t.color ) || !T.colorView || !T.dsView )
+		return refuse( "the draw target is not the shared tone frame" );
+	if ( T.w != t.w || T.h != t.h )
+		return refuse( "the air's size is not the tone frame's" );
+	if ( t.vp[2] < 1 || t.vp[3] < 1 )
+		return refuse( "an empty viewport" );
+	std::string w;
+	bool broken = false;
+	if ( !fxBegin( 0, broken, w ) )
+		return broken ? breakOff( w ) : refuse( w );
+	if ( F.airSamples != T.samples )
+		return breakOff( "the air's pipelines are not at the frame's sample count" );
+	FxNames names;
+	names.add( T.colorTex );
+	names.add( T.dsTex );
+	VkImageView views[kFxMaxTex] = {};
+	int smp[kFxMaxTex] = {};
+	for ( int k = 0; k < 7; k++ ) {
+		if ( !fxSlot( t.tex[k], views[k], names, S.copies, w ) )
+			return refuse( "the air's input t" + std::to_string( k ) + ": " + w );
+		smp[k] = t.tex[k].sampler;
+	}
+	const VkImageView att[2] = { T.colorView, T.dsView };
+	if ( !fxFb( F.fbAir, F.airPass, att, 2, T.w, T.h ) )
+		return breakOff( "the air's framebuffer over the tone frame failed" );
+	fxWrite( F.prog[kFxVolsky], views, smp, t.global, t.loose );
+	F.kind = 0;
+	F.w = t.w;
+	F.h = t.h;
+	std::memcpy( F.vp, t.vp, sizeof( F.vp ) );
+	F.stencilRef = ( t.red & 1 ) ? 2 : 1;
+	F.blend = t.overSky && !( t.red & 2 );
+	if ( !fxCross( names, w ) )
+		return breakOff( w );  // nothing signals vkDone: GL does not wait it; GL draws its quad this frame
+	const double ms = nowMs() - t0;
+	S.runs++;
+	S.cpuMs += ms;
+	S.maxMs = std::max( S.maxMs, ms );
+	return true;
+}
+
+void volSkyOnGl( const char * why )
+{
+	FxStat & S = fx().st[0];
+	S.gl++;
+	S.glWhy = why ? why : "";
+}
+
+FxStat takeVolSkyStat()
+{
+	Fx & F = fx();
+	FxStat s = F.st[0];
+	s.pipelines = F.pipelines;
+	s.buildMs = F.buildMs;
+	if ( F.broken[0] && s.failWhy.empty() )
+		s.failWhy = F.brokenWhy[0];
+	F.st[0] = FxStat();
+	return s;
+}
+
+bool cloudRun( const CloudRun & t, std::string & why )
+{
+	Fx & F = fx();
+	FxStat & S = F.st[1];
+	const double t0 = nowMs();
+	auto refuse = [&]( const std::string & w ) {
+		why = w;
+		S.fails++;
+		S.failWhy = w;
+		return false;
+	};
+	auto breakOff = [&]( const std::string & w ) {
+		F.broken[1] = true;
+		F.brokenWhy[1] = "the clouds on Vulkan broke: " + w;
+		return refuse( F.brokenWhy[1] );
+	};
+	if ( t.mw < 1 || t.mh < 1 || t.hw < 1 || t.hh < 1 || t.cur < 0 || t.cur > 1 )
+		return refuse( "the clouds' sizes or history index" );
+	const Shared * mc = sharedFind( t.marchKey ), * md = sharedFind( t.marchKey + 1 );
+	const Shared * hc = sharedFind( t.histKey[t.cur] ), * hd = sharedFind( t.histKey[t.cur] + 1 );
+	const Shared * pc = sharedFind( t.histKey[t.cur ^ 1] ), * pd = sharedFind( t.histKey[t.cur ^ 1] + 1 );
+	if ( !t.marchKey || !mc || !md || !hc || !hd || !pc || !pd )
+		return refuse( "the march / history targets are not shared" );
+	if ( mc->w < t.mw || mc->h < t.mh || md->w != mc->w || md->h != mc->h || hc->w != t.hw || hc->h != t.hh || hd->w != t.hw || hd->h != t.hh )
+		return refuse( "the march / history targets' sizes are not the passes'" );
+	std::string w;
+	bool broken = false;
+	if ( !fxBegin( 1, broken, w ) )
+		return broken ? breakOff( w ) : refuse( w );
+	const int mp = t.accum ? kFxMarchA : kFxMarch, rp = t.accum ? kFxResolveA : kFxResolve;
+	FxProg & M = F.prog[mp];
+	FxProg & R = F.prog[rp];
+	FxNames names;
+	for ( const Shared * s : { mc, md, hc, hd, pc, pd } )
+		names.add( s->tex );
+	const bool skip = ( t.red & 4 ) != 0;
+	if ( !skip ) {
+		VkImageView views[kFxMaxTex] = {};
+		int smp[kFxMaxTex] = {};
+		for ( int k = 0; k < M.ntex; k++ ) {
+			if ( !fxSlot( t.tex[k], views[k], names, S.copies, w ) )
+				return refuse( "the march's input t" + std::to_string( k ) + ": " + w );
+			smp[k] = t.tex[k].sampler;
+		}
+		if ( t.red & 2 ) {  // red: the shape and the detail swapped
+			std::swap( views[1], views[2] );
+			std::swap( smp[1], smp[2] );
+		}
+		const VkImageView att[2] = { mc->view, md->view };
+		if ( !fxFb( F.fbM, F.cloudPass, att, 2, mc->w, mc->h ) )
+			return breakOff( "the march's framebuffer failed" );
+		fxWrite( M, views, smp, nullptr, t.march );
+	}
+	{
+		// HLSL resolve t0 cvMarch, t1 cvMarchDepth, t2 cvPrevDepth, t3 cvPrev; resolve_a t0 cvMarch, t1 cvPrevDepth,
+		// t2 cvMarchDepth, t3 cvPrev (GL's units: the march's colour, depth, the other history's colour, depth)
+		VkImageView march = mc->view, marchD = md->view, prev = pc->view, prevD = pd->view;
+		if ( t.red & 1 ) {  // red: the march and the history swapped
+			std::swap( march, prev );
+			std::swap( marchD, prevD );
+		}
+		const VkImageView views[4] = { march, t.accum ? prevD : marchD, t.accum ? marchD : prevD, prev };
+		const int smp[4] = { kFxLinearClamp, kFxLinearClamp, kFxLinearClamp, kFxLinearClamp };
+		const VkImageView att[2] = { hc->view, hd->view };
+		if ( !fxFb( F.fbR, F.cloudPass, att, 2, t.hw, t.hh ) )
+			return breakOff( "the resolve's framebuffer failed" );
+		fxWrite( R, views, smp, nullptr, t.resolve );
+	}
+	F.kind = 1;
+	F.march = mp;
+	F.resolve = rp;
+	F.mw = t.mw;
+	F.mh = t.mh;
+	F.hw = t.hw;
+	F.hh = t.hh;
+	F.skipMarch = skip;
+	if ( !fxCross( names, w ) )
+		return breakOff( w );  // nothing signals vkDone: GL does not wait it; GL draws both passes this frame
+	const double ms = nowMs() - t0;
+	S.runs++;
+	S.cpuMs += ms;
+	S.maxMs = std::max( S.maxMs, ms );
+	return true;
+}
+
+void cloudOnGl( const char * why )
+{
+	FxStat & S = fx().st[1];
+	S.gl++;
+	S.glWhy = why ? why : "";
+}
+
+FxStat takeCloudStat()
+{
+	Fx & F = fx();
+	FxStat s = F.st[1];
+	s.pipelines = F.pipelines;
+	s.buildMs = F.buildMs;
+	if ( F.broken[1] && s.failWhy.empty() )
+		s.failWhy = F.brokenWhy[1];
+	F.st[1] = FxStat();
 	return s;
 }
 }  // namespace WwVkPresent

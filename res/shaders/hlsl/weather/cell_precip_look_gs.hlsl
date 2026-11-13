@@ -720,11 +720,11 @@ float3 cellLightE(int i, float3 P, float3 N, inout float3 L, out bool noSpec)
     if (a > 0.0f)
     {
         int iArg3 = i;
-        float3 param_8 = -Lv;
+        float3 DArg = -Lv;
         float3 axisArg = gAx_1;
         bool spotArg = t1.w > (-1.5f);
         // one call for every shape
-        g = cellGobo(iArg3, param_8, axisArg, spotArg);
+        g = cellGobo(iArg3, DArg, axisArg, spotArg);
     }
     if (a > 0.0f)
     {
@@ -1060,9 +1060,9 @@ void vpLight(float3 posView, float3 P, float3 dW, float z, inout float3 N, float
                 skyThinPick2 = volCubeScatter(EArg5, dWArg5);
             }
             skyThin += skyThinPick2;
-            float3 param_44[6] = Eg;
+            float3 CArg[6] = Eg;
             float3 NArg4 = N;
-            skyThick += vpCubeAt(param_44, NArg4);
+            skyThick += vpCubeAt(CArg, NArg4);
             float3 EArg4[6] = Eg;
             float3 dWArg4 = dW;
             jEnv += volCubeScatter(EArg4, dWArg4);
@@ -1121,9 +1121,9 @@ void vpLight(float3 posView, float3 P, float3 dW, float z, inout float3 N, float
                 skyThinPick = volCubeScatter(EArg2, dWArg2);
             }
             skyThin += skyThinPick;
-            float3 param_55[6] = Am;
+            float3 CArg2[6] = Am;
             float3 NArg2 = N;
-            skyThick += vpCubeAt(param_55, NArg2);
+            skyThick += vpCubeAt(CArg2, NArg2);
             float3 EArg[6] = Am;
             float3 dWArg = dW;
             jEnv += volCubeScatter(EArg, dWArg);

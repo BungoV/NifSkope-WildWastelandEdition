@@ -108,13 +108,13 @@ float overlay(float base, float blend)
 
 float3 overlay(float3 ba, float3 bl)
 {
-    float param = ba.x;
-    float param_1 = bl.x;
-    float param_2 = ba.y;
-    float param_3 = bl.y;
-    float param_4 = ba.z;
-    float param_5 = bl.z;
-    return float3(overlay(param, param_1), overlay(param_2, param_3), overlay(param_4, param_5));
+    float baseArg = ba.x;
+    float blendArg = bl.x;
+    float baseArg2 = ba.y;
+    float blendArg2 = bl.y;
+    float baseArg3 = ba.z;
+    float blendArg3 = bl.z;
+    return float3(overlay(baseArg, blendArg), overlay(baseArg2, blendArg2), overlay(baseArg3, blendArg3));
 }
 
 float3 tonemap(float3 x)
@@ -222,17 +222,17 @@ void frag_main()
     if (hasDetailMask)
     {
         detail = DetailMask.Sample(_DetailMask_sampler, offset).xyz;
-        float3 param = albedo;
-        float3 param_1 = detail;
-        albedo = overlay(param, param_1);
+        float3 baArg = albedo;
+        float3 blArg = detail;
+        albedo = overlay(baArg, blArg);
     }
     float3 tint = 0.0f.xxx;
     if (hasTintMask)
     {
         tint = TintMask.Sample(_TintMask_sampler, offset).xyz;
-        float3 param_2 = albedo;
-        float3 param_3 = tint;
-        albedo = overlay(param_2, param_3);
+        float3 baArg2 = albedo;
+        float3 blArg2 = tint;
+        albedo = overlay(baArg2, blArg2);
     }
     if (hasDetailMask)
     {
