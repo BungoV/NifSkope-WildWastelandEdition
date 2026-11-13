@@ -89,6 +89,8 @@ void poolRebind( NifSkopeOpenGLContext * r );
 void poolDraw( NifSkopeOpenGLContext * r, std::size_t first, std::size_t n );
 void poolUnbind( NifSkopeOpenGLContext * r );
 QString poolCensus( NifSkopeOpenGLContext * r );
+//! lane VKSHADOW1: this context's pool buffers (vec3 float positions, u16 indices) and their used bytes; false: no pool
+bool poolBuffers( unsigned int & pos, unsigned int & ebo, std::size_t & posBytes, std::size_t & idxBytes );
 
 // ---- census
 

@@ -51,6 +51,9 @@ VKFRAME_SSR = {'ssr_view_s1': '-DSSR_STAGE=1', 'ssr_view_s1w': '-DSSR_STAGE=1 -D
 	'ssr_view_s2': '-DSSR_STAGE=2', 'ssr_view_s2w': '-DSSR_STAGE=2 -DF4FX_SSR_WATER_LOOK',
 	'ssr_view_s3': '-DSSR_STAGE=3', 'ssr_view_s4': '-DSSR_STAGE=4', 'ssr_view_s5': '-DSSR_STAGE=5'}
 HLSL_SPECS += [('src/features/vkframe', k, 'vulkan1.2', 'vkframe_%s_spv' % k) for k in VKFRAME_SSR]
+# lane VKSHADOW1: the sun cascades' queued casters, the script's csm loop (res/shaders/hlsl/near/<k>.hlsl, vs_6_0)
+VKFRAME_CSM = {'csm_view_vs': ('res/shaders/hlsl/near', 'csm_view_vs')}
+HLSL_SPECS += [('src/features/vkframe', k, 'vulkan1.2', 'vkframe_%s_spv' % k) for k in VKFRAME_CSM]
 # lane VKAIR1: the air's sky pass and the clouds, the script's `fx <name> <dir/file>` lines (sky's register shifts, ps_6_0)
 VKFRAME_FX = {'volsky_view_ps': 'air/cell_volsky_ps__WW_CELL_FOGLEAK', 'cloud_march_view_ps': 'clouds/cloud_march_ps',
 	'cloud_march_a_view_ps': 'clouds/cloud_march_a_ps', 'cloud_resolve_view_ps': 'clouds/cloud_resolve_ps',
@@ -134,6 +137,10 @@ def script_ok(tree):
 	rlines = dict(re.findall(r'^ssr ([a-z0-9_]+) "([^"]*)"$', vf, re.M))
 	if rlines != VKFRAME_SSR:
 		bad.append('src/features/vkframe/vkframe_spirv.sh: its ssr lines (%s) are not this checker\'s reflections' % ' '.join(sorted(rlines)))
+	m = re.search(r'^for c in ([a-z_ ]+); do\n\t"\$DXC" -spirv -fspv-target-env=vulkan1\.2 -T vs_6_0 -E main -Fo "\$\{c\}\.spv" "\$\(cygpath -m "\$ROOT/res/shaders/hlsl/near/', vf, re.M)
+	cloop = m.group(1).split() if m else []
+	if sorted(cloop) != sorted(VKFRAME_CSM):
+		bad.append('src/features/vkframe/vkframe_spirv.sh: its csm loop (%s) is not this checker\'s cascade shaders' % ' '.join(cloop))
 	if '\t"$DXC" -spirv -fspv-target-env=vulkan1.2 -T ps_6_0 -E main ' + ' '.join(VKFRAME_SKY_ARGS) + ' -Fo "$1.spv" ' not in vf:
 		bad.append('src/features/vkframe/vkframe_spirv.sh: its fx() compile line changed')
 	flines = dict(re.findall(r'^fx ([a-z0-9_]+) ([A-Za-z0-9_/+]+)$', vf, re.M))
@@ -250,6 +257,8 @@ def main(argv):
 			if lk in VKFRAME_LIGHT:
 				src = os.path.join(tree, 'res/shaders/hlsl/vklight', VKFRAME_LIGHT[lk][0] + '.hlsl')
 				hdefs = ['-O0'] + (['-D', VKFRAME_LIGHT[lk][1]] if VKFRAME_LIGHT[lk][1] else [])
+			if k in VKFRAME_CSM:
+				src = os.path.join(tree, VKFRAME_CSM[k][0], VKFRAME_CSM[k][1] + '.hlsl')
 			if k in VKFRAME_SSR:
 				src = os.path.join(tree, 'res/shaders/hlsl/vklight/ssr_vk.hlsl')
 				hdefs = ['-DSSR_LIVE'] + VKFRAME_SSR[k].split()
