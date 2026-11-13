@@ -355,6 +355,196 @@ bool shadeBuild( const std::string & spvDir, std::string & why )
 	return true;
 }
 
+/* lane VKOBJ4 step 6: GL's texture units as set 0 (objBlBindUnits) for the CSM twin. A GL program binds csmMap (a shared
+ * 2D array, DEPTH_COMPONENT16, compare LEQUAL, as sunshadow makes it), volTex (a shared 3D, as the air volume) and
+ * ussContactMap (GL's own 2D) on their units. BAR: 2 shared images on the twin's csmMap / volTex bindings, 1 GL-only,
+ * 0 misfits, the csmMap sampler GL's compare state; prep writes both images and GL's samplers; the run crosses.
+ * Reds (each must FAIL): swap (the two shared textures on each other's unit), fit (the CSM given to volTex's binding
+ * straight to prep), cmp (the CSM's compare mode off in GL). */
+struct UnitsFix
+{
+	GLuint csm = 0, vol = 0, own = 0, prog = 0;
+	std::uintptr_t csmKey = 0, volKey = 0;
+	std::vector<std::uint32_t> ps;
+	std::vector<std::pair<std::uint32_t, std::vector<std::uint8_t>>> ubos;
+	std::uint32_t csmB = ~0u, volB = ~0u, csmS = ~0u;
+	void( WINAPI * bindTextureUnit )( GLuint, GLuint ) = nullptr;
+	void( WINAPI * textureParameteri )( GLuint, GLenum, GLint ) = nullptr;
+	void( WINAPI * createTextures )( GLenum, GLsizei, GLuint * ) = nullptr;
+	void( WINAPI * textureStorage2D )( GLuint, GLsizei, GLenum, GLsizei, GLsizei ) = nullptr;
+};
+UnitsFix ux;
+
+bool unitsBuild( const std::string & spvDir, std::string & why )
+{
+	using namespace WwVkPresent;
+	if ( !load( ux.bindTextureUnit, "glBindTextureUnit" ) || !load( ux.textureParameteri, "glTextureParameteri" )
+		|| !load( ux.createTextures, "glCreateTextures" ) || !load( ux.textureStorage2D, "glTextureStorage2D" ) )
+		return why = "a GL entry point is missing", false;
+	ux.ps = readSpv( spvDir + "/fo4_cellcsmbl_ps.pipe.spv" );
+	if ( ux.ps.empty() )
+		return why = "no csm pixel module", false;
+	static int keys[2];
+	ux.csmKey = reinterpret_cast<std::uintptr_t>( &keys[0] );
+	ux.volKey = reinterpret_cast<std::uintptr_t>( &keys[1] );
+	if ( !sharedTarget( ux.csmKey, 2, 64, 64, 4, 0x81A5, ux.csm, why ) || !sharedTarget( ux.volKey, 1, 16, 16, 16, kRgba16fi, ux.vol, why ) )
+		return why = "sharedTarget: " + why, false;
+	for ( GLuint t : { ux.csm, ux.vol } ) {
+		ux.textureParameteri( t, 0x2801, 0x2601 );  // LINEAR
+		ux.textureParameteri( t, 0x2800, 0x2601 );
+		for ( GLenum wr : { 0x2802u, 0x2803u, 0x8072u } )
+			ux.textureParameteri( t, wr, 0x812F );  // CLAMP_TO_EDGE
+	}
+	ux.textureParameteri( ux.csm, 0x884C, 0x884E );  // COMPARE_REF_TO_TEXTURE
+	ux.textureParameteri( ux.csm, 0x884D, 0x0203 );  // LEQUAL
+	ux.createTextures( GL_TEXTURE_2D, 1, &ux.own );
+	ux.textureStorage2D( ux.own, 1, 0x8058, 8, 8 );
+	const std::string vs = "#version 460 core\nvoid main() { gl_Position = vec4( 0.0 ); }\n";
+	const std::string fs = "#version 460 core\nlayout ( binding = 3 ) uniform sampler2DArrayShadow csmMap;\n"
+		"layout ( binding = 4 ) uniform sampler3D volTex;\nlayout ( binding = 5 ) uniform sampler2D ussContactMap;\n"
+		"layout ( location = 0 ) out vec4 o;\nvoid main() { o = vec4( texture( csmMap, vec4( 0.5, 0.5, 0.0, 0.5 ) ) + texture( volTex, vec3( 0.5 ) ).x"
+		" + texture( ussContactMap, vec2( 0.5 ) ).x ); }\n";
+	ux.prog = program( vs, fs );
+	if ( !ux.prog )
+		return why = "the units program did not link", false;
+	const std::vector<std::uint32_t> * mods[2] = { &sx.vs, &ux.ps };
+	for ( const std::vector<std::uint32_t> * w : mods ) {
+		SpvModule m;
+		if ( !spvReflect( w->data(), w->size(), m, why ) )
+			return false;
+		for ( const SpvBind & b : m.binds ) {
+			if ( b.set != 0 )
+				continue;
+			if ( b.type == VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER ) {
+				ux.ubos.emplace_back( b.binding, std::vector<std::uint8_t>( b.bytes, 0 ) );
+				continue;
+			}
+			if ( w != &ux.ps )
+				continue;
+			if ( b.name == "csmMap" )
+				ux.csmB = b.binding;
+			else if ( b.name == "volTex" )
+				ux.volB = b.binding;
+			else if ( b.name == "_csmMap_sampler" )
+				ux.csmS = b.binding;
+		}
+	}
+	if ( ux.csmB == ~0u || ux.volB == ~0u || ux.csmS == ~0u )
+		return why = "the csm twin has no csmMap / volTex / _csmMap_sampler", false;
+	if ( const GLenum e = glGetError(); e != GL_NO_ERROR )
+		return why = "GL error " + std::to_string( e ) + " making the units fixture", false;
+	return true;
+}
+
+struct UnitsOut
+{
+	WwVkPresent::ObjBlBindStat bind;
+	WwVkPresent::ObjBlDrawStat prep;
+	bool placed = false, cmp = false, prepped = false, ran = false;
+	std::string why;
+	bool good() const
+	{
+		return bind.shared == 2 && bind.compare == 1 && bind.glOwn == 1 && bind.misfit == 0 && placed && cmp && prepped && ran && prep.images == 2
+			&& prep.glSamplers >= 3;
+	}
+};
+
+void unitsRun( int red, UnitsOut & o )
+{
+	using namespace WwVkPresent;
+	ux.bindTextureUnit( 3, red == 1 ? ux.vol : ux.csm );
+	ux.bindTextureUnit( 4, red == 1 ? ux.csm : ux.vol );
+	ux.bindTextureUnit( 5, ux.own );
+	if ( red == 3 )
+		ux.textureParameteri( ux.csm, 0x884C, 0 );
+	f.useProgram( ux.prog );
+	ObjBlDraw d;
+	d.twin = 1;
+	d.vs = sx.vs.data();
+	d.vsWords = sx.vs.size();
+	d.ps = ux.ps.data();
+	d.psWords = ux.ps.size();
+	const bool bound = objBlBindUnits( glProc, ux.prog, d, o.bind, o.why );
+	f.useProgram( 0 );
+	for ( GLuint u : { 3u, 4u, 5u } )
+		ux.bindTextureUnit( u, 0 );
+	if ( red == 3 )
+		ux.textureParameteri( ux.csm, 0x884C, 0x884E );
+	if ( !bound )
+		return;
+	if ( red == 2 )
+		d.images.emplace_back( ux.volB, ux.csmKey );
+	int csmAt = 0, volAt = 0;
+	for ( const auto & im : d.images ) {
+		csmAt += im.first == ux.csmB && im.second == ux.csmKey;
+		volAt += im.first == ux.volB && im.second == ux.volKey;
+	}
+	o.placed = csmAt == 1 && volAt == 1 && d.images.size() == 2;
+	for ( const auto & s : d.samplers )
+		if ( s.first == ux.csmS )
+			o.cmp = s.second.compareMode == 0x884E && s.second.compareFunc == 0x0203 && s.second.minFilter == 0x2601;
+	shadeClear();
+	std::vector<unsigned> names;
+	if ( !objBlPoolCopy( sx.key, sx.pool, names, o.why ) )
+		return;
+	d.target.colors[0] = d.target.colors[1] = VK_FORMAT_R16G16B16A16_SFLOAT;
+	d.target.colorCount = 2;
+	d.target.depth = VK_FORMAT_D32_SFLOAT;
+	d.target.depthOp = VK_COMPARE_OP_LESS;
+	d.target.depthWrite = true;
+	d.colorKeys[0] = sx.c0;
+	d.colorKeys[1] = sx.c1;
+	d.depthKey = sx.dk;
+	d.w = kSW;
+	d.h = kSH;
+	d.poolKey = sx.key;
+	d.attrMask = sx.pool.attrMask;
+	d.need = 0x3EFFu;
+	d.ubos = ux.ubos;
+	d.glRows = sx.rows.data();
+	d.rows = sx.rows.size() / kBlRowBytes;
+	d.cmds = sx.cmds.data();
+	d.cmdCount = sx.cmds.size() / 5;
+	objBlDrawsReset();
+	o.prepped = objBlDrawPrep( d, o.prep, o.why );
+	if ( !o.prepped )
+		return;
+	o.ran = objBlRun( names, 0, o.why );
+	glFinish();
+}
+
+bool unitsGate( const std::string & spvDir )
+{
+	std::string why;
+	if ( !unitsBuild( spvDir, why ) ) {
+		std::printf( "BLVIEW units FAIL (the fixture: %s)\n", why.c_str() );
+		return false;
+	}
+	UnitsOut o;
+	unitsRun( 0, o );
+	bool ok = o.good();
+	std::printf( "BLVIEW units csmbl %s (%d shared images, %d compare samplers, %d GL samplers mirrored, %d GL-only, %d misfit, %d unbound, "
+		"%d GL texel buffers; placed %d, csm compare %d; set 0: %d images given, %d GL samplers, %d stand-ins; crossing %s)%s%s\n",
+		ok ? "OK" : "FAIL", o.bind.shared, o.bind.compare, o.bind.samplers, o.bind.glOwn, o.bind.misfit, o.bind.unbound, o.bind.texelGl,
+		int( o.placed ), int( o.cmp ), o.prep.images, o.prep.glSamplers, o.prep.standIns, o.ran ? "OK" : "no", o.why.empty() ? "" : ": ",
+		o.why.c_str() );
+	const char * reds[3] = { "swap", "fit", "cmp" };
+	const char * redWhy[3] = { "the shared textures on each other's unit", "the CSM given to volTex's binding", "the CSM's compare mode off" };
+	for ( int r = 1; r <= 3; r++ ) {
+		UnitsOut x;
+		unitsRun( r, x );
+		const bool fails = !x.good();
+		std::printf( "BLVIEW RED units%s %s (%s; %d shared, %d misfit, %d compare, placed %d, prep %d%s%s)\n", reds[r - 1], fails ? "FAIL" : "OK",
+			redWhy[r - 1], x.bind.shared, x.bind.misfit, x.bind.compare, int( x.placed ), int( x.prepped ), x.why.empty() ? "" : ": ", x.why.c_str() );
+		ok = ok && fails;
+	}
+	if ( const GLenum e = glGetError(); e != GL_NO_ERROR ) {
+		std::printf( "BLVIEW units FAIL (GL error 0x%x left)\n", unsigned( e ) );
+		ok = false;
+	}
+	return ok;
+}
+
 bool shadeGate( const std::string & spvDir )
 {
 	using namespace WwVkPresent;
@@ -418,6 +608,7 @@ bool shadeGate( const std::string & spvDir )
 			c.oneSide, c.differ, ran ? "" : "; ", ran ? "" : why.c_str() );
 		ok = ok && fails;
 	}
+	ok = unitsGate( spvDir ) && ok;
 	if ( const GLenum e = glGetError(); e != GL_NO_ERROR ) {
 		std::printf( "BLVIEW shade FAIL (GL error 0x%x left)\n", unsigned( e ) );
 		ok = false;

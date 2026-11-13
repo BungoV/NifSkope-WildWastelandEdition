@@ -115,6 +115,7 @@ struct Op
 	std::map<std::uint32_t, OpStandIn> stand;  // key: view type * 4 + element type
 	CsmBuf zeroTexel;
 	VkBufferView texelView[3] = {};             // float / int / uint
+	std::map<std::string, VkSampler> smps;      // GL's sampler states met (key: the ObjBlSampler's bytes)
 	VkCommandBuffer cmd = VK_NULL_HANDLE;
 	VkFence fence = VK_NULL_HANDLE;
 	// the crossing (objBlRun): GL's signal -> the worker's submit -> GL's wait; its own command buffer, fence, semaphores
@@ -809,8 +810,8 @@ int objBlPoolCount( std::size_t * bytes )
 void objBlPipeFree()
 {
 	Op & O = opS();
-	if ( ( !O.made.empty() || !O.pools.empty() || !O.draws.empty() || !O.stand.empty() || O.zeroTexel.buf || O.fence || O.runFence || O.glDone )
-		&& vk().ok ) {
+	if ( ( !O.made.empty() || !O.pools.empty() || !O.draws.empty() || !O.stand.empty() || O.zeroTexel.buf || O.fence || O.runFence || O.glDone
+		|| !O.smps.empty() ) && vk().ok ) {
 		Vk & v = vk();
 		drain();
 		v.vkDeviceWaitIdle( v.dev );
@@ -827,6 +828,9 @@ void objBlPipeFree()
 				v.vkFreeMemory( v.dev, s.second.mem, nullptr );
 		}
 		O.stand.clear();
+		for ( auto & s : O.smps )
+			v.vkDestroySampler( v.dev, s.second, nullptr );
+		O.smps.clear();
 		const auto destroyView = reinterpret_cast<PFN_vkDestroyBufferView>( v.vkGetDeviceProcAddr( v.dev, "vkDestroyBufferView" ) );
 		for ( VkBufferView & bv : O.texelView ) {
 			if ( bv && destroyView )
@@ -1083,10 +1087,173 @@ bool objBlTextures( GlProc gp, unsigned prog, const SpvModule & m, std::vector<O
 	g.activeTexture( unsigned( active ) );
 	return true;
 }
+
+bool objBlSamplerRead( GlProc gp, unsigned tex, ObjBlSampler & s, std::string & why )
+{
+	using GetIv = void( WINAPI * )( unsigned, unsigned, int * );
+	using GetFv = void( WINAPI * )( unsigned, unsigned, float * );
+	const auto iv = gp ? reinterpret_cast<GetIv>( gp( "glGetTextureParameteriv" ) ) : nullptr;
+	const auto fv = gp ? reinterpret_cast<GetFv>( gp( "glGetTextureParameterfv" ) ) : nullptr;
+	if ( !iv || !fv || !tex )
+		return why = "no glGetTextureParameteriv / fv (GL 4.5) or no texture", false;
+	s = ObjBlSampler();
+	int i = 0;
+	const std::pair<unsigned, unsigned *> ints[] = { { 0x2801u, &s.minFilter }, { 0x2800u, &s.magFilter }, { 0x2802u, &s.wrapS },
+		{ 0x2803u, &s.wrapT }, { 0x8072u, &s.wrapR }, { 0x884Cu, &s.compareMode }, { 0x884Du, &s.compareFunc } };
+	for ( const auto & p : ints ) {
+		iv( tex, p.first, &i );
+		*p.second = unsigned( i );
+	}
+	fv( tex, 0x8501, &s.lodBias );
+	fv( tex, 0x813A, &s.minLod );
+	fv( tex, 0x813B, &s.maxLod );
+	fv( tex, 0x84FE, &s.aniso );
+	fv( tex, 0x1004, s.border );
+	return true;
+}
+
+bool objBlSharedFits( std::uintptr_t key, std::uint32_t dim, std::uint32_t arrayed, std::string & why )
+{
+	const Shared * sh = sharedFind( key );
+	if ( !sh )
+		return why = "no shared target", false;
+	const int want = dim == 1 && !arrayed ? 0 : dim == 2 ? 1 : dim == 1 && arrayed ? 2 : -1;
+	static const char * names[3] = { "2D", "3D", "2D array" };
+	if ( want < 0 )
+		return why = "the binding is no 2D, 3D or 2D array image", false;
+	if ( sh->type != want )
+		return why = std::string( "the binding takes a " ) + names[want] + " image, the shared target is " + ( sh->type >= 0 && sh->type <= 2 ? names[sh->type] : "?" ), false;
+	if ( sh->samples > 1 )
+		return why = "the shared target is multisampled", false;
+	return true;
+}
+
+bool objBlBindUnits( GlProc gp, unsigned prog, ObjBlDraw & d, ObjBlBindStat & st, std::string & why )
+{
+	const std::uint32_t * words[2] = { d.vs, d.ps };
+	const std::size_t counts[2] = { d.vsWords, d.psWords };
+	for ( int m = 0; m < 2; m++ ) {
+		SpvModule mod;
+		if ( !spvReflect( words[m], counts[m], mod, why ) )
+			return false;
+		std::vector<ObjBlTexUnit> units;
+		if ( !objBlTextures( gp, prog, mod, units, why ) )
+			return false;
+		for ( const ObjBlTexUnit & u : units ) {
+			if ( u.type == VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER ) {
+				st.texelGl += u.glTex != 0;
+				st.unbound += u.glTex == 0;
+				continue;
+			}
+			if ( !u.glTex ) {
+				st.unbound++;
+				continue;
+			}
+			if ( u.type == VK_DESCRIPTOR_TYPE_SAMPLER ) {
+				ObjBlSampler s;
+				if ( !objBlSamplerRead( gp, u.glTex, s, why ) )
+					return false;
+				d.samplers.emplace_back( u.binding, s );
+				st.samplers++;
+				st.compare += s.compareMode != 0;
+				continue;
+			}
+			std::uintptr_t key = 0;
+			for ( const auto & e : shareds() )
+				if ( e.second.tex == u.glTex && e.second.glCtx == gl().ctx )
+					key = e.first;
+			if ( !key ) {
+				st.glOwn++;
+				continue;
+			}
+			std::string w;
+			if ( !objBlSharedFits( key, u.dim, u.arrayed, w ) ) {
+				st.misfit++;
+				if ( st.misfitWhy.empty() )
+					st.misfitWhy = u.name + ": " + w;
+				continue;
+			}
+			d.images.emplace_back( u.binding, key );
+			st.shared++;
+		}
+	}
+	return true;
+}
 }  // namespace WwVkPresent
 
 namespace
 {
+// GL's sampler state as a Vulkan sampler (made once per state): filters, wraps, LOD range, anisotropy, border, depth compare
+bool opSampler( const WwVkPresent::ObjBlSampler & s, VkSampler & out, std::string & why )
+{
+	Vk & v = vk();
+	Op & O = opS();
+	const std::string key( reinterpret_cast<const char *>( &s ), sizeof( s ) );
+	if ( const auto it = O.smps.find( key ); it != O.smps.end() )
+		return out = it->second, true;
+	VkSamplerCreateInfo ci { VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO };
+	if ( s.magFilter != 0x2600 && s.magFilter != 0x2601 )
+		return why = "a magnification filter Vulkan has no twin of (" + std::to_string( s.magFilter ) + ")", false;
+	ci.magFilter = s.magFilter == 0x2600 ? VK_FILTER_NEAREST : VK_FILTER_LINEAR;
+	bool mips = true;
+	switch ( s.minFilter ) {
+	case 0x2600: ci.minFilter = VK_FILTER_NEAREST; ci.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST; mips = false; break;
+	case 0x2601: ci.minFilter = VK_FILTER_LINEAR; ci.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST; mips = false; break;
+	case 0x2700: ci.minFilter = VK_FILTER_NEAREST; ci.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST; break;
+	case 0x2701: ci.minFilter = VK_FILTER_LINEAR; ci.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST; break;
+	case 0x2702: ci.minFilter = VK_FILTER_NEAREST; ci.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR; break;
+	case 0x2703: ci.minFilter = VK_FILTER_LINEAR; ci.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR; break;
+	default: return why = "a minification filter Vulkan has no twin of (" + std::to_string( s.minFilter ) + ")", false;
+	}
+	auto wrap = []( unsigned w, VkSamplerAddressMode & m ) {
+		switch ( w ) {
+		case 0x2901: m = VK_SAMPLER_ADDRESS_MODE_REPEAT; return true;
+		case 0x812F: m = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE; return true;
+		case 0x8370: m = VK_SAMPLER_ADDRESS_MODE_MIRRORED_REPEAT; return true;
+		case 0x812D: m = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER; return true;
+		default: return false;
+		}
+	};
+	if ( !wrap( s.wrapS, ci.addressModeU ) || !wrap( s.wrapT, ci.addressModeV ) || !wrap( s.wrapR, ci.addressModeW ) )
+		return why = "a wrap mode Vulkan has no twin of here", false;
+	const float * b = s.border;
+	if ( b[0] == 0.0f && b[1] == 0.0f && b[2] == 0.0f )
+		ci.borderColor = b[3] == 0.0f ? VK_BORDER_COLOR_FLOAT_TRANSPARENT_BLACK : b[3] == 1.0f ? VK_BORDER_COLOR_FLOAT_OPAQUE_BLACK : VK_BORDER_COLOR_MAX_ENUM;
+	else if ( b[0] == 1.0f && b[1] == 1.0f && b[2] == 1.0f && b[3] == 1.0f )
+		ci.borderColor = VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE;
+	else
+		ci.borderColor = VK_BORDER_COLOR_MAX_ENUM;
+	const bool border = ci.addressModeU == VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER || ci.addressModeV == VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER
+		|| ci.addressModeW == VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;
+	if ( ci.borderColor == VK_BORDER_COLOR_MAX_ENUM ) {
+		if ( border )
+			return why = "a border colour other than transparent black, opaque black or opaque white", false;
+		ci.borderColor = VK_BORDER_COLOR_FLOAT_TRANSPARENT_BLACK;
+	}
+	if ( s.compareMode == 0x884E ) {  // GL_COMPARE_REF_TO_TEXTURE: GL_NEVER + k is VkCompareOp k
+		if ( s.compareFunc < 0x0200 || s.compareFunc > 0x0207 )
+			return why = "an unknown compare function", false;
+		ci.compareEnable = VK_TRUE;
+		ci.compareOp = VkCompareOp( s.compareFunc - 0x0200 );
+	} else if ( s.compareMode != 0 )
+		return why = "an unknown compare mode", false;
+	if ( s.maxLod < 0.0f || s.maxLod < s.minLod )
+		return why = "a max LOD below 0 or below the min LOD", false;
+	ci.mipLodBias = s.lodBias;
+	ci.minLod = std::max( s.minLod, 0.0f );
+	ci.maxLod = mips ? s.maxLod : std::min( s.maxLod, 0.25f );
+	if ( s.aniso > 1.0f ) {
+		if ( !v.anisotropy )
+			return why = "anisotropic filtering without Vulkan's samplerAnisotropy", false;
+		ci.anisotropyEnable = VK_TRUE;
+		ci.maxAnisotropy = std::min( s.aniso, v.maxAniso );
+	}
+	if ( v.vkCreateSampler( v.dev, &ci, nullptr, &out ) != VK_SUCCESS )
+		return why = "vkCreateSampler (a set-0 sampler's) failed", false;
+	O.smps[key] = out;
+	return true;
+}
+
 // the 1x1 (0,0,0,1) of an image binding's shape (SPIR-V Dim / Arrayed) and element type, made and cleared once
 bool opStandIn( std::uint32_t dim, std::uint32_t arrayed, std::uint32_t sampled, VkImageView & out, std::string & why )
 {
@@ -1599,6 +1766,16 @@ bool objBlShade( GlProc gp, const ObjBlShade & s, std::string & why )
 		return fail( "the uniforms: " + w2 );
 	if ( !ust.mirrored )
 		return fail( "GL names none of the loose uniforms (a program linked from SPIR-V)" );
+	ObjBlBindStat bst;
+	if ( !objBlBindUnits( gp, s.prog, d, bst, w2 ) )
+		return fail( "the texture units: " + w2 );
+	{
+		ObjBlRunStat & rs = opS().st;
+		rs.shared += bst.shared;
+		rs.glOwn += bst.glOwn + bst.misfit;
+		rs.texelGl += bst.texelGl;
+		rs.compare += bst.compare;
+	}
 	std::vector<unsigned> names;
 	if ( !objBlPoolCopy( s.poolKey, s.pool, names, w2 ) )
 		return fail( "the pool: " + w2 );
@@ -1731,10 +1908,9 @@ bool objBlDrawPrep( const ObjBlDraw & d, ObjBlDrawStat & st, std::string & why )
 				VkImageView view = VK_NULL_HANDLE;
 				for ( const auto & im : d.images )
 					if ( im.first == b.binding + a ) {
-						const Shared * sh = sharedFind( im.second );
-						if ( !sh )
-							return why = where + ": its shared target is gone", false;
-						view = sh->view;
+						if ( !objBlSharedFits( im.second, b.dim, b.arrayed, w ) )
+							return why = where + ": " + w, false;
+						view = sharedFind( im.second )->view;
 						st.images++;
 					}
 				if ( !view ) {
@@ -1757,8 +1933,16 @@ bool objBlDrawPrep( const ObjBlDraw & d, ObjBlDrawStat & st, std::string & why )
 			wr.pTexelBufferView = &tvs[first];
 		} else if ( b.type == VK_DESCRIPTOR_TYPE_SAMPLER ) {
 			const std::size_t first = iis.size();
-			for ( std::uint32_t a = 0; a < b.count; a++ )
-				iis.push_back( { smp, VK_NULL_HANDLE, VK_IMAGE_LAYOUT_UNDEFINED } );
+			for ( std::uint32_t a = 0; a < b.count; a++ ) {
+				VkSampler one = smp;
+				for ( const auto & sm : d.samplers )
+					if ( sm.first == b.binding + a ) {
+						if ( !opSampler( sm.second, one, w ) )
+							return why = where + ": " + w, false;
+						st.glSamplers++;
+					}
+				iis.push_back( { one, VK_NULL_HANDLE, VK_IMAGE_LAYOUT_UNDEFINED } );
+			}
 			wr.pImageInfo = &iis[first];
 			st.samplers += int( b.count );
 		} else

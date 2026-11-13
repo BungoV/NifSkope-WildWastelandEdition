@@ -1238,8 +1238,9 @@ void frame()
 	if ( vkShadeOn() ) {
 		const WwVkPresent::ObjBlRunStat r = WwVkPresent::takeObjBlRunStat();
 		char b[640];
-		std::snprintf( b, sizeof( b ), "vk objshade: runs=%lld crossings=%d draws=%d cmds=%d gl=%d fails=%d ms=%.2f max=%.2f%s%s%s%s",
-			c.vkRuns, r.runs, r.draws, r.cmds, r.gl, r.fails, r.cpuMs, r.maxMs, r.glWhy.empty() ? "" : " glWhy=", r.glWhy.c_str(),
+		std::snprintf( b, sizeof( b ), "vk objshade: runs=%lld crossings=%d draws=%d cmds=%d gl=%d fails=%d ms=%.2f max=%.2f "
+			"units shared=%d glOnly=%d texelGl=%d compare=%d%s%s%s%s",
+			c.vkRuns, r.runs, r.draws, r.cmds, r.gl, r.fails, r.cpuMs, r.maxMs, r.shared, r.glOwn, r.texelGl, r.compare, r.glWhy.empty() ? "" : " glWhy=", r.glWhy.c_str(),
 			r.failWhy.empty() ? "" : " failWhy=", r.failWhy.c_str() );
 		if ( vkShadeLine != b && wwFrameLog() ) {
 			vkShadeLine = b;

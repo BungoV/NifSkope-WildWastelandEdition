@@ -8,9 +8,10 @@
  * declare differently, a set 1 that is not the table, a varying the vertex stage does not write, a target count the pixel
  * stage does not write, a vertex input no attribute feeds. Attributes are given by GL's attribute location (the HLSL twin's
  * TEXCOORDn); DXC numbers the inputs on its own (fo4_defaultbl_vs: TEXCOORD9 is Location 8), so the semantic maps them.
- * Slices 5-7 below: GL's uniforms mirrored, the class pools as vertex buffers, the multi-draw. Not wired yet: the crossing
- * at objRun, the lights / CSM / fog targets.
- * Gate: tests/vkframe/blview.sh (the `BLVIEW pipe` / `uni` / `pool` / `shade` lines; their reds must FAIL). */
+ * Slices 5-7 below: GL's uniforms mirrored, the class pools as vertex buffers, the multi-draw, the crossing (objBlRun),
+ * GL's texture units (objBlBindUnits: a shared target such as the CSM or the air volume as a set-0 image, GL's sampler
+ * state with the depth compare). GL's texel buffers (the lights) stay the zero texel.
+ * Gate: tests/vkframe/blview.sh (the `BLVIEW pipe` / `uni` / `pool` / `shade` / `units` lines; their reds must FAIL). */
 
 #include "features/vkframe/vkpresent.h"
 
@@ -143,6 +144,17 @@ int objBlPoolCount( std::size_t * bytes = nullptr );
  * instances, first index, base vertex, base instance; the row = wwDrawBase + base instance, BaseInstance). A set-0 image
  * not given reads a 1x1 (0,0,0,1) of its shape (GL's incomplete texture), a texel buffer not given one zero texel, a
  * sampler not given the table's default. Prep runs on GL's thread before the run's signal; the record is the worker's. */
+//! a GL texture's sampler state as a set-0 sampler takes it: wrap R and the depth compare too (the CSM's)
+struct ObjBlSampler
+{
+	unsigned minFilter = 0x2702, magFilter = 0x2601;  // GL's defaults
+	unsigned wrapS = 0x2901, wrapT = 0x2901, wrapR = 0x2901;
+	unsigned compareMode = 0, compareFunc = 0x0203;  // GL_NONE, GL_LEQUAL
+	float lodBias = 0.0f, minLod = -1000.0f, maxLod = 1000.0f, aniso = 1.0f;
+	float border[4] = {};
+};
+//! GL's texture state reads (glGetTextureParameter*, GL 4.5)
+bool objBlSamplerRead( GlProc gp, unsigned tex, ObjBlSampler & s, std::string & why );
 struct ObjBlDraw
 {
 	int twin = 0;
@@ -156,6 +168,7 @@ struct ObjBlDraw
 	std::uint32_t need = 0;      //!< the GL locations the vertex stage reads (bit L)
 	std::vector<std::pair<std::uint32_t, std::vector<std::uint8_t>>> ubos;  //!< binding -> bytes (objBlMirror)
 	std::vector<std::pair<std::uint32_t, std::uintptr_t>> images;          //!< binding -> a shared target
+	std::vector<std::pair<std::uint32_t, ObjBlSampler>> samplers;          //!< binding -> GL's state, else the default
 	const void * glRows = nullptr;  //!< GL's draw rows (the bindless ring, GL form), translated into wwDraws
 	std::size_t rows = 0;
 	const void * cmds = nullptr;    //!< GL's indirect commands
@@ -164,8 +177,26 @@ struct ObjBlDraw
 struct ObjBlDrawStat
 {
 	int ubos = 0, images = 0, standIns = 0, texels = 0, samplers = 0, rowBuffers = 0;
+	int glSamplers = 0;     //!< samplers with GL's state (the rest the default)
 	std::size_t whole = 0;  //!< rows with every handle known
 };
+//! what objBlBindUnits found on GL's units
+struct ObjBlBindStat
+{
+	int shared = 0;    //!< images from a shared target
+	int glOwn = 0;     //!< a GL texture that is no shared target (a stand-in)
+	int misfit = 0;    //!< a shared target the binding cannot take (shape or samples; a stand-in)
+	int unbound = 0;   //!< no unit or no texture
+	int texelGl = 0;   //!< a texel buffer GL binds (the zero texel on Vulkan)
+	int samplers = 0;  //!< samplers given GL's state
+	int compare = 0;   //!< of those, depth compare
+	std::string misfitWhy;
+};
+/*! GL's texture units of `prog` for both of d's modules: a set-0 image GL binds a shared target to joins d.images
+ * (shape and samples checked), each sampler takes GL's state of its texture. The rest stay stand-ins. */
+bool objBlBindUnits( GlProc gp, unsigned prog, ObjBlDraw & d, ObjBlBindStat & st, std::string & why );
+//! the shared target `key` fits a set-0 image of SPIR-V Dim `dim` / Arrayed (2D, 3D, 2D array; one sample)
+bool objBlSharedFits( std::uintptr_t key, std::uint32_t dim, std::uint32_t arrayed, std::string & why );
 //! GL program `prog`'s state for both modules' uniform blocks (LooseUniforms by objBlLoose, the named blocks by objBlBlock)
 bool objBlMirror( GlProc gp, unsigned prog, const std::uint32_t * vs, std::size_t vsWords, const std::uint32_t * ps, std::size_t psWords,
 	std::vector<std::pair<std::uint32_t, std::vector<std::uint8_t>>> & ubos, ObjBlUniStat & st, std::string & why );
@@ -184,6 +215,7 @@ bool objBlDrawPrep( const ObjBlDraw & d, ObjBlDrawStat & st, std::string & why )
 struct ObjBlRunStat
 {
 	int runs = 0, draws = 0, cmds = 0, gl = 0, fails = 0;
+	int shared = 0, glOwn = 0, texelGl = 0, compare = 0;  //!< objBlShade's units: shared images, GL-only textures, GL texel buffers, compare samplers
 	double cpuMs = 0.0, maxMs = 0.0;
 	std::string glWhy, failWhy;
 };
