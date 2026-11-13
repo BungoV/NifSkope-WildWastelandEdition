@@ -47,11 +47,11 @@ struct SPIRV_Cross_Output
 // the sky-view LUT (Hillaire 2020 sec. 5.3): latitude squeezed toward the horizon, longitude = angle to the sun
 void atSkyUvToDir(inout float2 uv, float2 n, float r, out float cosZ, out float cosAz)
 {
-    float param = uv.x;
-    float param_1 = n.x;
-    float param_2 = uv.y;
-    float param_3 = n.y;
-    uv = float2(atSubToUnit(param, param_1), atSubToUnit(param_2, param_3));
+    float uArg2 = uv.x;
+    float nArg2 = n.x;
+    float uArg = uv.y;
+    float nArg = n.y;
+    uv = float2(atSubToUnit(uArg2, nArg2), atSubToUnit(uArg, nArg));
     float vh = sqrt(max(0.0f, (r * r) - 40449600.0f));
     float beta = acos(clamp(vh / r, -1.0f, 1.0f));
     float zh = 3.1415927410125732421875f - beta;
@@ -105,24 +105,24 @@ void atSkyUvToDir(inout float2 uv, float2 n, float r, out float cosZ, out float 
 
 void frag_main()
 {
-    float2 param = gl_FragCoord.xy / atViewSize;
-    float2 param_1 = atViewSize;
-    float param_2 = atCamR;
-    float param_3;
-    float param_4;
-    atSkyUvToDir(param, param_1, param_2, param_3, param_4);
-    float cosZ = param_3;
-    float cosAz = param_4;
+    float2 uvArg = gl_FragCoord.xy / atViewSize;
+    float2 nArg3 = atViewSize;
+    float rArg2 = atCamR;
+    float cosZArg;
+    float cosAzArg;
+    atSkyUvToDir(uvArg, nArg3, rArg2, cosZArg, cosAzArg);
+    float cosZ = cosZArg;
+    float cosAz = cosAzArg;
     float sinZ = sqrt(max(0.0f, 1.0f - (cosZ * cosZ)));
     float3 v = float3(sinZ * cosAz, sinZ * sqrt(max(0.0f, 1.0f - (cosAz * cosAz))), cosZ);
     float3 s = float3(sqrt(max(0.0f, 1.0f - (atLightMu * atLightMu))), 0.0f, atLightMu);
-    float2 param_5 = atMsSize;
-    float param_6 = atMsOn;
-    float param_7 = atGround;
-    float param_8 = atCamR;
-    float3 param_9 = v;
-    float3 param_10 = s;
-    float3 L = atSkyMarch(atTransTex, _atTransTex_sampler, atMsTex, _atMsTex_sampler, param_5, param_6, param_7, param_8, param_9, param_10);
+    float2 msSizeArg = atMsSize;
+    float msOnArg = atMsOn;
+    float groundArg = atGround;
+    float rArg = atCamR;
+    float3 vArg = v;
+    float3 sArg = s;
+    float3 L = atSkyMarch(atTransTex, _atTransTex_sampler, atMsTex, _atMsTex_sampler, msSizeArg, msOnArg, groundArg, rArg, vArg, sArg);
     fragColor = float4(L, 1.0f);
 }
 

@@ -44,16 +44,16 @@ void vert_main()
     gl_Position = mul(float4(v, 1.0f), dotProj);
     dotView = v;
     float d = max(length(vertexPosition - dotCam), 1.0f);
-    float tmp80;
+    float fadePick;
     if ((dotRed & 1) != 0)
     {
-        tmp80 = 1.0f;
+        fadePick = 1.0f;
     }
     else
     {
-        tmp80 = smoothstep(dotBand.x, dotBand.y, d);
+        fadePick = smoothstep(dotBand.x, dotBand.y, d);
     }
-    float fade = tmp80;
+    float fade = fadePick;
     dotSigma = max(0.60000002384185791015625f, (dotFocal * dotBulb) / d);
     float k = dotFocal / d;
     dotValue = (((vertexColor * fade) * k) * k) / ((6.283185482025146484375f * dotSigma) * dotSigma).xxx;

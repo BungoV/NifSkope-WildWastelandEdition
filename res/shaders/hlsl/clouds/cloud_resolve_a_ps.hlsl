@@ -105,17 +105,17 @@ bool cvReprojUv(float2 uv, float dk, inout float2 pv)
     float2 vr = v.xy / (-v.z).xx;
     float2 pn = float2((vr.x * cvPrevProj.x) - cvPrevProj.z, (vr.y * cvPrevProj.y) - cvPrevProj.w);
     pv = (pn * 0.5f) + 0.5f.xx;
-    bool tmp304 = all(bool2(pv.x >= 0.0f.xx.x, pv.y >= 0.0f.xx.y));
-    bool tmp311;
-    if (tmp304)
+    bool cond = all(bool2(pv.x >= 0.0f.xx.x, pv.y >= 0.0f.xx.y));
+    bool cvReprojUvRet;
+    if (cond)
     {
-        tmp311 = all(bool2(pv.x <= 1.0f.xx.x, pv.y <= 1.0f.xx.y));
+        cvReprojUvRet = all(bool2(pv.x <= 1.0f.xx.x, pv.y <= 1.0f.xx.y));
     }
     else
     {
-        tmp311 = tmp304;
+        cvReprojUvRet = cond;
     }
-    return tmp311;
+    return cvReprojUvRet;
 }
 
 float4 cvCatmull(float t)
@@ -130,18 +130,18 @@ float4 cvCatmull(float t)
 
 float4 cvMoveBox(float2 q, float2 uv, float2 pv, float4 c)
 {
-    bool tmp80 = cvMoveClamp < 0.5f;
-    bool tmp97;
-    if (!tmp80)
+    bool cond3 = cvMoveClamp < 0.5f;
+    bool cond2;
+    if (!cond3)
     {
-        float2 tmp91 = abs(pv - uv) * cvHistSize;
-        tmp97 = all(bool2(tmp91.x < 0.00999999977648258209228515625f.xx.x, tmp91.y < 0.00999999977648258209228515625f.xx.y));
+        float2 condPart = abs(pv - uv) * cvHistSize;
+        cond2 = all(bool2(condPart.x < 0.00999999977648258209228515625f.xx.x, condPart.y < 0.00999999977648258209228515625f.xx.y));
     }
     else
     {
-        tmp97 = tmp80;
+        cond2 = cond3;
     }
-    if (tmp97)
+    if (cond2)
     {
         return c;
     }
@@ -174,66 +174,69 @@ void frag_main()
     float2 uv = (q + 0.5f.xx) / cvHistSize;
     bool fresh = all(bool2(slot.x == cvPhase.x, slot.y == cvPhase.y));
     int2 m = int2(floor(q / cvStride.xx));
-    float2 tmp349;
+    float2 muvPick;
     if (cvHistAge > 0.0f)
     {
-        tmp349 = (((q - cvPhase) / cvStride.xx) + 0.5f.xx) / float2(int2(spvTextureSize(cvMarch, uint(0), dummy_parameter)));
+        muvPick = (((q - cvPhase) / cvStride.xx) + 0.5f.xx) / float2(int2(spvTextureSize(cvMarch, uint(0), dummy_parameter)));
     }
     else
     {
-        tmp349 = uv;
+        muvPick = uv;
     }
-    float2 muv = tmp349;
-    float4 tmp370;
+    // lane CLOUD6h: with History Age, the march is read where its samples sit (texel m looked at m x stride + phase)
+    float2 muv = muvPick;
+    float4 coarsePick;
     if (fresh)
     {
-        tmp370 = cvMarch.Load(int3(m, 0));
+        coarsePick = cvMarch.Load(int3(m, 0));
     }
     else
     {
-        tmp370 = cvMarch.Sample(_cvMarch_sampler, muv);
+        coarsePick = cvMarch.Sample(_cvMarch_sampler, muv);
     }
-    float4 coarse = tmp370;
-    float tmp384;
+    float4 coarse = coarsePick;
+    float dkPick;
     if (fresh)
     {
-        tmp384 = cvMarchDepth.Load(int3(m, 0)).x;
+        dkPick = cvMarchDepth.Load(int3(m, 0)).x;
     }
     else
     {
-        tmp384 = cvMarchDepth.Sample(_cvMarchDepth_sampler, uv).x;
+        dkPick = cvMarchDepth.Sample(_cvMarchDepth_sampler, uv).x;
     }
-    float dk = tmp384;
-    bool tmp401 = cvHistOn < 0.5f;
+    float dk = dkPick;
+    bool cond5 = cvHistOn < 0.5f;
     float2 pv;
-    bool tmp414;
-    if (!tmp401)
+    bool cond4;
+    if (!cond5)
     {
-        float2 param = uv;
-        float param_1 = dk;
-        float2 param_2;
-        bool tmp411 = cvReprojUv(param, param_1, param_2);
-        pv = param_2;
-        tmp414 = !tmp411;
+        float2 uvArg2 = uv;
+        float dkArg = dk;
+        float2 pvArg2;
+        bool cvReprojUvRet2 = cvReprojUv(uvArg2, dkArg, pvArg2);
+        pv = pvArg2;
+        cond4 = !cvReprojUvRet2;
     }
     else
     {
-        tmp414 = tmp401;
+        cond4 = cond5;
     }
-    if (tmp414)
+    if (cond4)
     {
         cvOut = coarse;
+        // lane CLOUD6h: .g = the age (0: this frame's march)
         cvDepth = float4(dk, 0.0f, 0.0f, 0.0f);
         return;
     }
+    // the history at pv: Catmull-Rom colour, nearest depth (as Off)
     float2 xy = mad(pv, cvHistSize, -0.5f.xx);
     float2 f = frac(xy);
     int2 i0 = int2(floor(xy)) - int2(1, 1);
     int2 hi = int2(cvHistSize) - int2(1, 1);
-    float param_3 = f.x;
-    float4 wx = cvCatmull(param_3);
-    float param_4 = f.y;
-    float4 wy = cvCatmull(param_4);
+    float tArg2 = f.x;
+    float4 wx = cvCatmull(tArg2);
+    float tArg = f.y;
+    float4 wy = cvCatmull(tArg);
     float4 c = 0.0f.xxxx;
     for (int j = 0; j < 4; j++)
     {
@@ -244,17 +247,21 @@ void frag_main()
     }
     c = float4(max(c.xyz, 0.0f.xxx), clamp(c.w, 0.0f, 1.0f));
     int2 hp0 = clamp(int2(floor(pv * cvHistSize)), int2(0, 0), hi);
+    // lane CLOUD6h: the nearest trace's depth and age
     float2 hd = cvPrevDepth.Load(int3(hp0, 0)).xy;
     float age = hd.y + 1.0f;
     if (!fresh)
     {
-        float2 param_5 = q;
-        float2 param_6 = uv;
-        float2 param_7 = pv;
-        float4 param_8 = c;
-        cvOut = cvMoveBox(param_5, param_6, param_7, param_8);
+        float2 qArg = q;
+        float2 uvArg = uv;
+        float2 pvArg = pv;
+        float4 cArg3 = c;
+        // lane CLOUD6g
+        cvOut = cvMoveBox(qArg, uvArg, pvArg, cArg3);
+        // lane CLOUD6h: an old trace
         if (((cvHistAge > 0.0f) && (age > cvHistAge)) && (cvAccReset > 0.0f))
         {
+            // the 9 places the march texels looked this frame (m x stride + phase), moved as this pixel moved
             int2 mhi = int2(spvTextureSize(cvMarch, uint(0), dummy_parameter)) - int2(1, 1);
             int2 hp = hp0 + int2(((float2(m) * cvStride) + cvPhase) - q);
             float s1 = 0.0f;
@@ -288,6 +295,9 @@ void frag_main()
     float a = cvAccAlpha;
     if (cvAccClamp > 0.5f)
     {
+        // the 3x3 box of the fresh marches, tightened to their mean +- one deviation (variance clipping, Salvi 2016: the
+        // march texels sit 4 history px apart, so the bare min / max box held most of a textured old field), never
+        // tighter than the fresh march itself
         int2 mhi_1 = int2(spvTextureSize(cvMarch, uint(0), dummy_parameter)) - int2(1, 1);
         float4 lo = coarse;
         float4 up = coarse;
@@ -309,6 +319,7 @@ void frag_main()
         lo = min(max(lo, mu_1 - sd_1), coarse);
         up = max(min(up, mu_1 + sd_1), coarse);
         c = clamp(c, lo, up);
+        // lane CLOUD6g: Change Clamp
         if (cvAccReset > 0.0f)
         {
             int2 hp_1 = int2(floor(pv * cvHistSize));
@@ -325,12 +336,13 @@ void frag_main()
                     float4 hv = cvPrev.Load(int3(clamp(hp_1 + (int(cvStride).xx * int2(i_3, j_3)), int2(0, 0), hi), 0));
                     h1_1 += hv.w;
                     h2_1 += (hv.w * hv.w);
+                    // lane CLOUD6h: Lit Clamp, the light at the same 9 places
                     if (cvLitReset > 0.0f)
                     {
-                        float3 param_9 = hv.xyz;
-                        float hl = cvLum(param_9);
-                        float3 param_10 = cvMarch.Load(int3(clamp(m + int2(i_3, j_3), int2(0, 0), mhi_1), 0)).xyz;
-                        float fl = cvLum(param_10);
+                        float3 cArg2 = hv.xyz;
+                        float hl = cvLum(cArg2);
+                        float3 cArg = cvMarch.Load(int3(clamp(m + int2(i_3, j_3), int2(0, 0), mhi_1), 0)).xyz;
+                        float fl = cvLum(cArg);
                         l1 += hl;
                         l2 += (hl * hl);
                         f1 += fl;
@@ -356,6 +368,7 @@ void frag_main()
         }
     }
     cvOut = lerp(c, coarse, a.xxxx);
+    // the fresh march's mean distance (a mix with the 1e4 of no cloud means nothing); age 0
     cvDepth = float4(dk, 0.0f, 0.0f, 0.0f);
 }
 

@@ -127,21 +127,21 @@ float3 atLookup(Texture2D<float4> lut, SamplerState _lut_sampler, float3 d, floa
     float2 b = l.xy;
     float la = length(a);
     float lb = length(b);
-    float tmp941;
+    float cosAzPick;
     if ((la > 9.9999997473787516355514526367188e-06f) && (lb > 9.9999997473787516355514526367188e-06f))
     {
-        tmp941 = dot(a / la.xx, b / lb.xx);
+        cosAzPick = dot(a / la.xx, b / lb.xx);
     }
     else
     {
-        tmp941 = 1.0f;
+        cosAzPick = 1.0f;
     }
-    float cosAz = tmp941;
-    float param = atCamR;
-    float param_1 = d.z;
-    float param_2 = cosAz;
-    float2 param_3 = atViewSize;
-    return lut.Sample(_lut_sampler, atSkyDirToUv(param, param_1, param_2, param_3)).xyz;
+    float cosAz = cosAzPick;
+    float rArg = atCamR;
+    float cosZArg = d.z;
+    float cosAzArg = cosAz;
+    float2 nArg = atViewSize;
+    return lut.Sample(_lut_sampler, atSkyDirToUv(rArg, cosZArg, cosAzArg, nArg)).xyz;
 }
 
 // the GLSL twin of gl/atmomath.h weatherTint: the physical luminance in the weather's color at this elevation
@@ -151,16 +151,16 @@ float3 atWeatherTint(float3 c, float elevDeg)
     int i = min(int(t), 15);
     float3 w = lerp(atTint[i], atTint[i + 1], (t - float(i)).xxx);
     float lw = dot(w, float3(0.2125999927520751953125f, 0.715200006961822509765625f, 0.072200000286102294921875f));
-    float3 tmp1014;
+    float3 atWeatherTintRet;
     if (lw > 9.9999999392252902907785028219223e-09f)
     {
-        tmp1014 = w * (dot(c, float3(0.2125999927520751953125f, 0.715200006961822509765625f, 0.072200000286102294921875f)) / lw);
+        atWeatherTintRet = w * (dot(c, float3(0.2125999927520751953125f, 0.715200006961822509765625f, 0.072200000286102294921875f)) / lw);
     }
     else
     {
-        tmp1014 = c;
+        atWeatherTintRet = c;
     }
-    return tmp1014;
+    return atWeatherTintRet;
 }
 
 // AgX, Benjamin Wrensch's minimal fit (sRGB display out, the "base" look)
@@ -186,89 +186,98 @@ void frag_main()
 {
     float2 ndc = (((gl_FragCoord.xy - atRect.xy) * atRect.zw) * 2.0f) - 1.0f.xx;
     float3 vr = normalize(float3((ndc.x + projectionMatrix[2].x) / projectionMatrix[0].x, (ndc.y + projectionMatrix[2].y) / projectionMatrix[1].y, -1.0f));
+    // view to world: the transpose of the rotation
     float3 d = normalize(mul(viewMatrix, vr));
     float3 c;
     if (atPerPixel > 0.5f)
     {
-        float2 param = atMsSize;
-        float param_1 = atMsOn;
-        float param_2 = atGround;
-        float param_3 = atCamR;
-        float3 param_4 = d;
-        float3 param_5 = atSunW;
-        c = atSkyMarch(atTransTex, _atTransTex_sampler, atMsTex, _atMsTex_sampler, param, param_1, param_2, param_3, param_4, param_5) * atSunK;
+        float2 msSizeArg2 = atMsSize;
+        float msOnArg2 = atMsOn;
+        float groundArg2 = atGround;
+        float rArg7 = atCamR;
+        float3 vArg2 = d;
+        float3 sArg2 = atSunW;
+        c = atSkyMarch(atTransTex, _atTransTex_sampler, atMsTex, _atMsTex_sampler, msSizeArg2, msOnArg2, groundArg2, rArg7, vArg2, sArg2) * atSunK;
         if (atMoonK > 0.0f)
         {
-            float2 param_6 = atMsSize;
-            float param_7 = atMsOn;
-            float param_8 = atGround;
-            float param_9 = atCamR;
-            float3 param_10 = d;
-            float3 param_11 = atMoonW;
-            c += (atSkyMarch(atTransTex, _atTransTex_sampler, atMsTex, _atMsTex_sampler, param_6, param_7, param_8, param_9, param_10, param_11) * atMoonK);
+            float2 msSizeArg = atMsSize;
+            float msOnArg = atMsOn;
+            float groundArg = atGround;
+            float rArg6 = atCamR;
+            float3 vArg = d;
+            float3 sArg = atMoonW;
+            c += (atSkyMarch(atTransTex, _atTransTex_sampler, atMsTex, _atMsTex_sampler, msSizeArg, msOnArg, groundArg, rArg6, vArg, sArg) * atMoonK);
         }
     }
     else
     {
-        float3 param_12 = d;
-        float3 param_13 = atSunW;
-        c = atLookup(atSunView, _atSunView_sampler, param_12, param_13) * atSunK;
+        float3 dArg2 = d;
+        float3 lArg2 = atSunW;
+        c = atLookup(atSunView, _atSunView_sampler, dArg2, lArg2) * atSunK;
         if (atMoonK > 0.0f)
         {
-            float3 param_14 = d;
-            float3 param_15 = atMoonW;
-            c += (atLookup(atMoonView, _atMoonView_sampler, param_14, param_15) * atMoonK);
+            float3 dArg = d;
+            float3 lArg = atMoonW;
+            c += (atLookup(atMoonView, _atMoonView_sampler, dArg, lArg) * atMoonK);
         }
     }
     if (atFloor.y > 0.0f)
     {
+        // the emitting shell at ~90 km seen slant (van Rhijn 1921): brighter toward the horizon, then dimmed by the air
+        // below it (the view ray's transmittance: 0 where the ray meets the ground, so no edge at the horizon)
         float sz2 = 1.0f - (d.z * d.z);
+        // (6360 / 6450)^2
         float vr_1 = rsqrt(max(1.0f - (0.972259998321533203125f * sz2), 0.0199999995529651641845703125f));
-        float param_16 = atCamR;
-        float param_17 = d.z;
-        c += (((atFloor * atSunK) * vr_1) * atTrans(atTransTex, _atTransTex_sampler, param_16, param_17));
+        float rArg5 = atCamR;
+        float muArg4 = d.z;
+        c += (((atFloor * atSunK) * vr_1) * atTrans(atTransTex, _atTransTex_sampler, rArg5, muArg4));
     }
+    // MODULES1 R7: master Off: a crossfade to the record's dome (x = y); On: the dome added (x = 0)
     if (atRecNight.y > 0.0f)
     {
         float tn = sqrt(clamp(degrees(asin(clamp(d.z, -1.0f, 1.0f))), 0.0f, 90.0f) / 90.0f) * 16.0f;
         int jn = min(int(tn), 15);
         c = (c * (1.0f - atRecNight.x)) + (lerp(atTint[jn], atTint[jn + 1], (tn - float(jn)).xxx) * atRecNight.y);
     }
+    // the disc below keeps the physical color
     if (atTintOn > 0.5f)
     {
-        float3 param_18 = c;
-        float param_19 = degrees(asin(clamp(d.z, -1.0f, 1.0f)));
-        c = atWeatherTint(param_18, param_19);
+        float3 cArg2 = c;
+        float elevDegArg = degrees(asin(clamp(d.z, -1.0f, 1.0f)));
+        c = atWeatherTint(cArg2, elevDegArg);
     }
+    // NIGHTHAZE1: the overrides, x (1 - the view's transmittance)
     if (dot(atInscatter + atDirIns, 1.0f.xxx) > 0.0f)
     {
-        float param_20 = atCamR;
-        float param_21 = d.z;
-        float3 op = 1.0f.xxx - atTrans(atTransTex, _atTransTex_sampler, param_20, param_21);
+        float rArg4 = atCamR;
+        float muArg3 = d.z;
+        float3 op = 1.0f.xxx - atTrans(atTransTex, _atTransTex_sampler, rArg4, muArg3);
         c += ((atInscatter + (atDirIns * pow(max(dot(d, atDirL), 0.0f), max(atDirExp, 1.0f)))) * op);
     }
     float cs = dot(d, atSunW);
-    float tmp1286;
+    float sunEdgePick;
     if (atSunSize > 1.0f)
     {
-        tmp1286 = atSunSize * atSunSize;
+        sunEdgePick = atSunSize * atSunSize;
     }
     else
     {
-        tmp1286 = 1.0f;
+        sunEdgePick = 1.0f;
     }
-    float sunEdge = 1.0820000170497223734855651855469e-05f * tmp1286;
-    bool tmp1297;
+    // R6-12 b: a bigger drawn disc keeps its radiance (it sits at the cap); 1 - cos grows by the square of the radius
+    float sunEdge = 1.0820000170497223734855651855469e-05f * sunEdgePick;
+    bool cond2;
     if (atSunSize > 1.0f)
     {
-        tmp1297 = (1.0f - cs) < sunEdge;
+        cond2 = (1.0f - cs) < sunEdge;
     }
     else
     {
-        tmp1297 = cs > 0.99998915195465087890625f;
+        cond2 = cs > 0.99998915195465087890625f;
     }
-    if (tmp1297)
+    if (cond2)
     {
+        // ~ (theta / alpha)^2
         float x = clamp((1.0f - cs) / sunEdge, 0.0f, 1.0f);
         float3 limb = 1.0f.xxx;
         if (atLimb > 0.5f)
@@ -276,36 +285,37 @@ void frag_main()
             float3 a = float3(0.397000014781951904296875f, 0.5030000209808349609375f, 0.652000010013580322265625f);
             limb = (pow(sqrt(max(0.0f, 1.0f - x)).xxx, a) * (a + 2.0f.xxx)) * 0.5f;
         }
-        float param_22 = atCamR;
-        float param_23 = d.z;
-        float3 disc = ((atTrans(atTransTex, _atTransTex_sampler, param_22, param_23) * atSunK) * limb) / 6.7966997448820620775222778320312e-05f.xxx;
+        float rArg3 = atCamR;
+        float muArg2 = d.z;
+        float3 disc = ((atTrans(atTransTex, _atTransTex_sampler, rArg3, muArg2) * atSunK) * limb) / 6.7966997448820620775222778320312e-05f.xxx;
+        // lane FIX1101A: the air's gain (the cap capped first, as before)
         float ga = (atDiscAir > 0.0f) ? atDiscAir : 1.0f;
         if (atDiscHue > 0.5f)
         {
             float3 a_1 = float3(0.397000014781951904296875f, 0.5030000209808349609375f, 0.652000010013580322265625f);
-            float param_24 = atCamR;
-            float param_25 = atSunW.z;
-            float3 centre = (((atTrans(atTransTex, _atTransTex_sampler, param_24, param_25) * atSunK) * (a_1 + 2.0f.xxx)) * 0.5f) / 6.7966997448820620775222778320312e-05f.xxx;
+            float rArg2 = atCamR;
+            float muArg = atSunW.z;
+            float3 centre = (((atTrans(atTransTex, _atTransTex_sampler, rArg2, muArg) * atSunK) * (a_1 + 2.0f.xxx)) * 0.5f) / 6.7966997448820620775222778320312e-05f.xxx;
             float m = max(centre.x, max(centre.y, centre.z));
-            float tmp1396;
+            float cPick;
             if (m > atDiscCap)
             {
-                tmp1396 = atDiscCap / m;
+                cPick = atDiscCap / m;
             }
             else
             {
-                tmp1396 = 1.0f;
+                cPick = 1.0f;
             }
-            c += ((disc * tmp1396) * ga);
+            c += ((disc * cPick) * ga);
         }
         else
         {
             c += (min(disc, atDiscCap.xxx) * ga);
         }
     }
-    float3 param_26 = c;
-    float3 tmp1422 = studioOutput(param_26);
-    fragColor = float4(tmp1422, 1.0f);
+    float3 cArg = c;
+    float3 studioOutputRet = studioOutput(cArg);
+    fragColor = float4(studioOutputRet, 1.0f);
 }
 
 SPIRV_Cross_Output main(SPIRV_Cross_Input stage_input)

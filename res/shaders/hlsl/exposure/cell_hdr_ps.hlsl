@@ -270,14 +270,15 @@ float wwTmGreyInv(float y)
     {
         return v / 2.5f;
     }
+    // the toe's blend has no closed inverse: bisect (monotonic, 16 steps: 1e-5)
     float lo = 0.0f;
     float hi = 0.53799998760223388671875f;
     for (int i = 0; i < 16; i++)
     {
         float mid = 0.5f * (lo + hi);
-        float param = mid;
-        float tmp507 = wwTmCurve(param);
-        if (tmp507 < v)
+        float xArg = mid;
+        float wwTmCurveRet = wwTmCurve(xArg);
+        if (wwTmCurveRet < v)
         {
             lo = mid;
         }
@@ -293,8 +294,8 @@ float cellCurveInv(float y)
 {
     if (!cellIsVanCurve)
     {
-        float param = y;
-        return 2.0f * wwTmGreyInv(param);
+        float yArg = y;
+        return 2.0f * wwTmGreyInv(yArg);
     }
     float E = cellIsE;
     float yp = (y * ((((0.20000000298023223876953125f * E) + 19.37599945068359375f) * 0.0408560000360012054443359375f) - (E / 0.300000011920928955078125f))) + (E / 0.300000011920928955078125f);
@@ -312,17 +313,17 @@ float cellCurveInv(float y)
 // glow's place on the curve (cell_hdr.frag cellGlowShoulder). In and out as wwTonemapPhysical's, one channel.
 float wwTmGrey(float e)
 {
-    float param = max(e, 0.0f) * 2.5f;
-    float tmp459 = wwTmCurve(param);
-    return min(tmp459, 2.5f) * 0.4000000059604644775390625f;
+    float xArg2 = max(e, 0.0f) * 2.5f;
+    float wwTmCurveRet2 = wwTmCurve(xArg2);
+    return min(wwTmCurveRet2, 2.5f) * 0.4000000059604644775390625f;
 }
 
 float cellCurveW(float x)
 {
     if (!cellIsVanCurve)
     {
-        float param = 0.5f * x;
-        return wwTmGrey(param);
+        float eArg = 0.5f * x;
+        return wwTmGrey(eArg);
     }
     float E = cellIsE;
     float c = (((x * ((0.1500000059604644775390625f * x) + 0.0500000007450580596923828125f)) + (0.20000000298023223876953125f * E)) / ((x * ((0.1500000059604644775390625f * x) + 0.5f)) + 0.0599999986588954925537109375f)) - (E / 0.300000011920928955078125f);
@@ -332,25 +333,25 @@ float cellCurveW(float x)
 float3 cellGlowShoulder(float3 d, float3 du)
 {
     float3 k = 1.0f.xxx;
-    float tmp1500;
+    float kPick;
     for (int i = 0; i < 3; i++)
     {
-        float param = pow(clamp(d[i], 0.0f, 1.0f), 2.2000000476837158203125f);
-        float u = cellCurveInv(param);
-        float param_1 = du[i];
-        float from0 = pow(max(cellCurveW(param_1), 0.0f), 0.4545454680919647216796875f);
-        float param_2 = u + du[i];
-        float param_3 = u;
-        float here = pow(max(cellCurveW(param_2), 0.0f), 0.4545454680919647216796875f) - pow(max(cellCurveW(param_3), 0.0f), 0.4545454680919647216796875f);
+        float yArg2 = pow(clamp(d[i], 0.0f, 1.0f), 2.2000000476837158203125f);
+        float u = cellCurveInv(yArg2);
+        float xArg5 = du[i];
+        float from0 = pow(max(cellCurveW(xArg5), 0.0f), 0.4545454680919647216796875f);
+        float xArg4 = u + du[i];
+        float xArg3 = u;
+        float here = pow(max(cellCurveW(xArg4), 0.0f), 0.4545454680919647216796875f) - pow(max(cellCurveW(xArg3), 0.0f), 0.4545454680919647216796875f);
         if (from0 > 9.9999999747524270787835121154785e-07f)
         {
-            tmp1500 = clamp(here / from0, 0.0f, 1.0f);
+            kPick = clamp(here / from0, 0.0f, 1.0f);
         }
         else
         {
-            tmp1500 = 1.0f;
+            kPick = 1.0f;
         }
-        k[i] = tmp1500;
+        k[i] = kPick;
     }
     return k;
 }
@@ -384,21 +385,26 @@ void frag_main()
         }
     }
     float4 x = hdrSrc.Load(int2(gl_FragCoord.xy), gl_SampleID);
+    // the passes sort the pixels by depth too (the far plane = no opaque draw reached them);
+    // the bloom this pixel receives, raised where its view ray crosses fog
     if (cellFogBloomOn)
     {
         cellBloomGain = 1.0f + (4.0f * cellFogBloom.Load(int2(gl_FragCoord.xy), gl_SampleID).x);
     }
+    // its curve.
     float3 foBloom = 0.0f.xxx;
-    float tmp1583;
+    float bloomLodPick;
     if (cellIsFoBloomParams.w < 0.0f)
     {
-        tmp1583 = 2.0f;
+        bloomLodPick = 2.0f;
     }
     else
     {
-        tmp1583 = cellIsFoBloomParams.w * log2(max(cellBloomGain, 1.0f));
+        bloomLodPick = cellIsFoBloomParams.w * log2(max(cellBloomGain, 1.0f));
     }
-    float bloomLod = tmp1583;
+    // lane GAPLOOK1 (BLOOMMIP): through fog the glow spreads wider (an atmospheric PSF), so the fog's receiver gain
+    // picks how far down the top's mips the tent reads: log2(gain) levels (w = 1; 0 in clear air: the same bits)
+    float bloomLod = bloomLodPick;
     if (cellIsFoBloomOn && cellIsFoBloomCombOn)
     {
         foBloom = cellIsFoBloomComb.Load(int3(int2(gl_FragCoord.xy), 0)).xyz * cellIsFoBloomParams.y;
@@ -407,44 +413,47 @@ void frag_main()
     {
         if (cellIsFoBloomOn && (bloomLod > 0.0f))
         {
-            float2 param = (floor(gl_FragCoord.xy) + 0.5f.xx) / cellIsFoBloomFrame;
-            float param_1 = cellIsFoBloomParams.x;
-            float param_2 = cellIsFoBloomParams.z;
-            float param_3 = bloomLod;
-            foBloom = bloomTentDispersedLod(cellIsFoBloom, _cellIsFoBloom_sampler, param, param_1, param_2, param_3) * cellIsFoBloomParams.y;
+            float2 uvArg2 = (floor(gl_FragCoord.xy) + 0.5f.xx) / cellIsFoBloomFrame;
+            float radiusPixelsArg2 = cellIsFoBloomParams.x;
+            float dispersionArg2 = cellIsFoBloomParams.z;
+            float lodArg = bloomLod;
+            foBloom = bloomTentDispersedLod(cellIsFoBloom, _cellIsFoBloom_sampler, uvArg2, radiusPixelsArg2, dispersionArg2, lodArg) * cellIsFoBloomParams.y;
         }
         else
         {
             if (cellIsFoBloomOn)
             {
-                float2 param_4 = (floor(gl_FragCoord.xy) + 0.5f.xx) / cellIsFoBloomFrame;
-                float param_5 = cellIsFoBloomParams.x;
-                float param_6 = cellIsFoBloomParams.z;
-                foBloom = bloomTentDispersed(cellIsFoBloom, _cellIsFoBloom_sampler, param_4, param_5, param_6) * cellIsFoBloomParams.y;
+                float2 uvArg = (floor(gl_FragCoord.xy) + 0.5f.xx) / cellIsFoBloomFrame;
+                float radiusPixelsArg = cellIsFoBloomParams.x;
+                float dispersionArg = cellIsFoBloomParams.z;
+                foBloom = bloomTentDispersed(cellIsFoBloom, _cellIsFoBloom_sampler, uvArg, radiusPixelsArg, dispersionArg) * cellIsFoBloomParams.y;
             }
         }
     }
     if (hdrMode == 3)
     {
         cellFoBloomHere = foBloom;
-        float3 param_7 = 0.0f.xxx;
-        float3 lit = cellImageSpace(param_7);
+        float3 sqrtColorArg6 = 0.0f.xxx;
+        float3 lit = cellImageSpace(sqrtColorArg6);
         cellFoBloomHere = 0.0f.xxx;
-        float3 param_8 = 0.0f.xxx;
-        float3 glow = max(lit - cellImageSpace(param_8), 0.0f.xxx);
+        float3 sqrtColorArg5 = 0.0f.xxx;
+        float3 glow = max(lit - cellImageSpace(sqrtColorArg5), 0.0f.xxx);
+        // lane GLAREBLOW2: at the backdrop's place on the curve (cellImageSpace adds 2 x gain x it)
         if (hdrBackdropOn)
         {
-            float3 param_9 = hdrBackdrop.Load(int3(int2(gl_FragCoord.xy), 0)).xyz;
-            float3 param_10 = foBloom * (2.0f * cellBloomGain);
-            glow *= cellGlowShoulder(param_9, param_10);
+            float3 dArg = hdrBackdrop.Load(int3(int2(gl_FragCoord.xy), 0)).xyz;
+            float3 duArg = foBloom * (2.0f * cellBloomGain);
+            glow *= cellGlowShoulder(dArg, duArg);
         }
         fragColor = float4(glow, 0.0f);
         return;
     }
-    bool3 tmp1711 = (hdrMode == 0).xxx;
-    cellFoBloomHere = float3(tmp1711.x ? foBloom.x : 0.0f.xxx.x, tmp1711.y ? foBloom.y : 0.0f.xxx.y, tmp1711.z ? foBloom.z : 0.0f.xxx.z);
+    bool3 cellFoBloomHerePart = (hdrMode == 0).xxx;
+    cellFoBloomHere = float3(cellFoBloomHerePart.x ? foBloom.x : 0.0f.xxx.x, cellFoBloomHerePart.y ? foBloom.y : 0.0f.xxx.y, cellFoBloomHerePart.z ? foBloom.z : 0.0f.xxx.z);
     if (hdrMode == 2)
     {
+        // a cell effect over the sky: the sky is in the view, not the linear frame, so the effect went over 0.
+        // Un-premultiply by coverage (effects blend alpha as ONE, dst), tone-map, lay over by coverage.
         float A = clamp(x.w, 0.0f, 1.0f);
         float3 v = max(x.xyz, 0.0f.xxx);
         if ((!cellOn) || (!cellIsOn))
@@ -454,16 +463,17 @@ void frag_main()
         }
         if (A > 0.0009765625f)
         {
-            float3 param_11 = sqrt(v / A.xxx);
-            float3 param_12 = cellImageSpace(param_11) * A;
-            float2 param_13 = gl_FragCoord.xy;
-            fragColor = float4(wwDither8(param_12, param_13), A);
+            float3 sqrtColorArg4 = sqrt(v / A.xxx);
+            float3 cArg2 = cellImageSpace(sqrtColorArg4) * A;
+            float2 fragCoordArg2 = gl_FragCoord.xy;
+            // FOGGLOW1: the sky's air too
+            fragColor = float4(wwDither8(cArg2, fragCoordArg2), A);
         }
         else
         {
-            float3 param_14 = sqrt(v);
-            float3 param_15 = 0.0f.xxx;
-            fragColor = float4(max(cellImageSpace(param_14) - cellImageSpace(param_15), 0.0f.xxx), 0.0f);
+            float3 sqrtColorArg3 = sqrt(v);
+            float3 sqrtColorArg2 = 0.0f.xxx;
+            fragColor = float4(max(cellImageSpace(sqrtColorArg3) - cellImageSpace(sqrtColorArg2), 0.0f.xxx), 0.0f);
         }
         return;
     }
@@ -473,10 +483,10 @@ void frag_main()
         fragColor = x;
         return;
     }
-    float3 param_16 = sqrt(max(x.xyz, 0.0f.xxx));
-    float3 param_17 = cellImageSpace(param_16);
-    float2 param_18 = gl_FragCoord.xy;
-    fragColor = float4(wwDither8(param_17, param_18), 1.0f);
+    float3 sqrtColorArg = sqrt(max(x.xyz, 0.0f.xxx));
+    float3 cArg = cellImageSpace(sqrtColorArg);
+    float2 fragCoordArg = gl_FragCoord.xy;
+    fragColor = float4(wwDither8(cArg, fragCoordArg), 1.0f);
 }
 
 SPIRV_Cross_Output main(SPIRV_Cross_Input stage_input)

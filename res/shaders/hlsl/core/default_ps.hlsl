@@ -85,8 +85,8 @@ float4 getTexture(int n)
     float2 offs = texCoords[textures[n].coordSet] - textures[n].uvCenter;
     offs = float2((offs.x * r_c) - (offs.y * r_s), (offs.x * r_s) + (offs.y * r_c));
     offs = ((offs * textures[n].uvScale) + textures[n].uvCenter) + textures[n].uvOffset;
-    int tmp101 = textures[n].textureUnit - 1;
-    return textureUnits[tmp101].Sample(_textureUnits_sampler[tmp101], offs);
+    int getTextureRet = textures[n].textureUnit - 1;
+    return textureUnits[getTextureRet].Sample(_textureUnits_sampler[getTextureRet], offs);
 }
 
 void frag_main()
@@ -99,125 +99,133 @@ void frag_main()
     if ((vertexColorFlags & 40) == 40)
     {
         color *= C;
-        float4 tmp156 = color;
-        float3 tmp158 = tmp156.xyz * (A.xyz + (D.xyz * NdotL));
-        color.x = tmp158.x;
-        color.y = tmp158.y;
-        color.z = tmp158.z;
+        float4 colorPart20 = color;
+        float3 colorPart19 = colorPart20.xyz * (A.xyz + (D.xyz * NdotL));
+        color.x = colorPart19.x;
+        color.y = colorPart19.y;
+        color.z = colorPart19.z;
     }
     else
     {
         if ((vertexColorFlags & 8) != 0)
         {
-            float4 tmp189 = color;
-            float3 tmp191 = tmp189.xyz * ((A.xyz * frontMaterialAmbient.xyz) + ((D.xyz * frontMaterialDiffuse.xyz) * NdotL));
-            color.x = tmp191.x;
-            color.y = tmp191.y;
-            color.z = tmp191.z;
+            float4 colorPart18 = color;
+            float3 colorPart17 = colorPart18.xyz * ((A.xyz * frontMaterialAmbient.xyz) + ((D.xyz * frontMaterialDiffuse.xyz) * NdotL));
+            color.x = colorPart17.x;
+            color.y = colorPart17.y;
+            color.z = colorPart17.z;
             color.w *= min(frontMaterialAmbient.w + frontMaterialDiffuse.w, 1.0f);
         }
         else
         {
-            float4 tmp217 = color;
-            float3 tmp219 = tmp217.xyz * (A.xyz + (D.xyz * NdotL));
-            color.x = tmp219.x;
-            color.y = tmp219.y;
-            color.z = tmp219.z;
+            float4 colorPart16 = color;
+            float3 colorPart15 = colorPart16.xyz * (A.xyz + (D.xyz * NdotL));
+            color.x = colorPart15.x;
+            color.y = colorPart15.y;
+            color.z = colorPart15.z;
         }
     }
+    // Emissive
     float3 emissive = frontMaterialEmission.xyz * frontMaterialEmission.w;
     if ((vertexColorFlags & 16) != 0)
     {
         emissive = C.xyz * C.w;
     }
-    float4 tmp259 = color;
-    float3 tmp261 = tmp259.xyz + (emissive * glowScaleSRGB);
-    color.x = tmp261.x;
-    color.y = tmp261.y;
-    color.z = tmp261.z;
+    float4 colorPart14 = color;
+    float3 colorPart13 = colorPart14.xyz + (emissive * glowScaleSRGB);
+    color.x = colorPart13.x;
+    color.y = colorPart13.y;
+    color.z = colorPart13.z;
     color.w *= alpha;
+    // Texturing
     if (textures[0].textureUnit > 0)
     {
-        int param = 0;
-        color *= getTexture(param);
+        int nArg8 = 0;
+        color *= getTexture(nArg8);
     }
     if (textures[1].textureUnit > 0)
     {
-        int param_1 = 1;
-        color *= getTexture(param_1);
+        int nArg7 = 1;
+        color *= getTexture(nArg7);
     }
     if (textures[2].textureUnit > 0)
     {
-        int param_2 = 2;
-        color *= getTexture(param_2);
-        float4 tmp302 = color;
-        float3 tmp304 = tmp302.xyz * 2.0f;
-        color.x = tmp304.x;
-        color.y = tmp304.y;
-        color.z = tmp304.z;
+        int nArg6 = 2;
+        color *= getTexture(nArg6);
+        float4 colorPart12 = color;
+        float3 colorPart11 = colorPart12.xyz * 2.0f;
+        color.x = colorPart11.x;
+        color.y = colorPart11.y;
+        color.z = colorPart11.z;
     }
     if (textures[6].textureUnit > 0)
     {
-        int param_3 = 6;
-        float4 tmp = getTexture(param_3);
-        float4 tmp320 = color;
-        float3 tmp327 = lerp(tmp320.xyz, tmp.xyz, tmp.w.xxx);
-        color.x = tmp327.x;
-        color.y = tmp327.y;
-        color.z = tmp327.z;
+        int nArg5 = 6;
+        // decal 0
+        float4 tmp = getTexture(nArg5);
+        float4 colorPart10 = color;
+        float3 colorPart9 = lerp(colorPart10.xyz, tmp.xyz, tmp.w.xxx);
+        color.x = colorPart9.x;
+        color.y = colorPart9.y;
+        color.z = colorPart9.z;
     }
     if (textures[7].textureUnit > 0)
     {
-        int param_4 = 7;
-        float4 tmp_1 = getTexture(param_4);
-        float4 tmp343 = color;
-        float3 tmp350 = lerp(tmp343.xyz, tmp_1.xyz, tmp_1.w.xxx);
-        color.x = tmp350.x;
-        color.y = tmp350.y;
-        color.z = tmp350.z;
+        int nArg4 = 7;
+        // decal 1
+        float4 tmp_1 = getTexture(nArg4);
+        float4 colorPart8 = color;
+        float3 colorPart7 = lerp(colorPart8.xyz, tmp_1.xyz, tmp_1.w.xxx);
+        color.x = colorPart7.x;
+        color.y = colorPart7.y;
+        color.z = colorPart7.z;
     }
     if (textures[8].textureUnit > 0)
     {
-        int param_5 = 8;
-        float4 tmp_2 = getTexture(param_5);
-        float4 tmp365 = color;
-        float3 tmp372 = lerp(tmp365.xyz, tmp_2.xyz, tmp_2.w.xxx);
-        color.x = tmp372.x;
-        color.y = tmp372.y;
-        color.z = tmp372.z;
+        int nArg3 = 8;
+        // decal 2
+        float4 tmp_2 = getTexture(nArg3);
+        float4 colorPart6 = color;
+        float3 colorPart5 = lerp(colorPart6.xyz, tmp_2.xyz, tmp_2.w.xxx);
+        color.x = colorPart5.x;
+        color.y = colorPart5.y;
+        color.z = colorPart5.z;
     }
     if (textures[9].textureUnit > 0)
     {
-        int param_6 = 9;
-        float4 tmp_3 = getTexture(param_6);
-        float4 tmp387 = color;
-        float3 tmp394 = lerp(tmp387.xyz, tmp_3.xyz, tmp_3.w.xxx);
-        color.x = tmp394.x;
-        color.y = tmp394.y;
-        color.z = tmp394.z;
+        int nArg2 = 9;
+        // decal 3
+        float4 tmp_3 = getTexture(nArg2);
+        float4 colorPart4 = color;
+        float3 colorPart3 = lerp(colorPart4.xyz, tmp_3.xyz, tmp_3.w.xxx);
+        color.x = colorPart3.x;
+        color.y = colorPart3.y;
+        color.z = colorPart3.z;
     }
     if (textures[4].textureUnit > 0)
     {
-        int param_7 = 4;
-        float4 tmp412 = color;
-        float3 tmp414 = tmp412.xyz + (getTexture(param_7).xyz * glowScaleSRGB);
-        color.x = tmp414.x;
-        color.y = tmp414.y;
-        color.z = tmp414.z;
+        int nArg = 4;
+        float4 colorPart2 = color;
+        float3 colorPart = colorPart2.xyz + (getTexture(nArg).xyz * glowScaleSRGB);
+        color.x = colorPart.x;
+        color.y = colorPart.y;
+        color.z = colorPart.z;
     }
+    // Specular
     float a = 1.0f;
     if (alphaFlags > 0)
     {
-        int tmp433;
+        int mPick;
         if (color.w < alphaThreshold)
         {
-            tmp433 = 11051;
+            mPick = 11051;
         }
         else
         {
-            tmp433 = (color.w > alphaThreshold) ? 29041 : 19789;
+            mPick = (color.w > alphaThreshold) ? 29041 : 19789;
         }
-        int m = tmp433;
+        // 0: always, 1: <, 2: ==, 3: <=, 4: >, 5: !=, 6: >=, 7: never
+        int m = mPick;
         if ((m & (1 << alphaFlags)) == 0)
         {
             discard;

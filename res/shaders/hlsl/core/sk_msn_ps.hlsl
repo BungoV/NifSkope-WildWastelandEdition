@@ -138,16 +138,17 @@ void frag_main()
     if (alphaFlags > 0)
     {
         float a = (C.w * baseMap.w) * alpha;
-        int tmp203;
+        int mPick;
         if (a < alphaThreshold)
         {
-            tmp203 = 11051;
+            mPick = 11051;
         }
         else
         {
-            tmp203 = (a > alphaThreshold) ? 29041 : 19789;
+            mPick = (a > alphaThreshold) ? 29041 : 19789;
         }
-        int m = tmp203;
+        // 0: always, 1: <, 2: ==, 3: <=, 4: >, 5: !=, 6: >=, 7: never
+        int m = mPick;
         if ((m & (1 << alphaFlags)) == 0)
         {
             discard;
@@ -159,7 +160,13 @@ void frag_main()
     }
     float4 normalMap = NormalMap.Sample(_NormalMap_sampler, offset);
     float3 normal = (normalMap.xyz * 2.0f) - 1.0f.xxx;
+    // Convert model space to view space
+    // Swizzled G/B values!
     normal = normalize(mul(normal.xzy, float3x3(modelViewMatrix[0].xyz, modelViewMatrix[1].xyz, modelViewMatrix[2].xyz)));
+    // Face Normals
+    // vec3 X = dFdx(v);
+    // vec3 Y = dFdy(v);
+    // vec3 constructedNormal = normalize(cross(X,Y));
     float3 L = normalize(LightDir);
     float3 E = normalize(ViewDir);
     float3 R = reflect(-L, normal);
@@ -170,11 +177,13 @@ void frag_main()
     float NdotNegL = max(dot(normal, -L), 0.0f);
     float3 albedo = baseMap.xyz * C.xyz;
     float3 diffuse = A.xyz + (D.xyz * NdotL);
+    // Emissive
     float3 emissive = 0.0f.xxx;
     if (hasEmit)
     {
         emissive += (glowColor * glowMult);
     }
+    // Specular
     float s = SpecularMap.Sample(_SpecularMap_sampler, offset).x;
     if ((!hasSpecularMap) || hasBacklight)
     {
@@ -190,7 +199,7 @@ void frag_main()
         emissive += (backlight * D.xyz);
     }
     float4 mask = 0.0f.xxxx;
-    if (hasRimlight || hasSoftlight)
+    if (or(hasRimlight, hasSoftlight))   // HLSLFIX2 orfix.py: no short-circuit branch (NV took the wrong side)
     {
         mask = LightMask.Sample(_LightMask_sampler, offset);
     }
@@ -233,15 +242,15 @@ void frag_main()
     {
         albedo *= tintColor;
     }
-    float3 tmp521 = (albedo * (diffuse + (emissive * glowScaleSRGB))) + spec;
-    color.x = tmp521.x;
-    color.y = tmp521.y;
-    color.z = tmp521.z;
-    float3 param_4 = color.xyz;
-    float3 tmp531 = tonemap(param_4);
-    color.x = tmp531.x;
-    color.y = tmp531.y;
-    color.z = tmp531.z;
+    float3 colorPart = (albedo * (diffuse + (emissive * glowScaleSRGB))) + spec;
+    color.x = colorPart.x;
+    color.y = colorPart.y;
+    color.z = colorPart.z;
+    float3 xArg = color.xyz;
+    float3 tonemapRet = tonemap(xArg);
+    color.x = tonemapRet.x;
+    color.y = tonemapRet.y;
+    color.z = tonemapRet.z;
     fragColor = color;
 }
 

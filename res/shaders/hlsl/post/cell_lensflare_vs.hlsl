@@ -52,17 +52,17 @@ void vert_main()
                 int2 p = clamp(c + (int2(x, y) * int2(2, 2)), int2(0, 0), hi);
                 float d = flareDepth.Load(int3(p, 0)).x;
                 float sceneW = flareProj[3].z / (flareProj[2].z + ((2.0f * d) - 1.0f));
-                bool tmp106 = d >= 1.0f;
-                bool tmp118;
-                if (!tmp106)
+                bool cond = d >= 1.0f;
+                bool nPick;
+                if (!cond)
                 {
-                    tmp118 = (sceneW + flareSlack) >= vertexLight.z;
+                    nPick = (sceneW + flareSlack) >= vertexLight.z;
                 }
                 else
                 {
-                    tmp118 = tmp106;
+                    nPick = cond;
                 }
-                n += float(tmp118);
+                n += float(nPick);
             }
         }
         seen = n / 25.0f;

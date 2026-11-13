@@ -484,7 +484,9 @@ float2 wwDecalPomUv(float2 uv0, float3 P, float3 N, float3 E)
     {
         return uv0;
     }
+    // +u on the surface
     float3 T = normalize(((dpx * duy.y) - (dpy * dux.y)) / det.xxx);
+    // +v
     float3 B = normalize(((dpy * dux.x) - (dpx * duy.x)) / det.xxx);
     float ez = max(dot(E, N), 0.001000000047497451305389404296875f);
     float2 ofs = ((-float2(dot(E, T), dot(E, B))) / ez.xx) * wwDecalPom.x;
@@ -513,16 +515,16 @@ float2 wwDecalPomUv(float2 uv0, float3 P, float3 N, float3 E)
     }
     float d0 = prevLayer - prevH;
     float d1 = layer - h;
-    float tmp12420;
+    float tPick2;
     if ((d0 - d1) != 0.0f)
     {
-        tmp12420 = prevLayer + (((layer - prevLayer) * d0) / (d0 - d1));
+        tPick2 = prevLayer + (((layer - prevLayer) * d0) / (d0 - d1));
     }
     else
     {
-        tmp12420 = layer;
+        tPick2 = layer;
     }
-    float t = tmp12420;
+    float t = tPick2;
     return uv0 + (ofs * (1.0f - t));
 }
 
@@ -589,26 +591,28 @@ float wwDecalVertexA(float vertexA)
     {
         return vertexA;
     }
+    // lane DECALANGLE2: N = the drawn (normal-mapped) normal under this pixel, as the game's g-buffer has it
     if ((wwDecalMapped && wwDecalGbufOn) && (vertexA < 0.998039186000823974609375f))
     {
         int2 q = int2(gl_FragCoord.xy - wwDecalGbufRect.xy);
-        bool tmp12195 = all(bool2(q.x >= int2(0, 0).x, q.y >= int2(0, 0).y));
-        bool tmp12204;
-        if (tmp12195)
+        bool cond8 = all(bool2(q.x >= int2(0, 0).x, q.y >= int2(0, 0).y));
+        bool cond7;
+        if (cond8)
         {
-            int2 tmp12201 = int2(wwDecalGbufRect.zw);
-            tmp12204 = all(bool2(q.x < tmp12201.x, q.y < tmp12201.y));
+            int2 condPart = int2(wwDecalGbufRect.zw);
+            cond7 = all(bool2(q.x < condPart.x, q.y < condPart.y));
         }
         else
         {
-            tmp12204 = tmp12195;
+            cond7 = cond8;
         }
-        if (tmp12204)
+        if (cond7)
         {
             float4 g = cellCtGbuf.Load(int3(q, 0));
-            float3 param = float3(0.0f, 0.0f, 1.0f);
-            float3 param_1 = -ViewDir;
-            float z = cellAoPassOut(param, param_1).w;
+            float3 normalViewArg = float3(0.0f, 0.0f, 1.0f);
+            float3 posViewArg = -ViewDir;
+            float z = cellAoPassOut(normalViewArg, posViewArg).w;
+            // the surface under it, not a nearer one
             if (abs(g.w - z) <= (0.5f + (0.004999999888241291046142578125f * z)))
             {
                 float3 d = normalize(mul(normalMatrix, ((C.xyz * 255.0f) - 128.0f.xxx) / 127.0f.xxx));
@@ -638,12 +642,12 @@ float3 landDetailSplatN(float3 n, float2 w, float2 wdx, float2 wdy, float v)
 {
     if (landLodWin.w > 0.5f)
     {
-        float3 param = n;
-        float2 param_1 = w;
-        float2 param_2 = wdx;
-        float2 param_3 = wdy;
-        float param_4 = v;
-        return landDetailN(param, param_1, param_2, param_3, param_4);
+        float3 nArg = n;
+        float2 wArg = w;
+        float2 wdxArg = wdx;
+        float2 wdyArg = wdy;
+        float vArg = v;
+        return landDetailN(nArg, wArg, wdxArg, wdyArg, vArg);
     }
     float2 dd = (LandLodDetail.SampleGrad(_LandLodDetail_sampler, w * 0.000349999987520277500152587890625f, wdx * 0.000349999987520277500152587890625f, wdy * 0.000349999987520277500152587890625f).xy * 2.0f) - 1.0f.xx;
     return normalize(lerp(n, float3(-dd, sqrt(1.0f - min(dot(dd, dd), 1.0f))), v.xxx));
@@ -770,16 +774,16 @@ float VisibDiv(float NdotL, float NdotV, float VdotH, float NdotH)
     float numR = 2.0f * NdotH;
     if (denom >= (numL * numR))
     {
-        float tmp5003;
+        float numLPick;
         if (numL == NdotV)
         {
-            tmp5003 = 1.0f;
+            numLPick = 1.0f;
         }
         else
         {
-            tmp5003 = NdotL / NdotV;
+            numLPick = NdotL / NdotV;
         }
-        numL = tmp5003;
+        numL = numLPick;
         return (numL * numR) / denom;
     }
     return 1.0f / NdotV;
@@ -788,15 +792,24 @@ float VisibDiv(float NdotL, float NdotV, float VdotH, float NdotH)
 // this is a normalized Phong model used in the Torrance-Sparrow model
 float3 TorranceSparrow(float NdotL, float NdotH, float NdotV, float VdotH, float3 color, float power, float F0)
 {
+    // D: Normalized phong model
     float D_1 = ((power + 2.0f) / 6.283185482025146484375f) * pow(NdotH, power);
-    float param = NdotL;
-    float param_1 = NdotV;
-    float param_2 = VdotH;
-    float param_3 = NdotH;
-    float G_NdotV = VisibDiv(param, param_1, param_2, param_3);
-    float param_4 = VdotH;
-    float param_5 = F0;
-    float F = fresnelSchlick(param_4, param_5);
+    float NdotLArg = NdotL;
+    float NdotVArg = NdotV;
+    float VdotHArg2 = VdotH;
+    float NdotHArg = NdotH;
+    // G: Torrance-Sparrow visibility term divided by NdotV
+    float G_NdotV = VisibDiv(NdotLArg, NdotVArg, VdotHArg2, NdotHArg);
+    float VdotHArg = VdotH;
+    float F0Arg = F0;
+    // F: Schlick's approximation
+    float F = fresnelSchlick(VdotHArg, F0Arg);
+    // Torrance-Sparrow:
+    // (F * G * D) / (4 * NdotL * NdotV)
+    // Division by NdotV is done in VisibDiv()
+    // and division by NdotL is removed since
+    // outgoing radiance is determined by:
+    // BRDF * NdotL * L()
     float spec = ((F * G_NdotV) * D_1) / 4.0f;
     return (color * spec) * 3.1415927410125732421875f;
 }
@@ -833,6 +846,7 @@ float OrenNayarFull(float NdotL, float NdotV, float LdotV, float roughness)
     float gamma = (LdotV - (NdotL * NdotV)) / sqrt(max((1.0f - (NdotL * NdotL)) * (1.0f - (NdotV * NdotV)), 2.4999999368446879088878631591797e-05f));
     float roughnessSquared = roughness * roughness;
     float roughnessSquared9 = roughnessSquared / (roughnessSquared + 0.0900000035762786865234375f);
+    // C1, C2, and C3
     float C1 = 1.0f - (0.5f * (roughnessSquared / (roughnessSquared + 0.3300000131130218505859375f)));
     float C2 = 0.449999988079071044921875f * roughnessSquared9;
     if (gamma >= 0.0f)
@@ -845,6 +859,7 @@ float OrenNayarFull(float NdotL, float NdotV, float LdotV, float roughness)
     }
     float powValue = ((4.0f * alpha_1) * beta) / 9.8696041107177734375f;
     float C3 = ((0.125f * roughnessSquared9) * powValue) * powValue;
+    // Avoid asymptote at pi/2
     float asym = 1.57079637050628662109375f;
     float lim1 = asym + 0.004999999888241291046142578125f;
     float lim2 = asym - 0.004999999888241291046142578125f;
@@ -871,10 +886,15 @@ float OrenNayarFull(float NdotL, float NdotV, float LdotV, float roughness)
             ab2 = lim2;
         }
     }
+    // Reflection
     float A_1 = (gamma * C2) * tan(beta);
     float B = ((1.0f - abs(gamma)) * C3) * tan(ab2);
     float L1 = NdotL0 * ((C1 + A_1) + B);
+    // Interreflection
     float twoBetaPi = (2.0f * beta) / 3.1415927410125732421875f;
+    // the lend rule: outdoors, a surface whose own reads (P + N x 0.75 and 1.75 cell) are both solid, or whose 1.75 read
+    // lands indoors, sits in air the room grid could not resolve; its neighbor search could borrow a sealed pocket's
+    // dark across the wall. Debug WW_CELL_PV_RED=borrow: the old search.
     float L2 = ((0.17000000178813934326171875f * NdotL0) * (roughnessSquared / (roughnessSquared + 0.12999999523162841796875f))) * (1.0f - ((gamma * twoBetaPi) * twoBetaPi));
     return L1 + L2;
 }
@@ -1163,153 +1183,162 @@ void frag_main()
     {
         float2 fp = gl_FragCoord.xy + (5.588237762451171875f * farFadeFrame).xx;
         float n = frac(52.98291778564453125f * frac(dot(fp, float2(0.067110560834407806396484375f, 0.005837149918079376220703125f))));
-        bool tmp12469;
+        bool cond49;
         if (farLadder.x > 0.0f)
         {
-            tmp12469 = n >= (farLadder.x - 1.0f);
+            cond49 = n >= (farLadder.x - 1.0f);
         }
         else
         {
-            tmp12469 = n < (2.0f + farLadder.x);
+            cond49 = n < (2.0f + farLadder.x);
         }
-        if (tmp12469)
+        if (cond49)
         {
             discard;
         }
     }
     cellEmitOut = 0.0f.xxxx;
-    float3 param = ViewDir;
-    float wwGrassK = wwGrassFadeK(param);
+    float3 vArg5 = ViewDir;
+    // lane GRASSMB1: exactly 1.0 on every non-grass shape
+    float wwGrassK = wwGrassFadeK(vArg5);
     if (wwGrassK <= 0.0f)
     {
         discard;
     }
     float2 offset = (texCoord * uvScale) + uvOffset;
+    // lane DECALS1: the uv leaving the decal's rect is clipped, as the game's decal pass does
     if (wwDecalPom.x > 0.0f)
     {
-        float2 param_1 = offset;
-        float3 param_2 = -ViewDir;
-        float3 param_3 = normalize(btnMatrix[2]);
-        float3 param_4 = normalize(ViewDir);
-        offset = wwDecalPomUv(param_1, param_2, param_3, param_4);
-        bool tmp12527 = any(bool2(offset.x < 0.0f.xx.x, offset.y < 0.0f.xx.y));
-        bool tmp12535;
-        if (!tmp12527)
+        float2 uv0Arg = offset;
+        float3 PArg10 = -ViewDir;
+        float3 NArg10 = normalize(btnMatrix[2]);
+        float3 EArg = normalize(ViewDir);
+        offset = wwDecalPomUv(uv0Arg, PArg10, NArg10, EArg);
+        bool cond48 = any(bool2(offset.x < 0.0f.xx.x, offset.y < 0.0f.xx.y));
+        bool cond47;
+        if (!cond48)
         {
-            tmp12535 = any(bool2(offset.x > 1.0f.xx.x, offset.y > 1.0f.xx.y));
+            cond47 = any(bool2(offset.x > 1.0f.xx.x, offset.y > 1.0f.xx.y));
         }
         else
         {
-            tmp12535 = tmp12527;
+            cond47 = cond48;
         }
-        if (tmp12535)
+        if (cond47)
         {
             discard;
         }
     }
-    float3 param_5 = -ViewDir;
-    float2 airTD = wwVolAirSunTD(param_5);
+    float3 posViewArg22 = -ViewDir;
+    // FOGSUN1: no cascades compiled in; the sun still crosses the air
+    // MODULES1 G3: (direct T, the soft share)
+    float2 airTD = wwVolAirSunTD(posViewArg22);
     float airSunT = airTD.x;
     float4 Dair = float4(D.xyz * sqrt(airSunT), D.w);
     cellDirVis = airSunT;
     cellAirDif = airTD.y;
     float4 baseMap = BaseMap.SampleBias(_BaseMap_sampler, offset, wwMipBias);
-    float3 param_6 = -ViewDir;
-    float3 param_7 = cellWorldPos(param_6);
-    float3 param_8 = baseMap.xyz;
-    float3 tmp12577 = fgGround(param_7, param_8);
-    baseMap.x = tmp12577.x;
-    baseMap.y = tmp12577.y;
-    baseMap.z = tmp12577.z;
-    float3 param_9 = -ViewDir;
-    float2 landBandW = cellWorldPos(param_9).xy;
-    bool tmp12594 = landLod.x > 0.5f;
-    bool tmp12600;
-    if (tmp12594)
+    float3 posViewArg21 = -ViewDir;
+    float3 wArg7 = cellWorldPos(posViewArg21);
+    float3 sheetArg = baseMap.xyz;
+    float3 fgGroundRet = fgGround(wArg7, sheetArg);
+    baseMap.x = fgGroundRet.x;
+    baseMap.y = fgGroundRet.y;
+    baseMap.z = fgGroundRet.z;
+    float3 posViewArg20 = -ViewDir;
+    // lane LANDSPEC2 (src/features/far-ground/landlodspec.h): the near ground's land-LOD band, as the game's near land PS: v from the
+    // (gliding) blend centre; the albedo toward the level-4 LOD diffuse x the noise, the normal (below) toward the
+    // detail normals. Gradients first: the samples sit in a branch.
+    float2 landBandW = cellWorldPos(posViewArg20).xy;
+    bool cond46 = landLod.x > 0.5f;
+    bool cond45;
+    if (cond46)
     {
-        tmp12600 = landLod.x < 1.5f;
+        cond45 = landLod.x < 1.5f;
     }
     else
     {
-        tmp12600 = tmp12594;
+        cond45 = cond46;
     }
-    float tmp12601;
-    if (tmp12600)
+    float landBandVPick;
+    if (cond45)
     {
-        tmp12601 = 1.0f - clamp((landLodK.z - distance(landBandW, landLod.yz)) * landLodK.w, 0.0f, 1.0f);
+        landBandVPick = 1.0f - clamp((landLodK.z - distance(landBandW, landLod.yz)) * landLodK.w, 0.0f, 1.0f);
     }
     else
     {
-        tmp12601 = 0.0f;
+        landBandVPick = 0.0f;
     }
-    float landBandV = tmp12601;
+    float landBandV = landBandVPick;
     landBandW += landLodTex.xy;
     float2 landWdx = ddx(landBandW);
     float2 landWdy = ddy(landBandW);
+    // lane LANDSPEC3: the far LOD ground (02861) takes the noise and the detail normal whole
     float landDetailV = (landLod.x > 1.5f) ? 1.0f : landBandV;
     if ((landLodTex.z > 0.5f) && (landDetailV > 0.0f))
     {
         float3 noiseK = (LandLodNoise.SampleGrad(_LandLodNoise_sampler, landBandW * 0.00025000001187436282634735107421875f, landWdx * 0.00025000001187436282634735107421875f, landWdy * 0.00025000001187436282634735107421875f).xyz * 3.7777779102325439453125f) - 2.006000041961669921875f.xxx;
         float2 g = (landBandW - landLodWin.xy) * 6.103515625e-05f;
         int2 ci = int2(floor(g));
+        // lane LANDSPEC4: the window spans the near block (LANDSPEC5: up to 16 x 16)
         int nW = int(landLodWin.z);
         int k = ci.x + (nW * ci.y);
         if (landLod.x > 1.5f)
         {
-            float4 tmp12690 = baseMap;
-            float3 tmp12692 = tmp12690.xyz * noiseK;
-            baseMap.x = tmp12692.x;
-            baseMap.y = tmp12692.y;
-            baseMap.z = tmp12692.z;
+            float4 baseMapPart6 = baseMap;
+            float3 baseMapPart5 = baseMapPart6.xyz * noiseK;
+            baseMap.x = baseMapPart5.x;
+            baseMap.y = baseMapPart5.y;
+            baseMap.z = baseMapPart5.z;
         }
         else
         {
-            bool tmp12702 = ci.x >= 0;
-            bool tmp12708;
-            if (tmp12702)
+            bool cond44 = ci.x >= 0;
+            bool cond43;
+            if (cond44)
             {
-                tmp12708 = ci.y >= 0;
+                cond43 = ci.y >= 0;
             }
             else
             {
-                tmp12708 = tmp12702;
+                cond43 = cond44;
             }
-            bool tmp12715;
-            if (tmp12708)
+            bool cond42;
+            if (cond43)
             {
-                tmp12715 = ci.x < nW;
+                cond42 = ci.x < nW;
             }
             else
             {
-                tmp12715 = tmp12708;
+                cond42 = cond43;
             }
-            bool tmp12722;
-            if (tmp12715)
+            bool cond41;
+            if (cond42)
             {
-                tmp12722 = ci.y < nW;
+                cond41 = ci.y < nW;
             }
             else
             {
-                tmp12722 = tmp12715;
+                cond41 = cond42;
             }
-            bool tmp12742;
-            if (tmp12722)
+            bool cond40;
+            if (cond41)
             {
-                tmp12742 = ((int(landLodBits[k >> 6][(k >> 4) & 3]) >> (k & 15)) & 1) != 0;
+                cond40 = ((int(landLodBits[k >> 6][(k >> 4) & 3]) >> (k & 15)) & 1) != 0;
             }
             else
             {
-                tmp12742 = tmp12722;
+                cond40 = cond41;
             }
-            if (tmp12742)
+            if (cond40)
             {
                 float2 f = g - float2(ci);
                 float3 lod = LandLodDiff.SampleGrad(_LandLodDiff_sampler, float3(f.x, 1.0f - f.y, float(k)), landWdx * float2(6.103515625e-05f, -6.103515625e-05f), landWdy * float2(6.103515625e-05f, -6.103515625e-05f)).xyz;
-                float4 tmp12769 = baseMap;
-                float3 tmp12776 = lerp(tmp12769.xyz, lod * noiseK, landBandV.xxx);
-                baseMap.x = tmp12776.x;
-                baseMap.y = tmp12776.y;
-                baseMap.z = tmp12776.z;
+                float4 baseMapPart4 = baseMap;
+                float3 baseMapPart3 = lerp(baseMapPart4.xyz, lod * noiseK, landBandV.xxx);
+                baseMap.x = baseMapPart3.x;
+                baseMap.y = baseMapPart3.y;
+                baseMap.z = baseMapPart3.z;
             }
             else
             {
@@ -1319,44 +1348,44 @@ void frag_main()
                     int2 co = int2(floor(go));
                     int nO = int(landLodOuter.z);
                     int ko = co.x + (nO * co.y);
-                    bool tmp12814 = co.x >= 0;
-                    bool tmp12820;
-                    if (tmp12814)
+                    bool cond39 = co.x >= 0;
+                    bool cond38;
+                    if (cond39)
                     {
-                        tmp12820 = co.y >= 0;
+                        cond38 = co.y >= 0;
                     }
                     else
                     {
-                        tmp12820 = tmp12814;
+                        cond38 = cond39;
                     }
-                    bool tmp12827;
-                    if (tmp12820)
+                    bool cond37;
+                    if (cond38)
                     {
-                        tmp12827 = co.x < nO;
+                        cond37 = co.x < nO;
                     }
                     else
                     {
-                        tmp12827 = tmp12820;
+                        cond37 = cond38;
                     }
-                    bool tmp12834;
-                    if (tmp12827)
+                    bool cond36;
+                    if (cond37)
                     {
-                        tmp12834 = co.y < nO;
+                        cond36 = co.y < nO;
                     }
                     else
                     {
-                        tmp12834 = tmp12827;
+                        cond36 = cond37;
                     }
-                    bool tmp12854;
-                    if (tmp12834)
+                    bool cond35;
+                    if (cond36)
                     {
-                        tmp12854 = ((int(landLodOuterBits[ko >> 6][(ko >> 4) & 3]) >> (ko & 15)) & 1) != 0;
+                        cond35 = ((int(landLodOuterBits[ko >> 6][(ko >> 4) & 3]) >> (ko & 15)) & 1) != 0;
                     }
                     else
                     {
-                        tmp12854 = tmp12834;
+                        cond35 = cond36;
                     }
-                    if (tmp12854)
+                    if (cond35)
                     {
                         float2 f_1 = go - float2(co);
                         float2 flipV = float2(6.103515625e-05f, -6.103515625e-05f);
@@ -1367,11 +1396,11 @@ void frag_main()
                             flipV *= 0.5f;
                         }
                         float3 lod_1 = LandLodOuter.SampleGrad(_LandLodOuter_sampler, uvl, landWdx * flipV, landWdy * flipV).xyz;
-                        float4 tmp12920 = baseMap;
-                        float3 tmp12927 = lerp(tmp12920.xyz, lod_1 * noiseK, landBandV.xxx);
-                        baseMap.x = tmp12927.x;
-                        baseMap.y = tmp12927.y;
-                        baseMap.z = tmp12927.z;
+                        float4 baseMapPart2 = baseMap;
+                        float3 baseMapPart = lerp(baseMapPart2.xyz, lod_1 * noiseK, landBandV.xxx);
+                        baseMap.x = baseMapPart.x;
+                        baseMap.y = baseMapPart.y;
+                        baseMap.z = baseMapPart.z;
                     }
                 }
             }
@@ -1380,24 +1409,32 @@ void frag_main()
     float4 color = float4(baseMap.xyz, 1.0f);
     if (alphaFlags > 0)
     {
-        float param_10 = C.w;
-        float param_11 = wwDecalVertexA(param_10);
-        float a = (wwGrassVertexA(param_11) * baseMap.w) * alpha;
+        float vertexAArg3 = C.w;
+        float vertexAArg2 = wwDecalVertexA(vertexAArg3);
+        // The class parameter LIVES in vertex alpha, so the alpha test has to
+        // run on the real value even when the preview is about to replace the
+        // colour -- otherwise a tree card previews as a solid quad and its
+        // silhouette, the thing you are looking at, is gone. Hence the preview
+        // early-out sits AFTER this and not at the top of main().
+        float a = (wwGrassVertexA(vertexAArg2) * baseMap.w) * alpha;
+        // lane GRASSMB1: the grass fades out through its own alpha test
         a *= wwGrassK;
+        // lane DECALANGLE: the game drops texture alpha x term under 4/255
         if (wwDecalAngle && (a < 0.01568627543747425079345703125f))
         {
             discard;
         }
-        int tmp12975;
+        int mPick;
         if (a < alphaThreshold)
         {
-            tmp12975 = 11051;
+            mPick = 11051;
         }
         else
         {
-            tmp12975 = (a > alphaThreshold) ? 29041 : 19789;
+            mPick = (a > alphaThreshold) ? 29041 : 19789;
         }
-        int m = tmp12975;
+        // 0: always, 1: <, 2: ==, 3: <=, 4: >, 5: !=, 6: >=, 7: never
+        int m = mPick;
         if ((m & (1 << alphaFlags)) == 0)
         {
             discard;
@@ -1412,6 +1449,9 @@ void frag_main()
         float3 v = 0.0f.xxx;
         if (lodChannelView == 1)
         {
+            // The index HASHED to a colour, not the raw bytes: consecutive
+            // indices differ by one part in 255 of red and are
+            // indistinguishable, which is exactly the case worth seeing.
             float idx = floor((C.x * 255.0f) + 0.5f) + (floor((C.y * 255.0f) + 0.5f) * 256.0f);
             v = frac(sin(float3(12.98980045318603515625f, 78.233001708984375f, 45.16400146484375f) * (idx + 1.0f)) * 43758.546875f);
             v = (v * 0.800000011920928955078125f) + 0.20000000298023223876953125f.xxx;
@@ -1420,24 +1460,30 @@ void frag_main()
         {
             if (lodChannelView == 2)
             {
+                // the raw 16-bit index bytes
                 v = float3(C.x, C.y, 0.0f);
             }
             else
             {
                 if (lodChannelView == 3)
                 {
+                    // ambient occlusion (objects and terrain)
                     v = C.zzz;
                 }
                 else
                 {
                     if (lodChannelView == 4)
                     {
+                        // A: tree sway / terrain shore proximity
                         v = C.www;
                     }
                     else
                     {
                         if (lodChannelView == 5)
                         {
+                            // Terrain R is a material CLASS id, not a magnitude -- shown hashed
+                            // for the same reason the object index is: neighbouring classes
+                            // differ by a few parts in 255 and read as one flat grey.
                             float cls = floor((C.x * 255.0f) + 0.5f);
                             v = frac(sin(float3(12.98980045318603515625f, 78.233001708984375f, 45.16400146484375f) * (cls + 1.0f)) * 43758.546875f);
                             v = (v * 0.800000011920928955078125f) + 0.20000000298023223876953125f.xxx;
@@ -1446,12 +1492,17 @@ void frag_main()
                         {
                             if (lodChannelView == 6)
                             {
+                                // terrain flow-accumulation wetness
                                 v = C.yyy;
                             }
                             else
                             {
                                 if (lodChannelView == 8)
                                 {
+                                    // The impostor bake's normal sheet: the GEOMETRIC normal in the
+                                    // view's space, half-packed, flipped for back faces as the lit
+                                    // path flips it. After the alpha test above, so a leaf card
+                                    // writes its normal only where it has a leaf.
                                     float3 n_1 = normalize(btnMatrix_norm[2]);
                                     if (!gl_FrontFacing)
                                     {
@@ -1463,12 +1514,20 @@ void frag_main()
                                 {
                                     if (lodChannelView == 9)
                                     {
+                                        // the impostor bake's height: window z, linear under the ortho projection
                                         v = gl_FragCoord.z.xxx;
                                     }
                                     else
                                     {
                                         if (lodChannelView == 10)
                                         {
+                                            // The impostor bake's material channel (docs/LODGEN_IMPOSTOR_SPEC.md).
+                                            // A shape retargeted to a source .lodm: its third texture, raw --
+                                            // roughness/metallic/AO or gloss/specular/AO as the file says.
+                                            // Otherwise the LEGACY pair from the vanilla material, the way the
+                                            // lit path composes it: R gloss = smoothness x the specular map's
+                                            // G, G specular = the map's R (the normal's alpha without a map)
+                                            // x the specular strength.
                                             float4 sm = SpecularMap.SampleBias(_SpecularMap_sampler, offset, wwMipBias);
                                             if (lodMaskRaw)
                                             {
@@ -1476,26 +1535,27 @@ void frag_main()
                                             }
                                             else
                                             {
-                                                float tmp13145;
+                                                float glPick;
                                                 if (hasSpecularMap)
                                                 {
-                                                    tmp13145 = sm.y;
+                                                    glPick = sm.y;
                                                 }
                                                 else
                                                 {
-                                                    tmp13145 = 1.0f;
+                                                    glPick = 1.0f;
                                                 }
-                                                float gl = clamp(specGlossiness, 0.0f, 1.0f) * tmp13145;
-                                                float tmp13155;
+                                                float gl = clamp(specGlossiness, 0.0f, 1.0f) * glPick;
+                                                float spPick;
                                                 if (hasSpecularMap)
                                                 {
-                                                    tmp13155 = sm.x;
+                                                    spPick = sm.x;
                                                 }
                                                 else
                                                 {
-                                                    tmp13155 = NormalMap.SampleBias(_NormalMap_sampler, offset, wwMipBias).w;
+                                                    spPick = NormalMap.SampleBias(_NormalMap_sampler, offset, wwMipBias).w;
                                                 }
-                                                float sp = tmp13155 * ((lodSpecStrength > 0.0f) ? lodSpecStrength : 1.0f);
+                                                float sp = spPick * ((lodSpecStrength > 0.0f) ? lodSpecStrength : 1.0f);
+                                                // B: neutral AO, one per-pixel law for mixed shapes
                                                 v = float3(gl, clamp(sp, 0.0f, 1.0f), 1.0f);
                                             }
                                         }
@@ -1503,48 +1563,80 @@ void frag_main()
                                         {
                                             if (lodChannelView == 12)
                                             {
+                                                // The impostor bake's colour sheet: the base colour as the source
+                                                // has it, times the vertex colour, and NOTHING else - the lit path
+                                                // below tone-maps before it writes, so an "unlit" render of it is
+                                                // a curved albedo. The consumer lights the card.
                                                 v = baseMap.xyz * C.xyz;
                                             }
                                             else
                                             {
                                                 if (lodChannelView == 11)
                                                 {
-                                                    float tmp13197;
+                                                    float leafPick;
                                                     if (lodMaskByTree)
                                                     {
-                                                        tmp13197 = float(lodTreeAnim);
+                                                        leafPick = float(lodTreeAnim);
                                                     }
                                                     else
                                                     {
-                                                        tmp13197 = float(alphaFlags > 0);
+                                                        leafPick = float(alphaFlags > 0);
                                                     }
-                                                    float leaf = tmp13197;
+                                                    // The impostor bake's subsurface mask source. A LOD tree: the
+                                                    // alpha-tested shapes are the leaf cards, the trunk is opaque. A
+                                                    // near tree: every shape is alpha-tested (the bark card too), and
+                                                    // the branch cards are the ones that carry the tree-animation
+                                                    // flag; the bake picks the rule for the model.
+                                                    float leaf = leafPick;
+                                                    // G: the WIND WEIGHT W (IMPOSTORWIND1, sway A): the raw vertex alpha on a
+                                                    // tree-animation shape -- the only wind input the game's tree vertex
+                                                    // shader reads -- and 0 on any other shape, which the game never moves.
+                                                    // The mask reads only R.
                                                     v = float3(leaf, lodTreeAnim ? rawVertexAlpha : 0.0f, 0.0f);
                                                 }
                                                 else
                                                 {
                                                     if (lodChannelView == 13)
                                                     {
+                                                        // The impostor bake's emissive sheet (docs/LODGEN_IMPOSTOR_SPEC.md).
+                                                        // A shape whose GLOW SLOT a source .lodm retargeted reads that
+                                                        // texture raw - and an EMPTY retarget binds black, which is how a
+                                                        // pbr set that names no emissive says it emits nothing.
+                                                        // Otherwise the VANILLA LOD GLOW RULE, measured off the shipped
+                                                        // atlases: a LOD chunk shape carries Own-Emit with a black emissive
+                                                        // colour and no glow slot, so what lights it is its DIFFUSE'S ALPHA
+                                                        // on the opaque shapes (Diamond City's DXT5 atlas: 216,521 of
+                                                        // 262,144 alpha blocks varying, none fully transparent). An
+                                                        // alpha-tested shape spends its alpha on the cut-out instead and
+                                                        // emits nothing.
+                                                        // The EMISSIVE COLOUR is folded in here, because the engine scales
+                                                        // that alpha by it: a chunk shape own-emits with a black colour and
+                                                        // therefore emits nothing, which is the whole answer to "an opaque
+                                                        // source with alpha 255 throughout would light every wall". The
+                                                        // MULTIPLE is not folded in - it can exceed 1 and this sheet is eight
+                                                        // bits - and rides in the set's .lodm as `emissiveScale`. A retargeted
+                                                        // glow slot stays RAW: a source .lodm's emissive is its own picture.
                                                         if (lodEmissiveRaw)
                                                         {
                                                             v = GlowMap.SampleBias(_GlowMap_sampler, offset, wwMipBias).xyz;
                                                         }
                                                         else
                                                         {
-                                                            float3 tmp13232;
+                                                            float3 vPick;
                                                             if (alphaFlags == 0)
                                                             {
-                                                                tmp13232 = (baseMap.xyz * baseMap.w) * lodEmissiveColor;
+                                                                vPick = (baseMap.xyz * baseMap.w) * lodEmissiveColor;
                                                             }
                                                             else
                                                             {
-                                                                tmp13232 = 0.0f.xxx;
+                                                                vPick = 0.0f.xxx;
                                                             }
-                                                            v = tmp13232;
+                                                            v = vPick;
                                                         }
                                                     }
                                                     else
                                                     {
+                                                        // raw red: water depth
                                                         v = C.xxx;
                                                     }
                                                 }
@@ -1567,45 +1659,64 @@ void frag_main()
     float3 normal;
     if (hasModelSpaceNormals)
     {
+        // A model-space map carries all three components already, in the
+        // model's own axes, so it needs model -> view and NOTHING else.  The
+        // tangent-space path below would instead read the map's two stored
+        // channels as offsets along the mesh's tangent and bitangent -- and a
+        // terrain LOD tile's tangent frame is arbitrary (btdterrain.cpp builds
+        // T = n x worldUp, B = n x T), so the sheet's "up" lands sideways and
+        // the surface shades in blotches.
+        // Channel order MEASURED on Bethesda's own shipped sheets
+        // (Data/Textures/Terrain/Commonwealth/Commonwealth.16.*_msn.DDS, six
+        // 512x512 tiles, correlated against the heights of the same cells):
+        // R = EAST  (+x)   corr 0.364 with -dh/dx, 0.001 with -dh/dy
+        // B = NORTH (+y)   corr 0.422 with -dh/dy, 0.002 with -dh/dx
+        // G = UP    (+z)   mean 238.6 of 255
+        // Alpha is a constant 255 on every tile and carries nothing.
+        // sk_msn.frag's `.rbg` swizzle is this same order.
+        // The blue channel is NOT recomputed here: it is real data.
         float3 msn = (normalMap.xyz * 2.0f) - 1.0f.xxx;
         float3 msnN = float3(msn.x, msn.z, msn.y);
+        // lane LANDSPEC3: the far LOD ground's model-space map
         if ((landLodTex.w > 0.5f) && (landDetailV > 0.0f))
         {
-            float3 param_12 = msnN;
-            float2 param_13 = landBandW;
-            float2 param_14 = landWdx;
-            float2 param_15 = landWdy;
-            float param_16 = landDetailV;
-            msnN = landDetailN(param_12, param_13, param_14, param_15, param_16);
+            float3 nArg4 = msnN;
+            float2 wArg6 = landBandW;
+            float2 wdxArg4 = landWdx;
+            float2 wdyArg4 = landWdy;
+            float vArg4 = landDetailV;
+            msnN = landDetailN(nArg4, wArg6, wdxArg4, wdyArg4, vArg4);
         }
         normal = normalize(mul(normalMatrix, msnN));
     }
     else
     {
         normal = (normalMap.xyz * 2.0f) - 1.0f.xxx;
+        // Calculate missing blue channel
         normal.z = sqrt(max(1.0f - dot(normal.xy, normal.xy), 0.0f));
+        // lane LANDSPEC2: toward the detail normal in its own frame
         if ((landLodTex.w > 0.5f) && (landDetailV > 0.0f))
         {
-            float3 tmp13337;
+            float3 normalPick;
             if (landSplat)
             {
-                float3 param_17 = normal;
-                float2 param_18 = landBandW;
-                float2 param_19 = landWdx;
-                float2 param_20 = landWdy;
-                float param_21 = landDetailV;
-                tmp13337 = landDetailSplatN(param_17, param_18, param_19, param_20, param_21);
+                float3 nArg3 = normal;
+                float2 wArg5 = landBandW;
+                float2 wdxArg3 = landWdx;
+                float2 wdyArg3 = landWdy;
+                float vArg3 = landDetailV;
+                normalPick = landDetailSplatN(nArg3, wArg5, wdxArg3, wdyArg3, vArg3);
             }
             else
             {
-                float3 param_22 = normal;
-                float2 param_23 = landBandW;
-                float2 param_24 = landWdx;
-                float2 param_25 = landWdy;
-                float param_26 = landDetailV;
-                tmp13337 = landDetailN(param_22, param_23, param_24, param_25, param_26);
+                float3 nArg2 = normal;
+                float2 wArg4 = landBandW;
+                float2 wdxArg2 = landWdx;
+                float2 wdyArg2 = landWdy;
+                float vArg2 = landDetailV;
+                normalPick = landDetailN(nArg2, wArg4, wdxArg2, wdyArg2, vArg2);
             }
-            normal = tmp13337;
+            normal = normalPick;
         }
         normal = normalize(mul(normal, btnMatrix_norm));
     }
@@ -1613,21 +1724,21 @@ void frag_main()
     {
         normal *= (-1.0f);
     }
-    bool tmp13379 = cellOn && (cellProbe == 20);
-    bool tmp13388;
-    if (tmp13379)
+    bool cond34 = cellOn && (cellProbe == 20);
+    bool cond33;
+    if (cond34)
     {
-        tmp13388 = (cellAoEarly == 1) || (cellAoEarly == 4);
+        cond33 = (cellAoEarly == 1) || (cellAoEarly == 4);
     }
     else
     {
-        tmp13388 = tmp13379;
+        cond33 = cond34;
     }
-    if (tmp13388)
+    if (cond33)
     {
-        float3 param_27 = normal;
-        float3 param_28 = -ViewDir;
-        fragColor = cellAoPassOut(param_27, param_28);
+        float3 normalViewArg6 = normal;
+        float3 posViewArg19 = -ViewDir;
+        fragColor = cellAoPassOut(normalViewArg6, posViewArg19);
         return;
     }
     float3 L = normalize(LightDir);
@@ -1637,39 +1748,47 @@ void frag_main()
     float NdotL = dot(normal, L);
     if (hasModelSpaceNormals)
     {
+        // A terrain LOD sheet stores steep banks the coarse LOD mesh does not
+        // have, so a texel can face away from the light on a surface that is
+        // plainly in view, and with the camera light it fell to near-black in
+        // hard-edged patches (bungo 2026-09-18). Squared half-Lambert: 1 at
+        // N.L = 1, 0.25 at the terminator, 0 only when facing straight away.
         float hl = (NdotL * 0.5f) + 0.5f;
         NdotL = hl * hl;
     }
     float NdotL0 = max(NdotL, 1.1920928955078125e-07f);
     float NdotH = max(dot(normal, H), 1.1920928955078125e-07f);
+    // float NdotL = dot(N, L);
     float NdotV = max(dot(normal, V), 1.1920928955078125e-07f);
     float VdotH = max(dot(V, H), 1.1920928955078125e-07f);
     float NdotNegL = max(dot(normal, -L), 1.1920928955078125e-07f);
     float3 reflectedWS = mul(R, reflMatrix);
-    float3 tmp13463;
+    float3 albedoPick2;
     if (wwDecalAngle && wwDecalMapped)
     {
-        tmp13463 = 1.0f.xxx;
+        albedoPick2 = 1.0f.xxx;
     }
     else
     {
-        tmp13463 = C.xyz;
+        albedoPick2 = C.xyz;
     }
-    float3 albedo = baseMap.xyz * tmp13463;
+    // lane DECALANGLE2: rgb is D there
+    float3 albedo = baseMap.xyz * albedoPick2;
     float3 diffuse = A.xyz + (Dair.xyz * NdotL0);
     if (greyscaleColor)
     {
-        float tmp13492;
+        float albedoPick;
         if (wwDecalAngle && wwDecalMapped)
         {
-            tmp13492 = 1.0f;
+            albedoPick = 1.0f;
         }
         else
         {
-            tmp13492 = C.x;
+            albedoPick = C.x;
         }
-        albedo = GreyscaleMap.SampleLevel(_GreyscaleMap_sampler, float2(baseMap.y, paletteScale * tmp13492), 0.0f).xyz;
+        albedo = GreyscaleMap.SampleLevel(_GreyscaleMap_sampler, float2(baseMap.y, paletteScale * albedoPick), 0.0f).xyz;
     }
+    // Emissive
     float3 emissive = 0.0f.xxx;
     if (hasEmit)
     {
@@ -1679,281 +1798,309 @@ void frag_main()
             emissive *= glowMap.xyz;
         }
     }
+    // Specular — GGX + Smith + Schlick, matching the material editor's BRDF:
+    // spec = D_GGX(NoH, a) * G1(NoL,k) * G1(NoV,k) * F / (4 NoL NoV)
+    // with a = rough^2 and k = (rough+1)^2/8.
     float g_1 = 1.0f;
     float s = 1.0f;
     float smoothness = clamp(specGlossiness, 0.0f, 1.0f);
     if (hasSpecularMap)
     {
+        // G is gloss, R is the specular mask (measured, not assumed). A flat
+        // white G correctly falls back to the material's scalar smoothness.
         g_1 = specMap.y;
         s = specMap.x;
         smoothness = g_1 * smoothness;
     }
+    // Specular is no longer gated on hasSpecularMap: a material with only the
+    // scalar Smoothness/Specular Strength authored used to render completely
+    // matte, which is not what the game does with it.
     float specMask = s * specStrength;
+    // lane LANDSPEC1 (src/features/far-ground/landlodspec.h): the game's LOD land gloss/spec on the far ground, and on the near ground
+    // lerped in from 1.7 to 2.35 cells off the camera cell's centre (its land-LOD blend)
+    // lane LANDSPEC2: the band's v, worked out with the albedo
     float landLodV = (landLod.x > 1.5f) ? 1.0f : landBandV;
     smoothness = lerp(smoothness, landLodK.x, landLodV);
     specMask = lerp(specMask, landLodK.y, landLodV);
-    bool tmp13565;
+    bool cond32;
     if (cellOn)
     {
-        tmp13565 = landWetOn || landSwashOn;
+        cond32 = landWetOn || landSwashOn;
     }
     else
     {
-        tmp13565 = cellOn;
+        cond32 = cellOn;
     }
-    if (tmp13565)
+    if (cond32)
     {
-        float3 param_29 = -ViewDir;
-        float3 Pl = cellWorldPos(param_29);
-        float3 param_30 = btnMatrix_norm[2];
-        float3 Nl = cellWorldDir(param_30);
-        float3 param_31 = Pl;
-        float3 param_32 = Nl;
-        float2 wet = wwLandWet(param_31, param_32);
-        float3 param_33 = Pl;
-        float3 param_34 = Nl;
-        float param_35 = landSwashTime;
-        float4 sw = wwLandSwash(param_33, param_34, param_35);
+        float3 posViewArg18 = -ViewDir;
+        float3 Pl = cellWorldPos(posViewArg18);
+        float3 dirViewArg9 = btnMatrix_norm[2];
+        float3 Nl = cellWorldDir(dirViewArg9);
+        float3 PArg9 = Pl;
+        float3 NArg9 = Nl;
+        float2 wet = wwLandWet(PArg9, NArg9);
+        float3 PArg8 = Pl;
+        float3 NArg8 = Nl;
+        float tArg = landSwashTime;
+        float4 sw = wwLandSwash(PArg8, NArg8, tArg);
         wet = max(wet, sw.zx);
         float por = float(landShoreTerrain);
-        float param_36 = wet.x;
-        float param_37 = por;
-        albedo *= pow(wwLandWetBase(param_36, param_37), 0.4545454680919647216796875f);
-        float param_38 = 1.0f - smoothness;
-        float2 param_39 = wet;
-        float param_40 = por;
-        smoothness = 1.0f - wwLandWetRough(param_38, param_39, param_40);
+        float wArg3 = wet.x;
+        float porArg2 = por;
+        // the albedo is texture gamma here
+        albedo *= pow(wwLandWetBase(wArg3, porArg2), 0.4545454680919647216796875f);
+        float roughArg2 = 1.0f - smoothness;
+        float2 wetArg = wet;
+        float porArg = por;
+        smoothness = 1.0f - wwLandWetRough(roughArg2, wetArg, porArg);
         specMask = lerp(specMask, max(specMask, 0.5f), wet.y);
+        // the run-up's foam (texture gamma)
         albedo = lerp(albedo, 0.89999997615814208984375f.xxx, sw.y.xxx);
     }
-    bool tmp13637;
+    bool cond31;
     if (cellOn)
     {
-        tmp13637 = rainWet.x > 0.0f;
+        cond31 = rainWet.x > 0.0f;
     }
     else
     {
-        tmp13637 = cellOn;
+        cond31 = cellOn;
     }
-    if (tmp13637)
+    if (cond31)
     {
-        float param_41 = smoothness;
-        float param_42 = 0.0f;
-        float3 param_43 = -ViewDir;
-        float3 param_44 = btnMatrix_norm[2];
-        float3 param_45 = cellWorldPos(param_43);
-        float3 param_46 = cellWorldDir(param_44);
-        float rw = wwRainWetW(param_41, param_42) * wwRainWetExposed(param_45, param_46);
+        float glossArg5 = smoothness;
+        float metalArg = 0.0f;
+        float3 posViewArg17 = -ViewDir;
+        float3 dirViewArg8 = btnMatrix_norm[2];
+        float3 PArg7 = cellWorldPos(posViewArg17);
+        float3 NArg7 = cellWorldDir(dirViewArg8);
+        // FO76WEATHER2: dry under cover
+        float rw = wwRainWetW(glossArg5, metalArg) * wwRainWetExposed(PArg7, NArg7);
+        // the albedo is texture gamma here
         albedo *= pow(1.0f - (0.800000011920928955078125f * rw), 0.4545454680919647216796875f);
-        float param_47 = smoothness;
-        float param_48 = rw;
-        smoothness = wwRainWetSmooth(param_47, param_48);
+        float glossArg4 = smoothness;
+        float wArg2 = rw;
+        smoothness = wwRainWetSmooth(glossArg4, wArg2);
     }
+    // FO4 encodes NO metallicity, so F0 is the dielectric constant and _s.R
+    // stays what it is authored as — a specular MASK, not a metalness channel.
+    // The old hardcoded F0 of 0.2 was ~5x too reflective for a dielectric; the
+    // editor's default is 0.04.
     float rough = clamp(1.0f - smoothness, 0.0199999995529651641845703125f, 1.0f);
     float alphaR = rough * rough;
     float kSmith = ((rough + 1.0f) * (rough + 1.0f)) * 0.125f;
-    float param_49 = VdotH;
-    float param_50 = 0.039999999105930328369140625f;
-    float F = fresnelSchlick(param_49, param_50);
-    float param_51 = NdotH;
-    float param_52 = alphaR;
-    float param_53 = NdotL0;
-    float param_54 = kSmith;
-    float param_55 = NdotV;
-    float param_56 = kSmith;
-    float3 spec = (((((((D_GGX(param_51, param_52) * G1(param_53, param_54)) * G1(param_55, param_56)) * F) / max((4.0f * NdotL0) * NdotV, 0.001000000047497451305389404296875f)).xxx * specMask) * NdotL0) * Dair.xyz) * specColor;
+    float VdotHArg6 = VdotH;
+    float F0Arg5 = 0.039999999105930328369140625f;
+    // fresnelSchlick honours the material's authored Fresnel Power rather than
+    // hardwiring ^5 — that field exists in FO4 and the editor has no equivalent.
+    float F = fresnelSchlick(VdotHArg6, F0Arg5);
+    float NdotHArg3 = NdotH;
+    float alpha_1Arg = alphaR;
+    float NdotXArg2 = NdotL0;
+    float kArg2 = kSmith;
+    float NdotXArg = NdotV;
+    float kArg = kSmith;
+    float3 spec = (((((((D_GGX(NdotHArg3, alpha_1Arg) * G1(NdotXArg2, kArg2)) * G1(NdotXArg, kArg)) * F) / max((4.0f * NdotL0) * NdotV, 0.001000000047497451305389404296875f)).xxx * specMask) * NdotL0) * Dair.xyz) * specColor;
     float ambF0 = 0.039999999105930328369140625f;
     float ambMask = specMask;
     if (!editorBrdf)
     {
+        // n = 2^(gloss x 10 + 1), F0 0.2, no specular without a specular map, no (1 - F) on the diffuse
         F = 0.0f;
         ambF0 = 0.20000000298023223876953125f;
         spec = 0.0f.xxx;
         if (hasSpecularMap)
         {
-            float param_57 = NdotL0;
-            float param_58 = NdotH;
-            float param_59 = NdotV;
-            float param_60 = VdotH;
-            float3 param_61 = specMask.xxx;
-            float param_62 = exp2((smoothness * 10.0f) + 1.0f);
-            float param_63 = 0.20000000298023223876953125f;
-            spec = ((TorranceSparrow(param_57, param_58, param_59, param_60, param_61, param_62, param_63) * NdotL0) * Dair.xyz) * specColor;
+            float NdotLArg3 = NdotL0;
+            float NdotHArg2 = NdotH;
+            float NdotVArg3 = NdotV;
+            float VdotHArg5 = VdotH;
+            float3 colorArg2 = specMask.xxx;
+            float powerArg = exp2((smoothness * 10.0f) + 1.0f);
+            float F0Arg4 = 0.20000000298023223876953125f;
+            spec = ((TorranceSparrow(NdotLArg3, NdotHArg2, NdotVArg3, VdotHArg5, colorArg2, powerArg, F0Arg4) * NdotL0) * Dair.xyz) * specColor;
         }
         else
         {
             ambMask = 1.0f;
         }
     }
+    // lane SUNCELL1: the sun's specular before the cube (the exterior cell sun keeps it)
     float3 specSun = spec;
+    // Environment
     float specSky = 1.0f;
     if (cellOn)
     {
-        float3 param_64 = -ViewDir;
-        float3 param_65 = normal;
-        float3 param_66 = R;
-        float3 param_67 = cellWorldPos(param_64);
-        float3 param_68 = cellWorldDir(param_65);
-        float3 param_69 = cellWorldDir(param_66);
-        float param_70 = rough;
-        specSky = cellSpecSky(param_67, param_68, param_69, param_70);
+        float3 posViewArg16 = -ViewDir;
+        float3 dirViewArg7 = normal;
+        float3 dirViewArg6 = R;
+        float3 PArg6 = cellWorldPos(posViewArg16);
+        float3 NArg6 = cellWorldDir(dirViewArg7);
+        float3 RArg = cellWorldDir(dirViewArg6);
+        float roughArg = rough;
+        specSky = cellSpecSky(PArg6, NArg6, RArg, roughArg);
     }
     float4 cube = CubeMap.SampleLevel(_CubeMap_sampler, reflectedWS, 8.0f - (smoothness * 8.0f));
     float4 env = EnvironmentMap.Sample(_EnvironmentMap_sampler, offset);
+    // lane PRTPGI: the reflection before the viewport light, for the cell path
     float3 envSpec = 0.0f.xxx;
     if (hasCubeMap)
     {
-        float4 tmp13807 = cube;
-        float3 tmp13809 = tmp13807.xyz * (envReflection * specStrength);
-        cube.x = tmp13809.x;
-        cube.y = tmp13809.y;
-        cube.z = tmp13809.z;
+        float4 cubePart6 = cube;
+        float3 cubePart5 = cubePart6.xyz * (envReflection * specStrength);
+        cube.x = cubePart5.x;
+        cube.y = cubePart5.y;
+        cube.z = cubePart5.z;
         if (hasEnvMask)
         {
-            float4 tmp13822 = cube;
-            float3 tmp13824 = tmp13822.xyz * env.x;
-            cube.x = tmp13824.x;
-            cube.y = tmp13824.y;
-            cube.z = tmp13824.z;
+            float4 cubePart4 = cube;
+            float3 cubePart3 = cubePart4.xyz * env.x;
+            cube.x = cubePart3.x;
+            cube.y = cubePart3.y;
+            cube.z = cubePart3.z;
         }
         else
         {
-            float4 tmp13833 = cube;
-            float3 tmp13835 = tmp13833.xyz * s;
-            cube.x = tmp13835.x;
-            cube.y = tmp13835.y;
-            cube.z = tmp13835.z;
+            float4 cubePart2 = cube;
+            float3 cubePart = cubePart2.xyz * s;
+            cube.x = cubePart.x;
+            cube.y = cubePart.y;
+            cube.z = cubePart.z;
         }
         envSpec = cube.xyz;
         spec += ((cube.xyz * diffuse) * specSky);
     }
+    // lane CUBE1: the reflection the cell path adds before its light, linear: the game's term, or the old one
+    // (squared, x Lambert, the default cube too) under WW_CELL_LIT_RED=cubeold
     float3 cubeK = envSpec * envSpec;
-    bool tmp13862;
+    bool cond30;
     if (cellOn)
     {
-        tmp13862 = (cellRed & 512) == 0;
+        cond30 = (cellRed & 512) == 0;
     }
     else
     {
-        tmp13862 = cellOn;
+        cond30 = cellOn;
     }
-    if (tmp13862)
+    if (cond30)
     {
-        float3 tmp13866;
+        float3 cubeKPick;
         if (hasCubeMap)
         {
-            float tmp13872;
+            float glossPick3;
             if (hasSpecularMap)
             {
-                tmp13872 = specMap.y;
+                glossPick3 = specMap.y;
             }
             else
             {
-                tmp13872 = 1.0f;
+                glossPick3 = 1.0f;
             }
-            float tmp13883;
+            float specPick3;
             if (hasSpecularMap)
             {
-                tmp13883 = specMap.x;
+                specPick3 = specMap.x;
             }
             else
             {
-                tmp13883 = 1.0f;
+                specPick3 = 1.0f;
             }
-            float3 param_71 = reflectedWS;
-            float param_72 = cellCubeMat.y * tmp13872;
-            float param_73 = cellCubeMat.x * tmp13883;
-            float param_74 = envReflection;
-            float3 param_75 = -ViewDir;
-            tmp13866 = cellCubeGame(CubeMap, _CubeMap_sampler, param_71, param_72, param_73, param_74, param_75);
+            float3 dirArg = reflectedWS;
+            float glossArg3 = cellCubeMat.y * glossPick3;
+            float specArg3 = cellCubeMat.x * specPick3;
+            float envScaleArg3 = envReflection;
+            float3 posViewArg15 = -ViewDir;
+            cubeKPick = cellCubeGame(CubeMap, _CubeMap_sampler, dirArg, glossArg3, specArg3, envScaleArg3, posViewArg15);
         }
         else
         {
-            tmp13866 = 0.0f.xxx;
+            cubeKPick = 0.0f.xxx;
         }
-        cubeK = tmp13866;
+        cubeK = cubeKPick;
     }
-    bool tmp13905 = cellOn && hasCubeMap;
-    bool tmp13911;
-    if (tmp13905)
+    bool cond29 = cellOn && hasCubeMap;
+    bool cond28;
+    if (cond29)
     {
-        tmp13911 = (cellRed & 512) == 0;
+        cond28 = (cellRed & 512) == 0;
     }
     else
     {
-        tmp13911 = tmp13905;
+        cond28 = cond29;
     }
-    if (tmp13911)
+    if (cond28)
     {
-        float tmp13919;
+        float glossPick2;
         if (hasSpecularMap)
         {
-            tmp13919 = specMap.y;
+            glossPick2 = specMap.y;
         }
         else
         {
-            tmp13919 = 1.0f;
+            glossPick2 = 1.0f;
         }
-        float tmp13930;
+        float specPick2;
         if (hasSpecularMap)
         {
-            tmp13930 = specMap.x;
+            specPick2 = specMap.x;
         }
         else
         {
-            tmp13930 = 1.0f;
+            specPick2 = 1.0f;
         }
-        float3 param_76 = -ViewDir;
-        float3 param_77 = R;
-        float param_78 = cellCubeMat.y * tmp13919;
-        float param_79 = cellCubeMat.x * tmp13930;
-        float param_80 = envReflection;
-        float tmp13945 = cellReflProbe(GreyscaleMap, _GreyscaleMap_sampler, param_76, param_77, param_78, param_79, param_80);
-        cubeK *= tmp13945;
+        float3 posViewArg14 = -ViewDir;
+        float3 reflViewArg = R;
+        float glossArg2 = cellCubeMat.y * glossPick2;
+        float specArg2 = cellCubeMat.x * specPick2;
+        float envScaleArg2 = envReflection;
+        float cellReflProbeRet = cellReflProbe(GreyscaleMap, _GreyscaleMap_sampler, posViewArg14, reflViewArg, glossArg2, specArg2, envScaleArg2);
+        cubeK *= cellReflProbeRet;
     }
     if (cellOn)
     {
-        float tmp13954;
+        float glossPick;
         if (hasSpecularMap)
         {
-            tmp13954 = specMap.y;
+            glossPick = specMap.y;
         }
         else
         {
-            tmp13954 = 1.0f;
+            glossPick = 1.0f;
         }
-        float tmp13969;
+        float specPick;
         if (hasSpecularMap)
         {
-            tmp13969 = specMap.x;
+            specPick = specMap.x;
         }
         else
         {
-            tmp13969 = 1.0f;
+            specPick = 1.0f;
         }
-        float3 param_81 = cubeK;
-        float param_82 = lerp(cellCubeMat.y * tmp13954, landLodK.x, landLodV);
-        float param_83 = lerp(cellCubeMat.x * tmp13969, landLodK.y, landLodV);
-        float param_84 = envReflection;
-        float3 tmp13987 = cellSsrMix(param_81, param_82, param_83, param_84);
-        cubeK = tmp13987;
+        float3 cubeKArg2 = cubeK;
+        float glossArg = lerp(cellCubeMat.y * glossPick, landLodK.x, landLodV);
+        float specArg = lerp(cellCubeMat.x * specPick, landLodK.y, landLodV);
+        float envScaleArg = envReflection;
+        float3 cellSsrMixRet = cellSsrMix(cubeKArg2, glossArg, specArg, envScaleArg);
+        cubeK = cellSsrMixRet;
     }
+    // lane SPECOCC1: after the SSR mix, as FO4CS scales its reflection after the SSR blend
     cubeK *= specSky;
     float3 backlight = 0.0f.xxx;
     if (backlightPower > 0.0f)
     {
         backlight = (albedo * NdotNegL) * clamp(backlightPower, 0.0f, 1.0f);
-        bool tmp14005 = cellOn && cellHasDir;
-        bool tmp14012;
-        if (tmp14005)
+        bool cond27 = cellOn && cellHasDir;
+        bool cond26;
+        if (cond27)
         {
-            tmp14012 = (cellRed & 2048) == 0;
+            cond26 = (cellRed & 2048) == 0;
         }
         else
         {
-            tmp14012 = tmp14005;
+            cond26 = cond27;
         }
-        if (tmp14012)
+        if (cond26)
         {
             float bk = NdotNegL * clamp(backlightPower, 0.0f, 1.0f);
             cellBackK = (bk * bk) * max(wwFarSkyVis, 0.0f);
@@ -1969,16 +2116,17 @@ void frag_main()
         rim = pow(1.0f - NdotV, rimPower).xxx;
         rim *= smoothstep(-0.20000000298023223876953125f, 1.0f, dot(-L, V));
     }
-    float param_85 = NdotL;
-    float param_86 = dot(normal, V);
-    float param_87 = dot(L, V);
-    float param_88 = 1.0f - smoothness;
-    float diff = OrenNayarFull(param_85, param_86, param_87, param_88);
+    float NdotLArg2 = NdotL;
+    float NdotVArg2 = dot(normal, V);
+    float LdotVArg = dot(L, V);
+    float roughnessArg = 1.0f - smoothness;
+    // Diffuse
+    float diff = OrenNayarFull(NdotLArg2, NdotVArg2, LdotVArg, roughnessArg);
     diffuse = diff.xxx;
     float3 soft = 0.0f.xxx;
     float wrap = NdotL;
     bool wwh0 = (subsurfaceRolloff > 0.0f);
-    if (hasSoftlight || wwh0)
+    if (or(hasSoftlight, wwh0))   // HLSLFIX2 orfix.py: no short-circuit branch (NV took the wrong side)
     {
         wrap = (wrap + subsurfaceRolloff) / (1.0f + subsurfaceRolloff);
         soft = (albedo * max(0.0f, wrap)) * smoothstep(1.0f, 0.0f, sqrt(diff));
@@ -1988,264 +2136,300 @@ void frag_main()
     {
         albedo *= tintColor;
     }
-    float3 tmp14114 = ((diffuse * albedo) * Dair.xyz) * (1.0f - F);
-    color.x = tmp14114.x;
-    color.y = tmp14114.y;
-    color.z = tmp14114.z;
-    float4 tmp14125 = color;
-    float3 tmp14127 = tmp14125.xyz + (A.xyz * albedo);
-    color.x = tmp14127.x;
-    color.y = tmp14127.y;
-    color.z = tmp14127.z;
-    float4 tmp14135 = color;
-    float3 tmp14137 = tmp14135.xyz + spec;
-    color.x = tmp14137.x;
-    color.y = tmp14137.y;
-    color.z = tmp14137.z;
-    float param_89 = VdotH;
-    float param_90 = ambF0;
-    float4 tmp14160 = color;
-    float3 tmp14162 = tmp14160.xyz + ((((A.xyz * ambMask) * fresnelSchlick(param_89, param_90)) * (1.0f - NdotV)) * Dair.xyz);
-    color.x = tmp14162.x;
-    color.y = tmp14162.y;
-    color.z = tmp14162.z;
-    float4 tmp14179 = color;
-    float3 tmp14181 = tmp14179.xyz + (emissive * glowScaleSRGB);
-    color.x = tmp14181.x;
-    color.y = tmp14181.y;
-    color.z = tmp14181.z;
+    float3 colorPart22 = ((diffuse * albedo) * Dair.xyz) * (1.0f - F);
+    color.x = colorPart22.x;
+    color.y = colorPart22.y;
+    color.z = colorPart22.z;
+    float4 colorPart21 = color;
+    float3 colorPart20 = colorPart21.xyz + (A.xyz * albedo);
+    color.x = colorPart20.x;
+    color.y = colorPart20.y;
+    color.z = colorPart20.z;
+    float4 colorPart19 = color;
+    float3 colorPart18 = colorPart19.xyz + spec;
+    color.x = colorPart18.x;
+    color.y = colorPart18.y;
+    color.z = colorPart18.z;
+    float VdotHArg4 = VdotH;
+    float F0Arg3 = ambF0;
+    float4 colorPart17 = color;
+    float3 colorPart16 = colorPart17.xyz + ((((A.xyz * ambMask) * fresnelSchlick(VdotHArg4, F0Arg3)) * (1.0f - NdotV)) * Dair.xyz);
+    color.x = colorPart16.x;
+    color.y = colorPart16.y;
+    color.z = colorPart16.z;
+    float4 colorPart15 = color;
+    float3 colorPart14 = colorPart15.xyz + (emissive * glowScaleSRGB);
+    color.x = colorPart14.x;
+    color.y = colorPart14.y;
+    color.z = colorPart14.z;
+    // lane SKY1: outdoors the bounce grid's sky stands in for the weather's unshadowed ambient (0 elsewhere)
+    // lane SUNCELL1: an exterior with the weather's sun (cellHasDir) hands cellLit the ambient alone; the sun's
+    // diffuse and the cube are the game's terms there, its specular the viewport's (cellExtSpec, linear)
     if ((cellOn && (!cellInterior)) && cellHasDir)
     {
-        float param_91 = VdotH;
-        float param_92 = 0.039999999105930328369140625f;
-        float3 sx = (specSun * sqrt(max(cellSunScale, 0.0f))) + ((((A.xyz * specMask) * fresnelSchlick(param_91, param_92)) * (1.0f - NdotV)) * Dair.xyz);
+        float VdotHArg3 = VdotH;
+        float F0Arg2 = 0.039999999105930328369140625f;
+        // lane BOUNCE1: the sun's specular x the imagespace Sunlight Scale, as its diffuse (cellDirColor); sqrt space here
+        float3 sx = (specSun * sqrt(max(cellSunScale, 0.0f))) + ((((A.xyz * specMask) * fresnelSchlick(VdotHArg3, F0Arg2)) * (1.0f - NdotV)) * Dair.xyz);
         cellExtSpec = sx * sx;
+        // lane SUNCELL1: the ambient is the weather's directional ambient (DALC, the hour's keys) through the
+        // interior's law (cellAmbient), not the flat NAM0 Ambient the viewport carries
         float3 Ax = A.xyz;
         if (cellExtDalc)
         {
-            float3 param_93 = normal;
-            float3 param_94 = -ViewDir;
-            float3 param_95 = cellWorldDir(param_93);
-            float3 param_96 = cellWorldPos(param_94);
-            Ax = sqrt(cellAmbient(param_95, param_96));
+            float3 dirViewArg5 = normal;
+            float3 posViewArg13 = -ViewDir;
+            float3 NArg5 = cellWorldDir(dirViewArg5);
+            float3 PArg5 = cellWorldPos(posViewArg13);
+            Ax = sqrt(cellAmbient(NArg5, PArg5));
         }
         cellExtAmb = Ax * Ax;
-        float3 tmp14245 = Ax * albedo;
-        color.x = tmp14245.x;
-        color.y = tmp14245.y;
-        color.z = tmp14245.z;
-        bool tmp14253 = cellGiSky && false;
-        bool tmp14260;
-        if (tmp14253)
+        float3 colorPart13 = Ax * albedo;
+        color.x = colorPart13.x;
+        color.y = colorPart13.y;
+        color.z = colorPart13.z;
+        bool cond25 = cellGiSky && false;
+        bool cond24;
+        if (cond25)
         {
-            tmp14260 = (cellRed & 131072) == 0;
+            cond24 = (cellRed & 131072) == 0;
         }
         else
         {
-            tmp14260 = tmp14253;
+            cond24 = cond25;
         }
-        if (tmp14260)
+        if (cond24)
         {
-            float3 param_97 = -ViewDir;
-            float3 param_98 = normal;
-            float3 param_99 = cellWorldPos(param_97);
-            float3 param_100 = cellWorldDir(param_98);
-            float k_1 = cellGiSkyK(param_99, param_100);
-            float4 tmp14277 = color;
-            float3 tmp14279 = tmp14277.xyz * sqrt(1.0f - k_1);
-            color.x = tmp14279.x;
-            color.y = tmp14279.y;
-            color.z = tmp14279.z;
+            float3 posViewArg12 = -ViewDir;
+            float3 dirViewArg4 = normal;
+            float3 PArg4 = cellWorldPos(posViewArg12);
+            float3 NArg4 = cellWorldDir(dirViewArg4);
+            float k_1 = cellGiSkyK(PArg4, NArg4);
+            float4 colorPart12 = color;
+            float3 colorPart11 = colorPart12.xyz * sqrt(1.0f - k_1);
+            color.x = colorPart11.x;
+            color.y = colorPart11.y;
+            color.z = colorPart11.z;
             cellExtAmb *= (1.0f - k_1);
         }
+        // lane FIX1101A lodch: the share of the weather's ambient the GI did not replace takes the far placement's
+        // baked sky visibility (src/features/far-lod/lodchsky.h: the byte read as the GI's share, so near (GI) and far (bake) agree at
+        // the last cascade edge). Exactly 1 on every other shape: nothing changes there
         if (wwFarSkyVis < 0.99989998340606689453125f)
         {
-            float4 tmp14297 = color;
-            float3 tmp14299 = tmp14297.xyz * sqrt(max(wwFarSkyVis, 0.0f));
-            color.x = tmp14299.x;
-            color.y = tmp14299.y;
-            color.z = tmp14299.z;
+            float4 colorPart10 = color;
+            float3 colorPart9 = colorPart10.xyz * sqrt(max(wwFarSkyVis, 0.0f));
+            color.x = colorPart9.x;
+            color.y = colorPart9.y;
+            color.z = colorPart9.z;
             cellExtAmb *= max(wwFarSkyVis, 0.0f);
         }
     }
-    bool tmp14315;
+    bool cond23;
     if (cellOn)
     {
-        tmp14315 = cellGiSky && false;
+        cond23 = cellGiSky && false;
     }
     else
     {
-        tmp14315 = cellOn;
+        cond23 = cellOn;
     }
-    bool tmp14321;
-    if (tmp14315)
+    bool cond22;
+    if (cond23)
     {
-        tmp14321 = (cellRed & 131072) == 0;
-    }
-    else
-    {
-        tmp14321 = tmp14315;
-    }
-    bool tmp14329;
-    if (tmp14321)
-    {
-        tmp14329 = !((!cellInterior) && cellHasDir);
+        cond22 = (cellRed & 131072) == 0;
     }
     else
     {
-        tmp14329 = tmp14321;
+        cond22 = cond23;
     }
-    if (tmp14329)
+    bool cond21;
+    if (cond22)
     {
-        float3 param_101 = -ViewDir;
-        float3 param_102 = normal;
-        float3 param_103 = cellWorldPos(param_101);
-        float3 param_104 = cellWorldDir(param_102);
-        float k_2 = cellGiSkyK(param_103, param_104);
-        float4 tmp14352 = color;
-        float3 tmp14354 = tmp14352.xyz - ((A.xyz * (1.0f - sqrt(1.0f - k_2))) * albedo);
-        color.x = tmp14354.x;
-        color.y = tmp14354.y;
-        color.z = tmp14354.z;
+        cond21 = !((!cellInterior) && cellHasDir);
     }
     else
     {
-        bool tmp14367;
+        cond21 = cond22;
+    }
+    if (cond21)
+    {
+        float3 posViewArg11 = -ViewDir;
+        float3 dirViewArg3 = normal;
+        float3 PArg3 = cellWorldPos(posViewArg11);
+        float3 NArg3 = cellWorldDir(dirViewArg3);
+        // lane GISHADE1: without the weather's sun the colour carries the flat A x albedo among its other terms: keep
+        // sqrt(1 - k) of that ambient (linear (1 - k)), the rest as drawn
+        float k_2 = cellGiSkyK(PArg3, NArg3);
+        float4 colorPart8 = color;
+        float3 colorPart7 = colorPart8.xyz - ((A.xyz * (1.0f - sqrt(1.0f - k_2))) * albedo);
+        color.x = colorPart7.x;
+        color.y = colorPart7.y;
+        color.z = colorPart7.z;
+    }
+    else
+    {
+        bool cond20;
         if (cellOn)
         {
-            tmp14367 = cellGiSky && false;
+            cond20 = cellGiSky && false;
         }
         else
         {
-            tmp14367 = cellOn;
+            cond20 = cellOn;
         }
-        bool tmp14373;
-        if (tmp14367)
+        bool cond19;
+        if (cond20)
         {
-            tmp14373 = (cellRed & 131072) != 0;
+            cond19 = (cellRed & 131072) != 0;
         }
         else
         {
-            tmp14373 = tmp14367;
+            cond19 = cond20;
         }
-        if (tmp14373)
+        if (cond19)
         {
-            float3 param_105 = -ViewDir;
-            float3 param_106 = normal;
-            float3 param_107 = cellWorldPos(param_105);
-            float3 param_108 = cellWorldDir(param_106);
-            float4 tmp14391 = color;
-            float3 tmp14393 = tmp14391.xyz - ((A.xyz * cellGiSkyK(param_107, param_108)) * albedo);
-            color.x = tmp14393.x;
-            color.y = tmp14393.y;
-            color.z = tmp14393.z;
+            float3 posViewArg10 = -ViewDir;
+            float3 dirViewArg2 = normal;
+            float3 PArg2 = cellWorldPos(posViewArg10);
+            float3 NArg2 = cellWorldDir(dirViewArg2);
+            float4 colorPart6 = color;
+            float3 colorPart5 = colorPart6.xyz - ((A.xyz * cellGiSkyK(PArg2, NArg2)) * albedo);
+            color.x = colorPart5.x;
+            color.y = colorPart5.y;
+            color.z = colorPart5.z;
         }
     }
+    // lane SSGI2: an exterior without the sun adds the glow before cellLit's root
     float3 cellPreLit = color.xyz;
-    bool tmp14405 = (alphaFlags & 8) != 0;
-    bool tmp14413;
-    if (!tmp14405)
+    bool cond18 = (alphaFlags & 8) != 0;
+    bool cellSpecTintPick;
+    if (!cond18)
     {
-        tmp14413 = (cellRed & 262144) != 0;
+        cellSpecTintPick = (cellRed & 262144) != 0;
     }
     else
     {
-        tmp14413 = tmp14405;
+        cellSpecTintPick = cond18;
     }
-    bool3 tmp14415 = tmp14413.xxx;
-    cellSpecTint = float3(tmp14415.x ? specColor.x : 1.0f.xxx.x, tmp14415.y ? specColor.y : 1.0f.xxx.y, tmp14415.z ? specColor.z : 1.0f.xxx.z);
+    bool3 cellSpecTintPart = cellSpecTintPick.xxx;
+    cellSpecTint = float3(cellSpecTintPart.x ? specColor.x : 1.0f.xxx.x, cellSpecTintPart.y ? specColor.y : 1.0f.xxx.y, cellSpecTintPart.z ? specColor.z : 1.0f.xxx.z);
     if (cellOn)
     {
-        float3 param_109 = color.xyz;
-        float3 param_110 = albedo;
-        float3 param_111 = normal;
-        float3 param_112 = -ViewDir;
-        float3 param_113 = V;
-        float param_114 = specMask;
-        float3 param_115 = cellSpecTint;
-        float param_116 = alphaR;
-        float param_117 = kSmith;
-        float3 param_118 = emissive * glowScaleSRGB;
-        float3 param_119 = cubeK;
-        float3 tmp14447 = cellLit(param_109, param_110, param_111, param_112, param_113, param_114, param_115, param_116, param_117, param_118, param_119);
-        color.x = tmp14447.x;
-        color.y = tmp14447.y;
-        color.z = tmp14447.z;
+        float3 colorArg = color.xyz;
+        float3 albedoArg = albedo;
+        float3 normalViewArg5 = normal;
+        float3 posViewArg9 = -ViewDir;
+        float3 VviewArg = V;
+        float specMaskArg = specMask;
+        float3 specColArg = cellSpecTint;
+        float alphaRArg2 = alphaR;
+        float kSmithArg2 = kSmith;
+        float3 emissiveArg = emissive * glowScaleSRGB;
+        float3 cubeKArg = cubeK;
+        float3 cellLitRet = cellLit(colorArg, albedoArg, normalViewArg5, posViewArg9, VviewArg, specMaskArg, specColArg, alphaRArg2, kSmithArg2, emissiveArg, cubeKArg);
+        color.x = cellLitRet.x;
+        color.y = cellLitRet.y;
+        color.z = cellLitRet.z;
     }
+    // lane SSR1: what the reflections' march samples (probe 60)
     float3 cellSsrScene = color.xyz * color.xyz;
     if (cellOn && (cellProbe == 60))
     {
+        // lane SSGI2: the glow's share of that (cellLit adds it after the root; c^2 - (c - e)^2), coverage in a
         float3 e = max(emissive * glowScaleSRGB, 0.0f.xxx);
-        float3 tmp14478;
+        float3 cPick;
         if ((!cellInterior) && (!cellHasDir))
         {
-            tmp14478 = cellPreLit;
+            cPick = cellPreLit;
         }
         else
         {
-            tmp14478 = color.xyz;
+            cPick = color.xyz;
         }
-        float3 c = tmp14478;
+        float3 c = cPick;
         float3 c0 = max(c - e, 0.0f.xxx);
         float3 em = clamp((c * c) - (c0 * c0), 0.0f.xxx, cellSsrScene);
         cellEmitOut = float4(em, float(dot(em, float3(0.2125999927520751953125f, 0.715200006961822509765625f, 0.072200000286102294921875f)) > 9.9999999747524270787835121154785e-07f));
     }
     if (cellOn)
     {
-        float param_120 = wwFarAo;
-        float4 tmp14518 = color;
-        float3 tmp14520 = tmp14518.xyz * sqrt(cellAoShared(param_120));
-        color.x = tmp14520.x;
-        color.y = tmp14520.y;
-        color.z = tmp14520.z;
+        float bakedArg = wwFarAo;
+        float4 colorPart4 = color;
+        float3 colorPart3 = colorPart4.xyz * sqrt(cellAoShared(bakedArg));
+        color.x = colorPart3.x;
+        color.y = colorPart3.y;
+        color.z = colorPart3.z;
     }
-    bool tmp14532;
+    bool cond17;
+    // lane FOG1 (Lookdev weather fog): this colour is sqrt of linear light (tonemap squares it),
+    // so the fog runs on its square, before the exposure and the curve
+    // lane SKYA: the sky's aerial perspective with the fog off too
     if (!fogOn)
     {
-        tmp14532 = wwApOn();
+        cond17 = wwApOn();
     }
     else
     {
-        tmp14532 = fogOn;
+        cond17 = fogOn;
     }
-    if (tmp14532)
+    if (cond17)
     {
-        float3 param_121 = color.xyz * color.xyz;
-        float3 param_122 = -ViewDir;
-        float3 tmp14544 = wwFog(param_121, param_122);
-        float3 tmp14546 = sqrt(max(tmp14544, 0.0f.xxx));
-        color.x = tmp14546.x;
-        color.y = tmp14546.y;
-        color.z = tmp14546.z;
+        float3 preFogArg3 = color.xyz * color.xyz;
+        float3 posViewArg8 = -ViewDir;
+        float3 wwFogRet3 = wwFog(preFogArg3, posViewArg8);
+        float3 colorPart2 = sqrt(max(wwFogRet3, 0.0f.xxx));
+        color.x = colorPart2.x;
+        color.y = colorPart2.y;
+        color.z = colorPart2.z;
     }
+    // lane IMGS1: the cell's imagespace in place of the viewer's curve; probe 6 writes the linear colour raw
     float3 cellHdr = color.xyz * color.xyz;
     if (cellOn && cellIsOn)
     {
-        float3 tmp14567;
+        float3 colorPick2;
         if (cellIsLinear)
         {
-            tmp14567 = cellHdr;
+            colorPick2 = cellHdr;
         }
         else
         {
-            float3 param_123 = color.xyz;
-            tmp14567 = cellImageSpace(param_123);
+            float3 sqrtColorArg = color.xyz;
+            colorPick2 = cellImageSpace(sqrtColorArg);
         }
-        color.x = tmp14567.x;
-        color.y = tmp14567.y;
-        color.z = tmp14567.z;
+        color.x = colorPick2.x;
+        color.y = colorPick2.y;
+        color.z = colorPick2.z;
     }
     else
     {
-        float3 param_124 = color.xyz;
-        float3 tmp14587 = tonemap(param_124);
-        color.x = tmp14587.x;
-        color.y = tmp14587.y;
-        color.z = tmp14587.z;
+        float3 xArg = color.xyz;
+        float3 tonemapRet = tonemap(xArg);
+        color.x = tonemapRet.x;
+        color.y = tonemapRet.y;
+        color.z = tonemapRet.z;
     }
     if (doRefraction)
     {
+        // sample the already-rendered scene behind the shape, displaced by the
+        // (normal-mapped) surface normal - glass / heat-haze preview. The base
+        // texture of a refraction mesh is a distortion/noise map (not a diffuse
+        // colour), so it must NOT tint the result: show the clean refracted
+        // background. (Per-texel alpha blending garbled the render because the
+        // base texture is not opacity, so it is deliberately not applied here.)
         float2 suv = (gl_FragCoord.xy - float2(viewportDimensions.xy)) / float2(viewportDimensions.zw);
+        // Every route that scales the effect, multiplied together:
+        // - normal.xy is the eye-space shading normal, so the NORMAL MAP is
+        // what decides where each texel of the background is fetched from;
+        // a flat-normal region samples straight through and shows the scene
+        // unchanged.
+        // - refractionStrength is the property's Refraction Strength, static
+        // or driven per frame by a BSLightingShaderPropertyFloatController
+        // on Controlled Variable 0.
+        // - C.a is the effective per-vertex alpha (1.0 when the mesh has no
+        // vertex colours, because vertexColorOverride replaces it), so an
+        // authored alpha-0 region distorts nothing and alpha-1 distorts
+        // fully.
         float rStrength = clamp(refractionStrength, 0.0f, 1.0f) * clamp(C.w, 0.0f, 1.0f);
         float2 roffs = ((normal.xy * rStrength) * 0.0500000007450580596923828125f) * float2(float(viewportDimensions.w) / float(max(viewportDimensions.z, 1)), 1.0f);
         float3 bg = RefractionSrc.Sample(_RefractionSrc_sampler, clamp(suv + roffs, 0.001000000047497451305389404296875f.xx, 0.999000012874603271484375f.xx)).xyz;
@@ -2254,81 +2438,90 @@ void frag_main()
         color.z = bg.z;
         color.w = 1.0f;
     }
+    // MODULES1 M2 (bungo 11-10, decal_tall_wall / decal_unfogged_wall: the whole grime rectangle showed, dark in the
+    // sun, light in the fog). A multiply decal's material (GrimeSubtle01.BGSM: blend DestColor x Zero) multiplies the
+    // ALBEDO under it in the game's g-buffer, before any light. Drawn lit and fogged here, its output multiplied the lit
+    // frame by the decal's own light: the rectangle took the alley's darkness twice, and the fog's colour once. Now it
+    // writes the albedo factor alone, its texture alpha as the coverage (GrimeSubtle01_d: rgb mean 31/255, alpha mean
+    // 12/255: the dark rgb counts only where the alpha says grime), gamma-2 albedo -> linear: squared, pushed to neutral
+    // by the fog's transmittance at the pixel (the fog's own affine split: wwFog(1) - wwFog(0)), so the decal fades
+    // with the wall under it.
     if (cellOn && (wwMulDecal != 0))
     {
+        // the blend doubles a 2x decal: neutral grey is 0.5
         float m_1 = (wwMulDecal == 2) ? 2.0f : 1.0f;
-        float param_125 = C.w;
-        float cov = clamp((wwDecalVertexA(param_125) * baseMap.w) * alpha, 0.0f, 1.0f);
+        float vertexAArg = C.w;
+        float cov = clamp((wwDecalVertexA(vertexAArg) * baseMap.w) * alpha, 0.0f, 1.0f);
         float3 k_3 = clamp(lerp((1.0f / m_1).xxx, albedo, cov.xxx) * m_1, 0.0f.xxx, m_1.xxx);
         float3 F_1 = k_3 * k_3;
-        bool tmp14701;
+        bool cond16;
         if (!fogOn)
         {
-            tmp14701 = wwApOn();
+            cond16 = wwApOn();
         }
         else
         {
-            tmp14701 = fogOn;
+            cond16 = fogOn;
         }
-        if (tmp14701)
+        if (cond16)
         {
-            float3 param_126 = 0.0f.xxx;
-            float3 param_127 = -ViewDir;
-            float3 tmp14709 = wwFog(param_126, param_127);
-            float3 f0 = tmp14709;
-            float3 param_128 = 1.0f.xxx;
-            float3 param_129 = -ViewDir;
-            float3 tmp14715 = wwFog(param_128, param_129);
-            float3 T = clamp(tmp14715 - f0, 0.0f.xxx, 1.0f.xxx);
+            float3 preFogArg2 = 0.0f.xxx;
+            float3 posViewArg7 = -ViewDir;
+            float3 wwFogRet2 = wwFog(preFogArg2, posViewArg7);
+            float3 f0 = wwFogRet2;
+            float3 preFogArg = 1.0f.xxx;
+            float3 posViewArg6 = -ViewDir;
+            float3 wwFogRet = wwFog(preFogArg, posViewArg6);
+            float3 T = clamp(wwFogRet - f0, 0.0f.xxx, 1.0f.xxx);
             F_1 = lerp(1.0f.xxx, F_1, T);
         }
-        float3 tmp14725;
+        float3 colorPick;
         if (cellIsOn && cellIsLinear)
         {
-            tmp14725 = F_1;
+            colorPick = F_1;
         }
         else
         {
-            tmp14725 = sqrt(F_1);
+            colorPick = sqrt(F_1);
         }
-        float3 tmp14735 = tmp14725 / m_1.xxx;
-        color.x = tmp14735.x;
-        color.y = tmp14735.y;
-        color.z = tmp14735.z;
+        float3 colorPart = colorPick / m_1.xxx;
+        color.x = colorPart.x;
+        color.y = colorPart.y;
+        color.z = colorPart.z;
     }
     fragColor = color;
     if (cellOn && (cellProbe > 0))
     {
-        float4 tmp14751;
+        float4 fragColorPick3;
         if (cellProbe == 6)
         {
-            tmp14751 = float4(cellHdr * cellProbeGain, color.w);
+            fragColorPick3 = float4(cellHdr * cellProbeGain, color.w);
         }
         else
         {
-            float3 param_130 = normal;
-            float3 param_131 = -ViewDir;
-            float param_132 = alphaR;
-            float param_133 = kSmith;
-            float3 tmp14774 = cellProbeOut(param_130, param_131, param_132, param_133);
-            tmp14751 = float4(tmp14774, 1.0f);
+            float3 normalViewArg4 = normal;
+            float3 posViewArg5 = -ViewDir;
+            float alphaRArg = alphaR;
+            float kSmithArg = kSmith;
+            float3 cellProbeOutRet = cellProbeOut(normalViewArg4, posViewArg5, alphaRArg, kSmithArg);
+            fragColorPick3 = float4(cellProbeOutRet, 1.0f);
         }
-        fragColor = tmp14751;
+        fragColor = fragColorPick3;
     }
     if ((cellOn && (cellProbe >= 50)) && (cellProbe <= 53))
     {
-        float3 tmp14793;
+        float3 fragColorPick2;
         if (cellProbe == 50)
         {
-            tmp14793 = clamp(cubeK * 0.25f, 0.0f.xxx, 1.0f.xxx);
+            fragColorPick2 = clamp(cubeK * 0.25f, 0.0f.xxx, 1.0f.xxx);
         }
         else
         {
-            float2 param_134 = offset;
-            float3 param_135 = normal;
-            tmp14793 = cellCubeProbe(param_134, param_135);
+            float2 uvArg = offset;
+            float3 normalViewArg3 = normal;
+            fragColorPick2 = cellCubeProbe(uvArg, normalViewArg3);
         }
-        fragColor = float4(tmp14793, 1.0f);
+        fragColor = float4(fragColorPick2, 1.0f);
     }
     if (cellOn && (cellProbe == 66))
     {
@@ -2342,138 +2535,152 @@ void frag_main()
     {
         fragColor = float4(clamp(albedo, 0.0f.xxx, 1.0f.xxx), color.w);
     }
+    // lane PROBEVIEW1: the PRTP band's Pass
     if ((cellOn && (cellPass > 0)) && (cellProbe == 0))
     {
-        float3 param_136 = -ViewDir;
-        float3 param_137 = normal;
-        float3 param_138 = cellWorldPos(param_136);
-        float3 param_139 = cellWorldDir(param_137);
-        fragColor = float4(cellPassOut(param_138, param_139), 1.0f);
+        float3 posViewArg4 = -ViewDir;
+        float3 dirViewArg = normal;
+        float3 PArg = cellWorldPos(posViewArg4);
+        float3 NArg = cellWorldDir(dirViewArg);
+        fragColor = float4(cellPassOut(PArg, NArg), 1.0f);
     }
-    float3 param_140 = -ViewDir;
-    float3 param_141;
-    bool tmp14884 = wwFogProbe(param_140, param_141);
-    float3 fogProbeOut = param_141;
-    if (tmp14884)
+    float3 posViewArg3 = -ViewDir;
+    float3 oArg;
+    bool wwFogProbeRet = wwFogProbe(posViewArg3, oArg);
+    float3 fogProbeOut = oArg;
+    if (wwFogProbeRet)
     {
         fragColor = float4(fogProbeOut, 1.0f);
     }
     if (cellOn && (cellProbe == 20))
     {
-        float3 param_142 = normal;
-        float3 param_143 = -ViewDir;
-        fragColor = cellAoPassOut(param_142, param_143);
+        float3 normalViewArg2 = normal;
+        float3 posViewArg2 = -ViewDir;
+        fragColor = cellAoPassOut(normalViewArg2, posViewArg2);
         if (cellAoEarly == 2)
         {
             fragColor.w *= 1.00100004673004150390625f;
         }
     }
-    bool tmp14924;
+    bool cond15;
     if (cellOn)
     {
-        tmp14924 = (cellProbe == 60) || (cellProbe == 61);
+        cond15 = (cellProbe == 60) || (cellProbe == 61);
     }
     else
     {
-        tmp14924 = cellOn;
+        cond15 = cellOn;
     }
-    if (tmp14924)
+    if (cond15)
     {
-        float3 param_144 = cellSsrScene;
-        fragColor = cellSsrProbeOut(param_144);
+        float3 sceneLinearArg = cellSsrScene;
+        fragColor = cellSsrProbeOut(sceneLinearArg);
     }
+    // lane TERRBLEND1: a blended-ground pass (src/cellsplat.h). The vertex alpha
+    // is this pass's SHARE of the engine's weighted sum: an opaque base is scaled
+    // by it, a layer is ADDED at it (SRC_ALPHA, ONE). Never the texture's alpha, and
+    // the RAW vertex alpha: vertexColorOverride may force C.a to 1.
+    // water2fix: never over the data passes -- the obscurance pass (20: normal + view depth) and the
+    // reflections' scene pass (60/61): the ground wrote depth 1 there and the water SSR march died on it
     bool splatData = false;
-    bool tmp14942;
+    bool splatDataPick;
     if (cellOn)
     {
-        tmp14942 = ((cellProbe == 20) || (cellProbe == 60)) || (cellProbe == 61);
+        splatDataPick = ((cellProbe == 20) || (cellProbe == 60)) || (cellProbe == 61);
     }
     else
     {
-        tmp14942 = cellOn;
+        splatDataPick = cellOn;
     }
-    splatData = tmp14942;
+    splatData = splatDataPick;
     if (landSplat && (!splatData))
     {
+        // lane ALLON2 (bungo's thin dark lines along the ground's edges, 21.png): with MSAA a pixel on the
+        // OUTER edge of a layer's quads is shaded once at its centre, which lies outside every triangle of
+        // that layer, so every input is extrapolated past the edge -- the share below zero, and the lit
+        // colour can go non-finite. The blend then adds NaN x 0 = NaN and the resolve drops the whole
+        // pixel to black: one dark render pixel along every place a layer's quads stop. A share at or
+        // below zero adds nothing, so it is written as exactly nothing; a non-finite colour likewise.
+        // Red WW_TERRBLEND_RED=edgepass: the old output. Probe WW_TERRBLEND_PROBE=edge: such pixels green.
         float w = rawVertexAlpha;
-        bool tmp14955 = any(isnan(fragColor.xyz));
-        bool tmp14963;
-        if (!tmp14955)
+        bool cond14 = any(isnan(fragColor.xyz));
+        bool cond13;
+        if (!cond14)
         {
-            tmp14963 = any(isinf(fragColor.xyz));
+            cond13 = any(isinf(fragColor.xyz));
         }
         else
         {
-            tmp14963 = tmp14955;
+            cond13 = cond14;
         }
-        bool tmp14969;
-        if (!tmp14963)
+        bool cond12;
+        if (!cond13)
         {
-            tmp14969 = isnan(w);
+            cond12 = isnan(w);
         }
         else
         {
-            tmp14969 = tmp14963;
+            cond12 = cond13;
         }
-        bool tmp14975;
-        if (!tmp14969)
+        bool badPick;
+        if (!cond12)
         {
-            tmp14975 = isinf(w);
+            badPick = isinf(w);
         }
         else
         {
-            tmp14975 = tmp14969;
+            badPick = cond12;
         }
-        bool bad = tmp14975;
+        bool bad = badPick;
         if (landSplatDbg == 2)
         {
-            float4 tmp14982;
+            float4 fragColorPick;
             if (bad)
             {
-                tmp14982 = float4(0.0f, 1.0f, 0.0f, 1.0f);
+                fragColorPick = float4(0.0f, 1.0f, 0.0f, 1.0f);
             }
             else
             {
-                bool4 tmp14990 = ((alphaFlags & 8) != 0).xxxx;
-                tmp14982 = float4(tmp14990.x ? 0.0f.xxxx.x : float4(0.0f, 0.0f, 0.0f, 1.0f).x, tmp14990.y ? 0.0f.xxxx.y : float4(0.0f, 0.0f, 0.0f, 1.0f).y, tmp14990.z ? 0.0f.xxxx.z : float4(0.0f, 0.0f, 0.0f, 1.0f).z, tmp14990.w ? 0.0f.xxxx.w : float4(0.0f, 0.0f, 0.0f, 1.0f).w);
+                bool4 fragColorPart4 = ((alphaFlags & 8) != 0).xxxx;
+                fragColorPick = float4(fragColorPart4.x ? 0.0f.xxxx.x : float4(0.0f, 0.0f, 0.0f, 1.0f).x, fragColorPart4.y ? 0.0f.xxxx.y : float4(0.0f, 0.0f, 0.0f, 1.0f).y, fragColorPart4.z ? 0.0f.xxxx.z : float4(0.0f, 0.0f, 0.0f, 1.0f).z, fragColorPart4.w ? 0.0f.xxxx.w : float4(0.0f, 0.0f, 0.0f, 1.0f).w);
             }
-            fragColor = tmp14982;
+            fragColor = fragColorPick;
         }
         else
         {
-            bool tmp14995 = landSplatDbg == 0;
-            bool tmp15012;
-            if (tmp14995)
+            bool cond11 = landSplatDbg == 0;
+            bool cond10;
+            if (cond11)
             {
-                bool tmp15011;
+                bool condPick;
                 if (!bad)
                 {
-                    bool tmp15004 = (alphaFlags & 8) != 0;
-                    bool tmp15010;
-                    if (tmp15004)
+                    bool cond9 = (alphaFlags & 8) != 0;
+                    bool condPick2;
+                    if (cond9)
                     {
-                        tmp15010 = !(w > 0.0f);
+                        condPick2 = !(w > 0.0f);
                     }
                     else
                     {
-                        tmp15010 = tmp15004;
+                        condPick2 = cond9;
                     }
-                    tmp15011 = tmp15010;
+                    condPick = condPick2;
                 }
                 else
                 {
-                    tmp15011 = bad;
+                    condPick = bad;
                 }
-                tmp15012 = tmp15011;
+                cond10 = condPick;
             }
             else
             {
-                tmp15012 = tmp14995;
+                cond10 = cond11;
             }
-            if (tmp15012)
+            if (cond10)
             {
-                bool4 tmp15018 = ((alphaFlags & 8) != 0).xxxx;
-                fragColor = float4(tmp15018.x ? 0.0f.xxxx.x : float4(0.0f, 0.0f, 0.0f, 1.0f).x, tmp15018.y ? 0.0f.xxxx.y : float4(0.0f, 0.0f, 0.0f, 1.0f).y, tmp15018.z ? 0.0f.xxxx.z : float4(0.0f, 0.0f, 0.0f, 1.0f).z, tmp15018.w ? 0.0f.xxxx.w : float4(0.0f, 0.0f, 0.0f, 1.0f).w);
+                bool4 fragColorPart3 = ((alphaFlags & 8) != 0).xxxx;
+                fragColor = float4(fragColorPart3.x ? 0.0f.xxxx.x : float4(0.0f, 0.0f, 0.0f, 1.0f).x, fragColorPart3.y ? 0.0f.xxxx.y : float4(0.0f, 0.0f, 0.0f, 1.0f).y, fragColorPart3.z ? 0.0f.xxxx.z : float4(0.0f, 0.0f, 0.0f, 1.0f).z, fragColorPart3.w ? 0.0f.xxxx.w : float4(0.0f, 0.0f, 0.0f, 1.0f).w);
             }
             else
             {
@@ -2490,49 +2697,49 @@ void frag_main()
     }
     if (farLadder.y > 0.5f)
     {
-        float3 tmp15048;
+        float3 ltPick;
         if (farLadder.x != 0.0f)
         {
-            tmp15048 = float3(1.0f, 0.20000000298023223876953125f, 1.0f);
+            ltPick = float3(1.0f, 0.20000000298023223876953125f, 1.0f);
         }
         else
         {
-            float3 tmp15056;
+            float3 ltPick2;
             if (farLadder.y < 1.5f)
             {
-                tmp15056 = 0.920000016689300537109375f.xxx;
+                ltPick2 = 0.920000016689300537109375f.xxx;
             }
             else
             {
-                float3 tmp15065;
+                float3 ltPick3;
                 if (farLadder.y < 2.5f)
                 {
-                    tmp15065 = float3(0.20000000298023223876953125f, 0.85000002384185791015625f, 0.25f);
+                    ltPick3 = float3(0.20000000298023223876953125f, 0.85000002384185791015625f, 0.25f);
                 }
                 else
                 {
-                    float3 tmp15075;
+                    float3 ltPick4;
                     if (farLadder.y < 3.5f)
                     {
-                        tmp15075 = float3(0.949999988079071044921875f, 0.89999997615814208984375f, 0.1500000059604644775390625f);
+                        ltPick4 = float3(0.949999988079071044921875f, 0.89999997615814208984375f, 0.1500000059604644775390625f);
                     }
                     else
                     {
-                        bool3 tmp15087 = (farLadder.y < 4.5f).xxx;
-                        tmp15075 = float3(tmp15087.x ? float3(1.0f, 0.550000011920928955078125f, 0.100000001490116119384765625f).x : float3(0.949999988079071044921875f, 0.1500000059604644775390625f, 0.1500000059604644775390625f).x, tmp15087.y ? float3(1.0f, 0.550000011920928955078125f, 0.100000001490116119384765625f).y : float3(0.949999988079071044921875f, 0.1500000059604644775390625f, 0.1500000059604644775390625f).y, tmp15087.z ? float3(1.0f, 0.550000011920928955078125f, 0.100000001490116119384765625f).z : float3(0.949999988079071044921875f, 0.1500000059604644775390625f, 0.1500000059604644775390625f).z);
+                        bool3 ltPart = (farLadder.y < 4.5f).xxx;
+                        ltPick4 = float3(ltPart.x ? float3(1.0f, 0.550000011920928955078125f, 0.100000001490116119384765625f).x : float3(0.949999988079071044921875f, 0.1500000059604644775390625f, 0.1500000059604644775390625f).x, ltPart.y ? float3(1.0f, 0.550000011920928955078125f, 0.100000001490116119384765625f).y : float3(0.949999988079071044921875f, 0.1500000059604644775390625f, 0.1500000059604644775390625f).y, ltPart.z ? float3(1.0f, 0.550000011920928955078125f, 0.100000001490116119384765625f).z : float3(0.949999988079071044921875f, 0.1500000059604644775390625f, 0.1500000059604644775390625f).z);
                     }
-                    tmp15065 = tmp15075;
+                    ltPick3 = ltPick4;
                 }
-                tmp15056 = tmp15065;
+                ltPick2 = ltPick3;
             }
-            tmp15048 = tmp15056;
+            ltPick = ltPick2;
         }
-        float3 lt = tmp15048;
-        float4 tmp15094 = fragColor;
-        float3 tmp15100 = lt * (0.25f + (0.75f * clamp(dot(tmp15094.xyz, float3(0.2125999927520751953125f, 0.715200006961822509765625f, 0.072200000286102294921875f)), 0.0f, 1.0f)));
-        fragColor.x = tmp15100.x;
-        fragColor.y = tmp15100.y;
-        fragColor.z = tmp15100.z;
+        float3 lt = ltPick;
+        float4 fragColorPart2 = fragColor;
+        float3 fragColorPart = lt * (0.25f + (0.75f * clamp(dot(fragColorPart2.xyz, float3(0.2125999927520751953125f, 0.715200006961822509765625f, 0.072200000286102294921875f)), 0.0f, 1.0f)));
+        fragColor.x = fragColorPart.x;
+        fragColor.y = fragColorPart.y;
+        fragColor.z = fragColorPart.z;
     }
 }
 

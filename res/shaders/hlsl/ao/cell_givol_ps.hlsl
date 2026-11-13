@@ -50,8 +50,8 @@ bool volInside(float3 l, int type, float3 s)
         float3 d = float3(l.xy, l.z - clamp(l.z, -hz, hz));
         return dot(d, d) <= (r * r);
     }
-    float3 tmp152 = abs(l);
-    if (any(bool3(tmp152.x > h.x, tmp152.y > h.y, tmp152.z > h.z)))
+    float3 cond = abs(l);
+    if (any(bool3(cond.x > h.x, cond.y > h.y, cond.z > h.z)))
     {
         return false;
     }
@@ -70,17 +70,17 @@ void frag_main()
 {
     int2 f = int2(gl_FragCoord.xy);
     float4 g = volGbuf.Load(int3(f, 0));
-    bool tmp230 = g.w >= 100000.0f;
-    bool tmp240;
-    if (!tmp230)
+    bool cond3 = g.w >= 100000.0f;
+    bool cond2;
+    if (!cond3)
     {
-        tmp240 = dot(g.xyz, g.xyz) < 0.5f;
+        cond2 = dot(g.xyz, g.xyz) < 0.5f;
     }
     else
     {
-        tmp240 = tmp230;
+        cond2 = cond3;
     }
-    if (tmp240)
+    if (cond2)
     {
         discard;
     }
@@ -92,12 +92,12 @@ void frag_main()
     float4 a = volShapes.Load(3 * vShape);
     float4 b = volShapes.Load((3 * vShape) + 1);
     float4 c = volShapes.Load((3 * vShape) + 2);
-    float3 param = c.xyz;
-    float3 l = mul((P + (N * volBias)) - a.xyz, transpose(volRot(param)));
-    float3 param_1 = l;
-    int param_2 = int(a.w + 0.5f);
-    float3 param_3 = b.xyz;
-    if (!volInside(param_1, param_2, param_3))
+    float3 degArg = c.xyz;
+    float3 l = mul((P + (N * volBias)) - a.xyz, transpose(volRot(degArg)));
+    float3 lArg = l;
+    int typeArg = int(a.w + 0.5f);
+    float3 sArg = b.xyz;
+    if (!volInside(lArg, typeArg, sArg))
     {
         discard;
     }

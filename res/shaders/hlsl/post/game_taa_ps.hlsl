@@ -57,46 +57,57 @@ void frag_main()
 {
     float2 uv = gl_FragCoord.xy * c0.xy;
     float2 o = c3.xy;
+    // the 3x3 taps, named by their offset in units of c3
+    // (-1, -1)
     float2 tA = uv - o;
+    // (+1, +1)
     float2 tB = uv + o;
+    // (+1,  0)
     float2 tC = uv + (o * float2(1.0f, 0.0f));
+    // (+1, -1)
     float2 tD = uv + (o * float2(1.0f, -1.0f));
+    // (-1, +1)
     float2 tE = uv + (o * float2(-1.0f, 1.0f));
+    // ( 0, -1)
     float2 tF = uv + (o * float2(0.0f, -1.0f));
+    // ( 0, +1)
     float2 tG = uv + (o * float2(0.0f, 1.0f));
+    // (-1,  0)
     float2 tH = uv + (o * float2(-1.0f, 0.0f));
+    // the closest depth of the nine, its tap chosen in the game's order (later equal taps win)
     float dA = depthTex.Sample(_depthTex_sampler, tA).x;
     float dB = depthTex.Sample(_depthTex_sampler, tB).x;
     float dD = depthTex.Sample(_depthTex_sampler, tD).x;
     float m = min(min(dB, dD), dA);
-    bool2 tmp236 = (m == dA).xx;
-    float2 sel = float2(tmp236.x ? tA.x : tB.x, tmp236.y ? tA.y : tB.y);
-    bool2 tmp243 = (m == dD).xx;
-    sel = float2(tmp243.x ? tD.x : sel.x, tmp243.y ? tD.y : sel.y);
+    bool2 selPart8 = (m == dA).xx;
+    float2 sel = float2(selPart8.x ? tA.x : tB.x, selPart8.y ? tA.y : tB.y);
+    bool2 selPart7 = (m == dD).xx;
+    sel = float2(selPart7.x ? tD.x : sel.x, selPart7.y ? tD.y : sel.y);
     float dF = depthTex.Sample(_depthTex_sampler, tF).x;
     m = min(m, dF);
     float dC = depthTex.Sample(_depthTex_sampler, tC).x;
     m = min(m, dC);
-    bool2 tmp266 = (m == dC).xx;
-    sel = float2(tmp266.x ? tC.x : sel.x, tmp266.y ? tC.y : sel.y);
-    bool2 tmp273 = (m == dF).xx;
-    sel = float2(tmp273.x ? tF.x : sel.x, tmp273.y ? tF.y : sel.y);
+    bool2 selPart6 = (m == dC).xx;
+    sel = float2(selPart6.x ? tC.x : sel.x, selPart6.y ? tC.y : sel.y);
+    bool2 selPart5 = (m == dF).xx;
+    sel = float2(selPart5.x ? tF.x : sel.x, selPart5.y ? tF.y : sel.y);
     float dH = depthTex.Sample(_depthTex_sampler, tH).x;
     m = min(m, dH);
     float dE = depthTex.Sample(_depthTex_sampler, tE).x;
     m = min(m, dE);
-    bool2 tmp296 = (m == dE).xx;
-    sel = float2(tmp296.x ? tE.x : sel.x, tmp296.y ? tE.y : sel.y);
-    bool2 tmp303 = (m == dH).xx;
-    sel = float2(tmp303.x ? tH.x : sel.x, tmp303.y ? tH.y : sel.y);
+    bool2 selPart4 = (m == dE).xx;
+    sel = float2(selPart4.x ? tE.x : sel.x, selPart4.y ? tE.y : sel.y);
+    bool2 selPart3 = (m == dH).xx;
+    sel = float2(selPart3.x ? tH.x : sel.x, selPart3.y ? tH.y : sel.y);
     float dZ = depthTex.Sample(_depthTex_sampler, uv).x;
     m = min(m, dZ);
     float dG = depthTex.Sample(_depthTex_sampler, tG).x;
     m = min(m, dG);
-    bool2 tmp326 = (m == dG).xx;
-    sel = float2(tmp326.x ? tG.x : sel.x, tmp326.y ? tG.y : sel.y);
-    bool2 tmp333 = (m == dZ).xx;
-    sel = float2(tmp333.x ? uv.x : sel.x, tmp333.y ? uv.y : sel.y);
+    bool2 selPart2 = (m == dG).xx;
+    sel = float2(selPart2.x ? tG.x : sel.x, selPart2.y ? tG.y : sel.y);
+    bool2 selPart = (m == dZ).xx;
+    sel = float2(selPart.x ? uv.x : sel.x, selPart.y ? uv.y : sel.y);
+    // that tap's motion vector; the history where this pixel was
     float2 mv = mvTex.Sample(_mvTex_sampler, sel).xy;
     float2 mvs = mv * c5.zw;
     float mvLen = sqrt(dot(mv, mv));
@@ -110,6 +121,7 @@ void frag_main()
         o1 = 0.0f.xxxx;
         return;
     }
+    // the nine colours and their lumas
     float3 cA = curTex.Sample(_curTex_sampler, tA).xyz;
     float3 cB = curTex.Sample(_curTex_sampler, tB).xyz;
     float3 cC = curTex.Sample(_curTex_sampler, tC).xyz;
@@ -119,412 +131,419 @@ void frag_main()
     float3 cG = curTex.Sample(_curTex_sampler, tG).xyz;
     float3 cH = curTex.Sample(_curTex_sampler, tH).xyz;
     float3 cZ = curTex.Sample(_curTex_sampler, uv).xyz;
-    float3 param = cA;
-    float YA = luma(param);
-    float3 param_1 = cB;
-    float YB = luma(param_1);
-    float3 param_2 = cC;
-    float YC = luma(param_2);
-    float3 param_3 = cD;
-    float YD = luma(param_3);
-    float3 param_4 = cE;
-    float YE = luma(param_4);
-    float3 param_5 = cF;
-    float YF = luma(param_5);
-    float3 param_6 = cG;
-    float YG = luma(param_6);
-    float3 param_7 = cH;
-    float YH = luma(param_7);
-    float3 param_8 = cZ;
-    float YZ = luma(param_8);
+    float3 cArg10 = cA;
+    float YA = luma(cArg10);
+    float3 cArg9 = cB;
+    float YB = luma(cArg9);
+    float3 cArg8 = cC;
+    float YC = luma(cArg8);
+    float3 cArg7 = cD;
+    float YD = luma(cArg7);
+    float3 cArg6 = cE;
+    float YE = luma(cArg6);
+    float3 cArg5 = cF;
+    float YF = luma(cArg5);
+    float3 cArg4 = cG;
+    float YG = luma(cArg4);
+    float3 cArg3 = cH;
+    float YH = luma(cArg3);
+    float3 cArg2 = cZ;
+    float YZ = luma(cArg2);
+    // the 2x2 tent resample (the frame without its jitter): centre, (0,+1), (-1,0), (-1,+1)
     float3 R = cH * c2.z;
     R = (cE * c2.w) + R;
     R = (cG * c2.y) + R;
     R = (cZ * c2.x) + R;
-    float3 tmp498;
+    float3 upPick9;
     if (YZ < 1.00100004673004150390625f)
     {
-        tmp498 = float3(cZ.x, cZ.z, YZ);
+        upPick9 = float3(cZ.x, cZ.z, YZ);
     }
     else
     {
-        tmp498 = 1.00100004673004150390625f.xxx;
+        upPick9 = 1.00100004673004150390625f.xxx;
     }
-    float3 up = tmp498;
-    bool3 tmp515 = (YZ < Yh).xxx;
-    up = float3(tmp515.x ? 1.00100004673004150390625f.xxx.x : up.x, tmp515.y ? 1.00100004673004150390625f.xxx.y : up.y, tmp515.z ? 1.00100004673004150390625f.xxx.z : up.z);
-    float3 tmp521;
+    float3 up = upPick9;
+    bool3 upPart = (YZ < Yh).xxx;
+    up = float3(upPart.x ? 1.00100004673004150390625f.xxx.x : up.x, upPart.y ? 1.00100004673004150390625f.xxx.y : up.y, upPart.z ? 1.00100004673004150390625f.xxx.z : up.z);
+    float3 loPick9;
     if ((-0.001000000047497451305389404296875f) < YZ)
     {
-        tmp521 = float3(cZ.x, cZ.z, YZ);
+        loPick9 = float3(cZ.x, cZ.z, YZ);
     }
     else
     {
-        tmp521 = (-0.001000000047497451305389404296875f).xxx;
+        loPick9 = (-0.001000000047497451305389404296875f).xxx;
     }
-    float3 lo = tmp521;
-    bool3 tmp537 = (YZ < Yh).xxx;
-    lo = float3(tmp537.x ? lo.x : (-0.001000000047497451305389404296875f).xxx.x, tmp537.y ? lo.y : (-0.001000000047497451305389404296875f).xxx.y, tmp537.z ? lo.z : (-0.001000000047497451305389404296875f).xxx.z);
-    float3 tmp542;
+    float3 lo = loPick9;
+    bool3 loPart = (YZ < Yh).xxx;
+    lo = float3(loPart.x ? lo.x : (-0.001000000047497451305389404296875f).xxx.x, loPart.y ? lo.y : (-0.001000000047497451305389404296875f).xxx.y, loPart.z ? lo.z : (-0.001000000047497451305389404296875f).xxx.z);
+    float3 upPick8;
     if (YG < Yh)
     {
-        tmp542 = up;
+        upPick8 = up;
     }
     else
     {
-        float3 tmp551;
+        float3 upPick17;
         if (YG < up.z)
         {
-            tmp551 = float3(cG.x, cG.z, YG);
+            upPick17 = float3(cG.x, cG.z, YG);
         }
         else
         {
-            tmp551 = up;
+            upPick17 = up;
         }
-        tmp542 = tmp551;
+        upPick8 = upPick17;
     }
-    up = tmp542;
-    float3 tmp567;
+    up = upPick8;
+    float3 loPick8;
     if (YG < Yh)
     {
-        float3 tmp574;
+        float3 loPick17;
         if (lo.z < YG)
         {
-            tmp574 = float3(cG.x, cG.z, YG);
+            loPick17 = float3(cG.x, cG.z, YG);
         }
         else
         {
-            tmp574 = lo;
+            loPick17 = lo;
         }
-        tmp567 = tmp574;
+        loPick8 = loPick17;
     }
     else
     {
-        tmp567 = lo;
+        loPick8 = lo;
     }
-    lo = tmp567;
-    float3 tmp592;
+    lo = loPick8;
+    float3 upPick7;
     if (YH < Yh)
     {
-        tmp592 = up;
+        upPick7 = up;
     }
     else
     {
-        float3 tmp601;
+        float3 upPick16;
         if (YH < up.z)
         {
-            tmp601 = float3(cH.x, cH.z, YH);
+            upPick16 = float3(cH.x, cH.z, YH);
         }
         else
         {
-            tmp601 = up;
+            upPick16 = up;
         }
-        tmp592 = tmp601;
+        upPick7 = upPick16;
     }
-    up = tmp592;
-    float3 tmp617;
+    up = upPick7;
+    float3 loPick7;
     if (YH < Yh)
     {
-        float3 tmp624;
+        float3 loPick16;
         if (lo.z < YH)
         {
-            tmp624 = float3(cH.x, cH.z, YH);
+            loPick16 = float3(cH.x, cH.z, YH);
         }
         else
         {
-            tmp624 = lo;
+            loPick16 = lo;
         }
-        tmp617 = tmp624;
+        loPick7 = loPick16;
     }
     else
     {
-        tmp617 = lo;
+        loPick7 = lo;
     }
-    lo = tmp617;
-    float3 tmp642;
+    lo = loPick7;
+    float3 upPick6;
     if (YE < Yh)
     {
-        tmp642 = up;
+        upPick6 = up;
     }
     else
     {
-        float3 tmp651;
+        float3 upPick15;
         if (YE < up.z)
         {
-            tmp651 = float3(cE.x, cE.z, YE);
+            upPick15 = float3(cE.x, cE.z, YE);
         }
         else
         {
-            tmp651 = up;
+            upPick15 = up;
         }
-        tmp642 = tmp651;
+        upPick6 = upPick15;
     }
-    up = tmp642;
-    float3 tmp667;
+    up = upPick6;
+    float3 loPick6;
     if (YE < Yh)
     {
-        float3 tmp674;
+        float3 loPick15;
         if (lo.z < YE)
         {
-            tmp674 = float3(cE.x, cE.z, YE);
+            loPick15 = float3(cE.x, cE.z, YE);
         }
         else
         {
-            tmp674 = lo;
+            loPick15 = lo;
         }
-        tmp667 = tmp674;
+        loPick6 = loPick15;
     }
     else
     {
-        tmp667 = lo;
+        loPick6 = lo;
     }
-    lo = tmp667;
-    float3 tmp692;
+    lo = loPick6;
+    float3 upPick5;
     if (YF < Yh)
     {
-        tmp692 = up;
+        upPick5 = up;
     }
     else
     {
-        float3 tmp701;
+        float3 upPick14;
         if (YF < up.z)
         {
-            tmp701 = float3(cF.x, cF.z, YF);
+            upPick14 = float3(cF.x, cF.z, YF);
         }
         else
         {
-            tmp701 = up;
+            upPick14 = up;
         }
-        tmp692 = tmp701;
+        upPick5 = upPick14;
     }
-    up = tmp692;
-    float3 tmp717;
+    up = upPick5;
+    float3 loPick5;
     if (YF < Yh)
     {
-        float3 tmp724;
+        float3 loPick14;
         if (lo.z < YF)
         {
-            tmp724 = float3(cF.x, cF.z, YF);
+            loPick14 = float3(cF.x, cF.z, YF);
         }
         else
         {
-            tmp724 = lo;
+            loPick14 = lo;
         }
-        tmp717 = tmp724;
+        loPick5 = loPick14;
     }
     else
     {
-        tmp717 = lo;
+        loPick5 = lo;
     }
-    lo = tmp717;
-    float3 tmp742;
+    lo = loPick5;
+    float3 upPick4;
     if (YC < Yh)
     {
-        tmp742 = up;
+        upPick4 = up;
     }
     else
     {
-        float3 tmp751;
+        float3 upPick13;
         if (YC < up.z)
         {
-            tmp751 = float3(cC.x, cC.z, YC);
+            upPick13 = float3(cC.x, cC.z, YC);
         }
         else
         {
-            tmp751 = up;
+            upPick13 = up;
         }
-        tmp742 = tmp751;
+        upPick4 = upPick13;
     }
-    up = tmp742;
-    float3 tmp767;
+    up = upPick4;
+    float3 loPick4;
     if (YC < Yh)
     {
-        float3 tmp774;
+        float3 loPick13;
         if (lo.z < YC)
         {
-            tmp774 = float3(cC.x, cC.z, YC);
+            loPick13 = float3(cC.x, cC.z, YC);
         }
         else
         {
-            tmp774 = lo;
+            loPick13 = lo;
         }
-        tmp767 = tmp774;
+        loPick4 = loPick13;
     }
     else
     {
-        tmp767 = lo;
+        loPick4 = lo;
     }
-    lo = tmp767;
-    float3 tmp792;
+    lo = loPick4;
+    float3 upPick3;
     if (YD < Yh)
     {
-        tmp792 = up;
+        upPick3 = up;
     }
     else
     {
-        float3 tmp801;
+        float3 upPick12;
         if (YD < up.z)
         {
-            tmp801 = float3(cD.x, cD.z, YD);
+            upPick12 = float3(cD.x, cD.z, YD);
         }
         else
         {
-            tmp801 = up;
+            upPick12 = up;
         }
-        tmp792 = tmp801;
+        upPick3 = upPick12;
     }
-    up = tmp792;
-    float3 tmp817;
+    up = upPick3;
+    float3 loPick3;
     if (YD < Yh)
     {
-        float3 tmp824;
+        float3 loPick12;
         if (lo.z < YD)
         {
-            tmp824 = float3(cD.x, cD.z, YD);
+            loPick12 = float3(cD.x, cD.z, YD);
         }
         else
         {
-            tmp824 = lo;
+            loPick12 = lo;
         }
-        tmp817 = tmp824;
+        loPick3 = loPick12;
     }
     else
     {
-        tmp817 = lo;
+        loPick3 = lo;
     }
-    lo = tmp817;
-    float3 tmp842;
+    lo = loPick3;
+    float3 upPick2;
     if (YA < Yh)
     {
-        tmp842 = up;
+        upPick2 = up;
     }
     else
     {
-        float3 tmp851;
+        float3 upPick11;
         if (YA < up.z)
         {
-            tmp851 = float3(cA.x, cA.z, YA);
+            upPick11 = float3(cA.x, cA.z, YA);
         }
         else
         {
-            tmp851 = up;
+            upPick11 = up;
         }
-        tmp842 = tmp851;
+        upPick2 = upPick11;
     }
-    up = tmp842;
-    float3 tmp867;
+    up = upPick2;
+    float3 loPick2;
     if (YA < Yh)
     {
-        float3 tmp874;
+        float3 loPick11;
         if (lo.z < YA)
         {
-            tmp874 = float3(cA.x, cA.z, YA);
+            loPick11 = float3(cA.x, cA.z, YA);
         }
         else
         {
-            tmp874 = lo;
+            loPick11 = lo;
         }
-        tmp867 = tmp874;
+        loPick2 = loPick11;
     }
     else
     {
-        tmp867 = lo;
+        loPick2 = lo;
     }
-    lo = tmp867;
-    float3 tmp892;
+    lo = loPick2;
+    float3 upPick;
     if (YB < Yh)
     {
-        tmp892 = up;
+        upPick = up;
     }
     else
     {
-        float3 tmp901;
+        float3 upPick10;
         if (YB < up.z)
         {
-            tmp901 = float3(cB.x, cB.z, YB);
+            upPick10 = float3(cB.x, cB.z, YB);
         }
         else
         {
-            tmp901 = up;
+            upPick10 = up;
         }
-        tmp892 = tmp901;
+        upPick = upPick10;
     }
-    up = tmp892;
-    float3 tmp917;
+    up = upPick;
+    float3 loPick;
     if (YB < Yh)
     {
-        float3 tmp924;
+        float3 loPick10;
         if (lo.z < YB)
         {
-            tmp924 = float3(cB.x, cB.z, YB);
+            loPick10 = float3(cB.x, cB.z, YB);
         }
         else
         {
-            tmp924 = lo;
+            loPick10 = lo;
         }
-        tmp917 = tmp924;
+        loPick = loPick10;
     }
     else
     {
-        tmp917 = lo;
+        loPick = lo;
     }
-    lo = tmp917;
+    lo = loPick;
+    // (Y, R, G, B) of each
     float4 L = float4(lo.z, lo.x, ((lo.z - (lo.x * 0.25f)) - (lo.y * 0.25f)) * 2.0f, lo.y);
     float4 U = float4(up.z, up.x, ((up.z - (up.x * 0.25f)) - (up.y * 0.25f)) * 2.0f, up.y);
     bool noUp = 1.0f < U.x;
     bool noLo = L.x < 0.0f;
-    bool4 tmp991 = noLo.xxxx;
-    L = float4(tmp991.x ? U.x : L.x, tmp991.y ? U.y : L.y, tmp991.z ? U.z : L.z, tmp991.w ? U.w : L.w);
-    bool4 tmp996 = noUp.xxxx;
-    U = float4(tmp996.x ? L.x : U.x, tmp996.y ? L.y : U.y, tmp996.z ? L.z : U.z, tmp996.w ? L.w : U.w);
+    bool4 LPart = noLo.xxxx;
+    L = float4(LPart.x ? U.x : L.x, LPart.y ? U.y : L.y, LPart.z ? U.z : L.z, LPart.w ? U.w : L.w);
+    bool4 UPart = noUp.xxxx;
+    U = float4(UPart.x ? L.x : U.x, UPart.y ? L.y : U.y, UPart.z ? L.z : U.z, UPart.w ? L.w : U.w);
     float YhC = min(U.x, max(L.x, Yh));
     if (taaRed == 1)
     {
         YhC = Yh;
     }
     float4 span = U - L;
-    bool tmp1021 = any(bool2(huv.x >= c0.zw.x, huv.y >= c0.zw.y));
-    bool tmp1031;
-    if (!tmp1021)
+    bool cond = any(bool2(huv.x >= c0.zw.x, huv.y >= c0.zw.y));
+    bool offscreenPick;
+    if (!cond)
     {
-        tmp1031 = 0.0f >= min(huv.x, huv.y);
+        offscreenPick = 0.0f >= min(huv.x, huv.y);
     }
     else
     {
-        tmp1031 = tmp1021;
+        offscreenPick = cond;
     }
-    bool offscreen = tmp1031;
+    // off the previous frame: no history
+    bool offscreen = offscreenPick;
     float YhP = offscreen ? YZ : YhC;
     float vhP = offscreen ? 0.0f : vh;
     float t = (YhC - L.x) / span.x;
     float dY = YhP - YZ;
+    // the motion: 128 pixels is all of it; the weight falls from HighFreq at rest to LowFreq
     float vlen = clamp(mvLen / (c0.x * 128.0f), 0.0f, 1.0f);
     float wf = (vlen * (c4.x - c4.y)) + c4.y;
     float k = max(1.0f - (abs(vlen - vhP) * 20.0f), 0.0f);
     float w = min(k, wf);
-    float tmp1093;
+    float YnPick;
     if (abs(dY * w) < 0.00999999977648258209228515625f)
     {
-        tmp1093 = YZ;
+        YnPick = YZ;
     }
     else
     {
-        tmp1093 = (w * dY) + YZ;
+        YnPick = (w * dY) + YZ;
     }
-    float Yn = tmp1093;
+    // the next history: the luma, unless the change is under 0.01
+    float Yn = YnPick;
     o0 = float4(clamp(Yn, 0.0f, 1.0f), 0.0f, vlen, 0.0f);
+    // the history's colour: along the bracket at the history's luma (the middle when the bracket is flat)
     float tt = (0.00999999977648258209228515625f < span.x) ? t : 0.5f;
     float3 hist = (span.yzw * tt) + L.yzw;
-    bool3 tmp1125 = offscreen.xxx;
-    hist = float3(tmp1125.x ? cZ.x : hist.x, tmp1125.y ? cZ.y : hist.y, tmp1125.z ? cZ.z : hist.z);
-    bool3 tmp1131 = offscreen.xxx;
-    float3 Rr = float3(tmp1131.x ? cZ.x : R.x, tmp1131.y ? cZ.y : R.y, tmp1131.z ? cZ.z : R.z);
+    bool3 histPart = offscreen.xxx;
+    hist = float3(histPart.x ? cZ.x : hist.x, histPart.y ? cZ.y : hist.y, histPart.z ? cZ.z : hist.z);
+    bool3 RrPart = offscreen.xxx;
+    float3 Rr = float3(RrPart.x ? cZ.x : R.x, RrPart.y ? cZ.y : R.y, RrPart.z ? cZ.z : R.z);
     float3 cur = ((cZ - Rr) * k) + Rr;
     float3 col = clamp(((hist - cur) * w) + cur, 0.0f.xxx, 1.0f.xxx);
     col = clamp(((col - Rr) * c4.z) + col, 0.0f.xxx, 1.0f.xxx);
-    float3 param_9 = clamp(((Rr - col) * c4.w) + col, 0.0f.xxx, 1.0f.xxx);
-    float2 param_10 = gl_FragCoord.xy;
-    o1 = float4(wwDither8(param_9, param_10), 1.0f);
+    float3 cArg = clamp(((Rr - col) * c4.w) + col, 0.0f.xxx, 1.0f.xxx);
+    float2 fragCoordArg = gl_FragCoord.xy;
+    // lane FOGGLOW1: the picture goes into an 8-bit target: dithered (the tent above averages the tone map's dither away)
+    o1 = float4(wwDither8(cArg, fragCoordArg), 1.0f);
 }
 
 SPIRV_Cross_Output main(SPIRV_Cross_Input stage_input)

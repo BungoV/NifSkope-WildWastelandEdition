@@ -36,10 +36,10 @@ void frag_main()
     fragColor = tex * C;
     if (greyscaleColor)
     {
-        float3 tmp47 = GreyscaleMap.SampleLevel(_GreyscaleMap_sampler, float2(tex.y, paletteRow), 0.0f).xyz;
-        fragColor.x = tmp47.x;
-        fragColor.y = tmp47.y;
-        fragColor.z = tmp47.z;
+        float3 GreyscaleMapTexel = GreyscaleMap.SampleLevel(_GreyscaleMap_sampler, float2(tex.y, paletteRow), 0.0f).xyz;
+        fragColor.x = GreyscaleMapTexel.x;
+        fragColor.y = GreyscaleMapTexel.y;
+        fragColor.z = GreyscaleMapTexel.z;
     }
     if (greyscaleAlpha)
     {

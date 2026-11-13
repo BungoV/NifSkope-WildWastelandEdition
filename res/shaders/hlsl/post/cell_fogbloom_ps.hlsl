@@ -198,17 +198,17 @@ void frag_main()
 {
     wwAirFree = false;
     fragColor = 0.0f.xxxx;
-    bool tmp3016 = (!fogOn) || (!volOn);
-    bool tmp3023;
-    if (!tmp3016)
+    bool cond8 = (!fogOn) || (!volOn);
+    bool cond7;
+    if (!cond8)
     {
-        tmp3023 = volSlices.w < 0.5f;
+        cond7 = volSlices.w < 0.5f;
     }
     else
     {
-        tmp3023 = tmp3016;
+        cond7 = cond8;
     }
-    if (tmp3023)
+    if (cond7)
     {
         return;
     }
@@ -216,18 +216,19 @@ void frag_main()
     float3 dirView = float3(ndc.x / fbProj.x, ndc.y / fbProj.y, -1.0f);
     float z = fbDepth.Load(int3(int2(gl_FragCoord.xy), 0)).x;
     float viewZ;
+    // the sky: the ray to the grid's end, not the horizon's endless tail (T 0 in any air)
     if (z >= 1.0f)
     {
-        float tmp3071;
+        float farPick;
         if (volFar.w > 0.5f)
         {
-            tmp3071 = volFar.x * exp(volFar.y);
+            farPick = volFar.x * exp(volFar.y);
         }
         else
         {
-            tmp3071 = volSlices.x * exp(volSlices.y);
+            farPick = volSlices.x * exp(volSlices.y);
         }
-        float far = tmp3071;
+        float far = farPick;
         viewZ = (0.999000012874603271484375f * far) / (max(fogDistScale, 9.9999999600419720025001879548654e-13f) * length(dirView));
     }
     else
@@ -236,20 +237,20 @@ void frag_main()
     }
     float3 posView = dirView * viewZ;
     float d = length(posView) * fogDistScale;
-    float3 param = posView;
-    float4 tmp3122 = wwVolAirAt(param);
-    float T = clamp(tmp3122.w, 9.9999999747524270787835121154785e-07f, 1.0f);
+    float3 posViewArg = posView;
+    float4 wwVolAirAtRet = wwVolAirAt(posViewArg);
+    float T = clamp(wwVolAirAtRet.w, 9.9999999747524270787835121154785e-07f, 1.0f);
     float f = smoothstep(fbParams.z, fbParams.w, (-log(T)) / max(d, 1.0f));
-    float tmp3149;
+    float extraPick;
     if (fbTranslucent == 1)
     {
-        tmp3149 = 1.0f + fbParams.y;
+        extraPick = 1.0f + fbParams.y;
     }
     else
     {
-        tmp3149 = 1.0f;
+        extraPick = 1.0f;
     }
-    float extra = ((fbParams.x * f) * (1.0f - T)) * tmp3149;
+    float extra = ((fbParams.x * f) * (1.0f - T)) * extraPick;
     fragColor = float4(clamp(extra * 0.25f, 0.0f, 1.0f), 0.0f, 0.0f, 1.0f);
 }
 

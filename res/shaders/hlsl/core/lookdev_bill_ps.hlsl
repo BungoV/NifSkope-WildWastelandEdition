@@ -76,10 +76,10 @@ struct SPIRV_Cross_Output
 void frag_main()
 {
     float4 t = Tex.Sample(_Tex_sampler, uv);
-    float3 param = t.xyz;
-    float3 param_1 = srgbToLinear(param) * tint;
-    float3 tmp315 = studioOutput(param_1);
-    fragColor = float4(tmp315, t.w * alpha);
+    float3 cArg2 = t.xyz;
+    float3 cArg = srgbToLinear(cArg2) * tint;
+    float3 studioOutputRet = studioOutput(cArg);
+    fragColor = float4(studioOutputRet, t.w * alpha);
 }
 
 SPIRV_Cross_Output main(SPIRV_Cross_Input stage_input)

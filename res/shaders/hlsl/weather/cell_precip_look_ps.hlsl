@@ -69,6 +69,7 @@ void frag_main()
 {
     if (pcLook == 1)
     {
+        // the swept disc: along the streak s, across u (view units), the quad's half sizes hd + tl / 2 and hd
         float hd = gDrop.x;
         float tl = gDrop.y;
         float s = gQ.x * (hd + (0.5f * tl));
@@ -92,16 +93,16 @@ void frag_main()
         {
             discard;
         }
-        float tmp144;
+        float tfPick;
         if (tl > (9.9999997473787516355514526367188e-05f * hd))
         {
-            tmp144 = clamp((s / tl) + 0.5f, 0.0f, 1.0f);
+            tfPick = clamp((s / tl) + 0.5f, 0.0f, 1.0f);
         }
         else
         {
-            tmp144 = 0.5f;
+            tfPick = 0.5f;
         }
-        float tf = tmp144;
+        float tf = tfPick;
         float fl = 1.0f + (gDrop.z * sin(((6.283185482025146484375f * gDrop.w) * tf) + gOsc));
         fragColor = float4(max(((gCol.xyz * gA) * fl) + gB, 0.0f.xxx), a);
         return;
@@ -109,6 +110,7 @@ void frag_main()
     float4 t;
     if (pcFar != 0)
     {
+        // a far dot: the cell's mean (gCol) over a soft round footprint whose mean over the quad is 1
         t = float4(1.0f, 1.0f, 1.0f, exp((-2.5f) * dot(gQ, gQ)) / 0.298500001430511474609375f);
     }
     else
@@ -116,8 +118,8 @@ void frag_main()
         if (pcHasTex)
         {
             float tmp = pcTex.CalculateLevelOfDetail(_pcTex_sampler, gUv);
-            float2 tmp220 = tmp.xx;
-            float lod = min(tmp220.x, pcAtlas.z);
+            float2 lodPart2 = tmp.xx;
+            float lod = min(lodPart2.x, pcAtlas.z);
             t = pcTex.SampleLevel(_pcTex_sampler, clamp(gUv, gBox.xy, gBox.zw), lod);
             t.w = clamp((t.w - pcClump.x) / pcClump.y, 0.0f, 1.0f);
         }
@@ -131,24 +133,27 @@ void frag_main()
     {
         discard;
     }
+    // linear: the sRGB texture decodes on read
     float3 alb = t.xyz * gCol.xyz;
     alb *= pcAlbedo;
     if (((pcLook == 2) && pcHasN) && (pcFar == 0))
     {
         float tmp = pcTexN.CalculateLevelOfDetail(_pcTexN_sampler, gUv);
-        float2 tmp302 = tmp.xx;
-        float lod_1 = min(tmp302.x, pcAtlas.z);
+        float2 lodPart = tmp.xx;
+        float lod_1 = min(lodPart.x, pcAtlas.z);
         float3 nt = pcTexN.SampleLevel(_pcTexN_sampler, clamp(gUv, gBox.xy, gBox.zw), lod_1).xyz;
+        // DirectX green: y up in the image
         float3 nm = float3((2.0f * nt.x) - 1.0f, 1.0f - (2.0f * nt.y), (2.0f * nt.z) - 1.0f);
+        // the image's down is the quad's +v
         float2 ay = float2(-gAx.y, gAx.x);
         float3 N = normalize(float3((gAx * nm.x) - (ay * nm.y), max(nm.z, 0.0f)));
         float3 L = gDomL.xyz;
         float m = clamp((pcTrans * (1.0f - t.w)) / 0.4000000059604644775390625f, 0.0f, 1.0f);
-        float param = dot(N, L);
-        float param_1 = pcTrans;
-        float param_2 = L.z;
-        float param_3 = pcTrans;
-        float r = min(pcWrap(param, param_1) / max(pcWrap(param_2, param_3), 0.0500000007450580596923828125f), 4.0f);
+        float xArg2 = dot(N, L);
+        float wArg2 = pcTrans;
+        float xArg = L.z;
+        float wArg = pcTrans;
+        float r = min(pcWrap(xArg2, wArg2) / max(pcWrap(xArg, wArg), 0.0500000007450580596923828125f), 4.0f);
         float3 thickF = gThick * lerp(1.0f, r, gDomL.w);
         float3 V = normalize(-gView);
         float3 H = normalize(L + V);

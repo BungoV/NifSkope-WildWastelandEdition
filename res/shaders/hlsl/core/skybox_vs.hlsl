@@ -65,6 +65,7 @@ void vert_main()
     }
     if (projectionMatrix[3].w == 1.0f)
     {
+        // orthographic view is not supported
         gl_Position = float4(0.0f, 0.0f, 2.0f, 1.0f);
     }
     else

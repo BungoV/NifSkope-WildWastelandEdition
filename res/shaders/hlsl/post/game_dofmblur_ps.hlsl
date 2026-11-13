@@ -53,23 +53,23 @@ float2 V(float2 d)
 
 float2 mvAt(float2 d)
 {
-    float2 param = d;
-    float2 m = t1.Sample(_t1_sampler, V(param)).xy;
+    float2 dArg = d;
+    float2 m = t1.Sample(_t1_sampler, V(dArg)).xy;
     return float2(m.x, -m.y);
 }
 
 float sat(float v)
 {
-    float tmp45;
+    float satRet;
     if (v >= 0.0f)
     {
-        tmp45 = min(v, 1.0f);
+        satRet = min(v, 1.0f);
     }
     else
     {
-        tmp45 = 0.0f;
+        satRet = 0.0f;
     }
-    return tmp45;
+    return satRet;
 }
 
 // game_dof.frag's composite at one texel
@@ -83,60 +83,60 @@ float4 dofTexel(int2 p, float2 size)
     float k;
     if (farOnly != 0)
     {
-        float param = (y - dc0.z) / dc0.y;
-        k = sat(param);
+        float vArg2 = (y - dc0.z) / dc0.y;
+        k = sat(vArg2);
         k *= dc1.x;
-        bool tmp138;
+        bool notSkyPick2;
         if (!notSky)
         {
-            tmp138 = !(0.0f != dc1.w);
+            notSkyPick2 = !(0.0f != dc1.w);
         }
         else
         {
-            tmp138 = notSky;
+            notSkyPick2 = notSky;
         }
-        notSky = tmp138;
+        notSky = notSkyPick2;
     }
     else
     {
         float nearT = (dc0.z - y) / dc0.x;
-        bool tmp152 = y < dc0.z;
-        bool tmp158;
-        if (tmp152)
+        bool cond2 = y < dc0.z;
+        bool nearOnPick;
+        if (cond2)
         {
-            tmp158 = 0.0f != dc1.y;
+            nearOnPick = 0.0f != dc1.y;
         }
         else
         {
-            tmp158 = tmp152;
+            nearOnPick = cond2;
         }
-        bool nearOn = tmp158;
+        bool nearOn = nearOnPick;
         nearT = nearOn ? nearT : 0.0f;
         float farT = y - dc0.z;
-        bool tmp171 = dc0.z < y;
-        bool tmp177;
-        if (tmp171)
+        bool cond = dc0.z < y;
+        bool farOnPick;
+        if (cond)
         {
-            tmp177 = 0.0f != dc1.z;
+            farOnPick = 0.0f != dc1.z;
         }
         else
         {
-            tmp177 = tmp171;
+            farOnPick = cond;
         }
-        bool farOn = tmp177;
-        bool tmp186;
+        bool farOn = farOnPick;
+        bool notSkyPick;
         if (!notSky)
         {
-            tmp186 = !(0.0f != dc1.w);
+            notSkyPick = !(0.0f != dc1.w);
         }
         else
         {
-            tmp186 = notSky;
+            notSkyPick = notSky;
         }
-        notSky = tmp186;
+        notSky = notSkyPick;
         farT /= dc0.y;
-        float param_1 = farOn ? farT : nearT;
-        k = sat(param_1);
+        float vArg = farOn ? farT : nearT;
+        k = sat(vArg);
         k *= dc1.x;
     }
     if (dofRed != 0)
@@ -152,8 +152,8 @@ float4 dofTexel(int2 p, float2 size)
 float tapW(float2 m, float L)
 {
     float l = sqrt(dot(m, m));
-    float param = ((-abs(L - l)) * mc0.z) + 1.0f;
-    return sat(param);
+    float vArg3 = ((-abs(L - l)) * mc0.z) + 1.0f;
+    return sat(vArg3);
 }
 
 // the composite read as a linear filter reads its target at uv (clamped to the edge)
@@ -166,25 +166,25 @@ float3 dofAt(float2 uv, float2 size)
     int2 hi = min((lo + int2(1, 1)), (int2(size) - int2(1, 1)));
     lo = max(lo, int2(0, 0));
     hi = max(hi, int2(0, 0));
-    int2 param = lo;
-    float2 param_1 = size;
-    float3 r = dofTexel(param, param_1).xyz * ((1.0f - f.x) * (1.0f - f.y));
+    int2 pArg4 = lo;
+    float2 sizeArg4 = size;
+    float3 r = dofTexel(pArg4, sizeArg4).xyz * ((1.0f - f.x) * (1.0f - f.y));
     if (f.x > 0.0f)
     {
-        int2 param_2 = int2(hi.x, lo.y);
-        float2 param_3 = size;
-        r += (dofTexel(param_2, param_3).xyz * (f.x * (1.0f - f.y)));
+        int2 pArg3 = int2(hi.x, lo.y);
+        float2 sizeArg3 = size;
+        r += (dofTexel(pArg3, sizeArg3).xyz * (f.x * (1.0f - f.y)));
     }
     if (f.y > 0.0f)
     {
-        int2 param_4 = int2(lo.x, hi.y);
-        float2 param_5 = size;
-        r += (dofTexel(param_4, param_5).xyz * ((1.0f - f.x) * f.y));
+        int2 pArg2 = int2(lo.x, hi.y);
+        float2 sizeArg2 = size;
+        r += (dofTexel(pArg2, sizeArg2).xyz * ((1.0f - f.x) * f.y));
         if (f.x > 0.0f)
         {
-            int2 param_6 = hi;
-            float2 param_7 = size;
-            r += (dofTexel(param_6, param_7).xyz * (f.x * f.y));
+            int2 pArg = hi;
+            float2 sizeArg = size;
+            r += (dofTexel(pArg, sizeArg).xyz * (f.x * f.y));
         }
     }
     return r;
@@ -194,22 +194,22 @@ void frag_main()
 {
     float2 size = float2(int2(spvTextureSize(t0, uint(0), dummy_parameter)));
     float2 g = gl_FragCoord.xy / size;
-    float2 param = g;
-    float2 v1 = V(param);
-    float2 param_1 = v1;
-    float2 m = mvAt(param_1);
+    float2 dArg11 = g;
+    float2 v1 = V(dArg11);
+    float2 dArg10 = v1;
+    float2 m = mvAt(dArg10);
     float l2 = dot(m, m);
     float L = sqrt(l2);
     float2 dc = v1 - mc1.zw;
     float rr = sqrt(dot(dc, dc));
-    float param_2 = (rr * 0.100000001490116119384765625f) + (-0.017999999225139617919921875f);
-    rr = sat(param_2);
+    float vArg4 = (rr * 0.100000001490116119384765625f) + (-0.017999999225139617919921875f);
+    rr = sat(vArg4);
     rr = L * rr;
     if (rr < 0.001000000047497451305389404296875f)
     {
-        int2 param_3 = int2(gl_FragCoord.xy);
-        float2 param_4 = size;
-        fragColor = dofTexel(param_3, param_4);
+        int2 pArg5 = int2(gl_FragCoord.xy);
+        float2 sizeArg9 = size;
+        fragColor = dofTexel(pArg5, sizeArg9);
         return;
     }
     float2 dir = m * rsqrt(l2);
@@ -217,44 +217,44 @@ void frag_main()
     dir *= len;
     dir *= mc0.x;
     float2 p0 = min(v1, mc1.xy);
-    float2 param_5 = p0;
-    float2 param_6 = mvAt(param_5);
-    float param_7 = L;
-    float w0 = tapW(param_6, param_7);
-    float2 param_8 = p0;
-    float2 param_9 = V(param_8);
-    float2 param_10 = size;
-    float3 col = dofAt(param_9, param_10);
+    float2 dArg9 = p0;
+    float2 mArg4 = mvAt(dArg9);
+    float LArg4 = L;
+    float w0 = tapW(mArg4, LArg4);
+    float2 dArg8 = p0;
+    float2 uvArg4 = V(dArg8);
+    float2 sizeArg8 = size;
+    float3 col = dofAt(uvArg4, sizeArg8);
     float4 p12 = min((dir.xyxy * float4(0.25f, 0.25f, 0.5f, 0.5f)) + v1.xyxy, mc1.xyxy);
-    float2 param_11 = p12.xy;
-    float2 param_12 = mvAt(param_11);
-    float param_13 = L;
-    float w1 = tapW(param_12, param_13);
+    float2 dArg7 = p12.xy;
+    float2 mArg3 = mvAt(dArg7);
+    float LArg3 = L;
+    float w1 = tapW(mArg3, LArg3);
     float ws = w0 + w1;
-    float2 param_14 = p12.xy;
-    float2 param_15 = V(param_14);
-    float2 param_16 = size;
-    float3 c1t = dofAt(param_15, param_16) * w1;
+    float2 dArg6 = p12.xy;
+    float2 uvArg3 = V(dArg6);
+    float2 sizeArg7 = size;
+    float3 c1t = dofAt(uvArg3, sizeArg7) * w1;
     col = (col * w0) + c1t;
-    float2 param_17 = p12.zw;
-    float2 param_18 = mvAt(param_17);
-    float param_19 = L;
-    float w2 = tapW(param_18, param_19);
+    float2 dArg5 = p12.zw;
+    float2 mArg2 = mvAt(dArg5);
+    float LArg2 = L;
+    float w2 = tapW(mArg2, LArg2);
     ws = w2 + ws;
-    float2 param_20 = p12.zw;
-    float2 param_21 = V(param_20);
-    float2 param_22 = size;
-    col = (dofAt(param_21, param_22) * w2) + col;
+    float2 dArg4 = p12.zw;
+    float2 uvArg2 = V(dArg4);
+    float2 sizeArg6 = size;
+    col = (dofAt(uvArg2, sizeArg6) * w2) + col;
     float2 p3 = min((dir * 0.75f) + v1, mc1.xy);
-    float2 param_23 = p3;
-    float2 param_24 = mvAt(param_23);
-    float param_25 = L;
-    float w3 = tapW(param_24, param_25);
+    float2 dArg3 = p3;
+    float2 mArg = mvAt(dArg3);
+    float LArg = L;
+    float w3 = tapW(mArg, LArg);
     ws = w3 + ws;
-    float2 param_26 = p3;
-    float2 param_27 = V(param_26);
-    float2 param_28 = size;
-    col = (dofAt(param_27, param_28) * w3) + col;
+    float2 dArg2 = p3;
+    float2 uvArg = V(dArg2);
+    float2 sizeArg5 = size;
+    col = (dofAt(uvArg, sizeArg5) * w3) + col;
     ws += 0.001000000047497451305389404296875f;
     fragColor = float4(col / ws.xxx, 1.0f);
 }

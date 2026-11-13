@@ -52,9 +52,9 @@ void frag_main()
     float2 w = fgStampCell + ((gl_FragCoord.xy / fgStampSide.xx) * 4096.0f);
     float2 g = (w - fgGridMap.xy) * fgGridMap.z;
     float z = fgHeight.Sample(_fgHeight_sampler, (g + 0.5f.xx) / fgGridN).x;
-    float3 param = float3(w, z);
-    float param_1 = 4096.0f / fgStampSide;
-    fragColor = fgDecals(param, param_1);
+    float3 wArg = float3(w, z);
+    float pixArg = 4096.0f / fgStampSide;
+    fragColor = fgDecals(wArg, pixArg);
 }
 
 SPIRV_Cross_Output main(SPIRV_Cross_Input stage_input)

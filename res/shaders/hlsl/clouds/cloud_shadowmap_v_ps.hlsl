@@ -15,8 +15,8 @@ struct CloudBands
     float3 windKm;
 };
 
-static const float tmp664[4] = { 0.100000001490116119384765625f, 0.07999999821186065673828125f, 0.070000000298023223876953125f, 0.02999999932944774627685546875f };
-static const float tmp682[4] = { 0.60000002384185791015625f, 0.449999988079071044921875f, 0.550000011920928955078125f, 0.85000002384185791015625f };
+static const float table4[4] = { 0.100000001490116119384765625f, 0.07999999821186065673828125f, 0.070000000298023223876953125f, 0.02999999932944774627685546875f };
+static const float table42[4] = { 0.60000002384185791015625f, 0.449999988079071044921875f, 0.550000011920928955078125f, 0.85000002384185791015625f };
 
 cbuffer LooseUniforms : register(b31, space0)
 {
@@ -127,15 +127,16 @@ float cvTypeProfile(float T, float hf)
 {
     float u = clamp(T, 0.0f, 1.0f) * 3.0f;
     int k = min(int(u), 2);
-    float r = lerp(tmp664[k], tmp664[k + 1], u - float(k));
-    float f = lerp(tmp682[k], tmp682[k + 1], u - float(k));
-    float param = 0.0f;
-    float param_1 = r;
-    float param_2 = hf;
-    float param_3 = f;
-    float param_4 = 1.0f;
-    float param_5 = hf;
-    return cvSmooth(param, param_1, param_2) * (1.0f - cvSmooth(param_3, param_4, param_5));
+    // the rise and fall heights blend, not the profiles' values (cloudvolmath.h typeProfile: no shoulder half way up)
+    float r = lerp(table4[k], table4[k + 1], u - float(k));
+    float f = lerp(table42[k], table42[k + 1], u - float(k));
+    float aArg2 = 0.0f;
+    float bArg2 = r;
+    float xArg2 = hf;
+    float aArg = f;
+    float bArg = 1.0f;
+    float xArg = hf;
+    return cvSmooth(aArg2, bArg2, xArg2) * (1.0f - cvSmooth(aArg, bArg, xArg));
 }
 
 #define WW_FN_cvCalAt
@@ -173,20 +174,22 @@ void frag_main()
     cvFootKm = 0.0f;
     float2 uv = gl_FragCoord.xy / csSize;
     float2 ab = csFit.xy + ((uv - 0.5f.xx) * csFit.z);
+    // a clear line stores the lowest live base: a texel filtered with a cloudy one then never shadows a point above
+    // the cloud's top (the highest top did, near every cloud edge)
     float floorKm = 10000.0f;
     for (int b = 0; b < 2; b++)
     {
-        bool tmp1204 = cvBands.density[b] > 0.0f;
-        bool tmp1214;
-        if (tmp1204)
+        bool cond5 = cvBands.density[b] > 0.0f;
+        bool cond4;
+        if (cond5)
         {
-            tmp1214 = cvBands.topKm[b] > cvBands.baseKm[b];
+            cond4 = cvBands.topKm[b] > cvBands.baseKm[b];
         }
         else
         {
-            tmp1214 = tmp1204;
+            cond4 = cond5;
         }
-        if (tmp1214)
+        if (cond4)
         {
             floorKm = min(floorKm, cvBands.baseKm[b]);
         }
@@ -203,7 +206,7 @@ void frag_main()
             float top = cvBands.topKm[b_1];
             bool wwh0 = (cvBands.density[b_1] <= 0.0f);
             bool wwh1 = (top <= base);
-            if (wwh0 || wwh1)
+            if (or(wwh0, wwh1))   // HLSLFIX2 orfix.py: no short-circuit branch (NV took the wrong side)
             {
                 continue;
             }
@@ -211,10 +214,10 @@ void frag_main()
             for (int i = 0; i < csSteps; i++)
             {
                 float h = top - ((float(i) + 0.5f) * dh);
-                float2 param = ab;
-                float param_1 = h;
-                float3 param_2 = csLine(param, param_1);
-                float d = cloudDensity(param_2);
+                float2 abArg4 = ab;
+                float hArg4 = h;
+                float3 pArg = csLine(abArg4, hArg4);
+                float d = cloudDensity(pArg);
                 if (d <= 0.0f)
                 {
                     continue;
@@ -232,20 +235,25 @@ void frag_main()
     {
         if ((csMode == 3) && (csSheetN > 0))
         {
+            // MODULES1 10c: one sheet a layer. This texel's sun line meets sheet i at csLine( ab, altitude ): the
+            // parallax. The sun's disc is a tap pattern on the sheet (radius = the distance along the ray x tan of the
+            // sun's radius, stretched along the azimuth by 1 / sun z); hex tiling breaks the texture's repeat. The
+            // light kept is the product of (1 - cover); a receiver above a sheet is not shadowed by it through the
+            // map's height ramp (x = the highest contributing sheet, the ramp runs down to the lowest).
             float kept = 1.0f;
             float lo = 10000.0f;
             int taps = clamp(int(csSheetP.x + 0.5f), 1, 16);
             bool hex = csSheetP.y > 0.5f;
-            float2 tmp1357;
+            float2 azPick;
             if (dot(csS.xy, csS.xy) > 1.0000000133514319600180897396058e-10f)
             {
-                tmp1357 = normalize(csS.xy);
+                azPick = normalize(csS.xy);
             }
             else
             {
-                tmp1357 = float2(1.0f, 0.0f);
+                azPick = float2(1.0f, 0.0f);
             }
-            float2 az = tmp1357;
+            float2 az = azPick;
             float2 ac = float2(-az.y, az.x);
             float sz = max(csS.z, 0.001000000047497451305389404296875f);
             float texelWorld = (csFit.w / sz) / csUnitKm;
@@ -253,15 +261,15 @@ void frag_main()
             float2 c0;
             float2 c1;
             float2 c2;
-            float tmp1634;
+            float rPick;
             float a;
             for (int i_1 = 0; i_1 < csSheetN; i_1++)
             {
                 float altKm = csSheetB[i_1].z;
                 floorKm = min(floorKm, altKm - csFs.z);
-                float2 param_3 = ab;
-                float param_4 = altKm;
-                float2 hit = csLine(param_3, param_4).xy / csUnitKm.xx;
+                float2 abArg3 = ab;
+                float hArg3 = altKm;
+                float2 hit = csLine(abArg3, hArg3).xy / csUnitKm.xx;
                 float t = (max(altKm - csSheetP.w, 0.0f) / csUnitKm) / sz;
                 float rAcross = t * csSheetP.z;
                 float rAlong = rAcross / sz;
@@ -302,20 +310,20 @@ void frag_main()
                         c2 = c + float2(0.0f, 1.0f);
                         w = float3(-bz, 1.0f - f.y, 1.0f - f.x);
                     }
-                    float2 param_5 = c0;
-                    float2 tmp1599 = csSheetHash(param_5);
-                    o0 = tmp1599;
-                    float2 param_6 = c1;
-                    float2 tmp1602 = csSheetHash(param_6);
-                    o1 = tmp1602;
-                    float2 param_7 = c2;
-                    float2 tmp1605 = csSheetHash(param_7);
-                    o2 = tmp1605;
+                    float2 sArg3 = c0;
+                    float2 csSheetHashRet3 = csSheetHash(sArg3);
+                    o0 = csSheetHashRet3;
+                    float2 sArg2 = c1;
+                    float2 csSheetHashRet2 = csSheetHash(sArg2);
+                    o1 = csSheetHashRet2;
+                    float2 sArg = c2;
+                    float2 csSheetHashRet = csSheetHash(sArg);
+                    o2 = csSheetHashRet;
                     w /= max(length(w), 9.9999999747524270787835121154785e-07f).xxx;
-                    int param_8 = i_1;
-                    float2 param_9 = uvC;
-                    float param_10 = maxMip;
-                    mean = csSheetAlpha(param_8, param_9, param_10);
+                    int iArg5 = i_1;
+                    float2 stArg5 = uvC;
+                    float mipArg5 = maxMip;
+                    mean = csSheetAlpha(iArg5, stArg5, mipArg5);
                 }
                 float cover = 0.0f;
                 float2 dir = float2(1.0f, 0.0f);
@@ -323,34 +331,34 @@ void frag_main()
                 {
                     if (taps > 1)
                     {
-                        tmp1634 = sqrt((float(k) + 0.5f) / float(taps));
+                        rPick = sqrt((float(k) + 0.5f) / float(taps));
                     }
                     else
                     {
-                        tmp1634 = 0.0f;
+                        rPick = 0.0f;
                     }
-                    float r = tmp1634;
+                    float r = rPick;
                     float2 st = (uvC + (uvAlong * (r * dir.x))) + (uvAcross * (r * dir.y));
                     dir = float2((dir.x * (-0.737368881702423095703125f)) - (dir.y * 0.675490319728851318359375f), (dir.x * 0.675490319728851318359375f) + (dir.y * (-0.737368881702423095703125f)));
                     if (hex)
                     {
-                        int param_11 = i_1;
-                        float2 param_12 = st + o0;
-                        float param_13 = mip;
-                        int param_14 = i_1;
-                        float2 param_15 = st + o1;
-                        float param_16 = mip;
-                        int param_17 = i_1;
-                        float2 param_18 = st + o2;
-                        float param_19 = mip;
-                        a = clamp(mean + dot(w, float3(csSheetAlpha(param_11, param_12, param_13), csSheetAlpha(param_14, param_15, param_16), csSheetAlpha(param_17, param_18, param_19)) - mean.xxx), 0.0f, 1.0f);
+                        int iArg4 = i_1;
+                        float2 stArg4 = st + o0;
+                        float mipArg4 = mip;
+                        int iArg3 = i_1;
+                        float2 stArg3 = st + o1;
+                        float mipArg3 = mip;
+                        int iArg2 = i_1;
+                        float2 stArg2 = st + o2;
+                        float mipArg2 = mip;
+                        a = clamp(mean + dot(w, float3(csSheetAlpha(iArg4, stArg4, mipArg4), csSheetAlpha(iArg3, stArg3, mipArg3), csSheetAlpha(iArg2, stArg2, mipArg2)) - mean.xxx), 0.0f, 1.0f);
                     }
                     else
                     {
-                        int param_20 = i_1;
-                        float2 param_21 = st;
-                        float param_22 = mip;
-                        a = csSheetAlpha(param_20, param_21, param_22);
+                        int iArg = i_1;
+                        float2 stArg = st;
+                        float mipArg = mip;
+                        a = csSheetAlpha(iArg, stArg, mipArg);
                     }
                     cover += clamp(a * csSheetB[i_1].w, 0.0f, 1.0f);
                 }
@@ -371,32 +379,34 @@ void frag_main()
         {
             if (csMode == 3)
             {
+                // MODULES1 10b-7: the sheets law. Each band's cover is a flat sheet at the band's middle; the light kept is
+                // the product of (1 - cover); the mask is 1 - saturate((1 - kept) x opacity), then mask ^ strength.
                 float kept_1 = 1.0f;
-                float tmp1831;
+                float cPick2;
                 for (int b_2 = 1; b_2 >= 0; b_2--)
                 {
                     float base_1 = cvBands.baseKm[b_2];
                     float top_1 = cvBands.topKm[b_2];
                     bool wwh2 = (cvBands.density[b_2] <= 0.0f);
                     bool wwh3 = (top_1 <= base_1);
-                    if (wwh2 || wwh3)
+                    if (or(wwh2, wwh3))   // HLSLFIX2 orfix.py: no short-circuit branch (NV took the wrong side)
                     {
                         continue;
                     }
                     float mid = 0.5f * (base_1 + top_1);
-                    float2 param_23 = ab;
-                    float param_24 = mid;
-                    float2 param_25 = csLine(param_23, param_24).xy;
-                    float4 m_1 = cvMapAt(param_25);
+                    float2 abArg2 = ab;
+                    float hArg2 = mid;
+                    float2 xyArg2 = csLine(abArg2, hArg2).xy;
+                    float4 m_1 = cvMapAt(xyArg2);
                     if (b_2 == 0)
                     {
-                        tmp1831 = m_1.x;
+                        cPick2 = m_1.x;
                     }
                     else
                     {
-                        tmp1831 = m_1.y;
+                        cPick2 = m_1.y;
                     }
-                    float c_1 = clamp(tmp1831, 0.0f, 1.0f);
+                    float c_1 = clamp(cPick2, 0.0f, 1.0f);
                     if (c_1 <= 0.0f)
                     {
                         continue;
@@ -413,30 +423,30 @@ void frag_main()
             }
             else
             {
-                float tmp1922;
+                float cPick;
                 for (int b_3 = 1; b_3 >= 0; b_3--)
                 {
                     float base_2 = cvBands.baseKm[b_3];
                     float top_2 = cvBands.topKm[b_3];
                     bool wwh4 = (cvBands.density[b_3] <= 0.0f);
                     bool wwh5 = (top_2 <= base_2);
-                    if (wwh4 || wwh5)
+                    if (or(wwh4, wwh5))   // HLSLFIX2 orfix.py: no short-circuit branch (NV took the wrong side)
                     {
                         continue;
                     }
-                    float2 param_26 = ab;
-                    float param_27 = 0.5f * (base_2 + top_2);
-                    float2 param_28 = csLine(param_26, param_27).xy;
-                    float4 m_2 = cvMapAt(param_28);
+                    float2 abArg = ab;
+                    float hArg = 0.5f * (base_2 + top_2);
+                    float2 xyArg = csLine(abArg, hArg).xy;
+                    float4 m_2 = cvMapAt(xyArg);
                     if (b_3 == 0)
                     {
-                        tmp1922 = m_2.x;
+                        cPick = m_2.x;
                     }
                     else
                     {
-                        tmp1922 = m_2.y;
+                        cPick = m_2.y;
                     }
-                    float c_2 = clamp(tmp1922, 0.0f, 1.0f);
+                    float c_2 = clamp(cPick, 0.0f, 1.0f);
                     float tau = (((40.0f * cvBands.density[b_3]) * 0.4000000059604644775390625f) * (top_2 - base_2)) / csS.z;
                     float T = 1.0f - (c_2 * (1.0f - exp(-tau)));
                     if (T >= 1.0f)
@@ -455,7 +465,7 @@ void frag_main()
     }
     bool wwh6 = (zTop < 0.0f);
     bool wwh7 = (od <= 0.0f);
-    if (wwh6 || wwh7)
+    if (or(wwh6, wwh7))   // HLSLFIX2 orfix.py: no short-circuit branch (NV took the wrong side)
     {
         fragColor = float4((floorKm < 10000.0f) ? floorKm : 0.0f, 0.0f, 0.0f, 0.0f);
         return;

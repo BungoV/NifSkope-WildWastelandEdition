@@ -101,35 +101,35 @@ uint wwWaterInfoRaw(float2 worldXY)
     int2 t = int2(floor((worldXY - waterInfoGrid.xy) / waterInfoGrid.z.xx));
     int E = int(waterInfoLayout.z);
     int2 tile = t / E.xx;
-    bool tmp151 = t.x < 0;
-    bool tmp158;
-    if (!tmp151)
+    bool cond4 = t.x < 0;
+    bool cond3;
+    if (!cond4)
     {
-        tmp158 = t.y < 0;
+        cond3 = t.y < 0;
     }
     else
     {
-        tmp158 = tmp151;
+        cond3 = cond4;
     }
-    bool tmp168;
-    if (!tmp158)
+    bool cond2;
+    if (!cond3)
     {
-        tmp168 = tile.x >= int(waterInfoLayout.x);
+        cond2 = tile.x >= int(waterInfoLayout.x);
     }
     else
     {
-        tmp168 = tmp158;
+        cond2 = cond3;
     }
-    bool tmp178;
-    if (!tmp168)
+    bool cond;
+    if (!cond2)
     {
-        tmp178 = tile.y >= int(waterInfoLayout.y);
+        cond = tile.y >= int(waterInfoLayout.y);
     }
     else
     {
-        tmp178 = tmp168;
+        cond = cond2;
     }
-    if (tmp178)
+    if (cond)
     {
         return 16711680u;
     }
@@ -153,8 +153,8 @@ float wwSeamFade(float2 worldXY)
 
 uint wwWaterInfoWord(float2 worldXY)
 {
-    float2 param = worldXY;
-    uint w = wwWaterInfoRaw(param);
+    float2 worldXYArg2 = worldXY;
+    uint w = wwWaterInfoRaw(worldXYArg2);
     bool wwh0 = (waterSeam.x <= 0.0f);
     if (wwh0 || (!waterInfoOn))
     {
@@ -164,23 +164,23 @@ uint wwWaterInfoWord(float2 worldXY)
     uint sea = uint(waterSeam.y);
     if (id == 0u)
     {
-        uint tmp267;
+        uint wwWaterInfoWordRet;
         if (waterSeam.z > 0.0f)
         {
-            tmp267 = sea | 4294901760u;
+            wwWaterInfoWordRet = sea | 4294901760u;
         }
         else
         {
-            tmp267 = w;
+            wwWaterInfoWordRet = w;
         }
-        return tmp267;
+        return wwWaterInfoWordRet;
     }
     if (id != sea)
     {
         return w;
     }
-    float2 param_1 = worldXY;
-    float f = wwSeamFade(param_1);
+    float2 worldXYArg = worldXY;
+    float f = wwSeamFade(worldXYArg);
     uint sh = uint(lerp(255.0f, float((w >> uint(16)) & 255u), f) + 0.5f);
     uint dc = uint(lerp(255.0f, float(w >> uint(24)), f) + 0.5f);
     return (id | (sh << uint(16))) | (dc << uint(24));
@@ -205,9 +205,9 @@ uint wwOcMix(inout uint x)
 float wwOcHash01(int2 c, uint seed)
 {
     uint2 u = uint2(c & int2(1023, 1023));
-    uint param = ((u.x * 2376512323u) ^ (u.y * 3625334849u)) ^ seed;
-    uint tmp359 = wwOcMix(param);
-    return float(tmp359) * 2.3283064365386962890625e-10f;
+    uint xArg = ((u.x * 2376512323u) ^ (u.y * 3625334849u)) ^ seed;
+    uint wwOcMixRet = wwOcMix(xArg);
+    return float(wwOcMixRet) * 2.3283064365386962890625e-10f;
 }
 
 float wwOcValue(float2 p, uint seed)
@@ -216,39 +216,39 @@ float wwOcValue(float2 p, uint seed)
     float2 f = p - i;
     f = (f * f) * (3.0f.xx - (f * 2.0f));
     int2 c = int2(i);
-    int2 param = c;
-    uint param_1 = seed;
-    float a = wwOcHash01(param, param_1);
-    int2 param_2 = c + int2(1, 0);
-    uint param_3 = seed;
-    float b = wwOcHash01(param_2, param_3);
-    int2 param_4 = c + int2(0, 1);
-    uint param_5 = seed;
-    float d = wwOcHash01(param_4, param_5);
-    int2 param_6 = c + int2(1, 1);
-    uint param_7 = seed;
-    float e = wwOcHash01(param_6, param_7);
+    int2 cArg4 = c;
+    uint seedArg4 = seed;
+    float a = wwOcHash01(cArg4, seedArg4);
+    int2 cArg3 = c + int2(1, 0);
+    uint seedArg3 = seed;
+    float b = wwOcHash01(cArg3, seedArg3);
+    int2 cArg2 = c + int2(0, 1);
+    uint seedArg2 = seed;
+    float d = wwOcHash01(cArg2, seedArg2);
+    int2 cArg = c + int2(1, 1);
+    uint seedArg = seed;
+    float e = wwOcHash01(cArg, seedArg);
     return lerp(lerp(a, b, f.x), lerp(d, e, f.x), f.y);
 }
 
 // the wind patch factor (mean square 1): glassy where the gusts do not reach, cat's-paws where they do
 float wwOcPatch(float2 P, int set)
 {
-    float2 tmp434;
+    float2 pPick;
     if (set == 0)
     {
-        tmp434 = waterOceanPatch.xy;
+        pPick = waterOceanPatch.xy;
     }
     else
     {
-        tmp434 = waterOceanPatch.zw;
+        pPick = waterOceanPatch.zw;
     }
-    float2 p = (P + tmp434) / waterOceanSetB[set].z.xx;
-    float2 param = p;
-    uint param_1 = 625341585u;
-    float2 param_2 = (p * 2.0f) + float2(17.0f, 31.0f);
-    uint param_3 = 2654435769u;
-    float n = (0.64999997615814208984375f * wwOcValue(param, param_1)) + (0.3499999940395355224609375f * wwOcValue(param_2, param_3));
+    float2 p = (P + pPick) / waterOceanSetB[set].z.xx;
+    float2 pArg2 = p;
+    uint seedArg6 = 625341585u;
+    float2 pArg = (p * 2.0f) + float2(17.0f, 31.0f);
+    uint seedArg5 = 2654435769u;
+    float n = (0.64999997615814208984375f * wwOcValue(pArg2, seedArg6)) + (0.3499999940395355224609375f * wwOcValue(pArg, seedArg5));
     return 1.60209500789642333984375f * smoothstep(0.300000011920928955078125f, 0.699999988079071044921875f, n);
 }
 
@@ -264,14 +264,15 @@ int wwOcBody(float2 P, inout float ws, out float a, out float3 gc, inout float m
     float2 t0 = floor(g);
     float2 f = g - t0;
     float2 c0 = waterInfoGrid.xy + ((t0 + 0.5f.xx) * tex);
-    float2 param = c0;
-    float2 param_1 = c0 + float2(tex, 0.0f);
-    float2 param_2 = c0 + float2(0.0f, tex);
-    float2 param_3 = c0 + tex.xx;
-    uint4 wd = uint4(wwWaterInfoWord(param), wwWaterInfoWord(param_1), wwWaterInfoWord(param_2), wwWaterInfoWord(param_3));
+    float2 worldXYArg6 = c0;
+    float2 worldXYArg5 = c0 + float2(tex, 0.0f);
+    float2 worldXYArg4 = c0 + float2(0.0f, tex);
+    float2 worldXYArg3 = c0 + tex.xx;
+    uint4 wd = uint4(wwWaterInfoWord(worldXYArg6), wwWaterInfoWord(worldXYArg5), wwWaterInfoWord(worldXYArg4), wwWaterInfoWord(worldXYArg3));
     float4 bw = float4((1.0f - f.x) * (1.0f - f.y), f.x * (1.0f - f.y), (1.0f - f.x) * f.y, f.x * f.y);
     uint4 id = wd & uint4(65535u, 65535u, 65535u, 65535u);
     float U = waterOceanWind.z;
+    // each wet corner's set and gain; the set of the largest weight wins, its corners' gains blend
     float4 cset = (-1.0f).xxxx;
     float4 cgain = 0.0f.xxxx;
     float best = -1.0f;
@@ -295,11 +296,11 @@ int wwOcBody(float2 P, inout float ws, out float a, out float3 gc, inout float m
             F = min(F, 40.0f);
         }
         float4 S = waterOceanSet[s];
-        float param_4 = U;
-        float param_5 = F;
-        float param_6 = U;
-        float param_7 = waterOceanSetB[s].x;
-        float hw = (S.y * wwOcHw(param_4, param_5)) / max(wwOcHw(param_6, param_7), 9.9999999747524270787835121154785e-07f);
+        float UArg2 = U;
+        float FArg2 = F;
+        float UArg = U;
+        float FArg = waterOceanSetB[s].x;
+        float hw = (S.y * wwOcHw(UArg2, FArg2)) / max(wwOcHw(UArg, FArg), 9.9999999747524270787835121154785e-07f);
         cset[k] = float(s);
         cgain[k] = clamp(sqrt((hw * hw) + (S.z * S.z)) / max(S.x, 9.9999999747524270787835121154785e-07f), 0.1500000059604644775390625f, 3.0f);
         if (bw[k] > best)
@@ -312,44 +313,44 @@ int wwOcBody(float2 P, inout float ws, out float a, out float3 gc, inout float m
     {
         return -1;
     }
-    float4 tmp764 = float(set).xxxx;
-    float4 same = float4(bool4(cset.x == tmp764.x, cset.y == tmp764.y, cset.z == tmp764.z, cset.w == tmp764.w));
+    float4 samePart = float(set).xxxx;
+    float4 same = float4(bool4(cset.x == samePart.x, cset.y == samePart.y, cset.z == samePart.z, cset.w == samePart.w));
     ws = dot(bw, same);
     a = dot(bw * same, cgain) / max(ws, 9.9999999747524270787835121154785e-07f);
-    float tmp785;
+    float mPick;
     if ((waterOceanRed & 4) != 0)
     {
-        tmp785 = 1.0f;
+        mPick = 1.0f;
     }
     else
     {
-        float2 param_8 = P;
-        int param_9 = set;
-        tmp785 = wwOcPatch(param_8, param_9);
+        float2 PArg = P;
+        int setArg = set;
+        mPick = wwOcPatch(PArg, setArg);
     }
-    m = tmp785;
-    float tmp798;
+    m = mPick;
+    float pwPick;
     if ((waterOceanRed & 4) != 0)
     {
-        tmp798 = 0.0f;
+        pwPick = 0.0f;
     }
     else
     {
-        tmp798 = 1.0f - (0.699999988079071044921875f * clamp((U - 3.0f) / 7.0f, 0.0f, 1.0f));
+        pwPick = 1.0f - (0.699999988079071044921875f * clamp((U - 3.0f) / 7.0f, 0.0f, 1.0f));
     }
-    pw = tmp798;
+    pw = pwPick;
     gc = float3(1.0f, lerp(1.0f, m, 0.5f * pw), lerp(1.0f, m, pw));
     return set;
 }
 
 float2 wwOcOffset(int2 v, uint seed)
 {
-    uint param = ((uint(v.x) * 2376512323u) ^ (uint(v.y) * 3625334849u)) ^ seed;
-    uint tmp495 = wwOcMix(param);
-    uint h = tmp495;
-    uint param_1 = h ^ 1759714724u;
-    uint tmp501 = wwOcMix(param_1);
-    uint h2 = tmp501;
+    uint xArg3 = ((uint(v.x) * 2376512323u) ^ (uint(v.y) * 3625334849u)) ^ seed;
+    uint wwOcMixRet3 = wwOcMix(xArg3);
+    uint h = wwOcMixRet3;
+    uint xArg2 = h ^ 1759714724u;
+    uint wwOcMixRet2 = wwOcMix(xArg2);
+    uint h2 = wwOcMixRet2;
     return float2(float(h), float(h2)) * 2.3283064365386962890625e-10f;
 }
 
@@ -382,33 +383,33 @@ float3 wwOcCascadeD(float2 uv, float lod, float layer, uint seed)
         v1 = b + int2(1, 0);
         v2 = b + int2(0, 1);
     }
-    int2 param = v0;
-    uint param_1 = seed;
-    float3 D0 = waterOceanD.SampleLevel(_waterOceanD_sampler, float3(uv + wwOcOffset(param, param_1), layer), lod).xyz;
-    int2 param_2 = v1;
-    uint param_3 = seed;
-    float3 D1 = waterOceanD.SampleLevel(_waterOceanD_sampler, float3(uv + wwOcOffset(param_2, param_3), layer), lod).xyz;
-    int2 param_4 = v2;
-    uint param_5 = seed;
-    float3 D2 = waterOceanD.SampleLevel(_waterOceanD_sampler, float3(uv + wwOcOffset(param_4, param_5), layer), lod).xyz;
+    int2 vArg3 = v0;
+    uint seedArg9 = seed;
+    float3 D0 = waterOceanD.SampleLevel(_waterOceanD_sampler, float3(uv + wwOcOffset(vArg3, seedArg9), layer), lod).xyz;
+    int2 vArg2 = v1;
+    uint seedArg8 = seed;
+    float3 D1 = waterOceanD.SampleLevel(_waterOceanD_sampler, float3(uv + wwOcOffset(vArg2, seedArg8), layer), lod).xyz;
+    int2 vArg = v2;
+    uint seedArg7 = seed;
+    float3 D2 = waterOceanD.SampleLevel(_waterOceanD_sampler, float3(uv + wwOcOffset(vArg, seedArg7), layer), lod).xyz;
     return (((D0 * w.x) + (D1 * w.y)) + (D2 * w.z)) * rsqrt(max(dot(w, w), 9.9999999747524270787835121154785e-07f));
 }
 
 float3 wwWaterOceanDisp(float2 P, float _step)
 {
-    float2 param = P;
-    float param_1;
-    float param_2;
-    float3 param_3;
-    float param_4;
-    float param_5;
-    int tmp989 = wwOcBody(param, param_1, param_2, param_3, param_4, param_5);
-    float ws = param_1;
-    float a = param_2;
-    float3 gc = param_3;
-    float m = param_4;
-    float pw = param_5;
-    int set = tmp989;
+    float2 PArg2 = P;
+    float wsArg;
+    float aArg;
+    float3 gcArg;
+    float mArg;
+    float pwArg;
+    int wwOcBodyRet = wwOcBody(PArg2, wsArg, aArg, gcArg, mArg, pwArg);
+    float ws = wsArg;
+    float a = aArg;
+    float3 gc = gcArg;
+    float m = mArg;
+    float pw = pwArg;
+    int set = wwOcBodyRet;
     if (set < 0)
     {
         return 0.0f.xxx;
@@ -418,53 +419,54 @@ float3 wwWaterOceanDisp(float2 P, float _step)
     float2 Pm = P * 0.01428749971091747283935546875f;
     float2 q = float2(dot(Pm, d), dot(Pm, e));
     float4 iL = waterOceanInvL[set];
+    // tile texels a vertex step, times the tile's 1 / L below
     float texels = (_step * 0.01428749971091747283935546875f) * 128.0f;
     float3 H = 0.0f.xxx;
     for (int c = 0; c < 3; c++)
     {
         float il = iL[c];
-        float2 param_6 = q * il;
-        float param_7 = max(log2(max(texels * il, 9.9999999747524270787835121154785e-07f)), 0.0f);
-        float param_8 = float((set * 3) + c);
-        uint param_9 = 461845907u * uint(((set * 3) + c) + 1);
-        H += (wwOcCascadeD(param_6, param_7, param_8, param_9) * gc[c]);
+        float2 uvArg = q * il;
+        float lodArg = max(log2(max(texels * il, 9.9999999747524270787835121154785e-07f)), 0.0f);
+        float layerArg = float((set * 3) + c);
+        uint seedArg10 = 461845907u * uint(((set * 3) + c) + 1);
+        H += (wwOcCascadeD(uvArg, lodArg, layerArg, seedArg10) * gc[c]);
     }
     H *= (a * ws);
-    float tmp1090;
+    float lamPick;
     if ((waterOceanRed & 16) != 0)
     {
-        tmp1090 = 0.0f;
+        lamPick = 0.0f;
     }
     else
     {
-        tmp1090 = iL.w;
+        lamPick = iL.w;
     }
-    float lam = tmp1090;
+    float lam = lamPick;
     return float3(((d * H.y) + (e * H.z)) * lam, H.x) / 0.01428749971091747283935546875f.xxx;
 }
 
 void wwDomainBody()
 {
     float3 w = sTessCoord;
-    precise float4 tmp1129 = sGlIn[0] * w.x;
-    precise float4 tmp1134 = sGlIn[1] * w.y;
-    precise float4 tmp1135 = tmp1129 + tmp1134;
-    precise float4 tmp1140 = sGlIn[2] * w.z;
-    precise float4 tmp1141 = tmp1135 + tmp1140;
-    float4 clip = tmp1141;
-    precise float3 tmp1150 = tcViewDir[0] * w.x;
-    precise float3 tmp1155 = tcViewDir[1] * w.y;
-    precise float3 tmp1156 = tmp1150 + tmp1155;
-    precise float3 tmp1161 = tcViewDir[2] * w.z;
-    precise float3 tmp1162 = tmp1156 + tmp1161;
-    float3 pv = -tmp1162;
+    precise float4 part15 = sGlIn[0] * w.x;
+    precise float4 part14 = sGlIn[1] * w.y;
+    precise float4 part13 = part15 + part14;
+    precise float4 part12 = sGlIn[2] * w.z;
+    precise float4 clipPart2 = part13 + part12;
+    float4 clip = clipPart2;
+    precise float3 part11 = tcViewDir[0] * w.x;
+    precise float3 part10 = tcViewDir[1] * w.y;
+    precise float3 part9 = part11 + part10;
+    precise float3 part8 = tcViewDir[2] * w.z;
+    precise float3 pvPart2 = part9 + part8;
+    float3 pv = -pvPart2;
     LightDir = ((tcLightDir[0] * w.x) + (tcLightDir[1] * w.y)) + (tcLightDir[2] * w.z);
     texCoord = ((tcTexCoord[0] * w.x) + (tcTexCoord[1] * w.y)) + (tcTexCoord[2] * w.z);
-    float3x3 tmp1218 = tcBtn[0] * w.x;
-    float3x3 tmp1223 = tcBtn[1] * w.y;
-    float3x3 tmp1233 = float3x3(tmp1218[0] + tmp1223[0], tmp1218[1] + tmp1223[1], tmp1218[2] + tmp1223[2]);
-    float3x3 tmp1238 = tcBtn[2] * w.z;
-    btnMatrix = float3x3(tmp1233[0] + tmp1238[0], tmp1233[1] + tmp1238[1], tmp1233[2] + tmp1238[2]);
+    float3x3 btnMatrixPart4 = tcBtn[0] * w.x;
+    float3x3 btnMatrixPart3 = tcBtn[1] * w.y;
+    float3x3 btnMatrixPart2 = float3x3(btnMatrixPart4[0] + btnMatrixPart3[0], btnMatrixPart4[1] + btnMatrixPart3[1], btnMatrixPart4[2] + btnMatrixPart3[2]);
+    float3x3 btnMatrixPart = tcBtn[2] * w.z;
+    btnMatrix = float3x3(btnMatrixPart2[0] + btnMatrixPart[0], btnMatrixPart2[1] + btnMatrixPart[1], btnMatrixPart2[2] + btnMatrixPart[2]);
     A = tcA[0];
     C = ((tcC[0] * w.x) + (tcC[1] * w.y)) + (tcC[2] * w.z);
     D = tcD[0];
@@ -474,41 +476,41 @@ void wwDomainBody()
     float3 world = float3(dot(cellRow[0], p), dot(cellRow[1], p), dot(cellRow[2], p));
     wwOcBase = world.xy;
     float dist = length(pv);
-    precise float tmp1338 = 1.0f - smoothstep(waterOceanDisp.x, waterOceanDisp.y, dist);
-    float fade = tmp1338;
-    bool tmp1354;
+    precise float fadePart = 1.0f - smoothstep(waterOceanDisp.x, waterOceanDisp.y, dist);
+    float fade = fadePart;
+    bool cond5;
     if (waterOceanOn)
     {
-        tmp1354 = projectionMatrix[3].w != 1.0f;
+        cond5 = projectionMatrix[3].w != 1.0f;
     }
     else
     {
-        tmp1354 = waterOceanOn;
+        cond5 = waterOceanOn;
     }
-    if (tmp1354 && (fade > 0.0f))
+    if (cond5 && (fade > 0.0f))
     {
-        precise float tmp1363 = projectionMatrix[1].y * 0.5f;
-        precise float tmp1369 = tmp1363 * float(viewportDimensions.w);
-        precise float tmp1372 = tmp1369 / max(dist, 1.0f);
-        float pxu = tmp1372;
-        precise float tmp1377 = waterOceanDisp.z / pxu;
-        precise float tmp1381 = 4096.0f / waterOceanDisp.w;
-        float _step = max(tmp1377, tmp1381);
-        float2 param = world.xy;
-        float param_1 = _step;
-        precise float3 tmp1391 = wwWaterOceanDisp(param, param_1) * fade;
-        float3 dw = tmp1391;
-        precise float3 tmp1398 = cellRow[0].xyz * dw.x;
-        precise float3 tmp1404 = cellRow[1].xyz * dw.y;
-        precise float3 tmp1405 = tmp1398 + tmp1404;
-        precise float3 tmp1411 = cellRow[2].xyz * dw.z;
-        precise float3 tmp1412 = tmp1405 + tmp1411;
-        precise float3 tmp1421 = tmp1412 / dot(cellRow[0].xyz, cellRow[0].xyz).xxx;
-        float3 dv = tmp1421;
-        precise float3 tmp1424 = pv + dv;
-        pv = tmp1424;
-        precise float4 tmp1435 = clip + mul(float4(dv, 0.0f), projectionMatrix);
-        clip = tmp1435;
+        precise float part7 = projectionMatrix[1].y * 0.5f;
+        precise float part6 = part7 * float(viewportDimensions.w);
+        precise float pxuPart = part6 / max(dist, 1.0f);
+        float pxu = pxuPart;
+        precise float _stepPart2 = waterOceanDisp.z / pxu;
+        precise float _stepPart = 4096.0f / waterOceanDisp.w;
+        float _step = max(_stepPart2, _stepPart);
+        float2 PArg3 = world.xy;
+        float _stepArg = _step;
+        precise float3 wwWaterOceanDispRet = wwWaterOceanDisp(PArg3, _stepArg) * fade;
+        float3 dw = wwWaterOceanDispRet;
+        precise float3 part5 = cellRow[0].xyz * dw.x;
+        precise float3 part4 = cellRow[1].xyz * dw.y;
+        precise float3 part3 = part5 + part4;
+        precise float3 part2 = cellRow[2].xyz * dw.z;
+        precise float3 part = part3 + part2;
+        precise float3 dvPart = part / dot(cellRow[0].xyz, cellRow[0].xyz).xxx;
+        float3 dv = dvPart;
+        precise float3 pvPart = pv + dv;
+        pv = pvPart;
+        precise float4 clipPart = clip + mul(float4(dv, 0.0f), projectionMatrix);
+        clip = clipPart;
     }
     ViewDir = -pv;
     gl_Position = clip;

@@ -154,20 +154,20 @@ float cvDens(float3 p)
 {
     if (cvSlab > 0.0f)
     {
-        bool tmp828 = p.z > cvBands.baseKm.x;
-        bool tmp836;
-        if (tmp828)
+        bool cond4 = p.z > cvBands.baseKm.x;
+        bool cvDensRet;
+        if (cond4)
         {
-            tmp836 = p.z < cvBands.topKm.x;
+            cvDensRet = p.z < cvBands.topKm.x;
         }
         else
         {
-            tmp836 = tmp828;
+            cvDensRet = cond4;
         }
-        return tmp836 ? cvSlab : 0.0f;
+        return cvDensRet ? cvSlab : 0.0f;
     }
-    float3 param = p;
-    return cloudDensity(param);
+    float3 pArg = p;
+    return cloudDensity(pArg);
 }
 
 // the ray's hits of the sphere of radius R about the planet's centre (origin height h0): near, far; far < 0 = none
@@ -197,9 +197,9 @@ float cvJitter(float2 q)
 //! where the ray leaves the box (flat: the earth's curve over the box is under a cell, kept by kSafe)
 float cfExit(float3 o, float3 d)
 {
-    float3 tmp1546 = abs(d);
-    bool3 tmp1547 = bool3(tmp1546.x < 9.999999717180685365747194737196e-10f.xxx.x, tmp1546.y < 9.999999717180685365747194737196e-10f.xxx.y, tmp1546.z < 9.999999717180685365747194737196e-10f.xxx.z);
-    float3 dd = float3(tmp1547.x ? 9.999999717180685365747194737196e-10f.xxx.x : d.x, tmp1547.y ? 9.999999717180685365747194737196e-10f.xxx.y : d.y, tmp1547.z ? 9.999999717180685365747194737196e-10f.xxx.z : d.z);
+    float3 ddPart2 = abs(d);
+    bool3 ddPart = bool3(ddPart2.x < 9.999999717180685365747194737196e-10f.xxx.x, ddPart2.y < 9.999999717180685365747194737196e-10f.xxx.y, ddPart2.z < 9.999999717180685365747194737196e-10f.xxx.z);
+    float3 dd = float3(ddPart.x ? 9.999999717180685365747194737196e-10f.xxx.x : d.x, ddPart.y ? 9.999999717180685365747194737196e-10f.xxx.y : d.y, ddPart.z ? 9.999999717180685365747194737196e-10f.xxx.z : d.z);
     float3 ta = (cfOrgKm - o) / dd;
     float3 tb = ((cfOrgKm + (cfDim * cfCellKm)) - o) / dd;
     float3 tf = max(ta, tb);
@@ -220,7 +220,7 @@ float cvShaftDens(float3 p)
     float hb = (base - p.z) / max(base - cvShaft.y, 0.001000000047497451305389404296875f);
     bool wwh0 = (hb <= 0.0f);
     bool wwh1 = (hb >= 1.0f);
-    if (wwh0 || wwh1)
+    if (or(wwh0, wwh1))   // HLSLFIX2 orfix.py: no short-circuit branch (NV took the wrong side)
     {
         return 0.0f;
     }
@@ -230,10 +230,10 @@ float cvShaftDens(float3 p)
         float t = clamp((hb - 0.60000002384185791015625f) / 0.4000000059604644775390625f, 0.0f, 1.0f);
         f = 1.0f - ((t * t) * (3.0f - (2.0f * t)));
     }
-    float2 param = p.xy;
-    int param_1 = 0;
-    float param_2 = cvMapAt(param).x;
-    float c = cvCalAt(param_1, param_2);
+    float2 xyArg = p.xy;
+    int bArg = 0;
+    float cArg = cvMapAt(xyArg).x;
+    float c = cvCalAt(bArg, cArg);
     if (c <= 0.0f)
     {
         return 0.0f;
@@ -279,15 +279,15 @@ float cvOctaveSum(float cosT, float tauL)
     float k = 1.0f;
     for (int i = 0; i < cvOctaves; i++)
     {
-        float4 param = cvPrm;
-        float param_1 = cosT;
-        float param_2 = k;
-        float ph = wwDropletPhase(param, param_1, param_2);
+        float4 prmArg = cvPrm;
+        float cArg3 = cosT;
+        float kArg2 = k;
+        float ph = wwDropletPhase(prmArg, cArg3, kArg2);
         if (cvIceNow > 0.0f)
         {
-            float param_3 = cosT;
-            float param_4 = k;
-            ph = lerp(ph, wwIcePhase(param_3, param_4), cvIceNow);
+            float cArg2 = cosT;
+            float kArg = k;
+            ph = lerp(ph, wwIcePhase(cArg2, kArg), cvIceNow);
         }
         s += ((a * exp((-b) * tauL)) * ph);
         a *= 0.5f;
@@ -311,12 +311,14 @@ float cvTdif(float tau, inout float mu0, float g, float w)
     float k = sqrt(max((g1 * g1) - (g2 * g2), 9.9999999392252902907785028219223e-09f));
     if (abs(1.0f - (k * mu0)) < 0.001000000047497451305389404296875f)
     {
+        // the closed form's removable singularity at k mu0 = 1
         mu0 += 0.00200000009499490261077880859375f;
     }
     float em = exp((-k) * tp);
     float e0 = exp((-tp) / mu0);
     float den = (1.0f - (((k * k) * mu0) * mu0)) * ((k + g1) + (((k - g1) * em) * em));
     float num = ((((1.0f + (k * mu0)) * (a1 + (k * g4))) * e0) - (((((1.0f - (k * mu0)) * (a1 - (k * g4))) * em) * em) * e0)) - (((2.0f * k) * (g4 + (a1 * mu0))) * em);
+    // the total transmission minus the direct e0
     return max(((-wp) * num) / den, 0.0f);
 }
 
@@ -352,12 +354,12 @@ float3 cvSky(float3 d)
     float2 a = d.xy;
     float la = length(a);
     float3 c = 0.0f.xxx;
-    float tmp1009;
-    float3 tmp1041;
+    float cosAzPick;
+    float3 cPick;
     for (int i = 0; i < 2; i++)
     {
-        bool3 tmp984 = (i == 0).xxx;
-        float3 l = float3(tmp984.x ? cvSunW.x : cvMoonW.x, tmp984.y ? cvSunW.y : cvMoonW.y, tmp984.z ? cvSunW.z : cvMoonW.z);
+        bool3 lPart = (i == 0).xxx;
+        float3 l = float3(lPart.x ? cvSunW.x : cvMoonW.x, lPart.y ? cvSunW.y : cvMoonW.y, lPart.z ? cvSunW.z : cvMoonW.z);
         float k = (i == 0) ? cvSunK : cvMoonK;
         if (k <= 0.0f)
         {
@@ -366,27 +368,27 @@ float3 cvSky(float3 d)
         float lb = length(l.xy);
         if ((la > 9.9999997473787516355514526367188e-06f) && (lb > 9.9999997473787516355514526367188e-06f))
         {
-            tmp1009 = dot(a / la.xx, l.xy / lb.xx);
+            cosAzPick = dot(a / la.xx, l.xy / lb.xx);
         }
         else
         {
-            tmp1009 = 1.0f;
+            cosAzPick = 1.0f;
         }
-        float cosAz = tmp1009;
-        float param = cvCamR;
-        float param_1 = d.z;
-        float param_2 = cosAz;
-        float2 param_3 = cvViewSize;
-        float2 uv = atSkyDirToUv(param, param_1, param_2, param_3);
+        float cosAz = cosAzPick;
+        float rArg = cvCamR;
+        float cosZArg = d.z;
+        float cosAzArg = cosAz;
+        float2 nArg = cvViewSize;
+        float2 uv = atSkyDirToUv(rArg, cosZArg, cosAzArg, nArg);
         if (i == 0)
         {
-            tmp1041 = cvSunView.Sample(_cvSunView_sampler, uv).xyz;
+            cPick = cvSunView.Sample(_cvSunView_sampler, uv).xyz;
         }
         else
         {
-            tmp1041 = cvMoonView.Sample(_cvMoonView_sampler, uv).xyz;
+            cPick = cvMoonView.Sample(_cvMoonView_sampler, uv).xyz;
         }
-        c += (tmp1041 * k);
+        c += (cPick * k);
     }
     return c;
 }
@@ -404,14 +406,16 @@ void frag_main()
         for (int k = 0; k < 128; k++)
         {
             float z = base + (((float(k) + 0.5f) / 128.0f) * (top - base));
-            float3 param = float3(xy, z);
-            tau += (((cvDens(param) * 40.0f) * (top - base)) / 128.0f);
+            float3 pArg12 = float3(xy, z);
+            tau += (((cvDens(pArg12) * 40.0f) * (top - base)) / 128.0f);
         }
         cvOut = (1.0f - exp(-tau)).xxxx;
         cvDepth = 0.0f.xxxx;
         return;
     }
     float2 q = (floor(gl_FragCoord.xy) * cvStride) + cvPhase;
+    // the HG peak is about (1 - g) rad wide: no narrower than 4 history pixels (one march texel at the shipped stride),
+    // or it aliases (flickers) by the sun; the same for every stride, so a full march matches the resolved picture
     cvPrm = cvPhasePrm;
     cvPrm.x = min(cvPrm.x, 1.0f - (8.0f / (cvProj.y * cvHistSize.y)));
     float2 ndc = (((q + 0.5f.xx) / cvHistSize) * 2.0f) - 1.0f.xx;
@@ -427,52 +431,52 @@ void frag_main()
     {
         hi = cvBands.topKm.x;
     }
-    bool tmp1748 = cvShaft.x > 0.0f;
-    bool tmp1754;
-    if (tmp1748)
+    bool cond16 = cvShaft.x > 0.0f;
+    bool cond15;
+    if (cond16)
     {
-        tmp1754 = cvBands.density.x > 0.0f;
+        cond15 = cvBands.density.x > 0.0f;
     }
     else
     {
-        tmp1754 = tmp1748;
+        cond15 = cond16;
     }
-    if (tmp1754)
+    if (cond15)
     {
         lo = min(lo, max(cvShaft.y, 0.0f));
     }
-    float param_1 = o.z;
-    float3 param_2 = d;
-    float param_3 = 6360.0f;
-    float2 gnd = cvSphere(param_1, param_2, param_3);
-    bool tmp1773 = gnd.y > 0.0f;
-    bool tmp1779;
-    if (tmp1773)
+    float h0Arg4 = o.z;
+    float3 dArg10 = d;
+    float RArg4 = 6360.0f;
+    float2 gnd = cvSphere(h0Arg4, dArg10, RArg4);
+    bool cond14 = gnd.y > 0.0f;
+    bool cond13;
+    if (cond14)
     {
-        tmp1779 = gnd.x > 0.0f;
+        cond13 = gnd.x > 0.0f;
     }
     else
     {
-        tmp1779 = tmp1773;
+        cond13 = cond14;
     }
-    float tmp1780;
-    if (tmp1779)
+    float tGroundPick;
+    if (cond13)
     {
-        tmp1780 = gnd.x;
+        tGroundPick = gnd.x;
     }
     else
     {
-        tmp1780 = 1000000000.0f;
+        tGroundPick = 1000000000.0f;
     }
-    float tGround = tmp1780;
-    float param_4 = o.z;
-    float3 param_5 = d;
-    float param_6 = 6360.0f + lo;
-    float2 sb = cvSphere(param_4, param_5, param_6);
-    float param_7 = o.z;
-    float3 param_8 = d;
-    float param_9 = 6360.0f + hi;
-    float2 st = cvSphere(param_7, param_8, param_9);
+    float tGround = tGroundPick;
+    float h0Arg3 = o.z;
+    float3 dArg9 = d;
+    float RArg3 = 6360.0f + lo;
+    float2 sb = cvSphere(h0Arg3, dArg9, RArg3);
+    float h0Arg2 = o.z;
+    float3 dArg8 = d;
+    float RArg2 = 6360.0f + hi;
+    float2 st = cvSphere(h0Arg2, dArg8, RArg2);
     float t0;
     float t1;
     if (o.z < lo)
@@ -485,33 +489,34 @@ void frag_main()
         if (o.z < hi)
         {
             t0 = 0.0f;
-            float tmp1830;
+            float t1Pick2;
             if (sb.x > 0.0f)
             {
-                tmp1830 = sb.x;
+                t1Pick2 = sb.x;
             }
             else
             {
-                tmp1830 = st.y;
+                t1Pick2 = st.y;
             }
-            t1 = tmp1830;
+            t1 = t1Pick2;
         }
         else
         {
             t0 = st.x;
-            float tmp1845;
+            float t1Pick;
             if (sb.x > 0.0f)
             {
-                tmp1845 = sb.x;
+                t1Pick = sb.x;
             }
             else
             {
-                tmp1845 = st.y;
+                t1Pick = st.y;
             }
-            t1 = tmp1845;
+            t1 = t1Pick;
         }
     }
     t1 = min(min(t1, tGround), t0 + cvMaxKm);
+    // lane CLOUD2B: the scene in front ends the ray (a ridge hides what is behind it; what is in front still draws)
     float tScene = 1000000000.0f;
     if (cvSceneZ.w > 0.5f)
     {
@@ -531,42 +536,43 @@ void frag_main()
     if ((((hi > lo) && (t0 >= 0.0f)) && (t1 > t0)) && (t0 < tGround))
     {
         float pixKm = 2.0f / (cvProj.y * cvHistSize.y);
-        float2 param_10 = q;
-        float j = cvJitter(param_10);
+        float2 qArg = q;
+        float j = cvJitter(qArg);
+        // lane CLOUD4: fine steps through the box first, jumping its free cells; the plain march takes the rest of the ray
         if (cfOn > 0.5f)
         {
-            float3 param_11 = o;
-            float3 param_12 = d;
-            float tEnd = min(t1, cfExit(param_11, param_12));
+            float3 oArg5 = o;
+            float3 dArg7 = d;
+            float tEnd = min(t1, cfExit(oArg5, dArg7));
             float tc = t0;
-            float3 param_16;
-            float3 param_20;
-            float tmp2125;
-            float tmp2322;
-            float3 tmp2484;
-            float3 tmp2502;
-            float tmp2532;
+            float3 upArg4;
+            float3 upArg3;
+            float cvIceNowPick2;
+            float zbPick2;
+            float3 phCPick2;
+            float3 tintPick2;
+            float topZPick2;
             float tn = t0;
             int i = 0;
             for (; (i < cfMaxSteps) && (tc < tEnd); i++, tc = tn)
             {
-                float3 param_13 = o;
-                float3 param_14 = d;
-                float param_15 = tc;
-                float tmp2002 = cvHeight(param_13, param_14, param_15, param_16);
-                float3 cfUp = param_16;
-                float3 c = (float3(o.xy + (d.xy * tc), tmp2002) - cfOrgKm) / cfCellKm.xxx;
-                bool tmp2014 = any(bool3(c.x < 0.0f.xxx.x, c.y < 0.0f.xxx.y, c.z < 0.0f.xxx.z));
-                bool tmp2022;
-                if (!tmp2014)
+                float3 oArg4 = o;
+                float3 dArg6 = d;
+                float tArg4 = tc;
+                float cvHeightRet4 = cvHeight(oArg4, dArg6, tArg4, upArg4);
+                float3 cfUp = upArg4;
+                float3 c = (float3(o.xy + (d.xy * tc), cvHeightRet4) - cfOrgKm) / cfCellKm.xxx;
+                bool cond12 = any(bool3(c.x < 0.0f.xxx.x, c.y < 0.0f.xxx.y, c.z < 0.0f.xxx.z));
+                bool cond11;
+                if (!cond12)
                 {
-                    tmp2022 = any(bool3(c.x >= cfDim.x, c.y >= cfDim.y, c.z >= cfDim.z));
+                    cond11 = any(bool3(c.x >= cfDim.x, c.y >= cfDim.y, c.z >= cfDim.z));
                 }
                 else
                 {
-                    tmp2022 = tmp2014;
+                    cond11 = cond12;
                 }
-                if (tmp2022)
+                if (cond11)
                 {
                     break;
                 }
@@ -579,30 +585,34 @@ void frag_main()
                 float dt = min(cfStepKm, tEnd - tc);
                 tn = tc + dt;
                 float t = tc + (j * dt);
+                // lane CLOUD4: one march sample at t over dt (cloud_march.frag includes it inside its loops: the plain one and the
+                // fly-through grid's fine one). Reads o, d, t, dt, pixKm, cosT, lo, hi; adds to L, T, dsum, wsum; `continue` = an
+                // empty sample, `break` = the ray is opaque.
                 float3 p = o + (d * t);
-                float3 param_17 = o;
-                float3 param_18 = d;
-                float param_19 = t;
-                float tmp2087 = cvHeight(param_17, param_18, param_19, param_20);
-                float3 up = param_20;
-                p.z = tmp2087;
+                float3 oArg3 = o;
+                float3 dArg5 = d;
+                float tArg3 = t;
+                float cvHeightRet3 = cvHeight(oArg3, dArg5, tArg3, upArg3);
+                float3 up = upArg3;
+                p.z = cvHeightRet3;
                 cvFootKm = t * pixKm;
-                float3 param_21 = p;
-                float dens = cvDens(param_21);
-                bool tmp2099 = cvShaft.x > 0.0f;
-                bool tmp2107;
-                if (tmp2099)
+                float3 pArg11 = p;
+                float dens = cvDens(pArg11);
+                bool cond10 = cvShaft.x > 0.0f;
+                bool cond9;
+                if (cond10)
                 {
-                    tmp2107 = p.z < cvBands.baseKm.x;
+                    cond9 = p.z < cvBands.baseKm.x;
                 }
                 else
                 {
-                    tmp2107 = tmp2099;
+                    cond9 = cond10;
                 }
-                if (tmp2107)
+                if (cond9)
                 {
-                    float3 param_22 = p;
-                    dens += cvShaftDens(param_22);
+                    float3 pArg10 = p;
+                    // lane CLOUDRECX1: the precipitation shafts (0 = none, today)
+                    dens += cvShaftDens(pArg10);
                 }
                 if (dens <= 0.0f)
                 {
@@ -610,13 +620,13 @@ void frag_main()
                 }
                 if (p.z < cvBands.topKm.x)
                 {
-                    tmp2125 = cvIce.x;
+                    cvIceNowPick2 = cvIce.x;
                 }
                 else
                 {
-                    tmp2125 = cvIce.y;
+                    cvIceNowPick2 = cvIce.y;
                 }
-                cvIceNow = tmp2125;
+                cvIceNow = cvIceNowPick2;
                 float tauL = 0.0f;
                 for (int k_1 = 0; k_1 < cvTaps; k_1++)
                 {
@@ -626,54 +636,64 @@ void frag_main()
                     float dk = cvLightKm * ((b * b) - (a * a));
                     float3 pl = p + (cvKeyW * tk);
                     pl.z = p.z + (dot(up, cvKeyW) * tk);
-                    float3 param_23 = pl;
-                    tauL += ((cvDens(param_23) * 40.0f) * dk);
+                    float3 pArg9 = pl;
+                    tauL += ((cvDens(pArg9) * 40.0f) * dk);
                 }
                 float hf = clamp((p.z - lo) / max(hi - lo, 0.001000000047497451305389404296875f), 0.0f, 1.0f);
                 float mu0 = dot(up, cvKeyW);
-                float param_24 = 6360.0f + p.z;
-                float param_25 = mu0;
-                float3 key = atTrans(cvTrans, _cvTrans_sampler, param_24, param_25) * cvKeyK;
-                float param_26 = cosT;
-                float param_27 = tauL;
-                float ph = cvOctaveSum(param_26, param_27);
+                float rArg7 = 6360.0f + p.z;
+                float muArg6 = mu0;
+                float3 key = atTrans(cvTrans, _cvTrans_sampler, rArg7, muArg6) * cvKeyK;
+                float cosTArg3 = cosT;
+                float tauLArg3 = tauL;
+                float ph = cvOctaveSum(cosTArg3, tauLArg3);
+                // lane NIGHTHAZE1: the two-stream floor per colour when clouds.albedo is not grey
                 float3 phC = ph.xxx;
                 bool alC = any(bool3(cvAlbedoD.x != 0.0f.xxx.x, cvAlbedoD.y != 0.0f.xxx.y, cvAlbedoD.z != 0.0f.xxx.z));
+                // lane CLOUD2B: the octaves' floor: the diffuse light through the cloud above, as a slab of tauL mu0 (gate C)
                 if ((cvMsOn > 0.5f) && (mu0 > 0.00999999977648258209228515625f))
                 {
-                    float param_28 = tauL * mu0;
-                    float param_29 = mu0;
-                    float param_30 = cvMsG;
-                    float param_31 = 0.9900000095367431640625f;
-                    float tmp2270 = cvTdif(param_28, param_29, param_30, param_31);
-                    float fd = mu0 * tmp2270;
+                    float tauArg12 = tauL * mu0;
+                    float mu0Arg12 = mu0;
+                    float gArg12 = cvMsG;
+                    float wArg12 = 0.9900000095367431640625f;
+                    float cvTdifRet8 = cvTdif(tauArg12, mu0Arg12, gArg12, wArg12);
+                    float fd = mu0 * cvTdifRet8;
                     float3 fdC = fd.xxx;
                     if (alC)
                     {
                         for (int c_1 = 0; c_1 < 3; c_1++)
                         {
-                            float param_32 = tauL * mu0;
-                            float param_33 = mu0;
-                            float param_34 = cvMsG;
-                            float param_35 = 0.9900000095367431640625f + cvAlbedoD[c_1];
-                            float tmp2301 = cvTdif(param_32, param_33, param_34, param_35);
-                            fdC[c_1] = mu0 * tmp2301;
+                            float tauArg11 = tauL * mu0;
+                            float mu0Arg11 = mu0;
+                            float gArg11 = cvMsG;
+                            float wArg11 = 0.9900000095367431640625f + cvAlbedoD[c_1];
+                            float cvTdifRet7 = cvTdif(tauArg11, mu0Arg11, gArg11, wArg11);
+                            fdC[c_1] = mu0 * cvTdifRet7;
                         }
                     }
+                    // lane CLOUD2C: what the cloud UNDER the sample sends back up (a thick top seen from above): its slab
+                    // reflection (cvRdir) of the light reaching the sample, the direct beam and fd, the slab's depth from
+                    // taps straight down. Seen along d it weighs (1 - g d.z) / 2: the phase's share of up-going light
+                    // scattered toward the eye (Coakley & Chylek 1975: a backscatter fraction (1 - g) / 2). Gate R.
                     if (cvTopOn > 0.5f)
                     {
                         float tauB = 0.0f;
+                        // lane CLOUDLIGHT1: cvTopOn 2 (the default, WW_CLOUDVOL_TOPCOLUMN) takes the slab under the sample as uniform
+                        // at the sample's own density down to its band's base (at most the taps' reach): no read, where the taps
+                        // cost cvTaps (3 Medium / 6 Ultra) of the lit sample's 10 / 16. Gate tests/features/clouds/cloudlight_check.py
+                        // (MEASURED: converged picture vs the taps <= 0.21 levels rms, gate R 0.957 / 1.253 vs MC). 1 = the taps.
                         if (cvTopOn > 1.5f)
                         {
                             if (p.z < cvBands.topKm.x)
                             {
-                                tmp2322 = cvBands.baseKm.x;
+                                zbPick2 = cvBands.baseKm.x;
                             }
                             else
                             {
-                                tmp2322 = cvBands.baseKm.y;
+                                zbPick2 = cvBands.baseKm.y;
                             }
-                            float zb = tmp2322;
+                            float zb = zbPick2;
                             tauB = (dens * 40.0f) * clamp(p.z - zb, 0.0f, cvLightKm);
                         }
                         else
@@ -686,97 +706,107 @@ void frag_main()
                                 float dk_1 = cvLightKm * ((b_1 * b_1) - (a_1 * a_1));
                                 float3 pb = p - (up * tk_1);
                                 pb.z = p.z - tk_1;
-                                float3 param_36 = pb;
-                                tauB += ((cvDens(param_36) * 40.0f) * dk_1);
+                                float3 pArg8 = pb;
+                                tauB += ((cvDens(pArg8) * 40.0f) * dk_1);
                             }
                         }
-                        float param_37 = tauB;
-                        float param_38 = mu0;
-                        float param_39 = cvMsG;
-                        float param_40 = 0.9900000095367431640625f;
-                        float tmp2413 = cvRdir(param_37, param_38, param_39, param_40);
-                        float fu = tmp2413 * ((mu0 * exp(-tauL)) + fd);
+                        float tauArg10 = tauB;
+                        float mu0Arg10 = mu0;
+                        float gArg10 = cvMsG;
+                        float wArg10 = 0.9900000095367431640625f;
+                        float cvRdirRet4 = cvRdir(tauArg10, mu0Arg10, gArg10, wArg10);
+                        float fu = cvRdirRet4 * ((mu0 * exp(-tauL)) + fd);
                         fd += ((0.5f * (1.0f - (cvMsG * d.z))) * fu);
                         if (alC)
                         {
                             for (int c_2 = 0; c_2 < 3; c_2++)
                             {
-                                float param_41 = tauB;
-                                float param_42 = mu0;
-                                float param_43 = cvMsG;
-                                float param_44 = 0.9900000095367431640625f + cvAlbedoD[c_2];
-                                float tmp2461 = cvRdir(param_41, param_42, param_43, param_44);
-                                fdC[c_2] += (((0.5f * (1.0f - (cvMsG * d.z))) * tmp2461) * ((mu0 * exp(-tauL)) + fdC[c_2]));
+                                float tauArg9 = tauB;
+                                float mu0Arg9 = mu0;
+                                float gArg9 = cvMsG;
+                                float wArg9 = 0.9900000095367431640625f + cvAlbedoD[c_2];
+                                float cvRdirRet3 = cvRdir(tauArg9, mu0Arg9, gArg9, wArg9);
+                                fdC[c_2] += (((0.5f * (1.0f - (cvMsG * d.z))) * cvRdirRet3) * ((mu0 * exp(-tauL)) + fdC[c_2]));
                             }
                         }
                     }
                     ph = max(ph, fd / 3.1415927410125732421875f);
                     if (alC)
                     {
-                        tmp2484 = max(phC, fdC / 3.1415927410125732421875f.xxx);
+                        phCPick2 = max(phC, fdC / 3.1415927410125732421875f.xxx);
                     }
                     else
                     {
-                        tmp2484 = ph.xxx;
+                        phCPick2 = ph.xxx;
                     }
-                    phC = tmp2484;
+                    phC = phCPick2;
                 }
                 if (p.z < cvBands.topKm.x)
                 {
-                    tmp2502 = cvTint[0];
+                    tintPick2 = cvTint[0];
                 }
                 else
                 {
-                    tmp2502 = cvTint[1];
+                    tintPick2 = cvTint[1];
                 }
-                float3 tint = tmp2502;
+                float3 tint = tintPick2;
                 float ambF = lerp(0.5f, 1.0f, hf);
+                // lane NIGHTHAZE1
                 float3 ambC = ambF.xxx;
+                // lane CLOUDBAND1 (b), RDR2's darker sky light inside thick cloud (Bauer 2019 darkens it by a sun-ward sample): the open
+                // sky's light reaching the sample is its transmission through the column above: the delta-Eddington scaled direct
+                // part exp(-(1 - g^2 w) tau / 0.6) + the two-stream Tdif, both at mu 0.6 (the diffusivity cosine), tau from three
+                // taps straight up to the top of the sample's band.
+                // Off keeps the 0.5 .. 1 height ramp (a dense deck's base kept half the sky: 7.9x the Monte Carlo at tau 40).
+                // lane MODULES1: also the sky light's water path (0 with cvAmbDark off)
                 float tauU = 0.0f;
                 if (cvAmbDark > 0.5f)
                 {
                     if (p.z < cvBands.topKm.x)
                     {
-                        tmp2532 = cvBands.topKm.x;
+                        topZPick2 = cvBands.topKm.x;
                     }
                     else
                     {
-                        tmp2532 = cvBands.topKm.y;
+                        topZPick2 = cvBands.topKm.y;
                     }
-                    float topZ = tmp2532;
+                    float topZ = topZPick2;
                     float span = max(topZ - p.z, 0.0f);
                     for (int k_3 = 0; k_3 < 3; k_3++)
                     {
                         float tk_2 = (span * (float(k_3) + 0.5f)) / 3.0f;
                         float3 pu = p + (up * tk_2);
                         pu.z = p.z + tk_2;
-                        float3 param_45 = pu;
-                        tauU += (((cvDens(param_45) * 40.0f) * span) / 3.0f);
+                        float3 pArg7 = pu;
+                        tauU += (((cvDens(pArg7) * 40.0f) * span) / 3.0f);
                     }
-                    float param_46 = tauU;
-                    float param_47 = 0.60000002384185791015625f;
-                    float param_48 = cvMsG;
-                    float param_49 = 0.9900000095367431640625f;
-                    float tmp2600 = cvTdif(param_46, param_47, param_48, param_49);
-                    ambF = exp(((-(1.0f - ((cvMsG * cvMsG) * 0.9900000095367431640625f))) * tauU) / 0.60000002384185791015625f) + tmp2600;
+                    float tauArg8 = tauU;
+                    float mu0Arg8 = 0.60000002384185791015625f;
+                    float gArg8 = cvMsG;
+                    float wArg8 = 0.9900000095367431640625f;
+                    float cvTdifRet6 = cvTdif(tauArg8, mu0Arg8, gArg8, wArg8);
+                    // the direct part of the delta-Eddington scaled slab (the forward peak counts as passed through, as in cvTdif)
+                    ambF = exp(((-(1.0f - ((cvMsG * cvMsG) * 0.9900000095367431640625f))) * tauU) / 0.60000002384185791015625f) + cvTdifRet6;
                     ambC = ambF.xxx;
                     if (alC)
                     {
                         for (int c_3 = 0; c_3 < 3; c_3++)
                         {
                             float wc = 0.9900000095367431640625f + cvAlbedoD[c_3];
-                            float param_50 = tauU;
-                            float param_51 = 0.60000002384185791015625f;
-                            float param_52 = cvMsG;
-                            float param_53 = wc;
-                            float tmp2639 = cvTdif(param_50, param_51, param_52, param_53);
-                            ambC[c_3] = exp(((-(1.0f - ((cvMsG * cvMsG) * wc))) * tauU) / 0.60000002384185791015625f) + tmp2639;
+                            float tauArg7 = tauU;
+                            float mu0Arg7 = 0.60000002384185791015625f;
+                            float gArg7 = cvMsG;
+                            float wArg7 = wc;
+                            float cvTdifRet5 = cvTdif(tauArg7, mu0Arg7, gArg7, wArg7);
+                            ambC[c_3] = exp(((-(1.0f - ((cvMsG * cvMsG) * wc))) * tauU) / 0.60000002384185791015625f) + cvTdifRet5;
                         }
                     }
                 }
+                // lane MODULES1: the light the droplets passed on, red absorbed by the water on its way in (cloudvolmath.h waterAbsorbK)
                 float3 S = ((0.9900000095367431640625f.xxx + cvAlbedoD) * tint) * (((key * phC) * exp((-cvWaterK) * tauL)) + (((cvAmb * cvAmbOn) * ambC) * exp((-cvWaterK) * tauU)));
                 float tr = exp(((-dens) * 40.0f) * dt);
                 float w = T * (1.0f - tr);
+                // Frostbite: S (1 - e^(-sigma dt)) / sigma x sigma_s, sigma_s = albedo sigma
                 L += (S * w);
                 dsum += (w * t);
                 wsum += w;
@@ -789,39 +819,43 @@ void frag_main()
             t0 = (T < 0.004999999888241291046142578125f) ? t1 : tc;
         }
         float dt_1 = (t1 - t0) / float(cvSteps);
-        float3 param_57;
-        float tmp2799;
-        float tmp2984;
-        float3 tmp3146;
-        float3 tmp3164;
-        float tmp3190;
+        float3 upArg2;
+        float cvIceNowPick;
+        float zbPick;
+        float3 phCPick;
+        float3 tintPick;
+        float topZPick;
         for (int i_1 = 0; (i_1 < cvSteps) && (t1 > t0); i_1++)
         {
             float t_1 = t0 + ((float(i_1) + j) * dt_1);
+            // lane CLOUD4: one march sample at t over dt (cloud_march.frag includes it inside its loops: the plain one and the
+            // fly-through grid's fine one). Reads o, d, t, dt, pixKm, cosT, lo, hi; adds to L, T, dsum, wsum; `continue` = an
+            // empty sample, `break` = the ray is opaque.
             float3 p_1 = o + (d * t_1);
-            float3 param_54 = o;
-            float3 param_55 = d;
-            float param_56 = t_1;
-            float tmp2761 = cvHeight(param_54, param_55, param_56, param_57);
-            float3 up_1 = param_57;
-            p_1.z = tmp2761;
+            float3 oArg2 = o;
+            float3 dArg4 = d;
+            float tArg2 = t_1;
+            float cvHeightRet2 = cvHeight(oArg2, dArg4, tArg2, upArg2);
+            float3 up_1 = upArg2;
+            p_1.z = cvHeightRet2;
             cvFootKm = t_1 * pixKm;
-            float3 param_58 = p_1;
-            float dens_1 = cvDens(param_58);
-            bool tmp2773 = cvShaft.x > 0.0f;
-            bool tmp2781;
-            if (tmp2773)
+            float3 pArg6 = p_1;
+            float dens_1 = cvDens(pArg6);
+            bool cond8 = cvShaft.x > 0.0f;
+            bool cond7;
+            if (cond8)
             {
-                tmp2781 = p_1.z < cvBands.baseKm.x;
+                cond7 = p_1.z < cvBands.baseKm.x;
             }
             else
             {
-                tmp2781 = tmp2773;
+                cond7 = cond8;
             }
-            if (tmp2781)
+            if (cond7)
             {
-                float3 param_59 = p_1;
-                dens_1 += cvShaftDens(param_59);
+                float3 pArg5 = p_1;
+                // lane CLOUDRECX1: the precipitation shafts (0 = none, today)
+                dens_1 += cvShaftDens(pArg5);
             }
             if (dens_1 <= 0.0f)
             {
@@ -829,13 +863,13 @@ void frag_main()
             }
             if (p_1.z < cvBands.topKm.x)
             {
-                tmp2799 = cvIce.x;
+                cvIceNowPick = cvIce.x;
             }
             else
             {
-                tmp2799 = cvIce.y;
+                cvIceNowPick = cvIce.y;
             }
-            cvIceNow = tmp2799;
+            cvIceNow = cvIceNowPick;
             float tauL_1 = 0.0f;
             for (int k_4 = 0; k_4 < cvTaps; k_4++)
             {
@@ -845,54 +879,64 @@ void frag_main()
                 float dk_2 = cvLightKm * ((b_2 * b_2) - (a_2 * a_2));
                 float3 pl_1 = p_1 + (cvKeyW * tk_3);
                 pl_1.z = p_1.z + (dot(up_1, cvKeyW) * tk_3);
-                float3 param_60 = pl_1;
-                tauL_1 += ((cvDens(param_60) * 40.0f) * dk_2);
+                float3 pArg4 = pl_1;
+                tauL_1 += ((cvDens(pArg4) * 40.0f) * dk_2);
             }
             float hf_1 = clamp((p_1.z - lo) / max(hi - lo, 0.001000000047497451305389404296875f), 0.0f, 1.0f);
             float mu0_1 = dot(up_1, cvKeyW);
-            float param_61 = 6360.0f + p_1.z;
-            float param_62 = mu0_1;
-            float3 key_1 = atTrans(cvTrans, _cvTrans_sampler, param_61, param_62) * cvKeyK;
-            float param_63 = cosT;
-            float param_64 = tauL_1;
-            float ph_1 = cvOctaveSum(param_63, param_64);
+            float rArg6 = 6360.0f + p_1.z;
+            float muArg5 = mu0_1;
+            float3 key_1 = atTrans(cvTrans, _cvTrans_sampler, rArg6, muArg5) * cvKeyK;
+            float cosTArg2 = cosT;
+            float tauLArg2 = tauL_1;
+            float ph_1 = cvOctaveSum(cosTArg2, tauLArg2);
+            // lane NIGHTHAZE1: the two-stream floor per colour when clouds.albedo is not grey
             float3 phC_1 = ph_1.xxx;
             bool alC_1 = any(bool3(cvAlbedoD.x != 0.0f.xxx.x, cvAlbedoD.y != 0.0f.xxx.y, cvAlbedoD.z != 0.0f.xxx.z));
+            // lane CLOUD2B: the octaves' floor: the diffuse light through the cloud above, as a slab of tauL mu0 (gate C)
             if ((cvMsOn > 0.5f) && (mu0_1 > 0.00999999977648258209228515625f))
             {
-                float param_65 = tauL_1 * mu0_1;
-                float param_66 = mu0_1;
-                float param_67 = cvMsG;
-                float param_68 = 0.9900000095367431640625f;
-                float tmp2933 = cvTdif(param_65, param_66, param_67, param_68);
-                float fd_1 = mu0_1 * tmp2933;
+                float tauArg6 = tauL_1 * mu0_1;
+                float mu0Arg6 = mu0_1;
+                float gArg6 = cvMsG;
+                float wArg6 = 0.9900000095367431640625f;
+                float cvTdifRet4 = cvTdif(tauArg6, mu0Arg6, gArg6, wArg6);
+                float fd_1 = mu0_1 * cvTdifRet4;
                 float3 fdC_1 = fd_1.xxx;
                 if (alC_1)
                 {
                     for (int c_4 = 0; c_4 < 3; c_4++)
                     {
-                        float param_69 = tauL_1 * mu0_1;
-                        float param_70 = mu0_1;
-                        float param_71 = cvMsG;
-                        float param_72 = 0.9900000095367431640625f + cvAlbedoD[c_4];
-                        float tmp2964 = cvTdif(param_69, param_70, param_71, param_72);
-                        fdC_1[c_4] = mu0_1 * tmp2964;
+                        float tauArg5 = tauL_1 * mu0_1;
+                        float mu0Arg5 = mu0_1;
+                        float gArg5 = cvMsG;
+                        float wArg5 = 0.9900000095367431640625f + cvAlbedoD[c_4];
+                        float cvTdifRet3 = cvTdif(tauArg5, mu0Arg5, gArg5, wArg5);
+                        fdC_1[c_4] = mu0_1 * cvTdifRet3;
                     }
                 }
+                // lane CLOUD2C: what the cloud UNDER the sample sends back up (a thick top seen from above): its slab
+                // reflection (cvRdir) of the light reaching the sample, the direct beam and fd, the slab's depth from
+                // taps straight down. Seen along d it weighs (1 - g d.z) / 2: the phase's share of up-going light
+                // scattered toward the eye (Coakley & Chylek 1975: a backscatter fraction (1 - g) / 2). Gate R.
                 if (cvTopOn > 0.5f)
                 {
                     float tauB_1 = 0.0f;
+                    // lane CLOUDLIGHT1: cvTopOn 2 (the default, WW_CLOUDVOL_TOPCOLUMN) takes the slab under the sample as uniform
+                    // at the sample's own density down to its band's base (at most the taps' reach): no read, where the taps
+                    // cost cvTaps (3 Medium / 6 Ultra) of the lit sample's 10 / 16. Gate tests/features/clouds/cloudlight_check.py
+                    // (MEASURED: converged picture vs the taps <= 0.21 levels rms, gate R 0.957 / 1.253 vs MC). 1 = the taps.
                     if (cvTopOn > 1.5f)
                     {
                         if (p_1.z < cvBands.topKm.x)
                         {
-                            tmp2984 = cvBands.baseKm.x;
+                            zbPick = cvBands.baseKm.x;
                         }
                         else
                         {
-                            tmp2984 = cvBands.baseKm.y;
+                            zbPick = cvBands.baseKm.y;
                         }
-                        float zb_1 = tmp2984;
+                        float zb_1 = zbPick;
                         tauB_1 = (dens_1 * 40.0f) * clamp(p_1.z - zb_1, 0.0f, cvLightKm);
                     }
                     else
@@ -905,97 +949,107 @@ void frag_main()
                             float dk_3 = cvLightKm * ((b_3 * b_3) - (a_3 * a_3));
                             float3 pb_1 = p_1 - (up_1 * tk_4);
                             pb_1.z = p_1.z - tk_4;
-                            float3 param_73 = pb_1;
-                            tauB_1 += ((cvDens(param_73) * 40.0f) * dk_3);
+                            float3 pArg3 = pb_1;
+                            tauB_1 += ((cvDens(pArg3) * 40.0f) * dk_3);
                         }
                     }
-                    float param_74 = tauB_1;
-                    float param_75 = mu0_1;
-                    float param_76 = cvMsG;
-                    float param_77 = 0.9900000095367431640625f;
-                    float tmp3075 = cvRdir(param_74, param_75, param_76, param_77);
-                    float fu_1 = tmp3075 * ((mu0_1 * exp(-tauL_1)) + fd_1);
+                    float tauArg4 = tauB_1;
+                    float mu0Arg4 = mu0_1;
+                    float gArg4 = cvMsG;
+                    float wArg4 = 0.9900000095367431640625f;
+                    float cvRdirRet2 = cvRdir(tauArg4, mu0Arg4, gArg4, wArg4);
+                    float fu_1 = cvRdirRet2 * ((mu0_1 * exp(-tauL_1)) + fd_1);
                     fd_1 += ((0.5f * (1.0f - (cvMsG * d.z))) * fu_1);
                     if (alC_1)
                     {
                         for (int c_5 = 0; c_5 < 3; c_5++)
                         {
-                            float param_78 = tauB_1;
-                            float param_79 = mu0_1;
-                            float param_80 = cvMsG;
-                            float param_81 = 0.9900000095367431640625f + cvAlbedoD[c_5];
-                            float tmp3123 = cvRdir(param_78, param_79, param_80, param_81);
-                            fdC_1[c_5] += (((0.5f * (1.0f - (cvMsG * d.z))) * tmp3123) * ((mu0_1 * exp(-tauL_1)) + fdC_1[c_5]));
+                            float tauArg3 = tauB_1;
+                            float mu0Arg3 = mu0_1;
+                            float gArg3 = cvMsG;
+                            float wArg3 = 0.9900000095367431640625f + cvAlbedoD[c_5];
+                            float cvRdirRet = cvRdir(tauArg3, mu0Arg3, gArg3, wArg3);
+                            fdC_1[c_5] += (((0.5f * (1.0f - (cvMsG * d.z))) * cvRdirRet) * ((mu0_1 * exp(-tauL_1)) + fdC_1[c_5]));
                         }
                     }
                 }
                 ph_1 = max(ph_1, fd_1 / 3.1415927410125732421875f);
                 if (alC_1)
                 {
-                    tmp3146 = max(phC_1, fdC_1 / 3.1415927410125732421875f.xxx);
+                    phCPick = max(phC_1, fdC_1 / 3.1415927410125732421875f.xxx);
                 }
                 else
                 {
-                    tmp3146 = ph_1.xxx;
+                    phCPick = ph_1.xxx;
                 }
-                phC_1 = tmp3146;
+                phC_1 = phCPick;
             }
             if (p_1.z < cvBands.topKm.x)
             {
-                tmp3164 = cvTint[0];
+                tintPick = cvTint[0];
             }
             else
             {
-                tmp3164 = cvTint[1];
+                tintPick = cvTint[1];
             }
-            float3 tint_1 = tmp3164;
+            float3 tint_1 = tintPick;
             float ambF_1 = lerp(0.5f, 1.0f, hf_1);
+            // lane NIGHTHAZE1
             float3 ambC_1 = ambF_1.xxx;
+            // lane CLOUDBAND1 (b), RDR2's darker sky light inside thick cloud (Bauer 2019 darkens it by a sun-ward sample): the open
+            // sky's light reaching the sample is its transmission through the column above: the delta-Eddington scaled direct
+            // part exp(-(1 - g^2 w) tau / 0.6) + the two-stream Tdif, both at mu 0.6 (the diffusivity cosine), tau from three
+            // taps straight up to the top of the sample's band.
+            // Off keeps the 0.5 .. 1 height ramp (a dense deck's base kept half the sky: 7.9x the Monte Carlo at tau 40).
+            // lane MODULES1: also the sky light's water path (0 with cvAmbDark off)
             float tauU_1 = 0.0f;
             if (cvAmbDark > 0.5f)
             {
                 if (p_1.z < cvBands.topKm.x)
                 {
-                    tmp3190 = cvBands.topKm.x;
+                    topZPick = cvBands.topKm.x;
                 }
                 else
                 {
-                    tmp3190 = cvBands.topKm.y;
+                    topZPick = cvBands.topKm.y;
                 }
-                float topZ_1 = tmp3190;
+                float topZ_1 = topZPick;
                 float span_1 = max(topZ_1 - p_1.z, 0.0f);
                 for (int k_6 = 0; k_6 < 3; k_6++)
                 {
                     float tk_5 = (span_1 * (float(k_6) + 0.5f)) / 3.0f;
                     float3 pu_1 = p_1 + (up_1 * tk_5);
                     pu_1.z = p_1.z + tk_5;
-                    float3 param_82 = pu_1;
-                    tauU_1 += (((cvDens(param_82) * 40.0f) * span_1) / 3.0f);
+                    float3 pArg2 = pu_1;
+                    tauU_1 += (((cvDens(pArg2) * 40.0f) * span_1) / 3.0f);
                 }
-                float param_83 = tauU_1;
-                float param_84 = 0.60000002384185791015625f;
-                float param_85 = cvMsG;
-                float param_86 = 0.9900000095367431640625f;
-                float tmp3258 = cvTdif(param_83, param_84, param_85, param_86);
-                ambF_1 = exp(((-(1.0f - ((cvMsG * cvMsG) * 0.9900000095367431640625f))) * tauU_1) / 0.60000002384185791015625f) + tmp3258;
+                float tauArg2 = tauU_1;
+                float mu0Arg2 = 0.60000002384185791015625f;
+                float gArg2 = cvMsG;
+                float wArg2 = 0.9900000095367431640625f;
+                float cvTdifRet2 = cvTdif(tauArg2, mu0Arg2, gArg2, wArg2);
+                // the direct part of the delta-Eddington scaled slab (the forward peak counts as passed through, as in cvTdif)
+                ambF_1 = exp(((-(1.0f - ((cvMsG * cvMsG) * 0.9900000095367431640625f))) * tauU_1) / 0.60000002384185791015625f) + cvTdifRet2;
                 ambC_1 = ambF_1.xxx;
                 if (alC_1)
                 {
                     for (int c_6 = 0; c_6 < 3; c_6++)
                     {
                         float wc_1 = 0.9900000095367431640625f + cvAlbedoD[c_6];
-                        float param_87 = tauU_1;
-                        float param_88 = 0.60000002384185791015625f;
-                        float param_89 = cvMsG;
-                        float param_90 = wc_1;
-                        float tmp3297 = cvTdif(param_87, param_88, param_89, param_90);
-                        ambC_1[c_6] = exp(((-(1.0f - ((cvMsG * cvMsG) * wc_1))) * tauU_1) / 0.60000002384185791015625f) + tmp3297;
+                        float tauArg = tauU_1;
+                        float mu0Arg = 0.60000002384185791015625f;
+                        float gArg = cvMsG;
+                        float wArg = wc_1;
+                        float cvTdifRet = cvTdif(tauArg, mu0Arg, gArg, wArg);
+                        ambC_1[c_6] = exp(((-(1.0f - ((cvMsG * cvMsG) * wc_1))) * tauU_1) / 0.60000002384185791015625f) + cvTdifRet;
                     }
                 }
             }
+            // lane MODULES1: the light the droplets passed on, red absorbed by the water on its way in (cloudvolmath.h waterAbsorbK)
             float3 S_1 = ((0.9900000095367431640625f.xxx + cvAlbedoD) * tint_1) * (((key_1 * phC_1) * exp((-cvWaterK) * tauL_1)) + (((cvAmb * cvAmbOn) * ambC_1) * exp((-cvWaterK) * tauU_1)));
             float tr_1 = exp(((-dens_1) * 40.0f) * dt_1);
             float w_1 = T * (1.0f - tr_1);
+            // Frostbite: S (1 - e^(-sigma dt)) / sigma x sigma_s, sigma_s = albedo sigma
             L += (S_1 * w_1);
             dsum += (w_1 * t_1);
             wsum += w_1;
@@ -1006,87 +1060,91 @@ void frag_main()
             }
         }
     }
-    float param_91 = o.z;
-    float3 param_92 = d;
-    float param_93 = 6360.0f + cvBands.baseKm.z;
-    float2 sh = cvSphere(param_91, param_92, param_93);
-    float tmp3382;
+    float h0Arg = o.z;
+    float3 dArg3 = d;
+    float RArg = 6360.0f + cvBands.baseKm.z;
+    // the High band: a thin sheet at its base, behind the volume
+    float2 sh = cvSphere(h0Arg, dArg3, RArg);
+    float thPick;
     if (o.z < cvBands.baseKm.z)
     {
-        tmp3382 = sh.y;
+        thPick = sh.y;
     }
     else
     {
-        tmp3382 = -1.0f;
+        thPick = -1.0f;
     }
-    float th = tmp3382;
+    float th = thPick;
     if ((((((cvBands.density.z > 0.0f) && (th > 0.0f)) && (th < tGround)) && (th < tScene)) && (th < 200.0f)) && (T > 0.004999999888241291046142578125f))
     {
         float3 p_2 = o + (d * th);
-        float3 param_94 = o;
-        float3 param_95 = d;
-        float param_96 = th;
-        float3 param_97;
-        float tmp3426 = cvHeight(param_94, param_95, param_96, param_97);
-        float3 up_2 = param_97;
-        p_2.z = tmp3426;
-        float2 param_98 = p_2.xy;
-        float cov = cvMapAt(param_98).w;
+        float3 oArg = o;
+        float3 dArg2 = d;
+        float tArg = th;
+        float3 upArg;
+        float cvHeightRet = cvHeight(oArg, dArg2, tArg, upArg);
+        float3 up_2 = upArg;
+        p_2.z = cvHeightRet;
+        float2 xyArg2 = p_2.xy;
+        float cov = cvMapAt(xyArg2).w;
         float s = cvShape.SampleLevel(_cvShape_sampler, float3((p_2.xy + cvBands.windKm.xy) / 12.0f.xx, 0.5f), 0.0f).x;
         float a_4 = clamp((s - (1.0f - cov)) / max(cov, 0.001000000047497451305389404296875f), 0.0f, 1.0f) * cov;
         float tau_1 = (2.0f * cvBands.density.z) * a_4;
         float al = 1.0f - exp(-tau_1);
-        float param_99 = 6360.0f + p_2.z;
-        float param_100 = dot(up_2, cvKeyW);
-        float3 key_2 = atTrans(cvTrans, _cvTrans_sampler, param_99, param_100) * cvKeyK;
+        float rArg5 = 6360.0f + p_2.z;
+        float muArg4 = dot(up_2, cvKeyW);
+        float3 key_2 = atTrans(cvTrans, _cvTrans_sampler, rArg5, muArg4) * cvKeyK;
         cvIceNow = cvIce.z;
-        float param_101 = cosT;
-        float param_102 = 0.5f * tau_1;
-        float3 S_2 = ((0.9900000095367431640625f.xxx + cvAlbedoD) * cvTint[2]) * ((key_2 * cvOctaveSum(param_101, param_102)) + (cvAmb * cvAmbOn));
+        float cosTArg = cosT;
+        float tauLArg = 0.5f * tau_1;
+        float3 S_2 = ((0.9900000095367431640625f.xxx + cvAlbedoD) * cvTint[2]) * ((key_2 * cvOctaveSum(cosTArg, tauLArg)) + (cvAmb * cvAmbOn));
         L += (S_2 * (T * al));
         dsum += ((T * al) * th);
         wsum += (T * al);
         T *= (1.0f - al);
     }
-    float tmp3533;
+    float dmPick;
     if (wsum > 9.9999997473787516355514526367188e-06f)
     {
-        tmp3533 = dsum / wsum;
+        dmPick = dsum / wsum;
     }
     else
     {
-        tmp3533 = 10000.0f;
+        dmPick = 10000.0f;
     }
-    float dm = tmp3533;
+    float dm = dmPick;
     if ((cvApOn > 0.5f) && (wsum > 9.9999997473787516355514526367188e-06f))
     {
         float3 pe = float3(d.xy * dm, (6360.0f + o.z) + (d.z * dm));
         float r1 = length(pe);
         float mu1 = dot(pe, d) / r1;
-        float param_103 = 6360.0f + o.z;
-        float param_104 = d.z;
-        float3 ta = atTrans(cvTrans, _cvTrans_sampler, param_103, param_104);
-        float param_105 = r1;
-        float param_106 = mu1;
-        float3 tb = atTrans(cvTrans, _cvTrans_sampler, param_105, param_106);
+        float rArg4 = 6360.0f + o.z;
+        float muArg3 = d.z;
+        float3 ta = atTrans(cvTrans, _cvTrans_sampler, rArg4, muArg3);
+        float rArg3 = r1;
+        float muArg2 = mu1;
+        float3 tb = atTrans(cvTrans, _cvTrans_sampler, rArg3, muArg2);
         float3 tair = clamp(ta / max(tb, 9.9999999747524270787835121154785e-07f.xxx), 0.0f.xxx, 1.0f.xxx);
-        float3 param_107 = d;
-        float3 ap = cvSky(param_107);
-        bool tmp3606 = cvDeckAp.w > 0.5f;
-        bool tmp3613;
-        if (tmp3606)
+        float3 dArg = d;
+        // SKYLIGHT1 round 2: the air in front of the deck, seen from under it, is lit by the deck's diffuse light, not
+        // by the clear sun: the clear sky's in-scatter x (key tKey + sky tSky) / (key + sky) per colour, blended by the
+        // cover (clouddeckmath.h apUnder, the twin). At the overcast spot it was ~60 % of the 15-40 deg sky.
+        float3 ap = cvSky(dArg);
+        bool cond6 = cvDeckAp.w > 0.5f;
+        bool cond5;
+        if (cond6)
         {
-            tmp3613 = o.z < lo;
+            cond5 = o.z < lo;
         }
         else
         {
-            tmp3613 = tmp3606;
+            cond5 = cond6;
         }
-        if (tmp3613)
+        if (cond5)
         {
-            float param_108 = 6360.0f + o.z;
-            float param_109 = cvKeyW.z;
-            float3 keyH = ((atTrans(cvTrans, _cvTrans_sampler, param_108, param_109) * cvKeyK) * max(cvKeyW.z, 0.0f)) / 3.1415927410125732421875f.xxx;
+            float rArg2 = 6360.0f + o.z;
+            float muArg = cvKeyW.z;
+            float3 keyH = ((atTrans(cvTrans, _cvTrans_sampler, rArg2, muArg) * cvKeyK) * max(cvKeyW.z, 0.0f)) / 3.1415927410125732421875f.xxx;
             float3 clr = keyH + cvAmb;
             float3 und = (keyH * cvDeckAp.y) + (cvAmb * cvDeckAp.z);
             ap *= ((1.0f - cvDeckAp.x).xxx + (clamp(und / max(clr, 9.999999717180685365747194737196e-10f.xxx), 0.0f.xxx, 1.0f.xxx) * cvDeckAp.x));

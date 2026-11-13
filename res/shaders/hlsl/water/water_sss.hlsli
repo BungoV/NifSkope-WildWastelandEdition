@@ -15,21 +15,23 @@ float wwPosMean(float a, float sd)
     {
         return max(a, 0.0f);
     }
+    // Phi( -|x| ) = 0.5 erfc( |x| / sqrt 2 ) (Abramowitz and Stegun 7.1.26), kept with phi's own exp so the tail stays
+    // relative: sd ( phi( x ) + x Phi( x ) )
     float x = a / sd;
     float z = abs(x) * 0.7071068286895751953125f;
     float t = 1.0f / (1.0f + (0.3275910913944244384765625f * z));
     float e = exp(((-0.5f) * x) * x);
     float tail = (0.5f * t) * (0.254829585552215576171875f + (t * ((-0.284496724605560302734375f) + (t * (1.42141377925872802734375f + (t * ((-1.45315206050872802734375f) + (t * 1.0614054203033447265625f))))))));
-    float tmp1;
+    float PhiPick;
     if (x < 0.0f)
     {
-        tmp1 = tail * e;
+        PhiPick = tail * e;
     }
     else
     {
-        tmp1 = 1.0f - (tail * e);
+        PhiPick = 1.0f - (tail * e);
     }
-    float Phi = tmp1;
+    float Phi = PhiPick;
     return max(sd * ((0.398942291736602783203125f * e) + (x * Phi)), 0.0f);
 }
 #endif
@@ -42,11 +44,14 @@ float3 wwWaterCrestGlow(float2 s, float var, float3 V, float3 L, float3 sun, flo
     {
         return 0.0f.xxx;
     }
+    // > 0: the face tilts towards the eye
     float a = dot(s, (-V.xy) / h.xx);
-    float tmp1 = a;
-    float tmp2 = sqrt(0.5f * max(var, 0.0f));
-    float c = wwPosMean(tmp1, tmp2);
+    float PhiPick = a;
+    float cPart = sqrt(0.5f * max(var, 0.0f));
+    float c = wwPosMean(PhiPick, cPart);
+    // / isotropic
     float hg = 0.75f / pow(1.25f - (1.0f * clamp(dot(V, L), -1.0f, 1.0f)), 1.5f);
+    // FIX1031B: red dimglow, the gain before
     float gain = ((waterOceanRed & 512) != 0) ? 0.25f : 2.5f;
     return (sun * (((gain * c) * hg) * smoothstep(0.0f, 0.0500000007450580596923828125f, L.z))) * body;
 }

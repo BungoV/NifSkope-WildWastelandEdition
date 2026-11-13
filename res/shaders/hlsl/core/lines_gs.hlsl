@@ -55,16 +55,17 @@ struct SPIRV_Cross_Output
 
 void geom_main(line SPIRV_Cross_Input stage_input[2], inout TriangleStream<SPIRV_Cross_Output> geometry_stream)
 {
+    // per-endpoint colours so selection gradients interpolate along the edge
     float a = min(lineWidth, 1.0f);
     float4 c0 = float4(vsColor[0].xyz, vsColor[0].w * a);
     float4 c1 = float4(vsColor[1].xyz, vsColor[1].w * a);
     float4 p0 = mul(gl_PositionIn[0], projectionMatrix);
     float4 p1 = mul(gl_PositionIn[1], projectionMatrix);
-    float4 param = p0;
-    float4 param_1 = p1;
-    float4 param_2 = c0;
-    float4 param_3 = c1;
-    drawLine(param, param_1, param_2, param_3, geometry_stream);
+    float4 p0Arg = p0;
+    float4 p1Arg = p1;
+    float4 c0Arg = c0;
+    float4 c1Arg = c1;
+    drawLine(p0Arg, p1Arg, c0Arg, c1Arg, geometry_stream);
 }
 
 [maxvertexcount(4)]

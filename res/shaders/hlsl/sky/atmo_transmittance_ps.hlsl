@@ -36,28 +36,28 @@ struct SPIRV_Cross_Output
 
 void atTransRmu(float2 uv, inout float r, out float mu)
 {
-    float param = uv.x;
-    float param_1 = 256.0f;
-    float xm = atSubToUnit(param, param_1);
-    float param_2 = uv.y;
-    float param_3 = 64.0f;
-    float xr = atSubToUnit(param_2, param_3);
+    float uArg2 = uv.x;
+    float nArg2 = 256.0f;
+    float xm = atSubToUnit(uArg2, nArg2);
+    float uArg = uv.y;
+    float nArg = 64.0f;
+    float xr = atSubToUnit(uArg, nArg);
     float H = 1132.25439453125f;
     float rho = H * xr;
     r = sqrt((rho * rho) + 40449600.0f);
     float dmin = 6460.0f - r;
     float dmax = rho + H;
     float d = dmin + (xm * (dmax - dmin));
-    float tmp191;
+    float muPick;
     if (d == 0.0f)
     {
-        tmp191 = 1.0f;
+        muPick = 1.0f;
     }
     else
     {
-        tmp191 = clamp((((H * H) - (rho * rho)) - (d * d)) / ((2.0f * r) * d), -1.0f, 1.0f);
+        muPick = clamp((((H * H) - (rho * rho)) - (d * d)) / ((2.0f * r) * d), -1.0f, 1.0f);
     }
-    mu = tmp191;
+    mu = muPick;
 }
 
 #define WW_FN_atDistTop
@@ -68,45 +68,48 @@ void atTransRmu(float2 uv, inout float r, out float mu)
 
 void frag_main()
 {
-    float2 param = gl_FragCoord.xy / float2(256.0f, 64.0f);
-    float param_1;
-    float param_2;
-    atTransRmu(param, param_1, param_2);
-    float r = param_1;
-    float mu = param_2;
-    float param_3 = r;
-    float param_4 = mu;
-    float d = atDistTop(param_3, param_4);
+    float2 uvArg = gl_FragCoord.xy / float2(256.0f, 64.0f);
+    float rArg2;
+    float muArg2;
+    atTransRmu(uvArg, rArg2, muArg2);
+    float r = rArg2;
+    float mu = muArg2;
+    float rArg = r;
+    float muArg = mu;
+    float d = atDistTop(rArg, muArg);
+    // two segments meeting at the ray's lowest point, samples packed toward it: the fog's haze layer can be ~100 m
+    // thick on a 600 km grazing ray (uniform steps missed it: tests/features/sky/atmo_lut_check.py transmittance-haze)
     float tm = clamp((-r) * mu, 0.0f, d);
     float3 od = 0.0f.xxx;
-    float3 param_6;
-    float3 param_7;
-    float3 param_8;
-    float3 param_10;
-    float3 param_11;
-    float3 param_12;
+    float3 raySArg2;
+    float3 mieSArg2;
+    float3 extArg2;
+    float3 raySArg;
+    float3 mieSArg;
+    float3 extArg;
     for (int i = 0; i < 40; i++)
     {
         float a0 = float(i) / 40.0f;
         float a1 = float(i + 1) / 40.0f;
         float am = (a0 + a1) * 0.5f;
+        // segment A [0, tm]: t = tm (1 - (1 - a)^2); segment B [tm, d]: t = tm + (d - tm) a^2
         float tA = tm * (1.0f - ((1.0f - am) * (1.0f - am)));
         float wA = tm * (((1.0f - a0) * (1.0f - a0)) - ((1.0f - a1) * (1.0f - a1)));
         float tB = tm + (((d - tm) * am) * am);
         float wB = (d - tm) * ((a1 * a1) - (a0 * a0));
         float rr = sqrt(((r * r) + (tA * tA)) + (((2.0f * r) * mu) * tA));
-        float param_5 = rr - 6360.0f;
-        atMedium(param_5, param_6, param_7, param_8);
-        float3 rs = param_6;
-        float3 ms = param_7;
-        float3 e = param_8;
+        float hArg2 = rr - 6360.0f;
+        atMedium(hArg2, raySArg2, mieSArg2, extArg2);
+        float3 rs = raySArg2;
+        float3 ms = mieSArg2;
+        float3 e = extArg2;
         od += (e * wA);
         rr = sqrt(((r * r) + (tB * tB)) + (((2.0f * r) * mu) * tB));
-        float param_9 = rr - 6360.0f;
-        atMedium(param_9, param_10, param_11, param_12);
-        rs = param_10;
-        ms = param_11;
-        e = param_12;
+        float hArg = rr - 6360.0f;
+        atMedium(hArg, raySArg, mieSArg, extArg);
+        rs = raySArg;
+        ms = mieSArg;
+        e = extArg;
         od += (e * wB);
     }
     fragColor = float4(exp(-od), 1.0f);

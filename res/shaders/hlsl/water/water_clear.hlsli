@@ -9,18 +9,18 @@
 #if defined(WW_FN_wwWaterClearSetup) || defined(WW_FN_ALL)
 void wwWaterClearSetup(float3 P, float3 V, float3 sun, float3 Ldir, float3 skyLo, float3 skyHi)
 {
-    float2 tmp1 = P.xy;
-    float c = wwWaterInfo(tmp1).w;
-    int tmp2;
+    float2 cPart = P.xy;
+    float c = wwWaterInfo(cPart).w;
+    int wwClearInPick;
     if (c < (-0.5f))
     {
-        tmp2 = 2;
+        wwClearInPick = 2;
     }
     else
     {
-        tmp2 = clamp(int(c + 0.5f), 0, 2);
+        wwClearInPick = clamp(int(c + 0.5f), 0, 2);
     }
-    wwClearIn.cls = tmp2;
+    wwClearIn.cls = wwClearInPick;
     wwClearIn.sunCos = clamp(Ldir.z, 0.0f, 1.0f);
     wwClearIn.sun = sun;
     wwClearIn.sky = (skyLo + skyHi) * 0.5f;
@@ -31,46 +31,48 @@ void wwWaterClearSetup(float3 P, float3 V, float3 sun, float3 Ldir, float3 skyLo
 #if defined(WW_FN_wwWaterClear) || defined(WW_FN_ALL)
 float3 wwWaterClear(float3 c, float along, float vert)
 {
-    int tmp1 = wwClearIn.cls;
-    float3 tmp2;
-    float3 tmp3 = wwClearK(tmp1, tmp2);
-    float3 bb = tmp2;
-    float3 k = tmp3;
+    int cPart = wwClearIn.cls;
+    float3 wwClearInPick;
+    float3 kPart = wwClearK(cPart, wwClearInPick);
+    float3 bb = wwClearInPick;
+    float3 k = kPart;
     float s = wwClearIn.sunCos;
+    // the sun's cosine under the surface
     float muS = sqrt(1.0f - ((1.0f - (s * s)) / 1.77688896656036376953125f));
+    // through the surface (Fresnel ~2% / 6%)
     float3 Es = (wwClearIn.sun * s) * 0.980000019073486328125f;
     float3 Ed = wwClearIn.sky * 0.939999997615814208984375f;
     bool bed = (along < 100000000.0f) && (vert < 100000000.0f);
-    float tmp4;
+    float LPick;
     if (bed)
     {
-        tmp4 = along * 0.01428749971091747283935546875f;
+        LPick = along * 0.01428749971091747283935546875f;
     }
     else
     {
-        tmp4 = 1000000.0f;
+        LPick = 1000000.0f;
     }
-    float L = tmp4;
-    float tmp5;
+    float L = LPick;
+    float zPick;
     if (bed)
     {
-        tmp5 = vert * 0.01428749971091747283935546875f;
+        zPick = vert * 0.01428749971091747283935546875f;
     }
     else
     {
-        tmp5 = 1000000.0f;
+        zPick = 1000000.0f;
     }
-    float z = tmp5;
-    float tmp6;
+    float z = zPick;
+    float muVPick;
     if (bed)
     {
-        tmp6 = clamp(vert / max(along, 0.001000000047497451305389404296875f), 0.001000000047497451305389404296875f, 1.0f);
+        muVPick = clamp(vert / max(along, 0.001000000047497451305389404296875f), 0.001000000047497451305389404296875f, 1.0f);
     }
     else
     {
-        tmp6 = wwClearIn.viewMu;
+        muVPick = wwClearIn.viewMu;
     }
-    float muV = tmp6;
+    float muV = muVPick;
     float3 Ks = k / muS.xxx;
     float3 Kd = k / 0.800000011920928955078125f.xxx;
     float3 inS = 0.0f.xxx;
@@ -86,16 +88,16 @@ float3 wwWaterClear(float3 c, float along, float vert)
         return inS;
     }
     float3 E = Es + Ed;
-    float3 tmp7;
+    float3 TdPick;
     if (waterClearRed == 2)
     {
-        tmp7 = 1.0f.xxx;
+        TdPick = 1.0f.xxx;
     }
     else
     {
-        tmp7 = ((Es * exp((-Ks) * z)) + (Ed * exp((-Kd) * z))) / max(E, 9.9999999747524270787835121154785e-07f.xxx);
+        TdPick = ((Es * exp((-Ks) * z)) + (Ed * exp((-Kd) * z))) / max(E, 9.9999999747524270787835121154785e-07f.xxx);
     }
-    float3 Td = tmp7;
+    float3 Td = TdPick;
     return ((c * Td) * exp((-k) * L)) + inS;
 }
 #endif

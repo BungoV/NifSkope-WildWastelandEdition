@@ -27,9 +27,9 @@ uint wwOcMix(inout uint x)
 float wwOcHash01(int2 c, uint seed)
 {
     uint2 u = uint2(c & int2(1023, 1023));
-    uint tmp1 = ((u.x * 2376512323u) ^ (u.y * 3625334849u)) ^ seed;
-    uint tmp2 = wwOcMix(tmp1);
-    return float(tmp2) * 2.3283064365386962890625e-10f;
+    uint wwOcMixPart = ((u.x * 2376512323u) ^ (u.y * 3625334849u)) ^ seed;
+    uint wwOcMixRet = wwOcMix(wwOcMixPart);
+    return float(wwOcMixRet) * 2.3283064365386962890625e-10f;
 }
 #endif
 
@@ -40,18 +40,19 @@ float wwOcValue(float2 p, uint seed)
     float2 f = p - i;
     f = (f * f) * (3.0f.xx - (f * 2.0f));
     int2 c = int2(i);
-    int2 tmp1 = c;
-    uint tmp2 = seed;
-    float a = wwOcHash01(tmp1, tmp2);
-    int2 tmp3 = c + int2(1, 0);
-    uint tmp4 = seed;
-    float b = wwOcHash01(tmp3, tmp4);
-    int2 tmp5 = c + int2(0, 1);
-    uint tmp6 = seed;
-    float d = wwOcHash01(tmp5, tmp6);
-    int2 tmp7 = c + int2(1, 1);
-    uint tmp8 = seed;
-    float e = wwOcHash01(tmp7, tmp8);
+    int2 wwOcMixPart = c;
+    uint wwOcMixRet = seed;
+    float a = wwOcHash01(wwOcMixPart, wwOcMixRet);
+    int2 bPart2 = c + int2(1, 0);
+    uint bPart = seed;
+    float b = wwOcHash01(bPart2, bPart);
+    int2 dPart2 = c + int2(0, 1);
+    uint dPart = seed;
+    // the tiles run along the wind: rotate world metres into them, and the slopes back
+    float d = wwOcHash01(dPart2, dPart);
+    int2 ePart2 = c + int2(1, 1);
+    uint ePart = seed;
+    float e = wwOcHash01(ePart2, ePart);
     return lerp(lerp(a, b, f.x), lerp(d, e, f.x), f.y);
 }
 #endif
@@ -59,21 +60,21 @@ float wwOcValue(float2 p, uint seed)
 #if defined(WW_FN_wwOcPatch) || defined(WW_FN_ALL)
 float wwOcPatch(float2 P, int set)
 {
-    float2 tmp1;
+    float2 wwOcMixPart;
     if (set == 0)
     {
-        tmp1 = waterOceanPatch.xy;
+        wwOcMixPart = waterOceanPatch.xy;
     }
     else
     {
-        tmp1 = waterOceanPatch.zw;
+        wwOcMixPart = waterOceanPatch.zw;
     }
-    float2 p = (P + tmp1) / waterOceanSetB[set].z.xx;
-    float2 tmp2 = p;
-    uint tmp3 = 625341585u;
-    float2 tmp4 = (p * 2.0f) + float2(17.0f, 31.0f);
-    uint tmp5 = 2654435769u;
-    float n = (0.64999997615814208984375f * wwOcValue(tmp2, tmp3)) + (0.3499999940395355224609375f * wwOcValue(tmp4, tmp5));
+    float2 p = (P + wwOcMixPart) / waterOceanSetB[set].z.xx;
+    float2 wwOcMixRet = p;
+    uint bPart2 = 625341585u;
+    float2 bPart = (p * 2.0f) + float2(17.0f, 31.0f);
+    uint dPart2 = 2654435769u;
+    float n = (0.64999997615814208984375f * wwOcValue(wwOcMixRet, bPart2)) + (0.3499999940395355224609375f * wwOcValue(bPart, dPart2));
     return 1.60209500789642333984375f * smoothstep(0.300000011920928955078125f, 0.699999988079071044921875f, n);
 }
 #endif
@@ -81,12 +82,12 @@ float wwOcPatch(float2 P, int set)
 #if defined(WW_FN_wwOcOffset) || defined(WW_FN_ALL)
 float2 wwOcOffset(int2 v, uint seed)
 {
-    uint tmp1 = ((uint(v.x) * 2376512323u) ^ (uint(v.y) * 3625334849u)) ^ seed;
-    uint tmp2 = wwOcMix(tmp1);
-    uint h = tmp2;
-    uint tmp3 = h ^ 1759714724u;
-    uint tmp4 = wwOcMix(tmp3);
-    uint h2 = tmp4;
+    uint wwOcMixPart = ((uint(v.x) * 2376512323u) ^ (uint(v.y) * 3625334849u)) ^ seed;
+    uint wwOcMixRet = wwOcMix(wwOcMixPart);
+    uint h = wwOcMixRet;
+    uint bPart2 = h ^ 1759714724u;
+    uint bPart = wwOcMix(bPart2);
+    uint h2 = bPart;
     return float2(float(h), float(h2)) * 2.3283064365386962890625e-10f;
 }
 #endif
@@ -124,24 +125,24 @@ float4 wwOcCascade(float2 uv, float2 gx, float2 gy, float layer, uint seed, out 
         v1 = b + int2(1, 0);
         v2 = b + int2(0, 1);
     }
-    int2 tmp1 = v0;
-    uint tmp2 = seed;
-    float4 B0 = waterOceanB.SampleGrad(_waterOceanB_sampler, float3(uv + wwOcOffset(tmp1, tmp2), layer), gx, gy);
-    int2 tmp3 = v1;
-    uint tmp4 = seed;
-    float4 B1 = waterOceanB.SampleGrad(_waterOceanB_sampler, float3(uv + wwOcOffset(tmp3, tmp4), layer), gx, gy);
-    int2 tmp5 = v2;
-    uint tmp6 = seed;
-    float4 B2 = waterOceanB.SampleGrad(_waterOceanB_sampler, float3(uv + wwOcOffset(tmp5, tmp6), layer), gx, gy);
-    int2 tmp7 = v0;
-    uint tmp8 = seed;
-    float4 C0 = waterOceanC.SampleGrad(_waterOceanC_sampler, float3(uv + wwOcOffset(tmp7, tmp8), layer), gx, gy);
-    int2 tmp9 = v1;
-    uint tmp10 = seed;
-    float4 C1 = waterOceanC.SampleGrad(_waterOceanC_sampler, float3(uv + wwOcOffset(tmp9, tmp10), layer), gx, gy);
-    int2 tmp11 = v2;
-    uint tmp12 = seed;
-    float4 C2 = waterOceanC.SampleGrad(_waterOceanC_sampler, float3(uv + wwOcOffset(tmp11, tmp12), layer), gx, gy);
+    int2 wwOcMixPart = v0;
+    uint wwOcMixRet = seed;
+    float4 B0 = waterOceanB.SampleGrad(_waterOceanB_sampler, float3(uv + wwOcOffset(wwOcMixPart, wwOcMixRet), layer), gx, gy);
+    int2 bPart2 = v1;
+    uint bPart = seed;
+    float4 B1 = waterOceanB.SampleGrad(_waterOceanB_sampler, float3(uv + wwOcOffset(bPart2, bPart), layer), gx, gy);
+    int2 dPart2 = v2;
+    uint dPart = seed;
+    float4 B2 = waterOceanB.SampleGrad(_waterOceanB_sampler, float3(uv + wwOcOffset(dPart2, dPart), layer), gx, gy);
+    int2 ePart2 = v0;
+    uint ePart = seed;
+    float4 C0 = waterOceanC.SampleGrad(_waterOceanC_sampler, float3(uv + wwOcOffset(ePart2, ePart), layer), gx, gy);
+    int2 C1Part2 = v1;
+    uint C1Part = seed;
+    float4 C1 = waterOceanC.SampleGrad(_waterOceanC_sampler, float3(uv + wwOcOffset(C1Part2, C1Part), layer), gx, gy);
+    int2 C2Part2 = v2;
+    uint C2Part = seed;
+    float4 C2 = waterOceanC.SampleGrad(_waterOceanC_sampler, float3(uv + wwOcOffset(C2Part2, C2Part), layer), gx, gy);
     float n2 = dot(w, w);
     float rn = rsqrt(max(n2, 9.9999999747524270787835121154785e-07f));
     dxy = (((w.x * C0.w) + (w.y * C1.w)) + (w.z * C2.w)) * rn;
@@ -171,14 +172,15 @@ int wwOcBody(float2 P, inout float ws, out float a, out float3 gc, inout float m
     float2 t0 = floor(g);
     float2 f = g - t0;
     float2 c0 = waterInfoGrid.xy + ((t0 + 0.5f.xx) * tex);
-    float2 tmp1 = c0;
-    float2 tmp2 = c0 + float2(tex, 0.0f);
-    float2 tmp3 = c0 + float2(0.0f, tex);
-    float2 tmp4 = c0 + tex.xx;
-    uint4 wd = uint4(wwWaterInfoWord(tmp1), wwWaterInfoWord(tmp2), wwWaterInfoWord(tmp3), wwWaterInfoWord(tmp4));
+    float2 wwOcMixPart = c0;
+    float2 wwOcMixRet = c0 + float2(tex, 0.0f);
+    float2 bPart2 = c0 + float2(0.0f, tex);
+    float2 bPart = c0 + tex.xx;
+    uint4 wd = uint4(wwWaterInfoWord(wwOcMixPart), wwWaterInfoWord(wwOcMixRet), wwWaterInfoWord(bPart2), wwWaterInfoWord(bPart));
     float4 bw = float4((1.0f - f.x) * (1.0f - f.y), f.x * (1.0f - f.y), (1.0f - f.x) * f.y, f.x * f.y);
     uint4 id = wd & uint4(65535u, 65535u, 65535u, 65535u);
     float U = waterOceanWind.z;
+    // each wet corner's set and gain; the set of the largest weight wins, its corners' gains blend
     float4 cset = (-1.0f).xxxx;
     float4 cgain = 0.0f.xxxx;
     float best = -1.0f;
@@ -202,11 +204,11 @@ int wwOcBody(float2 P, inout float ws, out float a, out float3 gc, inout float m
             F = min(F, 40.0f);
         }
         float4 S = waterOceanSet[s];
-        float tmp5 = U;
-        float tmp6 = F;
-        float tmp7 = U;
-        float tmp8 = waterOceanSetB[s].x;
-        float hw = (S.y * wwOcHw(tmp5, tmp6)) / max(wwOcHw(tmp7, tmp8), 9.9999999747524270787835121154785e-07f);
+        float dPart2 = U;
+        float dPart = F;
+        float ePart2 = U;
+        float ePart = waterOceanSetB[s].x;
+        float hw = (S.y * wwOcHw(dPart2, dPart)) / max(wwOcHw(ePart2, ePart), 9.9999999747524270787835121154785e-07f);
         cset[k] = float(s);
         cgain[k] = clamp(sqrt((hw * hw) + (S.z * S.z)) / max(S.x, 9.9999999747524270787835121154785e-07f), 0.1500000059604644775390625f, 3.0f);
         if (bw[k] > best)
@@ -219,32 +221,32 @@ int wwOcBody(float2 P, inout float ws, out float a, out float3 gc, inout float m
     {
         return -1;
     }
-    float4 tmp9 = float(set).xxxx;
-    float4 same = float4(bool4(cset.x == tmp9.x, cset.y == tmp9.y, cset.z == tmp9.z, cset.w == tmp9.w));
+    float4 C1Part2 = float(set).xxxx;
+    float4 same = float4(bool4(cset.x == C1Part2.x, cset.y == C1Part2.y, cset.z == C1Part2.z, cset.w == C1Part2.w));
     ws = dot(bw, same);
     a = dot(bw * same, cgain) / max(ws, 9.9999999747524270787835121154785e-07f);
-    float tmp10;
+    float C1Part;
     if ((waterOceanRed & 4) != 0)
     {
-        tmp10 = 1.0f;
+        C1Part = 1.0f;
     }
     else
     {
-        float2 tmp11 = P;
-        int tmp12 = set;
-        tmp10 = wwOcPatch(tmp11, tmp12);
+        float2 C2Part2 = P;
+        int C2Part = set;
+        C1Part = wwOcPatch(C2Part2, C2Part);
     }
-    m = tmp10;
-    float tmp13;
+    m = C1Part;
+    float pwPick;
     if ((waterOceanRed & 4) != 0)
     {
-        tmp13 = 0.0f;
+        pwPick = 0.0f;
     }
     else
     {
-        tmp13 = 1.0f - (0.699999988079071044921875f * clamp((U - 3.0f) / 7.0f, 0.0f, 1.0f));
+        pwPick = 1.0f - (0.699999988079071044921875f * clamp((U - 3.0f) / 7.0f, 0.0f, 1.0f));
     }
-    pw = tmp13;
+    pw = pwPick;
     gc = float3(1.0f, lerp(1.0f, m, 0.5f * pw), lerp(1.0f, m, pw));
     return set;
 }
@@ -253,13 +255,13 @@ int wwOcBody(float2 P, inout float ws, out float a, out float3 gc, inout float m
 #if defined(WW_FN_wwWaterOcean) || defined(WW_FN_ALL)
 WwOcean wwWaterOcean(float2 P, float2 dPx, float2 dPy)
 {
-    float2 tmp1 = P;
-    float2 tmp2 = P;
-    float2 tmp3 = dPx;
-    float2 tmp4 = dPy;
-    int tmp5;
-    WwOcean tmp6 = wwWaterOceanQ(tmp1, tmp2, tmp3, tmp4, tmp5);
-    int set = tmp5;
-    return tmp6;
+    float2 wwOcMixPart = P;
+    float2 wwOcMixRet = P;
+    float2 bPart2 = dPx;
+    float2 bPart = dPy;
+    int dPart2;
+    WwOcean dPart = wwWaterOceanQ(wwOcMixPart, wwOcMixRet, bPart2, bPart, dPart2);
+    int set = dPart2;
+    return dPart;
 }
 #endif

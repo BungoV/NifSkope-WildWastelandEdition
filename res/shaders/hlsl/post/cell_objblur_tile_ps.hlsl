@@ -48,17 +48,17 @@ void frag_main()
             for (int x = 0; x < tile; x++)
             {
                 int2 q = o + int2(x, y);
-                bool tmp77 = q.x >= sz.x;
-                bool tmp87;
-                if (!tmp77)
+                bool cond2 = q.x >= sz.x;
+                bool cond;
+                if (!cond2)
                 {
-                    tmp87 = q.y >= sz.y;
+                    cond = q.y >= sz.y;
                 }
                 else
                 {
-                    tmp87 = tmp77;
+                    cond = cond2;
                 }
-                if (tmp87)
+                if (cond)
                 {
                     continue;
                 }

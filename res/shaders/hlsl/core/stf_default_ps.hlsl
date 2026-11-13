@@ -279,16 +279,16 @@ static float3x3 btnMatrix_norm;
 
 float2 getTexCoord(UVStream uvStream)
 {
-    float2 tmp269;
+    float2 offsetPick;
     if (!uvStream.useChannelTwo)
     {
-        tmp269 = texCoord.xy;
+        offsetPick = texCoord.xy;
     }
     else
     {
-        tmp269 = texCoord.zw;
+        offsetPick = texCoord.zw;
     }
-    float2 offset = tmp269;
+    float2 offset = offsetPick;
     return (offset * uvStream.scaleAndOffset.xy) + uvStream.scaleAndOffset.zw;
 }
 
@@ -296,24 +296,38 @@ float2 parallaxMapping(int n, float3 V, float2 offset)
 {
     if (sfParallaxScale < 0.0005000000237487256526947021484375f)
     {
+        // disabled
         return offset;
     }
+    // determine optimal height of each layer
     float layerHeight = 1.0f / lerp(float(sfParallaxMaxSteps), 8.0f, abs(V.z));
+    // current height of the layer
     float curLayerHeight = 1.0f;
     float2 dtex = (V.xy * sfParallaxScale) / max(abs(V.z), 0.0199999995529651641845703125f).xx;
+    // current texture coordinates
     float2 currentTextureCoords = offset + (dtex * sfParallaxOffset);
+    // shift of texture coordinates for each layer
     dtex *= layerHeight;
+    // height from heightmap
     float heightFromTexture = textureUnits[n].Sample(_textureUnits_sampler[n], currentTextureCoords).x;
+    // while point is above the surface
     while (curLayerHeight > heightFromTexture)
     {
+        // to the next layer
         curLayerHeight -= layerHeight;
+        // shift of texture coordinates
         currentTextureCoords -= dtex;
+        // new height from heightmap
         heightFromTexture = textureUnits[n].Sample(_textureUnits_sampler[n], currentTextureCoords).x;
     }
+    // previous texture coordinates
     float2 prevTCoords = currentTextureCoords + dtex;
+    // heights for linear interpolation
     float nextH = curLayerHeight - heightFromTexture;
     float prevH = (curLayerHeight + layerHeight) - textureUnits[n].Sample(_textureUnits_sampler[n], prevTCoords).x;
+    // proportions for linear interpolation
     float weight = nextH / (nextH - prevH);
+    // return interpolation of texture coordinates
     return lerp(currentTextureCoords, prevTCoords, weight.xx);
 }
 
@@ -329,16 +343,16 @@ float4 getLayerTexture(int layerNum, int textureNum, float2 offset)
 
 float getDetailBlendMask()
 {
-    bool tmp357;
+    bool cond;
     if (lm.detailBlender.detailBlendMaskSupported)
     {
-        tmp357 = lm.detailBlender.maskTexture != 0;
+        cond = lm.detailBlender.maskTexture != 0;
     }
     else
     {
-        tmp357 = lm.detailBlender.detailBlendMaskSupported;
+        cond = lm.detailBlender.detailBlendMaskSupported;
     }
-    if (!tmp357)
+    if (!cond)
     {
         return 1.0f;
     }
@@ -346,8 +360,8 @@ float getDetailBlendMask()
     {
         return lm.detailBlender.maskTextureReplacement.x;
     }
-    UVStream param = lm.detailBlender.uvStream;
-    return textureUnits[lm.detailBlender.maskTexture].Sample(_textureUnits_sampler[lm.detailBlender.maskTexture], getTexCoord(param)).x;
+    UVStream uvStreamArg = lm.detailBlender.uvStream;
+    return textureUnits[lm.detailBlender.maskTexture].Sample(_textureUnits_sampler[lm.detailBlender.maskTexture], getTexCoord(uvStreamArg)).x;
 }
 
 float getBlenderMask(int n)
@@ -361,8 +375,8 @@ float getBlenderMask(int n)
         }
         else
         {
-            UVStream param = lm.blenders[n].uvStream;
-            float2 offset = getTexCoord(param);
+            UVStream uvStreamArg2 = lm.blenders[n].uvStream;
+            float2 offset = getTexCoord(uvStreamArg2);
             r = textureUnits[lm.blenders[n].maskTexture].Sample(_textureUnits_sampler[lm.blenders[n].maskTexture], offset).x;
         }
     }
@@ -374,16 +388,20 @@ float getBlenderMask(int n)
     {
         r *= getDetailBlendMask();
     }
+    // mask intensity
     return r * lm.blenders[n].floatParams[4];
 }
 
 float LightingFuncGGX_REF(float NdotH, float NdotL, float NdotV, float roughness)
 {
     float alpha = roughness * roughness;
+    // D (GGX normal distribution)
     float alphaSqr = alpha * alpha;
     float denom = NdotH * NdotH;
     denom = (denom * alphaSqr) + (1.0f - denom);
     float D = alphaSqr / ((denom * denom) * 4.0f);
+    // no pi because BRDF -> lighting
+    // G
     float k = alpha * 0.5f;
     float G = NdotL / (lerp(NdotL, 1.0f, k) * lerp(NdotV, 1.0f, k));
     return D * G;
@@ -391,11 +409,14 @@ float LightingFuncGGX_REF(float NdotH, float NdotL, float NdotV, float roughness
 
 float emissiveIntensity(bool useAdaptive, bool adaptiveLimits, float4 luminanceParams)
 {
+    // luminousEmittance
     float l = luminanceParams.x;
     if (useAdaptive)
     {
         l = dot((lightSourceAmbient.xyz * 20.0f) + (lightSourceDiffuse[0].xyz * 80.0f), float3(0.2125999927520751953125f, 0.715200006961822509765625f, 0.072200000286102294921875f));
+        // exposureOffset
         l *= exp2(luminanceParams.y);
+        // minOffsetEmittance, maxOffsetEmittance
         if (adaptiveLimits)
         {
             l = clamp(l, luminanceParams.w, luminanceParams.z);
@@ -427,48 +448,50 @@ void frag_main()
     }
     float3 baseMap = C.xyz;
     float3 normal = float3(0.0f, 0.0f, 1.0f);
+    // roughness, metalness, AO
     float3 pbrMap = float3(0.0f, 0.0f, 1.0f);
     float baseAlpha = C.w;
     float alpha = 1.0f;
     float3 emissive = 0.0f.xxx;
     float3 transmissive = 0.0f.xxx;
     int numLayers = min(lm.numLayers, 6);
-    float4 tmp638;
+    float4 tintColorPick;
     for (int i = 0; i < numLayers; i++)
     {
         float3 layerBaseMap = 0.0f.xxx;
         float3 layerNormal = float3(0.0f, 0.0f, 1.0f);
         float3 layerPBRMap = float3(0.0f, 0.0f, 1.0f);
+        // "None"
         int blendMode = 3;
         if (i > 0)
         {
             blendMode = lm.blenders[i - 1].blendMode;
         }
-        UVStream param = lm.layers[i].uvStream;
-        float2 offset = getTexCoord(param);
+        UVStream uvStreamArg4 = lm.layers[i].uvStream;
+        float2 offset = getTexCoord(uvStreamArg4);
         if (lm.layers[i].material.textureSet.textures[6] >= 1)
         {
-            int param_1 = lm.layers[i].material.textureSet.textures[6];
-            float3 param_2 = normalize(mul(btnMatrix_norm, ViewDir_norm));
-            float2 param_3 = offset;
-            offset = parallaxMapping(param_1, param_2, param_3);
+            int nArg3 = lm.layers[i].material.textureSet.textures[6];
+            float3 VArg = normalize(mul(btnMatrix_norm, ViewDir_norm));
+            float2 offsetArg11 = offset;
+            offset = parallaxMapping(nArg3, VArg, offsetArg11);
         }
         if (lm.layers[i].material.textureSet.textures[0] != 0)
         {
-            int param_4 = i;
-            int param_5 = 0;
-            float2 param_6 = offset;
-            layerBaseMap = getLayerTexture(param_4, param_5, param_6).xyz;
+            int layerNumArg10 = i;
+            int textureNumArg10 = 0;
+            float2 offsetArg10 = offset;
+            layerBaseMap = getLayerTexture(layerNumArg10, textureNumArg10, offsetArg10).xyz;
         }
         if ((lm.layers[i].material.flags & 2) == 0)
         {
-            tmp638 = lm.layers[i].material.color;
+            tintColorPick = lm.layers[i].material.color;
         }
         else
         {
-            tmp638 = C;
+            tintColorPick = C;
         }
-        float4 tintColor = tmp638;
+        float4 tintColor = tintColorPick;
         if ((lm.layers[i].material.flags & 1) == 0)
         {
             layerBaseMap *= tintColor.xyz;
@@ -479,35 +502,36 @@ void frag_main()
         }
         if (lm.layers[i].material.textureSet.textures[1] != 0)
         {
-            int param_7 = i;
-            int param_8 = 1;
-            float2 param_9 = offset;
-            float2 tmp682 = getLayerTexture(param_7, param_8, param_9).xy * lm.layers[i].material.textureSet.floatParam;
-            layerNormal.x = tmp682.x;
-            layerNormal.y = tmp682.y;
+            int layerNumArg9 = i;
+            int textureNumArg9 = 1;
+            float2 offsetArg9 = offset;
+            float2 getLayerTextureRet = getLayerTexture(layerNumArg9, textureNumArg9, offsetArg9).xy * lm.layers[i].material.textureSet.floatParam;
+            layerNormal.x = getLayerTextureRet.x;
+            layerNormal.y = getLayerTextureRet.y;
             layerNormal.z = sqrt(max(1.0f - dot(layerNormal.xy, layerNormal.xy), 0.0f));
         }
         if (lm.layers[i].material.textureSet.textures[3] != 0)
         {
-            int param_10 = i;
-            int param_11 = 3;
-            float2 param_12 = offset;
-            layerPBRMap.x = getLayerTexture(param_10, param_11, param_12).x;
+            int layerNumArg8 = i;
+            int textureNumArg8 = 3;
+            float2 offsetArg8 = offset;
+            layerPBRMap.x = getLayerTexture(layerNumArg8, textureNumArg8, offsetArg8).x;
         }
         if (lm.layers[i].material.textureSet.textures[4] != 0)
         {
-            int param_13 = i;
-            int param_14 = 4;
-            float2 param_15 = offset;
-            layerPBRMap.y = getLayerTexture(param_13, param_14, param_15).x;
+            int layerNumArg7 = i;
+            int textureNumArg7 = 4;
+            float2 offsetArg7 = offset;
+            layerPBRMap.y = getLayerTexture(layerNumArg7, textureNumArg7, offsetArg7).x;
         }
         if (lm.layers[i].material.textureSet.textures[5] != 0)
         {
-            int param_16 = i;
-            int param_17 = 5;
-            float2 param_18 = offset;
-            layerPBRMap.z = getLayerTexture(param_16, param_17, param_18).x;
+            int layerNumArg6 = i;
+            int textureNumArg6 = 5;
+            float2 offsetArg6 = offset;
+            layerPBRMap.z = getLayerTexture(layerNumArg6, textureNumArg6, offsetArg6).x;
         }
+        // falloff
         float f = 1.0f;
         if ((lm.layeredEdgeFalloff.flags & (1 << i)) != 0)
         {
@@ -534,19 +558,20 @@ void frag_main()
                 layerBaseMap *= f;
             }
         }
+        // material layering
         float layerMask = 1.0f;
         if (i == 0)
         {
-            bool tmp824;
+            bool cond15;
             if (lm.decalSettings.isDecal)
             {
-                tmp824 = lm.layers[0].material.textureSet.textures[0] == 0;
+                cond15 = lm.layers[0].material.textureSet.textures[0] == 0;
             }
             else
             {
-                tmp824 = lm.decalSettings.isDecal;
+                cond15 = lm.decalSettings.isDecal;
             }
-            if (tmp824)
+            if (cond15)
             {
                 discard;
             }
@@ -558,32 +583,34 @@ void frag_main()
         }
         else
         {
-            int param_19 = i - 1;
-            layerMask = getBlenderMask(param_19);
-            bool tmp838 = blendMode != 3;
-            bool tmp850;
-            if (tmp838)
+            int nArg2 = i - 1;
+            layerMask = getBlenderMask(nArg2);
+            bool cond14 = blendMode != 3;
+            bool cond13;
+            if (cond14)
             {
-                bool tmp848;
+                bool condPick;
                 if (lm.isEffect)
                 {
-                    tmp848 = lm.effectSettings.isGlass;
+                    condPick = lm.effectSettings.isGlass;
                 }
                 else
                 {
-                    tmp848 = lm.isEffect;
+                    condPick = lm.isEffect;
                 }
-                tmp850 = !tmp848;
+                cond13 = !condPick;
             }
             else
             {
-                tmp850 = tmp838;
+                cond13 = cond14;
             }
-            if (tmp850)
+            if (cond13)
             {
+                // TODO: correctly implement Skin, instead of interpreting it as Linear
                 float srcMask = layerMask;
                 if (blendMode == 2)
                 {
+                    // PositionContrast
                     float blendPosition = lm.blenders[i - 1].floatParams[2];
                     float blendContrast = lm.blenders[i - 1].floatParams[3];
                     blendContrast = max(blendContrast * min(blendPosition, 1.0f - blendPosition), 0.001000000047497451305389404296875f);
@@ -597,6 +624,7 @@ void frag_main()
                 {
                     if (blendMode == 4)
                     {
+                        // CharacterCombine: blend color, roughness and metalness multiplicatively
                         layerBaseMap = (layerBaseMap * baseMap) * 2.0f;
                         layerPBRMap.x = (layerPBRMap.x * pbrMap.x) * 2.0f;
                         if (layerPBRMap.y < 0.5f)
@@ -612,6 +640,7 @@ void frag_main()
                     {
                         if (blendMode == 1)
                         {
+                            // Additive
                             layerBaseMap += baseMap;
                             layerPBRMap += pbrMap;
                             if (!lm.blenders[i - 1].boolParams[4])
@@ -624,25 +653,28 @@ void frag_main()
                 srcMask = clamp(srcMask, 0.0f, 1.0f) * f;
                 if (lm.blenders[i - 1].boolParams[0])
                 {
+                    // blend color
                     baseMap = min(lerp(baseMap, layerBaseMap, srcMask.xxx), 1.0f.xxx);
                 }
                 layerPBRMap = min(lerp(pbrMap, layerPBRMap, srcMask.xxx), 1.0f.xxx);
                 if (lm.blenders[i - 1].boolParams[1])
                 {
+                    // blend metalness
                     pbrMap.y = layerPBRMap.y;
                 }
                 if (lm.blenders[i - 1].boolParams[2])
                 {
+                    // blend roughness
                     pbrMap.x = layerPBRMap.x;
                 }
                 if (lm.blenders[i - 1].boolParams[3])
                 {
                     if (lm.blenders[i - 1].boolParams[4])
                     {
-                        float3 tmp1018 = normal;
-                        float2 tmp1024 = tmp1018.xy + (layerNormal.xy * srcMask);
-                        normal.x = tmp1024.x;
-                        normal.y = tmp1024.y;
+                        float3 normalPart2 = normal;
+                        float2 normalPart = normalPart2.xy + (layerNormal.xy * srcMask);
+                        normal.x = normalPart.x;
+                        normal.y = normalPart.y;
                         normal.z = sqrt(max(1.0f - dot(normal.xy, normal.xy), 0.0f));
                     }
                     else
@@ -652,6 +684,7 @@ void frag_main()
                 }
                 if (lm.blenders[i - 1].boolParams[6])
                 {
+                    // blend ambient occlusion
                     pbrMap.z = layerPBRMap.z;
                 }
             }
@@ -660,10 +693,10 @@ void frag_main()
         {
             if (lm.isEffect)
             {
-                int param_20 = i;
-                int param_21 = 2;
-                float2 param_22 = offset;
-                float a = getLayerTexture(param_20, param_21, param_22).x;
+                int layerNumArg5 = i;
+                int textureNumArg5 = 2;
+                float2 offsetArg5 = offset;
+                float a = getLayerTexture(layerNumArg5, textureNumArg5, offsetArg5).x;
                 if (lm.hasOpacityComponent)
                 {
                     int opacityBlendMode = -1;
@@ -675,31 +708,31 @@ void frag_main()
                     {
                         if (!lm.effectSettings.isGlass)
                         {
-                            bool tmp1100;
+                            bool cond12;
                             if (lm.opacity.secondLayerActive)
                             {
-                                tmp1100 = i == lm.opacity.secondLayerIndex;
+                                cond12 = i == lm.opacity.secondLayerIndex;
                             }
                             else
                             {
-                                tmp1100 = lm.opacity.secondLayerActive;
+                                cond12 = lm.opacity.secondLayerActive;
                             }
-                            if (tmp1100)
+                            if (cond12)
                             {
                                 opacityBlendMode = lm.opacity.firstBlenderMode;
                             }
                             else
                             {
-                                bool tmp1114;
+                                bool cond11;
                                 if (lm.opacity.thirdLayerActive)
                                 {
-                                    tmp1114 = i == lm.opacity.thirdLayerIndex;
+                                    cond11 = i == lm.opacity.thirdLayerIndex;
                                 }
                                 else
                                 {
-                                    tmp1114 = lm.opacity.thirdLayerActive;
+                                    cond11 = lm.opacity.thirdLayerActive;
                                 }
-                                if (tmp1114)
+                                if (cond11)
                                 {
                                     opacityBlendMode = lm.opacity.secondBlenderMode;
                                 }
@@ -740,97 +773,98 @@ void frag_main()
             }
             else
             {
-                bool tmp1167;
+                bool cond10;
                 if (lm.alphaSettings.hasOpacity)
                 {
-                    tmp1167 = i == lm.alphaSettings.opacitySourceLayer;
+                    cond10 = i == lm.alphaSettings.opacitySourceLayer;
                 }
                 else
                 {
-                    tmp1167 = lm.alphaSettings.hasOpacity;
+                    cond10 = lm.alphaSettings.hasOpacity;
                 }
-                if (tmp1167)
+                if (cond10)
                 {
                     if ((lm.layers[i].material.flags & 4) == 0)
                     {
-                        UVStream param_23 = lm.alphaSettings.opacityUVstream;
-                        int param_24 = i;
-                        int param_25 = 2;
-                        float2 param_26 = getTexCoord(param_23);
-                        baseAlpha = getLayerTexture(param_24, param_25, param_26).x;
+                        UVStream uvStreamArg3 = lm.alphaSettings.opacityUVstream;
+                        int layerNumArg4 = i;
+                        int textureNumArg4 = 2;
+                        float2 offsetArg4 = getTexCoord(uvStreamArg3);
+                        baseAlpha = getLayerTexture(layerNumArg4, textureNumArg4, offsetArg4).x;
                     }
                     else
                     {
-                        int param_27 = i;
-                        int param_28 = 2;
-                        float2 param_29 = offset;
-                        baseAlpha = getLayerTexture(param_27, param_28, param_29).x;
+                        int layerNumArg3 = i;
+                        int textureNumArg3 = 2;
+                        float2 offsetArg3 = offset;
+                        baseAlpha = getLayerTexture(layerNumArg3, textureNumArg3, offsetArg3).x;
                     }
                 }
             }
         }
         if (lm.layers[i].material.textureSet.textures[7] != 0)
         {
+            // _emissive.dds
             float4 tmp = 0.0f.xxxx;
             int maskBlender = 0;
-            bool tmp1212;
+            bool cond9;
             if (lm.emissiveSettings.isEnabled)
             {
-                tmp1212 = i == lm.emissiveSettings.emissiveSourceLayer;
+                cond9 = i == lm.emissiveSettings.emissiveSourceLayer;
             }
             else
             {
-                tmp1212 = lm.emissiveSettings.isEnabled;
+                cond9 = lm.emissiveSettings.isEnabled;
             }
-            if (tmp1212)
+            if (cond9)
             {
                 tmp = lm.emissiveSettings.emissiveTint;
                 maskBlender = lm.emissiveSettings.emissiveMaskSourceBlender;
             }
             else
             {
-                bool tmp1228;
+                bool cond8;
                 if (lm.layeredEmissivity.isEnabled)
                 {
-                    tmp1228 = i == lm.layeredEmissivity.firstLayerIndex;
+                    cond8 = i == lm.layeredEmissivity.firstLayerIndex;
                 }
                 else
                 {
-                    tmp1228 = lm.layeredEmissivity.isEnabled;
+                    cond8 = lm.layeredEmissivity.isEnabled;
                 }
-                if (tmp1228)
+                if (cond8)
                 {
                     tmp = lm.layeredEmissivity.firstLayerTint;
                     maskBlender = lm.layeredEmissivity.firstLayerMaskIndex;
                 }
                 else
                 {
-                    bool tmp1244;
+                    bool cond7;
                     if (lm.layeredEmissivity.isEnabled)
                     {
-                        tmp1244 = i == lm.layeredEmissivity.secondLayerIndex;
+                        cond7 = i == lm.layeredEmissivity.secondLayerIndex;
                     }
                     else
                     {
-                        tmp1244 = lm.layeredEmissivity.isEnabled;
+                        cond7 = lm.layeredEmissivity.isEnabled;
                     }
-                    if (tmp1244)
+                    if (cond7)
                     {
                         tmp = lm.layeredEmissivity.secondLayerTint;
                         maskBlender = lm.layeredEmissivity.secondLayerMaskIndex;
                     }
                     else
                     {
-                        bool tmp1260;
+                        bool cond6;
                         if (lm.layeredEmissivity.isEnabled)
                         {
-                            tmp1260 = i == lm.layeredEmissivity.thirdLayerIndex;
+                            cond6 = i == lm.layeredEmissivity.thirdLayerIndex;
                         }
                         else
                         {
-                            tmp1260 = lm.layeredEmissivity.isEnabled;
+                            cond6 = lm.layeredEmissivity.isEnabled;
                         }
-                        if (tmp1260)
+                        if (cond6)
                         {
                             tmp = lm.layeredEmissivity.thirdLayerTint;
                             maskBlender = lm.layeredEmissivity.thirdLayerMaskIndex;
@@ -844,31 +878,31 @@ void frag_main()
             }
             if ((maskBlender > 0) && (maskBlender < numLayers))
             {
-                int param_30 = maskBlender - 1;
-                tmp.w *= getBlenderMask(param_30);
+                int nArg = maskBlender - 1;
+                tmp.w *= getBlenderMask(nArg);
             }
-            int param_31 = i;
-            int param_32 = 7;
-            float2 param_33 = offset;
-            emissive += ((getLayerTexture(param_31, param_32, param_33).xyz * tmp.xyz) * tmp.w);
+            int layerNumArg2 = i;
+            int textureNumArg2 = 7;
+            float2 offsetArg2 = offset;
+            emissive += ((getLayerTexture(layerNumArg2, textureNumArg2, offsetArg2).xyz * tmp.xyz) * tmp.w);
         }
         if (lm.layers[i].material.textureSet.textures[8] != 0)
         {
-            bool tmp1315;
+            bool cond5;
             if (lm.translucencySettings.isEnabled)
             {
-                tmp1315 = i == lm.translucencySettings.transmittanceSourceLayer;
+                cond5 = i == lm.translucencySettings.transmittanceSourceLayer;
             }
             else
             {
-                tmp1315 = lm.translucencySettings.isEnabled;
+                cond5 = lm.translucencySettings.isEnabled;
             }
-            if (tmp1315)
+            if (cond5)
             {
-                int param_34 = i;
-                int param_35 = 8;
-                float2 param_36 = offset;
-                transmissive = (getLayerTexture(param_34, param_35, param_36).x * lm.translucencySettings.transmissiveScale).xxx;
+                int layerNumArg = i;
+                int textureNumArg = 8;
+                float2 offsetArg = offset;
+                transmissive = (getLayerTexture(layerNumArg, textureNumArg, offsetArg).x * lm.translucencySettings.transmissiveScale).xxx;
             }
         }
     }
@@ -883,6 +917,7 @@ void frag_main()
                 baseAlpha *= C.w;
             }
             alpha = (alpha * lm.effectSettings.materialOverallAlpha) * baseAlpha;
+            // alpha test settings seem to be ignored for effects, and a fixed threshold of 1/128 is used instead
             if (!(alpha > 0.00779999978840351104736328125f))
             {
                 discard;
@@ -910,17 +945,17 @@ void frag_main()
                 }
             }
             alpha *= baseAlpha;
-            bool tmp1408 = (alphaFlags & 1) != 0;
-            bool tmp1416;
-            if (tmp1408)
+            bool cond4 = (alphaFlags & 1) != 0;
+            bool cond3;
+            if (cond4)
             {
-                tmp1416 = !(alpha > lm.alphaSettings.alphaTestThreshold);
+                cond3 = !(alpha > lm.alphaSettings.alphaTestThreshold);
             }
             else
             {
-                tmp1416 = tmp1408;
+                cond3 = cond4;
             }
-            if (tmp1416)
+            if (cond3)
             {
                 discard;
             }
@@ -948,20 +983,24 @@ void frag_main()
     float3 normalWS = mul(normal, envMapRotation);
     float3 f0 = lerp(0.039999999105930328369140625f.xxx, baseMap, pbrMap.y.xxx);
     float3 albedo = baseMap * (1.0f - pbrMap.y);
+    // Specular
     float roughness = pbrMap.x;
     float3 spec = lightSourceDiffuse[0].xyz;
-    float param_37 = NdotH;
-    float param_38 = NdotL0;
-    float param_39 = NdotV_1;
-    float param_40 = clamp(roughness, 0.04500000178813934326171875f, 0.949999988079071044921875f);
-    spec *= LightingFuncGGX_REF(param_37, param_38, param_39, param_40);
+    float NdotHArg = NdotH;
+    float NdotLArg = NdotL0;
+    float NdotVArg = NdotV_1;
+    float roughnessArg = clamp(roughness, 0.04500000178813934326171875f, 0.949999988079071044921875f);
+    spec *= LightingFuncGGX_REF(NdotHArg, NdotLArg, NdotVArg, roughnessArg);
+    // Diffuse
     float3 diffuse = NdotL0.xxx;
+    // Fresnel
     float2 fDirect = textureUnits[0].SampleLevel(_textureUnits_sampler[0], float2(LdotH, NdotL0), 0.0f).zw;
     spec *= lerp(f0, 1.0f.xxx, fDirect.x.xxx);
     float4 envLUT = textureUnits[0].SampleLevel(_textureUnits_sampler[0], float2(NdotV_1, roughness), 0.0f);
     float2 fDiff = float2(fDirect.y, envLUT.z);
     fDiff = (fDiff * ((((LdotH * LdotH) * roughness) * 2.0f) - 0.5f)) + 1.0f.xx;
     diffuse *= (((1.0f.xxx - f0) * fDiff.x) * fDiff.y);
+    // Environment
     float3 refl = 0.0f.xxx;
     float3 ambient = lightSourceAmbient.xyz;
     if (hasCubeMap)
@@ -992,77 +1031,77 @@ void frag_main()
     float ao = pbrMap.z;
     float specOcc = max(((ao - 1.0f) * ((((NdotV_1 * 1.125f) - 2.625f) * NdotV_1) + 2.5f)) + 1.0f, 0.0f);
     refl *= (f_1 * envLUT.y);
-    float3 tmp1684 = (((diffuse * lightSourceDiffuse[0].xyz) + ambient) * albedo) * ao;
-    color.x = tmp1684.x;
-    color.y = tmp1684.y;
-    color.z = tmp1684.z;
-    float4 tmp1696 = color;
-    float3 tmp1698 = tmp1696.xyz + ((spec + refl) * specOcc);
-    color.x = tmp1698.x;
-    color.y = tmp1698.y;
-    color.z = tmp1698.z;
+    float3 colorPart11 = (((diffuse * lightSourceDiffuse[0].xyz) + ambient) * albedo) * ao;
+    color.x = colorPart11.x;
+    color.y = colorPart11.y;
+    color.z = colorPart11.z;
+    float4 colorPart10 = color;
+    float3 colorPart9 = colorPart10.xyz + ((spec + refl) * specOcc);
+    color.x = colorPart9.x;
+    color.y = colorPart9.y;
+    color.z = colorPart9.z;
     if (lm.emissiveSettings.isEnabled)
     {
-        bool param_41 = lm.emissiveSettings.adaptiveEmittance;
-        bool param_42 = lm.emissiveSettings.enableAdaptiveLimits;
-        float4 param_43 = float4(lm.emissiveSettings.luminousEmittance, lm.emissiveSettings.exposureOffset, lm.emissiveSettings.maxOffsetEmittance, lm.emissiveSettings.minOffsetEmittance);
-        emissive *= emissiveIntensity(param_41, param_42, param_43);
+        bool useAdaptiveArg2 = lm.emissiveSettings.adaptiveEmittance;
+        bool adaptiveLimitsArg2 = lm.emissiveSettings.enableAdaptiveLimits;
+        float4 luminanceParamsArg2 = float4(lm.emissiveSettings.luminousEmittance, lm.emissiveSettings.exposureOffset, lm.emissiveSettings.maxOffsetEmittance, lm.emissiveSettings.minOffsetEmittance);
+        emissive *= emissiveIntensity(useAdaptiveArg2, adaptiveLimitsArg2, luminanceParamsArg2);
     }
     else
     {
         if (lm.layeredEmissivity.isEnabled)
         {
-            bool param_44 = lm.layeredEmissivity.adaptiveEmittance;
-            bool param_45 = lm.layeredEmissivity.enableAdaptiveLimits;
-            float4 param_46 = float4(lm.layeredEmissivity.luminousEmittance, lm.layeredEmissivity.exposureOffset, lm.layeredEmissivity.maxOffsetEmittance, lm.layeredEmissivity.minOffsetEmittance);
-            emissive *= emissiveIntensity(param_44, param_45, param_46);
+            bool useAdaptiveArg = lm.layeredEmissivity.adaptiveEmittance;
+            bool adaptiveLimitsArg = lm.layeredEmissivity.enableAdaptiveLimits;
+            float4 luminanceParamsArg = float4(lm.layeredEmissivity.luminousEmittance, lm.layeredEmissivity.exposureOffset, lm.layeredEmissivity.maxOffsetEmittance, lm.layeredEmissivity.minOffsetEmittance);
+            emissive *= emissiveIntensity(useAdaptiveArg, adaptiveLimitsArg, luminanceParamsArg);
         }
     }
-    float4 tmp1757 = color;
-    float3 tmp1759 = tmp1757.xyz + emissive;
-    color.x = tmp1759.x;
-    color.y = tmp1759.y;
-    color.z = tmp1759.z;
-    bool tmp1772;
+    float4 colorPart8 = color;
+    float3 colorPart7 = colorPart8.xyz + emissive;
+    color.x = colorPart7.x;
+    color.y = colorPart7.y;
+    color.z = colorPart7.z;
+    bool cond2;
     if (lm.translucencySettings.isEnabled)
     {
-        tmp1772 = lm.translucencySettings.isThin;
+        cond2 = lm.translucencySettings.isThin;
     }
     else
     {
-        tmp1772 = lm.translucencySettings.isEnabled;
+        cond2 = lm.translucencySettings.isEnabled;
     }
-    if (tmp1772)
+    if (cond2)
     {
         transmissive *= ((albedo * (1.0f.xxx - f_1)) * ao);
-        float4 tmp1792 = color;
-        float3 tmp1794 = tmp1792.xyz + ((transmissive * lightSourceDiffuse[0].xyz) * max(-NdotL, 0.0f));
-        color.x = tmp1794.x;
-        color.y = tmp1794.y;
-        color.z = tmp1794.z;
+        float4 colorPart6 = color;
+        float3 colorPart5 = colorPart6.xyz + ((transmissive * lightSourceDiffuse[0].xyz) * max(-NdotL, 0.0f));
+        color.x = colorPart5.x;
+        color.y = colorPart5.y;
+        color.z = colorPart5.z;
         if (hasCubeMap)
         {
-            float4 tmp1815 = color;
-            float3 tmp1817 = tmp1815.xyz + ((CubeMap2.SampleLevel(_CubeMap2_sampler, -normalWS, 0.0f).xyz * transmissive) * lightSourceAmbient.xyz);
-            color.x = tmp1817.x;
-            color.y = tmp1817.y;
-            color.z = tmp1817.z;
+            float4 colorPart4 = color;
+            float3 colorPart3 = colorPart4.xyz + ((CubeMap2.SampleLevel(_CubeMap2_sampler, -normalWS, 0.0f).xyz * transmissive) * lightSourceAmbient.xyz);
+            color.x = colorPart3.x;
+            color.y = colorPart3.y;
+            color.z = colorPart3.z;
         }
         else
         {
-            float4 tmp1831 = color;
-            float3 tmp1833 = tmp1831.xyz + ((transmissive * lightSourceAmbient.xyz) * 0.07999999821186065673828125f);
-            color.x = tmp1833.x;
-            color.y = tmp1833.y;
-            color.z = tmp1833.z;
+            float4 colorPart2 = color;
+            float3 colorPart = colorPart2.xyz + ((transmissive * lightSourceAmbient.xyz) * 0.07999999821186065673828125f);
+            color.x = colorPart.x;
+            color.y = colorPart.y;
+            color.z = colorPart.z;
         }
     }
-    float3 param_47 = color.xyz * brightnessScale;
-    float param_48 = toneMapScale;
-    float3 tmp1849 = tonemap(param_47, param_48);
-    color.x = tmp1849.x;
-    color.y = tmp1849.y;
-    color.z = tmp1849.z;
+    float3 xArg = color.xyz * brightnessScale;
+    float yArg = toneMapScale;
+    float3 tonemapRet = tonemap(xArg, yArg);
+    color.x = tonemapRet.x;
+    color.y = tonemapRet.y;
+    color.z = tonemapRet.z;
     fragColor = color;
 }
 

@@ -30,17 +30,17 @@ float wwRainWetSmooth(float gloss, float w)
 #if defined(WW_FN_wwRainCoverOpen) || defined(WW_FN_ALL)
 float wwRainCoverOpen(int2 t, int2 n, float z)
 {
-    bool tmp1 = any(bool2(t.x < int2(0, 0).x, t.y < int2(0, 0).y));
-    bool tmp2;
-    if (!tmp1)
+    bool cond2 = any(bool2(t.x < int2(0, 0).x, t.y < int2(0, 0).y));
+    bool cond;
+    if (!cond2)
     {
-        tmp2 = any(bool2(t.x >= n.x, t.y >= n.y));
+        cond = any(bool2(t.x >= n.x, t.y >= n.y));
     }
     else
     {
-        tmp2 = tmp1;
+        cond = cond2;
     }
-    if (tmp2)
+    if (cond)
     {
         return 1.0f;
     }
@@ -60,22 +60,22 @@ float wwRainWetExposed(float3 P, float3 N)
     float2 f = q - float2(t);
     int2 n = int2(spvTextureSize(rainCover, uint(0), dummy_parameter));
     float z = (P.z + 8.0f) + (rainCoverGrid.w * min(length(N.xy) / max(abs(N.z), 0.0500000007450580596923828125f), 2.0f));
-    int2 tmp1 = t;
-    int2 tmp2 = n;
-    float tmp3 = z;
-    float e00 = wwRainCoverOpen(tmp1, tmp2, tmp3);
-    int2 tmp4 = t + int2(1, 0);
-    int2 tmp5 = n;
-    float tmp6 = z;
-    float e10 = wwRainCoverOpen(tmp4, tmp5, tmp6);
-    int2 tmp7 = t + int2(0, 1);
-    int2 tmp8 = n;
-    float tmp9 = z;
-    float e01 = wwRainCoverOpen(tmp7, tmp8, tmp9);
-    int2 tmp10 = t + int2(1, 1);
-    int2 tmp11 = n;
-    float tmp12 = z;
-    float e11 = wwRainCoverOpen(tmp10, tmp11, tmp12);
+    int2 cond2 = t;
+    int2 cond = n;
+    float e00Part = z;
+    float e00 = wwRainCoverOpen(cond2, cond, e00Part);
+    int2 e10Part3 = t + int2(1, 0);
+    int2 e10Part2 = n;
+    float e10Part = z;
+    float e10 = wwRainCoverOpen(e10Part3, e10Part2, e10Part);
+    int2 e01Part3 = t + int2(0, 1);
+    int2 e01Part2 = n;
+    float e01Part = z;
+    float e01 = wwRainCoverOpen(e01Part3, e01Part2, e01Part);
+    int2 e11Part3 = t + int2(1, 1);
+    int2 e11Part2 = n;
+    float e11Part = z;
+    float e11 = wwRainCoverOpen(e11Part3, e11Part2, e11Part);
     return lerp(lerp(e00, e10, f.x), lerp(e01, e11, f.x), f.y);
 }
 #endif

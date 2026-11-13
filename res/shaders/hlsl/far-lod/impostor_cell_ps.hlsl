@@ -300,8 +300,15 @@ uint3 spvTextureSize(Texture3D<float4> Tex, uint Level, out uint Param)
 float2 frameUvOf(int k, float3 pModel, out float d)
 {
     float3 r = pModel - cardCenter;
+    // ...measured from where THIS FRAME'S QUAD SITS, not from the card's one
+    // centre. Subtracting the frame's own offset is what undoes the slide the
+    // bake applied when it packed this view; skipping it puts every frame's
+    // picture in the wrong place by up to 13% of a frame, and puts the THREE
+    // blended frames in three different wrong places, which does not blur the
+    // card, it disperses it. See `ImpostorCardSet::frameOffset`.
     float2 st = float2(dot(r, frameRight[k]) - frameOffset[k].x, dot(r, frameUp[k]) - frameOffset[k].y);
     d = dot(r, frameFwd[k]);
+    // -half..+half  ->  0..1, y up in the world and v down on the sheet
     float2 uv = float2((st.x / (2.0f * cardHalf.x)) + 0.5f, 0.5f - (st.y / (2.0f * cardHalf.y)));
     return frameRect[k].xy + (clamp(uv, 0.0f.xx, 1.0f.xx) * frameRect[k].zw);
 }
@@ -327,14 +334,14 @@ float covAt(float2 uv)
     int2 i0 = int2(fl);
     float2 f = p - fl;
     int2 mx = sz - int2(1, 1);
-    float param = ColourSheet.Load(int3(clamp(i0, int2(0, 0), mx), 0)).w;
-    float a00 = coverageOf(param);
-    float param_1 = ColourSheet.Load(int3(clamp(i0 + int2(1, 0), int2(0, 0), mx), 0)).w;
-    float a10 = coverageOf(param_1);
-    float param_2 = ColourSheet.Load(int3(clamp(i0 + int2(0, 1), int2(0, 0), mx), 0)).w;
-    float a01 = coverageOf(param_2);
-    float param_3 = ColourSheet.Load(int3(clamp(i0 + int2(1, 1), int2(0, 0), mx), 0)).w;
-    float a11 = coverageOf(param_3);
+    float aArg4 = ColourSheet.Load(int3(clamp(i0, int2(0, 0), mx), 0)).w;
+    float a00 = coverageOf(aArg4);
+    float aArg3 = ColourSheet.Load(int3(clamp(i0 + int2(1, 0), int2(0, 0), mx), 0)).w;
+    float a10 = coverageOf(aArg3);
+    float aArg2 = ColourSheet.Load(int3(clamp(i0 + int2(0, 1), int2(0, 0), mx), 0)).w;
+    float a01 = coverageOf(aArg2);
+    float aArg = ColourSheet.Load(int3(clamp(i0 + int2(1, 1), int2(0, 0), mx), 0)).w;
+    float a11 = coverageOf(aArg);
     return lerp(lerp(a00, a10, f.x), lerp(a01, a11, f.x), f.y);
 }
 
@@ -355,6 +362,7 @@ float OrenNayarFull(float NdotL, float NdotV, float LdotV, float roughness)
     float gamma = (LdotV - (NdotL * NdotV)) / sqrt(max((1.0f - (NdotL * NdotL)) * (1.0f - (NdotV * NdotV)), 2.4999999368446879088878631591797e-05f));
     float roughnessSquared = roughness * roughness;
     float roughnessSquared9 = roughnessSquared / (roughnessSquared + 0.0900000035762786865234375f);
+    // C1, C2, and C3
     float C1 = 1.0f - (0.5f * (roughnessSquared / (roughnessSquared + 0.3300000131130218505859375f)));
     float C2 = 0.449999988079071044921875f * roughnessSquared9;
     if (gamma >= 0.0f)
@@ -367,6 +375,7 @@ float OrenNayarFull(float NdotL, float NdotV, float LdotV, float roughness)
     }
     float powValue = ((4.0f * alpha) * beta) / 9.8696041107177734375f;
     float C3 = ((0.125f * roughnessSquared9) * powValue) * powValue;
+    // Avoid asymptote at pi/2
     float asym = 1.57079637050628662109375f;
     float lim1 = asym + 0.004999999888241291046142578125f;
     float lim2 = asym - 0.004999999888241291046142578125f;
@@ -393,10 +402,15 @@ float OrenNayarFull(float NdotL, float NdotV, float LdotV, float roughness)
             ab2 = lim2;
         }
     }
+    // Reflection
     float A = (gamma * C2) * tan(beta);
     float B = ((1.0f - abs(gamma)) * C3) * tan(ab2);
     float L1 = NdotL0 * ((C1 + A) + B);
+    // Interreflection
     float twoBetaPi = (2.0f * beta) / 3.1415927410125732421875f;
+    // the lend rule: outdoors, a surface whose own reads (P + N x 0.75 and 1.75 cell) are both solid, or whose 1.75 read
+    // lands indoors, sits in air the room grid could not resolve; its neighbor search could borrow a sealed pocket's
+    // dark across the wall. Debug WW_CELL_PV_RED=borrow: the old search.
     float L2 = ((0.17000000178813934326171875f * NdotL0) * (roughnessSquared / (roughnessSquared + 0.12999999523162841796875f))) * (1.0f - ((gamma * twoBetaPi) * twoBetaPi));
     return L1 + L2;
 }
@@ -694,18 +708,23 @@ void frag_main()
     float sway = 0.0f;
     float wsum = 0.0f;
     float depthOffset = 0.0f;
+    // what the cut reads (1b)
     float cutCov = 0.0f;
     float cutW = -1.0f;
     float3 ray = normalize(cardViewRay);
+    // The stipple's noise (1b): one value per texel of the CARD, not of the
+    // screen, so it is fixed to the object and does not swim when the camera
+    // moves. Frame 0's texel size stands for all three (every frame of a set
+    // has the same size).
     float2 stipTexels = float2(int2(spvTextureSize(ColourSheet, uint(0), dummy_parameter))) * frameRect[0].zw;
     float2 stipCell = floor(cardQuadUv * stipTexels);
     float stipNoise = frac(sin(dot(stipCell, float2(12.98980045318603515625f, 78.233001708984375f))) * 43758.546875f);
-    float param_2;
-    float param_5;
-    float param_9;
-    float param_13;
-    float param_16;
-    float tmp8649;
+    float dArg5;
+    float dArg4;
+    float dArg3;
+    float dArg2;
+    float dArg;
+    float covPick;
     for (int k = 0; k < 3; k++)
     {
         if (k >= frameCount)
@@ -717,26 +736,54 @@ void frag_main()
         {
             continue;
         }
-        int param = k;
-        float3 param_1 = cardPosModel;
-        float2 tmp8399 = frameUvOf(param, param_1, param_2);
-        float d = param_2;
-        float2 uv = tmp8399;
+        int kArg6 = k;
+        float3 pModelArg5 = cardPosModel;
+        float2 frameUvOfRet5 = frameUvOf(kArg6, pModelArg5, dArg5);
+        float d = dArg5;
+        float2 uv = frameUvOfRet5;
         float3 p = cardPosModel;
+        // the search found no surface of this frame on the ray
         bool missed = false;
         float fdenom = dot(ray, frameFwd[k]);
-        bool tmp8415 = useHeightBlend && (depthSearchSteps > 0);
-        bool tmp8421;
-        if (tmp8415)
+        bool cond15 = useHeightBlend && (depthSearchSteps > 0);
+        bool cond14;
+        if (cond15)
         {
-            tmp8421 = abs(fdenom) > 0.1500000059604644775390625f;
+            cond14 = abs(fdenom) > 0.1500000059604644775390625f;
         }
         else
         {
-            tmp8421 = tmp8415;
+            cond14 = cond15;
         }
-        if (tmp8421)
+        if (cond14)
         {
+            // 1a. THE DEPTH SEARCH (lane IMPOSTORDEPTH1). The one step below
+            // asks frame k where its surface is AT THE CARD PLANE and moves
+            // there. That point of frame k's photograph is whatever lies on the
+            // card plane's line of sight IN THAT FRAME -- for a thin trunk at a
+            // frame 10..20 degrees away it is usually the crown or the sky, so
+            // the step aligns the crown shell and leaves the trunk where each
+            // frame happened to put it: two trunks (the stipple) or two half
+            // trunks under the cut (the mean). Measured on the 8x8 maple,
+            // 1-degree sweeps, scratchpad/impostordepth1_20260923/bar_rung.out.
+            // So the frame is asked along the WHOLE ray instead: N even samples
+            // from R in front of the card plane to R behind it, R = 1.15 x the
+            // larger card half-extent (every surface the bake photographed lies
+            // within it: the maple's heights span -367..+331 against halves
+            // 332.8 x 355.0). The first sample whose texel is covered (the
+            // cut's own threshold) and that lies BEHIND the surface the frame
+            // reports there is the hit -- the same test a parallax-occlusion
+            // march makes. Sky reads height 0.5, the card plane, so coverage
+            // has to be read first or the plane itself would be a surface.
+            // One refinement: from the hit, step along the ray onto that
+            // sample's surface (the old one-step law, seeded where the ray
+            // actually meets the object), clamped to the last step.
+            // A frame that finds nothing on the ray contributes NO coverage
+            // here: it did not see a surface on this line of sight, and saying
+            // so is what lets the three frames agree on a trunk.
+            // Cost, in sheet reads per pixel per frame: at most 2N in the march
+            // (colour alpha, then height only where covered), then the reads
+            // below at the hit.
             float R = 1.14999997615814208984375f * max(cardHalf.x, cardHalf.y);
             float dt = (2.0f * R) / float(depthSearchSteps);
             missed = true;
@@ -744,32 +791,41 @@ void frag_main()
             {
                 float t = (-R) + ((float(s) + 1.0f) * dt);
                 float3 q = cardPosModel + (ray * t);
-                int param_3 = k;
-                float3 param_4 = q;
-                float2 tmp8469 = frameUvOf(param_3, param_4, param_5);
-                float dq = param_5;
-                float2 uq = tmp8469;
-                float2 param_6 = uq;
-                if (covAt(param_6) < alphaThreshold)
+                int kArg5 = k;
+                float3 pModelArg4 = q;
+                float2 frameUvOfRet4 = frameUvOf(kArg5, pModelArg4, dArg4);
+                float dq = dArg4;
+                float2 uq = frameUvOfRet4;
+                float2 uvArg3 = uq;
+                if (covAt(uvArg3) < alphaThreshold)
                 {
                     continue;
                 }
                 float sq = (-(NormalSheet.SampleLevel(_NormalSheet_sampler, uq, 0.0f).z - 0.5f)) * cardDepthSpan;
+                // where the ray meets that surface
                 float tt = t + ((sq - dq) / fdenom);
                 if (dq > sq)
                 {
+                    // In FRONT of a covered texel. If the surface it reports is
+                    // within the next step, step onto it and accept it where the
+                    // frame is still covered: a thin trunk is crossed by the
+                    // ray over only w / sin(angle) of its length, and this is
+                    // what makes ANY sample inside that stretch find it, not
+                    // only one that happens to land behind its front face. A
+                    // surface further away than one step is left to the march,
+                    // so nothing nearer on the ray can be skipped.
                     if (tt > (t + dt))
                     {
                         continue;
                     }
                     float3 q2 = cardPosModel + (ray * tt);
-                    int param_7 = k;
-                    float3 param_8 = q2;
-                    float2 tmp8525 = frameUvOf(param_7, param_8, param_9);
-                    float d2 = param_9;
-                    float2 u2 = tmp8525;
-                    float2 param_10 = u2;
-                    if (covAt(param_10) < alphaThreshold)
+                    int kArg4 = k;
+                    float3 pModelArg3 = q2;
+                    float2 frameUvOfRet3 = frameUvOf(kArg4, pModelArg3, dArg3);
+                    float d2 = dArg3;
+                    float2 u2 = frameUvOfRet3;
+                    float2 uvArg2 = u2;
+                    if (covAt(uvArg2) < alphaThreshold)
                     {
                         continue;
                     }
@@ -780,11 +836,11 @@ void frag_main()
                 else
                 {
                     p = cardPosModel + (ray * clamp(tt, t - dt, t));
-                    int param_11 = k;
-                    float3 param_12 = p;
-                    float2 tmp8554 = frameUvOf(param_11, param_12, param_13);
-                    d = param_13;
-                    uv = tmp8554;
+                    int kArg3 = k;
+                    float3 pModelArg2 = p;
+                    float2 frameUvOfRet2 = frameUvOf(kArg3, pModelArg2, dArg2);
+                    d = dArg2;
+                    uv = frameUvOfRet2;
                 }
                 missed = false;
                 break;
@@ -794,51 +850,124 @@ void frag_main()
         {
             if (useHeightBlend)
             {
+                // Where frame k says the surface is, in world units along its own
+                // view direction, and the point on the view ray that reaches it.
                 float h = NormalSheet.SampleLevel(_NormalSheet_sampler, uv, 0.0f).z;
+                // THE SIGN, and it is SPEC GAP #4 -- spec 284..286 gives the height
+                // channel a unit and never says which way it points, so it had to be
+                // derived, and this lane derived it backwards first.
+                // `d` is measured along `frameFwd[k]`, and frameFwd is row 2 of the
+                // bake's Euler matrix: it points from the object TOWARD the camera
+                // (src/features/far-lod/impostoroct.cpp:290). So a point in FRONT of the card plane
+                // has d > 0. The baked height runs the OTHER WAY: the bake writes
+                // with distance FROM the camera, so h > 0.5 is BEHIND the plane.
+                // The surface frame k reports therefore sits at
+                // d = -( h - 0.5 ) x depthSpan
+                // and the leading minus is the entire correction.
+                // WHAT THE WRONG SIGN DID, so nobody restores it: a backwards
+                // parallax does not merely fail to remove the frames' disagreement,
+                // it DOUBLES it -- every sample lands as far on the wrong side as the
+                // right one lay on the correct side -- and the card came apart into a
+                // wide sparse spray. Measured on TreeMapleblasted05 N=4, azim 45
+                // elev 15, silhouette IoU against the mesh at five apparent sizes:
+                // 256 px  0.1675 wrong / 0.3114 blend OFF
+                // 128 px  0.1762 wrong / 0.3135 blend OFF
+                // 64 px  0.2112 wrong / 0.3151 blend OFF
+                // 32 px  0.2087 wrong / 0.2917 blend OFF
+                // 16 px  0.1786 wrong / 0.3750 blend OFF
+                // That is the signature, and it is the refuter this sign is checked
+                // by: a correction applied the right way round cannot be WORSE than
+                // not applying it at all. The pixel depth offset in section 2 has the
+                // opposite-looking sign for the same reason -- it moves along `ray`,
+                // which points AWAY from the camera, so there the plus is correct.
                 float want = (-(h - 0.5f)) * cardDepthSpan;
                 float denom = dot(ray, frameFwd[k]);
+                // A grazing frame gives a denominator near zero and a correction
+                // that would fly off the card. Its weight is small there anyway
+                // (a grazing frame is a corner of the blend triangle), so the
+                // correction is simply skipped rather than clamped to a number
+                // that would be a guess.
                 if (abs(denom) > 0.1500000059604644775390625f)
                 {
                     p = cardPosModel + (ray * ((want - d) / denom));
-                    int param_14 = k;
-                    float3 param_15 = p;
-                    float2 tmp8599 = frameUvOf(param_14, param_15, param_16);
-                    d = param_16;
-                    uv = tmp8599;
+                    int kArg2 = k;
+                    float3 pModelArg = p;
+                    float2 frameUvOfRet = frameUvOf(kArg2, pModelArg, dArg);
+                    d = dArg;
+                    uv = frameUvOfRet;
                 }
             }
         }
+        // The sway shear, if the viewer asked for one: read this texel's own
+        // weight, then move the lookup sideways in the frame's x by that much.
+        // Clamped to the frame's rect so a shear can never read a neighbour's
+        // frame -- the gutter is four texels (spec 239) and a wind shear is
+        // bigger than four texels.
         if (swayAmplitude != 0.0f)
         {
             float sw = NormalSheet.SampleLevel(_NormalSheet_sampler, uv, 0.0f).w;
             float dx = ((sw * swayAmplitude) * sin(swayPhase)) * frameRect[k].z;
             uv.x = clamp(uv.x + dx, frameRect[k].x, frameRect[k].x + frameRect[k].z);
         }
+        // CLAUSE C6 / C28 (spec 49, 317..321): coverage is the cut-out and it
+        // lives on the COLOUR sheet and nowhere else, and after the bake's
+        // downsample it is a FRACTION, not a cut-out.
         float4 c = ColourSheet.SampleLevel(_ColourSheet_sampler, uv, 0.0f);
         float4 n = NormalSheet.SampleLevel(_NormalSheet_sampler, uv, 0.0f);
         if (missed)
         {
-            tmp8649 = 0.0f;
+            covPick = 0.0f;
         }
         else
         {
-            float2 param_17 = uv;
-            tmp8649 = covAt(param_17);
+            float2 uvArg = uv;
+            covPick = covAt(uvArg);
         }
-        float cov = tmp8649;
+        // DECODED FIRST. `c.a` is the encoded alpha, not the coverage: see
+        // `coverageOf` above and `ImpostorCardSet::covFloor`. Everything below
+        // -- the weight, the average, the test -- is the FRACTION.
+        float cov = covPick;
+        // 1b. THE TEAR (lane IMPOSTORTEAR1). bungo: "like somebody ripped out
+        // a piece of paper". The three frames do not register -- one parallax
+        // step cannot move a thin trunk by more than its own width, and N=4
+        // blends frames up to 63 degrees apart -- so where ONE frame is solid
+        // the MEAN of the three falls under the cut and the card tears.
+        // THE RULE: a frame's own silhouette counts at a pixel whose card-texel
+        // noise is below min(1, 2 w) -- in full once its weight reaches 0.5,
+        // as a stipple of density 2w below that -- and the 3-frame mean is kept
+        // as the floor, so the card is never less covered than it was.
+        // WHY A STIPPLE, measured by the 1-degree sweeps of
+        // scratchpad/impostortear1_20260923 (bar: worst per-step change in
+        // covered pixels <= 1.5 x the shipped drawer's, azimuth and elevation,
+        // blast / maple / rock; tear clause: IoU vs the mesh at the torn view
+        // beats the shipped drawer and the torn share falls to <= 0.6 x):
+        // strongest frame only      tear repaired, pops 1.8 .. 2.6 x  FAIL
+        // depth march 4..128 taps   pops OK from 16 taps, the rock's tear
+        // never repaired (27.7 % at 128)     FAIL
+        // max_k cov * min(1, 2w)    azimuth OK, elevation 1.72 x       FAIL
+        // this stipple              pops 0.31 / 1.04 / 0.31 (az),
+        // 0.49 / 1.26 / 0.08 (el); torn share
+        // 44.9 / 68.3 / 27.3 % -> 5.9 / 19.0 / 5.4 %
+        // A hard threshold on ANY weight-scaled coverage flips every pixel only
+        // one frame covers in the same degree, because they all share that
+        // frame's weight -- the shipped mean did it at w = 0.5, which is where
+        // its own worst steps were. The noise spreads that one flip over the
+        // whole weight range. The price is a steady small change instead of a
+        // rare large one (mean step blast 3841 -> 5703 px) and a visible
+        // stipple where only a weak frame covers.
         if (cutRule == 0)
         {
-            bool tmp8664 = cov >= alphaThreshold;
-            bool tmp8672;
-            if (tmp8664)
+            bool cond13 = cov >= alphaThreshold;
+            bool cond12;
+            if (cond13)
             {
-                tmp8672 = stipNoise < min(1.0f, 2.0f * w);
+                cond12 = stipNoise < min(1.0f, 2.0f * w);
             }
             else
             {
-                tmp8672 = tmp8664;
+                cond12 = cond13;
             }
-            if (tmp8672)
+            if (cond12)
             {
                 cutCov = max(cutCov, cov);
             }
@@ -851,16 +980,20 @@ void frag_main()
                 cutCov = cov;
             }
         }
+        // The weight is the blend weight TIMES this frame's coverage, and the
+        // sum is normalised at the end. Without the coverage factor a frame
+        // that sees sky through a gap drags the other two towards transparent
+        // black, which is the second half of the ghosting.
         float wc = w * cov;
-        float4 tmp8697 = colour;
-        float3 tmp8699 = tmp8697.xyz + (c.xyz * wc);
-        colour.x = tmp8699.x;
-        colour.y = tmp8699.y;
-        colour.z = tmp8699.z;
+        float4 colourPart4 = colour;
+        float3 colourPart3 = colourPart4.xyz + (c.xyz * wc);
+        colour.x = colourPart3.x;
+        colour.y = colourPart3.y;
+        colour.z = colourPart3.z;
         colour.w += (cov * w);
-        int param_18 = k;
-        float4 param_19 = n;
-        normal += (frameNormalModel(param_18, param_19) * wc);
+        int kArg = k;
+        float4 nArg = n;
+        normal += (frameNormalModel(kArg, nArg) * wc);
         height += (n.z * wc);
         sway += (n.w * wc);
         if (hasMaskSheet)
@@ -875,27 +1008,36 @@ void frag_main()
     }
     if (wsum > 9.9999997473787516355514526367188e-06f)
     {
-        float4 tmp8770 = colour;
-        float3 tmp8773 = tmp8770.xyz / wsum.xxx;
-        colour.x = tmp8773.x;
-        colour.y = tmp8773.y;
-        colour.z = tmp8773.z;
+        float4 colourPart2 = colour;
+        float3 colourPart = colourPart2.xyz / wsum.xxx;
+        colour.x = colourPart.x;
+        colour.y = colourPart.y;
+        colour.z = colourPart.z;
         normal /= wsum.xxx;
         height /= wsum;
         sway /= wsum;
         mask /= wsum.xxxx;
         emissive /= wsum.xxx;
     }
-    float3 tmp8802;
+    float3 normalPick;
     if (dot(normal, normal) > 9.9999999392252902907785028219223e-09f)
     {
-        tmp8802 = normalize(normal);
+        normalPick = normalize(normal);
     }
     else
     {
-        tmp8802 = frameFwd[0];
+        normalPick = frameFwd[0];
     }
-    normal = tmp8802;
+    normal = normalPick;
+    // THE DEFAULT IS VANILLA'S (lane IMPOSTORFIN1, 2026-09-22): the viewer
+    // sends 128/255, the threshold on every alpha-tested shape of every
+    // vanilla .BTO chunk (flags 0x12EC: a hard GREATER test, never a blend),
+    // and the colour is then written opaque below -- the same hard cut-out.
+    // CLAUSE C28. The spec gives 0.5 for full crowns and says a consumer
+    // "tests lower, or blends, for bare trees" without naming the number --
+    // SPEC GAP #7. The number is the viewer's, not this shader's: it arrives
+    // as `alphaThreshold` so a picture can show the same card at both and
+    // bungo can say which one a bare Commonwealth maple wants.
     if (cutRule == 0)
     {
         cutCov = max(cutCov, colour.w);
@@ -911,6 +1053,7 @@ void frag_main()
     {
         discard;
     }
+    // interleaved gradient noise (Jimenez 2014), shifted per frame
     if (cardFadeOut > 0.0f)
     {
         float2 fp = gl_FragCoord.xy + (5.588237762451171875f * cardFadeFrame).xx;
@@ -919,6 +1062,14 @@ void frag_main()
             discard;
         }
     }
+    // ------------------------------------------------------------------
+    // 2. THE PIXEL DEPTH OFFSET (spec 286, SPEC GAP #4 on its sign).
+    // Without this a card is a flat sheet of paper: it intersects the ground
+    // in a straight line and slices through anything it overlaps. With it the
+    // card occupies the depth its own height channel says it does, so a tree
+    // standing half behind a wall is half behind the wall.
+    // The offset is along the VIEW RAY, away from the camera, which is the
+    // sign the spec should state and does not.
     if (useDepthOffset)
     {
         depthOffset = (height - 0.5f) * cardDepthSpan;
@@ -930,6 +1081,13 @@ void frag_main()
     {
         gl_FragDepth = gl_FragCoord.z;
     }
+    // ------------------------------------------------------------------
+    // 3. DEBUG CHANNELS. Every sheet channel on its own, unshaded, because a
+    // sheet that is loaded and never looked at is a sheet nobody can say is
+    // right. These are the ONLY thing the mask and emissive sheets feed
+    // until the material renderer lands.
+    // The normal the LIGHT is dotted with, in the light's (view) space --
+    // lane IMPOSTORLIGHT1. Debug channel 13 shows exactly it, and the gate reads it.
     float3 nView = normalize(mul(normal, float3x3(modelViewMatrix[0].xyz, modelViewMatrix[1].xyz, modelViewMatrix[2].xyz)));
     if (debugChannel != 0)
     {
@@ -1002,6 +1160,7 @@ void frag_main()
                                                 {
                                                     if (debugChannel == 12)
                                                     {
+                                                        // the depth offset in card-depth units, signed, red back / blue front
                                                         float t_1 = clamp((depthOffset / max(cardDepthSpan, 1.0f)) * 2.0f, -1.0f, 1.0f);
                                                         dbg = float3(max(t_1, 0.0f), 0.0f, max(-t_1, 0.0f));
                                                     }
@@ -1026,141 +1185,159 @@ void frag_main()
         fragColor = float4(dbg, 1.0f);
         return;
     }
-    float3 tmp9051;
+    float3 VPick;
     if (projectionMatrix[3].w == 1.0f)
     {
-        tmp9051 = float3(0.0f, 0.0f, 1.0f);
+        VPick = float3(0.0f, 0.0f, 1.0f);
     }
     else
     {
-        tmp9051 = normalize(-mul(float4(cardPosModel, 1.0f), modelViewMatrix).xyz);
+        VPick = normalize(-mul(float4(cardPosModel, 1.0f), modelViewMatrix).xyz);
     }
-    float3 V = tmp9051;
+    float3 V = VPick;
     float3 lit = 0.0f.xxx;
     float3 L = lightSourcePosition[0].xyz;
     if (dot(L, L) > 9.9999999392252902907785028219223e-09f)
     {
         L = normalize(L);
         float NdotL = dot(nView, L);
-        float param_20 = NdotL;
-        float param_21 = dot(nView, V);
-        float param_22 = dot(L, V);
-        float param_23 = 1.0f;
-        float param_24 = max(dot(V, normalize(L + V)), 1.1920928955078125e-07f);
-        float param_25 = 0.039999999105930328369140625f;
-        float diff = OrenNayarFull(param_20, param_21, param_22, param_23) * (1.0f - fresnelSchlick5(param_24, param_25));
+        float NdotLArg = NdotL;
+        float NdotVArg = dot(nView, V);
+        float LdotVArg = dot(L, V);
+        float roughnessArg = 1.0f;
+        float VdotHArg = max(dot(V, normalize(L + V)), 1.1920928955078125e-07f);
+        float F0Arg = 0.039999999105930328369140625f;
+        float diff = OrenNayarFull(NdotLArg, NdotVArg, LdotVArg, roughnessArg) * (1.0f - fresnelSchlick5(VdotHArg, F0Arg));
         lit = sqrt(max(lightSourceDiffuse[0].xyz, 0.0f.xxx)) * diff;
+        // lane BOUNCE1: the far card takes the near surfaces' sun, x the imagespace Sunlight Scale outdoors
         if ((cellOn && (!cellInterior)) && (cellSunScale > 0.0f))
         {
             lit *= sqrt(cellSunScale);
         }
     }
-    float tmp9137;
+    float aoPick;
     if (useBakedAo && hasMaskSheet)
     {
-        tmp9137 = mask.z;
+        aoPick = mask.z;
     }
     else
     {
-        tmp9137 = 1.0f;
+        aoPick = 1.0f;
     }
-    float ao = tmp9137;
+    // CLAUSE C25 (spec 293..295): the AO the bake measured from the height
+    // neighbourhood, multiplied into the AMBIENT term only -- never into the
+    // direct term, where it would double-count the shading the light already
+    // does. No material model is needed for this, which is why it is here and
+    // the gloss beside it is not.
+    float ao = aoPick;
     float3 ambient = (sqrt(max(lightSourceAmbient.xyz, 0.0f.xxx)) * 0.375f) * ao;
+    // AND THE TONEMAP, which this shader was the only one in the tree without.
+    // Verbatim `fo4_default.frag`'s curve, with `A.a` = toneMapScale and
+    // `D.a` = brightnessScale, which is what its vertex stage packs there.
     float3 lc = colour.xyz * (lit + ambient);
+    // lane PERFLOAD1 P2: outdoors with the weather's sun the card takes the near trees' inputs (fo4_default.frag,
+    // SUNCELL1): cellLit gets the weather's directional ambient (DALC, the hour's keys) x the baked AO alone, and adds
+    // the hour's sun itself (cellDirColor, Sunlight Scale in). The viewport sun and the flat NAM0 ambient above follow
+    // the viewport, not the hour: with them the card was lit twice and glowed at 3 AM outside the near square.
     if (((cellOn && (!cellInterior)) && cellHasDir) && (!cardLightRed))
     {
         float3 cardPosV = mul(float4(cardPosModel, 1.0f), modelViewMatrix).xyz;
-        float3 param_26 = nView;
-        float3 Nw = cellWorldDir(param_26);
-        float3 tmp9189;
+        float3 dirViewArg = nView;
+        float3 Nw = cellWorldDir(dirViewArg);
+        float3 AxPick;
         if (cellExtDalc)
         {
-            float3 param_27 = cardPosV;
-            float3 param_28 = Nw;
-            float3 param_29 = cellWorldPos(param_27);
-            tmp9189 = sqrt(max(cellAmbient(param_28, param_29), 0.0f.xxx));
+            float3 posViewArg6 = cardPosV;
+            float3 NArg2 = Nw;
+            float3 PArg2 = cellWorldPos(posViewArg6);
+            AxPick = sqrt(max(cellAmbient(NArg2, PArg2), 0.0f.xxx));
         }
         else
         {
-            tmp9189 = sqrt(max(lightSourceAmbient.xyz, 0.0f.xxx)) * 0.375f;
+            AxPick = sqrt(max(lightSourceAmbient.xyz, 0.0f.xxx)) * 0.375f;
         }
-        float3 Ax = tmp9189;
+        float3 Ax = AxPick;
         Ax *= ao;
-        bool tmp9213 = cellGiSky && false;
-        bool tmp9220;
-        if (tmp9213)
+        bool cond11 = cellGiSky && false;
+        bool cond10;
+        if (cond11)
         {
-            tmp9220 = (cellRed & 131072) == 0;
+            cond10 = (cellRed & 131072) == 0;
         }
         else
         {
-            tmp9220 = tmp9213;
+            cond10 = cond11;
         }
-        if (tmp9220)
+        if (cond10)
         {
-            float3 param_30 = cardPosV;
-            float3 param_31 = cellWorldPos(param_30);
-            float3 param_32 = Nw;
-            Ax *= sqrt(1.0f - cellGiSkyK(param_31, param_32));
+            float3 posViewArg5 = cardPosV;
+            float3 PArg = cellWorldPos(posViewArg5);
+            float3 NArg = Nw;
+            Ax *= sqrt(1.0f - cellGiSkyK(PArg, NArg));
         }
         cellExtAmb = Ax * Ax;
         lc = colour.xyz * Ax;
+        // lane DEBUGVIEW1 item 2: the clouds and the air cut the card's sun as the near trees'
         if (!cardSunRed)
         {
-            float3 param_33 = cardPosV;
-            cellDirVis = cardCloudT(param_33);
-            float3 param_34 = cardPosV;
-            float2 airTD = wwVolAirSunTD(param_34);
+            float3 posViewArg4 = cardPosV;
+            cellDirVis = cardCloudT(posViewArg4);
+            float3 posViewArg3 = cardPosV;
+            float2 airTD = wwVolAirSunTD(posViewArg3);
             cellDirVis *= airTD.x;
             cellAirDif = airTD.y;
         }
     }
+    // lane FARLOD1: the cell path, in fo4_default.frag's order -- the cell's lights on the sqrt-of-linear
+    // colour, the fog on its square, then the cell's imagespace (linear into the HDR frame) in place of
+    // the viewer's curve. Roughness 1, no specular and no cube: the card carries no gloss it shades.
     float3 cardPosView = mul(float4(cardPosModel, 1.0f), modelViewMatrix).xyz;
     if (cellOn)
     {
-        float3 param_35 = lc;
-        float3 param_36 = colour.xyz;
-        float3 param_37 = nView;
-        float3 param_38 = cardPosView;
-        float3 param_39 = V;
-        float param_40 = 0.0f;
-        float3 param_41 = 0.0f.xxx;
-        float param_42 = 1.0f;
-        float param_43 = 0.5f;
-        float3 param_44 = 0.0f.xxx;
-        float3 param_45 = 0.0f.xxx;
-        float3 tmp9288 = cellLit(param_35, param_36, param_37, param_38, param_39, param_40, param_41, param_42, param_43, param_44, param_45);
-        lc = tmp9288;
+        float3 colorArg = lc;
+        float3 albedoArg = colour.xyz;
+        float3 normalViewArg = nView;
+        float3 posViewArg2 = cardPosView;
+        float3 VviewArg = V;
+        float specMaskArg = 0.0f;
+        float3 specColArg = 0.0f.xxx;
+        float alphaRArg = 1.0f;
+        float kSmithArg = 0.5f;
+        float3 emissiveArg = 0.0f.xxx;
+        float3 cubeKArg = 0.0f.xxx;
+        float3 cellLitRet = cellLit(colorArg, albedoArg, normalViewArg, posViewArg2, VviewArg, specMaskArg, specColArg, alphaRArg, kSmithArg, emissiveArg, cubeKArg);
+        lc = cellLitRet;
     }
-    bool tmp9294;
+    bool cond9;
+    // lane SKYA: the sky's aerial perspective with the fog off too (the far cards)
     if (!fogOn)
     {
-        tmp9294 = wwApOn();
+        cond9 = wwApOn();
     }
     else
     {
-        tmp9294 = fogOn;
+        cond9 = fogOn;
     }
-    if (tmp9294)
+    if (cond9)
     {
-        float3 param_46 = lc * lc;
-        float3 param_47 = cardPosView;
-        float3 tmp9303 = wwFog(param_46, param_47);
-        lc = sqrt(max(tmp9303, 0.0f.xxx));
+        float3 preFogArg = lc * lc;
+        float3 posViewArg = cardPosView;
+        float3 wwFogRet = wwFog(preFogArg, posViewArg);
+        lc = sqrt(max(wwFogRet, 0.0f.xxx));
     }
     if (cellOn && cellIsOn)
     {
-        float3 tmp9314;
+        float3 lcPick;
         if (cellIsLinear)
         {
-            tmp9314 = lc * lc;
+            lcPick = lc * lc;
         }
         else
         {
-            float3 param_48 = lc;
-            tmp9314 = cellImageSpace(param_48);
+            float3 sqrtColorArg = lc;
+            lcPick = cellImageSpace(sqrtColorArg);
         }
-        lc = tmp9314;
+        lc = lcPick;
     }
     else
     {
@@ -1168,20 +1345,21 @@ void frag_main()
         z = (((z * ((z * 0.1500000059604644775390625f) + 0.0500000007450580596923828125f.xxx)) + 0.0040000001899898052215576171875f.xxx) / ((z * ((z * 0.1500000059604644775390625f) + 0.5f.xxx)) + 0.0599999986588954925537109375f.xxx)) - 0.066666670143604278564453125f.xxx;
         lc = sqrt(z / max(toneMapScale * 0.933333337306976318359375f, 9.9999999747524270787835121154785e-07f).xxx);
     }
+    // lane PERFLOAD1 P8: the level's colour, shaded by its luminance
     if (((cardLodTint.x + cardLodTint.y) + cardLodTint.z) > 0.0f)
     {
         lc = cardLodTint * (0.25f + (0.75f * clamp(dot(lc, float3(0.2125999927520751953125f, 0.715200006961822509765625f, 0.072200000286102294921875f)), 0.0f, 1.0f)));
-        bool tmp9389 = cardLodStripe > 0.5f;
-        bool tmp9404;
-        if (tmp9389)
+        bool cond8 = cardLodStripe > 0.5f;
+        bool cond7;
+        if (cond8)
         {
-            tmp9404 = frac(((gl_FragCoord.x + gl_FragCoord.y) * cardLodStripe) / 32.0f) < 0.3499999940395355224609375f;
+            cond7 = frac(((gl_FragCoord.x + gl_FragCoord.y) * cardLodStripe) / 32.0f) < 0.3499999940395355224609375f;
         }
         else
         {
-            tmp9404 = tmp9389;
+            cond7 = cond8;
         }
-        if (tmp9404)
+        if (cond7)
         {
             lc *= 0.4000000059604644775390625f;
         }

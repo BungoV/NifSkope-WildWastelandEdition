@@ -4,9 +4,9 @@
 // named in notes/vkcompute1/hlsl_plan.md. Not wired: nothing loads this file.
 // profile: ps_6_0
 #include "ReflectionsBindingsVk.hlsli"
-static const float tmp563[16] = { 0.0f, 0.5f, 0.125f, 0.625f, 0.75f, 0.2199999988079071044921875f, 0.875f, 0.375f, 0.1875f, 0.6875f, 0.0625f, 0.5625f, 0.9375f, 0.4375f, 0.8125f, 0.3125f };
-static const float tmp1107[5] = { -3.2942149639129638671875f, -1.40733301639556884765625f, 0.0f, 1.40733301639556884765625f, 3.2942149639129638671875f };
-static const float tmp1120[5] = { 0.093912996351718902587890625f, 0.3040049970149993896484375f, 0.2041639983654022216796875f, 0.3040049970149993896484375f, 0.093912996351718902587890625f };
+static const float kDither[16] = { 0.0f, 0.5f, 0.125f, 0.625f, 0.75f, 0.2199999988079071044921875f, 0.875f, 0.375f, 0.1875f, 0.6875f, 0.0625f, 0.5625f, 0.9375f, 0.4375f, 0.8125f, 0.3125f };
+static const float table5[5] = { -3.2942149639129638671875f, -1.40733301639556884765625f, 0.0f, 1.40733301639556884765625f, 3.2942149639129638671875f };
+static const float table52[5] = { 0.093912996351718902587890625f, 0.3040049970149993896484375f, 0.2041639983654022216796875f, 0.3040049970149993896484375f, 0.093912996351718902587890625f };
 
 cbuffer LooseUniforms : register(b31, space0)
 {
@@ -60,79 +60,79 @@ struct SPIRV_Cross_Output
 
 bool rayOut(float3 p)
 {
-    bool tmp122 = p.x <= 0.0f;
-    bool tmp130;
-    if (!tmp122)
+    bool cond4 = p.x <= 0.0f;
+    bool cond3;
+    if (!cond4)
     {
-        tmp130 = p.x >= 1.0f;
+        cond3 = p.x >= 1.0f;
     }
     else
     {
-        tmp130 = tmp122;
+        cond3 = cond4;
     }
-    bool tmp137;
-    if (!tmp130)
+    bool cond2;
+    if (!cond3)
     {
-        tmp137 = p.y <= 0.0f;
+        cond2 = p.y <= 0.0f;
     }
     else
     {
-        tmp137 = tmp130;
+        cond2 = cond3;
     }
-    bool tmp144;
-    if (!tmp137)
+    bool cond;
+    if (!cond2)
     {
-        tmp144 = p.y >= 1.0f;
+        cond = p.y >= 1.0f;
     }
     else
     {
-        tmp144 = tmp137;
+        cond = cond2;
     }
-    bool tmp158;
-    if (!tmp144)
+    bool rayOutRet;
+    if (!cond)
     {
-        tmp158 = (1.0f / p.z) >= ssrClip.y;
+        rayOutRet = (1.0f / p.z) >= ssrClip.y;
     }
     else
     {
-        tmp158 = tmp144;
+        rayOutRet = cond;
     }
-    return tmp158;
+    return rayOutRet;
 }
 
 // the game's load: outside the mip reads 0
 float zLoad(int m, float2 cell)
 {
     int2 t = int2(cell);
-    bool tmp33 = t.x < 0;
-    bool tmp41;
-    if (!tmp33)
+    bool cond8 = t.x < 0;
+    bool cond7;
+    if (!cond8)
     {
-        tmp41 = t.y < 0;
+        cond7 = t.y < 0;
     }
     else
     {
-        tmp41 = tmp33;
+        cond7 = cond8;
     }
-    bool tmp56;
-    if (!tmp41)
+    bool cond6;
+    if (!cond7)
     {
-        tmp56 = t.x >= mipSize[m].x;
+        cond6 = t.x >= mipSize[m].x;
     }
     else
     {
-        tmp56 = tmp41;
+        cond6 = cond7;
     }
-    bool tmp66;
-    if (!tmp56)
+    bool cond5;
+    if (!cond6)
     {
-        tmp66 = t.y >= mipSize[m].y;
+        cond5 = t.y >= mipSize[m].y;
     }
     else
     {
-        tmp66 = tmp56;
+        cond5 = cond6;
     }
-    if (tmp66)
+    if (cond5)
     {
         return 0.0f;
     }
@@ -163,6 +163,7 @@ void frag_main()
     }
     if (ssrStage == 5)
     {
+        // where this pixel's surface was in it (the background: its direction)
         int2 t = int2(gl_FragCoord.xy);
         float z = gbuf.Load(int3(t, 0)).w;
         float2 u = (float2(t) + 0.5f.xx) / float2(fullSize);
@@ -177,21 +178,22 @@ void frag_main()
     {
         int2 t_1 = min(((((int2(2, 2) * q) + int2(1, 1)) * fullSize) / (int2(2, 2) * halfSize)), (fullSize - int2(1, 1)));
         t_1.y = (fullSize.y - 1) - t_1.y;
-        float4 tmp322;
+        float4 wrPick;
         if (haveWaterRay)
         {
-            tmp322 = waterRay.Load(int3(t_1, 0));
+            wrPick = waterRay.Load(int3(t_1, 0));
         }
         else
         {
-            tmp322 = 0.0f.xxxx;
+            wrPick = 0.0f.xxxx;
         }
-        float4 wr = tmp322;
+        float4 wr = wrPick;
         float z_1;
         float3 P_1;
         float3 R;
         if (wr.w > 0.0f)
         {
+            // the water lies in front here; its pass already gated and wrote the ray
             if (dot(wr.xyz, wr.xyz) == 0.0f)
             {
                 return;
@@ -202,17 +204,17 @@ void frag_main()
         }
         else
         {
-            bool tmp377 = !opaqueRays;
-            bool tmp395;
-            if (!tmp377)
+            bool cond16 = !opaqueRays;
+            bool cond15;
+            if (!cond16)
             {
-                tmp395 = ((scene.Load(int3(t_1, 0)).w * ssrK.w) - 0.00999999977648258209228515625f) < 0.0f;
+                cond15 = ((scene.Load(int3(t_1, 0)).w * ssrK.w) - 0.00999999977648258209228515625f) < 0.0f;
             }
             else
             {
-                tmp395 = tmp377;
+                cond15 = cond16;
             }
-            if (tmp395)
+            if (cond15)
             {
                 return;
             }
@@ -226,6 +228,7 @@ void frag_main()
             }
             float3 Nw = mul(g.xyz, viewToWorld);
             Nw.z *= ssrK.z;
+            // back into the view
             float3 N = mul(viewToWorld, normalize(Nw));
             R = reflect(-V, N);
             if (!((-R.z) > ssrK.y))
@@ -236,6 +239,7 @@ void frag_main()
         float3 Q = P_1 + (R * 1000.0f);
         float zq = -Q.z;
         float2 uvq = float2(0.5f + (((0.5f * proj.x) * Q.x) / zq), 0.5f - (((0.5f * proj.y) * Q.y) / zq));
+        // the screen line is straight in (u, v, 1 / depth): run it back to depth = near
         float s = ((1.0f / ssrClip.x) - (1.0f / z_1)) / ((1.0f / zq) - (1.0f / z_1));
         fragColor = float4(uv + ((uvq - uv) * s), z_1, 1.0f);
         return;
@@ -248,7 +252,7 @@ void frag_main()
         {
             return;
         }
-        float dj = tmp563[(q.y & 3) + (4 * (q.x & 3))];
+        float dj = kDither[(q.y & 3) + (4 * (q.x & 3))];
         float3 A = float3(ray.xy, (1.0f / ssrClip.x) + ((dj - 0.5f) * 0.0040000001899898052215576171875f));
         float3 D = float3(uv, 1.0f / z0) - A;
         float2 S = uv + ((D.xy * dj) * 0.00200000009499490261077880859375f);
@@ -257,6 +261,7 @@ void frag_main()
         int level = 4;
         float2 s01 = float2(bool2(D.xy.x >= 0.0f.xx.x, D.xy.y >= 0.0f.xx.y));
         float2 sgn = (s01 * 2.0f) - 1.0f.xx;
+        // one cell on: the nearer of the cell's two far edges
         float2 tc = (((cell + s01) / G) - A.xy) / D.xy;
         bool xfirst = tc.y >= tc.x;
         float2 stepv = sgn * float2(float(xfirst), xfirst ? 0.0f : 1.0f);
@@ -269,61 +274,61 @@ void frag_main()
         float d = 0.0f;
         for (int n = 1; n <= 32; n++)
         {
-            bool tmp695 = alive && (level >= 1);
-            bool tmp702;
-            if (tmp695)
+            bool cond14 = alive && (level >= 1);
+            bool alivePick;
+            if (cond14)
             {
-                float3 param = p;
-                tmp702 = !rayOut(param);
+                float3 pArg2 = p;
+                alivePick = !rayOut(pArg2);
             }
             else
             {
-                tmp702 = tmp695;
+                alivePick = cond14;
             }
-            alive = tmp702;
+            alive = alivePick;
             if (!alive)
             {
                 break;
             }
-            int param_1 = level;
-            float2 param_2 = cell;
-            d = zLoad(param_1, param_2);
+            int mArg = level;
+            float2 cellArg = cell;
+            d = zLoad(mArg, cellArg);
             float rz = 1.0f / p.z;
-            bool tmp719 = level == 1;
-            bool tmp726;
-            if (tmp719)
+            bool cond13 = level == 1;
+            bool isL1Pick;
+            if (cond13)
             {
-                tmp726 = (ssrRed & 2) == 0;
+                isL1Pick = (ssrRed & 2) == 0;
             }
             else
             {
-                tmp726 = tmp719;
+                isL1Pick = cond13;
             }
-            bool isL1 = tmp726;
-            bool tmp741;
+            bool isL1 = isL1Pick;
+            bool refPick;
             if (!refused)
             {
-                bool tmp740;
+                bool refPick2;
                 if (isL1)
                 {
-                    tmp740 = (rz - d) >= 50.0f;
+                    refPick2 = (rz - d) >= 50.0f;
                 }
                 else
                 {
-                    tmp740 = isL1;
+                    refPick2 = isL1;
                 }
-                tmp741 = tmp740;
+                refPick = refPick2;
             }
             else
             {
-                tmp741 = refused;
+                refPick = refused;
             }
-            bool ref = tmp741;
+            bool ref = refPick;
             if ((d < rz) && (!ref))
             {
                 level--;
-                float2 tmp760 = p.xy - ((cell + 0.5f.xx) / G);
-                float2 h = float2(bool2(tmp760.x >= 0.0f.xx.x, tmp760.y >= 0.0f.xx.y));
+                float2 hPart = p.xy - ((cell + 0.5f.xx) / G);
+                float2 h = float2(bool2(hPart.x >= 0.0f.xx.x, hPart.y >= 0.0f.xx.y));
                 cell = (cell * 2.0f) + h;
                 G *= 2.0f;
                 refused = false;
@@ -336,25 +341,25 @@ void frag_main()
                 cell += stepv;
                 p = A + (D * min(tc.x, tc.y));
                 float rz2 = 1.0f / p.z;
-                bool tmp821;
+                bool refusedPick;
                 if (!ref)
                 {
-                    bool tmp820;
+                    bool refusedPick2;
                     if (isL1)
                     {
-                        tmp820 = (rz2 - d) >= 50.0f;
+                        refusedPick2 = (rz2 - d) >= 50.0f;
                     }
                     else
                     {
-                        tmp820 = isL1;
+                        refusedPick2 = isL1;
                     }
-                    tmp821 = tmp820;
+                    refusedPick = refusedPick2;
                 }
                 else
                 {
-                    tmp821 = ref;
+                    refusedPick = ref;
                 }
-                refused = tmp821;
+                refused = refusedPick;
                 if (!refused)
                 {
                     if (d < rz2)
@@ -377,9 +382,9 @@ void frag_main()
             }
             count = n;
         }
-        float3 param_3 = p;
-        bool wwh0 = (rayOut(param_3) || (count == 32));
-        if (wwh0 || refused)
+        float3 pArg = p;
+        bool wwh0 = (rayOut(pArg) || (count == 32));
+        if (or(wwh0, refused))   // HLSLFIX2 orfix.py: no short-circuit branch (NV took the wrong side)
         {
             return;
         }
@@ -390,6 +395,7 @@ void frag_main()
         {
             c = 1.0f;
         }
+        // lane PERF3: the hit in the previous frame's view; off its screen or behind it: no hit
         if (ssrPrev)
         {
             float zh = 1.0f / p.z;
@@ -401,35 +407,35 @@ void frag_main()
                 return;
             }
             float2 up_1 = float2(0.5f + (((0.5f * ssrPrevProj.x) * Hp.x) / zp_1), 0.5f - (((0.5f * ssrPrevProj.y) * Hp.y) / zp_1));
-            bool tmp1001 = up_1.x <= 0.0f;
-            bool tmp1008;
-            if (!tmp1001)
+            bool cond12 = up_1.x <= 0.0f;
+            bool cond11;
+            if (!cond12)
             {
-                tmp1008 = up_1.x >= 1.0f;
+                cond11 = up_1.x >= 1.0f;
             }
             else
             {
-                tmp1008 = tmp1001;
+                cond11 = cond12;
             }
-            bool tmp1015;
-            if (!tmp1008)
+            bool cond10;
+            if (!cond11)
             {
-                tmp1015 = up_1.y <= 0.0f;
+                cond10 = up_1.y <= 0.0f;
             }
             else
             {
-                tmp1015 = tmp1008;
+                cond10 = cond11;
             }
-            bool tmp1022;
-            if (!tmp1015)
+            bool cond9;
+            if (!cond10)
             {
-                tmp1022 = up_1.y >= 1.0f;
+                cond9 = up_1.y >= 1.0f;
             }
             else
             {
-                tmp1022 = tmp1015;
+                cond9 = cond10;
             }
-            if (tmp1022)
+            if (cond9)
             {
                 return;
             }
@@ -439,27 +445,27 @@ void frag_main()
         fragColor = float4(clamp(scene.SampleLevel(_scene_sampler, float2(p.x, 1.0f - p.y), 0.0f).xyz, 0.0f.xxx, 1.0f.xxx), c * c);
         return;
     }
-    float2 tmp1069;
+    float2 dirPick;
     if (ssrStage == 3)
     {
-        tmp1069 = float2(1.0f / float(halfSize.x), 0.0f);
+        dirPick = float2(1.0f / float(halfSize.x), 0.0f);
     }
     else
     {
-        tmp1069 = float2(0.0f, 1.0f / float(halfSize.y));
+        dirPick = float2(0.0f, 1.0f / float(halfSize.y));
     }
-    float2 dir = tmp1069;
+    float2 dir = dirPick;
     float lost = 0.0f;
     float present = 0.0f;
     float a = 0.0f;
     float4 tap[5];
     for (int i = 0; i < 5; i++)
     {
-        tap[i] = src.SampleLevel(_src_sampler, uv + (dir * tmp1107[i]), 0.0f);
-        a += (tmp1120[i] * tap[i].w);
+        tap[i] = src.SampleLevel(_src_sampler, uv + (dir * table5[i]), 0.0f);
+        a += (table52[i] * tap[i].w);
         if (tap[i].w < 0.00999999977648258209228515625f)
         {
-            lost += tmp1120[i];
+            lost += table52[i];
         }
         else
         {
@@ -474,7 +480,7 @@ void frag_main()
         {
             if (!(tap[i_1].w < 0.00999999977648258209228515625f))
             {
-                rgb += (tap[i_1].xyz * (tmp1120[i_1] + e));
+                rgb += (tap[i_1].xyz * (table52[i_1] + e));
             }
         }
     }

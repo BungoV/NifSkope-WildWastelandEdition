@@ -86,19 +86,27 @@ float4 getTexture(int n)
     float2 offs = texCoords[textures[n].coordSet] - textures[n].uvCenter;
     offs = float2((offs.x * r_c) - (offs.y * r_s), (offs.x * r_s) + (offs.y * r_c));
     offs = ((offs * textures[n].uvScale) + textures[n].uvCenter) + textures[n].uvOffset;
-    int tmp101 = textures[n].textureUnit - 1;
-    return textureUnits[tmp101].Sample(_textureUnits_sampler[tmp101], offs);
+    int getTextureRet = textures[n].textureUnit - 1;
+    return textureUnits[getTextureRet].Sample(_textureUnits_sampler[getTextureRet], offs);
 }
 
 void frag_main()
 {
     float2 uv = texCoords[0];
-    int param = 0;
-    float4 baseMap = getTexture(param);
+    int nArg = 0;
+    float4 baseMap = getTexture(nArg);
+    // lane FXPARITY1: before the falloff
     float4 baseMap0 = baseMap;
+    // palette lookups index the untouched base green channel
     float baseG = baseMap.y;
+    // sprite coverage: how "present" this texel is. Alpha for masked sprites,
+    // luminance for additively-keyed glow sprites (black == empty). Effect
+    // recolour / reflection is multiplied by this so it can only ever appear on
+    // the sprite body, never in the surround.
     float baseLum = max(baseMap.x, max(baseMap.y, baseMap.z));
     float coverage = clamp(max(baseMap.w, baseLum), 0.0f, 1.0f);
+    // billboard: view-space tangent frame is identity, so the sampled
+    // tangent-space normal is already the view-space normal
     float3 V = normalize(ViewDir);
     float3 normal = float3(0.0f, 0.0f, 1.0f);
     if (hasNormalMap)
@@ -107,18 +115,21 @@ void frag_main()
         n.z = sqrt(max(1.0f - dot(n.xy, n.xy), 0.0f));
         normal = normalize(n);
     }
+    // recolour from the palette only when it actually resolved and was bound
     bool doGreyColor = greyscaleColor && hasGreyscaleMap;
     float4 baseColor = glowColor;
     if (!doGreyColor)
     {
-        float4 tmp193 = baseColor;
-        float3 tmp195 = tmp193.xyz * glowMult;
-        baseColor.x = tmp195.x;
-        baseColor.y = tmp195.y;
-        baseColor.z = tmp195.z;
+        float4 baseColorPart2 = baseColor;
+        float3 baseColorPart = baseColorPart2.xyz * glowMult;
+        baseColor.x = baseColorPart.x;
+        baseColor.y = baseColorPart.y;
+        baseColor.z = baseColorPart.z;
     }
+    // view-angle falloff: soft edges / apparent volume. Only ever REDUCES the
+    // mask (alpha) or dims the body (rgb) - it can never make a sprite opaque.
     float falloff = 1.0f;
-    if (useFalloff || hasRGBFalloff)
+    if (or(useFalloff, hasRGBFalloff))   // HLSLFIX2 orfix.py: no short-circuit branch (NV took the wrong side)
     {
         falloff = smoothstep(falloffParams.x, falloffParams.y, abs(dot(normal, V)));
         falloff = lerp(max(falloffParams.z, 0.0f), min(falloffParams.w, 1.0f), falloff);
@@ -128,70 +139,75 @@ void frag_main()
         }
         if (hasRGBFalloff)
         {
-            float4 tmp240 = baseMap;
-            float3 tmp242 = tmp240.xyz * falloff;
-            baseMap.x = tmp242.x;
-            baseMap.y = tmp242.y;
-            baseMap.z = tmp242.z;
+            float4 baseMapPart2 = baseMap;
+            float3 baseMapPart = baseMapPart2.xyz * falloff;
+            baseMap.x = baseMapPart.x;
+            baseMap.y = baseMapPart.y;
+            baseMap.z = baseMapPart.z;
         }
     }
     float4 color = baseMap * C;
-    float4 tmp257 = color;
-    float3 tmp259 = tmp257.xyz * baseColor.xyz;
-    color.x = tmp259.x;
-    color.y = tmp259.y;
-    color.z = tmp259.z;
+    float4 colorPart7 = color;
+    float3 colorPart6 = colorPart7.xyz * baseColor.xyz;
+    color.x = colorPart6.x;
+    color.y = colorPart6.y;
+    color.z = colorPart6.z;
+    // greyscale-to-palette colour gradient (rgb only), gated by coverage so the
+    // palette-indexed surround stays dark instead of painting the void
     if (doGreyColor)
     {
         float3 pal = GreyscaleMap.SampleLevel(_GreyscaleMap_sampler, float2(baseG, (baseColor.x * C.x) * falloff), 0.0f).xyz;
-        float3 tmp289 = (pal * coverage) * C.xyz;
-        color.x = tmp289.x;
-        color.y = tmp289.y;
-        color.z = tmp289.z;
+        float3 colorPart5 = (pal * coverage) * C.xyz;
+        color.x = colorPart5.x;
+        color.y = colorPart5.y;
+        color.z = colorPart5.z;
     }
+    // environment reflection, also masked by coverage so it shines on the sprite
+    // body only
     if (hasCubeMap)
     {
         float3 refl = mul(reflect(-V, normal), envMapRotation);
         float3 cube = CubeMap.Sample(_CubeMap_sampler, refl).xyz;
-        float4 tmp334 = color;
-        float3 tmp336 = tmp334.xyz + (((cube * envReflection) * falloff) * coverage);
-        color.x = tmp336.x;
-        color.y = tmp336.y;
-        color.z = tmp336.z;
+        float4 colorPart4 = color;
+        float3 colorPart3 = colorPart4.xyz + (((cube * envReflection) * falloff) * coverage);
+        color.x = colorPart3.x;
+        color.y = colorPart3.y;
+        color.z = colorPart3.z;
     }
     if ((pfxGame & 1) != 0)
     {
+        // lane FXPARITY1: the game's effect law for a particle, replacing the viewer's above
         float ca = C.w;
         float fade = 1.0f;
         float4 bc = glowColor;
         if (!greyscaleColor)
         {
-            float4 tmp360 = bc;
-            float3 tmp362 = tmp360.xyz * glowMult;
-            bc.x = tmp362.x;
-            bc.y = tmp362.y;
-            bc.z = tmp362.z;
+            float4 bcPart2 = bc;
+            float3 bcPart = bcPart2.xyz * glowMult;
+            bc.x = bcPart.x;
+            bc.y = bcPart.y;
+            bc.z = bcPart.z;
         }
-        float tmp379;
+        float colorPick;
         if (greyscaleAlpha)
         {
-            tmp379 = 1.0f;
+            colorPick = 1.0f;
         }
         else
         {
-            tmp379 = baseMap0.w;
+            colorPick = baseMap0.w;
         }
-        color = float4((baseMap0.xyz * C.xyz) * bc.xyz, ((tmp379 * ca) * bc.w) * bc.w);
+        color = float4((baseMap0.xyz * C.xyz) * bc.xyz, ((colorPick * ca) * bc.w) * bc.w);
         if (!greyscaleAlpha)
         {
             color.w *= fade;
         }
         if (doGreyColor)
         {
-            float3 tmp421 = GreyscaleMap.SampleLevel(_GreyscaleMap_sampler, float2(baseG, (bc.x * C.x) * fade), 0.0f).xyz;
-            color.x = tmp421.x;
-            color.y = tmp421.y;
-            color.z = tmp421.z;
+            float3 GreyscaleMapTexel = GreyscaleMap.SampleLevel(_GreyscaleMap_sampler, float2(baseG, (bc.x * C.x) * fade), 0.0f).xyz;
+            color.x = GreyscaleMapTexel.x;
+            color.y = GreyscaleMapTexel.y;
+            color.z = GreyscaleMapTexel.z;
         }
         if (greyscaleAlpha && hasGreyscaleMap)
         {
@@ -199,11 +215,11 @@ void frag_main()
         }
         if (hasCubeMap)
         {
-            float4 tmp459 = color;
-            float3 tmp461 = tmp459.xyz + (CubeMap.Sample(_CubeMap_sampler, mul(reflect(-V, normal), envMapRotation)).xyz * envReflection);
-            color.x = tmp461.x;
-            color.y = tmp461.y;
-            color.z = tmp461.z;
+            float4 colorPart2 = color;
+            float3 colorPart = colorPart2.xyz + (CubeMap.Sample(_CubeMap_sampler, mul(reflect(-V, normal), envMapRotation)).xyz * envReflection);
+            color.x = colorPart.x;
+            color.y = colorPart.y;
+            color.z = colorPart.z;
         }
     }
     fragColor = color;

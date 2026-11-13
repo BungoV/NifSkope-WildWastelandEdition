@@ -44,6 +44,7 @@ void frag_main()
     float4 t;
     if (pcFar != 0)
     {
+        // a far dot: the cell's mean (gCol) over a soft round footprint whose mean over the quad is 1
         t = float4(1.0f, 1.0f, 1.0f, exp((-2.5f) * dot(gQ, gQ)) / 0.298500001430511474609375f);
     }
     else
@@ -51,8 +52,8 @@ void frag_main()
         if (pcHasTex)
         {
             float tmp = pcTex.CalculateLevelOfDetail(_pcTex_sampler, gUv);
-            float2 tmp47 = tmp.xx;
-            float lod = min(tmp47.x, pcAtlas.z);
+            float2 lodPart = tmp.xx;
+            float lod = min(lodPart.x, pcAtlas.z);
             t = pcTex.SampleLevel(_pcTex_sampler, clamp(gUv, gBox.xy, gBox.zw), lod);
         }
         else
@@ -65,6 +66,7 @@ void frag_main()
     {
         discard;
     }
+    // linear: the sRGB texture decodes on read
     float3 alb = t.xyz * gCol.xyz;
     fragColor = float4(max((alb * gA) + gB, 0.0f.xxx), a);
 }

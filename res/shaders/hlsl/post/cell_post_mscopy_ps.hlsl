@@ -29,64 +29,65 @@ void frag_main()
     int2 p = int2(gl_FragCoord.xy);
     float3 b = srcTex.Load(int3(p, 0)).xyz;
     float3 r = refTex.Load(int3(p, 0)).xyz;
-    bool tmp47 = b.x >= r.x;
-    bool tmp55;
-    if (!tmp47)
+    bool cond6 = b.x >= r.x;
+    bool cond5;
+    if (!cond6)
     {
-        tmp55 = r.x <= 0.0f;
+        cond5 = r.x <= 0.0f;
     }
     else
     {
-        tmp55 = tmp47;
+        cond5 = cond6;
     }
-    float tmp56;
-    if (tmp55)
+    float wPick3;
+    if (cond5)
     {
-        tmp56 = 1.0f;
+        wPick3 = 1.0f;
     }
     else
     {
-        tmp56 = b.x / r.x;
+        wPick3 = b.x / r.x;
     }
-    bool tmp72 = b.y >= r.y;
-    bool tmp79;
-    if (!tmp72)
+    bool cond4 = b.y >= r.y;
+    bool cond3;
+    if (!cond4)
     {
-        tmp79 = r.y <= 0.0f;
+        cond3 = r.y <= 0.0f;
     }
     else
     {
-        tmp79 = tmp72;
+        cond3 = cond4;
     }
-    float tmp80;
-    if (tmp79)
+    float wPick2;
+    if (cond3)
     {
-        tmp80 = 1.0f;
+        wPick2 = 1.0f;
     }
     else
     {
-        tmp80 = b.y / r.y;
+        wPick2 = b.y / r.y;
     }
-    bool tmp95 = b.z >= r.z;
-    bool tmp102;
-    if (!tmp95)
+    bool cond2 = b.z >= r.z;
+    bool cond;
+    if (!cond2)
     {
-        tmp102 = r.z <= 0.0f;
+        cond = r.z <= 0.0f;
     }
     else
     {
-        tmp102 = tmp95;
+        cond = cond2;
     }
-    float tmp103;
-    if (tmp102)
+    float wPick;
+    if (cond)
     {
-        tmp103 = 1.0f;
+        wPick = 1.0f;
     }
     else
     {
-        tmp103 = b.z / r.z;
+        wPick = b.z / r.z;
     }
-    float3 w = float3(tmp56, tmp80, tmp103);
+    // B >= R takes w = 1 by a compare, not B / R: a GPU's divide by itself is not always exactly 1
+    float3 w = float3(wPick3, wPick2, wPick);
     addOut = float4(b - (w * r), 0.0f);
     scaleOut = float4(w, 0.0f);
 }

@@ -238,55 +238,55 @@ float3 bloomSanitize(float3 c)
     uint3 bits = asuint(c);
     uint3 e = bits & uint3(2139095040u, 2139095040u, 2139095040u);
     uint3 m = bits & uint3(8388607u, 8388607u, 8388607u);
-    bool tmp677 = e.x == 2139095040u;
-    bool tmp683;
-    if (tmp677)
+    bool cond6 = e.x == 2139095040u;
+    bool cond5;
+    if (cond6)
     {
-        tmp683 = m.x != 0u;
+        cond5 = m.x != 0u;
     }
     else
     {
-        tmp683 = tmp677;
+        cond5 = cond6;
     }
-    bool tmp696;
-    if (!tmp683)
+    bool cond4;
+    if (!cond5)
     {
-        bool tmp689 = e.y == 2139095040u;
-        bool tmp695;
-        if (tmp689)
+        bool cond3 = e.y == 2139095040u;
+        bool condPick2;
+        if (cond3)
         {
-            tmp695 = m.y != 0u;
+            condPick2 = m.y != 0u;
         }
         else
         {
-            tmp695 = tmp689;
+            condPick2 = cond3;
         }
-        tmp696 = tmp695;
+        cond4 = condPick2;
     }
     else
     {
-        tmp696 = tmp683;
+        cond4 = cond5;
     }
-    bool tmp709;
-    if (!tmp696)
+    bool cond2;
+    if (!cond4)
     {
-        bool tmp702 = e.z == 2139095040u;
-        bool tmp708;
-        if (tmp702)
+        bool cond = e.z == 2139095040u;
+        bool condPick;
+        if (cond)
         {
-            tmp708 = m.z != 0u;
+            condPick = m.z != 0u;
         }
         else
         {
-            tmp708 = tmp702;
+            condPick = cond;
         }
-        tmp709 = tmp708;
+        cond2 = condPick;
     }
     else
     {
-        tmp709 = tmp696;
+        cond2 = cond4;
     }
-    if (tmp709)
+    if (cond2)
     {
         return 0.0f.xxx;
     }
@@ -298,24 +298,24 @@ float3 bloomSanitize(float3 c)
 float3 bloomTent(Texture2D<float4> m, SamplerState _m_sampler, float2 uv, float2 texel, float radiusPixels)
 {
     float2 o = texel * max(radiusPixels, 0.0f);
-    float3 param = m.SampleLevel(_m_sampler, uv, 0.0f).xyz;
-    float3 c = bloomSanitize(param) * 4.0f;
-    float3 param_1 = m.SampleLevel(_m_sampler, uv + float2(-o.x, 0.0f), 0.0f).xyz;
-    c += (bloomSanitize(param_1) * 2.0f);
-    float3 param_2 = m.SampleLevel(_m_sampler, uv + float2(o.x, 0.0f), 0.0f).xyz;
-    c += (bloomSanitize(param_2) * 2.0f);
-    float3 param_3 = m.SampleLevel(_m_sampler, uv + float2(0.0f, -o.y), 0.0f).xyz;
-    c += (bloomSanitize(param_3) * 2.0f);
-    float3 param_4 = m.SampleLevel(_m_sampler, uv + float2(0.0f, o.y), 0.0f).xyz;
-    c += (bloomSanitize(param_4) * 2.0f);
-    float3 param_5 = m.SampleLevel(_m_sampler, uv + float2(-o.x, -o.y), 0.0f).xyz;
-    c += bloomSanitize(param_5);
-    float3 param_6 = m.SampleLevel(_m_sampler, uv + float2(o.x, -o.y), 0.0f).xyz;
-    c += bloomSanitize(param_6);
-    float3 param_7 = m.SampleLevel(_m_sampler, uv + float2(-o.x, o.y), 0.0f).xyz;
-    c += bloomSanitize(param_7);
-    float3 param_8 = m.SampleLevel(_m_sampler, uv + float2(o.x, o.y), 0.0f).xyz;
-    c += bloomSanitize(param_8);
+    float3 cArg9 = m.SampleLevel(_m_sampler, uv, 0.0f).xyz;
+    float3 c = bloomSanitize(cArg9) * 4.0f;
+    float3 cArg8 = m.SampleLevel(_m_sampler, uv + float2(-o.x, 0.0f), 0.0f).xyz;
+    c += (bloomSanitize(cArg8) * 2.0f);
+    float3 cArg7 = m.SampleLevel(_m_sampler, uv + float2(o.x, 0.0f), 0.0f).xyz;
+    c += (bloomSanitize(cArg7) * 2.0f);
+    float3 cArg6 = m.SampleLevel(_m_sampler, uv + float2(0.0f, -o.y), 0.0f).xyz;
+    c += (bloomSanitize(cArg6) * 2.0f);
+    float3 cArg5 = m.SampleLevel(_m_sampler, uv + float2(0.0f, o.y), 0.0f).xyz;
+    c += (bloomSanitize(cArg5) * 2.0f);
+    float3 cArg4 = m.SampleLevel(_m_sampler, uv + float2(-o.x, -o.y), 0.0f).xyz;
+    c += bloomSanitize(cArg4);
+    float3 cArg3 = m.SampleLevel(_m_sampler, uv + float2(o.x, -o.y), 0.0f).xyz;
+    c += bloomSanitize(cArg3);
+    float3 cArg2 = m.SampleLevel(_m_sampler, uv + float2(-o.x, o.y), 0.0f).xyz;
+    c += bloomSanitize(cArg2);
+    float3 cArg = m.SampleLevel(_m_sampler, uv + float2(o.x, o.y), 0.0f).xyz;
+    c += bloomSanitize(cArg);
     return c * 0.0625f;
 }
 
@@ -325,32 +325,33 @@ float3 bloomTentDispersed(Texture2D<float4> m, SamplerState _m_sampler, float2 u
     float2 texel = 1.0f.xx / float2(max(int2(spvTextureSize(m, uint(0), dummy_parameter)), int2(1, 1)));
     float2 radial = uv - 0.5f.xx;
     float len = length(radial);
-    float2 tmp880;
+    float2 dPick;
     if (len > 9.9999997473787516355514526367188e-06f)
     {
-        tmp880 = ((radial / len.xx) * texel) * max(dispersion, 0.0f);
+        dPick = ((radial / len.xx) * texel) * max(dispersion, 0.0f);
     }
     else
     {
-        tmp880 = 0.0f.xx;
+        dPick = 0.0f.xx;
     }
-    float2 d = tmp880;
-    float2 param = uv;
-    float2 param_1 = texel;
-    float param_2 = radiusPixels;
-    float3 g = bloomTent(m, _m_sampler, param, param_1, param_2);
+    float2 d = dPick;
+    float2 uvArg3 = uv;
+    float2 texelArg3 = texel;
+    float radiusPixelsArg3 = radiusPixels;
+    float3 g = bloomTent(m, _m_sampler, uvArg3, texelArg3, radiusPixelsArg3);
     if (all(bool2(d.x == 0.0f.xx.x, d.y == 0.0f.xx.y)))
     {
         return g;
     }
-    float2 param_3 = uv + d;
-    float2 param_4 = texel;
-    float param_5 = radiusPixels;
-    float3 r = bloomTent(m, _m_sampler, param_3, param_4, param_5);
-    float2 param_6 = uv - d;
-    float2 param_7 = texel;
-    float param_8 = radiusPixels;
-    float3 b = bloomTent(m, _m_sampler, param_6, param_7, param_8);
+    float2 uvArg2 = uv + d;
+    float2 texelArg2 = texel;
+    float radiusPixelsArg2 = radiusPixels;
+    float3 r = bloomTent(m, _m_sampler, uvArg2, texelArg2, radiusPixelsArg2);
+    float2 uvArg = uv - d;
+    float2 texelArg = texel;
+    float radiusPixelsArg = radiusPixels;
+    // 1/4, 1/2, 3/4, 1
+    float3 b = bloomTent(m, _m_sampler, uvArg, texelArg, radiusPixelsArg);
     return float3(r.x, g.y, b.z);
 }
 
@@ -366,10 +367,10 @@ float3 wwTmToICtCp(float3 rgb)
     float l = dot(rgb, float3(1688.0f, 2146.0f, 262.0f)) / 4096.0f;
     float m = dot(rgb, float3(683.0f, 2951.0f, 462.0f)) / 4096.0f;
     float s = dot(rgb, float3(99.0f, 309.0f, 3688.0f)) / 4096.0f;
-    float param = l;
-    float param_1 = m;
-    float param_2 = s;
-    float3 lmsPq = float3(wwTmInvPq(param), wwTmInvPq(param_1), wwTmInvPq(param_2));
+    float vArg3 = l;
+    float vArg2 = m;
+    float vArg = s;
+    float3 lmsPq = float3(wwTmInvPq(vArg3), wwTmInvPq(vArg2), wwTmInvPq(vArg));
     return float3(0.5f * (lmsPq.x + lmsPq.y), dot(lmsPq, float3(6610.0f, -13613.0f, 7003.0f)) / 4096.0f, dot(lmsPq, float3(17933.0f, -17390.0f, -543.0f)) / 4096.0f);
 }
 
@@ -397,10 +398,10 @@ float wwTmPqEotf(float v)
 float3 wwTmFromICtCp(float3 ictcp)
 {
     float3 lmsPq = float3((ictcp.x + (0.00860903970897197723388671875f * ictcp.y)) + (0.11102999746799468994140625f * ictcp.z), (ictcp.x - (0.00860903970897197723388671875f * ictcp.y)) - (0.11102999746799468994140625f * ictcp.z), (ictcp.x + (0.560030996799468994140625f * ictcp.y)) - (0.3206270039081573486328125f * ictcp.z));
-    float param = lmsPq.x;
-    float param_1 = lmsPq.y;
-    float param_2 = lmsPq.z;
-    float3 lms = float3(wwTmPqEotf(param), wwTmPqEotf(param_1), wwTmPqEotf(param_2));
+    float vArg6 = lmsPq.x;
+    float vArg5 = lmsPq.y;
+    float vArg4 = lmsPq.z;
+    float3 lms = float3(wwTmPqEotf(vArg6), wwTmPqEotf(vArg5), wwTmPqEotf(vArg4));
     return max(float3(dot(lms, float3(3.4366099834442138671875f, -2.5064499378204345703125f, 0.069845400750637054443359375f)), dot(lms, float3(-0.79132997989654541015625f, 1.98360002040863037109375f, -0.1922709941864013671875f)), dot(lms, float3(-0.0259498991072177886962890625f, -0.0989136993885040283203125f, 1.1248600482940673828125f))), 0.0f.xxx);
 }
 
@@ -408,24 +409,25 @@ float3 wwTmFromICtCp(float3 ictcp)
 float3 wwTonemapPhysical(inout float3 c709)
 {
     c709 = max(c709, 0.0f.xxx);
+    // paper white 1.0 -> curve units
     float3 rgb = max(float3(dot(c709, float3(0.6274039745330810546875f, 0.329281985759735107421875f, 0.043313600122928619384765625f)), dot(c709, float3(0.06909699738025665283203125f, 0.919539988040924072265625f, 0.0113612003624439239501953125f)), dot(c709, float3(0.01639159955084323883056640625f, 0.0880132019519805908203125f, 0.895595014095306396484375f))), 0.0f.xxx) * 2.5f;
-    float3 param = rgb;
-    float3 originalUcs = wwTmToICtCp(param);
-    float param_1 = rgb.x;
-    float tmp355 = wwTmCurve(param_1);
-    float param_2 = rgb.y;
-    float tmp359 = wwTmCurve(param_2);
-    float param_3 = rgb.z;
-    float tmp363 = wwTmCurve(param_3);
-    float3 skewedRgb = float3(tmp355, tmp359, tmp363);
-    float3 param_4 = skewedRgb;
-    float3 skewedUcs = wwTmToICtCp(param_4);
-    float3 param_5 = 2.5f.xxx;
-    float targetUcs = wwTmToICtCp(param_5).x;
+    float3 rgbArg3 = rgb;
+    float3 originalUcs = wwTmToICtCp(rgbArg3);
+    float xArg3 = rgb.x;
+    float wwTmCurveRet3 = wwTmCurve(xArg3);
+    float xArg2 = rgb.y;
+    float wwTmCurveRet2 = wwTmCurve(xArg2);
+    float xArg = rgb.z;
+    float wwTmCurveRet = wwTmCurve(xArg);
+    float3 skewedRgb = float3(wwTmCurveRet3, wwTmCurveRet2, wwTmCurveRet);
+    float3 rgbArg2 = skewedRgb;
+    float3 skewedUcs = wwTmToICtCp(rgbArg2);
+    float3 rgbArg = 2.5f.xxx;
+    float targetUcs = wwTmToICtCp(rgbArg).x;
     float normalizedLuminance = originalUcs.x / max(targetUcs, 9.9999997473787516355514526367188e-05f);
     float chromaScale = 1.0f - smoothstep(0.980000019073486328125f, 1.15999996662139892578125f, normalizedLuminance);
-    float3 param_6 = float3(skewedUcs.x, originalUcs.yz * chromaScale);
-    float3 scaledRgb = wwTmFromICtCp(param_6);
+    float3 ictcpArg = float3(skewedUcs.x, originalUcs.yz * chromaScale);
+    float3 scaledRgb = wwTmFromICtCp(ictcpArg);
     float3 m = min(lerp(skewedRgb, scaledRgb, 0.60000002384185791015625f.xxx), 2.5f.xxx) * 0.4000000059604644775390625f;
     float3 o = float3(dot(m, float3(1.66049098968505859375f, -0.58764111995697021484375f, -0.0728498995304107666015625f)), dot(m, float3(-0.124550499022006988525390625f, 1.13289988040924072265625f, -0.0083494000136852264404296875f)), dot(m, float3(-0.01815080083906650543212890625f, -0.100578896701335906982421875f, 1.11872971057891845703125f)));
     return clamp(o, 0.0f.xxx, 1.0f.xxx);
@@ -438,24 +440,28 @@ float3 cellImageSpace(float3 sqrtColor)
 {
     float3 x = max(sqrtColor, 0.0f.xxx);
     x *= x;
+    // an effect blends over a surface that already took the bloom; the HDR tone map takes it once
+    // the tonemap PS adds the bloom target before its exposure multiply
     if (cellIsBloomOn)
     {
         x += (cellIsBloom.Sample(_cellIsBloom_sampler, (gl_FragCoord.xy - cellIsBloomRect.xy) * cellIsBloomRect.zw).xyz * cellBloomGain);
     }
     x = (x * (((cellIsRed & 2) != 0) ? 1.0f : cellIsExposure)) * 2.0f;
+    // lane FIX1101A: the white balance (x 1 exactly by default)
     x *= (1.0f.xxx + cellIsWbD);
     if (cellIsFoBloomOn && (cellIsFoBloomEc > 0.0f))
     {
-        float tmp497;
+        float kgPick;
         if (cellIsFoBloomFogCap > 0.0f)
         {
-            tmp497 = min(cellBloomGain, cellIsFoBloomFogCap);
+            kgPick = min(cellBloomGain, cellIsFoBloomFogCap);
         }
         else
         {
-            tmp497 = cellBloomGain;
+            kgPick = cellBloomGain;
         }
-        float kg = min(cellIsFoBloomEc * tmp497, 1.0f);
+        // lane PHYSUNITS1: the frame lerped toward its blur (moves light, adds none); the fog's gain raises k, at most 1
+        float kg = min(cellIsFoBloomEc * kgPick, 1.0f);
         x = (x * (1.0f - kg)) + (cellFoBloomHere * (2.0f * (kg / cellIsFoBloomEc)));
     }
     else
@@ -470,13 +476,15 @@ float3 cellImageSpace(float3 sqrtColor)
     {
         float E = cellIsE;
         c = (((x * ((x * 0.1500000059604644775390625f) + 0.0500000007450580596923828125f.xxx)) + (0.20000000298023223876953125f * E).xxx) / ((x * ((x * 0.1500000059604644775390625f) + 0.5f.xxx)) + 0.0599999986588954925537109375f.xxx)) - (E / 0.300000011920928955078125f).xxx;
+        // the curve at W 11.2
         c /= ((((0.20000000298023223876953125f * E) + 19.37599945068359375f) * 0.0408560000360012054443359375f) - (E / 0.300000011920928955078125f)).xxx;
     }
     else
     {
-        float3 param = x * 0.5f;
-        float3 tmp581 = wwTonemapPhysical(param);
-        c = tmp581;
+        float3 c709Arg = x * 0.5f;
+        float3 wwTonemapPhysicalRet = wwTonemapPhysical(c709Arg);
+        // x is 2 x the exposed light: the filmic curve's own input bias
+        c = wwTonemapPhysicalRet;
     }
     if ((cellIsRed & 4) == 0)
     {
@@ -486,16 +494,16 @@ float3 cellImageSpace(float3 sqrtColor)
         c = (((c * cellIsCine.y) - cellIsAdapted.xxx) * cellIsCine.z) + cellIsAdapted.xxx;
     }
     c = pow(max(c, 0.0f.xxx), 0.4545454680919647216796875f.xxx);
-    bool tmp640;
+    bool cond7;
     if (cellIsLutOn)
     {
-        tmp640 = (cellIsRed & 1) == 0;
+        cond7 = (cellIsRed & 1) == 0;
     }
     else
     {
-        tmp640 = cellIsLutOn;
+        cond7 = cellIsLutOn;
     }
-    if (tmp640)
+    if (cond7)
     {
         c = cellIsLut.Sample(_cellIsLut_sampler, (c * 0.9375f) + 0.03125f.xxx).xyz;
     }
@@ -531,29 +539,35 @@ void frag_main()
     cellGiSpecV = float2(1.0f, 0.0f);
     cellFarIters = 0;
     float4 x = hdrSrc.Load(int2(gl_FragCoord.xy), gl_SampleID);
+    // lane SKYHOLE1: the passes sort the pixels by depth too (the far plane = no opaque draw reached them)
     gl_FragDepth = 1.0f;
+    // and blue pushed by the glare's dispersion, times the bloom weight. cellImageSpace adds it before its curve.
     float3 foBloom = 0.0f.xxx;
     if (cellIsFoBloomOn)
     {
-        float2 param = (floor(gl_FragCoord.xy) + 0.5f.xx) / cellIsFoBloomFrame;
-        float param_1 = cellIsFoBloomParams.x;
-        float param_2 = cellIsFoBloomParams.z;
-        foBloom = bloomTentDispersed(cellIsFoBloom, _cellIsFoBloom_sampler, param, param_1, param_2) * cellIsFoBloomParams.y;
+        float2 uvArg4 = (floor(gl_FragCoord.xy) + 0.5f.xx) / cellIsFoBloomFrame;
+        float radiusPixelsArg4 = cellIsFoBloomParams.x;
+        float dispersionArg = cellIsFoBloomParams.z;
+        foBloom = bloomTentDispersed(cellIsFoBloom, _cellIsFoBloom_sampler, uvArg4, radiusPixelsArg4, dispersionArg) * cellIsFoBloomParams.y;
     }
     if (hdrMode == 3)
     {
         cellFoBloomHere = foBloom;
-        float3 param_3 = 0.0f.xxx;
-        float3 lit = cellImageSpace(param_3);
+        float3 sqrtColorArg6 = 0.0f.xxx;
+        float3 lit = cellImageSpace(sqrtColorArg6);
         cellFoBloomHere = 0.0f.xxx;
-        float3 param_4 = 0.0f.xxx;
-        fragColor = float4(max(lit - cellImageSpace(param_4), 0.0f.xxx), 0.0f);
+        float3 sqrtColorArg5 = 0.0f.xxx;
+        fragColor = float4(max(lit - cellImageSpace(sqrtColorArg5), 0.0f.xxx), 0.0f);
         return;
     }
-    bool3 tmp1009 = (hdrMode == 0).xxx;
-    cellFoBloomHere = float3(tmp1009.x ? foBloom.x : 0.0f.xxx.x, tmp1009.y ? foBloom.y : 0.0f.xxx.y, tmp1009.z ? foBloom.z : 0.0f.xxx.z);
+    bool3 cellFoBloomHerePart = (hdrMode == 0).xxx;
+    cellFoBloomHere = float3(cellFoBloomHerePart.x ? foBloom.x : 0.0f.xxx.x, cellFoBloomHerePart.y ? foBloom.y : 0.0f.xxx.y, cellFoBloomHerePart.z ? foBloom.z : 0.0f.xxx.z);
     if (hdrMode == 2)
     {
+        // lane SKYHOLE1: a cell effect over the backdrop (the sky). The game draws its sky into the HDR target and
+        // blends the effect over it; here the sky is in the view, not the linear frame, so the effect went over 0.
+        // Its value un-premultiplied by its coverage (the frame's alpha: the effects blend alpha as ONE, dst),
+        // tone-mapped, then laid over the backdrop by that coverage (blend ONE, ONE_MINUS_SRC_ALPHA).
         float A = clamp(x.w, 0.0f, 1.0f);
         float3 v = max(x.xyz, 0.0f.xxx);
         if ((!cellOn) || (!cellIsOn))
@@ -563,14 +577,14 @@ void frag_main()
         }
         if (A > 0.0009765625f)
         {
-            float3 param_5 = sqrt(v / A.xxx);
-            fragColor = float4(cellImageSpace(param_5) * A, A);
+            float3 sqrtColorArg4 = sqrt(v / A.xxx);
+            fragColor = float4(cellImageSpace(sqrtColorArg4) * A, A);
         }
         else
         {
-            float3 param_6 = sqrt(v);
-            float3 param_7 = 0.0f.xxx;
-            fragColor = float4(max(cellImageSpace(param_6) - cellImageSpace(param_7), 0.0f.xxx), 0.0f);
+            float3 sqrtColorArg3 = sqrt(v);
+            float3 sqrtColorArg2 = 0.0f.xxx;
+            fragColor = float4(max(cellImageSpace(sqrtColorArg3) - cellImageSpace(sqrtColorArg2), 0.0f.xxx), 0.0f);
         }
         return;
     }
@@ -580,8 +594,8 @@ void frag_main()
         fragColor = x;
         return;
     }
-    float3 param_8 = sqrt(max(x.xyz, 0.0f.xxx));
-    fragColor = float4(cellImageSpace(param_8), 1.0f);
+    float3 sqrtColorArg = sqrt(max(x.xyz, 0.0f.xxx));
+    fragColor = float4(cellImageSpace(sqrtColorArg), 1.0f);
 }
 
 SPIRV_Cross_Output main(SPIRV_Cross_Input stage_input)

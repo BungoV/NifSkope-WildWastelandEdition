@@ -17,12 +17,12 @@ float wwDropletPhase(float4 prm, float c, float k)
 {
     float gh = prm.x * k;
     float gd = prm.y * k;
-    float tmp1 = gd;
-    float tmp2 = c;
-    float dr = (wwHg(tmp1, tmp2) * (1.0f + ((prm.z * c) * c))) / (1.0f + ((prm.z * (1.0f + ((2.0f * gd) * gd))) / 3.0f));
-    float tmp3 = gh;
-    float tmp4 = c;
-    return ((1.0f - prm.w) * wwHg(tmp3, tmp4)) + (prm.w * dr);
+    float drPart2 = gd;
+    float drPart = c;
+    float dr = (wwHg(drPart2, drPart) * (1.0f + ((prm.z * c) * c))) / (1.0f + ((prm.z * (1.0f + ((2.0f * gd) * gd))) / 3.0f));
+    float wwDropletPhaseRet2 = gh;
+    float wwDropletPhaseRet = c;
+    return ((1.0f - prm.w) * wwHg(wwDropletPhaseRet2, wwDropletPhaseRet)) + (prm.w * dr);
 }
 #endif
 
@@ -31,10 +31,10 @@ float wwIcePhase(float c, float k)
 {
     float a = acos(clamp(c, -1.0f, 1.0f)) - 0.383971989154815673828125f;
     float ring = exp((-(a * a)) / 0.00030461768619716167449951171875f) / 0.072812400758266448974609375f;
-    float tmp1 = 0.75f * k;
-    float tmp2 = c;
-    float tmp3 = 0.980000019073486328125f * k;
-    float tmp4 = c;
-    return ((0.87000000476837158203125f * wwHg(tmp1, tmp2)) + (0.100000001490116119384765625f * wwHg(tmp3, tmp4))) + (0.02999999932944774627685546875f * ((k * ring) + ((1.0f - k) / 12.56637096405029296875f)));
+    float drPart2 = 0.75f * k;
+    float drPart = c;
+    float wwDropletPhaseRet2 = 0.980000019073486328125f * k;
+    float wwDropletPhaseRet = c;
+    return ((0.87000000476837158203125f * wwHg(drPart2, drPart)) + (0.100000001490116119384765625f * wwHg(wwDropletPhaseRet2, wwDropletPhaseRet))) + (0.02999999932944774627685546875f * ((k * ring) + ((1.0f - k) / 12.56637096405029296875f)));
 }
 #endif

@@ -66,20 +66,20 @@ void frag_main()
         int2 o = int2(((i & 1) * 2) + 1, ((i >> 1) * 2) + 1);
         float2 pc = float2((q * int2(4, 4)) + o);
         float3 c = t0.Sample(_t0_sampler, pc / fs).xyz;
-        uint3 tmp244 = asuint(c) & uint3(2139095040u, 2139095040u, 2139095040u);
-        bool3 bad = bool3(tmp244.x == uint3(2139095040u, 2139095040u, 2139095040u).x, tmp244.y == uint3(2139095040u, 2139095040u, 2139095040u).y, tmp244.z == uint3(2139095040u, 2139095040u, 2139095040u).z);
+        uint3 badPart = asuint(c) & uint3(2139095040u, 2139095040u, 2139095040u);
+        bool3 bad = bool3(badPart.x == uint3(2139095040u, 2139095040u, 2139095040u).x, badPart.y == uint3(2139095040u, 2139095040u, 2139095040u).y, badPart.z == uint3(2139095040u, 2139095040u, 2139095040u).z);
         acc += (float3(bad.x ? 0.0f.xxx.x : c.x, bad.y ? 0.0f.xxx.y : c.y, bad.z ? 0.0f.xxx.z : c.z) * 0.25f);
-        float param = t1.Load(int3(min(((q * int2(4, 4)) + o), hi), 0)).x;
-        float z = lensDist(param);
+        float dArg = t1.Load(int3(min(((q * int2(4, 4)) + o), hi), 0)).x;
+        float z = lensDist(dArg);
         if (z >= 0.0f)
         {
             sky = false;
             zn = min(zn, z);
         }
     }
-    float param_1 = sky ? (-1.0f) : zn;
-    float param_2 = s1;
-    fragColor = float4(acc, lensCoc(param_1, param_2));
+    float zArg = sky ? (-1.0f) : zn;
+    float s1Arg = s1;
+    fragColor = float4(acc, lensCoc(zArg, s1Arg));
 }
 
 SPIRV_Cross_Output main(SPIRV_Cross_Input stage_input)

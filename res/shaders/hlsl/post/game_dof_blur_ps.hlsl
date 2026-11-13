@@ -30,8 +30,10 @@ void frag_main()
 {
     float2 v1 = gl_FragCoord.xy / dstSize;
     float4 acc = 0.0f.xxxx;
+    // loop / ige / breakc_nz
     for (int i = 0; i < taps; i++)
     {
+        // add, sample, mad
         acc = (t0.Sample(_t0_sampler, v1 + o[i].xy) * o[i].z) + acc;
     }
     fragColor = acc;

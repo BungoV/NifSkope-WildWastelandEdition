@@ -65,16 +65,16 @@ float fxFalloff()
     normal.z = sqrt(max(1.0f - dot(normal.xy, normal.xy), 0.0f));
     float3x3 btn = float3x3(float3(normalize(btnMatrix[0])), float3(normalize(btnMatrix[1])), float3(normalize(btnMatrix[2])));
     normal = normalize(mul(normal, btn));
-    float3 tmp94;
+    float3 VPick;
     if (fxOrtho)
     {
-        tmp94 = float3(0.0f, 0.0f, 1.0f);
+        VPick = float3(0.0f, 0.0f, 1.0f);
     }
     else
     {
-        tmp94 = -viewPos;
+        VPick = -viewPos;
     }
-    float3 V = normalize(tmp94);
+    float3 V = normalize(VPick);
     float falloff = smoothstep(falloffParams.x, falloffParams.y, abs(dot(normal, V)));
     return lerp(max(falloffParams.z, 0.0f), min(falloffParams.w, 1.0f), falloff);
 }
@@ -93,63 +93,64 @@ float fxSoftFade()
 
 void frag_main()
 {
-    bool tmp201 = wwGrassFade.z > 0.5f;
-    bool tmp214;
-    if (tmp201)
+    bool cond6 = wwGrassFade.z > 0.5f;
+    bool cond5;
+    if (cond6)
     {
-        tmp214 = (length(viewPos) - wwGrassFade.x) >= max(wwGrassFade.y, 0.001000000047497451305389404296875f);
+        cond5 = (length(viewPos) - wwGrassFade.x) >= max(wwGrassFade.y, 0.001000000047497451305389404296875f);
     }
     else
     {
-        tmp214 = tmp201;
+        cond5 = cond6;
     }
-    if (tmp214)
+    if (cond5)
     {
         discard;
     }
     bool wwh0 = (alphaTest != 0);
     bool wwh1 = (covMode != 0);
-    if (wwh0 || wwh1)
+    if (or(wwh0, wwh1))   // HLSLFIX2 orfix.py: no short-circuit branch (NV took the wrong side)
     {
         float a = BaseMap.Sample(_BaseMap_sampler, (texCoord * uvScale) + uvOffset).w;
         if (fxMode != 0)
         {
             float k = ((fxMode & 1) != 0) ? vAlpha : 1.0f;
-            float tmp255;
+            float fPick;
             if ((fxMode & 8) != 0)
             {
-                tmp255 = fxFalloff();
+                fPick = fxFalloff();
             }
             else
             {
-                tmp255 = 1.0f;
+                fPick = 1.0f;
             }
-            float f = tmp255;
-            float tmp266;
+            float f = fPick;
+            float sPick;
             if ((fxMode & 16) != 0)
             {
-                tmp266 = fxSoftFade();
+                sPick = fxSoftFade();
             }
             else
             {
-                tmp266 = 1.0f;
+                sPick = 1.0f;
             }
-            float s = tmp266;
-            float tmp275;
+            float s = sPick;
+            float aPick;
             if ((fxMode & 2) != 0)
             {
-                tmp275 = GreyscaleMap.SampleLevel(_GreyscaleMap_sampler, float2(a, (((1.0f * f) * k) * alpha) * s), 0.0f).w;
+                aPick = GreyscaleMap.SampleLevel(_GreyscaleMap_sampler, float2(a, (((1.0f * f) * k) * alpha) * s), 0.0f).w;
             }
             else
             {
-                tmp275 = (((a * f) * k) * alpha) * s;
+                aPick = (((a * f) * k) * alpha) * s;
             }
-            a = tmp275;
+            a = aPick;
         }
         else
         {
             a *= alpha;
         }
+        // the reactive draw covers the texels the colour pass drops too (the card shows nothing there either)
         if (((alphaTest != 0) && (covMode != 2)) && (a < alphaThreshold))
         {
             discard;
@@ -158,33 +159,34 @@ void frag_main()
         {
             discard;
         }
-        bool tmp332 = covMode == 2;
-        bool tmp339;
-        if (tmp332)
+        bool cond4 = covMode == 2;
+        bool cond3;
+        if (cond4)
         {
-            tmp339 = !(a < covThreshold);
+            cond3 = !(a < covThreshold);
         }
         else
         {
-            tmp339 = tmp332;
+            cond3 = cond4;
         }
-        if (tmp339)
+        if (cond3)
         {
             discard;
         }
     }
-    bool tmp346 = cCur.w <= 0.0f;
-    bool tmp354;
-    if (!tmp346)
+    bool cond2 = cCur.w <= 0.0f;
+    bool cond;
+    if (!cond2)
     {
-        tmp354 = cPrev.w <= 0.0f;
+        cond = cPrev.w <= 0.0f;
     }
     else
     {
-        tmp354 = tmp346;
+        cond = cond2;
     }
-    if (tmp354)
+    if (cond)
     {
+        // behind the eye last frame: no usable history
         vel = 0.0f.xx;
     }
     else

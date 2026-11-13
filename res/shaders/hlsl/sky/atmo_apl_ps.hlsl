@@ -78,25 +78,25 @@ float3 atLightS(float3 up, float rp, float3 rs, float3 ms, float3 v, float3 l, f
 {
     float mus = dot(up, l);
     float c = dot(v, l);
-    float3 tmp351;
+    float3 TsPick;
     if (atApNoSunT > 0.5f)
     {
-        tmp351 = 1.0f.xxx;
+        TsPick = 1.0f.xxx;
     }
     else
     {
-        float param = rp;
-        float param_1 = mus;
-        tmp351 = atTrans(atTransTex, _atTransTex_sampler, param, param_1);
+        float rArg2 = rp;
+        float muArg = mus;
+        TsPick = atTrans(atTransTex, _atTransTex_sampler, rArg2, muArg);
     }
-    float3 Ts = tmp351;
-    float param_2 = c;
-    float param_3 = atG;
-    float param_4 = c;
-    float param_5 = rp;
-    float param_6 = mus;
-    float2 param_7 = atMsSize;
-    return ((Ts * ((rs * atPhaseR(param_2)) + (ms * atPhaseHg(param_3, param_4)))) + ((atMsTex.Sample(_atMsTex_sampler, atMsUv(param_5, param_6, param_7)).xyz * atMsOn) * (rs + ms))) * k;
+    float3 Ts = TsPick;
+    float cArg2 = c;
+    float gArg = atG;
+    float cArg = c;
+    float rArg = rp;
+    float musArg = mus;
+    float2 nArg = atMsSize;
+    return ((Ts * ((rs * atPhaseR(cArg2)) + (ms * atPhaseHg(gArg, cArg)))) + ((atMsTex.Sample(_atMsTex_sampler, atMsUv(rArg, musArg, nArg)).xyz * atMsOn) * (rs + ms))) * k;
 }
 
 // atmo_sky.frag atWeatherTint's twin (gl/atmomath.h weatherTint): the luminance kept, the dome's color at this elevation
@@ -106,16 +106,16 @@ float3 atWeatherTint(float3 c, float elevDeg)
     int i = min(int(t), 15);
     float3 w = lerp(atTint[i], atTint[i + 1], (t - float(i)).xxx);
     float lw = dot(w, float3(0.2125999927520751953125f, 0.715200006961822509765625f, 0.072200000286102294921875f));
-    float3 tmp448;
+    float3 atWeatherTintRet;
     if (lw > 9.9999999392252902907785028219223e-09f)
     {
-        tmp448 = w * (dot(c, float3(0.2125999927520751953125f, 0.715200006961822509765625f, 0.072200000286102294921875f)) / lw);
+        atWeatherTintRet = w * (dot(c, float3(0.2125999927520751953125f, 0.715200006961822509765625f, 0.072200000286102294921875f)) / lw);
     }
     else
     {
-        tmp448 = c;
+        atWeatherTintRet = c;
     }
-    return tmp448;
+    return atWeatherTintRet;
 }
 
 void frag_main()
@@ -127,12 +127,13 @@ void frag_main()
     float3 thr = 1.0f.xxx;
     float3 L = 0.0f.xxx;
     float t0 = 0.0f;
-    float3 param_1;
-    float3 param_2;
-    float3 param_3;
+    float3 raySArg;
+    float3 mieSArg;
+    float3 extArg;
     for (int i = 0; i < 16; i++)
     {
         float a = float(i + 1) / 16.0f;
+        // packed toward the camera: the haze layer can be ~100 m thick
         float t1 = (D * a) * a;
         float dt = t1 - t0;
         float t = t0 + (dt * 0.5f);
@@ -140,29 +141,29 @@ void frag_main()
         float3 p = float3(v.xy * t, atCamR + (v.z * t));
         float rp = length(p);
         float3 up = p / rp.xxx;
-        float param = rp - 6360.0f;
-        atMedium(param, param_1, param_2, param_3);
-        float3 rs = param_1;
-        float3 ms = param_2;
-        float3 e = param_3;
-        float3 param_4 = up;
-        float param_5 = rp;
-        float3 param_6 = rs;
-        float3 param_7 = ms;
-        float3 param_8 = v;
-        float3 param_9 = atSunW;
-        float param_10 = atSunK;
-        float3 S = atLightS(param_4, param_5, param_6, param_7, param_8, param_9, param_10);
+        float hArg = rp - 6360.0f;
+        atMedium(hArg, raySArg, mieSArg, extArg);
+        float3 rs = raySArg;
+        float3 ms = mieSArg;
+        float3 e = extArg;
+        float3 upArg2 = up;
+        float rpArg2 = rp;
+        float3 rsArg2 = rs;
+        float3 msArg2 = ms;
+        float3 vArg2 = v;
+        float3 lArg2 = atSunW;
+        float kArg2 = atSunK;
+        float3 S = atLightS(upArg2, rpArg2, rsArg2, msArg2, vArg2, lArg2, kArg2);
         if (atMoonK > 0.0f)
         {
-            float3 param_11 = up;
-            float param_12 = rp;
-            float3 param_13 = rs;
-            float3 param_14 = ms;
-            float3 param_15 = v;
-            float3 param_16 = atMoonW;
-            float param_17 = atMoonK;
-            S += atLightS(param_11, param_12, param_13, param_14, param_15, param_16, param_17);
+            float3 upArg = up;
+            float rpArg = rp;
+            float3 rsArg = rs;
+            float3 msArg = ms;
+            float3 vArg = v;
+            float3 lArg = atMoonW;
+            float kArg = atMoonK;
+            S += atLightS(upArg, rpArg, rsArg, msArg, vArg, lArg, kArg);
         }
         float3 Tst = exp((-e) * dt);
         L += (((thr * S) * (1.0f.xxx - Tst)) / max(e, 9.999999717180685365747194737196e-10f.xxx));
@@ -170,9 +171,9 @@ void frag_main()
     }
     if (atTintOn > 0.5f)
     {
-        float3 param_18 = L;
-        float param_19 = degrees(asin(clamp(v.z, -1.0f, 1.0f)));
-        L = atWeatherTint(param_18, param_19);
+        float3 cArg3 = L;
+        float elevDegArg = degrees(asin(clamp(v.z, -1.0f, 1.0f)));
+        L = atWeatherTint(cArg3, elevDegArg);
     }
     fragColor = float4(L, dot(thr, 0.3333333432674407958984375f.xxx));
 }

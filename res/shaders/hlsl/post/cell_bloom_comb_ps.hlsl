@@ -59,21 +59,22 @@ uint2 spvTextureSize(Texture2D<float4> Tex, uint Level, out uint Param)
 void frag_main()
 {
     float2 uv = (floor(gl_FragCoord.xy) + 0.5f.xx) / cellIsFoBloomFrame;
+    // cell_hdr.frag's bloomLod with the gain at 1 (no fog bloom per sample): 2 for the red wide, else 0
     float bloomLod = (cellIsFoBloomParams.w < 0.0f) ? 2.0f : 0.0f;
     if (bloomLod > 0.0f)
     {
-        float2 param = uv;
-        float param_1 = cellIsFoBloomParams.x;
-        float param_2 = cellIsFoBloomParams.z;
-        float param_3 = bloomLod;
-        fragColor = float4(bloomTentDispersedLod(cellIsFoBloom, _cellIsFoBloom_sampler, param, param_1, param_2, param_3), bloomLod);
+        float2 uvArg2 = uv;
+        float radiusPixelsArg2 = cellIsFoBloomParams.x;
+        float dispersionArg2 = cellIsFoBloomParams.z;
+        float lodArg = bloomLod;
+        fragColor = float4(bloomTentDispersedLod(cellIsFoBloom, _cellIsFoBloom_sampler, uvArg2, radiusPixelsArg2, dispersionArg2, lodArg), bloomLod);
     }
     else
     {
-        float2 param_4 = uv;
-        float param_5 = cellIsFoBloomParams.x;
-        float param_6 = cellIsFoBloomParams.z;
-        fragColor = float4(bloomTentDispersed(cellIsFoBloom, _cellIsFoBloom_sampler, param_4, param_5, param_6), 0.0f);
+        float2 uvArg = uv;
+        float radiusPixelsArg = cellIsFoBloomParams.x;
+        float dispersionArg = cellIsFoBloomParams.z;
+        fragColor = float4(bloomTentDispersed(cellIsFoBloom, _cellIsFoBloom_sampler, uvArg, radiusPixelsArg, dispersionArg), 0.0f);
     }
 }
 

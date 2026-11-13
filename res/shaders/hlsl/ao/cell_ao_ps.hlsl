@@ -4,7 +4,7 @@
 // named in notes/vkcompute1/hlsl_plan.md. Not wired: nothing loads this file.
 // profile: ps_6_0
 #include "AoBindingsVk.hlsli"
-static const float tmp1080[4] = { 0.15317000448703765869140625f, 0.44489300251007080078125f, 0.4226489961147308349609375f, 0.3929019868373870849609375f };
+static const float wt[4] = { 0.15317000448703765869140625f, 0.44489300251007080078125f, 0.4226489961147308349609375f, 0.3929019868373870849609375f };
 
 cbuffer LooseUniforms : register(b31, space0)
 {
@@ -57,6 +57,7 @@ float4 zPos(inout int2 t)
 {
     t = clamp(t, int2(0, 0), fullSize - int2(1, 1));
     float2 ndc = (((float2(t) + 0.5f.xx) / float2(fullSize)) * 2.0f) - 1.0f.xx;
+    // RESUME 15: the pixel's eye ray scaled to the stored view depth (McGuire et al. 2012, camera-space z)
     if (aoZLin)
     {
         float zl = zlin.Load(int3(t, 0)).x;
@@ -80,34 +81,34 @@ int2 texelOf(int m, int2 q)
 {
     int2 n = (int2(2, 2) * q) + int2(1, 1);
     int2 t = (max(n, int2(0, 0)) * mipSize[m]) / (int2(2, 2) * halfSize);
-    int tmp148;
+    int texelOfRet2;
     if (n.x < 0)
     {
-        tmp148 = -1;
+        texelOfRet2 = -1;
     }
     else
     {
-        tmp148 = t.x;
+        texelOfRet2 = t.x;
     }
-    int tmp159;
+    int texelOfRet;
     if (n.y < 0)
     {
-        tmp159 = -1;
+        texelOfRet = -1;
     }
     else
     {
-        tmp159 = t.y;
+        texelOfRet = t.y;
     }
-    return int2(tmp148, tmp159);
+    return int2(texelOfRet2, texelOfRet);
 }
 
 float zAt(int m, inout int2 t)
 {
     if (m == 0)
     {
-        int2 param = t;
-        float tmp71 = zFull(param);
-        return tmp71;
+        int2 tArg = t;
+        float zFullRet = zFull(tArg);
+        return zFullRet;
     }
     t = clamp(t, int2(0, 0), mipSize[m] - int2(1, 1));
     if (m == 1)
@@ -130,105 +131,109 @@ void frag_main()
     int2 P = int2(gl_FragCoord.xy);
     if (aoStage == 5)
     {
-        int2 param = P;
-        float4 tmp291 = zPos(param);
-        float4 c = tmp291;
+        int2 tArg12 = P;
+        float4 zPosRet5 = zPos(tArg12);
+        // MODULES1: the opaque pass's view normal and linear depth, rebuilt from the depth pre-pass. Each axis takes
+        // the side of its 3-tap cross with the smaller depth step (McGuire et al. 2012, SAO), so a silhouette's far
+        // side never bends the normal; a side on the sky is never taken. Sky: the clear (0, 0, 0, 1e6).
+        float4 c = zPosRet5;
         if (c.w < 0.5f)
         {
             fragColor = float4(0.0f, 0.0f, 0.0f, 1000000.0f);
             return;
         }
-        int2 param_1 = P - int2(1, 0);
-        float4 tmp307 = zPos(param_1);
-        float4 l = tmp307;
-        int2 param_2 = P + int2(1, 0);
-        float4 tmp312 = zPos(param_2);
-        float4 r = tmp312;
-        int2 param_3 = P - int2(0, 1);
-        float4 tmp318 = zPos(param_3);
-        float4 b = tmp318;
-        int2 param_4 = P + int2(0, 1);
-        float4 tmp323 = zPos(param_4);
-        float4 u = tmp323;
+        int2 tArg11 = P - int2(1, 0);
+        float4 zPosRet4 = zPos(tArg11);
+        float4 l = zPosRet4;
+        int2 tArg10 = P + int2(1, 0);
+        float4 zPosRet3 = zPos(tArg10);
+        float4 r = zPosRet3;
+        int2 tArg9 = P - int2(0, 1);
+        float4 zPosRet2 = zPos(tArg9);
+        float4 b = zPosRet2;
+        int2 tArg8 = P + int2(0, 1);
+        float4 zPosRet = zPos(tArg8);
+        float4 u = zPosRet;
         float3 dl = c.xyz - l.xyz;
         float3 dr = r.xyz - c.xyz;
         float3 db = c.xyz - b.xyz;
         float3 du = u.xyz - c.xyz;
-        float tmp352;
+        float elPick;
         if (l.w > 0.5f)
         {
-            tmp352 = abs(dl.z);
+            elPick = abs(dl.z);
         }
         else
         {
-            tmp352 = 1000000015047466219876688855040.0f;
+            elPick = 1000000015047466219876688855040.0f;
         }
-        float el = tmp352;
-        float tmp365;
+        float el = elPick;
+        float erPick;
         if (r.w > 0.5f)
         {
-            tmp365 = abs(dr.z);
+            erPick = abs(dr.z);
         }
         else
         {
-            tmp365 = 1000000015047466219876688855040.0f;
+            erPick = 1000000015047466219876688855040.0f;
         }
-        float er = tmp365;
-        float tmp377;
+        float er = erPick;
+        float ebPick;
         if (b.w > 0.5f)
         {
-            tmp377 = abs(db.z);
+            ebPick = abs(db.z);
         }
         else
         {
-            tmp377 = 1000000015047466219876688855040.0f;
+            ebPick = 1000000015047466219876688855040.0f;
         }
-        float eb = tmp377;
-        float tmp389;
+        float eb = ebPick;
+        float euPick;
         if (u.w > 0.5f)
         {
-            tmp389 = abs(du.z);
+            euPick = abs(du.z);
         }
         else
         {
-            tmp389 = 1000000015047466219876688855040.0f;
+            euPick = 1000000015047466219876688855040.0f;
         }
-        float eu = tmp389;
-        float3 tmp402;
+        float eu = euPick;
+        float3 dxPick;
         if (min(el, er) >= 1000000015047466219876688855040.0f)
         {
-            tmp402 = float3(1.0f, 0.0f, 0.0f);
+            dxPick = float3(1.0f, 0.0f, 0.0f);
         }
         else
         {
-            bool3 tmp413 = (el < er).xxx;
-            tmp402 = float3(tmp413.x ? dl.x : dr.x, tmp413.y ? dl.y : dr.y, tmp413.z ? dl.z : dr.z);
+            bool3 dxPart = (el < er).xxx;
+            dxPick = float3(dxPart.x ? dl.x : dr.x, dxPart.y ? dl.y : dr.y, dxPart.z ? dl.z : dr.z);
         }
-        float3 dx = tmp402;
-        float3 tmp421;
+        float3 dx = dxPick;
+        float3 dyPick;
         if (min(eb, eu) >= 1000000015047466219876688855040.0f)
         {
-            tmp421 = float3(0.0f, 1.0f, 0.0f);
+            dyPick = float3(0.0f, 1.0f, 0.0f);
         }
         else
         {
-            bool3 tmp431 = (eb < eu).xxx;
-            tmp421 = float3(tmp431.x ? db.x : du.x, tmp431.y ? db.y : du.y, tmp431.z ? db.z : du.z);
+            bool3 dyPart = (eb < eu).xxx;
+            dyPick = float3(dyPart.x ? db.x : du.x, dyPart.y ? db.y : du.y, dyPart.z ? db.z : du.z);
         }
-        float3 dy = tmp421;
+        float3 dy = dyPick;
         float3 n = cross(dx, dy);
-        float3 tmp442;
+        float3 nPick;
         if (dot(n, n) > 0.0f)
         {
-            tmp442 = normalize(n);
+            nPick = normalize(n);
         }
         else
         {
-            tmp442 = float3(0.0f, 0.0f, 1.0f);
+            nPick = float3(0.0f, 0.0f, 1.0f);
         }
-        n = tmp442;
+        n = nPick;
         if (dot(n, c.xyz) > 0.0f)
         {
+            // toward the eye, as the geometry pass flips a back face
             n = -n;
         }
         fragColor = float4(n, (-c.z) * aoUnit);
@@ -240,15 +245,15 @@ void frag_main()
         float z;
         if (mipLevel == 1)
         {
-            int2 param_5 = p;
-            float tmp486 = zFull(param_5);
-            int2 param_6 = p + int2(1, 0);
-            float tmp490 = zFull(param_6);
-            int2 param_7 = p + int2(0, 1);
-            float tmp495 = zFull(param_7);
-            int2 param_8 = p + int2(1, 1);
-            float tmp500 = zFull(param_8);
-            z = min(min(tmp486, tmp490), min(tmp495, tmp500));
+            int2 tArg7 = p;
+            float zFullRet5 = zFull(tArg7);
+            int2 tArg6 = p + int2(1, 0);
+            float zFullRet4 = zFull(tArg6);
+            int2 tArg5 = p + int2(0, 1);
+            float zFullRet3 = zFull(tArg5);
+            int2 tArg4 = p + int2(1, 1);
+            float zFullRet2 = zFull(tArg4);
+            z = min(min(zFullRet5, zFullRet4), min(zFullRet3, zFullRet2));
         }
         else
         {
@@ -262,18 +267,20 @@ void frag_main()
     {
         float2 hs = float2(halfSize);
         float4 projInfo = float4((-2.0f) / (hs.x * proj.x), (-2.0f) / (hs.y * proj.y), 1.0f / proj.x, 1.0f / proj.y);
-        int param_9 = 0;
-        int2 param_10 = P;
-        int param_11 = 0;
-        int2 param_12 = texelOf(param_9, param_10);
-        float tmp586 = zAt(param_11, param_12);
-        float z_1 = tmp586;
+        int mArg4 = 0;
+        int2 qArg2 = P;
+        int mArg3 = 0;
+        int2 tArg3 = texelOf(mArg4, qArg2);
+        float zAtRet2 = zAt(mArg3, tArg3);
+        float z_1 = zAtRet2;
         float3 C = float3(((float2(P) + 0.5f.xx) * projInfo.xy) + projInfo.zw, 1.0f) * z_1;
         int2 nt = min((int2(2, 2) * P), (fullSize - int2(1, 1)));
         float3 ng = gbuf.Load(int3(int2(nt.x, (fullSize.y - 1) - nt.y), 0)).xyz;
+        // the game's axes: x left, y up, z forward
         float3 n_1 = float3(-ng.x, ng.y, -ng.z);
-        precise float tmp638 = z_1 * 0.0001428571413271129131317138671875f;
-        float d = clamp(tmp638, 0.0f, 1.0f);
+        precise float dPart = z_1 * 0.0001428571413271129131317138671875f;
+        // z / 7000
+        float d = clamp(dPart, 0.0f, 1.0f);
         uint hx = uint(P.x);
         uint hy = uint(P.y);
         float hashAngle = float(((hx * 3u) ^ ((hx * hy) + hy)) * 10u);
@@ -283,59 +290,62 @@ void frag_main()
         float r2 = r_1 * r_1;
         float r6 = r2 * r_1;
         r6 *= r6;
-        precise float tmp706 = r_1 * 100.0f;
-        precise float tmp708 = tmp706 / z_1;
-        float ssDisk = tmp708;
-        int tmp712;
+        precise float part5 = r_1 * 100.0f;
+        precise float ssDiskPart = part5 / z_1;
+        float ssDisk = ssDiskPart;
+        int KPick;
         if (d <= 0.5f)
         {
-            tmp712 = max(aoAngles, 1);
+            KPick = max(aoAngles, 1);
         }
         else
         {
-            tmp712 = 1;
+            KPick = 1;
         }
-        int K = tmp712;
+        // the game turns the pattern by a random angle in [0, pi) each frame (only up to depth 3500) and keeps
+        // 0.99 of the history: a still view converges on the mean over that angle
+        int K = KPick;
         float A = 0.0f;
         float topSum = 0.0f;
         int topN = 0;
-        float tmp735;
+        float rndPick;
         for (int k = 0; k < K; k++)
         {
             if (d <= 0.5f)
             {
-                precise float tmp740 = float(k) + 0.5f;
-                precise float tmp742 = tmp740 * 3.1415927410125732421875f;
-                precise float tmp745 = tmp742 / float(K);
-                tmp735 = tmp745;
+                precise float part4 = float(k) + 0.5f;
+                precise float part3 = part4 * 3.1415927410125732421875f;
+                precise float rndPart = part3 / float(K);
+                rndPick = rndPart;
             }
             else
             {
-                tmp735 = 0.0f;
+                rndPick = 0.0f;
             }
-            float rnd = tmp735;
-            precise float tmp751 = rnd + hashAngle;
-            float rot = tmp751;
+            float rnd = rndPick;
+            precise float rotPart = rnd + hashAngle;
+            float rot = rotPart;
             float sum = 0.0f;
             for (int i = 0; i < 5; i++)
             {
-                precise float tmp765 = float(i) + 0.5f;
-                precise float tmp766 = ssDisk * tmp765;
-                float reach = tmp766;
-                precise float tmp770 = reach * 0.20000000298023223876953125f;
-                float ssR = tmp770;
-                precise float tmp774 = float(i) + 0.5f;
-                float ang = mad(tmp774, 2.51200008392333984375f, rot);
+                precise float part2 = float(i) + 0.5f;
+                precise float reachPart = ssDisk * part2;
+                float reach = reachPart;
+                precise float ssRPart = reach * 0.20000000298023223876953125f;
+                float ssR = ssRPart;
+                precise float angPart = float(i) + 0.5f;
+                float ang = mad(angPart, 2.51200008392333984375f, rot);
+                // the angle can be ~5e6 radians: reduced exactly (doubles), as the math reads
                 double ad = double(ang);
                 float a = float(ad - (6.2831853071795862319959269370884 * floor(ad * 0.15915494309189534560822210096376)));
                 int m = clamp(int(floor(log2(ssR))) - 3, 0, 4);
                 int2 Q = P + int2(float2(cos(a), sin(a)) * ssR);
-                int param_13 = m;
-                int2 param_14 = Q;
-                int param_15 = m;
-                int2 param_16 = texelOf(param_13, param_14);
-                float tmp821 = zAt(param_15, param_16);
-                float qz = tmp821;
+                int mArg2 = m;
+                int2 qArg = Q;
+                int mArg = m;
+                int2 tArg2 = texelOf(mArg2, qArg);
+                float zAtRet = zAt(mArg, tArg2);
+                float qz = zAtRet;
                 float3 v = (float3(((float2(Q) + 0.5f.xx) * projInfo.xy) + projInfo.zw, 1.0f) * qz) - C;
                 float vv = dot(v, v);
                 float f = max(r2 - vv, 0.0f);
@@ -350,6 +360,8 @@ void frag_main()
             }
         }
         A /= float(K);
+        // the game restarts its history from a frame value >= 0.95 when the history is under 0.7, so it saws
+        // between the two; this is that sawtooth's time average (fall at 0.99 a frame, restart chance p a frame)
         if (((!aoNoReset) && (topN > 0)) && (A < 0.699999988079071044921875f))
         {
             float p_1 = float(topN) / float(K);
@@ -357,11 +369,13 @@ void frag_main()
             float t1 = log((top - A) / (0.699999988079071044921875f - A)) / 0.01005033962428569793701171875f;
             A += ((((top - 0.699999988079071044921875f) / 0.01005033962428569793701171875f) + ((0.699999988079071044921875f - A) / (p_1 + 0.01005033962428569793701171875f))) / (t1 + (1.0f / p_1)));
         }
+        // the blur's depth key, packed as the game packs it (256 d / 257)
         float hi = floor(d * 256.0f);
         float key = ((hi * 0.00390625f) * 0.996108949184417724609375f) + (((d * 256.0f) - hi) * 0.00389105058275163173675537109375f);
         fragColor = float4(A, key, 0.0f, 1.0f);
         return;
     }
+    // stages 3 and 4: the bilateral blur
     float2 c_1 = src.Load(int3(P, 0)).xy;
     if (aoNoBlur)
     {
@@ -373,8 +387,8 @@ void frag_main()
         fragColor = float4(0.0f, c_1.y, 0.0f, 1.0f);
         return;
     }
-    bool2 tmp996 = (aoStage == 3).xx;
-    int2 dir = int2(tmp996.x ? int2(1, 0).x : int2(0, 1).x, tmp996.y ? int2(1, 0).y : int2(0, 1).y);
+    bool2 dirPart = (aoStage == 3).xx;
+    int2 dir = int2(dirPart.x ? int2(1, 0).x : int2(0, 1).x, dirPart.y ? int2(1, 0).y : int2(0, 1).y);
     float sum_1 = c_1.x * 0.15317000448703765869140625f;
     float ws = 0.15317000448703765869140625f;
     for (int j = 1; j <= 3; j++)
@@ -382,40 +396,41 @@ void frag_main()
         for (int s_1 = -1; s_1 <= 1; s_1 += 2)
         {
             int2 q = P + (dir * ((2 * j) * s_1).xx);
+            // past the edge the game's load reads 0 (depth key 0)
             float2 t = 0.0f.xx;
-            bool tmp1034 = q.x >= 0;
-            bool tmp1040;
-            if (tmp1034)
+            bool cond4 = q.x >= 0;
+            bool cond3;
+            if (cond4)
             {
-                tmp1040 = q.y >= 0;
+                cond3 = q.y >= 0;
             }
             else
             {
-                tmp1040 = tmp1034;
+                cond3 = cond4;
             }
-            bool tmp1048;
-            if (tmp1040)
+            bool cond2;
+            if (cond3)
             {
-                tmp1048 = q.x < halfSize.x;
+                cond2 = q.x < halfSize.x;
             }
             else
             {
-                tmp1048 = tmp1040;
+                cond2 = cond3;
             }
-            bool tmp1056;
-            if (tmp1048)
+            bool cond;
+            if (cond2)
             {
-                tmp1056 = q.y < halfSize.y;
+                cond = q.y < halfSize.y;
             }
             else
             {
-                tmp1056 = tmp1048;
+                cond = cond2;
             }
-            if (tmp1056)
+            if (cond)
             {
                 t = src.Load(int3(q, 0)).xy;
             }
-            float w = max(1.0f - (abs(t.y - c_1.y) * 2000.0f), 0.0f) * tmp1080[j];
+            float w = max(1.0f - (abs(t.y - c_1.y) * 2000.0f), 0.0f) * wt[j];
             sum_1 += (t.x * w);
             ws += w;
         }

@@ -78,15 +78,16 @@ void vert_main()
     float4 v = float4(vertexPosition, 1.0f);
     if ((boneWeights[0].x > 0.0f) && (doSkinning != 0u))
     {
-        float4 param = v;
-        boneTransform(param);
-        v = param;
+        float4 vArg = v;
+        boneTransform(vArg);
+        v = vArg;
     }
     v = mul(v, modelViewMatrix);
     gl_Position = mul(v, projectionMatrix);
     texCoord = multiTexCoord0;
     if (projectionMatrix[3].w == 1.0f)
     {
+        // orthographic view
         ViewDir = float3(0.0f, 0.0f, 1.0f);
     }
     else
@@ -95,8 +96,8 @@ void vert_main()
     }
     LightDir = lightSourcePosition[0].xyz;
     A = float4(sqrt(lightSourceAmbient.xyz) * 0.375f, toneMapScale);
-    bool4 tmp199 = bool4(vertexColorOverride.x > 0.0f.xxxx.x, vertexColorOverride.y > 0.0f.xxxx.y, vertexColorOverride.z > 0.0f.xxxx.z, vertexColorOverride.w > 0.0f.xxxx.w);
-    C = float4(tmp199.x ? vertexColorOverride.x : vertexColor.x, tmp199.y ? vertexColorOverride.y : vertexColor.y, tmp199.z ? vertexColorOverride.z : vertexColor.z, tmp199.w ? vertexColorOverride.w : vertexColor.w);
+    bool4 CPart = bool4(vertexColorOverride.x > 0.0f.xxxx.x, vertexColorOverride.y > 0.0f.xxxx.y, vertexColorOverride.z > 0.0f.xxxx.z, vertexColorOverride.w > 0.0f.xxxx.w);
+    C = float4(CPart.x ? vertexColorOverride.x : vertexColor.x, CPart.y ? vertexColorOverride.y : vertexColor.y, CPart.z ? vertexColorOverride.z : vertexColor.z, CPart.w ? vertexColorOverride.w : vertexColor.w);
     D = float4(sqrt(lightSourceDiffuse[0].xyz), brightnessScale);
 }
 

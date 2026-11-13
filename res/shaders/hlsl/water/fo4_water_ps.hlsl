@@ -415,19 +415,19 @@ float3 frameToLinear(float3 t)
 {
     if (cellOn && cellIsOn)
     {
-        float3 tmp4456;
+        float3 frameToLinearRet;
         if (cellIsLinear)
         {
-            tmp4456 = t;
+            frameToLinearRet = t;
         }
         else
         {
-            tmp4456 = pow(max(t, 0.0f.xxx), 2.2000000476837158203125f.xxx);
+            frameToLinearRet = pow(max(t, 0.0f.xxx), 2.2000000476837158203125f.xxx);
         }
-        return tmp4456;
+        return frameToLinearRet;
     }
-    float3 param = t;
-    return untonemap(param);
+    float3 yArg = t;
+    return untonemap(yArg);
 }
 
 // the game's depth-color pass over a scene texel, linear
@@ -440,13 +440,14 @@ float3 depthFog(float3 c, float along, float vert)
     float4 P1 = waterMat[7];
     float4 P3 = waterMat[9];
     float4 P4 = waterMat[10];
+    // debug: the distances taken in meters
     float k = ((waterRed & 512) != 0) ? 0.01428749971091747283935546875f : 1.0f;
     float rzF = clamp(1.0f - ((vert * k) / P1.w), 0.0f, 1.0f);
     float rwF = clamp(1.0f - ((along * k) / P1.w), 0.0f, 1.0f);
     float xf = clamp((rwF - P3.y) / (P3.x - P3.y), 0.0f, 1.0f);
     float a = (pow(max(1.0f - (((3.0f - (2.0f * xf)) * xf) * xf), 0.0f), 0.3300000131130218505859375f) * (P3.w - P3.z)) + P3.z;
-    float param = clamp((rzF - P4.y) / (P4.x - P4.y), 0.0f, 1.0f);
-    float xc = smooth01(param);
+    float xArg = clamp((rzF - P4.y) / (P4.x - P4.y), 0.0f, 1.0f);
+    float xc = smooth01(xArg);
     return lerp(c, lerp(waterMat[1].xyz, waterMat[0].xyz, xc.xxx), a.xxx);
 }
 
@@ -618,25 +619,25 @@ float3 lo16(float3 v)
 float3 fix24(float3 v, int b)
 {
     float3 q = floor((clamp(v, 0.0f.xxx, 1.0f.xxx) * 16777215.0f) + 0.5f.xxx);
-    float3 tmp4506;
+    float3 fix24Ret;
     if (b == 0)
     {
-        tmp4506 = floor(q / 65536.0f.xxx) / 255.0f.xxx;
+        fix24Ret = floor(q / 65536.0f.xxx) / 255.0f.xxx;
     }
     else
     {
-        float3 tmp4520;
+        float3 fix24Pick;
         if (b == 1)
         {
-            tmp4520 = mod(floor(q / 256.0f.xxx), 256.0f.xxx) / 255.0f.xxx;
+            fix24Pick = mod(floor(q / 256.0f.xxx), 256.0f.xxx) / 255.0f.xxx;
         }
         else
         {
-            tmp4520 = mod(q, 256.0f.xxx) / 255.0f.xxx;
+            fix24Pick = mod(q, 256.0f.xxx) / 255.0f.xxx;
         }
-        tmp4506 = tmp4520;
+        fix24Ret = fix24Pick;
     }
-    return tmp4506;
+    return fix24Ret;
 }
 
 void frag_main()
@@ -660,99 +661,101 @@ void frag_main()
     float4 Amp = waterMat[11];
     float4 UV = waterMat[12];
     float3 posView = -ViewDir;
-    float3 param = posView;
-    float3 P = cellWorldPos(param);
-    bool tmp4734;
+    float3 posViewArg7 = posView;
+    float3 P = cellWorldPos(posViewArg7);
+    bool cond18;
     if (waterFarMask)
     {
-        float2 param_1 = P.xy;
-        tmp4734 = wwFarWaterDry(param_1);
+        float2 worldXYArg = P.xy;
+        cond18 = wwFarWaterDry(worldXYArg);
     }
     else
     {
-        tmp4734 = waterFarMask;
+        cond18 = waterFarMask;
     }
-    if (tmp4734)
+    if (cond18)
     {
         discard;
     }
-    bool tmp4741 = waterSeam.z > 0.0f;
-    bool tmp4756;
-    if (tmp4741)
+    bool cond17 = waterSeam.z > 0.0f;
+    bool cond16;
+    if (cond17)
     {
-        float2 tmp4752 = waterSeamBox.xy + waterSeam.w.xx;
-        tmp4756 = all(bool2(P.xy.x > tmp4752.x, P.xy.y > tmp4752.y));
+        float2 condPart4 = waterSeamBox.xy + waterSeam.w.xx;
+        cond16 = all(bool2(P.xy.x > condPart4.x, P.xy.y > condPart4.y));
     }
     else
     {
-        tmp4756 = tmp4741;
+        cond16 = cond17;
     }
-    bool tmp4769;
-    if (tmp4756)
+    bool cond15;
+    if (cond16)
     {
-        float2 tmp4766 = waterSeamBox.zw - waterSeam.w.xx;
-        tmp4769 = all(bool2(P.xy.x < tmp4766.x, P.xy.y < tmp4766.y));
+        float2 condPart3 = waterSeamBox.zw - waterSeam.w.xx;
+        cond15 = all(bool2(P.xy.x < condPart3.x, P.xy.y < condPart3.y));
     }
     else
     {
-        tmp4769 = tmp4756;
+        cond15 = cond16;
     }
-    if (tmp4769)
+    if (cond15)
     {
         discard;
     }
-    bool tmp4775 = waterSeam.z <= 0.0f;
-    bool tmp4781;
-    if (tmp4775)
+    bool cond14 = waterSeam.z <= 0.0f;
+    bool cond13;
+    if (cond14)
     {
-        tmp4781 = waterSeam.w > 0.0f;
+        cond13 = waterSeam.w > 0.0f;
     }
     else
     {
-        tmp4781 = tmp4775;
+        cond13 = cond14;
     }
-    bool tmp4808;
-    if (tmp4781)
+    bool cond12;
+    if (cond13)
     {
-        float2 tmp4791 = waterSeamBox.xy + waterSeam.w.xx;
-        bool tmp4793 = any(bool2(P.xy.x < tmp4791.x, P.xy.y < tmp4791.y));
-        bool tmp4807;
-        if (!tmp4793)
+        float2 condPart2 = waterSeamBox.xy + waterSeam.w.xx;
+        bool cond11 = any(bool2(P.xy.x < condPart2.x, P.xy.y < condPart2.y));
+        bool condPick2;
+        if (!cond11)
         {
-            float2 tmp4804 = waterSeamBox.zw - waterSeam.w.xx;
-            tmp4807 = any(bool2(P.xy.x > tmp4804.x, P.xy.y > tmp4804.y));
+            float2 condPart5 = waterSeamBox.zw - waterSeam.w.xx;
+            condPick2 = any(bool2(P.xy.x > condPart5.x, P.xy.y > condPart5.y));
         }
         else
         {
-            tmp4807 = tmp4793;
+            condPick2 = cond11;
         }
-        tmp4808 = tmp4807;
+        cond12 = condPick2;
     }
     else
     {
-        tmp4808 = tmp4781;
+        cond12 = cond13;
     }
-    if (tmp4808)
+    if (cond12)
     {
         discard;
     }
-    float3 param_2 = 0.0f.xxx;
-    float3 eye = cellWorldPos(param_2);
+    float3 posViewArg6 = 0.0f.xxx;
+    float3 eye = cellWorldPos(posViewArg6);
     float3 ray = P - eye;
     float dist = length(ray);
     float3 V = ray / max(dist, 9.9999999747524270787835121154785e-07f).xxx;
     bool under = eye.z < P.z;
     float dfade = clamp((dist - 8192.0f) / (P1.x - 8192.0f), 0.0f, 1.0f);
+    // the opaque scene point behind this pixel
     int2 px = int2(gl_FragCoord.xy) - viewportDimensions.xy;
     float vert = 1000000000.0f;
     float along = 1000000000.0f;
     if (waterSslr == 1)
     {
+        // the obscurance pass's target: .a = the opaque scene's view depth (game units), 0 where nothing drew
         float gz = waterDepth.Load(int3(int2(gl_FragCoord.xy), 0)).w;
         if (gz > 0.0f)
         {
-            float3 param_3 = posView * (gz / max(-posView.z, 9.9999999747524270787835121154785e-07f));
-            float3 S = cellWorldPos(param_3);
+            float3 posViewArg5 = posView * (gz / max(-posView.z, 9.9999999747524270787835121154785e-07f));
+            float3 S = cellWorldPos(posViewArg5);
             vert = abs(P.z - S.z);
             along = length(S - P);
         }
@@ -766,8 +769,8 @@ void frag_main()
             {
                 float sceneW = projectionMatrix[3].z / (projectionMatrix[2].z + ((2.0f * dz) - 1.0f));
                 float fragW = 1.0f / gl_FragCoord.w;
-                float3 param_4 = posView * (sceneW / max(fragW, 9.9999999747524270787835121154785e-07f));
-                float3 S_1 = cellWorldPos(param_4);
+                float3 posViewArg4 = posView * (sceneW / max(fragW, 9.9999999747524270787835121154785e-07f));
+                float3 S_1 = cellWorldPos(posViewArg4);
                 vert = abs(P.z - S_1.z);
                 along = length(S_1 - P);
             }
@@ -777,35 +780,36 @@ void frag_main()
     float rw = clamp(1.0f - (along / P1.w), 0.0f, 1.0f);
     float x = clamp((rw - P3.y) / (P3.x - P3.y), 0.0f, 1.0f);
     float alphaV = (pow(max(1.0f - (((3.0f - (2.0f * x)) * x) * x), 0.0f), 0.3300000131130218505859375f) * (P3.w - P3.z)) + P3.z;
-    float tmp5000;
+    float shorePick;
     if ((waterRed & 16) != 0)
     {
-        tmp5000 = 0.0f;
+        shorePick = 0.0f;
     }
     else
     {
-        float param_5 = clamp((rz - P2.x) / (1.0f - P2.x), 0.0f, 1.0f);
-        tmp5000 = smooth01(param_5);
+        float xArg4 = clamp((rz - P2.x) / (1.0f - P2.x), 0.0f, 1.0f);
+        shorePick = smooth01(xArg4);
     }
-    float shore = tmp5000;
-    float param_6 = clamp((rz - P2.w) / (P2.z - P2.w), 0.0f, 1.0f);
-    float flatten = (1.0f - smooth01(param_6)) * P2.y;
+    float shore = shorePick;
+    float xArg3 = clamp((rz - P2.w) / (P2.z - P2.w), 0.0f, 1.0f);
+    float flatten = (1.0f - smooth01(xArg3)) * P2.y;
+    // the three noise layers
     float2 wxy = P.xy;
-    float2 param_7 = (wxy / UV.x.xx) + waterScroll0.xy;
-    float2 param_8;
-    float3 tmp5051 = noiseN(waterNoise0, _waterNoise0_sampler, param_7, param_8);
-    float2 tap0 = param_8;
-    float3 n1 = tmp5051;
-    float2 param_9 = (wxy / UV.y.xx) + waterScroll0.zw;
-    float2 param_10;
-    float3 tmp5066 = noiseN(waterNoise1, _waterNoise1_sampler, param_9, param_10);
-    float2 tap1 = param_10;
-    float3 n2 = tmp5066;
-    float2 param_11 = (wxy / UV.z.xx) + waterScroll1.xy;
-    float2 param_12;
-    float3 tmp5082 = noiseN(waterNoise2, _waterNoise2_sampler, param_11, param_12);
-    float2 tap2 = param_12;
-    float3 n3 = tmp5082;
+    float2 uvArg3 = (wxy / UV.x.xx) + waterScroll0.xy;
+    float2 tapArg3;
+    float3 noiseNRet3 = noiseN(waterNoise0, _waterNoise0_sampler, uvArg3, tapArg3);
+    float2 tap0 = tapArg3;
+    float3 n1 = noiseNRet3;
+    float2 uvArg2 = (wxy / UV.y.xx) + waterScroll0.zw;
+    float2 tapArg2;
+    float3 noiseNRet2 = noiseN(waterNoise1, _waterNoise1_sampler, uvArg2, tapArg2);
+    float2 tap1 = tapArg2;
+    float3 n2 = noiseNRet2;
+    float2 uvArg = (wxy / UV.z.xx) + waterScroll1.xy;
+    float2 tapArg;
+    float3 noiseNRet = noiseN(waterNoise2, _waterNoise2_sampler, uvArg, tapArg);
+    float2 tap2 = tapArg;
+    float3 n3 = noiseNRet;
     float3 N = ((n1 - float3(0.0f, 0.0f, 1.0f)) * Amp.x) + float3(0.0f, 0.0f, 1.0f);
     N += (((n2 * Amp.y) + (n3 * Amp.z)) * dfade);
     N = normalize(N);
@@ -813,44 +817,47 @@ void frag_main()
     N = normalize(((N - float3(0.0f, 0.0f, 1.0f)) * flatten) + float3(0.0f, 0.0f, 1.0f));
     if (waterSslr == 1)
     {
+        // the game's water ray pass: half the flattening, the ray into the view, the 0.2 gate
         float3 Nr = normalize(((N0 - float3(0.0f, 0.0f, 1.0f)) * (0.5f * flatten)) + float3(0.0f, 0.0f, 1.0f));
         float3 Rw = reflect(V, Nr);
-        float3 param_13 = float3(1.0f, 0.0f, 0.0f);
-        float3 param_14 = float3(0.0f, 1.0f, 0.0f);
-        float3 param_15 = float3(0.0f, 0.0f, 1.0f);
-        float3 Rv = float3(dot(Rw, cellWorldDir(param_13)), dot(Rw, cellWorldDir(param_14)), dot(Rw, cellWorldDir(param_15)));
-        bool3 tmp5158 = (((-Rv.z) > 0.20000000298023223876953125f) && (!under)).xxx;
-        fragColor = float4(float3(tmp5158.x ? Rv.x : 0.0f.xxx.x, tmp5158.y ? Rv.y : 0.0f.xxx.y, tmp5158.z ? Rv.z : 0.0f.xxx.z), max(-posView.z, 0.001000000047497451305389404296875f));
+        float3 dirViewArg4 = float3(1.0f, 0.0f, 0.0f);
+        float3 dirViewArg3 = float3(0.0f, 1.0f, 0.0f);
+        float3 dirViewArg2 = float3(0.0f, 0.0f, 1.0f);
+        float3 Rv = float3(dot(Rw, cellWorldDir(dirViewArg4)), dot(Rw, cellWorldDir(dirViewArg3)), dot(Rw, cellWorldDir(dirViewArg2)));
+        bool3 fragColorPart = (((-Rv.z) > 0.20000000298023223876953125f) && (!under)).xxx;
+        fragColor = float4(float3(fragColorPart.x ? Rv.x : 0.0f.xxx.x, fragColorPart.y ? Rv.y : 0.0f.xxx.y, fragColorPart.z ? Rv.z : 0.0f.xxx.z), max(-posView.z, 0.001000000047497451305389404296875f));
         return;
     }
     if ((waterRed & 32) != 0)
     {
         N = float3(0.0f, 0.0f, 1.0f);
     }
-    float3 tmp5176;
+    float3 NsPick;
     if (under)
     {
-        tmp5176 = -N;
+        NsPick = -N;
     }
     else
     {
-        tmp5176 = N;
+        NsPick = N;
     }
-    float3 Ns = tmp5176;
+    // INFERRED: from below the surface faces the eye
+    float3 Ns = NsPick;
     float c5 = 1.0f - clamp(dot(-V, Ns), 0.0f, 1.0f);
-    float tmp5195;
+    float FPick;
     if ((waterRed & 2) != 0)
     {
-        tmp5195 = P4.z;
+        FPick = P4.z;
     }
     else
     {
-        tmp5195 = P4.z + ((((((1.0f - P4.z) * c5) * c5) * c5) * c5) * c5);
+        FPick = P4.z + ((((((1.0f - P4.z) * c5) * c5) * c5) * c5) * c5);
     }
-    float F = tmp5195;
+    float F = FPick;
     float3 R = reflect(V, Ns);
     float3 sky = lerp(waterSky[0].xyz, waterSky[1].xyz, clamp(R.z + 0.75f, 0.0f, 1.0f).xxx);
     sky = lerp(sky, waterSky[2].xyz, clamp((R.z * 1.89999997615814208984375f) + 0.3499999940395355224609375f, 0.0f, 1.0f).xxx);
+    // the game's screen-space reflection over the sky
     float4 ssr = 0.0f.xxxx;
     if (waterSsrOn && (!under))
     {
@@ -862,101 +869,104 @@ void frag_main()
             sky = lerp(sky, ssr.xyz, ssr.w.xxx);
         }
     }
+    // the scene behind: in place, and offset by the normal (the game's shore tap)
     int2 size = int2(spvTextureSize(waterScene, uint(0), dummy_parameter));
     float2 uv = (float2(px) + 0.5f.xx) / float2(size);
     float2 offUV = uv + (float2(-N.x, -N.y) * (N.z * 0.0625f));
     int2 opx = clamp(int2(offUV * float2(size)), int2(0, 0), size - int2(1, 1));
     float3 texIn = waterScene.Load(int3(px, 0)).xyz;
     float3 texOff = waterScene.Load(int3(opx, 0)).xyz;
-    float3 param_16 = texIn;
-    float3 refr = frameToLinear(param_16);
-    float3 param_17 = texOff;
-    float3 refrOff = frameToLinear(param_17);
+    float3 tArg2 = texIn;
+    float3 refr = frameToLinear(tArg2);
+    float3 tArg = texOff;
+    float3 refrOff = frameToLinear(tArg);
+    // the depth-color pass is drawn into the copy before the water: apply it here at this pixel's distances, and
+    // at the offset texel's (its view ray met with the water plane)
     float offAlong = 0.0f;
     float offVert = 0.0f;
     float offHit = 0.0f;
     if ((!under) && (waterSslr == 0))
     {
-        float3 param_18 = refr;
-        float param_19 = along;
-        float param_20 = vert;
-        refr = depthFog(param_18, param_19, param_20);
+        float3 cArg2 = refr;
+        float alongArg2 = along;
+        float vertArg2 = vert;
+        refr = depthFog(cArg2, alongArg2, vertArg2);
         float2 ndc = (((float2(opx) + 0.5f.xx) / float2(size)) * 2.0f) - 1.0f.xx;
-        float tmp5393;
+        float odzPick;
         if (waterHaveDepth)
         {
-            tmp5393 = waterDepth.Load(int3(opx, 0)).x;
+            odzPick = waterDepth.Load(int3(opx, 0)).x;
         }
         else
         {
-            tmp5393 = 1.0f;
+            odzPick = 1.0f;
         }
-        float odz = tmp5393;
+        float odz = odzPick;
         float4x4 iP = spvInverse(projectionMatrix);
         float4 h = mul(float4(ndc, (2.0f * min(odz, 0.999998986721038818359375f)) - 1.0f, 1.0f), iP);
         float3 Sv = h.xyz / h.w.xxx;
-        float3 param_21 = Sv;
-        float3 Sw = cellWorldPos(param_21);
+        float3 posViewArg3 = Sv;
+        float3 Sw = cellWorldPos(posViewArg3);
         float3 dW = normalize(Sw - eye);
-        float tmp5442;
+        float tPick;
         if (abs(dW.z) > 9.9999999747524270787835121154785e-07f)
         {
-            tmp5442 = (P.z - eye.z) / dW.z;
+            tPick = (P.z - eye.z) / dW.z;
         }
         else
         {
-            tmp5442 = -1.0f;
+            tPick = -1.0f;
         }
-        float t = tmp5442;
+        float t = tPick;
         bool sceneAt = odz < 1.0f;
-        bool tmp5459 = t > 0.0f;
-        bool tmp5474;
-        if (tmp5459)
+        bool cond10 = t > 0.0f;
+        bool cond9;
+        if (cond10)
         {
-            bool tmp5463 = !sceneAt;
-            bool tmp5473;
-            if (!tmp5463)
+            bool cond8 = !sceneAt;
+            bool condPick;
+            if (!cond8)
             {
-                tmp5473 = t < length(Sw - eye);
+                condPick = t < length(Sw - eye);
             }
             else
             {
-                tmp5473 = tmp5463;
+                condPick = cond8;
             }
-            tmp5474 = tmp5473;
+            cond9 = condPick;
         }
         else
         {
-            tmp5474 = tmp5459;
+            cond9 = cond10;
         }
-        if (tmp5474)
+        if (cond9)
         {
             float3 Wp = eye + (dW * t);
-            float tmp5484;
+            float offAlongPick;
             if (sceneAt)
             {
-                tmp5484 = length(Sw - Wp);
+                offAlongPick = length(Sw - Wp);
             }
             else
             {
-                tmp5484 = 1000000000.0f;
+                offAlongPick = 1000000000.0f;
             }
-            offAlong = tmp5484;
-            float tmp5494;
+            offAlong = offAlongPick;
+            float offVertPick;
             if (sceneAt)
             {
-                tmp5494 = abs(Wp.z - Sw.z);
+                offVertPick = abs(Wp.z - Sw.z);
             }
             else
             {
-                tmp5494 = 1000000000.0f;
+                offVertPick = 1000000000.0f;
             }
-            offVert = tmp5494;
+            offVert = offVertPick;
             offHit = 1.0f;
-            float3 param_22 = refrOff;
-            float param_23 = offAlong;
-            float param_24 = offVert;
-            refrOff = depthFog(param_22, param_23, param_24);
+            float3 cArg = refrOff;
+            float alongArg = offAlong;
+            float vertArg = offVert;
+            refrOff = depthFog(cArg, alongArg, vertArg);
         }
     }
     float3 silted = refr;
@@ -964,8 +974,8 @@ void frag_main()
     {
         silted = refr + ((lerp(waterMat[5].xyz, waterMat[4].xyz, refr) - refr) * (waterMat[4].w * (1.0f - alphaV)));
     }
-    float3 param_25 = LightDir;
-    float3 Ldir = normalize(cellWorldDir(param_25));
+    float3 dirViewArg = LightDir;
+    float3 Ldir = normalize(cellWorldDir(dirViewArg));
     float3 sun = D.xyz * D.xyz;
     float3 spec = ((sun * pow(clamp(dot(R, Ldir), 0.0f, 1.0f), Var.x)) * waterMat[1].w) + ((sun * pow(clamp(dot(N, float3(-0.098999999463558197021484375f, -0.098999999463558197021484375f, 0.9900000095367431640625f)), 0.0f, 1.0f), waterMat[0].w)) * P1.z);
     if ((waterRed & 8) != 0)
@@ -975,130 +985,133 @@ void frag_main()
     float3 lin;
     if (under)
     {
+        // the game's underwater variant: half the sky and half the underwater color, the scene by 1 - F
         float3 refl = (sky + waterMat[3].xyz) * 0.5f;
         lin = lerp(refl, refr, (1.0f - F).xxx);
     }
     else
     {
-        float tmp5604;
+        float wReflPick;
         if ((waterRed & 1) != 0)
         {
-            tmp5604 = 0.0f;
+            wReflPick = 0.0f;
         }
         else
         {
-            tmp5604 = F * Var.y;
+            wReflPick = F * Var.y;
         }
-        float wRefl = tmp5604;
+        float wRefl = wReflPick;
         float3 far = lerp(waterMat[2].xyz, sky, waterMat[2].w.xxx);
         lin = lerp(silted, sky, wRefl.xxx);
         lin = lerp(far, lin, dfade.xxx) + spec;
         lin = lerp(lin, refrOff, shore.xxx);
     }
     lin = max(lin, 0.0f.xxx);
+    // FARWATER1 round 2: the air as the far land at the same distance gets it (waterAir)
     float3 pAir = posView;
     wwAirFree = (waterAir & 1) != 0;
     if ((waterAir & 2) != 0)
     {
-        float3 param_26 = posView;
-        pAir = wwAirFlatPos(param_26);
+        float3 posViewArg2 = posView;
+        pAir = wwAirFlatPos(posViewArg2);
     }
-    bool tmp5660;
+    bool cond7;
+    // lane SKYA: the sky's aerial perspective with the fog off too
     if (!fogOn)
     {
-        tmp5660 = wwApOn();
+        cond7 = wwApOn();
     }
     else
     {
-        tmp5660 = fogOn;
+        cond7 = fogOn;
     }
-    if (tmp5660)
+    if (cond7)
     {
-        float3 param_27 = lin;
-        float3 param_28 = pAir;
-        float3 tmp5667 = wwFog(param_27, param_28);
-        lin = max(tmp5667, 0.0f.xxx);
+        float3 preFogArg = lin;
+        float3 posViewArg = pAir;
+        float3 wwFogRet = wwFog(preFogArg, posViewArg);
+        lin = max(wwFogRet, 0.0f.xxx);
     }
     float3 s = sqrt(lin);
-    float3 tmp5676;
+    float3 outCPick;
     if (cellOn && cellIsOn)
     {
-        float3 tmp5680;
+        float3 outCPick2;
         if (cellIsLinear)
         {
-            tmp5680 = lin;
+            outCPick2 = lin;
         }
         else
         {
-            float3 param_29 = s;
-            tmp5680 = cellImageSpace(param_29);
+            float3 sqrtColorArg = s;
+            outCPick2 = cellImageSpace(sqrtColorArg);
         }
-        tmp5676 = tmp5680;
+        outCPick = outCPick2;
     }
     else
     {
-        float3 param_30 = s;
-        tmp5676 = tonemap(param_30);
+        float3 xArg2 = s;
+        outCPick = tonemap(xArg2);
     }
-    float3 outC = tmp5676;
+    float3 outC = outCPick;
     fragColor = float4(outC, 1.0f);
     if (waterProbe > 0)
     {
         float3 o = 0.0f.xxx;
         bool wwh0 = (waterProbe == 1);
         bool wwh1 = (waterProbe == 2);
-        if (wwh0 || wwh1)
+        if (or(wwh0, wwh1))   // HLSLFIX2 orfix.py: no short-circuit branch (NV took the wrong side)
         {
-            float3 tmp5714;
+            float3 oPick9;
             if (waterProbe == 1)
             {
-                float3 param_31 = (N * 0.5f) + 0.5f.xxx;
-                tmp5714 = hi16(param_31);
+                float3 vArg20 = (N * 0.5f) + 0.5f.xxx;
+                oPick9 = hi16(vArg20);
             }
             else
             {
-                float3 param_32 = (N * 0.5f) + 0.5f.xxx;
-                tmp5714 = lo16(param_32);
+                float3 vArg19 = (N * 0.5f) + 0.5f.xxx;
+                oPick9 = lo16(vArg19);
             }
-            o = tmp5714;
+            o = oPick9;
         }
         else
         {
             bool wwh2 = (waterProbe == 3);
             bool wwh3 = (waterProbe == 4);
-            if (wwh2 || wwh3)
+            if (or(wwh2, wwh3))   // HLSLFIX2 orfix.py: no short-circuit branch (NV took the wrong side)
             {
-                float3 tmp5741;
+                float3 oPick8;
                 if (waterProbe == 3)
                 {
-                    float3 param_33 = (V * 0.5f) + 0.5f.xxx;
-                    tmp5741 = hi16(param_33);
+                    float3 vArg18 = (V * 0.5f) + 0.5f.xxx;
+                    oPick8 = hi16(vArg18);
                 }
                 else
                 {
-                    float3 param_34 = (V * 0.5f) + 0.5f.xxx;
-                    tmp5741 = lo16(param_34);
+                    float3 vArg17 = (V * 0.5f) + 0.5f.xxx;
+                    oPick8 = lo16(vArg17);
                 }
-                o = tmp5741;
+                o = oPick8;
             }
             else
             {
                 bool wwh4 = (waterProbe == 5);
                 bool wwh5 = (waterProbe == 6);
-                if (wwh4 || wwh5)
+                if (or(wwh4, wwh5))   // HLSLFIX2 orfix.py: no short-circuit branch (NV took the wrong side)
                 {
-                    float3 tmp5768;
+                    float3 oPick7;
                     if (waterProbe == 5)
                     {
-                        float3 param_35 = float3(rz, rw, dfade);
-                        tmp5768 = hi16(param_35);
+                        float3 vArg16 = float3(rz, rw, dfade);
+                        oPick7 = hi16(vArg16);
                     }
                     else
                     {
-                        float3 param_36 = float3(rz, rw, dfade);
-                        tmp5768 = lo16(param_36);
+                        float3 vArg15 = float3(rz, rw, dfade);
+                        oPick7 = lo16(vArg15);
                     }
-                    o = tmp5768;
+                    o = oPick7;
                 }
                 else
                 {
@@ -1116,160 +1129,160 @@ void frag_main()
                         {
                             bool wwh6 = (waterProbe == 9);
                             bool wwh7 = (waterProbe == 10);
-                            if (wwh6 || wwh7)
+                            if (or(wwh6, wwh7))   // HLSLFIX2 orfix.py: no short-circuit branch (NV took the wrong side)
                             {
                                 int col = int(gl_FragCoord.x) % 4;
-                                float3 tmp5813;
+                                float3 vPick;
                                 if (col == 0)
                                 {
-                                    tmp5813 = sun * 0.25f;
+                                    vPick = sun * 0.25f;
                                 }
                                 else
                                 {
-                                    float3 tmp5822;
+                                    float3 vPick2;
                                     if (col == 1)
                                     {
-                                        tmp5822 = (Ldir * 0.5f) + 0.5f.xxx;
+                                        vPick2 = (Ldir * 0.5f) + 0.5f.xxx;
                                     }
                                     else
                                     {
-                                        float3 tmp5832;
+                                        float3 vPick3;
                                         if (col == 2)
                                         {
-                                            tmp5832 = float3(A.w / 8.0f, D.w / 8.0f, float(under));
+                                            vPick3 = float3(A.w / 8.0f, D.w / 8.0f, float(under));
                                         }
                                         else
                                         {
-                                            tmp5832 = float3(float(cellOn && cellIsOn), float(cellIsLinear), float(fogOn));
+                                            vPick3 = float3(float(cellOn && cellIsOn), float(cellIsLinear), float(fogOn));
                                         }
-                                        tmp5822 = tmp5832;
+                                        vPick2 = vPick3;
                                     }
-                                    tmp5813 = tmp5822;
+                                    vPick = vPick2;
                                 }
-                                float3 v = tmp5813;
-                                float3 tmp5860;
+                                float3 v = vPick;
+                                float3 oPick6;
                                 if (waterProbe == 9)
                                 {
-                                    float3 param_37 = v;
-                                    tmp5860 = hi16(param_37);
+                                    float3 vArg14 = v;
+                                    oPick6 = hi16(vArg14);
                                 }
                                 else
                                 {
-                                    float3 param_38 = v;
-                                    tmp5860 = lo16(param_38);
+                                    float3 vArg13 = v;
+                                    oPick6 = lo16(vArg13);
                                 }
-                                o = tmp5860;
+                                o = oPick6;
                             }
                             else
                             {
                                 bool wwh8 = (waterProbe == 11);
                                 bool wwh9 = (waterProbe == 12);
-                                if (wwh8 || wwh9)
+                                if (or(wwh8, wwh9))   // HLSLFIX2 orfix.py: no short-circuit branch (NV took the wrong side)
                                 {
-                                    float3 tmp5881;
+                                    float3 oPick5;
                                     if (waterProbe == 11)
                                     {
-                                        float3 param_39 = float3(tap0, tap1.x);
-                                        tmp5881 = hi16(param_39);
+                                        float3 vArg12 = float3(tap0, tap1.x);
+                                        oPick5 = hi16(vArg12);
                                     }
                                     else
                                     {
-                                        float3 param_40 = float3(tap0, tap1.x);
-                                        tmp5881 = lo16(param_40);
+                                        float3 vArg11 = float3(tap0, tap1.x);
+                                        oPick5 = lo16(vArg11);
                                     }
-                                    o = tmp5881;
+                                    o = oPick5;
                                 }
                                 else
                                 {
                                     bool wwh10 = (waterProbe == 13);
                                     bool wwh11 = (waterProbe == 14);
-                                    if (wwh10 || wwh11)
+                                    if (or(wwh10, wwh11))   // HLSLFIX2 orfix.py: no short-circuit branch (NV took the wrong side)
                                     {
-                                        float3 tmp5914;
+                                        float3 oPick4;
                                         if (waterProbe == 13)
                                         {
-                                            float3 param_41 = float3(tap1.y, tap2);
-                                            tmp5914 = hi16(param_41);
+                                            float3 vArg10 = float3(tap1.y, tap2);
+                                            oPick4 = hi16(vArg10);
                                         }
                                         else
                                         {
-                                            float3 param_42 = float3(tap1.y, tap2);
-                                            tmp5914 = lo16(param_42);
+                                            float3 vArg9 = float3(tap1.y, tap2);
+                                            oPick4 = lo16(vArg9);
                                         }
-                                        o = tmp5914;
+                                        o = oPick4;
                                     }
                                     else
                                     {
                                         bool wwh12 = (waterProbe == 15);
                                         bool wwh13 = (waterProbe == 16);
-                                        if (wwh12 || wwh13)
+                                        if (or(wwh12, wwh13))   // HLSLFIX2 orfix.py: no short-circuit branch (NV took the wrong side)
                                         {
-                                            float3 tmp5945;
+                                            float3 oPick3;
                                             if (waterProbe == 15)
                                             {
-                                                float3 param_43 = ssr.xyz;
-                                                tmp5945 = hi16(param_43);
+                                                float3 vArg8 = ssr.xyz;
+                                                oPick3 = hi16(vArg8);
                                             }
                                             else
                                             {
-                                                float3 param_44 = ssr.xyz;
-                                                tmp5945 = lo16(param_44);
+                                                float3 vArg7 = ssr.xyz;
+                                                oPick3 = lo16(vArg7);
                                             }
-                                            o = tmp5945;
+                                            o = oPick3;
                                         }
                                         else
                                         {
                                             bool wwh14 = (waterProbe == 17);
                                             bool wwh15 = (waterProbe == 18);
-                                            if (wwh14 || wwh15)
+                                            if (or(wwh14, wwh15))   // HLSLFIX2 orfix.py: no short-circuit branch (NV took the wrong side)
                                             {
-                                                float3 tmp5970;
+                                                float3 oPick2;
                                                 if (waterProbe == 17)
                                                 {
-                                                    float3 param_45 = float3(ssr.w, 0.0f, 0.0f);
-                                                    tmp5970 = hi16(param_45);
+                                                    float3 vArg6 = float3(ssr.w, 0.0f, 0.0f);
+                                                    oPick2 = hi16(vArg6);
                                                 }
                                                 else
                                                 {
-                                                    float3 param_46 = float3(ssr.w, 0.0f, 0.0f);
-                                                    tmp5970 = lo16(param_46);
+                                                    float3 vArg5 = float3(ssr.w, 0.0f, 0.0f);
+                                                    oPick2 = lo16(vArg5);
                                                 }
-                                                o = tmp5970;
+                                                o = oPick2;
                                             }
                                             else
                                             {
                                                 if ((waterProbe >= 19) && (waterProbe <= 21))
                                                 {
-                                                    float3 param_47 = float3(dist / 16384.0f, along / 4096.0f, vert / 4096.0f);
-                                                    int param_48 = waterProbe - 19;
-                                                    o = fix24(param_47, param_48);
+                                                    float3 vArg4 = float3(dist / 16384.0f, along / 4096.0f, vert / 4096.0f);
+                                                    int bArg2 = waterProbe - 19;
+                                                    o = fix24(vArg4, bArg2);
                                                 }
                                                 else
                                                 {
                                                     if ((waterProbe >= 22) && (waterProbe <= 24))
                                                     {
-                                                        float3 param_49 = float3(offAlong / 4096.0f, offVert / 4096.0f, offHit);
-                                                        int param_50 = waterProbe - 22;
-                                                        o = fix24(param_49, param_50);
+                                                        float3 vArg3 = float3(offAlong / 4096.0f, offVert / 4096.0f, offHit);
+                                                        int bArg = waterProbe - 22;
+                                                        o = fix24(vArg3, bArg);
                                                     }
                                                     else
                                                     {
                                                         bool wwh16 = (waterProbe == 25);
                                                         bool wwh17 = (waterProbe == 26);
-                                                        if (wwh16 || wwh17)
+                                                        if (or(wwh16, wwh17))   // HLSLFIX2 orfix.py: no short-circuit branch (NV took the wrong side)
                                                         {
-                                                            float3 tmp6041;
+                                                            float3 oPick;
                                                             if (waterProbe == 25)
                                                             {
-                                                                float3 param_51 = lin * 0.25f;
-                                                                tmp6041 = hi16(param_51);
+                                                                float3 vArg2 = lin * 0.25f;
+                                                                oPick = hi16(vArg2);
                                                             }
                                                             else
                                                             {
-                                                                float3 param_52 = lin * 0.25f;
-                                                                tmp6041 = lo16(param_52);
+                                                                float3 vArg = lin * 0.25f;
+                                                                oPick = lo16(vArg);
                                                             }
-                                                            o = tmp6041;
+                                                            o = oPick;
                                                         }
                                                         else
                                                         {

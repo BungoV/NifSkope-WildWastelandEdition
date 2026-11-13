@@ -98,27 +98,27 @@ float ldLtField(float4 src, float4 prm, float3 p, float3 d)
 {
     float phi = 0.0f;
     float gd = 0.0f;
-    float tmp344;
-    float tmp352;
+    float zsPick;
+    float zsPick2;
     for (int i = 0; i < 3; i++)
     {
         if (i == 0)
         {
-            tmp344 = src.z;
+            zsPick = src.z;
         }
         else
         {
             if (i == 1)
             {
-                tmp352 = prm.y;
+                zsPick2 = prm.y;
             }
             else
             {
-                tmp352 = prm.z;
+                zsPick2 = prm.z;
             }
-            tmp344 = tmp352 - src.z;
+            zsPick = zsPick2 - src.z;
         }
-        float zs = tmp344;
+        float zs = zsPick;
         float3 a = p - float3(src.xy, zs);
         float r = sqrt(dot(a, a) + prm.x);
         float e = exp((-r) * src.w) / r;
@@ -170,8 +170,8 @@ void frag_main()
     {
         t = lerp(t, Tex2.Sample(_Tex2_sampler, uv2), texBlend.xxxx);
     }
-    float3 param = t.xyz;
-    float3 c = ((srgbToLinear(param) * vcol.xyz) * colLin) * skyScale;
+    float3 cArg5 = t.xyz;
+    float3 c = ((srgbToLinear(cArg5) * vcol.xyz) * colLin) * skyScale;
     if (ldLtOn != 0)
     {
         float3 d = normalize(wdir);
@@ -179,12 +179,12 @@ void frag_main()
         if ((d.z > 0.0199999995529651641845703125f) && (h > 0.0f))
         {
             float3 p = float3(ldLtCam.xy + (d.xy * (h / d.z)), ldLtCam.w);
-            float3 param_1 = t.xyz;
-            float4 param_2 = ldLtSrc;
-            float4 param_3 = ldLtPrm;
-            float3 param_4 = p;
-            float3 param_5 = d;
-            c += (((srgbToLinear(param_1) * vcol.xyz) * ldLtCol) * ldLtField(param_2, param_3, param_4, param_5));
+            float3 cArg4 = t.xyz;
+            float4 srcArg = ldLtSrc;
+            float4 prmArg = ldLtPrm;
+            float3 pArg = p;
+            float3 dArg = d;
+            c += (((srgbToLinear(cArg4) * vcol.xyz) * ldLtCol) * ldLtField(srcArg, prmArg, pArg, dArg));
         }
     }
     float a = (t.w * vcol.w) * alpha;
@@ -194,8 +194,8 @@ void frag_main()
         float g = ldFsSun.w;
         float dn = (1.0f + (g * g)) - ((2.0f * g) * dot(normalize(wdir), ldFsSun.xyz));
         float phase = (1.0f - (g * g)) / ((12.56637096405029296875f * dn) * sqrt(max(dn, 9.9999999747524270787835121154785e-07f)));
-        float3 param_6 = t.xyz;
-        float lum = dot((srgbToLinear(param_6) * vcol.xyz) * colLin, float3(0.2125999927520751953125f, 0.715200006961822509765625f, 0.072200000286102294921875f)) * skyScale;
+        float3 cArg3 = t.xyz;
+        float lum = dot((srgbToLinear(cArg3) * vcol.xyz) * colLin, float3(0.2125999927520751953125f, 0.715200006961822509765625f, 0.072200000286102294921875f)) * skyScale;
         c += (ldFsTint * (lum * min(((ldFsRb.x * edge) + (ldFsRb.y * a)) * phase, ldFsRb.z)));
     }
     if (ldApOn != 0)
@@ -207,34 +207,34 @@ void frag_main()
         float s = ((-r0) * mu) + sqrt(max(0.0f, ((r0 * r0) * ((mu * mu) - 1.0f)) + (R1 * R1)));
         float r1 = sqrt(((r0 * r0) + (s * s)) + (((2.0f * r0) * mu) * s));
         float mu1 = ((r0 * mu) + s) / r1;
-        float param_7 = r0;
-        float param_8 = mu;
-        float param_9 = r1;
-        float param_10 = mu1;
-        float3 tair = clamp(atTrans(ldTrans, _ldTrans_sampler, param_7, param_8) / max(atTrans(ldTrans, _ldTrans_sampler, param_9, param_10), 9.9999999747524270787835121154785e-07f.xxx), 0.0f.xxx, 1.0f.xxx);
+        float rArg2 = r0;
+        float muArg2 = mu;
+        float rArg = r1;
+        float muArg = mu1;
+        float3 tair = clamp(atTrans(ldTrans, _ldTrans_sampler, rArg2, muArg2) / max(atTrans(ldTrans, _ldTrans_sampler, rArg, muArg), 9.9999999747524270787835121154785e-07f.xxx), 0.0f.xxx, 1.0f.xxx);
         float tm = max(tair.x, max(tair.y, tair.z));
         c *= (tair / max(tm, 9.9999999747524270787835121154785e-07f).xxx);
         a *= tm;
     }
     if (probe)
     {
-        float4 tmp857;
+        float4 fragColorPick;
         if (ndc.x < 0.0f)
         {
-            float3 param_11 = c;
-            float3 tmp862 = studioOutput(param_11);
-            tmp857 = float4(tmp862, 1.0f);
+            float3 cArg2 = c;
+            float3 studioOutputRet2 = studioOutput(cArg2);
+            fragColorPick = float4(studioOutputRet2, 1.0f);
         }
         else
         {
-            tmp857 = float4(a.xxx, 1.0f);
+            fragColorPick = float4(a.xxx, 1.0f);
         }
-        fragColor = tmp857;
+        fragColor = fragColorPick;
         return;
     }
-    float3 param_12 = c;
-    float3 tmp878 = studioOutput(param_12);
-    fragColor = float4(tmp878, a);
+    float3 cArg = c;
+    float3 studioOutputRet = studioOutput(cArg);
+    fragColor = float4(studioOutputRet, a);
 }
 
 SPIRV_Cross_Output main(SPIRV_Cross_Input stage_input)

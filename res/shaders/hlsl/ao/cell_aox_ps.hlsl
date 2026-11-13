@@ -67,10 +67,10 @@ float aoxZMip(int m, inout int2 t)
 
 float aoxZ(int2 t)
 {
-    int param = 0;
-    int2 param_1 = t;
-    float tmp178 = aoxZMip(param, param_1);
-    return tmp178;
+    int mArg = 0;
+    int2 tArg = t;
+    float aoxZMipRet = aoxZMip(mArg, tArg);
+    return aoxZMipRet;
 }
 
 float3 aoxViewPos(float2 uv, float z)
@@ -104,20 +104,20 @@ uint aoxSelectMip(float len)
 float aoxGtao(int2 P)
 {
     int2 pmax = fullSize - int2(1, 1);
-    int2 param = P;
-    float centerZ = aoxZ(param);
+    int2 tArg5 = P;
+    float centerZ = aoxZ(tArg5);
     if (centerZ >= 999000.0f)
     {
         return 1.0f;
     }
     float2 pix = 1.0f.xx / float2(fullSize);
-    float2 param_1 = (float2(P) + 0.5f.xx) * pix;
-    float param_2 = centerZ;
-    float3 centerView = aoxViewPos(param_1, param_2);
+    float2 uvArg3 = (float2(P) + 0.5f.xx) * pix;
+    float zArg3 = centerZ;
+    float3 centerView = aoxViewPos(uvArg3, zArg3);
     float3 viewVec = normalize(-centerView);
-    int2 param_3 = P;
-    float3 tmp1225 = aoxNormal(param_3);
-    float3 normalView = tmp1225;
+    int2 tArg4 = P;
+    float3 aoxNormalRet = aoxNormal(tArg4);
+    float3 normalView = aoxNormalRet;
     float effectRadius = max(aoxParams.x, 0.00999999977648258209228515625f);
     float sliceCount = aoxCounts.x;
     float stepCount = aoxCounts.y;
@@ -130,8 +130,8 @@ float aoxGtao(int2 P)
     float falloffMul = (-1.0f) / max(falloffRange, 9.9999997473787516355514526367188e-05f);
     float falloffAdd = (falloffFrom / max(falloffRange, 9.9999997473787516355514526367188e-05f)) + 1.0f;
     float visibility = clamp((10.0f - screenspaceRadius) / 100.0f, 0.0f, 1.0f) * 0.5f;
-    int2 param_4 = P;
-    float2 _noise = aoxStaticNoise(param_4);
+    int2 pArg = P;
+    float2 _noise = aoxStaticNoise(pArg);
     for (float slice = 0.0f; slice < sliceCount; slice += 1.0f)
     {
         float phi = ((slice + _noise.x) / sliceCount) * 3.1415927410125732421875f;
@@ -154,28 +154,28 @@ float aoxGtao(int2 P)
             float s = (_step + _noise.y) / stepCount;
             s = (s * s) + minS;
             float2 offsetPixels = (omega * s) * screenspaceRadius;
-            float param_5 = length(offsetPixels);
-            uint tapMip = aoxSelectMip(param_5);
+            float lenArg = length(offsetPixels);
+            uint tapMip = aoxSelectMip(lenArg);
             int2 sp0 = clamp(int2(round(float2(P) + offsetPixels)), int2(0, 0), pmax);
-            int param_6 = int(tapMip);
-            int2 param_7 = sp0 >> int(tapMip).xx;
-            float tmp1433 = aoxZMip(param_6, param_7);
-            float z0 = tmp1433;
-            float2 param_8 = (float2(sp0) + 0.5f.xx) * pix;
-            float param_9 = z0;
-            float3 delta0 = aoxViewPos(param_8, param_9) - centerView;
+            int mArg3 = int(tapMip);
+            int2 tArg3 = sp0 >> int(tapMip).xx;
+            float aoxZMipRet3 = aoxZMip(mArg3, tArg3);
+            float z0 = aoxZMipRet3;
+            float2 uvArg2 = (float2(sp0) + 0.5f.xx) * pix;
+            float zArg2 = z0;
+            float3 delta0 = aoxViewPos(uvArg2, zArg2) - centerView;
             float dist0 = length(delta0);
             float shc0 = dot(delta0 / max(dist0, 9.9999997473787516355514526367188e-06f).xxx, viewVec);
             float w0 = clamp((dist0 * falloffMul) + falloffAdd, 0.0f, 1.0f);
             horizonCos0 = max(horizonCos0, lerp(lowHorizonCos0, shc0, w0));
             int2 sp1 = clamp(int2(round(float2(P) - offsetPixels)), int2(0, 0), pmax);
-            int param_10 = int(tapMip);
-            int2 param_11 = sp1 >> int(tapMip).xx;
-            float tmp1490 = aoxZMip(param_10, param_11);
-            float z1 = tmp1490;
-            float2 param_12 = (float2(sp1) + 0.5f.xx) * pix;
-            float param_13 = z1;
-            float3 delta1 = aoxViewPos(param_12, param_13) - centerView;
+            int mArg2 = int(tapMip);
+            int2 tArg2 = sp1 >> int(tapMip).xx;
+            float aoxZMipRet2 = aoxZMip(mArg2, tArg2);
+            float z1 = aoxZMipRet2;
+            float2 uvArg = (float2(sp1) + 0.5f.xx) * pix;
+            float zArg = z1;
+            float3 delta1 = aoxViewPos(uvArg, zArg) - centerView;
             float dist1 = length(delta1);
             float shc1 = dot(delta1 / max(dist1, 9.9999997473787516355514526367188e-06f).xxx, viewVec);
             float w1 = clamp((dist1 * falloffMul) + falloffAdd, 0.0f, 1.0f);
@@ -202,19 +202,19 @@ float aoxUnorm8(float v)
 float aoxHbao(int2 P)
 {
     int2 pmax = fullSize - int2(1, 1);
-    int2 param = P;
-    float centerZ = aoxZ(param);
+    int2 tArg8 = P;
+    float centerZ = aoxZ(tArg8);
     if (centerZ >= 999000.0f)
     {
         return 1.0f;
     }
     float2 pix = 1.0f.xx / float2(fullSize);
-    float2 param_1 = (float2(P) + 0.5f.xx) * pix;
-    float param_2 = centerZ;
-    float3 centerView = aoxViewPos(param_1, param_2);
-    int2 param_3 = P;
-    float3 tmp1633 = aoxNormal(param_3);
-    float3 normalView = tmp1633;
+    float2 uvArg5 = (float2(P) + 0.5f.xx) * pix;
+    float zArg5 = centerZ;
+    float3 centerView = aoxViewPos(uvArg5, zArg5);
+    int2 tArg7 = P;
+    float3 aoxNormalRet2 = aoxNormal(tArg7);
+    float3 normalView = aoxNormalRet2;
     float effectRadius = max(aoxParams.x, 0.00999999977648258209228515625f);
     float tangentBiasSin = sin(clamp(aoxParams.y, 0.0f, 1.0f) * 0.261799395084381103515625f);
     float dirCount = aoxCounts.x;
@@ -236,15 +236,15 @@ float aoxHbao(int2 P)
             float t = (s - stepNoise) / stepCount;
             float2 offset = dir * (t * screenspaceRadius);
             int2 sp = clamp(int2(round(float2(P) + offset)), int2(0, 0), pmax);
-            float param_4 = length(offset);
-            uint m = aoxSelectMip(param_4);
-            int param_5 = int(m);
-            int2 param_6 = sp >> int(m).xx;
-            float tmp1765 = aoxZMip(param_5, param_6);
-            float sz = tmp1765;
-            float2 param_7 = (float2(sp) + 0.5f.xx) * pix;
-            float param_8 = sz;
-            float3 delta = aoxViewPos(param_7, param_8) - centerView;
+            float lenArg2 = length(offset);
+            uint m = aoxSelectMip(lenArg2);
+            int mArg4 = int(m);
+            int2 tArg6 = sp >> int(m).xx;
+            float aoxZMipRet4 = aoxZMip(mArg4, tArg6);
+            float sz = aoxZMipRet4;
+            float2 uvArg4 = (float2(sp) + 0.5f.xx) * pix;
+            float zArg4 = sz;
+            float3 delta = aoxViewPos(uvArg4, zArg4) - centerView;
             float dist = length(delta);
             float sinElev = dot(delta / max(dist, 9.9999997473787516355514526367188e-06f).xxx, normalView);
             float atten = clamp(1.0f - ((dist * dist) / max(falloffRadiusView * falloffRadiusView, 9.9999997473787516355514526367188e-05f)), 0.0f, 1.0f);
@@ -265,24 +265,24 @@ float2 aoxSrc(int2 t)
 float aoxBilateral(int2 P)
 {
     int radius = clamp(int(aoxDenoise.x), 1, 4);
-    int2 param = P;
-    float centerDepth = aoxZ(param);
+    int2 tArg11 = P;
+    float centerDepth = aoxZ(tArg11);
     float invDepthSigma = 1.0f / max(aoxDenoise.y * centerDepth, 0.001000000047497451305389404296875f);
     float weightedAO = 0.0f;
     float weightSum = 0.0f;
-    int tmp1859 = -radius;
-    for (int y = tmp1859; y <= radius; y++)
+    int part2 = -radius;
+    for (int y = part2; y <= radius; y++)
     {
-        int tmp1870 = -radius;
-        for (int x = tmp1870; x <= radius; x++)
+        int part = -radius;
+        for (int x = part; x <= radius; x++)
         {
             int2 q = P + int2(x, y);
-            int2 param_1 = q;
-            float dz = abs(aoxZ(param_1) - centerDepth) * invDepthSigma;
+            int2 tArg10 = q;
+            float dz = abs(aoxZ(tArg10) - centerDepth) * invDepthSigma;
             float spatial = ((abs(x) == radius) ? 0.5f : 1.0f) * ((abs(y) == radius) ? 0.5f : 1.0f);
             float weight = spatial * exp((-dz) * dz);
-            int2 param_2 = q;
-            weightedAO += (aoxSrc(param_2).x * weight);
+            int2 tArg9 = q;
+            weightedAO += (aoxSrc(tArg9).x * weight);
             weightSum += weight;
         }
     }
@@ -314,18 +314,18 @@ float XeGTAO_FastACos(float inX)
 {
     float x = abs(inX);
     float res = ((-0.15658299624919891357421875f) * x) + 1.57079601287841796875f;
-    float param = 1.0f - x;
-    res *= XeGTAO_FastSqrt(param);
-    float tmp461;
+    float xArg = 1.0f - x;
+    res *= XeGTAO_FastSqrt(xArg);
+    float XeGTAO_FastACosRet;
     if (inX >= 0.0f)
     {
-        tmp461 = res;
+        XeGTAO_FastACosRet = res;
     }
     else
     {
-        tmp461 = 3.14159297943115234375f - res;
+        XeGTAO_FastACosRet = 3.14159297943115234375f - res;
     }
-    return tmp461;
+    return XeGTAO_FastACosRet;
 }
 
 // the point-clamp SampleLevel of the 5-mip working depth: the nearest level, the texel under the uv
@@ -333,10 +333,10 @@ float XeGTAO_SampleDepth(float2 uv, float mipLevel_1)
 {
     int m = clamp(int(floor(mipLevel_1 + 0.5f)), 0, 4);
     int2 t = int2(floor(uv * float2(mipSize[m])));
-    int param = m;
-    int2 param_1 = t;
-    float tmp491 = aoxZMip(param, param_1);
-    return tmp491;
+    int mArg5 = m;
+    int2 tArg12 = t;
+    float aoxZMipRet5 = aoxZMip(mArg5, tArg12);
+    return aoxZMipRet5;
 }
 
 // rg: the working term (an integer 0..255, the visibility / 1.5) and the packed edges
@@ -344,30 +344,32 @@ float2 XeGTAO_MainPass(int2 pixCoord, float sliceCount, float stepsPerSlice, flo
 {
     float2 viewportPixelSize = 1.0f.xx / float2(fullSize);
     float2 normalizedScreenPos = (float2(pixCoord) + 0.5f.xx) * viewportPixelSize;
-    int2 param = pixCoord;
-    float viewspaceZ = aoxZ(param);
-    int2 param_1 = pixCoord + int2(-1, 0);
-    float pixLZ = aoxZ(param_1);
-    int2 param_2 = pixCoord + int2(0, -1);
-    float pixTZ = aoxZ(param_2);
-    int2 param_3 = pixCoord + int2(1, 0);
-    float pixRZ = aoxZ(param_3);
-    int2 param_4 = pixCoord + int2(0, 1);
-    float pixBZ = aoxZ(param_4);
-    float param_5 = viewspaceZ;
-    float param_6 = pixLZ;
-    float param_7 = pixRZ;
-    float param_8 = pixTZ;
-    float param_9 = pixBZ;
-    float4 edgesLRTB = XeGTAO_CalculateEdges(param_5, param_6, param_7, param_8, param_9);
-    float4 param_10 = edgesLRTB;
-    float tmp550 = XeGTAO_PackEdges(param_10);
-    float edges = tmp550;
+    int2 tArg17 = pixCoord;
+    float viewspaceZ = aoxZ(tArg17);
+    int2 tArg16 = pixCoord + int2(-1, 0);
+    float pixLZ = aoxZ(tArg16);
+    int2 tArg15 = pixCoord + int2(0, -1);
+    float pixTZ = aoxZ(tArg15);
+    int2 tArg14 = pixCoord + int2(1, 0);
+    float pixRZ = aoxZ(tArg14);
+    int2 tArg13 = pixCoord + int2(0, 1);
+    float pixBZ = aoxZ(tArg13);
+    float centerZArg = viewspaceZ;
+    float leftZArg = pixLZ;
+    float rightZArg = pixRZ;
+    float topZArg = pixTZ;
+    float bottomZArg = pixBZ;
+    float4 edgesLRTB = XeGTAO_CalculateEdges(centerZArg, leftZArg, rightZArg, topZArg, bottomZArg);
+    float4 edgesLRTBArg = edgesLRTB;
+    float XeGTAO_PackEdgesRet = XeGTAO_PackEdges(edgesLRTBArg);
+    float edges = XeGTAO_PackEdgesRet;
+    // XE_GTAO_FP32_DEPTHS
     viewspaceZ *= 0.999989986419677734375f;
-    float2 param_11 = normalizedScreenPos;
-    float param_12 = viewspaceZ;
-    float3 pixCenterPos = aoxViewPos(param_11, param_12);
+    float2 uvArg10 = normalizedScreenPos;
+    float zArg8 = viewspaceZ;
+    float3 pixCenterPos = aoxViewPos(uvArg10, zArg8);
     float3 viewVec = normalize(-pixCenterPos);
+    // RadiusMultiplier 1: the radius is already in view units
     float effectRadius = aoxParams.x;
     float sampleDistributionPower = 2.0f;
     float falloffRange = aoxParams.y * effectRadius;
@@ -395,8 +397,8 @@ float2 XeGTAO_MainPass(int2 pixCoord, float sliceCount, float stepsPerSlice, flo
         float signNorm = sign(dot(orthoDirectionVec, projectedNormalVec));
         float projectedNormalVecLength = length(projectedNormalVec);
         float cosNorm = clamp(dot(projectedNormalVec, viewVec) / projectedNormalVecLength, 0.0f, 1.0f);
-        float param_13 = cosNorm;
-        float n = signNorm * XeGTAO_FastACos(param_13);
+        float inXArg3 = cosNorm;
+        float n = signNorm * XeGTAO_FastACos(inXArg3);
         float lowHorizonCos0 = cos(n + 1.57079637050628662109375f);
         float lowHorizonCos1 = cos(n - 1.57079637050628662109375f);
         float horizonCos0 = lowHorizonCos0;
@@ -413,25 +415,26 @@ float2 XeGTAO_MainPass(int2 pixCoord, float sliceCount, float stepsPerSlice, flo
             float mipLevel_1 = clamp(log2(sampleOffsetLength) - 3.2999999523162841796875f, 0.0f, 5.0f);
             sampleOffset = round(sampleOffset) * viewportPixelSize;
             float2 sampleScreenPos0 = normalizedScreenPos + sampleOffset;
-            float2 param_14 = sampleScreenPos0;
-            float param_15 = mipLevel_1;
-            float SZ0 = XeGTAO_SampleDepth(param_14, param_15);
-            float2 param_16 = sampleScreenPos0;
-            float param_17 = SZ0;
-            float3 samplePos0 = aoxViewPos(param_16, param_17);
+            float2 uvArg9 = sampleScreenPos0;
+            float mipLevel_1Arg2 = mipLevel_1;
+            float SZ0 = XeGTAO_SampleDepth(uvArg9, mipLevel_1Arg2);
+            float2 uvArg8 = sampleScreenPos0;
+            float zArg7 = SZ0;
+            float3 samplePos0 = aoxViewPos(uvArg8, zArg7);
             float2 sampleScreenPos1 = normalizedScreenPos - sampleOffset;
-            float2 param_18 = sampleScreenPos1;
-            float param_19 = mipLevel_1;
-            float SZ1 = XeGTAO_SampleDepth(param_18, param_19);
-            float2 param_20 = sampleScreenPos1;
-            float param_21 = SZ1;
-            float3 samplePos1 = aoxViewPos(param_20, param_21);
+            float2 uvArg7 = sampleScreenPos1;
+            float mipLevel_1Arg = mipLevel_1;
+            float SZ1 = XeGTAO_SampleDepth(uvArg7, mipLevel_1Arg);
+            float2 uvArg6 = sampleScreenPos1;
+            float zArg6 = SZ1;
+            float3 samplePos1 = aoxViewPos(uvArg6, zArg6);
             float3 sampleDelta0 = samplePos0 - pixCenterPos;
             float3 sampleDelta1 = samplePos1 - pixCenterPos;
             float sampleDist0 = length(sampleDelta0);
             float sampleDist1 = length(sampleDelta1);
             float3 sampleHorizonVec0 = sampleDelta0 / sampleDist0.xxx;
             float3 sampleHorizonVec1 = sampleDelta1 / sampleDist1.xxx;
+            // thin occluder compensation 0: the falloff base is the plain distance
             float weight0 = clamp((sampleDist0 * falloffMul) + falloffAdd, 0.0f, 1.0f);
             float weight1 = clamp((sampleDist1 * falloffMul) + falloffAdd, 0.0f, 1.0f);
             float shc0 = dot(sampleHorizonVec0, viewVec);
@@ -442,15 +445,16 @@ float2 XeGTAO_MainPass(int2 pixCoord, float sliceCount, float stepsPerSlice, flo
             horizonCos1 = max(horizonCos1, shc1);
         }
         projectedNormalVecLength = lerp(projectedNormalVecLength, 1.0f, 0.0500000007450580596923828125f);
-        float param_22 = horizonCos1;
-        float h0 = -XeGTAO_FastACos(param_22);
-        float param_23 = horizonCos0;
-        float h1 = XeGTAO_FastACos(param_23);
+        float inXArg2 = horizonCos1;
+        float h0 = -XeGTAO_FastACos(inXArg2);
+        float inXArg = horizonCos0;
+        float h1 = XeGTAO_FastACos(inXArg);
         float iarc0 = ((cosNorm + ((2.0f * h0) * sin(n))) - cos((2.0f * h0) - n)) / 4.0f;
         float iarc1 = ((cosNorm + ((2.0f * h1) * sin(n))) - cos((2.0f * h1) - n)) / 4.0f;
         visibility += (projectedNormalVecLength * (iarc0 + iarc1));
     }
     visibility /= sliceCount;
+    // FinalValuePower
     visibility = pow(visibility, aoxParams.w);
     visibility = max(0.02999999932944774627685546875f, visibility);
     visibility = clamp(visibility / 1.5f, 0.0f, 1.0f);
@@ -471,26 +475,26 @@ float4 XeGTAO_UnpackEdges(float packedValue)
 // one pixel of XeGTAO_Denoise (finalApply): the edge-aware 3x3 over the working term (src.r) and edges (src.g)
 float XeGTAO_Denoise(int2 pixCoord, float blurBeta)
 {
-    int2 param = pixCoord;
-    float2 cC = aoxSrc(param);
-    int2 param_1 = pixCoord + int2(-1, 0);
-    float2 cL = aoxSrc(param_1);
-    int2 param_2 = pixCoord + int2(1, 0);
-    float2 cR = aoxSrc(param_2);
-    int2 param_3 = pixCoord + int2(0, -1);
-    float2 cT = aoxSrc(param_3);
-    int2 param_4 = pixCoord + int2(0, 1);
-    float2 cB = aoxSrc(param_4);
-    float param_5 = cL.y;
-    float4 edgesL_LRTB = XeGTAO_UnpackEdges(param_5);
-    float param_6 = cT.y;
-    float4 edgesT_LRTB = XeGTAO_UnpackEdges(param_6);
-    float param_7 = cR.y;
-    float4 edgesR_LRTB = XeGTAO_UnpackEdges(param_7);
-    float param_8 = cB.y;
-    float4 edgesB_LRTB = XeGTAO_UnpackEdges(param_8);
-    float param_9 = cC.y;
-    float4 edgesC_LRTB = XeGTAO_UnpackEdges(param_9);
+    int2 tArg26 = pixCoord;
+    float2 cC = aoxSrc(tArg26);
+    int2 tArg25 = pixCoord + int2(-1, 0);
+    float2 cL = aoxSrc(tArg25);
+    int2 tArg24 = pixCoord + int2(1, 0);
+    float2 cR = aoxSrc(tArg24);
+    int2 tArg23 = pixCoord + int2(0, -1);
+    float2 cT = aoxSrc(tArg23);
+    int2 tArg22 = pixCoord + int2(0, 1);
+    float2 cB = aoxSrc(tArg22);
+    float packedValueArg5 = cL.y;
+    float4 edgesL_LRTB = XeGTAO_UnpackEdges(packedValueArg5);
+    float packedValueArg4 = cT.y;
+    float4 edgesT_LRTB = XeGTAO_UnpackEdges(packedValueArg4);
+    float packedValueArg3 = cR.y;
+    float4 edgesR_LRTB = XeGTAO_UnpackEdges(packedValueArg3);
+    float packedValueArg2 = cB.y;
+    float4 edgesB_LRTB = XeGTAO_UnpackEdges(packedValueArg2);
+    float packedValueArg = cC.y;
+    float4 edgesC_LRTB = XeGTAO_UnpackEdges(packedValueArg);
     edgesC_LRTB *= float4(edgesL_LRTB.y, edgesR_LRTB.x, edgesT_LRTB.w, edgesB_LRTB.z);
     float edginess = (clamp(1.5f - dot(edgesC_LRTB, 1.0f.xxxx), 0.0f, 1.0f) / 1.5f) * 0.5f;
     edgesC_LRTB = clamp(edgesC_LRTB + edginess.xxxx, 0.0f.xxxx, 1.0f.xxxx);
@@ -508,19 +512,20 @@ float XeGTAO_Denoise(int2 pixCoord, float blurBeta)
     sumWeight += edgesC_LRTB.z;
     sum += ((cB.x / 255.0f) * edgesC_LRTB.w);
     sumWeight += edgesC_LRTB.w;
-    int2 param_10 = pixCoord + int2(-1, -1);
-    sum += ((aoxSrc(param_10).x / 255.0f) * weightTL);
+    int2 tArg21 = pixCoord + int2(-1, -1);
+    sum += ((aoxSrc(tArg21).x / 255.0f) * weightTL);
     sumWeight += weightTL;
-    int2 param_11 = pixCoord + int2(1, -1);
-    sum += ((aoxSrc(param_11).x / 255.0f) * weightTR);
+    int2 tArg20 = pixCoord + int2(1, -1);
+    sum += ((aoxSrc(tArg20).x / 255.0f) * weightTR);
     sumWeight += weightTR;
-    int2 param_12 = pixCoord + int2(-1, 1);
-    sum += ((aoxSrc(param_12).x / 255.0f) * weightBL);
+    int2 tArg19 = pixCoord + int2(-1, 1);
+    sum += ((aoxSrc(tArg19).x / 255.0f) * weightBL);
     sumWeight += weightBL;
-    int2 param_13 = pixCoord + int2(1, 1);
-    sum += ((aoxSrc(param_13).x / 255.0f) * weightBR);
+    int2 tArg18 = pixCoord + int2(1, 1);
+    sum += ((aoxSrc(tArg18).x / 255.0f) * weightBR);
     sumWeight += weightBR;
     float outputValue = (sum / sumWeight) * 1.5f;
+    // the R32_UINT store, then the resolve's saturate( packed / 255 )
     return clamp(float(uint((outputValue * 255.0f) + 0.5f)) / 255.0f, 0.0f, 1.0f);
 }
 
@@ -539,6 +544,7 @@ void frag_main()
             int2 p = P * int2(2, 2);
             int2 s = mipSize[mipLevel - 1] - int2(1, 1);
             float4 d = float4(src.Load(int3(min(p, s), 0)).x, src.Load(int3(min((p + int2(1, 0)), s), 0)).x, src.Load(int3(min((p + int2(0, 1)), s), 0)).x, src.Load(int3(min((p + int2(1, 1)), s), 0)).x);
+            // SSAO_DepthMIPFilter: the 2x2 mean weighted toward the far side, cut past the falloff
             float radius = 0.75f * max(aoxParams.x, 9.9999997473787516355514526367188e-05f);
             float range = clamp(aoxParams.y, 0.0f, 1.0f) * radius;
             float from = radius * (1.0f - clamp(aoxParams.y, 0.0f, 1.0f));
@@ -552,56 +558,56 @@ void frag_main()
         {
             if (aoxStage == 3)
             {
-                int2 param = P;
-                float param_1 = aoxGtao(param);
-                fragColor = float4(aoxUnorm8(param_1), 0.0f, 0.0f, 1.0f);
+                int2 PArg3 = P;
+                float vArg4 = aoxGtao(PArg3);
+                fragColor = float4(aoxUnorm8(vArg4), 0.0f, 0.0f, 1.0f);
             }
             else
             {
                 if (aoxStage == 4)
                 {
-                    int2 param_2 = P;
-                    float param_3 = aoxHbao(param_2);
-                    fragColor = float4(aoxUnorm8(param_3), 0.0f, 0.0f, 1.0f);
+                    int2 PArg2 = P;
+                    float vArg3 = aoxHbao(PArg2);
+                    fragColor = float4(aoxUnorm8(vArg3), 0.0f, 0.0f, 1.0f);
                 }
                 else
                 {
                     if (aoxStage == 5)
                     {
-                        int2 param_4 = P;
-                        float param_5 = aoxBilateral(param_4);
-                        fragColor = float4(aoxUnorm8(param_5), 0.0f, 0.0f, 1.0f);
+                        int2 PArg = P;
+                        float vArg2 = aoxBilateral(PArg);
+                        fragColor = float4(aoxUnorm8(vArg2), 0.0f, 0.0f, 1.0f);
                     }
                     else
                     {
                         if (aoxStage == 6)
                         {
-                            int2 param_6 = P;
-                            if (aoxZ(param_6) >= 999000.0f)
+                            int2 tArg28 = P;
+                            if (aoxZ(tArg28) >= 999000.0f)
                             {
-                                float4 param_7 = 1.0f.xxxx;
-                                float tmp2137 = XeGTAO_PackEdges(param_7);
-                                fragColor = float4(170.0f, tmp2137, 0.0f, 1.0f);
+                                float4 edgesLRTBArg2 = 1.0f.xxxx;
+                                float XeGTAO_PackEdgesRet2 = XeGTAO_PackEdges(edgesLRTBArg2);
+                                fragColor = float4(170.0f, XeGTAO_PackEdgesRet2, 0.0f, 1.0f);
                             }
                             else
                             {
-                                int2 param_8 = P;
-                                int2 param_9 = P;
-                                float3 tmp2145 = aoxNormal(param_9);
-                                int2 param_10 = P;
-                                float param_11 = aoxCounts.x;
-                                float param_12 = aoxCounts.y;
-                                float2 param_13 = aoxStaticNoise(param_8);
-                                float3 param_14 = tmp2145;
-                                fragColor = float4(XeGTAO_MainPass(param_10, param_11, param_12, param_13, param_14), 0.0f, 1.0f);
+                                int2 pArg2 = P;
+                                int2 tArg27 = P;
+                                float3 aoxNormalRet3 = aoxNormal(tArg27);
+                                int2 pixCoordArg2 = P;
+                                float sliceCountArg = aoxCounts.x;
+                                float stepsPerSliceArg = aoxCounts.y;
+                                float2 localNoiseArg = aoxStaticNoise(pArg2);
+                                float3 viewspaceNormalArg = aoxNormalRet3;
+                                fragColor = float4(XeGTAO_MainPass(pixCoordArg2, sliceCountArg, stepsPerSliceArg, localNoiseArg, viewspaceNormalArg), 0.0f, 1.0f);
                             }
                         }
                         else
                         {
-                            int2 param_15 = P;
-                            float param_16 = aoxDenoise.z;
-                            float param_17 = XeGTAO_Denoise(param_15, param_16);
-                            fragColor = float4(aoxUnorm8(param_17), 0.0f, 0.0f, 1.0f);
+                            int2 pixCoordArg = P;
+                            float blurBetaArg = aoxDenoise.z;
+                            float vArg = XeGTAO_Denoise(pixCoordArg, blurBetaArg);
+                            fragColor = float4(aoxUnorm8(vArg), 0.0f, 0.0f, 1.0f);
                         }
                     }
                 }

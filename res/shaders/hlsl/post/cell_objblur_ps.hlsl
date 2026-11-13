@@ -64,6 +64,7 @@ void frag_main()
     int2 X = int2(gl_FragCoord.xy);
     int2 sz = int2(spvTextureSize(colTex, uint(0), dummy_parameter));
     float4 cX = colTex.Load(int3(X, 0));
+    // radius: half the shutter's travel each side
     float2 vn = neighTex.Load(int3(X / tile.xx, 0)).xy * 0.5f;
     float ln = length(vn);
     if (ln < 0.5f)
@@ -71,49 +72,50 @@ void frag_main()
         fragColor = cX;
         return;
     }
+    // the span reaches the half pixel the last covered pixel overhangs
     float2 vs = vn * ((ln + 0.5f) / ln);
     float rx = length(blurTex.Load(int3(X, 0)).xy) * 0.5f;
-    int2 param = X;
-    float zx = dist(param);
+    int2 pArg2 = X;
+    float zx = dist(pArg2);
     float k = max(0.0199999995529651641845703125f * zx, 1.0f);
     float wsum = 1.0f;
     float4 sum = cX;
     float j = frac(52.98291778564453125f * frac(dot(gl_FragCoord.xy, float2(0.067110560834407806396484375f, 0.005837149918079376220703125f)) + noiseSeed)) - 0.5f;
     int n = max(samples, 2);
-    float tmp253;
+    float aPick;
     for (int i = 0; i < n; i++)
     {
         float t = lerp(-1.0f, 1.0f, ((float(i) + j) + 1.0f) / float(n + 1));
         int2 Y = clamp(int2(floor((float2(X) + 0.5f.xx) + (vs * t))), int2(0, 0), sz - int2(1, 1));
         float d = length(float2(Y - X));
         float ry = length(blurTex.Load(int3(Y, 0)).xy) * 0.5f;
-        int2 param_1 = Y;
-        float zy = dist(param_1);
-        float param_2 = zy;
-        float param_3 = zx;
-        float param_4 = k;
-        float yf = front(param_2, param_3, param_4);
-        float param_5 = zx;
-        float param_6 = zy;
-        float param_7 = k;
-        float xf = front(param_5, param_6, param_7);
+        int2 pArg = Y;
+        float zy = dist(pArg);
+        float zaArg2 = zy;
+        float zbArg2 = zx;
+        float kArg2 = k;
+        float yf = front(zaArg2, zbArg2, kArg2);
+        float zaArg = zx;
+        float zbArg = zy;
+        float kArg = k;
+        float xf = front(zaArg, zbArg, kArg);
         float same = yf * xf;
         float rm = max(rx, ry);
         if (rm < 0.5f)
         {
-            tmp253 = 1.0f;
+            aPick = 1.0f;
         }
         else
         {
-            float param_8 = d;
-            float param_9 = rm;
-            tmp253 = reach(param_8, param_9);
+            float dArg3 = d;
+            float rArg3 = rm;
+            aPick = reach(dArg3, rArg3);
         }
-        float param_10 = d;
-        float param_11 = ry;
-        float param_12 = d;
-        float param_13 = rx;
-        float a = ((same * tmp253) + ((yf - same) * reach(param_10, param_11))) + ((xf - same) * reach(param_12, param_13));
+        float dArg2 = d;
+        float rArg2 = ry;
+        float dArg = d;
+        float rArg = rx;
+        float a = ((same * aPick) + ((yf - same) * reach(dArg2, rArg2))) + ((xf - same) * reach(dArg, rArg));
         wsum += a;
         sum += (colTex.Load(int3(Y, 0)) * a);
     }

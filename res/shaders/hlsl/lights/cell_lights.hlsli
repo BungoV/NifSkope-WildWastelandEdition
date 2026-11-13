@@ -37,9 +37,9 @@ float3 cellImageSpace(float3 sqrtColor)
     }
     else
     {
-        float3 tmp1 = x * 0.5f;
-        float3 tmp2 = wwTonemapPhysical(tmp1);
-        c = tmp2;
+        float3 cPart2 = x * 0.5f;
+        float3 cPart = wwTonemapPhysical(cPart2);
+        c = cPart;
     }
     if ((cellIsRed & 4) == 0)
     {
@@ -49,16 +49,16 @@ float3 cellImageSpace(float3 sqrtColor)
         c = (((c * cellIsCine.y) - cellIsAdapted.xxx) * cellIsCine.z) + cellIsAdapted.xxx;
     }
     c = pow(max(c, 0.0f.xxx), 0.4545454680919647216796875f.xxx);
-    bool tmp3;
+    bool cond;
     if (cellIsLutOn)
     {
-        tmp3 = (cellIsRed & 1) == 0;
+        cond = (cellIsRed & 1) == 0;
     }
     else
     {
-        tmp3 = cellIsLutOn;
+        cond = cellIsLutOn;
     }
-    if (tmp3)
+    if (cond)
     {
         c = cellIsLut.Sample(_cellIsLut_sampler, (c * 0.9375f) + 0.03125f.xxx).xyz;
     }
@@ -82,9 +82,9 @@ float3 cellImageSpace(float3 sqrtColor)
     }
     else
     {
-        float3 tmp1 = x * 0.5f;
-        float3 tmp2 = wwTonemapPhysical(tmp1);
-        c = tmp2;
+        float3 cPart2 = x * 0.5f;
+        float3 cPart = wwTonemapPhysical(cPart2);
+        c = cPart;
     }
     if ((cellIsRed & 4) == 0)
     {
@@ -94,16 +94,16 @@ float3 cellImageSpace(float3 sqrtColor)
         c = (((c * cellIsCine.y) - cellIsAdapted.xxx) * cellIsCine.z) + cellIsAdapted.xxx;
     }
     c = pow(max(c, 0.0f.xxx), 0.4545454680919647216796875f.xxx);
-    bool tmp3;
+    bool cond;
     if (cellIsLutOn)
     {
-        tmp3 = (cellIsRed & 1) == 0;
+        cond = (cellIsRed & 1) == 0;
     }
     else
     {
-        tmp3 = cellIsLutOn;
+        cond = cellIsLutOn;
     }
-    if (tmp3)
+    if (cond)
     {
         c = cellIsLut.Sample(_cellIsLut_sampler, (c * 0.9375f) + 0.03125f.xxx).xyz;
     }
@@ -124,16 +124,16 @@ float3 cellImageSpace(float3 sqrtColor)
     x *= (1.0f.xxx + cellIsWbD);
     if (cellIsFoBloomOn && (cellIsFoBloomEc > 0.0f))
     {
-        float tmp1;
+        float cPart2;
         if (cellIsFoBloomFogCap > 0.0f)
         {
-            tmp1 = min(cellBloomGain, cellIsFoBloomFogCap);
+            cPart2 = min(cellBloomGain, cellIsFoBloomFogCap);
         }
         else
         {
-            tmp1 = cellBloomGain;
+            cPart2 = cellBloomGain;
         }
-        float kg = min(cellIsFoBloomEc * tmp1, 1.0f);
+        float kg = min(cellIsFoBloomEc * cPart2, 1.0f);
         x = (x * (1.0f - kg)) + (cellFoBloomHere * (2.0f * (kg / cellIsFoBloomEc)));
     }
     else
@@ -152,9 +152,9 @@ float3 cellImageSpace(float3 sqrtColor)
     }
     else
     {
-        float3 tmp2 = x * 0.5f;
-        float3 tmp3 = wwTonemapPhysical(tmp2);
-        c = tmp3;
+        float3 cPart = x * 0.5f;
+        float3 cond = wwTonemapPhysical(cPart);
+        c = cond;
     }
     if ((cellIsRed & 4) == 0)
     {
@@ -164,16 +164,16 @@ float3 cellImageSpace(float3 sqrtColor)
         c = (((c * cellIsCine.y) - cellIsAdapted.xxx) * cellIsCine.z) + cellIsAdapted.xxx;
     }
     c = pow(max(c, 0.0f.xxx), 0.4545454680919647216796875f.xxx);
-    bool tmp4;
+    bool cond2;
     if (cellIsLutOn)
     {
-        tmp4 = (cellIsRed & 1) == 0;
+        cond2 = (cellIsRed & 1) == 0;
     }
     else
     {
-        tmp4 = cellIsLutOn;
+        cond2 = cellIsLutOn;
     }
-    if (tmp4)
+    if (cond2)
     {
         c = cellIsLut.Sample(_cellIsLut_sampler, (c * 0.9375f) + 0.03125f.xxx).xyz;
     }
@@ -199,16 +199,16 @@ float3 cellWorldDir(float3 dirView)
 #if defined(WW_FN_cellAttVan) || defined(WW_FN_ALL)
 float cellAttVan(float x, float3 c)
 {
-    float tmp1;
+    float cPart2;
     if (c.z > 0.0f)
     {
-        tmp1 = pow(x, c.z);
+        cPart2 = pow(x, c.z);
     }
     else
     {
-        tmp1 = 1.0f;
+        cPart2 = 1.0f;
     }
-    float xe = tmp1;
+    float xe = cPart2;
     return pow(1.0f - clamp((c.y * xe) + c.x, 0.0f, 1.0f), 2.2000000476837158203125f);
 }
 #endif
@@ -219,16 +219,16 @@ float cellPhysRaw(float x, float s)
     float x2 = x * x;
     float w = clamp(1.0f - (x2 * x2), 0.0f, 1.0f);
     float den = x2 + (s * s);
-    float tmp1;
+    float cPart2;
     if (den > 0.0f)
     {
-        tmp1 = (w * w) / den;
+        cPart2 = (w * w) / den;
     }
     else
     {
-        tmp1 = 0.0f;
+        cPart2 = 0.0f;
     }
-    return tmp1;
+    return cPart2;
 }
 #endif
 
@@ -236,120 +236,122 @@ float cellPhysRaw(float x, float s)
 float cellPhysFalloff(float van, float x, float r, float3 c)
 {
     float a = clamp(cellLightPhys.y, 0.0f, 1.0f);
-    bool tmp1 = !(c.z > 0.0f);
-    bool tmp2;
-    if (!tmp1)
+    bool cPart2 = !(c.z > 0.0f);
+    bool cPart;
+    if (!cPart2)
     {
-        tmp2 = !(clamp(c.y + c.x, 0.0f, 1.0f) > clamp(c.x, 0.0f, 1.0f));
+        cPart = !(clamp(c.y + c.x, 0.0f, 1.0f) > clamp(c.x, 0.0f, 1.0f));
     }
     else
     {
-        tmp2 = tmp1;
+        cPart = cPart2;
     }
-    bool tmp3;
-    if (!tmp2)
+    bool cond;
+    if (!cPart)
     {
-        float tmp4 = 1.0f;
-        float3 tmp5 = c;
-        tmp3 = cellAttVan(tmp4, tmp5) >= 0.0039215688593685626983642578125f;
+        float cond2 = 1.0f;
+        float3 condPart = c;
+        cond = cellAttVan(cond2, condPart) >= 0.0039215688593685626983642578125f;
     }
     else
     {
-        tmp3 = tmp2;
+        cond = cPart;
     }
-    if (tmp3)
+    if (cond)
     {
+        // an authored curve that is no falloff keeps the game's
         return van;
     }
-    float tmp6 = a;
-    float3 tmp7 = c;
-    float vA = cellAttVan(tmp6, tmp7);
+    float vAPart2 = a;
+    float3 vAPart = c;
+    float vA = cellAttVan(vAPart2, vAPart);
     float b = 1.0f - (a * a);
-    float tmp8;
+    float test;
     if (b > 0.0f)
     {
-        tmp8 = pow(b, 1.10000002384185791015625f);
+        test = pow(b, 1.10000002384185791015625f);
     }
     else
     {
-        tmp8 = 0.0f;
+        test = 0.0f;
     }
-    if (vA > tmp8)
+    if (vA > test)
     {
         return van;
     }
+    // one loop for both: the program's size (GIDARK1's link limit)
     int red = int(cellLightPhysB.z + 0.5f);
     if (cellLightPhys.x > 1.5f)
     {
-        float tmp9;
+        float x0Pick;
         if (r > 0.0f)
         {
-            tmp9 = clamp((max(max(cellLightPhysB.x, 0.001000000047497451305389404296875f), max((0.100000001490116119384765625f * r) / 69.98999786376953125f, 0.20000000298023223876953125f)) * 69.98999786376953125f) / r, 9.9999997473787516355514526367188e-05f, 0.5f);
+            x0Pick = clamp((max(max(cellLightPhysB.x, 0.001000000047497451305389404296875f), max((0.100000001490116119384765625f * r) / 69.98999786376953125f, 0.20000000298023223876953125f)) * 69.98999786376953125f) / r, 9.9999997473787516355514526367188e-05f, 0.5f);
         }
         else
         {
-            tmp9 = 0.5f;
+            x0Pick = 0.5f;
         }
-        float x0 = tmp9;
+        float x0 = x0Pick;
         float den = 0.89999997615814208984375f - (0.666666686534881591796875f * x0);
         float t = clamp((x - 0.800000011920928955078125f) / 0.20000000298023223876953125f, 0.0f, 1.0f);
-        float tmp10;
+        float wPick;
         if ((red & 2) != 0)
         {
-            tmp10 = 1.0f;
+            wPick = 1.0f;
         }
         else
         {
-            tmp10 = 1.0f - ((t * t) * (3.0f - (2.0f * t)));
+            wPick = 1.0f - ((t * t) * (3.0f - (2.0f * t)));
         }
-        float w = tmp10;
+        float w = wPick;
         float m = max(x0, x);
-        float tmp11;
+        float cellPhysFalloffRet2;
         if (den > 0.0f)
         {
-            tmp11 = ((cellLightPhys.w / den) * w) / (m * m);
+            cellPhysFalloffRet2 = ((cellLightPhys.w / den) * w) / (m * m);
         }
         else
         {
-            tmp11 = 0.0f;
+            cellPhysFalloffRet2 = 0.0f;
         }
-        return tmp11;
+        return cellPhysFalloffRet2;
     }
     float s = cellLightPhys.z;
-    float tmp12 = a;
-    float tmp13 = s;
-    float raw = cellPhysRaw(tmp12, tmp13);
-    float tmp14;
+    float rawPart2 = a;
+    float rawPart = s;
+    float raw = cellPhysRaw(rawPart2, rawPart);
+    float kPick;
     if ((red & 1) != 0)
     {
-        tmp14 = 1.0f;
+        kPick = 1.0f;
     }
     else
     {
-        float tmp15;
+        float kPick2;
         if (raw > 0.0f)
         {
-            tmp15 = vA / raw;
+            kPick2 = vA / raw;
         }
         else
         {
-            tmp15 = 0.0f;
+            kPick2 = 0.0f;
         }
-        tmp14 = tmp15;
+        kPick = kPick2;
     }
-    float k = tmp14;
-    float tmp16;
+    float k = kPick;
+    float cellPhysFalloffRet;
     if (k > 0.0f)
     {
-        float tmp17 = x;
-        float tmp18 = s;
-        tmp16 = k * cellPhysRaw(tmp17, tmp18);
+        float cellPhysFalloffPart2 = x;
+        float cellPhysFalloffPart = s;
+        cellPhysFalloffRet = k * cellPhysRaw(cellPhysFalloffPart2, cellPhysFalloffPart);
     }
     else
     {
-        tmp16 = van;
+        cellPhysFalloffRet = van;
     }
-    return tmp16;
+    return cellPhysFalloffRet;
 }
 #endif
 
@@ -357,35 +359,35 @@ float cellPhysFalloff(float van, float x, float r, float3 c)
 float cellRadial(float d, float r, float3 bse)
 {
     float x = clamp(d / max(r, 0.001000000047497451305389404296875f), 0.0f, 1.0f);
-    float tmp1;
+    float cPart2;
     if (bse.z > 0.0f)
     {
-        tmp1 = pow(x, bse.z);
+        cPart2 = pow(x, bse.z);
     }
     else
     {
-        tmp1 = 1.0f;
+        cPart2 = 1.0f;
     }
-    float xe = tmp1;
+    float xe = cPart2;
     float k = 1.0f - clamp((bse.y * xe) + bse.x, 0.0f, 1.0f);
     if ((cellRed & 1) != 0)
     {
         return k;
     }
-    float tmp2;
+    float cPart;
     if (cellLightPhys.x > 0.5f)
     {
-        float tmp3 = pow(k, 2.2000000476837158203125f);
-        float tmp4 = x;
-        float tmp5 = r;
-        float3 tmp6 = bse;
-        tmp2 = cellPhysFalloff(tmp3, tmp4, tmp5, tmp6);
+        float cond = pow(k, 2.2000000476837158203125f);
+        float cond2 = x;
+        float condPart = r;
+        float3 vAPart2 = bse;
+        cPart = cellPhysFalloff(cond, cond2, condPart, vAPart2);
     }
     else
     {
-        tmp2 = pow(k, 2.2000000476837158203125f);
+        cPart = pow(k, 2.2000000476837158203125f);
     }
-    return tmp2;
+    return cPart;
 }
 #endif
 
@@ -393,41 +395,41 @@ float cellRadial(float d, float r, float3 bse)
 float cellShadowF(int i, float3 P, float3 N)
 {
     float4 t4 = cellLights.Load((i * 8) + 4);
-    bool tmp1 = !cellShadowOn;
-    bool tmp2;
-    if (!tmp1)
+    bool cPart2 = !cellShadowOn;
+    bool cPart;
+    if (!cPart2)
     {
-        tmp2 = t4.y < 0.5f;
+        cPart = t4.y < 0.5f;
     }
     else
     {
-        tmp2 = tmp1;
+        cPart = cPart2;
     }
-    if (tmp2)
+    if (cPart)
     {
         return 1.0f;
     }
     float4 t0 = cellLights.Load(i * 8);
-    bool tmp3 = t4.y > 1.5f;
-    bool tmp4;
-    if (tmp3)
+    bool cond = t4.y > 1.5f;
+    bool cond2;
+    if (cond)
     {
-        tmp4 = t4.y < 2.5f;
+        cond2 = t4.y < 2.5f;
     }
     else
     {
-        tmp4 = tmp3;
+        cond2 = cond;
     }
-    bool tmp5;
-    if (tmp4)
+    bool condPart;
+    if (cond2)
     {
-        tmp5 = dot(P - t0.xyz, cellLights.Load((i * 8) + 2).xyz) < 0.0f;
+        condPart = dot(P - t0.xyz, cellLights.Load((i * 8) + 2).xyz) < 0.0f;
     }
     else
     {
-        tmp5 = tmp4;
+        condPart = cond2;
     }
-    if (tmp5)
+    if (condPart)
     {
         return 0.0f;
     }
@@ -440,8 +442,8 @@ float cellShadowF(int i, float3 P, float3 N)
     float d = length(rn);
     float ref = (d - 1.0f) / max(t0.w, 0.001000000047497451305389404296875f);
     float3 a = rn / max(d, 0.001000000047497451305389404296875f).xxx;
-    bool3 tmp6 = (abs(a.z) < 0.89999997615814208984375f).xxx;
-    float3 u = normalize(cross(a, float3(tmp6.x ? float3(0.0f, 0.0f, 1.0f).x : float3(1.0f, 0.0f, 0.0f).x, tmp6.y ? float3(0.0f, 0.0f, 1.0f).y : float3(1.0f, 0.0f, 0.0f).y, tmp6.z ? float3(0.0f, 0.0f, 1.0f).z : float3(1.0f, 0.0f, 0.0f).z)));
+    bool3 vAPart2 = (abs(a.z) < 0.89999997615814208984375f).xxx;
+    float3 u = normalize(cross(a, float3(vAPart2.x ? float3(0.0f, 0.0f, 1.0f).x : float3(1.0f, 0.0f, 0.0f).x, vAPart2.y ? float3(0.0f, 0.0f, 1.0f).y : float3(1.0f, 0.0f, 0.0f).y, vAPart2.z ? float3(0.0f, 0.0f, 1.0f).z : float3(1.0f, 0.0f, 0.0f).z)));
     float3 v = cross(a, u);
     float s = 0.0f;
     for (int y = -1; y <= 1; y++)
@@ -451,16 +453,16 @@ float cellShadowF(int i, float3 P, float3 N)
             s += cellShadow.SampleCmp(_cellShadow_sampler, float4(a + (((u * float(x)) + (v * float(y))) * cellShadowTexel), t4.x), ref);
         }
     }
-    float tmp7;
+    float vAPart;
     if (cellShadowFadeOn)
     {
-        tmp7 = lerp(1.0f, s / 9.0f, cellShadowFade[clamp(int(t4.x + 0.5f), 0, 15)]);
+        vAPart = lerp(1.0f, s / 9.0f, cellShadowFade[clamp(int(t4.x + 0.5f), 0, 15)]);
     }
     else
     {
-        tmp7 = s / 9.0f;
+        vAPart = s / 9.0f;
     }
-    return tmp7;
+    return vAPart;
 }
 #endif
 
@@ -468,41 +470,41 @@ float cellShadowF(int i, float3 P, float3 N)
 float cellShadowF(int i, float3 P, float3 N)
 {
     float4 t4 = cellLights.Load((i * 8) + 4);
-    bool tmp1 = !cellShadowOn;
-    bool tmp2;
-    if (!tmp1)
+    bool cPart2 = !cellShadowOn;
+    bool cPart;
+    if (!cPart2)
     {
-        tmp2 = t4.y < 0.5f;
+        cPart = t4.y < 0.5f;
     }
     else
     {
-        tmp2 = tmp1;
+        cPart = cPart2;
     }
-    if (tmp2)
+    if (cPart)
     {
         return 1.0f;
     }
     float4 t0 = cellLights.Load(i * 8);
-    bool tmp3 = t4.y > 1.5f;
-    bool tmp4;
-    if (tmp3)
+    bool cond = t4.y > 1.5f;
+    bool cond2;
+    if (cond)
     {
-        tmp4 = t4.y < 2.5f;
+        cond2 = t4.y < 2.5f;
     }
     else
     {
-        tmp4 = tmp3;
+        cond2 = cond;
     }
-    bool tmp5;
-    if (tmp4)
+    bool condPart;
+    if (cond2)
     {
-        tmp5 = dot(P - t0.xyz, cellLights.Load((i * 8) + 2).xyz) < 0.0f;
+        condPart = dot(P - t0.xyz, cellLights.Load((i * 8) + 2).xyz) < 0.0f;
     }
     else
     {
-        tmp5 = tmp4;
+        condPart = cond2;
     }
-    if (tmp5)
+    if (condPart)
     {
         return 0.0f;
     }
@@ -515,8 +517,8 @@ float cellShadowF(int i, float3 P, float3 N)
     float d = length(rn);
     float ref = (d - 1.0f) / max(t0.w, 0.001000000047497451305389404296875f);
     float3 a = rn / max(d, 0.001000000047497451305389404296875f).xxx;
-    bool3 tmp6 = (abs(a.z) < 0.89999997615814208984375f).xxx;
-    float3 u = normalize(cross(a, float3(tmp6.x ? float3(0.0f, 0.0f, 1.0f).x : float3(1.0f, 0.0f, 0.0f).x, tmp6.y ? float3(0.0f, 0.0f, 1.0f).y : float3(1.0f, 0.0f, 0.0f).y, tmp6.z ? float3(0.0f, 0.0f, 1.0f).z : float3(1.0f, 0.0f, 0.0f).z)));
+    bool3 vAPart2 = (abs(a.z) < 0.89999997615814208984375f).xxx;
+    float3 u = normalize(cross(a, float3(vAPart2.x ? float3(0.0f, 0.0f, 1.0f).x : float3(1.0f, 0.0f, 0.0f).x, vAPart2.y ? float3(0.0f, 0.0f, 1.0f).y : float3(1.0f, 0.0f, 0.0f).y, vAPart2.z ? float3(0.0f, 0.0f, 1.0f).z : float3(1.0f, 0.0f, 0.0f).z)));
     float3 v = cross(a, u);
     float s = 0.0f;
     for (int y = -1; y <= 1; y++)
@@ -526,16 +528,16 @@ float cellShadowF(int i, float3 P, float3 N)
             s += cellShadow.SampleCmpLevelZero(_cellShadow_sampler, float4(a + (((u * float(x)) + (v * float(y))) * cellShadowTexel), t4.x), ref);
         }
     }
-    float tmp7;
+    float vAPart;
     if (cellShadowFadeOn)
     {
-        tmp7 = lerp(1.0f, s / 9.0f, cellShadowFade[clamp(int(t4.x + 0.5f), 0, 15)]);
+        vAPart = lerp(1.0f, s / 9.0f, cellShadowFade[clamp(int(t4.x + 0.5f), 0, 15)]);
     }
     else
     {
-        tmp7 = s / 9.0f;
+        vAPart = s / 9.0f;
     }
-    return tmp7;
+    return vAPart;
 }
 #endif
 
@@ -543,41 +545,43 @@ float cellShadowF(int i, float3 P, float3 N)
 float cellContactLocal(int i, float3 P)
 {
     float4 t4 = cellLights.Load((i * 8) + 4);
-    bool tmp1 = !cellCtOn;
-    bool tmp2;
-    if (!tmp1)
+    bool cPart2 = !cellCtOn;
+    bool cPart;
+    if (!cPart2)
     {
-        bool tmp3;
+        bool cond;
         if (cellShadowOn)
         {
-            tmp3 = t4.y > 0.5f;
+            cond = t4.y > 0.5f;
         }
         else
         {
-            tmp3 = cellShadowOn;
+            cond = cellShadowOn;
         }
-        bool tmp4;
-        if (tmp3)
+        bool cond2;
+        if (cond)
         {
-            tmp4 = t4.x > (-0.5f);
+            cond2 = t4.x > (-0.5f);
         }
         else
         {
-            tmp4 = tmp3;
+            cond2 = cond;
         }
-        tmp2 = tmp4;
+        cPart = cond2;
     }
     else
     {
-        tmp2 = tmp1;
+        cPart = cPart2;
     }
-    if (tmp2)
+    if (cPart)
     {
         return 1.0f;
     }
     float4 t0 = cellLights.Load(i * 8);
+    // world to view: the inverse of cellRow's rotation (orthonormal) and translation
     float3 w = P - float3(cellRow[0].w, cellRow[1].w, cellRow[2].w);
     float3 l = t0.xyz - float3(cellRow[0].w, cellRow[1].w, cellRow[2].w);
+    // columns = rows of view-to-world: R = its transpose
     float3x3 R = float3x3(float3(cellRow[0].xyz), float3(cellRow[1].xyz), float3(cellRow[2].xyz));
     float3 pv = mul(w, R);
     float3 lv = mul(l, R);
@@ -619,17 +623,17 @@ float cellContactLocal(int i, float3 P)
         }
         float2 ndc = ((cellCtProj.xy * S.xy) + (cellCtProj.zw * S.z)) / (-S.z).xx;
         float2 q = ((ndc * 0.5f) + 0.5f.xx) * cellCtRect.zw;
-        bool tmp5 = any(bool2(q.x < 0.0f.xx.x, q.y < 0.0f.xx.y));
-        bool tmp6;
-        if (!tmp5)
+        bool condPart = any(bool2(q.x < 0.0f.xx.x, q.y < 0.0f.xx.y));
+        bool vAPart2;
+        if (!condPart)
         {
-            tmp6 = any(bool2(q.x >= cellCtRect.zw.x, q.y >= cellCtRect.zw.y));
+            vAPart2 = any(bool2(q.x >= cellCtRect.zw.x, q.y >= cellCtRect.zw.y));
         }
         else
         {
-            tmp6 = tmp5;
+            vAPart2 = condPart;
         }
-        if (tmp6)
+        if (vAPart2)
         {
             break;
         }
@@ -647,44 +651,44 @@ float cellContactLocal(int i, float3 P)
 float3 cellShadowProbe(float3 P, float3 N)
 {
     float3 o = 0.0f.xxx;
-    float3 tmp1 = P;
-    int tmp2;
-    int tmp3 = cellLightsBegin(tmp1, tmp2);
-    int nL = tmp2;
-    int bL = tmp3;
+    float3 cPart2 = P;
+    int cPart;
+    int cond = cellLightsBegin(cPart2, cPart);
+    int nL = cPart;
+    int bL = cond;
     for (int k = 0; k < nL; k++)
     {
-        int tmp4 = bL;
-        int tmp5 = k;
-        int i = cellLightAt(tmp4, tmp5);
+        int cond2 = bL;
+        int condPart = k;
+        int i = cellLightAt(cond2, condPart);
         float slot = cellLights.Load((i * 8) + 4).x;
         bool wwh0 = (slot < (-0.5f));
         bool wwh1 = (slot > 2.5f);
-        if (wwh0 || wwh1)
+        if (or(wwh0, wwh1))   // HLSLFIX2 orfix.py: no short-circuit branch (NV took the wrong side)
         {
             continue;
         }
         float4 t0 = cellLights.Load(i * 8);
         float3 Lv = t0.xyz - P;
         float d = length(Lv);
-        bool tmp6 = d >= t0.w;
-        bool tmp7;
-        if (!tmp6)
+        bool vAPart2 = d >= t0.w;
+        bool vAPart;
+        if (!vAPart2)
         {
-            tmp7 = dot(N, Lv / max(d, 0.001000000047497451305389404296875f).xxx) < 0.0500000007450580596923828125f;
+            vAPart = dot(N, Lv / max(d, 0.001000000047497451305389404296875f).xxx) < 0.0500000007450580596923828125f;
         }
         else
         {
-            tmp7 = tmp6;
+            vAPart = vAPart2;
         }
-        if (tmp7)
+        if (vAPart)
         {
             continue;
         }
-        int tmp8 = i;
-        float3 tmp9 = P;
-        float3 tmp10 = N;
-        o[int(slot + 0.5f)] = (2.0f + (cellShadowF(tmp8, tmp9, tmp10) * 253.0f)) / 255.0f;
+        int test = i;
+        float3 x0Pick = P;
+        float3 wPick = N;
+        o[int(slot + 0.5f)] = (2.0f + (cellShadowF(test, x0Pick, wPick) * 253.0f)) / 255.0f;
     }
     return o;
 }
@@ -702,22 +706,22 @@ int2 cellRoomUnpack(float v)
 int2 cellRoomAt(float3 q)
 {
     float3 c = floor((q - cellRoomsOrigin) / cellRoomsCell.xxx);
-    bool tmp1 = any(bool3(c.x < 0.0f.xxx.x, c.y < 0.0f.xxx.y, c.z < 0.0f.xxx.z));
-    bool tmp2;
-    if (!tmp1)
+    bool cPart2 = any(bool3(c.x < 0.0f.xxx.x, c.y < 0.0f.xxx.y, c.z < 0.0f.xxx.z));
+    bool cPart;
+    if (!cPart2)
     {
-        tmp2 = any(bool3(c.x >= cellRoomsDims.x, c.y >= cellRoomsDims.y, c.z >= cellRoomsDims.z));
+        cPart = any(bool3(c.x >= cellRoomsDims.x, c.y >= cellRoomsDims.y, c.z >= cellRoomsDims.z));
     }
     else
     {
-        tmp2 = tmp1;
+        cPart = cPart2;
     }
-    if (tmp2)
+    if (cPart)
     {
         return int2(-1, -1);
     }
-    float tmp3 = cellRooms.Load(int4(int3(c), 0)).x;
-    return cellRoomUnpack(tmp3);
+    float cond = cellRooms.Load(int4(int3(c), 0)).x;
+    return cellRoomUnpack(cond);
 }
 #endif
 
@@ -743,32 +747,35 @@ float4 cellGiSample(float3 P, float3 N)
 #if defined(WW_FN_cellGiE0) || defined(WW_FN_ALL)
 float3 cellGiE0(float3 P, float3 N)
 {
-    float3 tmp1 = P;
-    float3 tmp2 = N;
-    float4 s = cellGiSample(tmp1, tmp2);
+    float3 cPart2 = P;
+    float3 cPart = N;
+    float4 s = cellGiSample(cPart2, cPart);
+    // with the sky in the grid the sample keeps its valid share (E x share), the other
+    // ( 1 - share ) being the weather's own ambient the program leaves in (cellGiSkyK)
     if (cellGiSky && false)
     {
         return max(s.xyz, 0.0f.xxx);
     }
-    float3 tmp3;
+    float3 cond;
     if (s.w > 0.00999999977648258209228515625f)
     {
-        tmp3 = max(s.xyz / s.w.xxx, 0.0f.xxx);
+        cond = max(s.xyz / s.w.xxx, 0.0f.xxx);
     }
     else
     {
-        tmp3 = 0.0f.xxx;
+        cond = 0.0f.xxx;
     }
-    return tmp3;
+    return cond;
 }
 #endif
 
 #if defined(WW_FN_cellGiE) || defined(WW_FN_ALL)
 float3 cellGiE(float3 P, float3 N)
 {
-    float3 tmp1 = P;
-    float3 tmp2 = N;
-    float3 e = cellGiE0(tmp1, tmp2);
+    float3 cPart2 = P;
+    float3 cPart = N;
+    float3 e = cellGiE0(cPart2, cPart);
+    // lane PRTOFF1: the AO decals are the PRT relight's
     return e;
 }
 #endif
@@ -776,64 +783,64 @@ float3 cellGiE(float3 P, float3 N)
 #if defined(WW_FN_cellGiSkyK) || defined(WW_FN_ALL)
 float cellGiSkyK(float3 P, float3 N)
 {
-    bool tmp1;
+    bool cPart2;
     if (!true)
     {
-        tmp1 = !(cellGiSky && false);
+        cPart2 = !(cellGiSky && false);
     }
     else
     {
-        tmp1 = true;
+        cPart2 = true;
     }
-    if (tmp1 || cellInterior)
+    if (or(cPart2, cellInterior))   // HLSLFIX2 orfix.py: no short-circuit branch (NV took the wrong side)
     {
         return 0.0f;
     }
-    float3 tmp2 = P;
-    float3 tmp3 = N;
-    return clamp(cellGiSample(tmp2, tmp3).w, 0.0f, 1.0f);
+    float3 cPart = P;
+    float3 cond = N;
+    return clamp(cellGiSample(cPart, cond).w, 0.0f, 1.0f);
 }
 #endif
 
 #if defined(WW_FN_cellSpecSky) || defined(WW_FN_ALL)
 float cellSpecSky(float3 P, float3 N, float3 R, float rough)
 {
-    bool tmp1 = (cellSpecOcc == 0) || true;
-    bool tmp2;
-    if (!tmp1)
+    bool cPart2 = (cellSpecOcc == 0) || true;
+    bool cPart;
+    if (!cPart2)
     {
-        tmp2 = !(cellGiSky && false);
+        cPart = !(cellGiSky && false);
     }
     else
     {
-        tmp2 = tmp1;
+        cPart = cPart2;
     }
-    if (tmp2 || cellInterior)
+    if (or(cPart, cellInterior))   // HLSLFIX2 orfix.py: no short-circuit branch (NV took the wrong side)
     {
         return 1.0f;
     }
     float r = clamp(rough, 0.0f, 1.0f);
-    float3 tmp3;
+    float3 cond;
     if (cellSpecOcc == 2)
     {
-        tmp3 = N;
+        cond = N;
     }
     else
     {
-        tmp3 = normalize(lerp(N, R, ((1.0f - r) * (sqrt(1.0f - r) + r)).xxx));
+        cond = normalize(lerp(N, R, ((1.0f - r) * (sqrt(1.0f - r) + r)).xxx));
     }
-    float3 D_1 = tmp3;
+    float3 D_1 = cond;
     float v = 1.0f;
-    float tmp4;
+    float cond2;
     if (cellSpecOcc == 2)
     {
-        tmp4 = lerp(1.0f, v, r);
+        cond2 = lerp(1.0f, v, r);
     }
     else
     {
-        tmp4 = v;
+        cond2 = v;
     }
-    return tmp4;
+    return cond2;
 }
 #endif
 
@@ -842,18 +849,18 @@ float cellAmbShare(float3 P, float3 N)
 {
     if (!cellInterior)
     {
-        float3 tmp1 = P;
-        float3 tmp2 = N;
-        return cellGiSkyK(tmp1, tmp2);
+        float3 cPart2 = P;
+        float3 cPart = N;
+        return cellGiSkyK(cPart2, cPart);
     }
     bool wwh2 = (cellGiAmb != 1);
     if ((true || (!cellHasDalc)) || wwh2)
     {
         return 0.0f;
     }
-    float3 tmp3 = P;
-    float3 tmp4 = N;
-    return clamp(cellGiSample(tmp3, tmp4).w, 0.0f, 1.0f);
+    float3 cond = P;
+    float3 cond2 = N;
+    return clamp(cellGiSample(cond, cond2).w, 0.0f, 1.0f);
 }
 #endif
 
@@ -891,28 +898,28 @@ float3 cellGobo(int i, float3 D_1, float3 axis, bool spot)
         }
         float4 a0 = cellLights.Load(r);
         h = int(a0.w + 0.5f) - 1;
-        float3 tmp1;
+        float3 cPart2;
         if ((cellGoboMap & 4) != 0)
         {
-            tmp1 = D_1;
+            cPart2 = D_1;
         }
         else
         {
-            tmp1 = float3(dot(D_1, a0.xyz), dot(D_1, cellLights.Load(r + 1).xyz), dot(D_1, cellLights.Load(r + 2).xyz));
+            cPart2 = float3(dot(D_1, a0.xyz), dot(D_1, cellLights.Load(r + 1).xyz), dot(D_1, cellLights.Load(r + 2).xyz));
         }
-        float3 l = tmp1;
+        float3 l = cPart2;
         if ((cellGoboMap & 8) != 0)
         {
-            float3 tmp2;
+            float3 cPart;
             if ((cellGoboMap & 2) != 0)
             {
-                tmp2 = l.yzx;
+                cPart = l.yzx;
             }
             else
             {
-                tmp2 = l;
+                cPart = l;
             }
-            float3 d = normalize(tmp2);
+            float3 d = normalize(cPart);
             hf = ((d.z >= 0.0f) == ((cellGoboMap & 1) == 0)) ? 0 : 1;
             uv = ((d.xy / (1.0f + abs(d.z)).xx) * 0.5f) + 0.5f.xx;
         }
@@ -920,54 +927,54 @@ float3 cellGobo(int i, float3 D_1, float3 axis, bool spot)
         {
             float3 d_1 = normalize(l);
             hf = int(l.x < (-1.0f));
-            float2 tmp3;
+            float2 cond;
             if ((cellGoboMap & 2) != 0)
             {
-                tmp3 = d_1.yz;
+                cond = d_1.yz;
             }
             else
             {
-                tmp3 = d_1.zy;
+                cond = d_1.zy;
             }
-            float2 e = tmp3;
-            bool tmp4 = hf == 1;
-            bool tmp5;
-            if (tmp4)
+            float2 e = cond;
+            bool cond2 = hf == 1;
+            bool condPart;
+            if (cond2)
             {
-                tmp5 = (cellGoboMap & 1) == 0;
+                condPart = (cellGoboMap & 1) == 0;
             }
             else
             {
-                tmp5 = tmp4;
+                condPart = cond2;
             }
-            if (tmp5)
+            if (condPart)
             {
                 e.x = -e.x;
             }
-            float tmp6;
+            float vAPart2;
             if (hf == 1)
             {
-                tmp6 = 1.0f - d_1.x;
+                vAPart2 = 1.0f - d_1.x;
             }
             else
             {
-                tmp6 = 1.0f + d_1.x;
+                vAPart2 = 1.0f + d_1.x;
             }
-            uv = ((e / max(tmp6, 9.9999997473787516355514526367188e-05f).xx) * 0.5f) + 0.5f.xx;
+            uv = ((e / max(vAPart2, 9.9999997473787516355514526367188e-05f).xx) * 0.5f) + 0.5f.xx;
         }
     }
     if (cellGoboFlat)
     {
-        float3 tmp7;
+        float3 vAPart;
         if (cellGoboGam)
         {
-            tmp7 = pow(cellLights.Load(h + 1).xyz, 2.2000000476837158203125f.xxx);
+            vAPart = pow(cellLights.Load(h + 1).xyz, 2.2000000476837158203125f.xxx);
         }
         else
         {
-            tmp7 = cellLights.Load(h + 1).xyz;
+            vAPart = cellLights.Load(h + 1).xyz;
         }
-        return tmp7;
+        return vAPart;
     }
     if ((cellGoboRot & 4) != 0)
     {
@@ -982,16 +989,16 @@ float3 cellGobo(int i, float3 D_1, float3 axis, bool spot)
         uv.y = 1.0f - uv.y;
     }
     int2 sz = int2(cellLights.Load(h).xy + 0.5f.xx);
-    int2 tmp8;
+    int2 test;
     if (hf < 0)
     {
-        tmp8 = sz;
+        test = sz;
     }
     else
     {
-        tmp8 = int2(sz.x, sz.y / 2);
+        test = int2(sz.x, sz.y / 2);
     }
-    int2 pz = tmp8;
+    int2 pz = test;
     float2 p = (clamp(uv, 0.0f.xx, 1.0f.xx) * float2(pz)) - 0.5f.xx;
     int2 q = int2(floor(p));
     float2 f = p - float2(q);
@@ -1000,16 +1007,16 @@ float3 cellGobo(int i, float3 D_1, float3 axis, bool spot)
     int b = (h + 2) + ((max(hf, 0) * pz.y) * sz.x);
     float3 c0 = lerp(cellLights.Load((b + (q0.y * sz.x)) + q0.x).xyz, cellLights.Load((b + (q0.y * sz.x)) + q1.x).xyz, f.x.xxx);
     float3 c1 = lerp(cellLights.Load((b + (q1.y * sz.x)) + q0.x).xyz, cellLights.Load((b + (q1.y * sz.x)) + q1.x).xyz, f.x.xxx);
-    float3 tmp9;
+    float3 x0Pick;
     if (cellGoboGam)
     {
-        tmp9 = pow(lerp(c0, c1, f.y.xxx), 2.2000000476837158203125f.xxx);
+        x0Pick = pow(lerp(c0, c1, f.y.xxx), 2.2000000476837158203125f.xxx);
     }
     else
     {
-        tmp9 = lerp(c0, c1, f.y.xxx);
+        x0Pick = lerp(c0, c1, f.y.xxx);
     }
-    return tmp9;
+    return x0Pick;
 }
 #endif
 
@@ -1047,28 +1054,28 @@ float3 cellGobo(int i, float3 D, float3 axis, bool spot)
         }
         float4 a0 = cellLights.Load(r);
         h = int(a0.w + 0.5f) - 1;
-        float3 tmp1;
+        float3 cPart2;
         if ((cellGoboMap & 4) != 0)
         {
-            tmp1 = D;
+            cPart2 = D;
         }
         else
         {
-            tmp1 = float3(dot(D, a0.xyz), dot(D, cellLights.Load(r + 1).xyz), dot(D, cellLights.Load(r + 2).xyz));
+            cPart2 = float3(dot(D, a0.xyz), dot(D, cellLights.Load(r + 1).xyz), dot(D, cellLights.Load(r + 2).xyz));
         }
-        float3 l = tmp1;
+        float3 l = cPart2;
         if ((cellGoboMap & 8) != 0)
         {
-            float3 tmp2;
+            float3 cPart;
             if ((cellGoboMap & 2) != 0)
             {
-                tmp2 = l.yzx;
+                cPart = l.yzx;
             }
             else
             {
-                tmp2 = l;
+                cPart = l;
             }
-            float3 d = normalize(tmp2);
+            float3 d = normalize(cPart);
             hf = ((d.z >= 0.0f) == ((cellGoboMap & 1) == 0)) ? 0 : 1;
             uv = ((d.xy / (1.0f + abs(d.z)).xx) * 0.5f) + 0.5f.xx;
         }
@@ -1076,54 +1083,54 @@ float3 cellGobo(int i, float3 D, float3 axis, bool spot)
         {
             float3 d_1 = normalize(l);
             hf = int(l.x < (-1.0f));
-            float2 tmp3;
+            float2 cond;
             if ((cellGoboMap & 2) != 0)
             {
-                tmp3 = d_1.yz;
+                cond = d_1.yz;
             }
             else
             {
-                tmp3 = d_1.zy;
+                cond = d_1.zy;
             }
-            float2 e = tmp3;
-            bool tmp4 = hf == 1;
-            bool tmp5;
-            if (tmp4)
+            float2 e = cond;
+            bool cond2 = hf == 1;
+            bool condPart;
+            if (cond2)
             {
-                tmp5 = (cellGoboMap & 1) == 0;
+                condPart = (cellGoboMap & 1) == 0;
             }
             else
             {
-                tmp5 = tmp4;
+                condPart = cond2;
             }
-            if (tmp5)
+            if (condPart)
             {
                 e.x = -e.x;
             }
-            float tmp6;
+            float vAPart2;
             if (hf == 1)
             {
-                tmp6 = 1.0f - d_1.x;
+                vAPart2 = 1.0f - d_1.x;
             }
             else
             {
-                tmp6 = 1.0f + d_1.x;
+                vAPart2 = 1.0f + d_1.x;
             }
-            uv = ((e / max(tmp6, 9.9999997473787516355514526367188e-05f).xx) * 0.5f) + 0.5f.xx;
+            uv = ((e / max(vAPart2, 9.9999997473787516355514526367188e-05f).xx) * 0.5f) + 0.5f.xx;
         }
     }
     if (cellGoboFlat)
     {
-        float3 tmp7;
+        float3 vAPart;
         if (cellGoboGam)
         {
-            tmp7 = pow(cellLights.Load(h + 1).xyz, 2.2000000476837158203125f.xxx);
+            vAPart = pow(cellLights.Load(h + 1).xyz, 2.2000000476837158203125f.xxx);
         }
         else
         {
-            tmp7 = cellLights.Load(h + 1).xyz;
+            vAPart = cellLights.Load(h + 1).xyz;
         }
-        return tmp7;
+        return vAPart;
     }
     if ((cellGoboRot & 4) != 0)
     {
@@ -1138,16 +1145,16 @@ float3 cellGobo(int i, float3 D, float3 axis, bool spot)
         uv.y = 1.0f - uv.y;
     }
     int2 sz = int2(cellLights.Load(h).xy + 0.5f.xx);
-    int2 tmp8;
+    int2 test;
     if (hf < 0)
     {
-        tmp8 = sz;
+        test = sz;
     }
     else
     {
-        tmp8 = int2(sz.x, sz.y / 2);
+        test = int2(sz.x, sz.y / 2);
     }
-    int2 pz = tmp8;
+    int2 pz = test;
     float2 p = (clamp(uv, 0.0f.xx, 1.0f.xx) * float2(pz)) - 0.5f.xx;
     int2 q = int2(floor(p));
     float2 f = p - float2(q);
@@ -1156,16 +1163,16 @@ float3 cellGobo(int i, float3 D, float3 axis, bool spot)
     int b = (h + 2) + ((max(hf, 0) * pz.y) * sz.x);
     float3 c0 = lerp(cellLights.Load((b + (q0.y * sz.x)) + q0.x).xyz, cellLights.Load((b + (q0.y * sz.x)) + q1.x).xyz, f.x.xxx);
     float3 c1 = lerp(cellLights.Load((b + (q1.y * sz.x)) + q0.x).xyz, cellLights.Load((b + (q1.y * sz.x)) + q1.x).xyz, f.x.xxx);
-    float3 tmp9;
+    float3 x0Pick;
     if (cellGoboGam)
     {
-        tmp9 = pow(lerp(c0, c1, f.y.xxx), 2.2000000476837158203125f.xxx);
+        x0Pick = pow(lerp(c0, c1, f.y.xxx), 2.2000000476837158203125f.xxx);
     }
     else
     {
-        tmp9 = lerp(c0, c1, f.y.xxx);
+        x0Pick = lerp(c0, c1, f.y.xxx);
     }
-    return tmp9;
+    return x0Pick;
 }
 #endif
 
@@ -1184,8 +1191,8 @@ bool cellShapeIn(int i, float3 P, float3 Lpos, float shape)
     float4 b1 = cellLights.Load((i * 8) + 6);
     float4 b2 = cellLights.Load((i * 8) + 7);
     float3 k = float3(dot(b0.xyz, P) + b0.w, dot(b1.xyz, P) + b1.w, dot(b2.xyz, P) + b2.w);
-    float3 tmp1 = abs(k);
-    return all(bool3(tmp1.x <= 1.0f.xxx.x, tmp1.y <= 1.0f.xxx.y, tmp1.z <= 1.0f.xxx.z));
+    float3 cPart2 = abs(k);
+    return all(bool3(cPart2.x <= 1.0f.xxx.x, cPart2.y <= 1.0f.xxx.y, cPart2.z <= 1.0f.xxx.z));
 }
 #endif
 
@@ -1197,34 +1204,35 @@ float3 cellLightE(int i, float3 P, float3 N, inout float3 L, out bool noSpec)
     float d = length(Lv);
     L = Lv / max(d, 0.001000000047497451305389404296875f).xxx;
     noSpec = true;
-    bool tmp1 = d >= t0.w;
-    bool tmp2;
-    if (!tmp1)
+    bool cPart2 = d >= t0.w;
+    bool cPart;
+    if (!cPart2)
     {
-        tmp2 = dot(N, L) <= 0.0f;
+        cPart = dot(N, L) <= 0.0f;
     }
     else
     {
-        tmp2 = tmp1;
+        cPart = cPart2;
     }
-    if (tmp2)
+    if (cPart)
     {
         return 0.0f.xxx;
     }
     float4 t1 = cellLights.Load((i * 8) + 1);
-    int tmp3 = i;
-    float3 tmp4 = P;
-    float3 tmp5 = t0.xyz;
-    float tmp6 = t1.w;
-    if (!cellShapeIn(tmp3, tmp4, tmp5, tmp6))
+    int cond = i;
+    float3 cond2 = P;
+    float3 condPart = t0.xyz;
+    float vAPart2 = t1.w;
+    if (!cellShapeIn(cond, cond2, condPart, vAPart2))
     {
         return 0.0f.xxx;
     }
     float4 t3 = cellLights.Load((i * 8) + 3);
-    float tmp7 = d;
-    float tmp8 = t0.w;
-    float3 tmp9 = t3.xyz;
-    float a = cellRadial(tmp7, tmp8, tmp9);
+    float vAPart = d;
+    float test = t0.w;
+    float3 x0Pick = t3.xyz;
+    float a = cellRadial(vAPart, test, x0Pick);
+    // lane LIGHTS5 (GOBO1)
     float3 g = 1.0f.xxx;
     float3 gAx = 0.0f.xxx;
     if (t1.w > (-1.5f))
@@ -1236,18 +1244,19 @@ float3 cellLightE(int i, float3 P, float3 N, inout float3 L, out bool noSpec)
     }
     if (a > 0.0f)
     {
-        int tmp10 = i;
-        float3 tmp11 = -Lv;
-        float3 tmp12 = gAx;
-        bool tmp13 = t1.w > (-1.5f);
-        g = cellGobo(tmp10, tmp11, tmp12, tmp13);
+        int wPick = i;
+        float3 cellPhysFalloffRet2 = -Lv;
+        float3 rawPart2 = gAx;
+        bool rawPart = t1.w > (-1.5f);
+        // one call for every shape
+        g = cellGobo(wPick, cellPhysFalloffRet2, rawPart2, rawPart);
     }
     if (a > 0.0f)
     {
-        int tmp14 = i;
-        float3 tmp15 = P;
-        float3 tmp16 = N;
-        a *= cellShadowF(tmp14, tmp15, tmp16);
+        int kPick = i;
+        float3 kPick2 = P;
+        float3 cellPhysFalloffRet = N;
+        a *= cellShadowF(kPick, kPick2, cellPhysFalloffRet);
     }
     noSpec = (int(t3.w + 0.5f) & 1) != 0;
     return (t1.xyz * g) * a;
@@ -1327,9 +1336,9 @@ float3 cellFarF(float3 P, float3 N)
             for (int dx = -1; dx <= 1; dx++)
             {
                 int3 k = k0 + int3(dx, dy, dz);
-                int3 tmp1 = k;
-                int tmp2 = side;
-                uint h = cellFarHash(tmp1, tmp2) & mask;
+                int3 cPart2 = k;
+                int cPart = side;
+                uint h = cellFarHash(cPart2, cPart) & mask;
                 float3 key = float3(float(k.x), float(k.y), float((k.z * 8) + side));
                 for (int j = 0; (j < cellFarProbe) && (j < 64); j++)
                 {
@@ -1356,16 +1365,16 @@ float3 cellFarF(float3 P, float3 N)
             }
         }
     }
-    float3 tmp3;
+    float3 cond;
     if (ws > 0.0f)
     {
-        tmp3 = s / ws.xxx;
+        cond = s / ws.xxx;
     }
     else
     {
-        tmp3 = 0.0f.xxx;
+        cond = 0.0f.xxx;
     }
-    return tmp3;
+    return cond;
 }
 #endif
 
@@ -1386,16 +1395,16 @@ float3 cellFarPlacedE(float3 P, float3 N)
     {
         return max(s.xyz, 0.0f.xxx);
     }
-    float3 tmp1;
+    float3 cPart2;
     if (s.w > 0.00999999977648258209228515625f)
     {
-        tmp1 = max(s.xyz / s.w.xxx, 0.0f.xxx);
+        cPart2 = max(s.xyz / s.w.xxx, 0.0f.xxx);
     }
     else
     {
-        tmp1 = 0.0f.xxx;
+        cPart2 = 0.0f.xxx;
     }
-    return tmp1;
+    return cPart2;
 }
 #endif
 
@@ -1404,22 +1413,22 @@ float cellFarTerms(float3 P, float3 N, out float3 F, out float3 gP)
 {
     F = 0.0f.xxx;
     gP = 0.0f.xxx;
-    float3 tmp1 = P;
-    float w = cellFarW(tmp1);
+    float3 cPart2 = P;
+    float w = cellFarW(cPart2);
     if (w <= 0.0f)
     {
         return 0.0f;
     }
     if ((cellFarRed & 1) == 0)
     {
-        float3 tmp2 = P;
-        float3 tmp3 = N;
-        float3 tmp4 = cellFarF(tmp2, tmp3);
-        F = tmp4;
+        float3 cPart = P;
+        float3 cond = N;
+        float3 cond2 = cellFarF(cPart, cond);
+        F = cond2;
     }
-    float3 tmp5 = P;
-    float3 tmp6 = N;
-    gP = cellFarPlacedE(tmp5, tmp6) * 0.31830990314483642578125f;
+    float3 condPart = P;
+    float3 vAPart2 = N;
+    gP = cellFarPlacedE(condPart, vAPart2) * 0.31830990314483642578125f;
     return w;
 }
 #endif
@@ -1427,77 +1436,77 @@ float cellFarTerms(float3 P, float3 N, out float3 F, out float3 gP)
 #if defined(WW_FN_cellFarProbeOut) || defined(WW_FN_ALL)
 float3 cellFarProbeOut(float3 P, float3 N)
 {
-    float3 tmp1 = P;
-    float w = cellFarW(tmp1);
+    float3 cPart2 = P;
+    float w = cellFarW(cPart2);
     if (cellProbe == 93)
     {
         return w.xxx;
     }
     if (cellProbe == 91)
     {
-        float3 tmp2;
+        float3 cPart;
         if (cellFarOn)
         {
-            float3 tmp3 = P;
-            float3 tmp4 = N;
-            float3 tmp5 = cellFarF(tmp3, tmp4);
-            tmp2 = tmp5;
+            float3 cond = P;
+            float3 cond2 = N;
+            float3 condPart = cellFarF(cond, cond2);
+            cPart = condPart;
         }
         else
         {
-            tmp2 = 0.0f.xxx;
+            cPart = 0.0f.xxx;
         }
-        return sqrt(clamp(tmp2 * 0.25f, 0.0f.xxx, 1.0f.xxx));
+        return sqrt(clamp(cPart * 0.25f, 0.0f.xxx, 1.0f.xxx));
     }
     if (cellProbe == 94)
     {
-        bool tmp6 = w > 0.0f;
-        bool tmp7;
-        if (tmp6)
+        bool vAPart2 = w > 0.0f;
+        bool vAPart;
+        if (vAPart2)
         {
-            tmp7 = (cellFarRed & 1) == 0;
+            vAPart = (cellFarRed & 1) == 0;
         }
         else
         {
-            tmp7 = tmp6;
+            vAPart = vAPart2;
         }
-        if (tmp7)
+        if (vAPart)
         {
-            float3 tmp8 = P;
-            float3 tmp9 = N;
-            float3 tmp10 = cellFarF(tmp8, tmp9);
+            float3 test = P;
+            float3 x0Pick = N;
+            float3 wPick = cellFarF(test, x0Pick);
         }
-        float3 tmp11 = P;
-        int tmp12;
-        int tmp13 = cellLightsBegin(tmp11, tmp12);
-        int nW = tmp12;
+        float3 cellPhysFalloffRet2 = P;
+        int rawPart2;
+        int rawPart = cellLightsBegin(cellPhysFalloffRet2, rawPart2);
+        int nW = rawPart2;
         return (float(((w >= 1.0f) ? 0 : nW) + cellFarIters) / 256.0f).xxx;
     }
     float3 E = 0.0f.xxx;
-    float3 tmp14 = P;
-    int tmp15;
-    int tmp16 = cellLightsBegin(tmp14, tmp15);
-    int nL = tmp15;
-    int bL = tmp16;
-    float3 tmp17;
-    bool tmp18;
+    float3 kPick = P;
+    int kPick2;
+    int cellPhysFalloffRet = cellLightsBegin(kPick, kPick2);
+    int nL = kPick2;
+    int bL = cellPhysFalloffRet;
+    float3 cellPhysFalloffPart2;
+    bool cellPhysFalloffPart;
     for (int k = 0; k < nL; k++)
     {
-        int tmp19 = bL;
-        int tmp20 = k;
-        int i = cellLightAt(tmp19, tmp20);
-        int tmp21 = i;
-        float3 tmp22 = P;
-        float3 tmp23 = N;
-        float3 tmp24 = cellLightE(tmp21, tmp22, tmp23, tmp17, tmp18);
-        float3 L = tmp17;
-        bool ns = tmp18;
-        float3 c = tmp24;
+        int iPart2 = bL;
+        int iPart = k;
+        int i = cellLightAt(iPart2, iPart);
+        int cellLightEPart3 = i;
+        float3 cellLightEPart2 = P;
+        float3 cellLightEPart = N;
+        float3 cellLightERet = cellLightE(cellLightEPart3, cellLightEPart2, cellLightEPart, cellPhysFalloffPart2, cellPhysFalloffPart);
+        float3 L = cellPhysFalloffPart2;
+        bool ns = cellPhysFalloffPart;
+        float3 c = cellLightERet;
         E += (c * max(dot(N, L), 0.0f));
     }
-    float3 tmp25 = P;
-    float3 tmp26 = N;
-    E += (cellFarPlacedE(tmp25, tmp26) * 0.31830990314483642578125f);
+    float3 EPart2 = P;
+    float3 EPart = N;
+    E += (cellFarPlacedE(EPart2, EPart) * 0.31830990314483642578125f);
     return sqrt(clamp(E * 0.25f, 0.0f.xxx, 1.0f.xxx));
 }
 #endif
@@ -1510,16 +1519,16 @@ float3 cellSsgiE(float3 eProbe)
         return eProbe;
     }
     float4 s = cellSsgi.Sample(_cellSsgi_sampler, (gl_FragCoord.xy - cellSsgiRect.xy) * cellSsgiRect.zw);
-    float tmp1;
+    float cPart2;
     if ((cellSsgiRed & 2) != 0)
     {
-        tmp1 = 1.0f;
+        cPart2 = 1.0f;
     }
     else
     {
-        tmp1 = lerp(1.0f, clamp(s.w, 0.0f, 1.0f), cellSsgiK.x);
+        cPart2 = lerp(1.0f, clamp(s.w, 0.0f, 1.0f), cellSsgiK.x);
     }
-    float keep = tmp1;
+    float keep = cPart2;
     return (eProbe * keep) + (max(s.xyz, 0.0f.xxx) * cellSsgiK.y);
 }
 #endif
@@ -1529,84 +1538,88 @@ float3 cellProbeRaw(float3 P, float3 N)
 {
     if ((cellProbe >= 91) && (cellProbe <= 94))
     {
-        float3 tmp1 = P;
-        float3 tmp2 = N;
-        float3 tmp3 = cellFarProbeOut(tmp1, tmp2);
-        return tmp3;
+        float3 cPart2 = P;
+        float3 cPart = N;
+        float3 cond = cellFarProbeOut(cPart2, cPart);
+        return cond;
     }
+    // the lit effects' probes: a surface writes black
     if ((cellProbe >= 70) && (cellProbe <= 74))
     {
         return 0.0f.xxx;
     }
+    // lane SSGI2: E_probe x the open share + E_screen when SSGI runs (the double-count gate)
     if (cellProbe == 5)
     {
-        float3 tmp4;
+        float3 cond2;
         if (false)
         {
-            float3 tmp5 = P;
-            float3 tmp6 = N;
-            tmp4 = cellGiE(tmp5, tmp6);
+            float3 condPart = P;
+            float3 vAPart2 = N;
+            cond2 = cellGiE(condPart, vAPart2);
         }
         else
         {
-            tmp4 = 0.0f.xxx;
+            cond2 = 0.0f.xxx;
         }
-        float3 tmp7 = tmp4;
-        return clamp(cellSsgiE(tmp7) * 0.31830990314483642578125f, 0.0f.xxx, 1.0f.xxx);
+        float3 vAPart = cond2;
+        return clamp(cellSsgiE(vAPart) * 0.31830990314483642578125f, 0.0f.xxx, 1.0f.xxx);
     }
+    // the share of the weather's ambient the grid's sky replaced (indoors the DALC's)
     if (cellProbe == 90)
     {
-        float3 tmp8 = P;
-        float3 tmp9 = N;
-        return cellAmbShare(tmp8, tmp9).xxx;
+        float3 test = P;
+        float3 x0Pick = N;
+        return cellAmbShare(test, x0Pick).xxx;
     }
+    // r = the branch cellGiSample took / 16, g = its .a, b = its E luminance / pi (sqrt)
     if (cellProbe == 95)
     {
-        float4 tmp10;
+        float4 wPick;
         if (false)
         {
-            float3 tmp11 = P;
-            float3 tmp12 = N;
-            tmp10 = cellGiSample(tmp11, tmp12);
+            float3 cellPhysFalloffRet2 = P;
+            float3 rawPart2 = N;
+            wPick = cellGiSample(cellPhysFalloffRet2, rawPart2);
         }
         else
         {
-            tmp10 = 0.0f.xxxx;
+            wPick = 0.0f.xxxx;
         }
-        float4 s = tmp10;
+        float4 s = wPick;
         return float3(float(cellGiPath) * 0.0625f, clamp(s.w, 0.0f, 1.0f), sqrt(clamp(dot(max(s.xyz, 0.0f.xxx), float3(0.2125999927520751953125f, 0.715200006961822509765625f, 0.072200000286102294921875f)) * 0.31830990314483642578125f, 0.0f, 1.0f)));
     }
     if (cellProbe == 1)
     {
         float3 E = 0.0f.xxx;
-        float3 tmp13 = P;
-        int tmp14;
-        int tmp15 = cellLightsBegin(tmp13, tmp14);
-        int nL = tmp14;
-        int bL = tmp15;
-        float3 tmp16;
-        bool tmp17;
+        float3 rawPart = P;
+        int kPick;
+        int kPick2 = cellLightsBegin(rawPart, kPick);
+        int nL = kPick;
+        int bL = kPick2;
+        float3 cellPhysFalloffRet;
+        bool cellPhysFalloffPart2;
         for (int k = 0; k < nL; k++)
         {
-            int tmp18 = bL;
-            int tmp19 = k;
-            int i = cellLightAt(tmp18, tmp19);
-            int tmp20 = i;
-            float3 tmp21 = P;
-            float3 tmp22 = N;
-            float3 tmp23 = cellLightE(tmp20, tmp21, tmp22, tmp16, tmp17);
-            float3 L = tmp16;
-            bool ns = tmp17;
-            float3 c = tmp23;
+            int cellPhysFalloffPart = bL;
+            int iPart2 = k;
+            int i = cellLightAt(cellPhysFalloffPart, iPart2);
+            int iPart = i;
+            float3 cellLightEPart3 = P;
+            float3 cellLightEPart2 = N;
+            float3 cellLightEPart = cellLightE(iPart, cellLightEPart3, cellLightEPart2, cellPhysFalloffRet, cellPhysFalloffPart2);
+            float3 L = cellPhysFalloffRet;
+            bool ns = cellPhysFalloffPart2;
+            float3 c = cellLightEPart;
             E += (c * max(dot(N, L), 0.0f));
         }
         return clamp(E * 0.25f, 0.0f.xxx, 1.0f.xxx);
     }
     if (cellProbe == 7)
     {
-        float3 tmp24 = P;
-        float3 tmp25 = N;
-        return cellShadowProbe(tmp24, tmp25);
+        float3 cellLightERet = P;
+        float3 EPart2 = N;
+        return cellShadowProbe(cellLightERet, EPart2);
     }
     float3 q = clamp(floor((P - cellCenter) + 32768.0f.xxx), 0.0f.xxx, 65535.0f.xxx);
     if (cellProbe == 2)
@@ -1625,37 +1638,37 @@ float3 cellProbeRaw(float3 P, float3 N)
 float3 cellPassOut(float3 P, float3 N)
 {
     bool wwh3 = ((cellPass >= 3) && (cellPass != 6));
-    if (wwh3 || true)
+    if (or(wwh3, true))   // HLSLFIX2 orfix.py: no short-circuit branch (NV took the wrong side)
     {
-        bool3 tmp1 = (cellPass == 6).xxx;
-        return float3(tmp1.x ? float3(1.0f, 0.0f, 1.0f).x : float3(0.0f, 1.0f, 1.0f).x, tmp1.y ? float3(1.0f, 0.0f, 1.0f).y : float3(0.0f, 1.0f, 1.0f).y, tmp1.z ? float3(1.0f, 0.0f, 1.0f).z : float3(0.0f, 1.0f, 1.0f).z);
+        bool3 cPart2 = (cellPass == 6).xxx;
+        return float3(cPart2.x ? float3(1.0f, 0.0f, 1.0f).x : float3(0.0f, 1.0f, 1.0f).x, cPart2.y ? float3(1.0f, 0.0f, 1.0f).y : float3(0.0f, 1.0f, 1.0f).y, cPart2.z ? float3(1.0f, 0.0f, 1.0f).z : float3(0.0f, 1.0f, 1.0f).z);
     }
-    bool tmp2 = cellPass != 6;
-    bool tmp3;
-    if (tmp2)
+    bool cPart = cellPass != 6;
+    bool cond;
+    if (cPart)
     {
-        tmp3 = (cellPassRed & 2) != 0;
+        cond = (cellPassRed & 2) != 0;
     }
     else
     {
-        tmp3 = tmp2;
+        cond = cPart;
     }
-    bool3 tmp4 = tmp3.xxx;
-    float3 tmp5 = P;
-    float3 tmp6 = float3(tmp4.x ? float3(0.0f, 0.0f, 1.0f).x : N.x, tmp4.y ? float3(0.0f, 0.0f, 1.0f).y : N.y, tmp4.z ? float3(0.0f, 0.0f, 1.0f).z : N.z);
-    float4 s = cellGiSample(tmp5, tmp6);
+    bool3 cond2 = cond.xxx;
+    float3 condPart = P;
+    float3 vAPart2 = float3(cond2.x ? float3(0.0f, 0.0f, 1.0f).x : N.x, cond2.y ? float3(0.0f, 0.0f, 1.0f).y : N.y, cond2.z ? float3(0.0f, 0.0f, 1.0f).z : N.z);
+    float4 s = cellGiSample(condPart, vAPart2);
     if (cellPass == 6)
     {
-        float3 tmp7;
+        float3 vAPart;
         if (s.w <= 0.00999999977648258209228515625f)
         {
-            tmp7 = float3(1.0f, 0.0f, 1.0f);
+            vAPart = float3(1.0f, 0.0f, 1.0f);
         }
         else
         {
-            tmp7 = (0.25f + (0.5f * clamp(s.w, 0.0f, 1.0f))).xxx;
+            vAPart = (0.25f + (0.5f * clamp(s.w, 0.0f, 1.0f))).xxx;
         }
-        return tmp7;
+        return vAPart;
     }
     if (s.w <= 0.00999999977648258209228515625f)
     {
@@ -1665,27 +1678,28 @@ float3 cellPassOut(float3 P, float3 N)
     if (cellPass == 1)
     {
         v *= 0.31830990314483642578125f;
+        // debug "direct": the cell's lights leak into the pass
         if ((cellPassRed & 1) != 0)
         {
-            float3 tmp8 = P;
-            int tmp9;
-            int tmp10 = cellLightsBegin(tmp8, tmp9);
-            int nL = tmp9;
-            int bL = tmp10;
-            float3 tmp11;
-            bool tmp12;
+            float3 test = P;
+            int x0Pick;
+            int wPick = cellLightsBegin(test, x0Pick);
+            int nL = x0Pick;
+            int bL = wPick;
+            float3 cellPhysFalloffRet2;
+            bool rawPart2;
             for (int k = 0; k < nL; k++)
             {
-                int tmp13 = bL;
-                int tmp14 = k;
-                int i = cellLightAt(tmp13, tmp14);
-                int tmp15 = i;
-                float3 tmp16 = P;
-                float3 tmp17 = N;
-                float3 tmp18 = cellLightE(tmp15, tmp16, tmp17, tmp11, tmp12);
-                float3 L = tmp11;
-                bool ns = tmp12;
-                float3 c = tmp18;
+                int rawPart = bL;
+                int kPick = k;
+                int i = cellLightAt(rawPart, kPick);
+                int kPick2 = i;
+                float3 cellPhysFalloffRet = P;
+                float3 cellPhysFalloffPart2 = N;
+                float3 cellPhysFalloffPart = cellLightE(kPick2, cellPhysFalloffRet, cellPhysFalloffPart2, cellPhysFalloffRet2, rawPart2);
+                float3 L = cellPhysFalloffRet2;
+                bool ns = rawPart2;
+                float3 c = cellPhysFalloffPart;
                 v += (c * max(dot(N, L), 0.0f));
             }
         }
@@ -1705,25 +1719,25 @@ float cellSpecGame(float3 N, float3 L, float3 V, float gloss)
     float NdotH = clamp(dot(N, H), 0.0f, 1.0f);
     float D_1 = (pow(NdotH, n) * (n + 2.0f)) * 0.15915499627590179443359375f;
     float m = min(NdotL, NdotV);
-    float tmp1;
+    float cPart2;
     if (VdotH >= ((2.0f * NdotH) * m))
     {
-        float tmp2;
+        float cPart;
         if (NdotV == m)
         {
-            tmp2 = 1.0f;
+            cPart = 1.0f;
         }
         else
         {
-            tmp2 = NdotL / max(NdotV, 9.9999997473787516355514526367188e-05f);
+            cPart = NdotL / max(NdotV, 9.9999997473787516355514526367188e-05f);
         }
-        tmp1 = ((2.0f * NdotH) * tmp2) / max(VdotH, 9.9999997473787516355514526367188e-05f);
+        cPart2 = ((2.0f * NdotH) * cPart) / max(VdotH, 9.9999997473787516355514526367188e-05f);
     }
     else
     {
-        tmp1 = 1.0f / max(NdotV, 9.9999997473787516355514526367188e-05f);
+        cPart2 = 1.0f / max(NdotV, 9.9999997473787516355514526367188e-05f);
     }
-    float G = tmp1;
+    float G = cPart2;
     float f1 = 1.0f - VdotH;
     float f4 = ((f1 * f1) * f1) * f1;
     float F = min(((1.0f - (f1 * f4)) * 0.20000000298023223876953125f) + (f4 * f1), 1.0f);
@@ -1742,25 +1756,25 @@ float cellSpecGame(float3 N, float3 L, float3 V, float gloss)
     float NdotH = clamp(dot(N, H), 0.0f, 1.0f);
     float D = (pow(NdotH, n) * (n + 2.0f)) * 0.15915499627590179443359375f;
     float m = min(NdotL, NdotV);
-    float tmp1;
+    float cPart2;
     if (VdotH >= ((2.0f * NdotH) * m))
     {
-        float tmp2;
+        float cPart;
         if (NdotV == m)
         {
-            tmp2 = 1.0f;
+            cPart = 1.0f;
         }
         else
         {
-            tmp2 = NdotL / max(NdotV, 9.9999997473787516355514526367188e-05f);
+            cPart = NdotL / max(NdotV, 9.9999997473787516355514526367188e-05f);
         }
-        tmp1 = ((2.0f * NdotH) * tmp2) / max(VdotH, 9.9999997473787516355514526367188e-05f);
+        cPart2 = ((2.0f * NdotH) * cPart) / max(VdotH, 9.9999997473787516355514526367188e-05f);
     }
     else
     {
-        tmp1 = 1.0f / max(NdotV, 9.9999997473787516355514526367188e-05f);
+        cPart2 = 1.0f / max(NdotV, 9.9999997473787516355514526367188e-05f);
     }
-    float G = tmp1;
+    float G = cPart2;
     float f1 = 1.0f - VdotH;
     float f4 = ((f1 * f1) * f1) * f1;
     float F = min(((1.0f - (f1 * f4)) * 0.20000000298023223876953125f) + (f4 * f1), 1.0f);
@@ -1833,33 +1847,34 @@ void cellSumLights(float3 P, float3 N, float3 Vw, float gloss, inout float3 diff
     diffOn = 0.0f.xxx;
     cellRimSum = 0.0f.xxx;
     spec = 0.0f.xxx;
-    float tmp1;
+    float cPart2;
     if (cellFarFade)
     {
-        float3 tmp2 = P;
-        tmp1 = cellFarW(tmp2);
+        float3 cPart = P;
+        cPart2 = cellFarW(cPart);
     }
     else
     {
-        tmp1 = 0.0f;
+        cPart2 = 0.0f;
     }
-    float fw = tmp1;
+    // the real lights fade out over the far band
+    float fw = cPart2;
     if (fw >= 1.0f)
     {
         return;
     }
-    float3 tmp3 = P;
-    int tmp4;
-    int tmp5 = cellLightsBegin(tmp3, tmp4);
-    int nL = tmp4;
-    int bL = tmp5;
-    float tmp6;
-    float tmp7;
+    float3 cond = P;
+    int cond2;
+    int condPart = cellLightsBegin(cond, cond2);
+    int nL = cond2;
+    int bL = condPart;
+    float vAPart2;
+    float vAPart;
     for (int k = 0; k < nL; k++)
     {
-        int tmp8 = bL;
-        int tmp9 = k;
-        int i = cellLightAt(tmp8, tmp9);
+        int test = bL;
+        int x0Pick = k;
+        int i = cellLightAt(test, x0Pick);
         float4 t0 = cellLights.Load(i * 8);
         float3 Lv = t0.xyz - P;
         float d = length(Lv);
@@ -1874,23 +1889,25 @@ void cellSumLights(float3 P, float3 N, float3 Vw, float gloss, inout float3 diff
             continue;
         }
         float4 t1 = cellLights.Load((i * 8) + 1);
-        int tmp10 = i;
-        float3 tmp11 = P;
-        float3 tmp12 = t0.xyz;
-        float tmp13 = t1.w;
-        if (!cellShapeIn(tmp10, tmp11, tmp12, tmp13))
+        int wPick = i;
+        float3 cellPhysFalloffRet2 = P;
+        float3 rawPart2 = t0.xyz;
+        float rawPart = t1.w;
+        if (!cellShapeIn(wPick, cellPhysFalloffRet2, rawPart2, rawPart))
         {
             continue;
         }
         float4 t3 = cellLights.Load((i * 8) + 3);
-        float tmp14 = d;
-        float tmp15 = t0.w;
-        float3 tmp16 = t3.xyz;
-        float a = cellRadial(tmp14, tmp15, tmp16);
+        float kPick = d;
+        float kPick2 = t0.w;
+        float3 cellPhysFalloffRet = t3.xyz;
+        float a = cellRadial(kPick, kPick2, cellPhysFalloffRet);
+        // lane LIGHTS5 (GOBO1)
         float3 g = 1.0f.xxx;
         float3 gAx = 0.0f.xxx;
         if (t1.w > (-1.5f))
         {
+            // PRTP2 section 2: base = saturate(1 - (1 - dot(-L, dir)) / (1 - cosOuter)), cone = min(base^falloff, 1)
             float4 t2 = cellLights.Load((i * 8) + 2);
             float base = clamp(1.0f - ((1.0f - dot(-L, t2.xyz)) / max(1.0f - t1.w, 9.9999997473787516355514526367188e-05f)), 0.0f, 1.0f);
             a *= min(pow(base, max(t2.w, 0.001000000047497451305389404296875f)), 1.0f);
@@ -1898,69 +1915,73 @@ void cellSumLights(float3 P, float3 N, float3 Vw, float gloss, inout float3 diff
         }
         if (a > 0.0f)
         {
-            int tmp17 = i;
-            float3 tmp18 = -Lv;
-            float3 tmp19 = gAx;
-            bool tmp20 = t1.w > (-1.5f);
-            g = cellGobo(tmp17, tmp18, tmp19, tmp20);
+            int cellPhysFalloffPart2 = i;
+            float3 cellPhysFalloffPart = -Lv;
+            float3 iPart2 = gAx;
+            bool iPart = t1.w > (-1.5f);
+            // GOBO2
+            g = cellGobo(cellPhysFalloffPart2, cellPhysFalloffPart, iPart2, iPart);
         }
         if (a > 0.0f)
         {
-            int tmp21 = i;
-            float3 tmp22 = P;
-            float3 tmp23 = N;
-            int tmp24 = i;
-            float3 tmp25 = P;
-            a *= (cellShadowF(tmp21, tmp22, tmp23) * cellContactLocal(tmp24, tmp25));
+            int cellLightEPart3 = i;
+            float3 cellLightEPart2 = P;
+            float3 cellLightEPart = N;
+            int cellLightERet = i;
+            float3 EPart2 = P;
+            // lane SHADOW1; GAPLOOK1 (C8)
+            a *= (cellShadowF(cellLightEPart3, cellLightEPart2, cellLightEPart) * cellContactLocal(cellLightERet, EPart2));
         }
         float3 E = ((t1.xyz * g) * a) * NdotL;
         diff += E;
+        // No Rim Lighting (2) drops the back-light; Ignore Roughness (4) also takes Lambert's diffuse
+        // WW_CELL_LIT_RED=rimflags
         int fl = int(t3.w + 0.5f) & (((cellRed & 64) != 0) ? 1 : 7);
         if ((fl & 6) != 0)
         {
-            tmp6 = 0.0f;
+            vAPart2 = 0.0f;
         }
         else
         {
-            float3 tmp26 = N;
-            float3 tmp27 = L;
-            float3 tmp28 = Vw;
-            float tmp29 = gloss;
-            tmp6 = cellRim(tmp26, tmp27, tmp28, tmp29);
+            float3 EPart = N;
+            float3 vAPart10 = L;
+            float3 vAPart9 = Vw;
+            float vAPart8 = gloss;
+            vAPart2 = cellRim(EPart, vAPart10, vAPart9, vAPart8);
         }
-        float rim = tmp6;
+        float rim = vAPart2;
         if ((fl & 4) != 0)
         {
-            tmp7 = 1.0f;
+            vAPart = 1.0f;
         }
         else
         {
-            float3 tmp30 = N;
-            float3 tmp31 = L;
-            float3 tmp32 = Vw;
-            float tmp33 = NdotL;
-            float tmp34 = gloss;
-            tmp7 = cellOren(tmp30, tmp31, tmp32, tmp33, tmp34);
+            float3 vAPart7 = N;
+            float3 vAPart6 = L;
+            float3 vAPart5 = Vw;
+            float vAPart4 = NdotL;
+            float vAPart3 = gloss;
+            vAPart = cellOren(vAPart7, vAPart6, vAPart5, vAPart4, vAPart3);
         }
-        diffOn += (E * (tmp7 + rim));
+        diffOn += (E * (vAPart + rim));
         cellRimSum += (E * rim);
-        bool tmp35 = (fl & 1) == 0;
-        bool tmp36;
-        if (!tmp35)
+        bool cond4 = (fl & 1) == 0;
+        bool cond3;
+        if (!cond4)
         {
-            tmp36 = (cellRed & 65536) != 0;
+            cond3 = (cellRed & 65536) != 0;
         }
         else
         {
-            tmp36 = tmp35;
+            cond3 = cond4;
         }
-        if (tmp36)
+        if (cond3)
         {
-            float3 tmp37 = N;
-            float3 tmp38 = L;
-            float3 tmp39 = Vw;
-            float tmp40 = gloss;
-            spec += (E * cellSpecGame(tmp37, tmp38, tmp39, tmp40));
+            float3 specPart4 = N;
+            float3 specPart3 = L;
+            float3 specPart2 = Vw;
+            float specPart = gloss;
+            spec += (E * cellSpecGame(specPart4, specPart3, specPart2, specPart));
         }
     }
     if (fw > 0.0f)
@@ -1978,14 +1999,15 @@ float3 cellAmboScale(float3 P)
 {
     for (int i = 0; i < cellAmboCount; i++)
     {
+        // linked to a box, it fills the box (not the sphere)
         if (cellAmboK[i].w > 0.5f)
         {
             float4 b0 = cellAmboBox[i * 3];
             float4 b1 = cellAmboBox[(i * 3) + 1];
             float4 b2 = cellAmboBox[(i * 3) + 2];
             float3 k = float3(dot(b0.xyz, P) + b0.w, dot(b1.xyz, P) + b1.w, dot(b2.xyz, P) + b2.w);
-            float3 tmp1 = abs(k);
-            if (all(bool3(tmp1.x < 1.0f.xxx.x, tmp1.y < 1.0f.xxx.y, tmp1.z < 1.0f.xxx.z)))
+            float3 cPart2 = abs(k);
+            if (all(bool3(cPart2.x < 1.0f.xxx.x, cPart2.y < 1.0f.xxx.y, cPart2.z < 1.0f.xxx.z)))
             {
                 return cellAmboK[i].xyz;
             }
@@ -2005,26 +2027,26 @@ float3 cellAmboScale(float3 P)
 float3 cellAmbientSum(float3 N, float3 P)
 {
     float4 n1 = float4(N, 1.0f);
-    float3 tmp1 = P;
-    return float3(dot(cellDalc[0], n1), dot(cellDalc[1], n1), dot(cellDalc[2], n1)) * cellAmboScale(tmp1);
+    float3 cPart2 = P;
+    return float3(dot(cellDalc[0], n1), dot(cellDalc[1], n1), dot(cellDalc[2], n1)) * cellAmboScale(cPart2);
 }
 #endif
 
 #if defined(WW_FN_cellAmbient) || defined(WW_FN_ALL)
 float3 cellAmbient(float3 N, float3 P)
 {
-    float3 tmp1 = N;
-    float3 tmp2 = P;
-    return pow(max(cellAmbientSum(tmp1, tmp2), 0.0f.xxx), 2.2000000476837158203125f.xxx);
+    float3 cPart2 = N;
+    float3 cPart = P;
+    return pow(max(cellAmbientSum(cPart2, cPart), 0.0f.xxx), 2.2000000476837158203125f.xxx);
 }
 #endif
 
 #if defined(WW_FN_cellAmbient_V2) || defined(WW_FN_ALL)
 float3 cellAmbient(float3 N, float3 P)
 {
-    float3 tmp1 = N;
-    float3 tmp2 = P;
-    return pow(max(cellAmbientSum(tmp1, tmp2), 0.0f.xxx), 2.2000000476837158203125f.xxx) * fxAmbShare;
+    float3 cPart2 = N;
+    float3 cPart = P;
+    return pow(max(cellAmbientSum(cPart2, cPart), 0.0f.xxx), 2.2000000476837158203125f.xxx) * fxAmbShare;
 }
 #endif
 
@@ -2036,15 +2058,15 @@ float3 cellAmbGi(float3 amb, float3 gi, float3 P, float3 N)
         return 0.0f.xxx;
     }
     bool wwh4 = (cellGiAmb == 0);
-    if (wwh4 || true)
+    if (or(wwh4, true))   // HLSLFIX2 orfix.py: no short-circuit branch (NV took the wrong side)
     {
         return amb;
     }
     if (cellGiAmb == 1)
     {
-        float3 tmp1 = P;
-        float3 tmp2 = N;
-        return amb * (1.0f - clamp(cellGiSample(tmp1, tmp2).w, 0.0f, 1.0f));
+        float3 cPart2 = P;
+        float3 cPart = N;
+        return amb * (1.0f - clamp(cellGiSample(cPart2, cPart).w, 0.0f, 1.0f));
     }
     if (cellGiAmb == 3)
     {
@@ -2057,17 +2079,17 @@ float3 cellAmbGi(float3 amb, float3 gi, float3 P, float3 N)
 #if defined(WW_FN_cellCubeGameOn) || defined(WW_FN_ALL)
 bool cellCubeGameOn()
 {
-    bool tmp1 = abs(cellCubeMat.z - 1.0f) < 0.5f;
-    bool tmp2;
-    if (!tmp1)
+    bool cPart2 = abs(cellCubeMat.z - 1.0f) < 0.5f;
+    bool cPart;
+    if (!cPart2)
     {
-        tmp2 = abs(cellCubeMat.z - 3.0f) < 0.5f;
+        cPart = abs(cellCubeMat.z - 3.0f) < 0.5f;
     }
     else
     {
-        tmp2 = tmp1;
+        cPart = cPart2;
     }
-    return tmp2;
+    return cPart;
 }
 #endif
 
@@ -2079,9 +2101,11 @@ float3 cellCubeGame(TextureCube<float4> cube, SamplerState _cube_sampler, float3
         return 0.0f.xxx;
     }
     float g = clamp(gloss, 0.0f, 1.0f);
+    // view units -> game units
     float depth = abs(posView.z) * length(cellRow[0].xyz);
     float lod = (((1.0f - g) * 6.0f) + (depth * 0.00195299996994435787200927734375f)) + log2(float(int2(spvTextureSize(cube, uint(0), dummy_parameter)).x) / 128.0f);
     float3 c = cube.SampleLevel(_cube_sampler, dir, max(lod, 0.0f)).xyz;
+    // an untagged cube: the game's sampler decodes sRGB before the filter, this after
     if (cellCubeMat.z < 2.0f)
     {
         c = lerp(c / 12.9200000762939453125f.xxx, pow((c + 0.054999999701976776123046875f.xxx) / 1.05499994754791259765625f.xxx, 2.400000095367431640625f.xxx), step(0.040449999272823333740234375f.xxx, c));
@@ -2104,8 +2128,8 @@ float3 cellCubeProbe(float2 uv, float3 normalView)
     {
         return float3(floor(f.y / 256.0f) / 255.0f, mod(f.y, 256.0f) / 255.0f, tag);
     }
-    float3 tmp1 = normalView;
-    float3 n = ((cellWorldDir(tmp1) * 0.5f) + 0.5f.xxx) * 255.0f;
+    float3 cPart2 = normalView;
+    float3 n = ((cellWorldDir(cPart2) * 0.5f) + 0.5f.xxx) * 255.0f;
     return (n - floor(n + 0.5f.xxx)) + 0.5f.xxx;
 }
 #endif
@@ -2113,46 +2137,46 @@ float3 cellCubeProbe(float2 uv, float3 normalView)
 #if defined(WW_FN_cellLit) || defined(WW_FN_ALL)
 float3 cellLit(float3 color, float3 albedo, float3 normalView, float3 posView, float3 Vview, float specMask, float3 specCol, float alphaR, float kSmith, float3 emissive, float3 cubeK)
 {
-    float3 tmp1 = posView;
-    float3 P = cellWorldPos(tmp1);
-    float3 tmp2 = normalView;
-    float3 N = cellWorldDir(tmp2);
-    float3 tmp3 = Vview;
-    float3 Vw = cellWorldDir(tmp3);
+    float3 cPart2 = posView;
+    float3 P = cellWorldPos(cPart2);
+    float3 cPart = normalView;
+    float3 N = cellWorldDir(cPart);
+    float3 cond = Vview;
+    float3 Vw = cellWorldDir(cond);
     float gloss = 1.0f - sqrt(alphaR);
-    float3 tmp4 = P;
-    float3 tmp5 = N;
-    float3 tmp6 = Vw;
-    float tmp7 = gloss;
-    float3 tmp8;
-    float3 tmp9;
-    float3 tmp10;
-    cellSumLights(tmp4, tmp5, tmp6, tmp7, tmp8, tmp9, tmp10);
-    float3 diff = tmp8;
-    float3 diffOn = tmp9;
-    float3 spec = tmp10;
+    float3 cond2 = P;
+    float3 condPart = N;
+    float3 vAPart2 = Vw;
+    float vAPart = gloss;
+    float3 test;
+    float3 x0Pick;
+    float3 wPick;
+    cellSumLights(cond2, condPart, vAPart2, vAPart, test, x0Pick, wPick);
+    float3 diff = test;
+    float3 diffOn = x0Pick;
+    float3 spec = wPick;
     float3 alb = albedo * albedo;
-    float3 tmp11;
+    float3 cellPhysFalloffRet2;
     if (false)
     {
-        float3 tmp12 = P;
-        float3 tmp13 = N;
-        tmp11 = cellGiE(tmp12, tmp13);
+        float3 rawPart2 = P;
+        float3 rawPart = N;
+        cellPhysFalloffRet2 = cellGiE(rawPart2, rawPart);
     }
     else
     {
-        tmp11 = 0.0f.xxx;
+        cellPhysFalloffRet2 = 0.0f.xxx;
     }
-    float3 tmp14 = tmp11;
-    float3 gi = cellSsgiE(tmp14) * 0.31830990314483642578125f;
-    float3 tmp15 = P;
-    float3 tmp16 = N;
-    float3 tmp17;
-    float3 tmp18;
-    float tmp19 = cellFarTerms(tmp15, tmp16, tmp17, tmp18);
-    float3 farF = tmp17;
-    float3 farGP = tmp18;
-    float farW = tmp19;
+    float3 kPick = cellPhysFalloffRet2;
+    float3 gi = cellSsgiE(kPick) * 0.31830990314483642578125f;
+    float3 kPick2 = P;
+    float3 cellPhysFalloffRet = N;
+    float3 cellPhysFalloffPart2;
+    float3 cellPhysFalloffPart;
+    float iPart2 = cellFarTerms(kPick2, cellPhysFalloffRet, cellPhysFalloffPart2, cellPhysFalloffPart);
+    float3 farF = cellPhysFalloffPart2;
+    float3 farGP = cellPhysFalloffPart;
+    float farW = iPart2;
     if (farW > 0.0f)
     {
         gi = max(gi - (farGP * farW), 0.0f.xxx);
@@ -2171,44 +2195,44 @@ float3 cellLit(float3 color, float3 albedo, float3 normalView, float3 posView, f
         float3 dir = (cellDirColor * max(nl, 0.0f)) * cellDirVis;
         float3 airDif = cellDirColor * (cellAirDif * (0.5f + (0.5f * N.z)));
         float3 Ex = (((diff + gi) + dir) + airDif) + cellExtAmb;
-        float3 tmp20 = N;
-        float3 tmp21 = Ld;
-        float3 tmp22 = Vw;
-        float tmp23 = nl;
-        float tmp24 = gloss;
-        float3 tmp25 = N;
-        float3 tmp26 = Ld;
-        float3 tmp27 = Vw;
-        float tmp28 = gloss;
-        float3 Edx = (((diffOn + gi) + airDif) + (dir * (cellOren(tmp20, tmp21, tmp22, tmp23, tmp24) + cellRim(tmp25, tmp26, tmp27, tmp28)))) + (cellDirColor * (cellBackK * cellDirVis));
+        float3 iPart = N;
+        float3 cellLightEPart3 = Ld;
+        float3 cellLightEPart2 = Vw;
+        float cellLightEPart = nl;
+        float cellLightERet = gloss;
+        float3 EPart2 = N;
+        float3 EPart = Ld;
+        float3 vAPart10 = Vw;
+        float vAPart9 = gloss;
+        float3 Edx = (((diffOn + gi) + airDif) + (dir * (cellOren(iPart, cellLightEPart3, cellLightEPart2, cellLightEPart, cellLightERet) + cellRim(EPart2, EPart, vAPart10, vAPart9)))) + (cellDirColor * (cellBackK * cellDirVis));
         float3 ambDim = 1.0f.xxx;
         float specDim = 1.0f;
-        float3 tmp29;
+        float3 vAPart8;
         if ((cellRed & 512) != 0)
         {
-            tmp29 = Ex;
+            vAPart8 = Ex;
         }
         else
         {
-            tmp29 = Edx + cellExtAmb;
+            vAPart8 = Edx + cellExtAmb;
         }
-        float3 linx = ((((((color * color) * ambDim) + (alb * Edx)) + ((spec * specMask) * specCol)) + cellExtSpec) + ((cubeK * specDim) * tmp29)) + cellReflAdd;
+        float3 linx = ((((((color * color) * ambDim) + (alb * Edx)) + ((spec * specMask) * specCol)) + cellExtSpec) + ((cubeK * specDim) * vAPart8)) + cellReflAdd;
         return sqrt(max(linx, 0.0f.xxx)) + emissive;
     }
     float3 E = diff + gi;
     float3 Ed = diffOn + gi;
     if (cellHasDalc)
     {
-        float3 tmp30 = N;
-        float3 tmp31 = P;
-        float3 amb = cellAmbient(tmp30, tmp31);
+        float3 vAPart7 = N;
+        float3 vAPart6 = P;
+        float3 amb = cellAmbient(vAPart7, vAPart6);
         if (cellGiAmb != 0)
         {
-            float3 tmp32 = amb;
-            float3 tmp33 = gi;
-            float3 tmp34 = P;
-            float3 tmp35 = N;
-            amb = cellAmbGi(tmp32, tmp33, tmp34, tmp35);
+            float3 vAPart5 = amb;
+            float3 vAPart4 = gi;
+            float3 vAPart3 = P;
+            float3 cond4 = N;
+            amb = cellAmbGi(vAPart5, vAPart4, vAPart3, cond4);
         }
         E += amb;
         Ed += amb;
@@ -2219,19 +2243,19 @@ float3 cellLit(float3 color, float3 albedo, float3 normalView, float3 posView, f
         float nl_1 = dot(N, Ld_1);
         float3 dir_1 = cellDirColor * max(nl_1, 0.0f);
         E += dir_1;
-        float3 tmp36 = N;
-        float3 tmp37 = Ld_1;
-        float3 tmp38 = Vw;
-        float tmp39 = nl_1;
-        float tmp40 = gloss;
-        float3 tmp41 = N;
-        float3 tmp42 = Ld_1;
-        float3 tmp43 = Vw;
-        float tmp44 = gloss;
-        Ed += ((dir_1 * (cellOren(tmp36, tmp37, tmp38, tmp39, tmp40) + cellRim(tmp41, tmp42, tmp43, tmp44))) + (cellDirColor * cellBackK));
+        float3 cond3 = N;
+        float3 specPart4 = Ld_1;
+        float3 specPart3 = Vw;
+        float specPart2 = nl_1;
+        float specPart = gloss;
+        float3 EdPart4 = N;
+        float3 EdPart3 = Ld_1;
+        float3 EdPart2 = Vw;
+        float EdPart = gloss;
+        Ed += ((dir_1 * (cellOren(cond3, specPart4, specPart3, specPart2, specPart) + cellRim(EdPart4, EdPart3, EdPart2, EdPart))) + (cellDirColor * cellBackK));
     }
-    bool3 tmp45 = ((cellRed & 512) != 0).xxx;
-    float3 lin = (((alb * Ed) + ((spec * specMask) * specCol)) + (cubeK * float3(tmp45.x ? E.x : Ed.x, tmp45.y ? E.y : Ed.y, tmp45.z ? E.z : Ed.z))) + cellReflAdd;
+    bool3 linPart = ((cellRed & 512) != 0).xxx;
+    float3 lin = (((alb * Ed) + ((spec * specMask) * specCol)) + (cubeK * float3(linPart.x ? E.x : Ed.x, linPart.y ? E.y : Ed.y, linPart.z ? E.z : Ed.z))) + cellReflAdd;
     return sqrt(max(lin, 0.0f.xxx)) + emissive;
 }
 #endif
@@ -2239,46 +2263,46 @@ float3 cellLit(float3 color, float3 albedo, float3 normalView, float3 posView, f
 #if defined(WW_FN_cellLit_V2) || defined(WW_FN_ALL)
 float3 cellLit(float3 color, float3 albedo, float3 normalView, float3 posView, float3 Vview, float specMask, float3 specCol, float alphaR, float kSmith, float3 emissive, float3 cubeK)
 {
-    float3 tmp1 = posView;
-    float3 P = cellWorldPos(tmp1);
-    float3 tmp2 = normalView;
-    float3 N = cellWorldDir(tmp2);
-    float3 tmp3 = Vview;
-    float3 Vw = cellWorldDir(tmp3);
+    float3 cPart2 = posView;
+    float3 P = cellWorldPos(cPart2);
+    float3 cPart = normalView;
+    float3 N = cellWorldDir(cPart);
+    float3 cond = Vview;
+    float3 Vw = cellWorldDir(cond);
     float gloss = 1.0f - sqrt(alphaR);
-    float3 tmp4 = P;
-    float3 tmp5 = N;
-    float3 tmp6 = Vw;
-    float tmp7 = gloss;
-    float3 tmp8;
-    float3 tmp9;
-    float3 tmp10;
-    cellSumLights(tmp4, tmp5, tmp6, tmp7, tmp8, tmp9, tmp10);
-    float3 diff = tmp8;
-    float3 diffOn = tmp9;
-    float3 spec = tmp10;
+    float3 cond2 = P;
+    float3 condPart = N;
+    float3 vAPart2 = Vw;
+    float vAPart = gloss;
+    float3 test;
+    float3 x0Pick;
+    float3 wPick;
+    cellSumLights(cond2, condPart, vAPart2, vAPart, test, x0Pick, wPick);
+    float3 diff = test;
+    float3 diffOn = x0Pick;
+    float3 spec = wPick;
     float3 alb = albedo * albedo;
-    float3 tmp11;
+    float3 cellPhysFalloffRet2;
     if (false)
     {
-        float3 tmp12 = P;
-        float3 tmp13 = N;
-        tmp11 = cellGiE(tmp12, tmp13);
+        float3 rawPart2 = P;
+        float3 rawPart = N;
+        cellPhysFalloffRet2 = cellGiE(rawPart2, rawPart);
     }
     else
     {
-        tmp11 = 0.0f.xxx;
+        cellPhysFalloffRet2 = 0.0f.xxx;
     }
-    float3 tmp14 = tmp11;
-    float3 gi = cellSsgiE(tmp14) * 0.31830990314483642578125f;
-    float3 tmp15 = P;
-    float3 tmp16 = N;
-    float3 tmp17;
-    float3 tmp18;
-    float tmp19 = cellFarTerms(tmp15, tmp16, tmp17, tmp18);
-    float3 farF = tmp17;
-    float3 farGP = tmp18;
-    float farW = tmp19;
+    float3 kPick = cellPhysFalloffRet2;
+    float3 gi = cellSsgiE(kPick) * 0.31830990314483642578125f;
+    float3 kPick2 = P;
+    float3 cellPhysFalloffRet = N;
+    float3 cellPhysFalloffPart2;
+    float3 cellPhysFalloffPart;
+    float iPart2 = cellFarTerms(kPick2, cellPhysFalloffRet, cellPhysFalloffPart2, cellPhysFalloffPart);
+    float3 farF = cellPhysFalloffPart2;
+    float3 farGP = cellPhysFalloffPart;
+    float farW = iPart2;
     if (farW > 0.0f)
     {
         gi = max(gi - (farGP * farW), 0.0f.xxx);
@@ -2297,49 +2321,49 @@ float3 cellLit(float3 color, float3 albedo, float3 normalView, float3 posView, f
         float3 dir = (cellDirColor * max(nl, 0.0f)) * cellDirVis;
         float3 airDif = cellDirColor * (cellAirDif * (0.5f + (0.5f * N.z)));
         float3 Ex = (((diff + gi) + dir) + airDif) + cellExtAmb;
-        float3 tmp20 = N;
-        float3 tmp21 = Ld;
-        float3 tmp22 = Vw;
-        float tmp23 = nl;
-        float tmp24 = gloss;
-        float3 tmp25 = N;
-        float3 tmp26 = Ld;
-        float3 tmp27 = Vw;
-        float tmp28 = gloss;
-        float3 Edx = (((diffOn + gi) + airDif) + (dir * (cellOren(tmp20, tmp21, tmp22, tmp23, tmp24) + cellRim(tmp25, tmp26, tmp27, tmp28)))) + (cellDirColor * (cellBackK * cellDirVis));
+        float3 iPart = N;
+        float3 cellLightEPart3 = Ld;
+        float3 cellLightEPart2 = Vw;
+        float cellLightEPart = nl;
+        float cellLightERet = gloss;
+        float3 EPart2 = N;
+        float3 EPart = Ld;
+        float3 vAPart10 = Vw;
+        float vAPart9 = gloss;
+        float3 Edx = (((diffOn + gi) + airDif) + (dir * (cellOren(iPart, cellLightEPart3, cellLightEPart2, cellLightEPart, cellLightERet) + cellRim(EPart2, EPart, vAPart10, vAPart9)))) + (cellDirColor * (cellBackK * cellDirVis));
         float3 ambDim = 1.0f.xxx;
         float specDim = 1.0f;
-        float3 tmp29;
-        float tmp30;
-        ussTerrainDim(tmp29, tmp30);
-        ambDim = tmp29;
-        specDim = tmp30;
-        float3 tmp31;
+        float3 vAPart8;
+        float vAPart7;
+        ussTerrainDim(vAPart8, vAPart7);
+        ambDim = vAPart8;
+        specDim = vAPart7;
+        float3 vAPart6;
         if ((cellRed & 512) != 0)
         {
-            tmp31 = Ex;
+            vAPart6 = Ex;
         }
         else
         {
-            tmp31 = Edx + cellExtAmb;
+            vAPart6 = Edx + cellExtAmb;
         }
-        float3 linx = ((((((color * color) * ambDim) + (alb * Edx)) + ((spec * specMask) * specCol)) + cellExtSpec) + ((cubeK * specDim) * tmp31)) + cellReflAdd;
+        float3 linx = ((((((color * color) * ambDim) + (alb * Edx)) + ((spec * specMask) * specCol)) + cellExtSpec) + ((cubeK * specDim) * vAPart6)) + cellReflAdd;
         return sqrt(max(linx, 0.0f.xxx)) + emissive;
     }
     float3 E = diff + gi;
     float3 Ed = diffOn + gi;
     if (cellHasDalc)
     {
-        float3 tmp32 = N;
-        float3 tmp33 = P;
-        float3 amb = cellAmbient(tmp32, tmp33);
+        float3 vAPart5 = N;
+        float3 vAPart4 = P;
+        float3 amb = cellAmbient(vAPart5, vAPart4);
         if (cellGiAmb != 0)
         {
-            float3 tmp34 = amb;
-            float3 tmp35 = gi;
-            float3 tmp36 = P;
-            float3 tmp37 = N;
-            amb = cellAmbGi(tmp34, tmp35, tmp36, tmp37);
+            float3 vAPart3 = amb;
+            float3 cond4 = gi;
+            float3 cond3 = P;
+            float3 specPart4 = N;
+            amb = cellAmbGi(vAPart3, cond4, cond3, specPart4);
         }
         E += amb;
         Ed += amb;
@@ -2350,19 +2374,19 @@ float3 cellLit(float3 color, float3 albedo, float3 normalView, float3 posView, f
         float nl_1 = dot(N, Ld_1);
         float3 dir_1 = cellDirColor * max(nl_1, 0.0f);
         E += dir_1;
-        float3 tmp38 = N;
-        float3 tmp39 = Ld_1;
-        float3 tmp40 = Vw;
-        float tmp41 = nl_1;
-        float tmp42 = gloss;
-        float3 tmp43 = N;
-        float3 tmp44 = Ld_1;
-        float3 tmp45 = Vw;
-        float tmp46 = gloss;
-        Ed += ((dir_1 * (cellOren(tmp38, tmp39, tmp40, tmp41, tmp42) + cellRim(tmp43, tmp44, tmp45, tmp46))) + (cellDirColor * cellBackK));
+        float3 specPart3 = N;
+        float3 specPart2 = Ld_1;
+        float3 specPart = Vw;
+        float EdPart4 = nl_1;
+        float EdPart3 = gloss;
+        float3 EdPart2 = N;
+        float3 EdPart = Ld_1;
+        float3 linPart = Vw;
+        float EdPart5 = gloss;
+        Ed += ((dir_1 * (cellOren(specPart3, specPart2, specPart, EdPart4, EdPart3) + cellRim(EdPart2, EdPart, linPart, EdPart5))) + (cellDirColor * cellBackK));
     }
-    bool3 tmp47 = ((cellRed & 512) != 0).xxx;
-    float3 lin = (((alb * Ed) + ((spec * specMask) * specCol)) + (cubeK * float3(tmp47.x ? E.x : Ed.x, tmp47.y ? E.y : Ed.y, tmp47.z ? E.z : Ed.z))) + cellReflAdd;
+    bool3 linPart2 = ((cellRed & 512) != 0).xxx;
+    float3 lin = (((alb * Ed) + ((spec * specMask) * specCol)) + (cubeK * float3(linPart2.x ? E.x : Ed.x, linPart2.y ? E.y : Ed.y, linPart2.z ? E.z : Ed.z))) + cellReflAdd;
     return sqrt(max(lin, 0.0f.xxx)) + emissive;
 }
 #endif
@@ -2370,115 +2394,124 @@ float3 cellLit(float3 color, float3 albedo, float3 normalView, float3 posView, f
 #if defined(WW_FN_cellProbeOut) || defined(WW_FN_ALL)
 float3 cellProbeOut(float3 normalView, float3 posView, float alphaR, float kSmith)
 {
-    float3 tmp1 = posView;
-    float3 P = cellWorldPos(tmp1);
-    float3 tmp2 = normalView;
-    float3 N = cellWorldDir(tmp2);
+    float3 cPart2 = posView;
+    float3 P = cellWorldPos(cPart2);
+    float3 cPart = normalView;
+    float3 N = cellWorldDir(cPart);
+    // the lit effects' probes: a surface writes black
     if ((cellProbe >= 70) && (cellProbe <= 74))
     {
         return 0.0f.xxx;
     }
+    // lane SSGI2: as cellProbeRaw's
     if (cellProbe == 5)
     {
-        float3 tmp3;
+        float3 cond;
         if (false)
         {
-            float3 tmp4 = P;
-            float3 tmp5 = N;
-            tmp3 = cellGiE(tmp4, tmp5);
+            float3 cond2 = P;
+            float3 condPart = N;
+            cond = cellGiE(cond2, condPart);
         }
         else
         {
-            tmp3 = 0.0f.xxx;
+            cond = 0.0f.xxx;
         }
-        float3 tmp6 = tmp3;
-        return clamp(cellSsgiE(tmp6) * 0.31830990314483642578125f, 0.0f.xxx, 1.0f.xxx);
+        float3 vAPart2 = cond;
+        return clamp(cellSsgiE(vAPart2) * 0.31830990314483642578125f, 0.0f.xxx, 1.0f.xxx);
     }
+    // the share of the weather's ambient the grid's sky replaced (indoors the DALC's)
     if (cellProbe == 90)
     {
-        float3 tmp7 = P;
-        float3 tmp8 = N;
-        return cellAmbShare(tmp7, tmp8).xxx;
+        float3 vAPart = P;
+        float3 test = N;
+        return cellAmbShare(vAPart, test).xxx;
     }
+    // the branch cellGiSample took, its .a and its E (cellProbeRaw's)
     if (cellProbe == 95)
     {
-        float3 tmp9 = P;
-        float3 tmp10 = N;
-        float3 tmp11 = cellProbeRaw(tmp9, tmp10);
-        return tmp11;
+        float3 x0Pick = P;
+        float3 wPick = N;
+        float3 cellPhysFalloffRet2 = cellProbeRaw(x0Pick, wPick);
+        return cellPhysFalloffRet2;
     }
     if ((cellProbe >= 91) && (cellProbe <= 94))
     {
-        float3 tmp12 = P;
-        float3 tmp13 = N;
-        float3 tmp14 = cellFarProbeOut(tmp12, tmp13);
-        return tmp14;
+        float3 rawPart2 = P;
+        float3 rawPart = N;
+        float3 kPick = cellFarProbeOut(rawPart2, rawPart);
+        return kPick;
     }
     bool wwh5 = ((((cellProbe == 1) || (cellProbe == 8)) || (cellProbe == 10)) || (cellProbe == 30));
     bool wwh6 = (cellProbe == 31);
-    if (wwh5 || wwh6)
+    if (or(wwh5, wwh6))   // HLSLFIX2 orfix.py: no short-circuit branch (NV took the wrong side)
     {
-        float3 tmp15;
+        float3 kPick2;
         if (cellProbe == 1)
         {
-            tmp15 = N;
+            kPick2 = N;
         }
         else
         {
-            float3 tmp16 = -posView;
-            tmp15 = cellWorldDir(tmp16);
+            float3 cellPhysFalloffRet = -posView;
+            kPick2 = cellWorldDir(cellPhysFalloffRet);
         }
-        float3 tmp17 = P;
-        float3 tmp18 = N;
-        float3 tmp19 = tmp15;
-        float tmp20 = 1.0f - sqrt(alphaR);
-        float3 tmp21;
-        float3 tmp22;
-        float3 tmp23;
-        cellSumLights(tmp17, tmp18, tmp19, tmp20, tmp21, tmp22, tmp23);
-        float3 diff = tmp21;
-        float3 diffOn = tmp22;
-        float3 spec = tmp23;
+        float3 cellPhysFalloffPart2 = P;
+        float3 cellPhysFalloffPart = N;
+        float3 iPart2 = kPick2;
+        float iPart = 1.0f - sqrt(alphaR);
+        float3 cellLightEPart3;
+        float3 cellLightEPart2;
+        float3 cellLightEPart;
+        cellSumLights(cellPhysFalloffPart2, cellPhysFalloffPart, iPart2, iPart, cellLightEPart3, cellLightEPart2, cellLightEPart);
+        float3 diff = cellLightEPart3;
+        float3 diffOn = cellLightEPart2;
+        float3 spec = cellLightEPart;
         if (cellProbe == 10)
         {
             return clamp(cellRimSum * 4.0f, 0.0f.xxx, 1.0f.xxx);
         }
+        // the placed lights' specular / 4, before the mask
         if (cellProbe == 30)
         {
             return clamp(spec * 0.25f, 0.0f.xxx, 1.0f.xxx);
         }
+        // lane GAPFIX1: the same after the colour cellLit puts on it (deferred = white)
         if (cellProbe == 31)
         {
             return clamp((spec * cellSpecTint) * 0.25f, 0.0f.xxx, 1.0f.xxx);
         }
-        bool3 tmp24 = (cellProbe == 8).xxx;
-        return clamp(float3(tmp24.x ? diffOn.x : diff.x, tmp24.y ? diffOn.y : diff.y, tmp24.z ? diffOn.z : diff.z) * 0.25f, 0.0f.xxx, 1.0f.xxx);
+        bool3 cellLightERet = (cellProbe == 8).xxx;
+        return clamp(float3(cellLightERet.x ? diffOn.x : diff.x, cellLightERet.y ? diffOn.y : diff.y, cellLightERet.z ? diffOn.z : diff.z) * 0.25f, 0.0f.xxx, 1.0f.xxx);
     }
     if (cellProbe == 9)
     {
+        // the gloss the diffuse used
         return float3(1.0f - sqrt(alphaR), 0.0f, 0.0f);
     }
+    // the interior ambient's affine sum before its 2.2, x 8 (it is dim)
     if (cellProbe == 11)
     {
-        float3 tmp25;
+        float3 EPart2;
         if (cellHasDalc)
         {
-            float3 tmp26 = N;
-            float3 tmp27 = P;
-            tmp25 = clamp(cellAmbientSum(tmp26, tmp27) * 8.0f, 0.0f.xxx, 1.0f.xxx);
+            float3 EPart = N;
+            float3 vAPart10 = P;
+            EPart2 = clamp(cellAmbientSum(EPart, vAPart10) * 8.0f, 0.0f.xxx, 1.0f.xxx);
         }
         else
         {
-            tmp25 = 0.0f.xxx;
+            EPart2 = 0.0f.xxx;
         }
-        return tmp25;
+        return EPart2;
     }
     if (cellProbe == 7)
     {
-        float3 tmp28 = P;
-        float3 tmp29 = N;
-        return cellShadowProbe(tmp28, tmp29);
+        float3 vAPart9 = P;
+        float3 vAPart8 = N;
+        return cellShadowProbe(vAPart9, vAPart8);
     }
+    // the position, 16 bits an axis over the 65536-unit box around the center
     float3 q = clamp(floor((P - cellCenter) + 32768.0f.xxx), 0.0f.xxx, 65535.0f.xxx);
     if (cellProbe == 2)
     {

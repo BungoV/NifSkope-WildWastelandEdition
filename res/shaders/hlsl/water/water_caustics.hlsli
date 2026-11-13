@@ -83,21 +83,21 @@ float2 wwCauWarp(float2 xw, float t)
     float2 f = u - iu;
     int2 i = int2(iu);
     float2 g[4];
-    float tmp1;
+    float wwCauTurnPick;
     for (int c = 0; c < 4; c++)
     {
         int2 ic = i + int2(c & 1, c >> 1);
         int2 j = int2((((3 * ic.x) - (4 * ic.y)) + 3600) % 1200, (((4 * ic.x) + (3 * ic.y)) + 3600) % 1200);
-        int2 tmp2 = j;
-        uint tmp3 = 11u;
-        uint tmp4 = wwCauHash(tmp2, tmp3);
-        float tmp5 = 81.0f;
-        float tmp6 = 0.75f;
-        float tmp7 = 0.5f;
-        float tmp8 = t;
-        float2 tmp9 = wwCauTurn(tmp4, tmp5, tmp6, tmp7, tmp8, tmp1);
-        float jit = tmp1;
-        g[c] = tmp9;
+        int2 wwCauHashPart2 = j;
+        uint wwCauHashPart = 11u;
+        uint wwCauHashRet = wwCauHash(wwCauHashPart2, wwCauHashPart);
+        float wwCauTurnPart4 = 81.0f;
+        float wwCauTurnPart3 = 0.75f;
+        float wwCauTurnPart2 = 0.5f;
+        float wwCauTurnPart = t;
+        float2 wwCauTurnRet = wwCauTurn(wwCauHashRet, wwCauTurnPart4, wwCauTurnPart3, wwCauTurnPart2, wwCauTurnPart, wwCauTurnPick);
+        float jit = wwCauTurnPick;
+        g[c] = wwCauTurnRet;
     }
     float va = dot(g[0], f);
     float vb = dot(g[1], f - float2(1.0f, 0.0f));
@@ -109,10 +109,10 @@ float2 wwCauWarp(float2 xw, float t)
     float2 G1 = g[1] - g[0];
     float2 G2 = g[2] - g[0];
     float2 G3 = ((g[0] - g[1]) - g[2]) + g[3];
-    float tmp10 = f.x;
-    float2 sx = wwCauFade(tmp10);
-    float tmp11 = f.y;
-    float2 sy = wwCauFade(tmp11);
+    float sxPart = f.x;
+    float2 sx = wwCauFade(sxPart);
+    float syPart = f.y;
+    float2 sy = wwCauFade(syPart);
     float nx = ((((g[0].x + (sx.y * k1)) + (sx.x * G1.x)) + (sy.x * G2.x)) + ((sx.y * sy.x) * k3)) + ((sx.x * sy.x) * G3.x);
     float ny = ((((g[0].y + (sx.x * G1.y)) + (sy.y * k2)) + (sy.x * G2.y)) + ((sx.x * sy.y) * k3)) + ((sx.x * sy.x) * G3.y);
     return float2((3.0f * nx) - (4.0f * ny), (4.0f * nx) + (3.0f * ny)) / 5.0f.xx;
@@ -129,23 +129,24 @@ float wwCauEdge(float2 p, int q, uint seed, float R, float t)
     float d2 = 1000000000.0f;
     float2 b1 = 0.0f.xx;
     float2 b2 = 0.0f.xx;
-    float tmp1;
+    float wwCauTurnPick;
     for (int oy = -1; oy <= 1; oy++)
     {
         for (int ox = -1; ox <= 1; ox++)
         {
             int2 c = ((i + int2(ox, oy)) + q.xx) % q.xx;
-            int2 tmp2 = c;
-            uint tmp3 = seed;
-            uint h = wwCauHash(tmp2, tmp3);
-            uint tmp4 = h;
-            float tmp5 = R;
-            float tmp6 = 0.60000002384185791015625f;
-            float tmp7 = 0.800000011920928955078125f;
-            float tmp8 = t;
-            float2 tmp9 = wwCauTurn(tmp4, tmp5, tmp6, tmp7, tmp8, tmp1);
-            float jit = tmp1;
-            float2 dir = tmp9;
+            int2 wwCauHashPart2 = c;
+            uint wwCauHashPart = seed;
+            uint h = wwCauHash(wwCauHashPart2, wwCauHashPart);
+            uint wwCauHashRet = h;
+            float wwCauTurnPart4 = R;
+            float wwCauTurnPart3 = 0.60000002384185791015625f;
+            float wwCauTurnPart2 = 0.800000011920928955078125f;
+            float wwCauTurnPart = t;
+            float2 wwCauTurnRet = wwCauTurn(wwCauHashRet, wwCauTurnPart4, wwCauTurnPart3, wwCauTurnPart2, wwCauTurnPart, wwCauTurnPick);
+            float jit = wwCauTurnPick;
+            float2 dir = wwCauTurnRet;
+            // the orbit's centre, uniform in the cell: no lattice line in the spectrum
             uint h2 = h * 739982445u;
             float2 c0 = float2(float((h2 >> uint(8)) & 4095u), float((h2 >> uint(20)) & 4095u)) / 4096.0f.xx;
             float2 v = ((float2(float(ox), float(oy)) + c0) + (dir * (0.25f * (0.699999988079071044921875f + (0.300000011920928955078125f * jit))))) - f;
@@ -181,24 +182,24 @@ float wwCauMean(float r)
 #if defined(WW_FN_wwCauNet) || defined(WW_FN_ALL)
 float3 wwCauNet(float2 xw, float L, float fw, float t)
 {
-    float2 tmp1 = xw;
-    float tmp2 = t;
-    float2 wn = wwCauWarp(tmp1, tmp2);
+    float2 wwCauTurnPick = xw;
+    float wwCauHashPart2 = t;
+    float2 wn = wwCauWarp(wwCauTurnPick, wwCauHashPart2);
     float2 wp = xw + (wn * 6.81099987030029296875f);
     float c1 = 40.354679107666015625f;
     float c2 = 19.5047626495361328125f;
-    float2 tmp3 = mod(wp / c1.xx, 203.0f.xx);
-    int tmp4 = 203;
-    uint tmp5 = 101u;
-    float tmp6 = 9.0f;
-    float tmp7 = t;
-    float e1 = wwCauEdge(tmp3, tmp4, tmp5, tmp6, tmp7) * c1;
-    float2 tmp8 = mod(wp / c2.xx, 420.0f.xx);
-    int tmp9 = 420;
-    uint tmp10 = 202u;
-    float tmp11 = 14.0f;
-    float tmp12 = t;
-    float e2 = wwCauEdge(tmp8, tmp9, tmp10, tmp11, tmp12) * c2;
+    float2 wwCauHashPart = mod(wp / c1.xx, 203.0f.xx);
+    int wwCauHashRet = 203;
+    uint wwCauTurnPart4 = 101u;
+    float wwCauTurnPart3 = 9.0f;
+    float wwCauTurnPart2 = t;
+    float e1 = wwCauEdge(wwCauHashPart, wwCauHashRet, wwCauTurnPart4, wwCauTurnPart3, wwCauTurnPart2) * c1;
+    float2 wwCauTurnPart = mod(wp / c2.xx, 420.0f.xx);
+    int wwCauTurnRet = 420;
+    uint sxPart = 202u;
+    float syPart = 14.0f;
+    float e2Part = t;
+    float e2 = wwCauEdge(wwCauTurnPart, wwCauTurnRet, sxPart, syPart, e2Part) * c2;
     float w0 = ((0.53579998016357421875f + (0.007922999560832977294921875f * L)) + (4.49100017547607421875f * exp((-L) / 52.5f))) * exp(1.0f * wn.x);
     float a2 = (0.0f + (1.2000000476837158203125f * (1.0f - exp((-(L / 260.0f)) * (L / 260.0f))))) + (0.581099987030029296875f * exp((-L) / 34.369998931884765625f));
     float k = 0.99500000476837158203125f * (1.0f - exp((-(L / 77.56999969482421875f)) * (L / 77.56999969482421875f)));
@@ -208,9 +209,9 @@ float3 wwCauNet(float2 xw, float L, float fw, float t)
         float wc = w0 * (1.0f + float3(0.119999997317790985107421875f, 0.0f, -0.119999997317790985107421875f)[ch]);
         float w = sqrt((wc * wc) + ((0.25f * fw) * fw));
         float P = pow(1.0f + (e1 / w), -3.38000011444091796875f) + (a2 * pow(1.0f + (e2 / w), -3.38000011444091796875f));
-        float tmp13 = w / c1;
-        float tmp14 = w / c2;
-        E[ch] = (1.0f - k) + ((k * P) / (wwCauMean(tmp13) + (a2 * wwCauMean(tmp14))));
+        float EPart2 = w / c1;
+        float EPart = w / c2;
+        E[ch] = (1.0f - k) + ((k * P) / (wwCauMean(EPart2) + (a2 * wwCauMean(EPart))));
     }
     return E;
 }
@@ -223,9 +224,9 @@ float wwCauEnvelope(float d, float L)
     {
         return 1.0f;
     }
-    float tmp1 = L;
-    float3 tmp2 = wwWaterAbsorb(tmp1);
-    return (1.0f - smoothstep(0.0f, 700.0f, d)) * wwCauLum(tmp2);
+    float wwCauTurnPick = L;
+    float3 wwCauHashPart2 = wwWaterAbsorb(wwCauTurnPick);
+    return (1.0f - smoothstep(0.0f, 700.0f, d)) * wwCauLum(wwCauHashPart2);
 }
 #endif
 
@@ -235,7 +236,7 @@ float3 wwWaterCaustic(float3 S, float d, float3 Ldir, float3 sun, float3 sky, fl
     dbg = float3(1.0f, 0.0f, 0.0f);
     bool wwh0 = (Ldir.z <= 0.0f);
     bool wwh1 = (d <= 0.0f);
-    if (wwh0 || wwh1)
+    if (or(wwh0, wwh1))   // HLSLFIX2 orfix.py: no short-circuit branch (NV took the wrong side)
     {
         return 1.0f.xxx;
     }
@@ -246,9 +247,9 @@ float3 wwWaterCaustic(float3 S, float d, float3 Ldir, float3 sun, float3 sky, fl
     float3 I = 1.0f.xxx;
     if (waterCauRed == 5)
     {
-        float2 tmp1 = X;
-        float tmp2 = t;
-        float3 H = wwCauHessian(tmp1, tmp2);
+        float2 wwCauTurnPick = X;
+        float wwCauHashPart2 = t;
+        float3 H = wwCauHessian(wwCauTurnPick, wwCauHashPart2);
         float s = L * 0.2498124539852142333984375f;
         float det = ((1.0f - (s * H.x)) * (1.0f - (s * H.y))) - (((s * s) * H.z) * H.z);
         float e = 0.0500000007450580596923828125f + (0.00200000009499490261077880859375f * L);
@@ -258,21 +259,21 @@ float3 wwWaterCaustic(float3 S, float d, float3 Ldir, float3 sun, float3 sky, fl
     {
         if (waterCauRed != 4)
         {
-            float2 tmp3 = X - (floor(X / 8192.0f.xx) * 8192.0f);
-            float tmp4 = L * wwCauPathGain;
-            float tmp5 = fw;
-            float tmp6 = t;
-            I = wwCauNet(tmp3, tmp4, tmp5, tmp6);
+            float2 wwCauHashPart = X - (floor(X / 8192.0f.xx) * 8192.0f);
+            float wwCauHashRet = L * wwCauPathGain;
+            float wwCauTurnPart4 = fw;
+            float wwCauTurnPart3 = t;
+            I = wwCauNet(wwCauHashPart, wwCauHashRet, wwCauTurnPart4, wwCauTurnPart3);
         }
     }
     float sh = (waterCauRed == 2) ? 1.0f : shadow;
-    float3 tmp7 = sun;
-    float Es = (wwCauLum(tmp7) * Ldir.z) * sh;
-    float3 tmp8 = sky;
-    float share = Es / max(Es + wwCauLum(tmp8), 9.9999999747524270787835121154785e-07f);
-    float tmp9 = d;
-    float tmp10 = L;
-    float env = wwCauEnvelope(tmp9, tmp10);
+    float3 wwCauTurnPart2 = sun;
+    float Es = (wwCauLum(wwCauTurnPart2) * Ldir.z) * sh;
+    float3 wwCauTurnPart = sky;
+    float share = Es / max(Es + wwCauLum(wwCauTurnPart), 9.9999999747524270787835121154785e-07f);
+    float wwCauTurnRet = d;
+    float sxPart = L;
+    float env = wwCauEnvelope(wwCauTurnRet, sxPart);
     dbg = float3(I.y, env, share);
     return max(1.0f.xxx + ((I - 1.0f.xxx) * (share * env)), 0.0f.xxx);
 }

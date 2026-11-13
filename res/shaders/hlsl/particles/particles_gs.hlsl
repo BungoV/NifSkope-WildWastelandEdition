@@ -90,9 +90,11 @@ void geom_main(point SPIRV_Cross_Input stage_input[1], inout TriangleStream<SPIR
     N = float3(0.0f, 0.0f, 1.0f);
     float sx = vsParticleSize[0] * particleScale.x;
     float sy = vsParticleSize[0] * particleScale.y;
+    // per-particle sprite rotation about the view axis (NiPSysRotationModifier)
     float ca = cos(vsAngle[0]);
     float sa = sin(vsAngle[0]);
     pSprite = float4(ca, sa, sx, float(gl_PrimitiveIDIn));
+    // rotated corner offsets: (u,v) in [-1,1] scaled by the sprite half-size
     float4 c11 = float4((ca - sa) * sx, (sa + ca) * sy, 0.0f, 0.0f);
     float4 c01 = float4(((-ca) - sa) * sx, ((-sa) + ca) * sy, 0.0f, 0.0f);
     float4 c10 = float4((ca + sa) * sx, (sa - ca) * sy, 0.0f, 0.0f);
@@ -101,6 +103,7 @@ void geom_main(point SPIRV_Cross_Input stage_input[1], inout TriangleStream<SPIR
     float2 uv;
     if (volPartDump > 0)
     {
+        // the probe: the centre's texel and point on all four corners, the quad over this particle's 8 pixels
         uv = uvBase + (0.5f.xx * particleUV.zw);
         float x0 = ((float(gl_PrimitiveIDIn * 8) / float(volPartDump)) * 2.0f) - 1.0f;
         float x1 = ((float((gl_PrimitiveIDIn * 8) + 8) / float(volPartDump)) * 2.0f) - 1.0f;

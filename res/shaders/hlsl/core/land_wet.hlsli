@@ -12,35 +12,36 @@ float2 wwLandWet(float3 P, float3 N)
     {
         return 0.0f.xx;
     }
-    float2 tmp1 = P.xy;
-    float d = wwLandShoreSmooth(tmp1);
+    float2 dPart = P.xy;
+    float d = wwLandShoreSmooth(dPart);
     if (d >= landWetK.x)
     {
         return 0.0f.xx;
     }
     float nz = clamp(N.z, 0.0500000007450580596923828125f, 1.0f);
+    // the height above the water, along the slope
     float h = (d * sqrt(1.0f - (nz * nz))) / nz;
-    float tmp2;
+    float wvPick;
     if ((landWetRed & 1) != 0)
     {
-        tmp2 = 1.0f;
+        wvPick = 1.0f;
     }
     else
     {
-        tmp2 = 1.0f - smoothstep(0.0f, landWetK.y, h);
+        wvPick = 1.0f - smoothstep(0.0f, landWetK.y, h);
     }
-    float wv = tmp2;
+    float wv = wvPick;
     float wet = (1.0f - smoothstep(0.0f, landWetK.x, d)) * wv;
-    float tmp3;
+    float filmPick;
     if ((landWetRed & 2) != 0)
     {
-        tmp3 = 0.0f;
+        filmPick = 0.0f;
     }
     else
     {
-        tmp3 = (1.0f - smoothstep(0.0f, landWetK.w, d)) * wv;
+        filmPick = (1.0f - smoothstep(0.0f, landWetK.w, d)) * wv;
     }
-    float film = tmp3;
+    float film = filmPick;
     return float2(wet, film);
 }
 #endif
@@ -48,16 +49,16 @@ float2 wwLandWet(float3 P, float3 N)
 #if defined(WW_FN_wwLandWetBase) || defined(WW_FN_ALL)
 float wwLandWetBase(float w, float por)
 {
-    float tmp1;
+    float dPart;
     if ((landWetRed & 4) != 0)
     {
-        tmp1 = 1.0f;
+        dPart = 1.0f;
     }
     else
     {
-        tmp1 = lerp(1.0f, landWetK.z, por * w);
+        dPart = lerp(1.0f, landWetK.z, por * w);
     }
-    return tmp1;
+    return dPart;
 }
 #endif
 

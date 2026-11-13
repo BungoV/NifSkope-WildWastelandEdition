@@ -81,6 +81,7 @@ void frag_main()
     float4 normalMap = NormalMap.Sample(_NormalMap_sampler, offset);
     float4 specMap = SpecularMap.Sample(_SpecularMap_sampler, offset);
     float3 normal = normalize((normalMap.xyz * 2.0f) - 1.0f.xxx);
+    // Calculate missing blue channel
     normal.z = sqrt(max(1.0f - dot(normal.xy, normal.xy), 0.0f));
     normal = normalize(mul(normal, btnMatrix_norm));
     if (!gl_FrontFacing)
@@ -104,14 +105,15 @@ void frag_main()
     float4 baseColor = glowColor;
     if (!greyscaleColor)
     {
-        float4 tmp182 = baseColor;
-        float3 tmp184 = tmp182.xyz * glowMult;
-        baseColor.x = tmp184.x;
-        baseColor.y = tmp184.y;
-        baseColor.z = tmp184.z;
+        float4 baseColorPart2 = baseColor;
+        float3 baseColorPart = baseColorPart2.xyz * glowMult;
+        baseColor.x = baseColorPart.x;
+        baseColor.y = baseColorPart.y;
+        baseColor.z = baseColorPart.z;
     }
+    // Falloff
     float falloff = 1.0f;
-    if (useFalloff || hasRGBFalloff)
+    if (or(useFalloff, hasRGBFalloff))   // HLSLFIX2 orfix.py: no short-circuit branch (NV took the wrong side)
     {
         falloff = smoothstep(falloffParams.x, falloffParams.y, abs(dot(normal, V)));
         falloff = lerp(max(falloffParams.z, 0.0f), min(falloffParams.w, 1.0f), falloff);
@@ -121,27 +123,27 @@ void frag_main()
         }
         if (hasRGBFalloff)
         {
-            float4 tmp231 = baseMap;
-            float3 tmp233 = tmp231.xyz * falloff;
-            baseMap.x = tmp233.x;
-            baseMap.y = tmp233.y;
-            baseMap.z = tmp233.z;
+            float4 baseMapPart2 = baseMap;
+            float3 baseMapPart = baseMapPart2.xyz * falloff;
+            baseMap.x = baseMapPart.x;
+            baseMap.y = baseMapPart.y;
+            baseMap.z = baseMapPart.z;
         }
     }
     float alphaMult = baseColor.w * baseColor.w;
     float4 color = baseMap * C;
-    float4 tmp254 = color;
-    float3 tmp256 = tmp254.xyz * baseColor.xyz;
-    color.x = tmp256.x;
-    color.y = tmp256.y;
-    color.z = tmp256.z;
+    float4 colorPart7 = color;
+    float3 colorPart6 = colorPart7.xyz * baseColor.xyz;
+    color.x = colorPart6.x;
+    color.y = colorPart6.y;
+    color.z = colorPart6.z;
     color.w *= alphaMult;
     if (greyscaleColor)
     {
-        float3 tmp287 = GreyscaleMap.SampleLevel(_GreyscaleMap_sampler, float2(BaseMap.Sample(_BaseMap_sampler, offset).y, (baseColor.x * C.x) * falloff), 0.0f).xyz;
-        color.x = tmp287.x;
-        color.y = tmp287.y;
-        color.z = tmp287.z;
+        float3 GreyscaleMapTexel = GreyscaleMap.SampleLevel(_GreyscaleMap_sampler, float2(BaseMap.Sample(_BaseMap_sampler, offset).y, (baseColor.x * C.x) * falloff), 0.0f).xyz;
+        color.x = GreyscaleMapTexel.x;
+        color.y = GreyscaleMapTexel.y;
+        color.z = GreyscaleMapTexel.z;
     }
     if (greyscaleAlpha)
     {
@@ -149,16 +151,17 @@ void frag_main()
     }
     if (alphaFlags > 0)
     {
-        int tmp321;
+        int mPick;
         if (color.w < alphaThreshold)
         {
-            tmp321 = 11051;
+            mPick = 11051;
         }
         else
         {
-            tmp321 = (color.w > alphaThreshold) ? 29041 : 19789;
+            mPick = (color.w > alphaThreshold) ? 29041 : 19789;
         }
-        int m = tmp321;
+        // 0: always, 1: <, 2: ==, 3: <=, 4: >, 5: !=, 6: >=, 7: never
+        int m = mPick;
         if ((m & (1 << alphaFlags)) == 0)
         {
             discard;
@@ -169,56 +172,61 @@ void frag_main()
         color.w = 1.0f;
     }
     float3 diffuse = A.xyz + (D.xyz * NdotL);
-    float4 tmp358 = color;
-    float4 tmp360 = color;
-    float3 tmp368 = lerp(tmp358.xyz, tmp360.xyz * D.xyz, lightingInfluence.xxx);
-    color.x = tmp368.x;
-    color.y = tmp368.y;
-    color.z = tmp368.z;
+    float4 colorPart5 = color;
+    float4 colorPart4 = color;
+    float3 colorPart3 = lerp(colorPart5.xyz, colorPart4.xyz * D.xyz, lightingInfluence.xxx);
+    color.x = colorPart3.x;
+    color.y = colorPart3.y;
+    color.z = colorPart3.z;
+    // Specular
     float g = 1.0f;
     float s = 1.0f;
     if (hasEnvMask)
     {
         g = specMap.x;
-        float tmp385;
+        float sPick;
         if (envMaskR)
         {
-            tmp385 = specMap.x;
+            sPick = specMap.x;
         }
         else
         {
-            tmp385 = specMap.y;
+            sPick = specMap.y;
         }
-        s = tmp385;
+        s = sPick;
     }
     float4 cube = CubeMap.Sample(_CubeMap_sampler, reflectedWS);
     if (hasCubeMap)
     {
-        float4 tmp410 = cube;
-        float3 tmp412 = tmp410.xyz * (envReflection * s);
-        cube.x = tmp412.x;
-        cube.y = tmp412.y;
-        cube.z = tmp412.z;
+        float4 cubePart7 = cube;
+        float3 cubePart6 = cubePart7.xyz * (envReflection * s);
+        cube.x = cubePart6.x;
+        cube.y = cubePart6.y;
+        cube.z = cubePart6.z;
         if (!envNormalAlphaRed)
         {
-            float4 tmp426 = cube;
-            float3 tmp428 = tmp426.xyz * normalMap.w;
-            cube.x = tmp428.x;
-            cube.y = tmp428.y;
-            cube.z = tmp428.z;
+            float4 cubePart5 = cube;
+            float3 cubePart4 = cubePart5.xyz * normalMap.w;
+            cube.x = cubePart4.x;
+            cube.y = cubePart4.y;
+            cube.z = cubePart4.z;
         }
-        float4 tmp435 = cube;
-        float4 tmp437 = cube;
-        float3 tmp444 = lerp(tmp435.xyz, tmp437.xyz * D.xyz, lightingInfluence.xxx);
-        cube.x = tmp444.x;
-        cube.y = tmp444.y;
-        cube.z = tmp444.z;
-        float4 tmp455 = color;
-        float3 tmp457 = tmp455.xyz + (cube.xyz * falloff);
-        color.x = tmp457.x;
-        color.y = tmp457.y;
-        color.z = tmp457.z;
+        float4 cubePart3 = cube;
+        float4 cubePart2 = cube;
+        float3 cubePart = lerp(cubePart3.xyz, cubePart2.xyz * D.xyz, lightingInfluence.xxx);
+        cube.x = cubePart.x;
+        cube.y = cubePart.y;
+        cube.z = cubePart.z;
+        float4 colorPart2 = color;
+        float3 colorPart = colorPart2.xyz + (cube.xyz * falloff);
+        color.x = colorPart.x;
+        color.y = colorPart.y;
+        color.z = colorPart.z;
     }
+    // lane SHADOWSHIMMER4 (EFFECTDECALHEADROOM): in a lit-decal program every cellOn path above returns or discards (the
+    // it all the same (its cellFxLit / vpLit lights and its wwFogFx: fo4_effectdecalcsm in march + WW_CELL_PRT 65482 -> 35670
+    // fragment instructions, the driver's limit 65536). Dropped in the GI-march mode only; the other modes keep their source
+    // (their machine code unchanged).
     fragColor = float4(color.xyz * sqrt(D.w), color.w);
 }
 

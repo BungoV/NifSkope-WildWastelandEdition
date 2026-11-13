@@ -32,8 +32,8 @@ void vert_main()
 {
     float4 v = float4(vertexPosition, 1.0f);
     gl_Position = mul(v, modelViewMatrix);
-    bool4 tmp47 = bool4(vertexColorOverride.x > 0.0f.xxxx.x, vertexColorOverride.y > 0.0f.xxxx.y, vertexColorOverride.z > 0.0f.xxxx.z, vertexColorOverride.w > 0.0f.xxxx.w);
-    vsColor = float4(tmp47.x ? vertexColorOverride.x : vertexColor.x, tmp47.y ? vertexColorOverride.y : vertexColor.y, tmp47.z ? vertexColorOverride.z : vertexColor.z, tmp47.w ? vertexColorOverride.w : vertexColor.w);
+    bool4 vsColorPart = bool4(vertexColorOverride.x > 0.0f.xxxx.x, vertexColorOverride.y > 0.0f.xxxx.y, vertexColorOverride.z > 0.0f.xxxx.z, vertexColorOverride.w > 0.0f.xxxx.w);
+    vsColor = float4(vsColorPart.x ? vertexColorOverride.x : vertexColor.x, vsColorPart.y ? vertexColorOverride.y : vertexColor.y, vsColorPart.z ? vertexColorOverride.z : vertexColor.z, vsColorPart.w ? vertexColorOverride.w : vertexColor.w);
 }
 
 SPIRV_Cross_Output main(SPIRV_Cross_Input stage_input)

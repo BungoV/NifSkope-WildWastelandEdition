@@ -39,26 +39,26 @@ struct WwClearLight
     float viewMu;
 };
 
-static const WwClearLight tmp953 = { 2, 0.0f.xxx, 0.0f, 0.0f.xxx, 1.0f };
-static const float3 tmp5720[3] = { float3(0.0388000011444091796875f, 0.039999999105930328369140625f, 0.01940000057220458984375f), float3(0.0542999990284442901611328125f, 0.039999999105930328369140625f, 0.01840000040829181671142578125f), float3(0.0384999997913837432861328125f, 0.0350000001490116119384765625f, 0.01640000008046627044677734375f) };
-static const float3 tmp5733[3] = { float3(0.0372000001370906829833984375f, 0.039999999105930328369140625f, 0.01950000040233135223388671875f), float3(0.0577999986708164215087890625f, 0.039999999105930328369140625f, 0.01820000074803829193115234375f), float3(0.0384999997913837432861328125f, 0.0350000001490116119384765625f, 0.01640000008046627044677734375f) };
-static const float3 tmp5770[3] = { 0.000600000028498470783233642578125f.xxx, float3(0.0199999995529651641845703125f, 0.017999999225139617919921875f, 0.01600000075995922088623046875f), 0.0040000001899898052215576171875f.xxx };
-static const float3 tmp5789[3] = { float3(0.00200000009499490261077880859375f, 0.0040000001899898052215576171875f, 0.01200000010430812835693359375f), float3(0.0599999986588954925537109375f, 0.20000000298023223876953125f, 0.699999988079071044921875f), float3(0.0199999995529651641845703125f, 0.07999999821186065673828125f, 0.2800000011920928955078125f) };
-static const float3 tmp5815[3] = { float3(0.5889999866485595703125f, 0.680000007152557373046875f, 1.736999988555908203125f), float3(0.87999999523162841796875f, 1.4170000553131103515625f, 3.78999996185302734375f), float3(0.64999997615814208984375f, 0.85000002384185791015625f, 2.2330000400543212890625f) };
-static const float3 tmp5829[3] = { float3(0.569999992847442626953125f, 0.630999982357025146484375f, 1.59899997711181640625f), float3(0.99199998378753662109375f, 1.7000000476837158203125f, 4.5799999237060546875f), float3(0.64999997615814208984375f, 0.85000002384185791015625f, 2.2330000400543212890625f) };
-static const float3 tmp6044[3] = { float3(0.550000011920928955078125f, 0.4799999892711639404296875f, 0.36000001430511474609375f), float3(0.20000000298023223876953125f, 0.180000007152557373046875f, 0.12999999523162841796875f), float3(0.2199999988079071044921875f, 0.20000000298023223876953125f, 0.1500000059604644775390625f) };
-static const float3 tmp6059[3] = { float3(0.20000000298023223876953125f, 0.180000007152557373046875f, 0.14000000059604644775390625f), float3(0.100000001490116119384765625f, 0.085000000894069671630859375f, 0.0599999986588954925537109375f), float3(0.119999997317790985107421875f, 0.100000001490116119384765625f, 0.07500000298023223876953125f) };
-static const float2 tmp6454[16] = { float2(0.493393003940582275390625f, 0.39426898956298828125f), float2(0.7985470294952392578125f, 0.885922014713287353515625f), float2(0.2473219931125640869140625f, 0.9264500141143798828125f), float2(0.051454000174999237060546875f, 0.14078199863433837890625f), float2(0.83184301853179931640625f, 0.00955200009047985076904296875f), float2(0.4286319911479949951171875f, 0.01715099997818470001220703125f), float2(0.01565600000321865081787109375f, 0.7497789859771728515625f), float2(0.758385002613067626953125f, 0.4961700141429901123046875f), float2(0.22348700463771820068359375f, 0.562151014804840087890625f), float2(0.01162800006568431854248046875f, 0.406994998455047607421875f), float2(0.24146200716495513916015625f, 0.3046360015869140625f), float2(0.4303109943866729736328125f, 0.7272260189056396484375f), float2(0.981810986995697021484375f, 0.278358995914459228515625f), float2(0.4070560038089752197265625f, 0.500533998012542724609375f), float2(0.123478002846240997314453125f, 0.4635460078716278076171875f), float2(0.809534013271331787109375f, 0.682272017002105712890625f) };
-static const float4 tmp8346[4] = { float4(12.0f, 22.0f, 0.5f, 0.0f), float4(77.0f, 31.0f, 0.60000002384185791015625f, 1.7000000476837158203125f), float4(141.0f, 41.0f, 0.800000011920928955078125f, 4.099999904632568359375f), float4(203.0f, 57.0f, 1.0f, 2.599999904632568359375f) };
-static const int tmp10300[5] = { 85, 256, 758, 2276, 6827 };
-static const float tmp10362[5] = { 0.36000001430511474609375f, 0.2599999904632568359375f, 0.180000007152557373046875f, 0.119999997317790985107421875f, 0.07999999821186065673828125f };
-static const float tmp10665[4] = { 0.06943179666996002197265625f, 0.3300094902515411376953125f, 0.669990479946136474609375f, 0.930568218231201171875f };
-static const float tmp10679[4] = { 0.1739273965358734130859375f, 0.3260726034641265869140625f, 0.3260726034641265869140625f, 0.1739273965358734130859375f };
-static const WwSurf tmp10713 = { 0.0f.xx, 0.0f, 0.0f, 0.0f };
-static const float tmp13533[8] = { 3.0f, 4.0f, 5.0f, 6.0f, 8.0f, 10.0f, 12.0f, 15.0f };
-static const float tmp13549[8] = { 0.699999988079071044921875f, 0.690699994564056396484375f, 0.6851999759674072265625f, 0.682699978351593017578125f, 0.683600008487701416015625f, 0.686999976634979248046875f, 0.694400012493133544921875f, 0.715099990367889404296875f };
-static const WwOcean tmp13594 = { 0.0f.xx, 0.0f, 0.0f, 0.0f, 1.0f };
-static const WwWaterBed tmp17751 = { false, false, 1000000000.0f, 1000000000.0f, -1.0f };
+static const WwClearLight kWwClearLightInit = { 2, 0.0f.xxx, 0.0f, 0.0f.xxx, 1.0f };
+static const float3 table3[3] = { float3(0.0388000011444091796875f, 0.039999999105930328369140625f, 0.01940000057220458984375f), float3(0.0542999990284442901611328125f, 0.039999999105930328369140625f, 0.01840000040829181671142578125f), float3(0.0384999997913837432861328125f, 0.0350000001490116119384765625f, 0.01640000008046627044677734375f) };
+static const float3 table32[3] = { float3(0.0372000001370906829833984375f, 0.039999999105930328369140625f, 0.01950000040233135223388671875f), float3(0.0577999986708164215087890625f, 0.039999999105930328369140625f, 0.01820000074803829193115234375f), float3(0.0384999997913837432861328125f, 0.0350000001490116119384765625f, 0.01640000008046627044677734375f) };
+static const float3 table33[3] = { 0.000600000028498470783233642578125f.xxx, float3(0.0199999995529651641845703125f, 0.017999999225139617919921875f, 0.01600000075995922088623046875f), 0.0040000001899898052215576171875f.xxx };
+static const float3 table34[3] = { float3(0.00200000009499490261077880859375f, 0.0040000001899898052215576171875f, 0.01200000010430812835693359375f), float3(0.0599999986588954925537109375f, 0.20000000298023223876953125f, 0.699999988079071044921875f), float3(0.0199999995529651641845703125f, 0.07999999821186065673828125f, 0.2800000011920928955078125f) };
+static const float3 table35[3] = { float3(0.5889999866485595703125f, 0.680000007152557373046875f, 1.736999988555908203125f), float3(0.87999999523162841796875f, 1.4170000553131103515625f, 3.78999996185302734375f), float3(0.64999997615814208984375f, 0.85000002384185791015625f, 2.2330000400543212890625f) };
+static const float3 table36[3] = { float3(0.569999992847442626953125f, 0.630999982357025146484375f, 1.59899997711181640625f), float3(0.99199998378753662109375f, 1.7000000476837158203125f, 4.5799999237060546875f), float3(0.64999997615814208984375f, 0.85000002384185791015625f, 2.2330000400543212890625f) };
+static const float3 table37[3] = { float3(0.550000011920928955078125f, 0.4799999892711639404296875f, 0.36000001430511474609375f), float3(0.20000000298023223876953125f, 0.180000007152557373046875f, 0.12999999523162841796875f), float3(0.2199999988079071044921875f, 0.20000000298023223876953125f, 0.1500000059604644775390625f) };
+static const float3 table38[3] = { float3(0.20000000298023223876953125f, 0.180000007152557373046875f, 0.14000000059604644775390625f), float3(0.100000001490116119384765625f, 0.085000000894069671630859375f, 0.0599999986588954925537109375f), float3(0.119999997317790985107421875f, 0.100000001490116119384765625f, 0.07500000298023223876953125f) };
+static const float2 csmPoisson[16] = { float2(0.493393003940582275390625f, 0.39426898956298828125f), float2(0.7985470294952392578125f, 0.885922014713287353515625f), float2(0.2473219931125640869140625f, 0.9264500141143798828125f), float2(0.051454000174999237060546875f, 0.14078199863433837890625f), float2(0.83184301853179931640625f, 0.00955200009047985076904296875f), float2(0.4286319911479949951171875f, 0.01715099997818470001220703125f), float2(0.01565600000321865081787109375f, 0.7497789859771728515625f), float2(0.758385002613067626953125f, 0.4961700141429901123046875f), float2(0.22348700463771820068359375f, 0.562151014804840087890625f), float2(0.01162800006568431854248046875f, 0.406994998455047607421875f), float2(0.24146200716495513916015625f, 0.3046360015869140625f), float2(0.4303109943866729736328125f, 0.7272260189056396484375f), float2(0.981810986995697021484375f, 0.278358995914459228515625f), float2(0.4070560038089752197265625f, 0.500533998012542724609375f), float2(0.123478002846240997314453125f, 0.4635460078716278076171875f), float2(0.809534013271331787109375f, 0.682272017002105712890625f) };
+static const float4 kWwCauWave[4] = { float4(12.0f, 22.0f, 0.5f, 0.0f), float4(77.0f, 31.0f, 0.60000002384185791015625f, 1.7000000476837158203125f), float4(141.0f, 41.0f, 0.800000011920928955078125f, 4.099999904632568359375f), float4(203.0f, 57.0f, 1.0f, 2.599999904632568359375f) };
+static const int Wt[5] = { 85, 256, 758, 2276, 6827 };
+static const float table5[5] = { 0.36000001430511474609375f, 0.2599999904632568359375f, 0.180000007152557373046875f, 0.119999997317790985107421875f, 0.07999999821186065673828125f };
+static const float table4[4] = { 0.06943179666996002197265625f, 0.3300094902515411376953125f, 0.669990479946136474609375f, 0.930568218231201171875f };
+static const float table42[4] = { 0.1739273965358734130859375f, 0.3260726034641265869140625f, 0.3260726034641265869140625f, 0.1739273965358734130859375f };
+static const WwSurf kWwSurfInit = { 0.0f.xx, 0.0f, 0.0f, 0.0f };
+static const float table8[8] = { 3.0f, 4.0f, 5.0f, 6.0f, 8.0f, 10.0f, 12.0f, 15.0f };
+static const float table82[8] = { 0.699999988079071044921875f, 0.690699994564056396484375f, 0.6851999759674072265625f, 0.682699978351593017578125f, 0.683600008487701416015625f, 0.686999976634979248046875f, 0.694400012493133544921875f, 0.715099990367889404296875f };
+static const WwOcean kWwOceanInit = { 0.0f.xx, 0.0f, 0.0f, 0.0f, 1.0f };
+static const WwWaterBed kWwWaterBedInit = { false, false, 1000000000.0f, 1000000000.0f, -1.0f };
 
 cbuffer globalUniforms : register(b0, space0)
 {
@@ -633,27 +633,28 @@ float3 wwFoamDetail(float2 P, float foot, float t)
     float2 Pw = P - (floor(P * 0.00048828125f) * 2048.0f);
     float n = 0.0f;
     float drawn = 0.0f;
-    float tmp10339;
+    float vPick;
     for (int i = 0; i < 5; i++)
     {
-        float s = 2048.0f / float(tmp10300[i]);
+        float s = 2048.0f / float(Wt[i]);
         float vis = 1.0f - smoothstep(0.3499999940395355224609375f, 0.699999988079071044921875f, foot / s);
+        // the finer layers drift slowly (bubbles turning over)
         float2 p = (Pw / s.xx) + ((float2(0.10999999940395355224609375f, 0.070000000298023223876953125f) * t) * float(i));
-        p = mod(p, float(tmp10300[i]).xx);
+        p = mod(p, float(Wt[i]).xx);
         if (vis > 0.0f)
         {
-            float2 param = p;
-            int param_1 = tmp10300[i];
-            int2 param_2 = int2(17 * i, 101 * i);
-            tmp10339 = wwFoamNoise(param, param_1, param_2);
+            float2 pArg2 = p;
+            int kArg2 = Wt[i];
+            int2 seedArg = int2(17 * i, 101 * i);
+            vPick = wwFoamNoise(pArg2, kArg2, seedArg);
         }
         else
         {
-            tmp10339 = 0.5f;
+            vPick = 0.5f;
         }
-        float v = tmp10339;
-        n += (tmp10362[i] * lerp(0.5f, v, vis));
-        drawn += (tmp10362[i] * vis);
+        float v = vPick;
+        n += (table5[i] * lerp(0.5f, v, vis));
+        drawn += (table5[i] * vis);
     }
     n = clamp(0.5f + ((n - 0.5f) * 2.2000000476837158203125f), 0.0f, 1.0f);
     float lvis = 1.0f - smoothstep(0.3499999940395355224609375f, 0.699999988079071044921875f, foot / 1.2000000476837158203125f);
@@ -661,9 +662,9 @@ float3 wwFoamDetail(float2 P, float foot, float t)
     if (lvis > 0.0f)
     {
         float2 p_1 = mod((Pw / 1.2000000476837158203125f.xx) + (float2(0.0500000007450580596923828125f, -0.039999999105930328369140625f) * t), 1707.0f.xx);
-        float2 param_3 = p_1;
-        int param_4 = 1707;
-        float wall = 1.0f - smoothstep(0.039999999105930328369140625f, 0.300000011920928955078125f, wwFoamLace(param_3, param_4));
+        float2 pArg = p_1;
+        int kArg = 1707;
+        float wall = 1.0f - smoothstep(0.039999999105930328369140625f, 0.300000011920928955078125f, wwFoamLace(pArg, kArg));
         lace = lerp(0.449999988079071044921875f, 0.1500000059604644775390625f + (0.85000002384185791015625f * wall), lvis);
     }
     return float3(n, lace, drawn);
@@ -733,9 +734,9 @@ float wwOcWhite(float J, float U)
     float jt = 0.715099990367889404296875f;
     for (int i = 0; i < 7; i++)
     {
-        if (u <= tmp13533[i + 1])
+        if (u <= table8[i + 1])
         {
-            jt = lerp(tmp13549[i], tmp13549[i + 1], (u - tmp13533[i]) / (tmp13533[i + 1] - tmp13533[i]));
+            jt = lerp(table82[i], table82[i + 1], (u - table8[i]) / (table8[i + 1] - table8[i]));
             break;
         }
     }
@@ -744,20 +745,20 @@ float wwOcWhite(float J, float U)
 
 WwOcean wwWaterOceanQ(float2 P, float2 Q, float2 dPx, float2 dPy, out int setOut)
 {
-    WwOcean o = tmp13594;
-    float2 param = P;
-    float param_1;
-    float param_2;
-    float3 param_3;
-    float param_4;
-    float param_5;
-    int tmp13608 = wwOcBody(param, param_1, param_2, param_3, param_4, param_5);
-    float ws = param_1;
-    float a = param_2;
-    float3 gc = param_3;
-    float m = param_4;
-    float pw = param_5;
-    int set = tmp13608;
+    WwOcean o = kWwOceanInit;
+    float2 PArg = P;
+    float wsArg;
+    float aArg;
+    float3 gcArg;
+    float mArg;
+    float pwArg;
+    int wwOcBodyRet = wwOcBody(PArg, wsArg, aArg, gcArg, mArg, pwArg);
+    float ws = wsArg;
+    float a = aArg;
+    float3 gc = gcArg;
+    float m = mArg;
+    float pw = pwArg;
+    int set = wwOcBodyRet;
     setOut = set;
     if (set < 0)
     {
@@ -765,6 +766,7 @@ WwOcean wwWaterOceanQ(float2 P, float2 Q, float2 dPx, float2 dPy, out int setOut
     }
     o.w = ws;
     float U = waterOceanWind.z;
+    // the tiles run along the wind: rotate world metres into them, and the slopes back
     float2 d = waterOceanWind.xy;
     float2 e = float2(-d.y, d.x);
     float2 Pm = Q * 0.01428749971091747283935546875f;
@@ -777,64 +779,64 @@ WwOcean wwWaterOceanQ(float2 P, float2 Q, float2 dPx, float2 dPy, out int setOut
     float4 B = 0.0f.xxxx;
     float dxy = 0.0f;
     float var = 0.0f;
-    float param_11;
-    float param_12;
+    float dxyArg;
+    float lostArg;
     for (int c = 0; c < 3; c++)
     {
         float il = iL[c];
-        float2 param_6 = q * il;
-        float2 param_7 = qx * il;
-        float2 param_8 = qy * il;
-        float param_9 = float((set * 3) + c);
-        uint param_10 = 461845907u * uint(((set * 3) + c) + 1);
-        float4 tmp13721 = wwOcCascade(param_6, param_7, param_8, param_9, param_10, param_11, param_12);
-        float dc = param_11;
-        float lc = param_12;
-        float4 Bc = tmp13721;
+        float2 uvArg = q * il;
+        float2 gxArg = qx * il;
+        float2 gyArg = qy * il;
+        float layerArg = float((set * 3) + c);
+        uint seedArg2 = 461845907u * uint(((set * 3) + c) + 1);
+        float4 wwOcCascadeRet = wwOcCascade(uvArg, gxArg, gyArg, layerArg, seedArg2, dxyArg, lostArg);
+        float dc = dxyArg;
+        float lc = lostArg;
+        float4 Bc = wwOcCascadeRet;
         B += (Bc * gc[c]);
         dxy += (gc[c] * dc);
         var += ((gc[c] * gc[c]) * lc);
     }
     B *= a;
     dxy *= a;
-    float tmp13760;
+    float varPick;
     if ((waterOceanRed & 8) != 0)
     {
-        tmp13760 = 0.0f;
+        varPick = 0.0f;
     }
     else
     {
-        tmp13760 = (a * a) * (var + (waterOceanSet[set].w * lerp(1.0f, m * m, pw)));
+        varPick = (a * a) * (var + (waterOceanSet[set].w * lerp(1.0f, m * m, pw)));
     }
-    var = tmp13760;
-    float tmp13784;
+    var = varPick;
+    float lamPick;
     if ((waterOceanRed & 16) != 0)
     {
-        tmp13784 = 0.0f;
+        lamPick = 0.0f;
     }
     else
     {
-        tmp13784 = iL.w;
+        lamPick = iL.w;
     }
-    float lam = tmp13784;
+    float lam = lamPick;
     float jx = 1.0f + (lam * B.z);
     float jy = 1.0f + (lam * B.w);
     float2 st = float2(B.x / max(jx, 0.20000000298023223876953125f), B.y / max(jy, 0.20000000298023223876953125f));
     o.slope = -((d * st.x) + (e * st.y));
     o.var = var;
     float J = (jx * jy) - (((lam * lam) * dxy) * dxy);
-    float tmp13844;
+    float oPick;
     if ((waterOceanRed & 2048) != 0)
     {
-        tmp13844 = ((1.0f - smoothstep(0.1500000059604644775390625f, 0.550000011920928955078125f, J)) * smoothstep(4.0f, 8.0f, U)) * ws;
+        oPick = ((1.0f - smoothstep(0.1500000059604644775390625f, 0.550000011920928955078125f, J)) * smoothstep(4.0f, 8.0f, U)) * ws;
     }
     else
     {
-        float param_13 = J;
-        float param_14 = U;
-        tmp13844 = wwOcWhite(param_13, param_14) * ws;
+        float JArg = J;
+        float UArg = U;
+        oPick = wwOcWhite(JArg, UArg) * ws;
     }
-    o.white = tmp13844;
+    o.white = oPick;
     o.cau = clamp(((a * waterOceanSetB[set].y) * gc.z) / max(waterOceanWind.w, 0.001000000047497451305389404296875f), 0.0f, 3.0f);
     return o;
 }
@@ -938,41 +940,43 @@ WwOcean wwWaterOceanQ(float2 P, float2 Q, float2 dPx, float2 dPy, out int setOut
 float wwSurfTau(float om, float d, float s)
 {
     float c0 = 686.5999755859375f / om;
+    // where h reaches half the deep wavelength: c = c0 within 0.4%
     float dDeep = (3.1415927410125732421875f * c0) / (om * s);
     float x = min(d, dDeep);
     float r = sqrt(x);
     float tau = 0.0f;
     for (int i = 0; i < 4; i++)
     {
-        float u = r * tmp10665[i];
+        float u = r * table4[i];
         float h = (s * u) * u;
-        float param = om;
-        float param_1 = h;
-        tau += ((((tmp10679[i] * 2.0f) * u) * wwSurfK(param, param_1)) / om);
+        float omArg = om;
+        float hArg = h;
+        // 1 / c = k / om
+        tau += ((((table42[i] * 2.0f) * u) * wwSurfK(omArg, hArg)) / om);
     }
     return (tau * r) + (max(d - dDeep, 0.0f) / c0);
 }
 
 WwSurf wwSurfLaw(float d, float2 gd, float h, float hs, float t, float2 P, float foot)
 {
-    WwSurf o = tmp10713;
+    WwSurf o = kWwSurfInit;
     float om = 6.283185482025146484375f / max(waterSurfK.x, 0.5f);
     float k0 = (om * om) / 686.5999755859375f;
     float L0 = 6.283185482025146484375f / k0;
     bool shoal = (waterSurfRed & 1) == 0;
     float hh = max(h, 1.0f);
-    float tmp10738;
+    float kPick3;
     if (shoal)
     {
-        float param = om;
-        float param_1 = hh;
-        tmp10738 = wwSurfK(param, param_1);
+        float omArg3 = om;
+        float hArg2 = hh;
+        kPick3 = wwSurfK(omArg3, hArg2);
     }
     else
     {
-        tmp10738 = k0;
+        kPick3 = k0;
     }
-    float k = tmp10738;
+    float k = kPick3;
     float w = 1.0f - smoothstep(0.3499999940395355224609375f * L0, 0.5f * L0, h);
     w *= smoothstep(0.0f, 64.0f, d);
     float L = 6.283185482025146484375f / k;
@@ -984,86 +988,89 @@ WwSurf wwSurfLaw(float d, float2 gd, float h, float hs, float t, float2 P, float
     {
         return o;
     }
-    float tmp10786;
+    float tauPick;
     if (shoal)
     {
-        float param_2 = om;
-        float param_3 = d;
-        float param_4 = hh / max(d, 1.0f);
-        tmp10786 = wwSurfTau(param_2, param_3, param_4);
+        float omArg2 = om;
+        float dArg = d;
+        float sArg = hh / max(d, 1.0f);
+        tauPick = wwSurfTau(omArg2, dArg, sArg);
     }
     else
     {
-        tmp10786 = (d * k0) / om;
+        tauPick = (d * k0) / om;
     }
-    float tau = tmp10786;
+    float tau = tauPick;
     float phi = om * (t + tau);
     float env = 1.0f;
     if ((waterSurfRed & 4) == 0)
     {
-        float2 param_5 = P / (2.0f * L0).xx;
-        float n1 = wwShoreNoise(param_5);
-        float2 param_6 = (P / (3.0f * L0).xx) + 0.4099999964237213134765625f.xx;
-        float n2 = wwShoreNoise(param_6);
+        float2 pArg4 = P / (2.0f * L0).xx;
+        float n1 = wwShoreNoise(pArg4);
+        float2 pArg3 = (P / (3.0f * L0).xx) + 0.4099999964237213134765625f.xx;
+        float n2 = wwShoreNoise(pArg3);
         phi += (3.0f * (n1 - 0.5f));
         float psi = ((om / max(waterSurfK.z, 1.0f)) * (t + (2.0f * tau))) + (6.283185482025146484375f * n2);
         env = 0.3499999940395355224609375f + (0.64999997615814208984375f * (0.5f + (0.5f * cos(psi))));
     }
+    // shoaling: energy flux kept, cg0 = c0 / 2
     float kh = k * hh;
-    float tmp10868;
+    float cgPick;
     if (shoal)
     {
-        tmp10868 = (0.5f * (om / k)) * (1.0f + ((2.0f * kh) / sinh(min(2.0f * kh, 40.0f))));
+        cgPick = (0.5f * (om / k)) * (1.0f + ((2.0f * kh) / sinh(min(2.0f * kh, 40.0f))));
     }
     else
     {
-        tmp10868 = 343.29998779296875f / om;
+        cgPick = 343.29998779296875f / om;
     }
-    float cg = tmp10868;
-    float tmp10894;
+    float cg = cgPick;
+    float HfreePick;
     if (shoal)
     {
-        tmp10894 = sqrt((0.5f * (686.5999755859375f / om)) / max(cg, 0.001000000047497451305389404296875f));
+        HfreePick = sqrt((0.5f * (686.5999755859375f / om)) / max(cg, 0.001000000047497451305389404296875f));
     }
     else
     {
-        tmp10894 = 1.0f;
+        HfreePick = 1.0f;
     }
-    float Hfree = (hs * env) * tmp10894;
+    float Hfree = (hs * env) * HfreePick;
     float gam = waterSurfK.y;
-    float tmp10912;
+    float bPick;
     if (shoal)
     {
-        tmp10912 = Hfree / max(gam * hh, 0.001000000047497451305389404296875f);
+        bPick = Hfree / max(gam * hh, 0.001000000047497451305389404296875f);
     }
     else
     {
-        tmp10912 = 0.0f;
+        bPick = 0.0f;
     }
-    float b = tmp10912;
-    float tmp10925;
+    // over 1: broken
+    float b = bPick;
+    float HPick;
     if (shoal)
     {
-        tmp10925 = min(Hfree, gam * hh);
+        HPick = min(Hfree, gam * hh);
     }
     else
     {
-        tmp10925 = Hfree;
+        HPick = Hfree;
     }
-    float H = tmp10925;
+    float H = HPick;
     bool brk = (waterSurfRed & 2) == 0;
-    float tmp10942;
+    float rPick;
     if (brk)
     {
-        tmp10942 = 0.60000002384185791015625f * smoothstep(0.5f, 1.0f, b);
+        rPick = 0.60000002384185791015625f * smoothstep(0.5f, 1.0f, b);
     }
     else
     {
-        tmp10942 = 0.0f;
+        rPick = 0.0f;
     }
-    float r = tmp10942;
+    float r = rPick;
     float th = phi - asin(r);
     float den = 1.0f + (r * sin(th));
+    // d phi / d d = om / c = k
     float dEta = (((((-0.5f) * H) * sqrt(1.0f - (r * r))) * (sin(th) + r)) / (den * den)) * k;
     dEta = clamp(dEta, -0.60000002384185791015625f, 0.60000002384185791015625f);
     o.slope = (gd * (-dEta)) * w;
@@ -1071,6 +1078,7 @@ WwSurf wwSurfLaw(float d, float2 gd, float h, float hs, float t, float2 P, float
     o.H = H;
     if (brk)
     {
+        // 0 at the crest, rising offshore
         float u = frac(phi / 6.283185482025146484375f);
         o.foam = (w * smoothstep(0.800000011920928955078125f, 1.10000002384185791015625f, b)) * exp((-6.0f) * u);
     }
@@ -1079,39 +1087,40 @@ WwSurf wwSurfLaw(float d, float2 gd, float h, float hs, float t, float2 P, float
 
 WwSurf wwWaterSurf(float2 P, float t, float foot)
 {
-    WwSurf none = tmp10713;
+    WwSurf none = kWwSurfInit;
     if ((!waterSurfOn) || (!waterInfoOn))
     {
         return none;
     }
-    float2 param = P;
-    if (wwWaterInfo(param).w != 0.0f)
+    float2 worldXYArg6 = P;
+    if (wwWaterInfo(worldXYArg6).w != 0.0f)
     {
         return none;
     }
-    float2 param_1 = P;
-    float4 wv = wwShoreWave(param_1);
+    float2 PArg3 = P;
+    float4 wv = wwShoreWave(PArg3);
     if (wv.w < 0.5f)
     {
         return none;
     }
     float e = 0.5f * waterInfoGrid.z;
-    float2 param_2 = P;
-    float d = wwShoreField(param_2).x;
-    float2 param_3 = P + float2(e, 0.0f);
-    float2 param_4 = P - float2(e, 0.0f);
-    float2 param_5 = P + float2(0.0f, e);
-    float2 param_6 = P - float2(0.0f, e);
-    float2 g = float2(wwShoreField(param_3).x - wwShoreField(param_4).x, wwShoreField(param_5).x - wwShoreField(param_6).x) / (2.0f * e).xx;
+    float2 worldXYArg5 = P;
+    float d = wwShoreField(worldXYArg5).x;
+    float2 worldXYArg4 = P + float2(e, 0.0f);
+    float2 worldXYArg3 = P - float2(e, 0.0f);
+    float2 worldXYArg2 = P + float2(0.0f, e);
+    float2 worldXYArg = P - float2(0.0f, e);
+    float2 g = float2(wwShoreField(worldXYArg4).x - wwShoreField(worldXYArg3).x, wwShoreField(worldXYArg2).x - wwShoreField(worldXYArg).x) / (2.0f * e).xx;
     float gl = length(g);
-    float param_7 = d;
-    float2 param_8 = g / max(gl, 9.9999997473787516355514526367188e-05f).xx;
-    float param_9 = wv.z;
-    float param_10 = wv.x;
-    float param_11 = t;
-    float2 param_12 = P;
-    float param_13 = foot;
-    WwSurf o = wwSurfLaw(param_7, param_8, param_9, param_10, param_11, param_12, param_13);
+    float dArg2 = d;
+    float2 gdArg = g / max(gl, 9.9999997473787516355514526367188e-05f).xx;
+    float hArg3 = wv.z;
+    float hsArg = wv.x;
+    float tArg = t;
+    float2 PArg2 = P;
+    float footArg = foot;
+    WwSurf o = wwSurfLaw(dArg2, gdArg, hArg3, hsArg, tArg, PArg2, footArg);
+    // the field's slope is lost past its cap and on ridges
     float gw = smoothstep(0.300000011920928955078125f, 0.699999988079071044921875f, gl);
     o.slope *= gw;
     o.foam *= gw;
@@ -1175,19 +1184,19 @@ float3 frameToLinear(float3 t)
 {
     if (cellOn && cellIsOn)
     {
-        float3 tmp16245;
+        float3 frameToLinearRet;
         if (cellIsLinear)
         {
-            tmp16245 = t;
+            frameToLinearRet = t;
         }
         else
         {
-            tmp16245 = pow(max(t, 0.0f.xxx), 2.2000000476837158203125f.xxx);
+            frameToLinearRet = pow(max(t, 0.0f.xxx), 2.2000000476837158203125f.xxx);
         }
-        return tmp16245;
+        return frameToLinearRet;
     }
-    float3 param = t;
-    return untonemap(param);
+    float3 yArg = t;
+    return untonemap(yArg);
 }
 
 #define WW_FN_csmNormalOff
@@ -1212,25 +1221,26 @@ float3 frameToLinear(float3 t)
 //! the 16-tap Poisson filter, radius 3 texels
 float csmFiltered(int i, float3 posView, float offsetWorld)
 {
-    int param = i;
-    float3 param_1 = posView + (csmNOff * ussCsmTexel[i]);
-    float3 q = csmUvd(param, param_1);
-    float tmp6369;
+    int iArg = i;
+    float3 posViewArg = posView + (csmNOff * ussCsmTexel[i]);
+    // lane SHADOWSHIMMER2: as csmHard
+    float3 q = csmUvd(iArg, posViewArg);
+    float zRefPick;
     if (ussCsmStable.w != 0.0f)
     {
-        tmp6369 = ussCsmBias[i];
+        zRefPick = ussCsmBias[i];
     }
     else
     {
-        tmp6369 = offsetWorld;
+        zRefPick = offsetWorld;
     }
-    float zRef = q.z - (tmp6369 * csmInvRange[i]);
+    float zRef = q.z - (zRefPick * csmInvRange[i]);
     float k = 6.0f / csmParams.z;
     float sum = 0.0f;
     for (int t = 0; t < 16; t++)
     {
-        float4 tmp6470 = float4(q.xy + ((tmp6454[t] - 0.5f.xx) * k), float(i), zRef);
-        sum += csmMap.SampleCmp(_csmMap_sampler, tmp6470.xyz, tmp6470.w);
+        float4 sumPart = float4(q.xy + ((csmPoisson[t] - 0.5f.xx) * k), float(i), zRef);
+        sum += csmMap.SampleCmp(_csmMap_sampler, sumPart.xyz, sumPart.w);
     }
     return sum / 16.0f;
 }
@@ -1324,13 +1334,16 @@ float csmFiltered(int i, float3 posView, float offsetWorld)
 float3 wwCauHessian(float2 xy, float t)
 {
     float3 H = 0.0f.xxx;
+    // exact in float32: the phase stays small far from 0,0
     float2 xw = xy - (floor(xy / 8192.0f.xx) * 8192.0f);
     for (int i = 0; i < 4; i++)
     {
-        float4 w = tmp8346[i];
+        float4 w = kWwCauWave[i];
         float a = radians(w.x);
         float k = 6.283185482025146484375f / w.y;
+        // whole turns per tile
         float2 kv = round((float2(cos(a), sin(a)) * k) / 0.0007669904152862727642059326171875f.xx) * 0.0007669904152862727642059326171875f;
+        // a whole number of turns per loop
         float om = round(sqrt(686.5999755859375f * k) / 0.098174773156642913818359375f) * 0.098174773156642913818359375f;
         float s = (-w.z) * sin((dot(kv, xw) - (om * t)) + w.w);
         H += (float3(kv.x * kv.x, kv.y * kv.y, kv.x * kv.y) * s);
@@ -1389,16 +1402,16 @@ float3 wwCauHessian(float2 xy, float t)
 // the class's bed albedo lit in air (the bed where the frame draws none)
 float3 wwWaterClearBed()
 {
-    float3 tmp6032;
+    float3 albPick;
     if (waterClearRed == 4)
     {
-        tmp6032 = tmp6044[wwClearIn.cls];
+        albPick = table37[wwClearIn.cls];
     }
     else
     {
-        tmp6032 = tmp6059[wwClearIn.cls];
+        albPick = table38[wwClearIn.cls];
     }
-    float3 alb = tmp6032;
+    float3 alb = albPick;
     return alb * ((wwClearIn.sun * wwClearIn.sunCos) + wwClearIn.sky);
 }
 
@@ -1406,26 +1419,26 @@ float3 wwWaterClearBed()
 float3 wwClearDeepR(int cls)
 {
     float y = dot(wwClearDeep, float3(0.2125999927520751953125f, 0.715200006961822509765625f, 0.072200000286102294921875f));
-    float3 tmp5705;
+    float3 rPick2;
     if (waterClearRed == 5)
     {
-        tmp5705 = tmp5720[cls];
+        rPick2 = table3[cls];
     }
     else
     {
-        tmp5705 = tmp5733[cls];
+        rPick2 = table32[cls];
     }
-    float3 r = tmp5705;
-    float3 tmp5741;
+    float3 r = rPick2;
+    float3 wwClearDeepRRet;
     if (y > 9.9999999747524270787835121154785e-07f)
     {
-        tmp5741 = wwClearDeep * (dot(r, float3(0.2125999927520751953125f, 0.715200006961822509765625f, 0.072200000286102294921875f)) / y);
+        wwClearDeepRRet = wwClearDeep * (dot(r, float3(0.2125999927520751953125f, 0.715200006961822509765625f, 0.072200000286102294921875f)) / y);
     }
     else
     {
-        tmp5741 = r;
+        wwClearDeepRRet = r;
     }
-    return tmp5741;
+    return wwClearDeepRRet;
 }
 
 float3 wwClearK(int cls, inout float3 bb)
@@ -1433,23 +1446,24 @@ float3 wwClearK(int cls, inout float3 bb)
     float3 k;
     if (waterClearRed == 4)
     {
-        bb = float3(0.00039999998989515006542205810546875f, 0.00095000001601874828338623046875f, 0.002249999903142452239990234375f) + tmp5770[cls];
-        k = (float3(0.3400000035762786865234375f, 0.0564999990165233612060546875f, 0.0092200003564357757568359375f) + tmp5789[cls]) + bb;
+        bb = float3(0.00039999998989515006542205810546875f, 0.00095000001601874828338623046875f, 0.002249999903142452239990234375f) + table33[cls];
+        k = (float3(0.3400000035762786865234375f, 0.0564999990165233612060546875f, 0.0092200003564357757568359375f) + table34[cls]) + bb;
     }
     else
     {
-        float3 tmp5800;
+        float3 kPick4;
         if (waterClearRed == 5)
         {
-            tmp5800 = tmp5815[cls];
+            kPick4 = table35[cls];
         }
         else
         {
-            tmp5800 = tmp5829[cls];
+            kPick4 = table36[cls];
         }
-        k = tmp5800;
-        int param = cls;
-        bb = (wwClearDeepR(param) * k) / 0.3300000131130218505859375f.xxx;
+        k = kPick4;
+        int clsArg = cls;
+        // Gordon R = 0.33 bb / k, solved for bb
+        bb = (wwClearDeepR(clsArg) * k) / 0.3300000131130218505859375f.xxx;
     }
     if (waterClearRed == 3)
     {
@@ -1479,27 +1493,28 @@ float3 depthFog(float3 c, float along, float vert)
     float4 P1 = waterMat[7];
     float4 P3 = waterMat[9];
     float4 P4 = waterMat[10];
+    // debug: the distances taken in meters
     float k = ((waterRed & 512) != 0) ? 0.01428749971091747283935546875f : 1.0f;
     if (waterClearOn)
     {
-        float3 param = c;
-        float param_1 = along;
-        float param_2 = vert;
-        return wwWaterClear(param, param_1, param_2);
+        float3 cArg2 = c;
+        float alongArg2 = along;
+        float vertArg = vert;
+        return wwWaterClear(cArg2, alongArg2, vertArg);
     }
     float rzF = clamp(1.0f - ((vert * k) / P1.w), 0.0f, 1.0f);
     float rwF = clamp(1.0f - ((along * k) / P1.w), 0.0f, 1.0f);
     float xf = clamp((rwF - P3.y) / (P3.x - P3.y), 0.0f, 1.0f);
     float a = (pow(max(1.0f - (((3.0f - (2.0f * xf)) * xf) * xf), 0.0f), 0.3300000131130218505859375f) * (P3.w - P3.z)) + P3.z;
-    float param_3 = clamp((rzF - P4.y) / (P4.x - P4.y), 0.0f, 1.0f);
-    float xc = smooth01(param_3);
+    float xArg = clamp((rzF - P4.y) / (P4.x - P4.y), 0.0f, 1.0f);
+    float xc = smooth01(xArg);
     if (waterDepthOn)
     {
-        float3 param_4 = c;
-        float3 param_5 = lerp(waterMat[1].xyz, waterMat[0].xyz, xc.xxx);
-        float param_6 = a;
-        float param_7 = along;
-        return wwWaterDepthMix(param_4, param_5, param_6, param_7);
+        float3 cArg = c;
+        float3 fogCArg = lerp(waterMat[1].xyz, waterMat[0].xyz, xc.xxx);
+        float aArg2 = a;
+        float alongArg = along;
+        return wwWaterDepthMix(cArg, fogCArg, aArg2, alongArg);
     }
     return lerp(c, lerp(waterMat[1].xyz, waterMat[0].xyz, xc.xxx), a.xxx);
 }
@@ -1760,9 +1775,10 @@ void frag_main()
     cellGiPath = 0;
     cellFarIters = 0;
     cellFarFade = true;
-    wwClearIn = tmp953;
+    wwClearIn = kWwClearLightInit;
     wwClearDeep = 0.0f.xxx;
     ussLastTerr = 1.0f;
+    // lane SHADOWSHIMMER2: probes 1 / 3 as drawn
     csmNOff = 0.0f.xxx;
     wwCauPathGain = 1.0f;
     float4 Var = waterMat[6];
@@ -1773,114 +1789,119 @@ void frag_main()
     float4 Amp = waterMat[11];
     float4 UV = waterMat[12];
     float3 posView = -ViewDir;
-    float3 param = posView;
-    float3 P = cellWorldPos(param);
-    bool tmp16470;
+    float3 posViewArg11 = posView;
+    float3 P = cellWorldPos(posViewArg11);
+    bool cond31;
     if (waterFarMask)
     {
-        float2 param_1 = P.xy;
-        tmp16470 = wwFarWaterDry(param_1);
+        float2 worldXYArg9 = P.xy;
+        cond31 = wwFarWaterDry(worldXYArg9);
     }
     else
     {
-        tmp16470 = waterFarMask;
+        cond31 = waterFarMask;
     }
-    if (tmp16470)
+    if (cond31)
     {
         discard;
     }
-    bool tmp16476 = waterSeam.z > 0.0f;
-    bool tmp16489;
-    if (tmp16476)
+    bool cond30 = waterSeam.z > 0.0f;
+    bool cond29;
+    if (cond30)
     {
-        float2 tmp16486 = waterSeamBox.xy + waterSeam.w.xx;
-        tmp16489 = all(bool2(P.xy.x > tmp16486.x, P.xy.y > tmp16486.y));
+        float2 condPart4 = waterSeamBox.xy + waterSeam.w.xx;
+        cond29 = all(bool2(P.xy.x > condPart4.x, P.xy.y > condPart4.y));
     }
     else
     {
-        tmp16489 = tmp16476;
+        cond29 = cond30;
     }
-    bool tmp16502;
-    if (tmp16489)
+    bool cond28;
+    if (cond29)
     {
-        float2 tmp16499 = waterSeamBox.zw - waterSeam.w.xx;
-        tmp16502 = all(bool2(P.xy.x < tmp16499.x, P.xy.y < tmp16499.y));
+        float2 condPart3 = waterSeamBox.zw - waterSeam.w.xx;
+        cond28 = all(bool2(P.xy.x < condPart3.x, P.xy.y < condPart3.y));
     }
     else
     {
-        tmp16502 = tmp16489;
+        cond28 = cond29;
     }
-    if (tmp16502)
+    if (cond28)
     {
         discard;
     }
-    bool tmp16508 = waterSeam.z <= 0.0f;
-    bool tmp16514;
-    if (tmp16508)
+    bool cond27 = waterSeam.z <= 0.0f;
+    bool cond26;
+    if (cond27)
     {
-        tmp16514 = waterSeam.w > 0.0f;
+        cond26 = waterSeam.w > 0.0f;
     }
     else
     {
-        tmp16514 = tmp16508;
+        cond26 = cond27;
     }
-    bool tmp16541;
-    if (tmp16514)
+    bool cond25;
+    if (cond26)
     {
-        float2 tmp16524 = waterSeamBox.xy + waterSeam.w.xx;
-        bool tmp16526 = any(bool2(P.xy.x < tmp16524.x, P.xy.y < tmp16524.y));
-        bool tmp16540;
-        if (!tmp16526)
+        float2 condPart2 = waterSeamBox.xy + waterSeam.w.xx;
+        bool cond24 = any(bool2(P.xy.x < condPart2.x, P.xy.y < condPart2.y));
+        bool condPick2;
+        if (!cond24)
         {
-            float2 tmp16537 = waterSeamBox.zw - waterSeam.w.xx;
-            tmp16540 = any(bool2(P.xy.x > tmp16537.x, P.xy.y > tmp16537.y));
+            float2 condPart5 = waterSeamBox.zw - waterSeam.w.xx;
+            condPick2 = any(bool2(P.xy.x > condPart5.x, P.xy.y > condPart5.y));
         }
         else
         {
-            tmp16540 = tmp16526;
+            condPick2 = cond24;
         }
-        tmp16541 = tmp16540;
+        cond25 = condPick2;
     }
     else
     {
-        tmp16541 = tmp16514;
+        cond25 = cond26;
     }
-    if (tmp16541)
+    if (cond25)
     {
         discard;
     }
-    float3 param_2 = 0.0f.xxx;
-    float3 eye = cellWorldPos(param_2);
+    float3 posViewArg10 = 0.0f.xxx;
+    float3 eye = cellWorldPos(posViewArg10);
     float3 ray = P - eye;
     float dist = length(ray);
     float3 V = ray / max(dist, 9.9999999747524270787835121154785e-07f).xxx;
     bool under = eye.z < P.z;
     if ((waterSslr == 1) && waterSsrFlat)
     {
+        // lane FIX1101A: the ray pass off the flat surface, before any normal work; the colour pass bends the read
         float3 Rf = float3(V.xy, -V.z);
-        float3 param_3 = float3(1.0f, 0.0f, 0.0f);
-        float3 param_4 = float3(0.0f, 1.0f, 0.0f);
-        float3 param_5 = float3(0.0f, 0.0f, 1.0f);
-        float3 Rv = float3(dot(Rf, cellWorldDir(param_3)), dot(Rf, cellWorldDir(param_4)), dot(Rf, cellWorldDir(param_5)));
-        bool3 tmp16608 = (((-Rv.z) > 0.20000000298023223876953125f) && (!under)).xxx;
-        fragColor = float4(float3(tmp16608.x ? Rv.x : 0.0f.xxx.x, tmp16608.y ? Rv.y : 0.0f.xxx.y, tmp16608.z ? Rv.z : 0.0f.xxx.z), max(-posView.z, 0.001000000047497451305389404296875f));
+        float3 dirViewArg10 = float3(1.0f, 0.0f, 0.0f);
+        float3 dirViewArg9 = float3(0.0f, 1.0f, 0.0f);
+        float3 dirViewArg8 = float3(0.0f, 0.0f, 1.0f);
+        float3 Rv = float3(dot(Rf, cellWorldDir(dirViewArg10)), dot(Rf, cellWorldDir(dirViewArg9)), dot(Rf, cellWorldDir(dirViewArg8)));
+        bool3 fragColorPart2 = (((-Rv.z) > 0.20000000298023223876953125f) && (!under)).xxx;
+        fragColor = float4(float3(fragColorPart2.x ? Rv.x : 0.0f.xxx.x, fragColorPart2.y ? Rv.y : 0.0f.xxx.y, fragColorPart2.z ? Rv.z : 0.0f.xxx.z), max(-posView.z, 0.001000000047497451305389404296875f));
         return;
     }
     float dfade = clamp((dist - 8192.0f) / (P1.x - 8192.0f), 0.0f, 1.0f);
+    // the opaque scene point behind this pixel
     int2 px = int2(gl_FragCoord.xy) - viewportDimensions.xy;
     float vert = 1000000000.0f;
     float along = 1000000000.0f;
+    // lane WATERLOOK1 step 3: the opaque point behind, world
     float3 ripS = P;
+    // lane WATERCAUSTICS1: the scene point behind, view space; its factor and probe values
     float3 cauSv = 0.0f.xxx;
     float3 cauDbg = float3(1.0f, 0.0f, 0.0f);
     float cauC = 1.0f;
     if (waterSslr == 1)
     {
+        // the obscurance pass's target: .a = the opaque scene's view depth (game units), 0 where nothing drew
         float gz = waterDepth.Load(int3(int2(gl_FragCoord.xy), 0)).w;
         if (gz > 0.0f)
         {
-            float3 param_6 = posView * (gz / max(-posView.z, 9.9999999747524270787835121154785e-07f));
-            float3 S = cellWorldPos(param_6);
+            float3 posViewArg9 = posView * (gz / max(-posView.z, 9.9999999747524270787835121154785e-07f));
+            float3 S = cellWorldPos(posViewArg9);
             vert = abs(P.z - S.z);
             along = length(S - P);
             ripS = S;
@@ -1895,8 +1916,8 @@ void frag_main()
             {
                 float sceneW = projectionMatrix[3].z / (projectionMatrix[2].z + ((2.0f * dz) - 1.0f));
                 float fragW = 1.0f / gl_FragCoord.w;
-                float3 param_7 = posView * (sceneW / max(fragW, 9.9999999747524270787835121154785e-07f));
-                float3 S_1 = cellWorldPos(param_7);
+                float3 posViewArg8 = posView * (sceneW / max(fragW, 9.9999999747524270787835121154785e-07f));
+                float3 S_1 = cellWorldPos(posViewArg8);
                 vert = abs(P.z - S_1.z);
                 along = length(S_1 - P);
                 ripS = S_1;
@@ -1908,376 +1929,391 @@ void frag_main()
     float rw = clamp(1.0f - (along / P1.w), 0.0f, 1.0f);
     float x = clamp((rw - P3.y) / (P3.x - P3.y), 0.0f, 1.0f);
     float alphaV = (pow(max(1.0f - (((3.0f - (2.0f * x)) * x) * x), 0.0f), 0.3300000131130218505859375f) * (P3.w - P3.z)) + P3.z;
-    float tmp16787;
+    float shorePick;
     if ((waterRed & 16) != 0)
     {
-        tmp16787 = 0.0f;
+        shorePick = 0.0f;
     }
     else
     {
-        float param_8 = clamp((rz - P2.x) / (1.0f - P2.x), 0.0f, 1.0f);
-        tmp16787 = smooth01(param_8);
+        float xArg4 = clamp((rz - P2.x) / (1.0f - P2.x), 0.0f, 1.0f);
+        shorePick = smooth01(xArg4);
     }
-    float shore = tmp16787;
-    float2 tmp16807;
+    float shore = shorePick;
+    float2 shoreFieldPick;
     if (waterShoreOn != 0)
     {
-        float2 param_9 = P.xy;
-        tmp16807 = wwShoreField(param_9);
+        float2 worldXYArg8 = P.xy;
+        shoreFieldPick = wwShoreField(worldXYArg8);
     }
     else
     {
-        tmp16807 = 0.0f.xx;
+        shoreFieldPick = 0.0f.xx;
     }
-    float2 shoreField = tmp16807;
-    float tmp16820;
+    // lane WATERSHORE1: the baked shore distance also fades the edge, so far water (no depth term) fades as near does
+    float2 shoreField = shoreFieldPick;
+    float shoreEdgeVPick;
     if ((waterShoreOn & 1) == 0)
     {
-        tmp16820 = 0.0f;
+        shoreEdgeVPick = 0.0f;
     }
     else
     {
-        float tmp16826;
+        float shoreEdgeVPick2;
         if (waterShoreEdgeLaw == 1)
         {
-            float2 param_10 = shoreField;
-            float param_11 = along;
-            float param_12 = V.z;
-            tmp16826 = wwShoreEdgeSoft(param_10, param_11, param_12);
+            float2 fieldArg4 = shoreField;
+            float alongArg9 = along;
+            float viewZArg = V.z;
+            shoreEdgeVPick2 = wwShoreEdgeSoft(fieldArg4, alongArg9, viewZArg);
         }
         else
         {
-            float2 param_13 = shoreField;
-            tmp16826 = wwShoreEdge(param_13);
+            float2 fieldArg3 = shoreField;
+            shoreEdgeVPick2 = wwShoreEdge(fieldArg3);
         }
-        tmp16820 = tmp16826;
+        shoreEdgeVPick = shoreEdgeVPick2;
     }
-    float shoreEdgeV = tmp16820;
+    // lane WATERFOAMDETAIL1: the soft contact from the water path to the scene behind and the bake (law 1), red: the bake
+    float shoreEdgeV = shoreEdgeVPick;
+    // lane WATERFOAMDETAIL1: the foam by the wave energy at the shore (waterShoreLaw 1), the old band as its red (0)
     float shoreFoot = max(length(ddx(P.xy)), length(ddy(P.xy)));
     float shoreColFoot = fwidth(min(vert, 4096.0f));
     float3 shoreFoamDbg = 0.0f.xxx;
-    float tmp16864;
+    float shoreFoamVPick;
     bool wwh0 = ((waterShoreOn & 2) == 0);
-    if (wwh0 || under)
+    if (or(wwh0, under))   // HLSLFIX2 orfix.py: no short-circuit branch (NV took the wrong side)
     {
-        tmp16864 = 0.0f;
+        shoreFoamVPick = 0.0f;
     }
     else
     {
-        float tmp16871;
+        float shoreFoamVPick2;
         if (waterShoreLaw == 1)
         {
-            float2 param_14 = shoreField;
-            float2 param_15 = P.xy;
-            float param_16 = waterShoreTime;
-            float param_17 = vert;
-            float param_18 = shoreColFoot;
-            float param_19 = shoreFoot;
-            float3 param_20;
-            float tmp16889 = wwShoreFoamWave(param_14, param_15, param_16, param_17, param_18, param_19, param_20);
-            shoreFoamDbg = param_20;
-            tmp16871 = tmp16889;
+            float2 fieldArg2 = shoreField;
+            float2 PArg21 = P.xy;
+            float tArg11 = waterShoreTime;
+            float columnArg2 = vert;
+            float colFootArg = shoreColFoot;
+            float footArg7 = shoreFoot;
+            float3 dbgArg2;
+            float wwShoreFoamWaveRet = wwShoreFoamWave(fieldArg2, PArg21, tArg11, columnArg2, colFootArg, footArg7, dbgArg2);
+            shoreFoamDbg = dbgArg2;
+            shoreFoamVPick2 = wwShoreFoamWaveRet;
         }
         else
         {
-            float2 param_21 = shoreField;
-            float2 param_22 = P.xy;
-            float param_23 = waterShoreTime;
-            tmp16871 = wwShoreFoam(param_21, param_22, param_23);
+            float2 fieldArg = shoreField;
+            float2 worldXYArg7 = P.xy;
+            float tArg10 = waterShoreTime;
+            shoreFoamVPick2 = wwShoreFoam(fieldArg, worldXYArg7, tArg10);
         }
-        tmp16864 = tmp16871;
+        shoreFoamVPick = shoreFoamVPick2;
     }
-    float shoreFoamV = tmp16864;
+    float shoreFoamV = shoreFoamVPick;
     if ((waterRed & 16) == 0)
     {
         shore = max(shore, shoreEdgeV);
     }
-    float param_24 = clamp((rz - P2.w) / (P2.z - P2.w), 0.0f, 1.0f);
-    float flatten = (1.0f - smooth01(param_24)) * P2.y;
+    float xArg3 = clamp((rz - P2.w) / (P2.z - P2.w), 0.0f, 1.0f);
+    float flatten = (1.0f - smooth01(xArg3)) * P2.y;
+    // the three noise layers
     float2 wxy = P.xy;
-    float2 param_25 = (wxy / UV.x.xx) + waterScroll0.xy;
-    float2 param_26;
-    float3 tmp16945 = noiseN(waterNoise0, _waterNoise0_sampler, param_25, param_26);
-    float2 tap0 = param_26;
-    float3 n1 = tmp16945;
-    float2 param_27 = (wxy / UV.y.xx) + waterScroll0.zw;
-    float2 param_28;
-    float3 tmp16960 = noiseN(waterNoise1, _waterNoise1_sampler, param_27, param_28);
-    float2 tap1 = param_28;
-    float3 n2 = tmp16960;
-    float2 param_29 = (wxy / UV.z.xx) + waterScroll1.xy;
-    float2 param_30;
-    float3 tmp16975 = noiseN(waterNoise2, _waterNoise2_sampler, param_29, param_30);
-    float2 tap2 = param_30;
-    float3 n3 = tmp16975;
+    float2 uvArg4 = (wxy / UV.x.xx) + waterScroll0.xy;
+    float2 tapArg3;
+    float3 noiseNRet3 = noiseN(waterNoise0, _waterNoise0_sampler, uvArg4, tapArg3);
+    float2 tap0 = tapArg3;
+    float3 n1 = noiseNRet3;
+    float2 uvArg3 = (wxy / UV.y.xx) + waterScroll0.zw;
+    float2 tapArg2;
+    float3 noiseNRet2 = noiseN(waterNoise1, _waterNoise1_sampler, uvArg3, tapArg2);
+    float2 tap1 = tapArg2;
+    float3 n2 = noiseNRet2;
+    float2 uvArg2 = (wxy / UV.z.xx) + waterScroll1.xy;
+    float2 tapArg;
+    float3 noiseNRet = noiseN(waterNoise2, _waterNoise2_sampler, uvArg2, tapArg);
+    float2 tap2 = tapArg;
+    float3 n3 = noiseNRet;
     float3 N = ((n1 - float3(0.0f, 0.0f, 1.0f)) * Amp.x) + float3(0.0f, 0.0f, 1.0f);
     N += (((n2 * Amp.y) + (n3 * Amp.z)) * dfade);
     N = normalize(N);
+    // lane WATERWAVES1: the swell's slopes add to the noise layers' (slope-space blend), before the game's flatten
     float swellFoot = max(length(ddx(P.xy)), length(ddy(P.xy)));
-    float4 tmp17013;
+    float4 swellPick;
     if (waterWavesOn != 0)
     {
-        float2 param_31 = P.xy;
-        float param_32 = waterWavesK.z;
-        float param_33 = swellFoot;
-        tmp17013 = wwWaterSwell(param_31, param_32, param_33);
+        float2 PArg20 = P.xy;
+        float tArg9 = waterWavesK.z;
+        float footprintArg = swellFoot;
+        swellPick = wwWaterSwell(PArg20, tArg9, footprintArg);
     }
     else
     {
-        tmp17013 = 0.0f.xxxx;
+        swellPick = 0.0f.xxxx;
     }
-    float4 swell = tmp17013;
+    float4 swell = swellPick;
     if (swell.z > 0.0f)
     {
         N = normalize(float3((N.xy / max(N.z, 0.001000000047497451305389404296875f).xx) + swell.xy, 1.0f));
     }
+    // lane WATERLOOK1: on a baked body the wind's spectrum replaces the noise layers and the swell (slope space)
+    // the spectrum is defined on the undisplaced grid
     float2 ocP = wwOcBase;
     float2 ocDx = ddx(ocP);
     float2 ocDy = ddy(ocP);
-    WwOcean tmp17059;
+    WwOcean ocPick;
     if (waterOceanOn)
     {
-        float2 param_34 = ocP;
-        float2 param_35 = ocDx;
-        float2 param_36 = ocDy;
-        tmp17059 = wwWaterOceanFlowed(param_34, param_35, param_36);
+        float2 PArg19 = ocP;
+        float2 dPxArg = ocDx;
+        float2 dPyArg = ocDy;
+        ocPick = wwWaterOceanFlowed(PArg19, dPxArg, dPyArg);
     }
     else
     {
-        tmp17059 = tmp13594;
+        ocPick = kWwOceanInit;
     }
-    WwOcean oc = tmp17059;
+    WwOcean oc = ocPick;
     if (oc.w > 0.0f)
     {
         N = normalize(float3(lerp(N.xy / max(N.z, 0.001000000047497451305389404296875f).xx, oc.slope, oc.w.xx), 1.0f));
     }
-    bool tmp17099;
+    bool cond23;
     if (waterOceanOn)
     {
-        tmp17099 = (waterOceanRed & 64) == 0;
+        cond23 = (waterOceanRed & 64) == 0;
     }
     else
     {
-        tmp17099 = waterOceanOn;
+        cond23 = waterOceanOn;
     }
-    if (tmp17099)
+    if (cond23)
     {
-        float param_37 = vert;
-        float3 param_38 = P;
-        float3 param_39 = ripS;
-        float3 param_40 = eye;
-        float param_41 = oc.w * sqrt(oc.var);
-        float3 rip = wwContactRippleAt(param_37, param_38, param_39, param_40, param_41);
+        float vertArg9 = vert;
+        float3 PArg18 = P;
+        float3 SArg3 = ripS;
+        float3 eyeArg2 = eye;
+        float s0Arg = oc.w * sqrt(oc.var);
+        float3 rip = wwContactRippleAt(vertArg9, PArg18, SArg3, eyeArg2, s0Arg);
         N = normalize(float3((N.xy / max(N.z, 0.001000000047497451305389404296875f).xx) + rip.xy, 1.0f));
         oc.var += rip.z;
     }
     float ocKeep = 0.0f;
-    bool tmp17146;
+    bool cond22;
     if (waterOceanOn)
     {
-        tmp17146 = oc.w > 0.0f;
+        cond22 = oc.w > 0.0f;
     }
     else
     {
-        tmp17146 = waterOceanOn;
+        cond22 = waterOceanOn;
     }
-    if (tmp17146)
+    if (cond22)
     {
-        float2 param_42 = wxy;
-        float param_43 = UV.z;
-        float2 param_44 = waterScroll1.xy;
-        float param_45 = oc.var;
-        float param_46 = dfade * oc.w;
-        float param_47;
-        float2 tmp17167 = wwWaterOceanDetail(param_42, param_43, param_44, param_45, param_46, param_47);
-        ocKeep = param_47;
-        float2 det = tmp17167;
+        float2 wxyArg = wxy;
+        float tileArg = UV.z;
+        float2 scrollArg = waterScroll1.xy;
+        float varArg2 = oc.var;
+        float wArg = dfade * oc.w;
+        float keepArg;
+        float2 wwWaterOceanDetailRet = wwWaterOceanDetail(wxyArg, tileArg, scrollArg, varArg2, wArg, keepArg);
+        ocKeep = keepArg;
+        float2 det = wwWaterOceanDetailRet;
         N = normalize(float3((N.xy / max(N.z, 0.001000000047497451305389404296875f).xx) + det, 1.0f));
     }
-    float param_48 = vert;
-    float3 param_49 = P;
-    float3 param_50 = ripS;
-    float3 param_51 = eye;
-    float param_52 = waterShoreTime;
-    float4 contact = wwWaterContact(param_48, param_49, param_50, param_51, param_52);
+    float vertArg8 = vert;
+    float3 PArg17 = P;
+    float3 SArg2 = ripS;
+    float3 eyeArg = eye;
+    float tArg8 = waterShoreTime;
+    // lane WATERLOOK1 step 12: the contact foam's density, distance, trust, foot (uniform flow: derivatives)
+    float4 contact = wwWaterContact(vertArg8, PArg17, SArg2, eyeArg, tArg8);
     if (under)
     {
         contact.x = 0.0f;
     }
-    float2 param_53 = P.xy;
-    float param_54 = waterShoreTime;
-    float param_55 = sqrt(length(cross(ddx(P), ddy(P))));
-    float4 rfoam = wwWaterRiverFoam(param_53, param_54, param_55);
+    float2 PArg16 = P.xy;
+    float tArg7 = waterShoreTime;
+    float footArg6 = sqrt(length(cross(ddx(P), ddy(P))));
+    // lane WATERLOOK1 step 15: river foam (density, alpha, C T, speed); the pixel's width (u) in uniform flow
+    float4 rfoam = wwWaterRiverFoam(PArg16, tArg7, footArg6);
     if (under)
     {
         rfoam = 0.0f.xxxx;
     }
     float3 N0 = N;
     N = normalize(((N - float3(0.0f, 0.0f, 1.0f)) * flatten) + float3(0.0f, 0.0f, 1.0f));
+    // lane WATERLOOK1 step 11: the shore waves (slope space), after the game's flatten, which would erase them in the shallows
     float surfFoot = max(length(ddx(P.xy)), length(ddy(P.xy)));
-    WwSurf tmp17236;
+    WwSurf surfPick;
     if (under)
     {
-        tmp17236 = tmp10713;
+        surfPick = kWwSurfInit;
     }
     else
     {
-        float2 param_56 = P.xy;
-        float param_57 = waterShoreTime;
-        float param_58 = surfFoot;
-        tmp17236 = wwWaterSurf(param_56, param_57, param_58);
+        float2 PArg15 = P.xy;
+        float tArg6 = waterShoreTime;
+        float footArg5 = surfFoot;
+        surfPick = wwWaterSurf(PArg15, tArg6, footArg5);
     }
-    WwSurf surf = tmp17236;
+    WwSurf surf = surfPick;
     if (surf.w > 0.0f)
     {
         N = normalize(float3((N.xy / max(N.z, 0.001000000047497451305389404296875f).xx) + surf.slope, 1.0f));
     }
     bool reflPhys = wwWaterReflPhys();
-    float tmp17275;
-    if (reflPhys || waterGlintOn)
+    float reflA2Pick2;
+    if (or(reflPhys, waterGlintOn))   // HLSLFIX2 orfix.py: no short-circuit branch (NV took the wrong side)
     {
-        float2 param_59 = (wxy / UV.x.xx) + waterScroll0.xy;
-        float2 param_60 = (wxy / UV.y.xx) + waterScroll0.zw;
-        float2 param_61 = (wxy / UV.z.xx) + waterScroll1.xy;
-        float2 param_62 = tap0;
-        float2 param_63 = tap1;
-        float2 param_64 = tap2;
-        float4 param_65 = Amp;
-        float param_66 = dfade;
-        float param_67 = flatten;
-        float param_68 = Var.x;
-        float3 param_69 = N;
-        bool param_70 = (waterGlintRed & 2) == 0;
-        tmp17275 = wwWaterAlpha2(param_59, param_60, param_61, param_62, param_63, param_64, param_65, param_66, param_67, param_68, param_69, param_70);
+        float2 uv0Arg = (wxy / UV.x.xx) + waterScroll0.xy;
+        float2 uv1Arg = (wxy / UV.y.xx) + waterScroll0.zw;
+        float2 uv2Arg = (wxy / UV.z.xx) + waterScroll1.xy;
+        float2 tap0Arg = tap0;
+        float2 tap1Arg = tap1;
+        float2 tap2Arg = tap2;
+        float4 AmpArg = Amp;
+        float dfadeArg2 = dfade;
+        float flattenArg = flatten;
+        float specPowArg = Var.x;
+        float3 NArg3 = N;
+        bool leanArg = (waterGlintRed & 2) == 0;
+        reflA2Pick2 = wwWaterAlpha2(uv0Arg, uv1Arg, uv2Arg, tap0Arg, tap1Arg, tap2Arg, AmpArg, dfadeArg2, flattenArg, specPowArg, NArg3, leanArg);
     }
     else
     {
-        tmp17275 = 0.0f;
+        reflA2Pick2 = 0.0f;
     }
-    float reflA2 = tmp17275;
-    bool tmp17335;
+    float reflA2 = reflA2Pick2;
+    bool cond21;
     if (waterOceanOn)
     {
-        tmp17335 = reflPhys || waterGlintOn;
+        cond21 = reflPhys || waterGlintOn;
     }
     else
     {
-        tmp17335 = waterOceanOn;
+        cond21 = waterOceanOn;
     }
-    if (tmp17335)
+    if (cond21)
     {
         float2 ocS = N.xy / max(N.z, 0.0500000007450580596923828125f).xx;
         float2 ocSx = ddx(ocS);
         float2 ocSy = ddy(ocS);
         bool ocLean = (waterGlintRed & 2) == 0;
-        float tmp17358;
+        float ocFootPick;
         if (ocLean)
         {
-            tmp17358 = min(0.5f * (dot(ocSx, ocSx) + dot(ocSy, ocSy)), waterGlintK.z);
+            ocFootPick = min(0.5f * (dot(ocSx, ocSx) + dot(ocSy, ocSy)), waterGlintK.z);
         }
         else
         {
-            tmp17358 = 0.0f;
+            ocFootPick = 0.0f;
         }
-        float ocFoot = tmp17358;
-        float tmp17376;
+        float ocFoot = ocFootPick;
+        float reflA2Pick;
         if (ocLean)
         {
-            tmp17376 = ((oc.var * (1.0f - ocKeep)) * flatten) * flatten;
+            reflA2Pick = ((oc.var * (1.0f - ocKeep)) * flatten) * flatten;
         }
         else
         {
-            tmp17376 = 0.0f;
+            reflA2Pick = 0.0f;
         }
-        reflA2 = lerp(reflA2, (9.9999997473787516355514526367188e-05f + tmp17376) + ocFoot, oc.w);
+        reflA2 = lerp(reflA2, (9.9999997473787516355514526367188e-05f + reflA2Pick) + ocFoot, oc.w);
     }
     if (waterSslr == 1)
     {
+        // the game's water ray pass: half the flattening, the ray into the view, the 0.2 gate
         float3 Nr = normalize(((N0 - float3(0.0f, 0.0f, 1.0f)) * (0.5f * flatten)) + float3(0.0f, 0.0f, 1.0f));
         float3 Rw = reflect(V, Nr);
-        float3 param_71 = float3(1.0f, 0.0f, 0.0f);
-        float3 param_72 = float3(0.0f, 1.0f, 0.0f);
-        float3 param_73 = float3(0.0f, 0.0f, 1.0f);
-        float3 Rv_1 = float3(dot(Rw, cellWorldDir(param_71)), dot(Rw, cellWorldDir(param_72)), dot(Rw, cellWorldDir(param_73)));
-        bool3 tmp17434 = (((-Rv_1.z) > 0.20000000298023223876953125f) && (!under)).xxx;
-        fragColor = float4(float3(tmp17434.x ? Rv_1.x : 0.0f.xxx.x, tmp17434.y ? Rv_1.y : 0.0f.xxx.y, tmp17434.z ? Rv_1.z : 0.0f.xxx.z), max(-posView.z, 0.001000000047497451305389404296875f));
+        float3 dirViewArg7 = float3(1.0f, 0.0f, 0.0f);
+        float3 dirViewArg6 = float3(0.0f, 1.0f, 0.0f);
+        float3 dirViewArg5 = float3(0.0f, 0.0f, 1.0f);
+        float3 Rv_1 = float3(dot(Rw, cellWorldDir(dirViewArg7)), dot(Rw, cellWorldDir(dirViewArg6)), dot(Rw, cellWorldDir(dirViewArg5)));
+        bool3 fragColorPart = (((-Rv_1.z) > 0.20000000298023223876953125f) && (!under)).xxx;
+        fragColor = float4(float3(fragColorPart.x ? Rv_1.x : 0.0f.xxx.x, fragColorPart.y ? Rv_1.y : 0.0f.xxx.y, fragColorPart.z ? Rv_1.z : 0.0f.xxx.z), max(-posView.z, 0.001000000047497451305389404296875f));
         return;
     }
     if ((waterRed & 32) != 0)
     {
         N = float3(0.0f, 0.0f, 1.0f);
     }
-    float3 tmp17452;
+    float3 NsPick;
     if (under)
     {
-        tmp17452 = -N;
+        NsPick = -N;
     }
     else
     {
-        tmp17452 = N;
+        NsPick = N;
     }
-    float3 Ns = tmp17452;
+    // INFERRED: from below the surface faces the eye
+    float3 Ns = NsPick;
     float c5 = 1.0f - clamp(dot(-V, Ns), 0.0f, 1.0f);
-    float tmp17471;
+    float FPick;
     if ((waterRed & 2) != 0)
     {
-        tmp17471 = P4.z;
+        FPick = P4.z;
     }
     else
     {
-        tmp17471 = P4.z + ((((((1.0f - P4.z) * c5) * c5) * c5) * c5) * c5);
+        FPick = P4.z + ((((((1.0f - P4.z) * c5) * c5) * c5) * c5) * c5);
     }
-    float F = tmp17471;
+    float F = FPick;
     float3 R = reflect(V, Ns);
     float3 sky = lerp(waterSky[0].xyz, waterSky[1].xyz, clamp(R.z + 0.75f, 0.0f, 1.0f).xxx);
     sky = lerp(sky, waterSky[2].xyz, clamp((R.z * 1.89999997615814208984375f) + 0.3499999940395355224609375f, 0.0f, 1.0f).xxx);
+    // 0.65 x the lower/horizon mix + 0.35 x the upper there (red WW_CELL_WATER_REFL_RED=grazing)
     if ((waterReflRed & 32) == 0)
     {
         sky = lerp(waterSky[0].xyz, sky, smoothstep(0.0f, 0.07999999821186065673828125f, R.z).xxx);
     }
-    float tmp17539;
+    float skyFarVPick;
     if (under)
     {
-        tmp17539 = 1.0f;
+        skyFarVPick = 1.0f;
     }
     else
     {
-        float3 param_74 = P;
-        tmp17539 = wwWaterSkyFar(param_74);
+        float3 PArg14 = P;
+        skyFarVPick = wwWaterSkyFar(PArg14);
     }
-    float skyFarV = tmp17539;
-    float3 tmp17549;
+    float skyFarV = skyFarVPick;
+    float3 reflSkyPick;
     if (waterReflOn)
     {
-        float3 param_75 = sky;
-        float3 param_76 = P;
-        float3 param_77 = R;
-        tmp17549 = wwWaterCloudSky(param_75, param_76, param_77);
+        float3 skyArg3 = sky;
+        float3 PArg13 = P;
+        float3 RArg2 = R;
+        reflSkyPick = wwWaterCloudSky(skyArg3, PArg13, RArg2);
     }
     else
     {
-        tmp17549 = sky;
+        reflSkyPick = sky;
     }
-    float3 reflSky = tmp17549;
+    // lane WATERREFL1: before the game's SSR blend
+    float3 reflSky = reflSkyPick;
     float4 reflRaw = 0.0f.xxxx;
     float4 reflFin = 0.0f.xxxx;
-    float tmp17566;
+    float skyVisPick;
     if (under)
     {
-        tmp17566 = 1.0f;
+        skyVisPick = 1.0f;
     }
     else
     {
-        float3 param_78 = P;
-        float3 param_79 = Ns;
-        float3 param_80 = R;
-        float param_81 = sqrt(max(reflA2, 0.0f));
-        float param_82 = skyFarV;
-        tmp17566 = wwWaterSkyVis(param_78, param_79, param_80, param_81, param_82);
+        float3 PArg12 = P;
+        float3 NArg2 = Ns;
+        float3 RArg = R;
+        float roughArg = sqrt(max(reflA2, 0.0f));
+        float farVArg2 = skyFarV;
+        skyVisPick = wwWaterSkyVis(PArg12, NArg2, RArg, roughArg, farVArg2);
     }
-    float skyVis = tmp17566;
+    float skyVis = skyVisPick;
     reflSky *= skyVis;
     sky *= skyVis;
+    // the game's screen-space reflection over the sky
     float4 ssr = 0.0f.xxxx;
     if (waterSsrOn && (!under))
     {
@@ -2285,9 +2321,10 @@ void frag_main()
         float2 st = float2(suv.x, 1.0f - suv.y);
         if (waterSsrFlat)
         {
-            float3 param_83 = R;
-            float3 param_84 = float3(V.xy, -V.z);
-            st += wwWaterSsrBend(param_83, param_84);
+            float3 RwArg = R;
+            float3 RflatArg = float3(V.xy, -V.z);
+            // lane FIX1101A: the flat ray's hit, bent by this normal
+            st += wwWaterSsrBend(RwArg, RflatArg);
         }
         ssr = lerp(waterSsrRaw.SampleLevel(_waterSsrRaw_sampler, st, 0.0f), waterSsrFin.SampleLevel(_waterSsrFin_sampler, st, 0.0f), 0.89999997615814208984375f.xxxx);
         reflRaw = waterSsrRaw.SampleLevel(_waterSsrRaw_sampler, st, 0.0f);
@@ -2297,235 +2334,246 @@ void frag_main()
             sky = lerp(sky, ssr.xyz, ssr.w.xxx);
         }
     }
+    // the scene behind: in place, and offset by the normal (the game's shore tap)
     int2 size = int2(spvTextureSize(waterScene, uint(0), dummy_parameter));
     float2 uv = (float2(px) + 0.5f.xx) / float2(size);
     float2 offUV = uv + (float2(-N.x, -N.y) * (N.z * 0.0625f));
     int2 opx = clamp(int2(offUV * float2(size)), int2(0, 0), size - int2(1, 1));
     float3 texIn = waterScene.Load(int3(px, 0)).xyz;
     float3 texOff = waterScene.Load(int3(opx, 0)).xyz;
-    float3 param_85 = texIn;
-    float3 refr = frameToLinear(param_85);
-    float3 param_86 = texOff;
-    float3 refrOff = frameToLinear(param_86);
+    float3 tArg5 = texIn;
+    float3 refr = frameToLinear(tArg5);
+    float3 tArg4 = texOff;
+    float3 refrOff = frameToLinear(tArg4);
+    // lane WATERFOAMDETAIL1: the scene at this very pixel, before any water colour
     float3 refrIn = refr;
+    // the depth-color pass is drawn into the copy before the water: apply it here at this pixel's distances, and
+    // at the offset texel's (its view ray met with the water plane)
     float offAlong = 0.0f;
     float offVert = 0.0f;
     float offHit = 0.0f;
-    float tmp17734;
+    float cauShPick;
     if (waterCauOn && waterCauShadow)
     {
-        float3 param_87 = cauSv;
-        float tmp17739 = wwSunShadow(param_87);
-        tmp17734 = tmp17739;
+        float3 posViewArg7 = cauSv;
+        float wwSunShadowRet = wwSunShadow(posViewArg7);
+        cauShPick = wwSunShadowRet;
     }
     else
     {
-        tmp17734 = 1.0f;
+        cauShPick = 1.0f;
     }
-    float cauSh = tmp17734;
-    float3 param_88 = cauSv;
-    float cauFw = min(length(fwidth(cellWorldPos(param_88).xy)), 64.0f);
-    WwWaterBed bed = tmp17751;
+    // lane WATERCAUSTICS1: the sun's visibility at the bed (uniform flow: the cascades take derivatives)
+    float cauSh = cauShPick;
+    float3 posViewArg6 = cauSv;
+    // lane CAUSTICPATTERN1: the bed's footprint per pixel (u), widening the net's lines so they never sparkle
+    float cauFw = min(length(fwidth(cellWorldPos(posViewArg6).xy)), 64.0f);
+    // lane WATERDEPTH1: the bed depth this pixel uses
+    WwWaterBed bed = kWwWaterBedInit;
     wwClearDeep = waterMat[1].xyz;
     if (waterClearOn)
     {
-        float3 param_89 = LightDir;
-        float3 param_90 = P;
-        float3 param_91 = V;
-        float3 param_92 = D.xyz * D.xyz;
-        float3 param_93 = normalize(cellWorldDir(param_89));
-        float3 param_94 = waterSky[0].xyz;
-        float3 param_95 = waterSky[2].xyz;
-        wwWaterClearSetup(param_90, param_91, param_92, param_93, param_94, param_95);
+        float3 dirViewArg4 = LightDir;
+        float3 PArg11 = P;
+        float3 VArg6 = V;
+        float3 sunArg5 = D.xyz * D.xyz;
+        float3 LdirArg5 = normalize(cellWorldDir(dirViewArg4));
+        float3 skyLoArg3 = waterSky[0].xyz;
+        float3 skyHiArg3 = waterSky[2].xyz;
+        wwWaterClearSetup(PArg11, VArg6, sunArg5, LdirArg5, skyLoArg3, skyHiArg3);
     }
-    if (waterDepthOn || waterClearOn)
+    if (or(waterDepthOn, waterClearOn))   // HLSLFIX2 orfix.py: no short-circuit branch (NV took the wrong side)
     {
-        float3 param_96 = P;
-        float3 param_97 = V;
-        float param_98 = vert;
-        float param_99 = along;
-        bed = wwWaterBedAt(param_96, param_97, param_98, param_99);
+        float3 PArg10 = P;
+        float3 VArg5 = V;
+        float sceneVertArg2 = vert;
+        float sceneAlongArg = along;
+        bed = wwWaterBedAt(PArg10, VArg5, sceneVertArg2, sceneAlongArg);
     }
     if ((!under) && (waterSslr == 0))
     {
-        float tmp17806;
+        float cauBdPick;
         if (waterCauOn)
         {
-            float3 param_100 = P;
-            tmp17806 = wwWaterBedDepth(param_100);
+            float3 PArg9 = P;
+            cauBdPick = wwWaterBedDepth(PArg9);
         }
         else
         {
-            tmp17806 = -1.0f;
+            cauBdPick = -1.0f;
         }
-        float cauBd = tmp17806;
+        // lane WATERCAUSTICS1: under a baked body, on the drawn bed (not the bake's), before the depth colour takes it
+        float cauBd = cauBdPick;
         wwCauPathGain = lerp(1.0f, oc.cau, oc.w);
-        bool tmp17823 = (cauBd >= 0.0f) && (vert < 100000000.0f);
-        bool tmp17830;
-        if (tmp17823)
+        bool cond20 = (cauBd >= 0.0f) && (vert < 100000000.0f);
+        bool cond19;
+        if (cond20)
         {
-            tmp17830 = vert <= (cauBd + 256.0f);
+            cond19 = vert <= (cauBd + 256.0f);
         }
         else
         {
-            tmp17830 = tmp17823;
+            cond19 = cond20;
         }
-        if (tmp17830)
+        if (cond19)
         {
-            float3 param_101 = cauSv;
-            float3 param_102 = LightDir;
-            float3 param_103 = cellWorldPos(param_101);
-            float param_104 = vert;
-            float3 param_105 = normalize(cellWorldDir(param_102));
-            float3 param_106 = D.xyz * D.xyz;
-            float3 param_107 = (waterSky[0].xyz + waterSky[2].xyz) * 0.5f;
-            float param_108 = cauSh;
-            float param_109 = cauFw;
-            float3 param_110;
-            float3 tmp17865 = wwWaterCaustic(param_103, param_104, param_105, param_106, param_107, param_108, param_109, param_110);
-            cauDbg = param_110;
-            float3 cauC3 = tmp17865;
+            float3 posViewArg5 = cauSv;
+            float3 dirViewArg3 = LightDir;
+            float3 SArg = cellWorldPos(posViewArg5);
+            float dArg3 = vert;
+            float3 LdirArg4 = normalize(cellWorldDir(dirViewArg3));
+            float3 sunArg4 = D.xyz * D.xyz;
+            float3 skyArg2 = (waterSky[0].xyz + waterSky[2].xyz) * 0.5f;
+            float shadowArg = cauSh;
+            float fwArg = cauFw;
+            float3 dbgArg;
+            float3 wwWaterCausticRet = wwWaterCaustic(SArg, dArg3, LdirArg4, sunArg4, skyArg2, shadowArg, fwArg, dbgArg);
+            cauDbg = dbgArg;
+            float3 cauC3 = wwWaterCausticRet;
+            // CAUSTICPATTERN1: per channel (the edges' colour split); the probes read green
             cauC = cauC3.y;
             refr *= cauC3;
         }
         if (waterClearOn && (waterClearRed != 4))
         {
-            float param_111 = bed.bd;
-            float param_112 = vert;
-            float param_113 = dist;
-            bool param_114 = waterClearRed != 6;
-            float bedW = wwWaterBedNearW(param_111, param_112, param_113, param_114);
-            float3 tmp17893;
+            float bdArg = bed.bd;
+            float sceneVertArg = vert;
+            float distArg = dist;
+            bool onArg = waterClearRed != 6;
+            // lane FIX1031B: the baked and the drawn bed blend (no hard switch: the teeth); red old = the step below
+            // lane FIX1101A: near = the scene, per pixel
+            float bedW = wwWaterBedNearW(bdArg, sceneVertArg, distArg, onArg);
+            float3 bedCPick;
             if (bedW > 0.0f)
             {
-                float3 param_115 = wwWaterClearBed();
-                float param_116 = bed.bd / max(-V.z, 0.001000000047497451305389404296875f);
-                float param_117 = bed.bd;
-                tmp17893 = depthFog(param_115, param_116, param_117);
+                float3 cArg8 = wwWaterClearBed();
+                float alongArg8 = bed.bd / max(-V.z, 0.001000000047497451305389404296875f);
+                float vertArg7 = bed.bd;
+                bedCPick = depthFog(cArg8, alongArg8, vertArg7);
             }
             else
             {
-                tmp17893 = 0.0f.xxx;
+                bedCPick = 0.0f.xxx;
             }
-            float3 bedC = tmp17893;
-            float3 tmp17914;
+            float3 bedC = bedCPick;
+            float3 refrPick2;
             if (bedW >= 1.0f)
             {
-                tmp17914 = bedC;
+                refrPick2 = bedC;
             }
             else
             {
-                float3 param_118 = refr;
-                float param_119 = along;
-                float param_120 = vert;
-                tmp17914 = lerp(depthFog(param_118, param_119, param_120), bedC, bedW.xxx);
+                float3 cArg7 = refr;
+                float alongArg7 = along;
+                float vertArg6 = vert;
+                refrPick2 = lerp(depthFog(cArg7, alongArg7, vertArg6), bedC, bedW.xxx);
             }
-            refr = tmp17914;
+            refr = refrPick2;
         }
         else
         {
-            float3 tmp17934;
+            float3 refrPick;
             if (bed.baked)
             {
-                float3 tmp17938;
+                float3 cPick;
                 if (waterClearOn)
                 {
-                    tmp17938 = wwWaterClearBed();
+                    cPick = wwWaterClearBed();
                 }
                 else
                 {
-                    tmp17938 = waterMat[0].xyz;
+                    cPick = waterMat[0].xyz;
                 }
-                float3 param_121 = tmp17938;
-                float param_122 = bed.along;
-                float param_123 = bed.vert;
-                tmp17934 = depthFog(param_121, param_122, param_123);
+                float3 cArg6 = cPick;
+                float alongArg6 = bed.along;
+                float vertArg5 = bed.vert;
+                refrPick = depthFog(cArg6, alongArg6, vertArg5);
             }
             else
             {
-                float3 param_124 = refr;
-                float param_125 = along;
-                float param_126 = vert;
-                tmp17934 = depthFog(param_124, param_125, param_126);
+                float3 cArg5 = refr;
+                float alongArg5 = along;
+                float vertArg4 = vert;
+                refrPick = depthFog(cArg5, alongArg5, vertArg4);
             }
-            refr = tmp17934;
+            refr = refrPick;
         }
         float2 ndc = (((float2(opx) + 0.5f.xx) / float2(size)) * 2.0f) - 1.0f.xx;
-        float tmp17977;
+        float odzPick;
         if (waterHaveDepth)
         {
-            tmp17977 = waterDepth.Load(int3(opx, 0)).x;
+            odzPick = waterDepth.Load(int3(opx, 0)).x;
         }
         else
         {
-            tmp17977 = 1.0f;
+            odzPick = 1.0f;
         }
-        float odz = tmp17977;
+        float odz = odzPick;
         float4x4 iP = spvInverse(projectionMatrix);
         float4 h = mul(float4(ndc, (2.0f * min(odz, 0.999998986721038818359375f)) - 1.0f, 1.0f), iP);
         float3 Sv = h.xyz / h.w.xxx;
-        float3 param_127 = Sv;
-        float3 Sw = cellWorldPos(param_127);
+        float3 posViewArg4 = Sv;
+        float3 Sw = cellWorldPos(posViewArg4);
         float3 dW = normalize(Sw - eye);
-        float tmp18026;
+        float tPick;
         if (abs(dW.z) > 9.9999999747524270787835121154785e-07f)
         {
-            tmp18026 = (P.z - eye.z) / dW.z;
+            tPick = (P.z - eye.z) / dW.z;
         }
         else
         {
-            tmp18026 = -1.0f;
+            tPick = -1.0f;
         }
-        float t = tmp18026;
+        float t = tPick;
         bool sceneAt = odz < 1.0f;
-        bool tmp18043 = t > 0.0f;
-        bool tmp18058;
-        if (tmp18043)
+        bool cond18 = t > 0.0f;
+        bool cond17;
+        if (cond18)
         {
-            bool tmp18047 = !sceneAt;
-            bool tmp18057;
-            if (!tmp18047)
+            bool cond16 = !sceneAt;
+            bool condPick;
+            if (!cond16)
             {
-                tmp18057 = t < length(Sw - eye);
+                condPick = t < length(Sw - eye);
             }
             else
             {
-                tmp18057 = tmp18047;
+                condPick = cond16;
             }
-            tmp18058 = tmp18057;
+            cond17 = condPick;
         }
         else
         {
-            tmp18058 = tmp18043;
+            cond17 = cond18;
         }
-        if (tmp18058)
+        if (cond17)
         {
             float3 Wp = eye + (dW * t);
-            float tmp18068;
+            float offAlongPick;
             if (sceneAt)
             {
-                tmp18068 = length(Sw - Wp);
+                offAlongPick = length(Sw - Wp);
             }
             else
             {
-                tmp18068 = 1000000000.0f;
+                offAlongPick = 1000000000.0f;
             }
-            offAlong = tmp18068;
-            float tmp18078;
+            offAlong = offAlongPick;
+            float offVertPick;
             if (sceneAt)
             {
-                tmp18078 = abs(Wp.z - Sw.z);
+                offVertPick = abs(Wp.z - Sw.z);
             }
             else
             {
-                tmp18078 = 1000000000.0f;
+                offVertPick = 1000000000.0f;
             }
-            offVert = tmp18078;
+            offVert = offVertPick;
             offHit = 1.0f;
-            float3 param_128 = refrOff;
-            float param_129 = offAlong;
-            float param_130 = offVert;
-            refrOff = depthFog(param_128, param_129, param_130);
+            float3 cArg4 = refrOff;
+            float alongArg4 = offAlong;
+            float vertArg3 = offVert;
+            refrOff = depthFog(cArg4, alongArg4, vertArg3);
         }
     }
     float3 silted = refr;
@@ -2533,61 +2581,65 @@ void frag_main()
     {
         silted = refr + ((lerp(waterMat[5].xyz, waterMat[4].xyz, refr) - refr) * (waterMat[4].w * (1.0f - alphaV)));
     }
-    float3 param_131 = LightDir;
-    float3 Ldir = normalize(cellWorldDir(param_131));
+    float3 dirViewArg2 = LightDir;
+    float3 Ldir = normalize(cellWorldDir(dirViewArg2));
     float3 sun = D.xyz * D.xyz;
     float3 spec = ((sun * pow(clamp(dot(R, Ldir), 0.0f, 1.0f), Var.x)) * waterMat[1].w) + ((sun * pow(clamp(dot(N, float3(-0.098999999463558197021484375f, -0.098999999463558197021484375f, 0.9900000095367431640625f)), 0.0f, 1.0f), waterMat[0].w)) * P1.z);
+    // lane WATERREFL1: the sun's glare from the roughness (no fixed-direction sparkle); red game keeps today's spec
     float3 glare = 0.0f.xxx;
+    // lane WATERLOOK1 step 9: the footprint (u^2), uniform flow
     float glFoot = length(cross(ddx(P), ddy(P)));
-    bool tmp18177;
+    bool cond15;
     if (waterGlintOn)
     {
-        tmp18177 = (waterGlintRed & 1) == 0;
+        cond15 = (waterGlintRed & 1) == 0;
     }
     else
     {
-        tmp18177 = waterGlintOn;
+        cond15 = waterGlintOn;
     }
-    if (tmp18177 && (!under))
+    if (cond15 && (!under))
     {
-        float3 param_132 = Ns;
-        float3 param_133 = V;
-        float3 param_134 = Ldir;
-        float param_135 = max(reflA2, 9.9999999747524270787835121154785e-07f);
-        float2 param_136 = P.xy;
-        float param_137 = glFoot;
-        float glX = wwWaterGlareGlit(param_132, param_133, param_134, param_135, param_136, param_137);
+        float3 NsArg = Ns;
+        float3 VArg4 = V;
+        float3 LdirArg3 = Ldir;
+        float reflA2Arg = max(reflA2, 9.9999999747524270787835121154785e-07f);
+        float2 xyArg = P.xy;
+        float footArg4 = glFoot;
+        // step 9: the sun's disc in the lobe; the mean glare, its shoulder, x the facets counted in this pixel (FIX1031B)
+        float glX = wwWaterGlareGlit(NsArg, VArg4, LdirArg3, reflA2Arg, xyArg, footArg4);
         glare = sun * glX;
         spec = glare;
     }
     float reflAlpha = sqrt(max(reflA2, 0.0f));
-    float param_138 = dot(-V, Ns);
-    float param_139 = reflAlpha;
-    float param_140 = waterGlintK.y;
-    float reflF = wwWaterFresnel(param_138, param_139, param_140);
-    bool tmp18223 = waterSsrOn && (!under);
-    bool tmp18229;
-    if (tmp18223)
+    float NoVArg = dot(-V, Ns);
+    float alphaArg2 = reflAlpha;
+    float F0Arg = waterGlintK.y;
+    float reflF = wwWaterFresnel(NoVArg, alphaArg2, F0Arg);
+    bool cond14 = waterSsrOn && (!under);
+    bool haveSsrPick;
+    if (cond14)
     {
-        tmp18229 = (waterRed & 256) == 0;
+        haveSsrPick = (waterRed & 256) == 0;
     }
     else
     {
-        tmp18229 = tmp18223;
+        haveSsrPick = cond14;
     }
-    float3 param_141 = reflSky;
-    float4 param_142 = reflRaw;
-    float4 param_143 = reflFin;
-    bool param_144 = tmp18229;
-    float param_145 = reflAlpha;
-    float3 reflEnv = wwWaterReflEnv(param_141, param_142, param_143, param_144, param_145);
+    float3 skyArg = reflSky;
+    float4 rawArg = reflRaw;
+    float4 finArg = reflFin;
+    bool haveSsrArg = haveSsrPick;
+    float alphaArg = reflAlpha;
+    float3 reflEnv = wwWaterReflEnv(skyArg, rawArg, finArg, haveSsrArg, alphaArg);
     if (!under)
     {
-        float3 param_146 = P;
-        float3 param_147 = Ns;
-        float3 param_148 = Ldir;
-        float param_149 = skyFarV;
-        spec *= wwWaterSkyVisSun(param_146, param_147, param_148, param_149);
+        float3 PArg8 = P;
+        float3 NArg = Ns;
+        float3 LArg2 = Ldir;
+        float farVArg = skyFarV;
+        // lane WATERLOOK1 step 10: the glare where the sun's sky is seen
+        spec *= wwWaterSkyVisSun(PArg8, NArg, LArg2, farVArg);
     }
     if ((waterRed & 8) != 0)
     {
@@ -2596,197 +2648,215 @@ void frag_main()
     float3 lin;
     if (under)
     {
+        // the game's underwater variant: half the sky and half the underwater color, the scene by 1 - F
         float3 refl = (sky + waterMat[3].xyz) * 0.5f;
         lin = lerp(refl, refr, (1.0f - F).xxx);
-        bool tmp18285;
+        bool cond13;
         if (waterUnderOn)
         {
-            tmp18285 = (waterUnderRed & 1) == 0;
+            cond13 = (waterUnderRed & 1) == 0;
         }
         else
         {
-            tmp18285 = waterUnderOn;
+            cond13 = waterUnderOn;
         }
-        if (tmp18285)
+        if (cond13)
         {
+            // lane WATERLOOK1 step 16: Snell's window: the air's light comes through only inside the critical cone; past
+            // it the surface mirrors the water below, the clear colour's deep water along the mirrored ray
             if ((waterUnderRed & 2) != 0)
             {
-                float3 param_150 = LightDir;
-                float3 param_151 = P;
-                float3 param_152 = V;
-                float3 param_153 = D.xyz * D.xyz;
-                float3 param_154 = normalize(cellWorldDir(param_150));
-                float3 param_155 = waterSky[0].xyz;
-                float3 param_156 = waterSky[2].xyz;
-                wwWaterClearSetup(param_151, param_152, param_153, param_154, param_155, param_156);
+                float3 dirViewArg = LightDir;
+                float3 PArg7 = P;
+                float3 VArg3 = V;
+                float3 sunArg3 = D.xyz * D.xyz;
+                float3 LdirArg2 = normalize(cellWorldDir(dirViewArg));
+                float3 skyLoArg2 = waterSky[0].xyz;
+                float3 skyHiArg2 = waterSky[2].xyz;
+                wwWaterClearSetup(PArg7, VArg3, sunArg3, LdirArg2, skyLoArg2, skyHiArg2);
             }
             else
             {
-                float3 param_157 = P;
-                float3 param_158 = V;
-                float3 param_159 = waterUnderSun;
-                float3 param_160 = waterUnderSunTo;
-                float3 param_161 = waterSky[0].xyz;
-                float3 param_162 = waterSky[2].xyz;
-                wwWaterClearSetup(param_157, param_158, param_159, param_160, param_161, param_162);
+                float3 PArg6 = P;
+                float3 VArg2 = V;
+                float3 sunArg2 = waterUnderSun;
+                float3 LdirArg = waterUnderSunTo;
+                float3 skyLoArg = waterSky[0].xyz;
+                float3 skyHiArg = waterSky[2].xyz;
+                wwWaterClearSetup(PArg6, VArg2, sunArg2, LdirArg, skyLoArg, skyHiArg);
             }
-            float3 param_163 = 0.0f.xxx;
-            float param_164 = 1000000000.0f;
-            float param_165 = 1000000000.0f;
-            float param_166 = clamp(dot(-V, Ns), 0.0f, 1.0f);
-            lin = lerp(refr, wwWaterClear(param_163, param_164, param_165), wwUnderFresnel(param_166).xxx);
+            float3 cArg3 = 0.0f.xxx;
+            float alongArg3 = 1000000000.0f;
+            float vertArg2 = 1000000000.0f;
+            float ciArg = clamp(dot(-V, Ns), 0.0f, 1.0f);
+            lin = lerp(refr, wwWaterClear(cArg3, alongArg3, vertArg2), wwUnderFresnel(ciArg).xxx);
         }
     }
     else
     {
-        float tmp18356;
+        float wReflPick;
         if ((waterRed & 1) != 0)
         {
-            tmp18356 = 0.0f;
+            wReflPick = 0.0f;
         }
         else
         {
-            tmp18356 = F * Var.y;
+            wReflPick = F * Var.y;
         }
-        float wRefl = tmp18356;
+        float wRefl = wReflPick;
         float3 far = lerp(waterMat[2].xyz, sky, waterMat[2].w.xxx);
-        float3 param_167 = far;
-        float3 param_168 = silted;
-        float param_169 = F;
-        bool param_170 = bed.known;
-        far = wwWaterDepthFar(param_167, param_168, param_169, param_170);
+        float3 farArg2 = far;
+        float3 bodyArg3 = silted;
+        float FArg2 = F;
+        bool knownArg = bed.known;
+        // lane WATERDEPTH1
+        far = wwWaterDepthFar(farArg2, bodyArg3, FArg2, knownArg);
         lin = lerp(silted, sky, wRefl.xxx);
         lin = lerp(far, lin, dfade.xxx) + spec;
-        bool tmp18402;
+        bool cond12;
         if (reflPhys)
         {
-            tmp18402 = (waterRed & 1) == 0;
+            cond12 = (waterRed & 1) == 0;
         }
         else
         {
-            tmp18402 = reflPhys;
+            cond12 = reflPhys;
         }
-        if (tmp18402)
+        if (cond12)
         {
-            float3 param_171 = silted;
-            float3 param_172 = reflEnv;
-            float param_173 = reflF;
-            float param_174 = F;
-            float param_175 = Var.y;
-            float3 param_176 = far;
-            float param_177 = dfade;
-            lin = wwWaterReflMix(param_171, param_172, param_173, param_174, param_175, param_176, param_177) + spec;
+            float3 bodyArg2 = silted;
+            float3 envArg = reflEnv;
+            float FArg = reflF;
+            float FgameArg = F;
+            float reflectivityArg = Var.y;
+            float3 farArg = far;
+            float dfadeArg = dfade;
+            lin = wwWaterReflMix(bodyArg2, envArg, FArg, FgameArg, reflectivityArg, farArg, dfadeArg) + spec;
         }
         lin = lerp(lin, refrOff, shore.xxx);
-        bool tmp18429 = waterShoreEdgeLaw == 1;
-        bool tmp18435;
-        if (tmp18429)
+        bool cond11 = waterShoreEdgeLaw == 1;
+        bool cond10;
+        if (cond11)
         {
-            tmp18435 = (waterRed & 16) == 0;
+            cond10 = (waterRed & 16) == 0;
         }
         else
         {
-            tmp18435 = tmp18429;
+            cond10 = cond11;
         }
-        if (tmp18435)
+        if (cond10)
         {
             lin = lerp(lin, refrIn, shoreEdgeV.xxx);
         }
+        // lane WATERSHORE1: the foam, a Lambert white of albedo 0.55 (fresh sea foam, Koepke 1984, Applied Optics
+        // 23(11)) lit by the sun and the water's upper sky row; opacity K1.w lets the water read through its holes
         float3 foamLin = ((sun * clamp(Ldir.z, 0.0f, 1.0f)) + waterSky[2].xyz) * 0.550000011920928955078125f;
         lin = lerp(lin, foamLin, (shoreFoamV * waterShoreK1.w).xxx);
-        float param_178 = shoreEdgeV;
-        float param_179 = vert;
-        float foamWet = wwFoamWet(param_178, param_179);
-        float param_180 = surf.foam;
-        float2 param_181 = P.xy;
-        float param_182 = surfFoot;
-        float param_183 = waterShoreTime;
-        lin = lerp(lin, foamLin, wwSurfFoamAlpha(param_180, param_181, param_182, param_183).xxx);
-        float param_184 = contact.x;
-        float2 param_185 = P.xy;
-        float param_186 = contact.w;
-        float param_187 = waterShoreTime;
-        lin = lerp(lin, foamLin, (foamWet * wwContactFoamAlpha(param_184, param_185, param_186, param_187)).xxx);
+        float edgeVArg = shoreEdgeV;
+        float columnArg = vert;
+        // lane FIX1101A (P0, the manager's rvc6_on 10-31: a large grey shape on the dry bank): the water plane runs on
+        // under a bank that lies a little below it, where the soft edge has made the water the scene it covers; the
+        // river, contact foam and whitecaps still painted there. They float only on water: x the water's own share
+        // left by the edge, and nothing over a column under 4 u (6 cm; full from 16 u). Red
+        // WW_CELL_WATER_RIVERFOAM_RED=paint (32)
+        float foamWet = wwFoamWet(edgeVArg, columnArg);
+        float D_1Arg2 = surf.foam;
+        float2 PArg5 = P.xy;
+        float footArg3 = surfFoot;
+        float tArg3 = waterShoreTime;
+        // step 11: the breakers' foam
+        lin = lerp(lin, foamLin, wwSurfFoamAlpha(D_1Arg2, PArg5, footArg3, tArg3).xxx);
+        float D_1Arg = contact.x;
+        float2 PArg4 = P.xy;
+        float footArg2 = contact.w;
+        float tArg2 = waterShoreTime;
+        // step 12: contact foam
+        lin = lerp(lin, foamLin, (foamWet * wwContactFoamAlpha(D_1Arg, PArg4, footArg2, tArg2)).xxx);
+        // step 15: river foam streaks
         lin = lerp(lin, foamLin, (foamWet * rfoam.y).xxx);
-        bool tmp18515;
+        bool cond9;
         if (waterOceanOn)
         {
-            tmp18515 = (waterOceanRed & 128) == 0;
+            cond9 = (waterOceanRed & 128) == 0;
         }
         else
         {
-            tmp18515 = waterOceanOn;
+            cond9 = waterOceanOn;
         }
-        bool tmp18521;
-        if (tmp18515)
+        bool cond8;
+        if (cond9)
         {
-            tmp18521 = oc.w > 0.0f;
+            cond8 = oc.w > 0.0f;
         }
         else
         {
-            tmp18521 = tmp18515;
+            cond8 = cond9;
         }
-        if (tmp18521)
+        if (cond8)
         {
-            float2 param_188 = N0.xy / max(N0.z, 0.001000000047497451305389404296875f).xx;
-            float param_189 = oc.var;
-            float3 param_190 = V;
-            float3 param_191 = Ldir;
-            float3 param_192 = sun;
-            float3 param_193 = waterMat[0].xyz;
-            lin += (wwWaterCrestGlow(param_188, param_189, param_190, param_191, param_192, param_193) * ((1.0f - F) * oc.w));
+            float2 sArg2 = N0.xy / max(N0.z, 0.001000000047497451305389404296875f).xx;
+            float varArg = oc.var;
+            float3 VArg = V;
+            float3 LArg = Ldir;
+            float3 sunArg = sun;
+            float3 bodyArg = waterMat[0].xyz;
+            lin += (wwWaterCrestGlow(sArg2, varArg, VArg, LArg, sunArg, bodyArg) * ((1.0f - F) * oc.w));
         }
+        // lane WATERLOOK1: whitecaps where the chop folds the surface (its Jacobian, Tessendorf 2001 section 4.4), from
+        // 4 m/s; lit as WATERSHORE1's foam (albedo 0.55, Koepke 1984)
         if (oc.white > 0.0f)
         {
             lin = lerp(lin, ((sun * clamp(Ldir.z, 0.0f, 1.0f)) + waterSky[2].xyz) * 0.550000011920928955078125f, ((0.800000011920928955078125f * oc.white) * foamWet).xxx);
         }
     }
     lin = max(lin, 0.0f.xxx);
+    // FARWATER1 round 2: the air as the far land at the same distance gets it (waterAir)
     float3 pAir = posView;
     wwAirFree = (waterAir & 1) != 0;
     if ((waterAir & 2) != 0)
     {
-        float3 param_194 = posView;
-        pAir = wwAirFlatPos(param_194);
+        float3 posViewArg3 = posView;
+        pAir = wwAirFlatPos(posViewArg3);
     }
-    bool tmp18598;
+    bool cond7;
+    // lane SKYA: the sky's aerial perspective with the fog off too
     if (!fogOn)
     {
-        tmp18598 = wwApOn();
+        cond7 = wwApOn();
     }
     else
     {
-        tmp18598 = fogOn;
+        cond7 = fogOn;
     }
-    if (tmp18598)
+    if (cond7)
     {
-        float3 param_195 = lin;
-        float3 param_196 = pAir;
-        float3 tmp18605 = wwFog(param_195, param_196);
-        lin = max(tmp18605, 0.0f.xxx);
+        float3 preFogArg = lin;
+        float3 posViewArg2 = pAir;
+        float3 wwFogRet = wwFog(preFogArg, posViewArg2);
+        lin = max(wwFogRet, 0.0f.xxx);
     }
     float3 s = sqrt(lin);
-    float3 tmp18614;
+    float3 outCPick;
     if (cellOn && cellIsOn)
     {
-        float3 tmp18618;
+        float3 outCPick2;
         if (cellIsLinear)
         {
-            tmp18618 = lin;
+            outCPick2 = lin;
         }
         else
         {
-            float3 param_197 = s;
-            tmp18618 = cellImageSpace(param_197);
+            float3 sqrtColorArg = s;
+            outCPick2 = cellImageSpace(sqrtColorArg);
         }
-        tmp18614 = tmp18618;
+        outCPick = outCPick2;
     }
     else
     {
-        float3 param_198 = s;
-        tmp18614 = tonemap(param_198);
+        float3 xArg2 = s;
+        outCPick = tonemap(xArg2);
     }
-    float3 outC = tmp18614;
+    float3 outC = outCPick;
     fragColor = float4(outC, 1.0f);
 }
 

@@ -33,13 +33,13 @@ float wwWaterAlpha2(float2 uv0, float2 uv1, float2 uv2, float2 tap0, float2 tap1
     {
         return a0;
     }
-    float2 tmp1 = uv0;
-    float2 tmp2 = tap0;
-    float2 tmp3 = uv1;
-    float2 tmp4 = tap1;
-    float2 tmp5 = uv2;
-    float2 tmp6 = tap2;
-    float v = ((Amp.x * Amp.x) * wwLayerVar(waterMoment0, _waterMoment0_sampler, tmp1, tmp2)) + ((dfade * dfade) * (((Amp.y * Amp.y) * wwLayerVar(waterMoment1, _waterMoment1_sampler, tmp3, tmp4)) + ((Amp.z * Amp.z) * wwLayerVar(waterMoment2, _waterMoment2_sampler, tmp5, tmp6))));
+    float2 vPart6 = uv0;
+    float2 vPart5 = tap0;
+    float2 vPart4 = uv1;
+    float2 vPart3 = tap1;
+    float2 vPart2 = uv2;
+    float2 vPart = tap2;
+    float v = ((Amp.x * Amp.x) * wwLayerVar(waterMoment0, _waterMoment0_sampler, vPart6, vPart5)) + ((dfade * dfade) * (((Amp.y * Amp.y) * wwLayerVar(waterMoment1, _waterMoment1_sampler, vPart4, vPart3)) + ((Amp.z * Amp.z) * wwLayerVar(waterMoment2, _waterMoment2_sampler, vPart2, vPart))));
     float z = 1.0f + ((Amp.y + Amp.z) * dfade);
     float lost = (1.0f - (dfade * dfade)) * (((Amp.y * Amp.y) * wwLayerVarAll(waterMoment1, _waterMoment1_sampler)) + ((Amp.z * Amp.z) * wwLayerVarAll(waterMoment2, _waterMoment2_sampler)));
     float zl = (1.0f + Amp.y) + Amp.z;
@@ -97,17 +97,17 @@ float wwWaterCloudBand(float3 P, float3 R, float z, float outside, int ch)
         return 0.0f;
     }
     float2 uv = (((P.xy + (R.xy * t)) - waterCloudGeo.xy) / (2.0f * waterCloudGeo.z).xx) + 0.5f.xx;
-    bool tmp1 = any(bool2(uv.x < 0.0f.xx.x, uv.y < 0.0f.xx.y));
-    bool tmp2;
-    if (!tmp1)
+    bool vPart6 = any(bool2(uv.x < 0.0f.xx.x, uv.y < 0.0f.xx.y));
+    bool vPart5;
+    if (!vPart6)
     {
-        tmp2 = any(bool2(uv.x > 1.0f.xx.x, uv.y > 1.0f.xx.y));
+        vPart5 = any(bool2(uv.x > 1.0f.xx.x, uv.y > 1.0f.xx.y));
     }
     else
     {
-        tmp2 = tmp1;
+        vPart5 = vPart6;
     }
-    if (tmp2)
+    if (vPart5)
     {
         return outside;
     }
@@ -115,6 +115,7 @@ float wwWaterCloudBand(float3 P, float3 R, float z, float outside, int ch)
     {
         return waterCloudMap.Sample(_waterCloudMap_sampler, uv)[ch];
     }
+    // lane SKYSEA1: fade to the band's mean cover over the map's outer 15% (the hard square drew a line on the sea)
     float2 e2 = min(uv, 1.0f.xx - uv);
     return lerp(outside, waterCloudMap.Sample(_waterCloudMap_sampler, uv)[ch], smoothstep(0.0f, 0.1500000059604644775390625f, min(e2.x, e2.y)));
 }
@@ -124,26 +125,26 @@ float wwWaterCloudBand(float3 P, float3 R, float z, float outside, int ch)
 float3 wwWaterCloudSky(float3 sky, float3 P, float3 R)
 {
     bool graze = (waterReflRed & 32) == 0;
-    bool tmp1 = waterCloudGeo.w < 0.5f;
-    bool tmp2;
-    if (!tmp1)
+    bool vPart6 = waterCloudGeo.w < 0.5f;
+    bool vPart5;
+    if (!vPart6)
     {
-        tmp2 = (waterReflRed & 8) != 0;
+        vPart5 = (waterReflRed & 8) != 0;
     }
     else
     {
-        tmp2 = tmp1;
+        vPart5 = vPart6;
     }
-    bool tmp3;
-    if (!tmp2)
+    bool vPart4;
+    if (!vPart5)
     {
-        tmp3 = (R.z <= 0.0f) && (!graze);
+        vPart4 = (R.z <= 0.0f) && (!graze);
     }
     else
     {
-        tmp3 = tmp2;
+        vPart4 = vPart5;
     }
-    if (tmp3)
+    if (vPart4)
     {
         return sky;
     }
@@ -151,37 +152,40 @@ float3 wwWaterCloudSky(float3 sky, float3 P, float3 R)
     float cov = covMean;
     if (R.z > 0.0f)
     {
-        float3 tmp4 = P;
-        float3 tmp5 = R;
-        float tmp6 = waterCloudZ.x;
-        float tmp7 = waterCloudCov.x;
-        int tmp8 = 0;
-        float cl = wwWaterCloudBand(tmp4, tmp5, tmp6, tmp7, tmp8);
-        float3 tmp9 = P;
-        float3 tmp10 = R;
-        float tmp11 = waterCloudZ.y;
-        float tmp12 = waterCloudCov.y;
-        int tmp13 = 1;
-        float cm = wwWaterCloudBand(tmp9, tmp10, tmp11, tmp12, tmp13);
-        float3 tmp14 = P;
-        float3 tmp15 = R;
-        float tmp16 = waterCloudZ.z;
-        float tmp17 = waterCloudCov.z;
-        int tmp18 = 3;
-        float ch = wwWaterCloudBand(tmp14, tmp15, tmp16, tmp17, tmp18);
+        float3 vPart3 = P;
+        float3 vPart2 = R;
+        float vPart = waterCloudZ.x;
+        float clPart2 = waterCloudCov.x;
+        int clPart = 0;
+        float cl = wwWaterCloudBand(vPart3, vPart2, vPart, clPart2, clPart);
+        float3 cmPart5 = P;
+        float3 cmPart4 = R;
+        float cmPart3 = waterCloudZ.y;
+        float cmPart2 = waterCloudCov.y;
+        int cmPart = 1;
+        float cm = wwWaterCloudBand(cmPart5, cmPart4, cmPart3, cmPart2, cmPart);
+        float3 chPart5 = P;
+        float3 chPart4 = R;
+        float chPart3 = waterCloudZ.z;
+        float chPart2 = waterCloudCov.z;
+        int chPart = 3;
+        float ch = wwWaterCloudBand(chPart5, chPart4, chPart3, chPart2, chPart);
         cov = 1.0f - (((1.0f - cl) * (1.0f - cm)) * (1.0f - ch));
     }
+    // the far band crowds into the horizon line under R.z 0.08 (flat water: past 12.5 x the eye's height). Lane FARWATER1:
+    // there the cover goes to the bands' mean, the deck the drawn sky shows at the horizon; the red (WW_CELL_WATER_REFL_RED=
+    // grazing) lets it go to the clear WTHR gradient, the deep blue band on the far water under an overcast
     float g = smoothstep(0.0f, 0.07999999821186065673828125f, R.z);
-    float tmp19;
+    float covPick;
     if (graze)
     {
-        tmp19 = lerp(covMean, cov, g);
+        covPick = lerp(covMean, cov, g);
     }
     else
     {
-        tmp19 = cov * g;
+        covPick = cov * g;
     }
-    cov = tmp19;
+    cov = covPick;
     float l = max(max(dot(waterSky[0].xyz, float3(0.2125999927520751953125f, 0.715200006961822509765625f, 0.072200000286102294921875f)), dot(waterSky[1].xyz, float3(0.2125999927520751953125f, 0.715200006961822509765625f, 0.072200000286102294921875f))), dot(waterSky[2].xyz, float3(0.2125999927520751953125f, 0.715200006961822509765625f, 0.072200000286102294921875f)));
     return lerp(sky, waterCloudTint * (1.5f * l), clamp(cov, 0.0f, 1.0f).xxx);
 }
@@ -194,16 +198,17 @@ float3 wwWaterReflEnv(float3 sky, float4 raw, float4 fin, bool haveSsr, float al
     {
         return sky;
     }
-    float tmp1;
+    float vPart6;
     if ((waterReflRed & 4) != 0)
     {
-        tmp1 = 0.89999997615814208984375f;
+        vPart6 = 0.89999997615814208984375f;
     }
     else
     {
-        tmp1 = smoothstep(waterGlintK.w, 8.0f * waterGlintK.w, alpha);
+        vPart6 = smoothstep(waterGlintK.w, 8.0f * waterGlintK.w, alpha);
     }
-    float w = tmp1;
+    float w = vPart6;
+    // lane FIX1101A: the blur fills the sharp march's holes (dither, refusals): no sky speckle on calm water
     if (waterSsrFlat)
     {
         w = max(w, clamp(fin.w - raw.w, 0.0f, 1.0f));
@@ -216,41 +221,41 @@ float3 wwWaterReflEnv(float3 sky, float4 raw, float4 fin, bool haveSsr, float al
 #if defined(WW_FN_wwWaterReflPhys) || defined(WW_FN_ALL)
 bool wwWaterReflPhys()
 {
-    bool tmp1;
+    bool vPart6;
     if (!waterReflOn)
     {
-        tmp1 = waterClearOn && (waterClearRed != 4);
+        vPart6 = waterClearOn && (waterClearRed != 4);
     }
     else
     {
-        tmp1 = waterReflOn;
+        vPart6 = waterReflOn;
     }
-    return tmp1;
+    return vPart6;
 }
 #endif
 
 #if defined(WW_FN_wwWaterReflMix) || defined(WW_FN_ALL)
 float3 wwWaterReflMix(float3 body, float3 env, float F, float Fgame, float reflectivity, float3 far, float dfade)
 {
-    float3 tmp1;
+    float3 vPart6;
     if ((waterReflRed & 1) != 0)
     {
-        tmp1 = lerp(body, env, (Fgame * reflectivity).xxx);
+        vPart6 = lerp(body, env, (Fgame * reflectivity).xxx);
     }
     else
     {
-        tmp1 = lerp(body, env, F.xxx);
+        vPart6 = lerp(body, env, F.xxx);
     }
-    float3 c = tmp1;
-    float3 tmp2;
+    float3 c = vPart6;
+    float3 vPart5;
     if ((waterReflRed & 2) != 0)
     {
-        tmp2 = lerp(far, c, dfade.xxx);
+        vPart5 = lerp(far, c, dfade.xxx);
     }
     else
     {
-        tmp2 = c;
+        vPart5 = c;
     }
-    return tmp2;
+    return vPart5;
 }
 #endif

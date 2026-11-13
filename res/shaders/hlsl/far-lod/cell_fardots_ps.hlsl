@@ -239,15 +239,16 @@ void frag_main()
     wwAirFree = false;
     float2 r = (wwPointCoord - 0.5f.xx) * ((2.0f * ceil(3.0f * dotSigma)) + 1.0f);
     float g = exp((-dot(r, r)) / ((2.0f * dotSigma) * dotSigma));
+    // past 3 sigma: the sprite's corners stay the sky's
     if (g < 0.010999999940395355224609375f)
     {
         discard;
     }
-    float3 param = dotValue * g;
-    float3 param_1 = dotView;
-    bool param_2 = true;
-    float3 tmp3742 = wwFogFx(param, param_1, param_2);
-    fragColor = float4(tmp3742, 0.0f);
+    float3 linArg = dotValue * g;
+    float3 posViewArg = dotView;
+    bool additiveArg = true;
+    float3 wwFogFxRet = wwFogFx(linArg, posViewArg, additiveArg);
+    fragColor = float4(wwFogFxRet, 0.0f);
 }
 
 SPIRV_Cross_Output main(SPIRV_Cross_Input stage_input)

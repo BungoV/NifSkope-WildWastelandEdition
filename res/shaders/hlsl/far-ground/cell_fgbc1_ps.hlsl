@@ -72,10 +72,10 @@ void frag_main()
         e0.z = lo.z;
         e1.z = hi.z;
     }
-    float3 param = e0;
-    uint c0 = to565(param);
-    float3 param_1 = e1;
-    uint c1 = to565(param_1);
+    float3 cArg2 = e0;
+    uint c0 = to565(cArg2);
+    float3 cArg = e1;
+    uint c1 = to565(cArg);
     if (c0 < c1)
     {
         uint t_1 = c0;
@@ -85,34 +85,36 @@ void frag_main()
     uint bits = 0u;
     if (c0 != c1)
     {
-        uint param_2 = c0;
-        float3 p0 = from565(param_2);
-        uint param_3 = c1;
-        float3 p1 = from565(param_3);
+        uint vArg2 = c0;
+        // the 4 colours lie on one line, so the nearest by projection is the nearest (no 4-way search)
+        float3 p0 = from565(vArg2);
+        uint vArg = c1;
+        float3 p1 = from565(vArg);
         float3 ax = p0 - p1;
         float inv = 3.0f / dot(ax, ax);
-        uint tmp282;
-        uint tmp288;
+        uint idxPick;
+        uint idxPick2;
         for (int i_2 = 0; i_2 < 16; i_2++)
         {
+            // 0 = p1 .. 3 = p0
             int q = int(clamp((dot(px[i_2] - p1, ax) * inv) + 0.5f, 0.0f, 3.0f));
             if (q == 0)
             {
-                tmp282 = 1u;
+                idxPick = 1u;
             }
             else
             {
                 if (q == 1)
                 {
-                    tmp288 = 3u;
+                    idxPick2 = 3u;
                 }
                 else
                 {
-                    tmp288 = (q == 2) ? 2u : 0u;
+                    idxPick2 = (q == 2) ? 2u : 0u;
                 }
-                tmp282 = tmp288;
+                idxPick = idxPick2;
             }
-            uint idx = tmp282;
+            uint idx = idxPick;
             bits |= (idx << uint(2 * i_2));
         }
     }

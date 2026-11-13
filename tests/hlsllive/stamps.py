@@ -31,6 +31,29 @@ def tools_key(names):
     return sha(*[_file(os.path.join(HERE, n)) for n in names])
 
 
+def _code(path):
+    """HLSLFIX2: a .py file's code only: the parsed tree with every docstring dropped (comments, blank lines, layout and
+    docstrings do not reach it; any change to a statement, name or constant does). A file that does not parse: its bytes."""
+    import ast
+    import sys
+    raw = _file(path)
+    try:
+        t = ast.parse(raw)
+    except (SyntaxError, ValueError):
+        return raw
+    for n in ast.walk(t):
+        b = getattr(n, 'body', None)
+        if isinstance(n, (ast.Module, ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) and b and isinstance(b[0], ast.Expr) \
+                and isinstance(b[0].value, ast.Constant) and isinstance(b[0].value.value, str):
+            n.body = b[1:] or [ast.Pass()]
+    return ('py%d.%d|' % sys.version_info[:2] + ast.dump(t)).encode('utf-8')
+
+
+def code_key(names):
+    """tools_key over the code of each file (_code): a comment or docstring edit keeps the key, so cached verdicts stay"""
+    return sha(*[_code(os.path.join(HERE, n)) for n in names])
+
+
 def dxc_key():
     try:
         st = os.stat(DXC)

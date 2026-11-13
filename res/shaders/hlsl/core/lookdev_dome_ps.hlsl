@@ -73,9 +73,9 @@ struct SPIRV_Cross_Output
 void frag_main()
 {
     float3 c = (((skyH * vcol.x) + (skyL * vcol.y)) + (skyU * vcol.z)) * skyScale;
-    float3 param = c;
-    float3 tmp300 = studioOutput(param);
-    fragColor = float4(tmp300, alphaMul);
+    float3 cArg = c;
+    float3 studioOutputRet = studioOutput(cArg);
+    fragColor = float4(studioOutputRet, alphaMul);
 }
 
 SPIRV_Cross_Output main(SPIRV_Cross_Input stage_input)

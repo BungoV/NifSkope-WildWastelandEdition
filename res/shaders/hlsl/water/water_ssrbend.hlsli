@@ -8,27 +8,30 @@
 #if defined(WW_FN_wwWaterSsrBend) || defined(WW_FN_ALL)
 float2 wwWaterSsrBend(float3 Rw, float3 Rflat)
 {
-    float3 tmp1 = float3(1.0f, 0.0f, 0.0f);
-    float3 ax = cellWorldDir(tmp1);
-    float3 tmp2 = float3(0.0f, 1.0f, 0.0f);
-    float3 ay = cellWorldDir(tmp2);
-    float3 tmp3 = float3(0.0f, 0.0f, 1.0f);
-    float3 az = cellWorldDir(tmp3);
+    float3 axPart = float3(1.0f, 0.0f, 0.0f);
+    float3 ax = cellWorldDir(axPart);
+    float3 ayPart = float3(0.0f, 1.0f, 0.0f);
+    float3 ay = cellWorldDir(ayPart);
+    float3 azPart = float3(0.0f, 0.0f, 1.0f);
+    float3 az = cellWorldDir(azPart);
     float3 a = float3(dot(Rw, ax), dot(Rw, ay), dot(Rw, az));
     float3 b = float3(dot(Rflat, ax), dot(Rflat, ay), dot(Rflat, az));
     float za = max(-a.z, 0.0500000007450580596923828125f);
     float zb = max(-b.z, 0.0500000007450580596923828125f);
+    // the read is indexed by the WATER pixel, and a mirror flips: to meet a hit moved by (dx, dy) on the screen the read
+    // moves (dx, -dy) (the calm image of a far bank mirrors about the horizon). 0.8 x and the cap: a near hit's shift is
+    // smaller than its direction's (tests/features/reflections/waterssr/ssr_gate.py: error 0.09 of the stripe contrast vs 0.15 unbent)
     float2 d = float2((0.5f * projectionMatrix[0].x) * ((a.x / za) - (b.x / zb)), (0.5f * projectionMatrix[1].y) * ((a.y / za) - (b.y / zb))) * 0.800000011920928955078125f;
     float l = length(d);
-    float2 tmp4;
+    float2 wwWaterSsrBendRet;
     if (l > 0.07999999821186065673828125f)
     {
-        tmp4 = d * (0.07999999821186065673828125f / l);
+        wwWaterSsrBendRet = d * (0.07999999821186065673828125f / l);
     }
     else
     {
-        tmp4 = d;
+        wwWaterSsrBendRet = d;
     }
-    return tmp4;
+    return wwWaterSsrBendRet;
 }
 #endif

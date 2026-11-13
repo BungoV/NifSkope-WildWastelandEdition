@@ -44,91 +44,101 @@ uint2 spvTextureSize(Texture2D<float4> Tex, uint Level, out uint Param)
 
 float sat(float v)
 {
-    float tmp16;
+    float satRet;
     if (v >= 0.0f)
     {
-        tmp16 = min(v, 1.0f);
+        satRet = min(v, 1.0f);
     }
     else
     {
-        tmp16 = 0.0f;
+        satRet = 0.0f;
     }
-    return tmp16;
+    return satRet;
 }
 
 void frag_main()
 {
     float2 v1 = gl_FragCoord.xy / float2(int2(spvTextureSize(t0, uint(0), dummy_parameter)));
+    // add r0.x, -r0.x, 1
     float x = 1.0f - t2.Sample(_t2_sampler, v1).x;
+    // mad
     float y = (x * c2.z) + c2.y;
+    // lt
     bool notSky = 9.9999997473787516355514526367188e-06f < x;
+    // div: the view distance
     y = c2.w / y;
     float k;
     if (farOnly != 0)
     {
-        float param = (y - c0.z) / c0.y;
-        k = sat(param);
+        float vArg2 = (y - c0.z) / c0.y;
+        // add, div_sat
+        k = sat(vArg2);
         k *= c1.x;
-        bool tmp108;
+        bool notSkyPick2;
         if (!notSky)
         {
-            tmp108 = !(0.0f != c1.w);
+            notSkyPick2 = !(0.0f != c1.w);
         }
         else
         {
-            tmp108 = notSky;
+            notSkyPick2 = notSky;
         }
-        notSky = tmp108;
+        // ne, not, or
+        notSky = notSkyPick2;
     }
     else
     {
         float nearT = (c0.z - y) / c0.x;
-        bool tmp122 = y < c0.z;
-        bool tmp128;
-        if (tmp122)
+        bool cond2 = y < c0.z;
+        bool nearOnPick;
+        if (cond2)
         {
-            tmp128 = 0.0f != c1.y;
+            nearOnPick = 0.0f != c1.y;
         }
         else
         {
-            tmp128 = tmp122;
+            nearOnPick = cond2;
         }
-        bool nearOn = tmp128;
+        bool nearOn = nearOnPick;
+        // and with the mask
         nearT = nearOn ? nearT : 0.0f;
         float farT = y - c0.z;
-        bool tmp141 = c0.z < y;
-        bool tmp147;
-        if (tmp141)
+        bool cond = c0.z < y;
+        bool farOnPick;
+        if (cond)
         {
-            tmp147 = 0.0f != c1.z;
+            farOnPick = 0.0f != c1.z;
         }
         else
         {
-            tmp147 = tmp141;
+            farOnPick = cond;
         }
-        bool farOn = tmp147;
-        bool tmp156;
+        bool farOn = farOnPick;
+        bool notSkyPick;
         if (!notSky)
         {
-            tmp156 = !(0.0f != c1.w);
+            notSkyPick = !(0.0f != c1.w);
         }
         else
         {
-            tmp156 = notSky;
+            notSkyPick = notSky;
         }
-        notSky = tmp156;
+        notSky = notSkyPick;
         farT /= c0.y;
-        float param_1 = farOn ? farT : nearT;
-        k = sat(param_1);
+        float vArg = farOn ? farT : nearT;
+        // movc_sat
+        k = sat(vArg);
         k *= c1.x;
     }
     if (dofRed != 0)
     {
         k = c1.x;
     }
+    // and r0.x, r0.y, r0.x
     k = notSky ? k : 0.0f;
     float4 b = t1.Sample(_t1_sampler, v1 * c3.zw);
     float4 a = t0.Sample(_t0_sampler, v1);
+    // add, mad
     fragColor = ((b - a) * k) + a;
 }
 

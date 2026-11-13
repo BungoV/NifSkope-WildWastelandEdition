@@ -88,15 +88,15 @@ void vert_main()
     float3 b = bitangentVector;
     if ((boneWeights[0].x > 0.0f) && (doSkinning != 0u))
     {
-        float4 param = v;
-        float3 param_1 = n;
-        float3 param_2 = t;
-        float3 param_3 = b;
-        boneTransform(param, param_1, param_2, param_3);
-        v = param;
-        n = param_1;
-        t = param_2;
-        b = param_3;
+        float4 vArg = v;
+        float3 nArg = n;
+        float3 tArg = t;
+        float3 bArg = b;
+        boneTransform(vArg, nArg, tArg, bArg);
+        v = vArg;
+        n = nArg;
+        t = tArg;
+        b = bArg;
     }
     v = mul(v, modelViewMatrix);
     gl_Position = mul(v, projectionMatrix);
@@ -106,6 +106,7 @@ void vert_main()
     btnMatrix[0] = normalize(mul(normalMatrix, b));
     if (projectionMatrix[3].w == 1.0f)
     {
+        // orthographic view
         ViewDir = float3(0.0f, 0.0f, 1.0f);
     }
     else
@@ -113,8 +114,8 @@ void vert_main()
         ViewDir = -v.xyz;
     }
     LightDir = lightSourcePosition[0].xyz;
-    bool4 tmp256 = bool4(vertexColorOverride.x > 0.0f.xxxx.x, vertexColorOverride.y > 0.0f.xxxx.y, vertexColorOverride.z > 0.0f.xxxx.z, vertexColorOverride.w > 0.0f.xxxx.w);
-    C = float4(tmp256.x ? vertexColorOverride.x : vertexColor.x, tmp256.y ? vertexColorOverride.y : vertexColor.y, tmp256.z ? vertexColorOverride.z : vertexColor.z, tmp256.w ? vertexColorOverride.w : vertexColor.w);
+    bool4 CPart = bool4(vertexColorOverride.x > 0.0f.xxxx.x, vertexColorOverride.y > 0.0f.xxxx.y, vertexColorOverride.z > 0.0f.xxxx.z, vertexColorOverride.w > 0.0f.xxxx.w);
+    C = float4(CPart.x ? vertexColorOverride.x : vertexColor.x, CPart.y ? vertexColorOverride.y : vertexColor.y, CPart.z ? vertexColorOverride.z : vertexColor.z, CPart.w ? vertexColorOverride.w : vertexColor.w);
 }
 
 SPIRV_Cross_Output main(SPIRV_Cross_Input stage_input)

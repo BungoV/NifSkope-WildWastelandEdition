@@ -156,28 +156,28 @@ float4 cellDdgiTile(int p, float3 d, int S)
     if (d.z < 0.0f)
     {
         float ou = u;
-        float param = ou;
-        u = (1.0f - abs(v)) * cellDdgiSignNotZero(param);
-        float param_1 = v;
-        v = (1.0f - abs(ou)) * cellDdgiSignNotZero(param_1);
+        float vArg2 = ou;
+        u = (1.0f - abs(v)) * cellDdgiSignNotZero(vArg2);
+        float vArg = v;
+        v = (1.0f - abs(ou)) * cellDdgiSignNotZero(vArg);
     }
     int n = S - 2;
     float fx = (1.0f + (((u * 0.5f) + 0.5f) * float(n))) - 0.5f;
     float fy = (1.0f + (((v * 0.5f) + 0.5f) * float(n))) - 0.5f;
-    int param_2 = int(floor(fx));
-    int param_3 = 0;
-    int param_4 = cellDdgiIMax(param_2, param_3);
-    int param_5 = S - 2;
-    int x0 = cellDdgiIMin(param_4, param_5);
-    int param_6 = int(floor(fy));
-    int param_7 = 0;
-    int param_8 = cellDdgiIMax(param_6, param_7);
-    int param_9 = S - 2;
-    int y0 = cellDdgiIMin(param_8, param_9);
+    int aArg4 = int(floor(fx));
+    int bArg4 = 0;
+    int aArg3 = cellDdgiIMax(aArg4, bArg4);
+    int bArg3 = S - 2;
+    int x0 = cellDdgiIMin(aArg3, bArg3);
+    int aArg2 = int(floor(fy));
+    int bArg2 = 0;
+    int aArg = cellDdgiIMax(aArg2, bArg2);
+    int bArg = S - 2;
+    int y0 = cellDdgiIMin(aArg, bArg);
     float ax = clamp(fx - float(x0), 0.0f, 1.0f);
     float ay = clamp(fy - float(y0), 0.0f, 1.0f);
     float4 t[4];
-    float4 tmp411;
+    float4 tPick;
     for (int k = 0; k < 4; k++)
     {
         int x = x0 + (k % 2);
@@ -192,15 +192,16 @@ float4 cellDdgiTile(int p, float3 d, int S)
             float4 q = cellDdgiAtlas.Load(((64 * cellDdgiDims.w) + (128 * p)) + (i / 2));
             if ((i % 2) == 0)
             {
-                tmp411 = float4(q.x, q.y, 0.0f, 0.0f);
+                tPick = float4(q.x, q.y, 0.0f, 0.0f);
             }
             else
             {
-                tmp411 = float4(q.z, q.w, 0.0f, 0.0f);
+                tPick = float4(q.z, q.w, 0.0f, 0.0f);
             }
-            t[k] = tmp411;
+            t[k] = tPick;
         }
     }
+    // ( a (1 - ax) + b ax ) (1 - ay) + ( e (1 - ax) + f ax ) ay, as the header writes it
     return (((t[0] * (1.0f - ax)) + (t[1] * ax)) * (1.0f - ay)) + (((t[2] * (1.0f - ax)) + (t[3] * ax)) * ay);
 }
 
@@ -329,34 +330,35 @@ void frag_main()
     float3 col;
     if (probeMode == 1)
     {
+        // Vigilant green, Asleep blue, Off red, fresh white (src/features/gi/rtddgicell.cpp's states view)
         float3 fc = float3(0.20000000298023223876953125f, 0.89999997615814208984375f, 0.300000011920928955078125f);
-        bool tmp3824 = probeState > 0.5f;
-        bool tmp3829;
-        if (tmp3824)
+        bool cond10 = probeState > 0.5f;
+        bool cond9;
+        if (cond10)
         {
-            tmp3829 = probeState < 1.5f;
+            cond9 = probeState < 1.5f;
         }
         else
         {
-            tmp3829 = tmp3824;
+            cond9 = cond10;
         }
-        if (tmp3829)
+        if (cond9)
         {
             fc = float3(0.3499999940395355224609375f, 0.449999988079071044921875f, 0.949999988079071044921875f);
         }
         else
         {
-            bool tmp3838 = probeState > 1.5f;
-            bool tmp3844;
-            if (tmp3838)
+            bool cond8 = probeState > 1.5f;
+            bool cond7;
+            if (cond8)
             {
-                tmp3844 = probeState < 2.5f;
+                cond7 = probeState < 2.5f;
             }
             else
             {
-                tmp3844 = tmp3838;
+                cond7 = cond8;
             }
-            if (tmp3844)
+            if (cond7)
             {
                 fc = float3(0.949999988079071044921875f, 0.1500000059604644775390625f, 0.1500000059604644775390625f);
             }
@@ -368,33 +370,35 @@ void frag_main()
                 }
             }
         }
-        float3 param = fc;
-        col = srgbToLinear(param) / max(probeExposure, 9.9999999747524270787835121154785e-07f).xxx;
+        float3 cArg2 = fc;
+        col = srgbToLinear(cArg2) / max(probeExposure, 9.9999999747524270787835121154785e-07f).xxx;
     }
     else
     {
         float4 pr = cellDdgiAtlas.Load((192 * cellDdgiDims.w) + probeIdx);
         if (int(pr.w + 0.5f) != 2)
         {
-            float3 param_1 = 0.119999997317790985107421875f.xxx;
-            col = srgbToLinear(param_1) / max(probeExposure, 9.9999999747524270787835121154785e-07f).xxx;
+            float3 cArg = 0.119999997317790985107421875f.xxx;
+            // the read never takes it
+            col = srgbToLinear(cArg) / max(probeExposure, 9.9999999747524270787835121154785e-07f).xxx;
         }
         else
         {
-            int param_2 = probeIdx;
-            float3 param_3 = normalize(probeN);
-            int param_4 = 8;
-            float4 e = cellDdgiTile(param_2, param_3, param_4);
+            int pArg = probeIdx;
+            float3 dArg = normalize(probeN);
+            int SArg = 8;
+            float4 e = cellDdgiTile(pArg, dArg, SArg);
             float3 q = float3(pow(max(e.x, 0.0f), 2.5f), pow(max(e.y, 0.0f), 2.5f), pow(max(e.z, 0.0f), 2.5f));
+            // E / pi = q^2 x 2 pi / pi
             col = (q * q) * 2.0f;
         }
     }
     if (probeFog)
     {
-        float3 param_5 = col;
-        float3 param_6 = viewPos;
-        float3 tmp3930 = wwFog(param_5, param_6);
-        col = tmp3930;
+        float3 preFogArg = col;
+        float3 posViewArg = viewPos;
+        float3 wwFogRet = wwFog(preFogArg, posViewArg);
+        col = wwFogRet;
     }
     fragColor = float4(max(col, 0.0f.xxx), 1.0f);
 }
