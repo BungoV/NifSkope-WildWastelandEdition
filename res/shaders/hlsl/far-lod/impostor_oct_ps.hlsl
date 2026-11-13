@@ -1009,9 +1009,24 @@ void frag_main()
 
 struct SPIRV_Cross_Input
 {
+#if defined(WW_CARDINST)
+    WW_LOC(18) float3 cardPosModel : TEXCOORD18;
+#endif
+#if !(defined(WW_CARDINST))
     float3 cardPosModel : TEXCOORD0;
+#endif
+#if defined(WW_CARDINST)
+    WW_LOC(19) float2 cardQuadUv : TEXCOORD19;
+#endif
+#if !(defined(WW_CARDINST))
     float2 cardQuadUv : TEXCOORD1;
+#endif
+#if defined(WW_CARDINST)
+    WW_LOC(20) float3 cardViewRay : TEXCOORD20;
+#endif
+#if !(defined(WW_CARDINST))
     float3 cardViewRay : TEXCOORD2;
+#endif
     noperspective centroid float4 gl_FragCoord : SV_Position;
 #if defined(WW_CARDINST)
     WW_LOC(6) nointerpolation float4 frameRect[3] : TEXCOORD6;

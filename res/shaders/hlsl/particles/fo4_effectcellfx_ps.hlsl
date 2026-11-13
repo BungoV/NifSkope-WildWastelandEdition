@@ -499,8 +499,8 @@ float vpCardSoft()
 }
 #endif
 
-static float3 ViewDir_norm = normalize( ViewDir );
-static float3x3 btnMatrix_norm = float3x3( normalize( btnMatrix[0] ), normalize( btnMatrix[1] ), normalize( btnMatrix[2] ) );
+static float3 ViewDir_norm	/* = normalize( ViewDir ) : set in main() after the stage inputs */;
+static float3x3 btnMatrix_norm	/* = float3x3( normalize( btnMatrix[0] ), normalize( btnMatrix[1] ), normalize( btnMatrix[2] ) ) : set in main() after the stage inputs */;
 
 
 #ifdef WW_FXRES
@@ -856,6 +856,8 @@ SPIRV_Cross_Output main(SPIRV_Cross_Input stage_input)
     btnMatrix = stage_input.btnMatrix;
     reflMatrix = stage_input.reflMatrix;
     gl_FrontFacing = stage_input.gl_FrontFacing;
+    ViewDir_norm = normalize( ViewDir );
+    btnMatrix_norm = float3x3( normalize( btnMatrix[0] ), normalize( btnMatrix[1] ), normalize( btnMatrix[2] ) );
     frag_main();
     SPIRV_Cross_Output stage_output;
 #if defined(WW_FXRES)
