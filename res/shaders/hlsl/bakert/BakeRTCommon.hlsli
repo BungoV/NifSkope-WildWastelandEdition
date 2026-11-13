@@ -1,6 +1,9 @@
 // Bake tracer: what the three GPU tracers share (lane VKCOMPUTE1, 2026-11-12; from src/features/gi/bakert/common.glsl and
 // rqx.comp). Shared, no bindings: it reads BakeRTTriOf, BakeRTMaskTris, BakeRTMaps, BakeRTAlpha and the push constants
 // BAKERT_PC by name (the shim declares them). Fusion Shaders (F4FS) feeds the same names from its own shim.
+// common.glsl's header:
+// Lane RTBAKE1: what both GPU tracers share -- the ray and hit records and the alpha-test hole (src/features/gi/probemask.h's
+// AlphaMask::hole, in float). Compiled into rq.comp and bvh.comp by tools/bakert_spirv.sh.
 #ifndef BAKERT_COMMON_HLSLI
 #define BAKERT_COMMON_HLSLI
 
@@ -8,7 +11,8 @@
 
 float BakeRT_Mf( uint i ) { return asfloat( BakeRTMaskTris[i] ); }
 
-// the hit at barycentrics (b1, b2) of soup triangle `tri` lands on a hole. MIRROR probemask.h AlphaMask::hole (float)
+// the hit at barycentrics (b1, b2) of soup triangle `tri` lands on a hole (AlphaMask::hole)
+// MIRROR probemask.h AlphaMask::hole (float)
 bool BakeRT_Hole( int tri, float b1, float b2 )
 {
 	if ( BAKERT_PC.useMask == 0u || tri < 0 || uint( tri ) >= BAKERT_PC.nTri )

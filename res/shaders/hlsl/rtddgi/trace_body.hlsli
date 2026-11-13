@@ -13,7 +13,8 @@ bool DDGI_Shadow( float3 o, float3 d, float tmax )
 	return DDGI_AnyHit( o, d, tmax, ( uint( DDGI_P.flags.w ) & DDGI_RED_HWHIT ) != 0u, false );
 }
 
-// MIRROR rtddgimath.h hitRadiance (trace_body.glsl ddgiHitRadiance): albedo x irradiance / pi + the surface's own emission Le
+// trace_body.glsl ddgiHitRadiance:
+// MIRROR rtddgimath.h hitRadiance (RTEMIS1): albedo x irradiance / pi + the surface's own emission Le (placed lights kept)
 float3 DDGI_HitRadiance( float3 alb, float3 E, float3 Le ) { return alb * E / DDGI_PI + Le; }
 
 #endif

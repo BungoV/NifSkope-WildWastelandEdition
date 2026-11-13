@@ -1,7 +1,9 @@
 // DDGI volume, the border copy (lane VKCOMPUTE1, 2026-11-12; from src/features/gi/rtddgi/border.comp). Shared, no bindings.
-// One invocation a (probe, border texel): 28 irradiance texels (8x8 tile) then 60 distance texels (16x16 tile), each a
-// copy of the interior texel the octahedral fold puts beside it (rtddgimath.h borderSource). Texel 0 of an updated
-// probe also counts the update (age). Dispatch: ceil(probes x 88 / 64) groups of 64.
+// border.comp's header:
+// Lane RTXGI1: the border copy. One invocation a (probe, border texel): 28 irradiance texels (8x8 tile) then 60
+// distance texels (16x16 tile), each a copy of the interior texel the octahedral fold puts beside it
+// (src/rtddgimath.h borderSource). Texel 0 of an updated probe also counts the update (age).
+// Dispatch: ceil(probes x 88 / 64) groups of 64.
 // BORDER_RED (the gate's red) drops the age count.
 #ifndef DDGI_BORDER_HLSLI
 #define DDGI_BORDER_HLSLI
@@ -19,7 +21,7 @@ void DDGI_BorderCS( uint id )
 	const int k = int( id % per );
 	const int st = DDGI_ProbeState( p );
 	if ( st == DDGI_OFF || ( st == DDGI_ASLEEP && DDGI_P.flags.y != 0 ) || DDGI_Skipped( DDGI_P, p ) )
-		return;   // a covered coarse probe was not blended: no border, its age stays
+		return;   // RTXCASCADE2: a covered coarse probe was not blended: no border, its age stays
 	if ( k < 4 * DDGI_IRR_S - 4 ) {
 		const int2 xy = DDGI_BorderXY( k, DDGI_IRR_S );
 		const int2 s = DDGI_BorderSource( xy.x, xy.y, DDGI_IRR_S );

@@ -34,7 +34,7 @@ float2 DDGI_SampleDist( uint p, float3 d )
 	return lerp( lerp( t00, t10, a.x ), lerp( t01, t11, a.x ), a.y );
 }
 
-// the alpha-test hole at barycentrics (b1, b2) of soup triangle tri (src/features/gi/bakert/common.glsl's hole)
+// the alpha-test hole at barycentrics (b1, b2) of soup triangle tri (src/features/gi/bakert/common.glsl's hole, this set's bindings)
 bool DDGI_Hole( int tri, float b1, float b2 )
 {
 	if ( DDGI_P.flags.z == 0 || tri < 0 || tri >= DDGI_P.counts.z )

@@ -1,8 +1,11 @@
-// ReSTIR DI for the shadow-casting cell lights, one invocation a pixel (lane VKCOMPUTE1, 2026-11-12; from
-// src/features/gi/rtddgi/restir.comp). The CPU twin is src/restirmath.h restir::frame() (passCandidates = mode 0,
-// passSpatial = mode 1, accumulate = mode 2, passRatio = mode 3); the per-pixel rules are RestirCommon.hlsli.
-// Shared, no bindings: it reads DDGI_P, DDGILights, DDGI_JOB (set 0 shim) and RESTIR_R, RestirGbuf ... RestirOutRatio
-// (the ReSTIR shim) by name. The g-buffer is view normal + linear depth (1e6 none), bottom row first. Ray queries: cs_6_5.
+// ReSTIR DI (lane VKCOMPUTE1, 2026-11-12; from src/features/gi/rtddgi/restir.comp). restir.comp's header:
+// Lane RESTIRDI1 (2026-10-30): ReSTIR DI for the shadow-casting cell lights, one invocation a pixel. The CPU twin is
+// src/restirmath.h restir::frame() (passCandidates = mode 0, passSpatial = mode 1, accumulate = mode 2, passRatio =
+// mode 3); the per-pixel rules are src/rtddgi/restir_common.glsl (MIRROR restirmath.h). Set 0 is the DDGI volume's own
+// descriptor set (its TLAS, true triangles, alpha masks and packed lights, ddgi_common.glsl), set 1 ReSTIR's buffers.
+// The g-buffer is the cell view's shared opaque pass (view normal, linear depth; 1e6 none), bottom row first.
+// HLSL: the per-pixel rules are RestirCommon.hlsli. Shared, no bindings: it reads DDGI_P, DDGILights, DDGI_JOB (set 0
+// shim) and RESTIR_R, RestirGbuf ... RestirOutRatio (the ReSTIR shim) by name. Ray queries: cs_6_5.
 #ifndef DDGI_RESTIR_HLSLI
 #define DDGI_RESTIR_HLSLI
 

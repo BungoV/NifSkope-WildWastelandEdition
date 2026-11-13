@@ -1,9 +1,17 @@
 // ReSTIR DI's per-pixel rules in HLSL (lane VKCOMPUTE1, 2026-11-12; from src/features/gi/rtddgi/restir_common.glsl, Bitterli
 // et al. 2020 reservoirs, Heitz et al. 2018 ratio). Shared, no bindings; it calls DDGI_Radial / DDGI_Spot (DDGICommon.hlsli).
 // Every function marked MIRROR is src/restirmath.h's function of that name; change all three or none.
-// A light is the DDGI volume's packed light (src/features/gi/rtddgi.cpp packLight, 8 float4): l0 pos + radius, l1 colour +
-// spot flag, l2 dir + cosOuter, l3 bias scale exponent cone, b0..b2 the box rows, l7 shape (0 omni, 1 hemisphere, 2 box),
+// restir_common.glsl's header:
+// Lane RESTIRDI1 (2026-10-30): ReSTIR DI's per-pixel rules (Bitterli et al. 2020 reservoirs, Heitz et al. 2018 ratio),
+// included by src/features/gi/rtddgi/restir.comp after ddgi_common.glsl (it calls ddgiRadial / ddgiSpot) and compiled as C++ by
+// tests/restir_math (through tests/restir_math/restir_shim.h). Every function marked MIRROR is src/restirmath.h's
+// function of that name; change both or neither. Written in a C++-compatible subset: no swizzles, no out/inout
+// parameters, no vec2, struct returns, literals that read the same in both languages.
+//
+// A light is the DDGI volume's packed light (src/features/gi/rtddgi.cpp packLight, 8 vec4): l0 pos + radius, l1 colour + spot flag,
+// l2 dir + cosOuter, l3 bias scale exponent cone, b0..b2 the box rows, l7 shape (0 omni, 1 hemisphere, 2 box),
 // source radius (the shadow ray's sphere), shadow flag, 0.
+// (HLSL: 8 float4; ddgiRadial / ddgiSpot = DDGI_Radial / DDGI_Spot.)
 #ifndef RESTIR_COMMON_HLSLI
 #define RESTIR_COMMON_HLSLI
 
@@ -13,11 +21,11 @@
 #define RESTIR_BIT_NOPDF 2         // W without 1 / p_hat(y) (a biased weight)
 #define RESTIR_BIT_NOTEMPORAL 4    // no temporal reuse (each frame alone)
 #define RESTIR_BIT_NOCLAMP 8       // the history's M not clamped (a new light waits behind a long history)
-#define RESTIR_BIT_NOHOLE 16       // GPU / twin shadow rays: alpha-tested triangles block whole
+#define RESTIR_BIT_NOHOLE 16       // GPU / twin shadow rays: alpha-tested triangles block whole (RESTIRDI0's red)
 #define RESTIR_HISTORY_CAP 20.0    // [Bitterli 2020 sec. 6] the history's M at most 20 x the current frame's
 #define RESTIR_DEPTH_TOL 0.1       // a neighbour is reused when its depth is within 10 %
 #define RESTIR_NORMAL_TOL 0.906    // and its normal within 25 degrees (cos 25)
-#define RESTIR_ACC_MAX 16.0        // the two estimates' running means keep at most 16 frames
+#define RESTIR_ACC_MAX 16.0        // the two estimates' running means keep at most 16 frames (a moved shadow settles in ~16)
 
 struct RestirRes
 {
@@ -65,7 +73,7 @@ uint Restir_Seed( uint pixel, uint frame, uint pass )
 float Restir_Lum( float r, float g, float b ) { return 0.2126 * r + 0.7152 * g + 0.0722 * b; }
 
 // MIRROR restirmath.h target: p_hat = the light's unshadowed Lambert irradiance luminance at P (normal N), with its
-// shape clip (hemisphere half-space, box), radial curve and spot cone: the trace's direct term without the ray
+// shape clip (hemisphere half-space, box), radial curve and spot cone: trace.comp ddgiDirect's term without the ray
 float Restir_Target( float4 l0, float4 l1, float4 l2, float4 l3, float4 b0, float4 b1, float4 b2, float4 l7, float3 P, float3 N )
 {
 	const float3 Lv = float3( l0.x - P.x, l0.y - P.y, l0.z - P.z );
@@ -170,7 +178,7 @@ float Restir_Ratio( float num, float den )
 }
 
 // MIRROR restirmath.h viewPos: the view-space point of pixel (px, py) of a W x H target at linear depth D, from the
-// projection's P00, P11, P20, P21 (inverted); bottom row first
+// projection's P00, P11, P20, P21 (cell_lights.glsl cellContactLocal's projection, inverted); bottom row first
 float3 Restir_ViewPos( float px, float py, float W, float H, float D, float4 proj )
 {
 	const float nx = ( px + 0.5 ) / W * 2.0 - 1.0;
@@ -179,7 +187,8 @@ float3 Restir_ViewPos( float px, float py, float W, float H, float D, float4 pro
 }
 
 // MIRROR restirmath.h accumulate: the two estimates' running means at the pixel (prev = the history pixel's num, den,
-// frames; valid false = no history), at most RESTIR_ACC_MAX frames deep
+// frames; valid false = no history), at most RESTIR_ACC_MAX frames deep. Without it the windowed ratio reads the
+// neighbours' reused samples, which the reuse makes alike (the unit test's temporal check measured it)
 float4 Restir_Accumulate( float4 prev, float num, float den, bool valid, int red )
 {
 	if ( !valid || ( red & RESTIR_BIT_NOTEMPORAL ) != 0 || prev.z < 0.5 )

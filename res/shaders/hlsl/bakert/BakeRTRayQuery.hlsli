@@ -1,6 +1,7 @@
-// Bake tracer: the RT tracer (lane VKCOMPUTE1, 2026-11-12; from src/features/gi/bakert/rq.comp). One thread a ray, an
-// inline ray query against the soup's BLAS (geometry 0 = the unmasked triangles, opaque; geometry 1 = the alpha-tested
-// ones, tested here). Double-sided, nearest hit. Shared, no bindings: BakeRTRays, BakeRTHits, BakeRTTLAS, BakeRTRemap.
+// Bake tracer: the RT tracer (lane VKCOMPUTE1, 2026-11-12; from src/features/gi/bakert/rq.comp). rq.comp's header:
+// Lane RTBAKE1: the RT tracer. One invocation a ray, VK_KHR_ray_query against the soup's BLAS (geometry 0 = the
+// unmasked triangles, opaque; geometry 1 = the alpha-tested ones, tested here). Double-sided, nearest hit.
+// HLSL: one thread a ray, an inline RayQuery. Shared, no bindings: BakeRTRays, BakeRTHits, BakeRTTLAS, BakeRTRemap.
 // Hits: t bits, soup triangle (0xFFFFFFFF = miss). Ray queries: DXIL cs_6_5.
 #ifndef BAKERT_RAY_QUERY_HLSLI
 #define BAKERT_RAY_QUERY_HLSLI

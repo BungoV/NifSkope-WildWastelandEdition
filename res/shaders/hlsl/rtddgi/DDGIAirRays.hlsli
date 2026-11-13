@@ -1,8 +1,12 @@
-// Air rays: the placed lamps' shadow in the air from ray queries on the DDGI volume's BVH (lane VKCOMPUTE1, 2026-11-12;
-// from src/features/gi/rtddgi/airrays.comp, route (b) of RESEARCH_AIR.md: MegaLights-style rays, Narkowicz & Costa 2025).
-// One invocation a froxel: 2 lamps by weighted reservoir sampling over every lamp whose sphere holds the froxel centre,
-// one shadow ray each, the ratio estimator (Heitz et al. 2018) as running means reprojected from the previous frame.
-// Shared, no bindings: it reads DDGI_P, DDGILights (set 0 shim) and AIR_A, AirAcc, AirAccPrev, AirOutRatio (the air shim)
+// Air rays (lane VKCOMPUTE1, 2026-11-12; from src/features/gi/rtddgi/airrays.comp). airrays.comp's header:
+// MODULES1 RESUME 15 item 2, route (b) of notes RESEARCH_AIR.md (MegaLights-style rays, Narkowicz & Costa 2025 pp. 14-20,
+// 57-63): the placed lamps' shadow in the air from ray queries on the DDGI volume's BVH, one invocation a froxel of
+// cell_volair's own grid. Per froxel: 2 lamps by weighted reservoir sampling over every lamp whose sphere holds the
+// froxel centre (weight = luminance x falloff x spot; the air has no normal), one shadow ray each, the ratio estimator
+// (shadowed / unshadowed of the sampled lamps, Heitz et al. 2018, as restir.comp mode 3) as running means of num and den
+// reprojected from the previous frame's froxel. cell_volair.frag mode 2 multiplies the exact unshadowed lamp sum by it.
+// Set 0 = the DDGI volume's descriptor set (ddgi_common.glsl), set 1 = the buffers below. No CPU twin yet (owed).
+// HLSL: set 0 = DDGIBindingsVk.hlsli, set 1 = DDGIAirRaysBindingsVk.hlsli. Shared, no bindings: it reads DDGI_P, DDGILights (set 0 shim) and AIR_A, AirAcc, AirAccPrev, AirOutRatio (the air shim)
 // by name. Ray queries: DXIL cs_6_5.
 #ifndef DDGI_AIR_RAYS_HLSLI
 #define DDGI_AIR_RAYS_HLSLI

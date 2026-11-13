@@ -1,8 +1,10 @@
 // DDGI volume, the probe blend (lane VKCOMPUTE1, 2026-11-12; from src/features/gi/rtddgi/blend.comp). Shared, no bindings.
-// One group of 256 a probe: its rays into group-shared memory, then threads 0..35 update the 6x6 irradiance interior and
-// threads 36..231 the 14x14 distance interior (rtddgimath.h blendIrradianceTexel / blendDistanceTexel). The fixed rays
-// (< 32) are not blended. The irradiance texel's alpha holds its sky visibility (blendSkyVisTexel).
-// Dispatch: one group a probe. BLEND_RED (the gate's red) drops the distance write.
+// blend.comp's header:
+// Lane RTXGI1: the probe blend. One workgroup a probe: its rays into shared memory, then threads 0..35 update the
+// 6x6 irradiance interior and threads 36..231 the 14x14 distance interior (src/rtddgimath.h blendIrradianceTexel /
+// blendDistanceTexel, the CPU twin's arithmetic in float). The fixed rays (< 32) are not blended [SDK]. M1FIX: the
+// irradiance texel's alpha holds its sky visibility (blendSkyVisTexel).
+// HLSL: one group of 256 a probe, the rays in group-shared memory. Dispatch: one group a probe. BLEND_RED (the gate's red) drops the distance write.
 #ifndef DDGI_BLEND_HLSLI
 #define DDGI_BLEND_HLSLI
 
@@ -17,7 +19,7 @@ void DDGI_BlendCS( uint p, uint t )
 		return;
 	const int st = DDGI_ProbeState( p );
 	if ( st == DDGI_OFF || ( st == DDGI_ASLEEP && DDGI_P.flags.y != 0 ) || DDGI_Skipped( DDGI_P, p ) )
-		return;   // the whole group leaves together: no barrier is skipped by part of it
+		return;   // the whole group leaves together: no barrier is skipped by part of it (RTXCASCADE2: + a covered probe)
 	const int N = DDGI_P.counts.x;
 	const int nb = N - DDGI_FIXED;
 	if ( int( t ) < nb ) {
@@ -38,7 +40,7 @@ void DDGI_BlendCS( uint p, uint t )
 			if ( c <= 0.0 )
 				continue;
 			s += c * DDGIBlendRay[r].rgb;
-			sv += DDGI_SkyVisRay( DDGI_P, DDGIBlendDir[r], DDGIBlendRay[r].w ) ? c : 0.0;   // a miss above the horizon only
+			sv += DDGI_SkyVisRay( DDGI_P, DDGIBlendDir[r], DDGIBlendRay[r].w ) ? c : 0.0;   // SKYBELOW1: a miss above the horizon only
 			w += c;
 		}
 		const uint at = p * uint( DDGI_IRR_S * DDGI_IRR_S ) + uint( ( ty + 1 ) * DDGI_IRR_S + tx + 1 );
