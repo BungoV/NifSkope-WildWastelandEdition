@@ -40,10 +40,12 @@ float atDistGround( float r, float mu )
 	return max( 0.0, -r * mu - sqrt( max( 0.0, r * r * ( mu * mu - 1.0 ) + kRb * kRb ) ) );
 }
 
+#ifndef WW_AT_HITSGROUND_OWN	// an entry may spell it itself (the HLSL sky twin: NVIDIA's operation order)
 bool atHitsGround( float r, float mu )
 {
 	return mu < 0.0 && r * r * ( mu * mu - 1.0 ) + kRb * kRb >= 0.0;
 }
+#endif
 
 // texel centers sit on the [0,1] ends of the parameter range
 float atUnitToSub( float u, float n ) { return 0.5 / n + u * ( 1.0 - 1.0 / n ); }
