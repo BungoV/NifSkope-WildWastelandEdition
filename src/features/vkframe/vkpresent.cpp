@@ -8195,3 +8195,5 @@ bool frame( QOpenGLWindow * w, const std::function<void()> & paint )
 
 }  // namespace WwVkPresent
 #endif
+
+#include "features/vkframe/vkwater.inc"  // lane VKWATER1: the water's route and census (row G5)
