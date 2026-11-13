@@ -107,13 +107,21 @@ void objBlPipeFree();
 struct ObjBlUniStat
 {
 	int members = 0, mirrored = 0, absent = 0;  //!< absent: GL has no location (the GLSL never reads it): left 0
+	int registry = 0;  //!< of mirrored: found through the location registry (a SPIR-V-linked program: no uniform names)
 };
+/*! the SPIR-V set's location registry (build_all.py's spirv/locs.txt: `name \t location \t slots`; an array's element i at
+ * location + i). A program whose active uniforms have no names (linked from SPIR-V) is mirrored through it: a name GL does
+ * not find takes the registry's location when GL reports that location active. Returns the names read (0: none, the
+ * registry is cleared). red 1 shifts every location by one (gates only: the mirror must FAIL) */
+int objBlLocsLoad( const std::string & file, std::string & why, int red = 0 );
 /*! GL program `prog`'s loose uniforms into a block laid out as `block` (glGetUniform*, by the member's name, an array's
  * elements by name[i]; a GL matrix's column c is the module's column c). false with a reason: a member of a type the mirror
  * does not take. red 1 matrices transposed, red 2 arrays packed tight (gates only: they must FAIL) */
 bool objBlLoose( GlProc gp, unsigned prog, const SpvBind & block, std::vector<std::uint8_t> & out, ObjBlUniStat & st, std::string & why,
 	int red = 0 );
 /*! GL's std140 block of the same name (globalUniforms, skinningUniforms): the bytes of the buffer range bound at its binding.
+ * A SPIR-V-linked program's block GL does not find by name is found by build_spv.py's binding (globalUniforms 0,
+ * skinningUniforms 1, wwShadowFrame 2).
  * false with a reason: no such block, no buffer bound, a member GL places elsewhere than the module, a smaller block.
  * red 1 reads the binding after GL's (gates only) */
 bool objBlBlock( GlProc gp, unsigned prog, const SpvBind & block, std::vector<std::uint8_t> & out, std::string & why, int red = 0 );

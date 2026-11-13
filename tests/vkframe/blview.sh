@@ -12,6 +12,7 @@ OUT="${1:?out dir}"
 MODE="${2:-}"
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 DXC="${DXC:-E:/Tools/dxc/bin/x64/dxc.exe}"
+PY="${PY:-$(command -v python)}"  # the caller's Python (build_all.py), before UCRT64 leads PATH
 export PATH="/c/msys64/ucrt64/bin:$PATH"
 if tasklist | grep -qiE '^(NifSkope|Fallout4)'; then echo "BLVIEW GATE FAILED (NifSkope or the game runs: no window of ours now)"; exit 1; fi
 mkdir -p "$OUT"
@@ -42,6 +43,9 @@ for vs in "pipe:$VSHIFT" "redshift:$PSHIFT"; do
 		-Fo "$OUT/fo4_defaultbl_vs.${vs%%:*}.spv" > "$OUT/fo4_defaultbl_vs.dxc.txt" 2>&1 \
 		|| { tail -20 "$OUT/fo4_defaultbl_vs.dxc.txt"; echo "BLVIEW GATE FAILED (dxc, fo4_defaultbl_vs ${vs%%:*})"; exit 1; }
 done
+# lane VKOBJ4 open item 2: GL's fo4_cellbl from the HLSL SPIR-V set (and its location registry), as the app links it
+"$PY" -I -X utf8 "$ROOT/tests/hlsllive/build_all.py" "$ROOT" "$OUT/spvset" --only fo4_cellbl --jobs 4 > "$OUT/spvset.txt" 2>&1 \
+	|| { tail -8 "$OUT/spvset.txt"; echo "BLVIEW GATE FAILED (build_all.py, the fo4_cellbl SPIR-V set)"; exit 1; }
 g++ -O2 -std=c++17 -pthread -I"$ROOT/src" "$ROOT/tests/vkframe/blview.cpp" -o "$OUT/blview.exe" -lopengl32 -lgdi32 -luser32 \
 	|| { echo "BLVIEW GATE FAILED (g++)"; exit 1; }
 TXT="$OUT/blview${MODE:+_$MODE}.txt"

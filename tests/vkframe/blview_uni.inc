@@ -342,3 +342,321 @@ bool uniGate( const std::string & root )
 	}
 	return ok;
 }
+
+/* Lane VKOBJ4 open item 2: the mirror on a program linked from SPIR-V (no uniform names), through the location registry.
+ * Fixture: GL's fo4_cellbl (fo4_defaultbl.vert + fo4_cellbl.frag) linked from the HLSL SPIR-V set build_all.py writes
+ * (blview.sh: <spv dir>/spvset, --only fo4_cellbl), the registry its locs.txt. Each LooseUniforms member of the shipped
+ * twins (objbl_vs, objbl_cell_ps) is set at the registry's location (element i at + i) by GL's own type there, values by
+ * uniValue (a module uint GL holds as int: its low 31 bits); globalUniforms / skinningUniforms on buffers of random bytes
+ * at build_spv.py's bindings 0 / 1; each active pixel-stage sampler on unit 30 - its order.
+ * Lines: `BLVIEW locs nameless`, `BLVIEW locs loose vertex|pixel`, `BLVIEW locs block <name>`, `BLVIEW locs tex`,
+ * `BLVIEW RED locshift|nolocs` (each must FAIL).
+ * BAR (stated before the first run, never widened): the program is nameless (GL finds no member by name); per stage 0 bytes
+ * differ from the values set at every location GL reports active (elements GL drops read 0), every member with an active
+ * element mirrored and through the registry, the rest absent, at least one mirrored; each block 0 bytes differ; every
+ * active sampler's unit found, at least one. */
+bool locsGate( const std::string & spirvDir )
+{
+	using namespace WwVkPresent;
+	struct LocGl
+	{
+		void( WINAPI * shaderBinary )( GLsizei, const GLuint *, GLenum, const void *, GLsizei ) = nullptr;
+		void( WINAPI * specialize )( GLuint, const char *, GLuint, const GLuint *, const GLuint * ) = nullptr;
+		void( WINAPI * ifaceIv )( GLuint, GLenum, GLenum, GLint * ) = nullptr;
+		void( WINAPI * resIv )( GLuint, GLenum, GLuint, GLsizei, const GLenum *, GLsizei, GLsizei *, GLint * ) = nullptr;
+		GLint( WINAPI * loc )( GLuint, const char * ) = nullptr;
+		void( WINAPI * uf[4] )( GLint, GLsizei, const GLfloat * ) = {};
+		void( WINAPI * ui[4] )( GLint, GLsizei, const GLint * ) = {};
+		void( WINAPI * uu[4] )( GLint, GLsizei, const GLuint * ) = {};
+		void( WINAPI * um[3][3] )( GLint, GLsizei, GLboolean, const GLfloat * ) = {};
+		void( WINAPI * deleteProgram )( GLuint ) = nullptr;
+	} u;
+	const char * n4 = "1234";
+	bool okLoad = load( u.shaderBinary, "glShaderBinary" ) && load( u.specialize, "glSpecializeShader" ) && load( u.ifaceIv, "glGetProgramInterfaceiv" )
+		&& load( u.resIv, "glGetProgramResourceiv" ) && load( u.loc, "glGetUniformLocation" ) && load( u.deleteProgram, "glDeleteProgram" );
+	for ( int i = 0; i < 4; i++ )
+		okLoad = okLoad && load( u.uf[i], ( std::string( "glUniform" ) + n4[i] + "fv" ).c_str() )
+			&& load( u.ui[i], ( std::string( "glUniform" ) + n4[i] + "iv" ).c_str() ) && load( u.uu[i], ( std::string( "glUniform" ) + n4[i] + "uiv" ).c_str() );
+	for ( int c = 2; c <= 4; c++ )
+		for ( int r = 2; r <= 4; r++ ) {
+			const std::string nm = c == r ? "glUniformMatrix" + std::to_string( c ) + "fv" : "glUniformMatrix" + std::to_string( c ) + "x" + std::to_string( r ) + "fv";
+			okLoad = okLoad && load( u.um[c - 2][r - 2], nm.c_str() );
+		}
+	if ( !okLoad ) {
+		std::printf( "BLVIEW locs: GL entry points missing (GL_ARB_gl_spirv / program interface query)\n" );
+		return false;
+	}
+	std::string why;
+	const int names = objBlLocsLoad( spirvDir + "/locs.txt", why );
+	std::map<std::string, std::string> index;
+	{
+		std::istringstream in( readFile( spirvDir + "/index.txt" ) );
+		std::string ln;
+		while ( std::getline( in, ln ) ) {
+			const std::size_t t = ln.find( '\t' );
+			if ( t != std::string::npos )
+				index[ln.substr( 0, t )] = ln.substr( t + 1 );
+		}
+	}
+	if ( !names || !index.count( "fo4_defaultbl.vert" ) || !index.count( "fo4_cellbl.frag" ) ) {
+		std::printf( "BLVIEW locs: no SPIR-V set at %s (%d registry names; %s)\n", spirvDir.c_str(), names, why.c_str() );
+		return false;
+	}
+	// GL's program from the set, as wwSpvAttach links it
+	const GLuint prog = f.createProgram();
+	const char * stage[2] = { "fo4_defaultbl.vert", "fo4_cellbl.frag" };
+	for ( int s = 0; s < 2; s++ ) {
+		const std::string full = readFile( spirvDir + "/" + index[stage[s]] );
+		/* the set keeps OpName, and the driver reflects it: the fixture renames each loose uniform (a UniformConstant variable)
+		 * `u<its location>`, so GL knows no member by its own name (the program the registry is for). Dropping the names
+		 * instead does not link on NV: a uniform both stages hold gets a default name per stage ("Duplicate location") */
+		auto word = [&]( std::size_t at ) {
+			std::uint32_t w = 0;
+			std::memcpy( &w, full.data() + at, 4 );
+			return w;
+		};
+		std::map<std::uint32_t, bool> loose;
+		std::map<std::uint32_t, std::uint32_t> locOf;
+		for ( std::size_t at = 20; at + 4 <= full.size(); ) {
+			const std::uint32_t w0 = word( at );
+			const std::size_t len = std::size_t( w0 >> 16 ) * 4;
+			if ( !len || at + len > full.size() )
+				break;
+			if ( ( w0 & 0xFFFFu ) == 59 && len >= 16 && word( at + 12 ) == 0 )  // OpVariable, UniformConstant
+				loose[word( at + 8 )] = true;
+			if ( ( w0 & 0xFFFFu ) == 71 && len >= 16 && word( at + 8 ) == 30 )  // OpDecorate Location
+				locOf[word( at + 4 )] = word( at + 12 );
+			at += len;
+		}
+		std::string bin = full.substr( 0, std::min<std::size_t>( full.size(), 20 ) );
+		for ( std::size_t at = 20; at + 4 <= full.size(); ) {
+			const std::uint32_t w0 = word( at );
+			const std::size_t len = std::size_t( w0 >> 16 ) * 4;
+			if ( !len || at + len > full.size() )
+				break;
+			const std::uint32_t id = len >= 8 ? word( at + 4 ) : 0;
+			if ( ( w0 & 0xFFFFu ) != 5 || !loose.count( id ) ) {
+				bin.append( full, at, len );
+			} else {  // OpName of a loose uniform: `u<location>` (no location: past every location, by its id)
+				std::string nm = "u" + std::to_string( locOf.count( id ) ? locOf[id] : 100000u + id );
+				nm.resize( ( nm.size() / 4 + 1 ) * 4, '\0' );
+				const std::uint32_t head[2] = { std::uint32_t( 2 + nm.size() / 4 ) << 16 | 5u, id };
+				bin.append( reinterpret_cast<const char *>( head ), 8 );
+				bin.append( nm );
+			}
+			at += len;
+		}
+		const GLuint sh = f.createShader( s ? kFrag : kVert );
+		u.shaderBinary( 1, &sh, 0x9551, bin.data(), GLsizei( bin.size() ) );  // SHADER_BINARY_FORMAT_SPIR_V
+		u.specialize( sh, "main", 0, nullptr, nullptr );
+		GLint okS = 0;
+		f.getShaderiv( sh, kCompiled, &okS );
+		if ( !okS ) {
+			std::printf( "BLVIEW locs: %s did not specialize\n", stage[s] );
+			return false;
+		}
+		f.attachShader( prog, sh );
+	}
+	f.linkProgram( prog );
+	GLint linked = 0;
+	f.getProgramiv( prog, kLinked, &linked );
+	if ( !linked ) {
+		char log[1024] = {};
+		void( WINAPI * infoLog )( GLuint, GLsizei, GLsizei *, char * ) = nullptr;
+		if ( load( infoLog, "glGetProgramInfoLog" ) )
+			infoLog( prog, GLsizei( sizeof( log ) - 1 ), nullptr, log );
+		std::printf( "BLVIEW locs: fo4_cellbl from SPIR-V did not link (%s)\n", log );
+		return false;
+	}
+	// GL's active default-block locations and their types (the fixture's own read)
+	std::map<int, GLint> glType;
+	GLint nRes = 0;
+	u.ifaceIv( prog, 0x92E1, 0x92F5, &nRes );
+	for ( GLint i = 0; i < nRes; i++ ) {
+		const GLenum props[3] = { 0x930E, 0x92FB, 0x92FA };  // LOCATION, ARRAY_SIZE, TYPE
+		GLint v[3] = { -1, 0, 0 };
+		u.resIv( prog, 0x92E1, GLuint( i ), 3, props, 3, nullptr, v );
+		for ( GLint e = 0; v[0] >= 0 && e < std::max( v[1], 1 ); e++ )
+			glType[v[0] + e] = v[2];
+	}
+	auto kindOf = []( GLint t ) {  // 0 float / matrix, 1 int / bool, 2 uint, 3 sampler or other
+		if ( t == 0x1406 || ( t >= 0x8B50 && t <= 0x8B52 ) || ( t >= 0x8B5A && t <= 0x8B5C ) || ( t >= 0x8B65 && t <= 0x8B6A ) )
+			return 0;
+		if ( t == 0x1404 || ( t >= 0x8B53 && t <= 0x8B59 ) )
+			return 1;
+		if ( t == 0x1405 || ( t >= 0x8DC6 && t <= 0x8DC8 ) )
+			return 2;
+		return 3;
+	};
+	SpvModule vsM, psM;
+	if ( !spvReflect( vkframe_objbl_vs_spv, sizeof( vkframe_objbl_vs_spv ) / 4, vsM, why )
+		|| !spvReflect( vkframe_objbl_cell_ps_spv, sizeof( vkframe_objbl_cell_ps_spv ) / 4, psM, why ) ) {
+		std::printf( "BLVIEW locs: reflection refused (%s)\n", why.c_str() );
+		return false;
+	}
+	const SpvBind * bl[2] = { uniBlock( vsM, "LooseUniforms" ), uniBlock( psM, "LooseUniforms" ) };
+	if ( !bl[0] || !bl[1] ) {
+		std::printf( "BLVIEW locs: a LooseUniforms block is missing from the twins\n" );
+		return false;
+	}
+	std::map<std::string, int> reg;
+	{
+		std::istringstream in( readFile( spirvDir + "/locs.txt" ) );
+		std::string ln;
+		while ( std::getline( in, ln ) ) {
+			const std::size_t t = ln.find( '\t' );
+			if ( t != std::string::npos )
+				reg[ln.substr( 0, t )] = std::atoi( ln.c_str() + t + 1 );
+		}
+	}
+	// nameless: GL finds no member by name
+	int named = 0;
+	for ( const SpvBind * b : bl )
+		for ( const SpvMember & m : b->members )
+			named += u.loc( prog, ( m.count > 1 ? m.name + "[0]" : m.name ).c_str() ) >= 0;
+	std::printf( "BLVIEW locs nameless: %d registry names, %d active locations, %d members GL finds by name: %s\n", names, int( glType.size() ), named,
+		named ? "FAIL" : "OK" );
+	bool ok = named == 0;
+	f.useProgram( prog );
+	std::vector<std::uint8_t> want[2];
+	int wantMirrored[2] = {};
+	for ( int s = 0; s < 2; s++ ) {
+		want[s].assign( bl[s]->bytes, 0 );
+		for ( const SpvMember & m : bl[s]->members ) {
+			const auto it = reg.find( m.name );
+			bool any = false;
+			for ( std::uint32_t e = 0; it != reg.end() && e < m.count; e++ ) {
+				const int at = it->second + int( e );
+				if ( !glType.count( at ) )
+					continue;
+				const int kind = kindOf( glType[at] );
+				std::uint32_t v[16] = {};
+				for ( std::uint32_t c = 0; c < m.cols; c++ )
+					for ( std::uint32_t r = 0; r < m.comps; r++ ) {
+						v[c * m.comps + r] = uniValue( m, e, c, r );
+						if ( m.base == 2 && kind == 1 )
+							v[c * m.comps + r] &= 0x7FFFFFFFu;
+					}
+				if ( m.cols > 1 && kind == 0 )
+					u.um[m.cols - 2][m.comps - 2]( at, 1, GL_FALSE, reinterpret_cast<const GLfloat *>( v ) );
+				else if ( kind == 0 && m.cols == 1 )
+					u.uf[m.comps - 1]( at, 1, reinterpret_cast<const GLfloat *>( v ) );
+				else if ( kind == 1 && m.cols == 1 )
+					u.ui[m.comps - 1]( at, 1, reinterpret_cast<const GLint *>( v ) );
+				else if ( kind == 2 && m.cols == 1 )
+					u.uu[m.comps - 1]( at, 1, v );
+				else
+					continue;
+				any = true;
+				for ( std::uint32_t c = 0; c < m.cols; c++ )
+					for ( std::uint32_t r = 0; r < m.comps; r++ ) {
+						const std::uint32_t off = m.offset + e * m.arrayStride
+							+ ( m.cols > 1 ? ( m.rowMajor ? r * m.colStride + c * 4 : c * m.colStride + r * 4 ) : r * 4 );
+						if ( off + 4 <= want[s].size() )
+							std::memcpy( want[s].data() + off, &v[c * m.comps + r], 4 );
+					}
+			}
+			wantMirrored[s] += any;
+		}
+	}
+	// the blocks at build_spv.py's bindings
+	std::mt19937 rng( 91 );
+	std::vector<std::uint8_t> gBytes( 1024 ), sBytes( 256 * 48 );
+	for ( auto & b : gBytes )
+		b = std::uint8_t( rng() );
+	for ( auto & b : sBytes )
+		b = std::uint8_t( rng() );
+	GLuint ubo[2] = {};
+	f.genBuffers( 2, ubo );
+	f.bindBuffer( 0x8A11, ubo[0] );
+	f.bufferData( 0x8A11, std::ptrdiff_t( gBytes.size() ), gBytes.data(), 0x88E4 );
+	f.bindBuffer( 0x8A11, ubo[1] );
+	f.bufferData( 0x8A11, std::ptrdiff_t( sBytes.size() ), sBytes.data(), 0x88E4 );
+	f.bindBufferBase( 0x8A11, 0, ubo[0] );
+	f.bindBufferBase( 0x8A11, 1, ubo[1] );
+	// the active pixel-stage samplers on units 30 - order
+	std::map<std::string, int> unitSet;
+	for ( const SpvBind & b : psM.binds ) {
+		if ( b.set != 0 || ( b.type != VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE && b.type != VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER ) )
+			continue;
+		const auto it = reg.find( b.name );
+		if ( it == reg.end() || !glType.count( it->second ) || kindOf( glType[it->second] ) != 3 )
+			continue;
+		const GLint unit = 30 - GLint( unitSet.size() );
+		u.ui[0]( it->second, 1, &unit );
+		unitSet[b.name] = unit;
+	}
+	// the mirror, then its reds
+	auto looseRun = [&]( int s, ObjBlUniStat & st, std::size_t & d ) {
+		std::vector<std::uint8_t> got;
+		const bool made = objBlLoose( glProc, prog, *bl[s], got, st, why );
+		d = made ? uniDiff( got, want[s] ) : 1;
+		return made && d == 0 && st.mirrored == wantMirrored[s] && st.registry == st.mirrored && st.mirrored >= 1
+			&& st.mirrored + st.absent == st.members;
+	};
+	for ( int s = 0; s < 2; s++ ) {
+		ObjBlUniStat st;
+		std::size_t d = 0;
+		const bool exact = looseRun( s, st, d );
+		std::printf( "BLVIEW locs loose %s: %d members, %d mirrored (%d through the registry, %d with an active location), %d absent, %u bytes, "
+			"%zu differ: %s\n", s ? "pixel" : "vertex", st.members, st.mirrored, st.registry, wantMirrored[s], st.absent, bl[s]->bytes, d,
+			exact ? "EXACT" : "FAIL" );
+		ok = ok && exact;
+	}
+	const SpvBind * blocks[2] = { uniBlock( psM, "globalUniforms" ), uniBlock( vsM, "skinningUniforms" ) };
+	const std::vector<std::uint8_t> * src[2] = { &gBytes, &sBytes };
+	for ( int k = 0; k < 2; k++ ) {
+		if ( !blocks[k] ) {
+			std::printf( "BLVIEW locs block %d: missing from the twins: FAIL\n", k );
+			ok = false;
+			continue;
+		}
+		SpvBind named = *blocks[k];
+		if ( named.name.compare( 0, 5, "type." ) == 0 )
+			named.name = named.name.substr( 5 );
+		std::vector<std::uint8_t> got;
+		const bool made = objBlBlock( glProc, prog, named, got, why );
+		const std::vector<std::uint8_t> w( src[k]->begin(), src[k]->begin() + std::ptrdiff_t( std::min<std::size_t>( src[k]->size(), named.bytes ) ) );
+		const std::size_t d = made ? uniDiff( got, w ) : 1;
+		std::printf( "BLVIEW locs block %s (%u bytes): %zu differ: %s%s\n", named.name.c_str(), named.bytes, d, made && !d ? "EXACT" : "FAIL",
+			made ? "" : ( " (" + why + ")" ).c_str() );
+		ok = ok && made && !d;
+	}
+	std::vector<ObjBlTexUnit> units;
+	const bool madeT = objBlTextures( glProc, prog, psM, units, why );
+	int found = 0, wrong = 0;
+	for ( const ObjBlTexUnit & tu : units ) {
+		if ( tu.type == VK_DESCRIPTOR_TYPE_SAMPLER )
+			continue;
+		const auto it = unitSet.find( tu.name );
+		if ( it == unitSet.end() )
+			wrong += tu.unit >= 0;
+		else
+			( tu.unit == it->second ? found : wrong )++;
+	}
+	const bool texOk = madeT && wrong == 0 && found == int( unitSet.size() ) && found >= 1;
+	std::printf( "BLVIEW locs tex: %zu active samplers set, %d found, %d wrong: %s\n", unitSet.size(), found, wrong, texOk ? "EXACT" : "FAIL" );
+	ok = ok && texOk;
+	// reds: the registry one location on; no registry (the mirror before it)
+	int redFail[2] = {};
+	for ( int red = 0; red < 2; red++ ) {
+		if ( red == 0 )
+			objBlLocsLoad( spirvDir + "/locs.txt", why, 1 );
+		else
+			objBlLocsLoad( spirvDir + "/no_locs.txt", why );
+		for ( int s = 0; s < 2; s++ ) {
+			ObjBlUniStat st;
+			std::size_t d = 0;
+			redFail[red] += !looseRun( s, st, d );
+		}
+	}
+	const char * redName[2] = { "locshift (every registry location one on)", "nolocs (no registry: the names only)" };
+	for ( int r = 0; r < 2; r++ ) {
+		std::printf( "BLVIEW RED %s %s (%d stages differ)\n", redName[r], redFail[r] ? "FAIL" : "PASSED", redFail[r] );
+		ok = ok && redFail[r] > 0;
+	}
+	objBlLocsLoad( spirvDir + "/no_locs.txt", why );  // the GLSL gates after this one never see it
+	f.useProgram( 0 );
+	u.deleteProgram( prog );
+	return ok;
+}

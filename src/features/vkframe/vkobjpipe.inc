@@ -948,6 +948,103 @@ void ouTarget( std::uint32_t dim, std::uint32_t arrayed, unsigned & target, unsi
 		query = 0x8C2Cu;
 	}
 }
+
+// the location registry (objBlLocsLoad): name -> base location; red 1 shifts every one
+struct OuReg
+{
+	std::map<std::string, int> loc;
+	int red = 0;
+};
+OuReg & ouReg()
+{
+	static OuReg r;
+	return r;
+}
+
+// a program's default-block locations GL keeps, and whether it is linked from SPIR-V (a shader attached as SPIR-V, or no
+// uniform has a name): the registry's locations hold then
+struct OuLocs
+{
+	bool nameless = false;
+	std::vector<int> active;  // sorted
+	bool has( int l ) const { return std::binary_search( active.begin(), active.end(), l ); }
+	// the registry's location of `name`'s element e when GL keeps it, else -1
+	int at( const std::string & name, std::uint32_t e ) const
+	{
+		if ( !nameless )
+			return -1;
+		const auto it = ouReg().loc.find( name );
+		if ( it == ouReg().loc.end() )
+			return -1;
+		const int l = it->second + ouReg().red + int( e );
+		return has( l ) ? l : -1;
+	}
+};
+
+OuLocs ouLocs( WwVkPresent::GlProc gp, unsigned prog )
+{
+	using IfaceIv = void( WINAPI * )( unsigned, unsigned, unsigned, int * );
+	using ResIv = void( WINAPI * )( unsigned, unsigned, unsigned, int, const unsigned *, int, int *, int * );
+	OuLocs o;
+	const auto iv = gp ? reinterpret_cast<IfaceIv>( gp( "glGetProgramInterfaceiv" ) ) : nullptr;
+	const auto rv = gp ? reinterpret_cast<ResIv>( gp( "glGetProgramResourceiv" ) ) : nullptr;
+	if ( !iv || !rv || ouReg().loc.empty() )
+		return o;
+	int n = 0, named = 0;
+	iv( prog, 0x92E1u, 0x92F5u, &n );  // UNIFORM, ACTIVE_RESOURCES
+	for ( int i = 0; i < n; i++ ) {
+		const unsigned props[3] = { 0x930Eu, 0x92FBu, 0x92F9u };  // LOCATION, ARRAY_SIZE, NAME_LENGTH
+		int v[3] = { -1, 0, 0 };
+		rv( prog, 0x92E1u, unsigned( i ), 3, props, 3, nullptr, v );
+		named += v[2] > 1;
+		for ( int e = 0; v[0] >= 0 && e < std::max( v[1], 1 ); e++ )
+			o.active.push_back( v[0] + e );
+	}
+	std::sort( o.active.begin(), o.active.end() );
+	o.nameless = n > 0 && !named;
+	/* a shader attached as SPIR-V (SPIR_V_BINARY_ARB): the registry's locations hold whatever names the driver reports
+	 * (NV reflects OpName; a uniform both stages hold must keep one name there, or the link fails) */
+	using Attached = void( WINAPI * )( unsigned, int, int *, unsigned * );
+	using ShaderIv = void( WINAPI * )( unsigned, unsigned, int * );
+	const auto att = reinterpret_cast<Attached>( gp( "glGetAttachedShaders" ) );
+	const auto shIv = reinterpret_cast<ShaderIv>( gp( "glGetShaderiv" ) );
+	unsigned sh[8] = {};
+	int nSh = 0;
+	if ( att && shIv )
+		att( prog, 8, &nSh, sh );
+	for ( int i = 0; i < nSh && !o.nameless; i++ ) {
+		int spv = 0;
+		shIv( sh[i], 0x9552u, &spv );  // GL_SPIR_V_BINARY_ARB
+		o.nameless = spv != 0;
+	}
+	return o;
+}
+
+// a SPIR-V-linked program's block by build_spv.py's binding (BLOCKS): its index, or 0xFFFFFFFF
+unsigned ouBlockByBinding( WwVkPresent::GlProc gp, unsigned prog, const std::string & name )
+{
+	using IfaceIv = void( WINAPI * )( unsigned, unsigned, unsigned, int * );
+	using ResIv = void( WINAPI * )( unsigned, unsigned, unsigned, int, const unsigned *, int, int *, int * );
+	const char * names[3] = { "globalUniforms", "skinningUniforms", "wwShadowFrame" };
+	int want = -1;
+	for ( int k = 0; k < 3; k++ )
+		if ( name.find( names[k] ) != std::string::npos )
+			want = k;
+	const auto iv = gp ? reinterpret_cast<IfaceIv>( gp( "glGetProgramInterfaceiv" ) ) : nullptr;
+	const auto rv = gp ? reinterpret_cast<ResIv>( gp( "glGetProgramResourceiv" ) ) : nullptr;
+	if ( want < 0 || !iv || !rv )
+		return 0xFFFFFFFFu;
+	int n = 0;
+	iv( prog, 0x92E2u, 0x92F5u, &n );  // UNIFORM_BLOCK, ACTIVE_RESOURCES
+	for ( int i = 0; i < n; i++ ) {
+		const unsigned props[2] = { 0x9302u, 0x92F9u };  // BUFFER_BINDING, NAME_LENGTH
+		int v[2] = { -1, 0 };
+		rv( prog, 0x92E2u, unsigned( i ), 2, props, 2, nullptr, v );
+		if ( v[0] == want && v[1] <= 1 )
+			return unsigned( i );
+	}
+	return 0xFFFFFFFFu;
+}
 }  // namespace
 
 namespace WwVkPresent
@@ -960,8 +1057,10 @@ bool objBlLoose( GlProc gp, unsigned prog, const SpvBind & block, std::vector<st
 	OuGl g;
 	if ( !ouGl( gp, g, why ) )
 		return false;
+	const OuLocs al = ouLocs( gp, prog );
 	for ( const SpvMember & m : block.members ) {
 		st.members++;
+		bool viaReg = false;
 		if ( m.base > 2 || m.comps > 4 || m.cols > 4 || ( m.cols > 1 && !m.colStride ) || ( m.count > 1 && !m.arrayStride ) ) {
 			why = block.name + "." + m.name + ": a member type the mirror does not take";
 			return false;
@@ -970,7 +1069,9 @@ bool objBlLoose( GlProc gp, unsigned prog, const SpvBind & block, std::vector<st
 		bool any = false;
 		for ( std::uint32_t e = 0; e < m.count; e++ ) {
 			const std::string nm = m.count > 1 ? m.name + "[" + std::to_string( e ) + "]" : m.name;
-			const int loc = g.getUniformLocation( prog, nm.c_str() );
+			int loc = g.getUniformLocation( prog, nm.c_str() );
+			if ( loc < 0 && ( loc = al.at( m.name, e ) ) >= 0 )
+				viaReg = true;  // linked from SPIR-V: no names, the registry's location
 			if ( loc < 0 )
 				continue;  // GL dropped it (an array's tail too): 0 as GL reads it
 			any = true;
@@ -991,8 +1092,33 @@ bool objBlLoose( GlProc gp, unsigned prog, const SpvBind & block, std::vector<st
 				}
 		}
 		( any ? st.mirrored : st.absent )++;
+		st.registry += any && viaReg;
 	}
 	return true;
+}
+
+int objBlLocsLoad( const std::string & file, std::string & why, int red )
+{
+	OuReg & r = ouReg();
+	r.loc.clear();
+	r.red = red == 1 ? 1 : 0;
+	std::FILE * fp = std::fopen( file.c_str(), "rb" );
+	if ( !fp ) {
+		why = "no " + file;
+		return 0;
+	}
+	char line[512];
+	while ( std::fgets( line, sizeof( line ), fp ) ) {
+		char * t1 = std::strchr( line, '\t' );
+		char * t2 = t1 ? std::strchr( t1 + 1, '\t' ) : nullptr;
+		if ( !t1 || !t2 || t1 == line )
+			continue;
+		r.loc[std::string( line, std::size_t( t1 - line ) )] = std::atoi( t1 + 1 );
+	}
+	std::fclose( fp );
+	if ( r.loc.empty() )
+		why = file + " holds no locations";
+	return int( r.loc.size() );
 }
 
 bool objBlBlock( GlProc gp, unsigned prog, const SpvBind & block, std::vector<std::uint8_t> & out, std::string & why, int red )
@@ -1001,7 +1127,9 @@ bool objBlBlock( GlProc gp, unsigned prog, const SpvBind & block, std::vector<st
 	OuGl g;
 	if ( !ouGl( gp, g, why ) )
 		return false;
-	const unsigned idx = g.getUniformBlockIndex( prog, block.name.c_str() );
+	unsigned idx = g.getUniformBlockIndex( prog, block.name.c_str() );
+	if ( idx == 0xFFFFFFFFu )
+		idx = ouBlockByBinding( gp, prog, block.name );  // linked from SPIR-V: no block names
 	if ( idx == 0xFFFFFFFFu ) {
 		why = "GL's program has no block " + block.name;
 		return false;
@@ -1059,6 +1187,7 @@ bool objBlTextures( GlProc gp, unsigned prog, const SpvModule & m, std::vector<O
 			images[b.name] = &b;
 	int active = 0;
 	g.getIntegerv( 0x84E0u, &active );  // ACTIVE_TEXTURE
+	const OuLocs al = ouLocs( gp, prog );
 	for ( const SpvBind & b : m.binds ) {
 		if ( b.set != 0 || b.type == VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER || b.type == VK_DESCRIPTOR_TYPE_STORAGE_BUFFER )
 			continue;
@@ -1079,7 +1208,9 @@ bool objBlTextures( GlProc gp, unsigned prog, const SpvModule & m, std::vector<O
 			u.dim = img->dim;
 			u.arrayed = img->arrayed;
 		}
-		const int loc = g.getUniformLocation( prog, u.name.c_str() );
+		int loc = g.getUniformLocation( prog, u.name.c_str() );
+		if ( loc < 0 )
+			loc = al.at( u.name, 0 );  // linked from SPIR-V: the registry's location
 		if ( loc >= 0 && img ) {
 			g.getUniformiv( prog, loc, &u.unit );
 			unsigned query = 0;
@@ -1544,6 +1675,7 @@ bool objBlMirror( GlProc gp, unsigned prog, const std::uint32_t * vs, std::size_
 				st.members += one.members;
 				st.mirrored += one.mirrored;
 				st.absent += one.absent;
+				st.registry += one.registry;
 			} else {
 				SpvBind named = b;
 				if ( named.name.compare( 0, 5, "type." ) == 0 )
