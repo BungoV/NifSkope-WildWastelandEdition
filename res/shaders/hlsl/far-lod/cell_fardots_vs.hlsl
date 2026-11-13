@@ -7,6 +7,7 @@
 #define Sample( s, uv ) SampleLevel( s, uv, 0 )	// GLSL: texture() outside a fragment shader reads level 0
 #define SampleCmp SampleCmpLevelZero	// the same for a shadow compare (SampleCmp is fragment-only)
 static float4 gl_Position;
+static float gl_PointSize;	// HLSL has no point size: written, not output
 /* One bulb a point, spread over a normalized Gaussian of sigma = max(0.6 px, projected bulb size): a pixel shows
  * I x (f / d)^2 x G / (2 pi sigma^2), so the dot's screen sum is the light reaching the camera. */
 

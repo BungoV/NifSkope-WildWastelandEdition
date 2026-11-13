@@ -72,6 +72,12 @@ cbuffer globalUniforms : register(b0, space0)
  * cell view takes the cell's own lights, the Lookdev fog and the cell's imagespace (fo4_cell.frag's
  * pattern). impostor_oct.prog defines neither and runs exactly the shader it always ran. */
 #ifdef WW_FOG
+#include "../air/lookdev_fog.hlsli"
+#endif
+#ifdef WW_CELLLIGHTS
+#include "../lights/cell_lights.hlsli"
+#endif
+
 #define WW_LOOSE_TYPES 1
 #if defined(WW_FOG)
 #include "../air/lookdev_fog.hlsli"
@@ -131,7 +137,16 @@ cbuffer LooseUniforms : register(b31, space0)
 	bool familyPbr;           // false = legacy (gloss/specular), true = pbr
 	float emissiveScale;       // spec 88..95 -- carried, never folded in
 #if !(defined(WW_CARDINST))
+	float4 frameRect[3];        // u0, v0, du, dv
 	float frameWeight[3];
+	float3 frameRight[3];
+	float3 frameUp[3];
+	float3 frameFwd[3];
+	int frameCount;          // 3 normally; 1 when blending is off
+	float2 frameOffset[3];
+	float3 cardCenter;
+	float2 cardHalf;
+	float cardDepthSpan;       // spec 285: 3 x max(bound radius, 1024)
 #endif
 	float cardMipCap;          // spec 243: mips stop at 8 texels a side
 	/* THE COVERAGE CONTRACT, as the SET declares it, in 0..1 (lodgen.cpp:3031).
@@ -199,13 +214,10 @@ cbuffer LooseUniforms : register(b31, space0)
 	 * not evidence of anything and every gate runs at 0.
 	 */
 	float swayAmplitude;
+#if !(defined(WW_CARDINST))
+	float swayPhase;           // radians; the harness steps it, not a clock
+#endif
 };
-#include "../air/lookdev_fog.hlsli"
-#endif
-#ifdef WW_CELLLIGHTS
-#include "../lights/cell_lights.hlsli"
-#endif
-
 
 
 /* lane FARCARD1: the instanced far cards (impostor_cellinst.frag) read the per-card values as flat inputs from
@@ -234,29 +246,47 @@ Texture2D<float4> EmissiveSheet : register(t50, space0); SamplerState _EmissiveS
 // --- the frames this pixel blends (chosen CPU-side, src/features/far-lod/impostoroct.cpp) -----
 // Each frame k carries its rect on the sheet, its weight, and its own camera
 // basis -- three DIFFERENT view spaces, which is the whole difficulty.
-static float4 frameRect[3];        // u0, v0, du, dv
+#if (defined(WW_CARDINST))
+static float4 frameRect[3];
+#endif
 #ifdef WW_CARDINST
 static float3 frameWeightV;        // one location, not three
 #define frameWeight frameWeightV
 #else
 
 #endif
+#if (defined(WW_CARDINST))
 static float3 frameRight[3];
+#endif
+#if (defined(WW_CARDINST))
 static float3 frameUp[3];
+#endif
+#if (defined(WW_CARDINST))
 static float3 frameFwd[3];
-static int frameCount;          // 3 normally; 1 when blending is off
+#endif
+#if (defined(WW_CARDINST))
+static int frameCount;
+#endif
 
 /* PER-FRAME POSITIONING: where frame k's quad SITS, relative to `cardCenter`,
  * along that frame's own right and up (`card.frameOffset`, lodgen.cpp:2999).
  * The bake slides each view's silhouette to its own frame's centre so a frame
  * does not have to pay for the union of every view's box; this slides it back.
  * Zero for a set baked before the law, which is exactly that older behaviour. */
+#if (defined(WW_CARDINST))
 static float2 frameOffset[3];
+#endif
 
 // --- the card ---------------------------------------------------------------
+#if (defined(WW_CARDINST))
 static float3 cardCenter;
+#endif
+#if (defined(WW_CARDINST))
 static float2 cardHalf;
-static float cardDepthSpan;       // spec 285: 3 x max(bound radius, 1024)
+#endif
+#if (defined(WW_CARDINST))
+static float cardDepthSpan;
+#endif
 
 /*! The colour sheet's alpha -> the coverage FRACTION the bake measured.
  *
@@ -331,7 +361,9 @@ float cardCloudT( float3 posView )	// ww_sunshadow.glsl ussCloudT
 #endif
 
 
-static float swayPhase;           // radians; the harness steps it, not a clock
+#if (defined(WW_CARDINST))
+static float swayPhase;
+#endif
 
 static float3 cardPosModel;
 static float2 cardQuadUv;
@@ -981,10 +1013,9 @@ struct SPIRV_Cross_Input
     float2 cardQuadUv : TEXCOORD1;
     float3 cardViewRay : TEXCOORD2;
     noperspective centroid float4 gl_FragCoord : SV_Position;
-    WW_LOC(6) nointerpolation float4 frameRect[3] : TEXCOORD6;
 #if defined(WW_CARDINST)
+    WW_LOC(6) nointerpolation float4 frameRect[3] : TEXCOORD6;
     WW_LOC(22) nointerpolation float3 frameWeightV : TEXCOORD22;
-#endif
     WW_LOC(9) nointerpolation float3 frameRight[3] : TEXCOORD9;
     WW_LOC(12) nointerpolation float3 frameUp[3] : TEXCOORD12;
     WW_LOC(0) nointerpolation float3 frameFwd[3] : TEXCOORD0;
@@ -994,6 +1025,7 @@ struct SPIRV_Cross_Input
     WW_LOC(17) nointerpolation float2 cardHalf : TEXCOORD17;
     WW_LOC(16) nointerpolation float cardDepthSpan : TEXCOORD16;
     WW_LOC(23) nointerpolation float swayPhase : TEXCOORD23;
+#endif
 };
 
 struct SPIRV_Cross_Output
@@ -1006,10 +1038,9 @@ SPIRV_Cross_Output main(SPIRV_Cross_Input stage_input)
 {
     gl_FragCoord = stage_input.gl_FragCoord;
     gl_FragCoord.w = 1.0 / gl_FragCoord.w;
-    frameRect = stage_input.frameRect;
 #if defined(WW_CARDINST)
+    frameRect = stage_input.frameRect;
     frameWeightV = stage_input.frameWeightV;
-#endif
     frameRight = stage_input.frameRight;
     frameUp = stage_input.frameUp;
     frameFwd = stage_input.frameFwd;
@@ -1019,6 +1050,7 @@ SPIRV_Cross_Output main(SPIRV_Cross_Input stage_input)
     cardHalf = stage_input.cardHalf;
     cardDepthSpan = stage_input.cardDepthSpan;
     swayPhase = stage_input.swayPhase;
+#endif
     cardPosModel = stage_input.cardPosModel;
     cardQuadUv = stage_input.cardQuadUv;
     cardViewRay = stage_input.cardViewRay;

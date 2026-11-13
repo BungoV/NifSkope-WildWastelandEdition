@@ -6,6 +6,7 @@
 #define WW_HLSL_SRC 1	// the shared .hlsli files give their readable half
 // inlined (no readable .hlsli yet): uniforms.glsl
 static float4 gl_FragCoord;
+static float2 gl_PointCoord;	// HLSL has no point sprites: the stage input wwPointCoord
 // a bulb's Gaussian, added into the linear frame (cell_fardots.vert), dimmed by the
 // air's transmittance to the bulb, as an additive effect is (wwFogFx; red fxfog: the game's fog alone)
 
@@ -60,6 +61,7 @@ void frag_main()
 
 struct SPIRV_Cross_Input
 {
+    float2 wwPointCoord : TEXCOORD0;
     float3 dotValue : TEXCOORD1;
     float dotSigma : TEXCOORD2;
     float3 dotView : TEXCOORD3;
@@ -75,6 +77,7 @@ SPIRV_Cross_Output main(SPIRV_Cross_Input stage_input)
 {
     gl_FragCoord = stage_input.gl_FragCoord;
     gl_FragCoord.w = 1.0 / gl_FragCoord.w;
+    gl_PointCoord = stage_input.wwPointCoord;
     dotValue = stage_input.dotValue;
     dotSigma = stage_input.dotSigma;
     dotView = stage_input.dotView;
