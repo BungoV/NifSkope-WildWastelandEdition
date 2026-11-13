@@ -3,6 +3,9 @@
 #include "features/vkframe/vkwater.h"
 #include "features/vkframe/water_view_vs.spv.h"  // lane VKWATER3: the shaded draw's twins (vkframe_spirv.sh)
 #include "features/vkframe/water_view_ps.spv.h"
+#include "features/vkframe/water_view_hs.spv.h"  // item 4: the tessellated variant (fo4_waterlookd)
+#include "features/vkframe/water_view_ds.spv.h"
+#include "features/vkframe/water_view_d_ps.spv.h"
 
 namespace
 {
@@ -21,36 +24,63 @@ bool waterSharedFmt( unsigned f )
 	return vkFormatOf( GLenum( f ), depth ) != VK_FORMAT_UNDEFINED;
 }
 
-/* Lane VKWATER3: the shaded draw. water_view_vs (fo4_default) + water_view_ps (fo4_waterlook, FOGLEAK + FRAME_UBO) over
- * the shape's GL buffers copied into one exported buffer; the loose uniforms into a host buffer; every input through
- * waterTwin; one VkSampler per GL sampling state; the air's render pass over the tone frame; fx's crossing (kind 3). */
-struct WaterImgName
-{
-	std::uint32_t binding;
-	const char * name;
-};
-// the twins' image bindings (water_view_ps t n -> 64 + n, water_view_vs t 0 -> 110), their samplers at + 64
-const WaterImgName kWaterImg[] = { { 64, "atApTex" }, { 65, "volAirTerr" }, { 66, "volAirRainMap" }, { 67, "volTex" },
-	{ 68, "volTile" }, { 69, "cellIsBloom" }, { 70, "cellIsLut" }, { 71, "waterInfoIndex" }, { 72, "waterInfoAtlas" },
-	{ 73, "waterFlowIndex" }, { 74, "waterFlowAtlas" }, { 75, "waterInfoBodies" }, { 76, "cellGi" }, { 77, "csmMap" }, { 78, "ussTerrMap" },
-	{ 79, "ussContactMap" }, { 80, "ussCloudMap" }, { 81, "waterMoment0" }, { 82, "waterMoment1" }, { 83, "waterMoment2" },
-	{ 84, "waterCloudMap" }, { 85, "waterOceanB" }, { 86, "waterOceanC" }, { 87, "waterNoise2" }, { 88, "waterSkyIndex" },
-	{ 89, "waterSkyAtlas" }, { 90, "waterDepth" }, { 91, "waterNoise0" }, { 92, "waterNoise1" }, { 93, "waterSsrRaw" },
-	{ 94, "waterSsrFin" }, { 95, "waterScene" }, { 96, "volAirNoise" }, { 97, "cellLights" }, { 98, "cellCluster" },
-	{ 99, "cellGiSlots" }, { 100, "cellRooms" }, { 101, "cellShadow" }, { 102, "cellFarSlots" }, { 103, "cellFarRecs" },
-	{ 104, "cellFarPlaced" }, { 105, "cellCtGbuf" }, { 106, "cellAoDecal" }, { 107, "cellSsgi" }, { 108, "waterOceanD" },
-	{ 110, "farStream" } };
+/* Lane VKWATER3: the shaded draw. water_view_vs (fo4_default) + the variant's pixel twin (fo4_waterlook*, FOGLEAK +
+ * FRAME_UBO), a tessellated variant with water_view_hs + water_view_ds between them, over the shape's GL buffers copied
+ * into one exported buffer; the loose uniforms into a host buffer; every input through waterTwin; one VkSampler per GL
+ * sampling state; the air's render pass over the tone frame; fx's crossing (kind 3). Every binding's census name is the
+ * module's own (vkwater_tables.h kN_water*, read from the SPIR-V: a sampler under its image's name). */
 constexpr VkDeviceSize kWaterAlign = 256;
-// the host buffer: zeros (a block GL has no buffer for), the loose blocks, the disabled attributes' values
-constexpr VkDeviceSize kWaterZeroAt = 0, kWaterVsLooseAt = 12288, kWaterPsLooseAt = 12800, kWaterConstAt = 18176, kWaterHostBytes = 18432;
-
-struct WaterDraw
+constexpr VkDeviceSize waterUp( VkDeviceSize n )
 {
-	bool made = false, broken = false;
-	std::string brokenWhy;
-	VkShaderModule vs = VK_NULL_HANDLE, ps = VK_NULL_HANDLE;
+	return ( n + kWaterAlign - 1 ) / kWaterAlign * kWaterAlign;
+}
+// the host buffer: zeros (a block GL has no buffer for), the loose blocks per stage, the disabled attributes' values
+constexpr VkDeviceSize kWaterZeroAt = 0, kWaterVsLooseAt = 12288;
+constexpr VkDeviceSize kWaterHsLooseAt = waterUp( kWaterVsLooseAt + WwVkPresent::kT_waterVsBytes );
+constexpr VkDeviceSize kWaterDsLooseAt = waterUp( kWaterHsLooseAt + WwVkPresent::kT_waterHsBytes );
+constexpr VkDeviceSize kWaterPsLooseAt = waterUp( kWaterDsLooseAt + WwVkPresent::kT_waterDsBytes );
+constexpr VkDeviceSize kWaterConstAt = waterUp( kWaterPsLooseAt + WwVkPresent::kWaterPsLooseMax );
+constexpr VkDeviceSize kWaterHostBytes = kWaterConstAt + kWaterAlign;
+static_assert( 16 * WwVkPresent::kWaterAttribs <= int( kWaterAlign ), "the disabled attributes' values fit their row" );
+
+// one variant's stages (vs, hs, ds, ps; a missing one is null) and their binding names
+struct WaterStage
+{
+	const std::uint32_t * words;
+	std::size_t bytes;
+	VkShaderStageFlagBits stage;
+	const WwVkPresent::WaterBindName * names;
+	int namesN;
+};
+int waterStages( int v, WaterStage * out )
+{
+	using namespace WwVkPresent;
+	const WaterTables & t = waterTables( v );
+	int n = 0;
+	out[n++] = { vkframe_water_view_vs_spv, sizeof( vkframe_water_view_vs_spv ), VK_SHADER_STAGE_VERTEX_BIT, kN_waterVs, waterN( kN_waterVs ) };
+	if ( t.tess ) {
+		out[n++] = { vkframe_water_view_hs_spv, sizeof( vkframe_water_view_hs_spv ), VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT, kN_waterHs,
+			waterN( kN_waterHs ) };
+		out[n++] = { vkframe_water_view_ds_spv, sizeof( vkframe_water_view_ds_spv ), VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT,
+			kN_waterDs, waterN( kN_waterDs ) };
+	}
+	if ( v == kWaterLookD )
+		out[n++] = { vkframe_water_view_d_ps_spv, sizeof( vkframe_water_view_d_ps_spv ), VK_SHADER_STAGE_FRAGMENT_BIT, t.psNames, t.psNamesN };
+	else
+		out[n++] = { vkframe_water_view_ps_spv, sizeof( vkframe_water_view_ps_spv ), VK_SHADER_STAGE_FRAGMENT_BIT, t.psNames, t.psNamesN };
+	return n;
+}
+
+// one variant's device parts: modules, the merged set (every stage reflected), its pool, one set, layout, pipelines
+struct WaterProg
+{
+	bool made = false;
+	int stageN = 0;
+	VkShaderModule mod[4] = {};
+	VkShaderStageFlagBits stage[4] = {};
 	std::vector<WwVkPresent::FarSetSlot> binds;
 	std::vector<VkShaderStageFlags> stages;
+	std::vector<const char *> names;  // per bind: its census name (the module's)
 	VkDescriptorSetLayout dsl = VK_NULL_HANDLE;
 	VkDescriptorPool pool = VK_NULL_HANDLE;
 	VkDescriptorSet set = VK_NULL_HANDLE;
@@ -58,6 +88,13 @@ struct WaterDraw
 	std::map<std::string, VkPipeline> pipes;
 	VkRenderPass pipePass = VK_NULL_HANDLE;
 	int pipeSamples = 0;
+};
+
+struct WaterDraw
+{
+	bool made = false, broken = false;
+	std::string brokenWhy;
+	WaterProg prog[WwVkPresent::kWaterVariants];
 	std::map<std::string, VkSampler> smp;
 	CsmBuf geo, host;
 	// the zero shadow cube (an input GL compiled out and the twin keeps): D16 1x1, one cube, depth 1, GENERAL
@@ -66,6 +103,7 @@ struct WaterDraw
 	VkImageView zeroCubeView = VK_NULL_HANDLE;
 	PFN_vkCmdDrawIndexed drawIndexed = nullptr;  // not in the device table (Vk): loaded here
 	// this run's record (written before the hand)
+	int cur = 0;  // the variant
 	VkPipeline pipe = VK_NULL_HANDLE;
 	VkBuffer vb[WwVkPresent::kWaterAttribs] = {};
 	VkDeviceSize vbOff[WwVkPresent::kWaterAttribs] = {};
@@ -189,43 +227,74 @@ bool waterZeroCube( WaterDraw & D, std::string & why )
 	return true;
 }
 
-// the device-time parts (once): modules, the merged set (vs + ps reflected), its pool, one set, the pipeline layout
+// the device-time parts every variant shares (once): vkCmdDrawIndexed, the zero cube
 bool waterStatic( std::string & why )
 {
 	Vk & v = vk();
 	WaterDraw & D = waterD();
 	if ( D.made )
 		return true;
-	WwVkPresent::FarSetCounts cv, cp;
-	if ( !WwVkPresent::farSetReflect( vkframe_water_view_vs_spv, sizeof( vkframe_water_view_vs_spv ) / 4, cv, why )
-		|| !WwVkPresent::farSetReflect( vkframe_water_view_ps_spv, sizeof( vkframe_water_view_ps_spv ) / 4, cp, why ) ) {
-		why = "the water twins' reflection: " + why;
+	D.drawIndexed = reinterpret_cast<PFN_vkCmdDrawIndexed>( v.vkGetDeviceProcAddr( v.dev, "vkCmdDrawIndexed" ) );
+	if ( !D.drawIndexed ) {
+		why = "no vkCmdDrawIndexed";
 		return false;
 	}
-	D.binds.clear();
-	D.stages.clear();
-	for ( int s = 0; s < 2; s++ )
-		for ( const WwVkPresent::FarSetSlot & b : ( s ? cp : cv ).binds ) {
-			for ( const WwVkPresent::FarSetSlot & o : D.binds )
+	std::string cw;
+	if ( fcFeatures( false, true, cw ) && !waterZeroCube( D, why ) )
+		return false;
+	D.made = true;
+	return true;
+}
+
+// one variant's parts (on its first draw): every stage reflected into one set, each binding named by its module
+bool waterProgMake( int variant, std::string & why )
+{
+	Vk & v = vk();
+	WaterProg & P = waterD().prog[variant];
+	if ( P.made )
+		return true;
+	WaterStage st[4];
+	P.stageN = waterStages( variant, st );
+	P.binds.clear();
+	P.stages.clear();
+	P.names.clear();
+	for ( int s = 0; s < P.stageN; s++ ) {
+		WwVkPresent::FarSetCounts c;
+		if ( !WwVkPresent::farSetReflect( st[s].words, st[s].bytes / 4, c, why ) ) {
+			why = "the water twins' reflection: " + why;
+			return false;
+		}
+		for ( const WwVkPresent::FarSetSlot & b : c.binds ) {
+			for ( const WwVkPresent::FarSetSlot & o : P.binds )
 				if ( o.binding == b.binding ) {
-					why = "the water twins both declare binding " + std::to_string( b.binding );
+					why = "two water twins declare binding " + std::to_string( b.binding );
 					return false;
 				}
-			D.binds.push_back( b );
-			D.stages.push_back( s ? VK_SHADER_STAGE_FRAGMENT_BIT : VK_SHADER_STAGE_VERTEX_BIT );
+			const char * nm = nullptr;
+			for ( int k = 0; k < st[s].namesN; k++ )
+				if ( st[s].names[k].binding == b.binding )
+					nm = st[s].names[k].name;
+			if ( !nm ) {
+				why = "the water twins' binding " + std::to_string( b.binding ) + " has no name in vkwater_tables.h";
+				return false;
+			}
+			P.binds.push_back( b );
+			P.stages.push_back( st[s].stage );
+			P.names.push_back( nm );
 		}
+	}
 	std::vector<VkDescriptorSetLayoutBinding> lb;
 	std::uint32_t n[4] = {};
 	static const VkDescriptorType kType[4] = { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
 		VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER, VK_DESCRIPTOR_TYPE_SAMPLER };
-	for ( std::size_t i = 0; i < D.binds.size(); i++ ) {
+	for ( std::size_t i = 0; i < P.binds.size(); i++ ) {
 		VkDescriptorSetLayoutBinding b {};
-		b.binding = D.binds[i].binding;
-		b.descriptorType = kType[D.binds[i].kind];
+		b.binding = P.binds[i].binding;
+		b.descriptorType = kType[P.binds[i].kind];
 		b.descriptorCount = 1;
-		b.stageFlags = D.stages[i];
+		b.stageFlags = P.stages[i];
 		lb.push_back( b );
-		n[D.binds[i].kind]++;
+		n[P.binds[i].kind]++;
 	}
 	VkDescriptorSetLayoutCreateInfo li { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
 	li.bindingCount = std::uint32_t( lb.size() );
@@ -238,34 +307,31 @@ bool waterStatic( std::string & why )
 	pi.maxSets = 1;
 	pi.poolSizeCount = std::uint32_t( ps.size() );
 	pi.pPoolSizes = ps.data();
-	if ( v.vkCreateDescriptorSetLayout( v.dev, &li, nullptr, &D.dsl ) != VK_SUCCESS
-		|| v.vkCreateDescriptorPool( v.dev, &pi, nullptr, &D.pool ) != VK_SUCCESS ) {
+	if ( v.vkCreateDescriptorSetLayout( v.dev, &li, nullptr, &P.dsl ) != VK_SUCCESS
+		|| v.vkCreateDescriptorPool( v.dev, &pi, nullptr, &P.pool ) != VK_SUCCESS ) {
 		why = "the water draw's set layout / pool failed";
 		return false;
 	}
 	VkDescriptorSetAllocateInfo ai { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO };
-	ai.descriptorPool = D.pool;
+	ai.descriptorPool = P.pool;
 	ai.descriptorSetCount = 1;
-	ai.pSetLayouts = &D.dsl;
+	ai.pSetLayouts = &P.dsl;
 	VkPipelineLayoutCreateInfo pli { VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO };
 	pli.setLayoutCount = 1;
-	pli.pSetLayouts = &D.dsl;
-	if ( v.vkAllocateDescriptorSets( v.dev, &ai, &D.set ) != VK_SUCCESS
-		|| v.vkCreatePipelineLayout( v.dev, &pli, nullptr, &D.layout ) != VK_SUCCESS
-		|| !fxModule( vkframe_water_view_vs_spv, sizeof( vkframe_water_view_vs_spv ), D.vs )
-		|| !fxModule( vkframe_water_view_ps_spv, sizeof( vkframe_water_view_ps_spv ), D.ps ) ) {
-		why = "the water draw's set / layout / modules failed";
+	pli.pSetLayouts = &P.dsl;
+	if ( v.vkAllocateDescriptorSets( v.dev, &ai, &P.set ) != VK_SUCCESS
+		|| v.vkCreatePipelineLayout( v.dev, &pli, nullptr, &P.layout ) != VK_SUCCESS ) {
+		why = "the water draw's set / layout failed";
 		return false;
 	}
-	D.drawIndexed = reinterpret_cast<PFN_vkCmdDrawIndexed>( v.vkGetDeviceProcAddr( v.dev, "vkCmdDrawIndexed" ) );
-	if ( !D.drawIndexed ) {
-		why = "no vkCmdDrawIndexed";
-		return false;
+	for ( int s = 0; s < P.stageN; s++ ) {
+		P.stage[s] = st[s].stage;
+		if ( !fxModule( st[s].words, st[s].bytes, P.mod[s] ) ) {
+			why = "the water draw's modules failed";
+			return false;
+		}
 	}
-	std::string cw;
-	if ( fcFeatures( false, true, cw ) && !waterZeroCube( D, why ) )
-		return false;
-	D.made = true;
+	P.made = true;
 	return true;
 }
 
@@ -323,14 +389,18 @@ VkPipeline waterPipe( const WwVkPresent::WaterRun & r, const VkFormat * fmt, std
 	Vk & v = vk();
 	Fx & F = fx();
 	WaterDraw & D = waterD();
-	if ( D.pipePass != F.airPass || D.pipeSamples != F.airSamples ) {
-		for ( auto & kv : D.pipes )
+	WaterProg & P = D.prog[r.variant];
+	const bool tess = WwVkPresent::waterTables( r.variant ).tess;
+	if ( P.pipePass != F.airPass || P.pipeSamples != F.airSamples ) {
+		for ( auto & kv : P.pipes )
 			v.vkDestroyPipeline( v.dev, kv.second, nullptr );
-		D.pipes.clear();
-		D.pipePass = F.airPass;
-		D.pipeSamples = F.airSamples;
+		P.pipes.clear();
+		P.pipePass = F.airPass;
+		P.pipeSamples = F.airSamples;
 	}
-	std::string key;
+	// GL's tessellator: its domain's origin lower-left (red 16: Vulkan's default upper-left, the triangles' order turned)
+	const bool upperLeft = tess && ( r.red & 16 ) != 0;
+	std::string key = std::to_string( int( upperLeft ) ) + " ";
 	VkVertexInputBindingDescription vb[WwVkPresent::kWaterAttribs] = {};
 	VkVertexInputAttributeDescription va[WwVkPresent::kWaterAttribs] = {};
 	for ( int i = 0; i < WwVkPresent::kWaterAttribs; i++ ) {
@@ -353,25 +423,29 @@ VkPipeline waterPipe( const WwVkPresent::WaterRun & r, const VkFormat * fmt, std
 		+ std::to_string( int( dop ) ) + " " + std::to_string( int( r.depthMask ) );
 	for ( bool m : r.colorMask )
 		key += m ? "1" : "0";
-	auto it = D.pipes.find( key );
-	if ( it != D.pipes.end() )
+	auto it = P.pipes.find( key );
+	if ( it != P.pipes.end() )
 		return it->second;
 	const double t0 = nowMs();
-	VkPipelineShaderStageCreateInfo st[2] = { { VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO },
-		{ VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO } };
-	st[0].stage = VK_SHADER_STAGE_VERTEX_BIT;
-	st[0].module = D.vs;
-	st[0].pName = "main";
-	st[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
-	st[1].module = D.ps;
-	st[1].pName = "main";
+	VkPipelineShaderStageCreateInfo st[4] = {};
+	for ( int s = 0; s < P.stageN; s++ ) {
+		st[s].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+		st[s].stage = P.stage[s];
+		st[s].module = P.mod[s];
+		st[s].pName = "main";
+	}
 	VkPipelineVertexInputStateCreateInfo vi { VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO };
 	vi.vertexBindingDescriptionCount = std::uint32_t( WwVkPresent::kWaterAttribs );
 	vi.pVertexBindingDescriptions = vb;
 	vi.vertexAttributeDescriptionCount = std::uint32_t( WwVkPresent::kWaterAttribs );
 	vi.pVertexAttributeDescriptions = va;
 	VkPipelineInputAssemblyStateCreateInfo ia { VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO };
-	ia.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+	ia.topology = tess ? VK_PRIMITIVE_TOPOLOGY_PATCH_LIST : VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+	VkPipelineTessellationDomainOriginStateCreateInfo dor { VK_STRUCTURE_TYPE_PIPELINE_TESSELLATION_DOMAIN_ORIGIN_STATE_CREATE_INFO };
+	dor.domainOrigin = upperLeft ? VK_TESSELLATION_DOMAIN_ORIGIN_UPPER_LEFT : VK_TESSELLATION_DOMAIN_ORIGIN_LOWER_LEFT;
+	VkPipelineTessellationStateCreateInfo ts { VK_STRUCTURE_TYPE_PIPELINE_TESSELLATION_STATE_CREATE_INFO };
+	ts.pNext = &dor;
+	ts.patchControlPoints = 3;  // waterRun refuses GL_PATCH_VERTICES != 3
 	VkPipelineViewportDepthClipControlCreateInfoEXT cc { VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_DEPTH_CLIP_CONTROL_CREATE_INFO_EXT };
 	cc.negativeOneToOne = VK_TRUE;  // GL's clip z in [-w, w]
 	VkPipelineViewportStateCreateInfo vps { VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO };
@@ -400,24 +474,25 @@ VkPipeline waterPipe( const WwVkPresent::WaterRun & r, const VkFormat * fmt, std
 	dy.dynamicStateCount = 2;
 	dy.pDynamicStates = dyn;
 	VkGraphicsPipelineCreateInfo gp { VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO };
-	gp.stageCount = 2;
+	gp.stageCount = std::uint32_t( P.stageN );
 	gp.pStages = st;
 	gp.pVertexInputState = &vi;
 	gp.pInputAssemblyState = &ia;
+	gp.pTessellationState = tess ? &ts : nullptr;
 	gp.pViewportState = &vps;
 	gp.pRasterizationState = &rs;
 	gp.pMultisampleState = &ms;
 	gp.pDepthStencilState = &ds;
 	gp.pColorBlendState = &cbs;
 	gp.pDynamicState = &dy;
-	gp.layout = D.layout;
+	gp.layout = P.layout;
 	gp.renderPass = F.airPass;
 	VkPipeline out = VK_NULL_HANDLE;
 	if ( v.vkCreateGraphicsPipelines( v.dev, tone().cache, 1, &gp, nullptr, &out ) != VK_SUCCESS ) {
 		why = "vkCreateGraphicsPipelines (the water draw) failed";
 		return VK_NULL_HANDLE;
 	}
-	D.pipes[key] = out;
+	P.pipes[key] = out;
 	D.pipelines++;
 	D.buildMs += nowMs() - t0;
 	toneCacheSave();
@@ -443,7 +518,7 @@ bool waterRecord( std::string & why )
 	v.vkCmdSetViewport( F.cmd, 0, 1, &vpt );
 	v.vkCmdSetScissor( F.cmd, 0, 1, &D.sc );
 	v.vkCmdBindPipeline( F.cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, D.pipe );
-	v.vkCmdBindDescriptorSets( F.cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, D.layout, 0, 1, &D.set, 0, nullptr );
+	v.vkCmdBindDescriptorSets( F.cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, D.prog[D.cur].layout, 0, 1, &D.prog[D.cur].set, 0, nullptr );
 	v.vkCmdBindVertexBuffers( F.cmd, 0, std::uint32_t( WwVkPresent::kWaterAttribs ), D.vb, D.vbOff );
 	v.vkCmdBindIndexBuffer( F.cmd, D.geo.buf, D.ibOff, VK_INDEX_TYPE_UINT16 );
 	D.drawIndexed( F.cmd, D.count, 1, D.first, D.baseVertex, 0 );
@@ -577,8 +652,16 @@ bool waterRun( const WaterRun & r, std::string & why )
 		return refuse( "the draw target is not the shared tone frame" );
 	if ( T.w != r.w || T.h != r.h )
 		return refuse( "the water draw's size is not the tone frame's" );
-	if ( r.census.tess )
-		return refuse( "a tessellated water program (its own twin is not in yet)" );
+	if ( r.variant < 0 || r.variant >= kWaterVariants )
+		return refuse( "a water program with no Vulkan twin" );
+	const WaterTables & tab = waterTables( r.variant );
+	if ( r.census.tess != tab.tess )
+		return refuse( std::string( tab.prog ) + ": GL's program is " + ( r.census.tess ? "" : "not " ) + "tessellated, its twin is "
+			+ ( tab.tess ? "" : "not" ) );
+	if ( tab.tess && r.patchVerts != 3 )
+		return refuse( "GL draws " + std::to_string( r.patchVerts ) + "-vertex patches (the twin's are 3)" );
+	if ( r.census.inputs.size() >= 120 )
+		return refuse( "more than 120 census inputs (the twins' keys)" );
 	WaterCaps caps = waterCaps();
 	caps.shadedDraw = true;
 	const std::string verdict = waterVerdict( r.census, caps );
@@ -613,8 +696,9 @@ bool waterRun( const WaterRun & r, std::string & why )
 	}
 	std::string w;
 	const int samples = T.samples > 0 ? T.samples : std::max( F.airSamples, 1 );
-	if ( !fxStatic( w ) || !fxSems( w ) || !fxPasses( samples, w ) || !waterStatic( w ) )
+	if ( !fxStatic( w ) || !fxSems( w ) || !fxPasses( samples, w ) || !waterStatic( w ) || !waterProgMake( r.variant, w ) )
 		return breakOff( w );
+	WaterProg & P = D.prog[r.variant];
 	if ( F.airSamples != T.samples )
 		return breakOff( "the air's render pass is not at the frame's sample count" );
 	// the exported buffer: every distinct vertex buffer, the elements, the GL blocks; the host one: loose blocks, zeros
@@ -640,7 +724,7 @@ bool waterRun( const WaterRun & r, std::string & why )
 		if ( r.attr[i].on )
 			vbAt[i] = place( r.attr[i].buf, 0, r.attr[i].bufBytes, 0 ) + VkDeviceSize( r.attr[i].off );
 	const VkDeviceSize ibAt = place( r.ebo, 0, r.eboBytes, 0 );
-	// the twins' block sizes (water_view_vs b40 / b41, water_view_ps b0 / b1): GL's range, never past the copy
+	// the twins' block sizes (globalUniforms in every stage, wwShadowFrame, skinningUniforms): GL's range, never past the copy
 	const WaterUbo * ubos[3] = { &r.global, &r.shadow, &r.skin };
 	const VkDeviceSize uboNeed[3] = { 336, 248, 12288 };
 	VkDeviceSize uboAt[3] = {};
@@ -660,70 +744,82 @@ bool waterRun( const WaterRun & r, std::string & why )
 	std::uint8_t * host = static_cast<std::uint8_t *>( D.host.ptr );
 	std::memset( host + kWaterZeroAt, 0, size_t( kWaterVsLooseAt - kWaterZeroAt ) );
 	std::memcpy( host + kWaterVsLooseAt, r.vsLoose, size_t( kT_waterVsBytes ) );
-	std::memcpy( host + kWaterPsLooseAt, r.psLoose, size_t( kT_waterPsBytes ) );
+	std::memcpy( host + kWaterHsLooseAt, r.hsLoose, size_t( kT_waterHsBytes ) );
+	std::memcpy( host + kWaterDsLooseAt, r.dsLoose, size_t( kT_waterDsBytes ) );
+	std::memcpy( host + kWaterPsLooseAt, r.psLoose, size_t( tab.psBytes ) );
 	if ( r.red & 1 ) {  // red: the ps's loose block one vec4 off (a table offset wrong by a row)
-		std::memmove( host + kWaterPsLooseAt + 16, r.psLoose, size_t( kT_waterPsBytes - 16 ) );
+		std::memmove( host + kWaterPsLooseAt + 16, r.psLoose, size_t( tab.psBytes - 16 ) );
 		std::memset( host + kWaterPsLooseAt, 0, 16 );
+	}
+	if ( r.red & 32 ) {  // red: the ds's loose block one vec4 off
+		std::memmove( host + kWaterDsLooseAt + 16, r.dsLoose, size_t( kT_waterDsBytes - 16 ) );
+		std::memset( host + kWaterDsLooseAt, 0, 16 );
 	}
 	for ( int i = 0; i < kWaterAttribs; i++ )
 		std::memcpy( host + kWaterConstAt + 16 * i, r.attr[i].cur, 16 );
 	// the images and texel buffers: GL's names into their twins (each level), the zero ones where GL has none
 	std::vector<GLuint> texNames { T.colorTex, T.dsTex };
 	std::vector<GLuint> bufNames { D.geo.gl };
-	std::vector<VkDescriptorImageInfo> ii( D.binds.size() );
-	std::vector<VkDescriptorBufferInfo> bi( D.binds.size() );
-	std::vector<VkBufferView> tv( D.binds.size() );
+	std::vector<VkDescriptorImageInfo> ii( P.binds.size() );
+	std::vector<VkDescriptorBufferInfo> bi( P.binds.size() );
+	std::vector<VkBufferView> tv( P.binds.size() );
 	std::vector<VkWriteDescriptorSet> ws;
-	auto slotOf = [&]( std::uint32_t binding, const char ** nameOut ) -> const WaterSlot * {
-		for ( const WaterImgName & n : kWaterImg )
-			if ( n.binding == binding ) {
-				*nameOut = n.name;
-				for ( const WaterSlot & s : r.census.inputs )
-					if ( s.name == n.name )
-						return &s;
-				return nullptr;
+	// a census input by the module's name; its index is its twins' key (key + index: one twin for every stage reading it)
+	auto slotOf = [&]( const char * nm, std::size_t & at ) -> const WaterSlot * {
+		for ( std::size_t k = 0; k < r.census.inputs.size(); k++ )
+			if ( r.census.inputs[k].name == nm ) {
+				at = k;
+				return &r.census.inputs[k];
 			}
-		*nameOut = nullptr;
 		return nullptr;
 	};
-	for ( std::size_t i = 0; i < D.binds.size(); i++ ) {
-		const FarSetSlot & b = D.binds[i];
+	std::map<std::size_t, VkImageView> viewOf;  // this run's views by census index (a second stage reads the first's)
+	std::size_t zeroKeys = r.census.inputs.size();  // an unbound texel buffer's key: past the census
+	for ( std::size_t i = 0; i < P.binds.size(); i++ ) {
+		const FarSetSlot & b = P.binds[i];
+		const char * nm = P.names[i];
 		VkWriteDescriptorSet x { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
-		x.dstSet = D.set;
+		x.dstSet = P.set;
 		x.dstBinding = b.binding;
 		x.descriptorCount = 1;
 		if ( b.kind == 0 ) {
 			x.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-			// vs blocks at 256 + n (fxw's b-shift), ps blocks at n
-			const int k = ( b.binding == 257 || b.binding == 1 ) ? 0 : b.binding == 0 ? 1 : b.binding == 256 ? 2 : -1;
+			const int k = std::strcmp( nm, "globalUniforms" ) == 0 ? 0 : std::strcmp( nm, "wwShadowFrame" ) == 0 ? 1
+				: std::strcmp( nm, "skinningUniforms" ) == 0 ? 2 : -1;
 			if ( k >= 0 )
 				bi[i] = uboHost[k] ? VkDescriptorBufferInfo { D.host.buf, kWaterZeroAt, uboNeed[k] }
 					: VkDescriptorBufferInfo { D.geo.buf, uboAt[k], uboNeed[k] };
-			else if ( b.binding == 256 + 31 )
+			else if ( std::strcmp( nm, "LooseUniforms" ) != 0 )
+				return breakOff( std::string( "the twins read a block " ) + nm + " the draw does not fill" );
+			else if ( b.binding >= 768 )  // the stage's block shift (vkframe_spirv.sh: ps 0, vs 256, hs 512, ds 768)
+				bi[i] = { D.host.buf, kWaterDsLooseAt, VkDeviceSize( kT_waterDsBytes ) };
+			else if ( b.binding >= 512 )
+				bi[i] = { D.host.buf, kWaterHsLooseAt, VkDeviceSize( kT_waterHsBytes ) };
+			else if ( b.binding >= 256 )
 				bi[i] = { D.host.buf, kWaterVsLooseAt, VkDeviceSize( kT_waterVsBytes ) };
-			else if ( b.binding == 31 )
-				bi[i] = { D.host.buf, kWaterPsLooseAt, VkDeviceSize( kT_waterPsBytes ) };
 			else
-				return breakOff( "the twins read a block at b" + std::to_string( b.binding ) + " the draw does not fill" );
+				bi[i] = { D.host.buf, kWaterPsLooseAt, VkDeviceSize( tab.psBytes ) };
 			x.pBufferInfo = &bi[i];
 		} else if ( b.kind == 3 ) {
-			const char * nm = nullptr;
-			const WaterSlot * s = slotOf( b.binding - 64, &nm );
+			std::size_t at = 0;
+			const WaterSlot * s = slotOf( nm, at );
 			WaterSlot plain;
 			VkSampler sm = waterSampler( s ? *s : plain, b.compare, ( r.red & 2 ) != 0 || !s, w );
 			if ( !sm )
 				return breakOff( w );
 			if ( b.compare && s && s->tex && s->cmpMode != 0x884E )
-				return refuse( std::string( nm ? nm : "?" ) + ": the twin compares, GL's texture does not" );
+				return refuse( std::string( nm ) + ": the twin compares, GL's texture does not" );
 			x.descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER;
 			ii[i].sampler = sm;
 			x.pImageInfo = &ii[i];
 		} else {
-			const char * nm = nullptr;
-			const WaterSlot * s = slotOf( b.binding, &nm );
-			if ( !nm )
-				return breakOff( "the twins read an image at b" + std::to_string( b.binding ) + " no census name maps" );
-			const std::uintptr_t key = r.key + b.binding;
+			std::size_t at = 0;
+			const WaterSlot * s = slotOf( nm, at );
+			if ( !s )
+				at = zeroKeys++;
+			if ( at >= 128 )
+				return refuse( std::string( nm ) + ": past the twins' 128 keys" );
+			const std::uintptr_t key = r.key + at;
 			if ( b.kind == 2 ) {  // a texel buffer (farStream): GL's data store into the twin, or a zero one
 				const bool bound = s && s->tex && s->dataBuf && s->bufBytes > 0;
 				unsigned tb = 0, tt = 0;
@@ -752,10 +848,11 @@ bool waterRun( const WaterRun & r, std::string & why )
 				else
 					view = F.d2;
 				// an integer image reads GL's unbound zero only through an integer view: refuse it
-				for ( const WaterImgName & n : { WaterImgName { 71, "" }, WaterImgName { 72, "" }, WaterImgName { 73, "" },
-						 WaterImgName { 74, "" }, WaterImgName { 88, "" }, WaterImgName { 89, "" } } )
-					if ( n.binding == b.binding )
+				for ( const char * n : { "waterInfoIndex", "waterInfoAtlas", "waterFlowIndex", "waterFlowAtlas", "waterSkyIndex", "waterSkyAtlas" } )
+					if ( std::strcmp( n, nm ) == 0 )
 						return refuse( std::string( nm ) + ": an unbound integer input" );
+			} else if ( viewOf.count( at ) ) {
+				view = viewOf[at];  // another stage's binding twinned it this run
 			} else if ( s->tex == T.colorTex || s->tex == T.dsTex ) {
 				return refuse( std::string( nm ) + ": samples the frame it draws into" );
 			} else if ( s->baseLevel != 0 ) {
@@ -782,6 +879,8 @@ bool waterRun( const WaterRun & r, std::string & why )
 				S.copies++;
 				texNames.push_back( twin );
 			}
+			if ( s && s->tex )
+				viewOf[at] = view;
 			x.descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
 			ii[i].imageView = view;
 			ii[i].imageLayout = VK_IMAGE_LAYOUT_GENERAL;
@@ -792,6 +891,7 @@ bool waterRun( const WaterRun & r, std::string & why )
 	const VkImageView att[2] = { T.colorView, T.dsView };
 	if ( !fxFb( F.fbAir, F.airPass, att, 2, T.w, T.h ) )
 		return breakOff( "the water draw's framebuffer over the tone frame failed" );
+	D.cur = r.variant;
 	D.pipe = waterPipe( r, fmt, w );
 	if ( !D.pipe )
 		return breakOff( w );

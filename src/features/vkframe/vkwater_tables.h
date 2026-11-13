@@ -1,12 +1,18 @@
 #pragma once
 
-// Lane VKWATER3 (2026-11-13, row G5): the water draw's loose uniforms (b287 of water_view_vs, b31 of water_view_ps), from
-// spirv-cross --reflect of the shipped SPIR-V (notes/vkwater3/tools/reflect_table.py; the vs block at 256 + 31).
+// Lane VKWATER3 (2026-11-13, row G5): the water twins' loose uniforms (LooseUniforms b31 + the stage's b-shift) and
+// their binding -> GL name tables (blocks by cbuffer name, images by name, samplers by the image they serve), from
+// spirv-cross --reflect of the shipped SPIR-V (notes/vkwater3/tools/twins.sh + water_tables.py; vkframe_spirv.sh's shifts).
 #include "features/vkframe/vkpresent.h"
 
 namespace WwVkPresent
 {
-// kT_waterVs: 19 fields, 320 bytes (spirv-cross --reflect of the shipped SPIR-V; tools: notes/vkair1/tools/reflect_table.py)
+struct WaterBindName
+{
+	std::uint32_t binding;
+	const char * name;
+};
+// water_view_vs: LooseUniforms b287, 19 fields, 320 bytes; 4 bindings (spirv-cross --reflect; notes/vkwater3/tools/water_tables.py)
 inline constexpr FxField kT_waterVs[] = {
 	{ "wwTreeWind5", 0, 4, 1, 0, 0 }, { "wwTreeWind3", 16, 4, 1, 0, 0 }, { "wwTreeWind4", 32, 4, 1, 0, 0 },
 	{ "wwTreeWind2", 48, 4, 1, 0, 0 }, { "wwTreeWind", 64, 4, 1, 0, 0 }, { "farInst", 80, 1, 1, 1, 0 },
@@ -17,7 +23,35 @@ inline constexpr FxField kT_waterVs[] = {
 	{ "vertexColorOverride", 304, 4, 1, 0, 0 },
 };
 inline constexpr int kT_waterVsBytes = 320;
-// kT_waterPs: 245 fields, 5232 bytes (spirv-cross --reflect of the shipped SPIR-V; tools: notes/vkair1/tools/reflect_table.py)
+inline constexpr WaterBindName kN_waterVs[] = {
+	{ 110, "farStream" }, { 256, "skinningUniforms" }, { 257, "globalUniforms" }, { 287, "LooseUniforms" },
+};
+// water_view_hs: LooseUniforms b543, 3 fields, 48 bytes; 2 bindings (spirv-cross --reflect; notes/vkwater3/tools/water_tables.py)
+inline constexpr FxField kT_waterHs[] = {
+	{ "waterOceanOn", 0, 1, 1, 1, 0 }, { "waterOceanDisp", 16, 4, 1, 0, 0 }, { "waterOceanRed", 32, 1, 1, 1, 0 },
+};
+inline constexpr int kT_waterHsBytes = 48;
+inline constexpr WaterBindName kN_waterHs[] = {
+	{ 512, "globalUniforms" }, { 543, "LooseUniforms" },
+};
+// water_view_ds: LooseUniforms b799, 17 fields, 352 bytes; 18 bindings (spirv-cross --reflect; notes/vkwater3/tools/water_tables.py)
+inline constexpr FxField kT_waterDs[] = {
+	{ "waterSeamBox", 0, 4, 1, 0, 0 }, { "waterSeam", 16, 4, 1, 0, 0 }, { "waterInfoOn", 32, 1, 1, 1, 0 },
+	{ "waterInfoGrid", 48, 4, 1, 0, 0 }, { "waterInfoLayout", 64, 4, 1, 0, 0 }, { "waterOceanPatch", 80, 4, 1, 0, 0 },
+	{ "waterOceanSetB", 96, 4, 2, 0, 0 }, { "waterOceanWind", 128, 4, 1, 0, 0 }, { "waterOceanSet", 144, 4, 2, 0, 0 },
+	{ "waterOceanRed", 176, 1, 1, 1, 0 }, { "waterOceanInvL", 192, 4, 2, 0, 0 }, { "cellRow", 224, 4, 3, 0, 0 },
+	{ "waterOceanDisp", 272, 4, 1, 0, 0 }, { "waterOceanOn", 288, 1, 1, 1, 0 }, { "waterFlowGrid", 304, 4, 1, 0, 0 },
+	{ "waterFlowLayout", 320, 4, 1, 0, 0 }, { "waterFlowOn", 336, 1, 1, 1, 0 },
+};
+inline constexpr int kT_waterDsBytes = 352;
+inline constexpr WaterBindName kN_waterDs[] = {
+	{ 768, "globalUniforms" }, { 799, "LooseUniforms" }, { 832, "waterInfoIndex" }, { 833, "waterInfoAtlas" },
+	{ 834, "waterInfoBodies" }, { 835, "waterOceanD" }, { 836, "waterFlowIndex" }, { 837, "waterFlowAtlas" },
+	{ 838, "waterOceanB" }, { 839, "waterOceanC" }, { 896, "waterInfoIndex" }, { 897, "waterInfoAtlas" },
+	{ 898, "waterInfoBodies" }, { 899, "waterOceanD" }, { 900, "waterFlowIndex" }, { 901, "waterFlowAtlas" },
+	{ 902, "waterOceanB" }, { 903, "waterOceanC" },
+};
+// water_view_ps: LooseUniforms b31, 245 fields, 5232 bytes; 89 bindings (spirv-cross --reflect; notes/vkwater3/tools/water_tables.py)
 inline constexpr FxField kT_waterPs[] = {
 	{ "fogNightHue", 0, 1, 1, 0, 0 }, { "fogNight", 16, 4, 1, 0, 0 }, { "atAp", 32, 4, 1, 0, 0 },
 	{ "atApProj", 48, 4, 1, 0, 0 }, { "fogRed", 64, 1, 1, 1, 0 }, { "fogK", 80, 4, 6, 0, 0 },
@@ -107,4 +141,136 @@ inline constexpr FxField kT_waterPs[] = {
 	{ "ussPbrDim", 5200, 1, 1, 1, 0 }, { "waterProbe", 5204, 1, 1, 1, 0 }, { "waterOceanDisp", 5216, 4, 1, 0, 0 },
 };
 inline constexpr int kT_waterPsBytes = 5232;
+inline constexpr WaterBindName kN_waterPs[] = {
+	{ 0, "wwShadowFrame" }, { 1, "globalUniforms" }, { 31, "LooseUniforms" }, { 64, "atApTex" }, { 65, "volAirTerr" },
+	{ 66, "volAirRainMap" }, { 67, "volTex" }, { 68, "volTile" }, { 69, "cellIsBloom" }, { 70, "cellIsLut" },
+	{ 71, "waterInfoIndex" }, { 72, "waterInfoAtlas" }, { 73, "waterFlowIndex" }, { 74, "waterFlowAtlas" },
+	{ 75, "waterInfoBodies" }, { 76, "cellGi" }, { 77, "csmMap" }, { 78, "ussTerrMap" }, { 79, "ussContactMap" },
+	{ 80, "ussCloudMap" }, { 81, "waterMoment0" }, { 82, "waterMoment1" }, { 83, "waterMoment2" },
+	{ 84, "waterCloudMap" }, { 85, "waterOceanB" }, { 86, "waterOceanC" }, { 87, "waterNoise2" }, { 88, "waterSkyIndex" },
+	{ 89, "waterSkyAtlas" }, { 90, "waterDepth" }, { 91, "waterNoise0" }, { 92, "waterNoise1" }, { 93, "waterSsrRaw" },
+	{ 94, "waterSsrFin" }, { 95, "waterScene" }, { 96, "volAirNoise" }, { 97, "cellLights" }, { 98, "cellCluster" },
+	{ 99, "cellGiSlots" }, { 100, "cellRooms" }, { 101, "cellShadow" }, { 102, "cellFarSlots" }, { 103, "cellFarRecs" },
+	{ 104, "cellFarPlaced" }, { 105, "cellCtGbuf" }, { 106, "cellAoDecal" }, { 107, "cellSsgi" }, { 108, "waterOceanD" },
+	{ 128, "atApTex" }, { 129, "volAirTerr" }, { 130, "volAirRainMap" }, { 131, "volTex" }, { 132, "volTile" },
+	{ 133, "cellIsBloom" }, { 134, "cellIsLut" }, { 135, "waterInfoIndex" }, { 136, "waterInfoAtlas" },
+	{ 137, "waterFlowIndex" }, { 138, "waterFlowAtlas" }, { 139, "waterInfoBodies" }, { 140, "cellGi" },
+	{ 141, "csmMap" }, { 142, "ussTerrMap" }, { 143, "ussContactMap" }, { 144, "ussCloudMap" }, { 145, "waterMoment0" },
+	{ 146, "waterMoment1" }, { 147, "waterMoment2" }, { 148, "waterCloudMap" }, { 149, "waterOceanB" },
+	{ 150, "waterOceanC" }, { 151, "waterNoise2" }, { 152, "waterSkyIndex" }, { 153, "waterSkyAtlas" },
+	{ 154, "waterDepth" }, { 155, "waterNoise0" }, { 156, "waterNoise1" }, { 157, "waterSsrRaw" }, { 158, "waterSsrFin" },
+	{ 159, "waterScene" }, { 160, "volAirNoise" }, { 163, "cellGiSlots" }, { 164, "cellRooms" }, { 165, "cellShadow" },
+	{ 168, "cellFarPlaced" }, { 169, "cellCtGbuf" }, { 170, "cellAoDecal" }, { 171, "cellSsgi" }, { 172, "waterOceanD" },
+};
+// water_view_d_ps: LooseUniforms b31, 245 fields, 5232 bytes; 89 bindings (spirv-cross --reflect; notes/vkwater3/tools/water_tables.py)
+inline constexpr FxField kT_waterPsD[] = {
+	{ "fogNightHue", 0, 1, 1, 0, 0 }, { "fogNight", 16, 4, 1, 0, 0 }, { "atAp", 32, 4, 1, 0, 0 },
+	{ "atApProj", 48, 4, 1, 0, 0 }, { "fogRed", 64, 1, 1, 1, 0 }, { "fogK", 80, 4, 6, 0, 0 },
+	{ "fogView", 176, 4, 1, 0, 0 }, { "volAirTerrU", 192, 4, 1, 0, 0 }, { "volAirTerrV", 208, 4, 1, 0, 0 },
+	{ "volAirTerrFU", 224, 4, 1, 0, 0 }, { "volAirTerrFV", 240, 4, 1, 0, 0 }, { "volAirFlags", 256, 1, 1, 1, 0 },
+	{ "volAirGround", 272, 4, 1, 0, 0 }, { "fogDistScale", 288, 1, 1, 0, 0 }, { "volAirTerrRef", 292, 1, 1, 0, 0 },
+	{ "volAirMed", 304, 4, 1, 0, 0 }, { "volAirLayer", 320, 4, 1, 0, 0 }, { "volAirRain", 336, 4, 1, 0, 0 },
+	{ "volAirRainXf", 352, 4, 1, 0, 4 }, { "volAirRainFar", 416, 4, 1, 0, 0 }, { "volPackDims", 432, 4, 1, 0, 0 },
+	{ "volFar", 448, 4, 1, 0, 0 }, { "volSlices", 464, 4, 1, 0, 0 }, { "volPack", 480, 4, 1, 0, 0 },
+	{ "volFarClamp", 496, 1, 1, 1, 0 }, { "volRect", 512, 4, 1, 0, 0 }, { "fogOn", 528, 1, 1, 1, 0 },
+	{ "volOn", 532, 1, 1, 1, 0 }, { "atApDouble", 536, 1, 1, 0, 0 }, { "volFogBlend", 540, 1, 1, 1, 0 },
+	{ "fogSun", 544, 4, 1, 0, 0 }, { "fogSunColour", 560, 4, 1, 0, 0 }, { "fogUnit", 576, 1, 1, 0, 0 },
+	{ "cellIsBloomOn", 580, 1, 1, 1, 0 }, { "cellIsBloomRect", 592, 4, 1, 0, 0 }, { "cellIsRed", 608, 1, 1, 1, 0 },
+	{ "cellIsExposure", 612, 1, 1, 0, 0 }, { "cellIsWbD", 624, 3, 1, 0, 0 }, { "cellIsVanCurve", 636, 1, 1, 1, 0 },
+	{ "cellIsE", 640, 1, 1, 0, 0 }, { "cellIsCine", 644, 3, 1, 0, 0 }, { "cellIsTint", 656, 4, 1, 0, 0 },
+	{ "cellIsAdapted", 672, 1, 1, 0, 0 }, { "cellIsLutOn", 676, 1, 1, 1, 0 }, { "cellRow", 688, 4, 3, 0, 0 },
+	{ "cellGiPad", 736, 1, 1, 0, 0 }, { "cellGiDims", 740, 3, 1, 0, 0 }, { "waterSeamBox", 752, 4, 1, 0, 0 },
+	{ "waterSeam", 768, 4, 1, 0, 0 }, { "waterInfoOn", 784, 1, 1, 1, 0 }, { "waterInfoGrid", 800, 4, 1, 0, 0 },
+	{ "waterInfoLayout", 816, 4, 1, 0, 0 }, { "waterFlowOn", 832, 1, 1, 1, 0 }, { "waterFlowGrid", 848, 4, 1, 0, 0 },
+	{ "waterFlowLayout", 864, 4, 1, 0, 0 }, { "waterDepthRed", 880, 1, 1, 1, 0 }, { "waterClearRed", 884, 1, 1, 1, 0 },
+	{ "waterSkyVisOn", 888, 1, 1, 1, 0 }, { "waterSkyVisRed", 892, 1, 1, 1, 0 }, { "cellGiSky", 896, 1, 1, 1, 0 },
+	{ "cellInterior", 900, 1, 1, 1, 0 }, { "cellSpecSkyBase", 904, 1, 1, 0, 0 }, { "cellGiVoxel", 908, 1, 1, 0, 0 },
+	{ "cellGiOrigin", 912, 3, 1, 0, 0 }, { "ussCsmStable", 928, 4, 1, 0, 0 }, { "ussCsmTexel", 944, 3, 1, 0, 0 },
+	{ "ussCsmBias", 960, 3, 1, 0, 0 }, { "ussCsmFilter", 976, 4, 1, 0, 0 }, { "ussCsmWorld", 992, 4, 1, 0, 0 },
+	{ "ussCsmCellX", 1008, 3, 1, 0, 0 }, { "ussCsmCellY", 1024, 3, 1, 0, 0 }, { "ussCsmPhase", 1036, 1, 1, 0, 0 },
+	{ "ussCsmOn", 1040, 1, 1, 1, 0 }, { "ussTerrSize", 1044, 2, 1, 0, 0 }, { "ussTerrExtra", 1056, 4, 1, 0, 0 },
+	{ "ussTerrAtlas", 1072, 4, 1, 0, 0 }, { "ussTerrRange", 1088, 4, 1, 0, 0 }, { "ussTerrPen", 1104, 4, 1, 0, 0 },
+	{ "ussTerrXform", 1120, 4, 1, 0, 0 }, { "ussTerrSelf", 1136, 4, 1, 0, 0 }, { "ussTerrOn", 1152, 1, 1, 1, 0 },
+	{ "ussWorldFromView", 1168, 4, 1, 0, 4 }, { "ussTerrBias", 1232, 4, 1, 0, 0 },
+	{ "ussTerrNearXform", 1248, 4, 1, 0, 0 }, { "ussContactOn", 1264, 1, 1, 1, 0 },
+	{ "ussContactInvSize", 1268, 2, 1, 0, 0 }, { "ussRed", 1276, 1, 1, 1, 0 }, { "ussCloudOn", 1280, 1, 1, 1, 0 },
+	{ "ussCloudFromView", 1296, 4, 1, 0, 4 }, { "ussCloudFar", 1360, 4, 1, 0, 0 }, { "ussOn", 1376, 1, 1, 1, 0 },
+	{ "waterCauRed", 1380, 1, 1, 1, 0 }, { "waterCauTime", 1384, 1, 1, 0, 0 }, { "waterShoreRed", 1388, 1, 1, 1, 0 },
+	{ "waterShoreK0", 1392, 4, 1, 0, 0 }, { "waterShoreK4", 1408, 4, 1, 0, 0 }, { "waterShoreK1", 1424, 4, 1, 0, 0 },
+	{ "waterShoreK2", 1440, 4, 1, 0, 0 }, { "waterShoreK3", 1456, 4, 1, 0, 0 }, { "waterShoreEdgeLaw", 1472, 1, 1, 1, 0 },
+	{ "waterSurfK", 1488, 4, 1, 0, 0 }, { "waterSurfRed", 1504, 1, 1, 1, 0 }, { "waterSurfOn", 1508, 1, 1, 1, 0 },
+	{ "waterWavesRed", 1512, 1, 1, 1, 0 }, { "waterWavesClass", 1520, 4, 3, 0, 0 },
+	{ "waterWavesShore", 1568, 4, 1, 0, 0 }, { "waterWavesK", 1584, 4, 1, 0, 0 }, { "waterGlintK", 1600, 4, 1, 0, 0 },
+	{ "waterCloudGeo", 1616, 4, 1, 0, 0 }, { "waterReflRed", 1632, 1, 1, 1, 0 }, { "waterCloudCov", 1648, 4, 1, 0, 0 },
+	{ "waterCloudZ", 1664, 4, 1, 0, 0 }, { "waterSky", 1680, 4, 3, 0, 0 }, { "waterCloudTint", 1728, 3, 1, 0, 0 },
+	{ "waterSsrFlat", 1740, 1, 1, 1, 0 }, { "waterReflOn", 1744, 1, 1, 1, 0 }, { "waterClearOn", 1748, 1, 1, 1, 0 },
+	{ "waterGlintRed", 1752, 1, 1, 1, 0 }, { "waterOceanPatch", 1760, 4, 1, 0, 0 },
+	{ "waterOceanSetB", 1776, 4, 2, 0, 0 }, { "waterOceanRed", 1808, 1, 1, 1, 0 }, { "waterOceanWind", 1824, 4, 1, 0, 0 },
+	{ "waterOceanSet", 1840, 4, 2, 0, 0 }, { "waterOceanInvL", 1872, 4, 2, 0, 0 }, { "waterOceanRip", 1904, 4, 1, 0, 0 },
+	{ "waterOceanFlowCorr", 1920, 4, 16, 0, 0 }, { "waterOceanFlow", 2176, 4, 1, 0, 0 },
+	{ "waterContactRed", 2192, 1, 1, 1, 0 }, { "waterContactK", 2208, 4, 1, 0, 0 },
+	{ "waterContactOn", 2224, 1, 1, 1, 0 }, { "waterRiverFoamOn", 2228, 1, 1, 1, 0 },
+	{ "waterRiverFoamRed", 2232, 1, 1, 1, 0 }, { "waterRiverFoamK", 2240, 4, 1, 0, 0 },
+	{ "waterRiverFoamK2", 2256, 4, 1, 0, 0 }, { "waterSkyLayout", 2272, 4, 1, 0, 0 }, { "waterSkyOn", 2288, 1, 1, 1, 0 },
+	{ "waterSkyGrid", 2304, 4, 1, 0, 0 }, { "cellOn", 2320, 1, 1, 1, 0 }, { "cellIsOn", 2324, 1, 1, 1, 0 },
+	{ "cellIsLinear", 2328, 1, 1, 1, 0 }, { "waterRed", 2332, 1, 1, 1, 0 }, { "waterMat", 2336, 4, 13, 0, 0 },
+	{ "waterDepthOn", 2544, 1, 1, 1, 0 }, { "waterFarMask", 2548, 1, 1, 1, 0 }, { "waterSslr", 2552, 1, 1, 1, 0 },
+	{ "waterHaveDepth", 2556, 1, 1, 1, 0 }, { "waterShoreOn", 2560, 1, 1, 1, 0 }, { "waterShoreLaw", 2564, 1, 1, 1, 0 },
+	{ "waterShoreTime", 2568, 1, 1, 0, 0 }, { "waterScroll0", 2576, 4, 1, 0, 0 }, { "waterScroll1", 2592, 4, 1, 0, 0 },
+	{ "waterWavesOn", 2608, 1, 1, 1, 0 }, { "waterOceanOn", 2612, 1, 1, 1, 0 }, { "waterGlintOn", 2616, 1, 1, 1, 0 },
+	{ "waterSsrOn", 2620, 1, 1, 1, 0 }, { "waterCauOn", 2624, 1, 1, 1, 0 }, { "waterCauShadow", 2628, 1, 1, 1, 0 },
+	{ "waterUnderOn", 2632, 1, 1, 1, 0 }, { "waterUnderRed", 2636, 1, 1, 1, 0 }, { "waterUnderSun", 2640, 3, 1, 0, 0 },
+	{ "waterUnderSunTo", 2656, 3, 1, 0, 0 }, { "waterAir", 2668, 1, 1, 1, 0 }, { "fogProbe", 2672, 4, 1, 0, 0 },
+	{ "volProbe", 2688, 1, 1, 1, 0 }, { "volAirDrift", 2704, 4, 1, 0, 0 }, { "volAirDriftUv", 2720, 4, 6, 0, 0 },
+	{ "volAirDriftRed", 2816, 1, 1, 1, 0 }, { "cellLightCount", 2820, 1, 1, 1, 0 }, { "cellClusterOn", 2824, 1, 1, 1, 0 },
+	{ "cellClusterDims", 2832, 4, 1, 0, 0 }, { "cellClusterOrigin", 2848, 2, 1, 0, 0 },
+	{ "cellClusterDepth", 2864, 4, 1, 0, 0 }, { "cellClusterLog", 2880, 2, 1, 0, 0 },
+	{ "cellClusterBase", 2888, 1, 1, 1, 0 }, { "cellHasDalc", 2892, 1, 1, 1, 0 }, { "cellGiAmb", 2896, 1, 1, 1, 0 },
+	{ "cellGiFill", 2900, 1, 1, 1, 0 }, { "cellDalc", 2912, 4, 3, 0, 0 }, { "cellHasDir", 2960, 1, 1, 1, 0 },
+	{ "cellExtDalc", 2964, 1, 1, 1, 0 }, { "cellSunScale", 2968, 1, 1, 0, 0 }, { "cellDirColor", 2976, 3, 1, 0, 0 },
+	{ "cellDirTo", 2992, 3, 1, 0, 0 }, { "cellCenter", 3008, 3, 1, 0, 0 }, { "cellProbe", 3020, 1, 1, 1, 0 },
+	{ "cellProbeGain", 3024, 1, 1, 0, 0 }, { "cellAmboCount", 3028, 1, 1, 1, 0 }, { "cellAmbo", 3040, 4, 16, 0, 0 },
+	{ "cellAmboK", 3296, 4, 16, 0, 0 }, { "cellAmboBox", 3552, 4, 48, 0, 0 }, { "cellLightPhys", 4320, 4, 1, 0, 0 },
+	{ "cellLightPhysB", 4336, 4, 1, 0, 0 }, { "cellRed", 4352, 1, 1, 1, 0 }, { "cellGiOn", 4356, 1, 1, 1, 0 },
+	{ "cellGiRooms", 4360, 1, 1, 1, 0 }, { "cellRoomsOrigin", 4368, 3, 1, 0, 0 }, { "cellRoomsCell", 4380, 1, 1, 0, 0 },
+	{ "cellRoomsDims", 4384, 3, 1, 0, 0 }, { "cellGiFineOn", 4396, 1, 1, 1, 0 }, { "cellGiFineN", 4400, 1, 1, 1, 0 },
+	{ "cellGiFineRed", 4404, 1, 1, 1, 0 }, { "cellGiFineBox", 4416, 4, 8, 0, 0 }, { "cellGiFineDim", 4544, 4, 8, 0, 0 },
+	{ "cellPass", 4672, 1, 1, 1, 0 }, { "cellPassRed", 4676, 1, 1, 1, 0 }, { "cellShadowOn", 4680, 1, 1, 1, 0 },
+	{ "cellShadowTexel", 4684, 1, 1, 0, 0 }, { "cellShadowFadeOn", 4688, 1, 1, 1, 0 },
+	{ "cellShadowFade", 4704, 1, 16, 0, 0 }, { "cellFarOn", 4960, 1, 1, 1, 0 }, { "cellFarBits", 4964, 1, 1, 1, 0 },
+	{ "cellFarProbe", 4968, 1, 1, 1, 0 }, { "cellFarCell", 4972, 1, 1, 0, 0 }, { "cellFarBand", 4976, 2, 1, 0, 0 },
+	{ "cellFarRed", 4984, 1, 1, 1, 0 }, { "cellFarPlacedOn", 4988, 1, 1, 1, 0 },
+	{ "cellFarPlacedOrigin", 4992, 3, 1, 0, 0 }, { "cellFarPlacedVoxel", 5004, 1, 1, 0, 0 },
+	{ "cellFarPlacedDims", 5008, 3, 1, 0, 0 }, { "cellCtOn", 5020, 1, 1, 1, 0 }, { "cellCtProj", 5024, 4, 1, 0, 0 },
+	{ "cellCtRect", 5040, 4, 1, 0, 0 }, { "cellCtRed", 5056, 1, 1, 1, 0 }, { "cellGiLoop8", 5060, 1, 1, 1, 0 },
+	{ "cellAoDecalOn", 5064, 1, 1, 1, 0 }, { "cellAoDecalRect", 5072, 4, 1, 0, 0 }, { "cellSkyVis", 5088, 1, 1, 0, 0 },
+	{ "cellSpecOcc", 5092, 1, 1, 1, 0 }, { "cellGoboOn", 5096, 1, 1, 1, 0 }, { "cellGoboRot", 5100, 1, 1, 1, 0 },
+	{ "cellGoboFlat", 5104, 1, 1, 1, 0 }, { "cellGoboGam", 5108, 1, 1, 1, 0 }, { "cellGoboTbl", 5112, 1, 1, 1, 0 },
+	{ "cellGoboMap", 5116, 1, 1, 1, 0 }, { "cellCubeMat", 5120, 4, 1, 0, 0 }, { "cellSsgiOn", 5136, 1, 1, 1, 0 },
+	{ "cellSsgiRect", 5152, 4, 1, 0, 0 }, { "cellSsgiK", 5168, 2, 1, 0, 0 }, { "cellSsgiRed", 5176, 1, 1, 1, 0 },
+	{ "ussView", 5180, 1, 1, 1, 0 }, { "ussTail", 5184, 2, 1, 0, 0 }, { "ussDim", 5192, 2, 1, 0, 0 },
+	{ "ussPbrDim", 5200, 1, 1, 1, 0 }, { "waterProbe", 5204, 1, 1, 1, 0 }, { "waterOceanDisp", 5216, 4, 1, 0, 0 },
+};
+inline constexpr int kT_waterPsDBytes = 5232;
+inline constexpr WaterBindName kN_waterPsD[] = {
+	{ 0, "wwShadowFrame" }, { 1, "globalUniforms" }, { 31, "LooseUniforms" }, { 64, "atApTex" }, { 65, "volAirTerr" },
+	{ 66, "volAirRainMap" }, { 67, "volTex" }, { 68, "volTile" }, { 69, "cellIsBloom" }, { 70, "cellIsLut" },
+	{ 71, "waterInfoIndex" }, { 72, "waterInfoAtlas" }, { 73, "waterFlowIndex" }, { 74, "waterFlowAtlas" },
+	{ 75, "waterInfoBodies" }, { 76, "cellGi" }, { 77, "csmMap" }, { 78, "ussTerrMap" }, { 79, "ussContactMap" },
+	{ 80, "ussCloudMap" }, { 81, "waterMoment0" }, { 82, "waterMoment1" }, { 83, "waterMoment2" },
+	{ 84, "waterCloudMap" }, { 85, "waterOceanB" }, { 86, "waterOceanC" }, { 87, "waterNoise2" }, { 88, "waterSkyIndex" },
+	{ 89, "waterSkyAtlas" }, { 90, "waterDepth" }, { 91, "waterNoise0" }, { 92, "waterNoise1" }, { 93, "waterSsrRaw" },
+	{ 94, "waterSsrFin" }, { 95, "waterScene" }, { 96, "volAirNoise" }, { 97, "cellLights" }, { 98, "cellCluster" },
+	{ 99, "cellGiSlots" }, { 100, "cellRooms" }, { 101, "cellShadow" }, { 102, "cellFarSlots" }, { 103, "cellFarRecs" },
+	{ 104, "cellFarPlaced" }, { 105, "cellCtGbuf" }, { 106, "cellAoDecal" }, { 107, "cellSsgi" }, { 108, "waterOceanD" },
+	{ 128, "atApTex" }, { 129, "volAirTerr" }, { 130, "volAirRainMap" }, { 131, "volTex" }, { 132, "volTile" },
+	{ 133, "cellIsBloom" }, { 134, "cellIsLut" }, { 135, "waterInfoIndex" }, { 136, "waterInfoAtlas" },
+	{ 137, "waterFlowIndex" }, { 138, "waterFlowAtlas" }, { 139, "waterInfoBodies" }, { 140, "cellGi" },
+	{ 141, "csmMap" }, { 142, "ussTerrMap" }, { 143, "ussContactMap" }, { 144, "ussCloudMap" }, { 145, "waterMoment0" },
+	{ 146, "waterMoment1" }, { 147, "waterMoment2" }, { 148, "waterCloudMap" }, { 149, "waterOceanB" },
+	{ 150, "waterOceanC" }, { 151, "waterNoise2" }, { 152, "waterSkyIndex" }, { 153, "waterSkyAtlas" },
+	{ 154, "waterDepth" }, { 155, "waterNoise0" }, { 156, "waterNoise1" }, { 157, "waterSsrRaw" }, { 158, "waterSsrFin" },
+	{ 159, "waterScene" }, { 160, "volAirNoise" }, { 163, "cellGiSlots" }, { 164, "cellRooms" }, { 165, "cellShadow" },
+	{ 168, "cellFarPlaced" }, { 169, "cellCtGbuf" }, { 170, "cellAoDecal" }, { 171, "cellSsgi" }, { 172, "waterOceanD" },
+};
 }  // namespace WwVkPresent

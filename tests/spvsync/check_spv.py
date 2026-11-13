@@ -68,13 +68,22 @@ VKFRAME_FXV = {'fardots_view_vs': 'far-lod/cell_fardots_view_vs'}
 HLSL_SPECS += [('src/features/vkframe', k, 'vulkan1.2', 'vkframe_%s_spv' % k) for k in VKFRAME_FXV]
 # lane VKFAR1 round 2: the far cards' pixel stage, the script's `fxk <name> <dir/file>` lines (fx() + every declared binding kept)
 VKFRAME_FXK = {'farcards_view_ps': 'far-lod/farcards_view_ps',
-	'water_view_ps': 'water/water_view_ps'}	# lane VKWATER3 (frozen twins, as HLSLSRC2's)
+	'water_view_ps': 'water/water_view_ps',	# lane VKWATER3 (frozen twins, as HLSLSRC2's)
+	'water_view_d_ps': 'water/water_view_d_ps'}
 HLSL_SPECS += [('src/features/vkframe', k, 'vulkan1.2', 'vkframe_%s_spv' % k) for k in VKFRAME_FXK]
 # lane VKWATER3: the water's vertex stage, the script's `fxw <name> <dir/file>` lines (vs_6_0, own shifts, bindings kept)
 VKFRAME_FXW_ARGS = ['-fvk-b-shift', '256', '0', '-fvk-t-shift', '110', '0', '-fvk-s-shift', '180', '0', '-fvk-u-shift', '220', '0',
 	'-fspv-preserve-bindings']
 VKFRAME_FXW = {'water_view_vs': 'core/water_view_vs'}
 HLSL_SPECS += [('src/features/vkframe', k, 'vulkan1.2', 'vkframe_%s_spv' % k) for k in VKFRAME_FXW]
+# lane VKWATER3 item 4: the tessellated water's hull / domain stages, the script's `fxh` / `fxd <name> <dir/file>` lines
+VKFRAME_FXH_ARGS = ['-fvk-b-shift', '512', '0', '-fvk-t-shift', '576', '0', '-fvk-s-shift', '640', '0', '-fvk-u-shift', '704', '0',
+	'-fspv-preserve-bindings']
+VKFRAME_FXH = {'water_view_hs': 'water/fo4_waterdisp_hs'}
+VKFRAME_FXD_ARGS = ['-fvk-b-shift', '768', '0', '-fvk-t-shift', '832', '0', '-fvk-s-shift', '896', '0', '-fvk-u-shift', '960', '0',
+	'-fspv-preserve-bindings']
+VKFRAME_FXD = {'water_view_ds': 'water/fo4_waterdisp_ds'}
+HLSL_SPECS += [('src/features/vkframe', k, 'vulkan1.2', 'vkframe_%s_spv' % k) for k in list(VKFRAME_FXH) + list(VKFRAME_FXD)]
 DEFAULT_G = 'E:/Tools/RenderDoc/RenderDoc_1.45_64/plugins/spirv/glslangValidator.exe'
 DEFAULT_DXC = 'E:/Tools/dxc/bin/x64/dxc.exe'
 
@@ -177,6 +186,13 @@ def script_ok(tree):
 	wlines = dict(re.findall(r'^fxw ([a-z0-9_]+) ([A-Za-z0-9_/+-]+)$', vf, re.M))
 	if wlines != VKFRAME_FXW:
 		bad.append('src/features/vkframe/vkframe_spirv.sh: its fxw lines (%s) are not this checker\'s water vertex stages' % ' '.join(sorted(wlines)))
+	for fn, prof, args, want in (('fxh', 'hs_6_0', VKFRAME_FXH_ARGS, VKFRAME_FXH), ('fxd', 'ds_6_0', VKFRAME_FXD_ARGS, VKFRAME_FXD)):
+		if '\t"$DXC" -spirv -fspv-target-env=vulkan1.2 -T %s -E main ' % prof + ' '.join(args) + ' -Fo "$1.spv" ' not in vf:
+			bad.append('src/features/vkframe/vkframe_spirv.sh: its %s() compile line changed' % fn)
+		got = dict(re.findall(r'^%s ([a-z0-9_]+) ([A-Za-z0-9_/+-]+)$' % fn, vf, re.M))
+		if got != want:
+			bad.append('src/features/vkframe/vkframe_spirv.sh: its %s lines (%s) are not this checker\'s water tessellation stages'
+			           % (fn, ' '.join(sorted(got))))
 	return bad
 
 
@@ -308,6 +324,14 @@ def main(argv):
 			m = re.search(r'hlsl profile: ([cvp]s_6_[0-9])', open(src, encoding='utf-8', errors='replace').read())
 			if k in VKFRAME_FXV or k in VKFRAME_FXW:
 				m = re.match(r'(vs_6_0)', 'vs_6_0')
+			if k in VKFRAME_FXH:
+				src = os.path.join(tree, 'res/shaders/hlsl', VKFRAME_FXH[k] + '.hlsl')
+				hdefs = VKFRAME_FXH_ARGS
+				m = re.match(r'(hs_6_0)', 'hs_6_0')
+			if k in VKFRAME_FXD:
+				src = os.path.join(tree, 'res/shaders/hlsl', VKFRAME_FXD[k] + '.hlsl')
+				hdefs = VKFRAME_FXD_ARGS
+				m = re.match(r'(ds_6_0)', 'ds_6_0')
 			opt = [] if d == 'src/features/vkframe' else ['-O0']   # vkframe_spirv.sh builds optimised
 			r = subprocess.run([dxc, '-spirv', '-fspv-target-env=' + env, '-T', m.group(1) if m else 'ps_6_0' if k in VKFRAME_SKY or k in VKFRAME_FX or k in VKFRAME_FXK else 'cs_6_0', '-E', 'main']
 			                   + opt + hdefs + ['-Fo', spv, src], capture_output=True, text=True, timeout=300)

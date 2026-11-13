@@ -6,14 +6,16 @@
 // Scene: a wavy grid (a third of its rows wound clockwise, so the cull is tested both ways), a depth slab over the left half
 // of the frame before the water (LEQUAL against it, depth written), every sampler of the program on its own unit with a
 // texture of the app's format holding seeded data (integer and texel-buffer inputs zero), every loose uniform seeded.
-// Two seeds; seed 2 also draws through a scissor and from an element offset.
+// Two seeds; seed 2 also draws through a scissor and from an element offset. A tessellated twin (argv[2], e.g.
+// fo4_waterlookd: hs + ds on 3-vertex patches) adds seed 3 with the sea on and displaced (app-sized ocean values).
 // Bar (set before the first run, never widened; notes/vkwater3/README.md):
 //   covered = samples whose depth or colour differs from the frame before the water on either side; must be >= 1000
 //   (an empty layer FAILS); coverage mismatch (covered on one side only) <= 0.05 % of covered; depth within 1 D24 unit
 //   on every sample covered on both sides; colour |vk - gl| <= 1e-2 * max(1, |gl|) per half on >= 99.9 % of the samples
 //   covered on both sides (NaN equals NaN). EXACT = no half and no depth differs and coverage equal; BOUND = within the bar.
 // Reds (each must FAIL, never refuse): red 1 the ps loose block one vec4 off, red 2 plain samplers, red 4 cull flipped,
-// red 8 depth ALWAYS. Last line `WATERDRAW GATE OK` or `WATERDRAW GATE FAILED`.
+// red 8 depth ALWAYS; tessellated only: red 16 the domain origin upper-left (seed 1), red 32 the ds loose block one vec4
+// off (seed 3, where a tessellated twin's red 2 is judged too). Last line `WATERDRAW GATE OK` or `WATERDRAW GATE FAILED`.
 // Sampling: judged at anisotropy 1 on both sides (NV's anisotropic footprint differs GL vs Vulkan at the same maxAnisotropy:
 // 10 248 samples past at the app's 16, BOUND at 1). The app's 16 is drawn once more on seed 1 and logged, never judged.
 // The noise's 16 is intended (the game's slots 4..6); the misses are its normal bending the SSR lookup over seeded noise.
@@ -471,10 +473,19 @@ int main( int argc, char ** argv )
 	using namespace wdr;
 	gTag = "WATERDRAW";
 	if ( argc < 2 ) {
-		std::printf( "usage: waterdraw <prep dir>\nWATERDRAW GATE FAILED\n" );
+		std::printf( "usage: waterdraw <prep dir> [program, default fo4_waterlook]\nWATERDRAW GATE FAILED\n" );
 		return 2;
 	}
 	const std::string dir = argv[1];
+	// item 4: the variant (waterdraw_prep.py wrote its stages); a tessellated one links 4 stages and draws 3-vertex patches
+	const std::string progName = std::string( argc > 2 ? argv[2] : "fo4_waterlook" ) + ".prog";
+	const int variant = WwVkPresent::waterVariantOf( progName );
+	if ( variant < 0 ) {
+		std::printf( "WATERDRAW GATE FAILED (%s has no Vulkan twin)\n", progName.c_str() );
+		return 2;
+	}
+	const WwVkPresent::WaterTables & tab = WwVkPresent::waterTables( variant );
+	const GLenum drawMode = tab.tess ? 0x000E : GL_TRIANGLES;  // GL_PATCHES (GL_PATCH_VERTICES stays 3, as in the app)
 	auto fatal = [&]( const std::string & why ) {
 		std::printf( "WATERDRAW GATE FAILED (%s)\n", why.c_str() );
 		return 2;
@@ -524,7 +535,30 @@ int main( int argc, char ** argv )
 	glPixelStorei( GL_UNPACK_ALIGNMENT, 1 );
 	const GLuint pUnpack = program( kTriVs, kUnpackFs, "unpack" ), pDepth = program( kTriVs, kDepthFs, "depth" ),
 		pSlab = program( kTriVs, kSlabFs, "slab" );
-	const GLuint pWater = program( readFile( dir + "/prog.vert.glsl" ), readFile( dir + "/prog.frag.glsl" ), "fo4_waterlook" );
+	GLuint pWater = 0;
+	if ( !tab.tess )
+		pWater = program( readFile( dir + "/prog.vert.glsl" ), readFile( dir + "/prog.frag.glsl" ), progName.c_str() );
+	else {
+		const GLuint a = shader( fVert, readFile( dir + "/prog.vert.glsl" ), "vert" ),
+			b = shader( 0x8E88, readFile( dir + "/prog.tesc.glsl" ), "tesc" ),  // GL_TESS_CONTROL_SHADER
+			c = shader( 0x8E87, readFile( dir + "/prog.tese.glsl" ), "tese" ),  // GL_TESS_EVALUATION_SHADER
+			d = shader( fFrag, readFile( dir + "/prog.frag.glsl" ), "frag" );
+		if ( a && b && c && d ) {
+			pWater = f.createProgram();
+			for ( GLuint s : { a, b, c, d } )
+				f.attachShader( pWater, s );
+			f.linkProgram( pWater );
+			GLint ok = 0;
+			f.getProgramiv( pWater, fLinked, &ok );
+			if ( !ok ) {
+				std::vector<char> log( 65536 );
+				f.getProgramInfoLog( pWater, GLsizei( log.size() ), nullptr, log.data() );
+				std::printf( "WATERDRAW link failed (%s): %.1500s\n", progName.c_str(), log.data() );
+				pWater = 0;
+			}
+		}
+	}
+	std::printf( "WATERDRAW program %s (variant %d%s)\n", progName.c_str(), variant, tab.tess ? ", tessellated: 3-vertex patches" : "" );
 	if ( !pUnpack || !pDepth || !pSlab || !pWater )
 		return fatal( "GL programs" );
 	std::string why;
@@ -570,11 +604,23 @@ int main( int argc, char ** argv )
 		// the twins' loose fields GL's program has no location for (compiled out of the GLSL, read by the HLSL)
 		std::string miss;
 		int nMiss = 0;
-		for ( const WwVkPresent::FxField & fd : WwVkPresent::kT_waterPs )
-			if ( f.getUniformLocation( pWater, fd.name ) < 0 ) {
+		for ( int k = 0; k < tab.psN; k++ )
+			if ( f.getUniformLocation( pWater, tab.ps[k].name ) < 0 ) {
 				nMiss++;
-				miss += std::string( " " ) + fd.name;
+				miss += std::string( " " ) + tab.ps[k].name;
 			}
+		if ( tab.tess ) {
+			for ( const WwVkPresent::FxField & fd : WwVkPresent::kT_waterHs )
+				if ( f.getUniformLocation( pWater, fd.name ) < 0 ) {
+					nMiss++;
+					miss += std::string( " hs:" ) + fd.name;
+				}
+			for ( const WwVkPresent::FxField & fd : WwVkPresent::kT_waterDs )
+				if ( f.getUniformLocation( pWater, fd.name ) < 0 ) {
+					nMiss++;
+					miss += std::string( " ds:" ) + fd.name;
+				}
+		}
 		for ( const WwVkPresent::FxField & fd : WwVkPresent::kT_waterVs )
 			if ( f.getUniformLocation( pWater, fd.name ) < 0 ) {
 				nMiss++;
@@ -784,13 +830,14 @@ int main( int argc, char ** argv )
 	auto pairRun = [&]( const std::vector<std::uint16_t> & bgC, const std::vector<float> & bgD, long long idxOff, int count, bool & ran ) {
 		before( fbRef );
 		drawState( fbRef, false );
-		glDrawElements( GL_TRIANGLES, count, GL_UNSIGNED_SHORT, reinterpret_cast<const void *>( std::uintptr_t( idxOff ) ) );
+		glDrawElements( drawMode, count, GL_UNSIGNED_SHORT, reinterpret_cast<const void *>( std::uintptr_t( idxOff ) ) );
 		stateEnd();
 		const std::vector<std::uint16_t> gC = readColor( refCol );
 		const std::vector<float> gD = readDepth( refDs, false );
 		before( fbFrame );
 		drawState( fbFrame, false );
 		WwVkPresent::WaterRun r;
+		r.variant = variant;
 		WwVkPresent::waterStateOf( &gw, pWater, r );
 		r.w = W;
 		r.h = H;
@@ -808,12 +855,76 @@ int main( int argc, char ** argv )
 	};
 	bool gateOk = true;
 	int runs = 0;
-	for ( int seed = 1; seed <= 2; seed++ ) {
+	for ( int seed = 1; seed <= ( tab.tess ? 3 : 2 ); seed++ ) {
 		std::mt19937 rng( 20261113u + std::uint32_t( seed ) * 7919u );
 		for ( Smp & s : smp )
 			if ( !fill( s, rng ) )
 				return fatal( "texture " + s.name );
 		const int nu = seedUnis( pWater, rng );
+		if ( seed == 3 ) {
+			/* the info zero (integer inputs) names no body: wwOcBody finds no set and the ds adds nothing. One sea body
+			 * over the whole lookup: every index tile uniform with word body 1 | open-water shore and depth codes, body
+			 * 1's row a sea (class 0, no flags) of a large area */
+			const std::uint32_t word = 1u | ( 255u << 16 ) | ( 255u << 24 );
+			const float sea[4] = { 0.0f, 0.0f, 0.0f, 1.0e8f };
+			for ( const Smp & s : smp ) {
+				if ( s.name == "waterInfoIndex" ) {
+					std::vector<std::uint32_t> d( size_t( s.w ) * size_t( s.h ) * 2, 0u );
+					for ( size_t i = 1; i < d.size(); i += 2 )
+						d[i] = word;
+					glBindTexture( GL_TEXTURE_2D, s.tex );
+					glTexSubImage2D( GL_TEXTURE_2D, 0, 0, 0, s.w, s.h, 0x8228, GL_UNSIGNED_INT, d.data() );
+				} else if ( s.name == "waterInfoBodies" ) {
+					glBindTexture( GL_TEXTURE_2D, s.tex );
+					glTexSubImage2D( GL_TEXTURE_2D, 0, 1, 0, 1, 1, GL_RGBA, GL_FLOAT, sea );
+				}
+			}
+			glBindTexture( GL_TEXTURE_2D, 0 );
+			if ( glGetError() != GL_NO_ERROR )
+				return fatal( "seed 3's sea body" );
+			/* seed 3, the tessellated twin's own: the seeded 0.05..1 leaves the grid (150..2500 u away) past the fade: no
+			 * split, no displacement, a blind ds (red 32 EXACT on seed 1). The ocean on, full out to 3000 u, none past 6000, an 8 px edge, a 4096 split cap: the hs splits (fractional
+			 * odd), the ds moves the vertices */
+			f.useProgram( pWater );
+			const GLint one = 1;
+			const float disp[4] = { 3000.0f, 6000.0f, 8.0f, 4096.0f };
+			for ( const char * on : { "waterOceanOn", "waterInfoOn" } )
+				if ( f.getUniformLocation( pWater, on ) >= 0 )
+					f.uniform1iv( f.getUniformLocation( pWater, on ), 1, &one );
+			if ( f.getUniformLocation( pWater, "waterOceanDisp" ) >= 0 )
+				f.uniform4fv( f.getUniformLocation( pWater, "waterOceanDisp" ), 1, disp );
+			/* a sea the size of the app's: the seeded 0.05..1 made 1 / L tiles of a metre and a seam fade over the
+			 * grid, a chop that threw seed 1's grid out of view on both sides. A unit wind of 8 m/s, tiles of 50, 12
+			 * and 3 m, gains of 1, info texels of 64 u, the seam off */
+			const float wind[4] = { 1.0f, 0.0f, 8.0f, 0.1f }, grid[4] = { -4096.0f, -4096.0f, 64.0f, 64.0f };
+			const float lay[4] = { 8.0f, 8.0f, 16.0f, 64.0f }, seam[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+			const float invL[8] = { 0.02f, 0.08f, 0.33f, 1.0f, 0.02f, 0.08f, 0.33f, 1.0f };
+			const float set[8] = { 1.0f, 1.0f, 0.2f, 0.01f, 1.0f, 1.0f, 0.2f, 0.01f };
+			const float setB[8] = { 1000.0f, 1.0f, 64.0f, 0.0f, 1000.0f, 1.0f, 64.0f, 0.0f };
+			const struct { const char * nm; const float * v; int n; } sane[] = { { "waterOceanWind", wind, 1 },
+				{ "waterInfoGrid", grid, 1 }, { "waterInfoLayout", lay, 1 }, { "waterSeam", seam, 1 },
+				{ "waterOceanInvL", invL, 2 }, { "waterOceanSet", set, 2 }, { "waterOceanSetB", setB, 2 } };
+			for ( const auto & s : sane )
+				if ( f.getUniformLocation( pWater, s.nm ) >= 0 )
+					f.uniform4fv( f.getUniformLocation( pWater, s.nm ), s.n, s.v );
+			// the info on: the seeded far mask discards every sample the random index calls dry (seed 1 covered 0)
+			const GLint zero = 0;
+			if ( f.getUniformLocation( pWater, "waterFarMask" ) >= 0 )
+				f.uniform1iv( f.getUniformLocation( pWater, "waterFarMask" ), 1, &zero );
+			// diagnostic only (never in a gate run): WATERDRAW_OCRED=<n> sets the shaders' own waterOceanRed on seed 3,
+			// WATERDRAW_OCPX=<px> the split's target edge
+			if ( const char * oc = std::getenv( "WATERDRAW_OCRED" ) ) {
+				const GLint v = GLint( std::atoi( oc ) );
+				if ( f.getUniformLocation( pWater, "waterOceanRed" ) >= 0 )
+					f.uniform1iv( f.getUniformLocation( pWater, "waterOceanRed" ), 1, &v );
+				std::printf( "WATERDRAW diagnostic: waterOceanRed %d\n", int( v ) );
+			}
+			if ( const char * px = std::getenv( "WATERDRAW_OCPX" ) ) {
+				const float d2[4] = { disp[0], disp[1], float( std::atof( px ) ), disp[3] };
+				f.uniform4fv( f.getUniformLocation( pWater, "waterOceanDisp" ), 1, d2 );
+				std::printf( "WATERDRAW diagnostic: target edge %g px\n", double( d2[2] ) );
+			}
+		}
 		blocks( rng );
 		const bool scissor = seed == 2;
 		const long long idxOff = 12;  // past the 6 leading dummy indices: an element offset on both seeds
@@ -825,7 +936,7 @@ int main( int argc, char ** argv )
 		const std::vector<float> bgD = readDepth( refDs, false );
 		before( fbRef );
 		drawState( fbRef, scissor );
-		glDrawElements( GL_TRIANGLES, count, GL_UNSIGNED_SHORT, reinterpret_cast<const void *>( std::uintptr_t( idxOff ) ) );
+		glDrawElements( drawMode, count, GL_UNSIGNED_SHORT, reinterpret_cast<const void *>( std::uintptr_t( idxOff ) ) );
 		stateEnd();
 		const GLenum ge = glGetError();
 		if ( ge != GL_NO_ERROR )
@@ -833,12 +944,17 @@ int main( int argc, char ** argv )
 		const std::vector<std::uint16_t> glC = readColor( refCol );
 		const std::vector<float> glD = readDepth( refDs, false );
 
-		for ( int red : { 0, 1, 2, 4, 8 } ) {
-			if ( seed == 2 && red )
+		for ( int red : { 0, 1, 2, 4, 8, 16, 32 } ) {
+			/* 16 / 32: the tessellated stages' reds. A tessellated twin's seed 3 (the sea displaced) judges reds 2 and 32:
+			 * seed 1's ocean finds no body, the ds a pass-through (red 32 EXACT) and the d ps's samplers barely read (red 2
+			 * BOUND, 8 samples past, max rel 0.019); seed 3's ps reads the mipped cascades */
+			const bool on3 = red == 0 || ( red == 2 && tab.tess ) || red == 32;
+			if ( ( seed == 2 && red ) || ( red >= 16 && !tab.tess ) || ( red && ( seed == 3 ) != on3 ) )
 				continue;
 			before( fbFrame );
 			drawState( fbFrame, scissor );
 			WwVkPresent::WaterRun r;
+			r.variant = variant;
 			WwVkPresent::waterStateOf( &gw, pWater, r );
 			r.w = W;
 			r.h = H;

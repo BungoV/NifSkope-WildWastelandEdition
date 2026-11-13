@@ -106,4 +106,20 @@ fxw() {
 	rm -f "$1.spv"
 }
 fxw water_view_vs core/water_view_vs
+# lane VKWATER3 item 4: the tessellated water (fo4_waterlookd: fo4_waterdisp.tesc / .tese) as water_view_hs + water_view_ds,
+# each on its own shifts (hs blocks at 512 + n, ds at 768 + n, their images / samplers past them) so no binding meets
+# another stage's in the one set; its pixel stage (a frozen twin) through fxk()
+fxh() {
+	"$DXC" -spirv -fspv-target-env=vulkan1.2 -T hs_6_0 -E main -fvk-b-shift 512 0 -fvk-t-shift 576 0 -fvk-s-shift 640 0 -fvk-u-shift 704 0 -fspv-preserve-bindings -Fo "$1.spv" "$(cygpath -m "$ROOT/res/shaders/hlsl/$2.hlsl" 2>/dev/null || echo "$ROOT/res/shaders/hlsl/$2.hlsl")"
+	python -I "$ROOT/tools/spv_header.py" "$1.spv" "vkframe_$1_spv" "$1.spv.h" < /dev/null
+	rm -f "$1.spv"
+}
+fxh water_view_hs water/fo4_waterdisp_hs
+fxd() {
+	"$DXC" -spirv -fspv-target-env=vulkan1.2 -T ds_6_0 -E main -fvk-b-shift 768 0 -fvk-t-shift 832 0 -fvk-s-shift 896 0 -fvk-u-shift 960 0 -fspv-preserve-bindings -Fo "$1.spv" "$(cygpath -m "$ROOT/res/shaders/hlsl/$2.hlsl" 2>/dev/null || echo "$ROOT/res/shaders/hlsl/$2.hlsl")"
+	python -I "$ROOT/tools/spv_header.py" "$1.spv" "vkframe_$1_spv" "$1.spv.h" < /dev/null
+	rm -f "$1.spv"
+}
+fxd water_view_ds water/fo4_waterdisp_ds
+fxk water_view_d_ps water/water_view_d_ps
 ls -la csm_view_vs.spv.h obj_depth_vs.spv.h sky_view_ps.spv.h bloom_down.spv.h bloom_hold.spv.h bloom_up.spv.h bloom_src.spv.h bloom_comb.spv.h bloom_back.spv.h tonemap.spv.h measure_q.spv.h tone_view_vs.spv.h tone_view_ps.spv.h taa_view_mv_cs.spv.h taa_view_resolve_cs.spv.h taa_view_rcas_ps.spv.h

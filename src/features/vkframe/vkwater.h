@@ -7,9 +7,11 @@
  * water whenever one input or stage is refused; the reasons are named in the `vk water:` line, slot by slot.
  * The census is GL queries only (Qt's functions or a harness's, Fn), so tests/vkframe/waterview.cpp runs the shipped code. */
 
+#include <algorithm>
 #include <cstdint>
 #include <cstdio>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "features/vkframe/vkwater_tables.h"
@@ -310,12 +312,55 @@ struct WaterUbo
 	long long off = 0, size = 0, bufBytes = 0;
 	int need = 0;  //!< the block's size in the program (GL_UNIFORM_BLOCK_DATA_SIZE)
 };
+/* lane VKWATER3 item 4: the water programs with Vulkan twins (cellwater.cpp wwCellWaterProgram's names), their pixel
+ * stage's tables. Every one takes water_view_vs; a tessellated one adds water_view_hs + water_view_ds (fo4_waterdisp). */
+enum WaterVariant { kWaterLook = 0, kWaterLookD, kWaterVariants };
+struct WaterTables
+{
+	const char * prog;  //!< GL's program file
+	bool tess;
+	const FxField * ps;
+	int psN, psBytes;
+	const WaterBindName * psNames;
+	int psNamesN;
+};
+template <class T, int N> constexpr int waterN( const T ( & )[N] )
+{
+	return N;
+}
+inline const WaterTables & waterTables( int v )
+{
+	static const WaterTables k[kWaterVariants] = {
+		{ "fo4_waterlook.prog", false, kT_waterPs, waterN( kT_waterPs ), kT_waterPsBytes, kN_waterPs, waterN( kN_waterPs ) },
+		{ "fo4_waterlookd.prog", true, kT_waterPsD, waterN( kT_waterPsD ), kT_waterPsDBytes, kN_waterPsD, waterN( kN_waterPsD ) } };
+	return k[v >= 0 && v < kWaterVariants ? v : 0];
+}
+//! the variant of GL's program file (-1: no twin)
+inline int waterVariantOf( std::string_view prog )
+{
+	for ( int v = 0; v < kWaterVariants; v++ )
+		if ( prog == waterTables( v ).prog )
+			return v;
+	return -1;
+}
+//! the variant's pixel twin declares this block or input (e.g. wwShadowFrame: GL's program must be the WW_FRAME_UBO one)
+inline bool waterPsReads( int v, std::string_view name )
+{
+	const WaterTables & t = waterTables( v );
+	for ( int k = 0; k < t.psNamesN; k++ )
+		if ( name == t.psNames[k].name )
+			return true;
+	return false;
+}
+inline constexpr int kWaterPsLooseMax = std::max( { kT_waterPsBytes, kT_waterPsDBytes } );
+
 /* everything the shaded draw reads: the census, GL's vertex array, element range, blocks, loose uniforms, raster state.
- * Indices GL_UNSIGNED_SHORT triangles (bsshape's drawElements). */
+ * Indices GL_UNSIGNED_SHORT triangles, or 3-vertex patches for a tessellated variant (bsshape's drawElements). */
 struct WaterRun
 {
 	int w = 0, h = 0;               //!< the tone frame's size
 	unsigned color = 0;             //!< the tone frame's colour (toneFrameIs)
+	int variant = kWaterLook;       //!< the caller's (waterVariantOf GL's program), before waterStateOf
 	WaterCensus census;
 	WaterAttrib attr[kWaterAttribs];
 	unsigned ebo = 0;
@@ -323,14 +368,18 @@ struct WaterRun
 	long long idxOff = 0;           //!< bytes into the element buffer
 	int count = 0, baseVertex = 0;
 	WaterUbo global, shadow, skin;  //!< globalUniforms (vs b41 + ps b1), wwShadowFrame (ps b0), skinningUniforms (vs b40)
-	std::uint8_t vsLoose[kT_waterVsBytes] = {}, psLoose[kT_waterPsBytes] = {};
+	std::uint8_t vsLoose[kT_waterVsBytes] = {}, hsLoose[kT_waterHsBytes] = {}, dsLoose[kT_waterDsBytes] = {};
+	std::uint8_t psLoose[kWaterPsLooseMax] = {};  //!< the variant's pixel table (waterTables)
+	int patchVerts = 3;             //!< GL_PATCH_VERTICES (a tessellated variant)
 	int vp[4] = {}, scissor[4] = {};
 	bool scissorOn = false, cullOn = false, depthTest = true, depthMask = true, blend = false, stencil = false;
 	bool colorMask[4] = { true, true, true, true };
 	unsigned cullFace = 0x0405, frontFace = 0x0901, depthFunc = 0x0203;
 	bool polyOffset = false;
 	std::uintptr_t key = 0;         //!< the twins' keys: key + slot index
-	int red = 0;                    //!< gates only: 1 the ps loose block a vec4 off, 2 plain samplers, 4 cull flipped, 8 depth ALWAYS
+	int red = 0;                    //!< gates only: 1 the ps loose block a vec4 off, 2 plain samplers, 4 cull flipped, 8 depth ALWAYS,
+	                                //!< 16 the tessellation domain's origin upper-left (Vulkan's default, not GL's), 32 the ds loose
+	                                //!< block a vec4 off
 };
 
 /* GL current, prog in use, its uniforms set, the shape's vertex array bound: GL's side of the draw into r (the census
@@ -404,7 +453,13 @@ template <class Fn> void waterStateOf( Fn * fn, unsigned prog, WaterRun & r )
 	ubo( "skinningUniforms", r.skin );
 	fn->glBindBuffer( 0x8F36, unsigned( was ) );
 	fxPack( fn, prog, kT_waterVs, int( sizeof( kT_waterVs ) / sizeof( kT_waterVs[0] ) ), r.vsLoose );
-	fxPack( fn, prog, kT_waterPs, int( sizeof( kT_waterPs ) / sizeof( kT_waterPs[0] ) ), r.psLoose );
+	const WaterTables & t = waterTables( r.variant );
+	fxPack( fn, prog, t.ps, t.psN, r.psLoose );
+	if ( t.tess ) {
+		fxPack( fn, prog, kT_waterHs, waterN( kT_waterHs ), r.hsLoose );
+		fxPack( fn, prog, kT_waterDs, waterN( kT_waterDs ), r.dsLoose );
+		fn->glGetIntegerv( 0x8E72, &r.patchVerts );  // GL_PATCH_VERTICES
+	}
 	fn->glGetIntegerv( 0x0BA2, r.vp );       // GL_VIEWPORT
 	fn->glGetIntegerv( 0x0C10, r.scissor );  // GL_SCISSOR_BOX
 	r.scissorOn = fn->glIsEnabled( 0x0C11 ) != 0;
@@ -444,8 +499,8 @@ struct WaterStat
 };
 WaterStat takeWaterStat();
 void waterCensusTook( double ms );
-/*! lane VKWATER3: the non-tessellated shaded water draw (fo4_default vs + fo4_waterlook ps twins) into the tone frame on
- * Vulkan, one crossing. false: why; nothing drawn (GL draws the shape) */
+/*! lane VKWATER3: the shaded water draw (r.variant's twins: fo4_default vs [+ fo4_waterdisp hs + ds] + the pixel twin)
+ * into the tone frame on Vulkan, one crossing. false: why; nothing drawn (GL draws the shape) */
 bool waterRun( const WaterRun & r, std::string & why );
 //! what waterRun cannot take on this device (empty: none)
 std::string waterDrawRefusal();
