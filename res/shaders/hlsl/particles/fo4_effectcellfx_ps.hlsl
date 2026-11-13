@@ -28,67 +28,6 @@ Texture2D<float4> GreyscaleMap : register(t47, space0); SamplerState _GreyscaleM
 TextureCube<float4> CubeMap : register(t48, space0); SamplerState _CubeMap_sampler : register(s48, space0);
 Texture2D<float4> NormalMap : register(t49, space0); SamplerState _NormalMap_sampler : register(s49, space0);
 Texture2D<float4> SpecularMap : register(t50, space0); SamplerState _SpecularMap_sampler : register(s50, space0);
-
-static float3 LightDir;
-static float3 ViewDir;
-
-static float2 texCoord;
-
-static float4 A;
-static float4 C;
-static float4 D;
-
-static float3x3 btnMatrix;
-static float3x3 reflMatrix;
-
-#ifdef WW_FXRES
-// lane FXRES1 (fo4_effectcellfx.frag, src/features/particles/cellfxres.h): the soft-effect layer's other two targets, blended by the
-// draw's own factors: the transmittance (0 colour, the draw's alpha, over 1) and the coverage (1, as the stencil)
-static float4 fragColor;
-static float4 fxResT;
-static float4 fxResCov;
-#else
-static float4 fragColor;
-#endif
-
-#ifdef WW_CELLLIGHTS
-/* lane EFX2 (fo4_effectcell.frag; src/gl/celllights.h wwCellFxRed): the game's effect pixel shader in the
- * cell view, transcribed from Shaders011.fxp (docs/PRTP_PLAN.md 2q):
- *   colour   = texture x vertex colour x base colour, all linear (sampled sRGB, base colour powered 2.2)
- *   lighting = mix( c, c x emit, lighting influence ), emit the script-set external emit colour, WHITE when
- *              unset. That is the UNLIT effect. One whose material sets the effect-lighting flag takes the
- *              game's lit shader instead (lane FXLIT1, src/features/lights/cellfxlit.h): emit = the directional colour +
- *              up to four placed lights, colour x pow( 1 - saturate( d / radius )^2, 2.2 ) x the spot cone,
- *              per pixel, no N.L and no shadow
- *   Soft     = saturate( (scene w - w) / soft depth ) x smoothstep( 0.075, 0.5, w / soft depth ), w the view
- *              depth; on alpha, or on the palette's row for a greyscale-to-palette effect
- *   fog      = mix( c, fog colour, f ) for a blended effect, c x (1 - f) for an additive one; with the cell air on,
- *              the air as the surfaces take it, c T + L, or c T for an additive one (lane VOLAIR1, wwFogFx)
- * then the cell's imagespace on its own (an effect blends over a surface that already took the bloom). */
-// uniforms.glsl inlined here: its .hlsli has no readable half yet (lane HLSLSRC1)
-cbuffer globalUniforms : register(b0, space0)
-{
-	row_major float3x3	viewMatrix : packoffset(c0);					// rotation part of view transform
-	row_major float3x3	envMapRotation : packoffset(c3);				// view space to environment map
-	row_major float4x4	projectionMatrix : packoffset(c6);
-	float4	lightSourcePosition[3] : packoffset(c10);
-	float4	lightSourceDiffuse[3] : packoffset(c13);
-	float4	lightSourceAmbient : packoffset(c16);
-	float	toneMapScale : packoffset(c17);				// 1.0 = full tone mapping
-	float	brightnessScale : packoffset(c17.y);
-	float	glowScale : packoffset(c17.z);
-	float	glowScaleSRGB : packoffset(c17.w);
-	int4	viewportDimensions : packoffset(c18);			// X, Y, width, height
-	uint	doSkinning : packoffset(c19);
-	int	sceneOptions : packoffset(c19.y);
-	int	cubeBgndMipLevel : packoffset(c19.z);
-	int	sfParallaxMaxSteps : packoffset(c19.w);
-	float	sfParallaxScale : packoffset(c20);
-	float	sfParallaxOffset : packoffset(c20.y);
-	float	unusedUniform1 : packoffset(c20.z);
-	float	unusedUniform2 : packoffset(c20.w);
-};
-// end of uniforms.glsl
 #define WW_LOOSE_TYPES 1
 #if defined(WW_CELLLIGHTS)
 #include "../air/lookdev_fog.hlsli"
@@ -272,6 +211,68 @@ cbuffer LooseUniforms : register(b31, space0)
 	float2 vpDumpScale;		// gates only: the full-size pixels a quarter-size dump pixel stands for (0 off)
 #endif
 };
+
+
+static float3 LightDir;
+static float3 ViewDir;
+
+static float2 texCoord;
+
+static float4 A;
+static float4 C;
+static float4 D;
+
+static float3x3 btnMatrix;
+static float3x3 reflMatrix;
+
+#ifdef WW_FXRES
+// lane FXRES1 (fo4_effectcellfx.frag, src/features/particles/cellfxres.h): the soft-effect layer's other two targets, blended by the
+// draw's own factors: the transmittance (0 colour, the draw's alpha, over 1) and the coverage (1, as the stencil)
+static float4 fragColor;
+static float4 fxResT;
+static float4 fxResCov;
+#else
+static float4 fragColor;
+#endif
+
+#ifdef WW_CELLLIGHTS
+/* lane EFX2 (fo4_effectcell.frag; src/gl/celllights.h wwCellFxRed): the game's effect pixel shader in the
+ * cell view, transcribed from Shaders011.fxp (docs/PRTP_PLAN.md 2q):
+ *   colour   = texture x vertex colour x base colour, all linear (sampled sRGB, base colour powered 2.2)
+ *   lighting = mix( c, c x emit, lighting influence ), emit the script-set external emit colour, WHITE when
+ *              unset. That is the UNLIT effect. One whose material sets the effect-lighting flag takes the
+ *              game's lit shader instead (lane FXLIT1, src/features/lights/cellfxlit.h): emit = the directional colour +
+ *              up to four placed lights, colour x pow( 1 - saturate( d / radius )^2, 2.2 ) x the spot cone,
+ *              per pixel, no N.L and no shadow
+ *   Soft     = saturate( (scene w - w) / soft depth ) x smoothstep( 0.075, 0.5, w / soft depth ), w the view
+ *              depth; on alpha, or on the palette's row for a greyscale-to-palette effect
+ *   fog      = mix( c, fog colour, f ) for a blended effect, c x (1 - f) for an additive one; with the cell air on,
+ *              the air as the surfaces take it, c T + L, or c T for an additive one (lane VOLAIR1, wwFogFx)
+ * then the cell's imagespace on its own (an effect blends over a surface that already took the bloom). */
+// uniforms.glsl inlined here: its .hlsli has no readable half yet (lane HLSLSRC1)
+cbuffer globalUniforms : register(b0, space0)
+{
+	row_major float3x3	viewMatrix : packoffset(c0);					// rotation part of view transform
+	row_major float3x3	envMapRotation : packoffset(c3);				// view space to environment map
+	row_major float4x4	projectionMatrix : packoffset(c6);
+	float4	lightSourcePosition[3] : packoffset(c10);
+	float4	lightSourceDiffuse[3] : packoffset(c13);
+	float4	lightSourceAmbient : packoffset(c16);
+	float	toneMapScale : packoffset(c17);				// 1.0 = full tone mapping
+	float	brightnessScale : packoffset(c17.y);
+	float	glowScale : packoffset(c17.z);
+	float	glowScaleSRGB : packoffset(c17.w);
+	int4	viewportDimensions : packoffset(c18);			// X, Y, width, height
+	uint	doSkinning : packoffset(c19);
+	int	sceneOptions : packoffset(c19.y);
+	int	cubeBgndMipLevel : packoffset(c19.z);
+	int	sfParallaxMaxSteps : packoffset(c19.w);
+	float	sfParallaxScale : packoffset(c20);
+	float	sfParallaxOffset : packoffset(c20.y);
+	float	unusedUniform1 : packoffset(c20.z);
+	float	unusedUniform2 : packoffset(c20.w);
+};
+// end of uniforms.glsl
 #include "../air/lookdev_fog.hlsli"
 #ifdef WW_SUNSHADOW
 #include "../shadows/ww_sunshadow.hlsli"
@@ -504,7 +505,7 @@ static float3x3 btnMatrix_norm = float3x3( normalize( btnMatrix[0] ), normalize(
 
 
 #ifdef WW_FXRES
-#define main wwFxResMain
+#define frag_main wwFxResMain
 #endif
 void frag_main()
 {
@@ -807,7 +808,7 @@ void frag_main()
 }
 
 #ifdef WW_FXRES
-#undef main
+#undef frag_main
 void frag_main()
 {
 	wwFxResMain();

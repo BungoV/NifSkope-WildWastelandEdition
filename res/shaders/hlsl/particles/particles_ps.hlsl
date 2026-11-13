@@ -62,6 +62,63 @@ cbuffer globalUniforms : register(b0, space0)
  * particle takes the cell effect's output law (fo4_effectshader.frag, lane EFX2): the colour decoded to linear,
  * fogged (an additive one dimmed, a blended one fogged toward the fog colour), then linear into the HDR frame,
  * or the cell's imagespace, or encoded again. */
+#include "../air/lookdev_fog.hlsli"
+#define WW_FX_AMBSHARE 1	// MODULES1 R8-1: a lit particle's ambient keeps the share the GI volume leaves (cell_fxlaw.glsl)
+#include "../lights/cell_lights.hlsli"
+
+// lane MODULES1 M3 (G7): the Effect Lighting law and the unlit unit
+#include "../lights/cell_fxlaw.hlsli"
+
+
+float3 cellFxLight( int i, float3 P )
+{
+	float4 t0 = cellLights.Load( i * CELL_TPL );
+	float4 t1 = cellLights.Load( i * CELL_TPL + 1 );
+	float3 Lv = t0.xyz - P;
+	float d = length( Lv );
+	float q = clamp( d / max( t0.w, 0.001 ), 0.0, 1.0 );
+	float a = 1.0 - q * q;
+	if ( ( fxLitMode & 4 ) == 0 )
+		a = pow( a, 2.2 );
+	if ( cellLightPhys.x > 0.5 && ( fxLitMode & 4 ) == 0 )	// lane LIGHTPHYS1: the surfaces' physical curve, so effects and air agree
+		a = cellPhysFalloff( a, q, t0.w, float3( 0.0, 1.0, 2.0 ) );
+	float3 g = (float3)( 1.0 );	// lane LIGHTS5 (GOBO-FX): the light's pattern, as on surfaces (GOBO2: every shape)
+	float3 gAx = (float3)( 0.0 );
+	if ( t1.w > -1.5 ) {	// a spot: the game's cone, its cosine + 0.001
+		float4 t2 = cellLights.Load( i * CELL_TPL + 2 );
+		float c = clamp( dot( -Lv / max( d, 0.001 ), t2.xyz ), 0.0, 1.0 );
+		float base = clamp( 1.0 - ( 1.0 - c ) / max( 1.0 - ( t1.w + 0.001 ), 1e-4 ), 0.0, 1.0 );
+		a *= min( pow( base, max( t2.w, 1e-3 ) ), 1.0 );
+		gAx = t2.xyz;
+	}
+	if ( a > 0.0 )
+		g = cellGobo( i, -Lv, gAx, t1.w > -1.5 );
+	return t1.rgb * g * a;
+}
+
+float3 cellFxLit( float3 P )
+{
+	// lane SUNCELL1 final: an exterior with no weather loaded has no sun to light it -- self-lit, as before
+	// MODULES1 R7-1: a blended lit particle outdoors takes the local light: the surfaces' sun + the ambient at it
+	bool loc = fxLocalOn() && !cellInterior && !fxAdditive;
+	if ( or( ( fxLitMode & 8 ) != 0, ( !cellInterior && !cellHasDir && !loc ) ) )
+		return (float3)( 1.0 );
+	// R8-1: the ambient's share and the GI as a surface there (fxLocalSky, set by the caller; 1 and 0 before it)
+	float3 E = loc ? vpSun.rgb * fxLocalVis + cellAmbient( float3( 0.0, 0.0, 1.0 ), P ) FX_LOCAL_GI : cellHasDir ? cellDirColor : (float3)( 0.0 );
+	if ( ( fxLitMode & 2 ) != 0 ) {
+		// flat on purpose: an effect's light has no hemisphere clip, which the cluster lists cull by
+		for ( int i = 0; i < cellLightCount; i++ )
+			E += cellFxLight( i, P );
+	} else {
+		for ( int k = 0; k < 4; k++ )
+			if ( fxLit[k] > -0.5 )
+				E += cellFxLight( int( fxLit[k] + 0.5 ), P ) * fxLitScale[k];
+	}
+	return fxLawMix( E, lightingInfluence, fxAdditive );	// MODULES1 M3: was mix( 1, E, lightingInfluence )
+}
+#endif
+
+Texture2D<float4> textureUnits[10] : register(t46, space0); SamplerState _textureUnits_sampler[10] : register(s46, space0);
 #define WW_LOOSE_TYPES 1
 #if defined(WW_CELLLIGHTS)
 #include "../air/lookdev_fog.hlsli"
@@ -194,63 +251,7 @@ cbuffer LooseUniforms : register(b31, space0)
 	float fxDistScale;		// view units -> game units
 #endif
 };
-#include "../air/lookdev_fog.hlsli"
-#define WW_FX_AMBSHARE 1	// MODULES1 R8-1: a lit particle's ambient keeps the share the GI volume leaves (cell_fxlaw.glsl)
-#include "../lights/cell_lights.hlsli"
 
-// lane MODULES1 M3 (G7): the Effect Lighting law and the unlit unit
-#include "../lights/cell_fxlaw.hlsli"
-
-
-float3 cellFxLight( int i, float3 P )
-{
-	float4 t0 = cellLights.Load( i * CELL_TPL );
-	float4 t1 = cellLights.Load( i * CELL_TPL + 1 );
-	float3 Lv = t0.xyz - P;
-	float d = length( Lv );
-	float q = clamp( d / max( t0.w, 0.001 ), 0.0, 1.0 );
-	float a = 1.0 - q * q;
-	if ( ( fxLitMode & 4 ) == 0 )
-		a = pow( a, 2.2 );
-	if ( cellLightPhys.x > 0.5 && ( fxLitMode & 4 ) == 0 )	// lane LIGHTPHYS1: the surfaces' physical curve, so effects and air agree
-		a = cellPhysFalloff( a, q, t0.w, float3( 0.0, 1.0, 2.0 ) );
-	float3 g = (float3)( 1.0 );	// lane LIGHTS5 (GOBO-FX): the light's pattern, as on surfaces (GOBO2: every shape)
-	float3 gAx = (float3)( 0.0 );
-	if ( t1.w > -1.5 ) {	// a spot: the game's cone, its cosine + 0.001
-		float4 t2 = cellLights.Load( i * CELL_TPL + 2 );
-		float c = clamp( dot( -Lv / max( d, 0.001 ), t2.xyz ), 0.0, 1.0 );
-		float base = clamp( 1.0 - ( 1.0 - c ) / max( 1.0 - ( t1.w + 0.001 ), 1e-4 ), 0.0, 1.0 );
-		a *= min( pow( base, max( t2.w, 1e-3 ) ), 1.0 );
-		gAx = t2.xyz;
-	}
-	if ( a > 0.0 )
-		g = cellGobo( i, -Lv, gAx, t1.w > -1.5 );
-	return t1.rgb * g * a;
-}
-
-float3 cellFxLit( float3 P )
-{
-	// lane SUNCELL1 final: an exterior with no weather loaded has no sun to light it -- self-lit, as before
-	// MODULES1 R7-1: a blended lit particle outdoors takes the local light: the surfaces' sun + the ambient at it
-	bool loc = fxLocalOn() && !cellInterior && !fxAdditive;
-	if ( or( ( fxLitMode & 8 ) != 0, ( !cellInterior && !cellHasDir && !loc ) ) )
-		return (float3)( 1.0 );
-	// R8-1: the ambient's share and the GI as a surface there (fxLocalSky, set by the caller; 1 and 0 before it)
-	float3 E = loc ? vpSun.rgb * fxLocalVis + cellAmbient( float3( 0.0, 0.0, 1.0 ), P ) FX_LOCAL_GI : cellHasDir ? cellDirColor : (float3)( 0.0 );
-	if ( ( fxLitMode & 2 ) != 0 ) {
-		// flat on purpose: an effect's light has no hemisphere clip, which the cluster lists cull by
-		for ( int i = 0; i < cellLightCount; i++ )
-			E += cellFxLight( i, P );
-	} else {
-		for ( int k = 0; k < 4; k++ )
-			if ( fxLit[k] > -0.5 )
-				E += cellFxLight( int( fxLit[k] + 0.5 ), P ) * fxLitScale[k];
-	}
-	return fxLawMix( E, lightingInfluence, fxAdditive );	// MODULES1 M3: was mix( 1, E, lightingInfluence )
-}
-#endif
-
-Texture2D<float4> textureUnits[10] : register(t46, space0); SamplerState _textureUnits_sampler[10] : register(s46, space0);
 
 Texture2D<float4> NormalMap : register(t56, space0); SamplerState _NormalMap_sampler : register(s56, space0);
 Texture2D<float4> GreyscaleMap : register(t57, space0); SamplerState _GreyscaleMap_sampler : register(s57, space0);
