@@ -550,6 +550,7 @@ bool TexCache::bindCube( const QString & fname, const NifModel * nif, bool useSe
 extern double wwTexLoadBytesMs, wwTexLoadQueryMs;
 extern bool wwTexLoadTaken;
 extern qint64 wwTexLoadSize;
+extern bool wwVkObjTexArm;	// lane VKOBJ3 (gltexloaders.cpp): this load may take a BC twin
 
 std::uint16_t TexCache::loadTex( Tex & txIn, const NifModel * nif )
 {
@@ -616,6 +617,8 @@ std::uint16_t TexCache::loadTex( Tex & txIn, const NifModel * nif )
 	wwTexLoadBytesMs = wwTexLoadQueryMs = 0.0;
 	wwTexLoadTaken = false;
 	wwTexLoadSize = 0;
+	const GLuint wwId0 = t->id[0];	// lane VKOBJ3: a BC twin replaces the name
+	wwVkObjTexArm = true;
 	try
 	{
 		i->mipmaps = texLoad( nif, i->filepath, i->format, t->target, i->width, i->height, t->id );
@@ -624,6 +627,11 @@ std::uint16_t TexCache::loadTex( Tex & txIn, const NifModel * nif )
 	catch ( QString & e )
 	{
 		i->status = e;
+	}
+	wwVkObjTexArm = false;
+	if ( t->id[0] != wwId0 ) {
+		WwBl::bornName( t->id[0] );
+		paramForget( t->id[0] );
 	}
 	{	/* lane EMPTY240 R8-2: a load over 30 ms on the drawing thread names its parts: finding the file, its bytes (taken
 		 * from a worker, or read here), the decode and upload, and the driver's size queries after it (each one waits for
@@ -695,6 +703,8 @@ void TexCache::flush()
 	WwBl::forgetAll();	// lane BINDLESS2: no handle may stay resident on a deleted texture
 	// lane STREAMTEX4: the fenced frees too (forgetAll waited for the GPU and dropped their handles)
 	grave.sweep( []( void * ) { return true; }, [this]( std::uint32_t a, std::uint32_t b ) {
+		WwBl::texGone( a );	// lane VKOBJ3: a BC twin's table entries and Vulkan half
+		WwBl::texGone( b );
 		const GLuint ids[2] = { a, b };
 		glDeleteTextures( b ? 2 : 1, ids );
 	}, [this]( void * f ) {
@@ -705,6 +715,8 @@ void TexCache::flush()
 		Tex &	tx = textures[i];
 		if ( tx.isLoaded() ) {
 			PassTime::texResidentDrop( tx.id[0] );	// lane STREAM1
+			WwBl::texGone( tx.id[0] );	// lane VKOBJ3
+			WwBl::texGone( tx.id[1] );
 			glDeleteTextures( ( !tx.id[1] ? 1 : 2 ), tx.id );
 		}
 		if ( tx.imageInfo )
@@ -717,6 +729,8 @@ void TexCache::flush()
 	for ( Tex & tx : embedTextures ) {
 		if ( tx.id[0] ) {
 			PassTime::texResidentDrop( tx.id[0] );	// lane STREAM1
+			WwBl::texGone( tx.id[0] );	// lane VKOBJ3
+			WwBl::texGone( tx.id[1] );
 			glDeleteTextures( ( !tx.id[1] ? 1 : 2 ), tx.id );
 		}
 		if ( tx.imageInfo )
