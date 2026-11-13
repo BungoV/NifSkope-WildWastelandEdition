@@ -250,6 +250,10 @@ template <class Fn> void waterCensusOf( Fn * fn, unsigned prog, WaterCensus & c 
 
 //! lane VKWATER1: the device's side of the verdict (vkwater.inc)
 WaterCaps waterCaps();
+/*! lane VKWATER2: one census input's twin on the present device, GL current: sharedTarget (colour, integer, depth 2D /
+ * 3D / array), VKFAR1's farTwin (BC 2D / array, cube-map arrays) or farTexelBuffer (texel buffers). false: why */
+bool waterTwin( std::uintptr_t key, const WaterSlot & s, unsigned & tex, std::string & why );
+void waterTwinDrop( std::uintptr_t key, const WaterSlot & s );
 //! one water draw stayed on GL (why: the verdict or the route's reason)
 void waterOnGl( const char * why );
 struct WaterStat

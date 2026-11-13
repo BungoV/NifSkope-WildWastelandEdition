@@ -9,13 +9,16 @@
 //  census   every input read back: name, kind, unit, texture, format, size, levels, anisotropy; nothing missing or extra;
 //           an empty census or an input of slots.txt no census covers is a FAIL
 //  verdict  each input's class equals the fixture's (independent table below); the line names every blocked input
-//  share    every input the verdict lets move (2D / 3D / array) is taken by sharedTarget; every one it refuses for a
-//           format (BC, integer, other) is refused by sharedTarget too
+//  share    every input the verdict lets move is taken by waterTwin (lane VKWATER2: sharedTarget, VKFAR1's farTwin for BC
+//           and cube-map arrays, farTexelBuffer); every one it refuses for a format / kind is refused by waterTwin too
 //  device   the caps equal the features vkpresent.cpp enables (textureCompressionBC, imageCubeArray, samplerAnisotropy,
 //           tessellationShader)
-//  tess     the tessellated program reads tess, the others do not; its verdict names the tessellated twin
-// Reds (each must FAIL): bc, int (caps forced on), drop (one census input lost), unit (two inputs' textures swapped),
-// tess (caps.tess on), empty (every census empty). Last line `WATERVIEW GATE OK` or `WATERVIEW GATE FAILED`.
+//  tess     the tessellated program reads tess, the others do not; its verdict does not name the tessellated twin
+//           (lane VKWATER2: tessellationShader on the present device)
+// Reds (each must FAIL): bc (caps.bc off: VKFAR1's BC twins lost), int (the integer rows lost), drop (one census input
+// lost), unit (two inputs' textures swapped), tess (caps.tess off), empty (every census empty), ds (the D32F_S8 row
+// lost), cube (caps.cubeArray off), tbuf (caps.texelBuffer off), aniso (caps.aniso off). The fixture's classes are fixed
+// (lane VKWATER2: every input moves); a red only mutates the caps or the census, never the expectation. Last line `WATERVIEW GATE OK` or `WATERVIEW GATE FAILED`.
 #define WW_VKPRESENT_NO_QT
 #include "../../src/features/vkframe/vkpresent.cpp"
 
@@ -141,16 +144,16 @@ void fixtureOf( In & x )
 		x.w = x.h = 64;
 		x.levels = 7;
 		x.aniso = 16.0f;
-		x.expect = kWaterAniso;  // vkwater.h names anisotropy before the format; fixtureNoisePlain keeps one plain BC
+		x.expect = kWaterOk;  // lane VKWATER2: VKOBJ2's samplerAnisotropy + VKFAR1's BC twin (red aniso / bc lose them)
 	} else if ( n == "waterInfoIndex" || n == "waterFlowIndex" ) {
-		x.fmt = 0x823C;  // RG32UI
-		x.expect = kWaterIntFormat;
+		x.fmt = 0x823C;  // RG32UI (lane VKWATER2: vkFormatOf's R32G32_UINT row)
+		x.expect = kWaterOk;
 	} else if ( n == "waterInfoAtlas" || n == "waterFlowAtlas" || n == "waterSkyIndex" ) {
 		x.fmt = 0x8236;  // R32UI
-		x.expect = kWaterIntFormat;
+		x.expect = kWaterOk;
 	} else if ( n == "waterSkyAtlas" ) {
 		x.fmt = 0x8232;  // R8UI
-		x.expect = kWaterIntFormat;
+		x.expect = kWaterOk;
 	} else if ( n == "waterInfoBodies" ) {
 		x.fmt = 0x8814;  // RGBA32F
 	} else if ( n == "waterMoment0" || n == "waterMoment1" || n == "waterMoment2" ) {
@@ -158,23 +161,23 @@ void fixtureOf( In & x )
 		x.w = x.h = 64;
 		x.levels = 7;
 		x.aniso = 16.0f;
-		x.expect = kWaterAniso;
+		x.expect = kWaterOk;  // lane VKWATER2: VKOBJ2's samplerAnisotropy
 	} else if ( n == "waterOceanB" ) {
 		x.fmt = 0x881A;
 	} else if ( n == "waterOceanC" ) {
 		x.fmt = 0x8814;
 	} else if ( n == "waterDepth" ) {
 		x.fmt = 0x8CAD;  // DEPTH32F_STENCIL8 (glscene.cpp's float depth frame; a D24S8 frame shares)
-		x.expect = kWaterFormat;
+		x.expect = kWaterOk;  // lane VKWATER2: vkFormatOf's D32_SFLOAT_S8_UINT row
 	} else if ( n == "csmMap" ) {
 		x.fmt = 0x81A5;  // D16 array
 	} else if ( n == "cellShadow" ) {
 		x.fmt = 0x81A5;
 		x.d = 6;
-		x.expect = kWaterCubeArray;
+		x.expect = kWaterOk;  // lane VKWATER2: VKFAR1's cube-map array twin
 	} else if ( n == "cellLights" ) {
 		x.fmt = 0x8814;
-		x.expect = kWaterTexelBuffer;
+		x.expect = kWaterOk;  // lane VKWATER2: VKFAR1's texel buffer
 	} else if ( n == "ussTerrMap" || n == "ussContactMap" ) {
 		x.fmt = 0x822E;  // R32F
 	}
@@ -186,7 +189,7 @@ void fixtureNoisePlain( In & x )
 {
 	if ( x.name == "waterNoise2" ) {
 		x.aniso = 1.0f;
-		x.expect = WwVkPresent::kWaterBc;
+		x.expect = WwVkPresent::kWaterOk;  // lane VKWATER2: VKFAR1's BC twin
 	}
 }
 
@@ -287,7 +290,8 @@ const char * kVs = "#version 450\nvoid main() { gl_Position = vec4( 0.0 ); }\n";
 struct Mut
 {
 	std::string name;
-	bool bc = false, intF = false, tess = false, drop = false, swap = false, empty = false;
+	bool bc = false, intF = false, tess = false, drop = false, swap = false, empty = false, ds = false, cube = false, tbuf = false,
+		aniso = false;
 };
 
 struct World
@@ -317,11 +321,19 @@ int evaluate( World & wd, const Mut & m, bool loud )
 	};
 	WaterCaps caps = waterCaps();
 	if ( m.bc )
-		caps.bc = true;
+		caps.bc = false;
+	if ( m.cube )
+		caps.cubeArray = false;
+	if ( m.aniso )
+		caps.aniso = false;
+	if ( m.tbuf )
+		caps.texelBuffer = false;
 	if ( m.intF )
-		caps.intFormats = true;
+		caps.intFormats = false;  // lane VKWATER2: the integer rows lost
+	if ( m.ds )  // the D32F_S8 row lost
+		caps.sharedFmt = []( unsigned f ) { return f != 0x8CADu && waterCaps().sharedFmt( f ); };
 	if ( m.tess )
-		caps.tess = true;
+		caps.tess = false;
 	std::vector<WaterCensus> cs = wd.cs;
 	if ( m.empty )
 		for ( auto & c : cs )
@@ -384,8 +396,7 @@ int evaluate( World & wd, const Mut & m, bool loud )
 				bad( b );
 			}
 			const int b = blocks[i];
-			const int want = x->expect == kWaterBc && caps.bc ? kWaterOk
-				: x->expect == kWaterIntFormat && caps.intFormats ? kWaterOk : x->expect;
+			const int want = x->expect;
 			if ( b != want )
 				bad( "verdict " + s.name + " reads " + waterBlockName( b ) + ", the fixture " + waterBlockName( want ) );
 			if ( b != kWaterOk && !has( verdict, " " + s.name ) )
@@ -393,19 +404,19 @@ int evaluate( World & wd, const Mut & m, bool loud )
 			if ( b != kWaterOk )
 				byClass[waterBlockName( b )] += " " + s.name;
 			// share: what the verdict lets move must be taken; a format refusal must be refused by sharedTarget too
-			if ( s.kind >= 0 && s.kind <= 2 && s.tex && ( b == kWaterOk || b == kWaterBc || b == kWaterIntFormat
-				|| b == kWaterFormat ) ) {
+			if ( s.kind >= 0 && s.kind <= 5 && s.tex && ( b == kWaterOk || b == kWaterBc || b == kWaterIntFormat
+				|| b == kWaterFormat || b == kWaterCubeArray || b == kWaterTexelBuffer ) ) {
 				static unsigned keys[256];
 				const std::uintptr_t key = reinterpret_cast<std::uintptr_t>( &keys[( p * 32 + i ) & 255] );
 				unsigned t = 0;
 				std::string why;
-				const bool took = sharedTarget( key, s.kind, s.w, s.h, s.d, s.glFmt, t, why, s.levels );
+				const bool took = waterTwin( key, s, t, why );
 				if ( took )
-					sharedTargetDrop( key );
+					waterTwinDrop( key, s );
 				if ( b == kWaterOk && !took )
-					bad( "share " + s.name + " moves by the verdict, sharedTarget refuses (" + why + ")" );
+					bad( "share " + s.name + " moves by the verdict, waterTwin refuses (" + why + ")" );
 				if ( b != kWaterOk && took )
-					bad( "share " + s.name + " refused by the verdict (" + waterBlockName( b ) + "), sharedTarget takes it" );
+					bad( "share " + s.name + " refused by the verdict (" + waterBlockName( b ) + "), waterTwin takes it" );
 			}
 		}
 	}
@@ -416,8 +427,8 @@ int evaluate( World & wd, const Mut & m, bool loud )
 	// tess
 	if ( !wd.tessC.tess )
 		bad( "tess program reads no tessellation stage" );
-	if ( !has( waterVerdict( wd.tessC, caps ), "the tessellated twin" ) )
-		bad( "tess verdict does not name the tessellated twin" );
+	if ( has( waterVerdict( wd.tessC, caps ), "the tessellated twin" ) )
+		bad( "tess verdict names the tessellated twin (tessellationShader lost)" );
 
 	if ( loud )
 		for ( auto & kv : byClass )
@@ -596,13 +607,17 @@ int main( int argc, char ** argv )
 	const int green = evaluate( wd, Mut(), true );
 	std::printf( "WATERVIEW GREEN %s (%d failures)\n", green ? "FAIL" : "OK", green );
 	bool redsOk = true;
-	Mut reds[6];
+	Mut reds[10];
 	reds[0].name = "bc";    reds[0].bc = true;
 	reds[1].name = "int";   reds[1].intF = true;
 	reds[2].name = "drop";  reds[2].drop = true;
 	reds[3].name = "unit";  reds[3].swap = true;
 	reds[4].name = "tess";  reds[4].tess = true;
 	reds[5].name = "empty"; reds[5].empty = true;
+	reds[6].name = "ds";    reds[6].ds = true;
+	reds[7].name = "cube";  reds[7].cube = true;
+	reds[8].name = "tbuf";  reds[8].tbuf = true;
+	reds[9].name = "aniso"; reds[9].aniso = true;
 	for ( auto & r : reds ) {
 		const int f = evaluate( wd, r, false );
 		std::printf( "WATERVIEW RED %s %s (%d failures)\n", r.name.c_str(), f ? "FAIL" : "PASSED (must fail)", f );
