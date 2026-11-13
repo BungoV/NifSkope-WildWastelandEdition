@@ -43,9 +43,10 @@ for vs in "pipe:$VSHIFT" "redshift:$PSHIFT"; do
 		-Fo "$OUT/fo4_defaultbl_vs.${vs%%:*}.spv" > "$OUT/fo4_defaultbl_vs.dxc.txt" 2>&1 \
 		|| { tail -20 "$OUT/fo4_defaultbl_vs.dxc.txt"; echo "BLVIEW GATE FAILED (dxc, fo4_defaultbl_vs ${vs%%:*})"; exit 1; }
 done
-# lane VKOBJ4 open item 2: GL's fo4_cellbl from the HLSL SPIR-V set (and its location registry), as the app links it
-"$PY" -I -X utf8 "$ROOT/tests/hlsllive/build_all.py" "$ROOT" "$OUT/spvset" --only fo4_cellbl --jobs 4 > "$OUT/spvset.txt" 2>&1 \
-	|| { tail -8 "$OUT/spvset.txt"; echo "BLVIEW GATE FAILED (build_all.py, the fo4_cellbl SPIR-V set)"; exit 1; }
+# lane VKOBJ4 open item 2 / gap 4: GL's fo4_cellbl and fo4_cellcsmbl from the HLSL SPIR-V set (one location registry), as the
+# app links them
+"$PY" -I -X utf8 "$ROOT/tests/hlsllive/build_all.py" "$ROOT" "$OUT/spvset" --only fo4_cellbl,fo4_cellcsmbl --jobs 4 > "$OUT/spvset.txt" 2>&1 \
+	|| { tail -8 "$OUT/spvset.txt"; echo "BLVIEW GATE FAILED (build_all.py, the fo4_cellbl / fo4_cellcsmbl SPIR-V set)"; exit 1; }
 # lane VKOBJ4 gap 1: the 4-sample arm's fill pass (GL from SPIR-V; blview_fill_*.hlsl -> $OUT/blview_fill_*.spv)
 "$PY" -I -X utf8 "$ROOT/tests/hlsllive/build_spv.py" "$OUT" "$ROOT/tests/vkframe/blview_fill_vs.hlsl" "$ROOT/tests/vkframe/blview_fill_ps.hlsl" \
 	> "$OUT/fill.txt" 2>&1 && ! grep -q "^FAIL" "$OUT/fill.txt" || { tail -8 "$OUT/fill.txt"; echo "BLVIEW GATE FAILED (build_spv.py, the fill pass)"; exit 1; }

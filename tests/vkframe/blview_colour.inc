@@ -32,10 +32,34 @@
  * bar; target 0 vs GL over the pixels both cover as the colour bar above (EXACT, or BOUND 4e-3), >= 2000 of them; target
  * 0 vs the 2-buffer Vulkan run EXACT over those pixels (dropping the output moves nothing); target 1 still 0.25 in every
  * value on both sides. Red strict (ObjBlShade.red 1: objBlPipe's old strict count) must refuse with "the pixel stage writes
- * 2 targets, the frame has 1". Check under: a 3-colour target still refuses ("writes 2 targets, the frame has 3"). */
-bool colourGate( const std::string & spirvDir, const std::vector<GLuint64> & fixture, int anisoAt, GLuint64 aniso1 )
+ * 2 targets, the frame has 1". Check under: a 3-colour target still refuses ("writes 2 targets, the frame has 3").
+ * Gap 4 (manager 11-13; stated before its first run, never widened): twin 1, GL's fo4_cellcsmbl (fo4_cellcsmbl.frag from the
+ * set) against the Vulkan fo4_cellcsmbl twin, every arm above the same way with the same bars (2-buffer, 1-buffer, the
+ * 4-sample frame per sample, reds glow / slot / strict / unshared / dropped sample), the lines `BLVIEW colourcsm`. The sun
+ * cascades are on (the app's unified path: ussOn, ussCsmOn, the Vogel filter, cascade 0 only; terrain, contact and cloud
+ * off) and read a shared D16 2D array (sharedTarget type 2, 3 layers of 256, a 32-texel checker of 0.25 / 1.0, LINEAR,
+ * compare LEQUAL) on csmMap's unit, so both sides compare the same texels. Lit-by-the-map clause: csmForce 1 (no shadow)
+ * moves GL's colour on >= 20 % of the pixels GL covers (the map reaches the colour). Red csmmap: the map's checker
+ * inverted after GL drew must FAIL and move the Vulkan colour (Vulkan reads the map, not a stand-in). cellShadow: no
+ * light reaches the fixture (the cluster and light units unbound: the zero texel on both sides), so its unit is not read. */
+static int gColTwin = 0;  // colPrintf: 1 prints `BLVIEW colourcsm` for `BLVIEW colour`
+void colPrintf( const char * fmt, ... )
+{
+	std::string f2( fmt );
+	const std::size_t at = f2.find( "colour" );
+	if ( gColTwin && at != std::string::npos )
+		f2.insert( at + 6, "csm" );
+	va_list ap;
+	va_start( ap, fmt );
+	std::vprintf( f2.c_str(), ap );
+	va_end( ap );
+}
+bool colourGate( const std::string & spirvDir, const std::vector<GLuint64> & fixture, int anisoAt, GLuint64 aniso1, int twin = 0 )
 {
 	using namespace WwVkPresent;
+	gColTwin = twin;
+	const std::uint32_t * psWords = twin ? vkframe_objbl_cellcsm_ps_spv : vkframe_objbl_cell_ps_spv;
+	const std::size_t psCount = twin ? sizeof( vkframe_objbl_cellcsm_ps_spv ) / 4 : sizeof( vkframe_objbl_cell_ps_spv ) / 4;
 	std::vector<GLuint64> handles = fixture;  // the fixture's handles, texture anisoAt as its anisotropy-1 twin
 	handles[std::size_t( anisoAt )] = aniso1;
 	struct ColGl
@@ -50,20 +74,24 @@ bool colourGate( const std::string & spirvDir, const std::vector<GLuint64> & fix
 		void( WINAPI * bindTextures )( GLuint, GLsizei, const GLuint * ) = nullptr;
 		void( WINAPI * bindSamplers )( GLuint, GLsizei, const GLuint * ) = nullptr;
 		void( WINAPI * deleteProgram )( GLuint ) = nullptr;
+		void( WINAPI * um4 )( GLint, GLsizei, GLboolean, const GLfloat * ) = nullptr;
+		void( WINAPI * clearTexSub )( GLuint, GLint, GLint, GLint, GLint, GLsizei, GLsizei, GLsizei, GLenum, GLenum, const void * ) = nullptr;
+		void( WINAPI * texParami )( GLuint, GLenum, GLint ) = nullptr;
 	} u;
 	const char * n4 = "1234";
 	bool okLoad = load( u.shaderBinary, "glShaderBinary" ) && load( u.specialize, "glSpecializeShader" ) && load( u.ifaceIv, "glGetProgramInterfaceiv" )
 		&& load( u.resIv, "glGetProgramResourceiv" ) && load( u.ui1, "glUniform1i" ) && load( u.uu1, "glUniform1ui" )
-		&& load( u.bindTextures, "glBindTextures" ) && load( u.bindSamplers, "glBindSamplers" ) && load( u.deleteProgram, "glDeleteProgram" );
+		&& load( u.bindTextures, "glBindTextures" ) && load( u.bindSamplers, "glBindSamplers" ) && load( u.deleteProgram, "glDeleteProgram" )
+		&& load( u.um4, "glUniformMatrix4fv" ) && load( u.clearTexSub, "glClearTexSubImage" ) && load( u.texParami, "glTextureParameteri" );
 	for ( int i = 0; i < 4; i++ )
 		okLoad = okLoad && load( u.uf[i], ( std::string( "glUniform" ) + n4[i] + "fv" ).c_str() );
 	if ( !okLoad || !sx.prog ) {
-		std::printf( "BLVIEW colour FAIL (GL entry points missing, or no shade fixture)\n" );
+		colPrintf( "BLVIEW colour FAIL (GL entry points missing, or no shade fixture)\n" );
 		return false;
 	}
 	std::string why;
 	if ( !objBlLocsLoad( spirvDir + "/locs.txt", why ) ) {
-		std::printf( "BLVIEW colour FAIL (no registry: %s)\n", why.c_str() );
+		colPrintf( "BLVIEW colour FAIL (no registry: %s)\n", why.c_str() );
 		return false;
 	}
 	std::map<std::string, std::string> index;
@@ -83,7 +111,7 @@ bool colourGate( const std::string & spirvDir, const std::vector<GLuint64> & fix
 	}
 	// GL's program from the set, the binaries as they are
 	const GLuint prog = f.createProgram();
-	const char * stage[2] = { "fo4_defaultbl.vert", "fo4_cellbl.frag" };
+	const char * stage[2] = { "fo4_defaultbl.vert", twin ? "fo4_cellcsmbl.frag" : "fo4_cellbl.frag" };
 	for ( int s = 0; s < 2; s++ ) {
 		const std::string bin = index.count( stage[s] ) ? readFile( spirvDir + "/" + index[stage[s]] ) : std::string();
 		const GLuint sh = f.createShader( s ? kFrag : kVert );
@@ -94,7 +122,7 @@ bool colourGate( const std::string & spirvDir, const std::vector<GLuint64> & fix
 			f.getShaderiv( sh, kCompiled, &okS );
 		}
 		if ( !okS ) {
-			std::printf( "BLVIEW colour FAIL (%s did not specialize)\n", stage[s] );
+			colPrintf( "BLVIEW colour FAIL (%s did not specialize)\n", stage[s] );
 			return false;
 		}
 		f.attachShader( prog, sh );
@@ -105,11 +133,11 @@ bool colourGate( const std::string & spirvDir, const std::vector<GLuint64> & fix
 	if ( !linked ) {
 		char log[1024] = {};
 		f.getProgramInfoLog( prog, GLsizei( sizeof( log ) - 1 ), nullptr, log );
-		std::printf( "BLVIEW colour FAIL (fo4_cellbl from SPIR-V did not link: %s)\n", log );
+		colPrintf( "BLVIEW colour FAIL (%s from SPIR-V did not link: %s)\n", stage[1], log );
 		return false;
 	}
 	if ( const GLenum e = glGetError(); e != GL_NO_ERROR ) {
-		std::printf( "BLVIEW colour FAIL (GL error 0x%x building the program)\n", unsigned( e ) );
+		colPrintf( "BLVIEW colour FAIL (GL error 0x%x building the program)\n", unsigned( e ) );
 		return false;
 	}
 	// GL's active default-block locations and their types
@@ -124,7 +152,7 @@ bool colourGate( const std::string & spirvDir, const std::vector<GLuint64> & fix
 			glType[v[0] + e] = v[2];
 	}
 	if ( const GLenum e = glGetError(); e != GL_NO_ERROR ) {
-		std::printf( "BLVIEW colour FAIL (GL error 0x%x reading the program's %d uniforms)\n", unsigned( e ), int( nRes ) );
+		colPrintf( "BLVIEW colour FAIL (GL error 0x%x reading the program's %d uniforms)\n", unsigned( e ), int( nRes ) );
 		return false;
 	}
 	{  // the registry against the names NV reflects: a stale or shifted locs.txt shows here
@@ -142,7 +170,7 @@ bool colourGate( const std::string & spirvDir, const std::vector<GLuint64> & fix
 				else if ( firstOff.empty() )
 					firstOff = e.first + " registry " + std::to_string( e.second ) + " GL " + std::to_string( l );
 			}
-		std::printf( "BLVIEW colour registry vs GL's names: %d named, %d agree%s%s\n", named, agree, firstOff.empty() ? "" : "; first off: ",
+		colPrintf( "BLVIEW colour registry vs GL's names: %d named, %d agree%s%s\n", named, agree, firstOff.empty() ? "" : "; first off: ",
 			firstOff.c_str() );
 	}
 	auto isSampler = []( GLint t ) {
@@ -151,11 +179,14 @@ bool colourGate( const std::string & spirvDir, const std::vector<GLuint64> & fix
 	f.useProgram( prog );
 	int units = 0, inactive = 0;
 	std::string putBad;
+	std::map<int, int> unitAt;  // a sampler's location -> its unit
 	for ( const auto & e : glType )
-		if ( isSampler( e.second ) )
+		if ( isSampler( e.second ) ) {
+			unitAt[e.first] = 1 + units;
 			u.ui1( e.first, 1 + units++ );  // each on its own empty unit
+		}
 	if ( const GLenum e = glGetError(); e != GL_NO_ERROR ) {
-		std::printf( "BLVIEW colour FAIL (GL error 0x%x placing %d samplers on units)\n", unsigned( e ), units );
+		colPrintf( "BLVIEW colour FAIL (GL error 0x%x placing %d samplers on units)\n", unsigned( e ), units );
 		return false;
 	}
 	auto put = [&]( const char * name, std::initializer_list<float> vals, int elem = 0 ) {
@@ -170,6 +201,8 @@ bool colourGate( const std::string & spirvDir, const std::vector<GLuint64> & fix
 		f.useProgram( prog );  // glUniform writes the current program: a red set after frameOff must still reach it
 		if ( t == 0x1406 || ( t >= 0x8B50 && t <= 0x8B52 ) )  // float, vec2..4
 			u.uf[t == 0x1406 ? 0 : t - 0x8B50 + 1]( at, 1, v );
+		else if ( t == 0x8B5C && vals.size() == 16 )  // mat4, GL column-major as the app's glUniformMatrix4fv
+			u.um4( at, 1, GL_FALSE, v );
 		else if ( t == 0x1405 )  // uint
 			u.uu1( at, GLuint( v[0] ) );
 		else  // int, bool
@@ -202,13 +235,57 @@ bool colourGate( const std::string & spirvDir, const std::vector<GLuint64> & fix
 	put( "paletteScale", { 1 } );
 	put( "cellIsLinear", { 1 } );
 	put( "wwDrawBase", { float( sx.base ) } );
+	// gap 4: the sun cascades on a shared D16 2D array (cascade 0: u = 0.5 + x / 80, v = 0.5 + y / 80, depth 0.5)
+	static int csmKeyAt = 0;
+	const std::uintptr_t csmKey = reinterpret_cast<std::uintptr_t>( &csmKeyAt );
+	GLuint csmTex = 0;
+	int csmUnit = -1;
+	auto csmFill = [&]( bool invert ) {
+		for ( int l = 0; l < 3; l++ )
+			for ( int by = 0; by < 8; by++ )
+				for ( int bx = 0; bx < 8; bx++ ) {
+					const float d = ( ( ( bx + by ) & 1 ) != 0 ) != invert ? 0.25f : 1.0f;
+					u.clearTexSub( csmTex, 0, bx * 32, by * 32, l, 32, 32, 1, 0x1902, GL_FLOAT, &d );  // DEPTH_COMPONENT
+				}
+	};
+	if ( twin ) {
+		if ( !sharedTarget( csmKey, 2, 256, 256, 3, 0x81A5, csmTex, why ) ) {
+			colPrintf( "BLVIEW colour FAIL (the shared cascade map: %s)\n", why.c_str() );
+			return false;
+		}
+		const GLenum pv[7][2] = { { 0x2801, 0x2601 }, { 0x2800, 0x2601 }, { 0x2802, 0x812F }, { 0x2803, 0x812F }, { 0x8072, 0x812F },
+			{ 0x884C, 0x884E }, { 0x884D, 0x0203 } };  // LINEAR, CLAMP_TO_EDGE, COMPARE_REF_TO_TEXTURE, LEQUAL
+		for ( const auto & p : pv )
+			u.texParami( csmTex, p[0], GLint( p[1] ) );
+		csmFill( false );
+		GLint( WINAPI * loc )( GLuint, const char * ) = nullptr;
+		GLint l = load( loc, "glGetUniformLocation" ) ? loc( prog, "csmMap" ) : -1;
+		if ( l < 0 && reg.count( "csmMap" ) )
+			l = reg["csmMap"];
+		csmUnit = unitAt.count( l ) ? unitAt[l] : -1;
+		const float k = 1.0f / 80.0f;
+		const float m[16] = { k, 0, 0, 0, 0, k, 0, 0, 0, 0, 0, 0, 0.5f, 0.5f, 0.5f, 1 };
+		for ( int c = 0; c < 3; c++ )
+			put( "csmMat", { m[0], m[1], m[2], m[3], m[4], m[5], m[6], m[7], m[8], m[9], m[10], m[11], m[12], m[13], m[14], m[15] }, c );
+		put( "csmParams", { 1.0f, 1000.0f, 256.0f, 10.0f } );
+		put( "csmSplitOffset", { 1000.0f, 2000.0f, 0.0f, 0.0f } );
+		put( "csmForce", { -1.0f } );
+		put( "csmRed", { 0 } );
+		put( "ussOn", { 1 } );
+		put( "ussCsmOn", { 1 } );
+		put( "ussCsmFilter", { 1.0f, 1.5f, 12.0f, 0.0f } );
+		if ( csmUnit < 0 || glGetError() != GL_NO_ERROR ) {
+			colPrintf( "BLVIEW colour FAIL (csmMap has no unit (location %d), or a GL error filling the map)\n", int( l ) );
+			return false;
+		}
+	}
 	// globalUniforms (binding 0) at the twin's layout, skinningUniforms (binding 1) zero
 	SpvModule psM;
 	const SpvBind * gb = nullptr;
-	if ( spvReflect( vkframe_objbl_cell_ps_spv, sizeof( vkframe_objbl_cell_ps_spv ) / 4, psM, why ) )
+	if ( spvReflect( psWords, psCount, psM, why ) )
 		gb = uniBlock( psM, "globalUniforms" );
 	if ( !gb ) {
-		std::printf( "BLVIEW colour FAIL (the twin's globalUniforms: %s)\n", why.c_str() );
+		colPrintf( "BLVIEW colour FAIL (the twin's globalUniforms: %s)\n", why.c_str() );
 		return false;
 	}
 	std::vector<std::uint8_t> gBytes( std::max<std::size_t>( gb->bytes, 16 ), 0 ), sBytes( 256 * 48, 0 );
@@ -289,6 +366,8 @@ bool colourGate( const std::string & spirvDir, const std::vector<GLuint64> & fix
 		f.useProgram( prog );
 		u.bindTextures( 0, 64, nullptr );
 		u.bindSamplers( 0, 64, nullptr );
+		if ( csmTex )
+			u.bindTextures( GLuint( csmUnit ), 1, &csmTex );
 		f.bindBufferBase( 0x8A11, 0, ubo[0] );
 		f.bindBufferBase( 0x8A11, 1, ubo[1] );
 		f.bindBufferBase( kSsbo, 12, rowsBuf );
@@ -306,13 +385,13 @@ bool colourGate( const std::string & spirvDir, const std::vector<GLuint64> & fix
 	};
 	ColOut gl;
 	if ( const GLenum e = glGetError(); e != GL_NO_ERROR || !putBad.empty() ) {
-		std::printf( "BLVIEW colour FAIL (GL error 0x%x setting the state; first bad value %s)\n", unsigned( e ), putBad.c_str() );
+		colPrintf( "BLVIEW colour FAIL (GL error 0x%x setting the state; first bad value %s)\n", unsigned( e ), putBad.c_str() );
 		return false;
 	}
 	shadeClear();
 	frameState();
 	if ( const GLenum e = glGetError(); e != GL_NO_ERROR ) {
-		std::printf( "BLVIEW colour FAIL (GL error 0x%x binding the frame)\n", unsigned( e ) );
+		colPrintf( "BLVIEW colour FAIL (GL error 0x%x binding the frame)\n", unsigned( e ) );
 		return false;
 	}
 	GLuint( WINAPI * debugLog )( GLuint, GLsizei, GLenum *, GLenum *, GLuint *, GLenum *, GLsizei *, char * ) = nullptr;
@@ -334,7 +413,7 @@ bool colourGate( const std::string & spirvDir, const std::vector<GLuint64> & fix
 		for ( int i = 0; debugLog && i < 8 && debugLog( 1, sizeof( buf ), nullptr, &ty, nullptr, nullptr, nullptr, buf ); i++ )
 			if ( ty == 0x824C )  // GL_DEBUG_TYPE_ERROR
 				msg = buf;
-		std::printf( "BLVIEW colour FAIL (GL error 0x%x in GL's fo4_cellbl draw: %s)\n", unsigned( drawErr ), msg.c_str() );
+		colPrintf( "BLVIEW colour FAIL (GL error 0x%x in GL's fo4_cellbl draw: %s)\n", unsigned( drawErr ), msg.c_str() );
 		return false;
 	}
 	shadeRead( gl.depth, &gl.c0, &gl.c1 );
@@ -355,20 +434,51 @@ bool colourGate( const std::string & spirvDir, const std::vector<GLuint64> & fix
 		std::size_t ch = 0;
 		for ( std::size_t i = 0; i < gl.c0.size(); i++ )
 			ch += gl.c0[i] != g2.c0[i];
-		std::printf( "BLVIEW colour GL glow probe: glowMult 0 changes %zu GL colour values\n", ch );
+		colPrintf( "BLVIEW colour GL glow probe: glowMult 0 changes %zu GL colour values\n", ch );
+	}
+	bool csmReach = true;
+	if ( twin ) {  // does the cascade map reach GL's colour (csmForce 1: no shadow)
+		ColOut g2;
+		put( "csmForce", { 1.0f } );
+		shadeClear();
+		frameState();
+		f.bindVertexArray( vao );
+		f.bindBuffer( 0x8F3F, sx.ind );
+		sf.multiDrawElementsIndirect( GL_TRIANGLES, GL_UNSIGNED_SHORT, nullptr, GLsizei( sx.cmds.size() / 5 ), 20 );
+		f.bindBuffer( 0x8F3F, 0 );
+		f.bindVertexArray( 0 );
+		frameOff();
+		shadeRead( g2.depth, &g2.c0, &g2.c1 );
+		put( "csmForce", { -1.0f } );
+		std::size_t cov = 0, moved = 0;
+		for ( std::size_t i = 0; i < gl.depth.size(); i++ ) {
+			if ( !( gl.depth[i] < 1.0f ) )
+				continue;
+			cov++;
+			bool mv = false;
+			for ( int ch = 0; ch < 4; ch++ )
+				mv = mv || gl.c0[i * 4 + ch] != g2.c0[i * 4 + ch];
+			moved += mv;
+		}
+		csmReach = cov > 0 && double( moved ) >= 0.2 * double( cov );
+		colPrintf( "BLVIEW colour GL map probe %s: csmForce 1 moves GL's colour on %zu of %zu covered pixels (bar >= 20 %%)\n",
+			csmReach ? "OK" : "FAIL", moved, cov );
 	}
 	if ( const GLenum e = glGetError(); e != GL_NO_ERROR ) {
-		std::printf( "BLVIEW colour FAIL (GL error 0x%x reading GL's fo4_cellbl draw)\n", unsigned( e ) );
+		colPrintf( "BLVIEW colour FAIL (GL error 0x%x reading GL's fo4_cellbl draw)\n", unsigned( e ) );
 		return false;
 	}
-	// the app's crossing, the same state; red: 1 glow, 2 slot, 10 strict (objBlPipe's old target count); clearK: both targets
+	// the app's crossing, the same state; red: 1 glow, 2 slot, 3 csmmap (the map inverted), 10 strict (objBlPipe's old target
+	// count); clearK: both targets
 	auto vkRun = [&]( int red, ColOut & out, std::string & w, float clearK = 0.0f ) {
 		if ( red == 1 )
 			put( "glowMult", { 0 } );
+		if ( red == 3 )
+			csmFill( true );
 		shadeClear( clearK );
 		frameState();
 		ObjBlShade s;
-		s.twin = 0;
+		s.twin = twin;
 		s.prog = prog;
 		s.poolKey = sx.key;
 		s.pool = sx.pool;
@@ -381,6 +491,8 @@ bool colourGate( const std::string & spirvDir, const std::vector<GLuint64> & fix
 		frameOff();
 		if ( red == 1 )
 			put( "glowMult", { 1.5f } );
+		if ( red == 3 )
+			csmFill( false );
 		if ( ran )
 			shadeRead( out.depth, &out.c0, &out.c1 );
 		glFinish();
@@ -437,35 +549,36 @@ bool colourGate( const std::string & spirvDir, const std::vector<GLuint64> & fix
 	const bool ran = vkRun( 0, vk0, w );
 	const ObjBlRunStat rs = takeObjBlRunStat();
 	if ( !ran ) {
-		std::printf( "BLVIEW colour FAIL (objBlShade refused: %s)\n", w.c_str() );
+		colPrintf( "BLVIEW colour FAIL (objBlShade refused: %s)\n", w.c_str() );
 		ok = false;
 	} else {
 		const DepthCmp dc = depthCmp( vk0.depth, gl.depth );
 		const ColCmp cc = colCmp( vk0 );
 		const bool litOk = cc.both >= 2000 && double( cc.lit ) >= 0.9 * double( cc.both );
 		const bool crossOk = rs.runs == 1 && rs.fails == 0;
-		std::printf( "BLVIEW colour state: %d samplers on their own units, %d values with no active location; set 0 units: %d shared, %d GL-only, "
+		colPrintf( "BLVIEW colour state: %d samplers on their own units, %d values with no active location; set 0 units: %d shared, %d GL-only, "
 			"%d GL texel buffers; crossing %s (%d runs, %d failed)\n", units, inactive, rs.shared, rs.glOwn, rs.texelGl, crossOk ? "OK" : "FAIL",
 			rs.runs, rs.fails );
-		std::printf( "BLVIEW colour depth vs GL %s (%zu covered, %zu on one side, %zu differ, max %.3g)\n", dc.word(), dc.covered, dc.oneSide,
+		colPrintf( "BLVIEW colour depth vs GL %s (%zu covered, %zu on one side, %zu differ, max %.3g)\n", dc.word(), dc.covered, dc.oneSide,
 			dc.differ, double( dc.maxAbs ) );
-		std::printf( "BLVIEW colour vs GL %s (%zu pixels both cover, %zu lit, %zu with glow: %s; %zu values differ, %zu over the bound, max %.3g of max(1, |GL|))\n",
+		colPrintf( "BLVIEW colour vs GL %s (%zu pixels both cover, %zu lit, %zu with glow: %s; %zu values differ, %zu over the bound, max %.3g of max(1, |GL|))\n",
 			cc.exact() ? "EXACT" : cc.bound() ? "BOUND" : "FAIL", cc.both, cc.lit, cc.glow, litOk ? "lit" : "NOT LIT", cc.differ, cc.over,
 			double( cc.maxRel ) );
 		if ( cc.over ) {
 			const std::size_t p = cc.first / 8, t = ( cc.first % 8 ) / 4;
 			const auto & g = t ? gl.c1 : gl.c0;
 			const auto & a = t ? vk0.c1 : vk0.c0;
-			std::printf( "BLVIEW colour spread: %zu values over 1e-2, %zu over 0.1 (of max(1, |GL|))\n", cc.over1, cc.over10 );
-			std::printf( "BLVIEW colour first over: pixel (%zu, %zu) target %zu channel %zu; GL %g %g %g %g, Vulkan %g %g %g %g\n", p % kSW, p / kSW, t,
+			colPrintf( "BLVIEW colour spread: %zu values over 1e-2, %zu over 0.1 (of max(1, |GL|))\n", cc.over1, cc.over10 );
+			colPrintf( "BLVIEW colour first over: pixel (%zu, %zu) target %zu channel %zu; GL %g %g %g %g, Vulkan %g %g %g %g\n", p % kSW, p / kSW, t,
 				cc.first % 4, double( fromHalf( g[p * 4] ) ), double( fromHalf( g[p * 4 + 1] ) ), double( fromHalf( g[p * 4 + 2] ) ),
 				double( fromHalf( g[p * 4 + 3] ) ), double( fromHalf( a[p * 4] ) ), double( fromHalf( a[p * 4 + 1] ) ), double( fromHalf( a[p * 4 + 2] ) ),
 				double( fromHalf( a[p * 4 + 3] ) ) );
 		}
-		ok = ok && crossOk &&( dc.exact() || dc.bound() ) && litOk && ( cc.exact() || cc.bound() );
+		ok = ok && crossOk &&( dc.exact() || dc.bound() ) && litOk && ( cc.exact() || cc.bound() ) && csmReach;
 	}
-	const char * redName[2] = { "glow (glowMult 0 after GL drew)", "slot (each row's maps one slot on)" };
-	for ( int r = 1; r <= 2; r++ ) {
+	const char * redName[3] = { "glow (glowMult 0 after GL drew)", "slot (each row's maps one slot on)",
+		"map (the cascade map's checker inverted after GL drew)" };
+	for ( int r = 1; r <= ( twin ? 3 : 2 ); r++ ) {
 		ColOut o;
 		std::string rw;
 		const bool rr = vkRun( r, o, rw );
@@ -479,7 +592,7 @@ bool colourGate( const std::string & spirvDir, const std::vector<GLuint64> & fix
 				vch += o.c0[i] != vk0.c0[i];
 			passes = ( dc.exact() || dc.bound() ) && ( cc.exact() || cc.bound() );
 		}
-		std::printf( "BLVIEW RED colour%s %s (%zu values over the bound, %zu Vulkan colour values moved off the Vulkan base%s%s)\n", redName[r - 1],
+		colPrintf( "BLVIEW RED colour%s %s (%zu values over the bound, %zu Vulkan colour values moved off the Vulkan base%s%s)\n", redName[r - 1],
 			passes ? "PASSED" : vch ? "FAIL" : "TESTS NOTHING", over, vch, rr ? "" : "; refused: ", rr ? "" : rw.c_str() );
 		ok = ok && !passes && vch > 0;
 	}
@@ -528,10 +641,10 @@ bool colourGate( const std::string & spirvDir, const std::vector<GLuint64> & fix
 				}
 			}
 			armOk = armOk && ran && ( dc.exact() || dc.bound() ) && both >= 2000 && over == 0 && vsTwo == 0 && t1Gl == 0 && t1Vk == 0;
-			std::printf( "BLVIEW colour 1buf depth vs GL %s (%zu covered, %zu on one side, %zu differ)\n", dc.word(), dc.covered, dc.oneSide,
+			colPrintf( "BLVIEW colour 1buf depth vs GL %s (%zu covered, %zu on one side, %zu differ)\n", dc.word(), dc.covered, dc.oneSide,
 				dc.differ );
 		}
-		std::printf( "BLVIEW colour 1buf %s (refused %d%s%s; %d runs, %d failed, %d outputs dropped; target 0 vs GL %s: %zu pixels both cover, "
+		colPrintf( "BLVIEW colour 1buf %s (refused %d%s%s; %d runs, %d failed, %d outputs dropped; target 0 vs GL %s: %zu pixels both cover, "
 			"%zu values differ, %zu over the bound, max %.3g; vs the 2-buffer Vulkan run %zu values differ; target 1 off 0.25: GL %zu, Vulkan %zu)\n",
 			armOk ? "OK" : "FAIL", int( !r1 ), r1 ? "" : ": ", r1 ? "" : w1.c_str(), rs1.runs, rs1.fails, rs1.dropped,
 			differ == 0 ? "EXACT" : over == 0 ? "BOUND" : "FAIL", both, differ, over, double( maxRel ), vsTwo, t1Gl, t1Vk );
@@ -542,7 +655,7 @@ bool colourGate( const std::string & spirvDir, const std::vector<GLuint64> & fix
 		const bool rr = vkRun( 10, vr, wr, k );
 		takeObjBlRunStat();
 		const bool said = wr.find( "the pixel stage writes 2 targets, the frame has 1" ) != std::string::npos;
-		std::printf( "BLVIEW RED colour1bufstrict %s (the strict target count; %s%s)\n", !rr && said ? "FAIL" : "PASSED",
+		colPrintf( "BLVIEW RED colour1bufstrict %s (the strict target count; %s%s)\n", !rr && said ? "FAIL" : "PASSED",
 			rr ? "drew" : "refused: ", rr ? "" : wr.c_str() );
 		ok = ok && !rr && said;
 		nBufs = 2;
@@ -553,10 +666,9 @@ bool colourGate( const std::string & spirvDir, const std::vector<GLuint64> & fix
 		t3.depth = 129;  // VK_FORMAT_D24_UNORM_S8_UINT
 		WwVkPresent::ObjBlPipeInfo i3;
 		std::string w3;
-		const bool b3 = objBlPipe( 0, vkframe_objbl_vs_spv, sizeof( vkframe_objbl_vs_spv ) / 4, vkframe_objbl_cell_ps_spv,
-			sizeof( vkframe_objbl_cell_ps_spv ) / 4, t3, {}, {}, i3, w3 );
+		const bool b3 = objBlPipe( twin, vkframe_objbl_vs_spv, sizeof( vkframe_objbl_vs_spv ) / 4, psWords, psCount, t3, {}, {}, i3, w3 );
 		const bool under = !b3 && w3.find( "the pixel stage writes 2 targets, the frame has 3" ) != std::string::npos;
-		std::printf( "BLVIEW colour 1buf under %s (a 3-colour frame: %s%s)\n", under ? "OK" : "FAIL", b3 ? "built" : "refused: ", w3.c_str() );
+		colPrintf( "BLVIEW colour 1buf under %s (a 3-colour frame: %s%s)\n", under ? "OK" : "FAIL", b3 ? "built" : "refused: ", w3.c_str() );
 		ok = ok && under;
 	}
 	/* gap 1 (manager 11-13; stated before the first run, never widened): the app's real frame, objBlFrame at 4 samples,
@@ -587,7 +699,7 @@ bool colourGate( const std::string & spirvDir, const std::vector<GLuint64> & fix
 		unsigned mc = 0, md = 0;
 		std::string mw;
 		if ( msOk && !objBlFrame( kSW, kSH, kS, 0x881A, 0x88F0, mc, md, mw ) ) {  // RGBA16F, DEPTH24_STENCIL8
-			std::printf( "BLVIEW colour ms FAIL (objBlFrame at 4 samples: %s)\n", mw.c_str() );
+			colPrintf( "BLVIEW colour ms FAIL (objBlFrame at 4 samples: %s)\n", mw.c_str() );
 			msOk = false;
 		}
 		GLuint msFb = 0, ownFb = 0, ownC = 0, ownD = 0, fillVao = 0, fillProg = 0;
@@ -608,7 +720,7 @@ bool colourGate( const std::string & spirvDir, const std::vector<GLuint64> & fix
 			storageMs( ownC, kS, 0x881A, kSW, kSH, GL_TRUE );
 			storageMs( ownD, kS, 0x88F0, kSW, kSH, GL_TRUE );
 			if ( !attach( msFb, mc, md ) || !attach( ownFb, ownC, ownD ) ) {
-				std::printf( "BLVIEW colour ms FAIL (a 4-sample framebuffer is not complete)\n" );
+				colPrintf( "BLVIEW colour ms FAIL (a 4-sample framebuffer is not complete)\n" );
 				msOk = false;
 			}
 		}
@@ -634,7 +746,7 @@ bool colourGate( const std::string & spirvDir, const std::vector<GLuint64> & fix
 				f.getProgramiv( fillProg, kLinked, &linked );
 			}
 			if ( !linked ) {
-				std::printf( "BLVIEW colour ms FAIL (the fill pass did not specialize or link)\n" );
+				colPrintf( "BLVIEW colour ms FAIL (the fill pass did not specialize or link)\n" );
 				msOk = false;
 			}
 			f.genVertexArrays( 1, &fillVao );
@@ -706,9 +818,9 @@ bool colourGate( const std::string & spirvDir, const std::vector<GLuint64> & fix
 			const std::size_t off = rOk ? fillOff( rb ) : nSmp;
 			const bool rrOk = objBlFrameSamples( mc, md, rbRed, rrw, 1 );
 			const std::size_t offRed = rrOk ? fillOff( rbRed ) : 0;
-			std::printf( "BLVIEW colour ms readback %s (%zu samples, %zu off the fill's values%s%s%s)\n", rOk && off == 0 ? "EXACT" : "FAIL", nSmp, off,
+			colPrintf( "BLVIEW colour ms readback %s (%zu samples, %zu off the fill's values%s%s%s)\n", rOk && off == 0 ? "EXACT" : "FAIL", nSmp, off,
 				fe != GL_NO_ERROR ? "; GL error in the fill " : "", rOk ? "" : "; refused: ", rOk ? "" : rw.c_str() );
-			std::printf( "BLVIEW RED colourmsdrop %s (the readback reads sample 0 for sample 1: %zu samples off%s%s)\n", rrOk && offRed ? "FAIL" : "PASSED",
+			colPrintf( "BLVIEW RED colourmsdrop %s (the readback reads sample 0 for sample 1: %zu samples off%s%s)\n", rrOk && offRed ? "FAIL" : "PASSED",
 				offRed, rrOk ? "" : "; refused: ", rrOk ? "" : rrw.c_str() );
 			msOk = rOk && off == 0 && rrOk && offRed > 0;
 		}
@@ -731,7 +843,7 @@ bool colourGate( const std::string & spirvDir, const std::vector<GLuint64> & fix
 			takeObjBlRunStat();
 			frameState();
 			ObjBlShade s;
-			s.twin = 0;
+			s.twin = twin;
 			s.prog = prog;
 			s.poolKey = sx.key;
 			s.pool = sx.pool;
@@ -744,7 +856,7 @@ bool colourGate( const std::string & spirvDir, const std::vector<GLuint64> & fix
 			const ObjBlRunStat rs = takeObjBlRunStat();
 			const bool vOk = vRan && glGetError() == GL_NO_ERROR && objBlFrameSamples( mc, md, vS, vw );
 			if ( !gOk || !vOk ) {
-				std::printf( "BLVIEW colour ms FAIL (%s: %s)\n", !gOk ? "GL's readback" : vRan ? "Vulkan's readback" : "objBlShade refused",
+				colPrintf( "BLVIEW colour ms FAIL (%s: %s)\n", !gOk ? "GL's readback" : vRan ? "Vulkan's readback" : "objBlShade refused",
 					!gOk ? gw.c_str() : vw.c_str() );
 				msOk = false;
 			} else {
@@ -785,9 +897,9 @@ bool colourGate( const std::string & spirvDir, const std::vector<GLuint64> & fix
 				}
 				const bool litOk = both >= 2000 && double( lit ) >= 0.9 * double( both );
 				const bool crossOk = rs.runs == 1 && rs.fails == 0;
-				std::printf( "BLVIEW colour ms depth vs GL %s (%zu samples covered, %zu on one side, %zu differ, max %.3g)\n", dc.word(), dc.covered,
+				colPrintf( "BLVIEW colour ms depth vs GL %s (%zu samples covered, %zu on one side, %zu differ, max %.3g)\n", dc.word(), dc.covered,
 					dc.oneSide, dc.differ, double( dc.maxAbs ) );
-				std::printf( "BLVIEW colour ms vs GL %s (%zu samples both cover, %zu in edge pixels, %zu lit: %s; %zu values differ, %zu over the bound, "
+				colPrintf( "BLVIEW colour ms vs GL %s (%zu samples both cover, %zu in edge pixels, %zu lit: %s; %zu values differ, %zu over the bound, "
 					"max %.3g; stencil differs on %zu; crossing %d runs, %d failed, %d outputs dropped)\n",
 					differ == 0 ? "EXACT" : over == 0 ? "BOUND" : "FAIL", both, edge, lit, litOk ? "lit" : "NOT LIT", differ, over, double( maxRel ),
 					stencil, rs.runs, rs.fails, rs.dropped );
@@ -804,13 +916,13 @@ bool colourGate( const std::string & spirvDir, const std::vector<GLuint64> & fix
 			takeObjBlRunStat();
 			const bool oRead = objBlFrameSamples( ownC, ownD, oS, orw );
 			const bool oSaid = ow.find( "not a shared target" ) != std::string::npos && orw.find( "not a shared target" ) != std::string::npos;
-			std::printf( "BLVIEW RED colourmsunshared %s (GL's own 4-sample frame: the shade %s%s, the readback %s%s)\n",
+			colPrintf( "BLVIEW RED colourmsunshared %s (GL's own 4-sample frame: the shade %s%s, the readback %s%s)\n",
 				!oRan && !oRead && oSaid ? "FAIL" : "PASSED", oRan ? "drew" : "refused: ", ow.c_str(), oRead ? "read" : "refused: ", orw.c_str() );
 			msOk = msOk && !oRan && !oRead && oSaid;
 			nBufs = 2;
 			frameFb = sx.fbo;
 		}
-		std::printf( "BLVIEW colour ms %s\n", msOk ? "OK" : "FAIL" );
+		colPrintf( "BLVIEW colour ms %s\n", msOk ? "OK" : "FAIL" );
 		ok = ok && msOk;
 		if ( fillProg )
 			u.deleteProgram( fillProg );
@@ -858,14 +970,19 @@ bool colourGate( const std::string & spirvDir, const std::vector<GLuint64> & fix
 			fixtureTex = reading;
 		gl = glKeep;
 	}
-	std::printf( "BLVIEW colour per texture, %d at anisotropy 1 (over the bound / over 0.1):%s\n", anisoAt, perTex.c_str() );
-	std::printf( "BLVIEW colour known driver difference: texture %d at the fixture's anisotropy, GL's anisotropic filter against Vulkan's "
+	colPrintf( "BLVIEW colour per texture, %d at anisotropy 1 (over the bound / over 0.1):%s\n", anisoAt, perTex.c_str() );
+	colPrintf( "BLVIEW colour known driver difference: texture %d at the fixture's anisotropy, GL's anisotropic filter against Vulkan's "
 		"(a reading, not the bar): %s over the bound / over 0.1\n", anisoAt, fixtureTex.c_str() );
+	if ( csmTex ) {
+		u.bindTextures( 0, 64, nullptr );
+		sharedTargetDrop( csmKey );
+	}
+	gColTwin = 0;
 	objBlLocsLoad( spirvDir + "/no_locs.txt", why );  // the GLSL gates never see it
 	f.useProgram( 0 );
 	u.deleteProgram( prog );
 	if ( const GLenum e = glGetError(); e != GL_NO_ERROR ) {
-		std::printf( "BLVIEW colour FAIL (GL error 0x%x left)\n", unsigned( e ) );
+		colPrintf( "BLVIEW colour FAIL (GL error 0x%x left)\n", unsigned( e ) );
 		ok = false;
 	}
 	return ok;

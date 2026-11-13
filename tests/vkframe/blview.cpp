@@ -24,6 +24,7 @@
 #include "../../src/features/vkframe/vkpresent.cpp"
 
 #include <GL/gl.h>
+#include <cstdarg>
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>
@@ -1106,7 +1107,9 @@ int main( int argc, char ** argv )
 		std::printf( "BLVIEW colour twin: texture %d at anisotropy 1 (test-local; the fixture's def %.0f), handle %llx: %s%s (GL error 0x%x)\n", anisoAt,
 			double( d.aniso ), static_cast<unsigned long long>( aniso1H ), twinOk ? "made" : "FAIL ", twinOk ? "" : why.c_str(), unsigned( e ) );
 	}
-	ok = twinOk && colourGate( spvDir + "/spvset/spirv", handles, anisoAt, aniso1H ) && ok;
+	const bool colOk = twinOk && colourGate( spvDir + "/spvset/spirv", handles, anisoAt, aniso1H, 0 );
+	const bool colCsmOk = twinOk && colourGate( spvDir + "/spvset/spirv", handles, anisoAt, aniso1H, 1 );  // gap 4: fo4_cellcsmbl
+	ok = colOk && colCsmOk && ok;
 	vk().vkWaitForFences( vk().dev, 1, &gv.fence, VK_TRUE, 1000000000ull );
 	const WwVkPresent::BlStat st = WwVkPresent::takeBlStat();
 	std::printf( "BLVIEW stat: %d images, %d samplers (caps %u / %u), %d adds, %d drops, %d rows, %d misses, %d rewrites, %d fails (%s)\n",
