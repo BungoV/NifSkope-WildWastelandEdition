@@ -53,6 +53,7 @@
 // lane VKFAR1: the far bulb dots as instanced quads (cell_fardots)
 #include "features/vkframe/fardots_view_vs.spv.h"
 #include "features/vkframe/fardots_view_ps.spv.h"
+#include "features/vkframe/vkfarcards.h"  // lane VKFAR1 round 2: the far cards' inputs (vkfarcards.inc)
 
 #include <algorithm>
 #include <chrono>
@@ -471,6 +472,9 @@ bool makeDevice( std::string & why )
 	v.storageExt = offered.shaderStorageImageExtendedFormats == VK_TRUE;
 	en.shaderFloat64 = offered.shaderFloat64;
 	v.float64 = offered.shaderFloat64 == VK_TRUE;
+	// lane VKFAR1 round 2: the far cards' BC sheets and shadow cube arrays (vkfarcards.inc reads what is offered)
+	en.textureCompressionBC = offered.textureCompressionBC;
+	en.imageCubeArray = offered.imageCubeArray;
 	VkDeviceCreateInfo di { VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO };
 	di.pEnabledFeatures = &en;
 	di.queueCreateInfoCount = 1;
@@ -3457,6 +3461,7 @@ void shutdown()
 		sharedStat().mb = 0.0;
 		sharedGen()++;
 	}
+	farCardsFree( gl().ok );  // lane VKFAR1 round 2: the far cards' twins
 	// the temporal AA's crossing semaphores (GL's names); its pipelines stay with the device
 	Taa & A = taa();
 	if ( A.glDone || A.pending ) {
@@ -5905,6 +5910,7 @@ FxStat takeCloudStat()
 }  // namespace WwVkPresent
 
 #include "features/vkframe/vkfardots.inc"  // lane VKFAR1 (row G3): the far bulb dots on the view
+#include "features/vkframe/vkfarcards.inc"  // lane VKFAR1 round 2: the far cards' inputs
 
 // lane VKLIGHT1: AO, the contact shadow lines and the SSGI cast as compute on the present device (vkpresent.h LightRun)
 namespace

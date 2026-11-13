@@ -1,0 +1,198 @@
+// Lane VKFAR1 round 2 (2026-11-13, row G3): the far cards' BC sheets and the cube-array shadow (vkfarcards.inc farTwin)
+// on the present device. GL writes known bytes into each twin as into its own texture (glCompressedTexSubImage2D/3D for
+// BC1 / BC3 / BC5 / BC7 / BC7 sRGB, glTexSubImage3D for a GL_DEPTH_COMPONENT16 cube-map array); after glFinish the present
+// device copies every level and layer out (farTwinRead) and the bytes must be the same, byte for byte.
+// Bar (set before the first run): every compared level / layer EXACT; GL raised no error; a GL format with no twin refused.
+// Reds (each must FAIL): the layer one off (a cube face order / layer mapping slip), the level one off, the twin made as
+// another format (BC1 for a BC3 sheet). Last line `FARTWIN GATE OK` or `FARTWIN GATE FAILED`.
+#define main fxview_main
+#include "fxview.cpp"
+#undef main
+
+#include <random>
+
+namespace fartw
+{
+using namespace fv;
+using CTex2D = void( WINAPI * )( GLenum, GLint, GLint, GLint, GLsizei, GLsizei, GLenum, GLsizei, const void * );
+using CTex3D = void( WINAPI * )( GLenum, GLint, GLint, GLint, GLint, GLsizei, GLsizei, GLsizei, GLenum, GLsizei, const void * );
+CTex2D cSub2D = nullptr;
+CTex3D cSub3D = nullptr;
+
+struct Case
+{
+	const char * name;
+	int type;  // 0 2D, 2 2D array, 3 cube-map array
+	int w, h, layers, levels;
+	unsigned fmt;
+	int block;  // bytes a 4x4 block; 0 = D16
+	std::vector<std::vector<std::vector<std::uint8_t>>> data;  // [level][layer]
+	char key = 0;
+	unsigned tex = 0;
+};
+
+size_t levelBytes( const Case & c, int level )
+{
+	const int w = std::max( c.w >> level, 1 ), h = std::max( c.h >> level, 1 );
+	return c.block ? size_t( ( w + 3 ) / 4 ) * size_t( ( h + 3 ) / 4 ) * size_t( c.block ) : size_t( w ) * size_t( h ) * 2;
+}
+
+GLenum target( const Case & c )
+{
+	return c.type == 3 ? 0x9009 : c.type == 2 ? fT2DA : GL_TEXTURE_2D;
+}
+
+void upload( Case & c, std::mt19937 & rng )
+{
+	glBindTexture( target( c ), c.tex );
+	c.data.assign( size_t( c.levels ), {} );
+	for ( int l = 0; l < c.levels; l++ ) {
+		const int w = std::max( c.w >> l, 1 ), h = std::max( c.h >> l, 1 );
+		for ( int z = 0; z < c.layers; z++ ) {
+			std::vector<std::uint8_t> b( levelBytes( c, l ) );
+			for ( auto & x : b )
+				x = std::uint8_t( rng() );
+			if ( c.type == 0 )
+				cSub2D( GL_TEXTURE_2D, l, 0, 0, w, h, c.fmt, GLsizei( b.size() ), b.data() );
+			else if ( c.block )
+				cSub3D( target( c ), l, 0, 0, z, w, h, 1, c.fmt, GLsizei( b.size() ), b.data() );
+			else
+				f.texSubImage3D( target( c ), l, 0, 0, z, w, h, 1, GL_DEPTH_COMPONENT, GL_UNSIGNED_SHORT, b.data() );
+			c.data[size_t( l )].push_back( std::move( b ) );
+		}
+	}
+	glBindTexture( target( c ), 0 );
+}
+
+// bytes that differ (a size mismatch counts every byte of the longer side)
+size_t differ( const std::vector<std::uint8_t> & a, const std::vector<std::uint8_t> & b )
+{
+	if ( a.size() != b.size() )
+		return std::max( a.size(), b.size() );
+	size_t n = 0;
+	for ( size_t i = 0; i < a.size(); i++ )
+		n += a[i] != b[i];
+	return n;
+}
+}  // namespace fartw
+
+int main()
+{
+	using namespace fartw;
+	setvbuf( stdout, nullptr, _IONBF, 0 );
+	auto fatal = []( const std::string & m ) {
+		std::printf( "FARTWIN %s\nFARTWIN GATE FAILED\n", m.c_str() );
+		return 2;
+	};
+	gOpenGl = LoadLibraryA( "opengl32.dll" );
+	WNDCLASSA wc {};
+	wc.style = CS_OWNDC;
+	wc.lpfnWndProc = wndProc;
+	wc.hInstance = GetModuleHandleA( nullptr );
+	wc.lpszClassName = "wwfartwin";
+	RegisterClassA( &wc );
+	HWND wnd = CreateWindowExA( WS_EX_NOACTIVATE, "wwfartwin", "far twin harness", WS_OVERLAPPEDWINDOW, 40, 40, 160, 90, nullptr,
+		nullptr, wc.hInstance, nullptr );
+	HDC dc = GetDC( wnd );
+	PIXELFORMATDESCRIPTOR pfd { sizeof( pfd ), 1, PFD_DRAW_TO_WINDOW | PFD_SUPPORT_OPENGL | PFD_DOUBLEBUFFER, PFD_TYPE_RGBA, 32 };
+	SetPixelFormat( dc, ChoosePixelFormat( dc, &pfd ), &pfd );
+	HGLRC glrc = wglCreateContext( dc );
+	wglMakeCurrent( dc, glrc );
+	pump();
+	if ( !loadAll() || !load( cSub2D, "glCompressedTexSubImage2D" ) || !load( cSub3D, "glCompressedTexSubImage3D" ) )
+		return fatal( "GL entry points" );
+	std::printf( "FARTWIN GL on %s\n", reinterpret_cast<const char *>( glGetString( GL_RENDERER ) ) );
+	glPixelStorei( GL_PACK_ALIGNMENT, 1 );
+	glPixelStorei( GL_UNPACK_ALIGNMENT, 1 );
+	std::string why;
+	if ( !WwVkPresent::viewBegin( 160, 90, 1, glProc, why ) )
+		return fatal( "the view: " + why );
+	std::vector<Case> cs;
+	cs.push_back( { "BC1 2D 64x32, 3 levels", 0, 64, 32, 1, 3, 0x83F1, 8 } );
+	cs.push_back( { "BC3 2D array 32x32x5", 2, 32, 32, 5, 1, 0x83F3, 16 } );
+	cs.push_back( { "BC5 2D array 16x48x2, 2 levels", 2, 16, 48, 2, 2, 0x8DBD, 16 } );
+	cs.push_back( { "BC7 2D 128x64, 4 levels", 0, 128, 64, 1, 4, 0x8E8C, 16 } );
+	cs.push_back( { "BC7 sRGB 2D array 64x64x3", 2, 64, 64, 3, 1, 0x8E8D, 16 } );
+	cs.push_back( { "D16 cube-map array 32x32, 2 cubes", 3, 32, 32, 12, 1, 0x81A5, 0 } );
+	std::mt19937 rng( 1113u );
+	bool ok = true;
+	while ( glGetError() != GL_NO_ERROR ) {
+	}
+	for ( auto & c : cs ) {
+		if ( !WwVkPresent::farTwin( reinterpret_cast<std::uintptr_t>( &c.key ), c.type, c.w, c.h, c.layers, c.fmt, c.tex, why, c.levels ) )
+			return fatal( std::string( "twin " ) + c.name + ": " + why );
+		upload( c, rng );
+		const GLenum e = glGetError();
+		if ( e != GL_NO_ERROR ) {
+			std::printf( "FARTWIN %s: GL error 0x%04X on the upload\n", c.name, unsigned( e ) );
+			ok = false;
+		}
+	}
+	glFinish();
+	for ( auto & c : cs ) {
+		size_t bad = 0, bytes = 0, parts = 0;
+		for ( int l = 0; l < c.levels; l++ )
+			for ( int z = 0; z < c.layers; z++ ) {
+				std::vector<std::uint8_t> got;
+				if ( !WwVkPresent::farTwinRead( reinterpret_cast<std::uintptr_t>( &c.key ), l, z, got, why ) ) {
+					std::printf( "FARTWIN %s: read level %d layer %d failed: %s\n", c.name, l, z, why.c_str() );
+					ok = false;
+					continue;
+				}
+				bad += differ( got, c.data[size_t( l )][size_t( z )] );
+				bytes += got.size();
+				parts++;
+			}
+		std::printf( "FARTWIN %s: %zu levels x layers, %zu bytes, %zu differ: %s\n", c.name, parts, bytes, bad, bad ? "FAIL" : "EXACT" );
+		ok = ok && bad == 0 && parts == size_t( c.levels * c.layers );
+	}
+	{
+		unsigned t = 0;
+		std::string w2;
+		char k = 0;
+		const bool made = WwVkPresent::farTwin( reinterpret_cast<std::uintptr_t>( &k ), 0, 16, 16, 1, 0x8051 /* GL_RGB8 */, t, w2 );
+		std::printf( "FARTWIN a format with no twin (GL_RGB8): %s (%s)\n", made ? "MADE (wrong)" : "refused", w2.c_str() );
+		if ( made ) {
+			ok = false;
+			WwVkPresent::farTwinDrop( reinterpret_cast<std::uintptr_t>( &k ) );
+		}
+	}
+	// reds: each must FAIL
+	auto red = [&]( const char * name, size_t bad ) {
+		std::printf( "FARTWIN red %s: %s (%zu bytes differ)\n", name, bad ? "FAIL" : "EXACT", bad );
+		if ( !bad ) {
+			std::printf( "FARTWIN red %s PASSED: the gate cannot see it\n", name );
+			ok = false;
+		}
+	};
+	{
+		Case & c = cs[5];
+		std::vector<std::uint8_t> got;
+		WwVkPresent::farTwinRead( reinterpret_cast<std::uintptr_t>( &c.key ), 0, 7, got, why );
+		red( "layer one off (cube 1 face 1 read as face 2)", differ( got, c.data[0][8] ) );
+	}
+	{
+		Case & c = cs[3];
+		std::vector<std::uint8_t> got;
+		WwVkPresent::farTwinRead( reinterpret_cast<std::uintptr_t>( &c.key ), 1, 0, got, why );
+		red( "level one off (level 1 read as level 2)", differ( got, c.data[2][0] ) );
+	}
+	{
+		Case & c = cs[1];
+		unsigned t = 0;
+		WwVkPresent::farTwin( reinterpret_cast<std::uintptr_t>( &c.key ), c.type, c.w, c.h, c.layers, 0x83F1, t, why );
+		std::vector<std::uint8_t> got;
+		WwVkPresent::farTwinRead( reinterpret_cast<std::uintptr_t>( &c.key ), 0, 0, got, why );
+		red( "the twin made as BC1 for a BC3 sheet", differ( got, c.data[0][0] ) );
+	}
+	const WwVkPresent::FarTwinStat st = WwVkPresent::farTwinStat();
+	std::printf( "FARTWIN stat: %d made, %d dropped, %d fails (%s), %.2f MB\n", st.made, st.dropped, st.fails, st.failWhy.c_str(), st.mb );
+	for ( auto & c : cs )
+		WwVkPresent::farTwinDrop( reinterpret_cast<std::uintptr_t>( &c.key ) );
+	WwVkPresent::shutdown();
+	wglMakeCurrent( nullptr, nullptr );
+	wglDeleteContext( glrc );
+	DestroyWindow( wnd );
+	std::printf( "%s\n", ok ? "FARTWIN GATE OK" : "FARTWIN GATE FAILED" );
+	return ok ? 0 : 1;
+}
