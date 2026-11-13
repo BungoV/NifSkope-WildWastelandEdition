@@ -166,11 +166,41 @@ void blWrite( std::uint32_t binding, std::uint32_t at, VkImageView view, VkSampl
 	v.vkUpdateDescriptorSets( v.dev, 1, &w, 0, nullptr );
 }
 
+// VKOBJ3: the freed elements black before their twins are destroyed (the caller drained and waited the device)
+void blGravesBlack()
+{
+	Bl & B = blS();
+	if ( !B.set )
+		return;
+	for ( const auto & g : B.graves )
+		blWrite( 0, g.first, B.zeroView, VK_NULL_HANDLE );
+}
+
+// VKOBJ3: a swizzle that only names what the format reads anyway counts as none: a channel the format lacks reads 0 (rgb)
+// or 1 (alpha) as gli writes it for BC1 RGB / BC4 / BC5; any other (BC4's R,R,R,1) stays refused
+void blSwizzleNorm( VkFormat fmt, WwVkPresent::BlSampler & s )
+{
+	int comps = 4;
+	if ( fmt == VK_FORMAT_BC4_UNORM_BLOCK || fmt == VK_FORMAT_BC4_SNORM_BLOCK )
+		comps = 1;
+	else if ( fmt == VK_FORMAT_BC5_UNORM_BLOCK || fmt == VK_FORMAT_BC5_SNORM_BLOCK )
+		comps = 2;
+	else if ( fmt == VK_FORMAT_BC1_RGB_UNORM_BLOCK || fmt == VK_FORMAT_BC1_RGB_SRGB_BLOCK )
+		comps = 3;
+	for ( int c = comps; c < 4; c++ ) {
+		const GLint absent = c == 3 ? 1 : 0;  // GL_ONE / GL_ZERO
+		if ( s.swizzle[c] == absent )
+			s.swizzle[c] = GLint( 0x1903 + c );
+	}
+}
+
 // the view the table samples for an owner's key: the shared twin (2D, one sample, colour)
 VkImageView blView( std::uintptr_t key, VkFormat & fmt )
 {
-	// VKFAR1 (BC sheet twins, cube arrays) joins here: farTwinFind( key ) when sharedFind has none
+	// VKOBJ3: the texture cache's BC twins live in VKFAR1's map (farTwin), the rest in sharedTarget's
 	const Shared * s = sharedFind( key );
+	if ( !s )
+		s = farTwinFind( key );
 	if ( !s || s->type != 0 || s->samples != 1 || s->glFmt == kDepth24 || s->glFmt == kDepth32f || s->glFmt == kDepth16
 		|| s->glFmt == kDepth24Stencil8 )
 		return VK_NULL_HANDLE;
@@ -449,9 +479,11 @@ bool blAdd( std::uint64_t handle, std::uintptr_t key, const BlSampler & s, std::
 		return refuse( "no shared 2D twin for this texture" );
 	if ( blIsSrgb( fmt ) && s.srgbDecode == 0x8A4A )
 		return refuse( "an sRGB texture with its decode skipped" );
+	BlSampler sn = s;
+	blSwizzleNorm( fmt, sn );
 	BlSmpKey k;
 	std::uint32_t smp = 0;
-	if ( !blSamplerKey( s, k, w ) || !blSamplerIndex( k, smp, w ) )
+	if ( !blSamplerKey( sn, k, w ) || !blSamplerIndex( k, smp, w ) )
 		return refuse( w );
 	auto old = B.handles.find( handle );
 	if ( old != B.handles.end() ) {  // the same handle again: GL froze its state, so only its key can be news
