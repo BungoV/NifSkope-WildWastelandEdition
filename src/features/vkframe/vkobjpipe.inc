@@ -2,8 +2,10 @@
 // modules. Included by vkpresent.cpp after vkbindless.inc (blSetGet: the table is set 1). The API: vkobjpipe.h.
 #include "features/vkframe/vkobjpipe.h"
 
+#include <algorithm>
 #include <cstring>
 #include <map>
+#include <type_traits>
 #include <vector>
 
 namespace
@@ -131,6 +133,12 @@ bool spvReflect( const std::uint32_t * w, std::size_t n, SpvModule & out, std::s
 	std::map<std::uint32_t, std::uint32_t> binding, setOf, location, constants;
 	std::map<std::uint32_t, int> builtin, block, bufferBlock;
 	std::map<std::uint32_t, std::string> names;
+	// a block's members: their type ids, names and layout decorations; an array type's stride
+	std::map<std::uint32_t, std::vector<std::uint32_t>> structMembers;
+	std::map<std::uint32_t, std::map<std::uint32_t, std::string>> memberNames;
+	std::map<std::uint32_t, std::map<std::uint32_t, std::uint32_t>> memberOffset, memberStride;
+	std::map<std::uint32_t, std::map<std::uint32_t, int>> memberRowMajor;
+	std::map<std::uint32_t, std::uint32_t> arrayStride;
 	struct Var
 	{
 		std::uint32_t id = 0, ptr = 0, storage = 0;
@@ -147,6 +155,18 @@ bool spvReflect( const std::uint32_t * w, std::size_t n, SpvModule & out, std::s
 		case 5:  // OpName
 			if ( wc >= 3 )
 				names[a[0]] = spvString( a + 1, wc - 2 );
+			break;
+		case 6:  // OpMemberName
+			if ( wc >= 4 )
+				memberNames[a[0]][a[1]] = spvString( a + 2, wc - 3 );
+			break;
+		case 72:  // OpMemberDecorate: RowMajor 4, ColMajor 5, MatrixStride 7, Offset 35
+			if ( wc >= 4 && a[2] == 4 )
+				memberRowMajor[a[0]][a[1]] = 1;
+			else if ( wc >= 5 && a[2] == 7 )
+				memberStride[a[0]][a[1]] = a[3];
+			else if ( wc >= 5 && a[2] == 35 )
+				memberOffset[a[0]][a[1]] = a[3];
 			break;
 		case 15:  // OpEntryPoint
 			if ( wc >= 3 && !out.stage )
@@ -165,17 +185,22 @@ bool spvReflect( const std::uint32_t * w, std::size_t n, SpvModule & out, std::s
 				binding[a[0]] = a[2];
 			else if ( wc >= 4 && a[1] == 34 )
 				setOf[a[0]] = a[2];
+			else if ( wc >= 4 && a[1] == 6 )
+				arrayStride[a[0]] = a[2];
 			break;
 		case 20: types[a[0]] = { op }; break;                                       // OpTypeBool
 		case 21: if ( wc >= 4 ) types[a[0]] = { op, a[1], a[2] }; break;            // OpTypeInt: width, signed
 		case 22: if ( wc >= 3 ) types[a[0]] = { op, a[1] }; break;                  // OpTypeFloat
 		case 23: case 24: if ( wc >= 4 ) types[a[0]] = { op, a[1], a[2] }; break;  // OpTypeVector / Matrix: element, count
-		case 25: if ( wc >= 9 ) types[a[0]] = { op, a[2], a[6] }; break;            // OpTypeImage: dim, sampled
+		case 25: if ( wc >= 9 ) types[a[0]] = { op, a[2], a[6], a[4] }; break;      // OpTypeImage: dim, sampled, arrayed
 		case 26: types[a[0]] = { op }; break;                                       // OpTypeSampler
 		case 27: if ( wc >= 3 ) types[a[0]] = { op, a[1] }; break;                  // OpTypeSampledImage
 		case 28: if ( wc >= 4 ) types[a[0]] = { op, a[1], a[2] }; break;            // OpTypeArray: element, length id
 		case 29: if ( wc >= 3 ) types[a[0]] = { op, a[1] }; break;                  // OpTypeRuntimeArray
-		case 30: types[a[0]] = { op }; break;                                       // OpTypeStruct
+		case 30:                                                                    // OpTypeStruct
+			types[a[0]] = { op };
+			structMembers[a[0]].assign( a + 1, a + wc - 1 );
+			break;
 		case 32: if ( wc >= 4 ) types[a[0]] = { op, a[1], a[2] }; break;            // OpTypePointer: storage, type
 		case 43: if ( wc >= 4 ) constants[a[1]] = a[2]; break;                      // OpConstant
 		case 59: if ( wc >= 4 ) vars.push_back( { a[1], a[0], a[2] } ); break;      // OpVariable
@@ -254,18 +279,53 @@ bool spvReflect( const std::uint32_t * w, std::size_t n, SpvModule & out, std::s
 			t = x.a;
 			x = ty( t );
 		}
-		if ( x.op == 25 )
+		if ( x.op == 27 ) {
+			b.type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+			x = ty( x.a );
+			b.dim = x.a;
+			b.arrayed = x.c;
+		} else if ( x.op == 25 ) {
 			b.type = x.a == 5 ? ( x.b == 2 ? VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER : VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER )
 				: ( x.b == 2 ? VK_DESCRIPTOR_TYPE_STORAGE_IMAGE : VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE );
-		else if ( x.op == 26 )
+			b.dim = x.a;
+			b.arrayed = x.c;
+		} else if ( x.op == 26 )
 			b.type = VK_DESCRIPTOR_TYPE_SAMPLER;
-		else if ( x.op == 27 )
-			b.type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
 		else if ( x.op == 30 && ( v.storage == 12 || bufferBlock.count( t ) ) )
 			b.type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-		else if ( x.op == 30 && v.storage == 2 && block.count( t ) )
+		else if ( x.op == 30 && v.storage == 2 && block.count( t ) ) {
 			b.type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-		else {
+			// the members: scalar / vector / matrix, or an array of one (a nested struct is base 3: the mirror refuses it)
+			const std::vector<std::uint32_t> & mt = structMembers[t];
+			for ( std::uint32_t k = 0; k < mt.size(); k++ ) {
+				SpvMember m;
+				m.name = memberNames[t].count( k ) ? memberNames[t][k] : "%" + std::to_string( k );
+				m.offset = memberOffset[t].count( k ) ? memberOffset[t][k] : 0;
+				m.colStride = memberStride[t].count( k ) ? memberStride[t][k] : 0;
+				m.rowMajor = memberRowMajor[t].count( k ) != 0;
+				Ty e = ty( mt[k] );
+				if ( e.op == 28 ) {
+					m.count = constants.count( e.b ) ? constants[e.b] : 1;
+					m.arrayStride = arrayStride.count( mt[k] ) ? arrayStride[mt[k]] : 0;
+					e = ty( e.a );
+				}
+				if ( e.op == 24 ) {
+					m.cols = e.b;
+					e = ty( e.a );
+				}
+				if ( e.op == 23 ) {
+					m.comps = e.b;
+					e = ty( e.a );
+				}
+				m.base = e.op == 22 ? 0 : e.op == 21 ? ( e.b ? 1 : 2 ) : 3;
+				// the member's extent: the last element's last component
+				const std::uint32_t one = m.cols > 1 ? ( m.rowMajor ? ( m.comps - 1 ) * m.colStride + m.cols * 4 : ( m.cols - 1 ) * m.colStride + m.comps * 4 )
+					: m.comps * 4;
+				b.bytes = std::max( b.bytes, m.offset + ( m.count - 1 ) * m.arrayStride + one );
+				b.members.push_back( m );
+			}
+			b.bytes = ( b.bytes + 15u ) & ~15u;
+		} else {
 			why = nm + ": a descriptor type the reader does not take";
 			return false;
 		}
@@ -552,5 +612,225 @@ void objBlPipeFree()
 	}
 	O.made.clear();
 	O.refused = 0;
+}
+}  // namespace WwVkPresent
+
+namespace
+{
+// the GL entry points the mirror reads (GL 4.5 core; looked up per call: the mirror runs on GL's thread, any context)
+struct OuGl
+{
+	int( WINAPI * getUniformLocation )( unsigned, const char * ) = nullptr;
+	void( WINAPI * getUniformfv )( unsigned, int, float * ) = nullptr;
+	void( WINAPI * getUniformiv )( unsigned, int, int * ) = nullptr;
+	void( WINAPI * getUniformuiv )( unsigned, int, unsigned * ) = nullptr;
+	unsigned( WINAPI * getUniformBlockIndex )( unsigned, const char * ) = nullptr;
+	void( WINAPI * getActiveUniformBlockiv )( unsigned, unsigned, unsigned, int * ) = nullptr;
+	void( WINAPI * getUniformIndices )( unsigned, int, const char * const *, unsigned * ) = nullptr;
+	void( WINAPI * getActiveUniformsiv )( unsigned, int, const unsigned *, unsigned, int * ) = nullptr;
+	void( WINAPI * getIntegeri_v )( unsigned, unsigned, int * ) = nullptr;
+	void( WINAPI * getInteger64i_v )( unsigned, unsigned, long long * ) = nullptr;
+	void( WINAPI * getNamedBufferSubData )( unsigned, std::intptr_t, std::intptr_t, void * ) = nullptr;
+	void( WINAPI * getIntegerv )( unsigned, int * ) = nullptr;
+	void( WINAPI * activeTexture )( unsigned ) = nullptr;
+};
+
+bool ouGl( WwVkPresent::GlProc gp, OuGl & g, std::string & why )
+{
+	if ( !gp ) {
+		why = "no GL entry points";
+		return false;
+	}
+	auto ld = [&]( auto & f, const char * n ) {
+		f = reinterpret_cast<std::remove_reference_t<decltype( f )>>( gp( n ) );
+		if ( !f && why.empty() )
+			why = std::string( "GL has no " ) + n;
+	};
+	why.clear();
+	ld( g.getUniformLocation, "glGetUniformLocation" );
+	ld( g.getUniformfv, "glGetUniformfv" );
+	ld( g.getUniformiv, "glGetUniformiv" );
+	ld( g.getUniformuiv, "glGetUniformuiv" );
+	ld( g.getUniformBlockIndex, "glGetUniformBlockIndex" );
+	ld( g.getActiveUniformBlockiv, "glGetActiveUniformBlockiv" );
+	ld( g.getUniformIndices, "glGetUniformIndices" );
+	ld( g.getActiveUniformsiv, "glGetActiveUniformsiv" );
+	ld( g.getIntegeri_v, "glGetIntegeri_v" );
+	ld( g.getInteger64i_v, "glGetInteger64i_v" );
+	ld( g.getNamedBufferSubData, "glGetNamedBufferSubData" );
+	ld( g.getIntegerv, "glGetIntegerv" );
+	ld( g.activeTexture, "glActiveTexture" );
+	return why.empty();
+}
+
+// GL's texture target and its binding query for an image's Dim / Arrayed (0: none)
+void ouTarget( std::uint32_t dim, std::uint32_t arrayed, unsigned & target, unsigned & query )
+{
+	target = query = 0;
+	if ( dim == 0 ) {
+		target = arrayed ? 0x8C18u : 0x0DE0u;  // TEXTURE_1D_ARRAY / 1D
+		query = arrayed ? 0x8C1Cu : 0x8068u;
+	} else if ( dim == 1 ) {
+		target = arrayed ? 0x8C1Au : 0x0DE1u;  // TEXTURE_2D_ARRAY / 2D
+		query = arrayed ? 0x8C1Du : 0x8069u;
+	} else if ( dim == 2 ) {
+		target = 0x806Fu;  // TEXTURE_3D
+		query = 0x806Au;
+	} else if ( dim == 3 ) {
+		target = arrayed ? 0x9009u : 0x8513u;  // TEXTURE_CUBE_MAP_ARRAY / CUBE_MAP
+		query = arrayed ? 0x900Au : 0x8514u;
+	} else if ( dim == 5 ) {
+		target = 0x8C2Au;  // TEXTURE_BUFFER
+		query = 0x8C2Cu;
+	}
+}
+}  // namespace
+
+namespace WwVkPresent
+{
+bool objBlLoose( GlProc gp, unsigned prog, const SpvBind & block, std::vector<std::uint8_t> & out, ObjBlUniStat & st, std::string & why,
+	int red )
+{
+	st = ObjBlUniStat();
+	out.assign( block.bytes, 0 );
+	OuGl g;
+	if ( !ouGl( gp, g, why ) )
+		return false;
+	for ( const SpvMember & m : block.members ) {
+		st.members++;
+		if ( m.base > 2 || m.comps > 4 || m.cols > 4 || ( m.cols > 1 && !m.colStride ) || ( m.count > 1 && !m.arrayStride ) ) {
+			why = block.name + "." + m.name + ": a member type the mirror does not take";
+			return false;
+		}
+		const std::uint32_t stride = red == 2 ? m.cols * m.comps * 4 : m.arrayStride;
+		bool any = false;
+		for ( std::uint32_t e = 0; e < m.count; e++ ) {
+			const std::string nm = m.count > 1 ? m.name + "[" + std::to_string( e ) + "]" : m.name;
+			const int loc = g.getUniformLocation( prog, nm.c_str() );
+			if ( loc < 0 )
+				continue;  // GL dropped it (an array's tail too): 0 as GL reads it
+			any = true;
+			std::uint32_t val[16] = {};
+			if ( m.base == 0 )
+				g.getUniformfv( prog, loc, reinterpret_cast<float *>( val ) );
+			else if ( m.base == 1 )
+				g.getUniformiv( prog, loc, reinterpret_cast<int *>( val ) );
+			else
+				g.getUniformuiv( prog, loc, val );
+			// GL returns a matrix column after column: column c row r is val[c * comps + r]
+			for ( std::uint32_t c = 0; c < m.cols; c++ )
+				for ( std::uint32_t r = 0; r < m.comps; r++ ) {
+					const bool across = m.cols > 1 && ( m.rowMajor != ( red == 1 ) );
+					const std::uint32_t at = m.offset + e * stride + ( m.cols > 1 ? ( across ? r * m.colStride + c * 4 : c * m.colStride + r * 4 ) : r * 4 );
+					if ( at + 4 <= out.size() )
+						std::memcpy( out.data() + at, &val[c * m.comps + r], 4 );
+				}
+		}
+		( any ? st.mirrored : st.absent )++;
+	}
+	return true;
+}
+
+bool objBlBlock( GlProc gp, unsigned prog, const SpvBind & block, std::vector<std::uint8_t> & out, std::string & why, int red )
+{
+	out.clear();
+	OuGl g;
+	if ( !ouGl( gp, g, why ) )
+		return false;
+	const unsigned idx = g.getUniformBlockIndex( prog, block.name.c_str() );
+	if ( idx == 0xFFFFFFFFu ) {
+		why = "GL's program has no block " + block.name;
+		return false;
+	}
+	int bind = -1, size = 0;
+	g.getActiveUniformBlockiv( prog, idx, 0x8A3Fu, &bind );  // UNIFORM_BLOCK_BINDING
+	g.getActiveUniformBlockiv( prog, idx, 0x8A40u, &size );  // UNIFORM_BLOCK_DATA_SIZE
+	if ( std::uint32_t( size ) < block.bytes ) {
+		why = block.name + ": GL's block is " + std::to_string( size ) + " bytes, the module's " + std::to_string( block.bytes );
+		return false;
+	}
+	// every member GL keeps sits where the module reads it
+	for ( const SpvMember & m : block.members ) {
+		const std::string nm = m.count > 1 ? m.name + "[0]" : m.name;
+		const char * p = nm.c_str();
+		unsigned ui = 0xFFFFFFFFu;
+		g.getUniformIndices( prog, 1, &p, &ui );
+		if ( ui == 0xFFFFFFFFu )
+			continue;
+		int off = -1;
+		g.getActiveUniformsiv( prog, 1, &ui, 0x8A3Bu, &off );  // UNIFORM_OFFSET
+		if ( off != int( m.offset ) ) {
+			why = block.name + "." + m.name + ": GL's offset " + std::to_string( off ) + ", the module's " + std::to_string( m.offset );
+			return false;
+		}
+	}
+	const unsigned at = unsigned( bind + ( red == 1 ? 1 : 0 ) );
+	int buf = 0;
+	long long start = 0, range = 0;
+	g.getIntegeri_v( 0x8A28u, at, &buf );        // UNIFORM_BUFFER_BINDING
+	g.getInteger64i_v( 0x8A29u, at, &start );    // UNIFORM_BUFFER_START
+	g.getInteger64i_v( 0x8A2Au, at, &range );    // UNIFORM_BUFFER_SIZE (0: the whole buffer, glBindBufferBase)
+	if ( !buf ) {
+		why = block.name + ": no buffer at GL's binding " + std::to_string( at );
+		return false;
+	}
+	if ( range && range < block.bytes ) {
+		why = block.name + ": GL binds " + std::to_string( range ) + " bytes, the module reads " + std::to_string( block.bytes );
+		return false;
+	}
+	out.assign( block.bytes, 0 );
+	g.getNamedBufferSubData( unsigned( buf ), std::intptr_t( start ), std::intptr_t( block.bytes ), out.data() );
+	return true;
+}
+
+bool objBlTextures( GlProc gp, unsigned prog, const SpvModule & m, std::vector<ObjBlTexUnit> & out, std::string & why )
+{
+	out.clear();
+	OuGl g;
+	if ( !ouGl( gp, g, why ) )
+		return false;
+	std::map<std::string, const SpvBind *> images;
+	for ( const SpvBind & b : m.binds )
+		if ( b.set == 0 && b.type != VK_DESCRIPTOR_TYPE_SAMPLER && b.type != VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER && b.type != VK_DESCRIPTOR_TYPE_STORAGE_BUFFER )
+			images[b.name] = &b;
+	int active = 0;
+	g.getIntegerv( 0x84E0u, &active );  // ACTIVE_TEXTURE
+	for ( const SpvBind & b : m.binds ) {
+		if ( b.set != 0 || b.type == VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER || b.type == VK_DESCRIPTOR_TYPE_STORAGE_BUFFER )
+			continue;
+		ObjBlTexUnit u;
+		u.binding = b.binding;
+		u.type = b.type;
+		u.name = b.name;
+		const SpvBind * img = &b;
+		if ( b.type == VK_DESCRIPTOR_TYPE_SAMPLER ) {
+			// spirv-cross names a texture's sampler _<texture>_sampler
+			const std::size_t n = b.name.size();
+			if ( n > 9 && b.name[0] == '_' && b.name.compare( n - 8, 8, "_sampler" ) == 0 )
+				u.name = b.name.substr( 1, n - 9 );
+			auto it = images.find( u.name );
+			img = it == images.end() ? nullptr : it->second;
+		}
+		if ( img ) {
+			u.dim = img->dim;
+			u.arrayed = img->arrayed;
+		}
+		const int loc = g.getUniformLocation( prog, u.name.c_str() );
+		if ( loc >= 0 && img ) {
+			g.getUniformiv( prog, loc, &u.unit );
+			unsigned query = 0;
+			ouTarget( u.dim, u.arrayed, u.glTarget, query );
+			if ( query && u.unit >= 0 ) {
+				int tex = 0;
+				g.activeTexture( 0x84C0u + unsigned( u.unit ) );  // TEXTURE0 + unit
+				g.getIntegerv( query, &tex );
+				u.glTex = unsigned( tex );
+			}
+		} else
+			u.unit = -1;
+		out.push_back( u );
+	}
+	g.activeTexture( unsigned( active ) );
+	return true;
 }
 }  // namespace WwVkPresent

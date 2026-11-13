@@ -20,12 +20,23 @@
 
 namespace WwVkPresent
 {
+/*! one member of a uniform block as the module lays it out (a cbuffer bool is a uint). A matrix is `cols` vectors of `comps`
+ * (DXC: an HLSL row_major matrix's rows, which are the GLSL matrix's columns), each `colStride` apart (rowMajor: the other way) */
+struct SpvMember
+{
+	std::string name;
+	std::uint32_t offset = 0, base = 0, comps = 1, cols = 1, colStride = 0, count = 1, arrayStride = 0;  //!< base: 0 float, 1 int, 2 uint, 3 other
+	bool rowMajor = false;
+};
 //! one descriptor binding a module declares (count 0 = a runtime array)
 struct SpvBind
 {
 	std::uint32_t set = 0, binding = 0, type = 0, count = 1;  //!< type: a VkDescriptorType
 	std::uint32_t stages = 0;                                 //!< VkShaderStageFlags
 	std::string name;                                         //!< the block's name for a buffer, else the variable's
+	std::uint32_t dim = 0, arrayed = 0;                       //!< an image's SPIR-V Dim (0 1D, 1 2D, 2 3D, 3 cube, 5 buffer)
+	std::vector<SpvMember> members;                           //!< a uniform block's members
+	std::uint32_t bytes = 0;                                  //!< a uniform block's size (the last member's end, to 16)
 };
 //! one stage input / output with a Location (a matrix or array takes `slots` locations)
 struct SpvIo
@@ -76,4 +87,30 @@ bool objBlPipe( int twin, const std::uint32_t * vs, std::size_t vsWords, const s
 int objBlPipes( int * refused = nullptr );
 //! shutdown(): the pipelines, layouts and render passes (before blFree: the layouts name the table's)
 void objBlPipeFree();
+
+/* Slice 5 (the mirrored state): GL's program state into set 0, read by name through the module's own layout.
+ * the loose uniforms (the twin's LooseUniforms block) */
+struct ObjBlUniStat
+{
+	int members = 0, mirrored = 0, absent = 0;  //!< absent: GL has no location (the GLSL never reads it): left 0
+};
+/*! GL program `prog`'s loose uniforms into a block laid out as `block` (glGetUniform*, by the member's name, an array's
+ * elements by name[i]; a GL matrix's column c is the module's column c). false with a reason: a member of a type the mirror
+ * does not take. red 1 matrices transposed, red 2 arrays packed tight (gates only: they must FAIL) */
+bool objBlLoose( GlProc gp, unsigned prog, const SpvBind & block, std::vector<std::uint8_t> & out, ObjBlUniStat & st, std::string & why,
+	int red = 0 );
+/*! GL's std140 block of the same name (globalUniforms, skinningUniforms): the bytes of the buffer range bound at its binding.
+ * false with a reason: no such block, no buffer bound, a member GL places elsewhere than the module, a smaller block.
+ * red 1 reads the binding after GL's (gates only) */
+bool objBlBlock( GlProc gp, unsigned prog, const SpvBind & block, std::vector<std::uint8_t> & out, std::string & why, int red = 0 );
+//! one set-0 texture-like binding and the GL texture its sampler uniform's unit holds (a sampler binding `_X_sampler`: X's)
+struct ObjBlTexUnit
+{
+	std::uint32_t binding = 0, type = 0, dim = 0, arrayed = 0;
+	std::string name;   //!< GL's sampler uniform
+	int unit = -1;      //!< -1: GL has no such uniform (the GLSL never reads it)
+	unsigned glTex = 0, glTarget = 0;
+};
+//! the module's set-0 images, texel buffers and samplers with GL's units and textures (the active unit restored)
+bool objBlTextures( GlProc gp, unsigned prog, const SpvModule & m, std::vector<ObjBlTexUnit> & out, std::string & why );
 }  // namespace WwVkPresent

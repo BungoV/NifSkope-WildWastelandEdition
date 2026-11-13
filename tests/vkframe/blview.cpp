@@ -600,6 +600,8 @@ bool pipeGate( const std::string & spvDir )
 	ok = ok && pipes == 2 && refused == 4;
 	return ok;
 }
+
+#include "blview_uni.inc"  // lane VKOBJ4 slice 5: GL's state mirrored into set 0 (`BLVIEW uni` lines)
 }  // namespace blv
 
 int main( int argc, char ** argv )
@@ -736,6 +738,7 @@ int main( int argc, char ** argv )
 	std::mt19937 rng( 23 );
 	std::uniform_real_distribution<float> u01( 0.0f, 1.0f );
 	bool ok = pipeGate( spvDir );  // lane VKOBJ4: the bl twins' pipelines and their reds
+	ok = uniGate( root ) && ok;    // lane VKOBJ4: the mirrored uniforms, blocks and texture units, and their reds
 	// lane VKOBJ3: the cache's BC twin of def t (random blocks per level, the def's sampler state, gli's swizzle on BC4 / BC5)
 	const GLenum bcFmt[kTex] = { 0x83F0, 0x83F1, 0x83F2, 0x83F3, 0x8DBB, 0x8DBD, 0x8E8C, 0x8C4C, 0x8C4F, 0x8DBE, 0x8E8D, 0x8C4D };
 	double makeMs = 0.0;
