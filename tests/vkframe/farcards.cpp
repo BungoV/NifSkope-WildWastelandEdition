@@ -185,6 +185,8 @@ int main( int argc, char ** argv )
 	SetPixelFormat( dc, fmt, &got );
 	HGLRC glrc = wglCreateContext( dc );
 	wglMakeCurrent( dc, glrc );
+	// the app's GL state (src/gl/gltex.cpp, scenelighting.cpp): the shadow cubes filter across faces as Vulkan's always do
+	glEnable( 0x884F );  // GL_TEXTURE_CUBE_MAP_SEAMLESS
 	wglDeleteContext( drc );
 	ReleaseDC( dummy, ddc );
 	DestroyWindow( dummy );
@@ -739,10 +741,6 @@ int main( int argc, char ** argv )
 			if ( gDump ) {
 				int vb[2] = {};
 				std::memcpy( vb, cs.vsLoose, 8 );
-				if ( const char * e = std::getenv( "FARCARDS_VSPOKE" ) ) {
-					vb[0] += std::atoi( e );
-					std::memcpy( cs.vsLoose, vb, 4 );
-				}
 				std::printf( "FARCARDS set %d: count %d, VS cardBase %d frameTableBase %d (red %d)\n", s, cs.count, vb[0], vb[1], red );
 			}
 		}

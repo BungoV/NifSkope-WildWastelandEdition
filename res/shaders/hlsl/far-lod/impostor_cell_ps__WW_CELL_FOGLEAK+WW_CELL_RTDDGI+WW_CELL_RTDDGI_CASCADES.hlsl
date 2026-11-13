@@ -3976,7 +3976,7 @@ void frag_main()
     // has the same size).
     float2 stipTexels = float2(int2(spvTextureSize(ColourSheet, uint(0), dummy_parameter))) * frameRect[0].zw;
     float2 stipCell = floor(cardQuadUv * stipTexels);
-    float stipNoise = frac(sin(dot(stipCell, float2(12.98980045318603515625f, 78.233001708984375f))) * 43758.546875f);
+    float stipNoise = frac(sin(mad(stipCell.y, 78.233001708984375f, stipCell.x * 12.98980045318603515625f)) * 43758.546875f);	// NV GL's order: the dot y first (lane VKFAR2)
     float dArg19;
     float dArg18;
     float dArg17;
