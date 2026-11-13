@@ -77,6 +77,27 @@ def include_closure(path, find=None, seen=None):
     return seen
 
 
+SRC_MARK = '// variants: #if'   # HLSLSRC: a readable source builds every loader define set itself
+
+
+def real(path):
+    """HLSLSRC: a variant stage `<stem>_<st>__<A+B>.hlsl` that does not exist, beside a `<stem>_<st>.hlsl` holding SRC_MARK,
+    is that one source built with -D A -D B (one readable file instead of one file per define set). -> (file, defines)"""
+    if os.path.exists(path):
+        return path, []
+    d, b = os.path.split(path)
+    stem, sep, tag = b[:-5].partition('__')
+    if sep and tag and b.endswith('.hlsl'):
+        src = os.path.join(d, stem + '.hlsl')
+        if SRC_MARK.encode() in _file(src)[:4000]:
+            return src, tag.split('+')
+    return path, []
+
+
+def exists(path):
+    return os.path.exists(real(path)[0])
+
+
 def source_key(path, find=None):
     files = sorted(include_closure(os.path.normpath(path), find))
     return sha(*[os.path.basename(f) + ':' + sha(_file(f)) for f in files])
@@ -102,7 +123,8 @@ def opt_of(hlsl):
 
 
 def stage_key(hlsl, defines, toolkey):
-    return sha(source_key(hlsl), ','.join(defines), opt_of(hlsl), dxc_key(), toolkey)
+    f, extra = real(hlsl)
+    return sha(source_key(f), ','.join(list(defines) + extra), opt_of(hlsl), dxc_key(), toolkey)
 
 
 def read_key(spv):

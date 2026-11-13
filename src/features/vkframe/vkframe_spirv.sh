@@ -72,11 +72,13 @@ fx() {
 	python -I "$ROOT/tools/spv_header.py" "$1.spv" "vkframe_$1_spv" "$1.spv.h" < /dev/null
 	rm -f "$1.spv"
 }
-fx volsky_view_ps air/cell_volsky_ps__WW_CELL_FOGLEAK
-fx cloud_march_view_ps clouds/cloud_march_ps
-fx cloud_march_a_view_ps clouds/cloud_march_a_ps
-fx cloud_resolve_view_ps clouds/cloud_resolve_ps
-fx cloud_resolve_a_view_ps clouds/cloud_resolve_a_ps
+# lane HLSLSRC2: the views compile their frozen spirv-cross twins (<dir>/<name>.hlsl, the base files' bytes): the readable
+# one-file sources took the programs' names, and kT_* in vkpresent.h holds the twins' layout
+fx volsky_view_ps air/volsky_view_ps
+fx cloud_march_view_ps clouds/cloud_march_view_ps
+fx cloud_march_a_view_ps clouds/cloud_march_a_view_ps
+fx cloud_resolve_view_ps clouds/cloud_resolve_view_ps
+fx cloud_resolve_a_view_ps clouds/cloud_resolve_a_view_ps
 # lane VKFAR1: the far bulb dots as instanced quads; the vertex stage with fx()'s shifts (its block is b1)
 fxv() {
 	"$DXC" -spirv -fspv-target-env=vulkan1.2 -T vs_6_0 -E main -fvk-b-shift 0 0 -fvk-t-shift 64 0 -fvk-s-shift 128 0 -fvk-u-shift 192 0 -Fo "$1.spv" "$(cygpath -m "$ROOT/res/shaders/hlsl/$2.hlsl" 2>/dev/null || echo "$ROOT/res/shaders/hlsl/$2.hlsl")"
@@ -84,7 +86,7 @@ fxv() {
 	rm -f "$1.spv"
 }
 fxv fardots_view_vs far-lod/cell_fardots_view_vs
-fx fardots_view_ps far-lod/cell_fardots_ps__WW_CELL_FOGLEAK
+fx fardots_view_ps far-lod/fardots_view_ps
 # lane VKFAR1 round 2: the far cards' pixel stage (26 textures / texel buffers, b0 + b31), fx()'s shifts; its set is reflected
 # from the module, so every declared binding stays in it (-fspv-preserve-bindings) and GL's binding list maps one to one
 fxk() {
@@ -92,15 +94,16 @@ fxk() {
 	python -I "$ROOT/tools/spv_header.py" "$1.spv" "vkframe_$1_spv" "$1.spv.h" < /dev/null
 	rm -f "$1.spv"
 }
-fxk farcards_view_ps far-lod/impostor_cellinstez_ps__WW_CELL_FOGLEAK
+fxk farcards_view_ps far-lod/farcards_view_ps
 # lane VKWATER3: the shaded water (fo4_waterlook, the app's FOGLEAK + FRAME_UBO variant) through fxk(); its vertex stage
 # (fo4_default) on its own shifts: its b0 / b1 / b31 / t0 would land on the pixel stage's under fx()'s (blocks at 256 + n:
-# b31 at 40 + 31 = 71 was the pixel stage's t7)
-fxk water_view_ps water/fo4_waterlook_ps__WW_CELL_FOGLEAK+WW_FRAME_UBO
+# b31 at 40 + 31 = 71 was the pixel stage's t7). Both are frozen spirv-cross twins under the view's name (HLSLSRC2's rule):
+# vkwater_tables.h holds their layout
+fxk water_view_ps water/water_view_ps
 fxw() {
 	"$DXC" -spirv -fspv-target-env=vulkan1.2 -T vs_6_0 -E main -fvk-b-shift 256 0 -fvk-t-shift 110 0 -fvk-s-shift 180 0 -fvk-u-shift 220 0 -fspv-preserve-bindings -Fo "$1.spv" "$(cygpath -m "$ROOT/res/shaders/hlsl/$2.hlsl" 2>/dev/null || echo "$ROOT/res/shaders/hlsl/$2.hlsl")"
 	python -I "$ROOT/tools/spv_header.py" "$1.spv" "vkframe_$1_spv" "$1.spv.h" < /dev/null
 	rm -f "$1.spv"
 }
-fxw water_view_vs core/fo4_default_vs
+fxw water_view_vs core/water_view_vs
 ls -la csm_view_vs.spv.h obj_depth_vs.spv.h sky_view_ps.spv.h bloom_down.spv.h bloom_hold.spv.h bloom_up.spv.h bloom_src.spv.h bloom_comb.spv.h bloom_back.spv.h tonemap.spv.h measure_q.spv.h tone_view_vs.spv.h tone_view_ps.spv.h taa_view_mv_cs.spv.h taa_view_resolve_cs.spv.h taa_view_rcas_ps.spv.h

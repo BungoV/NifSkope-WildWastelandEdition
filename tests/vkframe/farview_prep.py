@@ -47,7 +47,7 @@ def write_src(path, src):
         f.write(src)
 
 
-j = FJ.volsky('fardots', 'air/cell_volsky_ps__WW_CELL_FOGLEAK.hlsl', ['WW_CELL_FOGLEAK'])
+j = FJ.volsky('fardots', 'air/volsky_view_ps.hlsl', ['WW_CELL_FOGLEAK'])
 d = os.path.join(OUT, 'fardots')
 os.makedirs(d, exist_ok=True)
 write_src(os.path.join(d, 'prog.vert.glsl'), S.inject(S.expand(os.path.join(FEAT, 'far-lod/cell_fardots.vert')), ['WW_CELL_FOGLEAK']))

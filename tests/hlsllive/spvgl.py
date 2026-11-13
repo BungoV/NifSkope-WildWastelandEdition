@@ -415,7 +415,7 @@ def patch(data, block_bindings, report=None, locs=None, bool_names=(), ps_remap=
         pt = mod.defn[v.a[0]]            # OpTypePointer
         st = pt.a[2]
         nm = mod.name_of(vid)
-        if nm == 'LooseUniforms':
+        if nm in ('LooseUniforms', '$Globals'):   # HLSLSRC1: a readable source's loose uniforms are HLSL globals
             loose_var = v
             continue
         if nm in block_bindings:
@@ -477,7 +477,11 @@ def patch(data, block_bindings, report=None, locs=None, bool_names=(), ps_remap=
         lt -= keep
         mod.annot = [x for x in mod.annot if not ((x.op == OP_DECORATE and x.a[0] in lt and x.a[1] in (DEC_ARRAY_STRIDE, DEC_BLOCK))
                                                   or (x.op == OP_MEMBER_DECORATE and x.a[0] in lt and x.a[2] in (DEC_OFFSET, DEC_MATRIX_STRIDE, DEC_COL_MAJOR)))]
+        # DXC keeps every declared global in $Globals, read or not; GL (and the GLSL build) sees only the read ones
+        read_k = {const_value(mod, x.a[3]) for x in mod.funcs if x.op in (OP_ACCESS_CHAIN, OP_IN_BOUNDS_AC) and x.a[2] == lid}
         for k, mt in enumerate(members):
+            if mod.name_of(lid) == '$Globals' and k not in read_k:
+                continue
             for e in mod.mdecs.get((st_id, k), []):
                 if e[0] == DEC_ROW_MAJOR:
                     raise ValueError('RowMajor loose uniform %s' % mod.mnames.get((st_id, k)))

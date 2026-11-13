@@ -1,3 +1,59 @@
+// HLSL source of drawline.glsl (include-only GLSL), lane HLSLSRC1 (notes/hlsltools/glsl2hlsl.py): the GLSL's comments,
+// names and order kept. Its loose uniforms sit at the top under WW_LOOSE_UNIFORMS: the entry that includes this
+// file includes it once more inside its LooseUniforms cbuffer with that defined (HLSL has one cbuffer for them).
+#ifdef WW_HLSL_SRC
+#if defined(WW_LOOSE_TYPES)	// the types its loose uniforms use
+
+#elif defined(WW_LOOSE_UNIFORMS)
+	float lineWidth;
+#else
+void drawLine(inout WW_GS_STREAM geometry_stream,  float4 p0, float4 p1, float4 c0, float4 c1 )
+{
+	float	p0zw = p0.z + p0.w;
+	float	p1zw = p1.z + p1.w;
+	if ( !( p0zw > 0.0 && p1zw > 0.0 ) ) {
+		if ( p0zw > 0.000001 ) {
+			float	t = p0zw / ( p0zw - p1zw );
+			p1 = lerp( p0, p1, t );
+			c1 = lerp( c0, c1, t );
+		} else if ( p1zw > 0.000001 ) {
+			float	t = p1zw / ( p1zw - p0zw );
+			p0 = lerp( p1, p0, t );
+			c0 = lerp( c1, c0, t );
+		} else {
+			return;
+		}
+	}
+
+	float3	p0_ndc = p0.xyz / p0.w;
+	float3	p1_ndc = p1.xyz / p1.w;
+
+	float2	vpScale = float2( viewportDimensions.zw ) * 0.5;
+	float2	vpOffs = float2( viewportDimensions.xy ) + vpScale;
+
+	float2	p0_ss = p0_ndc.xy * vpScale;
+	float2	p1_ss = p1_ndc.xy * vpScale;
+
+	float2	d = normalize( p1_ss - p0_ss ) * max( lineWidth * 0.5, 0.5 );
+	float2	n = float2( -d.y, d.x ) / vpScale;
+
+	C = c0;
+	gl_Position = float4( p0_ndc.xy + n, p0_ndc.z, 1.0 );
+	EmitVertex( geometry_stream );
+	C = c0;
+	gl_Position = float4( p0_ndc.xy - n, p0_ndc.z, 1.0 );
+	EmitVertex( geometry_stream );
+	C = c1;
+	gl_Position = float4( p1_ndc.xy + n, p1_ndc.z, 1.0 );
+	EmitVertex( geometry_stream );
+	C = c1;
+	gl_Position = float4( p1_ndc.xy - n, p1_ndc.z, 1.0 );
+	EmitVertex( geometry_stream );
+
+	EndPrimitive( geometry_stream );
+}
+#endif	// WW_LOOSE_UNIFORMS
+#else	// WW_HLSL_SRC: the per-variant files' half (HLSLBULK1, WW_FN_<name> picks functions); it goes with the last of them
 // Shared HLSL for res/shaders/drawline.glsl (include-only GLSL), HLSLBULK1 round 2 (notes/hlslbulk1/tools/factor.py). No bindings: the
 // functions below are the converted ones, they read the declarations of the shader that includes them (its cbuffers,
 // resources, statics and LooseUniforms: the per-module shim and the entry own those). Define WW_FN_<name> for each
@@ -75,3 +131,4 @@ void drawLine(inout float4 p0, inout float4 p1, inout float4 c0, inout float4 c1
     geometry_stream.RestartStrip();
 }
 #endif
+#endif	// WW_HLSL_SRC
