@@ -1,3 +1,93 @@
+// HLSL source of features/post/cell_bloom.glsl (include-only GLSL), lane HLSLSRC3 (notes/hlslsrc3/tools/glsl2hlsl.py): the GLSL's comments,
+// names and order kept. Its loose uniforms sit at the top under WW_LOOSE_UNIFORMS: the entry that includes this
+// file includes it once more inside its LooseUniforms cbuffer with that defined (HLSL has one cbuffer for them).
+#ifdef WW_HLSL_SRC
+#ifndef WW_GLSL_SIZE_Texture2D_float4_
+#define WW_GLSL_SIZE_Texture2D_float4_
+int2 textureSize(Texture2D<float4> t, int lod) { uint w, h, l; t.GetDimensions(uint(lod), w, h, l); return int2(w, h); }
+#endif
+// FO4CS's bloom helpers (res/Post/BloomDownCS.hlsl, BloomUpCS.hlsl), shared by the bloom passes and cell_hdr.frag
+
+// FP16 maximum: the pyramid is half float, as FO4CS forces it
+static const float kBloomMaxFinite = 65504.0;
+
+// F4FX_SanitizeBloomSample: a NaN tap reads 0 (tested by its bits), anything else clamps to 0..65504
+float3 bloomSanitize( float3 c )
+{
+	uint3 bits = asuint( c );
+	uint3 e = bits & 0x7F800000u;
+	uint3 m = bits & 0x007FFFFFu;
+	if ( or( or( ( e.x == 0x7F800000u && m.x != 0u ), ( e.y == 0x7F800000u && m.y != 0u ) ), ( e.z == 0x7F800000u && m.z != 0u ) ) )
+		return (float3)( 0.0 );
+	float3 bounded = sign( c ) * min( abs( c ), (float3)( kBloomMaxFinite ) );
+	return clamp( bounded, (float3)( 0.0 ), (float3)( kBloomMaxFinite ) );
+}
+
+// F4FX_Luminance
+float bloomLuma( float3 c )
+{
+	return max( dot( c, float3( 0.2126, 0.7152, 0.0722 ) ), 0.0001 );
+}
+
+// F4FX_UpsampleTent: 9 taps, 4 / 2 2 2 2 / 1 1 1 1 over 16, at the bloom texel x the radius
+float3 bloomTent( Texture2D<float4> m, SamplerState _m_sampler, float2 uv, float2 texel, float radiusPixels )
+{
+	float2 o = texel * max( radiusPixels, 0.0 );
+	float3 c = bloomSanitize( m.SampleLevel( _m_sampler, uv, 0.0 ).rgb ) * 4.0;
+	c += bloomSanitize( m.SampleLevel( _m_sampler, uv + float2( -o.x, 0.0 ), 0.0 ).rgb ) * 2.0;
+	c += bloomSanitize( m.SampleLevel( _m_sampler, uv + float2( o.x, 0.0 ), 0.0 ).rgb ) * 2.0;
+	c += bloomSanitize( m.SampleLevel( _m_sampler, uv + float2( 0.0, -o.y ), 0.0 ).rgb ) * 2.0;
+	c += bloomSanitize( m.SampleLevel( _m_sampler, uv + float2( 0.0, o.y ), 0.0 ).rgb ) * 2.0;
+	c += bloomSanitize( m.SampleLevel( _m_sampler, uv + float2( -o.x, -o.y ), 0.0 ).rgb );
+	c += bloomSanitize( m.SampleLevel( _m_sampler, uv + float2( o.x, -o.y ), 0.0 ).rgb );
+	c += bloomSanitize( m.SampleLevel( _m_sampler, uv + float2( -o.x, o.y ), 0.0 ).rgb );
+	c += bloomSanitize( m.SampleLevel( _m_sampler, uv + float2( o.x, o.y ), 0.0 ).rgb );
+	return c * ( 1.0 / 16.0 );
+}
+
+// lane GAPLOOK1 (BLOOMMIP): the same tent read lod levels down the chain top's own mips (the blur chosen per pixel)
+float3 bloomTentLod( Texture2D<float4> m, SamplerState _m_sampler, float2 uv, float2 texel, float radiusPixels, float lod )
+{
+	float2 o = texel * exp2( lod ) * max( radiusPixels, 0.0 );
+	float3 c = bloomSanitize( m.SampleLevel( _m_sampler, uv, lod ).rgb ) * 4.0;
+	c += bloomSanitize( m.SampleLevel( _m_sampler, uv + float2( -o.x, 0.0 ), lod ).rgb ) * 2.0;
+	c += bloomSanitize( m.SampleLevel( _m_sampler, uv + float2( o.x, 0.0 ), lod ).rgb ) * 2.0;
+	c += bloomSanitize( m.SampleLevel( _m_sampler, uv + float2( 0.0, -o.y ), lod ).rgb ) * 2.0;
+	c += bloomSanitize( m.SampleLevel( _m_sampler, uv + float2( 0.0, o.y ), lod ).rgb ) * 2.0;
+	c += bloomSanitize( m.SampleLevel( _m_sampler, uv + float2( -o.x, -o.y ), lod ).rgb );
+	c += bloomSanitize( m.SampleLevel( _m_sampler, uv + float2( o.x, -o.y ), lod ).rgb );
+	c += bloomSanitize( m.SampleLevel( _m_sampler, uv + float2( -o.x, o.y ), lod ).rgb );
+	c += bloomSanitize( m.SampleLevel( _m_sampler, uv + float2( o.x, o.y ), lod ).rgb );
+	return c * ( 1.0 / 16.0 );
+}
+
+float3 bloomTentDispersedLod( Texture2D<float4> m, SamplerState _m_sampler, float2 uv, float radiusPixels, float dispersion, float lod )
+{
+	float2 texel = 1.0 / float2( max( textureSize( m, 0 ), (int2)( 1 ) ) );
+	float2 radial = uv - 0.5;
+	float len = length( radial );
+	float2 d = len > 1e-5 ? ( radial / len ) * texel * max( dispersion, 0.0 ) : (float2)( 0.0 );
+	float3 g = bloomTentLod( m, _m_sampler, uv, texel, radiusPixels, lod );
+	if ( all(d == (float2)( 0.0 )) )
+		return g;
+	return float3( bloomTentLod( m, _m_sampler, uv + d, texel, radiusPixels, lod ).r, g.g, bloomTentLod( m, _m_sampler, uv - d, texel, radiusPixels, lod ).b );
+}
+
+// BloomUpCS's dispersion: red and blue tents pushed apart along the radial from the frame's center, green the anchor
+float3 bloomTentDispersed( Texture2D<float4> m, SamplerState _m_sampler, float2 uv, float radiusPixels, float dispersion )
+{
+	float2 texel = 1.0 / float2( max( textureSize( m, 0 ), (int2)( 1 ) ) );
+	float2 radial = uv - 0.5;
+	float len = length( radial );
+	float2 d = len > 1e-5 ? ( radial / len ) * texel * max( dispersion, 0.0 ) : (float2)( 0.0 );
+	float3 g = bloomTent( m, _m_sampler, uv, texel, radiusPixels );
+	if ( all(d == (float2)( 0.0 )) )
+		return g;
+	float3 r = bloomTent( m, _m_sampler, uv + d, texel, radiusPixels );
+	float3 b = bloomTent( m, _m_sampler, uv - d, texel, radiusPixels );
+	return float3( r.r, g.g, b.b );
+}
+#else	// WW_HLSL_SRC: the per-variant files' half (HLSLBULK1, WW_FN_<name> picks functions); it goes with the last of them
 // Shared HLSL for res/shaders/features/post/cell_bloom.glsl (include-only GLSL), HLSLBULK1 round 2 (notes/hlslbulk1/tools/factor.py). No bindings: the
 // functions below are the converted ones, they read the declarations of the shader that includes them (its cbuffers,
 // resources, statics and LooseUniforms: the per-module shim and the entry own those). Define WW_FN_<name> for each
@@ -196,3 +286,4 @@ float3 bloomTentDispersed(Texture2D<float4> m, SamplerState _m_sampler, float2 u
     return float3(r.x, g.y, b.z);
 }
 #endif
+#endif	// WW_HLSL_SRC
