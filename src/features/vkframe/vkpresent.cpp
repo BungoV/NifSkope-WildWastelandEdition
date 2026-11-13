@@ -5222,12 +5222,17 @@ bool fxStatic( std::string & why )
 	// GL's sampling states of the inputs: LUTs / volumes LINEAR CLAMP, the tile NEAREST, the noise trilinear REPEAT
 	for ( int k = 0; k < WwVkPresent::kFxSamplers; k++ ) {
 		const bool nearest = k == WwVkPresent::kFxNearestClamp || k == WwVkPresent::kFxNearestRepeat;
-		const bool repeat = k == WwVkPresent::kFxLinearRepeat || k == WwVkPresent::kFxMipRepeat || k == WwVkPresent::kFxNearestRepeat;
+		const bool mipped = k == WwVkPresent::kFxMipRepeat || k == WwVkPresent::kFxMipRepeatAniso;
+		const bool repeat = k == WwVkPresent::kFxLinearRepeat || mipped || k == WwVkPresent::kFxNearestRepeat;
 		VkSamplerCreateInfo sci { VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO };
 		sci.magFilter = sci.minFilter = nearest ? VK_FILTER_NEAREST : VK_FILTER_LINEAR;
-		sci.mipmapMode = k == WwVkPresent::kFxMipRepeat ? VK_SAMPLER_MIPMAP_MODE_LINEAR : VK_SAMPLER_MIPMAP_MODE_NEAREST;
+		sci.mipmapMode = mipped ? VK_SAMPLER_MIPMAP_MODE_LINEAR : VK_SAMPLER_MIPMAP_MODE_NEAREST;
 		sci.addressModeU = sci.addressModeV = sci.addressModeW = repeat ? VK_SAMPLER_ADDRESS_MODE_REPEAT : VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-		sci.maxLod = k == WwVkPresent::kFxMipRepeat ? VK_LOD_CLAMP_NONE : 0.0f;
+		sci.maxLod = mipped ? VK_LOD_CLAMP_NONE : 0.0f;
+		if ( k == WwVkPresent::kFxMipRepeatAniso && v.anisotropy ) {  // lane VKWATER2: GL's aniso 16 (VKOBJ2's feature)
+			sci.anisotropyEnable = VK_TRUE;
+			sci.maxAnisotropy = std::min( 16.0f, v.maxAniso );
+		}
 		if ( v.vkCreateSampler( v.dev, &sci, nullptr, &F.smp[k] ) != VK_SUCCESS ) {
 			why = "vkCreateSampler (the air / clouds) failed";
 			return false;

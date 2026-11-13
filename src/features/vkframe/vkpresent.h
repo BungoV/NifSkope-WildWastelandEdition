@@ -504,7 +504,8 @@ inline constexpr FxField kT_resolve_a[] = {
 	{ "cvLitReset", 228, 1, 1, 0, 0 }, { "cvLitFloor", 232, 1, 1, 0, 0 },
 };
 inline constexpr int kT_resolve_aBytes = 240;
-enum FxSampler { kFxLinearClamp, kFxNearestClamp, kFxLinearRepeat, kFxMipRepeat, kFxNearestRepeat, kFxSamplers };
+// lane VKWATER2: kFxMipRepeatAniso = the mip repeat at GL's aniso 16 (the water's moments / noise), plain without the feature
+enum FxSampler { kFxLinearClamp, kFxNearestClamp, kFxLinearRepeat, kFxMipRepeat, kFxNearestRepeat, kFxMipRepeatAniso, kFxSamplers };
 //! one texture slot of a pass (HLSL t<i>): a GL texture copied into its twin, or a shared target read as is
 struct FxTex
 {
