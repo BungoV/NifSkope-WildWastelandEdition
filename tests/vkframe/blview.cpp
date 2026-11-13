@@ -3,7 +3,11 @@
 // table (vkbindless.inc, built in here with vkpresent.cpp and WW_VKPRESENT_NO_QT) and the shipped include
 // (ww_bindless_vk.hlsli: descriptor-indexed image + sampler arrays in set 1). Same textures (shared targets GL filled and
 // made resident), same rows, one draw per cell on each side.
-// Usage: blview <tree root> <spv dir>   (blview.sh compiles blview_vs / blview_ps / the red-slot ps with DXC into <spv dir>)
+// Usage: blview <tree root> <spv dir> [bc]   (blview.sh compiles blview_vs / blview_ps / the red-slot ps with DXC into <spv dir>)
+// Lane VKOBJ3, mode `bc`: the 12 textures are the texture cache's BC twins (vkobjtex.inc: objTexMake = VKFAR1's farTwin,
+// BC1/2/3/4/5/7 and sRGB, random blocks GL uploads with glCompressedTextureSubImage2D; BC4 / BC5 carry gli's swizzle) and
+// their handles join through objTexHandle. Frame 1: texture 3 is gone (objTexGone, deleted) and a new twin takes its slot
+// (the deferred free, the graves blacked). Red `key` (objTexHandle red 1: each handle with the twin made before) must FAIL.
 // Fixture: 12 textures (RGBA8 / RGBA16F / RGBA32F, 8..128 px, mips or not) with 12 GL sampler states (filters, wraps,
 // border, LOD bias / clamps, anisotropy 4); 128 rows of 8 handles; 128 cells of 24 x 24 px (384 x 192 RGBA32F), cell % 8
 // = the slot and the op (Sample, SampleBias 1.25, SampleLevel 1.5, SampleGrad, Sample, SampleLevel 0, SampleBias -0.75,
@@ -83,6 +87,7 @@ struct Fns
 	void( WINAPI * textureParameterf )( GLuint, GLenum, GLfloat ) = nullptr;
 	void( WINAPI * textureParameterfv )( GLuint, GLenum, const GLfloat * ) = nullptr;
 	void( WINAPI * getTextureImage )( GLuint, GLint, GLenum, GLenum, GLsizei, void * ) = nullptr;
+	void( WINAPI * compressedTextureSubImage2D )( GLuint, GLint, GLint, GLint, GLsizei, GLsizei, GLenum, GLsizei, const void * ) = nullptr;
 	GLuint64( WINAPI * getTextureHandle )( GLuint ) = nullptr;
 	void( WINAPI * makeResident )( GLuint64 ) = nullptr;
 	void( WINAPI * makeNonResident )( GLuint64 ) = nullptr;
@@ -111,6 +116,7 @@ bool loadAll()
 		&& load( f.textureSubImage2D, "glTextureSubImage2D" ) && load( f.textureParameteri, "glTextureParameteri" )
 		&& load( f.textureParameterf, "glTextureParameterf" ) && load( f.textureParameterfv, "glTextureParameterfv" )
 		&& load( f.getTextureImage, "glGetTextureImage" ) && load( f.getTextureHandle, "glGetTextureHandleARB" )
+		&& load( f.compressedTextureSubImage2D, "glCompressedTextureSubImage2D" )
 		&& load( f.makeResident, "glMakeTextureHandleResidentARB" ) && load( f.makeNonResident, "glMakeTextureHandleNonResidentARB" );
 }
 
@@ -498,10 +504,11 @@ int main( int argc, char ** argv )
 	using namespace blv;
 	std::setvbuf( stdout, nullptr, _IONBF, 0 );
 	if ( argc < 3 ) {
-		std::printf( "usage: blview <tree root> <spv dir>\nBLVIEW GATE FAILED\n" );
+		std::printf( "usage: blview <tree root> <spv dir> [bc]\nBLVIEW GATE FAILED\n" );
 		return 2;
 	}
 	const std::string root = argv[1], spvDir = argv[2];
+	const bool bc = argc > 3 && std::string( argv[3] ) == "bc";  // lane VKOBJ3
 	gOpenGl = LoadLibraryA( "opengl32.dll" );
 	WNDCLASSA wc {};
 	wc.style = CS_OWNDC;
@@ -626,7 +633,62 @@ int main( int argc, char ** argv )
 	std::mt19937 rng( 23 );
 	std::uniform_real_distribution<float> u01( 0.0f, 1.0f );
 	bool ok = true;
+	// lane VKOBJ3: the cache's BC twin of def t (random blocks per level, the def's sampler state, gli's swizzle on BC4 / BC5)
+	const GLenum bcFmt[kTex] = { 0x83F0, 0x83F1, 0x83F2, 0x83F3, 0x8DBB, 0x8DBD, 0x8E8C, 0x8C4C, 0x8C4F, 0x8DBE, 0x8E8D, 0x8C4D };
+	double makeMs = 0.0;
+	int made = 0;
+	auto makeBc = [&]( int t, GLuint & texOut, GLuint64 & hOut ) {
+		const TexDef & d = defs[t];
+		unsigned tex = 0;
+		const auto t0 = std::chrono::steady_clock::now();
+		if ( !WwVkPresent::objTexMake( bcFmt[t], d.w, d.h, d.levels, tex, why ) ) {
+			std::printf( "BLVIEW GATE FAILED (objTexMake %d: %s)\n", t, why.c_str() );
+			return false;
+		}
+		makeMs += std::chrono::duration<double, std::milli>( std::chrono::steady_clock::now() - t0 ).count();
+		made++;
+		const int blockBytes = fcFormat( bcFmt[t] ).block;
+		for ( int l = 0; l < d.levels; l++ ) {
+			const int lw = std::max( d.w >> l, 1 ), lh = std::max( d.h >> l, 1 );
+			std::vector<unsigned char> blocks( size_t( ( lw + 3 ) / 4 ) * size_t( ( lh + 3 ) / 4 ) * size_t( blockBytes ) );
+			for ( unsigned char & b : blocks )
+				b = static_cast<unsigned char>( rng() & 0xFF );
+			f.compressedTextureSubImage2D( tex, l, 0, 0, lw, lh, bcFmt[t], GLsizei( blocks.size() ), blocks.data() );
+		}
+		f.textureParameteri( tex, GL_TEXTURE_MIN_FILTER, GLint( d.minF ) );
+		f.textureParameteri( tex, GL_TEXTURE_MAG_FILTER, GLint( d.magF ) );
+		f.textureParameteri( tex, GL_TEXTURE_WRAP_S, GLint( d.wrapS ) );
+		f.textureParameteri( tex, GL_TEXTURE_WRAP_T, GLint( d.wrapT ) );
+		f.textureParameterf( tex, 0x8501, d.bias );
+		f.textureParameterf( tex, 0x813A, d.minLod );
+		f.textureParameterf( tex, 0x813B, d.maxLod );
+		f.textureParameterf( tex, 0x84FE, d.aniso );
+		f.textureParameterfv( tex, 0x1004, d.border );
+		if ( bcFmt[t] == 0x8DBB || bcFmt[t] == 0x8DBD || bcFmt[t] == 0x8DBE ) {  // gli: R,0,0,1 / R,G,0,1
+			const bool two = bcFmt[t] != 0x8DBB;
+			f.textureParameteri( tex, 0x8E42, GL_RED );
+			f.textureParameteri( tex, 0x8E43, two ? GL_GREEN : GL_ZERO );
+			f.textureParameteri( tex, 0x8E44, GL_ZERO );
+			f.textureParameteri( tex, 0x8E45, GL_ONE );
+		}
+		hOut = f.getTextureHandle( tex );
+		f.makeResident( hOut );
+		if ( !hOut ) {
+			std::printf( "BLVIEW GATE FAILED (BC texture %d: no handle)\n", t );
+			return false;
+		}
+		WwVkPresent::objTexHandle( tex, hOut, glProc );
+		texOut = GLuint( tex );
+		return true;
+	};
 	for ( int t = 0; t < kTex; t++ ) {
+		if ( bc ) {
+			GLuint tx = 0;
+			if ( !makeBc( t, tx, handles[t] ) )
+				return 2;
+			texs.push_back( tx );
+			continue;
+		}
 		const TexDef & d = defs[t];
 		const std::uintptr_t key = reinterpret_cast<std::uintptr_t>( &keyHome[t] );
 		unsigned tex = 0;
@@ -670,23 +732,35 @@ int main( int argc, char ** argv )
 		}
 		texs.push_back( tex );
 	}
-	if ( glGetError() != GL_NO_ERROR ) {
-		std::printf( "BLVIEW GATE FAILED (GL error making the textures)\n" );
+	if ( const GLenum e = glGetError(); e != GL_NO_ERROR ) {
+		std::printf( "BLVIEW GATE FAILED (GL error 0x%x making the textures)\n", unsigned( e ) );
 		return 2;
+	}
+	if ( bc ) {
+		const WwVkPresent::ObjTexStat s = WwVkPresent::objTexFrame();
+		std::printf( "BLVIEW bc twins: %d made, %d refused, %d handles added, %d add fails (%s), %.1f MB, objTexMake %.2f ms each\n",
+			s.made, s.refused, s.adds, s.addFails, s.addWhy.c_str(), s.mb, made ? makeMs / made : 0.0 );
+		if ( s.made != kTex || s.adds != kTex || s.addFails ) {
+			std::printf( "BLVIEW GATE FAILED (the BC twins did not all join)\n" );
+			return 2;
+		}
 	}
 
 	// ---- the rows: a skewed matrix block (copied through as is) and 8 handles each, every texture in every slot somewhere
 	std::vector<unsigned char> rows( size_t( kCells ) * kBlRowBytes, 0 );
-	for ( int r = 0; r < kCells; r++ ) {
-		float m[28];
-		for ( int i = 0; i < 28; i++ )
-			m[i] = float( r ) * 0.25f + float( i ) * 0.125f;
-		std::memcpy( &rows[size_t( r ) * kBlRowBytes], m, sizeof( m ) );
-		for ( int i = 0; i < 8; i++ ) {
-			const GLuint64 h = handles[size_t( ( r * 5 + i * 7 ) % kTex )];
-			std::memcpy( &rows[size_t( r ) * kBlRowBytes + kBlTexAt + 8 * size_t( i )], &h, 8 );
+	auto fillRows = [&]() {
+		for ( int r = 0; r < kCells; r++ ) {
+			float m[28];
+			for ( int i = 0; i < 28; i++ )
+				m[i] = float( r ) * 0.25f + float( i ) * 0.125f;
+			std::memcpy( &rows[size_t( r ) * kBlRowBytes], m, sizeof( m ) );
+			for ( int i = 0; i < 8; i++ ) {
+				const GLuint64 h = handles[size_t( ( r * 5 + i * 7 ) % kTex )];
+				std::memcpy( &rows[size_t( r ) * kBlRowBytes + kBlTexAt + 8 * size_t( i )], &h, 8 );
+			}
 		}
-	}
+	};
+	fillRows();
 	GLuint ssbo = 0, vao = 0, fbo = 0, refT = 0;
 	f.genBuffers( 1, &ssbo );
 	f.bindBuffer( kSsbo, ssbo );
@@ -707,6 +781,7 @@ int main( int argc, char ** argv )
 	}
 	std::vector<GLuint> crossing = texs;
 	crossing.push_back( GLuint( target ) );
+	std::size_t bcRowsWhole = 0, bcRows = 0;  // lane VKOBJ3: objTexRows over the frames' rows (the census the app line prints)
 
 	auto runGl = [&]( std::vector<float> & out ) {
 		f.bindFramebuffer( kFb, fbo );
@@ -747,7 +822,28 @@ int main( int argc, char ** argv )
 
 	std::vector<float> ref, gotV;
 	for ( int fr = 0; fr < 2; fr++ ) {
-		if ( fr == 1 ) {  // texture 3 non-resident and back: its image index goes to the graves, a new one is made
+		if ( fr == 1 && bc ) {  // lane VKOBJ3: texture 3 deleted by the cache, a new twin in its slot (new data, new handle)
+			WwVkPresent::objTexGone( texs[3] );
+			f.makeNonResident( handles[3] );
+			glDeleteTextures( 1, &texs[3] );
+			GLuint tx = 0;
+			if ( !makeBc( 3, tx, handles[3] ) ) {
+				ok = false;
+				continue;
+			}
+			texs[3] = crossing[3] = tx;
+			fillRows();
+			f.bindBuffer( kSsbo, ssbo );
+			f.bufferData( kSsbo, std::ptrdiff_t( rows.size() ), rows.data(), kDynamic );
+			const WwVkPresent::ObjTexStat s = WwVkPresent::objTexFrame();
+			std::printf( "BLVIEW bc frame1: gone %d, freed %d (%.2f ms), made %d, adds %d, add fails %d; twins %d\n", s.gone, s.freed,
+				s.freeMs, s.made, s.adds, s.addFails, s.twins );
+			if ( s.gone != 1 || s.freed != 1 || s.adds != 1 || s.twins != kTex ) {
+				std::printf( "BLVIEW frame1 FAIL (the BC replace)\n" );
+				ok = false;
+				continue;
+			}
+		} else if ( fr == 1 ) {  // texture 3 non-resident and back: its image index goes to the graves, a new one is made
 			f.makeNonResident( handles[3] );
 			WwVkPresent::blDrop( handles[3] );
 			f.makeResident( handles[3] );
@@ -770,6 +866,33 @@ int main( int argc, char ** argv )
 		std::printf( "BLVIEW frame%d %s (%zu of %zu covered pixels differ, max %g; rows with every handle known %zu of %d)\n", fr, d.word(),
 			d.diff, d.covered, double( d.maxAbs ), whole, kCells );
 		ok = ok && d.ok() && whole == std::size_t( kCells );
+		if ( bc ) {
+			WwVkPresent::objTexRows( rows.data(), std::size_t( kCells ) );
+			const WwVkPresent::ObjTexStat s = WwVkPresent::objTexFrame();
+			bcRows += s.rows;
+			bcRowsWhole += s.whole;
+		}
+	}
+	if ( bc ) {  // lane VKOBJ3: the census the app's line prints, then the red `key`
+		std::printf( "BLVIEW bc rows: %zu of %zu whole through objTexRows\n", bcRowsWhole, bcRows );
+		ok = ok && bcRows == std::size_t( 2 * kCells ) && bcRowsWhole == bcRows;
+		for ( int t = 0; t < kTex; t++ )
+			WwVkPresent::objTexHandle( texs[t], handles[t], glProc, 1 );
+		std::size_t whole = 0;
+		const bool ran = runVk( 0, 0, gotV, whole );
+		const Diff d = compare( gotV, ref );
+		const bool redFails = !ran || !d.ok();
+		std::printf( "BLVIEW RED %s key (each handle with the twin made before its texture's; must FAIL) (%zu of %zu covered pixels differ)\n",
+			redFails ? "FAIL" : "EXACT", d.diff, d.covered );
+		ok = ok && redFails;
+		// the red's own refusals (a BC4/BC5 swizzle met another format's image) stay with the red
+		const WwVkPresent::ObjTexStat sr = WwVkPresent::objTexFrame();
+		std::printf( "BLVIEW bc red: adds %d, refused %d (%s)\n", sr.adds, sr.addFails, sr.addWhy.c_str() );
+		for ( int t = 0; t < kTex; t++ )
+			WwVkPresent::objTexHandle( texs[t], handles[t], glProc, 0 );
+		const WwVkPresent::ObjTexStat s = WwVkPresent::objTexFrame();
+		std::printf( "BLVIEW bc back: adds %d, add fails %d (%s)\n", s.adds, s.addFails, s.addWhy.c_str() );
+		ok = ok && s.addFails == 0;
 	}
 	// the reds against frame 1's reference: each must FAIL
 	const struct
@@ -794,6 +917,12 @@ int main( int argc, char ** argv )
 		f.makeNonResident( h );
 	gvFree();
 	WwVkPresent::shutdown();
+	if ( bc ) {  // lane VKOBJ3: the cache deletes its names after the present went (shutdown kept them)
+		glDeleteTextures( GLsizei( texs.size() ), texs.data() );
+		const GLenum e = glGetError();
+		std::printf( "BLVIEW bc names deleted after shutdown: GL error 0x%x\n", unsigned( e ) );
+		ok = ok && e == GL_NO_ERROR;
+	}
 	wglMakeCurrent( nullptr, nullptr );
 	wglDeleteContext( glrc );
 	DestroyWindow( wnd );
