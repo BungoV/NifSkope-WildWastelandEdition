@@ -4,7 +4,9 @@
 #ifndef WW_GLSL_COMPAT_HLSLI
 #define WW_GLSL_COMPAT_HLSLI
 
-// GLSL mod: x - y * floor(x / y) (HLSL fmod truncates toward zero instead); y may be a scalar
+// GLSL mod: x - y * floor(x / y) (HLSL fmod truncates toward zero instead); y may be a scalar.
+// WW_GLSL_MOD: the other modules' readable includes then skip their own mod overloads (two would be ambiguous)
+#define WW_GLSL_MOD
 template<typename T, typename U> T mod(T x, U y)
 {
     return x - y * floor(x / y);
