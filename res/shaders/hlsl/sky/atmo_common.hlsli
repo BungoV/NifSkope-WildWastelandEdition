@@ -44,17 +44,17 @@ float atDistGround(float r, float mu)
 #if defined(WW_FN_atHitsGround) || defined(WW_FN_ALL)
 bool atHitsGround(float r, float mu)
 {
-    bool tmp1 = mu < 0.0f;
-    bool tmp2;
-    if (tmp1)
+    bool cond = mu < 0.0f;
+    bool atHitsGroundRet;
+    if (cond)
     {
-        tmp2 = (((r * r) * ((mu * mu) - 1.0f)) + 40449600.0f) >= 0.0f;
+        atHitsGroundRet = (((r * r) * ((mu * mu) - 1.0f)) + 40449600.0f) >= 0.0f;
     }
     else
     {
-        tmp2 = tmp1;
+        atHitsGroundRet = cond;
     }
-    return tmp2;
+    return atHitsGroundRet;
 }
 #endif
 
@@ -77,31 +77,31 @@ float2 atTransUv(float r, float mu)
 {
     float H = 1132.25439453125f;
     float rho = sqrt(max(0.0f, (r * r) - 40449600.0f));
-    float tmp1 = r;
-    float tmp2 = mu;
-    float d = atDistTop(tmp1, tmp2);
+    float cond = r;
+    float atHitsGroundRet = mu;
+    float d = atDistTop(cond, atHitsGroundRet);
     float dmin = 6460.0f - r;
     float dmax = rho + H;
-    float tmp3 = (d - dmin) / max(dmax - dmin, 9.9999999747524270787835121154785e-07f);
-    float tmp4 = 256.0f;
-    float tmp5 = rho / H;
-    float tmp6 = 64.0f;
-    return float2(atUnitToSub(tmp3, tmp4), atUnitToSub(tmp5, tmp6));
+    float atTransUvRet4 = (d - dmin) / max(dmax - dmin, 9.9999999747524270787835121154785e-07f);
+    float atTransUvRet3 = 256.0f;
+    float atTransUvRet2 = rho / H;
+    float atTransUvRet = 64.0f;
+    return float2(atUnitToSub(atTransUvRet4, atTransUvRet3), atUnitToSub(atTransUvRet2, atTransUvRet));
 }
 #endif
 
 #if defined(WW_FN_atTrans) || defined(WW_FN_ALL)
 float3 atTrans(Texture2D<float4> T, SamplerState _T_sampler, float r, float mu)
 {
-    float tmp1 = r;
-    float tmp2 = mu;
-    if (atHitsGround(tmp1, tmp2))
+    float cond = r;
+    float atHitsGroundRet = mu;
+    if (atHitsGround(cond, atHitsGroundRet))
     {
         return 0.0f.xxx;
     }
-    float tmp3 = r;
-    float tmp4 = mu;
-    return T.Sample(_T_sampler, atTransUv(tmp3, tmp4)).xyz;
+    float atTransUvRet4 = r;
+    float atTransUvRet3 = mu;
+    return T.Sample(_T_sampler, atTransUv(atTransUvRet4, atTransUvRet3)).xyz;
 }
 #endif
 
@@ -109,20 +109,20 @@ float3 atTrans(Texture2D<float4> T, SamplerState _T_sampler, float r, float mu)
 float2 atMsUv(float r, float mus, float2 n)
 {
     float hu = clamp((r - 6360.0f) / 100.0f, 0.0f, 1.0f);
-    float tmp1 = clamp((mus * 0.5f) + 0.5f, 0.0f, 1.0f);
-    float tmp2 = n.x;
-    float tmp3;
+    float cond = clamp((mus * 0.5f) + 0.5f, 0.0f, 1.0f);
+    float atHitsGroundRet = n.x;
+    float atTransUvRet4;
     if (atMsOld > 0.5f)
     {
-        tmp3 = hu;
+        atTransUvRet4 = hu;
     }
     else
     {
-        tmp3 = sqrt(hu);
+        atTransUvRet4 = sqrt(hu);
     }
-    float tmp4 = tmp3;
-    float tmp5 = n.y;
-    return float2(atUnitToSub(tmp1, tmp2), atUnitToSub(tmp4, tmp5));
+    float atTransUvRet3 = atTransUvRet4;
+    float atTransUvRet2 = n.y;
+    return float2(atUnitToSub(cond, atHitsGroundRet), atUnitToSub(atTransUvRet3, atTransUvRet2));
 }
 #endif
 
@@ -159,46 +159,46 @@ float2 atSkyDirToUv(float r, float cosZ, float cosAz, float2 n)
         uv.y = (sqrt(clamp(c_1, 0.0f, 1.0f)) * 0.5f) + 0.5f;
     }
     uv.x = sqrt(clamp(((-cosAz) * 0.5f) + 0.5f, 0.0f, 1.0f));
-    float tmp1 = uv.x;
-    float tmp2 = n.x;
-    float tmp3 = uv.y;
-    float tmp4 = n.y;
-    return float2(atUnitToSub(tmp1, tmp2), atUnitToSub(tmp3, tmp4));
+    float cond = uv.x;
+    float atHitsGroundRet = n.x;
+    float atTransUvRet4 = uv.y;
+    float atTransUvRet3 = n.y;
+    return float2(atUnitToSub(cond, atHitsGroundRet), atUnitToSub(atTransUvRet4, atTransUvRet3));
 }
 #endif
 
 #if defined(WW_FN_atSkyMarch) || defined(WW_FN_ALL)
 float3 atSkyMarch(Texture2D<float4> T, SamplerState _T_sampler, Texture2D<float4> M, SamplerState _M_sampler, float2 msSize, float msOn, float ground, float r, float3 v, float3 s)
 {
-    float tmp1 = r;
-    float tmp2 = v.z;
-    bool gnd = atHitsGround(tmp1, tmp2);
-    float tmp3;
+    float cond = r;
+    float atHitsGroundRet = v.z;
+    bool gnd = atHitsGround(cond, atHitsGroundRet);
+    float atTransUvRet4;
     if (gnd)
     {
-        float tmp4 = r;
-        float tmp5 = v.z;
-        tmp3 = atDistGround(tmp4, tmp5);
+        float atTransUvRet3 = r;
+        float atTransUvRet2 = v.z;
+        atTransUvRet4 = atDistGround(atTransUvRet3, atTransUvRet2);
     }
     else
     {
-        float tmp6 = r;
-        float tmp7 = v.z;
-        tmp3 = atDistTop(tmp6, tmp7);
+        float atTransUvRet = r;
+        float atTransUvPart = v.z;
+        atTransUvRet4 = atDistTop(atTransUvRet, atTransUvPart);
     }
-    float d = tmp3;
+    float d = atTransUvRet4;
     float cvs = dot(v, s);
-    float tmp8 = cvs;
-    float pr = atPhaseR(tmp8);
-    float tmp9 = atG;
-    float tmp10 = cvs;
-    float pm = atPhaseHg(tmp9, tmp10);
+    float prPart = cvs;
+    float pr = atPhaseR(prPart);
+    float pmPart2 = atG;
+    float pmPart = cvs;
+    float pm = atPhaseHg(pmPart2, pmPart);
     float3 thr = 1.0f.xxx;
     float3 L = 0.0f.xxx;
     float t0 = 0.0f;
-    float3 tmp11;
-    float3 tmp12;
-    float3 tmp13;
+    float3 part4;
+    float3 part3;
+    float3 part2;
     for (int i = 0; i < 30; i++)
     {
         float a = float(i + 1) / 30.0f;
@@ -210,18 +210,18 @@ float3 atSkyMarch(Texture2D<float4> T, SamplerState _T_sampler, Texture2D<float4
         float rp = length(p);
         float3 up = p / rp.xxx;
         float mus = dot(up, s);
-        float tmp14 = rp - 6360.0f;
-        atMedium(tmp14, tmp11, tmp12, tmp13);
-        float3 rs = tmp11;
-        float3 ms = tmp12;
-        float3 e = tmp13;
-        float tmp15 = rp;
-        float tmp16 = mus;
-        float3 Ts = atTrans(T, _T_sampler, tmp15, tmp16);
-        float tmp17 = rp;
-        float tmp18 = mus;
-        float2 tmp19 = msSize;
-        float3 S = (Ts * ((rs * pr) + (ms * pm))) + ((M.Sample(_M_sampler, atMsUv(tmp17, tmp18, tmp19)).xyz * msOn) * (rs + ms));
+        float part = rp - 6360.0f;
+        atMedium(part, part4, part3, part2);
+        float3 rs = part4;
+        float3 ms = part3;
+        float3 e = part2;
+        float TsPart2 = rp;
+        float TsPart = mus;
+        float3 Ts = atTrans(T, _T_sampler, TsPart2, TsPart);
+        float SPart3 = rp;
+        float SPart2 = mus;
+        float2 SPart = msSize;
+        float3 S = (Ts * ((rs * pr) + (ms * pm))) + ((M.Sample(_M_sampler, atMsUv(SPart3, SPart2, SPart)).xyz * msOn) * (rs + ms));
         float3 Tst = exp((-e) * dt);
         L += (((thr * S) * (1.0f.xxx - Tst)) / max(e, 9.999999717180685365747194737196e-10f.xxx));
         thr *= Tst;
@@ -229,9 +229,9 @@ float3 atSkyMarch(Texture2D<float4> T, SamplerState _T_sampler, Texture2D<float4
     if (gnd && (ground > 0.5f))
     {
         float c = dot(normalize(float3(v.xy * d, r + (v.z * d))), s);
-        float tmp20 = 6360.0f;
-        float tmp21 = c;
-        L += ((((thr * atTrans(T, _T_sampler, tmp20, tmp21)) * max(c, 0.0f)) * 0.300000011920928955078125f.xxx) / 3.1415927410125732421875f.xxx);
+        float LPart2 = 6360.0f;
+        float LPart = c;
+        L += ((((thr * atTrans(T, _T_sampler, LPart2, LPart)) * max(c, 0.0f)) * 0.300000011920928955078125f.xxx) / 3.1415927410125732421875f.xxx);
     }
     return L;
 }

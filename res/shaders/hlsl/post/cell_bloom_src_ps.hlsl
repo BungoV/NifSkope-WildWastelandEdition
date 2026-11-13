@@ -203,18 +203,18 @@ void frag_main()
     cellFarIters = 0;
     if (bloomImpulse.z > 0.0f)
     {
-        int2 tmp51 = int2(gl_FragCoord.xy) / int2(2, 2);
-        int2 tmp56 = int2(bloomImpulse.xy) / int2(2, 2);
-        float3 tmp61;
-        if (all(bool2(tmp51.x == tmp56.x, tmp51.y == tmp56.y)))
+        int2 cond2 = int2(gl_FragCoord.xy) / int2(2, 2);
+        int2 cond = int2(bloomImpulse.xy) / int2(2, 2);
+        float3 fragColorPick;
+        if (all(bool2(cond2.x == cond.x, cond2.y == cond.y)))
         {
-            tmp61 = bloomImpulse.z.xxx;
+            fragColorPick = bloomImpulse.z.xxx;
         }
         else
         {
-            tmp61 = 0.0f.xxx;
+            fragColorPick = 0.0f.xxx;
         }
-        fragColor = float4(tmp61, 1.0f);
+        fragColor = float4(fragColorPick, 1.0f);
         return;
     }
     if ((!cellOn) || (!cellIsOn))

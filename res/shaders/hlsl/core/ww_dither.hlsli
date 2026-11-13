@@ -27,11 +27,12 @@ float3 wwDither8(float3 c, float2 fragCoord)
     }
     uint2 p = uint2(fragCoord);
     uint s = uint(wwDitherSeed);
-    uint2 tmp1 = p;
-    uint tmp2 = 2u * s;
-    uint2 tmp3 = p;
-    uint tmp4 = (2u * s) + 1u;
-    float n = (wwDitherHash(tmp1, tmp2) + wwDitherHash(tmp3, tmp4)) - 1.0f;
+    uint2 nPart4 = p;
+    uint nPart3 = 2u * s;
+    uint2 nPart2 = p;
+    uint nPart = (2u * s) + 1u;
+    // triangular on (-1, 1)
+    float n = (wwDitherHash(nPart4, nPart3) + wwDitherHash(nPart2, nPart)) - 1.0f;
     float3 w = clamp(min(c, 1.0f.xxx - c) * 255.0f, 0.0f.xxx, 1.0f.xxx);
     return c + ((w * n) * 0.0039215688593685626983642578125f);
 }

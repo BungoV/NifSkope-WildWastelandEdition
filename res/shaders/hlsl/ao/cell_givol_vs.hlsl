@@ -4,10 +4,10 @@
 // named in notes/vkcompute1/hlsl_plan.md. Not wired: nothing loads this file.
 // profile: vs_6_0
 #include "AoBindingsVk.hlsli"
-static const float2 tmp136[4] = { (-1.0f).xx, float2(1.0f, -1.0f), 1.0f.xx, float2(-1.0f, 1.0f) };
-static const float3 tmp170[6] = { float3(1.0f, 0.0f, 0.0f), float3(-1.0f, 0.0f, 0.0f), float3(0.0f, 1.0f, 0.0f), float3(0.0f, -1.0f, 0.0f), float3(0.0f, 0.0f, 1.0f), float3(0.0f, 0.0f, -1.0f) };
-static const float3 tmp178[6] = { float3(0.0f, 1.0f, 0.0f), float3(0.0f, 0.0f, 1.0f), float3(0.0f, 0.0f, 1.0f), float3(1.0f, 0.0f, 0.0f), float3(1.0f, 0.0f, 0.0f), float3(0.0f, 1.0f, 0.0f) };
-static const float3 tmp187[6] = { float3(0.0f, 0.0f, 1.0f), float3(0.0f, 1.0f, 0.0f), float3(1.0f, 0.0f, 0.0f), float3(0.0f, 0.0f, 1.0f), float3(0.0f, 1.0f, 0.0f), float3(1.0f, 0.0f, 0.0f) };
+static const float2 FC[4] = { (-1.0f).xx, float2(1.0f, -1.0f), 1.0f.xx, float2(-1.0f, 1.0f) };
+static const float3 table6[6] = { float3(1.0f, 0.0f, 0.0f), float3(-1.0f, 0.0f, 0.0f), float3(0.0f, 1.0f, 0.0f), float3(0.0f, -1.0f, 0.0f), float3(0.0f, 0.0f, 1.0f), float3(0.0f, 0.0f, -1.0f) };
+static const float3 table62[6] = { float3(0.0f, 1.0f, 0.0f), float3(0.0f, 0.0f, 1.0f), float3(0.0f, 0.0f, 1.0f), float3(1.0f, 0.0f, 0.0f), float3(1.0f, 0.0f, 0.0f), float3(0.0f, 1.0f, 0.0f) };
+static const float3 table63[6] = { float3(0.0f, 0.0f, 1.0f), float3(0.0f, 1.0f, 0.0f), float3(1.0f, 0.0f, 0.0f), float3(0.0f, 0.0f, 1.0f), float3(0.0f, 1.0f, 0.0f), float3(1.0f, 0.0f, 0.0f) };
 
 Buffer<float4> volShapes : register(t0, space0);
 cbuffer LooseUniforms : register(b31, space0)
@@ -47,28 +47,28 @@ void vert_main()
     float4 c = volShapes.Load((3 * s) + 2);
     int f = gl_VertexID / 6;
     int k = gl_VertexID % 6;
-    int tmp140;
+    int qPick;
     if (k < 3)
     {
-        tmp140 = k;
+        qPick = k;
     }
     else
     {
-        int tmp147;
+        int qPick2;
         if (k == 3)
         {
-            tmp147 = 0;
+            qPick2 = 0;
         }
         else
         {
-            tmp147 = k - 1;
+            qPick2 = k - 1;
         }
-        tmp140 = tmp147;
+        qPick = qPick2;
     }
-    float2 q = tmp136[tmp140];
-    float3 l = (((tmp170[f] + (tmp178[f] * q.x)) + (tmp187[f] * q.y)) * 0.5f) * (b.xyz + (2.0f * volGrow).xxx);
-    float3 param = c.xyz;
-    float4 w = float4(mul(l, volRot(param)) + a.xyz, 1.0f);
+    float2 q = FC[qPick];
+    float3 l = (((table6[f] + (table62[f] * q.x)) + (table63[f] * q.y)) * 0.5f) * (b.xyz + (2.0f * volGrow).xxx);
+    float3 degArg = c.xyz;
+    float4 w = float4(mul(l, volRot(degArg)) + a.xyz, 1.0f);
     gl_Position = float4(dot(volClip[0], w), dot(volClip[1], w), dot(volClip[2], w), dot(volClip[3], w));
 }
 

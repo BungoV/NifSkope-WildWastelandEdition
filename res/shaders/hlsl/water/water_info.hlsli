@@ -24,35 +24,35 @@ uint wwWaterInfoRaw(float2 worldXY)
     int2 t = int2(floor((worldXY - waterInfoGrid.xy) / waterInfoGrid.z.xx));
     int E = int(waterInfoLayout.z);
     int2 tile = t / E.xx;
-    bool tmp1 = t.x < 0;
-    bool tmp2;
-    if (!tmp1)
+    bool cond4 = t.x < 0;
+    bool cond3;
+    if (!cond4)
     {
-        tmp2 = t.y < 0;
+        cond3 = t.y < 0;
     }
     else
     {
-        tmp2 = tmp1;
+        cond3 = cond4;
     }
-    bool tmp3;
-    if (!tmp2)
+    bool cond2;
+    if (!cond3)
     {
-        tmp3 = tile.x >= int(waterInfoLayout.x);
+        cond2 = tile.x >= int(waterInfoLayout.x);
     }
     else
     {
-        tmp3 = tmp2;
+        cond2 = cond3;
     }
-    bool tmp4;
-    if (!tmp3)
+    bool cond;
+    if (!cond2)
     {
-        tmp4 = tile.y >= int(waterInfoLayout.y);
+        cond = tile.y >= int(waterInfoLayout.y);
     }
     else
     {
-        tmp4 = tmp3;
+        cond = cond2;
     }
-    if (tmp4)
+    if (cond)
     {
         return 16711680u;
     }
@@ -70,8 +70,8 @@ uint wwWaterInfoRaw(float2 worldXY)
 #if defined(WW_FN_wwWaterInfoWord) || defined(WW_FN_ALL)
 uint wwWaterInfoWord(float2 worldXY)
 {
-    float2 tmp1 = worldXY;
-    uint w = wwWaterInfoRaw(tmp1);
+    float2 cond4 = worldXY;
+    uint w = wwWaterInfoRaw(cond4);
     bool wwh0 = (waterSeam.x <= 0.0f);
     if (wwh0 || (!waterInfoOn))
     {
@@ -81,23 +81,23 @@ uint wwWaterInfoWord(float2 worldXY)
     uint sea = uint(waterSeam.y);
     if (id == 0u)
     {
-        uint tmp2;
+        uint cond3;
         if (waterSeam.z > 0.0f)
         {
-            tmp2 = sea | 4294901760u;
+            cond3 = sea | 4294901760u;
         }
         else
         {
-            tmp2 = w;
+            cond3 = w;
         }
-        return tmp2;
+        return cond3;
     }
     if (id != sea)
     {
         return w;
     }
-    float2 tmp3 = worldXY;
-    float f = wwSeamFade(tmp3);
+    float2 cond2 = worldXY;
+    float f = wwSeamFade(cond2);
     uint sh = uint(lerp(255.0f, float((w >> uint(16)) & 255u), f) + 0.5f);
     uint dc = uint(lerp(255.0f, float(w >> uint(24)), f) + 0.5f);
     return (id | (sh << uint(16))) | (dc << uint(24));
@@ -107,17 +107,17 @@ uint wwWaterInfoWord(float2 worldXY)
 #if defined(WW_FN_wwFarWaterDry) || defined(WW_FN_ALL)
 bool wwFarWaterDry(float2 worldXY)
 {
-    bool tmp1;
+    bool cond4;
     if (waterInfoOn)
     {
-        float2 tmp2 = worldXY;
-        tmp1 = (wwWaterInfoRaw(tmp2) & 65535u) == 0u;
+        float2 cond3 = worldXY;
+        cond4 = (wwWaterInfoRaw(cond3) & 65535u) == 0u;
     }
     else
     {
-        tmp1 = waterInfoOn;
+        cond4 = waterInfoOn;
     }
-    return tmp1;
+    return cond4;
 }
 #endif
 
@@ -131,35 +131,35 @@ float2 wwWaterFlow(float2 worldXY)
     int2 t = int2(floor((worldXY - waterFlowGrid.xy) / waterFlowGrid.z.xx));
     int E = int(waterFlowLayout.z);
     int2 tile = t / E.xx;
-    bool tmp1 = t.x < 0;
-    bool tmp2;
-    if (!tmp1)
+    bool cond4 = t.x < 0;
+    bool cond3;
+    if (!cond4)
     {
-        tmp2 = t.y < 0;
+        cond3 = t.y < 0;
     }
     else
     {
-        tmp2 = tmp1;
+        cond3 = cond4;
     }
-    bool tmp3;
-    if (!tmp2)
+    bool cond2;
+    if (!cond3)
     {
-        tmp3 = tile.x >= int(waterFlowLayout.x);
+        cond2 = tile.x >= int(waterFlowLayout.x);
     }
     else
     {
-        tmp3 = tmp2;
+        cond2 = cond3;
     }
-    bool tmp4;
-    if (!tmp3)
+    bool cond;
+    if (!cond2)
     {
-        tmp4 = tile.y >= int(waterFlowLayout.y);
+        cond = tile.y >= int(waterFlowLayout.y);
     }
     else
     {
-        tmp4 = tmp3;
+        cond = cond2;
     }
-    if (tmp4)
+    if (cond)
     {
         return 0.0f.xx;
     }
@@ -172,47 +172,47 @@ float2 wwWaterFlow(float2 worldXY)
         w = waterFlowAtlas.Load(int3((int2(slot % perRow, slot / perRow) * E.xx) + (t - (tile * E.xx)), 0)).x;
     }
     float2 v = float2(float(int(w << 16u) >> 16), float(int(w) >> 16)) / waterFlowGrid.w.xx;
-    float2 tmp5;
+    float2 wwWaterFlowRet;
     if (waterSeam.x > 0.0f)
     {
-        float2 tmp6 = worldXY;
-        tmp5 = v * wwSeamFade(tmp6);
+        float2 wwWaterFlowPart = worldXY;
+        wwWaterFlowRet = v * wwSeamFade(wwWaterFlowPart);
     }
     else
     {
-        tmp5 = v;
+        wwWaterFlowRet = v;
     }
-    return tmp5;
+    return wwWaterFlowRet;
 }
 #endif
 
 #if defined(WW_FN_wwWaterInfo) || defined(WW_FN_ALL)
 float4 wwWaterInfo(float2 worldXY)
 {
-    float2 tmp1 = worldXY;
-    uint w = wwWaterInfoWord(tmp1);
+    float2 cond4 = worldXY;
+    uint w = wwWaterInfoWord(cond4);
     uint id = w & 65535u;
     float code = float(w >> uint(24)) / 255.0f;
-    float tmp2;
+    float cond3;
     if (id != 0u)
     {
-        tmp2 = waterInfoBodies.Load(int3(int2(int(id % 256u), int(id / 256u)), 0)).y;
+        cond3 = waterInfoBodies.Load(int3(int2(int(id % 256u), int(id / 256u)), 0)).y;
     }
     else
     {
-        tmp2 = -1.0f;
+        cond3 = -1.0f;
     }
-    float cls = tmp2;
-    float tmp3;
+    float cls = cond3;
+    float cond2;
     if (waterInfoOn)
     {
-        tmp3 = waterInfoGrid.w;
+        cond2 = waterInfoGrid.w;
     }
     else
     {
-        tmp3 = 32.0f;
+        cond2 = 32.0f;
     }
-    float q = tmp3;
+    float q = cond2;
     return float4(float((w >> uint(16)) & 255u) * q, (code * code) * 8192.0f, float(id), cls);
 }
 #endif

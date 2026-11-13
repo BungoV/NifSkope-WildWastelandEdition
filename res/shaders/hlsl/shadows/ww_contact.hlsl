@@ -44,29 +44,29 @@ groupshared float sL[64];
 
 float lineY(int j, float lineOff, int u, float Da)
 {
-    precise float tmp76 = float(u) / Da;
-    float r = tmp76;
-    precise float tmp81 = float(j) + 0.5f;
-    precise float tmp84 = lineOff * r;
-    precise float tmp85 = tmp81 - tmp84;
-    float y = tmp85;
+    precise float rPart = float(u) / Da;
+    float r = rPart;
+    precise float part2 = float(j) + 0.5f;
+    precise float part = lineOff * r;
+    precise float yPart = part2 - part;
+    float y = yPart;
     return y;
 }
 
 float linAt(float2 maskPx, out bool valid)
 {
     int2 q = int2(floor(maskPx * maskScale));
-    bool tmp101 = any(bool2(q.x < int2(0, 0).x, q.y < int2(0, 0).y));
-    bool tmp109;
-    if (!tmp101)
+    bool cond2 = any(bool2(q.x < int2(0, 0).x, q.y < int2(0, 0).y));
+    bool cond;
+    if (!cond2)
     {
-        tmp109 = any(bool2(q.x >= fullSize.x, q.y >= fullSize.y));
+        cond = any(bool2(q.x >= fullSize.x, q.y >= fullSize.y));
     }
     else
     {
-        tmp109 = tmp101;
+        cond = cond2;
     }
-    if (tmp109)
+    if (cond)
     {
         valid = false;
         return 1000000.0f;
@@ -106,199 +106,209 @@ void comp_main()
     int4 b = int4(tmp180.Load4(lo * 16 + 0));
     int sector = b.x;
     bool majorX = sector < 2;
+    // the side's direction away from the light
     float s = ((sector & 1) == 0) ? 1.0f : (-1.0f);
-    float tmp214;
+    float LmPick;
     if (majorX)
     {
-        tmp214 = lightCoord.x;
+        LmPick = lightCoord.x;
     }
     else
     {
-        tmp214 = lightCoord.y;
+        LmPick = lightCoord.y;
     }
-    float Lm = tmp214;
-    float tmp227;
+    float Lm = LmPick;
+    float LnPick;
     if (majorX)
     {
-        tmp227 = lightCoord.y;
+        LnPick = lightCoord.y;
     }
     else
     {
-        tmp227 = lightCoord.x;
+        LnPick = lightCoord.x;
     }
-    float Ln = tmp227;
+    float Ln = LnPick;
     float anchorC = (float(sideFirst[sector]) + (s * float(b.y))) + 0.5f;
     float Da = s * (anchorC - Lm);
     int j = b.z + (g - b.w);
-    precise float tmp268 = float(j) + 0.5f;
-    precise float tmp270 = tmp268 - Ln;
-    float lineOff = tmp270;
-    precise float tmp275 = float(j - 1) + 0.5f;
-    precise float tmp277 = tmp275 - Ln;
-    float lineOffPrev = tmp277;
+    precise float part4 = float(j) + 0.5f;
+    precise float lineOffPart = part4 - Ln;
+    // the line's minor offset at the anchor
+    float lineOff = lineOffPart;
+    precise float part3 = float(j - 1) + 0.5f;
+    precise float lineOffPrevPart = part3 - Ln;
+    float lineOffPrev = lineOffPrevPart;
+    // toward the light (rank up) or away
     float direction = (lightCoord.w > 0.0f) ? (-1.0f) : 1.0f;
     int n = min(int(sssParams.w), 384);
     int t = int(gl_LocalInvocationID.x);
+    // shared index = position + base
     int base = (direction < 0.0f) ? 0 : n;
-    float2 tmp361;
-    bool param_5;
-    float2 tmp384;
-    bool param_7;
-    float tmp439;
-    float tmp461;
-    float tmp474;
+    float2 maskPxPick2;
+    bool validArg2;
+    float2 maskPxPick;
+    bool validArg;
+    float lsPick;
+    float sSPick;
+    float sRPick;
     for (int idx = t; idx < ((64 + n) + 1); idx += 64)
     {
         int u = idx - base;
         float c = anchorC - (s * float(u));
         float D = s * (c - Lm);
-        int param = j;
-        float param_1 = lineOff;
-        int param_2 = u;
-        float param_3 = Da;
-        float y = lineY(param, param_1, param_2, param_3);
+        int jArg4 = j;
+        float lineOffArg4 = lineOff;
+        int uArg4 = u;
+        float DaArg4 = Da;
+        float y = lineY(jArg4, lineOffArg4, uArg4, DaArg4);
+        // Bend's minor-axis bilinear pair with its edge test, between the two FULL-size texels around the line (at a
+        // half-size mask the fragment pass blends texels two rows apart by a mask-pixel weight, which a plane reads as
+        // a depth step every other column); at scale 1 it is the fragment pass's pair exactly
         float yF = (y * maskScale) - 0.5f;
         float r0 = floor(yF);
         float w = yF - r0;
         float cF = floor(c * maskScale) + 0.5f;
         if (majorX)
         {
-            tmp361 = float2(cF, r0 + 0.5f);
+            maskPxPick2 = float2(cF, r0 + 0.5f);
         }
         else
         {
-            tmp361 = float2(r0 + 0.5f, cF);
+            maskPxPick2 = float2(r0 + 0.5f, cF);
         }
-        float2 param_4 = tmp361 / maskScale.xx;
-        float tmp380 = linAt(param_4, param_5);
-        bool va = param_5;
-        float la = tmp380;
+        float2 maskPxArg4 = maskPxPick2 / maskScale.xx;
+        float linAtRet2 = linAt(maskPxArg4, validArg2);
+        bool va = validArg2;
+        float la = linAtRet2;
         if (majorX)
         {
-            tmp384 = float2(cF, r0 + 1.5f);
+            maskPxPick = float2(cF, r0 + 1.5f);
         }
         else
         {
-            tmp384 = float2(r0 + 1.5f, cF);
+            maskPxPick = float2(r0 + 1.5f, cF);
         }
-        float2 param_6 = tmp384 / maskScale.xx;
-        float tmp404 = linAt(param_6, param_7);
-        bool vb = param_7;
-        float lb = tmp404;
+        float2 maskPxArg3 = maskPxPick / maskScale.xx;
+        float linAtRet = linAt(maskPxArg3, validArg);
+        bool vb = validArg;
+        float lb = linAtRet;
+        // the texel the line is in (the point filter at an edge)
         float ln = (w < 0.5f) ? la : lb;
         bool vn = (w < 0.5f) ? va : vb;
-        bool tmp423 = (!va) || (!vb);
-        bool tmp436;
-        if (!tmp423)
+        bool cond8 = (!va) || (!vb);
+        bool edgePick;
+        if (!cond8)
         {
-            tmp436 = abs(la - lb) > (ln * sssParams.y);
+            edgePick = abs(la - lb) > (ln * sssParams.y);
         }
         else
         {
-            tmp436 = tmp423;
+            edgePick = cond8;
         }
-        bool edge = tmp436;
+        bool edge = edgePick;
         if (edge)
         {
-            tmp439 = ln;
+            lsPick = ln;
         }
         else
         {
-            tmp439 = lerp(la, lb, w);
+            lsPick = lerp(la, lb, w);
         }
-        float ls = tmp439;
+        float ls = lsPick;
         va = vn;
         bool use = va && (D >= 1.0f);
         if (use)
         {
-            tmp461 = ls * D;
+            sSPick = ls * D;
         }
         else
         {
-            tmp461 = 0.0f;
+            sSPick = 0.0f;
         }
-        sS[idx] = tmp461;
+        sS[idx] = sSPick;
         if (use)
         {
-            tmp474 = 1.0f / (sssFloor * D);
+            sRPick = 1.0f / (sssFloor * D);
         }
         else
         {
-            tmp474 = 0.0f;
+            sRPick = 0.0f;
         }
-        sR[idx] = tmp474;
+        sR[idx] = sRPick;
         if ((u >= 0) && (u < 64))
         {
             sL[u] = va ? ls : (-1.0f);
         }
     }
     GroupMemoryBarrierWithGroupSync();
+    // this lane's pixel and whether it owns it: the line nearest the pixel's centre
     float cT = anchorC - (s * float(t));
     float dist0 = s * (cT - Lm);
-    int param_8 = j;
-    float param_9 = lineOff;
-    int param_10 = t;
-    float param_11 = Da;
-    float yT = lineY(param_8, param_9, param_10, param_11);
-    int2 tmp529;
+    int jArg3 = j;
+    float lineOffArg3 = lineOff;
+    int uArg3 = t;
+    float DaArg3 = Da;
+    float yT = lineY(jArg3, lineOffArg3, uArg3, DaArg3);
+    int2 pixPick;
     if (majorX)
     {
-        tmp529 = int2(int(floor(cT)), int(floor(yT)));
+        pixPick = int2(int(floor(cT)), int(floor(yT)));
     }
     else
     {
-        tmp529 = int2(int(floor(yT)), int(floor(cT)));
+        pixPick = int2(int(floor(yT)), int(floor(cT)));
     }
-    int2 pix = tmp529;
-    bool tmp549 = dist0 <= 0.0f;
-    bool tmp556;
-    if (!tmp549)
+    int2 pix = pixPick;
+    bool cond7 = dist0 <= 0.0f;
+    bool cond6;
+    if (!cond7)
     {
-        tmp556 = any(bool2(pix.x < int2(0, 0).x, pix.y < int2(0, 0).y));
+        cond6 = any(bool2(pix.x < int2(0, 0).x, pix.y < int2(0, 0).y));
     }
     else
     {
-        tmp556 = tmp549;
+        cond6 = cond7;
     }
-    bool tmp565;
-    if (!tmp556)
+    bool cond5;
+    if (!cond6)
     {
-        tmp565 = any(bool2(pix.x >= maskSize.x, pix.y >= maskSize.y));
+        cond5 = any(bool2(pix.x >= maskSize.x, pix.y >= maskSize.y));
     }
     else
     {
-        tmp565 = tmp556;
+        cond5 = cond6;
     }
-    if (tmp565)
+    if (cond5)
     {
         return;
     }
     float minorOff = (floor(yT) + 0.5f) - Ln;
-    bool tmp577;
+    bool inSectorPick;
     if (majorX)
     {
-        tmp577 = dist0 > abs(minorOff);
+        inSectorPick = dist0 > abs(minorOff);
     }
     else
     {
-        tmp577 = dist0 >= abs(minorOff);
+        inSectorPick = dist0 >= abs(minorOff);
     }
-    bool inSector = tmp577;
-    bool tmp591 = !inSector;
-    bool tmp609;
-    if (!tmp591)
+    // the fragment pass's |dx| > |dy|
+    bool inSector = inSectorPick;
+    bool cond4 = !inSector;
+    bool cond3;
+    if (!cond4)
     {
-        int param_12 = j - 1;
-        float param_13 = lineOffPrev;
-        int param_14 = t;
-        float param_15 = Da;
-        tmp609 = floor(lineY(param_12, param_13, param_14, param_15)) >= floor(yT);
+        int jArg2 = j - 1;
+        float lineOffArg2 = lineOffPrev;
+        int uArg2 = t;
+        float DaArg2 = Da;
+        cond3 = floor(lineY(jArg2, lineOffArg2, uArg2, DaArg2)) >= floor(yT);
     }
     else
     {
-        tmp609 = tmp591;
+        cond3 = cond4;
     }
-    if (tmp609)
+    if (cond3)
     {
         return;
     }
@@ -306,65 +316,69 @@ void comp_main()
     float mask = 1.0f;
     if ((lin0 > 0.0f) && (dist0 >= 1.0f))
     {
-        float2 tmp627;
+        float2 pPick;
         if (majorX)
         {
-            tmp627 = float2(cT, yT);
+            pPick = float2(cT, yT);
         }
         else
         {
-            tmp627 = float2(yT, cT);
+            pPick = float2(yT, cT);
         }
-        float2 p = tmp627;
+        float2 p = pPick;
         int nk = n;
         if (direction < 0.0f)
         {
+            // past that the samples are beyond the light
             nk = min(nk, int(floor(dist0 - 1.0f)));
         }
         float C = lin0 * dist0;
         if ((sssReach.x > 0.0f) && (nk > 0))
         {
-            float2 param_16 = p;
-            float param_17 = lin0;
-            float3 pv0 = sssViewPos(param_16, param_17);
+            float2 maskPxArg2 = p;
+            float zArg2 = lin0;
+            // FIX1101A's reach: the march stops at the first sample further than reachEff from the receiver (in view
+            // space the ray's samples move away monotonically), so a bisection finds the last one inside
+            float3 pv0 = sssViewPos(maskPxArg2, zArg2);
             float ss = clamp(dot(pv0, pv0) / max(sssReach.z * sssReach.z, 1.0f), 0.0f, 1.0f);
             float s2 = ss * ss;
             float wgt = 1.0f - (s2 * s2);
-            float tmp694;
+            float reachEffPick;
             if (wgt > 0.0f)
             {
-                tmp694 = (sssReach.x + (sssReach.y * lin0)) / wgt;
+                reachEffPick = (sssReach.x + (sssReach.y * lin0)) / wgt;
             }
             else
             {
-                tmp694 = 1000000015047466219876688855040.0f;
+                reachEffPick = 1000000015047466219876688855040.0f;
             }
-            float reachEff = tmp694;
+            float reachEff = reachEffPick;
+            // sample kl is inside (0: the receiver), kh is the last candidate
             int kl = 0;
             int kh = nk;
-            float2 tmp757;
+            float2 qPick;
             for (int it = 0; (it < 10) && (kl < kh); it++)
             {
                 int km = ((kl + kh) + 1) >> 1;
                 float dist = dist0 + (float(km) * direction);
                 int um = t - (int(direction) * km);
-                int param_18 = j;
-                float param_19 = lineOff;
-                int param_20 = um;
-                float param_21 = Da;
-                float yq = lineY(param_18, param_19, param_20, param_21);
+                int jArg = j;
+                float lineOffArg = lineOff;
+                int uArg = um;
+                float DaArg = Da;
+                float yq = lineY(jArg, lineOffArg, uArg, DaArg);
                 if (majorX)
                 {
-                    tmp757 = float2(anchorC - (s * float(um)), yq);
+                    qPick = float2(anchorC - (s * float(um)), yq);
                 }
                 else
                 {
-                    tmp757 = float2(yq, anchorC - (s * float(um)));
+                    qPick = float2(yq, anchorC - (s * float(um)));
                 }
-                float2 q = tmp757;
-                float2 param_22 = q;
-                float param_23 = C / dist;
-                if (distance(sssViewPos(param_22, param_23), pv0) > reachEff)
+                float2 q = qPick;
+                float2 maskPxArg = q;
+                float zArg = C / dist;
+                if (distance(sssViewPos(maskPxArg, zArg), pv0) > reachEff)
                 {
                     kh = km - 1;
                 }
@@ -375,6 +389,7 @@ void comp_main()
             }
             nk = kl;
         }
+        // 1 / (thickness fraction x depth x distance)
         float Kc = 1.0f / (sssParams.x * C);
         float4 lanes = 1.0f.xxxx;
         int _step = -int(direction);
@@ -387,6 +402,7 @@ void comp_main()
             float d2 = abs(((C - sS[i + _step]) * min(sR[i + _step], Kc)) - 1.0f);
             float d3 = abs(((C - sS[i + (2 * _step)]) * min(sR[i + (2 * _step)], Kc)) - 1.0f);
             float d4 = abs(((C - sS[i + (3 * _step)]) * min(sR[i + (3 * _step)], Kc)) - 1.0f);
+            // sample k lands in lane k & 3: k = 1 mod 4 here
             lanes = min(lanes, float4(d4, d1, d2, d3));
         }
         for (; k <= nk; k++)

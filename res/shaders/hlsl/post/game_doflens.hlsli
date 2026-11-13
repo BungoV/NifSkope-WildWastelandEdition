@@ -9,16 +9,16 @@
 #if defined(WW_FN_lensSat) || defined(WW_FN_ALL)
 float lensSat(float v)
 {
-    float tmp1;
+    float lensSatRet;
     if (v >= 0.0f)
     {
-        tmp1 = min(v, 1.0f);
+        lensSatRet = min(v, 1.0f);
     }
     else
     {
-        tmp1 = 0.0f;
+        lensSatRet = 0.0f;
     }
-    return tmp1;
+    return lensSatRet;
 }
 #endif
 
@@ -26,16 +26,16 @@ float lensSat(float v)
 float lensDist(float d)
 {
     float x = 1.0f - d;
-    float tmp1;
+    float lensSatRet;
     if (9.9999997473787516355514526367188e-06f < x)
     {
-        tmp1 = lz.z / ((x * lz.y) + lz.x);
+        lensSatRet = lz.z / ((x * lz.y) + lz.x);
     }
     else
     {
-        tmp1 = -1.0f;
+        lensSatRet = -1.0f;
     }
-    return tmp1;
+    return lensSatRet;
 }
 #endif
 
@@ -47,8 +47,8 @@ float lensFocus(Texture2D<float4> depthTex, SamplerState _depthTex_sampler)
     if (!(s1 > 0.0f))
     {
         int2 c = int2(spvTextureSize(depthTex, uint(0), dummy_parameter)) / int2(2, 2);
-        float tmp1 = depthTex.Load(int3(c, 0)).x;
-        float z = lensDist(tmp1);
+        float lensSatRet = depthTex.Load(int3(c, 0)).x;
+        float z = lensDist(lensSatRet);
         s1 = (z > 0.0f) ? z : 1000000.0f;
     }
     return max(s1, f * 1.0099999904632568359375f);
@@ -62,16 +62,17 @@ float lensCoc(float z, float s1)
     float c;
     if (z < 0.0f)
     {
-        float tmp1;
+        float lensSatRet;
         if (lz.w != 0.0f)
         {
-            tmp1 = 0.0f;
+            lensSatRet = 0.0f;
         }
         else
         {
-            tmp1 = (lensP.y * f) / (s1 - f);
+            lensSatRet = (lensP.y * f) / (s1 - f);
         }
-        c = tmp1;
+        // the sky: sharp, or the lens's limit at infinity
+        c = lensSatRet;
     }
     else
     {

@@ -52,27 +52,27 @@ float cvLtField(float3 p, float3 d)
 {
     float phi = 0.0f;
     float gd = 0.0f;
-    float tmp297;
-    float tmp308;
+    float zsPick;
+    float zsPick2;
     for (int i = 0; i < 3; i++)
     {
         if (i == 0)
         {
-            tmp297 = cvLtSrc.z;
+            zsPick = cvLtSrc.z;
         }
         else
         {
             if (i == 1)
             {
-                tmp308 = cvLtPrm.y;
+                zsPick2 = cvLtPrm.y;
             }
             else
             {
-                tmp308 = cvLtPrm.z;
+                zsPick2 = cvLtPrm.z;
             }
-            tmp297 = tmp308 - cvLtSrc.z;
+            zsPick = zsPick2 - cvLtSrc.z;
         }
-        float zs = tmp297;
+        float zs = zsPick;
         float3 a = p - float3(cvLtSrc.xy, zs);
         float r = sqrt(dot(a, a) + cvLtPrm.x);
         float e = exp((-r) * cvLtSrc.w) / r;
@@ -86,6 +86,7 @@ float cvLtField(float3 p, float3 d)
 // the flash's light at this pixel (premultiplied, as the history's), a = the clouds' opacity
 float3 cvLtLight(float2 uv, float a)
 {
+    // the nearest cloudy depth of the bilinear footprint (an edge texel of no cloud holds 1e4)
     float4 q = cvHistDepth.GatherRed(_cvHistDepth_sampler, uv);
     float dm = min(min(q.x, q.y), min(q.z, q.w));
     if (dm >= 1000.0f)
@@ -96,9 +97,9 @@ float3 cvLtLight(float2 uv, float a)
     float3 d = normalize(mul(float3((ndc.x + cvProj.z) / cvProj.x, (ndc.y + cvProj.w) / cvProj.y, -1.0f), cvCam));
     float3 e = float3(d.xy * dm, (6360.0f + cvCamKm.z) + (d.z * dm));
     float3 p = float3(cvCamKm.xy + (d.xy * dm), length(e) - 6360.0f);
-    float3 param = p;
-    float3 param_1 = d;
-    return (cvLtCol * a) * cvLtField(param, param_1);
+    float3 pArg = p;
+    float3 dArg = d;
+    return (cvLtCol * a) * cvLtField(pArg, dArg);
 }
 
 // AgX, Benjamin Wrensch's minimal fit (sRGB display out, the "base" look)
@@ -148,26 +149,26 @@ void frag_main()
     }
     if (cvLtOn != 0)
     {
-        float2 param = uv;
-        float param_1 = a;
-        float4 tmp616 = h;
-        float3 tmp618 = tmp616.xyz + cvLtLight(param, param_1);
-        h.x = tmp618.x;
-        h.y = tmp618.y;
-        h.z = tmp618.z;
+        float2 uvArg = uv;
+        float aArg = a;
+        float4 hPart2 = h;
+        float3 hPart = hPart2.xyz + cvLtLight(uvArg, aArg);
+        h.x = hPart.x;
+        h.y = hPart.y;
+        h.z = hPart.z;
     }
-    float4 tmp629;
+    float4 fragColorPick;
     if (cvFront == 2)
     {
-        tmp629 = float4(max(h.xyz, 0.0f.xxx), a);
+        fragColorPick = float4(max(h.xyz, 0.0f.xxx), a);
     }
     else
     {
-        float3 param_2 = h.xyz / a.xxx;
-        float3 tmp647 = studioOutput(param_2);
-        tmp629 = float4(tmp647, a);
+        float3 cArg = h.xyz / a.xxx;
+        float3 studioOutputRet = studioOutput(cArg);
+        fragColorPick = float4(studioOutputRet, a);
     }
-    fragColor = tmp629;
+    fragColor = fragColorPick;
 }
 
 SPIRV_Cross_Output main(SPIRV_Cross_Input stage_input)

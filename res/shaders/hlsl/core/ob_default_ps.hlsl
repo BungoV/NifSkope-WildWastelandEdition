@@ -108,22 +108,35 @@ float2 parallaxMapping(float3 V, float2 offset)
         }
         return offset + (V.xy * ((h - 0.5f) * parallaxScale));
     }
+    // determine optimal height of each layer
     float layerHeight = 1.0f / lerp(max(float(parallaxMaxSteps), 4.0f), 4.0f, abs(V.z));
+    // current height of the layer
     float curLayerHeight = 1.0f;
     float2 dtex = (V.xy * parallaxScale) / max(abs(V.z), 0.0199999995529651641845703125f).xx;
+    // current texture coordinates
     float2 currentTextureCoords = offset + (dtex * 0.5f);
+    // shift of texture coordinates for each layer
     dtex *= layerHeight;
+    // height from heightmap
     float heightFromTexture = HeightMap.Sample(_HeightMap_sampler, currentTextureCoords).x;
+    // while point is above the surface
     while (curLayerHeight > heightFromTexture)
     {
+        // to the next layer
         curLayerHeight -= layerHeight;
+        // shift of texture coordinates
         currentTextureCoords -= dtex;
+        // new height from heightmap
         heightFromTexture = HeightMap.Sample(_HeightMap_sampler, currentTextureCoords).x;
     }
+    // previous texture coordinates
     float2 prevTCoords = currentTextureCoords + dtex;
+    // heights for linear interpolation
     float nextH = curLayerHeight - heightFromTexture;
     float prevH = (curLayerHeight + layerHeight) - HeightMap.Sample(_HeightMap_sampler, prevTCoords).x;
+    // proportions for linear interpolation
     float weight = nextH / (nextH - prevH);
+    // return interpolation of texture coordinates
     return lerp(currentTextureCoords, prevTCoords, weight.xx);
 }
 
@@ -150,9 +163,9 @@ void frag_main()
     offset = ((float2((offset.x * r_c) - (offset.y * r_s), (offset.x * r_s) + (offset.y * r_c)) * uvScale) + uvCenter) + uvOffset;
     if ((parallaxMaxSteps >= 1) && (parallaxScale >= 0.0005000000237487256526947021484375f))
     {
-        float3 param = E;
-        float2 param_1 = offset;
-        offset = parallaxMapping(param, param_1);
+        float3 VArg = E;
+        float2 offsetArg = offset;
+        offset = parallaxMapping(VArg, offsetArg);
     }
     float4 baseMap = BaseMap.Sample(_BaseMap_sampler, offset);
     float4 color = baseMap;
@@ -161,6 +174,7 @@ void frag_main()
         float alphaMult = 1.0f;
         if (falloffParams.y != falloffParams.x)
         {
+            // TODO: When X and Y are both 0.0 or both 1.0 the effect is reversed.
             float falloff = smoothstep(falloffParams.y, falloffParams.x, abs(E.z));
             falloff = lerp(max(falloffParams.w, 0.0f), min(falloffParams.z, 1.0f), falloff);
             alphaMult = falloff;
@@ -168,17 +182,17 @@ void frag_main()
         color *= C;
         if (dot(frontMaterialEmission.xyz, 1.0f.xxx) > 0.0030000000260770320892333984375f)
         {
-            float4 tmp345 = color;
-            float3 tmp349 = tmp345.xyz * frontMaterialEmission.xyz;
-            color.x = tmp349.x;
-            color.y = tmp349.y;
-            color.z = tmp349.z;
+            float4 colorPart18 = color;
+            float3 colorPart17 = colorPart18.xyz * frontMaterialEmission.xyz;
+            color.x = colorPart17.x;
+            color.y = colorPart17.y;
+            color.z = colorPart17.z;
         }
-        float4 tmp356 = color;
-        float3 tmp360 = tmp356.xyz * glowMult;
-        color.x = tmp360.x;
-        color.y = tmp360.y;
-        color.z = tmp360.z;
+        float4 colorPart16 = color;
+        float3 colorPart15 = colorPart16.xyz * glowMult;
+        color.x = colorPart15.x;
+        color.y = colorPart15.y;
+        color.z = colorPart15.z;
         color.w *= alphaMult;
     }
     else
@@ -189,32 +203,33 @@ void frag_main()
         if ((vertexColorFlags & 40) == 40)
         {
             color *= C;
-            float4 tmp408 = color;
-            float3 tmp410 = tmp408.xyz * (A.xyz + (D.xyz * NdotL));
-            color.x = tmp410.x;
-            color.y = tmp410.y;
-            color.z = tmp410.z;
+            float4 colorPart14 = color;
+            float3 colorPart13 = colorPart14.xyz * (A.xyz + (D.xyz * NdotL));
+            color.x = colorPart13.x;
+            color.y = colorPart13.y;
+            color.z = colorPart13.z;
         }
         else
         {
             if ((vertexColorFlags & 8) != 0)
             {
-                float4 tmp440 = color;
-                float3 tmp442 = tmp440.xyz * ((A.xyz * frontMaterialAmbient.xyz) + ((D.xyz * frontMaterialDiffuse.xyz) * NdotL));
-                color.x = tmp442.x;
-                color.y = tmp442.y;
-                color.z = tmp442.z;
+                float4 colorPart12 = color;
+                float3 colorPart11 = colorPart12.xyz * ((A.xyz * frontMaterialAmbient.xyz) + ((D.xyz * frontMaterialDiffuse.xyz) * NdotL));
+                color.x = colorPart11.x;
+                color.y = colorPart11.y;
+                color.z = colorPart11.z;
                 color.w *= min(frontMaterialAmbient.w + frontMaterialDiffuse.w, 1.0f);
             }
             else
             {
-                float4 tmp467 = color;
-                float3 tmp469 = tmp467.xyz * (A.xyz + (D.xyz * NdotL));
-                color.x = tmp469.x;
-                color.y = tmp469.y;
-                color.z = tmp469.z;
+                float4 colorPart10 = color;
+                float3 colorPart9 = colorPart10.xyz * (A.xyz + (D.xyz * NdotL));
+                color.x = colorPart9.x;
+                color.y = colorPart9.y;
+                color.z = colorPart9.z;
             }
         }
+        // Environment
         if (hasCubeMap && (cubeMapScale > 0.0f))
         {
             float3 R = reflect(-E, normal);
@@ -228,12 +243,13 @@ void frag_main()
             {
                 cube *= (normalMap.w * cubeMapScale);
             }
-            float4 tmp531 = color;
-            float3 tmp533 = tmp531.xyz + ((cube * A.xyz) * 2.6666667461395263671875f);
-            color.x = tmp533.x;
-            color.y = tmp533.y;
-            color.z = tmp533.z;
+            float4 colorPart8 = color;
+            float3 colorPart7 = colorPart8.xyz + ((cube * A.xyz) * 2.6666667461395263671875f);
+            color.x = colorPart7.x;
+            color.y = colorPart7.y;
+            color.z = colorPart7.z;
         }
+        // Emissive
         float3 emissive = (glowMult * glowScaleSRGB).xxx;
         if ((vertexColorFlags & 16) == 0)
         {
@@ -245,23 +261,24 @@ void frag_main()
         }
         if (hasGlowMap)
         {
-            float4 tmp587 = color;
-            float3 tmp589 = tmp587.xyz + ((emissive * baseMap.xyz) * GlowMap.Sample(_GlowMap_sampler, offset).xyz);
-            color.x = tmp589.x;
-            color.y = tmp589.y;
-            color.z = tmp589.z;
+            float4 colorPart6 = color;
+            float3 colorPart5 = colorPart6.xyz + ((emissive * baseMap.xyz) * GlowMap.Sample(_GlowMap_sampler, offset).xyz);
+            color.x = colorPart5.x;
+            color.y = colorPart5.y;
+            color.z = colorPart5.z;
         }
         else
         {
             if (hasEmit)
             {
-                float4 tmp605 = color;
-                float3 tmp607 = tmp605.xyz + (emissive * baseMap.xyz);
-                color.x = tmp607.x;
-                color.y = tmp607.y;
-                color.z = tmp607.z;
+                float4 colorPart4 = color;
+                float3 colorPart3 = colorPart4.xyz + (emissive * baseMap.xyz);
+                color.x = colorPart3.x;
+                color.y = colorPart3.y;
+                color.z = colorPart3.z;
             }
         }
+        // Specular
         if (hasSpecular && (NdotL > 0.0f))
         {
             float3 H = normalize(L + E);
@@ -269,11 +286,11 @@ void frag_main()
             if (NdotH > 0.0f)
             {
                 float3 spec = frontMaterialSpecular.xyz * pow(NdotH, useGloss ? frontMaterialShininess : 1.0f);
-                float4 tmp653 = color;
-                float3 tmp655 = tmp653.xyz + ((spec * frontMaterialSpecular.w) * normalMap.w);
-                color.x = tmp655.x;
-                color.y = tmp655.y;
-                color.z = tmp655.z;
+                float4 colorPart2 = color;
+                float3 colorPart = colorPart2.xyz + ((spec * frontMaterialSpecular.w) * normalMap.w);
+                color.x = colorPart.x;
+                color.y = colorPart.y;
+                color.z = colorPart.z;
             }
         }
     }
@@ -281,16 +298,17 @@ void frag_main()
     float a = 1.0f;
     if (alphaFlags > 0)
     {
-        int tmp681;
+        int mPick;
         if (color.w < alphaThreshold)
         {
-            tmp681 = 11051;
+            mPick = 11051;
         }
         else
         {
-            tmp681 = (color.w > alphaThreshold) ? 29041 : 19789;
+            mPick = (color.w > alphaThreshold) ? 29041 : 19789;
         }
-        int m = tmp681;
+        // 0: always, 1: <, 2: ==, 3: <=, 4: >, 5: !=, 6: >=, 7: never
+        int m = mPick;
         if ((m & (1 << alphaFlags)) == 0)
         {
             discard;
@@ -300,8 +318,8 @@ void frag_main()
             a = color.w;
         }
     }
-    float3 param_2 = color.xyz;
-    fragColor = float4(tonemap(param_2), a);
+    float3 xArg = color.xyz;
+    fragColor = float4(tonemap(xArg), a);
 }
 
 SPIRV_Cross_Output main(SPIRV_Cross_Input stage_input)

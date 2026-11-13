@@ -4,8 +4,8 @@
 // named in notes/vkcompute1/hlsl_plan.md. Not wired: nothing loads this file.
 // profile: ps_6_0
 #include "CoreBindingsVk.hlsli"
-static const float2 tmp7112[16] = { float2(0.493393003940582275390625f, 0.39426898956298828125f), float2(0.7985470294952392578125f, 0.885922014713287353515625f), float2(0.2473219931125640869140625f, 0.9264500141143798828125f), float2(0.051454000174999237060546875f, 0.14078199863433837890625f), float2(0.83184301853179931640625f, 0.00955200009047985076904296875f), float2(0.4286319911479949951171875f, 0.01715099997818470001220703125f), float2(0.01565600000321865081787109375f, 0.7497789859771728515625f), float2(0.758385002613067626953125f, 0.4961700141429901123046875f), float2(0.22348700463771820068359375f, 0.562151014804840087890625f), float2(0.01162800006568431854248046875f, 0.406994998455047607421875f), float2(0.24146200716495513916015625f, 0.3046360015869140625f), float2(0.4303109943866729736328125f, 0.7272260189056396484375f), float2(0.981810986995697021484375f, 0.278358995914459228515625f), float2(0.4070560038089752197265625f, 0.500533998012542724609375f), float2(0.123478002846240997314453125f, 0.4635460078716278076171875f), float2(0.809534013271331787109375f, 0.682272017002105712890625f) };
-static const float3 tmp11331[6] = { float3(1.0f, 0.0f, 0.0f), float3(-1.0f, 0.0f, 0.0f), float3(0.0f, 1.0f, 0.0f), float3(0.0f, -1.0f, 0.0f), float3(0.0f, 0.0f, 1.0f), float3(0.0f, 0.0f, -1.0f) };
+static const float2 csmPoisson[16] = { float2(0.493393003940582275390625f, 0.39426898956298828125f), float2(0.7985470294952392578125f, 0.885922014713287353515625f), float2(0.2473219931125640869140625f, 0.9264500141143798828125f), float2(0.051454000174999237060546875f, 0.14078199863433837890625f), float2(0.83184301853179931640625f, 0.00955200009047985076904296875f), float2(0.4286319911479949951171875f, 0.01715099997818470001220703125f), float2(0.01565600000321865081787109375f, 0.7497789859771728515625f), float2(0.758385002613067626953125f, 0.4961700141429901123046875f), float2(0.22348700463771820068359375f, 0.562151014804840087890625f), float2(0.01162800006568431854248046875f, 0.406994998455047607421875f), float2(0.24146200716495513916015625f, 0.3046360015869140625f), float2(0.4303109943866729736328125f, 0.7272260189056396484375f), float2(0.981810986995697021484375f, 0.278358995914459228515625f), float2(0.4070560038089752197265625f, 0.500533998012542724609375f), float2(0.123478002846240997314453125f, 0.4635460078716278076171875f), float2(0.809534013271331787109375f, 0.682272017002105712890625f) };
+static const float3 table6[6] = { float3(1.0f, 0.0f, 0.0f), float3(-1.0f, 0.0f, 0.0f), float3(0.0f, 1.0f, 0.0f), float3(0.0f, -1.0f, 0.0f), float3(0.0f, 0.0f, 1.0f), float3(0.0f, 0.0f, -1.0f) };
 
 cbuffer globalUniforms : register(b0, space0)
 {
@@ -430,16 +430,16 @@ uint3 spvTextureSize(Texture3D<float4> Tex, uint Level, out uint Param)
 // the soft slab's inputs: (the scene's view depth, the card's, the half-depth h) in view units
 float3 vpCardSlab()
 {
-    int2 tmp11725;
+    int2 pxPick;
     if (vpDumpScale.x > 0.0f)
     {
-        tmp11725 = int2(gl_FragCoord.xy * vpDumpScale);
+        pxPick = int2(gl_FragCoord.xy * vpDumpScale);
     }
     else
     {
-        tmp11725 = int2(gl_FragCoord.xy) - viewportDimensions.xy;
+        pxPick = int2(gl_FragCoord.xy) - viewportDimensions.xy;
     }
-    int2 px = tmp11725;
+    int2 px = pxPick;
     float d = fxDepth.Load(int3(px, 0)).x;
     float sceneW = projectionMatrix[3].z / (projectionMatrix[2].z + ((2.0f * d) - 1.0f));
     return float3(sceneW, 1.0f / gl_FragCoord.w, max(fxSoftDepth, 1.0f) / max(fxDistScale, 9.9999999747524270787835121154785e-07f));
@@ -447,17 +447,17 @@ float3 vpCardSlab()
 
 float vpCardSoft()
 {
-    bool tmp11771 = !fxSoft;
-    bool tmp11778;
-    if (!tmp11771)
+    bool cond8 = !fxSoft;
+    bool cond7;
+    if (!cond8)
     {
-        tmp11778 = (volPartRed & 4) != 0;
+        cond7 = (volPartRed & 4) != 0;
     }
     else
     {
-        tmp11778 = tmp11771;
+        cond7 = cond8;
     }
-    if (tmp11778)
+    if (cond7)
     {
         return 1.0f;
     }
@@ -467,25 +467,27 @@ float vpCardSoft()
 
 float cellFxFade()
 {
-    bool tmp6844 = !fxSoft;
-    bool tmp6852;
-    if (!tmp6844)
+    bool cond10 = !fxSoft;
+    bool cond9;
+    if (!cond10)
     {
-        tmp6852 = (fxRed & 2) != 0;
+        cond9 = (fxRed & 2) != 0;
     }
     else
     {
-        tmp6852 = tmp6844;
+        cond9 = cond10;
     }
-    if (tmp6852)
+    if (cond9)
     {
         return 1.0f;
     }
     float d = fxDepth.Load(int3(int2(gl_FragCoord.xy) - viewportDimensions.xy, 0)).x;
+    // view depth from the projection: w = B / (A + z_ndc)
     float sceneW = projectionMatrix[3].z / (projectionMatrix[2].z + ((2.0f * d) - 1.0f));
     float k = fxDistScale / fxSoftDepth;
     float fragW = 1.0f / gl_FragCoord.w;
     float soft = clamp((sceneW - fragW) * k, 0.0f, 1.0f);
+    // the game subtracts its own near term here (INFERRED to be about one unit; read as none)
     float t = clamp(((fragW * k) - 0.07500000298023223876953125f) * 2.352941036224365234375f, 0.0f, 1.0f);
     return ((soft * t) * t) * (3.0f - (2.0f * t));
 }
@@ -520,25 +522,26 @@ float cellFxFade()
 //! the 16-tap Poisson filter, radius 3 texels
 float csmFiltered(int i, float3 posView, float offsetWorld)
 {
-    int param = i;
-    float3 param_1 = posView + (csmNOff * ussCsmTexel[i]);
-    float3 q = csmUvd(param, param_1);
-    float tmp7027;
+    int iArg = i;
+    float3 posViewArg = posView + (csmNOff * ussCsmTexel[i]);
+    // lane SHADOWSHIMMER2: as csmHard
+    float3 q = csmUvd(iArg, posViewArg);
+    float zRefPick;
     if (ussCsmStable.w != 0.0f)
     {
-        tmp7027 = ussCsmBias[i];
+        zRefPick = ussCsmBias[i];
     }
     else
     {
-        tmp7027 = offsetWorld;
+        zRefPick = offsetWorld;
     }
-    float zRef = q.z - (tmp7027 * csmInvRange[i]);
+    float zRef = q.z - (zRefPick * csmInvRange[i]);
     float k = 6.0f / csmParams.z;
     float sum = 0.0f;
     for (int t = 0; t < 16; t++)
     {
-        float4 tmp7128 = float4(q.xy + ((tmp7112[t] - 0.5f.xx) * k), float(i), zRef);
-        sum += csmMap.SampleCmp(_csmMap_sampler, tmp7128.xyz, tmp7128.w);
+        float4 sumPart = float4(q.xy + ((csmPoisson[t] - 0.5f.xx) * k), float(i), zRef);
+        sum += csmMap.SampleCmp(_csmMap_sampler, sumPart.xyz, sumPart.w);
     }
     return sum / 16.0f;
 }
@@ -657,6 +660,7 @@ float csmFiltered(int i, float3 posView, float offsetWorld)
 // one placed light on a lit effect at world point P, as the game's lit effect shader sums it
 float3 cellFxLight(int i, float3 P)
 {
+    // lane FXLIT1: the stride is HEMI1's 8 texels a light
     float4 t0 = cellLights.Load(i * 8);
     float4 t1 = cellLights.Load((i * 8) + 1);
     float3 Lv = t0.xyz - P;
@@ -667,26 +671,28 @@ float3 cellFxLight(int i, float3 P)
     {
         a = pow(a, 2.2000000476837158203125f);
     }
-    bool tmp6634 = cellLightPhys.x > 0.5f;
-    bool tmp6640;
-    if (tmp6634)
+    bool cond12 = cellLightPhys.x > 0.5f;
+    bool cond11;
+    if (cond12)
     {
-        tmp6640 = (fxLitMode & 4) == 0;
+        cond11 = (fxLitMode & 4) == 0;
     }
     else
     {
-        tmp6640 = tmp6634;
+        cond11 = cond12;
     }
-    if (tmp6640)
+    if (cond11)
     {
-        float param = a;
-        float param_1 = q;
-        float param_2 = t0.w;
-        float3 param_3 = float3(0.0f, 1.0f, 2.0f);
-        a = cellPhysFalloff(param, param_1, param_2, param_3);
+        float vanArg = a;
+        float xArg = q;
+        float rArg = t0.w;
+        float3 cArg = float3(0.0f, 1.0f, 2.0f);
+        a = cellPhysFalloff(vanArg, xArg, rArg, cArg);
     }
+    // lane LIGHTS5 (GOBO-FX): the light's pattern, as on surfaces (GOBO2: every shape)
     float3 g = 1.0f.xxx;
     float3 gAx = 0.0f.xxx;
+    // a spot: the game's cone, its cosine + 0.001
     if (t1.w > (-1.5f))
     {
         float4 t2 = cellLights.Load((i * 8) + 2);
@@ -697,11 +703,11 @@ float3 cellFxLight(int i, float3 P)
     }
     if (a > 0.0f)
     {
-        int param_4 = i;
+        int iArg2 = i;
         float3 param_5 = -Lv;
-        float3 param_6 = gAx;
-        bool param_7 = t1.w > (-1.5f);
-        g = cellGobo(param_4, param_5, param_6, param_7);
+        float3 axisArg = gAx;
+        bool spotArg = t1.w > (-1.5f);
+        g = cellGobo(iArg2, param_5, axisArg, spotArg);
     }
     return (t1.xyz * g) * a;
 }
@@ -719,41 +725,45 @@ float3 cellFxLight(int i, float3 P)
 // what a lit effect's colour is multiplied by at P: mix( 1, directional + its lights, lighting influence )
 float3 cellFxLit(float3 P)
 {
+    // lane SUNCELL1 final: an exterior with no weather loaded has no sun to light it -- self-lit, as before
+    // MODULES1 R7-1: a blended lit card outdoors takes the local light: the surfaces' sun under its shadow + the ambient
     bool loc = (fxLocalOn() && (!cellInterior)) && (!fxAdditive);
-    bool tmp6734 = (fxLitMode & 8) != 0;
-    bool tmp6747;
-    if (!tmp6734)
+    bool cond14 = (fxLitMode & 8) != 0;
+    bool cond13;
+    if (!cond14)
     {
-        tmp6747 = ((!cellInterior) && (!cellHasDir)) && (!loc);
+        cond13 = ((!cellInterior) && (!cellHasDir)) && (!loc);
     }
     else
     {
-        tmp6747 = tmp6734;
+        cond13 = cond14;
     }
-    if (tmp6747)
+    if (cond13)
     {
         return 1.0f.xxx;
     }
-    float3 tmp6753;
+    float3 EPick3;
     if (loc)
     {
-        float3 param = float3(0.0f, 0.0f, 1.0f);
-        float3 param_1 = P;
-        tmp6753 = ((vpSun.xyz * fxLocalVis) + cellAmbient(param, param_1)) + fxLocalGi;
+        float3 NArg = float3(0.0f, 0.0f, 1.0f);
+        float3 PArg3 = P;
+        EPick3 = ((vpSun.xyz * fxLocalVis) + cellAmbient(NArg, PArg3)) + fxLocalGi;
     }
     else
     {
-        bool3 tmp6771 = cellHasDir.xxx;
-        tmp6753 = float3(tmp6771.x ? cellDirColor.x : 0.0f.xxx.x, tmp6771.y ? cellDirColor.y : 0.0f.xxx.y, tmp6771.z ? cellDirColor.z : 0.0f.xxx.z);
+        bool3 EPart = cellHasDir.xxx;
+        EPick3 = float3(EPart.x ? cellDirColor.x : 0.0f.xxx.x, EPart.y ? cellDirColor.y : 0.0f.xxx.y, EPart.z ? cellDirColor.z : 0.0f.xxx.z);
     }
-    float3 E = tmp6753;
+    // R8-1: the ambient's share and the GI as a surface there (fxLocalSky, set by the caller; 1 and 0 before it)
+    float3 E = EPick3;
     if ((fxLitMode & 2) != 0)
     {
+        // flat on purpose: an effect's light has no hemisphere clip, which the cluster lists cull by
         for (int i = 0; i < cellLightCount; i++)
         {
-            int param_2 = i;
-            float3 param_3 = P;
-            E += cellFxLight(param_2, param_3);
+            int iArg4 = i;
+            float3 PArg2 = P;
+            E += cellFxLight(iArg4, PArg2);
         }
     }
     else
@@ -762,17 +772,17 @@ float3 cellFxLit(float3 P)
         {
             if (fxLit[k] > (-0.5f))
             {
-                int param_4 = int(fxLit[k] + 0.5f);
-                float3 param_5 = P;
-                E += (cellFxLight(param_4, param_5) * fxLitScale[k]);
+                int iArg3 = int(fxLit[k] + 0.5f);
+                float3 PArg = P;
+                E += (cellFxLight(iArg3, PArg) * fxLitScale[k]);
             }
         }
     }
-    float3 param_6 = E;
-    float param_7 = lightingInfluence;
-    bool param_8 = fxAdditive;
-    float3 tmp6839 = fxLawMix(param_6, param_7, param_8);
-    return tmp6839;
+    float3 EArg = E;
+    float influenceArg = lightingInfluence;
+    bool additiveArg = fxAdditive;
+    float3 fxLawMixRet = fxLawMix(EArg, influenceArg, additiveArg);
+    return fxLawMixRet;
 }
 
 #define WW_FN_cellWorldDir
@@ -950,186 +960,199 @@ void vpLight(float3 posView, float3 P, float3 dW, float z, inout float3 N, float
     thin = 0.0f.xxx;
     thick = 0.0f.xxx;
     vpLampMs = 0.0f.xxx;
+    // the sky's share: the records' colour at the end (the air's rule)
     float3 skyThin = 0.0f.xxx;
     float3 skyThick = 0.0f.xxx;
+    // the env share alone, as the air's Jenv (the veil's open level)
     float3 jEnv = 0.0f.xxx;
-    float3 param = P;
-    airGroundAt(param);
+    float3 PwArg = P;
+    // FOGTERRAIN2: the ground layer on the pass's terrain grid, as the froxels at this point
+    airGroundAt(PwArg);
     if ((volPartRed & 1) != 0)
     {
-        float3 param_1 = float3(0.0f, 0.0f, 1.0f);
-        N = cellWorldDir(param_1);
+        float3 dirViewArg3 = float3(0.0f, 0.0f, 1.0f);
+        // red flat: every pixel faces the eye's axis
+        N = cellWorldDir(dirViewArg3);
     }
-    bool tmp10862 = (volTerms & 1) != 0;
-    bool tmp10866;
-    if (tmp10862)
+    bool cond22 = (volTerms & 1) != 0;
+    bool cond21;
+    if (cond22)
     {
-        tmp10866 = vpHasSun();
+        cond21 = vpHasSun();
     }
     else
     {
-        tmp10866 = tmp10862;
+        cond21 = cond22;
     }
-    if (tmp10866)
+    if (cond21)
     {
         float3 to = normalize(cellDirTo);
-        bool tmp10878 = (!cellInterior) && volCsm;
-        bool tmp10884;
-        if (tmp10878)
+        bool cond20 = (!cellInterior) && volCsm;
+        bool cond19;
+        if (cond20)
         {
-            tmp10884 = (volPartRed & 64) == 0;
+            cond19 = (volPartRed & 64) == 0;
         }
         else
         {
-            tmp10884 = tmp10878;
+            cond19 = cond20;
         }
-        float tmp10885;
-        if (tmp10884)
+        float visPick;
+        if (cond19)
         {
-            float3 param_2 = posView;
-            float tmp10890 = wwSunShadow(param_2);
-            tmp10885 = tmp10890;
+            float3 posViewArg4 = posView;
+            float wwSunShadowRet = wwSunShadow(posViewArg4);
+            visPick = wwSunShadowRet;
         }
         else
         {
-            tmp10885 = 1.0f;
+            visPick = 1.0f;
         }
-        float vis = tmp10885;
-        float3 param_3 = vpSunColour();
-        float param_4 = z;
-        float param_5 = to.z;
-        float3 param_6 = posView;
-        float param_7 = z;
-        float param_8 = to.z;
-        float param_9 = airMed.w;
-        float3 e = (vpTint(param_3) * vis) * pow(airTupSun(param_4, param_5), wwAirDriftSunK(param_6, param_7, param_8, param_9));
-        float param_10 = dot(to, dW);
-        skyThin += (e * vpPhase(param_10));
-        float param_11 = dot(N, to);
-        float param_12 = w;
-        float param_13 = dot(to, dW);
-        skyThick += ((e * vpWrap(param_11, param_12)) * vpPhaseN(param_13));
+        float vis = visPick;
+        float3 eArg2 = vpSunColour();
+        float zArg4 = z;
+        float muArg2 = to.z;
+        float3 pArg3 = posView;
+        float loArg = z;
+        float muArg = to.z;
+        float topArg = airMed.w;
+        // FIX1101A: airTupSun
+        float3 e = (vpTint(eArg2) * vis) * pow(airTupSun(zArg4, muArg2), wwAirDriftSunK(pArg3, loArg, muArg, topArg));
+        float cArg6 = dot(to, dW);
+        skyThin += (e * vpPhase(cArg6));
+        float nlArg3 = dot(N, to);
+        float wArg3 = w;
+        float cArg5 = dot(to, dW);
+        skyThick += ((e * vpWrap(nlArg3, wArg3)) * vpPhaseN(cArg5));
     }
+    // the fog's height frame minus world z
     float zOff = z - P.z;
-    bool tmp10951 = (volTerms & 2) != 0;
-    bool tmp10957;
-    if (tmp10951)
+    bool cond18 = (volTerms & 2) != 0;
+    bool cond17;
+    if (cond18)
     {
-        tmp10957 = (volPartRed & 8) == 0;
+        cond17 = (volPartRed & 8) == 0;
     }
     else
     {
-        tmp10957 = tmp10951;
+        cond17 = cond18;
     }
-    if (tmp10957)
+    if (cond17)
     {
-        float3 param_14 = posView;
-        float dP = wwAirDriftAt(param_14);
+        float3 pArg2 = posView;
+        // lane WEATHERBLEND4: the drifting air at the puff, on its lamps' paths
+        float dP = wwAirDriftAt(pArg2);
+        // WEATHERBLEND5: world to view = rows transposed / scale^2
         float s2 = dot(cellRow[0].xyz, cellRow[0].xyz);
-        float3 param_15 = P;
-        float3 param_16 = posView;
-        int param_17;
-        int tmp10979 = vpLightsBegin(param_15, param_16, param_17);
-        int nLs = param_17;
-        int bLs = tmp10979;
-        float3 param_23;
-        bool param_24;
+        float3 PArg7 = P;
+        float3 posViewArg3 = posView;
+        int nArg;
+        int vpLightsBeginRet = vpLightsBegin(PArg7, posViewArg3, nArg);
+        int nLs = nArg;
+        // lane INTERIORPERF1: the cluster's list (was every light)
+        int bLs = vpLightsBeginRet;
+        float3 LArg;
+        bool noSpecArg;
         for (int k = 0; k < nLs; k++)
         {
-            int param_18 = bLs;
-            int param_19 = k;
-            int i = cellLightAt(param_18, param_19);
+            int baseArg = bLs;
+            int kArg = k;
+            int i = cellLightAt(baseArg, kArg);
             float4 t0 = cellLights.Load(i * 8);
             float d = length(t0.xyz - P);
             bool wwh0 = (d >= t0.w);
             bool wwh1 = (d < 0.001000000047497451305389404296875f);
-            if (wwh0 || wwh1)
+            if (or(wwh0, wwh1))   // HLSLFIX2 orfix.py: no short-circuit branch (NV took the wrong side)
             {
                 continue;
             }
             float3 L = (t0.xyz - P) / d.xxx;
-            int param_20 = i;
-            float3 param_21 = P;
-            float3 param_22 = L;
-            float3 tmp11037 = cellLightE(param_20, param_21, param_22, param_23, param_24);
-            float3 Lo = param_23;
-            bool noSpec = param_24;
-            float3 e_1 = tmp11037;
+            int iArg5 = i;
+            float3 PArg6 = P;
+            float3 NArg5 = L;
+            float3 cellLightERet = cellLightE(iArg5, PArg6, NArg5, LArg, noSpecArg);
+            float3 Lo = LArg;
+            bool noSpec = noSpecArg;
+            // N = L, as the air: no N.L, the shadow lifted toward the light
+            float3 e_1 = cellLightERet;
             if (all(bool3(e_1.x == 0.0f.xxx.x, e_1.y == 0.0f.xxx.y, e_1.z == 0.0f.xxx.z)))
             {
                 continue;
             }
+            // lane WEATHERBLEND5: the drift over the lamp's path (puff, middle, lamp: 1/4, 1/2, 1/4); red puffonly: at the puff
             float dL = dP;
-            bool tmp11051 = volAirDrift.x > 0.0f;
-            bool tmp11057;
-            if (tmp11051)
+            bool cond16 = volAirDrift.x > 0.0f;
+            bool nLPick;
+            if (cond16)
             {
-                tmp11057 = (volAirDriftRed & 2) == 0;
+                nLPick = (volAirDriftRed & 2) == 0;
             }
             else
             {
-                tmp11057 = tmp11051;
+                nLPick = cond16;
             }
-            int nL = tmp11057 ? 2 : 0;
+            // a uniform count: one copy of the reads
+            int nL = nLPick ? 2 : 0;
             if (nL > 0)
             {
                 float3 dV = (((cellRow[0].xyz * (t0.x - P.x)) + (cellRow[1].xyz * (t0.y - P.y))) + (cellRow[2].xyz * (t0.z - P.z))) / s2.xxx;
                 dL = 0.25f * dP;
                 for (int j = 1; j <= nL; j++)
                 {
-                    float3 param_25 = posView + (dV * (0.5f * float(j)));
-                    dL += (((j == 1) ? 0.5f : 0.25f) * wwAirDriftAt(param_25));
+                    float3 pArg = posView + (dV * (0.5f * float(j)));
+                    dL += (((j == 1) ? 0.5f : 0.25f) * wwAirDriftAt(pArg));
                 }
             }
-            float3 param_26 = e_1;
-            float param_27 = z;
-            float param_28 = t0.z + zOff;
-            float param_29 = d;
-            e_1 = vpTint(param_26) * exp((-airOd(param_27, param_28, param_29)) * dL);
-            float param_30 = dot(L, dW);
-            thin += (e_1 * vpPhase(param_30));
-            float param_31 = dot(N, L);
-            float param_32 = w;
-            float param_33 = dot(L, dW);
-            thick += ((e_1 * vpWrap(param_31, param_32)) * vpPhaseN(param_33));
-            float param_34 = dot(N, L);
-            float param_35 = 1.0f;
-            float param_36 = dot(L, dW);
-            vpLampMs += (e_1 * max(vpWrap(param_34, param_35).xxx - vpPhase(param_36), 0.0f.xxx));
+            float3 eArg = e_1;
+            float zaArg = z;
+            float zbArg = t0.z + zOff;
+            float lenArg = d;
+            e_1 = vpTint(eArg) * exp((-airOd(zaArg, zbArg, lenArg)) * dL);
+            float cArg4 = dot(L, dW);
+            thin += (e_1 * vpPhase(cArg4));
+            float nlArg2 = dot(N, L);
+            float wArg2 = w;
+            float cArg3 = dot(L, dW);
+            thick += ((e_1 * vpWrap(nlArg2, wArg2)) * vpPhaseN(cArg3));
+            float nlArg = dot(N, L);
+            float wArg = 1.0f;
+            float cArg2 = dot(L, dW);
+            vpLampMs += (e_1 * max(vpWrap(nlArg, wArg).xxx - vpPhase(cArg2), 0.0f.xxx));
         }
     }
     bool wantGi = ((volTerms & 4) != 0) && false;
-    bool tmp11195;
+    bool ambDalcPick;
     if (cellInterior)
     {
-        tmp11195 = cellHasDalc;
+        ambDalcPick = cellHasDalc;
     }
     else
     {
-        bool tmp11207;
+        bool ambDalcPick2;
         if (!cellExtDalc)
         {
-            tmp11207 = vpLocal();
+            ambDalcPick2 = vpLocal();
         }
         else
         {
-            tmp11207 = cellExtDalc;
+            ambDalcPick2 = cellExtDalc;
         }
-        tmp11195 = tmp11207;
+        ambDalcPick = ambDalcPick2;
     }
-    bool ambDalc = tmp11195;
-    bool tmp11214 = ((volTerms & 8) != 0) && ambDalc;
-    bool tmp11223;
-    if (tmp11214)
+    // R7-1: the weather's ambient at the card
+    bool ambDalc = ambDalcPick;
+    bool cond15 = ((volTerms & 8) != 0) && ambDalc;
+    bool wantAmbPick;
+    if (cond15)
     {
-        tmp11223 = !(cellInterior && (cellGiAmb == 2));
+        wantAmbPick = !(cellInterior && (cellGiAmb == 2));
     }
     else
     {
-        tmp11223 = tmp11214;
+        wantAmbPick = cond15;
     }
-    bool wantAmb = tmp11223;
-    if (wantGi || wantAmb)
+    bool wantAmb = wantAmbPick;
+    if (or(wantGi, wantAmb))   // HLSLFIX2 orfix.py: no short-circuit branch (NV took the wrong side)
     {
         float3 E[6];
         float share[6];
@@ -1140,97 +1163,98 @@ void vpLight(float3 posView, float3 P, float3 dW, float z, inout float3 N, float
         }
         if (false)
         {
-            float3 param_37 = P;
-            float3 param_38[6];
-            float param_39[6];
-            volCubeAll(param_37, param_38, param_39);
-            E = param_38;
-            share = param_39;
+            float3 PArg5 = P;
+            float3 EArg6[6];
+            float shareArg[6];
+            volCubeAll(PArg5, EArg6, shareArg);
+            E = EArg6;
+            share = shareArg;
         }
         if (wantGi)
         {
             float3 Eg[6];
             for (int a_1 = 0; a_1 < 6; a_1++)
             {
+                // the surfaces' GI unit -> the ambient's, as the air
                 Eg[a_1] = E[a_1] * 0.3183098733425140380859375f;
             }
-            float3 param_40[6] = Eg;
-            float3 param_41 = dW;
-            skyThin += volCubeScatter(param_40, param_41);
+            float3 EArg5[6] = Eg;
+            float3 dWArg4 = dW;
+            skyThin += volCubeScatter(EArg5, dWArg4);
             float3 param_42[6] = Eg;
-            float3 param_43 = N;
-            skyThick += vpCubeAt(param_42, param_43);
-            float3 param_44[6] = Eg;
-            float3 param_45 = dW;
-            jEnv += volCubeScatter(param_44, param_45);
+            float3 NArg4 = N;
+            skyThick += vpCubeAt(param_42, NArg4);
+            float3 EArg4[6] = Eg;
+            float3 dWArg3 = dW;
+            jEnv += volCubeScatter(EArg4, dWArg3);
         }
         if (wantAmb)
         {
-            bool tmp11312;
+            bool replacePick;
             if (false)
             {
-                bool tmp11303;
+                bool replacePick2;
                 if (cellInterior)
                 {
-                    tmp11303 = cellGiAmb == 1;
+                    replacePick2 = cellGiAmb == 1;
                 }
                 else
                 {
-                    tmp11303 = cellGiSky && false;
+                    replacePick2 = cellGiSky && false;
                 }
-                tmp11312 = tmp11303;
+                replacePick = replacePick2;
             }
             else
             {
-                tmp11312 = false;
+                replacePick = false;
             }
-            bool replace = tmp11312;
+            bool replace = replacePick;
             float keepA = 1.0f;
-            float3 param_46 = posView;
-            keepA = vpAmbKeep(param_46);
+            float3 posViewArg2 = posView;
+            keepA = vpAmbKeep(posViewArg2);
             float3 Am[6];
-            float tmp11341;
+            float AmPick;
             for (int a_2 = 0; a_2 < 6; a_2++)
             {
-                float3 param_47 = tmp11331[a_2];
-                float3 param_48 = P;
+                float3 NArg3 = table6[a_2];
+                float3 PArg4 = P;
                 if (replace)
                 {
-                    tmp11341 = 1.0f - share[a_2];
+                    AmPick = 1.0f - share[a_2];
                 }
                 else
                 {
-                    tmp11341 = 1.0f;
+                    AmPick = 1.0f;
                 }
-                Am[a_2] = cellAmbient(param_47, param_48) * (tmp11341 * keepA);
+                Am[a_2] = cellAmbient(NArg3, PArg4) * (AmPick * keepA);
             }
-            float3 param_49[6] = Am;
-            float3 param_50 = dW;
-            skyThin += volCubeScatter(param_49, param_50);
+            float3 EArg3[6] = Am;
+            float3 dWArg2 = dW;
+            skyThin += volCubeScatter(EArg3, dWArg2);
             float3 param_51[6] = Am;
-            float3 param_52 = N;
-            skyThick += vpCubeAt(param_51, param_52);
-            float3 param_53[6] = Am;
-            float3 param_54 = dW;
-            jEnv += volCubeScatter(param_53, param_54);
+            float3 NArg2 = N;
+            skyThick += vpCubeAt(param_51, NArg2);
+            float3 EArg2[6] = Am;
+            float3 dWArg = dW;
+            jEnv += volCubeScatter(EArg2, dWArg);
         }
     }
     float t = length(posView) * fogDistScale;
     float3 dirView = posView / max(length(posView), 9.9999999600419720025001879548654e-13f).xxx;
-    float3 param_55 = jEnv;
-    float param_56 = t;
-    float param_57 = z;
-    float vk = vpVeilK(param_55, param_56, param_57);
-    float3 param_58 = skyThin;
-    float param_59 = t;
-    float param_60 = z;
-    float3 param_61 = dirView;
-    thin += (airEnvColour(param_58, param_59, param_60, param_61) * vk);
-    float3 param_62 = skyThick;
-    float param_63 = t;
-    float param_64 = z;
-    float3 param_65 = dirView;
-    thick += (airEnvColour(param_62, param_63, param_64, param_65) * vk);
+    float3 JenvArg = jEnv;
+    float tArg3 = t;
+    float zArg3 = z;
+    float vk = vpVeilK(JenvArg, tArg3, zArg3);
+    float3 JArg2 = skyThin;
+    float tArg2 = t;
+    float zArg2 = z;
+    float3 dirViewArg2 = dirView;
+    thin += (airEnvColour(JArg2, tArg2, zArg2, dirViewArg2) * vk);
+    float3 JArg = skyThick;
+    float tArg = t;
+    float zArg = z;
+    float3 dirViewArg = dirView;
+    thick += (airEnvColour(JArg, tArg, zArg, dirViewArg) * vk);
 }
 
 #define WW_FN_wwGridAt
@@ -1303,26 +1327,26 @@ void vpLight(float3 posView, float3 P, float3 dW, float z, inout float3 N, float
 
 float3 fxLumpNormal(inout float3 N, float3 Nf, float3 pv, float a)
 {
-    bool tmp6318 = (fxLumpRed & 1) != 0;
-    bool tmp6330;
-    if (!tmp6318)
+    bool cond24 = (fxLumpRed & 1) != 0;
+    bool cond23;
+    if (!cond24)
     {
-        bool tmp6329;
+        bool condPick2;
         if (hasNormalMap)
         {
-            tmp6329 = (fxLumpRed & 2) != 0;
+            condPick2 = (fxLumpRed & 2) != 0;
         }
         else
         {
-            tmp6329 = hasNormalMap;
+            condPick2 = hasNormalMap;
         }
-        tmp6330 = tmp6329;
+        cond23 = condPick2;
     }
     else
     {
-        tmp6330 = tmp6318;
+        cond23 = cond24;
     }
-    if (tmp6330)
+    if (cond23)
     {
         return N;
     }
@@ -1340,7 +1364,7 @@ float3 fxLumpNormal(inout float3 N, float3 Nf, float3 pv, float a)
         float duv = abs((dux.x * duy.y) - (dux.y * duy.x));
         bool wwh2 = (abs(det) < 9.9999996826552253889678874634872e-21f);
         bool wwh3 = (duv < 9.9999996826552253889678874634872e-21f);
-        if (wwh2 || wwh3)
+        if (or(wwh2, wwh3))   // HLSLFIX2 orfix.py: no short-circuit branch (NV took the wrong side)
         {
             return normalize(n);
         }
@@ -1357,10 +1381,11 @@ float3 fxLumpNormal(inout float3 N, float3 Nf, float3 pv, float a)
     float duv_1 = abs((dux_1.x * duy_1.y) - (dux_1.y * duy_1.x));
     bool wwh4 = (abs(det_1) < 9.9999996826552253889678874634872e-21f);
     bool wwh5 = (duv_1 < 9.9999996826552253889678874634872e-21f);
-    if (wwh4 || wwh5)
+    if (or(wwh4, wwh5))   // HLSLFIX2 orfix.py: no short-circuit branch (NV took the wrong side)
     {
         return N;
     }
+    // half a UV unit in view units: the lump's height at alpha 1
     float L_1 = 0.5f * sqrt(abs(det_1) / duv_1);
     return normalize((N * abs(det_1)) - (((r1_1 * ddx(a)) + (r2_1 * ddy(a))) * (sign(det_1) * L_1)));
 }
@@ -1456,22 +1481,23 @@ void frag_main()
     fxLawRecv = 0.0f;
     fxRoomShare = 1.0f.xxx;
     ussLastTerr = 1.0f;
+    // lane SHADOWSHIMMER2: probes 1 / 3 as drawn
     csmNOff = 0.0f.xxx;
     airGz = 0.0f;
     vpLampMs = 0.0f.xxx;
     vpAirCardA = 0.0f;
     ViewDir_norm = normalize(ViewDir);
     btnMatrix_norm = float3x3(float3(normalize(btnMatrix[0])), float3(normalize(btnMatrix[1])), float3(normalize(btnMatrix[2])));
-    bool tmp11805;
+    bool cond36;
     if (cellOn)
     {
-        tmp11805 = (fxRed & 8) != 0;
+        cond36 = (fxRed & 8) != 0;
     }
     else
     {
-        tmp11805 = cellOn;
+        cond36 = cellOn;
     }
-    if (tmp11805)
+    if (cond36)
     {
         discard;
     }
@@ -1480,6 +1506,7 @@ void frag_main()
     float4 normalMap = NormalMap.Sample(_NormalMap_sampler, offset);
     float4 specMap = SpecularMap.Sample(_SpecularMap_sampler, offset);
     float3 normal = normalize((normalMap.xyz * 2.0f) - 1.0f.xxx);
+    // Calculate missing blue channel
     normal.z = sqrt(max(1.0f - dot(normal.xy, normal.xy), 0.0f));
     normal = normalize(mul(normal, btnMatrix_norm));
     if (!gl_FrontFacing)
@@ -1503,14 +1530,15 @@ void frag_main()
     float4 baseColor = glowColor;
     if (!greyscaleColor)
     {
-        float4 tmp11922 = baseColor;
-        float3 tmp11924 = tmp11922.xyz * glowMult;
-        baseColor.x = tmp11924.x;
-        baseColor.y = tmp11924.y;
-        baseColor.z = tmp11924.z;
+        float4 baseColorPart2 = baseColor;
+        float3 baseColorPart = baseColorPart2.xyz * glowMult;
+        baseColor.x = baseColorPart.x;
+        baseColor.y = baseColorPart.y;
+        baseColor.z = baseColorPart.z;
     }
+    // Falloff
     float falloff = 1.0f;
-    if (useFalloff || hasRGBFalloff)
+    if (or(useFalloff, hasRGBFalloff))   // HLSLFIX2 orfix.py: no short-circuit branch (NV took the wrong side)
     {
         falloff = smoothstep(falloffParams.x, falloffParams.y, abs(dot(normal, V)));
         falloff = lerp(max(falloffParams.z, 0.0f), min(falloffParams.w, 1.0f), falloff);
@@ -1520,21 +1548,23 @@ void frag_main()
         }
         if (hasRGBFalloff)
         {
-            float4 tmp11969 = baseMap;
-            float3 tmp11971 = tmp11969.xyz * falloff;
-            baseMap.x = tmp11971.x;
-            baseMap.y = tmp11971.y;
-            baseMap.z = tmp11971.z;
+            float4 baseMapPart2 = baseMap;
+            float3 baseMapPart = baseMapPart2.xyz * falloff;
+            baseMap.x = baseMapPart.x;
+            baseMap.y = baseMapPart.y;
+            baseMap.z = baseMapPart.z;
         }
     }
     float alphaMult = baseColor.w * baseColor.w;
     float4 color = baseMap * C;
-    float4 tmp11991 = color;
-    float3 tmp11993 = tmp11991.xyz * baseColor.xyz;
-    color.x = tmp11993.x;
-    color.y = tmp11993.y;
-    color.z = tmp11993.z;
+    float4 colorPart10 = color;
+    float3 colorPart9 = colorPart10.xyz * baseColor.xyz;
+    color.x = colorPart9.x;
+    color.y = colorPart9.y;
+    color.z = colorPart9.z;
     color.w *= alphaMult;
+    // ball of its size (the puff, the thickness its light reads), x the edge-on fade at its face normal x the near fade
+    // edge, near, the puff's opacity, a0
     float4 vpVol = float4(1.0f, 1.0f, 1.0f, color.w);
     float3 vpFaceN = float3(0.0f, 0.0f, 1.0f);
     if (cellOn && (volPart != 0))
@@ -1545,56 +1575,57 @@ void frag_main()
         {
             vpFaceN = -vpFaceN;
         }
-        float param = abs(dot(vpFaceN, ViewDir_norm));
-        vpVol.x = vpEdgeFade(param);
-        float param_1 = (-pv.z) * fxDistScale;
-        vpVol.y = vpNearFade(param_1);
-        float tmp12052;
+        float nvArg = abs(dot(vpFaceN, ViewDir_norm));
+        vpVol.x = vpEdgeFade(nvArg);
+        float depthArg = (-pv.z) * fxDistScale;
+        vpVol.y = vpNearFade(depthArg);
+        float vpVolPick;
         if ((fxLumpRed & 4) != 0)
         {
-            float param_2 = color.w;
-            float2 param_3 = (clamp(texCoord, 0.0f.xx, 1.0f.xx) * 2.0f) - 1.0f.xx;
-            tmp12052 = vpPuffAlpha(param_2, param_3);
+            float a0Arg = color.w;
+            float2 qArg = (clamp(texCoord, 0.0f.xx, 1.0f.xx) * 2.0f) - 1.0f.xx;
+            vpVolPick = vpPuffAlpha(a0Arg, qArg);
         }
         else
         {
-            tmp12052 = color.w;
+            vpVolPick = color.w;
         }
-        vpVol.z = tmp12052;
+        vpVol.z = vpVolPick;
         if (!greyscaleAlpha)
         {
             color.w = (vpVol.z * vpVol.x) * vpVol.y;
         }
     }
-    float tmp12087;
+    float fxFadePick;
     if (cellOn)
     {
-        float tmp12092;
+        float fxFadePick2;
         if (volPart != 0)
         {
-            tmp12092 = vpCardSoft();
+            fxFadePick2 = vpCardSoft();
         }
         else
         {
-            tmp12092 = cellFxFade();
+            fxFadePick2 = cellFxFade();
         }
-        tmp12087 = tmp12092;
+        fxFadePick = fxFadePick2;
     }
     else
     {
-        tmp12087 = 1.0f;
+        fxFadePick = 1.0f;
     }
-    float fxFade = tmp12087;
+    // lane EFX2: the Soft fades scale alpha, or a palette's row (the game's PS multiplies its palette coordinates)
+    float fxFade = fxFadePick;
     if (!greyscaleAlpha)
     {
         color.w *= fxFade;
     }
     if (greyscaleColor)
     {
-        float3 tmp12130 = GreyscaleMap.SampleLevel(_GreyscaleMap_sampler, float2(BaseMap.Sample(_BaseMap_sampler, offset).y, ((baseColor.x * C.x) * falloff) * fxFade), 0.0f).xyz;
-        color.x = tmp12130.x;
-        color.y = tmp12130.y;
-        color.z = tmp12130.z;
+        float3 GreyscaleMapTexel = GreyscaleMap.SampleLevel(_GreyscaleMap_sampler, float2(BaseMap.Sample(_BaseMap_sampler, offset).y, ((baseColor.x * C.x) * falloff) * fxFade), 0.0f).xyz;
+        color.x = GreyscaleMapTexel.x;
+        color.y = GreyscaleMapTexel.y;
+        color.z = GreyscaleMapTexel.z;
     }
     if (greyscaleAlpha)
     {
@@ -1602,16 +1633,17 @@ void frag_main()
     }
     if (alphaFlags > 0)
     {
-        int tmp12164;
+        int mPick;
         if (color.w < alphaThreshold)
         {
-            tmp12164 = 11051;
+            mPick = 11051;
         }
         else
         {
-            tmp12164 = (color.w > alphaThreshold) ? 29041 : 19789;
+            mPick = (color.w > alphaThreshold) ? 29041 : 19789;
         }
-        int m = tmp12164;
+        // 0: always, 1: <, 2: ==, 3: <=, 4: >, 5: !=, 6: >=, 7: never
+        int m = mPick;
         if ((m & (1 << alphaFlags)) == 0)
         {
             discard;
@@ -1624,96 +1656,101 @@ void frag_main()
     float3 diffuse = A.xyz + (D.xyz * NdotL);
     if (!cellOn)
     {
-        float4 tmp12204 = color;
-        float4 tmp12206 = color;
-        float3 tmp12213 = lerp(tmp12204.xyz, tmp12206.xyz * D.xyz, lightingInfluence.xxx);
-        color.x = tmp12213.x;
-        color.y = tmp12213.y;
-        color.z = tmp12213.z;
+        float4 colorPart8 = color;
+        float4 colorPart7 = color;
+        float3 colorPart6 = lerp(colorPart8.xyz, colorPart7.xyz * D.xyz, lightingInfluence.xxx);
+        color.x = colorPart6.x;
+        color.y = colorPart6.y;
+        color.z = colorPart6.z;
     }
-    bool tmp12227;
+    bool cond35;
     if (cellOn)
     {
-        tmp12227 = fxEmit.w > 0.0f;
+        cond35 = fxEmit.w > 0.0f;
     }
     else
     {
-        tmp12227 = cellOn;
+        cond35 = cellOn;
     }
-    if (tmp12227)
+    if (cond35)
     {
-        float4 tmp12230 = color;
-        float4 tmp12232 = color;
-        float3 tmp12239 = lerp(tmp12230.xyz, tmp12232.xyz * fxEmit.xyz, lightingInfluence.xxx);
-        color.x = tmp12239.x;
-        color.y = tmp12239.y;
-        color.z = tmp12239.z;
+        float4 colorPart5 = color;
+        float4 colorPart4 = color;
+        float3 colorPart3 = lerp(colorPart5.xyz, colorPart4.xyz * fxEmit.xyz, lightingInfluence.xxx);
+        color.x = colorPart3.x;
+        color.y = colorPart3.y;
+        color.z = colorPart3.z;
     }
+    // Specular
     float g = 1.0f;
     float s = 1.0f;
     if (hasEnvMask)
     {
         g = specMap.x;
-        float tmp12256;
+        float sPick;
         if (envMaskR)
         {
-            tmp12256 = specMap.x;
+            sPick = specMap.x;
         }
         else
         {
-            tmp12256 = specMap.y;
+            sPick = specMap.y;
         }
-        s = tmp12256;
+        s = sPick;
     }
     float4 cube = CubeMap.Sample(_CubeMap_sampler, reflectedWS);
     if (hasCubeMap)
     {
-        float4 tmp12281 = cube;
-        float3 tmp12283 = tmp12281.xyz * (envReflection * s);
-        cube.x = tmp12283.x;
-        cube.y = tmp12283.y;
-        cube.z = tmp12283.z;
+        float4 cubePart10 = cube;
+        float3 cubePart9 = cubePart10.xyz * (envReflection * s);
+        cube.x = cubePart9.x;
+        cube.y = cubePart9.y;
+        cube.z = cubePart9.z;
         if (!envNormalAlphaRed)
         {
-            float4 tmp12297 = cube;
-            float3 tmp12299 = tmp12297.xyz * normalMap.w;
-            cube.x = tmp12299.x;
-            cube.y = tmp12299.y;
-            cube.z = tmp12299.z;
+            float4 cubePart8 = cube;
+            float3 cubePart7 = cubePart8.xyz * normalMap.w;
+            cube.x = cubePart7.x;
+            cube.y = cubePart7.y;
+            cube.z = cubePart7.z;
         }
         if (!cellOn)
         {
-            float4 tmp12310 = cube;
-            float4 tmp12312 = cube;
-            float3 tmp12319 = lerp(tmp12310.xyz, tmp12312.xyz * D.xyz, lightingInfluence.xxx);
-            cube.x = tmp12319.x;
-            cube.y = tmp12319.y;
-            cube.z = tmp12319.z;
+            float4 cubePart6 = cube;
+            float4 cubePart5 = cube;
+            float3 cubePart4 = lerp(cubePart6.xyz, cubePart5.xyz * D.xyz, lightingInfluence.xxx);
+            cube.x = cubePart4.x;
+            cube.y = cubePart4.y;
+            cube.z = cubePart4.z;
         }
-        bool tmp12332;
+        bool cond34;
         if (cellOn)
         {
-            tmp12332 = fxEmit.w > 0.0f;
+            cond34 = fxEmit.w > 0.0f;
         }
         else
         {
-            tmp12332 = cellOn;
+            cond34 = cellOn;
         }
-        if (tmp12332)
+        if (cond34)
         {
-            float4 tmp12335 = cube;
-            float4 tmp12337 = cube;
-            float3 tmp12344 = lerp(tmp12335.xyz, tmp12337.xyz * fxEmit.xyz, lightingInfluence.xxx);
-            cube.x = tmp12344.x;
-            cube.y = tmp12344.y;
-            cube.z = tmp12344.z;
+            float4 cubePart3 = cube;
+            float4 cubePart2 = cube;
+            float3 cubePart = lerp(cubePart3.xyz, cubePart2.xyz * fxEmit.xyz, lightingInfluence.xxx);
+            cube.x = cubePart.x;
+            cube.y = cubePart.y;
+            cube.z = cubePart.z;
         }
-        float4 tmp12355 = color;
-        float3 tmp12357 = tmp12355.xyz + (cube.xyz * falloff);
-        color.x = tmp12357.x;
-        color.y = tmp12357.y;
-        color.z = tmp12357.z;
+        float4 colorPart2 = color;
+        float3 colorPart = colorPart2.xyz + (cube.xyz * falloff);
+        color.x = colorPart.x;
+        color.y = colorPart.y;
+        color.z = colorPart.z;
     }
+    // lane SHADOWSHIMMER4 (EFFECTDECALHEADROOM): in a lit-decal program every cellOn path above returns or discards (the
+    // it all the same (its cellFxLit / vpLit lights and its wwFogFx: fo4_effectdecalcsm in march + WW_CELL_PRT 65482 -> 35670
+    // fragment instructions, the driver's limit 65536). Dropped in the GI-march mode only; the other modes keep their source
+    // (their machine code unchanged).
     if (cellOn && fxDecalProbe)
     {
         if (color.w < 0.100000001490116119384765625f)
@@ -1724,73 +1761,76 @@ void frag_main()
     }
     if (cellOn)
     {
-        float3 tmp12384;
+        float3 linPick3;
         if ((fxRed & 4) != 0)
         {
-            tmp12384 = max(color.xyz, 0.0f.xxx);
+            linPick3 = max(color.xyz, 0.0f.xxx);
         }
         else
         {
-            tmp12384 = pow(max(color.xyz, 0.0f.xxx), 2.2000000476837158203125f.xxx);
+            linPick3 = pow(max(color.xyz, 0.0f.xxx), 2.2000000476837158203125f.xxx);
         }
-        float3 lin = tmp12384;
+        float3 lin = linPick3;
+        // lane FXLIT1: a lit effect, in linear light, before the fog
         if (fxLitMode != 0)
         {
-            float3 param_4 = -ViewDir;
-            float3 P = cellWorldPos(param_4);
-            bool tmp12408 = (volPart == 0) && volCsm;
-            bool tmp12412;
-            if (tmp12408)
+            float3 posViewArg10 = -ViewDir;
+            float3 P = cellWorldPos(posViewArg10);
+            bool cond33 = (volPart == 0) && volCsm;
+            bool cond32;
+            if (cond33)
             {
-                tmp12412 = fxLocalOn();
+                cond32 = fxLocalOn();
             }
             else
             {
-                tmp12412 = tmp12408;
+                cond32 = cond33;
             }
-            if ((tmp12412 && (!cellInterior)) && (!fxAdditive))
+            if ((cond32 && (!cellInterior)) && (!fxAdditive))
             {
-                float3 param_5 = -ViewDir;
-                float tmp12424 = wwSunShadow(param_5);
-                fxLocalVis = tmp12424;
+                float3 posViewArg9 = -ViewDir;
+                float wwSunShadowRet2 = wwSunShadow(posViewArg9);
+                fxLocalVis = wwSunShadowRet2;
             }
-            float3 param_6 = P;
-            bool param_7 = fxAdditive;
-            fxLocalSky(param_6, param_7);
-            float3 param_8 = P;
-            float3 m_1 = cellFxLit(param_8);
+            float3 PArg10 = P;
+            bool additiveArg3 = fxAdditive;
+            // R8-1: the sky light a surface takes here
+            fxLocalSky(PArg10, additiveArg3);
+            float3 PArg9 = P;
+            float3 m_1 = cellFxLit(PArg9);
             if ((cellProbe >= 70) && (cellProbe <= 74))
             {
-                float3 tmp12448;
+                float3 qPick;
                 if (cellProbe >= 73)
                 {
-                    tmp12448 = floor((clamp(m_1 * 0.25f, 0.0f.xxx, 1.0f.xxx) * 65535.0f) + 0.5f.xxx);
+                    qPick = floor((clamp(m_1 * 0.25f, 0.0f.xxx, 1.0f.xxx) * 65535.0f) + 0.5f.xxx);
                 }
                 else
                 {
-                    tmp12448 = clamp(floor((P - cellCenter) + 32768.0f.xxx), 0.0f.xxx, 65535.0f.xxx);
+                    qPick = clamp(floor((P - cellCenter) + 32768.0f.xxx), 0.0f.xxx, 65535.0f.xxx);
                 }
-                float3 q = tmp12448;
+                // its probes, opaque: 70 the model, 71 / 72 the position (as probes 2 / 3), 73 / 74 the multiplier / 4
+                float3 q = qPick;
                 bool high = (cellProbe == 71) || (cellProbe == 73);
-                float3 tmp12485;
+                float3 fragColorPick2;
                 if (cellProbe == 70)
                 {
-                    tmp12485 = fxLitId;
+                    fragColorPick2 = fxLitId;
                 }
                 else
                 {
-                    float3 tmp12492;
+                    float3 fragColorPick4;
                     if (high)
                     {
-                        tmp12492 = floor(q / 256.0f.xxx) / 255.0f.xxx;
+                        fragColorPick4 = floor(q / 256.0f.xxx) / 255.0f.xxx;
                     }
                     else
                     {
-                        tmp12492 = mod(q, 256.0f.xxx) / 255.0f.xxx;
+                        fragColorPick4 = mod(q, 256.0f.xxx) / 255.0f.xxx;
                     }
-                    tmp12485 = tmp12492;
+                    fragColorPick2 = fragColorPick4;
                 }
-                fragColor = float4(tmp12485, 1.0f);
+                fragColor = float4(fragColorPick2, 1.0f);
                 return;
             }
             if (volPart == 0)
@@ -1801,66 +1841,73 @@ void frag_main()
         if (volPart != 0)
         {
             float3 posView = -ViewDir;
-            float tmp12532;
+            float aThickPick;
             if (greyscaleAlpha)
             {
-                tmp12532 = color.w;
+                aThickPick = color.w;
             }
             else
             {
-                tmp12532 = vpVol.z;
+                aThickPick = vpVol.z;
             }
-            float aThick = tmp12532;
+            // the puff's opacity is its thickness; the fades are coverage
+            float aThick = aThickPick;
+            // gates only: probe slot volPartDump - 100 at every pixel, raw
             if (volPartDump >= 100)
             {
                 int k = volPartDump - 100;
-                float3 param_9 = posView;
-                float3 dW = cellWorldDir(param_9);
-                float3 param_10 = vpFaceN;
-                float3 Nw = cellWorldDir(param_10);
+                float3 dirViewArg5 = posView;
+                float3 dW = cellWorldDir(dirViewArg5);
+                float3 dirViewArg4 = vpFaceN;
+                float3 Nw = cellWorldDir(dirViewArg4);
+                // the card volume: |N.V| at the face, edge fade, near fade, depth (game units)
                 if (k == 8)
                 {
                     fragColor = float4(abs(dot(vpFaceN, ViewDir_norm)), vpVol.x, vpVol.y, (-posView.z) * fxDistScale);
                 }
                 else
                 {
+                    // the puff: q, a0, its opacity
                     if (k == 9)
                     {
                         fragColor = float4((clamp(texCoord, 0.0f.xx, 1.0f.xx) * 2.0f) - 1.0f.xx, vpVol.w, vpVol.z);
                     }
                     else
                     {
+                        // one white light at the eye's side (to = -dW), its N.to in w
                         if (k == 10)
                         {
-                            float3 param_11 = dW;
-                            float3 param_12 = Nw;
-                            float3 param_13 = -dW;
-                            float param_14 = aThick;
-                            fragColor = float4(vpOneLight(param_11, param_12, param_13, param_14), dot(Nw, -dW));
+                            float3 dWArg6 = dW;
+                            float3 NArg8 = Nw;
+                            float3 toArg2 = -dW;
+                            float aArg5 = aThick;
+                            fragColor = float4(vpOneLight(dWArg6, NArg8, toArg2, aArg5), dot(Nw, -dW));
                         }
                         else
                         {
+                            // the same light behind the card (to = dW); w: the coverage drawn (alpha)
                             if (k == 11)
                             {
-                                float3 param_15 = dW;
-                                float3 param_16 = Nw;
-                                float3 param_17 = dW;
-                                float param_18 = aThick;
-                                fragColor = float4(vpOneLight(param_15, param_16, param_17, param_18), color.w);
+                                float3 dWArg5 = dW;
+                                float3 NArg7 = Nw;
+                                float3 toArg = dW;
+                                float aArg4 = aThick;
+                                fragColor = float4(vpOneLight(dWArg5, NArg7, toArg, aArg4), color.w);
                             }
                             else
                             {
+                                // the soft slab: scene depth, card depth, h (game units), the fade drawn
                                 if (k == 12)
                                 {
                                     fragColor = float4(vpCardSlab() * fxDistScale, fxFade);
                                 }
                                 else
                                 {
-                                    int param_19 = k;
-                                    float3 param_20 = posView;
-                                    float param_21 = aThick;
-                                    float4 tmp12661 = vpProbe(param_19, param_20, param_21);
-                                    fragColor = tmp12661;
+                                    int slotArg = k;
+                                    float3 posViewArg8 = posView;
+                                    float aArg3 = aThick;
+                                    float4 vpProbeRet2 = vpProbe(slotArg, posViewArg8, aArg3);
+                                    fragColor = vpProbeRet2;
                                 }
                             }
                         }
@@ -1868,67 +1915,68 @@ void frag_main()
                 }
                 return;
             }
-            bool tmp12668 = (fxAirCard != 0) && (!fxAdditive);
-            bool tmp12674;
-            if (tmp12668)
+            bool cond31 = (fxAirCard != 0) && (!fxAdditive);
+            bool cond30;
+            if (cond31)
             {
-                tmp12674 = (fxLocalRed & 4) == 0;
+                cond30 = (fxLocalRed & 4) == 0;
             }
             else
             {
-                tmp12674 = tmp12668;
+                cond30 = cond31;
             }
-            if (tmp12674)
+            if (cond30)
             {
-                float tmp12680;
+                float vpAirCardAPick;
                 if ((fxLocalRed & 8) == 0)
                 {
-                    tmp12680 = clamp(aThick, 0.0f, 1.0f);
+                    vpAirCardAPick = clamp(aThick, 0.0f, 1.0f);
                 }
                 else
                 {
-                    tmp12680 = 0.0f;
+                    vpAirCardAPick = 0.0f;
                 }
-                vpAirCardA = tmp12680;
+                vpAirCardA = vpAirCardAPick;
                 aThick = 0.0f;
                 fxLocalGi = 0.0f.xxx;
             }
             if (fxLitMode != 0)
             {
-                float3 tmp12692;
+                float3 linPick2;
                 if (fxAdditive)
                 {
-                    float3 param_22 = posView;
-                    float3 param_23 = cellWorldPos(param_22);
-                    tmp12692 = cellFxLit(param_23);
+                    float3 posViewArg7 = posView;
+                    float3 PArg8 = cellWorldPos(posViewArg7);
+                    linPick2 = cellFxLit(PArg8);
                 }
                 else
                 {
-                    float3 tmp12705;
+                    float3 NPick;
                     if (dot(normal, V) < 0.0f)
                     {
-                        tmp12705 = -normal;
+                        NPick = -normal;
                     }
                     else
                     {
-                        tmp12705 = normal;
+                        NPick = normal;
                     }
-                    float3 param_24 = tmp12705;
-                    float3 param_25 = vpFaceN;
-                    float3 param_26 = posView;
-                    float param_27 = clamp(vpVol.w, 0.0f, 1.0f);
-                    float3 tmp12722 = fxLumpNormal(param_24, param_25, param_26, param_27);
-                    float3 param_28 = posView;
-                    float3 param_29 = tmp12722;
-                    float param_30 = aThick;
-                    float3 tmp12728 = vpLit(param_28, param_29, param_30);
-                    float3 param_31 = fxLocalGi;
-                    float param_32 = lightingInfluence;
-                    tmp12692 = tmp12728 + fxLawAdd(param_31, param_32);
+                    float3 NArg6 = NPick;
+                    float3 NfArg = vpFaceN;
+                    float3 pvArg = posView;
+                    float aArg2 = clamp(vpVol.w, 0.0f, 1.0f);
+                    float3 fxLumpNormalRet = fxLumpNormal(NArg6, NfArg, pvArg, aArg2);
+                    float3 posViewArg6 = posView;
+                    float3 NviewArg = fxLumpNormalRet;
+                    float aArg = aThick;
+                    float3 vpLitRet3 = vpLit(posViewArg6, NviewArg, aArg);
+                    float3 GArg = fxLocalGi;
+                    float influenceArg2 = lightingInfluence;
+                    linPick2 = vpLitRet3 + fxLawAdd(GArg, influenceArg2);
                 }
-                lin *= tmp12692;
+                lin *= linPick2;
             }
         }
+        // lane PHYSUNITS1: unlit effects in real units
         if (fxLitMode == 0)
         {
             float uk = fxAdditive ? cellFxEmitK : cellFxUnlitK;
@@ -1937,70 +1985,71 @@ void frag_main()
                 lin *= uk;
             }
         }
-        bool tmp12755 = volPart != 0;
-        bool tmp12761;
-        if (tmp12755)
+        bool cond29 = volPart != 0;
+        bool cond28;
+        if (cond29)
         {
-            tmp12761 = (volPartRed & 32) != 0;
+            cond28 = (volPartRed & 32) != 0;
         }
         else
         {
-            tmp12761 = tmp12755;
+            cond28 = cond29;
         }
-        if (tmp12761)
+        if (cond28)
         {
             if (fogOn)
             {
-                float param_33 = length(ViewDir) * fogDistScale;
-                float param_34 = dot(fogView.xyz, -ViewDir) + fogView.w;
-                float param_35;
-                float3 param_36;
-                float tmp12786 = wwFogEval(param_33, param_34, param_35, param_36);
-                float hb = param_35;
-                float3 fc = param_36;
-                float f = tmp12786;
-                float3 tmp12790;
+                float dArg = length(ViewDir) * fogDistScale;
+                float zArg5 = dot(fogView.xyz, -ViewDir) + fogView.w;
+                float hbArg;
+                float3 fogColArg;
+                float wwFogEvalRet = wwFogEval(dArg, zArg5, hbArg, fogColArg);
+                float hb = hbArg;
+                float3 fc = fogColArg;
+                float f = wwFogEvalRet;
+                float3 linPick;
                 if (fxAdditive)
                 {
-                    tmp12790 = lin * (1.0f - f);
+                    linPick = lin * (1.0f - f);
                 }
                 else
                 {
-                    tmp12790 = lerp(lin, fc, f.xxx);
+                    linPick = lerp(lin, fc, f.xxx);
                 }
-                lin = tmp12790;
+                lin = linPick;
             }
         }
         else
         {
-            float3 param_37 = lin;
-            float3 param_38 = -ViewDir;
-            bool param_39 = fxAdditive;
-            float3 tmp12812 = wwFogFx(param_37, param_38, param_39);
-            lin = tmp12812;
+            float3 linArg = lin;
+            float3 posViewArg5 = -ViewDir;
+            bool additiveArg2 = fxAdditive;
+            float3 wwFogFxRet = wwFogFx(linArg, posViewArg5, additiveArg2);
+            // lane VOLAIR1: the air, as the surfaces take it (red fxfog: the game's fog alone)
+            lin = wwFogFxRet;
         }
         if ((fxRed & 32) == 0)
         {
-            bool tmp12820 = any(isnan(lin));
-            bool tmp12827;
-            if (!tmp12820)
+            bool cond27 = any(isnan(lin));
+            bool cond26;
+            if (!cond27)
             {
-                tmp12827 = any(isinf(lin));
+                cond26 = any(isinf(lin));
             }
             else
             {
-                tmp12827 = tmp12820;
+                cond26 = cond27;
             }
-            bool tmp12834;
-            if (!tmp12827)
+            bool cond25;
+            if (!cond26)
             {
-                tmp12834 = isnan(color.w);
+                cond25 = isnan(color.w);
             }
             else
             {
-                tmp12834 = tmp12827;
+                cond25 = cond26;
             }
-            if (tmp12834)
+            if (cond25)
             {
                 lin = 0.0f.xxx;
                 color.w = 0.0f;
@@ -2013,26 +2062,27 @@ void frag_main()
         }
         else
         {
-            float3 tmp12858;
+            float3 fragColorPick;
             if (cellIsLinear)
             {
-                tmp12858 = lin;
+                fragColorPick = lin;
             }
             else
             {
-                float3 tmp12865;
+                float3 fragColorPick3;
                 if (cellIsOn)
                 {
-                    float3 param_40 = sqrt(lin);
-                    tmp12865 = cellImageSpace(param_40);
+                    float3 sqrtColorArg = sqrt(lin);
+                    fragColorPick3 = cellImageSpace(sqrtColorArg);
                 }
                 else
                 {
-                    tmp12865 = pow(lin, 0.4545454680919647216796875f.xxx);
+                    fragColorPick3 = pow(lin, 0.4545454680919647216796875f.xxx);
                 }
-                tmp12858 = tmp12865;
+                fragColorPick = fragColorPick3;
             }
-            fragColor = float4(tmp12858, color.w);
+            // lane HDR1: linear, summed in the HDR frame, tone-mapped once
+            fragColor = float4(fragColorPick, color.w);
         }
         return;
     }

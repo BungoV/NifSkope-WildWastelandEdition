@@ -38,7 +38,7 @@ void frag_main()
     float2 fr = mp - float2(base);
     bool wwh0 = (z >= 900000.0f);
     bool wwh1 = (z <= 0.0f);
-    if (wwh0 || wwh1)
+    if (or(wwh0, wwh1))   // HLSLFIX2 orfix.py: no short-circuit branch (NV took the wrong side)
     {
         fragMask = mask.Load(int3(clamp(int2(floor(gl_FragCoord.xy / maskScale.xx)), int2(0, 0), maskSize - int2(1, 1)), 0)).x;
         return;
@@ -47,8 +47,8 @@ void frag_main()
     float acc = 0.0f;
     float best = 1000000015047466219876688855040.0f;
     float bestM = 1.0f;
-    float tmp162;
-    float tmp174;
+    float bwPick2;
+    float bwPick;
     for (int j = 0; j < 2; j++)
     {
         for (int i = 0; i < 2; i++)
@@ -65,36 +65,36 @@ void frag_main()
             }
             if (i == 0)
             {
-                tmp162 = 1.0f - fr.x;
+                bwPick2 = 1.0f - fr.x;
             }
             else
             {
-                tmp162 = fr.x;
+                bwPick2 = fr.x;
             }
             if (j == 0)
             {
-                tmp174 = 1.0f - fr.y;
+                bwPick = 1.0f - fr.y;
             }
             else
             {
-                tmp174 = fr.y;
+                bwPick = fr.y;
             }
-            float bw = tmp162 * tmp174;
+            float bw = bwPick2 * bwPick;
             float w = bw * clamp(1.0f - (dz / (z * tolerance)), 0.0f, 1.0f);
             wsum += w;
             acc += (w * m);
         }
     }
-    float tmp212;
+    float fragMaskPick;
     if (wsum > 9.9999997473787516355514526367188e-05f)
     {
-        tmp212 = acc / wsum;
+        fragMaskPick = acc / wsum;
     }
     else
     {
-        tmp212 = bestM;
+        fragMaskPick = bestM;
     }
-    fragMask = tmp212;
+    fragMask = fragMaskPick;
 }
 
 SPIRV_Cross_Output main(SPIRV_Cross_Input stage_input)

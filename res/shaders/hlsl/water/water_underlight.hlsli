@@ -9,28 +9,28 @@
 float3 wwUlInt(float3 g, float L)
 {
     float3 gl = g * L;
-    float3 tmp1 = (1.0f.xxx - exp(-gl)) / g;
-    float3 tmp2 = (1.0f.xxx - (gl * 0.5f)) * L;
-    float3 tmp3 = abs(gl);
-    bool3 tmp4 = bool3(tmp3.x < 9.9999997473787516355514526367188e-05f.xxx.x, tmp3.y < 9.9999997473787516355514526367188e-05f.xxx.y, tmp3.z < 9.9999997473787516355514526367188e-05f.xxx.z);
-    return float3(tmp4.x ? tmp2.x : tmp1.x, tmp4.y ? tmp2.y : tmp1.y, tmp4.z ? tmp2.z : tmp1.z);
+    float3 wwUlIntRet3 = (1.0f.xxx - exp(-gl)) / g;
+    float3 wwUlIntRet2 = (1.0f.xxx - (gl * 0.5f)) * L;
+    float3 wwUlIntPart = abs(gl);
+    bool3 wwUlIntRet = bool3(wwUlIntPart.x < 9.9999997473787516355514526367188e-05f.xxx.x, wwUlIntPart.y < 9.9999997473787516355514526367188e-05f.xxx.y, wwUlIntPart.z < 9.9999997473787516355514526367188e-05f.xxx.z);
+    return float3(wwUlIntRet.x ? wwUlIntRet2.x : wwUlIntRet3.x, wwUlIntRet.y ? wwUlIntRet2.y : wwUlIntRet3.y, wwUlIntRet.z ? wwUlIntRet2.z : wwUlIntRet3.z);
 }
 #endif
 
 #if defined(WW_FN_wwUnderMeniscus) || defined(WW_FN_ALL)
 float wwUnderMeniscus(float dz, float w)
 {
-    bool tmp1 = uwLight == 0;
-    bool tmp2;
-    if (!tmp1)
+    bool wwUlIntRet3 = uwLight == 0;
+    bool wwUlIntRet2;
+    if (!wwUlIntRet3)
     {
-        tmp2 = (uwLightRed & 2) != 0;
+        wwUlIntRet2 = (uwLightRed & 2) != 0;
     }
     else
     {
-        tmp2 = tmp1;
+        wwUlIntRet2 = wwUlIntRet3;
     }
-    if (tmp2)
+    if (wwUlIntRet2)
     {
         return 0.0f;
     }
@@ -58,26 +58,31 @@ void wwUnderLight(float3 eye, float3 Pn, float3 Pw, bool farPlane, float H, out 
     {
         L = min(L, (H - eye.z) / dir.z);
     }
-    int tmp1 = uwClass;
-    float3 tmp2;
-    float3 tmp3 = wwClearK(tmp1, tmp2);
-    float3 bb = tmp2;
-    float3 k = tmp3;
+    int wwUlIntRet3 = uwClass;
+    float3 wwUlIntRet2;
+    float3 wwUlIntPart = wwClearK(wwUlIntRet3, wwUlIntRet2);
+    float3 bb = wwUlIntRet2;
+    float3 k = wwUlIntPart;
     float s = clamp(uwSun.w, 0.0f, 1.0f);
+    // the sun's cosine under the surface
     float muS = sqrt(1.0f - ((1.0f - (s * s)) / 1.77688896656036376953125f));
+    // through the surface (Fresnel ~2% / 6%), as the clear colour
     float3 Es = (uwSun.xyz * s) * 0.980000019073486328125f;
     float3 Ed = uwSky * 0.939999997615814208984375f;
     float3 Ks = k / muS.xxx;
     float3 Kd = k / 0.800000011920928955078125f.xxx;
     float Lm = min(L, 10000000.0f) * 0.01428749971091747283935546875f;
+    // the eye's depth (m)
     float zc = max(H - eye.z, 0.0f) * 0.01428749971091747283935546875f;
+    // the seen point's depth (m)
     float zv = max(H - (eye.z + (dir.z * min(L, 10000000.0f))), 0.0f) * 0.01428749971091747283935546875f;
     float3 sigma = bb * 0.75f;
-    float3 tmp4 = k - (Ks * dir.z);
-    float tmp5 = Lm;
-    float3 tmp6 = k - (Kd * dir.z);
-    float tmp7 = Lm;
-    add = sigma * (((Es * exp((-Ks) * zc)) * wwUlInt(tmp4, tmp5)) + ((Ed * exp((-Kd) * zc)) * wwUlInt(tmp6, tmp7)));
+    float3 wwUlIntRet = k - (Ks * dir.z);
+    float addPart3 = Lm;
+    float3 addPart2 = k - (Kd * dir.z);
+    float addPart = Lm;
+    add = sigma * (((Es * exp((-Ks) * zc)) * wwUlInt(wwUlIntRet, addPart3)) + ((Ed * exp((-Kd) * zc)) * wwUlInt(addPart2, addPart)));
+    // the scene's light on its way down (a small diffuse floor keeps lamp-lit points at night from going black)
     float3 Td = ((Es * exp((-Ks) * zv)) + ((Ed + 9.9999997473787516355514526367188e-05f.xxx) * exp((-Kd) * zv))) / ((Es + Ed) + 9.9999997473787516355514526367188e-05f.xxx);
     mul = Td * exp((-k) * Lm);
 }

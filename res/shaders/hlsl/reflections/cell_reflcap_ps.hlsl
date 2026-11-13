@@ -38,42 +38,43 @@ struct SPIRV_Cross_Output
 
 void frag_main()
 {
-    float4 tmp14;
+    float4 bPick;
     if (rpHasBase)
     {
-        tmp14 = BaseMap.Sample(_BaseMap_sampler, rpUv);
+        bPick = BaseMap.Sample(_BaseMap_sampler, rpUv);
     }
     else
     {
-        tmp14 = float4(0.5f, 0.5f, 0.5f, 1.0f);
+        bPick = float4(0.5f, 0.5f, 0.5f, 1.0f);
     }
-    float4 b = tmp14;
-    bool tmp48;
+    float4 b = bPick;
+    bool cond;
     if (rpAlphaTest)
     {
-        tmp48 = (b.w * alpha) < alphaThreshold;
+        cond = (b.w * alpha) < alphaThreshold;
     }
     else
     {
-        tmp48 = rpAlphaTest;
+        cond = rpAlphaTest;
     }
-    if (tmp48)
+    if (cond)
     {
         discard;
     }
-    float3 tmp57;
+    float3 cPick;
     if (rpHasVc)
     {
-        tmp57 = rpC.xyz;
+        cPick = rpC.xyz;
     }
     else
     {
-        tmp57 = 1.0f.xxx;
+        cPick = 1.0f.xxx;
     }
-    float3 c = tmp57;
+    float3 c = cPick;
     float3 n = normalize(rpN);
     if (dot(n, rpRel) > 0.0f)
     {
+        // a two-sided or flipped face: the side the probe sees
         n = -n;
     }
     rpAlbedo = float4(clamp(b.xyz * c, 0.0f.xxx, 1.0f.xxx), 1.0f);

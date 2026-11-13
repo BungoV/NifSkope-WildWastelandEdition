@@ -119,18 +119,18 @@ void geom_main(triangle SPIRV_Cross_Input stage_input[3], inout TriangleStream<S
     float alphaMult = min(lineWidth, 1.0f);
     float4 c0 = float4(vsColor[0].xyz, vsColor[0].w * alphaMult);
     C = c0;
-    float4 param = p0;
-    float4 param_1 = p1;
-    float4 param_2 = float4(vsColor[1].xyz, vsColor[1].w * alphaMult);
-    drawLine(param, param_1, param_2, geometry_stream);
-    float4 param_3 = p1;
-    float4 param_4 = p2;
-    float4 param_5 = float4(vsColor[2].xyz, vsColor[2].w * alphaMult);
-    drawLine(param_3, param_4, param_5, geometry_stream);
-    float4 param_6 = p2;
-    float4 param_7 = p0;
-    float4 param_8 = c0;
-    drawLine(param_6, param_7, param_8, geometry_stream);
+    float4 p0Arg3 = p0;
+    float4 p1Arg3 = p1;
+    float4 p1ColorArg3 = float4(vsColor[1].xyz, vsColor[1].w * alphaMult);
+    drawLine(p0Arg3, p1Arg3, p1ColorArg3, geometry_stream);
+    float4 p0Arg2 = p1;
+    float4 p1Arg2 = p2;
+    float4 p1ColorArg2 = float4(vsColor[2].xyz, vsColor[2].w * alphaMult);
+    drawLine(p0Arg2, p1Arg2, p1ColorArg2, geometry_stream);
+    float4 p0Arg = p2;
+    float4 p1Arg = p0;
+    float4 p1ColorArg = c0;
+    drawLine(p0Arg, p1Arg, p1ColorArg, geometry_stream);
 }
 
 [maxvertexcount(12)]

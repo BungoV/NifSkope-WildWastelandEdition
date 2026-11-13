@@ -54,8 +54,12 @@ struct SPIRV_Cross_Output
 float LightingFuncGGX_REF(float LdotR, float roughness)
 {
     float alpha = roughness * roughness;
+    // D (GGX normal distribution)
     float alphaSqr = alpha * alpha;
+    // denom = NdotH * NdotH * (alphaSqr - 1.0) + 1.0,
+    // LdotR = NdotH * NdotH * 2.0 - 1.0
     float denom = ((LdotR * alphaSqr) + alphaSqr) + max(1.0f - LdotR, 0.0f);
+    // no pi because BRDF -> lighting
     return alphaSqr / (denom * denom);
 }
 
@@ -79,6 +83,7 @@ void frag_main()
     float VdotL = dot(V, L);
     float3 viewWS = mul(V, reflMatrix);
     float m = clamp(float(cubeBgndMipLevel), 0.0f, 6.0f);
+    // Environment
     float3 color = lightSourceAmbient.xyz;
     if (hasCubeMap)
     {
@@ -88,16 +93,17 @@ void frag_main()
     {
         color *= 0.07999999821186065673828125f;
     }
+    // Directional light
     if (VdotL > 0.0f)
     {
         float roughness = (5.0f - sqrt(25.0f - (4.0f * m))) / 4.0f;
-        float param = VdotL;
-        float param_1 = max(roughness, 0.0199999995529651641845703125f);
-        color += ((lightSourceDiffuse[0].xyz * LightingFuncGGX_REF(param, param_1)) * VdotL);
+        float LdotRArg = VdotL;
+        float roughnessArg = max(roughness, 0.0199999995529651641845703125f);
+        color += ((lightSourceDiffuse[0].xyz * LightingFuncGGX_REF(LdotRArg, roughnessArg)) * VdotL);
     }
-    float3 param_2 = color * brightnessScale;
-    float param_3 = toneMapScale;
-    fragColor = float4(tonemap(param_2, param_3), 0.0f);
+    float3 xArg = color * brightnessScale;
+    float yArg = toneMapScale;
+    fragColor = float4(tonemap(xArg, yArg), 0.0f);
 }
 
 SPIRV_Cross_Output main(SPIRV_Cross_Input stage_input)

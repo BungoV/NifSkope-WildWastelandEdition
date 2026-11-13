@@ -13,9 +13,9 @@ static const float kRfCorr = 0.593;
 #if defined(WW_FN_wwRfStreak) || defined(WW_FN_ALL)
 float wwRfStreak(float2 s, float2 o)
 {
-    float2 tmp1 = s + o;
-    float2 tmp2 = (s * 2.0299999713897705078125f) + o.yx;
-    return ((0.64999997615814208984375f * wwShoreNoise(tmp1)) + (0.3499999940395355224609375f * wwShoreNoise(tmp2))) - 0.5f;
+    float2 wwRfStreakRet2 = s + o;
+    float2 wwRfStreakRet = (s * 2.0299999713897705078125f) + o.yx;
+    return ((0.64999997615814208984375f * wwShoreNoise(wwRfStreakRet2)) + (0.3499999940395355224609375f * wwShoreNoise(wwRfStreakRet))) - 0.5f;
 }
 #endif
 
@@ -43,8 +43,8 @@ float4 wwWaterRiverFoam(float2 P, float t, float foot)
     {
         return 0.0f.xxxx;
     }
-    float2 tmp1 = P;
-    if (abs(wwWaterInfo(tmp1).w - 1.0f) > 0.5f)
+    float2 wwRfStreakRet2 = P;
+    if (abs(wwWaterInfo(wwRfStreakRet2).w - 1.0f) > 0.5f)
     {
         return 0.0f.xxxx;
     }
@@ -54,13 +54,14 @@ float4 wwWaterRiverFoam(float2 P, float t, float foot)
     float2 f = g - t0;
     float2 c0 = waterFlowGrid.xy + ((t0 + 0.5f.xx) * tex);
     bool raw = (waterRiverFoamRed & 16) != 0;
+    // bake units -> u/s
     float uq = raw ? 1.0f : 69.99124908447265625f;
-    float2 tmp2 = c0;
-    float2 tmp3 = c0 + float2(tex, 0.0f);
-    float2 tmp4 = c0 + float2(0.0f, tex);
-    float2 tmp5 = c0 + tex.xx;
-    float2 tmp6[4] = { wwWaterFlow(tmp2), wwWaterFlow(tmp3), wwWaterFlow(tmp4), wwWaterFlow(tmp5) };
-    float2 vc[4] = tmp6;
+    float2 wwRfStreakRet = c0;
+    float2 vcPart4 = c0 + float2(tex, 0.0f);
+    float2 vcPart3 = c0 + float2(0.0f, tex);
+    float2 vcPart2 = c0 + tex.xx;
+    float2 vcPart[4] = { wwWaterFlow(wwRfStreakRet), wwWaterFlow(vcPart4), wwWaterFlow(vcPart3), wwWaterFlow(vcPart2) };
+    float2 vc[4] = vcPart;
     for (int i = 0; i < 4; i++)
     {
         vc[i] *= uq;
@@ -71,27 +72,30 @@ float4 wwWaterRiverFoam(float2 P, float t, float foot)
     {
         return 0.0f.xxxx;
     }
+    // the bilinear field's divergence: d vx / dx + d vy / dy
     float div = (lerp(vc[1].x - vc[0].x, vc[3].x - vc[2].x, f.y) + lerp(vc[2].y - vc[0].y, vc[3].y - vc[1].y, f.x)) / tex;
     float T = waterRiverFoamK.x;
-    float tmp7;
+    float CTPick;
     if ((waterRiverFoamRed & 1) != 0)
     {
-        tmp7 = 0.0f;
+        CTPick = 0.0f;
     }
     else
     {
-        tmp7 = clamp((-div) * T, -9.0f, waterRiverFoamK2.w);
+        CTPick = clamp((-div) * T, -9.0f, waterRiverFoamK2.w);
     }
-    float CT = tmp7;
+    float CT = CTPick;
+    // the source's speed in bake units (m/s; raw: u/s as before)
     float sm = spd / uq;
     float src = (waterRiverFoamK.y * sm) / (sm + waterRiverFoamK.z);
     if (!raw)
     {
-        float2 tmp8 = P;
-        float dHere = wwWaterInfo(tmp8).y * 0.01428749971091747283935546875f;
-        float2 tmp9 = P + ((v / spd.xx) * tex);
-        float dDown = wwWaterInfo(tmp9).y * 0.01428749971091747283935546875f;
+        float2 dHerePart = P;
+        float dHere = wwWaterInfo(dHerePart).y * 0.01428749971091747283935546875f;
+        float2 dDownPart = P + ((v / spd.xx) * tex);
+        float dDown = wwWaterInfo(dDownPart).y * 0.01428749971091747283935546875f;
         float shallow = 1.0f - smoothstep(0.300000011920928955078125f, 1.5f, dHere);
+        // the bed rises 0.5 m within a texel downstream
         float shoal = clamp((dHere - dDown) / 0.5f, 0.0f, 1.0f);
         src *= ((1.0f + (2.0f * shallow)) + (2.0f * shoal));
     }
@@ -101,75 +105,77 @@ float4 wwWaterRiverFoam(float2 P, float t, float foot)
         return float4(0.0f, 0.0f, CT, spd);
     }
     float W = waterRiverFoamK2.x;
-    float tmp10;
+    float visPick;
     if ((waterRiverFoamRed & 8) != 0)
     {
-        tmp10 = 1.0f;
+        visPick = 1.0f;
     }
     else
     {
-        tmp10 = 1.0f - smoothstep(0.3499999940395355224609375f, 0.699999988079071044921875f, foot / W);
+        visPick = 1.0f - smoothstep(0.3499999940395355224609375f, 0.699999988079071044921875f, foot / W);
     }
-    float vis = tmp10;
+    float vis = visPick;
+    // cover D over the threshold of a unit-sd read (logistic fit of the normal quantile)
     float z = log((1.0f - D_1) / D_1) / 1.70200002193450927734375f;
     float a = 0.0f;
     if (vis > 0.0f)
     {
-        float tmp11;
+        float LPick;
         if ((waterRiverFoamRed & 4) != 0)
         {
-            tmp11 = W;
+            LPick = W;
         }
         else
         {
-            tmp11 = W * waterRiverFoamK2.y;
+            LPick = W * waterRiverFoamK2.y;
         }
-        float L = tmp11;
+        float L = LPick;
         float ph = frac(t / T);
         float2 wp = float2(1.0f - abs((2.0f * ph) - 1.0f), abs((2.0f * ph) - 1.0f));
-        float2 tmp12;
+        float2 tpPick;
         if ((waterRiverFoamRed & 2) != 0)
         {
-            tmp12 = 0.0f.xx;
+            tpPick = 0.0f.xx;
         }
         else
         {
-            tmp12 = float2(ph, frac(ph + 0.5f)) * T;
+            tpPick = float2(ph, frac(ph + 0.5f)) * T;
         }
-        float2 tp = tmp12;
+        float2 tp = tpPick;
         float2 wc = 1.0f.xx - f;
         float4 wq = float4(wc.x * wc.y, f.x * wc.y, wc.x * f.y, f.x * f.y);
         float n = 0.0f;
         float var = 0.0f;
-        float2 tmp13;
+        float2 dirPick;
         float2 s[4];
-        float tmp14;
+        float varPick;
         for (int k = 0; k < 2; k++)
         {
-            bool2 tmp15 = (k == 0).xx;
-            float2 o = float2(tmp15.x ? float2(0.37000000476837158203125f, 0.709999978542327880859375f).x : float2(311.3699951171875f, 97.70999908447265625f).x, tmp15.y ? float2(0.37000000476837158203125f, 0.709999978542327880859375f).y : float2(311.3699951171875f, 97.70999908447265625f).y);
+            bool2 oPart = (k == 0).xx;
+            float2 o = float2(oPart.x ? float2(0.37000000476837158203125f, 0.709999978542327880859375f).x : float2(311.3699951171875f, 97.70999908447265625f).x, oPart.y ? float2(0.37000000476837158203125f, 0.709999978542327880859375f).y : float2(311.3699951171875f, 97.70999908447265625f).y);
             for (int i_1 = 0; i_1 < 4; i_1++)
             {
                 float sp = length(vc[i_1]);
                 if (sp > 9.9999997473787516355514526367188e-05f)
                 {
-                    tmp13 = vc[i_1] / sp.xx;
+                    dirPick = vc[i_1] / sp.xx;
                 }
                 else
                 {
-                    tmp13 = float2(1.0f, 0.0f);
+                    dirPick = float2(1.0f, 0.0f);
                 }
-                float2 dir = tmp13;
+                float2 dir = dirPick;
                 float2 Pc = c0 + (float2(float(i_1 & 1), float(i_1 >> 1)) * tex);
                 float2 blk = floor(Pc * 0.00048828125f);
                 float2 r = (P - (blk * 2048.0f)) - (vc[i_1] * tp[k]);
-                int2 tmp16 = int2(blk);
-                uint hb = wwShoreHash(tmp16);
+                int2 hbPart = int2(blk);
+                // each 2048 u block its own noise (a lattice offset by its hash): no repeat from block to block
+                uint hb = wwShoreHash(hbPart);
                 s[i_1] = float2(dot(r, dir) / L, dot(r, float2(-dir.y, dir.x)) / W) + (float2(float(hb & 1023u), float((hb >> uint(10)) & 1023u)) * 2.0f);
-                float2 tmp17 = s[i_1];
-                float2 tmp18 = o;
-                float tmp19 = wwRfStreak(tmp17, tmp18);
-                n += ((wp[k] * wq[i_1]) * wwRfGauss(tmp19));
+                float2 wwRfStreakPart2 = s[i_1];
+                float2 wwRfStreakPart = o;
+                float wwRfStreakRet3 = wwRfStreak(wwRfStreakPart2, wwRfStreakPart);
+                n += ((wp[k] * wq[i_1]) * wwRfGauss(wwRfStreakRet3));
             }
             for (int i_2 = 0; i_2 < 4; i_2++)
             {
@@ -177,35 +183,40 @@ float4 wwWaterRiverFoam(float2 P, float t, float foot)
                 {
                     if (i_2 == j)
                     {
-                        tmp14 = 1.0f;
+                        varPick = 1.0f;
                     }
                     else
                     {
-                        float2 tmp20 = s[i_2] - s[j];
-                        tmp14 = wwRfRho(tmp20);
+                        float2 varPart = s[i_2] - s[j];
+                        varPick = wwRfRho(varPart);
                     }
-                    var += ((((wp[k] * wp[k]) * wq[i_2]) * wq[j]) * tmp14);
+                    var += ((((wp[k] * wp[k]) * wq[i_2]) * wq[j]) * varPick);
                 }
             }
         }
+        // unit sd at every weight
         n /= sqrt(max(var, 9.9999999392252902907785028219223e-09f));
         float sf = waterRiverFoamK2.z;
         a = smoothstep(z - sf, z + sf, n);
     }
     a = lerp(D_1, a, vis);
+    // lane FIX1101A (P0, the manager's rvc6_on 10-31: "flat grey hard-edged blotches, like paint"): the streaks say where
+    // the foam GATHERS; inside them river foam is a lace of bubbles with holes, never a solid sheet. The shared foam
+    // density (at most 60 % foam in a full streak: 40 % holes in its cores, tests/features/water/waterfoam2), as the contact and shore foam are, carried with the water (two reads
+    // half a life apart, crossfaded like the streaks). Red WW_CELL_WATER_RIVERFOAM_RED=paint (32): the solid streaks
     if (((waterRiverFoamRed & 32) == 0) && (a > 0.00200000009499490261077880859375f))
     {
         float T2 = waterRiverFoamK.x;
         float ph2 = frac(t / T2);
         float w0 = 1.0f - abs((2.0f * ph2) - 1.0f);
-        float2 tmp21 = P - (v * (ph2 * T2));
-        float tmp22 = foot;
-        float tmp23 = t;
-        float3 d0 = wwFoamDetail(tmp21, tmp22, tmp23);
-        float2 tmp24 = P - (v * (frac(ph2 + 0.5f) * T2));
-        float tmp25 = foot;
-        float tmp26 = t;
-        float3 d1 = wwFoamDetail(tmp24, tmp25, tmp26);
+        float2 d0Part3 = P - (v * (ph2 * T2));
+        float d0Part2 = foot;
+        float d0Part = t;
+        float3 d0 = wwFoamDetail(d0Part3, d0Part2, d0Part);
+        float2 d1Part3 = P - (v * (frac(ph2 + 0.5f) * T2));
+        float d1Part2 = foot;
+        float d1Part = t;
+        float3 d1 = wwFoamDetail(d1Part3, d1Part2, d1Part);
         float3 det = lerp(d1, d0, w0.xxx);
         float dens = 0.60000002384185791015625f * a;
         float s_1 = lerp(0.5f, waterShoreK0.w, det.z);
@@ -219,15 +230,15 @@ float4 wwWaterRiverFoam(float2 P, float t, float foot)
 #if defined(WW_FN_wwFoamWet) || defined(WW_FN_ALL)
 float wwFoamWet(float edgeV, float column)
 {
-    float tmp1;
+    float wwRfStreakRet2;
     if ((waterRiverFoamRed & 32) != 0)
     {
-        tmp1 = 1.0f;
+        wwRfStreakRet2 = 1.0f;
     }
     else
     {
-        tmp1 = (1.0f - clamp(edgeV, 0.0f, 1.0f)) * smoothstep(4.0f, 16.0f, column);
+        wwRfStreakRet2 = (1.0f - clamp(edgeV, 0.0f, 1.0f)) * smoothstep(4.0f, 16.0f, column);
     }
-    return tmp1;
+    return wwRfStreakRet2;
 }
 #endif

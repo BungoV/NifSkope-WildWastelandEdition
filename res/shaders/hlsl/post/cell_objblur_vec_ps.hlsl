@@ -50,16 +50,16 @@ void frag_main()
         float4 q = mul(float4(ndc, 1.0f), reproj);
         float2 cam = ((q.xy / q.w.xx) - ndc.xy) * 0.5f;
         float own = maskTex.Load(int3(p, 0)).z;
-        float2 tmp110;
+        float2 vPick;
         if (own > 0.5f)
         {
-            tmp110 = vel - cam;
+            vPick = vel - cam;
         }
         else
         {
-            tmp110 = 0.0f.xx;
+            vPick = 0.0f.xx;
         }
-        v = tmp110;
+        v = vPick;
     }
     v = ((-v) / invSize) * shutter;
     float l = length(v);

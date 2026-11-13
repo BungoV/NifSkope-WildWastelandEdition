@@ -14,7 +14,7 @@ struct CellDdgiOut
     float vis3;
 };
 
-static const float2 tmp552[16] = { float2(0.493393003940582275390625f, 0.39426898956298828125f), float2(0.7985470294952392578125f, 0.885922014713287353515625f), float2(0.2473219931125640869140625f, 0.9264500141143798828125f), float2(0.051454000174999237060546875f, 0.14078199863433837890625f), float2(0.83184301853179931640625f, 0.00955200009047985076904296875f), float2(0.4286319911479949951171875f, 0.01715099997818470001220703125f), float2(0.01565600000321865081787109375f, 0.7497789859771728515625f), float2(0.758385002613067626953125f, 0.4961700141429901123046875f), float2(0.22348700463771820068359375f, 0.562151014804840087890625f), float2(0.01162800006568431854248046875f, 0.406994998455047607421875f), float2(0.24146200716495513916015625f, 0.3046360015869140625f), float2(0.4303109943866729736328125f, 0.7272260189056396484375f), float2(0.981810986995697021484375f, 0.278358995914459228515625f), float2(0.4070560038089752197265625f, 0.500533998012542724609375f), float2(0.123478002846240997314453125f, 0.4635460078716278076171875f), float2(0.809534013271331787109375f, 0.682272017002105712890625f) };
+static const float2 csmPoisson[16] = { float2(0.493393003940582275390625f, 0.39426898956298828125f), float2(0.7985470294952392578125f, 0.885922014713287353515625f), float2(0.2473219931125640869140625f, 0.9264500141143798828125f), float2(0.051454000174999237060546875f, 0.14078199863433837890625f), float2(0.83184301853179931640625f, 0.00955200009047985076904296875f), float2(0.4286319911479949951171875f, 0.01715099997818470001220703125f), float2(0.01565600000321865081787109375f, 0.7497789859771728515625f), float2(0.758385002613067626953125f, 0.4961700141429901123046875f), float2(0.22348700463771820068359375f, 0.562151014804840087890625f), float2(0.01162800006568431854248046875f, 0.406994998455047607421875f), float2(0.24146200716495513916015625f, 0.3046360015869140625f), float2(0.4303109943866729736328125f, 0.7272260189056396484375f), float2(0.981810986995697021484375f, 0.278358995914459228515625f), float2(0.4070560038089752197265625f, 0.500533998012542724609375f), float2(0.123478002846240997314453125f, 0.4635460078716278076171875f), float2(0.809534013271331787109375f, 0.682272017002105712890625f) };
 
 cbuffer wwShadowFrame : register(b0, space0)
 {
@@ -354,26 +354,26 @@ float3 rpOctDecode(float2 uv)
     float2 f = (uv * 2.0f) - 1.0f.xx;
     float3 n = float3(f, (1.0f - abs(f.x)) - abs(f.y));
     float t = max(-n.z, 0.0f);
-    float tmp5592;
+    float nPick2;
     if (n.x >= 0.0f)
     {
-        tmp5592 = -t;
+        nPick2 = -t;
     }
     else
     {
-        tmp5592 = t;
+        nPick2 = t;
     }
-    n.x += tmp5592;
-    float tmp5607;
+    n.x += nPick2;
+    float nPick;
     if (n.y >= 0.0f)
     {
-        tmp5607 = -t;
+        nPick = -t;
     }
     else
     {
-        tmp5607 = t;
+        nPick = t;
     }
-    n.y += tmp5607;
+    n.y += nPick;
     return normalize(n);
 }
 
@@ -410,27 +410,27 @@ float3 wwSkyBelowTap(int k)
     }
     float q = 0.3535533845424652099609375f;
     float s6 = -0.866025388240814208984375f;
-    float tmp5507;
+    float wwSkyBelowTapRet2;
     bool wwh0 = (k == 5);
     bool wwh1 = (k == 8);
-    if (wwh0 || wwh1)
+    if (or(wwh0, wwh1))   // HLSLFIX2 orfix.py: no short-circuit branch (NV took the wrong side)
     {
-        tmp5507 = q;
+        wwSkyBelowTapRet2 = q;
     }
     else
     {
-        tmp5507 = -q;
+        wwSkyBelowTapRet2 = -q;
     }
-    float tmp5517;
+    float wwSkyBelowTapRet;
     if (k < 7)
     {
-        tmp5517 = q;
+        wwSkyBelowTapRet = q;
     }
     else
     {
-        tmp5517 = -q;
+        wwSkyBelowTapRet = -q;
     }
-    return float3(tmp5507, tmp5517, s6);
+    return float3(wwSkyBelowTapRet2, wwSkyBelowTapRet, s6);
 }
 
 // the scale an Ambient Only volume puts on the ambient at P (1 outside every volume)
@@ -438,14 +438,15 @@ float3 cellAmboScale(float3 P)
 {
     for (int i = 0; i < cellAmboCount; i++)
     {
+        // linked to a box, it fills the box (not the sphere)
         if (cellAmboK[i].w > 0.5f)
         {
             float4 b0 = cellAmboBox[i * 3];
             float4 b1 = cellAmboBox[(i * 3) + 1];
             float4 b2 = cellAmboBox[(i * 3) + 2];
             float3 k = float3(dot(b0.xyz, P) + b0.w, dot(b1.xyz, P) + b1.w, dot(b2.xyz, P) + b2.w);
-            float3 tmp5331 = abs(k);
-            if (all(bool3(tmp5331.x < 1.0f.xxx.x, tmp5331.y < 1.0f.xxx.y, tmp5331.z < 1.0f.xxx.z)))
+            float3 cond = abs(k);
+            if (all(bool3(cond.x < 1.0f.xxx.x, cond.y < 1.0f.xxx.y, cond.z < 1.0f.xxx.z)))
             {
                 return cellAmboK[i].xyz;
             }
@@ -464,91 +465,92 @@ float3 cellAmboScale(float3 P)
 float3 cellAmbientSum(float3 N, float3 P)
 {
     float4 n1 = float4(N, 1.0f);
-    float3 param = P;
-    return float3(dot(cellDalc[0], n1), dot(cellDalc[1], n1), dot(cellDalc[2], n1)) * cellAmboScale(param);
+    float3 PArg = P;
+    return float3(dot(cellDalc[0], n1), dot(cellDalc[1], n1), dot(cellDalc[2], n1)) * cellAmboScale(PArg);
 }
 
 float3 cellAmbient(float3 N, float3 P)
 {
-    float3 param = N;
-    float3 param_1 = P;
-    return pow(max(cellAmbientSum(param, param_1), 0.0f.xxx), 2.2000000476837158203125f.xxx);
+    float3 NArg = N;
+    float3 PArg2 = P;
+    return pow(max(cellAmbientSum(NArg, PArg2), 0.0f.xxx), 2.2000000476837158203125f.xxx);
 }
 
 float3 rpAmbient(float3 N, float3 P)
 {
     if (cellInterior)
     {
-        float3 tmp5628;
+        float3 rpAmbientRet2;
         if (cellHasDalc)
         {
-            float3 param = N;
-            float3 param_1 = P;
-            tmp5628 = cellAmbient(param, param_1);
+            float3 NArg3 = N;
+            float3 PArg4 = P;
+            rpAmbientRet2 = cellAmbient(NArg3, PArg4);
         }
         else
         {
-            tmp5628 = 0.0f.xxx;
+            rpAmbientRet2 = 0.0f.xxx;
         }
-        return tmp5628;
+        return rpAmbientRet2;
     }
+    // fo4_default.vert's flat ambient
     float3 A = sqrt(max(lightSourceAmbient.xyz, 0.0f.xxx)) * 0.375f;
-    float3 tmp5655;
+    float3 rpAmbientRet;
     if (cellExtDalc)
     {
-        float3 param_2 = N;
-        float3 param_3 = P;
-        tmp5655 = cellAmbient(param_2, param_3);
+        float3 NArg2 = N;
+        float3 PArg3 = P;
+        rpAmbientRet = cellAmbient(NArg2, PArg3);
     }
     else
     {
-        tmp5655 = A * A;
+        rpAmbientRet = A * A;
     }
-    return tmp5655;
+    return rpAmbientRet;
 }
 
 // the ground's albedo from the taps that hit: sum of their albedo (rgb, already squared), n of them
 float3 wwSkyBelowAlbedo(float3 sum, float n)
 {
-    float3 tmp5531;
+    float3 wwSkyBelowAlbedoRet;
     if (n > 0.5f)
     {
-        tmp5531 = sum * (1.0f / n);
+        wwSkyBelowAlbedoRet = sum * (1.0f / n);
     }
     else
     {
-        tmp5531 = 0.5f.xxx;
+        wwSkyBelowAlbedoRet = 0.5f.xxx;
     }
-    return tmp5531;
+    return wwSkyBelowAlbedoRet;
 }
 
 // the miss's radiance in direction d: sky = the sky ambient there (today's miss), skyUp = an open up-facing white
 // surface's ambient (rpAmbient(+Z)), alb = wwSkyBelowAlbedo; rule 1 on, 0 the red
 float3 wwSkyBelowMiss(float3 d, float3 sky, float3 alb, float3 skyUp, bool interior, int rule)
 {
-    bool tmp5544 = rule != 0;
-    bool tmp5550;
-    if (tmp5544)
+    bool cond3 = rule != 0;
+    bool cond2;
+    if (cond3)
     {
-        float3 param = d;
-        tmp5550 = wwSkyBelow(param);
+        float3 dArg = d;
+        cond2 = wwSkyBelow(dArg);
     }
     else
     {
-        tmp5550 = tmp5544;
+        cond2 = cond3;
     }
-    if (tmp5550)
+    if (cond2)
     {
-        float3 tmp5554;
+        float3 wwSkyBelowMissRet;
         if (interior)
         {
-            tmp5554 = 0.0f.xxx;
+            wwSkyBelowMissRet = 0.0f.xxx;
         }
         else
         {
-            tmp5554 = alb * skyUp;
+            wwSkyBelowMissRet = alb * skyUp;
         }
-        return tmp5554;
+        return wwSkyBelowMissRet;
     }
     return sky;
 }
@@ -567,22 +569,22 @@ bool cellShapeIn(int i, float3 P, float3 Lpos, float shape)
     float4 b1 = cellLights.Load((i * 8) + 6);
     float4 b2 = cellLights.Load((i * 8) + 7);
     float3 k = float3(dot(b0.xyz, P) + b0.w, dot(b1.xyz, P) + b1.w, dot(b2.xyz, P) + b2.w);
-    float3 tmp5107 = abs(k);
-    return all(bool3(tmp5107.x <= 1.0f.xxx.x, tmp5107.y <= 1.0f.xxx.y, tmp5107.z <= 1.0f.xxx.z));
+    float3 cellShapeInRet = abs(k);
+    return all(bool3(cellShapeInRet.x <= 1.0f.xxx.x, cellShapeInRet.y <= 1.0f.xxx.y, cellShapeInRet.z <= 1.0f.xxx.z));
 }
 
 float cellAttVan(float x, float3 c)
 {
-    float tmp2448;
+    float xePick;
     if (c.z > 0.0f)
     {
-        tmp2448 = pow(x, c.z);
+        xePick = pow(x, c.z);
     }
     else
     {
-        tmp2448 = 1.0f;
+        xePick = 1.0f;
     }
-    float xe = tmp2448;
+    float xe = xePick;
     return pow(1.0f - clamp((c.y * xe) + c.x, 0.0f, 1.0f), 2.2000000476837158203125f);
 }
 
@@ -591,171 +593,173 @@ float cellPhysRaw(float x, float s)
     float x2 = x * x;
     float w = clamp(1.0f - (x2 * x2), 0.0f, 1.0f);
     float den = x2 + (s * s);
-    float tmp2488;
+    float cellPhysRawRet;
     if (den > 0.0f)
     {
-        tmp2488 = (w * w) / den;
+        cellPhysRawRet = (w * w) / den;
     }
     else
     {
-        tmp2488 = 0.0f;
+        cellPhysRawRet = 0.0f;
     }
-    return tmp2488;
+    return cellPhysRawRet;
 }
 
 // lane LIGHTPHYS1: the physical or advanced falloff for the game's value `van` at x = d / r (lightphys.h falloff)
 float cellPhysFalloff(float van, float x, float r, float3 c)
 {
     float a = clamp(cellLightPhys.y, 0.0f, 1.0f);
-    bool tmp2508 = !(c.z > 0.0f);
-    bool tmp2523;
-    if (!tmp2508)
+    bool cond6 = !(c.z > 0.0f);
+    bool cond5;
+    if (!cond6)
     {
-        tmp2523 = !(clamp(c.y + c.x, 0.0f, 1.0f) > clamp(c.x, 0.0f, 1.0f));
+        cond5 = !(clamp(c.y + c.x, 0.0f, 1.0f) > clamp(c.x, 0.0f, 1.0f));
     }
     else
     {
-        tmp2523 = tmp2508;
+        cond5 = cond6;
     }
-    bool tmp2533;
-    if (!tmp2523)
+    bool cond4;
+    if (!cond5)
     {
-        float param = 1.0f;
-        float3 param_1 = c;
-        tmp2533 = cellAttVan(param, param_1) >= 0.0039215688593685626983642578125f;
+        float xArg4 = 1.0f;
+        float3 cArg2 = c;
+        cond4 = cellAttVan(xArg4, cArg2) >= 0.0039215688593685626983642578125f;
     }
     else
     {
-        tmp2533 = tmp2523;
+        cond4 = cond5;
     }
-    if (tmp2533)
+    if (cond4)
     {
+        // an authored curve that is no falloff keeps the game's
         return van;
     }
-    float param_2 = a;
-    float3 param_3 = c;
-    float vA = cellAttVan(param_2, param_3);
+    float xArg3 = a;
+    float3 cArg = c;
+    float vA = cellAttVan(xArg3, cArg);
     float b = 1.0f - (a * a);
-    float tmp2552;
+    float test2;
     if (b > 0.0f)
     {
-        tmp2552 = pow(b, 1.10000002384185791015625f);
+        test2 = pow(b, 1.10000002384185791015625f);
     }
     else
     {
-        tmp2552 = 0.0f;
+        test2 = 0.0f;
     }
-    if (vA > tmp2552)
+    if (vA > test2)
     {
         return van;
     }
+    // one loop for both: the program's size (GIDARK1's link limit)
     int red = int(cellLightPhysB.z + 0.5f);
     if (cellLightPhys.x > 1.5f)
     {
-        float tmp2579;
+        float x0Pick;
         if (r > 0.0f)
         {
-            tmp2579 = clamp((max(max(cellLightPhysB.x, 0.001000000047497451305389404296875f), max((0.100000001490116119384765625f * r) / 69.98999786376953125f, 0.20000000298023223876953125f)) * 69.98999786376953125f) / r, 9.9999997473787516355514526367188e-05f, 0.5f);
+            x0Pick = clamp((max(max(cellLightPhysB.x, 0.001000000047497451305389404296875f), max((0.100000001490116119384765625f * r) / 69.98999786376953125f, 0.20000000298023223876953125f)) * 69.98999786376953125f) / r, 9.9999997473787516355514526367188e-05f, 0.5f);
         }
         else
         {
-            tmp2579 = 0.5f;
+            x0Pick = 0.5f;
         }
-        float x0 = tmp2579;
+        float x0 = x0Pick;
         float den = 0.89999997615814208984375f - (0.666666686534881591796875f * x0);
         float t = clamp((x - 0.800000011920928955078125f) / 0.20000000298023223876953125f, 0.0f, 1.0f);
-        float tmp2613;
+        float wPick;
         if ((red & 2) != 0)
         {
-            tmp2613 = 1.0f;
+            wPick = 1.0f;
         }
         else
         {
-            tmp2613 = 1.0f - ((t * t) * (3.0f - (2.0f * t)));
+            wPick = 1.0f - ((t * t) * (3.0f - (2.0f * t)));
         }
-        float w = tmp2613;
+        float w = wPick;
         float m = max(x0, x);
-        float tmp2632;
+        float cellPhysFalloffRet2;
         if (den > 0.0f)
         {
-            tmp2632 = ((cellLightPhys.w / den) * w) / (m * m);
+            cellPhysFalloffRet2 = ((cellLightPhys.w / den) * w) / (m * m);
         }
         else
         {
-            tmp2632 = 0.0f;
+            cellPhysFalloffRet2 = 0.0f;
         }
-        return tmp2632;
+        return cellPhysFalloffRet2;
     }
     float s = cellLightPhys.z;
-    float param_4 = a;
-    float param_5 = s;
-    float raw = cellPhysRaw(param_4, param_5);
-    float tmp2661;
+    float xArg2 = a;
+    float sArg2 = s;
+    float raw = cellPhysRaw(xArg2, sArg2);
+    float kPick;
     if ((red & 1) != 0)
     {
-        tmp2661 = 1.0f;
+        kPick = 1.0f;
     }
     else
     {
-        float tmp2667;
+        float kPick2;
         if (raw > 0.0f)
         {
-            tmp2667 = vA / raw;
+            kPick2 = vA / raw;
         }
         else
         {
-            tmp2667 = 0.0f;
+            kPick2 = 0.0f;
         }
-        tmp2661 = tmp2667;
+        kPick = kPick2;
     }
-    float k = tmp2661;
-    float tmp2678;
+    float k = kPick;
+    float cellPhysFalloffRet;
     if (k > 0.0f)
     {
-        float param_6 = x;
-        float param_7 = s;
-        tmp2678 = k * cellPhysRaw(param_6, param_7);
+        float xArg = x;
+        float sArg = s;
+        cellPhysFalloffRet = k * cellPhysRaw(xArg, sArg);
     }
     else
     {
-        tmp2678 = van;
+        cellPhysFalloffRet = van;
     }
-    return tmp2678;
+    return cellPhysFalloffRet;
 }
 
 // PRTP2 section 1: x = saturate(d / r); atten = pow(1 - saturate(scale * x^exponent + bias), 2.2)
 float cellRadial(float d, float r, float3 bse)
 {
     float x = clamp(d / max(r, 0.001000000047497451305389404296875f), 0.0f, 1.0f);
-    float tmp2703;
+    float xePick2;
     if (bse.z > 0.0f)
     {
-        tmp2703 = pow(x, bse.z);
+        xePick2 = pow(x, bse.z);
     }
     else
     {
-        tmp2703 = 1.0f;
+        xePick2 = 1.0f;
     }
-    float xe = tmp2703;
+    float xe = xePick2;
     float k = 1.0f - clamp((bse.y * xe) + bse.x, 0.0f, 1.0f);
     if ((cellRed & 1) != 0)
     {
         return k;
     }
-    float tmp2733;
+    float cellRadialRet;
     if (cellLightPhys.x > 0.5f)
     {
-        float param = pow(k, 2.2000000476837158203125f);
-        float param_1 = x;
-        float param_2 = r;
-        float3 param_3 = bse;
-        tmp2733 = cellPhysFalloff(param, param_1, param_2, param_3);
+        float vanArg = pow(k, 2.2000000476837158203125f);
+        float xArg5 = x;
+        float rArg = r;
+        float3 cArg3 = bse;
+        cellRadialRet = cellPhysFalloff(vanArg, xArg5, rArg, cArg3);
     }
     else
     {
-        tmp2733 = pow(k, 2.2000000476837158203125f);
+        cellRadialRet = pow(k, 2.2000000476837158203125f);
     }
-    return tmp2733;
+    return cellRadialRet;
 }
 
 float3 cellGobo(int i, float3 D, float3 axis, bool spot)
@@ -764,6 +768,7 @@ float3 cellGobo(int i, float3 D, float3 axis, bool spot)
     {
         return 1.0f.xxx;
     }
+    // GOBO2: the half of a non-spot pattern (0 top, 1 bottom)
     int hf = -1;
     int h;
     float2 uv;
@@ -791,28 +796,28 @@ float3 cellGobo(int i, float3 D, float3 axis, bool spot)
         }
         float4 a0 = cellLights.Load(r);
         h = int(a0.w + 0.5f) - 1;
-        float3 tmp4710;
+        float3 lPick;
         if ((cellGoboMap & 4) != 0)
         {
-            tmp4710 = D;
+            lPick = D;
         }
         else
         {
-            tmp4710 = float3(dot(D, a0.xyz), dot(D, cellLights.Load(r + 1).xyz), dot(D, cellLights.Load(r + 2).xyz));
+            lPick = float3(dot(D, a0.xyz), dot(D, cellLights.Load(r + 1).xyz), dot(D, cellLights.Load(r + 2).xyz));
         }
-        float3 l = tmp4710;
+        float3 l = lPick;
         if ((cellGoboMap & 8) != 0)
         {
-            float3 tmp4746;
+            float3 dPick;
             if ((cellGoboMap & 2) != 0)
             {
-                tmp4746 = l.yzx;
+                dPick = l.yzx;
             }
             else
             {
-                tmp4746 = l;
+                dPick = l;
             }
-            float3 d = normalize(tmp4746);
+            float3 d = normalize(dPick);
             hf = ((d.z >= 0.0f) == ((cellGoboMap & 1) == 0)) ? 0 : 1;
             uv = ((d.xy / (1.0f + abs(d.z)).xx) * 0.5f) + 0.5f.xx;
         }
@@ -820,54 +825,54 @@ float3 cellGobo(int i, float3 D, float3 axis, bool spot)
         {
             float3 d_1 = normalize(l);
             hf = int(l.x < (-1.0f));
-            float2 tmp4786;
+            float2 ePick;
             if ((cellGoboMap & 2) != 0)
             {
-                tmp4786 = d_1.yz;
+                ePick = d_1.yz;
             }
             else
             {
-                tmp4786 = d_1.zy;
+                ePick = d_1.zy;
             }
-            float2 e = tmp4786;
-            bool tmp4796 = hf == 1;
-            bool tmp4802;
-            if (tmp4796)
+            float2 e = ePick;
+            bool cond8 = hf == 1;
+            bool cond7;
+            if (cond8)
             {
-                tmp4802 = (cellGoboMap & 1) == 0;
+                cond7 = (cellGoboMap & 1) == 0;
             }
             else
             {
-                tmp4802 = tmp4796;
+                cond7 = cond8;
             }
-            if (tmp4802)
+            if (cond7)
             {
                 e.x = -e.x;
             }
-            float tmp4812;
+            float uvPick;
             if (hf == 1)
             {
-                tmp4812 = 1.0f - d_1.x;
+                uvPick = 1.0f - d_1.x;
             }
             else
             {
-                tmp4812 = 1.0f + d_1.x;
+                uvPick = 1.0f + d_1.x;
             }
-            uv = ((e / max(tmp4812, 9.9999997473787516355514526367188e-05f).xx) * 0.5f) + 0.5f.xx;
+            uv = ((e / max(uvPick, 9.9999997473787516355514526367188e-05f).xx) * 0.5f) + 0.5f.xx;
         }
     }
     if (cellGoboFlat)
     {
-        float3 tmp4835;
+        float3 cellGoboRet2;
         if (cellGoboGam)
         {
-            tmp4835 = pow(cellLights.Load(h + 1).xyz, 2.2000000476837158203125f.xxx);
+            cellGoboRet2 = pow(cellLights.Load(h + 1).xyz, 2.2000000476837158203125f.xxx);
         }
         else
         {
-            tmp4835 = cellLights.Load(h + 1).xyz;
+            cellGoboRet2 = cellLights.Load(h + 1).xyz;
         }
-        return tmp4835;
+        return cellGoboRet2;
     }
     if ((cellGoboRot & 4) != 0)
     {
@@ -882,16 +887,17 @@ float3 cellGobo(int i, float3 D, float3 axis, bool spot)
         uv.y = 1.0f - uv.y;
     }
     int2 sz = int2(cellLights.Load(h).xy + 0.5f.xx);
-    int2 tmp4893;
+    int2 pzPick;
     if (hf < 0)
     {
-        tmp4893 = sz;
+        pzPick = sz;
     }
     else
     {
-        tmp4893 = int2(sz.x, sz.y / 2);
+        pzPick = int2(sz.x, sz.y / 2);
     }
-    int2 pz = tmp4893;
+    // GOBO2: one half, no bleed into the other
+    int2 pz = pzPick;
     float2 p = (clamp(uv, 0.0f.xx, 1.0f.xx) * float2(pz)) - 0.5f.xx;
     int2 q = int2(floor(p));
     float2 f = p - float2(q);
@@ -900,56 +906,56 @@ float3 cellGobo(int i, float3 D, float3 axis, bool spot)
     int b = (h + 2) + ((max(hf, 0) * pz.y) * sz.x);
     float3 c0 = lerp(cellLights.Load((b + (q0.y * sz.x)) + q0.x).xyz, cellLights.Load((b + (q0.y * sz.x)) + q1.x).xyz, f.x.xxx);
     float3 c1 = lerp(cellLights.Load((b + (q1.y * sz.x)) + q0.x).xyz, cellLights.Load((b + (q1.y * sz.x)) + q1.x).xyz, f.x.xxx);
-    float3 tmp5017;
+    float3 cellGoboRet;
     if (cellGoboGam)
     {
-        tmp5017 = pow(lerp(c0, c1, f.y.xxx), 2.2000000476837158203125f.xxx);
+        cellGoboRet = pow(lerp(c0, c1, f.y.xxx), 2.2000000476837158203125f.xxx);
     }
     else
     {
-        tmp5017 = lerp(c0, c1, f.y.xxx);
+        cellGoboRet = lerp(c0, c1, f.y.xxx);
     }
-    return tmp5017;
+    return cellGoboRet;
 }
 
 float cellShadowF(int i, float3 P, float3 N)
 {
     float4 t4 = cellLights.Load((i * 8) + 4);
-    bool tmp2766 = !cellShadowOn;
-    bool tmp2773;
-    if (!tmp2766)
+    bool cond13 = !cellShadowOn;
+    bool cond12;
+    if (!cond13)
     {
-        tmp2773 = t4.y < 0.5f;
+        cond12 = t4.y < 0.5f;
     }
     else
     {
-        tmp2773 = tmp2766;
+        cond12 = cond13;
     }
-    if (tmp2773)
+    if (cond12)
     {
         return 1.0f;
     }
     float4 t0 = cellLights.Load(i * 8);
-    bool tmp2785 = t4.y > 1.5f;
-    bool tmp2791;
-    if (tmp2785)
+    bool cond11 = t4.y > 1.5f;
+    bool cond10;
+    if (cond11)
     {
-        tmp2791 = t4.y < 2.5f;
+        cond10 = t4.y < 2.5f;
     }
     else
     {
-        tmp2791 = tmp2785;
+        cond10 = cond11;
     }
-    bool tmp2807;
-    if (tmp2791)
+    bool cond9;
+    if (cond10)
     {
-        tmp2807 = dot(P - t0.xyz, cellLights.Load((i * 8) + 2).xyz) < 0.0f;
+        cond9 = dot(P - t0.xyz, cellLights.Load((i * 8) + 2).xyz) < 0.0f;
     }
     else
     {
-        tmp2807 = tmp2791;
+        cond9 = cond10;
     }
-    if (tmp2807)
+    if (cond9)
     {
         return 0.0f;
     }
@@ -962,8 +968,8 @@ float cellShadowF(int i, float3 P, float3 N)
     float d = length(rn);
     float ref = (d - 1.0f) / max(t0.w, 0.001000000047497451305389404296875f);
     float3 a = rn / max(d, 0.001000000047497451305389404296875f).xxx;
-    bool3 tmp2858 = (abs(a.z) < 0.89999997615814208984375f).xxx;
-    float3 u = normalize(cross(a, float3(tmp2858.x ? float3(0.0f, 0.0f, 1.0f).x : float3(1.0f, 0.0f, 0.0f).x, tmp2858.y ? float3(0.0f, 0.0f, 1.0f).y : float3(1.0f, 0.0f, 0.0f).y, tmp2858.z ? float3(0.0f, 0.0f, 1.0f).z : float3(1.0f, 0.0f, 0.0f).z)));
+    bool3 uPart = (abs(a.z) < 0.89999997615814208984375f).xxx;
+    float3 u = normalize(cross(a, float3(uPart.x ? float3(0.0f, 0.0f, 1.0f).x : float3(1.0f, 0.0f, 0.0f).x, uPart.y ? float3(0.0f, 0.0f, 1.0f).y : float3(1.0f, 0.0f, 0.0f).y, uPart.z ? float3(0.0f, 0.0f, 1.0f).z : float3(1.0f, 0.0f, 0.0f).z)));
     float3 v = cross(a, u);
     float s = 0.0f;
     for (int y = -1; y <= 1; y++)
@@ -973,16 +979,16 @@ float cellShadowF(int i, float3 P, float3 N)
             s += cellShadow.SampleCmp(_cellShadow_sampler, float4(a + (((u * float(x)) + (v * float(y))) * cellShadowTexel), t4.x), ref);
         }
     }
-    float tmp2918;
+    float cellShadowFRet;
     if (cellShadowFadeOn)
     {
-        tmp2918 = lerp(1.0f, s / 9.0f, cellShadowFade[clamp(int(t4.x + 0.5f), 0, 15)]);
+        cellShadowFRet = lerp(1.0f, s / 9.0f, cellShadowFade[clamp(int(t4.x + 0.5f), 0, 15)]);
     }
     else
     {
-        tmp2918 = s / 9.0f;
+        cellShadowFRet = s / 9.0f;
     }
-    return tmp2918;
+    return cellShadowFRet;
 }
 
 float3 cellLightE(int i, float3 P, float3 N, inout float3 L, out bool noSpec)
@@ -992,34 +998,35 @@ float3 cellLightE(int i, float3 P, float3 N, inout float3 L, out bool noSpec)
     float d = length(Lv);
     L = Lv / max(d, 0.001000000047497451305389404296875f).xxx;
     noSpec = true;
-    bool tmp5134 = d >= t0.w;
-    bool tmp5142;
-    if (!tmp5134)
+    bool cond15 = d >= t0.w;
+    bool cond14;
+    if (!cond15)
     {
-        tmp5142 = dot(N, L) <= 0.0f;
+        cond14 = dot(N, L) <= 0.0f;
     }
     else
     {
-        tmp5142 = tmp5134;
+        cond14 = cond15;
     }
-    if (tmp5142)
+    if (cond14)
     {
         return 0.0f.xxx;
     }
     float4 t1 = cellLights.Load((i * 8) + 1);
-    int param = i;
-    float3 param_1 = P;
-    float3 param_2 = t0.xyz;
-    float param_3 = t1.w;
-    if (!cellShapeIn(param, param_1, param_2, param_3))
+    int iArg3 = i;
+    float3 PArg6 = P;
+    float3 LposArg = t0.xyz;
+    float shapeArg = t1.w;
+    if (!cellShapeIn(iArg3, PArg6, LposArg, shapeArg))
     {
         return 0.0f.xxx;
     }
     float4 t3 = cellLights.Load((i * 8) + 3);
-    float param_4 = d;
-    float param_5 = t0.w;
-    float3 param_6 = t3.xyz;
-    float a = cellRadial(param_4, param_5, param_6);
+    float dArg2 = d;
+    float rArg2 = t0.w;
+    float3 bseArg = t3.xyz;
+    float a = cellRadial(dArg2, rArg2, bseArg);
+    // lane LIGHTS5 (GOBO1)
     float3 g = 1.0f.xxx;
     float3 gAx = 0.0f.xxx;
     if (t1.w > (-1.5f))
@@ -1031,18 +1038,19 @@ float3 cellLightE(int i, float3 P, float3 N, inout float3 L, out bool noSpec)
     }
     if (a > 0.0f)
     {
-        int param_7 = i;
-        float3 param_8 = -Lv;
-        float3 param_9 = gAx;
-        bool param_10 = t1.w > (-1.5f);
-        g = cellGobo(param_7, param_8, param_9, param_10);
+        int iArg2 = i;
+        float3 DArg = -Lv;
+        float3 axisArg = gAx;
+        bool spotArg = t1.w > (-1.5f);
+        // one call for every shape
+        g = cellGobo(iArg2, DArg, axisArg, spotArg);
     }
     if (a > 0.0f)
     {
-        int param_11 = i;
-        float3 param_12 = P;
-        float3 param_13 = N;
-        a *= cellShadowF(param_11, param_12, param_13);
+        int iArg = i;
+        float3 PArg5 = P;
+        float3 NArg4 = N;
+        a *= cellShadowF(iArg, PArg5, NArg4);
     }
     noSpec = (int(t3.w + 0.5f) & 1) != 0;
     return (t1.xyz * g) * a;
@@ -1055,12 +1063,12 @@ float3 cellGiKeyNormal(float k)
     float3 n = float3(o, (1.0f - abs(o.x)) - abs(o.y));
     if (n.z < 0.0f)
     {
-        float3 tmp2975 = n;
-        float tmp2981 = n.x;
-        float tmp2986 = n.y;
-        float2 tmp2990 = (1.0f.xx - abs(tmp2975.yx)) * float2((tmp2981 >= 0.0f) ? 1.0f : (-1.0f), (tmp2986 >= 0.0f) ? 1.0f : (-1.0f));
-        n.x = tmp2990.x;
-        n.y = tmp2990.y;
+        float3 nPart4 = n;
+        float nPart3 = n.x;
+        float nPart2 = n.y;
+        float2 nPart = (1.0f.xx - abs(nPart4.yx)) * float2((nPart3 >= 0.0f) ? 1.0f : (-1.0f), (nPart2 >= 0.0f) ? 1.0f : (-1.0f));
+        n.x = nPart.x;
+        n.y = nPart.y;
     }
     return normalize(n);
 }
@@ -1081,37 +1089,39 @@ float2 cellGiHalfVis2Of(float4 g)
 bool cellGiHalfAt(float3 P, float3 N, out float4 s)
 {
     s = 0.0f.xxxx;
+    // texel h sits at pixel h / scale
     float2 u = ((gl_FragCoord.xy - cellGiHalfRect.xy) - 0.5f.xx) * cellGiHalfScale;
     int2 h0 = int2(floor(u));
     float2 t = u - float2(h0);
     int2 hs = int2(cellGiHalfRect.zw);
+    // game units
     float tol = 1.0f + (0.00999999977648258209228515625f * distance(P, float3(cellRow[0].w, cellRow[1].w, cellRow[2].w)));
     float4 acc = 0.0f.xxxx;
     float wsum = 0.0f;
     float3 vacc = 0.0f.xxx;
     float2 vacc2 = 0.0f.xx;
-    float tmp4088;
-    float tmp4101;
+    float wbPick2;
+    float wbPick;
     for (int k = 0; k < 4; k++)
     {
         int2 o = int2(k & 1, k >> 1);
         if (o.x == 1)
         {
-            tmp4088 = t.x;
+            wbPick2 = t.x;
         }
         else
         {
-            tmp4088 = 1.0f - t.x;
+            wbPick2 = 1.0f - t.x;
         }
         if (o.y == 1)
         {
-            tmp4101 = t.y;
+            wbPick = t.y;
         }
         else
         {
-            tmp4101 = 1.0f - t.y;
+            wbPick = 1.0f - t.y;
         }
-        float wb = tmp4088 * tmp4101;
+        float wb = wbPick2 * wbPick;
         if (wb <= 0.0f)
         {
             continue;
@@ -1122,20 +1132,20 @@ bool cellGiHalfAt(float3 P, float3 N, out float4 s)
         {
             continue;
         }
-        float param = key.w;
-        float w = (wb * smoothstep(0.699999988079071044921875f, 0.949999988079071044921875f, dot(N, cellGiKeyNormal(param)))) * max(1.0f - (abs(dot(N, key.xyz - P)) / tol), 0.0f);
+        float kArg = key.w;
+        float w = (wb * smoothstep(0.699999988079071044921875f, 0.949999988079071044921875f, dot(N, cellGiKeyNormal(kArg)))) * max(1.0f - (abs(dot(N, key.xyz - P)) / tol), 0.0f);
         if (w <= 0.0f)
         {
             continue;
         }
         float4 g = cellGiHalf.Load(int3(h, 0));
         acc += (g * w);
-        float param_1 = g.x;
-        float param_2 = g.y;
-        float param_3 = g.z;
-        vacc += (float3(cellGiHalfVisOf(param_1), cellGiHalfVisOf(param_2), cellGiHalfVisOf(param_3)) * w);
-        float4 param_4 = g;
-        vacc2 += (cellGiHalfVis2Of(param_4) * w);
+        float eArg3 = g.x;
+        float eArg2 = g.y;
+        float eArg = g.z;
+        vacc += (float3(cellGiHalfVisOf(eArg3), cellGiHalfVisOf(eArg2), cellGiHalfVisOf(eArg)) * w);
+        float4 gArg = g;
+        vacc2 += (cellGiHalfVis2Of(gArg) * w);
         wsum += w;
     }
     if (wsum < 0.001000000047497451305389404296875f)
@@ -1172,28 +1182,28 @@ float4 cellDdgiTile(int p, float3 d, int S)
     if (d.z < 0.0f)
     {
         float ou = u;
-        float param = ou;
-        u = (1.0f - abs(v)) * cellDdgiSignNotZero(param);
-        float param_1 = v;
-        v = (1.0f - abs(ou)) * cellDdgiSignNotZero(param_1);
+        float vArg2 = ou;
+        u = (1.0f - abs(v)) * cellDdgiSignNotZero(vArg2);
+        float vArg = v;
+        v = (1.0f - abs(ou)) * cellDdgiSignNotZero(vArg);
     }
     int n = S - 2;
     float fx = (1.0f + (((u * 0.5f) + 0.5f) * float(n))) - 0.5f;
     float fy = (1.0f + (((v * 0.5f) + 0.5f) * float(n))) - 0.5f;
-    int param_2 = int(floor(fx));
-    int param_3 = 0;
-    int param_4 = cellDdgiIMax(param_2, param_3);
-    int param_5 = S - 2;
-    int x0 = cellDdgiIMin(param_4, param_5);
-    int param_6 = int(floor(fy));
-    int param_7 = 0;
-    int param_8 = cellDdgiIMax(param_6, param_7);
-    int param_9 = S - 2;
-    int y0 = cellDdgiIMin(param_8, param_9);
+    int aArg4 = int(floor(fx));
+    int bArg4 = 0;
+    int aArg3 = cellDdgiIMax(aArg4, bArg4);
+    int bArg3 = S - 2;
+    int x0 = cellDdgiIMin(aArg3, bArg3);
+    int aArg2 = int(floor(fy));
+    int bArg2 = 0;
+    int aArg = cellDdgiIMax(aArg2, bArg2);
+    int bArg = S - 2;
+    int y0 = cellDdgiIMin(aArg, bArg);
     float ax = clamp(fx - float(x0), 0.0f, 1.0f);
     float ay = clamp(fy - float(y0), 0.0f, 1.0f);
     float4 t[4];
-    float4 tmp3200;
+    float4 tPick;
     for (int k = 0; k < 4; k++)
     {
         int x = x0 + (k % 2);
@@ -1208,15 +1218,16 @@ float4 cellDdgiTile(int p, float3 d, int S)
             float4 q = cellDdgiAtlas.Load(((cellDdgiCBase[cellDdgiC] + (64 * cellDdgiCDims[cellDdgiC].w)) + (128 * p)) + (i / 2));
             if ((i % 2) == 0)
             {
-                tmp3200 = float4(q.x, q.y, 0.0f, 0.0f);
+                tPick = float4(q.x, q.y, 0.0f, 0.0f);
             }
             else
             {
-                tmp3200 = float4(q.z, q.w, 0.0f, 0.0f);
+                tPick = float4(q.z, q.w, 0.0f, 0.0f);
             }
-            t[k] = tmp3200;
+            t[k] = tPick;
         }
     }
+    // ( a (1 - ax) + b ax ) (1 - ay) + ( e (1 - ax) + f ax ) ay, as the header writes it
     return (((t[0] * (1.0f - ax)) + (t[1] * ax)) * (1.0f - ay)) + (((t[2] * (1.0f - ax)) + (t[3] * ax)) * ay);
 }
 
@@ -1251,27 +1262,27 @@ CellDdgiOut cellDdgiReadOne(float3 P, float3 n, float3 o, float3 d)
     float gx = (Pb.x - cellDdgiCOrigin[cellDdgiC].x) / cellDdgiCStep[cellDdgiC].x;
     float gy = (Pb.y - cellDdgiCOrigin[cellDdgiC].y) / cellDdgiCStep[cellDdgiC].y;
     float gz = (Pb.z - cellDdgiCOrigin[cellDdgiC].z) / cellDdgiCStep[cellDdgiC].z;
-    int param = int(floor(gx));
-    int param_1 = 0;
-    int param_2 = cellDdgiCDims[cellDdgiC].x - 2;
-    int param_3 = 0;
-    int param_4 = cellDdgiIMax(param, param_1);
-    int param_5 = cellDdgiIMax(param_2, param_3);
-    int bx = cellDdgiIMin(param_4, param_5);
-    int param_6 = int(floor(gy));
-    int param_7 = 0;
-    int param_8 = cellDdgiCDims[cellDdgiC].y - 2;
-    int param_9 = 0;
-    int param_10 = cellDdgiIMax(param_6, param_7);
-    int param_11 = cellDdgiIMax(param_8, param_9);
-    int by = cellDdgiIMin(param_10, param_11);
-    int param_12 = int(floor(gz));
-    int param_13 = 0;
-    int param_14 = cellDdgiCDims[cellDdgiC].z - 2;
-    int param_15 = 0;
-    int param_16 = cellDdgiIMax(param_12, param_13);
-    int param_17 = cellDdgiIMax(param_14, param_15);
-    int bz = cellDdgiIMin(param_16, param_17);
+    int aArg16 = int(floor(gx));
+    int bArg16 = 0;
+    int aArg15 = cellDdgiCDims[cellDdgiC].x - 2;
+    int bArg15 = 0;
+    int aArg14 = cellDdgiIMax(aArg16, bArg16);
+    int bArg14 = cellDdgiIMax(aArg15, bArg15);
+    int bx = cellDdgiIMin(aArg14, bArg14);
+    int aArg13 = int(floor(gy));
+    int bArg13 = 0;
+    int aArg12 = cellDdgiCDims[cellDdgiC].y - 2;
+    int bArg12 = 0;
+    int aArg11 = cellDdgiIMax(aArg13, bArg13);
+    int bArg11 = cellDdgiIMax(aArg12, bArg12);
+    int by = cellDdgiIMin(aArg11, bArg11);
+    int aArg10 = int(floor(gz));
+    int bArg10 = 0;
+    int aArg9 = cellDdgiCDims[cellDdgiC].z - 2;
+    int bArg9 = 0;
+    int aArg8 = cellDdgiIMax(aArg10, bArg10);
+    int bArg8 = cellDdgiIMax(aArg9, bArg9);
+    int bz = cellDdgiIMin(aArg8, bArg8);
     float ax = clamp(gx - float(bx), 0.0f, 1.0f);
     float ay = clamp(gy - float(by), 0.0f, 1.0f);
     float az = clamp(gz - float(bz), 0.0f, 1.0f);
@@ -1280,17 +1291,17 @@ CellDdgiOut cellDdgiReadOne(float3 P, float3 n, float3 o, float3 d)
     fade = min(fade, clamp(min(gy, float(cellDdgiCDims[cellDdgiC].y - 1) - gy) - 1.0f, 0.0f, 1.0f));
     fade = min(fade, clamp(min(gz, float(cellDdgiCDims[cellDdgiC].z - 1) - gz) - 1.0f, 0.0f, 1.0f));
     r.fade = fade;
-    bool tmp3464 = fade <= 0.0f;
-    bool tmp3470;
-    if (tmp3464)
+    bool cond17 = fade <= 0.0f;
+    bool cond16;
+    if (cond17)
     {
-        tmp3470 = (cellDdgiRed & 16) == 0;
+        cond16 = (cellDdgiRed & 16) == 0;
     }
     else
     {
-        tmp3470 = tmp3464;
+        cond16 = cond17;
     }
-    if (tmp3470)
+    if (cond16)
     {
         return r;
     }
@@ -1300,51 +1311,51 @@ CellDdgiOut cellDdgiReadOne(float3 P, float3 n, float3 o, float3 d)
     float v3sum = 0.0f;
     float wsum = 0.0f;
     float cover = 0.0f;
-    float tmp3566;
-    float tmp3576;
-    float tmp3587;
-    float tmp3715;
+    float triPick3;
+    float triPick2;
+    float triPick;
+    float wPick2;
     for (int c = 0; c < cellGiLoop8; c++)
     {
         int ox = c % 2;
         int oy = (c / 2) % 2;
         int oz = c / 4;
-        int param_18 = bx + ox;
-        int param_19 = cellDdgiCDims[cellDdgiC].x - 1;
-        int px = cellDdgiIMin(param_18, param_19);
-        int param_20 = by + oy;
-        int param_21 = cellDdgiCDims[cellDdgiC].y - 1;
-        int py = cellDdgiIMin(param_20, param_21);
-        int param_22 = bz + oz;
-        int param_23 = cellDdgiCDims[cellDdgiC].z - 1;
-        int pz = cellDdgiIMin(param_22, param_23);
+        int aArg7 = bx + ox;
+        int bArg7 = cellDdgiCDims[cellDdgiC].x - 1;
+        int px = cellDdgiIMin(aArg7, bArg7);
+        int aArg6 = by + oy;
+        int bArg6 = cellDdgiCDims[cellDdgiC].y - 1;
+        int py = cellDdgiIMin(aArg6, bArg6);
+        int aArg5 = bz + oz;
+        int bArg5 = cellDdgiCDims[cellDdgiC].z - 1;
+        int pz = cellDdgiIMin(aArg5, bArg5);
         int p = px + (cellDdgiCDims[cellDdgiC].x * (py + (cellDdgiCDims[cellDdgiC].y * pz)));
         float4 pr = cellDdgiAtlas.Load((cellDdgiCBase[cellDdgiC] + (192 * cellDdgiCDims[cellDdgiC].w)) + p);
         if (ox == 1)
         {
-            tmp3566 = ax;
+            triPick3 = ax;
         }
         else
         {
-            tmp3566 = 1.0f - ax;
+            triPick3 = 1.0f - ax;
         }
         if (oy == 1)
         {
-            tmp3576 = ay;
+            triPick2 = ay;
         }
         else
         {
-            tmp3576 = 1.0f - ay;
+            triPick2 = 1.0f - ay;
         }
         if (oz == 1)
         {
-            tmp3587 = az;
+            triPick = az;
         }
         else
         {
-            tmp3587 = 1.0f - az;
+            triPick = 1.0f - az;
         }
-        float tri = (tmp3566 * tmp3576) * tmp3587;
+        float tri = (triPick3 * triPick2) * triPick;
         int st = int(pr.w + 0.5f);
         if (st != 2)
         {
@@ -1362,47 +1373,47 @@ CellDdgiOut cellDdgiReadOne(float3 P, float3 n, float3 o, float3 d)
             float rr = length(bp);
             if (((cellDdgiRed & 2) == 0) && (rr > 0.0f))
             {
-                int param_24 = p;
-                float3 param_25 = bp * ((-1.0f) / rr);
-                int param_26 = 16;
-                float4 m = cellDdgiTile(param_24, param_25, param_26);
-                float param_27 = rr;
-                float param_28 = m.x;
-                float param_29 = m.y;
-                w *= cellDdgiChebyshev(param_27, param_28, param_29);
+                int pArg4 = p;
+                float3 dArg6 = bp * ((-1.0f) / rr);
+                int SArg4 = 16;
+                float4 m = cellDdgiTile(pArg4, dArg6, SArg4);
+                float rArg3 = rr;
+                float meanArg = m.x;
+                float mean2Arg = m.y;
+                w *= cellDdgiChebyshev(rArg3, meanArg, mean2Arg);
             }
             w = max(w, 9.9999999747524270787835121154785e-07f);
             if (w < 0.20000000298023223876953125f)
             {
-                tmp3715 = ((w * w) * w) / 0.039999999105930328369140625f;
+                wPick2 = ((w * w) * w) / 0.039999999105930328369140625f;
             }
             else
             {
-                tmp3715 = w;
+                wPick2 = w;
             }
-            w = tmp3715;
+            w = wPick2;
         }
         w *= tri;
-        int param_30 = p;
-        float3 param_31 = d;
-        int param_32 = 8;
-        float4 e = cellDdgiTile(param_30, param_31, param_32);
+        int pArg3 = p;
+        float3 dArg5 = d;
+        int SArg3 = 8;
+        float4 e = cellDdgiTile(pArg3, dArg5, SArg3);
         sum += (float3(pow(max(e.x, 0.0f), 2.5f), pow(max(e.y, 0.0f), 2.5f), pow(max(e.z, 0.0f), 2.5f)) * w);
         vsum += (w * e.w);
         if (cellDdgiTwo)
         {
-            int param_33 = p;
-            float3 param_34 = cellDdgiD2;
-            int param_35 = 8;
-            float4 e2 = cellDdgiTile(param_33, param_34, param_35);
+            int pArg2 = p;
+            float3 dArg4 = cellDdgiD2;
+            int SArg2 = 8;
+            float4 e2 = cellDdgiTile(pArg2, dArg4, SArg2);
             v2sum += (w * e2.w);
         }
         if (cellDdgiThree)
         {
-            int param_36 = p;
-            float3 param_37 = cellDdgiD3;
-            int param_38 = 8;
-            float4 e3 = cellDdgiTile(param_36, param_37, param_38);
+            int pArg = p;
+            float3 dArg3 = cellDdgiD3;
+            int SArg = 8;
+            float4 e3 = cellDdgiTile(pArg, dArg3, SArg);
             v3sum += (w * e3.w);
         }
         wsum += w;
@@ -1439,22 +1450,22 @@ CellDdgiOut cellDdgiRead(float3 P, float3 n, float3 o, float3 d)
     for (int c = 0; c < cellDdgiCount; c++)
     {
         cellDdgiC = c;
-        float3 param = P;
-        float3 param_1 = n;
-        float3 param_2 = o;
-        float3 param_3 = d;
-        CellDdgiOut q = cellDdgiReadOne(param, param_1, param_2, param_3);
-        bool tmp3872 = q.w > 0.0f;
-        bool tmp3878;
-        if (tmp3872)
+        float3 PArg7 = P;
+        float3 nArg = n;
+        float3 oArg = o;
+        float3 dArg7 = d;
+        CellDdgiOut q = cellDdgiReadOne(PArg7, nArg, oArg, dArg7);
+        bool cond19 = q.w > 0.0f;
+        bool cond18;
+        if (cond19)
         {
-            tmp3878 = q.fade > 0.0f;
+            cond18 = q.fade > 0.0f;
         }
         else
         {
-            tmp3878 = tmp3872;
+            cond18 = cond19;
         }
-        if (!tmp3878)
+        if (!cond18)
         {
             continue;
         }
@@ -1487,59 +1498,59 @@ float4 cellGiSampleVol(float3 P, float3 N)
     {
         return 0.0f.xxxx;
     }
-    bool tmp4241 = (cellGiHalfOn && (cellPass == 0)) && (cellProbe == 0);
+    bool cond24 = (cellGiHalfOn && (cellPass == 0)) && (cellProbe == 0);
     float4 hs;
-    bool tmp4252;
-    if (tmp4241)
+    bool cond23;
+    if (cond24)
     {
-        float3 param = P;
-        float3 param_1 = N;
-        float4 param_2;
-        bool tmp4250 = cellGiHalfAt(param, param_1, param_2);
-        hs = param_2;
-        tmp4252 = tmp4250;
+        float3 PArg9 = P;
+        float3 NArg5 = N;
+        float4 sArg3;
+        bool cellGiHalfAtRet = cellGiHalfAt(PArg9, NArg5, sArg3);
+        hs = sArg3;
+        cond23 = cellGiHalfAtRet;
     }
     else
     {
-        tmp4252 = tmp4241;
+        cond23 = cond24;
     }
-    if (tmp4252)
+    if (cond23)
     {
         if (hs.w > 0.0f)
         {
             cellGiPath = 12;
         }
-        float2 tmp4264;
+        float2 cellGiVisNPick;
         if (hs.w > 0.0f)
         {
-            tmp4264 = float2(cellGiHalfVis.x, hs.w);
+            cellGiVisNPick = float2(cellGiHalfVis.x, hs.w);
         }
         else
         {
-            tmp4264 = float2(1.0f, 0.0f);
+            cellGiVisNPick = float2(1.0f, 0.0f);
         }
-        cellGiVisN = tmp4264;
+        cellGiVisN = cellGiVisNPick;
         return hs;
     }
-    bool tmp4297;
+    bool cond22;
     if (!cellGiOneRead)
     {
-        bool tmp4286;
+        bool condPick;
         if (cellGiMemoOk)
         {
-            tmp4286 = (cellDdgiRed & 16) == 0;
+            condPick = (cellDdgiRed & 16) == 0;
         }
         else
         {
-            tmp4286 = cellGiMemoOk;
+            condPick = cellGiMemoOk;
         }
-        tmp4297 = (tmp4286 && all(bool3(P.x == cellGiMemoP.x, P.y == cellGiMemoP.y, P.z == cellGiMemoP.z))) && all(bool3(N.x == cellGiMemoN.x, N.y == cellGiMemoN.y, N.z == cellGiMemoN.z));
+        cond22 = (condPick && all(bool3(P.x == cellGiMemoP.x, P.y == cellGiMemoP.y, P.z == cellGiMemoP.z))) && all(bool3(N.x == cellGiMemoN.x, N.y == cellGiMemoN.y, N.z == cellGiMemoN.z));
     }
     else
     {
-        tmp4297 = cellGiOneRead;
+        cond22 = cellGiOneRead;
     }
-    if (tmp4297)
+    if (cond22)
     {
         if (cellGiMemoS.w > 0.0f)
         {
@@ -1548,107 +1559,107 @@ float4 cellGiSampleVol(float3 P, float3 N)
         cellGiVisN = cellGiMemoV;
         return cellGiMemoS;
     }
-    float3 param_3 = P;
-    float3 param_4 = N;
-    float3 param_5 = normalize(float3(cellRow[0].w, cellRow[1].w, cellRow[2].w) - P);
-    float3 param_6 = N;
-    CellDdgiOut tmp4326 = cellDdgiRead(param_3, param_4, param_5, param_6);
-    CellDdgiOut d = tmp4326;
+    float3 PArg8 = P;
+    float3 nArg2 = N;
+    float3 oArg2 = normalize(float3(cellRow[0].w, cellRow[1].w, cellRow[2].w) - P);
+    float3 dArg8 = N;
+    CellDdgiOut cellDdgiReadRet = cellDdgiRead(PArg8, nArg2, oArg2, dArg8);
+    CellDdgiOut d = cellDdgiReadRet;
     float4 s = 0.0f.xxxx;
-    bool tmp4330 = d.w > 0.0f;
-    bool tmp4336;
-    if (tmp4330)
+    bool cond21 = d.w > 0.0f;
+    bool cond20;
+    if (cond21)
     {
-        tmp4336 = d.fade > 0.0f;
+        cond20 = d.fade > 0.0f;
     }
     else
     {
-        tmp4336 = tmp4330;
+        cond20 = cond21;
     }
-    if (tmp4336)
+    if (cond20)
     {
         cellGiPath = 12;
-        float4 tmp4343;
+        float4 sPick;
         if (cellPass == 2)
         {
-            tmp4343 = float4(d.vis.xxx, 1.0f);
+            sPick = float4(d.vis.xxx, 1.0f);
         }
         else
         {
-            tmp4343 = float4(d.E, 1.0f);
+            sPick = float4(d.E, 1.0f);
         }
-        s = tmp4343 * d.fade;
+        s = sPick * d.fade;
     }
     cellGiMemoOk = true;
     cellGiMemoP = P;
     cellGiMemoN = N;
     cellGiMemoS = s;
-    float2 tmp4368;
+    float2 cellGiMemoVPick;
     if (s.w > 0.0f)
     {
-        tmp4368 = float2(d.vis, d.fade);
+        cellGiMemoVPick = float2(d.vis, d.fade);
     }
     else
     {
-        tmp4368 = float2(1.0f, 0.0f);
+        cellGiMemoVPick = float2(1.0f, 0.0f);
     }
-    cellGiMemoV = tmp4368;
+    cellGiMemoV = cellGiMemoVPick;
     cellGiVisN = cellGiMemoV;
     return s;
 }
 
 float4 cellGiSample(float3 P, float3 N)
 {
-    float3 param = P;
-    float3 param_1 = N;
-    float4 tmp4387 = cellGiSampleVol(param, param_1);
-    float4 s = tmp4387;
-    bool tmp4396 = ((!cellRestirGiOn) || (cellPass != 0)) || (cellProbe != 0);
-    bool tmp4404;
-    if (!tmp4396)
+    float3 PArg10 = P;
+    float3 NArg6 = N;
+    float4 cellGiSampleVolRet = cellGiSampleVol(PArg10, NArg6);
+    float4 s = cellGiSampleVolRet;
+    bool cond32 = ((!cellRestirGiOn) || (cellPass != 0)) || (cellProbe != 0);
+    bool cond31;
+    if (!cond32)
     {
-        tmp4404 = !(s.w > 0.0f);
+        cond31 = !(s.w > 0.0f);
     }
     else
     {
-        tmp4404 = tmp4396;
+        cond31 = cond32;
     }
-    if (tmp4404)
+    if (cond31)
     {
         return s;
     }
     int2 q = int2(gl_FragCoord.xy);
     int W = int(cellRestirGiSize.x + 0.5f);
     int H = int(cellRestirGiSize.y + 0.5f);
-    bool tmp4426 = q.x < 0;
-    bool tmp4433;
-    if (!tmp4426)
+    bool cond30 = q.x < 0;
+    bool cond29;
+    if (!cond30)
     {
-        tmp4433 = q.y < 0;
+        cond29 = q.y < 0;
     }
     else
     {
-        tmp4433 = tmp4426;
+        cond29 = cond30;
     }
-    bool tmp4441;
-    if (!tmp4433)
+    bool cond28;
+    if (!cond29)
     {
-        tmp4441 = q.x >= W;
+        cond28 = q.x >= W;
     }
     else
     {
-        tmp4441 = tmp4433;
+        cond28 = cond29;
     }
-    bool tmp4449;
-    if (!tmp4441)
+    bool cond27;
+    if (!cond28)
     {
-        tmp4449 = q.y >= H;
+        cond27 = q.y >= H;
     }
     else
     {
-        tmp4449 = tmp4441;
+        cond27 = cond28;
     }
-    if (tmp4449)
+    if (cond27)
     {
         return s;
     }
@@ -1656,56 +1667,57 @@ float4 cellGiSample(float3 P, float3 N)
     float3 w = P - float3(cellRow[0].w, cellRow[1].w, cellRow[2].w);
     float s2 = 1.0f / max(dot(cellRow[0].xyz, cellRow[0].xyz), 9.9999999600419720025001879548654e-13f);
     float D = (-s2) * (((cellRow[0].z * w.x) + (cellRow[1].z * w.y)) + (cellRow[2].z * w.z));
-    bool tmp4509 = e.w > 0.0f;
-    bool tmp4523;
-    if (tmp4509)
+    bool cond26 = e.w > 0.0f;
+    bool cond25;
+    if (cond26)
     {
-        tmp4523 = abs(D - e.w) <= ((0.0199999995529651641845703125f * e.w) + 2.0f);
+        cond25 = abs(D - e.w) <= ((0.0199999995529651641845703125f * e.w) + 2.0f);
     }
     else
     {
-        tmp4523 = tmp4509;
+        cond25 = cond26;
     }
-    float4 tmp4524;
-    if (tmp4523)
+    float4 cellGiSampleRet;
+    if (cond25)
     {
-        tmp4524 = float4(e.xyz * s.w, s.w);
+        cellGiSampleRet = float4(e.xyz * s.w, s.w);
     }
     else
     {
-        tmp4524 = s;
+        cellGiSampleRet = s;
     }
-    return tmp4524;
+    return cellGiSampleRet;
 }
 
 float3 cellGiE0(float3 P, float3 N)
 {
-    float3 param = P;
-    float3 param_1 = N;
-    float4 tmp4548 = cellGiSample(param, param_1);
-    float4 s = tmp4548;
+    float3 PArg11 = P;
+    float3 NArg7 = N;
+    float4 cellGiSampleRet2 = cellGiSample(PArg11, NArg7);
+    float4 s = cellGiSampleRet2;
     if (cellGiSky && cellDdgiOn)
     {
         return max(s.xyz, 0.0f.xxx);
     }
-    float3 tmp4562;
+    float3 cellGiE0Ret;
     if (s.w > 0.00999999977648258209228515625f)
     {
-        tmp4562 = max(s.xyz / s.w.xxx, 0.0f.xxx);
+        cellGiE0Ret = max(s.xyz / s.w.xxx, 0.0f.xxx);
     }
     else
     {
-        tmp4562 = 0.0f.xxx;
+        cellGiE0Ret = 0.0f.xxx;
     }
-    return tmp4562;
+    return cellGiE0Ret;
 }
 
 float3 cellGiE(float3 P, float3 N)
 {
-    float3 param = P;
-    float3 param_1 = N;
-    float3 tmp4581 = cellGiE0(param, param_1);
-    float3 e = tmp4581;
+    float3 PArg12 = P;
+    float3 NArg8 = N;
+    float3 cellGiE0Ret2 = cellGiE0(PArg12, NArg8);
+    float3 e = cellGiE0Ret2;
+    // lane PRTOFF1: the AO decals are the PRT relight's
     return e;
 }
 
@@ -1722,10 +1734,10 @@ float3 cellAmbGi(float3 amb, float3 gi, float3 P, float3 N)
     }
     if (cellGiAmb == 1)
     {
-        float3 param = P;
-        float3 param_1 = N;
-        float4 tmp5431 = cellGiSample(param, param_1);
-        return amb * (1.0f - clamp(tmp5431.w, 0.0f, 1.0f));
+        float3 PArg13 = P;
+        float3 NArg9 = N;
+        float4 cellGiSampleRet3 = cellGiSample(PArg13, NArg9);
+        return amb * (1.0f - clamp(cellGiSampleRet3.w, 0.0f, 1.0f));
     }
     if (cellGiAmb == 3)
     {
@@ -1737,24 +1749,24 @@ float3 cellAmbGi(float3 amb, float3 gi, float3 P, float3 N)
 // the share of the weather's ambient the grid's sky replaces at P (0: not a sky grid)
 float cellGiSkyK(float3 P, float3 N)
 {
-    bool tmp4586 = !cellDdgiOn;
-    bool tmp4594;
-    if (!tmp4586)
+    bool cond34 = !cellDdgiOn;
+    bool cond33;
+    if (!cond34)
     {
-        tmp4594 = !(cellGiSky && cellDdgiOn);
+        cond33 = !(cellGiSky && cellDdgiOn);
     }
     else
     {
-        tmp4594 = tmp4586;
+        cond33 = cond34;
     }
-    if (tmp4594 || cellInterior)
+    if (or(cond33, cellInterior))   // HLSLFIX2 orfix.py: no short-circuit branch (NV took the wrong side)
     {
         return 0.0f;
     }
-    float3 param = P;
-    float3 param_1 = N;
-    float4 tmp4605 = cellGiSample(param, param_1);
-    return clamp(tmp4605.w, 0.0f, 1.0f);
+    float3 PArg14 = P;
+    float3 NArg10 = N;
+    float4 cellGiSampleRet4 = cellGiSample(PArg14, NArg10);
+    return clamp(cellGiSampleRet4.w, 0.0f, 1.0f);
 }
 
 float3 csmNormalOff(float3 posView, float3 dPx, float3 dPy)
@@ -1762,30 +1774,30 @@ float3 csmNormalOff(float3 posView, float3 dPx, float3 dPy)
     float3 n = cross(dPx, dPy);
     float ln = length(n);
     float3 lv = float3(csmMat[0][0].z, csmMat[0][1].z, csmMat[0][2].z);
-    bool tmp389 = ln <= 9.9999996826552253889678874634872e-21f;
-    bool tmp397;
-    if (!tmp389)
+    bool cond36 = ln <= 9.9999996826552253889678874634872e-21f;
+    bool cond35;
+    if (!cond36)
     {
-        tmp397 = dot(lv, lv) <= 0.0f;
+        cond35 = dot(lv, lv) <= 0.0f;
     }
     else
     {
-        tmp397 = tmp389;
+        cond35 = cond36;
     }
-    if (tmp397)
+    if (cond35)
     {
         return 0.0f.xxx;
     }
-    float3 tmp405;
+    float3 nPick3;
     if (dot(n, posView) > 0.0f)
     {
-        tmp405 = (-n) / ln.xxx;
+        nPick3 = (-n) / ln.xxx;
     }
     else
     {
-        tmp405 = n / ln.xxx;
+        nPick3 = n / ln.xxx;
     }
-    n = tmp405;
+    n = nPick3;
     float c = dot(n, normalize(lv));
     return n * ((ussCsmStable.w * sqrt(max(1.0f - (c * c), 0.0f))) / csmParams.x);
 }
@@ -1808,16 +1820,16 @@ void csmSelect(float3 posView, out int a, out int b, out float t)
         bound = csmSplitOffset.y;
     }
     float x = clamp((dv - bound) / csmParams.w, 0.0f, 1.0f);
-    float tmp616;
+    float tPick2;
     if ((csmRed & 1) != 0)
     {
-        tmp616 = step(0.5f, x);
+        tPick2 = step(0.5f, x);
     }
     else
     {
-        tmp616 = smoothstep(0.0f, 1.0f, x);
+        tPick2 = smoothstep(0.0f, 1.0f, x);
     }
-    t = tmp616;
+    t = tPick2;
 }
 
 float3 csmUvd(int i, float3 posView)
@@ -1834,9 +1846,9 @@ float ussIgn(float2 p)
 //! nOff: the normal offset per world unit of this cascade's texel (view space; 0 off)
 float ussVogel(int i, float3 posView, float offsetWorld, float3 dPx, float3 dPy, float3 nOff)
 {
-    int param = i;
-    float3 param_1 = posView + (nOff * ussCsmTexel[i]);
-    float3 q = csmUvd(param, param_1);
+    int iArg4 = i;
+    float3 posViewArg = posView + (nOff * ussCsmTexel[i]);
+    float3 q = csmUvd(iArg4, posViewArg);
     float zRef = q.z - (offsetWorld * csmInvRange[i]);
     float2 rpdb = 0.0f.xx;
     if (ussCsmFilter.w > 0.5f)
@@ -1853,35 +1865,43 @@ float ussVogel(int i, float3 posView, float offsetWorld, float3 dPx, float3 dPy,
     int n = max(int(ussCsmFilter.z), 1);
     if (ussCsmWorld.x > 0.5f)
     {
+        // lane SHADOWPAR1: FO4CS's radius in world units over this cascade's texel, its taps 32 (r / 3)^2 in 8..48
         R = clamp(ussCsmWorld[i + 1] / max(ussCsmTexel[i], 9.9999999747524270787835121154785e-07f), 0.5f, 16.0f);
         n = int(clamp(floor(((32.0f * (R / 3.0f)) * (R / 3.0f)) + 0.5f), 8.0f, 48.0f));
     }
-    float2 tmp837;
+    float2 rpPick;
     if (ussCsmStable.x > 0.5f)
     {
-        tmp837 = mod(floor(q.xy * (csmParams.z * 4.0f)) + float2(ussCsmCellX[i], ussCsmCellY[i]), 4096.0f.xx);
+        rpPick = mod(floor(q.xy * (csmParams.z * 4.0f)) + float2(ussCsmCellX[i], ussCsmCellY[i]), 4096.0f.xx);
     }
     else
     {
-        tmp837 = gl_FragCoord.xy + (float2(32.66500091552734375f, 11.81499958038330078125f) * ussCsmPhase);
+        rpPick = gl_FragCoord.xy + (float2(32.66500091552734375f, 11.81499958038330078125f) * ussCsmPhase);
     }
-    float2 rp = tmp837;
-    float2 param_2 = rp;
-    float rot = 6.283185482025146484375f * ussIgn(param_2);
+    // lane SHADOWSHIMMER1: the rotation of the absolute light-space lattice cell (4 per texel, wrapped at 4096): the same
+    // for a still world point in every frame and from every camera. Red (x 0): the pixel's, plus the TAA frame's phase
+    float2 rp = rpPick;
+    float2 pArg5 = rp;
+    float rot = 6.283185482025146484375f * ussIgn(pArg5);
     float k = 1.0f / csmParams.z;
     float lim = 2000.0f * csmInvRange[i];
-    float tmp895;
+    float capPick;
     if (ussCsmFilter.w > 1.5f)
     {
-        tmp895 = lim;
+        capPick = lim;
     }
     else
     {
-        tmp895 = (4.0f * ussCsmTexel[i]) * csmInvRange[i];
+        capPick = (4.0f * ussCsmTexel[i]) * csmInvRange[i];
     }
-    float cap = tmp895;
+    // MODULES1 R7 item 9 (bungo b60/b61: "Still the same leak", the sun on a wall panel inside a shadowed alley): on a
+    // wall the sun grazes, the receiver plane's depth slope has no bound, so half of the taps compared 2000 u toward the
+    // sun, past every caster (50 % lit at N.L 0). A tap is now pulled toward the centre until its depth walk is at most
+    // 4 texels of its cascade: it stays on the receiver's plane, near the point. ussCsmFilter.w 2 = the red
+    // WW_SHADOW_RED=walk2000.
+    float cap = capPick;
     float sum = 0.0f;
-    float tmp960;
+    float pullPick;
     for (int t = 0; t < 48; t++)
     {
         if (t >= n)
@@ -1894,15 +1914,15 @@ float ussVogel(int i, float3 posView, float offsetWorld, float3 dPx, float3 dPy,
         float dz = dot(rpdb, o);
         if (ussCsmFilter.w > 1.5f)
         {
-            tmp960 = 1.0f;
+            pullPick = 1.0f;
         }
         else
         {
-            tmp960 = min(1.0f, cap / max(abs(dz), 1.0000000031710768509710513471353e-30f));
+            pullPick = min(1.0f, cap / max(abs(dz), 1.0000000031710768509710513471353e-30f));
         }
-        float pull = tmp960;
-        float4 tmp992 = float4(q.xy + (o * pull), float(i), zRef + clamp(dz * pull, -lim, lim));
-        sum += csmMap.SampleCmp(_csmMap_sampler, tmp992.xyz, tmp992.w);
+        float pull = pullPick;
+        float4 sumPart = float4(q.xy + (o * pull), float(i), zRef + clamp(dz * pull, -lim, lim));
+        sum += csmMap.SampleCmp(_csmMap_sampler, sumPart.xyz, sumPart.w);
     }
     return sum / float(n);
 }
@@ -1910,25 +1930,26 @@ float ussVogel(int i, float3 posView, float offsetWorld, float3 dPx, float3 dPy,
 //! the 16-tap Poisson filter, radius 3 texels
 float csmFiltered(int i, float3 posView, float offsetWorld)
 {
-    int param = i;
-    float3 param_1 = posView + (csmNOff * ussCsmTexel[i]);
-    float3 q = csmUvd(param, param_1);
-    float tmp465;
+    int iArg5 = i;
+    float3 posViewArg2 = posView + (csmNOff * ussCsmTexel[i]);
+    // lane SHADOWSHIMMER2: as csmHard
+    float3 q = csmUvd(iArg5, posViewArg2);
+    float zRefPick;
     if (ussCsmStable.w != 0.0f)
     {
-        tmp465 = ussCsmBias[i];
+        zRefPick = ussCsmBias[i];
     }
     else
     {
-        tmp465 = offsetWorld;
+        zRefPick = offsetWorld;
     }
-    float zRef = q.z - (tmp465 * csmInvRange[i]);
+    float zRef = q.z - (zRefPick * csmInvRange[i]);
     float k = 6.0f / csmParams.z;
     float sum = 0.0f;
     for (int t = 0; t < 16; t++)
     {
-        float4 tmp569 = float4(q.xy + ((tmp552[t] - 0.5f.xx) * k), float(i), zRef);
-        sum += csmMap.SampleCmp(_csmMap_sampler, tmp569.xyz, tmp569.w);
+        float4 sumPart2 = float4(q.xy + ((csmPoisson[t] - 0.5f.xx) * k), float(i), zRef);
+        sum += csmMap.SampleCmp(_csmMap_sampler, sumPart2.xyz, sumPart2.w);
     }
     return sum / 16.0f;
 }
@@ -1946,100 +1967,102 @@ float ussCascades(float3 posView, float3 dPx, float3 dPy, out float w)
     {
         return 1.0f;
     }
-    float3 param = posView;
-    int param_1;
-    int param_2;
-    float param_3;
-    csmSelect(param, param_1, param_2, param_3);
-    int a = param_1;
-    int b = param_2;
-    float t = param_3;
+    float3 posViewArg7 = posView;
+    int aArg17;
+    int bArg17;
+    float tArg;
+    csmSelect(posViewArg7, aArg17, bArg17, tArg);
+    int a = aArg17;
+    int b = bArg17;
+    float t = tArg;
     float sA = 1.0f;
     float sB = 1.0f;
     if (ussCsmFilter.x > 0.5f)
     {
+        // lane SHADOWSHIMMER1: the normal offset, ussCsmStable.y texels of the cascade x sin(the light's angle to the
+        // surface), along the geometric normal (the position's derivatives) turned toward the eye; once for both cascades
         float3 nOff = 0.0f.xxx;
         if (ussCsmStable.y > 0.0f)
         {
             float3 n = cross(dPx, dPy);
             float ln = length(n);
             float3 lv = float3(csmMat[a][0].z, csmMat[a][1].z, csmMat[a][2].z);
-            bool tmp1073 = ln > 9.9999996826552253889678874634872e-21f;
-            bool tmp1080;
-            if (tmp1073)
+            bool cond38 = ln > 9.9999996826552253889678874634872e-21f;
+            bool cond37;
+            if (cond38)
             {
-                tmp1080 = dot(lv, lv) > 0.0f;
+                cond37 = dot(lv, lv) > 0.0f;
             }
             else
             {
-                tmp1080 = tmp1073;
+                cond37 = cond38;
             }
-            if (tmp1080)
+            if (cond37)
             {
-                float3 tmp1087;
+                float3 nPick4;
                 if (dot(n, posView) > 0.0f)
                 {
-                    tmp1087 = (-n) / ln.xxx;
+                    nPick4 = (-n) / ln.xxx;
                 }
                 else
                 {
-                    tmp1087 = n / ln.xxx;
+                    nPick4 = n / ln.xxx;
                 }
-                n = tmp1087;
+                n = nPick4;
                 float c = dot(n, normalize(lv));
                 nOff = n * ((ussCsmStable.y * sqrt(max(1.0f - (c * c), 0.0f))) / csmParams.x);
             }
         }
         if (t < 1.0f)
         {
-            int param_4 = a;
-            float3 param_5 = posView;
-            float param_6 = ussCsmBias[a];
-            float3 param_7 = dPx;
-            float3 param_8 = dPy;
-            float3 param_9 = nOff;
-            sA = ussVogel(param_4, param_5, param_6, param_7, param_8, param_9);
+            int iArg9 = a;
+            float3 posViewArg6 = posView;
+            float offsetWorldArg4 = ussCsmBias[a];
+            float3 dPxArg2 = dPx;
+            float3 dPyArg2 = dPy;
+            float3 nOffArg2 = nOff;
+            sA = ussVogel(iArg9, posViewArg6, offsetWorldArg4, dPxArg2, dPyArg2, nOffArg2);
         }
         if (t > 0.0f)
         {
-            int param_10 = b;
-            float3 param_11 = posView;
-            float param_12 = ussCsmBias[b];
-            float3 param_13 = dPx;
-            float3 param_14 = dPy;
-            float3 param_15 = nOff;
-            sB = ussVogel(param_10, param_11, param_12, param_13, param_14, param_15);
+            int iArg8 = b;
+            float3 posViewArg5 = posView;
+            float offsetWorldArg3 = ussCsmBias[b];
+            float3 dPxArg = dPx;
+            float3 dPyArg = dPy;
+            float3 nOffArg = nOff;
+            sB = ussVogel(iArg8, posViewArg5, offsetWorldArg3, dPxArg, dPyArg, nOffArg);
         }
     }
     else
     {
         if (t < 1.0f)
         {
-            int param_16 = a;
-            float3 param_17 = posView;
-            float param_18 = csmSplitOffset.z;
-            sA = csmFiltered(param_16, param_17, param_18);
+            int iArg7 = a;
+            float3 posViewArg4 = posView;
+            float offsetWorldArg2 = csmSplitOffset.z;
+            sA = csmFiltered(iArg7, posViewArg4, offsetWorldArg2);
         }
         if (t > 0.0f)
         {
-            int param_19 = b;
-            float3 param_20 = posView;
-            float param_21 = csmSplitOffset.w;
-            sB = csmFiltered(param_19, param_20, param_21);
+            int iArg6 = b;
+            float3 posViewArg3 = posView;
+            float offsetWorldArg = csmSplitOffset.w;
+            sB = csmFiltered(iArg6, posViewArg3, offsetWorldArg);
         }
     }
     float s = clamp(((dot(posView, posView) * csmParams.x) * csmParams.x) / (csmParams.y * csmParams.y), 0.0f, 1.0f);
     float s2 = s * s;
-    float tmp1208;
+    float wPick3;
     if ((csmRed & 2) != 0)
     {
-        tmp1208 = 1.0f;
+        wPick3 = 1.0f;
     }
     else
     {
-        tmp1208 = 1.0f - (s2 * s2);
+        wPick3 = 1.0f - (s2 * s2);
     }
-    w = tmp1208;
+    w = wPick3;
     return lerp(sA, sB, t);
 }
 
@@ -2048,17 +2071,17 @@ float ussSlope(float3 dPx, float3 dPy)
 {
     float3 n = cross(dPx, dPy);
     float l = length(n);
-    bool tmp2152 = l < 9.9999996826552253889678874634872e-21f;
-    bool tmp2159;
-    if (!tmp2152)
+    bool cond40 = l < 9.9999996826552253889678874634872e-21f;
+    bool cond39;
+    if (!cond40)
     {
-        tmp2159 = ussTerrBias.x < 0.5f;
+        cond39 = ussTerrBias.x < 0.5f;
     }
     else
     {
-        tmp2159 = tmp2152;
+        cond39 = cond40;
     }
-    if (tmp2159)
+    if (cond39)
     {
         return 0.0f;
     }
@@ -2078,37 +2101,37 @@ float2 ussTerrExtraUv(inout float2 uv, float off)
 float4 ussTerrHeights(float2 uv)
 {
     float d = 1.0f / ussTerrSize.x;
-    float2 param = uv;
-    float param_1 = ussTerrExtra.x;
-    float2 tmp1551 = ussTerrExtraUv(param, param_1);
-    float c = ussTerrMap.Sample(_ussTerrMap_sampler, tmp1551).x;
-    float2 param_2 = uv + float2(d, 0.0f);
-    float param_3 = ussTerrExtra.x;
-    float2 tmp1564 = ussTerrExtraUv(param_2, param_3);
-    float hE = ussTerrMap.Sample(_ussTerrMap_sampler, tmp1564).x;
-    float2 param_4 = uv - float2(d, 0.0f);
-    float param_5 = ussTerrExtra.x;
-    float2 tmp1577 = ussTerrExtraUv(param_4, param_5);
-    float hW = ussTerrMap.Sample(_ussTerrMap_sampler, tmp1577).x;
-    float2 param_6 = uv + float2(0.0f, d);
-    float param_7 = ussTerrExtra.x;
-    float2 tmp1590 = ussTerrExtraUv(param_6, param_7);
-    float hN = ussTerrMap.Sample(_ussTerrMap_sampler, tmp1590).x;
-    float2 param_8 = uv - float2(0.0f, d);
-    float param_9 = ussTerrExtra.x;
-    float2 tmp1603 = ussTerrExtraUv(param_8, param_9);
-    float hS = ussTerrMap.Sample(_ussTerrMap_sampler, tmp1603).x;
-    bool tmp1607 = c <= 0.0f;
-    bool tmp1619;
-    if (!tmp1607)
+    float2 uvArg5 = uv;
+    float offArg5 = ussTerrExtra.x;
+    float2 ussTerrExtraUvRet5 = ussTerrExtraUv(uvArg5, offArg5);
+    float c = ussTerrMap.Sample(_ussTerrMap_sampler, ussTerrExtraUvRet5).x;
+    float2 uvArg4 = uv + float2(d, 0.0f);
+    float offArg4 = ussTerrExtra.x;
+    float2 ussTerrExtraUvRet4 = ussTerrExtraUv(uvArg4, offArg4);
+    float hE = ussTerrMap.Sample(_ussTerrMap_sampler, ussTerrExtraUvRet4).x;
+    float2 uvArg3 = uv - float2(d, 0.0f);
+    float offArg3 = ussTerrExtra.x;
+    float2 ussTerrExtraUvRet3 = ussTerrExtraUv(uvArg3, offArg3);
+    float hW = ussTerrMap.Sample(_ussTerrMap_sampler, ussTerrExtraUvRet3).x;
+    float2 uvArg2 = uv + float2(0.0f, d);
+    float offArg2 = ussTerrExtra.x;
+    float2 ussTerrExtraUvRet2 = ussTerrExtraUv(uvArg2, offArg2);
+    float hN = ussTerrMap.Sample(_ussTerrMap_sampler, ussTerrExtraUvRet2).x;
+    float2 uvArg = uv - float2(0.0f, d);
+    float offArg = ussTerrExtra.x;
+    float2 ussTerrExtraUvRet = ussTerrExtraUv(uvArg, offArg);
+    float hS = ussTerrMap.Sample(_ussTerrMap_sampler, ussTerrExtraUvRet).x;
+    bool cond42 = c <= 0.0f;
+    bool cond41;
+    if (!cond42)
     {
-        tmp1619 = min(min(hE, hW), min(hN, hS)) <= 0.0f;
+        cond41 = min(min(hE, hW), min(hN, hS)) <= 0.0f;
     }
     else
     {
-        tmp1619 = tmp1607;
+        cond41 = cond42;
     }
-    if (tmp1619)
+    if (cond41)
     {
         return float4(ussTerrRange.x + (c * ussTerrRange.y), 0.0f, 0.0f, float(c > 0.0f));
     }
@@ -2121,41 +2144,43 @@ float4 ussTerrHeights(float2 uv)
 //! one tier's uv into the shared texture (lane SHADOWPAR1: the near tier sits under the far map)
 float2 ussTerrAtlasUv(inout float2 uv, int tier)
 {
-    bool tmp1227 = ussTerrSize.y <= 0.0f;
-    bool tmp1234;
-    if (tmp1227)
+    bool cond44 = ussTerrSize.y <= 0.0f;
+    bool cond43;
+    if (cond44)
     {
-        tmp1234 = ussTerrExtra.z <= 0.0f;
+        cond43 = ussTerrExtra.z <= 0.0f;
     }
     else
     {
-        tmp1234 = tmp1227;
+        cond43 = cond44;
     }
-    if (tmp1234)
+    if (cond43)
     {
+        // one tier: the map as TERRSHADOW1 made it
         return uv;
     }
-    float tmp1242;
+    float nPick5;
     if (tier == 0)
     {
-        tmp1242 = ussTerrSize.x;
+        nPick5 = ussTerrSize.x;
     }
     else
     {
-        tmp1242 = ussTerrSize.y;
+        nPick5 = ussTerrSize.y;
     }
-    float n = tmp1242;
+    float n = nPick5;
+    // no bleed across the tiers' seam
     uv = clamp(uv, (0.5f / n).xx, (1.0f - (0.5f / n)).xx);
-    float2 tmp1262;
+    float2 ussTerrAtlasUvRet;
     if (tier == 0)
     {
-        tmp1262 = float2(uv.x, uv.y * ussTerrAtlas.x);
+        ussTerrAtlasUvRet = float2(uv.x, uv.y * ussTerrAtlas.x);
     }
     else
     {
-        tmp1262 = float2(uv.x * ussTerrAtlas.y, ussTerrAtlas.z + (uv.y * ussTerrAtlas.w));
+        ussTerrAtlasUvRet = float2(uv.x * ussTerrAtlas.y, ussTerrAtlas.z + (uv.y * ussTerrAtlas.w));
     }
-    return tmp1262;
+    return ussTerrAtlasUvRet;
 }
 
 //! the visibility at height z from the limb heights rg (0 = no shadow height: lit)
@@ -2163,118 +2188,122 @@ float ussTerrVis(float2 rg, float z)
 {
     float lo = ussTerrRange.x + (rg.x * ussTerrRange.y);
     float hi = ussTerrRange.x + (rg.y * ussTerrRange.y);
-    float tmp1314;
+    float ussTerrVisRet;
     if (rg.x <= 0.0f)
     {
-        tmp1314 = 1.0f;
+        ussTerrVisRet = 1.0f;
     }
     else
     {
-        float tmp1323;
+        float ussTerrVisPick;
         if ((lo - hi) > 0.001000000047497451305389404296875f)
         {
-            tmp1323 = clamp((z - hi) / (lo - hi), 0.0f, 1.0f);
+            ussTerrVisPick = clamp((z - hi) / (lo - hi), 0.0f, 1.0f);
         }
         else
         {
-            tmp1323 = float(z >= lo);
+            ussTerrVisPick = float(z >= lo);
         }
-        tmp1314 = tmp1323;
+        ussTerrVisRet = ussTerrVisPick;
     }
-    return tmp1314;
+    return ussTerrVisRet;
 }
 
 float ussTerrTier(float2 uv, int tier, float z, float texel, bool pen, float2 wxy)
 {
-    float2 param = uv;
-    int param_1 = tier;
-    float2 tmp1353 = ussTerrAtlasUv(param, param_1);
-    float2 rg = ussTerrMap.Sample(_ussTerrMap_sampler, tmp1353).xy;
-    float2 param_2 = rg;
-    float param_3 = z;
-    float c = ussTerrVis(param_2, param_3);
-    bool tmp1363 = !pen;
-    bool tmp1371;
-    if (!tmp1363)
+    float2 uvArg7 = uv;
+    int tierArg2 = tier;
+    float2 ussTerrAtlasUvRet3 = ussTerrAtlasUv(uvArg7, tierArg2);
+    float2 rg = ussTerrMap.Sample(_ussTerrMap_sampler, ussTerrAtlasUvRet3).xy;
+    float2 rgArg2 = rg;
+    float zArg2 = z;
+    float c = ussTerrVis(rgArg2, zArg2);
+    bool cond47 = !pen;
+    bool cond46;
+    if (!cond47)
     {
-        tmp1371 = ussTerrPen.x < 0.5f;
+        cond46 = ussTerrPen.x < 0.5f;
     }
     else
     {
-        tmp1371 = tmp1363;
+        cond46 = cond47;
     }
-    bool tmp1378;
-    if (!tmp1371)
+    bool cond45;
+    if (!cond46)
     {
-        tmp1378 = rg.x <= 0.0f;
+        cond45 = rg.x <= 0.0f;
     }
     else
     {
-        tmp1378 = tmp1371;
+        cond45 = cond46;
     }
-    if (tmp1378)
+    if (cond45)
     {
         return c;
     }
     float dist = (max(rg.x - rg.y, 0.0f) * ussTerrRange.y) / max(ussTerrPen.w - ussTerrPen.z, 9.9999999747524270787835121154785e-07f);
+    // tan(0.265 deg)
     float r = min((dist * 0.0046251001767814159393310546875f) / max(texel, 9.9999999747524270787835121154785e-07f), 16.0f);
     if (r <= 0.5f)
     {
         return c;
     }
-    float tmp1417;
+    float nPick6;
     if (tier == 0)
     {
-        tmp1417 = ussTerrSize.x;
+        nPick6 = ussTerrSize.x;
     }
     else
     {
-        tmp1417 = ussTerrSize.y;
+        nPick6 = ussTerrSize.y;
     }
-    float n = tmp1417;
+    float n = nPick6;
     if (n <= 0.0f)
     {
+        // one tier: N = span / texel
         n = 1.0f / max(ussTerrXform.x * texel, 9.9999999600419720025001879548654e-13f);
     }
-    float2 tmp1442;
+    float2 pPick;
     if (ussCsmStable.z > 0.5f)
     {
-        tmp1442 = gl_FragCoord.xy;
+        pPick = gl_FragCoord.xy;
     }
     else
     {
-        tmp1442 = mod(floor(wxy * (4.0f / max(texel, 9.9999999747524270787835121154785e-07f))), 4096.0f.xx);
+        pPick = mod(floor(wxy * (4.0f / max(texel, 9.9999999747524270787835121154785e-07f))), 4096.0f.xx);
     }
-    float2 param_4 = tmp1442;
-    float rot = 6.283185482025146484375f * ussIgn(param_4);
+    float2 pArg6 = pPick;
+    // lane SHADOWSHIMMER2 (TERRPENSTABLE): the rotation of the world lattice cell (4 per tier texel, wrapped at 4096), the
+    // cascades' hash: a still world point keeps it in every frame and from every camera. Red (z 1): the screen pixel's
+    float rot = 6.283185482025146484375f * ussIgn(pArg6);
     float sum = c;
     for (int t = 0; t < 8; t++)
     {
         float th = (float(t) * 2.3999631404876708984375f) + rot;
         float2 o = float2(cos(th), sin(th)) * ((sqrt((float(t) + 0.5f) / 8.0f) * r) / n);
-        float2 param_5 = clamp(uv + o, 0.0f.xx, 1.0f.xx);
-        int param_6 = tier;
-        float2 tmp1501 = ussTerrAtlasUv(param_5, param_6);
-        float2 param_7 = ussTerrMap.Sample(_ussTerrMap_sampler, tmp1501).xy;
-        float param_8 = z;
-        sum += ussTerrVis(param_7, param_8);
+        float2 uvArg6 = clamp(uv + o, 0.0f.xx, 1.0f.xx);
+        int tierArg = tier;
+        float2 ussTerrAtlasUvRet2 = ussTerrAtlasUv(uvArg6, tierArg);
+        float2 rgArg = ussTerrMap.Sample(_ussTerrMap_sampler, ussTerrAtlasUvRet2).xy;
+        float zArg = z;
+        sum += ussTerrVis(rgArg, zArg);
     }
     return sum / 9.0f;
 }
 
 float ussTerrSelfWeight(float2 uv, float wz, float4 h)
 {
-    float2 param = uv;
-    int param_1 = 0;
-    float2 tmp1693 = ussTerrAtlasUv(param, param_1);
-    float2 rg = ussTerrMap.Sample(_ussTerrMap_sampler, tmp1693).xy;
-    float2 param_2 = uv;
-    float param_3 = ussTerrExtra.x;
-    float2 tmp1703 = ussTerrExtraUv(param_2, param_3);
-    float cast = ussTerrMap.Sample(_ussTerrMap_sampler, tmp1703).y;
+    float2 uvArg9 = uv;
+    int tierArg3 = 0;
+    float2 ussTerrAtlasUvRet4 = ussTerrAtlasUv(uvArg9, tierArg3);
+    float2 rg = ussTerrMap.Sample(_ussTerrMap_sampler, ussTerrAtlasUvRet4).xy;
+    float2 uvArg8 = uv;
+    float offArg6 = ussTerrExtra.x;
+    float2 ussTerrExtraUvRet6 = ussTerrExtraUv(uvArg8, offArg6);
+    float cast = ussTerrMap.Sample(_ussTerrMap_sampler, ussTerrExtraUvRet6).y;
     bool wwh3 = (rg.x <= 0.0f);
     bool wwh4 = (cast <= 0.0f);
-    if (wwh3 || wwh4)
+    if (or(wwh3, wwh4))   // HLSLFIX2 orfix.py: no short-circuit branch (NV took the wrong side)
     {
         return 1.0f;
     }
@@ -2282,21 +2311,23 @@ float ussTerrSelfWeight(float2 uv, float wz, float4 h)
     float hc = ussTerrRange.x + (cast * ussTerrRange.y);
     float tanE = max(ussTerrPen.z, 9.9999997473787516355514526367188e-05f);
     float cosE = rsqrt(1.0f + (tanE * tanE));
+    // the gap to the first hit along the light: the caster's distance (s = hc - d tanE) over cos(elevation)
     float delta = max(hc - s, 0.0f) / (tanE * cosE);
+    // the stored depth's change per texel here
     float grad = (ussTerrPen.y * cosE) * (1.0f + (h.z * tanE));
     float margin = (4.0f * ussTerrSelf.w) + min(1.5f * grad, ussTerrSelf.z);
     float fade = clamp((delta - margin) / max(grad, 8.0f * ussTerrSelf.w), 0.0f, 1.0f);
     float lo = ussTerrSelf.y;
-    float tmp1790;
+    float ussTerrSelfWeightRet;
     if (lo > 0.0f)
     {
-        tmp1790 = fade * smoothstep(0.0f, 1.0f, ((hc - wz) - lo) / lo);
+        ussTerrSelfWeightRet = fade * smoothstep(0.0f, 1.0f, ((hc - wz) - lo) / lo);
     }
     else
     {
-        tmp1790 = fade;
+        ussTerrSelfWeightRet = fade;
     }
-    return tmp1790;
+    return ussTerrSelfWeightRet;
 }
 
 //! (C) the terrain's shadow-height map; inMap = 1 inside it. grad: the receiver's slope (rise over run, the slope
@@ -2310,163 +2341,170 @@ float ussTerrain(float3 posView, out float inMap, inout float grad, bool pen)
     }
     float3 wp = mul(float4(posView, 1.0f), ussWorldFromView).xyz;
     float2 uv = float2((wp.x * ussTerrXform.x) + ussTerrXform.y, (wp.y * ussTerrXform.z) + ussTerrXform.w);
-    bool tmp1846 = any(bool2(uv.x < 0.0f.xx.x, uv.y < 0.0f.xx.y));
-    bool tmp1853;
-    if (!tmp1846)
+    bool cond54 = any(bool2(uv.x < 0.0f.xx.x, uv.y < 0.0f.xx.y));
+    bool cond53;
+    if (!cond54)
     {
-        tmp1853 = any(bool2(uv.x > 1.0f.xx.x, uv.y > 1.0f.xx.y));
+        cond53 = any(bool2(uv.x > 1.0f.xx.x, uv.y > 1.0f.xx.y));
     }
     else
     {
-        tmp1853 = tmp1846;
+        cond53 = cond54;
     }
-    if (tmp1853)
+    if (cond53)
     {
         return 1.0f;
     }
     inMap = 1.0f;
+    // lane FAR5: bias.x 2 = FO4CS's LocalGradient from the terrain-only heights instead of the screen slope; 3 = 0.
+    // Surface receivers only (pen): the air's taps would push the decal/GI-march programs over the instruction limit
     float4 h = 0.0f.xxxx;
-    bool tmp1872;
+    bool cond52;
     if (pen)
     {
-        bool tmp1864 = ussTerrBias.x > 1.5f;
-        bool tmp1871;
-        if (!tmp1864)
+        bool cond51 = ussTerrBias.x > 1.5f;
+        bool condPick2;
+        if (!cond51)
         {
-            tmp1871 = ussTerrExtra.y > 0.0f;
+            condPick2 = ussTerrExtra.y > 0.0f;
         }
         else
         {
-            tmp1871 = tmp1864;
+            condPick2 = cond51;
         }
-        tmp1872 = tmp1871;
+        cond52 = condPick2;
     }
     else
     {
-        tmp1872 = pen;
+        cond52 = pen;
     }
-    if (tmp1872)
+    if (cond52)
     {
-        float2 param = uv;
-        h = ussTerrHeights(param);
+        float2 uvArg15 = uv;
+        h = ussTerrHeights(uvArg15);
     }
-    bool tmp1884;
+    bool cond50;
     if (pen)
     {
-        tmp1884 = ussTerrBias.x > 1.5f;
+        cond50 = ussTerrBias.x > 1.5f;
     }
     else
     {
-        tmp1884 = pen;
+        cond50 = pen;
     }
-    if (tmp1884)
+    if (cond50)
     {
-        float tmp1891;
+        float gradPick;
         if (ussTerrBias.x > 2.5f)
         {
-            tmp1891 = 0.0f;
+            gradPick = 0.0f;
         }
         else
         {
-            tmp1891 = h.z;
+            gradPick = h.z;
         }
-        grad = tmp1891;
+        grad = gradPick;
     }
-    float tmp1904;
+    float zPick;
     if (ussTerrBias.x > 0.5f)
     {
-        tmp1904 = (12.0f * (1.0f + clamp(grad, 0.0f, 4.0f))) / ussTerrBias.y;
+        zPick = (12.0f * (1.0f + clamp(grad, 0.0f, 4.0f))) / ussTerrBias.y;
     }
     else
     {
-        tmp1904 = ussTerrRange.z;
+        zPick = ussTerrRange.z;
     }
-    float z = wp.z + tmp1904;
-    float2 param_1 = uv;
-    int param_2 = 0;
-    float param_3 = z;
-    float param_4 = ussTerrPen.y;
-    bool param_5 = pen;
-    float2 param_6 = wp.xy;
-    float vis = ussTerrTier(param_1, param_2, param_3, param_4, param_5, param_6);
+    // lane SHADOWPAR1: FO4CS's bias 12 (1 + slope) / sin(elevation); else TERRSHADOW1's 0.05 T + 4
+    float z = wp.z + zPick;
+    float2 uvArg14 = uv;
+    int tierArg5 = 0;
+    float zArg6 = z;
+    float texelArg2 = ussTerrPen.y;
+    bool penArg2 = pen;
+    float2 wxyArg2 = wp.xy;
+    float vis = ussTerrTier(uvArg14, tierArg5, zArg6, texelArg2, penArg2, wxyArg2);
     if (ussTerrSize.y > 0.0f)
     {
+        // the near tier, faded in over 128 of its texels from its window's edge
         float2 un = float2((wp.x * ussTerrNearXform.x) + ussTerrNearXform.y, (wp.y * ussTerrNearXform.z) + ussTerrNearXform.w);
         float2 en = (min(un, 1.0f.xx - un) * ussTerrSize.y) / 128.0f.xx;
         float w = smoothstep(0.0f, 1.0f, clamp(min(en.x, en.y), 0.0f, 1.0f));
         if (w > 0.0f)
         {
-            float2 param_7 = un;
-            int param_8 = 1;
-            float param_9 = z;
-            float param_10 = ussTerrBias.w;
-            bool param_11 = pen;
-            float2 param_12 = wp.xy;
-            vis = lerp(vis, ussTerrTier(param_7, param_8, param_9, param_10, param_11, param_12), w);
+            float2 uvArg13 = un;
+            int tierArg4 = 1;
+            float zArg5 = z;
+            float texelArg = ussTerrBias.w;
+            bool penArg = pen;
+            float2 wxyArg = wp.xy;
+            vis = lerp(vis, ussTerrTier(uvArg13, tierArg4, zArg5, texelArg, penArg, wxyArg), w);
         }
     }
     if (ussTerrExtra.y > 0.0f)
     {
-        bool tmp2007 = h.w > 0.0f;
-        bool tmp2013;
-        if (tmp2007)
+        bool cond49 = h.w > 0.0f;
+        bool cond48;
+        if (cond49)
         {
-            tmp2013 = ussTerrSelf.x > 0.5f;
+            cond48 = ussTerrSelf.x > 0.5f;
         }
         else
         {
-            tmp2013 = tmp2007;
+            cond48 = cond49;
         }
-        if (tmp2013)
+        if (cond48)
         {
-            float2 param_13 = uv;
-            float param_14 = ussTerrExtra.y;
-            float2 tmp2022 = ussTerrExtraUv(param_13, param_14);
-            float2 param_15 = ussTerrMap.Sample(_ussTerrMap_sampler, tmp2022).xy;
-            float param_16 = z;
-            float2 param_17 = uv;
-            float param_18 = wp.z;
-            float4 param_19 = h;
-            vis = min(ussTerrVis(param_15, param_16), lerp(1.0f, vis, ussTerrSelfWeight(param_17, param_18, param_19)));
+            float2 uvArg12 = uv;
+            float offArg8 = ussTerrExtra.y;
+            float2 ussTerrExtraUvRet8 = ussTerrExtraUv(uvArg12, offArg8);
+            float2 rgArg4 = ussTerrMap.Sample(_ussTerrMap_sampler, ussTerrExtraUvRet8).xy;
+            float zArg4 = z;
+            float2 uvArg11 = uv;
+            float wzArg = wp.z;
+            float4 hArg = h;
+            // lane FAR6: FO4CS composes its terrain sweep and the self-tested LOD term by min()
+            vis = min(ussTerrVis(rgArg4, zArg4), lerp(1.0f, vis, ussTerrSelfWeight(uvArg11, wzArg, hArg)));
         }
         else
         {
             if (h.w > 0.0f)
             {
-                float tmp2050;
+                float mPick;
                 if (ussTerrExtra.w < 0.0f)
                 {
-                    tmp2050 = 1.0f;
+                    mPick = 1.0f;
                 }
                 else
                 {
-                    tmp2050 = smoothstep(0.75f * ussTerrExtra.w, 1.25f * ussTerrExtra.w, (wp.z - h.x) - min(h.y, 4.0f * ussTerrPen.y));
+                    mPick = smoothstep(0.75f * ussTerrExtra.w, 1.25f * ussTerrExtra.w, (wp.z - h.x) - min(h.y, 4.0f * ussTerrPen.y));
                 }
-                float m = tmp2050;
+                float m = mPick;
                 if (m > 0.0f)
                 {
-                    float2 param_20 = uv;
-                    float param_21 = ussTerrExtra.y;
-                    float2 tmp2087 = ussTerrExtraUv(param_20, param_21);
-                    float2 param_22 = ussTerrMap.Sample(_ussTerrMap_sampler, tmp2087).xy;
-                    float param_23 = z;
-                    vis = lerp(vis, ussTerrVis(param_22, param_23), m);
+                    float2 uvArg10 = uv;
+                    float offArg7 = ussTerrExtra.y;
+                    float2 ussTerrExtraUvRet7 = ussTerrExtraUv(uvArg10, offArg7);
+                    float2 rgArg3 = ussTerrMap.Sample(_ussTerrMap_sampler, ussTerrExtraUvRet7).xy;
+                    float zArg3 = z;
+                    vis = lerp(vis, ussTerrVis(rgArg3, zArg3), m);
                 }
             }
         }
     }
+    // MODULES1 M9: w < 0 = a circle around the eye, radius -w (world units), faded over its outer fifth; w > 0 the square's edge
     float2 e = min(uv, 1.0f.xx - uv) / max(ussTerrRange.w, 9.9999999747524270787835121154785e-07f).xx;
-    float tmp2111;
+    float edgeWPick;
     if (ussTerrRange.w < 0.0f)
     {
-        tmp2111 = 1.0f - smoothstep(0.800000011920928955078125f, 1.0f, length(wp.xy - ussWorldFromView[3].xy) / (-ussTerrRange.w));
+        edgeWPick = 1.0f - smoothstep(0.800000011920928955078125f, 1.0f, length(wp.xy - ussWorldFromView[3].xy) / (-ussTerrRange.w));
     }
     else
     {
-        tmp2111 = clamp(min(e.x, e.y), 0.0f, 1.0f);
+        edgeWPick = clamp(min(e.x, e.y), 0.0f, 1.0f);
     }
-    float edgeW = tmp2111;
+    float edgeW = edgeWPick;
     vis = lerp(1.0f, vis, edgeW);
+    // the low sun's fade and the moon's strength (1 when off)
     return lerp(1.0f, vis, ussTerrBias.z);
 }
 
@@ -2483,33 +2521,36 @@ float ussContact()
 //! min( mix( 1, cascades, fade ), terrain, contact ): each producer fails to lit; min never darkens twice
 float ussCompose(float3 posView)
 {
+    // lane TERRSHADOW1: the debug ladder (raw grey, or the weights as numbers)
     float3 dPx = ddx(posView);
     float3 dPy = ddy(posView);
-    float3 param = posView;
-    float3 param_1 = dPx;
-    float3 param_2 = dPy;
-    float param_3;
-    float tmp2226 = ussCascades(param, param_1, param_2, param_3);
-    float w = param_3;
-    float casc = tmp2226;
-    float3 param_4 = dPx;
-    float3 param_5 = dPy;
-    float3 param_6 = posView;
-    float param_8 = ussSlope(param_4, param_5);
-    bool param_9 = true;
-    float param_7;
-    float tmp2241 = ussTerrain(param_6, param_7, param_8, param_9);
-    float inMap = param_7;
-    float terr = tmp2241;
+    float3 posViewArg9 = posView;
+    float3 dPxArg4 = dPx;
+    float3 dPyArg4 = dPy;
+    float wArg;
+    float ussCascadesRet = ussCascades(posViewArg9, dPxArg4, dPyArg4, wArg);
+    float w = wArg;
+    float casc = ussCascadesRet;
+    float3 dPxArg3 = dPx;
+    float3 dPyArg3 = dPy;
+    float3 posViewArg8 = posView;
+    float gradArg = ussSlope(dPxArg3, dPyArg3);
+    bool penArg3 = true;
+    float inMapArg;
+    float ussTerrainRet = ussTerrain(posViewArg8, inMapArg, gradArg, penArg3);
+    float inMap = inMapArg;
+    float terr = ussTerrainRet;
     float con = ussContact();
     if (((ussRed & 1) != 0) && (w > 0.0f))
     {
+        // red terrseam: the terrain only past the cascades' reach
         terr = 1.0f;
     }
     ussLastTerr = terr;
     float c = lerp(1.0f, casc, w);
     if ((ussRed & 2) != 0)
     {
+        // red mulcompose
         return (c * terr) * con;
     }
     return min(min(c, terr), con);
@@ -2518,40 +2559,40 @@ float ussCompose(float3 posView)
 //! the filtered factor with the seam blend, before the distance fade
 float csmBlended(float3 posView)
 {
-    float3 param = posView;
-    int param_1;
-    int param_2;
-    float param_3;
-    csmSelect(param, param_1, param_2, param_3);
-    int a = param_1;
-    int b = param_2;
-    float t = param_3;
-    float tmp640;
+    float3 posViewArg12 = posView;
+    int aArg18;
+    int bArg18;
+    float tArg2;
+    csmSelect(posViewArg12, aArg18, bArg18, tArg2);
+    int a = aArg18;
+    int b = bArg18;
+    float t = tArg2;
+    float sAPick;
     if (t < 1.0f)
     {
-        int param_4 = a;
-        float3 param_5 = posView;
-        float param_6 = csmSplitOffset.z;
-        tmp640 = csmFiltered(param_4, param_5, param_6);
+        int iArg11 = a;
+        float3 posViewArg11 = posView;
+        float offsetWorldArg6 = csmSplitOffset.z;
+        sAPick = csmFiltered(iArg11, posViewArg11, offsetWorldArg6);
     }
     else
     {
-        tmp640 = 1.0f;
+        sAPick = 1.0f;
     }
-    float sA = tmp640;
-    float tmp656;
+    float sA = sAPick;
+    float sBPick;
     if (t > 0.0f)
     {
-        int param_7 = b;
-        float3 param_8 = posView;
-        float param_9 = csmSplitOffset.w;
-        tmp656 = csmFiltered(param_7, param_8, param_9);
+        int iArg10 = b;
+        float3 posViewArg10 = posView;
+        float offsetWorldArg5 = csmSplitOffset.w;
+        sBPick = csmFiltered(iArg10, posViewArg10, offsetWorldArg5);
     }
     else
     {
-        tmp656 = 1.0f;
+        sBPick = 1.0f;
     }
-    float sB = tmp656;
+    float sB = sBPick;
     return lerp(sA, sB, t);
 }
 
@@ -2566,26 +2607,27 @@ float wwSunShadowGeo(float3 posView)
     {
         return csmForce;	// WW_CSM_FORCE: >= 0 replaces the factor (the factor-site wiring test); -1 off
     }
+    // lane SHADOWSHIMMER2 (CSMOFFBIAS): the Off tier's normal offset, before any per-pixel branch (derivatives)
     if (ussCsmStable.w > 0.0f)
     {
-        float3 param = posView;
-        float3 param_1 = ddx(posView);
-        float3 param_2 = ddy(posView);
-        csmNOff = csmNormalOff(param, param_1, param_2);
+        float3 posViewArg15 = posView;
+        float3 dPxArg5 = ddx(posView);
+        float3 dPyArg5 = ddy(posView);
+        csmNOff = csmNormalOff(posViewArg15, dPxArg5, dPyArg5);
     }
     if (ussOn != 0)
     {
-        float3 param_3 = posView;
-        float tmp2374 = ussCompose(param_3);
-        return tmp2374;
+        float3 posViewArg14 = posView;
+        float ussComposeRet = ussCompose(posViewArg14);
+        return ussComposeRet;
     }
     float dv = (-posView.z) * csmParams.x;
     if (dv > (csmParams.y + csmParams.w))
     {
         return 1.0f;
     }
-    float3 param_4 = posView;
-    float sh = csmBlended(param_4);
+    float3 posViewArg13 = posView;
+    float sh = csmBlended(posViewArg13);
     if ((csmRed & 2) == 0)
     {
         float s = clamp(((dot(posView, posView) * csmParams.x) * csmParams.x) / (csmParams.y * csmParams.y), 0.0f, 1.0f);
@@ -2612,10 +2654,10 @@ float ussCloudT(float3 posView)
 //! the sun's shadow factor: the geometry's x the clouds' (lane CLOUD3; x exactly 1 with the row off)
 float wwSunShadow(float3 posView)
 {
-    float3 param = posView;
-    float tmp2437 = wwSunShadowGeo(param);
-    float3 param_1 = posView;
-    return tmp2437 * ussCloudT(param_1);
+    float3 posViewArg17 = posView;
+    float wwSunShadowGeoRet = wwSunShadowGeo(posViewArg17);
+    float3 posViewArg16 = posView;
+    return wwSunShadowGeoRet * ussCloudT(posViewArg16);
 }
 
 void frag_main()
@@ -2647,36 +2689,40 @@ void frag_main()
     cellGiOneRead = false;
     cellGiSpecV = float2(1.0f, 0.0f);
     cellFarIters = 0;
+    // never: the setters ran; it keeps cellOn live (wwCellLightsUniforms returns early without it)
     if (!cellOn)
     {
         fragColor = 0.0f.xxxx;
         return;
     }
     float2 uv = (gl_FragCoord.xy - rpTile.xy) / rpTile.z.xx;
-    float2 param = uv;
-    float3 dir = rpOctDecode(param);
+    float2 uvArg16 = uv;
+    float3 dir = rpOctDecode(uvArg16);
     float4 a = rpAlb.Sample(_rpAlb_sampler, float4(dir, rpLayer));
+    // the sky (or, indoors, the void past the walls); below the horizon the ground (SKYBELOW2)
     if (a.w < 0.5f)
     {
         float3 gs = 0.0f.xxx;
         float gn = 0.0f;
-        bool tmp5719 = (rpSkyBelow != 0) && (!cellInterior);
-        bool tmp5725;
-        if (tmp5719)
+        bool cond58 = (rpSkyBelow != 0) && (!cellInterior);
+        bool cond57;
+        if (cond58)
         {
-            float3 param_1 = dir;
-            tmp5725 = wwSkyBelow(param_1);
+            float3 dArg10 = dir;
+            cond57 = wwSkyBelow(dArg10);
         }
         else
         {
-            tmp5725 = tmp5719;
+            cond57 = cond58;
         }
-        if (tmp5725)
+        if (cond57)
         {
+            // the ground's albedo: this probe's own below-horizon hits
             for (int k = 0; k < 9; k++)
             {
-                int param_2 = k;
-                float4 g = rpAlb.SampleLevel(_rpAlb_sampler, float4(wwSkyBelowTap(param_2), rpLayer), 0.0f);
+                int kArg2 = k;
+                // in a branch: no derivatives
+                float4 g = rpAlb.SampleLevel(_rpAlb_sampler, float4(wwSkyBelowTap(kArg2), rpLayer), 0.0f);
                 if (g.w >= 0.5f)
                 {
                     gs += (g.xyz * g.xyz);
@@ -2684,123 +2730,124 @@ void frag_main()
                 }
             }
         }
-        float3 param_3 = dir;
-        float3 param_4 = rpPos;
-        float3 param_5 = gs;
-        float param_6 = gn;
-        float3 param_7 = float3(0.0f, 0.0f, 1.0f);
-        float3 param_8 = rpPos;
-        float3 param_9 = dir;
-        float3 param_10 = rpAmbient(param_3, param_4);
-        float3 param_11 = wwSkyBelowAlbedo(param_5, param_6);
-        float3 param_12 = rpAmbient(param_7, param_8);
-        bool param_13 = cellInterior;
-        int param_14 = rpSkyBelow;
-        fragColor = float4(wwSkyBelowMiss(param_9, param_10, param_11, param_12, param_13, param_14), 1.0f);
+        float3 NArg17 = dir;
+        float3 PArg21 = rpPos;
+        float3 sumArg = gs;
+        float nArg3 = gn;
+        float3 NArg16 = float3(0.0f, 0.0f, 1.0f);
+        float3 PArg20 = rpPos;
+        float3 dArg9 = dir;
+        float3 skyArg = rpAmbient(NArg17, PArg21);
+        float3 albArg = wwSkyBelowAlbedo(sumArg, nArg3);
+        float3 skyUpArg = rpAmbient(NArg16, PArg20);
+        bool interiorArg = cellInterior;
+        int ruleArg = rpSkyBelow;
+        fragColor = float4(wwSkyBelowMiss(dArg9, skyArg, albArg, skyUpArg, interiorArg, ruleArg), 1.0f);
         return;
     }
     float4 nd = rpNd.Sample(_rpNd_sampler, float4(dir, rpLayer));
     float3 N = normalize(nd.xyz);
+    // a hair off the surface (the shadow lookups' own bias does the rest)
     float3 P = (rpPos + (dir * nd.w)) + (N * 2.0f);
     float3 E = 0.0f.xxx;
     if ((rpRed & 2) == 0)
     {
-        float3 param_18;
-        bool param_19;
+        float3 LArg;
+        bool noSpecArg;
         for (int i = 0; i < cellLightCount; i++)
         {
-            int param_15 = i;
-            float3 param_16 = P;
-            float3 param_17 = N;
-            float3 tmp5846 = cellLightE(param_15, param_16, param_17, param_18, param_19);
-            float3 L = param_18;
-            bool noSpec = param_19;
-            float3 e = tmp5846;
+            int iArg12 = i;
+            float3 PArg19 = P;
+            float3 NArg15 = N;
+            float3 cellLightERet = cellLightE(iArg12, PArg19, NArg15, LArg, noSpecArg);
+            float3 L = LArg;
+            bool noSpec = noSpecArg;
+            float3 e = cellLightERet;
             E += (e * max(dot(N, L), 0.0f));
         }
     }
-    bool tmp5865;
+    bool cond56;
     if (false)
     {
-        tmp5865 = (rpRed & 4) == 0;
+        cond56 = (rpRed & 4) == 0;
     }
     else
     {
-        tmp5865 = false;
+        cond56 = false;
     }
-    float3 tmp5866;
-    if (tmp5865)
+    float3 giPick;
+    if (cond56)
     {
-        float3 param_20 = P;
-        float3 param_21 = N;
-        float3 tmp5873 = cellGiE(param_20, param_21);
-        tmp5866 = tmp5873 * 0.31830990314483642578125f;
+        float3 PArg18 = P;
+        float3 NArg14 = N;
+        float3 cellGiERet = cellGiE(PArg18, NArg14);
+        giPick = cellGiERet * 0.31830990314483642578125f;
     }
     else
     {
-        tmp5866 = 0.0f.xxx;
+        giPick = 0.0f.xxx;
     }
-    float3 gi = tmp5866;
+    float3 gi = giPick;
     E += gi;
-    float3 param_22 = N;
-    float3 param_23 = P;
-    float3 amb = rpAmbient(param_22, param_23);
+    float3 NArg13 = N;
+    float3 PArg17 = P;
+    float3 amb = rpAmbient(NArg13, PArg17);
     if (cellInterior)
     {
         if (cellHasDalc && (cellGiAmb != 0))
         {
-            float3 param_24 = amb;
-            float3 param_25 = gi;
-            float3 param_26 = P;
-            float3 param_27 = N;
-            float3 tmp5904 = cellAmbGi(param_24, param_25, param_26, param_27);
-            amb = tmp5904;
+            float3 ambArg = amb;
+            float3 giArg = gi;
+            float3 PArg16 = P;
+            float3 NArg12 = N;
+            float3 cellAmbGiRet = cellAmbGi(ambArg, giArg, PArg16, NArg12);
+            amb = cellAmbGiRet;
         }
     }
     else
     {
-        float3 param_28 = P;
-        float3 param_29 = N;
-        float tmp5910 = cellGiSkyK(param_28, param_29);
-        amb *= (1.0f - tmp5910);
+        float3 PArg15 = P;
+        float3 NArg11 = N;
+        float cellGiSkyKRet = cellGiSkyK(PArg15, NArg11);
+        amb *= (1.0f - cellGiSkyKRet);
     }
     E += amb;
-    bool tmp5924;
+    bool cond55;
     if (cellHasDir)
     {
-        tmp5924 = (rpRed & 1) == 0;
+        cond55 = (rpRed & 1) == 0;
     }
     else
     {
-        tmp5924 = cellHasDir;
+        cond55 = cellHasDir;
     }
-    if (tmp5924)
+    if (cond55)
     {
         float3 Ld = normalize(cellDirTo);
-        float tmp5933;
+        float visPick;
         if (cellInterior)
         {
-            tmp5933 = 1.0f;
+            visPick = 1.0f;
         }
         else
         {
-            float3 param_30 = mul(float4(P, 1.0f), rpViewFromWorld).xyz;
-            float tmp5947 = wwSunShadow(param_30);
-            tmp5933 = tmp5947;
+            float3 posViewArg18 = mul(float4(P, 1.0f), rpViewFromWorld).xyz;
+            float wwSunShadowRet = wwSunShadow(posViewArg18);
+            visPick = wwSunShadowRet;
         }
-        float vis = tmp5933;
+        float vis = visPick;
         E += ((cellDirColor * max(dot(N, Ld), 0.0f)) * vis);
     }
-    float3 tmp5964;
+    float3 albPick;
     if ((rpRed & 8) != 0)
     {
-        tmp5964 = 1.0f.xxx;
+        albPick = 1.0f.xxx;
     }
     else
     {
-        tmp5964 = a.xyz * a.xyz;
+        albPick = a.xyz * a.xyz;
     }
-    float3 alb = tmp5964;
+    float3 alb = albPick;
     fragColor = float4(max(alb * E, 0.0f.xxx), 1.0f);
 }
 

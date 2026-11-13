@@ -264,8 +264,8 @@ float3 multiScatter(Surface s, float2 dfg)
         return 1.0f.xxx;
     }
     float Ess = max(clamp(dfg.x + dfg.y, 0.0f, 1.0f), 0.0500000007450580596923828125f);
-    Surface param = s;
-    return 1.0f.xxx + (clamp(surfaceF0(param), 0.0f.xxx, 1.0f.xxx) * ((1.0f / Ess) - 1.0f));
+    Surface sArg = s;
+    return 1.0f.xxx + (clamp(surfaceF0(sArg), 0.0f.xxx, 1.0f.xxx) * ((1.0f / Ess) - 1.0f));
 }
 
 float3 dielF0(Surface s)
@@ -279,26 +279,28 @@ float3 dielF90(Surface s)
     {
         return 1.0f.xxx;
     }
-    Surface param = s;
-    return clamp(dielF0(param) * 50.0f, 0.0f.xxx, 1.0f.xxx);
+    Surface sArg2 = s;
+    return clamp(dielF0(sArg2) * 50.0f, 0.0f.xxx, 1.0f.xxx);
 }
 
 // E_spec: the specular lobe's directional albedo, multiscatter included -- the env
 // specular scale and the energy the indirect diffuse gives up
 float3 specAlbedo(Surface s, float2 dfg, float3 ms)
 {
-    float3 tmp4943;
+    float3 dielPick;
     if ((r3Red & 16) != 0)
     {
-        tmp4943 = ((s.f0d * dfg.x) + dfg.y.xxx) * s.weight;
+        dielPick = ((s.f0d * dfg.x) + dfg.y.xxx) * s.weight;
     }
     else
     {
-        Surface param = s;
-        Surface param_1 = s;
-        tmp4943 = (dielF0(param) * dfg.x) + (dielF90(param_1) * dfg.y);
+        Surface sArg4 = s;
+        Surface sArg3 = s;
+        dielPick = (dielF0(sArg4) * dfg.x) + (dielF90(sArg3) * dfg.y);
     }
-    float3 diel = tmp4943;
+    // the split sum of Schlick( F0, F90 ) is F0 A + F90 B
+    float3 diel = dielPick;
+    // the editor's F82 split-sum: B x tint
     float3 metl = ((s.base * dfg.x) + (s.tint * dfg.y)) * s.weight;
     return lerp(diel, metl, s.metal.xxx) * ms;
 }
@@ -311,20 +313,20 @@ float pow5(float x)
 
 float3 fresnelSchlick(float c, float3 F0)
 {
-    float param = clamp(1.0f - c, 0.0f, 1.0f);
-    return F0 + ((1.0f.xxx - F0) * pow5(param));
+    float xArg = clamp(1.0f - c, 0.0f, 1.0f);
+    return F0 + ((1.0f.xxx - F0) * pow5(xArg));
 }
 
 // OpenPBR F82 conductor Fresnel (the editor's, materialpreviewwidget.cpp:1789):
 // Schlick bent so the 82-degree reflectance is tint x Schlick(82); tint 1 = Schlick.
 float3 fresnelF82(float mu, float3 f0, float3 tint)
 {
-    float param = mu;
-    float3 param_1 = f0;
-    float3 fs = fresnelSchlick(param, param_1);
-    float param_2 = 0.14285714924335479736328125f;
-    float3 param_3 = f0;
-    float3 fsb = fresnelSchlick(param_2, param_3);
+    float cArg2 = mu;
+    float3 F0Arg2 = f0;
+    float3 fs = fresnelSchlick(cArg2, F0Arg2);
+    float cArg = 0.14285714924335479736328125f;
+    float3 F0Arg = f0;
+    float3 fsb = fresnelSchlick(cArg, F0Arg);
     float3 b = (fsb * (1.0f.xxx - tint)) / 0.0566527806222438812255859375f.xxx;
     return clamp(fs - ((b * mu) * pow(1.0f - mu, 6.0f)), 0.0f.xxx, 1.0f.xxx);
 }
@@ -335,22 +337,22 @@ float3 surfaceF(Surface s, float c)
     float3 fd;
     if ((r3Red & 16) != 0)
     {
-        float param = c;
-        float3 param_1 = s.f0d;
-        fd = fresnelSchlick(param, param_1) * s.weight;
+        float cArg3 = c;
+        float3 F0Arg3 = s.f0d;
+        fd = fresnelSchlick(cArg3, F0Arg3) * s.weight;
     }
     else
     {
-        Surface param_2 = s;
-        float3 F0 = dielF0(param_2);
-        Surface param_3 = s;
-        float param_4 = clamp(1.0f - c, 0.0f, 1.0f);
-        fd = F0 + ((dielF90(param_3) - F0) * pow5(param_4));
+        Surface sArg6 = s;
+        float3 F0 = dielF0(sArg6);
+        Surface sArg5 = s;
+        float xArg2 = clamp(1.0f - c, 0.0f, 1.0f);
+        fd = F0 + ((dielF90(sArg5) - F0) * pow5(xArg2));
     }
-    float param_5 = c;
-    float3 param_6 = s.base;
-    float3 param_7 = s.tint;
-    return lerp(fd, fresnelF82(param_5, param_6, param_7) * s.weight, s.metal.xxx);
+    float muArg = c;
+    float3 f0Arg = s.base;
+    float3 tintArg = s.tint;
+    return lerp(fd, fresnelF82(muArg, f0Arg, tintArg) * s.weight, s.metal.xxx);
 }
 
 // EON directional albedo (Portsmouth-Kutz-Hill 2024 fit; the editor's eonAlbedo)
@@ -380,34 +382,35 @@ void directLightA(Surface s, float3 L, float3 Ls, float rS, float3 V, float3 ms,
     float lambdaV = NoLs * sqrt(((NoV * NoV) * (1.0f - a2)) + a2);
     float lambdaL = NoV * sqrt(((NoLs * NoLs) * (1.0f - a2)) + a2);
     float Vis = 0.5f / max(lambdaV + lambdaL, 9.9999997473787516355514526367188e-05f);
-    Surface param = s;
-    float param_1 = VoH;
-    float3 F = surfaceF(param, param_1);
+    Surface sArg7 = s;
+    float cArg4 = VoH;
+    float3 F = surfaceF(sArg7, cArg4);
     dSpec = ((F * (D_1 * Vis)) * ms) * NoLs;
     float3 rho = s.base * (1.0f - s.metal);
     float3 keep = clamp(1.0f.xxx - F, 0.0f.xxx, 1.0f.xxx);
     if (s.diffRough > 0.0f)
     {
+        // EON (OpenPBR base_diffuse_roughness; the editor's lines 2683-2689)
         float dr = s.diffRough;
         float AF = 1.0f / (1.0f + (0.28786098957061767578125f * dr));
         float sON = dot(L, V) - (NoL * NoV);
-        float tmp5144;
+        float stinvPick;
         if (sON > 0.0f)
         {
-            tmp5144 = sON / max(max(NoL, NoV), 0.001000000047497451305389404296875f);
+            stinvPick = sON / max(max(NoL, NoV), 0.001000000047497451305389404296875f);
         }
         else
         {
-            tmp5144 = sON;
+            stinvPick = sON;
         }
-        float stinv = tmp5144;
+        float stinv = stinvPick;
         float3 fss = ((rho / 3.1415927410125732421875f.xxx) * AF) * (1.0f + (dr * stinv));
-        float param_2 = NoV;
-        float param_3 = dr;
-        float EFo = eonAlbedo(param_2, param_3);
-        float param_4 = NoL;
-        float param_5 = dr;
-        float EFi = eonAlbedo(param_4, param_5);
+        float muArg3 = NoV;
+        float rArg2 = dr;
+        float EFo = eonAlbedo(muArg3, rArg2);
+        float muArg2 = NoL;
+        float rArg = dr;
+        float EFi = eonAlbedo(muArg2, rArg);
         float avgEF = AF * (1.0f + (0.072488002479076385498046875f * dr));
         float3 rhoMs = ((rho * rho) * avgEF) / max(1.0f.xxx - (rho * (1.0f - avgEF)), 0.001000000047497451305389404296875f.xxx);
         float3 fms = (((rhoMs / 3.1415927410125732421875f.xxx) * max(0.00999999977648258209228515625f, 1.0f - EFo)) * max(0.00999999977648258209228515625f, 1.0f - EFi)) / max(0.00999999977648258209228515625f, 1.0f - avgEF).xxx;
@@ -415,10 +418,12 @@ void directLightA(Surface s, float3 L, float3 Ls, float rS, float3 V, float3 ms,
     }
     else
     {
+        // Burley, the game's (FO4CS truepbr_brdf.hlsli:57-66), with the specular energy removed.
+        // Debug "lambert": fd = 1.
         float f90 = 0.5f + (((2.0f * s.rough) * LoH) * LoH);
-        float param_6 = 1.0f - NoL;
-        float param_7 = 1.0f - NoV;
-        float fd = (1.0f + ((f90 - 1.0f) * pow5(param_6))) * (1.0f + ((f90 - 1.0f) * pow5(param_7)));
+        float xArg4 = 1.0f - NoL;
+        float xArg3 = 1.0f - NoV;
+        float fd = (1.0f + ((f90 - 1.0f) * pow5(xArg4))) * (1.0f + ((f90 - 1.0f) * pow5(xArg3)));
         if ((r3Red & 32) != 0)
         {
             fd = 1.0f;
@@ -429,17 +434,17 @@ void directLightA(Surface s, float3 L, float3 Ls, float rS, float3 V, float3 ms,
 
 void directLight(Surface s, float3 L, float3 V, float3 ms, out float3 dDiff, out float3 dSpec)
 {
-    Surface param = s;
-    float3 param_1 = L;
-    float3 param_2 = L;
-    float param_3 = s.rough;
-    float3 param_4 = V;
-    float3 param_5 = ms;
-    float3 param_6;
-    float3 param_7;
-    directLightA(param, param_1, param_2, param_3, param_4, param_5, param_6, param_7);
-    dDiff = param_6;
-    dSpec = param_7;
+    Surface sArg8 = s;
+    float3 LArg = L;
+    float3 LsArg = L;
+    float rSArg = s.rough;
+    float3 VArg = V;
+    float3 msArg = ms;
+    float3 dDiffArg;
+    float3 dSpecArg;
+    directLightA(sArg8, LArg, LsArg, rSArg, VArg, msArg, dDiffArg, dSpecArg);
+    dDiff = dDiffArg;
+    dSpec = dSpecArg;
 }
 
 #define WW_FN_wwAirEnd
@@ -616,48 +621,51 @@ void frag_main()
     ViewDir_norm = normalize(ViewDir);
     btnMatrix_norm = float3x3(float3(normalize(btnMatrix[0])), float3(normalize(btnMatrix[1])), float3(normalize(btnMatrix[2])));
     float2 offset = (texCoord * uvScale) + uvOffset;
+    // --- base color / opacity ---
     float3 base = pbrBaseColor;
     float op = pbrOpacity;
-    int param = 1;
-    if (hasFeature(param))
+    int bitArg13 = 1;
+    if (hasFeature(bitArg13))
     {
         float4 bc = BaseMap.Sample(_BaseMap_sampler, offset);
-        float3 tmp5314;
+        float3 basePick;
         if (baseIsSrgbTex)
         {
-            tmp5314 = bc.xyz;
+            basePick = bc.xyz;
         }
         else
         {
-            float3 param_1 = bc.xyz;
-            tmp5314 = srgbToLinear(param_1);
+            float3 cArg9 = bc.xyz;
+            basePick = srgbToLinear(cArg9);
         }
-        base = tmp5314 * pbrBaseColor;
-        int param_2 = 2048;
-        if (hasFeature(param_2))
+        // decoded as sRGB whatever the DXGI tag says: an sRGB-tagged
+        base = basePick * pbrBaseColor;
+        int bitArg12 = 2048;
+        if (hasFeature(bitArg12))
         {
-            float tmp5335;
+            float opPick;
             if (pbrComposition >= 0)
             {
-                tmp5335 = bc.w;
+                opPick = bc.w;
             }
             else
             {
-                tmp5335 = bc.w * pbrOpacity;
+                opPick = bc.w * pbrOpacity;
             }
-            op = tmp5335;
+            // the editor's baseAlpha replaces (ED:2258)
+            op = opPick;
         }
     }
-    bool tmp5354;
+    bool cond20;
     if (pbrTintEnabled)
     {
-        tmp5354 = (r4Red & 4) == 0;
+        cond20 = (r4Red & 4) == 0;
     }
     else
     {
-        tmp5354 = pbrTintEnabled;
+        cond20 = pbrTintEnabled;
     }
-    if (tmp5354)
+    if (cond20)
     {
         float4 masks = pbrTintMasks;
         if (pbrTintUseTex != 0)
@@ -681,17 +689,17 @@ void frag_main()
             }
         }
         float total = dot(masks, 1.0f.xxxx);
-        bool tmp5411 = (pbrTintMode == 0) && (total > 1.0f);
-        bool tmp5417;
-        if (tmp5411)
+        bool cond19 = (pbrTintMode == 0) && (total > 1.0f);
+        bool cond18;
+        if (cond19)
         {
-            tmp5417 = (r4Red & 1) == 0;
+            cond18 = (r4Red & 1) == 0;
         }
         else
         {
-            tmp5417 = tmp5411;
+            cond18 = cond19;
         }
-        if (tmp5417)
+        if (cond18)
         {
             masks /= total.xxxx;
         }
@@ -707,18 +715,19 @@ void frag_main()
     }
     base *= C.xyz;
     float4 color = float4(base, 1.0f);
-    bool tmp5511 = pbrComposition >= 0;
-    bool tmp5517;
-    if (tmp5511)
+    bool cond17 = pbrComposition >= 0;
+    bool cond16;
+    if (cond17)
     {
-        tmp5517 = (r4Red & 16) == 0;
+        cond16 = (r4Red & 16) == 0;
     }
     else
     {
-        tmp5517 = tmp5511;
+        cond16 = cond17;
     }
-    if (tmp5517)
+    if (cond16)
     {
+        // the .pbrm composition (ED:2282-2283, 2336-2337); vertex alpha is not read (the editor's)
         float opacity = (pbrAlphaConst ? 1.0f : op) * pbrGlobalOpacity;
         if (pbrComposition == 0)
         {
@@ -742,16 +751,16 @@ void frag_main()
         if (alphaFlags > 0)
         {
             float a = (C.w * op) * alpha;
-            int tmp5565;
+            int mPick;
             if (a < alphaThreshold)
             {
-                tmp5565 = 11051;
+                mPick = 11051;
             }
             else
             {
-                tmp5565 = (a > alphaThreshold) ? 29041 : 19789;
+                mPick = (a > alphaThreshold) ? 29041 : 19789;
             }
-            int m = tmp5565;
+            int m = mPick;
             if ((m & (1 << alphaFlags)) == 0)
             {
                 discard;
@@ -763,15 +772,16 @@ void frag_main()
         }
     }
     float3 normal = float3(0.0f, 0.0f, 1.0f);
-    int param_3 = 2;
-    if (hasFeature(param_3))
+    int bitArg11 = 2;
+    if (hasFeature(bitArg11))
     {
         float4 nm = NormalMap.Sample(_NormalMap_sampler, offset);
-        float2 tmp5617 = clamp(((nm.xy * 255.0f) - 128.0f.xx) / 127.0f.xx, (-1.0f).xx, 1.0f.xx) * pbrNormalStrength;
-        normal.x = tmp5617.x;
-        normal.y = tmp5617.y;
+        float2 normalPart = clamp(((nm.xy * 255.0f) - 128.0f.xx) / 127.0f.xx, (-1.0f).xx, 1.0f.xx) * pbrNormalStrength;
+        normal.x = normalPart.x;
+        normal.y = normalPart.y;
         normal.z = sqrt(max(1.0f - dot(normal.xy, normal.xy), 0.0f));
     }
+    // back faces: the GEOMETRIC normal flips before the tangent frame is applied
     float3x3 tbn = btnMatrix_norm;
     if (!gl_FrontFacing)
     {
@@ -785,27 +795,27 @@ void frag_main()
     s.ao = pbrAo;
     s.weight = pbrSpecWeight;
     float f0ior = pbrF0;
-    int param_4 = 8;
-    if (hasFeature(param_4))
+    int bitArg10 = 8;
+    if (hasFeature(bitArg10))
     {
         float4 rm = RmaosMap.Sample(_RmaosMap_sampler, offset);
-        int param_5 = 16;
-        if (hasFeature(param_5))
+        int bitArg9 = 16;
+        if (hasFeature(bitArg9))
         {
             s.rough = rm.x;
         }
-        int param_6 = 32;
-        if (hasFeature(param_6))
+        int bitArg8 = 32;
+        if (hasFeature(bitArg8))
         {
             s.metal = rm.y;
         }
-        int param_7 = 64;
-        if (hasFeature(param_7))
+        int bitArg7 = 64;
+        if (hasFeature(bitArg7))
         {
             s.ao = rm.z;
         }
-        int param_8 = 128;
-        if (hasFeature(param_8))
+        int bitArg6 = 128;
+        if (hasFeature(bitArg6))
         {
             if (pbrSpecV6)
             {
@@ -818,38 +828,38 @@ void frag_main()
         }
     }
     s.tint = pbrSpecTint;
-    int param_9 = 33554432;
-    bool tmp5718 = hasFeature(param_9);
-    bool tmp5725;
-    if (!tmp5718)
+    int bitArg5 = 33554432;
+    bool hasFeatureRet = hasFeature(bitArg5);
+    bool cond15;
+    if (!hasFeatureRet)
     {
-        int param_10 = 1073741824;
-        tmp5725 = hasFeature(param_10);
+        int bitArg4 = 1073741824;
+        cond15 = hasFeature(bitArg4);
     }
     else
     {
-        tmp5725 = tmp5718;
+        cond15 = hasFeatureRet;
     }
-    if (tmp5725)
+    if (cond15)
     {
         float4 sc = SpecColorMap.Sample(_SpecColorMap_sampler, offset);
-        int param_11 = 33554432;
-        if (hasFeature(param_11))
+        int bitArg3 = 33554432;
+        if (hasFeature(bitArg3))
         {
-            float3 tmp5739;
+            float3 sPick;
             if (specIsSrgbTex)
             {
-                tmp5739 = sc.xyz;
+                sPick = sc.xyz;
             }
             else
             {
-                float3 param_12 = sc.xyz;
-                tmp5739 = srgbToLinear(param_12);
+                float3 cArg8 = sc.xyz;
+                sPick = srgbToLinear(cArg8);
             }
-            s.tint = tmp5739;
+            s.tint = sPick;
         }
-        int param_13 = 1073741824;
-        if (hasFeature(param_13))
+        int bitArg2 = 1073741824;
+        if (hasFeature(bitArg2))
         {
             float ior = sc.w * pbrIorMax;
             float r = (ior - 1.0f) / (ior + 1.0f);
@@ -868,83 +878,92 @@ void frag_main()
     float3 V = ViewDir_norm;
     float3 R = reflect(-V, s.N);
     float NdotV = clamp(dot(s.N, V), 9.9999997473787516355514526367188e-05f, 1.0f);
-    float param_14 = NdotV;
-    float param_15 = s.rough;
-    float2 dfg = dfgLazarov(param_14, param_15);
-    Surface param_16 = s;
-    float2 param_17 = dfg;
-    float3 ms = multiScatter(param_16, param_17);
-    Surface param_18 = s;
-    float2 param_19 = dfg;
-    float3 param_20 = ms;
-    float3 Espec = specAlbedo(param_18, param_19, param_20);
-    float3 tmp5837;
+    float NdotVArg = NdotV;
+    float rArg3 = s.rough;
+    float2 dfg = dfgLazarov(NdotVArg, rArg3);
+    Surface sArg12 = s;
+    float2 dfgArg2 = dfg;
+    float3 ms = multiScatter(sArg12, dfgArg2);
+    Surface sArg11 = s;
+    float2 dfgArg = dfg;
+    float3 msArg3 = ms;
+    float3 Espec = specAlbedo(sArg11, dfgArg, msArg3);
+    float3 keepIndPick;
     if ((r3Red & 2) != 0)
     {
-        tmp5837 = 1.0f.xxx;
+        keepIndPick = 1.0f.xxx;
     }
     else
     {
-        tmp5837 = clamp(1.0f.xxx - Espec, 0.0f.xxx, 1.0f.xxx);
+        keepIndPick = clamp(1.0f.xxx - Espec, 0.0f.xxx, 1.0f.xxx);
     }
-    float3 keepInd = tmp5837;
+    // the indirect diffuse gives up the energy the specular lobe took. Debug "nosplit".
+    float3 keepInd = keepIndPick;
     float3 rho = s.base * (1.0f - s.metal);
+    // Linear throughout. The sun's irradiance is the uploaded diffuse color x PI, so a white Lambert surface
+    // facing a sun of 1 reads 1; D.rgb is sqrt(diffuse), so read the uniform rather than square a sqrt.
     float3 sunE = (lightSourceDiffuse[0].xyz * 3.1415927410125732421875f) * ((sceneMode >= 1) ? studioSun : 1.0f);
-    Surface param_21 = s;
-    float3 param_22 = normalize(LightDir);
-    float3 param_23 = V;
-    float3 param_24 = ms;
-    float3 param_25;
-    float3 param_26;
-    directLight(param_21, param_22, param_23, param_24, param_25, param_26);
-    float3 dDiff = param_25;
-    float3 dSpec = param_26;
+    Surface sArg10 = s;
+    float3 LArg2 = normalize(LightDir);
+    float3 VArg2 = V;
+    float3 msArg2 = ms;
+    float3 dDiffArg2;
+    float3 dSpecArg2;
+    directLight(sArg10, LArg2, VArg2, msArg2, dDiffArg2, dSpecArg2);
+    float3 dDiff = dDiffArg2;
+    float3 dSpec = dSpecArg2;
     float3 outDiff = dDiff * sunE;
     float3 outSpec = dSpec * sunE;
-    float3 param_27 = -ViewDir;
-    float airSunT = wwVolAirSunT(param_27);
+    float3 posViewArg3 = -ViewDir;
+    // FOGSUN1: the sun through the air (1 where the air is off)
+    float airSunT = wwVolAirSunT(posViewArg3);
     outDiff *= airSunT;
     outSpec *= airSunT;
     s.ao *= clamp(wwFarSkyVis, 0.0f, 1.0f);
+    // what the block below adds is the ambient's diffuse
     float3 preAmbDiff = outDiff;
+    // lane SPECOCC1: what the block below adds is the cube reflection
     float3 preAmbSpec = outSpec;
     if ((sceneMode >= 1) && hasStudioCube)
     {
+        // Studio: the irradiance cube is the radiance average, so Lambert takes it without 1/PI.
         float3 irr = IrradianceMap.Sample(_IrradianceMap_sampler, mul(s.N, reflMatrix)).xyz;
         if (sceneMode == 2)
         {
+            // Lookdev: the weather's DALC 6-axis ambient on the WORLD normal (Z up); an up-facing normal
+            // takes the Z- color (measured). The engine blends linearly in gamma space; this n^2 pick approximates it.
             float3 wn = mul(s.N, envMapRotation);
             float3 n2 = wn * wn;
-            float3 tmp5962;
+            float3 axPick;
             if ((wn.x > 0.0f) != lookdevDalcFlip)
             {
-                tmp5962 = lookdevDalc[1];
+                axPick = lookdevDalc[1];
             }
             else
             {
-                tmp5962 = lookdevDalc[0];
+                axPick = lookdevDalc[0];
             }
-            float3 ax = tmp5962;
-            float3 tmp5980;
+            float3 ax = axPick;
+            float3 ayPick;
             if ((wn.y > 0.0f) != lookdevDalcFlip)
             {
-                tmp5980 = lookdevDalc[3];
+                ayPick = lookdevDalc[3];
             }
             else
             {
-                tmp5980 = lookdevDalc[2];
+                ayPick = lookdevDalc[2];
             }
-            float3 ay = tmp5980;
-            float3 tmp5995;
+            float3 ay = ayPick;
+            float3 azPick;
             if ((wn.z > 0.0f) != lookdevDalcFlip)
             {
-                tmp5995 = lookdevDalc[5];
+                azPick = lookdevDalc[5];
             }
             else
             {
-                tmp5995 = lookdevDalc[4];
+                azPick = lookdevDalc[4];
             }
-            float3 az = tmp5995;
+            float3 az = azPick;
             irr = ((ax * n2.x) + (ay * n2.y)) + (az * n2.z);
         }
         outDiff += (((irr * rho) * keepInd) * s.ao);
@@ -953,63 +972,69 @@ void frag_main()
     }
     else
     {
+        // Legacy (or Studio without a cube): A.rgb = sqrt(ambient) * 0.375, so A.rgb^2 is the
+        // ambient the legacy shapes see in linear terms.
         outDiff += ((((A.xyz * A.xyz) * rho) * keepInd) * s.ao);
         if (hasCubeMap)
         {
             float3 cube = CubeMap.SampleLevel(_CubeMap_sampler, mul(R, reflMatrix), s.rough * 8.0f).xyz;
+            // the legacy cube is display-encoded: squared into the same linear space
             outSpec += ((((cube * cube) * envReflection) * Espec) * s.ao);
         }
     }
-    float3 tmp6099;
+    float3 colorPick;
     if (r3Term == 1)
     {
-        tmp6099 = outDiff;
+        colorPick = outDiff;
     }
     else
     {
-        float3 tmp6106;
+        float3 colorPick2;
         if (r3Term == 2)
         {
-            tmp6106 = outSpec;
+            colorPick2 = outSpec;
         }
         else
         {
-            tmp6106 = outDiff + outSpec;
+            colorPick2 = outDiff + outSpec;
         }
-        tmp6099 = tmp6106;
+        colorPick = colorPick2;
     }
-    color.x = tmp6099.x;
-    color.y = tmp6099.y;
-    color.z = tmp6099.z;
+    color.x = colorPick.x;
+    color.y = colorPick.y;
+    color.z = colorPick.z;
     if (r3Term == 3)
     {
-        Surface param_28 = s;
-        float param_29 = NdotV;
-        float3 tmp6130 = surfaceF(param_28, param_29);
-        color.x = tmp6130.x;
-        color.y = tmp6130.y;
-        color.z = tmp6130.z;
+        Surface sArg9 = s;
+        float cArg7 = NdotV;
+        float3 surfaceFRet = surfaceF(sArg9, cArg7);
+        color.x = surfaceFRet.x;
+        color.y = surfaceFRet.y;
+        color.z = surfaceFRet.z;
     }
+    // --- emission (ED:2519-2521): color x mask x luminance/100, added before exposure; a map REPLACES the
+    // constant unless overridden. Debug "emitmul": constant x map, "emitraw": no /100.
+    // lane SSGI2: the emission alone (cellEmitOut)
     float3 pbrEmitLin = 0.0f.xxx;
     if ((pbrEmissiveIntensity > 0.0f) && (r3Term == 0))
     {
         float3 ecol = pow(max(pbrEmissiveColor, 0.0f.xxx), 2.2000000476837158203125f.xxx);
         float emask = pbrEmissiveMask;
-        int param_30 = 256;
-        if (hasFeature(param_30))
+        int bitArg = 256;
+        if (hasFeature(bitArg))
         {
             float4 em = EmissiveMap.Sample(_EmissiveMap_sampler, offset);
-            float3 tmp6169;
+            float3 emapPick;
             if (emissiveIsSrgbTex)
             {
-                tmp6169 = em.xyz;
+                emapPick = em.xyz;
             }
             else
             {
-                float3 param_31 = em.xyz;
-                tmp6169 = srgbToLinear(param_31);
+                float3 cArg6 = em.xyz;
+                emapPick = srgbToLinear(cArg6);
             }
-            float3 emap = tmp6169;
+            float3 emap = emapPick;
             if ((r4Red & 2) != 0)
             {
                 ecol *= emap;
@@ -1028,154 +1053,165 @@ void frag_main()
             }
         }
         pbrEmitLin = ((ecol * emask) * pbrEmissiveIntensity) * (((r4Red & 8) != 0) ? 100.0f : 1.0f);
-        float4 tmp6216 = color;
-        float3 tmp6218 = tmp6216.xyz + pbrEmitLin;
-        color.x = tmp6218.x;
-        color.y = tmp6218.y;
-        color.z = tmp6218.z;
+        float4 colorPart6 = color;
+        float3 colorPart5 = colorPart6.xyz + pbrEmitLin;
+        color.x = colorPart5.x;
+        color.y = colorPart5.y;
+        color.z = colorPart5.z;
     }
     if (sceneMode >= 1)
     {
         if ((sceneMode == 2) && true)
         {
-            float3 param_32 = color.xyz;
-            float3 param_33 = -ViewDir;
-            float3 tmp6240 = wwFog(param_32, param_33);
-            color.x = tmp6240.x;
-            color.y = tmp6240.y;
-            color.z = tmp6240.z;
+            float3 preFogArg = color.xyz;
+            float3 posViewArg2 = -ViewDir;
+            float3 wwFogRet = wwFog(preFogArg, posViewArg2);
+            color.x = wwFogRet.x;
+            color.y = wwFogRet.y;
+            color.z = wwFogRet.z;
         }
         if (studioProbe >= 0.0f)
         {
-            float3 tmp6253 = studioProbe.xxx;
-            color.x = tmp6253.x;
-            color.y = tmp6253.y;
-            color.z = tmp6253.z;
+            float3 colorPart4 = studioProbe.xxx;
+            color.x = colorPart4.x;
+            color.y = colorPart4.y;
+            color.z = colorPart4.z;
         }
-        float3 param_34 = color.xyz;
-        float3 tmp6263 = studioOutput(param_34);
-        color.x = tmp6263.x;
-        color.y = tmp6263.y;
-        color.z = tmp6263.z;
+        float3 cArg5 = color.xyz;
+        float3 studioOutputRet = studioOutput(cArg5);
+        color.x = studioOutputRet.x;
+        color.y = studioOutputRet.y;
+        color.z = studioOutputRet.z;
     }
     else
     {
-        float3 param_35 = sqrt(max(color.xyz, 0.0f.xxx));
-        float3 tmp6276 = tonemap(param_35);
-        color.x = tmp6276.x;
-        color.y = tmp6276.y;
-        color.z = tmp6276.z;
+        float3 xArg5 = sqrt(max(color.xyz, 0.0f.xxx));
+        float3 tonemapRet = tonemap(xArg5);
+        color.x = tonemapRet.x;
+        color.y = tonemapRet.y;
+        color.z = tonemapRet.z;
     }
-    bool tmp6284 = pbrComposition == 3;
-    bool tmp6290;
-    if (tmp6284)
+    bool cond14 = pbrComposition == 3;
+    bool cond13;
+    if (cond14)
     {
-        tmp6290 = (r4Red & 16) == 0;
+        cond13 = (r4Red & 16) == 0;
     }
     else
     {
-        tmp6290 = tmp6284;
+        cond13 = cond14;
     }
-    if (tmp6290)
+    if (cond13)
     {
-        float tmp6294 = color.w;
-        float4 tmp6295 = color;
-        float3 tmp6297 = tmp6295.xyz * tmp6294;
-        color.x = tmp6297.x;
-        color.y = tmp6297.y;
-        color.z = tmp6297.z;
+        float colorPart3 = color.w;
+        float4 colorPart2 = color;
+        float3 colorPart = colorPart2.xyz * colorPart3;
+        color.x = colorPart.x;
+        color.y = colorPart.y;
+        color.z = colorPart.z;
     }
     fragColor = color;
-    float3 param_36 = -ViewDir;
-    float3 param_37;
-    bool tmp6312 = wwFogProbe(param_36, param_37);
-    float3 fogProbeOut = param_37;
-    if (tmp6312)
+    float3 posViewArg = -ViewDir;
+    float3 oArg;
+    bool wwFogProbeRet = wwFogProbe(posViewArg, oArg);
+    float3 fogProbeOut = oArg;
+    if (wwFogProbeRet)
     {
         fragColor = float4(fogProbeOut, 1.0f);
     }
+    // a blended-ground pass (src/cellsplat.h): the RAW vertex alpha (C.a may be overridden) is this pass's share;
+    // an opaque base is scaled by it, a layer is added at it (SRC_ALPHA, ONE).
+    // never over the data passes (20, 60/61): the ground would write depth 1 there and the water SSR march
+    // would die on it
     bool splatData = false;
     if (landSplat && (!splatData))
     {
+        // lane ALLON2 (bungo's thin dark lines along the ground's edges, 21.png): with MSAA a pixel on the
+        // OUTER edge of a layer's quads is shaded once at its centre, which lies outside every triangle of
+        // that layer, so every input is extrapolated past the edge -- the share below zero, and the lit
+        // colour can go non-finite. The blend then adds NaN x 0 = NaN and the resolve drops the whole
+        // pixel to black: one dark render pixel along every place a layer's quads stop. A share at or
+        // below zero adds nothing, so it is written as exactly nothing; a non-finite colour likewise.
+        // Red WW_TERRBLEND_RED=edgepass: the old output. Probe WW_TERRBLEND_PROBE=edge: such pixels green.
         float w = rawVertexAlpha;
-        bool tmp6337 = any(isnan(fragColor.xyz));
-        bool tmp6345;
-        if (!tmp6337)
+        bool cond12 = any(isnan(fragColor.xyz));
+        bool cond11;
+        if (!cond12)
         {
-            tmp6345 = any(isinf(fragColor.xyz));
+            cond11 = any(isinf(fragColor.xyz));
         }
         else
         {
-            tmp6345 = tmp6337;
+            cond11 = cond12;
         }
-        bool tmp6351;
-        if (!tmp6345)
+        bool cond10;
+        if (!cond11)
         {
-            tmp6351 = isnan(w);
+            cond10 = isnan(w);
         }
         else
         {
-            tmp6351 = tmp6345;
+            cond10 = cond11;
         }
-        bool tmp6357;
-        if (!tmp6351)
+        bool badPick;
+        if (!cond10)
         {
-            tmp6357 = isinf(w);
+            badPick = isinf(w);
         }
         else
         {
-            tmp6357 = tmp6351;
+            badPick = cond10;
         }
-        bool bad = tmp6357;
+        bool bad = badPick;
         if (landSplatDbg == 2)
         {
-            float4 tmp6364;
+            float4 fragColorPick;
             if (bad)
             {
-                tmp6364 = float4(0.0f, 1.0f, 0.0f, 1.0f);
+                fragColorPick = float4(0.0f, 1.0f, 0.0f, 1.0f);
             }
             else
             {
-                bool4 tmp6374 = ((alphaFlags & 8) != 0).xxxx;
-                tmp6364 = float4(tmp6374.x ? 0.0f.xxxx.x : float4(0.0f, 0.0f, 0.0f, 1.0f).x, tmp6374.y ? 0.0f.xxxx.y : float4(0.0f, 0.0f, 0.0f, 1.0f).y, tmp6374.z ? 0.0f.xxxx.z : float4(0.0f, 0.0f, 0.0f, 1.0f).z, tmp6374.w ? 0.0f.xxxx.w : float4(0.0f, 0.0f, 0.0f, 1.0f).w);
+                bool4 fragColorPart2 = ((alphaFlags & 8) != 0).xxxx;
+                fragColorPick = float4(fragColorPart2.x ? 0.0f.xxxx.x : float4(0.0f, 0.0f, 0.0f, 1.0f).x, fragColorPart2.y ? 0.0f.xxxx.y : float4(0.0f, 0.0f, 0.0f, 1.0f).y, fragColorPart2.z ? 0.0f.xxxx.z : float4(0.0f, 0.0f, 0.0f, 1.0f).z, fragColorPart2.w ? 0.0f.xxxx.w : float4(0.0f, 0.0f, 0.0f, 1.0f).w);
             }
-            fragColor = tmp6364;
+            fragColor = fragColorPick;
         }
         else
         {
-            bool tmp6379 = landSplatDbg == 0;
-            bool tmp6396;
-            if (tmp6379)
+            bool cond9 = landSplatDbg == 0;
+            bool cond8;
+            if (cond9)
             {
-                bool tmp6395;
+                bool condPick;
                 if (!bad)
                 {
-                    bool tmp6388 = (alphaFlags & 8) != 0;
-                    bool tmp6394;
-                    if (tmp6388)
+                    bool cond7 = (alphaFlags & 8) != 0;
+                    bool condPick2;
+                    if (cond7)
                     {
-                        tmp6394 = !(w > 0.0f);
+                        condPick2 = !(w > 0.0f);
                     }
                     else
                     {
-                        tmp6394 = tmp6388;
+                        condPick2 = cond7;
                     }
-                    tmp6395 = tmp6394;
+                    condPick = condPick2;
                 }
                 else
                 {
-                    tmp6395 = bad;
+                    condPick = bad;
                 }
-                tmp6396 = tmp6395;
+                cond8 = condPick;
             }
             else
             {
-                tmp6396 = tmp6379;
+                cond8 = cond9;
             }
-            if (tmp6396)
+            if (cond8)
             {
-                bool4 tmp6402 = ((alphaFlags & 8) != 0).xxxx;
-                fragColor = float4(tmp6402.x ? 0.0f.xxxx.x : float4(0.0f, 0.0f, 0.0f, 1.0f).x, tmp6402.y ? 0.0f.xxxx.y : float4(0.0f, 0.0f, 0.0f, 1.0f).y, tmp6402.z ? 0.0f.xxxx.z : float4(0.0f, 0.0f, 0.0f, 1.0f).z, tmp6402.w ? 0.0f.xxxx.w : float4(0.0f, 0.0f, 0.0f, 1.0f).w);
+                bool4 fragColorPart = ((alphaFlags & 8) != 0).xxxx;
+                fragColor = float4(fragColorPart.x ? 0.0f.xxxx.x : float4(0.0f, 0.0f, 0.0f, 1.0f).x, fragColorPart.y ? 0.0f.xxxx.y : float4(0.0f, 0.0f, 0.0f, 1.0f).y, fragColorPart.z ? 0.0f.xxxx.z : float4(0.0f, 0.0f, 0.0f, 1.0f).z, fragColorPart.w ? 0.0f.xxxx.w : float4(0.0f, 0.0f, 0.0f, 1.0f).w);
             }
             else
             {

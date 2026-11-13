@@ -44,12 +44,14 @@ void frag_main()
     float4 color = C;
     if ((selectionFlags & 2) != 0)
     {
+        // draw points as circles
         float2 d = wwPointCoord - 0.5f.xx;
         float r2 = dot(d, d);
         if (r2 > 0.25f)
         {
             discard;
         }
+        // with anti-aliasing if enabled
         int p = selectionFlags & 65280;
         if (p != 0)
         {

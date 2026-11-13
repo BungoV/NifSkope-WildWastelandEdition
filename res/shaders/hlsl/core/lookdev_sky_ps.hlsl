@@ -76,9 +76,10 @@ void frag_main()
 {
     if (projectionMatrix[3].w == 1.0f)
     {
-        float3 param = 0.180000007152557373046875f.xxx;
-        float3 tmp290 = studioOutput(param);
-        fragColor = float4(tmp290, 1.0f);
+        float3 cArg2 = 0.180000007152557373046875f.xxx;
+        float3 studioOutputRet2 = studioOutput(cArg2);
+        // orthographic: no eye ray; a flat mid-grey stands in
+        fragColor = float4(studioOutputRet2, 1.0f);
         return;
     }
     float3 ray = normalize(float3((ndc.x + projectionMatrix[2].x) / projectionMatrix[0].x, (ndc.y + projectionMatrix[2].y) / projectionMatrix[1].y, -1.0f));
@@ -89,16 +90,16 @@ void frag_main()
         r[1].z *= (-1.0f);
         r[2].z *= (-1.0f);
     }
-    float3 tmp346;
+    float3 colorPick;
     if (hasCubeMap)
     {
-        tmp346 = CubeMap.SampleLevel(_CubeMap_sampler, mul(ray, r), 0.0f).xyz;
+        colorPick = CubeMap.SampleLevel(_CubeMap_sampler, mul(ray, r), 0.0f).xyz;
     }
     else
     {
-        tmp346 = 0.180000007152557373046875f.xxx;
+        colorPick = 0.180000007152557373046875f.xxx;
     }
-    float3 color = tmp346;
+    float3 color = colorPick;
     if (sunDiscUp)
     {
         float VdotL = dot(ray, normalize(sunDiscView));
@@ -110,9 +111,9 @@ void frag_main()
             color += ((sunLinear * (a2 / (denom * denom))) * VdotL);
         }
     }
-    float3 param_1 = color;
-    float3 tmp406 = studioOutput(param_1);
-    fragColor = float4(tmp406, 1.0f);
+    float3 cArg = color;
+    float3 studioOutputRet = studioOutput(cArg);
+    fragColor = float4(studioOutputRet, 1.0f);
 }
 
 SPIRV_Cross_Output main(SPIRV_Cross_Input stage_input)

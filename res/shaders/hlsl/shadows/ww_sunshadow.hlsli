@@ -19,30 +19,30 @@ float3 csmNormalOff(float3 posView, float3 dPx, float3 dPy)
     float3 n = cross(dPx, dPy);
     float ln = length(n);
     float3 lv = float3(csmMat[0][0].z, csmMat[0][1].z, csmMat[0][2].z);
-    bool tmp1 = ln <= 9.9999996826552253889678874634872e-21f;
-    bool tmp2;
-    if (!tmp1)
+    bool cond2 = ln <= 9.9999996826552253889678874634872e-21f;
+    bool cond;
+    if (!cond2)
     {
-        tmp2 = dot(lv, lv) <= 0.0f;
+        cond = dot(lv, lv) <= 0.0f;
     }
     else
     {
-        tmp2 = tmp1;
+        cond = cond2;
     }
-    if (tmp2)
+    if (cond)
     {
         return 0.0f.xxx;
     }
-    float3 tmp3;
+    float3 nPick;
     if (dot(n, posView) > 0.0f)
     {
-        tmp3 = (-n) / ln.xxx;
+        nPick = (-n) / ln.xxx;
     }
     else
     {
-        tmp3 = n / ln.xxx;
+        nPick = n / ln.xxx;
     }
-    n = tmp3;
+    n = nPick;
     float c = dot(n, normalize(lv));
     return n * ((ussCsmStable.w * sqrt(max(1.0f - (c * c), 0.0f))) / csmParams.x);
 }
@@ -51,21 +51,22 @@ float3 csmNormalOff(float3 posView, float3 dPx, float3 dPy)
 #if defined(WW_FN_csmHard) || defined(WW_FN_ALL)
 float csmHard(int i, float3 posView, float offsetWorld)
 {
-    int tmp1 = i;
-    float3 tmp2 = posView + (csmNOff * ussCsmTexel[i]);
-    float3 q = csmUvd(tmp1, tmp2);
-    float tmp3;
+    int cond2 = i;
+    float3 cond = posView + (csmNOff * ussCsmTexel[i]);
+    // lane SHADOWSHIMMER2: the Off tier's stable bias (csmNOff 0 and CSM1's offset with the red)
+    float3 q = csmUvd(cond2, cond);
+    float nPick;
     if (ussCsmStable.w != 0.0f)
     {
-        tmp3 = ussCsmBias[i];
+        nPick = ussCsmBias[i];
     }
     else
     {
-        tmp3 = offsetWorld;
+        nPick = offsetWorld;
     }
-    float off = tmp3;
-    float4 tmp4 = float4(q.xy, float(i), q.z - (off * csmInvRange[i]));
-    return csmMap.SampleCmp(_csmMap_sampler, tmp4.xyz, tmp4.w);
+    float off = nPick;
+    float4 csmHardRet = float4(q.xy, float(i), q.z - (off * csmInvRange[i]));
+    return csmMap.SampleCmp(_csmMap_sampler, csmHardRet.xyz, csmHardRet.w);
 }
 #endif
 
@@ -87,56 +88,56 @@ void csmSelect(float3 posView, out int a, out int b, out float t)
         bound = csmSplitOffset.y;
     }
     float x = clamp((dv - bound) / csmParams.w, 0.0f, 1.0f);
-    float tmp1;
+    float cond2;
     if ((csmRed & 1) != 0)
     {
-        tmp1 = step(0.5f, x);
+        cond2 = step(0.5f, x);
     }
     else
     {
-        tmp1 = smoothstep(0.0f, 1.0f, x);
+        cond2 = smoothstep(0.0f, 1.0f, x);
     }
-    t = tmp1;
+    t = cond2;
 }
 #endif
 
 #if defined(WW_FN_csmBlended) || defined(WW_FN_ALL)
 float csmBlended(float3 posView)
 {
-    float3 tmp1 = posView;
-    int tmp2;
-    int tmp3;
-    float tmp4;
-    csmSelect(tmp1, tmp2, tmp3, tmp4);
-    int a = tmp2;
-    int b = tmp3;
-    float t = tmp4;
-    float tmp5;
+    float3 cond2 = posView;
+    int cond;
+    int nPick;
+    float csmHardRet;
+    csmSelect(cond2, cond, nPick, csmHardRet);
+    int a = cond;
+    int b = nPick;
+    float t = csmHardRet;
+    float sAPick;
     if (t < 1.0f)
     {
-        int tmp6 = a;
-        float3 tmp7 = posView;
-        float tmp8 = csmSplitOffset.z;
-        tmp5 = csmFiltered(tmp6, tmp7, tmp8);
+        int sAPart3 = a;
+        float3 sAPart2 = posView;
+        float sAPart = csmSplitOffset.z;
+        sAPick = csmFiltered(sAPart3, sAPart2, sAPart);
     }
     else
     {
-        tmp5 = 1.0f;
+        sAPick = 1.0f;
     }
-    float sA = tmp5;
-    float tmp9;
+    float sA = sAPick;
+    float sBPick;
     if (t > 0.0f)
     {
-        int tmp10 = b;
-        float3 tmp11 = posView;
-        float tmp12 = csmSplitOffset.w;
-        tmp9 = csmFiltered(tmp10, tmp11, tmp12);
+        int sBPart3 = b;
+        float3 sBPart2 = posView;
+        float sBPart = csmSplitOffset.w;
+        sBPick = csmFiltered(sBPart3, sBPart2, sBPart);
     }
     else
     {
-        tmp9 = 1.0f;
+        sBPick = 1.0f;
     }
-    float sB = tmp9;
+    float sB = sBPick;
     return lerp(sA, sB, t);
 }
 #endif
@@ -151,9 +152,9 @@ float ussIgn(float2 p)
 #if defined(WW_FN_ussVogel) || defined(WW_FN_ALL)
 float ussVogel(int i, float3 posView, float offsetWorld, float3 dPx, float3 dPy, float3 nOff)
 {
-    int tmp1 = i;
-    float3 tmp2 = posView + (nOff * ussCsmTexel[i]);
-    float3 q = csmUvd(tmp1, tmp2);
+    int cond2 = i;
+    float3 cond = posView + (nOff * ussCsmTexel[i]);
+    float3 q = csmUvd(cond2, cond);
     float zRef = q.z - (offsetWorld * csmInvRange[i]);
     float2 rpdb = 0.0f.xx;
     if (ussCsmFilter.w > 0.5f)
@@ -173,32 +174,32 @@ float ussVogel(int i, float3 posView, float offsetWorld, float3 dPx, float3 dPy,
         R = clamp(ussCsmWorld[i + 1] / max(ussCsmTexel[i], 9.9999999747524270787835121154785e-07f), 0.5f, 16.0f);
         n = int(clamp(floor(((32.0f * (R / 3.0f)) * (R / 3.0f)) + 0.5f), 8.0f, 48.0f));
     }
-    float2 tmp3;
+    float2 nPick;
     if (ussCsmStable.x > 0.5f)
     {
-        tmp3 = mod(floor(q.xy * (csmParams.z * 4.0f)) + float2(ussCsmCellX[i], ussCsmCellY[i]), 4096.0f.xx);
+        nPick = mod(floor(q.xy * (csmParams.z * 4.0f)) + float2(ussCsmCellX[i], ussCsmCellY[i]), 4096.0f.xx);
     }
     else
     {
-        tmp3 = gl_FragCoord.xy + (float2(32.66500091552734375f, 11.81499958038330078125f) * ussCsmPhase);
+        nPick = gl_FragCoord.xy + (float2(32.66500091552734375f, 11.81499958038330078125f) * ussCsmPhase);
     }
-    float2 rp = tmp3;
-    float2 tmp4 = rp;
-    float rot = 6.283185482025146484375f * ussIgn(tmp4);
+    float2 rp = nPick;
+    float2 csmHardRet = rp;
+    float rot = 6.283185482025146484375f * ussIgn(csmHardRet);
     float k = 1.0f / csmParams.z;
     float lim = 2000.0f * csmInvRange[i];
-    float tmp5;
+    float sAPick;
     if (ussCsmFilter.w > 1.5f)
     {
-        tmp5 = lim;
+        sAPick = lim;
     }
     else
     {
-        tmp5 = (4.0f * ussCsmTexel[i]) * csmInvRange[i];
+        sAPick = (4.0f * ussCsmTexel[i]) * csmInvRange[i];
     }
-    float cap = tmp5;
+    float cap = sAPick;
     float sum = 0.0f;
-    float tmp6;
+    float sAPart3;
     for (int t = 0; t < 48; t++)
     {
         if (t >= n)
@@ -211,15 +212,15 @@ float ussVogel(int i, float3 posView, float offsetWorld, float3 dPx, float3 dPy,
         float dz = dot(rpdb, o);
         if (ussCsmFilter.w > 1.5f)
         {
-            tmp6 = 1.0f;
+            sAPart3 = 1.0f;
         }
         else
         {
-            tmp6 = min(1.0f, cap / max(abs(dz), 1.0000000031710768509710513471353e-30f));
+            sAPart3 = min(1.0f, cap / max(abs(dz), 1.0000000031710768509710513471353e-30f));
         }
-        float pull = tmp6;
-        float4 tmp7 = float4(q.xy + (o * pull), float(i), zRef + clamp(dz * pull, -lim, lim));
-        sum += csmMap.SampleCmp(_csmMap_sampler, tmp7.xyz, tmp7.w);
+        float pull = sAPart3;
+        float4 sAPart2 = float4(q.xy + (o * pull), float(i), zRef + clamp(dz * pull, -lim, lim));
+        sum += csmMap.SampleCmp(_csmMap_sampler, sAPart2.xyz, sAPart2.w);
     }
     return sum / float(n);
 }
@@ -228,9 +229,9 @@ float ussVogel(int i, float3 posView, float offsetWorld, float3 dPx, float3 dPy,
 #if defined(WW_FN_ussVogel_V2) || defined(WW_FN_ALL)
 float ussVogel(int i, float3 posView, float offsetWorld, float3 dPx, float3 dPy, float3 nOff)
 {
-    int tmp1 = i;
-    float3 tmp2 = posView + (nOff * ussCsmTexel[i]);
-    float3 q = csmUvd(tmp1, tmp2);
+    int cond2 = i;
+    float3 cond = posView + (nOff * ussCsmTexel[i]);
+    float3 q = csmUvd(cond2, cond);
     float zRef = q.z - (offsetWorld * csmInvRange[i]);
     float2 rpdb = 0.0f.xx;
     if (ussCsmFilter.w > 0.5f)
@@ -250,32 +251,32 @@ float ussVogel(int i, float3 posView, float offsetWorld, float3 dPx, float3 dPy,
         R = clamp(ussCsmWorld[i + 1] / max(ussCsmTexel[i], 9.9999999747524270787835121154785e-07f), 0.5f, 16.0f);
         n = int(clamp(floor(((32.0f * (R / 3.0f)) * (R / 3.0f)) + 0.5f), 8.0f, 48.0f));
     }
-    float2 tmp3;
+    float2 nPick;
     if (ussCsmStable.x > 0.5f)
     {
-        tmp3 = mod(floor(q.xy * (csmParams.z * 4.0f)) + float2(ussCsmCellX[i], ussCsmCellY[i]), 4096.0f.xx);
+        nPick = mod(floor(q.xy * (csmParams.z * 4.0f)) + float2(ussCsmCellX[i], ussCsmCellY[i]), 4096.0f.xx);
     }
     else
     {
-        tmp3 = pcFragCoord.xy + (float2(32.66500091552734375f, 11.81499958038330078125f) * ussCsmPhase);
+        nPick = pcFragCoord.xy + (float2(32.66500091552734375f, 11.81499958038330078125f) * ussCsmPhase);
     }
-    float2 rp = tmp3;
-    float2 tmp4 = rp;
-    float rot = 6.283185482025146484375f * ussIgn(tmp4);
+    float2 rp = nPick;
+    float2 csmHardRet = rp;
+    float rot = 6.283185482025146484375f * ussIgn(csmHardRet);
     float k = 1.0f / csmParams.z;
     float lim = 2000.0f * csmInvRange[i];
-    float tmp5;
+    float sAPick;
     if (ussCsmFilter.w > 1.5f)
     {
-        tmp5 = lim;
+        sAPick = lim;
     }
     else
     {
-        tmp5 = (4.0f * ussCsmTexel[i]) * csmInvRange[i];
+        sAPick = (4.0f * ussCsmTexel[i]) * csmInvRange[i];
     }
-    float cap = tmp5;
+    float cap = sAPick;
     float sum = 0.0f;
-    float tmp6;
+    float sAPart3;
     for (int t = 0; t < 48; t++)
     {
         if (t >= n)
@@ -288,15 +289,15 @@ float ussVogel(int i, float3 posView, float offsetWorld, float3 dPx, float3 dPy,
         float dz = dot(rpdb, o);
         if (ussCsmFilter.w > 1.5f)
         {
-            tmp6 = 1.0f;
+            sAPart3 = 1.0f;
         }
         else
         {
-            tmp6 = min(1.0f, cap / max(abs(dz), 1.0000000031710768509710513471353e-30f));
+            sAPart3 = min(1.0f, cap / max(abs(dz), 1.0000000031710768509710513471353e-30f));
         }
-        float pull = tmp6;
-        float4 tmp7 = float4(q.xy + (o * pull), float(i), zRef + clamp(dz * pull, -lim, lim));
-        sum += csmMap.SampleCmpLevelZero(_csmMap_sampler, tmp7.xyz, tmp7.w);
+        float pull = sAPart3;
+        float4 sAPart2 = float4(q.xy + (o * pull), float(i), zRef + clamp(dz * pull, -lim, lim));
+        sum += csmMap.SampleCmpLevelZero(_csmMap_sampler, sAPart2.xyz, sAPart2.w);
     }
     return sum / float(n);
 }
@@ -315,100 +316,102 @@ float ussCascades(float3 posView, float3 dPx, float3 dPy, out float w)
     {
         return 1.0f;
     }
-    float3 tmp1 = posView;
-    int tmp2;
-    int tmp3;
-    float tmp4;
-    csmSelect(tmp1, tmp2, tmp3, tmp4);
-    int a = tmp2;
-    int b = tmp3;
-    float t = tmp4;
+    float3 cond2 = posView;
+    int cond;
+    int nPick;
+    float csmHardRet;
+    csmSelect(cond2, cond, nPick, csmHardRet);
+    int a = cond;
+    int b = nPick;
+    float t = csmHardRet;
     float sA = 1.0f;
     float sB = 1.0f;
     if (ussCsmFilter.x > 0.5f)
     {
+        // lane SHADOWSHIMMER1: the normal offset, ussCsmStable.y texels of the cascade x sin(the light's angle to the
+        // surface), along the geometric normal (the position's derivatives) turned toward the eye; once for both cascades
         float3 nOff = 0.0f.xxx;
         if (ussCsmStable.y > 0.0f)
         {
             float3 n = cross(dPx, dPy);
             float ln = length(n);
             float3 lv = float3(csmMat[a][0].z, csmMat[a][1].z, csmMat[a][2].z);
-            bool tmp5 = ln > 9.9999996826552253889678874634872e-21f;
-            bool tmp6;
-            if (tmp5)
+            bool sAPick = ln > 9.9999996826552253889678874634872e-21f;
+            bool sAPart3;
+            if (sAPick)
             {
-                tmp6 = dot(lv, lv) > 0.0f;
+                sAPart3 = dot(lv, lv) > 0.0f;
             }
             else
             {
-                tmp6 = tmp5;
+                sAPart3 = sAPick;
             }
-            if (tmp6)
+            if (sAPart3)
             {
-                float3 tmp7;
+                float3 sAPart2;
                 if (dot(n, posView) > 0.0f)
                 {
-                    tmp7 = (-n) / ln.xxx;
+                    sAPart2 = (-n) / ln.xxx;
                 }
                 else
                 {
-                    tmp7 = n / ln.xxx;
+                    sAPart2 = n / ln.xxx;
                 }
-                n = tmp7;
+                n = sAPart2;
                 float c = dot(n, normalize(lv));
                 nOff = n * ((ussCsmStable.y * sqrt(max(1.0f - (c * c), 0.0f))) / csmParams.x);
             }
         }
         if (t < 1.0f)
         {
-            int tmp8 = a;
-            float3 tmp9 = posView;
-            float tmp10 = ussCsmBias[a];
-            float3 tmp11 = dPx;
-            float3 tmp12 = dPy;
-            float3 tmp13 = nOff;
-            sA = ussVogel(tmp8, tmp9, tmp10, tmp11, tmp12, tmp13);
+            int sAPart = a;
+            float3 sBPick = posView;
+            float sBPart3 = ussCsmBias[a];
+            float3 sBPart2 = dPx;
+            float3 sBPart = dPy;
+            float3 sAPart7 = nOff;
+            sA = ussVogel(sAPart, sBPick, sBPart3, sBPart2, sBPart, sAPart7);
         }
         if (t > 0.0f)
         {
-            int tmp14 = b;
-            float3 tmp15 = posView;
-            float tmp16 = ussCsmBias[b];
-            float3 tmp17 = dPx;
-            float3 tmp18 = dPy;
-            float3 tmp19 = nOff;
-            sB = ussVogel(tmp14, tmp15, tmp16, tmp17, tmp18, tmp19);
+            int sBPart12 = b;
+            float3 sBPart11 = posView;
+            float sBPart10 = ussCsmBias[b];
+            float3 sBPart9 = dPx;
+            float3 sBPart8 = dPy;
+            float3 sBPart7 = nOff;
+            sB = ussVogel(sBPart12, sBPart11, sBPart10, sBPart9, sBPart8, sBPart7);
         }
     }
     else
     {
         if (t < 1.0f)
         {
-            int tmp20 = a;
-            float3 tmp21 = posView;
-            float tmp22 = csmSplitOffset.z;
-            sA = csmFiltered(tmp20, tmp21, tmp22);
+            int sAPart6 = a;
+            float3 sAPart5 = posView;
+            float sAPart4 = csmSplitOffset.z;
+            sA = csmFiltered(sAPart6, sAPart5, sAPart4);
         }
         if (t > 0.0f)
         {
-            int tmp23 = b;
-            float3 tmp24 = posView;
-            float tmp25 = csmSplitOffset.w;
-            sB = csmFiltered(tmp23, tmp24, tmp25);
+            int sBPart6 = b;
+            float3 sBPart5 = posView;
+            float sBPart4 = csmSplitOffset.w;
+            sB = csmFiltered(sBPart6, sBPart5, sBPart4);
         }
     }
     float s = clamp(((dot(posView, posView) * csmParams.x) * csmParams.x) / (csmParams.y * csmParams.y), 0.0f, 1.0f);
     float s2 = s * s;
-    float tmp26;
+    float wPick;
     if ((csmRed & 2) != 0)
     {
-        tmp26 = 1.0f;
+        wPick = 1.0f;
     }
     else
     {
-        tmp26 = 1.0f - (s2 * s2);
+        wPick = 1.0f - (s2 * s2);
     }
-    w = tmp26;
+    w = wPick;
     return lerp(sA, sB, t);
 }
 #endif
@@ -416,41 +419,43 @@ float ussCascades(float3 posView, float3 dPx, float3 dPy, out float w)
 #if defined(WW_FN_ussTerrAtlasUv) || defined(WW_FN_ALL)
 float2 ussTerrAtlasUv(inout float2 uv, int tier)
 {
-    bool tmp1 = ussTerrSize.y <= 0.0f;
-    bool tmp2;
-    if (tmp1)
+    bool cond2 = ussTerrSize.y <= 0.0f;
+    bool cond;
+    if (cond2)
     {
-        tmp2 = ussTerrExtra.z <= 0.0f;
+        cond = ussTerrExtra.z <= 0.0f;
     }
     else
     {
-        tmp2 = tmp1;
+        cond = cond2;
     }
-    if (tmp2)
+    if (cond)
     {
+        // one tier: the map as TERRSHADOW1 made it
         return uv;
     }
-    float tmp3;
+    float nPick;
     if (tier == 0)
     {
-        tmp3 = ussTerrSize.x;
+        nPick = ussTerrSize.x;
     }
     else
     {
-        tmp3 = ussTerrSize.y;
+        nPick = ussTerrSize.y;
     }
-    float n = tmp3;
+    float n = nPick;
+    // no bleed across the tiers' seam
     uv = clamp(uv, (0.5f / n).xx, (1.0f - (0.5f / n)).xx);
-    float2 tmp4;
+    float2 csmHardRet;
     if (tier == 0)
     {
-        tmp4 = float2(uv.x, uv.y * ussTerrAtlas.x);
+        csmHardRet = float2(uv.x, uv.y * ussTerrAtlas.x);
     }
     else
     {
-        tmp4 = float2(uv.x * ussTerrAtlas.y, ussTerrAtlas.z + (uv.y * ussTerrAtlas.w));
+        csmHardRet = float2(uv.x * ussTerrAtlas.y, ussTerrAtlas.z + (uv.y * ussTerrAtlas.w));
     }
-    return tmp4;
+    return csmHardRet;
 }
 #endif
 
@@ -459,58 +464,58 @@ float ussTerrVis(float2 rg, float z)
 {
     float lo = ussTerrRange.x + (rg.x * ussTerrRange.y);
     float hi = ussTerrRange.x + (rg.y * ussTerrRange.y);
-    float tmp1;
+    float cond2;
     if (rg.x <= 0.0f)
     {
-        tmp1 = 1.0f;
+        cond2 = 1.0f;
     }
     else
     {
-        float tmp2;
+        float cond;
         if ((lo - hi) > 0.001000000047497451305389404296875f)
         {
-            tmp2 = clamp((z - hi) / (lo - hi), 0.0f, 1.0f);
+            cond = clamp((z - hi) / (lo - hi), 0.0f, 1.0f);
         }
         else
         {
-            tmp2 = float(z >= lo);
+            cond = float(z >= lo);
         }
-        tmp1 = tmp2;
+        cond2 = cond;
     }
-    return tmp1;
+    return cond2;
 }
 #endif
 
 #if defined(WW_FN_ussTerrTier) || defined(WW_FN_ALL)
 float ussTerrTier(float2 uv, int tier, float z, float texel, bool pen, float2 wxy)
 {
-    float2 tmp1 = uv;
-    int tmp2 = tier;
-    float2 tmp3 = ussTerrAtlasUv(tmp1, tmp2);
-    float2 rg = ussTerrMap.Sample(_ussTerrMap_sampler, tmp3).xy;
-    float2 tmp4 = rg;
-    float tmp5 = z;
-    float c = ussTerrVis(tmp4, tmp5);
-    bool tmp6 = !pen;
-    bool tmp7;
-    if (!tmp6)
+    float2 cond2 = uv;
+    int cond = tier;
+    float2 nPick = ussTerrAtlasUv(cond2, cond);
+    float2 rg = ussTerrMap.Sample(_ussTerrMap_sampler, nPick).xy;
+    float2 csmHardRet = rg;
+    float sAPick = z;
+    float c = ussTerrVis(csmHardRet, sAPick);
+    bool sAPart3 = !pen;
+    bool sAPart2;
+    if (!sAPart3)
     {
-        tmp7 = ussTerrPen.x < 0.5f;
+        sAPart2 = ussTerrPen.x < 0.5f;
     }
     else
     {
-        tmp7 = tmp6;
+        sAPart2 = sAPart3;
     }
-    bool tmp8;
-    if (!tmp7)
+    bool sAPart;
+    if (!sAPart2)
     {
-        tmp8 = rg.x <= 0.0f;
+        sAPart = rg.x <= 0.0f;
     }
     else
     {
-        tmp8 = tmp7;
+        sAPart = sAPart2;
     }
-    if (tmp8)
+    if (sAPart)
     {
         return c;
     }
@@ -520,42 +525,42 @@ float ussTerrTier(float2 uv, int tier, float z, float texel, bool pen, float2 wx
     {
         return c;
     }
-    float tmp9;
+    float sBPick;
     if (tier == 0)
     {
-        tmp9 = ussTerrSize.x;
+        sBPick = ussTerrSize.x;
     }
     else
     {
-        tmp9 = ussTerrSize.y;
+        sBPick = ussTerrSize.y;
     }
-    float n = tmp9;
+    float n = sBPick;
     if (n <= 0.0f)
     {
         n = 1.0f / max(ussTerrXform.x * texel, 9.9999999600419720025001879548654e-13f);
     }
-    float2 tmp10;
+    float2 sBPart3;
     if (ussCsmStable.z > 0.5f)
     {
-        tmp10 = gl_FragCoord.xy;
+        sBPart3 = gl_FragCoord.xy;
     }
     else
     {
-        tmp10 = mod(floor(wxy * (4.0f / max(texel, 9.9999999747524270787835121154785e-07f))), 4096.0f.xx);
+        sBPart3 = mod(floor(wxy * (4.0f / max(texel, 9.9999999747524270787835121154785e-07f))), 4096.0f.xx);
     }
-    float2 tmp11 = tmp10;
-    float rot = 6.283185482025146484375f * ussIgn(tmp11);
+    float2 sBPart2 = sBPart3;
+    float rot = 6.283185482025146484375f * ussIgn(sBPart2);
     float sum = c;
     for (int t = 0; t < 8; t++)
     {
         float th = (float(t) * 2.3999631404876708984375f) + rot;
         float2 o = float2(cos(th), sin(th)) * ((sqrt((float(t) + 0.5f) / 8.0f) * r) / n);
-        float2 tmp12 = clamp(uv + o, 0.0f.xx, 1.0f.xx);
-        int tmp13 = tier;
-        float2 tmp14 = ussTerrAtlasUv(tmp12, tmp13);
-        float2 tmp15 = ussTerrMap.Sample(_ussTerrMap_sampler, tmp14).xy;
-        float tmp16 = z;
-        sum += ussTerrVis(tmp15, tmp16);
+        float2 sBPart = clamp(uv + o, 0.0f.xx, 1.0f.xx);
+        int sAPart7 = tier;
+        float2 sBPart12 = ussTerrAtlasUv(sBPart, sAPart7);
+        float2 sBPart11 = ussTerrMap.Sample(_ussTerrMap_sampler, sBPart12).xy;
+        float sBPart10 = z;
+        sum += ussTerrVis(sBPart11, sBPart10);
     }
     return sum / 9.0f;
 }
@@ -564,33 +569,33 @@ float ussTerrTier(float2 uv, int tier, float z, float texel, bool pen, float2 wx
 #if defined(WW_FN_ussTerrTier_V2) || defined(WW_FN_ALL)
 float ussTerrTier(float2 uv, int tier, float z, float texel, bool pen, float2 wxy)
 {
-    float2 tmp1 = uv;
-    int tmp2 = tier;
-    float2 tmp3 = ussTerrAtlasUv(tmp1, tmp2);
-    float2 rg = ussTerrMap.SampleLevel(_ussTerrMap_sampler, tmp3, 0.0f).xy;
-    float2 tmp4 = rg;
-    float tmp5 = z;
-    float c = ussTerrVis(tmp4, tmp5);
-    bool tmp6 = !pen;
-    bool tmp7;
-    if (!tmp6)
+    float2 cond2 = uv;
+    int cond = tier;
+    float2 nPick = ussTerrAtlasUv(cond2, cond);
+    float2 rg = ussTerrMap.SampleLevel(_ussTerrMap_sampler, nPick, 0.0f).xy;
+    float2 csmHardRet = rg;
+    float sAPick = z;
+    float c = ussTerrVis(csmHardRet, sAPick);
+    bool sAPart3 = !pen;
+    bool sAPart2;
+    if (!sAPart3)
     {
-        tmp7 = ussTerrPen.x < 0.5f;
+        sAPart2 = ussTerrPen.x < 0.5f;
     }
     else
     {
-        tmp7 = tmp6;
+        sAPart2 = sAPart3;
     }
-    bool tmp8;
-    if (!tmp7)
+    bool sAPart;
+    if (!sAPart2)
     {
-        tmp8 = rg.x <= 0.0f;
+        sAPart = rg.x <= 0.0f;
     }
     else
     {
-        tmp8 = tmp7;
+        sAPart = sAPart2;
     }
-    if (tmp8)
+    if (sAPart)
     {
         return c;
     }
@@ -600,42 +605,42 @@ float ussTerrTier(float2 uv, int tier, float z, float texel, bool pen, float2 wx
     {
         return c;
     }
-    float tmp9;
+    float sBPick;
     if (tier == 0)
     {
-        tmp9 = ussTerrSize.x;
+        sBPick = ussTerrSize.x;
     }
     else
     {
-        tmp9 = ussTerrSize.y;
+        sBPick = ussTerrSize.y;
     }
-    float n = tmp9;
+    float n = sBPick;
     if (n <= 0.0f)
     {
         n = 1.0f / max(ussTerrXform.x * texel, 9.9999999600419720025001879548654e-13f);
     }
-    float2 tmp10;
+    float2 sBPart3;
     if (ussCsmStable.z > 0.5f)
     {
-        tmp10 = pcFragCoord.xy;
+        sBPart3 = pcFragCoord.xy;
     }
     else
     {
-        tmp10 = mod(floor(wxy * (4.0f / max(texel, 9.9999999747524270787835121154785e-07f))), 4096.0f.xx);
+        sBPart3 = mod(floor(wxy * (4.0f / max(texel, 9.9999999747524270787835121154785e-07f))), 4096.0f.xx);
     }
-    float2 tmp11 = tmp10;
-    float rot = 6.283185482025146484375f * ussIgn(tmp11);
+    float2 sBPart2 = sBPart3;
+    float rot = 6.283185482025146484375f * ussIgn(sBPart2);
     float sum = c;
     for (int t = 0; t < 8; t++)
     {
         float th = (float(t) * 2.3999631404876708984375f) + rot;
         float2 o = float2(cos(th), sin(th)) * ((sqrt((float(t) + 0.5f) / 8.0f) * r) / n);
-        float2 tmp12 = clamp(uv + o, 0.0f.xx, 1.0f.xx);
-        int tmp13 = tier;
-        float2 tmp14 = ussTerrAtlasUv(tmp12, tmp13);
-        float2 tmp15 = ussTerrMap.SampleLevel(_ussTerrMap_sampler, tmp14, 0.0f).xy;
-        float tmp16 = z;
-        sum += ussTerrVis(tmp15, tmp16);
+        float2 sBPart = clamp(uv + o, 0.0f.xx, 1.0f.xx);
+        int sAPart7 = tier;
+        float2 sBPart12 = ussTerrAtlasUv(sBPart, sAPart7);
+        float2 sBPart11 = ussTerrMap.SampleLevel(_ussTerrMap_sampler, sBPart12, 0.0f).xy;
+        float sBPart10 = z;
+        sum += ussTerrVis(sBPart11, sBPart10);
     }
     return sum / 9.0f;
 }
@@ -653,37 +658,37 @@ float2 ussTerrExtraUv(inout float2 uv, float off)
 float4 ussTerrHeights(float2 uv)
 {
     float d = 1.0f / ussTerrSize.x;
-    float2 tmp1 = uv;
-    float tmp2 = ussTerrExtra.x;
-    float2 tmp3 = ussTerrExtraUv(tmp1, tmp2);
-    float c = ussTerrMap.Sample(_ussTerrMap_sampler, tmp3).x;
-    float2 tmp4 = uv + float2(d, 0.0f);
-    float tmp5 = ussTerrExtra.x;
-    float2 tmp6 = ussTerrExtraUv(tmp4, tmp5);
-    float hE = ussTerrMap.Sample(_ussTerrMap_sampler, tmp6).x;
-    float2 tmp7 = uv - float2(d, 0.0f);
-    float tmp8 = ussTerrExtra.x;
-    float2 tmp9 = ussTerrExtraUv(tmp7, tmp8);
-    float hW = ussTerrMap.Sample(_ussTerrMap_sampler, tmp9).x;
-    float2 tmp10 = uv + float2(0.0f, d);
-    float tmp11 = ussTerrExtra.x;
-    float2 tmp12 = ussTerrExtraUv(tmp10, tmp11);
-    float hN = ussTerrMap.Sample(_ussTerrMap_sampler, tmp12).x;
-    float2 tmp13 = uv - float2(0.0f, d);
-    float tmp14 = ussTerrExtra.x;
-    float2 tmp15 = ussTerrExtraUv(tmp13, tmp14);
-    float hS = ussTerrMap.Sample(_ussTerrMap_sampler, tmp15).x;
-    bool tmp16 = c <= 0.0f;
-    bool tmp17;
-    if (!tmp16)
+    float2 cond2 = uv;
+    float cond = ussTerrExtra.x;
+    float2 nPick = ussTerrExtraUv(cond2, cond);
+    float c = ussTerrMap.Sample(_ussTerrMap_sampler, nPick).x;
+    float2 csmHardRet = uv + float2(d, 0.0f);
+    float sAPick = ussTerrExtra.x;
+    float2 sAPart3 = ussTerrExtraUv(csmHardRet, sAPick);
+    float hE = ussTerrMap.Sample(_ussTerrMap_sampler, sAPart3).x;
+    float2 sAPart2 = uv - float2(d, 0.0f);
+    float sAPart = ussTerrExtra.x;
+    float2 sBPick = ussTerrExtraUv(sAPart2, sAPart);
+    float hW = ussTerrMap.Sample(_ussTerrMap_sampler, sBPick).x;
+    float2 sBPart3 = uv + float2(0.0f, d);
+    float sBPart2 = ussTerrExtra.x;
+    float2 sBPart = ussTerrExtraUv(sBPart3, sBPart2);
+    float hN = ussTerrMap.Sample(_ussTerrMap_sampler, sBPart).x;
+    float2 sAPart7 = uv - float2(0.0f, d);
+    float sBPart12 = ussTerrExtra.x;
+    float2 sBPart11 = ussTerrExtraUv(sAPart7, sBPart12);
+    float hS = ussTerrMap.Sample(_ussTerrMap_sampler, sBPart11).x;
+    bool sBPart10 = c <= 0.0f;
+    bool sBPart9;
+    if (!sBPart10)
     {
-        tmp17 = min(min(hE, hW), min(hN, hS)) <= 0.0f;
+        sBPart9 = min(min(hE, hW), min(hN, hS)) <= 0.0f;
     }
     else
     {
-        tmp17 = tmp16;
+        sBPart9 = sBPart10;
     }
-    if (tmp17)
+    if (sBPart9)
     {
         return float4(ussTerrRange.x + (c * ussTerrRange.y), 0.0f, 0.0f, float(c > 0.0f));
     }
@@ -698,37 +703,37 @@ float4 ussTerrHeights(float2 uv)
 float4 ussTerrHeights(float2 uv)
 {
     float d = 1.0f / ussTerrSize.x;
-    float2 tmp1 = uv;
-    float tmp2 = ussTerrExtra.x;
-    float2 tmp3 = ussTerrExtraUv(tmp1, tmp2);
-    float c = ussTerrMap.SampleLevel(_ussTerrMap_sampler, tmp3, 0.0f).x;
-    float2 tmp4 = uv + float2(d, 0.0f);
-    float tmp5 = ussTerrExtra.x;
-    float2 tmp6 = ussTerrExtraUv(tmp4, tmp5);
-    float hE = ussTerrMap.SampleLevel(_ussTerrMap_sampler, tmp6, 0.0f).x;
-    float2 tmp7 = uv - float2(d, 0.0f);
-    float tmp8 = ussTerrExtra.x;
-    float2 tmp9 = ussTerrExtraUv(tmp7, tmp8);
-    float hW = ussTerrMap.SampleLevel(_ussTerrMap_sampler, tmp9, 0.0f).x;
-    float2 tmp10 = uv + float2(0.0f, d);
-    float tmp11 = ussTerrExtra.x;
-    float2 tmp12 = ussTerrExtraUv(tmp10, tmp11);
-    float hN = ussTerrMap.SampleLevel(_ussTerrMap_sampler, tmp12, 0.0f).x;
-    float2 tmp13 = uv - float2(0.0f, d);
-    float tmp14 = ussTerrExtra.x;
-    float2 tmp15 = ussTerrExtraUv(tmp13, tmp14);
-    float hS = ussTerrMap.SampleLevel(_ussTerrMap_sampler, tmp15, 0.0f).x;
-    bool tmp16 = c <= 0.0f;
-    bool tmp17;
-    if (!tmp16)
+    float2 cond2 = uv;
+    float cond = ussTerrExtra.x;
+    float2 nPick = ussTerrExtraUv(cond2, cond);
+    float c = ussTerrMap.SampleLevel(_ussTerrMap_sampler, nPick, 0.0f).x;
+    float2 csmHardRet = uv + float2(d, 0.0f);
+    float sAPick = ussTerrExtra.x;
+    float2 sAPart3 = ussTerrExtraUv(csmHardRet, sAPick);
+    float hE = ussTerrMap.SampleLevel(_ussTerrMap_sampler, sAPart3, 0.0f).x;
+    float2 sAPart2 = uv - float2(d, 0.0f);
+    float sAPart = ussTerrExtra.x;
+    float2 sBPick = ussTerrExtraUv(sAPart2, sAPart);
+    float hW = ussTerrMap.SampleLevel(_ussTerrMap_sampler, sBPick, 0.0f).x;
+    float2 sBPart3 = uv + float2(0.0f, d);
+    float sBPart2 = ussTerrExtra.x;
+    float2 sBPart = ussTerrExtraUv(sBPart3, sBPart2);
+    float hN = ussTerrMap.SampleLevel(_ussTerrMap_sampler, sBPart, 0.0f).x;
+    float2 sAPart7 = uv - float2(0.0f, d);
+    float sBPart12 = ussTerrExtra.x;
+    float2 sBPart11 = ussTerrExtraUv(sAPart7, sBPart12);
+    float hS = ussTerrMap.SampleLevel(_ussTerrMap_sampler, sBPart11, 0.0f).x;
+    bool sBPart10 = c <= 0.0f;
+    bool sBPart9;
+    if (!sBPart10)
     {
-        tmp17 = min(min(hE, hW), min(hN, hS)) <= 0.0f;
+        sBPart9 = min(min(hE, hW), min(hN, hS)) <= 0.0f;
     }
     else
     {
-        tmp17 = tmp16;
+        sBPart9 = sBPart10;
     }
-    if (tmp17)
+    if (sBPart9)
     {
         return float4(ussTerrRange.x + (c * ussTerrRange.y), 0.0f, 0.0f, float(c > 0.0f));
     }
@@ -742,17 +747,17 @@ float4 ussTerrHeights(float2 uv)
 #if defined(WW_FN_ussTerrSelfWeight) || defined(WW_FN_ALL)
 float ussTerrSelfWeight(float2 uv, float wz, float4 h)
 {
-    float2 tmp1 = uv;
-    int tmp2 = 0;
-    float2 tmp3 = ussTerrAtlasUv(tmp1, tmp2);
-    float2 rg = ussTerrMap.Sample(_ussTerrMap_sampler, tmp3).xy;
-    float2 tmp4 = uv;
-    float tmp5 = ussTerrExtra.x;
-    float2 tmp6 = ussTerrExtraUv(tmp4, tmp5);
-    float cast = ussTerrMap.Sample(_ussTerrMap_sampler, tmp6).y;
+    float2 cond2 = uv;
+    int cond = 0;
+    float2 nPick = ussTerrAtlasUv(cond2, cond);
+    float2 rg = ussTerrMap.Sample(_ussTerrMap_sampler, nPick).xy;
+    float2 csmHardRet = uv;
+    float sAPick = ussTerrExtra.x;
+    float2 sAPart3 = ussTerrExtraUv(csmHardRet, sAPick);
+    float cast = ussTerrMap.Sample(_ussTerrMap_sampler, sAPart3).y;
     bool wwh0 = (rg.x <= 0.0f);
     bool wwh1 = (cast <= 0.0f);
-    if (wwh0 || wwh1)
+    if (or(wwh0, wwh1))   // HLSLFIX2 orfix.py: no short-circuit branch (NV took the wrong side)
     {
         return 1.0f;
     }
@@ -765,33 +770,33 @@ float ussTerrSelfWeight(float2 uv, float wz, float4 h)
     float margin = (4.0f * ussTerrSelf.w) + min(1.5f * grad, ussTerrSelf.z);
     float fade = clamp((delta - margin) / max(grad, 8.0f * ussTerrSelf.w), 0.0f, 1.0f);
     float lo = ussTerrSelf.y;
-    float tmp7;
+    float sAPart2;
     if (lo > 0.0f)
     {
-        tmp7 = fade * smoothstep(0.0f, 1.0f, ((hc - wz) - lo) / lo);
+        sAPart2 = fade * smoothstep(0.0f, 1.0f, ((hc - wz) - lo) / lo);
     }
     else
     {
-        tmp7 = fade;
+        sAPart2 = fade;
     }
-    return tmp7;
+    return sAPart2;
 }
 #endif
 
 #if defined(WW_FN_ussTerrSelfWeight_V2) || defined(WW_FN_ALL)
 float ussTerrSelfWeight(float2 uv, float wz, float4 h)
 {
-    float2 tmp1 = uv;
-    int tmp2 = 0;
-    float2 tmp3 = ussTerrAtlasUv(tmp1, tmp2);
-    float2 rg = ussTerrMap.SampleLevel(_ussTerrMap_sampler, tmp3, 0.0f).xy;
-    float2 tmp4 = uv;
-    float tmp5 = ussTerrExtra.x;
-    float2 tmp6 = ussTerrExtraUv(tmp4, tmp5);
-    float cast = ussTerrMap.SampleLevel(_ussTerrMap_sampler, tmp6, 0.0f).y;
+    float2 cond2 = uv;
+    int cond = 0;
+    float2 nPick = ussTerrAtlasUv(cond2, cond);
+    float2 rg = ussTerrMap.SampleLevel(_ussTerrMap_sampler, nPick, 0.0f).xy;
+    float2 csmHardRet = uv;
+    float sAPick = ussTerrExtra.x;
+    float2 sAPart3 = ussTerrExtraUv(csmHardRet, sAPick);
+    float cast = ussTerrMap.SampleLevel(_ussTerrMap_sampler, sAPart3, 0.0f).y;
     bool wwh2 = (rg.x <= 0.0f);
     bool wwh3 = (cast <= 0.0f);
-    if (wwh2 || wwh3)
+    if (or(wwh2, wwh3))   // HLSLFIX2 orfix.py: no short-circuit branch (NV took the wrong side)
     {
         return 1.0f;
     }
@@ -804,16 +809,16 @@ float ussTerrSelfWeight(float2 uv, float wz, float4 h)
     float margin = (4.0f * ussTerrSelf.w) + min(1.5f * grad, ussTerrSelf.z);
     float fade = clamp((delta - margin) / max(grad, 8.0f * ussTerrSelf.w), 0.0f, 1.0f);
     float lo = ussTerrSelf.y;
-    float tmp7;
+    float sAPart2;
     if (lo > 0.0f)
     {
-        tmp7 = fade * smoothstep(0.0f, 1.0f, ((hc - wz) - lo) / lo);
+        sAPart2 = fade * smoothstep(0.0f, 1.0f, ((hc - wz) - lo) / lo);
     }
     else
     {
-        tmp7 = fade;
+        sAPart2 = fade;
     }
-    return tmp7;
+    return sAPart2;
 }
 #endif
 
@@ -827,85 +832,85 @@ float ussTerrain(float3 posView, out float inMap, inout float grad, bool pen)
     }
     float3 wp = mul(float4(posView, 1.0f), ussWorldFromView).xyz;
     float2 uv = float2((wp.x * ussTerrXform.x) + ussTerrXform.y, (wp.y * ussTerrXform.z) + ussTerrXform.w);
-    bool tmp1 = any(bool2(uv.x < 0.0f.xx.x, uv.y < 0.0f.xx.y));
-    bool tmp2;
-    if (!tmp1)
+    bool cond2 = any(bool2(uv.x < 0.0f.xx.x, uv.y < 0.0f.xx.y));
+    bool cond;
+    if (!cond2)
     {
-        tmp2 = any(bool2(uv.x > 1.0f.xx.x, uv.y > 1.0f.xx.y));
+        cond = any(bool2(uv.x > 1.0f.xx.x, uv.y > 1.0f.xx.y));
     }
     else
     {
-        tmp2 = tmp1;
+        cond = cond2;
     }
-    if (tmp2)
+    if (cond)
     {
         return 1.0f;
     }
     inMap = 1.0f;
     float4 h = 0.0f.xxxx;
-    bool tmp3;
+    bool nPick;
     if (pen)
     {
-        bool tmp4 = ussTerrBias.x > 1.5f;
-        bool tmp5;
-        if (!tmp4)
+        bool csmHardRet = ussTerrBias.x > 1.5f;
+        bool sAPick;
+        if (!csmHardRet)
         {
-            tmp5 = ussTerrExtra.y > 0.0f;
+            sAPick = ussTerrExtra.y > 0.0f;
         }
         else
         {
-            tmp5 = tmp4;
+            sAPick = csmHardRet;
         }
-        tmp3 = tmp5;
+        nPick = sAPick;
     }
     else
     {
-        tmp3 = pen;
+        nPick = pen;
     }
-    if (tmp3)
+    if (nPick)
     {
-        float2 tmp6 = uv;
-        h = ussTerrHeights(tmp6);
+        float2 sAPart3 = uv;
+        h = ussTerrHeights(sAPart3);
     }
-    bool tmp7;
+    bool sAPart2;
     if (pen)
     {
-        tmp7 = ussTerrBias.x > 1.5f;
+        sAPart2 = ussTerrBias.x > 1.5f;
     }
     else
     {
-        tmp7 = pen;
+        sAPart2 = pen;
     }
-    if (tmp7)
+    if (sAPart2)
     {
-        float tmp8;
+        float sAPart;
         if (ussTerrBias.x > 2.5f)
         {
-            tmp8 = 0.0f;
+            sAPart = 0.0f;
         }
         else
         {
-            tmp8 = h.z;
+            sAPart = h.z;
         }
-        grad = tmp8;
+        grad = sAPart;
     }
-    float tmp9;
+    float sBPick;
     if (ussTerrBias.x > 0.5f)
     {
-        tmp9 = (12.0f * (1.0f + clamp(grad, 0.0f, 4.0f))) / ussTerrBias.y;
+        sBPick = (12.0f * (1.0f + clamp(grad, 0.0f, 4.0f))) / ussTerrBias.y;
     }
     else
     {
-        tmp9 = ussTerrRange.z;
+        sBPick = ussTerrRange.z;
     }
-    float z = wp.z + tmp9;
-    float2 tmp10 = uv;
-    int tmp11 = 0;
-    float tmp12 = z;
-    float tmp13 = ussTerrPen.y;
-    bool tmp14 = pen;
-    float2 tmp15 = wp.xy;
-    float vis = ussTerrTier(tmp10, tmp11, tmp12, tmp13, tmp14, tmp15);
+    float z = wp.z + sBPick;
+    float2 sBPart3 = uv;
+    int sBPart2 = 0;
+    float sBPart = z;
+    float sAPart7 = ussTerrPen.y;
+    bool sBPart12 = pen;
+    float2 sBPart11 = wp.xy;
+    float vis = ussTerrTier(sBPart3, sBPart2, sBPart, sAPart7, sBPart12, sBPart11);
     if (ussTerrSize.y > 0.0f)
     {
         float2 un = float2((wp.x * ussTerrNearXform.x) + ussTerrNearXform.y, (wp.y * ussTerrNearXform.z) + ussTerrNearXform.w);
@@ -913,76 +918,76 @@ float ussTerrain(float3 posView, out float inMap, inout float grad, bool pen)
         float w = smoothstep(0.0f, 1.0f, clamp(min(en.x, en.y), 0.0f, 1.0f));
         if (w > 0.0f)
         {
-            float2 tmp16 = un;
-            int tmp17 = 1;
-            float tmp18 = z;
-            float tmp19 = ussTerrBias.w;
-            bool tmp20 = pen;
-            float2 tmp21 = wp.xy;
-            vis = lerp(vis, ussTerrTier(tmp16, tmp17, tmp18, tmp19, tmp20, tmp21), w);
+            float2 sBPart10 = un;
+            int sBPart9 = 1;
+            float sBPart8 = z;
+            float sBPart7 = ussTerrBias.w;
+            bool sAPart6 = pen;
+            float2 sAPart5 = wp.xy;
+            vis = lerp(vis, ussTerrTier(sBPart10, sBPart9, sBPart8, sBPart7, sAPart6, sAPart5), w);
         }
     }
     if (ussTerrExtra.y > 0.0f)
     {
-        bool tmp22 = h.w > 0.0f;
-        bool tmp23;
-        if (tmp22)
+        bool sAPart4 = h.w > 0.0f;
+        bool sBPart6;
+        if (sAPart4)
         {
-            tmp23 = ussTerrSelf.x > 0.5f;
+            sBPart6 = ussTerrSelf.x > 0.5f;
         }
         else
         {
-            tmp23 = tmp22;
+            sBPart6 = sAPart4;
         }
-        if (tmp23)
+        if (sBPart6)
         {
-            float2 tmp24 = uv;
-            float tmp25 = ussTerrExtra.y;
-            float2 tmp26 = ussTerrExtraUv(tmp24, tmp25);
-            float2 tmp27 = ussTerrMap.Sample(_ussTerrMap_sampler, tmp26).xy;
-            float tmp28 = z;
-            float2 tmp29 = uv;
-            float tmp30 = wp.z;
-            float4 tmp31 = h;
-            vis = min(ussTerrVis(tmp27, tmp28), lerp(1.0f, vis, ussTerrSelfWeight(tmp29, tmp30, tmp31)));
+            float2 sBPart5 = uv;
+            float sBPart4 = ussTerrExtra.y;
+            float2 wPick = ussTerrExtraUv(sBPart5, sBPart4);
+            float2 ussTerrMapTexel2 = ussTerrMap.Sample(_ussTerrMap_sampler, wPick).xy;
+            float visPart5 = z;
+            float2 visPart4 = uv;
+            float visPart3 = wp.z;
+            float4 visPart2 = h;
+            vis = min(ussTerrVis(ussTerrMapTexel2, visPart5), lerp(1.0f, vis, ussTerrSelfWeight(visPart4, visPart3, visPart2)));
         }
         else
         {
             if (h.w > 0.0f)
             {
-                float tmp32;
+                float mPick;
                 if (ussTerrExtra.w < 0.0f)
                 {
-                    tmp32 = 1.0f;
+                    mPick = 1.0f;
                 }
                 else
                 {
-                    tmp32 = smoothstep(0.75f * ussTerrExtra.w, 1.25f * ussTerrExtra.w, (wp.z - h.x) - min(h.y, 4.0f * ussTerrPen.y));
+                    mPick = smoothstep(0.75f * ussTerrExtra.w, 1.25f * ussTerrExtra.w, (wp.z - h.x) - min(h.y, 4.0f * ussTerrPen.y));
                 }
-                float m = tmp32;
+                float m = mPick;
                 if (m > 0.0f)
                 {
-                    float2 tmp33 = uv;
-                    float tmp34 = ussTerrExtra.y;
-                    float2 tmp35 = ussTerrExtraUv(tmp33, tmp34);
-                    float2 tmp36 = ussTerrMap.Sample(_ussTerrMap_sampler, tmp35).xy;
-                    float tmp37 = z;
-                    vis = lerp(vis, ussTerrVis(tmp36, tmp37), m);
+                    float2 ussTerrExtraUvPart2 = uv;
+                    float ussTerrExtraUvPart = ussTerrExtra.y;
+                    float2 ussTerrExtraUvRet = ussTerrExtraUv(ussTerrExtraUvPart2, ussTerrExtraUvPart);
+                    float2 ussTerrMapTexel = ussTerrMap.Sample(_ussTerrMap_sampler, ussTerrExtraUvRet).xy;
+                    float visPart = z;
+                    vis = lerp(vis, ussTerrVis(ussTerrMapTexel, visPart), m);
                 }
             }
         }
     }
     float2 e = min(uv, 1.0f.xx - uv) / max(ussTerrRange.w, 9.9999999747524270787835121154785e-07f).xx;
-    float tmp38;
+    float edgeWPick;
     if (ussTerrRange.w < 0.0f)
     {
-        tmp38 = 1.0f - smoothstep(0.800000011920928955078125f, 1.0f, length(wp.xy - ussWorldFromView[3].xy) / (-ussTerrRange.w));
+        edgeWPick = 1.0f - smoothstep(0.800000011920928955078125f, 1.0f, length(wp.xy - ussWorldFromView[3].xy) / (-ussTerrRange.w));
     }
     else
     {
-        tmp38 = clamp(min(e.x, e.y), 0.0f, 1.0f);
+        edgeWPick = clamp(min(e.x, e.y), 0.0f, 1.0f);
     }
-    float edgeW = tmp38;
+    float edgeW = edgeWPick;
     vis = lerp(1.0f, vis, edgeW);
     return lerp(1.0f, vis, ussTerrBias.z);
 }
@@ -998,85 +1003,85 @@ float ussTerrain(float3 posView, out float inMap, inout float grad, bool pen)
     }
     float3 wp = mul(float4(posView, 1.0f), ussWorldFromView).xyz;
     float2 uv = float2((wp.x * ussTerrXform.x) + ussTerrXform.y, (wp.y * ussTerrXform.z) + ussTerrXform.w);
-    bool tmp1 = any(bool2(uv.x < 0.0f.xx.x, uv.y < 0.0f.xx.y));
-    bool tmp2;
-    if (!tmp1)
+    bool cond2 = any(bool2(uv.x < 0.0f.xx.x, uv.y < 0.0f.xx.y));
+    bool cond;
+    if (!cond2)
     {
-        tmp2 = any(bool2(uv.x > 1.0f.xx.x, uv.y > 1.0f.xx.y));
+        cond = any(bool2(uv.x > 1.0f.xx.x, uv.y > 1.0f.xx.y));
     }
     else
     {
-        tmp2 = tmp1;
+        cond = cond2;
     }
-    if (tmp2)
+    if (cond)
     {
         return 1.0f;
     }
     inMap = 1.0f;
     float4 h = 0.0f.xxxx;
-    bool tmp3;
+    bool nPick;
     if (pen)
     {
-        bool tmp4 = ussTerrBias.x > 1.5f;
-        bool tmp5;
-        if (!tmp4)
+        bool csmHardRet = ussTerrBias.x > 1.5f;
+        bool sAPick;
+        if (!csmHardRet)
         {
-            tmp5 = ussTerrExtra.y > 0.0f;
+            sAPick = ussTerrExtra.y > 0.0f;
         }
         else
         {
-            tmp5 = tmp4;
+            sAPick = csmHardRet;
         }
-        tmp3 = tmp5;
+        nPick = sAPick;
     }
     else
     {
-        tmp3 = pen;
+        nPick = pen;
     }
-    if (tmp3)
+    if (nPick)
     {
-        float2 tmp6 = uv;
-        h = ussTerrHeights(tmp6);
+        float2 sAPart3 = uv;
+        h = ussTerrHeights(sAPart3);
     }
-    bool tmp7;
+    bool sAPart2;
     if (pen)
     {
-        tmp7 = ussTerrBias.x > 1.5f;
+        sAPart2 = ussTerrBias.x > 1.5f;
     }
     else
     {
-        tmp7 = pen;
+        sAPart2 = pen;
     }
-    if (tmp7)
+    if (sAPart2)
     {
-        float tmp8;
+        float sAPart;
         if (ussTerrBias.x > 2.5f)
         {
-            tmp8 = 0.0f;
+            sAPart = 0.0f;
         }
         else
         {
-            tmp8 = h.z;
+            sAPart = h.z;
         }
-        grad = tmp8;
+        grad = sAPart;
     }
-    float tmp9;
+    float sBPick;
     if (ussTerrBias.x > 0.5f)
     {
-        tmp9 = (12.0f * (1.0f + clamp(grad, 0.0f, 4.0f))) / ussTerrBias.y;
+        sBPick = (12.0f * (1.0f + clamp(grad, 0.0f, 4.0f))) / ussTerrBias.y;
     }
     else
     {
-        tmp9 = ussTerrRange.z;
+        sBPick = ussTerrRange.z;
     }
-    float z = wp.z + tmp9;
-    float2 tmp10 = uv;
-    int tmp11 = 0;
-    float tmp12 = z;
-    float tmp13 = ussTerrPen.y;
-    bool tmp14 = pen;
-    float2 tmp15 = wp.xy;
-    float vis = ussTerrTier(tmp10, tmp11, tmp12, tmp13, tmp14, tmp15);
+    float z = wp.z + sBPick;
+    float2 sBPart3 = uv;
+    int sBPart2 = 0;
+    float sBPart = z;
+    float sAPart7 = ussTerrPen.y;
+    bool sBPart12 = pen;
+    float2 sBPart11 = wp.xy;
+    float vis = ussTerrTier(sBPart3, sBPart2, sBPart, sAPart7, sBPart12, sBPart11);
     if (ussTerrSize.y > 0.0f)
     {
         float2 un = float2((wp.x * ussTerrNearXform.x) + ussTerrNearXform.y, (wp.y * ussTerrNearXform.z) + ussTerrNearXform.w);
@@ -1084,76 +1089,76 @@ float ussTerrain(float3 posView, out float inMap, inout float grad, bool pen)
         float w = smoothstep(0.0f, 1.0f, clamp(min(en.x, en.y), 0.0f, 1.0f));
         if (w > 0.0f)
         {
-            float2 tmp16 = un;
-            int tmp17 = 1;
-            float tmp18 = z;
-            float tmp19 = ussTerrBias.w;
-            bool tmp20 = pen;
-            float2 tmp21 = wp.xy;
-            vis = lerp(vis, ussTerrTier(tmp16, tmp17, tmp18, tmp19, tmp20, tmp21), w);
+            float2 sBPart10 = un;
+            int sBPart9 = 1;
+            float sBPart8 = z;
+            float sBPart7 = ussTerrBias.w;
+            bool sAPart6 = pen;
+            float2 sAPart5 = wp.xy;
+            vis = lerp(vis, ussTerrTier(sBPart10, sBPart9, sBPart8, sBPart7, sAPart6, sAPart5), w);
         }
     }
     if (ussTerrExtra.y > 0.0f)
     {
-        bool tmp22 = h.w > 0.0f;
-        bool tmp23;
-        if (tmp22)
+        bool sAPart4 = h.w > 0.0f;
+        bool sBPart6;
+        if (sAPart4)
         {
-            tmp23 = ussTerrSelf.x > 0.5f;
+            sBPart6 = ussTerrSelf.x > 0.5f;
         }
         else
         {
-            tmp23 = tmp22;
+            sBPart6 = sAPart4;
         }
-        if (tmp23)
+        if (sBPart6)
         {
-            float2 tmp24 = uv;
-            float tmp25 = ussTerrExtra.y;
-            float2 tmp26 = ussTerrExtraUv(tmp24, tmp25);
-            float2 tmp27 = ussTerrMap.SampleLevel(_ussTerrMap_sampler, tmp26, 0.0f).xy;
-            float tmp28 = z;
-            float2 tmp29 = uv;
-            float tmp30 = wp.z;
-            float4 tmp31 = h;
-            vis = min(ussTerrVis(tmp27, tmp28), lerp(1.0f, vis, ussTerrSelfWeight(tmp29, tmp30, tmp31)));
+            float2 sBPart5 = uv;
+            float sBPart4 = ussTerrExtra.y;
+            float2 wPick = ussTerrExtraUv(sBPart5, sBPart4);
+            float2 ussTerrMapTexel2 = ussTerrMap.SampleLevel(_ussTerrMap_sampler, wPick, 0.0f).xy;
+            float visPart5 = z;
+            float2 visPart4 = uv;
+            float visPart3 = wp.z;
+            float4 visPart2 = h;
+            vis = min(ussTerrVis(ussTerrMapTexel2, visPart5), lerp(1.0f, vis, ussTerrSelfWeight(visPart4, visPart3, visPart2)));
         }
         else
         {
             if (h.w > 0.0f)
             {
-                float tmp32;
+                float mPick;
                 if (ussTerrExtra.w < 0.0f)
                 {
-                    tmp32 = 1.0f;
+                    mPick = 1.0f;
                 }
                 else
                 {
-                    tmp32 = smoothstep(0.75f * ussTerrExtra.w, 1.25f * ussTerrExtra.w, (wp.z - h.x) - min(h.y, 4.0f * ussTerrPen.y));
+                    mPick = smoothstep(0.75f * ussTerrExtra.w, 1.25f * ussTerrExtra.w, (wp.z - h.x) - min(h.y, 4.0f * ussTerrPen.y));
                 }
-                float m = tmp32;
+                float m = mPick;
                 if (m > 0.0f)
                 {
-                    float2 tmp33 = uv;
-                    float tmp34 = ussTerrExtra.y;
-                    float2 tmp35 = ussTerrExtraUv(tmp33, tmp34);
-                    float2 tmp36 = ussTerrMap.SampleLevel(_ussTerrMap_sampler, tmp35, 0.0f).xy;
-                    float tmp37 = z;
-                    vis = lerp(vis, ussTerrVis(tmp36, tmp37), m);
+                    float2 ussTerrExtraUvPart2 = uv;
+                    float ussTerrExtraUvPart = ussTerrExtra.y;
+                    float2 ussTerrExtraUvRet = ussTerrExtraUv(ussTerrExtraUvPart2, ussTerrExtraUvPart);
+                    float2 ussTerrMapTexel = ussTerrMap.SampleLevel(_ussTerrMap_sampler, ussTerrExtraUvRet, 0.0f).xy;
+                    float visPart = z;
+                    vis = lerp(vis, ussTerrVis(ussTerrMapTexel, visPart), m);
                 }
             }
         }
     }
     float2 e = min(uv, 1.0f.xx - uv) / max(ussTerrRange.w, 9.9999999747524270787835121154785e-07f).xx;
-    float tmp38;
+    float edgeWPick;
     if (ussTerrRange.w < 0.0f)
     {
-        tmp38 = 1.0f - smoothstep(0.800000011920928955078125f, 1.0f, length(wp.xy - ussWorldFromView[3].xy) / (-ussTerrRange.w));
+        edgeWPick = 1.0f - smoothstep(0.800000011920928955078125f, 1.0f, length(wp.xy - ussWorldFromView[3].xy) / (-ussTerrRange.w));
     }
     else
     {
-        tmp38 = clamp(min(e.x, e.y), 0.0f, 1.0f);
+        edgeWPick = clamp(min(e.x, e.y), 0.0f, 1.0f);
     }
-    float edgeW = tmp38;
+    float edgeW = edgeWPick;
     vis = lerp(1.0f, vis, edgeW);
     return lerp(1.0f, vis, ussTerrBias.z);
 }
@@ -1164,17 +1169,17 @@ float ussSlope(float3 dPx, float3 dPy)
 {
     float3 n = cross(dPx, dPy);
     float l = length(n);
-    bool tmp1 = l < 9.9999996826552253889678874634872e-21f;
-    bool tmp2;
-    if (!tmp1)
+    bool cond2 = l < 9.9999996826552253889678874634872e-21f;
+    bool cond;
+    if (!cond2)
     {
-        tmp2 = ussTerrBias.x < 0.5f;
+        cond = ussTerrBias.x < 0.5f;
     }
     else
     {
-        tmp2 = tmp1;
+        cond = cond2;
     }
-    if (tmp2)
+    if (cond)
     {
         return 0.0f;
     }
@@ -1210,22 +1215,22 @@ float ussCompose(float3 posView)
 {
     float3 dPx = ddx(posView);
     float3 dPy = ddy(posView);
-    float3 tmp1 = posView;
-    float3 tmp2 = dPx;
-    float3 tmp3 = dPy;
-    float tmp4;
-    float tmp5 = ussCascades(tmp1, tmp2, tmp3, tmp4);
-    float w = tmp4;
-    float casc = tmp5;
-    float3 tmp6 = dPx;
-    float3 tmp7 = dPy;
-    float3 tmp8 = posView;
-    float tmp9 = ussSlope(tmp6, tmp7);
-    bool tmp10 = true;
-    float tmp11;
-    float tmp12 = ussTerrain(tmp8, tmp11, tmp9, tmp10);
-    float inMap = tmp11;
-    float terr = tmp12;
+    float3 cond2 = posView;
+    float3 cond = dPx;
+    float3 nPick = dPy;
+    float csmHardRet;
+    float sAPick = ussCascades(cond2, cond, nPick, csmHardRet);
+    float w = csmHardRet;
+    float casc = sAPick;
+    float3 sAPart3 = dPx;
+    float3 sAPart2 = dPy;
+    float3 sAPart = posView;
+    float sBPick = ussSlope(sAPart3, sAPart2);
+    bool sBPart3 = true;
+    float sBPart2;
+    float sBPart = ussTerrain(sAPart, sBPart2, sBPick, sBPart3);
+    float inMap = sBPart2;
+    float terr = sBPart;
     float con = ussContact();
     if (((ussRed & 1) != 0) && (w > 0.0f))
     {
@@ -1246,22 +1251,22 @@ float ussCompose(float3 posView)
 {
     float3 dPx = pcDPx;
     float3 dPy = pcDPy;
-    float3 tmp1 = posView;
-    float3 tmp2 = dPx;
-    float3 tmp3 = dPy;
-    float tmp4;
-    float tmp5 = ussCascades(tmp1, tmp2, tmp3, tmp4);
-    float w = tmp4;
-    float casc = tmp5;
-    float3 tmp6 = dPx;
-    float3 tmp7 = dPy;
-    float3 tmp8 = posView;
-    float tmp9 = ussSlope(tmp6, tmp7);
-    bool tmp10 = true;
-    float tmp11;
-    float tmp12 = ussTerrain(tmp8, tmp11, tmp9, tmp10);
-    float inMap = tmp11;
-    float terr = tmp12;
+    float3 cond2 = posView;
+    float3 cond = dPx;
+    float3 nPick = dPy;
+    float csmHardRet;
+    float sAPick = ussCascades(cond2, cond, nPick, csmHardRet);
+    float w = csmHardRet;
+    float casc = sAPick;
+    float3 sAPart3 = dPx;
+    float3 sAPart2 = dPy;
+    float3 sAPart = posView;
+    float sBPick = ussSlope(sAPart3, sAPart2);
+    bool sBPart3 = true;
+    float sBPart2;
+    float sBPart = ussTerrain(sAPart, sBPart2, sBPick, sBPart3);
+    float inMap = sBPart2;
+    float terr = sBPart;
     float con = ussContact();
     if (((ussRed & 1) != 0) && (w > 0.0f))
     {
@@ -1305,24 +1310,24 @@ float wwSunShadowGeo(float3 posView)
     }
     if (ussCsmStable.w > 0.0f)
     {
-        float3 tmp1 = posView;
-        float3 tmp2 = ddx(posView);
-        float3 tmp3 = ddy(posView);
-        csmNOff = csmNormalOff(tmp1, tmp2, tmp3);
+        float3 cond2 = posView;
+        float3 cond = ddx(posView);
+        float3 nPick = ddy(posView);
+        csmNOff = csmNormalOff(cond2, cond, nPick);
     }
     if (ussOn != 0)
     {
-        float3 tmp4 = posView;
-        float tmp5 = ussCompose(tmp4);
-        return tmp5;
+        float3 csmHardRet = posView;
+        float sAPick = ussCompose(csmHardRet);
+        return sAPick;
     }
     float dv = (-posView.z) * csmParams.x;
     if (dv > (csmParams.y + csmParams.w))
     {
         return 1.0f;
     }
-    float3 tmp6 = posView;
-    float sh = csmBlended(tmp6);
+    float3 sAPart3 = posView;
+    float sh = csmBlended(sAPart3);
     if ((csmRed & 2) == 0)
     {
         float s = clamp(((dot(posView, posView) * csmParams.x) * csmParams.x) / (csmParams.y * csmParams.y), 0.0f, 1.0f);
@@ -1346,24 +1351,24 @@ float wwSunShadowGeo(float3 posView)
     }
     if (ussCsmStable.w > 0.0f)
     {
-        float3 tmp1 = posView;
-        float3 tmp2 = pcDPx;
-        float3 tmp3 = pcDPy;
-        csmNOff = csmNormalOff(tmp1, tmp2, tmp3);
+        float3 cond2 = posView;
+        float3 cond = pcDPx;
+        float3 nPick = pcDPy;
+        csmNOff = csmNormalOff(cond2, cond, nPick);
     }
     if (ussOn != 0)
     {
-        float3 tmp4 = posView;
-        float tmp5 = ussCompose(tmp4);
-        return tmp5;
+        float3 csmHardRet = posView;
+        float sAPick = ussCompose(csmHardRet);
+        return sAPick;
     }
     float dv = (-posView.z) * csmParams.x;
     if (dv > (csmParams.y + csmParams.w))
     {
         return 1.0f;
     }
-    float3 tmp6 = posView;
-    float sh = csmBlended(tmp6);
+    float3 sAPart3 = posView;
+    float sh = csmBlended(sAPart3);
     if ((csmRed & 2) == 0)
     {
         float s = clamp(((dot(posView, posView) * csmParams.x) * csmParams.x) / (csmParams.y * csmParams.y), 0.0f, 1.0f);
@@ -1377,81 +1382,81 @@ float wwSunShadowGeo(float3 posView)
 #if defined(WW_FN_wwSunShadow) || defined(WW_FN_ALL)
 float wwSunShadow(float3 posView)
 {
-    float3 tmp1 = posView;
-    float tmp2 = wwSunShadowGeo(tmp1);
-    float3 tmp3 = posView;
-    return tmp2 * ussCloudT(tmp3);
+    float3 cond2 = posView;
+    float cond = wwSunShadowGeo(cond2);
+    float3 nPick = posView;
+    return cond * ussCloudT(nPick);
 }
 #endif
 
 #if defined(WW_FN_wwAirTailShadow) || defined(WW_FN_ALL)
 float wwAirTailShadow(float3 dirView, float t0, float t1, float tau)
 {
-    bool tmp1 = ussOn != 0;
-    bool tmp2;
-    if (tmp1)
+    bool cond2 = ussOn != 0;
+    bool cond;
+    if (cond2)
     {
-        tmp2 = ussTail.x > 0.0f;
+        cond = ussTail.x > 0.0f;
     }
     else
     {
-        tmp2 = tmp1;
+        cond = cond2;
     }
-    bool terr = tmp2 && (ussTerrOn != 0);
-    bool tmp3 = ussCloudOn != 0;
-    bool tmp4;
-    if (tmp3)
+    bool terr = cond && (ussTerrOn != 0);
+    bool nPick = ussCloudOn != 0;
+    bool csmHardRet;
+    if (nPick)
     {
-        tmp4 = ussCloudFar.z > 0.0f;
+        csmHardRet = ussCloudFar.z > 0.0f;
     }
     else
     {
-        tmp4 = tmp3;
+        csmHardRet = nPick;
     }
-    bool cloud = tmp4;
+    bool cloud = csmHardRet;
     bool wwh4 = (t1 <= t0);
     if (((!terr) && (!cloud)) || wwh4)
     {
         return 1.0f;
     }
-    float tmp5;
+    float sAPick;
     if (terr)
     {
-        tmp5 = ussTail.y;
+        sAPick = ussTail.y;
     }
     else
     {
-        tmp5 = ussCloudFar.w;
+        sAPick = ussCloudFar.w;
     }
-    float a = clamp(tmp5, 0.0f, 1.0f);
+    float a = clamp(sAPick, 0.0f, 1.0f);
     float3 p0 = dirView * (t0 / fogDistScale);
-    float tmp6;
+    float sAPart3;
     float inMap;
     if (terr)
     {
-        float3 tmp7 = p0;
-        float tmp8 = 0.0f;
-        bool tmp9 = false;
-        float tmp10;
-        float tmp11 = ussTerrain(tmp7, tmp10, tmp8, tmp9);
-        inMap = tmp10;
-        tmp6 = tmp11;
+        float3 sAPart2 = p0;
+        float sAPart = 0.0f;
+        bool sBPick = false;
+        float sBPart3;
+        float sBPart2 = ussTerrain(sAPart2, sBPart3, sAPart, sBPick);
+        inMap = sBPart3;
+        sAPart3 = sBPart2;
     }
     else
     {
-        tmp6 = 1.0f;
+        sAPart3 = 1.0f;
     }
-    float tmp12;
+    float sBPart;
     if (cloud)
     {
-        float3 tmp13 = p0;
-        tmp12 = ussCloudT(tmp13);
+        float3 sAPart7 = p0;
+        sBPart = ussCloudT(sAPart7);
     }
     else
     {
-        tmp12 = 1.0f;
+        sBPart = 1.0f;
     }
-    float v0 = tmp6 * tmp12;
+    float v0 = sAPart3 * sBPart;
     float e = 1.0f - exp(-max(tau, 0.0f));
     float2 key;
     if (ussCsmStable.z < (-0.5f))
@@ -1462,16 +1467,16 @@ float wwAirTailShadow(float3 dirView, float t0, float t1, float tau)
             dw = dirView;
         }
         dw /= ((abs(dw.x) + abs(dw.y)) + abs(dw.z)).xxx;
-        float2 tmp14;
+        float2 sBPart12;
         if (dw.z >= 0.0f)
         {
-            tmp14 = dw.xy;
+            sBPart12 = dw.xy;
         }
         else
         {
-            tmp14 = (1.0f.xx - abs(dw.yx)) * float2((dw.x >= 0.0f) ? 1.0f : (-1.0f), (dw.y >= 0.0f) ? 1.0f : (-1.0f));
+            sBPart12 = (1.0f.xx - abs(dw.yx)) * float2((dw.x >= 0.0f) ? 1.0f : (-1.0f), (dw.y >= 0.0f) ? 1.0f : (-1.0f));
         }
-        float2 oct = tmp14;
+        float2 oct = sBPart12;
         key = mod(floor(oct * 2048.0f), 4096.0f.xx);
     }
     else
@@ -1481,58 +1486,58 @@ float wwAirTailShadow(float3 dirView, float t0, float t1, float tau)
         float3 c = floor(w1 / cell.xxx);
         key = mod(c.xy + (float2(37.0f, 61.0f) * c.z), 4096.0f.xx);
     }
-    float2 tmp15;
+    float2 sBPart11;
     if (ussCsmStable.z > 0.5f)
     {
-        tmp15 = gl_FragCoord.xy;
+        sBPart11 = gl_FragCoord.xy;
     }
     else
     {
-        tmp15 = key;
+        sBPart11 = key;
     }
-    float2 tmp16 = tmp15;
-    float jit = ussIgn(tmp16);
+    float2 sBPart10 = sBPart11;
+    float jit = ussIgn(sBPart10);
     float acc = 0.0f;
-    float tmp17;
-    float tmp18;
-    float tmp19;
-    float tmp20;
+    float sBPart9;
+    float sBPart8;
+    float sBPart7;
+    float sAPart6;
     for (int i = 0; i < 8; i++)
     {
         float q = (float(i) + jit) / 8.0f;
         if (tau > 9.9999997473787516355514526367188e-05f)
         {
-            tmp17 = (-log(max(1.0f - (q * e), 9.9999999747524270787835121154785e-07f))) / tau;
+            sBPart9 = (-log(max(1.0f - (q * e), 9.9999999747524270787835121154785e-07f))) / tau;
         }
         else
         {
-            tmp17 = q;
+            sBPart9 = q;
         }
-        float u = tmp17;
+        float u = sBPart9;
         float3 p = dirView * (lerp(t0, t1, clamp(u, 0.0f, 1.0f)) / fogDistScale);
         if (terr)
         {
-            float3 tmp21 = p;
-            float tmp22 = 0.0f;
-            bool tmp23 = false;
-            float tmp24 = ussTerrain(tmp21, tmp19, tmp22, tmp23);
-            inMap = tmp19;
-            tmp18 = tmp24;
+            float3 sAPart5 = p;
+            float sAPart4 = 0.0f;
+            bool sBPart6 = false;
+            float sBPart5 = ussTerrain(sAPart5, sBPart7, sAPart4, sBPart6);
+            inMap = sBPart7;
+            sBPart8 = sBPart5;
         }
         else
         {
-            tmp18 = 1.0f;
+            sBPart8 = 1.0f;
         }
         if (cloud)
         {
-            float3 tmp25 = p;
-            tmp20 = ussCloudT(tmp25);
+            float3 sBPart4 = p;
+            sAPart6 = ussCloudT(sBPart4);
         }
         else
         {
-            tmp20 = 1.0f;
+            sAPart6 = 1.0f;
         }
-        acc += (tmp18 * tmp20);
+        acc += (sBPart8 * sAPart6);
     }
     return (a + (((1.0f - a) * acc) / 8.0f)) / max(a + ((1.0f - a) * v0), 0.25f);
 }

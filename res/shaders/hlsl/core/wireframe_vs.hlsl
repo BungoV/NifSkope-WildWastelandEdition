@@ -82,15 +82,15 @@ void vert_main()
     float3 b = bitangentVector;
     if ((boneWeights[0].x > 0.0f) && (doSkinning != 0u))
     {
-        float4 param = v;
-        float3 param_1 = n;
-        float3 param_2 = t;
-        float3 param_3 = b;
-        boneTransform(param, param_1, param_2, param_3);
-        v = param;
-        n = param_1;
-        t = param_2;
-        b = param_3;
+        float4 vArg = v;
+        float3 nArg = n;
+        float3 tArg = t;
+        float3 bArg = b;
+        boneTransform(vArg, nArg, tArg, bArg);
+        v = vArg;
+        n = nArg;
+        t = tArg;
+        b = bArg;
     }
     gl_Position = mul(v, modelViewMatrix);
     btnMatrix[2] = normalize(mul(normalMatrix, n));
@@ -102,8 +102,8 @@ void vert_main()
     }
     else
     {
-        bool4 tmp234 = bool4(vertexColorOverride.x > 0.0f.xxxx.x, vertexColorOverride.y > 0.0f.xxxx.y, vertexColorOverride.z > 0.0f.xxxx.z, vertexColorOverride.w > 0.0f.xxxx.w);
-        vsColor = float4(tmp234.x ? vertexColorOverride.x : vertexColor.x, tmp234.y ? vertexColorOverride.y : vertexColor.y, tmp234.z ? vertexColorOverride.z : vertexColor.z, tmp234.w ? vertexColorOverride.w : vertexColor.w);
+        bool4 vsColorPart = bool4(vertexColorOverride.x > 0.0f.xxxx.x, vertexColorOverride.y > 0.0f.xxxx.y, vertexColorOverride.z > 0.0f.xxxx.z, vertexColorOverride.w > 0.0f.xxxx.w);
+        vsColor = float4(vsColorPart.x ? vertexColorOverride.x : vertexColor.x, vsColorPart.y ? vertexColorOverride.y : vertexColor.y, vsColorPart.z ? vertexColorOverride.z : vertexColor.z, vsColorPart.w ? vertexColorOverride.w : vertexColor.w);
     }
 }
 

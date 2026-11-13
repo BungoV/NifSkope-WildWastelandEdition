@@ -37,55 +37,55 @@ float2 cmul(float2 a, float2 b)
 void frag_main()
 {
     int2 p = int2(gl_FragCoord.xy);
-    int tmp61;
+    int iPick;
     if (oceanAxis == 0)
     {
-        tmp61 = p.x & 127;
+        iPick = p.x & 127;
     }
     else
     {
-        tmp61 = p.y;
+        iPick = p.y;
     }
-    int i = tmp61;
+    int i = iPick;
     int k = i % oceanNs;
     int j = ((i / (2 * oceanNs)) * oceanNs) + k;
     float sg = (((i / oceanNs) & 1) != 0) ? (-1.0f) : 1.0f;
-    int2 tmp100;
+    int2 aPick;
     if (oceanAxis == 0)
     {
-        tmp100 = int2((p.x - i) + j, p.y);
+        aPick = int2((p.x - i) + j, p.y);
     }
     else
     {
-        tmp100 = int2(p.x, j);
+        aPick = int2(p.x, j);
     }
-    int2 a = tmp100;
-    int2 tmp121;
+    int2 a = aPick;
+    int2 bPick;
     if (oceanAxis == 0)
     {
-        tmp121 = int2(a.x + 64, p.y);
+        bPick = int2(a.x + 64, p.y);
     }
     else
     {
-        tmp121 = int2(p.x, j + 64);
+        bPick = int2(p.x, j + 64);
     }
-    int2 b = tmp121;
+    int2 b = bPick;
     float th = (3.1415927410125732421875f * float(k)) / float(oceanNs);
     float2 w = float2(cos(th), sin(th)) * sg;
     float4 a0 = oceanIn0.Load(int3(a, 0));
     float4 a1 = oceanIn1.Load(int3(a, 0));
     float4 b0 = oceanIn0.Load(int3(b, 0));
     float4 b1 = oceanIn1.Load(int3(b, 0));
-    float2 param = b0.xy;
-    float2 param_1 = w;
-    float2 param_2 = b0.zw;
-    float2 param_3 = w;
-    o0 = a0 + float4(cmul(param, param_1), cmul(param_2, param_3));
-    float2 param_4 = b1.xy;
-    float2 param_5 = w;
-    float2 param_6 = b1.zw;
-    float2 param_7 = w;
-    o1 = a1 + float4(cmul(param_4, param_5), cmul(param_6, param_7));
+    float2 aArg4 = b0.xy;
+    float2 bArg4 = w;
+    float2 aArg3 = b0.zw;
+    float2 bArg3 = w;
+    o0 = a0 + float4(cmul(aArg4, bArg4), cmul(aArg3, bArg3));
+    float2 aArg2 = b1.xy;
+    float2 bArg2 = w;
+    float2 aArg = b1.zw;
+    float2 bArg = w;
+    o1 = a1 + float4(cmul(aArg2, bArg2), cmul(aArg, bArg));
 }
 
 SPIRV_Cross_Output main(SPIRV_Cross_Input stage_input)

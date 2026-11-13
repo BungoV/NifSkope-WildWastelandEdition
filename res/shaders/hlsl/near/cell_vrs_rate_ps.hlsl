@@ -50,6 +50,7 @@ uint pick(float2 d, float cut, int maxRate)
             ry = 4;
         }
     }
+    // no 4x1 / 1x4 in the hardware's set
     if ((rx == 4) && (ry == 1))
     {
         rx = 2;
@@ -98,16 +99,17 @@ void frag_main()
     {
         int2 m = clamp(o + (tile / int2(2, 2)), int2(0, 0), hi);
         float v = length(vrsMv.Load(int3(m, 0)).xy * vrsSize);
+        // under a pixel a frame: none
         k = clamp(1.0f + (vrsMotion * max(v - 1.0f, 0.0f)), 1.0f, 4.0f);
     }
-    float2 param = d;
-    float param_1 = vrsCut * k;
-    int param_2 = vrsMax;
-    rateOpaque = pick(param, param_1, param_2);
-    float2 param_3 = d;
-    float param_4 = vrsCutSorted * k;
-    int param_5 = 2;
-    rateSorted = pick(param_3, param_4, param_5);
+    float2 dArg2 = d;
+    float cutArg2 = vrsCut * k;
+    int maxRateArg2 = vrsMax;
+    rateOpaque = pick(dArg2, cutArg2, maxRateArg2);
+    float2 dArg = d;
+    float cutArg = vrsCutSorted * k;
+    int maxRateArg = 2;
+    rateSorted = pick(dArg, cutArg, maxRateArg);
 }
 
 SPIRV_Cross_Output main(SPIRV_Cross_Input stage_input)

@@ -50,16 +50,20 @@ void frag_main()
 {
     int2 size = int2(spvTextureSize(srcTex, uint(0), dummy_parameter));
     int2 p = int2(gl_FragCoord.xy);
-    int2 param = clamp(p + int2(0, 1), int2(0, 0), size - int2(1, 1));
-    float3 b = tap(param);
-    int2 param_1 = clamp(p + int2(-1, 0), int2(0, 0), size - int2(1, 1));
-    float3 d = tap(param_1);
-    int2 param_2 = p;
-    float3 e = tap(param_2);
-    int2 param_3 = clamp(p + int2(1, 0), int2(0, 0), size - int2(1, 1));
-    float3 f = tap(param_3);
-    int2 param_4 = clamp(p + int2(0, -1), int2(0, 0), size - int2(1, 1));
-    float3 h = tap(param_4);
+    int2 qArg5 = clamp(p + int2(0, 1), int2(0, 0), size - int2(1, 1));
+    // b
+    // d e f
+    // h
+    float3 b = tap(qArg5);
+    int2 qArg4 = clamp(p + int2(-1, 0), int2(0, 0), size - int2(1, 1));
+    float3 d = tap(qArg4);
+    int2 qArg3 = p;
+    float3 e = tap(qArg3);
+    int2 qArg2 = clamp(p + int2(1, 0), int2(0, 0), size - int2(1, 1));
+    float3 f = tap(qArg2);
+    int2 qArg = clamp(p + int2(0, -1), int2(0, 0), size - int2(1, 1));
+    float3 h = tap(qArg);
+    // luma times 2 for the noise test
     float bL = (b.z * 0.5f) + ((b.x * 0.5f) + b.y);
     float dL = (d.z * 0.5f) + ((d.x * 0.5f) + d.y);
     float eL = (e.z * 0.5f) + ((e.x * 0.5f) + e.y);
@@ -69,6 +73,7 @@ void frag_main()
     float rangeL = max(max(max(bL, dL), max(eL, fL)), hL) - min(min(min(bL, dL), min(eL, fL)), hL);
     nz = clamp(abs(nz) / max(rangeL, 9.9999999747524270787835121154785e-07f), 0.0f, 1.0f);
     nz = ((-0.5f) * nz) + 1.0f;
+    // the ring's min/max, and the most negative lobe that keeps the result inside it
     float3 mn4 = min(min(b, d), min(f, h));
     float3 mx4 = max(max(b, d), max(f, h));
     float2 peakC = float2(1.0f, -4.0f);

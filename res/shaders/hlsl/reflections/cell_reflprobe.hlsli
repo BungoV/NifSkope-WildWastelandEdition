@@ -23,52 +23,54 @@ float3 cellReflSample(Texture2D<float4> atlas, SamplerState _atlas_sampler, int 
 {
     float3 bmin = cellReflMin[i].xyz;
     float3 bmax = cellReflMax[i].xyz;
-    float tmp1;
+    float RsPick3;
     if (abs(R.x) < 9.9999997473787516355514526367188e-06f)
     {
-        tmp1 = 9.9999997473787516355514526367188e-06f;
+        RsPick3 = 9.9999997473787516355514526367188e-06f;
     }
     else
     {
-        tmp1 = R.x;
+        RsPick3 = R.x;
     }
-    float tmp2;
+    float RsPick2;
     if (abs(R.y) < 9.9999997473787516355514526367188e-06f)
     {
-        tmp2 = 9.9999997473787516355514526367188e-06f;
+        RsPick2 = 9.9999997473787516355514526367188e-06f;
     }
     else
     {
-        tmp2 = R.y;
+        RsPick2 = R.y;
     }
-    float tmp3;
+    float RsPick;
     if (abs(R.z) < 9.9999997473787516355514526367188e-06f)
     {
-        tmp3 = 9.9999997473787516355514526367188e-06f;
+        RsPick = 9.9999997473787516355514526367188e-06f;
     }
     else
     {
-        tmp3 = R.z;
+        RsPick = R.z;
     }
-    float3 Rs = float3(tmp1, tmp2, tmp3);
+    // Lagarde's parallax: the ray to the box's far wall, seen from the capture point
+    float3 Rs = float3(RsPick3, RsPick2, RsPick);
     float3 tf = max((bmax - P) / Rs, (bmin - P) / Rs);
     float t = min(tf.x, min(tf.y, tf.z));
-    float3 tmp4;
+    float3 dPick;
     if (t > 0.0f)
     {
-        tmp4 = (P + (R * t)) - cellReflPos[i].xyz;
+        dPick = (P + (R * t)) - cellReflPos[i].xyz;
     }
     else
     {
-        tmp4 = R;
+        dPick = R;
     }
-    float3 d = tmp4;
+    float3 d = dPick;
     float T = cellReflAtlas.z;
     float tile = cellReflPos[i].w;
     float2 org = float2(mod(tile, cellReflAtlas.w), floor(tile / cellReflAtlas.w)) * T;
+    // the coarser mip's half texel: no bleed from the next tile
     float inset = (0.5f * exp2(ceil(lod))) / T;
-    float3 tmp5 = normalize(d);
-    float2 uv = clamp(cellReflOct(tmp5), inset.xx, (1.0f - inset).xx);
+    float3 uvPart = normalize(d);
+    float2 uv = clamp(cellReflOct(uvPart), inset.xx, (1.0f - inset).xx);
     return atlas.SampleLevel(_atlas_sampler, (org + (uv * T)) * cellReflAtlas.xy, lod).xyz;
 }
 #endif
@@ -76,34 +78,35 @@ float3 cellReflSample(Texture2D<float4> atlas, SamplerState _atlas_sampler, int 
 #if defined(WW_FN_cellReflProbe) || defined(WW_FN_ALL)
 float cellReflProbe(Texture2D<float4> atlas, SamplerState _atlas_sampler, float3 posView, float3 reflView, float gloss, float spec, float envScale)
 {
-    bool tmp1 = !cellReflOn;
-    bool tmp2;
-    if (!tmp1)
+    bool RsPick3 = !cellReflOn;
+    bool RsPick2;
+    if (!RsPick3)
     {
-        tmp2 = !cellCubeGameOn();
+        RsPick2 = !cellCubeGameOn();
     }
     else
     {
-        tmp2 = tmp1;
+        RsPick2 = RsPick3;
     }
-    bool tmp3;
-    if (!tmp2)
+    bool RsPick;
+    if (!RsPick2)
     {
-        tmp3 = (cellProbe != 0) && (cellProbe != 66);
+        RsPick = (cellProbe != 0) && (cellProbe != 66);
     }
     else
     {
-        tmp3 = tmp2;
+        RsPick = RsPick2;
     }
-    if (tmp3)
+    if (RsPick)
     {
         return 1.0f;
     }
-    float3 tmp4 = posView;
-    float3 P = cellWorldPos(tmp4);
-    float3 tmp5 = reflView;
-    float3 R = normalize(cellWorldDir(tmp5));
+    float3 dPick = posView;
+    float3 P = cellWorldPos(dPick);
+    float3 uvPart = reflView;
+    float3 R = normalize(cellWorldDir(uvPart));
     float g = clamp(gloss, 0.0f, 1.0f);
+    // lane CUBE1's mip on a 128 cube; ours are 64
     float lod = clamp(((1.0f - g) * 6.0f) - 1.0f, 0.0f, cellReflLods);
     float3 sum = 0.0f.xxx;
     float W = 0.0f;
@@ -121,11 +124,11 @@ float cellReflProbe(Texture2D<float4> atlas, SamplerState _atlas_sampler, float3
         {
             continue;
         }
-        int tmp6 = i;
-        float3 tmp7 = P;
-        float3 tmp8 = R;
-        float tmp9 = lod;
-        sum += (cellReflSample(atlas, _atlas_sampler, tmp6, tmp7, tmp8, tmp9) * w);
+        int sumPart8 = i;
+        float3 sumPart7 = P;
+        float3 sumPart6 = R;
+        float sumPart5 = lod;
+        sum += (cellReflSample(atlas, _atlas_sampler, sumPart8, sumPart7, sumPart6, sumPart5) * w);
         W += w;
     }
     if (W > 1.0f)
@@ -137,11 +140,11 @@ float cellReflProbe(Texture2D<float4> atlas, SamplerState _atlas_sampler, float3
     if ((fall >= 0) && (W < 1.0f))
     {
         cellReflFall = 1.0f - W;
-        int tmp10 = fall;
-        float3 tmp11 = P;
-        float3 tmp12 = R;
-        float tmp13 = lod;
-        sum += (cellReflSample(atlas, _atlas_sampler, tmp10, tmp11, tmp12, tmp13) * cellReflFall);
+        int sumPart4 = fall;
+        float3 sumPart3 = P;
+        float3 sumPart2 = R;
+        float sumPart = lod;
+        sum += (cellReflSample(atlas, _atlas_sampler, sumPart4, sumPart3, sumPart2, sumPart) * cellReflFall);
         W = 1.0f;
     }
     float k = ((3.0f * clamp(spec, 0.0f, 1.0f)) * min(sqrt(clamp(g - 0.300000011920928955078125f, 0.0f, 1.0f)), 1.0f)) * clamp(envScale, 0.0f, 50.0f);

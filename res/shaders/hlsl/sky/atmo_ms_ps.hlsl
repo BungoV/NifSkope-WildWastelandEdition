@@ -39,16 +39,16 @@ struct SPIRV_Cross_Output
 
 float atMsRowToH(float u)
 {
-    float tmp287;
+    float atMsRowToHRet;
     if (atMsOld > 0.5f)
     {
-        tmp287 = u;
+        atMsRowToHRet = u;
     }
     else
     {
-        tmp287 = u * u;
+        atMsRowToHRet = u * u;
     }
-    return tmp287;
+    return atMsRowToHRet;
 }
 
 #define WW_FN_atHitsGround
@@ -73,22 +73,24 @@ float atMsRowToH(float u)
 void frag_main()
 {
     float2 uv = gl_FragCoord.xy / atMsSize;
-    float param = uv.x;
-    float param_1 = atMsSize.x;
-    float mus = (atSubToUnit(param, param_1) * 2.0f) - 1.0f;
-    float param_2 = uv.y;
-    float param_3 = atMsSize.y;
-    float param_4 = atSubToUnit(param_2, param_3);
-    float r = 6360.0f + max(0.00999999977648258209228515625f, atMsRowToH(param_4) * 100.0f);
+    float uArg3 = uv.x;
+    float nArg2 = atMsSize.x;
+    float mus = (atSubToUnit(uArg3, nArg2) * 2.0f) - 1.0f;
+    float uArg2 = uv.y;
+    float nArg = atMsSize.y;
+    float uArg = atSubToUnit(uArg2, nArg);
+    float r = 6360.0f + max(0.00999999977648258209228515625f, atMsRowToH(uArg) * 100.0f);
     float3 s = float3(sqrt(max(0.0f, 1.0f - (mus * mus))), 0.0f, mus);
+    // lane FIX1101A (atmo): 40 steps packed toward the texel's point (t = d (i / N)^2): the haze layer sits in the first
+    // km of a ray up to 1000 km long, where 20 uniform steps put their first sample 25 km out. Red msold: 20 uniform.
     bool old = atMsOld > 0.5f;
     int N = old ? 20 : 40;
     float3 L2 = 0.0f.xxx;
     float3 F = 0.0f.xxx;
-    float tmp413;
-    float3 param_12;
-    float3 param_13;
-    float3 param_14;
+    float dPick;
+    float3 raySArg;
+    float3 mieSArg;
+    float3 extArg;
     for (int a = 0; a < 8; a++)
     {
         for (int b = 0; b < 8; b++)
@@ -96,22 +98,22 @@ void frag_main()
             float th = (6.283185482025146484375f * (float(a) + 0.5f)) / 8.0f;
             float ph = acos(1.0f - ((2.0f * (float(b) + 0.5f)) / 8.0f));
             float3 v = float3(sin(ph) * cos(th), sin(ph) * sin(th), cos(ph));
-            float param_5 = r;
-            float param_6 = v.z;
-            bool gnd = atHitsGround(param_5, param_6);
+            float rArg5 = r;
+            float muArg5 = v.z;
+            bool gnd = atHitsGround(rArg5, muArg5);
             if (gnd)
             {
-                float param_7 = r;
-                float param_8 = v.z;
-                tmp413 = atDistGround(param_7, param_8);
+                float rArg4 = r;
+                float muArg4 = v.z;
+                dPick = atDistGround(rArg4, muArg4);
             }
             else
             {
-                float param_9 = r;
-                float param_10 = v.z;
-                tmp413 = atDistTop(param_9, param_10);
+                float rArg3 = r;
+                float muArg3 = v.z;
+                dPick = atDistTop(rArg3, muArg3);
             }
-            float d = tmp413;
+            float d = dPick;
             float dt = d / float(N);
             float3 thr = 1.0f.xxx;
             float3 L = 0.0f.xxx;
@@ -128,14 +130,14 @@ void frag_main()
                 }
                 float3 p = float3(v.xy * t, r + (v.z * t));
                 float rp = length(p);
-                float param_11 = rp - 6360.0f;
-                atMedium(param_11, param_12, param_13, param_14);
-                float3 rs = param_12;
-                float3 ms = param_13;
-                float3 e = param_14;
-                float param_15 = rp;
-                float param_16 = dot(p / rp.xxx, s);
-                float3 Ts = atTrans(atTransTex, _atTransTex_sampler, param_15, param_16);
+                float hArg = rp - 6360.0f;
+                atMedium(hArg, raySArg, mieSArg, extArg);
+                float3 rs = raySArg;
+                float3 ms = mieSArg;
+                float3 e = extArg;
+                float rArg2 = rp;
+                float muArg2 = dot(p / rp.xxx, s);
+                float3 Ts = atTrans(atTransTex, _atTransTex_sampler, rArg2, muArg2);
                 float3 sc = rs + ms;
                 float3 Tst = exp((-e) * dt);
                 float3 ie = 1.0f.xxx / max(e, 9.999999717180685365747194737196e-10f.xxx);
@@ -148,9 +150,9 @@ void frag_main()
                 float3 pg = float3(v.xy * d, r + (v.z * d));
                 float3 n = normalize(pg);
                 float c = dot(n, s);
-                float param_17 = 6360.0f;
-                float param_18 = c;
-                L += ((((thr * atTrans(atTransTex, _atTransTex_sampler, param_17, param_18)) * max(c, 0.0f)) * 0.300000011920928955078125f.xxx) / 3.1415927410125732421875f.xxx);
+                float rArg = 6360.0f;
+                float muArg = c;
+                L += ((((thr * atTrans(atTransTex, _atTransTex_sampler, rArg, muArg)) * max(c, 0.0f)) * 0.300000011920928955078125f.xxx) / 3.1415927410125732421875f.xxx);
             }
             L2 += L;
             F += f;

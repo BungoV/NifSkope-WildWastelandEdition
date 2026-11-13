@@ -39,47 +39,48 @@ void frag_main()
     int2 p = int2(gl_FragCoord.xy);
     int tile = p.x / 128;
     int2 m = int2(p.x - (tile * 128), p.y);
-    int tmp74;
+    int nPick2;
     if (m.x < 64)
     {
-        tmp74 = m.x;
+        nPick2 = m.x;
     }
     else
     {
-        tmp74 = m.x - 128;
+        nPick2 = m.x - 128;
     }
-    int tmp88;
+    int nPick;
     if (m.y < 64)
     {
-        tmp88 = m.y;
+        nPick = m.y;
     }
     else
     {
-        tmp88 = m.y - 128;
+        nPick = m.y - 128;
     }
-    float2 n = float2(float(tmp74), float(tmp88));
+    float2 n = float2(float(nPick2), float(nPick));
     float2 k = n * oceanDk[tile];
     float kl = length(k);
     float4 h0 = oceanH0.Load(int3(p, 0));
     float q = oceanQ.Load(int3(p, 0)).x;
     float ph = 6.283185482025146484375f * frac(q * oceanPhase);
     float2 e = float2(cos(ph), sin(ph));
-    float2 param = h0.xy;
-    float2 param_1 = e;
-    float2 param_2 = h0.zw;
-    float2 param_3 = float2(e.x, -e.y);
-    float2 h = cmul(param, param_1) + cmul(param_2, param_3);
+    float2 aArg2 = h0.xy;
+    float2 bArg2 = e;
+    float2 aArg = h0.zw;
+    float2 bArg = float2(e.x, -e.y);
+    float2 h = cmul(aArg2, bArg2) + cmul(aArg, bArg);
+    // i h
     float2 ih = float2(-h.y, h.x);
-    float tmp176;
+    float kiPick;
     if (kl > 0.0f)
     {
-        tmp176 = 1.0f / kl;
+        kiPick = 1.0f / kl;
     }
     else
     {
-        tmp176 = 0.0f;
+        kiPick = 0.0f;
     }
-    float ki = tmp176;
+    float ki = kiPick;
     float2 sx = ih * k.x;
     float2 sy = ih * k.y;
     float2 dx = ih * (k.x * ki);
@@ -87,6 +88,7 @@ void frag_main()
     float2 dxx = h * (((-k.x) * k.x) * ki);
     float2 dyy = h * (((-k.y) * k.y) * ki);
     float2 dxy = h * (((-k.x) * k.y) * ki);
+    // a + i b for complex a, b: ( a.x - b.y, a.y + b.x )
     o0 = float4(sx.x - sy.y, sx.y + sy.x, dxx.x - dyy.y, dxx.y + dyy.x);
     o1 = float4(dxy.x - h.y, dxy.y + h.x, dx.x - dy.y, dx.y + dy.x);
 }

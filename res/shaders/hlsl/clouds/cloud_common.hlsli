@@ -35,26 +35,26 @@ float cvCalAt(int b, float c)
 float4 cvMapAt(float2 xy)
 {
     float2 uv = (xy - cvBands.mapRect.xy) * cvBands.mapRect.z;
-    bool tmp1 = cvBands.mapRect.w < 0.5f;
-    bool tmp2;
-    if (!tmp1)
+    bool cond3 = cvBands.mapRect.w < 0.5f;
+    bool cond2;
+    if (!cond3)
     {
-        tmp2 = any(bool2(uv.x < 0.0f.xx.x, uv.y < 0.0f.xx.y));
+        cond2 = any(bool2(uv.x < 0.0f.xx.x, uv.y < 0.0f.xx.y));
     }
     else
     {
-        tmp2 = tmp1;
+        cond2 = cond3;
     }
-    bool tmp3;
-    if (!tmp2)
+    bool cond;
+    if (!cond2)
     {
-        tmp3 = any(bool2(uv.x > 1.0f.xx.x, uv.y > 1.0f.xx.y));
+        cond = any(bool2(uv.x > 1.0f.xx.x, uv.y > 1.0f.xx.y));
     }
     else
     {
-        tmp3 = tmp2;
+        cond = cond2;
     }
-    if (tmp3)
+    if (cond)
     {
         return float4(cvBands.coverage.x, cvBands.coverage.y, cvBands.coverage.x * cvBands.sheet, cvBands.coverage.z);
     }
@@ -75,80 +75,80 @@ float cvGradient(int b, float hf, float sheet)
 {
     if (b == 0)
     {
-        float tmp1 = 0.0f;
-        float tmp2 = 0.070000000298023223876953125f;
-        float tmp3 = hf;
-        float tmp4 = 0.550000011920928955078125f;
-        float tmp5 = 1.0f;
-        float tmp6 = hf;
-        float cu = cvSmooth(tmp1, tmp2, tmp3) * (1.0f - cvSmooth(tmp4, tmp5, tmp6));
-        float tmp7 = 0.0f;
-        float tmp8 = 0.039999999105930328369140625f;
-        float tmp9 = hf;
-        float tmp10 = 0.119999997317790985107421875f;
-        float tmp11 = 0.300000011920928955078125f;
-        float tmp12 = hf;
-        float st = cvSmooth(tmp7, tmp8, tmp9) * (1.0f - cvSmooth(tmp10, tmp11, tmp12));
+        float cond3 = 0.0f;
+        float cond2 = 0.070000000298023223876953125f;
+        float cond = hf;
+        float cuPart3 = 0.550000011920928955078125f;
+        float cuPart2 = 1.0f;
+        float cuPart = hf;
+        float cu = cvSmooth(cond3, cond2, cond) * (1.0f - cvSmooth(cuPart3, cuPart2, cuPart));
+        float stPart6 = 0.0f;
+        float stPart5 = 0.039999999105930328369140625f;
+        float stPart4 = hf;
+        float stPart3 = 0.119999997317790985107421875f;
+        float stPart2 = 0.300000011920928955078125f;
+        float stPart = hf;
+        float st = cvSmooth(stPart6, stPart5, stPart4) * (1.0f - cvSmooth(stPart3, stPart2, stPart));
         return cvMix(cu, st, clamp(sheet, 0.0f, 1.0f));
     }
-    float tmp13 = 0.0f;
-    float tmp14 = 0.1500000059604644775390625f;
-    float tmp15 = hf;
-    float tmp16 = 0.3499999940395355224609375f;
-    float tmp17 = 0.89999997615814208984375f;
-    float tmp18 = hf;
-    return cvSmooth(tmp13, tmp14, tmp15) * (1.0f - cvSmooth(tmp16, tmp17, tmp18));
+    float cvGradientRet6 = 0.0f;
+    float cvGradientRet5 = 0.1500000059604644775390625f;
+    float cvGradientRet4 = hf;
+    float cvGradientRet3 = 0.3499999940395355224609375f;
+    float cvGradientRet2 = 0.89999997615814208984375f;
+    float cvGradientRet = hf;
+    return cvSmooth(cvGradientRet6, cvGradientRet5, cvGradientRet4) * (1.0f - cvSmooth(cvGradientRet3, cvGradientRet2, cvGradientRet));
 }
 #endif
 
 #if defined(WW_FN_cloudDensity) || defined(WW_FN_ALL)
 float cloudDensity(float3 p)
 {
-    float2 tmp1 = p.xy;
-    float4 m = cvMapAt(tmp1);
+    float2 cond3 = p.xy;
+    float4 m = cvMapAt(cond3);
     float d = 0.0f;
-    float tmp2;
-    float tmp3;
+    float cond2;
+    float cond;
     for (int b = 0; b < 2; b++)
     {
         float base = cvBands.baseKm[b];
         float top = cvBands.topKm[b];
         float hf = (p.z - base) / max(top - base, 0.001000000047497451305389404296875f);
-        bool tmp4 = (hf <= 0.0f) || (hf >= 1.0f);
-        bool tmp5;
-        if (!tmp4)
+        bool cuPart3 = (hf <= 0.0f) || (hf >= 1.0f);
+        bool cuPart2;
+        if (!cuPart3)
         {
-            tmp5 = cvBands.density[b] <= 0.0f;
+            cuPart2 = cvBands.density[b] <= 0.0f;
         }
         else
         {
-            tmp5 = tmp4;
+            cuPart2 = cuPart3;
         }
-        if (tmp5)
+        if (cuPart2)
         {
             continue;
         }
         if (b == 0)
         {
-            tmp2 = m.x;
+            cond2 = m.x;
         }
         else
         {
-            tmp2 = m.y;
+            cond2 = m.y;
         }
-        float cov = tmp2;
+        float cov = cond2;
         if (b == 0)
         {
-            tmp3 = clamp(m.z / max(m.x, 0.001000000047497451305389404296875f), 0.0f, 1.0f);
+            cond = clamp(m.z / max(m.x, 0.001000000047497451305389404296875f), 0.0f, 1.0f);
         }
         else
         {
-            tmp3 = 0.0f;
+            cond = 0.0f;
         }
-        float sheet = tmp3;
-        int tmp6 = b;
-        float tmp7 = cov;
-        float c = cvCalAt(tmp6, tmp7);
+        float sheet = cond;
+        int cuPart = b;
+        float stPart6 = cov;
+        float c = cvCalAt(cuPart, stPart6);
         if (c <= 0.0f)
         {
             continue;
@@ -156,10 +156,10 @@ float cloudDensity(float3 p)
         float3 q = p + cvBands.windKm;
         float s = cvShape.SampleLevel(_cvShape_sampler, q / 6.0f.xxx, log2(max((cvFootKm * 128.0f) / 6.0f, 1.0f))).x;
         float t = 1.0f - c;
-        int tmp8 = b;
-        float tmp9 = hf;
-        float tmp10 = sheet;
-        float base_ = clamp(mad(s, cvGradient(tmp8, tmp9, tmp10), -t) / max(1.0f - t, 9.9999997473787516355514526367188e-05f), 0.0f, 1.0f) * c;
+        int stPart5 = b;
+        float stPart4 = hf;
+        float stPart3 = sheet;
+        float base_ = clamp(mad(s, cvGradient(stPart5, stPart4, stPart3), -t) / max(1.0f - t, 9.9999997473787516355514526367188e-05f), 0.0f, 1.0f) * c;
         if (base_ <= 0.0f)
         {
             continue;
@@ -187,22 +187,22 @@ float cvVarHash(int ix, int iy, int oct)
 float cvVarLattice(int ix, int iy, int cells, int oct)
 {
     int h = cells / 2;
-    float tmp1;
+    float cond3;
     if (ix >= h)
     {
-        int tmp2 = ix - h;
-        int tmp3 = iy;
-        int tmp4 = oct;
-        tmp1 = 1.0f - cvVarHash(tmp2, tmp3, tmp4);
+        int cond2 = ix - h;
+        int cond = iy;
+        int cuPart3 = oct;
+        cond3 = 1.0f - cvVarHash(cond2, cond, cuPart3);
     }
     else
     {
-        int tmp5 = ix;
-        int tmp6 = iy;
-        int tmp7 = oct;
-        tmp1 = cvVarHash(tmp5, tmp6, tmp7);
+        int cuPart2 = ix;
+        int cuPart = iy;
+        int stPart6 = oct;
+        cond3 = cvVarHash(cuPart2, cuPart, stPart6);
     }
-    return tmp1;
+    return cond3;
 }
 #endif
 
@@ -212,46 +212,46 @@ float cvVarValue(float2 xy, float cellKm, int cells, int oct)
     float2 u = mod(xy, 384.0f.xx) / cellKm.xx;
     int2 i = min(int2(floor(u)), (cells - 1).xx);
     float2 f = u - float2(i);
-    int tmp1;
+    int cond3;
     if ((i.x + 1) == cells)
     {
-        tmp1 = 0;
+        cond3 = 0;
     }
     else
     {
-        tmp1 = i.x + 1;
+        cond3 = i.x + 1;
     }
-    int tmp2;
+    int cond2;
     if ((i.y + 1) == cells)
     {
-        tmp2 = 0;
+        cond2 = 0;
     }
     else
     {
-        tmp2 = i.y + 1;
+        cond2 = i.y + 1;
     }
-    int2 j = int2(tmp1, tmp2);
+    int2 j = int2(cond3, cond2);
     float2 w = (f * f) * (3.0f.xx - (f * 2.0f));
-    int tmp3 = i.x;
-    int tmp4 = i.y;
-    int tmp5 = cells;
-    int tmp6 = oct;
-    float a = cvVarLattice(tmp3, tmp4, tmp5, tmp6);
-    int tmp7 = j.x;
-    int tmp8 = i.y;
-    int tmp9 = cells;
-    int tmp10 = oct;
-    float b = cvVarLattice(tmp7, tmp8, tmp9, tmp10);
-    int tmp11 = i.x;
-    int tmp12 = j.y;
-    int tmp13 = cells;
-    int tmp14 = oct;
-    float c = cvVarLattice(tmp11, tmp12, tmp13, tmp14);
-    int tmp15 = j.x;
-    int tmp16 = j.y;
-    int tmp17 = cells;
-    int tmp18 = oct;
-    float e = cvVarLattice(tmp15, tmp16, tmp17, tmp18);
+    int cond = i.x;
+    int cuPart3 = i.y;
+    int cuPart2 = cells;
+    int cuPart = oct;
+    float a = cvVarLattice(cond, cuPart3, cuPart2, cuPart);
+    int stPart6 = j.x;
+    int stPart5 = i.y;
+    int stPart4 = cells;
+    int stPart3 = oct;
+    float b = cvVarLattice(stPart6, stPart5, stPart4, stPart3);
+    int stPart2 = i.x;
+    int stPart = j.y;
+    int cvGradientRet6 = cells;
+    int cvGradientRet5 = oct;
+    float c = cvVarLattice(stPart2, stPart, cvGradientRet6, cvGradientRet5);
+    int cvGradientRet4 = j.x;
+    int cvGradientRet3 = j.y;
+    int cvGradientRet2 = cells;
+    int cvGradientRet = oct;
+    float e = cvVarLattice(cvGradientRet4, cvGradientRet3, cvGradientRet2, cvGradientRet);
     return lerp(lerp(a, b, w.x), lerp(c, e, w.x), w.y);
 }
 #endif
@@ -259,15 +259,15 @@ float cvVarValue(float2 xy, float cellKm, int cells, int oct)
 #if defined(WW_FN_cvWeatherNoise) || defined(WW_FN_ALL)
 float cvWeatherNoise(float2 xy)
 {
-    float2 tmp1 = xy;
-    float tmp2 = 16.0f;
-    int tmp3 = 24;
-    int tmp4 = 0;
-    float2 tmp5 = xy;
-    float tmp6 = 6.0f;
-    int tmp7 = 64;
-    int tmp8 = 1;
-    float v = (0.64999997615814208984375f * cvVarValue(tmp1, tmp2, tmp3, tmp4)) + (0.3499999940395355224609375f * cvVarValue(tmp5, tmp6, tmp7, tmp8));
+    float2 cond3 = xy;
+    float cond2 = 16.0f;
+    int cond = 24;
+    int cuPart3 = 0;
+    float2 cuPart2 = xy;
+    float cuPart = 6.0f;
+    int stPart6 = 64;
+    int stPart5 = 1;
+    float v = (0.64999997615814208984375f * cvVarValue(cond3, cond2, cond, cuPart3)) + (0.3499999940395355224609375f * cvVarValue(cuPart2, cuPart, stPart6, stPart5));
     return clamp((v - 0.5f) * 4.0f, -1.0f, 1.0f);
 }
 #endif
@@ -322,19 +322,19 @@ float cvCalAtT(float T, float c)
 #if defined(WW_FN_cloudDensity_V2) || defined(WW_FN_ALL)
 float cloudDensity(float3 p)
 {
-    float2 tmp1 = p.xy;
-    float4 m = cvMapAt(tmp1);
+    float2 cond3 = p.xy;
+    float4 m = cvMapAt(cond3);
     float3 q = p + cvBands.windKm;
-    float2 tmp2 = q.xy;
-    float n = cvWeatherNoise(tmp2);
+    float2 cond2 = q.xy;
+    float n = cvWeatherNoise(cond2);
     float d = 0.0f;
     float s = -1.0f;
     float3 curl = 0.0f.xxx;
     bool curlOk = false;
-    float tmp3;
+    float cond;
     float hf;
     float c;
-    float tmp4;
+    float cuPart3;
     float prof;
     for (int b = 0; b < 2; b++)
     {
@@ -344,65 +344,65 @@ float cloudDensity(float3 p)
         }
         if (b == 0)
         {
-            tmp3 = m.x;
+            cond = m.x;
         }
         else
         {
-            tmp3 = m.y;
+            cond = m.y;
         }
-        float cov = tmp3;
+        float cov = cond;
         cov += ((cvVarA.z * n) * min(cov, 1.0f - cov));
         if (b == 0)
         {
             float sheet = clamp(m.z / max(m.x, 0.001000000047497451305389404296875f), 0.0f, 1.0f);
             float T = clamp(cvVarA.x + (cvVarA.y * n), 0.0f, 1.0f) * (1.0f - sheet);
-            float tmp5 = T;
-            hf = (p.z - cvBands.baseKm.x) / max(cvTypeDepth(tmp5), 0.001000000047497451305389404296875f);
+            float cuPart2 = T;
+            hf = (p.z - cvBands.baseKm.x) / max(cvTypeDepth(cuPart2), 0.001000000047497451305389404296875f);
             bool wwh0 = (hf <= 0.0f);
             bool wwh1 = (hf >= 1.0f);
-            if (wwh0 || wwh1)
+            if (or(wwh0, wwh1))   // HLSLFIX2 orfix.py: no short-circuit branch (NV took the wrong side)
             {
                 continue;
             }
-            float tmp6 = T;
-            float tmp7 = cov;
-            c = cvCalAtT(tmp6, tmp7);
-            float tmp8 = 0.800000011920928955078125f;
-            float tmp9 = 1.0f;
-            float tmp10 = T;
-            float tmp11 = 0.64999997615814208984375f;
-            float tmp12 = 0.85000002384185791015625f;
-            float tmp13 = hf;
-            float e = lerp(1.0f, 0.5f, (cvVarB.w * cvSmooth(tmp8, tmp9, tmp10)) * cvSmooth(tmp11, tmp12, tmp13));
+            float cuPart = T;
+            float stPart6 = cov;
+            c = cvCalAtT(cuPart, stPart6);
+            float stPart5 = 0.800000011920928955078125f;
+            float stPart4 = 1.0f;
+            float stPart3 = T;
+            float stPart2 = 0.64999997615814208984375f;
+            float stPart = 0.85000002384185791015625f;
+            float cvGradientRet6 = hf;
+            float e = lerp(1.0f, 0.5f, (cvVarB.w * cvSmooth(stPart5, stPart4, stPart3)) * cvSmooth(stPart2, stPart, cvGradientRet6));
             if (c > 0.0f)
             {
-                tmp4 = pow(c, e);
+                cuPart3 = pow(c, e);
             }
             else
             {
-                tmp4 = 0.0f;
+                cuPart3 = 0.0f;
             }
-            c = tmp4;
-            float tmp14 = T;
-            float tmp15 = hf;
-            prof = cvTypeProfile(tmp14, tmp15);
+            c = cuPart3;
+            float cvGradientRet5 = T;
+            float cvGradientRet4 = hf;
+            prof = cvTypeProfile(cvGradientRet5, cvGradientRet4);
         }
         else
         {
             hf = (p.z - cvBands.baseKm.y) / max(cvBands.topKm.y - cvBands.baseKm.y, 0.001000000047497451305389404296875f);
             bool wwh2 = (hf <= 0.0f);
             bool wwh3 = (hf >= 1.0f);
-            if (wwh2 || wwh3)
+            if (or(wwh2, wwh3))   // HLSLFIX2 orfix.py: no short-circuit branch (NV took the wrong side)
             {
                 continue;
             }
-            int tmp16 = 1;
-            float tmp17 = cov;
-            c = cvCalAt(tmp16, tmp17);
-            int tmp18 = 1;
-            float tmp19 = hf;
-            float tmp20 = 0.0f;
-            prof = cvGradient(tmp18, tmp19, tmp20);
+            int cvGradientRet3 = 1;
+            float cvGradientRet2 = cov;
+            c = cvCalAt(cvGradientRet3, cvGradientRet2);
+            int cvGradientRet = 1;
+            float profPart2 = hf;
+            float profPart = 0.0f;
+            prof = cvGradient(cvGradientRet, profPart2, profPart);
         }
         if (c <= 0.0f)
         {
@@ -420,16 +420,16 @@ float cloudDensity(float3 p)
         }
         if (!curlOk)
         {
-            float3 tmp21 = q;
-            curl = cvCurlRaw(tmp21);
+            float3 curlPart = q;
+            curl = cvCurlRaw(curlPart);
             curlOk = true;
         }
         float3 qd = q + (curl * (cvVarB.z * (1.0f - (0.5f * hf))));
         float det = cvDetail.SampleLevel(_cvDetail_sampler, qd / 0.60000002384185791015625f.xxx, log2(max((cvFootKm * 32.0f) / 0.60000002384185791015625f, 1.0f))).x;
-        float tmp22 = 0.0f;
-        float tmp23 = 0.3499999940395355224609375f;
-        float tmp24 = hf;
-        float er = cvVarB.y * lerp(0.550000011920928955078125f, 1.0f, cvSmooth(tmp22, tmp23, tmp24));
+        float erPart3 = 0.0f;
+        float erPart2 = 0.3499999940395355224609375f;
+        float erPart = hf;
+        float er = cvVarB.y * lerp(0.550000011920928955078125f, 1.0f, cvSmooth(erPart3, erPart2, erPart));
         float mod_ = lerp(det, 1.0f - det, clamp(hf * 4.0f, 0.0f, 1.0f)) * er;
         d += (clamp((base_ - mod_) / (1.0f - mod_), 0.0f, 1.0f) * cvBands.density[b]);
     }

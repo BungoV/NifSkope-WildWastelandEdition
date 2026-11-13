@@ -48,20 +48,20 @@ void frag_main()
     float2 lc = (gl_FragCoord.xy / float(fxrScale).xx) - 0.5f.xx;
     int2 b = int2(floor(lc));
     float2 f = lc - float2(b);
-    int2 tmp76[4] = { b, b + int2(1, 0), b + int2(0, 1), b + int2(1, 1) };
-    int2 t[4] = tmp76;
-    float tmp104[4] = { (1.0f - f.x) * (1.0f - f.y), f.x * (1.0f - f.y), (1.0f - f.x) * f.y, f.x * f.y };
-    float wb[4] = tmp104;
-    float param = fxrDepth.Load(int3(int2(gl_FragCoord.xy), 0)).x;
-    float w = viewW(param);
+    int2 tPart[4] = { b, b + int2(1, 0), b + int2(0, 1), b + int2(1, 1) };
+    int2 t[4] = tPart;
+    float wbPart[4] = { (1.0f - f.x) * (1.0f - f.y), f.x * (1.0f - f.y), (1.0f - f.x) * f.y, f.x * f.y };
+    float wb[4] = wbPart;
+    float dArg2 = fxrDepth.Load(int3(int2(gl_FragCoord.xy), 0)).x;
+    float w = viewW(dArg2);
     bool edge = false;
     int best = 0;
     float bestD = 1000000015047466219876688855040.0f;
     for (int i = 0; i < 4; i++)
     {
         t[i] = clamp(t[i], int2(0, 0), fxrSize - int2(1, 1));
-        float param_1 = fxrZ.Load(int3(t[i], 0)).x;
-        float dz = abs(viewW(param_1) - w);
+        float dArg = fxrZ.Load(int3(t[i], 0)).x;
+        float dz = abs(viewW(dArg) - w);
         if (dz > (fxrEdge * w))
         {
             edge = true;

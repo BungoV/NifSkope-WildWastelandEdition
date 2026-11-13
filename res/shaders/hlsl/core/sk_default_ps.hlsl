@@ -126,16 +126,17 @@ void frag_main()
     if (alphaFlags > 0)
     {
         float a = (C.w * baseMap.w) * alpha;
-        int tmp205;
+        int mPick;
         if (a < alphaThreshold)
         {
-            tmp205 = 11051;
+            mPick = 11051;
         }
         else
         {
-            tmp205 = (a > alphaThreshold) ? 29041 : 19789;
+            mPick = (a > alphaThreshold) ? 29041 : 19789;
         }
-        int m = tmp205;
+        // 0: always, 1: <, 2: ==, 3: <=, 4: >, 5: !=, 6: >=, 7: never
+        int m = mPick;
         if ((m & (1 << alphaFlags)) == 0)
         {
             discard;
@@ -159,33 +160,35 @@ void frag_main()
     float3 reflectedWS = mul(reflected, envMapRotation);
     float3 albedo = baseMap.xyz * C.xyz;
     float3 diffuse = A.xyz + (D.xyz * NdotL);
+    // Environment
     if (hasCubeMap)
     {
         float4 cube = CubeMap.Sample(_CubeMap_sampler, reflectedWS);
-        float4 tmp334 = cube;
-        float3 tmp336 = tmp334.xyz * envReflection;
-        cube.x = tmp336.x;
-        cube.y = tmp336.y;
-        cube.z = tmp336.z;
+        float4 cubePart6 = cube;
+        float3 cubePart5 = cubePart6.xyz * envReflection;
+        cube.x = cubePart5.x;
+        cube.y = cubePart5.y;
+        cube.z = cubePart5.z;
         if (hasEnvMask)
         {
             float4 env = EnvironmentMap.Sample(_EnvironmentMap_sampler, offset);
-            float4 tmp356 = cube;
-            float3 tmp358 = tmp356.xyz * env.x;
-            cube.x = tmp358.x;
-            cube.y = tmp358.y;
-            cube.z = tmp358.z;
+            float4 cubePart4 = cube;
+            float3 cubePart3 = cubePart4.xyz * env.x;
+            cube.x = cubePart3.x;
+            cube.y = cubePart3.y;
+            cube.z = cubePart3.z;
         }
         else
         {
-            float4 tmp368 = cube;
-            float3 tmp370 = tmp368.xyz * normalMap.w;
-            cube.x = tmp370.x;
-            cube.y = tmp370.y;
-            cube.z = tmp370.z;
+            float4 cubePart2 = cube;
+            float3 cubePart = cubePart2.xyz * normalMap.w;
+            cube.x = cubePart.x;
+            cube.y = cubePart.y;
+            cube.z = cubePart.z;
         }
         albedo += cube.xyz;
     }
+    // Emissive & Glow
     float3 emissive = 0.0f.xxx;
     if (hasEmit)
     {
@@ -195,6 +198,7 @@ void frag_main()
             emissive *= glowMap.xyz;
         }
     }
+    // Specular
     float3 spec = clamp(((specColor * specStrength) * normalMap.w) * pow(NdotH, useGloss ? specGlossiness : 1.0f), 0.0f.xxx, 1.0f.xxx);
     spec *= D.xyz;
     float3 backlight = 0.0f.xxx;
@@ -205,7 +209,7 @@ void frag_main()
         emissive += (backlight * D.xyz);
     }
     float4 mask = 0.0f.xxxx;
-    if (hasRimlight || hasSoftlight)
+    if (or(hasRimlight, hasSoftlight))   // HLSLFIX2 orfix.py: no short-circuit branch (NV took the wrong side)
     {
         mask = LightMask.Sample(_LightMask_sampler, offset);
     }
@@ -228,15 +232,15 @@ void frag_main()
     {
         albedo *= tintColor;
     }
-    float3 tmp539 = (albedo * (diffuse + (emissive * glowScaleSRGB))) + spec;
-    color.x = tmp539.x;
-    color.y = tmp539.y;
-    color.z = tmp539.z;
-    float3 param = color.xyz;
-    float3 tmp549 = tonemap(param);
-    color.x = tmp549.x;
-    color.y = tmp549.y;
-    color.z = tmp549.z;
+    float3 colorPart = (albedo * (diffuse + (emissive * glowScaleSRGB))) + spec;
+    color.x = colorPart.x;
+    color.y = colorPart.y;
+    color.z = colorPart.z;
+    float3 xArg = color.xyz;
+    float3 tonemapRet = tonemap(xArg);
+    color.x = tonemapRet.x;
+    color.y = tonemapRet.y;
+    color.z = tonemapRet.z;
     fragColor = color;
 }
 

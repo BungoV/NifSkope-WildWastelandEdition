@@ -38,17 +38,17 @@ void frag_main()
     {
         discard;
     }
-    bool tmp33 = shAlphaTest != 0;
-    bool tmp60;
-    if (tmp33)
+    bool cond2 = shAlphaTest != 0;
+    bool cond;
+    if (cond2)
     {
-        tmp60 = (BaseMap.Sample(_BaseMap_sampler, (texCoord * uvScale) + uvOffset).w * alpha) < alphaThreshold;
+        cond = (BaseMap.Sample(_BaseMap_sampler, (texCoord * uvScale) + uvOffset).w * alpha) < alphaThreshold;
     }
     else
     {
-        tmp60 = tmp33;
+        cond = cond2;
     }
-    if (tmp60)
+    if (cond)
     {
         discard;
     }

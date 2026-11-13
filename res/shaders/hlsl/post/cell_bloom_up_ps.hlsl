@@ -54,12 +54,12 @@ uint2 spvTextureSize(Texture2D<float4> Tex, uint Level, out uint Param)
 void frag_main()
 {
     float2 uv = (floor(gl_FragCoord.xy) + 0.5f.xx) / bloomDst;
-    float3 param = bloomSrc.SampleLevel(_bloomSrc_sampler, uv, 0.0f).xyz;
-    float3 source = bloomSanitize(param);
-    float2 param_1 = uv;
-    float param_2 = bloomParams.x;
-    float param_3 = bloomParams.w;
-    float3 bloom = bloomTentDispersed(bloomMip, _bloomMip_sampler, param_1, param_2, param_3);
+    float3 cArg = bloomSrc.SampleLevel(_bloomSrc_sampler, uv, 0.0f).xyz;
+    float3 source = bloomSanitize(cArg);
+    float2 uvArg = uv;
+    float radiusPixelsArg = bloomParams.x;
+    float dispersionArg = bloomParams.w;
+    float3 bloom = bloomTentDispersed(bloomMip, _bloomMip_sampler, uvArg, radiusPixelsArg, dispersionArg);
     fragColor = float4((source * bloomParams.y) + (bloom * bloomParams.z), 1.0f);
 }
 

@@ -4,8 +4,8 @@
 // named in notes/vkcompute1/hlsl_plan.md. Not wired: nothing loads this file.
 // profile: vs_6_0
 #include "FarLodBindingsVk.hlsli"
-static const int tmp87[3] = { 0, 0, 0 };
-static const float tmp91[3] = { 0.0f, 0.0f, 0.0f };
+static const int table3[3] = { 0, 0, 0 };
+static const float table32[3] = { 0.0f, 0.0f, 0.0f };
 
 cbuffer globalUniforms : register(b0, space0)
 {
@@ -98,48 +98,48 @@ struct SPIRV_Cross_Output
 
 void wwCardPick(float3 eye, float3 centre, int N, int V, bool ring, bool asBaked, bool shuffle, float sharpen, int frameCount_1, inout int3 idx, inout float3 w, inout float3 right, inout float3 up, inout float3 fwd)
 {
-    precise float3 tmp36 = eye - centre;
-    float3 d = tmp36;
-    precise float tmp44 = d.x * d.x;
-    precise float tmp50 = d.y * d.y;
-    precise float tmp51 = tmp44 + tmp50;
-    precise float tmp57 = d.z * d.z;
-    precise float tmp58 = tmp51 + tmp57;
-    float len = sqrt(tmp58);
+    precise float3 dPart4 = eye - centre;
+    float3 d = dPart4;
+    precise float part34 = d.x * d.x;
+    precise float part33 = d.y * d.y;
+    precise float part32 = part34 + part33;
+    precise float part31 = d.z * d.z;
+    precise float lenPart = part32 + part31;
+    float len = sqrt(lenPart);
     if (len > 9.9999999747524270787835121154785e-07f)
     {
-        precise float tmp68 = d.x / len;
-        precise float tmp72 = d.y / len;
-        precise float tmp76 = d.z / len;
-        d = float3(tmp68, tmp72, tmp76);
+        precise float dPart3 = d.x / len;
+        precise float dPart2 = d.y / len;
+        precise float dPart = d.z / len;
+        d = float3(dPart3, dPart2, dPart);
     }
     else
     {
         d = float3(0.0f, 0.0f, 1.0f);
     }
-    int i3[3] = tmp87;
-    float w3[3] = tmp91;
+    int i3[3] = table3;
+    float w3[3] = table32;
     if (ring)
     {
         float phi = atan2(d.y, d.x);
         if (phi < 0.0f)
         {
-            precise float tmp107 = phi + 6.283185482025146484375f;
-            phi = tmp107;
+            precise float phiPart = phi + 6.283185482025146484375f;
+            phi = phiPart;
         }
-        precise float tmp110 = phi / 6.283185482025146484375f;
-        precise float tmp113 = tmp110 * float(V);
-        float f = tmp113;
+        precise float part30 = phi / 6.283185482025146484375f;
+        precise float fPart = part30 * float(V);
+        float f = fPart;
         float fl = floor(f);
-        precise float tmp120 = f - fl;
-        float t = tmp120;
+        precise float tPart = f - fl;
+        float t = tPart;
         int i0 = ((int(fl) % V) + V) % V;
         int i1 = (i0 + 1) % V;
         if (t <= 0.5f)
         {
             i3[0] = i0;
-            precise float tmp144 = 1.0f - t;
-            w3[0] = tmp144;
+            precise float w3Part7 = 1.0f - t;
+            w3[0] = w3Part7;
             i3[1] = i1;
             w3[1] = t;
         }
@@ -148,8 +148,8 @@ void wwCardPick(float3 eye, float3 centre, int N, int V, bool ring, bool asBaked
             i3[0] = i1;
             w3[0] = t;
             i3[1] = i0;
-            precise float tmp158 = 1.0f - t;
-            w3[1] = tmp158;
+            precise float w3Part6 = 1.0f - t;
+            w3[1] = w3Part6;
         }
         i3[2] = i3[0];
         w3[2] = 0.0f;
@@ -163,97 +163,99 @@ void wwCardPick(float3 eye, float3 centre, int N, int V, bool ring, bool asBaked
     }
     else
     {
-        float3 tmp193;
+        float3 ePick;
         if (asBaked)
         {
-            tmp193 = float3(-d.x, -d.y, d.z);
+            ePick = float3(-d.x, -d.y, d.z);
         }
         else
         {
-            tmp193 = d;
+            ePick = d;
         }
-        float3 e = tmp193;
-        precise float tmp213 = e.x * e.x;
-        precise float tmp218 = e.y * e.y;
-        precise float tmp219 = tmp213 + tmp218;
-        precise float tmp224 = e.z * e.z;
-        precise float tmp225 = tmp219 + tmp224;
-        float n = sqrt(tmp225);
+        // gridLookupDir, then dirToGrid
+        float3 e = ePick;
+        precise float part29 = e.x * e.x;
+        precise float part28 = e.y * e.y;
+        precise float part27 = part29 + part28;
+        precise float part26 = e.z * e.z;
+        precise float nPart2 = part27 + part26;
+        float n = sqrt(nPart2);
         bool ok = n > 9.9999996826552253889678874634872e-21f;
         if (ok)
         {
-            precise float tmp237 = e.x / n;
-            precise float tmp241 = e.y / n;
-            precise float tmp245 = e.z / n;
-            e = float3(tmp237, tmp241, tmp245);
+            precise float ePart6 = e.x / n;
+            precise float ePart5 = e.y / n;
+            precise float ePart4 = e.z / n;
+            e = float3(ePart6, ePart5, ePart4);
         }
-        bool tmp253;
+        bool cond;
         if (ok)
         {
-            tmp253 = e.z < 0.0f;
+            cond = e.z < 0.0f;
         }
         else
         {
-            tmp253 = ok;
+            cond = ok;
         }
-        if (tmp253)
+        if (cond)
         {
             e.z = 0.0f;
-            precise float tmp261 = e.x * e.x;
-            precise float tmp266 = e.y * e.y;
-            precise float tmp267 = tmp261 + tmp266;
-            precise float tmp272 = e.z * e.z;
-            precise float tmp273 = tmp267 + tmp272;
-            n = sqrt(tmp273);
+            precise float part25 = e.x * e.x;
+            precise float part24 = e.y * e.y;
+            precise float part23 = part25 + part24;
+            precise float part22 = e.z * e.z;
+            precise float nPart = part23 + part22;
+            n = sqrt(nPart);
             ok = n > 9.9999996826552253889678874634872e-21f;
             if (ok)
             {
-                precise float tmp283 = e.x / n;
-                precise float tmp287 = e.y / n;
-                precise float tmp291 = e.z / n;
-                e = float3(tmp283, tmp287, tmp291);
+                precise float ePart3 = e.x / n;
+                precise float ePart2 = e.y / n;
+                precise float ePart = e.z / n;
+                e = float3(ePart3, ePart2, ePart);
             }
         }
-        precise float tmp300 = abs(e.x) + abs(e.y);
-        precise float tmp303 = tmp300 + e.z;
-        float L = tmp303;
+        precise float part21 = abs(e.x) + abs(e.y);
+        precise float LPart = part21 + e.z;
+        float L = LPart;
         ok = ((ok && (L > 9.9999996826552253889678874634872e-21f)) && (N >= 2)) && (N <= 16);
         if (ok)
         {
-            precise float tmp322 = e.x / L;
-            float x = tmp322;
-            precise float tmp327 = e.y / L;
-            float y = tmp327;
-            precise float tmp331 = x + y;
-            float u = tmp331;
-            precise float tmp335 = x - y;
-            float v = tmp335;
-            precise float tmp338 = u + 1.0f;
-            precise float tmp339 = tmp338 * 0.5f;
-            precise float tmp343 = tmp339 * float(N - 1);
-            float a = tmp343;
-            precise float tmp346 = v + 1.0f;
-            precise float tmp347 = tmp346 * 0.5f;
-            precise float tmp351 = tmp347 * float(N - 1);
-            float b = tmp351;
+            precise float xPart = e.x / L;
+            float x = xPart;
+            precise float yPart = e.y / L;
+            float y = yPart;
+            precise float uPart = x + y;
+            float u = uPart;
+            precise float vPart = x - y;
+            float v = vPart;
+            precise float part20 = u + 1.0f;
+            precise float part19 = part20 * 0.5f;
+            precise float aPart = part19 * float(N - 1);
+            float a = aPart;
+            precise float part18 = v + 1.0f;
+            precise float part17 = part18 * 0.5f;
+            precise float bPart = part17 * float(N - 1);
+            float b = bPart;
             float hi = float(N - 1);
             a = clamp(a, 0.0f, hi);
             b = clamp(b, 0.0f, hi);
+            // pickFrames
             int g0 = clamp(int(floor(a)), 0, N - 2);
             int h0 = clamp(int(floor(b)), 0, N - 2);
-            precise float tmp380 = a - float(g0);
-            float fa = tmp380;
-            precise float tmp385 = b - float(h0);
-            float fb = tmp385;
+            precise float faPart = a - float(g0);
+            float fa = faPart;
+            precise float fbPart = b - float(h0);
+            float fb = fbPart;
             int3 gi;
             int3 gj;
             if ((fa + fb) <= 1.0f)
             {
                 gi = int3(g0, g0 + 1, g0);
                 gj = int3(h0, h0, h0 + 1);
-                precise float tmp404 = 1.0f - fa;
-                precise float tmp406 = tmp404 - fb;
-                w3[0] = tmp406;
+                precise float part16 = 1.0f - fa;
+                precise float w3Part5 = part16 - fb;
+                w3[0] = w3Part5;
                 w3[1] = fa;
                 w3[2] = fb;
             }
@@ -261,13 +263,13 @@ void wwCardPick(float3 eye, float3 centre, int N, int V, bool ring, bool asBaked
             {
                 gi = int3(g0 + 1, g0, g0 + 1);
                 gj = int3(h0 + 1, h0 + 1, h0);
-                precise float tmp427 = fa + fb;
-                precise float tmp428 = tmp427 - 1.0f;
-                w3[0] = tmp428;
-                precise float tmp431 = 1.0f - fa;
-                w3[1] = tmp431;
-                precise float tmp434 = 1.0f - fb;
-                w3[2] = tmp434;
+                precise float part15 = fa + fb;
+                precise float w3Part4 = part15 - 1.0f;
+                w3[0] = w3Part4;
+                precise float w3Part3 = 1.0f - fa;
+                w3[1] = w3Part3;
+                precise float w3Part2 = 1.0f - fb;
+                w3[2] = w3Part2;
             }
             for (int k_1 = 0; k_1 < 3; k_1++)
             {
@@ -278,6 +280,7 @@ void wwCardPick(float3 eye, float3 centre, int N, int V, bool ring, bool asBaked
                 i3[k_1] = gi[k_1] + (gj[k_1] * N);
             }
         }
+        // selectFrames turns the grid whether or not the pick answered (a view from straight below keeps 0, 0, 0)
         if (shuffle)
         {
             for (int k_2 = 0; k_2 < 3; k_2++)
@@ -288,30 +291,31 @@ void wwCardPick(float3 eye, float3 centre, int N, int V, bool ring, bool asBaked
             }
         }
     }
+    // the slider: sharpen and renormalise between the ends, the strongest frame alone at the crisp end
     if ((frameCount_1 > 1) && (sharpen != 1.0f))
     {
         float sum = 0.0f;
-        float tmp521;
+        float w3Pick;
         for (int k_3 = 0; k_3 < 3; k_3++)
         {
             if (0.0f < w3[k_3])
             {
-                tmp521 = pow(w3[k_3], sharpen);
+                w3Pick = pow(w3[k_3], sharpen);
             }
             else
             {
-                tmp521 = 0.0f;
+                w3Pick = 0.0f;
             }
-            w3[k_3] = tmp521;
-            precise float tmp536 = sum + w3[k_3];
-            sum = tmp536;
+            w3[k_3] = w3Pick;
+            precise float sumPart = sum + w3[k_3];
+            sum = sumPart;
         }
         if (sum > 0.0f)
         {
             for (int k_4 = 0; k_4 < 3; k_4++)
             {
-                precise float tmp556 = w3[k_4] / sum;
-                w3[k_4] = tmp556;
+                precise float w3Part = w3[k_4] / sum;
+                w3[k_4] = w3Part;
             }
         }
     }
@@ -330,57 +334,58 @@ void wwCardPick(float3 eye, float3 centre, int N, int V, bool ring, bool asBaked
     }
     idx = int3(i3[0], i3[1], i3[2]);
     w = float3(w3[0], w3[1], w3[2]);
+    // the standing billboard: right = +Z x fwd, +X straight down the pole; up = fwd x right
     fwd = d;
     float3 r = float3(-d.y, d.x, 0.0f);
     if (sqrt(((r.x * r.x) + (r.y * r.y)) + (r.z * r.z)) < 9.9999997473787516355514526367188e-05f)
     {
         r = float3(1.0f, 0.0f, 0.0f);
     }
-    precise float tmp640 = r.x * r.x;
-    precise float tmp645 = r.y * r.y;
-    precise float tmp646 = tmp640 + tmp645;
-    precise float tmp651 = r.z * r.z;
-    precise float tmp652 = tmp646 + tmp651;
-    float rm = sqrt(tmp652);
-    float3 tmp656;
+    precise float part14 = r.x * r.x;
+    precise float part13 = r.y * r.y;
+    precise float part12 = part14 + part13;
+    precise float part11 = r.z * r.z;
+    precise float rmPart = part12 + part11;
+    float rm = sqrt(rmPart);
+    float3 rPick;
     if (rm > 0.0f)
     {
-        precise float tmp662 = r.x / rm;
-        precise float tmp666 = r.y / rm;
-        precise float tmp670 = r.z / rm;
-        tmp656 = float3(tmp662, tmp666, tmp670);
+        precise float rPart3 = r.x / rm;
+        precise float rPart2 = r.y / rm;
+        precise float rPart = r.z / rm;
+        rPick = float3(rPart3, rPart2, rPart);
     }
     else
     {
-        tmp656 = 0.0f.xxx;
+        rPick = 0.0f.xxx;
     }
-    r = tmp656;
-    precise float tmp680 = d.y * r.z;
-    precise float tmp685 = d.z * r.y;
-    precise float tmp686 = tmp680 - tmp685;
-    precise float tmp691 = d.z * r.x;
-    precise float tmp696 = d.x * r.z;
-    precise float tmp697 = tmp691 - tmp696;
-    precise float tmp702 = d.x * r.y;
-    precise float tmp707 = d.y * r.x;
-    precise float tmp708 = tmp702 - tmp707;
-    float3 q = float3(tmp686, tmp697, tmp708);
-    precise float tmp715 = q.x * q.x;
-    precise float tmp720 = q.y * q.y;
-    precise float tmp721 = tmp715 + tmp720;
-    precise float tmp726 = q.z * q.z;
-    precise float tmp727 = tmp721 + tmp726;
-    float qm = sqrt(tmp727);
-    float3 tmp731;
+    r = rPick;
+    precise float part10 = d.y * r.z;
+    precise float part9 = d.z * r.y;
+    precise float qPart3 = part10 - part9;
+    precise float part8 = d.z * r.x;
+    precise float part7 = d.x * r.z;
+    precise float qPart2 = part8 - part7;
+    precise float part6 = d.x * r.y;
+    precise float part5 = d.y * r.x;
+    precise float qPart = part6 - part5;
+    float3 q = float3(qPart3, qPart2, qPart);
+    precise float part4 = q.x * q.x;
+    precise float part3 = q.y * q.y;
+    precise float part2 = part4 + part3;
+    precise float part = q.z * q.z;
+    precise float qmPart = part2 + part;
+    float qm = sqrt(qmPart);
+    float3 upPick;
     if (qm > 0.0f)
     {
-        tmp731 = float3(q.x / qm, q.y / qm, q.z / qm);
+        upPick = float3(q.x / qm, q.y / qm, q.z / qm);
     }
     else
     {
-        tmp731 = 0.0f.xxx;
+        upPick = 0.0f.xxx;
     }
-    up = tmp731;
+    up = upPick;
     right = r;
 }
 
@@ -390,26 +395,26 @@ void vert_main()
     int slot = int(cardData.Load(cardIndexBase + (ci >> 2))[ci & 3]);
     float4 t0 = cardData.Load(slot * 2);
     float4 t1 = cardData.Load((slot * 2) + 1);
-    float3 param = cardEyeModel;
-    float3 param_1 = t0.xyz;
-    int param_2 = pickN;
-    int param_3 = pickV;
-    bool param_4 = pickRing;
-    bool param_5 = pickAsBaked;
-    bool param_6 = pickShuffle;
-    float param_7 = pickSharpen;
-    int param_8 = pickFrameCount;
-    int3 param_9;
-    float3 param_10;
-    float3 param_11;
-    float3 param_12;
-    float3 param_13;
-    wwCardPick(param, param_1, param_2, param_3, param_4, param_5, param_6, param_7, param_8, param_9, param_10, param_11, param_12, param_13);
-    int3 pIdx = param_9;
-    float3 pW = param_10;
-    float3 inRight = param_11;
-    float3 inUp = param_12;
-    float3 inFwd = param_13;
+    float3 eyeArg = cardEyeModel;
+    float3 centreArg = t0.xyz;
+    int NArg = pickN;
+    int VArg = pickV;
+    bool ringArg = pickRing;
+    bool asBakedArg = pickAsBaked;
+    bool shuffleArg = pickShuffle;
+    float sharpenArg = pickSharpen;
+    int frameCount_1Arg = pickFrameCount;
+    int3 idxArg;
+    float3 wArg;
+    float3 rightArg;
+    float3 upArg;
+    float3 fwdArg;
+    wwCardPick(eyeArg, centreArg, NArg, VArg, ringArg, asBakedArg, shuffleArg, sharpenArg, frameCount_1Arg, idxArg, wArg, rightArg, upArg, fwdArg);
+    int3 pIdx = idxArg;
+    float3 pW = wArg;
+    float3 inRight = rightArg;
+    float3 inUp = upArg;
+    float3 inFwd = fwdArg;
     float3 inCenter = t0.xyz;
     float2 inHalf = t1.xy;
     float scale = t1.w;
@@ -419,8 +424,8 @@ void vert_main()
     swayPhase = cardSwayBase + t1.z;
     frameCount = pickFrameCount;
     frameWeightV = pW;
-    float tmp878[3] = { float(pIdx.x), float(pIdx.y), float(pIdx.z) };
-    float frames[3] = tmp878;
+    float framesPart[3] = { float(pIdx.x), float(pIdx.y), float(pIdx.z) };
+    float frames[3] = framesPart;
     for (int k = 0; k < 3; k++)
     {
         int f = frameTableBase + (int(frames[k]) * 4);
@@ -430,32 +435,38 @@ void vert_main()
         frameRight[k] = f1.xyz;
         frameUp[k] = f2.xyz;
         frameFwd[k] = cardFrames.Load(f + 3).xyz;
+        // the per-card path multiplied on the CPU: one float multiply either way
         frameOffset[k] = float2(f1.w * scale, f2.w * scale);
     }
+    // impostor_oct.vert from here, with its uniforms as the locals above
     float3 p = (inCenter + (inRight * (vertexPosition.x * inHalf.x))) + (inUp * (vertexPosition.y * inHalf.y));
     cardPosModel = p;
     cardQuadUv = multiTexCoord0;
-    bool tmp1002;
+    bool orthoCamPick;
     if (!cardOrtho)
     {
-        tmp1002 = abs(projectionMatrix[2].w) < 9.9999999747524270787835121154785e-07f;
+        orthoCamPick = abs(projectionMatrix[2].w) < 9.9999999747524270787835121154785e-07f;
     }
     else
     {
-        tmp1002 = cardOrtho;
+        orthoCamPick = cardOrtho;
     }
-    bool orthoCam = tmp1002;
-    float3 tmp1005;
+    bool orthoCam = orthoCamPick;
+    float3 cardViewRayPick;
     if (orthoCam)
     {
-        tmp1005 = -inFwd;
+        cardViewRayPick = -inFwd;
     }
     else
     {
-        tmp1005 = normalize(p - cardEyeModel);
+        cardViewRayPick = normalize(p - cardEyeModel);
     }
-    cardViewRay = tmp1005;
+    cardViewRay = cardViewRayPick;
     gl_Position = mul(mul(float4(p, 1.0f), modelViewMatrix), projectionMatrix);
+    // lane PERFFIX4: the fragment writes cardPosModel + ray * (height - 0.5) * span, up to half the span TOWARD the
+    // eye. Pull the vertex that far along its own eye ray (+5 % for the angle between a vertex ray and a pixel ray,
+    // + 4 units for rounding): the same screen position, and every depth the fragment writes lies behind the quad,
+    // so impostor_cellinstez.frag may declare depth_greater and the hardware tests depth before the march.
     if ((!orthoCam) && useDepthOffset)
     {
         float4 e = mul(float4(p, 1.0f), modelViewMatrix);

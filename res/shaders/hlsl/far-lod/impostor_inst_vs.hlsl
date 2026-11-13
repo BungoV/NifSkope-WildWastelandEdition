@@ -104,8 +104,8 @@ void vert_main()
     swayPhase = t1.z;
     frameCount = int(t2.w);
     frameWeightV = t5.xyz;
-    float tmp121[3] = { t3.w, t4.w, t5.w };
-    float frames[3] = tmp121;
+    float framesPart[3] = { t3.w, t4.w, t5.w };
+    float frames[3] = framesPart;
     for (int k = 0; k < 3; k++)
     {
         int f = frameTableBase + (int(frames[k]) * 4);
@@ -115,31 +115,33 @@ void vert_main()
         frameRight[k] = f1.xyz;
         frameUp[k] = f2.xyz;
         frameFwd[k] = cardFrames.Load(f + 3).xyz;
+        // the per-card path multiplied on the CPU: one float multiply either way
         frameOffset[k] = float2(f1.w * scale, f2.w * scale);
     }
+    // impostor_oct.vert from here, with its uniforms as the locals above
     float3 p = (inCenter + (inRight * (vertexPosition.x * inHalf.x))) + (inUp * (vertexPosition.y * inHalf.y));
     cardPosModel = p;
     cardQuadUv = multiTexCoord0;
-    bool tmp252;
+    bool orthoCamPick;
     if (!cardOrtho)
     {
-        tmp252 = abs(projectionMatrix[2].w) < 9.9999999747524270787835121154785e-07f;
+        orthoCamPick = abs(projectionMatrix[2].w) < 9.9999999747524270787835121154785e-07f;
     }
     else
     {
-        tmp252 = cardOrtho;
+        orthoCamPick = cardOrtho;
     }
-    bool orthoCam = tmp252;
-    float3 tmp255;
+    bool orthoCam = orthoCamPick;
+    float3 cardViewRayPick;
     if (orthoCam)
     {
-        tmp255 = -inFwd;
+        cardViewRayPick = -inFwd;
     }
     else
     {
-        tmp255 = normalize(p - cardEyeModel);
+        cardViewRayPick = normalize(p - cardEyeModel);
     }
-    cardViewRay = tmp255;
+    cardViewRay = cardViewRayPick;
     gl_Position = mul(mul(float4(p, 1.0f), modelViewMatrix), projectionMatrix);
 }
 

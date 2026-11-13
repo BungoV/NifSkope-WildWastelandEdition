@@ -71,16 +71,16 @@ uint2 spvTextureSize(Texture2D<float4> Tex, uint Level, out uint Param)
 float4 lensTexel(int2 p)
 {
     float4 a = t0.Load(int3(p, 0));
-    float param = t2.Load(int3(p, 0)).x;
-    float param_1 = lensDist(param);
-    float param_2 = lensS1;
-    float cf = lensCoc(param_1, param_2);
+    float dArg = t2.Load(int3(p, 0)).x;
+    float zArg = lensDist(dArg);
+    float s1Arg = lensS1;
+    float cf = lensCoc(zArg, s1Arg);
     float2 uq = (float2(p) + 0.5f.xx) / (float2(int2(spvTextureSize(t1, uint(0), dummy_parameter))) * 4.0f);
     float3 m = a.xyz;
     if (cf > 1.0f)
     {
-        float param_3 = (cf - 1.0f) / 3.0f;
-        m = lerp(a.xyz, t1.Sample(_t1_sampler, uq).xyz, lensSat(param_3).xxx);
+        float vArg = (cf - 1.0f) / 3.0f;
+        m = lerp(a.xyz, t1.Sample(_t1_sampler, uq).xyz, lensSat(vArg).xxx);
     }
     if (lensQ.y != 0.0f)
     {
@@ -97,8 +97,8 @@ void frag_main()
 {
     lensS1 = 0.0f;
     lensS1 = lensFocus(t2, _t2_sampler);
-    int2 param = int2(gl_FragCoord.xy);
-    fragColor = lensTexel(param);
+    int2 pArg = int2(gl_FragCoord.xy);
+    fragColor = lensTexel(pArg);
 }
 
 SPIRV_Cross_Output main(SPIRV_Cross_Input stage_input)

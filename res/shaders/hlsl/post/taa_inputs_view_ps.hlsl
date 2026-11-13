@@ -49,17 +49,17 @@ void frag_main()
     }
     float2 px = velTex.Load(int3(p, 0)).xy * size;
     float len = length(px);
-    float3 tmp115;
+    float3 cPick;
     if (len > 9.9999997473787516355514526367188e-05f)
     {
-        float param = (atan2(px.y, px.x) / 6.283185482025146484375f) + 0.5f;
-        tmp115 = hue(param) * clamp(len / viewScale, 0.0f, 1.0f);
+        float hArg = (atan2(px.y, px.x) / 6.283185482025146484375f) + 0.5f;
+        cPick = hue(hArg) * clamp(len / viewScale, 0.0f, 1.0f);
     }
     else
     {
-        tmp115 = 0.0f.xxx;
+        cPick = 0.0f.xxx;
     }
-    float3 c = tmp115;
+    float3 c = cPick;
     fragColor = float4(lerp(c, 1.0f.xxx, (m.z * 0.25f).xxx), 1.0f);
 }
 

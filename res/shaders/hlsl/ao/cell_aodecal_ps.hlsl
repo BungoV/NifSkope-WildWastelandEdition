@@ -4,8 +4,8 @@
 // named in notes/vkcompute1/hlsl_plan.md. Not wired: nothing loads this file.
 // profile: ps_6_0
 #include "AoBindingsVk.hlsli"
-static const float tmp228[9] = { 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f };
-static const float tmp395[9] = { 1.0f, 0.666666686534881591796875f, 0.666666686534881591796875f, 0.666666686534881591796875f, 0.25f, 0.25f, 0.25f, 0.25f, 0.25f };
+static const float band[9] = { 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f };
+static const float table9[9] = { 1.0f, 0.666666686534881591796875f, 0.666666686534881591796875f, 0.666666686534881591796875f, 0.25f, 0.25f, 0.25f, 0.25f, 0.25f };
 
 Texture3D<float4> aoVol : register(t0, space0);	// RGBA32F, dims.x x dims.y x 3 dims.z: slabs k0-3, k4-7, k8
 SamplerState _aoVol_sampler : register(s0, space0);
@@ -76,7 +76,7 @@ void sh9(float3 d, inout float y[9])
 
 float aoLookup(float3 m, float3 n)
 {
-    float K[9] = tmp228;
+    float K[9] = band;
     int3 i0;
     float3 f;
     for (int a = 0; a < 3; a++)
@@ -86,9 +86,9 @@ float aoLookup(float3 m, float3 n)
         i0[a] = min(int(floor(g)), (aoDims[a] - 2));
         f[a] = g - float(i0[a]);
     }
-    float tmp322;
-    float tmp334;
-    float tmp347;
+    float wPick3;
+    float wPick2;
+    float wPick;
     for (int dz = 0; dz < 2; dz++)
     {
         for (int dy = 0; dy < 2; dy++)
@@ -97,45 +97,46 @@ float aoLookup(float3 m, float3 n)
             {
                 if (dx == 1)
                 {
-                    tmp322 = f.x;
+                    wPick3 = f.x;
                 }
                 else
                 {
-                    tmp322 = 1.0f - f.x;
+                    wPick3 = 1.0f - f.x;
                 }
                 if (dy == 1)
                 {
-                    tmp334 = f.y;
+                    wPick2 = f.y;
                 }
                 else
                 {
-                    tmp334 = 1.0f - f.y;
+                    wPick2 = 1.0f - f.y;
                 }
                 if (dz == 1)
                 {
-                    tmp347 = f.z;
+                    wPick = f.z;
                 }
                 else
                 {
-                    tmp347 = 1.0f - f.z;
+                    wPick = 1.0f - f.z;
                 }
-                float w = (tmp322 * tmp334) * tmp347;
-                int3 param = i0 + int3(dx, dy, dz);
-                float param_1 = w;
-                float param_2[9] = K;
-                voxel(param, param_1, param_2);
-                K = param_2;
+                float w = (wPick3 * wPick2) * wPick;
+                int3 iArg = i0 + int3(dx, dy, dz);
+                float wArg = w;
+                float KArg[9] = K;
+                voxel(iArg, wArg, KArg);
+                K = KArg;
             }
         }
     }
-    float3 param_3 = n;
-    float param_4[9];
-    sh9(param_3, param_4);
-    float Y[9] = param_4;
+    float3 dArg2 = n;
+    float yArg2[9];
+    sh9(dArg2, yArg2);
+    float Y[9] = yArg2;
     float occ = 0.0f;
     for (int j = 0; j < 9; j++)
     {
-        occ += (((tmp395[j] * K[j]) * 3.5449078083038330078125f) * Y[j]);
+        // 2 sqrt(pi)
+        occ += (((table9[j] * K[j]) * 3.5449078083038330078125f) * Y[j]);
     }
     float3 inner3 = min(m - aoLo, aoHi - m);
     float fd = clamp(min(inner3.x, min(inner3.y, inner3.z)) / aoFade, 0.0f, 1.0f);
@@ -145,10 +146,10 @@ float aoLookup(float3 m, float3 n)
     if (r < aoRcut)
     {
         float3 u = w_1 / r.xxx;
-        float3 param_5 = u;
-        float param_6[9];
-        sh9(param_5, param_6);
-        float yu[9] = param_6;
+        float3 dArg = u;
+        float yArg[9];
+        sh9(dArg, yArg);
+        float yu[9] = yArg;
         float s = 0.0f;
         for (int j_1 = 0; j_1 < 9; j_1++)
         {
@@ -178,19 +179,19 @@ void frag_main()
     float4 pv = float4((zv * (ndc.x + aoProj.z)) / aoProj.x, (zv * (ndc.y + aoProj.w)) / aoProj.y, -zv, 1.0f);
     float3 m = float3(dot(aoM[0], pv), dot(aoM[1], pv), dot(aoM[2], pv));
     float3 n = normalize(float3(dot(aoN[0], g.xyz), dot(aoN[1], g.xyz), dot(aoN[2], g.xyz)));
-    float3 param = m;
-    float3 param_1 = n;
-    float ao = aoLookup(param, param_1);
-    float tmp638;
+    float3 mArg = m;
+    float3 nArg = n;
+    float ao = aoLookup(mArg, nArg);
+    float outAoPick;
     if (aoAdd)
     {
-        tmp638 = ao - 1.0f;
+        outAoPick = ao - 1.0f;
     }
     else
     {
-        tmp638 = ao;
+        outAoPick = ao;
     }
-    outAo = tmp638.xxxx;
+    outAo = outAoPick.xxxx;
     outId = 0.0f.xxxx;
 }
 

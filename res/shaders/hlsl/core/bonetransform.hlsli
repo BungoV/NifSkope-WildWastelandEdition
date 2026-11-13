@@ -19,8 +19,8 @@ void boneTransform(inout float4 v, inout float3 n, inout float3 t, inout float3 
         }
         int bone = int(bw) & 255;
         float w = frac(bw);
-        float3x4 tmp1 = boneTransforms[bone] * w;
-        mTmp = float3x4(mTmp[0] + tmp1[0], mTmp[1] + tmp1[1], mTmp[2] + tmp1[2]);
+        float3x4 mTmpPart = boneTransforms[bone] * w;
+        mTmp = float3x4(mTmp[0] + mTmpPart[0], mTmp[1] + mTmpPart[1], mTmp[2] + mTmpPart[2]);
         wSum += w;
     }
     if (wSum > 0.0f)

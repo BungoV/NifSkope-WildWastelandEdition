@@ -60,6 +60,7 @@ void geom_main(point SPIRV_Cross_Input stage_input[1], inout TriangleStream<SPIR
         return;
     }
     float h = vsHalf[0];
+    // pixels per view unit here
     float k = pcFocal / depth;
     float2 tr = vsVel[0].xy * pcShutter;
     float tl = length(tr);
@@ -83,6 +84,7 @@ void geom_main(point SPIRV_Cross_Input stage_input[1], inout TriangleStream<SPIR
     gBox = float4(vsCell[0] + pcInset, (vsCell[0] + cell) - pcInset);
     if (pcFar != 0)
     {
+        // the cell's mean: 16 taps at the one-texel-a-cell mip (all one texel there; a capped chain averages its 4 x 4)
         float4 m = 0.0f.xxxx;
         if (pcHasTex)
         {

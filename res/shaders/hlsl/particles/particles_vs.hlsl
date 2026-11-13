@@ -72,6 +72,7 @@ void vert_main()
     gl_Position = v;
     if (projectionMatrix[3].w == 1.0f)
     {
+        // orthographic view
         vsViewDir = float3(0.0f, 0.0f, 1.0f);
     }
     else
@@ -79,8 +80,8 @@ void vert_main()
         vsViewDir = -v.xyz;
     }
     vsLightDir = lightSourcePosition[0].xyz;
-    bool4 tmp75 = bool4(vertexColorOverride.x > 0.0f.xxxx.x, vertexColorOverride.y > 0.0f.xxxx.y, vertexColorOverride.z > 0.0f.xxxx.z, vertexColorOverride.w > 0.0f.xxxx.w);
-    vsColor = float4(tmp75.x ? vertexColorOverride.x : vertexColor.x, tmp75.y ? vertexColorOverride.y : vertexColor.y, tmp75.z ? vertexColorOverride.z : vertexColor.z, tmp75.w ? vertexColorOverride.w : vertexColor.w);
+    bool4 vsColorPart = bool4(vertexColorOverride.x > 0.0f.xxxx.x, vertexColorOverride.y > 0.0f.xxxx.y, vertexColorOverride.z > 0.0f.xxxx.z, vertexColorOverride.w > 0.0f.xxxx.w);
+    vsColor = float4(vsColorPart.x ? vertexColorOverride.x : vertexColor.x, vsColorPart.y ? vertexColorOverride.y : vertexColor.y, vsColorPart.z ? vertexColorOverride.z : vertexColor.z, vsColorPart.w ? vertexColorOverride.w : vertexColor.w);
     vsParticleSize = particleSize;
     vsUVOffset = vertexUV;
     vsAngle = vertexAngle;

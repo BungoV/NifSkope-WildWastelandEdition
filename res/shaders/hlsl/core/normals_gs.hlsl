@@ -63,11 +63,11 @@ void geom_main(point SPIRV_Cross_Input stage_input[1], inout TriangleStream<SPIR
     float4 d = float4(btnMatrix[0][clamp(btnSelection, 0, 2)] * normalLineLength, 0.0f);
     float4 p0 = mul(gl_PositionIn[0] - (d * 0.20000000298023223876953125f), projectionMatrix);
     float4 p1 = mul(gl_PositionIn[0] + (d * 0.800000011920928955078125f), projectionMatrix);
-    float4 param = p0;
-    float4 param_1 = p1;
-    float4 param_2 = c;
-    float4 param_3 = c;
-    drawLine(param, param_1, param_2, param_3, geometry_stream);
+    float4 p0Arg = p0;
+    float4 p1Arg = p1;
+    float4 c0Arg = c;
+    float4 c1Arg = c;
+    drawLine(p0Arg, p1Arg, c0Arg, c1Arg, geometry_stream);
 }
 
 [maxvertexcount(4)]

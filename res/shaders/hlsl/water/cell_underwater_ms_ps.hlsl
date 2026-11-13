@@ -13,15 +13,15 @@ struct WwClearLight
     float viewMu;
 };
 
-static const WwClearLight tmp83 = { 2, 0.0f.xxx, 0.0f, 0.0f.xxx, 1.0f };
-static const float3 tmp267[3] = { float3(0.0388000011444091796875f, 0.039999999105930328369140625f, 0.01940000057220458984375f), float3(0.0542999990284442901611328125f, 0.039999999105930328369140625f, 0.01840000040829181671142578125f), float3(0.0384999997913837432861328125f, 0.0350000001490116119384765625f, 0.01640000008046627044677734375f) };
-static const float3 tmp280[3] = { float3(0.0372000001370906829833984375f, 0.039999999105930328369140625f, 0.01950000040233135223388671875f), float3(0.0577999986708164215087890625f, 0.039999999105930328369140625f, 0.01820000074803829193115234375f), float3(0.0384999997913837432861328125f, 0.0350000001490116119384765625f, 0.01640000008046627044677734375f) };
-static const float3 tmp319[3] = { 0.000600000028498470783233642578125f.xxx, float3(0.0199999995529651641845703125f, 0.017999999225139617919921875f, 0.01600000075995922088623046875f), 0.0040000001899898052215576171875f.xxx };
-static const float3 tmp340[3] = { float3(0.00200000009499490261077880859375f, 0.0040000001899898052215576171875f, 0.01200000010430812835693359375f), float3(0.0599999986588954925537109375f, 0.20000000298023223876953125f, 0.699999988079071044921875f), float3(0.0199999995529651641845703125f, 0.07999999821186065673828125f, 0.2800000011920928955078125f) };
-static const float3 tmp366[3] = { float3(0.5889999866485595703125f, 0.680000007152557373046875f, 1.736999988555908203125f), float3(0.87999999523162841796875f, 1.4170000553131103515625f, 3.78999996185302734375f), float3(0.64999997615814208984375f, 0.85000002384185791015625f, 2.2330000400543212890625f) };
-static const float3 tmp380[3] = { float3(0.569999992847442626953125f, 0.630999982357025146484375f, 1.59899997711181640625f), float3(0.99199998378753662109375f, 1.7000000476837158203125f, 4.5799999237060546875f), float3(0.64999997615814208984375f, 0.85000002384185791015625f, 2.2330000400543212890625f) };
-static const float3 tmp975[3] = { float3(0.550000011920928955078125f, 0.4799999892711639404296875f, 0.36000001430511474609375f), float3(0.20000000298023223876953125f, 0.180000007152557373046875f, 0.12999999523162841796875f), float3(0.2199999988079071044921875f, 0.20000000298023223876953125f, 0.1500000059604644775390625f) };
-static const float3 tmp984[3] = { float3(0.20000000298023223876953125f, 0.180000007152557373046875f, 0.14000000059604644775390625f), float3(0.100000001490116119384765625f, 0.085000000894069671630859375f, 0.0599999986588954925537109375f), float3(0.119999997317790985107421875f, 0.100000001490116119384765625f, 0.07500000298023223876953125f) };
+static const WwClearLight kWwClearLightInit = { 2, 0.0f.xxx, 0.0f, 0.0f.xxx, 1.0f };
+static const float3 table3[3] = { float3(0.0388000011444091796875f, 0.039999999105930328369140625f, 0.01940000057220458984375f), float3(0.0542999990284442901611328125f, 0.039999999105930328369140625f, 0.01840000040829181671142578125f), float3(0.0384999997913837432861328125f, 0.0350000001490116119384765625f, 0.01640000008046627044677734375f) };
+static const float3 table32[3] = { float3(0.0372000001370906829833984375f, 0.039999999105930328369140625f, 0.01950000040233135223388671875f), float3(0.0577999986708164215087890625f, 0.039999999105930328369140625f, 0.01820000074803829193115234375f), float3(0.0384999997913837432861328125f, 0.0350000001490116119384765625f, 0.01640000008046627044677734375f) };
+static const float3 table33[3] = { 0.000600000028498470783233642578125f.xxx, float3(0.0199999995529651641845703125f, 0.017999999225139617919921875f, 0.01600000075995922088623046875f), 0.0040000001899898052215576171875f.xxx };
+static const float3 table34[3] = { float3(0.00200000009499490261077880859375f, 0.0040000001899898052215576171875f, 0.01200000010430812835693359375f), float3(0.0599999986588954925537109375f, 0.20000000298023223876953125f, 0.699999988079071044921875f), float3(0.0199999995529651641845703125f, 0.07999999821186065673828125f, 0.2800000011920928955078125f) };
+static const float3 table35[3] = { float3(0.5889999866485595703125f, 0.680000007152557373046875f, 1.736999988555908203125f), float3(0.87999999523162841796875f, 1.4170000553131103515625f, 3.78999996185302734375f), float3(0.64999997615814208984375f, 0.85000002384185791015625f, 2.2330000400543212890625f) };
+static const float3 table36[3] = { float3(0.569999992847442626953125f, 0.630999982357025146484375f, 1.59899997711181640625f), float3(0.99199998378753662109375f, 1.7000000476837158203125f, 4.5799999237060546875f), float3(0.64999997615814208984375f, 0.85000002384185791015625f, 2.2330000400543212890625f) };
+static const float3 table37[3] = { float3(0.550000011920928955078125f, 0.4799999892711639404296875f, 0.36000001430511474609375f), float3(0.20000000298023223876953125f, 0.180000007152557373046875f, 0.12999999523162841796875f), float3(0.2199999988079071044921875f, 0.20000000298023223876953125f, 0.1500000059604644775390625f) };
+static const float3 table38[3] = { float3(0.20000000298023223876953125f, 0.180000007152557373046875f, 0.14000000059604644775390625f), float3(0.100000001490116119384765625f, 0.085000000894069671630859375f, 0.0599999986588954925537109375f), float3(0.119999997317790985107421875f, 0.100000001490116119384765625f, 0.07500000298023223876953125f) };
 
 cbuffer LooseUniforms : register(b31, space0)
 {
@@ -92,26 +92,26 @@ static float3 wwClearDeep;
 float3 wwClearDeepR(int cls)
 {
     float y = dot(wwClearDeep, float3(0.2125999927520751953125f, 0.715200006961822509765625f, 0.072200000286102294921875f));
-    float3 tmp252;
+    float3 rPick;
     if (waterClearRed == 5)
     {
-        tmp252 = tmp267[cls];
+        rPick = table3[cls];
     }
     else
     {
-        tmp252 = tmp280[cls];
+        rPick = table32[cls];
     }
-    float3 r = tmp252;
-    float3 tmp288;
+    float3 r = rPick;
+    float3 wwClearDeepRRet;
     if (y > 9.9999999747524270787835121154785e-07f)
     {
-        tmp288 = wwClearDeep * (dot(r, float3(0.2125999927520751953125f, 0.715200006961822509765625f, 0.072200000286102294921875f)) / y);
+        wwClearDeepRRet = wwClearDeep * (dot(r, float3(0.2125999927520751953125f, 0.715200006961822509765625f, 0.072200000286102294921875f)) / y);
     }
     else
     {
-        tmp288 = r;
+        wwClearDeepRRet = r;
     }
-    return tmp288;
+    return wwClearDeepRRet;
 }
 
 float3 wwClearK(int cls, inout float3 bb)
@@ -119,23 +119,24 @@ float3 wwClearK(int cls, inout float3 bb)
     float3 k;
     if (waterClearRed == 4)
     {
-        bb = float3(0.00039999998989515006542205810546875f, 0.00095000001601874828338623046875f, 0.002249999903142452239990234375f) + tmp319[cls];
-        k = (float3(0.3400000035762786865234375f, 0.0564999990165233612060546875f, 0.0092200003564357757568359375f) + tmp340[cls]) + bb;
+        bb = float3(0.00039999998989515006542205810546875f, 0.00095000001601874828338623046875f, 0.002249999903142452239990234375f) + table33[cls];
+        k = (float3(0.3400000035762786865234375f, 0.0564999990165233612060546875f, 0.0092200003564357757568359375f) + table34[cls]) + bb;
     }
     else
     {
-        float3 tmp351;
+        float3 kPick;
         if (waterClearRed == 5)
         {
-            tmp351 = tmp366[cls];
+            kPick = table35[cls];
         }
         else
         {
-            tmp351 = tmp380[cls];
+            kPick = table36[cls];
         }
-        k = tmp351;
-        int param = cls;
-        bb = (wwClearDeepR(param) * k) / 0.3300000131130218505859375f.xxx;
+        k = kPick;
+        int clsArg = cls;
+        // Gordon R = 0.33 bb / k, solved for bb
+        bb = (wwClearDeepR(clsArg) * k) / 0.3300000131130218505859375f.xxx;
     }
     if (waterClearRed == 3)
     {
@@ -151,11 +152,11 @@ float uwEdgeTol()
     float t = min(max(uwFog.z - uwFog.y, 0.001000000047497451305389404296875f), max(uwFog.z, 0.001000000047497451305389404296875f)) / (512.0f * max(uwFog.x, 0.001000000047497451305389404296875f));
     if (uwLight != 0)
     {
-        int param = uwClass;
-        float3 param_1;
-        float3 tmp712 = wwClearK(param, param_1);
-        float3 bb = param_1;
-        float3 k = tmp712;
+        int clsArg2 = uwClass;
+        float3 bbArg;
+        float3 wwClearKRet = wwClearK(clsArg2, bbArg);
+        float3 bb = bbArg;
+        float3 k = wwClearKRet;
         t = min(t, 1.0f / ((1536.0f * max(max(k.x, max(k.y, k.z)), 9.9999999747524270787835121154785e-07f)) * 0.01428749971091747283935546875f));
     }
     return t;
@@ -175,16 +176,16 @@ bool uwNearMax(float2 ndc, float dMax, float dS, float tol)
     {
         return false;
     }
-    precise float tmp744 = dMax * 2.0f;
-    precise float tmp745 = tmp744 - 1.0f;
-    float2 param = ndc;
-    float param_1 = tmp745;
-    float3 a = uwWorld(param, param_1);
-    precise float tmp752 = dS * 2.0f;
-    precise float tmp753 = tmp752 - 1.0f;
-    float2 param_2 = ndc;
-    float param_3 = tmp753;
-    float3 b = uwWorld(param_2, param_3);
+    precise float part2 = dMax * 2.0f;
+    precise float zPart2 = part2 - 1.0f;
+    float2 ndcArg2 = ndc;
+    float zArg2 = zPart2;
+    float3 a = uwWorld(ndcArg2, zArg2);
+    precise float part = dS * 2.0f;
+    precise float zPart = part - 1.0f;
+    float2 ndcArg = ndc;
+    float zArg = zPart;
+    float3 b = uwWorld(ndcArg, zArg);
     float e = distance(a, b);
     return e <= tol;
 }
@@ -210,80 +211,81 @@ bool uwNearMax(float2 ndc, float dMax, float dS, float tol)
 
 void frag_main()
 {
-    wwClearIn = tmp83;
+    wwClearIn = kWwClearLightInit;
     wwClearDeep = 0.0f.xxx;
     float d = uwDepth.Load(int3(int2(gl_FragCoord.xy), 0)).x;
     float2 ndc = (((gl_FragCoord.xy - uwVp.xy) / uwVp.zw) * 2.0f) - 1.0f.xx;
     float dS = uwDepthMs.Load(int2(gl_FragCoord.xy), gl_SampleID).x;
-    float2 param = ndc;
-    float param_1 = d;
-    float param_2 = dS;
-    float param_3 = uwEdgeTol();
-    if (uwNearMax(param, param_1, param_2, param_3))
+    float2 ndcArg5 = ndc;
+    float dMaxArg = d;
+    float dSArg = dS;
+    float tolArg = uwEdgeTol();
+    if (uwNearMax(ndcArg5, dMaxArg, dSArg, tolArg))
     {
         discard;
     }
     d = dS;
-    float2 param_4 = ndc;
-    float param_5 = -1.0f;
-    float3 Pn = uwWorld(param_4, param_5);
-    float2 param_6 = ndc;
-    float param_7 = (d * 2.0f) - 1.0f;
-    float3 Pw = uwWorld(param_6, param_7);
-    bool tmp838 = uwLight != 0;
-    bool tmp844;
-    if (tmp838)
+    float2 ndcArg4 = ndc;
+    float zArg4 = -1.0f;
+    float3 Pn = uwWorld(ndcArg4, zArg4);
+    float2 ndcArg3 = ndc;
+    float zArg3 = (d * 2.0f) - 1.0f;
+    float3 Pw = uwWorld(ndcArg3, zArg3);
+    bool cond2 = uwLight != 0;
+    bool cond;
+    if (cond2)
     {
-        tmp844 = (uwLightRed & 4) == 0;
+        cond = (uwLightRed & 4) == 0;
     }
     else
     {
-        tmp844 = tmp838;
+        cond = cond2;
     }
     float3 add;
     float3 mul;
-    if (tmp844)
+    if (cond)
     {
-        float3 param_8 = uwEye;
-        float3 param_9 = Pn;
-        float3 param_10 = Pw;
-        bool param_11 = d >= 1.0f;
-        float param_12 = uwFog.w;
-        float3 param_13;
-        float3 param_14;
-        wwUnderLight(param_8, param_9, param_10, param_11, param_12, param_13, param_14);
-        add = param_13;
-        mul = param_14;
+        float3 eyeArg2 = uwEye;
+        float3 PnArg2 = Pn;
+        float3 PwArg2 = Pw;
+        bool farPlaneArg2 = d >= 1.0f;
+        float HArg = uwFog.w;
+        float3 addArg2;
+        float3 mulArg2;
+        wwUnderLight(eyeArg2, PnArg2, PwArg2, farPlaneArg2, HArg, addArg2, mulArg2);
+        add = addArg2;
+        mul = mulArg2;
     }
     else
     {
-        float3 tmp876;
+        float3 fwdPick;
         if ((uwRed & 4) != 0)
         {
-            tmp876 = 0.0f.xxx;
+            fwdPick = 0.0f.xxx;
         }
         else
         {
-            tmp876 = -normalize(float3(uwRow[0].z, uwRow[1].z, uwRow[2].z));
+            fwdPick = -normalize(float3(uwRow[0].z, uwRow[1].z, uwRow[2].z));
         }
-        float3 param_15 = uwEye;
-        float3 param_16 = Pn;
-        float3 param_17 = Pw;
-        bool param_18 = d >= 1.0f;
-        float4 param_19 = uwFog;
-        float3 param_20 = uwColor;
-        float3 param_21 = uwTint;
-        int param_22 = uwRed;
-        float3 param_23 = tmp876;
-        float3 param_24;
-        float3 param_25;
-        wwUnderwater(param_15, param_16, param_17, param_18, param_19, param_20, param_21, param_22, param_23, param_24, param_25);
-        add = param_24;
-        mul = param_25;
+        float3 eyeArg = uwEye;
+        float3 PnArg = Pn;
+        float3 PwArg = Pw;
+        bool farPlaneArg = d >= 1.0f;
+        float4 uwFog_1Arg = uwFog;
+        float3 fogColArg = uwColor;
+        float3 tintArg = uwTint;
+        int redArg = uwRed;
+        float3 fwdArg = fwdPick;
+        float3 addArg;
+        float3 mulArg;
+        wwUnderwater(eyeArg, PnArg, PwArg, farPlaneArg, uwFog_1Arg, fogColArg, tintArg, redArg, fwdArg, addArg, mulArg);
+        add = addArg;
+        mul = mulArg;
     }
-    float param_26 = Pn.z - uwFog.w;
-    float param_27 = fwidth(Pn.z) * uwMenK.x;
-    float men = wwUnderMeniscus(param_26, param_27);
+    float dzArg = Pn.z - uwFog.w;
+    float wArg = fwidth(Pn.z) * uwMenK.x;
+    // 0 with the row off
+    float men = wwUnderMeniscus(dzArg, wArg);
     fragAdd = float4(add * (1.0f - men), 0.0f);
     fragMul = float4(mul * (1.0f - men), 1.0f);
 }
