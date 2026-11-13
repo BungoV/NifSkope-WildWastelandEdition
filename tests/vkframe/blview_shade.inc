@@ -809,6 +809,150 @@ bool texelGate()
 	return ok;
 }
 
+/* lane VKOBJ4 open item 3: the cell frame as shared targets (objBlFrame: colour RGBA16F, depth / stencil D24S8) read by
+ * objBlFrameRead from GL's draw framebuffer with GL's stencil state (front and back: ALWAYS, reference 1, KEEP / KEEP /
+ * REPLACE), then the slice-7 fixture's 64 shapes drawn into it on Vulkan through objBlRun. The app's shape (4 samples) is
+ * made first. BAR (stated before the first run, never widened): the 4-sample frame is made and known (objBlFrameIs); the read
+ * takes both colour draw buffers and the depth / stencil as shared targets with GL's stencil state (on, ALWAYS, ref 1,
+ * REPLACE on pass, front = back); after the run the stencil is 1 exactly where the depth is under 1 and 0 elsewhere (0
+ * mismatches, >= 2000 covered); once dropped the frame is no longer known. Reds (each must FAIL): stoff (the stencil read
+ * as off: none written), glown (GL's own D24S8 texture as the depth: the read refuses it). */
+struct FrameOut
+{
+	bool made4 = false, read = false, stateOk = false, prepped = false, ran = false, dropped = false;
+	std::size_t covered = 0, mismatch = ~std::size_t( 0 );
+	std::string why;
+	bool good() const
+	{
+		return made4 && read && stateOk && prepped && ran && covered >= 2000 && mismatch == 0 && dropped;
+	}
+};
+
+void frameRun( int red, FrameOut & o )
+{
+	using namespace WwVkPresent;
+	void( WINAPI * clearBufferfi )( GLenum, GLint, GLfloat, GLint ) = nullptr;
+	if ( !load( clearBufferfi, "glClearBufferfi" ) ) {
+		o.why = "no glClearBufferfi";
+		return;
+	}
+	unsigned color = 0, ds = 0;
+	o.made4 = objBlFrame( kSW, kSH, 4, kRgba16fi, 0x88F0, color, ds, o.why ) && objBlFrameIs( color );  // DEPTH24_STENCIL8
+	if ( !o.made4 || !objBlFrame( kSW, kSH, 1, kRgba16fi, 0x88F0, color, ds, o.why ) )
+		return;
+	GLuint own = 0, fbo = 0;
+	if ( red == 2 ) {  // GL's own depth / stencil texture
+		ux.createTextures( GL_TEXTURE_2D, 1, &own );
+		ux.textureStorage2D( own, 1, 0x88F0, kSW, kSH );
+	}
+	f.genFramebuffers( 1, &fbo );
+	f.bindFramebuffer( kFb, fbo );
+	f.framebufferTexture2D( kFb, kColorAtt0, GL_TEXTURE_2D, color, 0 );
+	f.framebufferTexture2D( kFb, kColorAtt0 + 1, GL_TEXTURE_2D, sx.t1, 0 );
+	f.framebufferTexture2D( kFb, 0x821A, GL_TEXTURE_2D, red == 2 ? own : ds, 0 );  // DEPTH_STENCIL_ATTACHMENT
+	const GLenum dbs[2] = { kColorAtt0, kColorAtt0 + 1 };
+	sf.drawBuffers( 2, dbs );
+	if ( f.checkFramebufferStatus( kFb ) != kComplete ) {
+		o.why = "the frame's GL framebuffer is not complete";
+		f.bindFramebuffer( kFb, 0 );
+		return;
+	}
+	const GLfloat zero[4] = {};
+	glDepthMask( GL_TRUE );
+	glStencilMask( 0xFF );
+	sf.clearBufferfv( 0x1800, 0, zero );
+	sf.clearBufferfv( 0x1800, 1, zero );
+	clearBufferfi( 0x84F9, 0, 1.0f, 0 );  // GL_DEPTH_STENCIL
+	glViewport( 0, 0, kSW, kSH );
+	glEnable( GL_DEPTH_TEST );
+	glDepthFunc( GL_LESS );
+	glEnable( GL_CULL_FACE );
+	glCullFace( GL_BACK );
+	glFrontFace( GL_CCW );
+	glEnable( GL_STENCIL_TEST );
+	glStencilFunc( GL_ALWAYS, 1, 0xFF );
+	glStencilOp( GL_KEEP, GL_KEEP, GL_REPLACE );
+	ObjBlDraw d;
+	o.read = objBlFrameRead( glProc, d, o.why, red == 1 ? 2 : 0 );
+	glDisable( GL_STENCIL_TEST );
+	glDisable( GL_CULL_FACE );
+	glDisable( GL_DEPTH_TEST );
+	f.bindFramebuffer( kFb, 0 );
+	if ( o.read ) {
+		const ObjBlStencil & sg = d.target.stencil;
+		const bool same = sg.func[0] == sg.func[1] && sg.pass[0] == sg.pass[1] && sg.ref[0] == sg.ref[1] && sg.fail[0] == sg.fail[1]
+			&& sg.depthFail[0] == sg.depthFail[1];
+		o.stateOk = d.target.colorCount == 2 && d.target.depth == VK_FORMAT_D24_UNORM_S8_UINT && d.w == kSW && d.h == kSH && sg.on == 1
+			&& sg.func[0] == VK_COMPARE_OP_ALWAYS && sg.ref[0] == 1 && sg.pass[0] == VK_STENCIL_OP_REPLACE && sg.fail[0] == VK_STENCIL_OP_KEEP
+			&& sg.depthFail[0] == VK_STENCIL_OP_KEEP && same;
+		if ( red == 1 )
+			o.stateOk = d.target.colorCount == 2 && d.target.depth == VK_FORMAT_D24_UNORM_S8_UINT;  // the red draws on, stencil off
+		std::vector<unsigned> names;
+		if ( objBlPoolCopy( sx.key, sx.pool, names, o.why ) ) {
+			d.twin = 0;
+			d.vs = sx.vs.data();
+			d.vsWords = sx.vs.size();
+			d.ps = sx.ps.data();
+			d.psWords = sx.ps.size();
+			d.poolKey = sx.key;
+			d.attrMask = sx.pool.attrMask;
+			d.need = 0x3EFFu;
+			d.ubos = sx.ubos;
+			d.glRows = sx.rows.data();
+			d.rows = sx.rows.size() / kBlRowBytes;
+			d.cmds = sx.cmds.data();
+			d.cmdCount = sx.cmds.size() / 5;
+			objBlDrawsReset();
+			ObjBlDrawStat pst;
+			o.prepped = objBlDrawPrep( d, pst, o.why );
+			if ( o.prepped )
+				o.ran = objBlRun( names, 0, o.why );
+		}
+		glFinish();
+		std::vector<std::uint32_t> px( std::size_t( kSW ) * kSH, 0 );
+		f.getTextureImage( ds, 0, 0x84F9, 0x84FA, GLsizei( px.size() * 4 ), px.data() );  // DEPTH_STENCIL, UNSIGNED_INT_24_8
+		o.covered = 0;
+		o.mismatch = 0;
+		for ( const std::uint32_t p : px ) {
+			const bool covered = ( p >> 8 ) < 0xFFFFFFu;
+			o.covered += covered;
+			o.mismatch += ( p & 0xFFu ) != ( covered ? 1u : 0u );
+		}
+	}
+	void( WINAPI * deleteFramebuffers )( GLsizei, const GLuint * ) = nullptr;
+	if ( load( deleteFramebuffers, "glDeleteFramebuffers" ) )
+		deleteFramebuffers( 1, &fbo );
+	if ( own )
+		glDeleteTextures( 1, &own );
+	objBlFrameDrop();
+	o.dropped = !objBlFrameIs( color );
+}
+
+bool frameGate()
+{
+	FrameOut o;
+	frameRun( 0, o );
+	bool ok = o.good();
+	std::printf( "BLVIEW frame shared %s (4-sample frame made %d; read %d, stencil state %d; prep %d, crossing %d; %zu covered, %zu stencil "
+		"mismatches; dropped %d)%s%s\n", ok ? "OK" : "FAIL", int( o.made4 ), int( o.read ), int( o.stateOk ), int( o.prepped ), int( o.ran ),
+		o.covered, o.mismatch, int( o.dropped ), o.why.empty() ? "" : ": ", o.why.c_str() );
+	const char * reds[2] = { "stoff", "glown" };
+	const char * redWhy[2] = { "the stencil read as off", "GL's own D24S8 texture as the depth" };
+	for ( int r = 1; r <= 2; r++ ) {
+		FrameOut x;
+		frameRun( r, x );
+		const bool fails = !x.good();
+		std::printf( "BLVIEW RED frame%s %s (%s; read %d, %zu covered, %zu mismatches%s%s)\n", reds[r - 1], fails ? "FAIL" : "OK", redWhy[r - 1],
+			int( x.read ), x.covered, x.mismatch, x.why.empty() ? "" : ": ", x.why.c_str() );
+		ok = ok && fails;
+	}
+	if ( const GLenum e = glGetError(); e != GL_NO_ERROR ) {
+		std::printf( "BLVIEW frame FAIL (GL error 0x%x left)\n", unsigned( e ) );
+		ok = false;
+	}
+	return ok;
+}
+
 /* lane VKOBJ4 open item 6: GL's blend as the pipeline's (objBlTargetState, ObjBlTarget.blend).
  * BAR (stated before the first run, never widened):
  * (a) GL's state SRC_ALPHA / ONE_MINUS_SRC_ALPHA on colour, ONE / ONE on alpha, equations ADD / MAX, the mask RGB on and
@@ -1001,6 +1145,7 @@ bool shadeGate( const std::string & spvDir )
 	}
 	ok = unitsGate( spvDir ) && ok;
 	ok = texelGate() && ok;  // lane VKOBJ4 open item 4
+	ok = frameGate() && ok;  // lane VKOBJ4 open item 3
 	ok = blendGate() && ok;
 	if ( const GLenum e = glGetError(); e != GL_NO_ERROR ) {
 		std::printf( "BLVIEW shade FAIL (GL error 0x%x left)\n", unsigned( e ) );

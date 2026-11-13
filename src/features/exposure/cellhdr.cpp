@@ -20,6 +20,8 @@
 #include "features/lights/lightmeas.h"	// lane LIGHTMEAS1: the light at the camera in real units (measure only)
 #include "features/vkframe/vkframe.h"	// lane VKFRAME1 round 3: the frame shared with the Vulkan bloom source
 #include "features/vkframe/vkpresent.h"	// lane VKFRAME1 round 10: the view on Vulkan keeps the view's cached format
+#include "features/vkframe/vkobjpipe.h"	// lane VKOBJ4 open item 3: the frame as shared targets (objBlFrame)
+#include "features/near/cellbindless.h"	// WwBl::vkShadeOn
 #include "features/shared/glstatememo.h"	// lane EMPTY240 R11-2: the clear's state reads kept
 
 #include <QDebug>
@@ -133,6 +135,8 @@ struct HdrGpu
 	bool vkTried = false;	// a share was refused once at this shape: GL's own from then on
 	bool vkTone = false;	// lane VKFRAME1 round 11: color and ds are the present device's (WwVkPresent::toneFrame), the tone on Vulkan
 	bool vkToneTried = false;	// that make was refused once at this shape
+	bool vkObj = false;	// lane VKOBJ4 open item 3: color and ds are shared targets (objBlFrame), the cell runs draw into them on Vulkan
+	bool vkObjTried = false;	// that make was refused once at this shape
 };
 
 // lane SYNC1: the state the measure and the tone quads restore, read once (sync) or each where it was (red)
@@ -1353,14 +1357,19 @@ bool wwCellHdrBegin( Scene * scene )
 	 * made on the present device, which tone-maps it into the view (wwCellHdrEnd); the Vulkan bloom's frame comes first */
 	const bool wantTone = !wantVk && wantTex && hdrFormat().gl == GL_RGBA16F && dsFormat == GL_DEPTH24_STENCIL8 && WwVkPresent::viewFbo()
 		&& s.prevDraw == GLint( WwVkPresent::viewFbo() ) && WwVkPresent::toneWanted();
+	/* lane VKOBJ4 open item 3: the cell runs on Vulkan (WW_VKOBJ_SHADE=1) and neither stage above: the frame's colour and depth /
+	 * stencil are shared targets (objBlFrame), so objBlShade draws into them; multisample only (the tone reads sampler2DMS) */
+	const bool wantObj = !wantVk && !wantTone && wantTex && S >= 2 && WwBl::vkShadeOn();
 	if ( !g.fbo || g.w != W || g.h != H || g.samples != S || g.dsFormat != dsFormat || g.dsTex != wantTex
 		|| g.colorFormat != hdrFormat().gl || ( wantVk && !g.vkShared && !g.vkTried ) || ( g.vkShared && !wantVk )
-		|| ( wantTone && !g.vkTone && !g.vkToneTried ) || ( g.vkTone && ( !wantTone || !WwVkPresent::toneFrameIs( g.color ) ) ) ) {
+		|| ( wantTone && !g.vkTone && !g.vkToneTried ) || ( g.vkTone && ( !wantTone || !WwVkPresent::toneFrameIs( g.color ) ) )
+		|| ( wantObj && !g.vkObj && !g.vkObjTried ) || ( g.vkObj && ( !wantObj || !WwVkPresent::objBlFrameIs( g.color ) ) ) ) {
 		if ( !g.fbo )
 			fn->glGenFramebuffers( 1, &g.fbo );
 		if ( g.w != W || g.h != H || g.samples != S || g.dsFormat != dsFormat ) {
 			g.vkTried = false;	// a new shape is worth a new try
 			g.vkToneTried = false;
+			g.vkObjTried = false;
 		}
 		if ( g.vkShared ) {	// Vulkan's: dropped there, not deleted here
 			WwVkPost::freeFrame( r );
@@ -1378,6 +1387,15 @@ bool wwCellHdrBegin( Scene * scene )
 			if ( !wantTone ) {
 				g.vkToneTried = false;
 				qInfo().noquote() << "cell hdr: the frame back to GL's own (the tone stage on Vulkan is not wanted this frame)";
+			}
+		}
+		if ( g.vkObj ) {	// shared targets: dropped there, not deleted here
+			WwVkPresent::objBlFrameDrop();
+			g.color = g.ds = 0;
+			g.dsTex = g.vkObj = false;
+			if ( !wantObj ) {
+				g.vkObjTried = false;
+				qInfo().noquote() << "cell hdr: the frame back to GL's own (the cell runs are not on Vulkan this frame)";
 			}
 		}
 		if ( wantTone && !g.vkToneTried ) {
@@ -1427,7 +1445,35 @@ bool wwCellHdrBegin( Scene * scene )
 				qInfo().noquote() << QStringLiteral( "cell hdr: the frame stays GL's own (%1)" ).arg( vkWhy );
 			}
 		}
-		if ( !g.vkShared && !g.vkTone ) {
+		if ( wantObj && !g.vkObjTried ) {
+			std::string objWhy;
+			unsigned oc = 0, od = 0;
+			if ( g.color )
+				fn->glDeleteTextures( 1, &g.color );
+			if ( g.ds && g.dsTex )
+				fn->glDeleteTextures( 1, &g.ds );
+			else if ( g.ds )
+				fn->glDeleteRenderbuffers( 1, &g.ds );
+			g.color = g.ds = 0;
+			g.dsTex = false;
+			g.vkObj = WwVkPresent::objBlFrame( W, H, S, hdrFormat().gl, dsFormat, oc, od, objWhy );
+			if ( g.vkObj ) {
+				g.color = oc;
+				g.ds = od;
+				fn->glBindTexture( GL_TEXTURE_2D_MULTISAMPLE, od );	// the tone map's usampler2DMS reads the stencil
+				fn->glTexParameteri( GL_TEXTURE_2D_MULTISAMPLE, GL_DEPTH_STENCIL_TEXTURE_MODE, GL_STENCIL_INDEX );
+				fn->glBindTexture( GL_TEXTURE_2D_MULTISAMPLE, 0 );
+				g.dsTex = true;
+				g.colorFormat = hdrFormat().gl;
+				qInfo().noquote() << QStringLiteral( "cell hdr: the frame as shared targets (%1x%2, %3 samples): the cell runs draw into it on Vulkan" )
+					.arg( W ).arg( H ).arg( S );
+			} else {
+				g.vkObjTried = true;
+				qInfo().noquote() << QStringLiteral( "cell hdr: the frame stays GL's own, the cell runs on GL (%1)" )
+					.arg( QString::fromStdString( objWhy ) );
+			}
+		}
+		if ( !g.vkShared && !g.vkTone && !g.vkObj ) {
 		if ( g.color )
 			fn->glDeleteTextures( 1, &g.color );
 		fn->glGenTextures( 1, &g.color );

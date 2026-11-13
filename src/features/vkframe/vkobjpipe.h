@@ -71,18 +71,25 @@ struct ObjBlBlend
 {
 	std::uint32_t on = 0, srcColor = 1, dstColor = 0, colorOp = 0, srcAlpha = 1, dstAlpha = 0, alphaOp = 0, writeMask = 0xF;
 };
-//! the frame the pipeline draws into, as GL's cell pass draws (colour formats as VkFormat, GL's depth and blend state)
+//! GL's stencil test as the pipeline's: [0] front, [1] back (func a VkCompareOp, the ops VkStencilOp; reference and masks GL's)
+struct ObjBlStencil
+{
+	std::uint32_t on = 0, func[2] = { 7, 7 }, fail[2] = {}, depthFail[2] = {}, pass[2] = {}, ref[2] = {}, readMask[2] = { 0xFF, 0xFF },
+		writeMask[2] = { 0xFF, 0xFF };
+};
+//! the frame the pipeline draws into, as GL's cell pass draws (colour formats as VkFormat, GL's depth, stencil and blend state)
 struct ObjBlTarget
 {
 	std::uint32_t colors[4] = {}, colorCount = 0, depth = 0, samples = 1;
 	std::uint32_t depthOp = 3;  //!< a VkCompareOp (3 = LESS_OR_EQUAL)
 	bool depthWrite = false, twoSided = false;
 	ObjBlBlend blend;
+	ObjBlStencil stencil;  //!< lane VKOBJ4 open item 3 (off: the defaults)
 };
-/*! GL's fixed state as the pipeline takes it, for `colorCount` draw buffers: depth test / function / mask, culling, blend
- * (per draw buffer: they must agree; a constant factor is refused) and the colour mask. Refused with a reason: stencil or
- * scissor on, depth test off, culling other than back faces with CCW front. red 1 reads source and destination swapped
- * (gates only: it must FAIL) */
+/*! GL's fixed state as the pipeline takes it, for `colorCount` draw buffers: depth test / function / mask, culling, stencil
+ * (front and back: function, reference, masks, ops), blend (per draw buffer: they must agree; a constant factor is refused)
+ * and the colour mask. Refused with a reason: scissor on, depth test off, culling other than back faces with CCW front.
+ * red 1 reads source and destination swapped, red 2 reads the stencil test as off (gates only: each must FAIL) */
 bool objBlTargetState( GlProc gp, std::uint32_t colorCount, ObjBlTarget & t, std::string & why, int red = 0 );
 struct ObjBlPipeInfo
 {
@@ -269,4 +276,14 @@ struct ObjBlShade
 	std::size_t nCmds = 0;
 };
 bool objBlShade( GlProc gp, const ObjBlShade & s, std::string & why );
+/*! objBlShade's frame read on its own: GL's draw framebuffer as d's targets (every colour draw buffer and the depth / stencil
+ * a shared target: keys, formats, size, samples), the viewport the whole frame, the fixed state (objBlTargetState with `red`).
+ * false: why (d's target untouched past the first refusal) */
+bool objBlFrameRead( GlProc gp, ObjBlDraw & d, std::string & why, int red = 0 );
+/*! lane VKOBJ4 open item 3: the cell frame's colour (GL format colorFmt) and depth / stencil (dsFmt) as shared targets of
+ * w x h at `samples` (GL names in color / ds: GL attaches them; a Vulkan run draws into them). Kept while the shape holds.
+ * objBlFrameDrop frees both; objBlFrameIs: `color` is this frame's colour. */
+bool objBlFrame( int w, int h, int samples, unsigned colorFmt, unsigned dsFmt, unsigned & color, unsigned & ds, std::string & why );
+void objBlFrameDrop();
+bool objBlFrameIs( unsigned color );
 }  // namespace WwVkPresent

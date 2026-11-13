@@ -77,6 +77,9 @@ void forgetAll();
  * handle joins with the twin made before its texture's (must FAIL the gate) */
 bool vkTexOn();
 int vkTexRed();
+/* lane VKOBJ4: WW_VKOBJ_SHADE=1 (with vkTexOn): a cell run draws on Vulkan through its program's twin; the cell frame's
+ * colour and depth / stencil are then shared targets (cellhdr: objBlFrame) */
+bool vkShadeOn();
 //! the cache deletes tex next (its handles were dropped): a twin leaves the table, its Vulkan half at the next frame
 void texGone( GLuint tex );
 

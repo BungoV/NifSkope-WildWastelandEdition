@@ -157,7 +157,7 @@ bool opSame( const OpEntry & e, int twin, const std::uint32_t * vs, std::size_t 
 	const WwVkPresent::ObjBlTarget & u = e.target;
 	if ( std::memcmp( t.colors, u.colors, sizeof( t.colors ) ) || t.colorCount != u.colorCount || t.depth != u.depth || t.samples != u.samples
 		|| t.depthOp != u.depthOp || t.depthWrite != u.depthWrite || t.twoSided != u.twoSided
-		|| std::memcmp( &t.blend, &u.blend, sizeof( t.blend ) ) )
+		|| std::memcmp( &t.blend, &u.blend, sizeof( t.blend ) ) || std::memcmp( &t.stencil, &u.stencil, sizeof( t.stencil ) ) )
 		return false;
 	for ( std::size_t i = 0; i < b.size(); i++ )
 		if ( b[i].binding != e.buffers[i].binding || b[i].stride != e.buffers[i].stride || b[i].perInstance != e.buffers[i].perInstance )
@@ -667,6 +667,20 @@ bool objBlPipe( int twin, const std::uint32_t * vs, std::size_t vsN, const std::
 	ds.depthTestEnable = target.depth ? VK_TRUE : VK_FALSE;
 	ds.depthWriteEnable = target.depth && target.depthWrite ? VK_TRUE : VK_FALSE;
 	ds.depthCompareOp = VkCompareOp( target.depthOp );
+	if ( target.stencil.on ) {  // lane VKOBJ4 open item 3: GL's front is the pipeline's front (CLOCKWISE above, the flip)
+		const ObjBlStencil & sg = target.stencil;
+		ds.stencilTestEnable = VK_TRUE;
+		VkStencilOpState * so[2] = { &ds.front, &ds.back };
+		for ( int k = 0; k < 2; k++ ) {
+			so[k]->failOp = VkStencilOp( sg.fail[k] );
+			so[k]->passOp = VkStencilOp( sg.pass[k] );
+			so[k]->depthFailOp = VkStencilOp( sg.depthFail[k] );
+			so[k]->compareOp = VkCompareOp( sg.func[k] );
+			so[k]->compareMask = sg.readMask[k];
+			so[k]->writeMask = sg.writeMask[k];
+			so[k]->reference = sg.ref[k];
+		}
+	}
 	std::vector<VkPipelineColorBlendAttachmentState> cba( target.colorCount );
 	for ( VkPipelineColorBlendAttachmentState & c : cba ) {
 		const ObjBlBlend & b = target.blend;
@@ -1872,8 +1886,8 @@ bool objBlTargetState( GlProc gp, std::uint32_t colorCount, ObjBlTarget & t, std
 	const auto getBiv = reinterpret_cast<GetBiv>( gp( "glGetBooleani_v" ) );
 	if ( !getIv || !getIiv || !isOn || !isOni || !getBv || !getBiv )
 		return why = "GL's state queries are not loaded", false;
-	if ( isOn( 0x0B90 ) || isOn( 0x0C11 ) )  // GL_STENCIL_TEST, GL_SCISSOR_TEST
-		return why = "stencil or scissor is on (the pipeline takes neither)", false;
+	if ( isOn( 0x0C11 ) )  // GL_SCISSOR_TEST
+		return why = "scissor is on (the pipeline takes none)", false;
 	if ( !isOn( 0x0B71 ) )  // GL_DEPTH_TEST
 		return why = "depth test is off", false;
 	GLint func = 0, cullMode = 0, front = 0;
@@ -1890,6 +1904,41 @@ bool objBlTargetState( GlProc gp, std::uint32_t colorCount, ObjBlTarget & t, std
 	if ( cull && ( cullMode != 0x0405 || front != 0x0901 ) )  // GL_BACK, GL_CCW
 		return why = "culling other than back faces with CCW front", false;
 	t.twoSided = !cull;
+	// the stencil test, front and back (GL's function and op enums as Vulkan's)
+	t.stencil = ObjBlStencil();
+	if ( isOn( 0x0B90 ) && red != 2 ) {  // GL_STENCIL_TEST
+		auto sop = []( GLint g, std::uint32_t & v ) {
+			switch ( g ) {
+			case 0x1E00: v = 0; return true;  // KEEP
+			case 0: v = 1; return true;       // ZERO
+			case 0x1E01: v = 2; return true;  // REPLACE
+			case 0x1E02: v = 3; return true;  // INCR
+			case 0x1E03: v = 4; return true;  // DECR
+			case 0x150A: v = 5; return true;  // INVERT
+			case 0x8507: v = 6; return true;  // INCR_WRAP
+			case 0x8508: v = 7; return true;  // DECR_WRAP
+			default: return false;
+			}
+		};
+		// FUNC, REF, VALUE_MASK, WRITEMASK, FAIL, PASS_DEPTH_FAIL, PASS_DEPTH_PASS; then the BACK_ ones
+		static const GLenum q[2][7] = { { 0x0B92, 0x0B97, 0x0B93, 0x0B98, 0x0B94, 0x0B95, 0x0B96 },
+			{ 0x8800, 0x8CA3, 0x8CA4, 0x8CA5, 0x8801, 0x8802, 0x8803 } };
+		ObjBlStencil & sg = t.stencil;
+		sg.on = 1;
+		for ( int k = 0; k < 2; k++ ) {
+			GLint v[7] = {};
+			for ( int j = 0; j < 7; j++ )
+				getIv( q[k][j], &v[j] );
+			if ( v[0] < 0x0200 || v[0] > 0x0207 )
+				return why = "an unknown stencil function", false;
+			if ( !sop( v[4], sg.fail[k] ) || !sop( v[5], sg.depthFail[k] ) || !sop( v[6], sg.pass[k] ) )
+				return why = "an unknown stencil op", false;
+			sg.func[k] = std::uint32_t( v[0] - 0x0200 );
+			sg.ref[k] = std::uint32_t( std::min( std::max( v[1], 0 ), 255 ) );  // GL clamps to the 8 stencil bits
+			sg.readMask[k] = std::uint32_t( v[2] ) & 0xFFu;
+			sg.writeMask[k] = std::uint32_t( v[3] ) & 0xFFu;
+		}
+	}
 	// GL's factor / equation enums as Vulkan's (the constant factors refused: the pipeline has no blend constants)
 	auto factor = []( GLint g, std::uint32_t & v ) {
 		switch ( g ) {
@@ -1948,30 +1997,17 @@ bool objBlTargetState( GlProc gp, std::uint32_t colorCount, ObjBlTarget & t, std
 	return true;
 }
 
-bool objBlShade( GlProc gp, const ObjBlShade & s, std::string & why )
+bool objBlFrameRead( GlProc gp, ObjBlDraw & d, std::string & why, int red )
 {
 	auto fail = [&]( const std::string & w ) {
-		objBlOnGl( w.c_str() );
 		return why = w, false;
 	};
 	using GetIv = void( WINAPI * )( GLenum, GLint * );
 	using GetAtt = void( WINAPI * )( GLenum, GLenum, GLenum, GLint * );
-	using IsOn = GLubyte( WINAPI * )( GLenum );
-	using GetBv = void( WINAPI * )( GLenum, GLubyte * );
 	const auto getIv = reinterpret_cast<GetIv>( gp( "glGetIntegerv" ) );
 	const auto getAtt = reinterpret_cast<GetAtt>( gp( "glGetFramebufferAttachmentParameteriv" ) );
-	const auto isOn = reinterpret_cast<IsOn>( gp( "glIsEnabled" ) );
-	const auto getBv = reinterpret_cast<GetBv>( gp( "glGetBooleanv" ) );
-	if ( !getIv || !getAtt || !isOn || !getBv )
+	if ( !getIv || !getAtt )
 		return fail( "GL's state queries are not loaded" );
-	if ( s.twin < 0 || s.twin > 1 || !s.prog || !s.rows || !s.nRows || !s.cmds || !s.nCmds )
-		return fail( "no twin, program, rows or commands" );
-	ObjBlDraw d;
-	d.twin = s.twin;
-	d.vs = vkframe_objbl_vs_spv;
-	d.vsWords = sizeof( vkframe_objbl_vs_spv ) / 4;
-	d.ps = s.twin ? vkframe_objbl_cellcsm_ps_spv : vkframe_objbl_cell_ps_spv;
-	d.psWords = s.twin ? sizeof( vkframe_objbl_cellcsm_ps_spv ) / 4 : sizeof( vkframe_objbl_cell_ps_spv ) / 4;
 	// the frame: GL's draw framebuffer, every target a shared one
 	GLint fbo = 0;
 	getIv( 0x8CA6, &fbo );  // GL_DRAW_FRAMEBUFFER_BINDING
@@ -2024,8 +2060,58 @@ bool objBlShade( GlProc gp, const ObjBlShade & s, std::string & why )
 	getIv( 0x0BA2, vp );  // GL_VIEWPORT
 	if ( vp[0] || vp[1] || vp[2] != d.w || vp[3] != d.h )
 		return fail( "the viewport is not the whole frame" );
+	if ( !objBlTargetState( gp, d.target.colorCount, d.target, why, red ) )
+		return false;
+	if ( d.target.stencil.on && dsh->fmt != VK_FORMAT_D24_UNORM_S8_UINT && dsh->fmt != VK_FORMAT_D32_SFLOAT_S8_UINT )
+		d.target.stencil = ObjBlStencil();  // no stencil buffer: GL's test passes, as none
+	return true;
+}
+
+namespace
+{
+char kFrameColor, kFrameDs;  // the cell frame's shared keys (their addresses)
+}
+
+bool objBlFrame( int w, int h, int samples, unsigned colorFmt, unsigned dsFmt, unsigned & color, unsigned & ds, std::string & why )
+{
+	color = ds = 0;
+	if ( !sharedTarget( reinterpret_cast<std::uintptr_t>( &kFrameColor ), 0, w, h, 1, colorFmt, color, why, 1, samples ) )
+		return false;
+	if ( !sharedTarget( reinterpret_cast<std::uintptr_t>( &kFrameDs ), 0, w, h, 1, dsFmt, ds, why, 1, samples ) ) {
+		objBlFrameDrop();
+		color = 0;
+		return false;
+	}
+	return true;
+}
+
+void objBlFrameDrop()
+{
+	sharedTargetDrop( reinterpret_cast<std::uintptr_t>( &kFrameColor ) );
+	sharedTargetDrop( reinterpret_cast<std::uintptr_t>( &kFrameDs ) );
+}
+
+bool objBlFrameIs( unsigned color )
+{
+	return sharedTargetIs( reinterpret_cast<std::uintptr_t>( &kFrameColor ), color );
+}
+
+bool objBlShade( GlProc gp, const ObjBlShade & s, std::string & why )
+{
+	auto fail = [&]( const std::string & w ) {
+		objBlOnGl( w.c_str() );
+		return why = w, false;
+	};
+	if ( s.twin < 0 || s.twin > 1 || !s.prog || !s.rows || !s.nRows || !s.cmds || !s.nCmds )
+		return fail( "no twin, program, rows or commands" );
+	ObjBlDraw d;
+	d.twin = s.twin;
+	d.vs = vkframe_objbl_vs_spv;
+	d.vsWords = sizeof( vkframe_objbl_vs_spv ) / 4;
+	d.ps = s.twin ? vkframe_objbl_cellcsm_ps_spv : vkframe_objbl_cell_ps_spv;
+	d.psWords = s.twin ? sizeof( vkframe_objbl_cellcsm_ps_spv ) / 4 : sizeof( vkframe_objbl_cell_ps_spv ) / 4;
 	std::string w2;
-	if ( !objBlTargetState( gp, d.target.colorCount, d.target, w2 ) )
+	if ( !objBlFrameRead( gp, d, w2 ) )
 		return fail( w2 );
 	// the vertex stage's GL locations (TEXCOORDn) and the class
 	SpvModule vm;
@@ -2313,7 +2399,7 @@ bool objBlDrawPrep( const ObjBlDraw & d, ObjBlDrawStat & st, std::string & why )
 		const Shared * sh = sharedFind( d.depthKey );
 		if ( !sh || sh->w < d.w || sh->h < d.h )
 			return why = std::string( "the depth target " ) + ( sh ? "is smaller than the frame" : "is not a shared target" ), false;
-		views.push_back( sh->view );
+		views.push_back( sh->attView ? sh->attView : sh->view );  // a stencil format: the depth and stencil aspects
 	}
 	if ( s.fb && ( s.fbViews != views || s.w != d.w || s.h != d.h ) ) {
 		drain();

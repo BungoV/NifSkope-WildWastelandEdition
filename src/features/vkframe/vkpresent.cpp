@@ -1377,6 +1377,7 @@ struct Shared
 	VkImage img = VK_NULL_HANDLE;
 	VkDeviceMemory mem = VK_NULL_HANDLE;
 	VkImageView view = VK_NULL_HANDLE;
+	VkImageView attView = VK_NULL_HANDLE;  // lane VKOBJ4 open item 3: a stencil format's depth and stencil view (a render pass attachment)
 	GLuint tex = 0, obj = 0;
 	void * glCtx = nullptr;
 	int type = 0, w = 0, h = 0, d = 0, levels = 1;
@@ -1434,6 +1435,8 @@ void sharedFree( Shared & s, bool glAlive )
 	}
 	if ( s.view )
 		v.vkDestroyImageView( v.dev, s.view, nullptr );
+	if ( s.attView )
+		v.vkDestroyImageView( v.dev, s.attView, nullptr );
 	if ( s.img )
 		v.vkDestroyImage( v.dev, s.img, nullptr );
 	if ( s.mem )
@@ -3855,6 +3858,13 @@ bool sharedTarget( std::uintptr_t key, int type, int w, int h, int d, unsigned g
 	if ( !s.view ) {
 		sharedFree( s, true );
 		return fail( "a shared target's image view failed" );
+	}
+	if ( fmt == VK_FORMAT_D24_UNORM_S8_UINT || fmt == VK_FORMAT_D32_SFLOAT_S8_UINT ) {
+		s.attView = imageView( s.img, viewType, fmt, VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT, 1, std::uint32_t( layers ) );
+		if ( !s.attView ) {
+			sharedFree( s, true );
+			return fail( "a shared target's depth / stencil view failed" );
+		}
 	}
 	s.glCtx = g.ctx;
 	s.type = type;

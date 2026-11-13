@@ -541,14 +541,14 @@ bool runPoolPeek( const Shape * sh, std::uintptr_t & idxOff, std::int32_t & base
 	return true;
 }
 
-namespace
-{
 bool vkShadeOn()
 {
 	WW_SWITCH_STATIC( bool, want, wwEnv( "WW_VKOBJ_SHADE" ).trimmed() == "1" );
 	return want && vkTexOn();
 }
 
+namespace
+{
 // lane VKOBJ4: the run on Vulkan through its program's twin (false: GL draws it; objBlShade counted why)
 bool vkShade( const NifSkopeOpenGLContext::Program * prog, GLsizei n )
 {
