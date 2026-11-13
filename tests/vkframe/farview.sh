@@ -9,7 +9,7 @@ OUT="${1:?out dir}"
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 PY="${PY:-$(command -v python)}"	# before the UCRT64 PATH
 export PATH="/c/msys64/ucrt64/bin:$PATH"
-if tasklist | grep -qiE '^(NifSkope|Fallout4)'; then echo "FARVIEW GATE FAILED (NifSkope or the game runs: no window of ours now)"; exit 1; fi
+if powershell -NoProfile -Command "if (Get-Process NifSkope,Fallout4 -ErrorAction SilentlyContinue) { 'busy' }" | grep -q busy; then echo "FARVIEW GATE FAILED (NifSkope or the game runs: no window of ours now)"; exit 1; fi
 mkdir -p "$OUT"
 "$PY" -I "$ROOT/tests/vkframe/farview_prep.py" "$OUT" || { echo "FARVIEW GATE FAILED (job)"; exit 1; }
 g++ -O2 -std=c++17 -pthread -I"$ROOT/src" "$ROOT/tests/vkframe/farview.cpp" -o "$OUT/farview.exe" -lopengl32 -lgdi32 -luser32 \

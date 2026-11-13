@@ -357,6 +357,105 @@ int main( int argc, char ** argv )
 		if ( glGetError() != GL_NO_ERROR )
 			return fatal( "the GL reference draw" );
 	}
+	if ( std::getenv( "FARVIEW_PROBE" ) ) {
+		// each dot alone through GL's own vertex stage, a fragment stage writing (gl_PointCoord, gl_FragCoord.xy): the
+		// driver's point centre is fragCoord - (pointCoord - 0.5) * size (x) and fragCoord - (0.5 - pointCoord) * size (y)
+		const char * kProbeFs = "#version 410 core\nout vec4 o; void main() { o = vec4( gl_PointCoord, gl_FragCoord.xy ); }\n";
+		std::string vsrc = readFile( dir + "/prog.vert.glsl" );
+		const GLuint pProbe = program( vsrc, kProbeFs, "probe" );
+		const GLuint pt = tex2d( W, H, fRgba32f, GL_RGBA, GL_FLOAT, nullptr, false );
+		const GLuint fbP = fbo( GL_TEXTURE_2D, pt, 0, 0 );
+		// a second program hands the vertex stage's gl_Position to the fragment, flat (a smooth output comes back through 1/w)
+		std::string vclip = vsrc;
+		const size_t mpos = vclip.find( "void main()" ), lastBrace = vclip.rfind( '}' );
+		if ( mpos == std::string::npos || lastBrace == std::string::npos )
+			return fatal( "probe: prog.vert.glsl main" );
+		vclip.insert( lastBrace, "\twwClip = gl_Position;\n" );
+		vclip.insert( mpos, "flat out vec4 wwClip;\n" );
+		const GLuint pClip = program( vclip, "#version 410 core\nflat in vec4 wwClip; out vec4 o; void main() { o = wwClip; }\n", "probe clip" );
+		if ( !pProbe || !pClip || !fbP )
+			return fatal( "probe program / target" );
+		const float bulb = 4.0f;
+		for ( GLuint p : { pClip, pProbe } ) {
+			f.useProgram( p );
+			setUnis( p, uni );
+			f.uniform4fv( f.getUniformLocation( p, "dotRow" ), 3, row );
+			f.uniformMatrix4fv( f.getUniformLocation( p, "dotProj" ), 1, GL_FALSE, proj );
+			f.uniform3fv( f.getUniformLocation( p, "dotCam" ), 1, cam );
+			f.uniform2fv( f.getUniformLocation( p, "dotBand" ), 1, band );
+			f.uniform1fv( f.getUniformLocation( p, "dotFocal" ), 1, &focal );
+			f.uniform1fv( f.getUniformLocation( p, "dotBulb" ), 1, &bulb );
+			f.uniform1i( f.getUniformLocation( p, "dotRed" ), 0 );
+			const GLuint bp = f.getUniformBlockIndex( p, "globalUniforms" );
+			if ( bp != 0xFFFFFFFFu )
+				f.uniformBlockBinding( p, bp, 0 );
+		}
+		f.bindBufferBase( fUbo, 0, ubo );
+		f.bindFramebuffer( fFb, fbP );
+		glViewport( 0, 0, W, H );
+		drawState0();
+		glEnable( 0x8642 );
+		glEnable( 0x8861 );
+		va.bindVertexArray( vao );
+		std::vector<float> img( size_t( W ) * H * 4 );
+		FILE * out = std::fopen( ( std::string( argv[1] ) + "/glcentre.txt" ).c_str(), "w" );
+		int drawn = 0;
+		for ( int i = 0; i < n; i++ ) {
+			glClearColor( -1.0f, -1.0f, -1.0f, -1.0f );
+			glClear( GL_COLOR_BUFFER_BIT );
+			glDrawArrays( GL_POINTS, i, 1 );
+			glReadPixels( 0, 0, W, H, GL_RGBA, GL_FLOAT, img.data() );
+			// the covered box: its side is the point size, its first texel gives the centre
+			int x0 = W, y0 = H, x1 = -1, y1 = -1;
+			for ( int y = 0; y < H; y++ )
+				for ( int x = 0; x < W; x++ )
+					if ( img[( size_t( y ) * W + x ) * 4 + 2] >= 0.0f ) {
+						x0 = std::min( x0, x ); x1 = std::max( x1, x );
+						y0 = std::min( y0, y ); y1 = std::max( y1, y );
+					}
+			if ( x1 < 0 )
+				continue;
+			// an interior texel (not clipped by the frame edge) with its pointcoord, and the size from two texels apart
+			const int xm = ( x0 + x1 ) / 2, ym = ( y0 + y1 ) / 2;
+			const float * c0 = &img[( size_t( ym ) * W + xm ) * 4];
+			float size = 0.0f;
+			if ( xm + 1 <= x1 )
+				size = 1.0f / ( img[( size_t( ym ) * W + xm + 1 ) * 4] - c0[0] );
+			else if ( xm - 1 >= x0 )
+				size = 1.0f / ( c0[0] - img[( size_t( ym ) * W + xm - 1 ) * 4] );
+			const float sz = size > 0.0f ? std::round( size ) : 1.0f;
+			const double cx = double( c0[2] ) - ( double( c0[0] ) - 0.5 ) * sz, cy = double( c0[3] ) - ( 0.5 - double( c0[1] ) ) * sz;
+			const float pcx = c0[0], pcy = c0[1], fx = c0[2], fy = c0[3];
+			// GL's clip position of this dot, exact bits
+			f.useProgram( pClip );
+			glClear( GL_COLOR_BUFFER_BIT );
+			glDrawArrays( GL_POINTS, i, 1 );
+			float clip[4] = {};
+			glReadPixels( xm, ym, 1, 1, GL_RGBA, GL_FLOAT, clip );
+			f.useProgram( pProbe );
+			std::fprintf( out, "%d %.0f %.9f %.9f %.9g %.9g %.9g %.9g %a %a %a %a\n", i, sz, cx, cy, pcx, pcy, fx, fy, clip[0], clip[1],
+				clip[2], clip[3] );
+			drawn++;
+		}
+		std::fclose( out );
+		va.bindVertexArray( 0 );
+		glDisable( 0x8642 );
+		glDisable( 0x8861 );
+		drawState0();
+		// the dots' inputs, for the candidate transforms (python, float32)
+		FILE * in = std::fopen( ( std::string( argv[1] ) + "/probe_in.txt" ).c_str(), "w" );
+		std::fprintf( in, "vp %d %d %d %d\nrow", 0, 0, W, H );
+		for ( float x : row )
+			std::fprintf( in, " %.9g", x );
+		std::fprintf( in, "\nproj" );
+		for ( float x : proj )
+			std::fprintf( in, " %.9g", x );
+		std::fprintf( in, "\n" );
+		for ( int i = 0; i < n; i++ )
+			std::fprintf( in, "pos %d %.9g %.9g %.9g\n", i, pos[size_t( i ) * 3], pos[size_t( i ) * 3 + 1], pos[size_t( i ) * 3 + 2] );
+		std::fclose( in );
+		std::printf( "FARVIEW probe: %d dots drawn alone, centres in glcentre.txt\n", drawn );
+	}
 	auto runVk = [&]( int red, std::vector<std::uint16_t> & a, std::vector<std::uint16_t> & b ) -> bool {
 		before( fbFrame );
 		bindJob();

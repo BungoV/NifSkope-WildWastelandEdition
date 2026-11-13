@@ -35,10 +35,10 @@ struct VsOut
 };
 
 // NVIDIA GL's lowering of dot() and mat4 * vec4 as mad chains (the window centre is snapped to 1/256 px, so a last
-// bit of the clip position moves a dot by a grid step)
+// bit of the clip position moves a dot by a grid step). Matched bit for bit against GL's gl_Position on 3121 dots.
 float FarDot4(float4 a, float4 b)
 {
-    return mad(a.z, b.z, mad(a.y, b.y, mad(a.x, b.x, a.w * b.w)));
+    return mad(a.w, b.w, mad(a.z, b.z, mad(a.y, b.y, a.x * b.x)));
 }
 
 float4 FarProj(float3 v)
@@ -66,8 +66,10 @@ VsOut main(VsIn i)
     // leaves the corners where they are: build them in window pixels, never through NDC (a last bit there moved a
     // corner by 1/256 px).
     float2 vp = float2(max(dotViewport.z, 1), max(dotViewport.w, 1));
-    // GL's viewport transform, unfused (a fused or (ndc + 1) form moved 2x more centres a grid step)
-    precise float2 cw = (c.xy / c.w) * (vp * 0.5f) + (float2(dotViewport.xy) + vp * 0.5f);
+    // the NV driver's viewport transform: scale first, then times 1 / w, then the offset, each rounded to fp32. It gave
+    // GL's snapped centre on all 3024 dots inside the frame; (x / w) * scale + offset missed 2, fused forms more.
+    precise float rw = 1.0f / c.w;
+    precise float2 cw = ((c.xy * (vp * 0.5f)) * rw) + (float2(dotViewport.xy) + vp * 0.5f);
     float2 q = round(cw * 256.0f) / 256.0f + float2(corner.x - 0.5f, 0.5f - corner.y) * size;
     o.wwPointCoord = corner;
     o.pos = float4(((q - float2(dotViewport.xy)) / vp * 2.0f - 1.0f) * c.w, (c.z + c.w) * 0.5f, c.w);
