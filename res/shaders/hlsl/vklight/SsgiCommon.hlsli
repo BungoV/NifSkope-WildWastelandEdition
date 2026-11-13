@@ -88,7 +88,7 @@ float4 F4FX_SsgiCast( int2 wp, F4FX_SsgiParams P_ )
 	float3 il = float3( 0.0f, 0.0f, 0.0f );
 	float vis = 0.0f, wsum = 0.0f;
 	for ( int s = 0; s < P_.slices; s++ ) {
-		float phi = ( float( s ) + n0 ) * PI / float( P_.slices );
+		float phi = PI * ( ( float( s ) + n0 ) * ( 1.0f / float( P_.slices ) ) );	// NV GL's lowering
 		float2 dir = float2( cos( phi ), sin( phi ) );
 		float3 d3 = float3( dir, 0.0f );
 		float3 ortho = normalize( d3 - V * dot( d3, V ) );
@@ -109,7 +109,7 @@ float4 F4FX_SsgiCast( int2 wp, F4FX_SsgiParams P_ )
 			for ( int k = 0; k < P_.steps; k++ ) {
 				float t = ( float( k ) + ( P_.blueNoise ? sliceStep : frac( n1 + float( k ) * 0.618034f ) ) ) / float( P_.steps );
 				float off = max( t * t * rPx, 1.0f + float( k ) );
-				float2 sp = float2( ft ) + 0.5f + sgn * dir * off;
+				float2 sp = mad( sgn * dir, off, float2( ft ) ) + 0.5f;	// NV GL's lowering
 				if ( sp.x < 0.0f || sp.y < 0.0f || sp.x >= float( P_.fullSize.x ) || sp.y >= float( P_.fullSize.y ) )
 					break;
 				if ( P_.fullBreak && occ == 0xFFFFFFFFu )
@@ -117,13 +117,16 @@ float4 F4FX_SsgiCast( int2 wp, F4FX_SsgiParams P_ )
 				float4 gs = SSGI_GBUF( int2( sp ) );
 				if ( gs.w <= 0.0f )
 					continue;
-				float3 S = F4FX_SsgiViewPos( sp / float2( P_.fullSize ), gs.w, P_.proj );
-				float3 dF = S - P;
+				// NV GL folds viewPos( sp / fullSize ) - P into fma( ndc * z, 1 / proj, -P ), uv as sp * ( 1 / fullSize )
+				float2 ndc = sp * ( 1.0f / float2( P_.fullSize ) ) * 2.0f - 1.0f;
+				float3 dF = float3( mad( ndc.x * gs.w, 1.0f / P_.proj.x, -P.x ), mad( ndc.y * gs.w, 1.0f / P_.proj.y, -P.y ), -gs.w - P.z );
 				float len = length( dF );
 				if ( len > P_.radius || len < 1.0e-3f )
 					continue;
 				float3 dB = dF - V * P_.thickness;
-				float aF = sgn * F4FX_SsgiAcos( clamp( dot( dF / len, V ), -1.0f, 1.0f ) );
+				// NV GL: dF / len as dF * ( 1 / len ), the dot as a mad chain x, y, z
+				float rl = 1.0f / len;
+				float aF = sgn * F4FX_SsgiAcos( clamp( mad( dF.z * rl, V.z, mad( dF.y * rl, V.y, dF.x * rl * V.x ) ), -1.0f, 1.0f ) );
 				float aB = sgn * F4FX_SsgiAcos( clamp( dot( normalize( dB ), V ), -1.0f, 1.0f ) );
 				float uF = 0.5f + 0.5f * sin( clamp( aF - n, -0.5f * PI, 0.5f * PI ) );
 				float uB = 0.5f + 0.5f * sin( clamp( aB - n, -0.5f * PI, 0.5f * PI ) );

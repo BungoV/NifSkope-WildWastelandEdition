@@ -32,6 +32,7 @@ BSD License - see nifskope.h
 #include "gl/fogterrain.h"	// lane FOGTERRAIN1: the ground fog's low-pass terrain (FOGTERRAIN2: its own job here)
 #include "features/shared/cellpasstime.h"	// lane PERFFIX2: the contact sub-timer
 #include "features/shadows/contactlines.h"	// lane PERFFIX2: the contact march's line layout (ww_contact.comp)
+#include "features/vkframe/vkpresent.h"	// lane VKLIGHT1: the contact lines on the present device
 
 #include <QCoreApplication>
 #include <QDir>
@@ -2229,6 +2230,52 @@ bool contactLineReady()
 	return true;
 }
 
+/* lane VKLIGHT1 (L2): the line march as Vulkan compute (contact_vk.hlsl) into GL's own mask, the cleared mask copied
+ * in and the marched one back. false: GL's dispatch */
+bool contactLineVk( GLuint gbuf, GLuint mask, int W, int H, int mw, int mh, int scale, const float light[4],
+	const float params[4], float floorU, const float reach[4], const float tanXY[2], const WwContactBands & B )
+{
+	if ( !WwVkPresent::shareWanted( "WW_VKVIEW_CONTACT_RED" ) ) {
+		WwVkPresent::lightSay( WwVkPresent::LightContact, false, "red WW_VKVIEW_CONTACT_RED=1 or the view not on Vulkan" );
+		return false;
+	}
+	WwVkPresent::LightRun t;
+	t.pass = WwVkPresent::LightContact;
+	WwVkPresent::LightImage gi;
+	gi.tex = gbuf;
+	gi.glFmt = GL_RGBA32F;
+	gi.w = W;
+	gi.h = H;
+	gi.in = true;
+	t.img.push_back( gi );
+	WwVkPresent::LightImage mi;
+	mi.tex = mask;
+	mi.glFmt = GL_R8;
+	mi.w = mw;
+	mi.h = mh;
+	mi.in = true;
+	mi.out = true;
+	t.img.push_back( mi );
+	WwVkPresent::LightDispatch d;
+	d.kernel = WwVkPresent::LightContactK;
+	d.out0 = 1;
+	d.t[0] = 0;
+	d.gx = std::min( B.waves, 32768 );
+	d.gy = ( B.waves + 32767 ) / 32768;
+	const float c[6][4] = { { light[0], light[1], light[2], light[3] }, { params[0], params[1], params[2], params[3] },
+		{ reach[0], reach[1], reach[2], reach[3] }, { float( scale ), floorU, tanXY[0], tanXY[1] },
+		{ float( W ), float( H ), float( mw ), float( mh ) }, { float( B.bands.size() ), float( B.waves ), 0.0f, 0.0f } };
+	std::memcpy( d.pc, c, sizeof( c ) );
+	std::memcpy( d.pc + 112, B.first, sizeof( B.first ) );
+	t.d.push_back( d );
+	t.buf.resize( B.bands.size() * sizeof( WwContactBand ) );
+	std::memcpy( t.buf.data(), B.bands.data(), t.buf.size() );
+	std::string why;
+	const bool ok = WwVkPresent::lightRun( t, why );
+	WwVkPresent::lightSay( WwVkPresent::LightContact, true, nullptr );
+	return ok;
+}
+
 /* one near march into `mask` (R8, mw x mh, its fbo bound with the viewport): cleared to lit first (the light's own
  * pixel has no line), then the line dispatch. The same uniforms as ww_contact.frag's non-SHADOWPAR1 march. */
 void contactLineRun( GLuint gbuf, GLuint mask, int W, int H, int mw, int mh, int scale, const float light[4],
@@ -2240,6 +2287,8 @@ void contactLineRun( GLuint gbuf, GLuint mask, int W, int H, int mw, int mh, int
 	g->glClearBufferfv( GL_COLOR, 0, lit );
 	const WwContactBands B = wwContactBands( light[0], light[1], mw, mh );
 	if ( B.waves <= 0 )
+		return;
+	if ( contactLineVk( gbuf, mask, W, H, mw, mh, scale, light, params, floorU, reach, tanXY, B ) )
 		return;
 	g->glBindBuffer( GL_SHADER_STORAGE_BUFFER, L.ssbo );
 	g->glBufferData( GL_SHADER_STORAGE_BUFFER, GLsizeiptr( B.bands.size() * sizeof( WwContactBand ) ), B.bands.data(), GL_STREAM_DRAW );
