@@ -10,7 +10,8 @@
 //   <= 0.1 % of halves past 1 ulp.
 // cloud: GL's march at the history size seeds hist[1]; the march at the stride-4 size and the resolve into hist[0] are the
 //   reference. Bars: the march colour, the march depth and hist[0] each under frag_gate's MARCH_RULE (values with rel >
-//   1e-3 <= 1e-4 of all); the resolve on GL's own march (red bit 4: the march targets filled from GL's) EXACT.
+//   1e-3 <= 1e-4 of all); the resolve on GL's own march (red bit 4: the march targets filled from GL's) EXACT; the noise
+//   twins EXACT at every mip level (cloudvol.cpp mips the shape and the detail).
 // Reds (each must FAIL): volsky stencil ref 2, no blend over the sky, volAirMed zeroed; cloud shape / detail swapped,
 // the resolve's march / history swapped. Last line `VOLSKYVIEW GATE OK|FAILED` or `CLOUDVIEW GATE OK|FAILED`.
 #define WW_VKPRESENT_NO_QT
@@ -486,8 +487,9 @@ void drawState0()
 // ---- compares ---------------------------------------------------------------------------------------------------
 struct Halves
 {
-	size_t total = 0, diff = 0, past1 = 0, past2 = 0;
+	size_t total = 0, diff = 0, past1 = 0, past2 = 0, worst = 0;
 	int maxu = 0;
+	std::uint16_t worstA = 0, worstB = 0;
 	bool ok() const { return total > 0 && maxu <= 2 && past1 * 1000 <= total; }
 	const char * word() const { return total == 0 ? "FAIL" : diff == 0 ? "EXACT" : ok() ? "BOUND" : "FAIL"; }
 };
@@ -511,6 +513,11 @@ Halves compareHalves( const std::vector<std::uint16_t> & a, const std::vector<st
 		v.diff += d != 0;
 		v.past1 += d > 1;
 		v.past2 += d > 2;
+		if ( d > v.maxu ) {
+			v.worst = i;
+			v.worstA = a[i];
+			v.worstB = b[i];
+		}
 		v.maxu = std::max( v.maxu, d );
 	}
 	return v;
@@ -546,8 +553,9 @@ float h2f( std::uint16_t h )
 // rel > 1e-3 must be <= 1e-4 of all
 struct Rel
 {
-	size_t n = 0, differ = 0, past = 0;
+	size_t n = 0, differ = 0, past = 0, first = 0;
 	double maxRel = 0.0;
+	float firstA = 0.0f, firstB = 0.0f;
 	bool ok() const { return n > 0 && double( past ) <= 1e-4 * double( n ); }
 	const char * word() const { return n == 0 ? "FAIL" : differ == 0 ? "EXACT" : ok() ? "BOUND" : "FAIL"; }
 };
@@ -574,6 +582,11 @@ Rel compareRel( const std::vector<float> & a, const std::vector<float> & b )
 			rel = std::fabs( double( a[i] ) - double( b[i] ) ) / m;
 			if ( !std::isfinite( rel ) )
 				rel = 1.0;
+		}
+		if ( rel > 1e-3 && !r.past ) {
+			r.first = i;
+			r.firstA = a[i];
+			r.firstB = b[i];
 		}
 		r.past += rel > 1e-3;
 		r.maxRel = std::max( r.maxRel, rel );
@@ -870,6 +883,10 @@ int main( int argc, char ** argv )
 			const Halves v = compareHalves( vk, refs[ji] );
 			std::printf( "%s %s %s (%zu of %zu halves differ, %zu past 1 ulp, %zu past 2, max %d ulp; volume %s)\n", gTag, jobs[ji],
 				v.word(), v.diff, v.total, v.past1, v.past2, v.maxu, ji == 0 ? "shared" : "copied into its twin" );
+			if ( v.diff ) {  // the unpacked frame: W * S samples a row, 4 halves a sample
+				const size_t px = v.worst / 4;
+				std::printf( "%s %s: worst at sample x %zu (pixel %zu) y %zu channel %zu: Vulkan %.6g, GL %.6g\n", gTag, jobs[ji], px % size_t( WS ),
+					( px % size_t( WS ) ) / size_t( S ), px / size_t( WS ), v.worst % 4, h2f( v.worstA ), h2f( v.worstB ) );			}
 			ok = ok && v.ok();
 		}
 		const struct
@@ -1020,6 +1037,8 @@ int main( int argc, char ** argv )
 				return fatal( "GL's cloud reference" );
 			// the Vulkan run as cloudvol.cpp's: the march's slots and both blocks from the programs GL is about to draw with
 			auto runVk = [&]( int red, bool marchFromGl ) -> bool {
+				for ( GLenum e = glGetError(); e != GL_NO_ERROR; e = glGetError() )
+					std::printf( "%s %s: GL error 0x%04x before the run\n", gTag, var, unsigned( e ) );
 				clear2( fbSH0 );
 				if ( marchFromGl ) {
 					f.copyImageSubData( mC, GL_TEXTURE_2D, 0, 0, 0, 0, sMC, GL_TEXTURE_2D, 0, 0, 0, 0, mw, mh, 1 );
@@ -1061,13 +1080,25 @@ int main( int argc, char ** argv )
 					std::printf( "%s %s: cloudRun refused: %s\n", gTag, var, why.c_str() );
 					return false;
 				}
-				return glGetError() == GL_NO_ERROR;
+				const GLenum e = glGetError();
+				if ( e != GL_NO_ERROR )
+					std::printf( "%s %s: GL error 0x%04x after the run (red %d)\n", gTag, var, unsigned( e ), t.red );
+				return e == GL_NO_ERROR;
 			};
-			auto rel = [&]( const char * what, const std::vector<float> & gl, const std::vector<float> & vk, bool exact ) {
+			auto rel =[&]( const char * what, const std::vector<float> & gl, const std::vector<float> & vk, bool exact ) {
 				const Rel r = compareRel( gl, vk );
 				const bool pass = exact ? ( r.n > 0 && r.differ == 0 ) : r.ok();
 				std::printf( "%s %s %s %s (%zu of %zu values differ, %zu past rel 1e-3, max rel %.3g; bar %s)\n", gTag, var, what,
 					exact ? ( pass ? "EXACT" : "FAIL" ) : r.word(), r.differ, r.n, r.past, r.maxRel, exact ? "EXACT" : "MARCH_RULE" );
+				if ( r.past )
+					std::printf( "%s %s %s: first past at value %zu: GL %.6g, Vulkan %.6g\n", gTag, var, what, r.first, r.firstA, r.firstB );
+				if ( !pass ) {  // both sides for the offline look (notes/vkair1/tools)
+					std::string nm = dir + "/" + var + "_" + what;
+					for ( char & c : nm )
+						c = c == ' ' || c == '(' || c == ')' || c == '\'' ? '_' : c;
+					std::ofstream( nm + ".gl.bin", std::ios::binary ).write( reinterpret_cast<const char *>( gl.data() ), std::streamsize( gl.size() * 4 ) );
+					std::ofstream( nm + ".vk.bin", std::ios::binary ).write( reinterpret_cast<const char *>( vk.data() ), std::streamsize( vk.size() * 4 ) );
+				}
 				return pass;
 			};
 			// the full job: Vulkan's march and resolve
@@ -1078,6 +1109,28 @@ int main( int argc, char ** argv )
 				ok = rel( "march depth", gMD, readRg32f( sMD, mw, mh ), false ) && ok;
 				ok = rel( "hist[0] colour", gHC, readRgba16f( sHC[0], hw, hh ), false ) && ok;
 				ok = rel( "hist[0] depth", gHD, readRg32f( sHD[0], hw, hh ), false ) && ok;
+			}
+			// the noise twins hold every level of GL's mips (a twin of one level reads 0 past level 0: the march moved ~10 %)
+			for ( int k = 1; k <= 2; k++ ) {
+				const int n = k == 1 ? 128 : 32, levels = k == 1 ? 8 : 6;
+				GLuint tw = 0;
+				if ( !WwVkPresent::sharedTarget( reinterpret_cast<std::uintptr_t>( &twins[a][k] ), 1, n, n, n, fR8, tw, why, levels ) )
+					return fatal( "the noise twin: " + why );
+				size_t d = 0, all = 0;
+				for ( int l = 0; l < levels; l++ ) {
+					const int m = std::max( n >> l, 1 );
+					std::vector<unsigned char> x( size_t( m ) * m * m ), y( x.size() );
+					glBindTexture( fT3D, tex[k].gl );
+					glGetTexImage( fT3D, l, fRed, GL_UNSIGNED_BYTE, x.data() );
+					glBindTexture( fT3D, tw );
+					glGetTexImage( fT3D, l, fRed, GL_UNSIGNED_BYTE, y.data() );
+					for ( size_t i = 0; i < x.size(); i++ )
+						d += x[i] != y[i];
+					all += x.size();
+				}
+				const bool same = d == 0 && glGetError() == GL_NO_ERROR;
+				std::printf( "%s %s %s twin, %d levels %s (%zu of %zu texels differ)\n", gTag, var, tex[k].name.c_str(), levels, same ? "EXACT" : "FAIL", d, all );
+				ok = ok && same;
 			}
 			// the resolve alone on GL's own march
 			if ( !runVk( 0, true ) ) {
@@ -1092,8 +1145,8 @@ int main( int argc, char ** argv )
 				const Rel c = compareRel( gMC, ran ? readRgba16f( sMC, mw, mh ) : std::vector<float>() );
 				const Rel h = compareRel( gHC, ran ? readRgba16f( sHC[0], hw, hh ) : std::vector<float>() );
 				const bool redFails = !ran || !c.ok() || !h.ok();
-				std::printf( "%s RED %s %s shape / detail swapped (march %zu past rel 1e-3, hist %zu; must FAIL)\n", gTag,
-					redFails ? "FAIL" : "BOUND", var, c.past, h.past );
+				std::printf( "%s RED %s %s shape / detail swapped (%s; march %zu of %zu past rel 1e-3, hist %zu; must FAIL)\n", gTag,
+					redFails ? "FAIL" : "BOUND", var, ran ? "ran" : "did not run", c.past, c.n, h.past );
 				ok = ok && redFails;
 			}
 			{

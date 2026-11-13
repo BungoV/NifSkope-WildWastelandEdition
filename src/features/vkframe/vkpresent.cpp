@@ -1088,7 +1088,7 @@ bool makeSlot( Slot & s, int w, int h, std::string & why )
 bool makeShared( VkImage & img, VkDeviceMemory & mem, GLuint & tex, GLuint & obj, VkFormat fmt, GLenum glFmt, int samples, int w,
 	int h, bool depth, double & mb, std::string & why, VkImageType type = VK_IMAGE_TYPE_2D, int d = 1, int layers = 1, int levels = 1 )
 {
-	levels = ( type == VK_IMAGE_TYPE_2D && samples == 1 && layers <= 1 ) ? std::max( levels, 1 ) : 1;  // lane VKLIGHT1: a mipped 2D input
+	levels = ( samples == 1 && !depth ) ? std::max( levels, 1 ) : 1;  // lanes VKLIGHT1 / VKAIR1: a mipped 2D, 2D array or 3D input
 	Vk & v = vk();
 	Gl & g = gl();
 	const bool is3d = type == VK_IMAGE_TYPE_3D, layered = !is3d && layers > 1;
@@ -5587,6 +5587,10 @@ bool fxSlot( const WwVkPresent::FxTex & t, VkImageView & view, FxNames & names, 
 	const Shared * s = sharedFind( t.twin );
 	if ( !s || !s->view ) {
 		why = "an input's twin has no view";
+		return false;
+	}
+	if ( s->levels != std::max( t.levels, 1 ) ) {
+		why = "an input's twin has " + std::to_string( s->levels ) + " levels, the input " + std::to_string( t.levels );
 		return false;
 	}
 	view = s->view;
