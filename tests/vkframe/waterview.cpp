@@ -14,8 +14,9 @@
 //  device   the caps equal the features vkpresent.cpp enables (textureCompressionBC, imageCubeArray, samplerAnisotropy,
 //           tessellationShader)
 //  tess     the tessellated program reads tess, the others do not; its verdict names the tessellated twin
-// Reds (each must FAIL): bc, int (caps forced on), drop (one census input lost), unit (two inputs' textures swapped),
-// tess (caps.tess on), empty (every census empty). Last line `WATERVIEW GATE OK` or `WATERVIEW GATE FAILED`.
+// Reds (each must FAIL): bc (caps.bc on), int (the integer rows lost), drop (one census input lost), unit (two inputs'
+// textures swapped), tess (caps.tess on), empty (every census empty). The fixture's classes are fixed (lane VKWATER2: the
+// integer lookups move); a red only mutates the caps or the census, never the expectation. Last line `WATERVIEW GATE OK` or `WATERVIEW GATE FAILED`.
 #define WW_VKPRESENT_NO_QT
 #include "../../src/features/vkframe/vkpresent.cpp"
 
@@ -143,14 +144,14 @@ void fixtureOf( In & x )
 		x.aniso = 16.0f;
 		x.expect = kWaterAniso;  // vkwater.h names anisotropy before the format; fixtureNoisePlain keeps one plain BC
 	} else if ( n == "waterInfoIndex" || n == "waterFlowIndex" ) {
-		x.fmt = 0x823C;  // RG32UI
-		x.expect = kWaterIntFormat;
+		x.fmt = 0x823C;  // RG32UI (lane VKWATER2: vkFormatOf's R32G32_UINT row)
+		x.expect = kWaterOk;
 	} else if ( n == "waterInfoAtlas" || n == "waterFlowAtlas" || n == "waterSkyIndex" ) {
 		x.fmt = 0x8236;  // R32UI
-		x.expect = kWaterIntFormat;
+		x.expect = kWaterOk;
 	} else if ( n == "waterSkyAtlas" ) {
 		x.fmt = 0x8232;  // R8UI
-		x.expect = kWaterIntFormat;
+		x.expect = kWaterOk;
 	} else if ( n == "waterInfoBodies" ) {
 		x.fmt = 0x8814;  // RGBA32F
 	} else if ( n == "waterMoment0" || n == "waterMoment1" || n == "waterMoment2" ) {
@@ -319,7 +320,7 @@ int evaluate( World & wd, const Mut & m, bool loud )
 	if ( m.bc )
 		caps.bc = true;
 	if ( m.intF )
-		caps.intFormats = true;
+		caps.intFormats = false;  // lane VKWATER2: the integer rows lost
 	if ( m.tess )
 		caps.tess = true;
 	std::vector<WaterCensus> cs = wd.cs;
@@ -384,8 +385,7 @@ int evaluate( World & wd, const Mut & m, bool loud )
 				bad( b );
 			}
 			const int b = blocks[i];
-			const int want = x->expect == kWaterBc && caps.bc ? kWaterOk
-				: x->expect == kWaterIntFormat && caps.intFormats ? kWaterOk : x->expect;
+			const int want = x->expect;
 			if ( b != want )
 				bad( "verdict " + s.name + " reads " + waterBlockName( b ) + ", the fixture " + waterBlockName( want ) );
 			if ( b != kWaterOk && !has( verdict, " " + s.name ) )
