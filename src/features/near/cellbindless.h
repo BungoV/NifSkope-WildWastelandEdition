@@ -112,8 +112,10 @@ bool runPoolPeek( const Shape * sh, std::uintptr_t & idxOff, std::int32_t & base
 //! writes the staged row (a follower's) and returns its base instance
 std::uint32_t runRow();
 void runCmd( GLsizei count, std::uintptr_t offBytes, std::uintptr_t idxOff, std::int32_t baseVertex, std::uint32_t rel );
-//! one multi-draw for the run; false = no follower joined (the caller draws the leader as before)
-bool runIssue( NifSkopeOpenGLContext::GLFunctions * f );
+/*! one multi-draw for the run; false = no follower joined (the caller draws the leader as before). lane VKOBJ4:
+ * WW_VKOBJ_SHADE=1 (with WW_VKOBJ_TEX=1) draws it on Vulkan through `prog`'s twin when the frame's targets are shared
+ * (WwVkPresent::objBlShade), else GL draws it; the `vk objshade:` line says which and why */
+bool runIssue( NifSkopeOpenGLContext::GLFunctions * f, const NifSkopeOpenGLContext::Program * prog = nullptr );
 }
 
 #endif

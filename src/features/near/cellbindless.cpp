@@ -25,6 +25,7 @@
 bool wwFrameLog();	// gl/cellcull.cpp
 
 #include "features/vkframe/vkobjtex.h"	// lane VKOBJ3: the cache's BC twins in the Vulkan bindless table
+#include "features/vkframe/vkobjpipe.h"	// lane VKOBJ4: a run's multi-draw on Vulkan (WW_VKOBJ_SHADE)
 
 #ifndef GL_SHADER_STORAGE_BUFFER
 #define GL_SHADER_STORAGE_BUFFER 0x90D2
@@ -130,6 +131,7 @@ struct Ctx
 	long long draws = 0, pooled = 0, uploads = 0, waits = 0, conflicts = 0, fallbacks = 0, rebuilds = 0;
 	long long conflictsAll = 0;
 	long long runs = 0, merged = 0, mdiCalls = 0, longest = 0;	// lane BINDLESSMDI1
+	long long vkRuns = 0;	// lane VKOBJ4: runs drawn on Vulkan (WW_VKOBJ_SHADE)
 	QString line;
 	/* lane BINDREOPEN1: the functions of the last draw (the frame sweep's fences and shrinks have no caller's), one
 	 * fence per frame that released pool spans (a grave's range is reused once its frame's fence passed), counters */
@@ -281,7 +283,7 @@ namespace
 {
 std::vector<Row> vkRows;  // lane VKOBJ3: the frame's rows, translated by the Vulkan table at frame()
 bool vkTexEver = false;
-std::string vkLine, vkLoadLine;
+std::string vkLine, vkLoadLine, vkShadeLine;
 
 void vkRowCensus()
 {
@@ -539,7 +541,50 @@ bool runPoolPeek( const Shape * sh, std::uintptr_t & idxOff, std::int32_t & base
 	return true;
 }
 
-bool runIssue( NifSkopeOpenGLContext::GLFunctions * f )
+namespace
+{
+bool vkShadeOn()
+{
+	WW_SWITCH_STATIC( bool, want, wwEnv( "WW_VKOBJ_SHADE" ).trimmed() == "1" );
+	return want && vkTexOn();
+}
+
+// lane VKOBJ4: the run on Vulkan through its program's twin (false: GL draws it; objBlShade counted why)
+bool vkShade( const NifSkopeOpenGLContext::Program * prog, GLsizei n )
+{
+	Ctx & c = cx();
+	if ( !prog || !c.boundCls ) {
+		WwVkPresent::objBlOnGl( "no program or class" );
+		return false;
+	}
+	const std::string_view nm = prog->name;
+	const int twin = nm.find( "cellcsmbl" ) != std::string_view::npos ? 1 : nm.find( "cellbl" ) != std::string_view::npos ? 0 : -1;
+	if ( twin < 0 ) {
+		WwVkPresent::objBlOnGl( "the program has no Vulkan twin" );
+		return false;
+	}
+	const Class & k = *c.boundCls;
+	WwVkPresent::ObjBlShade s;
+	s.twin = twin;
+	s.prog = prog->id;
+	s.poolKey = reinterpret_cast<std::uintptr_t>( &k );
+	s.pool.attrMask = k.attrMask;
+	std::copy( k.vbo, k.vbo + 16, s.pool.vbo );
+	s.pool.ebo = k.ebo;
+	s.pool.verts = k.a.vertUsed;
+	s.pool.indices = k.a.idxUsed;
+	s.rows = c.map + std::size_t( run.base ) * sizeof( Row );
+	s.nRows = run.rows;
+	s.cmds = c.cmdMap + std::size_t( run.cmd0 ) * kCmdBytes;
+	s.nCmds = std::size_t( n );
+	std::string why;
+	return WwVkPresent::objBlShade( []( const char * name ) -> void * {
+		return reinterpret_cast<void *>( QOpenGLContext::currentContext()->getProcAddress( name ) );
+	}, s, why );
+}
+}  // namespace
+
+bool runIssue( NifSkopeOpenGLContext::GLFunctions * f, const NifSkopeOpenGLContext::Program * prog )
 {
 	Ctx & c = cx();
 	if ( !run.open )
@@ -550,7 +595,9 @@ bool runIssue( NifSkopeOpenGLContext::GLFunctions * f )
 		return false;
 	}
 	const GLsizei n = GLsizei( c.cmdCursor - run.cmd0 );
-	if ( n > 0 ) {
+	if ( n > 0 && vkShadeOn() && vkShade( prog, n ) ) {
+		c.vkRuns++;
+	} else if ( n > 0 ) {
 		f->glBindBuffer( GL_DRAW_INDIRECT_BUFFER, c.cmdBuf );
 		c.mdi( GL_TRIANGLES, GL_UNSIGNED_SHORT, (const void *) ( std::size_t( run.cmd0 ) * kCmdBytes ), n, GLsizei( kCmdBytes ) );
 		f->glBindBuffer( GL_DRAW_INDIRECT_BUFFER, 0 );
@@ -1187,6 +1234,19 @@ void frame()
 			std::fprintf( stderr, "%s\n", b );
 		}
 	}
+	// lane VKOBJ4: the runs drawn on Vulkan this frame, the ones GL drew and why
+	if ( vkShadeOn() ) {
+		const WwVkPresent::ObjBlRunStat r = WwVkPresent::takeObjBlRunStat();
+		char b[640];
+		std::snprintf( b, sizeof( b ), "vk objshade: runs=%lld crossings=%d draws=%d cmds=%d gl=%d fails=%d ms=%.2f max=%.2f%s%s%s%s",
+			c.vkRuns, r.runs, r.draws, r.cmds, r.gl, r.fails, r.cpuMs, r.maxMs, r.glWhy.empty() ? "" : " glWhy=", r.glWhy.c_str(),
+			r.failWhy.empty() ? "" : " failWhy=", r.failWhy.c_str() );
+		if ( vkShadeLine != b && wwFrameLog() ) {
+			vkShadeLine = b;
+			std::fprintf( stderr, "%s\n", b );
+		}
+	}
+	c.vkRuns = 0;
 }
 }
 

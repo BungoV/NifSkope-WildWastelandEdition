@@ -1,8 +1,12 @@
 // Lane VKOBJ4 (2026-11-13, plan row G4 slice 4): the bl twins' shaded pipelines, both stages' resources read from the
 // modules. Included by vkpresent.cpp after vkbindless.inc (blSetGet: the table is set 1). The API: vkobjpipe.h.
 #include "features/vkframe/vkobjpipe.h"
+#include "features/vkframe/objbl_vs.spv.h"  // the twins (vkframe_spirv.sh fxb: VS_SHIFT / PS_SHIFT, -D WW_VK_BINDLESS)
+#include "features/vkframe/objbl_cell_ps.spv.h"
+#include "features/vkframe/objbl_cellcsm_ps.spv.h"
 
 #include <algorithm>
+#include <cstdlib>
 #include <cstring>
 #include <map>
 #include <type_traits>
@@ -78,6 +82,7 @@ struct OpDraw
 	VkFramebuffer fb = VK_NULL_HANDLE;
 	std::vector<VkImageView> fbViews;
 	int w = 0, h = 0;
+	std::vector<std::uintptr_t> keys;  // the shared targets it draws into or reads (the crossing hands them over)
 };
 
 // a set-0 image no one gives: a 1x1 (0,0,0,1) of its shape and element type (GL's incomplete texture)
@@ -112,6 +117,15 @@ struct Op
 	VkBufferView texelView[3] = {};             // float / int / uint
 	VkCommandBuffer cmd = VK_NULL_HANDLE;
 	VkFence fence = VK_NULL_HANDLE;
+	// the crossing (objBlRun): GL's signal -> the worker's submit -> GL's wait; its own command buffer, fence, semaphores
+	VkCommandBuffer runCmd = VK_NULL_HANDLE;
+	VkFence runFence = VK_NULL_HANDLE;
+	VkSemaphore glDone = VK_NULL_HANDLE, vkDone = VK_NULL_HANDLE;
+	GLuint glDoneGl = 0, vkDoneGl = 0;
+	void * semCtx = nullptr;
+	bool pending = false;
+	int runMode = 0;
+	WwVkPresent::ObjBlRunStat st;
 };
 
 Op & opS()
@@ -167,6 +181,23 @@ void opDrawFree( OpDraw & d )
 		csmBufFree( u.second, false );
 	csmBufFree( d.cmds, false );
 	d = OpDraw();
+}
+
+void opRunSemsDrop( bool glAlive )
+{
+	Vk & v = vk();
+	Gl & g = gl();
+	Op & O = opS();
+	if ( glAlive )
+		for ( GLuint * s : { &O.glDoneGl, &O.vkDoneGl } )
+			if ( *s )
+				g.deleteSemaphores( 1, s );
+	for ( VkSemaphore * s : { &O.glDone, &O.vkDone } )
+		if ( *s )
+			v.vkDestroySemaphore( v.dev, *s, nullptr );
+	O.glDoneGl = O.vkDoneGl = 0;
+	O.glDone = O.vkDone = VK_NULL_HANDLE;
+	O.semCtx = nullptr;
 }
 
 const char * opStage( std::uint32_t s )
@@ -291,11 +322,11 @@ bool spvReflect( const std::uint32_t * w, std::size_t n, SpvModule & out, std::s
 			io.name = nm;
 			Ty x = ty( t );
 			if ( x.op == 28 ) {
-				io.slots = constants.count( x.b ) ? constants[x.b] : 1;
+				io.locs = constants.count( x.b ) ? constants[x.b] : 1;
 				x = ty( x.a );
 			}
 			if ( x.op == 24 ) {
-				io.slots *= x.b;
+				io.locs *= x.b;
 				x = ty( x.a );
 			}
 			if ( x.op == 23 ) {
@@ -460,7 +491,7 @@ bool objBlPipe( int twin, const std::uint32_t * vs, std::size_t vsN, const std::
 	for ( const SpvIo & i : m[1].inputs ) {
 		bool found = false;
 		for ( const SpvIo & o : m[0].outputs )
-			found = found || ( o.location == i.location && o.slots == i.slots && o.comps == i.comps && o.base == i.base );
+			found = found || ( o.location == i.location && o.locs == i.locs && o.comps == i.comps && o.base == i.base );
 		if ( !found )
 			return refuse( "the pixel stage's " + i.name + " (Location " + std::to_string( i.location ) + ") is no vertex output of its shape" );
 		in.varyings++;
@@ -470,9 +501,9 @@ bool objBlPipe( int twin, const std::uint32_t * vs, std::size_t vsN, const std::
 		return refuse( "the pixel stage writes " + std::to_string( m[1].outputs.size() ) + " targets, the frame has "
 			+ std::to_string( target.colorCount ) );
 	for ( const SpvIo & o : m[1].outputs )
-		if ( o.location >= target.colorCount || o.slots != 1 )
+		if ( o.location >= target.colorCount || o.locs != 1 )
 			return refuse( "the pixel stage's " + o.name + " is at Location " + std::to_string( o.location ) );
-	// the attributes: an input in_var_TEXCOORD<k> (slots s) reads GL's locations k .. k + s - 1
+	// the attributes: an input in_var_TEXCOORD<k> (locs s) reads GL's locations k .. k + s - 1
 	std::vector<VkVertexInputAttributeDescription> va;
 	for ( const SpvIo & i : m[0].inputs ) {
 		const std::string pre = "in.var.TEXCOORD", pre2 = "in_var_TEXCOORD";
@@ -485,7 +516,7 @@ bool objBlPipe( int twin, const std::uint32_t * vs, std::size_t vsN, const std::
 		if ( nm.empty() || nm.find_first_not_of( "0123456789" ) != std::string::npos )
 			return refuse( "the vertex input " + i.name + " has no GL location (not a TEXCOORDn)" );
 		k = std::uint32_t( std::stoul( nm ) );
-		for ( std::uint32_t j = 0; j < i.slots; j++ ) {
+		for ( std::uint32_t j = 0; j < i.locs; j++ ) {
 			const ObjBlAttr * a = nullptr;
 			for ( const ObjBlAttr & x : attrs )
 				if ( x.glLocation == k + j )
@@ -778,7 +809,8 @@ int objBlPoolCount( std::size_t * bytes )
 void objBlPipeFree()
 {
 	Op & O = opS();
-	if ( ( !O.made.empty() || !O.pools.empty() || !O.draws.empty() || !O.stand.empty() || O.zeroTexel.buf || O.fence ) && vk().ok ) {
+	if ( ( !O.made.empty() || !O.pools.empty() || !O.draws.empty() || !O.stand.empty() || O.zeroTexel.buf || O.fence || O.runFence || O.glDone )
+		&& vk().ok ) {
 		Vk & v = vk();
 		drain();
 		v.vkDeviceWaitIdle( v.dev );
@@ -810,6 +842,14 @@ void objBlPipeFree()
 			v.vkDestroyFence( v.dev, O.fence, nullptr );
 		O.cmd = VK_NULL_HANDLE;
 		O.fence = VK_NULL_HANDLE;
+		if ( O.runCmd )
+			v.vkFreeCommandBuffers( v.dev, v.pool, 1, &O.runCmd );
+		if ( O.runFence )
+			v.vkDestroyFence( v.dev, O.runFence, nullptr );
+		O.runCmd = VK_NULL_HANDLE;
+		O.runFence = VK_NULL_HANDLE;
+		O.pending = false;
+		opRunSemsDrop( gl().ok && O.semCtx == gl().ctx );
 		for ( OpEntry & e : O.made )
 			opDestroy( e );
 		for ( auto & p : O.pools ) {
@@ -1260,6 +1300,47 @@ bool objBlDrawRecord( VkCommandBuffer cmd, int mode, std::string & why )
 	}
 	return true;
 }
+
+// the crossing's last submit done (its command buffer, the slots' host buffers and the rows are free again)
+void opRunWait()
+{
+	Op & O = opS();
+	if ( !O.pending )
+		return;
+	vk().vkWaitForFences( vk().dev, 1, &O.runFence, VK_TRUE, 5000000000ull );
+	O.pending = false;
+}
+
+// the worker's half of objBlRun: the prepared draws recorded, submitted after GL's signal, ours signalled back
+bool opRunWork( std::string & why )
+{
+	Vk & v = vk();
+	Op & O = opS();
+	v.vkResetFences( v.dev, 1, &O.runFence );
+	v.vkResetCommandBuffer( O.runCmd, 0 );
+	VkCommandBufferBeginInfo bi { VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
+	bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+	v.vkBeginCommandBuffer( O.runCmd, &bi );
+	if ( !objBlDrawRecord( O.runCmd, O.runMode, why ) ) {
+		v.vkEndCommandBuffer( O.runCmd );
+		return false;
+	}
+	if ( v.vkEndCommandBuffer( O.runCmd ) != VK_SUCCESS )
+		return why = "vkEndCommandBuffer (the shaded objects) failed", false;
+	const VkPipelineStageFlags waitAt = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
+	VkSubmitInfo si { VK_STRUCTURE_TYPE_SUBMIT_INFO };
+	si.waitSemaphoreCount = 1;
+	si.pWaitSemaphores = &O.glDone;
+	si.pWaitDstStageMask = &waitAt;
+	si.commandBufferCount = 1;
+	si.pCommandBuffers = &O.runCmd;
+	si.signalSemaphoreCount = 1;
+	si.pSignalSemaphores = &O.vkDone;
+	const VkResult r = v.vkQueueSubmit( v.queue, 1, &si, O.runFence );
+	if ( r != VK_SUCCESS )
+		return why = "vkQueueSubmit (the shaded objects) returned " + std::to_string( int( r ) ), false;
+	return true;
+}
 }  // namespace
 
 namespace WwVkPresent
@@ -1301,8 +1382,237 @@ bool objBlMirror( GlProc gp, unsigned prog, const std::uint32_t * vs, std::size_
 
 void objBlDrawsReset()
 {
+	opRunWait();
 	opS().live = 0;
 	opS().rowCount = 0;
+}
+
+bool objBlRun( const std::vector<unsigned> & glBufs, int mode, std::string & why )
+{
+	Vk & v = vk();
+	Gl & g = gl();
+	Op & O = opS();
+	const double t0 = nowMs();
+	auto refuse = [&]( const std::string & w ) {
+		O.st.fails++;
+		O.st.failWhy = w;
+		return why = w, false;
+	};
+	if ( !v.ok || !g.ok || g.ctx != reinterpret_cast<void *>( wglGetCurrentContext() ) )
+		return refuse( "the present device or GL's entry points are not ready in this context" );
+	if ( !g.signalSemaphore || !g.waitSemaphore )
+		return refuse( "no glSignalSemaphoreEXT / glWaitSemaphoreEXT" );
+	if ( !O.live )
+		return true;  // nothing prepared: nothing crosses
+	if ( mode < 0 || mode > 2 )
+		return refuse( "mode " + std::to_string( mode ) );
+	opRunWait();
+	std::string w;
+	if ( !O.runFence ) {
+		VkFenceCreateInfo fi { VK_STRUCTURE_TYPE_FENCE_CREATE_INFO };
+		VkCommandBufferAllocateInfo cai { VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO };
+		cai.commandPool = v.pool;
+		cai.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+		cai.commandBufferCount = 1;
+		if ( v.vkCreateFence( v.dev, &fi, nullptr, &O.runFence ) != VK_SUCCESS || v.vkAllocateCommandBuffers( v.dev, &cai, &O.runCmd ) != VK_SUCCESS )
+			return refuse( "the crossing's fence / command buffer failed" );
+	}
+	if ( !O.glDone || O.semCtx != g.ctx ) {
+		opRunSemsDrop( false );  // another context's names: that context went
+		if ( !exportSem( O.glDone, O.glDoneGl, w ) || !exportSem( O.vkDone, O.vkDoneGl, w ) ) {
+			opRunSemsDrop( true );
+			return refuse( w );
+		}
+		O.semCtx = g.ctx;
+	}
+	// the textures: every shared target a draw writes or reads, once
+	std::vector<GLuint> texs;
+	for ( std::size_t i = 0; i < O.live; i++ )
+		for ( std::uintptr_t k : O.draws[i].keys ) {
+			const Shared * sh = sharedFind( k );
+			if ( !sh )
+				return refuse( "a draw's shared target went before the crossing" );
+			if ( std::find( texs.begin(), texs.end(), sh->tex ) == texs.end() )
+				texs.push_back( sh->tex );
+		}
+	std::vector<GLuint> bufs( glBufs.begin(), glBufs.end() );
+	std::vector<GLenum> lay( texs.size(), kLayoutGeneral );
+	O.runMode = mode;
+	g.signalSemaphore( O.glDoneGl, GLuint( bufs.size() ), bufs.data(), GLuint( texs.size() ), texs.data(), lay.data() );
+	g.flush();
+	Worker & W = wk();
+	std::uint64_t want = 0;
+	{
+		std::lock_guard<std::mutex> lk( W.m );
+		want = W.toneDone + 1;
+	}
+	Work j;
+	j.k = -1;
+	j.fn = opRunWork;
+	hand( j );
+	bool ok = false;
+	{
+		std::unique_lock<std::mutex> lk( W.m );
+		W.idle.wait( lk, [&W, want]() { return W.toneDone >= want; } );
+		ok = W.toneOk;
+		w = W.toneWhy;
+	}
+	if ( !ok )
+		return refuse( w );  // nothing signals vkDone: GL does not wait it
+	g.waitSemaphore( O.vkDoneGl, GLuint( bufs.size() ), bufs.data(), GLuint( texs.size() ), texs.data(), lay.data() );
+	O.pending = true;
+	const double ms = nowMs() - t0;
+	O.st.runs++;
+	O.st.draws += int( O.live );
+	for ( std::size_t i = 0; i < O.live; i++ )
+		O.st.cmds += int( O.draws[i].cmdCount );
+	O.st.cpuMs += ms;
+	O.st.maxMs = std::max( O.st.maxMs, ms );
+	return true;
+}
+
+void objBlOnGl( const char * why )
+{
+	opS().st.gl++;
+	opS().st.glWhy = why ? why : "";
+}
+
+ObjBlRunStat takeObjBlRunStat()
+{
+	ObjBlRunStat s = opS().st;
+	opS().st = ObjBlRunStat();
+	return s;
+}
+
+bool objBlShade( GlProc gp, const ObjBlShade & s, std::string & why )
+{
+	auto fail = [&]( const std::string & w ) {
+		objBlOnGl( w.c_str() );
+		return why = w, false;
+	};
+	using GetIv = void( WINAPI * )( GLenum, GLint * );
+	using GetAtt = void( WINAPI * )( GLenum, GLenum, GLenum, GLint * );
+	using IsOn = GLubyte( WINAPI * )( GLenum );
+	using GetBv = void( WINAPI * )( GLenum, GLubyte * );
+	const auto getIv = reinterpret_cast<GetIv>( gp( "glGetIntegerv" ) );
+	const auto getAtt = reinterpret_cast<GetAtt>( gp( "glGetFramebufferAttachmentParameteriv" ) );
+	const auto isOn = reinterpret_cast<IsOn>( gp( "glIsEnabled" ) );
+	const auto getBv = reinterpret_cast<GetBv>( gp( "glGetBooleanv" ) );
+	if ( !getIv || !getAtt || !isOn || !getBv )
+		return fail( "GL's state queries are not loaded" );
+	if ( s.twin < 0 || s.twin > 1 || !s.prog || !s.rows || !s.nRows || !s.cmds || !s.nCmds )
+		return fail( "no twin, program, rows or commands" );
+	ObjBlDraw d;
+	d.twin = s.twin;
+	d.vs = vkframe_objbl_vs_spv;
+	d.vsWords = sizeof( vkframe_objbl_vs_spv ) / 4;
+	d.ps = s.twin ? vkframe_objbl_cellcsm_ps_spv : vkframe_objbl_cell_ps_spv;
+	d.psWords = s.twin ? sizeof( vkframe_objbl_cellcsm_ps_spv ) / 4 : sizeof( vkframe_objbl_cell_ps_spv ) / 4;
+	// the frame: GL's draw framebuffer, every target a shared one
+	GLint fbo = 0;
+	getIv( 0x8CA6, &fbo );  // GL_DRAW_FRAMEBUFFER_BINDING
+	if ( !fbo )
+		return fail( "GL draws into the default framebuffer" );
+	auto keyOf = [&]( GLenum att, std::uintptr_t & key, const Shared *& sh ) {
+		GLint type = 0, name = 0;
+		getAtt( 0x8CA9, att, 0x8CD0, &type );  // GL_FRAMEBUFFER_ATTACHMENT_OBJECT_TYPE
+		if ( type != 0x1702 )                   // GL_TEXTURE
+			return false;
+		getAtt( 0x8CA9, att, 0x8CD1, &name );  // _OBJECT_NAME
+		for ( const auto & e : shareds() )
+			if ( e.second.tex == GLuint( name ) && e.second.glCtx == gl().ctx ) {
+				key = e.first;
+				sh = &e.second;
+				return true;
+			}
+		return false;
+	};
+	int w = 0, h = 0, samples = 0;
+	for ( std::uint32_t c = 0; c < 4; c++ ) {
+		GLint db = 0;
+		getIv( GLenum( 0x8825 + c ), &db );  // GL_DRAW_BUFFERc
+		if ( db == 0 )
+			break;
+		if ( db != GLint( 0x8CE0 + c ) )
+			return fail( "draw buffer " + std::to_string( c ) + " is not colour attachment " + std::to_string( c ) );
+		const Shared * sh = nullptr;
+		if ( !keyOf( GLenum( db ), d.colorKeys[c], sh ) )
+			return fail( "colour attachment " + std::to_string( c ) + " is not a shared target" );
+		if ( c && ( sh->w != w || sh->h != h || sh->samples != samples ) )
+			return fail( "the colour targets differ in size or samples" );
+		w = sh->w;
+		h = sh->h;
+		samples = sh->samples;
+		d.target.colors[c] = std::uint32_t( sh->fmt );
+		d.target.colorCount = c + 1;
+	}
+	const Shared * dsh = nullptr;
+	if ( !keyOf( 0x8D00, d.depthKey, dsh ) && !keyOf( 0x821A, d.depthKey, dsh ) )  // GL_DEPTH_ATTACHMENT, GL_DEPTH_STENCIL_ATTACHMENT
+		return fail( "the depth attachment is not a shared target" );
+	if ( d.target.colorCount && ( dsh->w != w || dsh->h != h || dsh->samples != samples ) )
+		return fail( "the depth target differs from the colour targets in size or samples" );
+	d.w = dsh->w;
+	d.h = dsh->h;
+	d.target.depth = std::uint32_t( dsh->fmt );
+	d.target.samples = std::uint32_t( std::max( 1, dsh->samples ) );
+	// GL's fixed state as the pipeline takes it
+	GLint vp[4] = {};
+	getIv( 0x0BA2, vp );  // GL_VIEWPORT
+	if ( vp[0] || vp[1] || vp[2] != d.w || vp[3] != d.h )
+		return fail( "the viewport is not the whole frame" );
+	if ( isOn( 0x0BE2 ) || isOn( 0x0B90 ) || isOn( 0x0C11 ) )  // GL_BLEND, GL_STENCIL_TEST, GL_SCISSOR_TEST
+		return fail( "blend, stencil or scissor is on (the pipeline takes none)" );
+	GLubyte cm[4] = {}, dm = 0;
+	getBv( 0x0C23, cm );  // GL_COLOR_WRITEMASK
+	getBv( 0x0B72, &dm );  // GL_DEPTH_WRITEMASK
+	if ( d.target.colorCount && ( !cm[0] || !cm[1] || !cm[2] || !cm[3] ) )
+		return fail( "a colour channel is masked" );
+	if ( !isOn( 0x0B71 ) )  // GL_DEPTH_TEST
+		return fail( "depth test is off" );
+	GLint func = 0, cullMode = 0, front = 0;
+	getIv( 0x0B74, &func );  // GL_DEPTH_FUNC: GL_NEVER + k is VkCompareOp k
+	if ( func < 0x0200 || func > 0x0207 )
+		return fail( "an unknown depth function" );
+	d.target.depthOp = std::uint32_t( func - 0x0200 );
+	d.target.depthWrite = dm != 0;
+	const bool cull = isOn( 0x0B44 ) != 0;  // GL_CULL_FACE
+	getIv( 0x0B45, &cullMode );
+	getIv( 0x0B46, &front );
+	if ( cull && ( cullMode != 0x0405 || front != 0x0901 ) )  // GL_BACK, GL_CCW
+		return fail( "culling other than back faces with CCW front" );
+	d.target.twoSided = !cull;
+	// the vertex stage's GL locations (TEXCOORDn) and the class
+	SpvModule vm;
+	std::string w2;
+	if ( !spvReflect( d.vs, d.vsWords, vm, w2 ) )
+		return fail( "the vertex twin: " + w2 );
+	for ( const SpvIo & in : vm.inputs ) {
+		const std::size_t at = in.name.find( "TEXCOORD" );
+		if ( at != std::string::npos )
+			for ( std::uint32_t j = 0; j < in.locs; j++ )
+				d.need |= 1u << ( ( std::atoi( in.name.c_str() + at + 8 ) + int( j ) ) & 31 );
+	}
+	d.poolKey = s.poolKey;
+	d.attrMask = s.pool.attrMask;
+	ObjBlUniStat ust;
+	if ( !objBlMirror( gp, s.prog, d.vs, d.vsWords, d.ps, d.psWords, d.ubos, ust, w2 ) )
+		return fail( "the uniforms: " + w2 );
+	if ( !ust.mirrored )
+		return fail( "GL names none of the loose uniforms (a program linked from SPIR-V)" );
+	std::vector<unsigned> names;
+	if ( !objBlPoolCopy( s.poolKey, s.pool, names, w2 ) )
+		return fail( "the pool: " + w2 );
+	d.glRows = s.rows;
+	d.rows = s.nRows;
+	d.cmds = s.cmds;
+	d.cmdCount = s.nCmds;
+	objBlDrawsReset();
+	ObjBlDrawStat dst;
+	if ( !objBlDrawPrep( d, dst, w2 ) )
+		return fail( "the draw: " + w2 );
+	if ( !objBlRun( names, 0, w2 ) )
+		return fail( "the crossing: " + w2 );
+	return true;
 }
 
 bool objBlDrawPrep( const ObjBlDraw & d, ObjBlDrawStat & st, std::string & why )
@@ -1312,6 +1622,7 @@ bool objBlDrawPrep( const ObjBlDraw & d, ObjBlDrawStat & st, std::string & why )
 	st = ObjBlDrawStat();
 	if ( !v.ok )
 		return why = "no present device", false;
+	opRunWait();  // the slots' host buffers and the rows are rewritten below
 	if ( !d.cmds || !d.cmdCount || d.w < 1 || d.h < 1 )
 		return why = "no commands or no frame", false;
 	// the pipeline of the class's layout
@@ -1495,6 +1806,11 @@ bool objBlDrawPrep( const ObjBlDraw & d, ObjBlDrawStat & st, std::string & why )
 	}
 	s.w = d.w;
 	s.h = d.h;
+	s.keys.assign( d.colorKeys, d.colorKeys + d.target.colorCount );
+	if ( d.target.depth )
+		s.keys.push_back( d.depthKey );
+	for ( const auto & im : d.images )
+		s.keys.push_back( im.second );
 	v.vkUpdateDescriptorSets( v.dev, std::uint32_t( writes.size() ), writes.data(), 0, nullptr );
 	O.live++;
 	return true;

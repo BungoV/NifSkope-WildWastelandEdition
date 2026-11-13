@@ -8,7 +8,8 @@
  * <= 0.2 % of the covered pixels and |depth difference| <= 2e-6 elsewhere; a run with < 2000 covered pixels FAILS. The
  * three record routes (MDI, one indirect per command, direct) EXACT to each other in all three targets.
  * Reds (each must FAIL against GL): base (wwDrawBase 0 in the Vulkan state), inst (every base instance 0), cull (twoSided).
- * Included inside namespace blv after blview_pool.inc (it borrows gv's command buffer, fence and semaphores). */
+ * Every Vulkan run crosses through objBlRun (GL's signal, the worker's submit, GL's wait), as the app's would.
+ * Included inside namespace blv after blview_pool.inc. */
 
 struct ShadeFns
 {
@@ -22,42 +23,6 @@ struct ShadeFns
 	void( WINAPI * clearBufferfv )( GLenum, GLint, const GLfloat * ) = nullptr;
 };
 ShadeFns sf;
-
-struct ShadeRun
-{
-	int mode = 0;
-};
-ShadeRun shadeRun;
-
-bool shadeWork( std::string & why )
-{
-	Vk & v = vk();
-	v.vkResetFences( v.dev, 1, &gv.fence );
-	v.vkResetCommandBuffer( gv.cmd, 0 );
-	VkCommandBufferBeginInfo bi { VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
-	bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-	v.vkBeginCommandBuffer( gv.cmd, &bi );
-	if ( !objBlDrawRecord( gv.cmd, shadeRun.mode, why ) ) {
-		v.vkEndCommandBuffer( gv.cmd );
-		return false;
-	}
-	if ( v.vkEndCommandBuffer( gv.cmd ) != VK_SUCCESS )
-		return why = "vkEndCommandBuffer (the shaded draw) failed", false;
-	const VkPipelineStageFlags waitAt = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
-	VkSubmitInfo si { VK_STRUCTURE_TYPE_SUBMIT_INFO };
-	si.waitSemaphoreCount = 1;
-	si.pWaitSemaphores = &gv.glDone;
-	si.pWaitDstStageMask = &waitAt;
-	si.commandBufferCount = 1;
-	si.pCommandBuffers = &gv.cmd;
-	si.signalSemaphoreCount = 1;
-	si.pSignalSemaphores = &gv.vkDone;
-	if ( v.vkQueueSubmit( v.queue, 1, &si, gv.fence ) != VK_SUCCESS )
-		return why = "vkQueueSubmit (the shaded draw) failed", false;
-	if ( v.vkWaitForFences( v.dev, 1, &gv.fence, VK_TRUE, 5000000000ull ) != VK_SUCCESS )
-		return why = "the shaded draw did not finish", false;
-	return true;
-}
 
 struct ShadeFix
 {
@@ -108,7 +73,6 @@ bool shadeVk( int mode, int red, std::vector<float> & depth, std::vector<std::ui
 	WwVkPresent::ObjBlDrawStat & st, std::string & why )
 {
 	using namespace WwVkPresent;
-	Gl & g = gl();
 	shadeClear();
 	std::vector<unsigned> names;
 	if ( !objBlPoolCopy( sx.key, sx.pool, names, why ) )
@@ -150,31 +114,8 @@ bool shadeVk( int mode, int red, std::vector<float> & depth, std::vector<std::ui
 		return false;
 	if ( const GLenum e = glGetError(); e != GL_NO_ERROR )
 		return why = "GL error " + std::to_string( e ) + " before the signal", false;
-	const GLuint texs[3] = { sx.t0, sx.t1, sx.td };
-	const GLenum lay[3] = { kLayoutGeneral, kLayoutGeneral, kLayoutGeneral };
-	g.signalSemaphore( gv.glDoneGl, GLuint( names.size() ), names.data(), 3, texs, lay );
-	g.flush();
-	shadeRun.mode = mode;
-	Worker & W = wk();
-	std::uint64_t want = 0;
-	{
-		std::lock_guard<std::mutex> lk( W.m );
-		want = W.toneDone + 1;
-	}
-	Work j;
-	j.k = -1;
-	j.fn = shadeWork;
-	hand( j );
-	bool ok = false;
-	{
-		std::unique_lock<std::mutex> lk( W.m );
-		W.idle.wait( lk, [&W, want]() { return W.toneDone >= want; } );
-		ok = W.toneOk;
-		why = W.toneWhy;
-	}
-	if ( !ok )
+	if ( !objBlRun( names, mode, why ) )
 		return false;
-	g.waitSemaphore( gv.vkDoneGl, GLuint( names.size() ), names.data(), 3, texs, lay );
 	shadeRead( depth, &c0, &c1 );
 	glFinish();
 	if ( const GLenum e = glGetError(); e != GL_NO_ERROR )
@@ -428,6 +369,7 @@ bool shadeGate( const std::string & spvDir )
 		return false;
 	}
 	bool ok = true;
+	takeObjBlRunStat();  // the count starts here
 	std::vector<float> dep[3];
 	std::vector<std::uint16_t> c0[3], c1[3];
 	const char * routes[3] = { "mdi", "per-command", "direct" };
@@ -455,6 +397,13 @@ bool shadeGate( const std::string & spvDir )
 			std::printf( "BLVIEW shade %s vs mdi %s (depth + both targets; %zu target values non-zero)\n", routes[m], same ? "EXACT" : "FAIL", lit );
 			ok = ok && same;
 		}
+	}
+	{
+		const ObjBlRunStat rs = takeObjBlRunStat();
+		const bool good = rs.runs == 3 && rs.draws == 3 && rs.fails == 0 && rs.cmds == int( 3 * sx.cmds.size() / 5 );
+		std::printf( "BLVIEW shade crossing %s (%d runs, %d draws, %d commands, %d failed; %.3f ms mean, %.3f max)%s%s\n", good ? "OK" : "FAIL", rs.runs,
+			rs.draws, rs.cmds, rs.fails, rs.runs ? rs.cpuMs / rs.runs : 0.0, rs.maxMs, rs.failWhy.empty() ? "" : ": ", rs.failWhy.c_str() );
+		ok = ok && good;
 	}
 	const char * reds[3] = { "base", "inst", "cull" };
 	const char * redWhy[3] = { "wwDrawBase 0 in the Vulkan state", "every base instance 0", "twoSided: the mirrored shapes drawn" };

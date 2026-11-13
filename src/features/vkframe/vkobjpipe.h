@@ -40,10 +40,10 @@ struct SpvBind
 	std::vector<SpvMember> members;                           //!< a uniform block's members
 	std::uint32_t bytes = 0;                                  //!< a uniform block's size (the last member's end, to 16)
 };
-//! one stage input / output with a Location (a matrix or array takes `slots` locations)
+//! one stage input / output with a Location (a matrix or array takes `locs` locations; not `slots`: Qt's macro)
 struct SpvIo
 {
-	std::uint32_t location = 0, slots = 1, comps = 1, base = 0;  //!< base: 0 float, 1 int, 2 uint
+	std::uint32_t location = 0, locs = 1, comps = 1, base = 0;  //!< base: 0 float, 1 int, 2 uint
 	std::string name;
 };
 struct SpvModule
@@ -176,4 +176,36 @@ void objBlDrawsReset();
  * framebuffer of the targets. The host buffers are rewritten: the slot's last submit must be done. false with a reason
  * (nothing added) */
 bool objBlDrawPrep( const ObjBlDraw & d, ObjBlDrawStat & st, std::string & why );
+
+/* the crossing (as objRun's): GL current, the draws prepared, every GL name the copies wrote (`glBufs`, objBlPoolCopy's):
+ * GL's signal over them and the draws' shared targets (GENERAL), the worker records the prepared draws (`mode` as
+ * objBlDrawRecord's: 0 MDI, 1 one indirect per command, 2 direct) and submits, GL waits ours. The next prep / reset waits
+ * the submit. false: why (nothing signalled; GL draws them) */
+struct ObjBlRunStat
+{
+	int runs = 0, draws = 0, cmds = 0, gl = 0, fails = 0;
+	double cpuMs = 0.0, maxMs = 0.0;
+	std::string glWhy, failWhy;
+};
+bool objBlRun( const std::vector<unsigned> & glBufs, int mode, std::string & why );
+void objBlOnGl( const char * why );
+ObjBlRunStat takeObjBlRunStat();  //!< and starts the next count
+
+/* the app's crossing (cellbindless.cpp runIssue, WW_VKOBJ_SHADE=1): one multi-draw run of class `poolKey` on Vulkan instead
+ * of GL's glMultiDrawElementsIndirect. Read from GL here: the draw framebuffer (every colour draw buffer and the depth must
+ * be shared targets), the depth / cull state (refused: blend, stencil, a colour mask, a viewport that is not the frame),
+ * program `prog`'s uniforms (objBlMirror). The rows are the run's own from its leader: Vulkan's wwDrawBase is 0 (GL's
+ * wwDrawIdx is not a module member: the mirror leaves it 0). false: why (nothing drawn; GL draws the run) */
+struct ObjBlShade
+{
+	int twin = 0;           //!< 0 fo4_cellbl, 1 fo4_cellcsmbl
+	unsigned prog = 0;      //!< GL's current program
+	std::uintptr_t poolKey = 0;
+	ObjBlPool pool;
+	const void * rows = nullptr;  //!< GL form, the leader's first
+	std::size_t nRows = 0;
+	const void * cmds = nullptr;  //!< 5 words a command (the base instance relative to the leader)
+	std::size_t nCmds = 0;
+};
+bool objBlShade( GlProc gp, const ObjBlShade & s, std::string & why );
 }  // namespace WwVkPresent
