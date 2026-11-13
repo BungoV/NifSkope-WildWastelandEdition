@@ -328,30 +328,8 @@ static uint wwBlRow;	// wwDrawIdx: the vertex stage's row, flat to the pixel sta
 // GL (GL_ARB_gl_spirv): tex[i] is the 64-bit GL_ARB_bindless_texture handle, sampled through SPV_NV_bindless_texture
 #include "ww_bindless_gl.hlsli"
 #else
-Texture2D<float4> wwBlMap(uint i)
-{
-    return ResourceDescriptorHeap[NonUniformResourceIndex(wwDraws[wwBlRow].tex[i].x)];
-}
-
-SamplerState wwBlSmp(uint i)
-{
-    return SamplerDescriptorHeap[NonUniformResourceIndex(wwDraws[wwBlRow].tex[i].y)];
-}
-
-#define BaseMap wwBlMap(0)
-#define _BaseMap_sampler wwBlSmp(0)
-#define NormalMap wwBlMap(1)
-#define _NormalMap_sampler wwBlSmp(1)
-#define GlowMap wwBlMap(2)
-#define _GlowMap_sampler wwBlSmp(2)
-#define BacklightMap wwBlMap(3)
-#define _BacklightMap_sampler wwBlSmp(3)
-#define SpecularMap wwBlMap(4)
-#define _SpecularMap_sampler wwBlSmp(4)
-#define GreyscaleMap wwBlMap(5)
-#define _GreyscaleMap_sampler wwBlSmp(5)
-#define EnvironmentMap wwBlMap(6)
-#define _EnvironmentMap_sampler wwBlSmp(6)
+// Vulkan (WW_VK_BINDLESS: descriptor-indexed arrays in set 1) or the descriptor heaps (DXIL)
+#include "ww_bindless_vk.hlsli"
 #endif
 #define normalMatrix float3x3(wwDraws[wwBlRow].nm[0].xyz, wwDraws[wwBlRow].nm[1].xyz, wwDraws[wwBlRow].nm[2].xyz)
 Texture2D<float4> LandLodNoise : register(t27, space0);
