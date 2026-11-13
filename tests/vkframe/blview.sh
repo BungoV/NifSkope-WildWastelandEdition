@@ -5,8 +5,10 @@
 # Also compiles both bl twins with -D WW_VK_BINDLESS (they must build) and prints their set-1 bindings.
 # Not while NifSkope or the game runs (a window of ours): the script refuses then.
 # Last line: `BLVIEW GATE OK` or `BLVIEW GATE FAILED`.
+# Lane VKOBJ3: `bash tests/vkframe/blview.sh <out dir> bc` runs the texture cache's BC twins (vkobjtex.inc) instead.
 set -u
 OUT="${1:?out dir}"
+MODE="${2:-}"
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 DXC="${DXC:-E:/Tools/dxc/bin/x64/dxc.exe}"
 export PATH="/c/msys64/ucrt64/bin:$PATH"
@@ -26,5 +28,6 @@ for twin in fo4_cellbl_ps fo4_cellcsmbl_ps; do
 done
 g++ -O2 -std=c++17 -pthread -I"$ROOT/src" "$ROOT/tests/vkframe/blview.cpp" -o "$OUT/blview.exe" -lopengl32 -lgdi32 -luser32 \
 	|| { echo "BLVIEW GATE FAILED (g++)"; exit 1; }
-"$OUT/blview.exe" "$ROOT" "$OUT" 2>&1 | tee "$OUT/blview.txt"
-tail -1 "$OUT/blview.txt" | grep -q "BLVIEW GATE OK"
+TXT="$OUT/blview${MODE:+_$MODE}.txt"
+"$OUT/blview.exe" "$ROOT" "$OUT" $MODE 2>&1 | tee "$TXT"
+tail -1 "$TXT" | grep -q "BLVIEW GATE OK"

@@ -39,6 +39,8 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "celltexahead.h"
 #include "features/shared/cellpasstime.h"	// lane PERF1
 #include "wwalphacov.h"	// lane TREELEAF1
+#include "features/near/cellbindless.h"	// lane VKOBJ3: WW_VKOBJ_TEX
+#include "features/vkframe/vkobjtex.h"	// lane VKOBJ3: the cache's BC twins
 
 #include "libfo76utils/src/filebuf.hpp"
 #include "libfo76utils/src/pbr_lut.hpp"
@@ -665,6 +667,9 @@ private:
 	const char *	bytes = nullptr;
 };
 
+//! lane VKOBJ3: set by TexCache::loadTex around its texLoad (only the cache's own loads may take a twin)
+bool wwVkObjTexArm = false;
+
 //! Create texture with glTexStorage2D using GLI (lane STREAM1: from a gli::texture or, in place, a DdsView)
 #ifndef Q_OS_MACOS
 template< class TextureT >
@@ -675,9 +680,28 @@ static GLuint GLI_create_texture(
 	gli::gl::format const format = glProfile.translate( texture.format(), texture.swizzles() );
 	target = glProfile.translate( texture.target() );
 
+	/* lane VKOBJ3: WW_VKOBJ_TEX=1, a cache load (TexCache::loadTex arms it) of a block-compressed 2D texture is made on the
+	 * present device (its storage is the Vulkan image's; the uploads below fill it as GL's own) */
+	bool wwTwin = false;
+	if ( wwVkObjTexArm && WwBl::vkTexOn() && texture.target() == gli::TARGET_2D && texture.layers() == 1
+		&& texture.faces() == 1 && gli::is_compressed( texture.format() ) ) {
+		const glm::tvec3<GLsizei> e( texture.extent() );
+		unsigned tw = 0;
+		std::string why;
+		if ( WwVkPresent::objTexMake( format.Internal, e.x, e.y, int( texture.levels() ), tw, why ) ) {
+			if ( id[0] )
+				glDeleteTextures( 1, id );	// a fresh name with no storage yet
+			id[0] = GLuint( tw );
+			wwTwin = true;
+		}
+	}
 	if ( !id[0] )
 		glGenTextures( 1, id );
 	glBindTexture( target, id[0] );
+	if ( wwTwin ) {	// the twin maker sampled it nearest: GL's defaults again
+		glTexParameteri( target, GL_TEXTURE_MIN_FILTER, GL_NEAREST_MIPMAP_LINEAR );
+		glTexParameteri( target, GL_TEXTURE_MAG_FILTER, GL_LINEAR );
+	}
 	glTexParameteri( target, GL_TEXTURE_BASE_LEVEL, 0 );
 	glTexParameteri( target, GL_TEXTURE_MAX_LEVEL, static_cast<GLint>(texture.levels() - 1) );
 	if ( gli::component_count(texture.format()) == 1 ) {
@@ -697,8 +721,9 @@ static GLuint GLI_create_texture(
 	switch ( texture.target() ) {
 	case gli::TARGET_2D:
 	case gli::TARGET_CUBE:
-		fn->glTexStorage2D( target, static_cast<GLint>(texture.levels()), format.Internal,
-							textureExtent.x, textureExtent.y );
+		if ( !wwTwin )	// lane VKOBJ3: the twin's storage is the imported memory
+			fn->glTexStorage2D( target, static_cast<GLint>(texture.levels()), format.Internal,
+								textureExtent.x, textureExtent.y );
 		break;
 	default:
 		return 0;

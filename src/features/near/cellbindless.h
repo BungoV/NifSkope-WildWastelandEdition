@@ -72,6 +72,13 @@ extern long long freedLiveAll, staleAll;
  * order of gl/cellbindlessreopen.h -- fence wait, ring reset, staged row zeroed, handles non-resident (before the
  * textures go), the geometry pool's entries and buffers dropped. Red WW_BINDLESS_RED=reopenraw: the order before. */
 void forgetAll();
+/* lane VKOBJ3: WW_VKOBJ_TEX=1 (stage 0, default off): the texture cache's BC 2D textures are made on the Vulkan present
+ * device and their resident handles join its bindless table; the frame line `vk objtex:`. Red WW_VKOBJ_TEX_RED=key: a
+ * handle joins with the twin made before its texture's (must FAIL the gate) */
+bool vkTexOn();
+int vkTexRed();
+//! the cache deletes tex next (its handles were dropped): a twin leaves the table, its Vulkan half at the next frame
+void texGone( GLuint tex );
 
 //! the pooled draw of the shape now drawing: valid while `on`
 struct Geo
