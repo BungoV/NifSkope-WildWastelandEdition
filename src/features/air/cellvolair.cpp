@@ -45,6 +45,9 @@ BSD License - see nifskope.h
 #include "recx.h"
 #include "features/air/fognoise.h"	// MODULES1 part 19: the lumps' texture file
 #include "features/water/endlesssea.h"	// FARWATER1 round 2: the sky band over the endless sea
+#include "features/vkframe/vkpresent.h"	// lane VKAIR1: the sky's air on the present device
+
+const void * wwGlobalUboBytes( const NifSkopeOpenGLContext * ctx );	// glcontext.cpp: b0's bytes (lane VKAIR1)
 
 #include <QDebug>
 #include <QElapsedTimer>
@@ -2148,7 +2151,39 @@ static void vaPassInner( Scene * scene, bool run )
 	if ( g.cols != cols || g.rows != rows || g.slices != kSlices || !g.inject || g.texW != texW || g.texH != texH || g.texD != texD
 		|| g.half != half ) {
 		vaAlloc3D( fn, g.inject, texW, texH, texD, false, false );	// the slices' transmittance needs float32 (16F: 5e-4 a step near 1)
-		vaAlloc3D( fn, g.integ, texW, texH, texD, true, half );
+		/* lane VKAIR1 (row L5): while the view is on Vulkan the integrated volume is a shared target of the present
+		 * device, so the sky's air reads it there with no copy (red WW_VKVIEW_AIR_RED=1, or a refusal: GL's own, as before) */
+		const std::uintptr_t integKey = reinterpret_cast<std::uintptr_t>( &g.integ );
+		bool integShared = false;
+		if ( WwVkPresent::shareWanted( "WW_VKVIEW_AIR_RED" ) ) {
+			if ( g.integ && !WwVkPresent::sharedTargetIs( integKey, g.integ ) ) {
+				fn->glDeleteTextures( 1, &g.integ );
+				g.integ = 0;
+			}
+			unsigned t = 0;
+			std::string why;
+			integShared = WwVkPresent::sharedTarget( integKey, 1, texW, texH, texD, half ? GL_RGBA16F : GL_RGBA32F, t, why, 1 );
+			if ( integShared ) {
+				g.integ = t;
+				fn->glBindTexture( GL_TEXTURE_3D, t );
+				fn->glTexParameteri( GL_TEXTURE_3D, GL_TEXTURE_MIN_FILTER, GL_LINEAR );
+				fn->glTexParameteri( GL_TEXTURE_3D, GL_TEXTURE_MAG_FILTER, GL_LINEAR );
+				fn->glTexParameteri( GL_TEXTURE_3D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE );
+				fn->glTexParameteri( GL_TEXTURE_3D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE );
+				fn->glTexParameteri( GL_TEXTURE_3D, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE );
+				fn->glTexParameteri( GL_TEXTURE_3D, GL_TEXTURE_MAX_LEVEL, 0 );
+				fn->glBindTexture( GL_TEXTURE_3D, 0 );
+			} else {
+				qInfo().noquote() << "vk air: the integrated volume stays GL's (" << QString::fromStdString( why ) << ")";
+			}
+		}
+		if ( !integShared ) {
+			if ( WwVkPresent::sharedTargetIs( integKey, g.integ ) ) {
+				g.integ = 0;	// the present device's name: dropped there, not deleted here
+				WwVkPresent::sharedTargetDrop( integKey );
+			}
+			vaAlloc3D( fn, g.integ, texW, texH, texD, true, half );
+		}
 		g.half = half;
 		if ( !g.fbo )
 			fn->glGenFramebuffers( 1, &g.fbo );
@@ -3644,6 +3679,98 @@ static void vaApplyDump( F * fn, GLuint progId )
  * touched. cell_volsky.prog over the pixels no draw reaches: before the scene, into the linear frame (stencil 1, the
  * resolve composites it over the backdrop by its coverage, cell_hdr.frag mode 2); in a probe frame, after the scene, the
  * raw probe on the far-plane pixels (stencil 2: written back as is). */
+/* lane VKAIR1 (row L5): the sky's air quad on the present device into the tone frame and its stencil, the program's
+ * uniforms (b0 the global buffer's bytes, b31 packed by kT_volsky) and its bound textures read from GL as set above.
+ * false: GL draws its quad (the reason counted and said in the "vk air:" line, one a 5 s window) */
+bool vaSkyOnVulkan( Renderer * r, NifSkopeOpenGLContext::Program * prog, VaGpu & g, bool overSky )
+{
+	auto fn = r->fn;
+	GLint drawFb = 0;
+	fn->glGetIntegerv( GL_DRAW_FRAMEBUFFER_BINDING, &drawFb );
+	const GLuint color = wwCellHdrVkToneColor( GLuint( drawFb ) );
+	if ( !color )
+		return false;	// not the present device's tone frame: GL's, as before
+	static QString said;
+	static auto at = std::chrono::steady_clock::now();
+	auto say = [&]( const QString & line, bool timed ) {
+		const auto now = std::chrono::steady_clock::now();
+		if ( line == said || ( timed && std::chrono::duration<double>( now - at ).count() < 5.0 && said.startsWith( QStringLiteral( "vk air: on V" ) ) ) )
+			return;
+		said = line;
+		at = now;
+		qInfo().noquote() << line;
+	};
+	if ( !WwVkPresent::shareWanted( "WW_VKVIEW_AIR_RED" ) ) {
+		say( QStringLiteral( "vk air: on GL (red WW_VKVIEW_AIR_RED=1 or the view not on Vulkan)" ), false );
+		return false;
+	}
+	static WwVkPresent::VolSkyRun t;
+	t = WwVkPresent::VolSkyRun();
+	std::string why;
+	bool drew = false;
+	const void * ubo = wwGlobalUboBytes( r );
+	if ( !wwFogLeakShaderDefine() ) {
+		WwVkPresent::volSkyOnGl( "WW_CELL_FOGLEAK=0: GL's program is not the Vulkan pass's twin" );
+	} else if ( !ubo ) {
+		WwVkPresent::volSkyOnGl( "the global uniform buffer's bytes are not known for this context" );
+	} else {
+		wwCellHdrFrameSize( t.w, t.h );
+		GLint vp[4] = {};
+		fn->glGetIntegerv( GL_VIEWPORT, vp );
+		std::memcpy( t.vp, vp, sizeof( t.vp ) );
+		t.color = color;
+		t.overSky = overSky;
+		// cell_volsky_ps's t0..t6 (vkframe_spirv.sh)
+		static const char * const kName[7] = { "atApTex", "volAirTerr", "volAirRainMap", "volTex", "volTile", "atSkyTransTex", "volAirNoise" };
+		static const int kType[7] = { 1, 2, 0, 1, 0, 0, 1 };
+		static char twin[7];
+		const std::uintptr_t integKey = reinterpret_cast<std::uintptr_t>( &g.integ );
+		bool ok = true;
+		for ( int k = 0; k < 7 && ok; k++ ) {
+			ok = WwVkPresent::fxTexOf( fn, prog->id, kName[k], kType[k], t.tex[k], why );
+			t.tex[k].twin = reinterpret_cast<std::uintptr_t>( &twin[k] );
+			if ( k == 3 && WwVkPresent::sharedTargetIs( integKey, t.tex[k].tex ) )
+				t.tex[k].shared = integKey;	// the integrated volume: read where it is
+		}
+		if ( !ok ) {
+			WwVkPresent::volSkyOnGl( why.c_str() );
+		} else {
+			std::memcpy( t.global, ubo, sizeof( t.global ) );
+			WwVkPresent::fxPack( fn, prog->id, WwVkPresent::kT_volsky, int( std::size( WwVkPresent::kT_volsky ) ), t.loose );
+			drew = WwVkPresent::volSkyRun( t, why );
+		}
+	}
+	const WwVkPresent::FxStat st = WwVkPresent::takeVolSkyStat();
+	static WwVkPresent::FxStat sum;
+	sum.runs += st.runs;
+	sum.gl += st.gl;
+	sum.fails += st.fails;
+	sum.cpuMs += st.cpuMs;
+	sum.maxMs = std::max( sum.maxMs, st.maxMs );
+	sum.copies += st.copies;
+	sum.pipelines = st.pipelines;
+	sum.buildMs = st.buildMs;
+	if ( !st.glWhy.empty() )
+		sum.glWhy = st.glWhy;
+	if ( !st.failWhy.empty() )
+		sum.failWhy = st.failWhy;
+	const auto now = std::chrono::steady_clock::now();
+	if ( std::chrono::duration<double>( now - at ).count() >= 5.0 || !said.startsWith( QStringLiteral( "vk air: on V" ) ) ) {
+		QString line = sum.runs > 0
+			? QStringLiteral( "vk air: on Vulkan %1 frames (cell_volsky_ps into the tone frame + stencil, one crossing; %2 pipelines built in %3 ms; "
+				"%4 input copies; drawing thread %5 ms, max %6)" ).arg( sum.runs ).arg( sum.pipelines ).arg( sum.buildMs, 0, 'f', 1 )
+				.arg( sum.copies ).arg( sum.cpuMs / sum.runs, 0, 'f', 3 ).arg( sum.maxMs, 0, 'f', 3 )
+			: QStringLiteral( "vk air: on Vulkan wanted, 0 frames drawn" );
+		if ( sum.gl > 0 )
+			line += QStringLiteral( ", on GL %1 frames (last: %2)" ).arg( sum.gl ).arg( QString::fromStdString( sum.glWhy ) );
+		if ( sum.fails > 0 )
+			line += QStringLiteral( ", refused %1 (last: %2)" ).arg( sum.fails ).arg( QString::fromStdString( sum.failWhy ) );
+		say( line, false );
+		sum = WwVkPresent::FxStat();
+	}
+	return drew;
+}
+
 void wwVolAirSkyDraw( Scene * scene, bool probes )
 {
 	if ( !scene || !scene->renderer || scene->selecting )
@@ -3744,7 +3871,9 @@ void wwVolAirSkyDraw( Scene * scene, bool probes )
 	const float * attrs = quad;
 	if ( !probes )
 		vaApplyDump( fn, prog->id );	// lane VKLIGHT1 r2: WW_CELL_AIR_APPLY_DUMP
-	r->drawShape( 4, 3, 6, GL_TRIANGLES, GL_UNSIGNED_SHORT, &attrs, idx );
+	// lane VKAIR1 (row L5): the tone frame shared with the present device: the same quad on Vulkan (false: GL's)
+	if ( probes || !vaSkyOnVulkan( r, prog, g, overSky ) )
+		r->drawShape( 4, 3, 6, GL_TRIANGLES, GL_UNSIGNED_SHORT, &attrs, idx );
 	r->stopProgram();
 	if ( overSky )
 		fn->glBlendFuncSeparate( GLenum( bSrc ), GLenum( bDst ), GLenum( bSrcA ), GLenum( bDstA ) );

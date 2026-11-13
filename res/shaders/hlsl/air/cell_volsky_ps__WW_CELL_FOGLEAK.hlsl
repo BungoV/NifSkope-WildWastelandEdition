@@ -1329,7 +1329,7 @@ float atUnitToSub(float u, float n)
 float2 atTransUv(float r, float mu)
 {
     float H = 1132.25439453125f;
-    float rho = sqrt(max(0.0f, (r * r) - 40449600.0f));
+    float rho = sqrt(max(0.0f, mad(r, r, -40449600.0f)));  // NV GL fuses r * r - c (frag.sh probe_resid_rhofma)
     float rArg = r;
     float muArg = mu;
     float d = atDistTop(rArg, muArg);
