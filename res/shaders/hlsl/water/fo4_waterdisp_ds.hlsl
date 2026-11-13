@@ -143,6 +143,38 @@ uint wwWaterInfoRaw(float2 worldXY)
     return waterInfoAtlas.Load(int3((int2(slot % perRow, slot / perRow) * E.xx) + (t - (tile * E.xx)), 0)).x;
 }
 
+// NV GL's own codegen, bit-exact (lane VKWATER3: the displaced vertices GL vs Vulkan, from its tese assembly).
+// sqrt and length run as 1 / rsqrt; NV's Vulkan compiler folds a plain 1 / rsqrt into its own sqrt, which rounds
+// apart, so the max (a no-op for every rsqrt, inf kept) blocks the fold
+float wwGlSqrt(float x)
+{
+    precise float rq = max(rsqrt(x), 1.175494351e-38f);
+    precise float r = 1.0f / rq;
+    return r;
+}
+
+// a dot of 4 as an x-first fma chain (Vulkan's own dot rounds apart here; the cascades' dot of 3 the same, inline)
+float wwGlDot4(float4 u, float4 v)
+{
+    return mad(u.w, v.w, mad(u.z, v.z, mad(u.y, v.y, u.x * v.x)));
+}
+
+// mix as a + t (b - a), unfused
+float wwGlMix(float a, float b, float t)
+{
+    precise float d = b - a;
+    precise float r = a + (t * d);
+    return r;
+}
+
+// smoothstep as t = sat((x - e0) / (e1 - e0)), then (t t)(3 - 2 t), unfused
+float wwGlSmoothstep(float e0, float e1, float x)
+{
+    precise float t = saturate((x - e0) / (e1 - e0));
+    precise float r = (t * t) * (3.0f - (t * 2.0f));
+    return r;
+}
+
 // lane FARSEA1: 1 a band inside the bake's box, 0 at its edge (the open sea)
 float wwSeamFade(float2 worldXY)
 {
@@ -181,15 +213,15 @@ uint wwWaterInfoWord(float2 worldXY)
     }
     float2 worldXYArg = worldXY;
     float f = wwSeamFade(worldXYArg);
-    uint sh = uint(lerp(255.0f, float((w >> uint(16)) & 255u), f) + 0.5f);
-    uint dc = uint(lerp(255.0f, float(w >> uint(24)), f) + 0.5f);
+    uint sh = uint(wwGlMix(255.0f, float((w >> uint(16)) & 255u), f) + 0.5f);
+    uint dc = uint(wwGlMix(255.0f, float(w >> uint(24)), f) + 0.5f);
     return (id | (sh << uint(16))) | (dc << uint(24));
 }
 
 // the wind sea's Hs at fetch F (m): fetch-limited, capped at fully developed (the foam's law, WATERFOAMDETAIL1)
 float wwOcHw(float U, float F)
 {
-    return min((0.001599999959580600261688232421875f * U) * sqrt(F / 9.81000041961669921875f), ((0.20999999344348907470703125f * U) * U) / 9.81000041961669921875f);
+    return min((0.001599999959580600261688232421875f * U) * wwGlSqrt(F / 9.81000041961669921875f),((0.20999999344348907470703125f * U) * U) / 9.81000041961669921875f);
 }
 
 uint wwOcMix(inout uint x)
@@ -228,7 +260,7 @@ float wwOcValue(float2 p, uint seed)
     int2 cArg = c + int2(1, 1);
     uint seedArg = seed;
     float e = wwOcHash01(cArg, seedArg);
-    return lerp(lerp(a, b, f.x), lerp(d, e, f.x), f.y);
+    return wwGlMix(wwGlMix(a, b, f.x), wwGlMix(d, e, f.x), f.y);
 }
 
 // the wind patch factor (mean square 1): glassy where the gusts do not reach, cat's-paws where they do
@@ -249,7 +281,7 @@ float wwOcPatch(float2 P, int set)
     float2 pArg = (p * 2.0f) + float2(17.0f, 31.0f);
     uint seedArg5 = 2654435769u;
     float n = (0.64999997615814208984375f * wwOcValue(pArg2, seedArg6)) + (0.3499999940395355224609375f * wwOcValue(pArg, seedArg5));
-    return 1.60209500789642333984375f * smoothstep(0.300000011920928955078125f, 0.699999988079071044921875f, n);
+    return 1.60209500789642333984375f * wwGlSmoothstep(0.300000011920928955078125f, 0.699999988079071044921875f, n);
 }
 
 int wwOcBody(float2 P, inout float ws, out float a, out float3 gc, inout float m, inout float pw)
@@ -290,7 +322,7 @@ int wwOcBody(float2 P, inout float ws, out float a, out float3 gc, inout float m
             continue;
         }
         int s = (cls == 0) ? 0 : 1;
-        float F = (sqrt(max(row.w, 1.0f)) * tex) * 0.01428749971091747283935546875f;
+        float F = (wwGlSqrt(max(row.w, 1.0f)) * tex) * 0.01428749971091747283935546875f;
         if (cls == 1)
         {
             F = min(F, 40.0f);
@@ -302,7 +334,7 @@ int wwOcBody(float2 P, inout float ws, out float a, out float3 gc, inout float m
         float FArg = waterOceanSetB[s].x;
         float hw = (S.y * wwOcHw(UArg2, FArg2)) / max(wwOcHw(UArg, FArg), 9.9999999747524270787835121154785e-07f);
         cset[k] = float(s);
-        cgain[k] = clamp(sqrt((hw * hw) + (S.z * S.z)) / max(S.x, 9.9999999747524270787835121154785e-07f), 0.1500000059604644775390625f, 3.0f);
+        cgain[k] = clamp(wwGlSqrt((hw * hw) + (S.z * S.z)) / max(S.x, 9.9999999747524270787835121154785e-07f), 0.1500000059604644775390625f, 3.0f);
         if (bw[k] > best)
         {
             best = bw[k];
@@ -316,7 +348,7 @@ int wwOcBody(float2 P, inout float ws, out float a, out float3 gc, inout float m
     float4 samePart = float(set).xxxx;
     float4 same = float4(bool4(cset.x == samePart.x, cset.y == samePart.y, cset.z == samePart.z, cset.w == samePart.w));
     ws = dot(bw, same);
-    a = dot(bw * same, cgain) / max(ws, 9.9999999747524270787835121154785e-07f);
+    a = wwGlDot4(bw * same, cgain) / max(ws, 9.9999999747524270787835121154785e-07f);
     float mPick;
     if ((waterOceanRed & 4) != 0)
     {
@@ -339,7 +371,7 @@ int wwOcBody(float2 P, inout float ws, out float a, out float3 gc, inout float m
         pwPick = 1.0f - (0.699999988079071044921875f * clamp((U - 3.0f) / 7.0f, 0.0f, 1.0f));
     }
     pw = pwPick;
-    gc = float3(1.0f, lerp(1.0f, m, 0.5f * pw), lerp(1.0f, m, pw));
+    gc = float3(1.0f, wwGlMix(1.0f, m, 0.5f * pw), wwGlMix(1.0f, m, pw));
     return set;
 }
 
@@ -392,7 +424,7 @@ float3 wwOcCascadeD(float2 uv, float lod, float layer, uint seed)
     int2 vArg = v2;
     uint seedArg7 = seed;
     float3 D2 = waterOceanD.SampleLevel(_waterOceanD_sampler, float3(uv + wwOcOffset(vArg, seedArg7), layer), lod).xyz;
-    return (((D0 * w.x) + (D1 * w.y)) + (D2 * w.z)) * rsqrt(max(dot(w, w), 9.9999999747524270787835121154785e-07f));
+    return (((D0 * w.x) + (D1 * w.y)) + (D2 * w.z)) * rsqrt(max(mad(w.z, w.z, mad(w.y, w.y, w.x * w.x)), 9.9999999747524270787835121154785e-07f));
 }
 
 float3 wwWaterOceanDisp(float2 P, float _step)
@@ -475,8 +507,9 @@ void wwDomainBody()
     float4 p = float4(pv, 1.0f);
     float3 world = float3(dot(cellRow[0], p), dot(cellRow[1], p), dot(cellRow[2], p));
     wwOcBase = world.xy;
-    float dist = length(pv);
-    precise float fadePart = 1.0f - smoothstep(waterOceanDisp.x, waterOceanDisp.y, dist);
+    // NV GL's length, bit-exact (lane VKWATER3, as VKFAR2): its x-first fma chain, then wwGlSqrt
+    float dist = wwGlSqrt(mad(pv.z, pv.z, mad(pv.y, pv.y, pv.x * pv.x)));
+    precise float fadePart = 1.0f - wwGlSmoothstep(waterOceanDisp.x, waterOceanDisp.y, dist);
     float fade = fadePart;
     bool cond5;
     if (waterOceanOn)

@@ -81,7 +81,7 @@ VKFRAME_FXH_ARGS = ['-fvk-b-shift', '512', '0', '-fvk-t-shift', '576', '0', '-fv
 	'-fspv-preserve-bindings']
 VKFRAME_FXH = {'water_view_hs': 'water/fo4_waterdisp_hs'}
 VKFRAME_FXD_ARGS = ['-fvk-b-shift', '768', '0', '-fvk-t-shift', '832', '0', '-fvk-s-shift', '896', '0', '-fvk-u-shift', '960', '0',
-	'-fspv-preserve-bindings']
+	'-fspv-preserve-bindings', '-Gis']
 VKFRAME_FXD = {'water_view_ds': 'water/fo4_waterdisp_ds'}
 HLSL_SPECS += [('src/features/vkframe', k, 'vulkan1.2', 'vkframe_%s_spv' % k) for k in list(VKFRAME_FXH) + list(VKFRAME_FXD)]
 DEFAULT_G = 'E:/Tools/RenderDoc/RenderDoc_1.45_64/plugins/spirv/glslangValidator.exe'
@@ -321,7 +321,8 @@ def main(argv):
 			if k in VKFRAME_FXW:
 				src = os.path.join(tree, 'res/shaders/hlsl', VKFRAME_FXW[k] + '.hlsl')
 				hdefs = VKFRAME_FXW_ARGS
-			m = re.search(r'hlsl profile: ([cvp]s_6_[0-9])', open(src, encoding='utf-8', errors='replace').read())
+			m = None if k in VKFRAME_FXH or k in VKFRAME_FXD else \
+				re.search(r'hlsl profile: ([cvp]s_6_[0-9])', open(src, encoding='utf-8', errors='replace').read())
 			if k in VKFRAME_FXV or k in VKFRAME_FXW:
 				m = re.match(r'(vs_6_0)', 'vs_6_0')
 			if k in VKFRAME_FXH:
