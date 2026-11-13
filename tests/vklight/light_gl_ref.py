@@ -268,7 +268,7 @@ def load_dump():
 
 
 # ---------------------------------------------------------------------------------------------------------------- AO
-AO = 'ao/cell_ao.frag'
+AO = os.environ.get('VKLIGHT_AO_SRC', 'ao/cell_ao.frag')   # a stage probe's copy (absolute path) overrides
 
 
 def ao_chain(name, srcd, W, H, depth, proj, unit, zlin_route, angles, no_reset, time_it, reds):

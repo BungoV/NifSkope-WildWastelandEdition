@@ -166,14 +166,15 @@ float2 F4FX_AoRaw( Texture2D<float4> gbuf, Texture2D<float4> z1, Texture2D<float
 			int2 Q = P + int2( ssR * float2( cos( a ), sin( a ) ) );
 			float qz = F4FX_AoZAt( gbuf, z1, z2, z3, z4, s, m, F4FX_AoTexelOf( s, m, Q ) );
 			float3 v = float3( ( float2( Q ) + 0.5f ) * projInfo.xy + projInfo.zw, 1.0f ) * qz - C;
-			// the dots as mad chains (GL's order): 0.8 % of values off by a few ulp instead of 1.1 %; every other form
-			// tried (precise / mad tap positions, distributed products, precise sums) was 5-8x worse (notes/vklight1)
+			// the dots as mad chains (GL's order; probes: every tap and sum float-exact)
 			precise float vv = mad( v.z, v.z, mad( v.y, v.y, v.x * v.x ) );
 			precise float vn = mad( v.z, n.z, mad( v.y, n.y, v.x * n.x ) );
 			float f = max( r2 - vv, 0.0f );
 			sum += f * f * f * max( ( vn - biasP ) / ( vv + 0.01f ), 0.0f );
 		}
-		float Ak = max( 1.0f - sum * params.z / r6, 0.0f );
+		// NV GL: fma( -sum, z / r6, 1 ) (else 12 % of the obscured texels miss by 1-1280 ulp)
+		precise float zr = params.z / r6;
+		float Ak = max( mad( -sum, zr, 1.0f ), 0.0f );
 		A += Ak;
 		if ( Ak >= 0.95f ) {
 			topSum += Ak;
@@ -183,9 +184,12 @@ float2 F4FX_AoRaw( Texture2D<float4> gbuf, Texture2D<float4> z1, Texture2D<float
 	A /= float( K );
 	if ( !noReset && topN > 0 && A < 0.7f ) {
 		const float lam = 0.01005034f;
-		float p = float( topN ) / float( K ), top = topSum / float( topN );
+		// NV GL's lowering, spelled out: top as a reciprocal multiply, the sum's first term and the last add fused.
+		// No precise here: it reaches log() and changes its lowering (133 ulp)
+		float p = float( topN ) / float( K ), top = topSum * ( 1.0f / float( topN ) );
 		float t1 = log( ( top - A ) / ( 0.7f - A ) ) / lam;
-		A += ( ( top - 0.7f ) / lam + ( 0.7f - A ) / ( p + lam ) ) / ( t1 + 1.0f / p );
+		float nu = mad( top - 0.7f, 1.0f / lam, ( 0.7f - A ) * ( 1.0f / ( p + lam ) ) );
+		A = mad( nu, 1.0f / ( t1 + 1.0f / p ), A );
 	}
 	float hi = floor( d * 256.0f );
 	float key = hi * 0.00390625f * 0.996108949f + ( d * 256.0f - hi ) * 0.00389105058f;
