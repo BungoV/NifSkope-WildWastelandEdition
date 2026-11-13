@@ -11,6 +11,7 @@
 #include <windows.h>
 
 #include "features/vkframe/vkpresent.h"
+#include "features/vkframe/vkobjtex.h"  // lane VKOBJ3: shutdown() lets the cache's BC twins go
 
 #define VK_NO_PROTOTYPES
 #define VK_USE_PLATFORM_WIN32_KHR
@@ -3595,6 +3596,9 @@ void shutdown()
 		sharedStat().mb = 0.0;
 		sharedGen()++;
 	}
+	// lane VKOBJ3: the texture cache's BC twins keep their GL names (the cache deletes them); farCardsFree frees the rest
+	if ( const int ot = objTexFree() )
+		std::fprintf( stderr, "vk objtex: shutdown, %d cache twins handed to farCardsFree (GL names kept)\n", ot );
 	farCardsFree( gl().ok );  // lane VKFAR1 round 2: the far cards' twins
 	// the temporal AA's crossing semaphores (GL's names); its pipelines stay with the device
 	Taa & A = taa();
@@ -8196,6 +8200,7 @@ ObjStat takeObjStat()
 }  // namespace WwVkPresent
 
 #include "features/vkframe/vkbindless.inc"  // lane VKOBJ2: the bindless maps as descriptor indexing
+#include "features/vkframe/vkobjtex.inc"  // lane VKOBJ3: the texture cache's BC twins and their handles in the table
 
 namespace
 {
