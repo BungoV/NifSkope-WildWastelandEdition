@@ -16,7 +16,12 @@ export PATH="/c/msys64/ucrt64/bin:$PATH"
 if tasklist | grep -qiE '^(NifSkope|Fallout4)'; then echo "BLVIEW GATE FAILED (NifSkope or the game runs: no window of ours now)"; exit 1; fi
 mkdir -p "$OUT"
 SPV=(-spirv -fspv-target-env=vulkan1.2 -HV 2021)
+# the stage shifts as src/features/vkframe/vkframe_spirv.sh's PS_SHIFT / VS_SHIFT (the shipped objbl_*.spv.h)
 PSHIFT="-fvk-b-shift 0 0 -fvk-t-shift 64 0 -fvk-s-shift 128 0 -fvk-u-shift 192 0"
+VSHIFT="-fvk-b-shift 256 0 -fvk-t-shift 320 0 -fvk-s-shift 384 0 -fvk-u-shift 448 0"
+for v in PS_SHIFT:"$PSHIFT" VS_SHIFT:"$VSHIFT"; do
+	grep -qF "${v%%:*}=\"${v#*:}\"" "$ROOT/src/features/vkframe/vkframe_spirv.sh" || { echo "BLVIEW GATE FAILED (${v%%:*} differs from vkframe_spirv.sh)"; exit 1; }
+done
 "$DXC" "${SPV[@]}" -T vs_6_0 -E main "$ROOT/tests/vkframe/blview_vs.hlsl" -Fo "$OUT/blview_vs.spv" > "$OUT/dxc.txt" 2>&1 \
 	&& "$DXC" "${SPV[@]}" -T ps_6_0 -E main -D WW_VK_BINDLESS "$ROOT/tests/vkframe/blview_ps.hlsl" -Fo "$OUT/blview_ps.spv" >> "$OUT/dxc.txt" 2>&1 \
 	&& "$DXC" "${SPV[@]}" -T ps_6_0 -E main -D WW_VK_BINDLESS -D WW_VK_BINDLESS_RED_SLOT "$ROOT/tests/vkframe/blview_ps.hlsl" \
@@ -32,7 +37,7 @@ for twin in fo4_cellbl_ps fo4_cellcsmbl_ps; do
 		-Fo "$OUT/$twin.pipe.spv" >> "$OUT/$twin.dxc.txt" 2>&1 || { tail -20 "$OUT/$twin.dxc.txt"; echo "BLVIEW GATE FAILED (dxc, $twin pipe)"; exit 1; }
 done
 # lane VKOBJ4: the bl vertex stage on its own shifts, and the red `shift` on the pixel stage's (b0 skinning on b0 global)
-for vs in "pipe:-fvk-b-shift 256 0 -fvk-t-shift 320 0 -fvk-s-shift 384 0 -fvk-u-shift 448 0" "redshift:$PSHIFT"; do
+for vs in "pipe:$VSHIFT" "redshift:$PSHIFT"; do
 	"$DXC" "${SPV[@]}" -T vs_6_0 -E main -D WW_VK_BINDLESS ${vs#*:} -fspv-preserve-bindings "$ROOT/res/shaders/hlsl/near/fo4_defaultbl_vs.hlsl" \
 		-Fo "$OUT/fo4_defaultbl_vs.${vs%%:*}.spv" > "$OUT/fo4_defaultbl_vs.dxc.txt" 2>&1 \
 		|| { tail -20 "$OUT/fo4_defaultbl_vs.dxc.txt"; echo "BLVIEW GATE FAILED (dxc, fo4_defaultbl_vs ${vs%%:*})"; exit 1; }
