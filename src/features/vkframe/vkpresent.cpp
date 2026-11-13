@@ -88,6 +88,7 @@ constexpr GLenum kTexture3D = 0x806F, kTexBinding3D = 0x806A, kTexture2DArray = 
 constexpr GLenum kDepth16 = 0x81A5;  // lane VKSHADOW1: the sun cascades' D16 2D array
 constexpr GLenum kDepth24 = 0x81A6, kDepth32f = 0x8CAC;  // lane VKOBJ1: the objects' prepass (X8_D24 / D32F, multisample)
 constexpr GLenum kGlR32ui = 0x8236, kGlRg32ui = 0x823C, kGlR8ui = 0x8232;  // lane VKWATER2: the water's index / atlas lookups
+constexpr GLenum kDepth32fS8 = 0x8CAD;  // lane VKWATER2: waterDepth's copy on a float depth frame (D32F_S8)
 constexpr GLuint64 kTimeoutIgnored = ~0ull;
 
 struct Gl
@@ -1330,7 +1331,7 @@ WwVkPresent::SharedStat & sharedStat()
 
 VkFormat vkFormatOf( GLenum f, bool & depth )
 {
-	depth = f == kDepth24Stencil8 || f == kDepth16 || f == kDepth24 || f == kDepth32f;
+	depth = f == kDepth24Stencil8 || f == kDepth16 || f == kDepth24 || f == kDepth32f || f == kDepth32fS8;
 	switch ( f ) {
 	case kDepth16: return VK_FORMAT_D16_UNORM;  // lane VKSHADOW1
 	case kDepth24: return VK_FORMAT_X8_D24_UNORM_PACK32;  // lane VKOBJ1 (EXT_external_objects' pairing)
@@ -1344,6 +1345,7 @@ VkFormat vkFormatOf( GLenum f, bool & depth )
 	case kGlR8: return VK_FORMAT_R8_UNORM;
 	case kGlRg8: return VK_FORMAT_R8G8_UNORM;
 	case kDepth24Stencil8: return VK_FORMAT_D24_UNORM_S8_UINT;
+	case kDepth32fS8: return VK_FORMAT_D32_SFLOAT_S8_UINT;  // lane VKWATER2
 	case kGlR32ui: return VK_FORMAT_R32_UINT;  // lane VKWATER2: waterInfoAtlas / FlowAtlas / SkyIndex
 	case kGlRg32ui: return VK_FORMAT_R32G32_UINT;  // waterInfoIndex / FlowIndex
 	case kGlR8ui: return VK_FORMAT_R8_UINT;  // waterSkyAtlas

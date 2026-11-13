@@ -15,7 +15,7 @@
 //           tessellationShader)
 //  tess     the tessellated program reads tess, the others do not; its verdict names the tessellated twin
 // Reds (each must FAIL): bc (caps.bc on), int (the integer rows lost), drop (one census input lost), unit (two inputs'
-// textures swapped), tess (caps.tess on), empty (every census empty). The fixture's classes are fixed (lane VKWATER2: the
+// textures swapped), tess (caps.tess on), empty (every census empty), ds (the D32F_S8 row lost). The fixture's classes are fixed (lane VKWATER2: the
 // integer lookups move); a red only mutates the caps or the census, never the expectation. Last line `WATERVIEW GATE OK` or `WATERVIEW GATE FAILED`.
 #define WW_VKPRESENT_NO_QT
 #include "../../src/features/vkframe/vkpresent.cpp"
@@ -166,7 +166,7 @@ void fixtureOf( In & x )
 		x.fmt = 0x8814;
 	} else if ( n == "waterDepth" ) {
 		x.fmt = 0x8CAD;  // DEPTH32F_STENCIL8 (glscene.cpp's float depth frame; a D24S8 frame shares)
-		x.expect = kWaterFormat;
+		x.expect = kWaterOk;  // lane VKWATER2: vkFormatOf's D32_SFLOAT_S8_UINT row
 	} else if ( n == "csmMap" ) {
 		x.fmt = 0x81A5;  // D16 array
 	} else if ( n == "cellShadow" ) {
@@ -288,7 +288,7 @@ const char * kVs = "#version 450\nvoid main() { gl_Position = vec4( 0.0 ); }\n";
 struct Mut
 {
 	std::string name;
-	bool bc = false, intF = false, tess = false, drop = false, swap = false, empty = false;
+	bool bc = false, intF = false, tess = false, drop = false, swap = false, empty = false, ds = false;
 };
 
 struct World
@@ -321,6 +321,8 @@ int evaluate( World & wd, const Mut & m, bool loud )
 		caps.bc = true;
 	if ( m.intF )
 		caps.intFormats = false;  // lane VKWATER2: the integer rows lost
+	if ( m.ds )  // the D32F_S8 row lost
+		caps.sharedFmt = []( unsigned f ) { return f != 0x8CADu && waterCaps().sharedFmt( f ); };
 	if ( m.tess )
 		caps.tess = true;
 	std::vector<WaterCensus> cs = wd.cs;
@@ -596,13 +598,14 @@ int main( int argc, char ** argv )
 	const int green = evaluate( wd, Mut(), true );
 	std::printf( "WATERVIEW GREEN %s (%d failures)\n", green ? "FAIL" : "OK", green );
 	bool redsOk = true;
-	Mut reds[6];
+	Mut reds[7];
 	reds[0].name = "bc";    reds[0].bc = true;
 	reds[1].name = "int";   reds[1].intF = true;
 	reds[2].name = "drop";  reds[2].drop = true;
 	reds[3].name = "unit";  reds[3].swap = true;
 	reds[4].name = "tess";  reds[4].tess = true;
 	reds[5].name = "empty"; reds[5].empty = true;
+	reds[6].name = "ds";    reds[6].ds = true;
 	for ( auto & r : reds ) {
 		const int f = evaluate( wd, r, false );
 		std::printf( "WATERVIEW RED %s %s (%d failures)\n", r.name.c_str(), f ? "FAIL" : "PASSED (must fail)", f );

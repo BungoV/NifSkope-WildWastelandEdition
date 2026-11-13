@@ -27,7 +27,7 @@ WaterCaps waterCaps()
 	WaterCaps c;
 	/* the present device as vkpresent.cpp creates it: no textureCompressionBC, imageCubeArray, samplerAnisotropy or
 	 * tessellationShader enabled, no VkBufferView route for GL texel buffers, no shaded mesh pipeline */
-	c.sharedFmt = &waterSharedFmt;
+	c.sharedFmt = &waterSharedFmt;  // lane VKWATER2: + R32UI / RG32UI / R8UI and D32F_S8 (waterDepth on a float frame)
 	c.intFormats = waterSharedFmt( 0x8236 ) && waterSharedFmt( 0x823C ) && waterSharedFmt( 0x8232 );  // R32UI RG32UI R8UI
 	return c;
 }
