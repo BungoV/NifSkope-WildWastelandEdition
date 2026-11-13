@@ -1,4 +1,4 @@
-// HLSL source of features/gi/cell_ssgi.frag (fragment shader), lane HLSLSRC2 (notes/hlslsrc2/tools/glsl2hlsl.py): one readable file for every
+// HLSL source of features/gi/cell_ssgi.frag (fragment shader), lane HLSLSRC1 (notes/hlsltools/glsl2hlsl.py): one readable file for every
 // variant, the GLSL's comments, names and order kept. Loose uniforms are the LooseUniforms cbuffer (b31).
 // variants: #if none (the loader's defines; res/shaders/hlsl/variants.txt lists the sets built)
 // profile: ps_6_0
@@ -506,7 +506,7 @@ float2 hizReduce( int2 p, bool fromGbuf )
 {
 	int2 fs = fromGbuf ? fullSize : textureSize( hiz, 0 );
 	int2 os = max( fs / 2, (int2)( 1 ) );
-	int2 n = (int2)( 2 ) + int2( (p == os - 1) ) * int2( (fs > os * 2) );
+	int2 n = (int2)( 2 ) + int2( (p == (os - 1)) ) * int2( (fs > (os * 2)) );
 	float2 r = float2( 1.0e30, 0.0 );
 	for ( int y = 0; y < 3; y++ )
 		for ( int x = 0; x < 3; x++ ) {

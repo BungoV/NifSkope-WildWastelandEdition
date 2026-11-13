@@ -1,0 +1,23 @@
+#version 450
+// lane HLSLSRC3: tests/hlslmatch/cullmatch.cpp's depth fill. Writes the r32f depth image (plain, or -DMS multisample, which
+// takes no buffer copy) from a float buffer, one value per sample: v[( y * dim.x + x ) * samples + s].
+layout( local_size_x = 8, local_size_y = 8 ) in;
+layout( std430, binding = 0 ) readonly buffer Src { float v[]; };
+#ifdef MS
+layout( r32f, binding = 1 ) uniform writeonly image2DMS img;
+#else
+layout( r32f, binding = 1 ) uniform writeonly image2D img;
+#endif
+layout( push_constant ) uniform Fill { ivec2 dim; int samples; };
+void main()
+{
+	ivec2 p = ivec2( gl_GlobalInvocationID.xy );
+	if ( p.x >= dim.x || p.y >= dim.y )
+		return;
+#ifdef MS
+	for ( int s = 0; s < samples; s++ )
+		imageStore( img, p, s, vec4( v[( p.y * dim.x + p.x ) * samples + s] ) );
+#else
+	imageStore( img, p, vec4( v[p.y * dim.x + p.x] ) );
+#endif
+}
