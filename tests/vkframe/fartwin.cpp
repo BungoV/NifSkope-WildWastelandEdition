@@ -4,7 +4,10 @@
 // device copies every level and layer out (farTwinRead) and the bytes must be the same, byte for byte.
 // Bar (set before the first run): every compared level / layer EXACT; GL raised no error; a GL format with no twin refused.
 // Reds (each must FAIL): the layer one off (a cube face order / layer mapping slip), the level one off, the twin made as
-// another format (BC1 for a BC3 sheet). Last line `FARTWIN GATE OK` or `FARTWIN GATE FAILED`.
+// another format (BC1 for a BC3 sheet).
+// Texel buffers (farTexelBuffer: cellLights RGBA32F, cellCluster RGBA32I): GL writes with glBufferSubData into the imported
+// buffer, its GL_TEXTURE_BUFFER view must name that buffer and format, the present device's bytes must be the same.
+// Reds: a texel one off, the buffer remade at half the size. Last line `FARTWIN GATE OK` or `FARTWIN GATE FAILED`.
 #define main fxview_main
 #include "fxview.cpp"
 #undef main
@@ -184,6 +187,81 @@ int main()
 		std::vector<std::uint8_t> got;
 		WwVkPresent::farTwinRead( reinterpret_cast<std::uintptr_t>( &c.key ), 0, 0, got, why );
 		red( "the twin made as BC1 for a BC3 sheet", differ( got, c.data[0][0] ) );
+	}
+	// texel buffers (cellLights float4, cellCluster int4): GL writes with glBufferSubData, the present device reads back
+	{
+		using BufSub = void( WINAPI * )( GLenum, std::intptr_t, std::intptr_t, const void * );
+		BufSub bufSub = nullptr;
+		void( WINAPI * bindBuf )( GLenum, GLuint ) = nullptr;
+		if ( !load( bufSub, "glBufferSubData" ) || !load( bindBuf, "glBindBuffer" ) )
+			return fatal( "glBufferSubData" );
+		std::printf( "FARTWIN texel buffers: the device holds %u texels a buffer\n", WwVkPresent::farTexelBufferMax() );
+		struct TB
+		{
+			const char * name;
+			unsigned fmt;
+			size_t bytes;
+			char key = 0;
+			unsigned buf = 0, tex = 0;
+			std::vector<std::uint8_t> data;
+		};
+		TB tb[2] = { { "cellLights RGBA32F, 4096 texels", 0x8814, 4096 * 16 }, { "cellCluster RGBA32I, 24576 texels", 0x8D82, 24576 * 16 } };
+		for ( auto & b : tb ) {
+			if ( !WwVkPresent::farTexelBuffer( reinterpret_cast<std::uintptr_t>( &b.key ), b.fmt, b.bytes, b.buf, b.tex, why ) )
+				return fatal( std::string( "texel buffer " ) + b.name + ": " + why );
+			b.data.resize( b.bytes );
+			for ( auto & x : b.data )
+				x = std::uint8_t( rng() );
+			bindBuf( 0x8C2A, b.buf );
+			bufSub( 0x8C2A, 0, std::intptr_t( b.bytes / 2 ), b.data.data() );  // two writes: the second at an offset
+			bufSub( 0x8C2A, std::intptr_t( b.bytes / 2 ), std::intptr_t( b.bytes - b.bytes / 2 ), b.data.data() + b.bytes / 2 );
+			bindBuf( 0x8C2A, 0 );
+			glBindTexture( 0x8C2A, b.tex );
+			GLint store = 0, ifmt = 0;
+			glGetTexLevelParameteriv( 0x8C2A, 0, 0x8C2D, &store );  // GL_TEXTURE_BUFFER_DATA_STORE_BINDING
+			glGetTexLevelParameteriv( 0x8C2A, 0, GL_TEXTURE_INTERNAL_FORMAT, &ifmt );
+			glBindTexture( 0x8C2A, 0 );
+			const GLenum e = glGetError();
+			std::printf( "FARTWIN %s: GL view on buffer %d (want %u), format 0x%04X, GL error 0x%04X\n", b.name, store, b.buf, unsigned( ifmt ),
+				unsigned( e ) );
+			ok = ok && e == GL_NO_ERROR && GLuint( store ) == b.buf && unsigned( ifmt ) == b.fmt;
+		}
+		glFinish();
+		for ( auto & b : tb ) {
+			std::vector<std::uint8_t> got;
+			const bool read = WwVkPresent::farTexelBufferRead( reinterpret_cast<std::uintptr_t>( &b.key ), got, why );
+			const size_t bad = read ? differ( got, b.data ) : b.bytes;
+			std::printf( "FARTWIN %s: %zu bytes, %zu differ: %s\n", b.name, got.size(), bad, bad ? "FAIL" : "EXACT" );
+			ok = ok && bad == 0;
+		}
+		{
+			unsigned gb = 0, gt = 0;
+			char k = 0;
+			const bool made = WwVkPresent::farTexelBuffer( reinterpret_cast<std::uintptr_t>( &k ), 0x8058 /* GL_RGBA8 */, 64, gb, gt, why );
+			std::printf( "FARTWIN a texel buffer format with no twin (GL_RGBA8): %s\n", made ? "MADE (wrong)" : "refused" );
+			ok = ok && !made;
+		}
+		{
+			std::vector<std::uint8_t> got, want( tb[0].data.begin() + 16, tb[0].data.end() );
+			WwVkPresent::farTexelBufferRead( reinterpret_cast<std::uintptr_t>( &tb[0].key ), got, why );
+			got.resize( got.size() - 16 );
+			const size_t bad = differ( got, want );
+			std::printf( "FARTWIN red texel one off (cellLights read a texel late): %s (%zu bytes differ)\n", bad ? "FAIL" : "EXACT", bad );
+			if ( !bad )
+				ok = false;
+		}
+		{
+			TB & b = tb[1];
+			WwVkPresent::farTexelBuffer( reinterpret_cast<std::uintptr_t>( &b.key ), b.fmt, b.bytes / 2, b.buf, b.tex, why );
+			std::vector<std::uint8_t> got;
+			WwVkPresent::farTexelBufferRead( reinterpret_cast<std::uintptr_t>( &b.key ), got, why );
+			const size_t bad = differ( got, b.data );
+			std::printf( "FARTWIN red the buffer remade at half the size: %s (%zu bytes differ)\n", bad ? "FAIL" : "EXACT", bad );
+			if ( !bad )
+				ok = false;
+		}
+		for ( auto & b : tb )
+			WwVkPresent::farTexelBufferDrop( reinterpret_cast<std::uintptr_t>( &b.key ) );
 	}
 	const WwVkPresent::FarTwinStat st = WwVkPresent::farTwinStat();
 	std::printf( "FARTWIN stat: %d made, %d dropped, %d fails (%s), %.2f MB\n", st.made, st.dropped, st.fails, st.failWhy.c_str(), st.mb );

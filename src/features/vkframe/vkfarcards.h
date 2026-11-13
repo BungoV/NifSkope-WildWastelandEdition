@@ -21,6 +21,14 @@ bool farTwin( std::uintptr_t key, int type, int w, int h, int layers, unsigned g
 void farTwinDrop( std::uintptr_t key );
 //! one level of one layer as the present device sees it (packed blocks / texels); for the gates
 bool farTwinRead( std::uintptr_t key, int level, int layer, std::vector<std::uint8_t> & out, std::string & why );
-FarTwinStat farTwinStat();
+FarTwinStat farTwinStat();  //!< the twins and the texel buffers together
+/*! a texel buffer both APIs see (cellCluster int4, cellLights / cellFarSlots / cellFarRecs float4): glFmt GL_RGBA32F,
+ * GL_RGBA32I or GL_RGBA32UI, bytes whole 16-byte texels within the device's maxTexelBufferElements. glBuf is a GL buffer
+ * with immutable storage on the present device's memory (write it with glBufferSubData / copies, never glBufferData);
+ * glTex its GL_TEXTURE_BUFFER view; the present device holds a VkBufferView of the same bytes. Keyed, own map. */
+bool farTexelBuffer( std::uintptr_t key, unsigned glFmt, std::size_t bytes, unsigned & glBuf, unsigned & glTex, std::string & why );
+void farTexelBufferDrop( std::uintptr_t key );
+bool farTexelBufferRead( std::uintptr_t key, std::vector<std::uint8_t> & out, std::string & why );  //!< for the gates
+std::uint32_t farTexelBufferMax();  //!< the device's maxTexelBufferElements (0: no device)
 void farCardsFree( bool glAlive );  //!< shutdown(): everything above goes with the view
 }  // namespace WwVkPresent

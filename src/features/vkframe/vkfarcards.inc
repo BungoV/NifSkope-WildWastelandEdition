@@ -48,6 +48,36 @@ FcFormat fcFormat( GLenum f )
 	return { c, 0, texel, false };
 }
 
+// 2. a texel buffer both APIs see (cellCluster int4, cellLights / cellFarSlots / cellFarRecs float4): the present device
+//    makes the buffer on exportable memory, GL imports it (glBufferStorageMemEXT) and views it as GL_TEXTURE_BUFFER.
+struct FcBuf
+{
+	VkBuffer buf = VK_NULL_HANDLE;
+	VkDeviceMemory mem = VK_NULL_HANDLE;
+	VkBufferView view = VK_NULL_HANDLE;
+	VkDeviceSize bytes = 0;
+	GLuint glBuf = 0, glTex = 0, obj = 0;
+	GLenum glFmt = 0;
+	void * glCtx = nullptr;
+	double mb = 0.0;
+};
+
+// entry points nothing else on the present device or in vkpresent.cpp's Gl loads (read on first use, GL per context)
+struct FcDev
+{
+	PFN_vkCreateBufferView vkCreateBufferView = nullptr;
+	PFN_vkDestroyBufferView vkDestroyBufferView = nullptr;
+	PFN_vkCmdCopyBuffer vkCmdCopyBuffer = nullptr;
+	VkDevice dev = VK_NULL_HANDLE;
+	std::uint32_t maxTexels = 0;
+	void * glCtx = nullptr;
+	void( WINAPI * genBuffers )( GLsizei, GLuint * ) = nullptr;
+	void( WINAPI * deleteBuffers )( GLsizei, const GLuint * ) = nullptr;
+	void( WINAPI * bindBuffer )( GLenum, GLuint ) = nullptr;
+	void( WINAPI * bufferStorageMem )( GLenum, std::intptr_t, GLuint, GLuint64 ) = nullptr;
+	void( WINAPI * texBuffer )( GLenum, GLenum, GLuint ) = nullptr;
+};
+
 // bytes of one layer of one level as vkCmdCopyImageToBuffer packs it
 VkDeviceSize fcLayerBytes( const FcFormat & f, int w, int h )
 {
@@ -59,6 +89,8 @@ VkDeviceSize fcLayerBytes( const FcFormat & f, int w, int h )
 struct FarCards
 {
 	std::map<std::uintptr_t, Shared> twins;
+	std::map<std::uintptr_t, FcBuf> bufs;
+	FcDev d;
 	WwVkPresent::FarTwinStat st;
 	int features = -1;  // -1 unread; bit 0 textureCompressionBC, bit 1 imageCubeArray (the device enables what is offered)
 };
@@ -224,6 +256,159 @@ const Shared * farTwinFind( std::uintptr_t key )
 	auto it = m.find( key );
 	return it == m.end() ? nullptr : &it->second;
 }
+
+constexpr GLenum kFcTexBuffer = 0x8C2A, kFcBindingTexBuffer = 0x8C2C, kFcRgba32f = 0x8814, kFcRgba32i = 0x8D82, kFcRgba32ui = 0x8D70;
+
+VkFormat fcTexelFormat( GLenum f )
+{
+	return f == kFcRgba32f ? VK_FORMAT_R32G32B32A32_SFLOAT : f == kFcRgba32i ? VK_FORMAT_R32G32B32A32_SINT
+		: f == kFcRgba32ui ? VK_FORMAT_R32G32B32A32_UINT : VK_FORMAT_UNDEFINED;
+}
+
+bool fcDev( std::string & why )
+{
+	Vk & v = vk();
+	FcDev & d = farCards().d;
+	if ( d.dev != v.dev ) {
+		d = FcDev();
+		d.vkCreateBufferView = reinterpret_cast<PFN_vkCreateBufferView>( v.vkGetDeviceProcAddr( v.dev, "vkCreateBufferView" ) );
+		d.vkDestroyBufferView = reinterpret_cast<PFN_vkDestroyBufferView>( v.vkGetDeviceProcAddr( v.dev, "vkDestroyBufferView" ) );
+		d.vkCmdCopyBuffer = reinterpret_cast<PFN_vkCmdCopyBuffer>( v.vkGetDeviceProcAddr( v.dev, "vkCmdCopyBuffer" ) );
+		VkPhysicalDeviceProperties2 p { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2 };
+		v.vkGetPhysicalDeviceProperties2( v.phys, &p );
+		d.maxTexels = p.properties.limits.maxTexelBufferElements;
+		d.dev = v.dev;
+	}
+	void * ctx = reinterpret_cast<void *>( wglGetCurrentContext() );
+	if ( ctx && d.glCtx != ctx ) {
+		auto ld = []( auto & p, const char * n ) { p = reinterpret_cast<std::remove_reference_t<decltype( p )>>( wglGetProcAddress( n ) ); };
+		ld( d.genBuffers, "glGenBuffers" );
+		ld( d.deleteBuffers, "glDeleteBuffers" );
+		ld( d.bindBuffer, "glBindBuffer" );
+		ld( d.bufferStorageMem, "glBufferStorageMemEXT" );
+		ld( d.texBuffer, "glTexBuffer" );
+		d.glCtx = ctx;
+	}
+	if ( !d.vkCreateBufferView || !d.vkDestroyBufferView || !d.vkCmdCopyBuffer ) {
+		why = "the present device has no buffer views / buffer copies";
+		return false;
+	}
+	if ( !d.genBuffers || !d.deleteBuffers || !d.bindBuffer || !d.bufferStorageMem || !d.texBuffer ) {
+		why = "GL has no glBufferStorageMemEXT / glTexBuffer in this context";
+		return false;
+	}
+	return true;
+}
+
+// the caller drained the worker and waited the device idle
+void fcBufFree( FcBuf & b, bool glAlive )
+{
+	Vk & v = vk();
+	FcDev & d = farCards().d;
+	if ( glAlive && b.glCtx == gl().ctx ) {
+		if ( b.glTex )
+			gl().deleteTextures( 1, &b.glTex );
+		if ( b.glBuf && d.deleteBuffers )
+			d.deleteBuffers( 1, &b.glBuf );
+		if ( b.obj )
+			gl().deleteMemoryObjects( 1, &b.obj );
+	}
+	if ( b.view && d.vkDestroyBufferView )
+		d.vkDestroyBufferView( v.dev, b.view, nullptr );
+	if ( b.buf )
+		v.vkDestroyBuffer( v.dev, b.buf, nullptr );
+	if ( b.mem )
+		v.vkFreeMemory( v.dev, b.mem, nullptr );
+	b = FcBuf();
+}
+
+bool fcBufMake( FcBuf & b, GLenum glFmt, VkFormat fmt, VkDeviceSize bytes, std::string & why )
+{
+	Vk & v = vk();
+	Gl & g = gl();
+	FcDev & d = farCards().d;
+	VkFormatProperties fp {};
+	v.vkGetPhysicalDeviceFormatProperties( v.phys, fmt, &fp );
+	if ( !( fp.bufferFeatures & VK_FORMAT_FEATURE_UNIFORM_TEXEL_BUFFER_BIT ) ) {
+		why = "format " + std::to_string( int( fmt ) ) + " is no uniform texel buffer on the present device";
+		return false;
+	}
+	if ( bytes / 16 > d.maxTexels ) {
+		why = std::to_string( bytes / 16 ) + " texels, the device's texel buffers hold " + std::to_string( d.maxTexels );
+		return false;
+	}
+	VkExternalMemoryBufferCreateInfo ext { VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_BUFFER_CREATE_INFO };
+	ext.handleTypes = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_WIN32_BIT;
+	VkBufferCreateInfo ci { VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
+	ci.pNext = &ext;
+	ci.size = bytes;
+	ci.usage = VK_BUFFER_USAGE_UNIFORM_TEXEL_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+	if ( v.vkCreateBuffer( v.dev, &ci, nullptr, &b.buf ) != VK_SUCCESS ) {
+		why = "vkCreateBuffer (a far-card texel buffer) failed";
+		return false;
+	}
+	VkMemoryRequirements r;
+	v.vkGetBufferMemoryRequirements( v.dev, b.buf, &r );
+	VkMemoryDedicatedAllocateInfo ded { VK_STRUCTURE_TYPE_MEMORY_DEDICATED_ALLOCATE_INFO };
+	ded.buffer = b.buf;
+	VkExportMemoryAllocateInfo exp { VK_STRUCTURE_TYPE_EXPORT_MEMORY_ALLOCATE_INFO };
+	exp.pNext = &ded;
+	exp.handleTypes = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_WIN32_BIT;
+	VkMemoryAllocateInfo ai { VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO };
+	ai.pNext = &exp;
+	ai.allocationSize = r.size;
+	ai.memoryTypeIndex = memType( r.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT );
+	if ( ai.memoryTypeIndex == UINT32_MAX || v.vkAllocateMemory( v.dev, &ai, nullptr, &b.mem ) != VK_SUCCESS
+		|| v.vkBindBufferMemory( v.dev, b.buf, b.mem, 0 ) != VK_SUCCESS ) {
+		why = "no exportable device memory for a far-card texel buffer";
+		return false;
+	}
+	b.bytes = bytes;
+	b.mb = double( r.size ) / 1048576.0;
+	VkBufferViewCreateInfo vi { VK_STRUCTURE_TYPE_BUFFER_VIEW_CREATE_INFO };
+	vi.buffer = b.buf;
+	vi.format = fmt;
+	vi.range = VK_WHOLE_SIZE;
+	if ( d.vkCreateBufferView( v.dev, &vi, nullptr, &b.view ) != VK_SUCCESS ) {
+		why = "vkCreateBufferView (a far-card texel buffer) failed";
+		return false;
+	}
+	VkMemoryGetWin32HandleInfoKHR mi { VK_STRUCTURE_TYPE_MEMORY_GET_WIN32_HANDLE_INFO_KHR };
+	mi.memory = b.mem;
+	mi.handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_WIN32_BIT;
+	HANDLE mh = nullptr;
+	if ( v.vkGetMemoryWin32HandleKHR( v.dev, &mi, &mh ) != VK_SUCCESS || !mh ) {
+		why = "vkGetMemoryWin32HandleKHR (a far-card texel buffer) failed";
+		return false;
+	}
+	while ( g.getError() != 0 ) {}
+	GLint wasBuf = 0, wasTex = 0;
+	g.getIntegerv( kFcTexBuffer, &wasBuf );  // GL_TEXTURE_BUFFER_BINDING has the target's value
+	g.getIntegerv( kFcBindingTexBuffer, &wasTex );
+	g.createMemoryObjects( 1, &b.obj );
+	const GLint one = 1;
+	g.memoryObjectParameteriv( b.obj, kDedicated, &one );
+	g.importMemoryWin32Handle( b.obj, GLuint64( r.size ), kHandleOpaqueWin32, mh );
+	const GLenum errImport = g.getError();
+	CloseHandle( mh );
+	d.genBuffers( 1, &b.glBuf );
+	d.bindBuffer( kFcTexBuffer, b.glBuf );
+	d.bufferStorageMem( kFcTexBuffer, std::intptr_t( bytes ), b.obj, 0 );
+	g.genTextures( 1, &b.glTex );
+	g.bindTexture( kFcTexBuffer, b.glTex );
+	d.texBuffer( kFcTexBuffer, glFmt, b.glBuf );
+	const GLenum errStorage = g.getError();
+	g.bindTexture( kFcTexBuffer, GLuint( wasTex ) );
+	d.bindBuffer( kFcTexBuffer, GLuint( wasBuf ) );
+	if ( errImport || errStorage ) {
+		why = "the GL import of a far-card texel buffer failed (GL error at the import " + std::to_string( errImport ) + ", the storage "
+			+ std::to_string( errStorage ) + ")";
+		return false;
+	}
+	b.glFmt = glFmt;
+	b.glCtx = g.ctx;
+	return true;
+}
 }  // namespace
 
 namespace WwVkPresent
@@ -383,13 +568,152 @@ FarTwinStat farTwinStat()
 void farCardsFree( bool glAlive )
 {
 	FarCards & C = farCards();
-	if ( C.twins.empty() )
+	if ( C.twins.empty() && C.bufs.empty() )
 		return;
 	drain();
 	vk().vkDeviceWaitIdle( vk().dev );
 	for ( auto & kv : C.twins )
 		sharedFree( kv.second, glAlive && kv.second.glCtx == gl().ctx );
+	for ( auto & kv : C.bufs )
+		fcBufFree( kv.second, glAlive );
 	C.twins.clear();
+	C.bufs.clear();
+	C.d = FcDev();
 	C.st.mb = 0.0;
+}
+
+bool farTexelBuffer( std::uintptr_t key, unsigned glFmt, std::size_t bytes, unsigned & glBuf, unsigned & glTex, std::string & why )
+{
+	Gl & g = gl();
+	Vk & v = vk();
+	FarCards & C = farCards();
+	glBuf = glTex = 0;
+	auto fail = [&]( const std::string & r ) {
+		why = r;
+		C.st.fails++;
+		C.st.failWhy = r;
+		return false;
+	};
+	if ( !v.ok || !g.ok || g.ctx != reinterpret_cast<void *>( wglGetCurrentContext() ) )
+		return fail( "the present device or GL's entry points are not ready in this context" );
+	const VkFormat fmt = fcTexelFormat( GLenum( glFmt ) );
+	if ( fmt == VK_FORMAT_UNDEFINED )
+		return fail( "GL format " + std::to_string( glFmt ) + " has no far-card texel buffer (RGBA32F / RGBA32I / RGBA32UI)" );
+	if ( bytes < 16 || bytes % 16 )
+		return fail( "a far-card texel buffer of " + std::to_string( bytes ) + " bytes (whole 16-byte texels)" );
+	if ( !fcDev( why ) )
+		return fail( why );
+	auto it = C.bufs.find( key );
+	if ( it != C.bufs.end() && it->second.glCtx == g.ctx && it->second.glFmt == glFmt && it->second.bytes == bytes ) {
+		glBuf = it->second.glBuf;
+		glTex = it->second.glTex;
+		return true;
+	}
+	drain();
+	v.vkDeviceWaitIdle( v.dev );
+	if ( it != C.bufs.end() ) {
+		C.st.mb -= it->second.mb;
+		fcBufFree( it->second, true );
+		C.bufs.erase( it );
+		C.st.dropped++;
+	}
+	FcBuf b;
+	if ( !fcBufMake( b, GLenum( glFmt ), fmt, VkDeviceSize( bytes ), why ) ) {
+		fcBufFree( b, true );
+		return fail( why );
+	}
+	C.st.made++;
+	C.st.mb += b.mb;
+	glBuf = b.glBuf;
+	glTex = b.glTex;
+	C.bufs[key] = b;
+	return true;
+}
+
+void farTexelBufferDrop( std::uintptr_t key )
+{
+	FarCards & C = farCards();
+	auto it = C.bufs.find( key );
+	if ( it == C.bufs.end() )
+		return;
+	drain();
+	vk().vkDeviceWaitIdle( vk().dev );
+	C.st.mb -= it->second.mb;
+	C.st.dropped++;
+	fcBufFree( it->second, gl().ok );
+	C.bufs.erase( it );
+}
+
+// the bytes as the present device sees them (the gates compare them with what GL wrote; GL finished first)
+bool farTexelBufferRead( std::uintptr_t key, std::vector<std::uint8_t> & out, std::string & why )
+{
+	Vk & v = vk();
+	FarCards & C = farCards();
+	auto it = C.bufs.find( key );
+	if ( it == C.bufs.end() || !it->second.buf ) {
+		why = "no far-card texel buffer of that key";
+		return false;
+	}
+	const FcBuf & s = it->second;
+	drain();
+	v.vkDeviceWaitIdle( v.dev );
+	VkBuffer buf = VK_NULL_HANDLE;
+	VkDeviceMemory mem = VK_NULL_HANDLE;
+	VkBufferCreateInfo bci { VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
+	bci.size = s.bytes;
+	bci.usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+	bool ok = v.vkCreateBuffer( v.dev, &bci, nullptr, &buf ) == VK_SUCCESS;
+	if ( ok ) {
+		VkMemoryRequirements br;
+		v.vkGetBufferMemoryRequirements( v.dev, buf, &br );
+		VkMemoryAllocateInfo ai { VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO };
+		ai.allocationSize = br.size;
+		ai.memoryTypeIndex = memType( br.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT );
+		ok = ai.memoryTypeIndex != UINT32_MAX && v.vkAllocateMemory( v.dev, &ai, nullptr, &mem ) == VK_SUCCESS
+			&& v.vkBindBufferMemory( v.dev, buf, mem, 0 ) == VK_SUCCESS;
+	}
+	VkCommandBufferAllocateInfo cai { VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO };
+	cai.commandPool = v.pool;
+	cai.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+	cai.commandBufferCount = 1;
+	VkCommandBuffer cmd = VK_NULL_HANDLE;
+	VkFence fence = VK_NULL_HANDLE;
+	VkFenceCreateInfo fi { VK_STRUCTURE_TYPE_FENCE_CREATE_INFO };
+	ok = ok && v.vkAllocateCommandBuffers( v.dev, &cai, &cmd ) == VK_SUCCESS && v.vkCreateFence( v.dev, &fi, nullptr, &fence ) == VK_SUCCESS;
+	if ( ok ) {
+		VkCommandBufferBeginInfo bi { VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
+		bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+		v.vkBeginCommandBuffer( cmd, &bi );
+		VkBufferCopy c { 0, 0, s.bytes };
+		C.d.vkCmdCopyBuffer( cmd, s.buf, buf, 1, &c );
+		v.vkEndCommandBuffer( cmd );
+		ok = oneShot( cmd, fence );
+	}
+	if ( ok ) {
+		void * p = nullptr;
+		ok = v.vkMapMemory( v.dev, mem, 0, s.bytes, 0, &p ) == VK_SUCCESS;
+		if ( ok ) {
+			out.assign( static_cast<const std::uint8_t *>( p ), static_cast<const std::uint8_t *>( p ) + s.bytes );
+			v.vkUnmapMemory( v.dev, mem );
+		}
+	}
+	if ( cmd )
+		v.vkFreeCommandBuffers( v.dev, v.pool, 1, &cmd );
+	if ( fence )
+		v.vkDestroyFence( v.dev, fence, nullptr );
+	if ( buf )
+		v.vkDestroyBuffer( v.dev, buf, nullptr );
+	if ( mem )
+		v.vkFreeMemory( v.dev, mem, nullptr );
+	if ( !ok )
+		why = "the far-card texel buffer's read back failed";
+	return ok;
+}
+
+std::uint32_t farTexelBufferMax()
+{
+	std::string why;
+	fcDev( why );  // the Vulkan half reads the limit even where GL's entry points are missing
+	return farCards().d.maxTexels;
 }
 }  // namespace WwVkPresent
