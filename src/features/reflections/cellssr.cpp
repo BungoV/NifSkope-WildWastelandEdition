@@ -16,6 +16,7 @@ BSD License - see nifskope.h
 #include "gl/celllights.h"
 #include "features/far-lod/cellfarinst.h"
 #include "features/exposure/cellhdr.h"	// lane FRAMEFMT1: the frame's colour format for the previous-frame copy
+#include "features/vkframe/vkpresent.h"	// lane VKLIGHT2: the full-screen stages on the present device
 #include "features/water/cellwater.h"
 #include "gl/celllooks.h"	// lane WATERREFL1: the Water reflections row picks the water march's twin
 #include "gl/glnode.h"
@@ -111,6 +112,7 @@ struct SsrTarget
 	GLuint tex = 0, fbo = 0;
 	int w = 0, h = 0;
 	GLenum fmt = 0;	// lane FRAMEFMT1: the format ssrAlloc made it in
+	bool vk = false;	// lane VKLIGHT2: tex is a shared target (WwVkPresent::sharedTarget, keyed by this target): never deleted here
 };
 
 struct SsrGpu
@@ -161,10 +163,10 @@ void ssrAlloc( NifSkopeOpenGLContext::GLFunctions * fn, SsrTarget & t, int w, in
 {
 	if ( t.tex && t.w == w && t.h == h && t.fmt == fmt )
 		return;
-	if ( !t.tex ) {
+	if ( !t.tex )
 		fn->glGenTextures( 1, &t.tex );
+	if ( !t.fbo )
 		fn->glGenFramebuffers( 1, &t.fbo );
-	}
 	fn->glBindTexture( GL_TEXTURE_2D, t.tex );
 	fn->glTexImage2D( GL_TEXTURE_2D, 0, GLint( fmt ), w, h, 0, GL_RGBA, GL_FLOAT, nullptr );
 	t.fmt = fmt;
@@ -178,6 +180,99 @@ void ssrAlloc( NifSkopeOpenGLContext::GLFunctions * fn, SsrTarget & t, int w, in
 	fn->glFramebufferTexture2D( GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, t.tex, 0 );
 	t.w = w;
 	t.h = h;
+}
+
+/* lane VKLIGHT2: the target on the present device (vk, RGBA32F, keyed by the target) or GL's own as ssrAlloc made it.
+ * false: the shared one could not be made (GL's own is left in place) */
+bool ssrPlace( NifSkopeOpenGLContext::GLFunctions * fn, SsrTarget & t, int w, int h, bool linear, bool vk, std::string & why )
+{
+	const std::uintptr_t key = reinterpret_cast<std::uintptr_t>( &t );
+	if ( !vk ) {
+		if ( t.vk ) {
+			WwVkPresent::sharedTargetDrop( key );
+			t.tex = 0;
+			t.vk = false;
+		}
+		ssrAlloc( fn, t, w, h, linear );
+		return true;
+	}
+	unsigned tex = 0;
+	if ( !WwVkPresent::sharedTarget( key, 0, w, h, 1, GL_RGBA32F, tex, why ) || !tex ) {
+		ssrPlace( fn, t, w, h, linear, false, why );
+		return false;
+	}
+	if ( t.vk && t.tex == tex )
+		return true;
+	if ( t.tex && !t.vk )
+		fn->glDeleteTextures( 1, &t.tex );
+	t.tex = tex;
+	t.vk = true;
+	t.fmt = GL_RGBA32F;
+	t.w = w;
+	t.h = h;
+	fn->glBindTexture( GL_TEXTURE_2D, t.tex );
+	fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, linear ? GL_LINEAR : GL_NEAREST );
+	fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, linear ? GL_LINEAR : GL_NEAREST );
+	fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE );
+	fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE );
+	fn->glBindTexture( GL_TEXTURE_2D, 0 );
+	if ( !t.fbo )
+		fn->glGenFramebuffers( 1, &t.fbo );
+	fn->glBindFramebuffer( GL_FRAMEBUFFER, t.fbo );
+	fn->glFramebufferTexture2D( GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, t.tex, 0 );
+	return true;
+}
+
+/* lane PERF3: game-unit view P = R world + t / sc (cellAoPassOut's depth); the previous view: M P + T with
+ * M = Rp R^T, T = tp / scp - M t / sc (M row-major) */
+void ssrPrevMT( const SsrGpu & g, const Transform & vt, float M[9], float T[3] )
+{
+	const float sc = vt.scale != 0.0f ? vt.scale : 1.0f;
+	for ( int i = 0; i < 3; i++ )
+		for ( int j = 0; j < 3; j++ ) {
+			float m = 0.0f;
+			for ( int k = 0; k < 3; k++ )
+				m += g.prevRot[i * 3 + k] * vt.rotation( j, k );
+			M[i * 3 + j] = m;
+		}
+	for ( int i = 0; i < 3; i++ ) {
+		float mt = 0.0f;
+		for ( int j = 0; j < 3; j++ )
+			mt += M[i * 3 + j] * vt.translation[j];
+		T[i] = g.prevT[i] / g.prevSc - mt / sc;
+	}
+}
+
+// lane VKLIGHT2: the route's line, one a 5 s window while the stages are wanted on Vulkan, else once a change
+void ssrVkSay( bool wanted, const std::string & glWhy )
+{
+	static std::string said;
+	static QElapsedTimer at;
+	if ( !wanted ) {
+		const std::string line = "vk ssr: on GL (" + glWhy + ")";
+		if ( line != said ) {
+			said = line;
+			std::fprintf( stderr, "%s\n", line.c_str() );
+		}
+		return;
+	}
+	if ( at.isValid() && at.elapsed() < 5000 && said.rfind( "vk ssr: on V", 0 ) == 0 )
+		return;
+	at.start();
+	const WwVkPresent::SsrStat st = WwVkPresent::takeSsrStat();
+	char b[512];
+	if ( st.runs > 0 )
+		std::snprintf( b, sizeof( b ), "vk ssr: on Vulkan %d frames (ssr_vk stages 5, 1-4, one crossing; %d pipelines built in %.1f ms; "
+			"drawing thread %.3f ms, max %.3f)", st.runs, st.pipelines, st.buildMs, st.cpuMs / st.runs, st.maxMs );
+	else
+		std::snprintf( b, sizeof( b ), "vk ssr: on Vulkan wanted, 0 frames run" );
+	std::string line = b;
+	if ( st.gl > 0 )
+		line += ", on GL " + std::to_string( st.gl ) + " frames (last: " + st.glWhy + ")";
+	if ( st.fails > 0 )
+		line += ", " + std::to_string( st.fails ) + " refused to GL (last: " + st.failWhy + ")";
+	said = line;
+	std::fprintf( stderr, "%s\n", line.c_str() );
 }
 
 bool ssrIsCellProgram( const NifSkopeOpenGLContext::Program * p )
@@ -392,14 +487,6 @@ void wwCellSsrPass( Scene * scene, bool run )
 		if ( wasStencil ) fn->glEnable( GL_STENCIL_TEST ); else fn->glDisable( GL_STENCIL_TEST );
 	};
 
-	// the targets; the scene pass borrows the obscurance pass's depth buffer (that pass is done with it)
-	ssrAlloc( fn, g.scene, W, H, true );
-	if ( !sceneOnly ) {
-	ssrAlloc( fn, g.ray, hw, hh, false );
-	ssrAlloc( fn, g.raw, hw, hh, true );
-	ssrAlloc( fn, g.across, hw, hh, true );
-	ssrAlloc( fn, g.fin, hw, hh, true );
-	}
 	/* lane PERF3 (cellssr.h): the flag from the obscurance pass's stencil and the color from the previous frame, when
 	 * this frame can use them; else the scene pass as before */
 	int prevWhy = 0;
@@ -422,6 +509,30 @@ void wwCellSsrPass( Scene * scene, bool run )
 	}
 	const bool usePrev = prevWhy == 1;
 	const bool prevBounce = usePrev && bounce;	// lane PERFFIX1: stage 5 makes the bounce's donor
+	/* lane VKLIGHT2 (row L4): stage 5 and stages 1-4 on the present device, the pass's targets shared; GL keeps stage 0,
+	 * the scene pass and the water's rays. Red WW_VKVIEW_SSR_RED=1 (or the view on GL): GL's quads. */
+	static std::string vkOff;	// a shared target could not be made: GL for good, said once
+	const bool vkWant = WwVkPresent::shareWanted( "WW_VKVIEW_SSR_RED" );
+	bool vkUse = vkWant && vkOff.empty() && s.dump.isEmpty() && ( !sceneOnly || prevBounce );
+	std::string vkWhy;
+	if ( !vkWant )
+		ssrVkSay( false, "red WW_VKVIEW_SSR_RED=1 or the view not on Vulkan" );
+	else if ( !vkOff.empty() )
+		ssrVkSay( false, vkOff );
+	else if ( !s.dump.isEmpty() )
+		ssrVkSay( false, "WW_CELL_SSR_DUMP reads GL's own stages" );
+	// the targets; the scene pass borrows the obscurance pass's depth buffer (that pass is done with it)
+	if ( !ssrPlace( fn, g.scene, W, H, true, vkUse, vkWhy ) )
+		vkUse = false;
+	if ( !sceneOnly ) {
+		for ( SsrTarget * t : { &g.ray, &g.raw, &g.across, &g.fin } )
+			if ( !ssrPlace( fn, *t, hw, hh, t != &g.ray, vkUse, vkWhy ) )
+				vkUse = false;
+	}
+	if ( vkWant && !vkWhy.empty() ) {
+		vkOff = "a shared target failed: " + vkWhy;
+		ssrVkSay( false, vkOff );
+	}
 	g.prevValid = false;	// used once: the end of this frame keeps the next
 	static const float quad[12] = { -1, -1, 0, 1, -1, 0, -1, 1, 0, 1, 1, 0 };
 	static const std::uint16_t idx[6] = { 0, 1, 2, 2, 1, 3 };
@@ -564,7 +675,11 @@ void wwCellSsrPass( Scene * scene, bool run )
 	// 1b. the water's rays, depth-tested against the opaque depth just drawn
 	if ( waterSsr ) {
 		PassTime::Swap waterT( PassTime::Reflections, PassTime::SsrWater );	// lane TIMING1: the water's rays alone
-		ssrAlloc( fn, g.wray, W, H, false );
+		if ( !ssrPlace( fn, g.wray, W, H, false, vkUse, vkWhy ) ) {
+			vkUse = false;
+			vkOff = "a shared target failed: " + vkWhy;
+			ssrVkSay( false, vkOff );
+		}
 		fn->glBindFramebuffer( GL_FRAMEBUFFER, g.wray.fbo );
 		fn->glFramebufferRenderbuffer( GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, ao.depthRb );
 		if ( fn->glCheckFramebufferStatus( GL_FRAMEBUFFER ) == GL_FRAMEBUFFER_COMPLETE ) {
@@ -709,6 +824,79 @@ void wwCellSsrPass( Scene * scene, bool run )
 		}
 	}
 
+	const Transform & vt = scene->view;
+	const auto & pm = r->globalUniforms->projectionMatrix;
+	const float p00 = pm[0][0], p11 = pm[1][1];
+	const float farZ = std::min( kSsrFarMax, L->clipDist > 0.0f ? L->clipDist : kSsrFarMax );
+	// world = R^T x view: column j of the uniform is the view axis j in the world
+	float rot[9];
+	for ( int j = 0; j < 3; j++ )
+		for ( int k = 0; k < 3; k++ )
+			rot[j * 3 + k] = vt.rotation( j, k );
+	float prevM[9] = {}, prevT[3] = {};
+	if ( usePrev )
+		ssrPrevMT( g, vt, prevM, prevT );
+
+	// 2v. lane VKLIGHT2: the same stages on the present device (ssr_vk.hlsl), into the same targets
+	if ( vkUse ) {
+		static char keys[4];	// the twins' keys: addresses no other owner uses
+		WwVkPresent::SsrRun v;
+		v.W = W; v.H = H; v.hw = hw; v.hh = hh;
+		v.gbuf = ao.gbuf;
+		for ( int m = 1; m < 5; m++ ) {
+			v.mip[m] = ao.mip[m];
+			v.mipW[m] = ao.mipW[m];
+			v.mipH[m] = ao.mipH[m];
+		}
+		v.gbufKey = reinterpret_cast<std::uintptr_t>( &keys[0] );
+		v.atlasKey = reinterpret_cast<std::uintptr_t>( &keys[1] );
+		v.prevKey = reinterpret_cast<std::uintptr_t>( &keys[2] );
+		v.prev = usePrev ? g.prev.tex : 0;
+		v.prevFmt = usePrev ? g.prev.fmt : 0;
+		v.scene = g.scene.tex; v.sceneKey = reinterpret_cast<std::uintptr_t>( &g.scene );
+		v.wray = g.wray.tex; v.wrayKey = reinterpret_cast<std::uintptr_t>( &g.wray );
+		v.ray = g.ray.tex; v.rayKey = reinterpret_cast<std::uintptr_t>( &g.ray );
+		v.raw = g.raw.tex; v.rawKey = reinterpret_cast<std::uintptr_t>( &g.raw );
+		v.across = g.across.tex; v.acrossKey = reinterpret_cast<std::uintptr_t>( &g.across );
+		v.fin = g.fin.tex; v.finKey = reinterpret_cast<std::uintptr_t>( &g.fin );
+		v.haveWater = g.haveWater;
+		v.waterLook = wwLookOn( WwLook::WaterRefl ) || wwCellSsrWaterAll();
+		v.prevOn = usePrev;
+		v.stage5 = prevBounce;
+		v.march = !sceneOnly;
+		const float c0[4] = { float( W ), float( H ), float( hw ), float( hh ) };
+		const float c1[4] = { p00, p11, kSsrNear, farZ };
+		for ( int k = 0; k < 4; k++ ) {
+			v.c[0][k] = c0[k];
+			v.c[1][k] = c1[k];
+			v.c[2][k] = kSsrK[k];
+		}
+		for ( int j = 0; j < 3; j++ )
+			for ( int k = 0; k < 3; k++ )
+				v.c[3 + j][k] = rot[j * 3 + k];
+		v.i[0] = s.red | ( s.waterRed ? 8 : 0 );
+		v.i[1] = g.haveWater ? 1 : 0;
+		v.i[2] = g.waterOnly ? 0 : 1;
+		std::copy( prevM, prevM + 9, v.prevM );
+		std::copy( prevT, prevT + 3, v.prevT );
+		v.prevProj[0] = g.prevP00;
+		v.prevProj[1] = g.prevP11;
+		std::string why;
+		if ( WwVkPresent::ssrRun( v, why ) ) {
+			ssrVkSay( true, std::string() );
+			if ( prevBounce )
+				g.sceneReady = true;
+			if ( !sceneOnly ) {
+				g.ready = true;
+				g.doc = scene->nifModel;
+			}
+			restore();
+			return;
+		}
+		WwVkPresent::ssrOnGl( why.c_str() );
+		ssrVkSay( false, "this frame: " + why );
+	}
+
 	// 2. the full-screen passes (cell_ssr.frag)
 	prog = r->useProgram( ssrProg );
 	fn->glDisable( GL_DEPTH_TEST );
@@ -738,15 +926,6 @@ void wwCellSsrPass( Scene * scene, bool run )
 	fn->glUniform2i( prog->uniLocation( "mipSize[%d]", 0 ), W, H );
 	for ( int m = 1; m < 5; m++ )
 		fn->glUniform2i( prog->uniLocation( "mipSize[%d]", m ), ao.mipW[m], ao.mipH[m] );
-	const auto & pm = r->globalUniforms->projectionMatrix;
-	const float p00 = pm[0][0], p11 = pm[1][1];
-	const float farZ = std::min( kSsrFarMax, L->clipDist > 0.0f ? L->clipDist : kSsrFarMax );
-	// world = R^T x view: column j of the uniform is the view axis j in the world
-	const Transform & vt = scene->view;
-	float rot[9];
-	for ( int j = 0; j < 3; j++ )
-		for ( int k = 0; k < 3; k++ )
-			rot[j * 3 + k] = vt.rotation( j, k );
 	fn->glUniformMatrix3fv( prog->uniLocation( "viewToWorld" ), 1, GL_FALSE, rot );
 	prog->uni2f( "proj", p00, p11 );
 	prog->uni4f( "ssrK", FloatVector4( kSsrK[0], kSsrK[1], kSsrK[2], kSsrK[3] ) );
@@ -754,25 +933,8 @@ void wwCellSsrPass( Scene * scene, bool run )
 	prog->uni1i( "ssrRed", s.red | ( s.waterRed ? 8 : 0 ) );	// lane FIX1101A: 8 = the water rays' old end (no step fade)
 	prog->uni1b( "ssrPrev", usePrev );
 	if ( usePrev ) {
-		/* game-unit view P = R world + t / sc (cellAoPassOut's depth); the previous view: M P + T with
-		 * M = Rp R^T, T = tp / scp - M t / sc */
-		const float sc = vt.scale != 0.0f ? vt.scale : 1.0f;
-		float M[9], T[3];
-		for ( int i = 0; i < 3; i++ )
-			for ( int j = 0; j < 3; j++ ) {
-				float m = 0.0f;
-				for ( int k = 0; k < 3; k++ )
-					m += g.prevRot[i * 3 + k] * vt.rotation( j, k );
-				M[i * 3 + j] = m;
-			}
-		for ( int i = 0; i < 3; i++ ) {
-			float mt = 0.0f;
-			for ( int j = 0; j < 3; j++ )
-				mt += M[i * 3 + j] * vt.translation[j];
-			T[i] = g.prevT[i] / g.prevSc - mt / sc;
-		}
-		fn->glUniformMatrix3fv( prog->uniLocation( "ssrPrevRot" ), 1, GL_TRUE, M );	// M is row-major
-		prog->uni3f( "ssrPrevT", T[0], T[1], T[2] );
+		fn->glUniformMatrix3fv( prog->uniLocation( "ssrPrevRot" ), 1, GL_TRUE, prevM );	// M is row-major
+		prog->uni3f( "ssrPrevT", prevT[0], prevT[1], prevT[2] );
 		prog->uni2f( "ssrPrevProj", g.prevP00, g.prevP11 );
 		prog->uni1i( "prevScene", 8 );
 	}
