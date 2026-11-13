@@ -12,6 +12,7 @@
 // carries the app's R,R,R,1 through its own view, red `swz` (objTexHandle red 2: that view dropped) must FAIL.
 // Every mode: the bl twins' pipelines (vkobjpipe.inc, `BLVIEW pipe` lines); reds shift / table / varying / attr must FAIL.
 // Then the mirrored state (blview_uni.inc) and the class pools' twins (blview_pool.inc); their reds must FAIL too.
+// Then one class's multi-draw through the cellbl twin against GL's (blview_shade.inc, its own bar; reds base / inst / cull).
 // Fixture: 12 textures (RGBA8 / RGBA16F / RGBA32F, 8..128 px, mips or not) with 12 GL sampler states (filters, wraps,
 // border, LOD bias / clamps, anisotropy 4); 128 rows of 8 handles; 128 cells of 24 x 24 px (384 x 192 RGBA32F), cell % 8
 // = the slot and the op (Sample, SampleBias 1.25, SampleLevel 1.5, SampleGrad, Sample, SampleLevel 0, SampleBias -0.75,
@@ -604,6 +605,7 @@ bool pipeGate( const std::string & spvDir )
 
 #include "blview_uni.inc"  // lane VKOBJ4 slice 5: GL's state mirrored into set 0 (`BLVIEW uni` lines)
 #include "blview_pool.inc" // lane VKOBJ4 slice 6: the class pools as vertex buffers (`BLVIEW pool` lines)
+#include "blview_shade.inc" // lane VKOBJ4 slice 7: the multi-draw through the cellbl twin (`BLVIEW shade` lines)
 }  // namespace blv
 
 int main( int argc, char ** argv )
@@ -898,6 +900,7 @@ int main( int argc, char ** argv )
 		return 2;
 	}
 	ok = poolGate( spvDir ) && ok;  // lane VKOBJ4: the class pools' twins (gv's command buffer and semaphores)
+	ok = shadeGate( spvDir ) && ok; // lane VKOBJ4: the class's multi-draw through the cellbl twin against GL
 	std::vector<GLuint> crossing = texs;
 	crossing.push_back( GLuint( target ) );
 	std::size_t bcRowsWhole = 0, bcRows = 0;  // lane VKOBJ3: objTexRows over the frames' rows (the census the app line prints)

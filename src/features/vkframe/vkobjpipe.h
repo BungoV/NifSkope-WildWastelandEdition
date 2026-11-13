@@ -8,8 +8,9 @@
  * declare differently, a set 1 that is not the table, a varying the vertex stage does not write, a target count the pixel
  * stage does not write, a vertex input no attribute feeds. Attributes are given by GL's attribute location (the HLSL twin's
  * TEXCOORDn); DXC numbers the inputs on its own (fo4_defaultbl_vs: TEXCOORD9 is Location 8), so the semantic maps them.
- * Not drawn yet: the mirrored uniforms, the pools as vertex buffers, MDI and the crossing are the next slices.
- * Gate: tests/vkframe/blview.sh (the `BLVIEW pipe` lines; reds shift / table / varying / attr must FAIL). */
+ * Slices 5-7 below: GL's uniforms mirrored, the class pools as vertex buffers, the multi-draw. Not wired yet: the crossing
+ * at objRun, the lights / CSM / fog targets.
+ * Gate: tests/vkframe/blview.sh (the `BLVIEW pipe` / `uni` / `pool` / `shade` lines; their reds must FAIL). */
 
 #include "features/vkframe/vkpresent.h"
 
@@ -35,6 +36,7 @@ struct SpvBind
 	std::uint32_t stages = 0;                                 //!< VkShaderStageFlags
 	std::string name;                                         //!< the block's name for a buffer, else the variable's
 	std::uint32_t dim = 0, arrayed = 0;                       //!< an image's SPIR-V Dim (0 1D, 1 2D, 2 3D, 3 cube, 5 buffer)
+	std::uint32_t sampled = 0;                                //!< an image's element: 0 float, 1 int, 2 uint
 	std::vector<SpvMember> members;                           //!< a uniform block's members
 	std::uint32_t bytes = 0;                                  //!< a uniform block's size (the last member's end, to 16)
 };
@@ -135,4 +137,43 @@ bool objBlPoolCopy( std::uintptr_t key, const ObjBlPool & p, std::vector<unsigne
 void objBlPoolDrop( std::uintptr_t key );
 //! the twins held (and their bytes)
 int objBlPoolCount( std::size_t * bytes = nullptr );
+
+/* Slice 7 (the draw): one class's multi-draw through twin `twin`'s pipeline into shared targets (sharedTarget keys), GL's
+ * state in set 0, the table as set 1, GL's DrawElementsIndirectCommand array as Vulkan's (the same 20 bytes: count,
+ * instances, first index, base vertex, base instance; the row = wwDrawBase + base instance, BaseInstance). A set-0 image
+ * not given reads a 1x1 (0,0,0,1) of its shape (GL's incomplete texture), a texel buffer not given one zero texel, a
+ * sampler not given the table's default. Prep runs on GL's thread before the run's signal; the record is the worker's. */
+struct ObjBlDraw
+{
+	int twin = 0;
+	const std::uint32_t * vs = nullptr, * ps = nullptr;
+	std::size_t vsWords = 0, psWords = 0;
+	ObjBlTarget target;
+	std::uintptr_t colorKeys[4] = {}, depthKey = 0;
+	int w = 0, h = 0;
+	std::uintptr_t poolKey = 0;  //!< the class objBlPoolCopy filled
+	std::uint64_t attrMask = 0;
+	std::uint32_t need = 0;      //!< the GL locations the vertex stage reads (bit L)
+	std::vector<std::pair<std::uint32_t, std::vector<std::uint8_t>>> ubos;  //!< binding -> bytes (objBlMirror)
+	std::vector<std::pair<std::uint32_t, std::uintptr_t>> images;          //!< binding -> a shared target
+	const void * glRows = nullptr;  //!< GL's draw rows (the bindless ring, GL form), translated into wwDraws
+	std::size_t rows = 0;
+	const void * cmds = nullptr;    //!< GL's indirect commands
+	std::size_t cmdCount = 0;
+};
+struct ObjBlDrawStat
+{
+	int ubos = 0, images = 0, standIns = 0, texels = 0, samplers = 0, rowBuffers = 0;
+	std::size_t whole = 0;  //!< rows with every handle known
+};
+//! GL program `prog`'s state for both modules' uniform blocks (LooseUniforms by objBlLoose, the named blocks by objBlBlock)
+bool objBlMirror( GlProc gp, unsigned prog, const std::uint32_t * vs, std::size_t vsWords, const std::uint32_t * ps, std::size_t psWords,
+	std::vector<std::pair<std::uint32_t, std::vector<std::uint8_t>>> & ubos, ObjBlUniStat & st, std::string & why );
+//! a frame's start: no draws prepared, no rows (the slots' allocations stay for the next prep)
+void objBlDrawsReset();
+/*! one more draw ready to record (the worker's objBlDrawRecord, in prep order): the pipeline (objBlPipe from the class's
+ * layout), its own set 0 written, the rows (this draw's glRows, else the frame's so far) and commands on the device, the
+ * framebuffer of the targets. The host buffers are rewritten: the slot's last submit must be done. false with a reason
+ * (nothing added) */
+bool objBlDrawPrep( const ObjBlDraw & d, ObjBlDrawStat & st, std::string & why );
 }  // namespace WwVkPresent

@@ -60,6 +60,32 @@ struct OpEntry
 	VkPipelineLayout layout = VK_NULL_HANDLE;
 	VkRenderPass pass = VK_NULL_HANDLE;
 	VkPipeline pipe = VK_NULL_HANDLE;
+	std::vector<WwVkPresent::SpvBind> set0;  // both stages' set-0 bindings (stages merged)
+};
+
+// one prepared draw (slice 7): its pipeline, set 0 (own pool), a host buffer per uniform block, the commands (on the device
+// and a host copy for the direct route), the framebuffer of its targets
+struct OpDraw
+{
+	std::size_t entry = 0;
+	VkDescriptorPool dpool = VK_NULL_HANDLE;
+	VkDescriptorSet dset = VK_NULL_HANDLE;
+	std::map<std::uint32_t, CsmBuf> ubo;
+	CsmBuf cmds;
+	std::vector<std::uint8_t> host;
+	std::size_t cmdCount = 0;
+	std::uintptr_t poolKey = 0;
+	VkFramebuffer fb = VK_NULL_HANDLE;
+	std::vector<VkImageView> fbViews;
+	int w = 0, h = 0;
+};
+
+// a set-0 image no one gives: a 1x1 (0,0,0,1) of its shape and element type (GL's incomplete texture)
+struct OpStandIn
+{
+	VkImage img = VK_NULL_HANDLE;
+	VkDeviceMemory mem = VK_NULL_HANDLE;
+	VkImageView view = VK_NULL_HANDLE;
 };
 
 // a class pool's twins: one exported buffer per attribute, the indices (GL imports each: the copy target)
@@ -76,6 +102,16 @@ struct Op
 	int refused = 0;
 	std::map<std::uintptr_t, OpPool> pools;
 	CsmBuf constVb;  // GL's generic attribute default (0,0,0,1) for the locations a class does not carry (host-visible)
+	// the draws (slice 7): the frame's rows (wwDraws), the prepared draws (`live` of them this frame), the stand-ins
+	CsmBuf rows;
+	std::size_t rowCount = 0;
+	std::vector<OpDraw> draws;
+	std::size_t live = 0;
+	std::map<std::uint32_t, OpStandIn> stand;  // key: view type * 4 + element type
+	CsmBuf zeroTexel;
+	VkBufferView texelView[3] = {};             // float / int / uint
+	VkCommandBuffer cmd = VK_NULL_HANDLE;
+	VkFence fence = VK_NULL_HANDLE;
 };
 
 Op & opS()
@@ -118,6 +154,19 @@ void opDestroy( OpEntry & e )
 	e.layout = VK_NULL_HANDLE;
 	e.dsl0 = VK_NULL_HANDLE;
 	e.pass = VK_NULL_HANDLE;
+}
+
+void opDrawFree( OpDraw & d )
+{
+	Vk & v = vk();
+	if ( d.fb )
+		v.vkDestroyFramebuffer( v.dev, d.fb, nullptr );
+	if ( d.dpool )
+		v.vkDestroyDescriptorPool( v.dev, d.dpool, nullptr );
+	for ( auto & u : d.ubo )
+		csmBufFree( u.second, false );
+	csmBufFree( d.cmds, false );
+	d = OpDraw();
 }
 
 const char * opStage( std::uint32_t s )
@@ -202,7 +251,7 @@ bool spvReflect( const std::uint32_t * w, std::size_t n, SpvModule & out, std::s
 		case 21: if ( wc >= 4 ) types[a[0]] = { op, a[1], a[2] }; break;            // OpTypeInt: width, signed
 		case 22: if ( wc >= 3 ) types[a[0]] = { op, a[1] }; break;                  // OpTypeFloat
 		case 23: case 24: if ( wc >= 4 ) types[a[0]] = { op, a[1], a[2] }; break;  // OpTypeVector / Matrix: element, count
-		case 25: if ( wc >= 9 ) types[a[0]] = { op, a[2], a[6], a[4] }; break;      // OpTypeImage: dim, sampled, arrayed
+		case 25: if ( wc >= 9 ) types[a[0]] = { op, a[2], a[6], a[4], a[1] }; break;  // OpTypeImage: dim, sampled, arrayed, element
 		case 26: types[a[0]] = { op }; break;                                       // OpTypeSampler
 		case 27: if ( wc >= 3 ) types[a[0]] = { op, a[1] }; break;                  // OpTypeSampledImage
 		case 28: if ( wc >= 4 ) types[a[0]] = { op, a[1], a[2] }; break;            // OpTypeArray: element, length id
@@ -294,11 +343,15 @@ bool spvReflect( const std::uint32_t * w, std::size_t n, SpvModule & out, std::s
 			x = ty( x.a );
 			b.dim = x.a;
 			b.arrayed = x.c;
+			const Ty el = ty( x.d );
+			b.sampled = el.op == 21 ? ( el.b ? 1u : 2u ) : 0u;
 		} else if ( x.op == 25 ) {
 			b.type = x.a == 5 ? ( x.b == 2 ? VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER : VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER )
 				: ( x.b == 2 ? VK_DESCRIPTOR_TYPE_STORAGE_IMAGE : VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE );
 			b.dim = x.a;
 			b.arrayed = x.c;
+			const Ty el = ty( x.d );
+			b.sampled = el.op == 21 ? ( el.b ? 1u : 2u ) : 0u;
 		} else if ( x.op == 26 )
 			b.type = VK_DESCRIPTOR_TYPE_SAMPLER;
 		else if ( x.op == 30 && ( v.storage == 12 || bufferBlock.count( t ) ) )
@@ -480,6 +533,8 @@ bool objBlPipe( int twin, const std::uint32_t * vs, std::size_t vsN, const std::
 		in.psOnly += b.stages == VK_SHADER_STAGE_FRAGMENT_BIT;
 		in.both += b.stages == ( VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT );
 	}
+	for ( const auto & kv : set0 )
+		e.set0.push_back( kv.second );
 	in.set0 = int( lb.size() );
 	in.targets = int( target.colorCount );
 	VkDescriptorSetLayoutCreateInfo lci { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
@@ -723,9 +778,38 @@ int objBlPoolCount( std::size_t * bytes )
 void objBlPipeFree()
 {
 	Op & O = opS();
-	if ( ( !O.made.empty() || !O.pools.empty() ) && vk().ok ) {
+	if ( ( !O.made.empty() || !O.pools.empty() || !O.draws.empty() || !O.stand.empty() || O.zeroTexel.buf || O.fence ) && vk().ok ) {
+		Vk & v = vk();
 		drain();
-		vk().vkDeviceWaitIdle( vk().dev );
+		v.vkDeviceWaitIdle( v.dev );
+		for ( OpDraw & d : O.draws )
+			opDrawFree( d );
+		O.draws.clear();
+		O.live = 0;
+		for ( auto & s : O.stand ) {
+			if ( s.second.view )
+				v.vkDestroyImageView( v.dev, s.second.view, nullptr );
+			if ( s.second.img )
+				v.vkDestroyImage( v.dev, s.second.img, nullptr );
+			if ( s.second.mem )
+				v.vkFreeMemory( v.dev, s.second.mem, nullptr );
+		}
+		O.stand.clear();
+		const auto destroyView = reinterpret_cast<PFN_vkDestroyBufferView>( v.vkGetDeviceProcAddr( v.dev, "vkDestroyBufferView" ) );
+		for ( VkBufferView & bv : O.texelView ) {
+			if ( bv && destroyView )
+				destroyView( v.dev, bv, nullptr );
+			bv = VK_NULL_HANDLE;
+		}
+		csmBufFree( O.zeroTexel, false );
+		csmBufFree( O.rows, false );
+		O.rowCount = 0;
+		if ( O.cmd )
+			v.vkFreeCommandBuffers( v.dev, v.pool, 1, &O.cmd );
+		if ( O.fence )
+			v.vkDestroyFence( v.dev, O.fence, nullptr );
+		O.cmd = VK_NULL_HANDLE;
+		O.fence = VK_NULL_HANDLE;
 		for ( OpEntry & e : O.made )
 			opDestroy( e );
 		for ( auto & p : O.pools ) {
@@ -957,6 +1041,462 @@ bool objBlTextures( GlProc gp, unsigned prog, const SpvModule & m, std::vector<O
 		out.push_back( u );
 	}
 	g.activeTexture( unsigned( active ) );
+	return true;
+}
+}  // namespace WwVkPresent
+
+namespace
+{
+// the 1x1 (0,0,0,1) of an image binding's shape (SPIR-V Dim / Arrayed) and element type, made and cleared once
+bool opStandIn( std::uint32_t dim, std::uint32_t arrayed, std::uint32_t sampled, VkImageView & out, std::string & why )
+{
+	Vk & v = vk();
+	Op & O = opS();
+	VkImageViewType vt = VK_IMAGE_VIEW_TYPE_2D;
+	VkImageType it = VK_IMAGE_TYPE_2D;
+	std::uint32_t layers = 1;
+	VkImageCreateFlags fl = 0;
+	if ( dim == 0 ) {
+		vt = arrayed ? VK_IMAGE_VIEW_TYPE_1D_ARRAY : VK_IMAGE_VIEW_TYPE_1D;
+		it = VK_IMAGE_TYPE_1D;
+	} else if ( dim == 1 )
+		vt = arrayed ? VK_IMAGE_VIEW_TYPE_2D_ARRAY : VK_IMAGE_VIEW_TYPE_2D;
+	else if ( dim == 2 && !arrayed ) {
+		vt = VK_IMAGE_VIEW_TYPE_3D;
+		it = VK_IMAGE_TYPE_3D;
+	} else if ( dim == 3 ) {
+		vt = arrayed ? VK_IMAGE_VIEW_TYPE_CUBE_ARRAY : VK_IMAGE_VIEW_TYPE_CUBE;
+		layers = 6;
+		fl = VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT;
+	} else
+		return why = "an image of Dim " + std::to_string( dim ) + ( arrayed ? " (arrayed)" : "" ) + " has no stand-in", false;
+	if ( sampled > 2 )
+		return why = "an image element the stand-ins do not take", false;
+	const std::uint32_t key = std::uint32_t( vt ) * 4 + sampled;
+	const auto found = O.stand.find( key );
+	if ( found != O.stand.end() ) {
+		out = found->second.view;
+		return true;
+	}
+	const VkFormat fmt = sampled == 1 ? VK_FORMAT_R32G32B32A32_SINT : sampled == 2 ? VK_FORMAT_R32G32B32A32_UINT : VK_FORMAT_R8G8B8A8_UNORM;
+	OpStandIn s;
+	VkImageCreateInfo ci { VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO };
+	ci.flags = fl;
+	ci.imageType = it;
+	ci.format = fmt;
+	ci.extent = { 1, 1, 1 };
+	ci.mipLevels = 1;
+	ci.arrayLayers = layers;
+	ci.samples = VK_SAMPLE_COUNT_1_BIT;
+	ci.tiling = VK_IMAGE_TILING_OPTIMAL;
+	ci.usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+	auto fail = [&]( const char * r ) {
+		if ( s.view )
+			v.vkDestroyImageView( v.dev, s.view, nullptr );
+		if ( s.img )
+			v.vkDestroyImage( v.dev, s.img, nullptr );
+		if ( s.mem )
+			v.vkFreeMemory( v.dev, s.mem, nullptr );
+		why = r;
+		return false;
+	};
+	if ( v.vkCreateImage( v.dev, &ci, nullptr, &s.img ) != VK_SUCCESS )
+		return fail( "a stand-in image failed" );
+	VkMemoryRequirements r;
+	v.vkGetImageMemoryRequirements( v.dev, s.img, &r );
+	VkMemoryAllocateInfo ai { VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO };
+	ai.allocationSize = r.size;
+	ai.memoryTypeIndex = memType( r.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT );
+	if ( ai.memoryTypeIndex == UINT32_MAX || v.vkAllocateMemory( v.dev, &ai, nullptr, &s.mem ) != VK_SUCCESS
+		|| v.vkBindImageMemory( v.dev, s.img, s.mem, 0 ) != VK_SUCCESS )
+		return fail( "a stand-in image's memory failed" );
+	VkImageViewCreateInfo vci { VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO };
+	vci.image = s.img;
+	vci.viewType = vt;
+	vci.format = fmt;
+	vci.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, layers };
+	if ( v.vkCreateImageView( v.dev, &vci, nullptr, &s.view ) != VK_SUCCESS )
+		return fail( "a stand-in image's view failed" );
+	if ( !O.fence ) {
+		VkFenceCreateInfo fi { VK_STRUCTURE_TYPE_FENCE_CREATE_INFO };
+		VkCommandBufferAllocateInfo cai { VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO };
+		cai.commandPool = v.pool;
+		cai.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+		cai.commandBufferCount = 1;
+		if ( v.vkCreateFence( v.dev, &fi, nullptr, &O.fence ) != VK_SUCCESS || v.vkAllocateCommandBuffers( v.dev, &cai, &O.cmd ) != VK_SUCCESS )
+			return fail( "the stand-ins' command buffer failed" );
+	}
+	drain();  // the queue is the worker's
+	v.vkResetCommandBuffer( O.cmd, 0 );
+	VkCommandBufferBeginInfo bi { VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
+	bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+	v.vkBeginCommandBuffer( O.cmd, &bi );
+	VkImageMemoryBarrier ib { VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER };
+	ib.srcQueueFamilyIndex = ib.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+	ib.image = s.img;
+	ib.subresourceRange = vci.subresourceRange;
+	ib.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+	ib.newLayout = VK_IMAGE_LAYOUT_GENERAL;
+	ib.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+	v.vkCmdPipelineBarrier( O.cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1, &ib );
+	VkClearColorValue one {};
+	if ( sampled )
+		one.uint32[3] = 1u;
+	else
+		one.float32[3] = 1.0f;
+	v.vkCmdClearColorImage( O.cmd, s.img, VK_IMAGE_LAYOUT_GENERAL, &one, 1, &ib.subresourceRange );
+	ib.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
+	ib.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+	ib.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+	v.vkCmdPipelineBarrier( O.cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 0, nullptr, 0, nullptr, 1, &ib );
+	if ( v.vkEndCommandBuffer( O.cmd ) != VK_SUCCESS || !oneShot( O.cmd, O.fence ) )
+		return fail( "a stand-in image's clear failed" );
+	O.stand[key] = s;
+	out = s.view;
+	return true;
+}
+
+// one zero texel of the element type (GL: a buffer texture with no buffer reads 0)
+bool opZeroTexel( std::uint32_t sampled, VkBufferView & out, std::string & why )
+{
+	Vk & v = vk();
+	Op & O = opS();
+	if ( sampled > 2 )
+		return why = "a texel buffer element the stand-ins do not take", false;
+	if ( !O.zeroTexel.buf ) {
+		if ( !csmBuf( O.zeroTexel, 16, false, VK_BUFFER_USAGE_UNIFORM_TEXEL_BUFFER_BIT, why ) )
+			return false;
+		std::memset( O.zeroTexel.ptr, 0, 16 );
+	}
+	if ( !O.texelView[sampled] ) {
+		const auto create = reinterpret_cast<PFN_vkCreateBufferView>( v.vkGetDeviceProcAddr( v.dev, "vkCreateBufferView" ) );
+		VkBufferViewCreateInfo ci { VK_STRUCTURE_TYPE_BUFFER_VIEW_CREATE_INFO };
+		ci.buffer = O.zeroTexel.buf;
+		ci.format = sampled == 1 ? VK_FORMAT_R32G32B32A32_SINT : sampled == 2 ? VK_FORMAT_R32G32B32A32_UINT : VK_FORMAT_R32G32B32A32_SFLOAT;
+		ci.range = 16;
+		if ( !create || create( v.dev, &ci, nullptr, &O.texelView[sampled] ) != VK_SUCCESS )
+			return why = "the zero texel's view failed", false;
+	}
+	out = O.texelView[sampled];
+	return true;
+}
+
+// a host buffer at least `need` bytes (growing: the device idle first, the old one may still be read)
+bool opHostBuf( CsmBuf & b, std::size_t need, VkBufferUsageFlags usage, std::string & why )
+{
+	if ( b.buf && b.cap < VkDeviceSize( need ) ) {
+		drain();
+		vk().vkDeviceWaitIdle( vk().dev );
+	}
+	return csmBuf( b, VkDeviceSize( std::max<std::size_t>( need, 16 ) ), false, usage, why );
+}
+
+/* the prepared draws into cmd (the worker's, inside its submit after GL's signal): per draw its render pass on the
+ * targets (LOAD / STORE), the pipeline, {set 0, the table}, the class's twins, its commands. mode 0: one
+ * vkCmdDrawIndexedIndirect for up to 65535 commands (multiDrawIndirect), 1: one indirect per command, 2: direct draws from
+ * the host copy. Without drawIndirectFirstInstance every mode draws directly (the base instance is the row). */
+bool objBlDrawRecord( VkCommandBuffer cmd, int mode, std::string & why )
+{
+	Vk & v = vk();
+	Op & O = opS();
+	VkDescriptorSetLayout tdsl = VK_NULL_HANDLE;
+	VkDescriptorSet table = VK_NULL_HANDLE;
+	if ( !blSetGet( tdsl, table, why ) )
+		return false;
+	for ( std::size_t i = 0; i < O.live; i++ ) {
+		const OpDraw & d = O.draws[i];
+		if ( d.entry >= O.made.size() )
+			return why = "a draw's pipeline went", false;
+		const OpEntry & e = O.made[d.entry];
+		VkBuffer vb[17] = {}, ib = VK_NULL_HANDLE;
+		if ( !WwVkPresent::objBlPoolBinds( d.poolKey, vb, ib ) )
+			return why = "a draw's class has no twins", false;
+		// the draw before wrote the same targets: its writes before this pass's tests and writes
+		VkMemoryBarrier mb { VK_STRUCTURE_TYPE_MEMORY_BARRIER };
+		mb.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+		mb.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT
+			| VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+		const VkPipelineStageFlags att = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT
+			| VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
+		if ( i )
+			v.vkCmdPipelineBarrier( cmd, att, att, 0, 1, &mb, 0, nullptr, 0, nullptr );
+		VkRenderPassBeginInfo rbi { VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO };
+		rbi.renderPass = e.pass;
+		rbi.framebuffer = d.fb;
+		rbi.renderArea = { { 0, 0 }, { std::uint32_t( d.w ), std::uint32_t( d.h ) } };
+		v.vkCmdBeginRenderPass( cmd, &rbi, VK_SUBPASS_CONTENTS_INLINE );
+		const VkViewport vp { 0.0f, 0.0f, float( d.w ), float( d.h ), 0.0f, 1.0f };
+		const VkRect2D sc { { 0, 0 }, { std::uint32_t( d.w ), std::uint32_t( d.h ) } };
+		v.vkCmdSetViewport( cmd, 0, 1, &vp );
+		v.vkCmdSetScissor( cmd, 0, 1, &sc );
+		v.vkCmdBindPipeline( cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, e.pipe );
+		const VkDescriptorSet sets[2] = { d.dset, table };
+		v.vkCmdBindDescriptorSets( cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, e.layout, 0, 2, sets, 0, nullptr );
+		for ( const WwVkPresent::ObjBlBuffer & b : e.buffers ) {
+			const VkDeviceSize zero = 0;
+			v.vkCmdBindVertexBuffers( cmd, b.binding, 1, &vb[std::min<std::uint32_t>( b.binding, 16 )], &zero );
+		}
+		v.vkCmdBindIndexBuffer( cmd, ib, 0, VK_INDEX_TYPE_UINT16 );
+		const int m = !v.firstInstance ? 2 : mode == 0 && !v.multiDrawIndirect ? 1 : mode;
+		if ( m == 0 ) {
+			for ( std::size_t at = 0; at < d.cmdCount; at += 65535 )
+				v.vkCmdDrawIndexedIndirect( cmd, d.cmds.buf, VkDeviceSize( at * 20 ), std::uint32_t( std::min<std::size_t>( 65535, d.cmdCount - at ) ), 20 );
+		} else if ( m == 1 ) {
+			for ( std::size_t c = 0; c < d.cmdCount; c++ )
+				v.vkCmdDrawIndexedIndirect( cmd, d.cmds.buf, VkDeviceSize( c * 20 ), 1, 20 );
+		} else {
+			const auto drawIndexed = reinterpret_cast<PFN_vkCmdDrawIndexed>( v.vkGetDeviceProcAddr( v.dev, "vkCmdDrawIndexed" ) );
+			if ( !drawIndexed ) {
+				v.vkCmdEndRenderPass( cmd );
+				return why = "no vkCmdDrawIndexed", false;
+			}
+			for ( std::size_t c = 0; c < d.cmdCount; c++ ) {
+				std::uint32_t k[5];
+				std::memcpy( k, d.host.data() + c * 20, 20 );
+				drawIndexed( cmd, k[0], k[1], k[2], std::int32_t( k[3] ), k[4] );
+			}
+		}
+		v.vkCmdEndRenderPass( cmd );
+	}
+	return true;
+}
+}  // namespace
+
+namespace WwVkPresent
+{
+bool objBlMirror( GlProc gp, unsigned prog, const std::uint32_t * vs, std::size_t vsWords, const std::uint32_t * ps, std::size_t psWords,
+	std::vector<std::pair<std::uint32_t, std::vector<std::uint8_t>>> & ubos, ObjBlUniStat & st, std::string & why )
+{
+	ubos.clear();
+	st = ObjBlUniStat();
+	const std::uint32_t * w[2] = { vs, ps };
+	const std::size_t n[2] = { vsWords, psWords };
+	for ( int s = 0; s < 2; s++ ) {
+		SpvModule m;
+		if ( !spvReflect( w[s], n[s], m, why ) )
+			return false;
+		for ( const SpvBind & b : m.binds ) {
+			if ( b.type != VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER || b.set != 0 )
+				continue;
+			std::vector<std::uint8_t> bytes;
+			if ( b.name == "LooseUniforms" || b.name == "type.LooseUniforms" ) {
+				ObjBlUniStat one;
+				if ( !objBlLoose( gp, prog, b, bytes, one, why ) )
+					return false;
+				st.members += one.members;
+				st.mirrored += one.mirrored;
+				st.absent += one.absent;
+			} else {
+				SpvBind named = b;
+				if ( named.name.compare( 0, 5, "type." ) == 0 )
+					named.name = named.name.substr( 5 );
+				if ( !objBlBlock( gp, prog, named, bytes, why ) )
+					return false;
+			}
+			ubos.emplace_back( b.binding, std::move( bytes ) );
+		}
+	}
+	return true;
+}
+
+void objBlDrawsReset()
+{
+	opS().live = 0;
+	opS().rowCount = 0;
+}
+
+bool objBlDrawPrep( const ObjBlDraw & d, ObjBlDrawStat & st, std::string & why )
+{
+	Vk & v = vk();
+	Op & O = opS();
+	st = ObjBlDrawStat();
+	if ( !v.ok )
+		return why = "no present device", false;
+	if ( !d.cmds || !d.cmdCount || d.w < 1 || d.h < 1 )
+		return why = "no commands or no frame", false;
+	// the pipeline of the class's layout
+	std::vector<ObjBlBuffer> bufs;
+	std::vector<ObjBlAttr> attrs;
+	objBlPoolLayout( d.attrMask, bufs, attrs, d.need );
+	ObjBlPipeInfo info;
+	if ( !objBlPipe( d.twin, d.vs, d.vsWords, d.ps, d.psWords, d.target, bufs, attrs, info, why ) )
+		return false;
+	std::size_t entry = O.made.size();
+	for ( std::size_t i = 0; i < O.made.size(); i++ )
+		if ( opSame( O.made[i], d.twin, d.vs, d.vsWords, d.ps, d.psWords, d.target, bufs, attrs ) )
+			entry = i;
+	if ( entry == O.made.size() )
+		return why = "the pipeline was made but is not found", false;
+	const OpEntry & e = O.made[entry];
+	VkBuffer vb[17] = {}, ib = VK_NULL_HANDLE;
+	if ( !objBlPoolBinds( d.poolKey, vb, ib ) )
+		return why = "the class has no twins (objBlPoolCopy first)", false;
+	// the rows: this draw's, else the frame's so far
+	if ( d.glRows && d.rows ) {
+		if ( !opHostBuf( O.rows, d.rows * kBlRowBytes, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, why ) )
+			return false;
+		st.whole = blTranslate( d.glRows, O.rows.ptr, d.rows, 0 );
+		O.rowCount = d.rows;
+	}
+	if ( !O.rowCount )
+		return why = "no rows (wwDraws) this frame", false;
+	// the slot: a set 0 of this pipeline's layout
+	if ( O.live == O.draws.size() )
+		O.draws.emplace_back();
+	OpDraw & s = O.draws[O.live];
+	if ( s.dpool && s.entry != entry ) {
+		drain();
+		v.vkDeviceWaitIdle( v.dev );
+		opDrawFree( s );
+	}
+	if ( !s.dpool ) {
+		std::map<VkDescriptorType, std::uint32_t> count;
+		for ( const SpvBind & b : e.set0 )
+			count[VkDescriptorType( b.type )] += b.count;
+		std::vector<VkDescriptorPoolSize> sizes;
+		for ( const auto & c : count )
+			sizes.push_back( { c.first, c.second } );
+		VkDescriptorPoolCreateInfo pci { VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO };
+		pci.maxSets = 1;
+		pci.poolSizeCount = std::uint32_t( sizes.size() );
+		pci.pPoolSizes = sizes.data();
+		VkDescriptorSetAllocateInfo ai { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO };
+		ai.descriptorSetCount = 1;
+		ai.pSetLayouts = &e.dsl0;
+		if ( v.vkCreateDescriptorPool( v.dev, &pci, nullptr, &s.dpool ) != VK_SUCCESS
+			|| ( ai.descriptorPool = s.dpool, v.vkAllocateDescriptorSets( v.dev, &ai, &s.dset ) != VK_SUCCESS ) )
+			return why = "the draw's set 0 failed", false;
+		s.entry = entry;
+	}
+	// set 0, binding by binding (the frame's previous submit of this slot is done: the caller's fence)
+	std::string w;
+	BlSmpKey k0;
+	std::uint32_t at0 = 0;
+	if ( !blSamplerKey( BlSampler(), k0, w ) || !blSamplerIndex( k0, at0, w ) )
+		return why = "the default sampler: " + w, false;
+	const VkSampler smp = blS().smps[at0];
+	std::vector<VkWriteDescriptorSet> writes;
+	std::vector<VkDescriptorBufferInfo> bis;
+	std::vector<VkDescriptorImageInfo> iis;
+	std::vector<VkBufferView> tvs;
+	std::size_t total = 0;  // the arrays are reserved whole: the writes point into them
+	for ( const SpvBind & b : e.set0 )
+		total += b.count;
+	bis.reserve( total );
+	iis.reserve( total );
+	tvs.reserve( total );
+	for ( const SpvBind & b : e.set0 ) {
+		VkWriteDescriptorSet wr { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
+		wr.dstSet = s.dset;
+		wr.dstBinding = b.binding;
+		wr.descriptorCount = b.count;
+		wr.descriptorType = VkDescriptorType( b.type );
+		const std::string where = "set 0 binding " + std::to_string( b.binding ) + " (" + b.name + ")";
+		if ( b.type == VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER ) {
+			const std::vector<std::uint8_t> * src = nullptr;
+			for ( const auto & u : d.ubos )
+				if ( u.first == b.binding )
+					src = &u.second;
+			if ( !src )
+				return why = where + ": no state given (objBlMirror)", false;
+			if ( src->size() < b.bytes )
+				return why = where + ": " + std::to_string( src->size() ) + " bytes given, the module reads " + std::to_string( b.bytes ), false;
+			CsmBuf & u = s.ubo[b.binding];
+			if ( !opHostBuf( u, b.bytes, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, why ) )
+				return false;
+			std::memcpy( u.ptr, src->data(), b.bytes );
+			bis.push_back( { u.buf, 0, b.bytes } );
+			wr.pBufferInfo = &bis.back();
+			st.ubos++;
+		} else if ( b.type == VK_DESCRIPTOR_TYPE_STORAGE_BUFFER ) {
+			if ( b.name != "wwDraws" && b.name != "type.StructuredBuffer.WwDraw" )
+				return why = where + ": a storage buffer the draw does not know", false;
+			bis.push_back( { O.rows.buf, 0, VkDeviceSize( O.rowCount * kBlRowBytes ) } );
+			wr.pBufferInfo = &bis.back();
+			st.rowBuffers++;
+		} else if ( b.type == VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE ) {
+			const std::size_t first = iis.size();
+			for ( std::uint32_t a = 0; a < b.count; a++ ) {
+				VkImageView view = VK_NULL_HANDLE;
+				for ( const auto & im : d.images )
+					if ( im.first == b.binding + a ) {
+						const Shared * sh = sharedFind( im.second );
+						if ( !sh )
+							return why = where + ": its shared target is gone", false;
+						view = sh->view;
+						st.images++;
+					}
+				if ( !view ) {
+					if ( !opStandIn( b.dim, b.arrayed, b.sampled, view, w ) )
+						return why = where + ": " + w, false;
+					st.standIns++;
+				}
+				iis.push_back( { VK_NULL_HANDLE, view, VK_IMAGE_LAYOUT_GENERAL } );
+			}
+			wr.pImageInfo = &iis[first];
+		} else if ( b.type == VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER ) {
+			const std::size_t first = tvs.size();
+			for ( std::uint32_t a = 0; a < b.count; a++ ) {
+				VkBufferView tv = VK_NULL_HANDLE;
+				if ( !opZeroTexel( b.sampled, tv, w ) )
+					return why = where + ": " + w, false;
+				tvs.push_back( tv );
+				st.texels++;
+			}
+			wr.pTexelBufferView = &tvs[first];
+		} else if ( b.type == VK_DESCRIPTOR_TYPE_SAMPLER ) {
+			const std::size_t first = iis.size();
+			for ( std::uint32_t a = 0; a < b.count; a++ )
+				iis.push_back( { smp, VK_NULL_HANDLE, VK_IMAGE_LAYOUT_UNDEFINED } );
+			wr.pImageInfo = &iis[first];
+			st.samplers += int( b.count );
+		} else
+			return why = where + ": a descriptor type the draw does not write", false;
+		writes.push_back( wr );
+	}
+	// the commands
+	if ( !opHostBuf( s.cmds, d.cmdCount * 20, VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT, why ) )
+		return false;
+	std::memcpy( s.cmds.ptr, d.cmds, d.cmdCount * 20 );
+	s.host.assign( static_cast<const std::uint8_t *>( d.cmds ), static_cast<const std::uint8_t *>( d.cmds ) + d.cmdCount * 20 );
+	s.cmdCount = d.cmdCount;
+	s.poolKey = d.poolKey;
+	// the framebuffer of the targets (made again when a view or the size changed)
+	std::vector<VkImageView> views;
+	for ( std::uint32_t c = 0; c < d.target.colorCount; c++ ) {
+		const Shared * sh = sharedFind( d.colorKeys[c] );
+		if ( !sh || sh->w < d.w || sh->h < d.h )
+			return why = "colour target " + std::to_string( c ) + ( sh ? " is smaller than the frame" : " is not a shared target" ), false;
+		views.push_back( sh->view );
+	}
+	if ( d.target.depth ) {
+		const Shared * sh = sharedFind( d.depthKey );
+		if ( !sh || sh->w < d.w || sh->h < d.h )
+			return why = std::string( "the depth target " ) + ( sh ? "is smaller than the frame" : "is not a shared target" ), false;
+		views.push_back( sh->view );
+	}
+	if ( s.fb && ( s.fbViews != views || s.w != d.w || s.h != d.h ) ) {
+		drain();
+		v.vkDeviceWaitIdle( v.dev );
+		v.vkDestroyFramebuffer( v.dev, s.fb, nullptr );
+		s.fb = VK_NULL_HANDLE;
+	}
+	if ( !s.fb ) {
+		VkFramebufferCreateInfo fci { VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO };
+		fci.renderPass = e.pass;
+		fci.attachmentCount = std::uint32_t( views.size() );
+		fci.pAttachments = views.data();
+		fci.width = std::uint32_t( d.w );
+		fci.height = std::uint32_t( d.h );
+		fci.layers = 1;
+		if ( v.vkCreateFramebuffer( v.dev, &fci, nullptr, &s.fb ) != VK_SUCCESS )
+			return why = "the draw's framebuffer failed", false;
+		s.fbViews = views;
+	}
+	s.w = d.w;
+	s.h = d.h;
+	v.vkUpdateDescriptorSets( v.dev, std::uint32_t( writes.size() ), writes.data(), 0, nullptr );
+	O.live++;
 	return true;
 }
 }  // namespace WwVkPresent

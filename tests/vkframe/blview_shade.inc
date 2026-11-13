@@ -1,0 +1,477 @@
+/* lane VKOBJ4 slice 7: one class's multi-draw through the fo4_cellbl twins (objBlDrawPrep + objBlDrawRecord) into shared
+ * targets (two RGBA16F + D32F, 256 x 128), against GL drawing the same pool, rows and commands (glMultiDrawElementsIndirect,
+ * gl_BaseInstance, the same wwDrawBase) with a position-only program. Fixture: 64 shapes (a 4 x 4 vertex grid each, 16
+ * verts, 54 u16 indices) in one class pool, the commands in reverse shape order (base vertex, first index and base instance
+ * per command), 5 rows before the shapes' (wwDrawBase 5; those rows scale by 40), half the shapes mirrored (back-facing:
+ * culled on both sides), a perspective projection in globalUniforms.
+ * BAR (stated before the first run, never widened): depth vs GL EXACT, or BOUND with pixels covered on one side only
+ * <= 0.2 % of the covered pixels and |depth difference| <= 2e-6 elsewhere; a run with < 2000 covered pixels FAILS. The
+ * three record routes (MDI, one indirect per command, direct) EXACT to each other in all three targets.
+ * Reds (each must FAIL against GL): base (wwDrawBase 0 in the Vulkan state), inst (every base instance 0), cull (twoSided).
+ * Included inside namespace blv after blview_pool.inc (it borrows gv's command buffer, fence and semaphores). */
+
+struct ShadeFns
+{
+	void( WINAPI * vertexAttribPointer )( GLuint, GLint, GLenum, GLboolean, GLsizei, const void * ) = nullptr;
+	void( WINAPI * enableVertexAttribArray )( GLuint ) = nullptr;
+	void( WINAPI * multiDrawElementsIndirect )( GLenum, GLenum, const void *, GLsizei, GLsizei ) = nullptr;
+	GLint( WINAPI * getUniformLocation )( GLuint, const char * ) = nullptr;
+	void( WINAPI * uniformMatrix4fv )( GLint, GLsizei, GLboolean, const GLfloat * ) = nullptr;
+	void( WINAPI * uniform1ui )( GLint, GLuint ) = nullptr;
+	void( WINAPI * drawBuffers )( GLsizei, const GLenum * ) = nullptr;
+	void( WINAPI * clearBufferfv )( GLenum, GLint, const GLfloat * ) = nullptr;
+};
+ShadeFns sf;
+
+struct ShadeRun
+{
+	int mode = 0;
+};
+ShadeRun shadeRun;
+
+bool shadeWork( std::string & why )
+{
+	Vk & v = vk();
+	v.vkResetFences( v.dev, 1, &gv.fence );
+	v.vkResetCommandBuffer( gv.cmd, 0 );
+	VkCommandBufferBeginInfo bi { VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
+	bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+	v.vkBeginCommandBuffer( gv.cmd, &bi );
+	if ( !objBlDrawRecord( gv.cmd, shadeRun.mode, why ) ) {
+		v.vkEndCommandBuffer( gv.cmd );
+		return false;
+	}
+	if ( v.vkEndCommandBuffer( gv.cmd ) != VK_SUCCESS )
+		return why = "vkEndCommandBuffer (the shaded draw) failed", false;
+	const VkPipelineStageFlags waitAt = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
+	VkSubmitInfo si { VK_STRUCTURE_TYPE_SUBMIT_INFO };
+	si.waitSemaphoreCount = 1;
+	si.pWaitSemaphores = &gv.glDone;
+	si.pWaitDstStageMask = &waitAt;
+	si.commandBufferCount = 1;
+	si.pCommandBuffers = &gv.cmd;
+	si.signalSemaphoreCount = 1;
+	si.pSignalSemaphores = &gv.vkDone;
+	if ( v.vkQueueSubmit( v.queue, 1, &si, gv.fence ) != VK_SUCCESS )
+		return why = "vkQueueSubmit (the shaded draw) failed", false;
+	if ( v.vkWaitForFences( v.dev, 1, &gv.fence, VK_TRUE, 5000000000ull ) != VK_SUCCESS )
+		return why = "the shaded draw did not finish", false;
+	return true;
+}
+
+struct ShadeFix
+{
+	WwVkPresent::ObjBlPool pool;
+	std::uintptr_t key = 0, c0 = 0, c1 = 0, dk = 0;
+	GLuint t0 = 0, t1 = 0, td = 0, fbo = 0, prog = 0, vao = 0, rowsGl = 0, ind = 0;
+	std::vector<unsigned char> rows;        // GL form
+	std::vector<std::uint32_t> cmds;        // 5 words per command
+	std::vector<std::uint32_t> vs, ps;
+	std::vector<std::pair<std::uint32_t, std::vector<std::uint8_t>>> ubos;
+	std::vector<std::pair<std::size_t, std::uint32_t>> baseAt;  // ubos[i] holds wwDrawBase at this offset
+	float proj[16] = {};
+	std::uint32_t base = 5;
+	int shapes = 64;
+};
+ShadeFix sx;
+constexpr int kSW = 256, kSH = 128;
+
+void shadeClear()
+{
+	f.bindFramebuffer( kFb, sx.fbo );
+	const GLenum dbs[2] = { kColorAtt0, kColorAtt0 + 1 };
+	sf.drawBuffers( 2, dbs );
+	const GLfloat zero[4] = {}, one = 1.0f;
+	glDepthMask( GL_TRUE );
+	glColorMask( GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE );
+	sf.clearBufferfv( 0x1800, 0, zero );  // GL_COLOR
+	sf.clearBufferfv( 0x1800, 1, zero );
+	sf.clearBufferfv( 0x1801, 0, &one );  // GL_DEPTH
+	f.bindFramebuffer( kFb, 0 );
+}
+
+void shadeRead( std::vector<float> & depth, std::vector<std::uint16_t> * c0, std::vector<std::uint16_t> * c1 )
+{
+	depth.assign( std::size_t( kSW ) * kSH, 0.0f );
+	f.getTextureImage( sx.td, 0, 0x1902, 0x1406, GLsizei( depth.size() * 4 ), depth.data() );  // DEPTH_COMPONENT, FLOAT
+	std::vector<std::uint16_t> * cs[2] = { c0, c1 };
+	const GLuint ts[2] = { sx.t0, sx.t1 };
+	for ( int c = 0; c < 2; c++ )
+		if ( cs[c] ) {
+			cs[c]->assign( std::size_t( kSW ) * kSH * 4, 0 );
+			f.getTextureImage( ts[c], 0, 0x1908, kHalf, GLsizei( cs[c]->size() * 2 ), cs[c]->data() );
+		}
+}
+
+// one Vulkan draw: the pool copied, the draw prepared, GL's signal, the worker records + submits, GL waits; the targets read
+bool shadeVk( int mode, int red, std::vector<float> & depth, std::vector<std::uint16_t> & c0, std::vector<std::uint16_t> & c1,
+	WwVkPresent::ObjBlDrawStat & st, std::string & why )
+{
+	using namespace WwVkPresent;
+	Gl & g = gl();
+	shadeClear();
+	std::vector<unsigned> names;
+	if ( !objBlPoolCopy( sx.key, sx.pool, names, why ) )
+		return false;
+	ObjBlDraw d;
+	d.twin = 0;
+	d.vs = sx.vs.data();
+	d.vsWords = sx.vs.size();
+	d.ps = sx.ps.data();
+	d.psWords = sx.ps.size();
+	d.target.colors[0] = d.target.colors[1] = VK_FORMAT_R16G16B16A16_SFLOAT;
+	d.target.colorCount = 2;
+	d.target.depth = VK_FORMAT_D32_SFLOAT;
+	d.target.depthOp = VK_COMPARE_OP_LESS;
+	d.target.depthWrite = true;
+	d.target.twoSided = red == 3;
+	d.colorKeys[0] = sx.c0;
+	d.colorKeys[1] = sx.c1;
+	d.depthKey = sx.dk;
+	d.w = kSW;
+	d.h = kSH;
+	d.poolKey = sx.key;
+	d.attrMask = sx.pool.attrMask;
+	d.need = 0x3EFFu;
+	d.ubos = sx.ubos;
+	if ( red == 1 )  // wwDrawBase 0
+		for ( const auto & at : sx.baseAt )
+			std::memset( d.ubos[at.first].second.data() + at.second, 0, 4 );
+	std::vector<std::uint32_t> cmds = sx.cmds;
+	if ( red == 2 )
+		for ( std::size_t c = 0; c < cmds.size(); c += 5 )
+			cmds[c + 4] = 0;
+	d.glRows = sx.rows.data();
+	d.rows = sx.rows.size() / kBlRowBytes;
+	d.cmds = cmds.data();
+	d.cmdCount = cmds.size() / 5;
+	objBlDrawsReset();
+	if ( !objBlDrawPrep( d, st, why ) )
+		return false;
+	if ( const GLenum e = glGetError(); e != GL_NO_ERROR )
+		return why = "GL error " + std::to_string( e ) + " before the signal", false;
+	const GLuint texs[3] = { sx.t0, sx.t1, sx.td };
+	const GLenum lay[3] = { kLayoutGeneral, kLayoutGeneral, kLayoutGeneral };
+	g.signalSemaphore( gv.glDoneGl, GLuint( names.size() ), names.data(), 3, texs, lay );
+	g.flush();
+	shadeRun.mode = mode;
+	Worker & W = wk();
+	std::uint64_t want = 0;
+	{
+		std::lock_guard<std::mutex> lk( W.m );
+		want = W.toneDone + 1;
+	}
+	Work j;
+	j.k = -1;
+	j.fn = shadeWork;
+	hand( j );
+	bool ok = false;
+	{
+		std::unique_lock<std::mutex> lk( W.m );
+		W.idle.wait( lk, [&W, want]() { return W.toneDone >= want; } );
+		ok = W.toneOk;
+		why = W.toneWhy;
+	}
+	if ( !ok )
+		return false;
+	g.waitSemaphore( gv.vkDoneGl, GLuint( names.size() ), names.data(), 3, texs, lay );
+	shadeRead( depth, &c0, &c1 );
+	glFinish();
+	if ( const GLenum e = glGetError(); e != GL_NO_ERROR )
+		return why = "GL error " + std::to_string( e ) + " at the semaphores", false;
+	return true;
+}
+
+// GL's draw of the same pool, rows and commands: depth only
+bool shadeGl( std::vector<float> & depth, std::string & why )
+{
+	shadeClear();
+	f.bindFramebuffer( kFb, sx.fbo );
+	glViewport( 0, 0, kSW, kSH );
+	glEnable( GL_DEPTH_TEST );
+	glDepthFunc( GL_LESS );
+	glDepthMask( GL_TRUE );
+	glColorMask( GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE );
+	glEnable( GL_CULL_FACE );
+	glCullFace( GL_BACK );
+	glFrontFace( GL_CCW );
+	f.useProgram( sx.prog );
+	sf.uniformMatrix4fv( sf.getUniformLocation( sx.prog, "proj" ), 1, GL_FALSE, sx.proj );
+	sf.uniform1ui( sf.getUniformLocation( sx.prog, "base" ), sx.base );
+	f.bindVertexArray( sx.vao );
+	f.bindBufferBase( kSsbo, 12, sx.rowsGl );
+	f.bindBuffer( 0x8F3F, sx.ind );  // DRAW_INDIRECT_BUFFER
+	sf.multiDrawElementsIndirect( GL_TRIANGLES, GL_UNSIGNED_SHORT, nullptr, GLsizei( sx.cmds.size() / 5 ), 20 );
+	f.bindBuffer( 0x8F3F, 0 );
+	f.bindVertexArray( 0 );
+	f.useProgram( 0 );
+	glDisable( GL_CULL_FACE );
+	glDisable( GL_DEPTH_TEST );
+	glColorMask( GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE );
+	f.bindFramebuffer( kFb, 0 );
+	shadeRead( depth, nullptr, nullptr );
+	glFinish();
+	if ( const GLenum e = glGetError(); e != GL_NO_ERROR )
+		return why = "GL error " + std::to_string( e ) + " in GL's draw", false;
+	return true;
+}
+
+struct DepthCmp
+{
+	std::size_t covered = 0, oneSide = 0, differ = 0;
+	float maxAbs = 0.0f;
+	bool exact() const { return covered >= 2000 && oneSide == 0 && differ == 0; }
+	bool bound() const { return covered >= 2000 && double( oneSide ) <= 0.002 * double( covered ) && maxAbs <= 2e-6f; }
+	const char * word() const { return exact() ? "EXACT" : bound() ? "BOUND" : "FAIL"; }
+};
+
+DepthCmp depthCmp( const std::vector<float> & a, const std::vector<float> & b )
+{
+	DepthCmp c;
+	if ( a.size() != b.size() )
+		return c;
+	for ( std::size_t i = 0; i < a.size(); i++ ) {
+		const bool ca = a[i] < 1.0f, cb = b[i] < 1.0f;
+		if ( !ca && !cb )
+			continue;
+		c.covered++;
+		if ( ca != cb ) {
+			c.oneSide++;
+			continue;
+		}
+		if ( a[i] != b[i] ) {
+			c.differ++;
+			c.maxAbs = std::max( c.maxAbs, std::fabs( a[i] - b[i] ) );
+		}
+	}
+	return c;
+}
+
+// column-major GL mat4 m into a uniform block member at the module's layout (objBlLoose's placement)
+void shadePutMat( std::vector<std::uint8_t> & out, const WwVkPresent::SpvMember & m, const float * glm )
+{
+	for ( std::uint32_t c = 0; c < m.cols; c++ )
+		for ( std::uint32_t r = 0; r < m.comps; r++ ) {
+			const bool across = m.cols > 1 && m.rowMajor;
+			const std::uint32_t at = m.offset + ( across ? r * m.colStride + c * 4 : c * m.colStride + r * 4 );
+			if ( at + 4 <= out.size() )
+				std::memcpy( out.data() + at, &glm[c * 4 + r], 4 );
+		}
+}
+
+bool shadeBuild( const std::string & spvDir, std::string & why )
+{
+	using namespace WwVkPresent;
+	if ( !load( sf.vertexAttribPointer, "glVertexAttribPointer" ) || !load( sf.enableVertexAttribArray, "glEnableVertexAttribArray" )
+		|| !load( sf.multiDrawElementsIndirect, "glMultiDrawElementsIndirect" ) || !load( sf.getUniformLocation, "glGetUniformLocation" )
+		|| !load( sf.uniformMatrix4fv, "glUniformMatrix4fv" ) || !load( sf.uniform1ui, "glUniform1ui" )
+		|| !load( sf.drawBuffers, "glDrawBuffers" ) || !load( sf.clearBufferfv, "glClearBufferfv" ) )
+		return why = "a GL entry point is missing", false;
+	sx.vs = readSpv( spvDir + "/fo4_defaultbl_vs.pipe.spv" );
+	sx.ps = readSpv( spvDir + "/fo4_cellbl_ps.pipe.spv" );
+	if ( sx.vs.empty() || sx.ps.empty() )
+		return why = "no modules", false;
+	static int keys[4];
+	sx.key = reinterpret_cast<std::uintptr_t>( &keys[0] );
+	sx.c0 = reinterpret_cast<std::uintptr_t>( &keys[1] );
+	sx.c1 = reinterpret_cast<std::uintptr_t>( &keys[2] );
+	sx.dk = reinterpret_cast<std::uintptr_t>( &keys[3] );
+	if ( !sharedTarget( sx.c0, 0, kSW, kSH, 1, kRgba16fi, sx.t0, why ) || !sharedTarget( sx.c1, 0, kSW, kSH, 1, kRgba16fi, sx.t1, why )
+		|| !sharedTarget( sx.dk, 0, kSW, kSH, 1, 0x8CAC, sx.td, why ) )
+		return why = "sharedTarget: " + why, false;
+	f.genFramebuffers( 1, &sx.fbo );
+	f.bindFramebuffer( kFb, sx.fbo );
+	f.framebufferTexture2D( kFb, kColorAtt0, GL_TEXTURE_2D, sx.t0, 0 );
+	f.framebufferTexture2D( kFb, kColorAtt0 + 1, GL_TEXTURE_2D, sx.t1, 0 );
+	f.framebufferTexture2D( kFb, 0x8D00, GL_TEXTURE_2D, sx.td, 0 );  // DEPTH_ATTACHMENT
+	const GLenum st = f.checkFramebufferStatus( kFb );
+	f.bindFramebuffer( kFb, 0 );
+	if ( st != kComplete )
+		return why = "the GL framebuffer is not complete", false;
+	// the pool: 64 shapes of 4 x 4 verts over [-1,1]^2 with a bump, position 3, colour 4, normal 3, tangent 3, bitangent 3, uv 2
+	const int nv = 16, ni = 54;
+	sx.pool.attrMask = 3ull | 4ull << 4 | 3ull << 8 | 3ull << 12 | 3ull << 16 | 2ull << 28;
+	sx.pool.verts = std::size_t( sx.shapes * nv );
+	sx.pool.indices = std::size_t( sx.shapes * ni );
+	std::vector<float> a[8];
+	std::vector<std::uint16_t> idx;
+	for ( int s = 0; s < sx.shapes; s++ ) {
+		for ( int y = 0; y < 4; y++ )
+			for ( int x = 0; x < 4; x++ ) {
+				const float px = -1.0f + x * ( 2.0f / 3.0f ), py = -1.0f + y * ( 2.0f / 3.0f );
+				a[0].insert( a[0].end(), { px, py, 0.25f * std::sin( px * 2.1f + py * 1.3f + float( s ) ) } );
+				a[1].insert( a[1].end(), { 1.0f, 1.0f, 1.0f, 1.0f } );
+				a[2].insert( a[2].end(), { 0.0f, 0.0f, 1.0f } );
+				a[3].insert( a[3].end(), { 1.0f, 0.0f, 0.0f } );
+				a[4].insert( a[4].end(), { 0.0f, 1.0f, 0.0f } );
+				a[7].insert( a[7].end(), { px * 0.5f + 0.5f, py * 0.5f + 0.5f } );
+			}
+		for ( int y = 0; y < 3; y++ )
+			for ( int x = 0; x < 3; x++ ) {
+				const std::uint16_t i0 = std::uint16_t( y * 4 + x ), i1 = std::uint16_t( i0 + 1 ), i2 = std::uint16_t( i0 + 4 ), i3 = std::uint16_t( i0 + 5 );
+				idx.insert( idx.end(), { i0, i1, i3, i0, i3, i2 } );  // CCW seen from +z
+			}
+	}
+	constexpr GLenum kCopyWrite = 0x8F37, kStatic = 0x88E4;
+	for ( int i : { 0, 1, 2, 3, 4, 7 } ) {
+		f.genBuffers( 1, &sx.pool.vbo[i] );
+		f.bindBuffer( kCopyWrite, sx.pool.vbo[i] );
+		f.bufferData( kCopyWrite, std::ptrdiff_t( a[i].size() * 4 ), a[i].data(), kStatic );
+	}
+	f.genBuffers( 1, &sx.pool.ebo );
+	f.bindBuffer( kCopyWrite, sx.pool.ebo );
+	f.bufferData( kCopyWrite, std::ptrdiff_t( idx.size() * 2 ), idx.data(), kStatic );
+	f.bindBuffer( kCopyWrite, 0 );
+	// the rows: 5 decoys (scale 40), then one per shape on an 8 x 8 grid at depth 12..30, turned about y, odd ones mirrored
+	const int rowsN = int( sx.base ) + sx.shapes;
+	sx.rows.assign( std::size_t( rowsN ) * kBlRowBytes, 0 );
+	for ( int r = 0; r < rowsN; r++ ) {
+		float m[16] = {};
+		const int s = r - int( sx.base );
+		if ( s < 0 ) {
+			m[0] = m[5] = m[10] = 40.0f;
+			m[15] = 1.0f;
+			m[14] = -20.0f;
+		} else {
+			const float ang = 0.35f * float( s % 7 ) - 1.0f, sc = 1.1f, mir = ( s & 1 ) ? -1.0f : 1.0f;
+			const float tx = ( float( s % 8 ) - 3.5f ) * 3.4f, ty = ( float( s / 8 ) - 3.5f ) * 1.7f, tz = -12.0f - float( ( s * 5 ) % 19 );
+			m[0] = sc * std::cos( ang ) * mir;
+			m[2] = -sc * std::sin( ang ) * mir;
+			m[5] = sc;
+			m[8] = sc * std::sin( ang );
+			m[10] = sc * std::cos( ang );
+			m[12] = tx * ( -tz / 12.0f );
+			m[13] = ty * ( -tz / 12.0f );
+			m[14] = tz;
+			m[15] = 1.0f;
+		}
+		unsigned char * row = sx.rows.data() + std::size_t( r ) * kBlRowBytes;
+		std::memcpy( row, m, 64 );
+		const float nm[12] = { 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0 };
+		std::memcpy( row + 64, nm, 48 );
+	}
+	// the commands, last shape first
+	for ( int c = 0; c < sx.shapes; c++ ) {
+		const int s = sx.shapes - 1 - c;
+		sx.cmds.insert( sx.cmds.end(), { std::uint32_t( ni ), 1u, std::uint32_t( s * ni ), std::uint32_t( s * nv ), std::uint32_t( s ) } );
+	}
+	// a perspective projection (60 degrees, 2:1, near 1, far 100), GL column-major
+	const float fy = 1.0f / std::tan( 0.5235988f ), n = 1.0f, fa = 100.0f;
+	sx.proj[0] = fy / 2.0f;
+	sx.proj[5] = fy;
+	sx.proj[10] = ( fa + n ) / ( n - fa );
+	sx.proj[11] = -1.0f;
+	sx.proj[14] = 2.0f * fa * n / ( n - fa );
+	// the state: every uniform block zero but globalUniforms.projectionMatrix and LooseUniforms.wwDrawBase
+	const std::vector<std::uint32_t> * mods[2] = { &sx.vs, &sx.ps };
+	for ( const std::vector<std::uint32_t> * w : mods ) {
+		SpvModule m;
+		if ( !spvReflect( w->data(), w->size(), m, why ) )
+			return false;
+		for ( const SpvBind & b : m.binds ) {
+			if ( b.type != VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER || b.set != 0 )
+				continue;
+			std::vector<std::uint8_t> bytes( b.bytes, 0 );
+			for ( const SpvMember & mm : b.members ) {
+				if ( b.name.find( "globalUniforms" ) != std::string::npos && mm.name == "projectionMatrix" )
+					shadePutMat( bytes, mm, sx.proj );
+				if ( b.name.find( "LooseUniforms" ) != std::string::npos && mm.name == "wwDrawBase" ) {
+					std::memcpy( bytes.data() + mm.offset, &sx.base, 4 );
+					sx.baseAt.emplace_back( sx.ubos.size(), mm.offset );
+				}
+			}
+			sx.ubos.emplace_back( b.binding, std::move( bytes ) );
+		}
+	}
+	if ( sx.baseAt.empty() )
+		return why = "wwDrawBase is in no LooseUniforms", false;
+	// GL's reference: the positions, the rows as GL binds them (binding 12), the commands as its indirect buffer
+	const std::string glVs = "#version 460 core\nlayout(location = 0) in vec3 pos;\nstruct Row { mat4 mv; vec4 nm[3]; uvec2 tex[8]; };\n"
+		"layout(std430, binding = 12) readonly buffer Rows { Row rows[]; };\nuniform mat4 proj;\nuniform uint base;\n"
+		"void main() { gl_Position = proj * (rows[base + uint(gl_BaseInstance)].mv * vec4(pos, 1.0)); }\n";
+	const std::string glFs = "#version 460 core\nvoid main() {}\n";
+	sx.prog = program( glVs, glFs );
+	if ( !sx.prog )
+		return why = "GL's reference program", false;
+	f.genVertexArrays( 1, &sx.vao );
+	f.bindVertexArray( sx.vao );
+	f.bindBuffer( 0x8892, sx.pool.vbo[0] );  // ARRAY_BUFFER
+	sf.vertexAttribPointer( 0, 3, GL_FLOAT, GL_FALSE, 0, nullptr );
+	sf.enableVertexAttribArray( 0 );
+	f.bindBuffer( 0x8893, sx.pool.ebo );  // ELEMENT_ARRAY_BUFFER (the VAO's)
+	f.bindVertexArray( 0 );
+	f.bindBuffer( 0x8892, 0 );
+	f.genBuffers( 1, &sx.rowsGl );
+	f.bindBuffer( kSsbo, sx.rowsGl );
+	f.bufferData( kSsbo, std::ptrdiff_t( sx.rows.size() ), sx.rows.data(), kStatic );
+	f.bindBuffer( kSsbo, 0 );
+	f.genBuffers( 1, &sx.ind );
+	f.bindBuffer( 0x8F3F, sx.ind );
+	f.bufferData( 0x8F3F, std::ptrdiff_t( sx.cmds.size() * 4 ), sx.cmds.data(), kStatic );
+	f.bindBuffer( 0x8F3F, 0 );
+	if ( const GLenum e = glGetError(); e != GL_NO_ERROR )
+		return why = "GL error " + std::to_string( e ) + " making the fixture", false;
+	return true;
+}
+
+bool shadeGate( const std::string & spvDir )
+{
+	using namespace WwVkPresent;
+	std::string why;
+	if ( !shadeBuild( spvDir, why ) ) {
+		std::printf( "BLVIEW shade FAIL (the fixture: %s)\n", why.c_str() );
+		return false;
+	}
+	std::vector<float> glDepth;
+	if ( !shadeGl( glDepth, why ) ) {
+		std::printf( "BLVIEW shade FAIL (GL's draw: %s)\n", why.c_str() );
+		return false;
+	}
+	bool ok = true;
+	std::vector<float> dep[3];
+	std::vector<std::uint16_t> c0[3], c1[3];
+	const char * routes[3] = { "mdi", "per-command", "direct" };
+	const Vk & v = vk();
+	for ( int m = 0; m < 3; m++ ) {
+		ObjBlDrawStat st;
+		if ( !shadeVk( m, 0, dep[m], c0[m], c1[m], st, why ) ) {
+			std::printf( "BLVIEW shade %s FAIL (%s)\n", routes[m], why.c_str() );
+			ok = false;
+			continue;
+		}
+		const DepthCmp c = depthCmp( dep[m], glDepth );
+		if ( m == 0 )
+			std::printf( "BLVIEW shade set 0: %d ubos, %d images given, %d stand-ins, %d texel buffers, %d samplers, %d row buffers; %zu rows whole; "
+				"device multiDrawIndirect %d, firstInstance %d\n", st.ubos, st.images, st.standIns, st.texels, st.samplers, st.rowBuffers, st.whole,
+				int( v.multiDrawIndirect ), int( v.firstInstance ) );
+		std::printf( "BLVIEW shade %s vs GL depth %s (%zu covered, %zu on one side, %zu differ, max %.3g; %zu commands)\n", routes[m], c.word(),
+			c.covered, c.oneSide, c.differ, double( c.maxAbs ), sx.cmds.size() / 5 );
+		ok = ok && ( c.exact() || c.bound() );
+		if ( m > 0 && !dep[0].empty() ) {
+			const bool same = dep[m] == dep[0] && c0[m] == c0[0] && c1[m] == c1[0];
+			std::size_t lit = 0;
+			for ( std::size_t i = 0; i < c0[0].size(); i++ )
+				lit += c0[0][i] != 0 || c1[0][i] != 0;
+			std::printf( "BLVIEW shade %s vs mdi %s (depth + both targets; %zu target values non-zero)\n", routes[m], same ? "EXACT" : "FAIL", lit );
+			ok = ok && same;
+		}
+	}
+	const char * reds[3] = { "base", "inst", "cull" };
+	const char * redWhy[3] = { "wwDrawBase 0 in the Vulkan state", "every base instance 0", "twoSided: the mirrored shapes drawn" };
+	for ( int r = 1; r <= 3; r++ ) {
+		ObjBlDrawStat st;
+		std::vector<float> d;
+		std::vector<std::uint16_t> a, b;
+		const bool ran = shadeVk( 0, r, d, a, b, st, why );
+		const DepthCmp c = ran ? depthCmp( d, glDepth ) : DepthCmp();
+		const bool fails = !ran || !( c.exact() || c.bound() );
+		std::printf( "BLVIEW RED shade%s %s (%s; %zu on one side, %zu differ%s%s)\n", reds[r - 1], fails ? "FAIL" : c.word(), redWhy[r - 1],
+			c.oneSide, c.differ, ran ? "" : "; ", ran ? "" : why.c_str() );
+		ok = ok && fails;
+	}
+	if ( const GLenum e = glGetError(); e != GL_NO_ERROR ) {
+		std::printf( "BLVIEW shade FAIL (GL error 0x%x left)\n", unsigned( e ) );
+		ok = false;
+	}
+	return ok;
+}
