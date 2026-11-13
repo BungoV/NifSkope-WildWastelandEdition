@@ -36,6 +36,14 @@
 #include "features/vkframe/light_ao_blurf.spv.h"
 #include "features/vkframe/light_contact.spv.h"
 #include "features/vkframe/light_ssgi.spv.h"
+// lane VKLIGHT2: the reflections' stages (ssr_vk.hlsl SSR_LIVE; w = the water look)
+#include "features/vkframe/ssr_view_s1.spv.h"
+#include "features/vkframe/ssr_view_s1w.spv.h"
+#include "features/vkframe/ssr_view_s2.spv.h"
+#include "features/vkframe/ssr_view_s2w.spv.h"
+#include "features/vkframe/ssr_view_s3.spv.h"
+#include "features/vkframe/ssr_view_s4.spv.h"
+#include "features/vkframe/ssr_view_s5.spv.h"
 
 #include <algorithm>
 #include <chrono>
@@ -548,6 +556,7 @@ struct Work
 	bool merge = false; // lane VKPOST2 (k = -1): the deferred tone pass, then the TAA, one crossing (mergeWork)
 	bool sky = false;   // lane VKSKY1 (k = -1): the cell sky into the tone frame (skyWork); shares tone's counters
 	int light = -1;     // lane VKLIGHT1 (k = -1): this LightPass's dispatches (lightWork); shares tone's counters
+	bool ssr = false;   // lane VKLIGHT2 (k = -1): the reflections' stages (ssrWork); shares tone's counters
 };
 
 // round 11: the tone pass's record + submit, on the worker (the queue is the worker's)
@@ -558,6 +567,8 @@ bool skyWork( std::string & why );
 void skyDrop();
 bool lightWork( int pass, std::string & why );
 void lightDrop();
+bool ssrWork( std::string & why );
+void ssrDrop();
 
 struct Worker
 {
@@ -623,10 +634,10 @@ void workerLoop()
 			W.q.pop_front();
 			W.busy = true;
 		}
-		if ( j.tone || j.taa || j.merge || j.sky || j.light >= 0 ) {
+		if ( j.tone || j.taa || j.merge || j.sky || j.ssr || j.light >= 0 ) {
 			std::string why;
 			const bool ok = j.light >= 0 ? lightWork( j.light, why )
-				: j.merge ? mergeWork( why ) : j.sky ? skyWork( why ) : j.taa ? taaWork( why ) : toneWork( why );
+				: j.ssr ? ssrWork( why ) : j.merge ? mergeWork( why ) : j.sky ? skyWork( why ) : j.taa ? taaWork( why ) : toneWork( why );
 			{
 				std::lock_guard<std::mutex> lk( W.m );
 				W.toneDone++;
@@ -3436,6 +3447,7 @@ void shutdown()
 	}
 	lightDrop();  // lane VKLIGHT1: AO / contact / SSGI images, pipelines and semaphores
 	skyDrop();  // lane VKSKY1: the sky's crossing semaphores and framebuffer
+	ssrDrop();  // lane VKLIGHT2: the reflections' crossing semaphores
 }
 
 bool viewBegin( int w, int h, int samples, GlProc gp, std::string & why )
@@ -5578,6 +5590,484 @@ LightStat takeLightStat( int pass )
 	if ( P.broken && s.failWhy.empty() )
 		s.failWhy = P.brokenWhy;
 	P.st = LightStat();
+	return s;
+}
+}  // namespace WwVkPresent
+
+// lane VKLIGHT2: the reflections' full-screen stages (row L4) as compute, their own crossing like the sky's
+namespace
+{
+enum SsrPipe { kSsrS1, kSsrS1w, kSsrS2, kSsrS2w, kSsrS3, kSsrS4, kSsrS5, kSsrPipes };
+struct SsrPc
+{
+	float c[7][4];
+	std::int32_t i[4];
+};
+static_assert( sizeof( SsrPc ) == 128, "ssr_vk.hlsl's LpxJob" );
+struct SsrJob
+{
+	int pipe = 0, set = 0, gx = 0, gy = 0;
+};
+struct Ssr
+{
+	bool made = false, broken = false;
+	std::string brokenWhy;
+	VkSampler linear = VK_NULL_HANDLE, point = VK_NULL_HANDLE;
+	VkDescriptorSetLayout dsl = VK_NULL_HANDLE;
+	VkDescriptorPool dpool = VK_NULL_HANDLE;
+	VkDescriptorSet set[5] = {};  // per dispatch: stage 5, 1, 2, 3, 4
+	VkPipelineLayout layout = VK_NULL_HANDLE;
+	VkPipeline pipe[kSsrPipes] = {};
+	VkBuffer buf = VK_NULL_HANDLE;  // LpxBuf: rows 0..2 ssrPrevRot's GL columns (w ssrPrevT), row 3 (ssrPrevProj, prevOn)
+	VkDeviceMemory bufMem = VK_NULL_HANDLE;
+	float * bufPtr = nullptr;
+	VkSemaphore glDone = VK_NULL_HANDLE, vkDone = VK_NULL_HANDLE;
+	GLuint glDoneGl = 0, vkDoneGl = 0;
+	void * semCtx = nullptr;
+	VkCommandBuffer cmd = VK_NULL_HANDLE;
+	VkFence fence = VK_NULL_HANDLE;
+	bool pending = false;
+	int pipelines = 0;
+	double buildMs = 0.0;
+	SsrPc pc {};
+	SsrJob jobs[5];
+	int nJobs = 0;
+	WwVkPresent::SsrStat st;
+};
+
+Ssr & ssrS()
+{
+	static Ssr s;
+	return s;
+}
+
+// the device-time parts (once): samplers, the set layout (LightBindingsVk.hlsli + binding 10), 5 sets, the layout, the 7
+// pipelines (the tone cache), the table buffer, the command buffer and its fence
+bool ssrStatic( std::string & why )
+{
+	Vk & v = vk();
+	Ssr & S = ssrS();
+	if ( S.made )
+		return true;
+	const double t0 = nowMs();
+	VkSamplerCreateInfo sci { VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO };
+	sci.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
+	sci.addressModeU = sci.addressModeV = sci.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+	sci.maxLod = 0.0f;
+	sci.magFilter = sci.minFilter = VK_FILTER_LINEAR;
+	const bool sOk = v.vkCreateSampler( v.dev, &sci, nullptr, &S.linear ) == VK_SUCCESS;
+	sci.magFilter = sci.minFilter = VK_FILTER_NEAREST;
+	if ( !sOk || v.vkCreateSampler( v.dev, &sci, nullptr, &S.point ) != VK_SUCCESS ) {
+		why = "vkCreateSampler (the reflections) failed";
+		return false;
+	}
+	// 0-4 and 10 sampled, 5 / 6 samplers, 7 the storage target, 9 the table (8 unused by ssr_vk.hlsl)
+	const std::uint32_t num[10] = { 0, 1, 2, 3, 4, 10, 5, 6, 7, 9 };
+	VkDescriptorSetLayoutBinding b[10] = {};
+	for ( int k = 0; k < 10; k++ ) {
+		b[k].binding = num[k];
+		b[k].descriptorType = k < 6 ? VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE : k < 8 ? VK_DESCRIPTOR_TYPE_SAMPLER
+			: k == 8 ? VK_DESCRIPTOR_TYPE_STORAGE_IMAGE : VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+		b[k].descriptorCount = 1;
+		b[k].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+	}
+	VkDescriptorSetLayoutCreateInfo lci { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
+	lci.bindingCount = 10;
+	lci.pBindings = b;
+	VkDescriptorPoolSize ps[4] = { { VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 30 }, { VK_DESCRIPTOR_TYPE_SAMPLER, 10 },
+		{ VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 5 }, { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 5 } };
+	VkDescriptorPoolCreateInfo pci { VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO };
+	pci.maxSets = 5;
+	pci.poolSizeCount = 4;
+	pci.pPoolSizes = ps;
+	if ( v.vkCreateDescriptorSetLayout( v.dev, &lci, nullptr, &S.dsl ) != VK_SUCCESS
+		|| v.vkCreateDescriptorPool( v.dev, &pci, nullptr, &S.dpool ) != VK_SUCCESS ) {
+		why = "the reflections' descriptor set layout / pool failed";
+		return false;
+	}
+	VkDescriptorSetLayout dsls[5] = { S.dsl, S.dsl, S.dsl, S.dsl, S.dsl };
+	VkDescriptorSetAllocateInfo dai { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO };
+	dai.descriptorPool = S.dpool;
+	dai.descriptorSetCount = 5;
+	dai.pSetLayouts = dsls;
+	const VkPushConstantRange pr { VK_SHADER_STAGE_COMPUTE_BIT, 0, std::uint32_t( sizeof( SsrPc ) ) };
+	VkPipelineLayoutCreateInfo plci { VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO };
+	plci.setLayoutCount = 1;
+	plci.pSetLayouts = &S.dsl;
+	plci.pushConstantRangeCount = 1;
+	plci.pPushConstantRanges = &pr;
+	if ( v.vkAllocateDescriptorSets( v.dev, &dai, S.set ) != VK_SUCCESS
+		|| v.vkCreatePipelineLayout( v.dev, &plci, nullptr, &S.layout ) != VK_SUCCESS ) {
+		why = "the reflections' descriptor sets / pipeline layout failed";
+		return false;
+	}
+	struct Code
+	{
+		const std::uint32_t * p;
+		size_t bytes;
+	};
+	const Code code[kSsrPipes] = { { vkframe_ssr_view_s1_spv, sizeof( vkframe_ssr_view_s1_spv ) },
+		{ vkframe_ssr_view_s1w_spv, sizeof( vkframe_ssr_view_s1w_spv ) }, { vkframe_ssr_view_s2_spv, sizeof( vkframe_ssr_view_s2_spv ) },
+		{ vkframe_ssr_view_s2w_spv, sizeof( vkframe_ssr_view_s2w_spv ) }, { vkframe_ssr_view_s3_spv, sizeof( vkframe_ssr_view_s3_spv ) },
+		{ vkframe_ssr_view_s4_spv, sizeof( vkframe_ssr_view_s4_spv ) }, { vkframe_ssr_view_s5_spv, sizeof( vkframe_ssr_view_s5_spv ) } };
+	for ( int k = 0; k < kSsrPipes; k++ ) {
+		VkShaderModuleCreateInfo mci { VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO };
+		mci.codeSize = code[k].bytes;
+		mci.pCode = code[k].p;
+		VkShaderModule m = VK_NULL_HANDLE;
+		if ( v.vkCreateShaderModule( v.dev, &mci, nullptr, &m ) != VK_SUCCESS ) {
+			why = "the reflections' shader module " + std::to_string( k ) + " failed";
+			return false;
+		}
+		VkComputePipelineCreateInfo cp { VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO };
+		cp.stage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+		cp.stage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+		cp.stage.module = m;
+		cp.stage.pName = "main";
+		cp.layout = S.layout;
+		const VkResult r = v.vkCreateComputePipelines( v.dev, tone().cache, 1, &cp, nullptr, &S.pipe[k] );
+		v.vkDestroyShaderModule( v.dev, m, nullptr );
+		if ( r != VK_SUCCESS ) {
+			why = "vkCreateComputePipelines (the reflections, " + std::to_string( k ) + ") failed";
+			return false;
+		}
+		S.pipelines++;
+	}
+	toneCacheSave();
+	VkBufferCreateInfo bci { VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
+	bci.size = 64;
+	bci.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
+	bool mapped = v.vkCreateBuffer( v.dev, &bci, nullptr, &S.buf ) == VK_SUCCESS;
+	if ( mapped ) {
+		VkMemoryRequirements br {};
+		v.vkGetBufferMemoryRequirements( v.dev, S.buf, &br );
+		VkMemoryAllocateInfo ai { VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO };
+		ai.allocationSize = br.size;
+		ai.memoryTypeIndex = memType( br.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT );
+		void * p = nullptr;
+		mapped = ai.memoryTypeIndex != UINT32_MAX && v.vkAllocateMemory( v.dev, &ai, nullptr, &S.bufMem ) == VK_SUCCESS
+			&& v.vkBindBufferMemory( v.dev, S.buf, S.bufMem, 0 ) == VK_SUCCESS
+			&& v.vkMapMemory( v.dev, S.bufMem, 0, VK_WHOLE_SIZE, 0, &p ) == VK_SUCCESS;
+		S.bufPtr = static_cast<float *>( p );
+	}
+	if ( !mapped || !S.bufPtr ) {
+		why = "the reflections' table buffer failed";
+		return false;
+	}
+	VkFenceCreateInfo fi { VK_STRUCTURE_TYPE_FENCE_CREATE_INFO };
+	VkCommandBufferAllocateInfo cai { VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO };
+	cai.commandPool = v.pool;
+	cai.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+	cai.commandBufferCount = 1;
+	if ( v.vkCreateFence( v.dev, &fi, nullptr, &S.fence ) != VK_SUCCESS || v.vkAllocateCommandBuffers( v.dev, &cai, &S.cmd ) != VK_SUCCESS ) {
+		why = "the reflections' fence / command buffer failed";
+		return false;
+	}
+	S.buildMs = nowMs() - t0;
+	S.made = true;
+	return true;
+}
+
+void ssrSemsDrop( bool glAlive )
+{
+	Vk & v = vk();
+	Gl & g = gl();
+	Ssr & S = ssrS();
+	if ( glAlive )
+		for ( GLuint * s : { &S.glDoneGl, &S.vkDoneGl } )
+			if ( *s )
+				g.deleteSemaphores( 1, s );
+	for ( VkSemaphore * s : { &S.glDone, &S.vkDone } )
+		if ( *s )
+			v.vkDestroySemaphore( v.dev, *s, nullptr );
+	S.glDoneGl = S.vkDoneGl = 0;
+	S.glDone = S.vkDone = VK_NULL_HANDLE;
+	S.semCtx = nullptr;
+}
+
+bool ssrSems( std::string & why )
+{
+	Gl & g = gl();
+	Ssr & S = ssrS();
+	if ( S.glDone && S.semCtx == g.ctx )
+		return true;
+	ssrSemsDrop( false );
+	if ( !exportSem( S.glDone, S.glDoneGl, why ) || !exportSem( S.vkDone, S.vkDoneGl, why ) ) {
+		ssrSemsDrop( true );
+		return false;
+	}
+	S.semCtx = g.ctx;
+	return true;
+}
+
+// the worker: the recorded dispatches in GL's order, a compute barrier between each, waiting GL's signal, with the fence
+bool ssrWork( std::string & why )
+{
+	Vk & v = vk();
+	Ssr & S = ssrS();
+	v.vkResetFences( v.dev, 1, &S.fence );
+	v.vkResetCommandBuffer( S.cmd, 0 );
+	VkCommandBufferBeginInfo bi { VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
+	bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+	v.vkBeginCommandBuffer( S.cmd, &bi );
+	v.vkCmdPushConstants( S.cmd, S.layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, std::uint32_t( sizeof( SsrPc ) ), &S.pc );
+	for ( int k = 0; k < S.nJobs; k++ ) {
+		const SsrJob & j = S.jobs[k];
+		if ( k ) {
+			VkMemoryBarrier mb { VK_STRUCTURE_TYPE_MEMORY_BARRIER };
+			mb.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+			mb.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
+			v.vkCmdPipelineBarrier( S.cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 1, &mb, 0,
+				nullptr, 0, nullptr );
+		}
+		v.vkCmdBindPipeline( S.cmd, VK_PIPELINE_BIND_POINT_COMPUTE, S.pipe[j.pipe] );
+		v.vkCmdBindDescriptorSets( S.cmd, VK_PIPELINE_BIND_POINT_COMPUTE, S.layout, 0, 1, &S.set[j.set], 0, nullptr );
+		v.vkCmdDispatch( S.cmd, std::uint32_t( ( j.gx + 7 ) / 8 ), std::uint32_t( ( j.gy + 7 ) / 8 ), 1 );
+	}
+	if ( v.vkEndCommandBuffer( S.cmd ) != VK_SUCCESS ) {
+		why = "vkEndCommandBuffer (the reflections) failed";
+		return false;
+	}
+	const VkPipelineStageFlags waitAt = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
+	VkSubmitInfo si { VK_STRUCTURE_TYPE_SUBMIT_INFO };
+	si.waitSemaphoreCount = 1;
+	si.pWaitSemaphores = &S.glDone;
+	si.pWaitDstStageMask = &waitAt;
+	si.commandBufferCount = 1;
+	si.pCommandBuffers = &S.cmd;
+	si.signalSemaphoreCount = 1;
+	si.pSignalSemaphores = &S.vkDone;
+	const VkResult r = v.vkQueueSubmit( v.queue, 1, &si, S.fence );
+	if ( r != VK_SUCCESS ) {
+		why = "vkQueueSubmit (the reflections) returned " + std::to_string( int( r ) );
+		return false;
+	}
+	return true;
+}
+
+// shutdown: the crossing's semaphores (GL's names); the pipelines stay with the device
+void ssrDrop()
+{
+	Ssr & S = ssrS();
+	if ( !S.glDone && !S.pending )
+		return;
+	drain();
+	vk().vkDeviceWaitIdle( vk().dev );
+	S.pending = false;
+	ssrSemsDrop( gl().ok && S.semCtx == gl().ctx );
+}
+}  // namespace
+
+namespace WwVkPresent
+{
+bool ssrRun( const SsrRun & t, std::string & why )
+{
+	Ssr & S = ssrS();
+	Gl & g = gl();
+	Vk & v = vk();
+	const double t0 = nowMs();
+	auto refuse = [&]( const std::string & w ) {
+		why = w;
+		S.st.fails++;
+		S.st.failWhy = w;
+		return false;
+	};
+	auto breakOff = [&]( const std::string & w ) {
+		S.broken = true;
+		S.brokenWhy = "the reflections on Vulkan broke: " + w;
+		return refuse( S.brokenWhy );
+	};
+	if ( S.broken )
+		return refuse( S.brokenWhy );
+	if ( !v.ok || !g.ok || g.ctx != reinterpret_cast<void *>( wglGetCurrentContext() ) )
+		return refuse( "the present device or GL's entry points are not ready in this context" );
+	if ( !t.stage5 && !t.march )
+		return refuse( "no stage asked" );
+	if ( t.W < 1 || t.H < 1 || t.hw != ( t.W + 1 ) / 2 || t.hh != ( t.H + 1 ) / 2 )
+		return refuse( "the pass's sizes" );
+	if ( !g.copyImageSubData )
+		return refuse( "no glCopyImageSubData (the inputs' copies into their twins)" );
+	if ( !t.gbuf || ( t.prevOn && !t.prev ) || ( t.march && ( !t.mip[1] || !t.mip[2] || !t.mip[3] || !t.mip[4] ) ) )
+		return refuse( "an input texture is missing" );
+	if ( t.prevOn && t.prevFmt != kRgba16f && t.prevFmt != kRgba32f )
+		return refuse( "the previous frame's format " + std::to_string( t.prevFmt ) + " has no twin" );
+	if ( S.pending ) {
+		v.vkWaitForFences( v.dev, 1, &S.fence, VK_TRUE, 1000000000ull );
+		S.pending = false;
+	}
+	std::string w;
+	if ( !ssrStatic( w ) || !ssrSems( w ) )
+		return breakOff( w );
+	// the shared targets the caller made (sharedTarget) and the twins of GL's inputs
+	auto viewOf = [&]( std::uintptr_t key, unsigned tex ) -> VkImageView {
+		const Shared * s = sharedFind( key );
+		return s && tex && s->tex == tex ? s->view : VK_NULL_HANDLE;
+	};
+	const VkImageView vScene = viewOf( t.sceneKey, t.scene );
+	if ( !vScene )
+		return refuse( "the scene target is not shared" );
+	VkImageView vRay = VK_NULL_HANDLE, vRaw = VK_NULL_HANDLE, vAcross = VK_NULL_HANDLE, vFin = VK_NULL_HANDLE;
+	if ( t.march ) {
+		vRay = viewOf( t.rayKey, t.ray );
+		vRaw = viewOf( t.rawKey, t.raw );
+		vAcross = viewOf( t.acrossKey, t.across );
+		vFin = viewOf( t.finKey, t.fin );
+		if ( !vRay || !vRaw || !vAcross || !vFin )
+			return refuse( "a half-size target is not shared" );
+	}
+	const VkImageView vWray = t.haveWater ? viewOf( t.wrayKey, t.wray ) : VK_NULL_HANDLE;
+	if ( t.haveWater && !vWray )
+		return refuse( "the water's ray target is not shared" );
+	GLuint gbufTw = 0, atlasTw = 0, prevTw = 0;
+	if ( !sharedTarget( t.gbufKey, 0, t.W, t.H, 1, kRgba32f, gbufTw, w ) )
+		return refuse( "the g-buffer's twin: " + w );
+	int atlasW = 0, off[4] = {};
+	if ( t.march ) {
+		for ( int m = 1; m < 5; m++ ) {
+			off[m - 1] = atlasW;
+			atlasW += t.mipW[m];
+		}
+		if ( atlasW < 1 || t.mipH[1] < 1 || !sharedTarget( t.atlasKey, 0, atlasW, t.mipH[1], 1, kGlR32f, atlasTw, w ) )
+			return refuse( "the depth mips' atlas: " + w );
+	}
+	if ( t.prevOn && !sharedTarget( t.prevKey, 0, t.W, t.H, 1, t.prevFmt, prevTw, w ) )
+		return refuse( "the previous frame's twin: " + w );
+	const VkImageView vGbuf = viewOf( t.gbufKey, gbufTw );
+	const VkImageView vAtlas = t.march ? viewOf( t.atlasKey, atlasTw ) : vGbuf;
+	const VkImageView vPrev = t.prevOn ? viewOf( t.prevKey, prevTw ) : vGbuf;
+	if ( !vGbuf || !vAtlas || !vPrev )
+		return refuse( "a twin has no view" );
+	g.copyImageSubData( t.gbuf, kTexture2D, 0, 0, 0, 0, gbufTw, kTexture2D, 0, 0, 0, 0, t.W, t.H, 1 );
+	if ( t.march )
+		for ( int m = 1; m < 5; m++ )
+			g.copyImageSubData( t.mip[m], kTexture2D, 0, 0, 0, 0, atlasTw, kTexture2D, 0, off[m - 1], 0, 0, t.mipW[m], t.mipH[m], 1 );
+	if ( t.prevOn )
+		g.copyImageSubData( t.prev, kTexture2D, 0, 0, 0, 0, prevTw, kTexture2D, 0, 0, 0, 0, t.W, t.H, 1 );
+	// the push block and the table (the fence above: the GPU no longer reads either)
+	std::memcpy( S.pc.c, t.c, sizeof( t.c ) );
+	for ( int m = 0; m < 4; m++ )
+		S.pc.c[6][m] = float( off[m] + ( ( t.red & 1 ) ? 1 : 0 ) );
+	for ( int k = 0; k < 4; k++ )
+		S.pc.i[k] = t.i[k];
+	const bool untransposed = ( t.red & 2 ) != 0;
+	for ( int k = 0; k < 3; k++ ) {
+		for ( int c = 0; c < 3; c++ )
+			S.bufPtr[k * 4 + c] = untransposed ? t.prevM[k * 3 + c] : t.prevM[c * 3 + k];
+		S.bufPtr[k * 4 + 3] = t.prevT[k];
+	}
+	S.bufPtr[12] = t.prevProj[0];
+	S.bufPtr[13] = t.prevProj[1];
+	S.bufPtr[14] = t.prevOn ? 1.0f : 0.0f;
+	S.bufPtr[15] = 0.0f;
+	// the sets: stage 5 / 1 / 2 / 3 / 4; T3 the stage before (stage 5 and 1: a dummy), an absent input the g-buffer's view
+	const VkImageView src[5] = { vGbuf, vGbuf, vRay, vRaw, vAcross };
+	const VkImageView out[5] = { vScene, vRay, vRaw, vAcross, vFin };
+	VkDescriptorImageInfo ii[5][9] = {};
+	VkDescriptorBufferInfo bi { S.buf, 0, 64 };
+	VkWriteDescriptorSet ws[5 * 10] = {};
+	int nw = 0;
+	for ( int s = 0; s < 5; s++ ) {
+		if ( !out[s] )
+			continue;
+		const VkImageView sampled[6] = { vGbuf, vAtlas, vScene, src[s], vWray ? vWray : vGbuf, vPrev };
+		const std::uint32_t num[6] = { 0, 1, 2, 3, 4, 10 };
+		for ( int k = 0; k < 9; k++ ) {
+			VkWriteDescriptorSet & x = ws[nw++];
+			x.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+			x.dstSet = S.set[s];
+			x.descriptorCount = 1;
+			x.pImageInfo = &ii[s][k];
+			ii[s][k].imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+			if ( k < 6 ) {
+				x.dstBinding = num[k];
+				x.descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+				ii[s][k].imageView = sampled[k];
+			} else if ( k < 8 ) {
+				x.dstBinding = std::uint32_t( k - 1 );
+				x.descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER;
+				ii[s][k].sampler = k == 6 ? S.linear : S.point;
+			} else {
+				x.dstBinding = 7;
+				x.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+				ii[s][k].imageView = out[s];
+			}
+		}
+		VkWriteDescriptorSet & x = ws[nw++];
+		x.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+		x.dstSet = S.set[s];
+		x.dstBinding = 9;
+		x.descriptorCount = 1;
+		x.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+		x.pBufferInfo = &bi;
+	}
+	v.vkUpdateDescriptorSets( v.dev, std::uint32_t( nw ), ws, 0, nullptr );
+	// GL's order: stage 5 (the bounce's donor, full size), then 1-4 at half size
+	const bool look = t.waterLook && !( t.red & 4 );
+	S.nJobs = 0;
+	if ( t.stage5 && !( t.red & 8 ) )
+		S.jobs[S.nJobs++] = { kSsrS5, 0, t.W, t.H };
+	if ( t.march ) {
+		S.jobs[S.nJobs++] = { look ? kSsrS1w : kSsrS1, 1, t.hw, t.hh };
+		S.jobs[S.nJobs++] = { look ? kSsrS2w : kSsrS2, 2, t.hw, t.hh };
+		S.jobs[S.nJobs++] = { kSsrS3, 3, t.hw, t.hh };
+		S.jobs[S.nJobs++] = { kSsrS4, 4, t.hw, t.hh };
+	}
+	// GL's scene pass, water's rays and the copies done -> the worker's stages -> GL's readers
+	GLuint tex[10];
+	GLenum lay[10];
+	int n = 0;
+	for ( GLuint x : { GLuint( t.scene ), GLuint( gbufTw ), GLuint( atlasTw ), GLuint( prevTw ), GLuint( t.haveWater ? t.wray : 0 ),
+			 GLuint( t.march ? t.ray : 0 ), GLuint( t.march ? t.raw : 0 ), GLuint( t.march ? t.across : 0 ), GLuint( t.march ? t.fin : 0 ) } )
+		if ( x ) {
+			tex[n] = x;
+			lay[n++] = kLayoutGeneral;
+		}
+	g.signalSemaphore( S.glDoneGl, 0, nullptr, GLuint( n ), tex, lay );
+	g.flush();
+	Worker & W = wk();
+	std::uint64_t want = 0;
+	{
+		std::lock_guard<std::mutex> lk( W.m );
+		want = W.toneDone + 1;
+	}
+	Work j;
+	j.k = -1;
+	j.ssr = true;
+	hand( j );
+	bool ok = false;
+	{
+		std::unique_lock<std::mutex> lk( W.m );
+		W.idle.wait( lk, [&W, want]() { return W.toneDone >= want; } );
+		ok = W.toneOk;
+		w = W.toneWhy;
+	}
+	if ( !ok )
+		return breakOff( w );  // nothing signals vkDone: GL does not wait it; GL runs its stages this frame
+	g.waitSemaphore( S.vkDoneGl, 0, nullptr, GLuint( n ), tex, lay );
+	S.pending = true;
+	const double ms = nowMs() - t0;
+	S.st.runs++;
+	S.st.cpuMs += ms;
+	S.st.maxMs = std::max( S.st.maxMs, ms );
+	return true;
+}
+
+void ssrOnGl( const char * why )
+{
+	Ssr & S = ssrS();
+	S.st.gl++;
+	S.st.glWhy = why ? why : "";
+}
+
+SsrStat takeSsrStat()
+{
+	Ssr & S = ssrS();
+	SsrStat s = S.st;
+	s.pipelines = S.pipelines;
+	s.buildMs = S.buildMs;
+	if ( S.broken && s.failWhy.empty() )
+		s.failWhy = S.brokenWhy;
+	S.st = SsrStat();
 	return s;
 }
 }  // namespace WwVkPresent
