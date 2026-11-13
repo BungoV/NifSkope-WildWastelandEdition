@@ -28,6 +28,29 @@ Texture2D<float4> GreyscaleMap : register(t47, space0); SamplerState _GreyscaleM
 TextureCube<float4> CubeMap : register(t48, space0); SamplerState _CubeMap_sampler : register(s48, space0);
 Texture2D<float4> NormalMap : register(t49, space0); SamplerState _NormalMap_sampler : register(s49, space0);
 Texture2D<float4> SpecularMap : register(t50, space0); SamplerState _SpecularMap_sampler : register(s50, space0);
+
+static float3 LightDir;
+static float3 ViewDir;
+
+static float2 texCoord;
+
+static float4 A;
+static float4 C;
+static float4 D;
+
+static float3x3 btnMatrix;
+static float3x3 reflMatrix;
+
+#ifdef WW_FXRES
+// lane FXRES1 (fo4_effectcellfx.frag, src/features/particles/cellfxres.h): the soft-effect layer's other two targets, blended by the
+// draw's own factors: the transmittance (0 colour, the draw's alpha, over 1) and the coverage (1, as the stencil)
+static float4 fragColor;
+static float4 fxResT;
+static float4 fxResCov;
+#else
+static float4 fragColor;
+#endif
+
 #define WW_LOOSE_TYPES 1
 #if defined(WW_CELLLIGHTS)
 #include "../air/lookdev_fog.hlsli"
@@ -211,30 +234,6 @@ cbuffer LooseUniforms : register(b31, space0)
 	float2 vpDumpScale;		// gates only: the full-size pixels a quarter-size dump pixel stands for (0 off)
 #endif
 };
-
-
-static float3 LightDir;
-static float3 ViewDir;
-
-static float2 texCoord;
-
-static float4 A;
-static float4 C;
-static float4 D;
-
-static float3x3 btnMatrix;
-static float3x3 reflMatrix;
-
-#ifdef WW_FXRES
-// lane FXRES1 (fo4_effectcellfx.frag, src/features/particles/cellfxres.h): the soft-effect layer's other two targets, blended by the
-// draw's own factors: the transmittance (0 colour, the draw's alpha, over 1) and the coverage (1, as the stencil)
-static float4 fragColor;
-static float4 fxResT;
-static float4 fxResCov;
-#else
-static float4 fragColor;
-#endif
-
 #ifdef WW_CELLLIGHTS
 /* lane EFX2 (fo4_effectcell.frag; src/gl/celllights.h wwCellFxRed): the game's effect pixel shader in the
  * cell view, transcribed from Shaders011.fxp (docs/PRTP_PLAN.md 2q):

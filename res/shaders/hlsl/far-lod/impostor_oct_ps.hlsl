@@ -71,13 +71,6 @@ cbuffer globalUniforms : register(b0, space0)
 /* lane FARLOD1: impostor_cell.frag defines these and includes this whole file, so a far card in the
  * cell view takes the cell's own lights, the Lookdev fog and the cell's imagespace (fo4_cell.frag's
  * pattern). impostor_oct.prog defines neither and runs exactly the shader it always ran. */
-#ifdef WW_FOG
-#include "../air/lookdev_fog.hlsli"
-#endif
-#ifdef WW_CELLLIGHTS
-#include "../lights/cell_lights.hlsli"
-#endif
-
 #define WW_LOOSE_TYPES 1
 #if defined(WW_FOG)
 #include "../air/lookdev_fog.hlsli"
@@ -218,6 +211,13 @@ cbuffer LooseUniforms : register(b31, space0)
 	float swayPhase;           // radians; the harness steps it, not a clock
 #endif
 };
+#ifdef WW_FOG
+#include "../air/lookdev_fog.hlsli"
+#endif
+#ifdef WW_CELLLIGHTS
+#include "../lights/cell_lights.hlsli"
+#endif
+
 
 
 /* lane FARCARD1: the instanced far cards (impostor_cellinst.frag) read the per-card values as flat inputs from

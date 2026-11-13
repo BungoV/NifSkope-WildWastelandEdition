@@ -38,65 +38,6 @@ cbuffer globalUniforms : register(b0, space0)
 	float	unusedUniform2 : packoffset(c20.w);
 };
 // end of uniforms.glsl
-#ifdef WW_FOG
-#include "../air/lookdev_fog.hlsli"
-#endif
-// FOGSUN1: the sun through the air; a variant without the fog compiled in (fo4_default, fo4_csm) has no air between
-// the surface and the sun (lane VOLAIR1 10-15: calling wwVolAirSunT there broke both programs; the shader guard found it)
-#ifdef WW_FOG
-#define WW_AIR_SUN_TD( p ) wwVolAirSunTD( p )
-#else
-#define WW_AIR_SUN_TD( p ) float2( 1.0, 0.0 )
-#endif
-#ifdef WW_SUNSHADOW
-// lane SUNCELL1: the cascades (fo4_cellcsm, fo4_csm, fo4_fogcsm); the loader takes nothing after an include's quote
-#include "../shadows/ww_sunshadow.hlsli"
-#endif
-
-#ifdef WW_BINDLESS
-// lane BINDLESS2: the material's maps as resident handles in the draw's row (slots of src/features/near/cellbindless.h)
-// ww_bindless.glsl inlined here: its .hlsli has no readable half yet (lane HLSLSRC1)
-// lane BINDLESS2: the per-draw row (src/features/near/cellbindless.h WwBl::Row, std430, 176 bytes): the draw's matrices and the
-// material's seven 2D maps as resident texture handles. wwDrawIdx is the draw's row in the ring at binding 12.
-// lane BINDLESSMDI1: the row is wwDrawBase + the draw's base instance (0 for a plain draw; a multi-draw's command
-// carries its own), handed to the fragment stage flat.
-struct WwDraw
-{
-	float4x4 mv;
-	float4 nm[3];
-	uint2 tex[8];
-};
-StructuredBuffer<WwDraw> wwDraws : register(t47, space0);
-#ifdef WW_BL_VERT
-#ifdef GL_ARB_shader_draw_parameters
-
-#define wwDrawIdx ( wwDrawBase + ( wwBlUniformRow ? 0u : uint( gl_BaseInstanceARB ) ) )
-#else
-#define wwDrawIdx wwDrawBase
-#endif
-static uint wwBlRow;
-#else
-static uint wwBlRow;
-#define wwDrawIdx wwBlRow
-#endif
-// end of ww_bindless.glsl
-#define BaseMap (sampler2D)( wwDraws[wwDrawIdx].tex[0] )
-#define NormalMap (sampler2D)( wwDraws[wwDrawIdx].tex[1] )
-#define GlowMap (sampler2D)( wwDraws[wwDrawIdx].tex[2] )
-#define BacklightMap (sampler2D)( wwDraws[wwDrawIdx].tex[3] )
-#define SpecularMap (sampler2D)( wwDraws[wwDrawIdx].tex[4] )
-#define GreyscaleMap (sampler2D)( wwDraws[wwDrawIdx].tex[5] )
-#define EnvironmentMap (sampler2D)( wwDraws[wwDrawIdx].tex[6] )
-#else
-Texture2D<float4> BaseMap : register(t48, space0); SamplerState _BaseMap_sampler : register(s48, space0);
-Texture2D<float4> NormalMap : register(t49, space0); SamplerState _NormalMap_sampler : register(s49, space0);
-Texture2D<float4> GlowMap : register(t50, space0); SamplerState _GlowMap_sampler : register(s50, space0);
-Texture2D<float4> BacklightMap : register(t51, space0); SamplerState _BacklightMap_sampler : register(s51, space0);
-Texture2D<float4> SpecularMap : register(t52, space0); SamplerState _SpecularMap_sampler : register(s52, space0);
-Texture2D<float4> GreyscaleMap : register(t53, space0); SamplerState _GreyscaleMap_sampler : register(s53, space0);
-Texture2D<float4> EnvironmentMap : register(t54, space0); SamplerState _EnvironmentMap_sampler : register(s54, space0);
-#endif
-TextureCube<float4> CubeMap : register(t55, space0); SamplerState _CubeMap_sampler : register(s55, space0);
 #define WW_LOOSE_TYPES 1
 #if defined(WW_FOG)
 #include "../air/lookdev_fog.hlsli"
@@ -325,7 +266,65 @@ cbuffer LooseUniforms : register(b31, space0)
 	float farFadeFrame;
 #endif
 };
+#ifdef WW_FOG
+#include "../air/lookdev_fog.hlsli"
+#endif
+// FOGSUN1: the sun through the air; a variant without the fog compiled in (fo4_default, fo4_csm) has no air between
+// the surface and the sun (lane VOLAIR1 10-15: calling wwVolAirSunT there broke both programs; the shader guard found it)
+#ifdef WW_FOG
+#define WW_AIR_SUN_TD( p ) wwVolAirSunTD( p )
+#else
+#define WW_AIR_SUN_TD( p ) float2( 1.0, 0.0 )
+#endif
+#ifdef WW_SUNSHADOW
+// lane SUNCELL1: the cascades (fo4_cellcsm, fo4_csm, fo4_fogcsm); the loader takes nothing after an include's quote
+#include "../shadows/ww_sunshadow.hlsli"
+#endif
 
+#ifdef WW_BINDLESS
+// lane BINDLESS2: the material's maps as resident handles in the draw's row (slots of src/features/near/cellbindless.h)
+// ww_bindless.glsl inlined here: its .hlsli has no readable half yet (lane HLSLSRC1)
+// lane BINDLESS2: the per-draw row (src/features/near/cellbindless.h WwBl::Row, std430, 176 bytes): the draw's matrices and the
+// material's seven 2D maps as resident texture handles. wwDrawIdx is the draw's row in the ring at binding 12.
+// lane BINDLESSMDI1: the row is wwDrawBase + the draw's base instance (0 for a plain draw; a multi-draw's command
+// carries its own), handed to the fragment stage flat.
+struct WwDraw
+{
+	float4x4 mv;
+	float4 nm[3];
+	uint2 tex[8];
+};
+StructuredBuffer<WwDraw> wwDraws : register(t47, space0);
+#ifdef WW_BL_VERT
+#ifdef GL_ARB_shader_draw_parameters
+
+#define wwDrawIdx ( wwDrawBase + ( wwBlUniformRow ? 0u : uint( gl_BaseInstanceARB ) ) )
+#else
+#define wwDrawIdx wwDrawBase
+#endif
+static uint wwBlRow;
+#else
+static uint wwBlRow;
+#define wwDrawIdx wwBlRow
+#endif
+// end of ww_bindless.glsl
+#define BaseMap (sampler2D)( wwDraws[wwDrawIdx].tex[0] )
+#define NormalMap (sampler2D)( wwDraws[wwDrawIdx].tex[1] )
+#define GlowMap (sampler2D)( wwDraws[wwDrawIdx].tex[2] )
+#define BacklightMap (sampler2D)( wwDraws[wwDrawIdx].tex[3] )
+#define SpecularMap (sampler2D)( wwDraws[wwDrawIdx].tex[4] )
+#define GreyscaleMap (sampler2D)( wwDraws[wwDrawIdx].tex[5] )
+#define EnvironmentMap (sampler2D)( wwDraws[wwDrawIdx].tex[6] )
+#else
+Texture2D<float4> BaseMap : register(t48, space0); SamplerState _BaseMap_sampler : register(s48, space0);
+Texture2D<float4> NormalMap : register(t49, space0); SamplerState _NormalMap_sampler : register(s49, space0);
+Texture2D<float4> GlowMap : register(t50, space0); SamplerState _GlowMap_sampler : register(s50, space0);
+Texture2D<float4> BacklightMap : register(t51, space0); SamplerState _BacklightMap_sampler : register(s51, space0);
+Texture2D<float4> SpecularMap : register(t52, space0); SamplerState _SpecularMap_sampler : register(s52, space0);
+Texture2D<float4> GreyscaleMap : register(t53, space0); SamplerState _GreyscaleMap_sampler : register(s53, space0);
+Texture2D<float4> EnvironmentMap : register(t54, space0); SamplerState _EnvironmentMap_sampler : register(s54, space0);
+#endif
+TextureCube<float4> CubeMap : register(t55, space0); SamplerState _CubeMap_sampler : register(s55, space0);
 // model -> view rotation, the same row-major uniform the vertex stage uses for
 // the normal, tangent and bitangent.  Declared here because the model-space
 // path has no tangent frame to ride on.
