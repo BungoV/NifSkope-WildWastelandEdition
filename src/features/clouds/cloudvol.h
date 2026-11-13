@@ -68,6 +68,18 @@ bool wwCloudVolDraw( Scene * scene, const WwCloudVolView & view, QStringList & d
  *  the drawn tier or the sky did not draw this frame: the caller keeps the weather's colour. */
 bool wwCloudVolLowColour( float out[3] );
 
+/*! lane CLOUDLIT1: the 2D layers lit from our sky as the volume's thin sheet (lookdev_clouds_ps.hlsl ldKey .. ldTint), the
+ *  volume's own terms this frame: TO the key light and its radiance (cvKeyW, cvKeyK), the sky light at the clouds (cvAmb),
+ *  the droplet phase (cvPhasePrm, its peak capped as the volume's cvPrm for the history the view p11 x viewH would get),
+ *  the octave count (cvOctaves) and the Low band's tint. False (the layers keep colLin) when the sky did not draw this
+ *  frame, no key light is up, or red WW_CLOUDVOL_RED=vanillalit. */
+struct WwCloudLayerLight
+{
+	float keyW[3] = { 0.0f, 0.0f, 1.0f }, keyK = 0.0f, amb[3] = {}, phase[4] = {}, tint[3] = { 1.0f, 1.0f, 1.0f };
+	int octaves = 4;
+};
+bool wwCloudLayerLight( float p11, int viewH, WwCloudLayerLight & out );
+
 /*! lane SKYLIGHT1: the cloud map's Low + Mid deck over a ground point (clouddeckmath.h, the volume's own density), sun
  *  at mu0: out = cover, the sun's diffuse transmission, the clear sky's transmission, the mean column tau. False = no
  *  deck this frame. Memoised (tables per band shape, columns per coverage and mu0). GL thread. */

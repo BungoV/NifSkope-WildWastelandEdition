@@ -1498,6 +1498,29 @@ bool wwCloudVolLowColour( float out[3] )
 	return s.lowOk;
 }
 
+bool wwCloudLayerLight( float p11, int viewH, WwCloudLayerLight & out )
+{
+	CvState & s = cs();
+	const WwAtmoFrame & f = wwAtmoFrame();
+	if ( !f.valid || red( "vanillalit" ) || !keyLight( f, out.keyW, out.keyK ) )
+		return false;
+	skyAmbient( s, out.keyW[2], f.haze, out.amb );	// as wwCloudVolDraw's amb
+	for ( float & a : out.amb )
+		a *= out.keyK;
+	const WwCloudMap & m = wwCloudMap();
+	const V::Droplet drop = V::dropletParams( m.valid && m.recx14.dropletUm > 0.0f ? m.recx14.dropletUm : V::kDropletUm );
+	const int div = preset( s.tier ).div, hh = std::max( 1, ( viewH + div - 1 ) / div );
+	const float rows = p11 * float( hh );	// cloud_march_ps.hlsl: cvPrm.x = min( x, 1 - 8 / ( cvProj.y x cvHistSize.y ) )
+	out.phase[0] = rows > 0.0f ? std::min( drop.gHg, 1.0f - 8.0f / rows ) : drop.gHg;
+	out.phase[1] = drop.gD;
+	out.phase[2] = drop.alpha;
+	out.phase[3] = drop.wD;
+	out.octaves = red( "nooctaves" ) ? 1 : 4;
+	for ( int c = 0; c < 3; c++ )
+		out.tint[c] = m.valid && !red( "notint" ) ? m.band[0].tint[c] : 1.0f;
+	return true;
+}
+
 bool wwCloudDeckThrough( float mu0, float out[4] )
 {
 	const WwCloudMap & m = wwCloudMap();

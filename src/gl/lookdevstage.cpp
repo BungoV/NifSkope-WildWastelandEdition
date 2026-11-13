@@ -3373,6 +3373,27 @@ void drawClouds( Scene * scene, const SkyFrame & f, float mul, QStringList & dre
 	 * Low base's shell; red WW_LOOKDEV_RED=cloudnoap = the un-hazed layer that met the horizon band with a seam */
 	const float apDeckR = WwAtmoMath::kRb + wwCloudLayerDeckKm();
 	const bool apOn = atf.valid && atf.trans != 0 && atf.camR < apDeckR && !wwLookdevRed( "cloudnoap" );
+	/* lane CLOUDLIT1: with the aerial perspective on, the layers are lit from our sky as the volume's thin sheet
+	 * (lookdev_clouds_ps.hlsl ldSkyLit, the volume's key, sky light, phase, octaves and Low tint); ldKey.w 0 = colLin */
+	WwCloudLayerLight ll;
+	bool llOn = false;
+	if ( apOn ) {
+		GLint llVp[4] = { 0, 0, 1, 1 };
+		r->fn->glGetIntegerv( GL_VIEWPORT, llVp );
+		llOn = wwCloudLayerLight( r->globalUniforms->projectionMatrix[1][1], llVp[3], ll );
+	}
+	{
+		static int said = -1;
+		if ( int( llOn ) != said ) {
+			said = int( llOn );
+			if ( llOn )
+				fprintf( stderr, "cloudlayer light: sky key=(%.3f %.3f %.3f) k=%.4g amb=(%.4g %.4g %.4g)\n", double( ll.keyW[0] ),
+					double( ll.keyW[1] ), double( ll.keyW[2] ), double( ll.keyK ), double( ll.amb[0] ), double( ll.amb[1] ),
+					double( ll.amb[2] ) );
+			else
+				fprintf( stderr, "cloudlayer light: colLin\n" );
+		}
+	}
 	/* MODULES1 10c: the Fusion Shaders cloud scatter law on the layers (cloudfusionlaw.h, lookdev_clouds.frag
 	 * ldFsOn): the key light's direction and elevation gate, the weather class's response (during a change the two
 	 * classes by the change's share). A share of the layer's own lit colour: no light is added that the layer did
@@ -3426,6 +3447,12 @@ void drawClouds( Scene * scene, const SkyFrame & f, float mul, QStringList & dre
 		r->fn->glActiveTexture( GL_TEXTURE0 );
 		prog->uni1i( "ldTrans", 2 );
 		prog->uni2f( "ldApR", atf.camR, apDeckR );
+		prog->uni4f( "ldKey", FloatVector4( ll.keyW[0], ll.keyW[1], ll.keyW[2], llOn ? ll.keyK : 0.0f ) );	// lane CLOUDLIT1
+		if ( !llOn )
+			return;
+		prog->uni4f( "ldAmb", FloatVector4( ll.amb[0], ll.amb[1], ll.amb[2], float( ll.octaves ) ) );
+		prog->uni4f( "ldPhase", FloatVector4( ll.phase[0], ll.phase[1], ll.phase[2], ll.phase[3] ) );
+		prog->uni3f( "ldTint", ll.tint[0], ll.tint[1], ll.tint[2] );
 	};
 	// lane WEATHERBLEND1: W = the weather whose texture and scroll a pass draws (s.w, or the one a change leaves)
 	auto layerUniforms = [&]( NifSkopeOpenGLContext::Program * prog, const WwWeatherData & W, int i, float alpha ) {
