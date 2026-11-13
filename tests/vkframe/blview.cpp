@@ -606,6 +606,7 @@ bool pipeGate( const std::string & spvDir )
 #include "blview_uni.inc"  // lane VKOBJ4 slice 5: GL's state mirrored into set 0 (`BLVIEW uni` lines)
 #include "blview_pool.inc" // lane VKOBJ4 slice 6: the class pools as vertex buffers (`BLVIEW pool` lines)
 #include "blview_shade.inc" // lane VKOBJ4 slice 7: the multi-draw through the cellbl twin (`BLVIEW shade` lines)
+#include "blview_colour.inc" // lane VKOBJ4 step 7: GL's own fo4_cellbl against the twin through objBlShade (`BLVIEW colour` lines)
 }  // namespace blv
 
 int main( int argc, char ** argv )
@@ -736,7 +737,7 @@ int main( int argc, char ** argv )
 		{ kRgba8i, 64, 64, 7, 0x2700, 0x2601, 0x812F, 0x812F, 0.0f, -1000.0f, 2.0f, 1.0f, {} },
 		{ kRgba8i, 32, 32, 6, 0x2601, 0x2601, 0x2901, 0x2901, 0.0f, -1000.0f, 1000.0f, 1.0f, {} },
 	};
-	static unsigned keyHome[kTex + 1];
+	static unsigned keyHome[kTex + 2];  // the defs, the target, the colour arm's anisotropy-1 twin
 	std::vector<GLuint> texs;
 	std::vector<GLuint64> handles( kTex, 0 );
 	std::mt19937 rng( 23 );
@@ -1049,12 +1050,73 @@ int main( int argc, char ** argv )
 		std::printf( "BLVIEW RED %s %s (%zu of %zu covered pixels differ; must FAIL)\n", redFails ? "FAIL" : "EXACT", r.name, d.diff, d.covered );
 		ok = ok && redFails;
 	}
+	// lane VKOBJ4 step 7: the colour arm, GL's own fo4_cellbl. Texture 5 (the one def at anisotropy 4) goes in as a
+	// test-local twin at anisotropy 1: the same def and levels (copied from texs[5]), registered as its arm registers, so the
+	// GL sampler and the Vulkan one (which mirrors GL's own 0x84FE) both sample at 1. After the frames: its add and hand-over
+	// stay out of their counts. Texture 5 itself stays as made.
+	const int anisoAt = 5;
+	GLuint aniso1Tex = 0;
+	GLuint64 aniso1H = 0;
+	bool twinOk = false;
+	{
+		const TexDef & d = defs[anisoAt];
+		void( WINAPI * copyImage )( GLuint, GLenum, GLint, GLint, GLint, GLint, GLuint, GLenum, GLint, GLint, GLint, GLint, GLsizei, GLsizei,
+			GLsizei ) = nullptr;
+		unsigned tex = 0;
+		const std::uintptr_t key = reinterpret_cast<std::uintptr_t>( &keyHome[kTex + 1] );
+		twinOk = load( copyImage, "glCopyImageSubData" )
+			&& ( bc ? WwVkPresent::objTexMake( bcFmt[anisoAt], d.w, d.h, d.levels, tex, why )
+					: WwVkPresent::sharedTarget( key, 0, d.w, d.h, 1, d.fmt, tex, why, d.levels, 1 ) );
+		for ( int l = 0; twinOk && l < d.levels; l++ )
+			copyImage( texs[anisoAt], GL_TEXTURE_2D, l, 0, 0, 0, tex, GL_TEXTURE_2D, l, 0, 0, 0, std::max( d.w >> l, 1 ), std::max( d.h >> l, 1 ), 1 );
+		if ( twinOk ) {
+			aniso1Tex = GLuint( tex );
+			f.textureParameteri( tex, GL_TEXTURE_MIN_FILTER, GLint( d.minF ) );
+			f.textureParameteri( tex, GL_TEXTURE_MAG_FILTER, GLint( d.magF ) );
+			f.textureParameteri( tex, GL_TEXTURE_WRAP_S, GLint( d.wrapS ) );
+			f.textureParameteri( tex, GL_TEXTURE_WRAP_T, GLint( d.wrapT ) );
+			f.textureParameterf( tex, 0x8501, d.bias );
+			f.textureParameterf( tex, 0x813A, d.minLod );
+			f.textureParameterf( tex, 0x813B, d.maxLod );
+			f.textureParameterf( tex, 0x84FE, 1.0f );  // the override: anisotropy 1 (the fixture's def says d.aniso)
+			f.textureParameterfv( tex, 0x1004, d.border );
+			if ( bc && ( bcFmt[anisoAt] == 0x8DBB || bcFmt[anisoAt] == 0x8DBD || bcFmt[anisoAt] == 0x8DBE ) ) {  // as makeBc
+				const bool two = bcFmt[anisoAt] != 0x8DBB;
+				f.textureParameteri( tex, 0x8E42, GL_RED );
+				f.textureParameteri( tex, 0x8E43, two ? GL_GREEN : GL_RED );
+				f.textureParameteri( tex, 0x8E44, two ? GL_ZERO : GL_RED );
+				f.textureParameteri( tex, 0x8E45, GL_ONE );
+			}
+			WwVkPresent::BlSampler s;
+			twinOk = bc || WwVkPresent::blSamplerRead( tex, s, glProc, why );
+			aniso1H = twinOk ? f.getTextureHandle( tex ) : 0;
+			if ( aniso1H )
+				f.makeResident( aniso1H );
+			if ( bc && aniso1H ) {
+				WwVkPresent::objTexHandle( tex, aniso1H, glProc );
+				const WwVkPresent::ObjTexStat ts = WwVkPresent::objTexFrame();  // the twin's own hand-over
+				twinOk = ts.adds == 1 && ts.addFails == 0;
+				if ( !twinOk )
+					why = "objTexHandle: " + std::to_string( ts.adds ) + " adds, " + ts.addWhy;
+			} else
+				twinOk = aniso1H && WwVkPresent::blAdd( aniso1H, key, s, why );
+		}
+		const GLenum e = glGetError();
+		twinOk = twinOk && e == GL_NO_ERROR;
+		std::printf( "BLVIEW colour twin: texture %d at anisotropy 1 (test-local; the fixture's def %.0f), handle %llx: %s%s (GL error 0x%x)\n", anisoAt,
+			double( d.aniso ), static_cast<unsigned long long>( aniso1H ), twinOk ? "made" : "FAIL ", twinOk ? "" : why.c_str(), unsigned( e ) );
+	}
+	ok = twinOk && colourGate( spvDir + "/spvset/spirv", handles, anisoAt, aniso1H ) && ok;
 	vk().vkWaitForFences( vk().dev, 1, &gv.fence, VK_TRUE, 1000000000ull );
 	const WwVkPresent::BlStat st = WwVkPresent::takeBlStat();
 	std::printf( "BLVIEW stat: %d images, %d samplers (caps %u / %u), %d adds, %d drops, %d rows, %d misses, %d rewrites, %d fails (%s)\n",
 		st.images, st.samplers, st.imageCap, st.samplerCap, st.adds, st.drops, st.rows, st.misses, st.rewrites, st.fails, st.failWhy.c_str() );
 	for ( GLuint64 h : handles )
 		f.makeNonResident( h );
+	if ( aniso1H )
+		f.makeNonResident( aniso1H );
+	if ( bc && aniso1Tex )
+		texs.push_back( aniso1Tex );  // the cache's name, deleted after shutdown with the rest
 	gvFree();
 	WwVkPresent::shutdown();
 	if ( bc ) {  // lane VKOBJ3: the cache deletes its names after the present went (shutdown kept them)
