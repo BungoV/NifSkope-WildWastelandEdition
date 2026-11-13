@@ -1360,7 +1360,8 @@ bool wwCellHdrBegin( Scene * scene )
 	/* lane VKOBJ4 open item 3: the cell runs on Vulkan (WW_VKOBJ_SHADE=1) and neither stage above: the frame's colour and depth /
 	 * stencil are shared targets (objBlFrame), so objBlShade draws into them; multisample only (the tone reads sampler2DMS).
 	 * With the tone stage on, its frame is the shared one (toneFrame registers it): objBlShade draws into the frame the tone
-	 * and the bloom read. The Vulkan bloom chain's frame (wantVk) is another device's: the cell runs stay on GL there. */
+	 * and the bloom read. The Vulkan bloom chain's frame (wantVk) is on the present device and lent to objBlFrameRead
+ * (vkframe.cpp, borrowTarget): objBlShade draws into that frame, so none of its own is made there. */
 	const bool wantObj = !wantVk && !wantTone && wantTex && S >= 2 && WwBl::vkShadeOn();
 	if ( !g.fbo || g.w != W || g.h != H || g.samples != S || g.dsFormat != dsFormat || g.dsTex != wantTex
 		|| g.colorFormat != hdrFormat().gl || ( wantVk && !g.vkShared && !g.vkTried ) || ( g.vkShared && !wantVk )

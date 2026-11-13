@@ -270,8 +270,9 @@ bool colourGate( const std::string & spirvDir, const std::vector<GLuint64> & fix
 	f.bindBuffer( 0x8892, 0 );
 	// GL's frame and fixed state, as the app's opaque pass (nBufs: the 1-buffer arm's draw buffer 0 only)
 	int nBufs = 2;
+	GLuint frameFb = sx.fbo;  // the 4-sample arm binds the app's frame here
 	auto frameState = [&]() {
-		f.bindFramebuffer( kFb, sx.fbo );
+		f.bindFramebuffer( kFb, frameFb );
 		const GLenum dbs[2] = { kColorAtt0, kColorAtt0 + 1 };
 		sf.drawBuffers( nBufs, dbs );
 		glViewport( 0, 0, kSW, kSH );
@@ -557,6 +558,273 @@ bool colourGate( const std::string & spirvDir, const std::vector<GLuint64> & fix
 		const bool under = !b3 && w3.find( "the pixel stage writes 2 targets, the frame has 3" ) != std::string::npos;
 		std::printf( "BLVIEW colour 1buf under %s (a 3-colour frame: %s%s)\n", under ? "OK" : "FAIL", b3 ? "built" : "refused: ", w3.c_str() );
 		ok = ok && under;
+	}
+	/* gap 1 (manager 11-13; stated before the first run, never widened): the app's real frame, objBlFrame at 4 samples,
+	 * RGBA16F + D24S8, one draw buffer. Readback: GL's fill pass (blview_fill_*.hlsl, once per sample through the sample
+	 * mask, stencil ref sample + 1) and objBlFrameSamples must give every sample EXACT: colour (x/256, y/256, s, 0.5) in
+	 * half bits, the D24 value j * 4096 with j = (x & 255) + 256 s, stencil s + 1. Shade: GL's fo4_cellbl into that frame,
+	 * read back; objBlShade into the same frame (cleared alike), read back; per sample, depth vs GL as the shade bar
+	 * (DepthCmp EXACT or BOUND), colour over the samples both cover as the colour bar (EXACT, or BOUND 4e-3 * max(1, |GL|)),
+	 * >= 2000 of them, GL's rgb non-zero on >= 90 %; one run, 0 failed. Reds (each must FAIL): the non-shared frame (GL's
+	 * own 4-sample textures: objBlShade and the readback must refuse, "not a shared target"); the dropped sample
+	 * (objBlFrameSamples red 1 reads sample 0 for sample 1: must move the readback off the expected values). */
+	{
+		using MaskI = void( WINAPI * )( GLuint, GLbitfield );
+		using ClearFi = void( WINAPI * )( GLenum, GLint, GLfloat, GLint );
+		using Store2DMs = void( WINAPI * )( GLuint, GLsizei, GLenum, GLsizei, GLsizei, GLboolean );
+		using Create = void( WINAPI * )( GLenum, GLsizei, GLuint * );
+		using DelFbo = void( WINAPI * )( GLsizei, const GLuint * );
+		MaskI sampleMaski = nullptr;
+		ClearFi clearBufferfi = nullptr;
+		Store2DMs storageMs = nullptr;
+		Create createTextures = nullptr;
+		DelFbo delFbo = nullptr, delVao = nullptr;
+		bool msOk = load( sampleMaski, "glSampleMaski" ) && load( clearBufferfi, "glClearBufferfi" )
+			&& load( storageMs, "glTextureStorage2DMultisample" ) && load( createTextures, "glCreateTextures" )
+			&& load( delFbo, "glDeleteFramebuffers" ) && load( delVao, "glDeleteVertexArrays" );
+		const int kS = 4;
+		const std::size_t nSmp = std::size_t( kSW ) * kSH * kS;
+		unsigned mc = 0, md = 0;
+		std::string mw;
+		if ( msOk && !objBlFrame( kSW, kSH, kS, 0x881A, 0x88F0, mc, md, mw ) ) {  // RGBA16F, DEPTH24_STENCIL8
+			std::printf( "BLVIEW colour ms FAIL (objBlFrame at 4 samples: %s)\n", mw.c_str() );
+			msOk = false;
+		}
+		GLuint msFb = 0, ownFb = 0, ownC = 0, ownD = 0, fillVao = 0, fillProg = 0;
+		auto attach = [&]( GLuint & fb, GLuint c, GLuint d ) {
+			f.genFramebuffers( 1, &fb );
+			f.bindFramebuffer( kFb, fb );
+			f.framebufferTexture2D( kFb, kColorAtt0, 0x9100, c, 0 );  // TEXTURE_2D_MULTISAMPLE
+			f.framebufferTexture2D( kFb, 0x821A, 0x9100, d, 0 );       // DEPTH_STENCIL_ATTACHMENT
+			const GLenum db = kColorAtt0;
+			sf.drawBuffers( 1, &db );
+			const bool done = f.checkFramebufferStatus( kFb ) == kComplete;
+			f.bindFramebuffer( kFb, 0 );
+			return done;
+		};
+		if ( msOk ) {
+			createTextures( 0x9100, 1, &ownC );
+			createTextures( 0x9100, 1, &ownD );
+			storageMs( ownC, kS, 0x881A, kSW, kSH, GL_TRUE );
+			storageMs( ownD, kS, 0x88F0, kSW, kSH, GL_TRUE );
+			if ( !attach( msFb, mc, md ) || !attach( ownFb, ownC, ownD ) ) {
+				std::printf( "BLVIEW colour ms FAIL (a 4-sample framebuffer is not complete)\n" );
+				msOk = false;
+			}
+		}
+		// the fill pass's program from its SPIR-V (build_spv.py in blview.sh)
+		if ( msOk ) {
+			fillProg = f.createProgram();
+			const char * fillSpv[2] = { "/../../blview_fill_vs.spv", "/../../blview_fill_ps.spv" };
+			for ( int s = 0; s < 2 && msOk; s++ ) {
+				const std::string bin = readFile( spirvDir + fillSpv[s] );
+				const GLuint sh = f.createShader( s ? kFrag : kVert );
+				GLint okS = 0;
+				if ( !bin.empty() ) {
+					u.shaderBinary( 1, &sh, 0x9551, bin.data(), GLsizei( bin.size() ) );
+					u.specialize( sh, "main", 0, nullptr, nullptr );
+					f.getShaderiv( sh, kCompiled, &okS );
+				}
+				msOk = okS != 0;
+				f.attachShader( fillProg, sh );
+			}
+			GLint linked = 0;
+			if ( msOk ) {
+				f.linkProgram( fillProg );
+				f.getProgramiv( fillProg, kLinked, &linked );
+			}
+			if ( !linked ) {
+				std::printf( "BLVIEW colour ms FAIL (the fill pass did not specialize or link)\n" );
+				msOk = false;
+			}
+			f.genVertexArrays( 1, &fillVao );
+		}
+		auto msClear = [&]( GLuint fb ) {
+			const GLfloat zero[4] = {};
+			f.bindFramebuffer( kFb, fb );
+			glDepthMask( GL_TRUE );
+			glStencilMask( 0xFF );
+			glColorMask( GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE );
+			sf.clearBufferfv( 0x1800, 0, zero );  // GL_COLOR
+			clearBufferfi( 0x84F9, 0, 1.0f, 0 );    // GL_DEPTH_STENCIL
+			f.bindFramebuffer( kFb, 0 );
+		};
+		auto toHalf = []( float v ) {  // exact for the fill's values (0 or normal halves)
+			std::uint32_t b = 0;
+			std::memcpy( &b, &v, 4 );
+			if ( !( b & 0x7FFFFFFFu ) )
+				return std::uint32_t( ( b >> 16 ) & 0x8000u );
+			return std::uint32_t( ( ( b >> 16 ) & 0x8000u ) | ( ( ( ( b >> 23 ) & 0xFFu ) - 112u ) << 10 ) | ( ( b >> 13 ) & 0x3FFu ) );
+		};
+		auto d24 = []( std::uint32_t bits ) {
+			float v = 0.0f;
+			std::memcpy( &v, &bits, 4 );
+			return std::uint32_t( std::lround( double( v ) * 16777215.0 ) );
+		};
+		// the readback against the fill's values: samples off (any word)
+		auto fillOff = [&]( const std::vector<std::uint32_t> & got ) {
+			std::size_t off = 0;
+			for ( std::size_t i = 0; i < nSmp && got.size() == nSmp * 4; i++ ) {
+				const std::uint32_t s = std::uint32_t( i % kS ), p = std::uint32_t( i / kS ), x = p % kSW, y = p / kSW;
+				const std::uint32_t want[4] = { toHalf( float( x ) / 256.0f ) | ( toHalf( float( y ) / 256.0f ) << 16 ),
+					toHalf( float( s ) ) | ( toHalf( 0.5f ) << 16 ), ( ( x & 255u ) + 256u * s ) * 4096u, s + 1 };
+				off += got[i * 4] != want[0] || got[i * 4 + 1] != want[1] || d24( got[i * 4 + 2] ) != want[2] || got[i * 4 + 3] != want[3];
+			}
+			return got.size() == nSmp * 4 ? off : nSmp;
+		};
+		if ( msOk ) {
+			msClear( msFb );
+			f.bindFramebuffer( kFb, msFb );
+			glViewport( 0, 0, kSW, kSH );
+			glDisable( GL_CULL_FACE );
+			glDisable( GL_BLEND );
+			glDisable( GL_SCISSOR_TEST );
+			glEnable( GL_DEPTH_TEST );
+			glDepthFunc( GL_ALWAYS );
+			glEnable( GL_STENCIL_TEST );
+			glStencilOp( GL_KEEP, GL_KEEP, GL_REPLACE );
+			glEnable( 0x8E51 );  // GL_SAMPLE_MASK
+			f.useProgram( fillProg );
+			f.bindVertexArray( fillVao );
+			for ( int s = 0; s < kS; s++ ) {
+				sampleMaski( 0, 1u << s );
+				glStencilFunc( GL_ALWAYS, s + 1, 0xFF );
+				glDrawArrays( GL_TRIANGLES, 0, 3 );
+			}
+			sampleMaski( 0, ~0u );
+			glDisable( 0x8E51 );
+			glDisable( GL_STENCIL_TEST );
+			glDepthFunc( GL_LESS );
+			glDisable( GL_DEPTH_TEST );
+			f.bindVertexArray( 0 );
+			f.useProgram( 0 );
+			f.bindFramebuffer( kFb, 0 );
+			const GLenum fe = glGetError();
+			std::vector<std::uint32_t> rb, rbRed;
+			std::string rw, rrw;
+			const bool rOk = fe == GL_NO_ERROR && objBlFrameSamples( mc, md, rb, rw );
+			const std::size_t off = rOk ? fillOff( rb ) : nSmp;
+			const bool rrOk = objBlFrameSamples( mc, md, rbRed, rrw, 1 );
+			const std::size_t offRed = rrOk ? fillOff( rbRed ) : 0;
+			std::printf( "BLVIEW colour ms readback %s (%zu samples, %zu off the fill's values%s%s%s)\n", rOk && off == 0 ? "EXACT" : "FAIL", nSmp, off,
+				fe != GL_NO_ERROR ? "; GL error in the fill " : "", rOk ? "" : "; refused: ", rOk ? "" : rw.c_str() );
+			std::printf( "BLVIEW RED colourmsdrop %s (the readback reads sample 0 for sample 1: %zu samples off%s%s)\n", rrOk && offRed ? "FAIL" : "PASSED",
+				offRed, rrOk ? "" : "; refused: ", rrOk ? "" : rrw.c_str() );
+			msOk = rOk && off == 0 && rrOk && offRed > 0;
+		}
+		// the shade: GL's fo4_cellbl into the frame, then objBlShade into it, every sample read back
+		if ( msOk ) {
+			nBufs = 1;
+			frameFb = msFb;
+			std::vector<std::uint32_t> gS, vS;
+			std::string gw, vw;
+			msClear( msFb );
+			frameState();
+			f.bindVertexArray( vao );
+			f.bindBuffer( 0x8F3F, sx.ind );
+			sf.multiDrawElementsIndirect( GL_TRIANGLES, GL_UNSIGNED_SHORT, nullptr, GLsizei( sx.cmds.size() / 5 ), 20 );
+			f.bindBuffer( 0x8F3F, 0 );
+			f.bindVertexArray( 0 );
+			frameOff();
+			const bool gOk = glGetError() == GL_NO_ERROR && objBlFrameSamples( mc, md, gS, gw );
+			msClear( msFb );
+			takeObjBlRunStat();
+			frameState();
+			ObjBlShade s;
+			s.twin = 0;
+			s.prog = prog;
+			s.poolKey = sx.key;
+			s.pool = sx.pool;
+			s.rows = rows.data();
+			s.nRows = nRows;
+			s.cmds = sx.cmds.data();
+			s.nCmds = sx.cmds.size() / 5;
+			const bool vRan = objBlShade( glProc, s, vw );
+			frameOff();
+			const ObjBlRunStat rs = takeObjBlRunStat();
+			const bool vOk = vRan && glGetError() == GL_NO_ERROR && objBlFrameSamples( mc, md, vS, vw );
+			if ( !gOk || !vOk ) {
+				std::printf( "BLVIEW colour ms FAIL (%s: %s)\n", !gOk ? "GL's readback" : vRan ? "Vulkan's readback" : "objBlShade refused",
+					!gOk ? gw.c_str() : vw.c_str() );
+				msOk = false;
+			} else {
+				std::vector<float> gd( nSmp ), vd( nSmp );
+				for ( std::size_t i = 0; i < nSmp; i++ ) {
+					gd[i] = float( double( d24( gS[i * 4 + 2] ) ) / 16777215.0 );
+					vd[i] = float( double( d24( vS[i * 4 + 2] ) ) / 16777215.0 );
+				}
+				const DepthCmp dc = depthCmp( vd, gd );
+				std::size_t both = 0, lit = 0, differ = 0, over = 0, stencil = 0, edge = 0;
+				float maxRel = 0.0f;
+				for ( std::size_t i = 0; i < nSmp; i++ ) {
+					stencil += gS[i * 4 + 3] != vS[i * 4 + 3];
+					if ( !( gd[i] < 1.0f ) || !( vd[i] < 1.0f ) )
+						continue;
+					both++;
+					const std::size_t p0 = ( i / kS ) * kS;  // a pixel with samples on both sides of an edge
+					bool mixed = false;
+					for ( int k = 0; k < kS; k++ )
+						mixed = mixed || !( gd[p0 + std::size_t( k )] < 1.0f );
+					edge += mixed;
+					bool l = false;
+					for ( int ch = 0; ch < 4; ch++ ) {
+						const std::uint16_t hg = std::uint16_t( gS[i * 4 + std::size_t( ch / 2 )] >> ( 16 * ( ch & 1 ) ) );
+						const std::uint16_t hv = std::uint16_t( vS[i * 4 + std::size_t( ch / 2 )] >> ( 16 * ( ch & 1 ) ) );
+						const float g = fromHalf( hg );
+						if ( ch < 3 && g != 0.0f )
+							l = true;
+						if ( hg == hv )
+							continue;
+						differ++;
+						const float rel = std::fabs( fromHalf( hv ) - g ) / std::max( 1.0f, std::fabs( g ) );
+						over += !( rel <= 4e-3f );
+						if ( rel > maxRel || rel != rel )
+							maxRel = rel != rel ? 1e30f : rel;
+					}
+					lit += l;
+				}
+				const bool litOk = both >= 2000 && double( lit ) >= 0.9 * double( both );
+				const bool crossOk = rs.runs == 1 && rs.fails == 0;
+				std::printf( "BLVIEW colour ms depth vs GL %s (%zu samples covered, %zu on one side, %zu differ, max %.3g)\n", dc.word(), dc.covered,
+					dc.oneSide, dc.differ, double( dc.maxAbs ) );
+				std::printf( "BLVIEW colour ms vs GL %s (%zu samples both cover, %zu in edge pixels, %zu lit: %s; %zu values differ, %zu over the bound, "
+					"max %.3g; stencil differs on %zu; crossing %d runs, %d failed, %d outputs dropped)\n",
+					differ == 0 ? "EXACT" : over == 0 ? "BOUND" : "FAIL", both, edge, lit, litOk ? "lit" : "NOT LIT", differ, over, double( maxRel ),
+					stencil, rs.runs, rs.fails, rs.dropped );
+				msOk = crossOk && ( dc.exact() || dc.bound() ) && litOk && over == 0;
+			}
+			// red: GL's own 4-sample frame (not shared) must refuse, the shade and the readback
+			msClear( ownFb );
+			frameFb = ownFb;
+			frameState();
+			std::string ow, orw;
+			std::vector<std::uint32_t> oS;
+			const bool oRan = objBlShade( glProc, s, ow );
+			frameOff();
+			takeObjBlRunStat();
+			const bool oRead = objBlFrameSamples( ownC, ownD, oS, orw );
+			const bool oSaid = ow.find( "not a shared target" ) != std::string::npos && orw.find( "not a shared target" ) != std::string::npos;
+			std::printf( "BLVIEW RED colourmsunshared %s (GL's own 4-sample frame: the shade %s%s, the readback %s%s)\n",
+				!oRan && !oRead && oSaid ? "FAIL" : "PASSED", oRan ? "drew" : "refused: ", ow.c_str(), oRead ? "read" : "refused: ", orw.c_str() );
+			msOk = msOk && !oRan && !oRead && oSaid;
+			nBufs = 2;
+			frameFb = sx.fbo;
+		}
+		std::printf( "BLVIEW colour ms %s\n", msOk ? "OK" : "FAIL" );
+		ok = ok && msOk;
+		if ( fillProg )
+			u.deleteProgram( fillProg );
+		if ( fillVao )
+			delVao( 1, &fillVao );
+		if ( msFb )
+			delFbo( 1, &msFb );
+		if ( ownFb )
+			delFbo( 1, &ownFb );
+		if ( ownC )
+			glDeleteTextures( 1, &ownC );
+		if ( ownD )
+			glDeleteTextures( 1, &ownD );
+		objBlFrameDrop();
 	}
 	// where the gap lives: every slot of every row on one texture, GL against Vulkan (a reading, not the bar); the last
 	// reading is the fixture's own texture anisoAt at its anisotropy (the known driver difference)

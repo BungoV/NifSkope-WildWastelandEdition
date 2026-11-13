@@ -296,4 +296,10 @@ bool objBlFrameRead( GlProc gp, ObjBlDraw & d, std::string & why, int red = 0 );
 bool objBlFrame( int w, int h, int samples, unsigned colorFmt, unsigned dsFmt, unsigned & color, unsigned & ds, std::string & why );
 void objBlFrameDrop();
 bool objBlFrameIs( unsigned color );
+/*! lane VKOBJ4 gap 1: every sample of a multisampled shared frame read back on the present device (objbl_samples_cs.hlsl):
+ * GL's colour texture colorTex and depth-stencil texture dsTex (both shared targets of this context, D24S8 or D32FS8),
+ * one crossing after GL's draws. out: 4 words a sample, (y * w + x) * samples + s: red | green << 16 and blue | alpha << 16
+ * as half bits, the depth's float bits, the stencil. red 1 reads sample 0 for sample 1 (gates only: must move the result).
+ * false: why (out empty) */
+bool objBlFrameSamples( unsigned colorTex, unsigned dsTex, std::vector<std::uint32_t> & out, std::string & why, int red = 0 );
 }  // namespace WwVkPresent

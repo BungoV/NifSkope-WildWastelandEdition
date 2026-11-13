@@ -4,6 +4,7 @@
 #include "features/vkframe/objbl_vs.spv.h"  // the twins (vkframe_spirv.sh fxb: VS_SHIFT / PS_SHIFT, -D WW_VK_BINDLESS)
 #include "features/vkframe/objbl_cell_ps.spv.h"
 #include "features/vkframe/objbl_cellcsm_ps.spv.h"
+#include "features/vkframe/objbl_samples_cs.spv.h"  // the cell frame's per-sample readback (objBlFrameSamples)
 
 #include <algorithm>
 #include <cstdlib>
@@ -142,6 +143,16 @@ struct Op
 	bool pending = false;
 	int runMode = 0;
 	WwVkPresent::ObjBlRunStat st;
+	// the cell frame's per-sample readback (objBlFrameSamples): a compute pass on the crossing's command buffer
+	VkDescriptorSetLayout smpDsl = VK_NULL_HANDLE;
+	VkPipelineLayout smpLayout = VK_NULL_HANDLE;
+	VkPipeline smpPipe = VK_NULL_HANDLE;
+	VkDescriptorPool smpPool = VK_NULL_HANDLE;
+	VkDescriptorSet smpSet = VK_NULL_HANDLE;
+	VkImageView smpDepth = VK_NULL_HANDLE;    // the depth target's depth aspect, made per readback (a borrowed one's view has both)
+	VkImageView smpStencil = VK_NULL_HANDLE;  // the depth target's stencil aspect, made per readback
+	CsmBuf smpOut;                            // host-visible: one uint4 per sample
+	std::uint32_t smpJob[4] = {};             // w, h, samples, red (objbl_samples_cs.hlsl's ReadJob)
 };
 
 Op & opS()
@@ -862,10 +873,30 @@ void objBlPipeFree()
 {
 	Op & O = opS();
 	if ( ( !O.made.empty() || !O.pools.empty() || !O.draws.empty() || !O.stand.empty() || O.zeroTexel.buf || O.fence || O.runFence || O.glDone
-		|| !O.smps.empty() || !O.texTwins.empty() ) && vk().ok ) {
+		|| !O.smps.empty() || !O.texTwins.empty() || O.smpDsl ) && vk().ok ) {
 		Vk & v = vk();
 		drain();
 		v.vkDeviceWaitIdle( v.dev );
+		if ( O.smpStencil )
+			v.vkDestroyImageView( v.dev, O.smpStencil, nullptr );
+		if ( O.smpDepth )
+			v.vkDestroyImageView( v.dev, O.smpDepth, nullptr );
+		O.smpDepth = VK_NULL_HANDLE;
+		if ( O.smpPipe )
+			v.vkDestroyPipeline( v.dev, O.smpPipe, nullptr );
+		if ( O.smpLayout )
+			v.vkDestroyPipelineLayout( v.dev, O.smpLayout, nullptr );
+		if ( O.smpPool )
+			v.vkDestroyDescriptorPool( v.dev, O.smpPool, nullptr );
+		if ( O.smpDsl )
+			v.vkDestroyDescriptorSetLayout( v.dev, O.smpDsl, nullptr );
+		O.smpStencil = VK_NULL_HANDLE;
+		O.smpPipe = VK_NULL_HANDLE;
+		O.smpLayout = VK_NULL_HANDLE;
+		O.smpPool = VK_NULL_HANDLE;
+		O.smpDsl = VK_NULL_HANDLE;
+		O.smpSet = VK_NULL_HANDLE;
+		csmBufFree( O.smpOut, false );
 		for ( OpDraw & d : O.draws )
 			opDrawFree( d );
 		O.draws.clear();
@@ -1739,6 +1770,145 @@ bool opRunWork( std::string & why )
 		return why = "vkQueueSubmit (the shaded objects) returned " + std::to_string( int( r ) ), false;
 	return true;
 }
+
+// the crossing's fence, command buffer and semaphores (this GL context's), made once
+bool opRunMake( std::string & why )
+{
+	Vk & v = vk();
+	Gl & g = gl();
+	Op & O = opS();
+	if ( !O.runFence ) {
+		VkFenceCreateInfo fi { VK_STRUCTURE_TYPE_FENCE_CREATE_INFO };
+		VkCommandBufferAllocateInfo cai { VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO };
+		cai.commandPool = v.pool;
+		cai.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+		cai.commandBufferCount = 1;
+		if ( v.vkCreateFence( v.dev, &fi, nullptr, &O.runFence ) != VK_SUCCESS || v.vkAllocateCommandBuffers( v.dev, &cai, &O.runCmd ) != VK_SUCCESS )
+			return why = "the crossing's fence / command buffer failed", false;
+	}
+	if ( !O.glDone || O.semCtx != g.ctx ) {
+		opRunSemsDrop( false );  // another context's names: that context went
+		if ( !exportSem( O.glDone, O.glDoneGl, why ) || !exportSem( O.vkDone, O.vkDoneGl, why ) ) {
+			opRunSemsDrop( true );
+			return false;
+		}
+		O.semCtx = g.ctx;
+	}
+	return true;
+}
+
+// the readback's pipeline: objbl_samples_cs.hlsl (0-2 the frame's colour, depth, stencil; 3 the samples; the job pushed)
+bool opSmpMake( std::string & why )
+{
+	Vk & v = vk();
+	Op & O = opS();
+	if ( O.smpPipe )
+		return true;
+	if ( !v.vkCmdDispatch || !v.vkCreateComputePipelines )
+		return why = "no vkCmdDispatch / vkCreateComputePipelines", false;
+	VkDescriptorSetLayoutBinding b[4] = {};
+	for ( std::uint32_t k = 0; k < 4; k++ ) {
+		b[k].binding = k;
+		b[k].descriptorType = k < 3 ? VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE : VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+		b[k].descriptorCount = 1;
+		b[k].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+	}
+	VkDescriptorSetLayoutCreateInfo lci { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
+	lci.bindingCount = 4;
+	lci.pBindings = b;
+	const VkDescriptorPoolSize ps[2] = { { VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 3 }, { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1 } };
+	VkDescriptorPoolCreateInfo pci { VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO };
+	pci.maxSets = 1;
+	pci.poolSizeCount = 2;
+	pci.pPoolSizes = ps;
+	if ( v.vkCreateDescriptorSetLayout( v.dev, &lci, nullptr, &O.smpDsl ) != VK_SUCCESS
+		|| v.vkCreateDescriptorPool( v.dev, &pci, nullptr, &O.smpPool ) != VK_SUCCESS )
+		return why = "the readback's descriptor set layout / pool failed", false;
+	VkDescriptorSetAllocateInfo dai { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO };
+	dai.descriptorPool = O.smpPool;
+	dai.descriptorSetCount = 1;
+	dai.pSetLayouts = &O.smpDsl;
+	const VkPushConstantRange pc { VK_SHADER_STAGE_COMPUTE_BIT, 0, std::uint32_t( sizeof( O.smpJob ) ) };
+	VkPipelineLayoutCreateInfo plci { VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO };
+	plci.setLayoutCount = 1;
+	plci.pSetLayouts = &O.smpDsl;
+	plci.pushConstantRangeCount = 1;
+	plci.pPushConstantRanges = &pc;
+	if ( v.vkAllocateDescriptorSets( v.dev, &dai, &O.smpSet ) != VK_SUCCESS
+		|| v.vkCreatePipelineLayout( v.dev, &plci, nullptr, &O.smpLayout ) != VK_SUCCESS )
+		return why = "the readback's descriptor set / pipeline layout failed", false;
+	VkShaderModuleCreateInfo mci { VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO };
+	mci.codeSize = sizeof( vkframe_objbl_samples_cs_spv );
+	mci.pCode = vkframe_objbl_samples_cs_spv;
+	VkShaderModule cs = VK_NULL_HANDLE;
+	if ( v.vkCreateShaderModule( v.dev, &mci, nullptr, &cs ) != VK_SUCCESS )
+		return why = "the readback's shader module failed", false;
+	VkComputePipelineCreateInfo cp { VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO };
+	cp.stage = { VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO };
+	cp.stage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+	cp.stage.module = cs;
+	cp.stage.pName = "main";
+	cp.layout = O.smpLayout;
+	const bool ok = v.vkCreateComputePipelines( v.dev, VK_NULL_HANDLE, 1, &cp, nullptr, &O.smpPipe ) == VK_SUCCESS;
+	v.vkDestroyShaderModule( v.dev, cs, nullptr );
+	if ( !ok )
+		return why = "vkCreateComputePipelines (the readback) failed", false;
+	return true;
+}
+
+// the worker's half of objBlFrameSamples: the readback recorded, submitted after GL's signal, ours signalled back
+bool opSmpWork( std::string & why )
+{
+	Vk & v = vk();
+	Op & O = opS();
+	v.vkResetFences( v.dev, 1, &O.runFence );
+	v.vkResetCommandBuffer( O.runCmd, 0 );
+	VkCommandBufferBeginInfo bi { VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
+	bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+	v.vkBeginCommandBuffer( O.runCmd, &bi );
+	v.vkCmdBindPipeline( O.runCmd, VK_PIPELINE_BIND_POINT_COMPUTE, O.smpPipe );
+	v.vkCmdBindDescriptorSets( O.runCmd, VK_PIPELINE_BIND_POINT_COMPUTE, O.smpLayout, 0, 1, &O.smpSet, 0, nullptr );
+	v.vkCmdPushConstants( O.runCmd, O.smpLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof( O.smpJob ), O.smpJob );
+	v.vkCmdDispatch( O.runCmd, ( O.smpJob[0] + 7 ) / 8, ( O.smpJob[1] + 7 ) / 8, 1 );
+	VkMemoryBarrier mb { VK_STRUCTURE_TYPE_MEMORY_BARRIER };
+	mb.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+	mb.dstAccessMask = VK_ACCESS_HOST_READ_BIT;
+	v.vkCmdPipelineBarrier( O.runCmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_HOST_BIT, 0, 1, &mb, 0, nullptr, 0, nullptr );
+	if ( v.vkEndCommandBuffer( O.runCmd ) != VK_SUCCESS )
+		return why = "vkEndCommandBuffer (the readback) failed", false;
+	const VkPipelineStageFlags waitAt = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
+	VkSubmitInfo si { VK_STRUCTURE_TYPE_SUBMIT_INFO };
+	si.waitSemaphoreCount = 1;
+	si.pWaitSemaphores = &O.glDone;
+	si.pWaitDstStageMask = &waitAt;
+	si.commandBufferCount = 1;
+	si.pCommandBuffers = &O.runCmd;
+	si.signalSemaphoreCount = 1;
+	si.pSignalSemaphores = &O.vkDone;
+	const VkResult r = v.vkQueueSubmit( v.queue, 1, &si, O.runFence );
+	if ( r != VK_SUCCESS )
+		return why = "vkQueueSubmit (the readback) returned " + std::to_string( int( r ) ), false;
+	return true;
+}
+
+// a job handed to the worker (k = -1), waited for; its result
+bool opWorkerRun( bool ( *fn )( std::string & ), std::string & why )
+{
+	Worker & W = wk();
+	std::uint64_t want = 0;
+	{
+		std::lock_guard<std::mutex> lk( W.m );
+		want = W.toneDone + 1;
+	}
+	Work j;
+	j.k = -1;
+	j.fn = fn;
+	hand( j );
+	std::unique_lock<std::mutex> lk( W.m );
+	W.idle.wait( lk, [&W, want]() { return W.toneDone >= want; } );
+	why = W.toneWhy;
+	return W.toneOk;
+}
 }  // namespace
 
 namespace WwVkPresent
@@ -1807,23 +1977,8 @@ bool objBlRun( const std::vector<unsigned> & glBufs, int mode, std::string & why
 		return refuse( "mode " + std::to_string( mode ) );
 	opRunWait();
 	std::string w;
-	if ( !O.runFence ) {
-		VkFenceCreateInfo fi { VK_STRUCTURE_TYPE_FENCE_CREATE_INFO };
-		VkCommandBufferAllocateInfo cai { VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO };
-		cai.commandPool = v.pool;
-		cai.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-		cai.commandBufferCount = 1;
-		if ( v.vkCreateFence( v.dev, &fi, nullptr, &O.runFence ) != VK_SUCCESS || v.vkAllocateCommandBuffers( v.dev, &cai, &O.runCmd ) != VK_SUCCESS )
-			return refuse( "the crossing's fence / command buffer failed" );
-	}
-	if ( !O.glDone || O.semCtx != g.ctx ) {
-		opRunSemsDrop( false );  // another context's names: that context went
-		if ( !exportSem( O.glDone, O.glDoneGl, w ) || !exportSem( O.vkDone, O.vkDoneGl, w ) ) {
-			opRunSemsDrop( true );
-			return refuse( w );
-		}
-		O.semCtx = g.ctx;
-	}
+	if ( !opRunMake( w ) )
+		return refuse( w );
 	// the textures: every shared target a draw writes or reads, once
 	std::vector<GLuint> texs;
 	for ( std::size_t i = 0; i < O.live; i++ )
@@ -1839,24 +1994,7 @@ bool objBlRun( const std::vector<unsigned> & glBufs, int mode, std::string & why
 	O.runMode = mode;
 	g.signalSemaphore( O.glDoneGl, GLuint( bufs.size() ), bufs.data(), GLuint( texs.size() ), texs.data(), lay.data() );
 	g.flush();
-	Worker & W = wk();
-	std::uint64_t want = 0;
-	{
-		std::lock_guard<std::mutex> lk( W.m );
-		want = W.toneDone + 1;
-	}
-	Work j;
-	j.k = -1;
-	j.fn = opRunWork;
-	hand( j );
-	bool ok = false;
-	{
-		std::unique_lock<std::mutex> lk( W.m );
-		W.idle.wait( lk, [&W, want]() { return W.toneDone >= want; } );
-		ok = W.toneOk;
-		w = W.toneWhy;
-	}
-	if ( !ok )
+	if ( !opWorkerRun( opRunWork, w ) )
 		return refuse( w );  // nothing signals vkDone: GL does not wait it
 	g.waitSemaphore( O.vkDoneGl, GLuint( bufs.size() ), bufs.data(), GLuint( texs.size() ), texs.data(), lay.data() );
 	O.pending = true;
@@ -2122,6 +2260,82 @@ void objBlFrameDrop()
 bool objBlFrameIs( unsigned color )
 {
 	return sharedTargetIs( reinterpret_cast<std::uintptr_t>( &kFrameColor ), color );
+}
+
+bool objBlFrameSamples( unsigned colorTex, unsigned dsTex, std::vector<std::uint32_t> & out, std::string & why, int red )
+{
+	Vk & v = vk();
+	Gl & g = gl();
+	Op & O = opS();
+	out.clear();
+	if ( !v.ok || !g.ok || g.ctx != reinterpret_cast<void *>( wglGetCurrentContext() ) )
+		return why = "the present device or GL's entry points are not ready in this context", false;
+	if ( !g.signalSemaphore || !g.waitSemaphore )
+		return why = "no glSignalSemaphoreEXT / glWaitSemaphoreEXT", false;
+	// the frame: GL's two textures, both shared targets of this context, one size and sample count
+	const Shared * col = nullptr, * ds = nullptr;
+	for ( const auto & e : shareds() ) {
+		if ( e.second.glCtx != g.ctx )
+			continue;
+		if ( e.second.tex == GLuint( colorTex ) )
+			col = &e.second;
+		if ( e.second.tex == GLuint( dsTex ) )
+			ds = &e.second;
+	}
+	if ( !col || !ds )
+		return why = std::string( !col ? "the colour" : "the depth-stencil" ) + " texture is not a shared target", false;
+	if ( col->w != ds->w || col->h != ds->h || col->samples != ds->samples )
+		return why = "the colour and depth-stencil targets differ in size or samples", false;
+	if ( ds->fmt != VK_FORMAT_D24_UNORM_S8_UINT && ds->fmt != VK_FORMAT_D32_SFLOAT_S8_UINT )
+		return why = "the depth target has no stencil (the readback reads a depth-stencil frame)", false;
+	if ( col->samples < 2 || !col->view || !ds->img )
+		return why = "the readback reads a multisampled frame", false;
+	opRunWait();
+	if ( !opRunMake( why ) || !opSmpMake( why ) )
+		return false;
+	const std::size_t n = std::size_t( col->w ) * std::size_t( col->h ) * std::size_t( col->samples );
+	if ( !opHostBuf( O.smpOut, n * 16, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, why ) )
+		return false;
+	for ( VkImageView * iv : { &O.smpDepth, &O.smpStencil } )
+		if ( *iv )
+			v.vkDestroyImageView( v.dev, *iv, nullptr );
+	O.smpDepth = imageView( ds->img, VK_IMAGE_VIEW_TYPE_2D, ds->fmt, VK_IMAGE_ASPECT_DEPTH_BIT );
+	O.smpStencil = imageView( ds->img, VK_IMAGE_VIEW_TYPE_2D, ds->fmt, VK_IMAGE_ASPECT_STENCIL_BIT );
+	if ( !O.smpDepth || !O.smpStencil )
+		return why = "the depth target's depth / stencil view failed", false;
+	VkDescriptorImageInfo ii[3] = { { VK_NULL_HANDLE, col->view, VK_IMAGE_LAYOUT_GENERAL }, { VK_NULL_HANDLE, O.smpDepth, VK_IMAGE_LAYOUT_GENERAL },
+		{ VK_NULL_HANDLE, O.smpStencil, VK_IMAGE_LAYOUT_GENERAL } };
+	const VkDescriptorBufferInfo bi { O.smpOut.buf, 0, VkDeviceSize( n * 16 ) };
+	VkWriteDescriptorSet wr[4] = {};
+	for ( std::uint32_t k = 0; k < 4; k++ ) {
+		wr[k].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+		wr[k].dstSet = O.smpSet;
+		wr[k].dstBinding = k;
+		wr[k].descriptorCount = 1;
+		wr[k].descriptorType = k < 3 ? VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE : VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+		if ( k < 3 )
+			wr[k].pImageInfo = &ii[k];
+		else
+			wr[k].pBufferInfo = &bi;
+	}
+	v.vkUpdateDescriptorSets( v.dev, 4, wr, 0, nullptr );
+	O.smpJob[0] = std::uint32_t( col->w );
+	O.smpJob[1] = std::uint32_t( col->h );
+	O.smpJob[2] = std::uint32_t( col->samples );
+	O.smpJob[3] = std::uint32_t( red == 1 ? 1 : 0 );
+	// GL's draws into the frame before the read; the read before GL's next write into it
+	GLuint texs[2] = { col->tex, ds->tex };
+	GLenum lay[2] = { kLayoutGeneral, kLayoutGeneral };
+	g.signalSemaphore( O.glDoneGl, 0, nullptr, 2, texs, lay );
+	g.flush();
+	if ( !opWorkerRun( opSmpWork, why ) )
+		return false;  // nothing signals vkDone: GL does not wait it
+	g.waitSemaphore( O.vkDoneGl, 0, nullptr, 2, texs, lay );
+	O.pending = true;
+	opRunWait();
+	out.resize( n * 4 );
+	std::memcpy( out.data(), O.smpOut.ptr, n * 16 );
+	return true;
 }
 
 bool objBlShade( GlProc gp, const ObjBlShade & s, std::string & why )
