@@ -13,11 +13,12 @@
 //           and cube-map arrays, farTexelBuffer); every one it refuses for a format / kind is refused by waterTwin too
 //  device   the caps equal the features vkpresent.cpp enables (textureCompressionBC, imageCubeArray, samplerAnisotropy,
 //           tessellationShader)
-//  tess     the tessellated program reads tess, the others do not; its verdict names the tessellated twin
-// Reds (each must FAIL): bc (caps.bc on), int (the integer rows lost), drop (one census input lost), unit (two inputs'
-// textures swapped), tess (caps.tess on), empty (every census empty), ds (the D32F_S8 row lost), cube (caps.cubeArray
-// off), tbuf (caps.texelBuffer off), aniso (caps.aniso off). bc: caps.bc off (VKFAR1's BC twins lost). The fixture's classes are fixed (lane VKWATER2: the
-// integer lookups move); a red only mutates the caps or the census, never the expectation. Last line `WATERVIEW GATE OK` or `WATERVIEW GATE FAILED`.
+//  tess     the tessellated program reads tess, the others do not; its verdict does not name the tessellated twin
+//           (lane VKWATER2: tessellationShader on the present device)
+// Reds (each must FAIL): bc (caps.bc off: VKFAR1's BC twins lost), int (the integer rows lost), drop (one census input
+// lost), unit (two inputs' textures swapped), tess (caps.tess off), empty (every census empty), ds (the D32F_S8 row
+// lost), cube (caps.cubeArray off), tbuf (caps.texelBuffer off), aniso (caps.aniso off). The fixture's classes are fixed
+// (lane VKWATER2: every input moves); a red only mutates the caps or the census, never the expectation. Last line `WATERVIEW GATE OK` or `WATERVIEW GATE FAILED`.
 #define WW_VKPRESENT_NO_QT
 #include "../../src/features/vkframe/vkpresent.cpp"
 
@@ -332,7 +333,7 @@ int evaluate( World & wd, const Mut & m, bool loud )
 	if ( m.ds )  // the D32F_S8 row lost
 		caps.sharedFmt = []( unsigned f ) { return f != 0x8CADu && waterCaps().sharedFmt( f ); };
 	if ( m.tess )
-		caps.tess = true;
+		caps.tess = false;
 	std::vector<WaterCensus> cs = wd.cs;
 	if ( m.empty )
 		for ( auto & c : cs )
@@ -426,8 +427,8 @@ int evaluate( World & wd, const Mut & m, bool loud )
 	// tess
 	if ( !wd.tessC.tess )
 		bad( "tess program reads no tessellation stage" );
-	if ( !has( waterVerdict( wd.tessC, caps ), "the tessellated twin" ) )
-		bad( "tess verdict does not name the tessellated twin" );
+	if ( has( waterVerdict( wd.tessC, caps ), "the tessellated twin" ) )
+		bad( "tess verdict names the tessellated twin (tessellationShader lost)" );
 
 	if ( loud )
 		for ( auto & kv : byClass )

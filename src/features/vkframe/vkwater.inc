@@ -35,6 +35,7 @@ WaterCaps waterCaps()
 		c.cubeArray = fcFeatures( false, true, why );
 		c.texelBuffer = farTexelBufferMax() > 0;
 		c.aniso = vk().anisotropy;  // VKOBJ2's samplerAnisotropy
+		c.tess = vk().tess;  // lane VKWATER2: tessellationShader
 	}
 	return c;
 }

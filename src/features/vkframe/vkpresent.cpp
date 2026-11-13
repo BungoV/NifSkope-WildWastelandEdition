@@ -259,6 +259,7 @@ struct Vk
 	bool descIndexing = false, drawParams = false, anisotropy = false;
 	std::uint32_t blImageCap = 0, blSamplerCap = 0;
 	float maxAniso = 1.0f;
+	bool tess = false;  // lane VKWATER2: tessellationShader (the water's fo4_waterlookd / dp twin)
 };
 #undef VKP
 
@@ -532,6 +533,8 @@ bool makeDevice( std::string & why )
 	// without them), GL's anisotropic filtering for their samplers
 	en.samplerAnisotropy = offered.samplerAnisotropy;
 	v.anisotropy = offered.samplerAnisotropy == VK_TRUE;
+	en.tessellationShader = offered.tessellationShader;  // lane VKWATER2: the water's tessellated twin
+	v.tess = offered.tessellationShader == VK_TRUE;
 	VkPhysicalDeviceDescriptorIndexingFeatures ixEn { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES };
 	VkPhysicalDeviceShaderDrawParametersFeatures dpEn { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_DRAW_PARAMETERS_FEATURES };
 	{
