@@ -40,6 +40,8 @@
 #include "gl/celluniprof.h"	// lane PERFFIX1: WW_CELL_UNI_PROF
 #include "features/shared/glstatememo.h"	// lane EMPTY240 R11-2: the obscurance pass's state reads and target checks kept
 #include "gl/cellunirec.h"	// lane PERFFIX1: the cell-uniform class record
+#include "features/vkframe/vkpresent.h"	// lane VKLIGHT1: the AO stages on the present device
+#include <cstring>
 #include "features/clouds/cloudvol.h"	// lane LIGHTNING2: a storm's flash on the exterior ambient (wwLightningGround)
 #include "cellworldanim.h"	// lane NIFXLIGHT3: the world clock a .nifx light's dimmer follows
 #include "features/sky/atmosphere.h"	// lane FIX1101A (atmo): wwAtmoWbGain, the test white balance
@@ -472,6 +474,72 @@ void aoEcho( const QString & line )
 		return;
 	last = line;
 	std::fprintf( stderr, "cell ao: %s\n", qPrintable( line ) );
+}
+
+/* lane VKLIGHT1 (L1): the depth mips and the obscurance (stages 1-4) as Vulkan compute (ao_vk.hlsl) on GL's own targets.
+ * The g-buffer (stage 5) stays GL: it reads the depth-stencil resolve, which has no colour twin. false: why; GL's stages */
+bool aoVkStages( const AoGpu & g, bool obs, int W, int H, int hw, int hh, const int ms[5][2], float p00, float p11,
+	float radius, int angles, bool noBlur, bool noReset, std::string & why )
+{
+	WwVkPresent::LightRun t;
+	t.pass = WwVkPresent::LightAo;
+	auto img = [&]( const AoTarget & a, unsigned fmt, bool in, bool out ) {
+		WwVkPresent::LightImage i;
+		i.tex = a.tex;
+		i.glFmt = fmt;
+		i.w = a.w;
+		i.h = a.h;
+		i.in = in;
+		i.out = out;
+		t.img.push_back( i );
+		return int( t.img.size() ) - 1;
+	};
+	auto put = []( WwVkPresent::LightDispatch & d, int k, float x, float y, float z, float w ) {
+		const float v[4] = { x, y, z, w };
+		std::memcpy( d.pc + 16 * k, v, sizeof( v ) );
+	};
+	auto putI = []( WwVkPresent::LightDispatch & d, int x, int y ) {
+		const int v[4] = { x, y, 0, 0 };
+		std::memcpy( d.pc + 112, v, sizeof( v ) );
+	};
+	auto job = [&]( int kernel, int out0 ) {
+		WwVkPresent::LightDispatch d;
+		d.kernel = kernel;
+		d.out0 = out0;
+		put( d, 2, float( ms[1][0] ), float( ms[1][1] ), float( ms[2][0] ), float( ms[2][1] ) );
+		put( d, 3, float( ms[3][0] ), float( ms[3][1] ), float( ms[4][0] ), float( ms[4][1] ) );
+		put( d, 4, float( W ), float( H ), float( hw ), float( hh ) );
+		return d;
+	};
+	int mip[5] = { img( g.gbuf, GL_RGBA32F, true, false ), -1, -1, -1, -1 };
+	for ( int m = 1; m < 5; m++ )
+		mip[m] = img( g.mip[m], GL_R32F, false, true );
+	for ( int m = 1; m < 5; m++ ) {
+		WwVkPresent::LightDispatch d = job( WwVkPresent::LightAoMip, mip[m] );
+		putI( d, m, 0 );
+		d.t[0] = mip[m - 1];
+		t.d.push_back( d );
+	}
+	if ( obs ) {
+		const int raw = img( g.raw, GL_RG32F, false, true ), across = img( g.across, GL_RG32F, false, false ),
+			fin = img( g.fin, GL_R32F, false, true );
+		WwVkPresent::LightDispatch d = job( WwVkPresent::LightAoRaw, raw );
+		put( d, 0, p00, p11, radius, kAoBias );
+		put( d, 1, kAoIntensity, 0.0f, 0.0f, 0.0f );
+		putI( d, angles, noReset ? 1 : 0 );
+		for ( int k = 0; k < 5; k++ )
+			d.t[k] = mip[k];
+		t.d.push_back( d );
+		d = job( WwVkPresent::LightAoBlur, across );
+		putI( d, 0, noBlur ? 1 : 0 );
+		d.t[0] = raw;
+		t.d.push_back( d );
+		d = job( WwVkPresent::LightAoBlurF, fin );
+		putI( d, 1, noBlur ? 1 : 0 );
+		d.t[0] = across;
+		t.d.push_back( d );
+	}
+	return WwVkPresent::lightRun( t, why );
 }
 
 // lane SSAO2: FO4 Community Shaders' SSAO defaults (radius 1.2 x 32 units, falloff, intensity, power, quality, denoise)
@@ -1110,15 +1178,27 @@ void wwCellAoPass( Scene * scene, bool run )
 		fn->glViewport( 0, 0, out.w, out.h );
 		r->drawShape( 4, 3, 6, GL_TRIANGLES, GL_UNSIGNED_SHORT, &attrs, idx );
 	};
-	for ( int m = 1; m < 5; m++ ) {
-		prog->uni1i( "mipLevel", m );
-		pass( 1, g.mip[m], m > 1 ? &g.mip[m - 1] : nullptr );
+	// the obscurance itself; the pyramid is shared. A ported method skips it
+	const bool aoObs = a.on && ( method == WwAoVanilla || a.methodRed == 1 );
+	// lane VKLIGHT1 (L1): the pyramid and the obscurance on the present device (WW_VKVIEW=1; red WW_VKVIEW_AO_RED=1: GL)
+	bool aoVk = false;
+	if ( WwVkPresent::shareWanted( "WW_VKVIEW_AO_RED" ) ) {
+		std::string why;
+		aoVk = aoVkStages( g, aoObs, W, H, hw, hh, ms, p00, p11, radius, angles, ( a.red & 4 ) != 0, ( a.red & 8 ) != 0, why );
+		WwVkPresent::lightSay( WwVkPresent::LightAo, true, nullptr );
+	} else {
+		WwVkPresent::lightSay( WwVkPresent::LightAo, false, "red WW_VKVIEW_AO_RED=1 or the view not on Vulkan" );
 	}
-	// the obscurance itself; the pyramid above is shared. A ported method skips it
-	if ( a.on && ( method == WwAoVanilla || a.methodRed == 1 ) ) {
-		pass( 2, g.raw, nullptr );
-		pass( 3, g.across, &g.raw );
-		pass( 4, g.fin, &g.across );
+	if ( !aoVk ) {
+		for ( int m = 1; m < 5; m++ ) {
+			prog->uni1i( "mipLevel", m );
+			pass( 1, g.mip[m], m > 1 ? &g.mip[m - 1] : nullptr );
+		}
+		if ( aoObs ) {
+			pass( 2, g.raw, nullptr );
+			pass( 3, g.across, &g.raw );
+			pass( 4, g.fin, &g.across );
+		}
 	}
 	r->stopProgram();
 	g.aoTex = a.on ? g.fin.tex : 0;
