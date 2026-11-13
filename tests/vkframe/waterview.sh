@@ -18,10 +18,12 @@ W="$ROOT/res/shaders/hlsl/water"
 ARGS=()
 # the default Ultra twin, the Medium twin (both as the app injects WW_CELL_FOGLEAK + WW_FRAME_UBO), the Medium base;
 # DXC drops cell_lights.glsl's unused texel buffers and cube-map array: waterview.cpp adds those two by their GLSL names
+# (lane HLSLSRC2: one readable source a program, the variant by -D: <tag>=<source>[__<A+B>])
 for tw in "ultra=fo4_waterlook_ps__WW_CELL_FOGLEAK+WW_FRAME_UBO" "medium=fo4_waterlookm_ps__WW_CELL_FOGLEAK+WW_FRAME_UBO" \
 	"mbase=fo4_waterlookm_ps"; do
 	tag=${tw%%=*}; src=${tw#*=}
-	"$DXC" -spirv -fspv-target-env=vulkan1.2 -O0 -fspv-preserve-bindings -T ps_6_0 -E main -fvk-b-shift 0 0 -fvk-t-shift 64 0 \
+	DEFS=(); case "$src" in *__*) v=${src#*__}; src=${src%%__*}; IFS=+ read -ra vv <<< "$v"; for d in "${vv[@]}"; do DEFS+=(-D "$d=1"); done ;; esac
+	"$DXC" -spirv -fspv-target-env=vulkan1.2 -O0 -fspv-preserve-bindings -T ps_6_0 -E main "${DEFS[@]}" -fvk-b-shift 0 0 -fvk-t-shift 64 0 \
 		-fvk-s-shift 128 0 -fvk-u-shift 192 0 -I "$W" -I "$W/.." "$W/$src.hlsl" -Fo "$OUT/$tag.spv" > "$OUT/$tag.dxc.log" 2>&1 \
 		|| { echo "WATERVIEW GATE FAILED (dxc $src)"; exit 1; }
 	"$SC" "$OUT/$tag.spv" --reflect --output "$OUT/$tag.json" > /dev/null 2>&1 || { echo "WATERVIEW GATE FAILED (reflect $tag)"; exit 1; }
