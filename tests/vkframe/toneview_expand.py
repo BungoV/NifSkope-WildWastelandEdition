@@ -11,8 +11,17 @@ sys.path.insert(0, os.path.join(TREE, 'tests', 'spells'))
 import shader_link_check as S  # noqa: E402
 
 out = sys.argv[1]
+# lane VKBLOOM1: + the Fusion Shaders bloom's chain and the exposure measure (the BLOOM arm's GL reference)
+POST = ('res', 'shaders', 'features', 'post')
 for name, rel in (('cell_hdr.vert.glsl', ('res', 'shaders', 'cell_hdr.vert')),
-                  ('cell_hdr.frag.glsl', ('res', 'shaders', 'features', 'exposure', 'cell_hdr.frag'))):
+                  ('cell_hdr.frag.glsl', ('res', 'shaders', 'features', 'exposure', 'cell_hdr.frag')),
+                  ('cell_ao.vert.glsl', ('res', 'shaders', 'cell_ao.vert')),
+                  ('cell_bloom_src.frag.glsl', POST + ('cell_bloom_src.frag',)),
+                  ('cell_bloom_down.frag.glsl', POST + ('cell_bloom_down.frag',)),
+                  ('cell_bloom_hold.frag.glsl', POST + ('cell_bloom_hold.frag',)),
+                  ('cell_bloom_up.frag.glsl', POST + ('cell_bloom_up.frag',)),
+                  ('cell_bloom_comb.frag.glsl', POST + ('cell_bloom_comb.frag',)),
+                  ('cell_is_measure_q.frag.glsl', ('res', 'shaders', 'features', 'exposure', 'cell_is_measure_q.frag'))):
     src = S.expand(os.path.join(TREE, *rel))
     with open(os.path.join(out, name), 'w', newline='\n', encoding='latin-1') as f:
         f.write(src)

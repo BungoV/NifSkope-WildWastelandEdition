@@ -101,9 +101,29 @@ bool toneFrame( int w, int h, int samples, unsigned & color, unsigned & ds, std:
 bool toneFrameIs( unsigned color );
 //! the shared frame goes (GL current)
 void toneFrameDrop();
+/* Lane VKBLOOM1: the Fusion Shaders bloom (cellbloom.cpp, mode 3) on the present device, in the tone pass's command
+ * buffer before its draws: the source from the shared frame, down / hold / up, the per-pixel combine (vkframe.cpp's
+ * kernels, the same SPIR-V), then mode 3 over the backdrop the view holds after modes 0-2. cellbloom.cpp fills it. */
+constexpr int kToneBloomMips = 12;
+struct ToneBloom
+{
+	int mips = 0;
+	int dims[kToneBloomMips][2] = {};
+	float thr = 1.0f, knee = 0.5f;
+	int red = 0;
+	bool hold = false;
+	int holdK = 0, holdN = 1;
+	float radius = 1.0f, dispersion = 0.0f;
+	float srcW[kToneBloomMips] = {}, accW[kToneBloomMips] = {};
+	float exposure = 1.0f;  //!< cell_bloom_src.frag's uniforms
+	bool on = false;
+	float impulseX = 0.0f, impulseY = 0.0f, impulse = 0.0f;
+};
 struct ToneRun
 {
 	ToneJob job;
+	const ToneBloom * bloom = nullptr;  //!< lane VKBLOOM1: flag 7 (and 11) on: the bloom runs in this pass
+	int measQw = 0, measQh = 0;         //!< lane VKBLOOM1: the exposure measure's quarter size (0: not asked)
 	bool splitSky = false;   //!< mode 0 where the depth is nearer than the far plane, mode 2 (premultiplied) where it is not
 	bool sorted = true;      //!< the stencil sorts the pixels: mode 0 takes stencil 1, mode 1 stencil 2 after it
 	const std::uint8_t * lut = nullptr;  //!< the grading LUT, 16^3 RGB8 (null: none); uploaded when lutGen changes
@@ -117,6 +137,15 @@ struct ToneRun
 /* GL current, the view (viewBegin) bound and the frame's depth already in it: the tone draws on Vulkan into the view.
  * false: why; nothing drawn (GL draws its quads). */
 bool toneRun( const ToneRun & t, std::string & why );
+//! lane VKBLOOM1: the bloom can run in the tone pass (the stage made, not broken; the frame multisample)
+bool toneBloomReady();
+//! lane VKBLOOM1: toneRun calls that took a bloom (cellbloom.cpp resets its hold when one was lost)
+std::uint64_t toneBloomRuns();
+//! lane VKBLOOM1: the last toneRun recorded the measure it was asked for
+bool toneMeasureRan();
+/* lane VKBLOOM1: the measure's quarter values (RGBA32F, qw x qh) read back in the pass's command buffer. 1: px valid until
+ * the next toneRun, tex its GL name (the shared target; GL may blur it); 0: none waits; -1: its pass is not done yet. */
+int toneMeasureTake( const float *& px, int & qw, int & qh, unsigned & tex );
 //! a frame whose tone map stayed on GL while the stage was wanted, and why (the telemetry)
 void toneOnGl( const char * why );
 struct ToneStat
@@ -127,8 +156,16 @@ struct ToneStat
 	std::string glWhy, failWhy;        //!< the last reasons
 	int pipelines = 0;                 //!< built for the frame's samples
 	double buildMs = 0.0;
+	int deferred = 0, flushed = 0;     //!< lane VKPOST2: runs left for the TAA's crossing; of those, crossed alone (toneFlush)
+	int bloom = 0, measure = 0;        //!< lane VKBLOOM1: runs that carried the Fusion Shaders bloom / the exposure measure
 };
 ToneStat takeToneStat();
+/* Lane VKPOST2: the merged crossing. toneRun may DEFER its crossing (state recorded, no GL signal) when the last TAA ran
+ * on Vulkan right after it: the TAA's crossing then carries the tone pass too (TaaRun::colorFromView). Any GL pass that
+ * reads or draws the view between the two calls toneFlush() first (GL current): the deferred pass crosses alone.
+ * tonePending: a deferred pass waits. Red WW_VKVIEW_MERGE_RED=1: never deferred (two crossings). */
+bool tonePending();
+bool toneFlush( std::string * why = nullptr );
 //! the pipeline cache file (empty: none); the Qt part sets it before the first toneFrame
 void toneCachePath( const std::string & path );
 
@@ -177,6 +214,8 @@ struct TaaRun
 	std::uintptr_t cur = 0, depth = 0, mv = 0, pic = 0, hist[2] = {}, lock[2] = {};  //!< sharedTarget keys
 	unsigned vel = 0, mask = 0;     //!< TAAINPUTS1's GL textures (RG16F / RGBA8; 0: none), copied into shared twins
 	std::uintptr_t velKey = 0, maskKey = 0;
+	bool colorFromView = false;     //!< lane VKPOST2: GL skipped its colour blit; Vulkan resolves the view into cur behind
+	                                //!< the deferred tone pass (one crossing for both). Refused without a deferred pass.
 };
 /* GL current, the view bound, the frame's colour and depth already blitted into the shared cur / depth: the vectors,
  * resolve and copy-back run on Vulkan. false: why; nothing drawn (GL runs its passes). */
@@ -190,8 +229,137 @@ struct TaaStat
 	std::string glWhy, failWhy;
 	int pipelines = 0;
 	double buildMs = 0.0;
+	int merged = 0;                    //!< lane VKPOST2: runs that carried the deferred tone pass (one crossing)
 };
 TaaStat takeTaaStat();
+
+/* Lane VKSKY1 (row G, the sky first): the cell sky (atmo_sky.frag, step 3 of wwAtmoDrawSky) as a Vulkan fragment pass
+ * into the tone frame (toneFrame's colour), res/shaders/hlsl/sky/atmo_sky_ps.hlsl. GL builds the LUTs as before; skyRun
+ * copies the four into shared twins (sharedTarget), GL signals, the worker draws one full-screen triangle at the frame's
+ * samples (no depth or stencil attachment: GL's quad ran with both off), GL waits Vulkan's signal and draws the rest of
+ * the backdrop and the objects on it. Red WW_VKVIEW_SKY_RED=1 (or WW_VKVIEW off): GL's quad. */
+struct SkyField
+{
+	const char * name;
+	int offset, words, count;  //!< bytes into LooseUniforms; floats (or ints) a member; array length (1: plain)
+	bool isInt;
+};
+//! atmo_sky_ps.hlsl's LooseUniforms (b31), offsets from spirv-cross --reflect of sky_view_ps.spv.h (block 564 B)
+constexpr SkyField kSkyFields[] = {
+	{ "atHaze", 0, 3, 1, false }, { "atRay", 16, 3, 1, false }, { "atMieS", 28, 1, 1, false }, { "atHazeSpec", 32, 3, 1, false },
+	{ "atHazeAlbedo", 48, 3, 1, false }, { "atMieE", 60, 1, 1, false }, { "atOzone", 64, 3, 1, false }, { "atMsOld", 76, 1, 1, false },
+	{ "atG", 80, 1, 1, false }, { "sceneExposure", 84, 1, 1, false }, { "viewTransform", 88, 1, 1, true }, { "atCamR", 92, 1, 1, false },
+	{ "atViewSize", 96, 2, 1, false }, { "atTint", 112, 3, 17, false }, { "atRect", 384, 4, 1, false }, { "atPerPixel", 400, 1, 1, false },
+	{ "atSunK", 404, 1, 1, false }, { "atMsSize", 408, 2, 1, false }, { "atMsOn", 416, 1, 1, false }, { "atGround", 420, 1, 1, false },
+	{ "atSunW", 432, 3, 1, false }, { "atMoonK", 444, 1, 1, false }, { "atMoonW", 448, 3, 1, false }, { "atFloor", 464, 3, 1, false },
+	{ "atRecNight", 480, 2, 1, false }, { "atTintOn", 488, 1, 1, false }, { "atInscatter", 496, 3, 1, false }, { "atDirIns", 512, 3, 1, false },
+	{ "atDirL", 528, 3, 1, false }, { "atDirExp", 540, 1, 1, false }, { "atSunSize", 544, 1, 1, false }, { "atLimb", 548, 1, 1, false },
+	{ "atDiscAir", 552, 1, 1, false }, { "atDiscHue", 556, 1, 1, false }, { "atDiscCap", 560, 1, 1, false },
+};
+constexpr int kSkyLooseBytes = 576;   //!< the block (564) rounded to 16
+constexpr int kSkyGlobalBytes = 336;  //!< NifSkopeOpenGLContext::GlobalUniforms (b0), copied as is
+struct SkyRun
+{
+	int w = 0, h = 0;              //!< the tone frame
+	int vp[4] = {};                //!< GL's viewport (x, y, w, h): the pass's viewport and scissor
+	unsigned color = 0;            //!< the tone frame's colour name (toneFrameIs)
+	unsigned lut[4] = {};          //!< GL's RGBA16F 2D LUTs: transmittance, multiple scattering, sun view, moon view
+	int lutW[4] = {}, lutH[4] = {};
+	std::uintptr_t lutKey[4] = {}; //!< their shared twins' keys (sharedTarget)
+	std::uint8_t global[kSkyGlobalBytes] = {};
+	std::uint8_t loose[kSkyLooseBytes] = {};
+};
+/* GL current, the tone frame bound as GL's draw target, the LUTs drawn: the sky's pixels drawn on Vulkan. false: why;
+ * nothing drawn (GL draws its quad). */
+bool skyRun( const SkyRun & t, std::string & why );
+//! a frame whose sky stayed on GL while the stage was wanted, and why (the telemetry)
+void skyOnGl( const char * why );
+struct SkyStat
+{
+	int runs = 0, gl = 0, fails = 0;   //!< since the last take
+	double cpuMs = 0.0, maxMs = 0.0;   //!< the drawing thread's skyRun ms
+	std::string glWhy, failWhy;
+	int pipelines = 0;
+	double buildMs = 0.0;
+};
+SkyStat takeSkyStat();
+
+/* Lane VKLIGHT1 (plan rows L1-L3): AO (ao_vk.hlsl: gbuf, 4 mips, raw, across, fin), the contact shadow lines
+ * (contact_vk.hlsl) and the SSGI cast (ssgi_vk.hlsl) as Vulkan compute on the present device. The caller lists GL's own
+ * textures and the dispatches its GL stages would draw; lightRun copies the `in` textures into shared twins, GL signals,
+ * the worker records the dispatches (LightBindingsVk.hlsli's set, a 128-byte push block each), GL waits and copies the
+ * `out` twins back into GL's textures, so every consumer reads what it read before. false: why; nothing changed (GL draws
+ * its stages). Reds WW_VKVIEW_AO_RED / _CONTACT_RED / _SSGI_RED = 1 (or WW_VKVIEW off): GL. */
+enum LightPass { LightAo = 0, LightContact = 1, LightSsgi = 2, LightPasses = 3 };
+enum LightKernel { LightAoGbuf = 0, LightAoMip, LightAoRaw, LightAoBlur, LightAoBlurF, LightContactK, LightSsgiK, LightKernels };
+struct LightImage
+{
+	unsigned tex = 0;              //!< GL's texture (GL_TEXTURE_2D)
+	unsigned glFmt = 0;            //!< its internal format: RGBA32F / RGBA16F / RG32F / R32F / R8 / RG8
+	int w = 0, h = 0, levels = 1;  //!< levels > 1: every level is copied in (an input only)
+	bool in = false, out = false;  //!< copied into the twin before / back into GL's texture after
+};
+struct LightDispatch
+{
+	int kernel = 0;
+	std::uint8_t pc[128] = {};     //!< LpxJob
+	int out0 = -1, out1 = -1;      //!< image indices (storage targets)
+	int t[5] = { -1, -1, -1, -1, -1 };  //!< sampled images (-1: unbound)
+	int gx = 0, gy = 0;            //!< gx > 0: these groups; else 8x8 groups over out0
+};
+struct LightRun
+{
+	int pass = 0;
+	std::vector<LightImage> img;
+	std::vector<LightDispatch> d;
+	std::vector<std::uint8_t> buf; //!< binding 9 (the contact bands); empty: 256 zero bytes
+};
+//! GL current, its inputs drawn: the dispatches run on Vulkan and the outputs are back in GL's textures
+bool lightRun( const LightRun & t, std::string & why );
+//! a frame whose pass stayed on GL while it was wanted, and why (the telemetry)
+void lightOnGl( int pass, const char * why );
+struct LightStat
+{
+	int runs = 0, gl = 0, fails = 0;   //!< since the last take
+	double cpuMs = 0.0, maxMs = 0.0;   //!< the drawing thread's lightRun ms
+	std::string glWhy, failWhy;
+	int pipelines = 0;
+	double buildMs = 0.0;
+};
+LightStat takeLightStat( int pass );
+
+/* Lane VKLIGHT2 (row L4): the reflections' full-screen stages (cell_ssr.frag 5, 1-4) as Vulkan compute,
+ * res/shaders/hlsl/vklight/ssr_vk.hlsl (SSR_LIVE). GL keeps stage 0, the scene pass and the water's rays; the pass's own
+ * targets (scene, water ray, ray, raw, across, fin) are shared (sharedTarget); the g-buffer, the depth mips (one R32F atlas,
+ * side by side) and the previous frame are copied into twins. One crossing. Red WW_VKVIEW_SSR_RED=1: GL's quads. */
+struct SsrRun
+{
+	int W = 0, H = 0, hw = 0, hh = 0;
+	unsigned gbuf = 0;                      //!< RGBA32F W x H (the obscurance pass's)
+	unsigned mip[5] = {};                   //!< 1..4: R32F min-of-2x2 depth
+	int mipW[5] = {}, mipH[5] = {};
+	std::uintptr_t gbufKey = 0, atlasKey = 0, prevKey = 0;  //!< the twins' keys
+	unsigned prev = 0, prevFmt = 0;         //!< the previous frame (RGBA16F or RGBA32F), when prevOn
+	unsigned scene = 0, wray = 0, ray = 0, raw = 0, across = 0, fin = 0;  //!< the shared targets' GL names
+	std::uintptr_t sceneKey = 0, wrayKey = 0, rayKey = 0, rawKey = 0, acrossKey = 0, finKey = 0;
+	bool haveWater = false, waterLook = false, prevOn = false, stage5 = false, march = false;
+	float c[6][4] = {};                     //!< ssr_vk.hlsl's push c[0..5] (ssrRun adds c[6], the atlas offsets)
+	int i[4] = {};
+	float prevM[9] = {}, prevT[3] = {}, prevProj[2] = {};  //!< M row-major (GL's GL_TRUE upload)
+	int red = 0;  //!< gates only: 1 atlas offsets off by one, 2 M untransposed, 4 water look on the base pipelines, 8 no stage 5
+};
+//! GL current, the scene pass and the water's rays drawn: stage 5 (stage5) and 1-4 (march) on Vulkan. false: why; GL runs them
+bool ssrRun( const SsrRun & t, std::string & why );
+void ssrOnGl( const char * why );
+struct SsrStat
+{
+	int runs = 0, gl = 0, fails = 0;
+	double cpuMs = 0.0, maxMs = 0.0;
+	std::string glWhy, failWhy;
+	int pipelines = 0;
+	double buildMs = 0.0;
+};
+SsrStat takeSsrStat();
 
 }
 
@@ -213,5 +381,7 @@ bool toneWanted();
 /* lane VKSHARE1: a pass's targets go on the present device this frame (sharedTarget): the view on Vulkan with its size
  * settled (viewFbo), and the pass's red (redEnv=1) unset */
 bool shareWanted( const char * redEnv );
+//! lane VKLIGHT1: the pass's route line ("vk ao:", "vk contact:", "vk ssgi:"), one a 5 s window while on Vulkan
+void lightSay( int pass, bool wanted, const char * glWhy );
 }
 #endif

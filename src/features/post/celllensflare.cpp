@@ -4,6 +4,7 @@
 #include "features/post/celllensflare.h"
 #include "wwswitch.h"
 
+#include "features/vkframe/vkpresent.h"	// lane VKPOST2: a deferred tone pass crosses before the flare draws into the view
 #include "features/weather/esmweather.h"
 #include "gl/celllights.h"
 #include "gl/celllooks.h"
@@ -183,6 +184,7 @@ int wwCellLensFlareDraw( Scene * scene )
 	}
 	if ( picks.empty() )
 		return 0;
+	WwVkPresent::toneFlush();	// lane VKPOST2: additive over the view: the tone map lands first
 
 	NifSkopeOpenGLContext::Program * prog = r->useProgram( "cell_lensflare.prog" );
 	if ( !prog )

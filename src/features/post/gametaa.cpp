@@ -971,7 +971,24 @@ bool taaResolveImpl( Scene * scene, const LinearIn * lin )
 	static const std::uint16_t idx[6] = { 0, 1, 2, 2, 1, 3 };
 	const float * attrs = quad;
 	bool msOk = true;
-	if ( !linear ) {
+	/* lane VKPOST2: the tone pass waits on Vulkan (deferred): this frame's TAA crossing carries it and resolves the view
+	 * into cur on Vulkan, so GL skips its colour blit (one crossing, not two). Otherwise the tone pass crosses first. */
+	bool colorSkipped = g.vk && !linear && WwVkPresent::tonePending();
+	if ( !colorSkipped )
+		WwVkPresent::toneFlush();
+	auto colorBack = [&]() {	// the merged crossing refused: the tone pass alone, then GL's colour blit after all
+		if ( !colorSkipped )
+			return;
+		colorSkipped = false;
+		WwVkPresent::toneFlush();
+		fn->glBindFramebuffer( GL_READ_FRAMEBUFFER, GLuint( prevDraw ) );
+		fn->glBindFramebuffer( GL_DRAW_FRAMEBUFFER, g.inFbo );
+		fn->glDisable( GL_SCISSOR_TEST );
+		fn->glBlitFramebuffer( 0, 0, W, H, 0, 0, W, H, GL_COLOR_BUFFER_BIT, GL_NEAREST );
+	};
+	if ( colorSkipped ) {
+		// the colour comes from the view on Vulkan (taaRun's colorFromView)
+	} else if ( !linear ) {
 		fn->glBlitFramebuffer( 0, 0, W, H, 0, 0, W, H, GL_COLOR_BUFFER_BIT, GL_NEAREST );
 	} else if ( s.taa2LinearBlit ) {	// the red: TAA3's plain blit of the linear frame (its samples averaged in light)
 		fn->glBindFramebuffer( GL_READ_FRAMEBUFFER, lin->fbo );
@@ -1021,6 +1038,8 @@ bool taaResolveImpl( Scene * scene, const LinearIn * lin )
 	fn->glColorMask( GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE );
 
 	bool ok = blitErr == GL_NO_ERROR && msOk;
+	if ( !ok )
+		colorBack();	// lane VKPOST2: no crossing this frame takes the deferred tone pass
 	const Matrix4 reproj4 = toMatrix4( reproj );
 
 	// 2. the motion vectors (t2): the camera's reprojection of the frame's depth (lane VKSHARE1: on the Vulkan route
@@ -1226,9 +1245,11 @@ bool taaResolveImpl( Scene * scene, const LinearIn * lin )
 			t.mask = ( inputs & 2 ) ? maskTex : 0;
 			t.velKey = g.vkKey + 8;
 			t.maskKey = g.vkKey + 9;
+			t.colorFromView = colorSkipped;
 			std::string why;
 			vkDrew = WwVkPresent::taaRun( t, why );
 			if ( vkDrew ) {
+				colorSkipped = false;
 				g.vkMiss = 0;
 				g.mvOk = true;
 				taa2Inputs = inputs;
@@ -1237,6 +1258,7 @@ bool taaResolveImpl( Scene * scene, const LinearIn * lin )
 			} else {
 				if ( ++g.vkMiss >= 60 )
 					g.vkFailed = true;	// next frame: GL's own targets at this size
+				colorBack();
 				ok = mvPass();
 				fn->glBindFramebuffer( GL_FRAMEBUFFER, g.outFbo );	// its three draw buffers are the framebuffer's own state
 			}
