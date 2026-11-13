@@ -66,13 +66,24 @@ struct ObjBlBuffer
 	std::uint32_t binding = 0, stride = 0;
 	bool perInstance = false;
 };
-//! the frame the pipeline draws into, as GL's cell pass draws (colour formats as VkFormat, GL's depth state)
+//! GL's blend and colour mask as one state for every colour target (VkBlendFactor / VkBlendOp; writeMask: VkColorComponentFlags)
+struct ObjBlBlend
+{
+	std::uint32_t on = 0, srcColor = 1, dstColor = 0, colorOp = 0, srcAlpha = 1, dstAlpha = 0, alphaOp = 0, writeMask = 0xF;
+};
+//! the frame the pipeline draws into, as GL's cell pass draws (colour formats as VkFormat, GL's depth and blend state)
 struct ObjBlTarget
 {
 	std::uint32_t colors[4] = {}, colorCount = 0, depth = 0, samples = 1;
 	std::uint32_t depthOp = 3;  //!< a VkCompareOp (3 = LESS_OR_EQUAL)
 	bool depthWrite = false, twoSided = false;
+	ObjBlBlend blend;
 };
+/*! GL's fixed state as the pipeline takes it, for `colorCount` draw buffers: depth test / function / mask, culling, blend
+ * (per draw buffer: they must agree; a constant factor is refused) and the colour mask. Refused with a reason: stencil or
+ * scissor on, depth test off, culling other than back faces with CCW front. red 1 reads source and destination swapped
+ * (gates only: it must FAIL) */
+bool objBlTargetState( GlProc gp, std::uint32_t colorCount, ObjBlTarget & t, std::string & why, int red = 0 );
 struct ObjBlPipeInfo
 {
 	int set0 = 0, ubos = 0, images = 0, texels = 0, samplers = 0, ssbos = 0, vsOnly = 0, psOnly = 0, both = 0;
@@ -225,7 +236,7 @@ ObjBlRunStat takeObjBlRunStat();  //!< and starts the next count
 
 /* the app's crossing (cellbindless.cpp runIssue, WW_VKOBJ_SHADE=1): one multi-draw run of class `poolKey` on Vulkan instead
  * of GL's glMultiDrawElementsIndirect. Read from GL here: the draw framebuffer (every colour draw buffer and the depth must
- * be shared targets), the depth / cull state (refused: blend, stencil, a colour mask, a viewport that is not the frame),
+ * be shared targets), the depth / cull / blend state (objBlTargetState; refused: a viewport that is not the frame),
  * program `prog`'s uniforms (objBlMirror). The rows are the run's own from its leader: Vulkan's wwDrawBase is 0 (GL's
  * wwDrawIdx is not a module member: the mirror leaves it 0). false: why (nothing drawn; GL draws the run) */
 struct ObjBlShade

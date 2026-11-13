@@ -142,7 +142,8 @@ bool opSame( const OpEntry & e, int twin, const std::uint32_t * vs, std::size_t 
 		return false;
 	const WwVkPresent::ObjBlTarget & u = e.target;
 	if ( std::memcmp( t.colors, u.colors, sizeof( t.colors ) ) || t.colorCount != u.colorCount || t.depth != u.depth || t.samples != u.samples
-		|| t.depthOp != u.depthOp || t.depthWrite != u.depthWrite || t.twoSided != u.twoSided )
+		|| t.depthOp != u.depthOp || t.depthWrite != u.depthWrite || t.twoSided != u.twoSided
+		|| std::memcmp( &t.blend, &u.blend, sizeof( t.blend ) ) )
 		return false;
 	for ( std::size_t i = 0; i < b.size(); i++ )
 		if ( b[i].binding != e.buffers[i].binding || b[i].stride != e.buffers[i].stride || b[i].perInstance != e.buffers[i].perInstance )
@@ -653,8 +654,17 @@ bool objBlPipe( int twin, const std::uint32_t * vs, std::size_t vsN, const std::
 	ds.depthWriteEnable = target.depth && target.depthWrite ? VK_TRUE : VK_FALSE;
 	ds.depthCompareOp = VkCompareOp( target.depthOp );
 	std::vector<VkPipelineColorBlendAttachmentState> cba( target.colorCount );
-	for ( VkPipelineColorBlendAttachmentState & c : cba )
-		c.colorWriteMask = 0xF;
+	for ( VkPipelineColorBlendAttachmentState & c : cba ) {
+		const ObjBlBlend & b = target.blend;
+		c.blendEnable = b.on ? VK_TRUE : VK_FALSE;
+		c.srcColorBlendFactor = VkBlendFactor( b.srcColor );
+		c.dstColorBlendFactor = VkBlendFactor( b.dstColor );
+		c.colorBlendOp = VkBlendOp( b.colorOp );
+		c.srcAlphaBlendFactor = VkBlendFactor( b.srcAlpha );
+		c.dstAlphaBlendFactor = VkBlendFactor( b.dstAlpha );
+		c.alphaBlendOp = VkBlendOp( b.alphaOp );
+		c.colorWriteMask = b.writeMask;
+	}
 	VkPipelineColorBlendStateCreateInfo cbs { VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO };
 	cbs.attachmentCount = std::uint32_t( cba.size() );
 	cbs.pAttachments = cba.data();
@@ -1651,6 +1661,98 @@ ObjBlRunStat takeObjBlRunStat()
 	return s;
 }
 
+bool objBlTargetState( GlProc gp, std::uint32_t colorCount, ObjBlTarget & t, std::string & why, int red )
+{
+	using GetIv = void( WINAPI * )( GLenum, GLint * );
+	using GetIiv = void( WINAPI * )( GLenum, GLuint, GLint * );
+	using IsOn = GLubyte( WINAPI * )( GLenum );
+	using IsOni = GLubyte( WINAPI * )( GLenum, GLuint );
+	using GetBv = void( WINAPI * )( GLenum, GLubyte * );
+	using GetBiv = void( WINAPI * )( GLenum, GLuint, GLubyte * );
+	const auto getIv = reinterpret_cast<GetIv>( gp( "glGetIntegerv" ) );
+	const auto getIiv = reinterpret_cast<GetIiv>( gp( "glGetIntegeri_v" ) );
+	const auto isOn = reinterpret_cast<IsOn>( gp( "glIsEnabled" ) );
+	const auto isOni = reinterpret_cast<IsOni>( gp( "glIsEnabledi" ) );
+	const auto getBv = reinterpret_cast<GetBv>( gp( "glGetBooleanv" ) );
+	const auto getBiv = reinterpret_cast<GetBiv>( gp( "glGetBooleani_v" ) );
+	if ( !getIv || !getIiv || !isOn || !isOni || !getBv || !getBiv )
+		return why = "GL's state queries are not loaded", false;
+	if ( isOn( 0x0B90 ) || isOn( 0x0C11 ) )  // GL_STENCIL_TEST, GL_SCISSOR_TEST
+		return why = "stencil or scissor is on (the pipeline takes neither)", false;
+	if ( !isOn( 0x0B71 ) )  // GL_DEPTH_TEST
+		return why = "depth test is off", false;
+	GLint func = 0, cullMode = 0, front = 0;
+	GLubyte dm = 0;
+	getIv( 0x0B74, &func );  // GL_DEPTH_FUNC: GL_NEVER + k is VkCompareOp k
+	if ( func < 0x0200 || func > 0x0207 )
+		return why = "an unknown depth function", false;
+	getBv( 0x0B72, &dm );  // GL_DEPTH_WRITEMASK
+	t.depthOp = std::uint32_t( func - 0x0200 );
+	t.depthWrite = dm != 0;
+	const bool cull = isOn( 0x0B44 ) != 0;  // GL_CULL_FACE
+	getIv( 0x0B45, &cullMode );
+	getIv( 0x0B46, &front );
+	if ( cull && ( cullMode != 0x0405 || front != 0x0901 ) )  // GL_BACK, GL_CCW
+		return why = "culling other than back faces with CCW front", false;
+	t.twoSided = !cull;
+	// GL's factor / equation enums as Vulkan's (the constant factors refused: the pipeline has no blend constants)
+	auto factor = []( GLint g, std::uint32_t & v ) {
+		switch ( g ) {
+		case 0: v = 0; return true;        // ZERO
+		case 1: v = 1; return true;        // ONE
+		case 0x0300: v = 2; return true;   // SRC_COLOR
+		case 0x0301: v = 3; return true;
+		case 0x0306: v = 4; return true;   // DST_COLOR
+		case 0x0307: v = 5; return true;
+		case 0x0302: v = 6; return true;   // SRC_ALPHA
+		case 0x0303: v = 7; return true;
+		case 0x0304: v = 8; return true;   // DST_ALPHA
+		case 0x0305: v = 9; return true;
+		case 0x0308: v = 14; return true;  // SRC_ALPHA_SATURATE
+		default: return false;
+		}
+	};
+	auto op = []( GLint g, std::uint32_t & v ) {
+		switch ( g ) {
+		case 0x8006: v = 0; return true;  // FUNC_ADD
+		case 0x800A: v = 1; return true;  // FUNC_SUBTRACT
+		case 0x800B: v = 2; return true;  // FUNC_REVERSE_SUBTRACT
+		case 0x8007: v = 3; return true;  // MIN
+		case 0x8008: v = 4; return true;  // MAX
+		default: return false;
+		}
+	};
+	t.blend = ObjBlBlend();
+	for ( std::uint32_t c = 0; c < colorCount; c++ ) {
+		ObjBlBlend b;
+		GLint sc = 1, dc = 0, sa = 1, da = 0, ec = 0x8006, ea = 0x8006;
+		b.on = isOni( 0x0BE2, c ) ? 1u : 0u;  // GL_BLEND
+		getIiv( 0x80C9, c, &sc );  // GL_BLEND_SRC_RGB
+		getIiv( 0x80C8, c, &dc );  // GL_BLEND_DST_RGB
+		getIiv( 0x80CB, c, &sa );  // GL_BLEND_SRC_ALPHA
+		getIiv( 0x80CA, c, &da );  // GL_BLEND_DST_ALPHA
+		getIiv( 0x8009, c, &ec );  // GL_BLEND_EQUATION_RGB
+		getIiv( 0x883D, c, &ea );  // GL_BLEND_EQUATION_ALPHA
+		if ( red == 1 ) {
+			std::swap( sc, dc );
+			std::swap( sa, da );
+		}
+		GLubyte cm[4] = {};
+		getBiv( 0x0C23, c, cm );  // GL_COLOR_WRITEMASK
+		b.writeMask = ( cm[0] ? 1u : 0u ) | ( cm[1] ? 2u : 0u ) | ( cm[2] ? 4u : 0u ) | ( cm[3] ? 8u : 0u );
+		if ( b.on ) {
+			if ( !factor( sc, b.srcColor ) || !factor( dc, b.dstColor ) || !factor( sa, b.srcAlpha ) || !factor( da, b.dstAlpha ) )
+				return why = "draw buffer " + std::to_string( c ) + " blends by a constant or unknown factor", false;
+			if ( !op( ec, b.colorOp ) || !op( ea, b.alphaOp ) )
+				return why = "draw buffer " + std::to_string( c ) + " blends by an unknown equation", false;
+		}
+		if ( c && std::memcmp( &b, &t.blend, sizeof( b ) ) )
+			return why = "draw buffer " + std::to_string( c ) + " blends or masks other than draw buffer 0", false;
+		t.blend = b;
+	}
+	return true;
+}
+
 bool objBlShade( GlProc gp, const ObjBlShade & s, std::string & why )
 {
 	auto fail = [&]( const std::string & w ) {
@@ -1727,30 +1829,11 @@ bool objBlShade( GlProc gp, const ObjBlShade & s, std::string & why )
 	getIv( 0x0BA2, vp );  // GL_VIEWPORT
 	if ( vp[0] || vp[1] || vp[2] != d.w || vp[3] != d.h )
 		return fail( "the viewport is not the whole frame" );
-	if ( isOn( 0x0BE2 ) || isOn( 0x0B90 ) || isOn( 0x0C11 ) )  // GL_BLEND, GL_STENCIL_TEST, GL_SCISSOR_TEST
-		return fail( "blend, stencil or scissor is on (the pipeline takes none)" );
-	GLubyte cm[4] = {}, dm = 0;
-	getBv( 0x0C23, cm );  // GL_COLOR_WRITEMASK
-	getBv( 0x0B72, &dm );  // GL_DEPTH_WRITEMASK
-	if ( d.target.colorCount && ( !cm[0] || !cm[1] || !cm[2] || !cm[3] ) )
-		return fail( "a colour channel is masked" );
-	if ( !isOn( 0x0B71 ) )  // GL_DEPTH_TEST
-		return fail( "depth test is off" );
-	GLint func = 0, cullMode = 0, front = 0;
-	getIv( 0x0B74, &func );  // GL_DEPTH_FUNC: GL_NEVER + k is VkCompareOp k
-	if ( func < 0x0200 || func > 0x0207 )
-		return fail( "an unknown depth function" );
-	d.target.depthOp = std::uint32_t( func - 0x0200 );
-	d.target.depthWrite = dm != 0;
-	const bool cull = isOn( 0x0B44 ) != 0;  // GL_CULL_FACE
-	getIv( 0x0B45, &cullMode );
-	getIv( 0x0B46, &front );
-	if ( cull && ( cullMode != 0x0405 || front != 0x0901 ) )  // GL_BACK, GL_CCW
-		return fail( "culling other than back faces with CCW front" );
-	d.target.twoSided = !cull;
+	std::string w2;
+	if ( !objBlTargetState( gp, d.target.colorCount, d.target, w2 ) )
+		return fail( w2 );
 	// the vertex stage's GL locations (TEXCOORDn) and the class
 	SpvModule vm;
-	std::string w2;
 	if ( !spvReflect( d.vs, d.vsWords, vm, w2 ) )
 		return fail( "the vertex twin: " + w2 );
 	for ( const SpvIo & in : vm.inputs ) {

@@ -41,17 +41,18 @@ struct ShadeFix
 ShadeFix sx;
 constexpr int kSW = 256, kSH = 128;
 
-void shadeClear()
+void shadeClear( float k = 0.0f, bool depth = true )
 {
 	f.bindFramebuffer( kFb, sx.fbo );
 	const GLenum dbs[2] = { kColorAtt0, kColorAtt0 + 1 };
 	sf.drawBuffers( 2, dbs );
-	const GLfloat zero[4] = {}, one = 1.0f;
+	const GLfloat zero[4] = { k, k, k, k }, one = 1.0f;
 	glDepthMask( GL_TRUE );
 	glColorMask( GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE );
 	sf.clearBufferfv( 0x1800, 0, zero );  // GL_COLOR
 	sf.clearBufferfv( 0x1800, 1, zero );
-	sf.clearBufferfv( 0x1801, 0, &one );  // GL_DEPTH
+	if ( depth )
+		sf.clearBufferfv( 0x1801, 0, &one );  // GL_DEPTH
 	f.bindFramebuffer( kFb, 0 );
 }
 
@@ -70,10 +71,10 @@ void shadeRead( std::vector<float> & depth, std::vector<std::uint16_t> * c0, std
 
 // one Vulkan draw: the pool copied, the draw prepared, GL's signal, the worker records + submits, GL waits; the targets read
 bool shadeVk( int mode, int red, std::vector<float> & depth, std::vector<std::uint16_t> & c0, std::vector<std::uint16_t> & c1,
-	WwVkPresent::ObjBlDrawStat & st, std::string & why )
+	WwVkPresent::ObjBlDrawStat & st, std::string & why, const WwVkPresent::ObjBlBlend * blend = nullptr, float clearK = 0.0f )
 {
 	using namespace WwVkPresent;
-	shadeClear();
+	shadeClear( clearK, !blend );  // a blended run: over the depth of the run before it, EQUAL and no depth write (one fragment a pixel)
 	std::vector<unsigned> names;
 	if ( !objBlPoolCopy( sx.key, sx.pool, names, why ) )
 		return false;
@@ -89,6 +90,11 @@ bool shadeVk( int mode, int red, std::vector<float> & depth, std::vector<std::ui
 	d.target.depthOp = VK_COMPARE_OP_LESS;
 	d.target.depthWrite = true;
 	d.target.twoSided = red == 3;
+	if ( blend ) {
+		d.target.blend = *blend;
+		d.target.depthOp = VK_COMPARE_OP_EQUAL;
+		d.target.depthWrite = false;
+	}
 	d.colorKeys[0] = sx.c0;
 	d.colorKeys[1] = sx.c1;
 	d.depthKey = sx.dk;
@@ -545,6 +551,133 @@ bool unitsGate( const std::string & spvDir )
 	return ok;
 }
 
+/* lane VKOBJ4 open item 6: GL's blend as the pipeline's (objBlTargetState, ObjBlTarget.blend).
+ * BAR (stated before the first run, never widened):
+ * (a) GL's state SRC_ALPHA / ONE_MINUS_SRC_ALPHA on colour, ONE / ONE on alpha, equations ADD / MAX, the mask RGB on and
+ *     A off, on both draw buffers, reads as VkBlendFactor 6 / 7 / 1 / 1, VkBlendOp 0 / 4, writeMask 0x7, blend on;
+ * (b) the shade run into targets cleared to 0.25 with ONE / ONE ADD on colour and ONE / ONE MAX on alpha gives, in every value of
+ *     both targets, 0.25 + off on rgb and max(0.25, off) on alpha (off: the same run without blend into targets cleared to 0),
+ *     within one half ulp of that sum; the run without blend has >= 2000 non-zero values.
+ * Reds (each must FAIL): swap (objBlTargetState's red 1: source and destination read swapped), off (the blended run with blend
+ * off in the target). */
+float fromHalf( std::uint16_t h )
+{
+	const int e = ( h >> 10 ) & 0x1F, m = h & 0x3FF;
+	const float v = e == 0 ? std::ldexp( float( m ), -24 ) : e == 31 ? 65504.0f * 2.0f : std::ldexp( float( m | 0x400 ), e - 25 );
+	return ( h & 0x8000 ) ? -v : v;
+}
+
+struct BlendFns
+{
+	void( WINAPI * funcSep )( GLenum, GLenum, GLenum, GLenum ) = nullptr;
+	void( WINAPI * eqSep )( GLenum, GLenum ) = nullptr;
+	void( WINAPI * colorMaski )( GLuint, GLboolean, GLboolean, GLboolean, GLboolean ) = nullptr;
+};
+
+bool blendStateRead( int red, WwVkPresent::ObjBlTarget & t, std::string & why )
+{
+	BlendFns b;
+	if ( !load( b.funcSep, "glBlendFuncSeparate" ) || !load( b.eqSep, "glBlendEquationSeparate" ) || !load( b.colorMaski, "glColorMaski" ) )
+		return why = "a GL blend entry point is missing", false;
+	glEnable( GL_DEPTH_TEST );
+	glEnable( GL_CULL_FACE );
+	glCullFace( GL_BACK );
+	glFrontFace( GL_CCW );
+	glEnable( GL_BLEND );
+	b.funcSep( 0x0302, 0x0303, 1, 1 );
+	b.eqSep( 0x8006, 0x8008 );
+	for ( GLuint c = 0; c < 2; c++ )
+		b.colorMaski( c, GL_TRUE, GL_TRUE, GL_TRUE, GL_FALSE );
+	const bool ok = WwVkPresent::objBlTargetState( glProc, 2, t, why, red );
+	for ( GLuint c = 0; c < 2; c++ )
+		b.colorMaski( c, GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE );
+	b.funcSep( 1, 0, 1, 0 );
+	b.eqSep( 0x8006, 0x8006 );
+	glDisable( GL_BLEND );
+	glDisable( GL_CULL_FACE );
+	glDisable( GL_DEPTH_TEST );
+	return ok;
+}
+
+bool blendStateGood( const WwVkPresent::ObjBlTarget & t )
+{
+	const WwVkPresent::ObjBlBlend & b = t.blend;
+	return b.on == 1 && b.srcColor == 6 && b.dstColor == 7 && b.srcAlpha == 1 && b.dstAlpha == 1 && b.colorOp == 0 && b.alphaOp == 4
+		&& b.writeMask == 0x7 && !t.twoSided;
+}
+
+struct BlendCmp
+{
+	std::size_t values = 0, lit = 0, off = 0;
+	float maxUlps = 0.0f;
+	bool good() const { return values > 0 && lit >= 2000 && off == 0; }
+};
+
+BlendCmp blendCmp( const std::vector<std::uint16_t> * base, const std::vector<std::uint16_t> * got, float k )
+{
+	BlendCmp c;
+	for ( int t = 0; t < 2; t++ ) {
+		if ( base[t].size() != got[t].size() || base[t].empty() )
+			return BlendCmp();
+		for ( std::size_t i = 0; i < base[t].size(); i++ ) {
+			const float o = fromHalf( base[t][i] ), g = fromHalf( got[t][i] );
+			c.lit += base[t][i] != 0;
+			const float e = ( i % 4 ) == 3 ? std::max( k, o ) : k + o;
+			int ex = 0;
+			std::frexp( e, &ex );
+			const float ulp = std::max( std::ldexp( 1.0f, ex - 11 ), std::ldexp( 1.0f, -24 ) );
+			const float u = std::fabs( g - e ) / ulp;
+			c.values++;
+			c.maxUlps = std::max( c.maxUlps, u );
+			c.off += u > 1.0f;
+		}
+	}
+	return c;
+}
+
+bool blendGate()
+{
+	using namespace WwVkPresent;
+	std::string why;
+	ObjBlTarget t;
+	const bool read = blendStateRead( 0, t, why );
+	bool ok = read && blendStateGood( t );
+	std::printf( "BLVIEW blend state %s (on %u, colour %u / %u op %u, alpha %u / %u op %u, mask 0x%x)%s%s\n", ok ? "OK" : "FAIL", t.blend.on,
+		t.blend.srcColor, t.blend.dstColor, t.blend.colorOp, t.blend.srcAlpha, t.blend.dstAlpha, t.blend.alphaOp, t.blend.writeMask,
+		why.empty() ? "" : ": ", why.c_str() );
+	{
+		ObjBlTarget r;
+		std::string w;
+		const bool fails = !blendStateRead( 1, r, w ) || !blendStateGood( r );
+		std::printf( "BLVIEW RED blendswap %s (source and destination read swapped: colour %u / %u)\n", fails ? "FAIL" : "OK", r.blend.srcColor,
+			r.blend.dstColor );
+		ok = ok && fails;
+	}
+	const float k = 0.25f;
+	ObjBlBlend add;
+	add.on = 1;
+	add.srcColor = add.dstColor = add.srcAlpha = add.dstAlpha = 1;
+	add.colorOp = 0;
+	add.alphaOp = 4;
+	std::vector<float> d0, d1, d2;
+	std::vector<std::uint16_t> base[2], got[2], red[2];
+	ObjBlDrawStat st;
+	const bool ran = shadeVk( 0, 0, d0, base[0], base[1], st, why ) && shadeVk( 0, 0, d1, got[0], got[1], st, why, &add, k );
+	const BlendCmp c = ran ? blendCmp( base, got, k ) : BlendCmp();
+	std::printf( "BLVIEW blend run %s (%zu values, %zu lit without blend, %zu off by more than one half ulp, max %.3g ulp)%s%s\n",
+		c.good() ? "OK" : "FAIL", c.values, c.lit, c.off, double( c.maxUlps ), ran ? "" : ": ", ran ? "" : why.c_str() );
+	ok = ok && c.good();
+	{
+		ObjBlBlend none = add;
+		none.on = 0;
+		const bool rr = ran && shadeVk( 0, 0, d2, red[0], red[1], st, why, &none, k );
+		const BlendCmp x = rr ? blendCmp( base, red, k ) : BlendCmp();
+		std::printf( "BLVIEW RED blendoff %s (the run with blend off; %zu off)\n", x.good() ? "OK" : "FAIL", x.off );
+		ok = ok && !x.good();
+	}
+	return ok;
+}
+
 bool shadeGate( const std::string & spvDir )
 {
 	using namespace WwVkPresent;
@@ -609,6 +742,7 @@ bool shadeGate( const std::string & spvDir )
 		ok = ok && fails;
 	}
 	ok = unitsGate( spvDir ) && ok;
+	ok = blendGate() && ok;
 	if ( const GLenum e = glGetError(); e != GL_NO_ERROR ) {
 		std::printf( "BLVIEW shade FAIL (GL error 0x%x left)\n", unsigned( e ) );
 		ok = false;
