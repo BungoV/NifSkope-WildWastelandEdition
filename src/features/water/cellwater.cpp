@@ -24,6 +24,8 @@
 #include "gl/renderer.h"
 #include "gl/celluniform.h"	// lane CELLUNI3: the blend note
 #include "features/overlays/debugview.h"	// lane DEBUGVIEW1: the water draws under a debug view
+#include "features/vkframe/vkpresent.h"	// lane VKWATER1: the water on the Vulkan view (row G5)
+#include "features/vkframe/vkwater.h"
 
 #include <QFile>
 #include <QHash>
@@ -34,6 +36,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <vector>
@@ -450,6 +453,31 @@ void wwCellWaterTierFrame()
 	std::fprintf( stderr, "%s\n", qPrintable( line2 ) );
 }
 
+/* lane VKWATER1 (row G5): the water on the Vulkan view (WW_VKVIEW=1; red WW_VKVIEW_WATER_RED=1). A census of the program GL
+ * draws with (a new program, or every 5 s), its verdict against the present device, the `vk water:` line. No input or
+ * stage is refused on GL's side: GL draws this water whenever the verdict names one (today it always does). */
+template <class Fn> static void wwCellWaterVkRoute( Fn * fn, GLuint prog )
+{
+	if ( !WwVkPresent::shareWanted( "WW_VKVIEW_WATER_RED" ) ) {
+		WwVkPresent::waterSay( false, "red WW_VKVIEW_WATER_RED=1 or the view not on Vulkan" );
+		return;
+	}
+	static GLuint censusProg = 0;
+	static auto censusAt = std::chrono::steady_clock::now();
+	static std::string verdict;
+	const auto now = std::chrono::steady_clock::now();
+	if ( prog != censusProg || std::chrono::duration<double>( now - censusAt ).count() >= 5.0 ) {
+		WwVkPresent::WaterCensus c;
+		WwVkPresent::waterCensusOf( fn, prog, c );
+		verdict = WwVkPresent::waterVerdict( c, WwVkPresent::waterCaps() );
+		WwVkPresent::waterCensusTook( std::chrono::duration<double, std::milli>( std::chrono::steady_clock::now() - now ).count() );
+		censusProg = prog;
+		censusAt = now;
+	}
+	WwVkPresent::waterOnGl( verdict.empty() ? "the Vulkan draw is not built" : verdict.c_str() );
+	WwVkPresent::waterSay( true, nullptr );
+}
+
 bool wwCellWaterUniforms( Scene * scene, int block, int unit )
 {
 	WaterState & s = st();
@@ -771,6 +799,7 @@ bool wwCellWaterUniforms( Scene * scene, int block, int unit )
 		const float sun[3] = { 0.0f, 0.0f, 0.0f };	// the shader reads light 0 (the frame's sun); the probes echo it
 		writeDump( *dit, sky, fromWeather, sun );
 	}
+	wwCellWaterVkRoute( fn, prog->id );	// lane VKWATER1
 	return true;
 }
 
