@@ -1445,7 +1445,7 @@ float3 cellGiFineAdd( float3 P, float3 N, float3 base, float kC )
 	float3 g = (float3)( 0.0 );
 	for ( int k = 0; k < cellGiFineN; k++ ) {
 		float3 gk = ( P + N * ( 0.5 * cellGiFineBox[k].w ) - cellGiFineBox[k].xyz ) / cellGiFineBox[k].w - 0.5;
-		if ( all( (gk >= (float3)( 0.0 )) ) && all( (gk < cellGiFineDim[k].xyz - 1.0) ) ) {
+		if ( all( (gk >= (float3)( 0.0 )) ) && all( (gk < (cellGiFineDim[k].xyz - 1.0)) ) ) {
 			b = k;
 			g = gk;
 			break;

@@ -30,7 +30,7 @@ void frag_main()
 	for ( int i = 0; i < 4; i++ ) {						// loop / ige / breakc_nz
 		float2 uv = ( taps[i].xy * c7.xy + v1 ) * c4.xy;		// mad, mul
 		float3 c = t0.Sample( _t0_sampler, uv ).rgb;
-		bool3 bad = (asuint( c ) & 0x7f800000u == (uint3)( 0x7f800000u ));	// and, ieq
+		bool3 bad = ((asuint( c ) & 0x7f800000u) == (uint3)( 0x7f800000u ));	// and, ieq
 		c = select(bad, (float3)( 0.0 ), c);					// movc
 		acc = c * taps[i].z + acc;							// mad
 	}

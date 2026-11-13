@@ -43,7 +43,7 @@ void frag_main()
 		int2 o = int2( ( i & 1 ) * 2 + 1, ( i >> 1 ) * 2 + 1 );
 		float2 pc = float2( q * 4 + o );
 		float3 c = t0.Sample( _t0_sampler, pc / fs ).rgb;
-		bool3 bad = (asuint( c ) & 0x7f800000u == (uint3)( 0x7f800000u ));
+		bool3 bad = ((asuint( c ) & 0x7f800000u) == (uint3)( 0x7f800000u ));
 		acc += select(bad, (float3)( 0.0 ), c) * 0.25;
 		float z = lensDist( t1.Load( int3(min( q * 4 + o, hi ), 0) ).r );
 		if ( z >= 0.0 ) {
