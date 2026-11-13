@@ -489,9 +489,8 @@ bool makeDevice( std::string & why )
 	qi.queueFamilyIndex = v.family;
 	qi.queueCount = 1;
 	qi.pQueuePriorities = &prio;
-	const char * dext[] = { VK_KHR_SWAPCHAIN_EXTENSION_NAME, VK_KHR_EXTERNAL_MEMORY_WIN32_EXTENSION_NAME,
-		VK_KHR_EXTERNAL_SEMAPHORE_WIN32_EXTENSION_NAME, VK_EXT_DEPTH_CLIP_CONTROL_EXTENSION_NAME };
-	std::uint32_t nDext = 3;
+	std::vector<const char *> dext = { VK_KHR_SWAPCHAIN_EXTENSION_NAME, VK_KHR_EXTERNAL_MEMORY_WIN32_EXTENSION_NAME,
+		VK_KHR_EXTERNAL_SEMAPHORE_WIN32_EXTENSION_NAME };
 	// lane VKOBJ1: depth clip control when offered (the objects' prepass refuses without it)
 	VkPhysicalDeviceDepthClipControlFeaturesEXT clipFeat { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DEPTH_CLIP_CONTROL_FEATURES_EXT };
 	if ( v.vkEnumerateDeviceExtensionProperties && v.vkGetPhysicalDeviceFeatures2 ) {
@@ -499,9 +498,13 @@ bool makeDevice( std::string & why )
 		v.vkEnumerateDeviceExtensionProperties( v.phys, nullptr, &ne, nullptr );
 		std::vector<VkExtensionProperties> ep( ne );
 		v.vkEnumerateDeviceExtensionProperties( v.phys, nullptr, &ne, ep.data() );
-		bool has = false;
-		for ( const VkExtensionProperties & e : ep )
+		bool has = false, budget = false;
+		for ( const VkExtensionProperties & e : ep ) {
 			has = has || std::strcmp( e.extensionName, VK_EXT_DEPTH_CLIP_CONTROL_EXTENSION_NAME ) == 0;
+			budget = budget || std::strcmp( e.extensionName, VK_EXT_MEMORY_BUDGET_EXTENSION_NAME ) == 0;
+		}
+		if ( budget )  // lane VKOBJ4 item 2: the bloom chain's frame checks the heap's budget (vkframe.cpp makeFrame)
+			dext.push_back( VK_EXT_MEMORY_BUDGET_EXTENSION_NAME );
 		if ( has ) {
 			VkPhysicalDeviceFeatures2 f2 { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2 };
 			f2.pNext = &clipFeat;
@@ -510,7 +513,7 @@ bool makeDevice( std::string & why )
 		}
 	}
 	if ( v.clipControl )
-		nDext = 4;
+		dext.push_back( VK_EXT_DEPTH_CLIP_CONTROL_EXTENSION_NAME );
 	clipFeat.pNext = nullptr;
 	// round 11: the tone pass's fragment shader reads SV_SampleIndex (the SampleRateShading capability)
 	VkPhysicalDeviceFeatures offered {}, en {};
@@ -575,8 +578,8 @@ bool makeDevice( std::string & why )
 	di.pEnabledFeatures = &en;
 	di.queueCreateInfoCount = 1;
 	di.pQueueCreateInfos = &qi;
-	di.enabledExtensionCount = nDext;
-	di.ppEnabledExtensionNames = dext;
+	di.enabledExtensionCount = std::uint32_t( dext.size() );
+	di.ppEnabledExtensionNames = dext.data();
 	di.pNext = v.clipControl ? &clipFeat : nullptr;
 	if ( v.descIndexing || v.drawParams ) {  // lane VKOBJ2: ahead of the clip control chain
 		dpEn.pNext = const_cast<void *>( di.pNext );
@@ -677,6 +680,8 @@ struct Work
 	int light = -1;     // lane VKLIGHT1 (k = -1): this LightPass's dispatches (lightWork); shares tone's counters
 	bool ssr = false;   // lane VKLIGHT2 (k = -1): the reflections' stages (ssrWork); shares tone's counters
 	bool ( *fn )( std::string & ) = nullptr;  // lane VKSHADOW1 (k = -1): a pass's own record + submit; shares tone's counters
+	bool ( *fnArg )( void *, std::string & ) = nullptr;  // lane VKOBJ4 item 2 (k = -1): onWorker's job, fn's counters
+	void * arg = nullptr;
 	bool fx = false;    // lane VKAIR1 (k = -1): the air's sky pass or the clouds' march + resolve (fxWork); tone's counters
 };
 
@@ -761,9 +766,9 @@ void workerLoop()
 			W.q.pop_front();
 			W.busy = true;
 		}
-		if ( j.fn ) {  // lane VKSHADOW1: a pass that brings its own work function (the sun cascades)
+		if ( j.fn || j.fnArg ) {  // lane VKSHADOW1: a pass that brings its own work function (the sun cascades)
 			std::string why;
-			const bool ok = j.fn( why );
+			const bool ok = j.fnArg ? j.fnArg( j.arg, why ) : j.fn( why );
 			{
 				std::lock_guard<std::mutex> lk( W.m );
 				W.toneDone++;
@@ -3951,6 +3956,81 @@ SharedStat takeSharedStat()
 	s.live = int( shareds().size() );
 	sharedStat().made = sharedStat().dropped = sharedStat().fails = 0;
 	return s;
+}
+
+bool shareDevice( GlProc gp, Device & out, std::string & why )
+{
+	if ( !glCurrent( gp, why ) || !makeDevice( why ) )
+		return false;
+	const Vk & v = vk();
+	out.instance = v.inst;
+	out.physical = v.phys;
+	out.device = v.dev;
+	out.queue = v.queue;
+	out.getDeviceProcAddr = reinterpret_cast<void *>( v.vkGetDeviceProcAddr );
+	out.family = v.family;
+	std::memcpy( out.uuid, v.uuid, 16 );
+	return true;
+}
+
+bool onWorker( bool ( *fn )( void * arg, std::string & why ), void * arg, std::string & why )
+{
+	Worker & W = wk();
+	std::uint64_t want = 0;
+	{
+		std::lock_guard<std::mutex> lk( W.m );
+		want = W.toneDone + 1;
+	}
+	Work j;
+	j.k = -1;
+	j.fnArg = fn;
+	j.arg = arg;
+	hand( j );
+	std::unique_lock<std::mutex> lk( W.m );
+	W.idle.wait( lk, [&W, want]() { return W.toneDone >= want; } );
+	why = W.toneWhy;
+	return W.toneOk;
+}
+
+bool borrowTarget( std::uintptr_t key, const Borrow & b, std::string & why )
+{
+	const Vk & v = vk();
+	if ( !v.ok || static_cast<VkDevice>( b.device ) != v.dev )
+		return why = "the image is another device's, not the present device's", false;
+	bool depth = false;
+	const VkFormat fmt = vkFormatOf( GLenum( b.glFmt ), depth );
+	if ( fmt == VK_FORMAT_UNDEFINED || !b.image || !b.view || !b.tex || ( depth && !b.attView ) )
+		return why = "no image, view, GL name or known format", false;
+	const auto it = shareds().find( key );
+	if ( it != shareds().end() && !it->second.borrowed )
+		return why = "the key holds a target of its own", false;
+	Shared s;
+	s.borrowed = true;
+	s.img = static_cast<VkImage>( b.image );
+	s.view = static_cast<VkImageView>( b.view );
+	s.attView = depth ? static_cast<VkImageView>( b.attView ) : VK_NULL_HANDLE;
+	s.tex = b.tex;
+	s.glCtx = reinterpret_cast<void *>( wglGetCurrentContext() );
+	s.w = b.w;
+	s.h = b.h;
+	s.samples = std::max( 1, b.samples );
+	s.glFmt = GLenum( b.glFmt );
+	s.fmt = fmt;
+	shareds()[key] = s;
+	sharedGen()++;
+	return true;
+}
+
+void borrowDrop( std::uintptr_t key )
+{
+	const auto it = shareds().find( key );
+	if ( it == shareds().end() || !it->second.borrowed )
+		return;
+	drain();  // the owner frees the image next: nothing queued or in flight may still use it
+	if ( vk().ok )
+		vk().vkDeviceWaitIdle( vk().dev );
+	shareds().erase( it );
+	sharedGen()++;
 }
 
 /* the tone pass's crossing alone (GL current): GL signals A with the deferred names, the worker submits, GL waits B.
