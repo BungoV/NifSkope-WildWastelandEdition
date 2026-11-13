@@ -1181,8 +1181,8 @@ static bool farCardsOnVulkan( Renderer * r, NifSkopeOpenGLContext::Program * pro
 		at = std::chrono::steady_clock::now();
 		qInfo().noquote() << line;
 	};
-	if ( !WwVkPresent::shareWanted( "WW_VKVIEW_FARCARDS_RED" ) ) {
-		say( QStringLiteral( "vk far: cards on GL (red WW_VKVIEW_FARCARDS_RED=1 or the view not on Vulkan)" ) );
+	if ( !WwVkPresent::shareWanted( "WW_VKVIEW_FARCARD_RED" ) ) {
+		say( QStringLiteral( "vk far: cards on GL (red WW_VKVIEW_FARCARD_RED=1 or the view not on Vulkan)" ) );
 		return false;
 	}
 	static WwVkPresent::FarCardsRun t;
