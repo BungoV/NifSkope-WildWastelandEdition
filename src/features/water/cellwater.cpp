@@ -26,6 +26,7 @@
 #include "features/overlays/debugview.h"	// lane DEBUGVIEW1: the water draws under a debug view
 #include "features/vkframe/vkpresent.h"	// lane VKWATER1: the water on the Vulkan view (row G5)
 #include "features/vkframe/vkwater.h"
+#include "features/near/cellbindless.h"	// lane VKWATER3: a pooled shape's range
 
 #include <QFile>
 #include <QHash>
@@ -453,15 +454,30 @@ void wwCellWaterTierFrame()
 	std::fprintf( stderr, "%s\n", qPrintable( line2 ) );
 }
 
-/* lane VKWATER1 (row G5): the water on the Vulkan view (WW_VKVIEW=1; red WW_VKVIEW_WATER_RED=1). A census of the program GL
- * draws with (a new program, or every 5 s), its verdict against the present device, the `vk water:` line. No input or
- * stage is refused on GL's side: GL draws this water whenever the verdict names one (today it always does). */
-template <class Fn> static void wwCellWaterVkRoute( Fn * fn, GLuint prog )
+bool wwFogLeakShaderDefine();	// src/features/air/cellvolair.cpp: WW_CELL_FOGLEAK in the cell programs
+
+/* lane VKWATER3: the shape's draw armed by the route below, taken (or dropped) by wwCellWaterVkDraw at its draw */
+struct VkWaterArm
 {
+	NifSkopeOpenGLContext::GLFunctions * fn = nullptr;
+	GLuint prog = 0;
+	unsigned int color = 0;
+};
+static VkWaterArm g_vkWaterArm;
+static char g_vkWaterKeys[128];	// the twins' keys (key + slot index)
+
+/* lane VKWATER1 (row G5): the water on the Vulkan view (WW_VKVIEW=1; red WW_VKVIEW_WATER_RED=1). A census of the program GL
+ * draws with (a new program, or every 5 s), its verdict against the present device, the `vk water:` line.
+ * lane VKWATER3: a clear verdict on fo4_waterlook.prog (the twins' program and defines) into the shared tone frame arms the
+ * shape's draw for the present device; anything else stays on GL with its reason. */
+static void wwCellWaterVkRoute( NifSkopeOpenGLContext::GLFunctions * fn, NifSkopeOpenGLContext::Program * program )
+{
+	g_vkWaterArm = VkWaterArm();
 	if ( !WwVkPresent::shareWanted( "WW_VKVIEW_WATER_RED" ) ) {
 		WwVkPresent::waterSay( false, "red WW_VKVIEW_WATER_RED=1 or the view not on Vulkan" );
 		return;
 	}
+	const GLuint prog = program->id;
 	static GLuint censusProg = 0;
 	static auto censusAt = std::chrono::steady_clock::now();
 	static std::string verdict;
@@ -469,13 +485,64 @@ template <class Fn> static void wwCellWaterVkRoute( Fn * fn, GLuint prog )
 	if ( prog != censusProg || std::chrono::duration<double>( now - censusAt ).count() >= 5.0 ) {
 		WwVkPresent::WaterCensus c;
 		WwVkPresent::waterCensusOf( fn, prog, c );
-		verdict = WwVkPresent::waterVerdict( c, WwVkPresent::waterCaps() );
+		WwVkPresent::WaterCaps caps = WwVkPresent::waterCaps();
+		caps.shadedDraw = WwVkPresent::waterDrawRefusal().empty();	// lane VKWATER3: wired (wwCellWaterVkDraw)
+		verdict = WwVkPresent::waterVerdict( c, caps );
 		WwVkPresent::waterCensusTook( std::chrono::duration<double, std::milli>( std::chrono::steady_clock::now() - now ).count() );
 		censusProg = prog;
 		censusAt = now;
 	}
-	WwVkPresent::waterOnGl( verdict.empty() ? "the Vulkan draw is not built" : verdict.c_str() );
+	const char * no = nullptr;
+	unsigned int color = 0;
+	if ( !verdict.empty() )
+		no = verdict.c_str();
+	else if ( std::string_view( program->name ) != "fo4_waterlook.prog" )
+		no = "this water program has no Vulkan twin (fo4_waterlook.prog only)";
+	else if ( !wwFogLeakShaderDefine() )
+		no = "WW_CELL_FOGLEAK=0: GL's program is not the Vulkan twin";
+	else if ( !program->wwShadowFrame )
+		no = "WW_FRAME_UBO off: GL's program is not the Vulkan twin";
+	else {
+		GLint drawFb = 0;
+		fn->glGetIntegerv( GL_DRAW_FRAMEBUFFER_BINDING, &drawFb );
+		color = wwCellHdrVkToneColor( GLuint( drawFb ) );
+		if ( !color )
+			no = "the draw target is not the shared tone frame";
+	}
+	if ( no )
+		WwVkPresent::waterOnGl( no );
+	else
+		g_vkWaterArm = VkWaterArm { fn, prog, color };
 	WwVkPresent::waterSay( true, nullptr );
+}
+
+bool wwCellWaterVkDraw( int indexCount )
+{
+	const VkWaterArm a = g_vkWaterArm;
+	g_vkWaterArm = VkWaterArm();
+	if ( !a.fn || !a.prog )
+		return false;
+	GLint cur = 0;
+	a.fn->glGetIntegerv( GL_CURRENT_PROGRAM, &cur );
+	if ( GLuint( cur ) != a.prog ) {
+		WwVkPresent::waterOnGl( "another program at the shape's draw" );
+		return false;
+	}
+	static WwVkPresent::WaterRun r;
+	r = WwVkPresent::WaterRun();
+	WwVkPresent::waterStateOf( a.fn, a.prog, r );
+	wwCellHdrFrameSize( r.w, r.h );
+	r.color = a.color;
+	r.count = indexCount;
+	r.idxOff = WwBl::geo.on ? (long long) WwBl::geo.idxOff : 0;	// a pooled shape: its arena range
+	r.baseVertex = WwBl::geo.on ? WwBl::geo.baseVertex : 0;
+	r.key = reinterpret_cast<std::uintptr_t>( g_vkWaterKeys );
+	std::string why;
+	if ( !WwVkPresent::waterRun( r, why ) ) {
+		WwVkPresent::waterOnGl( why.c_str() );
+		return false;
+	}
+	return true;
 }
 
 bool wwCellWaterUniforms( Scene * scene, int block, int unit )
@@ -799,7 +866,7 @@ bool wwCellWaterUniforms( Scene * scene, int block, int unit )
 		const float sun[3] = { 0.0f, 0.0f, 0.0f };	// the shader reads light 0 (the frame's sun); the probes echo it
 		writeDump( *dit, sky, fromWeather, sun );
 	}
-	wwCellWaterVkRoute( fn, prog->id );	// lane VKWATER1
+	wwCellWaterVkRoute( fn, prog );	// lane VKWATER1
 	return true;
 }
 

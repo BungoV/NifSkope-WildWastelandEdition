@@ -16,6 +16,7 @@
 // red 8 depth ALWAYS. Last line `WATERDRAW GATE OK` or `WATERDRAW GATE FAILED`.
 // Sampling: judged at anisotropy 1 on both sides (NV's anisotropic footprint differs GL vs Vulkan at the same maxAnisotropy:
 // 10 248 samples past at the app's 16, BOUND at 1). The app's 16 is drawn once more on seed 1 and logged, never judged.
+// The noise's 16 is intended (the game's slots 4..6); the misses are its normal bending the SSR lookup over seeded noise.
 #define main fxview_main
 #include "fxview.cpp"
 #undef main
