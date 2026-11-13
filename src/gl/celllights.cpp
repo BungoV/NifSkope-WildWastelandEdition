@@ -76,6 +76,9 @@ BSD License - see nifskope.h
 #include "features/exposure/physunits.h"	// lane PHYSUNITS1: real units
 #include "gl/dalcfit.h"	// lane SKYLIGHT1: the up / down poles read exactly
 #include "features/overlays/debugview.h"	// lane DEBUGVIEW1: a debug view is a probe pass
+#include "features/vkframe/vkpresent.h"	// lane VKFAR1 (row G3): the far dots on the Vulkan view
+
+bool wwFogLeakShaderDefine();	// glcontext.cpp: WW_CELL_FOGLEAK in the cell programs (the Vulkan twin's define)
 
 //! lane PHYSUNITS1: an interior's ambient, directional and fog factor (its lamps' median x Game Light Brightness); 1 else
 static float physInteriorK( const WwCellLighting * L )
@@ -560,6 +563,99 @@ int wwCellFarRed()
 }
 
 
+/* lane VKFAR1 (row G3): the far dots on the present device's tone frame, cell_fardots' uniforms already set on prog.
+ * false: GL draws its points (the reason is in the "vk far:" line). The far cards and the far ground stay on GL. */
+static bool farDotsOnVulkan( Renderer * r, NifSkopeOpenGLContext::Program * prog, const WwCellFar * Fr, const std::vector<float> & pos,
+	const std::vector<float> & I, const float * row, const float * cam, const float * proj, const GLint * vp, float focal )
+{
+	auto fn = r->fn;
+	GLint drawFb = 0;
+	fn->glGetIntegerv( GL_DRAW_FRAMEBUFFER_BINDING, &drawFb );
+	const GLuint color = wwCellHdrVkToneColor( GLuint( drawFb ) );
+	if ( !color )
+		return false;	// not the present device's tone frame: GL's, as before
+	static QString said;
+	static auto at = std::chrono::steady_clock::now();
+	auto say = [&]( const QString & line ) {
+		if ( line == said )
+			return;
+		said = line;
+		at = std::chrono::steady_clock::now();
+		qInfo().noquote() << line;
+	};
+	if ( !WwVkPresent::shareWanted( "WW_VKVIEW_FAR_RED" ) ) {
+		say( QStringLiteral( "vk far: dots on GL (red WW_VKVIEW_FAR_RED=1 or the view not on Vulkan)" ) );
+		return false;
+	}
+	static WwVkPresent::FarDotsRun t;
+	t = WwVkPresent::FarDotsRun();
+	std::string why;
+	bool drew = false;
+	if ( !wwFogLeakShaderDefine() ) {
+		WwVkPresent::farDotsOnGl( "WW_CELL_FOGLEAK=0: GL's program is not the Vulkan pass's twin" );
+	} else {
+		wwCellHdrFrameSize( t.w, t.h );
+		std::memcpy( t.vp, vp, sizeof( t.vp ) );
+		t.color = color;
+		t.n = int( pos.size() / 3 );
+		t.pos = pos.data();
+		t.value = I.data();
+		std::memcpy( t.dotRow, row, sizeof( t.dotRow ) );
+		std::memcpy( t.dotProj, proj, sizeof( t.dotProj ) );
+		std::memcpy( t.dotCam, cam, sizeof( t.dotCam ) );
+		t.dotBand[0] = Fr->band[0];
+		t.dotBand[1] = Fr->band[1];
+		t.dotFocal = focal;
+		t.dotBulb = 4.0f;
+		t.dotRed = 0;
+		// cell_fardots_ps's t0..t4 (vkframe_spirv.sh); the air's integrated volume is read where it is shared
+		static const char * const kName[5] = { "atApTex", "volAirTerr", "volAirRainMap", "volTex", "volTile" };
+		static const int kType[5] = { 1, 2, 0, 1, 0 };
+		static char twin[5];
+		bool ok = true;
+		for ( int k = 0; k < 5 && ok; k++ ) {
+			ok = WwVkPresent::fxTexOf( fn, prog->id, kName[k], kType[k], t.tex[k], why );
+			t.tex[k].twin = reinterpret_cast<std::uintptr_t>( &twin[k] );
+		}
+		if ( !ok ) {
+			WwVkPresent::farDotsOnGl( why.c_str() );
+		} else {
+			WwVkPresent::fxPack( fn, prog->id, WwVkPresent::kT_fardots, int( std::size( WwVkPresent::kT_fardots ) ), t.loose );
+			drew = WwVkPresent::farDotsRun( t, why );
+		}
+	}
+	const WwVkPresent::FxStat st = WwVkPresent::takeFarDotsStat();
+	static WwVkPresent::FxStat sum;
+	sum.runs += st.runs;
+	sum.gl += st.gl;
+	sum.fails += st.fails;
+	sum.cpuMs += st.cpuMs;
+	sum.maxMs = std::max( sum.maxMs, st.maxMs );
+	sum.copies += st.copies;
+	sum.pipelines = st.pipelines;
+	sum.buildMs = st.buildMs;
+	if ( !st.glWhy.empty() )
+		sum.glWhy = st.glWhy;
+	if ( !st.failWhy.empty() )
+		sum.failWhy = st.failWhy;
+	if ( std::chrono::duration<double>( std::chrono::steady_clock::now() - at ).count() >= 5.0 || !said.startsWith( QStringLiteral( "vk far: dots on V" ) ) ) {
+		QString line = sum.runs > 0
+			? QStringLiteral( "vk far: dots on Vulkan %1 frames (%2 dots, cell_fardots as instanced quads into the tone frame + stencil, one crossing; "
+				"%3 pipelines built in %4 ms; %5 input copies; drawing thread %6 ms, max %7)" ).arg( sum.runs ).arg( t.n ).arg( sum.pipelines )
+				.arg( sum.buildMs, 0, 'f', 1 ).arg( sum.copies ).arg( sum.cpuMs / sum.runs, 0, 'f', 3 ).arg( sum.maxMs, 0, 'f', 3 )
+			: QStringLiteral( "vk far: dots on Vulkan wanted, 0 frames drawn" );
+		if ( sum.gl > 0 )
+			line += QStringLiteral( ", on GL %1 frames (last: %2)" ).arg( sum.gl ).arg( QString::fromStdString( sum.glWhy ) );
+		if ( sum.fails > 0 )
+			line += QStringLiteral( ", refused %1 (last: %2)" ).arg( sum.fails ).arg( QString::fromStdString( sum.failWhy ) );
+		line += QStringLiteral( "; far cards + far ground on GL (blocked: BC textures, cube-array shadows, texel buffers not shared)" );
+		said.clear();
+		say( line );
+		sum = WwVkPresent::FxStat();
+	}
+	return drew;
+}
+
 /* The far bulb dots: intensity I spread over a normalized Gaussian, I (f / d)^2 G / (2 pi sigma^2), so the summed
  * dot equals the bulb's own emissive at any size. Depth-tested, not written; the stencil marks them as linear light. */
 int wwCellFarDotsDraw( Scene * scene )
@@ -590,10 +686,14 @@ int wwCellFarDotsDraw( Scene * scene )
 	// world -> view: posView = sc R world + t (the inverse of cellRow)
 	const Transform & vt = scene->view;
 	const float sc = vt.scale != 0.0f ? vt.scale : 1.0f;
-	float cam[3];
+	float cam[3], row[12];
 	for ( int j = 0; j < 3; j++ ) {
 		prog->uni4f_l( prog->uniLocation( "dotRow[%d]", j ), FloatVector4( vt.rotation( j, 0 ) * sc, vt.rotation( j, 1 ) * sc,
 			vt.rotation( j, 2 ) * sc, vt.translation[j] ) );
+		row[j * 4 + 0] = vt.rotation( j, 0 ) * sc;
+		row[j * 4 + 1] = vt.rotation( j, 1 ) * sc;
+		row[j * 4 + 2] = vt.rotation( j, 2 ) * sc;
+		row[j * 4 + 3] = vt.translation[j];
 		float w = 0.0f;
 		for ( int k = 0; k < 3; k++ )
 			w -= vt.rotation( k, j ) * vt.translation[k];
@@ -609,6 +709,11 @@ int wwCellFarDotsDraw( Scene * scene )
 	prog->uni1f( "dotBulb", 4.0f );	// a bulb's radius, game units (a household bulb is ~3-5)
 	prog->uni1i( "dotRed", 0 );
 	wwLookdevFogUniforms( scene );	// lane VOLAIR1: the air between the bulb and the camera (cell_fardots.frag)
+	if ( farDotsOnVulkan( r, prog, Fr, pos, I, row, cam, &pm[0][0], vp, pm[1][1] * 0.5f * float( vp[3] ) ) ) {
+		r->stopProgram();	// lane VKFAR1: drawn on the Vulkan view, GL's state untouched
+		s.dotsLast = int( n );
+		return int( n );
+	}
 	GLboolean depthMask = GL_TRUE;
 	fn->glGetBooleanv( GL_DEPTH_WRITEMASK, &depthMask );
 	const bool wasBlend = fn->glIsEnabled( GL_BLEND ), wasCull = fn->glIsEnabled( GL_CULL_FACE );

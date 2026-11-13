@@ -515,6 +515,43 @@ bool cloudRun( const CloudRun & t, std::string & why );
 void cloudOnGl( const char * why );
 FxStat takeCloudStat();
 
+// lane VKFAR1 (row G3): the far bulb dots (cell_fardots_ps__WW_CELL_FOGLEAK's b31, reflected)
+inline constexpr FxField kT_fardots[] = {
+	{ "fogNightHue", 0, 1, 1, 0, 0 }, { "fogNight", 16, 4, 1, 0, 0 }, { "atAp", 32, 4, 1, 0, 0 },
+	{ "atApProj", 48, 4, 1, 0, 0 }, { "fogRed", 64, 1, 1, 1, 0 }, { "fogK", 80, 4, 6, 0, 0 },
+	{ "volAirTerrU", 176, 4, 1, 0, 0 }, { "volAirTerrV", 192, 4, 1, 0, 0 }, { "volAirTerrFU", 208, 4, 1, 0, 0 },
+	{ "volAirTerrFV", 224, 4, 1, 0, 0 }, { "volAirFlags", 240, 1, 1, 1, 0 }, { "volAirGround", 256, 4, 1, 0, 0 },
+	{ "fogDistScale", 272, 1, 1, 0, 0 }, { "volAirTerrRef", 276, 1, 1, 0, 0 }, { "volAirMed", 288, 4, 1, 0, 0 },
+	{ "volAirLayer", 304, 4, 1, 0, 0 }, { "volAirRain", 320, 4, 1, 0, 0 }, { "volAirRainXf", 336, 4, 1, 0, 4 },
+	{ "volAirRainFar", 400, 4, 1, 0, 0 }, { "volPackDims", 416, 4, 1, 0, 0 }, { "fogView", 432, 4, 1, 0, 0 },
+	{ "volFar", 448, 4, 1, 0, 0 }, { "volSlices", 464, 4, 1, 0, 0 }, { "volPack", 480, 4, 1, 0, 0 },
+	{ "volFarClamp", 496, 1, 1, 1, 0 }, { "volRect", 512, 4, 1, 0, 0 }, { "fogOn", 528, 1, 1, 1, 0 },
+	{ "volOn", 532, 1, 1, 1, 0 }, { "atApDouble", 536, 1, 1, 0, 0 }, { "volFogBlend", 540, 1, 1, 1, 0 },
+	{ "fogSun", 544, 4, 1, 0, 0 }, { "fogSunColour", 560, 4, 1, 0, 0 }, { "fogUnit", 576, 1, 1, 0, 0 },
+	{ "fogProbe", 592, 4, 1, 0, 0 }, { "volProbe", 608, 1, 1, 1, 0 }, { "volAirDrift", 624, 4, 1, 0, 0 },
+	{ "volAirDriftUv", 640, 4, 6, 0, 0 }, { "volAirDriftRed", 736, 1, 1, 1, 0 },
+};
+inline constexpr int kT_fardotsBytes = 752;
+struct FarDotsRun
+{
+	int w = 0, h = 0, vp[4] = {};    //!< the tone frame's size, GL's viewport (the point size is in its pixels)
+	unsigned color = 0;             //!< the tone frame's colour (toneFrameIs)
+	int n = 0;                      //!< dots
+	const float * pos = nullptr;    //!< n x 3, world
+	const float * value = nullptr;  //!< n x 3, the bulb's intensity
+	float dotRow[12] = {}, dotProj[16] = {}, dotCam[3] = {}, dotBand[2] = {};  //!< cell_fardots.vert's uniforms (dotProj GL's columns)
+	float dotFocal = 0.0f, dotBulb = 4.0f;
+	int dotRed = 0;
+	FxTex tex[5];                   //!< t0 atApTex, t1 volAirTerr, t2 volAirRainMap, t3 volTex, t4 volTile
+	std::uint8_t loose[kT_fardotsBytes] = {};
+	int red = 0;                    //!< gates only: 1 stencil write mask 0, 2 no blend, 4 quads twice the point size
+};
+/* GL current, the tone frame bound, cell_fardots' uniforms set: the dots as instanced quads on Vulkan (depth LEQUAL no
+ * write, blend ONE / ONE, stencil ALWAYS ref 1 REPLACE mask 0x03, as GL's). false: why; nothing drawn (GL draws its points) */
+bool farDotsRun( const FarDotsRun & t, std::string & why );
+void farDotsOnGl( const char * why );
+FxStat takeFarDotsStat();
+
 /* lane VKAIR1: a pass's b31 bytes from the program GL is about to draw with (glGetUniform*, arrays element by element,
  * a matrix's GL column k at + 16 k as the row_major HLSL reads it). Fn: the caller's GL functions (Qt's 4.x core) */
 template <class Fn> void fxPack( Fn * fn, unsigned prog, const FxField * f, int n, std::uint8_t * out )

@@ -50,6 +50,9 @@
 #include "features/vkframe/cloud_march_a_view_ps.spv.h"
 #include "features/vkframe/cloud_resolve_view_ps.spv.h"
 #include "features/vkframe/cloud_resolve_a_view_ps.spv.h"
+// lane VKFAR1: the far bulb dots as instanced quads (cell_fardots)
+#include "features/vkframe/fardots_view_vs.spv.h"
+#include "features/vkframe/fardots_view_ps.spv.h"
 
 #include <algorithm>
 #include <chrono>
@@ -581,6 +584,7 @@ bool ssrWork( std::string & why );
 void ssrDrop();
 bool fxWork( std::string & why );
 void fxDrop();
+bool farRecord( std::string & why );  // lane VKFAR1 (vkfardots.inc): fxWork's kind 2
 
 struct Worker
 {
@@ -5042,7 +5046,7 @@ struct Fx
 	VkFence fence = VK_NULL_HANDLE;
 	bool pending = false;
 	// this run's job, written by the drawing thread before the hand
-	int kind = 0;  // 0 the air, 1 the clouds
+	int kind = 0;  // 0 the air, 1 the clouds, 2 the far dots (lane VKFAR1)
 	VkFramebuffer fbAir = VK_NULL_HANDLE, fbM = VK_NULL_HANDLE, fbR = VK_NULL_HANDLE;
 	int w = 0, h = 0, vp[4] = {}, stencilRef = 1, march = kFxMarch, resolve = kFxResolve, mw = 0, mh = 0, hw = 0, hh = 0;
 	bool blend = false, skipMarch = false;
@@ -5465,6 +5469,11 @@ bool fxWork( std::string & why )
 		}
 		FxProg & P = F.prog[kFxVolsky];
 		fxDraw( P, P.pipe[F.blend ? 1 : 0], F.fbAir, F.airPass, F.w, F.h, F.vp, F.stencilRef );
+	} else if ( F.kind == 2 ) {  // lane VKFAR1: the far dots
+		if ( !farRecord( why ) ) {
+			v.vkEndCommandBuffer( F.cmd );
+			return false;
+		}
 	} else {
 		if ( !F.fbR || ( !F.skipMarch && !F.fbM ) ) {
 			v.vkEndCommandBuffer( F.cmd );
@@ -5894,6 +5903,8 @@ FxStat takeCloudStat()
 	return s;
 }
 }  // namespace WwVkPresent
+
+#include "features/vkframe/vkfardots.inc"  // lane VKFAR1 (row G3): the far bulb dots on the view
 
 // lane VKLIGHT1: AO, the contact shadow lines and the SSGI cast as compute on the present device (vkpresent.h LightRun)
 namespace
