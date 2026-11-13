@@ -10,7 +10,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(HERE)), 'tests', 'spells'))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import remap, spirv_probe, glctx
+import remap, spirv_probe, glctx, stamps
 from glctx import GLuint, GLint, GLenum, fn
 import shader_link_check as slc
 
@@ -42,7 +42,7 @@ def items(tree):
         yield pf, st, [], name
         for un, tags in var.get(name, []):
             st2 = [(e, p[:-5] + '__' + tags[s + '.' + e] + '.hlsl' if tags.get(s + '.' + e) else p, s) for e, p, s in st]
-            if all(os.path.exists(x[1]) for x in st2):
+            if all(stamps.exists(x[1]) for x in st2):
                 yield pf, st2, un.split('+'), name + '@' + un
 
 

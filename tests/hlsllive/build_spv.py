@@ -36,12 +36,13 @@ def bool_names(src):
 
 def compile_raw(hlsl, raw, defines=()):
     '''R7: the DXC step alone (thread safe: no shared state), so build_all can run many at once -> (ok, stderr tail)'''
-    st = os.path.basename(hlsl).rsplit('.', 1)[0].rsplit('_', 1)[1]
-    src = open(hlsl, encoding='utf-8', errors='replace').read()
+    f, extra = stamps.real(hlsl)   # HLSLSRC: a virtual variant = its readable source + the tag's defines
+    st = os.path.basename(f).rsplit('.', 1)[0].rsplit('_', 1)[1]
+    src = open(f, encoding='utf-8', errors='replace').read()
     pm = re.search(r'// profile: (\w+)', src)
-    cmd = [DXC, '-spirv', '-fspv-target-env=vulkan1.0'] + shifts_of(hlsl, src) + [stamps.opt_of(hlsl), '-T', pm.group(1) if pm else PROFILE[st],
-           '-E', 'main', '-I', os.path.dirname(hlsl), '-Fo', raw, hlsl]
-    for d in defines:
+    cmd = [DXC, '-spirv', '-fspv-target-env=vulkan1.0'] + shifts_of(f, src) + [stamps.opt_of(hlsl), '-T', pm.group(1) if pm else PROFILE[st],
+           '-E', 'main', '-I', os.path.dirname(f), '-Fo', raw, f]
+    for d in list(defines) + extra:
         cmd += ['-D', d]
     if GL_BINDLESS in src:
         # -Vd: DXC's validator wants OpSamplerImageAddressingModeNV, which HLSL cannot write; spvgl.patch adds it
@@ -54,7 +55,7 @@ def compile_raw(hlsl, raw, defines=()):
 
 def build(hlsl, out, defines=(), locs=None, precompiled=False, ps_remap=None):
     raw = out + '.raw'
-    src = open(hlsl, encoding='utf-8', errors='replace').read()
+    src = open(stamps.real(hlsl)[0], encoding='utf-8', errors='replace').read()
     if not precompiled:
         ok, err = compile_raw(hlsl, raw, defines)
         if not ok:
