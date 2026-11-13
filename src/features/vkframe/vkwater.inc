@@ -25,11 +25,46 @@ namespace WwVkPresent
 WaterCaps waterCaps()
 {
 	WaterCaps c;
-	/* the present device as vkpresent.cpp creates it: no textureCompressionBC, imageCubeArray, samplerAnisotropy or
-	 * tessellationShader enabled, no VkBufferView route for GL texel buffers, no shaded mesh pipeline */
+	/* the present device as vkpresent.cpp creates it (lane VKWATER2): textureCompressionBC and imageCubeArray (VKFAR1's
+	 * farTwin), VkBufferView texel buffers (farTexelBuffer), when offered; no shaded mesh pipeline yet */
 	c.sharedFmt = &waterSharedFmt;  // lane VKWATER2: + R32UI / RG32UI / R8UI and D32F_S8 (waterDepth on a float frame)
 	c.intFormats = waterSharedFmt( 0x8236 ) && waterSharedFmt( 0x823C ) && waterSharedFmt( 0x8232 );  // R32UI RG32UI R8UI
+	if ( vk().ok ) {
+		std::string why;
+		c.bc = fcFeatures( true, false, why );
+		c.cubeArray = fcFeatures( false, true, why );
+		c.texelBuffer = farTexelBufferMax() > 0;
+		c.aniso = vk().anisotropy;  // VKOBJ2's samplerAnisotropy
+	}
 	return c;
+}
+
+bool waterTwin( std::uintptr_t key, const WaterSlot & s, unsigned & tex, std::string & why )
+{
+	tex = 0;
+	if ( s.kind == 5 ) {
+		unsigned buf = 0;
+		return farTexelBuffer( key, s.glFmt, std::size_t( std::max( s.w, 1 ) ) * 16u, buf, tex, why );
+	}
+	if ( s.kind == 4 )
+		return farTwin( key, 3, s.w, s.h, s.d, s.glFmt, tex, why, s.levels );
+	if ( s.kind < 0 || s.kind > 2 || ( s.kind == 1 && waterBcFormat( s.glFmt ) ) ) {
+		why = s.name + ": no twin for this sampler kind / format";
+		return false;
+	}
+	if ( waterBcFormat( s.glFmt ) )
+		return farTwin( key, s.kind, s.w, s.h, s.kind == 2 ? s.d : 1, s.glFmt, tex, why, s.levels );
+	return sharedTarget( key, s.kind, s.w, s.h, s.d, s.glFmt, tex, why, s.levels );
+}
+
+void waterTwinDrop( std::uintptr_t key, const WaterSlot & s )
+{
+	if ( s.kind == 5 )
+		farTexelBufferDrop( key );
+	else if ( s.kind == 4 || waterBcFormat( s.glFmt ) )
+		farTwinDrop( key );
+	else
+		sharedTargetDrop( key );
 }
 
 void waterOnGl( const char * why )
