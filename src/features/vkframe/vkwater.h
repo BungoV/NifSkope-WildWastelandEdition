@@ -12,6 +12,8 @@
 #include <string>
 #include <vector>
 
+#include "features/vkframe/vkwater_tables.h"
+
 namespace WwVkPresent
 {
 
@@ -27,6 +29,11 @@ struct WaterSlot
 	int w = 0, h = 0, d = 1, levels = 1;
 	float aniso = 1.0f;
 	bool samplerObj = false;  //!< a sampler object on its unit (its state, not the texture's, samples)
+	// lane VKWATER3: the texture's sampling state (the draw's VkSampler), a texel buffer's data store
+	unsigned magF = 0x2601, minF = 0x2601, wrap[3] = { 0x2901, 0x2901, 0x2901 }, cmpMode = 0, cmpFunc = 0x0203;
+	int baseLevel = 0;
+	unsigned dataBuf = 0;
+	long long bufBytes = 0;
 };
 
 //! why an input cannot move (0: it takes a twin)
@@ -223,6 +230,21 @@ template <class Fn> void waterCensusOf( Fn * fn, unsigned prog, WaterCensus & c 
 					fn->glGetTexParameteriv( kTarget[s.kind], 0x813D, &maxL );  // GL_TEXTURE_MAX_LEVEL
 					fn->glGetTexParameterfv( kTarget[s.kind], 0x84FE, &an );    // GL_TEXTURE_MAX_ANISOTROPY
 					s.aniso = an;
+					int magF = 0, wr[3] = {}, cm = 0, cf = 0, bl = 0;
+					fn->glGetTexParameteriv( kTarget[s.kind], 0x2800, &magF );  // GL_TEXTURE_MAG_FILTER
+					fn->glGetTexParameteriv( kTarget[s.kind], 0x2802, &wr[0] );  // WRAP_S / T / R
+					fn->glGetTexParameteriv( kTarget[s.kind], 0x2803, &wr[1] );
+					fn->glGetTexParameteriv( kTarget[s.kind], 0x8072, &wr[2] );
+					fn->glGetTexParameteriv( kTarget[s.kind], 0x884C, &cm );     // GL_TEXTURE_COMPARE_MODE / FUNC
+					fn->glGetTexParameteriv( kTarget[s.kind], 0x884D, &cf );
+					fn->glGetTexParameteriv( kTarget[s.kind], 0x813C, &bl );     // GL_TEXTURE_BASE_LEVEL
+					s.magF = unsigned( magF );
+					s.minF = unsigned( minF );
+					for ( int k = 0; k < 3; k++ )
+						s.wrap[k] = unsigned( wr[k] );
+					s.cmpMode = unsigned( cm );
+					s.cmpFunc = unsigned( cf );
+					s.baseLevel = bl;
 					const bool mip = minF >= 0x2700 && minF <= 0x2703;
 					while ( mip && s.levels <= maxL && s.levels < 16 ) {
 						int lw = 0;
@@ -231,6 +253,13 @@ template <class Fn> void waterCensusOf( Fn * fn, unsigned prog, WaterCensus & c 
 							break;
 						s.levels++;
 					}
+				} else {
+					int ds = 0;
+					fn->glGetTexLevelParameteriv( 0x8C2A, 0, 0x8C2D, &ds );  // GL_TEXTURE_BUFFER_DATA_STORE_BINDING
+					int bytes = 0;
+					fn->glGetTexLevelParameteriv( 0x8C2A, 0, 0x919E, &bytes );  // GL_TEXTURE_BUFFER_SIZE
+					s.dataBuf = unsigned( ds );
+					s.bufBytes = bytes;
 				}
 			}
 		}
@@ -246,6 +275,153 @@ template <class Fn> void waterCensusOf( Fn * fn, unsigned prog, WaterCensus & c 
 		if ( t == 0x8E88 || t == 0x8E87 )      // GL_TESS_CONTROL_SHADER / GL_TESS_EVALUATION_SHADER
 			c.tess = true;
 	}
+}
+
+/* Lane VKWATER3: the shaded draw. The vertex inputs water_view_vs reads (SPIR-V location, GL's attribute location in
+ * fo4_default.vert = the HLSL TEXCOORD index, components); DXC dropped boneWeights[1] and the far boxes. */
+struct WaterVsIn
+{
+	int spv, gl, comps;
+};
+inline constexpr WaterVsIn kWaterVsIn[] = { { 0, 0, 3 }, { 1, 1, 4 }, { 2, 2, 3 }, { 3, 3, 3 }, { 4, 4, 3 }, { 5, 5, 4 }, { 7, 7, 2 },
+	{ 8, 9, 2 }, { 9, 10, 4 }, { 10, 11, 4 }, { 11, 12, 4 }, { 12, 13, 4 } };
+constexpr int kWaterAttribs = int( sizeof( kWaterVsIn ) / sizeof( kWaterVsIn[0] ) );
+
+//! one vertex attribute as GL's vertex array holds it
+struct WaterAttrib
+{
+	bool on = false;
+	int size = 4, stride = 0;
+	unsigned type = 0x1406, buf = 0;
+	bool norm = false, integer = false;
+	std::uintptr_t off = 0;
+	long long bufBytes = 0;
+	int divisor = 0;
+	float cur[4] = { 0, 0, 0, 1 };  //!< GL's current value (a disabled array)
+};
+//! one uniform block's range as GL's indexed binding holds it (buf 0: no block / nothing bound)
+struct WaterUbo
+{
+	unsigned buf = 0;
+	long long off = 0, size = 0, bufBytes = 0;
+	int need = 0;  //!< the block's size in the program (GL_UNIFORM_BLOCK_DATA_SIZE)
+};
+/* everything the shaded draw reads: the census, GL's vertex array, element range, blocks, loose uniforms, raster state.
+ * Indices GL_UNSIGNED_SHORT triangles (bsshape's drawElements). */
+struct WaterRun
+{
+	int w = 0, h = 0;               //!< the tone frame's size
+	unsigned color = 0;             //!< the tone frame's colour (toneFrameIs)
+	WaterCensus census;
+	WaterAttrib attr[kWaterAttribs];
+	unsigned ebo = 0;
+	long long eboBytes = 0;
+	long long idxOff = 0;           //!< bytes into the element buffer
+	int count = 0, baseVertex = 0;
+	WaterUbo global, shadow, skin;  //!< globalUniforms (vs b41 + ps b1), wwShadowFrame (ps b0), skinningUniforms (vs b40)
+	std::uint8_t vsLoose[kT_waterVsBytes] = {}, psLoose[kT_waterPsBytes] = {};
+	int vp[4] = {}, scissor[4] = {};
+	bool scissorOn = false, cullOn = false, depthTest = true, depthMask = true, blend = false, stencil = false;
+	bool colorMask[4] = { true, true, true, true };
+	unsigned cullFace = 0x0405, frontFace = 0x0901, depthFunc = 0x0203;
+	bool polyOffset = false;
+	std::uintptr_t key = 0;         //!< the twins' keys: key + slot index
+	int red = 0;                    //!< gates only: 1 the ps loose block a vec4 off, 2 plain samplers, 4 cull flipped, 8 depth ALWAYS
+};
+
+/* GL current, prog in use, its uniforms set, the shape's vertex array bound: GL's side of the draw into r (the census
+ * first: waterCensusOf). count / idxOff / baseVertex / w / h / color / key are the caller's. */
+template <class Fn> void waterStateOf( Fn * fn, unsigned prog, WaterRun & r )
+{
+	waterCensusOf( fn, prog, r.census );
+	int was = 0;
+	fn->glGetIntegerv( 0x8F36, &was );  // GL_COPY_READ_BUFFER binding
+	auto bytesOf = [&]( unsigned b ) -> long long {
+		if ( !b )
+			return 0;
+		int n = 0;
+		fn->glBindBuffer( 0x8F36, b );
+		fn->glGetBufferParameteriv( 0x8F36, 0x8764, &n );  // GL_BUFFER_SIZE
+		return n;
+	};
+	for ( int i = 0; i < kWaterAttribs; i++ ) {
+		WaterAttrib & a = r.attr[i];
+		a = WaterAttrib();
+		const unsigned l = unsigned( kWaterVsIn[i].gl );
+		int on = 0, size = 4, stride = 0, type = 0x1406, norm = 0, integer = 0, div = 0, buf = 0;
+		fn->glGetVertexAttribiv( l, 0x8622, &on );      // ENABLED
+		fn->glGetVertexAttribiv( l, 0x8623, &size );
+		fn->glGetVertexAttribiv( l, 0x8624, &stride );
+		fn->glGetVertexAttribiv( l, 0x8625, &type );
+		fn->glGetVertexAttribiv( l, 0x886A, &norm );
+		fn->glGetVertexAttribiv( l, 0x88FD, &integer );
+		fn->glGetVertexAttribiv( l, 0x88FE, &div );
+		fn->glGetVertexAttribiv( l, 0x889F, &buf );     // BUFFER_BINDING
+		void * p = nullptr;
+		fn->glGetVertexAttribPointerv( l, 0x8645, &p );
+		fn->glGetVertexAttribfv( l, 0x8626, a.cur );    // CURRENT_VERTEX_ATTRIB
+		a.on = on != 0;
+		a.size = size;
+		a.stride = stride;
+		a.type = unsigned( type );
+		a.norm = norm != 0;
+		a.integer = integer != 0;
+		a.divisor = div;
+		a.buf = unsigned( buf );
+		a.off = reinterpret_cast<std::uintptr_t>( p );
+		a.bufBytes = a.on ? bytesOf( a.buf ) : 0;
+	}
+	int ebo = 0;
+	fn->glGetIntegerv( 0x8895, &ebo );  // GL_ELEMENT_ARRAY_BUFFER_BINDING (the vertex array's)
+	r.ebo = unsigned( ebo );
+	r.eboBytes = bytesOf( r.ebo );
+	auto ubo = [&]( const char * name, WaterUbo & u ) {
+		u = WaterUbo();
+		const unsigned bi = fn->glGetUniformBlockIndex( prog, name );
+		if ( bi == 0xFFFFFFFFu )
+			return;
+		int bp = 0, need = 0, b = 0;
+		fn->glGetActiveUniformBlockiv( prog, bi, 0x8A3F, &bp );    // GL_UNIFORM_BLOCK_BINDING
+		fn->glGetActiveUniformBlockiv( prog, bi, 0x8A40, &need );  // GL_UNIFORM_BLOCK_DATA_SIZE
+		u.need = need;
+		fn->glGetIntegeri_v( 0x8A28, unsigned( bp ), &b );         // GL_UNIFORM_BUFFER_BINDING
+		u.buf = unsigned( b );
+		if ( !u.buf )
+			return;
+		long long st = 0, sz = 0;
+		fn->glGetInteger64i_v( 0x8A29, unsigned( bp ), &st );      // START / SIZE (0: the whole buffer)
+		fn->glGetInteger64i_v( 0x8A2A, unsigned( bp ), &sz );
+		u.bufBytes = bytesOf( u.buf );
+		u.off = st;
+		u.size = sz > 0 ? sz : u.bufBytes - st;
+	};
+	ubo( "globalUniforms", r.global );
+	ubo( "wwShadowFrame", r.shadow );
+	ubo( "skinningUniforms", r.skin );
+	fn->glBindBuffer( 0x8F36, unsigned( was ) );
+	fxPack( fn, prog, kT_waterVs, int( sizeof( kT_waterVs ) / sizeof( kT_waterVs[0] ) ), r.vsLoose );
+	fxPack( fn, prog, kT_waterPs, int( sizeof( kT_waterPs ) / sizeof( kT_waterPs[0] ) ), r.psLoose );
+	fn->glGetIntegerv( 0x0BA2, r.vp );       // GL_VIEWPORT
+	fn->glGetIntegerv( 0x0C10, r.scissor );  // GL_SCISSOR_BOX
+	r.scissorOn = fn->glIsEnabled( 0x0C11 ) != 0;
+	r.cullOn = fn->glIsEnabled( 0x0B44 ) != 0;
+	r.depthTest = fn->glIsEnabled( 0x0B71 ) != 0;
+	r.blend = fn->glIsEnabled( 0x0BE2 ) != 0;
+	r.stencil = fn->glIsEnabled( 0x0B90 ) != 0;
+	r.polyOffset = fn->glIsEnabled( 0x8037 ) != 0;  // GL_POLYGON_OFFSET_FILL
+	int cf = 0, ff = 0, df = 0;
+	fn->glGetIntegerv( 0x0B45, &cf );  // GL_CULL_FACE_MODE
+	fn->glGetIntegerv( 0x0B46, &ff );  // GL_FRONT_FACE
+	fn->glGetIntegerv( 0x0B74, &df );  // GL_DEPTH_FUNC
+	r.cullFace = unsigned( cf );
+	r.frontFace = unsigned( ff );
+	r.depthFunc = unsigned( df );
+	unsigned char dm = 1, cm[4] = { 1, 1, 1, 1 };
+	fn->glGetBooleanv( 0x0B72, &dm );  // GL_DEPTH_WRITEMASK
+	fn->glGetBooleanv( 0x0C23, cm );   // GL_COLOR_WRITEMASK
+	r.depthMask = dm != 0;
+	for ( int k = 0; k < 4; k++ )
+		r.colorMask[k] = cm[k] != 0;
 }
 
 //! lane VKWATER1: the device's side of the verdict (vkwater.inc)
@@ -264,6 +440,12 @@ struct WaterStat
 };
 WaterStat takeWaterStat();
 void waterCensusTook( double ms );
+/*! lane VKWATER3: the non-tessellated shaded water draw (fo4_default vs + fo4_waterlook ps twins) into the tone frame on
+ * Vulkan, one crossing. false: why; nothing drawn (GL draws the shape) */
+bool waterRun( const WaterRun & r, std::string & why );
+//! what waterRun cannot take on this device (empty: none)
+std::string waterDrawRefusal();
+FxStat takeWaterDrawStat();
 }
 
 #ifndef WW_VKPRESENT_NO_QT
