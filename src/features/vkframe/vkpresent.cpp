@@ -51,6 +51,10 @@
 #include "features/vkframe/cloud_march_a_view_ps.spv.h"
 #include "features/vkframe/cloud_resolve_view_ps.spv.h"
 #include "features/vkframe/cloud_resolve_a_view_ps.spv.h"
+// lane VKFAR1: the far bulb dots as instanced quads (cell_fardots)
+#include "features/vkframe/fardots_view_vs.spv.h"
+#include "features/vkframe/fardots_view_ps.spv.h"
+#include "features/vkframe/vkfarcards.h"  // lane VKFAR1 round 2: the far cards' inputs (vkfarcards.inc)
 #include "features/vkframe/obj_depth_vs.spv.h"  // lane VKOBJ1
 
 #include <algorithm>
@@ -251,6 +255,10 @@ struct Vk
 	// lane VKOBJ1: GL's clip z in [-w, w] for the objects' perspective prepass (VK_EXT_depth_clip_control)
 	bool clipControl = false;
 	VKP( vkEnumerateDeviceExtensionProperties ); VKP( vkGetPhysicalDeviceFeatures2 );
+	// lane VKOBJ2: the bindless maps as descriptor indexing (vkbindless.inc), the row by BaseInstance, GL's anisotropy
+	bool descIndexing = false, drawParams = false, anisotropy = false;
+	std::uint32_t blImageCap = 0, blSamplerCap = 0;
+	float maxAniso = 1.0f;
 };
 #undef VKP
 
@@ -511,12 +519,53 @@ bool makeDevice( std::string & why )
 	v.storageExt = offered.shaderStorageImageExtendedFormats == VK_TRUE;
 	en.shaderFloat64 = offered.shaderFloat64;
 	v.float64 = offered.shaderFloat64 == VK_TRUE;
+	// lane VKFAR1 round 2: the far cards' BC sheets and shadow cube arrays (vkfarcards.inc reads what is offered)
+	en.textureCompressionBC = offered.textureCompressionBC;
+	en.imageCubeArray = offered.imageCubeArray;
 	en.depthBiasClamp = offered.depthBiasClamp;  // lane VKSHADOW1: GL's glPolygonOffsetClamp twin
 	v.depthBiasClamp = offered.depthBiasClamp == VK_TRUE;
 	en.multiDrawIndirect = offered.multiDrawIndirect;
 	v.multiDrawIndirect = offered.multiDrawIndirect == VK_TRUE;
 	en.drawIndirectFirstInstance = offered.drawIndirectFirstInstance;
 	v.firstInstance = offered.drawIndirectFirstInstance == VK_TRUE;
+	// lane VKOBJ2: descriptor indexing + draw parameters for the bindless maps (Vulkan 1.2 core structs; the table refuses
+	// without them), GL's anisotropic filtering for their samplers
+	en.samplerAnisotropy = offered.samplerAnisotropy;
+	v.anisotropy = offered.samplerAnisotropy == VK_TRUE;
+	VkPhysicalDeviceDescriptorIndexingFeatures ixEn { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES };
+	VkPhysicalDeviceShaderDrawParametersFeatures dpEn { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_DRAW_PARAMETERS_FEATURES };
+	{
+		VkPhysicalDeviceProperties2 pp { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2 };
+		v.vkGetPhysicalDeviceProperties2( v.phys, &pp );
+		v.maxAniso = pp.properties.limits.maxSamplerAnisotropy;
+		if ( pp.properties.apiVersion >= VK_API_VERSION_1_2 && v.vkGetPhysicalDeviceFeatures2 ) {
+			VkPhysicalDeviceDescriptorIndexingFeatures ix { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES };
+			VkPhysicalDeviceShaderDrawParametersFeatures dp { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_DRAW_PARAMETERS_FEATURES };
+			ix.pNext = &dp;
+			VkPhysicalDeviceFeatures2 f2 { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2 };
+			f2.pNext = &ix;
+			v.vkGetPhysicalDeviceFeatures2( v.phys, &f2 );
+			VkPhysicalDeviceDescriptorIndexingProperties ixp { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_PROPERTIES };
+			pp.pNext = &ixp;
+			v.vkGetPhysicalDeviceProperties2( v.phys, &pp );
+			v.drawParams = dp.shaderDrawParameters == VK_TRUE;
+			dpEn.shaderDrawParameters = dp.shaderDrawParameters;
+			v.descIndexing = ix.runtimeDescriptorArray && ix.shaderSampledImageArrayNonUniformIndexing && ix.descriptorBindingPartiallyBound
+				&& ix.descriptorBindingSampledImageUpdateAfterBind && ix.descriptorBindingUpdateUnusedWhilePending;
+			if ( v.descIndexing ) {
+				ixEn.runtimeDescriptorArray = ixEn.shaderSampledImageArrayNonUniformIndexing = VK_TRUE;
+				ixEn.descriptorBindingPartiallyBound = ixEn.descriptorBindingSampledImageUpdateAfterBind = VK_TRUE;
+				ixEn.descriptorBindingUpdateUnusedWhilePending = VK_TRUE;
+				v.blSamplerCap = std::min( { ixp.maxDescriptorSetUpdateAfterBindSamplers, ixp.maxPerStageDescriptorUpdateAfterBindSamplers, 256u } );
+				v.blImageCap = std::min( { ixp.maxDescriptorSetUpdateAfterBindSampledImages,
+					ixp.maxPerStageDescriptorUpdateAfterBindSampledImages, 65536u } );
+				if ( v.blImageCap + v.blSamplerCap > ixp.maxPerStageUpdateAfterBindResources )
+					v.blImageCap = ixp.maxPerStageUpdateAfterBindResources > v.blSamplerCap
+						? ixp.maxPerStageUpdateAfterBindResources - v.blSamplerCap : 0u;
+				v.descIndexing = v.blImageCap >= 2 && v.blSamplerCap >= 2;
+			}
+		}
+	}
 	VkDeviceCreateInfo di { VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO };
 	di.pEnabledFeatures = &en;
 	di.queueCreateInfoCount = 1;
@@ -524,6 +573,11 @@ bool makeDevice( std::string & why )
 	di.enabledExtensionCount = nDext;
 	di.ppEnabledExtensionNames = dext;
 	di.pNext = v.clipControl ? &clipFeat : nullptr;
+	if ( v.descIndexing || v.drawParams ) {  // lane VKOBJ2: ahead of the clip control chain
+		dpEn.pNext = const_cast<void *>( di.pNext );
+		ixEn.pNext = &dpEn;
+		di.pNext = &ixEn;
+	}
 	if ( v.vkCreateDevice( v.phys, &di, nullptr, &v.dev ) != VK_SUCCESS )
 		return fail( "vkCreateDevice (swapchain + external memory / semaphore win32) failed" );
 #define LD( fn ) v.fn = reinterpret_cast<PFN_##fn>( v.vkGetDeviceProcAddr( v.dev, #fn ) )
@@ -634,7 +688,9 @@ void ssrDrop();
 void csmDrop();  // lane VKSHADOW1
 bool fxWork( std::string & why );
 void fxDrop();
+bool farRecord( std::string & why );  // lane VKFAR1 (vkfardots.inc): fxWork's kind 2
 void objDrop();  // lane VKOBJ1
+void blFree();  // lane VKOBJ2
 
 struct Worker
 {
@@ -3523,6 +3579,7 @@ void shutdown()
 	}
 	csmDrop();  // lane VKSHADOW1: the cascades' layer views go before the shared arrays they view
 	objDrop();  // lane VKOBJ1: the prepass framebuffer goes before the shared depth it holds
+	blFree();  // lane VKOBJ2: the bindless table's set and samplers (it holds the shared targets' views)
 	// lane VKSHARE1: the keyed shared targets (their owners see sharedTargetIs false and make GL's own again)
 	if ( !shareds().empty() ) {
 		drain();
@@ -3533,6 +3590,7 @@ void shutdown()
 		sharedStat().mb = 0.0;
 		sharedGen()++;
 	}
+	farCardsFree( gl().ok );  // lane VKFAR1 round 2: the far cards' twins
 	// the temporal AA's crossing semaphores (GL's names); its pipelines stay with the device
 	Taa & A = taa();
 	if ( A.glDone || A.pending ) {
@@ -5128,7 +5186,7 @@ struct Fx
 	VkFence fence = VK_NULL_HANDLE;
 	bool pending = false;
 	// this run's job, written by the drawing thread before the hand
-	int kind = 0;  // 0 the air, 1 the clouds
+	int kind = 0;  // 0 the air, 1 the clouds, 2 the far dots (lane VKFAR1)
 	VkFramebuffer fbAir = VK_NULL_HANDLE, fbM = VK_NULL_HANDLE, fbR = VK_NULL_HANDLE;
 	int w = 0, h = 0, vp[4] = {}, stencilRef = 1, march = kFxMarch, resolve = kFxResolve, mw = 0, mh = 0, hw = 0, hh = 0;
 	bool blend = false, skipMarch = false;
@@ -5551,6 +5609,11 @@ bool fxWork( std::string & why )
 		}
 		FxProg & P = F.prog[kFxVolsky];
 		fxDraw( P, P.pipe[F.blend ? 1 : 0], F.fbAir, F.airPass, F.w, F.h, F.vp, F.stencilRef );
+	} else if ( F.kind == 2 ) {  // lane VKFAR1: the far dots
+		if ( !farRecord( why ) ) {
+			v.vkEndCommandBuffer( F.cmd );
+			return false;
+		}
 	} else {
 		if ( !F.fbR || ( !F.skipMarch && !F.fbM ) ) {
 			v.vkEndCommandBuffer( F.cmd );
@@ -5980,6 +6043,9 @@ FxStat takeCloudStat()
 	return s;
 }
 }  // namespace WwVkPresent
+
+#include "features/vkframe/vkfardots.inc"  // lane VKFAR1 (row G3): the far bulb dots on the view
+#include "features/vkframe/vkfarcards.inc"  // lane VKFAR1 round 2: the far cards' inputs
 
 // lane VKLIGHT1: AO, the contact shadow lines and the SSGI cast as compute on the present device (vkpresent.h LightRun)
 namespace
@@ -8112,6 +8178,8 @@ ObjStat takeObjStat()
 	return s;
 }
 }  // namespace WwVkPresent
+
+#include "features/vkframe/vkbindless.inc"  // lane VKOBJ2: the bindless maps as descriptor indexing
 
 namespace
 {
