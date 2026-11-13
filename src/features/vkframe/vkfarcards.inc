@@ -45,8 +45,8 @@ FcFormat fcFormat( GLenum f )
 	const VkFormat c = vkFormatOf( f, depth );
 	if ( c == VK_FORMAT_UNDEFINED || depth )
 		return { VK_FORMAT_UNDEFINED, 0, 0, false };
-	const int texel = c == VK_FORMAT_R32G32B32A32_SFLOAT ? 16 : c == VK_FORMAT_R16G16B16A16_SFLOAT || c == VK_FORMAT_R32G32_SFLOAT ? 8
-		: c == VK_FORMAT_R8_UNORM ? 1 : c == VK_FORMAT_R8G8_UNORM ? 2 : 4;
+	const int texel = c == VK_FORMAT_R32G32B32A32_SFLOAT ? 16 : c == VK_FORMAT_R16G16B16A16_SFLOAT || c == VK_FORMAT_R32G32_SFLOAT
+		|| c == VK_FORMAT_R32G32_UINT ? 8 : c == VK_FORMAT_R8_UNORM || c == VK_FORMAT_R8_UINT ? 1 : c == VK_FORMAT_R8G8_UNORM ? 2 : 4;  // lane VKWATER2: + the integer rows
 	return { c, 0, texel, false };
 }
 
