@@ -15,6 +15,7 @@
 #include "gl/cellunits.h"	// lane BUGS1102B: the roof map's unit
 #include "features/weather/rainfogmath.h"	// lane WETWEATHER1: the rain's share of a weather change
 #include "features/weather/rainwetlaw.h"
+#include "features/weather/airtempmath.h"	// lane WEATHERRECX2: temperature.air -> phase, wetting / drying
 #include "features/weather/weatherrecx.h"	// lane WEATHERRECX1: precipitation.wetting / drying
 #include "features/weather/recxphysical.h"	// lane AIRPERF1 A9: the entry's physicalWeather switch
 #include "features/shadows/shadowset.h"	// lane WETWEATHER2: the cover map leaves the terrain out
@@ -258,6 +259,52 @@ bool loadDds( NifSkopeOpenGLContext::GLFunctions * fn, const QString & path, PcT
 }
 
 //! one weather's layers: its .recx block, else its record's class flags
+//! lane WEATHERRECX2: WW_WEATHER_AIRTEMP_RED=1 (live): the air temperature moves neither the phase nor the wetness speeds
+bool airTempRed()
+{
+	return wwEnv( "WW_WEATHER_AIRTEMP_RED" ).trimmed() == QByteArray( "1" );
+}
+
+/* lane WEATHERRECX2 (temperature.air, airtempmath.h): the file's rain and fine snow re-split by the air temperature
+ * (Dai 2008); the other types (hail, clumps, far dots) keep their rates. Returns the census words. */
+QString airPhase( QVector<WwPrecipLayerSpec> & specs, float airC )
+{
+	if ( airC <= WwAirTemp::kNotSet || airTempRed() )
+		return airTempRed() ? QStringLiteral( " (air red: no phase)" ) : QString();
+	double rain = 0.0, snow = 0.0;
+	for ( const WwPrecipLayerSpec & s : specs )
+		if ( s.type == WwPrecip::Rain )
+			rain += s.rateMmH;
+		else if ( s.type == WwPrecip::SnowFine )
+			snow += s.rateMmH;
+	if ( rain + snow <= 0.0 )
+		return QString();
+	float toRain = 0.0f, toSnow = 0.0f;
+	WwAirTemp::split( float( rain + snow ), airC, toRain, toSnow );
+	auto scaleFamily = [&specs]( int type, double have, double want ) {
+		if ( have > 0.0 ) {
+			for ( int i = specs.size() - 1; i >= 0; i-- )
+				if ( specs[i].type == type ) {
+					const double k = want / have;
+					specs[i].rateMmH *= k;
+					if ( specs[i].density >= 0.0 )
+						specs[i].density *= k;
+					if ( specs[i].rateMmH < 1e-3 )
+						specs.remove( i );
+				}
+		} else if ( want >= 1e-3 ) {
+			WwPrecipLayerSpec s = wwPrecipDefault( type, QStringLiteral( "recx" ) );
+			s.rateMmH = want;
+			specs.append( s );
+		}
+	};
+	scaleFamily( WwPrecip::Rain, rain, toRain );
+	scaleFamily( WwPrecip::SnowFine, snow, toSnow );
+	return QStringLiteral( " (air %1C: snow share %2, rain %3 + snowFine %4 -> %5 + %6 mm/h)" ).arg( double( airC ), 0, 'f', 1 )
+		.arg( double( WwAirTemp::snowShare( airC ) ), 0, 'f', 3 ).arg( rain, 0, 'f', 2 ).arg( snow, 0, 'f', 2 )
+		.arg( double( toRain ), 0, 'f', 2 ).arg( double( toSnow ), 0, 'f', 2 );
+}
+
 QVector<PcLayer> layersOf( const QStringList & roots, const QStringList & files, quint32 formID, const QString & edid,
 	const QString & owner, unsigned classFlags, int spgdType, double spgdDensity, int spgdRed, QStringList & notes )
 {
@@ -286,6 +333,7 @@ QVector<PcLayer> layersOf( const QStringList & roots, const QStringList & files,
 			? QStringLiteral( " (rain red: added keys dropped)" ) : QString() );
 		for ( const QString & l : n )
 			notes << QStringLiteral( "%1 /precipitation/%2" ).arg( h.file.section( QLatin1Char( '/' ), -3 ), l );
+		source += airPhase( specs, wwWeatherRecx().airTemp );
 	} else {
 		// lane RAINFOG2 (PRECIPFLAG1): the precipitation shader's layer (MNAM -> SPGD type, rate x density / 7); red
 		// WW_PRECIP_SPGD_RED=flags: the class flags (WEATHERLOOK1 B), =rate: the type's default rate
@@ -327,6 +375,7 @@ struct RwState
 	bool init = false, moving = false;
 	bool cover = false;	// lane FO76WEATHER2: the cover map is built and tested
 	QString coverWhy;
+	QString airNote;	// lane WEATHERRECX2: the air temperature's wetting / drying minutes
 	float wet = 0.0f, target = 0.0f;
 	const void * doc = nullptr;
 	QElapsedTimer clock;
@@ -506,8 +555,13 @@ float wwCellRainWetAmount( Scene * scene )
 		// lane WEATHERRECX1: the .recx's wetting / drying minutes (red WW_WEATHER_RECORD_RED=precip: the game's speeds)
 		const WwWeatherRecx & wx = wwWeatherRecx();
 		const bool fromFile = !wwWeatherRecordRed( WwRecPrecip );
+		// lane WEATHERRECX2: the air temperature slows drying in the cold and wetting under snow (airtempmath.h)
+		const float airC = airTempRed() ? WwAirTemp::kNotSet : wx.airTemp;
+		const float wetMin = WwAirTemp::wettingMinutes( wx.wetting, airC ), dryMin = WwAirTemp::dryingMinutes( wx.drying, airC );
 		s.wet = WwRainWet::update( s.wet, s.target, float( now - s.lastMs ) * 0.001f, rainNow, rainPrev, !interior,
-			red != "nosnap", fromFile ? wx.wetting : -1.0f, fromFile ? wx.drying : -1.0f );
+			red != "nosnap", fromFile ? wetMin : -1.0f, fromFile ? dryMin : -1.0f );
+		s.airNote = fromFile && airC > WwAirTemp::kNotSet ? QStringLiteral( " air %1C wetting %2 drying %3 min" )
+			.arg( double( airC ), 0, 'f', 1 ).arg( double( wetMin ), 0, 'f', 1 ).arg( double( dryMin ), 0, 'f', 1 ) : QString();
 	}
 	s.lastMs = now;
 	s.moving = s.wet != s.target;
@@ -528,7 +582,8 @@ float wwCellRainWetAmount( Scene * scene )
 		.arg( interior ? QStringLiteral( " (interior)" ) : QString() )
 		.arg( pinOk ? QStringLiteral( " (WW_CELL_RAINWET_AMOUNT)" ) : QString() ).arg( s.coverWhy )
 		.arg( red == "nosnap" ? QStringLiteral( " (RED WW_CELL_RAINWET_RED=nosnap)" )
-			: !pinOk && !interior && WwRainWet::snaps( rainNow, rainPrev, true ) ? QStringLiteral( " (snap: no rain in the change)" ) : QString() ) );
+			: !pinOk && !interior && WwRainWet::snaps( rainNow, rainPrev, true ) ? QStringLiteral( " (snap: no rain in the change)" ) : QString() )
+		+ s.airNote );
 	return s.wet;
 }
 
