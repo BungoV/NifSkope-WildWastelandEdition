@@ -267,7 +267,8 @@ bool vkTexOn()
 
 int vkTexRed()
 {
-	WW_SWITCH_STATIC( int, r, wwEnv( "WW_VKOBJ_TEX_RED" ).trimmed() == "key" ? 1 : 0 );
+	// lane VKOBJ4: `swz`, the swizzle's own view dropped (BC4's R,R,R,1 reads R,0,0,1)
+	WW_SWITCH_STATIC( int, r, wwEnv( "WW_VKOBJ_TEX_RED" ).trimmed() == "key" ? 1 : wwEnv( "WW_VKOBJ_TEX_RED" ).trimmed() == "swz" ? 2 : 0 );
 	return r;
 }
 
@@ -280,7 +281,7 @@ namespace
 {
 std::vector<Row> vkRows;  // lane VKOBJ3: the frame's rows, translated by the Vulkan table at frame()
 bool vkTexEver = false;
-std::string vkLine;
+std::string vkLine, vkLoadLine;
 
 void vkRowCensus()
 {
@@ -1171,9 +1172,18 @@ void frame()
 			"addFails=%d rows=%zu whole=%zu misses=%d images=%d samplers=%d mb=%.1f makeMs=%.2f freeMs=%.2f%s%s%s%s%s",
 			s.twins, s.made, s.refused, s.gone, s.freed, s.handles, s.adds, s.addFails, s.rows, s.whole, s.misses, s.images,
 			s.samplers, s.mb, s.makeMs, s.freeMs, s.why.empty() ? "" : " refusedWhy=", s.why.c_str(),
-			s.addWhy.empty() ? "" : " addWhy=", s.addWhy.c_str(), vkTexRed() == 1 ? " RED key" : "" );
+			s.addWhy.empty() ? "" : " addWhy=", s.addWhy.c_str(), vkTexRed() == 1 ? " RED key" : vkTexRed() == 2 ? " RED swz" : "" );
 		if ( vkLine != b && wwFrameLog() ) {
 			vkLine = b;
+			std::fprintf( stderr, "%s\n", b );
+		}
+		/* lane VKOBJ4: the batch (one GL signal + one submit per flush) and the cell's load cost so far (make + flush time;
+		 * it ends 30 frames after the last make) */
+		std::snprintf( b, sizeof( b ), "vk objtex load: twins=%d ms=%.2f each=%.3f flushes=%d (this frame: batched=%d flushed=%d "
+			"flushMs=%.2f flushFails=%d) swizzled=%d", s.loadTwins, s.loadMs, s.loadTwins ? s.loadMs / s.loadTwins : 0.0,
+			s.loadFlushes, s.batched, s.flushed, s.flushMs, s.flushFails, s.swizzled );
+		if ( s.loadTwins && vkLoadLine != b && wwFrameLog() ) {
+			vkLoadLine = b;
 			std::fprintf( stderr, "%s\n", b );
 		}
 	}

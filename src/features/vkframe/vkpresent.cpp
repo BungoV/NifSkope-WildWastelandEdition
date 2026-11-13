@@ -12,6 +12,7 @@
 
 #include "features/vkframe/vkpresent.h"
 #include "features/vkframe/vkobjtex.h"  // lane VKOBJ3: shutdown() lets the cache's BC twins go
+#include "features/vkframe/vkobjpipe.h"  // lane VKOBJ4: shutdown() frees the bl twins' pipelines
 
 #define VK_NO_PROTOTYPES
 #define VK_USE_PLATFORM_WIN32_KHR
@@ -3583,6 +3584,7 @@ void shutdown()
 	}
 	csmDrop();  // lane VKSHADOW1: the cascades' layer views go before the shared arrays they view
 	objDrop();  // lane VKOBJ1: the prepass framebuffer goes before the shared depth it holds
+	objBlPipeFree();  // lane VKOBJ4: the bl twins' pipelines (their layouts name the table's)
 	blFree();  // lane VKOBJ2: the bindless table's set and samplers (it holds the shared targets' views)
 	// lane VKSHARE1: the keyed shared targets (their owners see sharedTargetIs false and make GL's own again)
 	if ( !shareds().empty() ) {
@@ -8193,6 +8195,7 @@ ObjStat takeObjStat()
 
 #include "features/vkframe/vkbindless.inc"  // lane VKOBJ2: the bindless maps as descriptor indexing
 #include "features/vkframe/vkobjtex.inc"  // lane VKOBJ3: the texture cache's BC twins and their handles in the table
+#include "features/vkframe/vkobjpipe.inc"  // lane VKOBJ4: the bl twins' shaded pipelines (row G4 slice 4)
 
 namespace
 {

@@ -6,6 +6,7 @@
 # Not while NifSkope or the game runs (a window of ours): the script refuses then.
 # Last line: `BLVIEW GATE OK` or `BLVIEW GATE FAILED`.
 # Lane VKOBJ3: `bash tests/vkframe/blview.sh <out dir> bc` runs the texture cache's BC twins (vkobjtex.inc) instead.
+# Lane VKOBJ4: also compiles the bl twins' pipeline modules (*.pipe.spv, the vertex stage's red `redshift`) for objBlPipe.
 set -u
 OUT="${1:?out dir}"
 MODE="${2:-}"
@@ -15,6 +16,7 @@ export PATH="/c/msys64/ucrt64/bin:$PATH"
 if tasklist | grep -qiE '^(NifSkope|Fallout4)'; then echo "BLVIEW GATE FAILED (NifSkope or the game runs: no window of ours now)"; exit 1; fi
 mkdir -p "$OUT"
 SPV=(-spirv -fspv-target-env=vulkan1.2 -HV 2021)
+PSHIFT="-fvk-b-shift 0 0 -fvk-t-shift 64 0 -fvk-s-shift 128 0 -fvk-u-shift 192 0"
 "$DXC" "${SPV[@]}" -T vs_6_0 -E main "$ROOT/tests/vkframe/blview_vs.hlsl" -Fo "$OUT/blview_vs.spv" > "$OUT/dxc.txt" 2>&1 \
 	&& "$DXC" "${SPV[@]}" -T ps_6_0 -E main -D WW_VK_BINDLESS "$ROOT/tests/vkframe/blview_ps.hlsl" -Fo "$OUT/blview_ps.spv" >> "$OUT/dxc.txt" 2>&1 \
 	&& "$DXC" "${SPV[@]}" -T ps_6_0 -E main -D WW_VK_BINDLESS -D WW_VK_BINDLESS_RED_SLOT "$ROOT/tests/vkframe/blview_ps.hlsl" \
@@ -25,6 +27,15 @@ for twin in fo4_cellbl_ps fo4_cellcsmbl_ps; do
 		> "$OUT/$twin.dxc.txt" 2>&1 || { tail -20 "$OUT/$twin.dxc.txt"; echo "BLVIEW GATE FAILED (dxc, $twin with WW_VK_BINDLESS)"; exit 1; }
 	"$DXC" "${SPV[@]}" -T ps_6_0 -E main -D WW_VK_BINDLESS "$ROOT/res/shaders/hlsl/near/$twin.hlsl" -Fc "$OUT/$twin.vk.asm" > /dev/null 2>&1
 	echo "twin $twin (Vulkan form): $(grep -cE 'wwBl(Images|Samplers) (DescriptorSet 1|Binding [01])' "$OUT/$twin.vk.asm") set-1 decorations"
+	# lane VKOBJ4: the pipeline's form (fx()'s shifts, every binding kept), read by objBlPipe
+	"$DXC" "${SPV[@]}" -T ps_6_0 -E main -D WW_VK_BINDLESS $PSHIFT -fspv-preserve-bindings "$ROOT/res/shaders/hlsl/near/$twin.hlsl" \
+		-Fo "$OUT/$twin.pipe.spv" >> "$OUT/$twin.dxc.txt" 2>&1 || { tail -20 "$OUT/$twin.dxc.txt"; echo "BLVIEW GATE FAILED (dxc, $twin pipe)"; exit 1; }
+done
+# lane VKOBJ4: the bl vertex stage on its own shifts, and the red `shift` on the pixel stage's (b0 skinning on b0 global)
+for vs in "pipe:-fvk-b-shift 256 0 -fvk-t-shift 320 0 -fvk-s-shift 384 0 -fvk-u-shift 448 0" "redshift:$PSHIFT"; do
+	"$DXC" "${SPV[@]}" -T vs_6_0 -E main -D WW_VK_BINDLESS ${vs#*:} -fspv-preserve-bindings "$ROOT/res/shaders/hlsl/near/fo4_defaultbl_vs.hlsl" \
+		-Fo "$OUT/fo4_defaultbl_vs.${vs%%:*}.spv" > "$OUT/fo4_defaultbl_vs.dxc.txt" 2>&1 \
+		|| { tail -20 "$OUT/fo4_defaultbl_vs.dxc.txt"; echo "BLVIEW GATE FAILED (dxc, fo4_defaultbl_vs ${vs%%:*})"; exit 1; }
 done
 g++ -O2 -std=c++17 -pthread -I"$ROOT/src" "$ROOT/tests/vkframe/blview.cpp" -o "$OUT/blview.exe" -lopengl32 -lgdi32 -luser32 \
 	|| { echo "BLVIEW GATE FAILED (g++)"; exit 1; }

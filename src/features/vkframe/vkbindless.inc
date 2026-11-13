@@ -3,7 +3,9 @@
 // drain). The API and the row's meaning: vkbindless.h. The shader side: res/shaders/hlsl/near/ww_bindless_vk.hlsli.
 #include "features/vkframe/vkbindless.h"
 
+#include <map>
 #include <unordered_map>
+#include <utility>
 
 namespace
 {
@@ -20,8 +22,17 @@ struct BlSmpKey
 struct BlImg
 {
 	std::uintptr_t key = 0;
+	std::uint32_t swz = 0;  // VKOBJ4: 0, or the swizzle its own view carries (blSwizzleCode)
 	int refs = 0;
 };
+
+// VKOBJ4: a swizzled view of a key's image (the image it was made on: a remade twin's is stale)
+struct BlSwzView
+{
+	VkImage img = VK_NULL_HANDLE;
+	VkImageView view = VK_NULL_HANDLE;
+};
+using BlViewKey = std::pair<std::uintptr_t, std::uint32_t>;
 
 struct BlEntry
 {
@@ -43,7 +54,8 @@ struct Bl
 	std::vector<BlSmpKey> smpKeys;  // index = the sampler's array element (0: GL's default state)
 	std::vector<VkSampler> smps;
 	std::vector<BlImg> imgs;        // index = the image's array element (0: the black 1x1, key 0)
-	std::unordered_map<std::uintptr_t, std::uint32_t> keyImg;
+	std::map<BlViewKey, std::uint32_t> keyImg;  // (key, swizzle) -> image element
+	std::map<BlViewKey, BlSwzView> swzViews;
 	std::unordered_map<std::uint64_t, BlEntry> handles;
 	std::vector<std::pair<std::uint32_t, std::uint64_t>> graves;  // (index, the translate it was freed at)
 	std::uint64_t serial = 0, gen = 0;
@@ -177,7 +189,7 @@ void blGravesBlack()
 }
 
 // VKOBJ3: a swizzle that only names what the format reads anyway counts as none: a channel the format lacks reads 0 (rgb)
-// or 1 (alpha) as gli writes it for BC1 RGB / BC4 / BC5; any other (BC4's R,R,R,1) stays refused
+// or 1 (alpha) as gli writes it for BC1 RGB / BC4 / BC5; any other (BC4's R,R,R,1) takes its own view (VKOBJ4)
 void blSwizzleNorm( VkFormat fmt, WwVkPresent::BlSampler & s )
 {
 	int comps = 4;
@@ -194,8 +206,36 @@ void blSwizzleNorm( VkFormat fmt, WwVkPresent::BlSampler & s )
 	}
 }
 
-// the view the table samples for an owner's key: the shared twin (2D, one sample, colour)
-VkImageView blView( std::uintptr_t key, VkFormat & fmt )
+/* VKOBJ4: a normalised swizzle as Vulkan's component mapping, 3 bits a channel (VkComponentSwizzle's value); 0 = none.
+ * false: a GL swizzle value Vulkan has no twin of. s's swizzle reads identity after (the sampler key wants none) */
+bool blSwizzleCode( WwVkPresent::BlSampler & s, std::uint32_t & code, std::string & why )
+{
+	code = 0;
+	bool any = false;
+	for ( int c = 0; c < 4; c++ ) {
+		std::uint32_t m;
+		switch ( s.swizzle[c] ) {
+		case 0x1903: m = VK_COMPONENT_SWIZZLE_R; break;
+		case 0x1904: m = VK_COMPONENT_SWIZZLE_G; break;
+		case 0x1905: m = VK_COMPONENT_SWIZZLE_B; break;
+		case 0x1906: m = VK_COMPONENT_SWIZZLE_A; break;
+		case 0: m = VK_COMPONENT_SWIZZLE_ZERO; break;
+		case 1: m = VK_COMPONENT_SWIZZLE_ONE; break;
+		default:
+			why = "a texture swizzle value Vulkan has no twin of (" + std::to_string( s.swizzle[c] ) + ")";
+			return false;
+		}
+		any = any || s.swizzle[c] != GLint( 0x1903 + c );
+		code |= m << ( 3 * c );
+		s.swizzle[c] = GLint( 0x1903 + c );
+	}
+	if ( !any )
+		code = 0;
+	return true;
+}
+
+// the view the table samples for an owner's key: the shared twin (2D, one sample, colour); VKOBJ4: swz != 0, its own view
+VkImageView blView( std::uintptr_t key, VkFormat & fmt, std::uint32_t swz = 0 )
 {
 	// VKOBJ3: the texture cache's BC twins live in VKFAR1's map (farTwin), the rest in sharedTarget's
 	const Shared * s = sharedFind( key );
@@ -205,7 +245,38 @@ VkImageView blView( std::uintptr_t key, VkFormat & fmt )
 		|| s->glFmt == kDepth24Stencil8 )
 		return VK_NULL_HANDLE;
 	fmt = s->fmt;
-	return s->view;
+	if ( !swz )
+		return s->view;
+	Vk & v = vk();
+	BlSwzView & sv = blS().swzViews[{ key, swz }];
+	if ( sv.view && sv.img == s->img )
+		return sv.view;
+	if ( sv.view )  // the key's image was remade (its old one is gone, so is any work on it)
+		v.vkDestroyImageView( v.dev, sv.view, nullptr );
+	sv = BlSwzView();
+	VkImageViewCreateInfo ci { VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO };
+	ci.image = s->img;
+	ci.viewType = VK_IMAGE_VIEW_TYPE_2D;
+	ci.format = s->fmt;
+	ci.components = { VkComponentSwizzle( swz & 7 ), VkComponentSwizzle( ( swz >> 3 ) & 7 ), VkComponentSwizzle( ( swz >> 6 ) & 7 ),
+		VkComponentSwizzle( ( swz >> 9 ) & 7 ) };
+	ci.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, std::uint32_t( std::max( s->levels, 1 ) ), 0, 1 };
+	if ( v.vkCreateImageView( v.dev, &ci, nullptr, &sv.view ) != VK_SUCCESS ) {
+		sv = BlSwzView();
+		return VK_NULL_HANDLE;
+	}
+	sv.img = s->img;
+	return sv.view;
+}
+
+// VKOBJ4: the key's swizzled views go before its image (the caller drained and waited the device idle)
+void blSwzForget( std::uintptr_t key )
+{
+	Vk & v = vk();
+	auto & m = blS().swzViews;
+	for ( auto it = m.lower_bound( { key, 0u } ); it != m.end() && it->first.first == key; it = m.erase( it ) )
+		if ( it->second.view )
+			v.vkDestroyImageView( v.dev, it->second.view, nullptr );
 }
 
 // the sampler's array element for a key, made when first asked
@@ -342,7 +413,7 @@ void blRewrite()
 		if ( B.imgs[i].refs <= 0 )
 			continue;
 		VkFormat fmt = VK_FORMAT_UNDEFINED;
-		VkImageView view = blView( B.imgs[i].key, fmt );
+		VkImageView view = blView( B.imgs[i].key, fmt, B.imgs[i].swz );
 		if ( !view ) {
 			view = B.zeroView;
 			B.st.misses++;
@@ -382,6 +453,9 @@ void blFree()
 	v.vkDeviceWaitIdle( v.dev );
 	for ( VkSampler s : B.smps )
 		v.vkDestroySampler( v.dev, s, nullptr );
+	for ( auto & sv : B.swzViews )  // VKOBJ4
+		if ( sv.second.view )
+			v.vkDestroyImageView( v.dev, sv.second.view, nullptr );
 	if ( B.zeroView )
 		v.vkDestroyImageView( v.dev, B.zeroView, nullptr );
 	if ( B.zeroImg )
@@ -474,27 +548,34 @@ bool blAdd( std::uint64_t handle, std::uintptr_t key, const BlSampler & s, std::
 	if ( B.gen != sharedGen() )
 		blRewrite();
 	VkFormat fmt = VK_FORMAT_UNDEFINED;
-	const VkImageView view = blView( key, fmt );
-	if ( !view )
+	if ( !blView( key, fmt ) )
 		return refuse( "no shared 2D twin for this texture" );
 	if ( blIsSrgb( fmt ) && s.srgbDecode == 0x8A4A )
 		return refuse( "an sRGB texture with its decode skipped" );
 	BlSampler sn = s;
 	blSwizzleNorm( fmt, sn );
+	std::uint32_t swz = 0;  // VKOBJ4: a swizzle left after the norm (BC4's R,R,R,1) is the view's own
+	if ( !blSwizzleCode( sn, swz, w ) )
+		return refuse( w );
+	const VkImageView view = blView( key, fmt, swz );
+	if ( !view )
+		return refuse( "the swizzled view (" + std::to_string( swz ) + ") of this texture's twin failed" );
 	BlSmpKey k;
 	std::uint32_t smp = 0;
 	if ( !blSamplerKey( sn, k, w ) || !blSamplerIndex( k, smp, w ) )
 		return refuse( w );
 	auto old = B.handles.find( handle );
 	if ( old != B.handles.end() ) {  // the same handle again: GL froze its state, so only its key can be news
-		if ( B.imgs[old->second.img].key == key ) {
+		if ( B.imgs[old->second.img].key == key && B.imgs[old->second.img].swz == swz ) {
 			old->second.smp = smp;
 			return true;
 		}
 		blDrop( handle );
 	}
+	if ( swz )
+		B.st.swizzled++;
 	std::uint32_t img = 0;
-	auto ki = B.keyImg.find( key );
+	auto ki = B.keyImg.find( { key, swz } );
 	if ( ki != B.keyImg.end() )
 		img = ki->second;
 	else {
@@ -512,8 +593,9 @@ bool blAdd( std::uint64_t handle, std::uintptr_t key, const BlSampler & s, std::
 			B.imgs.push_back( BlImg() );
 		}
 		B.imgs[img].key = key;
+		B.imgs[img].swz = swz;
 		B.imgs[img].refs = 0;
-		B.keyImg[key] = img;
+		B.keyImg[{ key, swz }] = img;
 		blWrite( 0, img, view, VK_NULL_HANDLE );  // a new or long-unused element: no pending work reads it
 	}
 	B.imgs[img].refs++;
@@ -533,7 +615,7 @@ void blDrop( std::uint64_t handle )
 	B.st.drops++;
 	if ( img == 0 || img >= B.imgs.size() || --B.imgs[img].refs > 0 )
 		return;
-	B.keyImg.erase( B.imgs[img].key );
+	B.keyImg.erase( { B.imgs[img].key, B.imgs[img].swz } );
 	B.imgs[img] = BlImg();
 	B.graves.push_back( { img, B.serial } );
 }

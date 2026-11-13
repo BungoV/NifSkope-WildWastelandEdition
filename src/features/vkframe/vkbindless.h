@@ -40,6 +40,7 @@ struct BlStat
 	int images = 0, samplers = 0;  //!< live image indices (without the default), distinct samplers
 	int adds = 0, drops = 0, rows = 0, misses = 0, rewrites = 0;
 	int fails = 0;
+	int swizzled = 0;  //!< VKOBJ4: adds through a swizzle's own view (BC4's R,R,R,1)
 	std::string failWhy;
 	std::uint32_t imageCap = 0, samplerCap = 0;
 };

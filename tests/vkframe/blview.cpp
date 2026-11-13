@@ -8,6 +8,9 @@
 // BC1/2/3/4/5/7 and sRGB, random blocks GL uploads with glCompressedTextureSubImage2D; BC4 / BC5 carry gli's swizzle) and
 // their handles join through objTexHandle. Frame 1: texture 3 is gone (objTexGone, deleted) and a new twin takes its slot
 // (the deferred free, the graves blacked). Red `key` (objTexHandle red 1: each handle with the twin made before) must FAIL.
+// Lane VKOBJ4: the 12 twins reach the present device in one hand-over (one GL signal, one submit: the batch line), BC4
+// carries the app's R,R,R,1 through its own view, red `swz` (objTexHandle red 2: that view dropped) must FAIL.
+// Every mode: the bl twins' pipelines (vkobjpipe.inc, `BLVIEW pipe` lines); reds shift / table / varying / attr must FAIL.
 // Fixture: 12 textures (RGBA8 / RGBA16F / RGBA32F, 8..128 px, mips or not) with 12 GL sampler states (filters, wraps,
 // border, LOD bias / clamps, anisotropy 4); 128 rows of 8 handles; 128 cells of 24 x 24 px (384 x 192 RGBA32F), cell % 8
 // = the slot and the op (Sample, SampleBias 1.25, SampleLevel 1.5, SampleGrad, Sample, SampleLevel 0, SampleBias -0.75,
@@ -497,6 +500,104 @@ std::uint16_t toHalf( float x )
 		return std::uint16_t( s | 0x7C00u );
 	return std::uint16_t( s | ( std::uint32_t( e ) << 10 ) | ( m >> 13 ) );
 }
+
+/* lane VKOBJ4: the bl twins' pipelines (vkobjpipe.inc) from blview.sh's modules, the attributes as fo4_default.vert's GL
+ * locations (one buffer each; 10..13 the far instance rows), two RGBA16F targets + D24S8 at 4x, EQUAL after the prepass.
+ * Each twin must be made once (a second ask finds it); the reds must be refused for their own reason */
+bool pipeGate( const std::string & spvDir )
+{
+	using namespace WwVkPresent;
+	const std::vector<std::uint32_t> vs = readSpv( spvDir + "/fo4_defaultbl_vs.pipe.spv" ),
+		vsRed = readSpv( spvDir + "/fo4_defaultbl_vs.redshift.spv" );
+	const char * twins[2] = { "fo4_cellbl_ps", "fo4_cellcsmbl_ps" };
+	std::vector<std::uint32_t> ps[2];
+	for ( int t = 0; t < 2; t++ )
+		ps[t] = readSpv( spvDir + "/" + twins[t] + ".pipe.spv" );
+	if ( vs.empty() || vsRed.empty() || ps[0].empty() || ps[1].empty() ) {
+		std::printf( "BLVIEW pipe: no modules in %s\n", spvDir.c_str() );
+		return false;
+	}
+	ObjBlTarget tg;
+	tg.colors[0] = tg.colors[1] = VK_FORMAT_R16G16B16A16_SFLOAT;
+	tg.colorCount = 2;
+	tg.depth = VK_FORMAT_D24_UNORM_S8_UINT;
+	tg.samples = 4;
+	tg.depthOp = VK_COMPARE_OP_EQUAL;
+	std::vector<ObjBlBuffer> bufs;
+	std::vector<ObjBlAttr> attrs;
+	const std::uint32_t glAttr[13][2] = { { 0, VK_FORMAT_R32G32B32_SFLOAT }, { 1, VK_FORMAT_R32G32B32A32_SFLOAT }, { 2, VK_FORMAT_R32G32B32_SFLOAT },
+		{ 3, VK_FORMAT_R32G32B32_SFLOAT }, { 4, VK_FORMAT_R32G32B32_SFLOAT }, { 5, VK_FORMAT_R32G32B32A32_SFLOAT },
+		{ 6, VK_FORMAT_R32G32B32A32_SFLOAT }, { 7, VK_FORMAT_R32G32_SFLOAT }, { 9, VK_FORMAT_R32G32_SFLOAT },
+		{ 10, VK_FORMAT_R32G32B32A32_SFLOAT }, { 11, VK_FORMAT_R32G32B32A32_SFLOAT }, { 12, VK_FORMAT_R32G32B32A32_SFLOAT },
+		{ 13, VK_FORMAT_R32G32B32A32_SFLOAT } };
+	for ( std::uint32_t i = 0; i < 13; i++ ) {
+		const std::uint32_t f = glAttr[i][1];
+		const std::uint32_t bytes = f == VK_FORMAT_R32G32_SFLOAT ? 8 : f == VK_FORMAT_R32G32B32_SFLOAT ? 12 : 16;
+		bufs.push_back( { i, bytes, glAttr[i][0] >= 10 } );
+		attrs.push_back( { glAttr[i][0], i, f, 0 } );
+	}
+	bool ok = true;
+	std::string why;
+	for ( int t = 0; t < 2; t++ ) {
+		ObjBlPipeInfo in;
+		if ( !objBlPipe( t, vs.data(), vs.size(), ps[t].data(), ps[t].size(), tg, bufs, attrs, in, why ) ) {
+			std::printf( "BLVIEW pipe %s: REFUSED (%s)\n", twins[t], why.c_str() );
+			ok = false;
+			continue;
+		}
+		std::printf( "BLVIEW pipe %s: set 0 = %d bindings (%d ubos, %d images, %d texel buffers, %d samplers, %d storage buffers; vertex %d, "
+			"pixel %d, both %d), set 1 = the table, %d inputs, %d varyings, %d targets: pipeline made in %.1f ms\n", twins[t], in.set0, in.ubos,
+			in.images, in.texels, in.samplers, in.ssbos, in.vsOnly, in.psOnly, in.both, in.inputs, in.varyings, in.targets, in.ms );
+	}
+	ObjBlPipeInfo again;
+	const int made = objBlPipes();
+	if ( ok && ( !objBlPipe( 0, vs.data(), vs.size(), ps[0].data(), ps[0].size(), tg, bufs, attrs, again, why ) || objBlPipes() != 2 || made != 2 ) ) {
+		std::printf( "BLVIEW pipe: not made once per twin (%d made, then %d)\n", made, objBlPipes() );
+		ok = false;
+	}
+	// the reds: a register shift that collides, a swapped table, a varying no vertex output writes, an attribute missing
+	std::vector<std::uint32_t> psTable = ps[0], psVary = ps[0];
+	std::vector<std::uint32_t> set1;
+	for ( int pass = 0; pass < 2; pass++ )
+		for ( std::size_t i = 5; i < psTable.size(); i += psTable[i] >> 16 ) {
+			if ( !( psTable[i] >> 16 ) )
+				break;
+			std::uint32_t * a = &psTable[i + 1];
+			if ( ( psTable[i] & 0xFFFFu ) != 71 )
+				continue;
+			if ( pass == 0 && a[1] == 34 && a[2] == 1 )
+				set1.push_back( a[0] );
+			else if ( pass == 1 && a[1] == 33 && std::find( set1.begin(), set1.end(), a[0] ) != set1.end() )
+				a[2] ^= 1u;
+		}
+	for ( std::size_t i = 5; i < psVary.size() && ( psVary[i] >> 16 ); i += psVary[i] >> 16 )
+		if ( ( psVary[i] & 0xFFFFu ) == 71 && psVary[i + 2] == 30 && psVary[i + 3] == 3 ) {
+			psVary[i + 3] = 20;
+			break;
+		}
+	std::vector<ObjBlAttr> attrsRed;
+	for ( const ObjBlAttr & a : attrs )
+		if ( a.glLocation != 12 )
+			attrsRed.push_back( a );
+	struct Red
+	{
+		const char * name, * expect;
+		const std::vector<std::uint32_t> * v, * p;
+		const std::vector<ObjBlAttr> * a;
+	} reds[4] = { { "shift", "register shift", &vsRed, &ps[0], &attrs }, { "table", "not the table", &vs, &psTable, &attrs },
+		{ "varying", "no vertex output", &vs, &psVary, &attrs }, { "attr", "no attribute feeds GL location 12", &vs, &ps[0], &attrsRed } };
+	for ( const Red & r : reds ) {
+		ObjBlPipeInfo in;
+		std::string w;
+		const bool made2 = objBlPipe( 0, r.v->data(), r.v->size(), r.p->data(), r.p->size(), tg, bufs, *r.a, in, w );
+		const bool own = !made2 && w.find( r.expect ) != std::string::npos;
+		std::printf( "BLVIEW RED %s %s (%s)\n", r.name, own ? "FAIL" : "PASSED", made2 ? "made" : w.c_str() );
+		ok = ok && own;
+	}
+	int refused = 0;
+	std::printf( "BLVIEW pipe: %d pipelines, %d refused\n", objBlPipes( &refused ), refused );
+	return ok;
+}
 }  // namespace blv
 
 int main( int argc, char ** argv )
@@ -632,7 +733,7 @@ int main( int argc, char ** argv )
 	std::vector<GLuint64> handles( kTex, 0 );
 	std::mt19937 rng( 23 );
 	std::uniform_real_distribution<float> u01( 0.0f, 1.0f );
-	bool ok = true;
+	bool ok = pipeGate( spvDir );  // lane VKOBJ4: the bl twins' pipelines and their reds
 	// lane VKOBJ3: the cache's BC twin of def t (random blocks per level, the def's sampler state, gli's swizzle on BC4 / BC5)
 	const GLenum bcFmt[kTex] = { 0x83F0, 0x83F1, 0x83F2, 0x83F3, 0x8DBB, 0x8DBD, 0x8E8C, 0x8C4C, 0x8C4F, 0x8DBE, 0x8E8D, 0x8C4D };
 	double makeMs = 0.0;
@@ -664,11 +765,12 @@ int main( int argc, char ** argv )
 		f.textureParameterf( tex, 0x813B, d.maxLod );
 		f.textureParameterf( tex, 0x84FE, d.aniso );
 		f.textureParameterfv( tex, 0x1004, d.border );
-		if ( bcFmt[t] == 0x8DBB || bcFmt[t] == 0x8DBD || bcFmt[t] == 0x8DBE ) {  // gli: R,0,0,1 / R,G,0,1
+		if ( bcFmt[t] == 0x8DBB || bcFmt[t] == 0x8DBD || bcFmt[t] == 0x8DBE ) {
+			// VKOBJ4: BC4 as GLI_create_texture sets a one-channel format (R,R,R,1: its own view); BC5 gli's R,G,0,1
 			const bool two = bcFmt[t] != 0x8DBB;
 			f.textureParameteri( tex, 0x8E42, GL_RED );
-			f.textureParameteri( tex, 0x8E43, two ? GL_GREEN : GL_ZERO );
-			f.textureParameteri( tex, 0x8E44, GL_ZERO );
+			f.textureParameteri( tex, 0x8E43, two ? GL_GREEN : GL_RED );
+			f.textureParameteri( tex, 0x8E44, two ? GL_ZERO : GL_RED );
 			f.textureParameteri( tex, 0x8E45, GL_ONE );
 		}
 		hOut = f.getTextureHandle( tex );
@@ -738,10 +840,19 @@ int main( int argc, char ** argv )
 	}
 	if ( bc ) {
 		const WwVkPresent::ObjTexStat s = WwVkPresent::objTexFrame();
-		std::printf( "BLVIEW bc twins: %d made, %d refused, %d handles added, %d add fails (%s), %.1f MB, objTexMake %.2f ms each\n",
+		std::printf( "BLVIEW bc twins: %d made, %d refused, %d handles added, %d add fails (%s), %.1f MB, objTexMake %.3f ms each\n",
 			s.made, s.refused, s.adds, s.addFails, s.addWhy.c_str(), s.mb, made ? makeMs / made : 0.0 );
+		// VKOBJ4: one hand-over for the batch (one GL signal, one submit), BC4's R,R,R,1 through its own view, the load line
+		std::printf( "BLVIEW bc batch: %d batched, %d flushes of %d twins (%.3f ms, %d fails), %d swizzled adds; load: twins=%d ms=%.2f "
+			"each=%.3f flushes=%d\n", s.batched, s.flushes, s.flushed, s.flushMs, s.flushFails, s.swizzled, s.loadTwins, s.loadMs,
+			s.loadTwins ? s.loadMs / s.loadTwins : 0.0, s.loadFlushes );
 		if ( s.made != kTex || s.adds != kTex || s.addFails ) {
 			std::printf( "BLVIEW GATE FAILED (the BC twins did not all join)\n" );
+			return 2;
+		}
+		if ( s.batched != kTex || s.flushes != 1 || s.flushed != kTex || s.flushFails || s.swizzled != 1 || s.loadTwins != kTex
+			|| s.loadFlushes != 1 ) {
+			std::printf( "BLVIEW GATE FAILED (the batch: not one hand-over for every twin, or BC4 not through its own view)\n" );
 			return 2;
 		}
 	}
@@ -836,9 +947,9 @@ int main( int argc, char ** argv )
 			f.bindBuffer( kSsbo, ssbo );
 			f.bufferData( kSsbo, std::ptrdiff_t( rows.size() ), rows.data(), kDynamic );
 			const WwVkPresent::ObjTexStat s = WwVkPresent::objTexFrame();
-			std::printf( "BLVIEW bc frame1: gone %d, freed %d (%.2f ms), made %d, adds %d, add fails %d; twins %d\n", s.gone, s.freed,
-				s.freeMs, s.made, s.adds, s.addFails, s.twins );
-			if ( s.gone != 1 || s.freed != 1 || s.adds != 1 || s.twins != kTex ) {
+			std::printf( "BLVIEW bc frame1: gone %d, freed %d (%.2f ms), made %d, adds %d, add fails %d; twins %d; flushes %d of %d\n",
+				s.gone, s.freed, s.freeMs, s.made, s.adds, s.addFails, s.twins, s.flushes, s.flushed );
+			if ( s.gone != 1 || s.freed != 1 || s.adds != 1 || s.twins != kTex || s.flushes != 1 || s.flushed != 1 ) {
 				std::printf( "BLVIEW frame1 FAIL (the BC replace)\n" );
 				ok = false;
 				continue;
@@ -893,6 +1004,23 @@ int main( int argc, char ** argv )
 		const WwVkPresent::ObjTexStat s = WwVkPresent::objTexFrame();
 		std::printf( "BLVIEW bc back: adds %d, add fails %d (%s)\n", s.adds, s.addFails, s.addWhy.c_str() );
 		ok = ok && s.addFails == 0;
+		// VKOBJ4 red `swz`: every handle with no swizzle (BC4's own view dropped: it reads R,0,0,1)
+		for ( int t = 0; t < kTex; t++ )
+			WwVkPresent::objTexHandle( texs[t], handles[t], glProc, 2 );
+		const bool ranS = runVk( 0, 0, gotV, whole );
+		const Diff dS = compare( gotV, ref );
+		const bool swzFails = !ranS || !dS.ok();
+		std::printf( "BLVIEW RED %s swz (BC4 without its R,R,R,1 view; must FAIL) (%zu of %zu covered pixels differ)\n",
+			swzFails ? "FAIL" : "EXACT", dS.diff, dS.covered );
+		ok = ok && swzFails;
+		for ( int t = 0; t < kTex; t++ )
+			WwVkPresent::objTexHandle( texs[t], handles[t], glProc, 0 );
+		const bool ranB = runVk( 0, 0, gotV, whole );
+		const Diff dB = compare( gotV, ref );
+		const WwVkPresent::ObjTexStat sb = WwVkPresent::objTexFrame();
+		std::printf( "BLVIEW bc swz back: %s (%zu of %zu covered pixels differ), adds %d, add fails %d, swizzled %d\n",
+			ranB && dB.ok() ? "EXACT" : "FAIL", dB.diff, dB.covered, sb.adds, sb.addFails, sb.swizzled );
+		ok = ok && ranB && dB.ok() && sb.addFails == 0 && sb.swizzled == 1;
 	}
 	// the reds against frame 1's reference: each must FAIL
 	const struct
