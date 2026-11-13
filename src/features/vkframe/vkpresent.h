@@ -173,8 +173,10 @@ void toneCachePath( const std::string & path );
  * device and imported into GL, keyed by the owner. type 0 = 2D, 1 = 3D (d deep), 2 = 2D array (d layers); glFmt one of
  * GL_RGBA16F / RGBA32F / RGBA8 / RG32F / RG16F / R32F / R8 / DEPTH24_STENCIL8. GL current. Same key and shape: the same
  * name; another shape: the old one goes first (a full drain). false: why; tex 0 (the owner makes GL's own). The GL
- * texture has NEAREST filters; the owner sets its own. */
-bool sharedTarget( std::uintptr_t key, int type, int w, int h, int d, unsigned glFmt, unsigned & tex, std::string & why );
+ * texture has NEAREST filters; the owner sets its own. levels (lane VKAIR1): a mip chain (colour formats; the clouds'
+ * noise volumes), the owner fills each level. */
+bool sharedTarget( std::uintptr_t key, int type, int w, int h, int d, unsigned glFmt, unsigned & tex, std::string & why,
+	int levels = 1 );
 //! tex is key's live shared name in the current GL context (a shutdown drops every one: the owner makes GL's own again)
 bool sharedTargetIs( std::uintptr_t key, unsigned tex );
 //! key's target goes (GL current: its GL names too)
@@ -316,6 +318,250 @@ struct SsrStat
 	double buildMs = 0.0;
 };
 SsrStat takeSsrStat();
+
+/* Lane VKAIR1 (rows L5, L6): the air's sky pass (cell_volsky.frag, WW_CELL_FOGLEAK's twin) and the clouds' march + resolve
+ * (cloud_march / _a, cloud_resolve / _a) as Vulkan fragment passes, res/shaders/hlsl/{air,clouds}. Each GL program's
+ * uniforms go over as its LooseUniforms block (b31) packed at the offsets below (spirv-cross --reflect of the shipped
+ * SPIR-V, notes/vkair1/tools/reflect_table.py); the air also takes b0 (the global buffer's bytes). Inputs GL owns are
+ * copied into shared twins (sharedTarget, glCopyImageSubData a level), or read as shared targets with no copy (the air's
+ * packed volume, the clouds' march and history). One crossing a pass. Reds WW_VKVIEW_AIR_RED=1, WW_VKVIEW_CLOUD_RED=1: GL. */
+struct FxField
+{
+	const char * name;
+	int offset, words, count, isInt, cols;  //!< bytes into b31; floats (ints) a member, rows of a matrix; array length; cols > 0: a matrix
+};
+// kT_volsky: 53 fields, 848 bytes (spirv-cross --reflect of the shipped SPIR-V; tools: notes/vkair1/tools/reflect_table.py)
+inline constexpr FxField kT_volsky[] = {
+	{ "fogNightHue", 0, 1, 1, 0, 0 }, { "fogNight", 16, 4, 1, 0, 0 }, { "atAp", 32, 4, 1, 0, 0 },
+	{ "atApProj", 48, 4, 1, 0, 0 }, { "fogRed", 64, 1, 1, 1, 0 }, { "fogK", 80, 4, 6, 0, 0 },
+	{ "fogView", 176, 4, 1, 0, 0 }, { "volAirTerrU", 192, 4, 1, 0, 0 }, { "volAirTerrV", 208, 4, 1, 0, 0 },
+	{ "volAirTerrFU", 224, 4, 1, 0, 0 }, { "volAirTerrFV", 240, 4, 1, 0, 0 }, { "volAirFlags", 256, 1, 1, 1, 0 },
+	{ "volAirGround", 272, 4, 1, 0, 0 }, { "fogDistScale", 288, 1, 1, 0, 0 }, { "volAirTerrRef", 292, 1, 1, 0, 0 },
+	{ "volAirMed", 304, 4, 1, 0, 0 }, { "volAirLayer", 320, 4, 1, 0, 0 }, { "volAirRain", 336, 4, 1, 0, 0 },
+	{ "volAirRainXf", 352, 4, 1, 0, 4 }, { "volAirRainFar", 416, 4, 1, 0, 0 }, { "volPackDims", 432, 4, 1, 0, 0 },
+	{ "volFar", 448, 4, 1, 0, 0 }, { "volSlices", 464, 4, 1, 0, 0 }, { "volPack", 480, 4, 1, 0, 0 },
+	{ "volFarClamp", 496, 1, 1, 1, 0 }, { "volRect", 512, 4, 1, 0, 0 }, { "fogOn", 528, 1, 1, 1, 0 },
+	{ "volOn", 532, 1, 1, 1, 0 }, { "atApDouble", 536, 1, 1, 0, 0 }, { "volFogBlend", 540, 1, 1, 1, 0 },
+	{ "fogSun", 544, 4, 1, 0, 0 }, { "fogSunColour", 560, 4, 1, 0, 0 }, { "fogUnit", 576, 1, 1, 0, 0 },
+	{ "volSkyMode", 580, 1, 1, 1, 0 }, { "fogProbe", 592, 4, 1, 0, 0 }, { "volSkyOn", 608, 1, 1, 1, 0 },
+	{ "atSkyCamR", 612, 1, 1, 0, 0 }, { "atApSkyRule", 616, 1, 1, 1, 0 }, { "volSkySea", 620, 1, 1, 1, 0 },
+	{ "volSkyDome", 624, 1, 1, 0, 0 }, { "volProbe", 628, 1, 1, 1, 0 }, { "volAirDrift", 640, 4, 1, 0, 0 },
+	{ "volAirDriftUv", 656, 4, 6, 0, 0 }, { "volAirDriftRed", 752, 1, 1, 1, 0 }, { "atRay", 756, 3, 1, 0, 0 },
+	{ "atMieS", 768, 1, 1, 0, 0 }, { "atMieE", 772, 1, 1, 0, 0 }, { "atHaze", 784, 3, 1, 0, 0 },
+	{ "atOzone", 800, 3, 1, 0, 0 }, { "atG", 812, 1, 1, 0, 0 }, { "atHazeAlbedo", 816, 3, 1, 0, 0 },
+	{ "atHazeSpec", 832, 3, 1, 0, 0 }, { "atMsOld", 844, 1, 1, 0, 0 },
+};
+inline constexpr int kT_volskyBytes = 848;
+// kT_march: 56 fields, 1152 bytes (spirv-cross --reflect of the shipped SPIR-V; tools: notes/vkair1/tools/reflect_table.py)
+inline constexpr FxField kT_march[] = {
+	{ "cvCal", 0, 1, 34, 0, 0 }, { "cvBands.baseKm", 544, 3, 1, 0, 0 }, { "cvBands.topKm", 560, 3, 1, 0, 0 },
+	{ "cvBands.density", 576, 3, 1, 0, 0 }, { "cvBands.coverage", 592, 3, 1, 0, 0 }, { "cvBands.sheet", 604, 1, 1, 0, 0 },
+	{ "cvBands.mapRect", 608, 4, 1, 0, 0 }, { "cvBands.windKm", 624, 3, 1, 0, 0 }, { "cvSlab", 640, 1, 1, 0, 0 },
+	{ "cvSunW", 644, 3, 1, 0, 0 }, { "cvMoonW", 656, 3, 1, 0, 0 }, { "cvSunK", 668, 1, 1, 0, 0 },
+	{ "cvMoonK", 672, 1, 1, 0, 0 }, { "cvCamR", 676, 1, 1, 0, 0 }, { "cvViewSize", 680, 2, 1, 0, 0 },
+	{ "cvShaft", 688, 4, 1, 0, 0 }, { "cvOctaves", 704, 1, 1, 1, 0 }, { "cvProbe", 708, 1, 1, 1, 0 },
+	{ "cvProbeRect", 720, 4, 1, 0, 0 }, { "cvProbeBand", 736, 1, 1, 1, 0 }, { "cvStride", 740, 1, 1, 0, 0 },
+	{ "cvPhase", 744, 2, 1, 0, 0 }, { "cvPhasePrm", 752, 4, 1, 0, 0 }, { "cvProj", 768, 4, 1, 0, 0 },
+	{ "cvHistSize", 784, 2, 1, 0, 0 }, { "cvCam", 800, 3, 1, 0, 3 }, { "cvCamKm", 848, 3, 1, 0, 0 },
+	{ "cvMaxKm", 860, 1, 1, 0, 0 }, { "cvSceneZ", 864, 4, 1, 0, 0 }, { "cvKeyW", 880, 3, 1, 0, 0 },
+	{ "cvSteps", 892, 1, 1, 1, 0 }, { "cvFrame", 896, 1, 1, 0, 0 }, { "cvIce", 900, 3, 1, 0, 0 },
+	{ "cvTaps", 912, 1, 1, 1, 0 }, { "cvLightKm", 916, 1, 1, 0, 0 }, { "cvKeyK", 920, 1, 1, 0, 0 },
+	{ "cvAlbedoD", 928, 3, 1, 0, 0 }, { "cvMsOn", 940, 1, 1, 0, 0 }, { "cvMsG", 944, 1, 1, 0, 0 },
+	{ "cvTopOn", 948, 1, 1, 0, 0 }, { "cvTint", 960, 3, 3, 0, 0 }, { "cvAmbDark", 1008, 1, 1, 0, 0 },
+	{ "cvWaterK", 1012, 3, 1, 0, 0 }, { "cvAmbOn", 1024, 1, 1, 0, 0 }, { "cvAmb", 1028, 3, 1, 0, 0 },
+	{ "cvApOn", 1040, 1, 1, 0, 0 }, { "cvDeckAp", 1056, 4, 1, 0, 0 }, { "atRay", 1072, 3, 1, 0, 0 },
+	{ "atMieS", 1084, 1, 1, 0, 0 }, { "atMieE", 1088, 1, 1, 0, 0 }, { "atHaze", 1092, 3, 1, 0, 0 },
+	{ "atOzone", 1104, 3, 1, 0, 0 }, { "atG", 1116, 1, 1, 0, 0 }, { "atHazeAlbedo", 1120, 3, 1, 0, 0 },
+	{ "atHazeSpec", 1136, 3, 1, 0, 0 }, { "atMsOld", 1148, 1, 1, 0, 0 },
+};
+inline constexpr int kT_marchBytes = 1152;
+// kT_march_a: 57 fields, 1168 bytes (spirv-cross --reflect of the shipped SPIR-V; tools: notes/vkair1/tools/reflect_table.py)
+inline constexpr FxField kT_march_a[] = {
+	{ "cvCal", 0, 1, 34, 0, 0 }, { "cvBands.baseKm", 544, 3, 1, 0, 0 }, { "cvBands.topKm", 560, 3, 1, 0, 0 },
+	{ "cvBands.density", 576, 3, 1, 0, 0 }, { "cvBands.coverage", 592, 3, 1, 0, 0 }, { "cvBands.sheet", 604, 1, 1, 0, 0 },
+	{ "cvBands.mapRect", 608, 4, 1, 0, 0 }, { "cvBands.windKm", 624, 3, 1, 0, 0 }, { "cvSlab", 640, 1, 1, 0, 0 },
+	{ "cvBlueSlice", 644, 1, 1, 1, 0 }, { "cvFrame", 648, 1, 1, 0, 0 }, { "cvSunW", 656, 3, 1, 0, 0 },
+	{ "cvMoonW", 672, 3, 1, 0, 0 }, { "cvSunK", 684, 1, 1, 0, 0 }, { "cvMoonK", 688, 1, 1, 0, 0 },
+	{ "cvCamR", 692, 1, 1, 0, 0 }, { "cvViewSize", 696, 2, 1, 0, 0 }, { "cvShaft", 704, 4, 1, 0, 0 },
+	{ "cvOctaves", 720, 1, 1, 1, 0 }, { "cvProbe", 724, 1, 1, 1, 0 }, { "cvProbeRect", 736, 4, 1, 0, 0 },
+	{ "cvProbeBand", 752, 1, 1, 1, 0 }, { "cvStride", 756, 1, 1, 0, 0 }, { "cvPhase", 760, 2, 1, 0, 0 },
+	{ "cvPhasePrm", 768, 4, 1, 0, 0 }, { "cvProj", 784, 4, 1, 0, 0 }, { "cvHistSize", 800, 2, 1, 0, 0 },
+	{ "cvCam", 816, 3, 1, 0, 3 }, { "cvCamKm", 864, 3, 1, 0, 0 }, { "cvMaxKm", 876, 1, 1, 0, 0 },
+	{ "cvSceneZ", 880, 4, 1, 0, 0 }, { "cvKeyW", 896, 3, 1, 0, 0 }, { "cvSteps", 908, 1, 1, 1, 0 },
+	{ "cvIce", 912, 3, 1, 0, 0 }, { "cvTaps", 924, 1, 1, 1, 0 }, { "cvLightKm", 928, 1, 1, 0, 0 },
+	{ "cvKeyK", 932, 1, 1, 0, 0 }, { "cvAlbedoD", 944, 3, 1, 0, 0 }, { "cvMsOn", 956, 1, 1, 0, 0 },
+	{ "cvMsG", 960, 1, 1, 0, 0 }, { "cvTopOn", 964, 1, 1, 0, 0 }, { "cvTint", 976, 3, 3, 0, 0 },
+	{ "cvAmbDark", 1024, 1, 1, 0, 0 }, { "cvWaterK", 1028, 3, 1, 0, 0 }, { "cvAmbOn", 1040, 1, 1, 0, 0 },
+	{ "cvAmb", 1044, 3, 1, 0, 0 }, { "cvApOn", 1056, 1, 1, 0, 0 }, { "cvDeckAp", 1072, 4, 1, 0, 0 },
+	{ "atRay", 1088, 3, 1, 0, 0 }, { "atMieS", 1100, 1, 1, 0, 0 }, { "atMieE", 1104, 1, 1, 0, 0 },
+	{ "atHaze", 1108, 3, 1, 0, 0 }, { "atOzone", 1120, 3, 1, 0, 0 }, { "atG", 1132, 1, 1, 0, 0 },
+	{ "atHazeAlbedo", 1136, 3, 1, 0, 0 }, { "atHazeSpec", 1152, 3, 1, 0, 0 }, { "atMsOld", 1164, 1, 1, 0, 0 },
+};
+inline constexpr int kT_march_aBytes = 1168;
+// kT_resolve: 12 fields, 192 bytes (spirv-cross --reflect of the shipped SPIR-V; tools: notes/vkair1/tools/reflect_table.py)
+inline constexpr FxField kT_resolve[] = {
+	{ "cvMoveClamp", 0, 1, 1, 0, 0 }, { "cvHistSize", 4, 2, 1, 0, 0 }, { "cvStride", 12, 1, 1, 0, 0 },
+	{ "cvPhase", 16, 2, 1, 0, 0 }, { "cvHistOn", 24, 1, 1, 0, 0 }, { "cvReproj", 28, 1, 1, 0, 0 },
+	{ "cvCam", 32, 3, 1, 0, 3 }, { "cvProj", 80, 4, 1, 0, 0 }, { "cvPrevCam", 96, 3, 1, 0, 3 },
+	{ "cvCamKm", 144, 3, 1, 0, 0 }, { "cvPrevCamKm", 160, 3, 1, 0, 0 }, { "cvPrevProj", 176, 4, 1, 0, 0 },
+};
+inline constexpr int kT_resolveBytes = 192;
+// kT_resolve_a: 20 fields, 236 bytes (spirv-cross --reflect of the shipped SPIR-V; tools: notes/vkair1/tools/reflect_table.py)
+inline constexpr FxField kT_resolve_a[] = {
+	{ "cvMoveClamp", 0, 1, 1, 0, 0 }, { "cvHistSize", 4, 2, 1, 0, 0 }, { "cvStride", 12, 1, 1, 0, 0 },
+	{ "cvReproj", 16, 1, 1, 0, 0 }, { "cvCam", 32, 3, 1, 0, 3 }, { "cvProj", 80, 4, 1, 0, 0 },
+	{ "cvPrevCam", 96, 3, 1, 0, 3 }, { "cvCamKm", 144, 3, 1, 0, 0 }, { "cvPrevCamKm", 160, 3, 1, 0, 0 },
+	{ "cvPrevProj", 176, 4, 1, 0, 0 }, { "cvPhase", 192, 2, 1, 0, 0 }, { "cvHistAge", 200, 1, 1, 0, 0 },
+	{ "cvHistOn", 204, 1, 1, 0, 0 }, { "cvAccReset", 208, 1, 1, 0, 0 }, { "cvAgeK", 212, 1, 1, 0, 0 },
+	{ "cvAccResetSd", 216, 1, 1, 0, 0 }, { "cvAccAlpha", 220, 1, 1, 0, 0 }, { "cvAccClamp", 224, 1, 1, 0, 0 },
+	{ "cvLitReset", 228, 1, 1, 0, 0 }, { "cvLitFloor", 232, 1, 1, 0, 0 },
+};
+inline constexpr int kT_resolve_aBytes = 240;
+enum FxSampler { kFxLinearClamp, kFxNearestClamp, kFxLinearRepeat, kFxMipRepeat, kFxNearestRepeat, kFxSamplers };
+//! one texture slot of a pass (HLSL t<i>): a GL texture copied into its twin, or a shared target read as is
+struct FxTex
+{
+	unsigned tex = 0;               //!< GL's name (0 and no shared: a zero texture, as GL's unbound unit reads)
+	int type = 0;                   //!< 0 2D, 1 3D, 2 2D array (sharedTarget's)
+	int w = 0, h = 0, d = 1, levels = 1;
+	unsigned glFmt = 0;
+	std::uintptr_t twin = 0;        //!< the twin's sharedTarget key
+	std::uintptr_t shared = 0;      //!< non-zero: tex IS this shared target (no copy)
+	bool still = false;             //!< the source never changes once made (noise): copied when the twin or name is new
+	int sampler = kFxLinearClamp;
+};
+constexpr int kFxGlobalBytes = 336;  //!< b0, as the sky's
+struct VolSkyRun
+{
+	int w = 0, h = 0, vp[4] = {};
+	unsigned color = 0;             //!< the tone frame's colour (toneFrameIs)
+	bool overSky = false;           //!< blend ONE / ONE_MINUS_SRC_ALPHA, alpha ZERO / ONE (else none)
+	FxTex tex[7];                   //!< t0 atApTex, t1 volAirTerr, t2 volAirRainMap, t3 volTex, t4 volTile, t5 atSkyTransTex, t6 volAirNoise
+	std::uint8_t global[kFxGlobalBytes] = {};
+	std::uint8_t loose[kT_volskyBytes] = {};
+	int red = 0;                    //!< gates only: 1 stencil ref 2, 2 no blend over the sky
+};
+/* GL current, the tone frame bound, the uniforms set: the air over the sky drawn on Vulkan (stencil ALWAYS ref 1 REPLACE,
+ * mask 0x03, no depth test, as GL's). false: why; nothing drawn (GL draws its quad). */
+bool volSkyRun( const VolSkyRun & t, std::string & why );
+void volSkyOnGl( const char * why );
+struct FxStat
+{
+	int runs = 0, gl = 0, fails = 0;
+	double cpuMs = 0.0, maxMs = 0.0;
+	std::string glWhy, failWhy;
+	int pipelines = 0;
+	double buildMs = 0.0;
+	int copies = 0;                 //!< texture copies into twins since the last take
+};
+FxStat takeVolSkyStat();
+struct CloudRun
+{
+	bool accum = false;             //!< the _a twins (Cloud Accumulation)
+	int mw = 0, mh = 0, hw = 0, hh = 0, cur = 0;
+	std::uintptr_t marchKey = 0, histKey[2] = {};  //!< shared targets: key = RGBA16F colour, key + 1 = RG32F depth
+	FxTex tex[8];                   //!< the march's t0.. (march: map shape detail sun moon scene trans; _a: + blue at t3)
+	std::uint8_t march[kT_march_aBytes] = {};
+	std::uint8_t resolve[kT_resolve_aBytes] = {};
+	int red = 0;                    //!< gates only: 1 the resolve's march / history inputs swapped, 2 the march's t1 / t2
+	                                //!< swapped, 4 no march (the caller filled the march targets)
+};
+//! GL current: the march (into the shared march targets) and the resolve (into hist[cur]) on Vulkan, one crossing
+bool cloudRun( const CloudRun & t, std::string & why );
+void cloudOnGl( const char * why );
+FxStat takeCloudStat();
+
+/* lane VKAIR1: a pass's b31 bytes from the program GL is about to draw with (glGetUniform*, arrays element by element,
+ * a matrix's GL column k at + 16 k as the row_major HLSL reads it). Fn: the caller's GL functions (Qt's 4.x core) */
+template <class Fn> void fxPack( Fn * fn, unsigned prog, const FxField * f, int n, std::uint8_t * out )
+{
+	for ( int i = 0; i < n; i++ ) {
+		const FxField & x = f[i];
+		const int stride = 16 * ( x.cols > 0 ? x.cols : 1 );
+		for ( int e = 0; e < x.count; e++ ) {
+			std::string nm( x.name );
+			if ( x.count > 1 )
+				nm += "[" + std::to_string( e ) + "]";
+			const int l = fn->glGetUniformLocation( prog, nm.c_str() );
+			if ( l < 0 )
+				continue;  // not in the program: GL reads 0 there too
+			std::uint8_t * at = out + x.offset + e * stride;
+			float v[16] = {};
+			if ( x.isInt )
+				fn->glGetUniformiv( prog, l, reinterpret_cast<int *>( v ) );
+			else
+				fn->glGetUniformfv( prog, l, v );
+			if ( x.cols > 0 ) {
+				for ( int c = 0; c < x.cols; c++ )
+					for ( int r = 0; r < x.words; r++ )
+						reinterpret_cast<float *>( at + 16 * c )[r] = v[c * x.words + r];
+			} else {
+				for ( int w = 0; w < x.words; w++ )
+					reinterpret_cast<float *>( at )[w] = v[w];
+			}
+		}
+	}
+}
+
+/* lane VKAIR1: a texture slot from what the program samples now: the sampler's unit, the name bound there (type 0 2D,
+ * 1 3D, 2 2D array), its size, format, levels and sampling. false: why (a state the Vulkan samplers do not hold). The
+ * caller sets twin / shared / still. GL enums as numbers: this header carries no GL header */
+template <class Fn> bool fxTexOf( Fn * fn, unsigned prog, const char * sampler, int type, FxTex & t, std::string & why )
+{
+	t.type = type;
+	t.tex = 0;
+	const int l = fn->glGetUniformLocation( prog, sampler );
+	if ( l < 0 )
+		return true;  // not in the program: the zero texture
+	int unit = 0, active = 0x84C0;
+	fn->glGetUniformiv( prog, l, &unit );
+	fn->glGetIntegerv( 0x84E0, &active );  // GL_ACTIVE_TEXTURE
+	fn->glActiveTexture( unsigned( 0x84C0 + unit ) );
+	const unsigned target = type == 1 ? 0x806Fu : type == 2 ? 0x8C1Au : 0x0DE1u;
+	int name = 0, sobj = 0;
+	fn->glGetIntegerv( type == 1 ? 0x806A : type == 2 ? 0x8C1D : 0x8069, &name );  // GL_TEXTURE_BINDING_3D / 2D_ARRAY / 2D
+	fn->glGetIntegerv( 0x8919, &sobj );  // GL_SAMPLER_BINDING
+	bool ok = true;
+	if ( name ) {
+		int w = 0, h = 0, d = 1, fmt = 0, minF = 0, wrap = 0, maxL = 0;
+		fn->glGetTexLevelParameteriv( target, 0, 0x1000, &w );  // GL_TEXTURE_WIDTH
+		fn->glGetTexLevelParameteriv( target, 0, 0x1001, &h );
+		if ( type )
+			fn->glGetTexLevelParameteriv( target, 0, 0x8071, &d );  // GL_TEXTURE_DEPTH
+		fn->glGetTexLevelParameteriv( target, 0, 0x1003, &fmt );  // GL_TEXTURE_INTERNAL_FORMAT
+		fn->glGetTexParameteriv( target, 0x2801, &minF );  // GL_TEXTURE_MIN_FILTER
+		fn->glGetTexParameteriv( target, 0x2802, &wrap );  // GL_TEXTURE_WRAP_S
+		fn->glGetTexParameteriv( target, 0x813D, &maxL );  // GL_TEXTURE_MAX_LEVEL
+		const bool mip = minF >= 0x2700 && minF <= 0x2703, repeat = wrap == 0x2901, nearest = minF == 0x2600;
+		int levels = 1;
+		while ( mip && levels <= maxL && levels < 16 ) {
+			int lw = 0;
+			fn->glGetTexLevelParameteriv( target, levels, 0x1000, &lw );
+			if ( lw < 1 )
+				break;
+			levels++;
+		}
+		t.tex = unsigned( name );
+		t.w = w;
+		t.h = h;
+		t.d = type ? d : 1;
+		t.glFmt = unsigned( fmt );
+		t.levels = levels;
+		t.sampler = mip ? kFxMipRepeat : nearest ? ( repeat ? kFxNearestRepeat : kFxNearestClamp ) : repeat ? kFxLinearRepeat : kFxLinearClamp;
+		if ( sobj ) {
+			ok = false;
+			why = std::string( sampler ) + ": a sampler object on its unit";
+		} else if ( mip && ( !repeat || minF != 0x2703 ) ) {
+			ok = false;
+			why = std::string( sampler ) + ": a mipmapped sampling other than trilinear repeat";
+		} else if ( w < 1 || h < 1 ) {
+			ok = false;
+			why = std::string( sampler ) + ": no level 0";
+		}
+	}
+	fn->glActiveTexture( unsigned( active ) );
+	return ok;
+}
 
 }
 

@@ -682,8 +682,45 @@ QHash<Renderer *, CvRedo> & redos()
 	return d;
 }
 
+/* lane VKAIR1 (row L6): while capture is set, marchPass and resolvePass set their programs up as for GL's draw and hand
+ * the bound textures and uniforms to t instead of drawing (cvOnVulkan runs both on the present device, one crossing) */
+struct CvVk
+{
+	bool capture = false, ok = true;
+	std::string why;
+	WwVkPresent::CloudRun t;
+};
+
+CvVk & cvVk()
+{
+	static CvVk v;
+	return v;
+}
+
+//! the march program's samplers as its HLSL t0.. (cloud_march_ps / cloud_march_a_ps: + cvBlue at t3)
+void cvVkCatchMarch( NifSkopeOpenGLContext::GLFunctions * fn, GLuint prog, bool accum )
+{
+	CvVk & v = cvVk();
+	static const char * const kName[2][8] = {
+		{ "cvMap", "cvShape", "cvDetail", "cvSunView", "cvMoonView", "cvScene", "cvTrans", nullptr },
+		{ "cvMap", "cvShape", "cvDetail", "cvBlue", "cvSunView", "cvMoonView", "cvScene", "cvTrans" } };
+	static const int kType[2][8] = { { 0, 1, 1, 0, 0, 0, 0, 0 }, { 0, 1, 1, 0, 0, 0, 0, 0 } };
+	static char twin[2][8];
+	const int a = accum ? 1 : 0;
+	for ( int k = 0; k < 8 && kName[a][k] && v.ok; k++ ) {
+		WwVkPresent::FxTex & x = v.t.tex[k];
+		v.ok = WwVkPresent::fxTexOf( fn, prog, kName[a][k], kType[a][k], x, v.why );
+		x.twin = reinterpret_cast<std::uintptr_t>( &twin[a][k] );
+		x.still = k == 1 || k == 2 || ( accum && k == 3 );	// the noise volumes and the blue noise sheet: made once
+	}
+	if ( accum )
+		WwVkPresent::fxPack( fn, prog, WwVkPresent::kT_march_a, int( std::size( WwVkPresent::kT_march_a ) ), v.t.march );
+	else
+		WwVkPresent::fxPack( fn, prog, WwVkPresent::kT_march, int( std::size( WwVkPresent::kT_march ) ), v.t.march );
+}
+
 //! the march: one fragment a history pixel of this frame's phase, ended at the scene when sceneTex is set (g.sceneZ)
-bool marchPass( Renderer * r, CvGpu & g, const CvRedo & d, const WwAtmoFrame & f, const WwCloudMap & m, GLuint sceneTex )
+bool marchPass(Renderer * r, CvGpu & g, const CvRedo & d, const WwAtmoFrame & f, const WwCloudMap & m, GLuint sceneTex )
 {
 	auto fn = r->fn;
 	const bool fly = wwCloudFlyActive( r );	// lane CLOUD4: the march with the fly-through box
@@ -785,7 +822,10 @@ bool marchPass( Renderer * r, CvGpu & g, const CvRedo & d, const WwAtmoFrame & f
 	p->uni4f( "cvSceneZ", FloatVector4( g.sceneZ[0], g.sceneZ[1], g.sceneZ[2], sceneTex ? 1.0f : 0.0f ) );
 	if ( fly )
 		wwCloudFlyUniforms( r, p, 7 );
-	quad( r );
+	if ( cvVk().capture )
+		cvVkCatchMarch( fn, p->id, acc );	// lane VKAIR1: the present device draws it (cvOnVulkan)
+	else
+		quad( r );
 	r->stopProgram();
 	if ( fly )
 		wwCloudFlyRelease( r, 7 );
@@ -836,9 +876,109 @@ bool resolvePass( Renderer * r, CvGpu & g, const CvRedo & d )
 		p->uni1f( "cvLitReset", d.litClamp ? V::kLitReset : 0.0f );
 		p->uni1f( "cvLitFloor", V::kLitFloor );
 	}
-	quad( r );
+	if ( cvVk().capture ) {	// lane VKAIR1: the present device draws it (cvOnVulkan)
+		if ( d.accum )
+			WwVkPresent::fxPack( fn, p->id, WwVkPresent::kT_resolve_a, int( std::size( WwVkPresent::kT_resolve_a ) ), cvVk().t.resolve );
+		else
+			WwVkPresent::fxPack( fn, p->id, WwVkPresent::kT_resolve, int( std::size( WwVkPresent::kT_resolve ) ), cvVk().t.resolve );
+	} else {
+		quad( r );
+	}
 	r->stopProgram();
 	return true;
+}
+
+/* lane VKAIR1 (row L6): the march and the resolve on the present device into the shared march / history targets, one
+ * crossing (the programs set up as GL's, their state read back). false: GL draws both (the reason counted in the
+ * "vk clouds:" line, one a 5 s window). Fly-through and Cloud Variety stay GL's (their programs have no Vulkan twin). */
+bool cvOnVulkan( Renderer * r, CvGpu & g, const CvRedo & d, const WwAtmoFrame & f, const WwCloudMap & m, GLuint sceneTex )
+{
+	static std::string said;
+	static auto at = std::chrono::steady_clock::now() - std::chrono::seconds( 10 );
+	static WwVkPresent::FxStat sum;
+	auto say = [&]() {
+		const WwVkPresent::FxStat st = WwVkPresent::takeCloudStat();
+		sum.runs += st.runs;
+		sum.gl += st.gl;
+		sum.fails += st.fails;
+		sum.cpuMs += st.cpuMs;
+		sum.maxMs = std::max( sum.maxMs, st.maxMs );
+		sum.copies += st.copies;
+		sum.pipelines = st.pipelines;
+		sum.buildMs = st.buildMs;
+		if ( !st.glWhy.empty() )
+			sum.glWhy = st.glWhy;
+		if ( !st.failWhy.empty() )
+			sum.failWhy = st.failWhy;
+		const auto now = std::chrono::steady_clock::now();
+		if ( std::chrono::duration<double>( now - at ).count() < 5.0 )
+			return;
+		char line[512];
+		if ( sum.runs > 0 )
+			std::snprintf( line, sizeof( line ), "vk clouds: on Vulkan %d frames (march + resolve, one crossing; %d pipelines built in %.1f ms; "
+				"%d input copies; drawing thread %.3f ms, max %.3f)", sum.runs, sum.pipelines, sum.buildMs, sum.copies, sum.cpuMs / sum.runs, sum.maxMs );
+		else
+			std::snprintf( line, sizeof( line ), "vk clouds: on Vulkan wanted, 0 frames drawn" );
+		std::string s = line;
+		if ( sum.gl > 0 )
+			s += ", on GL " + std::to_string( sum.gl ) + " frames (last: " + sum.glWhy + ")";
+		if ( sum.fails > 0 )
+			s += ", refused " + std::to_string( sum.fails ) + " (last: " + sum.failWhy + ")";
+		if ( s != said || sum.runs > 0 ) {
+			std::fprintf( stderr, "%s\n", s.c_str() );
+			said = s;
+		}
+		at = now;
+		sum = WwVkPresent::FxStat();
+	};
+	if ( !WwVkPresent::shareWanted( "WW_VKVIEW_CLOUD_RED" ) )
+		return false;	// GL's (red or the view not on Vulkan): ensure() said where the targets live
+	bool drew = false;
+	if ( !g.march.shared || !g.hist[0].shared || !g.hist[1].shared ) {
+		WwVkPresent::cloudOnGl( "the march / history targets are GL's own" );
+	} else if ( wwCloudFlyActive( r ) ) {
+		WwVkPresent::cloudOnGl( "the fly-through box (no Vulkan twin of cloud_fly)" );
+	} else if ( d.b.variety ) {
+		WwVkPresent::cloudOnGl( "Cloud Variety (no Vulkan twin of cloud_march_v)" );
+	} else {
+		CvVk & v = cvVk();
+		v.t = WwVkPresent::CloudRun();
+		v.ok = true;
+		v.why.clear();
+		v.capture = true;
+		const bool set = marchPass( r, g, d, f, m, sceneTex ) && resolvePass( r, g, d );
+		v.capture = false;
+		if ( !set ) {
+			WwVkPresent::cloudOnGl( "a cloud program did not link" );
+		} else if ( !v.ok ) {
+			WwVkPresent::cloudOnGl( v.why.c_str() );
+		} else {
+			v.t.accum = d.accum;
+			v.t.mw = d.mw;
+			v.t.mh = d.mh;
+			v.t.hw = d.hw;
+			v.t.hh = d.hh;
+			v.t.cur = d.cur;
+			v.t.marchKey = g.march.key;
+			v.t.histKey[0] = g.hist[0].key;
+			v.t.histKey[1] = g.hist[1].key;
+			std::string why;
+			drew = WwVkPresent::cloudRun( v.t, why );
+		}
+	}
+	say();
+	return drew;
+}
+
+//! the march then the resolve: on the present device when it takes them (cvOnVulkan), else GL's draws; 0 ok, 1 the march's
+//! program did not link, 2 the resolve's
+int marchResolve( Renderer * r, CvGpu & g, const CvRedo & d, const WwAtmoFrame & f, const WwCloudMap & m, GLuint sceneTex )
+{
+	if ( cvOnVulkan( r, g, d, f, m, sceneTex ) )
+		return 0;
+	if ( !marchPass( r, g, d, f, m, sceneTex ) )
+		return 1;
+	return resolvePass( r, g, d ) ? 0 : 2;
 }
 
 //! lane CLOUD2C: the GL state the passes after the scene change, put back as found when it goes out of scope
@@ -918,8 +1058,7 @@ void redoWithDepth( Renderer * r, CvGpu & g )
 	if ( it == redos().constEnd() || !it->ok || !f.valid || !m.valid )
 		return;
 	GlKeep keep( r->fn );
-	if ( marchPass( r, g, *it, f, m, g.sceneTex ) )
-		resolvePass( r, g, *it );
+	marchResolve( r, g, *it, f, m, g.sceneTex );	// lane VKAIR1: on the present device when it takes them
 }
 
 /* lane CLOUD6f (CLOUDBAND1 leftover, RDR2 gap f; Bauer 2019 slide 40: a strike is a point light inside the cloud, added to
@@ -1618,12 +1757,13 @@ bool wwCloudVolDraw( Scene * scene, const WwCloudVolView & view, QStringList & d
 	if ( ok )	// lane CLOUD4: the fly-through box over the camera (its own FBO; the march binds its own after)
 		wwCloudFlyPrepare( scene, cam.km, view.cloudSeconds );
 	// 1. the march: one fragment a history pixel of this frame's phase; 2. the resolve into this frame's history
-	if ( ok && !marchPass( r, g, d, f, m, sceneOn ? g.sceneTex : 0 ) ) {
+	const int failed = ok ? marchResolve( r, g, d, f, m, sceneOn ? g.sceneTex : 0 ) : 0;	// lane VKAIR1: Vulkan or GL
+	if ( failed == 1 ) {
 		ok = false;
 		why = b.variety ? QStringLiteral( "cloud_march_v.prog did not link" )
 			: d.accum ? QStringLiteral( "cloud_march_a.prog did not link" ) : QStringLiteral( "cloud_march.prog did not link" );
 	}
-	if ( ok && !resolvePass( r, g, d ) ) {
+	if ( failed == 2 ) {
 		ok = false;
 		why = d.accum ? QStringLiteral( "cloud_resolve_a.prog did not link" ) : QStringLiteral( "cloud_resolve.prog did not link" );
 	}
