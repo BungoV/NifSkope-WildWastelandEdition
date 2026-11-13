@@ -38,7 +38,6 @@ cbuffer globalUniforms : register(b0, space0)
 	float	unusedUniform2 : packoffset(c20.w);
 };
 // end of uniforms.glsl
-#ifdef WW_FOG
 #define WW_LOOSE_TYPES 1
 #if defined(WW_FOG)
 #include "../air/lookdev_fog.hlsli"
@@ -267,6 +266,7 @@ cbuffer LooseUniforms : register(b31, space0)
 	float farFadeFrame;
 #endif
 };
+#ifdef WW_FOG
 #include "../air/lookdev_fog.hlsli"
 #endif
 // FOGSUN1: the sun through the air; a variant without the fog compiled in (fo4_default, fo4_csm) has no air between
@@ -365,8 +365,8 @@ static float4 fragColor;
 static float4 cellEmitOut;
 #endif
 
-static float3 ViewDir_norm = normalize( ViewDir );
-static float3x3 btnMatrix_norm = float3x3( normalize( btnMatrix[0] ), normalize( btnMatrix[1] ), normalize( btnMatrix[2] ) );
+static float3 ViewDir_norm	/* = normalize( ViewDir ) : set in main() after the stage inputs */;
+static float3x3 btnMatrix_norm	/* = float3x3( normalize( btnMatrix[0] ), normalize( btnMatrix[1] ), normalize( btnMatrix[2] ) ) : set in main() after the stage inputs */;
 
 #ifndef M_PI
 	#define M_PI 3.1415926535897932384626433832795
@@ -1622,6 +1622,8 @@ SPIRV_Cross_Output main(SPIRV_Cross_Input stage_input)
     farLadder = stage_input.farLadder;
 #endif
     gl_FrontFacing = stage_input.gl_FrontFacing;
+    ViewDir_norm = normalize( ViewDir );
+    btnMatrix_norm = float3x3( normalize( btnMatrix[0] ), normalize( btnMatrix[1] ), normalize( btnMatrix[2] ) );
     frag_main();
     SPIRV_Cross_Output stage_output;
 #if defined(WW_BINDLESS) && defined(WW_BL_VERT)
