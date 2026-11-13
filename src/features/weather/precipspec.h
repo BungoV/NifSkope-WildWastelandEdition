@@ -2,19 +2,21 @@
 #define WW_PRECIPSPEC_H
 
 /* lane WEATHERLOOK1 phase B: a weather's precipitation layers, from its .recx block "precipitation" (docs/RECX.md)
- * or, with no block, from its own record (WTHR DATA class flags: Rainy -> one rain layer, Snow -> one snow_fine
+ * or, with no block, from its own record (WTHR DATA class flags: Rainy -> one rain layer, Snow -> one snowFine
  * layer, the type defaults of gl/precipmath.h). Header only (Qt Core), so tests/features/weather/precip reads the same parser.
  *
- *   "precipitation": { "layers": [ { "type": "snow_fine", "rate": 1.5, "size": 5.5, "drawScale": 3,
+ *   "precipitation": { "layers": [ { "type": "snowFine", "rate": 1.5, "size": 5.5, "drawScale": 3,
  *                                    "texture": "FO4CS/Precip/snow_fine_d.dds", "atlas": [4, 4] }, ... ] }
  *
- * Keys of a layer (all but type optional; the type's default where absent): type (rain, hail, snow_fine,
- * snow_far_dot, snow_wet_clump, snow_big_clump), rate (mm/h of water), density (particles per m^3; wins over rate),
+ * Keys of a layer (all but type optional; the type's default where absent): type (rain, hail, snowFine,
+ * snowFarDot, snowWetClump, snowBigClump, or any Weathers/Precip type file, preciptypes.h; the old snake_case names
+ * are read as aliases with a note), rate (mm/h of water), density (particles per m^3; wins over rate),
  * size (mm), drawScale, wind (the share of the wind it rides, 0..2), translucency (0..1), spin (rad/s), sway (game
  * units), texture (under Textures\, as the game links textures), atlas ([columns, rows]). Unknown keys and bad values
  * are reported in `notes` and dropped. */
 
 #include "features/weather/precipmath.h"
+#include "features/weather/preciptypes.h"
 
 #include <QJsonArray>
 #include <QJsonObject>
@@ -125,8 +127,14 @@ inline QVector<WwPrecipLayerSpec> wwPrecipParse( const QJsonObject & block, QStr
 			if ( get( o, "type" ).toString().trimmed().compare( QLatin1String( "sleet" ), Qt::CaseInsensitive ) == 0 )
 				notes << where + QStringLiteral( " dropped (sleet removed by PRECIPLOOK1: use rain or hail)" );
 			else
-				notes << where + QStringLiteral( " dropped (not-type \"%1\")" ).arg( get( o, "type" ).toString() );
+				notes << where + QStringLiteral( " dropped (not-type \"%1\"; looked for %2)" )
+					.arg( get( o, "type" ).toString(), wwPrecipTypeWhere( get( o, "type" ).toString().trimmed() ) );
 			continue;
+		}
+		{
+			const QByteArray w = get( o, "type" ).toString().trimmed().toLower().toLatin1();
+			if ( const char * a = WwPrecip::typeAlias( w.constData() ) )
+				notes << where + QStringLiteral( ": type \"%1\" is the old name of \"%2\" (read as it)" ).arg( QLatin1String( w ), QLatin1String( a ) );
 		}
 		for ( auto it = o.constBegin(); it != o.constEnd(); ++it ) {
 			bool ok = it.key().startsWith( QLatin1Char( '_' ) );

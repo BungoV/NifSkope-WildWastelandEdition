@@ -4,8 +4,8 @@
 /* lane WEATHERLOOK1 phase B (2026-10-30): precipitation in the cell view, drawn from the Lookdev weather.
  *
  * Source, per weather: its .recx block "precipitation" (docs/RECX.md; parser gl/precipspec.h), else its own record (WTHR
- * DATA class flags: Rainy -> a rain layer, Snow -> a snow_fine layer). Each layer: a type (rain, hail, snow_fine,
- * snow_far_dot, snow_wet_clump, snow_big_clump), its rate or density, size, draw scale and texture (under Textures\,
+ * DATA class flags: Rainy -> a rain layer, Snow -> a snowFine layer). Each layer: a type (rain, hail, snowFine,
+ * snowFarDot, snowWetClump, snowBigClump or a Weathers/Precip type file; lane WEATHERRECX2), its rate or density, size, draw scale and texture (under Textures\,
  * looked up loose in the .recx roots: the loaded plugins' folders, the game's Data, the shipped Data; each type ships a
  * default, Textures/FO4CS/Precip in the MO2 mod "Fusion Shaders - Assets" (lane WEATHERRECX1), the phase A atlases of notes/weatherlook1; a texture under the old
  * WW/Precip is still found there and the other way round).

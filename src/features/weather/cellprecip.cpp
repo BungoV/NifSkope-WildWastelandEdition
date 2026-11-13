@@ -693,6 +693,13 @@ int wwCellPrecipDraw( Scene * scene )
 	if ( rk != s.rootsFor ) {
 		s.rootsFor = rk;
 		s.roots = wwRecxRoots( files, dataDir );
+		// lane WEATHERRECX2: the precipitation types are files (Plugins/<P>/Weathers/Precip/<name>.recx)
+		QStringList tn;
+		const int nt = wwPrecipLoadTypes( s.roots, tn );
+		for ( const QString & n : tn )
+			std::fprintf( stderr, "precip types: %s\n", qPrintable( n ) );
+		std::fprintf( stderr, "precip types: %d files (%s), %d types in all\n", nt,
+			qPrintable( wwPrecipTypeFiles().loaded.join( QStringLiteral( ", " ) ) ), WwPrecip::typeCount() );
 	}
 	// lane RAINFOG2: the precipitation shaders (MNAM -> SPGD) and the switch WW_PRECIP_SPGD / its red
 	WW_SWITCH_STATIC( int, spgdRed, WwPrecip::spgdRedBits( wwEnv( "WW_PRECIP_SPGD" ).trimmed().toLower().constData(),

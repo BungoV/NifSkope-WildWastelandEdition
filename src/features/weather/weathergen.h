@@ -42,7 +42,7 @@ struct Out
 	double windSpeed = 0, windDirection = 0, turbulence = 0, gusts = 0;	// m/s, degrees FROM (0 north, 90 east)
 	double tempDay = 12, tempDawn = 6;	// deg C at 14:00 and 05:00
 	double lightning = 0;	// flashes per minute
-	const char * precipType = nullptr;	// "rain" / "snow_fine" / none
+	const char * precipType = nullptr;	// "rain" / "snowFine" / none (WEATHERRECX2: camelCase)
 	double precipRate = 0, wetting = 20, drying = 90;
 	double transHours = 0.01, precipStart = 0, precipEnd = 0, lightningStart = 0, lightningEnd = 0;
 	double stars = 1, moonlight = 1;
@@ -204,7 +204,7 @@ inline Out generate( const In & in )
 	else if ( cls == "storm" ) { rate = 8; wetting = 15; }
 	else if ( cls == "snow" ) { rate = 1; wetting = 30; }
 	if ( ( in.precipType == 0 || in.precipType == 1 ) && rate > 0.0 ) {
-		o.precipType = in.precipType == 0 ? "rain" : "snow_fine";
+		o.precipType = in.precipType == 0 ? "rain" : "snowFine";
 		o.precipRate = r3( rate * in.precipDensity / 7.0 );
 		o.wetting = wetting;
 	}

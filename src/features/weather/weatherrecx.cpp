@@ -3,6 +3,7 @@
 #include "gl/celllooks.h"
 #include "gl/lookdevstage.h"
 #include "features/weather/weathergen.h"
+#include "features/weather/precipmath.h"	// lane WEATHERRECX2: the precipitation type registry
 #include "features/weather/wxoverride.h"
 #include "features/weather/weatherrecxmath.h"
 #include "features/weather/recxphysical.h"	// lane AIRPERF1 A8: the entry's physicalWeather switch
@@ -329,7 +330,6 @@ const char * const kSlots[] = { "groundFogNoise", "rain", "hail", "snow", "splas
 const char * const kSlotDefaults[] = { "FO4CS\\Fog\\GroundFogNoise.dds", "FO4CS\\Precip\\rain_d.dds", "FO4CS\\Precip\\hail_d.dds",
 	"FO4CS\\Precip\\snow_fine_d.dds", "FO4CS\\Precip\\splash_d.dds", "FO4CS\\Precip\\ripple_n.dds",
 	"FO4CS\\Lightning\\bolt_d.dds", "FO4CS\\Particles\\dust_d.dds", "FO4CS\\Particles\\rad_d.dds" };
-const char * const kPrecipTypes[] = { "rain", "hail", "snow_fine", "snow_far_dot", "snow_wet_clump", "snow_big_clump" };
 
 //! lane NIGHTHAZE1: an [r,g,b] key (or one number for all three) in [lo, hi]; dropped with a line otherwise
 void readRgb( const Obj & b, const char * key, float lo, float hi, float out[3] )
@@ -437,14 +437,16 @@ void readPrecip( const Obj & b, WwWeatherRecx & r )
 		const Obj L = b.child( la[i], QStringLiteral( "layers/%1" ).arg( i ) );
 		L.unknownKeys( { QStringLiteral( "type" ), QStringLiteral( "rate" ), QStringLiteral( "size" ),
 			QStringLiteral( "density" ), QStringLiteral( "wind" ), QStringLiteral( "texture" ) } );
-		const QString t = L.get( "type" ).toString().trimmed().toLower();
-		bool known = false;
-		for ( const char * k : kPrecipTypes )
-			known = known || t == QLatin1String( k );
-		if ( !known ) {
-			sayOnce( QStringLiteral( "weather recx: %1: dropped (not-precipitation-type \"%2\")" ).arg( L.where, t ) );
+		// lane WEATHERRECX2: the type registry (compiled six + Weathers/Precip files; old snake_case names are aliases)
+		const QString w = L.get( "type" ).toString().trimmed();
+		const int ti = WwPrecip::typeOf( w.toUtf8().constData() );
+		if ( ti < 0 ) {
+			sayOnce( QStringLiteral( "weather recx: %1: dropped (not-precipitation-type \"%2\")" ).arg( L.where, w ) );
 			continue;
 		}
+		const QString t = QString::fromLatin1( WwPrecip::typeInfo( ti ).name );
+		if ( t.compare( w, Qt::CaseInsensitive ) != 0 )
+			sayOnce( QStringLiteral( "weather recx: %1: type \"%2\" is the old name of \"%3\" (read as it)" ).arg( L.where, w, t ) );
 		double rate = 0.0;
 		if ( !L.num( "rate", 0.0f, 500.0f, rate ) )
 			rate = 0.0;
@@ -609,7 +611,7 @@ const Input kInputs[] = {
 	{ "precipitation.rain", &WwWeatherRecx::rainRate, WwRecPrecip, []( const WwWeatherGen::Out & o, double ) {
 		return o.precipType && std::string( o.precipType ) == "rain" ? o.precipRate : 0.0; } },
 	{ "precipitation.snow", &WwWeatherRecx::snowRate, WwRecPrecip, []( const WwWeatherGen::Out & o, double ) {
-		return o.precipType && std::string( o.precipType ) == "snow_fine" ? o.precipRate : 0.0; } },
+		return o.precipType && std::string( o.precipType ) == "snowFine" ? o.precipRate : 0.0; } },
 };
 
 bool isSet( const WwWeatherRecx & r, const Input & in )

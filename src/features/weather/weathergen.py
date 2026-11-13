@@ -133,7 +133,7 @@ def generate(w):
     v['tempDawn'] = float(base + toff - (6 if cls in CLEAR_NIGHTS else 2))
     v['lightning'] = float(freq) if thunder else 0.0
     if ptype in ('rain', 'snow') and cls in PRECIP_RATE:
-        v['precipType'] = 'rain' if ptype == 'rain' else 'snow_fine'
+        v['precipType'] = 'rain' if ptype == 'rain' else 'snowFine'
         v['precipRate'] = r3(PRECIP_RATE[cls] * pdens / 7.0)
         v['wetting'] = float(WETTING[cls])
     else:
