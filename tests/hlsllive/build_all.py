@@ -25,14 +25,14 @@ def ifmap_of(vs, ps):
     """R9: a pixel shader whose inputs include wwPointCoord was converted for a points geometry twin; in a vertex + pixel program its
     inputs are matched to the vertex shader's outputs by member name ({} when it has no wwPointCoord)"""
     import re
-    pt = open(ps, encoding='utf-8', errors='replace').read()
+    pt = open(stamps.real(ps)[0], encoding='utf-8', errors='replace').read()
     if 'wwPointCoord' not in pt:
         return {}
     def members(txt, struct):
         m = re.search(r'struct %s\s*\{(.*?)\};' % struct, txt, re.S)
         return dict((n, int(i)) for n, i in re.findall(r'\b\w+\s+(\w+)\s*:\s*TEXCOORD(\d+)', m.group(1))) if m else {}
     pin = members(pt, 'SPIRV_Cross_Input')
-    vout = members(open(vs, encoding='utf-8', errors='replace').read(), 'SPIRV_Cross_Output')
+    vout = members(open(stamps.real(vs)[0], encoding='utf-8', errors='replace').read(), 'SPIRV_Cross_Output')
     out = {}
     for n, i in pin.items():
         if n == 'wwPointCoord':
@@ -81,7 +81,7 @@ def main():
             for e, path, stem in base[p][0]:
                 t = tags.get(stem + '.' + e)
                 st.append((e, path[:-5] + '__' + t + '.hlsl' if t else path, stem))
-            if all(os.path.exists(x[1]) for x in st):
+            if all(stamps.exists(x[1]) for x in st):
                 progs.append((p + '@' + un, st, base[p][1]))
     progs.sort(key=lambda x: x[0])
 

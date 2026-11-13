@@ -554,7 +554,9 @@ void BSShape::drawShapes( NodeList * secondPass )
 		GpuDrivenB::learn( this, shader );	// step B: the state this draw runs with
 	static std::vector<std::uint32_t> fadeKeep, fadeBand;	// lane DECALS1
 	static std::vector<float> fadeAlpha;
-	if ( numTriangles > 0 && !hiddenT && !selectionFlags && wwLookOn( WwLook::DecalFade )
+	if ( numTriangles > 0 && !hiddenT && !selectionFlags && wwCellWaterVkDraw( int( numTriangles * 3 ) ) ) {
+		// lane VKWATER3: the water drew on the present device (cellwater.h)
+	} else if ( numTriangles > 0 && !hiddenT && !selectionFlags && wwLookOn( WwLook::DecalFade )
 		&& !wwCellProbePass( scene ) && !wwCellAlbedoProbePass( scene )
 		&& wwCellDecalFadeRanges( scene, this, id(), std::int64_t( numTriangles ), fadeKeep, fadeBand, fadeAlpha ) ) {
 		// lane DECALS1: a decal-flag shape's near placements whole, the fading band one draw each with its alpha

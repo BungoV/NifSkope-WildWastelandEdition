@@ -51,6 +51,9 @@ bool wwCellWaterOn();
 void wwCellWaterSetOn( bool on );
 //! With fo4_water.prog bound for `block`: the record, the sky, the textures. False = draw it the old way.
 bool wwCellWaterUniforms( Scene * scene, int block, int firstTextureUnit );
+/*! lane VKWATER3 (row G5): at the shape's draw, after wwCellWaterUniforms armed it: the water drawn on the present device
+ *  into the shared tone frame (true: GL draws nothing), else false and GL draws it (the reason in the `vk water:` line) */
+bool wwCellWaterVkDraw( int indexCount );
 /*! DEBUGVIEW1 item 5: once a frame (wwEndlessSeaFollow): the water draws of the last frame per tier (near, far map,
  *  endless sea), each tier's far fade distance and the far colour law; one "water tiers:" line when they change */
 void wwCellWaterTierFrame();

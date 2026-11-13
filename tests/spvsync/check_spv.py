@@ -56,22 +56,30 @@ VKFRAME_CSM = {'csm_view_vs': ('res/shaders/hlsl/near', 'csm_view_vs'),
 	'obj_depth_vs': ('res/shaders/hlsl/near', 'obj_depth_vs')}  # lane VKOBJ1: the objects' prepass
 HLSL_SPECS += [('src/features/vkframe', k, 'vulkan1.2', 'vkframe_%s_spv' % k) for k in VKFRAME_CSM]
 # lane VKAIR1: the air's sky pass and the clouds, the script's `fx <name> <dir/file>` lines (sky's register shifts, ps_6_0)
-VKFRAME_FX = {'volsky_view_ps': 'air/cell_volsky_ps__WW_CELL_FOGLEAK', 'cloud_march_view_ps': 'clouds/cloud_march_ps',
-	'cloud_march_a_view_ps': 'clouds/cloud_march_a_ps', 'cloud_resolve_view_ps': 'clouds/cloud_resolve_ps',
-	'cloud_resolve_a_view_ps': 'clouds/cloud_resolve_a_ps',
-	'fardots_view_ps': 'far-lod/cell_fardots_ps__WW_CELL_FOGLEAK'}	# lane VKFAR1
+# lane HLSLSRC2: the views' frozen spirv-cross twins under the view's name (the readable sources took the programs' names;
+# vkpresent.h's kT_* tables hold the twins' layout)
+VKFRAME_FX = {'volsky_view_ps': 'air/volsky_view_ps', 'cloud_march_view_ps': 'clouds/cloud_march_view_ps',
+	'cloud_march_a_view_ps': 'clouds/cloud_march_a_view_ps', 'cloud_resolve_view_ps': 'clouds/cloud_resolve_view_ps',
+	'cloud_resolve_a_view_ps': 'clouds/cloud_resolve_a_view_ps',
+	'fardots_view_ps': 'far-lod/fardots_view_ps'}	# lane VKFAR1
 HLSL_SPECS += [('src/features/vkframe', k, 'vulkan1.2', 'vkframe_%s_spv' % k) for k in VKFRAME_FX]
 # lane VKFAR1: the far dots' vertex stage, the script's `fxv <name> <dir/file>` lines (fx()'s shifts, vs_6_0)
 VKFRAME_FXV = {'fardots_view_vs': 'far-lod/cell_fardots_view_vs'}
 HLSL_SPECS += [('src/features/vkframe', k, 'vulkan1.2', 'vkframe_%s_spv' % k) for k in VKFRAME_FXV]
 # lane VKFAR1 round 2: the far cards' pixel stage, the script's `fxk <name> <dir/file>` lines (fx() + every declared binding kept)
-VKFRAME_FXK = {'farcards_view_ps': 'far-lod/impostor_cellinstez_ps__WW_CELL_FOGLEAK'}
+VKFRAME_FXK = {'farcards_view_ps': 'far-lod/farcards_view_ps',
+	'water_view_ps': 'water/water_view_ps'}	# lane VKWATER3 (frozen twins, as HLSLSRC2's)
 HLSL_SPECS += [('src/features/vkframe', k, 'vulkan1.2', 'vkframe_%s_spv' % k) for k in VKFRAME_FXK]
 # lane VKFAR2: the far cards' vertex stage, the script's `fxc <name> <dir/file>` lines (its own bindings in the cards' set)
-VKFRAME_FXC = {'farcards_view_vs': 'far-lod/impostor_instez_vs'}
+VKFRAME_FXC = {'farcards_view_vs': 'far-lod/farcards_view_vs'}	# frozen twin, as HLSLSRC2's
 VKFRAME_FXC_ARGS = ['-fvk-bind-register', 'b0', '0', '0', '0', '-fvk-bind-register', 'b31', '0', '32', '0', '-fvk-bind-register',
 	't0', '0', '96', '0', '-fvk-bind-register', 't1', '0', '97', '0', '-fspv-preserve-bindings']
 HLSL_SPECS += [('src/features/vkframe', k, 'vulkan1.2', 'vkframe_%s_spv' % k) for k in VKFRAME_FXC]
+# lane VKWATER3: the water's vertex stage, the script's `fxw <name> <dir/file>` lines (vs_6_0, own shifts, bindings kept)
+VKFRAME_FXW_ARGS = ['-fvk-b-shift', '256', '0', '-fvk-t-shift', '110', '0', '-fvk-s-shift', '180', '0', '-fvk-u-shift', '220', '0',
+	'-fspv-preserve-bindings']
+VKFRAME_FXW = {'water_view_vs': 'core/water_view_vs'}
+HLSL_SPECS += [('src/features/vkframe', k, 'vulkan1.2', 'vkframe_%s_spv' % k) for k in VKFRAME_FXW]
 DEFAULT_G = 'E:/Tools/RenderDoc/RenderDoc_1.45_64/plugins/spirv/glslangValidator.exe'
 DEFAULT_DXC = 'E:/Tools/dxc/bin/x64/dxc.exe'
 
@@ -174,6 +182,11 @@ def script_ok(tree):
 	clines = dict(re.findall(r'^fxc ([a-z0-9_]+) ([A-Za-z0-9_/+-]+)$', vf, re.M))
 	if clines != VKFRAME_FXC:
 		bad.append('src/features/vkframe/vkframe_spirv.sh: its fxc lines (%s) are not this checker\'s far-card vertex stages' % ' '.join(sorted(clines)))
+	if '\t"$DXC" -spirv -fspv-target-env=vulkan1.2 -T vs_6_0 -E main ' + ' '.join(VKFRAME_FXW_ARGS) + ' -Fo "$1.spv" ' not in vf:
+		bad.append('src/features/vkframe/vkframe_spirv.sh: its fxw() compile line changed')
+	wlines = dict(re.findall(r'^fxw ([a-z0-9_]+) ([A-Za-z0-9_/+-]+)$', vf, re.M))
+	if wlines != VKFRAME_FXW:
+		bad.append('src/features/vkframe/vkframe_spirv.sh: its fxw lines (%s) are not this checker\'s water vertex stages' % ' '.join(sorted(wlines)))
 	return bad
 
 
@@ -302,8 +315,11 @@ def main(argv):
 			if k in VKFRAME_FXC:
 				src = os.path.join(tree, 'res/shaders/hlsl', VKFRAME_FXC[k] + '.hlsl')
 				hdefs = VKFRAME_FXC_ARGS
+			if k in VKFRAME_FXW:
+				src = os.path.join(tree, 'res/shaders/hlsl', VKFRAME_FXW[k] + '.hlsl')
+				hdefs = VKFRAME_FXW_ARGS
 			m = re.search(r'hlsl profile: ([cvp]s_6_[0-9])', open(src, encoding='utf-8', errors='replace').read())
-			if k in VKFRAME_FXV or k in VKFRAME_FXC:
+			if k in VKFRAME_FXV or k in VKFRAME_FXC or k in VKFRAME_FXW:
 				m = re.match(r'(vs_6_0)', 'vs_6_0')
 			opt = [] if d == 'src/features/vkframe' else ['-O0']   # vkframe_spirv.sh builds optimised
 			r = subprocess.run([dxc, '-spirv', '-fspv-target-env=' + env, '-T', m.group(1) if m else 'ps_6_0' if k in VKFRAME_SKY or k in VKFRAME_FX or k in VKFRAME_FXK else 'cs_6_0', '-E', 'main']

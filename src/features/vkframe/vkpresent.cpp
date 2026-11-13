@@ -11,6 +11,7 @@
 #include <windows.h>
 
 #include "features/vkframe/vkpresent.h"
+#include "features/vkframe/vkobjtex.h"  // lane VKOBJ3: shutdown() lets the cache's BC twins go
 
 #define VK_NO_PROTOTYPES
 #define VK_USE_PLATFORM_WIN32_KHR
@@ -693,6 +694,8 @@ bool fxWork( std::string & why );
 void fxDrop();
 bool farRecord( std::string & why );  // lane VKFAR1 (vkfardots.inc): fxWork's kind 2
 bool fcRecord( std::string & why );   // lane VKFAR2 (vkfarcardsdraw.inc): fxWork's kind 3
+bool waterRecord( std::string & why );  // lane VKWATER3 (vkwater.inc): fxWork's kind 4
+void waterDrop();
 void objDrop();  // lane VKOBJ1
 void blFree();  // lane VKOBJ2
 
@@ -3594,6 +3597,9 @@ void shutdown()
 		sharedStat().mb = 0.0;
 		sharedGen()++;
 	}
+	// lane VKOBJ3: the texture cache's BC twins keep their GL names (the cache deletes them); farCardsFree frees the rest
+	if ( const int ot = objTexFree() )
+		std::fprintf( stderr, "vk objtex: shutdown, %d cache twins handed to farCardsFree (GL names kept)\n", ot );
 	farCardsFree( gl().ok );  // lane VKFAR1 round 2: the far cards' twins
 	// the temporal AA's crossing semaphores (GL's names); its pipelines stay with the device
 	Taa & A = taa();
@@ -3607,6 +3613,7 @@ void shutdown()
 	skyDrop();  // lane VKSKY1: the sky's crossing semaphores and framebuffer
 	ssrDrop();  // lane VKLIGHT2: the reflections' crossing semaphores
 	fxDrop();   // lane VKAIR1: the air's and the clouds' crossing semaphores and framebuffers
+	waterDrop();  // lane VKWATER3: the water draw's buffers (GL's names); pipelines and samplers stay with the device
 }
 
 bool viewBegin( int w, int h, int samples, GlProc gp, std::string & why )
@@ -5190,7 +5197,7 @@ struct Fx
 	VkFence fence = VK_NULL_HANDLE;
 	bool pending = false;
 	// this run's job, written by the drawing thread before the hand
-	int kind = 0;  // 0 the air, 1 the clouds, 2 the far dots (lane VKFAR1)
+	int kind = 0;  // 0 the air, 1 the clouds, 2 the far dots (lane VKFAR1), 3 the far cards (lane VKFAR2), 4 the water draw (lane VKWATER3)
 	VkFramebuffer fbAir = VK_NULL_HANDLE, fbM = VK_NULL_HANDLE, fbR = VK_NULL_HANDLE;
 	int w = 0, h = 0, vp[4] = {}, stencilRef = 1, march = kFxMarch, resolve = kFxResolve, mw = 0, mh = 0, hw = 0, hh = 0;
 	bool blend = false, skipMarch = false;
@@ -5625,6 +5632,11 @@ bool fxWork( std::string & why )
 		}
 	} else if ( F.kind == 3 ) {  // lane VKFAR2: the far cards
 		if ( !fcRecord( why ) ) {
+			v.vkEndCommandBuffer( F.cmd );
+			return false;
+		}
+	} else if ( F.kind == 4 ) {  // lane VKWATER3: the shaded water draw
+		if ( !waterRecord( why ) ) {
 			v.vkEndCommandBuffer( F.cmd );
 			return false;
 		}
@@ -8220,6 +8232,7 @@ ObjStat takeObjStat()
 }  // namespace WwVkPresent
 
 #include "features/vkframe/vkbindless.inc"  // lane VKOBJ2: the bindless maps as descriptor indexing
+#include "features/vkframe/vkobjtex.inc"  // lane VKOBJ3: the texture cache's BC twins and their handles in the table
 
 namespace
 {
