@@ -1,5 +1,3 @@
-// SPDX-License-Identifier: GPL-3.0-or-later WITH FO4-CS-Modding-Exception
-//
 // S43 - THE FAR TIER'S DEPTH REDUCTION. One coarse texel per thread, holding the
 // MINIMUM raw depth over its DIVISOR x DIVISOR block of the engine's depth
 // target, i.e. the NEAREST surface in that block.
@@ -57,14 +55,14 @@ void main(uint3 dispatchThreadID : SV_DispatchThreadID)
             const float2 uv = (float2(base + uint2(i, j)) + 0.5f) *
                 SSSFar_InvFullMaskSize * SSSFar_DynamicResolution;
             float raw = SSSFar_SourceDepth.SampleLevel(SSSFar_PointBorder, uv, 0.0f);
-#if !F4FX_SSS_FP_BAND_OCCLUDERS
+#if !F4FS_SSS_FP_BAND_OCCLUDERS
             // S44: the far tier's copy of the one compare per sample. It has to
             // happen HERE and not only in the coarse march's decode, because the
             // reduction is a MIN: a single first-person texel is the smallest raw
             // value in the block and would otherwise decide the whole coarse
             // texel. Mapping it to 1.0 (sky) is the exclusion - not a world
             // occluder, and not a world receiver either.
-            raw = raw > F4FX_SSS_VIEWMODEL_DEPTH_MAX ? raw : 1.0f;
+            raw = raw > F4FS_SSS_VIEWMODEL_DEPTH_MAX ? raw : 1.0f;
 #endif
             minRaw = min(minRaw, raw);
         }
