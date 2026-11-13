@@ -284,6 +284,39 @@ struct SkyStat
 };
 SkyStat takeSkyStat();
 
+/* Lane VKLIGHT2 (row L4): the reflections' full-screen stages (cell_ssr.frag 5, 1-4) as Vulkan compute,
+ * res/shaders/hlsl/vklight/ssr_vk.hlsl (SSR_LIVE). GL keeps stage 0, the scene pass and the water's rays; the pass's own
+ * targets (scene, water ray, ray, raw, across, fin) are shared (sharedTarget); the g-buffer, the depth mips (one R32F atlas,
+ * side by side) and the previous frame are copied into twins. One crossing. Red WW_VKVIEW_SSR_RED=1: GL's quads. */
+struct SsrRun
+{
+	int W = 0, H = 0, hw = 0, hh = 0;
+	unsigned gbuf = 0;                      //!< RGBA32F W x H (the obscurance pass's)
+	unsigned mip[5] = {};                   //!< 1..4: R32F min-of-2x2 depth
+	int mipW[5] = {}, mipH[5] = {};
+	std::uintptr_t gbufKey = 0, atlasKey = 0, prevKey = 0;  //!< the twins' keys
+	unsigned prev = 0, prevFmt = 0;         //!< the previous frame (RGBA16F or RGBA32F), when prevOn
+	unsigned scene = 0, wray = 0, ray = 0, raw = 0, across = 0, fin = 0;  //!< the shared targets' GL names
+	std::uintptr_t sceneKey = 0, wrayKey = 0, rayKey = 0, rawKey = 0, acrossKey = 0, finKey = 0;
+	bool haveWater = false, waterLook = false, prevOn = false, stage5 = false, march = false;
+	float c[6][4] = {};                     //!< ssr_vk.hlsl's push c[0..5] (ssrRun adds c[6], the atlas offsets)
+	int i[4] = {};
+	float prevM[9] = {}, prevT[3] = {}, prevProj[2] = {};  //!< M row-major (GL's GL_TRUE upload)
+	int red = 0;  //!< gates only: 1 atlas offsets off by one, 2 M untransposed, 4 water look on the base pipelines, 8 no stage 5
+};
+//! GL current, the scene pass and the water's rays drawn: stage 5 (stage5) and 1-4 (march) on Vulkan. false: why; GL runs them
+bool ssrRun( const SsrRun & t, std::string & why );
+void ssrOnGl( const char * why );
+struct SsrStat
+{
+	int runs = 0, gl = 0, fails = 0;
+	double cpuMs = 0.0, maxMs = 0.0;
+	std::string glWhy, failWhy;
+	int pipelines = 0;
+	double buildMs = 0.0;
+};
+SsrStat takeSsrStat();
+
 }
 
 #ifndef WW_VKPRESENT_NO_QT

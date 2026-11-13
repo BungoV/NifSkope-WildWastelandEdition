@@ -42,6 +42,11 @@ HLSL_SRC = dict((k, 'res/shaders/hlsl/exposure') for k in VKFRAME_EXPOSURE)	# a 
 VKFRAME_SKY_ARGS = ['-fvk-b-shift', '0', '0', '-fvk-t-shift', '64', '0', '-fvk-s-shift', '128', '0', '-fvk-u-shift', '192', '0']
 VKFRAME_SKY = {'sky_view_ps': ('res/shaders/hlsl/sky', 'atmo_sky_ps')}
 HLSL_SPECS += [('src/features/vkframe', k, 'vulkan1.2', 'vkframe_%s_spv' % k) for k in VKFRAME_SKY]
+# lane VKLIGHT2: the reflections, the script's `ssr <name> "<defines>"` lines (res/shaders/hlsl/vklight/ssr_vk.hlsl -DSSR_LIVE)
+VKFRAME_SSR = {'ssr_view_s1': '-DSSR_STAGE=1', 'ssr_view_s1w': '-DSSR_STAGE=1 -DF4FX_SSR_WATER_LOOK',
+	'ssr_view_s2': '-DSSR_STAGE=2', 'ssr_view_s2w': '-DSSR_STAGE=2 -DF4FX_SSR_WATER_LOOK',
+	'ssr_view_s3': '-DSSR_STAGE=3', 'ssr_view_s4': '-DSSR_STAGE=4', 'ssr_view_s5': '-DSSR_STAGE=5'}
+HLSL_SPECS += [('src/features/vkframe', k, 'vulkan1.2', 'vkframe_%s_spv' % k) for k in VKFRAME_SSR]
 DEFAULT_G = 'E:/Tools/RenderDoc/RenderDoc_1.45_64/plugins/spirv/glslangValidator.exe'
 DEFAULT_DXC = 'E:/Tools/dxc/bin/x64/dxc.exe'
 
@@ -111,6 +116,11 @@ def script_ok(tree):
 	sloop = m.group(1).split() if m else []
 	if sorted(sloop) != sorted(VKFRAME_SKY):
 		bad.append('src/features/vkframe/vkframe_spirv.sh: its sky loop (%s) is not this checker\'s sky shaders' % ' '.join(sloop))
+	if '\t"$DXC" -spirv -fspv-target-env=vulkan1.2 -T cs_6_0 -E main -DSSR_LIVE $2 -Fo "$1.spv" ' not in vf:
+		bad.append('src/features/vkframe/vkframe_spirv.sh: its ssr() compile line changed')
+	rlines = dict(re.findall(r'^ssr ([a-z0-9_]+) "([^"]*)"$', vf, re.M))
+	if rlines != VKFRAME_SSR:
+		bad.append('src/features/vkframe/vkframe_spirv.sh: its ssr lines (%s) are not this checker\'s reflections' % ' '.join(sorted(rlines)))
 	return bad
 
 
@@ -218,6 +228,9 @@ def main(argv):
 			if k in VKFRAME_SKY:
 				src = os.path.join(tree, VKFRAME_SKY[k][0], VKFRAME_SKY[k][1] + '.hlsl')
 				hdefs = VKFRAME_SKY_ARGS
+			if k in VKFRAME_SSR:
+				src = os.path.join(tree, 'res/shaders/hlsl/vklight/ssr_vk.hlsl')
+				hdefs = ['-DSSR_LIVE'] + VKFRAME_SSR[k].split()
 			m = re.search(r'hlsl profile: ([cvp]s_6_[0-9])', open(src, encoding='utf-8', errors='replace').read())
 			opt = [] if d == 'src/features/vkframe' else ['-O0']   # vkframe_spirv.sh builds optimised
 			r = subprocess.run([dxc, '-spirv', '-fspv-target-env=' + env, '-T', m.group(1) if m else 'ps_6_0' if k in VKFRAME_SKY else 'cs_6_0', '-E', 'main']

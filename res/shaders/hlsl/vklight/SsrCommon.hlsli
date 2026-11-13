@@ -6,8 +6,8 @@
 //   SSR_SCENE( t )         full size scene texel (alpha = reflection flag); SSR_SCENE_AT( uv ) the same, bilinear
 //   SSR_WATER( t )         the water's ray (only read when haveWaterRay)
 //   SSR_SRC( q )           the previous stage's target texel; SSR_SRC_AT( uv ) the same, bilinear
-// Not here: stage 0 (the stencil flag), 5 (the bounce donor), the previous-frame hit (ssrPrev) and the water look
-// (cell_ssrwater.prog, WW_SSR_WATER_LOOK).
+//   SSR_PREV_AT( uv )      optional (lane VKLIGHT2): the previous frame's colour, bilinear; turns on the ssrPrev hit and stage 5
+// F4FX_SSR_WATER_LOOK = cell_ssrwater.prog (WW_SSR_WATER_LOOK). Not here: stage 0 (the stencil flag, a GL draw).
 #ifndef F4FX_SSR_COMMON_HLSLI
 #define F4FX_SSR_COMMON_HLSLI
 
@@ -22,7 +22,23 @@ struct F4FX_SsrParams
 	int red;			// 2 no gap refusal, 4 no fade
 	bool haveWaterRay;
 	bool opaqueRays;
+#ifdef SSR_PREV_AT
+	bool prevOn;
+	float3 prevCol[3];	// this view -> the previous view: GL columns of ssrPrevRot, then ssrPrevT
+	float3 prevT;
+	float2 prevProj;
+#endif
 };
+
+#ifdef F4FX_SSR_WATER_LOOK
+#define F4FX_SSR_STEPS ( waterLook ? 64 : 32 )
+#define F4FX_SSR_HITMAX ( waterLook ? 64.0f : 1.0f )
+#define F4FX_SSR_THICK( d ) ( waterLook && ( P_.red & 8 ) == 0 ? max( 50.0f, 0.06f * ( d ) ) : 50.0f )
+#else
+#define F4FX_SSR_STEPS 32
+#define F4FX_SSR_HITMAX 1.0f
+#define F4FX_SSR_THICK( d ) 50.0f
+#endif
 
 int2 F4FX_SsrMipSize( int2 full, int m )
 {
@@ -65,6 +81,9 @@ float4 F4FX_SsrRay( int2 q, F4FX_SsrParams P_ )
 	t.y = P_.fullSize.y - 1 - t.y;
 	float3 P, R;
 	float z;
+#ifdef F4FX_SSR_WATER_LOOK
+	float kind = 1.0f;
+#endif
 	float4 wr = P_.haveWaterRay ? SSR_WATER( t ) : float4( 0.0f, 0.0f, 0.0f, 0.0f );
 	if ( wr.a > 0.0f ) {
 		if ( dot( wr.xyz, wr.xyz ) == 0.0f )
@@ -72,6 +91,9 @@ float4 F4FX_SsrRay( int2 q, F4FX_SsrParams P_ )
 		z = wr.a;
 		P = F4FX_SsrViewPos( uv, z, P_ );
 		R = wr.xyz;
+#ifdef F4FX_SSR_WATER_LOOK
+		kind = 2.0f;
+#endif
 	} else {
 		if ( !P_.opaqueRays || SSR_SCENE( t ).a * P_.k.w - 0.01f < 0.0f )
 			return float4( 0.0f, 0.0f, 0.0f, 0.0f );
@@ -98,7 +120,11 @@ float4 F4FX_SsrRay( int2 q, F4FX_SsrParams P_ )
 	// the screen line is straight in (u, v, 1 / depth): run it back to depth = near
 	float s = ( 1.0f / P_.clip.x - 1.0f / z ) / ( 1.0f / zq - 1.0f / z );
 	precise float2 uv0 = mad( uvq - uv, s, uv );	// GL: one fma
+#ifdef F4FX_SSR_WATER_LOOK
+	return float4( uv0, z, kind );
+#else
 	return float4( uv0, z, 1.0f );
+#endif
 }
 
 static const float F4FX_SsrDither[16] = { 0.0f, 0.5f, 0.125f, 0.625f, 0.75f, 0.22f, 0.875f, 0.375f,
@@ -107,12 +133,15 @@ static const float F4FX_SsrDither[16] = { 0.0f, 0.5f, 0.125f, 0.625f, 0.75f, 0.2
 // stage 2: the hierarchical march over depth mips 1..4 (32 steps); rgb the hit's colour, alpha the confidence squared
 float4 F4FX_SsrMarch( int2 q, F4FX_SsrParams P_ )
 {
-	const int steps = 32;
 	float2 uv = ( float2( q ) + 0.5f ) / float2( P_.halfSize );
 	float4 ray = SSR_SRC( q );
 	float z0 = ray.z;
 	if ( !( P_.clip.x < z0 ) )
 		return float4( 0.0f, 0.0f, 0.0f, 0.0f );
+#ifdef F4FX_SSR_WATER_LOOK
+	bool waterLook = ray.w > 1.5f;
+#endif
+	const int steps = F4FX_SSR_STEPS;
 	float dj = F4FX_SsrDither[( q.y & 3 ) + 4 * ( q.x & 3 )];
 	float3 A = float3( ray.xy, 1.0f / P_.clip.x + ( dj - 0.5f ) * 0.004f );
 	float3 D = float3( uv, 1.0f / z0 ) - A;
@@ -141,7 +170,7 @@ float4 F4FX_SsrMarch( int2 q, F4FX_SsrParams P_ )
 		d = F4FX_SsrZLoad( level, cell, P_ );
 		float rz = 1.0f / p.z;
 		bool isL1 = level == 1 && ( P_.red & 2 ) == 0;
-		bool ref = refused || ( isL1 && rz - d >= 50.0f );
+		bool ref = refused || ( isL1 && rz - d >= F4FX_SSR_THICK( d ) );
 		if ( d < rz && !ref ) {
 			level -= 1;
 			float2 hp = p.xy - ( cell + 0.5f ) / G;
@@ -156,7 +185,7 @@ float4 F4FX_SsrMarch( int2 q, F4FX_SsrParams P_ )
 			cell += stepv;
 			p = A + min( tc.x, tc.y ) * D;
 			float rz2 = 1.0f / p.z;
-			refused = ref || ( isL1 && rz2 - d >= 50.0f );
+			refused = ref || ( isL1 && rz2 - d >= F4FX_SSR_THICK( d ) );
 			if ( !refused ) {
 				if ( d < rz2 ) {
 					p = A + ( ( 1.0f / d - A.z ) / D.z ) * D;
@@ -183,8 +212,47 @@ float4 F4FX_SsrMarch( int2 q, F4FX_SsrParams P_ )
 	c *= clamp( mad( -25.0f, q3, 1.0f ), 0.0f, 1.0f );
 	if ( ( P_.red & 4 ) != 0 )
 		c = 1.0f;
-	return float4( clamp( SSR_SCENE_AT( float2( p.x, 1.0f - p.y ) ).rgb, 0.0f, 1.0f ), c * c );
+#ifdef F4FX_SSR_WATER_LOOK
+	if ( waterLook ) {	// the screen edges fade (10 % a side), and the end of the steps
+		float2 e = min( p.xy, 1.0f - p.xy );
+		c = smoothstep( 0.0f, 0.1f, e.x ) * smoothstep( 0.0f, 0.1f, e.y );
+		if ( ( P_.red & 8 ) == 0 )
+			c *= clamp( float( steps - count ) / 8.0f, 0.0f, 1.0f );
+	}
+#endif
+#ifdef SSR_PREV_AT
+	if ( P_.prevOn ) {	// the hit in the previous frame's view; off its screen or behind it: no hit
+		float3 H = F4FX_SsrViewPos( p.xy, 1.0f / p.z, P_ );
+		float3 Hp = mad( P_.prevCol[2], H.z, mad( P_.prevCol[0], H.x, P_.prevCol[1] * H.y ) ) + P_.prevT;
+		float zp = -Hp.z;
+		if ( !( zp > P_.clip.x ) )
+			return float4( 0.0f, 0.0f, 0.0f, 0.0f );
+		precise float2 up = float2( 0.5f + 0.5f * P_.prevProj.x * Hp.x / zp, 0.5f - 0.5f * P_.prevProj.y * Hp.y / zp );
+		if ( up.x <= 0.0f || up.x >= 1.0f || up.y <= 0.0f || up.y >= 1.0f )
+			return float4( 0.0f, 0.0f, 0.0f, 0.0f );
+		return float4( clamp( SSR_PREV_AT( float2( up.x, 1.0f - up.y ) ).rgb, 0.0f, F4FX_SSR_HITMAX ), c * c );
+	}
+#endif
+	return float4( clamp( SSR_SCENE_AT( float2( p.x, 1.0f - p.y ) ).rgb, 0.0f, F4FX_SSR_HITMAX ), c * c );
 }
+
+#ifdef SSR_PREV_AT
+// stage 5: the bounce's donor at full size texel t (bottom row first): the previous frame's colour where this surface was
+float3 F4FX_SsrPrevDonor( int2 t, F4FX_SsrParams P_ )
+{
+	float z = SSR_GBUF( t ).a;
+	float2 u = ( float2( t ) + 0.5f ) / float2( P_.fullSize );
+	precise float tx = ( 2.0f * u.x ) * z;
+	precise float ty = ( 2.0f * u.y ) * z;
+	precise float x = ( tx - z ) * ( 1.0f / P_.proj.x );
+	precise float y = ( ty - z ) * ( 1.0f / P_.proj.y );
+	float3 P = float3( x, y, -z );
+	float3 Pp = mad( P_.prevCol[2], P.z, mad( P_.prevCol[0], P.x, P_.prevCol[1] * P.y ) ) + P_.prevT;
+	float zp = max( -Pp.z, P_.clip.x );
+	precise float2 up = float2( 0.5f + 0.5f * P_.prevProj.x * Pp.x / zp, 0.5f + 0.5f * P_.prevProj.y * Pp.y / zp );
+	return SSR_PREV_AT( clamp( up, 0.0f, 1.0f ) ).rgb;
+}
+#endif
 
 // stages 3 (across) and 4 (down): the 5-tap blur of the march, lost taps' weight shared by the present ones
 float4 F4FX_SsrBlur( int2 q, int stage, F4FX_SsrParams P_ )
