@@ -1237,11 +1237,14 @@ void frame()
 	// lane VKOBJ4: the runs drawn on Vulkan this frame, the ones GL drew and why
 	if ( vkShadeOn() ) {
 		const WwVkPresent::ObjBlRunStat r = WwVkPresent::takeObjBlRunStat();
-		char b[640];
+		// the light texel buffers: read in place from stores (no copy) or copied at the crossing; the owners' updates
+		const WwVkPresent::ObjBlStoreStat ls = WwVkPresent::objBlTexelStoreStat( true );
+		char b[768];
 		std::snprintf( b, sizeof( b ), "vk objshade: runs=%lld crossings=%d draws=%d cmds=%d gl=%d fails=%d ms=%.2f max=%.2f "
-			"units shared=%d glOnly=%d texelGl=%d compare=%d%s%s%s%s",
-			c.vkRuns, r.runs, r.draws, r.cmds, r.gl, r.fails, r.cpuMs, r.maxMs, r.shared, r.glOwn, r.texelGl, r.compare, r.glWhy.empty() ? "" : " glWhy=", r.glWhy.c_str(),
-			r.failWhy.empty() ? "" : " failWhy=", r.failWhy.c_str() );
+			"units shared=%d glOnly=%d texelGl=%d compare=%d texel imported=%d copied=%llu copiedKB=%.1f stores=%d writes=%llu staged=%llu%s%s%s%s",
+			c.vkRuns, r.runs, r.draws, r.cmds, r.gl, r.fails, r.cpuMs, r.maxMs, r.shared, r.glOwn, r.texelGl, r.compare, r.texelImported,
+			(unsigned long long)ls.copied, ls.copiedBytes / 1024.0, ls.stores, (unsigned long long)ls.writes, (unsigned long long)ls.staged,
+			r.glWhy.empty() ? "" : " glWhy=", r.glWhy.c_str(), r.failWhy.empty() ? "" : " failWhy=", r.failWhy.c_str() );
 		if ( vkShadeLine != b && wwFrameLog() ) {
 			vkShadeLine = b;
 			std::fprintf( stderr, "%s\n", b );

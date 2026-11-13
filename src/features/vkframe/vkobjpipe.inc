@@ -110,10 +110,19 @@ struct OpTexel
 	VkFormat fmt = VK_FORMAT_UNDEFINED;
 	std::uint32_t cls = 0;  // the element class as SPIR-V's sampled type: 0 float, 1 int, 2 uint
 	VkDeviceSize range = 0;
+	VkBuffer ext = VK_NULL_HANDLE;  // GL's buffer is a store (objBlTexelStore): its own Vulkan buffer at extOff, nothing copied
+	VkDeviceSize extOff = 0;
 	VkBufferView view = VK_NULL_HANDLE;
 	VkBuffer viewBuf = VK_NULL_HANDLE;
 	VkFormat viewFmt = VK_FORMAT_UNDEFINED;
-	VkDeviceSize viewRange = 0;
+	VkDeviceSize viewRange = 0, viewOff = 0;
+};
+
+// a light buffer GL writes straight into exported Vulkan memory (objBlTexelStore; the crossing reads it in place)
+struct OpStore
+{
+	CsmBuf buf;
+	std::size_t bytes = 0;  // the owner's last fill
 };
 
 struct Op
@@ -131,6 +140,13 @@ struct Op
 	CsmBuf zeroTexel;
 	VkBufferView texelView[3] = {};             // float / int / uint
 	std::map<unsigned, OpTexel> texTwins;       // GL's buffer texture -> its twin
+	std::map<unsigned, OpStore> stores;         // GL's buffer name -> the store under it
+	GLuint storeStage = 0;                      // GL's staging buffer, only if a store refuses glNamedBufferSubData
+	int storeSubData = -1;                      // -1 not tried, 0 refused (staged), 1 written in place
+	WwVkPresent::ObjBlStoreStat storeSt;
+	CsmBuf texRead;                             // objBlTexelRead's host copy
+	VkBuffer readSrc = VK_NULL_HANDLE;
+	VkDeviceSize readOff = 0, readLen = 0;
 	std::map<std::string, VkSampler> smps;      // GL's sampler states met (key: the ObjBlSampler's bytes)
 	VkCommandBuffer cmd = VK_NULL_HANDLE;
 	VkFence fence = VK_NULL_HANDLE;
@@ -873,7 +889,7 @@ void objBlPipeFree()
 {
 	Op & O = opS();
 	if ( ( !O.made.empty() || !O.pools.empty() || !O.draws.empty() || !O.stand.empty() || O.zeroTexel.buf || O.fence || O.runFence || O.glDone
-		|| !O.smps.empty() || !O.texTwins.empty() || O.smpDsl ) && vk().ok ) {
+		|| !O.smps.empty() || !O.texTwins.empty() || O.smpDsl || !O.stores.empty() ) && vk().ok ) {
 		Vk & v = vk();
 		drain();
 		v.vkDeviceWaitIdle( v.dev );
@@ -925,6 +941,15 @@ void objBlPipeFree()
 			csmBufFree( t.second.buf, gl().ok && t.second.buf.glCtx == gl().ctx );
 		}
 		O.texTwins.clear();
+		// the stores (their owners see objBlTexelStoreIs false and fill a GL buffer of their own again)
+		for ( auto & s : O.stores )
+			csmBufFree( s.second.buf, gl().ok && s.second.buf.glCtx == gl().ctx );
+		O.stores.clear();
+		if ( O.storeStage && gl().ok && gl().ctx == reinterpret_cast<void *>( wglGetCurrentContext() ) )
+			gl().deleteBuffers( 1, &O.storeStage );
+		O.storeStage = 0;
+		O.storeSubData = -1;
+		csmBufFree( O.texRead, false );
 		csmBufFree( O.zeroTexel, false );
 		csmBufFree( O.rows, false );
 		O.rowCount = 0;
@@ -1369,6 +1394,7 @@ bool objBlBindUnits( GlProc gp, unsigned prog, ObjBlDraw & d, ObjBlBindStat & st
 				if ( objBlTexelCopy( gp, u.glTex, st.glBufs, w ) ) {
 					d.texels.emplace_back( u.binding, u.glTex );
 					st.texelShared++;
+					st.texelImported += objBlTexelImported( u.glTex ) ? 1 : 0;
 				} else {
 					st.texelRefused++;
 					if ( st.texelWhy.empty() )
@@ -1624,29 +1650,103 @@ bool opTexelView( unsigned tex, std::uint32_t sampled, VkBufferView & out, std::
 {
 	Vk & v = vk();
 	const auto it = opS().texTwins.find( tex );
-	if ( it == opS().texTwins.end() || !it->second.buf.buf || !it->second.range )
+	if ( it == opS().texTwins.end() || !( it->second.ext || it->second.buf.buf ) || !it->second.range )
 		return why = "GL's buffer texture " + std::to_string( tex ) + " has no twin (objBlTexelCopy first)", false;
 	OpTexel & t = it->second;
 	static const char * cls[3] = { "float", "int", "uint" };
 	if ( t.cls != sampled )
 		return why = std::string( "GL's buffer texture holds " ) + cls[t.cls % 3] + " texels, the binding reads " + ( sampled < 3 ? cls[sampled] : "another class" ), false;
-	if ( !t.view || t.viewBuf != t.buf.buf || t.viewFmt != t.fmt || t.viewRange != t.range ) {
+	const VkBuffer src = t.ext ? t.ext : t.buf.buf;  // a store's own buffer, else the copy's twin
+	const VkDeviceSize off = t.ext ? t.extOff : 0;
+	if ( !t.view || t.viewBuf != src || t.viewFmt != t.fmt || t.viewRange != t.range || t.viewOff != off ) {
 		const auto create = reinterpret_cast<PFN_vkCreateBufferView>( v.vkGetDeviceProcAddr( v.dev, "vkCreateBufferView" ) );
 		const auto destroy = reinterpret_cast<PFN_vkDestroyBufferView>( v.vkGetDeviceProcAddr( v.dev, "vkDestroyBufferView" ) );
 		if ( t.view && destroy )
 			destroy( v.dev, t.view, nullptr );
 		t.view = VK_NULL_HANDLE;
 		VkBufferViewCreateInfo ci { VK_STRUCTURE_TYPE_BUFFER_VIEW_CREATE_INFO };
-		ci.buffer = t.buf.buf;
+		ci.buffer = src;
 		ci.format = t.fmt;
+		ci.offset = off;
 		ci.range = t.range;
 		if ( !create || create( v.dev, &ci, nullptr, &t.view ) != VK_SUCCESS )
 			return why = "the texel twin's view failed", false;
-		t.viewBuf = t.buf.buf;
+		t.viewBuf = src;
 		t.viewFmt = t.fmt;
 		t.viewRange = t.range;
+		t.viewOff = off;
 	}
 	out = t.view;
+	return true;
+}
+
+// the device's texel-buffer view offset alignment (a store's range must start on it)
+VkDeviceSize opTexelAlign()
+{
+	static VkDeviceSize a = 0;
+	if ( !a ) {
+		VkPhysicalDeviceProperties2 pp { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2 };
+		vk().vkGetPhysicalDeviceProperties2( vk().phys, &pp );
+		a = std::max<VkDeviceSize>( pp.properties.limits.minTexelBufferOffsetAlignment, 1 );
+	}
+	return a;
+}
+
+// a store's buffer goes: the views over it first (a later buffer may reuse its handle)
+void opStoreUnview( VkBuffer b )
+{
+	Vk & v = vk();
+	const auto destroy = reinterpret_cast<PFN_vkDestroyBufferView>( v.vkGetDeviceProcAddr( v.dev, "vkDestroyBufferView" ) );
+	for ( auto & e : opS().texTwins ) {
+		OpTexel & t = e.second;
+		if ( t.ext == b ) {
+			t.ext = VK_NULL_HANDLE;
+			t.range = 0;
+		}
+		if ( t.view && t.viewBuf == b ) {
+			if ( destroy )
+				destroy( v.dev, t.view, nullptr );
+			t.view = VK_NULL_HANDLE;
+			t.viewBuf = VK_NULL_HANDLE;
+		}
+	}
+}
+
+// the worker's half of objBlTexelRead: the view's bytes copied to the host, submitted after GL's signal, ours signalled back
+bool opReadWork( std::string & why )
+{
+	Vk & v = vk();
+	Op & O = opS();
+	v.vkResetFences( v.dev, 1, &O.runFence );
+	v.vkResetCommandBuffer( O.runCmd, 0 );
+	VkCommandBufferBeginInfo bi { VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
+	bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+	v.vkBeginCommandBuffer( O.runCmd, &bi );
+	const auto copy = reinterpret_cast<PFN_vkCmdCopyBuffer>( v.vkGetDeviceProcAddr( v.dev, "vkCmdCopyBuffer" ) );
+	if ( !copy ) {
+		v.vkEndCommandBuffer( O.runCmd );
+		return why = "no vkCmdCopyBuffer", false;
+	}
+	const VkBufferCopy c { O.readOff, 0, O.readLen };
+	copy( O.runCmd, O.readSrc, O.texRead.buf, 1, &c );
+	VkMemoryBarrier mb { VK_STRUCTURE_TYPE_MEMORY_BARRIER };
+	mb.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+	mb.dstAccessMask = VK_ACCESS_HOST_READ_BIT;
+	v.vkCmdPipelineBarrier( O.runCmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_HOST_BIT, 0, 1, &mb, 0, nullptr, 0, nullptr );
+	if ( v.vkEndCommandBuffer( O.runCmd ) != VK_SUCCESS )
+		return why = "vkEndCommandBuffer (the texel read) failed", false;
+	const VkPipelineStageFlags waitAt = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
+	VkSubmitInfo si { VK_STRUCTURE_TYPE_SUBMIT_INFO };
+	si.waitSemaphoreCount = 1;
+	si.pWaitSemaphores = &O.glDone;
+	si.pWaitDstStageMask = &waitAt;
+	si.commandBufferCount = 1;
+	si.pCommandBuffers = &O.runCmd;
+	si.signalSemaphoreCount = 1;
+	si.pSignalSemaphores = &O.vkDone;
+	const VkResult r = v.vkQueueSubmit( v.queue, 1, &si, O.runFence );
+	if ( r != VK_SUCCESS )
+		return why = "vkQueueSubmit (the texel read) returned " + std::to_string( int( r ) ), false;
 	return true;
 }
 
@@ -2382,6 +2482,7 @@ bool objBlShade( GlProc gp, const ObjBlShade & s, std::string & why )
 		rs.glOwn += bst.glOwn + bst.misfit;
 		rs.texelGl += bst.texelGl;
 		rs.texelShared += bst.texelShared;
+		rs.texelImported += bst.texelImported;
 		rs.compare += bst.compare;
 	}
 	std::vector<unsigned> names;
@@ -2445,6 +2546,22 @@ bool objBlTexelCopy( GlProc gp, unsigned tex, std::vector<unsigned> & glNames, s
 		return why = "the buffer texture's range holds no texel", false;
 	OpTexel & t = opS().texTwins[tex];
 	const VkDeviceSize need = VkDeviceSize( bytes );
+	// GL's buffer is a store: Vulkan reads its memory in place (GL's writes are ordered before the crossing's signal)
+	const auto st = opS().stores.find( unsigned( buf ) );
+	if ( st != opS().stores.end() && st->second.buf.glCtx == g.ctx && VkDeviceSize( from ) % opTexelAlign() == 0
+		&& VkDeviceSize( from ) + f->bytes <= st->second.buf.cap ) {
+		t.ext = st->second.buf.buf;
+		t.extOff = VkDeviceSize( from );
+		t.fmt = f->vk;
+		t.cls = f->cls;
+		t.range = std::min( need, st->second.buf.cap - t.extOff ) / f->bytes * f->bytes;
+		if ( std::find( glNames.begin(), glNames.end(), st->second.buf.gl ) == glNames.end() )
+			glNames.push_back( st->second.buf.gl );
+		opS().storeSt.imported++;
+		return true;
+	}
+	t.ext = VK_NULL_HANDLE;
+	t.extOff = 0;
 	if ( t.buf.buf && ( t.buf.cap < need || t.buf.glCtx != g.ctx ) ) {
 		if ( opS().live )
 			return why = "the texel twin would move under prepared draws", false;
@@ -2453,10 +2570,191 @@ bool objBlTexelCopy( GlProc gp, unsigned tex, std::vector<unsigned> & glNames, s
 	if ( !csmBuf( t.buf, need, true, VK_BUFFER_USAGE_UNIFORM_TEXEL_BUFFER_BIT, why ) )
 		return false;
 	g.copyNamedBufferSubData( GLuint( buf ), t.buf.gl, std::intptr_t( from ), 0, std::intptr_t( bytes ) );
+	opS().storeSt.copied++;
+	opS().storeSt.copiedBytes += std::uint64_t( bytes );
 	t.fmt = f->vk;
 	t.cls = f->cls;
 	t.range = need / f->bytes * f->bytes;
 	glNames.push_back( t.buf.gl );
+	return true;
+}
+
+bool objBlTexelStore( unsigned & buf, std::size_t bytes, std::string & why )
+{
+	Gl & g = gl();
+	Op & O = opS();
+	if ( !vk().ok || !g.ok || !g.createBuffers || !g.deleteBuffers || !g.namedBufferStorageMem
+		|| g.ctx != reinterpret_cast<void *>( wglGetCurrentContext() ) )
+		return why = "the present device or GL's buffer entry points are not ready in this context", false;
+	if ( !bytes )
+		return why = "an empty store", false;
+	const auto it = O.stores.find( buf );
+	if ( it != O.stores.end() && it->second.buf.glCtx == g.ctx && it->second.buf.cap >= VkDeviceSize( bytes ) ) {
+		it->second.bytes = bytes;
+		return true;
+	}
+	OpStore s;
+	if ( !csmBuf( s.buf, VkDeviceSize( bytes ), true, VK_BUFFER_USAGE_UNIFORM_TEXEL_BUFFER_BIT, why ) ) {
+		csmBufFree( s.buf, s.buf.glCtx == g.ctx );
+		return false;
+	}
+	s.bytes = bytes;
+	if ( it != O.stores.end() ) {  // the old store: Vulkan's last read of it done, its views gone
+		opRunWait();
+		opStoreUnview( it->second.buf.buf );
+		csmBufFree( it->second.buf, it->second.buf.glCtx == g.ctx );
+		O.stores.erase( it );
+	} else if ( buf ) {
+		const GLuint old = GLuint( buf );
+		g.deleteBuffers( 1, &old );  // the owner's own buffer
+	}
+	buf = s.buf.gl;
+	O.stores[buf] = s;
+	return true;
+}
+
+bool objBlTexelStoreWrite( unsigned buf, std::size_t off, std::size_t bytes, const void * data, std::string & why )
+{
+	Gl & g = gl();
+	Op & O = opS();
+	const auto it = O.stores.find( buf );
+	if ( it == O.stores.end() || it->second.buf.glCtx != g.ctx || g.ctx != reinterpret_cast<void *>( wglGetCurrentContext() ) )
+		return why = "GL buffer " + std::to_string( buf ) + " is no store of this context", false;
+	if ( VkDeviceSize( off ) + VkDeviceSize( bytes ) > it->second.buf.cap )
+		return why = "the write runs past the store", false;
+	if ( !bytes )
+		return true;
+	ObjBlStoreStat & st = O.storeSt;
+	if ( O.storeSubData != 0 && g.namedBufferSubData ) {
+		while ( g.getError() != 0 ) {}
+		g.namedBufferSubData( GLuint( buf ), std::intptr_t( off ), std::intptr_t( bytes ), data );
+		if ( g.getError() == 0 ) {
+			O.storeSubData = 1;
+			st.writes++;
+			st.writeBytes += bytes;
+			return true;
+		}
+		O.storeSubData = 0;  // the imported storage takes no SubData: staged from here on
+	}
+	if ( !g.namedBufferData || !g.copyNamedBufferSubData )
+		return why = "no glNamedBufferData / glCopyNamedBufferSubData for the staged write", false;
+	if ( !O.storeStage )
+		g.createBuffers( 1, &O.storeStage );
+	g.namedBufferData( O.storeStage, std::intptr_t( bytes ), data, 0x88E0 );  // STREAM_DRAW
+	g.copyNamedBufferSubData( O.storeStage, GLuint( buf ), 0, std::intptr_t( off ), std::intptr_t( bytes ) );
+	st.writes++;
+	st.staged++;
+	st.writeBytes += bytes;
+	return true;
+}
+
+bool objBlTexelStoreIs( unsigned buf )
+{
+	const auto it = opS().stores.find( buf );
+	return buf && it != opS().stores.end() && it->second.buf.glCtx == gl().ctx;
+}
+
+void objBlTexelStoreDrop( unsigned & buf )
+{
+	Op & O = opS();
+	const auto it = O.stores.find( buf );
+	if ( it == O.stores.end() )
+		return;
+	opRunWait();
+	opStoreUnview( it->second.buf.buf );
+	csmBufFree( it->second.buf, gl().ok && it->second.buf.glCtx == gl().ctx );
+	O.stores.erase( it );
+	buf = 0;
+}
+
+bool objBlTexelFill( unsigned & buf, bool & stored, bool shade, std::initializer_list<std::pair<const void *, std::size_t>> parts, bool & moved )
+{
+	moved = false;
+	if ( stored && !objBlTexelStoreIs( buf ) ) {  // freed with the device: the name is gone
+		buf = 0;
+		stored = false;
+		moved = true;
+	}
+	if ( !shade ) {
+		if ( stored ) {
+			objBlTexelStoreDrop( buf );
+			stored = false;
+			moved = true;
+		}
+		return false;
+	}
+	std::size_t total = 0;
+	for ( const auto & p : parts )
+		total += p.second;
+	const unsigned was = buf;
+	std::string why;
+	bool ok = objBlTexelStore( buf, total, why );
+	std::size_t at = 0;
+	for ( const auto & p : parts ) {
+		ok = ok && objBlTexelStoreWrite( buf, at, p.second, p.first, why );
+		at += p.second;
+	}
+	if ( !ok ) {
+		if ( objBlTexelStoreIs( buf ) )
+			objBlTexelStoreDrop( buf );
+		stored = false;
+		moved = moved || buf != was;
+		return false;
+	}
+	stored = true;
+	moved = moved || buf != was;
+	return true;
+}
+
+ObjBlStoreStat objBlTexelStoreStat( bool reset )
+{
+	Op & O = opS();
+	ObjBlStoreStat s = O.storeSt;
+	s.stores = int( O.stores.size() );
+	s.subData = O.storeSubData;
+	if ( reset )
+		O.storeSt = ObjBlStoreStat();
+	return s;
+}
+
+bool objBlTexelImported( unsigned tex )
+{
+	const auto it = opS().texTwins.find( tex );
+	return it != opS().texTwins.end() && it->second.ext;
+}
+
+bool objBlTexelRead( unsigned tex, std::vector<std::uint8_t> & out, std::string & why )
+{
+	Vk & v = vk();
+	Gl & g = gl();
+	Op & O = opS();
+	out.clear();
+	if ( !v.ok || !g.ok || !g.signalSemaphore || !g.waitSemaphore || g.ctx != reinterpret_cast<void *>( wglGetCurrentContext() ) )
+		return why = "the present device or GL's semaphores are not ready in this context", false;
+	const auto it = O.texTwins.find( tex );
+	if ( it == O.texTwins.end() || !it->second.range || !( it->second.ext || it->second.buf.buf ) )
+		return why = "GL's buffer texture " + std::to_string( tex ) + " has no twin (objBlTexelCopy first)", false;
+	const OpTexel & t = it->second;
+	GLuint name = t.buf.gl;
+	if ( t.ext )
+		for ( const auto & s : O.stores )
+			if ( s.second.buf.buf == t.ext )
+				name = s.second.buf.gl;
+	opRunWait();
+	if ( !opRunMake( why ) || !opHostBuf( O.texRead, std::size_t( t.range ), VK_BUFFER_USAGE_TRANSFER_DST_BIT, why ) )
+		return false;
+	O.readSrc = t.ext ? t.ext : t.buf.buf;
+	O.readOff = t.ext ? t.extOff : 0;
+	O.readLen = t.range;
+	g.signalSemaphore( O.glDoneGl, 1, &name, 0, nullptr, nullptr );
+	g.flush();
+	if ( !opWorkerRun( opReadWork, why ) )
+		return false;  // nothing signals vkDone: GL does not wait it
+	g.waitSemaphore( O.vkDoneGl, 1, &name, 0, nullptr, nullptr );
+	O.pending = true;
+	opRunWait();
+	out.resize( std::size_t( t.range ) );
+	std::memcpy( out.data(), O.texRead.ptr, out.size() );
 	return true;
 }
 

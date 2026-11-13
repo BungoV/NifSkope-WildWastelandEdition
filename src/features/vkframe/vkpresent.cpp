@@ -145,6 +145,9 @@ struct Gl
 	void( WINAPI * deleteBuffers )( GLsizei, const GLuint * ) = nullptr;
 	void( WINAPI * namedBufferStorageMem )( GLuint, std::intptr_t, GLuint, GLuint64 ) = nullptr;
 	void( WINAPI * copyNamedBufferSubData )( GLuint, GLuint, std::intptr_t, std::intptr_t, std::intptr_t ) = nullptr;
+	// lane VKOBJ4 (optional, GL 4.5): the light stores' writes (objBlTexelStoreWrite; the staging buffer if a store refuses SubData)
+	void( WINAPI * namedBufferSubData )( GLuint, std::intptr_t, std::intptr_t, const void * ) = nullptr;
+	void( WINAPI * namedBufferData )( GLuint, std::intptr_t, const void *, GLenum ) = nullptr;
 };
 
 template <class F> void load( F & f, WwVkPresent::GlProc gp, const char * name )
@@ -191,6 +194,8 @@ bool loadGl( Gl & g, WwVkPresent::GlProc gp, std::string & why )
 	load( g.deleteBuffers, gp, "glDeleteBuffers" );
 	load( g.namedBufferStorageMem, gp, "glNamedBufferStorageMemEXT" );
 	load( g.copyNamedBufferSubData, gp, "glCopyNamedBufferSubData" );
+	load( g.namedBufferSubData, gp, "glNamedBufferSubData" );
+	load( g.namedBufferData, gp, "glNamedBufferData" );
 	g.ok = g.getIntegerv && g.getError && g.enable && g.disable && g.isEnabled && g.flush && g.genTextures && g.deleteTextures
 		&& g.bindTexture && g.texParameteri && g.genFramebuffers && g.deleteFramebuffers && g.bindFramebuffer
 		&& g.framebufferTexture2D && g.checkFramebufferStatus && g.blitFramebuffer && g.createMemoryObjects

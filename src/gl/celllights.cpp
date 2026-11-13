@@ -77,6 +77,8 @@ BSD License - see nifskope.h
 #include "gl/dalcfit.h"	// lane SKYLIGHT1: the up / down poles read exactly
 #include "features/overlays/debugview.h"	// lane DEBUGVIEW1: a debug view is a probe pass
 #include "features/vkframe/vkpresent.h"	// lane VKFAR1 (row G3): the far dots on the Vulkan view
+#include "features/vkframe/vkobjpipe.h"	// lane VKOBJ4: the light buffers as stores (objBlTexelFill)
+#include "features/near/cellbindless.h"	// lane VKOBJ4: WwBl::vkShadeOn
 
 bool wwFogLeakShaderDefine();	// glcontext.cpp: WW_CELL_FOGLEAK in the cell programs (the Vulkan twin's define)
 
@@ -1363,19 +1365,27 @@ void wwCellLightsUniforms( Scene * scene )
 			g.spheres.insert( g.spheres.end(), t.begin() + std::ptrdiff_t( o ), t.begin() + std::ptrdiff_t( o + 4 ) );
 		if ( t.empty() )
 			t.assign( kTexelsPerLight * 4, 0.0f );	// a buffer texture must have a store
-		if ( !g.buf ) {
-			fn->glGenBuffers( 1, &g.buf );
+		if ( !g.tex )
 			fn->glGenTextures( 1, &g.tex );
+		// lane VKOBJ4: under WW_VKOBJ_SHADE a store (exported Vulkan memory GL writes; the Vulkan runs read it in place)
+		bool moved = false;
+		const bool stored = WwVkPresent::objBlTexelFill( g.buf, g.bufStored, WwBl::vkShadeOn(),
+			{ { t.data(), t.size() * sizeof( float ) }, { x.data(), x.size() * sizeof( float ) } }, moved );
+		if ( moved )
+			g.texAttached = false;
+		if ( !stored ) {
+			if ( !g.buf )
+				fn->glGenBuffers( 1, &g.buf );
+			fn->glBindBuffer( GL_TEXTURE_BUFFER, g.buf );
+			if ( x.empty() ) {
+				fn->glBufferData( GL_TEXTURE_BUFFER, GLsizeiptr( t.size() * sizeof( float ) ), t.data(), GL_STATIC_DRAW );
+			} else {	// lane LIGHTS5: the lights, then the patterns and fog scales
+				fn->glBufferData( GL_TEXTURE_BUFFER, GLsizeiptr( ( t.size() + x.size() ) * sizeof( float ) ), nullptr, GL_STATIC_DRAW );
+				fn->glBufferSubData( GL_TEXTURE_BUFFER, 0, GLsizeiptr( t.size() * sizeof( float ) ), t.data() );
+				fn->glBufferSubData( GL_TEXTURE_BUFFER, GLintptr( t.size() * sizeof( float ) ), GLsizeiptr( x.size() * sizeof( float ) ), x.data() );
+			}
+			fn->glBindBuffer( GL_TEXTURE_BUFFER, 0 );
 		}
-		fn->glBindBuffer( GL_TEXTURE_BUFFER, g.buf );
-		if ( x.empty() ) {
-			fn->glBufferData( GL_TEXTURE_BUFFER, GLsizeiptr( t.size() * sizeof( float ) ), t.data(), GL_STATIC_DRAW );
-		} else {	// lane LIGHTS5: the lights, then the patterns and fog scales
-			fn->glBufferData( GL_TEXTURE_BUFFER, GLsizeiptr( ( t.size() + x.size() ) * sizeof( float ) ), nullptr, GL_STATIC_DRAW );
-			fn->glBufferSubData( GL_TEXTURE_BUFFER, 0, GLsizeiptr( t.size() * sizeof( float ) ), t.data() );
-			fn->glBufferSubData( GL_TEXTURE_BUFFER, GLintptr( t.size() * sizeof( float ) ), GLsizeiptr( x.size() * sizeof( float ) ), x.data() );
-		}
-		fn->glBindBuffer( GL_TEXTURE_BUFFER, 0 );
 		g.doc = scene->nifModel;
 		g.version = s.version.value( scene->nifModel );
 		g.count = int( t.size() / ( kTexelsPerLight * 4 ) ) - ( L->lights.isEmpty() ? 1 : 0 );
@@ -1446,7 +1456,11 @@ void wwCellLightsUniforms( Scene * scene )
 					patch( size_t( g.bulbBase ) + ( size_t( i ) - n ), v, false );
 				}
 			}
-			if ( lo <= hi && g.buf ) {
+			std::string storeWhy;	// lane VKOBJ4: a store takes the patch as GL's write into it
+			if ( lo <= hi && g.buf && g.bufStored ) {
+				WwVkPresent::objBlTexelStoreWrite( g.buf, std::size_t( lo * per * sizeof( float ) ), std::size_t( ( hi - lo + 1 ) * per * sizeof( float ) ),
+					g.flickLive.data() + lo * per, storeWhy );
+			} else if ( lo <= hi && g.buf ) {
 				fn->glBindBuffer( GL_TEXTURE_BUFFER, g.buf );
 				fn->glBufferSubData( GL_TEXTURE_BUFFER, GLintptr( lo * per * sizeof( float ) ), GLsizeiptr( ( hi - lo + 1 ) * per * sizeof( float ) ),
 					g.flickLive.data() + lo * per );
@@ -1642,17 +1656,23 @@ void wwCellLightsUniforms( Scene * scene )
 	 * this draw uses them; a GPU with fewer than 23 units never draws far light */
 	const WwCellFar * Fr = on && s.farOn && pass == 0 && g.units > kFarPlacedUnit ? wwCellFarFor( scene->nifModel ) : nullptr;
 	if ( Fr && !Fr->slotTab.empty() && ( g.farDoc != scene->nifModel || g.farVersion != s.farVersion.value( scene->nifModel ) ) ) {
-		auto upBuf = [&]( GLuint & buf, GLuint & tex, const void * data, size_t bytes ) {
-			if ( !buf ) {
-				fn->glGenBuffers( 1, &buf );
+		auto upBuf = [&]( GLuint & buf, GLuint & tex, GLuint & att, bool & stored, const void * data, size_t bytes ) {
+			if ( !tex )
 				fn->glGenTextures( 1, &tex );
-			}
+			bool moved = false;	// lane VKOBJ4: under WW_VKOBJ_SHADE a store (the Vulkan runs read it in place)
+			const bool inStore = WwVkPresent::objBlTexelFill( buf, stored, WwBl::vkShadeOn(), { { data, bytes } }, moved );
+			if ( moved )
+				att = 0;	// re-attached below (a reused name is another buffer)
+			if ( inStore )
+				return;
+			if ( !buf )
+				fn->glGenBuffers( 1, &buf );
 			fn->glBindBuffer( GL_TEXTURE_BUFFER, buf );
 			fn->glBufferData( GL_TEXTURE_BUFFER, GLsizeiptr( bytes ), data, GL_STATIC_DRAW );
 			fn->glBindBuffer( GL_TEXTURE_BUFFER, 0 );
 		};
-		upBuf( g.farSlotBuf, g.farSlotTex, Fr->slotTab.data(), Fr->slotTab.size() * sizeof( float ) );
-		upBuf( g.farRecBuf, g.farRecTex, Fr->recs.data(), Fr->recs.size() * sizeof( float ) );
+		upBuf( g.farSlotBuf, g.farSlotTex, g.farSlotAtt, g.farSlotStored, Fr->slotTab.data(), Fr->slotTab.size() * sizeof( float ) );
+		upBuf( g.farRecBuf, g.farRecTex, g.farRecAtt, g.farRecStored, Fr->recs.data(), Fr->recs.size() * sizeof( float ) );
 		if ( !Fr->placed.empty() ) {
 			if ( !g.farPlacedTex )
 				fn->glGenTextures( 1, &g.farPlacedTex );

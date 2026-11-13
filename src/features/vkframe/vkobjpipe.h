@@ -10,14 +10,17 @@
  * TEXCOORDn); DXC numbers the inputs on its own (fo4_defaultbl_vs: TEXCOORD9 is Location 8), so the semantic maps them.
  * Slices 5-7 below: GL's uniforms mirrored, the class pools as vertex buffers, the multi-draw, the crossing (objBlRun),
  * GL's texture units (objBlBindUnits: a shared target such as the CSM or the air volume as a set-0 image, GL's sampler
- * state with the depth compare). GL's texel buffers (the lights) stay the zero texel.
+ * state with the depth compare). GL's texel buffers (the lights): read in place from a store (objBlTexelStore), else copied
+ * into a twin each crossing (objBlTexelCopy).
  * Gate: tests/vkframe/blview.sh (the `BLVIEW pipe` / `uni` / `pool` / `shade` / `units` lines; their reds must FAIL). */
 
 #include "features/vkframe/vkpresent.h"
 
 #include <cstddef>
 #include <cstdint>
+#include <initializer_list>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace WwVkPresent
@@ -223,6 +226,7 @@ struct ObjBlBindStat
 	int unbound = 0;   //!< no unit or no texture
 	int texelGl = 0;   //!< a texel buffer GL binds
 	int texelShared = 0, texelRefused = 0;  //!< of those, copied into a twin (d.texels) / refused (the zero texel on Vulkan)
+	int texelImported = 0;  //!< of the shared, read in place from a store (no copy)
 	int samplers = 0;  //!< samplers given GL's state
 	int compare = 0;   //!< of those, depth compare
 	std::string misfitWhy, texelWhy;
@@ -236,6 +240,35 @@ bool objBlBindUnits( GlProc gp, unsigned prog, ObjBlDraw & d, ObjBlBindStat & st
  * a buffer GL imports (glCopyNamedBufferSubData, ordered before the crossing's signal; glNames gets the twin's GL name).
  * Formats: R / RG / RGBA 32F, 32I, 32UI, RGBA16F, RGBA8; others are refused. red 1 copies from 16 bytes past the start. */
 bool objBlTexelCopy( GlProc gp, unsigned tex, std::vector<unsigned> & glNames, std::string & why, int red = 0 );
+/* the light stores: a GL buffer whose storage is exported memory of the present device. GL's owner writes it (the update),
+ * the crossing reads that memory through the texel view (objBlTexelCopy sees the store: nothing is copied). */
+struct ObjBlStoreStat
+{
+	int stores = 0;                 //!< stores alive
+	int subData = -1;               //!< -1 no write yet, 1 glNamedBufferSubData into the store, 0 refused (writes staged)
+	std::uint64_t imported = 0;     //!< texel buffers read in place at a crossing
+	std::uint64_t copied = 0, copiedBytes = 0;  //!< texel buffers copied into a twin at a crossing (GL's own buffers)
+	std::uint64_t writes = 0, staged = 0, writeBytes = 0;  //!< the owners' updates (staged: through GL's staging copy)
+};
+/*! `buf` made (or kept) a store of at least `bytes`: a store already big enough stays; else a new one replaces it (the old
+ * store, or the owner's own GL buffer, is deleted) and `buf` takes its name, so the owner re-attaches its texture */
+bool objBlTexelStore( unsigned & buf, std::size_t bytes, std::string & why );
+//! GL's write of `bytes` at `off` into store `buf` (glNamedBufferSubData, else through a staging buffer)
+bool objBlTexelStoreWrite( unsigned buf, std::size_t off, std::size_t bytes, const void * data, std::string & why );
+//! `buf` is a live store of this context (false after the device went: the name is gone)
+bool objBlTexelStoreIs( unsigned buf );
+//! store `buf` deleted (Vulkan's last read waited), buf = 0
+void objBlTexelStoreDrop( unsigned & buf );
+/*! an owner's update: under `shade` the parts (in order) written into a store (made or grown first); `stored` keeps
+ * whether buf is one, `moved` says the name changed (re-attach). false: the owner fills a GL buffer of its own (a store
+ * left from before is dropped, buf = 0) */
+bool objBlTexelFill( unsigned & buf, bool & stored, bool shade, std::initializer_list<std::pair<const void *, std::size_t>> parts, bool & moved );
+//! the counters (reset: the per-frame ones zeroed after the read)
+ObjBlStoreStat objBlTexelStoreStat( bool reset = false );
+//! GL's buffer texture `tex` is read in place from a store (its last objBlTexelCopy)
+bool objBlTexelImported( unsigned tex );
+//! the Vulkan side's bytes of `tex`'s view (its buffer, offset and range) copied back after one crossing (the gates)
+bool objBlTexelRead( unsigned tex, std::vector<std::uint8_t> & out, std::string & why );
 //! the shared target `key` fits a set-0 image of SPIR-V Dim `dim` / Arrayed (2D, 3D, 2D array, cube array; one sample)
 bool objBlSharedFits( std::uintptr_t key, std::uint32_t dim, std::uint32_t arrayed, std::string & why );
 //! GL program `prog`'s state for both modules' uniform blocks (LooseUniforms by objBlLoose, the named blocks by objBlBlock)
@@ -258,6 +291,7 @@ struct ObjBlRunStat
 	int runs = 0, draws = 0, cmds = 0, gl = 0, fails = 0;
 	int shared = 0, glOwn = 0, texelGl = 0, compare = 0;  //!< objBlShade's units: shared images, GL-only textures, GL texel buffers, compare samplers
 	int texelShared = 0;  //!< of the texel buffers, those drawn from their twins
+	int texelImported = 0;  //!< of those, read in place from a store (the rest copied at the crossing)
 	int dropped = 0;      //!< pixel outputs past the frame's targets in the draws' pipelines (objBlPipe; Vulkan discards them)
 	double cpuMs = 0.0, maxMs = 0.0;
 	std::string glWhy, failWhy;

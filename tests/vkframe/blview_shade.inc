@@ -809,6 +809,196 @@ bool texelGate()
 	return ok;
 }
 
+/* lane VKOBJ4 gap 2: GL's light buffers as stores (objBlTexelStore: exported memory of the present device that GL writes;
+ * the crossing reads it in place, nothing copied). BAR (stated before the first run, never widened): a 4 KiB RGBA32F light
+ * buffer filled through objBlTexelFill is a store; its buffer texture is read in place (objBlTexelImported; 0 bytes copied;
+ * the crossing's GL names are the store's alone) and Vulkan's bytes of the view (objBlTexelRead: the view's buffer, offset
+ * and range copied back after a crossing) equal the fill EXACT; frame 2: GL's patch (512 bytes at 512, the flicker's write)
+ * read back EXACT; frame 3: a 96 KiB fill grows the store (the name moves, the texture re-attached) read back EXACT; the int
+ * class (a 2 KiB RGBA32I cluster list) EXACT. Red (must FAIL): skip (frame 2's write skipped: Vulkan reads frame 1's bytes).
+ * Cost, measured offline (256 KiB, 200 crossings): objBlTexelCopy of a GL buffer (the copy each crossing) against a store,
+ * CPU ms and GPU ms (GL timer) per crossing, printed on the `BLVIEW store cost` line. */
+struct StoreOut
+{
+	std::size_t d1 = ~std::size_t( 0 ), d2 = ~std::size_t( 0 ), d3 = ~std::size_t( 0 ), di = ~std::size_t( 0 );
+	bool stored = false, imported = true, namesOk = true, moved = false;
+	std::uint64_t copiedBytes = 0;
+	int reads = 0, subData = -1;
+	std::string why;
+	bool good() const
+	{
+		return stored && imported && namesOk && moved && copiedBytes == 0 && reads == 4 && d1 == 0 && d2 == 0 && d3 == 0 && di == 0;
+	}
+};
+
+void storeRun( int red, StoreOut & o )
+{
+	using namespace WwVkPresent;
+	void( WINAPI * textureBuffer )( GLuint, GLenum, GLuint ) = nullptr;
+	if ( !ux.createTextures || !load( textureBuffer, "glTextureBuffer" ) ) {
+		o.why = "no glCreateTextures / glTextureBuffer";
+		return;
+	}
+	std::uint32_t seed = 0x2545F491u + std::uint32_t( red );
+	auto fill = [&seed]( std::vector<std::uint8_t> & v ) {
+		for ( std::uint8_t & b : v )
+			b = std::uint8_t( ( seed = seed * 1664525u + 1013904223u ) >> 24 );
+	};
+	unsigned buf = 0, ibuf = 0;
+	bool stored = false, istored = false, moved = false;
+	GLuint tex = 0, itex = 0;
+	// one crossing: GL's buffer texture through objBlTexelCopy, then Vulkan's bytes of its view against `want`
+	auto check = [&]( GLuint t, unsigned b, const std::vector<std::uint8_t> & want, std::size_t & differ ) {
+		std::vector<unsigned> names;
+		const ObjBlStoreStat before = objBlTexelStoreStat();
+		if ( !objBlTexelCopy( glProc, t, names, o.why ) )
+			return;
+		o.copiedBytes += objBlTexelStoreStat().copiedBytes - before.copiedBytes;
+		o.imported = o.imported && objBlTexelImported( t );
+		o.namesOk = o.namesOk && names.size() == 1 && names[0] == b;
+		std::vector<std::uint8_t> got;
+		if ( !objBlTexelRead( t, got, o.why ) )
+			return;
+		o.reads++;
+		differ = want.size() > got.size() ? want.size() : 0;
+		for ( std::size_t k = 0; k < want.size() && k < got.size(); k++ )
+			differ += got[k] != want[k];
+	};
+	std::vector<std::uint8_t> a( 4096 );
+	fill( a );
+	objBlTexelFill( buf, stored, true, { { a.data(), a.size() } }, moved );
+	o.stored = stored && objBlTexelStoreIs( buf );
+	if ( !o.stored ) {
+		o.why = "the fill made no store";
+		return;
+	}
+	ux.createTextures( 0x8C2A, 1, &tex );  // TEXTURE_BUFFER
+	textureBuffer( tex, 0x8814, GLuint( buf ) );  // RGBA32F, the whole store (as the owners attach)
+	check( tex, buf, a, o.d1 );
+	// frame 2: GL's patch into the store (the flicker's glBufferSubData)
+	std::vector<std::uint8_t> b2 = a, patch( 512 );
+	fill( patch );
+	std::copy( patch.begin(), patch.end(), b2.begin() + 512 );
+	std::string w;
+	if ( red != 1 )
+		objBlTexelStoreWrite( buf, 512, patch.size(), patch.data(), w );
+	check( tex, buf, b2, o.d2 );
+	// frame 3: a bigger fill grows the store; the owner re-attaches the moved name
+	std::vector<std::uint8_t> c( 96 * 1024 );
+	fill( c );
+	const unsigned was = buf;
+	objBlTexelFill( buf, stored, true, { { c.data(), c.size() / 2 }, { c.data() + c.size() / 2, c.size() - c.size() / 2 } }, moved );
+	o.moved = moved && buf != was && objBlTexelStoreIs( buf ) && !objBlTexelStoreIs( was );
+	if ( moved )
+		textureBuffer( tex, 0x8814, GLuint( buf ) );
+	check( tex, buf, c, o.d3 );
+	// the int class (the cluster lists)
+	std::vector<std::uint8_t> iv( 2048 );
+	fill( iv );
+	bool imoved = false;
+	objBlTexelFill( ibuf, istored, true, { { iv.data(), iv.size() } }, imoved );
+	ux.createTextures( 0x8C2A, 1, &itex );
+	textureBuffer( itex, 0x8D82, GLuint( ibuf ) );  // RGBA32I
+	check( itex, ibuf, iv, o.di );
+	o.subData = objBlTexelStoreStat().subData;
+	glDeleteTextures( 1, &tex );
+	glDeleteTextures( 1, &itex );
+	objBlTexelStoreDrop( buf );
+	objBlTexelStoreDrop( ibuf );
+}
+
+// the copy each crossing against a store: CPU and GPU ms per crossing, 256 KiB, 200 crossings
+bool storeCost( double & copyCpu, double & copyGpu, double & impCpu, double & impGpu, std::string & why )
+{
+	using namespace WwVkPresent;
+	void( WINAPI * createBuffers )( GLsizei, GLuint * ) = nullptr;
+	void( WINAPI * deleteBuffers )( GLsizei, const GLuint * ) = nullptr;
+	void( WINAPI * namedBufferData )( GLuint, std::intptr_t, const void *, GLenum ) = nullptr;
+	void( WINAPI * textureBuffer )( GLuint, GLenum, GLuint ) = nullptr;
+	void( WINAPI * genQueries )( GLsizei, GLuint * ) = nullptr;
+	void( WINAPI * deleteQueries )( GLsizei, const GLuint * ) = nullptr;
+	void( WINAPI * beginQuery )( GLenum, GLuint ) = nullptr;
+	void( WINAPI * endQuery )( GLenum ) = nullptr;
+	void( WINAPI * queryU64 )( GLuint, GLenum, std::uint64_t * ) = nullptr;
+	if ( !load( createBuffers, "glCreateBuffers" ) || !load( deleteBuffers, "glDeleteBuffers" ) || !load( namedBufferData, "glNamedBufferData" )
+		|| !load( textureBuffer, "glTextureBuffer" ) || !load( genQueries, "glGenQueries" ) || !load( deleteQueries, "glDeleteQueries" )
+		|| !load( beginQuery, "glBeginQuery" ) || !load( endQuery, "glEndQuery" ) || !load( queryU64, "glGetQueryObjectui64v" ) )
+		return why = "a GL entry point is missing", false;
+	const std::size_t kBytes = 256 * 1024;
+	const int kN = 200;
+	std::vector<std::uint8_t> z( kBytes );
+	for ( std::size_t k = 0; k < z.size(); k++ )
+		z[k] = std::uint8_t( k * 131u );
+	GLuint plain = 0, texCopy = 0, texImp = 0, q = 0;
+	createBuffers( 1, &plain );
+	namedBufferData( plain, std::intptr_t( kBytes ), z.data(), 0x88E4 );  // STATIC_DRAW
+	unsigned sb = 0;
+	bool st = false, mv = false;
+	if ( !objBlTexelFill( sb, st, true, { { z.data(), z.size() } }, mv ) )
+		return why = "the store was not made", false;
+	ux.createTextures( 0x8C2A, 1, &texCopy );
+	ux.createTextures( 0x8C2A, 1, &texImp );
+	textureBuffer( texCopy, 0x8814, plain );
+	textureBuffer( texImp, 0x8814, GLuint( sb ) );
+	genQueries( 1, &q );
+	bool ok = true;
+	auto time = [&]( GLuint tex, double & cpu, double & gpu ) {
+		std::vector<unsigned> names;
+		ok = ok && objBlTexelCopy( glProc, tex, names, why );  // the twin made outside the timing
+		glFinish();
+		beginQuery( 0x88BF, q );  // TIME_ELAPSED
+		const auto t0 = std::chrono::steady_clock::now();
+		for ( int i = 0; i < kN && ok; i++ ) {
+			names.clear();
+			ok = objBlTexelCopy( glProc, tex, names, why );
+		}
+		const auto t1 = std::chrono::steady_clock::now();
+		endQuery( 0x88BF );
+		glFinish();
+		std::uint64_t ns = 0;
+		queryU64( q, 0x8866, &ns );  // QUERY_RESULT
+		cpu = std::chrono::duration<double, std::milli>( t1 - t0 ).count() / kN;
+		gpu = double( ns ) * 1e-6 / kN;
+	};
+	time( texCopy, copyCpu, copyGpu );
+	time( texImp, impCpu, impGpu );
+	deleteQueries( 1, &q );
+	glDeleteTextures( 1, &texCopy );
+	glDeleteTextures( 1, &texImp );
+	deleteBuffers( 1, &plain );
+	objBlTexelStoreDrop( sb );
+	return ok;
+}
+
+bool storeGate()
+{
+	StoreOut o;
+	storeRun( 0, o );
+	bool ok = o.good();
+	std::printf( "BLVIEW store lights %s (store %d, read in place %d, GL names the store's %d, copied %llu bytes; Vulkan reads %d: "
+		"fill %zu, patch %zu, grown %zu (moved %d), int %zu bytes off; GL writes %s)%s%s\n", ok ? "OK" : "FAIL", int( o.stored ),
+		int( o.imported ), int( o.namesOk ), (unsigned long long)o.copiedBytes, o.reads, o.d1, o.d2, o.d3, int( o.moved ), o.di,
+		o.subData == 1 ? "glNamedBufferSubData into the store" : o.subData == 0 ? "staged (the store refuses SubData)" : "none",
+		o.why.empty() ? "" : ": ", o.why.c_str() );
+	StoreOut x;
+	storeRun( 1, x );
+	const bool fails = !x.good();
+	std::printf( "BLVIEW RED storeskip %s (frame 2's write skipped: patch %zu bytes off, fill %zu, grown %zu%s%s)\n", fails ? "FAIL" : "OK",
+		x.d2, x.d1, x.d3, x.why.empty() ? "" : ": ", x.why.c_str() );
+	ok = ok && fails;
+	double cc = 0, cg = 0, ic = 0, ig = 0;
+	std::string why;
+	const bool timed = storeCost( cc, cg, ic, ig, why );
+	std::printf( "BLVIEW store cost %s (256 KiB, 200 crossings, measured offline): copy cpu %.4f gpu %.4f ms per crossing, "
+		"import cpu %.4f gpu %.4f ms per crossing%s%s\n", timed ? "OK" : "FAIL", cc, cg, ic, ig, why.empty() ? "" : ": ", why.c_str() );
+	ok = ok && timed;
+	if ( const GLenum e = glGetError(); e != GL_NO_ERROR ) {
+		std::printf( "BLVIEW store FAIL (GL error 0x%x left)\n", unsigned( e ) );
+		ok = false;
+	}
+	return ok;
+}
+
 /* lane VKOBJ4 open item 3: the cell frame as shared targets (objBlFrame: colour RGBA16F, depth / stencil D24S8) read by
  * objBlFrameRead from GL's draw framebuffer with GL's stencil state (front and back: ALWAYS, reference 1, KEEP / KEEP /
  * REPLACE), then the slice-7 fixture's 64 shapes drawn into it on Vulkan through objBlRun. The app's shape (4 samples) is
@@ -1243,6 +1433,7 @@ bool shadeGate( const std::string & spvDir )
 	}
 	ok = unitsGate( spvDir ) && ok;
 	ok = texelGate() && ok;  // lane VKOBJ4 open item 4
+	ok = storeGate() && ok;  // lane VKOBJ4 gap 2
 	ok = frameGate() && ok;  // lane VKOBJ4 open item 3
 	ok = blendGate() && ok;
 	if ( const GLenum e = glGetError(); e != GL_NO_ERROR ) {
