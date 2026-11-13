@@ -903,9 +903,9 @@ void vpLight(float3 posView, float3 P, float3 dW, float z, inout float3 N, float
             float3 EArg4[6] = Eg;
             float3 dWArg4 = dW;
             skyThin += volCubeScatter(EArg4, dWArg4);
-            float3 param_42[6] = Eg;
+            float3 CArg[6] = Eg;
             float3 NArg3 = N;
-            skyThick += vpCubeAt(param_42, NArg3);
+            skyThick += vpCubeAt(CArg, NArg3);
             float3 EArg3[6] = Eg;
             float3 dWArg3 = dW;
             jEnv += volCubeScatter(EArg3, dWArg3);
@@ -953,9 +953,9 @@ void vpLight(float3 posView, float3 P, float3 dW, float z, inout float3 N, float
             float3 EArg2[6] = Am;
             float3 dWArg2 = dW;
             skyThin += volCubeScatter(EArg2, dWArg2);
-            float3 param_51[6] = Am;
+            float3 CArg2[6] = Am;
             float3 NArg = N;
-            skyThick += vpCubeAt(param_51, NArg);
+            skyThick += vpCubeAt(CArg2, NArg);
             float3 EArg[6] = Am;
             float3 dWArg = dW;
             jEnv += volCubeScatter(EArg, dWArg);

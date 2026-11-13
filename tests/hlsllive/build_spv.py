@@ -7,7 +7,9 @@ import spvgl, stamps
 
 DXC = 'E:/Tools/dxc/bin/x64/dxc.exe'
 PROFILE = {'vs': 'vs_6_0', 'ps': 'ps_6_0', 'gs': 'gs_6_0', 'hs': 'hs_6_0', 'ds': 'ds_6_0'}
-BLOCKS = {'globalUniforms': 0, 'skinningUniforms': 1, 'wwShadowFrame': 2}
+BLOCKS = {'globalUniforms': 0, 'skinningUniforms': 1, 'wwShadowFrame': 2,
+          'wwDraws': 12}   # HLSLFIX3: the bindless row buffer (ww_bindless.glsl: std430, binding 12; an SSBO: BufferBlock)
+GL_BINDLESS = 'WW_GL_BINDLESS'   # a source naming it takes its GL bindless route (SPV_NV_bindless_texture; ww_bindless_gl.hlsli)
 
 
 def shifts_of(path, src):
@@ -41,6 +43,11 @@ def compile_raw(hlsl, raw, defines=()):
            '-E', 'main', '-I', os.path.dirname(hlsl), '-Fo', raw, hlsl]
     for d in defines:
         cmd += ['-D', d]
+    if GL_BINDLESS in src:
+        # -Vd: DXC's validator wants OpSamplerImageAddressingModeNV, which HLSL cannot write; spvgl.patch adds it
+        cmd += ['-D', GL_BINDLESS, '-Vd']
+        if os.environ.get('WW_GL_BINDLESS_RED') == 'slot':
+            cmd += ['-D', 'WW_GL_BINDLESS_RED_SLOT']   # red: each map reads its neighbour's handle (A4 must FAIL)
     r = subprocess.run(cmd, capture_output=True, text=True, stdin=subprocess.DEVNULL)
     return r.returncode == 0, r.stderr[-600:]
 
