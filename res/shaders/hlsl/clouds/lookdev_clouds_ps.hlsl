@@ -72,6 +72,14 @@ cbuffer LooseUniforms : register(b31, space0)
 	float4 ldFsSun;	// toward the key light (world), the lobe's g
 	float4 ldFsRb;	// rim, body, the cap
 	float3 ldFsTint;
+	/* lane CLOUDLIT1 (bungo: "2d clouds should probably be lit like that, from our sky"): with the physical sky on
+	 * (ldApOn) the layer is lit as the volume's thin sheet (cloud_march_ps.hlsl, the High band): the sun x the
+	 * transmittance from the deck point toward it x the octave phase, plus the sky light at the deck; the texture's
+	 * brightness splits lit from shaded. colLin is not used there. ldKey.w 0 (not set): the layer as before */
+	float4 ldKey;	// TO the key light (world, cvKeyW), w = its radiance (cvKeyK)
+	float4 ldAmb;	// rgb = the sky light at the clouds (cvAmb), w = the octave count (cvOctaves)
+	float4 ldPhase;	// the droplet phase (cvPhasePrm, its peak capped as the volume's cvPrm)
+	float3 ldTint;	// the Low band's tint (cvTint[0]), 1 without a cloud map
 };
 
 
@@ -165,6 +173,35 @@ float3 studioOutput( float3 c )
 // end of lookdev_output.glsl
 #include "lightning_field.hlsli"
 #include "../sky/atmo_common.hlsli"
+#include "ww_droplet_phase.hlsli"
+
+// lane CLOUDLIT1: cloud_march_ps.hlsl cvOctaveSum with the layer's phase and count (the droplet phase; no ice share)
+float ldOctaveSum( float cosT, float tauL )
+{
+	float s = 0.0, a = 1.0, b = 1.0, k = 1.0;
+	for ( int i = 0; i < int( ldAmb.w ); i++ ) {
+		s += a * exp( -b * tauL ) * wwDropletPhase( ldPhase, cosT, k );
+		a *= 0.5;
+		b *= 0.5;
+		k *= 0.5;
+	}
+	return s;
+}
+
+/* lane CLOUDLIT1: the volume's thin-sheet light (cloud_march_ps.hlsl, the High band's S) at the deck point along d:
+ * kCvAlbedo x tint x ( w x key x octaves + sky ), the key = ldKey.w x T( deck, mu of the key there ), tau from the
+ * texel's opacity as the sheet's 1 - exp( -tau ). w = the texel's linear brightness: 1 lit, 0 the sky light alone */
+float3 ldSkyLit( float3 tl, float a, float3 d )
+{
+	float r0 = ldApR.x, R1 = ldApR.y, mu = d.z;
+	float s = -r0 * mu + sqrt( max( 0.0, r0 * r0 * ( mu * mu - 1.0 ) + R1 * R1 ) );
+	float r1 = sqrt( r0 * r0 + s * s + 2.0 * r0 * mu * s );
+	float muK = ( r0 * ldKey.z + s * dot( d, ldKey.xyz ) ) / r1;
+	float3 key = ldKey.w * atTrans( ldTrans, _ldTrans_sampler, r1, muK );
+	float w = clamp( dot( tl, float3( 0.2126, 0.7152, 0.0722 ) ), 0.0, 1.0 );
+	float tau = -log( 1.0 - min( a, 0.999 ) );
+	return 0.99 * ldTint * ( w * key * ldOctaveSum( dot( d, ldKey.xyz ), 0.5 * tau ) + ldAmb.rgb );
+}
 
 void frag_main()
 {
@@ -172,6 +209,12 @@ void frag_main()
 	if ( texBlend > 0.0 )
 		t = lerp( t, Tex2.Sample( _Tex2_sampler, uv2 ), texBlend );
 	float3 c = srgbToLinear( t.rgb ) * vcol.rgb * colLin * skyScale;
+	bool ldSky = and( ldApOn != 0, ldKey.w > 0.0 );	// lane CLOUDLIT1
+	float3 cSky = (float3)( 0.0 );
+	if ( ldSky ) {
+		cSky = ldSkyLit( srgbToLinear( t.rgb ) * vcol.rgb, t.a * vcol.a * alpha, normalize( wdir ) );
+		c = cSky;
+	}
 	if ( ldLtOn != 0 ) {
 		float3 d = normalize( wdir );
 		float h = ldLtCam.w - ldLtCam.z;
@@ -186,6 +229,8 @@ void frag_main()
 		float g = ldFsSun.w, dn = 1.0 + g * g - 2.0 * g * dot( normalize( wdir ), ldFsSun.xyz );
 		float phase = ( 1.0 - g * g ) / ( 12.566371 * dn * sqrt( max( dn, 1e-6 ) ) );
 		float lum = dot( srgbToLinear( t.rgb ) * vcol.rgb * colLin, float3( 0.2126, 0.7152, 0.0722 ) ) * skyScale;
+		if ( ldSky )
+			lum = dot( cSky, float3( 0.2126, 0.7152, 0.0722 ) );	// lane CLOUDLIT1: the layer's own lit luminance
 		c += ldFsTint * ( lum * min( ( ldFsRb.x * edge + ldFsRb.y * a ) * phase, ldFsRb.z ) );
 	}
 	if ( ldApOn != 0 ) {
