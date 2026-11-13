@@ -194,7 +194,6 @@ void frag_main()
     if (greyscaleColor)
     {
         float xArg2 = baseMap.y;
-        // work around incorrect format used by Fallout 76 grayscale textures
         albedo = GreyscaleMap.SampleLevel(_GreyscaleMap_sampler, float2(srgbCompress(xArg2), paletteScale * C.x), 0.0f).xyz;
     }
     // Emissive

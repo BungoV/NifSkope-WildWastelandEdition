@@ -927,7 +927,6 @@ void frag_main()
     if ((sceneMode >= 1) && hasStudioCube)
     {
         // Studio: the irradiance cube is the radiance average, so Lambert takes it without 1/PI.
-        // FO76's roughness->lod law m = r*(10-4r) over the 7 filtered levels (f76_default.frag:188).
         float3 irr = IrradianceMap.Sample(_IrradianceMap_sampler, mul(s.N, reflMatrix)).xyz;
         if (sceneMode == 2)
         {

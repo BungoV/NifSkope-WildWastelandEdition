@@ -5792,7 +5792,6 @@ void frag_main()
         float3 dirViewArg16 = btnMatrix_norm[2];
         float3 PArg60 = cellWorldPos(posViewArg29);
         float3 NArg50 = cellWorldDir(dirViewArg16);
-        // FO76WEATHER2: dry under cover
         float rw = wwRainWetW(glossArg14, metalArg) * wwRainWetExposed(PArg60, NArg50);
         // the albedo is texture gamma here
         albedo *= pow(1.0f - (0.800000011920928955078125f * rw), 0.4545454680919647216796875f);
