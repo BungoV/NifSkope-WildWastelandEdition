@@ -83,7 +83,8 @@ int kernelOf( std::string spv )
 		spv.resize( spv.size() - 4 );
 	static const std::map<std::string, int> k = { { "ao_gbuf", WwVkPresent::LightAoGbuf }, { "ao_mip", WwVkPresent::LightAoMip },
 		{ "ao_raw", WwVkPresent::LightAoRaw }, { "ao_blur", WwVkPresent::LightAoBlur }, { "ao_blurf", WwVkPresent::LightAoBlurF },
-		{ "contact", WwVkPresent::LightContactK }, { "ssgi", WwVkPresent::LightSsgiK } };
+		{ "contact", WwVkPresent::LightContactK }, { "ssgi", WwVkPresent::LightSsgiK },
+		{ "ssgie", WwVkPresent::LightSsgiK } };	// lane VKFAR3: the cast with the emission subtracted (its own red)
 	const auto i = k.find( spv );
 	return i == k.end() ? -1 : i->second;
 }

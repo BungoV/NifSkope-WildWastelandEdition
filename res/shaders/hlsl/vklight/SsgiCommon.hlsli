@@ -4,8 +4,9 @@
 //   SSGI_GBUF( int2 fullTexel )  float4: view normal (GL axes), linear depth (texelFetch, clamped by the caller)
 //   SSGI_SCENE( float2 uv, lod ) float3: the opaque lit linear colour, prefiltered levels 0..4 (nearest mip, linear texels)
 //   SSGI_NOISE( int2 p )         float2: the spatiotemporal blue noise sheet, 128 x (64 x 128)
-// Not here: the interval pyramid skip (red `hiz` only), the emissive donor subtraction (emissive cast on) and the old
-// fill law (red `oldlaw`). Expressions keep the GL twin's order.
+// Optional (lane VKFAR3): SSGI_EMIT( float2 uv, lvl ) float3, the scene pass's emitted share (levels 0..4), subtracted
+// from the donor when P_.emitSub. Not here: the interval pyramid skip (red `hiz` only), the emissive cast's own chain
+// (red `emitchain`) and the old fill law (red `oldlaw`). Expressions keep the GL twin's order.
 #ifndef SSGI_COMMON_HLSLI
 #define SSGI_COMMON_HLSLI
 
@@ -25,6 +26,9 @@ struct F4FX_SsgiParams
 	int frameIndex;
 	bool blueNoise;		// false: the closed-form interleaved gradient noise
 	bool fullBreak;		// the full-mask early out
+#ifdef SSGI_EMIT
+	bool emitSub;		// lane VKFAR3: the donor less the emission (the traced volume carries it)
+#endif
 };
 
 // NVIDIA's GL acos is this polynomial (Abramowitz-Stegun 4.4.45, max error 6.8e-5), not SPIR-V's Acos:
@@ -139,6 +143,13 @@ float4 F4FX_SsgiCast( int2 wp, F4FX_SsgiParams P_ )
 					float facing = clamp( dot( Ns, -dF / len ), 0.0f, 1.0f );
 					float lod = clamp( log2( off ) - 3.3f, 0.0f, 4.0f );
 					float3 L = SSGI_SCENE( sp / float2( P_.fullSize ), lod );
+#ifdef SSGI_EMIT
+					if ( P_.emitSub ) {
+						// the level the scene's nearest-mip lookup took (GL: ceil(lod + 0.5) - 1 above 0.5)
+						float lvl = lod <= 0.5f ? 0.0f : ceil( lod + 0.5f ) - 1.0f;
+						L -= SSGI_EMIT( sp / float2( P_.fullSize ), lvl );
+					}
+#endif
 					float front = clamp( facing * 10.0f, 0.0f, 1.0f );
 					sil += share * front * max( L, float3( 0.0f, 0.0f, 0.0f ) );
 					taken += share * front;

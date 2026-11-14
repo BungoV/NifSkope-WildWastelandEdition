@@ -34,8 +34,8 @@ for p in $PASSES; do
 		JOBS="$JOBS ao_A ao_L ao_N ao_S ao_SL"; NRED=$((NRED + 5)) ;;
 	contact) K="$K contact:contact_vk.hlsl::CONTACT_RED"
 		JOBS="$JOBS ct_A ct_B ct_C ct_S"; NRED=$((NRED + 1)) ;;
-	ssgi) K="$K ssgi:ssgi_vk.hlsl::SSGI_RED"
-		JOBS="$JOBS sg_A sg_B sg_S"; NRED=$((NRED + 1)) ;;
+	ssgi) K="$K ssgi:ssgi_vk.hlsl::SSGI_RED ssgie:ssgi_vk.hlsl::SSGI_EMIT_RED"	# ssgie: lane VKFAR3, the emission subtracted
+		JOBS="$JOBS sg_A sg_B sg_S sg_E"; NRED=$((NRED + 2)) ;;
 	ssr) K="$K ssr_ray:ssr_vk.hlsl:-DSSR_STAGE=1:SSR_RED ssr_march:ssr_vk.hlsl:-DSSR_STAGE=2:SSR_RED
 		ssr_across:ssr_vk.hlsl:-DSSR_STAGE=3:SSR_RED ssr_down:ssr_vk.hlsl:-DSSR_STAGE=4:SSR_RED"
 		JOBS="$JOBS ss_A ss_W ss_R ss_S"; NRED=$((NRED + 4)) ;;

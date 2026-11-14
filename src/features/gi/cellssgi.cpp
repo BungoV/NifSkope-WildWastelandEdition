@@ -536,7 +536,8 @@ void wwCellSsgiPass( Scene * scene, bool run )
 	/* lane VKLIGHT1 (L3): the ordinary cast as Vulkan compute (ssgi_vk.hlsl) into GL's own target; the rest of the chain
 	 * stays GL. Only the cast the kernel holds: no emissive chain or subtraction, no interval pyramid, the fill law */
 	const bool castVkWant = WwVkPresent::shareWanted( "WW_VKVIEW_SSGI_RED" );
-	const char * castVkNo = emis || emisOff ? "the emissive chain or its subtraction" : hizN > 0 ? "red hiz"
+	// lane VKFAR3 (A1): the subtraction (emisOff, the traced volume carries the emission: the all-on route) is the kernel's
+	const char * castVkNo = emis ? "the emissive chain (red emitchain)" : hizN > 0 ? "red hiz"
 		: ( s.red & 256 ) ? "red oldlaw" : nullptr;
 	if ( !castVkWant )
 		WwVkPresent::lightSay( WwVkPresent::LightSsgi, false, "red WW_VKVIEW_SSGI_RED=1 or the view not on Vulkan" );
@@ -568,10 +569,12 @@ void wwCellSsgiPass( Scene * scene, bool run )
 		d.t[0] = img( ao.gbuf, GL_RGBA32F, W, H, 1, false );
 		d.t[1] = img( sceneTex, GL_RGBA32F, W, H, 5, false );
 		d.t[2] = blue ? img( g.noiseTex, GL_RG8, 128, 8192, 1, false ) : -1;
+		d.t[3] = emisOff ? img( GLuint( emitTex ), GL_RGBA16F, W, H, 5, false ) : -1;	// cellssr.cpp's emission, mips 0..4
 		d.out0 = img( cst.tex, GL_RGBA16F, cst.w, cst.h, 1, true );
 		const float c[3][4] = { { float( W ), float( H ), float( ww ), float( wh ) }, { pm[0][0], pm[1][1], radius, kThickness },
 			{ kSource, kSaturation, 0.0f, 0.0f } };
-		const int i[4] = { tier.slices, tier.steps, g.frame & 63, ( blue ? 1 : 0 ) | ( wwSsgiFullBreak( s.red ) ? 2 : 0 ) };
+		const int i[4] = { tier.slices, tier.steps, g.frame & 63,
+			( blue ? 1 : 0 ) | ( wwSsgiFullBreak( s.red ) ? 2 : 0 ) | ( emisOff ? 4 : 0 ) };
 		std::memcpy( d.pc, c, sizeof( c ) );
 		std::memcpy( d.pc + 112, i, sizeof( i ) );
 		t.d.push_back( d );

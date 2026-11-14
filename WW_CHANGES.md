@@ -23,7 +23,19 @@ Changed, not built, not checked live.
   also walks the shared textures through view on / no view / off / a shutdown / a refusal / no key slot; the old rule
   as red churns twice.
 - Crossing cells costs nothing here: the far ground is only prepared when a cell opens without streaming; streamed
-  roaming never makes it, so nothing is dropped or made on a crossing.
+  roaming never makes it, so nothing is dropped or made on a crossing. The same gate checks the rest of pass() is the
+  tree's text before the lane (95 of 95 lines, a changed line caught).
+
+## VKFAR3 A1 SSGI (2026-11-14): the SSGI cast stays on Vulkan when the traced volume carries the emission
+
+Changed, not built, not checked live.
+
+- With RT GI on (WW_CELL_RTDDGI=1, the all-on route), SSGI takes the emission off what it gathers (the traced volume
+  counts it). The Vulkan cast (WW_VKVIEW=1) refused that case and the cast went back to GL; it now subtracts the same
+  emission on Vulkan. Only the emissive cast's own chain (red emitchain) still stays on GL, named on the `vk ssgi:` line.
+- Gate tests/vklight/light.sh job sg_E (the ultra tier, half size, 4 x 12, the emission over the bright texels): BOUND
+  against GL (107 of 1969920 values 1 ulp apart), red ssgie (the emission read as zero) FAILS (274244 differ);
+  lightview.sh runs it through the app's lightRun: BOUND, red FAILS. sg_A / sg_B / sg_S unchanged (27 / 106 / 231).
 
 ## VKFAR2 L8 slice 1 (2026-11-14): rain / snow pass for the Vulkan view, not wired in (gate red)
 

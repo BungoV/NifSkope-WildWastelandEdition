@@ -27,9 +27,9 @@ for d in $DIRS; do
 	NEED_G=$((NEED_G + $(ls "$d" | grep -cE '^(ao|ct|sg)_')))
 	NEED_R=$((NEED_R + $(ls "$d"/ao_*/red_*.txt "$d"/ct_*/red_*.txt "$d"/sg_*/red_*.txt 2>/dev/null | wc -l)))
 done
-# the default two sets: 12 jobs and 7 reds each
-[ -n "${LIGHTVIEW_JOBS:-}" ] || [ -n "${LIGHTVIEW_KEPT+x}" ] || [ "$NEED_G $NEED_R" = "24 14" ] \
-	|| { echo "LIGHTVIEW GATE FAILED (the two sets hold $NEED_G jobs and $NEED_R reds, 24 and 14 expected)"; exit 1; }
+# the default two sets: the fresh one 13 jobs and 8 reds (lane VKFAR3 added sg_E + red ssgie), the kept one 12 and 7
+[ -n "${LIGHTVIEW_JOBS:-}" ] || [ -n "${LIGHTVIEW_KEPT+x}" ] || [ "$NEED_G $NEED_R" = "25 15" ] \
+	|| { echo "LIGHTVIEW GATE FAILED (the two sets hold $NEED_G jobs and $NEED_R reds, 25 and 15 expected)"; exit 1; }
 export PATH="/c/msys64/ucrt64/bin:$PATH"
 g++ -O2 -std=c++17 -pthread -I"$ROOT/src" "$ROOT/tests/vkframe/lightview.cpp" -o "$OUT/lightview.exe" -lopengl32 -lgdi32 -luser32 \
 	|| { echo "LIGHTVIEW GATE FAILED (g++)"; exit 1; }

@@ -515,9 +515,9 @@ def mip_img(name, srcd, W, H, rgba, levels):
     return x
 
 
-def ssgi_job(name, srcd, W, H, proj, div, slices, steps, blue, frame, radius, time_it, reds):
+def ssgi_job(name, srcd, W, H, proj, div, slices, steps, blue, frame, radius, time_it, reds, emit=None):
     """src/features/gi/cellssgi.cpp stage 1 (the cast) at a tier's work size; the interval pyramid off (its default),
-    the full-mask early out on, no emissive subtraction"""
+    the full-mask early out on; emit (lane VKFAR3): the donor less that emission (kernel ssgie, flag 4), else none"""
     ww = (W + div - 1) // div if div > 1 else W
     wh = (H + div - 1) // div if div > 1 else H
     P00, P11 = float(proj[0][0]), float(proj[1][1])
@@ -527,13 +527,19 @@ def ssgi_job(name, srcd, W, H, proj, div, slices, steps, blue, frame, radius, ti
     imgs = [Img('gbuf', 'rgba32f', W, H, NEAREST, gb, gbf), SCENE[srcd],
             Img('noise', 'rgba16f', 128, 64 * 128, NEAREST, NOISE, 'noise.bin'), Img('cast', 'rgba16f', ww, wh, NEAREST)]
     thick, srcb, sat = 32.0, 1.0, 0.8
-    flags = (1 if blue else 0) | 2
+    flags = (1 if blue else 0) | 2 | (4 if emit is not None else 0)
     uni = [('ssgiStage', 'i', 1), ('fullSize', '2i', (W, H)), ('workSize', '2i', (ww, wh)), ('proj', '2f', (P00, P11)),
            ('slices', 'i', slices), ('steps', 'i', steps), ('radius', 'f', radius), ('thickness', 'f', thick),
            ('sourceBrightness', 'f', srcb), ('saturation', 'f', sat), ('frameIndex', 'i', frame), ('blueNoise', 'i', int(blue)),
-           ('hizLevels', 'i', 0), ('fullBreak', 'i', 1), ('emitSub', 'i', 0), ('oldLaw', 'i', 0)]
-    ps = [Pass('cast', 'ssgi', SSGI, ['cast'], [('gbuf', 'gbuf'), ('scene', 'scene'), ('noiseTex', 'noise')],
-               ['gbuf', 'scene', 'noise'], uni, [(W, H, ww, wh), (P00, P11, radius, thick), (srcb, sat, 0, 0)],
+           ('hizLevels', 'i', 0), ('fullBreak', 'i', 1), ('emitSub', 'i', int(emit is not None)), ('oldLaw', 'i', 0)]
+    units = [('gbuf', 'gbuf'), ('scene', 'scene'), ('noiseTex', 'noise')]
+    vk = ['gbuf', 'scene', 'noise']
+    if emit is not None:
+        imgs.append(emit)
+        units.append(('emitTex', emit.name))
+        vk.append(emit.name)
+    ps = [Pass('cast', 'ssgie' if emit is not None else 'ssgi', SSGI, ['cast'], units,
+               vk, uni, [(W, H, ww, wh), (P00, P11, radius, thick), (srcb, sat, 0, 0)],
                (slices, steps, frame, flags))]
     job(name, imgs, ps, [('cast', os.environ.get('VKLIGHT_SSGI_RULE', 'sector'))], reds, time_it)
 
@@ -555,6 +561,16 @@ def ssgi_main():
     ssgi_job('sg_A', srcd, W, H, proj, 4, 3, 12, True, 5, 256.0, True, ['ssgi'])
     # quality 3 (half work size, 4 x 12), the closed-form noise
     ssgi_job('sg_B', srcd, W, H, proj, 2, 4, 12, False, 41, 256.0, True, [])
+    # lane VKFAR3: quality 3 (ultra, the all-on route) with the traced volume carrying the emission: the donor less the
+    # emitted share (the bright texels' colour, 0.8 of it in a checker so the subtraction leaves a remainder, a = coverage)
+    sc = np.nan_to_num(px, posinf=6.0e4, neginf=0.0).astype(np.float32)
+    lum = 0.2126 * sc[..., 0] + 0.7152 * sc[..., 1] + 0.0722 * sc[..., 2]
+    ey, ex = np.mgrid[0:H, 0:W]
+    k = np.where((lum > np.percentile(lum, 85.0)) & (((ex // 8 + ey // 8) % 2) == 0), 0.8, 0.0).astype(np.float32)
+    em = np.zeros_like(sc)
+    em[..., :3] = sc[..., :3] * k[..., None]
+    em[..., 3] = (k > 0).astype(np.float32)
+    ssgi_job('sg_E', srcd, W, H, proj, 2, 4, 12, True, 17, 256.0, False, ['ssgie'], emit=mip_img('emit', srcd, W, H, em, 5))
     # synthetic: odd sizes, sky rows, a bright scene with steps; full work size, a short radius (the interior's spacing)
     sw, sh = 641, 361
     sy, sx = np.mgrid[0:sh, 0:sw].astype(np.float32)
