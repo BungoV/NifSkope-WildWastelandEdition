@@ -73,7 +73,8 @@ HLSL_SPECS += [('src/features/vkframe', k, 'vulkan1.2', 'vkframe_%s_spv' % k) fo
 # (their spirv-cross fixup gl_FragCoord.w = 1.0 / gl_FragCoord.w wants D3D's clip w in SV_Position.w)
 VKFRAME_FXKW = {'water_view_ps': 'water/water_view_ps',
 	'water_view_d_ps': 'water/water_view_d_ps', 'water_view_m_ps': 'water/water_view_m_ps',
-	'water_view_p_ps': 'water/water_view_p_ps', 'water_view_dp_ps': 'water/water_view_dp_ps'}
+	'water_view_p_ps': 'water/water_view_p_ps', 'water_view_dp_ps': 'water/water_view_dp_ps',
+	'water_view_off_ps': 'water/water_view_off_ps'}	# lane VKWATER4: fo4_water.prog (the water look off)
 HLSL_SPECS += [('src/features/vkframe', k, 'vulkan1.2', 'vkframe_%s_spv' % k) for k in VKFRAME_FXKW]
 # lane VKWATER3: the water's vertex stage, the script's `fxw <name> <dir/file>` lines (vs_6_0, own shifts, bindings kept)
 VKFRAME_FXW_ARGS = ['-fvk-b-shift', '256', '0', '-fvk-t-shift', '110', '0', '-fvk-s-shift', '180', '0', '-fvk-u-shift', '220', '0',

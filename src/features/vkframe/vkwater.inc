@@ -9,6 +9,7 @@
 #include "features/vkframe/water_view_m_ps.spv.h"  // piece 2: fo4_waterlookm, fo4_waterlookp, fo4_waterlookdp
 #include "features/vkframe/water_view_p_ps.spv.h"
 #include "features/vkframe/water_view_dp_ps.spv.h"
+#include "features/vkframe/water_view_off_ps.spv.h"  // lane VKWATER4: fo4_water (the water look off)
 
 namespace
 {
@@ -74,6 +75,7 @@ int waterStages( int v, WaterStage * out )
 	case kWaterLookM: ps = vkframe_water_view_m_ps_spv, psBytes = sizeof( vkframe_water_view_m_ps_spv ); break;
 	case kWaterLookP: ps = vkframe_water_view_p_ps_spv, psBytes = sizeof( vkframe_water_view_p_ps_spv ); break;
 	case kWaterLookDp: ps = vkframe_water_view_dp_ps_spv, psBytes = sizeof( vkframe_water_view_dp_ps_spv ); break;
+	case kWaterOff: ps = vkframe_water_view_off_ps_spv, psBytes = sizeof( vkframe_water_view_off_ps_spv ); break;
 	default: break;
 	}
 	out[n++] = { ps, psBytes, VK_SHADER_STAGE_FRAGMENT_BIT, t.psNames, t.psNamesN };
@@ -967,9 +969,10 @@ bool waterRun( const WaterRun & r, std::string & why )
 					view = F.d2a;
 				else
 					view = F.d2;
-				// an integer image reads GL's unbound zero only through an integer view: refuse it
+				// an integer image reads GL's unbound zero only through an integer view: refuse it. One GL's program
+				// does not hold (no census row: fo4_water has no flow) is never read, so the zero view stands in.
 				for ( const char * n : { "waterInfoIndex", "waterInfoAtlas", "waterFlowIndex", "waterFlowAtlas", "waterSkyIndex", "waterSkyAtlas" } )
-					if ( std::strcmp( n, nm ) == 0 )
+					if ( s && std::strcmp( n, nm ) == 0 )
 						return refuse( std::string( nm ) + ": an unbound integer input" );
 			} else if ( viewOf.count( at ) ) {
 				view = viewOf[at];  // another stage's binding twinned it this run
@@ -1143,7 +1146,7 @@ void waterSay( bool wanted, const char * glWhy )
 	QString per;
 	for ( int k = 0; k < kWaterVariants; k++ )
 		per += QStringLiteral( "%1%2/%3" ).arg( k ? QStringLiteral( " " ) : QString() ).arg( st.vk[k] ).arg( st.glV[k] );
-	line += QStringLiteral( "; per twin look d m p dp (vk/gl) %1" ).arg( per );
+	line += QStringLiteral( "; per twin look d m p dp off (vk/gl) %1" ).arg( per );
 	if ( st.census > 0 )
 		line += QStringLiteral( "; %1 censuses, %2 ms each" ).arg( st.census ).arg( st.censusMs / st.census, 0, 'f', 3 );
 	said = line;
