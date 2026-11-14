@@ -18,9 +18,11 @@ void main( uint3 id : SV_DispatchThreadID )
 {
 	uint i = id.x;
 	float4 a = io[i * 6 + 0], b = io[i * 6 + 1], nb = io[i * 6 + 2], p = io[i * 6 + 3];
+	// p.w = the shape: 0 near, 1..3 a far draw's baked type, 4 a far placement (farInst)
+	bool far = farSkyShapeFar( p.w > 3.5, p.w > 3.5 ? 0.0 : p.w );
 	float2 vv = farSkyDir6( a, b, nb.xyz );
-	float c = farSkyCombine( nb.w, farSkyOn, vv );
+	float c = farSkyCombine( nb.w, farSkyOn && far, vv );
 	float2 uv = farSkyMapUv( p.xyz );
 	io[i * 6 + 4] = float4( vv, c, uv.x );
-	io[i * 6 + 5] = float4( uv.y, 0.0, 0.0, 1.0 );
+	io[i * 6 + 5] = float4( uv.y, far ? 1.0 : 0.0, 0.0, 1.0 );
 }

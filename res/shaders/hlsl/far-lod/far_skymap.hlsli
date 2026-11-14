@@ -11,7 +11,21 @@
 	bool farSkyOn;
 	// the map rect in scene units: xy = its corner (cell x0, y0 times 4096 minus the scene shift), zw = 1 / its size
 	float4 farSkyRect;
+	// the vertex stage's far-shape uniforms, read here by name (src/features/far-lod/cellfarinst.cpp and
+	// src/gl/renderer.cpp set them per draw, 0 on every other shape): the map reaches far shapes only
+	bool farInst;
+	float4 farVcAo;
 #else
+
+// A far shape (past the last cascade): a far placement (farInst) or a far draw with its baked type (farVcAo.z).
+// Near shapes keep the byte.
+bool farSkyShapeFar( bool inst, float vcAoType )
+{
+#ifdef FARSKY_RED_NEAR
+	return true;	// red (tests/features/far-lod/farskymap): the map on near shapes too
+#endif
+	return inst || vcAoType > 0.5;
+}
 
 float2 farSkyMapUv( float3 p )
 {
@@ -52,7 +66,7 @@ Texture2DArray<float4> farSkyMap : register(t63, space0); SamplerState _farSkyMa
 // Call in uniform control flow (the hardware mip needs the pixel quad).
 float farSkyVisAt( float base, float3 p, float3 n )
 {
-	if ( !farSkyOn )
+	if ( !farSkyOn || !farSkyShapeFar( farInst, farVcAo.z ) )
 		return base;
 	float2 uv = farSkyMapUv( p );
 	float4 a = farSkyMap.Sample( _farSkyMap_sampler, float3( uv, 0.0 ) );

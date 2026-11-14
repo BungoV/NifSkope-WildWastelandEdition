@@ -15,6 +15,7 @@ g1() { # $1 = name, $2 = extra define
 g1 green "" || rc=1
 g1 red_octant -DFARSKYMAP_RED_OCTANT && { echo "G1 red_octant did NOT fail"; rc=1; }
 g1 red_layout -DFARSKYMAP_RED_LAYOUT && { echo "G1 red_layout did NOT fail"; rc=1; }
+g1 red_near -DFARSKYMAP_RED_NEAR && { echo "G1 red_near did NOT fail"; rc=1; }
 if [ -f "$H/g2.sh" ]; then bash "$H/g2.sh" "$T" || rc=1; fi
 echo "FARSKYMAP GATES rc=$rc"
 exit $rc

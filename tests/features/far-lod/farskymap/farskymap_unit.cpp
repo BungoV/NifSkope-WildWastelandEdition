@@ -1,5 +1,5 @@
 // FARSKYMAP1 G1: the far sky map's C++ side (src/features/far-lod/farskymap.h) against independent expectations.
-// Reds (-DFARSKYMAP_RED_OCTANT, -DFARSKYMAP_RED_LAYOUT) must FAIL. run.sh drives all three.
+// Reds (-DFARSKYMAP_RED_OCTANT, -DFARSKYMAP_RED_LAYOUT, -DFARSKYMAP_RED_NEAR) must FAIL. run.sh drives all four.
 #include "../../../../src/features/far-lod/farskymap.h"
 
 #include <cstdio>
@@ -144,6 +144,10 @@ int main( int argc, char ** argv )
 	CHECK( FarSkyMap::combine( 0.8f, true, 0.3f, 0.0f ) == 0.8f, "on, no valid" );
 	CHECK( std::fabs( FarSkyMap::combine( 0.8f, true, 0.5f, 1.0f ) - 0.4f ) < 1e-6f, "on, valid" );
 	CHECK( std::fabs( FarSkyMap::combine( 0.8f, true, 0.5f, 0.5f ) - 0.6f ) < 1e-6f, "on, half valid" );
+	// 5b. Near shapes (not a far placement, no baked type) keep the byte with the map on; far shapes take it.
+	CHECK( !FarSkyMap::shapeFar( false, 0.0f ), "near shape" );
+	CHECK( FarSkyMap::combine( 1.0f, FarSkyMap::shapeFar( false, 0.0f ), 0.3f, 1.0f ) == 1.0f, "map on, near shape: base" );
+	CHECK( FarSkyMap::shapeFar( true, 0.0f ) && FarSkyMap::shapeFar( false, 1.0f ) && FarSkyMap::shapeFar( false, 3.0f ), "far shapes" );
 
 	// 6. File round trip (half precision).
 	std::string fpath = std::string( tmp ) + "/unit.farsky";

@@ -162,7 +162,16 @@ inline float evalTexel( const float * t, const float n[3], float * validOut )
 	return ( wx * sx + wy * sy + wz * sz ) / valid / std::max( wx + wy + wz, 1e-8f ); // the shader's order
 }
 
-// Combine law. on = probe GI drawn and a map loaded. Off returns base untouched (bit identity).
+// A far shape (shader: farSkyShapeFar): a far placement or a far draw with a baked type. Near shapes keep the byte.
+inline bool shapeFar( bool inst, float vcAoType )
+{
+#ifdef FARSKYMAP_RED_NEAR
+	return true; // red: the map on near shapes too
+#endif
+	return inst || vcAoType > 0.5f;
+}
+
+// Combine law. on = probe GI drawn, a map loaded and a far shape. Off returns base untouched (bit identity).
 inline float combine( float base, bool on, float mapVis, float valid )
 {
 	if ( !on )
