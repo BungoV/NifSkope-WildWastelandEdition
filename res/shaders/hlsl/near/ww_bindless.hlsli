@@ -22,7 +22,12 @@ struct WwDraw
 	float4 nm[3];
 	uint2 tex[8];
 };
-StructuredBuffer<WwDraw> wwDraws : register(t63, space0);	// GL binding 12 (tests/hlsllive/build_spv.py BLOCKS); t63: the core's t0-t62 are taken
+// GL binding 12 (tests/hlsllive/build_spv.py BLOCKS); Vulkan binding 12 as tests/vkframe/blview_ps.hlsl (free in set 0);
+// DXIL t63: the core's t0-t62 are taken
+#if defined(__spirv__) && defined(WW_VK_BINDLESS)
+[[vk::binding(12, 0)]]
+#endif
+StructuredBuffer<WwDraw> wwDraws : register(t63, space0);
 // the vertex stage sets it in main (wwDrawBase + the base instance, or wwDrawBase alone when wwBlUniformRow); the
 // fragment stage takes it flat from the vertex stage
 static uint wwBlRow;
