@@ -1361,6 +1361,20 @@ int wwWeatherRecxTextureSlot( const char * name )
 	return -1;
 }
 
+QString wwWeatherRecxTextureFor( const QString & type )
+{
+	const WwWeatherRecx & r = wwWeatherRecx();
+	return r.on ? wwWeatherRecxTextureFor( r, type ) : QString();
+}
+
+QString wwWeatherRecxTextureFor( const WwWeatherRecx & r, const QString & type )
+{
+	int i = wwWeatherRecxTextureSlot( type.toLatin1().constData() );
+	if ( ( i < 0 || r.textures[i].isEmpty() ) && type.startsWith( QLatin1String( "snow" ), Qt::CaseInsensitive ) )
+		i = wwWeatherRecxTextureSlot( "snow" );
+	return i < 0 ? QString() : r.textures[i];
+}
+
 QString wwWeatherRecxTexture( const char * slot )
 {
 	const int i = wwWeatherRecxTextureSlot( slot );

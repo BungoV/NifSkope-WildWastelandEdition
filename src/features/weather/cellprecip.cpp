@@ -348,6 +348,10 @@ QVector<PcLayer> layersOf( const QStringList & roots, const QStringList & files,
 		L.spec = specs.at( i );
 		L.weather = edid;
 		L.source = source;
+		// lane WEATHERRECX2 (1.8): the weather's textures slot only where the layer names no texture of its own
+		if ( wwPrecipTextureFallback( L.spec, wwWeatherRecxTextureFor( QLatin1String( typeInfo( L.spec.type ).name ) ) ) )
+			notes << QStringLiteral( "%1: layer %2 texture %3 (the weather's textures slot; the layer names none)" )
+				.arg( edid ).arg( i ).arg( L.spec.texture );
 		L.field.type = L.spec.type;
 		L.field.sizeMm = L.spec.sizeMm;
 		L.field.drawScale = L.spec.drawScale;

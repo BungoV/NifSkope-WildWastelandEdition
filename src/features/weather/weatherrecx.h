@@ -140,6 +140,11 @@ bool wwWeatherRecxAirFilters( float glow[3], float cloudAlbedo[3], float inscatt
 bool wwWeatherRecxWindBytes( float & speed, float & dir, float & turb );
 //! lane WEATHERRECX1: the texture slot names (SPEC.md textures), index into WwWeatherRecx::textures
 int wwWeatherRecxTextureSlot( const char * name );
+/*! lane WEATHERRECX2 (1.8): the weather file's textures slot for a precipitation type, a FALLBACK only: a layer's own
+ *  "texture" wins, and empty = none set (the type file's texture stays). The slot is named like the type; any snow*
+ *  type falls back to the "snow" slot. */
+QString wwWeatherRecxTextureFor( const QString & type );
+QString wwWeatherRecxTextureFor( const WwWeatherRecx & r, const QString & type );	//!< the same on a resolved weather
 //! lane WEATHERRECX1: the slot's texture, the weather's or the shared default (Textures\FO4CS\<slot>\...)
 QString wwWeatherRecxTexture( const char * slot );
 

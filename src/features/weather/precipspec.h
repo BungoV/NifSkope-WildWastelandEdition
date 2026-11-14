@@ -33,6 +33,7 @@ struct WwPrecipLayerSpec
 	double sizeMm = 0.0, rateMmH = 0.0, density = -1.0;	// density < 0: from the rate
 	double drawScale = 1.0, windShare = 1.0, translucency = 0.5, spin = 0.0, sway = 0.0;
 	QString texture;	// under Textures\ (the type's default when the file names none)
+	bool textureOwn = false;	// lane WEATHERRECX2: the layer named its texture (it wins over the weather's textures slot)
 	int cols = 1, rows = 1;
 	QString from;	// "recx" or "record"
 
@@ -44,6 +45,16 @@ struct WwPrecipLayerSpec
 		return density >= 0.0 ? density : WwPrecip::densityFromRate( type, sizeMm, rateMmH );
 	}
 };
+
+//! lane WEATHERRECX2 (1.8): the weather's textures slot fills a layer that names no texture (fallback only: the
+//! layer's own texture wins); true when the slot was taken. The atlas grid stays the type's.
+inline bool wwPrecipTextureFallback( WwPrecipLayerSpec & s, const QString & slotTexture )
+{
+	if ( s.textureOwn || slotTexture.trimmed().isEmpty() )
+		return false;
+	s.texture = slotTexture.trimmed();
+	return true;
+}
 
 //! the type's defaults
 inline WwPrecipLayerSpec wwPrecipDefault( int type, const QString & from )
@@ -168,8 +179,10 @@ inline QVector<WwPrecipLayerSpec> wwPrecipParse( const QJsonObject & block, QStr
 		num( "spin", 0.0, 20.0, s.spin );
 		num( "sway", 0.0, 200.0, s.sway );
 		const QJsonValue tv = get( o, "texture" );
-		if ( tv.isString() && !tv.toString().trimmed().isEmpty() )
+		if ( tv.isString() && !tv.toString().trimmed().isEmpty() ) {
 			s.texture = tv.toString().trimmed();
+			s.textureOwn = true;
+		}
 		const QJsonValue av = get( o, "atlas" );
 		if ( !av.isUndefined() ) {
 			const QJsonArray a = av.toArray();
