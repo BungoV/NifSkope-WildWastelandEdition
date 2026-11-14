@@ -521,7 +521,9 @@ static void wwCellWaterVkRoute( NifSkopeOpenGLContext::GLFunctions * fn, NifSkop
 		fn->glGetIntegerv( GL_DRAW_FRAMEBUFFER_BINDING, &drawFb );
 		color = wwCellHdrVkToneColor( GLuint( drawFb ) );
 		// lane VKWATER4: else the water ray pass's shared target (red WW_VKVIEW_WATER_RAY_RED=1 keeps it on GL)
-		if ( !color && wwCellSsrWaterRayPass( nullptr ) )
+		if ( !color && wwCellSsrWaterRayPass( nullptr ) && variant != WwVkPresent::kWaterLookM )
+			no = "the water ray pass draws fo4_waterlookm alone on Vulkan (this twin there: WW_CELL_SSR_WATER_RED=1 or a probe)";
+		else if ( !color && wwCellSsrWaterRayPass( nullptr ) )
 			no = wwCellSsrVkRayTarget( GLuint( drawFb ), color, rayDepth, rayW, rayH );
 		else if ( !color )
 			no = "the draw target is neither the shared tone frame nor the water ray pass's target";

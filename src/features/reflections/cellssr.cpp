@@ -701,20 +701,9 @@ void wwCellSsrPass( Scene * scene, bool run )
 			if ( g.wray.vk && wwEnvInt( "WW_VKVIEW_WATER_RAY_RED" ) == 1 ) {
 				s.vkRayNo = "red WW_VKVIEW_WATER_RAY_RED=1 (the water ray pass on GL)";
 			} else if ( g.wray.vk ) {
-				static GLuint rbSeen = 0;
-				static int rbW = 0, rbH = 0;
-				static GLint rbFmt = 0;
-				if ( rbSeen != ao.depthRb || rbW != W || rbH != H ) {	// its format: asked once a renderbuffer / size
-					fn->glBindRenderbuffer( GL_RENDERBUFFER, ao.depthRb );
-					fn->glGetRenderbufferParameteriv( GL_RENDERBUFFER, GL_RENDERBUFFER_INTERNAL_FORMAT, &rbFmt );
-					fn->glBindRenderbuffer( GL_RENDERBUFFER, 0 );
-					rbSeen = ao.depthRb;
-					rbW = W;
-					rbH = H;
-				}
 				unsigned depthTwin = 0;
 				std::string why;
-				if ( WwVkPresent::waterRayDepth( reinterpret_cast<std::uintptr_t>( &s.vkRayDepth ), ao.depthRb, unsigned( rbFmt ), W, H,
+				if ( WwVkPresent::waterRayDepth( reinterpret_cast<std::uintptr_t>( &s.vkRayDepth ), ao.depthRb, ao.depthFmt, W, H,
 						depthTwin, why ) ) {
 					s.vkRayFbo = g.wray.fbo;
 					s.vkRayColor = g.wray.tex;

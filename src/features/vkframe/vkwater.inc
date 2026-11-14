@@ -707,8 +707,9 @@ bool waterRayDepth( std::uintptr_t key, unsigned rb, unsigned glFmt, int w, int 
 	if ( !sharedTarget( key, 0, w, h, 1, glFmt, t, why ) || !t )
 		return false;
 	// the copy's GL error is read once a new twin (glGetError is a driver round trip: not every pass)
-	static unsigned checked = 0;
-	const bool ask = t != checked;
+	static unsigned checked = 0, checkedFmt = 0;
+	static int checkedW = 0, checkedH = 0;	// a GL name can come back for a remade twin: its format and size too
+	const bool ask = t != checked || glFmt != checkedFmt || w != checkedW || h != checkedH;
 	if ( ask )
 		while ( g.getError() != 0 ) {}
 	g.copyImageSubData( rb, 0x8D41, 0, 0, 0, 0, t, 0x0DE1, 0, 0, 0, 0, w, h, 1 );  // GL_RENDERBUFFER -> GL_TEXTURE_2D
@@ -718,6 +719,9 @@ bool waterRayDepth( std::uintptr_t key, unsigned rb, unsigned glFmt, int w, int 
 			return false;
 		}
 		checked = t;
+		checkedFmt = glFmt;
+		checkedW = w;
+		checkedH = h;
 	}
 	tex = t;
 	return true;
