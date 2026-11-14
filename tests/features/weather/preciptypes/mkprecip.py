@@ -3,7 +3,7 @@
 --extra adds the gate's fixtures: sleetLike (base hail), a mod-namespaced key, an old snake_case name."""
 import json, os, sys
 
-V = '1.7'
+V = '1.8'
 T = {
  'rain': dict(size=2.0, rate=4.0, drawScale=1.0, translucency=0.9, spin=0.0, sway=0.0, maxMip=4,
               texture='FO4CS/Precip/rain_d.dds', atlas=[4, 2],

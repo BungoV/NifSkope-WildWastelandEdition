@@ -151,7 +151,8 @@ def radstorm_rain(w, pf, e):
 def translate(w, f):
     """w: the wthr_list row (rung input), f: the wthr_full row -> (entry, diag)"""
     v = G.generate(w)
-    e = G.entry_of(w, v)
+    e = G.entry_flat(w, v)	# WEATHERRECX2: flat names + `_kf` keyframes; G.finish18 spells it as SPEC.md 1.8
+    kfa = e['_kf']['atmosphere']
     fog = f.get('fog', {})
     der = {}
     atmo = e['atmosphere']
@@ -166,18 +167,26 @@ def translate(w, f):
         der['atmosphere.visibility'] = ('FNAM day near %.0f far %.0f u power %.3g max %.3g -> least-squares '
                                         'Koschmieder fit' % (fog['dayNear'], fog['dayFar'], fog['dayPower'],
                                                              fog['dayMax']))
-        atmo.pop('hours', None)
+        kfa.pop('visibility', None)
         if abs(vn - vd) > 0.05 * vd:
-            atmo['hours'] = {'2': {'visibility': vn}, '14': {'visibility': vd}}
-            tr_atmo.append('hours')
+            kfa['visibility'] = [(2, vn), (14, vd)]
             der['atmosphere.hours'] = ('FNAM night near %.0f far %.0f u power %.3g max %.3g -> hour 2; day -> hour 14'
                                        % (fog['nightNear'], fog['nightFar'], fog['nightPower'], fog['nightMax']))
         hh = float('%.0f' % haze_height(fog['dayNearHeightMid'], fog['dayNearHeightRange']))
+        hn = float('%.0f' % haze_height(fog['nightNearHeightMid'], fog['nightNearHeightRange']))
         atmo['hazeHeight'] = hh
         tr_atmo.append('hazeHeight')
         der['atmosphere.hazeHeight'] = ('FNAM day near-height mid %.0f range %.0f u -> column-equal scale height'
                                         % (fog['dayNearHeightMid'], fog['dayNearHeightRange']))
-        diag.update(visDay=vd, visNight=vn, hazeHeight=hh)
+        # WEATHERRECX2: the record's own night pair is the course (hour 2), not the generator's dawn law
+        kfa.pop('hazeHeight', None)
+        if abs(hn - hh) > 0.05 * hh:
+            kfa['hazeHeight'] = [(2, hn), (14, hh)]
+            der['atmosphere.hazeHeight'] += ('; FNAM night mid %.0f range %.0f u -> hour 2'
+                                             % (fog['nightNearHeightMid'], fog['nightNearHeightRange']))
+        if 'visibility' in kfa or 'hazeHeight' in kfa:
+            tr_atmo.append('hours')
+        diag.update(visDay=vd, visNight=vn, hazeHeight=hh, hazeHeightNight=hn)
     ff = f.get('colors', {}).get('fogFar', {}).get('day')
     if ff:
         ha = haze_albedo(ff, atmo['hazeType'], atmo['humidity'])
@@ -195,8 +204,11 @@ def translate(w, f):
     for k in ('hazeType', 'humidity', 'groundAlbedo', 'ozone'):
         der.setdefault('atmosphere.' + k, 'generated rung (class %s, region %s): the record has no such field'
                        % (v['class'], v['region']))
-    if 'hours' not in atmo:
-        der['atmosphere.hours'] = 'none: the record night fog is within 5 % of the day'
+    if 'atmosphere.hours' not in der:
+        der['atmosphere.hours'] = 'visibility: the record night fog is within 5 % of the day'
+    gen_kf = sorted(k for k in kfa if k not in ('visibility', 'hazeHeight'))
+    if gen_kf:
+        der['atmosphere.hours'] += ('; %s: the generator day course (hour 5 dawn, 14 day)' % ', '.join(gen_kf))
     pf = f.get('precipitationForm')
     der['precipitation'] = ('record MNAM %s %s density %s (generated rung rate)' % (
         pf.get('edid'), pf.get('typeName'), pf.get('particleDensity')) if pf else
@@ -205,7 +217,8 @@ def translate(w, f):
     if rate:
         p = e.setdefault('precipitation', {})
         p['layers'] = [{'type': 'rain', 'rate': rate}]
-        p['_added'] = ['layers']
+        p['precipitationBase'] = 0.0	# WEATHERRECX2: the shafts reach the ground, as any precipitating weather
+        p['_added'] = ['layers', 'precipitationBase']
         der['precipitation'] = ('rain added: cumulonimbus + lightning, vanilla record dry (MNAM NULL); rate %.1f mm/h = '
                                 'Marshall-Palmer from rain water %.2f g/m3 = liquidWater %.2f x %.2f' % (
                                     rate, e['clouds']['liquidWater'] * RAIN_SHARE, e['clouds']['liquidWater'],
@@ -232,6 +245,7 @@ def translate(w, f):
             v['class'], v['region'])
     der['vanillaRecord'] = 'every other WTHR field as stored (NAM0, FNAM in m, NAM4, PNAM/JNAM, QNAM/RNAM, DALC, IMSP, ...)'
     e['_derivedFrom'] = der
+    e = G.finish18(e)
     e['vanillaRecord'] = record_block(f)
     return e, diag
 
@@ -263,10 +277,10 @@ def main():
         folder = os.path.join(out_root, stem)
         os.makedirs(folder, exist_ok=True)
         name = w.get('edid', w['lid']) + '.recx'
-        doc = {'_': 'Fusion Shaders weather file (SPEC.md 1.5): the vanilla WTHR record translated to physical units; '
+        doc = {'_': 'Fusion Shaders weather file (SPEC.md 1.8): the vanilla WTHR record translated to physical units; '
                     '`vanillaRecord` keeps every field as stored. Edit freely (lane MODULES1, '
                     'src/features/weather/weathertranslate.py).',
-               'entries': [e]}
+               'version': G.VERSION, 'entries': [e]}
         with open(os.path.join(folder, name), 'w', encoding='utf-8', newline='\n') as fh:
             fh.write(json.dumps(doc, indent=1) + '\n')
         made += 1

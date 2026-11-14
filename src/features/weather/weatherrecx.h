@@ -76,7 +76,7 @@ struct WwWeatherRecx
 	float lightningFreqLast = -1.0f;	//!< ... and its own lightning.frequency
 	QString blocksState, blocksLine;	//!< the echo per block family: switch, who decides (and the numbers)
 	QStringList sources;	//!< "<key>=<source>" per input (file:<path> | generated | record)
-	/* lane WEATHERRECX2 (SPEC.md 1.7). source: "override", "override[fog,clouds.layers]", "augment" or "skipped" (the
+	/* lane WEATHERRECX2 (SPEC.md 1.8). source: "override", "override[fog,clouds.layers]", "augment" or "skipped" (the
 	 * spec COMMON "override" key of the entries that won); overrideAll / overrideFuncs: what it replaces of the record.
 	 * stored: the keys the spec lists as "stored for later" ("atmosphere.rayleighScale" -> value; an rgb as .r/.g/.b,
 	 * a bool as 0/1), read, range-checked and echoed, no user yet. recordFields: the WTHR fields the entry's

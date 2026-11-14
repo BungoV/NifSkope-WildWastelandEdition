@@ -1,7 +1,7 @@
 #ifndef WW_AIRTEMPMATH_H
 #define WW_AIRTEMPMATH_H
 
-/* lane WEATHERRECX2 (SPEC.md 1.7 temperature.air): what the air temperature does to precipitation and wetness.
+/* lane WEATHERRECX2 (SPEC.md 1.8 temperature.air): what the air temperature does to precipitation and wetness.
  * Plain C++ (no Qt), so the offline gate reads the same rule.
  *  - Phase: the snow share of the precipitation at the ground, Dai (2008, GRL 35 L12802) land fit
  *    F = a (tanh(b (T - c)) - d) percent, a -48.2292, b 0.7205, c 1.1662, d 1.0223: 50 % near 1.1 C, under 2 % above 4 C,

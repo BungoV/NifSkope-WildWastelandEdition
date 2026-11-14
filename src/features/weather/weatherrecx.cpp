@@ -7,7 +7,7 @@
 #include "features/weather/wxoverride.h"
 #include "features/weather/weatherrecxmath.h"
 #include "features/weather/recxphysical.h"	// lane AIRPERF1 A8: the entry's physicalWeather switch
-#include "features/weather/weatherrecxcanon.h"	// lane WEATHERRECX2: the 1.7 names, units by version
+#include "features/weather/weatherrecxcanon.h"	// lane WEATHERRECX2: the 1.8 names, units by version
 #include "features/clouds/cloudrecx14math.h"
 #include "recx.h"
 
@@ -178,17 +178,17 @@ const Key kWind[] = { { "speed", 0.0f, 60.0f, &WwWeatherRecx::windSpeed },
 const Key kTemp[] = { { "air", -60.0f, 60.0f, &WwWeatherRecx::airTemp } };
 const Key kLightning[] = { { "frequency", 0.0f, 120.0f, &WwWeatherRecx::lightningFreq },
 	{ "cloudToGround", 0.0f, 1.0f, &WwWeatherRecx::cloudToGround }, { "distance", 0.3f, 50.0f, &WwWeatherRecx::lightningDistance },
-	// lane WEATHERRECX2 (1.7): lightning.fadeIn / fadeOut (weatherrecxcanon.h gives them these names)
+	// lane WEATHERRECX2 (1.8): lightning.fadeIn / fadeOut (weatherrecxcanon.h gives them these names)
 	{ "lightningStart", 0.0f, 1.0f, &WwWeatherRecx::lightningStart }, { "lightningEnd", 0.0f, 1.0f, &WwWeatherRecx::lightningEnd } };
 const Key kTrans[] = { { "duration", 0.01f, 24.0f, &WwWeatherRecx::transHours },
 	{ "precipitationStart", 0.0f, 1.0f, &WwWeatherRecx::precipStart }, { "precipitationEnd", 0.0f, 1.0f, &WwWeatherRecx::precipEnd },
 	{ "lightningStart", 0.0f, 1.0f, &WwWeatherRecx::lightningStart }, { "lightningEnd", 0.0f, 1.0f, &WwWeatherRecx::lightningEnd } };
 const Key kPrecip[] = { { "wetting", 0.0f, 600.0f, &WwWeatherRecx::wetting }, { "drying", 0.0f, 2880.0f, &WwWeatherRecx::drying },
-	// lane WEATHERRECX2 (1.7): precipitation.base / fadeIn / fadeOut (weatherrecxcanon.h gives them these names)
+	// lane WEATHERRECX2 (1.8): precipitation.base / fadeIn / fadeOut (weatherrecxcanon.h gives them these names)
 	{ "precipitationBase", 0.0f, WwCloudRecx14::kPrecipBaseMax, &WwWeatherRecx::precipitationBase },
 	{ "precipitationStart", 0.0f, 1.0f, &WwWeatherRecx::precipStart }, { "precipitationEnd", 0.0f, 1.0f, &WwWeatherRecx::precipEnd } };
 
-/* lane WEATHERRECX2 (SPEC.md 1.7, notes UNREAL_GAPS rows 1-14 and F1-F16): keys stored for later. Read, range-checked,
+/* lane WEATHERRECX2 (SPEC.md 1.8, notes UNREAL_GAPS rows 1-14 and F1-F16): keys stored for later. Read, range-checked,
  * logged, kept in WwWeatherRecx::stored and echoed; nothing draws them yet. A nested group arrives dotted
  * (weatherrecxcanon.h). Kinds: 0 number, 1 rgb, 2 bool. No hours. */
 struct Stored
@@ -651,17 +651,27 @@ double genTemp( const WwWeatherGen::Out & o, double hour )
 {
 	return hoursAt( { { 5.0, o.tempDawn }, { 14.0, o.tempDay } }, hour, o.tempDay );
 }
+// lane WEATHERRECX2 (1.8): the day's course the generator writes as hours 5 / 14 (weathergen.py entry_flat)
+double genDawn( double dawn, double day, double hour )
+{
+	return hoursAt( { { 5.0, dawn }, { 14.0, day } }, hour, day );
+}
 
 const Input kInputs[] = {
 	{ "visibility", &WwWeatherRecx::visibilityM, WwRecFog, genVisibility },
-	{ "hazeHeight", &WwWeatherRecx::hazeHeightM, WwRecFog, []( const WwWeatherGen::Out & o, double ) { return o.hazeHeight; } },
+	{ "hazeHeight", &WwWeatherRecx::hazeHeightM, WwRecFog,
+		[]( const WwWeatherGen::Out & o, double h ) { return genDawn( o.hazeHeightDawn, o.hazeHeight, h ); } },
 	{ "ozone", &WwWeatherRecx::ozone, WwRecSky, []( const WwWeatherGen::Out & o, double ) { return o.ozone; } },
-	{ "humidity", &WwWeatherRecx::humidity, WwRecFog, []( const WwWeatherGen::Out & o, double ) { return o.humidity; } },
+	{ "humidity", &WwWeatherRecx::humidity, WwRecFog,
+		[]( const WwWeatherGen::Out & o, double h ) { return genDawn( o.humidityDawn, o.humidity, h ); } },
 	{ "groundAlbedo", &WwWeatherRecx::groundAlbedo, WwRecSky, []( const WwWeatherGen::Out & o, double ) { return o.groundAlbedo; } },
-	{ "angstrom", &WwWeatherRecx::angstrom, WwRecFog, nullptr },
-	{ "hazeAnisotropy", &WwWeatherRecx::hazeAnisotropy, WwRecFog, nullptr },
-	{ "airglow", &WwWeatherRecx::airglow, WwRecSky, nullptr },
-	{ "coverage", &WwWeatherRecx::coverage, WwRecClouds, []( const WwWeatherGen::Out & o, double ) { return o.coverage; } },
+	{ "angstrom", &WwWeatherRecx::angstrom, WwRecFog,
+		[]( const WwWeatherGen::Out & o, double h ) { return genDawn( o.angstromDawn, o.angstrom, h ); } },
+	{ "hazeAnisotropy", &WwWeatherRecx::hazeAnisotropy, WwRecFog,
+		[]( const WwWeatherGen::Out & o, double h ) { return genDawn( o.hazeAnisotropyDawn, o.hazeAnisotropy, h ); } },
+	{ "airglow", &WwWeatherRecx::airglow, WwRecSky, []( const WwWeatherGen::Out & o, double ) { return o.airglow; } },
+	{ "coverage", &WwWeatherRecx::coverage, WwRecClouds,
+		[]( const WwWeatherGen::Out & o, double h ) { return genDawn( o.coverageDawn, o.coverage, h ); } },
 	{ "density", &WwWeatherRecx::density, WwRecClouds, []( const WwWeatherGen::Out & o, double ) { return o.density; } },
 	{ "type", &WwWeatherRecx::type, WwRecClouds,
 		[]( const WwWeatherGen::Out & o, double ) { return WwWeatherGen::cloudTypeNumber( o.cloudType ); } },
@@ -672,24 +682,30 @@ const Input kInputs[] = {
 	{ "shadowDeck", &WwWeatherRecx::shadowDeck, WwRecClouds, nullptr },
 	{ "liquidWater", &WwWeatherRecx::liquidWater, WwRecClouds, nullptr },
 	{ "dropletRadius", &WwWeatherRecx::dropletRadius, WwRecClouds, nullptr },
-	{ "iceFraction", &WwWeatherRecx::iceFraction, WwRecClouds, nullptr },
-	{ "evolution", &WwWeatherRecx::evolution, WwRecClouds, nullptr },
-	{ "precipitation.base", &WwWeatherRecx::precipitationBase, WwRecClouds, nullptr },	// WEATHERRECX2: was clouds.precipitationBase
+	{ "iceFraction", &WwWeatherRecx::iceFraction, WwRecClouds, []( const WwWeatherGen::Out & o, double ) { return o.iceFraction; } },
+	{ "evolution", &WwWeatherRecx::evolution, WwRecClouds, []( const WwWeatherGen::Out & o, double ) { return o.evolution; } },
+	// WEATHERRECX2: was clouds.precipitationBase; -1 (no precipitation) = unset
+	{ "precipitation.base", &WwWeatherRecx::precipitationBase, WwRecClouds,
+		[]( const WwWeatherGen::Out & o, double ) { return o.precipitationBase; } },
 	{ "stars", &WwWeatherRecx::stars, WwRecSky, []( const WwWeatherGen::Out & o, double ) { return o.stars; } },
 	{ "moonlight", &WwWeatherRecx::moonlight, WwRecSky, []( const WwWeatherGen::Out & o, double ) { return o.moonlight; } },
-	{ "wind.speed", &WwWeatherRecx::windSpeed, WwRecWind, []( const WwWeatherGen::Out & o, double ) { return o.windSpeed; } },
+	{ "wind.speed", &WwWeatherRecx::windSpeed, WwRecWind,
+		[]( const WwWeatherGen::Out & o, double h ) { return genDawn( o.windSpeedNight, o.windSpeed, h ); } },
 	{ "wind.direction", &WwWeatherRecx::windDirection, WwRecWind,
 		[]( const WwWeatherGen::Out & o, double ) { return o.windDirection; } },
-	{ "wind.gusts", &WwWeatherRecx::gusts, WwRecWind, []( const WwWeatherGen::Out & o, double ) { return o.gusts; } },
+	{ "wind.gusts", &WwWeatherRecx::gusts, WwRecWind,
+		[]( const WwWeatherGen::Out & o, double h ) { return genDawn( o.gustsNight, o.gusts, h ); } },
 	{ "wind.turbulence", &WwWeatherRecx::turbulence, WwRecWind, []( const WwWeatherGen::Out & o, double ) { return o.turbulence; } },
 	{ "temperature", &WwWeatherRecx::airTemp, 0u, genTemp },
 	{ "lightning.frequency", &WwWeatherRecx::lightningFreq, WwRecLightning,
 		[]( const WwWeatherGen::Out & o, double ) { return o.lightning; } },
-	{ "lightning.cloudToGround", &WwWeatherRecx::cloudToGround, WwRecLightning, nullptr },
-	{ "lightning.distance", &WwWeatherRecx::lightningDistance, WwRecLightning, nullptr },
+	{ "lightning.cloudToGround", &WwWeatherRecx::cloudToGround, WwRecLightning,
+		[]( const WwWeatherGen::Out & o, double ) { return o.cloudToGround; } },	// -1 (no lightning) = unset
+	{ "lightning.distance", &WwWeatherRecx::lightningDistance, WwRecLightning,
+		[]( const WwWeatherGen::Out & o, double ) { return o.lightningDistance; } },	// km
 	{ "transitions.duration", &WwWeatherRecx::transHours, WwRecTransitions,
 		[]( const WwWeatherGen::Out & o, double ) { return o.transHours; } },
-	// lane WEATHERRECX2 (1.7 names; the record red channel stays transitions)
+	// lane WEATHERRECX2 (1.8 names; the record red channel stays transitions)
 	{ "precipitation.fadeIn", &WwWeatherRecx::precipStart, WwRecTransitions,
 		[]( const WwWeatherGen::Out & o, double ) { return o.precipStart; } },
 	{ "precipitation.fadeOut", &WwWeatherRecx::precipEnd, WwRecTransitions,
@@ -801,8 +817,22 @@ static bool weatherTranslateRed()
 static QJsonObject untranslated( QJsonObject o )
 {
 	const QJsonArray keys = o.value( QStringLiteral( "_translated" ) ).toArray();
-	for ( const QJsonValue & k : keys )
-		o.remove( k.toString() );
+	for ( const QJsonValue & k : keys ) {
+		const QString name = k.toString();
+		const int dot = name.indexOf( QLatin1Char( '.' ) );
+		if ( dot < 0 ) {
+			o.remove( name );
+			continue;
+		}
+		// 1.8 nested name ("haze.height"): drop the member, then the group when it is left empty
+		const QString g = name.left( dot );
+		QJsonObject sub = o.value( g ).toObject();
+		sub.remove( name.mid( dot + 1 ) );
+		if ( sub.isEmpty() )
+			o.remove( g );
+		else
+			o.insert( g, sub );
+	}
 	return o;
 }
 
@@ -828,7 +858,7 @@ int physFamOf( const QString & block )
 
 bool recordPart( const char * key )
 {
-	// WEATHERRECX2: the fades moved from transitions into precipitation / lightning in 1.7; still WTHR DATA bytes 6..9
+	// WEATHERRECX2: the fades moved from transitions into precipitation / lightning in 1.8; still WTHR DATA bytes 6..9
 	return !std::strcmp( key, "wind.direction" ) || !std::strcmp( key, "wind.turbulence" ) || std::strstr( key, ".fadeIn" )
 		|| std::strstr( key, ".fadeOut" );
 }
@@ -838,7 +868,7 @@ bool recordPart( const char * key )
 const char * const kFunctions[] = { "atmosphere", "fog", "sky", "sun", "ambient", "imagespace", "clouds", "clouds.layers",
 	"night", "precipitation", "wind", "temperature", "lightning", "transitions", "textures" };
 
-//! the override function an input belongs to (its 1.7 block, the haze inputs = fog)
+//! the override function an input belongs to (its 1.8 block, the haze inputs = fog)
 QString funcOf( const Input & in )
 {
 	const QString n = QLatin1String( in.name );
@@ -892,7 +922,7 @@ WwWeatherRecx resolveOne( const Who & w, const QStringList & roots, const QStrin
 	unsigned useRecord = 0;
 	QString famState[5], famIgnored[5];	// lane AIRPERF1 A9: per family "<switch>:<who decides>", the keys not read
 	/* lane WEATHERRECX2: the union of the winning entries' "override" (spec COMMON), the stored-for-later keys, the
-	 * record fields the translator wrote. transitions is read before precipitation and lightning: their 1.7 fadeIn /
+	 * record fields the translator wrote. transitions is read before precipitation and lightning: their 1.8 fadeIn /
 	 * fadeOut win over the old transitions keys. */
 	WwRecxOverride cover;
 	bool anyHit = false;
@@ -925,7 +955,7 @@ WwWeatherRecx resolveOne( const Who & w, const QStringList & roots, const QStrin
 		if ( trRed )
 			fileLine += QStringLiteral( " (translate red: %1 dropped)" ).arg( bn );
 		QJsonObject raw = trRed ? untranslated( h.block ) : h.block;
-		if ( bn != QLatin1String( "textures" ) ) {	// the 1.7 names and units (weatherrecxcanon.h)
+		if ( bn != QLatin1String( "textures" ) ) {	// the 1.8 names and units (weatherrecxcanon.h)
 			QStringList notes;
 			raw = WwWeatherCanon::canon( bn, raw, WwWeatherCanon::versionOf( h.entry ), rel + QStringLiteral( " /" ) + bn, notes );
 			for ( const QString & n : notes )
@@ -934,7 +964,7 @@ WwWeatherRecx resolveOne( const Who & w, const QStringList & roots, const QStrin
 		}
 		const Obj b{ raw, rel + QStringLiteral( " /" ) + bn };
 		WwWeatherRecx before = r;
-		// an old key that moved into this block (clouds.precipitationBase, transitions.*) loses to the 1.7 one here
+		// an old key that moved into this block (clouds.precipitationBase, transitions.*) loses to the 1.8 one here
 		auto movedWins = [&]( const char * key, float WwWeatherRecx::* f, const char * old, const char * now ) {
 			if ( before.*f >= 0.0f && !b.get( key ).isUndefined() )
 				sayOnce( QStringLiteral( "weather recx: %1: %2 ignored (%3 set)" ).arg( b.where, QLatin1String( old ), QLatin1String( now ) ) );
@@ -947,7 +977,24 @@ WwWeatherRecx resolveOne( const Who & w, const QStringList & roots, const QStrin
 				QStringLiteral( "hazeGlow" ), QStringLiteral( "inscatterColor" ), QStringLiteral( "directionalInscatter" ),
 				QStringLiteral( "directionalInscatterExponent" ), QStringLiteral( "directionalInscatterStart" ) } + storedNames( bn ) );
 			readKeys( b, kAtmo, hour, r );
-			readAtmoWords( b, r, useRecord );
+			{
+				// lane WEATHERRECX2 (1.8): "fromRecord" lists the colour channels; beside it useRecordColors is ignored
+				const QJsonValue fr = wwRecxFromRecord( h.entry );
+				unsigned fromList = 0;
+				readAtmoWords( b, r, fr.isUndefined() ? useRecord : fromList );
+				if ( !fr.isUndefined() && !b.get( "useRecordColors" ).isUndefined() )
+					sayOnce( QStringLiteral( "weather recx: %1: useRecordColors ignored (fromRecord set)" ).arg( b.where ) );
+				for ( const QJsonValue & v : fr.toArray() ) {
+					const unsigned bit = wwWeatherRecordChannels( v.toString() );
+					if ( bit & ( WwRecSky | WwRecSun | WwRecAmbient | WwRecFog | WwRecClouds | WwRecImagespace ) )
+						useRecord |= bit;
+				}
+				if ( !fr.isUndefined() && !WwWeatherCanon::keyOf( h.entry, QStringLiteral( "physicalWeather" ) ).isEmpty() )
+					sayOnce( QStringLiteral( "weather recx: %1: physicalWeather ignored (fromRecord set)" ).arg( rel ) );
+				else if ( fr.isUndefined() && !WwWeatherCanon::keyOf( h.entry, QStringLiteral( "physicalWeather" ) ).isEmpty()
+					&& WwWeatherCanon::versionOf( h.entry ) >= WwWeatherCanon::kUnitsVersion )
+					sayOnce( QStringLiteral( "weather recx: %1: \"physicalWeather\" is the old name of \"fromRecord\" (read as it)" ).arg( rel ) );
+			}
 			if ( wwRecxPhysicalWeather( h.entry ) )	// lane AIRPERF1 A8: the entry's switch, read where its values are
 				src[QStringLiteral( "physicalWeather" )] = QStringLiteral( "file:" ) + rel;
 			else if ( covered( ov, QStringLiteral( "fog" ) ) )	// WEATHERRECX2: an override of the haze is the physical haze
@@ -1043,7 +1090,9 @@ WwWeatherRecx resolveOne( const Who & w, const QStringList & roots, const QStrin
 		const int fi = physFamOf( bn );
 		if ( fi >= 0 ) {
 			// WEATHERRECX2: an override of the block stands like the switch on (the file decides alone)
-			const bool sw = wwRecxPhysicalWeather( h.entry ) || ov.covers( bn ), redF = switchRed( block );
+			// WEATHERRECX2 (1.8): a family the entry's fromRecord list names stays the record's
+			const bool sw = ( wwRecxPhysicalWeather( h.entry ) && !wwRecxFromRecordNames( h.entry, bn ) ) || ov.covers( bn ),
+					   redF = switchRed( block );
 			QStringList ign;
 			if ( sw && !redF ) {
 				r.phys |= kPhysFam[fi].bit;

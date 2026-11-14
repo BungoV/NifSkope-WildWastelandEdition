@@ -1,10 +1,10 @@
 #ifndef WW_WEATHERRECXCANON_H
 #define WW_WEATHERRECXCANON_H
 
-/* lane WEATHERRECX2 (SPEC.md 1.7): a weather block in the spec's 1.7 spelling turned into the names the reader keeps
+/* lane WEATHERRECX2 (SPEC.md 1.8): a weather block in the spec's 1.8 spelling turned into the names the reader keeps
  * (weatherrecx.cpp Key tables), before any key is read. Header only (Qt Core), so the offline gates read the same rule.
  *
- *   1.7 name                               reader name                       old name (read as it, with a line)
+ *   1.8 name                               reader name                       old name (read as it, with a line)
  *   atmosphere.haze.{height,type,albedo,   hazeHeight, hazeType, hazeAlbedo, atmosphere.hazeHeight ...
  *     glow,anisotropy}                     hazeGlow, hazeAnisotropy
  *   atmosphere.volumetric.emissive         hazeGlow                          (an alias of haze.glow)
@@ -15,10 +15,10 @@
  *   precipitation.base                     precipitationBase                 clouds.precipitationBase
  *   precipitation.fadeIn / fadeOut         precipitationStart / End          transitions.precipitationStart / End
  *   lightning.fadeIn / fadeOut             lightningStart / End              transitions.lightningStart / End
- * Units by the entry's version (the file's "version", recx.cpp): from 1.7 lightning.distance is metres and
+ * Units by the entry's version (the file's "version", recx.cpp): from 1.8 lightning.distance is metres and
  * precipitation.wetting / drying are hours; older files keep km and minutes (a line says which was read).
  * Any other nested group of a block (secondFog, volumetric, multiScattering, snowCover) becomes dotted keys
- * ("volumetric.extinctionScale") for the stored-for-later keys. Both spellings at once: the 1.7 one wins, the old one is
+ * ("volumetric.extinctionScale") for the stored-for-later keys. Both spellings at once: the 1.8 one wins, the old one is
  * logged "ignored". Each `hours` object gets the same rule. */
 
 #include <QJsonArray>
@@ -30,7 +30,7 @@
 namespace WwWeatherCanon
 {
 
-//! the entry's "version" ("1.7" or 1.7); 0 when absent or unreadable
+//! the entry's "version" ("1.8" or 1.8); 0 when absent or unreadable
 inline double versionOf( const QJsonObject & entry )
 {
 	const QJsonValue v = entry.value( QStringLiteral( "version" ) );
@@ -41,13 +41,13 @@ inline double versionOf( const QJsonObject & entry )
 	return ok ? d : 0.0;
 }
 
-constexpr double kUnitsVersion = 1.7;	// metres / hours from here on
+constexpr double kUnitsVersion = 1.8;	// metres / hours from here on
 
 struct Ren
 {
 	const char * block;
 	const char * group;	// nullptr: a flat key of the block
-	const char * sub;	// the 1.7 key (in the group, or flat)
+	const char * sub;	// the 1.8 key (in the group, or flat)
 	const char * internal;	// the reader's name
 	const char * old;	// the old flat name of the same block (nullptr: none in this block)
 };
@@ -78,7 +78,7 @@ inline const Ren * renames( int & n )
 	return k;
 }
 
-//! old names that now live in ANOTHER block: block, old key, its 1.7 home
+//! old names that now live in ANOTHER block: block, old key, its 1.8 home
 struct Moved
 {
 	const char * block;
@@ -109,8 +109,8 @@ inline QJsonObject canon( const QString & block, QJsonObject o, double version, 
 {
 	int nr = 0;
 	const Ren * rn = renames( nr );
-	QJsonObject from17;	// internal name -> the 1.7 value
-	QJsonObject from17Names;	// internal name -> the 1.7 spelling (for the lines)
+	QJsonObject from18;	// internal name -> the 1.8 value
+	QJsonObject from18Names;	// internal name -> the 1.8 spelling (for the lines)
 	// 1. nested groups: mapped subkeys to reader names, the rest to dotted keys
 	QStringList groups;
 	for ( auto it = o.constBegin(); it != o.constEnd(); ++it )
@@ -129,18 +129,18 @@ inline QJsonObject canon( const QString & block, QJsonObject o, double version, 
 					&& jt.key().compare( QLatin1String( rn[i].sub ), Qt::CaseInsensitive ) == 0 ) {
 					mapped = true;
 					const QString in = QLatin1String( rn[i].internal );
-					if ( from17.contains( in ) ) {
-						notes << QStringLiteral( "%1: %2.%3 ignored (%4 set)" ).arg( where, g, jt.key(), from17Names.value( in ).toString() );
+					if ( from18.contains( in ) ) {
+						notes << QStringLiteral( "%1: %2.%3 ignored (%4 set)" ).arg( where, g, jt.key(), from18Names.value( in ).toString() );
 					} else {
-						from17.insert( in, jt.value() );
-						from17Names.insert( in, g + QLatin1Char( '.' ) + jt.key() );
+						from18.insert( in, jt.value() );
+						from18Names.insert( in, g + QLatin1Char( '.' ) + jt.key() );
 					}
 				}
 			if ( !mapped )
 				o.insert( g + QLatin1Char( '.' ) + jt.key(), jt.value() );
 		}
 	}
-	// 2. flat 1.7 keys of the block
+	// 2. flat 1.8 keys of the block
 	for ( int i = 0; i < nr; i++ ) {
 		if ( rn[i].group || block != QLatin1String( rn[i].block ) )
 			continue;
@@ -149,10 +149,10 @@ inline QJsonObject canon( const QString & block, QJsonObject o, double version, 
 			continue;
 		const QJsonValue v = o.value( k );
 		o.remove( k );
-		from17.insert( QLatin1String( rn[i].internal ), v );
-		from17Names.insert( QLatin1String( rn[i].internal ), k );
+		from18.insert( QLatin1String( rn[i].internal ), v );
+		from18Names.insert( QLatin1String( rn[i].internal ), k );
 	}
-	// 3. old names: read as the 1.7 key unless that is set
+	// 3. old names: read as the 1.8 key unless that is set
 	for ( int i = 0; i < nr; i++ ) {
 		if ( block != QLatin1String( rn[i].block ) )
 			continue;
@@ -168,14 +168,14 @@ inline QJsonObject canon( const QString & block, QJsonObject o, double version, 
 		}
 		if ( k.isEmpty() )
 			continue;
-		if ( from17.contains( in ) ) {
+		if ( from18.contains( in ) ) {
 			notes << QStringLiteral( "%1: %2 ignored (%3 set)" ).arg( where, k, now );
 			o.remove( k );
 		} else {
 			notes << QStringLiteral( "%1: \"%2\" is the old name of \"%3\" (read as it)" ).arg( where, k, now );
 		}
 	}
-	for ( auto it = from17.constBegin(); it != from17.constEnd(); ++it ) {
+	for ( auto it = from18.constBegin(); it != from18.constEnd(); ++it ) {
 		const QString k = keyOf( o, it.key() );
 		if ( !k.isEmpty() )
 			o.remove( k );
@@ -196,7 +196,7 @@ inline QJsonObject canon( const QString & block, QJsonObject o, double version, 
 		if ( version >= kUnitsVersion ) {
 			o.insert( k, o.value( k ).toDouble() * f );
 		} else {
-			notes << QStringLiteral( "%1: %2 read in %3 (file version %4 < 1.7; from 1.7 it is %5)" ).arg( where, k,
+			notes << QStringLiteral( "%1: %2 read in %3 (file version %4 < 1.8; from 1.8 it is %5)" ).arg( where, k,
 				QLatin1String( oldUnit ), version > 0.0 ? QString::number( version ) : QStringLiteral( "none" ), QLatin1String( newUnit ) );
 		}
 	};

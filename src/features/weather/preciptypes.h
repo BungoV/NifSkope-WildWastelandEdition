@@ -2,7 +2,7 @@
 #define WW_PRECIPTYPES_H
 
 /* lane WEATHERRECX2 part 4: precipitation TYPES as files, <root>/Plugins/<Provider>/Weathers/Precip/<name>.recx:
- *   { "version": "1.7", "entries": [ { "precipitationType": "rain", "type": { ... } } ] }
+ *   { "version": "1.8", "entries": [ { "precipitationType": "rain", "type": { ... } } ] }
  * Keys of "type" (all optional; "base" names the type it starts from, else the shipped type of that name, else rain):
  *   base, size (mm), variants [[sizeMm, cellMm], ...] (the atlas cells, at most 16), material (water | ice | drySnow |
  *   wetSnow) or mass [coef, exp] (mg = coef D^exp, D mm), shape (drop | pellet | flake | clump) and/or drag {areaCoef,

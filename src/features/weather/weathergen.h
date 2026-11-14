@@ -46,7 +46,13 @@ struct Out
 	double precipRate = 0, wetting = 20, drying = 90;
 	double transHours = 0.01, precipStart = 0, precipEnd = 0, lightningStart = 0, lightningEnd = 0;
 	double stars = 1, moonlight = 1;
+	// lane WEATHERRECX2 (1.8): the day's course (05:00 vs 14:00) and the filled keys (fill18); < 0 = none
+	double humidityDawn = 55, hazeHeightDawn = 1200, coverageDawn = 0.2, windSpeedNight = 0, gustsNight = 0;
+	double angstrom = 1.1, angstromDawn = 1.1, hazeAnisotropy = 0.7, hazeAnisotropyDawn = 0.7, airglow = 1;
+	double iceFraction = 0, evolution = 20, precipitationBase = -1, cloudToGround = -1, lightningDistance = -1;	// km
 };
+
+inline void fill18( Out & o, double speed, double turb );
 
 //! the cloud type words as clouds.type numbers (weatherrecx.cpp typeWords)
 inline double cloudTypeNumber( const char * w )
@@ -221,6 +227,7 @@ inline Out generate( const In & in )
 		o.stars = 0.3;
 		o.moonlight = 0.5;
 	}
+	fill18( o, speed, turb );
 	return o;
 }
 
@@ -262,6 +269,55 @@ inline void humidityGrowth( float humidity, float albedo[3], float & angstrom, f
 		albedo[i] = float( 1.0 - ( 1.0 - albedo[i] ) / f );
 	angstrom = float( angstrom / f );
 	g = float( std::min( 0.9, g + 0.05 * ( f - 1.0 ) ) );
+}
+
+/* lane WEATHERRECX2 (SPEC.md 1.8): the day's course (05:00 against 14:00) and the keys the rung used to leave to the
+ * reader's defaults. The same rule as weathergen.py generate's tail:
+ *  - humidity at dawn: the day's vapour kept (same dew point), Tetens e_s(T) (airtempmath.h), at most 100 %;
+ *  - haze scale height at dawn x 0.5 (the night's stable layer; coast x 0.8), wind and gusts at dawn x 0.6 for fair
+ *    weathers (the night's decoupled surface; coast x 0.8), fair-weather cumulus cover at dawn x 0.5;
+ *  - angstrom / hazeAnisotropy: the hazeType's grown at that hour's humidity (humidityGrowth), airglow the hazeType's;
+ *  - iceFraction: the low cloud (1.5 km, 6.5 K/km under the day's air) 0 above -5 C, 1 below -35 C (CALIPSO);
+ *  - evolution by cloud type (minutes), precipitation.base 0 m when it precipitates, lightning 0.25 / 8 km. */
+inline double vapourKPa( double t )
+{
+	return 0.6108 * std::exp( 17.27 * t / ( t + 237.3 ) );
+}
+
+inline void grownOptics( const std::string & haze, double humidity, double & angstrom, double & g )
+{
+	const HazeType * h = hazeType( haze );
+	const double ang = h ? double( h->angstrom ) : 1.1, g0 = h ? double( h->g ) : 0.7;
+	const double rh = std::min( 99.0, std::max( 0.0, humidity ) ) / 100.0;
+	const double f = std::pow( ( 1.0 - rh ) / 0.5, -0.25 );
+	angstrom = ang / f;
+	g = std::min( 0.9, g0 + 0.05 * ( f - 1.0 ) );
+}
+
+inline void fill18( Out & o, double speed, double turb )
+{
+	const std::string cls = o.cls, reg = o.region, ct = o.cloudType;
+	o.humidityDawn = r3( std::min( 100.0, o.humidity * vapourKPa( o.tempDay ) / vapourKPa( o.tempDawn ) ) );
+	o.hazeHeightDawn = r3( o.hazeHeight * ( reg == "coast" ? 0.8 : 0.5 ) );
+	o.coverageDawn = ct == "cumulus" && ( cls == "clear" || cls == "clearest" || cls == "dust" ) ? r3( o.coverage * 0.5 ) : o.coverage;
+	const bool fair = cls == "clearest" || cls == "clear" || cls == "dust" || cls == "polluted" || cls == "mist" || cls == "fog";
+	const double nw = fair ? ( reg == "coast" ? 0.8 : 0.6 ) : 1.0;
+	o.windSpeedNight = r3( speed * nw );
+	o.gustsNight = r3( speed * nw * ( 1.0 + turb ) );
+	double a = 0.0, g = 0.0;
+	grownOptics( o.hazeType, o.humidity, a, g );
+	o.angstrom = r3( a );
+	o.hazeAnisotropy = r3( g );
+	grownOptics( o.hazeType, o.humidityDawn, a, g );
+	o.angstromDawn = r3( a );
+	o.hazeAnisotropyDawn = r3( g );
+	const HazeType * h = hazeType( o.hazeType );
+	o.airglow = h ? double( h->airglow ) : 1.0;
+	o.iceFraction = r3( std::min( 1.0, std::max( 0.0, ( -5.0 - ( o.tempDay - 9.75 ) ) / 30.0 ) ) );
+	o.evolution = ct == "cumulus" ? 20.0 : ct == "cumulonimbus" ? 45.0 : ct == "stratocumulus" ? 90.0 : 240.0;
+	o.precipitationBase = o.precipType ? 0.0 : -1.0;
+	o.cloudToGround = o.lightning > 0.0 ? 0.25 : -1.0;
+	o.lightningDistance = o.lightning > 0.0 ? 8.0 : -1.0;
 }
 
 }	// namespace WwWeatherGen

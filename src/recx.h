@@ -104,7 +104,7 @@ WwRecxOverride wwRecxOverride( const QJsonObject & entry, const QStringList & va
 
 /* lane WEATHERRECX2 (spec COMMON "base"): an entry's "base" (a part file name or a list of them) merged under its own
  * keys. A name is looked for beside the file, then in <category folder>/Parts/<name>.recx. A part file is
- * { "version": "1.7", "part": { <blocks>, "base": ... } }; later parts win over earlier ones, the entry over all;
+ * { "version": "1.8", "part": { <blocks>, "base": ... } }; later parts win over earlier ones, the entry over all;
  * objects merge key by key. A cycle or a missing part is dropped with a line in `log`. Done for every entry on read. */
 QJsonObject wwRecxExpandEntry( const QJsonObject & entry, const QString & filePath, const QString & catDir, QStringList & log );
 
