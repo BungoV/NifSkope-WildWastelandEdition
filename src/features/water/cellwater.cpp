@@ -471,7 +471,8 @@ static char g_vkWaterKeys[128];	// the twins' keys (key + slot index)
 
 /* lane VKWATER1 (row G5): the water on the Vulkan view (WW_VKVIEW=1; red WW_VKVIEW_WATER_RED=1). A census of the program GL
  * draws with (a new program, or every 5 s), its verdict against the present device, the `vk water:` line.
- * lane VKWATER3: a clear verdict on a program with twins (WwVkPresent::waterVariantOf: fo4_waterlook / d / m / p / dp) and
+ * lane VKWATER3: a clear verdict on a program with twins (WwVkPresent::waterVariantOf: fo4_waterlook / d / m / p / dp;
+ * VKWATER4 fo4_water) and
  * their defines into the shared tone frame arms the shape's draw for the present device; anything else stays on GL with
  * its reason. */
 static void wwCellWaterVkRoute( NifSkopeOpenGLContext::GLFunctions * fn, NifSkopeOpenGLContext::Program * program )
@@ -502,16 +503,17 @@ static void wwCellWaterVkRoute( NifSkopeOpenGLContext::GLFunctions * fn, NifSkop
 	const int variant = WwVkPresent::waterVariantOf( program->name );
 	// lane VKWATER4: one red per twin (=1: that twin stays on GL), read every draw
 	static const char * const kTwinRed[WwVkPresent::kWaterVariants] = { "WW_VKVIEW_WATER_LOOK_RED", "WW_VKVIEW_WATER_D_RED",
-		"WW_VKVIEW_WATER_M_RED", "WW_VKVIEW_WATER_P_RED", "WW_VKVIEW_WATER_DP_RED" };
+		"WW_VKVIEW_WATER_M_RED", "WW_VKVIEW_WATER_P_RED", "WW_VKVIEW_WATER_DP_RED", "WW_VKVIEW_WATER_OFF_RED" };
 	static const char * const kTwinRedWhy[WwVkPresent::kWaterVariants] = { "red WW_VKVIEW_WATER_LOOK_RED=1 (fo4_waterlook on GL)",
 		"red WW_VKVIEW_WATER_D_RED=1 (fo4_waterlookd on GL)", "red WW_VKVIEW_WATER_M_RED=1 (fo4_waterlookm on GL)",
-		"red WW_VKVIEW_WATER_P_RED=1 (fo4_waterlookp on GL)", "red WW_VKVIEW_WATER_DP_RED=1 (fo4_waterlookdp on GL)" };
+		"red WW_VKVIEW_WATER_P_RED=1 (fo4_waterlookp on GL)", "red WW_VKVIEW_WATER_DP_RED=1 (fo4_waterlookdp on GL)",
+		"red WW_VKVIEW_WATER_OFF_RED=1 (fo4_water, the water look off, on GL)" };
 	if ( variant >= 0 && variant < WwVkPresent::kWaterVariants && wwEnvInt( kTwinRed[variant] ) == 1 )
 		no = kTwinRedWhy[variant];
 	else if ( !verdict.empty() )
 		no = verdict.c_str();
 	else if ( variant < 0 )
-		no = "this water program has no Vulkan twin (fo4_waterlook / d / m / p / dp only)";
+		no = "this water program has no Vulkan twin (fo4_water, fo4_waterlook / d / m / p / dp only)";
 	else if ( !wwFogLeakShaderDefine() )
 		no = "WW_CELL_FOGLEAK=0: GL's program is not the Vulkan twin";
 	else if ( !program->wwShadowFrame && WwVkPresent::waterPsReads( variant, "wwShadowFrame" ) )

@@ -250,6 +250,7 @@ struct Vk
 	VKP( vkMapMemory ); VKP( vkUnmapMemory ); VKP( vkCmdCopyImageToBuffer ); VKP( vkCmdResolveImage ); VKP( vkCmdCopyImage );
 	// round 11: the tone pass on the view (a render pass of the present device)
 	bool sampleShading = false;  // the device feature SV_SampleIndex needs (enabled when offered)
+	bool dualSrcBlend = false;   // lane VKWATER4 (L7): the underwater pass's SRC1_COLOR blend (enabled when offered)
 	VKP( vkGetPhysicalDeviceFeatures );
 	VKP( vkCreateImageView ); VKP( vkDestroyImageView ); VKP( vkCreateSampler ); VKP( vkDestroySampler );
 	VKP( vkCreateDescriptorSetLayout ); VKP( vkDestroyDescriptorSetLayout ); VKP( vkCreateDescriptorPool );
@@ -549,6 +550,8 @@ bool makeDevice( std::string & why )
 		v.vkGetPhysicalDeviceFeatures( v.phys, &offered );
 	en.sampleRateShading = offered.sampleRateShading;
 	v.sampleShading = offered.sampleRateShading == VK_TRUE;
+	en.dualSrcBlend = offered.dualSrcBlend;
+	v.dualSrcBlend = offered.dualSrcBlend == VK_TRUE;
 	en.shaderStorageImageExtendedFormats = offered.shaderStorageImageExtendedFormats;
 	v.storageExt = offered.shaderStorageImageExtendedFormats == VK_TRUE;
 	en.shaderFloat64 = offered.shaderFloat64;
@@ -733,7 +736,9 @@ bool waterRecord( std::string & why );  // lane VKWATER3 (vkwater.inc): fxWork's
 bool fbRecord( std::string & why );  // lane VKFAR2 (vkfogbloom.inc): fxWork's kind 6, the fog bloom
 bool cfRecord( std::string & why );  // lane VKFAR2 (vkcloudfront.inc): fxWork's kind 7, the clouds in front
 bool precipRecord( std::string & why );  // lane VKFAR2 (vkprecip.inc): fxWork's kind 8, rain / snow
+bool underRecord( std::string & why );  // lane VKWATER4 (vkunder.inc): fxWork's kind 10, the underwater fog
 void waterDrop();
+void underDrop();  // lane VKWATER4 (vkunder.inc)
 void objDrop();  // lane VKOBJ1
 void blFree();  // lane VKOBJ2
 void fogDrop();  // lane VKFAR2 (vkfog.inc): the air's integrate
@@ -3778,6 +3783,7 @@ void shutdown()
 	ssrDrop();  // lane VKLIGHT2: the reflections' crossing semaphores
 	fxDrop();   // lane VKAIR1: the air's and the clouds' crossing semaphores and framebuffers
 	waterDrop();  // lane VKWATER3: the water draw's buffers (GL's names); pipelines and samplers stay with the device
+	underDrop();  // lane VKWATER4 (L7): the underwater draw's framebuffer, depth view and host buffer
 }
 
 bool viewBegin( int w, int h, int samples, GlProc gp, std::string & why )
@@ -5998,6 +6004,11 @@ bool fxWork( std::string & why )
 		}
 	} else if ( F.kind == 8 ) {  // lane VKFAR2 (row L8): rain / snow
 		if ( !precipRecord( why ) ) {
+			v.vkEndCommandBuffer( F.cmd );
+			return false;
+		}
+	} else if ( F.kind == 10 ) {  // lane VKWATER4 (L7): the underwater fog, its per-pixel and per-sample draws
+		if ( !underRecord( why ) ) {
 			v.vkEndCommandBuffer( F.cmd );
 			return false;
 		}
@@ -9291,3 +9302,4 @@ bool frame( QOpenGLWindow * w, const std::function<void()> & paint )
 
 #include "features/vkframe/vkwater.inc"  // lane VKWATER1: the water's route and census (row G5)
 #include "features/vkframe/vkfarground.inc"  // lane VKFAR3: the far ground's ring-0 terrain (row G3)
+#include "features/vkframe/vkunder.inc"  // lane VKWATER4 (L7): the underwater fog on the view

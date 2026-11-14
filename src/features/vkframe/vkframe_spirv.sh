@@ -280,4 +280,10 @@ fxt() {
 }
 fxt fargnd_view_vs core/water_view_vs
 ls -la fargnd_view_ps.spv.h fargnd_view_vs.spv.h
+# lane VKWATER4: the water look off (fo4_water.prog), frozen from the old fo4_water_ps FOGLEAK + FRAME_UBO spirv-cross file
+fxkw water_view_off_ps water/water_view_off_ps
+# lane VKWATER4 (L7): the camera-underwater fog (cell_underwater.prog + its per-sample _ms), frozen twins: both outputs at
+# location 0 index 0 / 1 (dual-source blend), SV_SampleIndex in the _ms twin only
+fxkw underwater_view_ps water/underwater_view_ps
+fxkw underwater_view_ms_ps water/underwater_view_ms_ps
 ls -la csm_view_vs.spv.h obj_depth_vs.spv.h sky_view_ps.spv.h bloom_down.spv.h bloom_hold.spv.h bloom_up.spv.h bloom_src.spv.h bloom_comb.spv.h bloom_back.spv.h tonemap.spv.h measure_q.spv.h tone_view_vs.spv.h tone_view_ps.spv.h taa_view_mv_cs.spv.h taa_view_resolve_cs.spv.h taa_view_rcas_ps.spv.h

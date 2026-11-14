@@ -84,7 +84,10 @@ HLSL_SPECS += [('src/features/vkframe', k, 'vulkan1.2', 'vkframe_%s_spv' % k) fo
 # (their spirv-cross fixup gl_FragCoord.w = 1.0 / gl_FragCoord.w wants D3D's clip w in SV_Position.w)
 VKFRAME_FXKW = {'water_view_ps': 'water/water_view_ps',
 	'water_view_d_ps': 'water/water_view_d_ps', 'water_view_m_ps': 'water/water_view_m_ps',
-	'water_view_p_ps': 'water/water_view_p_ps', 'water_view_dp_ps': 'water/water_view_dp_ps'}
+	'water_view_p_ps': 'water/water_view_p_ps', 'water_view_dp_ps': 'water/water_view_dp_ps',
+	'water_view_off_ps': 'water/water_view_off_ps',	# lane VKWATER4: fo4_water.prog (the water look off)
+	'underwater_view_ps': 'water/underwater_view_ps',	# lane VKWATER4 (L7): cell_underwater.prog
+	'underwater_view_ms_ps': 'water/underwater_view_ms_ps'}	# and its per-sample cell_underwater_ms.prog
 HLSL_SPECS += [('src/features/vkframe', k, 'vulkan1.2', 'vkframe_%s_spv' % k) for k in VKFRAME_FXKW]
 # lane VKFAR2: the far cards' vertex stage, the script's `fxc <name> <dir/file>` lines (its own bindings in the cards' set)
 VKFRAME_FXC = {'farcards_view_vs': 'far-lod/farcards_view_vs'}	# frozen twin, as HLSLSRC2's

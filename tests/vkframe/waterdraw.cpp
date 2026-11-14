@@ -88,6 +88,7 @@ struct Ex
 	void( WINAPI * bindRenderbuffer )( GLenum, GLuint ) = nullptr;
 	void( WINAPI * renderbufferStorage )( GLenum, GLenum, GLsizei, GLsizei ) = nullptr;
 	void( WINAPI * framebufferRenderbuffer )( GLenum, GLenum, GLenum, GLuint ) = nullptr;
+	void( WINAPI * getRenderbufferParameteriv )( GLenum, GLenum, GLint * ) = nullptr;
 };
 Ex ex;
 
@@ -119,6 +120,7 @@ bool loadMore()
 	WD_X( uniform4uiv, "glUniform4uiv" ); WD_X( uniformMatrix2fv, "glUniformMatrix2fv" );
 	WD_X( genRenderbuffers, "glGenRenderbuffers" ); WD_X( bindRenderbuffer, "glBindRenderbuffer" );
 	WD_X( renderbufferStorage, "glRenderbufferStorage" ); WD_X( framebufferRenderbuffer, "glFramebufferRenderbuffer" );
+	WD_X( getRenderbufferParameteriv, "glGetRenderbufferParameteriv" );
 #undef WD_X
 	return ok;
 }
@@ -1248,7 +1250,8 @@ int main( int argc, char ** argv )
 	 * data: waterSslr 1, an RGBA32F 1-sample shared target of its own size (200x120, not the tone frame's) over a D24S8
 	 * renderbuffer holding an occluder (the slab, left half), depth LEQUAL with the mask off, colour cleared to 0. GL draws
 	 * its own copy; the twin draws against waterRayDepth's copy of the renderbuffer. Same bar per pixel (covered = colour
-	 * not the clear on either side; no depth: the pass writes none). Reds 1 / 2 / 4 / 8 must FAIL. */
+	 * not the clear on either side; no depth: the pass writes none). Reds 1 / 2 / 4 / 8 must FAIL. Run twice: D24S8, then
+	 * D32F_S8 ("ray d32fs8" lines). */
 	if ( variant == WwVkPresent::kWaterLookM ) {
 		const int WR = 200, HR = 120;
 		auto rayFbo = [&]( GLuint col, GLuint rb ) {
@@ -1261,12 +1264,15 @@ int main( int argc, char ** argv )
 			f.drawBuffers( 1, &buf );
 			return f.checkFramebufferStatus( fFb ) == fComplete ? b : 0u;
 		};
+		auto raySpec = [&]( GLuint rb, GLenum fmt ) {
+			ex.bindRenderbuffer( 0x8D41, rb );
+			ex.renderbufferStorage( 0x8D41, fmt, WR, HR );
+			ex.bindRenderbuffer( 0x8D41, 0 );
+		};
 		auto rayRb = [&]() {
 			GLuint rb = 0;
 			ex.genRenderbuffers( 1, &rb );
-			ex.bindRenderbuffer( 0x8D41, rb );
-			ex.renderbufferStorage( 0x8D41, fD24s8, WR, HR );
-			ex.bindRenderbuffer( 0x8D41, 0 );
+			raySpec( rb, fD24s8 );
 			return rb;
 		};
 		static char rayKeys[2];
@@ -1317,77 +1323,101 @@ int main( int argc, char ** argv )
 		};
 		const long long idxOff = 12;
 		const int count = triIdx;
-		rayBefore( fbRayRef );
-		rayState( fbRayRef );
-		glDrawElements( drawMode, count, GL_UNSIGNED_SHORT, reinterpret_cast<const void *>( std::uintptr_t( idxOff ) ) );
-		stateEnd();
-		const std::vector<float> glR = rayRead( fbRayRef );
-		for ( int red : { 0, 1, 2, 4, 8 } ) {
-			rayBefore( fbRayVk );
-			unsigned dTwin = 0;
-			if ( !WwVkPresent::waterRayDepth( reinterpret_cast<std::uintptr_t>( &rayKeys[1] ), rbVk, fD24s8, WR, HR, dTwin, why ) ) {
-				std::printf( "WATERDRAW ray red %d: REFUSED (the depth twin: %s)\n", red, why.c_str() );
-				gateOk = false;
-				continue;
+		// the D24S8 arm, then the D32F_S8 one (the app's other pre-pass format): both renderbuffers respecified at the same
+		// names and size, so waterRayDepth remakes its twin at the same key
+		for ( const GLenum dsFmt : { GLenum( fD24s8 ), GLenum( 0x8CAD ) } ) {
+			const char * lab = dsFmt == GLenum( fD24s8 ) ? "ray" : "ray d32fs8";
+			if ( dsFmt != GLenum( fD24s8 ) ) {
+				raySpec( rbRef, dsFmt );
+				raySpec( rbVk, dsFmt );
+				for ( const GLuint fb : { fbRayRef, fbRayVk } ) {
+					f.bindFramebuffer( fFb, fb );
+					if ( f.checkFramebufferStatus( fFb ) != fComplete )
+						return fatal( "the D32F_S8 ray targets: a framebuffer incomplete" );
+				}
 			}
-			rayState( fbRayVk );
-			WwVkPresent::WaterRun r;
-			r.variant = variant;
-			WwVkPresent::waterStateOf( &gw, pWater, r );
-			r.w = WR;
-			r.h = HR;
-			r.color = rayTex;
-			r.rayDepth = dTwin;
-			r.idxOff = idxOff;
-			r.count = count;
-			r.key = reinterpret_cast<std::uintptr_t>( twinKeys );
-			r.red = red;
-			const bool ran = WwVkPresent::waterRun( r, why );
+			rayBefore( fbRayRef );
+			rayState( fbRayRef );
+			glDrawElements( drawMode, count, GL_UNSIGNED_SHORT, reinterpret_cast<const void *>( std::uintptr_t( idxOff ) ) );
 			stateEnd();
-			runs++;
-			if ( !ran ) {
-				std::printf( "WATERDRAW ray red %d: REFUSED (%s)\n", red, why.c_str() );
-				gateOk = false;
-				continue;
-			}
-			const std::vector<float> vkR = rayRead( fbRayVk );
-			size_t covered = 0, both = 0, onlyOne = 0, colPast = 0, diff = 0;
-			double maxRel = 0.0;
-			for ( size_t p = 0; p < size_t( WR ) * HR; p++ ) {
-				const float * a = &vkR[p * 4], * b = &glR[p * 4];
-				const bool ca = a[0] != 0.0f || a[1] != 0.0f || a[2] != 0.0f || a[3] != 0.0f,
-					cb = b[0] != 0.0f || b[1] != 0.0f || b[2] != 0.0f || b[3] != 0.0f;
-				if ( !ca && !cb )
-					continue;
-				covered++;
-				if ( ca != cb ) {
-					onlyOne++;
+			const std::vector<float> glR = rayRead( fbRayRef );
+			for ( int red : { 0, 1, 2, 4, 8 } ) {
+				rayBefore( fbRayVk );
+				unsigned dTwin = 0;
+				if ( !WwVkPresent::waterRayDepth( reinterpret_cast<std::uintptr_t>( &rayKeys[1] ), rbVk, dsFmt, WR, HR, dTwin, why ) ) {
+					std::printf( "WATERDRAW %s red %d: REFUSED (the depth twin: %s)\n", lab, red, why.c_str() );
+					gateOk = false;
 					continue;
 				}
-				both++;
-				bool past = false, any = false;
-				for ( int c = 0; c < 4; c++ ) {
-					if ( std::isnan( a[c] ) && std::isnan( b[c] ) )
+				if ( red == 0 ) {  // which format ran: the renderbuffer's and its twin's (GL_RENDERBUFFER / TEXTURE_INTERNAL_FORMAT)
+					GLint rbFmt = 0, twFmt = 0;
+					ex.bindRenderbuffer( 0x8D41, rbVk );
+					ex.getRenderbufferParameteriv( 0x8D41, 0x8D44, &rbFmt );
+					ex.bindRenderbuffer( 0x8D41, 0 );
+					glBindTexture( GL_TEXTURE_2D, dTwin );
+					gw.glGetTexLevelParameteriv( GL_TEXTURE_2D, 0, 0x1003, &twFmt );
+					glBindTexture( GL_TEXTURE_2D, 0 );
+					std::printf( "WATERDRAW %s formats: renderbuffer 0x%X, depth twin 0x%X\n", lab, unsigned( rbFmt ), unsigned( twFmt ) );
+				}
+				rayState( fbRayVk );
+				WwVkPresent::WaterRun r;
+				r.variant = variant;
+				WwVkPresent::waterStateOf( &gw, pWater, r );
+				r.w = WR;
+				r.h = HR;
+				r.color = rayTex;
+				r.rayDepth = dTwin;
+				r.idxOff = idxOff;
+				r.count = count;
+				r.key = reinterpret_cast<std::uintptr_t>( twinKeys );
+				r.red = red;
+				const bool ran = WwVkPresent::waterRun( r, why );
+				stateEnd();
+				runs++;
+				if ( !ran ) {
+					std::printf( "WATERDRAW %s red %d: REFUSED (%s)\n", lab, red, why.c_str() );
+					gateOk = false;
+					continue;
+				}
+				const std::vector<float> vkR = rayRead( fbRayVk );
+				size_t covered = 0, both = 0, onlyOne = 0, colPast = 0, diff = 0;
+				double maxRel = 0.0;
+				for ( size_t p = 0; p < size_t( WR ) * HR; p++ ) {
+					const float * a = &vkR[p * 4], * b = &glR[p * 4];
+					const bool ca = a[0] != 0.0f || a[1] != 0.0f || a[2] != 0.0f || a[3] != 0.0f,
+						cb = b[0] != 0.0f || b[1] != 0.0f || b[2] != 0.0f || b[3] != 0.0f;
+					if ( !ca && !cb )
 						continue;
-					const double d = std::fabs( double( a[c] ) - double( b[c] ) ), m = std::max( 1.0, std::fabs( double( b[c] ) ) );
-					if ( d != 0.0 || std::isnan( d ) )
-						any = true;
-					if ( !( d <= 1e-2 * m ) )
-						past = true;
-					if ( d / m > maxRel )
-						maxRel = d / m;
+					covered++;
+					if ( ca != cb ) {
+						onlyOne++;
+						continue;
+					}
+					both++;
+					bool past = false, any = false;
+					for ( int c = 0; c < 4; c++ ) {
+						if ( std::isnan( a[c] ) && std::isnan( b[c] ) )
+							continue;
+						const double d = std::fabs( double( a[c] ) - double( b[c] ) ), m = std::max( 1.0, std::fabs( double( b[c] ) ) );
+						if ( d != 0.0 || std::isnan( d ) )
+							any = true;
+						if ( !( d <= 1e-2 * m ) )
+							past = true;
+						if ( d / m > maxRel )
+							maxRel = d / m;
+					}
+					diff += any;
+					colPast += past;
 				}
-				diff += any;
-				colPast += past;
+				const bool ok = covered >= 1000 && onlyOne * 2000 <= covered && colPast * 1000 <= both;
+				const char * word = covered < 1000 ? "FAIL" : ( diff == 0 && onlyOne == 0 ) ? "EXACT" : ok ? "BOUND" : "FAIL";
+				const bool fail = !ok;
+				std::printf( "WATERDRAW %s red %d: %s covered %zu (both %zu, one side only %zu), colour %zu pixels differ, %zu past 1e-2 "
+					"(max rel %.3g)%s\n", lab, red, word, covered, both, onlyOne, diff, colPast, maxRel,
+					red ? ( fail ? " -> red FAILS as it must" : " -> red PASSES: the gate is blind" ) : "" );
+				if ( red ? !fail : fail )
+					gateOk = false;
 			}
-			const bool ok = covered >= 1000 && onlyOne * 2000 <= covered && colPast * 1000 <= both;
-			const char * word = covered < 1000 ? "FAIL" : ( diff == 0 && onlyOne == 0 ) ? "EXACT" : ok ? "BOUND" : "FAIL";
-			const bool fail = !ok;
-			std::printf( "WATERDRAW ray red %d: %s covered %zu (both %zu, one side only %zu), colour %zu pixels differ, %zu past 1e-2 "
-				"(max rel %.3g)%s\n", red, word, covered, both, onlyOne, diff, colPast, maxRel,
-				red ? ( fail ? " -> red FAILS as it must" : " -> red PASSES: the gate is blind" ) : "" );
-			if ( red ? !fail : fail )
-				gateOk = false;
 		}
 		const GLint zero = 0;
 		f.useProgram( pWater );

@@ -320,8 +320,9 @@ struct WaterUbo
 };
 /* lane VKWATER3 item 4: the water programs with Vulkan twins (cellwater.cpp wwCellWaterProgram's names), their pixel
  * stage's tables. Every one takes water_view_vs; a tessellated one adds water_view_hs + water_view_ds (fo4_waterdisp).
- * Piece 2: the Medium / ray-pass look (m) and the probes' looks (p, tessellated dp). */
-enum WaterVariant { kWaterLook = 0, kWaterLookD, kWaterLookM, kWaterLookP, kWaterLookDp, kWaterVariants };
+ * Piece 2: the Medium / ray-pass look (m) and the probes' looks (p, tessellated dp). Lane VKWATER4: the water look off
+ * (fo4_water, "off"). */
+enum WaterVariant { kWaterLook = 0, kWaterLookD, kWaterLookM, kWaterLookP, kWaterLookDp, kWaterOff, kWaterVariants };
 struct WaterTables
 {
 	const char * prog;  //!< GL's program file
@@ -342,7 +343,8 @@ inline const WaterTables & waterTables( int v )
 		{ "fo4_waterlookd.prog", true, kT_waterPsD, waterN( kT_waterPsD ), kT_waterPsDBytes, kN_waterPsD, waterN( kN_waterPsD ) },
 		{ "fo4_waterlookm.prog", false, kT_waterPsM, waterN( kT_waterPsM ), kT_waterPsMBytes, kN_waterPsM, waterN( kN_waterPsM ) },
 		{ "fo4_waterlookp.prog", false, kT_waterPsP, waterN( kT_waterPsP ), kT_waterPsPBytes, kN_waterPsP, waterN( kN_waterPsP ) },
-		{ "fo4_waterlookdp.prog", true, kT_waterPsDp, waterN( kT_waterPsDp ), kT_waterPsDpBytes, kN_waterPsDp, waterN( kN_waterPsDp ) } };
+		{ "fo4_waterlookdp.prog", true, kT_waterPsDp, waterN( kT_waterPsDp ), kT_waterPsDpBytes, kN_waterPsDp, waterN( kN_waterPsDp ) },
+		{ "fo4_water.prog", false, kT_waterPsOff, waterN( kT_waterPsOff ), kT_waterPsOffBytes, kN_waterPsOff, waterN( kN_waterPsOff ) } };
 	return k[v >= 0 && v < kWaterVariants ? v : 0];
 }
 //! the variant of GL's program file (-1: no twin)
@@ -362,7 +364,8 @@ inline bool waterPsReads( int v, std::string_view name )
 			return true;
 	return false;
 }
-inline constexpr int kWaterPsLooseMax = std::max( { kT_waterPsBytes, kT_waterPsDBytes, kT_waterPsMBytes, kT_waterPsPBytes, kT_waterPsDpBytes } );
+inline constexpr int kWaterPsLooseMax = std::max( { kT_waterPsBytes, kT_waterPsDBytes, kT_waterPsMBytes, kT_waterPsPBytes, kT_waterPsDpBytes,
+	kT_waterPsOffBytes } );
 //! lane VKFAR2: one instanced command (CellMeshInst::Cmd's layout; GL's DrawElementsIndirectCommand)
 struct WaterCmd
 {
@@ -548,7 +551,7 @@ struct WaterStat
 	int gl = 0, census = 0;
 	std::string glWhy;
 	double censusMs = 0.0;
-	int vk[kWaterVariants] = {}, glV[kWaterVariants] = {};	// lane VKWATER4: per twin (look / d / m / p / dp)
+	int vk[kWaterVariants] = {}, glV[kWaterVariants] = {};	// lane VKWATER4: per twin (look / d / m / p / dp / off)
 };
 WaterStat takeWaterStat();
 void waterCensusTook( double ms );
