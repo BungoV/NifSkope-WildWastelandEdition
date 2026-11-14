@@ -657,7 +657,7 @@ def main():
             prim = {0x0000: 0x0000, 0x0001: 0x0001, 0x0004: 0x0004, 0x000A: 0x000A, 0x000C: 0x000C}.get(it, 0x0004)
             nverts = 48
         if not hasts and not any(e == 'geom' for e, _p, _s in st) and any(
-                e == 'frag' and 'wwPointCoord' in open(p_, encoding='utf-8', errors='replace').read() for e, p_, _s in st):
+                e == 'frag' and 'wwPointCoord' in open(stamps.real(p_)[0], encoding='utf-8', errors='replace').read() for e, p_, _s in st):
             prim = 0x0000   # R9: a point-sprite program (cell_fardots, selection: gl_PointCoord): the app draws points
         def sweep():
             verdict, detail, cov = 'EXACT', '', 0

@@ -4,18 +4,90 @@ uniform blocks (name, data size, member names and offsets), vertex attributes (n
   python -I -X utf8 tests/hlsllive/a2_iface.py <tree> <spv dir from a1_sweep> [--only substr] [--plant]
 A uniform the GLSL keeps active and the SPIR-V program lacks is 'missing' (the app's glUniform* on it would be silently
 dropped: the program must fall back unless the GLSL one is dead); a type/size/offset difference is 'differ'.
---plant renames one uniform in memory: the gate must then report it."""
+--plant renames one uniform in memory: the gate must then report it. A loose bool uniform reported GL_BOOL by GLSL and
+GL_INT by SPIR-V (spvgl declares it int on purpose) is the same; --plant-type turns one such uniform's SPIR-V type into
+GL_FLOAT in memory and the program must then show 'differ'. A GLSL sampler*Shadow against the plain SPIR-V sampler of the
+same dimension is the same only when the SPIR-V compares through it (SHADOW_AS_PLAIN); --plant-shadow takes that proof away
+from one sampler, --plant-attr turns one SPIR-V attribute into GL_FLOAT, --plant-matcol drops a column of a matrix
+attribute the twin declares per column (MAT_COLS): each must show 'differ'."""
 import ctypes, os, sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(HERE)), 'tests', 'spells'))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import remap, spirv_probe, glctx
+import remap, spirv_probe, glctx, stamps
 from glctx import GLuint, GLint, GLenum, fn
 import shader_link_check as slc
 
 # GL sampler / image / buffer-sampler types (the ones whose loss would be a real hole, not a dead uniform)
 SAMPLER_TYPES = set(range(0x8B5E, 0x8B63)) | set(range(0x8DC0, 0x8DD0)) | set(range(0x8DD0, 0x8DDA)) | {0x8DC1, 0x8DC2, 0x8DC3, 0x8DC4, 0x8DC5, 0x8DC6, 0x8DC7, 0x8DC8, 0x8DC9, 0x8DCA, 0x8DCB, 0x8DCC, 0x8DCD, 0x8DCE, 0x8DCF, 0x8DD2, 0x8DD3, 0x8DD4, 0x8DD5, 0x8DD6, 0x8DD7, 0x8DD8, 0x8DD9, 0x8DC0, 0x9108, 0x9109, 0x910A, 0x910B, 0x910C, 0x910D, 0x910E, 0x910F, 0x9110, 0x9111, 0x9112, 0x9113, 0x9114, 0x9115, 0x9116, 0x900D, 0x900E, 0x900F, 0x9010, 0x9011}
+
+# HLSLSRC1 11-14: a loose bool uniform is declared int on purpose by spvgl (the app sets it with glUniform1i; see
+# spvgl.int_twin), so the GLSL program reports GL_BOOL[_VECn] where the SPIR-V one reports GL_INT[_VECn]. Same size: not
+# a difference. Loose uniforms only (block members keep their own bool/uint rule); --plant-type proves a real type change
+# on such a uniform still differs.
+BOOL_AS_INT = {0x8B56: 0x1404, 0x8B57: 0x8B53, 0x8B58: 0x8B54, 0x8B59: 0x8B55}
+
+
+def same_loose(g, s):
+    return g == s or (BOOL_AS_INT.get(g[0]) == s[0] and g[1:] == s[1:])
+
+
+# HLSLSRC1 11-14: DXC writes every OpTypeImage with Depth 2 (unknown), so NV reports a GLSL sampler*Shadow's twin as the
+# plain sampler of the same dimension. The app binds both with glUniform1i(unit) and the depth texture keeps its compare
+# mode, so the pair is the same binding only when the SPIR-V really compares through that variable: its image type says
+# Depth 2 and some stage feeds a load of it to an OpImage*Dref* instruction (dref_vars). --plant-shadow takes that proof
+# away from one such sampler and the program must then show 'differ'.
+SHADOW_AS_PLAIN = {0x8B61: 0x8B5D, 0x8B62: 0x8B5E, 0x8DC3: 0x8DC0, 0x8DC4: 0x8DC1, 0x8DC5: 0x8B60, 0x900D: 0x900C, 0x8B64: 0x8B63}
+DREF_OPS = {89, 90, 93, 94, 97, 307, 308, 311, 312, 316}
+
+# HLSLSRC1 11-14: a GLSL matCxR vertex attribute at location L is fed by the app one column per location (L..L+C-1); the
+# HLSL twin declares the columns as C float<R> inputs (TEXCOORD<L>_<i>, spvgl puts column i at L+i). Same feed when every
+# column is there with the column type and the matrix is not an array. --plant-matcol removes one column: must differ.
+MAT_COLS = {0x8B5A: (2, 0x8B50), 0x8B5B: (3, 0x8B51), 0x8B5C: (4, 0x8B52)}
+
+
+def mat_split(sattr, loc, v):
+    c = MAT_COLS.get(v[0])
+    return bool(c) and v[1] == 1 and all(sattr.get(loc + i) == (c[1], 1) for i in range(c[0]))
+
+
+def dref_vars(path):
+    '''Names of the UniformConstant variables of a SPIR-V module whose image type has Depth 2 and that reach a Dref op.'''
+    import struct
+    b = open(path, 'rb').read()
+    w = struct.unpack('<%dI' % (len(b) // 4), b)
+    names, img, simg, ptr, var, val, used = {}, {}, {}, {}, {}, {}, set()
+    i = 5
+    while i < len(w):
+        n, op = w[i] >> 16, w[i] & 0xFFFF
+        a = w[i + 1:i + n]
+        if op == 5:
+            s = b[(i + 2) * 4:(i + n) * 4]
+            names[a[0]] = s[:s.index(b'\0')].decode('utf-8', 'replace')
+        elif op == 25:
+            img[a[0]] = a[3]                                 # Depth operand
+        elif op == 27:
+            simg[a[0]] = a[1]
+        elif op == 32:
+            ptr[a[0]] = a[2]
+        elif op == 59 and a[2] == 0:
+            var[a[1]] = a[0]
+        elif op == 61 and a[2] in var:
+            val[a[1]] = a[2]
+        elif op in (83, 86) and a[2] in val:                 # OpCopyObject, OpSampledImage (image operand)
+            val[a[1]] = val[a[2]]
+        elif op in DREF_OPS and a[2] in val:
+            used.add(val[a[2]])
+        i += n
+    out = set()
+    for v in used:
+        t = ptr.get(var[v])
+        t = simg.get(t, t)
+        if img.get(t) == 2 and v in names:
+            out.add(names[v])
+    return out
+
 
 STG = {'vert': 'vs', 'frag': 'ps', 'geom': 'gs', 'tesc': 'hs', 'tese': 'ds'}
 GLTYPE = {'vert': 0x8B31, 'frag': 0x8B30, 'geom': 0x8DD9, 'tesc': 0x8E88, 'tese': 0x8E87}
@@ -42,7 +114,7 @@ def items(tree):
         yield pf, st, [], name
         for un, tags in var.get(name, []):
             st2 = [(e, p[:-5] + '__' + tags[s + '.' + e] + '.hlsl' if tags.get(s + '.' + e) else p, s) for e, p, s in st]
-            if all(os.path.exists(x[1]) for x in st2):
+            if all(stamps.exists(x[1]) for x in st2):
                 yield pf, st2, un.split('+'), name + '@' + un
 
 
@@ -79,8 +151,6 @@ def iface(p):
     gaus = fn('glGetActiveUniformsiv', None, GLuint, ctypes.c_int, ctypes.POINTER(GLuint), GLenum, ctypes.POINTER(GLint))
     gabn = fn('glGetActiveUniformBlockName', None, GLuint, GLuint, ctypes.c_int, ctypes.POINTER(GLint), ctypes.c_char_p)
     gabi = fn('glGetActiveUniformBlockiv', None, GLuint, GLuint, GLenum, ctypes.POINTER(GLint))
-    gaa = fn('glGetActiveAttrib', None, GLuint, GLuint, ctypes.c_int, ctypes.POINTER(GLint), ctypes.POINTER(GLint), ctypes.POINTER(GLenum), ctypes.c_char_p)
-    gal = fn('glGetAttribLocation', GLint, GLuint, ctypes.c_char_p)
     n = GLint(); gpi(p, 0x8B86, ctypes.byref(n))
     uni, blocku = {}, {}
     for i in range(n.value):
@@ -103,13 +173,19 @@ def iface(p):
         gabn(p, i, 256, ctypes.byref(ln), nm)
         gabi(p, i, 0x8A40, ctypes.byref(ds))
         blocks[nm.value.decode()] = ds.value
-    na = GLint(); gpi(p, 0x8B89, ctypes.byref(na))
+    # By location: the GLSL has explicit layout(location=n); the app never asks a name. HLSLSRC1 11-14: read the location
+    # with the program-interface query, never glGetAttribLocation(name): NV names no SPIR-V vertex input (''), so every
+    # SPIR-V attribute came back at one junk location and the dict kept one random type (701 A2 rows were mostly that).
+    gpif = fn('glGetProgramInterfaceiv', None, GLuint, GLenum, GLenum, ctypes.POINTER(GLint))
+    gpri = fn('glGetProgramResourceiv', None, GLuint, GLenum, GLuint, ctypes.c_int, ctypes.POINTER(GLenum), ctypes.c_int, ctypes.POINTER(GLint), ctypes.POINTER(GLint))
+    na = GLint(); gpif(p, 0x92E3, 0x92F5, ctypes.byref(na))          # GL_PROGRAM_INPUT, GL_ACTIVE_RESOURCES
+    props = (GLenum * 3)(0x930E, 0x92FA, 0x92FB)                     # GL_LOCATION, GL_TYPE, GL_ARRAY_SIZE
     attr = {}
     for i in range(na.value):
-        nm = ctypes.create_string_buffer(256); ln, sz, ty = GLint(), GLint(), GLenum()
-        gaa(p, i, 256, ctypes.byref(ln), ctypes.byref(sz), ctypes.byref(ty), nm)
-        if not nm.value.startswith(b'gl_'):
-            attr[gal(p, nm.value)] = ty.value     # by location: the GLSL has explicit layout(location=n); the app never asks a name
+        out = (GLint * 3)(); ln = GLint()
+        gpri(p, 0x92E3, i, 3, props, 3, ctypes.byref(ln), out)
+        if out[0] >= 0:                                              # builtins (gl_VertexID) have no location
+            attr[out[0]] = (out[1], out[2])
     return uni, blocku, blocks, attr
 
 
@@ -118,6 +194,10 @@ def main():
     tree, spvdir = a[0], a[1]
     only = a[a.index('--only') + 1] if '--only' in a else None
     plant = '--plant' in a
+    plant_type = '--plant-type' in a
+    plant_shadow = '--plant-shadow' in a
+    plant_attr = '--plant-attr' in a
+    plant_matcol = '--plant-matcol' in a
     glctx.context()
     units = GLint(0); glctx.gl.glGetIntegerv(0x8872, ctypes.byref(units))
     units = min(max(units.value, 1), 32) - 2
@@ -153,6 +233,28 @@ def main():
         if plant and s[2]:
             k = sorted(s[2])[0]
             s[2][k] += 4          # a planted block-size fault: the gate must report it
+        if plant_type:
+            # a planted type change on a bool uniform spvgl declared int (int -> float): the bool/int pair must not hide it
+            ks = sorted(k for k, v in g[0].items() if k in s[0] and v[0] in BOOL_AS_INT and same_loose(v, s[0][k]))
+            if ks:
+                s[0][ks[0]] = (0x1406,) + s[0][ks[0]][1:]
+                print('PLANT-TYPE', name, ks[0], 'GL_INT -> GL_FLOAT', flush=True)
+        dref = set().union(*(dref_vars(x[1]) for x in specs))
+        shadow_ok = lambda k, v: v[0] in SHADOW_AS_PLAIN and k in dref and s[0][k] == (SHADOW_AS_PLAIN[v[0]],) + v[1:]
+        if plant_shadow:
+            ks = sorted(k for k, v in g[0].items() if k in s[0] and shadow_ok(k, v))
+            if ks:
+                dref.discard(ks[0])
+                print('PLANT-SHADOW', name, ks[0], 'no Dref use', flush=True)
+        if plant_attr and s[3]:
+            k = sorted(s[3])[0]
+            s[3][k] = (0x1406,) + s[3][k][1:]      # a planted attribute type fault (-> float)
+            print('PLANT-ATTR', name, k, flush=True)
+        if plant_matcol:
+            ks = sorted(k for k, v in g[3].items() if k in s[3] and mat_split(s[3], k, v))
+            if ks:
+                del s[3][ks[0] + MAT_COLS[g[3][ks[0]][0]][0] - 1]      # the matrix's last column gone
+                print('PLANT-MATCOL', name, ks[0], flush=True)
         tot['programs'] += 1
         miss, diff, dropped = [], [], []
         for ix, label in ((0, 'uniform'), (1, 'blockmember'), (3, 'attrib')):
@@ -164,6 +266,8 @@ def main():
                         dropped.append(k)
                         continue
                     miss.append('%s %s' % (label, k))
+                elif ix == 0 and (same_loose(v, s[ix][k]) or shadow_ok(k, v)) or ix == 3 and mat_split(s[3], k, v):
+                    continue
                 elif s[ix][k] != v and not (ix == 1 and s[ix][k][0] == 5125 and v[0] == 35670 and s[ix][k][1:] == v[1:]):   # a bool member is a uint in SPIR-V
                     diff.append('%s %s glsl=%s spv=%s' % (label, k, v, s[ix][k]))
         for k, v in g[2].items():

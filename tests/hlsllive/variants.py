@@ -92,7 +92,16 @@ def main():
     if dry:
         return
     ok = bad = 0
+    import stamps
+    readable = set()   # HLSLSRC: a readable source (stamps.SRC_MARK) builds its define sets itself; no per-variant file is written
+    for dp, _dn, fs in os.walk(os.path.join(tree, 'res/shaders/hlsl')):
+        for f in fs:
+            if f.endswith('.hlsl') and '__' not in f and stamps.SRC_MARK.encode() in stamps._file(os.path.join(dp, f))[:4000]:
+                readable.add(f)
     for (p, tag), t in sorted(jobs.items()):
+        stem, ext = os.path.splitext(os.path.basename(p))
+        if '%s_%s.hlsl' % (stem, convert.SUFFIX.get(ext[1:], '')) in readable:
+            continue
         try:
             out, err = convert.convert(tree, p, byname, scratch, variant=tuple(t))
         except Exception as e:
