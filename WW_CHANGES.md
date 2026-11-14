@@ -62,6 +62,20 @@ Changed, not built, not checked live. The look is for bungo's flight.
 - The AO gate's depth mips 1-4 print as information lines (they are internal to the pass); the AO results keep their
   bars. lightview.sh: LIGHTVIEW GATE OK, 29 greens, 19 reds FAIL (new job ax_H: GL from SPIR-V, red = the old step).
 
+## VKFAR3 A1 DDGI (2026-11-15): the traced GI's probe atlas imported on the present device (WW_VKVIEW=1)
+
+Changed, not built, not checked live. Nothing on the view reads it yet (its consumers are the next steps), so no
+frame changes.
+
+- When RT GI hands a new volume to GL and the view is on, the probe atlas is also imported on the present device (the
+  device that owns the window): its own export of the same memory, a buffer over it and a texel view. A `vk ddgi:` line
+  says it was imported or why not (another GPU or driver, wrong usage, sizes). Red WW_VKVIEW_DDGI_RED=1 skips it.
+- It is freed with GL's copy (a new volume, RT GI off, the cell closed) and at shutdown.
+- No wait of its own: readers on the view are ordered behind GL, which already waits for the traced GI's update.
+- Offline gate tests/vkframe/ddgiview.sh: a second device exports a 4096-probe atlas, the present device imports it
+  and reads it back through the view: EXACT (0 of 790528 texels, twice, and a window); reds (a view one texel late,
+  half a view) FAIL; another driver and a buffer without texel use are refused, and every handle is closed.
+
 ## VKFAR2 L8 slice 1 (2026-11-14): rain / snow pass for the Vulkan view, not wired in (gate red)
 
 Changed, not built, not checked live. Nothing in the app calls it yet, so no frame changes.

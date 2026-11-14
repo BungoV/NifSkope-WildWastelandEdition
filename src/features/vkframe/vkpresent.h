@@ -903,6 +903,36 @@ template <class Fn> bool fxTexOf( Fn * fn, unsigned prog, const char * sampler, 
 	return ok;
 }
 
+/* Lane VKFAR3 (row A1): the DDGI probe atlas (bakert's device, rtddgi_vk.inc) imported onto the present device as a
+ * VkBuffer + an RGBA32F texel view, so a pass on the view reads it in place (vkddgi.inc). The fields are what
+ * bakert::ddgiGpuShare hands out (rtddgi_gpu.h DdgiGpuShare); the import must repeat the exporter's buffer (size, usage)
+ * and allocation (size, memory type, dedicated), so the exporter says them rather than the importer guessing.
+ * Order: no semaphore of its own. bakert's submit signals vkDone once and GL waits it once (rtddgicell.cpp), so a reader
+ * on the present device is ordered through GL: its crossing's glDone comes after GL's vkDone wait in GL's stream, and
+ * GL's wait on the crossing's vkDone comes before GL's next glDone to bakert (which holds bakert's next write). A reader
+ * that runs outside such a crossing (deferred, no GL signal) is not ordered against bakert's writes. */
+struct DdgiAtlasShare
+{
+	void * memory = nullptr;          //!< an NT handle of the atlas's memory (OPAQUE_WIN32); the import closes it, always
+	std::uint64_t memorySize = 0;     //!< the allocation's size
+	std::uint64_t bufferSize = 0;     //!< the exporter's VkBuffer size
+	std::uint64_t atlasBytes = 0;     //!< the atlas itself, at offset 0 (probes x 193 texels x 16 bytes)
+	std::uint32_t usage = 0;          //!< the exporter's VkBufferUsageFlags (UNIFORM_TEXEL_BUFFER among them)
+	std::uint32_t memoryType = 0;     //!< the exporter's memory type index (the same GPU: the same index)
+	bool dedicated = true;
+	std::uint8_t deviceUuid[16] = {}, driverUuid[16] = {};
+};
+//! the import under key (one a volume; an older one under key is dropped first). false: why; nothing kept
+bool ddgiAtlasImport( const void * key, const DdgiAtlasShare & in, std::string & why );
+//! the texel view (VkBufferView as a handle) and the atlas's texels under key; 0 when none
+std::uint64_t ddgiAtlasView( const void * key, std::uint64_t * texels = nullptr );
+//! the import under key goes (drains the worker and waits the device idle first; nothing under key: returns at once)
+void ddgiAtlasDrop( const void * key );
+/* gates only: texels [first, first + count) fetched through the view on the worker (ddgi_atlas_fetch_cs), 4 floats each.
+ * red 1: a view one texel late (offset minTexelBufferOffsetAlignment rounded to a texel), red 2: a view over the first
+ * half of the atlas (fetches past it read 0). false: why */
+bool ddgiAtlasRead( const void * key, std::uint32_t first, std::uint32_t count, std::vector<float> & out, int red, std::string & why );
+
 }
 
 #ifndef WW_VKPRESENT_NO_QT

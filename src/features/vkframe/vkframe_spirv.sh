@@ -193,6 +193,8 @@ fxs() {
 	rm -f "$1.spv"
 }
 fxs precip_view_cs weather/precip_view_cs
+# lane VKFAR3: the DDGI atlas read through the present device's view (gate)
+fxs ddgi_atlas_fetch_cs rtddgi/ddgi_atlas_fetch_cs
 fxv precip_view_vs weather/precip_view_vs
 fx precip_view_ps weather/precip_view_ps
 ls -la precip_view_cs.spv.h precip_view_vs.spv.h precip_view_ps.spv.h

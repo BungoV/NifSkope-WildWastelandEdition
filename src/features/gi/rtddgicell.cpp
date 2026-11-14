@@ -15,6 +15,7 @@
 #include "features/gi/rttracesetrule.h"   // lane AIRPERF1 r5: warmUpdates
 #include "features/gi/bakert.h"          // lane VKCOMPUTE1: asyncQueue
 #include "features/gi/vkasyncrule.h"     // lane VKCOMPUTE1: GL's wait placement
+#include "features/vkframe/vkpresent.h"   // lane VKFAR3: the atlas imported on the present device
 #include <chrono>
 #include "version.h"
 #include "wwswitch.h"
@@ -648,6 +649,7 @@ void freeGl( Cell & c, Renderer * r )
 	c.interop = c.glRead = false;
 	c.fresh = false;
 	c.vk.reset();
+	WwVkPresent::ddgiAtlasDrop( &c );   // lane VKFAR3: the present device's import of the same memory (none: returns at once)
 }
 
 //! the volume and its GL objects (GL first: its import holds the device's memory)
@@ -859,6 +861,40 @@ bool importShare( Cell & c, Renderer * r, RtDdgiLive & L, QString * why )
 	c.interop = true;
 	c.glRead = false;
 	return true;
+}
+
+/*! lane VKFAR3 (row A1): the atlas on the present device too (vkddgi.inc), for the passes on the view that read the volume.
+ *  Its own ddgiGpuShare: importShare closed GL's handles. The semaphore handles go unused: the present device's readers are
+ *  ordered through GL's crossings (vkpresent.h DdgiAtlasShare). Red WW_VKVIEW_DDGI_RED=1: no import */
+void vkDdgiImport( Cell & c, RtDdgiLive & L )
+{
+	if ( !WwVkPresent::shareKept( "WW_VKVIEW_DDGI_RED" ) ) {
+		WwVkPresent::ddgiAtlasDrop( &c );
+		return;
+	}
+	bakert::DdgiGpuShare sh;
+	if ( !bakert::ddgiGpuShare( L.session(), &sh ) ) {
+		say( c.tag + QStringLiteral( "vk ddgi: not imported (%1)" ).arg( QString::fromStdString( sh.why ) ) );
+		return;
+	}
+	bakert::ddgiGpuCloseHandle( sh.vkDone );
+	bakert::ddgiGpuCloseHandle( sh.glDone );
+	WwVkPresent::DdgiAtlasShare in;
+	in.memory = sh.memory;
+	in.memorySize = sh.memorySize;
+	in.bufferSize = sh.bufferSize;
+	in.atlasBytes = sh.atlasBytes;
+	in.usage = sh.usage;
+	in.memoryType = sh.memoryType;
+	in.dedicated = sh.dedicated;
+	std::memcpy( in.deviceUuid, sh.deviceUuid, 16 );
+	std::memcpy( in.driverUuid, sh.driverUuid, 16 );
+	std::string why;
+	if ( WwVkPresent::ddgiAtlasImport( &c, in, why ) )   // closes in.memory
+		say( c.tag + QStringLiteral( "vk ddgi: the atlas imported on the present device (%1 MB, %2 texels, a view, no copy)" )
+			.arg( double( sh.atlasBytes ) / 1048576.0, 0, 'f', 1 ).arg( qulonglong( sh.atlasBytes / 16 ) ) );
+	else
+		say( c.tag + QStringLiteral( "vk ddgi: not imported (%1)" ).arg( QString::fromStdString( why ) ) );
 }
 
 //! the readback path (M2's, the red): the tiles of the last step into the texture buffer, the probes' texels when moved
@@ -2505,6 +2541,8 @@ static void volumeFrame( Scene * scene, Cell & c, const CellSpec * spIn, bool du
 					QString why;
 					if ( !importShare( c, r, b->live, &why ) )
 						c.interopWhy = QStringLiteral( "interop refused: " ) + why;
+					else
+						vkDdgiImport( c, b->live );   // lane VKFAR3
 				} else {
 					c.interopWhy = QStringLiteral( "WW_CELL_RTDDGI_RED=readback" );
 				}

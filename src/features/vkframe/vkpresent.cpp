@@ -64,6 +64,7 @@
 #include "features/vkframe/precip_view_cs.spv.h"
 #include "features/vkframe/precip_view_vs.spv.h"
 #include "features/vkframe/precip_view_ps.spv.h"
+#include "features/vkframe/ddgi_atlas_fetch_cs.spv.h"  // lane VKFAR3: the DDGI atlas read through its texel view (gates)
 #include "features/vkframe/vkfarcards.h"  // lane VKFAR1 round 2: the far cards' inputs (vkfarcards.inc)
 #include "features/vkframe/obj_depth_vs.spv.h"  // lane VKOBJ1
 
@@ -223,6 +224,7 @@ struct Vk
 	VkQueue queue = VK_NULL_HANDLE;
 	std::uint32_t family = UINT32_MAX;
 	std::uint8_t uuid[VK_UUID_SIZE] = {};
+	std::uint8_t driverUuid[VK_UUID_SIZE] = {};  // lane VKFAR3: a Vulkan-to-Vulkan import matches device AND driver
 	VkPhysicalDeviceMemoryProperties mem {};
 	VkCommandPool pool = VK_NULL_HANDLE;
 	VKP( vkGetInstanceProcAddr ); VKP( vkCreateInstance ); VKP( vkEnumeratePhysicalDevices );
@@ -481,6 +483,7 @@ bool makeDevice( std::string & why )
 		if ( match && pp.properties.apiVersion >= VK_API_VERSION_1_1 ) {
 			v.phys = p;
 			std::memcpy( v.uuid, id.deviceUUID, VK_UUID_SIZE );
+			std::memcpy( v.driverUuid, id.driverUUID, VK_UUID_SIZE );
 			break;
 		}
 	}
@@ -727,6 +730,7 @@ void waterDrop();
 void objDrop();  // lane VKOBJ1
 void blFree();  // lane VKOBJ2
 void fogDrop();  // lane VKFAR2 (vkfog.inc): the air's integrate
+void ddgiFreeAll();  // lane VKFAR3 (vkddgi.inc): the DDGI atlas imports and the fetch pipeline
 
 struct Worker
 {
@@ -3687,6 +3691,7 @@ void shutdown()
 	csmDrop();  // lane VKSHADOW1: the cascades' layer views go before the shared arrays they view
 	objDrop();  // lane VKOBJ1: the prepass framebuffer goes before the shared depth it holds
 	fogDrop();  // lane VKFAR2: the integrate's set goes before the shared volumes it views
+	ddgiFreeAll();  // lane VKFAR3: the DDGI atlas imports (bakert keeps its own buffer)
 	blFree();  // lane VKOBJ2: the bindless table's set and samplers (it holds the shared targets' views)
 	// lane VKSHARE1: the keyed shared targets (their owners see sharedTargetIs false and make GL's own again)
 	if ( !shareds().empty() ) {
@@ -8445,6 +8450,7 @@ ObjStat takeObjStat()
 #include "features/vkframe/vkfog.inc"  // lane VKFAR2: the air's integrate (the froxel volume) on the view
 #include "features/vkframe/vkflare.inc"  // lane VKFAR2 P9: the lens-flare sprites in the deferred tone pass
 #include "features/vkframe/vkpost7.inc"  // lane VKFAR2 P7: DoF, motion blur and object blur in the deferred tone pass
+#include "features/vkframe/vkddgi.inc"  // lane VKFAR3: the DDGI probe atlas imported from bakert's device
 
 namespace
 {

@@ -72,7 +72,8 @@ VKFRAME_FXV = {'fardots_view_vs': 'far-lod/cell_fardots_view_vs',
 	'precip_view_vs': 'weather/precip_view_vs'}	# lane VKFAR2: L8 slice 1, rain / snow's instanced corners
 HLSL_SPECS += [('src/features/vkframe', k, 'vulkan1.2', 'vkframe_%s_spv' % k) for k in VKFRAME_FXV]
 # lane VKFAR2 L8 slice 1: rain / snow's record pass, the script's `fxs <name> <dir/file>` lines (fx()'s shifts, cs_6_0)
-VKFRAME_FXS = {'precip_view_cs': 'weather/precip_view_cs'}
+VKFRAME_FXS = {'precip_view_cs': 'weather/precip_view_cs',
+	'ddgi_atlas_fetch_cs': 'rtddgi/ddgi_atlas_fetch_cs'}	# lane VKFAR3: the DDGI atlas through the present device's view
 HLSL_SPECS += [('src/features/vkframe', k, 'vulkan1.2', 'vkframe_%s_spv' % k) for k in VKFRAME_FXS]
 # lane VKFAR1 round 2: the far cards' pixel stage, the script's `fxk <name> <dir/file>` lines (fx() + every declared binding kept)
 VKFRAME_FXK = {'farcards_view_ps': 'far-lod/farcards_view_ps',
