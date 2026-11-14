@@ -476,3 +476,38 @@ bool underRun( const UnderRun & r, std::string & why )
 	return true;
 }
 }  // namespace WwVkPresent
+
+#ifndef WW_VKPRESENT_NO_QT
+namespace WwVkPresent
+{
+void underSay( bool wanted, const char * glWhy )
+{
+	static QString said;
+	static double at = 0.0;
+	const QString head = QStringLiteral( "vk under: " );
+	if ( !wanted ) {
+		const QString line = head + QStringLiteral( "on GL (%1)" ).arg( QString::fromUtf8( glWhy ? glWhy : "" ) );
+		if ( line != said ) {
+			said = line;
+			qInfo().noquote() << line;
+		}
+		return;
+	}
+	const double now = nowMs();
+	if ( now - at < 5000.0 && said.startsWith( head + QStringLiteral( "wanted" ) ) )
+		return;
+	at = now;
+	const FxStat st = takeUnderStat();
+	QString line = head + QStringLiteral( "wanted on Vulkan, %1 frames run (both draws, one crossing; %2 ms CPU each, max %3; "
+		"%4 pipelines built in %5 ms)" )
+		.arg( st.runs ).arg( st.runs ? st.cpuMs / st.runs : 0.0, 0, 'f', 3 ).arg( st.maxMs, 0, 'f', 3 ).arg( st.pipelines )
+		.arg( st.buildMs, 0, 'f', 1 );
+	if ( st.gl > 0 )
+		line += QStringLiteral( "; on GL %1 frames (last: %2)" ).arg( st.gl ).arg( QString::fromStdString( st.glWhy ) );
+	if ( st.fails > 0 )
+		line += QStringLiteral( "; %1 refused (last: %2)" ).arg( st.fails ).arg( QString::fromStdString( st.failWhy ) );
+	said = line;
+	qInfo().noquote() << line;
+}
+}  // namespace WwVkPresent
+#endif
