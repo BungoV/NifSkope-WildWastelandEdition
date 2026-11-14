@@ -222,14 +222,9 @@ cbuffer LooseUniforms : register(b31, space0)
 
 #ifdef WW_BINDLESS
 // lane BINDLESS2: the material's maps as resident handles in the draw's row (slots of src/features/near/cellbindless.h)
+// BaseMap ... EnvironmentMap (and their _<map>_sampler names) are the route's: GL handles (ww_bindless_gl.hlsli) or
+// Vulkan / descriptor-heap indices (ww_bindless_vk.hlsli), slots 0-6 of the row's tex[]
 #include "../near/ww_bindless.hlsli"
-#define BaseMap (sampler2D)( wwDraws[wwDrawIdx].tex[0] )
-#define NormalMap (sampler2D)( wwDraws[wwDrawIdx].tex[1] )
-#define GlowMap (sampler2D)( wwDraws[wwDrawIdx].tex[2] )
-#define BacklightMap (sampler2D)( wwDraws[wwDrawIdx].tex[3] )
-#define SpecularMap (sampler2D)( wwDraws[wwDrawIdx].tex[4] )
-#define GreyscaleMap (sampler2D)( wwDraws[wwDrawIdx].tex[5] )
-#define EnvironmentMap (sampler2D)( wwDraws[wwDrawIdx].tex[6] )
 #else
 Texture2D<float4> BaseMap : register(t50, space0); SamplerState _BaseMap_sampler : register(s50, space0);
 Texture2D<float4> NormalMap : register(t51, space0); SamplerState _NormalMap_sampler : register(s51, space0);
@@ -466,7 +461,15 @@ float3 tonemap(float3 x)
 #define CELL_GI_ONEREAD 1	// DDGIREADPERF1: one volume read site (cellGiFirst in main, cell_lights.glsl)
 #define CELL_RESTIR_MISS_PIXEL 1	// MODULES1 R7 item 2: a surface off the traced depth takes the pixel's shadow ratio (cellShadowF)
 #include "../lights/cell_lights.hlsli"
+#if defined(WW_BINDLESS) && defined(__spirv__) && defined(WW_GL_BINDLESS)
+#define Texture2D WwBlTexT	// the probes' atlas parameter takes a GL bindless map (GreyscaleMap)
+#define SamplerState uint
+#endif
 #include "../reflections/cell_reflprobe.hlsli"
+#if defined(WW_BINDLESS) && defined(__spirv__) && defined(WW_GL_BINDLESS)
+#undef Texture2D
+#undef SamplerState
+#endif
 #include "../ao/cell_ao.hlsli"
 #include "../reflections/cell_ssr.hlsli"
 #include "cell_grass.hlsli"
@@ -1384,6 +1387,9 @@ struct SPIRV_Cross_Input
 #if defined(WW_FAR_SPLAT)
     WW_LOC(16) nointerpolation float farSplatA : TEXCOORD16;
 #endif
+#if defined(WW_BINDLESS)
+    WW_LOC(16) nointerpolation uint wwBlRow : TEXCOORD16;	// the draw's row, flat from the vertex stage (no far splat here)
+#endif
 };
 
 struct SPIRV_Cross_Output
@@ -1396,6 +1402,9 @@ struct SPIRV_Cross_Output
 
 SPIRV_Cross_Output main(SPIRV_Cross_Input stage_input)
 {
+#if defined(WW_BINDLESS)
+    wwBlRow = stage_input.wwBlRow;
+#endif
     gl_FragCoord = stage_input.gl_FragCoord;
     gl_FragCoord.w = 1.0 / gl_FragCoord.w;
     LightDir = stage_input.LightDir;
