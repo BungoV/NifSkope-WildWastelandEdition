@@ -67,11 +67,14 @@ HLSL_SPECS += [('src/features/vkframe', k, 'vulkan1.2', 'vkframe_%s_spv' % k) fo
 VKFRAME_FXV = {'fardots_view_vs': 'far-lod/cell_fardots_view_vs'}
 HLSL_SPECS += [('src/features/vkframe', k, 'vulkan1.2', 'vkframe_%s_spv' % k) for k in VKFRAME_FXV]
 # lane VKFAR1 round 2: the far cards' pixel stage, the script's `fxk <name> <dir/file>` lines (fx() + every declared binding kept)
-VKFRAME_FXK = {'farcards_view_ps': 'far-lod/farcards_view_ps',
-	'water_view_ps': 'water/water_view_ps',	# lane VKWATER3 (frozen twins, as HLSLSRC2's)
+VKFRAME_FXK = {'farcards_view_ps': 'far-lod/farcards_view_ps'}
+HLSL_SPECS += [('src/features/vkframe', k, 'vulkan1.2', 'vkframe_%s_spv' % k) for k in VKFRAME_FXK]
+# lane VKWATER3: the water's pixel twins (frozen, as HLSLSRC2's), the script's `fxkw` lines: fxk() + -fvk-use-dx-position-w
+# (their spirv-cross fixup gl_FragCoord.w = 1.0 / gl_FragCoord.w wants D3D's clip w in SV_Position.w)
+VKFRAME_FXKW = {'water_view_ps': 'water/water_view_ps',
 	'water_view_d_ps': 'water/water_view_d_ps', 'water_view_m_ps': 'water/water_view_m_ps',
 	'water_view_p_ps': 'water/water_view_p_ps', 'water_view_dp_ps': 'water/water_view_dp_ps'}
-HLSL_SPECS += [('src/features/vkframe', k, 'vulkan1.2', 'vkframe_%s_spv' % k) for k in VKFRAME_FXK]
+HLSL_SPECS += [('src/features/vkframe', k, 'vulkan1.2', 'vkframe_%s_spv' % k) for k in VKFRAME_FXKW]
 # lane VKWATER3: the water's vertex stage, the script's `fxw <name> <dir/file>` lines (vs_6_0, own shifts, bindings kept)
 VKFRAME_FXW_ARGS = ['-fvk-b-shift', '256', '0', '-fvk-t-shift', '110', '0', '-fvk-s-shift', '180', '0', '-fvk-u-shift', '220', '0',
 	'-fspv-preserve-bindings']
@@ -182,6 +185,11 @@ def script_ok(tree):
 	klines = dict(re.findall(r'^fxk ([a-z0-9_]+) ([A-Za-z0-9_/+-]+)$', vf, re.M))
 	if klines != VKFRAME_FXK:
 		bad.append('src/features/vkframe/vkframe_spirv.sh: its fxk lines (%s) are not this checker\'s far cards' % ' '.join(sorted(klines)))
+	if '\t"$DXC" -spirv -fspv-target-env=vulkan1.2 -T ps_6_0 -E main ' + ' '.join(VKFRAME_SKY_ARGS + ['-fspv-preserve-bindings', '-fvk-use-dx-position-w']) + ' -Fo "$1.spv" ' not in vf:
+		bad.append('src/features/vkframe/vkframe_spirv.sh: its fxkw() compile line changed')
+	kwlines = dict(re.findall(r'^fxkw ([a-z0-9_]+) ([A-Za-z0-9_/+-]+)$', vf, re.M))
+	if kwlines != VKFRAME_FXKW:
+		bad.append('src/features/vkframe/vkframe_spirv.sh: its fxkw lines (%s) are not this checker\'s water pixel twins' % ' '.join(sorted(kwlines)))
 	if '\t"$DXC" -spirv -fspv-target-env=vulkan1.2 -T vs_6_0 -E main ' + ' '.join(VKFRAME_FXW_ARGS) + ' -Fo "$1.spv" ' not in vf:
 		bad.append('src/features/vkframe/vkframe_spirv.sh: its fxw() compile line changed')
 	wlines = dict(re.findall(r'^fxw ([a-z0-9_]+) ([A-Za-z0-9_/+-]+)$', vf, re.M))
@@ -319,6 +327,9 @@ def main(argv):
 			if k in VKFRAME_FXK:
 				src = os.path.join(tree, 'res/shaders/hlsl', VKFRAME_FXK[k] + '.hlsl')
 				hdefs = VKFRAME_SKY_ARGS + ['-fspv-preserve-bindings']
+			if k in VKFRAME_FXKW:
+				src = os.path.join(tree, 'res/shaders/hlsl', VKFRAME_FXKW[k] + '.hlsl')
+				hdefs = VKFRAME_SKY_ARGS + ['-fspv-preserve-bindings', '-fvk-use-dx-position-w']
 			if k in VKFRAME_FXW:
 				src = os.path.join(tree, 'res/shaders/hlsl', VKFRAME_FXW[k] + '.hlsl')
 				hdefs = VKFRAME_FXW_ARGS
@@ -335,7 +346,7 @@ def main(argv):
 				hdefs = VKFRAME_FXD_ARGS
 				m = re.match(r'(ds_6_0)', 'ds_6_0')
 			opt = [] if d == 'src/features/vkframe' else ['-O0']   # vkframe_spirv.sh builds optimised
-			r = subprocess.run([dxc, '-spirv', '-fspv-target-env=' + env, '-T', m.group(1) if m else 'ps_6_0' if k in VKFRAME_SKY or k in VKFRAME_FX or k in VKFRAME_FXK else 'cs_6_0', '-E', 'main']
+			r = subprocess.run([dxc, '-spirv', '-fspv-target-env=' + env, '-T', m.group(1) if m else 'ps_6_0' if k in VKFRAME_SKY or k in VKFRAME_FX or k in VKFRAME_FXK or k in VKFRAME_FXKW else 'cs_6_0', '-E', 'main']
 			                   + opt + hdefs + ['-Fo', spv, src], capture_output=True, text=True, timeout=300)
 			if r.returncode == 0:
 				r = subprocess.run([sys.executable, '-I', os.path.join(tree, 'tools/spv_header.py'), spv, vn, out],

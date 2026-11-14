@@ -5,9 +5,13 @@
 // helpers are reused (its main renamed). GL's side of the draw is read by the shipped waterStateOf.
 // Scene: a wavy grid (a third of its rows wound clockwise, so the cull is tested both ways), a depth slab over the left half
 // of the frame before the water (LEQUAL against it, depth written), every sampler of the program on its own unit with a
-// texture of the app's format holding seeded data (integer and texel-buffer inputs zero), every loose uniform seeded.
-// Two seeds; seed 2 also draws through a scissor and from an element offset. A tessellated twin (argv[2], e.g.
-// fo4_waterlookd: hs + ds on 3-vertex patches) adds seed 3 with the sea on and displaced (app-sized ocean values).
+// texture of the app's format holding seeded data (integer and texel-buffer inputs zero; the scene depth a smooth seeded
+// field, since GL truncates its fetch coordinates), every loose float seeded from its own stream (the seed's draw ^ FNV-1a
+// of its name, so a name holds one value in every variant). Switches are never a coin (ww-gl-vk-interop): every int is 0,
+// then each seed's app-like profile turns its switches on (seed 1 every look row, seed 2 that plus the air, seed 3 the sea),
+// and every profile is proven by its judged reds failing. Seed 2 also draws through a scissor and from an element offset,
+// with waterProbe 25 (0 elsewhere). A tessellated twin (argv[2], e.g. fo4_waterlookd: hs + ds on 3-vertex patches) adds
+// seed 3 with the sea on and displaced (app-sized ocean values).
 // Bar (set before the first run, never widened; notes/vkwater3/README.md):
 //   covered = samples whose depth or colour differs from the frame before the water on either side; must be >= 1000
 //   (an empty layer FAILS); coverage mismatch (covered on one side only) <= 0.05 % of covered; depth within 1 D24 unit
@@ -15,7 +19,8 @@
 //   covered on both sides (NaN equals NaN). EXACT = no half and no depth differs and coverage equal; BOUND = within the bar.
 // Reds (each must FAIL, never refuse): red 1 the ps loose block one vec4 off, red 2 plain samplers, red 4 cull flipped,
 // red 8 depth ALWAYS; tessellated only: red 16 the domain origin upper-left (seed 1), red 32 the ds loose block one vec4
-// off (seed 3, where a tessellated twin's red 2 is judged too). Last line `WATERDRAW GATE OK` or `WATERDRAW GATE FAILED`.
+// off (seed 3, where a tessellated twin's red 2 is judged too). Seed 2 (the air) judges reds 1 and 2.
+// Last line `WATERDRAW GATE OK` or `WATERDRAW GATE FAILED`.
 // Sampling: judged at anisotropy 1 on both sides (NV's anisotropic footprint differs GL vs Vulkan at the same maxAnisotropy:
 // 10 248 samples past at the app's 16, BOUND at 1). The app's 16 is drawn once more on seed 1 and logged, never judged.
 // The noise's 16 is intended (the game's slots 4..6); the misses are its normal bending the SSR lookup over seeded noise.
@@ -299,6 +304,16 @@ bool fill( Smp & s, std::mt19937 & rng )
 				const float v = u01( rng );
 				std::memcpy( &x, &v, 4 );
 			}
+			/* the air's (L, T) as a drawn air holds it (thin near the eye: T 0.6..1, L under 0.25): T 0..1 hid the
+			 * surface under the air on some draws (seed 2's red 2 blind, the surface times a T near 0); the aerial
+			 * perspective's froxels (atApTex) alike (d seed 2 draw 4: red 2 blind under it, failing with atAp.x 0) */
+			if ( ( s.name == "volTex" || s.name == "atApTex" ) && comps == 4 )
+				for ( size_t i = 0; i < data.size(); i++ ) {
+					float v;
+					std::memcpy( &v, &data[i], 4 );
+					v = i % 4 == 3 ? 0.6f + 0.4f * v : 0.25f * v;
+					std::memcpy( &data[i], &v, 4 );
+				}
 		}
 		if ( s.kind == 0 )
 			glTexSubImage2D( tg, l, 0, 0, lw, lh, pf, ty, data.data() );
@@ -369,12 +384,11 @@ int seedUnis( GLuint p, std::mt19937 & rng )
 		for ( const char c : base )
 			h = ( h ^ std::uint8_t( c ) ) * 16777619u;
 		std::mt19937 nr( s0 ^ h );
+		// every int / bool 0 here: switches come from the seed's profile (wdrProfile), never a coin (ww-gl-vk-interop)
 		for ( size_t k = 0; k < total; k++ ) {
 			fv[k] = zero ? 0.0f : u01( nr );
-			iv[k] = zero ? 0 : GLint( nr() & 1u );
+			iv[k] = 0;
 		}
-		if ( std::getenv( "WATERDRAW_DUMPI" ) && ( kind == 'i' || kind == 'u' ) && iv[0] != 0 )	// diagnostic only
-			std::printf( "WATERDRAW int %s = %d\n", base.c_str(), int( iv[0] ) );
 		if ( base == "modelViewMatrix" || base == "normalMatrix" ) {
 			const int dim = kind == '4' ? 4 : 3;
 			for ( int r = 0; r < dim; r++ )
@@ -845,14 +859,15 @@ int main( int argc, char ** argv )
 	static char twinKeys[128];
 	// GL's draw and the twin's into the same frame contents, no scissor, judged against the frame before the water
 	auto pairRun = [&]( const std::vector<std::uint16_t> & bgC, const std::vector<float> & bgD, long long idxOff, int count, bool & ran ) {
+		const bool bsc = std::getenv( "WATERDRAW_BISSCI" ) != nullptr;	// diagnostic only: the bisect through the scissor
 		before( fbRef );
-		drawState( fbRef, false );
+		drawState( fbRef, bsc );
 		glDrawElements( drawMode, count, GL_UNSIGNED_SHORT, reinterpret_cast<const void *>( std::uintptr_t( idxOff ) ) );
 		stateEnd();
 		const std::vector<std::uint16_t> gC = readColor( refCol );
 		const std::vector<float> gD = readDepth( refDs, false );
 		before( fbFrame );
-		drawState( fbFrame, false );
+		drawState( fbFrame, bsc );
 		WwVkPresent::WaterRun r;
 		r.variant = variant;
 		WwVkPresent::waterStateOf( &gw, pWater, r );
@@ -862,6 +877,8 @@ int main( int argc, char ** argv )
 		r.idxOff = idxOff;
 		r.count = count;
 		r.key = reinterpret_cast<std::uintptr_t>( twinKeys );
+		if ( const char * br = std::getenv( "WATERDRAW_BISRED" ) )	// diagnostic only: the bisect under a red
+			r.red = std::atoi( br );
 		ran = WwVkPresent::waterRun( r, why );
 		stateEnd();
 		if ( !ran )
@@ -878,6 +895,90 @@ int main( int argc, char ** argv )
 			if ( !fill( s, rng ) )
 				return fatal( "texture " + s.name );
 		const int nu = seedUnis( pWater, rng );
+		/* piece 2: the seed's switch profile, the app's (seedUnis leaves every int 0; random ints switched debug views and
+		 * the far mask on, a coin per variant). Every seed: the water look rows Ultra draws. Seed 2: + the air (fog, the
+		 * volume). Seed 3: + the sea (below). Each profile is judged by reds that must FAIL on it */
+		{
+			f.useProgram( pWater );
+			std::vector<const char *> on = { "waterHaveDepth", "waterDepthOn", "waterClearOn", "waterReflOn", "waterSsrOn",
+				"waterSkyOn", "waterSkyVisOn", "waterShoreOn", "waterShoreLaw", "waterShoreEdgeLaw", "waterFlowOn", "waterGlintOn",
+				"waterRiverFoamOn", "waterCauOn", "waterCauShadow", "waterContactOn", "waterWavesOn", "waterSurfOn", "cellIsLinear" };
+			if ( seed == 2 )
+				on.insert( on.end(), { "fogOn", "volOn", "volAirFlags" } );
+			const GLint one = 1;
+			for ( const char * nm : on )
+				if ( f.getUniformLocation( pWater, nm ) >= 0 )
+					f.uniform1iv( f.getUniformLocation( pWater, nm ), 1, &one );
+			auto set4 = [&]( const char * nm, const float * v ) {
+				const GLint l = f.getUniformLocation( pWater, nm );
+				if ( l >= 0 )
+					f.uniform4fv( l, 1, v );
+			};
+			/* the record's distances app-sized (esmwater.h): the noise layers' uv scale (world units a tile; the seeded
+			 * 0..1 tiled them hundreds of times a texel over the grid 150..2500 u away) and params1's depth amount (.w:
+			 * 0..1 put every scene point past it, rz 0, and half the draws flattened the normal to (0, 0, 1) by params2's
+			 * order: no texture reached the colour, red 2 blind); params1.y the record's 0.5 */
+			if ( const GLint l = f.getUniformLocation( pWater, "waterMat[12]" ); l >= 0 ) {
+				GLfloat uv[4] = {};
+				gw.glGetUniformfv( pWater, l, uv );
+				for ( int k = 0; k < 3; k++ )
+					uv[k] = 200.0f + 800.0f * uv[k];
+				f.uniform4fv( l, 1, uv );
+			}
+			if ( const GLint l = f.getUniformLocation( pWater, "waterMat[7]" ); l >= 0 ) {
+				GLfloat p1[4] = {};
+				gw.glGetUniformfv( pWater, l, p1 );
+				p1[1] = 0.5f;
+				p1[3] = 250.0f + 1500.0f * p1[3];	// the records' p10 .. p90 (290 .. 1739; notes waterdepth1 watr.tsv, 42 WATRs)
+				f.uniform4fv( l, 1, p1 );
+			}
+			/* params3 / params4 as every one of those records holds them: alpha and colour shallow range 1, deep range
+			 * 0.72 .. 0.99, shallow alpha 0, deep alpha 1 (the seeded ranges, inverted or crossed, put the alpha and
+			 * colour steps where the records never do) */
+			if ( const GLint l = f.getUniformLocation( pWater, "waterMat[9]" ); l >= 0 ) {
+				GLfloat p3[4] = {};
+				gw.glGetUniformfv( pWater, l, p3 );
+				const GLfloat v[4] = { 1.0f, 0.72f + 0.27f * p3[1], 0.0f, 1.0f };
+				f.uniform4fv( l, 1, v );
+			}
+			if ( const GLint l = f.getUniformLocation( pWater, "waterMat[10]" ); l >= 0 ) {
+				GLfloat p4[4] = {};
+				gw.glGetUniformfv( pWater, l, p4 );
+				p4[0] = 1.0f;
+				p4[1] = 0.72f + 0.27f * p4[1];
+				f.uniform4fv( l, 1, p4 );
+			}
+			/* params2 in the records' ranges (notes vkwater3 watr_normals.tsv, the same 42 WATRs): surface effect falloff
+			 * 0.9 .. 1, normal magnitude 0.15 .. 0.84, shallow normal falloff 1 on every record, deep 0.75 .. 0.999. The
+			 * seeded ones faded shallow water to the scene (base seed 2 draw 5) or kept no normal over it (m seed 2 draw 3,
+			 * shallow falloff under 1; d seed 2 draw 2, the pair inverted): no texture reached the colour, red 2 blind */
+			if ( const GLint l = f.getUniformLocation( pWater, "waterMat[8]" ); l >= 0 ) {
+				GLfloat p2[4] = {};
+				gw.glGetUniformfv( pWater, l, p2 );
+				p2[0] = 0.9f + 0.1f * p2[0];
+				p2[1] = 0.15f + 0.7f * p2[1];
+				p2[2] = 1.0f;
+				p2[3] = 0.75f + 0.249f * p2[3];
+				f.uniform4fv( l, 1, p2 );
+			}
+			if ( seed == 2 ) {
+				/* the air's volume laid out as the app packs it (seeded 0..1 texel counts and slice counts put clamp( x,
+				 * lo, hi ) at lo > hi, where GL and Vulkan order min / max differently): the near grid alone over the 16 x
+				 * 16 x 8 volume, 64 u to 20 000 u in its 8 slices, the frame's rect, view units = game units, no far grid */
+				const float dims[4] = { 16.0f, 16.0f, 8.0f, 8.0f }, pack[4] = { 1.0f, 1.0f, 0.0f, 0.0f };
+				const float slices[4] = { 64.0f, std::log( 20000.0f / 64.0f ), 8.0f, 1.0f }, off[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+				const float rect[4] = { 0.0f, 0.0f, 1.0f / float( W ), 1.0f / float( H ) };
+				set4( "volPackDims", dims );
+				set4( "volPack", pack );
+				set4( "volSlices", slices );
+				set4( "volFar", off );
+				set4( "volRect", rect );
+				if ( const GLint l = f.getUniformLocation( pWater, "fogDistScale" ); l >= 0 ) {
+					const GLfloat s1 = 1.0f;
+					f.uniform1fv( l, 1, &s1 );
+				}
+			}
+		}
 		/* piece 2: a probe twin (fo4_waterlookp / dp) seeded 0 / 1 drew probe 1, the normal, which reads no texture (red 2
 		 * blind). Its look under probe 0 on seeds 1 and 3 (the reds judged there), probe 25 (the light it writes) on seed 2 */
 		if ( f.getUniformLocation( pWater, "waterProbe" ) >= 0 ) {
@@ -887,6 +988,32 @@ int main( int argc, char ** argv )
 			std::printf( "WATERDRAW seed %d: waterProbe %d\n", seed, int( pr ) );
 		}
 		// diagnostic only (never in a gate run): WATERDRAW_SETI=name=v[,name=v] sets int uniforms on every seed
+		// diagnostic only: WATERDRAW_SETF=<seed>:name.c=v[,...] sets one component of a vec4 (c in xyzw) on that seed
+		if ( const char * sf = std::getenv( "WATERDRAW_SETF" ) ) {
+			f.useProgram( pWater );
+			std::string all( sf );
+			for ( size_t a = 0; a < all.size(); ) {
+				size_t e = all.find( ',', a );
+				if ( e == std::string::npos )
+					e = all.size();
+				const std::string kv = all.substr( a, e - a );
+				const size_t c = kv.find( ':' ), d = kv.find( '.', c == std::string::npos ? 0 : c ), q = kv.find( '=' );
+				if ( c != std::string::npos && d != std::string::npos && q != std::string::npos && std::atoi( kv.c_str() ) == seed ) {
+					const std::string nm = kv.substr( c + 1, d - c - 1 );
+					const int comp = int( std::string( "xyzw" ).find( kv[d + 1] ) );
+					const GLint l = f.getUniformLocation( pWater, nm.c_str() );
+					GLfloat v[16] = {};
+					if ( l >= 0 && comp >= 0 && comp < 4 ) {
+						gw.glGetUniformfv( pWater, l, v );
+						v[comp] = float( std::atof( kv.c_str() + q + 1 ) );
+						f.uniform4fv( l, 1, v );
+					}
+					std::printf( "WATERDRAW diagnostic: %s.%c = %g%s\n", nm.c_str(), kv[d + 1], double( v[comp < 0 ? 0 : comp] ),
+						l >= 0 ? "" : " (no location)" );
+				}
+				a = e + 1;
+			}
+		}
 		if ( const char * si = std::getenv( "WATERDRAW_SETI" ) ) {
 			f.useProgram( pWater );
 			std::string all( si );
@@ -990,11 +1117,10 @@ int main( int argc, char ** argv )
 		const std::vector<float> glD = readDepth( refDs, false );
 
 		for ( int red : { 0, 1, 2, 4, 8, 16, 32 } ) {
-			/* 16 / 32: the tessellated stages' reds. A tessellated twin's seed 3 (the sea displaced) judges reds 2 and 32:
-			 * seed 1's ocean finds no body, the ds a pass-through (red 32 EXACT) and the d ps's samplers barely read (red 2
-			 * BOUND, 8 samples past, max rel 0.019); seed 3's ps reads the mipped cascades */
-			const bool on3 = red == 0 || ( red == 2 && tab.tess ) || red == 32;
-			if ( ( seed == 2 && red ) || ( red >= 16 && !tab.tess ) || ( red && ( seed == 3 ) != on3 ) )
+			/* 16 / 32: the tessellated stages' reds. Red 32 on seed 3 only (the sea displaced; seed 1's ds a pass-through,
+			 * red 32 EXACT there). Piece 2: every profile proven, seed 1 all but 32, seed 2 (the air) 1 and 2, seed 3 2 and 32 */
+			const bool judged = seed == 1 ? red != 32 : seed == 2 ? red <= 2 : ( red == 0 || red == 2 || red == 32 );
+			if ( !judged || ( red >= 16 && !tab.tess ) )
 				continue;
 			before( fbFrame );
 			drawState( fbFrame, scissor );
@@ -1030,10 +1156,10 @@ int main( int argc, char ** argv )
 			if ( red ? !fail : fail )
 				gateOk = false;
 		}
-		// diagnostic (WATERDRAW_BISECT=1, seed 1): each seeded loose scalar set to 0 alone, both sides redrawn; the ones that
+		// diagnostic (WATERDRAW_BISECT=<seed>): each seeded loose scalar set to 0 alone, both sides redrawn; the ones that
 		// move the colour misses are printed. Never part of the verdict.
 		const char * bis = std::getenv( "WATERDRAW_BISECT" );
-		if ( seed == 1 && bis && *bis == '1' ) {
+		if ( bis && *bis == char( '0' + seed ) ) {
 			GLint n = 0;
 			f.getProgramiv( pWater, fActiveUnis, &n );
 			size_t base = 0;
