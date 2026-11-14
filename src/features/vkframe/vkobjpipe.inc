@@ -5,6 +5,10 @@
 #include "features/vkframe/objbl_cell_ps.spv.h"
 #include "features/vkframe/objbl_cellcsm_ps.spv.h"
 #include "features/vkframe/objbl_samples_cs.spv.h"  // the cell frame's per-sample readback (objBlFrameSamples)
+#include "features/vkframe/objcell_vs.spv.h"  // lane VKWATER3: the non-bindless twins (vkframe_spirv.sh fxc, the base variant)
+#include "features/vkframe/objcell_cell_ps.spv.h"
+#include "features/vkframe/objcell_cellcsm_ps.spv.h"
+#include "features/vkframe/objcell_pbrm_ps.spv.h"  // pbrm_default.prog's pixel twin (its vertex stage is objcell_vs)
 
 #include <algorithm>
 #include <cstdlib>
@@ -522,7 +526,15 @@ bool objBlPipe( int twin, const std::uint32_t * vs, std::size_t vsN, const std::
 					+ opStage( b.stages ) + "'s " + b.name + " (a register shift lands two resources on one binding)" );
 			it->second.stages |= b.stages;
 		}
-	// set 1 = the table: binding 0 the images, binding 1 the samplers, both runtime arrays, nothing else
+	// set 1 = the table: binding 0 the images, binding 1 the samplers, both runtime arrays, nothing else (the non-bindless
+	// twins, twin 2 and up: no set 1; the layout keeps the table as set 1 all the same)
+	if ( twin >= 2 && set1.empty() ) {
+		set1.resize( 2 );
+		set1[0].type = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+		set1[1].type = VK_DESCRIPTOR_TYPE_SAMPLER;
+		set1[1].binding = 1;
+		set1[0].count = set1[1].count = 0;
+	}
 	bool table = set1.size() == 2;
 	for ( const SpvBind & b : set1 )
 		table = table && b.count == 0
@@ -776,20 +788,28 @@ int objBlPipes( int * refused )
 	return int( opS().made.size() );
 }
 
-void objBlPoolLayout( std::uint64_t attrMask, std::vector<ObjBlBuffer> & buffers, std::vector<ObjBlAttr> & attrs, std::uint32_t need )
+void objBlPoolLayout( std::uint64_t attrMask, std::vector<ObjBlBuffer> & buffers, std::vector<ObjBlAttr> & attrs, std::uint32_t need,
+	const std::uint32_t * stride, std::uint32_t halfMask, bool halfRed )
 {
 	buffers.clear();
 	attrs.clear();
 	const VkFormat fmt[5] = { VK_FORMAT_UNDEFINED, VK_FORMAT_R32_SFLOAT, VK_FORMAT_R32G32_SFLOAT, VK_FORMAT_R32G32B32_SFLOAT,
 		VK_FORMAT_R32G32B32A32_SFLOAT };
+	// lane VKWATER3: GL's half floats (VTXPACK); 3 halves read as 4 (the caller refuses a stage input of 4 there)
+	const VkFormat half[5] = { VK_FORMAT_UNDEFINED, VK_FORMAT_R16_SFLOAT, VK_FORMAT_R16G16_SFLOAT, VK_FORMAT_R16G16B16A16_SFLOAT,
+		VK_FORMAT_R16G16B16A16_SFLOAT };
+	const VkFormat unorm[5] = { VK_FORMAT_UNDEFINED, VK_FORMAT_R16_UNORM, VK_FORMAT_R16G16_UNORM, VK_FORMAT_R16G16B16A16_UNORM,
+		VK_FORMAT_R16G16B16A16_UNORM };  // the red `half`: the same bytes, the wrong reading
 	std::uint32_t have = 0;
 	std::uint64_t m = attrMask;
 	for ( std::uint32_t i = 0; m && i < 16; i++, m >>= 4 ) {
 		const std::uint32_t n = std::uint32_t( m & 15 );
 		if ( !n || n > 4 )
 			continue;
-		buffers.push_back( { i, n * 4, false } );
-		attrs.push_back( { i, i, std::uint32_t( fmt[n] ), 0 } );
+		const bool h = halfMask >> i & 1u;
+		const std::uint32_t tight = h ? ( n == 3 ? 4u : n ) * 2u : n * 4u;
+		buffers.push_back( { i, stride && stride[i] ? stride[i] : tight, false } );
+		attrs.push_back( { i, i, std::uint32_t( h ? ( halfRed ? unorm[n] : half[n] ) : fmt[n] ), 0 } );
 		have |= 1u << i;
 	}
 	const std::uint32_t miss = need & ~have;
@@ -845,11 +865,15 @@ bool objBlPoolCopy( std::uintptr_t key, const ObjBlPool & p, std::vector<unsigne
 			continue;
 		if ( n > 4 || !p.vbo[i] )
 			return why = "attribute " + std::to_string( i ) + ": " + ( n > 4 ? "more than 4 floats" : "no GL buffer" ), false;
-		const std::size_t bytes = p.verts * n * 4;
-		if ( !csmBuf( t.vb[i], VkDeviceSize( bytes ), true, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, w ) )
+		// lane VKWATER3: a shape's attribute from its offset, GL's stride apart (the last vertex: its own size only)
+		const bool h = p.halfMask >> i & 1u;
+		const std::size_t own = h ? ( n == 3 ? 4 : n ) * 2 : n * 4, step = p.stride[i] ? p.stride[i] : own;
+		const std::size_t bytes = ( p.verts - 1 ) * step + ( h && n == 3 ? 6 : own );  // GL's; the twin holds the 4th half's room
+		if ( !csmBuf( t.vb[i], VkDeviceSize( bytes - ( h && n == 3 ? 6 : own ) + own ), true, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, w ) )
 			return why = "attribute " + std::to_string( i ) + "'s twin: " + w, false;
 		const bool r = red == 1 && prev;
-		g.copyNamedBufferSubData( GLuint( r ? prev : p.vbo[i] ), t.vb[i].gl, 0, 0, std::intptr_t( r ? std::min( bytes, prevBytes ) : bytes ) );
+		g.copyNamedBufferSubData( GLuint( r ? prev : p.vbo[i] ), t.vb[i].gl, std::intptr_t( r ? 0 : p.offset[i] ), 0,
+			std::intptr_t( r ? std::min( bytes, prevBytes ) : bytes ) );
 		glNames.push_back( t.vb[i].gl );
 		prev = p.vbo[i];
 		prevBytes = bytes;
@@ -1419,6 +1443,31 @@ bool objBlBindUnits( GlProc gp, unsigned prog, ObjBlDraw & d, ObjBlBindStat & st
 			for ( const auto & e : shareds() )
 				if ( e.second.tex == u.glTex && e.second.glCtx == gl().ctx )
 					key = e.first;
+			if ( !key && d.twin >= 2 && ( key = objTexKey( u.glTex, d.texRed == 1 ? 1 : 0 ) ) != 0 ) {
+				// lane VKWATER3: the texture cache's twin (2D BC); GL's swizzle as the view's own, sRGB decode as GL samples it
+				BlSampler bs;
+				VkFormat fmt = VK_FORMAT_UNDEFINED;
+				std::uint32_t swz = 0;
+				std::string w;
+				bool ok = u.dim == 1 && !u.arrayed && blView( key, fmt ) && blSamplerRead( u.glTex, bs, gp, w );
+				if ( ok && blIsSrgb( fmt ) && bs.srgbDecode == 0x8A4A )
+					ok = false, w = "an sRGB texture with its decode skipped";
+				if ( ok ) {
+					blSwizzleNorm( fmt, bs );
+					ok = blSwizzleCode( bs, swz, w );
+				}
+				if ( !ok ) {
+					st.misfit++;
+					if ( st.misfitWhy.empty() )
+						st.misfitWhy = u.name + ": " + ( w.empty() ? std::string( "the twin is no 2D view of this binding" ) : w );
+					continue;
+				}
+				d.images.emplace_back( u.binding, key );
+				d.imageSwz.resize( d.images.size() - 1, 0u );
+				d.imageSwz.push_back( d.texRed == 2 ? 0u : swz );
+				st.twins++;
+				continue;
+			}
 			if ( !key ) {
 				st.glOwn++;
 				continue;
@@ -2085,6 +2134,8 @@ bool objBlRun( const std::vector<unsigned> & glBufs, int mode, std::string & why
 		for ( std::uintptr_t k : O.draws[i].keys ) {
 			const Shared * sh = sharedFind( k );
 			if ( !sh )
+				sh = farTwinFind( k );  // lane VKWATER3: a texture cache twin a non-bindless draw samples (objTexKey)
+			if ( !sh || !sh->tex )
 				return refuse( "a draw's shared target went before the crossing" );
 			if ( std::find( texs.begin(), texs.end(), sh->tex ) == texs.end() )
 				texs.push_back( sh->tex );
@@ -2502,6 +2553,154 @@ bool objBlShade( GlProc gp, const ObjBlShade & s, std::string & why )
 	return true;
 }
 
+int objCellRed( const char * name )
+{
+	static const char * names[4] = { "offset", "half", "swz", "key" };
+	for ( int i = 0; name && i < 4; i++ )
+		if ( std::strcmp( name, names[i] ) == 0 )
+			return i + 1;
+	return 0;
+}
+
+bool objCellShade( GlProc gp, const ObjCellShade & s, std::string & why )
+{
+	auto fail = [&]( const std::string & w ) {
+		objBlOnGl( w.c_str() );
+		return why = w, false;
+	};
+	if ( s.twin < 2 || s.twin > 4 || !s.prog || !s.verts || !s.cmds || !s.nCmds )
+		return fail( "no twin, program, vertices or commands" );
+	if ( !gp )
+		return fail( "no GL entry points" );
+	using GetIv = void( WINAPI * )( unsigned, int * );
+	using GetIiv = void( WINAPI * )( unsigned, unsigned, int * );
+	using GetAfv = void( WINAPI * )( unsigned, unsigned, float * );
+	using GetBiv = void( WINAPI * )( unsigned, unsigned, int * );
+	const auto getIv = reinterpret_cast<GetIv>( gp( "glGetIntegerv" ) );
+	const auto getIiv = reinterpret_cast<GetIiv>( gp( "glGetIntegeri_v" ) );
+	const auto getAiv = reinterpret_cast<GetIiv>( gp( "glGetVertexAttribiv" ) );
+	const auto getAfv = reinterpret_cast<GetAfv>( gp( "glGetVertexAttribfv" ) );
+	const auto getBiv = reinterpret_cast<GetBiv>( gp( "glGetNamedBufferParameteriv" ) );
+	if ( !getIv || !getIiv || !getAiv || !getAfv || !getBiv )
+		return fail( "GL has no glGetIntegeri_v / glGetVertexAttribiv / glGetVertexAttribfv / glGetNamedBufferParameteriv" );
+	ObjBlDraw d;
+	d.twin = s.twin;
+	d.texRed = s.red == 4 ? 1 : s.red == 3 ? 2 : 0;
+	d.vs = vkframe_objcell_vs_spv;
+	d.vsWords = sizeof( vkframe_objcell_vs_spv ) / 4;
+	d.ps = s.twin == 4 ? vkframe_objcell_pbrm_ps_spv : s.twin == 3 ? vkframe_objcell_cellcsm_ps_spv : vkframe_objcell_cell_ps_spv;
+	d.psWords = s.twin == 4 ? sizeof( vkframe_objcell_pbrm_ps_spv ) / 4
+		: s.twin == 3 ? sizeof( vkframe_objcell_cellcsm_ps_spv ) / 4 : sizeof( vkframe_objcell_cell_ps_spv ) / 4;
+	std::string w2;
+	if ( !objBlFrameRead( gp, d, w2 ) )
+		return fail( w2 );
+	SpvModule vm;
+	if ( !spvReflect( d.vs, d.vsWords, vm, w2 ) )
+		return fail( "the vertex twin: " + w2 );
+	std::uint32_t comps[32] = {};
+	for ( const SpvIo & in : vm.inputs ) {
+		const std::size_t at = in.name.find( "TEXCOORD" );
+		if ( at != std::string::npos )
+			for ( std::uint32_t j = 0; j < in.locs; j++ ) {
+				const int l = ( std::atoi( in.name.c_str() + at + 8 ) + int( j ) ) & 31;
+				d.need |= 1u << l;
+				comps[l] = in.comps;
+			}
+	}
+	// the shape's VAO, location by location
+	ObjBlPool pool;
+	for ( unsigned l = 0; l < 16; l++ ) {
+		if ( !( d.need >> l & 1u ) )
+			continue;
+		const std::string at = "GL location " + std::to_string( l ) + ": ";
+		int on = 0, size = 0, type = 0, norm = 0, integer = 0, bind = 0, rel = 0, buf = 0, off = 0, stride = 0, div = 0;
+		getAiv( l, 0x8622u, &on );  // VERTEX_ATTRIB_ARRAY_ENABLED
+		if ( !on ) {
+			float c[4] = {};
+			getAfv( l, 0x8626u, c );  // CURRENT_VERTEX_ATTRIB
+			if ( c[0] != 0.0f || c[1] != 0.0f || c[2] != 0.0f || c[3] != 1.0f )
+				return fail( at + "disabled with a current value other than (0,0,0,1)" );
+			continue;  // the constant binding
+		}
+		getAiv( l, 0x8623u, &size );     // SIZE
+		getAiv( l, 0x8625u, &type );     // TYPE
+		getAiv( l, 0x886Au, &norm );     // NORMALIZED
+		getAiv( l, 0x88FDu, &integer );  // INTEGER
+		getAiv( l, 0x82D4u, &bind );     // VERTEX_ATTRIB_BINDING
+		getAiv( l, 0x82D5u, &rel );      // VERTEX_ATTRIB_RELATIVE_OFFSET
+		getIiv( 0x8F4Fu, unsigned( bind ), &buf );     // VERTEX_BINDING_BUFFER
+		getIiv( 0x82D7u, unsigned( bind ), &off );     // VERTEX_BINDING_OFFSET
+		getIiv( 0x82D8u, unsigned( bind ), &stride );  // VERTEX_BINDING_STRIDE
+		getIiv( 0x82D6u, unsigned( bind ), &div );     // VERTEX_BINDING_DIVISOR
+		if ( size < 1 || size > 4 || ( type != 0x1406 && type != 0x140B ) || norm || integer )
+			return fail( at + "not 1 to 4 floats or halves (size " + std::to_string( size ) + ", type " + std::to_string( type ) + ")" );
+		if ( div || !buf || off < 0 || rel < 0 || stride < 0 )
+			return fail( at + "instanced, or no buffer" );
+		const bool half = type == 0x140B;
+		if ( half && size == 3 && comps[l] > 3 )
+			return fail( at + "3 halves the stage reads as 4" );
+		pool.attrMask |= std::uint64_t( size ) << ( 4 * l );
+		pool.vbo[l] = unsigned( buf );
+		pool.offset[l] = s.red == 1 ? 0 : std::size_t( off ) + std::size_t( rel );
+		pool.stride[l] = std::uint32_t( stride );
+		pool.halfMask |= half ? 1u << l : 0u;
+	}
+	int ebo = 0, ebytes = 0;
+	getIv( 0x8895u, &ebo );  // ELEMENT_ARRAY_BUFFER_BINDING (the VAO's)
+	if ( ebo )
+		getBiv( unsigned( ebo ), 0x8764u, &ebytes );  // BUFFER_SIZE
+	if ( !ebo || ebytes < 2 )
+		return fail( "the shape has no index buffer" );
+	pool.ebo = unsigned( ebo );
+	pool.indices = std::size_t( ebytes ) / 2;
+	pool.verts = s.verts;
+	d.poolKey = s.poolKey;
+	d.attrMask = pool.attrMask;
+	d.halfMask = pool.halfMask;
+	d.halfRed = s.red == 2;
+	for ( int i = 0; i < 16; i++ )
+		d.attrStride[i] = pool.stride[i];
+	ObjBlUniStat ust;
+	if ( !objBlMirror( gp, s.prog, d.vs, d.vsWords, d.ps, d.psWords, d.ubos, ust, w2 ) )
+		return fail( "the uniforms: " + w2 );
+	if ( !ust.mirrored )
+		return fail( "GL names none of the loose uniforms" );
+	ObjBlBindStat bst;
+	if ( !objBlBindUnits( gp, s.prog, d, bst, w2 ) )
+		return fail( "the texture units: " + w2 );
+	if ( bst.misfit )
+		return fail( "a texture: " + bst.misfitWhy );
+	if ( bst.glOwn )
+		return fail( std::to_string( bst.glOwn ) + " GL textures with no twin (not a BC 2D cache texture, or not shared)" );
+	if ( bst.texelRefused )
+		return fail( "a texel buffer: " + bst.texelWhy );
+	{
+		ObjBlRunStat & rs = opS().st;
+		rs.shared += bst.shared;
+		rs.twins += bst.twins;
+		rs.texelGl += bst.texelGl;
+		rs.texelShared += bst.texelShared;
+		rs.texelImported += bst.texelImported;
+		rs.compare += bst.compare;
+	}
+	objTexFlush();  // the twins made since the last flush: on the device before the run samples them
+	opRunWait();    // one pool key serves every shape: the last crossing done with it before its buffers are refilled (or regrown)
+	std::vector<unsigned> names;
+	if ( !objBlPoolCopy( s.poolKey, pool, names, w2 ) )
+		return fail( "the shape: " + w2 );
+	names.insert( names.end(), bst.glBufs.begin(), bst.glBufs.end() );
+	d.cmds = s.cmds;
+	d.cmdCount = s.nCmds;
+	objBlDrawsReset();
+	ObjBlDrawStat dst;
+	if ( !objBlDrawPrep( d, dst, w2 ) )
+		return fail( "the draw: " + w2 );
+	if ( !objBlRun( names, 0, w2 ) )
+		return fail( "the crossing: " + w2 );
+	opS().st.cells++;
+	return true;
+}
+
 bool objBlTexelCopy( GlProc gp, unsigned tex, std::vector<unsigned> & glNames, std::string & why, int red )
 {
 	Gl & g = gl();
@@ -2771,7 +2970,7 @@ bool objBlDrawPrep( const ObjBlDraw & d, ObjBlDrawStat & st, std::string & why )
 	// the pipeline of the class's layout
 	std::vector<ObjBlBuffer> bufs;
 	std::vector<ObjBlAttr> attrs;
-	objBlPoolLayout( d.attrMask, bufs, attrs, d.need );
+	objBlPoolLayout( d.attrMask, bufs, attrs, d.need, d.attrStride, d.halfMask, d.halfRed );
 	ObjBlPipeInfo info;
 	if ( !objBlPipe( d.twin, d.vs, d.vsWords, d.ps, d.psWords, d.target, bufs, attrs, info, why, d.pipeRed ) )
 		return false;
@@ -2793,7 +2992,10 @@ bool objBlDrawPrep( const ObjBlDraw & d, ObjBlDrawStat & st, std::string & why )
 		st.whole = blTranslate( d.glRows, O.rows.ptr, d.rows, 0 );
 		O.rowCount = d.rows;
 	}
-	if ( !O.rowCount )
+	bool rowsRead = false;  // lane VKWATER3: the non-bindless twins read no rows
+	for ( const SpvBind & b : e.set0 )
+		rowsRead = rowsRead || b.type == VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+	if ( rowsRead && !O.rowCount )
 		return why = "no rows (wwDraws) this frame", false;
 	// the slot: a set 0 of this pipeline's layout
 	if ( O.live == O.draws.size() )
@@ -2873,11 +3075,20 @@ bool objBlDrawPrep( const ObjBlDraw & d, ObjBlDrawStat & st, std::string & why )
 			const std::size_t first = iis.size();
 			for ( std::uint32_t a = 0; a < b.count; a++ ) {
 				VkImageView view = VK_NULL_HANDLE;
-				for ( const auto & im : d.images )
-					if ( im.first == b.binding + a ) {
-						if ( !objBlSharedFits( im.second, b.dim, b.arrayed, w ) )
-							return why = where + ": " + w, false;
-						view = sharedFind( im.second )->view;
+				for ( std::size_t i = 0; i < d.images.size(); i++ )
+					if ( d.images[i].first == b.binding + a ) {
+						const std::uintptr_t key = d.images[i].second;
+						if ( !sharedFind( key ) && farTwinFind( key ) ) {  // lane VKWATER3: a texture cache twin (2D, its swizzle)
+							VkFormat fmt = VK_FORMAT_UNDEFINED;
+							const std::uint32_t swz = i < d.imageSwz.size() ? d.imageSwz[i] : 0;
+							if ( b.dim != 1 || b.arrayed || !( view = blView( key, fmt, swz ) ) )
+								return why = where + ": the texture's twin is no 2D view of this binding", false;
+							st.twins++;
+						} else {
+							if ( !objBlSharedFits( key, b.dim, b.arrayed, w ) )
+								return why = where + ": " + w, false;
+							view = sharedFind( key )->view;
+						}
 						st.images++;
 					}
 				if ( !view ) {

@@ -24,6 +24,9 @@ bool objTexIs( unsigned tex );
  * (WW_VKOBJ_TEX_RED=key): the handle is added with the twin made before tex's (the wrong image); red 2
  * (WW_VKOBJ_TEX_RED=swz): with no swizzle (BC4's R,R,R,1 view dropped) */
 void objTexHandle( unsigned tex, std::uint64_t handle, GlProc gp, int red = 0 );
+/*! lane VKWATER3: tex's twin as a set-0 image key (farTwinFind), 0 when tex has none. red 1: the twin made before tex's
+ * (gates only: the wrong image) */
+std::uintptr_t objTexKey( unsigned tex, int red = 0 );
 //! the cache deletes tex next: a twin's handles leave the table, its Vulkan half goes at objTexFrame (GL's name is the cache's)
 void objTexGone( unsigned tex );
 //! the rows of a frame GL drew with handles (n x 176 bytes): translated as the Vulkan draw would, counted for the line

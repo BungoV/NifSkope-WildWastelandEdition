@@ -157,12 +157,19 @@ struct ObjBlPool
 	std::uint64_t attrMask = 0;
 	unsigned vbo[16] = {}, ebo = 0;  //!< GL's names
 	std::size_t verts = 0, indices = 0;
+	/*! lane VKWATER3 (a shape's VAO, objCellShade): attribute i starts at offset[i] in vbo[i], stride[i] bytes apart (0: tight),
+	 * half floats when bit i of halfMask is set (n 3 reads 4 halves' room: GL's packed stride) */
+	std::size_t offset[16] = {};
+	std::uint32_t stride[16] = {};
+	std::uint32_t halfMask = 0;
 };
 /*! the class's VAO as the pipeline's vertex input: attribute i on buffer binding i, stride 4 n, R32..._SFLOAT, GL location i.
  * A GL location in `need` (bit L) the class does not carry reads GL's generic default (0,0,0,1: the cell pass never sets a
  * current value): binding 16, stride 0, one R32G32B32A32 (the twins' constant buffer) */
 constexpr std::uint32_t kObjBlConstBinding = 16;
-void objBlPoolLayout( std::uint64_t attrMask, std::vector<ObjBlBuffer> & buffers, std::vector<ObjBlAttr> & attrs, std::uint32_t need = 0 );
+void objBlPoolLayout( std::uint64_t attrMask, std::vector<ObjBlBuffer> & buffers, std::vector<ObjBlAttr> & attrs, std::uint32_t need = 0,
+	const std::uint32_t * stride = nullptr, std::uint32_t halfMask = 0,
+	bool halfRed = false );  //!< lane VKWATER3: GL's strides (0 tight), half floats (n 3: 4 halves); halfRed: read as 16-bit unorm
 /*! GL's pool into the class's twins on the present device (glCopyNamedBufferSubData into buffers GL imports; the twins grow
  * by doubling), GL's order: call before the run's signal and list `glNames` in it. false with a reason (nothing copied).
  * red 1 copies each attribute from the buffer of the attribute before it (gates only) */
@@ -199,9 +206,13 @@ struct ObjBlDraw
 	int scissor[4] = { 0, 0, -1, -1 };  //!< x, y, w, h in the frame's rows (objBlFrameRead: GL's box, else the frame); -1: the frame
 	std::uintptr_t poolKey = 0;  //!< the class objBlPoolCopy filled
 	std::uint64_t attrMask = 0;
+	std::uint32_t attrStride[16] = {}, halfMask = 0;  //!< lane VKWATER3: the pool's strides and half floats (objBlPoolLayout)
+	bool halfRed = false;        //!< lane VKWATER3, gates only: the halves read as 16-bit unorm (objCellShade's red `half`)
 	std::uint32_t need = 0;      //!< the GL locations the vertex stage reads (bit L)
 	std::vector<std::pair<std::uint32_t, std::vector<std::uint8_t>>> ubos;  //!< binding -> bytes (objBlMirror)
-	std::vector<std::pair<std::uint32_t, std::uintptr_t>> images;          //!< binding -> a shared target
+	std::vector<std::pair<std::uint32_t, std::uintptr_t>> images;          //!< binding -> a shared target (or a texture cache twin)
+	std::vector<std::uint32_t> imageSwz;  //!< lane VKWATER3: per image, a twin's swizzle (blSwizzleCode; 0 none)
+	int texRed = 0;                       //!< lane VKWATER3, gates only: 1 the twin made before (objTexKey), 2 the swizzle dropped
 	std::vector<std::pair<std::uint32_t, ObjBlSampler>> samplers;          //!< binding -> GL's state, else the default
 	std::vector<std::pair<std::uint32_t, unsigned>> texels;                //!< binding -> GL's buffer texture (objBlTexelCopy made its twin)
 	const void * glRows = nullptr;  //!< GL's draw rows (the bindless ring, GL form), translated into wwDraws
@@ -213,6 +224,7 @@ struct ObjBlDraw
 struct ObjBlDrawStat
 {
 	int ubos = 0, images = 0, standIns = 0, texels = 0, samplers = 0, rowBuffers = 0;
+	int twins = 0;          //!< of the images, texture cache twins (lane VKWATER3)
 	int glSamplers = 0;     //!< samplers with GL's state (the rest the default)
 	int texelsGl = 0;       //!< texel buffers from GL's twins (the rest the zero texel)
 	std::size_t whole = 0;  //!< rows with every handle known
@@ -221,6 +233,7 @@ struct ObjBlDrawStat
 struct ObjBlBindStat
 {
 	int shared = 0;    //!< images from a shared target
+	int twins = 0;     //!< images from a texture cache twin (lane VKWATER3: twin 2 and up only)
 	int glOwn = 0;     //!< a GL texture that is no shared target (a stand-in)
 	int misfit = 0;    //!< a shared target the binding cannot take (shape or samples; a stand-in)
 	int unbound = 0;   //!< no unit or no texture
@@ -292,6 +305,8 @@ struct ObjBlRunStat
 	int shared = 0, glOwn = 0, texelGl = 0, compare = 0;  //!< objBlShade's units: shared images, GL-only textures, GL texel buffers, compare samplers
 	int texelShared = 0;  //!< of the texel buffers, those drawn from their twins
 	int texelImported = 0;  //!< of those, read in place from a store (the rest copied at the crossing)
+	int twins = 0;        //!< lane VKWATER3: images from texture cache twins (objCellShade)
+	int cells = 0;        //!< lane VKWATER3: objCellShade's draws on Vulkan
 	int dropped = 0;      //!< pixel outputs past the frame's targets in the draws' pipelines (objBlPipe; Vulkan discards them)
 	double cpuMs = 0.0, maxMs = 0.0;
 	std::string glWhy, failWhy;
@@ -318,6 +333,27 @@ struct ObjBlShade
 	int red = 0;  //!< gates only: 1 objBlPipe's strict target count (a 1-buffer frame must refuse)
 };
 bool objBlShade( GlProc gp, const ObjBlShade & s, std::string & why );
+/* lane VKWATER3 (plan row G4 by draws): one shape's draw (bsshape.cpp, WW_VKOBJ_SHADE=1) through the non-bindless twins
+ * of fo4_cell / fo4_cellcsm / pbrm_default on the app's base variant (WW_CELL_FOGLEAK + WW_FRAME_UBO; the caller refuses any other). Read
+ * from GL here: the frame and fixed state (objBlFrameRead), the uniforms (objBlMirror), the units (objBlBindUnits: every
+ * texture a shared target or a texture cache twin, else refused), the shape's VAO (per location the stage reads: enabled,
+ * float or half, not normalised or integer, divisor 0, its buffer / offset / stride; a disabled one must hold GL's
+ * (0,0,0,1)) and its index buffer (GL_UNSIGNED_SHORT, its size). false: why (nothing drawn; GL draws the shape) */
+struct ObjCellShade
+{
+	int twin = 2;                 //!< 2 fo4_cell, 3 fo4_cellcsm, 4 pbrm_default
+	unsigned prog = 0;            //!< GL's current program
+	std::uintptr_t poolKey = 0;   //!< one key per route (the shape's twins are rewritten each draw)
+	std::size_t verts = 0;        //!< the shape's vertex count
+	const void * cmds = nullptr;  //!< 5 words a command (count, instances, first index, base vertex, base instance)
+	std::size_t nCmds = 0;
+	/*! gates only, each must FAIL: 1 `offset` (the attributes read from offset 0), 2 `half` (half floats read as 16-bit unorm),
+	 * 3 `swz` (the twins' swizzle dropped), 4 `key` (the twin made before) */
+	int red = 0;
+};
+bool objCellShade( GlProc gp, const ObjCellShade & s, std::string & why );
+//! the red's name (WW_VKVIEW_OBJCELL_RED: offset | half | swz | key) as ObjCellShade.red, 0 for anything else
+int objCellRed( const char * name );
 /*! objBlShade's frame read on its own: GL's draw framebuffer as d's targets (every colour draw buffer and the depth / stencil
  * a shared target: keys, formats, size, samples; the tone frame's too, as borrowed shared targets), the viewport the whole
  * frame, the fixed state (objBlTargetState with `red`), GL's scissor box clamped to the frame (d.scissor; the frame when the

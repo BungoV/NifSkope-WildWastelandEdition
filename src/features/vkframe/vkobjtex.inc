@@ -220,6 +220,15 @@ void objTexHandle( unsigned tex, std::uint64_t handle, GlProc gp, int red )
 	O.st.adds++;
 }
 
+std::uintptr_t objTexKey( unsigned tex, int red )
+{
+	const Ot & O = ot();
+	const auto it = tex ? O.twins.find( GLuint( tex ) ) : O.twins.end();
+	if ( it == O.twins.end() )
+		return 0;
+	return red == 1 && it->second.prevKey ? it->second.prevKey : it->second.key;
+}
+
 void objTexGone( unsigned tex )
 {
 	Ot & O = ot();

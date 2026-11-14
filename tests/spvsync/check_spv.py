@@ -102,7 +102,7 @@ HLSL_SRC['objbl_samples_cs'] = 'res/shaders/hlsl/near'
 # fallbacks on the app's base variant, the frozen FragCoord.w fixup's flag
 VKFRAME_FXC_ARGS = ['-HV', '2021', '-D', 'WW_CELL_FOGLEAK=1', '-D', 'WW_FRAME_UBO=1']
 VKFRAME_FXC = {'objcell_vs': ('fo4_default_vs', 'vs_6_0', 'VS_SHIFT'), 'objcell_cell_ps': ('fo4_cell_ps', 'ps_6_0', 'PS_SHIFT'),
-	'objcell_cellcsm_ps': ('fo4_cellcsm_ps', 'ps_6_0', 'PS_SHIFT')}
+	'objcell_cellcsm_ps': ('fo4_cellcsm_ps', 'ps_6_0', 'PS_SHIFT'), 'objcell_pbrm_ps': ('pbrm_default_ps', 'ps_6_0', 'PS_SHIFT')}
 HLSL_SPECS += [('src/features/vkframe', k, 'vulkan1.2', 'vkframe_%s_spv' % k) for k in VKFRAME_FXC]
 DEFAULT_G = 'E:/Tools/RenderDoc/RenderDoc_1.45_64/plugins/spirv/glslangValidator.exe'
 DEFAULT_DXC = 'E:/Tools/dxc/bin/x64/dxc.exe'

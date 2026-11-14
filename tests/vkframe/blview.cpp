@@ -608,6 +608,7 @@ bool pipeGate( const std::string & spvDir )
 #include "blview_pool.inc" // lane VKOBJ4 slice 6: the class pools as vertex buffers (`BLVIEW pool` lines)
 #include "blview_shade.inc" // lane VKOBJ4 slice 7: the multi-draw through the cellbl twin (`BLVIEW shade` lines)
 #include "blview_colour.inc" // lane VKOBJ4 step 7: GL's own fo4_cellbl against the twin through objBlShade (`BLVIEW colour` lines)
+#include "blview_cell.inc"   // lane VKWATER3 G4: GL's own fo4_cell / fo4_cellcsm against objCellShade (`BLVIEW cell` lines)
 }  // namespace blv
 
 int main( int argc, char ** argv )
@@ -1110,6 +1111,23 @@ int main( int argc, char ** argv )
 	const bool colOk = twinOk && colourGate( spvDir + "/spvset/spirv", handles, anisoAt, aniso1H, 0 );
 	const bool colCsmOk = twinOk && colourGate( spvDir + "/spvset/spirv", handles, anisoAt, aniso1H, 1 );  // gap 4: fo4_cellcsmbl
 	ok = colOk && colCsmOk && ok;
+	if ( bc ) {  // lane VKWATER3 G4: GL's fo4_cell / fo4_cellcsm against the non-bindless twins through objCellShade
+		/* BaseMap DXT5, NormalMap DXT1, SpecularMap BC5 signed (R,G,0,1: .g the gloss), GlowMap DXT1. Not texture 4: the twin made
+		 * before it is texture 3's first, gone when frame 1 replaced it, so the red `key` had no image to read */
+		const GLuint maps[4] = { texs[3], texs[1], texs[9], texs[0] };
+		const bool c2 = cellGate( spvDir + "/cellset/spirv", 2, maps, 0xBu );  // offset, half, key: BC5's view is the identity
+		const bool c3 = cellGate( spvDir + "/cellset/spirv", 3, maps, 0xBu );
+		// the red swz needs a swizzled view: BC4 texs[4] (R,R,R,1) as SpecularMap, that red only
+		const GLuint bc4[4] = { texs[3], texs[1], texs[4], texs[0] };
+		const bool c2s = cellGate( spvDir + "/cellset/spirv", 2, bc4, 1u << 2, "bc4" );
+		const bool c3s = cellGate( spvDir + "/cellset/spirv", 3, bc4, 1u << 2, "bc4" );
+		// pbrm_default (twin 4): BaseMap DXT5, NormalMap DXT1, RmaosMap BC7, EmissiveMap DXT1; then BC4 as RmaosMap for swz
+		const GLuint pbrm[4] = { texs[3], texs[1], texs[6], texs[0] }, pbrmBc4[4] = { texs[3], texs[1], texs[4], texs[0] };
+		const bool c4 = cellGate( spvDir + "/cellset/spirv", 4, pbrm, 0xBu );
+		const bool c4s = cellGate( spvDir + "/cellset/spirv", 4, pbrmBc4, 1u << 2, "bc4" );
+		ok = c2 && c3 && c2s && c3s && c4 && c4s && ok;
+	} else
+		std::printf( "BLVIEW cell not run (the cell twins read the texture cache's twins: MODE=bc)\n" );
 	vk().vkWaitForFences( vk().dev, 1, &gv.fence, VK_TRUE, 1000000000ull );
 	const WwVkPresent::BlStat st = WwVkPresent::takeBlStat();
 	std::printf( "BLVIEW stat: %d images, %d samplers (caps %u / %u), %d adds, %d drops, %d rows, %d misses, %d rewrites, %d fails (%s)\n",

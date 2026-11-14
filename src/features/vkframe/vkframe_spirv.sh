@@ -148,7 +148,7 @@ fxb() {
 fxb objbl_vs fo4_defaultbl_vs vs_6_0 "$VS_SHIFT"
 fxb objbl_cell_ps fo4_cellbl_ps ps_6_0 "$PS_SHIFT"
 fxb objbl_cellcsm_ps fo4_cellcsmbl_ps ps_6_0 "$PS_SHIFT"
-# lane VKWATER3 (G4 by draws): the non-bindless fallbacks fo4_cell / fo4_cellcsm (res/shaders/hlsl/core) on
+# lane VKWATER3 (G4 by draws): the non-bindless fallbacks fo4_cell / fo4_cellcsm / pbrm_default (res/shaders/hlsl/core) on
 # the app's base variant (WW_CELL_FOGLEAK + WW_FRAME_UBO; the app site refuses any other), every binding kept for
 # objBlPipe; the frozen pixel stages invert FragCoord.w themselves (-fvk-use-dx-position-w)
 fxc() {
@@ -159,6 +159,8 @@ fxc() {
 fxc objcell_vs fo4_default_vs vs_6_0 "$VS_SHIFT"
 fxc objcell_cell_ps fo4_cell_ps ps_6_0 "$PS_SHIFT"
 fxc objcell_cellcsm_ps fo4_cellcsm_ps ps_6_0 "$PS_SHIFT"
+# pbrm_default.prog is fo4_default.vert + pbrm_default.frag: objcell_vs is its vertex twin too
+fxc objcell_pbrm_ps pbrm_default_ps ps_6_0 "$PS_SHIFT"
 # the cell frame's per-sample readback (objBlFrameSamples): its own bindings, no shift
 "$DXC" -spirv -fspv-target-env=vulkan1.2 -T cs_6_0 -E main -Fo objbl_samples_cs.spv "$(cygpath -m "$ROOT/res/shaders/hlsl/near/objbl_samples_cs.hlsl" 2>/dev/null || echo "$ROOT/res/shaders/hlsl/near/objbl_samples_cs.hlsl")"
 python -I "$ROOT/tools/spv_header.py" objbl_samples_cs.spv vkframe_objbl_samples_cs_spv objbl_samples_cs.spv.h < /dev/null

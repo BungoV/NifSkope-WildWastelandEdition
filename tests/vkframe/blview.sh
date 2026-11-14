@@ -47,6 +47,11 @@ done
 # app links them
 "$PY" -I -X utf8 "$ROOT/tests/hlsllive/build_all.py" "$ROOT" "$OUT/spvset" --only fo4_cellbl,fo4_cellcsmbl --jobs 4 > "$OUT/spvset.txt" 2>&1 \
 	|| { tail -8 "$OUT/spvset.txt"; echo "BLVIEW GATE FAILED (build_all.py, the fo4_cellbl / fo4_cellcsmbl SPIR-V set)"; exit 1; }
+# lane VKWATER3 G4: GL's fo4_cell and fo4_cellcsm (with their variants, the base WW_CELL_FOGLEAK+WW_FRAME_UBO among them) for the cell gate
+if [ "$MODE" = bc ]; then
+	"$PY" -I -X utf8 "$ROOT/tests/hlsllive/build_all.py" "$ROOT" "$OUT/cellset" --only fo4_cell.prog,fo4_cellcsm.prog,pbrm_default.prog --jobs 4 > "$OUT/cellset.txt" 2>&1 \
+		|| { tail -8 "$OUT/cellset.txt"; echo "BLVIEW GATE FAILED (build_all.py, the fo4_cell / fo4_cellcsm / pbrm_default SPIR-V set)"; exit 1; }
+fi
 # lane VKOBJ4 gap 1: the 4-sample arm's fill pass (GL from SPIR-V; blview_fill_*.hlsl -> $OUT/blview_fill_*.spv)
 "$PY" -I -X utf8 "$ROOT/tests/hlsllive/build_spv.py" "$OUT" "$ROOT/tests/vkframe/blview_fill_vs.hlsl" "$ROOT/tests/vkframe/blview_fill_ps.hlsl" \
 	> "$OUT/fill.txt" 2>&1 && ! grep -q "^FAIL" "$OUT/fill.txt" || { tail -8 "$OUT/fill.txt"; echo "BLVIEW GATE FAILED (build_spv.py, the fill pass)"; exit 1; }

@@ -283,7 +283,7 @@ namespace
 {
 std::vector<Row> vkRows;  // lane VKOBJ3: the frame's rows, translated by the Vulkan table at frame()
 bool vkTexEver = false;
-std::string vkLine, vkLoadLine, vkShadeLine;
+std::string vkLine, vkLoadLine, vkShadeLine, vkCellLine, vkPbrmLine;
 
 void vkRowCensus()
 {
@@ -607,6 +607,70 @@ bool runIssue( NifSkopeOpenGLContext::GLFunctions * f, const NifSkopeOpenGLConte
 	c.merged += run.rows - 1;
 	c.longest = std::max<long long>( c.longest, run.rows );
 	return true;
+}
+
+}  // namespace WwBl
+bool rtddgiCellShaderDefine();      // src/features/gi/rtddgicell.cpp: WW_CELL_RTDDGI in the cell programs
+bool rtddgiRestirShaderDefine();    // WW_CELL_RESTIR
+bool rtddgiRestirGiShaderDefine();  // WW_CELL_RESTIRGI
+bool wwFogLeakShaderDefine();       // src/features/air/cellvolair.cpp: WW_CELL_FOGLEAK
+int wwCellGiVis();                  // src/gl/celllights.cpp: 1 = WW_CELL_GI_MARCH
+bool wwCellPrtOn();                 // WW_CELL_PRT
+namespace WwBl
+{
+namespace
+{
+long long cellTried = 0, cellDrawn = 0, pbrmTried = 0, pbrmDrawn = 0;	// pbrm: pbrm_default (twin 4, `vk objpbrm:`)
+std::string cellWhy, pbrmWhy;
+}  // namespace
+
+bool vkCellDraw( const NifSkopeOpenGLContext::Program * prog, const GLsizei * counts, const void * const * offs, GLsizei n, std::size_t verts )
+{
+	if ( !vkShadeOn() || !prog || n <= 0 || geo.on )
+		return false;
+	const int twin = prog->name == "fo4_cellcsm.prog" ? 3 : prog->name == "fo4_cell.prog" ? 2 : prog->name == "pbrm_default.prog" ? 4 : 0;
+	if ( !twin )
+		return false;
+	const bool pbrm = twin == 4;
+	( pbrm ? pbrmTried : cellTried )++;
+	std::string & lastWhy = pbrm ? pbrmWhy : cellWhy;
+	// the twins are the base variant (fo4_cell.frag@WW_CELL_FOGLEAK+WW_FRAME_UBO): the loader's other defines make another program
+	const char * no = !wwFogLeakShaderDefine() ? "WW_CELL_FOGLEAK=0: GL's program is not the Vulkan twin"
+		: !prog->wwShadowFrame ? "WW_FRAME_UBO off: GL's program is not the Vulkan twin"
+		: wwCellGiVis() == 1 ? "WW_CELL_GI_MARCH in GL's program: no Vulkan twin"
+		: wwCellPrtOn() ? "WW_CELL_PRT in GL's program: no Vulkan twin"
+		: rtddgiCellShaderDefine() ? "WW_CELL_RTDDGI in GL's program: no Vulkan twin"
+		: rtddgiRestirShaderDefine() ? "WW_CELL_RESTIR in GL's program: no Vulkan twin"
+		: rtddgiRestirGiShaderDefine() ? "WW_CELL_RESTIRGI in GL's program: no Vulkan twin" : nullptr;
+	if ( no ) {
+		WwVkPresent::objBlOnGl( no );
+		lastWhy = no;
+		return false;
+	}
+	static std::vector<std::uint32_t> cmds;
+	cmds.clear();
+	for ( GLsizei i = 0; i < n; i++ )
+		cmds.insert( cmds.end(), { std::uint32_t( counts[i] ), 1u, std::uint32_t( std::uintptr_t( offs[i] ) / 2 ), 0u, 0u } );
+	WW_SWITCH_STATIC( int, red, WwVkPresent::objCellRed( wwEnv( "WW_VKVIEW_OBJCELL_RED" ).trimmed().toStdString().c_str() ) );
+	WW_SWITCH_STATIC( int, redPbrm, WwVkPresent::objCellRed( wwEnv( "WW_VKVIEW_OBJPBRM_RED" ).trimmed().toStdString().c_str() ) );
+	WwVkPresent::ObjCellShade s;
+	s.twin = twin;
+	s.prog = prog->id;
+	static int poolHome = 0;	// one pool for every shape (objCellShade waits for the last crossing before it refills it)
+	s.poolKey = reinterpret_cast<std::uintptr_t>( &poolHome );
+	s.verts = verts;
+	s.cmds = cmds.data();
+	s.nCmds = std::size_t( n );
+	s.red = pbrm ? redPbrm : red;
+	std::string why;
+	const bool drew = WwVkPresent::objCellShade( []( const char * name ) -> void * {
+		return reinterpret_cast<void *>( QOpenGLContext::currentContext()->getProcAddress( name ) );
+	}, s, why );
+	if ( drew )
+		( pbrm ? pbrmDrawn : cellDrawn )++;
+	else
+		lastWhy = why;
+	return drew;
 }
 
 namespace
@@ -1249,6 +1313,31 @@ void frame()
 			vkShadeLine = b;
 			std::fprintf( stderr, "%s\n", b );
 		}
+		// lane VKWATER3 G4: the non-bindless fo4_cell / fo4_cellcsm shapes (vkCellDraw) drawn on Vulkan, and the last refusal
+		if ( cellTried ) {
+			WW_SWITCH_STATIC( QString, cellRed, wwEnv( "WW_VKVIEW_OBJCELL_RED" ).trimmed() );
+			std::snprintf( b, sizeof( b ), "vk objcell: shapes=%lld drawn=%lld gl=%lld twinImages=%d cells=%d%s%s%s%s", cellTried, cellDrawn,
+				cellTried - cellDrawn, r.twins, r.cells, cellWhy.empty() ? "" : " glWhy=", cellWhy.c_str(),
+				WwVkPresent::objCellRed( cellRed.toStdString().c_str() ) ? " RED " : "", cellRed.toStdString().c_str() );
+			if ( vkCellLine != b && wwFrameLog() ) {
+				vkCellLine = b;
+				std::fprintf( stderr, "%s\n", b );
+			}
+		}
+		// lane VKWATER3 G4: the non-bindless pbrm_default shapes, the same route (twin 4)
+		if ( pbrmTried ) {
+			WW_SWITCH_STATIC( QString, pbrmRed, wwEnv( "WW_VKVIEW_OBJPBRM_RED" ).trimmed() );
+			std::snprintf( b, sizeof( b ), "vk objpbrm: shapes=%lld drawn=%lld gl=%lld%s%s%s%s", pbrmTried, pbrmDrawn, pbrmTried - pbrmDrawn,
+				pbrmWhy.empty() ? "" : " glWhy=", pbrmWhy.c_str(), WwVkPresent::objCellRed( pbrmRed.toStdString().c_str() ) ? " RED " : "",
+				pbrmRed.toStdString().c_str() );
+			if ( vkPbrmLine != b && wwFrameLog() ) {
+				vkPbrmLine = b;
+				std::fprintf( stderr, "%s\n", b );
+			}
+		}
+		cellTried = cellDrawn = pbrmTried = pbrmDrawn = 0;
+		cellWhy.clear();
+		pbrmWhy.clear();
 	}
 	c.vkRuns = 0;
 }

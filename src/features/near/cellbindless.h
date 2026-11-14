@@ -80,6 +80,11 @@ int vkTexRed();
 /* lane VKOBJ4: WW_VKOBJ_SHADE=1 (with vkTexOn): a cell run draws on Vulkan through its program's twin; the cell frame's
  * colour and depth / stencil are then shared targets (cellhdr: objBlFrame) */
 bool vkShadeOn();
+/* lane VKWATER3 (plan row G4 by draws): a non-bindless fo4_cell / fo4_cellcsm / pbrm_default shape (its own vertex array) on
+ * Vulkan through the base variant's twins (objCellShade, under vkShadeOn); false: GL draws it, the reason in `vk objcell:`
+ * (`vk objpbrm:`). counts / offs as glMultiDrawElements (16-bit indices), verts the shape's vertex count.
+ * Reds WW_VKVIEW_OBJCELL_RED / WW_VKVIEW_OBJPBRM_RED=offset|half|swz|key */
+bool vkCellDraw( const NifSkopeOpenGLContext::Program * prog, const GLsizei * counts, const void * const * offs, GLsizei n, std::size_t verts );
 //! the cache deletes tex next (its handles were dropped): a twin leaves the table, its Vulkan half at the next frame
 void texGone( GLuint tex );
 
