@@ -115,7 +115,8 @@ for ci, c in enumerate(CASES):
         with open(os.path.join(d, 'tex.txt'), 'w', newline='\n') as f:
             f.write('pcTex 2d rgba8 %d %d 1 linear repeat 1 tex_pcTex.bin\n' % (tw, th))
     mips = int(math.floor(math.log2(max(tw, th)))) + 1
-    maxLod = min(mips - 1, max(0.0, math.log2(CELL_PX / 16.0))) if has else 0.0    oneLod = min(mips - 1, max(0.0, math.log2(CELL_PX))) if has else 0.0
+    maxLod = min(mips - 1, max(0.0, math.log2(CELL_PX / 16.0))) if has else 0.0
+    oneLod = min(mips - 1, max(0.0, math.log2(CELL_PX))) if has else 0.0
     seed = g['seedS']
     U = {
         'pcSeedS': [seed - (1 << 32) if seed >= (1 << 31) else seed],  # the bits; setUnis hands them as a uint

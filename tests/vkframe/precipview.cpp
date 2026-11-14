@@ -293,11 +293,12 @@ int main( int argc, char ** argv )
 			f.bindBufferBase( fUbo, 0, ubo );
 		};
 		// GL: cellprecip.cpp's state, its points
-		std::vector<std::uint16_t> bg, refA, refB;
+		std::vector<std::uint16_t> bg, refA, refB, refA2, refB2;
 		before( fbRef, j.zd );
 		bg = readSamples( refCol );
 		double glMs = 0.0;
-		for ( int pass = 0; pass < 2; pass++ ) {  // pass 0 warms the driver (its first-use cost is not the draw's), pass 1 is timed
+		// pass 0 warms the driver (its first-use cost is not the draw's), pass 1 is timed and judged, pass 2 repeats it
+		for ( int pass = 0; pass < 3; pass++ ) {
 			before( fbRef, j.zd );
 			bindJob();
 			f.bindFramebuffer( fFb, fbRef );
@@ -316,14 +317,17 @@ int main( int argc, char ** argv )
 			const double g0 = nowMs();
 			glDrawArrays( GL_POINTS, j.first, pass ? j.n : 1 );
 			glFinish();
-			glMs = nowMs() - g0;
+			if ( pass == 1 )
+				glMs = nowMs() - g0;
 			bindVertexArray( 0 );
 			drawState0();
 			glDepthFunc( GL_LESS );
+			if ( pass ) {
+				( pass == 1 ? refA : refA2 ) = readSamples( refCol );
+				reveal( fbRef );
+				( pass == 1 ? refB : refB2 ) = readSamples( refCol );
+			}
 		}
-		refA = readSamples( refCol );
-		reveal( fbRef );
-		refB = readSamples( refCol );
 		if ( glGetError() != GL_NO_ERROR )
 			return fatal( j.name + ": the GL reference draw" );
 		std::printf( "PRECIPVIEW %s job: %dx%d x%d, run %d + %d, atlas %s, far %d, slab depth %.7f, GL draw %.2f ms\n", j.name.c_str(), W, H, S,
@@ -379,6 +383,15 @@ int main( int argc, char ** argv )
 					"in whole / partly flipped pixels: %zu / %zu)\n", j.name.c_str(), v.word(), v.covered, v.diff, v.flips, v.past1, v.maxu,
 					v.stencil, v.flipBy[0], v.flipBy[1], v.flipBy[2], v.flipWhole, v.flipPart );
 				ok = ok && v.ok();
+				// repeatability: GL against its own second draw, Vulkan against a second run (each must be EXACT)
+				std::vector<std::uint16_t> a2, b2;
+				const Verdict g = judge( bg, refA2, refA, refB2, refB );
+				const bool vkRan = runVk( 0, a2, b2, false );
+				const Verdict w = vkRan ? judge( bg, a2, a, b2, b ) : Verdict();
+				std::printf( "PRECIPVIEW %s repeat: GL vs GL %s (%zu halves differ, %zu flips, stencil %zu), Vulkan vs Vulkan %s (%zu halves differ, "
+					"%zu flips, stencil %zu)\n", j.name.c_str(), g.word(), g.diff, g.flips, g.stencil, vkRan ? w.word() : "FAIL (run failed)", w.diff,
+					w.flips, w.stencil );
+				ok = ok && g.diff == 0 && g.stencil == 0 && vkRan && w.diff == 0 && w.stencil == 0;
 			}
 		}
 		for ( RedSeen & r : reds ) {
