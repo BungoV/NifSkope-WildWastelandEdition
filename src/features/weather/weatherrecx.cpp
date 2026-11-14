@@ -722,6 +722,19 @@ const Input kInputs[] = {
 		return o.precipType && std::string( o.precipType ) == "snowFine" ? o.precipRate : 0.0; } },
 };
 
+/* lane WEATHERRECX3 (bungo 11-14 "Old recx need an adjustment", values kept): the keys whose generated rung WEATHERRECX2
+ * added. A weather a file sets leaves them unset when the file is silent, as the 1.4 reader did (the users' own
+ * defaults: the hazeType grown at the humidity, still clouds, no shafts); a weather with no file still takes them. */
+bool rungLater( const Input & in )
+{
+	static const char * const kLater[] = { "angstrom", "hazeAnisotropy", "airglow", "iceFraction", "evolution",
+		"precipitation.base", "lightning.cloudToGround", "lightning.distance" };
+	for ( const char * k : kLater )
+		if ( std::strcmp( in.name, k ) == 0 )
+			return true;
+	return false;
+}
+
 bool isSet( const WwWeatherRecx & r, const Input & in )
 {
 	return in.field == &WwWeatherRecx::airTemp ? r.airTemp > -999.0f : r.*( in.field ) >= 0.0f;
@@ -1156,13 +1169,15 @@ WwWeatherRecx resolveOne( const Who & w, const QStringList & roots, const QStrin
 		const bool own = w.haveGen && !cover.all;
 		r.genClass = QLatin1String( own ? o.cls : od.cls );
 		r.genRegion = QLatin1String( own ? o.region : od.region );
-		QStringList silent;
+		QStringList silent, keptUnset;
 		for ( const Input & in : kInputs )
 			if ( !isSet( r, in ) && in.gen ) {
 				if ( covered( cover, funcOf( in ) ) ) {
 					r.*( in.field ) = float( in.gen( od, hour ) );
 					src[QLatin1String( in.name )] = QStringLiteral( "class-default" );
 					silent << QLatin1String( in.name );
+				} else if ( w.haveGen && anyHit && rungLater( in ) ) {
+					keptUnset << QLatin1String( in.name );	// WEATHERRECX3: the file's weather keeps the 1.4 reader's unset
 				} else if ( w.haveGen ) {
 					r.*( in.field ) = float( in.gen( o, hour ) );
 					src[QLatin1String( in.name )] = QStringLiteral( "generated" );
@@ -1184,6 +1199,9 @@ WwWeatherRecx resolveOne( const Who & w, const QStringList & roots, const QStrin
 		if ( !silent.isEmpty() )
 			sayOnce( QStringLiteral( "weather recx: %1 %2: silent keys take the class default (%3): %4" ).arg( w.edid, r.source,
 				QLatin1String( od.cls ), silent.join( QLatin1Char( ',' ) ) ) );
+		if ( !keptUnset.isEmpty() )
+			sayOnce( QStringLiteral( "weather recx: %1: unset, the file's weather takes no generated value for: %2" ).arg( w.edid,
+				keptUnset.join( QLatin1Char( ',' ) ) ) );
 	}
 	for ( int i = 0; i < 9; i++ )
 		if ( r.textures[i].isEmpty() )
