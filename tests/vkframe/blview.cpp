@@ -1115,7 +1115,7 @@ int main( int argc, char ** argv )
 		/* BaseMap DXT5, NormalMap DXT1, SpecularMap BC5 signed (R,G,0,1: .g the gloss), GlowMap DXT1. Not texture 4: the twin made
 		 * before it is texture 3's first, gone when frame 1 replaced it, so the red `key` had no image to read */
 		const GLuint maps[4] = { texs[3], texs[1], texs[9], texs[0] };
-		const bool c2 = cellGate( spvDir + "/cellset/spirv", 2, maps, 0xBu );  // offset, half, key: BC5's view is the identity
+		const bool c2 =cellGate( spvDir + "/cellset/spirv", 2, maps, 0xBu );  // offset, half, key: BC5's view is the identity
 		const bool c3 = cellGate( spvDir + "/cellset/spirv", 3, maps, 0xBu );
 		// the red swz needs a swizzled view: BC4 texs[4] (R,R,R,1) as SpecularMap, that red only
 		const GLuint bc4[4] = { texs[3], texs[1], texs[4], texs[0] };
@@ -1123,9 +1123,23 @@ int main( int argc, char ** argv )
 		const bool c3s = cellGate( spvDir + "/cellset/spirv", 3, bc4, 1u << 2, "bc4" );
 		// pbrm_default (twin 4): BaseMap DXT5, NormalMap DXT1, RmaosMap BC7, EmissiveMap DXT1; then BC4 as RmaosMap for swz
 		const GLuint pbrm[4] = { texs[3], texs[1], texs[6], texs[0] }, pbrmBc4[4] = { texs[3], texs[1], texs[4], texs[0] };
-		const bool c4 = cellGate( spvDir + "/cellset/spirv", 4, pbrm, 0xBu );
+		const bool c4 = cellGate( spvDir + "/cellset/spirv", 4, pbrm, 0xBu | 1u << 7 );  // + oldbrdf, the BRDF before OpenPBR
 		const bool c4s = cellGate( spvDir + "/cellset/spirv", 4, pbrmBc4, 1u << 2, "bc4" );
 		ok = c2 && c3 && c2s && c3s && c4 && c4s && ok;
+		/* the G4 variants (11-14): the placed lights (vars 1, red light), the skinning and the alpha test / blend (vars 2 | 4, reds
+		 * bone and blend); twins 5 / 6 (pbrm_cell / pbrm_cellcsm) always carry the lights */
+		const bool v2l = cellGate( spvDir + "/cellset/spirv", 2, maps, 1u << 4, "lights", 1u );
+		const bool v3l = cellGate( spvDir + "/cellset/spirv", 3, maps, 1u << 4, "lights", 1u );
+		const bool v2sa = cellGate( spvDir + "/cellset/spirv", 2, maps, 1u << 5, "skin", 2u ) &
+			cellGate( spvDir + "/cellset/spirv", 2, maps, 1u << 6, "alpha", 4u ) & cellGate( spvDir + "/cellset/spirv", 2, maps, 3u << 5, "skin alpha", 6u );
+		const bool v4sa = cellGate( spvDir + "/cellset/spirv", 4, pbrm, 1u << 5, "skin", 2u ) &
+			cellGate( spvDir + "/cellset/spirv", 4, pbrm, 1u << 6, "alpha", 4u ) & cellGate( spvDir + "/cellset/spirv", 4, pbrm, 3u << 5, "skin alpha", 6u );
+		const bool c5 = cellGate( spvDir + "/cellset/spirv", 5, pbrm, 0xBu | 1u << 4 | 1u << 7 );
+		const bool c6 = cellGate( spvDir + "/cellset/spirv", 6, pbrm, 0xBu | 1u << 4 | 1u << 7 );
+		const bool c5s = cellGate( spvDir + "/cellset/spirv", 5, pbrmBc4, 1u << 2, "bc4" );
+		const bool c6s = cellGate( spvDir + "/cellset/spirv", 6, pbrmBc4, 1u << 2, "bc4" );
+		const bool v5sa = cellGate( spvDir + "/cellset/spirv", 5, pbrm, 3u << 5, "skin alpha", 6u );
+		ok = v2l && v3l && v2sa && v4sa && c5 && c6 && c5s && c6s && v5sa && ok;
 	} else
 		std::printf( "BLVIEW cell not run (the cell twins read the texture cache's twins: MODE=bc)\n" );
 	vk().vkWaitForFences( vk().dev, 1, &gv.fence, VK_TRUE, 1000000000ull );

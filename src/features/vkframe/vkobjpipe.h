@@ -213,6 +213,7 @@ struct ObjBlDraw
 	std::vector<std::pair<std::uint32_t, std::uintptr_t>> images;          //!< binding -> a shared target (or a texture cache twin)
 	std::vector<std::uint32_t> imageSwz;  //!< lane VKWATER3: per image, a twin's swizzle (blSwizzleCode; 0 none)
 	int texRed = 0;                       //!< lane VKWATER3, gates only: 1 the twin made before (objTexKey), 2 the swizzle dropped
+	int texelRed = 0;                     //!< lane VKWATER3, gates only: objBlTexelCopy's red (1: copied from 16 bytes past the start)
 	std::vector<std::pair<std::uint32_t, ObjBlSampler>> samplers;          //!< binding -> GL's state, else the default
 	std::vector<std::pair<std::uint32_t, unsigned>> texels;                //!< binding -> GL's buffer texture (objBlTexelCopy made its twin)
 	const void * glRows = nullptr;  //!< GL's draw rows (the bindless ring, GL form), translated into wwDraws
@@ -307,6 +308,7 @@ struct ObjBlRunStat
 	int texelImported = 0;  //!< of those, read in place from a store (the rest copied at the crossing)
 	int twins = 0;        //!< lane VKWATER3: images from texture cache twins (objCellShade)
 	int cells = 0;        //!< lane VKWATER3: objCellShade's draws on Vulkan
+	int cellLit = 0, cellSkinned = 0, cellBlended = 0;  //!< of those: with the cell's light buffer, with bone weights, blended
 	int dropped = 0;      //!< pixel outputs past the frame's targets in the draws' pipelines (objBlPipe; Vulkan discards them)
 	double cpuMs = 0.0, maxMs = 0.0;
 	std::string glWhy, failWhy;
@@ -334,25 +336,29 @@ struct ObjBlShade
 };
 bool objBlShade( GlProc gp, const ObjBlShade & s, std::string & why );
 /* lane VKWATER3 (plan row G4 by draws): one shape's draw (bsshape.cpp, WW_VKOBJ_SHADE=1) through the non-bindless twins
- * of fo4_cell / fo4_cellcsm / pbrm_default on the app's base variant (WW_CELL_FOGLEAK + WW_FRAME_UBO; the caller refuses any other). Read
+ * of fo4_cell / fo4_cellcsm / pbrm_default / pbrm_cell / pbrm_cellcsm on the app's base variant (WW_CELL_FOGLEAK + WW_FRAME_UBO; the caller refuses any other). Read
  * from GL here: the frame and fixed state (objBlFrameRead), the uniforms (objBlMirror), the units (objBlBindUnits: every
  * texture a shared target or a texture cache twin, else refused), the shape's VAO (per location the stage reads: enabled,
  * float or half, not normalised or integer, divisor 0, its buffer / offset / stride; a disabled one must hold GL's
  * (0,0,0,1)) and its index buffer (GL_UNSIGNED_SHORT, its size). false: why (nothing drawn; GL draws the shape) */
 struct ObjCellShade
 {
-	int twin = 2;                 //!< 2 fo4_cell, 3 fo4_cellcsm, 4 pbrm_default
+	int twin = 2;                 //!< 2 fo4_cell, 3 fo4_cellcsm, 4 pbrm_default, 5 pbrm_cell, 6 pbrm_cellcsm
 	unsigned prog = 0;            //!< GL's current program
 	std::uintptr_t poolKey = 0;   //!< one key per route (the shape's twins are rewritten each draw)
 	std::size_t verts = 0;        //!< the shape's vertex count
 	const void * cmds = nullptr;  //!< 5 words a command (count, instances, first index, base vertex, base instance)
 	std::size_t nCmds = 0;
 	/*! gates only, each must FAIL: 1 `offset` (the attributes read from offset 0), 2 `half` (half floats read as 16-bit unorm),
-	 * 3 `swz` (the twins' swizzle dropped), 4 `key` (the twin made before) */
+	 * 3 `swz` (the twins' swizzle dropped), 4 `key` (the twin made before); the variants': 5 `light` (the light texel buffer
+	 * copied from one texel on), 6 `bone` (the bone transforms one bone on), 7 `blend` (GL's source / destination factors swapped) */
 	int red = 0;
+	int * variants = nullptr;  //!< drawn: [0] += with the light buffer, [1] += with bone weights, [2] += blended (null: not counted)
 };
 bool objCellShade( GlProc gp, const ObjCellShade & s, std::string & why );
-//! the red's name (WW_VKVIEW_OBJCELL_RED: offset | half | swz | key) as ObjCellShade.red, 0 for anything else
+//! twin's pixel stage (objcell_*_ps.spv.h)
+void objCellPs( int twin, const std::uint32_t *& words, std::size_t & count );
+//! the red's name (WW_VKVIEW_OBJCELL_RED / _OBJPBRM_RED: offset | half | swz | key | light | bone | blend) as ObjCellShade.red, 0 else
 int objCellRed( const char * name );
 /*! objBlShade's frame read on its own: GL's draw framebuffer as d's targets (every colour draw buffer and the depth / stencil
  * a shared target: keys, formats, size, samples; the tone frame's too, as borrowed shared targets), the viewport the whole

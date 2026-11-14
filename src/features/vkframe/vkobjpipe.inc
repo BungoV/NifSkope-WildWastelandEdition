@@ -9,6 +9,8 @@
 #include "features/vkframe/objcell_cell_ps.spv.h"
 #include "features/vkframe/objcell_cellcsm_ps.spv.h"
 #include "features/vkframe/objcell_pbrm_ps.spv.h"  // pbrm_default.prog's pixel twin (its vertex stage is objcell_vs)
+#include "features/vkframe/objcell_pbrmcell_ps.spv.h"     // pbrm_cell.prog's (the cell-lit pbrm_default)
+#include "features/vkframe/objcell_pbrmcellcsm_ps.spv.h"  // pbrm_cellcsm.prog's (and the sun cascades)
 
 #include <algorithm>
 #include <cstdlib>
@@ -1415,7 +1417,7 @@ bool objBlBindUnits( GlProc gp, unsigned prog, ObjBlDraw & d, ObjBlBindStat & st
 				}
 				st.texelGl++;
 				std::string w;
-				if ( objBlTexelCopy( gp, u.glTex, st.glBufs, w ) ) {
+				if ( objBlTexelCopy( gp, u.glTex, st.glBufs, w, d.texelRed ) ) {
 					d.texels.emplace_back( u.binding, u.glTex );
 					st.texelShared++;
 					st.texelImported += objBlTexelImported( u.glTex ) ? 1 : 0;
@@ -2555,11 +2557,22 @@ bool objBlShade( GlProc gp, const ObjBlShade & s, std::string & why )
 
 int objCellRed( const char * name )
 {
-	static const char * names[4] = { "offset", "half", "swz", "key" };
-	for ( int i = 0; name && i < 4; i++ )
+	static const char * names[7] = { "offset", "half", "swz", "key", "light", "bone", "blend" };
+	for ( int i = 0; name && i < 7; i++ )
 		if ( std::strcmp( name, names[i] ) == 0 )
 			return i + 1;
 	return 0;
+}
+
+void objCellPs( int twin, const std::uint32_t *& words, std::size_t & count )
+{
+	switch ( twin ) {
+	case 3: words = vkframe_objcell_cellcsm_ps_spv; count = sizeof( vkframe_objcell_cellcsm_ps_spv ) / 4; return;
+	case 4: words = vkframe_objcell_pbrm_ps_spv; count = sizeof( vkframe_objcell_pbrm_ps_spv ) / 4; return;
+	case 5: words = vkframe_objcell_pbrmcell_ps_spv; count = sizeof( vkframe_objcell_pbrmcell_ps_spv ) / 4; return;
+	case 6: words = vkframe_objcell_pbrmcellcsm_ps_spv; count = sizeof( vkframe_objcell_pbrmcellcsm_ps_spv ) / 4; return;
+	default: words = vkframe_objcell_cell_ps_spv; count = sizeof( vkframe_objcell_cell_ps_spv ) / 4; return;
+	}
 }
 
 bool objCellShade( GlProc gp, const ObjCellShade & s, std::string & why )
@@ -2568,7 +2581,7 @@ bool objCellShade( GlProc gp, const ObjCellShade & s, std::string & why )
 		objBlOnGl( w.c_str() );
 		return why = w, false;
 	};
-	if ( s.twin < 2 || s.twin > 4 || !s.prog || !s.verts || !s.cmds || !s.nCmds )
+	if ( s.twin < 2 || s.twin > 6 || !s.prog || !s.verts || !s.cmds || !s.nCmds )
 		return fail( "no twin, program, vertices or commands" );
 	if ( !gp )
 		return fail( "no GL entry points" );
@@ -2588,11 +2601,10 @@ bool objCellShade( GlProc gp, const ObjCellShade & s, std::string & why )
 	d.texRed = s.red == 4 ? 1 : s.red == 3 ? 2 : 0;
 	d.vs = vkframe_objcell_vs_spv;
 	d.vsWords = sizeof( vkframe_objcell_vs_spv ) / 4;
-	d.ps = s.twin == 4 ? vkframe_objcell_pbrm_ps_spv : s.twin == 3 ? vkframe_objcell_cellcsm_ps_spv : vkframe_objcell_cell_ps_spv;
-	d.psWords = s.twin == 4 ? sizeof( vkframe_objcell_pbrm_ps_spv ) / 4
-		: s.twin == 3 ? sizeof( vkframe_objcell_cellcsm_ps_spv ) / 4 : sizeof( vkframe_objcell_cell_ps_spv ) / 4;
+	objCellPs( s.twin, d.ps, d.psWords );
+	d.texelRed = s.red == 5 ? 1 : 0;
 	std::string w2;
-	if ( !objBlFrameRead( gp, d, w2 ) )
+	if ( !objBlFrameRead( gp, d, w2, s.red == 7 ? 1 : 0 ) )
 		return fail( w2 );
 	SpvModule vm;
 	if ( !spvReflect( d.vs, d.vsWords, vm, w2 ) )
@@ -2665,6 +2677,12 @@ bool objCellShade( GlProc gp, const ObjCellShade & s, std::string & why )
 		return fail( "the uniforms: " + w2 );
 	if ( !ust.mirrored )
 		return fail( "GL names none of the loose uniforms" );
+	if ( s.red == 6 )  // red `bone`: the bone transforms one bone on (each vertex takes the next bone's matrix)
+		for ( const SpvBind & b : vm.binds )
+			if ( b.name.find( "skinningUniforms" ) != std::string::npos )
+				for ( auto & u : d.ubos )
+					if ( u.first == b.binding && u.second.size() > 48 )
+						std::rotate( u.second.begin(), u.second.begin() + 48, u.second.end() );
 	ObjBlBindStat bst;
 	if ( !objBlBindUnits( gp, s.prog, d, bst, w2 ) )
 		return fail( "the texture units: " + w2 );
@@ -2697,7 +2715,16 @@ bool objCellShade( GlProc gp, const ObjCellShade & s, std::string & why )
 		return fail( "the draw: " + w2 );
 	if ( !objBlRun( names, 0, w2 ) )
 		return fail( "the crossing: " + w2 );
-	opS().st.cells++;
+	ObjBlRunStat & rs = opS().st;
+	rs.cells++;
+	rs.cellLit += bst.texelShared > 0 ? 1 : 0;  // the cell's light texel buffer (the cell-lit programs) copied to its twin
+	rs.cellSkinned += pool.vbo[5] ? 1 : 0;       // bone weights fed (fo4_default.vert skins by them)
+	rs.cellBlended += d.target.blend.on ? 1 : 0;
+	if ( s.variants ) {
+		s.variants[0] += bst.texelShared > 0 ? 1 : 0;
+		s.variants[1] += pool.vbo[5] ? 1 : 0;
+		s.variants[2] += d.target.blend.on ? 1 : 0;
+	}
 	return true;
 }
 

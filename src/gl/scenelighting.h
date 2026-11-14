@@ -52,8 +52,9 @@ bool wwR2aRed( const char * name );
  *   WW_STUDIO_SUN=<scale>   the Studio/Lookdev sun times this (0 = the white furnace: env only)
  *   WW_R3_TERM=diffuse|specular|fresnel   the PBR program outputs that one term (gates s1, s2, s3;
  *                           fresnel = the surface Fresnel at N.V, lane PBRR4 gate s1b)
- *   WW_R3_RED=noms|nosplit|fo4csweight|notint|f90scaled|lambert   R3 red controls (pbrm_default.frag
- *                           r3Red bits 1/2/4/8/16/32; f90scaled + lambert are lane PBRR4's s1b/d1 reds)
+ *   WW_R3_RED=noms|nosplit|fo4csweight|notint|f90scaled|lambert|oldbrdf   R3 red controls (pbrm_default
+ *                           r3Red bits 1/2/4/8/16/32/64; f90scaled + lambert are lane PBRR4's s1b/d1 reds;
+ *                           64 = the BRDF before OpenPBR, which noms/fo4csweight/f90scaled/lambert carry)
  * Lane PBRR4:
  *   WW_R4_RED=nodiv|emitmul|notintmask|emitraw|nocomp   R4 red controls (r4Red bits 1/2/4/8/16):
  *     nodiv = tint Normalize never divides, emitmul = the old constant x map emission,

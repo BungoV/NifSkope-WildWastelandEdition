@@ -33,11 +33,32 @@
  * line is not asked. Reds WW_VKVIEW_OBJPBRM_RED, the same four; swz on its BC4
  * pass (texs[4] as RmaosMap).
  * Refusals (each must refuse, nothing drawn, with its reason): a GL-only RGBA8 texture on BaseMap ("no twin"); a
- * normalised byte colour attribute ("not 1 to 4 floats or halves"). */
-bool cellGate( const std::string & spirvDir, int twin, const GLuint maps[4], unsigned reds = 15u, const char * label = nullptr )
+ * normalised byte colour attribute ("not 1 to 4 floats or halves").
+ * Variants (lane VKWATER3 11-14, `vars`; the same sweep, the same bar):
+ * 1 lights: the cell's placed lights, a 3-light RGBA32F texel buffer on cellLights (8 texels a light: an omni, a spot, a
+ *   non-specular omni, in view space = world as cellRow is the identity), draw i walks 3 - i % 3 of them; the crossing copies
+ *   the buffer into its twin. Red `light` (5): the copy from one texel on. Light probe: the lights moved off GL's colour on
+ *   >= 20 % of the covered pixels (cellLightCount 0 against the lit sweep).
+ * 2 skin: fo4_default.vert's GPU skinning (doSkinning, boneWeights at locations 5 / 6, two bones a vertex, 6 distinct bone
+ *   transforms in skinningUniforms). Red `bone` (6): the bone transforms one bone on. Skin probe: doSkinning 0 moves GL's
+ *   depth on >= 20 % of the covered pixels.
+ * 4 alpha: the alpha test and blend (alphaFlags per draw: '>' 0.5, '>' + blend, blend alone, '>=' 0.5, none, '<' + blend;
+ *   GL_BLEND SRC_ALPHA / ONE_MINUS_SRC_ALPHA on the blended draws) over the DXT5 BaseMap's alpha. Red `blend` (7): GL's
+ *   factors read swapped. Alpha probe: alphaFlags 0 everywhere moves GL's colour or depth on >= 20 % of the covered pixels.
+ * Twins 5 / 6 (`BLVIEW pbrmcell`, `pbrmcellcsm`): pbrm_cell / pbrm_cellcsm (pbrm_default.frag with WW_CELLLIGHTS, and the
+ * cascades) against objcell_pbrmcell_ps / objcell_pbrmcellcsm_ps, the pbrm state, two targets, always with the lights. */
+bool cellGate( const std::string & spirvDir, int twin, const GLuint maps[4], unsigned reds = 15u, const char * label = nullptr, unsigned vars = 0u )
 {
 	using namespace WwVkPresent;
-	const std::string tagS = std::string( twin == 4 ? "pbrm" : twin == 3 ? "cellcsm" : "cell" ) + ( label ? std::string( " " ) + label : std::string() );
+	static const char * twinTag[7] = { "", "", "cell", "cellcsm", "pbrm", "pbrmcell", "pbrmcellcsm" };
+	static const char * twinFrag[7] = { "", "", "fo4_cell", "fo4_cellcsm", "pbrm_default", "pbrm_cell", "pbrm_cellcsm" };
+	if ( twin < 2 || twin > 6 ) {
+		std::printf( "BLVIEW cell FAIL (no twin %d)\n", twin );
+		return false;
+	}
+	const bool pbrmT = twin >= 4, csmT = twin == 3 || twin == 6, lightsV = ( vars & 1u ) != 0 || twin >= 5;
+	const bool skinV = ( vars & 2u ) != 0, alphaV = ( vars & 4u ) != 0;
+	const std::string tagS = std::string( twinTag[twin] ) + ( label ? std::string( " " ) + label : std::string() );
 	const char * tag = tagS.c_str();
 	struct CellGl
 	{
@@ -57,6 +78,7 @@ bool cellGate( const std::string & spirvDir, int twin, const GLuint maps[4], uns
 		void( WINAPI * clearTexSub )( GLuint, GLint, GLint, GLint, GLint, GLsizei, GLsizei, GLsizei, GLenum, GLenum, const void * ) = nullptr;
 		void( WINAPI * texParami )( GLuint, GLenum, GLint ) = nullptr;
 		void( WINAPI * disableAttr )( GLuint ) = nullptr;
+		void( WINAPI * texBuffer )( GLenum, GLenum, GLuint ) = nullptr;
 		GLint( WINAPI * loc )( GLuint, const char * ) = nullptr;
 	} u;
 	const char * n4 = "1234";
@@ -65,7 +87,7 @@ bool cellGate( const std::string & spirvDir, int twin, const GLuint maps[4], uns
 		&& load( u.um3, "glUniformMatrix3fv" ) && load( u.um4, "glUniformMatrix4fv" ) && load( u.bindTextures, "glBindTextures" )
 		&& load( u.bindSamplers, "glBindSamplers" ) && load( u.drawBv, "glDrawElementsBaseVertex" ) && load( u.bufSub, "glNamedBufferSubData" )
 		&& load( u.clearTexSub, "glClearTexSubImage" ) && load( u.texParami, "glTextureParameteri" )
-		&& load( u.disableAttr, "glDisableVertexAttribArray" ) && load( u.loc, "glGetUniformLocation" );
+		&& load( u.disableAttr, "glDisableVertexAttribArray" ) && load( u.loc, "glGetUniformLocation" ) && load( u.texBuffer, "glTexBuffer" );
 	for ( int i = 0; i < 4; i++ )
 		okLoad = okLoad && load( u.uf[i], ( std::string( "glUniform" ) + n4[i] + "fv" ).c_str() );
 	if ( !okLoad || !sx.fbo ) {
@@ -94,8 +116,7 @@ bool cellGate( const std::string & spirvDir, int twin, const GLuint maps[4], uns
 	}
 	// GL's program from the set, the app's base variant, the binaries as they are
 	const GLuint prog = f.createProgram();
-	const std::string stage[2] = { "fo4_default.vert",
-		std::string( twin == 4 ? "pbrm_default" : twin == 3 ? "fo4_cellcsm" : "fo4_cell" ) + ".frag@WW_CELL_FOGLEAK+WW_FRAME_UBO" };
+	const std::string stage[2] = { "fo4_default.vert", std::string( twinFrag[twin] ) + ".frag@WW_CELL_FOGLEAK+WW_FRAME_UBO" };
 	for ( int s = 0; s < 2; s++ ) {
 		const std::string bin = index.count( stage[s] ) ? readFile( spirvDir + "/" + index[stage[s]] ) : std::string();
 		const GLuint sh = f.createShader( s ? kFrag : kVert );
@@ -149,7 +170,7 @@ bool cellGate( const std::string & spirvDir, int twin, const GLuint maps[4], uns
 		return l;
 	};
 	const char * cellMaps[4] = { "BaseMap", "NormalMap", "SpecularMap", "GlowMap" }, * pbrmMaps[4] = { "BaseMap", "NormalMap", "RmaosMap", "EmissiveMap" };
-	const char * const * mapName = twin == 4 ? pbrmMaps : cellMaps;
+	const char * const * mapName = pbrmT ? pbrmMaps : cellMaps;
 	int mapUnit[4] = {};
 	for ( int m = 0; m < 4; m++ ) {
 		const GLint l = locOf( mapName[m] );
@@ -172,10 +193,9 @@ bool cellGate( const std::string & spirvDir, int twin, const GLuint maps[4], uns
 		std::vector<std::uint8_t> bytes;
 	};
 	SpvModule mods[2];
-	const std::uint32_t * words[2] = { vkframe_objcell_vs_spv, twin == 4 ? vkframe_objcell_pbrm_ps_spv
-		: twin == 3 ? vkframe_objcell_cellcsm_ps_spv : vkframe_objcell_cell_ps_spv };
-	const std::size_t counts[2] = { sizeof( vkframe_objcell_vs_spv ) / 4, twin == 4 ? sizeof( vkframe_objcell_pbrm_ps_spv ) / 4
-		: twin == 3 ? sizeof( vkframe_objcell_cellcsm_ps_spv ) / 4 : sizeof( vkframe_objcell_cell_ps_spv ) / 4 };
+	const std::uint32_t * words[2] = { vkframe_objcell_vs_spv, nullptr };
+	std::size_t counts[2] = { sizeof( vkframe_objcell_vs_spv ) / 4, 0 };
+	objCellPs( twin, words[1], counts[1] );
 	std::vector<Blk> blks;
 	for ( int m = 0; m < 2; m++ ) {
 		if ( !spvReflect( words[m], counts[m], mods[m], why ) ) {
@@ -301,7 +321,7 @@ bool cellGate( const std::string & spirvDir, int twin, const GLuint maps[4], uns
 	set( "cellIsLinear", { 1 } );
 	set( "specColor", { 1.0f, 0.9f, 0.8f } );
 	set( "glowColor", { 0.3f, 0.2f, 0.1f } );
-	if ( twin == 4 ) {  // pbrm_default's constants every draw shares
+	if ( pbrmT ) {  // pbrm_default's constants every draw shares
 		set( "pbrOpacity", { 1 } );
 		set( "pbrAo", { 1 } );
 		set( "pbrSpecV6", { 0 } );
@@ -312,7 +332,7 @@ bool cellGate( const std::string & spirvDir, int twin, const GLuint maps[4], uns
 		set( "pbrEmissiveMapColor", { 1 } );
 		set( "pbrEmissiveMapMask", { 0 } );
 		set( "pbrGlobalOpacity", { 1 } );
-		set( "pbrAlphaThreshold", { 0 } );
+		set( "pbrAlphaThreshold", { alphaV ? 0.5f : 0.0f } );
 		set( "sceneExposure", { 1 } );
 		set( "studioSun", { 1 } );
 		set( "studioProbe", { -1 } );  // run 7: 0 (>= 0) replaced the Lookdev draws' lit result by black
@@ -330,7 +350,7 @@ bool cellGate( const std::string & spirvDir, int twin, const GLuint maps[4], uns
 	const std::uintptr_t csmKey = reinterpret_cast<std::uintptr_t>( &csmKeyAt );
 	GLuint csmTex = 0;
 	int csmUnit = -1;
-	if ( twin == 3 ) {
+	if ( csmT ) {
 		if ( !sharedTarget( csmKey, 2, 256, 256, 3, 0x81A5, csmTex, why ) ) {
 			std::printf( "BLVIEW %s FAIL (the shared cascade map: %s)\n", tag, why.c_str() );
 			return false;
@@ -362,10 +382,65 @@ bool cellGate( const std::string & spirvDir, int twin, const GLuint maps[4], uns
 			return false;
 		}
 	}
-	// the shape: two 6 x 6 grids with a bump (base vertex 0 / 36), the app's sequential arrays; values exact in half
+	// variant 1 (and twins 5 / 6): the placed lights, 8 RGBA32F texels a light, view space (cellRow is the identity)
+	GLuint lightTex = 0, lightBuf = 0;
+	int lightUnit = -1;
+	if ( lightsV ) {
+		const float lt[3][8][4] = {
+			{ { -3.0f, 1.5f, -6.0f, 8.0f }, { 1.2f, 0.9f, 0.6f, -2.0f }, { 0, 0, -1, 1 }, { 0, 1, 2, 0 }, { -1, 0, 0, 0 } },  // omni
+			{ { 2.0f, 0.0f, -3.0f, 9.0f }, { 0.6f, 0.9f, 1.4f, 0.5f }, { 0, 0, -1, 2 }, { 0, 1, 2, 0 }, { -1, 0, 0, 0 } },    // spot
+			{ { 5.0f, 2.0f, -8.0f, 9.0f }, { 0.8f, 1.3f, 0.7f, -2.0f }, { 0, 0, -1, 1 }, { 0, 1, 2, 1 }, { -1, 0, 0, 0 } } };  // omni, no specular
+		f.genBuffers( 1, &lightBuf );
+		f.bindBuffer( 0x8C2A, lightBuf );  // TEXTURE_BUFFER
+		f.bufferData( 0x8C2A, std::ptrdiff_t( sizeof( lt ) ), lt, 0x88E4 );
+		f.bindBuffer( 0x8C2A, 0 );
+		glGenTextures( 1, &lightTex );
+		glBindTexture( 0x8C2A, lightTex );
+		u.texBuffer( 0x8C2A, kRgba32fi, lightBuf );
+		glBindTexture( 0x8C2A, 0 );
+		const GLint l = locOf( "cellLights" );
+		lightUnit = unitAt.count( l ) ? unitAt[l] : -1;
+		if ( lightUnit < 0 || glGetError() != GL_NO_ERROR ) {
+			std::printf( "BLVIEW %s FAIL (cellLights has no unit (location %d), or a GL error making the light buffer)\n", tag, int( l ) );
+			return false;
+		}
+	}
+	// variant 2: 6 distinct bones (a turn about z, a shift; mat3x4 rows as GL's std140 columns), doSkinning on
+	if ( skinV ) {
+		Blk * sk = nullptr;
+		for ( Blk & x : blks )
+			if ( x.name == "skinningUniforms" )
+				sk = &x;
+		const SpvMember * bt = nullptr;
+		for ( std::size_t m = 0; sk && m < sk->b->members.size(); m++ )
+			if ( sk->b->members[m].name == "boneTransforms" )
+				bt = &sk->b->members[m];
+		bool skinOn = false;
+		for ( Blk & x : blks )
+			for ( const SpvMember & m : x.b->members )
+				if ( x.name == "globalUniforms" && m.name == "doSkinning" && m.offset + 4 <= x.bytes.size() ) {
+					const std::uint32_t one = 1;
+					std::memcpy( x.bytes.data() + m.offset, &one, 4 );
+					skinOn = true;
+				}
+		if ( !bt || !skinOn ) {
+			std::printf( "BLVIEW %s FAIL (no skinningUniforms.boneTransforms or globalUniforms.doSkinning in the twins)\n", tag );
+			return false;
+		}
+		const std::size_t stride = bt->arrayStride ? bt->arrayStride : 48;
+		for ( int k = 0; k < 6; k++ ) {
+			const float a = 0.12f * float( k - 2 ), c = std::cos( a ), s = std::sin( a );
+			const float rows[12] = { c, -s, 0, 0.08f * float( k ) - 0.2f, s, c, 0, 0.06f * float( k % 3 ) - 0.06f, 0, 0, 1, 0.25f * float( k % 2 ) - 0.1f };
+			if ( bt->offset + std::size_t( k ) * stride + 48 <= sk->bytes.size() )
+				std::memcpy( sk->bytes.data() + bt->offset + std::size_t( k ) * stride, rows, 48 );
+		}
+	}
+	// the shape: two 6 x 6 grids with a bump (base vertex 0 / 36), the app's sequential arrays; values exact in half; with
+	// variant 2 the bone codes (bone + weight) at locations 5 / 6: bones v % 6 and (v + 1) % 6, weights 0.75 / 0.25 or 0.5 / 0.5
 	const int g = 6, nv = g * g, ni = ( g - 1 ) * ( g - 1 ) * 6;
-	const int locs[6] = { 0, 1, 2, 3, 4, 7 }, comps[6] = { 3, 4, 3, 3, 3, 2 };
-	std::vector<float> arr[6];
+	const int nAttr = skinV ? 8 : 6;
+	const int locs[8] = { 0, 1, 2, 3, 4, 7, 5, 6 }, comps[8] = { 3, 4, 3, 3, 3, 2, 4, 4 };
+	std::vector<float> arr[8];
 	std::mt19937 vr( 7 );
 	std::uniform_real_distribution<float> v01( 0.0f, 1.0f );
 	auto hq = []( float x ) { return fromHalf( toHalf( x ) ); };
@@ -387,6 +462,12 @@ bool cellGate( const std::string & spirvDir, int twin, const GLuint maps[4], uns
 					arr[4].push_back( hq( v ) );
 				for ( float v : { px * 0.75f + 0.5f, py * 0.75f + 0.5f } )
 					arr[5].push_back( hq( v ) );
+				const int vi = s * nv + y * g + x, b0 = vi % 6, b1 = ( vi + 1 ) % 6;
+				const float w0 = vi % 2 ? 0.5f : 0.75f;
+				for ( float v : { float( b0 ) + w0, float( b1 ) + 1.0f - w0, 0.0f, 0.0f } )
+					arr[6].push_back( v );
+				for ( int c = 0; c < 4; c++ )
+					arr[7].push_back( 0.0f );
 			}
 	std::vector<std::uint16_t> idx;
 	for ( int y = 0; y + 1 < g; y++ )
@@ -401,8 +482,8 @@ bool cellGate( const std::string & spirvDir, int twin, const GLuint maps[4], uns
 	// layout 0 floats, 1 halves (VTXPACK1), 2 the refusal: colour as 4 normalised bytes
 	for ( int lay = 0; lay < 3; lay++ ) {
 		std::vector<std::uint8_t> bytes;
-		std::size_t offs[6] = {};
-		for ( int a = 0; a < 6; a++ ) {
+		std::size_t offs[8] = {};
+		for ( int a = 0; a < nAttr; a++ ) {
 			offs[a] = bytes.size();
 			if ( lay == 1 || ( lay == 2 && a == 1 ) ) {
 				const int n = comps[a], slot = lay == 1 && n == 3 ? 4 : n;
@@ -427,7 +508,7 @@ bool cellGate( const std::string & spirvDir, int twin, const GLuint maps[4], uns
 		f.bindVertexArray( vao[lay] );
 		f.bindBuffer( 0x8892, vbo[lay] );
 		f.bufferData( 0x8892, std::ptrdiff_t( bytes.size() ), bytes.data(), 0x88E4 );
-		for ( int a = 0; a < 6; a++ ) {
+		for ( int a = 0; a < nAttr; a++ ) {
 			const int n = comps[a];
 			const void * off = reinterpret_cast<const void *>( offs[a] );
 			if ( lay == 2 && a == 1 )
@@ -454,7 +535,30 @@ bool cellGate( const std::string & spirvDir, int twin, const GLuint maps[4], uns
 		{ 1, { h, 1, 0, std::uint32_t( nv ), 0, std::uint32_t( ni ) - h, 1, h, 0, 0 } },
 		{ 0, { std::uint32_t( ni ), 1, 0, std::uint32_t( nv ), 0 } }, { 1, { std::uint32_t( ni ), 1, 0, 0, 0 } } };
 	const int nDraws = 6;
+	int probe = 0;  // the GL-only variant probes: 1 the lights off, 2 the skinning off, 3 the alpha test and blend off
+	bool oldBrdf = false;  // pbrm_default's red 8: r3Red 64, the BRDF before OpenPBR (GL's reference always draws without it)
+	static const int alphaMode[6] = { 4, 4 | 8, 8, 6, 0, 1 | 8 };  // '>', '>' + blend, blend, '>=', none, '<' + blend
 	auto drawState = [&]( int i ) {
+		if ( lightsV )
+			set( "cellLightCount", { float( probe == 1 ? 0 : 3 - i % 3 ) } );
+		if ( skinV )
+			for ( Blk & x : blks )
+				for ( const SpvMember & m : x.b->members )
+					if ( x.name == "globalUniforms" && m.name == "doSkinning" ) {
+						const std::uint32_t on = probe == 2 ? 0u : 1u;
+						std::memcpy( x.bytes.data() + m.offset, &on, 4 );
+					}
+		const int am = alphaV && probe != 3 ? alphaMode[i] : 0;
+		if ( alphaV ) {
+			set( "alphaFlags", { float( am ) } );
+			set( "alphaThreshold", { 0.5f } );
+			if ( pbrmT )  // .pbrm composition: draw 0 the material's own test (pbrAlphaThreshold), draw 2 its blend, the rest alphaFlags
+				set( "pbrComposition", { float( probe == 3 ? 0 : i == 0 ? 1 : i == 2 ? 2 : -1 ) } );
+			if ( ( am & 8 ) != 0 ) {
+				glEnable( GL_BLEND );
+				glBlendFunc( GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA );
+			}
+		}
 		std::mt19937 r( std::uint32_t( 101 + i ) );
 		std::uniform_real_distribution<float> q( 0.0f, 1.0f );
 		const bool sun = i % 3 != 2;
@@ -474,7 +578,7 @@ bool cellGate( const std::string & spirvDir, int twin, const GLuint maps[4], uns
 		set( "uvOffset", { q( r ), q( r ) } );
 		set( "vertexColorOverride", { i == 4 ? 0.7f : 0.0f, 0.0f, 0.0f, 0.0f } );
 		set( "cellProbe", { i == 3 ? 60.0f : 0.0f } );
-		if ( twin == 4 ) {  // pbrm_default: the material and the scene mode per draw
+		if ( pbrmT ) {  // pbrm_default: the material and the scene mode per draw
 			set( "pbrBaseColor", { 0.2f + 0.7f * q( r ), 0.2f + 0.7f * q( r ), 0.2f + 0.7f * q( r ) } );
 			set( "pbrRoughness", { 0.1f + 0.8f * q( r ) } );
 			set( "pbrMetallic", { i % 2 ? 0.0f : 0.5f * q( r ) } );  // run 5: a full metal with no cube map is black off its highlight
@@ -482,7 +586,8 @@ bool cellGate( const std::string & spirvDir, int twin, const GLuint maps[4], uns
 			set( "pbrDiffuseRoughness", { i == 2 ? 0.6f : 0.0f } );
 			// base, normal, the RMAOS map (8) with its rough / AO channels (16, 64; run 5: bit 8 alone reads no channel), its metal
 			// channel (32) on draws 2 and 4, emissive
-			const int feat = 1 | ( i % 2 == 0 ? 2 : 0 ) | ( i != 1 ? 8 | 16 | 64 : 0 ) | ( i == 2 || i == 4 ? 32 : 0 ) | ( glow ? 256 : 0 );
+			const int feat = 1 | ( i % 2 == 0 ? 2 : 0 ) | ( i != 1 ? 8 | 16 | 64 : 0 ) | ( i == 2 || i == 4 ? 32 : 0 ) | ( glow ? 256 : 0 )
+				| ( alphaV ? 2048 : 0 );  // F_OPACITY: the base map's alpha is the opacity
 			set( "pbrFeatures", { float( feat ) } );
 			set( "pbrEmissiveColor", { 0.8f, 0.6f, 0.4f } );
 			set( "pbrEmissiveIntensity", { glow ? 0.5f + q( r ) : 0.0f } );
@@ -491,6 +596,7 @@ bool cellGate( const std::string & spirvDir, int twin, const GLuint maps[4], uns
 			set( "pbrTintMode", { float( i % 3 ) } );
 			set( "sceneMode", { i == 1 || i == 4 ? 2.0f : 0.0f } );
 			set( "viewTransform", { float( i % 3 ) } );
+			set( "r3Red", { oldBrdf ? 64.0f : 0.0f } );  // a loose int uniform: set() writes it with glUniform1i
 		}
 		// the model-view: about y, scale 2.2, x across the frame, depth 7..11 (the shapes overlap: the depth test decides)
 		const float ang = 1.1f * ( q( r ) - 0.5f ), sc = 2.2f, c = std::cos( ang ), s = std::sin( ang );
@@ -534,11 +640,14 @@ bool cellGate( const std::string & spirvDir, int twin, const GLuint maps[4], uns
 		}
 		if ( csmTex )
 			u.bindTextures( GLuint( csmUnit ), 1, &csmTex );
+		if ( lightTex )
+			u.bindTextures( GLuint( lightUnit ), 1, &lightTex );
 		for ( Blk & x : blks )
 			f.bindBufferBase( 0x8A11, x.glBind, x.buf );
 	};
 	auto frameOff = [&]() {
 		f.bindVertexArray( 0 );
+		glDisable( GL_BLEND );
 		glDisable( GL_CULL_FACE );
 		glDisable( GL_DEPTH_TEST );
 		f.useProgram( 0 );
@@ -608,7 +717,7 @@ bool cellGate( const std::string & spirvDir, int twin, const GLuint maps[4], uns
 	for ( const Blk & x : blks )
 		std::printf( " %s@%u (%zu B)", x.name.c_str(), x.glBind, x.bytes.size() );
 	std::printf( "\n" );
-	if ( twin == 4 ) {
+	if ( pbrmT ) {
 		std::printf( "BLVIEW %s not read:%s\n", tag, offNames.c_str() );
 		std::printf( "BLVIEW %s GL per draw (covered / rgb non-zero):", tag );
 		for ( int i = 0; i < nDraws; i++ ) {
@@ -620,12 +729,11 @@ bool cellGate( const std::string & spirvDir, int twin, const GLuint maps[4], uns
 					cov++;
 					lit += one.c0[p * 4] != 0 || one.c0[p * 4 + 1] != 0 || one.c0[p * 4 + 2] != 0;
 				}
-			std::printf( " %d: %zu / %zu", i, cov, lit );
-		}
+			std::printf( " %d: %zu / %zu", i, cov, lit );		}
 		std::printf( "\n" );
 	}
 	bool csmReach = true;
-	if ( twin == 3 ) {  // does the cascade map reach GL's colour (csmForce 1: no shadow)
+	if ( csmT ) {  // does the cascade map reach GL's colour (csmForce 1: no shadow)
 		CellOut g2;
 		set( "csmForce", { 1.0f } );
 		glSweep( g2 );
@@ -643,6 +751,30 @@ bool cellGate( const std::string & spirvDir, int twin, const GLuint maps[4], uns
 		csmReach = cov > 0 && double( moved ) >= 0.2 * double( cov );
 		std::printf( "BLVIEW %s GL map probe %s: csmForce 1 moves GL's colour on %zu of %zu covered pixels (bar >= 20 %%)\n", tag,
 			csmReach ? "OK" : "FAIL", moved, cov );
+	}
+	// the variant probes: each variant's input reaches GL's picture (else its red could test nothing)
+	static const char * probeName[4] = { "", "lights (cellLightCount 0)", "skin (doSkinning 0)", "alpha (alphaFlags 0, no blend)" };
+	for ( int pr = 1; pr <= 3; pr++ ) {
+		if ( !( pr == 1 ? lightsV : pr == 2 ? skinV : alphaV ) )
+			continue;
+		CellOut g2;
+		probe = pr;
+		glSweep( g2 );
+		probe = 0;
+		std::size_t cov = 0, moved = 0;
+		for ( std::size_t i = 0; i < gl.depth.size(); i++ ) {
+			if ( !( gl.depth[i] < 1.0f ) )
+				continue;
+			cov++;
+			bool mv = gl.depth[i] != g2.depth[i];
+			for ( int ch = 0; ch < 4; ch++ )
+				mv = mv || gl.c0[i * 4 + ch] != g2.c0[i * 4 + ch];
+			moved += mv;
+		}
+		const bool reach = cov > 0 && double( moved ) >= 0.2 * double( cov );
+		std::printf( "BLVIEW %s GL %s probe %s: moves GL's colour or depth on %zu of %zu covered pixels (bar >= 20 %%)\n", tag, probeName[pr],
+			reach ? "OK" : "FAIL", moved, cov );
+		csmReach = csmReach && reach;
 	}
 	struct CellCmp
 	{
@@ -691,10 +823,14 @@ bool cellGate( const std::string & spirvDir, int twin, const GLuint maps[4], uns
 	} else {
 		const DepthCmp dc = depthCmp( vk0.depth, gl.depth );
 		const CellCmp cc = colCmp( vk0 );
-		const bool litOk = cc.both >= 2000 && double( cc.lit ) >= 0.9 * double( cc.both ) && ( twin == 4 || cc.glow >= 200 );
-		const bool crossOk = rs.runs == nDraws && rs.fails == 0 && rs.cells == nDraws && rs.twins == 4 * nDraws;
-		std::printf( "BLVIEW %s crossing %s (%d runs, %d failed, %d cells, %d twin images, %d shared, %d GL-only)\n", tag, crossOk ? "OK" : "FAIL",
-			rs.runs, rs.fails, rs.cells, rs.twins, rs.shared, rs.glOwn );
+		const bool litOk = cc.both >= 2000 && double( cc.lit ) >= 0.9 * double( cc.both ) && ( pbrmT || cc.glow >= 200 );
+		int blendDraws = 0;
+		for ( int i = 0; i < nDraws; i++ )
+			blendDraws += alphaV && ( alphaMode[i] & 8 ) != 0 ? 1 : 0;
+		const bool varOk = rs.cellLit == ( lightsV ? nDraws : 0 ) && rs.cellSkinned == ( skinV ? nDraws : 0 ) && rs.cellBlended == blendDraws;
+		const bool crossOk = rs.runs == nDraws && rs.fails == 0 && rs.cells == nDraws && rs.twins == 4 * nDraws && varOk;
+		std::printf( "BLVIEW %s crossing %s (%d runs, %d failed, %d cells, %d twin images, %d shared, %d GL-only; lit %d skinned %d blended %d)\n",
+			tag, crossOk ? "OK" : "FAIL", rs.runs, rs.fails, rs.cells, rs.twins, rs.shared, rs.glOwn, rs.cellLit, rs.cellSkinned, rs.cellBlended );
 		std::printf( "BLVIEW %s depth vs GL %s (%zu covered, %zu on one side, %zu differ, max %.3g)\n", tag, dc.word(), dc.covered, dc.oneSide,
 			dc.differ, double( dc.maxAbs ) );
 		const bool colOk = cc.over == 0;
@@ -712,14 +848,38 @@ bool cellGate( const std::string & spirvDir, int twin, const GLuint maps[4], uns
 		}
 		ok = ok && crossOk && ( dc.exact() || dc.bound() ) && litOk && colOk;
 	}
-	const char * redName[4] = { "offset (every attribute read from offset 0)", "half (halves read as 16-bit unorm)",
-		"swz (the twins' swizzle dropped)", "key (each twin the one made before it)" };
-	for ( int r = 1; r <= 4; r++ ) {
+	if ( pbrmT && ( reds >> 7 & 1u ) ) {  // lane VKWATER3: the look before OpenPBR against the new one, both on GL (a number, not a gate)
+		CellOut g2;
+		oldBrdf = true;
+		glSweep( g2 );
+		oldBrdf = false;
+		const CellCmp cc = colCmp( g2 );
+		double sum = 0.0;
+		std::size_t n = 0;
+		for ( std::size_t i = 0; i < gl.depth.size(); i++ ) {
+			if ( !( gl.depth[i] < 1.0f ) || !( g2.depth[i] < 1.0f ) )
+				continue;
+			for ( int ch = 0; ch < 3; ch++ ) {
+				const float a = fromHalf( g2.c0[i * 4 + ch] ), b = fromHalf( gl.c0[i * 4 + ch] );
+				sum += std::fabs( a - b ) / std::max( 1.0f, std::fabs( b ) );
+				n++;
+			}
+		}
+		std::printf( "BLVIEW %s OpenPBR vs the old BRDF (GL, target 0 rgb): %zu pixels, %zu values differ, max %.4g, mean %.4g of max(1, |new|)\n",
+			tag, cc.both, cc.differ, double( cc.maxRel ), n ? sum / double( n ) : 0.0 );
+	}
+	const char * redName[8] = { "offset (every attribute read from offset 0)", "half (halves read as 16-bit unorm)",
+		"swz (the twins' swizzle dropped)", "key (each twin the one made before it)", "light (the light texel buffer copied from one texel on)",
+		"bone (the bone transforms one bone on)", "blend (GL's source / destination factors swapped)",
+		"oldbrdf (r3Red 64: the BRDF before OpenPBR)" };
+	for ( int r = 1; r <= 8; r++ ) {
 		if ( !( reds >> ( r - 1 ) & 1u ) )
 			continue;
 		CellOut o;
 		std::string rw;
-		const bool rr = vkSweep( r, o, rw );
+		oldBrdf = r == 8;
+		const bool rr = vkSweep( r == 8 ? 0 : r, o, rw );
+		oldBrdf = false;
 		bool passes = false;
 		std::size_t over = 0, vch = 0;
 		if ( rr ) {
@@ -757,6 +917,8 @@ bool cellGate( const std::string & spirvDir, int twin, const GLuint maps[4], uns
 	}
 	f.bindVertexArray( 0 );
 	glDeleteTextures( 1, &glOnly );
+	if ( lightTex )
+		glDeleteTextures( 1, &lightTex );  // its buffer stays with the gate's other buffers
 	objBlLocsLoad( spirvDir + "/no_locs.txt", why );  // the other gates never see it
 	std::printf( "BLVIEW %s %s\n", tag, ok ? "OK" : "FAILED" );
 	return ok;

@@ -140,12 +140,14 @@ int wwR3Term() { return st().term; }
 int wwR3RedBits()
 {
 	const QString & r = st().red3;
-	if ( r == QLatin1StringView( "noms" ) ) return 1;
+	// lane VKWATER3: 64 = oldbrdf, the BRDF before OpenPBR; the reds that break its terms carry it
+	if ( r == QLatin1StringView( "noms" ) ) return 1 | 64;
 	if ( r == QLatin1StringView( "nosplit" ) ) return 2;
-	if ( r == QLatin1StringView( "fo4csweight" ) ) return 4;
+	if ( r == QLatin1StringView( "fo4csweight" ) ) return 4 | 64;
 	if ( r == QLatin1StringView( "notint" ) ) return 8;
-	if ( r == QLatin1StringView( "f90scaled" ) ) return 16;
-	if ( r == QLatin1StringView( "lambert" ) ) return 32;
+	if ( r == QLatin1StringView( "f90scaled" ) ) return 16 | 64;
+	if ( r == QLatin1StringView( "lambert" ) ) return 32 | 64;
+	if ( r == QLatin1StringView( "oldbrdf" ) ) return 64;
 	return 0;
 }
 
