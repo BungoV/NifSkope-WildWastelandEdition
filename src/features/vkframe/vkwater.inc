@@ -606,6 +606,7 @@ struct TwinSpec
 	VkDeviceSize constAt, hostBytes;
 	bool rings;
 	int kind;  //!< fxWork's kind
+	bool psGlobalB0 = false;  //!< lane VKFAR3: the pixel stage's globalUniforms at b0, wwShadowFrame at b1 (the far ground's)
 };
 const TwinSpec kFarlodSpec { "far LOD", vkframe_farlod_view_vs_spv, sizeof( vkframe_farlod_view_vs_spv ), vkframe_farlod_view_ps_spv,
 	sizeof( vkframe_farlod_view_ps_spv ), kFarlodImg, sizeof( kFarlodImg ) / sizeof( kFarlodImg[0] ), kFarlodInts,
@@ -655,6 +656,7 @@ WaterDraw & farLodD()
 	static WaterDraw D;
 	return D;
 }
+WaterDraw & farGroundD();  // lane VKFAR3 (vkfarground.inc): fxWork's kind 9
 
 VkFormat waterAttrFormat( const WwVkPresent::WaterAttrib & a )
 {
@@ -1087,12 +1089,12 @@ VkPipeline waterPipe( WaterDraw & D, const TwinSpec & P, const WwVkPresent::Wate
 	return out;
 }
 
-// fxWork's kind 5 (the worker): the far LOD rings' commands into the tone frame
+// fxWork's kind 5 (the worker): the far LOD rings' commands into the tone frame; kind 9 (lane VKFAR3): the far ground's
 bool ringsRecord( std::string & why )
 {
 	Vk & v = vk();
 	Fx & F = fx();
-	WaterDraw & D = farLodD();
+	WaterDraw & D = F.kind == 9 ? farGroundD() : farLodD();
 	if ( !F.fbAir || !D.pipe ) {
 		why = "no framebuffer / pipeline for the water draw";
 		return false;
@@ -1120,7 +1122,7 @@ bool ringsRecord( std::string & why )
 // shutdown (after fxDrop waited the device): the exported copy is GL's name too
 void ringsDrop()
 {
-	for ( WaterDraw * D : { &farLodD() } ) {
+	for ( WaterDraw * D : { &farLodD(), &farGroundD() } ) {
 		if ( !D->geo.buf && !D->host.buf )
 			continue;
 		vk().vkDeviceWaitIdle( vk().dev );
@@ -1131,12 +1133,12 @@ void ringsDrop()
 }  // namespace farlod
 
 // fxWork's kind 4 (the worker): the shape into the tone frame, or the water ray pass's target (lane VKWATER4); kind 5
-// (lane VKFAR2): the far LOD rings
+// (lane VKFAR2): the far LOD rings; kind 9 (lane VKFAR3): the far ground
 bool waterRecord( std::string & why )
 {
 	Vk & v = vk();
 	Fx & F = fx();
-	if ( F.kind == 5 )
+	if ( F.kind == 5 || F.kind == 9 )  // lane VKFAR3: 9 the far ground, on the rings' copy
 		return farlod::ringsRecord( why );
 	WaterDraw & D = waterD();
 	if ( !D.recFb || !D.recPass || !D.pipe ) {
@@ -1909,8 +1911,9 @@ static bool twinRun( WaterDraw & D, const TwinSpec & P, const WaterRun & r, std:
 		x.descriptorCount = 1;
 		if ( b.kind == 0 ) {
 			x.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-			// vs blocks at 256 + n (fxw's b-shift), ps blocks at n
-			const int k = ( b.binding == 257 || b.binding == 1 ) ? 0 : b.binding == 0 ? 1 : b.binding == 256 ? 2 : -1;
+			// vs blocks at 256 + n (fxw's b-shift), ps blocks at n (globalUniforms b1, wwShadowFrame b0; psGlobalB0: swapped)
+			const std::uint32_t psGlobal = P.psGlobalB0 ? 0 : 1, psShadow = P.psGlobalB0 ? 1 : 0;
+			const int k = ( b.binding == 257 || b.binding == psGlobal ) ? 0 : b.binding == psShadow ? 1 : b.binding == 256 ? 2 : -1;
 			if ( k >= 0 )
 				bi[i] = uboHost[k] ? VkDescriptorBufferInfo { D.host.buf, kWaterZeroAt, uboNeed[k] }
 					: VkDescriptorBufferInfo { D.geo.buf, uboAt[k], uboNeed[k] };
@@ -2043,7 +2046,7 @@ static bool twinRun( WaterDraw & D, const TwinSpec & P, const WaterRun & r, std:
 	x1 = std::clamp( x1, 0, T.w );
 	y1 = std::clamp( y1, 0, T.h );
 	D.sc = { { x0, y0 }, { std::uint32_t( std::max( x1 - x0, 0 ) ), std::uint32_t( std::max( y1 - y0, 0 ) ) } };
-	F.kind = P.kind;  // fxWork's kind 4 water, 5 the far LOD rings (3 = VKFAR2's far cards)
+	F.kind = P.kind;  // fxWork's kind 4 water, 5 the far LOD rings (3 = VKFAR2's far cards), 9 the far ground (lane VKFAR3)
 	F.w = r.w;
 	F.h = r.h;
 	// GL's work so far signalled (the frame, every twin, the copies) -> the worker's job -> GL waits

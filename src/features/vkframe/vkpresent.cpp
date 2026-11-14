@@ -103,6 +103,7 @@ constexpr GLenum kTexture3D = 0x806F, kTexBinding3D = 0x806A, kTexture2DArray = 
 constexpr GLenum kDepth16 = 0x81A5;  // lane VKSHADOW1: the sun cascades' D16 2D array
 constexpr GLenum kDepth24 = 0x81A6, kDepth32f = 0x8CAC;  // lane VKOBJ1: the objects' prepass (X8_D24 / D32F, multisample)
 constexpr GLenum kGlR32ui = 0x8236, kGlRg32ui = 0x823C, kGlR8ui = 0x8232;  // lane VKWATER2: the water's index / atlas lookups
+constexpr GLenum kGlRgba32ui = 0x8D70, kGlRgba16ui = 0x8D76;  // lane VKFAR3: the far ground's grid / cached-page cell table
 constexpr GLenum kDepth32fS8 = 0x8CAD;  // lane VKWATER2: waterDepth's copy on a float depth frame (D32F_S8)
 constexpr GLuint64 kTimeoutIgnored = ~0ull;
 
@@ -1460,6 +1461,8 @@ VkFormat vkFormatOf( GLenum f, bool & depth )
 	case kGlR32ui: return VK_FORMAT_R32_UINT;  // lane VKWATER2: waterInfoAtlas / FlowAtlas / SkyIndex
 	case kGlRg32ui: return VK_FORMAT_R32G32_UINT;  // waterInfoIndex / FlowIndex
 	case kGlR8ui: return VK_FORMAT_R8_UINT;  // waterSkyAtlas
+	case kGlRgba32ui: return VK_FORMAT_R32G32B32A32_UINT;  // lane VKFAR3: fgGrid
+	case kGlRgba16ui: return VK_FORMAT_R16G16B16A16_UINT;  // lane VKFAR3: fgCells
 	default: return VK_FORMAT_UNDEFINED;
 	}
 }
@@ -5531,7 +5534,7 @@ struct Fx
 	VkFence fence = VK_NULL_HANDLE;
 	bool pending = false;
 	// this run's job, written by the drawing thread before the hand
-	int kind = 0;  // 0 the air, 1 the clouds, 2 the far dots (lane VKFAR1), 3 the far cards (lane VKFAR2), 4 the water draw (lane VKWATER3), 6 the fog bloom (lane VKFAR2), 8 rain / snow (lane VKFAR2)
+	int kind = 0;  // 0 the air, 1 the clouds, 2 the far dots (lane VKFAR1), 3 the far cards (lane VKFAR2), 4 the water draw (lane VKWATER3), 6 the fog bloom (lane VKFAR2), 8 rain / snow (lane VKFAR2), 9 the far ground (lane VKFAR3)
 	VkFramebuffer fbAir = VK_NULL_HANDLE, fbM = VK_NULL_HANDLE, fbR = VK_NULL_HANDLE;
 	int w = 0, h = 0, vp[4] = {}, stencilRef = 1, march = kFxMarch, resolve = kFxResolve, mw = 0, mh = 0, hw = 0, hh = 0;
 	bool blend = false, skipMarch = false;
@@ -5969,7 +5972,7 @@ bool fxWork( std::string & why )
 			v.vkEndCommandBuffer( F.cmd );
 			return false;
 		}
-	} else if ( F.kind == 4 || F.kind == 5 ) {  // lane VKWATER3: the shaded water draw; lane VKFAR2: 5 the far LOD rings
+	} else if ( F.kind == 4 || F.kind == 5 || F.kind == 9 ) {  // lane VKWATER3: the shaded water draw; lane VKFAR2: 5 the far LOD rings; lane VKFAR3: 9 the far ground
 		if ( !waterRecord( why ) ) {
 			v.vkEndCommandBuffer( F.cmd );
 			return false;
@@ -9243,3 +9246,4 @@ bool frame( QOpenGLWindow * w, const std::function<void()> & paint )
 #endif
 
 #include "features/vkframe/vkwater.inc"  // lane VKWATER1: the water's route and census (row G5)
+#include "features/vkframe/vkfarground.inc"  // lane VKFAR3: the far ground's ring-0 terrain (row G3)

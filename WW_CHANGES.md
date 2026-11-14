@@ -1,3 +1,20 @@
+## VKFAR3 G3 (2026-11-14): the near far ground (ring 0's live terrain) draws on Vulkan (WW_VKVIEW=1)
+
+Changed, not built, not checked live.
+
+- With Show > Far ground at "Live, shader decals" (the default) and sun shadows on, ring 0's terrain shapes
+  (fo4_cellcsmfgl) draw on the Vulkan view, one draw a shape.
+- While the view is on, the ground grid, the layer textures (~180 MB) and the decal atlas are made on the present
+  device and shared with GL, so no draw copies them. The view off keeps GL's own textures as before. If one cannot be
+  shared, GL draws the shape and the line says why.
+- Red WW_VKVIEW_FARGROUND_RED=1 keeps GL's draw. A `vk farground:` line counts shapes drawn on Vulkan and on GL and
+  names why GL kept a shape: Baked sheet, no sun shadows (fo4_cellfgl), "Live, cached pages", the oldpages red,
+  the textures not shared.
+- Offline gate tests/vkframe/fargrounddraw.sh against GL's own program: 2 seeds, depth EXACT, colour inside the bar
+  (max rel 0.0098, mipped atlas), GL on the shared textures vs GL on plain ones EXACT, three copies fewer a draw, every
+  red FAILS (offset, plain samplers, cull, depth test, polygon offset, first index, grid and decals rewritten after
+  GL's draw).
+
 ## VKOBJ5 (2026-11-14): skinned and alpha-tested bindless object draws on Vulkan (WW_VKOBJ_SHADE=1)
 
 Changed, not built, not checked live. Offline: tests/vkframe/blview.sh colourGate gained a skinned and an alpha-tested

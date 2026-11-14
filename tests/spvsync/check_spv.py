@@ -113,6 +113,16 @@ HLSL_SPECS += [('src/features/vkframe', k, 'vulkan1.2', 'vkframe_%s_spv' % k) fo
 VKFRAME_FXB_ARGS = ['-fvk-bind-register', 'b0', '0', '0', '0', '-fvk-bind-register', 'b31', '0', '32', '0', '-fspv-preserve-bindings']
 VKFRAME_FXB = {'skystars_view_vs': 'clouds/lookdev_clouds_vs', 'skymoon_view_vs': 'core/lookdev_bill_vs'}
 HLSL_SPECS += [('src/features/vkframe', k, 'vulkan1.2', 'vkframe_%s_spv' % k) for k in VKFRAME_FXB]
+# lane VKFAR3 G3: the far ground's pixel stages, the script's `fxg <name> <dir/file>` lines (fxk()'s shifts + the app's variant)
+VKFRAME_FXG_ARGS = VKFRAME_SKY_ARGS + ['-fspv-preserve-bindings', '-D', 'WW_CELL_FOGLEAK=1', '-D', 'WW_FRAME_UBO=1']
+VKFRAME_FXG = {'fargnd_view_ps': 'far-ground/fo4_cellcsmfgl_ps'}
+HLSL_SPECS += [('src/features/vkframe', k, 'vulkan1.2', 'vkframe_%s_spv' % k) for k in VKFRAME_FXG]
+# lane VKFAR3 G3: their vertex stage, the script's `fxt <name> <dir/file>` lines (t at 200, s at 216: past the pixel
+# stage's declared images 64..126 and samplers 128..190; used or not, every declared binding is in the merged set)
+VKFRAME_FXT_ARGS = ['-fvk-b-shift', '256', '0', '-fvk-t-shift', '200', '0', '-fvk-s-shift', '216', '0', '-fvk-u-shift', '240', '0',
+	'-fspv-preserve-bindings']
+VKFRAME_FXT = {'fargnd_view_vs': 'core/water_view_vs'}
+HLSL_SPECS += [('src/features/vkframe', k, 'vulkan1.2', 'vkframe_%s_spv' % k) for k in VKFRAME_FXT]
 # lane VKFAR2 P9: the lens-flare sprites, the script's `fxf <name> <dir/file> <profile>` lines (no shifts, no options)
 VKFRAME_FXF = {'lensflare_view_vs': ('post/lens_flare_view_vs', 'vs_6_0'), 'lensflare_view_ps': ('post/lens_flare', 'ps_6_0')}
 HLSL_SPECS += [('src/features/vkframe', k, 'vulkan1.2', 'vkframe_%s_spv' % k) for k in VKFRAME_FXF]
@@ -273,6 +283,16 @@ def script_ok(tree):
 	llines = dict(re.findall(r'^fxl ([a-z0-9_]+) ([A-Za-z0-9_/+-]+)$', vf, re.M))
 	if llines != VKFRAME_FXL:
 		bad.append('src/features/vkframe/vkframe_spirv.sh: its fxl lines (%s) are not this checker\'s far LOD vertex stages' % ' '.join(sorted(llines)))
+	if '\t"$DXC" -spirv -fspv-target-env=vulkan1.2 -T ps_6_0 -E main ' + ' '.join(VKFRAME_FXG_ARGS) + ' -Fo "$1.spv" ' not in vf:
+		bad.append('src/features/vkframe/vkframe_spirv.sh: its fxg() compile line changed')
+	glines = dict(re.findall(r'^fxg ([a-z0-9_]+) ([A-Za-z0-9_/+-]+)$', vf, re.M))
+	if glines != VKFRAME_FXG:
+		bad.append('src/features/vkframe/vkframe_spirv.sh: its fxg lines (%s) are not this checker\'s far-ground pixel stages' % ' '.join(sorted(glines)))
+	if '\t"$DXC" -spirv -fspv-target-env=vulkan1.2 -T vs_6_0 -E main ' + ' '.join(VKFRAME_FXT_ARGS) + ' -Fo "$1.spv" ' not in vf:
+		bad.append('src/features/vkframe/vkframe_spirv.sh: its fxt() compile line changed')
+	tlines = dict(re.findall(r'^fxt ([a-z0-9_]+) ([A-Za-z0-9_/+-]+)$', vf, re.M))
+	if tlines != VKFRAME_FXT:
+		bad.append('src/features/vkframe/vkframe_spirv.sh: its fxt lines (%s) are not this checker\'s far-ground vertex stages' % ' '.join(sorted(tlines)))
 	if '\t"$DXC" -spirv -fspv-target-env=vulkan1.2 -T vs_6_0 -E main ' + ' '.join(VKFRAME_FXB_ARGS) + ' -Fo "$1.spv" ' not in vf:
 		bad.append('src/features/vkframe/vkframe_spirv.sh: its fxb() compile line changed')
 	blines = dict(re.findall(r'^fxb ([a-z0-9_]+) ([A-Za-z0-9_/+-]+)$', vf, re.M))
@@ -464,6 +484,12 @@ def main(argv):
 					+ ['-fspv-preserve-bindings']
 			if k in VKFRAME_FXCELL:
 				src = os.path.join(tree, 'res/shaders/hlsl/core', VKFRAME_FXCELL[k][0] + '.hlsl')
+			if k in VKFRAME_FXG:
+				src = os.path.join(tree, 'res/shaders/hlsl', VKFRAME_FXG[k] + '.hlsl')
+				hdefs = VKFRAME_FXG_ARGS
+			if k in VKFRAME_FXT:
+				src = os.path.join(tree, 'res/shaders/hlsl', VKFRAME_FXT[k] + '.hlsl')
+				hdefs = VKFRAME_FXT_ARGS
 			if k in VKFRAME_FXF:  # the profile is the table's (lens_flare.hlsl holds both stages)
 				src = os.path.join(tree, 'res/shaders/hlsl', VKFRAME_FXF[k][0] + '.hlsl')
 				hdefs = []
@@ -476,7 +502,7 @@ def main(argv):
 				m = None
 			else:
 				m = re.search(r'hlsl profile: ([cvp]s_6_[0-9])', open(src, encoding='utf-8', errors='replace').read())
-			if k in VKFRAME_FXV or k in VKFRAME_FXC or k in VKFRAME_FXW or k in VKFRAME_FXL or k in VKFRAME_FXB:
+			if k in VKFRAME_FXV or k in VKFRAME_FXC or k in VKFRAME_FXW or k in VKFRAME_FXL or k in VKFRAME_FXB or k in VKFRAME_FXT:
 				m = re.match(r'(vs_6_0)', 'vs_6_0')
 			if k in VKFRAME_FXH:
 				src = os.path.join(tree, 'res/shaders/hlsl', VKFRAME_FXH[k] + '.hlsl')
@@ -486,6 +512,8 @@ def main(argv):
 				src = os.path.join(tree, 'res/shaders/hlsl', VKFRAME_FXD[k] + '.hlsl')
 				hdefs = VKFRAME_FXD_ARGS
 				m = re.match(r'(ds_6_0)', 'ds_6_0')
+			if k in VKFRAME_FXG:
+				m = re.match(r'(ps_6_0)', 'ps_6_0')
 			if k in VKFRAME_FXS:
 				m = re.match(r'(cs_6_0)', 'cs_6_0')
 			if k in VKFRAME_FXBL:

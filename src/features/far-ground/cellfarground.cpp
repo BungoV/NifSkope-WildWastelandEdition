@@ -17,6 +17,9 @@ BSD License - see nifskope.h
 #include "features/far-lod/lodgen.h"
 #include "features/far-lod/lodtfile.h"
 #include "features/far-lod/loddecal.h"
+#include "features/exposure/cellhdr.h"	// lane VKFAR3: the shared tone frame
+#include "features/vkframe/vkpresent.h"	// lane VKFAR3: ring 0 on the Vulkan view (row G3)
+#include "features/vkframe/vkwater.h"
 
 #include <QElapsedTimer>
 #include <QHash>
@@ -28,7 +31,11 @@ BSD License - see nifskope.h
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <string>
+#include <string_view>
 #include <vector>
+
+bool wwFogLeakShaderDefine();	// src/features/air/cellvolair.cpp: WW_CELL_FOGLEAK in the cell programs
 
 namespace
 {
@@ -93,6 +100,9 @@ struct Gpu
 	std::vector<quint16> cellTab;
 	int idle = 0, fillFrames = 0, painted = 0;
 	bool settledSaid = false, busy = false;
+	// lane VKFAR3: the live lookup's grid, layers and atlas on the present device (bits 1, 2, 4; key slot vkSlot), no copy a draw
+	int vkSlot = -1, vkShared = 0, vkFailed = 0;
+	std::string vkWhy;
 };
 
 struct Doc
@@ -143,21 +153,90 @@ void delTex( NifSkopeOpenGLContext::GLFunctions * fn, GLuint & t, qint64 & bytes
 	bytes = 0;
 }
 
+// lane VKFAR3: the shared inputs' keys, three a Gpu (a Gpu is copied into the graveyard: its address is no key)
+constexpr int kVkSlots = 256;
+char g_vkKeys[3 * kVkSlots];
+bool g_vkUsed[kVkSlots];
+
+std::uintptr_t vkKeyOf( const Gpu & g, int slot )
+{
+	return reinterpret_cast<std::uintptr_t>( g_vkKeys + 3 * g.vkSlot + slot );
+}
+
+//! a shared input goes with its target (its GL name too); one a present shutdown already took is only forgotten
+void delShared( Gpu & g, int slot, GLuint & t, qint64 & bytes )
+{
+	if ( WwVkPresent::sharedTargetIs( vkKeyOf( g, slot ), t ) )
+		WwVkPresent::sharedTargetDrop( vkKeyOf( g, slot ) );
+	t = 0;
+	bytes = 0;
+	g.vkShared &= ~( 1 << slot );
+	if ( !g.vkShared && g.vkSlot >= 0 ) {
+		g_vkUsed[g.vkSlot] = false;
+		g.vkSlot = -1;
+	}
+}
+
+void delIn( NifSkopeOpenGLContext::GLFunctions * fn, Gpu & g, int slot, GLuint & t, qint64 & bytes )
+{
+	if ( g.vkShared & ( 1 << slot ) )
+		delShared( g, slot, t, bytes );
+	else
+		delTex( fn, t, bytes );
+}
+
+//! slot's texture made on the present device (GL current); false: GL makes its own (why in vkWhy)
+bool sharedIn( Gpu & g, int slot, int type, int w, int h, int d, GLenum fmt, int levels, GLuint & t )
+{
+	for ( int i = 0; i < kVkSlots && g.vkSlot < 0; i++ )
+		if ( !g_vkUsed[i] ) {
+			g_vkUsed[i] = true;
+			g.vkSlot = i;
+		}
+	if ( g.vkSlot < 0 ) {
+		g.vkWhy = "no free key slot";
+		g.vkFailed |= 1 << slot;
+		return false;
+	}
+	unsigned tex = 0;
+	std::string why;
+	if ( !WwVkPresent::sharedTarget( vkKeyOf( g, slot ), type, w, h, d, fmt, tex, why, levels ) ) {
+		g.vkWhy = why;
+		g.vkFailed |= 1 << slot;
+		if ( !g.vkShared ) {
+			g_vkUsed[g.vkSlot] = false;
+			g.vkSlot = -1;
+		}
+		return false;
+	}
+	t = tex;
+	g.vkShared |= 1 << slot;
+	return true;
+}
+
+int mipLevels( int w, int h )
+{
+	int n = 1;
+	while ( std::max( w, h ) >> n )
+		n++;
+	return n;
+}
+
 void freeDecals( NifSkopeOpenGLContext::GLFunctions * fn, Gpu & g )
 {
 	delTex( fn, g.dtex, g.bDec );
 	if ( g.dbuf )
 		fn->glDeleteBuffers( 1, &g.dbuf );
 	g.dbuf = 0;
-	delTex( fn, g.atlas, g.bAtlas );
+	delIn( fn, g, 2, g.atlas, g.bAtlas );
 }
 
 //! The page paint's inputs and scratch: what a settled set of pages no longer needs.
 void freeKit( NifSkopeOpenGLContext::GLFunctions * fn, Gpu & g )
 {
-	delTex( fn, g.grid, g.bGrid );
+	delIn( fn, g, 0, g.grid, g.bGrid );
 	delTex( fn, g.height, g.bHeight );
-	delTex( fn, g.ltex, g.bLtex );
+	delIn( fn, g, 1, g.ltex, g.bLtex );
 	freeDecals( fn, g );
 	qint64 none = 0;
 	delTex( fn, g.scratchN, none );
@@ -192,9 +271,9 @@ void freePools( NifSkopeOpenGLContext::GLFunctions * fn, Gpu & g )
 
 void freeAll( NifSkopeOpenGLContext::GLFunctions * fn, Gpu & g )
 {
-	delTex( fn, g.grid, g.bGrid );
+	delIn( fn, g, 0, g.grid, g.bGrid );
 	delTex( fn, g.height, g.bHeight );
-	delTex( fn, g.ltex, g.bLtex );
+	delIn( fn, g, 1, g.ltex, g.bLtex );
 	freeDecals( fn, g );
 	freePools( fn, g );
 	delTex( fn, g.pages, g.bPages );
@@ -509,13 +588,17 @@ void loadPictures( Doc & d )
 }
 
 GLuint tex2D( NifSkopeOpenGLContext::GLFunctions * fn, GLenum ifmt, int w, int h, GLenum fmt, GLenum type, const void * data,
-	bool linear, bool mips )
+	bool linear, bool mips, GLuint have = 0 )
 {
-	GLuint t = 0;
-	fn->glGenTextures( 1, &t );
+	GLuint t = have;	// have: a shared target's storage (lane VKFAR3), filled in place
+	if ( !t )
+		fn->glGenTextures( 1, &t );
 	fn->glBindTexture( GL_TEXTURE_2D, t );
 	fn->glPixelStorei( GL_UNPACK_ALIGNMENT, 1 );
-	fn->glTexImage2D( GL_TEXTURE_2D, 0, GLint( ifmt ), w, h, 0, fmt, type, data );
+	if ( have )
+		fn->glTexSubImage2D( GL_TEXTURE_2D, 0, 0, 0, w, h, fmt, type, data );
+	else
+		fn->glTexImage2D( GL_TEXTURE_2D, 0, GLint( ifmt ), w, h, 0, fmt, type, data );
 	if ( mips )
 		fn->glGenerateMipmap( GL_TEXTURE_2D );
 	fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, mips ? GL_LINEAR_MIPMAP_LINEAR : linear ? GL_LINEAR : GL_NEAREST );
@@ -530,19 +613,29 @@ qint64 mipBytes( qint64 b, bool mips )
 	return mips ? b * 4 / 3 : b;
 }
 
-void uploadBase( NifSkopeOpenGLContext::GLFunctions * fn, Doc & d )
+//! share (lane VKFAR3): the grid and layers on the present device (the live lookup's Vulkan twin reads them, no copy)
+void uploadBase( NifSkopeOpenGLContext::GLFunctions * fn, Doc & d, bool share = false )
 {
 	Gpu & g = d.gpu;
 	if ( !g.grid ) {
-		g.grid = tex2D( fn, GL_RGBA32UI, d.nx, d.ny, GL_RGBA_INTEGER, GL_UNSIGNED_INT, d.grid.data(), false, false );
+		GLuint have = 0;
+		if ( share && !( g.vkFailed & 1 ) )
+			sharedIn( g, 0, 0, d.nx, d.ny, 1, GL_RGBA32UI, 1, have );
+		g.grid = tex2D( fn, GL_RGBA32UI, d.nx, d.ny, GL_RGBA_INTEGER, GL_UNSIGNED_INT, d.grid.data(), false, false, have );
 		g.bGrid = qint64( d.grid.size() ) * 4;
 	}
 	if ( !g.ltex ) {
 		const int nl = std::max<int>( 1, int( d.ltexPaths.size() ) );
-		fn->glGenTextures( 1, &g.ltex );
+		const bool sh = share && !( g.vkFailed & 2 )
+			&& sharedIn( g, 1, 2, kLtexSide, kLtexSide, nl, GL_RGBA8, mipLevels( kLtexSide, kLtexSide ), g.ltex );
+		if ( !sh )
+			fn->glGenTextures( 1, &g.ltex );
 		fn->glBindTexture( GL_TEXTURE_2D_ARRAY, g.ltex );
 		fn->glPixelStorei( GL_UNPACK_ALIGNMENT, 4 );
-		fn->glTexImage3D( GL_TEXTURE_2D_ARRAY, 0, GL_RGBA8, kLtexSide, kLtexSide, nl, 0, GL_BGRA, GL_UNSIGNED_BYTE, d.ltexPix.data() );
+		if ( !sh )
+			fn->glTexImage3D( GL_TEXTURE_2D_ARRAY, 0, GL_RGBA8, kLtexSide, kLtexSide, nl, 0, GL_BGRA, GL_UNSIGNED_BYTE, d.ltexPix.data() );
+		else if ( d.ltexPix.size() >= size_t( kLtexSide ) * kLtexSide * size_t( nl ) )
+			fn->glTexSubImage3D( GL_TEXTURE_2D_ARRAY, 0, 0, 0, 0, kLtexSide, kLtexSide, nl, GL_BGRA, GL_UNSIGNED_BYTE, d.ltexPix.data() );
 		fn->glGenerateMipmap( GL_TEXTURE_2D_ARRAY );
 		fn->glTexParameteri( GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR );
 		fn->glTexParameteri( GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAG_FILTER, GL_LINEAR );
@@ -553,11 +646,29 @@ void uploadBase( NifSkopeOpenGLContext::GLFunctions * fn, Doc & d )
 	}
 }
 
-void uploadDecals( NifSkopeOpenGLContext::GLFunctions * fn, Doc & d )
+void uploadAtlas( NifSkopeOpenGLContext::GLFunctions * fn, Doc & d, bool share )
 {
 	Gpu & g = d.gpu;
-	if ( g.dtex )
+	const int w = d.atlasW > 0 ? d.atlasW : 1, h = d.atlasW > 0 ? d.atlasH : 1;
+	const bool mips = d.atlasW > 0;
+	GLuint have = 0;
+	if ( share && !( g.vkFailed & 4 ) )
+		sharedIn( g, 2, 0, w, h, 1, GL_RGBA8, mips ? mipLevels( w, h ) : 1, have );
+	const quint32 none = 0u;
+	g.atlas = tex2D( fn, GL_RGBA8, w, h, GL_BGRA, GL_UNSIGNED_BYTE, mips ? static_cast<const void *>( d.atlasPix.data() ) : &none, true,
+		mips, have );
+	g.bAtlas = mips ? mipBytes( qint64( w ) * h * 4, true ) : 4;
+}
+
+//! share (lane VKFAR3): the atlas on the present device; the decal records stay a GL texel buffer (copied a draw: small)
+void uploadDecals( NifSkopeOpenGLContext::GLFunctions * fn, Doc & d, bool share = false )
+{
+	Gpu & g = d.gpu;
+	if ( g.dtex ) {
+		if ( !g.atlas )
+			uploadAtlas( fn, d, share );	// reshare took it
 		return;
+	}
 	std::vector<float> buf( d.recs );
 	buf.insert( buf.end(), d.binTex.begin(), d.binTex.end() );
 	buf.insert( buf.end(), d.ids.begin(), d.ids.end() );
@@ -572,13 +683,24 @@ void uploadDecals( NifSkopeOpenGLContext::GLFunctions * fn, Doc & d )
 	fn->glBindTexture( GL_TEXTURE_BUFFER, 0 );
 	fn->glBindBuffer( GL_TEXTURE_BUFFER, 0 );
 	g.bDec = qint64( buf.size() ) * 4;
-	if ( d.atlasW > 0 ) {
-		g.atlas = tex2D( fn, GL_RGBA8, d.atlasW, d.atlasH, GL_BGRA, GL_UNSIGNED_BYTE, d.atlasPix.data(), true, true );
-		g.bAtlas = mipBytes( qint64( d.atlasW ) * d.atlasH * 4, true );
-	} else {
-		const quint32 none = 0u;
-		g.atlas = tex2D( fn, GL_RGBA8, 1, 1, GL_BGRA, GL_UNSIGNED_BYTE, &none, true, false );
-		g.bAtlas = 4;
+	uploadAtlas( fn, d, share );
+}
+
+//! lane VKFAR3: the live lookup's inputs follow the view: on the present device while it draws there, GL's own otherwise
+void reshare( NifSkopeOpenGLContext::GLFunctions * fn, Gpu & g, bool share )
+{
+	if ( !share )
+		g.vkFailed = 0;
+	GLuint * const t[3] = { &g.grid, &g.ltex, &g.atlas };
+	qint64 * const b[3] = { &g.bGrid, &g.bLtex, &g.bAtlas };
+	for ( int i = 0; i < 3; i++ ) {
+		if ( !*t[i] )
+			continue;
+		const bool on = g.vkShared & ( 1 << i );
+		if ( on && !WwVkPresent::sharedTargetIs( vkKeyOf( g, i ), *t[i] ) )
+			delShared( g, i, *t[i], *b[i] );	// a present shutdown took it: made again
+		else if ( on != share && !( share && ( g.vkFailed & ( 1 << i ) ) ) )
+			delIn( fn, g, i, *t[i], *b[i] );
 	}
 }
 
@@ -1323,11 +1445,14 @@ void pass( Scene * scene )
 	freePools( fn, d.gpu );
 	if ( !d.pics )
 		loadPictures( d );
-	uploadBase( fn, d );
+	const bool share = want == 1 && WwVkPresent::shareWanted( "WW_VKVIEW_FARGROUND_RED" );	// lane VKFAR3
+	if ( want == 1 )
+		reshare( fn, d.gpu, share );
+	uploadBase( fn, d, share );
 	if ( want == 1 ) {
 		delTex( fn, d.gpu.pages, d.gpu.bPages );
 		d.gpu.pageSide = 0;
-		uploadDecals( fn, d );
+		uploadDecals( fn, d, share );
 	} else {
 		const int side = kPageSide[s.quality];
 		if ( !d.gpu.pages || d.gpu.pageSide != side ) {
@@ -1397,6 +1522,78 @@ bool wantsFrames( Scene * scene )
 {
 	const auto it = docs().constFind( scene ? scene->nifModel : nullptr );
 	return it != docs().constEnd() && it->gpu.ready == 3 && it->gpu.busy;
+}
+
+bool vkDraw( Scene * scene, NifSkopeOpenGLContext::Program * prog, int block, int indexCount, long long idxOff, int baseVertex )
+{
+	if ( !scene || !scene->renderer || !prog || !ring0( scene->nifModel, block ) )
+		return false;
+	if ( !WwVkPresent::shareWanted( "WW_VKVIEW_FARGROUND_RED" ) ) {
+		WwVkPresent::farGroundSay( false, "red WW_VKVIEW_FARGROUND_RED=1 or the view not on Vulkan" );
+		return false;
+	}
+	auto fn = scene->renderer->fn;
+	const std::string_view name( prog->name );
+	const char * no = nullptr;
+	unsigned int color = 0;
+	if ( name == "fo4_cellcsmfgc.prog" || name == "fo4_cellfgc.prog" )
+		no = "red oldpages (fo4_cellcsmfgc, FARDRAW1's decal-only pages: no Vulkan twin)";
+	else if ( name == "fo4_cellcsmfgp.prog" || name == "fo4_cellfgp.prog" )
+		no = "Live, cached pages (fo4_cellcsmfgp: no Vulkan twin yet)";
+	else if ( name != "fo4_cellcsmfgl.prog" )
+		no = "not the shader-decals twin (Baked sheet, or no sun shadows: fo4_cellcsmfgl.prog only)";
+	else if ( prog->wwBindless )
+		no = "a bindless program (no Vulkan twin)";
+	else if ( !wwFogLeakShaderDefine() )
+		no = "WW_CELL_FOGLEAK=0: GL's program is not the Vulkan twin";
+	else if ( !prog->wwShadowFrame )
+		no = "WW_FRAME_UBO off: GL's program is not the Vulkan twin";
+	else if ( idxOff & 1 )
+		no = "an odd element offset";
+	else if ( const auto dit = docs().constFind( scene->nifModel ); dit == docs().constEnd() || ( dit->gpu.vkShared & 7 ) != 7 ) {
+		static std::string why;	// never a copy a draw: ~180 MB of layers and up to ~180 MB of atlas
+		why = "the grid, layers or atlas are not on the present device ("
+			+ ( dit == docs().constEnd() || dit->gpu.vkWhy.empty() ? std::string( "not made yet" ) : dit->gpu.vkWhy ) + ")";
+		no = why.c_str();
+	} else {
+		GLint drawFb = 0;
+		fn->glGetIntegerv( GL_DRAW_FRAMEBUFFER_BINDING, &drawFb );
+		color = wwCellHdrVkToneColor( GLuint( drawFb ) );
+		if ( !color )
+			no = "the draw target is not the shared tone frame";
+	}
+	if ( !no ) {
+		GLint cur = 0;
+		fn->glGetIntegerv( GL_CURRENT_PROGRAM, &cur );
+		if ( GLuint( cur ) != prog->id )
+			no = "another program at the shape's draw";
+	}
+	if ( no ) {
+		WwVkPresent::farGroundOnGl( no );
+		WwVkPresent::farGroundSay( true, nullptr );
+		return false;
+	}
+	static WwVkPresent::WaterRun r;
+	static char keys[192];	// the twins' keys (key + slot index)
+	r = WwVkPresent::WaterRun();
+	WwVkPresent::farGroundStateOf( fn, prog->id, r );
+	wwCellHdrFrameSize( r.w, r.h );
+	r.color = color;
+	WwVkPresent::WaterCmd c;	// the shape's one range as the rings' command
+	c.count = std::uint32_t( indexCount );
+	c.instanceCount = 1;
+	c.firstIndex = std::uint32_t( idxOff / 2 );
+	c.baseVertex = baseVertex;
+	r.cmds.push_back( c );
+	r.key = reinterpret_cast<std::uintptr_t>( keys );
+	std::string why;
+	const bool ok = WwVkPresent::farGroundRun( r, why );
+	if ( !ok )
+		WwVkPresent::farGroundOnGl( why.c_str() );
+	else
+		PassTime::countDraw( 1 );
+	WwVkPresent::farGroundSay( true, nullptr );
+	return ok;
 }
 
 }

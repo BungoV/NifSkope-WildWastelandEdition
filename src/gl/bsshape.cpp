@@ -556,6 +556,9 @@ void BSShape::drawShapes( NodeList * secondPass )
 	static std::vector<float> fadeAlpha;
 	if ( numTriangles > 0 && !hiddenT && !selectionFlags && wwCellWaterVkDraw( int( numTriangles * 3 ) ) ) {
 		// lane VKWATER3: the water drew on the present device (cellwater.h)
+	} else if ( fgZone && numTriangles > 0 && !hiddenT && CellFarGround::vkDraw( scene, context->getCurrentProgram(), id(),
+		int( numTriangles * 3 ), WwBl::geo.on ? (long long) WwBl::geo.idxOff : 0, WwBl::geo.on ? int( WwBl::geo.baseVertex ) : 0 ) ) {
+		// lane VKFAR3: ring 0's ground drew on the present device (cellfarground.h)
 	} else if ( numTriangles > 0 && !hiddenT && !selectionFlags && wwLookOn( WwLook::DecalFade )
 		&& !wwCellProbePass( scene ) && !wwCellAlbedoProbePass( scene )
 		&& wwCellDecalFadeRanges( scene, this, id(), std::int64_t( numTriangles ), fadeKeep, fadeBand, fadeAlpha ) ) {

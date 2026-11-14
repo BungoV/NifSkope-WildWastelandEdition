@@ -16,6 +16,7 @@
 
 #include "features/vkframe/vkwater_tables.h"
 #include "features/vkframe/vkfarlod_tables.h"
+#include "features/vkframe/vkfarground_tables.h"  // lane VKFAR3
 
 namespace WwVkPresent
 {
@@ -130,6 +131,8 @@ inline std::string waterFmtName( unsigned f )
 	case 0x8236: return "R32UI";
 	case 0x823C: return "RG32UI";
 	case 0x8232: return "R8UI";
+	case 0x8D70: return "RGBA32UI";  // lane VKFAR3: fgGrid
+	case 0x8D76: return "RGBA16UI";  // fgCells
 	case 0x8CAD: return "D32F_S8";
 	case 0x8CAC: return "D32F";
 	case 0x88F0: return "D24S8";
@@ -367,8 +370,9 @@ struct WaterCmd
 	std::int32_t baseVertex = 0;
 	std::uint32_t baseInstance = 0;
 };
-//! the largest pixel-stage loose block of the shaded twins (water, the far LOD rings)
-constexpr int kTwinPsMax = kT_farlodPsBytes > kWaterPsLooseMax ? kT_farlodPsBytes : kWaterPsLooseMax;
+//! the largest pixel-stage loose block of the shaded twins (water, the far LOD rings, lane VKFAR3: the far ground)
+constexpr int kTwinPsMax2 = kT_farlodPsBytes > kWaterPsLooseMax ? kT_farlodPsBytes : kWaterPsLooseMax;
+constexpr int kTwinPsMax = kT_fargndPsBytes > kTwinPsMax2 ? kT_fargndPsBytes : kTwinPsMax2;
 
 /* everything the shaded draw reads: the census, GL's vertex array, element range, blocks, loose uniforms, raster state.
  * Indices GL_UNSIGNED_SHORT triangles, or 3-vertex patches for a tessellated variant (bsshape's drawElements). */
@@ -525,6 +529,12 @@ template <class Fn> void farLodStateOf( Fn * fn, unsigned prog, WaterRun & r )
 	twinStateOf( fn, prog, r, kT_farlodPs, int( sizeof( kT_farlodPs ) / sizeof( kT_farlodPs[0] ) ), kT_farlodPsBytes );
 }
 
+//! lane VKFAR3: the far ground's side (fo4_cellcsmfgl's twin), the ring-0 terrain shape's vertex array bound
+template <class Fn> void farGroundStateOf( Fn * fn, unsigned prog, WaterRun & r )
+{
+	twinStateOf( fn, prog, r, kT_fargndPs, int( sizeof( kT_fargndPs ) / sizeof( kT_fargndPs[0] ) ), kT_fargndPsBytes );
+}
+
 //! lane VKWATER1: the device's side of the verdict (vkwater.inc)
 WaterCaps waterCaps();
 /*! lane VKWATER2: one census input's twin on the present device, GL current: sharedTarget (colour, integer, depth 2D /
@@ -559,6 +569,14 @@ FxStat takeFarLodDrawStat();
 //! one far LOD rings draw stayed on GL (why: the route's reason or farLodRun's)
 void farLodOnGl( const char * why );
 WaterStat takeFarLodGlStat();
+/*! lane VKFAR3 (row G3): the far ground's ring-0 terrain (fo4_default vs + fo4_cellcsmfgl FOGLEAK + FRAME_UBO ps twins; r from
+ * farGroundStateOf, r.cmds one command for the shape) into the tone frame on Vulkan, one crossing. false: why (GL draws it) */
+bool farGroundRun( const WaterRun & r, std::string & why );
+std::string farGroundDrawRefusal();
+FxStat takeFarGroundDrawStat();
+//! one far-ground draw stayed on GL (why: the route's reason or farGroundRun's)
+void farGroundOnGl( const char * why );
+WaterStat takeFarGroundGlStat();
 }
 
 #ifndef WW_VKPRESENT_NO_QT
@@ -568,5 +586,7 @@ namespace WwVkPresent
 void waterSay( bool wanted, const char * glWhy );
 //! lane VKFAR2: the far LOD rings' route line ("vk far: LOD rings"), the same shape
 void farLodSay( bool wanted, const char * glWhy );
+//! lane VKFAR3: the far ground's route line ("vk farground:"), the same shape
+void farGroundSay( bool wanted, const char * glWhy );
 }
 #endif
