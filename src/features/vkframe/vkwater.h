@@ -493,13 +493,14 @@ WaterCaps waterCaps();
  * 3D / array), VKFAR1's farTwin (BC 2D / array, cube-map arrays) or farTexelBuffer (texel buffers). false: why */
 bool waterTwin( std::uintptr_t key, const WaterSlot & s, unsigned & tex, std::string & why );
 void waterTwinDrop( std::uintptr_t key, const WaterSlot & s );
-//! one water draw stayed on GL (why: the verdict or the route's reason)
-void waterOnGl( const char * why );
+//! one water draw stayed on GL (why: the verdict or the route's reason; variant: its twin, -1 none)
+void waterOnGl( const char * why, int variant = -1 );
 struct WaterStat
 {
 	int gl = 0, census = 0;
 	std::string glWhy;
 	double censusMs = 0.0;
+	int vk[kWaterVariants] = {}, glV[kWaterVariants] = {};	// lane VKWATER4: per twin (look / d / m / p / dp)
 };
 WaterStat takeWaterStat();
 void waterCensusTook( double ms );

@@ -595,10 +595,12 @@ void waterTwinDrop( std::uintptr_t key, const WaterSlot & s )
 		sharedTargetDrop( key );
 }
 
-void waterOnGl( const char * why )
+void waterOnGl( const char * why, int variant )
 {
 	WaterStat & s = waterS().st;
 	s.gl++;
+	if ( variant >= 0 && variant < kWaterVariants )
+		s.glV[variant]++;
 	s.glWhy = why ? why : "";
 }
 
@@ -961,6 +963,7 @@ bool waterRun( const WaterRun & r, std::string & why )
 	S.runs++;
 	S.cpuMs += ms;
 	S.maxMs = std::max( S.maxMs, ms );
+	waterS().st.vk[r.variant]++;  // lane VKWATER4: per twin
 	return true;
 }
 
@@ -1004,6 +1007,11 @@ void waterSay( bool wanted, const char * glWhy )
 		.arg( ds.failWhy.empty() ? QString() : QStringLiteral( ": " ) + QString::fromStdString( ds.failWhy ) ).arg( st.gl );
 	if ( !st.glWhy.empty() )
 		line += QStringLiteral( " (blocked: %1)" ).arg( QString::fromStdString( st.glWhy ) );
+	// lane VKWATER4: per twin, Vulkan / GL draws
+	QString per;
+	for ( int k = 0; k < kWaterVariants; k++ )
+		per += QStringLiteral( "%1%2/%3" ).arg( k ? QStringLiteral( " " ) : QString() ).arg( st.vk[k] ).arg( st.glV[k] );
+	line += QStringLiteral( "; per twin look d m p dp (vk/gl) %1" ).arg( per );
 	if ( st.census > 0 )
 		line += QStringLiteral( "; %1 censuses, %2 ms each" ).arg( st.census ).arg( st.censusMs / st.census, 0, 'f', 3 );
 	said = line;

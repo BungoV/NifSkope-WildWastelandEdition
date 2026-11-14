@@ -497,7 +497,15 @@ static void wwCellWaterVkRoute( NifSkopeOpenGLContext::GLFunctions * fn, NifSkop
 	const char * no = nullptr;
 	unsigned int color = 0;
 	const int variant = WwVkPresent::waterVariantOf( program->name );
-	if ( !verdict.empty() )
+	// lane VKWATER4: one red per twin (=1: that twin stays on GL), read every draw
+	static const char * const kTwinRed[WwVkPresent::kWaterVariants] = { "WW_VKVIEW_WATER_LOOK_RED", "WW_VKVIEW_WATER_D_RED",
+		"WW_VKVIEW_WATER_M_RED", "WW_VKVIEW_WATER_P_RED", "WW_VKVIEW_WATER_DP_RED" };
+	static const char * const kTwinRedWhy[WwVkPresent::kWaterVariants] = { "red WW_VKVIEW_WATER_LOOK_RED=1 (fo4_waterlook on GL)",
+		"red WW_VKVIEW_WATER_D_RED=1 (fo4_waterlookd on GL)", "red WW_VKVIEW_WATER_M_RED=1 (fo4_waterlookm on GL)",
+		"red WW_VKVIEW_WATER_P_RED=1 (fo4_waterlookp on GL)", "red WW_VKVIEW_WATER_DP_RED=1 (fo4_waterlookdp on GL)" };
+	if ( variant >= 0 && variant < WwVkPresent::kWaterVariants && wwEnvInt( kTwinRed[variant] ) == 1 )
+		no = kTwinRedWhy[variant];
+	else if ( !verdict.empty() )
 		no = verdict.c_str();
 	else if ( variant < 0 )
 		no = "this water program has no Vulkan twin (fo4_waterlook / d / m / p / dp only)";
@@ -513,7 +521,7 @@ static void wwCellWaterVkRoute( NifSkopeOpenGLContext::GLFunctions * fn, NifSkop
 			no = "the draw target is not the shared tone frame";
 	}
 	if ( no )
-		WwVkPresent::waterOnGl( no );
+		WwVkPresent::waterOnGl( no, variant );
 	else
 		g_vkWaterArm = VkWaterArm { fn, prog, color, variant };
 	WwVkPresent::waterSay( true, nullptr );
@@ -528,7 +536,7 @@ bool wwCellWaterVkDraw( int indexCount )
 	GLint cur = 0;
 	a.fn->glGetIntegerv( GL_CURRENT_PROGRAM, &cur );
 	if ( GLuint( cur ) != a.prog ) {
-		WwVkPresent::waterOnGl( "another program at the shape's draw" );
+		WwVkPresent::waterOnGl( "another program at the shape's draw", a.variant );
 		return false;
 	}
 	static WwVkPresent::WaterRun r;
@@ -543,7 +551,7 @@ bool wwCellWaterVkDraw( int indexCount )
 	r.key = reinterpret_cast<std::uintptr_t>( g_vkWaterKeys );
 	std::string why;
 	if ( !WwVkPresent::waterRun( r, why ) ) {
-		WwVkPresent::waterOnGl( why.c_str() );
+		WwVkPresent::waterOnGl( why.c_str(), a.variant );
 		return false;
 	}
 	return true;
