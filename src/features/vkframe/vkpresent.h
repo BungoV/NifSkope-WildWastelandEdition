@@ -545,7 +545,8 @@ inline constexpr FxField kT_resolve_a[] = {
 };
 inline constexpr int kT_resolve_aBytes = 240;
 // lane VKWATER2: kFxMipRepeatAniso = the mip repeat at GL's aniso 16 (the water's moments / noise), plain without the feature
-enum FxSampler { kFxLinearClamp, kFxNearestClamp, kFxLinearRepeat, kFxMipRepeat, kFxNearestRepeat, kFxMipRepeatAniso, kFxSamplers };
+// lane VKFAR2 (row L8): kFxMipClamp = trilinear CLAMP_TO_EDGE (the precipitation atlases, cellprecip.cpp loadDds)
+enum FxSampler { kFxLinearClamp, kFxNearestClamp, kFxLinearRepeat, kFxMipRepeat, kFxNearestRepeat, kFxMipRepeatAniso, kFxMipClamp, kFxSamplers };
 //! one texture slot of a pass (HLSL t<i>): a GL texture copied into its twin, or a shared target read as is
 struct FxTex
 {
@@ -686,10 +687,10 @@ struct PrecipRun
 	int first = 0, n = 0;           //!< the run: glDrawArrays( GL_POINTS, first, n )
 	bool lit = false, fogged = false, roofOn = false;  //!< lit and roofOn refused (GL draws); fogged: slice 2a
 	bool look = false;              //!< slice 3: cell_precip_look.prog's run (cs / ps also hold kT_preciplook*)
-	FxTex tex[8];                   //!< t0 pcRoof (none yet), t1 pcTex (the atlas), the air's t25 atApTex, t26 volTex, t27 volTile, t28 volAirTerr, t29 volAirRainMap, the look's pcTexN
+	FxTex tex[8];                   //!< t0 pcRoof (none yet), t1 pcTex (the atlas; a BC one twinned by farTwin), the air's t25 atApTex, t26 volTex, t27 volTile, t28 volAirTerr, t29 volAirRainMap, the look's pcTexN
 	std::uint8_t cs[kT_precipcsBytes] = {};  //!< fxPack( cell_precip_gpu, kT_precipcs ) (+ kT_preciplookcs for a look run)
 	std::uint8_t ps[kT_preciplookpsBytes] = {};  //!< fxPack( cell_precip_gpu, kT_precipps ) (+ kT_preciplookps for a look run)
-	int red = 0;                    //!< gates only: 1 the cull radius 0, 2 the strip's last two corners swapped, 4 no near fade, 8 the air dropped, 16 the look dropped (the plain pipelines draw a look run)
+	int red = 0;                    //!< gates only: 1 the cull radius 0, 2 the strip's last two corners swapped, 4 no near fade, 8 the air dropped, 16 the look dropped (the plain pipelines draw a look run), 32 the atlas dropped (t1 / t7 the zero texture)
 	std::uint8_t * recOut = nullptr;  //!< gates only: the run's records read back (n x 112 bytes, 192 a look run; host-visible records, a fence wait); null in the app
 };
 /* GL current, the tone frame bound, cell_precip_gpu's uniforms set: one run of particles on Vulkan, a record pass then
@@ -894,8 +895,9 @@ template <class Fn> void fxPack( Fn * fn, unsigned prog, const FxField * f, int 
 
 /* lane VKAIR1: a texture slot from what the program samples now: the sampler's unit, the name bound there (type 0 2D,
  * 1 3D, 2 2D array), its size, format, levels and sampling. false: why (a state the Vulkan samplers do not hold). The
- * caller sets twin / shared / still. GL enums as numbers: this header carries no GL header */
-template <class Fn> bool fxTexOf( Fn * fn, unsigned prog, const char * sampler, int type, FxTex & t, std::string & why )
+ * caller sets twin / shared / still. GL enums as numbers: this header carries no GL header. mipClamp (lane VKFAR2, L8): a
+ * trilinear CLAMP_TO_EDGE texture (S and T) is taken as kFxMipClamp; the other callers keep refusing it */
+template <class Fn> bool fxTexOf( Fn * fn, unsigned prog, const char * sampler, int type, FxTex & t, std::string & why, bool mipClamp = false )
 {
 	t.type = type;
 	t.tex = 0;
@@ -912,7 +914,7 @@ template <class Fn> bool fxTexOf( Fn * fn, unsigned prog, const char * sampler, 
 	fn->glGetIntegerv( 0x8919, &sobj );  // GL_SAMPLER_BINDING
 	bool ok = true;
 	if ( name ) {
-		int w = 0, h = 0, d = 1, fmt = 0, minF = 0, wrap = 0, maxL = 0;
+		int w = 0, h = 0, d = 1, fmt = 0, minF = 0, wrap = 0, wrapT = 0, maxL = 0;
 		fn->glGetTexLevelParameteriv( target, 0, 0x1000, &w );  // GL_TEXTURE_WIDTH
 		fn->glGetTexLevelParameteriv( target, 0, 0x1001, &h );
 		if ( type )
@@ -920,8 +922,10 @@ template <class Fn> bool fxTexOf( Fn * fn, unsigned prog, const char * sampler, 
 		fn->glGetTexLevelParameteriv( target, 0, 0x1003, &fmt );  // GL_TEXTURE_INTERNAL_FORMAT
 		fn->glGetTexParameteriv( target, 0x2801, &minF );  // GL_TEXTURE_MIN_FILTER
 		fn->glGetTexParameteriv( target, 0x2802, &wrap );  // GL_TEXTURE_WRAP_S
+		fn->glGetTexParameteriv( target, 0x2803, &wrapT );  // GL_TEXTURE_WRAP_T
 		fn->glGetTexParameteriv( target, 0x813D, &maxL );  // GL_TEXTURE_MAX_LEVEL
 		const bool mip = minF >= 0x2700 && minF <= 0x2703, repeat = wrap == 0x2901, nearest = minF == 0x2600;
+		const bool mipClampOk = mipClamp && mip && minF == 0x2703 && type == 0 && wrap == 0x812F && wrapT == 0x812F;  // CLAMP_TO_EDGE
 		int levels = 1;
 		while ( mip && levels <= maxL && levels < 16 ) {
 			int lw = 0;
@@ -936,13 +940,14 @@ template <class Fn> bool fxTexOf( Fn * fn, unsigned prog, const char * sampler, 
 		t.d = type ? d : 1;
 		t.glFmt = unsigned( fmt );
 		t.levels = levels;
-		t.sampler = mip ? kFxMipRepeat : nearest ? ( repeat ? kFxNearestRepeat : kFxNearestClamp ) : repeat ? kFxLinearRepeat : kFxLinearClamp;
+		t.sampler = mipClampOk ? kFxMipClamp : mip ? kFxMipRepeat : nearest ? ( repeat ? kFxNearestRepeat : kFxNearestClamp ) : repeat ? kFxLinearRepeat : kFxLinearClamp;
 		if ( sobj ) {
 			ok = false;
 			why = std::string( sampler ) + ": a sampler object on its unit";
-		} else if ( mip && ( !repeat || minF != 0x2703 ) ) {
+		} else if ( mip && !mipClampOk && ( !repeat || minF != 0x2703 ) ) {
 			ok = false;
-			why = std::string( sampler ) + ": a mipmapped sampling other than trilinear repeat";
+			why = std::string( sampler ) + ( mipClamp ? ": a mipmapped sampling other than trilinear repeat or clamp-to-edge"
+				: ": a mipmapped sampling other than trilinear repeat" );
 		} else if ( w < 1 || h < 1 ) {
 			ok = false;
 			why = std::string( sampler ) + ": no level 0";
@@ -1015,10 +1020,10 @@ template <class Fn> bool precipDraw( Fn * fn, unsigned prog, int first, int coun
 	const bool vol = geti( "volOn" ) != 0;
 	if ( fn->glGetUniformLocation( prog, "pcSeedS" ) < 0 ) {
 		precipOnGl( "the CPU field (cell_precip.prog): no Vulkan twin" );
-	} else if ( vol && wwFogLeakShaderDefine() ) {
-		// the loader injects WW_CELL_FOGLEAK into GL's program (glcontext.cpp): the air's far tail is the one-tail shape,
-		// the record pass the gate judged is the shape without it
-		precipOnGl( "WW_CELL_FOGLEAK compiled into GL's program: the record pass is the FOGLEAK=0 twin" );
+	} else if ( vol && !wwFogLeakShaderDefine() ) {
+		// the loader injects WW_CELL_FOGLEAK into GL's program by default (glcontext.cpp); the record pass is compiled with
+		// it (precip_view_cs.hlsl), so WW_CELL_FOGLEAK=0 is the shape it does not match
+		precipOnGl( "WW_CELL_FOGLEAK=0: the record pass is the FOGLEAK twin" );
 	} else {
 		toneFrameSize( t.w, t.h );
 		fn->glGetIntegerv( 0x0BA2, t.vp );  // GL_VIEWPORT
@@ -1034,7 +1039,7 @@ template <class Fn> bool precipDraw( Fn * fn, unsigned prog, int first, int coun
 		static char airKeys[5];
 		static const char * const kAir[5] = { "atApTex", "volTex", "volTile", "volAirTerr", "volAirRainMap" };
 		static const int kAirType[5] = { 1, 1, 0, 2, 0 };
-		bool ok = fxTexOf( fn, prog, "pcTex", 0, t.tex[1], why );
+		bool ok = fxTexOf( fn, prog, "pcTex", 0, t.tex[1], why, true );  // the DDS atlas: BC, trilinear clamp (precipRun twins it)
 		if ( ok && t.tex[1].tex ) {
 			t.tex[1].twin = reinterpret_cast<std::uintptr_t>( &atlasKeys[t.tex[1].tex] );
 			t.tex[1].still = true;
@@ -1044,7 +1049,7 @@ template <class Fn> bool precipDraw( Fn * fn, unsigned prog, int first, int coun
 			t.tex[2 + k].twin = reinterpret_cast<std::uintptr_t>( &airKeys[k] );
 		}
 		if ( ok && t.look ) {
-			ok = fxTexOf( fn, prog, "pcTexN", 0, t.tex[7], why );
+			ok = fxTexOf( fn, prog, "pcTexN", 0, t.tex[7], why, true );
 			if ( ok && t.tex[7].tex ) {
 				t.tex[7].twin = reinterpret_cast<std::uintptr_t>( &atlasKeys[t.tex[7].tex] );
 				t.tex[7].still = true;

@@ -9,7 +9,11 @@
 // differ from cell_precip_gpu.prog on >= 1000 samples. Unlit, the snow's normal-map split cannot change a sample (thin =
 // thick, no key light): its pcTexN binding is bound but not judged until a lit fixture (slice 2b). A kept split case,
 // snow near with no atlas (plain, unfogged), sits next to the open snow near row. Each run starts past particle 0
-// (pcFirst) and is unlit.
+// (pcFirst) and is unlit. Every atlas and normal map is the app's kind (cellprecip.cpp loadDds): BC3 with every level,
+// trilinear, CLAMP_TO_EDGE (rain_near_fog sRGB BC3); the rain cases read it too (rain_drop_look binds it, its look
+// reads no texture). The rain atlas's real DXGI format was not on disk: BC3 and sRGB BC3 are the formats judged.
+// GL's programs carry the loader's WW_CELL_FOGLEAK (on by default), the record pass too; each fogged case prints a
+// fogleak check (GL without the define vs with it, reference only, not part of the verdict).
 // Frame before the particles: a sky clear and a depth slab over the left half halfway across a gap between particle
 // depths. After them a full-screen draw where stencil == 1 sets alpha 1, so the stencil the particles wrote is read too.
 // Bar (farview's, set before the first run, never widened):
@@ -18,7 +22,8 @@
 //   1 ulp outside flips <= 0.1 % of the covered halves, stencil differs on <= 0.05 % of covered samples. Else FAIL.
 // Also: pcSeedS's bits as fxPack reads them (glGetUniformiv on a uint) equal the value set, or the gate fails.
 // Reds (each must FAIL in at least one case): red 1 the cull radius 0, red 2 the strip's last two corners swapped,
-// red 4 the near fade dropped, red 8 the air dropped (A = 1, B = 0), red 16 a look run on the plain pipelines. Last line `PRECIPVIEW GATE OK` or `PRECIPVIEW GATE FAILED`.
+// red 4 the near fade dropped, red 8 the air dropped (A = 1, B = 0), red 16 a look run on the plain pipelines, red 32
+// the atlas and normal map dropped (the zero texture; must FAIL in EVERY atlas case but rain_drop_look). Last line `PRECIPVIEW GATE OK` or `PRECIPVIEW GATE FAILED`.
 // Localisation (plain cases, printed only, never part of the verdict): GL's geometry stage is captured twice by transform
 // feedback (gl_Position, gUv, gQ, gView and the flat outputs; any float differing between the two captures = GL not
 // deterministic before raster), and the Vulkan run is repeated with its records read back (PrecipRun::recOut) to diff
@@ -98,6 +103,50 @@ void( WINAPI * getBufferSubData )( GLenum, std::ptrdiff_t, std::ptrdiff_t, void 
 const char * kTfVar[8] = { "gl_Position", "gUv", "gQ", "gView", "gCol", "gBox", "gA", "gB" };
 const int kTfAt[9] = { 0, 4, 6, 8, 11, 15, 19, 22, 25 };  // each varying's first float in a captured vertex, 25 a vertex
 const int kTfFloats = 25;
+void( WINAPI * compressedTexImage2D )( GLenum, GLint, GLenum, GLsizei, GLsizei, GLint, GLsizei, const void * ) = nullptr;
+
+// ruling 11-14 (step 1): the atlases as the app loads them (cellprecip.cpp loadDds): BC3 (fmt bc3, or bc3srgb), every level
+// from the prep's numpy encoder (mips = the level count), BASE 0, MAX_LEVEL levels - 1, trilinear, CLAMP_TO_EDGE
+bool uploadBc( const std::string & dir, TexIn & t )
+{
+	const GLenum ifmt = t.fmt == "bc3" ? 0x83F3 : t.fmt == "bc3srgb" ? 0x8C4F : 0;  // DXT5, SRGB_ALPHA DXT5
+	if ( !ifmt || t.mips < 1 || t.target != GL_TEXTURE_2D ) {
+		std::printf( "%s texture %s: format %s, %d levels\n", gTag, t.name.c_str(), t.fmt.c_str(), t.mips );
+		return false;
+	}
+	const std::string data = readFile( dir + "/" + t.file );
+	GLuint x = 0;
+	glGenTextures( 1, &x );
+	glBindTexture( GL_TEXTURE_2D, x );
+	size_t at = 0;
+	for ( int l = 0; l < t.mips; l++ ) {
+		const int lw = std::max( t.w >> l, 1 ), lh = std::max( t.h >> l, 1 );
+		const size_t bytes = size_t( std::max( 1, ( lw + 3 ) / 4 ) ) * size_t( std::max( 1, ( lh + 3 ) / 4 ) ) * 16;
+		if ( at + bytes > data.size() ) {
+			std::printf( "%s texture %s: short at level %d\n", gTag, t.name.c_str(), l );
+			return false;
+		}
+		compressedTexImage2D( GL_TEXTURE_2D, l, ifmt, lw, lh, 0, GLsizei( bytes ), data.data() + at );
+		at += bytes;
+	}
+	if ( at != data.size() ) {
+		std::printf( "%s texture %s: bytes past its levels\n", gTag, t.name.c_str() );
+		return false;
+	}
+	glTexParameteri( GL_TEXTURE_2D, 0x813C, 0 );  // GL_TEXTURE_BASE_LEVEL
+	glTexParameteri( GL_TEXTURE_2D, fMaxLevel, t.mips - 1 );
+	glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, t.mips > 1 ? GLint( fMipLinear ) : GL_LINEAR );
+	glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR );
+	glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GLint( fClamp ) );
+	glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GLint( fClamp ) );
+	glBindTexture( GL_TEXTURE_2D, 0 );
+	t.gl = x;
+	return glGetError() == GL_NO_ERROR;
+}
+bool uploadAtlas( const std::string & dir, TexIn & t )
+{
+	return t.fmt.compare( 0, 3, "bc3" ) == 0 ? uploadBc( dir, t ) : upload( dir, t, 0 );
+}
 
 GLuint program3( const std::string & vs, const std::string & gs, const std::string & fs, const char * tag, bool tf = false )
 {
@@ -373,7 +422,8 @@ int main( int argc, char ** argv )
 	if ( !loadAll() || !load( genVertexArrays, "glGenVertexArrays" ) || !load( bindVertexArray, "glBindVertexArray" )
 		|| !load( tfVaryings, "glTransformFeedbackVaryings" ) || !load( tfBegin, "glBeginTransformFeedback" )
 		|| !load( tfEnd, "glEndTransformFeedback" ) || !load( genQueries, "glGenQueries" ) || !load( beginQuery, "glBeginQuery" )
-		|| !load( endQuery, "glEndQuery" ) || !load( getQueryObjectuiv, "glGetQueryObjectuiv" ) || !load( getBufferSubData, "glGetBufferSubData" ) )
+		|| !load( endQuery, "glEndQuery" ) || !load( getQueryObjectuiv, "glGetQueryObjectuiv" ) || !load( getBufferSubData, "glGetBufferSubData" )
+		|| !load( compressedTexImage2D, "glCompressedTexImage2D" ) )
 		return fatal( "GL entry points" );
 	std::printf( "PRECIPVIEW GL on %s\n", reinterpret_cast<const char *>( glGetString( GL_RENDERER ) ) );
 	glPixelStorei( GL_PACK_ALIGNMENT, 1 );
@@ -387,9 +437,14 @@ int main( int argc, char ** argv )
 	// the localisation's copy of cell_precip_gpu.prog, its geometry-stage outputs captured (the plain cases)
 	const GLuint pTf = program3( readFile( dir + "/prog.vert.glsl" ), readFile( dir + "/prog.geom.glsl" ), readFile( dir + "/prog.frag.glsl" ),
 		"cell_precip_gpu (captured)", true );
-	if ( !pUnpack || !pSlab || !pReveal || !pPrecip || !pLook || !pTf )
+	// the fogleak check's reference (step 1, 11-14): both programs without the loader's WW_CELL_FOGLEAK, fogged cases only
+	const GLuint pNoFl = program3( readFile( dir + "/prog_nofl.vert.glsl" ), readFile( dir + "/prog_nofl.geom.glsl" ),
+		readFile( dir + "/prog_nofl.frag.glsl" ), "cell_precip_gpu (no FOGLEAK)" );
+	const GLuint pLookNoFl = program3( readFile( dir + "/prog_look_nofl.vert.glsl" ), readFile( dir + "/prog_look_nofl.geom.glsl" ),
+		readFile( dir + "/prog_look_nofl.frag.glsl" ), "cell_precip_look (no FOGLEAK)" );
+	if ( !pUnpack || !pSlab || !pReveal || !pPrecip || !pLook || !pTf || !pNoFl || !pLookNoFl )
 		return fatal( "GL programs" );
-	for ( const GLuint prog : { pPrecip, pLook, pTf } ) {  // every sampler its own empty unit from 20 (unit 0's default mixes sampler
+	for ( const GLuint prog : { pPrecip, pLook, pTf, pNoFl, pLookNoFl } ) {  // every sampler its own empty unit from 20 (unit 0's default mixes sampler
 		// types: GL_INVALID_OPERATION at the draw once the air's textures are bound); bindJob then sets the read ones (farcards.cpp's rule)
 		f.useProgram( prog );
 		GLint n = 0, next = 20;
@@ -428,7 +483,7 @@ int main( int argc, char ** argv )
 	f.genBuffers( 1, &ubo );
 	f.bindBuffer( fUbo, ubo );
 	f.bufferData( fUbo, std::ptrdiff_t( zeros.size() ), zeros.data(), fStatic );
-	for ( const GLuint prog : { pPrecip, pLook, pTf } ) {
+	for ( const GLuint prog : { pPrecip, pLook, pTf, pNoFl, pLookNoFl } ) {
 		const GLuint bi = f.getUniformBlockIndex( prog, "globalUniforms" );
 		if ( bi != 0xFFFFFFFFu )
 			f.uniformBlockBinding( prog, bi, 0 );
@@ -492,13 +547,13 @@ int main( int argc, char ** argv )
 		const char * name;
 		int red;
 		bool seen;
-	} reds[5] = { { "cull (radius 0)", 1, false }, { "corners (the strip's last two swapped)", 2, false }, { "near fade (dropped)", 4, false },
-		{ "air (dropped)", 8, false }, { "look (dropped: the plain pipelines)", 16, false } };
+	} reds[6] = { { "cull (radius 0)", 1, false }, { "corners (the strip's last two swapped)", 2, false }, { "near fade (dropped)", 4, false },
+		{ "air (dropped)", 8, false }, { "look (dropped: the plain pipelines)", 16, false }, { "atlas (dropped: the zero texture)", 32, false } };
 	for ( Job & j : jobs ) {
-		if ( j.hasTex && !upload( dir + "/" + j.name, j.tex[size_t( j.atlasAt )], 0 ) )
+		if ( j.hasTex && !uploadAtlas( dir + "/" + j.name, j.tex[size_t( j.atlasAt )] ) )
 			return fatal( j.name + ": the atlas upload" );
 		const GLuint atlas = j.hasTex ? j.tex[size_t( j.atlasAt )].gl : 0;
-		if ( j.hasN() && !upload( dir + "/" + j.name, j.tex[size_t( j.normAt )], 0 ) )
+		if ( j.hasN() && !uploadAtlas( dir + "/" + j.name, j.tex[size_t( j.normAt )] ) )
 			return fatal( j.name + ": the normal map upload" );
 		const GLuint normMap = j.hasN() ? j.tex[size_t( j.normAt )].gl : 0;
 		const GLuint pJob = j.look ? pLook : pPrecip;
@@ -542,13 +597,15 @@ int main( int argc, char ** argv )
 		// (pass 2 is the repeat line's; passes 1-5 are the GL noise reference line's five draws)
 		// (a fogged case's pass 6 draws with the air off: the air must change the picture, or the case does not test it)
 		// (a look case's last pass draws cell_precip_gpu.prog instead: the look must change the picture too)
-		std::vector<std::uint16_t> refOff, refPlain;
+		// (a fogged case's last pass draws the same program without WW_CELL_FOGLEAK: the fogleak check, printed only)
+		std::vector<std::uint16_t> refOff, refPlain, refNoFl;
 		if ( const GLenum e = glGetError() )
 			return fatal( j.name + ": a GL error before the reference draw (0x" + std::to_string( unsigned( e ) ) + ")" );
 		const int passAir = j.fog ? 6 : -1, passPlain = j.look ? 6 + ( j.fog ? 1 : 0 ) : -1;
-		for ( int pass = 0; pass < 6 + ( j.fog ? 1 : 0 ) + ( j.look ? 1 : 0 ); pass++ ) {
+		const int passNoFl = j.fog ? 6 + 1 + ( j.look ? 1 : 0 ) : -1;
+		for ( int pass = 0; pass < 6 + ( j.fog ? 2 : 0 ) + ( j.look ? 1 : 0 ); pass++ ) {
 			before( fbRef, j.zd );
-			bindJob( pass == passPlain ? pPrecip : pJob );
+			bindJob( pass == passPlain ? pPrecip : pass == passNoFl ? ( j.look ? pLookNoFl : pNoFl ) : pJob );
 			if ( pass == passAir ) {  // the air off: fogOn 0 alone leaves the volume and the aerial perspective on
 				static const float zero4[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
 				u1i( pJob, "fogOn", 0 );
@@ -580,6 +637,8 @@ int main( int argc, char ** argv )
 				refOff = readSamples( refCol );
 			else if ( pass == passPlain )
 				refPlain = readSamples( refCol );
+			else if ( pass == passNoFl )
+				refNoFl = readSamples( refCol );
 			else if ( pass ) {
 				( pass == 1 ? refA : refAn[pass - 2] ) = readSamples( refCol );
 				reveal( fbRef );
@@ -589,12 +648,15 @@ int main( int argc, char ** argv )
 		if ( const GLenum e = glGetError() )
 			return fatal( j.name + ": the GL reference draw (GL error 0x" + [&] { char s[16]; std::snprintf( s, sizeof( s ), "%04X", unsigned( e ) ); return std::string( s ); }() + ")" );
 		std::printf( "PRECIPVIEW %s job: %dx%d x%d, run %d + %d, atlas %s, far %d, slab depth %.7f, GL draw %.2f ms\n", j.name.c_str(), W, H, S,
-			j.first, j.n, j.hasTex ? "RGBA8 + mips" : "none", j.farT, double( j.zd ), glMs );
+			j.first, j.n, j.hasTex ? ( j.tex[size_t( j.atlasAt )].fmt + ", every level, trilinear clamp" ).c_str() : "none", j.farT, double( j.zd ), glMs );
 		if ( j.fog ) {  // the fixture's check, not the bar: samples the air changes past 2 ulp in GL's own picture
 			const Verdict o = judge( bg, refOff, refA, refB, refB );
 			std::printf( "PRECIPVIEW %s air check: GL with the air off differs from GL with the air on %zu of %zu covered samples (%s)\n", j.name.c_str(),
 				o.flips, o.covered, o.flips >= 1000 ? "the air is seen" : "TOO FEW: the case does not test the air" );
 			ok = ok && o.flips >= 1000;
+			const Verdict n = judge( bg, refNoFl, refA, refB, refB );  // reference only: the define's reach in this fixture
+			std::printf( "PRECIPVIEW %s fogleak check: GL without WW_CELL_FOGLEAK differs from GL with it %zu of %zu covered samples%s\n",
+				j.name.c_str(), n.flips, n.covered, n.flips ? "" : " (0: this fixture does not reach the one-tail shape)" );
 		}
 		if ( j.look ) {  // the same: cell_precip_gpu.prog against cell_precip_look.prog on the same uniforms
 			const Verdict o = judge( bg, refPlain, refA, refB, refB );
@@ -616,7 +678,7 @@ int main( int argc, char ** argv )
 			t.first = j.first;
 			t.n = j.n;
 			// t0 pcRoof: none (pcRoofOn 0; its sampler shares unit 0's atlas in GL's state, so it is not read from there)
-			if ( !WwVkPresent::fxTexOf( &ga, pJob, "pcTex", 0, t.tex[1], why ) ) {
+			if ( !WwVkPresent::fxTexOf( &ga, pJob, "pcTex", 0, t.tex[1], why, true ) ) {
 				std::printf( "PRECIPVIEW fxTexOf refused: %s\n", why.c_str() );
 				return false;
 			}
@@ -635,7 +697,7 @@ int main( int argc, char ** argv )
 				t.look = true;
 				WwVkPresent::fxPack( &ga, pJob, WwVkPresent::kT_preciplookcs, int( std::size( WwVkPresent::kT_preciplookcs ) ), t.cs );
 				WwVkPresent::fxPack( &ga, pJob, WwVkPresent::kT_preciplookps, int( std::size( WwVkPresent::kT_preciplookps ) ), t.ps );
-				if ( !WwVkPresent::fxTexOf( &ga, pJob, "pcTexN", 0, t.tex[7], why ) ) {
+				if ( !WwVkPresent::fxTexOf( &ga, pJob, "pcTexN", 0, t.tex[7], why, true ) ) {
 					std::printf( "PRECIPVIEW fxTexOf refused (pcTexN): %s\n", why.c_str() );
 					return false;
 				}
@@ -753,8 +815,8 @@ int main( int argc, char ** argv )
 			}
 		}
 		for ( RedSeen & r : reds ) {
-			if ( r.red == 16 && !j.look )
-				continue;  // a plain run has no look to drop
+			if ( ( r.red == 16 && !j.look ) || ( r.red == 32 && !j.hasTex ) )
+				continue;  // a plain run has no look to drop, a case with no atlas no atlas
 			std::vector<std::uint16_t> a, b;
 			if ( !runVk( r.red, a, b, false ) ) {
 				std::printf( "PRECIPVIEW %s red %s: the run failed (counts as a FAIL)\n", j.name.c_str(), r.name );
@@ -765,6 +827,11 @@ int main( int argc, char ** argv )
 			std::printf( "PRECIPVIEW %s red %s: %s (%zu covered, %zu flips, %zu past 1 ulp, stencil differs on %zu)\n", j.name.c_str(), r.name,
 				v.word(), v.covered, v.flips, v.past1, v.stencil );
 			r.seen = r.seen || !v.ok();
+			if ( r.red == 32 && v.ok() ) {  // every case that reads its atlas must see it dropped (the drop, pcLook 1, reads none)
+				std::printf( "PRECIPVIEW %s red atlas %s\n", j.name.c_str(), j.look == 1 ? "PASSED: bound, not read (the drop's look reads no texture)"
+					: "PASSED: the case does not see its atlas" );
+				ok = ok && j.look == 1;
+			}
 		}
 		jobAt++;
 	}
@@ -777,10 +844,10 @@ int main( int argc, char ** argv )
 	std::printf( "PRECIPVIEW stat: %d runs, %d failed (%s), %d pipelines built in %.1f ms, %d input copies, drawing thread %.3f ms a run "
 		"(max %.3f; includes the harness's hand-off wait, not a frame cost)\n", st.runs, st.fails, st.failWhy.c_str(), st.pipelines, st.buildMs,
 		st.copies, st.runs ? st.cpuMs / st.runs : 0.0, st.maxMs );
-	for ( char & k : twinKeys )
-		WwVkPresent::sharedTargetDrop( reinterpret_cast<std::uintptr_t>( &k ) );
+	for ( char & k : twinKeys )  // a BC atlas is a farTwin, an uncompressed one a shared target
+		WwVkPresent::farTwinDrop( reinterpret_cast<std::uintptr_t>( &k ) ), WwVkPresent::sharedTargetDrop( reinterpret_cast<std::uintptr_t>( &k ) );
 	for ( char & k : normKeys )
-		WwVkPresent::sharedTargetDrop( reinterpret_cast<std::uintptr_t>( &k ) );
+		WwVkPresent::farTwinDrop( reinterpret_cast<std::uintptr_t>( &k ) ), WwVkPresent::sharedTargetDrop( reinterpret_cast<std::uintptr_t>( &k ) );
 	for ( int c = 0; c < 8; c++ ) {
 		WwVkPresent::sharedTargetDrop( reinterpret_cast<std::uintptr_t>( &volKeys[c] ) );
 		for ( char & k : airKeys[c] )

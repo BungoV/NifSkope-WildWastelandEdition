@@ -9,6 +9,9 @@
 // cell_precip_field.hlsli is included unchanged (its hashes, roof test); pcParticleVk below is a twin-local copy of its
 // pcParticle spelled in NV GL's order of operations. A change to pcParticle there must be mirrored here.
 // profile: cs_6_0
+// the loader injects WW_CELL_FOGLEAK into GL's program by default (glcontext.cpp): the air's one-tail far shape. It adds
+// no binding (reflect json identical with and without); vkprecip refuses WW_CELL_FOGLEAK=0 instead.
+#define WW_CELL_FOGLEAK 1
 #include "WeatherBindingsVk.hlsli"
 #define WW_HLSL_SRC 1	// the shared .hlsli files give their readable half
 // slice 2a: the air at the particle's centre, as cell_precip_gpu_gs.hlsl reads it outside a fragment stage

@@ -1,7 +1,8 @@
 """Lane VKFAR2 (row L8 slice 1): the job of tests/vkframe/precipview.cpp, written as files the C++ harness reads: the GL
-program (the tree's cell_precip_gpu.vert / .geom / .frag with the loader's #include expansion, no defines: the app's
-cell_precip_gpu.prog), and per case the field's uniforms from precipmath.h gpuRun (through the PERFFIX3 dump exe,
-tests/features/weather/precipgpu/precipgpu_dump.cpp: never re-typed), the view, an RGBA8 atlas with its mips, the run
+program (the tree's cell_precip_gpu.vert / .geom / .frag with the loader's #include expansion and its WW_CELL_FOGLEAK
+define, as the app's cell_precip_gpu.prog; _nofl copies without it for the harness's fogleak check), and per case the field's uniforms from precipmath.h gpuRun (through the PERFFIX3 dump exe,
+tests/features/weather/precipgpu/precipgpu_dump.cpp: never re-typed), the view, the atlas as the app loads it (BC3,
+every level, clamp: bc3enc.py; the rain cases too, rain_near_fog sRGB BC3; snow_near_disc keeps no atlas), the run
 and the slab's depth (halfway across the widest gap between two particle depths near the median, from the dump's CPU
 particles, so no particle sits on the slab).
 
@@ -15,6 +16,8 @@ TREE = os.path.abspath(os.path.join(HERE, '..', '..'))
 WEATHER = os.path.join(TREE, 'res', 'shaders', 'features', 'weather')
 sys.path.insert(0, os.path.join(TREE, 'tests', 'spells'))
 import shader_link_check as S  # noqa: E402
+sys.path.insert(0, HERE)
+from bc3enc import bc3, levels  # noqa: E402
 
 OUT = os.path.abspath(sys.argv[1])
 EXE = sys.argv[2]
@@ -26,18 +29,18 @@ CELL_PX = 64
 CASES = [
     ('snow_near_tex', 3, 5.5, 1.0, 97, 600.125, (12345.6, -98765.4, 7210.0), (-55.0, 210.0), 0, 3.0, 0.5, 6.0, 1.0, 1.0, 1,
      0.7, -0.15, 40000, 0, 0),
-    ('rain_near_disc', 0, 2.0, 4.0, 11, 37.25, (-60500.0, 70000.0, 6300.0), (120.0, -40.0), 0, 1.0, 0.0, 0.0, 1.0, 1.0, 0,
+    ('rain_near_disc', 0, 2.0, 4.0, 11, 37.25, (-60500.0, 70000.0, 6300.0), (120.0, -40.0), 0, 1.0, 0.0, 0.0, 1.0, 1.0, 1,
      2.0, -0.08, 40000, 0, 0),
     ('snow_far_mean', 3, 5.5, 1.0, 97, 600.125, (12345.6, -98765.4, 7210.0), (-55.0, 210.0), 1, 3.0, 0.5, 6.0, 1.0, 0.6, 1,
      3.3, -0.01, 40000, 0, 0),
     # slice 2a: the same runs seen through the air (wwFogFx's A / B in the record pass)
-    ('rain_near_fog', 0, 2.0, 4.0, 11, 37.25, (-60500.0, 70000.0, 6300.0), (120.0, -40.0), 0, 1.0, 0.0, 0.0, 1.0, 1.0, 0,
+    ('rain_near_fog', 0, 2.0, 4.0, 11, 37.25, (-60500.0, 70000.0, 6300.0), (120.0, -40.0), 0, 1.0, 0.0, 0.0, 1.0, 1.0, 1,
      2.0, -0.08, 40000, 1, 0),
     ('snow_far_fog', 3, 5.5, 1.0, 97, 600.125, (12345.6, -98765.4, 7210.0), (-55.0, 210.0), 1, 3.0, 0.5, 6.0, 1.0, 0.6, 1,
      3.3, -0.01, 40000, 1, 0),
     # slice 3: the look program. The drop (swept-disc coverage, the flicker) unfogged; the snow with its normal map, the
     # clump threshold and the albedo through the air, at a small clock (snow_near_tex's 600 s sway phase is its own row)
-    ('rain_drop_look', 0, 2.0, 4.0, 11, 37.25, (-60500.0, 70000.0, 6300.0), (120.0, -40.0), 0, 1.0, 0.0, 0.0, 1.0, 1.0, 0,
+    ('rain_drop_look', 0, 2.0, 4.0, 11, 37.25, (-60500.0, 70000.0, 6300.0), (120.0, -40.0), 0, 1.0, 0.0, 0.0, 1.0, 1.0, 1,
      2.0, -0.08, 40000, 0, 1),
     ('snow_look_near', 3, 5.5, 1.0, 97, 37.25, (12345.6, -98765.4, 7210.0), (-55.0, 210.0), 0, 3.0, 0.5, 6.0, 1.0, 1.0, 1,
      0.7, -0.15, 40000, 1, 2),
@@ -137,19 +140,33 @@ def normals(w, h, seed):
     return np.ascontiguousarray(np.round(img * 255).astype(np.uint8))
 
 
+def bc3_levels(img, path):
+    """an RGBA8 picture -> every level as BC3, concatenated (the harness's uploadBc reads them in order); the count"""
+    lv = levels(img.astype(np.float64) / 255.0)
+    with open(path, 'wb') as f:
+        for p in lv:
+            f.write(bc3(p))
+    return len(lv)
+
+
 def fl(v):
     return ' '.join(repr(float(x)) for x in np.asarray(v, np.float64).reshape(-1))
 
 
 os.makedirs(OUT, exist_ok=True)
+fl_seen = 0
 for st, ext in (('vert', 'vert'), ('geom', 'geom'), ('frag', 'frag')):
-    src = S.inject(S.expand(os.path.join(WEATHER, 'cell_precip_gpu.' + ext)), [])
-    with open(os.path.join(OUT, 'prog.%s.glsl' % st), 'w', newline='\n', encoding='latin-1') as f:
-        f.write(src)
     # cell_precip_look.prog: the gpu vert, the look geom / frag (each #define PC_LOOK 1 + the gpu file)
-    src = S.inject(S.expand(os.path.join(WEATHER, ('cell_precip_gpu.' if st == 'vert' else 'cell_precip_look.') + ext)), [])
-    with open(os.path.join(OUT, 'prog_look.%s.glsl' % st), 'w', newline='\n', encoding='latin-1') as f:
-        f.write(src)
+    for prog, base in (('prog', 'cell_precip_gpu.'), ('prog_look', 'cell_precip_gpu.' if st == 'vert' else 'cell_precip_look.')):
+        raw = S.expand(os.path.join(WEATHER, base + ext))
+        # the loader injects WW_CELL_FOGLEAK into every source naming it (glcontext.cpp, on by default); the _nofl copies
+        # without it are the fogleak check's reference only
+        names_it = 'WW_CELL_FOGLEAK' in raw
+        fl_seen += names_it
+        for suf, defs in (('', ['WW_CELL_FOGLEAK'] if names_it else []), ('_nofl', [])):
+            with open(os.path.join(OUT, '%s%s.%s.glsl' % (prog, suf, st)), 'w', newline='\n', encoding='latin-1') as f:
+                f.write(S.inject(raw, defs))
+print('precipview: WW_CELL_FOGLEAK named in %d of the 6 stage sources (injected there)' % fl_seen)
 P = proj()
 focal = P[1, 1] * 0.5 * H
 names = []
@@ -176,11 +193,12 @@ for ci, c in enumerate(CASES):
     d = os.path.join(OUT, c[0])
     os.makedirs(d, exist_ok=True)
     tw = th = 1
+    fmt = 'bc3srgb' if c[0] == 'rain_near_fog' else 'bc3'  # the app's atlases are BC (loadDds); one case sRGB
     if has:
         img, tw, th = atlas(cols, rows, 7 + ci)
-        img.tofile(os.path.join(d, 'tex_pcTex.bin'))
+        nl = bc3_levels(img, os.path.join(d, 'tex_pcTex.bin'))
         with open(os.path.join(d, 'tex.txt'), 'w', newline='\n') as f:
-            f.write('pcTex 2d rgba8 %d %d 1 linear repeat 1 tex_pcTex.bin\n' % (tw, th))
+            f.write('pcTex 2d %s %d %d 1 linear clamp %d tex_pcTex.bin\n' % (fmt, tw, th, nl))
     mips = int(math.floor(math.log2(max(tw, th)))) + 1
     maxLod = min(mips - 1, max(0.0, math.log2(CELL_PX / 16.0))) if has else 0.0
     oneLod = min(mips - 1, max(0.0, math.log2(CELL_PX))) if has else 0.0
@@ -223,9 +241,9 @@ for ci, c in enumerate(CASES):
                 t.data.tofile(os.path.join(d, fn))
                 f.write('%s %s %s %d %d %d %s %s %d %s\n' % (k, t.kind, t.fmt, t.w, t.h, t.d, t.filt, t.wrap, t.mips, fn))
     if hasN:
-        normals(tw, th, 31 + ci).tofile(os.path.join(d, 'tex_pcTexN.bin'))
+        nl = bc3_levels(normals(tw, th, 31 + ci), os.path.join(d, 'tex_pcTexN.bin'))
         with open(os.path.join(d, 'tex.txt'), 'a', newline='\n') as f:
-            f.write('pcTexN 2d rgba8 %d %d 1 linear repeat 1 tex_pcTexN.bin\n' % (tw, th))
+            f.write('pcTexN 2d bc3 %d %d 1 linear clamp %d tex_pcTexN.bin\n' % (tw, th, nl))
     with open(os.path.join(d, 'uni.txt'), 'w', newline='\n') as f:
         for key, val in U.items():
             f.write('%s %s\n' % (key, fl(val)))
