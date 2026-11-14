@@ -1,3 +1,14 @@
+## VKWATER4 (2026-11-15): the camera-underwater meniscus takes its derivative before the discard (HLSL)
+
+Changed, not built, not checked live. Offline: tests/vkframe/underdraw.sh arms A, B, C BOUND, red "old order" FAILS.
+
+- res/shaders/hlsl/water/cell_underwater_ps.hlsl (and its per-sample twin cell_underwater_ms_ps.hlsl) takes
+  fwidth( Pn.z ) before the per-sample draw's discard. After a discard the derivative is undefined; on NVIDIA GL it moved
+  the waterline's meniscus by up to 1168 half-float steps on edge samples.
+- GL's GLSL (features/water/cell_underwater.frag) keeps the old order until the HLSL switch.
+- The Vulkan twin's near-the-farthest-sample test now spells NVIDIA GL's own float form, so both pick the same draw for a
+  sample on the threshold.
+
 ## VKBLOOM1 (2026-11-12): the Fusion Shaders bloom and the exposure measure join the tone pass on Vulkan (WW_VKVIEW=1)
 
 Changed, not built, not checked live. Offline: tests/vkframe/toneview.sh gained a BLOOM arm (GL's own bloom chain and

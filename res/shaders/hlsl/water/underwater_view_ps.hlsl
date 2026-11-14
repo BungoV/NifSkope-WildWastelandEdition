@@ -60,12 +60,21 @@ float3 uwWorld( float2 ndc, float z )
 	return float3( dot( uwRow[0], p ), dot( uwRow[1], p ), dot( uwRow[2], p ) );
 }
 
-// lane VKWATER4: uwNearMax's copy, precise inside (DXC does not carry the caller's precise into a callee)
-float3 uwWorldPrecise( float2 ndc, float z )
+// lane VKWATER4: uwNearMax's world point in NV GL's own float form (its fp assembly): d * 2 - 1 spread into the
+// matrix row as fma( d * row, 2, -row ), x-first fma dots; precise inside (DXC does not carry it into a callee)
+float uwDot4Gl( float4 u, float4 v )
 {
-	precise float4 v = mul(float4( ndc, z, 1.0 ), uwInvProj);
+	precise float r = mad( u.w, v.w, mad( u.z, v.z, mad( u.y, v.y, u.x * v.x ) ) );
+	return r;
+}
+
+float3 uwWorldGl( float2 ndc, float d )
+{
+	precise float4 t = mad( ndc.x, uwInvProj[0], ndc.y * uwInvProj[1] );
+	precise float4 z = mad( d * uwInvProj[2], 2.0, -uwInvProj[2] );
+	precise float4 v = ( t + z ) + uwInvProj[3];
 	precise float4 p = float4( v.xyz / v.w, 1.0 );
-	precise float3 r = float3( dot( uwRow[0], p ), dot( uwRow[1], p ), dot( uwRow[2], p ) );
+	precise float3 r = float3( uwDot4Gl( p, uwRow[0] ), uwDot4Gl( p, uwRow[1] ), uwDot4Gl( p, uwRow[2] ) );
 	return r;
 }
 
@@ -86,10 +95,11 @@ bool uwNearMax( float2 ndc, float dMax, float dS, float tol )
 {
 	if ( ( dS >= 1.0 ) != ( dMax >= 1.0 ) )
 		return false;
-	precise float zA = dMax * 2.0 - 1.0, zB = dS * 2.0 - 1.0;
-	precise float3 a = uwWorldPrecise( ndc, zA );
-	precise float3 b = uwWorldPrecise( ndc, zB );
-	precise float e = distance( a, b );
+	precise float3 a = uwWorldGl( ndc, dMax );
+	precise float3 b = uwWorldGl( ndc, dS );
+	precise float3 q = b - a;	// GL: distance as 1 / rsqrt of an x-first fma dot; the max (a no-op) blocks NV Vulkan's fold into its sqrt
+	precise float s = mad( q.z, q.z, mad( q.y, q.y, q.x * q.x ) );
+	precise float e = 1.0 / max( rsqrt( s ), 1.175494351e-38 );
 	return e <= tol;
 }
 
