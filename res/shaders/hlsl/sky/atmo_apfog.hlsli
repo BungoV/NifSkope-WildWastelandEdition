@@ -1,3 +1,42 @@
+// HLSL source of features/sky/atmo_apfog.glsl (include-only GLSL), lane HLSLSRC2 (notes/hlslsrc2/tools/glsl2hlsl.py): the GLSL's comments,
+// names and order kept. Its loose uniforms sit at the top under WW_LOOSE_UNIFORMS: the entry that includes this
+// file includes it once more inside its LooseUniforms cbuffer with that defined (HLSL has one cbuffer for them).
+#ifdef WW_HLSL_SRC
+// lane SKYA (ATMO2): how the physical sky's aerial perspective and the cell fog share one surface's air.
+// Both describe the same lower atmosphere: the cell fog (the game's fog, or the Volumetric Air fitted to it) is the
+// weather's own measure of it, and the aerial perspective is the sky's medium (the clear air + the haze rung taken
+// from the same fog numbers, atmosphere.cpp hazeFromFog). Laying one over the other counts the haze twice. So the
+// combined transmittance is the MIN of the two: the aerial perspective is applied first, then the fog keeps only
+// the share it has not already taken, T' = min(1, Tfog / Tap), and its in-scatter scaled by (1 - T') / (1 - Tfog).
+// Where the fog is thicker (near, in a fog bank) the fog leads (bungo 10-19: our fog leads); where the clear air
+// is thicker (past the fog's curve, the far LOD) the sky's air leads, continuous with the sky behind it.
+// Red "double" (WW_ATMO_AP_RED=double): T' = Tfog, the haze counted twice. Offline gate: tests/spells/atmo_lut_check.py.
+// Pure functions: no uniforms (the gate compiles this file alone).
+
+// the fog's residual transmittance once the aerial perspective's tAp is in
+float wwApFogResidualT( float tAp, float tFog, bool doubled )
+{
+	if ( doubled )
+		return tFog;
+	return clamp( tFog / max( tAp, 1e-6 ), 0.0, 1.0 );
+}
+
+// a medium's in-scatter L (its whole transmittance tFull) scaled to its residual tRes
+float3 wwApFogResidualL( float3 L, float tFull, float tRes )
+{
+	if ( tRes >= 1.0 )
+		return (float3)( 0.0 );
+	return L * clamp( ( 1.0 - tRes ) / max( 1.0 - tFull, 1e-6 ), 0.0, 1.0 );
+}
+
+// (L, T) of the surface's whole air: the aerial perspective (ap) then the fog's residual (fog = its L, T)
+float4 wwApFogCombine( float4 ap, float4 fog, bool doubled )
+{
+	float tr = wwApFogResidualT( ap.a, fog.a, doubled );
+	float3 lr = doubled ? fog.rgb : wwApFogResidualL( fog.rgb, fog.a, tr );
+	return float4( ap.rgb * tr + lr, ap.a * tr );
+}
+#else	// WW_HLSL_SRC: the per-variant files' half (HLSLBULK1, WW_FN_<name> picks functions); it goes with the last of them
 // Shared HLSL for res/shaders/features/sky/atmo_apfog.glsl (include-only GLSL), HLSLBULK1 round 2 (notes/hlslbulk1/tools/factor.py). No bindings: the
 // functions below are the converted ones, they read the declarations of the shader that includes them (its cbuffers,
 // resources, statics and LooseUniforms: the per-module shim and the entry own those). Define WW_FN_<name> for each
@@ -27,3 +66,4 @@ float3 wwApFogResidualL(float3 L, float tFull, float tRes)
     return L * clamp((1.0f - tRes) / max(1.0f - tFull, 9.9999999747524270787835121154785e-07f), 0.0f, 1.0f);
 }
 #endif
+#endif	// WW_HLSL_SRC

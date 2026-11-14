@@ -76,7 +76,7 @@ def smooth3(n, seed):
 
 
 if mode == 'volsky':
-    leak = ('air/cell_volsky_ps__WW_CELL_FOGLEAK.hlsl', ['WW_CELL_FOGLEAK'])
+    leak = ('air/volsky_view_ps.hlsl', ['WW_CELL_FOGLEAK'])
     jobs = [(FJ.volsky('volsky_leak', *leak), 1),
             (FJ.volsky('volsky_leak_near', *leak, far_on=False, flags=2 | 8 | 32 | 64 | 65536, rule=1, night=False), 0)]
     for j, over in jobs:

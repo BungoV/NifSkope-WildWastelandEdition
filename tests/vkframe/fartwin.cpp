@@ -331,7 +331,7 @@ int main( int argc, char ** argv )
 	{
 		if ( argc < 2 )
 			return fatal( "usage: fartwin.exe <tree root>" );
-		const auto want = hlslSlots( std::string( argv[1] ) + "/res/shaders/hlsl/far-lod/impostor_cellinstez_ps__WW_CELL_FOGLEAK.hlsl" );
+		const auto want = hlslSlots( std::string( argv[1] ) + "/res/shaders/hlsl/far-lod/farcards_view_ps.hlsl" );
 		WwVkPresent::FarSetCounts sc;
 		const bool made = WwVkPresent::farCardsSet( sc, why );
 		int tSlots = 0;

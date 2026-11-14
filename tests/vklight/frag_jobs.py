@@ -282,7 +282,7 @@ def cloud_jobs():
             u = dict(J[key])
             if suffix:
                 u['cvBlueSlice'] = 5
-            out.append(dict(name='cloud%s_%s' % (suffix, name), size=size, hlsl='clouds/cloud_march%s_ps.hlsl' % suffix,
+            out.append(dict(name='cloud%s_%s' % (suffix, name), size=size, hlsl='clouds/cloud_march%s_view_ps.hlsl' % suffix,
                             glsl='clouds/cloud_march.frag', defines=defs, uniforms=u, textures=T, rule=MARCH_RULE,
                             vk_edit=MARCH_FIX,  # the port carries the fixes (_a jitters by blue noise: no dot)
                             reds=red))  # every march job carries the red (the gate wants a red per job)
@@ -300,7 +300,7 @@ def cloud_jobs():
         if suffix:  # cloudvol.cpp resolvePass, every clamp on (cloudvolmath.h constants)
             u.update({'cvAccAlpha': [0.25], 'cvAccClamp': [1.0], 'cvAccReset': [0.0075], 'cvAccResetSd': [1.5],
                       'cvHistAge': [16.0], 'cvAgeK': [1.25], 'cvLitReset': [0.07], 'cvLitFloor': [0.02]})
-        out.append(dict(name='cloud%s_resolve' % suffix, size=(hw, hh), hlsl='clouds/cloud_resolve%s_ps.hlsl' % suffix,
+        out.append(dict(name='cloud%s_resolve' % suffix, size=(hw, hh), hlsl='clouds/cloud_resolve%s_view_ps.hlsl' % suffix,
                         glsl='clouds/cloud_resolve.frag', defines=defs, uniforms=u, textures=rtex, rule=('ulp', 1),
                         reds=CLOUD_REDS['resolve' + suffix]))
     return out
@@ -310,8 +310,9 @@ def jobs(want, tex):
     global Tex
     Tex = tex
     all_ = [
-        volsky('volsky_leak', 'air/cell_volsky_ps__WW_CELL_FOGLEAK.hlsl', ['WW_CELL_FOGLEAK'], reds=VOLSKY_REDS[:3]),
-        volsky('volsky_leak_near', 'air/cell_volsky_ps__WW_CELL_FOGLEAK.hlsl', ['WW_CELL_FOGLEAK'], far_on=False,
+        # lane HLSLSRC2: the FOGLEAK jobs run the view's frozen twin (volsky_view_ps.hlsl, the vk_edit anchors' text)
+        volsky('volsky_leak', 'air/volsky_view_ps.hlsl', ['WW_CELL_FOGLEAK'], reds=VOLSKY_REDS[:3]),
+        volsky('volsky_leak_near', 'air/volsky_view_ps.hlsl', ['WW_CELL_FOGLEAK'], far_on=False,
                flags=2 | 8 | 32 | 64 | 65536, rule=1, night=False, reds=VOLSKY_REDS[3:]),  # far off, AP rule 1: only the near grid's tail moves it
         volsky('volsky_base', 'air/cell_volsky_ps.hlsl', [], reds=[VOLSKY_REDS[0], VOLSKY_REDS[2]]),  # froxel reads in lookdev_fog.hlsli
     ]
@@ -323,7 +324,7 @@ def jobs(want, tex):
         want = list(want) + [j['name'] for j in clouds]
     # probes (only when named): one term off at a time, to find which one carries a difference
     full = 2 | 4 | 8 | 64 | 16384 | 65536 | 131072
-    leak = ('air/cell_volsky_ps__WW_CELL_FOGLEAK.hlsl', ['WW_CELL_FOGLEAK'])
+    leak = ('air/volsky_view_ps.hlsl', ['WW_CELL_FOGLEAK'])
     probes = [volsky('probe_nocurve', *leak, flags=full & ~131072), volsky('probe_noterr', *leak, flags=full & ~64),
               volsky('probe_norain', *leak, rain=False), volsky('probe_norec', *leak, flags=full & ~4),
               volsky('probe_rule0', *leak, rule=0), volsky('probe_notail', *leak, flags=8, rule=0, night=False, rain=False)]

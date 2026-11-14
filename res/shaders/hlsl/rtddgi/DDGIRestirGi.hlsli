@@ -7,6 +7,16 @@
 //   3 filter      the like pixels' means in a window; 4 + it the a-trous passes (the last writes RestirGiOut)
 // RESTIRGI_FILTER builds the filter kernel (modes 2..; no ray code). RESTIRGI_RED (the gate's red) drops mode 2's packed
 // g-buffer write.
+// restirgi.comp's header:
+// Lane RTEMIS1 part 2 (2026-11-06): ReSTIR GI on the DDGI volume's BVH, one invocation a pixel (the RT quality preset
+// High). The CPU twin is src/features/gi/restirgimath.h restirgi::frame() (its pass 0 = mode 0, pass 1 = mode 1); the
+// per-pixel rules are restirgi_common.glsl (MIRROR restirgimath.h). A bounce ray's hit is shaded as a probe ray's
+// (trace_body.glsl: direct + the volume's irradiance, x albedo / pi, + Le), a miss returns the volume's miss radiance.
+// mode 2 keeps a running mean a pixel (reprojected, at most knobs.y frames, clamped to the like neighbours' estimates),
+// mode 3 filters it in a depth / normal aware window (twice as wide while the mean is young: one frame must stand on its
+// own, history only polishes), modes 4.. run the variance-guided a-trous passes on it and the last one writes the
+// irradiance the cell shader reads (no a-trous passes: mode 3 writes it). Set 0 = the volume's own set, set 1 = the buffers below.
+// (HLSL: set 1 is DDGIRestirGiBindingsVk.hlsli's; restirgi_common.glsl = restirgi_common.hlsli, trace_body.glsl = trace_body.hlsli)
 #ifndef DDGI_RESTIRGI_HLSLI
 #define DDGI_RESTIRGI_HLSLI
 
@@ -15,6 +25,9 @@
 
 uint RestirGi_StbnByte( uint i ) { return ( RestirGiStbn[i >> 2u] >> ( ( i & 3u ) * 8u ) ) & 255u; }
 
+// the g-buffer texel packed for the filter and a-trous taps (8 bytes, not 16): the depth's own float bits and the normal
+// octahedral in two snorm16 [Cigolle 2014, "A Survey of Efficient Representations for Independent Unit Vectors"];
+// a zero normal packs to (0, 0) and comes back +z (only where the depth is invalid)
 // GLSL packSnorm2x16 / unpackSnorm2x16: SPIR-V takes GLSL.std.450's own instructions (the same as glslang's); DXIL the formula
 #ifdef __spirv__
 [[vk::ext_instruction( 56, "GLSL.std.450" )]] uint RestirGi_SpvPackSnorm2x16( float2 v );
@@ -92,9 +105,11 @@ RgPixel RestirGi_Pixel( bool prev, int x, int y )
 }
 
 #ifndef RESTIRGI_FILTER
-/* the bounce hit's direct light (MIRROR rtddgi.cpp RgTwinScene directOne): the sun and the directional term as DDGI_Direct,
- * the placed lights by ONE pick in proportion to its unshadowed luminance (a running pick on the one uniform u, rescaled
- * each step) with one shadow ray, over its probability [Talbot 2005, RIS]; red alllights = DDGI_Direct */
+/* the bounce hit's direct light (RTEMIS1 11-09, the cost cut; MIRROR rtddgi.cpp RgTwinScene directOne): the sun and the
+ * directional term as ddgiDirect, the placed lights by ONE pick in proportion to its unshadowed luminance (a running
+ * pick on the one uniform u, rescaled each step) with one shadow ray, over its probability: the mean of every light with
+ * a ray each [Talbot 2005, RIS]; red alllights = ddgiDirect */
+// (HLSL: ddgiDirect = DDGI_Direct)
 float3 RestirGi_DirectOne( float3 Pw, float3 n, float u )
 {
 	float3 E = float3( 0.0, 0.0, 0.0 );
@@ -165,6 +180,7 @@ float3 RestirGi_DirectOne( float3 Pw, float3 n, float u )
 	return E;
 }
 
+// the bounce ray, shaded as trace.comp main shades a probe ray (the twin: src/features/gi/rtddgi.cpp restirgiCli's scene)
 RgRes RestirGi_Trace( float3 o, float3 d, float u, int red )
 {
 	uint pr;
@@ -324,8 +340,11 @@ void RestirGi_ModeSpatial( int x, int y, uint id )
 }
 #endif
 
-// mode 2: the running mean, through the reprojected pixel (none: starts over), clamped to the 3 x 3 like pixels' estimates
-// first [Karis 2014]; the same 3 x 3 gives the frame's spatial variance of the estimate's luminance [Schied 2017, SVGF 4.2]
+// mode 2: the running mean, through the reprojected pixel (none: starts over; mode 0 found none on a cut, a light change
+// or a disocclusion). The history is clamped to the 3 x 3 like pixels' estimates first [Karis 2014, TAA's clamp], so a
+// stale mean (a light gone, a thing moved) cannot outlive the frame that shows it. The same 3 x 3 gives the frame's
+// spatial variance of the estimate's luminance; over the mean's frames it is the mean's variance, the a-trous guide
+// (a young mean: one frame's spread, so the guide is wide exactly when the history is short) [Schied 2017, SVGF 4.2].
 void RestirGi_ModeAccumulate( int x, int y, uint id )
 {
 	float4 e = RestirGiEst[id];
@@ -335,7 +354,8 @@ void RestirGi_ModeAccumulate( int x, int y, uint id )
 	RestirGiPk[id] = RestirGi_Pack( g );
 #endif
 	// a pixel the half / quarter trace skipped (valid depth, no estimate): the mean of its traced like 3 x 3 neighbours;
-	// none like it: its own history's mean, then any traced neighbour, then black
+	// none like it: its own history's mean, then any traced neighbour, then black (the filters read acc.w > 0 exactly
+	// where the depth is valid, so a valid pixel always gets one)
 	if ( e.w < 0.5 && g.w > 0.0 && g.w < 1e5 && !RestirGi_Traced( x, y, uint( RG_G.size.z ), RG_G.opts.w ) ) {
 		float3 sum = float3( 0.0, 0.0, 0.0 ), sumAny = float3( 0.0, 0.0, 0.0 );
 		float nf = 0.0, nAny = 0.0;
@@ -402,14 +422,16 @@ void RestirGi_ModeAccumulate( int x, int y, uint id )
 	RestirGiAtrB[id] = float4( 0.0, 0.0, 0.0, vs / n );
 }
 
-// mode 3: the running means of the window's like pixels (depth within 10 %, normal within 25 degrees: Restir_Similar)
+// mode 3: the running means of the window's like pixels (depth within 10 %, normal within 25 degrees: restirSimilar)
+// (HLSL: restirSimilar = Restir_Similar)
 void RestirGi_ModeFilter( int x, int y, uint id )
 {
 	const float4 g = RestirGi_Unpack( RestirGiPk[id] );
 	float3 s = float3( 0.0, 0.0, 0.0 );
 	float n = 0.0;
 	const int f = RG_G.opts.z;
-	const int st = RestirGiAcc[id].w < 4.0 ? 2 : 1;   // a young mean: the same taps, twice as wide
+	// a young mean (TAA off, a cut, a disocclusion): the same taps, twice as wide
+	const int st = RestirGiAcc[id].w < 4.0 ? 2 : 1;
 	if ( g.w > 0.0 && g.w < 1e5 )
 		for ( int dy = -f; dy <= f; dy++ )
 			for ( int dx = -f; dx <= f; dx++ ) {
@@ -430,9 +452,11 @@ void RestirGi_ModeFilter( int x, int y, uint id )
 	RestirGiOut[id] = float4( m, g.w );
 }
 
-/* mode 4 + it: one a-trous pass of the edge-avoiding wavelet filter [Dammertz 2010; Schied 2017, SVGF 4.3]: the 5 x 5 B3
- * spline kernel (3/8, 1/4, 1/16) with holes, step 2^it; edge stops on depth and normal (Restir_Similar, then cos^128) and
- * on luminance against the variance guide (sigma_l 4); ping-pong A -> B -> A ...; the last pass (knobs.w) writes RestirGiOut */
+/* mode 4 + it: one a-trous pass of the edge-avoiding wavelet filter [Dammertz 2010; Schied 2017, SVGF 4.3]: the 5 x 5
+ * B3 spline kernel (3/8, 1/4, 1/16) with holes, step 2^it; edge stops on depth and normal (restirSimilar, then
+ * cos^128 of the normals) and on luminance against the variance guide (sigma_l 4: SVGF's); the variance is filtered
+ * with the squared weights. Ping-pong atrA -> atrB -> atrA ...; the last pass (knobs.w of them) writes outE. */
+// (HLSL: atrA / atrB / outE = RestirGiAtrA / RestirGiAtrB / RestirGiOut)
 void RestirGi_ModeAtrous( int x, int y, uint id, int it )
 {
 	const bool fromA = ( it & 1 ) == 0;
@@ -453,6 +477,7 @@ void RestirGi_ModeAtrous( int x, int y, uint id, int it )
 					continue;
 				const int q = qy * RG_G.size.x + qx;
 				const float4 h = RestirGi_Unpack( RestirGiPk[q] );
+				// acc[q].w > 0 exactly where the depth is valid (modes 1-2): the g-buffer read answers it, one read fewer a tap
 				if ( ( dx != 0 || dy != 0 ) && ( !Restir_Similar( g.w, g.xyz, h.w, h.xyz ) || !( h.w > 0.0 && h.w < 1e5 ) ) )
 					continue;
 				const float4 cq = fromA ? RestirGiAtrA[q] : RestirGiAtrB[q];
@@ -491,7 +516,7 @@ void RestirGi_CS( uint3 tid, uint3 gid, uint gi )
 	const uint mode = DDGI_JOB.job.x;
 #ifndef RESTIRGI_FILTER
 	// the half / quarter trace, modes 0 and 1: an invocation a 2 x 1 (half) or 2 x 2 (quarter) block, so every invocation
-	// holds exactly one traced pixel
+	// holds exactly one traced pixel (a checkerboard over invocations leaves half of each subgroup idle in the ray loops)
 	const int tb = RG_G.opts.w & ( RESTIRGI_BIT_HALF | RESTIRGI_BIT_QUARTER );
 	if ( mode <= 1u && tb != 0 && ( RG_G.opts.w & RESTIRGI_BIT_LINEAR ) == 0 ) {
 		const int bh = ( tb & RESTIRGI_BIT_QUARTER ) != 0 ? 2 : 1;
@@ -518,7 +543,8 @@ void RestirGi_CS( uint3 tid, uint3 gid, uint gi )
 		return;
 	const uint id = uint( y * RG_G.size.x + x );
 #ifdef RESTIRGI_FILTER
-	// the filter kernel (rtddgi_spirv.sh -DRESTIRGI_FILTER -> restirgi_filt.spv.h): modes 2.. only, no ray code
+	// the filter kernel (rtddgi_spirv.sh -DRESTIRGI_FILTER -> restirgi_filt.spv.h): modes 2.. only, so no ray code and
+	// its registers stays in it (one module for every mode sized the a-trous passes' occupancy by the bounce's)
 	if ( mode == 2u )
 #else
 	if ( mode == 0u )

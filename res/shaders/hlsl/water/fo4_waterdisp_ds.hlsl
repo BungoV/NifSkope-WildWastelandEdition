@@ -1,4 +1,5 @@
-// HLSL port of features/water/fo4_waterdisp.tese (tessellation evaluation shader), HLSLBULK1 round 2
+// HLSL source of features/water/fo4_waterdisp.tese (tessellation evaluation shader), HLSLBULK1 round 2 (readable
+// header and the GLSL's comments: lane FO4MATCH1). One file, no variants (variants.txt: the stage has no defines).
 // (notes/hlslbulk1/tools/build_ds.py): SPIRV-Cross cannot emit tessellation HLSL, so the tese's GLSL was converted as a
 // vertex-shader twin (glslang -G, spirv-cross --hlsl, the same post-processing as convert.py) and wrapped here by a
 // domain-shader entry: GLSL `layout(triangles, fractional_odd_spacing, ccw) in` is [domain("tri")] (the spacing and
@@ -6,8 +7,16 @@
 // Each vertex of the split water moved by the wave spectrum's heights and chop (the water ocean math inlined below);
 // the fragment reads the spectrum at the undisplaced point (wwOcBase). Fusion Shaders (F4FS) feeds the hull shader's
 // patch, the loose uniforms and the ocean textures. Not wired: nothing loads this file.
+// variants: #if none (the loader's defines; res/shaders/hlsl/variants.txt lists the sets built)
 // profile: ds_6_0
 #include "WaterBindingsVk.hlsli"
+#define WW_HLSL_SRC 1	// the shared .hlsli files give their readable half (none included here: the ocean math is inlined)
+
+// lane WATERLOOK1 step 2 (src/gl/cellocean.h): each vertex of the split water moved by the wave spectrum's heights and
+// chop (water_ocean.glsl wwWaterOceanDisp, the same cascades, offsets and gains the normals read), full out to
+// waterOceanDisp.x, none past .y. Positions are interpolated in clip space (exact: a linear map of the view position)
+// and the move added through the projection; the fragment reads the spectrum at the undisplaced point (wwOcBase), as the
+// normals are defined there (Tessendorf's Lagrangian grid).
 cbuffer globalUniforms : register(b0, space0)
 {
     row_major float3x3 viewMatrix : packoffset(c0);
@@ -489,17 +498,20 @@ void wwDomainBody()
     }
     if (cond5 && (fade > 0.0f))
     {
+        // the vertices' spacing here: the split's target in pixels, or the finest a GPU splits a quad
         precise float part7 = projectionMatrix[1].y * 0.5f;
         precise float part6 = part7 * float(viewportDimensions.w);
         precise float pxuPart = part6 / max(dist, 1.0f);
         float pxu = pxuPart;
         precise float _stepPart2 = waterOceanDisp.z / pxu;
-        precise float _stepPart = 4096.0f / waterOceanDisp.w;
+        // 4096 is GLSL's const kOcCellEdge, kept a literal (a static const changes the -O0 SPIR-V):
+        precise float _stepPart = 4096.0f / waterOceanDisp.w;	// u: the cell view's water quad (src/cellview.cpp), split at most waterOceanDisp.w times
         float _step = max(_stepPart2, _stepPart);
         float2 PArg3 = world.xy;
         float _stepArg = _step;
         precise float3 wwWaterOceanDispRet = wwWaterOceanDisp(PArg3, _stepArg) * fade;
         float3 dw = wwWaterOceanDispRet;
+        // world -> view: cellRow's 3 x 3 is R^T / s, so R s dw = ( sum row_k dw_k ) s^2
         precise float3 part5 = cellRow[0].xyz * dw.x;
         precise float3 part4 = cellRow[1].xyz * dw.y;
         precise float3 part3 = part5 + part4;

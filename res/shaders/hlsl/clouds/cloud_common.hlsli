@@ -1,3 +1,252 @@
+// HLSL source of features/clouds/cloud_common.glsl (include-only GLSL), lane HLSLSRC2 (notes/hlslsrc2/tools/glsl2hlsl.py): the GLSL's comments,
+// names and order kept. Its loose uniforms sit at the top under WW_LOOSE_UNIFORMS: the entry that includes this
+// file includes it once more inside its LooseUniforms cbuffer with that defined (HLSL has one cbuffer for them).
+#ifdef WW_HLSL_SRC
+#if defined(WW_LOOSE_TYPES)	// the types its loose uniforms use
+struct CloudBands {
+	float3 baseKm;	// Low, Mid, High base, km above z = 0
+	float3 topKm;
+	float3 density;	// relative optical thickness, 1 = a plain cumulus; 0 = an empty band
+	float3 coverage;	// outside the map square
+	float sheet;	// the Low band's sheet share outside the map square
+	float4 mapRect;	// world km: x0, y0, 1 / (2 halfExtent); w = 1 when the map texture is bound
+	float3 windKm;	// the noise offset (wind x time), km
+};
+#elif defined(WW_LOOSE_UNIFORMS)
+	CloudBands cvBands;
+	float cvCal[34];	// coverage -> threshold coverage, 17 per band (cloudvolmath.h calibrate)
+#if !(!defined(WW_CLOUD_VARIETY))
+	/* lane CLOUD5: Cloud Variety (the *_v.prog twins define WW_CLOUD_VARIETY; Off draws the function above unchanged).
+	 * The Low band takes a cloud TYPE 0..1 (stratus, stratocumulus, cumulus, cumulonimbus), each with its own depth and
+	 * profile; a weather noise over tens of km swings the coverage (mean kept) and the type; the detail lookup is displaced
+	 * by a curl field and eroded more, less at the base. Sources and the CPU twin: src/features/clouds/cloudvolmath.h varietyDensity. */
+	float4 cvVarA;	// x the weather's Low type, y the type's swing, z the coverage's swing, w the Low band's own depth km
+	float4 cvVarB;	// x a cumulonimbus' depth km, y the erosion, z the curl km (0 = red nocurl), w the anvil
+	float cvCalT[221];	// the Low band's coverage tables at T = 1 - (1 - k / 12)^2, 13 x 17 (cloudvolmath.h kVarCal, varCalT)
+#endif
+#else
+#ifndef WW_GLSL_MOD
+#define WW_GLSL_MOD	// GLSL mod: x - y floor(x / y) (HLSL fmod truncates)
+float mod(float x, float y) { return x - y * floor(x / y); }
+float2 mod(float2 x, float2 y) { return x - y * floor(x / y); }
+float3 mod(float3 x, float3 y) { return x - y * floor(x / y); }
+float4 mod(float4 x, float4 y) { return x - y * floor(x / y); }
+float2 mod(float2 x, float y) { return x - y * floor(x / y); }
+float3 mod(float3 x, float y) { return x - y * floor(x / y); }
+float4 mod(float4 x, float y) { return x - y * floor(x / y); }
+#endif
+// lane CLOUD2: the volume clouds' density, ONE function for every reader (the march, CLOUD3's shadows, CLOUD4).
+// The CPU twin is src/features/clouds/cloudvolmath.h (bandDensity, gradient, calAt): keep the two in step. p = (world x km,
+// world y km, height km above z = 0). The band heights live in the one struct below (src/features/clouds/cloudvol.cpp sets it).
+
+
+Texture3D<float4> cvShape : register(t0, space0); SamplerState _cvShape_sampler : register(s0, space0);	// 128^3 R8 Perlin-Worley (src/features/clouds/cloudnoise.h), period kCvShapeKm
+Texture3D<float4> cvDetail : register(t1, space0); SamplerState _cvDetail_sampler : register(s1, space0);	// 32^3 R8 Worley fBm, period kCvDetailKm
+Texture2D<float4> cvMap : register(t2, space0); SamplerState _cvMap_sampler : register(s2, space0);	// CLOUD1's map: R Low, G Mid, B Low sheet, A High coverage
+
+static const float kCvShapeKm = 6.0;
+static const float kCvDetailKm = 0.6;
+static const float kCvSigma = 40.0;	// extinction /km at density 1
+static float cvFootKm = 0.0;	// a reader's pixel footprint at p, km (picks the noise mips; 0 = the finest, mip 0)
+
+float cvCalAt( int b, float c )
+{
+	float t = clamp( c, 0.0, 1.0 ) * 16.0;
+	int i = min( int( t ), 15 );
+	return lerp( cvCal[b * 17 + i], cvCal[b * 17 + i + 1], t - float( i ) );
+}
+
+float4 cvMapAt( float2 xy )
+{
+	float2 uv = ( xy - cvBands.mapRect.xy ) * cvBands.mapRect.z;
+	if ( or( or( cvBands.mapRect.w < 0.5, any( (uv < (float2)( 0.0 )) ) ), any( (uv > (float2)( 1.0 )) ) ) )
+		return float4( cvBands.coverage.x, cvBands.coverage.y, cvBands.coverage.x * cvBands.sheet, cvBands.coverage.z );
+	return cvMap.SampleLevel( _cvMap_sampler, uv, 0.0 );
+}
+
+float cvSmooth( float a, float b, float x )
+{
+	float t = clamp( ( x - a ) / ( b - a ), 0.0, 1.0 );
+	return t * t * ( 3.0 - 2.0 * t );
+}
+
+float cvGradient( int b, float hf, float sheet )
+{
+	if ( b == 0 ) {
+		float cu = cvSmooth( 0.0, 0.07, hf ) * ( 1.0 - cvSmooth( 0.55, 1.0, hf ) );
+		float st = cvSmooth( 0.0, 0.04, hf ) * ( 1.0 - cvSmooth( 0.12, 0.3, hf ) );
+		return lerp( cu, st, clamp( sheet, 0.0, 1.0 ) );
+	}
+	return cvSmooth( 0.0, 0.15, hf ) * ( 1.0 - cvSmooth( 0.35, 0.9, hf ) );
+}
+
+#ifndef WW_CLOUD_VARIETY
+// relative density (extinction = kCvSigma x this, /km); 0 outside the Low and Mid bands
+float cloudDensity( float3 p )
+{
+	float4 m = cvMapAt( p.xy );
+	float d = 0.0;
+	for ( int b = 0; b < 2; b++ ) {
+		float base = cvBands.baseKm[b], top = cvBands.topKm[b];
+		float hf = ( p.z - base ) / max( top - base, 1e-3 );
+		if ( or( or( hf <= 0.0, hf >= 1.0 ), cvBands.density[b] <= 0.0 ) )
+			continue;
+		float cov = b == 0 ? m.r : m.g;
+		float sheet = b == 0 ? clamp( m.b / max( m.r, 1e-3 ), 0.0, 1.0 ) : 0.0;
+		float c = cvCalAt( b, cov );
+		if ( c <= 0.0 )
+			continue;
+		float3 q = p + cvBands.windKm;
+		float s = cvShape.SampleLevel( _cvShape_sampler, q / kCvShapeKm, log2( max( cvFootKm * 128.0 / kCvShapeKm, 1.0 ) ) ).r;
+		float t = 1.0 - c;
+		float base_ = clamp( ( s * cvGradient( b, hf, sheet ) - t ) / max( 1.0 - t, 1e-4 ), 0.0, 1.0 ) * c;
+		if ( base_ <= 0.0 )
+			continue;
+		float det = cvDetail.SampleLevel( _cvDetail_sampler, q / kCvDetailKm, log2( max( cvFootKm * 32.0 / kCvDetailKm, 1.0 ) ) ).r;
+		float mod_ = lerp( det, 1.0 - det, clamp( hf * 4.0, 0.0, 1.0 ) ) * 0.2;
+		d += clamp( ( base_ - mod_ ) / ( 1.0 - mod_ ), 0.0, 1.0 ) * cvBands.density[b];
+	}
+	return d;
+}
+#else
+
+
+static const float kCvVarWrapKm = 384.0;	// cloudvolmath.h kVarWrapKm (the wind's wrap)
+static const float kCvCurlPeriodKm = 24.0;
+
+float cvVarHash( int ix, int iy, int oct )
+{
+	uint h = uint( ix ) * 0x8da6b343u ^ uint( iy ) * 0xd8163841u ^ uint( oct ) * 0xcb1ab31fu;
+	h ^= h >> 13u;
+	h *= 0x5bd1e995u;
+	h ^= h >> 15u;
+	return float( h >> 8u ) * ( 1.0 / 16777216.0 );
+}
+
+// antithetic: half a wrap east holds 1 - the value, so the noise's mean over the wrap is exactly 0 (cloudvolmath.h varLattice)
+float cvVarLattice( int ix, int iy, int cells, int oct )
+{
+	int h = cells / 2;
+	return ix >= h ? 1.0 - cvVarHash( ix - h, iy, oct ) : cvVarHash( ix, iy, oct );
+}
+
+float cvVarValue( float2 xy, float cellKm, int cells, int oct )
+{
+	float2 u = mod( xy, (float2)( kCvVarWrapKm ) ) / cellKm;
+	int2 i = min( int2( floor( u ) ), (int2)( cells - 1 ) );
+	float2 f = u - float2( i );
+	int2 j = int2( i.x + 1 == cells ? 0 : i.x + 1, i.y + 1 == cells ? 0 : i.y + 1 );
+	float2 w = f * f * ( 3.0 - 2.0 * f );
+	float a = cvVarLattice( i.x, i.y, cells, oct ), b = cvVarLattice( j.x, i.y, cells, oct );
+	float c = cvVarLattice( i.x, j.y, cells, oct ), e = cvVarLattice( j.x, j.y, cells, oct );
+	return lerp( lerp( a, b, w.x ), lerp( c, e, w.x ), w.y );
+}
+
+float cvWeatherNoise( float2 xy )
+{
+	float v = 0.65 * cvVarValue( xy, 16.0, 24, 0 ) + 0.35 * cvVarValue( xy, 6.0, 64, 1 );
+	return clamp( ( v - 0.5 ) * 4.0, -1.0, 1.0 );
+}
+
+float3 cvCurlRaw( float3 q )
+{
+	float3 u = mod( q, (float3)( kCvCurlPeriodKm ) ) / kCvCurlPeriodKm;
+	float c1 = cos( 6.2831853 * frac( 13.0 * u.x + 5.0 * u.y + 0.11 ) );
+	float c2 = cos( 6.2831853 * frac( -6.0 * u.x + 11.0 * u.y + 0.33 ) );
+	float c3 = cos( 6.2831853 * frac( 10.0 * u.x + 8.0 * u.z + 0.64 ) );
+	float c4 = cos( 6.2831853 * frac( -7.0 * u.x + 12.0 * u.z + 0.85 ) );
+	float ax = c1 * 0.358979 + c2 * 0.877896, ay = c1 * -0.933346 + c2 * 0.478852;
+	float bx = c3 * 0.624695 + c4 * 0.863779, bz = c3 * -0.780869 + c4 * 0.503871;
+	return 0.5 * float3( ax + bx, ay, bz );
+}
+
+float cvTypeDepth( float T )
+{
+	float u = clamp( T, 0.0, 1.0 ) * 3.0, dc = cvVarA.w;
+	if ( u < 1.0 )
+		return dc * lerp( 0.3, 0.6, u );
+	if ( u < 2.0 )
+		return dc * lerp( 0.6, 1.0, u - 1.0 );
+	return lerp( dc, max( cvVarB.x, dc ), u - 2.0 );
+}
+
+float cvTypeProfile( float T, float hf )
+{
+	const float rise[4] = { 0.10, 0.08, 0.07, 0.03 };
+	const float fall[4] = { 0.60, 0.45, 0.55, 0.85 };
+	float u = clamp( T, 0.0, 1.0 ) * 3.0;
+	int k = min( int( u ), 2 );
+	// the rise and fall heights blend, not the profiles' values (cloudvolmath.h typeProfile: no shoulder half way up)
+	float r = lerp( rise[k], rise[k + 1], u - float( k ) ), f = lerp( fall[k], fall[k + 1], u - float( k ) );
+	return cvSmooth( 0.0, r, hf ) * ( 1.0 - cvSmooth( f, 1.0, hf ) );
+}
+
+float cvCalAtT( float T, float c )
+{
+	float u = ( 1.0 - sqrt( 1.0 - clamp( T, 0.0, 1.0 ) ) ) * 12.0;	// cloudvolmath.h varCalT's inverse
+	int k = min( int( u ), 11 );
+	float t = clamp( c, 0.0, 1.0 ) * 16.0;
+	int i = min( int( t ), 15 );
+	float f = t - float( i );
+	float a = lerp( cvCalT[k * 17 + i], cvCalT[k * 17 + i + 1], f );
+	float b = lerp( cvCalT[k * 17 + 17 + i], cvCalT[k * 17 + 18 + i], f );
+	return lerp( a, b, u - float( k ) );
+}
+
+float cloudDensity( float3 p )
+{
+	float4 m = cvMapAt( p.xy );
+	float3 q = p + cvBands.windKm;
+	float n = cvWeatherNoise( q.xy );
+	float d = 0.0, s = -1.0;
+	float3 curl = (float3)( 0.0 );
+	bool curlOk = false;
+	for ( int b = 0; b < 2; b++ ) {
+		if ( cvBands.density[b] <= 0.0 )
+			continue;
+		float cov = b == 0 ? m.r : m.g;
+		cov += cvVarA.z * n * min( cov, 1.0 - cov );
+		float hf, prof, c;
+		if ( b == 0 ) {
+			float sheet = clamp( m.b / max( m.r, 1e-3 ), 0.0, 1.0 );
+			float T = clamp( cvVarA.x + cvVarA.y * n, 0.0, 1.0 ) * ( 1.0 - sheet );
+			hf = ( p.z - cvBands.baseKm.x ) / max( cvTypeDepth( T ), 1e-3 );
+			if ( or( hf <= 0.0, hf >= 1.0 ) )
+				continue;
+			c = cvCalAtT( T, cov );
+			float e = lerp( 1.0, 0.5, cvVarB.w * cvSmooth( 0.8, 1.0, T ) * cvSmooth( 0.65, 0.85, hf ) );
+			c = c > 0.0 ? pow( c, e ) : 0.0;
+			prof = cvTypeProfile( T, hf );
+		} else {
+			hf = ( p.z - cvBands.baseKm.y ) / max( cvBands.topKm.y - cvBands.baseKm.y, 1e-3 );
+			if ( or( hf <= 0.0, hf >= 1.0 ) )
+				continue;
+			c = cvCalAt( 1, cov );
+			prof = cvGradient( 1, hf, 0.0 );
+		}
+		if ( c <= 0.0 )
+			continue;
+		if ( s < 0.0 )
+			s = cvShape.SampleLevel( _cvShape_sampler, q / kCvShapeKm, log2( max( cvFootKm * 128.0 / kCvShapeKm, 1.0 ) ) ).r;
+		float t = 1.0 - c;
+		float base_ = clamp( ( s * prof - t ) / max( 1.0 - t, 1e-4 ), 0.0, 1.0 ) * c;
+		if ( base_ <= 0.0 )
+			continue;
+		if ( !curlOk ) {
+			curl = cvCurlRaw( q );
+			curlOk = true;
+		}
+		float3 qd = q + curl * ( cvVarB.z * ( 1.0 - 0.5 * hf ) );
+		float det = cvDetail.SampleLevel( _cvDetail_sampler, qd / kCvDetailKm, log2( max( cvFootKm * 32.0 / kCvDetailKm, 1.0 ) ) ).r;
+		float er = cvVarB.y * lerp( 0.55, 1.0, cvSmooth( 0.0, 0.35, hf ) );
+		float mod_ = lerp( det, 1.0 - det, clamp( hf * 4.0, 0.0, 1.0 ) ) * er;
+		d += clamp( ( base_ - mod_ ) / ( 1.0 - mod_ ), 0.0, 1.0 ) * cvBands.density[b];
+	}
+	return d;
+}
+#endif
+#endif	// WW_LOOSE_UNIFORMS
+#else	// WW_HLSL_SRC: the per-variant files' half (HLSLBULK1, WW_FN_<name> picks functions); it goes with the last of them
 // Shared HLSL for res/shaders/features/clouds/cloud_common.glsl (include-only GLSL), HLSLBULK1 round 2 (notes/hlslbulk1/tools/factor.py). No bindings: the
 // functions below are the converted ones, they read the declarations of the shader that includes them (its cbuffers,
 // resources, statics and LooseUniforms: the per-module shim and the entry own those). Define WW_FN_<name> for each
@@ -436,3 +685,4 @@ float cloudDensity(float3 p)
     return d;
 }
 #endif
+#endif	// WW_HLSL_SRC

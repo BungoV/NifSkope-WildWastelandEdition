@@ -15,3 +15,20 @@ cell_precip.prog	pcRow=1:0:0:0:0:1:0:0:0:0:0:-5,pcProj=1:0:0:0:0:1:0:0:0:0:-1:-1
 # cell_precip_gpu / _look: the particles from gl_VertexID in a 40-unit box round the eye (random pcL < 1 culls them all), no roof, no inner box
 cell_precip_gpu.prog	pcL=40,pcInner=0,pcRoofOn=0,pcRow=1:0:0:0:0:1:0:0:0:0:1:0,pcProj=1:0:0:0:0:1:0:0:0:0:-1:-1:0:0:-2:0,pcFocal=500,pcMinPx=0,pcShutter=0,pcNear=0:0.001,pcThin=1
 cell_precip_look.prog	pcL=40,pcInner=0,pcRoofOn=0,pcRow=1:0:0:0:0:1:0:0:0:0:1:0,pcProj=1:0:0:0:0:1:0:0:0:0:-1:-1:0:0:-2:0,pcFocal=500,pcMinPx=0,pcShutter=0,pcNear=0:0.001,pcThin=1
+# fo4_water and its looks (VKWATER3): the app's depth-copy state (no reflection-ray pass, the scene depth bound), so the scene
+# point behind the water is rebuilt from 1/gl_FragCoord.w; random ints left it unread and A4 missed a doubled w inversion
+fo4_water.prog	waterSslr=0,waterHaveDepth=1
+fo4_waterlook.prog	waterSslr=0,waterHaveDepth=1
+fo4_waterlookd.prog	waterSslr=0,waterHaveDepth=1
+fo4_waterlookdp.prog	waterSslr=0,waterHaveDepth=1
+fo4_waterlookm.prog	waterSslr=0,waterHaveDepth=1
+fo4_waterlookp.prog	waterSslr=0,waterHaveDepth=1
+# the soft fades (FO4MATCH1): fragW = 1/gl_FragCoord.w against the scene depth. A GL perspective in globalUniforms (w = -z_eye,
+# z_ndc = 0.95 - 1/w: A4's vertices draw at w 0.51..0.9, the scene at 0.54..20), the soft fade on, and the fade reaching an
+# output (cellOn, no probe pass, alpha kept: alphaFlags 8; taa_objvel: its alpha test at 0.5). Random ints never got there.
+fo4_effectcell.prog	projectionMatrix=1:0:0:0:0:1:0:0:0:0:-0.95:-1:0:0:-1:0,fxSoft=1,fxSoftDepth=1,fxDistScale=10,cellOn=1,cellProbe=0,volPart=0,fxRed=0,alphaFlags=8,greyscaleAlpha=0,greyscaleColor=0
+fo4_effectdecal.prog	projectionMatrix=1:0:0:0:0:1:0:0:0:0:-0.95:-1:0:0:-1:0,fxSoft=1,fxSoftDepth=1,fxDistScale=10,cellOn=1,cellProbe=0,volPart=0,fxRed=0,alphaFlags=8,greyscaleAlpha=0,greyscaleColor=0
+fo4_effectdecalcsm.prog	projectionMatrix=1:0:0:0:0:1:0:0:0:0:-0.95:-1:0:0:-1:0,fxSoft=1,fxSoftDepth=1,fxDistScale=10,cellOn=1,cellProbe=0,volPart=0,fxRed=0,alphaFlags=8,greyscaleAlpha=0,greyscaleColor=0
+fo4_effectcellfx.prog	projectionMatrix=1:0:0:0:0:1:0:0:0:0:-0.95:-1:0:0:-1:0,fxSoft=1,fxSoftDepth=1,fxDistScale=10,cellOn=1,cellProbe=0,volPart=0,fxRed=0,alphaFlags=8,greyscaleAlpha=0,greyscaleColor=0
+particles_cell.prog	projectionMatrix=1:0:0:0:0:1:0:0:0:0:-0.95:-1:0:0:-1:0,fxSoft=1,fxSoftDepth=1,fxDistScale=10,cellOn=1,cellProbe=0,volPart=0,pfxGame=2,pfxAlphaRed=0
+taa_objvel.prog	clipJit=1:0:0:0:0:1:0:0:0:0:-0.95:-1:0:0:-1:0,fxProj=-0.95:-1,fxMode=16,fxSoftDepth=1,fxDistScale=10,alphaTest=1,covMode=0,alphaThreshold=0.5,alpha=1,wwGrassFade=0:0:0
