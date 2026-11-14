@@ -6,8 +6,8 @@ Changed, not built, not checked live. Offline: tests/vkframe/underdraw.sh arms A
   fwidth( Pn.z ) before the per-sample draw's discard. After a discard the derivative is undefined; on NVIDIA GL it moved
   the waterline's meniscus by up to 1168 half-float steps on edge samples.
 - GL's GLSL (features/water/cell_underwater.frag) keeps the old order until the HLSL switch.
-- The Vulkan twin's near-the-farthest-sample test now spells NVIDIA GL's own float form, so both pick the same draw for a
-  sample on the threshold.
+- The Vulkan twin's near-the-farthest-sample test now spells NVIDIA GL's own float form; in the gate's plain fog arm both
+  pick the same draw for a sample on the threshold. The light row still splits 13 samples (cause open).
 
 ## VKBLOOM1 (2026-11-12): the Fusion Shaders bloom and the exposure measure join the tone pass on Vulkan (WW_VKVIEW=1)
 
