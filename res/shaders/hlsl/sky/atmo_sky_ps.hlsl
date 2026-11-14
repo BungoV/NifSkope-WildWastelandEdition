@@ -96,10 +96,14 @@ struct SPIRV_Cross_Output
     float4 fragColor : SV_Target0;
 };
 
-// GL's r * r * (mu * mu - 1) + kRb * kRb, in NVIDIA's order: the shared form flipped the horizon row's ground test
+// GL's r * r * (mu * mu - 1) + kRb * kRb >= 0 as NVIDIA's GL lowers it at every call (fp asm: MUL mu mu, MUL r r,
+// MAD mm rr -rr, SGE -kRb^2); any other order flips horizon pixels (VKFAR2 G1 residue at el 12, 145 ulp)
 bool atHitsGround(float r, float mu)
 {
-    return mu < 0.0f && mad(mu * mu, r * r, mad(r, -r, 40449600.0f)) >= 0.0f;
+    precise float mm = mu * mu;
+    precise float rr = r * r;
+    precise float x = mad(mm, rr, -rr);
+    return mu < 0.0f && x >= -40449600.0f;
 }
 #define WW_FN_atDistGround
 #define WW_FN_atDistTop

@@ -1149,8 +1149,8 @@ int main( int argc, char ** argv )
 
 	const Job jobs[2] = {
 		// night: sRGB output, a big globe low in the view, the stars' Tex2 (unbound) blend, the transmittance LUT and the
-		// scatter lobe on
-		{ "night", 120.0f, 14.0f, 55.0f, 10.0f, -20.0f, 24.0f, 0.0f, 8.0f, 1.0f, 0.5f, 0, 0.6f, 0.3f, 1, 1, { 0, 0, 0, 0 } },
+		// scatter lobe on; el 12 puts the sky's own horizon ground test on 2 pixels (atHitsGround spelled as NV's GL)
+		{ "night", 120.0f, 12.0f, 55.0f, 10.0f, -20.0f, 24.0f, 0.0f, 8.0f, 1.0f, 0.5f, 0, 0.6f, 0.3f, 1, 1, { 0, 0, 0, 0 } },
 		// dusk: linear output, a smaller globe, an offset smaller viewport (the pass's viewport and atRect), the lobe off
 		{ "dusk", -40.0f, 20.0f, 40.0f, -60.0f, 4.0f, 14.0f, -3.0f, 3.0f, 2.0f, 0.1f, 3, 1.0f, 0.0f, 0, 0, { 0, 0, 0, 0 } },
 	};
@@ -1273,24 +1273,20 @@ int main( int argc, char ** argv )
 		std::vector<std::uint16_t> ref;
 		const bool ran = runVk( jobs2[ji], stars[ji], kNone, r ) && runGl( jobs2[ji], stars[ji], true, true, false, ref );
 		const Halves v = compare( r.out, ref );
+		if ( std::getenv( "SKYBODY_DUMP" ) )
+			for ( int side = 0; side < 2; side++ ) {
+				const std::vector<std::uint16_t> & b = side ? ref : r.out;
+				std::ofstream o( dir + ( side ? "/gl_" : "/vk_" ) + jobs2[ji].name + "_aniso16.bin", std::ios::binary );
+				const std::int32_t hd[2] = { WS, H };
+				o.write( reinterpret_cast<const char *>( hd ), sizeof( hd ) );
+				o.write( reinterpret_cast<const char *>( b.data() ), std::streamsize( b.size() * 2 ) );
+			}
 		std::printf( "SKYBODY logged aniso16 %s %s (%zu halves differ, %zu past 4 ulp, max %d ulp; not judged)\n", jobs2[ji].name,
 			ran ? v.word() : "did not run", v.diff, v.past4, v.maxu );
 		for ( const Map & m : maps ) {
 			glBindTexture( GL_TEXTURE_2D, m.tex );
 			glTexParameterf( GL_TEXTURE_2D, kAniso, kJudgedAniso );
 		}
-	}
-	// logged, not judged: the night camera 2 deg lower (el 12) puts the sky pass's own horizon on two pixels where GL and
-	// Vulkan pick ground vs sky (G1's atmo_sky, not the bodies): the sky part alone
-	{
-		Job jl = jobs2[0];
-		jl.camEl = 12.0f;
-		Run r;
-		std::vector<std::uint16_t> ref;
-		const bool ran = runVk( jl, stars[0], kSkyOnly, r ) && runGl( jl, stars[0], false, false, false, ref );
-		const Halves v = compare( r.out, ref );
-		std::printf( "SKYBODY logged night el 12 part sky %s (%zu halves differ, %zu past 4 ulp, max %d ulp; not judged)\n",
-			ran ? v.word() : "did not run", v.diff, v.past4, v.maxu );
 	}
 	WwVkPresent::takeSkyStat();
 	// the route red (WW_VKVIEW_SKYBODY_RED=1: the bodies not armed): the sky crosses alone, each body refuses with a why and
