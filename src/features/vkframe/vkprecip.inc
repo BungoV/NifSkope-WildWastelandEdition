@@ -1,0 +1,492 @@
+/* lane VKFAR2 (row L8 slice 1, 2026-11-14): rain / snow (cell_precip_gpu) on the present device, into the tone frame and its
+ * stencil, through the VKAIR1 crossing (fx(): its fence, command buffer, semaphores, the air's render pass over the frame).
+ * Included once by vkpresent.cpp after vkfardots.inc (it reads that block's anonymous-namespace parts).
+ * GL draws one GL_POINT a particle and its geometry stage makes the quad; the present device has no geometry stage, so a
+ * compute pass (precip_view_cs.hlsl: the field, the cull, the geometry stage's per-particle part) writes one record a
+ * particle in GL's order, and each particle is an instance of four strip vertices (precip_view_vs.hlsl) read by
+ * cell_precip_gpu_ps.hlsl's frozen copy (precip_view_ps.hlsl). Nothing is compacted: the blend needs GL's order.
+ * Slice 1 is unlit and unfogged: a lit cell, the fog or the roof map are refused (GL draws).
+ * GL's state (cellprecip.cpp): depth LEQUAL, no depth write, cull off, blend SRC_ALPHA / ONE_MINUS_SRC_ALPHA, stencil ALWAYS
+ * ref 1, REPLACE on depth pass, write mask 0x03. */
+namespace
+{
+constexpr VkDeviceSize kPrecipViewBytes = 96;   // precip_view_vs PrecipView (b1)
+constexpr VkDeviceSize kPrecipCsAt = 256;       // the compute pass's b31
+constexpr VkDeviceSize kPrecipPsAt = 1792;      // the pixel stage's b31 (past the compute block's 1312)
+constexpr VkDeviceSize kPrecipRecBytes = 112;   // PrecipRec: 7 float4
+
+struct Precip
+{
+	bool made = false, broken = false;
+	std::string brokenWhy;
+	VkDescriptorSetLayout csDsl = VK_NULL_HANDLE, gDsl = VK_NULL_HANDLE;
+	VkDescriptorPool dpool = VK_NULL_HANDLE;
+	VkDescriptorSet csSet = VK_NULL_HANDLE, gSet = VK_NULL_HANDLE;
+	VkPipelineLayout csLayout = VK_NULL_HANDLE, gLayout = VK_NULL_HANDLE;
+	VkShaderModule cs = VK_NULL_HANDLE, vs = VK_NULL_HANDLE, ps = VK_NULL_HANDLE;
+	VkPipeline csPipe = VK_NULL_HANDLE;
+	VkBuffer ubo = VK_NULL_HANDLE;  // the vertex block at 0, the compute b31 at kPrecipCsAt, the pixel b31 at kPrecipPsAt
+	VkDeviceMemory uboMem = VK_NULL_HANDLE;
+	std::uint8_t * uboPtr = nullptr;
+	VkBuffer rec = VK_NULL_HANDLE;  // the records, one a particle
+	VkDeviceMemory recMem = VK_NULL_HANDLE;
+	VkDeviceSize recCap = 0;
+	VkPipeline pipe = VK_NULL_HANDLE;
+	VkRenderPass pipePass = VK_NULL_HANDLE;
+	int pipeSamples = 0, pipelines = 0;
+	double buildMs = 0.0;
+	// this run's job (the drawing thread writes it before the hand, the worker records it)
+	int n = 0;
+	WwVkPresent::FxStat st;
+};
+
+Precip & precip()
+{
+	static Precip d;
+	return d;
+}
+
+// a member's offset in a reflected block (-1: absent)
+int precipAt( const WwVkPresent::FxField * f, int n, const char * name )
+{
+	for ( int i = 0; i < n; i++ )
+		if ( std::strcmp( f[i].name, name ) == 0 )
+			return f[i].offset;
+	return -1;
+}
+
+bool precipStatic( std::string & why )
+{
+	Vk & v = vk();
+	Precip & D = precip();
+	if ( D.made )
+		return true;
+	const double t0 = nowMs();
+	if ( !v.vkCmdDispatch || !v.vkCreateComputePipelines || !v.vkCmdPipelineBarrier ) {
+		why = "no vkCmdDispatch / vkCreateComputePipelines / vkCmdPipelineBarrier";
+		return false;
+	}
+	// compute: b31, t0 pcRoof / t1 pcTex at 64 / 65, s1 at 129, u0 the records at 192 (vkframe_spirv.sh fxs()'s shifts)
+	VkDescriptorSetLayoutBinding cb[5] = {};
+	const std::uint32_t cBind[5] = { 31, 64, 65, 129, 192 };
+	const VkDescriptorType cType[5] = { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
+		VK_DESCRIPTOR_TYPE_SAMPLER, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER };
+	for ( int k = 0; k < 5; k++ ) {
+		cb[k].binding = cBind[k];
+		cb[k].descriptorType = cType[k];
+		cb[k].descriptorCount = 1;
+		cb[k].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+	}
+	// graphics: b1 the vertex block, t1 the records at 65 (vertex); b31, t0 pcTex at 64, s0 at 128 (pixel)
+	VkDescriptorSetLayoutBinding gb[5] = {};
+	const std::uint32_t gBind[5] = { 1, 65, 31, 64, 128 };
+	const VkDescriptorType gType[5] = { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+		VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, VK_DESCRIPTOR_TYPE_SAMPLER };
+	for ( int k = 0; k < 5; k++ ) {
+		gb[k].binding = gBind[k];
+		gb[k].descriptorType = gType[k];
+		gb[k].descriptorCount = 1;
+		gb[k].stageFlags = k < 2 ? VK_SHADER_STAGE_VERTEX_BIT : VK_SHADER_STAGE_FRAGMENT_BIT;
+	}
+	VkDescriptorSetLayoutCreateInfo lci { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
+	lci.bindingCount = 5;
+	lci.pBindings = cb;
+	VkDescriptorSetLayoutCreateInfo lgi = lci;
+	lgi.pBindings = gb;
+	VkDescriptorPoolSize ps[4] = { { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 3 }, { VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 3 },
+		{ VK_DESCRIPTOR_TYPE_SAMPLER, 2 }, { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 2 } };
+	VkDescriptorPoolCreateInfo pci { VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO };
+	pci.maxSets = 2;
+	pci.poolSizeCount = 4;
+	pci.pPoolSizes = ps;
+	if ( v.vkCreateDescriptorSetLayout( v.dev, &lci, nullptr, &D.csDsl ) != VK_SUCCESS
+		|| v.vkCreateDescriptorSetLayout( v.dev, &lgi, nullptr, &D.gDsl ) != VK_SUCCESS
+		|| v.vkCreateDescriptorPool( v.dev, &pci, nullptr, &D.dpool ) != VK_SUCCESS ) {
+		why = "the rain / snow descriptor set layouts / pool failed";
+		return false;
+	}
+	const VkDescriptorSetLayout dsls[2] = { D.csDsl, D.gDsl };
+	VkDescriptorSet sets[2] = {};
+	VkDescriptorSetAllocateInfo dai { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO };
+	dai.descriptorPool = D.dpool;
+	dai.descriptorSetCount = 2;
+	dai.pSetLayouts = dsls;
+	VkPipelineLayoutCreateInfo plci { VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO };
+	plci.setLayoutCount = 1;
+	plci.pSetLayouts = &D.csDsl;
+	VkPipelineLayoutCreateInfo plgi = plci;
+	plgi.pSetLayouts = &D.gDsl;
+	if ( v.vkAllocateDescriptorSets( v.dev, &dai, sets ) != VK_SUCCESS
+		|| v.vkCreatePipelineLayout( v.dev, &plci, nullptr, &D.csLayout ) != VK_SUCCESS
+		|| v.vkCreatePipelineLayout( v.dev, &plgi, nullptr, &D.gLayout ) != VK_SUCCESS ) {
+		why = "the rain / snow descriptor sets / pipeline layouts failed";
+		return false;
+	}
+	D.csSet = sets[0];
+	D.gSet = sets[1];
+	if ( !fxModule( vkframe_precip_view_cs_spv, sizeof( vkframe_precip_view_cs_spv ), D.cs )
+		|| !fxModule( vkframe_precip_view_vs_spv, sizeof( vkframe_precip_view_vs_spv ), D.vs )
+		|| !fxModule( vkframe_precip_view_ps_spv, sizeof( vkframe_precip_view_ps_spv ), D.ps ) ) {
+		why = "the rain / snow shader modules failed";
+		return false;
+	}
+	VkComputePipelineCreateInfo cp { VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO };
+	cp.stage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+	cp.stage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+	cp.stage.module = D.cs;
+	cp.stage.pName = "main";
+	cp.layout = D.csLayout;
+	if ( v.vkCreateComputePipelines( v.dev, tone().cache, 1, &cp, nullptr, &D.csPipe ) != VK_SUCCESS ) {
+		why = "vkCreateComputePipelines (the rain / snow records) failed";
+		return false;
+	}
+	D.pipelines++;
+	VkBufferCreateInfo bci { VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
+	bci.size = kPrecipPsAt + VkDeviceSize( WwVkPresent::kT_precippsBytes );
+	bci.usage = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
+	bool mapped = v.vkCreateBuffer( v.dev, &bci, nullptr, &D.ubo ) == VK_SUCCESS;
+	if ( mapped ) {
+		VkMemoryRequirements br {};
+		v.vkGetBufferMemoryRequirements( v.dev, D.ubo, &br );
+		VkMemoryAllocateInfo ai { VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO };
+		ai.allocationSize = br.size;
+		ai.memoryTypeIndex = memType( br.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT );
+		void * p = nullptr;
+		mapped = ai.memoryTypeIndex != UINT32_MAX && v.vkAllocateMemory( v.dev, &ai, nullptr, &D.uboMem ) == VK_SUCCESS
+			&& v.vkBindBufferMemory( v.dev, D.ubo, D.uboMem, 0 ) == VK_SUCCESS && v.vkMapMemory( v.dev, D.uboMem, 0, VK_WHOLE_SIZE, 0, &p ) == VK_SUCCESS;
+		D.uboPtr = static_cast<std::uint8_t *>( p );
+	}
+	if ( !mapped || !D.uboPtr ) {
+		why = "the rain / snow uniform buffer failed";
+		return false;
+	}
+	std::memset( D.uboPtr, 0, size_t( bci.size ) );
+	D.buildMs += nowMs() - t0;
+	D.made = true;
+	toneCacheSave();
+	return true;
+}
+
+// the record buffer, grown (the last run's fence already waited); device memory, written and read only on the device
+bool precipRecords( VkDeviceSize need, std::string & why )
+{
+	Vk & v = vk();
+	Precip & D = precip();
+	if ( D.rec && D.recCap >= need )
+		return true;
+	if ( D.rec )
+		v.vkDestroyBuffer( v.dev, D.rec, nullptr );
+	if ( D.recMem )
+		v.vkFreeMemory( v.dev, D.recMem, nullptr );
+	D.rec = VK_NULL_HANDLE;
+	D.recMem = VK_NULL_HANDLE;
+	D.recCap = 0;
+	const VkDeviceSize cap = std::max<VkDeviceSize>( need + need / 2, 64 * 1024 );
+	VkBufferCreateInfo bci { VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
+	bci.size = cap;
+	bci.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
+	bool ok = v.vkCreateBuffer( v.dev, &bci, nullptr, &D.rec ) == VK_SUCCESS;
+	if ( ok ) {
+		VkMemoryRequirements br {};
+		v.vkGetBufferMemoryRequirements( v.dev, D.rec, &br );
+		VkMemoryAllocateInfo ai { VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO };
+		ai.allocationSize = br.size;
+		ai.memoryTypeIndex = memType( br.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT );
+		if ( ai.memoryTypeIndex == UINT32_MAX )
+			ai.memoryTypeIndex = memType( br.memoryTypeBits, 0 );
+		ok = ai.memoryTypeIndex != UINT32_MAX && v.vkAllocateMemory( v.dev, &ai, nullptr, &D.recMem ) == VK_SUCCESS
+			&& v.vkBindBufferMemory( v.dev, D.rec, D.recMem, 0 ) == VK_SUCCESS;
+	}
+	if ( !ok ) {
+		why = "the rain / snow record buffer (" + std::to_string( need ) + " bytes) failed";
+		return false;
+	}
+	D.recCap = cap;
+	return true;
+}
+
+// the pipeline over the air's render pass (remade when the frame's sample count changes)
+bool precipPipe( std::string & why )
+{
+	Vk & v = vk();
+	Fx & F = fx();
+	Precip & D = precip();
+	if ( D.pipePass == F.airPass && D.pipeSamples == F.airSamples && D.pipe )
+		return true;
+	const double t0 = nowMs();
+	if ( D.pipe ) {
+		v.vkDestroyPipeline( v.dev, D.pipe, nullptr );
+		D.pipe = VK_NULL_HANDLE;
+	}
+	D.pipePass = VK_NULL_HANDLE;
+	VkPipelineShaderStageCreateInfo st[2] = { { VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO },
+		{ VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO } };
+	st[0].stage = VK_SHADER_STAGE_VERTEX_BIT;
+	st[0].module = D.vs;
+	st[0].pName = "main";
+	st[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+	st[1].module = D.ps;
+	st[1].pName = "main";
+	VkPipelineVertexInputStateCreateInfo vi { VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO };
+	VkPipelineInputAssemblyStateCreateInfo ia { VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO };
+	ia.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP;
+	VkPipelineViewportStateCreateInfo vps { VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO };
+	vps.viewportCount = vps.scissorCount = 1;
+	VkPipelineRasterizationStateCreateInfo rs { VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO };
+	rs.polygonMode = VK_POLYGON_MODE_FILL;
+	rs.cullMode = VK_CULL_MODE_NONE;
+	rs.frontFace = VK_FRONT_FACE_CLOCKWISE;
+	rs.lineWidth = 1.0f;
+	VkPipelineMultisampleStateCreateInfo ms { VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO };
+	ms.rasterizationSamples = VkSampleCountFlagBits( F.airSamples );
+	VkPipelineDepthStencilStateCreateInfo ds { VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO };
+	ds.depthTestEnable = VK_TRUE;
+	ds.depthWriteEnable = VK_FALSE;
+	ds.depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
+	ds.stencilTestEnable = VK_TRUE;
+	ds.front.failOp = ds.front.depthFailOp = VK_STENCIL_OP_KEEP;
+	ds.front.passOp = VK_STENCIL_OP_REPLACE;
+	ds.front.compareOp = VK_COMPARE_OP_ALWAYS;
+	ds.front.compareMask = 0xFF;
+	ds.front.writeMask = 0x03;
+	ds.back = ds.front;
+	VkPipelineColorBlendAttachmentState cb {};  // glBlendFunc( SRC_ALPHA, ONE_MINUS_SRC_ALPHA ), alpha too
+	cb.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+	cb.blendEnable = VK_TRUE;
+	cb.srcColorBlendFactor = cb.srcAlphaBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
+	cb.dstColorBlendFactor = cb.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+	cb.colorBlendOp = cb.alphaBlendOp = VK_BLEND_OP_ADD;
+	VkPipelineColorBlendStateCreateInfo cbs { VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO };
+	cbs.attachmentCount = 1;
+	cbs.pAttachments = &cb;
+	const VkDynamicState dyn[3] = { VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR, VK_DYNAMIC_STATE_STENCIL_REFERENCE };
+	VkPipelineDynamicStateCreateInfo dy { VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO };
+	dy.dynamicStateCount = 3;
+	dy.pDynamicStates = dyn;
+	VkGraphicsPipelineCreateInfo gp { VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO };
+	gp.stageCount = 2;
+	gp.pStages = st;
+	gp.pVertexInputState = &vi;
+	gp.pInputAssemblyState = &ia;
+	gp.pViewportState = &vps;
+	gp.pRasterizationState = &rs;
+	gp.pMultisampleState = &ms;
+	gp.pDepthStencilState = &ds;
+	gp.pColorBlendState = &cbs;
+	gp.pDynamicState = &dy;
+	gp.layout = D.gLayout;
+	gp.renderPass = F.airPass;
+	if ( v.vkCreateGraphicsPipelines( v.dev, tone().cache, 1, &gp, nullptr, &D.pipe ) != VK_SUCCESS ) {
+		why = "vkCreateGraphicsPipelines (rain / snow) failed";
+		return false;
+	}
+	D.pipelines++;
+	D.pipePass = F.airPass;
+	D.pipeSamples = F.airSamples;
+	D.buildMs += nowMs() - t0;
+	toneCacheSave();
+	return true;
+}
+
+// the worker (fxWork, F.kind 8): the records, then the instanced quads into the tone frame
+bool precipRecord( std::string & why )
+{
+	Vk & v = vk();
+	Fx & F = fx();
+	Precip & D = precip();
+	if ( !F.fbAir || !D.pipe || !D.csPipe || !D.rec ) {
+		why = "no framebuffer / pipeline / record buffer for rain / snow";
+		return false;
+	}
+	v.vkCmdBindPipeline( F.cmd, VK_PIPELINE_BIND_POINT_COMPUTE, D.csPipe );
+	v.vkCmdBindDescriptorSets( F.cmd, VK_PIPELINE_BIND_POINT_COMPUTE, D.csLayout, 0, 1, &D.csSet, 0, nullptr );
+	v.vkCmdDispatch( F.cmd, std::uint32_t( ( D.n + 63 ) / 64 ), 1, 1 );
+	VkMemoryBarrier mb { VK_STRUCTURE_TYPE_MEMORY_BARRIER };  // the records written -> the vertex stage reads them
+	mb.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+	mb.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+	v.vkCmdPipelineBarrier( F.cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_VERTEX_SHADER_BIT, 0, 1, &mb, 0, nullptr, 0, nullptr );
+	VkRenderPassBeginInfo rbi { VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO };
+	rbi.renderPass = F.airPass;
+	rbi.framebuffer = F.fbAir;
+	rbi.renderArea = { { 0, 0 }, { std::uint32_t( F.w ), std::uint32_t( F.h ) } };
+	v.vkCmdBeginRenderPass( F.cmd, &rbi, VK_SUBPASS_CONTENTS_INLINE );
+	// GL's viewport rows from the bottom = the image's rows from the top in memory: no flip (FragCoord.y = GL's)
+	const VkViewport vpt { float( F.vp[0] ), float( F.vp[1] ), float( F.vp[2] ), float( F.vp[3] ), 0.0f, 1.0f };
+	const int x0 = std::clamp( F.vp[0], 0, F.w ), y0 = std::clamp( F.vp[1], 0, F.h );
+	const int x1 = std::clamp( F.vp[0] + F.vp[2], 0, F.w ), y1 = std::clamp( F.vp[1] + F.vp[3], 0, F.h );
+	const VkRect2D sc { { x0, y0 }, { std::uint32_t( std::max( x1 - x0, 0 ) ), std::uint32_t( std::max( y1 - y0, 0 ) ) } };
+	v.vkCmdSetViewport( F.cmd, 0, 1, &vpt );
+	v.vkCmdSetScissor( F.cmd, 0, 1, &sc );
+	v.vkCmdBindPipeline( F.cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, D.pipe );
+	v.vkCmdSetStencilReference( F.cmd, VK_STENCIL_FACE_FRONT_AND_BACK, 1u );
+	v.vkCmdBindDescriptorSets( F.cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, D.gLayout, 0, 1, &D.gSet, 0, nullptr );
+	v.vkCmdDraw( F.cmd, 4, std::uint32_t( D.n ), 0, 0 );
+	v.vkCmdEndRenderPass( F.cmd );
+	return true;
+}
+}  // namespace
+
+namespace WwVkPresent
+{
+bool precipRun( const PrecipRun & t, std::string & why )
+{
+	Fx & F = fx();
+	Precip & D = precip();
+	Tone & T = tone();
+	Vk & v = vk();
+	Gl & g = gl();
+	FxStat & S = D.st;
+	const double t0 = nowMs();
+	auto refuse = [&]( const std::string & w ) {
+		why = w;
+		S.fails++;
+		S.failWhy = w;
+		return false;
+	};
+	auto breakOff = [&]( const std::string & w ) {
+		D.broken = true;
+		D.brokenWhy = "rain / snow on Vulkan broke: " + w;
+		return refuse( D.brokenWhy );
+	};
+	if ( D.broken )
+		return refuse( D.brokenWhy );
+	if ( t.lit )
+		return refuse( "a lit cell (the particles' light is slice 2's)" );
+	if ( t.fogged )
+		return refuse( "the fog on (its A / B are slice 2's)" );
+	if ( t.roofOn || t.tex[0].tex )
+		return refuse( "the roof map on (slice 3's)" );
+	if ( !toneFrameIs( t.color ) || !T.colorView || !T.dsView )
+		return refuse( "the draw target is not the shared tone frame" );
+	if ( T.w != t.w || T.h != t.h )
+		return refuse( "rain / snow's size is not the tone frame's" );
+	if ( t.vp[2] < 1 || t.vp[3] < 1 )
+		return refuse( "an empty viewport" );
+	if ( t.n < 1 || t.first < 0 )
+		return refuse( "no particles" );
+	if ( !v.ok || !g.ok || g.ctx != reinterpret_cast<void *>( wglGetCurrentContext() ) )
+		return refuse( "the present device or GL's entry points are not ready in this context" );
+	if ( !g.copyImageSubData )
+		return refuse( "no glCopyImageSubData (the atlas' copy into its shared twin)" );
+	const int atFirst = precipAt( kT_precipcs, int( std::size( kT_precipcs ) ), "pcFirst" );
+	const int atCount = precipAt( kT_precipcs, int( std::size( kT_precipcs ) ), "pcCount" );
+	const int atRed = precipAt( kT_precipcs, int( std::size( kT_precipcs ) ), "pcRed" );
+	const int atProj = precipAt( kT_precipcs, int( std::size( kT_precipcs ) ), "pcProj" );
+	const int atAtlas = precipAt( kT_precipcs, int( std::size( kT_precipcs ) ), "pcAtlas" );
+	const int atNear = precipAt( kT_precipps, int( std::size( kT_precipps ) ), "pcNear" );
+	if ( atFirst < 0 || atCount < 0 || atRed < 0 || atProj < 0 || atAtlas < 0 || atNear < 0 )
+		return breakOff( "a member missing from the reflected blocks" );
+	// the last crossing (any fx pass) is done before its command buffer, sets, framebuffer and buffers are written again
+	if ( F.pending ) {
+		v.vkWaitForFences( v.dev, 1, &F.fence, VK_TRUE, 1000000000ull );
+		F.pending = false;
+	}
+	std::string w;
+	const int samples = T.samples > 0 ? T.samples : std::max( F.airSamples, 1 );
+	if ( !fxStatic( w ) || !fxSems( w ) || !fxPasses( samples, w ) || !precipStatic( w ) || !precipPipe( w ) )
+		return breakOff( w );
+	if ( F.airSamples != T.samples )
+		return breakOff( "rain / snow's pipeline is not at the frame's sample count" );
+	if ( !precipRecords( VkDeviceSize( t.n ) * kPrecipRecBytes, w ) )
+		return breakOff( w );
+	FxNames names;
+	names.add( T.colorTex );
+	names.add( T.dsTex );
+	VkImageView views[2] = {};
+	int smp[2] = {};
+	for ( int k = 0; k < 2; k++ ) {
+		FxTex x = t.tex[k];
+		if ( !x.shared && x.tex )
+			x.shared = farSharedOf( x.tex );
+		if ( !fxSlot( x, views[k], names, S.copies, w ) )
+			return refuse( "rain / snow's input t" + std::to_string( k ) + ": " + w );
+		smp[k] = std::clamp( x.sampler, 0, int( kFxSamplers ) - 1 );
+	}
+	const VkImageView att[2] = { T.colorView, T.dsView };
+	if ( !fxFb( F.fbAir, F.airPass, att, 2, T.w, T.h ) )
+		return breakOff( "rain / snow's framebuffer over the tone frame failed" );
+	// the compute b31 (GL's uniforms + the run), the vertex block (its pcProj / pcAtlas bytes + the red), the pixel b31
+	std::uint8_t * u = D.uboPtr;
+	std::uint8_t * c = u + kPrecipCsAt;
+	std::memcpy( c, t.cs, size_t( kT_precipcsBytes ) );
+	const std::uint32_t first = std::uint32_t( t.first ), count = std::uint32_t( t.n );
+	const int csRed = ( t.red & 1 ) ? 1 : 0;
+	std::memcpy( c + atFirst, &first, 4 );
+	std::memcpy( c + atCount, &count, 4 );
+	std::memcpy( c + atRed, &csRed, 4 );
+	std::memset( u, 0, size_t( kPrecipViewBytes ) );
+	std::memcpy( u, t.cs + atProj, 64 );
+	std::memcpy( u + 64, t.cs + atAtlas, 16 );
+	const int vsRed = ( t.red & 2 ) ? 1 : 0;
+	std::memcpy( u + 80, &vsRed, 4 );
+	std::uint8_t * p = u + kPrecipPsAt;
+	std::memcpy( p, t.ps, size_t( kT_precippsBytes ) );
+	if ( t.red & 4 ) {  // red: the near fade dropped (whole from the eye on)
+		const float nf[2] = { -2.0f, -1.0f };
+		std::memcpy( p + atNear, nf, 8 );
+	}
+	const VkDeviceSize recBytes = VkDeviceSize( t.n ) * kPrecipRecBytes;
+	VkDescriptorBufferInfo bi[5] = { { D.ubo, kPrecipCsAt, VkDeviceSize( kT_precipcsBytes ) }, { D.rec, 0, recBytes },
+		{ D.ubo, 0, kPrecipViewBytes }, { D.rec, 0, recBytes }, { D.ubo, kPrecipPsAt, VkDeviceSize( kT_precippsBytes ) } };
+	VkDescriptorImageInfo ii[5] = {};
+	ii[0].imageView = views[0];
+	ii[1].imageView = views[1];
+	ii[2].sampler = F.smp[smp[1]];
+	ii[3].imageView = views[1];
+	ii[4].sampler = F.smp[smp[1]];
+	for ( int k : { 0, 1, 3 } )
+		ii[k].imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+	VkWriteDescriptorSet ws[10] = {};
+	auto put = [&]( int k, VkDescriptorSet s, std::uint32_t b, VkDescriptorType ty, const VkDescriptorBufferInfo * bp, const VkDescriptorImageInfo * ip ) {
+		ws[k].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+		ws[k].dstSet = s;
+		ws[k].dstBinding = b;
+		ws[k].descriptorCount = 1;
+		ws[k].descriptorType = ty;
+		ws[k].pBufferInfo = bp;
+		ws[k].pImageInfo = ip;
+	};
+	put( 0, D.csSet, 31, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, &bi[0], nullptr );
+	put( 1, D.csSet, 64, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, nullptr, &ii[0] );
+	put( 2, D.csSet, 65, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, nullptr, &ii[1] );
+	put( 3, D.csSet, 129, VK_DESCRIPTOR_TYPE_SAMPLER, nullptr, &ii[2] );
+	put( 4, D.csSet, 192, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, &bi[1], nullptr );
+	put( 5, D.gSet, 1, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, &bi[2], nullptr );
+	put( 6, D.gSet, 65, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, &bi[3], nullptr );
+	put( 7, D.gSet, 31, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, &bi[4], nullptr );
+	put( 8, D.gSet, 64, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, nullptr, &ii[3] );
+	put( 9, D.gSet, 128, VK_DESCRIPTOR_TYPE_SAMPLER, nullptr, &ii[4] );
+	v.vkUpdateDescriptorSets( v.dev, 10, ws, 0, nullptr );
+	D.n = t.n;
+	F.kind = 8;
+	F.w = t.w;
+	F.h = t.h;
+	std::memcpy( F.vp, t.vp, sizeof( F.vp ) );
+	if ( !fxCross( names, w ) )
+		return breakOff( w );  // nothing signals vkDone: GL does not wait it; GL draws its points this frame
+	const double ms = nowMs() - t0;
+	S.runs++;
+	S.cpuMs += ms;
+	S.maxMs = std::max( S.maxMs, ms );
+	return true;
+}
+
+void precipOnGl( const char * why )
+{
+	FxStat & S = precip().st;
+	S.gl++;
+	S.glWhy = why ? why : "";
+}
+
+FxStat takePrecipStat()
+{
+	Precip & D = precip();
+	FxStat s = D.st;
+	s.pipelines = D.pipelines;
+	s.buildMs = D.buildMs;
+	if ( D.broken && s.failWhy.empty() )
+		s.failWhy = D.brokenWhy;
+	D.st = FxStat();
+	return s;
+}
+}  // namespace WwVkPresent

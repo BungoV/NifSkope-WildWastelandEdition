@@ -185,4 +185,15 @@ pfx p7_ob_vec post/objblur_vec cs_6_0 ""
 pfx p7_ob_tile post/objblur_tile cs_6_0 ""
 pfx p7_ob post/objblur cs_6_0 ""
 ls -la p7_*.spv.h
+# lane VKFAR2 L8 slice 1: rain / snow without a geometry stage (vkprecip.inc): the per-particle compute pass, the instanced
+# corners and cell_precip_gpu_ps.hlsl's frozen copy, all on fx()'s shifts (the compute and graphics sets are separate)
+fxs() {
+	"$DXC" -spirv -fspv-target-env=vulkan1.2 -T cs_6_0 -E main -fvk-b-shift 0 0 -fvk-t-shift 64 0 -fvk-s-shift 128 0 -fvk-u-shift 192 0 -Fo "$1.spv" "$(cygpath -m "$ROOT/res/shaders/hlsl/$2.hlsl" 2>/dev/null || echo "$ROOT/res/shaders/hlsl/$2.hlsl")"
+	python -I "$ROOT/tools/spv_header.py" "$1.spv" "vkframe_$1_spv" "$1.spv.h" < /dev/null
+	rm -f "$1.spv"
+}
+fxs precip_view_cs weather/precip_view_cs
+fxv precip_view_vs weather/precip_view_vs
+fx precip_view_ps weather/precip_view_ps
+ls -la precip_view_cs.spv.h precip_view_vs.spv.h precip_view_ps.spv.h
 ls -la csm_view_vs.spv.h obj_depth_vs.spv.h sky_view_ps.spv.h bloom_down.spv.h bloom_hold.spv.h bloom_up.spv.h bloom_src.spv.h bloom_comb.spv.h bloom_back.spv.h tonemap.spv.h measure_q.spv.h tone_view_vs.spv.h tone_view_ps.spv.h taa_view_mv_cs.spv.h taa_view_resolve_cs.spv.h taa_view_rcas_ps.spv.h

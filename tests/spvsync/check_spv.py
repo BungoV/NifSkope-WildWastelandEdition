@@ -63,11 +63,16 @@ VKFRAME_FX = {'volsky_view_ps': 'air/volsky_view_ps', 'cloud_march_view_ps': 'cl
 	'cloud_resolve_a_view_ps': 'clouds/cloud_resolve_a_view_ps',
 	'fardots_view_ps': 'far-lod/fardots_view_ps',	# lane VKFAR1
 	'fogbloom_view_ps': 'post/fogbloom_view_ps',	# lane VKFAR2: hand-kept readable twin (P4b)
-	'cloud_composite_view_ps': 'clouds/cloud_composite_view_ps'}	# lane VKFAR2: P8, frozen copy
+	'cloud_composite_view_ps': 'clouds/cloud_composite_view_ps',	# lane VKFAR2: P8, frozen copy
+	'precip_view_ps': 'weather/precip_view_ps'}	# lane VKFAR2: L8 slice 1, frozen copy of cell_precip_gpu_ps
 HLSL_SPECS += [('src/features/vkframe', k, 'vulkan1.2', 'vkframe_%s_spv' % k) for k in VKFRAME_FX]
 # lane VKFAR1: the far dots' vertex stage, the script's `fxv <name> <dir/file>` lines (fx()'s shifts, vs_6_0)
-VKFRAME_FXV = {'fardots_view_vs': 'far-lod/cell_fardots_view_vs'}
+VKFRAME_FXV = {'fardots_view_vs': 'far-lod/cell_fardots_view_vs',
+	'precip_view_vs': 'weather/precip_view_vs'}	# lane VKFAR2: L8 slice 1, rain / snow's instanced corners
 HLSL_SPECS += [('src/features/vkframe', k, 'vulkan1.2', 'vkframe_%s_spv' % k) for k in VKFRAME_FXV]
+# lane VKFAR2 L8 slice 1: rain / snow's record pass, the script's `fxs <name> <dir/file>` lines (fx()'s shifts, cs_6_0)
+VKFRAME_FXS = {'precip_view_cs': 'weather/precip_view_cs'}
+HLSL_SPECS += [('src/features/vkframe', k, 'vulkan1.2', 'vkframe_%s_spv' % k) for k in VKFRAME_FXS]
 # lane VKFAR1 round 2: the far cards' pixel stage, the script's `fxk <name> <dir/file>` lines (fx() + every declared binding kept)
 VKFRAME_FXK = {'farcards_view_ps': 'far-lod/farcards_view_ps',
 	'water_view_ps': 'water/water_view_ps',	# lane VKWATER3 (frozen twins, as HLSLSRC2's)
@@ -244,6 +249,11 @@ def script_ok(tree):
 	plines = {a: (b, c, e) for a, b, c, e in re.findall(r'^pfx ([a-z0-9_]+) ([A-Za-z0-9_/+-]+) ([cvp]s_6_0) "([^"]*)"$', vf, re.M)}
 	if plines != VKFRAME_PFX:
 		bad.append('src/features/vkframe/vkframe_spirv.sh: its pfx lines (%s) are not this checker\'s P7 post passes' % ' '.join(sorted(plines)))
+	if '\t"$DXC" -spirv -fspv-target-env=vulkan1.2 -T cs_6_0 -E main ' + ' '.join(VKFRAME_SKY_ARGS) + ' -Fo "$1.spv" ' not in vf:
+		bad.append('src/features/vkframe/vkframe_spirv.sh: its fxs() compile line changed')
+	slines = dict(re.findall(r'^fxs ([a-z0-9_]+) ([A-Za-z0-9_/+-]+)$', vf, re.M))
+	if slines != VKFRAME_FXS:
+		bad.append('src/features/vkframe/vkframe_spirv.sh: its fxs lines (%s) are not this checker\'s record passes' % ' '.join(sorted(slines)))
 	return bad
 
 
@@ -366,6 +376,9 @@ def main(argv):
 			if k in VKFRAME_FXV:
 				src = os.path.join(tree, 'res/shaders/hlsl', VKFRAME_FXV[k] + '.hlsl')
 				hdefs = VKFRAME_SKY_ARGS
+			if k in VKFRAME_FXS:
+				src = os.path.join(tree, 'res/shaders/hlsl', VKFRAME_FXS[k] + '.hlsl')
+				hdefs = VKFRAME_SKY_ARGS
 			if k in VKFRAME_FXK:
 				src = os.path.join(tree, 'res/shaders/hlsl', VKFRAME_FXK[k] + '.hlsl')
 				hdefs = VKFRAME_SKY_ARGS + ['-fspv-preserve-bindings']
@@ -396,6 +409,8 @@ def main(argv):
 				m = re.search(r'hlsl profile: ([cvp]s_6_[0-9])', open(src, encoding='utf-8', errors='replace').read())
 			if k in VKFRAME_FXV or k in VKFRAME_FXC or k in VKFRAME_FXW or k in VKFRAME_FXL or k in VKFRAME_FXB:
 				m = re.match(r'(vs_6_0)', 'vs_6_0')
+			if k in VKFRAME_FXS:
+				m = re.match(r'(cs_6_0)', 'cs_6_0')
 			opt =[] if d == 'src/features/vkframe' else ['-O0']   # vkframe_spirv.sh builds optimised
 			r = subprocess.run([dxc, '-spirv', '-fspv-target-env=' + env, '-T', m.group(1) if m else 'ps_6_0' if k in VKFRAME_SKY or k in VKFRAME_FX or k in VKFRAME_FXK else 'cs_6_0', '-E', 'main']
 			                   + opt + hdefs + ['-Fo', spv, src], capture_output=True, text=True, timeout=300)

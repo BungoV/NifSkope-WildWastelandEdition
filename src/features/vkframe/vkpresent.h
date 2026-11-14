@@ -609,6 +609,45 @@ bool farDotsRun( const FarDotsRun & t, std::string & why );
 void farDotsOnGl( const char * why );
 FxStat takeFarDotsStat();
 
+// lane VKFAR2 (row L8 slice 1): rain / snow (cell_precip_gpu): precip_view_cs's b31 (GL's names; pcFirst / pcCount / pcRed
+// are not GL's, precipRun writes them) and precip_view_ps's (spirv-cross --reflect of the shipped SPIR-V)
+inline constexpr FxField kT_precipcs[] = {
+	{ "pcSeedS", 0, 1, 1, 1, 0 }, { "pcL", 4, 1, 1, 0, 0 }, { "pcInner", 8, 1, 1, 0, 0 }, { "pcOffXY", 16, 2, 1, 0, 0 },
+	{ "pcOffZ", 32, 1, 16, 0, 0 }, { "pcNCand", 288, 1, 1, 1, 0 }, { "pcBest", 292, 1, 1, 1, 0 },
+	{ "pcCand", 304, 1, 16, 1, 0 }, { "pcFallU", 560, 1, 16, 0, 0 }, { "pcHalfU", 816, 1, 16, 0, 0 },
+	{ "pcWind", 1072, 2, 1, 0, 0 }, { "pcSway", 1080, 1, 1, 0, 0 }, { "pcSpin", 1084, 1, 1, 0, 0 },
+	{ "pcT", 1088, 1, 1, 0, 0 }, { "pcCols", 1092, 1, 1, 1, 0 }, { "pcCells", 1096, 1, 1, 1, 0 },
+	{ "pcCellUv", 1104, 2, 1, 0, 0 }, { "pcRoofOn", 1112, 1, 1, 1, 0 }, { "pcRoofCam", 1120, 3, 1, 0, 0 },
+	{ "pcRoofInv", 1132, 1, 1, 0, 0 }, { "pcRow", 1136, 4, 3, 0, 0 }, { "pcProj", 1184, 4, 1, 0, 4 },
+	{ "pcFocal", 1248, 1, 1, 0, 0 }, { "pcMinPx", 1252, 1, 1, 0, 0 }, { "pcShutter", 1256, 1, 1, 0, 0 },
+	{ "pcThin", 1260, 1, 1, 0, 0 }, { "pcAtlas", 1264, 4, 1, 0, 0 }, { "pcInset", 1280, 2, 1, 0, 0 },
+	{ "pcFar", 1288, 1, 1, 1, 0 }, { "pcHasTex", 1292, 1, 1, 1, 0 }, { "pcFirst", 1296, 1, 1, 1, 0 },
+	{ "pcCount", 1300, 1, 1, 1, 0 }, { "pcRed", 1304, 1, 1, 1, 0 },
+};
+inline constexpr int kT_precipcsBytes = 1312;
+inline constexpr FxField kT_precipps[] = {
+	{ "pcHasTex", 0, 1, 1, 1, 0 }, { "pcFar", 4, 1, 1, 1, 0 }, { "pcAtlas", 16, 4, 1, 0, 0 },
+	{ "pcNear", 32, 2, 1, 0, 0 },
+};
+inline constexpr int kT_precippsBytes = 48;
+struct PrecipRun
+{
+	int w = 0, h = 0, vp[4] = {};    //!< the tone frame's size, GL's viewport
+	unsigned color = 0;             //!< the tone frame's colour (toneFrameIs)
+	int first = 0, n = 0;           //!< the run: glDrawArrays( GL_POINTS, first, n )
+	bool lit = false, fogged = false, roofOn = false;  //!< slice 1 refuses each (GL draws)
+	FxTex tex[2];                   //!< t0 pcRoof (slice 1: none), t1 pcTex (the atlas)
+	std::uint8_t cs[kT_precipcsBytes] = {};  //!< fxPack( cell_precip_gpu, kT_precipcs )
+	std::uint8_t ps[kT_precippsBytes] = {};  //!< fxPack( cell_precip_gpu, kT_precipps )
+	int red = 0;                    //!< gates only: 1 the cull radius 0, 2 the strip's last two corners swapped, 4 no near fade
+};
+/* GL current, the tone frame bound, cell_precip_gpu's uniforms set: one run of particles on Vulkan, a record pass then
+ * instanced quads (depth LEQUAL no write, blend SRC_ALPHA / ONE_MINUS_SRC_ALPHA, stencil ALWAYS ref 1 REPLACE mask 0x03,
+ * as GL's). false: why; nothing drawn (GL draws its points) */
+bool precipRun( const PrecipRun & t, std::string & why );
+void precipOnGl( const char * why );
+FxStat takePrecipStat();
+
 // lane VKFAR2 (row P4b): the fog bloom's own pass (fogbloom_view_ps's b31, spirv-cross --reflect of the shipped SPIR-V)
 inline constexpr FxField kT_fogbloom[] = {
 	{ "fogOn", 0, 1, 1, 1, 0 }, { "fogK", 16, 4, 6, 0, 0 }, { "fogView", 112, 4, 1, 0, 0 },
