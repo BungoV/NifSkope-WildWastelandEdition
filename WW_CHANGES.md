@@ -69,6 +69,20 @@ Changed, not built, not checked live. Nothing in the app calls it yet, so no fra
   yet (not the slab half: both halves show it). GL's state at the draw is ordinary 4x multisampling (no
   alpha-to-coverage, no sample shading, no sample mask); by reading glview.cpp the app draws with the same state, but
   that was not run. The cause is open, so lit (slice 2b) waits.
+- Ruling 11-14 (coordinator): NVIDIA GL's 4x blend sometimes writing a pixel's mean to all its samples is a driver
+  quirk; Vulkan's per-sample blend is the right one. tests/vkframe/precipview.cpp now judges Vulkan against a
+  per-sample reference built from GL's own programs: each particle drawn on its own, in draw order, with blending off
+  into a 4x float target, then blended sample by sample by GL's own blend unit at 1x. Its checks all read 0 in every
+  case (one constant blend at 1x vs 4x; the same loop with blending off vs one GL 4x draw with blending off; the
+  reference vs GL's 4x frame, and GL's four repeat draws, on every pixel no particle ever split). Gate precipviewE2 OK:
+  rain_near_disc, rain_near_fog, snow_far_mean, snow_far_fog, rain_drop_look EXACT; snow_near_tex BOUND (8 flips of
+  1649185), snow_look_near BOUND (0 flips), snow_near_disc BOUND (0 flips). Every red FAILs, and a new harness red
+  (Vulkan's four samples averaged per pixel) FAILs in every case. Kept as info lines: the verdict against GL's 4x
+  frame (as before) and a count of GL's merged pixels (snow_near_tex 4469, of them 4457 hold the reference's mean;
+  rain_near_disc 103 of 103). The repeat clause now asks the reference built twice and GL's stencil drawn twice to be
+  EXACT; GL's 4x colour drawn twice is info, since it varies only on merged pixels (all differing pixels hold one value
+  in one of the two draws). Under the old clause (GL 4x drawn twice EXACT) the first run (E1) failed on snow_near_tex,
+  rain_near_disc, snow_look_near and snow_near_disc (80, 24, 84 and 12 flips): the move awaits the coordinator's word.
 - Same-name atlas reload: cannot happen today. cellprecip.cpp loads each atlas once per texture path into its
   lifelong cache and never deletes or re-uploads it (a failed load deletes its name before anyone sees it), so a GL
   name never gets new pixels and the copy kept per name and Vulkan image stays right. A change there that reloads an
