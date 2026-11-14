@@ -1,6 +1,6 @@
 // lane HLSLSRC3 (2026-11-13): headless Vulkan byte compare of the GPU cull kernels (cellgpucull_hiz0 / _hizn / _cull) against
 // their HLSL twins. Run by tests/hlslmatch/cullmatch.sh:
-//   cullmatch <hiz0|hiz0ms|hizn|cull> <glsl.spv> <hlsl.spv>
+//   cullmatch <hiz0|hiz0ms|hizn|cull|bc7> <glsl.spv> <hlsl.spv>   (bc7: lane FO4MATCH1, the far-LOD BC7 encoder)
 // Both modules get the same random inputs, the same prefilled outputs and the same std140 uniform bytes (binding 31), case
 // after case; every watched buffer must come back byte-identical. The GLSL run must also change its output (a kernel that
 // writes nothing would match a red). Exit 0 match, 1 mismatch, 2 the GLSL wrote nothing, 3 setup error.
@@ -350,13 +350,17 @@ static int cases = 0, bad = 0, wrote = 0;
 // run both sides on identical prefilled outputs; watched = the output buffers, compared byte for byte
 // depths: a hiz the kernel reads back is prefilled with depths in [0, 1], never random bits. A NaN takes GLSL max (FMax,
 // undefined for NaN) and HLSL max (NMax, drops the NaN) apart, and a depth buffer holds none.
-static void both( const char * name, Side * s, std::vector<Bind> binds, const std::vector<Buf> & watched, uint32_t gx, uint32_t gy,
-	bool depths = false )
+// given (lane FO4MATCH1, bc7): the prefill itself (a later pass starts from the GLSL's earlier pass); returns the GLSL's output
+typedef std::vector<std::vector<uint8_t>> Bytes;
+static Bytes both( const char * name, Side * s, std::vector<Bind> binds, const std::vector<Buf> & watched, uint32_t gx, uint32_t gy,
+	bool depths = false, const Bytes * given = nullptr )
 {
 	std::vector<std::vector<uint8_t>> pre, out[2];
 	for ( const Buf & w : watched ) {
 		pre.emplace_back( w.n );
-		if ( depths )
+		if ( given )
+			pre.back() = ( *given )[pre.size() - 1];
+		else if ( depths )
 			for ( size_t i = 0; i + 4 <= w.n; i += 4 ) {
 				float v = frand( 0.0f, 1.0f );
 				memcpy( &pre.back()[i], &v, 4 );
@@ -384,6 +388,7 @@ static void both( const char * name, Side * s, std::vector<Bind> binds, const st
 	if ( !same )
 		bad++;
 	printf( "%-5s %s (%zu bytes differ%s)\n", same ? "same" : "DIFF", name, diff, changed ? "" : ", GLSL wrote nothing" );
+	return out[0];
 }
 
 static void caseHiz0( Side * s, bool ms, int w, int h, int samples, int imgSamples )
@@ -533,10 +538,60 @@ static void caseCull( Side * s, int mode, uint32_t seed )
 	}
 }
 
+// lane FO4MATCH1 (11-14): the far-LOD BC7 encoder (res/shaders/features/far-lod/lodgen_bc7.glsl, tables filled as
+// src/features/far-lod/lodgengpu.cpp does) against lodgen_bc7_cs.hlsl: its three passes as the host runs them (pass 0 on
+// every block, then passes 1 and 2 on the blocks the pass before left with error, each from the GLSL's earlier output).
+// Pixels 0xAARRGGBB: a gradient plus noise, opaque or random alpha. Uniforms (std140): uPass 0, uW 4, uH 8, uBw 12,
+// uFirst 16, uCount 20, uWt 32.
+static void caseBc7( Side * s, int w, int h, bool opaque, int wt0, int wt1, int wt2, int wt3, uint32_t seed )
+{
+	rng = seed;
+	int bw = ( w + 3 ) / 4, bh = ( h + 3 ) / 4, nb = bw * bh;
+	Buf src = ssbo( size_t( w ) * h * 4 );
+	for ( int y = 0; y < h; y++ )
+		for ( int x = 0; x < w; x++ ) {
+			auto ch = [ & ]( float base, float gx, float gy ) {
+				return uint32_t( std::min( 255.0f, std::max( 0.0f, base + gx * x + gy * y + frand( -24.0f, 24.0f ) ) ) );
+			};
+			uint32_t a = opaque ? 255u : ( rnd() >> 24 );
+			static_cast<uint32_t *>( src.p )[y * w + x] = ( a << 24 ) | ( ch( 40, 3.1f, 0.7f ) << 16 ) | ( ch( 200, -1.3f, 2.2f ) << 8 ) | ch( 90, 0.4f, -1.9f );
+		}
+	Buf dst = ssbo( size_t( nb ) * 16 ), err = ssbo( size_t( nb ) * 4 ), list = ssbo( size_t( nb ) * 4 + 4 );
+	Bytes prev;
+	int count = nb;
+	for ( int pass = 0; pass < 3 && count > 0; pass++ ) {
+		Ubo u;
+		u.put( 0, pass );
+		u.put( 4, w );
+		u.put( 8, h );
+		u.put( 12, bw );
+		u.put( 16, 0 );
+		u.put( 20, count );
+		int wt[4] = { wt0, wt1, wt2, wt3 };
+		for ( int i = 0; i < 4; i++ )
+			u.put( 32 + i * 4, wt[i] );
+		Buf ub = makeBuf( u.b.size(), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT );
+		memcpy( ub.p, u.b.data(), u.b.size() );
+		char name[128];
+		snprintf( name, sizeof name, "bc7 %dx%d %s wt %d,%d,%d,%d pass %d blocks %d", w, h, opaque ? "opaque" : "alpha", wt0, wt1, wt2, wt3,
+			pass, count );
+		prev = both( name, s, { { 0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, src.b, VK_NULL_HANDLE }, { 1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, dst.b, VK_NULL_HANDLE },
+			{ 2, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, err.b, VK_NULL_HANDLE }, { 3, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, list.b, VK_NULL_HANDLE },
+			{ 31, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, ub.b, VK_NULL_HANDLE } }, { dst, err }, uint32_t( ( count + 63 ) / 64 ), 1, false,
+			pass ? &prev : nullptr );
+		// the next pass's list: the blocks the GLSL left with error (the host's blkList)
+		count = 0;
+		const int32_t * e = reinterpret_cast<const int32_t *>( prev[1].data() );
+		for ( int b = 0; b < nb; b++ )
+			if ( e[b] > 0 )
+				static_cast<int32_t *>( list.p )[count++] = b;
+	}
+}
+
 int main( int argc, char ** argv )
 {
 	if ( argc != 4 ) {
-		printf( "usage: cullmatch <hiz0|hiz0ms|hizn|cull> <glsl.spv> <hlsl.spv>\n" );
+		printf( "usage: cullmatch <hiz0|hiz0ms|hizn|cull|bc7> <glsl.spv> <hlsl.spv>\n" );
 		return 3;
 	}
 	std::string k = argv[1];
@@ -565,6 +620,11 @@ int main( int argc, char ** argv )
 		for ( int m : modes )
 			for ( int r = 0; r < 3; r++ )
 				caseCull( s, m, 0x1234567u * seed++ );
+	} else if ( k == "bc7" ) {
+		caseBc7( s, 16, 16, true, 1, 1, 1, 1, 11 );
+		caseBc7( s, 37, 23, true, 2, 3, 1, 4, 12 );
+		caseBc7( s, 64, 32, false, 1, 1, 1, 1, 13 );
+		caseBc7( s, 13, 9, false, 3, 1, 2, 5, 14 );
 	} else {
 		printf( "unknown kernel %s\n", k.c_str() );
 		return 3;
