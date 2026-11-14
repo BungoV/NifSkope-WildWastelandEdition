@@ -1110,10 +1110,10 @@ int main( int argc, char ** argv )
 	}
 	const bool colOk = twinOk && colourGate( spvDir + "/spvset/spirv", handles, anisoAt, aniso1H, 0 );
 	const bool colCsmOk = twinOk && colourGate( spvDir + "/spvset/spirv", handles, anisoAt, aniso1H, 1 );  // gap 4: fo4_cellcsmbl
-	// lane VKOBJ5 (G4): skinned (kind 1) and alpha-tested (kind 2) draws through both bl twins
+	// lane VKOBJ5 (G4): skinned (kind 1), alpha-tested (kind 2), single rigid (kind 3), own VAO (kind 4) through both bl twins
 	bool kindOk = true;
 	for ( int tw = 0; tw < 2; tw++ )
-		for ( int kd = 1; kd <= 2; kd++ )
+		for ( int kd = 1; kd <= 4; kd++ )
 			kindOk = ( twinOk && colourGate( spvDir + "/spvset/spirv", handles, anisoAt, aniso1H, tw, kd ) ) && kindOk;
 	ok = kindOk && ok;
 	ok = colOk && colCsmOk && ok;

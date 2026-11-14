@@ -85,11 +85,15 @@ bool vkShadeOn();
  * (`vk objpbrm:`). counts / offs as glMultiDrawElements (16-bit indices), verts the shape's vertex count.
  * Reds WW_VKVIEW_OBJCELL_RED / WW_VKVIEW_OBJPBRM_RED=offset|half|swz|key */
 bool vkCellDraw( const NifSkopeOpenGLContext::Program * prog, const GLsizei * counts, const void * const * offs, GLsizei n, std::size_t verts );
-/* lane VKOBJ5 (plan row G4: skinned and alpha-tested): a POOLED fo4_cellbl / fo4_cellcsmbl shape outside a run that is skinned
- * (its class carries the bone codes, location 5) or alpha-tested (alphaFlags & 7) on Vulkan through the bl twins (objBlShade,
- * one row: the one commit wrote, under vkShadeOn); false: GL draws it, the reason in `vk objskin:` / `vk objalpha:`.
- * Reds WW_VKVIEW_OBJSKIN_RED=bone (the bone transforms one bone on), WW_VKVIEW_OBJALPHA_RED=flags (alphaFlags 0) */
-bool vkBlDraw( const NifSkopeOpenGLContext::Program * prog, const GLsizei * counts, const void * const * offs, GLsizei n );
+/* lane VKOBJ5 (plan row G4): a fo4_cellbl / fo4_cellcsmbl shape outside a run on Vulkan through the bl twins (objBlShade, one
+ * row: the one commit wrote, wwDrawBase 0 on Vulkan; under vkShadeOn): skinned (bone codes at location 5), alpha-tested
+ * (alphaFlags & 7), or rigid and opaque (no blend; a blended rigid shape stays on GL); pooled (its class's arena) or unpooled
+ * (the shape's own VAO, `verts` its vertex count, indices from 0). false: GL draws it, the reason in `vk objskin:` /
+ * `vk objalpha:` / `vk objrigid:` (unpooled ones also in `vk objown:`). Reds WW_VKVIEW_OBJSKIN_RED=bone (the bone transforms
+ * one bone on), WW_VKVIEW_OBJALPHA_RED=flags (alphaFlags 0), WW_VKVIEW_OBJOWN_RED=offset|half (the VAO read from offset 0 /
+ * halves as 16-bit unorm) */
+bool vkBlDraw( const NifSkopeOpenGLContext::Program * prog, const GLsizei * counts, const void * const * offs, GLsizei n,
+	std::size_t verts = 0 );
 //! the cache deletes tex next (its handles were dropped): a twin leaves the table, its Vulkan half at the next frame
 void texGone( GLuint tex );
 

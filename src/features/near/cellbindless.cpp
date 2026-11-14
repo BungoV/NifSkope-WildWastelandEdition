@@ -578,6 +578,7 @@ bool vkShade( const NifSkopeOpenGLContext::Program * prog, GLsizei n )
 	s.pool.indices = k.a.idxUsed;
 	s.rows = c.map + std::size_t( run.base ) * sizeof( Row );
 	s.nRows = run.rows;
+	s.rowsAtBase = true;  // lane VKOBJ5: GL's wwDrawBase is the leader's row (commit), the rows start there
 	s.cmds = c.cmdMap + std::size_t( run.cmd0 ) * kCmdBytes;
 	s.nCmds = std::size_t( n );
 	std::string why;
@@ -586,66 +587,90 @@ bool vkShade( const NifSkopeOpenGLContext::Program * prog, GLsizei n )
 	}, s, why );
 }
 
-/* lane VKOBJ5 (plan row G4: skinned and alpha-tested): the shapes that never join a run (bsshape's run predicate takes rigid,
- * opaque shapes only), counted per kind for `vk objskin:` / `vk objalpha:` (a shape both skinned and alpha-tested counts in both) */
-long long skinTried = 0, skinDrawn = 0, alphaTried = 0, alphaDrawn = 0;
-std::string skinWhy, alphaWhy, vkSkinLine, vkAlphaLine;
+/* lane VKOBJ5 (plan row G4): the shapes that never join a run (bsshape's run predicate takes rigid, opaque, pooled shapes
+ * only; a run of one rolls back to its leader's plain draw), counted per kind: 0 skinned `vk objskin:`, 1 alpha-tested
+ * `vk objalpha:`, 2 rigid `vk objrigid:` (neither), 3 unpooled `vk objown:` (any of them; a shape counts in each kind it is) */
+constexpr int kBlKinds = 4;
+long long blTried[kBlKinds] = {}, blDrawn[kBlKinds] = {};
+std::string blWhy[kBlKinds], vkBlLine[kBlKinds];
+int blOwnKey = 0;  // the unpooled shapes' one pool key (objBlShade waits the last crossing before refilling it)
 }  // namespace
 
-bool vkBlDraw( const NifSkopeOpenGLContext::Program * prog, const GLsizei * counts, const void * const * offs, GLsizei n )
+bool vkBlDraw( const NifSkopeOpenGLContext::Program * prog, const GLsizei * counts, const void * const * offs, GLsizei n,
+	std::size_t verts )
 {
 	Ctx & c = cx();
-	if ( !vkShadeOn() || !prog || n <= 0 || !geo.on || !c.boundCls || !c.map )
+	QOpenGLContext * qc = QOpenGLContext::currentContext();
+	if ( !vkShadeOn() || !prog || n <= 0 || !c.map || !qc )
+		return false;
+	const bool own = !geo.on;  // unpooled: the shape's own VAO is bound (bsshape), its indices from 0, base vertex 0
+	if ( ( !own && !c.boundCls ) || ( own && !verts ) )
 		return false;
 	const std::string_view nm = prog->name;
 	const int twin = nm.find( "cellcsmbl" ) != std::string_view::npos ? 1 : nm.find( "cellbl" ) != std::string_view::npos ? 0 : -1;
 	if ( twin < 0 )
 		return false;
-	const Class & k = *c.boundCls;
-	// skinned: the class carries the bone codes (location 5; bsshape feeds them only for a GPU-skinned shape)
-	const bool skinned = ( ( k.attrMask >> 20 ) & 15u ) != 0;
+	QOpenGLFunctions * gf = qc->functions();
+	// skinned: the bone codes at location 5 (bsshape feeds them only for a GPU-skinned shape): the class's, or the VAO's
+	GLint loc5 = 0;
+	if ( own )
+		gf->glGetVertexAttribiv( 5, GL_VERTEX_ATTRIB_ARRAY_ENABLED, &loc5 );
+	const bool skinned = own ? loc5 != 0 : ( ( c.boundCls->attrMask >> 20 ) & 15u ) != 0;
 	// alpha-tested: alphaFlags' test bits (0 always, 1 <, 2 ==, 3 <=, 4 >, 5 !=, 6 >=, 7 never; bit 3 is the blend)
 	GLint alphaFlags = 0;
-	if ( QOpenGLContext * qc = QOpenGLContext::currentContext() ) {
-		const GLint at = qc->functions()->glGetUniformLocation( prog->id, "alphaFlags" );
-		if ( at >= 0 )
-			qc->functions()->glGetUniformiv( prog->id, at, &alphaFlags );
-	}
+	const GLint at = gf->glGetUniformLocation( prog->id, "alphaFlags" );
+	if ( at >= 0 )
+		gf->glGetUniformiv( prog->id, at, &alphaFlags );
 	const bool alphaTest = ( alphaFlags & 7 ) != 0;
-	if ( !skinned && !alphaTest )
-		return false;  // a rigid opaque shape outside a run: not this route (it stays on GL)
-	skinTried += skinned;
-	alphaTried += alphaTest;
+	const bool rigid = !skinned && !alphaTest;
+	const bool in[kBlKinds] = { skinned, alphaTest, rigid, own };
+	for ( int i = 0; i < kBlKinds; i++ )
+		blTried[i] += in[i];
+	auto refuse = [&]( const std::string & w ) {
+		for ( int i = 0; i < kBlKinds; i++ )
+			if ( in[i] )
+				blWhy[i] = w;
+		return false;
+	};
 	/* the shipped bl twins are the code-default route; the RT GI variant (WW_CELL_RTDDGI + cascades + RESTIR / RESTIRGI) is
 	 * lane VKWATER3's: until its twin lands, such a program stays on GL with the reason in the line */
 	const char * no = ::rtddgiCellShaderDefine() ? "WW_CELL_RTDDGI in GL's program: no Vulkan twin"
 		: ::rtddgiRestirShaderDefine() ? "WW_CELL_RESTIR in GL's program: no Vulkan twin"
 		: ::rtddgiRestirGiShaderDefine() ? "WW_CELL_RESTIRGI in GL's program: no Vulkan twin" : nullptr;
-	if ( no ) {
-		if ( skinned )
-			skinWhy = no;
-		if ( alphaTest )
-			alphaWhy = no;
-		return false;
-	}
+	if ( no )
+		return refuse( no );
+	if ( rigid && gf->glIsEnabled( GL_BLEND ) )
+		return refuse( "a blended rigid shape (the opaque route only)" );
 	static std::vector<std::uint32_t> cmds;
 	cmds.clear();
+	const std::uintptr_t idxOff = own ? 0 : geo.idxOff;
+	const std::int32_t baseVertex = own ? 0 : geo.baseVertex;
 	for ( GLsizei i = 0; i < n; i++ )
-		cmds.insert( cmds.end(), { std::uint32_t( counts[i] ), 1u, std::uint32_t( ( std::uintptr_t( offs[i] ) + geo.idxOff ) / 2 ),
-			std::uint32_t( geo.baseVertex ), 0u } );
+		cmds.insert( cmds.end(), { std::uint32_t( counts[i] ), 1u, std::uint32_t( ( std::uintptr_t( offs[i] ) + idxOff ) / 2 ),
+			std::uint32_t( baseVertex ), 0u } );
 	WW_SWITCH_STATIC( int, redSkin, wwEnv( "WW_VKVIEW_OBJSKIN_RED" ).trimmed() == "bone" ? 1 : 0 );
 	WW_SWITCH_STATIC( int, redAlpha, wwEnv( "WW_VKVIEW_OBJALPHA_RED" ).trimmed() == "flags" ? 1 : 0 );
+	WW_SWITCH_STATIC( QString, redOwnName, wwEnv( "WW_VKVIEW_OBJOWN_RED" ).trimmed() );
 	WwVkPresent::ObjBlShade s;
 	s.twin = twin;
 	s.prog = prog->id;
-	s.poolKey = reinterpret_cast<std::uintptr_t>( &k );
-	s.pool.attrMask = k.attrMask;
-	std::copy( k.vbo, k.vbo + 16, s.pool.vbo );
-	s.pool.ebo = k.ebo;
-	s.pool.verts = k.a.vertUsed;
-	s.pool.indices = k.a.idxUsed;
+	if ( own ) {
+		s.poolKey = reinterpret_cast<std::uintptr_t>( &blOwnKey );
+		s.pool.verts = verts;
+		s.ownVao = true;
+		s.ownRed = redOwnName == "offset" ? 1 : redOwnName == "half" ? 2 : 0;
+	} else {
+		const Class & k = *c.boundCls;
+		s.poolKey = reinterpret_cast<std::uintptr_t>( &k );
+		s.pool.attrMask = k.attrMask;
+		std::copy( k.vbo, k.vbo + 16, s.pool.vbo );
+		s.pool.ebo = k.ebo;
+		s.pool.verts = k.a.vertUsed;
+		s.pool.indices = k.a.idxUsed;
+	}
 	s.rows = c.map + std::size_t( ( c.cursor + kRows - 1 ) % kRows ) * sizeof( Row );  // the shape's own row (commit wrote it)
 	s.nRows = 1;
+	s.rowsAtBase = true;  // GL's wwDrawBase is that row
 	s.cmds = cmds.data();
 	s.nCmds = cmds.size() / 5;
 	s.skinRed = skinned ? redSkin : 0;
@@ -654,16 +679,11 @@ bool vkBlDraw( const NifSkopeOpenGLContext::Program * prog, const GLsizei * coun
 	const bool drew = WwVkPresent::objBlShade( []( const char * name ) -> void * {
 		return reinterpret_cast<void *>( QOpenGLContext::currentContext()->getProcAddress( name ) );
 	}, s, why );
-	if ( drew ) {
-		skinDrawn += skinned;
-		alphaDrawn += alphaTest;
-	} else {
-		if ( skinned )
-			skinWhy = why;
-		if ( alphaTest )
-			alphaWhy = why;
-	}
-	return drew;
+	if ( !drew )
+		return refuse( why );
+	for ( int i = 0; i < kBlKinds; i++ )
+		blDrawn[i] += in[i];
+	return true;
 }
 
 bool runIssue(NifSkopeOpenGLContext::GLFunctions * f, const NifSkopeOpenGLContext::Program * prog )
@@ -1384,29 +1404,31 @@ void frame()
 			std::fprintf( stderr, "%s\n", b );
 		}
 	}
-	// lane VKOBJ5: the skinned / alpha-tested bindless shapes outside a run (vkBlDraw) drawn on Vulkan, and the last refusal
+	// lane VKOBJ5: the bindless shapes outside a run (vkBlDraw) drawn on Vulkan per kind, and the last refusal
 	if ( vkShadeOn() ) {
 		WW_SWITCH_STATIC( QString, skinRed, wwEnv( "WW_VKVIEW_OBJSKIN_RED" ).trimmed() );
 		WW_SWITCH_STATIC( QString, alphaRed, wwEnv( "WW_VKVIEW_OBJALPHA_RED" ).trimmed() );
+		WW_SWITCH_STATIC( QString, ownRed, wwEnv( "WW_VKVIEW_OBJOWN_RED" ).trimmed() );
+		static const char * kindName[kBlKinds] = { "objskin", "objalpha", "objrigid", "objown" };
 		char b[640];
-		for ( int kind = 0; kind < 2; kind++ ) {
-			const long long tried = kind ? alphaTried : skinTried, drawn = kind ? alphaDrawn : skinDrawn;
-			const std::string & why = kind ? alphaWhy : skinWhy;
-			const QString & red = kind ? alphaRed : skinRed;
-			const bool redOn = kind ? red == "flags" : red == "bone";
-			if ( !tried )
+		for ( int kind = 0; kind < kBlKinds; kind++ ) {
+			const QString none;
+			const QString & red = kind == 0 ? skinRed : kind == 1 ? alphaRed : kind == 3 ? ownRed : none;
+			const bool redOn = kind == 0 ? red == "bone" : kind == 1 ? red == "flags" : kind == 3 && ( red == "offset" || red == "half" );
+			if ( !blTried[kind] )
 				continue;
-			std::snprintf( b, sizeof( b ), "vk %s: shapes=%lld drawn=%lld gl=%lld%s%s%s%s", kind ? "objalpha" : "objskin", tried, drawn,
-				tried - drawn, why.empty() ? "" : " glWhy=", why.c_str(), redOn ? " RED " : "", redOn ? red.toStdString().c_str() : "" );
-			std::string & line = kind ? vkAlphaLine : vkSkinLine;
-			if ( line != b && wwFrameLog() ) {
-				line = b;
+			std::snprintf( b, sizeof( b ), "vk %s: shapes=%lld drawn=%lld gl=%lld%s%s%s%s", kindName[kind], blTried[kind], blDrawn[kind],
+				blTried[kind] - blDrawn[kind], blWhy[kind].empty() ? "" : " glWhy=", blWhy[kind].c_str(), redOn ? " RED " : "",
+				redOn ? red.toStdString().c_str() : "" );
+			if ( vkBlLine[kind] != b && wwFrameLog() ) {
+				vkBlLine[kind] = b;
 				std::fprintf( stderr, "%s\n", b );
 			}
 		}
-		skinTried = skinDrawn = alphaTried = alphaDrawn = 0;
-		skinWhy.clear();
-		alphaWhy.clear();
+		for ( int kind = 0; kind < kBlKinds; kind++ ) {
+			blTried[kind] = blDrawn[kind] = 0;
+			blWhy[kind].clear();
+		}
 	}
 	// lane VKOBJ4: the runs drawn on Vulkan this frame, the ones GL drew and why
 	if ( vkShadeOn() ) {
