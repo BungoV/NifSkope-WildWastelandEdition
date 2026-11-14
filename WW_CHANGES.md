@@ -20,6 +20,16 @@ pass for both bindless twins (fo4_cellbl, fo4_cellcsmbl): depth EXACT, colour in
 - The bindless twins' alpha test discards after the last texture sample (as VKWATER3 did for fo4_default /
   pbrm_default). A discard in the middle ended the pixel on Vulkan and broke its neighbours' texture filtering
   (colour max 0.88 off before, BOUND after).
+- Round 3: the cell-lit particle systems (particles_cell) draw on Vulkan under WW_VKOBJ_SHADE: a record pass and a
+  4-vertex strip per particle through the particles' pixel twin, which reads the soft fade's depth (fxDepth) from a
+  shared target. Offline: blview pfx cases leq / always / hard / write / nocol, depth and colour EXACT, reds FAIL.
+- **Soft particles on the GL HLSL route changed.** Their pixel program was compiled without -fvk-use-dx-position-w,
+  so the soft fade read 1/w for the pixel's w and faded nearly to nothing. tests/hlsllive/build_spv.py now passes that
+  flag for the frozen pixel files that invert gl_FragCoord.w: soft particles there fade by depth as on the GLSL route.
+- Round 4: when the present device refuses the fxDepth shared target, GL's own texture is used as before, and the shared
+  target is asked for again on a size change or every 120 second passes (at most 4 asks per size; a grant frees GL's
+  texture). Lines: `lane VKOBJ5: fxDepth shared target refused, ...` (once) and `... granted after N refusals`.
+  Offline: tests/vkframe/fxdepthshare.sh (forced first refusal recovers; the old rule as the red fails).
 
 ## VKBLOOM1 (2026-11-12): the Fusion Shaders bloom and the exposure measure join the tone pass on Vulkan (WW_VKVIEW=1)
 
