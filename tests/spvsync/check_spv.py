@@ -100,6 +100,18 @@ HLSL_SPECS += [('src/features/vkframe', k, 'vulkan1.2', 'vkframe_%s_spv' % k) fo
 VKFRAME_FOG_SRC = 'res/shaders/hlsl/air/volair_integ_cs.hlsl'
 VKFRAME_FOG = {'fog_integ_cs': '', 'fog_integ32_cs': '-DVOLAIR_INTEG_F32'}
 HLSL_SPECS += [('src/features/vkframe', k, 'vulkan1.2', 'vkframe_%s_spv' % k) for k in VKFRAME_FOG]
+# lane VKFAR2 P7: cellpost.cpp's post passes in the tone pass, the script's `pfx <name> <dir/file> <profile> "<defines>"` lines
+VKFRAME_PFX = {
+	'p7_res': ('post/post7_resolve', 'cs_6_0', ''), 'p7_dep': ('post/post7_resolve', 'cs_6_0', '-DPOST7_DEPTH'),
+	'p7_copy_ps': ('post/post7_copy_ps', 'ps_6_0', ''), 'p7_dof_down': ('post/dof_down', 'cs_6_0', ''),
+	'p7_dof_blur': ('post/dof_blur', 'cs_6_0', ''), 'p7_dof_comp': ('post/dof_comp', 'cs_6_0', ''),
+	'p7_lens_comp': ('post/dof_comp', 'cs_6_0', '-DDOF_LENS'), 'p7_lens_prep': ('post/doflens_prep', 'cs_6_0', ''),
+	'p7_lens_tile': ('post/doflens_tile', 'cs_6_0', ''), 'p7_lens_gather': ('post/doflens_gather', 'cs_6_0', ''),
+	'p7_mblur': ('post/mblur', 'cs_6_0', ''), 'p7_dofmblur': ('post/mblur', 'cs_6_0', '-DMBLUR_FUSE'),
+	'p7_lensmblur': ('post/mblur', 'cs_6_0', '-DMBLUR_FUSE -DDOF_LENS'), 'p7_mv': ('post/taa_mv', 'cs_6_0', '-DTAA_MV_RG16'),
+	'p7_ob_vec': ('post/objblur_vec', 'cs_6_0', ''), 'p7_ob_tile': ('post/objblur_tile', 'cs_6_0', ''),
+	'p7_ob': ('post/objblur', 'cs_6_0', '')}
+HLSL_SPECS += [('src/features/vkframe', k, 'vulkan1.2', 'vkframe_%s_spv' % k) for k in VKFRAME_PFX]
 DEFAULT_G = 'E:/Tools/RenderDoc/RenderDoc_1.45_64/plugins/spirv/glslangValidator.exe'
 DEFAULT_DXC = 'E:/Tools/dxc/bin/x64/dxc.exe'
 
@@ -227,6 +239,11 @@ def script_ok(tree):
 	glines = dict(re.findall(r'^fog ([a-z0-9_]+) "([^"]*)"$', vf, re.M))
 	if glines != VKFRAME_FOG:
 		bad.append('src/features/vkframe/vkframe_spirv.sh: its fog lines (%s) are not this checker\'s air integrate kernels' % ' '.join(sorted(glines)))
+	if '\t"$DXC" -spirv -fspv-target-env=vulkan1.2 -T $3 -E main $4 -Fo "$1.spv" ' not in vf:
+		bad.append('src/features/vkframe/vkframe_spirv.sh: its pfx() compile line changed')
+	plines = {a: (b, c, e) for a, b, c, e in re.findall(r'^pfx ([a-z0-9_]+) ([A-Za-z0-9_/+-]+) ([cvp]s_6_0) "([^"]*)"$', vf, re.M)}
+	if plines != VKFRAME_PFX:
+		bad.append('src/features/vkframe/vkframe_spirv.sh: its pfx lines (%s) are not this checker\'s P7 post passes' % ' '.join(sorted(plines)))
 	return bad
 
 
@@ -371,6 +388,10 @@ def main(argv):
 				src = os.path.join(tree, 'res/shaders/hlsl', VKFRAME_FXF[k][0] + '.hlsl')
 				hdefs = []
 				m = re.match(r'([vp]s_6_0)', VKFRAME_FXF[k][1])
+			elif k in VKFRAME_PFX:  # the profile and defines are the table's (one source, several kernels)
+				src = os.path.join(tree, 'res/shaders/hlsl', VKFRAME_PFX[k][0] + '.hlsl')
+				hdefs = VKFRAME_PFX[k][2].split()
+				m = re.match(r'([cvp]s_6_0)', VKFRAME_PFX[k][1])
 			else:
 				m = re.search(r'hlsl profile: ([cvp]s_6_[0-9])', open(src, encoding='utf-8', errors='replace').read())
 			if k in VKFRAME_FXV or k in VKFRAME_FXC or k in VKFRAME_FXW or k in VKFRAME_FXL or k in VKFRAME_FXB:

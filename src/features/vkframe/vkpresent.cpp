@@ -1604,9 +1604,10 @@ struct ToneBloomState
 	int measW = 0, measH = 0;
 };
 /* the deferred crossing's GL names: the frame, its depth, the view slot, the measure, the fog bloom and the measure's
- * quarter (7), lane VKFAR2 P9's flare depth twin and up to kFlareTexMax sprite twins (vkflare.inc) */
+ * quarter (7), lane VKFAR2 P9's flare depth twin and up to kFlareTexMax sprite twins (vkflare.inc), P7's velocity and mask
+ * twins (vkpost7.inc) */
 constexpr int kFlareTexMax = 16;
-constexpr int kToneDefMax = 8 + kFlareTexMax;
+constexpr int kToneDefMax = 10 + kFlareTexMax;
 struct Tone
 {
 	void * glCtx = nullptr;
@@ -2701,6 +2702,13 @@ int flareRedTest = 0;
 void flToneReset();
 void flRecordPre( VkCommandBuffer cmd );
 bool flRecordIn( VkCommandBuffer cmd );
+/* lane VKFAR2 P7: cellpost.cpp's post passes queued into a deferred tone pass (vkpost7.inc), recorded before the flare (GL's
+ * order: the post passes, then the flare, then the TAA). Harness only (toneview.cpp's P7 reds, must FAIL): 1 = the resolve
+ * takes sample 0, 2 = the DoF blur skipped, 3 = the lens gather skipped, 4 = the vectors zero, 5 = the object blur's tile
+ * passes skipped, 6 = the fused pass replaced by the plain blur */
+int postRedTest = 0;
+void p7ToneReset();
+bool p7Record( VkCommandBuffer cmd, const VkRenderPassBeginInfo & rbi );
 
 // the worker: record the LUT's copy (when new) and the pass into this frame's view slot (toneWork submits it)
 bool toneRecord( std::string & why )
@@ -2933,6 +2941,7 @@ bool toneRecord( std::string & why )
 		if ( T.splitSky )
 			draw( 4, 3, 1, 1 );
 	}
+	p7Record( T.cmd, rbi );  // lane VKFAR2 P7: cellpost.cpp's DoF / motion blur / object blur (ends and begins the pass again)
 	if ( flareRedTest != 1 )
 		flRecordIn( T.cmd );  // lane VKFAR2 P9: celllensflare.cpp's sprites over the toned view, before the TAA
 	v.vkCmdEndRenderPass( T.cmd );
@@ -4273,6 +4282,7 @@ bool toneRun( const ToneRun & t, std::string & why )
 	}
 	// GL's frame (and the view's depth GL blitted) done -> the worker's pass -> GL's later passes on the view
 	flToneReset();  // lane VKFAR2 P9: no sprites until celllensflare.cpp queues this frame's
+	p7ToneReset();  // lane VKFAR2 P7: no post passes until cellpost.cpp queues this frame's
 	T.defTex[0] = T.colorTex;
 	T.defTex[1] = T.dsTex;
 	T.defTex[2] = V.slot[V.cur].colorTex;
@@ -8414,6 +8424,7 @@ ObjStat takeObjStat()
 #include "features/vkframe/vkskybody.inc"  // lane VKFAR2 G2: the stars and the moon globe in the sky's pass
 #include "features/vkframe/vkfog.inc"  // lane VKFAR2: the air's integrate (the froxel volume) on the view
 #include "features/vkframe/vkflare.inc"  // lane VKFAR2 P9: the lens-flare sprites in the deferred tone pass
+#include "features/vkframe/vkpost7.inc"  // lane VKFAR2 P7: DoF, motion blur and object blur in the deferred tone pass
 
 namespace
 {

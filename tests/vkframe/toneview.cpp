@@ -1734,6 +1734,514 @@ int main( int argc, char ** argv )
 		}
 		glDeleteTextures( 1, &dTex );
 	}
+	/* lane VKFAR2 P7: cellpost.cpp's depth of field (the game's passes, the thin lens), motion blur (alone, fused, two-pass)
+	 * and object blur recorded in the deferred tone pass (vkpost7.inc, tonePostQueue) against GL's own chain (the tree's
+	 * game_* / cell_objblur* programs) drawn on the view after the tone pass crossed alone, as postApply draws it (the
+	 * tone-mapped frame: no linear copy back). Both from the same PostRun. Reds (postRedTest) must FAIL: 1 the colour's
+	 * sample 0 for the samples' mean, 2 the game's blur skipped, 3 the lens gather cleared, 4 the vectors cleared, 5 the
+	 * object tiles cleared, 6 the fused composite dropped. */
+	{
+		using Uni4fv = void( WINAPI * )( GLint, GLsizei, const GLfloat * );
+		using UniMat = void( WINAPI * )( GLint, GLsizei, GLboolean, const GLfloat * );
+		using DrawBufs = void( WINAPI * )( GLsizei, const GLenum * );
+		using ReadBuf = void( WINAPI * )( GLenum );
+		const auto uni4fv = reinterpret_cast<Uni4fv>( glProc( "glUniform4fv" ) );
+		const auto uniMat = reinterpret_cast<UniMat>( glProc( "glUniformMatrix4fv" ) );
+		const auto drawBufs = reinterpret_cast<DrawBufs>( glProc( "glDrawBuffers" ) );
+		const auto readBuf = reinterpret_cast<ReadBuf>( glProc( "glReadBuffer" ) );
+		constexpr GLenum kTvRg16f = 0x822F, kTvR16f = 0x822D, kTvRg = 0x8227, kTvCol1 = 0x8CE1;
+		constexpr int uCur = 12, uBlur = 13, uDepth = 14, uMv = 15, uNear = 11;	// cellpost.cpp's units
+		auto prog = [&]( const char * n ) { return program( aoVs, readFile( dir + "/" + n + ".frag.glsl" ), n ); };
+		const GLuint qDown = prog( "game_dof_down" ), qBlur = prog( "game_dof_blur" ), qDof = prog( "game_dof" );
+		const GLuint qLPrep = prog( "game_doflens_prep" ), qLTile = prog( "game_doflens_tile" ), qLGather = prog( "game_doflens_gather" );
+		const GLuint qLens = prog( "game_doflens" ), qMv = prog( "game_taa_mv" ), qMb = prog( "game_mblur" );
+		const GLuint qDM = prog( "game_dofmblur" ), qDLM = prog( "game_doflensmblur" ), qOVec = prog( "cell_objblur_vec" );
+		const GLuint qOTile = prog( "cell_objblur_tile" ), qOb = prog( "cell_objblur" ), qCopy = prog( "game_taa_copy" );
+		bool made = uni4fv && uniMat && drawBufs && readBuf && qDown && qBlur && qDof && qLPrep && qLTile && qLGather && qLens && qMv
+			&& qMb && qDM && qDLM && qOVec && qOTile && qOb && qCopy;
+		// cellpost.cpp's targets
+		const int qw[2] = { ( W + 3 ) / 4, std::max( W >> 2, 1 ) }, qh[2] = { ( H + 3 ) / 4, std::max( H >> 2, 1 ) };
+		const int ltw = ( qw[0] + 7 ) / 8, lth = ( qh[0] + 7 ) / 8, otw = ( W + 15 ) / 16, oth = ( H + 15 ) / 16;
+		const GLuint gCur = tex2d( W, H, kRgba16f, GL_RGBA, GL_FLOAT, nullptr, true );
+		const GLuint gDepth = tex2d( W, H, kD24s8, 0x84F9, 0x84FA, nullptr, false );	// DEPTH_STENCIL, UNSIGNED_INT_24_8
+		const GLuint gBlur[2] = { tex2d( qw[0], qh[0], kRgba16f, GL_RGBA, GL_FLOAT, nullptr, false ),
+			tex2d( qw[1], qh[1], kRgba16f, GL_RGBA, GL_FLOAT, nullptr, false ) };
+		const GLuint gMv = tex2d( W, H, kTvRg16f, kTvRg, GL_FLOAT, nullptr, true );
+		const GLuint gOut = tex2d( W, H, kRgba16f, GL_RGBA, GL_FLOAT, nullptr, true );
+		const GLuint gFar = tex2d( qw[0], qh[0], kRgba16f, GL_RGBA, GL_FLOAT, nullptr, true );
+		const GLuint gNear = tex2d( qw[0], qh[0], kRgba16f, GL_RGBA, GL_FLOAT, nullptr, true );
+		const GLuint gLt[2] = { tex2d( ltw, lth, kTvR16f, kRed, GL_FLOAT, nullptr, false ), tex2d( ltw, lth, kTvR16f, kRed, GL_FLOAT, nullptr, false ) };
+		const GLuint gObVec = tex2d( W, H, kTvRg16f, kTvRg, GL_FLOAT, nullptr, false );
+		const GLuint gObT[2] = { tex2d( otw, oth, kTvRg16f, kTvRg, GL_FLOAT, nullptr, false ),
+			tex2d( otw, oth, kTvRg16f, kTvRg, GL_FLOAT, nullptr, false ) };
+		// the object inputs (TAA's velocity RG16F and mask RGBA8, the frame's size): a fast mover (25 px at the shutter,
+		// longer than a tile), a slow one, the rest still; the mask's blue marks the movers
+		std::vector<float> vel( size_t( W ) * H * 2, 0.0f );
+		std::vector<std::uint8_t> mask( size_t( W ) * H * 4, 0 );
+		std::mt19937 orng( 83 );
+		for ( int y = 0; y < H; y++ )
+			for ( int x = 0; x < W; x++ ) {
+				const size_t i = size_t( y ) * W + x;
+				const bool fast = x >= W / 4 && x < W / 2 && y >= H / 3 && y < 2 * H / 3;
+				const bool slow = x >= 5 * W / 8 && x < 7 * W / 8 && y >= H / 8 && y < H / 3;
+				vel[i * 2] = fast ? -0.08f : slow ? 0.004f : 0.0f;
+				vel[i * 2 + 1] = fast ? 0.012f : slow ? -0.002f : 0.0f;
+				mask[i * 4] = std::uint8_t( orng() );
+				mask[i * 4 + 1] = std::uint8_t( orng() );
+				mask[i * 4 + 2] = fast || slow ? 255 : 0;
+				mask[i * 4 + 3] = 255;
+			}
+		const GLuint oVel = tex2d( W, H, kTvRg16f, kTvRg, GL_FLOAT, vel.data(), false );
+		const GLuint oMask = tex2d( W, H, kRgba8, GL_RGBA, GL_UNSIGNED_BYTE, mask.data(), false );
+		GLuint gIn = 0, gFbo = 0;
+		f.genFramebuffers( 1, &gIn );
+		f.genFramebuffers( 1, &gFbo );
+		f.bindFramebuffer( kFb, gIn );
+		f.framebufferTexture2D( kFb, kCol0, GL_TEXTURE_2D, gCur, 0 );
+		f.framebufferTexture2D( kFb, kDsAtt, GL_TEXTURE_2D, gDepth, 0 );
+		made = made && f.checkFramebufferStatus( kFb ) == kComplete && glGetError() == GL_NO_ERROR;
+		static const float kBw[7][15] = {	// cellpost.cpp kBlurWeights
+			{ 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.106506713f, 0.786985755f, 0.106506713f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f },
+			{ 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0544885658f, 0.244201481f, 0.402619928f, 0.244201481f, 0.0544885658f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f },
+			{ 0.0f, 0.0f, 0.0f, 0.0f, 0.0366327688f, 0.111280687f, 0.216745228f, 0.270682156f, 0.216745228f, 0.111280687f, 0.0366327688f, 0.0f, 0.0f, 0.0f, 0.0f },
+			{ 0.0f, 0.0f, 0.0f, 0.0276304893f, 0.0662821382f, 0.1238316f, 0.180173829f, 0.204163671f, 0.180173829f, 0.1238316f, 0.0662821382f, 0.0276304893f, 0.0f, 0.0f, 0.0f },
+			{ 0.0f, 0.0f, 0.0221905038f, 0.0455889553f, 0.0798113719f, 0.119064637f, 0.151360765f, 0.163967222f, 0.151360765f, 0.119064637f, 0.0798113719f, 0.0455889553f, 0.0221905038f, 0.0f, 0.0f },
+			{ 0.0f, 0.018543981f, 0.0341669098f, 0.0563317239f, 0.0831085816f, 0.109719239f, 0.129617959f, 0.137022808f, 0.129617959f, 0.109719239f, 0.0831085816f, 0.0563317239f, 0.0341669098f, 0.018543981f, 0.0f },
+			{ 0.0159283616f, 0.0270778015f, 0.0424232148f, 0.0612547807f, 0.0815124661f, 0.0999668092f, 0.112988554f, 0.117695801f, 0.112988554f, 0.0999668092f, 0.0815124661f, 0.0612547807f, 0.0424232148f, 0.0270778015f, 0.0159283616f },
+		};
+		const float zN = 1.0f, zF = 1000.0f;	// the frame's depth 0.2..0.9 reads 1.25..9.9 units, 1.0 the sky
+
+		struct PCase
+		{
+			const char * name;
+			bool dof, lens, mb, ob, fuse;
+			int radius;
+			bool farOnly, tile;
+		};
+		const PCase cases[11] = { { "dof r7", true, false, false, false, true, 7, false, false },
+			{ "dof r3 far-only", true, false, false, false, true, 3, true, false },
+			{ "motion blur alone", false, false, true, false, true, 3, false, false },
+			{ "dof + motion blur fused", true, false, true, false, true, 5, false, false },
+			{ "dof + motion blur two-pass", true, false, true, false, false, 5, false, false },
+			{ "lens near tile", false, true, false, false, true, 7, false, true },
+			{ "lens far-only", false, true, false, false, true, 4, true, false },
+			{ "lens + motion blur fused", false, true, true, false, true, 6, false, true },
+			{ "object blur alone", false, false, false, true, true, 3, false, false },
+			{ "motion blur + object blur", false, false, true, true, true, 3, false, false },
+			{ "dof + object blur", true, false, false, true, true, 4, false, false } };
+		// cellpost.cpp postApply's PostRun for a case (its record, lens, vectors and object constants)
+		auto runOf = [&]( const PCase & c ) {
+			WwVkPresent::PostRun p;
+			p.w = W;
+			p.h = H;
+			p.vp[2] = W;
+			p.vp[3] = H;
+			p.dof = c.dof || c.lens;
+			p.lens = c.lens;
+			p.mb = c.mb;
+			p.ob = c.ob;
+			p.fuse = c.fuse;
+			p.radius = c.radius;
+			p.row = c.radius - 1;
+			const float strength = 0.6f, d = 3.0f, rg = 4.0f;
+			const unsigned flags = ( unsigned( c.radius ) << 3 ) | ( c.farOnly ? 2u : 0u ), mode = flags & 3u;
+			const float dc[4][4] = { { d - ( d - rg ), ( rg + d ) - d, d, 10000.0f },
+				{ strength, mode > 1u ? 0.0f : 1.0f, ( flags & 1u ) ? 0.0f : 1.0f, ( flags & 4u ) ? 1.0f : 0.0f },
+				{ -1e8f, zN, zF - zN, zF * zN }, { 1.0f, 1.0f, 1.0f, 1.0f } };
+			std::memcpy( p.dc, dc, sizeof( dc ) );
+			p.farOnly = mode == 2u ? 1 : 0;
+			if ( c.lens ) {
+				const float fu = 24.0f / 14.2875f;	// f 24 mm (P[5] 2) in units
+				const float s1 = std::max( d, fu * 1.01f + 0.001f ), want = strength * 8.0f * float( c.radius );
+				const float aPx = want * ( s1 + rg ) * ( s1 - fu ) / ( fu * rg );
+				const float lz[4] = { zN, zF - zN, zF * zN, dc[1][3] }, lp[4] = { s1, aPx, fu, 0.0f };
+				const float lq[4] = { 64.0f, c.farOnly ? 0.0f : 1.0f, dc[1][2], c.tile ? 1.0f : 0.0f };
+				std::memcpy( p.lz, lz, sizeof( lz ) );
+				std::memcpy( p.lensP, lp, sizeof( lp ) );
+				std::memcpy( p.lensQ, lq, sizeof( lq ) );
+			}
+			const float rp[16] = { 1.01f, 0, 0, 0, 0, 0.995f, 0, 0, 0, 0, 1, 0, 0.03f, -0.02f, 0, 1 };
+			std::memcpy( p.reproj, rp, sizeof( rp ) );
+			p.jitter[0] = 0.0007f;
+			p.jitter[1] = -0.0011f;
+			const float mc[2][4] = { { 50.0f * 0.001f * 60.0f, 0.01f, 70.0f, 0.0f },
+				{ 1.0f, 1.0f, float( W - 1 ) / float( W ), float( H - 1 ) / float( H ) } };
+			std::memcpy( p.mc, mc, sizeof( mc ) );
+			p.obVel = oVel;
+			p.obMask = oMask;
+			const float op[16] = { 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, -0.01f, 0.006f, 0, 1 };
+			std::memcpy( p.obReproj, op, sizeof( op ) );
+			p.obJitter[0] = 0.0004f;
+			p.obJitter[1] = 0.0009f;
+			p.shutter = 0.5f;
+			p.maxPx = 32.0f;
+			p.tile = 16;
+			p.samples = 15;
+			p.zNear = zN;
+			p.zFar = zF;
+			p.seed = 0.375f;
+			p.gp = glProc;
+			return p;
+		};
+		static const float pQuad[12] = { -1, -1, 0, 1, -1, 0, -1, 1, 0, 1, 1, 0 };
+		static const std::uint16_t pIdx[6] = { 0, 1, 2, 2, 1, 3 };
+		// postApply's GL chain on the view (vfb), the !linear path
+		auto glPost = [&]( const WwVkPresent::PostRun & p, GLuint vfb ) -> bool {
+			const bool fuse = p.dof && p.mb && p.fuse;
+			f.bindFramebuffer( kRead, vfb );
+			f.bindFramebuffer( kDraw, gIn );
+			glDisable( GL_SCISSOR_TEST );
+			f.blitFramebuffer( 0, 0, W, H, 0, 0, W, H, GL_COLOR_BUFFER_BIT, GL_NEAREST );
+			f.blitFramebuffer( 0, 0, W, H, 0, 0, W, H, GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT, GL_NEAREST );
+			glDisable( GL_DEPTH_TEST );
+			glDepthMask( GL_FALSE );
+			glDisable( GL_BLEND );
+			glDisable( GL_CULL_FACE );
+			glDisable( GL_STENCIL_TEST );
+			glColorMask( GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE );
+			glViewport( 0, 0, W, H );
+			f.enableVertexAttribArray( 0 );
+			f.vertexAttribPointer( 0, 3, GL_FLOAT, GL_FALSE, 0, pQuad );
+			auto draw = [&]() { glDrawElements( GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, pIdx ); };
+			auto target = [&]( GLuint t ) {
+				f.bindFramebuffer( kFb, gFbo );
+				f.framebufferTexture2D( kFb, kCol0, GL_TEXTURE_2D, t, 0 );
+				drawBufs( 1, &kCol0 );
+			};
+			auto bind = [&]( int u, GLuint t ) { bindUnit( u, GL_TEXTURE_2D, t ); };
+			auto filt = [&]( GLuint t, GLint fl ) {	// on the active unit, as cellpost.cpp's filter()
+				glBindTexture( GL_TEXTURE_2D, t );
+				glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, fl );
+				glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, fl );
+			};
+			auto use = [&]( GLuint q ) { f.useProgram( q ); return q; };
+			auto u4v = [&]( GLuint q, const char * n, const float * v, int k ) { uni4fv( f.getUniformLocation( q, n ), k, v ); };
+			auto outToCur = [&]() {	// the motion blur reads the depth of field's picture
+				f.bindFramebuffer( kRead, gFbo );
+				f.framebufferTexture2D( kRead, kCol0, GL_TEXTURE_2D, gOut, 0 );
+				readBuf( kCol0 );
+				f.bindFramebuffer( kDraw, gIn );
+				drawBufs( 1, &kCol0 );
+				f.blitFramebuffer( 0, 0, W, H, 0, 0, W, H, GL_COLOR_BUFFER_BIT, GL_NEAREST );
+			};
+			bind( uNear, 0 );
+			filt( gBlur[0], GL_LINEAR );	// the app's steady state (both routes leave it linear)
+			if ( p.lens ) {
+				target( gBlur[0] );
+				glViewport( 0, 0, qw[0], qh[0] );
+				GLuint q = use( qLPrep );
+				bind( uCur, gCur );
+				bind( uDepth, gDepth );
+				u1i( q, "t0", uCur );
+				u1i( q, "t1", uDepth );
+				u4f( q, "lz", p.lz );
+				u4f( q, "lensP", p.lensP );
+				u4f( q, "lensQ", p.lensQ );
+				draw();
+				const bool nearTile = p.lensQ[1] != 0.0f && p.lensQ[3] > 0.5f;
+				if ( nearTile ) {
+					glViewport( 0, 0, ltw, lth );
+					for ( int pass = 0; pass < 2; pass++ ) {
+						target( gLt[pass] );
+						q = use( qLTile );
+						bind( uNear, pass ? gLt[0] : gBlur[0] );
+						u1i( q, "t0", uNear );
+						u1i( q, "dilate", pass );
+						draw();
+					}
+					glViewport( 0, 0, qw[0], qh[0] );
+				}
+				f.bindFramebuffer( kFb, gFbo );
+				f.framebufferTexture2D( kFb, kCol0, GL_TEXTURE_2D, gFar, 0 );
+				f.framebufferTexture2D( kFb, kTvCol1, GL_TEXTURE_2D, gNear, 0 );
+				const GLenum two[2] = { kCol0, kTvCol1 };
+				drawBufs( 2, two );
+				bind( uBlur, gBlur[0] );
+				filt( gBlur[0], GL_LINEAR );
+				if ( nearTile )
+					bind( uNear, gLt[1] );
+				q = use( qLGather );
+				u1i( q, "t0", uBlur );
+				u1i( q, "t1", uNear );
+				u4f( q, "lensQ", p.lensQ );
+				draw();
+				f.framebufferTexture2D( kFb, kTvCol1, GL_TEXTURE_2D, 0, 0 );
+				glViewport( 0, 0, W, H );
+				if ( !fuse ) {
+					target( gOut );
+					q = use( qLens );
+					bind( uCur, gCur );
+					bind( uBlur, gFar );
+					bind( uDepth, gDepth );
+					bind( uNear, gNear );
+					u1i( q, "t0", uCur );
+					u1i( q, "t1", uBlur );
+					u1i( q, "t2", uDepth );
+					u1i( q, "lensNear", uNear );
+					u4f( q, "lz", p.lz );
+					u4f( q, "lensP", p.lensP );
+					u4f( q, "lensQ", p.lensQ );
+					draw();
+					outToCur();
+				}
+			} else if ( p.dof ) {
+				target( gBlur[0] );
+				glViewport( 0, 0, qw[0], qh[0] );
+				GLuint q = use( qDown );
+				bind( uCur, gCur );
+				u1i( q, "t0", uCur );
+				const float c4[4] = { 1.0f, 1.0f, 2.0f / float( W ), 2.0f / float( H ) }, c7[4] = { 1.0f / float( W ), 1.0f / float( H ), 0, 0 };
+				u4f( q, "c4", c4 );
+				u4f( q, "c7", c7 );
+				const float taps4[16] = { -1, -1, 0.25f, 0, 1, -1, 0.25f, 0, -1, 1, 0.25f, 0, 1, 1, 0.25f, 0 };
+				u4v( q, "taps", taps4, 4 );
+				u2f( q, "dstSize", float( qw[0] ), float( qh[0] ) );
+				draw();
+				const int taps = 2 * p.radius + 1;
+				for ( int pass = 0; pass < 2; pass++ ) {
+					const GLuint src = gBlur[pass], dst = gBlur[1 - pass];
+					const int sw = qw[pass], sh = qh[pass], dw = qw[1 - pass], dh = qh[1 - pass];
+					target( dst );
+					glViewport( 0, 0, dw, dh );
+					q = use( qBlur );
+					bind( uBlur, src );
+					filt( src, GL_NEAREST );
+					float o[60] = {};
+					for ( int i = 0; i < taps; i++ ) {
+						const int k = 7 - p.radius + i;
+						o[i * 4] = pass == 1 ? float( k - 7 ) / float( sw ) : 0.0f;
+						o[i * 4 + 1] = pass == 0 ? float( k - 7 ) / float( sh ) : 0.0f;
+						o[i * 4 + 2] = kBw[p.row][k];
+					}
+					u1i( q, "t0", uBlur );
+					u4v( q, "o", o, taps );
+					u1i( q, "taps", taps );
+					u2f( q, "dstSize", float( dw ), float( dh ) );
+					draw();
+				}
+				glViewport( 0, 0, W, H );
+				filt( gBlur[0], GL_LINEAR );
+				if ( !fuse ) {
+					target( gOut );
+					q = use( qDof );
+					bind( uCur, gCur );
+					bind( uBlur, gBlur[0] );
+					bind( uDepth, gDepth );
+					u1i( q, "t0", uCur );
+					u1i( q, "t1", uBlur );
+					u1i( q, "t2", uDepth );
+					u4f( q, "c0", p.dc[0] );
+					u4f( q, "c1", p.dc[1] );
+					u4f( q, "c2", p.dc[2] );
+					u4f( q, "c3", p.dc[3] );
+					u1i( q, "farOnly", p.farOnly );
+					u1i( q, "dofRed", p.dofRed );
+					draw();
+					outToCur();
+				}
+			}
+			if ( p.mb ) {
+				target( gMv );
+				GLuint q = use( qMv );
+				bind( uDepth, gDepth );
+				u1i( q, "depthTex", uDepth );
+				uniMat( f.getUniformLocation( q, "reproj" ), 1, GL_FALSE, p.reproj );
+				u2f( q, "jitterNdc", p.jitter[0], p.jitter[1] );
+				u2f( q, "invSize", 1.0f / float( W ), 1.0f / float( H ) );
+				draw();
+				target( gOut );
+				if ( fuse ) {
+					q = use( p.lens ? qDLM : qDM );
+					bind( uCur, gCur );
+					bind( uMv, gMv );
+					bind( uBlur, p.lens ? gFar : gBlur[0] );
+					bind( uDepth, gDepth );
+					if ( p.lens ) {
+						bind( uNear, gNear );
+						u1i( q, "lensNear", uNear );
+						u4f( q, "lz", p.lz );
+						u4f( q, "lensP", p.lensP );
+						u4f( q, "lensQ", p.lensQ );
+					}
+					u1i( q, "t0", uCur );
+					u1i( q, "t1", uMv );
+					u1i( q, "t2", uBlur );
+					u1i( q, "t3", uDepth );
+					u4f( q, "dc0", p.dc[0] );
+					u4f( q, "dc1", p.dc[1] );
+					u4f( q, "dc2", p.dc[2] );
+					u4f( q, "dc3", p.dc[3] );
+					u4f( q, "mc0", p.mc[0] );
+					u4f( q, "mc1", p.mc[1] );
+					u1i( q, "farOnly", p.farOnly );
+					u1i( q, "dofRed", p.dofRed );
+				} else {
+					q = use( qMb );
+					bind( uCur, gCur );
+					bind( uMv, gMv );
+					u1i( q, "t0", uCur );
+					u1i( q, "t1", uMv );
+					u4f( q, "c0", p.mc[0] );
+					u4f( q, "c1", p.mc[1] );
+				}
+				draw();
+			}
+			GLuint picture = p.mb ? gOut : gCur;
+			if ( p.ob ) {
+				const GLuint dst = p.mb ? gCur : gOut;
+				target( gObVec );
+				GLuint q = use( qOVec );
+				bind( uMv, p.obVel );
+				bind( uBlur, p.obMask );
+				bind( uDepth, gDepth );
+				u1i( q, "velTex", uMv );
+				u1i( q, "maskTex", uBlur );
+				u1i( q, "depthTex", uDepth );
+				uniMat( f.getUniformLocation( q, "reproj" ), 1, GL_FALSE, p.obReproj );
+				u2f( q, "jitterNdc", p.obJitter[0], p.obJitter[1] );
+				u2f( q, "invSize", 1.0f / float( W ), 1.0f / float( H ) );
+				u1f( q, "shutter", p.shutter );
+				u1f( q, "maxPx", p.maxPx );
+				u1i( q, "objRed", p.objRed );
+				draw();
+				glViewport( 0, 0, otw, oth );
+				for ( int mode = 0; mode < 2; mode++ ) {
+					target( gObT[mode] );
+					q = use( qOTile );
+					bind( uMv, mode ? gObT[0] : gObVec );
+					u1i( q, "srcTex", uMv );
+					u1i( q, "tile", p.tile );
+					u1i( q, "tileMode", mode );
+					draw();
+				}
+				glViewport( 0, 0, W, H );
+				target( dst );
+				q = use( qOb );
+				bind( uCur, picture );
+				bind( uBlur, gObVec );
+				bind( uMv, gObT[1] );
+				bind( uDepth, gDepth );
+				u1i( q, "colTex", uCur );
+				u1i( q, "blurTex", uBlur );
+				u1i( q, "neighTex", uMv );
+				u1i( q, "depthTex", uDepth );
+				u1i( q, "tile", p.tile );
+				u1i( q, "samples", p.samples );
+				u1f( q, "zNear", p.zNear );
+				u1f( q, "zFar", p.zFar );
+				u1f( q, "noiseSeed", p.seed );
+				draw();
+				picture = dst;
+			}
+			f.bindFramebuffer( kDraw, vfb );
+			glViewport( p.vp[0], p.vp[1], p.vp[2], p.vp[3] );
+			const GLuint q = use( qCopy );
+			bind( uCur, picture );
+			u1i( q, "srcTex", uCur );
+			draw();
+			f.disableVertexAttribArray( 0 );
+			for ( int u : { uNear, uCur, uBlur, uDepth, uMv } )
+				bind( u, 0 );
+			f.activeTexture( kTex0 );
+			glDepthMask( GL_TRUE );
+			return glGetError() == GL_NO_ERROR;
+		};
+		// one frame: the tone pass deferred; the passes queued into it (Vulkan) or drawn by GL after it crossed alone; p null:
+		// no post pass (the floor's frame)
+		auto route = [&]( const WwVkPresent::PostRun * p, bool onVk, int red, std::vector<std::uint8_t> & out ) -> bool {
+			if ( !WwVkPresent::viewBegin( W, H, S, glProc, why ) ) {
+				std::printf( "TONEVIEW POST: the view: %s\n", why.c_str() );
+				return false;
+			}
+			const GLuint vfb = WwVkPresent::viewFbo();
+			Tone & T = tone();
+			T.mergeRed = false;
+			T.mergeHint = true;
+			T.backoff = 0;
+			const WwVkPresent::ToneRun tr = toneOf( jobs[0], jobs[0].splitSky, vfb );
+			if ( !WwVkPresent::toneRun( tr, why ) || !T.deferred ) {
+				std::printf( "TONEVIEW POST: the tone pass was not deferred (%s)\n", why.c_str() );
+				return false;
+			}
+			if ( p && onVk ) {
+				postRedTest = red;
+				if ( !WwVkPresent::tonePostQueue( *p, why ) ) {
+					postRedTest = 0;
+					std::printf( "TONEVIEW POST: tonePostQueue refused: %s\n", why.c_str() );
+					return false;
+				}
+			}
+			const bool flushed = WwVkPresent::toneFlush( &why );
+			postRedTest = 0;
+			if ( !flushed ) {
+				std::printf( "TONEVIEW POST: toneFlush: %s\n", why.c_str() );
+				return false;
+			}
+			if ( p && !onVk && !glPost( *p, vfb ) ) {
+				std::printf( "TONEVIEW POST: GL's chain raised a GL error\n" );
+				return false;
+			}
+			View & V = view();
+			out = readSamples( V.slot[V.cur].colorTex );
+			if ( !WwVkPresent::present( wnd, W, H, false, glProc, why ) ) {
+				std::printf( "TONEVIEW POST: present: %s\n", why.c_str() );
+				return false;
+			}
+			pump();
+			return glGetError() == GL_NO_ERROR;
+		};
+		if ( !made ) {
+			std::printf( "TONEVIEW POST FAIL (the GL programs, entry points or targets)\n" );
+			ok = false;
+		} else {
+			WwVkPresent::takeTonePostStat();
+			std::vector<std::uint8_t> bare;
+			const bool bareRan = route( nullptr, false, 0, bare );
+			int vkRuns = 0, twinCopies = 0;
+			std::vector<std::uint8_t> refs[11];
+			for ( int k = 0; k < 11; k++ ) {
+				const PCase & c = cases[k];
+				const WwVkPresent::PostRun p = runOf( c );
+				std::vector<std::uint8_t> vk;
+				const bool ran = bareRan && route( &p, false, 0, refs[k] ) && route( &p, true, 0, vk );
+				vkRuns++;
+				twinCopies += c.ob ? 2 : 0;
+				const Verdict v = compare( vk, refs[k] ), fl = compare( refs[k], bare );
+				const bool drew = fl.diff > size_t( 64 );	// the floor: the passes changed GL's frame
+				std::printf( "TONEVIEW POST %s %s (%zu of %zu bytes differ, max %d; the passes changed %zu bytes of GL's frame)\n", c.name,
+					ran && drew ? v.word() : "FAIL", v.diff, v.total, v.maxd, fl.diff );
+				ok = ok && ran && drew && v.ok();
+			}
+			struct PRed
+			{
+				int red, onCase;
+				const char * what;
+			};
+			const PRed reds[6] = { { 1, 0, "the colour's sample 0 for the samples' mean" }, { 2, 0, "the game's blur skipped" },
+				{ 3, 5, "the lens gather cleared" }, { 4, 2, "the camera vectors cleared" }, { 5, 8, "the object tiles cleared" },
+				{ 6, 3, "the fused composite dropped" } };
+			for ( const PRed & rd : reds ) {
+				const WwVkPresent::PostRun p = runOf( cases[rd.onCase] );
+				std::vector<std::uint8_t> vk;
+				const bool ran = route( &p, true, rd.red, vk );
+				vkRuns++;
+				twinCopies += cases[rd.onCase].ob ? 2 : 0;
+				const Verdict v = compare( vk, refs[rd.onCase] );
+				const bool redFails = !ran || !v.ok();
+				std::printf( "TONEVIEW POST RED %d %s (%s on %s: %zu bytes differ, max %d; must FAIL)\n", rd.red, redFails ? "FAIL" : v.word(),
+					rd.what, cases[rd.onCase].name, v.diff, v.maxd );
+				ok = ok && redFails;
+			}
+			const WwVkPresent::FxStat fs = WwVkPresent::takeTonePostStat();
+			std::printf( "TONEVIEW POST stat: %d queued (want %d), %d refused (%s), %d twin copies (want %d), %d pipelines in %.1f ms, "
+				"drawing thread %.3f ms a queue (max %.3f)\n", fs.runs, vkRuns, fs.fails, fs.failWhy.c_str(), fs.copies, twinCopies,
+				fs.pipelines, fs.buildMs, fs.runs ? fs.cpuMs / fs.runs : 0.0, fs.maxMs );
+			ok = ok && fs.runs == vkRuns && fs.fails == 0 && fs.copies == twinCopies;
+		}
+		const GLuint dead[15] = { gCur, gDepth, gBlur[0], gBlur[1], gMv, gOut, gFar, gNear, gLt[0], gLt[1], gObVec, gObT[0], gObT[1],
+			oVel, oMask };
+		glDeleteTextures( 15, dead );
+	}
 	f.bindFramebuffer( kFb, 0 );
 	WwVkPresent::toneFrameDrop();
 	WwVkPresent::shutdown();

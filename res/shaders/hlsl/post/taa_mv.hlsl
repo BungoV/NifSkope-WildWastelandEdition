@@ -3,7 +3,12 @@
 // c[0..3] = reproj's GL columns, c[4] = (jitterNdc, invSize). Target rg32f. PFX_RED drops the jitter.
 // GL's own rounding of p.xy / p.w (a value near 1) shows in about a third of the vectors at 1 - 2 last bits of the NDC; no
 // order of the matrix product or the NDC sum matched it (8 tried), so the gate bounds the vectors at 2^-22 (rule ndc).
+// TAA_MV_RG16 (lane VKFAR2 P7): the post passes' vectors, cellpost.cpp's RG16F target
+#ifdef TAA_MV_RG16
+#define PFX_OUT0_FORMAT "rg16f"
+#else
 #define PFX_OUT0_FORMAT "rg32f"
+#endif
 #define PFX_OUT0_TYPE float2
 #include "PostFxBindingsVk.hlsli"
 

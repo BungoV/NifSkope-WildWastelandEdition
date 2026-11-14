@@ -24,7 +24,12 @@ for name, rel in (('cell_hdr.vert.glsl', ('res', 'shaders', 'cell_hdr.vert')),
                   ('cell_is_measure_q.frag.glsl', ('res', 'shaders', 'features', 'exposure', 'cell_is_measure_q.frag')),
                   # lane VKFAR2 P9: the lens-flare sprites (the FLARE arm's GL reference)
                   ('cell_lensflare.vert.glsl', POST + ('cell_lensflare.vert',)),
-                  ('cell_lensflare.frag.glsl', POST + ('cell_lensflare.frag',))):
+                  ('cell_lensflare.frag.glsl', POST + ('cell_lensflare.frag',))) + tuple(
+                  # lane VKFAR2 P7: cellpost.cpp's passes (the POST arm's GL reference)
+                  (n + '.frag.glsl', POST + (n + '.frag',)) for n in (
+                      'game_dof_down', 'game_dof_blur', 'game_dof', 'game_doflens_prep', 'game_doflens_tile',
+                      'game_doflens_gather', 'game_doflens', 'game_taa_mv', 'game_mblur', 'game_dofmblur',
+                      'game_doflensmblur', 'cell_objblur_vec', 'cell_objblur_tile', 'cell_objblur', 'game_taa_copy')):
     src = S.expand(os.path.join(TREE, *rel))
     with open(os.path.join(out, name), 'w', newline='\n', encoding='latin-1') as f:
         f.write(src)

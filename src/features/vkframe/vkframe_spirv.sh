@@ -160,4 +160,29 @@ fog() {
 fog fog_integ_cs ""
 fog fog_integ32_cs "-DVOLAIR_INTEG_F32"
 ls -la fog_integ_cs.spv.h fog_integ32_cs.spv.h
+# lane VKFAR2 P7: cellpost.cpp's depth of field, motion blur and object blur in the tone pass (vkpost7.inc): the kernels as
+# they stand, a few twice under their defines (the 4th word, unquoted into dxc)
+pfx() {
+	"$DXC" -spirv -fspv-target-env=vulkan1.2 -T $3 -E main $4 -Fo "$1.spv" "$(cygpath -m "$ROOT/res/shaders/hlsl/$2.hlsl" 2>/dev/null || echo "$ROOT/res/shaders/hlsl/$2.hlsl")"
+	python -I "$ROOT/tools/spv_header.py" "$1.spv" "vkframe_$1_spv" "$1.spv.h" < /dev/null
+	rm -f "$1.spv"
+}
+pfx p7_res post/post7_resolve cs_6_0 ""
+pfx p7_dep post/post7_resolve cs_6_0 "-DPOST7_DEPTH"
+pfx p7_copy_ps post/post7_copy_ps ps_6_0 ""
+pfx p7_dof_down post/dof_down cs_6_0 ""
+pfx p7_dof_blur post/dof_blur cs_6_0 ""
+pfx p7_dof_comp post/dof_comp cs_6_0 ""
+pfx p7_lens_comp post/dof_comp cs_6_0 "-DDOF_LENS"
+pfx p7_lens_prep post/doflens_prep cs_6_0 ""
+pfx p7_lens_tile post/doflens_tile cs_6_0 ""
+pfx p7_lens_gather post/doflens_gather cs_6_0 ""
+pfx p7_mblur post/mblur cs_6_0 ""
+pfx p7_dofmblur post/mblur cs_6_0 "-DMBLUR_FUSE"
+pfx p7_lensmblur post/mblur cs_6_0 "-DMBLUR_FUSE -DDOF_LENS"
+pfx p7_mv post/taa_mv cs_6_0 "-DTAA_MV_RG16"
+pfx p7_ob_vec post/objblur_vec cs_6_0 ""
+pfx p7_ob_tile post/objblur_tile cs_6_0 ""
+pfx p7_ob post/objblur cs_6_0 ""
+ls -la p7_*.spv.h
 ls -la csm_view_vs.spv.h obj_depth_vs.spv.h sky_view_ps.spv.h bloom_down.spv.h bloom_hold.spv.h bloom_up.spv.h bloom_src.spv.h bloom_comb.spv.h bloom_back.spv.h tonemap.spv.h measure_q.spv.h tone_view_vs.spv.h tone_view_ps.spv.h taa_view_mv_cs.spv.h taa_view_resolve_cs.spv.h taa_view_rcas_ps.spv.h

@@ -691,6 +691,36 @@ bool toneFlareQueue( const FlareRun & f, std::string & why );
 void toneFlareOnGl( const char * why );
 FxStat takeToneFlareStat();
 
+/* Lane VKFAR2 P7: cellpost.cpp's depth of field (the game's or the thin lens), motion blur (alone or fused) and object blur
+ * recorded in the DEFERRED tone pass before the flare (res/shaders/hlsl/post: dof_*, doflens_*, mblur, taa_mv, objblur_*,
+ * post7_*; vkpost7.inc). The view's samples and depth are copied and resolved as GL's blits keep them (post7_resolve.hlsl),
+ * the passes run as compute, the picture goes back into every sample (post7_copy_ps.hlsl). The object blur's velocity and
+ * mask are copied into shared twins. Only while tonePending() on the tone-mapped view (not linear), D24S8, RG16F vectors.
+ * GL current. false: why; nothing queued (the caller flushes and runs GL's passes). */
+struct PostRun
+{
+	int w = 0, h = 0;                 //!< the frame (the view's size)
+	int vp[4] = {};                   //!< GL's viewport: the copy back's
+	bool dof = false, lens = false, mb = false, ob = false, fuse = false;
+	int radius = 3, row = 2;          //!< the game's blur: taps 2 radius + 1, its weight row
+	float dc[4][4] = {};              //!< the composite's c0..c3
+	int farOnly = 0, dofRed = 0;
+	float lz[4] = {}, lensP[4] = {}, lensQ[4] = {};
+	float reproj[16] = {};            //!< the vectors' reprojection, GL's column order
+	float jitter[2] = {};
+	float mc[2][4] = {};              //!< the blur's mc0, mc1
+	bool noVelocity = false;          //!< WW_CELL_MBLUR_RED=novelocity: the vectors cleared
+	unsigned obVel = 0, obMask = 0;   //!< the inputs' velocity and mask (GL 2D textures, w x h)
+	float obReproj[16] = {}, obJitter[2] = {};
+	float shutter = 0.0f, maxPx = 0.0f;
+	int tile = 16, samples = 15, objRed = 0;
+	float zNear = 0.0f, zFar = 0.0f, seed = 0.0f;
+	GlProc gp = nullptr;              //!< the twins' formats
+};
+bool tonePostQueue( const PostRun & p, std::string & why );
+void tonePostOnGl( const char * why );
+FxStat takeTonePostStat();
+
 /* Lane VKOBJ1 (plan row G4, slice 1): the objects' opaque depth prepass (cellgpucull.cpp, lookdev_csmdepth_q.prog) on the
  * present device into a shared multisample depth target (sharedTarget type 0 with samples, GL_DEPTH_COMPONENT24 / 32F) that
  * GL's Hi-Z then reads. GL clears it; the two spans (back faces culled, then two-sided) run in one crossing (depth-only
