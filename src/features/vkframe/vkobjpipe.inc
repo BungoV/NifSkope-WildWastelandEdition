@@ -458,35 +458,49 @@ bool spvReflect( const std::uint32_t * w, std::size_t n, SpvModule & out, std::s
 			b.type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
 		else if ( x.op == 30 && v.storage == 2 && block.count( t ) ) {
 			b.type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-			// the members: scalar / vector / matrix, or an array of one (a nested struct is base 3: the mirror refuses it)
-			const std::vector<std::uint32_t> & mt = structMembers[t];
-			for ( std::uint32_t k = 0; k < mt.size(); k++ ) {
-				SpvMember m;
-				m.name = memberNames[t].count( k ) ? memberNames[t][k] : "%" + std::to_string( k );
-				m.offset = memberOffset[t].count( k ) ? memberOffset[t][k] : 0;
-				m.colStride = memberStride[t].count( k ) ? memberStride[t][k] : 0;
-				m.rowMajor = memberRowMajor[t].count( k ) != 0;
-				Ty e = ty( mt[k] );
-				if ( e.op == 28 ) {
-					m.count = constants.count( e.b ) ? constants[e.b] : 1;
-					m.arrayStride = arrayStride.count( mt[k] ) ? arrayStride[mt[k]] : 0;
-					e = ty( e.a );
+			// the members: scalar / vector / matrix, or an array of one. A nested struct (or an array of them, particles'
+			// Texture textures[10]) is walked into one member a field and element, named as GL names them
+			// ("textures[3].uvScale"); deeper than 4 levels stays base 3 and the mirror refuses it
+			auto walk = [&]( auto & self, std::uint32_t st, const std::string & pre, std::uint32_t at, int depth ) -> void {
+				const std::vector<std::uint32_t> mt = structMembers[st];
+				for ( std::uint32_t k = 0; k < mt.size(); k++ ) {
+					SpvMember m;
+					m.name = pre + ( memberNames[st].count( k ) ? memberNames[st][k] : "%" + std::to_string( k ) );
+					m.offset = at + ( memberOffset[st].count( k ) ? memberOffset[st][k] : 0 );
+					m.colStride = memberStride[st].count( k ) ? memberStride[st][k] : 0;
+					m.rowMajor = memberRowMajor[st].count( k ) != 0;
+					std::uint32_t tid = mt[k];
+					Ty e = ty( tid );
+					const bool arr = e.op == 28;
+					if ( arr ) {
+						m.count = constants.count( e.b ) ? constants[e.b] : 1;
+						m.arrayStride = arrayStride.count( tid ) ? arrayStride[tid] : 0;
+						tid = e.a;
+						e = ty( tid );
+					}
+					if ( e.op == 30 && depth < 4 ) {
+						for ( std::uint32_t el = 0; el < m.count; el++ )
+							self( self, tid, m.name + ( arr ? "[" + std::to_string( el ) + "]" : "" ) + ".", m.offset + el * m.arrayStride,
+								depth + 1 );
+						continue;
+					}
+					if ( e.op == 24 ) {
+						m.cols = e.b;
+						e = ty( e.a );
+					}
+					if ( e.op == 23 ) {
+						m.comps = e.b;
+						e = ty( e.a );
+					}
+					m.base = e.op == 22 ? 0 : e.op == 21 ? ( e.b ? 1 : 2 ) : 3;
+					// the member's extent: the last element's last component
+					const std::uint32_t one = m.cols > 1 ? ( m.rowMajor ? ( m.comps - 1 ) * m.colStride + m.cols * 4 : ( m.cols - 1 ) * m.colStride + m.comps * 4 )
+						: m.comps * 4;
+					b.bytes = std::max( b.bytes, m.offset + ( m.count - 1 ) * m.arrayStride + one );
+					b.members.push_back( m );
 				}
-				if ( e.op == 24 ) {
-					m.cols = e.b;
-					e = ty( e.a );
-				}
-				if ( e.op == 23 ) {
-					m.comps = e.b;
-					e = ty( e.a );
-				}
-				m.base = e.op == 22 ? 0 : e.op == 21 ? ( e.b ? 1 : 2 ) : 3;
-				// the member's extent: the last element's last component
-				const std::uint32_t one = m.cols > 1 ? ( m.rowMajor ? ( m.comps - 1 ) * m.colStride + m.cols * 4 : ( m.cols - 1 ) * m.colStride + m.comps * 4 )
-					: m.comps * 4;
-				b.bytes = std::max( b.bytes, m.offset + ( m.count - 1 ) * m.arrayStride + one );
-				b.members.push_back( m );
-			}
+			};
+			walk( walk, t, "", 0u, 0 );
 			b.bytes = ( b.bytes + 15u ) & ~15u;
 		} else {
 			why = nm + ": a descriptor type the reader does not take";
@@ -3371,7 +3385,7 @@ bool objBlDrawPrep( const ObjBlDraw & d, ObjBlDrawStat & st, std::string & why )
 			return why = "the draw's set 0 failed", false;
 		s.entry = entry;
 	}
-	// lane VKOBJ5: the record pass's set, its inputs and its records (n + 1: red `offset` reads one record on)
+	// lane VKOBJ5: the record pass's set, its inputs and its records (n + 1: red `offset` reads 16 bytes on)
 	VkDeviceSize recOff = 0;
 	if ( pfx ) {
 		if ( !s.cpool ) {
@@ -3400,10 +3414,12 @@ bool objBlDrawPrep( const ObjBlDraw & d, ObjBlDrawStat & st, std::string & why )
 		if ( d.pfxRed == 1 ) {
 			VkPhysicalDeviceProperties2 pp { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2 };
 			v.vkGetPhysicalDeviceProperties2( v.phys, &pp );
+			// one vec4 on, not one record on: a whole record on draws the same quads in the same order bar the first (the
+			// first gate run: 0 pixels moved in three of five cases)
 			const VkDeviceSize al = std::max<VkDeviceSize>( pp.properties.limits.minStorageBufferOffsetAlignment, 1 );
-			if ( 80 % al )
-				return why = "red offset: a record (80 bytes) is no storage offset step (" + std::to_string( al ) + ")", false;
-			recOff = 80;
+			if ( 16 % al )
+				return why = "red offset: 16 bytes is no storage offset step (" + std::to_string( al ) + ")", false;
+			recOff = 16;
 		}
 	}
 	s.pfx = pfx;

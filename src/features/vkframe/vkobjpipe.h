@@ -224,7 +224,7 @@ struct ObjBlDraw
 	int pipeRed = 0;                //!< gates only: objBlPipe's red
 	/*! lane VKOBJ5 (objPfxShade): a record pass before the draw. `cs` writes one record a primitive from `pfxN` inputs of
 	 * 48 bytes at `pfxIn`; the expand stage reads them (no vertex buffers, no commands: 4 vertices, pfxN instances).
-	 * pfxRed 1 (gates only) binds the expand stage's records one record on */
+	 * pfxRed 1 (gates only) binds the expand stage's records 16 bytes on */
 	const std::uint32_t * cs = nullptr;
 	std::size_t csWords = 0;
 	const void * pfxIn = nullptr;
@@ -394,7 +394,7 @@ struct ObjPfxShade
 	unsigned prog = 0;  //!< GL's current program (particles_cell)
 	const float * pos = nullptr, * col = nullptr, * uv = nullptr, * angle = nullptr, * size = nullptr;
 	std::size_t n = 0;  //!< the points (glDrawArrays( GL_POINTS, 0, n ))
-	/*! gates only, each must FAIL: 1 `offset` (the expand stage reads record i + 1), 2 `light` (the light texel buffer copied
+	/*! gates only, each must FAIL: 1 `offset` (the expand stage reads its records 16 bytes on), 2 `light` (the light texel buffer copied
 	 * from one texel on), 3 `depth` (GL's ALWAYS read as LEQUAL) */
 	int red = 0;
 };
