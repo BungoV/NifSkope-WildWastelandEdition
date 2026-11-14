@@ -14,6 +14,16 @@ Changed, not built, not checked live.
   (max rel 0.0098, mipped atlas), GL on the shared textures vs GL on plain ones EXACT, three copies fewer a draw, every
   red FAILS (offset, plain samplers, cull, depth test, polygon offset, first index, grid and decals rewritten after
   GL's draw).
+- Round 2: a frame with no Vulkan view (a resize, a grab) no longer hands the shared textures back to GL and makes
+  them again the next frame (each round trip was ~60-115 ms of remake and refill for the layers alone). They go back
+  to GL only when the view is turned off or the red is set.
+- Offline gate tests/vkframe/fargroundoff.sh (CPU only): with the view off, the far ground's GL uploads and frees match
+  c7e7d1a2 (the tree before the lane) call for call, cut from both versions of cellfarground.cpp: 535 of 535 calls the
+  same, no call to the present device. Reds: a flipped argument and a removed call are caught, sharing on differs. It
+  also walks the shared textures through view on / no view / off / a shutdown / a refusal / no key slot; the old rule
+  as red churns twice.
+- Crossing cells costs nothing here: the far ground is only prepared when a cell opens without streaming; streamed
+  roaming never makes it, so nothing is dropped or made on a crossing.
 
 ## VKFAR2 L8 slice 1 (2026-11-14): rain / snow pass for the Vulkan view, not wired in (gate red)
 

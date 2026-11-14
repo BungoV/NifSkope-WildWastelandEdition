@@ -8730,6 +8730,14 @@ bool toneWanted()
 	return viewWanted( off ) && viewFbo() != 0;
 }
 
+bool shareKept( const char * redEnv )
+{
+	if ( redEnv && wwEnvInt( redEnv ) == 1 )
+		return false;
+	QString off;
+	return viewWanted( off );
+}
+
 bool shareWanted( const char * redEnv )
 {
 	if ( redEnv && wwEnvInt( redEnv ) == 1 )

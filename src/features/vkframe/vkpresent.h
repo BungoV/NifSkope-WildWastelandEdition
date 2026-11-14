@@ -921,6 +921,8 @@ bool toneWanted();
 /* lane VKSHARE1: a pass's targets go on the present device this frame (sharedTarget): the view on Vulkan with its size
  * settled (viewFbo), and the pass's red (redEnv=1) unset */
 bool shareWanted( const char * redEnv );
+//! lane VKFAR3: the view is on Vulkan by its switch and redEnv unset, with or without a view this frame (a resize, a grab)
+bool shareKept( const char * redEnv );
 //! lane VKLIGHT1: the pass's route line ("vk ao:", "vk contact:", "vk ssgi:"), one a 5 s window while on Vulkan
 void lightSay( int pass, bool wanted, const char * glWhy );
 //! lane VKSHADOW1: the cascades' route line ("vk csm:"), one a 5 s window while on Vulkan

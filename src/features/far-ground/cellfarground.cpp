@@ -686,10 +686,11 @@ void uploadDecals( NifSkopeOpenGLContext::GLFunctions * fn, Doc & d, bool share 
 	uploadAtlas( fn, d, share );
 }
 
-//! lane VKFAR3: the live lookup's inputs follow the view: on the present device while it draws there, GL's own otherwise
-void reshare( NifSkopeOpenGLContext::GLFunctions * fn, Gpu & g, bool share )
+/* lane VKFAR3: the live lookup's inputs follow the view: on the present device while it draws there (share), GL's own
+ * once the view is off by its switch or the red (!keep); a frame with no view (a resize, a grab: keep) changes nothing */
+void reshare( NifSkopeOpenGLContext::GLFunctions * fn, Gpu & g, bool share, bool keep )
 {
-	if ( !share )
+	if ( !keep )
 		g.vkFailed = 0;
 	GLuint * const t[3] = { &g.grid, &g.ltex, &g.atlas };
 	qint64 * const b[3] = { &g.bGrid, &g.bLtex, &g.bAtlas };
@@ -699,8 +700,21 @@ void reshare( NifSkopeOpenGLContext::GLFunctions * fn, Gpu & g, bool share )
 		const bool on = g.vkShared & ( 1 << i );
 		if ( on && !WwVkPresent::sharedTargetIs( vkKeyOf( g, i ), *t[i] ) )
 			delShared( g, i, *t[i], *b[i] );	// a present shutdown took it: made again
-		else if ( on != share && !( share && ( g.vkFailed & ( 1 << i ) ) ) )
+		else if ( on ? !share && !keep : share && !( g.vkFailed & ( 1 << i ) ) )
 			delIn( fn, g, i, *t[i], *b[i] );
+	}
+}
+
+//! pass()'s uploads of the live lookup (lookup) or the sheet's base; share / keep: reshare (tests/vkframe/fargroundoff gates it)
+void uploadInputs( NifSkopeOpenGLContext::GLFunctions * fn, Doc & d, bool lookup, bool share, bool keep )
+{
+	if ( lookup )
+		reshare( fn, d.gpu, share, keep );
+	uploadBase( fn, d, share );
+	if ( lookup ) {
+		delTex( fn, d.gpu.pages, d.gpu.bPages );
+		d.gpu.pageSide = 0;
+		uploadDecals( fn, d, share );
 	}
 }
 
@@ -1445,15 +1459,10 @@ void pass( Scene * scene )
 	freePools( fn, d.gpu );
 	if ( !d.pics )
 		loadPictures( d );
-	const bool share = want == 1 && WwVkPresent::shareWanted( "WW_VKVIEW_FARGROUND_RED" );	// lane VKFAR3
-	if ( want == 1 )
-		reshare( fn, d.gpu, share );
-	uploadBase( fn, d, share );
-	if ( want == 1 ) {
-		delTex( fn, d.gpu.pages, d.gpu.bPages );
-		d.gpu.pageSide = 0;
-		uploadDecals( fn, d, share );
-	} else {
+	const bool lookup = want == 1;	// lane VKFAR3: the inputs on the present device while the view draws there
+	uploadInputs( fn, d, lookup, lookup && WwVkPresent::shareWanted( "WW_VKVIEW_FARGROUND_RED" ),
+		lookup && WwVkPresent::shareKept( "WW_VKVIEW_FARGROUND_RED" ) );
+	if ( !lookup ) {
 		const int side = kPageSide[s.quality];
 		if ( !d.gpu.pages || d.gpu.pageSide != side ) {
 			QString why;

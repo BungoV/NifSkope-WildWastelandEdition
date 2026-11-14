@@ -768,6 +768,38 @@ int main( int argc, char ** argv )
 	std::printf( "FARGROUNDDRAW %d runs: %d on Vulkan, %.2f ms CPU each (max %.2f; the harness's hand-off wait included), %d fails, "
 		"%d pipelines built in %.1f ms (%.2f ms CPU a run without them)\n", runs, tot.runs, tot.runs ? tot.cpuMs / tot.runs : 0.0, tot.maxMs,
 		tot.fails, tot.pipelines, tot.buildMs, tot.runs ? ( tot.cpuMs - tot.buildMs ) / tot.runs : 0.0 );
+	{
+		// round 2: what a remade fgLtex costs at a real size (128 layers of 512^2 RGBA8 + mips, ~179 MB): made, filled, dropped
+		using Clk = std::chrono::steady_clock;
+		auto ms = []( Clk::time_point a ) { return std::chrono::duration<double, std::milli>( Clk::now() - a ).count(); };
+		const int L = 128, side = 512;
+		std::vector<std::uint32_t> pix( size_t( side ) * side * L, 0xFF808080u );
+		static char bigKey;
+		const auto key = reinterpret_cast<std::uintptr_t>( &bigKey );
+		for ( int round = 0; round < 2; round++ ) {
+			glFinish();
+			const auto t0 = Clk::now();
+			unsigned t = 0;
+			if ( !WwVkPresent::sharedTarget( key, 2, side, side, L, 0x8058, t, why, 10 ) ) {
+				std::printf( "FARGROUNDDRAW remake cost: REFUSED (%s)\n", why.c_str() );
+				gateOk = false;
+				break;
+			}
+			const double make = ms( t0 );
+			const auto t1 = Clk::now();
+			const GLenum arr = 0x8C1A;	// GL_TEXTURE_2D_ARRAY
+			glBindTexture( arr, t );
+			f.texSubImage3D( arr, 0, 0, 0, 0, side, side, L, 0x80E1 /* GL_BGRA */, GL_UNSIGNED_BYTE, pix.data() );
+			f.generateMipmap( arr );
+			glFinish();
+			const double fill = ms( t1 );
+			const auto t2 = Clk::now();
+			WwVkPresent::sharedTargetDrop( key );
+			const double drop = ms( t2 );
+			std::printf( "FARGROUNDDRAW remake cost %d (fgLtex %d layers, %.0f MB): made %.1f ms, filled + mips %.1f ms, dropped %.1f ms\n",
+				round + 1, L, double( side ) * side * 4.0 * L * 4.0 / 3.0 / 1048576.0, make, fill, drop );
+		}
+	}
 	std::printf( gateOk ? "FARGROUNDDRAW GATE OK\n" : "FARGROUNDDRAW GATE FAILED\n" );
 	return gateOk ? 0 : 1;
 }
