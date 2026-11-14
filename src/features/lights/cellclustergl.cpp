@@ -12,6 +12,8 @@ BSD License - see nifskope.h
 #include "gl/celluniform.h"	// lane CELLUNI1
 #include "gl/glscene.h"
 #include "gl/renderer.h"
+#include "features/near/cellbindless.h"     // lane VKOBJ4: WwBl::vkShadeOn
+#include "features/vkframe/vkobjpipe.h"     // lane VKOBJ4: the cluster lists as stores (objBlTexelFill)
 
 #include <QElapsedTimer>
 #include <QHash>
@@ -91,6 +93,7 @@ struct Slot
 	GLuint buf = 0, tex = 0;
 	bool valid = false;
 	bool attached = false;  // the buffer is attached to the texture (once per upload, not per draw)
+	bool stored = false;    // lane VKOBJ4: buf is a store (WW_VKOBJ_SHADE: objBlTexelFill; the Vulkan runs read it in place)
 	Key key = {};           // key.proj is the projection the lists were built with (the jitter anchor)
 	WwClusterGrid grid;
 	WwClusterScratch scratch;
@@ -238,13 +241,17 @@ bool rebuild( Renderer * r, ClusterGpu & c, Slot & sl, const Key & k, const std:
 	data.insert( data.end(), sl.grid.index.begin(), sl.grid.index.end() );
 	data.push_back( 0 );    // a buffer texture must have a store
 	auto fn = r->fn;
-	if ( !sl.buf ) {
-		fn->glGenBuffers( 1, &sl.buf );
+	if ( !sl.tex )
 		fn->glGenTextures( 1, &sl.tex );
+	// lane VKOBJ4: under WW_VKOBJ_SHADE a store (exported Vulkan memory GL writes; the Vulkan runs read it in place)
+	bool moved = false;
+	if ( !WwVkPresent::objBlTexelFill( sl.buf, sl.stored, WwBl::vkShadeOn(), { { data.data(), data.size() * sizeof( std::int32_t ) } }, moved ) ) {
+		if ( !sl.buf )
+			fn->glGenBuffers( 1, &sl.buf );
+		fn->glBindBuffer( GL_TEXTURE_BUFFER, sl.buf );
+		fn->glBufferData( GL_TEXTURE_BUFFER, GLsizeiptr( data.size() * sizeof( std::int32_t ) ), data.data(), GL_STREAM_DRAW );
+		fn->glBindBuffer( GL_TEXTURE_BUFFER, 0 );
 	}
-	fn->glBindBuffer( GL_TEXTURE_BUFFER, sl.buf );
-	fn->glBufferData( GL_TEXTURE_BUFFER, GLsizeiptr( data.size() * sizeof( std::int32_t ) ), data.data(), GL_STREAM_DRAW );
-	fn->glBindBuffer( GL_TEXTURE_BUFFER, 0 );
 	sl.attached = false;
 	echo( sl.grid, count );
 	return true;

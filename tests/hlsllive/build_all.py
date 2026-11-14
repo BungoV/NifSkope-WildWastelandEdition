@@ -1,5 +1,5 @@
 """Build the whole SPIR-V set for the live path (HLSLBULK1 R5, A1) and link-test every program against the real driver.
-  python -I -X utf8 tests/hlsllive/build_all.py <tree> <outdir> [--only substr] [--defines A,B] [--jobs N] [--full]
+  python -I -X utf8 tests/hlsllive/build_all.py <tree> <outdir> [--only substr[,substr...]] [--defines A,B] [--jobs N] [--full]
 Writes <outdir>/spirv/<one .spv per distinct stage shader>, <outdir>/spirv/index.txt (one line per stage shader file name:
 `<glsl file name>\\t<spv file>`), <outdir>/spirv/programs.txt (one line per program: `<prog>\\tOK` or `FAIL <why>`) and
 <outdir>/spirv/locs.txt (the program-wide uniform location registry: name, location, slots).
@@ -58,7 +58,7 @@ def main():
             st = [x for x in st if not x[1].endswith('_points_gs.hlsl')]   # remap's points twin: the GLSL program has no geometry stage
         if any(e not in STG for e, _p, _s in st):
             continue
-        if only and only not in os.path.basename(pf):
+        if only and not any(o and o in os.path.basename(pf) for o in only.split(',')):
             continue
         # the .prog's own file names, in its order (remap.programs sorted them by stage; the names are what the loader keys on)
         names = []

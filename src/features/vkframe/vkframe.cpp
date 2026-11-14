@@ -1,7 +1,8 @@
 /* Lane VKFRAME1 round 2 (2026-11-12): the live glue of the Vulkan frame (vkframe.h). Step P1: the bloom chain's down,
- * hold and up passes run on bakert's Vulkan device on images GL imported, between GL's source resolve and GL's reads.
+ * hold and up passes run on the present device (lane VKOBJ4 item 2: vkpresent.cpp's, every submit a job on its worker)
+ * on images GL imported, between GL's source resolve and GL's reads.
  *
- * Sync (vkframegraph.h's rules on this device): bakert's device is Vulkan 1.2 without the timelineSemaphore feature on,
+ * Sync (vkframegraph.h's rules on this device): the device is driven without the timelineSemaphore feature,
  * so the frames in flight are a ring of fences (frame n waits for frame n - 2 before it records; WW_FRAMEQUEUE_RED=1: no
  * cap, only a slot's own reuse) and the GL edges are two binary semaphores (GL_EXT_semaphore is binary): GL signals
  * `glDone` after the source resolve, the submit waits on it and signals `vkDone`, GL waits on that before it reads the
@@ -19,7 +20,7 @@
 
 #include "features/vkframe/vkframe.h"
 #include "features/vkframe/vkframegraph.h"
-#include "features/gi/bakert.h"	// round 5: the route asks for bakert's device when nothing else has
+#include "features/vkframe/vkpresent.h"	// VKOBJ4 item 2: the present device, its worker, the borrowed frame
 #include "features/shared/cellpasstime.h"
 #include "harnesswindow.h"   // wwHarnessSettingsSuffix
 #include "version.h"
@@ -84,7 +85,7 @@ Window & win()
 
 #ifndef _WIN32
 
-void wwVkFrameSetDevice( void *, void *, void *, unsigned, void *, void *, const unsigned char[16], std::mutex * ) {}
+void wwVkFrameSetDevice( void *, void *, void *, unsigned, void *, void *, const unsigned char[16] ) {}
 
 namespace WwVkPost
 {
@@ -146,7 +147,7 @@ constexpr VkStructureType kSemaphoreGetWin32 = VkStructureType( 1000078003 );  /
 	X( vkGetPhysicalDeviceProperties ) X( vkGetPhysicalDeviceMemoryProperties ) X( vkGetPhysicalDeviceQueueFamilyProperties ) \
 	X( vkGetPhysicalDeviceImageFormatProperties2 ) X( vkGetPhysicalDeviceMemoryProperties2 ) X( vkEnumerateDeviceExtensionProperties )
 
-const char * const kNoDeviceYet = "no device yet (the ray-tracing device is not up)";
+const char * const kNoDeviceYet = "no device yet (the present device is not up)";
 
 struct Dev
 {
@@ -156,8 +157,7 @@ struct Dev
 	VkPhysicalDevice pd = VK_NULL_HANDLE;
 	VkDevice dev = VK_NULL_HANDLE;
 	uint32_t qf = 0;
-	VkQueue q = VK_NULL_HANDLE;
-	std::mutex * qm = nullptr;
+	VkQueue q = VK_NULL_HANDLE;	// the present worker's: submitted only from a job on that worker
 	unsigned char uuid[16] = {};
 	double tsPeriod = 1.0;
 	int tsBits = 0;
@@ -193,14 +193,20 @@ Dev & dv()
 	return d;
 }
 
-/* round 5: the route's device is bakert's, which registers itself (wwVkFrameSetDevice) when it is made with GL sharing.
- * bakert makes it on first use; with no RT GI and no GPU bake in a run nothing used it, and the route waited for good.
- * So the route asks once, on its own thread (the first use builds the bakes' pipelines). WW_VKFRAME_KICK_RED=1: no
- * ask, the route waits for another user as before round 5. */
-std::atomic<int> & kickState()	// 0 not asked, 1 coming up, 2 asked and back
+/* VKOBJ4 item 2: the route's device is the present device (vkpresent.cpp), made here on the GL thread the first time the
+ * route is wanted, the Vulkan view off too, and registered (wwVkFrameSetDevice) before anything else can. Its queue is the
+ * present worker's: every submit below is a job on that worker (submitOnWorker), so no queue lock. WW_VKFRAME_KICK_RED=1:
+ * no ask, the route stays GL. */
+std::atomic<int> & kickState()	// 0 not asked, 2 asked and back
 {
 	static std::atomic<int> s { 0 };
 	return s;
+}
+
+void * glProc( const char * name )
+{
+	QOpenGLContext * c = QOpenGLContext::currentContext();
+	return c ? reinterpret_cast<void *>( c->getProcAddress( name ) ) : nullptr;
 }
 
 void kickDevice()
@@ -208,33 +214,54 @@ void kickDevice()
 	if ( kickState().load( std::memory_order_relaxed ) != 0 || dv().ready.load( std::memory_order_acquire )
 		|| wwEnvInt( "WW_VKFRAME_KICK_RED" ) == 1 )
 		return;
-	int no = 0;
-	if ( !kickState().compare_exchange_strong( no, 1 ) )
-		return;
-	std::fprintf( stderr, "vk frame: asking for the ray-tracing device (the route is wanted and it is not up yet)\n" );
-	std::thread( []() {
-		const double t0 = nowMs();
-		const std::string name = bakert::deviceName();
-		const bool up = dv().ready.load( std::memory_order_acquire );
-		std::fprintf( stderr, "vk frame: ray-tracing device %s after %.1f ms: %s\n", name.empty() ? "absent" : name.c_str(),
-			nowMs() - t0, up ? "registered with GL sharing, the route can run on Vulkan"
-			: name.empty() ? "no Vulkan device, the route stays GL"
-			: "not registered (no ray query or no Win32 export extensions, or WW_BAKE_RT_RED=noshare / compute), the route stays GL" );
-		kickState().store( 2 );
-	} ).detach();
+	kickState().store( 2 );
+	const double t0 = nowMs();
+	WwVkPresent::Device p;
+	std::string w;
+	const bool made = WwVkPresent::shareDevice( glProc, p, w );
+	if ( made )
+		wwVkFrameSetDevice( p.instance, p.physical, p.device, p.family, p.queue, p.getDeviceProcAddr, p.uuid );
+	else
+		dv().why = QStringLiteral( "no device (the present device: %1)" ).arg( QString::fromStdString( w ) );
+	const bool up = dv().ready.load( std::memory_order_acquire );
+	std::fprintf( stderr, "vk frame: the present device %s after %.1f ms: %s\n", made ? "made" : "refused", nowMs() - t0,
+		up ? "registered with GL sharing, the route can run on Vulkan" : made ? "not registered, the route stays GL"
+		: w.c_str() );
 }
 
 QString deviceWhy()
 {
 	Dev & d = dv();
 	const int k = kickState().load();
-	if ( k == 1 )
-		return QStringLiteral( "no device yet (the ray-tracing device is coming up)" );
 	if ( k == 2 && d.why == QLatin1String( kNoDeviceYet ) )
-		return QStringLiteral( "no device (the ray-tracing device came up without GL sharing)" );
+		return QStringLiteral( "no device (the present device came up without GL sharing)" );
 	if ( k == 0 && wwEnvInt( "WW_VKFRAME_KICK_RED" ) == 1 )
 		return d.why + QStringLiteral( " (red WW_VKFRAME_KICK_RED=1: the route does not ask for it)" );
 	return d.why;
+}
+
+// VKOBJ4 item 2: one vkQueueSubmit as a job on the present worker (the queue is the worker's alone); the caller waits for it
+struct SubmitJob
+{
+	const VkSubmitInfo * sub;
+	VkFence fence;
+};
+
+bool submitWork( void * arg, std::string & why )
+{
+	const SubmitJob * s = static_cast<const SubmitJob *>( arg );
+	Dev & d = dv();
+	if ( d.vkQueueSubmit( d.q, 1, s->sub, s->fence ) == VK_SUCCESS )
+		return true;
+	why = "vkQueueSubmit failed";
+	return false;
+}
+
+bool submitOnWorker( const VkSubmitInfo & sub, VkFence fence )
+{
+	SubmitJob j { &sub, fence };
+	std::string why;
+	return WwVkPresent::onWorker( submitWork, &j, why );
 }
 
 // the BloomBindingsVk.hlsli push constants (48 bytes)
@@ -433,6 +460,7 @@ struct Img
 	VkImage i = VK_NULL_HANDLE;
 	VkDeviceMemory m = VK_NULL_HANDLE;
 	VkImageView v = VK_NULL_HANDLE;	// level 0, every layer (2D, or 2D_ARRAY for the ring); a depth / stencil: its stencil
+	VkImageView att = VK_NULL_HANDLE;	// VKOBJ4 item 2: a depth / stencil's both aspects (the borrowed frame's attachment)
 	VkImageView layer[WwVkPost::kRingLayers] = {};
 	GLuint tex = 0, mem = 0;
 	int w = 0, h = 0, layers = 1, levels = 1, samples = 1;
@@ -551,6 +579,13 @@ bool makeImg( Img & I, int w, int h, int layers, int levels, QString & why, VkFo
 		why = QStringLiteral( "vkCreateImageView failed" );
 		return false;
 	}
+	if ( isDs ) {
+		vi.subresourceRange.aspectMask = I.aspect;
+		if ( d.vkCreateImageView( d.dev, &vi, nullptr, &I.att ) != VK_SUCCESS ) {
+			why = QStringLiteral( "vkCreateImageView (depth and stencil) failed" );
+			return false;
+		}
+	}
 	if ( layers > 1 )
 		for ( int l = 0; l < layers && l < WwVkPost::kRingLayers; l++ ) {
 			vi.viewType = VK_IMAGE_VIEW_TYPE_2D;
@@ -627,6 +662,8 @@ void dropImg( Img & I )
 			d.vkDestroyImageView( d.dev, v, nullptr );
 	if ( I.v )
 		d.vkDestroyImageView( d.dev, I.v, nullptr );
+	if ( I.att )
+		d.vkDestroyImageView( d.dev, I.att, nullptr );
 	if ( I.i )
 		d.vkDestroyImage( d.dev, I.i, nullptr );
 	if ( I.m )
@@ -784,13 +821,7 @@ bool toGeneralNow( std::initializer_list<const Img *> imgs, QString & why )
 	VkSubmitInfo sub { VK_STRUCTURE_TYPE_SUBMIT_INFO };
 	sub.commandBufferCount = 1;
 	sub.pCommandBuffers = &cb;
-	bool ok;
-	{
-		std::unique_lock<std::mutex> lk;
-		if ( d.qm )
-			lk = std::unique_lock<std::mutex>( *d.qm );
-		ok = d.vkQueueSubmit( d.q, 1, &sub, d.fence[slot] ) == VK_SUCCESS;
-	}
+	const bool ok = submitOnWorker( sub, d.fence[slot] );
 	if ( ok )
 		d.vkWaitForFences( d.dev, 1, &d.fence[slot], VK_TRUE, 1000000000ull );
 	else
@@ -828,72 +859,6 @@ void sayRoute( const QString & why )
 	}
 }
 
-/* build 89 late item (fly89.log: "tone map slow step: bloom" 96.7, 106.7, 111.2 ms after the goto): the device's queue
- * lock is the traced GI's too, and its cell build holds it through masks + BLAS + TLAS (107 ms by paint 126). The
- * drawing thread does not wait on it: a lock not free within kBusySpinMs sends that frame's bloom to GL's passes. */
-constexpr double kBusySpinMs = 0.5;
-
-bool takeQueue( Dev & d, double spinMs )	// true = held (the caller unlocks); no lock = always
-{
-	if ( !d.qm )
-		return true;
-	const double t0 = nowMs();
-	for ( ;; ) {
-		if ( d.qm->try_lock() )
-			return true;
-		if ( nowMs() - t0 >= spinMs )
-			return false;
-		SwitchToThread();
-	}
-}
-
-struct Busy
-{
-	std::uint64_t gen = 0, askedGen = ~std::uint64_t( 0 );	// runBloom's count; the one sourceReady asked in
-	bool asked = false;	// its answer: busy
-	int frames = 0;
-	double t0 = -1.0, waitedMs = 0.0;
-};
-
-Busy & busy()
-{
-	static Busy b;
-	return b;
-}
-
-bool queueBusyNow()
-{
-	Dev & d = dv();
-	const bool held = takeQueue( d, kBusySpinMs );
-	if ( held && d.qm )
-		d.qm->unlock();
-	return !held;
-}
-
-// one telemetry line a busy run, when it ends (GL thread)
-void sayBusy( bool busyNow, double spunMs )
-{
-	Busy & b = busy();
-	if ( busyNow ) {
-		if ( b.t0 < 0.0 ) {
-			b.t0 = nowMs();
-			b.frames = 0;
-			b.waitedMs = 0.0;
-		}
-		b.frames++;
-		b.waitedMs += spunMs;
-		return;
-	}
-	if ( b.t0 >= 0.0 ) {
-		static int said = 0;
-		if ( said++ < 40 )
-			std::fprintf( stderr, "vk post: the ray-tracing device's queue was held by its other user (the traced GI's build) for "
-				"%.1f ms: bloom on GL's passes for %d frames; the drawing thread spun %.2f ms on it in all, no wait\n",
-				nowMs() - b.t0, b.frames, b.waitedMs );
-		b.t0 = -1.0;
-	}
-}
-
 QString cachePath()
 {
 	QString dir = QStandardPaths::writableLocation( QStandardPaths::CacheLocation );
@@ -906,7 +871,7 @@ QString cachePath()
 }	// namespace
 
 void wwVkFrameSetDevice( void * instance, void * physical, void * device, unsigned family, void * queue, void * getDeviceProcAddr,
-	const unsigned char deviceUuid[16], std::mutex * queueLock )
+	const unsigned char deviceUuid[16] )
 {
 	Dev & d = dv();
 	if ( d.ready.load( std::memory_order_acquire ) || !instance || !physical || !device || !queue || !getDeviceProcAddr )
@@ -917,7 +882,6 @@ void wwVkFrameSetDevice( void * instance, void * physical, void * device, unsign
 	d.dev = static_cast<VkDevice>( device );
 	d.qf = family;
 	d.q = static_cast<VkQueue>( queue );
-	d.qm = queueLock;
 	std::memcpy( d.uuid, deviceUuid, 16 );
 	auto gdpa = reinterpret_cast<PFN_vkGetDeviceProcAddr>( getDeviceProcAddr );
 #define VKFRAME_LOAD_D( f ) d.f = reinterpret_cast<PFN_##f>( gdpa( d.dev, #f ) );
@@ -925,7 +889,7 @@ void wwVkFrameSetDevice( void * instance, void * physical, void * device, unsign
 #undef VKFRAME_LOAD_D
 	d.getMemWin32 = reinterpret_cast<PfnGetMemoryWin32>( gdpa( d.dev, "vkGetMemoryWin32HandleKHR" ) );
 	d.getSemWin32 = reinterpret_cast<PfnGetSemaphoreWin32>( gdpa( d.dev, "vkGetSemaphoreWin32HandleKHR" ) );
-	HMODULE lib = LoadLibraryA( "vulkan-1.dll" );	// already loaded by bakert: this only takes a reference
+	HMODULE lib = LoadLibraryA( "vulkan-1.dll" );	// already loaded by the device's maker: this only takes a reference
 	auto gipa = lib ? reinterpret_cast<PFN_vkGetInstanceProcAddr>( reinterpret_cast<void *>( GetProcAddress( lib, "vkGetInstanceProcAddr" ) ) )
 		: nullptr;
 	if ( gipa ) {
@@ -1273,12 +1237,7 @@ bool makeChain( const void * key, int W, int H, int mipCount, const int dims[][2
 		VkSubmitInfo sub { VK_STRUCTURE_TYPE_SUBMIT_INFO };
 		sub.commandBufferCount = 1;
 		sub.pCommandBuffers = &cb;
-		{
-			std::unique_lock<std::mutex> lk;
-			if ( d.qm )
-				lk = std::unique_lock<std::mutex>( *d.qm );
-			ok = d.vkQueueSubmit( d.q, 1, &sub, d.fence[slot] ) == VK_SUCCESS;
-		}
+		ok = submitOnWorker( sub, d.fence[slot] );
 		if ( ok ) {
 			d.vkWaitForFences( d.dev, 1, &d.fence[slot], VK_TRUE, 1000000000ull );
 		} else {
@@ -1370,6 +1329,32 @@ bool makeFrame( const void * key, int W, int H, int samples, unsigned dsFormat, 
 	}
 	color = fr.color.tex;
 	ds = fr.ds.tex;
+	/* VKOBJ4 item 2: the frame lent to the present device's object passes (objBlFrameRead finds it by its GL names): keys
+	 * key + 1 (colour) and key + 2 (depth / stencil). Refused when the device is not the present device's (said once). */
+	{
+		const std::uintptr_t k = reinterpret_cast<std::uintptr_t>( key );
+		WwVkPresent::Borrow bc, bd;
+		bc.device = bd.device = d.dev;
+		bc.image = fr.color.i;
+		bc.view = fr.color.v;
+		bc.tex = fr.color.tex;
+		bc.glFmt = glFormatOf( VK_FORMAT_R16G16B16A16_SFLOAT );
+		bd.image = fr.ds.i;
+		bd.view = bd.attView = fr.ds.att;
+		bd.tex = fr.ds.tex;
+		bd.glFmt = dsFormat;
+		bc.w = bd.w = W;
+		bc.h = bd.h = H;
+		bc.samples = bd.samples = samples;
+		std::string w;
+		const bool lent = WwVkPresent::borrowTarget( k + 1, bc, w ) && WwVkPresent::borrowTarget( k + 2, bd, w );
+		if ( !lent ) {
+			WwVkPresent::borrowDrop( k + 1 );
+			static int said = 0;
+			if ( said++ < 1 )
+				std::fprintf( stderr, "vk post: the shared frame is not lent to the object passes (%s)\n", w.c_str() );
+		}
+	}
 	std::fprintf( stderr, "vk post: frame shared %dx%d, %d sample(s): colour RGBA16F %.1f MB, depth / stencil %s %.1f MB; %s\n", W, H,
 		samples, mb * 8.0, dsf == VK_FORMAT_D24_UNORM_S8_UINT ? "D24S8" : "D32FS8", mb * ( dsf == VK_FORMAT_D24_UNORM_S8_UINT ? 4.0 : 8.0 ),
 		budget ? qPrintable( QStringLiteral( "in video memory (the device heap grew %1 MB, %2 MB left of the budget)" )
@@ -1388,6 +1373,8 @@ void freeFrame( const void * key )
 		c.srcFrame = VK_NULL_HANDLE;	// a new frame can reuse the handle: its set is written again
 		c.measFrame = VK_NULL_HANDLE;
 	}
+	WwVkPresent::borrowDrop( reinterpret_cast<std::uintptr_t>( key ) + 1 );	// VKOBJ4 item 2: no longer lent
+	WwVkPresent::borrowDrop( reinterpret_cast<std::uintptr_t>( key ) + 2 );
 	dropImg( it->color );
 	dropImg( it->ds );
 	frames().erase( it );
@@ -1401,11 +1388,7 @@ bool sourceReady( const void * key, unsigned color, unsigned ds )
 	if ( it == chains().constEnd() || !it->ok || it->ctx != q || ft == frames().constEnd() || ft->ctx != q || !color
 		|| ft->color.tex != color || ft->ds.tex != ds || !wanted() )
 		return false;
-	// build 89 late item: a busy queue -> GL draws the source too (runBloom reads this answer, it does not ask again)
-	Busy & b = busy();
-	b.askedGen = b.gen;
-	b.asked = queueBusyNow();
-	return !b.asked;
+	return true;
 }
 
 unsigned combTexture( const void * key )
@@ -1472,22 +1455,8 @@ bool runBloom( const void * key, const BloomJob & job, QString & why )
 		sayRoute( QStringLiteral( "gl (%1)" ).arg( why ) );
 		return false;
 	}
-	c.lastRun = nowMs();	// a busy frame keeps the frame shared (no rebuild, no full wait after it)
+	c.lastRun = nowMs();	// keeps the frame shared (no rebuild, no full wait after it)
 	c.combRan = false;
-	// build 89 late item: the queue's other user holds it -> GL's passes this frame, nothing waited
-	{
-		Busy & b = busy();
-		const double ts = nowMs();
-		const bool isBusy = job.src ? false : b.askedGen == b.gen ? b.asked : queueBusyNow();
-		b.gen++;
-		sayBusy( isBusy, nowMs() - ts );
-		if ( isBusy ) {
-			why = QStringLiteral( "the ray-tracing device's queue is held by its other user (the traced GI's build)" );
-			win().glFrames++;
-			win().glWhy = why;
-			return false;
-		}
-	}
 	// build 89 late item: where a slow bloom's CPU went (one line a bloom of 20 ms or more)
 	const double ph0 = nowMs();
 	// round 3 (P3): the source's frame; the set is written again only when that frame was made again
@@ -1661,24 +1630,6 @@ bool runBloom( const void * key, const BloomJob & job, QString & why )
 	}
 
 	const double ph4 = nowMs();
-	/* build 89 late item: the queue lock before GL's signal (a frame GL drew the source for may still go to GL's passes);
-	 * a frame whose source Vulkan makes has no GL source to fall back on: it takes the lock, the wait is named below */
-	bool held = takeQueue( d, kBusySpinMs );
-	if ( !held && !job.src ) {
-		sayBusy( true, nowMs() - ph4 );
-		why = QStringLiteral( "the ray-tracing device's queue is held by its other user (the traced GI's build)" );
-		win().glFrames++;
-		win().glWhy = why;
-		return false;
-	}
-	if ( !held ) {
-		d.qm->lock();
-		held = true;
-	}
-	std::unique_lock<std::mutex> lk;
-	if ( d.qm )
-		lk = std::unique_lock<std::mutex>( *d.qm, std::adopt_lock );
-	const double ph5 = nowMs();
 	// GL -> Vulkan: GL signals after its source resolve (flushed, so the signal is queued before the submit waits on it)
 	// the images both sides touch this frame: the chain's, and the shared frame while the source reads it
 	std::vector<GLuint> & texs = c.texs;
@@ -1703,9 +1654,8 @@ bool runBloom( const void * key, const BloomJob & job, QString & why )
 	sub.signalSemaphoreCount = 1;
 	sub.pSignalSemaphores = &c.vkVkDone;
 	d.vkResetFences( d.dev, 1, &d.fence[slot] );
-	const bool ok = d.vkQueueSubmit( d.q, 1, &sub, d.fence[slot] ) == VK_SUCCESS;
-	if ( lk.owns_lock() )
-		lk.unlock();
+	// VKOBJ4 item 2: the submit is a job on the present worker (its queue); GL waits on vkDone after it is queued
+	const bool ok = submitOnWorker( sub, d.fence[slot] );
 	const double ph7 = nowMs();
 	if ( !ok ) {
 		// GL's signal has no waiter now: the chain cannot pair its semaphores again, so it goes back to GL for good
@@ -1727,17 +1677,16 @@ bool runBloom( const void * key, const BloomJob & job, QString & why )
 	c.combRan = comb;
 	c.measRan = meas;
 	win().vkFrames++;
-	sayBusy( false, 0.0 );
 	const double ph8 = nowMs();
 	if ( ph8 - ph0 >= 20.0 ) {
 		static int slow = 0;
 		if ( slow++ < 40 )
 			std::fprintf( stderr, "vk post: slow bloom %.1f ms CPU (Vulkan frame %llu) = source set wait %.1f + combine target %.1f + "
-				"frames-in-flight wait %.1f + record %.1f + queue lock wait %.1f + GL signal and flush %.1f + submit %.1f + GL wait "
-				"%.1f\n", ph8 - ph0, static_cast<unsigned long long>( f ), ph1 - ph0, ph2 - ph1, ph3 - ph2, ph4 - ph3, ph5 - ph4,
-				ph6 - ph5, ph7 - ph6, ph8 - ph7 );
+				"frames-in-flight wait %.1f + record %.1f + GL signal and flush %.1f + submit on the present worker %.1f + GL wait "
+				"%.1f\n", ph8 - ph0, static_cast<unsigned long long>( f ), ph1 - ph0, ph2 - ph1, ph3 - ph2, ph4 - ph3,
+				ph6 - ph4, ph7 - ph6, ph8 - ph7 );
 	}
-	sayRoute( QStringLiteral( "vulkan (bloom %1down / hold / up%2 on the ray-tracing device, %3 mips%4%5)" )
+	sayRoute( QStringLiteral( "vulkan (bloom %1down / hold / up%2 on the present device, %3 mips%4%5)" )
 		.arg( fr ? QStringLiteral( "source / " ) : QString() ).arg( comb ? QStringLiteral( " / combine" ) : QString() ).arg( n )
 		.arg( job.hold ? QStringLiteral( ", hold" ) : QString() ).arg( meas ? QStringLiteral( ", exposure measure" ) : QString() ) );
 	return true;
@@ -1776,7 +1725,7 @@ QString wwVkFrameUse( int frames, double glGpuMs, double wallMs )
 		wall <= hi + 0.25 * lo ? "they overlap" : "they take turns", 100.0 * ov, blocked, d.pipesBuilt, d.pipesWanted,
 		d.cacheWords.isEmpty() ? "not opened" : qPrintable( d.cacheWords ) );
 	const QString words = vkRoute
-		? QStringLiteral( "; Vulkan frame: bloom chain %1 ms a frame on the ray-tracing device (%2 of %3 frames)" )
+		? QStringLiteral( "; Vulkan frame: bloom chain %1 ms a frame on the present device (%2 of %3 frames)" )
 			.arg( vk, 0, 'f', 3 ).arg( w.vkFrames ).arg( w.vkFrames + w.glFrames )
 		: QStringLiteral( "; Vulkan frame: off (%1)" ).arg( why );
 	w = Window();

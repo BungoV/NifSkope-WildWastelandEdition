@@ -44,6 +44,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "features/shared/camunired.h"	// lane EMPTY240 R12-1: the global uniforms not uploaded twice
 #include "features/near/celldrawpacket.h"	// lane GAPPERF-BINDLESS: the setters record while a draw packet records
 #include "features/near/cellbindless.h"	// lane BINDLESS2
+#include "features/vkframe/vkobjpipe.h"	// lane VKOBJ4: the SPIR-V set's location registry for the mirror
 #include "progcachekeep.h"	// lane BUGS1102C
 #include "gpustage.h"	// MODULES1: static buffers filled by a GPU copy (no driver RAM copy)
 #include "wwuploadcap.h"	// lane EMPTY240 R4-1: the paint's upload budget
@@ -715,6 +716,10 @@ static void wwSpvInit( const QDir & shaders )
 	wwSpvLive = wwSpvFell = 0;
 	wwSpvTable( wwSpvDir + "/index.txt", &wwSpvIndex, nullptr );
 	wwSpvTable( wwSpvDir + "/programs.txt", nullptr, &wwSpvProgOk );
+	{	// lane VKOBJ4: a program linked from SPIR-V has no uniform names; the Vulkan mirror reads its locations from here
+		std::string	why;
+		WwVkPresent::objBlLocsLoad( ( wwSpvDir + "/locs.txt" ).toStdString(), why );
+	}
 	wwSpecialize = nullptr;
 	if ( QOpenGLContext * ctx = QOpenGLContext::currentContext(); ctx && ctx->hasExtension( "GL_ARB_gl_spirv" ) ) {
 		wwSpecialize = reinterpret_cast< WwSpecializeFn >( ctx->getProcAddress( "glSpecializeShader" ) );

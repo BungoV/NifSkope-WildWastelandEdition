@@ -229,4 +229,39 @@ fxs precip_look_view_cs weather/precip_look_view_cs
 fxv precip_look_view_vs weather/precip_look_view_vs
 fx precip_look_view_ps weather/precip_look_view_ps
 ls -la precip_view_cs.spv.h precip_view_vs.spv.h precip_view_ps.spv.h precip_look_view_cs.spv.h precip_look_view_vs.spv.h precip_look_view_ps.spv.h
+# lane VKOBJ4: the shift sets by stage. A pipeline whose vertex stage declares resources takes VS_SHIFT for it: on PS_SHIFT the
+# bl vertex stage's b0 (skinning) lands on the pixel stage's b0 (global). fxv() keeps PS_SHIFT (fardots' vertex block is b1).
+PS_SHIFT="-fvk-b-shift 0 0 -fvk-t-shift 64 0 -fvk-s-shift 128 0 -fvk-u-shift 192 0"
+VS_SHIFT="-fvk-b-shift 256 0 -fvk-t-shift 320 0 -fvk-s-shift 384 0 -fvk-u-shift 448 0"
+# the bl twins (res/shaders/hlsl/near, -D WW_VK_BINDLESS), every binding kept: objBlPipe reflects them (vkobjpipe.inc)
+fxb() {
+	"$DXC" -spirv -fspv-target-env=vulkan1.2 -HV 2021 -T "$3" -E main -D WW_VK_BINDLESS $4 -fspv-preserve-bindings -Fo "$1.spv" "$(cygpath -m "$ROOT/res/shaders/hlsl/near/$2.hlsl" 2>/dev/null || echo "$ROOT/res/shaders/hlsl/near/$2.hlsl")"
+	python -I "$ROOT/tools/spv_header.py" "$1.spv" "vkframe_$1_spv" "$1.spv.h" < /dev/null
+	rm -f "$1.spv"
+}
+fxb objbl_vs fo4_defaultbl_vs vs_6_0 "$VS_SHIFT"
+fxb objbl_cell_ps fo4_cellbl_ps ps_6_0 "$PS_SHIFT"
+fxb objbl_cellcsm_ps fo4_cellcsmbl_ps ps_6_0 "$PS_SHIFT"
+# lane VKWATER3 (G4 by draws): the non-bindless fallbacks fo4_cell / fo4_cellcsm / pbrm_default (res/shaders/hlsl/core) on
+# the app's base variant (WW_CELL_FOGLEAK + WW_FRAME_UBO; the app site refuses any other), every binding kept for
+# objBlPipe; the frozen pixel stages invert FragCoord.w themselves (-fvk-use-dx-position-w). The alpha tests discard after
+# the last texture sample (killPx in the HLSL): a discard before it left NV GL and NV Vulkan different derivatives in part-killed
+# quads (3398 values over the bound in the G4 alpha pass, 11-14; demote gave the same 3398)
+fxc() {
+	"$DXC" -spirv -fspv-target-env=vulkan1.2 -HV 2021 -T "$3" -E main -D WW_CELL_FOGLEAK=1 -D WW_FRAME_UBO=1 $4 -fspv-preserve-bindings -fvk-use-dx-position-w -Fo "$1.spv" "$(cygpath -m "$ROOT/res/shaders/hlsl/core/$2.hlsl" 2>/dev/null || echo "$ROOT/res/shaders/hlsl/core/$2.hlsl")"
+	python -I "$ROOT/tools/spv_header.py" "$1.spv" "vkframe_$1_spv" "$1.spv.h" < /dev/null
+	rm -f "$1.spv"
+}
+fxc objcell_vs fo4_default_vs vs_6_0 "$VS_SHIFT"
+fxc objcell_cell_ps fo4_cell_ps ps_6_0 "$PS_SHIFT"
+fxc objcell_cellcsm_ps fo4_cellcsm_ps ps_6_0 "$PS_SHIFT"
+# pbrm_default.prog is fo4_default.vert + pbrm_default.frag: objcell_vs is its vertex twin too
+fxc objcell_pbrm_ps pbrm_default_ps ps_6_0 "$PS_SHIFT"
+# its cell-lit programs (pbrm_cell.prog, pbrm_cellcsm.prog: pbrm_default.frag with WW_CELLLIGHTS, and WW_SUNSHADOW)
+fxc objcell_pbrmcell_ps pbrm_cell_ps ps_6_0 "$PS_SHIFT"
+fxc objcell_pbrmcellcsm_ps pbrm_cellcsm_ps ps_6_0 "$PS_SHIFT"
+# the cell frame's per-sample readback (objBlFrameSamples): its own bindings, no shift
+"$DXC" -spirv -fspv-target-env=vulkan1.2 -T cs_6_0 -E main -Fo objbl_samples_cs.spv "$(cygpath -m "$ROOT/res/shaders/hlsl/near/objbl_samples_cs.hlsl" 2>/dev/null || echo "$ROOT/res/shaders/hlsl/near/objbl_samples_cs.hlsl")"
+python -I "$ROOT/tools/spv_header.py" objbl_samples_cs.spv vkframe_objbl_samples_cs_spv objbl_samples_cs.spv.h < /dev/null
+rm -f objbl_samples_cs.spv
 ls -la csm_view_vs.spv.h obj_depth_vs.spv.h sky_view_ps.spv.h bloom_down.spv.h bloom_hold.spv.h bloom_up.spv.h bloom_src.spv.h bloom_comb.spv.h bloom_back.spv.h tonemap.spv.h measure_q.spv.h tone_view_vs.spv.h tone_view_ps.spv.h taa_view_mv_cs.spv.h taa_view_resolve_cs.spv.h taa_view_rcas_ps.spv.h

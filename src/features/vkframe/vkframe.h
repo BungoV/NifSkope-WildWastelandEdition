@@ -1,8 +1,9 @@
 #ifndef WW_VKFRAME_H
 #define WW_VKFRAME_H
 
-/* Lane VKFRAME1 round 2 (2026-11-12): the live glue of the Vulkan frame (notes/vkframe1/plan.md). The device is bakert's
- * (src/features/gi/bakert.cpp registers it with wwVkFrameSetDevice once it is made with GL sharing); this file owns
+/* Lane VKFRAME1 round 2 (2026-11-12): the live glue of the Vulkan frame (notes/vkframe1/plan.md). The device is the
+ * present device (lane VKOBJ4 item 2: vkpresent.cpp's, registered here by the route's first ask; its queue is the present
+ * worker's, so every submit here is a job on that worker); this file owns
  * the passes that moved: images Vulkan makes and GL imports (GL_EXT_memory_object), one binary semaphore each way
  * (GL_EXT_semaphore), a fence ring for the frames in flight, the pipelines built at registration behind an on-disk
  * pipeline cache, the GPU timestamps (PassTime sub vk-bloom, `hardware use:`) and the `vk frame:` line.
@@ -10,11 +11,9 @@
 
 #include <QString>
 
-#include <mutex>
-
-//! bakert's device, once made with GL sharing (its external memory + semaphore extensions on). Builds every pipeline.
+//! the device, its external memory + semaphore extensions on (the first registration wins). Builds every pipeline.
 void wwVkFrameSetDevice( void * instance, void * physical, void * device, unsigned family, void * queue,
-	void * getDeviceProcAddr, const unsigned char deviceUuid[16], std::mutex * queueLock );
+	void * getDeviceProcAddr, const unsigned char deviceUuid[16] );
 
 namespace WwVkPost
 {

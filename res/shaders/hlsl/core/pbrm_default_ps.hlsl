@@ -174,7 +174,7 @@ cbuffer LooseUniforms : register(b31, space0)
 	bool lookdevDalcFlip;		// debug "dalcflip": the other axis-sign convention
 	float studioSun;			// WW_STUDIO_SUN: the Studio/Lookdev sun scale (0 = the white furnace)
 	int r3Term;					// WW_R3_TERM: 0 all, 1 diffuse only, 2 specular only
-	int r3Red;					// WW_R3_RED: 1 noms, 2 nosplit, 4 fo4csweight, 8 notint, 16 f90scaled, 32 lambert
+	int r3Red;					// WW_R3_RED: 1 noms, 2 nosplit, 4 fo4csweight, 8 notint, 16 f90scaled, 32 lambert, 64 oldbrdf
 	int r4Red;					// WW_R4_RED: 1 nodiv, 2 emitmul, 4 notintmask, 8 emitraw, 16 nocomp
 	float alpha;
 	int alphaFlags;
@@ -439,6 +439,21 @@ float3 surfaceF0( Surface s )
 	return lerp( s.weight * s.f0d, s.weight * s.base, s.metal );
 }
 
+/* lane VKWATER3 (11-14, bungo: "Switch to OpenPBR"): the direct lobes, the environment split sum and the specular occlusion
+ * are Fusion Shaders' OpenPBR core, mapped as Fusion's forward ShadePbr maps a .pbrm draw (notes/vkwater3/openpbr_map.md).
+ * Red WW_R3_RED=oldbrdf (64): the BRDF before the switch (Burley, F90 = sat(50 F0), the split-sum multiscatter). */
+#include "../f4fs/Lighting/openpbr_constants.hlsli"
+/* The GGX energy table as packed constants: Fusion uploads t80 / t81 from C++, NifSkope binds neither (t80 lands on the cell
+ * variant's SSGI sampler), and 1024 float3 constants pass NV GL's 1024-register limit (C6020). */
+#include "openpbr_ggx_packed.hlsli"
+#include "../f4fs/Lighting/openpbr_brdf.hlsli"
+
+bool oldBrdf() { return ( r3Red & 64 ) != 0; }
+
+// OpenPBR's F82 edge tint (OpenPBR_LayersEdgeTint): the specular colour on the metallic share, white on the dielectric
+// share, which F0 already tinted
+float3 openPbrEdgeTint( Surface s ) { return lerp( (float3)( 1.0 ), clamp( s.tint, 0.0, 1.0 ), s.metal ); }
+
 // Multiscatter energy compensation (FO4CS truepbr_brdf.hlsli:104-105). Debug "noms": 1.
 float3 multiScatter( Surface s, float2 dfg )
 {
@@ -462,6 +477,22 @@ float3 specAlbedo( Surface s, float2 dfg, float3 ms )
 // specular lobe takes Ls and roughness rS (an area light's representative point); the diffuse keeps L.
 void directLightA( Surface s, float3 L, float3 Ls, float rS, float3 V, float3 ms, out float3 dDiff, out float3 dSpec )
 {
+	if ( !oldBrdf() ) {
+		/* OpenPBR (Fusion's ForwardLightResponse): its lobes carry the engine light's PI (OPENPBR_ENGINE_LIGHT_TO_RADIANCE)
+		 * and the callers here multiply E x PI, so both come back / PI. Lambert at diffuse roughness 0 (EON above it). */
+		float3 Ho = normalize( Ls + V );
+		float NoLo = saturate( dot( s.N, L ) ), NoLso = saturate( dot( s.N, Ls ) ), NoVo = saturate( dot( s.N, V ) );
+		float VoHo = saturate( dot( V, Ho ) );
+		float3 F0 = surfaceF0( s );
+		float3 edge = openPbrEdgeTint( s );
+		float3 spec = OpenPBR_DirectSpecular( F0, rS, NoLso, NoVo, saturate( dot( s.N, Ho ) ), VoHo );
+		[branch] if ( any( edge != (float3)( 1.0 ) ) )	// OpenPBR_ApplyEdgeTint: the Schlick lobe rescaled to F82
+			spec *= OpenPBR_F82Metal( F0, edge, VoHo ) / max( OpenPBR_F_Schlick( F0, VoHo ), (float3)( 1e-4 ) );
+		dSpec = spec * OPENPBR_INV_PI;
+		dDiff = ( 1.0 - s.metal ) * s.base * NoLo * OpenPBR_DirectDiffuseWeight( F0, NoVo, NoLo, saturate( dot( L, Ho ) ), s.diffRough )
+			* OPENPBR_INV_PI;
+		return;
+	}
 	float3 H = normalize( Ls + V );
 	float NoL = clamp( dot( s.N, L ), 0.0, 1.0 );
 	float NoLs = clamp( dot( s.N, Ls ), 0.0, 1.0 );
@@ -503,13 +534,21 @@ void directLightA( Surface s, float3 L, float3 Ls, float rS, float3 V, float3 ms
 	}
 }
 
+/* Fusion's world light passes (bsdf_light_sun / _deferred / _spot, deferred_tiled_lighting) widen the direct-specular
+ * roughness by the emitter's apparent size before the uncapped GGX D; the sun by OPENPBR_SUN_ANGULAR_RADIUS */
+float openPbrEmitterRough( float r, float angularRadius )
+{
+	return oldBrdf() ? r : OpenPBR_FilterPerceptualRoughnessForEmitter( r, angularRadius );
+}
+
 void directLight( Surface s, float3 L, float3 V, float3 ms, out float3 dDiff, out float3 dSpec )
 {
-	directLightA( s, L, L, s.rough, V, ms, dDiff, dSpec );
+	directLightA( s, L, L, openPbrEmitterRough( s.rough, OPENPBR_SUN_ANGULAR_RADIUS ), V, ms, dDiff, dSpec );
 }
 
 void frag_main()
 {
+	bool killPx = false;	// the alpha tests' discard, taken after the last texture sample (derivatives defined on every route)
 #ifdef WW_CELLLIGHTS
 	cellEmitOut = (float4)( 0.0 );
 #endif
@@ -558,7 +597,7 @@ void frag_main()
 			opacity = 1.0;
 		else if ( pbrComposition == 1 ) {
 			if ( opacity < pbrAlphaThreshold )
-				discard;
+				killPx = true;
 			opacity = 1.0;
 		}
 		color.a = opacity;
@@ -575,7 +614,7 @@ void frag_main()
 #endif
 		int m = ( a < alphaThreshold ? 0x2B2B : ( a > alphaThreshold ? 0x7171 : 0x4D4D ) );
 		if ( ( m & ( 1 << alphaFlags ) ) == 0 )
-			discard;
+			killPx = true;
 		if ( ( alphaFlags & 8 ) != 0 )
 			color.a = a;
 	}
@@ -601,6 +640,8 @@ void frag_main()
 #ifdef WW_CELLLIGHTS
 	if ( cellOn && cellProbe == 20 && ( or( cellAoEarly == 1, cellAoEarly == 4 ) ) ) {	// lane PERF1: the obscurance pass reads the normal and depth only
 		fragColor = cellAoPassOut( s.N, -ViewDir );
+		if ( killPx )
+			discard;
 		return;
 	}
 #endif
@@ -637,7 +678,8 @@ void frag_main()
 	if ( ( r3Red & 8 ) != 0 )
 		s.tint = (float3)( 1.0 );
 	s.f0d = s.tint * f0ior;
-	s.rough = clamp( s.rough, 0.035, 1.0 );	// the design's floor (FO4CS uses 0.045)
+	const float roughMin = oldBrdf() ? 0.035 : OPENPBR_MIN_PERCEPTUAL_ROUGHNESS;	// OpenPBR's floor 0.045 (the old design's 0.035 under red oldbrdf)
+	s.rough = clamp( s.rough, roughMin, 1.0 );
 	s.metal = clamp( s.metal, 0.0, 1.0 );
 	s.weight = clamp( s.weight, 0.0, 1.0 );
 	s.diffRough = clamp( pbrDiffuseRoughness, 0.0, 1.0 );
@@ -661,13 +703,13 @@ void frag_main()
 		float por = landShoreTerrain ? 1.0 - s.metal : 0.0;
 		s.base *= wwLandWetBase( wet.x, por );
 		s.base = lerp( s.base, (float3)( 0.8 ), sw.y );	// the run-up's foam
-		s.rough = max( wwLandWetRough( s.rough, wet, por ), 0.035 );
+		s.rough = max( wwLandWetRough( s.rough, wet, por ), roughMin );
 	}
 	if ( cellOn && rainWet.x > 0.0 ) {	// lane [reference game]WEATHER1: rain wetness, [reference game]'s law (metal from the F0)
 		float rw = wwRainWetW( 1.0 - s.rough, wwRainWetMetal( lerp( s.weight * s.f0d, s.base, s.metal ) ) )
 			* wwRainWetExposed( cellWorldPos( -ViewDir ), cellWorldDir( normalize( tbn[2] ) ) );	// [reference game]WEATHER2: dry under cover
 		s.base *= 1.0 - 0.8 * rw;
-		s.rough = max( ( 1.0 - 0.4 * rw ) * s.rough, 0.035 );
+		s.rough = max( ( 1.0 - 0.4 * rw ) * s.rough, roughMin );
 	}
 #endif
 
@@ -676,7 +718,9 @@ void frag_main()
 	float NdotV = clamp( dot( s.N, V ), 1e-4, 1.0 );
 	float2 dfg = dfgLazarov( NdotV, s.rough );
 	float3 ms = multiScatter( s, dfg );
-	float3 Espec = specAlbedo( s, dfg, ms );
+	// OpenPBR (Fusion's ambient pass): F0 dfg.x + dfg.y less the F82 edge-tint correction, no multiscatter
+	float3 Espec = oldBrdf() ? specAlbedo( s, dfg, ms )
+		: max( surfaceF0( s ) * dfg.x + dfg.y - OpenPBR_EnvF82Correction( surfaceF0( s ), openPbrEdgeTint( s ), s.rough, NdotV ), (float3)( 0.0 ) );
 	// the indirect diffuse gives up the energy the specular lobe took. Debug "nosplit".
 	float3 keepInd = ( ( r3Red & 2 ) != 0 ) ? (float3)( 1.0 ) : clamp( (float3)( 1.0 ) - Espec, 0.0, 1.0 );
 	float3 rho = s.base * ( 1.0 - s.metal );
@@ -709,6 +753,9 @@ void frag_main()
 #else
 	s.ao *= clamp( wwFarSkyVis, 0.0, 1.0 );	// MODULES1 10c: the far bake's sky occlusion on the ambient (1 elsewhere)
 #endif
+	// OpenPBR (Fusion's ambient pass): the multi-bounce AO on the indirect diffuse, the specular occlusion on the reflections
+	float3 diffAo = oldBrdf() ? (float3)( s.ao ) : OpenPBR_MultiBounceAO( rho, s.ao );
+	float specAo = oldBrdf() ? s.ao : OpenPBR_SpecularOcclusion( NdotV, s.rough, s.ao );
 	float3 preAmbDiff = outDiff;	// what the block below adds is the ambient's diffuse
 	float3 preAmbSpec = outSpec;	// lane SPECOCC1: what the block below adds is the cube reflection
 #ifdef WW_DV
@@ -729,17 +776,17 @@ void frag_main()
 			float3 az = ( ( wn.z > 0.0 ) != lookdevDalcFlip ) ? lookdevDalc[5] : lookdevDalc[4];
 			irr = n2.x * ax + n2.y * ay + n2.z * az;
 		}
-		outDiff += irr * rho * keepInd * s.ao;
+		outDiff += irr * rho * keepInd * diffAo;
 		float3 env = StudioCube.SampleLevel( _StudioCube_sampler, mul(R, reflMatrix), s.rough * ( 10.0 - 4.0 * s.rough ) ).rgb;
-		outSpec += env * Espec * s.ao;
+		outSpec += env * Espec * specAo;
 	} else {
 		// Legacy (or Studio without a cube): A.rgb = sqrt(ambient) * 0.375, so A.rgb^2 is the
 		// ambient the legacy shapes see in linear terms.
-		outDiff += A.rgb * A.rgb * rho * keepInd * s.ao;
+		outDiff += A.rgb * A.rgb * rho * keepInd * diffAo;
 		if ( hasCubeMap ) {
 			float3 cube = CubeMap.SampleLevel( _CubeMap_sampler, mul(R, reflMatrix), s.rough * 8.0 ).rgb;
 			// the legacy cube is display-encoded: squared into the same linear space
-			outSpec += cube * cube * envReflection * Espec * s.ao;
+			outSpec += cube * cube * envReflection * Espec * specAo;
 		}
 	}
 #ifdef WW_SUNSHADOW
@@ -789,6 +836,8 @@ void frag_main()
 			float rS = sw.rough;
 			if ( cellLightPhysB.y > 0.0 && !noSpec )	// lane LIGHTPHYS1: Area lights
 				cellAreaSpec( i, Pw, sw.N, Vw, Ls, rS );
+			else	// a point or spot light: Fusion's fixed-radius emitter (the area path replaces it, as Fusion's does)
+				rS = openPbrEmitterRough( rS, OpenPBR_LocalEmitterAngularRadius( length( cellLights.Load( i * CELL_TPL ).xyz - Pw ) ) );
 			directLightA( sw, Lw, Ls, rS, Vw, ms, dD, dS );
 			cE += E * max( dot( sw.N, Lw ), 0.0 );
 			cDiff += dD * E * M_PI;
@@ -822,15 +871,15 @@ void frag_main()
 #endif
 			cE += giE;
 			if ( cellHasDalc && cellGiAmb == 0 ) {
-				outDiff += cellAmbient( sw.N, Pw ) * rho * keepInd * s.ao;	// P picks the Ambient Only volume
-				outSpec += cellAmbient( reflect( -Vw, sw.N ), Pw ) * Espec * s.ao;
+				outDiff += cellAmbient( sw.N, Pw ) * rho * keepInd * diffAo;	// P picks the Ambient Only volume
+				outSpec += cellAmbient( reflect( -Vw, sw.N ), Pw ) * Espec * specAo;
 				cE += cellAmbient( sw.N, Pw );
 			} else if ( cellHasDalc ) {	// WW_CELL_GI_AMB (cellAmbGi); the reflection's ambient by the same luminance share
 				float3 a0 = cellAmbient( sw.N, Pw );
 				float3 a1 = cellAmbGi( a0, giE, Pw, sw.N );
 				float k = dot( a1, float3( 0.2126, 0.7152, 0.0722 ) ) / max( dot( a0, float3( 0.2126, 0.7152, 0.0722 ) ), 1.0e-6 );
-				outDiff += a1 * rho * keepInd * s.ao;
-				outSpec += cellAmbient( reflect( -Vw, sw.N ), Pw ) * k * Espec * s.ao;
+				outDiff += a1 * rho * keepInd * diffAo;
+				outSpec += cellAmbient( reflect( -Vw, sw.N ), Pw ) * k * Espec * specAo;
 				cE += a1;
 			}
 			if ( cellHasDir ) {
@@ -854,7 +903,7 @@ void frag_main()
 					                      lerp( cellCubeMat.x * sg.r, landLodK.y, landLodV ), envReflection, -ViewDir );
 				} else {
 					float3 cube = CubeMap.SampleLevel( _CubeMap_sampler, mul(R, reflMatrix), s.rough * 8.0 ).rgb;
-					cubeK = cube * cube * envReflection * Espec * s.ao;
+					cubeK = cube * cube * envReflection * Espec * specAo;
 				}
 			}
 			// the screen-space reflection over the cube term, by the march's confidence (cell_ssr.glsl)
@@ -870,7 +919,7 @@ void frag_main()
 		} else if ( cellGiSky ) {
 			// the grid's sky stands in for the weather's unshadowed ambient by its valid share,
 			// and takes the material's AO as that ambient did
-			outDiff += cDiff + giDiff * s.ao - cellGiSkyK( Pw, sw.N ) * ( outDiff - preAmbDiff );
+			outDiff += cDiff + giDiff * diffAo - cellGiSkyK( Pw, sw.N ) * ( outDiff - preAmbDiff );
 			// lane SPECOCC1: the cube reflection keeps the sky visibility along R (exactly 1 with the row off: untouched)
 			float specSky = cellSpecSky( Pw, sw.N, cellWorldDir( R ), s.rough );
 			if ( specSky < 1.0 )
@@ -1036,6 +1085,8 @@ void frag_main()
 		else
 			fragColor = float4( fragColor.rgb * clamp( rawVertexAlpha, 0.0, 1.0 ), 1.0 );
 	}
+	if ( killPx )
+		discard;
 }
 
 struct SPIRV_Cross_Input
