@@ -639,6 +639,31 @@ bool fogBloomRun( const FogBloomRun & t, unsigned & target, std::string & why );
 void fogBloomOnGl( const char * why );
 FxStat takeFogBloomStat();
 
+// lane VKFAR2 (row P8): the clouds in front of the scene (cloud_composite_view_ps's b31, spirv-cross --reflect of the shipped SPIR-V)
+inline constexpr FxField kT_cloudfront[] = {
+	{ "cvRect", 0, 4, 1, 0, 0 }, { "sceneExposure", 16, 1, 1, 0, 0 }, { "viewTransform", 20, 1, 1, 1, 0 },
+	{ "cvFront", 24, 1, 1, 1, 0 }, { "cvSceneZ", 32, 4, 1, 0, 0 }, { "cvProj", 48, 4, 1, 0, 0 },
+	{ "cvLtOn", 64, 1, 1, 1, 0 }, { "cvLtSrc", 80, 4, 1, 0, 0 }, { "cvLtPrm", 96, 4, 1, 0, 0 },
+	{ "cvLtCol", 112, 3, 1, 0, 0 }, { "cvCam", 128, 3, 1, 0, 3 }, { "cvCamKm", 176, 3, 1, 0, 0 },
+};
+inline constexpr int kT_cloudfrontBytes = 192;
+inline constexpr int kT_cloudfrontFrontAt = 24;
+inline constexpr int kT_cloudfrontFlashAt = 64;  // cvLtOn: a flash frame stays GL's (cloudfrontview's flash job)  //!< cvFront (the pass runs mode 2 only)
+struct CloudFrontRun
+{
+	int w = 0, h = 0, samples = 0, vp[4] = {};  //!< the tone frame's size and samples, GL's viewport at the pass
+	unsigned color = 0;             //!< the tone frame's colour (toneFrameIs)
+	FxTex tex[3];                   //!< cvHist, cvHistDepth (the clouds' shared history), cvScene (GL's depth max, copied)
+	std::uint8_t loose[kT_cloudfrontBytes] = {};
+	int red = 0;                    //!< gates only: 1 stencil test off, 2 no blend (written over), 4 cvFront 1 (the display mode)
+};
+/* GL current, cloud_composite's uniforms set with cvFront 2: the history over the tone frame's stencil-1 samples on Vulkan
+ * (blend ONE / ONE_MINUS_SRC_ALPHA, alpha ZERO / ONE; stencil EQUAL 1 mask 0x03, no write; no depth test), as cloudvol.cpp's
+ * frontPass( 2 ). false: why; nothing drawn (GL draws its quad) */
+bool cloudFrontRun( const CloudFrontRun & t, std::string & why );
+void cloudFrontOnGl( const char * why );
+FxStat takeCloudFrontStat();
+
 /* Lane VKOBJ1 (plan row G4, slice 1): the objects' opaque depth prepass (cellgpucull.cpp, lookdev_csmdepth_q.prog) on the
  * present device into a shared multisample depth target (sharedTarget type 0 with samples, GL_DEPTH_COMPONENT24 / 32F) that
  * GL's Hi-Z then reads. GL clears it; the two spans (back faces culled, then two-sided) run in one crossing (depth-only

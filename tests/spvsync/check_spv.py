@@ -62,7 +62,8 @@ VKFRAME_FX = {'volsky_view_ps': 'air/volsky_view_ps', 'cloud_march_view_ps': 'cl
 	'cloud_march_a_view_ps': 'clouds/cloud_march_a_view_ps', 'cloud_resolve_view_ps': 'clouds/cloud_resolve_view_ps',
 	'cloud_resolve_a_view_ps': 'clouds/cloud_resolve_a_view_ps',
 	'fardots_view_ps': 'far-lod/fardots_view_ps',	# lane VKFAR1
-	'fogbloom_view_ps': 'post/fogbloom_view_ps'}	# lane VKFAR2: hand-kept readable twin (P4b)
+	'fogbloom_view_ps': 'post/fogbloom_view_ps',	# lane VKFAR2: hand-kept readable twin (P4b)
+	'cloud_composite_view_ps': 'clouds/cloud_composite_view_ps'}	# lane VKFAR2: P8, frozen copy
 HLSL_SPECS += [('src/features/vkframe', k, 'vulkan1.2', 'vkframe_%s_spv' % k) for k in VKFRAME_FX]
 # lane VKFAR1: the far dots' vertex stage, the script's `fxv <name> <dir/file>` lines (fx()'s shifts, vs_6_0)
 VKFRAME_FXV = {'fardots_view_vs': 'far-lod/cell_fardots_view_vs'}

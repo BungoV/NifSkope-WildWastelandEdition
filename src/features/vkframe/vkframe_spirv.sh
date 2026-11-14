@@ -89,6 +89,8 @@ fxv fardots_view_vs far-lod/cell_fardots_view_vs
 fx fardots_view_ps far-lod/fardots_view_ps
 # lane VKFAR2 (P4b): the fog bloom's own pass, a hand-kept readable twin of cell_fogbloom (the depth and stencil read per sample)
 fx fogbloom_view_ps post/fogbloom_view_ps
+# lane VKFAR2 (P8): the clouds in front of the scene (cloud_composite cvFront 2), a frozen copy of the readable source
+fx cloud_composite_view_ps clouds/cloud_composite_view_ps
 # lane VKFAR1 round 2: the far cards' pixel stage (26 textures / texel buffers, b0 + b31), fx()'s shifts; its set is reflected
 # from the module, so every declared binding stays in it (-fspv-preserve-bindings) and GL's binding list maps one to one
 fxk() {

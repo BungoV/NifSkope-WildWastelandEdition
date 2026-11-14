@@ -56,6 +56,7 @@
 #include "features/vkframe/fardots_view_vs.spv.h"
 #include "features/vkframe/fardots_view_ps.spv.h"
 #include "features/vkframe/fogbloom_view_ps.spv.h"  // lane VKFAR2 (row P4b): the fog bloom's own pass (vkfogbloom.inc)
+#include "features/vkframe/cloud_composite_view_ps.spv.h"  // lane VKFAR2 (row P8): the clouds in front (vkcloudfront.inc)
 #include "features/vkframe/vkfarcards.h"  // lane VKFAR1 round 2: the far cards' inputs (vkfarcards.inc)
 #include "features/vkframe/obj_depth_vs.spv.h"  // lane VKOBJ1
 
@@ -712,6 +713,7 @@ bool farRecord( std::string & why );  // lane VKFAR1 (vkfardots.inc): fxWork's k
 bool fcRecord( std::string & why );   // lane VKFAR2 (vkfarcardsdraw.inc): fxWork's kind 3
 bool waterRecord( std::string & why );  // lane VKWATER3 (vkwater.inc): fxWork's kind 4 (VKFAR2: and 5, the far LOD rings)
 bool fbRecord( std::string & why );  // lane VKFAR2 (vkfogbloom.inc): fxWork's kind 6, the fog bloom
+bool cfRecord( std::string & why );  // lane VKFAR2 (vkcloudfront.inc): fxWork's kind 7, the clouds in front
 void waterDrop();
 void objDrop();  // lane VKOBJ1
 void blFree();  // lane VKOBJ2
@@ -5722,6 +5724,11 @@ bool fxWork( std::string & why )
 			v.vkEndCommandBuffer( F.cmd );
 			return false;
 		}
+	} else if ( F.kind == 7 ) {  // lane VKFAR2 (row P8): the clouds in front of the scene
+		if ( !cfRecord( why ) ) {
+			v.vkEndCommandBuffer( F.cmd );
+			return false;
+		}
 	} else {
 		if ( !F.fbR || ( !F.skipMarch && !F.fbM ) ) {
 			v.vkEndCommandBuffer( F.cmd );
@@ -6181,6 +6188,7 @@ FxStat takeCloudStat()
 #include "features/vkframe/vkfarcards.inc"  // lane VKFAR1 round 2: the far cards' inputs
 #include "features/vkframe/vkfarcardsdraw.inc"  // lane VKFAR2: the far cards drawn on the view
 #include "features/vkframe/vkfogbloom.inc"  // lane VKFAR2 (row P4b): the fog bloom's own pass
+#include "features/vkframe/vkcloudfront.inc"  // lane VKFAR2 (row P8): the clouds in front of the scene
 
 // lane VKLIGHT1: AO, the contact shadow lines and the SSGI cast as compute on the present device (vkpresent.h LightRun)
 namespace
