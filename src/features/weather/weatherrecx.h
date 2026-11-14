@@ -86,6 +86,15 @@ struct WwWeatherRecx
 	QStringList overrideFuncs;
 	QStringList stored;	//!< "<block>.<key>=<value>", sorted
 	QStringList recordFields;
+	/* lane WEATHERRECX4 (SPEC.md 1.8 "Read by the drawing"): the keys moved out of "stored for later", in the spec's
+	 * units; < 0 = not set (today's value; weatherrecxwire.h applies them). wired = "<key>=<value> <unit> (<source>)"
+	 * per key, file:<path> or "default (today)" */
+	float fogStartM = -1.0f, fogCutoffM = -1.0f, fogMaxOpacity = -1.0f, skyLightInFog = -1.0f;
+	float volExtinctionScale = -1.0f, volNearFadeInM = -1.0f, volViewDistanceM = -1.0f;
+	float multiScattering = -1.0f, skyLuminance[3] = { -1.0f, -1.0f, -1.0f }, localFogScale = -1.0f;
+	float sunIlluminance = -1.0f, precipFogExtinction = -1.0f, moonGameFactor = -1.0f, adaptFloor = -1.0f;
+	int precipOcclusion = -1;	//!< precipitation.occlusion: -1 not set, 0 false, 1 true
+	QStringList wired;
 	unsigned long long stamp = 0;	//!< moves whenever a value moves (memo keys)
 	QString key;	//!< the values as text (rebuild keys); empty when off
 	WwWeatherRecx()

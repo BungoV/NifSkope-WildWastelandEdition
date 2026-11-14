@@ -103,6 +103,8 @@ const char * wwAtmoHazeSource();
 
 //! the CPU transmittance (the LUT's math) from height km along cos zenith, haze from the last drawn frame
 void wwAtmoTransmittance( float heightKm, float cosZenith, float out[3] );
+//! lane WEATHERRECX4: the luminance transmittance of the clear-day reference air at the zenith (atmosphere.sunIlluminance)
+float wwAtmoClearZenithTransmittance();
 
 /* lane SKYA (ATMO2): the aerial perspective (Hillaire 2020 sec. 5.4), a froxel volume over the view built with the
  * sky's own medium and LUTs, read by every surface through lookdev_fog.glsl's wwFog (near geometry, the far LOD, the

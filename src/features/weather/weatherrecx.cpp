@@ -216,8 +216,72 @@ const Stored kStored[] = {
 	{ "precipitation", "snowCover.max", 0.0f, 500.0f, 0, "mm" }, { "precipitation", "snowCover.melt", 0.0f, 50.0f, 0, "mm/h" },
 	{ "precipitation", "occlusion", 0.0f, 1.0f, 2, "bool" }, { "precipitation", "fogExtinctionScale", 0.0f, 4.0f, 0, "x" },
 	{ "wind", "foliage", 0.0f, 4.0f, 0, "x" }, { "wind", "cloth", 0.0f, 4.0f, 0, "x" },
-	{ "night", "moonGameFactor", 1.0f, 20.0f, 0, "x" }, { "night", "adaptFloor", 0.0f, 1.0f, 0, "cd/m2" },
+	{ "night", "moonGameFactor", 1.0f, 20.0f, 0, "x" }, { "night", "adaptFloor", 0.001f, 1.0f, 0, "cd/m2" },
 };
+
+/* lane WEATHERRECX4 (bungo 11-14 "Yes, queue it"; SPEC.md 1.8 "Read by the drawing"): the stored keys whose drawing
+ * exists now read into WwWeatherRecx fields (weatherrecxwire.h applies them). Parsed and range-checked by readStored as
+ * before; they leave the "stored for later" echo and get one "weather recx wired:" line each (value + source). drawn = ""
+ * : read and logged, no drawing takes it yet (no plain scalar to wire; the lane draws nothing new). */
+struct Wired
+{
+	const char * name;
+	float WwWeatherRecx::*field;	//!< null: skyLuminance (rgb) / precipitation.occlusion (bool)
+	const char * unit, * drawn;
+};
+const Wired kWired[] = {
+	{ "atmosphere.fogStart", &WwWeatherRecx::fogStartM, "m", "the record fog's near distance (lookdevstage.cpp currentFog)" },
+	{ "atmosphere.fogCutoff", &WwWeatherRecx::fogCutoffM, "m", "the record fog's far distance (currentFog)" },
+	{ "atmosphere.fogMaxOpacity", &WwWeatherRecx::fogMaxOpacity, "share", "the record fog's max (currentFog)" },
+	{ "atmosphere.skyLightInFog", &WwWeatherRecx::skyLightInFog, "x", "" },
+	{ "atmosphere.volumetric.extinctionScale", &WwWeatherRecx::volExtinctionScale, "x", "the near air's extinction (cellvolair.cpp sigma0)" },
+	{ "atmosphere.volumetric.nearFadeIn", &WwWeatherRecx::volNearFadeInM, "m", "" },
+	{ "atmosphere.volumetric.viewDistance", &WwWeatherRecx::volViewDistanceM, "m", "the near air's end (cellvolair.cpp farD)" },
+	{ "atmosphere.multiScattering", &WwWeatherRecx::multiScattering, "x", "the sky's multiple scattering (atmosphere.cpp atMsOn)" },
+	{ "atmosphere.skyLuminance", nullptr, "x rgb", "" },
+	{ "atmosphere.localFogScale", &WwWeatherRecx::localFogScale, "x", "every airzone volume's fog (cellairzone.cpp)" },
+	{ "atmosphere.sunIlluminance", &WwWeatherRecx::sunIlluminance, "lux", "the sun above the air (lookdevstage.cpp sunLum)" },
+	{ "precipitation.occlusion", nullptr, "bool", "the wet cover test (cellprecip.cpp)" },
+	{ "precipitation.fogExtinctionScale", &WwWeatherRecx::precipFogExtinction, "x", "the rain / snow fog (cellvolair.cpp rfLaw)" },
+	{ "night.moonGameFactor", &WwWeatherRecx::moonGameFactor, "x", "the moon's gameplay factor (lookdevstage.cpp)" },
+	{ "night.adaptFloor", &WwWeatherRecx::adaptFloor, "cd/m2", "the camera's adaptation floor (physcamera.h)" },
+};
+
+//! lane WEATHERRECX4: the wired keys out of the stored map into r's fields; one "wired" entry per key (value + source)
+void takeWired( WwWeatherRecx & r, QMap<QString, QString> & stored, const QMap<QString, QString> & from )
+{
+	for ( const Wired & k : kWired ) {
+		const QString n = QLatin1String( k.name );
+		QString val;
+		if ( n == QLatin1String( "atmosphere.skyLuminance" ) ) {
+			if ( stored.contains( n + QLatin1String( ".r" ) ) ) {
+				const char * c[3] = { ".r", ".g", ".b" };
+				for ( int i = 0; i < 3; i++ ) {
+					r.skyLuminance[i] = stored.take( n + QLatin1String( c[i] ) ).toFloat();
+					val += ( i ? QStringLiteral( "," ) : QString() ) + QString::number( double( r.skyLuminance[i] ), 'g', 6 );
+				}
+			}
+		} else if ( stored.contains( n ) ) {
+			val = stored.take( n );
+			if ( k.field )
+				r.*( k.field ) = val.toFloat();
+			else
+				r.precipOcclusion = val.toInt() != 0 ? 1 : 0;
+		}
+		const QString drawn = *k.drawn ? QLatin1String( k.drawn ) : QStringLiteral( "read and logged, nothing draws it yet" );
+		r.wired << ( val.isEmpty() ? QStringLiteral( "%1=- %2 (default (today); %3)" ).arg( n, QLatin1String( k.unit ), drawn )
+								   : QStringLiteral( "%1=%2 %3 (file:%4; %5)" ).arg( n, val, QLatin1String( k.unit ),
+									   from.value( n, from.value( n + QLatin1String( ".r" ) ) ), drawn ) );
+	}
+}
+
+bool wiredAny( const WwWeatherRecx & r )
+{
+	for ( const Wired & k : kWired )
+		if ( k.field && r.*( k.field ) >= 0.0f )
+			return true;
+	return r.skyLuminance[0] >= 0.0f || r.precipOcclusion >= 0;
+}
 
 QStringList storedNames( const QString & block )
 {
@@ -619,6 +683,14 @@ QString keyOf( const WwWeatherRecx & r )
 	for ( const auto & m : c14 )
 		if ( m.v >= 0.0f )
 			x += QStringLiteral( " %1=%2" ).arg( QLatin1String( m.n ), f4( m.v ) );
+	// lane WEATHERRECX4: the wired keys (only when set: the text above is as before otherwise)
+	for ( const Wired & m : kWired )
+		if ( m.field && r.*( m.field ) >= 0.0f )
+			x += QStringLiteral( " %1=%2" ).arg( QLatin1String( m.name ), f4( r.*( m.field ) ) );
+	if ( r.skyLuminance[0] >= 0.0f )
+		x += QStringLiteral( " skyLuminance=%1,%2,%3" ).arg( f4( r.skyLuminance[0] ), f4( r.skyLuminance[1] ), f4( r.skyLuminance[2] ) );
+	if ( r.precipOcclusion >= 0 )
+		x += QStringLiteral( " occlusion=%1" ).arg( r.precipOcclusion );
 	for ( int i = 0; i < 32; i++ )
 		if ( r.layerLwc[i] >= 0.0f || r.layerRadius[i] >= 0.0f || r.layerIce[i] >= 0.0f || r.layerAnvil[i] >= 0.0f )
 			x += QStringLiteral( " L%1:lwc=%2,r=%3,ice=%4,anvil=%5,type=%6" ).arg( i ).arg( f4( r.layerLwc[i] ), f4( r.layerRadius[i] ),
@@ -939,7 +1011,7 @@ WwWeatherRecx resolveOne( const Who & w, const QStringList & roots, const QStrin
 	 * fadeOut win over the old transitions keys. */
 	WwRecxOverride cover;
 	bool anyHit = false;
-	QMap<QString, QString> stored;
+	QMap<QString, QString> stored, storedFrom;	// lane WEATHERRECX4: storedFrom = the file each stored key came from
 	for ( const char * block : { "atmosphere", "clouds", "night", "transitions", "precipitation", "wind", "temperature",
 			  "lightning", "textures" } ) {
 		const QString bn = QLatin1String( block );
@@ -974,6 +1046,9 @@ WwWeatherRecx resolveOne( const Who & w, const QStringList & roots, const QStrin
 			for ( const QString & n : notes )
 				sayOnce( QStringLiteral( "weather recx: " ) + n );
 			readStored( bn, raw, rel + QStringLiteral( " /" ) + bn, stored );
+			for ( auto it = stored.constBegin(); it != stored.constEnd(); ++it )	// lane WEATHERRECX4: each key's file
+				if ( it.key().startsWith( bn + QLatin1Char( '.' ) ) )
+					storedFrom[it.key()] = rel;
 		}
 		const Obj b{ raw, rel + QStringLiteral( " /" ) + bn };
 		WwWeatherRecx before = r;
@@ -1261,6 +1336,10 @@ WwWeatherRecx resolveOne( const Who & w, const QStringList & roots, const QStrin
 	}
 	for ( auto it = src.constBegin(); it != src.constEnd(); ++it )
 		r.sources << it.key() + QLatin1Char( '=' ) + it.value();
+	// lane WEATHERRECX4: the wired keys leave the stored map; one line per key (value + source) per weather open
+	takeWired( r, stored, storedFrom );
+	for ( const QString & l : r.wired )
+		sayOnce( QStringLiteral( "weather recx wired: %1 %2" ).arg( w.edid, l ) );
 	// lane WEATHERRECX2: the keys stored for later, echoed (nothing draws them yet)
 	for ( auto it = stored.constBegin(); it != stored.constEnd(); ++it )
 		r.stored << it.key() + QLatin1Char( '=' ) + it.value();
@@ -1301,6 +1380,13 @@ void blendInto( WwWeatherRecx & b, const WwWeatherRecx & a, float t )
 		b.inscatterColor[i] = lerpSet( a.inscatterColor[i], b.inscatterColor[i], t );
 		b.dirInscatter[i] = lerpSet( a.dirInscatter[i], b.dirInscatter[i], t );
 	}
+	for ( const Wired & m : kWired )	// lane WEATHERRECX4: the wired keys blend like every number
+		if ( m.field )
+			b.*( m.field ) = lerpSet( a.*( m.field ), b.*( m.field ), t );
+	for ( int i = 0; i < 3; i++ )
+		b.skyLuminance[i] = lerpSet( a.skyLuminance[i], b.skyLuminance[i], t );
+	if ( b.precipOcclusion < 0 && t < 1.0f )
+		b.precipOcclusion = a.precipOcclusion;	// a switch: the leaving weather's until the change is done
 	b.dirInscatterExp = lerpSet( a.dirInscatterExp, b.dirInscatterExp, t );
 	b.dirInscatterStart = lerpSet( a.dirInscatterStart, b.dirInscatterStart, t );
 }
@@ -1496,7 +1582,7 @@ const WwWeatherRecx & wwWeatherRecx()
 	next.on =next.visibilityM >= 0.0f || next.hazeHeightM >= 0.0f || next.ozone >= 0.0f || next.coverage >= 0.0f
 		|| next.density >= 0.0f || next.layers > 0 || next.stars >= 0.0f || next.moonlight >= 0.0f || next.type >= 0.0f
 		|| !next.hazeType.isEmpty() || next.windSpeed >= 0.0f || next.lightningFreq >= 0.0f || next.transHours >= 0.0f
-		|| next.recordRed != 0 || cloud14Any( next );
+		|| next.recordRed != 0 || cloud14Any( next ) || wiredAny( next );
 	next.key = next.on ? keyOf( next ) : QString();
 	next.stamp = cur.stamp;
 	// lane WEATHERRECX1: one line per weather open, every input's source (file:<path> | generated | record | default)

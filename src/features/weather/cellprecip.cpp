@@ -17,6 +17,7 @@
 #include "features/weather/rainwetlaw.h"
 #include "features/weather/airtempmath.h"	// lane WEATHERRECX2: temperature.air -> phase, wetting / drying
 #include "features/weather/weatherrecx.h"	// lane WEATHERRECX1: precipitation.wetting / drying
+#include "features/weather/weatherrecxwire.h"	// lane WEATHERRECX4: precipitation.occlusion
 #include "features/weather/recxphysical.h"	// lane AIRPERF1 A9: the entry's physicalWeather switch
 #include "features/shadows/shadowset.h"	// lane WETWEATHER2: the cover map leaves the terrain out
 #include "gl/glshape.h"
@@ -561,11 +562,31 @@ float wwCellRainWetAmount( Scene * scene )
 		const bool fromFile = !wwWeatherRecordRed( WwRecPrecip );
 		// lane WEATHERRECX2: the air temperature slows drying in the cold and wetting under snow (airtempmath.h)
 		const float airC = airTempRed() ? WwAirTemp::kNotSet : wx.airTemp;
-		const float wetMin = WwAirTemp::wettingMinutes( wx.wetting, airC ), dryMin = WwAirTemp::dryingMinutes( wx.drying, airC );
+		/* lane WEATHERRECX4: drying from temperature, humidity, wind and sun (Penman; airtempmath.h): the file's hours are
+		 * the time at 15 C, RH 60 %, wind.speed 2 m/s, clear sky, sun 45 degrees high. Red WW_WEATHER_DRYING_RED=1 (live): the
+		 * temperature-only factor of WEATHERRECX2. */
+		const bool dryRed = wwEnv( "WW_WEATHER_DRYING_RED" ).trimmed() == QByteArray( "1" );
+		WwAirTemp::DryingAir air;
+		air.t = airC;
+		air.rh = wx.humidity >= 0.0f ? wx.humidity * 0.01f : -1.0f;
+		air.wind = wx.windSpeed;
+		air.sinSun = wwLookdevSunSinHeight();
+		air.cover = wx.coverage;
+		const float wetMin = WwAirTemp::wettingMinutes( wx.wetting, airC );
+		const float dryMin = dryRed ? WwAirTemp::dryingMinutes( wx.drying, airC ) : WwAirTemp::dryingMinutesAir( wx.drying, air );
 		s.wet = WwRainWet::update( s.wet, s.target, float( now - s.lastMs ) * 0.001f, rainNow, rainPrev, !interior,
 			red != "nosnap", fromFile ? wetMin : -1.0f, fromFile ? dryMin : -1.0f );
-		s.airNote = fromFile && airC > WwAirTemp::kNotSet ? QStringLiteral( " air %1C wetting %2 drying %3 min" )
-			.arg( double( airC ), 0, 'f', 1 ).arg( double( wetMin ), 0, 'f', 1 ).arg( double( dryMin ), 0, 'f', 1 ) : QString();
+		if ( dryRed )
+			s.airNote = fromFile && airC > WwAirTemp::kNotSet ? QStringLiteral( " air %1C wetting %2 drying %3 min (RED WW_WEATHER_DRYING_RED=1)" )
+				.arg( double( airC ), 0, 'f', 1 ).arg( double( wetMin ), 0, 'f', 1 ).arg( double( dryMin ), 0, 'f', 1 ) : QString();
+		else
+			s.airNote = fromFile && wx.drying > 0.0f ? QStringLiteral( " air %1C wetting %2 min; drying %3 min = file %4 x %5 (Penman: RH %6 %7, wind %8 m/s %9, sun height %10 deg, cloud %11 %12)" )
+				.arg( airC > WwAirTemp::kNotSet ? double( airC ) : double( WwAirTemp::kDryRefT ), 0, 'f', 1 ).arg( double( wetMin ), 0, 'f', 1 )
+				.arg( double( dryMin ), 0, 'f', 0 ).arg( double( wx.drying ), 0, 'f', 0 ).arg( double( WwAirTemp::dryingFactorAir( air ) ), 0, 'f', 2 )
+				.arg( double( air.rh >= 0.0f ? air.rh * 100.0f : WwAirTemp::kDryRefRh * 100.0f ), 0, 'f', 0 ).arg( air.rh >= 0.0f ? "file" : "reference" )
+				.arg( double( air.wind >= 0.0f ? air.wind : WwAirTemp::kDryRefWind ), 0, 'f', 1 ).arg( air.wind >= 0.0f ? "file" : "reference" )
+				.arg( double( std::asin( std::clamp( air.sinSun, -1.0f, 1.0f ) ) * 57.29578f ), 0, 'f', 0 )
+				.arg( double( air.cover >= 0.0f ? air.cover : 0.0f ), 0, 'f', 2 ).arg( air.cover >= 0.0f ? "file" : "reference" ) : QString();
 	}
 	s.lastMs = now;
 	s.moving = s.wet != s.target;
@@ -573,6 +594,8 @@ float wwCellRainWetAmount( Scene * scene )
 	s.cover = false;
 	if ( red == "nocover" ) {
 		s.coverWhy = QStringLiteral( " (RED WW_CELL_RAINWET_RED=nocover)" );
+	} else if ( !WwRecxWire::occlusion( true, wwWeatherRecx().precipOcclusion ) ) {	// lane WEATHERRECX4
+		s.coverWhy = QStringLiteral( " (precipitation.occlusion false: no cover test)" );
 	} else if ( !interior && s.wet > 0.0f ) {
 		const QString note = rcBuild( scene );
 		if ( !note.isEmpty() )

@@ -11,6 +11,9 @@
 #include "features/weather/weatherrecx.h"
 #include "features/weather/wxoverride.h"
 #include "gl/celllooks.h"
+#ifndef WX3_OLD
+#include "features/weather/weatherrecxwire.h"	// lane WEATHERRECX4
+#endif
 
 #include <QCoreApplication>
 #include <QFile>
@@ -187,6 +190,65 @@ void dump( const WwWeatherRecx & r )
 	put( "use.windSpeedByte", ws );
 	put( "use.windDirByte", wd );
 	put( "use.windTurbByte", wt );
+	/* lane WEATHERRECX4: the 15 wired keys and the drawn terms they feed, at fixed probe inputs (today's values: fog
+	 * near 1000 u / far 20000 u / max 0.8, froxel sigma 0.05 and end 70000 u, sky MS 1, zone fog 0.3, rain fog 0.2,
+	 * moon factor 8.1, floor 1). The old reader has no such keys: it prints them unset and the probe values as drawn. */
+#ifdef WX3_OLD
+	const float skyLum[3] = { -1, -1, -1 };
+	const float fogStartM = -1, fogCutoffM = -1, fogMaxOpacity = -1, skyLightInFog = -1, volExtinctionScale = -1,
+		volNearFadeInM = -1, volViewDistanceM = -1, multiScattering = -1, localFogScale = -1, sunIlluminance = -1,
+		precipFogExtinction = -1, moonGameFactor = -1, adaptFloor = -1;
+	const int precipOcclusion = -1;
+	put( "use.fogNear", 1000.0f );
+	put( "use.fogFar", 20000.0f );
+	put( "use.fogMax", 0.8f );
+	put( "use.volSigma", 0.05f );
+	put( "use.volFar", 70000.0f );
+	put( "use.msOn", 1.0f );
+	put( "use.localFog", 0.3f );
+	put( "use.precipFog", 0.2 );
+	put( "use.sunFactor", 1.0f );
+	put( "use.occlusion", 1 );
+	put( "use.moonGame", 8.1f );
+	put( "use.adaptFloor", 1.0f );
+#else
+	const float * skyLum = r.skyLuminance;
+	const float fogStartM = r.fogStartM, fogCutoffM = r.fogCutoffM, fogMaxOpacity = r.fogMaxOpacity,
+		skyLightInFog = r.skyLightInFog, volExtinctionScale = r.volExtinctionScale, volNearFadeInM = r.volNearFadeInM,
+		volViewDistanceM = r.volViewDistanceM, multiScattering = r.multiScattering, localFogScale = r.localFogScale,
+		sunIlluminance = r.sunIlluminance, precipFogExtinction = r.precipFogExtinction, moonGameFactor = r.moonGameFactor,
+		adaptFloor = r.adaptFloor;
+	const int precipOcclusion = r.precipOcclusion;
+	put( "use.fogNear", WwRecxWire::fogNear( 1000.0f, fogStartM ) );
+	put( "use.fogFar", WwRecxWire::fogFar( 20000.0f, fogCutoffM ) );
+	put( "use.fogMax", WwRecxWire::fogMax( 0.8f, fogMaxOpacity ) );
+	put( "use.volSigma", WwRecxWire::volExtinction( 0.05f, volExtinctionScale ) );
+	put( "use.volFar", WwRecxWire::volViewDistance( 70000.0f, volViewDistanceM, 69.93007f ) );
+	put( "use.msOn", WwRecxWire::multiScatter( 1.0f, multiScattering ) );
+	put( "use.localFog", WwRecxWire::localFog( 0.3f, localFogScale ) );
+	put( "use.precipFog", WwRecxWire::precipFog( 0.2, precipFogExtinction ) );
+	put( "use.sunFactor", WwRecxWire::sunFactor( sunIlluminance, 133800.0f, 0.8f ) );
+	put( "use.occlusion", WwRecxWire::occlusion( true, precipOcclusion ) ? 1 : 0 );
+	put( "use.moonGame", WwRecxWire::moonGame( 8.1f, moonGameFactor, false ) );
+	put( "use.adaptFloor", WwRecxWire::adaptFloor( 1.0f, adaptFloor ) );
+	for ( const QString & s : r.wired )
+		g_out << QStringLiteral( "wiredlog.%1" ).arg( s );
+#endif
+	put( "fogStartM", fogStartM );
+	put( "fogCutoffM", fogCutoffM );
+	put( "fogMaxOpacity", fogMaxOpacity );
+	put( "skyLightInFog", skyLightInFog );
+	put( "volExtinctionScale", volExtinctionScale );
+	put( "volNearFadeInM", volNearFadeInM );
+	put( "volViewDistanceM", volViewDistanceM );
+	put( "multiScattering", multiScattering );
+	put3( "skyLuminance", skyLum );
+	put( "localFogScale", localFogScale );
+	put( "sunIlluminance", sunIlluminance );
+	put( "precipOcclusion", precipOcclusion );
+	put( "precipFogExtinction", precipFogExtinction );
+	put( "moonGameFactor", moonGameFactor );
+	put( "adaptFloor", adaptFloor );
 #ifndef WX3_OLD
 	for ( const QString & s : r.stored )
 		g_out << QStringLiteral( "stored.%1" ).arg( s );

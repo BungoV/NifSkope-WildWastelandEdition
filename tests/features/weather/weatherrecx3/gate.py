@@ -13,7 +13,7 @@ import json, os, shutil, subprocess, sys
 
 HOURS = '0,2,3.5,5,8,11,14,17,20,23'
 REL = 'Plugins/Fusion Shaders - Assets/Weathers'
-NOCMP = ('stored.', 'source=')
+NOCMP = ('stored.', 'source=', 'wiredlog.')  # WEATHERRECX4: the wired keys' telemetry text (branch only)
 
 args = sys.argv[1:]
 plan_dir = None	# --plan <Weathers>: the weathers to resolve come from this set (the control: a root with no files)

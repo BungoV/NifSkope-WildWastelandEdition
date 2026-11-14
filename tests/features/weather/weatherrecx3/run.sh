@@ -29,6 +29,10 @@ python -I "$H/gate.py" "$WK/dump_old.exe" "$WK/dump_new.exe" $LIST "$ORIG" "$REG
 echo "== red_ref (reference = a broken ORIGINAL; the true migrated set must FAIL)"
 python -I "$H/gate.py" "$WK/dump_old.exe" "$WK/dump_new.exe" $LIST "$WK/reds/red_ref" "$REGEN" "$WK/work_ref" \
   migrated="$WK/migrated"
+echo "== WEATHERRECX4 wired-key reds (one key set in CommonwealthClear: each must FAIL on that key and its use.* term)"
+WX4=""
+for n in $(cat "$WK/reds/wx4_reds.txt"); do WX4="$WX4 $n=$WK/reds/$n"; done
+python -I "$H/gate.py" "$WK/dump_old.exe" "$WK/dump_new.exe" $LIST "$ORIG" "$REGEN" "$WK/work_wx4" $WX4
 echo "== control (no file at all, no groundFog set: the generated rung alone)"
 python -I "$H/gate.py" --plan "$ORIG" "$WK/dump_old.exe" "$WK/dump_new.exe" $LIST "$WK/reds/empty" "$WK/noflat" "$WK/work_ctl" \
   nofile="$WK/reds/empty"

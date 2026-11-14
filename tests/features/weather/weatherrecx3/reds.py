@@ -41,6 +41,33 @@ def hh(e):
 edit(clone(mig, 'red_value'), 'Fallout4/CommonwealthClear.recx', vis)
 edit(clone(mig, 'red_unit'), 'Fallout4/CommonwealthRain.recx', wet)
 edit(clone(orig, 'red_ref'), 'Fallout4/CommonwealthFoggy.recx', hh)
+
+# WEATHERRECX4: one red per wired key, set in Fallout4/CommonwealthClear only (each must FAIL on that key and its drawn
+# use.* term; the three read-only keys on the key alone). Names: wx4_<key>.
+WIRED = [
+    ('atmosphere', 'fogStart', 500.0), ('atmosphere', 'fogCutoff', 9000.0), ('atmosphere', 'fogMaxOpacity', 0.5),
+    ('atmosphere', 'skyLightInFog', 2.0), ('atmosphere', 'volumetric.extinctionScale', 2.0),
+    ('atmosphere', 'volumetric.nearFadeIn', 100.0), ('atmosphere', 'volumetric.viewDistance', 500.0),
+    ('atmosphere', 'multiScattering', 0.5), ('atmosphere', 'skyLuminance', [1.2, 1.0, 0.8]),
+    ('atmosphere', 'localFogScale', 2.0), ('atmosphere', 'sunIlluminance', 100000.0),
+    ('precipitation', 'occlusion', False), ('precipitation', 'fogExtinctionScale', 2.0),
+    ('night', 'moonGameFactor', 4.0), ('night', 'adaptFloor', 0.1),
+]
+
+
+def setter(block, key, value):
+    def fn(e):
+        e.setdefault(block, {})[key] = value
+    return fn
+
+
+WX4 = []
+for block, key, value in WIRED:
+    name = 'wx4_' + key.replace('.', '_')
+    edit(clone(mig, name), 'Fallout4/CommonwealthClear.recx', setter(block, key, value))
+    WX4.append(name)
+with open(os.path.join(out, 'wx4_reds.txt'), 'w', encoding='utf-8', newline='\n') as f:
+    f.write('\n'.join(WX4) + '\n')
 e = os.path.join(out, 'empty')
 if os.path.isdir(e):
     shutil.rmtree(e)
