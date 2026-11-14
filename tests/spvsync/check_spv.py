@@ -69,7 +69,8 @@ HLSL_SPECS += [('src/features/vkframe', k, 'vulkan1.2', 'vkframe_%s_spv' % k) fo
 # lane VKFAR1 round 2: the far cards' pixel stage, the script's `fxk <name> <dir/file>` lines (fx() + every declared binding kept)
 VKFRAME_FXK = {'farcards_view_ps': 'far-lod/farcards_view_ps',
 	'water_view_ps': 'water/water_view_ps',	# lane VKWATER3 (frozen twins, as HLSLSRC2's)
-	'farlod_view_ps': 'core/farlod_view_ps'}	# lane VKFAR2: the far LOD rings
+	'farlod_view_ps': 'core/farlod_view_ps',	# lane VKFAR2: the far LOD rings
+	'skystars_view_ps': 'clouds/lookdev_clouds_ps', 'skymoon_view_ps': 'sky/sky_moon_ps'}	# lane VKFAR2 G2: the sky bodies
 HLSL_SPECS += [('src/features/vkframe', k, 'vulkan1.2', 'vkframe_%s_spv' % k) for k in VKFRAME_FXK]
 # lane VKFAR2: the far cards' vertex stage, the script's `fxc <name> <dir/file>` lines (its own bindings in the cards' set)
 VKFRAME_FXC = {'farcards_view_vs': 'far-lod/farcards_view_vs'}	# frozen twin, as HLSLSRC2's
@@ -86,6 +87,10 @@ VKFRAME_FXL_ARGS = ['-fvk-b-shift', '256', '0', '-fvk-t-shift', '120', '0', '-fv
 	'-fspv-preserve-bindings']
 VKFRAME_FXL = {'farlod_view_vs': 'core/water_view_vs'}
 HLSL_SPECS += [('src/features/vkframe', k, 'vulkan1.2', 'vkframe_%s_spv' % k) for k in VKFRAME_FXL]
+# lane VKFAR2 G2: the sky bodies' vertex stages, the script's `fxb <name> <dir/file>` lines (b0 at 0, their b31 at 32)
+VKFRAME_FXB_ARGS = ['-fvk-bind-register', 'b0', '0', '0', '0', '-fvk-bind-register', 'b31', '0', '32', '0', '-fspv-preserve-bindings']
+VKFRAME_FXB = {'skystars_view_vs': 'clouds/lookdev_clouds_vs', 'skymoon_view_vs': 'core/lookdev_bill_vs'}
+HLSL_SPECS += [('src/features/vkframe', k, 'vulkan1.2', 'vkframe_%s_spv' % k) for k in VKFRAME_FXB]
 DEFAULT_G = 'E:/Tools/RenderDoc/RenderDoc_1.45_64/plugins/spirv/glslangValidator.exe'
 DEFAULT_DXC = 'E:/Tools/dxc/bin/x64/dxc.exe'
 
@@ -198,6 +203,11 @@ def script_ok(tree):
 	llines = dict(re.findall(r'^fxl ([a-z0-9_]+) ([A-Za-z0-9_/+-]+)$', vf, re.M))
 	if llines != VKFRAME_FXL:
 		bad.append('src/features/vkframe/vkframe_spirv.sh: its fxl lines (%s) are not this checker\'s far LOD vertex stages' % ' '.join(sorted(llines)))
+	if '\t"$DXC" -spirv -fspv-target-env=vulkan1.2 -T vs_6_0 -E main ' + ' '.join(VKFRAME_FXB_ARGS) + ' -Fo "$1.spv" ' not in vf:
+		bad.append('src/features/vkframe/vkframe_spirv.sh: its fxb() compile line changed')
+	blines = dict(re.findall(r'^fxb ([a-z0-9_]+) ([A-Za-z0-9_/+-]+)$', vf, re.M))
+	if blines != VKFRAME_FXB:
+		bad.append('src/features/vkframe/vkframe_spirv.sh: its fxb lines (%s) are not this checker\'s sky-body vertex stages' % ' '.join(sorted(blines)))
 	return bad
 
 
@@ -332,8 +342,11 @@ def main(argv):
 			if k in VKFRAME_FXL:
 				src = os.path.join(tree, 'res/shaders/hlsl', VKFRAME_FXL[k] + '.hlsl')
 				hdefs = VKFRAME_FXL_ARGS
+			if k in VKFRAME_FXB:
+				src = os.path.join(tree, 'res/shaders/hlsl', VKFRAME_FXB[k] + '.hlsl')
+				hdefs = VKFRAME_FXB_ARGS
 			m = re.search(r'hlsl profile: ([cvp]s_6_[0-9])', open(src, encoding='utf-8', errors='replace').read())
-			if k in VKFRAME_FXV or k in VKFRAME_FXC or k in VKFRAME_FXW or k in VKFRAME_FXL:
+			if k in VKFRAME_FXV or k in VKFRAME_FXC or k in VKFRAME_FXW or k in VKFRAME_FXL or k in VKFRAME_FXB:
 				m = re.match(r'(vs_6_0)', 'vs_6_0')
 			opt = [] if d == 'src/features/vkframe' else ['-O0']   # vkframe_spirv.sh builds optimised
 			r = subprocess.run([dxc, '-spirv', '-fspv-target-env=' + env, '-T', m.group(1) if m else 'ps_6_0' if k in VKFRAME_SKY or k in VKFRAME_FX or k in VKFRAME_FXK else 'cs_6_0', '-E', 'main']

@@ -253,8 +253,11 @@ struct Vk
 	VKP( vkCmdBindVertexBuffers ); VKP( vkCmdBindIndexBuffer ); VKP( vkCmdDrawIndexedIndirect ); VKP( vkCmdSetDepthBias );
 	// lane VKAIR1: the air's stencil reference, the zero textures' clear
 	VKP( vkCmdSetStencilReference ); VKP( vkCmdClearColorImage );
+	VKP( vkCmdDrawIndexed );  // lane VKFAR2 G2: the stars' mesh and the moon's quad
 	// lane VKOBJ1: GL's clip z in [-w, w] for the objects' perspective prepass (VK_EXT_depth_clip_control)
 	bool clipControl = false;
+	// lane VKFAR2 G2: GL's single-sample backdrop on a multisampled frame (VK_EXT_sample_locations: every sample at the centre)
+	VkSampleCountFlags centreSamples = 0;
 	VKP( vkEnumerateDeviceExtensionProperties ); VKP( vkGetPhysicalDeviceFeatures2 );
 	// lane VKOBJ2: the bindless maps as descriptor indexing (vkbindless.inc), the row by BaseInstance, GL's anisotropy
 	bool descIndexing = false, drawParams = false, anisotropy = false;
@@ -489,8 +492,9 @@ bool makeDevice( std::string & why )
 	qi.queueCount = 1;
 	qi.pQueuePriorities = &prio;
 	const char * dext[] = { VK_KHR_SWAPCHAIN_EXTENSION_NAME, VK_KHR_EXTERNAL_MEMORY_WIN32_EXTENSION_NAME,
-		VK_KHR_EXTERNAL_SEMAPHORE_WIN32_EXTENSION_NAME, VK_EXT_DEPTH_CLIP_CONTROL_EXTENSION_NAME };
+		VK_KHR_EXTERNAL_SEMAPHORE_WIN32_EXTENSION_NAME, VK_EXT_DEPTH_CLIP_CONTROL_EXTENSION_NAME, nullptr };
 	std::uint32_t nDext = 3;
+	bool hasSampleLoc = false;
 	// lane VKOBJ1: depth clip control when offered (the objects' prepass refuses without it)
 	VkPhysicalDeviceDepthClipControlFeaturesEXT clipFeat { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DEPTH_CLIP_CONTROL_FEATURES_EXT };
 	if ( v.vkEnumerateDeviceExtensionProperties && v.vkGetPhysicalDeviceFeatures2 ) {
@@ -499,8 +503,10 @@ bool makeDevice( std::string & why )
 		std::vector<VkExtensionProperties> ep( ne );
 		v.vkEnumerateDeviceExtensionProperties( v.phys, nullptr, &ne, ep.data() );
 		bool has = false;
-		for ( const VkExtensionProperties & e : ep )
+		for ( const VkExtensionProperties & e : ep ) {
 			has = has || std::strcmp( e.extensionName, VK_EXT_DEPTH_CLIP_CONTROL_EXTENSION_NAME ) == 0;
+			hasSampleLoc = hasSampleLoc || std::strcmp( e.extensionName, VK_EXT_SAMPLE_LOCATIONS_EXTENSION_NAME ) == 0;
+		}
 		if ( has ) {
 			VkPhysicalDeviceFeatures2 f2 { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2 };
 			f2.pNext = &clipFeat;
@@ -511,6 +517,14 @@ bool makeDevice( std::string & why )
 	if ( v.clipControl )
 		nDext = 4;
 	clipFeat.pNext = nullptr;
+	if ( hasSampleLoc ) {  // lane VKFAR2 G2: the sample counts that take custom positions (the sky bodies' pipelines)
+		VkPhysicalDeviceSampleLocationsPropertiesEXT slp { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SAMPLE_LOCATIONS_PROPERTIES_EXT };
+		VkPhysicalDeviceProperties2 pp { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2 };
+		pp.pNext = &slp;
+		v.vkGetPhysicalDeviceProperties2( v.phys, &pp );
+		v.centreSamples = slp.sampleLocationSampleCounts;
+		dext[nDext++] = VK_EXT_SAMPLE_LOCATIONS_EXTENSION_NAME;
+	}
 	// round 11: the tone pass's fragment shader reads SV_SampleIndex (the SampleRateShading capability)
 	VkPhysicalDeviceFeatures offered {}, en {};
 	if ( v.vkGetPhysicalDeviceFeatures )
@@ -607,6 +621,7 @@ bool makeDevice( std::string & why )
 	LD( vkCmdDispatch ); LD( vkCreateComputePipelines );
 	LD( vkCmdBindVertexBuffers ); LD( vkCmdBindIndexBuffer ); LD( vkCmdDrawIndexedIndirect ); LD( vkCmdSetDepthBias );
 	LD( vkCmdSetStencilReference ); LD( vkCmdClearColorImage );
+	LD( vkCmdDrawIndexed );
 #undef LD
 	if ( !v.vkGetMemoryWin32HandleKHR || !v.vkGetSemaphoreWin32HandleKHR || !v.vkCreateSwapchainKHR )
 		return fail( "the device lacks a swapchain / win32 export entry point" );
@@ -4702,8 +4717,18 @@ struct Sky
 	VkFramebuffer fb = VK_NULL_HANDLE;  // over the tone frame's colour, made each run (the frame may be remade between)
 	int w = 0, h = 0, vp[4] = {};
 	WwVkPresent::SkyStat st;
+	// lane VKFAR2 G2: this frame's LUTs (GL's names, their twins, the views) for the bodies; held: the crossing waits for them
+	GLuint lutGl[4] = {}, lutTwin[4] = {};
+	VkImageView lutView[4] = {};
+	bool held = false;
 };
 constexpr VkDeviceSize kSkyLooseAt = 512;  // past b0 (336), on any minUniformBufferOffsetAlignment up to 256
+
+// lane VKFAR2 G2 (vkskybody.inc): the bodies' side of the sky's pass
+bool skyBodiesTakeArm();                          // the backdrop armed the bodies (cleared)
+void skyBodyTexNames( std::vector<GLuint> & out );  // the twins the joined bodies sample (the crossing's lists)
+void skyBodyRecord( VkCommandBuffer cmd );        // their draws, after the sky's triangle (the worker)
+void skyBodiesDone();                             // the crossing went or failed: nothing joined any more
 
 Sky & sky()
 {
@@ -4961,6 +4986,7 @@ bool skyWork( std::string & why )
 	v.vkCmdBindPipeline( S.cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, S.pipe );
 	v.vkCmdBindDescriptorSets( S.cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, S.layout, 0, 1, &S.set, 0, nullptr );
 	v.vkCmdDraw( S.cmd, 3, 1, 0, 0 );
+	skyBodyRecord( S.cmd );  // lane VKFAR2 G2: the stars and the moon globe that joined, in GL's order
 	v.vkCmdEndRenderPass( S.cmd );
 	if ( v.vkEndCommandBuffer( S.cmd ) != VK_SUCCESS ) {
 		why = "vkEndCommandBuffer (the sky) failed";
@@ -4992,10 +5018,49 @@ void skyDrop()
 	drain();
 	vk().vkDeviceWaitIdle( vk().dev );
 	S.pending = false;
+	S.held = false;
+	skyBodiesDone();
 	if ( S.fb )
 		vk().vkDestroyFramebuffer( vk().dev, S.fb, nullptr );
 	S.fb = VK_NULL_HANDLE;
 	skySemsDrop( gl().ok && S.semCtx == gl().ctx );
+}
+
+/* the crossing: GL's frame so far and the LUT copies (and the bodies' twins) signalled -> the worker's sky and bodies ->
+ * GL waits. false: why; nothing signals vkDone (GL does not wait it) */
+bool skyCross( std::string & why )
+{
+	Sky & S = sky();
+	Gl & g = gl();
+	std::vector<GLuint> tex = { tone().colorTex, S.lutTwin[0], S.lutTwin[1], S.lutTwin[2], S.lutTwin[3] };
+	skyBodyTexNames( tex );
+	const std::vector<GLenum> lay( tex.size(), kLayoutGeneral );
+	g.signalSemaphore( S.glDoneGl, 0, nullptr, GLuint( tex.size() ), tex.data(), lay.data() );
+	g.flush();
+	Worker & W = wk();
+	std::uint64_t want = 0;
+	{
+		std::lock_guard<std::mutex> lk( W.m );
+		want = W.toneDone + 1;
+	}
+	Work j;
+	j.k = -1;
+	j.sky = true;
+	hand( j );
+	bool ok = false;
+	{
+		std::unique_lock<std::mutex> lk( W.m );
+		W.idle.wait( lk, [&W, want]() { return W.toneDone >= want; } );
+		ok = W.toneOk;
+		why = W.toneWhy;
+	}
+	S.held = false;
+	skyBodiesDone();
+	if ( !ok )
+		return false;
+	g.waitSemaphore( S.vkDoneGl, 0, nullptr, GLuint( tex.size() ), tex.data(), lay.data() );
+	S.pending = true;
+	return true;
 }
 }  // namespace
 
@@ -5019,6 +5084,13 @@ bool skyRun( const SkyRun & t, std::string & why )
 		S.brokenWhy = "the sky on Vulkan broke: " + w;
 		return refuse( S.brokenWhy );
 	};
+	const bool hold = skyBodiesTakeArm();  // lane VKFAR2 G2
+	if ( S.held ) {  // a held crossing never sent (nothing was signalled): dropped, it drew nothing
+		S.held = false;
+		skyBodiesDone();
+		S.st.flushFails++;
+		S.st.bodyWhy = "a held sky crossing was never flushed (dropped)";
+	}
 	if ( S.broken )
 		return refuse( S.brokenWhy );
 	if ( !v.ok || !g.ok || g.ctx != reinterpret_cast<void *>( wglGetCurrentContext() ) )
@@ -5096,34 +5168,17 @@ bool skyRun( const SkyRun & t, std::string & why )
 	S.w = t.w;
 	S.h = t.h;
 	std::memcpy( S.vp, t.vp, sizeof( S.vp ) );
-	// GL's frame so far and the LUT copies done -> the worker's sky -> GL's backdrop layers and objects
-	GLuint tex[5] = { T.colorTex, lutTex[0], lutTex[1], lutTex[2], lutTex[3] };
-	GLenum lay[5];
-	for ( GLenum & l : lay )
-		l = kLayoutGeneral;
-	g.signalSemaphore( S.glDoneGl, 0, nullptr, 5, tex, lay );
-	g.flush();
-	Worker & W = wk();
-	std::uint64_t want = 0;
-	{
-		std::lock_guard<std::mutex> lk( W.m );
-		want = W.toneDone + 1;
+	for ( int k = 0; k < 4; k++ ) {
+		S.lutGl[k] = t.lut[k];
+		S.lutTwin[k] = lutTex[k];
+		S.lutView[k] = sLut[k]->view;
 	}
-	Work j;
-	j.k = -1;
-	j.sky = true;
-	hand( j );
-	bool ok = false;
-	{
-		std::unique_lock<std::mutex> lk( W.m );
-		W.idle.wait( lk, [&W, want]() { return W.toneDone >= want; } );
-		ok = W.toneOk;
-		w = W.toneWhy;
-	}
-	if ( !ok )
+	// lane VKFAR2 G2: armed, the crossing waits for the bodies (skyBodiesFlush sends it); else it goes now
+	if ( hold ) {
+		S.held = true;
+	} else if ( !skyCross( w ) ) {
 		return breakOff( w );  // nothing signals vkDone: GL does not wait it; GL draws its quad this frame
-	g.waitSemaphore( S.vkDoneGl, 0, nullptr, 5, tex, lay );
-	S.pending = true;
+	}
 	const double ms = nowMs() - t0;
 	S.st.runs++;
 	S.st.cpuMs += ms;
@@ -8233,6 +8288,7 @@ ObjStat takeObjStat()
 
 #include "features/vkframe/vkbindless.inc"  // lane VKOBJ2: the bindless maps as descriptor indexing
 #include "features/vkframe/vkobjtex.inc"  // lane VKOBJ3: the texture cache's BC twins and their handles in the table
+#include "features/vkframe/vkskybody.inc"  // lane VKFAR2 G2: the stars and the moon globe in the sky's pass
 
 namespace
 {

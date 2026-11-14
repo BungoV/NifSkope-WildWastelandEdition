@@ -669,6 +669,8 @@ private:
 
 //! lane VKOBJ3: set by TexCache::loadTex around its texLoad (only the cache's own loads may take a twin)
 bool wwVkObjTexArm = false;
+//! lane VKFAR2 G2: set beside it for a Textures\Sky load while the sky bodies may draw on Vulkan (their maps' twins)
+bool wwVkSkyTexArm = false;
 
 //! Create texture with glTexStorage2D using GLI (lane STREAM1: from a gli::texture or, in place, a DdsView)
 #ifndef Q_OS_MACOS
@@ -681,9 +683,10 @@ static GLuint GLI_create_texture(
 	target = glProfile.translate( texture.target() );
 
 	/* lane VKOBJ3: WW_VKOBJ_TEX=1, a cache load (TexCache::loadTex arms it) of a block-compressed 2D texture is made on the
-	 * present device (its storage is the Vulkan image's; the uploads below fill it as GL's own) */
+	 * present device (its storage is the Vulkan image's; the uploads below fill it as GL's own). Lane VKFAR2 G2: so is a
+	 * sky body's map (wwVkSkyTexArm), whatever WW_VKOBJ_TEX says */
 	bool wwTwin = false;
-	if ( wwVkObjTexArm && WwBl::vkTexOn() && texture.target() == gli::TARGET_2D && texture.layers() == 1
+	if ( wwVkObjTexArm && ( WwBl::vkTexOn() || wwVkSkyTexArm ) && texture.target() == gli::TARGET_2D && texture.layers() == 1
 		&& texture.faces() == 1 && gli::is_compressed( texture.format() ) ) {
 		const glm::tvec3<GLsizei> e( texture.extent() );
 		unsigned tw = 0;

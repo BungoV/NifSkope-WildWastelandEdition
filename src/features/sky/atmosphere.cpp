@@ -510,6 +510,20 @@ bool skyOnVulkan( Renderer * r, NifSkopeOpenGLContext::Program * p, GLuint color
 	return WwVkPresent::skyRun( t, why );
 }
 
+// lane VKFAR2 G2: this frame's sky as it went to Vulkan (on: skyRun took it), for a GL redraw when its held crossing fails
+struct SkyAgain
+{
+	bool on = false;
+	GLint vp[4] = {};
+	GLuint lut[4] = {};  // units 0..3: atTransTex, atSunView, atMoonView, atMsTex (step 3's bindTex)
+};
+
+SkyAgain & skyAgain()
+{
+	static SkyAgain a;
+	return a;
+}
+
 // lane VKSKY1: the route's line, one a 5 s window while the sky is wanted on Vulkan
 void skyVkSay( bool wanted, const char * glWhy )
 {
@@ -539,6 +553,15 @@ void skyVkSay( bool wanted, const char * glWhy )
 		line += QStringLiteral( ", on GL %1 frames (last: %2)" ).arg( st.gl ).arg( QString::fromStdString( st.glWhy ) );
 	if ( st.fails > 0 )
 		line += QStringLiteral( ", %1 refused to GL (last: %2)" ).arg( st.fails ).arg( QString::fromStdString( st.failWhy ) );
+	// lane VKFAR2 G2: the stars and the moon globe in the sky's pass (red WW_VKVIEW_SKYBODY_RED=1: on GL, no crossing held)
+	if ( wwEnvInt( "WW_VKVIEW_SKYBODY_RED" ) == 1 )
+		line += QStringLiteral( "; bodies on GL (red WW_VKVIEW_SKYBODY_RED=1)" );
+	else
+		line += QStringLiteral( "; bodies in its pass: stars %1, moon %2" ).arg( st.stars ).arg( st.moons );
+	if ( st.bodyGl > 0 )
+		line += QStringLiteral( ", %1 bodies refused to GL (last: %2)" ).arg( st.bodyGl ).arg( QString::fromStdString( st.bodyWhy ) );
+	if ( st.flushFails > 0 )
+		line += QStringLiteral( ", %1 held crossings failed or dropped (the sky and bodies redrawn on GL)" ).arg( st.flushFails );
 	said = line;
 	qInfo().noquote() << line;
 }
@@ -1086,6 +1109,15 @@ bool wwAtmoDrawSky( Scene * scene, const WwAtmoInputs & in, QString * line )
 			}
 			if ( !vkDrew )
 				quad( r );
+			{	// lane VKFAR2 G2: what a failed held crossing redraws on GL (wwAtmoSkyGlAgain)
+				SkyAgain & again = skyAgain();
+				again.on = vkDrew;
+				std::memcpy( again.vp, vp, sizeof( again.vp ) );
+				again.lut[0] = g.trans.tex;
+				again.lut[1] = g.sunView.tex;
+				again.lut[2] = g.moonView.tex;
+				again.lut[3] = g.ms.tex;
+			}
 			r->stopProgram();
 		} else {
 			ok = false;
@@ -1185,6 +1217,42 @@ unsigned wwAtmoMultiScatterTex()
 const WwAtmoFrame & wwAtmoFrame()
 {
 	return g_frame;
+}
+
+bool wwAtmoSkyGlAgain( Renderer * r )
+{
+	SkyAgain & a = skyAgain();
+	if ( !a.on || !r )
+		return false;
+	a.on = false;
+	auto fn = r->fn;
+	auto p = r->useProgram( "atmo_sky.prog" );
+	if ( !p )
+		return false;
+	// step 3's state: no depth, blend, cull, scissor or stencil; the scissor and stencil come back as they were
+	const bool wasScissor = fn->glIsEnabled( GL_SCISSOR_TEST ), wasStencil = fn->glIsEnabled( GL_STENCIL_TEST );
+	fn->glDisable( GL_DEPTH_TEST );
+	fn->glDisable( GL_BLEND );
+	fn->glDisable( GL_CULL_FACE );
+	fn->glDisable( GL_SCISSOR_TEST );
+	fn->glDisable( GL_STENCIL_TEST );
+	fn->glDepthMask( GL_FALSE );
+	glViewport( a.vp[0], a.vp[1], a.vp[2], a.vp[3] );
+	for ( int u = 0; u < 4; u++ ) {
+		fn->glActiveTexture( GLenum( GL_TEXTURE0 + u ) );
+		fn->glBindTexture( GL_TEXTURE_2D, a.lut[u] );
+	}
+	quad( r );
+	r->stopProgram();
+	for ( int u = 3; u >= 0; u-- ) {
+		fn->glActiveTexture( GLenum( GL_TEXTURE0 + u ) );
+		fn->glBindTexture( GL_TEXTURE_2D, 0 );
+	}
+	if ( wasScissor )
+		fn->glEnable( GL_SCISSOR_TEST );
+	if ( wasStencil )
+		fn->glEnable( GL_STENCIL_TEST );
+	return true;
 }
 
 const char * wwAtmoHazeSource()

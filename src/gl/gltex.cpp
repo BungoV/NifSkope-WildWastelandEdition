@@ -551,6 +551,21 @@ extern double wwTexLoadBytesMs, wwTexLoadQueryMs;
 extern bool wwTexLoadTaken;
 extern qint64 wwTexLoadSize;
 extern bool wwVkObjTexArm;	// lane VKOBJ3 (gltexloaders.cpp): this load may take a BC twin
+extern bool wwVkSkyTexArm;	// lane VKFAR2 G2 (gltexloaders.cpp): a sky body's map takes one too
+
+/* lane VKFAR2 G2: a Textures\Sky map loaded while the sky bodies may draw on Vulkan (WW_VKVIEW=1, neither red) is made as
+ * a BC twin, so the stars and the moon globe sample the bytes GL uploaded once (vkskybody.h) */
+static bool wwSkyTexTwin( const QString & fileName )
+{
+	WW_SWITCH_STATIC( bool, want, wwEnvInt( "WW_VKVIEW" ) == 1 && wwEnvInt( "WW_VKVIEW_RED" ) != 1
+		&& wwEnvInt( "WW_VKVIEW_SKYBODY_RED" ) != 1 );
+	if ( !want )
+		return false;
+	QString f = fileName;
+	f.replace( QChar( '\\' ), QChar( '/' ) );
+	return f.startsWith( QLatin1StringView( "textures/sky/" ), Qt::CaseInsensitive )
+		|| f.contains( QLatin1StringView( "/textures/sky/" ), Qt::CaseInsensitive );
+}
 
 std::uint16_t TexCache::loadTex( Tex & txIn, const NifModel * nif )
 {
@@ -619,6 +634,7 @@ std::uint16_t TexCache::loadTex( Tex & txIn, const NifModel * nif )
 	wwTexLoadSize = 0;
 	const GLuint wwId0 = t->id[0];	// lane VKOBJ3: a BC twin replaces the name
 	wwVkObjTexArm = true;
+	wwVkSkyTexArm = wwSkyTexTwin( fileName );
 	try
 	{
 		i->mipmaps = texLoad( nif, i->filepath, i->format, t->target, i->width, i->height, t->id );
@@ -629,6 +645,7 @@ std::uint16_t TexCache::loadTex( Tex & txIn, const NifModel * nif )
 		i->status = e;
 	}
 	wwVkObjTexArm = false;
+	wwVkSkyTexArm = false;
 	if ( t->id[0] != wwId0 ) {
 		WwBl::bornName( t->id[0] );
 		paramForget( t->id[0] );

@@ -284,6 +284,9 @@ struct SkyStat
 	std::string glWhy, failWhy;
 	int pipelines = 0;
 	double buildMs = 0.0;
+	//! lane VKFAR2 G2 (vkskybody.h): stars / moon draws in the sky's pass, bodies sent to GL, held crossings that failed
+	int stars = 0, moons = 0, bodyGl = 0, flushFails = 0;
+	std::string bodyWhy;
 };
 SkyStat takeSkyStat();
 

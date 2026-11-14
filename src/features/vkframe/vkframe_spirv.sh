@@ -123,4 +123,17 @@ fxl() {
 	rm -f "$1.spv"
 }
 fxl farlod_view_vs core/water_view_vs
+# lane VKFAR2 G2: the sky bodies in the backdrop pass after the sky. The readable sources compile as they stand: the stars
+# (lookdev_clouds), the moon globe (lookdev_bill + sky_moon). Pixel stages through fxk(); vertex stages share the set:
+# b0 at 0 and their own b31 at 32 (vkskybody.h holds all four blocks' layouts)
+fxb() {
+	"$DXC" -spirv -fspv-target-env=vulkan1.2 -T vs_6_0 -E main -fvk-bind-register b0 0 0 0 -fvk-bind-register b31 0 32 0 -fspv-preserve-bindings -Fo "$1.spv" "$(cygpath -m "$ROOT/res/shaders/hlsl/$2.hlsl" 2>/dev/null || echo "$ROOT/res/shaders/hlsl/$2.hlsl")"
+	python -I "$ROOT/tools/spv_header.py" "$1.spv" "vkframe_$1_spv" "$1.spv.h" < /dev/null
+	rm -f "$1.spv"
+}
+fxb skystars_view_vs clouds/lookdev_clouds_vs
+fxk skystars_view_ps clouds/lookdev_clouds_ps
+fxb skymoon_view_vs core/lookdev_bill_vs
+fxk skymoon_view_ps sky/sky_moon_ps
+ls -la skystars_view_vs.spv.h skystars_view_ps.spv.h skymoon_view_vs.spv.h skymoon_view_ps.spv.h
 ls -la csm_view_vs.spv.h obj_depth_vs.spv.h sky_view_ps.spv.h bloom_down.spv.h bloom_hold.spv.h bloom_up.spv.h bloom_src.spv.h bloom_comb.spv.h bloom_back.spv.h tonemap.spv.h measure_q.spv.h tone_view_vs.spv.h tone_view_ps.spv.h taa_view_mv_cs.spv.h taa_view_resolve_cs.spv.h taa_view_rcas_ps.spv.h
