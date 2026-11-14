@@ -170,4 +170,14 @@ fxc objcell_pbrmcellcsm_ps pbrm_cellcsm_ps ps_6_0 "$PS_SHIFT"
 "$DXC" -spirv -fspv-target-env=vulkan1.2 -T cs_6_0 -E main -Fo objbl_samples_cs.spv "$(cygpath -m "$ROOT/res/shaders/hlsl/near/objbl_samples_cs.hlsl" 2>/dev/null || echo "$ROOT/res/shaders/hlsl/near/objbl_samples_cs.hlsl")"
 python -I "$ROOT/tools/spv_header.py" objbl_samples_cs.spv vkframe_objbl_samples_cs_spv objbl_samples_cs.spv.h < /dev/null
 rm -f objbl_samples_cs.spv
+# lane VKOBJ5: particles_cell.prog (res/shaders/hlsl/particles): the record pass and the expand stage (VKFAR2's precip shape,
+# VS_SHIFT) and the cell-lit pixel twin on the app's variant (WW_CELL_AIRZONE + WW_CELL_FOGLEAK + WW_FRAME_UBO), every binding kept
+fxp() {
+	"$DXC" -spirv -fspv-target-env=vulkan1.2 -HV 2021 -T "$3" -E main -D WW_CELL_AIRZONE=1 -D WW_CELL_FOGLEAK=1 -D WW_FRAME_UBO=1 $4 -fspv-preserve-bindings -fvk-use-dx-position-w -Fo "$1.spv" "$(cygpath -m "$ROOT/res/shaders/hlsl/particles/$2.hlsl" 2>/dev/null || echo "$ROOT/res/shaders/hlsl/particles/$2.hlsl")"
+	python -I "$ROOT/tools/spv_header.py" "$1.spv" "vkframe_$1_spv" "$1.spv.h" < /dev/null
+	rm -f "$1.spv"
+}
+fxp objpfx_cs pfx_view_cs cs_6_0 "$VS_SHIFT"
+fxp objpfx_vs pfx_view_vs vs_6_0 "$VS_SHIFT"
+fxp objpfx_cell_ps particles_cell_ps ps_6_0 "$PS_SHIFT"
 ls -la csm_view_vs.spv.h obj_depth_vs.spv.h sky_view_ps.spv.h bloom_down.spv.h bloom_hold.spv.h bloom_up.spv.h bloom_src.spv.h bloom_comb.spv.h bloom_back.spv.h tonemap.spv.h measure_q.spv.h tone_view_vs.spv.h tone_view_ps.spv.h taa_view_mv_cs.spv.h taa_view_resolve_cs.spv.h taa_view_rcas_ps.spv.h
