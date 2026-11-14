@@ -404,8 +404,9 @@ float VisibDiv( float NdotL, float NdotV, float VdotH, float NdotH )
 	return 1.0 / NdotV;
 }
 
-// this is a normalized Phong model used in the Torrance-Sparrow model (the vanilla path's lobe: the game's sun and light
-// passes, Schlick ^5 and the lobe capped at 15; the material's Fresnel Power stays the editor BRDF's)
+// this is a normalized Phong model used in the Torrance-Sparrow model
+// (FO4MATCH1: the vanilla path's lobe: the game's sun and light passes, Schlick ^5 and the lobe capped at 15; the
+// material's Fresnel Power stays the editor BRDF's)
 float3 TorranceSparrow(float NdotL, float NdotH, float NdotV, float VdotH, float3 color, float power, float F0)
 {
 	// D: Normalized phong model
@@ -414,7 +415,8 @@ float3 TorranceSparrow(float NdotL, float NdotH, float NdotV, float VdotH, float
 	// G: Torrance-Sparrow visibility term divided by NdotV
 	float G_NdotV = VisibDiv( NdotL, NdotV, VdotH, NdotH );
 
-	// F: Schlick's approximation, ^5
+	// F: Schlick's approximation
+	// (FO4MATCH1: ^5, as the game's passes)
 	float fc = 1.0 - VdotH;
 	float fc5 = fc * fc * fc * fc * fc;
 	float F = min( F0 + ( 1.0 - F0 ) * fc5, 1.0 );
@@ -1058,7 +1060,8 @@ void frag_main()
 		//emissive += rim * D.rgb * specMask;
 	}
 
-	// Diffuse: the vanilla path takes the game's Oren-Nayar (its light and sun passes); the editor BRDF the full model
+	// Diffuse
+	// (FO4MATCH1: the vanilla path takes the game's Oren-Nayar (its light and sun passes); the editor BRDF the full model)
 	float diff = editorBrdf ? OrenNayarFull( NdotL, dot(normal, V), dot(L, V), 1.0 - smoothness )
 	                        : OrenNayar( L, V, normal, 1.0 - smoothness, NdotL );
 	diffuse = (float3)(diff);
@@ -1107,7 +1110,8 @@ void frag_main()
 	// lane GAPFIX1: the game's deferred lights read only the spec scale (pool1 findings 5); blended draws are forward and keep the colour
 	cellSpecTint = ( or( ( alphaFlags & 8 ) != 0, ( cellRed & 262144 ) != 0 ) ) ? specColor : (float3)( 1.0 );	// WW_CELL_SPEC_RED=tint
 	if ( cellOn && !cellInterior && cellHasDir ) {
-		// lane BOUNCE1: the sun's specular x the imagespace Sunlight Scale, as its diffuse (cellDirColor)
+		// lane BOUNCE1: the sun's specular x the imagespace Sunlight Scale, as its diffuse (cellDirColor); sqrt space here
+		// (FO4MATCH1: the editor BRDF keeps the sqrt space; the vanilla path below is linear in the light)
 		float3 Dx = D.rgb * sqrt( max( cellSunScale, 0.0 ) );	// the sun's root (sqrt space)
 		if ( editorBrdf ) {
 			float3 sx = specSun * sqrt( max( cellSunScale, 0.0 ) ) + A.rgb * specMask * fresnelSchlick( VdotH, 0.04 ) * ( 1.0 - NdotV ) * D.rgb;
@@ -1151,7 +1155,8 @@ void frag_main()
 	} else if ( cellOn && cellGiSky && ( cellRed & 131072 ) != 0 )
 		color.rgb -= cellGiSkyK( cellWorldPos( -ViewDir ), cellWorldDir( normal ) ) * A.rgb * albedo;
 	float3 cellPreLit = color.rgb;	// lane SSGI2: an exterior without the sun adds the glow before cellLit's root
-	// lane PRTP3: the cell's own lights (src/gl/celllights.h); cellSpecTint is set above the exterior sun's terms
+	// lane PRTP3: the cell's own lights (src/gl/celllights.h)
+	// (FO4MATCH1: cellSpecTint is set above the exterior sun's terms)
 	if ( cellOn )
 		color.rgb = cellLit( color.rgb, albedo, normal, -ViewDir, V, specMask, cellSpecTint, alphaR, kSmith,
 		                     emissive * glowScaleSRGB, cubeK );
