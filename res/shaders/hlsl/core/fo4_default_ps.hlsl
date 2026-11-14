@@ -404,7 +404,8 @@ float VisibDiv( float NdotL, float NdotV, float VdotH, float NdotH )
 	return 1.0 / NdotV;
 }
 
-// this is a normalized Phong model used in the Torrance-Sparrow model
+// this is a normalized Phong model used in the Torrance-Sparrow model (the vanilla path's lobe: the game's sun and light
+// passes, Schlick ^5 and the lobe capped at 15; the material's Fresnel Power stays the editor BRDF's)
 float3 TorranceSparrow(float NdotL, float NdotH, float NdotV, float VdotH, float3 color, float power, float F0)
 {
 	// D: Normalized phong model
@@ -413,8 +414,10 @@ float3 TorranceSparrow(float NdotL, float NdotH, float NdotV, float VdotH, float
 	// G: Torrance-Sparrow visibility term divided by NdotV
 	float G_NdotV = VisibDiv( NdotL, NdotV, VdotH, NdotH );
 
-	// F: Schlick's approximation
-	float F = fresnelSchlick( VdotH, F0 );
+	// F: Schlick's approximation, ^5
+	float fc = 1.0 - VdotH;
+	float fc5 = fc * fc * fc * fc * fc;
+	float F = min( F0 + ( 1.0 - F0 ) * fc5, 1.0 );
 
 	// Torrance-Sparrow:
 	// (F * G * D) / (4 * NdotL * NdotV)
@@ -422,9 +425,23 @@ float3 TorranceSparrow(float NdotL, float NdotH, float NdotV, float VdotH, float
 	// and division by NdotL is removed since
 	// outgoing radiance is determined by:
 	// BRDF * NdotL * L()
-	float spec = (F * G_NdotV * D) / 4.0;
+	float spec = min( (F * G_NdotV * D) / 4.0, 15.0 );
 
 	return color * spec * M_PI;
+}
+
+// The game's ambient specular lobe (its sun pass): (1 - saturate(NdotV))^(3 - gloss) x 0.25; the caller multiplies the
+// ambient at the mirror direction and the spec mask
+float ambSpecGame( float NdotV, float gloss )
+{
+	return pow( 1.0 - clamp( NdotV, 0.0, 1.0 ), 3.0 - gloss ) * 0.25;
+}
+
+// The game's sun tail beside Oren-Nayar + rim (its sun pass), per unit of light and albedo: translucency a x sat(-NL)
+// (a = the translucency mask) + wrap max(sat((NL + w) / (w + 1)) - sat(NL), 0), w = the material's wrap (subsurface rolloff)
+float sunTailGame( float NdotL, float a, float w )
+{
+	return a * clamp( -NdotL, 0.0, 1.0 ) + max( clamp( ( NdotL + w ) / ( w + 1.0 ), 0.0, 1.0 ) - clamp( NdotL, 0.0, 1.0 ), 0.0 );
 }
 
 float3 tonemap(float3 x)
@@ -936,16 +953,18 @@ void frag_main()
 	            * specMask * NdotL0 * D.rgb * specColor;
 	float ambF0 = 0.04;
 	float ambMask = specMask;
+	float3 specSunK = (float3)( 0.0 );	// the vanilla lobe x NdotL x the spec mask, before the light (the cell sun takes it linear)
 	if ( !editorBrdf ) {
 		/* lane VANILLADEF1: the upstream law (and the game's light specular, cell_lights.glsl): normalized Phong,
 		 * n = 2^(gloss x 10 + 1), F0 0.2, no specular without a specular map, no (1 - F) on the diffuse */
 		F = 0.0;
 		ambF0 = 0.2;
 		spec = (float3)( 0.0 );
-		if ( hasSpecularMap )
-			spec = TorranceSparrow( NdotL0, NdotH, NdotV, VdotH, (float3)( specMask ), exp2( smoothness * 10.0 + 1.0 ), 0.2 )
-			       * NdotL0 * D.rgb * specColor;
-		else
+		if ( hasSpecularMap ) {
+			specSunK = TorranceSparrow( NdotL0, NdotH, NdotV, VdotH, (float3)( specMask ), exp2( smoothness * 10.0 + 1.0 ), 0.2 )
+			           * NdotL0;
+			spec = specSunK * D.rgb * specColor;
+		} else
 			ambMask = 1.0;
 	}
 	float3 specSun = spec;	// lane SUNCELL1: the sun's specular before the cube (the exterior cell sun keeps it)
@@ -1015,6 +1034,13 @@ void frag_main()
 #endif
 		emissive += backlight * D.rgb;
 	}
+#ifdef WW_CELLLIGHTS
+	/* FO4MATCH1: the vanilla path's sun tail is the game's (sunTailGame: translucency, a = the back light power, + the
+	 * wrap from the subsurface rolloff), linear in the light as its diffuse (cellLit: albedo x sun x cellBackK x the
+	 * sun's visibility); the far placement's baked sky visibility stays its shade. The editor BRDF keeps the leaf law above */
+	if ( cellOn && cellHasDir && ( cellRed & 2048 ) == 0 && !editorBrdf )
+		cellBackK = sunTailGame( dot( normal, L ), clamp( backlightPower, 0.0, 1.0 ), subsurfaceRolloff ) * max( wwFarSkyVis, 0.0 );
+#endif
 
 	float3 rim = (float3)(0.0);
 	if ( hasRimlight ) {
@@ -1024,13 +1050,16 @@ void frag_main()
 		//emissive += rim * D.rgb * specMask;
 	}
 
-	// Diffuse
-	float diff = OrenNayarFull( NdotL, dot(normal, V), dot(L, V), 1.0 - smoothness );
+	// Diffuse: the vanilla path takes the game's Oren-Nayar (its light and sun passes); the editor BRDF the full model
+	float diff = editorBrdf ? OrenNayarFull( NdotL, dot(normal, V), dot(L, V), 1.0 - smoothness )
+	                        : OrenNayar( L, V, normal, 1.0 - smoothness, NdotL );
 	diffuse = (float3)(diff);
 
 	float3 soft = (float3)(0.0);
 	float wrap = NdotL;
-	if ( or( hasSoftlight, subsurfaceRolloff > 0.0 ) ) {
+	if ( !editorBrdf )
+		diffuse += sunTailGame( NdotL, 0.0, subsurfaceRolloff );	// the game's wrap; its translucency is the back light above
+	else if ( or( hasSoftlight, subsurfaceRolloff > 0.0 ) ) {
 		wrap = (wrap + subsurfaceRolloff) / (1.0 + subsurfaceRolloff);
 		soft = albedo * max( 0.0, wrap ) * smoothstep( 1.0, 0.0, sqrt(diff) );
 
@@ -1051,7 +1080,10 @@ void frag_main()
 	color.rgb += A.rgb * albedo;
 	// Specular
 	color.rgb += spec;
-	color.rgb += A.rgb * ambMask * fresnelSchlick( VdotH, ambF0 ) * (1.0 - NdotV) * D.rgb;
+	if ( editorBrdf )
+		color.rgb += A.rgb * ambMask * fresnelSchlick( VdotH, ambF0 ) * (1.0 - NdotV) * D.rgb;
+	else	// the game's ambient specular lobe on the flat ambient, in this colour's root space (its square is the game's term)
+		color.rgb += A.rgb * sqrt( ambMask * ambSpecGame( NdotV, smoothness ) );
 	// Emissive
 	color.rgb += emissive * glowScaleSRGB;
 #ifdef WW_CELLLIGHTS
@@ -1064,10 +1096,20 @@ void frag_main()
 	// lane SKY1: outdoors the bounce grid's sky stands in for the weather's unshadowed ambient (0 elsewhere)
 	/* lane SUNCELL1: an exterior with the weather's sun (cellHasDir) hands cellLit the ambient alone; the sun's
 	 * diffuse and the cube are the game's terms there, its specular the viewport's (cellExtSpec, linear) */
+	// lane GAPFIX1: the game's deferred lights read only the spec scale (pool1 findings 5); blended draws are forward and keep the colour
+	cellSpecTint = ( or( ( alphaFlags & 8 ) != 0, ( cellRed & 262144 ) != 0 ) ) ? specColor : (float3)( 1.0 );	// WW_CELL_SPEC_RED=tint
 	if ( cellOn && !cellInterior && cellHasDir ) {
-		// lane BOUNCE1: the sun's specular x the imagespace Sunlight Scale, as its diffuse (cellDirColor); sqrt space here
-		float3 sx = specSun * sqrt( max( cellSunScale, 0.0 ) ) + A.rgb * specMask * fresnelSchlick( VdotH, 0.04 ) * ( 1.0 - NdotV ) * D.rgb;
-		cellExtSpec = sx * sx;
+		// lane BOUNCE1: the sun's specular x the imagespace Sunlight Scale, as its diffuse (cellDirColor)
+		float3 Dx = D.rgb * sqrt( max( cellSunScale, 0.0 ) );	// the sun's root (sqrt space)
+		if ( editorBrdf ) {
+			float3 sx = specSun * sqrt( max( cellSunScale, 0.0 ) ) + A.rgb * specMask * fresnelSchlick( VdotH, 0.04 ) * ( 1.0 - NdotV ) * D.rgb;
+			cellExtSpec = sx * sx;
+		} else {
+			/* FO4MATCH1: the game's sun specular is linear in the light (the lobe x the sun, not the root sum squared), and
+			 * its ambient specular is the lobe on the weather's ambient at the mirror direction (the DALC, else the flat one) */
+			float3 ambR = cellExtDalc ? cellAmbient( cellWorldDir( R ), cellWorldPos( -ViewDir ) ) : A.rgb * A.rgb;
+			cellExtSpec = specSunK * cellSpecTint * Dx * Dx + specMask * cellSpecTint * ambSpecGame( NdotV, smoothness ) * ambR;
+		}
 		/* lane SUNCELL1: the ambient is the weather's directional ambient (DALC, the hour's keys) through the
 		 * interior's law (cellAmbient), not the flat NAM0 Ambient the viewport carries */
 		float3 Ax = A.rgb;
@@ -1101,9 +1143,7 @@ void frag_main()
 	} else if ( cellOn && cellGiSky && ( cellRed & 131072 ) != 0 )
 		color.rgb -= cellGiSkyK( cellWorldPos( -ViewDir ), cellWorldDir( normal ) ) * A.rgb * albedo;
 	float3 cellPreLit = color.rgb;	// lane SSGI2: an exterior without the sun adds the glow before cellLit's root
-	// lane PRTP3: the cell's own lights (src/gl/celllights.h)
-	// lane GAPFIX1: the game's deferred lights read only the spec scale (pool1 findings 5); blended draws are forward and keep the colour
-	cellSpecTint = ( or( ( alphaFlags & 8 ) != 0, ( cellRed & 262144 ) != 0 ) ) ? specColor : (float3)( 1.0 );	// WW_CELL_SPEC_RED=tint
+	// lane PRTP3: the cell's own lights (src/gl/celllights.h); cellSpecTint is set above the exterior sun's terms
 	if ( cellOn )
 		color.rgb = cellLit( color.rgb, albedo, normal, -ViewDir, V, specMask, cellSpecTint, alphaR, kSmith,
 		                     emissive * glowScaleSRGB, cubeK );
