@@ -19,6 +19,10 @@
 // Also: pcSeedS's bits as fxPack reads them (glGetUniformiv on a uint) equal the value set, or the gate fails.
 // Reds (each must FAIL in at least one case): red 1 the cull radius 0, red 2 the strip's last two corners swapped,
 // red 4 the near fade dropped, red 8 the air dropped (A = 1, B = 0), red 16 a look run on the plain pipelines. Last line `PRECIPVIEW GATE OK` or `PRECIPVIEW GATE FAILED`.
+// Localisation (plain cases, printed only, never part of the verdict): GL's geometry stage is captured twice by transform
+// feedback (gl_Position, gUv, gQ, gView and the flat outputs; any float differing between the two captures = GL not
+// deterministic before raster), and the Vulkan run is repeated with its records read back (PrecipRun::recOut) to diff
+// per particle against the capture: ulp buckets per field, and which flipped pixels lie under a differing particle.
 #define main fxview_main
 #include "fxview.cpp"
 #undef main
@@ -81,7 +85,21 @@ Verdict judge( const std::vector<std::uint16_t> & bg, const std::vector<std::uin
 	return v;
 }
 
-GLuint program3( const std::string & vs, const std::string & gs, const std::string & fs, const char * tag )
+// ruling 11-14 (the near snow reds' localisation, harness only): GL's geometry-stage outputs by transform feedback
+// (a copy of the program linked with these varyings; the shaders unchanged) against the Vulkan records read back
+void( WINAPI * tfVaryings )( GLuint, GLsizei, const char * const *, GLenum ) = nullptr;
+void( WINAPI * tfBegin )( GLenum ) = nullptr;
+void( WINAPI * tfEnd )() = nullptr;
+void( WINAPI * genQueries )( GLsizei, GLuint * ) = nullptr;
+void( WINAPI * beginQuery )( GLenum, GLuint ) = nullptr;
+void( WINAPI * endQuery )( GLenum ) = nullptr;
+void( WINAPI * getQueryObjectuiv )( GLuint, GLenum, GLuint * ) = nullptr;
+void( WINAPI * getBufferSubData )( GLenum, std::ptrdiff_t, std::ptrdiff_t, void * ) = nullptr;
+const char * kTfVar[8] = { "gl_Position", "gUv", "gQ", "gView", "gCol", "gBox", "gA", "gB" };
+const int kTfAt[9] = { 0, 4, 6, 8, 11, 15, 19, 22, 25 };  // each varying's first float in a captured vertex, 25 a vertex
+const int kTfFloats = 25;
+
+GLuint program3( const std::string & vs, const std::string & gs, const std::string & fs, const char * tag, bool tf = false )
 {
 	const GLuint a = shader( fVert, vs, tag ), b = shader( 0x8DD9, gs, tag ), c = shader( fFrag, fs, tag );  // GL_GEOMETRY_SHADER
 	if ( !a || !b || !c )
@@ -90,6 +108,8 @@ GLuint program3( const std::string & vs, const std::string & gs, const std::stri
 	f.attachShader( p, a );
 	f.attachShader( p, b );
 	f.attachShader( p, c );
+	if ( tf )
+		tfVaryings( p, 8, kTfVar, 0x8C8C );  // GL_INTERLEAVED_ATTRIBS
 	f.linkProgram( p );
 	GLint ok = 0;
 	f.getProgramiv( p, fLinked, &ok );
@@ -100,6 +120,143 @@ GLuint program3( const std::string & vs, const std::string & gs, const std::stri
 		return 0;
 	}
 	return p;
+}
+
+long long ulpOf( float x, float y )
+{
+	std::int32_t i = 0, k = 0;
+	std::memcpy( &i, &x, 4 );
+	std::memcpy( &k, &y, 4 );
+	const long long a = i < 0 ? -static_cast<long long>( i & 0x7FFFFFFF ) : i, b = k < 0 ? -static_cast<long long>( k & 0x7FFFFFFF ) : k;
+	return std::llabs( a - b );
+}
+
+// precip_view_vs.hlsl spelled on the CPU from a record (c, axes, ext at floats 0 / 4 / 8): corner v's GL clip position
+// (before the depth move), uv and view position; M = GL's pcProj as glGetUniformfv reads it (column i at 4 i = row i there)
+void vsCorner( const float * r, int v, const float * M, const float * atlas, float pos[4], float uv[2], float view[3] )
+{
+	const float qx = ( v & 1 ) ? 1.0f : -1.0f, qy = ( v & 2 ) ? 1.0f : -1.0f;
+	const float xh = qx * r[8], yh = qy * r[9];
+	const float offY0 = r[6] * yh, offY1 = r[7] * yh;
+	const float off0 = std::fma( r[4], xh, offY0 ), off1 = std::fma( r[5], xh, offY1 );
+	view[0] = r[0] + off0;
+	view[1] = r[1] + off1;
+	view[2] = r[2] + 0.0f;
+	uv[0] = std::fma( std::fma( qx, 0.5f, 0.5f ), atlas[0], r[10] );
+	uv[1] = std::fma( std::fma( qy, 0.5f, 0.5f ), atlas[1], r[11] );
+	for ( int i = 0; i < 4; i++ ) {
+		const float c0 = view[1] * M[4 + i];
+		const float c1 = std::fma( view[0], M[i], c0 );
+		const float c2 = std::fma( view[2], M[8 + i], c1 );
+		pos[i] = c2 + M[12 + i];
+	}
+}
+
+// one case's particles: GL's captured triangles (6 vertices a particle, kTfFloats each) against the Vulkan records (28
+// floats each: c axes ext col box a b; c.w 0 = culled), per field and bucket; then which flipped pixels lie under a
+// particle that differs past 4 ulp anywhere (its GL quad's pixel box)
+void particleDiff( const std::string & name, const std::vector<float> & gl, unsigned glPrims, const std::vector<std::uint8_t> & rec, int n,
+	const float * M, const float * atlas, int W, int H, const std::vector<std::uint16_t> & a, const std::vector<std::uint16_t> & ref )
+{
+	std::vector<int> drawn;
+	for ( int i = 0; i < n; i++ ) {
+		float cw = 0.0f;
+		std::memcpy( &cw, rec.data() + size_t( i ) * 112 + 12, 4 );
+		if ( cw != 0.0f )
+			drawn.push_back( i );
+	}
+	std::printf( "PRECIPVIEW %s particles: GL wrote %u triangles (%s 2 x the %zu records Vulkan drew of %d)\n", name.c_str(), glPrims,
+		glPrims == 2 * drawn.size() ? "=" : "NOT", drawn.size(), n );
+	if ( glPrims != 2 * drawn.size() )
+		return;  // a cull difference: the finding itself (no pairing past it)
+	const char * fname[7] = { "clip position", "uv", "view position", "gCol", "gBox", "gA", "gB" };
+	size_t bucket[7][4] = {};  // exact / 1-4 / 5-64 / past 64 ulp, particles by their worst component
+	long long fmax[7] = {};
+	size_t glFlatSplit = 0, cornerBad = 0;
+	std::vector<char> mark( size_t( W ) * H, 0 );
+	size_t shown = 0, differing = 0;
+	for ( size_t k = 0; k < drawn.size(); k++ ) {
+		const float * r = reinterpret_cast<const float *>( rec.data() + size_t( drawn[k] ) * 112 );
+		long long worst[7] = {};
+		float lo[2] = { 1e30f, 1e30f }, hi[2] = { -1e30f, -1e30f };
+		const float * first = &gl[k * 6 * kTfFloats];
+		for ( int e = 0; e < 6; e++ ) {
+			const float * g = first + e * kTfFloats;
+			const float qx = g[kTfAt[2]], qy = g[kTfAt[2] + 1];
+			if ( std::fabs( qx ) != 1.0f || std::fabs( qy ) != 1.0f ) {
+				cornerBad++;
+				continue;
+			}
+			const int v = ( qx > 0.0f ? 1 : 0 ) + ( qy > 0.0f ? 2 : 0 );
+			float pos[4], uv[2], view[3];
+			vsCorner( r, v, M, atlas, pos, uv, view );
+			for ( int c = 0; c < 4; c++ )
+				worst[0] = std::max( worst[0], ulpOf( g[kTfAt[0] + c], pos[c] ) );
+			for ( int c = 0; c < 2; c++ )
+				worst[1] = std::max( worst[1], ulpOf( g[kTfAt[1] + c], uv[c] ) );
+			for ( int c = 0; c < 3; c++ )
+				worst[2] = std::max( worst[2], ulpOf( g[kTfAt[3] + c], view[c] ) );
+			for ( int c = 0; c < kTfAt[8] - kTfAt[4]; c++ )  // GL's flat outputs the same on every vertex (written once before the loop)
+				glFlatSplit += std::memcmp( &g[kTfAt[4] + c], &first[kTfAt[4] + c], 4 ) != 0;
+			if ( v >= 2 ) {  // a triangle's last vertex (the provoking one, GL's default): its flat values are the ones drawn
+				for ( int c = 0; c < 4; c++ ) {
+					worst[3] = std::max( worst[3], ulpOf( g[kTfAt[4] + c], r[12 + c] ) );
+					worst[4] = std::max( worst[4], ulpOf( g[kTfAt[5] + c], r[16 + c] ) );
+				}
+				for ( int c = 0; c < 3; c++ ) {
+					worst[5] = std::max( worst[5], ulpOf( g[kTfAt[6] + c], r[20 + c] ) );
+					worst[6] = std::max( worst[6], ulpOf( g[kTfAt[7] + c], r[24 + c] ) );
+				}
+			}
+			const float w = g[3];
+			for ( int c = 0; c < 2 && w > 0.0f; c++ ) {
+				const float s = ( g[c] / w * 0.5f + 0.5f ) * float( c ? H : W );
+				lo[c] = std::min( lo[c], s );
+				hi[c] = std::max( hi[c], s );
+			}
+		}
+		bool diff = false;
+		for ( int fi = 0; fi < 7; fi++ ) {
+			bucket[fi][worst[fi] == 0 ? 0 : worst[fi] <= 4 ? 1 : worst[fi] <= 64 ? 2 : 3]++;
+			fmax[fi] = std::max( fmax[fi], worst[fi] );
+			diff = diff || worst[fi] > 4;
+		}
+		if ( !diff )
+			continue;
+		differing++;
+		for ( int y = std::max( int( std::floor( lo[1] ) ), 0 ); y <= std::min( int( std::ceil( hi[1] ) ), H - 1 ); y++ )
+			for ( int x = std::max( int( std::floor( lo[0] ) ), 0 ); x <= std::min( int( std::ceil( hi[0] ) ), W - 1 ); x++ )
+				mark[size_t( y ) * W + x] = 1;
+		if ( shown < 6 ) {
+			shown++;
+			std::printf( "PRECIPVIEW %s particle %d (GL primitive pair %zu) differs:", name.c_str(), drawn[k], k );
+			for ( int fi = 0; fi < 7; fi++ )
+				if ( worst[fi] > 4 )
+					std::printf( " %s %lld ulp", fname[fi], worst[fi] );
+			std::printf( " (GL gCol %.9g %.9g %.9g %.9g, Vulkan %.9g %.9g %.9g %.9g; GL gA %.9g, Vulkan %.9g)\n", first[kTfAt[4]], first[kTfAt[4] + 1],
+				first[kTfAt[4] + 2], first[kTfAt[4] + 3], r[12], r[13], r[14], r[15], first[kTfAt[6]], r[20] );
+		}
+	}
+	for ( int fi = 0; fi < 7; fi++ )
+		std::printf( "PRECIPVIEW %s field %s: particles exact / 1-4 / 5-64 / past 64 ulp: %zu / %zu / %zu / %zu (max %lld)\n", name.c_str(), fname[fi],
+			bucket[fi][0], bucket[fi][1], bucket[fi][2], bucket[fi][3], fmax[fi] );
+	std::printf( "PRECIPVIEW %s GL flat outputs that differ between a particle's vertices: %zu floats; captured vertices off a corner: %zu\n",
+		name.c_str(), glFlatSplit, cornerBad );
+	// the flipped pixels (any sample's half past 2 ulp, as judge's flips) under / outside the differing particles' boxes
+	size_t flipIn = 0, flipOut = 0, marked = 0;
+	for ( size_t p = 0; p < mark.size(); p++ ) {
+		marked += size_t( mark[p] );
+		bool fl = false;
+		for ( int s = 0; s < 4 && !fl; s++ )
+			for ( int c = 0; c < 4 && !fl; c++ ) {
+				const size_t i = ( p * 4 + size_t( s ) ) * 4 + size_t( c );
+				fl = std::abs( ordered( a[i] ) - ordered( ref[i] ) ) > 2;
+			}
+		if ( fl )
+			( mark[p] ? flipIn : flipOut )++;
+	}
+	std::printf( "PRECIPVIEW %s particles differing past 4 ulp: %zu of %zu; flipped pixels under their quads %zu, outside every one %zu "
+		"(their quads cover %zu of %zu pixels)\n", name.c_str(), differing, drawn.size(), flipIn, flipOut, marked, mark.size() );
 }
 
 struct Job
@@ -213,7 +370,10 @@ int main( int argc, char ** argv )
 	pump();
 	void( WINAPI * genVertexArrays )( GLsizei, GLuint * ) = nullptr;
 	void( WINAPI * bindVertexArray )( GLuint ) = nullptr;
-	if ( !loadAll() || !load( genVertexArrays, "glGenVertexArrays" ) || !load( bindVertexArray, "glBindVertexArray" ) )
+	if ( !loadAll() || !load( genVertexArrays, "glGenVertexArrays" ) || !load( bindVertexArray, "glBindVertexArray" )
+		|| !load( tfVaryings, "glTransformFeedbackVaryings" ) || !load( tfBegin, "glBeginTransformFeedback" )
+		|| !load( tfEnd, "glEndTransformFeedback" ) || !load( genQueries, "glGenQueries" ) || !load( beginQuery, "glBeginQuery" )
+		|| !load( endQuery, "glEndQuery" ) || !load( getQueryObjectuiv, "glGetQueryObjectuiv" ) || !load( getBufferSubData, "glGetBufferSubData" ) )
 		return fatal( "GL entry points" );
 	std::printf( "PRECIPVIEW GL on %s\n", reinterpret_cast<const char *>( glGetString( GL_RENDERER ) ) );
 	glPixelStorei( GL_PACK_ALIGNMENT, 1 );
@@ -224,9 +384,12 @@ int main( int argc, char ** argv )
 		"cell_precip_gpu" );
 	const GLuint pLook = program3( readFile( dir + "/prog_look.vert.glsl" ), readFile( dir + "/prog_look.geom.glsl" ),
 		readFile( dir + "/prog_look.frag.glsl" ), "cell_precip_look" );
-	if ( !pUnpack || !pSlab || !pReveal || !pPrecip || !pLook )
+	// the localisation's copy of cell_precip_gpu.prog, its geometry-stage outputs captured (the plain cases)
+	const GLuint pTf = program3( readFile( dir + "/prog.vert.glsl" ), readFile( dir + "/prog.geom.glsl" ), readFile( dir + "/prog.frag.glsl" ),
+		"cell_precip_gpu (captured)", true );
+	if ( !pUnpack || !pSlab || !pReveal || !pPrecip || !pLook || !pTf )
 		return fatal( "GL programs" );
-	for ( const GLuint prog : { pPrecip, pLook } ) {  // every sampler its own empty unit from 20 (unit 0's default mixes sampler
+	for ( const GLuint prog : { pPrecip, pLook, pTf } ) {  // every sampler its own empty unit from 20 (unit 0's default mixes sampler
 		// types: GL_INVALID_OPERATION at the draw once the air's textures are bound); bindJob then sets the read ones (farcards.cpp's rule)
 		f.useProgram( prog );
 		GLint n = 0, next = 20;
@@ -265,7 +428,7 @@ int main( int argc, char ** argv )
 	f.genBuffers( 1, &ubo );
 	f.bindBuffer( fUbo, ubo );
 	f.bufferData( fUbo, std::ptrdiff_t( zeros.size() ), zeros.data(), fStatic );
-	for ( const GLuint prog : { pPrecip, pLook } ) {
+	for ( const GLuint prog : { pPrecip, pLook, pTf } ) {
 		const GLuint bi = f.getUniformBlockIndex( prog, "globalUniforms" );
 		if ( bi != 0xFFFFFFFFu )
 			f.uniformBlockBinding( prog, bi, 0 );
@@ -440,7 +603,7 @@ int main( int argc, char ** argv )
 			ok = ok && o.flips >= 1000;
 		}
 
-		auto runVk = [&]( int red, std::vector<std::uint16_t> & a, std::vector<std::uint16_t> & b, bool checkSeed ) -> bool {
+		auto runVk = [&]( int red, std::vector<std::uint16_t> & a, std::vector<std::uint16_t> & b, bool checkSeed, std::uint8_t * recOut = nullptr ) -> bool {
 			before( fbFrame, j.zd );
 			bindJob( pJob );
 			f.bindFramebuffer( fFb, fbFrame );
@@ -486,6 +649,7 @@ int main( int argc, char ** argv )
 					return false;
 			}
 			t.red = red;
+			t.recOut = recOut;
 			f.bindFramebuffer( fFb, fbFrame );
 			if ( !WwVkPresent::precipRun( t, why ) ) {
 				std::printf( "PRECIPVIEW precipRun refused: %s\n", why.c_str() );
@@ -528,6 +692,64 @@ int main( int argc, char ** argv )
 					"halves past 1 ulp %zu %zu %zu %zu (max %zu = %.4f %%), halves differ %zu %zu %zu %zu\n", j.name.c_str(), nFl[0], nFl[1], nFl[2],
 					nFl[3], nFlMax, v.covered ? 100.0 * double( nFlMax ) / double( v.covered ) : 0.0, nPa[0], nPa[1], nPa[2], nPa[3], nPaMax,
 					v.covered ? 100.0 * double( nPaMax ) / double( v.covered ) : 0.0, nDi[0], nDi[1], nDi[2], nDi[3] );
+				// the localisation (reference, not the bar): GL's geometry stage captured twice (run to run the same?), then
+				// per particle against the Vulkan records read back (a plain case: the look program is not captured)
+				if ( !j.look ) {
+					static GLuint tfBuf = 0, tfQ = 0;
+					if ( !tfBuf ) {
+						f.genBuffers( 1, &tfBuf );
+						genQueries( 1, &tfQ );
+					}
+					const std::ptrdiff_t tfBytes = std::ptrdiff_t( j.n ) * 6 * kTfFloats * 4;
+					auto capture = [&]( std::vector<float> & out, GLuint & prims ) {
+						bindJob( pTf );
+						glEnable( 0x8C89 );  // GL_RASTERIZER_DISCARD
+						f.bindBuffer( 0x8C8E, tfBuf );  // GL_TRANSFORM_FEEDBACK_BUFFER
+						f.bufferData( 0x8C8E, tfBytes, nullptr, 0x88EA );  // GL_DYNAMIC_COPY
+						f.bindBufferBase( 0x8C8E, 0, tfBuf );
+						beginQuery( 0x8C88, tfQ );  // GL_TRANSFORM_FEEDBACK_PRIMITIVES_WRITTEN
+						tfBegin( GL_TRIANGLES );
+						bindVertexArray( vao );
+						glDrawArrays( GL_POINTS, j.first, j.n );
+						tfEnd();
+						endQuery( 0x8C88 );
+						bindVertexArray( 0 );
+						glDisable( 0x8C89 );
+						prims = 0;
+						getQueryObjectuiv( tfQ, 0x8866, &prims );  // GL_QUERY_RESULT
+						out.assign( size_t( prims ) * 3 * kTfFloats, 0.0f );
+						if ( !out.empty() )
+							getBufferSubData( 0x8C8E, 0, std::ptrdiff_t( out.size() * 4 ), out.data() );
+						f.bindBufferBase( 0x8C8E, 0, 0 );
+					};
+					std::vector<float> tf1, tf2;
+					GLuint pr1 = 0, pr2 = 0;
+					capture( tf1, pr1 );
+					capture( tf2, pr2 );
+					size_t tfDiff = 0, tfVar[8] = {};
+					for ( size_t i = 0; i < std::min( tf1.size(), tf2.size() ); i++ )
+						if ( std::memcmp( &tf1[i], &tf2[i], 4 ) != 0 ) {
+							tfDiff++;
+							const int at = int( i % size_t( kTfFloats ) );
+							for ( int q = 0; q < 8; q++ )
+								tfVar[q] += at >= kTfAt[q] && at < kTfAt[q + 1];
+						}
+					std::printf( "PRECIPVIEW %s GL geometry stage captured twice: %u / %u triangles, %zu floats differ (gl_Position %zu, gUv %zu, gQ %zu, "
+						"gView %zu, gCol %zu, gBox %zu, gA %zu, gB %zu)%s\n", j.name.c_str(), pr1, pr2, tfDiff, tfVar[0], tfVar[1], tfVar[2], tfVar[3],
+						tfVar[4], tfVar[5], tfVar[6], tfVar[7], glGetError() == GL_NO_ERROR ? "" : " (a GL error in the capture)" );
+					std::vector<std::uint8_t> rec( size_t( j.n ) * 112 );
+					std::vector<std::uint16_t> a3, b3;
+					if ( !runVk( 0, a3, b3, false, rec.data() ) )
+						std::printf( "PRECIPVIEW %s particles: the Vulkan run with the read-back failed\n", j.name.c_str() );
+					else {
+						std::printf( "PRECIPVIEW %s particles: the read-back run against the judged one %s\n", j.name.c_str(), judge( bg, a3, a, b3, b ).word() );
+						bindJob( pJob );
+						float M[16] = {}, atl[4] = {};
+						f.getUniformfv( pJob, f.getUniformLocation( pJob, "pcProj" ), M );
+						f.getUniformfv( pJob, f.getUniformLocation( pJob, "pcAtlas" ), atl );
+						particleDiff( j.name, tf1, pr1, rec, j.n, M, atl, W, H, a, refA );
+					}
+				}
 			}
 		}
 		for ( RedSeen & r : reds ) {
