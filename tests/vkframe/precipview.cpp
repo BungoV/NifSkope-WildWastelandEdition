@@ -40,6 +40,16 @@
 // reference split), how many hold the reference's mean. The repeat clause's GL side is the reference built twice (EXACT)
 // and GL's 4x stencil drawn twice (EXACT); GL's 4x colour drawn twice is info (its merge varies run to run). Red 64 (harness only): Vulkan's 4 samples averaged per pixel
 // (the reveal's samples kept); must FAIL in every near case.
+// Lit (slice 2b, plan L8 (12); bars set before the first lit run, never widened): the sun alone (volTerms 1; the lamps, GI,
+// ambient, CSM, the drift, the terrain air, the local sun law and an interior are refused by precipRun, GL draws them),
+// through precip_lit_view_cs. Cases rain_near_lit (rain_near_disc's run, unfogged) and snow_far_lit (snow_far_fog's run
+// through the air, the veil on, the air's column on the sun): cellOn 1, cellHasDir 1, a non-grey sun (1.6, 1.2, 0.75) off
+// the view axis, the phase (volPhase) and its isotropic tint (volGi) set, pcTrans 0.5. The same verdict, reference
+// checks, repeat clause and red 64 as the unlit cases. Each lit case must also show (else the gate fails): GL lit vs GL
+// with cellHasDir 0 differs on >= 1000 covered samples; GL with pcTrans 0.5 vs 1.0 differs on >= 1000 (thin vs thick);
+// no NaN / Inf half in GL's lit frame; every name the sun branch reads is found in GL's program (packed, not zero);
+// rain_near_lit's captured gA (unfogged: the light) holds >= 100 distinct particles with unequal channels. Red 128 the
+// light dropped (pcRed 4: lit = 1); must FAIL in every lit case.
 #define main fxview_main
 #include "fxview.cpp"
 #undef main
