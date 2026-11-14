@@ -16,6 +16,7 @@
 // (bloom + measure + tone + TAA in one crossing against two).
 #define WW_VKPRESENT_NO_QT
 #include "../../src/features/vkframe/vkpresent.cpp"
+#include "../../src/features/post/postroute.h"  // lane VKFAR2 P7: cellpost.cpp's route and route lines
 
 #include <GL/gl.h>
 #include <cmath>
@@ -2270,6 +2271,98 @@ int main( int argc, char ** argv )
 				std::printf( "TONEVIEW POST RED 7 %s (all 16 kernels on the first queue of %s: most in one queue %d in %.1f ms, the picture "
 					"%s; must FAIL)\n", redFails ? "FAIL" : "OK", cases[0].name, eager.most, eager.mostMs, ran ? v.word() : "not drawn" );
 				ok = ok && redFails && ran && v.ok();
+				WwVkPresent::takeTonePostStat();
+			}
+			/* the app's route (postroute.h, cellpost.cpp's order): the red WW_VKVIEW_POST_RED=1 and a refused queue draw GL's
+			 * chain after the tone pass crossed (GL's own frame), a refusal does not break the route (the next frames are on
+			 * Vulkan), and the route lines "vk dof:" / "vk motionblur:" / "vk objblur:" name each frame's route and why.
+			 * Red: a refusal whose GL chain is dropped must FAIL */
+			auto appRoute = [&]( const WwVkPresent::PostRun & p, bool red, bool dropGl, std::vector<std::uint8_t> & out, bool & onVk ) -> bool {
+				onVk = false;
+				if ( !WwVkPresent::viewBegin( W, H, S, glProc, why ) )
+					return false;
+				const GLuint vfb = WwVkPresent::viewFbo();
+				Tone & T = tone();
+				T.mergeRed = false;
+				T.mergeHint = true;
+				T.backoff = 0;
+				const WwVkPresent::ToneRun tr = toneOf( jobs[0], jobs[0].splitSky, vfb );
+				if ( !WwVkPresent::toneRun( tr, why ) )
+					return false;
+				const bool pending = !red && WwVkPresent::tonePending();
+				const char * notVk = WwPostRoute::whyNotVk( red, false, false, pending, pending && vfb == WwVkPresent::viewFbo(), true, false );
+				std::string vkWhy = notVk ? notVk : "";
+				onVk = !notVk && WwVkPresent::tonePostQueue( p, vkWhy );
+				if ( !onVk )
+					WwVkPresent::tonePostOnGl( vkWhy.c_str() );
+				if ( !WwVkPresent::toneFlush( &why ) )
+					return false;
+				if ( !onVk && !dropGl && !glPost( p, vfb ) )
+					return false;
+				View & V = view();
+				out = readSamples( V.slot[V.cur].colorTex );
+				if ( !WwVkPresent::present( wnd, W, H, false, glProc, why ) )
+					return false;
+				pump();
+				return glGetError() == GL_NO_ERROR;
+			};
+			struct RCase
+			{
+				const char * what;
+				int onCase, how;  // how: 0 on Vulkan, 1 the red, 2 a refused queue (the frame's size)
+				const char * pre[2];
+			};
+			const RCase rcases[5] = { { "the red WW_VKVIEW_POST_RED=1", 3, 1, { "vk dof: on GL (the game's passes), ",
+				"vk motionblur: on GL (with the depth of field), " } },
+				{ "a refused queue", 10, 2, { "vk dof: on GL (the game's passes), ", "vk objblur: on GL, " } },
+				{ "after the refusal, the thin lens", 7, 0, { "vk dof: on Vulkan (the thin lens), ", "vk motionblur: on Vulkan (with the depth of field), " } },
+				{ "motion blur alone", 2, 0, { "vk motionblur: on Vulkan (alone), ", nullptr } },
+				{ "object blur alone", 8, 0, { "vk objblur: on Vulkan, ", nullptr } } };
+			WwVkPresent::takeTonePostStat();
+			for ( const RCase & rc : rcases ) {
+				const PCase & c = cases[rc.onCase];
+				WwVkPresent::PostRun p = runOf( c );
+				if ( rc.how == 2 )
+					p.w = W + 1;  // GL's chain never reads p.w
+				std::vector<std::uint8_t> got;
+				bool onVk = false;
+				const bool ran = appRoute( p, rc.how == 1, false, got, onVk );
+				const Verdict v = compare( got, refs[rc.onCase] );
+				const WwVkPresent::FxStat st = WwVkPresent::takeTonePostStat();
+				const std::vector<std::string> ls = WwPostRoute::lines( onVk, p.dof, p.lens, p.mb, p.ob, st );
+				const int want = rc.pre[1] ? 2 : 1;
+				bool linesOk = int( ls.size() ) == want;
+				for ( int k = 0; k < want && linesOk; k++ ) {
+					const std::string & l = ls[size_t( k )];
+					if ( rc.how == 0 )
+						linesOk = l.rfind( std::string( rc.pre[k] ) + "in the deferred tone pass 1 frames (", 0 ) == 0
+							&& l.find( "on GL" ) == std::string::npos && l.find( "refused" ) == std::string::npos;
+					else if ( rc.how == 1 )
+						linesOk = l == std::string( rc.pre[k] ) + "0 frames in the tone pass, on GL 1 frames (last: red WW_VKVIEW_POST_RED=1)";
+					else
+						linesOk = st.failWhy.rfind( "frame ", 0 ) == 0 && l == std::string( rc.pre[k] ) + "0 frames in the tone pass, on GL 1 frames "
+							"(last: " + st.failWhy + "), refused 1 (last: " + st.failWhy + ")";
+				}
+				for ( const std::string & l : ls )
+					std::printf( "TONEVIEW POST route line: %s\n", l.c_str() );
+				const bool routeOk = onVk == ( rc.how == 0 ) && !post7().broken;
+				const bool pass = ran && routeOk && linesOk && v.ok();
+				std::printf( "TONEVIEW POST route %s %s (on %s; %s, the picture %s against GL's: %zu bytes differ, max %d; lines %s)\n", rc.what,
+					pass ? v.word() : "FAIL", c.name, onVk ? "on Vulkan" : "on GL", ran ? v.word() : "not drawn", v.diff, v.maxd,
+					linesOk ? "as wanted" : "NOT as wanted" );
+				ok = ok && pass;
+			}
+			{
+				WwVkPresent::PostRun p = runOf( cases[10] );
+				p.w = W + 1;
+				std::vector<std::uint8_t> got;
+				bool onVk = false;
+				const bool ran = appRoute( p, false, true, got, onVk );
+				const Verdict v = compare( got, refs[10] );
+				const bool redFails = !ran || onVk || !v.ok();
+				std::printf( "TONEVIEW POST route RED %s (a refusal with GL's chain dropped on %s: %zu bytes differ, max %d; must FAIL)\n",
+					redFails ? "FAIL" : v.word(), cases[10].name, v.diff, v.maxd );
+				ok = ok && redFails;
 				WwVkPresent::takeTonePostStat();
 			}
 		}
