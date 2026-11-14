@@ -1,3 +1,27 @@
+## VKFAR3 A1 SSGI (2026-11-14): the SSGI cast stays on Vulkan when the traced volume carries the emission
+
+Changed, not built, not checked live.
+
+- With RT GI on (WW_CELL_RTDDGI=1, the all-on route), SSGI takes the emission off what it gathers (the traced volume
+  counts it). The Vulkan cast (WW_VKVIEW=1) refused that case and the cast went back to GL; it now subtracts the same
+  emission on Vulkan. Only the emissive cast's own chain (red emitchain) still stays on GL, named on the `vk ssgi:` line.
+- Gate tests/vklight/light.sh job sg_E (the ultra tier, half size, 4 x 12, the emission over the bright texels): BOUND
+  against GL (107 of 1969920 values 1 ulp apart), red ssgie (the emission read as zero) FAILS (274244 differ);
+  lightview.sh runs it through the app's lightRun: BOUND, red FAILS. sg_A / sg_B / sg_S unchanged (27 / 106 / 231).
+
+## VKFAR3 A1 AO methods (2026-11-14): XeGTAO and GTAO on Vulkan (WW_VKVIEW=1), gate red
+
+Changed, not built, not checked live. With the view off nothing changes.
+
+- With the view on Vulkan, the XeGTAO and GTAO methods (WW_CELL_AO_METHOD) run in the same Vulkan pass as the
+  obscurance: depth mips, the AO term and its edges, the two blur stages. Red WW_VKVIEW_AOX_RED=1 keeps them on GL.
+  Log line `vk aox:` says which route ran and why.
+- HBAO stays on GL: its first step can land on the pixel itself, where two equal positions give a random direction
+  (3.6 % of pixels differ by up to 239 codes between GL and Vulkan; neither is right). Fixing that changes GL's shader.
+- Offline gate tests/vklight/light.sh on the mem_main dump: all three jobs within their bars, 3 reds FAIL. On mem_base
+  (lightview.sh) the first depth mip of the synthetic job has 1 value at 5 ulp against its 4 ulp bar (the AO result
+  itself is within its bar): LIGHTVIEW is red until that bar is decided.
+
 ## VKFAR3 G3 (2026-11-14): the near far ground (ring 0's live terrain) draws on Vulkan (WW_VKVIEW=1)
 
 Changed, not built, not checked live.
@@ -14,6 +38,17 @@ Changed, not built, not checked live.
   (max rel 0.0098, mipped atlas), GL on the shared textures vs GL on plain ones EXACT, three copies fewer a draw, every
   red FAILS (offset, plain samplers, cull, depth test, polygon offset, first index, grid and decals rewritten after
   GL's draw).
+- Round 2: a frame with no Vulkan view (a resize, a grab) no longer hands the shared textures back to GL and makes
+  them again the next frame (each round trip was ~60-115 ms of remake and refill for the layers alone). They go back
+  to GL only when the view is turned off or the red is set.
+- Offline gate tests/vkframe/fargroundoff.sh (CPU only): with the view off, the far ground's GL uploads and frees match
+  c7e7d1a2 (the tree before the lane) call for call, cut from both versions of cellfarground.cpp: 535 of 535 calls the
+  same, no call to the present device. Reds: a flipped argument and a removed call are caught, sharing on differs. It
+  also walks the shared textures through view on / no view / off / a shutdown / a refusal / no key slot; the old rule
+  as red churns twice.
+- Crossing cells costs nothing here: the far ground is only prepared when a cell opens without streaming; streamed
+  roaming never makes it, so nothing is dropped or made on a crossing. The same gate checks the rest of pass() is the
+  tree's text before the lane (95 of 95 lines, a changed line caught).
 
 ## VKOBJ5 (2026-11-14): skinned, alpha-tested, single rigid and unpooled bindless object draws on Vulkan (WW_VKOBJ_SHADE=1)
 

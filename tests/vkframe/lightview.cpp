@@ -83,7 +83,9 @@ int kernelOf( std::string spv )
 		spv.resize( spv.size() - 4 );
 	static const std::map<std::string, int> k = { { "ao_gbuf", WwVkPresent::LightAoGbuf }, { "ao_mip", WwVkPresent::LightAoMip },
 		{ "ao_raw", WwVkPresent::LightAoRaw }, { "ao_blur", WwVkPresent::LightAoBlur }, { "ao_blurf", WwVkPresent::LightAoBlurF },
-		{ "contact", WwVkPresent::LightContactK }, { "ssgi", WwVkPresent::LightSsgiK } };
+		{ "contact", WwVkPresent::LightContactK }, { "ssgi", WwVkPresent::LightSsgiK },
+		{ "ssgie", WwVkPresent::LightSsgiK },	// lane VKFAR3: the cast with the emission subtracted (its own red)
+		{ "aox_z", WwVkPresent::LightAoxZ }, { "aox_xe", WwVkPresent::LightAoxXe }, { "aox_r8", WwVkPresent::LightAoxR8 } };
 	const auto i = k.find( spv );
 	return i == k.end() ? -1 : i->second;
 }
@@ -162,7 +164,7 @@ int runChain( const std::string & jobs, const std::string & job, const std::stri
 	if ( t.d.empty() || cmps.empty() )
 		return broken( "no pass or no compare" );
 	const int k0 = t.d[0].kernel;
-	t.pass = k0 <= WwVkPresent::LightAoBlurF ? WwVkPresent::LightAo : k0 == WwVkPresent::LightContactK ? WwVkPresent::LightContact
+	t.pass = k0 <= WwVkPresent::LightAoBlurF || k0 >= WwVkPresent::LightAoxZ ? WwVkPresent::LightAo : k0 == WwVkPresent::LightContactK ? WwVkPresent::LightContact
 		: WwVkPresent::LightSsgi;
 	if ( !bufFile.empty() )
 		t.buf = readBytes( dir + bufFile );

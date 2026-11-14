@@ -334,7 +334,9 @@ SkyStat takeSkyStat();
  * `out` twins back into GL's textures, so every consumer reads what it read before. false: why; nothing changed (GL draws
  * its stages). Reds WW_VKVIEW_AO_RED / _CONTACT_RED / _SSGI_RED = 1 (or WW_VKVIEW off): GL. */
 enum LightPass { LightAo = 0, LightContact = 1, LightSsgi = 2, LightPasses = 3 };
-enum LightKernel { LightAoGbuf = 0, LightAoMip, LightAoRaw, LightAoBlur, LightAoBlurF, LightContactK, LightSsgiK, LightKernels };
+// LightAoxZ / Xe / R8 (lane VKFAR3): the ported AO methods' depth mips, XeGTAO's term + edges, the r8 stages (aox_vk.hlsl)
+enum LightKernel { LightAoGbuf = 0, LightAoMip, LightAoRaw, LightAoBlur, LightAoBlurF, LightContactK, LightSsgiK, LightAoxZ, LightAoxXe,
+	LightAoxR8, LightKernels };
 struct LightImage
 {
 	unsigned tex = 0;              //!< GL's texture (GL_TEXTURE_2D)
@@ -980,6 +982,8 @@ bool toneWanted();
 /* lane VKSHARE1: a pass's targets go on the present device this frame (sharedTarget): the view on Vulkan with its size
  * settled (viewFbo), and the pass's red (redEnv=1) unset */
 bool shareWanted( const char * redEnv );
+//! lane VKFAR3: the view is on Vulkan by its switch and redEnv unset, with or without a view this frame (a resize, a grab)
+bool shareKept( const char * redEnv );
 //! lane VKLIGHT1: the pass's route line ("vk ao:", "vk contact:", "vk ssgi:"), one a 5 s window while on Vulkan
 void lightSay( int pass, bool wanted, const char * glWhy );
 //! lane VKSHADOW1: the cascades' route line ("vk csm:"), one a 5 s window while on Vulkan
