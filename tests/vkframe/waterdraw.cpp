@@ -87,6 +87,7 @@ struct Ex
 	void( WINAPI * bindRenderbuffer )( GLenum, GLuint ) = nullptr;
 	void( WINAPI * renderbufferStorage )( GLenum, GLenum, GLsizei, GLsizei ) = nullptr;
 	void( WINAPI * framebufferRenderbuffer )( GLenum, GLenum, GLenum, GLuint ) = nullptr;
+	void( WINAPI * getRenderbufferParameteriv )( GLenum, GLenum, GLint * ) = nullptr;
 };
 Ex ex;
 
@@ -118,6 +119,7 @@ bool loadMore()
 	WD_X( uniform4uiv, "glUniform4uiv" ); WD_X( uniformMatrix2fv, "glUniformMatrix2fv" );
 	WD_X( genRenderbuffers, "glGenRenderbuffers" ); WD_X( bindRenderbuffer, "glBindRenderbuffer" );
 	WD_X( renderbufferStorage, "glRenderbufferStorage" ); WD_X( framebufferRenderbuffer, "glFramebufferRenderbuffer" );
+	WD_X( getRenderbufferParameteriv, "glGetRenderbufferParameteriv" );
 #undef WD_X
 	return ok;
 }
@@ -1345,6 +1347,16 @@ int main( int argc, char ** argv )
 					std::printf( "WATERDRAW %s red %d: REFUSED (the depth twin: %s)\n", lab, red, why.c_str() );
 					gateOk = false;
 					continue;
+				}
+				if ( red == 0 ) {  // which format ran: the renderbuffer's and its twin's (GL_RENDERBUFFER / TEXTURE_INTERNAL_FORMAT)
+					GLint rbFmt = 0, twFmt = 0;
+					ex.bindRenderbuffer( 0x8D41, rbVk );
+					ex.getRenderbufferParameteriv( 0x8D41, 0x8D44, &rbFmt );
+					ex.bindRenderbuffer( 0x8D41, 0 );
+					glBindTexture( GL_TEXTURE_2D, dTwin );
+					gw.glGetTexLevelParameteriv( GL_TEXTURE_2D, 0, 0x1003, &twFmt );
+					glBindTexture( GL_TEXTURE_2D, 0 );
+					std::printf( "WATERDRAW %s formats: renderbuffer 0x%X, depth twin 0x%X\n", lab, unsigned( rbFmt ), unsigned( twFmt ) );
 				}
 				rayState( fbRayVk );
 				WwVkPresent::WaterRun r;
