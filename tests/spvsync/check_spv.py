@@ -61,13 +61,17 @@ HLSL_SPECS += [('src/features/vkframe', k, 'vulkan1.2', 'vkframe_%s_spv' % k) fo
 VKFRAME_FX = {'volsky_view_ps': 'air/volsky_view_ps', 'cloud_march_view_ps': 'clouds/cloud_march_view_ps',
 	'cloud_march_a_view_ps': 'clouds/cloud_march_a_view_ps', 'cloud_resolve_view_ps': 'clouds/cloud_resolve_view_ps',
 	'cloud_resolve_a_view_ps': 'clouds/cloud_resolve_a_view_ps',
-	'fardots_view_ps': 'far-lod/fardots_view_ps'}	# lane VKFAR1
+	'fardots_view_ps': 'far-lod/fardots_view_ps',	# lane VKFAR1
+	'fogbloom_view_ps': 'post/fogbloom_view_ps',	# lane VKFAR2: hand-kept readable twin (P4b)
+	'cloud_composite_view_ps': 'clouds/cloud_composite_view_ps'}	# lane VKFAR2: P8, frozen copy
 HLSL_SPECS += [('src/features/vkframe', k, 'vulkan1.2', 'vkframe_%s_spv' % k) for k in VKFRAME_FX]
 # lane VKFAR1: the far dots' vertex stage, the script's `fxv <name> <dir/file>` lines (fx()'s shifts, vs_6_0)
 VKFRAME_FXV = {'fardots_view_vs': 'far-lod/cell_fardots_view_vs'}
 HLSL_SPECS += [('src/features/vkframe', k, 'vulkan1.2', 'vkframe_%s_spv' % k) for k in VKFRAME_FXV]
 # lane VKFAR1 round 2: the far cards' pixel stage, the script's `fxk <name> <dir/file>` lines (fx() + every declared binding kept)
-VKFRAME_FXK = {'farcards_view_ps': 'far-lod/farcards_view_ps'}
+VKFRAME_FXK = {'farcards_view_ps': 'far-lod/farcards_view_ps',
+	'farlod_view_ps': 'core/farlod_view_ps',	# lane VKFAR2: the far LOD rings
+	'skystars_view_ps': 'clouds/lookdev_clouds_ps', 'skymoon_view_ps': 'sky/sky_moon_ps'}	# lane VKFAR2 G2: the sky bodies
 HLSL_SPECS += [('src/features/vkframe', k, 'vulkan1.2', 'vkframe_%s_spv' % k) for k in VKFRAME_FXK]
 # lane VKWATER3: the water's pixel twins (frozen, as HLSLSRC2's), the script's `fxkw` lines: fxk() + -fvk-use-dx-position-w
 # (their spirv-cross fixup gl_FragCoord.w = 1.0 / gl_FragCoord.w wants D3D's clip w in SV_Position.w)
@@ -75,6 +79,11 @@ VKFRAME_FXKW = {'water_view_ps': 'water/water_view_ps',
 	'water_view_d_ps': 'water/water_view_d_ps', 'water_view_m_ps': 'water/water_view_m_ps',
 	'water_view_p_ps': 'water/water_view_p_ps', 'water_view_dp_ps': 'water/water_view_dp_ps'}
 HLSL_SPECS += [('src/features/vkframe', k, 'vulkan1.2', 'vkframe_%s_spv' % k) for k in VKFRAME_FXKW]
+# lane VKFAR2: the far cards' vertex stage, the script's `fxc <name> <dir/file>` lines (its own bindings in the cards' set)
+VKFRAME_FXC = {'farcards_view_vs': 'far-lod/farcards_view_vs'}	# frozen twin, as HLSLSRC2's
+VKFRAME_FXC_ARGS = ['-fvk-bind-register', 'b0', '0', '0', '0', '-fvk-bind-register', 'b31', '0', '32', '0', '-fvk-bind-register',
+	't0', '0', '96', '0', '-fvk-bind-register', 't1', '0', '97', '0', '-fspv-preserve-bindings']
+HLSL_SPECS += [('src/features/vkframe', k, 'vulkan1.2', 'vkframe_%s_spv' % k) for k in VKFRAME_FXC]
 # lane VKWATER3: the water's vertex stage, the script's `fxw <name> <dir/file>` lines (vs_6_0, own shifts, bindings kept)
 VKFRAME_FXW_ARGS = ['-fvk-b-shift', '256', '0', '-fvk-t-shift', '110', '0', '-fvk-s-shift', '180', '0', '-fvk-u-shift', '220', '0',
 	'-fspv-preserve-bindings']
@@ -88,6 +97,34 @@ VKFRAME_FXD_ARGS = ['-fvk-b-shift', '768', '0', '-fvk-t-shift', '832', '0', '-fv
 	'-fspv-preserve-bindings', '-Gis']
 VKFRAME_FXD = {'water_view_ds': 'water/fo4_waterdisp_ds'}
 HLSL_SPECS += [('src/features/vkframe', k, 'vulkan1.2', 'vkframe_%s_spv' % k) for k in list(VKFRAME_FXH) + list(VKFRAME_FXD)]
+# lane VKFAR2: the far LOD rings' vertex stage, the script's `fxl <name> <dir/file>` lines (fxw's shifts, t at 120)
+VKFRAME_FXL_ARGS = ['-fvk-b-shift', '256', '0', '-fvk-t-shift', '120', '0', '-fvk-s-shift', '180', '0', '-fvk-u-shift', '220', '0',
+	'-fspv-preserve-bindings']
+VKFRAME_FXL = {'farlod_view_vs': 'core/water_view_vs'}
+HLSL_SPECS += [('src/features/vkframe', k, 'vulkan1.2', 'vkframe_%s_spv' % k) for k in VKFRAME_FXL]
+# lane VKFAR2 G2: the sky bodies' vertex stages, the script's `fxb <name> <dir/file>` lines (b0 at 0, their b31 at 32)
+VKFRAME_FXB_ARGS = ['-fvk-bind-register', 'b0', '0', '0', '0', '-fvk-bind-register', 'b31', '0', '32', '0', '-fspv-preserve-bindings']
+VKFRAME_FXB = {'skystars_view_vs': 'clouds/lookdev_clouds_vs', 'skymoon_view_vs': 'core/lookdev_bill_vs'}
+HLSL_SPECS += [('src/features/vkframe', k, 'vulkan1.2', 'vkframe_%s_spv' % k) for k in VKFRAME_FXB]
+# lane VKFAR2 P9: the lens-flare sprites, the script's `fxf <name> <dir/file> <profile>` lines (no shifts, no options)
+VKFRAME_FXF = {'lensflare_view_vs': ('post/lens_flare_view_vs', 'vs_6_0'), 'lensflare_view_ps': ('post/lens_flare', 'ps_6_0')}
+HLSL_SPECS += [('src/features/vkframe', k, 'vulkan1.2', 'vkframe_%s_spv' % k) for k in VKFRAME_FXF]
+# lane VKFAR2 (the froxel item): the air's integrate, the script's `fog <name> "<defines>"` lines (cs_6_0, one source)
+VKFRAME_FOG_SRC = 'res/shaders/hlsl/air/volair_integ_cs.hlsl'
+VKFRAME_FOG = {'fog_integ_cs': '', 'fog_integ32_cs': '-DVOLAIR_INTEG_F32'}
+HLSL_SPECS += [('src/features/vkframe', k, 'vulkan1.2', 'vkframe_%s_spv' % k) for k in VKFRAME_FOG]
+# lane VKFAR2 P7: cellpost.cpp's post passes in the tone pass, the script's `pfx <name> <dir/file> <profile> "<defines>"` lines
+VKFRAME_PFX = {
+	'p7_res': ('post/post7_resolve', 'cs_6_0', ''), 'p7_dep': ('post/post7_resolve', 'cs_6_0', '-DPOST7_DEPTH'),
+	'p7_copy_ps': ('post/post7_copy_ps', 'ps_6_0', ''), 'p7_dof_down': ('post/dof_down', 'cs_6_0', ''),
+	'p7_dof_blur': ('post/dof_blur', 'cs_6_0', ''), 'p7_dof_comp': ('post/dof_comp', 'cs_6_0', ''),
+	'p7_lens_comp': ('post/dof_comp', 'cs_6_0', '-DDOF_LENS'), 'p7_lens_prep': ('post/doflens_prep', 'cs_6_0', ''),
+	'p7_lens_tile': ('post/doflens_tile', 'cs_6_0', ''), 'p7_lens_gather': ('post/doflens_gather', 'cs_6_0', ''),
+	'p7_mblur': ('post/mblur', 'cs_6_0', ''), 'p7_dofmblur': ('post/mblur', 'cs_6_0', '-DMBLUR_FUSE'),
+	'p7_lensmblur': ('post/mblur', 'cs_6_0', '-DMBLUR_FUSE -DDOF_LENS'), 'p7_mv': ('post/taa_mv', 'cs_6_0', '-DTAA_MV_RG16'),
+	'p7_ob_vec': ('post/objblur_vec', 'cs_6_0', ''), 'p7_ob_tile': ('post/objblur_tile', 'cs_6_0', ''),
+	'p7_ob': ('post/objblur', 'cs_6_0', '')}
+HLSL_SPECS += [('src/features/vkframe', k, 'vulkan1.2', 'vkframe_%s_spv' % k) for k in VKFRAME_PFX]
 DEFAULT_G = 'E:/Tools/RenderDoc/RenderDoc_1.45_64/plugins/spirv/glslangValidator.exe'
 DEFAULT_DXC = 'E:/Tools/dxc/bin/x64/dxc.exe'
 
@@ -190,6 +227,11 @@ def script_ok(tree):
 	kwlines = dict(re.findall(r'^fxkw ([a-z0-9_]+) ([A-Za-z0-9_/+-]+)$', vf, re.M))
 	if kwlines != VKFRAME_FXKW:
 		bad.append('src/features/vkframe/vkframe_spirv.sh: its fxkw lines (%s) are not this checker\'s water pixel twins' % ' '.join(sorted(kwlines)))
+	if '\t"$DXC" -spirv -fspv-target-env=vulkan1.2 -T vs_6_0 -E main ' + ' '.join(VKFRAME_FXC_ARGS) + ' -Fo "$1.spv" ' not in vf:
+		bad.append('src/features/vkframe/vkframe_spirv.sh: its fxc() compile line changed')
+	clines = dict(re.findall(r'^fxc ([a-z0-9_]+) ([A-Za-z0-9_/+-]+)$', vf, re.M))
+	if clines != VKFRAME_FXC:
+		bad.append('src/features/vkframe/vkframe_spirv.sh: its fxc lines (%s) are not this checker\'s far-card vertex stages' % ' '.join(sorted(clines)))
 	if '\t"$DXC" -spirv -fspv-target-env=vulkan1.2 -T vs_6_0 -E main ' + ' '.join(VKFRAME_FXW_ARGS) + ' -Fo "$1.spv" ' not in vf:
 		bad.append('src/features/vkframe/vkframe_spirv.sh: its fxw() compile line changed')
 	wlines = dict(re.findall(r'^fxw ([a-z0-9_]+) ([A-Za-z0-9_/+-]+)$', vf, re.M))
@@ -202,6 +244,31 @@ def script_ok(tree):
 		if got != want:
 			bad.append('src/features/vkframe/vkframe_spirv.sh: its %s lines (%s) are not this checker\'s water tessellation stages'
 			           % (fn, ' '.join(sorted(got))))
+	if '\t"$DXC" -spirv -fspv-target-env=vulkan1.2 -T vs_6_0 -E main ' + ' '.join(VKFRAME_FXL_ARGS) + ' -Fo "$1.spv" ' not in vf:
+		bad.append('src/features/vkframe/vkframe_spirv.sh: its fxl() compile line changed')
+	llines = dict(re.findall(r'^fxl ([a-z0-9_]+) ([A-Za-z0-9_/+-]+)$', vf, re.M))
+	if llines != VKFRAME_FXL:
+		bad.append('src/features/vkframe/vkframe_spirv.sh: its fxl lines (%s) are not this checker\'s far LOD vertex stages' % ' '.join(sorted(llines)))
+	if '\t"$DXC" -spirv -fspv-target-env=vulkan1.2 -T vs_6_0 -E main ' + ' '.join(VKFRAME_FXB_ARGS) + ' -Fo "$1.spv" ' not in vf:
+		bad.append('src/features/vkframe/vkframe_spirv.sh: its fxb() compile line changed')
+	blines = dict(re.findall(r'^fxb ([a-z0-9_]+) ([A-Za-z0-9_/+-]+)$', vf, re.M))
+	if blines != VKFRAME_FXB:
+		bad.append('src/features/vkframe/vkframe_spirv.sh: its fxb lines (%s) are not this checker\'s sky-body vertex stages' % ' '.join(sorted(blines)))
+	if '\t"$DXC" -spirv -fspv-target-env=vulkan1.2 -T $3 -E main -Fo "$1.spv" ' not in vf:
+		bad.append('src/features/vkframe/vkframe_spirv.sh: its fxf() compile line changed')
+	flines = {a: (b, c) for a, b, c in re.findall(r'^fxf ([a-z0-9_]+) ([A-Za-z0-9_/+-]+) ([vp]s_6_0)$', vf, re.M)}
+	if flines != VKFRAME_FXF:
+		bad.append('src/features/vkframe/vkframe_spirv.sh: its fxf lines (%s) are not this checker\'s lens-flare stages' % ' '.join(sorted(flines)))
+	if '\t"$DXC" -spirv -fspv-target-env=vulkan1.2 -T cs_6_0 -E main $2 -Fo "$1.spv" "$(cygpath -m "$ROOT/' + VKFRAME_FOG_SRC + '" ' not in vf:
+		bad.append('src/features/vkframe/vkframe_spirv.sh: its fog() compile line changed')
+	glines = dict(re.findall(r'^fog ([a-z0-9_]+) "([^"]*)"$', vf, re.M))
+	if glines != VKFRAME_FOG:
+		bad.append('src/features/vkframe/vkframe_spirv.sh: its fog lines (%s) are not this checker\'s air integrate kernels' % ' '.join(sorted(glines)))
+	if '\t"$DXC" -spirv -fspv-target-env=vulkan1.2 -T $3 -E main $4 -Fo "$1.spv" ' not in vf:
+		bad.append('src/features/vkframe/vkframe_spirv.sh: its pfx() compile line changed')
+	plines = {a: (b, c, e) for a, b, c, e in re.findall(r'^pfx ([a-z0-9_]+) ([A-Za-z0-9_/+-]+) ([cvp]s_6_0) "([^"]*)"$', vf, re.M)}
+	if plines != VKFRAME_PFX:
+		bad.append('src/features/vkframe/vkframe_spirv.sh: its pfx lines (%s) are not this checker\'s P7 post passes' % ' '.join(sorted(plines)))
 	return bad
 
 
@@ -330,12 +397,34 @@ def main(argv):
 			if k in VKFRAME_FXKW:
 				src = os.path.join(tree, 'res/shaders/hlsl', VKFRAME_FXKW[k] + '.hlsl')
 				hdefs = VKFRAME_SKY_ARGS + ['-fspv-preserve-bindings', '-fvk-use-dx-position-w']
+			if k in VKFRAME_FXC:
+				src = os.path.join(tree, 'res/shaders/hlsl', VKFRAME_FXC[k] + '.hlsl')
+				hdefs = VKFRAME_FXC_ARGS
 			if k in VKFRAME_FXW:
 				src = os.path.join(tree, 'res/shaders/hlsl', VKFRAME_FXW[k] + '.hlsl')
 				hdefs = VKFRAME_FXW_ARGS
-			m = None if k in VKFRAME_FXH or k in VKFRAME_FXD else \
-				re.search(r'hlsl profile: ([cvp]s_6_[0-9])', open(src, encoding='utf-8', errors='replace').read())
-			if k in VKFRAME_FXV or k in VKFRAME_FXW:
+			if k in VKFRAME_FXL:
+				src = os.path.join(tree, 'res/shaders/hlsl', VKFRAME_FXL[k] + '.hlsl')
+				hdefs = VKFRAME_FXL_ARGS
+			if k in VKFRAME_FOG:
+				src = os.path.join(tree, VKFRAME_FOG_SRC)
+				hdefs = VKFRAME_FOG[k].split()
+			if k in VKFRAME_FXB:
+				src = os.path.join(tree, 'res/shaders/hlsl', VKFRAME_FXB[k] + '.hlsl')
+				hdefs = VKFRAME_FXB_ARGS
+			if k in VKFRAME_FXF:  # the profile is the table's (lens_flare.hlsl holds both stages)
+				src = os.path.join(tree, 'res/shaders/hlsl', VKFRAME_FXF[k][0] + '.hlsl')
+				hdefs = []
+				m = re.match(r'([vp]s_6_0)', VKFRAME_FXF[k][1])
+			elif k in VKFRAME_PFX:  # the profile and defines are the table's (one source, several kernels)
+				src = os.path.join(tree, 'res/shaders/hlsl', VKFRAME_PFX[k][0] + '.hlsl')
+				hdefs = VKFRAME_PFX[k][2].split()
+				m = re.match(r'([cvp]s_6_0)', VKFRAME_PFX[k][1])
+			elif k in VKFRAME_FXH or k in VKFRAME_FXD:
+				m = None
+			else:
+				m = re.search(r'hlsl profile: ([cvp]s_6_[0-9])', open(src, encoding='utf-8', errors='replace').read())
+			if k in VKFRAME_FXV or k in VKFRAME_FXC or k in VKFRAME_FXW or k in VKFRAME_FXL or k in VKFRAME_FXB:
 				m = re.match(r'(vs_6_0)', 'vs_6_0')
 			if k in VKFRAME_FXH:
 				src = os.path.join(tree, 'res/shaders/hlsl', VKFRAME_FXH[k] + '.hlsl')

@@ -19,6 +19,7 @@
 #include "gl/renderer.h"
 #include "harnesswindow.h"
 
+#include <QDebug>	// lane VKFAR2: the "vk cloudfront:" line
 #include <QFile>
 #include <QHash>
 #include <QSettings>
@@ -1255,6 +1256,79 @@ void lightningUniforms( Renderer * r, NifSkopeOpenGLContext::Program * p, const 
 	p->uni4f( "cvProj", FloatVector4( proj[0], proj[1], proj[2], proj[3] ) );
 }
 
+/* lane VKFAR2 (row P8): mode 2 drawn on the present device (vkcloudfront.inc: the tone frame's colour + stencil, the
+ * history read where it is shared, the scene depth copied into a twin), the program's uniforms already set. true: drawn;
+ * false: GL draws its quad (the reason on "vk cloudfront:"). Red WW_VKVIEW_CLOUDFRONT_RED=1 keeps GL's */
+bool frontOnVulkan( Renderer * r, NifSkopeOpenGLContext::Program * p, const GlKeep & keep )
+{
+	auto fn = r->fn;
+	static QString said;
+	static auto at = std::chrono::steady_clock::now();
+	auto say = [&]( const QString & line ) {
+		if ( line == said )
+			return;
+		said = line;
+		at = std::chrono::steady_clock::now();
+		qInfo().noquote() << line;
+	};
+	const GLuint color = wwCellHdrVkToneColor( GLuint( keep.draw ) );
+	if ( !color || !WwVkPresent::shareWanted( "WW_VKVIEW_CLOUDFRONT_RED" ) ) {
+		say( QStringLiteral( "vk cloudfront: on GL (red WW_VKVIEW_CLOUDFRONT_RED=1, the view not on Vulkan or not the tone frame)" ) );
+		return false;
+	}
+	static WwVkPresent::CloudFrontRun t;
+	t = WwVkPresent::CloudFrontRun();
+	std::string why;
+	bool drew = false;
+	static const char * const kName[3] = { "cvHist", "cvHistDepth", "cvScene" };
+	static char twin[3];
+	bool ok = true;
+	for ( int k = 0; k < 3 && ok; k++ ) {
+		ok = WwVkPresent::fxTexOf( fn, p->id, kName[k], 0, t.tex[k], why );
+		t.tex[k].twin = reinterpret_cast<std::uintptr_t>( &twin[k] );
+	}
+	if ( !ok ) {
+		WwVkPresent::cloudFrontOnGl( why.c_str() );
+	} else {
+		WwVkPresent::fxPack( fn, p->id, WwVkPresent::kT_cloudfront, int( sizeof( WwVkPresent::kT_cloudfront ) / sizeof( WwVkPresent::kT_cloudfront[0] ) ), t.loose );
+		wwCellHdrFrameSize( t.w, t.h );
+		fn->glGetIntegerv( GL_SAMPLES, &t.samples );
+		std::memcpy( t.vp, keep.vp, sizeof( t.vp ) );
+		t.color = color;
+		drew = WwVkPresent::cloudFrontRun( t, why );
+	}
+	const WwVkPresent::FxStat st = WwVkPresent::takeCloudFrontStat();
+	static WwVkPresent::FxStat sum;
+	sum.runs += st.runs;
+	sum.gl += st.gl;
+	sum.fails += st.fails;
+	sum.cpuMs += st.cpuMs;
+	sum.maxMs = std::max( sum.maxMs, st.maxMs );
+	sum.copies += st.copies;
+	sum.pipelines = st.pipelines;
+	sum.buildMs = st.buildMs;
+	if ( !st.glWhy.empty() )
+		sum.glWhy = st.glWhy;
+	if ( !st.failWhy.empty() )
+		sum.failWhy = st.failWhy;
+	if ( std::chrono::duration<double>( std::chrono::steady_clock::now() - at ).count() >= 5.0 || !said.startsWith( QStringLiteral( "vk cloudfront: on V" ) ) ) {
+		QString line = sum.runs > 0
+			? QStringLiteral( "vk cloudfront: on Vulkan %1 frames (%2x%3 x%4, cvFront 2 into the tone frame's stencil-1 samples, one draw, "
+				"one crossing; %5 pipelines built in %6 ms; %7 input copies; drawing thread %8 ms, max %9)" ).arg( sum.runs )
+				.arg( t.w ).arg( t.h ).arg( t.samples ).arg( sum.pipelines ).arg( sum.buildMs, 0, 'f', 1 ).arg( sum.copies )
+				.arg( sum.cpuMs / sum.runs, 0, 'f', 3 ).arg( sum.maxMs, 0, 'f', 3 )
+			: QStringLiteral( "vk cloudfront: on Vulkan wanted, 0 frames drawn" );
+		if ( sum.gl > 0 )
+			line += QStringLiteral( ", on GL %1 frames (last: %2)" ).arg( sum.gl ).arg( QString::fromStdString( sum.glWhy ) );
+		if ( sum.fails > 0 )
+			line += QStringLiteral( ", refused %1 (last: %2)" ).arg( sum.fails ).arg( QString::fromStdString( sum.failWhy ) );
+		said.clear();
+		say( line );
+		sum = WwVkPresent::FxStat();
+	}
+	return drew;
+}
+
 //! the history over the scene where the clouds' mean depth is in front of it (cloud_composite.frag cvFront): mode 1 in
 //! display space (exposure, view transform; blend SRC_ALPHA), mode 2 linear light into the cell frame's stencil-1 pixels
 void frontPass( Renderer * r, CvGpu & g, int mode )
@@ -1282,6 +1356,10 @@ void frontPass( Renderer * r, CvGpu & g, int mode )
 	// lane CLOUD6f: the backdrop's flash over the scene too (g.prevCam / prevKm hold this frame's camera after a draw)
 	const auto lit = lightnings().constFind( r );
 	lightningUniforms( r, p, lit != lightnings().constEnd() ? *lit : CvLightning(), g.prevCam, g.prevKm, g.frontProj );
+	if ( mode == 2 && frontOnVulkan( r, p, keep ) ) {  // lane VKFAR2 (row P8)
+		r->stopProgram();
+		return;
+	}
 	fn->glEnable( GL_BLEND );
 	if ( mode == 2 ) {
 		// the cell's linear light only (stencil 1, cellhdr.cpp): the tone map takes those pixels; the others pass as written

@@ -15,6 +15,7 @@
 #include <vector>
 
 #include "features/vkframe/vkwater_tables.h"
+#include "features/vkframe/vkfarlod_tables.h"
 
 namespace WwVkPresent
 {
@@ -104,6 +105,8 @@ inline int waterSlotBlock( const WaterSlot & s, const WaterCaps & c )
 		return c.texelBuffer ? kWaterOk : kWaterTexelBuffer;
 	if ( s.kind == 4 )
 		return c.cubeArray ? kWaterOk : kWaterCubeArray;
+	if ( s.kind == 3 && !s.tex )
+		return kWaterOk;  // lane VKFAR2: GL's unbound cube reads 0 (the rings' zero cube; the water's draw refuses it)
 	if ( s.kind < 0 || s.kind > 2 )
 		return kWaterKind;
 	if ( !s.tex )
@@ -357,6 +360,15 @@ inline bool waterPsReads( int v, std::string_view name )
 	return false;
 }
 inline constexpr int kWaterPsLooseMax = std::max( { kT_waterPsBytes, kT_waterPsDBytes, kT_waterPsMBytes, kT_waterPsPBytes, kT_waterPsDpBytes } );
+//! lane VKFAR2: one instanced command (CellMeshInst::Cmd's layout; GL's DrawElementsIndirectCommand)
+struct WaterCmd
+{
+	std::uint32_t count = 0, instanceCount = 0, firstIndex = 0;
+	std::int32_t baseVertex = 0;
+	std::uint32_t baseInstance = 0;
+};
+//! the largest pixel-stage loose block of the shaded twins (water, the far LOD rings)
+constexpr int kTwinPsMax = kT_farlodPsBytes > kWaterPsLooseMax ? kT_farlodPsBytes : kWaterPsLooseMax;
 
 /* everything the shaded draw reads: the census, GL's vertex array, element range, blocks, loose uniforms, raster state.
  * Indices GL_UNSIGNED_SHORT triangles, or 3-vertex patches for a tessellated variant (bsshape's drawElements). */
@@ -373,22 +385,29 @@ struct WaterRun
 	int count = 0, baseVertex = 0;
 	WaterUbo global, shadow, skin;  //!< globalUniforms (vs b41 + ps b1), wwShadowFrame (ps b0), skinningUniforms (vs b40)
 	std::uint8_t vsLoose[kT_waterVsBytes] = {}, hsLoose[kT_waterHsBytes] = {}, dsLoose[kT_waterDsBytes] = {};
-	std::uint8_t psLoose[kWaterPsLooseMax] = {};  //!< the variant's pixel table (waterTables)
+	std::uint8_t psLoose[kTwinPsMax] = {};  //!< the variant's pixel table (waterTables) or the rings' (lane VKFAR2)
+	int psBytes = kT_waterPsBytes;  //!< lane VKFAR2: the pixel twin's block (twinStateOf's table)
 	int patchVerts = 3;             //!< GL_PATCH_VERTICES (a tessellated variant)
 	int vp[4] = {}, scissor[4] = {};
 	bool scissorOn = false, cullOn = false, depthTest = true, depthMask = true, blend = false, stencil = false;
 	bool colorMask[4] = { true, true, true, true };
 	unsigned cullFace = 0x0405, frontFace = 0x0901, depthFunc = 0x0203;
 	bool polyOffset = false;
+	// lane VKFAR2: GL's polygon offset (factor, units), FRAMEBUFFER_SRGB, the second draw buffer (GL_NONE 0), the commands
+	float polyFactor = 0.0f, polyUnits = 0.0f;
+	bool srgb = false;
+	unsigned drawBuf1 = 0;
+	std::vector<WaterCmd> cmds;     //!< far rings: instanced commands (empty: one draw of count from idxOff / baseVertex)
 	std::uintptr_t key = 0;         //!< the twins' keys: key + slot index
 	int red = 0;                    //!< gates only: 1 the ps loose block a vec4 off, 2 plain samplers, 4 cull flipped, 8 depth ALWAYS,
-	                                //!< 16 the tessellation domain's origin upper-left (Vulkan's default, not GL's), 32 the ds loose
-	                                //!< block a vec4 off
+	                                //!< 16 water: the tessellation domain's origin upper-left (Vulkan's default, not GL's),
+	                                //!< rings (lane VKFAR2): the polygon offset dropped; 32 water: the ds loose block a vec4 off
 };
 
 /* GL current, prog in use, its uniforms set, the shape's vertex array bound: GL's side of the draw into r (the census
- * first: waterCensusOf). count / idxOff / baseVertex / w / h / color / key are the caller's. */
-template <class Fn> void waterStateOf( Fn * fn, unsigned prog, WaterRun & r )
+ * first: waterCensusOf). count / idxOff / baseVertex / cmds / w / h / color / key are the caller's. ps / nPs / psBytes:
+ * the pixel twin's loose block (lane VKFAR2: the water's or the far LOD rings'). */
+template <class Fn> void twinStateOf( Fn * fn, unsigned prog, WaterRun & r, const FxField * ps, int nPs, int psBytes )
 {
 	waterCensusOf( fn, prog, r.census );
 	int was = 0;
@@ -457,13 +476,8 @@ template <class Fn> void waterStateOf( Fn * fn, unsigned prog, WaterRun & r )
 	ubo( "skinningUniforms", r.skin );
 	fn->glBindBuffer( 0x8F36, unsigned( was ) );
 	fxPack( fn, prog, kT_waterVs, int( sizeof( kT_waterVs ) / sizeof( kT_waterVs[0] ) ), r.vsLoose );
-	const WaterTables & t = waterTables( r.variant );
-	fxPack( fn, prog, t.ps, t.psN, r.psLoose );
-	if ( t.tess ) {
-		fxPack( fn, prog, kT_waterHs, waterN( kT_waterHs ), r.hsLoose );
-		fxPack( fn, prog, kT_waterDs, waterN( kT_waterDs ), r.dsLoose );
-		fn->glGetIntegerv( 0x8E72, &r.patchVerts );  // GL_PATCH_VERTICES
-	}
+	fxPack( fn, prog, ps, nPs, r.psLoose );
+	r.psBytes = psBytes;
 	fn->glGetIntegerv( 0x0BA2, r.vp );       // GL_VIEWPORT
 	fn->glGetIntegerv( 0x0C10, r.scissor );  // GL_SCISSOR_BOX
 	r.scissorOn = fn->glIsEnabled( 0x0C11 ) != 0;
@@ -485,6 +499,29 @@ template <class Fn> void waterStateOf( Fn * fn, unsigned prog, WaterRun & r )
 	r.depthMask = dm != 0;
 	for ( int k = 0; k < 4; k++ )
 		r.colorMask[k] = cm[k] != 0;
+	fn->glGetFloatv( 0x8038, &r.polyFactor );  // GL_POLYGON_OFFSET_FACTOR
+	fn->glGetFloatv( 0x2A00, &r.polyUnits );   // GL_POLYGON_OFFSET_UNITS
+	r.srgb = fn->glIsEnabled( 0x8DB9 ) != 0;  // GL_FRAMEBUFFER_SRGB
+	int db1 = 0;
+	fn->glGetIntegerv( 0x8826, &db1 );         // GL_DRAW_BUFFER1
+	r.drawBuf1 = unsigned( db1 );
+}
+
+template <class Fn> void waterStateOf( Fn * fn, unsigned prog, WaterRun & r )
+{
+	const WaterTables & t = waterTables( r.variant );
+	twinStateOf( fn, prog, r, t.ps, t.psN, t.psBytes );
+	if ( t.tess ) {  // lane VKWATER3 item 4
+		fxPack( fn, prog, kT_waterHs, waterN( kT_waterHs ), r.hsLoose );
+		fxPack( fn, prog, kT_waterDs, waterN( kT_waterDs ), r.dsLoose );
+		fn->glGetIntegerv( 0x8E72, &r.patchVerts );  // GL_PATCH_VERTICES
+	}
+}
+
+//! lane VKFAR2: the far LOD rings' side (fo4_cellcsm's twin), the rings' vertex array bound
+template <class Fn> void farLodStateOf( Fn * fn, unsigned prog, WaterRun & r )
+{
+	twinStateOf( fn, prog, r, kT_farlodPs, int( sizeof( kT_farlodPs ) / sizeof( kT_farlodPs[0] ) ), kT_farlodPsBytes );
 }
 
 //! lane VKWATER1: the device's side of the verdict (vkwater.inc)
@@ -509,6 +546,14 @@ bool waterRun( const WaterRun & r, std::string & why );
 //! what waterRun cannot take on this device (empty: none)
 std::string waterDrawRefusal();
 FxStat takeWaterDrawStat();
+/*! lane VKFAR2: the far LOD rings (fo4_default vs + fo4_cellcsm FOGLEAK + FRAME_UBO ps twins; r from farLodStateOf, r.cmds
+ * the instanced commands) into the tone frame on Vulkan, one crossing. false: why; nothing drawn (GL draws the rings) */
+bool farLodRun( const WaterRun & r, std::string & why );
+std::string farLodDrawRefusal();
+FxStat takeFarLodDrawStat();
+//! one far LOD rings draw stayed on GL (why: the route's reason or farLodRun's)
+void farLodOnGl( const char * why );
+WaterStat takeFarLodGlStat();
 }
 
 #ifndef WW_VKPRESENT_NO_QT
@@ -516,5 +561,7 @@ namespace WwVkPresent
 {
 //! the water's route line ("vk water:"), one a 5 s window while the view is on Vulkan
 void waterSay( bool wanted, const char * glWhy );
+//! lane VKFAR2: the far LOD rings' route line ("vk far: LOD rings"), the same shape
+void farLodSay( bool wanted, const char * glWhy );
 }
 #endif

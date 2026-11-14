@@ -46,6 +46,7 @@ BSD License - see nifskope.h
 #include "features/air/fognoise.h"	// MODULES1 part 19: the lumps' texture file
 #include "features/water/endlesssea.h"	// FARWATER1 round 2: the sky band over the endless sea
 #include "features/vkframe/vkpresent.h"	// lane VKAIR1: the sky's air on the present device
+#include "features/vkframe/vkfog.h"	// lane VKFAR2: the integrate on the present device
 
 const void * wwGlobalUboBytes( const NifSkopeOpenGLContext * ctx );	// glcontext.cpp: b0's bytes (lane VKAIR1)
 
@@ -511,6 +512,8 @@ struct VaGpu
 	int histCur = 0, histCols = 0, histRows = 0, histSlices = 0;
 	int histStrata = 0;	// MODULES1 item 8: 6 = the four strata + the env walk's two (envspread), 4 = red
 	bool half = false;	// lane PERFFIX3: the volumes are RGBA16F (WW_CELL_AIR_RED=f32: RGBA32F, as before)
+	// lane VKFAR2: the inject asked on the present device (the integrate there), and made there
+	bool injectAsk = false, injectShared = false;
 	// lane PERFFIX3: the stages whose framebuffer was found complete for this layout of targets (bit per site; asked once)
 	int fbOk = 0;
 	std::uint64_t fbLayout = 0;
@@ -2148,9 +2151,12 @@ static void vaPassInner( Scene * scene, bool run )
 	const int texW = farOn ? std::max( cols, fp.cols ) : cols, texH = farOn ? std::max( rows, fp.rows ) : rows;
 	const int texD = kSlices + ( farOn ? fp.slices : 0 );
 	const bool half = !s.f32;	// lane PERFFIX3: RGBA16F volumes (red f32: RGBA32F, as before)
+	/* lane VKFAR2: the integrate on the present device wants the inject there too (red WW_VKVIEW_FOG_RED=1: GL's own, GL's
+	 * integrate); a red flipped live, or a shutdown that dropped the shared names, makes the volumes again */
+	const std::uintptr_t injectKey = reinterpret_cast<std::uintptr_t>( &g.inject );
+	const bool fogShare = WwVkPresent::shareWanted( "WW_VKVIEW_AIR_RED" ) && WwVkPresent::shareWanted( "WW_VKVIEW_FOG_RED" );
 	if ( g.cols != cols || g.rows != rows || g.slices != kSlices || !g.inject || g.texW != texW || g.texH != texH || g.texD != texD
-		|| g.half != half ) {
-		vaAlloc3D( fn, g.inject, texW, texH, texD, false, false );	// the slices' transmittance needs float32 (16F: 5e-4 a step near 1)
+		|| g.half != half || g.injectAsk != fogShare || ( g.injectShared && !WwVkPresent::sharedTargetIs( injectKey, g.inject ) ) ) {
 		/* lane VKAIR1 (row L5): while the view is on Vulkan the integrated volume is a shared target of the present
 		 * device, so the sky's air reads it there with no copy (red WW_VKVIEW_AIR_RED=1, or a refusal: GL's own, as before) */
 		const std::uintptr_t integKey = reinterpret_cast<std::uintptr_t>( &g.integ );
@@ -2183,6 +2189,38 @@ static void vaPassInner( Scene * scene, bool run )
 				WwVkPresent::sharedTargetDrop( integKey );
 			}
 			vaAlloc3D( fn, g.integ, texW, texH, texD, true, half );
+		}
+		// the slices' transmittance needs float32 (16F: 5e-4 a step near 1); lane VKFAR2: shared beside a shared integ
+		g.injectAsk = fogShare;
+		if ( g.injectShared && !WwVkPresent::sharedTargetIs( injectKey, g.inject ) )
+			g.inject = 0;	// a shutdown dropped the shared name: not ours to delete (GL may have handed it out again)
+		g.injectShared = false;
+		if ( fogShare && integShared ) {
+			if ( g.inject && !WwVkPresent::sharedTargetIs( injectKey, g.inject ) ) {
+				fn->glDeleteTextures( 1, &g.inject );
+				g.inject = 0;
+			}
+			unsigned t = 0;
+			std::string why;
+			g.injectShared = WwVkPresent::sharedTarget( injectKey, 1, texW, texH, texD, GL_RGBA32F, t, why, 1 );
+			if ( g.injectShared ) {
+				g.inject = t;
+				fn->glBindTexture( GL_TEXTURE_3D, t );
+				fn->glTexParameteri( GL_TEXTURE_3D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE );
+				fn->glTexParameteri( GL_TEXTURE_3D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE );
+				fn->glTexParameteri( GL_TEXTURE_3D, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE );
+				fn->glTexParameteri( GL_TEXTURE_3D, GL_TEXTURE_MAX_LEVEL, 0 );
+				fn->glBindTexture( GL_TEXTURE_3D, 0 );
+			} else {
+				qInfo().noquote() << "vk fog: the inject stays GL's (" << QString::fromStdString( why ) << ")";
+			}
+		}
+		if ( !g.injectShared ) {
+			if ( WwVkPresent::sharedTargetIs( injectKey, g.inject ) ) {
+				g.inject = 0;	// the present device's name: dropped there, not deleted here
+				WwVkPresent::sharedTargetDrop( injectKey );
+			}
+			vaAlloc3D( fn, g.inject, texW, texH, texD, false, false );
 		}
 		g.half = half;
 		if ( !g.fbo )
@@ -2943,6 +2981,27 @@ static void vaPassInner( Scene * scene, bool run )
 	prog->uni1i( "volLampVol", lampRan ? 1 : 0 );
 	// lane PERF2: the O(S) integrate (stage 3, 7 layers a draw); red oldint: stage 2, every layer re-summed from 0
 	const bool oneSum = g.mrtOk == 1 && !( s.red & 268435456 );
+	/* lane VKFAR2: while the view is on Vulkan the integrate (stages 2 / 3) is a compute pass there (vkfog.inc,
+	 * volair_integ_cs.hlsl), one crossing a grid, into the shared volume; a refusal draws GL's integrate this frame */
+	const std::uintptr_t integKeyF = reinterpret_cast<std::uintptr_t>( &g.integ );
+	const bool fogVk = g.injectShared && WwVkPresent::sharedTargetIs( injectKey, g.inject )
+		&& WwVkPresent::sharedTargetIs( integKeyF, g.integ );
+	if ( fogShare && !fogVk )
+		WwVkPresent::fogOnGl( "the inject or the integrated volume is not a shared target" );
+	auto fogRun = [&]( int cc, int rr, int base, int layers ) {
+		WwVkPresent::FogIntegRun t;
+		t.inject = injectKey;
+		t.integ = integKeyF;
+		t.injectTex = g.inject;
+		t.integTex = g.integ;
+		t.f32 = !half;
+		t.grid[0] = WwVkPresent::FogGrid { cc, rr, base, layers };
+		std::string why;
+		if ( WwVkPresent::fogIntegRun( t, why ) )
+			return true;
+		WwVkPresent::fogOnGl( why.c_str() );
+		return false;
+	};
 	for ( int stage = 1; stage <= 2 && complete; stage++ ) {
 		prog->uni1i( "volStage", stage == 2 && oneSum ? 3 : stage );
 		fn->glActiveTexture( GLenum( GL_TEXTURE0 + kInjectUnit ) );
@@ -2970,6 +3029,8 @@ static void vaPassInner( Scene * scene, bool run )
 				fn->glFramebufferTexture2D( GL_FRAMEBUFFER, GLenum( GL_COLOR_ATTACHMENT0 + p ), GL_TEXTURE_2D, 0, 0 );
 			const GLenum first = GL_COLOR_ATTACHMENT0;
 			fn->glDrawBuffers( 1, &first );
+		} else if ( stage == 2 && fogVk && fogRun( cols, rows, 0, kSlices ) ) {
+			// lane VKFAR2: the near grid summed on Vulkan
 		} else if ( stage == 2 && oneSum ) {
 			prog->uni1i( "volCarry", kGbufUnit );
 			fn->glActiveTexture( GLenum( GL_TEXTURE0 + kGbufUnit ) );
@@ -3085,6 +3146,8 @@ static void vaPassInner( Scene * scene, bool run )
 			prog->uni1f( "volJitter", jitter ? float( ( ++frame * 2654435761u ) >> 8 ) / 16777216.0f - 0.5f : 0.0f );
 			fn->glViewport( 0, 0, fp.cols, fp.rows );
 			for ( int stage = 1; stage <= 2 && farOk; stage++ ) {
+				if ( stage == 2 && farShare.sum && fogVk && fogRun( fp.cols, fp.rows, kSlices, fp.slices ) )
+					break;	// lane VKFAR2: the far grid summed on Vulkan
 				prog->uni1i( "volStage", stage );
 				fn->glActiveTexture( GLenum( GL_TEXTURE0 + kInjectUnit ) );
 				fn->glBindTexture( GL_TEXTURE_3D, stage == 2 ? g.inject : 0 );
@@ -3125,6 +3188,7 @@ static void vaPassInner( Scene * scene, bool run )
 		PassTime::subEnd( PassTime::AirFar );
 		vaCpu.mark( PassTime::CpuAirFar );
 	}
+	WwVkPresent::fogSay( fogShare, "red WW_VKVIEW_FOG_RED=1 or WW_VKVIEW_AIR_RED=1, or the view not on Vulkan" );	// lane VKFAR2
 	PassTime::subBegin( PassTime::AirPost );
 	// the numbers the dump echoes, read before the program stops
 	float cellRowV[3][4], cellDirColV[3] = { 0, 0, 0 }, cellDirToV[3] = { 0, 0, 0 };
@@ -3416,6 +3480,27 @@ static void vaPassInner( Scene * scene, bool run )
 	restore();
 }
 
+/* volAirFlags (lookdev_fog.glsl): what the surfaces' and the sky's air reads do (the reds clear a bit); lane VKFAR2:
+ * one helper for wwVolAirUniforms and wwVolAirShareOf */
+static int vaAirFlagsOf( Scene * scene, const VaState & s, const VaGpu & g, bool terr )
+{
+	// part 18 (bungo 11-06, the blocks in his crop): RDR2's single dithered froxel tap, TAA resolves it (Bauer 2019 slides 48,
+	// 57; notes/modules1/research/fog_temporal.md); red WW_CELL_AIR_DITHER_RED=1: the plain read at the pixel's own column
+	WW_SWITCH_STATIC( bool, ditherRed, wwEnv( "WW_CELL_AIR_DITHER_RED" ).trimmed() == "1" );
+	WW_SWITCH_STATIC( bool, aboveRed, wwEnv( "WW_CELL_AIR_ABOVE_RED" ).trimmed() == "1" );	// MODULES1 item 18
+	WW_SWITCH_STATIC( bool, groundEndRed, wwEnv( "WW_CELL_AIR_GROUNDEND_RED" ).trimmed() == "1" );
+	WW_SWITCH_STATIC( bool, curveRed, wwEnv( "WW_CELL_AIR_CURVE_RED" ).trimmed() == "1" );
+	return ( ( s.red & 512 ) ? 0 : 1 ) | ( ( s.red & 1024 ) ? 0 : 2 ) | ( ( s.red & 256 ) ? 0 : 4 )
+		| ( ( s.red & 65536 ) ? 0 : 8 ) | ( ( s.red & 131072 ) ? 0 : 16 ) | ( s.tricubic ? 32 : 0 ) | ( terr ? 64 : 0 )
+		| ( s.sunColumn ? 0 : 128 )	// lane FIX1101A: 128 = the surfaces' sun dimmed by the ground layer only
+		| ( ( vaLeakBits( scene && wwCellLightsWanted( scene ) ? wwCellLightsFor( scene->nifModel ) : nullptr, s.leakRed ) & 8 ) ? 0 : 256 )	// lane FOGLEAK1: 256 = the far grid's tail takes the sun's shadow (WW_CELL_FOGLEAK only)
+		| ( ditherRed ? 0 : 512 | int( ( g.frame & 15u ) << 10 ) )	// part 18: 512 = the dithered froxel read, bits 10-13 its frame
+		| ( aboveRed ? 0 : 16384 )	// MODULES1 item 18: 16384 = a downward tail still above the air's top is clear
+		| ( vaThinSrcRed() ? 0 : 32768 )	// MODULES1 10c: 32768 = a too-thin column's tail takes the grid's light over the law's depth
+		| ( groundEndRed ? 0 : 65536 )	// MODULES1 M5: 65536 = a downward sky ray ends at the ground
+		| ( curveRed ? 0 : 131072 );	// lane SKYSEA1: 131072 = the sky ray's air over the curved ground
+}
+
 void wwVolAirUniforms( Scene * scene )
 {
 	if ( !scene || !scene->renderer )
@@ -3549,11 +3634,7 @@ void wwVolAirUniforms( Scene * scene )
 	const int gloc = prog->uniLocation( "volAirGround" );
 	if ( gloc >= 0 )
 		prog->uni4f_l( gloc, FloatVector4( g.ground[0], g.ground[1], g.ground[2], g.ground[3] ) );
-	const int fl = prog->uniLocation( "volAirFlags" );
-	// part 18 (bungo 11-06, the blocks in his crop): RDR2's single dithered froxel tap, TAA resolves it (Bauer 2019 slides 48,
-	// 57; notes/modules1/research/fog_temporal.md); red WW_CELL_AIR_DITHER_RED=1: the plain read at the pixel's own column
-	WW_SWITCH_STATIC( bool, ditherRed, wwEnv( "WW_CELL_AIR_DITHER_RED" ).trimmed() == "1" );
-	WW_SWITCH_STATIC( bool, aboveRed, wwEnv( "WW_CELL_AIR_ABOVE_RED" ).trimmed() == "1" );	// MODULES1 item 18
+	const int fl = prog->uniLocation( "volAirFlags" );	// the bits: vaAirFlagsOf
 	// MODULES1 M5: 65536 = a downward sky ray's air ends at the ground (lookdev_fog.glsl wwVolAirSky); red: never ends
 	WW_SWITCH_STATIC( bool, groundEndRed, wwEnv( "WW_CELL_AIR_GROUNDEND_RED" ).trimmed() == "1" );
 	// lane SKYSEA1: 131072 = a sky ray's air column over the curved ground (lookdev_fog.glsl wwAirCurvedTau); red: flat
@@ -3579,15 +3660,54 @@ void wwVolAirUniforms( Scene * scene )
 	if ( fl >= 0 )
 		vaColumnEcho( g.med, g.layer, g.ground, terr, s.sunColumn );	// MODULES1 M12 (G4b, G5)
 	if ( fl >= 0 )
-		prog->uni1i_l( fl, ( ( s.red & 512 ) ? 0 : 1 ) | ( ( s.red & 1024 ) ? 0 : 2 ) | ( ( s.red & 256 ) ? 0 : 4 )
-			| ( ( s.red & 65536 ) ? 0 : 8 ) | ( ( s.red & 131072 ) ? 0 : 16 ) | ( s.tricubic ? 32 : 0 ) | ( terr ? 64 : 0 )
-			| ( s.sunColumn ? 0 : 128 )	// lane FIX1101A: 128 = the surfaces' sun dimmed by the ground layer only
-			| ( ( vaLeakBits( scene && wwCellLightsWanted( scene ) ? wwCellLightsFor( scene->nifModel ) : nullptr, s.leakRed ) & 8 ) ? 0 : 256 )	// lane FOGLEAK1: 256 = the far grid's tail takes the sun's shadow (WW_CELL_FOGLEAK only)
-			| ( ditherRed ? 0 : 512 | int( ( g.frame & 15u ) << 10 ) )	// part 18: 512 = the dithered froxel read, bits 10-13 its frame
-			| ( aboveRed ? 0 : 16384 )	// MODULES1 item 18: 16384 = a downward tail still above the air's top is clear
-			| ( vaThinSrcRed() ? 0 : 32768 )	// MODULES1 10c: 32768 = a too-thin column's tail takes the grid's light over the law's depth
-			| ( groundEndRed ? 0 : 65536 )	// MODULES1 M5: 65536 = a downward sky ray ends at the ground
-			| ( curveRed ? 0 : 131072 ) );	// lane SKYSEA1: 131072 = the sky ray's air over the curved ground
+		prog->uni1i_l( fl, vaAirFlagsOf( scene, s, g, terr ) );
+}
+
+// lane VKFAR2: the finished volume and its numbers for a reader on the present device (cellvolair.h), as set above
+bool wwVolAirShareOf( Scene * scene, WwVolAirShare & o )
+{
+	o = WwVolAirShare();
+	if ( !scene || !scene->renderer )
+		return false;
+	VaState & s = vs();
+	auto it = vaGpus().find( scene->renderer );
+	if ( it == vaGpus().end() )
+		return false;
+	VaGpu & g = it.value();
+	o.on = s.on && g.ready && g.doc == scene->nifModel && g.unitsOk > 0 && g.integ != 0;
+	if ( !o.on )
+		return false;
+	o.integKey = reinterpret_cast<std::uintptr_t>( &g.integ );
+	o.integTex = g.integ;
+	o.integShared = WwVkPresent::sharedTargetIs( o.integKey, g.integ );
+	o.half = g.half;
+	o.texW = g.texW;
+	o.texH = g.texH;
+	o.texD = g.texD;
+	o.cols = g.cols;
+	o.rows = g.rows;
+	o.slices = g.slices;
+	const float sl[4] = { g.near, g.logRatio, float( g.slices ), ( s.red & 1 ) ? 0.0f : 1.0f };
+	const float fr[4] = { g.farStart, g.farLog, float( g.farSlices ), g.farOn ? 1.0f : 0.0f };
+	const float tw = float( std::max( g.texW, 1 ) ), th = float( std::max( g.texH, 1 ) );
+	const float pk[4] = { float( g.cols ) / tw, float( g.rows ) / th, float( g.farCols ) / tw, float( g.farRows ) / th };
+	const float pd[4] = { tw, th, float( std::max( g.texD, 1 ) ), float( g.slices ) };
+	for ( int i = 0; i < 4; i++ ) {
+		o.volSlices[i] = sl[i];
+		o.volFar[i] = fr[i];
+		o.volPack[i] = pk[i];
+		o.volPackDims[i] = pd[i];
+		o.volAirMed[i] = g.med[i];
+		o.volAirLayer[i] = g.layer[i];
+		o.volAirGround[i] = g.ground[i];
+	}
+	o.volAirFlags = vaAirFlagsOf( scene, s, g, g.terrOn && g.terr );
+	o.volProbe = s.probe;
+	o.volFogBlend = s.fogBlend;
+	o.volFarClamp = g.tileValid && !( s.red & 2097152 );
+	o.tileTex = o.volFarClamp ? g.tile : 0;
+	o.frame = g.frame;
+	return true;
 }
 
 /* lane VKLIGHT1 r2: WW_CELL_AIR_APPLY_DUMP=<existing folder>: once, what cell_volsky reads as its draw sees it, for the

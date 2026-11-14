@@ -87,6 +87,10 @@ fxv() {
 }
 fxv fardots_view_vs far-lod/cell_fardots_view_vs
 fx fardots_view_ps far-lod/fardots_view_ps
+# lane VKFAR2 (P4b): the fog bloom's own pass, a hand-kept readable twin of cell_fogbloom (the depth and stencil read per sample)
+fx fogbloom_view_ps post/fogbloom_view_ps
+# lane VKFAR2 (P8): the clouds in front of the scene (cloud_composite cvFront 2), a frozen copy of the readable source
+fx cloud_composite_view_ps clouds/cloud_composite_view_ps
 # lane VKFAR1 round 2: the far cards' pixel stage (26 textures / texel buffers, b0 + b31), fx()'s shifts; its set is reflected
 # from the module, so every declared binding stays in it (-fspv-preserve-bindings) and GL's binding list maps one to one
 fxk() {
@@ -95,6 +99,14 @@ fxk() {
 	rm -f "$1.spv"
 }
 fxk farcards_view_ps far-lod/farcards_view_ps
+# lane VKFAR2: the far cards' vertex stage shares the pixel stage's set: b0 at 0 (both stages), its own b31 at 32 and
+# its texel buffers cardData / cardFrames at 96 / 97, clear of the pixel stage's 31 and 64..89
+fxc() {
+	"$DXC" -spirv -fspv-target-env=vulkan1.2 -T vs_6_0 -E main -fvk-bind-register b0 0 0 0 -fvk-bind-register b31 0 32 0 -fvk-bind-register t0 0 96 0 -fvk-bind-register t1 0 97 0 -fspv-preserve-bindings -Fo "$1.spv" "$(cygpath -m "$ROOT/res/shaders/hlsl/$2.hlsl" 2>/dev/null || echo "$ROOT/res/shaders/hlsl/$2.hlsl")"
+	python -I "$ROOT/tools/spv_header.py" "$1.spv" "vkframe_$1_spv" "$1.spv.h" < /dev/null
+	rm -f "$1.spv"
+}
+fxc farcards_view_vs far-lod/farcards_view_vs
 # lane VKWATER3: the shaded water (fo4_waterlook, the app's FOGLEAK + FRAME_UBO variant) through fxk(); its vertex stage
 # (fo4_default) on its own shifts: its b0 / b1 / b31 / t0 would land on the pixel stage's under fx()'s (blocks at 256 + n:
 # b31 at 40 + 31 = 71 was the pixel stage's t7). Both are frozen spirv-cross twins under the view's name (HLSLSRC2's rule):
@@ -135,4 +147,71 @@ fxkw water_view_d_ps water/water_view_d_ps
 fxkw water_view_m_ps water/water_view_m_ps
 fxkw water_view_p_ps water/water_view_p_ps
 fxkw water_view_dp_ps water/water_view_dp_ps
+# lane VKFAR2: the far LOD rings (terrain chunks, .lodi objects): fo4_cellcsm's FOGLEAK + FRAME_UBO twin through fxk()
+# (t0..t46 at 64..110); fo4_default's twin on fxw()'s shifts but t at 120, so its farStream clears the pixel stage's t46
+fxk farlod_view_ps core/farlod_view_ps
+fxl() {
+	"$DXC" -spirv -fspv-target-env=vulkan1.2 -T vs_6_0 -E main -fvk-b-shift 256 0 -fvk-t-shift 120 0 -fvk-s-shift 180 0 -fvk-u-shift 220 0 -fspv-preserve-bindings -Fo "$1.spv" "$(cygpath -m "$ROOT/res/shaders/hlsl/$2.hlsl" 2>/dev/null || echo "$ROOT/res/shaders/hlsl/$2.hlsl")"
+	python -I "$ROOT/tools/spv_header.py" "$1.spv" "vkframe_$1_spv" "$1.spv.h" < /dev/null
+	rm -f "$1.spv"
+}
+fxl farlod_view_vs core/water_view_vs
+# lane VKFAR2 G2: the sky bodies in the backdrop pass after the sky. The readable sources compile as they stand: the stars
+# (lookdev_clouds), the moon globe (lookdev_bill + sky_moon). Pixel stages through fxk(); vertex stages share the set:
+# b0 at 0 and their own b31 at 32 (vkskybody.h holds all four blocks' layouts)
+fxb() {
+	"$DXC" -spirv -fspv-target-env=vulkan1.2 -T vs_6_0 -E main -fvk-bind-register b0 0 0 0 -fvk-bind-register b31 0 32 0 -fspv-preserve-bindings -Fo "$1.spv" "$(cygpath -m "$ROOT/res/shaders/hlsl/$2.hlsl" 2>/dev/null || echo "$ROOT/res/shaders/hlsl/$2.hlsl")"
+	python -I "$ROOT/tools/spv_header.py" "$1.spv" "vkframe_$1_spv" "$1.spv.h" < /dev/null
+	rm -f "$1.spv"
+}
+fxb skystars_view_vs clouds/lookdev_clouds_vs
+fxk skystars_view_ps clouds/lookdev_clouds_ps
+fxb skymoon_view_vs core/lookdev_bill_vs
+fxk skymoon_view_ps sky/sky_moon_ps
+ls -la skystars_view_vs.spv.h skystars_view_ps.spv.h skymoon_view_vs.spv.h skymoon_view_ps.spv.h
+# lane VKFAR2 P9: the lens-flare sprites in the tone pass (vkflare.inc): lens_flare.hlsl's pixel entry as it stands, its
+# vertex entry through lens_flare_view_vs.hlsl (renamed main). PostFxBindingsVk.hlsli's own bindings, unused ones stripped
+fxf() {
+	"$DXC" -spirv -fspv-target-env=vulkan1.2 -T $3 -E main -Fo "$1.spv" "$(cygpath -m "$ROOT/res/shaders/hlsl/$2.hlsl" 2>/dev/null || echo "$ROOT/res/shaders/hlsl/$2.hlsl")"
+	python -I "$ROOT/tools/spv_header.py" "$1.spv" "vkframe_$1_spv" "$1.spv.h" < /dev/null
+	rm -f "$1.spv"
+}
+fxf lensflare_view_vs post/lens_flare_view_vs vs_6_0
+fxf lensflare_view_ps post/lens_flare ps_6_0
+ls -la lensflare_view_vs.spv.h lensflare_view_ps.spv.h
+# lane VKFAR2 (the froxel item): the air's integrate as compute (res/shaders/hlsl/air/volair_integ_cs.hlsl, vkfog.inc), the
+# RGBA16F volume and the f32 red's RGBA32F one
+fog() {
+	"$DXC" -spirv -fspv-target-env=vulkan1.2 -T cs_6_0 -E main $2 -Fo "$1.spv" "$(cygpath -m "$ROOT/res/shaders/hlsl/air/volair_integ_cs.hlsl" 2>/dev/null || echo "$ROOT/res/shaders/hlsl/air/volair_integ_cs.hlsl")"
+	python -I "$ROOT/tools/spv_header.py" "$1.spv" "vkframe_$1_spv" "$1.spv.h" < /dev/null
+	rm -f "$1.spv"
+}
+fog fog_integ_cs ""
+fog fog_integ32_cs "-DVOLAIR_INTEG_F32"
+ls -la fog_integ_cs.spv.h fog_integ32_cs.spv.h
+# lane VKFAR2 P7: cellpost.cpp's depth of field, motion blur and object blur in the tone pass (vkpost7.inc): the kernels as
+# they stand, a few twice under their defines (the 4th word, unquoted into dxc)
+pfx() {
+	"$DXC" -spirv -fspv-target-env=vulkan1.2 -T $3 -E main $4 -Fo "$1.spv" "$(cygpath -m "$ROOT/res/shaders/hlsl/$2.hlsl" 2>/dev/null || echo "$ROOT/res/shaders/hlsl/$2.hlsl")"
+	python -I "$ROOT/tools/spv_header.py" "$1.spv" "vkframe_$1_spv" "$1.spv.h" < /dev/null
+	rm -f "$1.spv"
+}
+pfx p7_res post/post7_resolve cs_6_0 ""
+pfx p7_dep post/post7_resolve cs_6_0 "-DPOST7_DEPTH"
+pfx p7_copy_ps post/post7_copy_ps ps_6_0 ""
+pfx p7_dof_down post/dof_down cs_6_0 ""
+pfx p7_dof_blur post/dof_blur cs_6_0 ""
+pfx p7_dof_comp post/dof_comp cs_6_0 ""
+pfx p7_lens_comp post/dof_comp cs_6_0 "-DDOF_LENS"
+pfx p7_lens_prep post/doflens_prep cs_6_0 ""
+pfx p7_lens_tile post/doflens_tile cs_6_0 ""
+pfx p7_lens_gather post/doflens_gather cs_6_0 ""
+pfx p7_mblur post/mblur cs_6_0 ""
+pfx p7_dofmblur post/mblur cs_6_0 "-DMBLUR_FUSE"
+pfx p7_lensmblur post/mblur cs_6_0 "-DMBLUR_FUSE -DDOF_LENS"
+pfx p7_mv post/taa_mv cs_6_0 "-DTAA_MV_RG16"
+pfx p7_ob_vec post/objblur_vec cs_6_0 ""
+pfx p7_ob_tile post/objblur_tile cs_6_0 ""
+pfx p7_ob post/objblur cs_6_0 ""
+ls -la p7_*.spv.h
 ls -la csm_view_vs.spv.h obj_depth_vs.spv.h sky_view_ps.spv.h bloom_down.spv.h bloom_hold.spv.h bloom_up.spv.h bloom_src.spv.h bloom_comb.spv.h bloom_back.spv.h tonemap.spv.h measure_q.spv.h tone_view_vs.spv.h tone_view_ps.spv.h taa_view_mv_cs.spv.h taa_view_resolve_cs.spv.h taa_view_rcas_ps.spv.h

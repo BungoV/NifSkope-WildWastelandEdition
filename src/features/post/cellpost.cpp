@@ -17,13 +17,16 @@
 #include <QElapsedTimer>
 #include <QFile>
 #include <QHash>
+#include <QOpenGLContext>
 #include <QSettings>
 #include <QTextStream>
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
+#include <string>
 #include <vector>
 
 #include "esmfile.hpp"
@@ -606,6 +609,53 @@ QString wwCellPostEcho()
 
 namespace {
 
+/* lane VKFAR2 P7: the route lines "vk dof:", "vk motionblur:", "vk objblur:" (the passes on this frame), when the route or
+ * the set of passes changes, and every 5 s while it holds (the stats since the last lines) */
+void postVkSay( bool vk, bool dof, bool lens, bool mb, bool ob )
+{
+	static int was = -1;
+	static auto at = std::chrono::steady_clock::now();
+	static WwVkPresent::FxStat sum;
+	const WwVkPresent::FxStat st = WwVkPresent::takeTonePostStat();
+	sum.runs += st.runs;
+	sum.gl += st.gl;
+	sum.fails += st.fails;
+	sum.cpuMs += st.cpuMs;
+	sum.maxMs = std::max( sum.maxMs, st.maxMs );
+	sum.copies += st.copies;
+	sum.pipelines = st.pipelines;
+	sum.buildMs = st.buildMs;
+	if ( !st.glWhy.empty() )
+		sum.glWhy = st.glWhy;
+	if ( !st.failWhy.empty() )
+		sum.failWhy = st.failWhy;
+	const int key = ( vk ? 1 : 0 ) | ( dof ? 2 : 0 ) | ( lens ? 4 : 0 ) | ( mb ? 8 : 0 ) | ( ob ? 16 : 0 );
+	const auto now = std::chrono::steady_clock::now();
+	if ( was == key && std::chrono::duration<double>( now - at ).count() < 5.0 )
+		return;
+	was = key;
+	at = now;
+	QString tail = sum.runs > 0
+		? QStringLiteral( "in the deferred tone pass %1 frames (%2 pipelines built in %3 ms; %4 vector copies; drawing thread %5 ms, "
+			"max %6)" ).arg( sum.runs ).arg( sum.pipelines ).arg( sum.buildMs, 0, 'f', 1 ).arg( sum.copies )
+			.arg( sum.cpuMs / sum.runs, 0, 'f', 3 ).arg( sum.maxMs, 0, 'f', 3 )
+		: QStringLiteral( "0 frames in the tone pass" );
+	if ( sum.gl > 0 )
+		tail += QStringLiteral( ", on GL %1 frames (last: %2)" ).arg( sum.gl ).arg( QString::fromStdString( sum.glWhy ) );
+	if ( sum.fails > 0 )
+		tail += QStringLiteral( ", refused %1 (last: %2)" ).arg( sum.fails ).arg( QString::fromStdString( sum.failWhy ) );
+	const QString route = vk ? QStringLiteral( "on Vulkan" ) : QStringLiteral( "on GL" );
+	if ( dof )
+		qInfo().noquote() << QStringLiteral( "vk dof: %1 (%2), %3" ).arg( route, lens ? QStringLiteral( "the thin lens" )
+			: QStringLiteral( "the game's passes" ), tail );
+	if ( mb )
+		qInfo().noquote() << QStringLiteral( "vk motionblur: %1 (%2), %3" ).arg( route, dof ? QStringLiteral( "with the depth of field" )
+			: QStringLiteral( "alone" ), tail );
+	if ( ob )
+		qInfo().noquote() << QStringLiteral( "vk objblur: %1, %2" ).arg( route, tail );
+	sum = WwVkPresent::FxStat();
+}
+
 /*! lane POSTFX2: one stage of the chain. linear: the linear frame before the tone map, the depth of field and motion
  *  blur only (the row WW_CELL_POST_LINEAR); else the tone-mapped frame: what the linear stage did not run this frame. */
 void postApply( Scene * scene, bool linear )
@@ -627,7 +677,6 @@ void postApply( Scene * scene, bool linear )
 	}
 	if ( ( !wantDof && !wantMb && !wantOb ) || !scene || !scene->renderer || scene->selecting )
 		return;
-	WwVkPresent::toneFlush();	// lane VKPOST2: the view holds the tone map before this pass reads it
 	if ( wantOb )
 		wwTaaInputsRequest();	// lane POSTFX1: the object vectors of the NEXT frame (the inputs ran before this pass)
 	Renderer * r = scene->renderer;
@@ -891,6 +940,85 @@ void postApply( Scene * scene, bool linear )
 		return;
 	}
 
+	/* lane VKFAR2 P7: while the tone pass is deferred (no GL pass crossed since the tone map) the passes are recorded in it,
+	 * after its modes and before the flare (GL's order), from the view itself; GL draws nothing. Otherwise (the linear
+	 * frame, a dump frame, a refusal, the red WW_VKVIEW_POST_RED=1) the tone pass crosses first and GL runs them as before */
+	const bool dump = !s.dumpDir.isEmpty() && frame == s.dumpFrame;
+	WW_SWITCH_STATIC( bool, vkRed, wwEnvInt( "WW_VKVIEW_POST_RED" ) == 1 );
+	std::string vkWhy;
+	if ( vkRed )
+		vkWhy = "red WW_VKVIEW_POST_RED=1";
+	else if ( linear )
+		vkWhy = "the linear frame (before the tone map)";
+	else if ( dump )
+		vkWhy = "a dump frame (GL's targets are read back)";
+	else if ( !WwVkPresent::tonePending() )
+		vkWhy = "no deferred tone pass (the view is not on Vulkan, or a GL pass crossed first)";
+	else if ( GLuint( prevDraw ) != GLuint( WwVkPresent::viewFbo() ) )
+		vkWhy = "the frame is not the view";
+	else if ( dsFormat != GL_DEPTH24_STENCIL8 )
+		vkWhy = "the frame's depth is not D24S8";
+	else if ( s.redRg32 )
+		vkWhy = "red WW_CELL_MBLUR_RED=rg32 (RG32F vectors)";
+	else {
+		WwVkPresent::PostRun p;
+		p.w = W;
+		p.h = H;
+		for ( int k = 0; k < 4; k++ )
+			p.vp[k] = vp[k];
+		p.dof = runDof;
+		p.lens = runLens;
+		p.mb = runMb;
+		p.ob = runOb;
+		p.fuse = !s.redFuse;
+		p.radius = radius;
+		p.row = s.redBlurRow ? ( radius < kBlurMaxRadius ? radius : radius - 2 ) : radius - 1;
+		FloatVector4 dcs[4] = { dc0, dc1, dc2, dc3 };
+		for ( int k = 0; k < 4; k++ ) {
+			for ( int c = 0; c < 4; c++ ) {
+				p.dc[k][c] = dcs[k][c];
+				p.lz[c] = lz[c];
+				p.lensP[c] = lensP[c];
+				p.lensQ[c] = lensQ[c];
+				p.mc[0][c] = mc0[c];
+				p.mc[1][c] = mc1[c];
+			}
+		}
+		p.farOnly = farOnly ? 1 : 0;
+		p.dofRed = s.redNoCoc ? 1 : 0;
+		const Matrix4 rp = toMatrix4( reproj ), op = Matrix4( obReproj );
+		std::memcpy( p.reproj, rp.data(), sizeof( p.reproj ) );
+		p.jitter[0] = s.redNoJitter ? 0.0f : jitX;
+		p.jitter[1] = s.redNoJitter ? 0.0f : jitY;
+		p.noVelocity = s.redNoVelocity;
+		p.obVel = unsigned( obVel );
+		p.obMask = unsigned( obMask );
+		std::memcpy( p.obReproj, op.data(), sizeof( p.obReproj ) );
+		p.obJitter[0] = obJx;
+		p.obJitter[1] = obJy;
+		p.shutter = kObShutter;
+		p.maxPx = kObMaxPx;
+		p.tile = kObTile;
+		p.samples = kObSamples;
+		p.objRed = s.redObCamera ? 1 : 0;
+		p.zNear = zNear;
+		p.zFar = zFar;
+		p.seed = float( frame % 8 ) * 0.125f;
+		p.gp = []( const char * n ) -> void * {
+			QOpenGLContext * gc = QOpenGLContext::currentContext();
+			return gc ? reinterpret_cast<void *>( gc->getProcAddress( n ) ) : nullptr;
+		};
+		if ( WwVkPresent::tonePostQueue( p, vkWhy ) ) {
+			postVkSay( true, runDof, runLens, runMb, runOb );
+			return;
+		}
+	}
+	if ( WwVkPresent::shareWanted( nullptr ) ) {	// the view on Vulkan: the route lines say why GL ran them
+		WwVkPresent::tonePostOnGl( vkWhy.c_str() );
+		postVkSay( false, runDof, runLens, runMb, runOb );
+	}
+	WwVkPresent::toneFlush();	// lane VKPOST2: the view holds the tone map before GL's passes read it
+
 	PostGpu & g = postGpus( linear )[r];
 	// lane POSTFX2: the linear frame's own precision (RGBA32F by default): its values pass through unclamped
 	GLenum colFormat = GL_RGBA16F;
@@ -973,7 +1101,6 @@ void postApply( Scene * scene, bool linear )
 	static const float quad[12] = { -1, -1, 0, 1, -1, 0, -1, 1, 0, 1, 1, 0 };
 	static const std::uint16_t idx[6] = { 0, 1, 2, 2, 1, 3 };
 	const float * attrs = quad;
-	const bool dump = !s.dumpDir.isEmpty() && frame == s.dumpFrame;
 	const QString dd = s.dumpDir + QLatin1Char( '/' );
 	if ( dump )
 		QDir().mkpath( s.dumpDir );

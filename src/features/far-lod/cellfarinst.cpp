@@ -10,6 +10,9 @@
 #include "gl/glscene.h"
 #include "gl/gpustage.h"	// MODULES1: static buffers filled by a GPU copy (no driver RAM copy)
 #include "gl/renderer.h"
+#include "features/exposure/cellhdr.h"	// lane VKFAR2: the shared tone frame
+#include "features/vkframe/vkpresent.h"	// lane VKFAR2: the far LOD rings on the Vulkan view (row G3)
+#include "features/vkframe/vkwater.h"
 
 #include <QElapsedTimer>
 #include <QHash>
@@ -23,6 +26,7 @@
 #include <vector>
 
 quint64 wwGlPaintCount();	// glview.cpp
+bool wwFogLeakShaderDefine();	// src/features/air/cellvolair.cpp: WW_CELL_FOGLEAK in the cell programs
 
 namespace
 {
@@ -365,6 +369,93 @@ void submit( NifSkopeOpenGLContext * r, Ctx & c, Copy & k, const std::vector<Cel
 	fn->glBindVertexArray( 0 );
 }
 
+/* lane VKFAR2 (row G3): the far LOD rings on the Vulkan view (WW_VKVIEW=1; red WW_VKVIEW_FARLOD_RED=1). Armed at the rings'
+ * program setup (fo4_cellcsm.prog with the twins' defines, no splat pass, into the shared tone frame), drawn at the rings'
+ * draw (GL's state, the surviving commands, farLodRun: gate tests/vkframe/farloddraw.sh). Any refusal draws GL's submit,
+ * the reason in the `vk far: LOD rings` line. */
+struct VkFarArm
+{
+	GLFunctions * fn = nullptr;
+	GLuint prog = 0;
+	unsigned int color = 0;
+};
+VkFarArm g_vkFarArm;
+char g_vkFarKeys[160];	// the twins' keys (key + slot index)
+
+void farLodVkArm( GLFunctions * fn, NifSkopeOpenGLContext::Program * prog, int splatPass )
+{
+	g_vkFarArm = VkFarArm();
+	if ( !WwVkPresent::shareWanted( "WW_VKVIEW_FARLOD_RED" ) ) {
+		WwVkPresent::farLodSay( false, "red WW_VKVIEW_FARLOD_RED=1 or the view not on Vulkan" );
+		return;
+	}
+	const char * no = nullptr;
+	unsigned int color = 0;
+	if ( splatPass > 0 )
+		no = "a splat pass (blended twin, no Vulkan twin yet)";
+	else if ( std::string( prog->name ) != "fo4_cellcsm.prog" )
+		no = "this far program has no Vulkan twin (fo4_cellcsm.prog only)";
+	else if ( prog->wwBindless )
+		no = "a bindless far program (no Vulkan twin)";
+	else if ( !wwFogLeakShaderDefine() )
+		no = "WW_CELL_FOGLEAK=0: GL's program is not the Vulkan twin";
+	else if ( !prog->wwShadowFrame )
+		no = "WW_FRAME_UBO off: GL's program is not the Vulkan twin";
+	else {
+		GLint drawFb = 0;
+		fn->glGetIntegerv( GL_DRAW_FRAMEBUFFER_BINDING, &drawFb );
+		color = wwCellHdrVkToneColor( GLuint( drawFb ) );
+		if ( !color )
+			no = "the draw target is not the shared tone frame";
+	}
+	if ( no )
+		WwVkPresent::farLodOnGl( no );
+	else
+		g_vkFarArm = VkFarArm { fn, prog->id, color };
+	WwVkPresent::farLodSay( true, nullptr );
+}
+
+// true: the rings drew on the present device; false: GL's submit draws them
+bool farLodVkDraw( Copy & k, const std::vector<CellMeshInst::Cmd> & cmds )
+{
+	const VkFarArm a = g_vkFarArm;
+	g_vkFarArm = VkFarArm();
+	if ( !a.fn )
+		return false;
+	GLint cur = 0;
+	a.fn->glGetIntegerv( GL_CURRENT_PROGRAM, &cur );
+	if ( GLuint( cur ) != a.prog ) {
+		WwVkPresent::farLodOnGl( "another program at the rings' draw" );
+		return false;
+	}
+	static WwVkPresent::WaterRun r;
+	r = WwVkPresent::WaterRun();
+	a.fn->glBindVertexArray( k.vao );
+	WwVkPresent::farLodStateOf( a.fn, a.prog, r );
+	wwCellHdrFrameSize( r.w, r.h );
+	r.color = a.color;
+	r.cmds.reserve( cmds.size() );
+	for ( const CellMeshInst::Cmd & m : cmds ) {
+		WwVkPresent::WaterCmd c;
+		c.count = m.count;
+		c.instanceCount = m.instanceCount;
+		c.firstIndex = m.firstIndex;
+		c.baseVertex = m.baseVertex;
+		c.baseInstance = m.baseInstance;
+		r.cmds.push_back( c );
+	}
+	r.key = reinterpret_cast<std::uintptr_t>( g_vkFarKeys );
+	std::string why;
+	const bool ok = WwVkPresent::farLodRun( r, why );
+	a.fn->glBindVertexArray( 0 );
+	if ( !ok ) {
+		WwVkPresent::farLodOnGl( why.c_str() );
+		return false;
+	}
+	PassTime::countDraw( 1 );
+	return true;
+}
+
 Ctx * ctxOf()
 {
 	QOpenGLContext * q = QOpenGLContext::currentContext();
@@ -562,7 +653,9 @@ bool draw( NifSkopeOpenGLContext * r, Scene * scene, const CellMeshInst & d, Nif
 		rowsAo = !view && lodlAoOn();
 	}
 	vcAoUniform( prog, rowsAo ? 3 : 0 );
-	submit( r, *cp, *k, cmds );
+	farLodVkArm( r->fn, prog, splatPass );	// lane VKFAR2: the rings on the Vulkan view, else GL's submit
+	if ( !farLodVkDraw( *k, cmds ) )
+		submit( r, *cp, *k, cmds );
 	if ( rowsAo )
 		vcAoUniform( prog, 0 );
 	if ( k->streamTex )

@@ -187,10 +187,11 @@ void vert_main()
 	 * so impostor_cellinstez.frag may declare depth_greater and the hardware tests depth before the march. */
 	if ( !orthoCam && useDepthOffset ) {
 		float4 e = mul(float4( p, 1.0 ), modelViewMatrix);
-		float dist = length( e.xyz );
+		// NV GL's float order, bit-exact (lane VKFAR2): length as an x-first fma chain, e * (1 - q) as fma(-e, q, e)
+		float dist = sqrt( mad( e.z, e.z, mad( e.y, e.y, e.x * e.x ) ) );
 		float s = length( (float3)( modelViewMatrix[0] ) );
 		float pull = min( s * cardDepthSpan * 0.5 * 1.05 + 4.0, dist * 0.5 );
-		gl_Position = mul(float4( e.xyz * ( 1.0 - pull / dist ), 1.0 ), projectionMatrix);
+		gl_Position = mul(float4( mad( -e.xyz, ( pull / dist ).xxx, e.xyz ), 1.0 ), projectionMatrix);
 	}
 #endif
 }

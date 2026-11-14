@@ -12,11 +12,17 @@
 #include "gl/lookdevstage.h"
 #include "gl/renderer.h"
 
+#include <QDebug>
 #include <QHash>
+#include <QOpenGLContext>
+#include <QSet>
 #include <QVector>
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
+#include <cstring>
+#include <string>
 #include <vector>
 
 namespace
@@ -52,7 +58,64 @@ QString texPath( QString t )
 		t.prepend( QStringLiteral( "textures/" ) );
 	return t;
 }
+
+// lane VKFAR2 P9: the sprite maps named so far (TexCache::loadTex makes these as BC twins), keyed from "textures/" on
+QString lensTexKey( const QString & path )
+{
+	QString f = path.toLower();
+	f.replace( QChar( '\\' ), QChar( '/' ) );
+	const qsizetype at = f.indexOf( QLatin1StringView( "textures/" ) );
+	return at > 0 ? f.mid( at ) : f;
+}
+
+QSet<QString> & lensTexNames()
+{
+	static QSet<QString> s;
+	return s;
+}
+
+// "vk lensflare:" when the route changes, and every 5 s while it holds (the stats since the last line)
+void lensVkSay( bool vk )
+{
+	static int was = -1;
+	static auto at = std::chrono::steady_clock::now();
+	static WwVkPresent::FxStat sum;
+	const WwVkPresent::FxStat st = WwVkPresent::takeToneFlareStat();
+	sum.runs += st.runs;
+	sum.gl += st.gl;
+	sum.fails += st.fails;
+	sum.cpuMs += st.cpuMs;
+	sum.maxMs = std::max( sum.maxMs, st.maxMs );
+	sum.copies += st.copies;
+	sum.pipelines = st.pipelines;
+	sum.buildMs = st.buildMs;
+	if ( !st.glWhy.empty() )
+		sum.glWhy = st.glWhy;
+	if ( !st.failWhy.empty() )
+		sum.failWhy = st.failWhy;
+	const auto now = std::chrono::steady_clock::now();
+	if ( was == int( vk ) && std::chrono::duration<double>( now - at ).count() < 5.0 )
+		return;
+	was = int( vk );
+	at = now;
+	QString line = sum.runs > 0
+		? QStringLiteral( "vk lensflare: in the deferred tone pass %1 frames (%2 pipelines built in %3 ms; %4 depth copies; "
+			"drawing thread %5 ms, max %6)" ).arg( sum.runs ).arg( sum.pipelines ).arg( sum.buildMs, 0, 'f', 1 ).arg( sum.copies )
+			.arg( sum.cpuMs / sum.runs, 0, 'f', 3 ).arg( sum.maxMs, 0, 'f', 3 )
+		: QStringLiteral( "vk lensflare: 0 frames in the tone pass" );
+	if ( sum.gl > 0 )
+		line += QStringLiteral( ", on GL %1 frames (last: %2)" ).arg( sum.gl ).arg( QString::fromStdString( sum.glWhy ) );
+	if ( sum.fails > 0 )
+		line += QStringLiteral( ", refused %1 (last: %2)" ).arg( sum.fails ).arg( QString::fromStdString( sum.failWhy ) );
+	qInfo().noquote() << line;
+	sum = WwVkPresent::FxStat();
+}
 }	// namespace
+
+bool wwCellLensFlareTexWanted( const QString & fileName )
+{
+	return lensTexNames().contains( lensTexKey( fileName ) );
+}
 
 bool wwCellLensKnown( quint32 form, ESMFile & esm )
 {
@@ -184,6 +247,111 @@ int wwCellLensFlareDraw( Scene * scene )
 	}
 	if ( picks.empty() )
 		return 0;
+
+	static const quint16 idx[6] = { 0, 1, 2, 0, 2, 3 };
+	static const float corner[4][2] = { { -1, -1 }, { 1, -1 }, { 1, 1 }, { -1, 1 } };	// +-1: inferred
+	/* one sprite's four corners as GL's four attributes (pos, col, uv, lit); false: not drawn. The GL draw and the Vulkan
+	 * table (lane VKFAR2 P9) read the same numbers */
+	auto spriteOf = [&]( const Pick & p, const WwLensSprite & sp, float * pos, float * col, float * uv, float * lit ) {
+		const WwLens & lens = *p.lens;
+		const float k = std::pow( p.ang, std::pow( 255.0f, sp.angularFade ) - 1.0f ) * sp.opacity * p.alpha;
+		if ( !( k > 0.0f ) || sp.texture.isEmpty() )
+			return false;
+		float infl[3];	// white + (light colour - white) x CNAM
+		for ( int c = 0; c < 3; c++ )
+			infl[c] = 1.0f + ( p.tint[c] - 1.0f ) * lens.colorInfluence;
+		// the light's screen angle from the centre, x corrected by the aspect (Rotates)
+		const float sx = p.ndc[0] * 0.5f, sy = p.ndc[1] * 0.5f;
+		const float angle = std::atan2( sy * aspectHW, sx );
+		const float a = ( sp.flags & 1 ) ? angle : 0.0f;
+		const float ca = std::cos( a ), sa = std::sin( a );
+		const float m = 1.0f - 2.0f * sp.position;	// inferred: the centre slides along the line through the screen centre
+		const float cx = p.ndc[0] * m, cy = p.ndc[1] * m;
+		for ( int v = 0; v < 4; v++ ) {
+			const float x = corner[v][0] * sp.width, y = corner[v][1] * sp.height;
+			pos[v * 4 + 0] = cx;
+			pos[v * 4 + 1] = cy;
+			pos[v * 4 + 2] = ( x * ca - y * sa ) * aspectHW;
+			pos[v * 4 + 3] = x * sa + y * ca;
+			for ( int c = 0; c < 3; c++ )
+				col[v * 4 + c] = sp.tint[c] * infl[c] * k;
+			col[v * 4 + 3] = ( sp.flags & 2 ) ? 1.0f : 0.0f;
+			uv[v * 4 + 0] = corner[v][0] * 0.5f + 0.5f;
+			uv[v * 4 + 1] = 0.5f - corner[v][1] * 0.5f;
+			uv[v * 4 + 2] = uv[v * 4 + 3] = 0.0f;
+			lit[v * 4 + 0] = p.ndc[0];
+			lit[v * 4 + 1] = p.ndc[1];
+			lit[v * 4 + 2] = p.viewZ;
+			lit[v * 4 + 3] = 0.0f;
+		}
+		return true;
+	};
+
+	/* lane VKFAR2 P9: while the tone pass is deferred (no GL pass crossed since the tone map) the sprites are recorded in it,
+	 * after its modes, and GL draws nothing; otherwise (a refusal: a map with no BC twin, the red WW_VKVIEW_LENS_RED=1) the
+	 * tone pass crosses first and GL draws them as before. Each sprite map is named for the twin before its first bind */
+	WW_SWITCH_STATIC( bool, vkRed, wwEnvInt( "WW_VKVIEW_LENS_RED" ) == 1 );
+	std::string vkWhy = vkRed ? "red WW_VKVIEW_LENS_RED=1" : "no deferred tone pass (the view is not on Vulkan, or a GL pass crossed first)";
+	if ( !vkRed && WwVkPresent::tonePending() ) {
+		static std::vector<float> rows;
+		static std::vector<unsigned> texs;
+		rows.clear();
+		texs.clear();
+		bool ok = true;
+		r->fn->glActiveTexture( GL_TEXTURE0 );
+		for ( const Pick & p : picks ) {
+			for ( const WwLensSprite & sp : p.lens->sprites ) {
+				float pos[16], col[16], uv[16], lit[16];
+				if ( !ok || !spriteOf( p, sp, pos, col, uv, lit ) )
+					continue;
+				const QString path = texPath( sp.texture );
+				lensTexNames().insert( lensTexKey( path ) );
+				if ( scene->bindTexture( QStringView( path ), true ) <= 0 )
+					continue;
+				const GLuint name = scene->textures->wwBound;
+				if ( !name || texs.size() >= size_t( WwVkPresent::kFlareMaxSprites ) ) {
+					ok = false;
+					vkWhy = name ? "more sprites than the table holds" : "a sprite map bound by its first load (no cache name yet)";
+					continue;
+				}
+				glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE );
+				glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE );
+				for ( int v = 0; v < 4; v++ )
+					for ( const float * a : { pos, col, uv, lit } )
+						rows.insert( rows.end(), a + v * 4, a + v * 4 + 4 );
+				texs.push_back( unsigned( name ) );
+			}
+		}
+		if ( ok && texs.empty() ) {
+			s.lastLights = int( picks.size() );
+			return 0;
+		}
+		if ( ok ) {
+			WwVkPresent::FlareRun f;
+			f.n = int( texs.size() );
+			f.rows = rows.data();
+			f.tex = texs.data();
+			std::memcpy( f.proj, &pm[0][0], sizeof( f.proj ) );
+			f.slack = kSlack * sc;
+			f.red = redNow;
+			f.depth = s.grabbed ? unsigned( scene->fxDepthTexId ) : 0u;
+			std::memcpy( f.vp, vp, sizeof( f.vp ) );
+			f.gp = []( const char * n ) -> void * {
+				QOpenGLContext * gc = QOpenGLContext::currentContext();
+				return gc ? reinterpret_cast<void *>( gc->getProcAddress( n ) ) : nullptr;
+			};
+			if ( WwVkPresent::toneFlareQueue( f, vkWhy ) ) {
+				s.lastLights = int( picks.size() );
+				s.lastSprites = f.n;
+				lensVkSay( true );
+				return f.n;
+			}
+		}
+	}
+	if ( WwVkPresent::shareWanted( nullptr ) ) {	// the view on Vulkan: the route line says why GL drew them
+		WwVkPresent::toneFlareOnGl( vkWhy.c_str() );
+		lensVkSay( false );
+	}
 	WwVkPresent::toneFlush();	// lane VKPOST2: additive over the view: the tone map lands first
 
 	NifSkopeOpenGLContext::Program * prog = r->useProgram( "cell_lensflare.prog" );
@@ -210,47 +378,18 @@ int wwCellLensFlareDraw( Scene * scene )
 	fn->glActiveTexture( GL_TEXTURE0 );
 	prog->uni1i( "flareTex", 0 );
 
-	static const quint16 idx[6] = { 0, 1, 2, 0, 2, 3 };
-	static const float corner[4][2] = { { -1, -1 }, { 1, -1 }, { 1, 1 }, { -1, 1 } };	// +-1: inferred
 	int sprites = 0;
 	for ( const Pick & p : picks ) {
-		const WwLens & lens = *p.lens;
-		float infl[3];	// white + (light colour - white) x CNAM
-		for ( int c = 0; c < 3; c++ )
-			infl[c] = 1.0f + ( p.tint[c] - 1.0f ) * lens.colorInfluence;
-		// the light's screen angle from the centre, x corrected by the aspect (Rotates)
-		const float sx = p.ndc[0] * 0.5f, sy = p.ndc[1] * 0.5f;
-		const float angle = std::atan2( sy * aspectHW, sx );
-		for ( const WwLensSprite & sp : lens.sprites ) {
-			const float k = std::pow( p.ang, std::pow( 255.0f, sp.angularFade ) - 1.0f ) * sp.opacity * p.alpha;
-			if ( !( k > 0.0f ) || sp.texture.isEmpty() )
+		for ( const WwLensSprite & sp : p.lens->sprites ) {
+			float pos[16], col[16], uv[16], lit[16];
+			if ( !spriteOf( p, sp, pos, col, uv, lit ) )
 				continue;
-			if ( scene->bindTexture( QStringView( texPath( sp.texture ) ), true ) <= 0 )
+			const QString path = texPath( sp.texture );
+			lensTexNames().insert( lensTexKey( path ) );
+			if ( scene->bindTexture( QStringView( path ), true ) <= 0 )
 				continue;
 			glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE );
 			glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE );
-			const float a = ( sp.flags & 1 ) ? angle : 0.0f;
-			const float ca = std::cos( a ), sa = std::sin( a );
-			const float m = 1.0f - 2.0f * sp.position;	// inferred: the centre slides along the line through the screen centre
-			const float cx = p.ndc[0] * m, cy = p.ndc[1] * m;
-			float pos[16], col[16], uv[16], lit[16];
-			for ( int v = 0; v < 4; v++ ) {
-				const float x = corner[v][0] * sp.width, y = corner[v][1] * sp.height;
-				pos[v * 4 + 0] = cx;
-				pos[v * 4 + 1] = cy;
-				pos[v * 4 + 2] = ( x * ca - y * sa ) * aspectHW;
-				pos[v * 4 + 3] = x * sa + y * ca;
-				for ( int c = 0; c < 3; c++ )
-					col[v * 4 + c] = sp.tint[c] * infl[c] * k;
-				col[v * 4 + 3] = ( sp.flags & 2 ) ? 1.0f : 0.0f;
-				uv[v * 4 + 0] = corner[v][0] * 0.5f + 0.5f;
-				uv[v * 4 + 1] = 0.5f - corner[v][1] * 0.5f;
-				uv[v * 4 + 2] = uv[v * 4 + 3] = 0.0f;
-				lit[v * 4 + 0] = p.ndc[0];
-				lit[v * 4 + 1] = p.ndc[1];
-				lit[v * 4 + 2] = p.viewZ;
-				lit[v * 4 + 3] = 0.0f;
-			}
 			const float * attrs[4] = { pos, col, uv, lit };
 			r->drawShape( 4, 0x4444, 6, GL_TRIANGLES, GL_UNSIGNED_SHORT, attrs, idx );
 			sprites++;

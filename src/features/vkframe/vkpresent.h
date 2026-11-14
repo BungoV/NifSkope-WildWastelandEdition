@@ -88,12 +88,13 @@ const char * routeName();
  * GL signals, the worker records and submits the pass (it waits GL's signal, signals back), the drawing thread waits the
  * submit and GL waits Vulkan's signal; GL's later passes (clouds in front, P7, lens flare, TAA, overlays) draw on the
  * result. Red WW_VKVIEW_TONE_RED=1 (or WW_VKVIEW off): GL's tone quads. */
-struct ToneJob  // 96 bytes: ToneBindingsVk.hlsli's ToneJob (push constants); ints[0]'s mode / test / ref are toneRun's
+struct ToneJob  // 112 bytes: ToneBindingsVk.hlsli's ToneJob (push constants); ints[0]'s mode / test / ref are toneRun's
 {
 	float cineE[4] = {}, tint[4] = {}, wbExposure[4] = {}, bloomRect[4] = {}, fo[4] = {};
 	std::int32_t ints[4] = {};
+	float tent[4] = {};  //!< lane VKFAR2: toneRun fills it (and ints[3], flag 8) from ToneRun::bloom when its lod is on
 };
-static_assert( sizeof( ToneJob ) == 96, "ToneJob is the shader's push constant block" );
+static_assert( sizeof( ToneJob ) == 112, "ToneJob is the shader's push constant block" );
 /* the linear frame (RGBA16F + D24S8, samples at the view's) GL draws the cell into, made on the present device; GL names
  * out (multisample textures; ds already in GL_STENCIL_INDEX mode). GL current. */
 bool toneFrame( int w, int h, int samples, unsigned & color, unsigned & ds, std::string & why );
@@ -118,6 +119,10 @@ struct ToneBloom
 	float exposure = 1.0f;  //!< cell_bloom_src.frag's uniforms
 	bool on = false;
 	float impulseX = 0.0f, impulseY = 0.0f, impulse = 0.0f;
+	/* lane VKFAR2: Bloom Mip under the fog bloom (cell_hdr.frag's lod tent): no combine; the top's mips (levels 0-3, as
+	 * glGenerateMipmap) read per sample by perPixel x log2 of the fog's gain (cellIsFoBloomParams.w) */
+	bool lod = false;
+	float perPixel = 0.0f;
 };
 struct ToneRun
 {
@@ -133,6 +138,11 @@ struct ToneRun
 	std::uint64_t measureGen = 0;  //!< copied into the shared image when it changes
 	int vp[4] = {};                //!< GL's viewport (x, y, w, h; w 0: the whole frame): the pass's viewport and scissor
 	unsigned drawFb = 0, readFb = 0;  //!< bound again after the measure's copy (no glGet)
+	/* lane VKFAR2: flag 9 (cellFogBloomOn): the fog bloom's shared R8 target (fogBloomRun's sharedTarget key and GL name,
+	 * the frame's size and samples), read per sample at binding 5; key 0 refuses (GL drew its own target) */
+	std::uintptr_t fogKey = 0;
+	unsigned fogTex = 0;
+	int fogRed = 0;  //!< WW_VKVIEW_TONE_FOGBLOOM_RED=1: the pass ignores the target (gain 1; must FAIL the view gate)
 };
 /* GL current, the view (viewBegin) bound and the frame's depth already in it: the tone draws on Vulkan into the view.
  * false: why; nothing drawn (GL draws its quads). */
@@ -284,6 +294,9 @@ struct SkyStat
 	std::string glWhy, failWhy;
 	int pipelines = 0;
 	double buildMs = 0.0;
+	//! lane VKFAR2 G2 (vkskybody.h): stars / moon draws in the sky's pass, bodies sent to GL, held crossings that failed
+	int stars = 0, moons = 0, bodyGl = 0, flushFails = 0;
+	std::string bodyWhy;
 };
 SkyStat takeSkyStat();
 
@@ -595,6 +608,118 @@ struct FarDotsRun
 bool farDotsRun( const FarDotsRun & t, std::string & why );
 void farDotsOnGl( const char * why );
 FxStat takeFarDotsStat();
+
+// lane VKFAR2 (row P4b): the fog bloom's own pass (fogbloom_view_ps's b31, spirv-cross --reflect of the shipped SPIR-V)
+inline constexpr FxField kT_fogbloom[] = {
+	{ "fogOn", 0, 1, 1, 1, 0 }, { "fogK", 16, 4, 6, 0, 0 }, { "fogView", 112, 4, 1, 0, 0 },
+	{ "fogDistScale", 128, 1, 1, 0, 0 }, { "fogSun", 144, 4, 1, 0, 0 }, { "fogSunColour", 160, 4, 1, 0, 0 },
+	{ "fogUnit", 176, 1, 1, 0, 0 }, { "fogProbe", 192, 4, 1, 0, 0 }, { "fogRed", 208, 1, 1, 1, 0 },
+	{ "fogNight", 224, 4, 1, 0, 0 }, { "fogNightHue", 240, 1, 1, 0, 0 }, { "atAp", 256, 4, 1, 0, 0 },
+	{ "atApProj", 272, 4, 1, 0, 0 }, { "atApDouble", 288, 1, 1, 0, 0 }, { "volOn", 292, 1, 1, 1, 0 },
+	{ "volRect", 304, 4, 1, 0, 0 }, { "volFarClamp", 320, 1, 1, 1, 0 }, { "volSlices", 336, 4, 1, 0, 0 },
+	{ "volProbe", 352, 1, 1, 1, 0 }, { "volFogBlend", 356, 1, 1, 1, 0 }, { "volFar", 368, 4, 1, 0, 0 },
+	{ "volPack", 384, 4, 1, 0, 0 }, { "volPackDims", 400, 4, 1, 0, 0 }, { "volAirMed", 416, 4, 1, 0, 0 },
+	{ "volAirLayer", 432, 4, 1, 0, 0 }, { "volAirGround", 448, 4, 1, 0, 0 }, { "volAirFlags", 464, 1, 1, 1, 0 },
+	{ "volAirTerrU", 480, 4, 1, 0, 0 }, { "volAirTerrV", 496, 4, 1, 0, 0 }, { "volAirTerrFU", 512, 4, 1, 0, 0 },
+	{ "volAirTerrFV", 528, 4, 1, 0, 0 }, { "volAirTerrRef", 544, 1, 1, 0, 0 }, { "volAirRain", 560, 4, 1, 0, 0 },
+	{ "volAirRainFar", 576, 4, 1, 0, 0 }, { "volAirRainXf", 592, 4, 1, 0, 4 }, { "volAirDrift", 656, 4, 1, 0, 0 },
+	{ "volAirDriftUv", 672, 4, 6, 0, 0 }, { "volAirDriftRed", 768, 1, 1, 1, 0 }, { "fbProj", 772, 2, 1, 0, 0 },
+	{ "fbProjZ", 784, 2, 1, 0, 0 }, { "fbParams", 800, 4, 1, 0, 0 }, { "fbTranslucent", 816, 1, 1, 1, 0 },
+};
+inline constexpr int kT_fogbloomBytes = 832;
+inline constexpr int kT_fogbloomTranslucentAt = 816;  //!< fbTranslucent: 0 the first draw's set, 1 the second's
+struct FogBloomRun
+{
+	int w = 0, h = 0, samples = 0, vp[4] = {};  //!< the tone frame's size and samples, GL's viewport at the pass
+	unsigned color = 0;             //!< the tone frame's colour (toneFrameIs)
+	std::uintptr_t key = 0;         //!< the target's sharedTarget key (R8, the frame's samples)
+	FxTex tex[4];                   //!< volTex, volTile, volAirTerr, volAirRainMap (fogbloom_view_ps's t26..t29)
+	std::uint8_t loose[kT_fogbloomBytes] = {};
+	int red = 0;                    //!< gates only: 1 no second draw, 2 the first draw with fbTranslucent 1, 4 fbProj.y doubled
+};
+/* GL current, cell_fogbloom's uniforms set: the bloom-intensity target drawn on Vulkan (cleared to 0; draw 1 every
+ * sample, draw 2 the samples whose stencil has 0x04, fbTranslucent 1), reading the tone frame's depth (sample 0, as GL's
+ * NEAREST blit keeps) and stencil. target: the shared R8 GL name the tone map binds. false: why; nothing drawn (GL's pass) */
+bool fogBloomRun( const FogBloomRun & t, unsigned & target, std::string & why );
+void fogBloomOnGl( const char * why );
+FxStat takeFogBloomStat();
+
+// lane VKFAR2 (row P8): the clouds in front of the scene (cloud_composite_view_ps's b31, spirv-cross --reflect of the shipped SPIR-V)
+inline constexpr FxField kT_cloudfront[] = {
+	{ "cvRect", 0, 4, 1, 0, 0 }, { "sceneExposure", 16, 1, 1, 0, 0 }, { "viewTransform", 20, 1, 1, 1, 0 },
+	{ "cvFront", 24, 1, 1, 1, 0 }, { "cvSceneZ", 32, 4, 1, 0, 0 }, { "cvProj", 48, 4, 1, 0, 0 },
+	{ "cvLtOn", 64, 1, 1, 1, 0 }, { "cvLtSrc", 80, 4, 1, 0, 0 }, { "cvLtPrm", 96, 4, 1, 0, 0 },
+	{ "cvLtCol", 112, 3, 1, 0, 0 }, { "cvCam", 128, 3, 1, 0, 3 }, { "cvCamKm", 176, 3, 1, 0, 0 },
+};
+inline constexpr int kT_cloudfrontBytes = 192;
+inline constexpr int kT_cloudfrontFrontAt = 24;
+inline constexpr int kT_cloudfrontFlashAt = 64;  // cvLtOn: a flash frame stays GL's (cloudfrontview's flash job)  //!< cvFront (the pass runs mode 2 only)
+struct CloudFrontRun
+{
+	int w = 0, h = 0, samples = 0, vp[4] = {};  //!< the tone frame's size and samples, GL's viewport at the pass
+	unsigned color = 0;             //!< the tone frame's colour (toneFrameIs)
+	FxTex tex[3];                   //!< cvHist, cvHistDepth (the clouds' shared history), cvScene (GL's depth max, copied)
+	std::uint8_t loose[kT_cloudfrontBytes] = {};
+	int red = 0;                    //!< gates only: 1 stencil test off, 2 no blend (written over), 4 cvFront 1 (the display mode)
+};
+/* GL current, cloud_composite's uniforms set with cvFront 2: the history over the tone frame's stencil-1 samples on Vulkan
+ * (blend ONE / ONE_MINUS_SRC_ALPHA, alpha ZERO / ONE; stencil EQUAL 1 mask 0x03, no write; no depth test), as cloudvol.cpp's
+ * frontPass( 2 ). false: why; nothing drawn (GL draws its quad) */
+bool cloudFrontRun( const CloudFrontRun & t, std::string & why );
+void cloudFrontOnGl( const char * why );
+FxStat takeCloudFrontStat();
+
+/* Lane VKFAR2 P9: the lens-flare sprites (celllensflare.cpp, cell_lensflare.vert/.frag) recorded in the DEFERRED tone pass,
+ * after its modes, before the crossing (res/shaders/hlsl/post/lens_flare.hlsl; vkflare.inc). Only while tonePending(): no
+ * GL pass came between the tone map and the flare. The sprite maps are the texture cache's BC twins (loaded with the twin
+ * armed, gltex.cpp), sampled with GL's sampler state; the opaque depth is copied into a shared twin. GL current. false: why;
+ * nothing queued (the caller flushes and draws on GL). */
+constexpr int kFlareMaxSprites = 256;
+struct FlareRun
+{
+	int n = 0;                       //!< sprites, GL's draw order
+	const float * rows = nullptr;    //!< n x 4 corners x (pos, col, uv, lit) x 4 floats: GL's four attributes
+	const unsigned * tex = nullptr;  //!< n: each sprite's GL 2D texture (the cache's name)
+	float proj[16] = {};             //!< flareProj, GL's column order
+	float slack = 0.0f;              //!< flareSlack
+	int red = 0;                     //!< flareRed (bit 0: no occlusion)
+	unsigned depth = 0;              //!< flareDepth (Scene::fxDepthTexId), vp[2] x vp[3]; 0: none (red bit 0)
+	int vp[4] = {};                  //!< GL's viewport: the draws' and flareViewport
+	GlProc gp = nullptr;             //!< the maps' sampler state and the depth's format
+};
+bool toneFlareQueue( const FlareRun & f, std::string & why );
+void toneFlareOnGl( const char * why );
+FxStat takeToneFlareStat();
+
+/* Lane VKFAR2 P7: cellpost.cpp's depth of field (the game's or the thin lens), motion blur (alone or fused) and object blur
+ * recorded in the DEFERRED tone pass before the flare (res/shaders/hlsl/post: dof_*, doflens_*, mblur, taa_mv, objblur_*,
+ * post7_*; vkpost7.inc). The view's samples and depth are copied and resolved as GL's blits keep them (post7_resolve.hlsl),
+ * the passes run as compute, the picture goes back into every sample (post7_copy_ps.hlsl). The object blur's velocity and
+ * mask are copied into shared twins. Only while tonePending() on the tone-mapped view (not linear), D24S8, RG16F vectors.
+ * GL current. false: why; nothing queued (the caller flushes and runs GL's passes). */
+struct PostRun
+{
+	int w = 0, h = 0;                 //!< the frame (the view's size)
+	int vp[4] = {};                   //!< GL's viewport: the copy back's
+	bool dof = false, lens = false, mb = false, ob = false, fuse = false;
+	int radius = 3, row = 2;          //!< the game's blur: taps 2 radius + 1, its weight row
+	float dc[4][4] = {};              //!< the composite's c0..c3
+	int farOnly = 0, dofRed = 0;
+	float lz[4] = {}, lensP[4] = {}, lensQ[4] = {};
+	float reproj[16] = {};            //!< the vectors' reprojection, GL's column order
+	float jitter[2] = {};
+	float mc[2][4] = {};              //!< the blur's mc0, mc1
+	bool noVelocity = false;          //!< WW_CELL_MBLUR_RED=novelocity: the vectors cleared
+	unsigned obVel = 0, obMask = 0;   //!< the inputs' velocity and mask (GL 2D textures, w x h)
+	float obReproj[16] = {}, obJitter[2] = {};
+	float shutter = 0.0f, maxPx = 0.0f;
+	int tile = 16, samples = 15, objRed = 0;
+	float zNear = 0.0f, zFar = 0.0f, seed = 0.0f;
+	GlProc gp = nullptr;              //!< the twins' formats
+};
+bool tonePostQueue( const PostRun & p, std::string & why );
+void tonePostOnGl( const char * why );
+FxStat takeTonePostStat();
 
 /* Lane VKOBJ1 (plan row G4, slice 1): the objects' opaque depth prepass (cellgpucull.cpp, lookdev_csmdepth_q.prog) on the
  * present device into a shared multisample depth target (sharedTarget type 0 with samples, GL_DEPTH_COMPONENT24 / 32F) that

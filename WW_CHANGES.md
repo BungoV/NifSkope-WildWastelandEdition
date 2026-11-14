@@ -1,3 +1,15 @@
+## VKFAR2 P7 (2026-11-14): depth of field, motion blur and object blur join the tone pass on Vulkan (WW_VKVIEW=1)
+
+Changed, not built, not checked live. Offline: tests/vkframe/toneview.sh gained a POST arm (GL's own cellpost passes as
+the reference): 11 cases BOUND (max 1 byte), the six reds FAIL, 17 queued, 0 refused. spvsync OK.
+
+- With the view on Vulkan, the game's depth of field, the thin lens, the motion blur (alone, fused or two-pass) and the
+  object blur run inside the tone pass, before the lens flare, so turning one on no longer sends the tone pass across
+  alone. All of them still ship off.
+- Any refusal draws them on GL as before. Red WW_VKVIEW_POST_RED=1: always GL. Log lines `vk dof:`, `vk motionblur:`
+  and `vk objblur:` say which route ran and why.
+- The frame they read is the view's samples averaged and rounded to half float, as GL's blit into RGBA16F keeps it.
+
 ## VKBLOOM1 (2026-11-12): the Fusion Shaders bloom and the exposure measure join the tone pass on Vulkan (WW_VKVIEW=1)
 
 Changed, not built, not checked live. Offline: tests/vkframe/toneview.sh gained a BLOOM arm (GL's own bloom chain and

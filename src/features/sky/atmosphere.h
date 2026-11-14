@@ -11,6 +11,7 @@
 #include <QString>
 
 class Scene;
+class Renderer;
 
 int wwAtmoTier();
 void wwAtmoSetTier( int tier );	//!< refused while WW_ATMO pins it
@@ -62,6 +63,10 @@ struct WwAtmoFrame
 	float recNight[2] = { 0.0f, 0.0f };	//!< MODULES1 R7: as drawn (0 0 = none); the table above is filled when [1] > 0
 };
 const WwAtmoFrame & wwAtmoFrame();
+/*! lane VKFAR2 G2: the sky's pixels once more on GL, as this frame's held Vulkan crossing would have drawn them (its flush
+ *  failed: nothing of it drew). The program keeps its uniforms; the LUTs and the viewport are this frame's. False: no
+ *  sky went to Vulkan this frame */
+bool wwAtmoSkyGlAgain( Renderer * r );
 //! MODULES1 M8: the drawn sky's colour just above the horizon, scene units (false with no sky drawn)
 bool wwAtmoHorizon( float out[3] );
 /*! NIGHTHAZE1: the haze's glow (emissive radiance a thick haze reaches) and the last-resort inscattering overrides, in

@@ -55,6 +55,8 @@
 // lane VKFAR1: the far bulb dots as instanced quads (cell_fardots)
 #include "features/vkframe/fardots_view_vs.spv.h"
 #include "features/vkframe/fardots_view_ps.spv.h"
+#include "features/vkframe/fogbloom_view_ps.spv.h"  // lane VKFAR2 (row P4b): the fog bloom's own pass (vkfogbloom.inc)
+#include "features/vkframe/cloud_composite_view_ps.spv.h"  // lane VKFAR2 (row P8): the clouds in front (vkcloudfront.inc)
 #include "features/vkframe/vkfarcards.h"  // lane VKFAR1 round 2: the far cards' inputs (vkfarcards.inc)
 #include "features/vkframe/obj_depth_vs.spv.h"  // lane VKOBJ1
 
@@ -253,8 +255,11 @@ struct Vk
 	VKP( vkCmdBindVertexBuffers ); VKP( vkCmdBindIndexBuffer ); VKP( vkCmdDrawIndexedIndirect ); VKP( vkCmdSetDepthBias );
 	// lane VKAIR1: the air's stencil reference, the zero textures' clear
 	VKP( vkCmdSetStencilReference ); VKP( vkCmdClearColorImage );
+	VKP( vkCmdDrawIndexed );  // lane VKFAR2 G2: the stars' mesh and the moon's quad
 	// lane VKOBJ1: GL's clip z in [-w, w] for the objects' perspective prepass (VK_EXT_depth_clip_control)
 	bool clipControl = false;
+	// lane VKFAR2 G2: GL's single-sample backdrop on a multisampled frame (VK_EXT_sample_locations: every sample at the centre)
+	VkSampleCountFlags centreSamples = 0;
 	VKP( vkEnumerateDeviceExtensionProperties ); VKP( vkGetPhysicalDeviceFeatures2 );
 	// lane VKOBJ2: the bindless maps as descriptor indexing (vkbindless.inc), the row by BaseInstance, GL's anisotropy
 	bool descIndexing = false, drawParams = false, anisotropy = false;
@@ -489,8 +494,9 @@ bool makeDevice( std::string & why )
 	qi.queueCount = 1;
 	qi.pQueuePriorities = &prio;
 	const char * dext[] = { VK_KHR_SWAPCHAIN_EXTENSION_NAME, VK_KHR_EXTERNAL_MEMORY_WIN32_EXTENSION_NAME,
-		VK_KHR_EXTERNAL_SEMAPHORE_WIN32_EXTENSION_NAME, VK_EXT_DEPTH_CLIP_CONTROL_EXTENSION_NAME };
+		VK_KHR_EXTERNAL_SEMAPHORE_WIN32_EXTENSION_NAME, VK_EXT_DEPTH_CLIP_CONTROL_EXTENSION_NAME, nullptr };
 	std::uint32_t nDext = 3;
+	bool hasSampleLoc = false;
 	// lane VKOBJ1: depth clip control when offered (the objects' prepass refuses without it)
 	VkPhysicalDeviceDepthClipControlFeaturesEXT clipFeat { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DEPTH_CLIP_CONTROL_FEATURES_EXT };
 	if ( v.vkEnumerateDeviceExtensionProperties && v.vkGetPhysicalDeviceFeatures2 ) {
@@ -499,8 +505,10 @@ bool makeDevice( std::string & why )
 		std::vector<VkExtensionProperties> ep( ne );
 		v.vkEnumerateDeviceExtensionProperties( v.phys, nullptr, &ne, ep.data() );
 		bool has = false;
-		for ( const VkExtensionProperties & e : ep )
+		for ( const VkExtensionProperties & e : ep ) {
 			has = has || std::strcmp( e.extensionName, VK_EXT_DEPTH_CLIP_CONTROL_EXTENSION_NAME ) == 0;
+			hasSampleLoc = hasSampleLoc || std::strcmp( e.extensionName, VK_EXT_SAMPLE_LOCATIONS_EXTENSION_NAME ) == 0;
+		}
 		if ( has ) {
 			VkPhysicalDeviceFeatures2 f2 { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2 };
 			f2.pNext = &clipFeat;
@@ -511,6 +519,14 @@ bool makeDevice( std::string & why )
 	if ( v.clipControl )
 		nDext = 4;
 	clipFeat.pNext = nullptr;
+	if ( hasSampleLoc ) {  // lane VKFAR2 G2: the sample counts that take custom positions (the sky bodies' pipelines)
+		VkPhysicalDeviceSampleLocationsPropertiesEXT slp { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SAMPLE_LOCATIONS_PROPERTIES_EXT };
+		VkPhysicalDeviceProperties2 pp { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2 };
+		pp.pNext = &slp;
+		v.vkGetPhysicalDeviceProperties2( v.phys, &pp );
+		v.centreSamples = slp.sampleLocationSampleCounts;
+		dext[nDext++] = VK_EXT_SAMPLE_LOCATIONS_EXTENSION_NAME;
+	}
 	// round 11: the tone pass's fragment shader reads SV_SampleIndex (the SampleRateShading capability)
 	VkPhysicalDeviceFeatures offered {}, en {};
 	if ( v.vkGetPhysicalDeviceFeatures )
@@ -607,6 +623,7 @@ bool makeDevice( std::string & why )
 	LD( vkCmdDispatch ); LD( vkCreateComputePipelines );
 	LD( vkCmdBindVertexBuffers ); LD( vkCmdBindIndexBuffer ); LD( vkCmdDrawIndexedIndirect ); LD( vkCmdSetDepthBias );
 	LD( vkCmdSetStencilReference ); LD( vkCmdClearColorImage );
+	LD( vkCmdDrawIndexed );
 #undef LD
 	if ( !v.vkGetMemoryWin32HandleKHR || !v.vkGetSemaphoreWin32HandleKHR || !v.vkCreateSwapchainKHR )
 		return fail( "the device lacks a swapchain / win32 export entry point" );
@@ -693,10 +710,14 @@ void csmDrop();  // lane VKSHADOW1
 bool fxWork( std::string & why );
 void fxDrop();
 bool farRecord( std::string & why );  // lane VKFAR1 (vkfardots.inc): fxWork's kind 2
-bool waterRecord( std::string & why );  // lane VKWATER3 (vkwater.inc): fxWork's kind 3
+bool fcRecord( std::string & why );   // lane VKFAR2 (vkfarcardsdraw.inc): fxWork's kind 3
+bool waterRecord( std::string & why );  // lane VKWATER3 (vkwater.inc): fxWork's kind 4 (VKFAR2: and 5, the far LOD rings)
+bool fbRecord( std::string & why );  // lane VKFAR2 (vkfogbloom.inc): fxWork's kind 6, the fog bloom
+bool cfRecord( std::string & why );  // lane VKFAR2 (vkcloudfront.inc): fxWork's kind 7, the clouds in front
 void waterDrop();
 void objDrop();  // lane VKOBJ1
 void blFree();  // lane VKOBJ2
+void fogDrop();  // lane VKFAR2 (vkfog.inc): the air's integrate
 
 struct Worker
 {
@@ -1529,7 +1550,7 @@ bool makeView( int w, int h, int samples, std::string & why )
  * view's samples). The crossing: GL signals A (the frame, the view slot, the measure), the worker's submit waits A and
  * signals B, GL waits B before its next pass on the view; the drawing thread waits the worker's submit first (GL may
  * wait a binary semaphore only after its signal is submitted). The LUT goes up from the CPU bytes GL uploads (16^3,
- * 16 KB), not through a GL import; the fog bloom stays GL's. Lane VKBLOOM1: the Fusion Shaders bloom (its chain as
+ * 16 KB), not through a GL import; the fog bloom's R8 is read where fogBloomRun drew it (lane VKFAR2). Lane VKBLOOM1: the Fusion Shaders bloom (its chain as
  * compute dispatches, then mode 3 over the backdrop) and the exposure measure run in the same command buffer. */
 // lane VKBLOOM1: one image of the bloom chain (device-local, or shared when GL reads it: the combine, the measure)
 struct BloomImg
@@ -1539,7 +1560,7 @@ struct BloomImg
 	VkImageView view = VK_NULL_HANDLE;
 	VkImageView layer[8] = {};  // the ring's layers, each a 2D storage view
 	GLuint tex = 0, obj = 0;
-	int w = 0, h = 0, layers = 1, samples = 1;
+	int w = 0, h = 0, layers = 1, samples = 1, levels = 1;
 };
 struct ToneBloomState
 {
@@ -1551,6 +1572,7 @@ struct ToneBloomState
 	// per chain shape (W x H, the mips' dims); the frame's views are in the sets: made again with the frame
 	int W = 0, H = 0, mips = 0, dims[WwVkPresent::kToneBloomMips][2] = {};
 	BloomImg src, ring, comb, mip[WwVkPresent::kToneBloomMips], up[WwVkPresent::kToneBloomMips];
+	BloomImg lod;  // lane VKFAR2: the top's mips (ToneBloom::lod), made at the first lod frame of this shape
 	VkDescriptorPool pool = VK_NULL_HANDLE;
 	VkDescriptorSet down[WwVkPresent::kToneBloomMips] = {}, downRing[8] = {}, hold = VK_NULL_HANDLE,
 		upSet[WwVkPresent::kToneBloomMips] = {}, srcSet = VK_NULL_HANDLE, combSet = VK_NULL_HANDLE;
@@ -1581,6 +1603,11 @@ struct ToneBloomState
 	bool measRan = false, measHave = false, measDone = false;
 	int measW = 0, measH = 0;
 };
+/* the deferred crossing's GL names: the frame, its depth, the view slot, the measure, the fog bloom and the measure's
+ * quarter (7), lane VKFAR2 P9's flare depth twin and up to kFlareTexMax sprite twins (vkflare.inc), P7's velocity and mask
+ * twins (vkpost7.inc) */
+constexpr int kFlareTexMax = 16;
+constexpr int kToneDefMax = 10 + kFlareTexMax;
 struct Tone
 {
 	void * glCtx = nullptr;
@@ -1590,6 +1617,7 @@ struct Tone
 	GLuint colorTex = 0, dsTex = 0, colorObj = 0, dsObj = 0;
 	VkImageView colorView = VK_NULL_HANDLE, stencilView = VK_NULL_HANDLE;
 	VkImageView dsView = VK_NULL_HANDLE;  // lane VKAIR1: depth + stencil, the air pass's stencil attachment
+	VkImageView depthView = VK_NULL_HANDLE;  // lane VKFAR2: the depth alone, sampled (the fog bloom's per-sample depth)
 	double frameMb = 0.0;
 	// the measure's bloom, copied by GL into an image of this device (RGBA32F, 1 sample) when it changes
 	int mw = 0, mh = 0;
@@ -1652,7 +1680,7 @@ struct Tone
 	 * right after a tone pass; backoff: frames without deferring after a flush; red WW_VKVIEW_MERGE_RED=1 never defers */
 	bool deferred = false, ranSinceTaa = false, mergeHint = false, mergeRed = false, subOk = false;
 	int backoff = 0;
-	GLuint defTex[8] = {};  // lane VKBLOOM1: + the combine and the measure's quarter target
+	GLuint defTex[kToneDefMax] = {};  // lane VKBLOOM1: + the combine and the measure's quarter target; VKFAR2 P9: + the flares'
 	GLuint defN = 0;
 	ToneBloomState bloom;  // lane VKBLOOM1
 };
@@ -1809,14 +1837,15 @@ VkImageView layerView( VkImage img, VkImageViewType type, VkFormat fmt, int base
 
 /* lane VKBLOOM1: a chain image only this device reads (device-local; layers > 1: the ring, a 2D array view and a 2D view
  * per layer), left UNDEFINED (bloomGeneral lays it out) */
-bool bloomLocal( BloomImg & I, VkFormat fmt, VkImageUsageFlags usage, int w, int h, int layers, double & mb, int samples = 1 )
+bool bloomLocal( BloomImg & I, VkFormat fmt, VkImageUsageFlags usage, int w, int h, int layers, double & mb, int samples = 1,
+	int levels = 1 )
 {
 	Vk & v = vk();
 	VkImageCreateInfo ci { VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO };
 	ci.imageType = VK_IMAGE_TYPE_2D;
 	ci.format = fmt;
 	ci.extent = { std::uint32_t( w ), std::uint32_t( h ), 1 };
-	ci.mipLevels = 1;
+	ci.mipLevels = std::uint32_t( levels );
 	ci.arrayLayers = std::uint32_t( layers );
 	ci.samples = VkSampleCountFlagBits( samples );
 	ci.tiling = VK_IMAGE_TILING_OPTIMAL;
@@ -1836,7 +1865,9 @@ bool bloomLocal( BloomImg & I, VkFormat fmt, VkImageUsageFlags usage, int w, int
 	I.h = h;
 	I.layers = layers;
 	I.samples = samples;
-	I.view = layerView( I.img, layers > 1 ? VK_IMAGE_VIEW_TYPE_2D_ARRAY : VK_IMAGE_VIEW_TYPE_2D, fmt, 0, layers );
+	I.levels = levels;
+	I.view = levels > 1 ? imageView( I.img, VK_IMAGE_VIEW_TYPE_2D, fmt, VK_IMAGE_ASPECT_COLOR_BIT, std::uint32_t( levels ) )
+		: layerView( I.img, layers > 1 ? VK_IMAGE_VIEW_TYPE_2D_ARRAY : VK_IMAGE_VIEW_TYPE_2D, fmt, 0, layers );
 	if ( !I.view )
 		return false;
 	for ( int l = 0; layers > 1 && l < layers && l < 8; l++ )
@@ -1859,7 +1890,7 @@ bool bloomGeneral( const std::vector<const BloomImg *> & imgs )
 		b.newLayout = VK_IMAGE_LAYOUT_GENERAL;
 		b.srcQueueFamilyIndex = b.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
 		b.image = I->img;
-		b.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, std::uint32_t( I->layers ) };
+		b.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, std::uint32_t( I->levels ), 0, std::uint32_t( I->layers ) };
 		bars.push_back( b );
 	}
 	if ( bars.empty() )
@@ -1897,6 +1928,7 @@ void toneBloomFree( bool glAlive )
 	bloomImgDrop( B.src, glAlive );
 	bloomImgDrop( B.ring, glAlive );
 	bloomImgDrop( B.comb, glAlive );
+	bloomImgDrop( B.lod, glAlive );
 	for ( int i = 0; i < WwVkPresent::kToneBloomMips; i++ ) {
 		bloomImgDrop( B.mip[i], glAlive );
 		bloomImgDrop( B.up[i], glAlive );
@@ -2043,6 +2075,7 @@ bool toneBloomChain( const WwVkPresent::ToneBloom & b, std::string & why )
 	bloomImgDrop( B.src, true );
 	bloomImgDrop( B.ring, true );
 	bloomImgDrop( B.comb, true );
+	bloomImgDrop( B.lod, true );
 	for ( int i = 0; i < WwVkPresent::kToneBloomMips; i++ ) {
 		bloomImgDrop( B.mip[i], true );
 		bloomImgDrop( B.up[i], true );
@@ -2285,7 +2318,7 @@ void toneFrameFree( bool glAlive )
 			if ( *o )
 				g.deleteMemoryObjects( 1, o );
 	}
-	for ( VkImageView * iv : { &T.colorView, &T.stencilView, &T.dsView } )
+	for ( VkImageView * iv : { &T.colorView, &T.stencilView, &T.dsView, &T.depthView } )
 		if ( *iv )
 			v.vkDestroyImageView( v.dev, *iv, nullptr );
 	for ( VkImage * i : { &T.color, &T.ds } )
@@ -2297,7 +2330,7 @@ void toneFrameFree( bool glAlive )
 	toneMeasureDrop( glAlive );
 	toneBloomFree( glAlive );
 	T.colorTex = T.dsTex = T.colorObj = T.dsObj = 0;
-	T.colorView = T.stencilView = T.dsView = VK_NULL_HANDLE;
+	T.colorView = T.stencilView = T.dsView = T.depthView = VK_NULL_HANDLE;
 	T.color = T.ds = VK_NULL_HANDLE;
 	T.colorMem = T.dsMem = VK_NULL_HANDLE;
 	T.w = T.h = T.samples = 0;
@@ -2336,9 +2369,10 @@ bool toneStatic( std::string & why )
 		return true;
 	VkSamplerCreateInfo sci { VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO };
 	sci.magFilter = sci.minFilter = VK_FILTER_LINEAR;
-	sci.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
+	// lane VKFAR2: GL_LINEAR_MIPMAP_LINEAR over the top's mips (the lod tent); every other read is SampleLevel 0 of one level
+	sci.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
 	sci.addressModeU = sci.addressModeV = sci.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-	sci.maxLod = 0.0f;
+	sci.maxLod = 1000.0f;
 	if ( v.vkCreateSampler( v.dev, &sci, nullptr, &T.sampler ) != VK_SUCCESS ) {
 		why = "vkCreateSampler (the tone pass) failed";
 		return false;
@@ -2659,8 +2693,22 @@ bool toneFbs( std::string & why )
 }
 
 // lane VKBLOOM1: harness only (tests/vkframe/toneview.cpp's reds, must FAIL); 1 = mode 3 not drawn, 2 = the measure not
-// dispatched, 3 = mode 3 reads no backdrop
+// dispatched, 3 = mode 3 reads no backdrop, 4 (lane VKFAR2) = the lod tent reads level 0 only
 int bloomRedTest = 0;
+/* lane VKFAR2 P9: the lens-flare sprites queued into a deferred tone pass (vkflare.inc): the table's upload before the pass,
+ * the sprites after the modes. Harness only (toneview.cpp's flare reds, must FAIL): 1 = drawn before the modes, 2 = the
+ * depth ignored (no occlusion) */
+int flareRedTest = 0;
+void flToneReset();
+void flRecordPre( VkCommandBuffer cmd );
+bool flRecordIn( VkCommandBuffer cmd );
+/* lane VKFAR2 P7: cellpost.cpp's post passes queued into a deferred tone pass (vkpost7.inc), recorded before the flare (GL's
+ * order: the post passes, then the flare, then the TAA). Harness only (toneview.cpp's P7 reds, must FAIL): 1 = the resolve
+ * takes sample 0, 2 = the DoF blur skipped, 3 = the lens gather skipped, 4 = the vectors zero, 5 = the object blur's tile
+ * passes skipped, 6 = the fused pass replaced by the plain blur */
+int postRedTest = 0;
+void p7ToneReset();
+bool p7Record( VkCommandBuffer cmd, const VkRenderPassBeginInfo & rbi );
 
 // the worker: record the LUT's copy (when new) and the pass into this frame's view slot (toneWork submits it)
 bool toneRecord( std::string & why )
@@ -2695,6 +2743,7 @@ bool toneRecord( std::string & why )
 		v.vkCmdPipelineBarrier( T.cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0, nullptr, 0, nullptr, 1, &b );
 		T.lutCopy = false;
 	}
+	flRecordPre( T.cmd );  // lane VKFAR2 P9: the queued flare sprites' table
 	ToneBloomState & B = T.bloom;
 	if ( B.on || B.measQw > 0 ) {
 		/* lane VKBLOOM1: vkframe.cpp runBloom's dispatches on this command buffer, from the shared frame GL just drew (the
@@ -2764,10 +2813,42 @@ bool toneRecord( std::string & why )
 				j.params[3] = b.dispersion;
 				dispatch( 2, B.upSet[level], B.dims[level][0], B.dims[level][1], j, 8 );
 			}
-			Pc j {};  // the final tent once per pixel (bloom_comb.hlsl), lod 0 of the top; the tone pass weighs it
-			j.params[0] = b.radius;
-			j.params[2] = b.dispersion;
-			dispatch( 4, B.combSet, B.W, B.H, j, 8 );
+			if ( b.lod && B.lod.img ) {
+				/* lane VKFAR2: Bloom Mip under the fog bloom: no combine; cell_hdr.frag reads the top's mips per sample
+				 * (cellbloom.cpp's glGenerateMipmap, levels 0-3), so the top goes to level 0 and each level is a linear blit
+				 * of the one above (GL's sizes: max(1, size >> level)) */
+				const BloomImg & top = n == 1 ? B.mip[0] : B.up[0];
+				VkMemoryBarrier tb { VK_STRUCTURE_TYPE_MEMORY_BARRIER };
+				tb.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT | VK_ACCESS_SHADER_READ_BIT;
+				tb.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT | VK_ACCESS_TRANSFER_WRITE_BIT;
+				v.vkCmdPipelineBarrier( T.cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+					VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 1, &tb, 0, nullptr, 0, nullptr );
+				VkImageCopy cp {};
+				cp.srcSubresource = cp.dstSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
+				cp.extent = { std::uint32_t( B.dims[0][0] ), std::uint32_t( B.dims[0][1] ), 1 };
+				v.vkCmdCopyImage( T.cmd, top.img, VK_IMAGE_LAYOUT_GENERAL, B.lod.img, VK_IMAGE_LAYOUT_GENERAL, 1, &cp );
+				for ( int l = 1; l < B.lod.levels; l++ ) {
+					tb.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+					tb.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT | VK_ACCESS_TRANSFER_WRITE_BIT;
+					v.vkCmdPipelineBarrier( T.cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 1, &tb, 0, nullptr, 0,
+						nullptr );
+					VkImageBlit bl {};
+					bl.srcSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, std::uint32_t( l - 1 ), 0, 1 };
+					bl.dstSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, std::uint32_t( l ), 0, 1 };
+					bl.srcOffsets[1] = { std::max( 1, B.dims[0][0] >> ( l - 1 ) ), std::max( 1, B.dims[0][1] >> ( l - 1 ) ), 1 };
+					bl.dstOffsets[1] = { std::max( 1, B.dims[0][0] >> l ), std::max( 1, B.dims[0][1] >> l ), 1 };
+					v.vkCmdBlitImage( T.cmd, B.lod.img, VK_IMAGE_LAYOUT_GENERAL, B.lod.img, VK_IMAGE_LAYOUT_GENERAL, 1, &bl, VK_FILTER_LINEAR );
+				}
+				tb.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+				tb.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+				v.vkCmdPipelineBarrier( T.cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT
+					| VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 1, &tb, 0, nullptr, 0, nullptr );
+			} else {
+				Pc j {};  // the final tent once per pixel (bloom_comb.hlsl), lod 0 of the top; the tone pass weighs it
+				j.params[0] = b.radius;
+				j.params[2] = b.dispersion;
+				dispatch( 4, B.combSet, B.W, B.H, j, 8 );
+			}
 			B.records++;
 		}
 		if ( B.measQw > 0 ) {  // the measure's texels into the host buffer: read at the next frame (toneMeasureTake)
@@ -2806,6 +2887,11 @@ bool toneRecord( std::string & why )
 		v.vkCmdPushConstants( T.cmd, T.layout, VK_SHADER_STAGE_FRAGMENT_BIT, 0, std::uint32_t( sizeof( j ) ), &j );
 		v.vkCmdDraw( T.cmd, 3, 1, 0, 0 );
 	};
+	if ( flareRedTest == 1 && flRecordIn( T.cmd ) ) {  // the red: the sprites under the modes
+		v.vkCmdSetViewport( T.cmd, 0, 1, &vp );
+		v.vkCmdSetScissor( T.cmd, 0, 1, &sc );
+		v.vkCmdBindDescriptorSets( T.cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, T.layout, 0, 1, &T.set, 0, nullptr );
+	}
 	// cellhdr.cpp's quads: mode 0 where an opaque draw reached (GREATER), mode 2 over the far plane, mode 1 stencil 2
 	if ( T.splitSky ) {
 		draw( 1, 0, 1, 1 );
@@ -2855,6 +2941,9 @@ bool toneRecord( std::string & why )
 		if ( T.splitSky )
 			draw( 4, 3, 1, 1 );
 	}
+	p7Record( T.cmd, rbi );  // lane VKFAR2 P7: cellpost.cpp's DoF / motion blur / object blur (ends and begins the pass again)
+	if ( flareRedTest != 1 )
+		flRecordIn( T.cmd );  // lane VKFAR2 P9: celllensflare.cpp's sprites over the toned view, before the TAA
 	v.vkCmdEndRenderPass( T.cmd );
 	if ( v.vkEndCommandBuffer( T.cmd ) != VK_SUCCESS ) {
 		why = "vkEndCommandBuffer (the tone pass) failed";
@@ -3585,6 +3674,7 @@ void shutdown()
 	}
 	csmDrop();  // lane VKSHADOW1: the cascades' layer views go before the shared arrays they view
 	objDrop();  // lane VKOBJ1: the prepass framebuffer goes before the shared depth it holds
+	fogDrop();  // lane VKFAR2: the integrate's set goes before the shared volumes it views
 	blFree();  // lane VKOBJ2: the bindless table's set and samplers (it holds the shared targets' views)
 	// lane VKSHARE1: the keyed shared targets (their owners see sharedTargetIs false and make GL's own again)
 	if ( !shareds().empty() ) {
@@ -3759,7 +3849,8 @@ bool toneFrame( int w, int h, int samples, unsigned & color, unsigned & ds, std:
 	T.stencilView = imageView( T.ds, VK_IMAGE_VIEW_TYPE_2D, VK_FORMAT_D24_UNORM_S8_UINT, VK_IMAGE_ASPECT_STENCIL_BIT );
 	const GLenum err = g.getError();
 	T.dsView = imageView( T.ds, VK_IMAGE_VIEW_TYPE_2D, VK_FORMAT_D24_UNORM_S8_UINT, VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT );
-	if ( !T.colorView || !T.stencilView || !T.dsView || err != 0 ) {
+	T.depthView = imageView( T.ds, VK_IMAGE_VIEW_TYPE_2D, VK_FORMAT_D24_UNORM_S8_UINT, VK_IMAGE_ASPECT_DEPTH_BIT );
+	if ( !T.colorView || !T.stencilView || !T.dsView || !T.depthView || err != 0 ) {
 		why = "the tone frame's views / stencil mode failed (GL error " + std::to_string( err ) + ")";
 		toneFrameFree( true );
 		return false;
@@ -3897,7 +3988,7 @@ static bool toneCross( std::string & w )
 {
 	Tone & T = tone();
 	Gl & g = gl();
-	GLenum lay[8];
+	GLenum lay[kToneDefMax];
 	for ( GLenum & l : lay )
 		l = kLayoutGeneral;
 	g.signalSemaphore( T.glDoneGl, 0, nullptr, T.defN, T.defTex, lay );
@@ -3983,8 +4074,15 @@ bool toneRun( const ToneRun & t, std::string & why )
 	if ( V.samples != T.samples || T.w > V.w || T.h > V.h )
 		return refuse( "the tone frame's shape is not the view's" );
 	const std::int32_t f = t.job.ints[0];
-	if ( f & ( 1 << 9 ) )
-		return refuse( "the fog bloom is on (GL's)" );
+	// lane VKFAR2: the fog bloom's shared R8 (fogBloomRun drew it on this device), read per sample at binding 5
+	const Shared * fogS = nullptr;
+	if ( f & ( 1 << 9 ) ) {
+		fogS = t.fogKey ? sharedFind( t.fogKey ) : nullptr;
+		if ( !fogS || !t.fogTex || fogS->tex != t.fogTex )
+			return refuse( "the fog bloom drew on GL (no shared target to read)" );
+		if ( fogS->fmt != VK_FORMAT_R8_UNORM || fogS->samples != T.samples || fogS->w != T.w || fogS->h != T.h || !fogS->view )
+			return refuse( "the fog bloom's shared target is not the tone frame's shape" );
+	}
 	const bool bloomOn = ( f & ( 1 << 7 ) ) != 0, backOn = ( f & ( 1 << 11 ) ) != 0;
 	if ( ( bloomOn || backOn ) != ( t.bloom != nullptr ) || ( backOn && !bloomOn ) )
 		return refuse( "the Fusion Shaders bloom's flags and its job do not agree (GL's bloom)" );
@@ -4092,6 +4190,24 @@ bool toneRun( const ToneRun & t, std::string & why )
 				return refuse( B.brokenWhy );
 			}
 		}
+		if ( b && b->lod && !B.lod.img ) {
+			// lane VKFAR2: the top's mips, levels 0-3 as GL's MAX_LEVEL 3 (fewer when the top is that small)
+			drain();
+			const int lw = b->dims[0][0], lh = b->dims[0][1];
+			int levels = 1;
+			while ( levels < 4 && ( std::max( lw, lh ) >> levels ) > 0 )
+				levels++;
+			bool ok = bloomLocal( B.lod, VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT
+				| VK_IMAGE_USAGE_TRANSFER_DST_BIT, lw, lh, 1, B.mb, 1, levels );
+			if ( ok )
+				ok = bloomGeneral( { &B.lod } );
+			if ( !ok ) {
+				bloomImgDrop( B.lod, true );
+				B.broken = true;
+				B.brokenWhy = "the bloom in the tone pass broke: the top's mips failed";
+				return refuse( B.brokenWhy );
+			}
+		}
 		if ( b ) {
 			B.job = *b;
 			bloomFresh = B.fresh;
@@ -4108,12 +4224,16 @@ bool toneRun( const ToneRun & t, std::string & why )
 	}
 	const bool measureBound = measureOn && T.measureView;
 	static bool boundMeasure = false;
-	static VkImageView boundComb = VK_NULL_HANDLE, boundBack = VK_NULL_HANDLE;
-	const VkImageView combView = B.on && B.comb.view ? B.comb.view : T.dummyView;
+	static VkImageView boundComb = VK_NULL_HANDLE, boundBack = VK_NULL_HANDLE, boundFog = VK_NULL_HANDLE;
+	static std::uint64_t boundFogGen = 0;
+	const bool lodOn = B.on && B.job.lod && B.lod.view;
+	const VkImageView combView = lodOn ? B.lod.view : B.on && B.comb.view ? B.comb.view : T.dummyView;
 	const VkImageView backView = B.backdrop && B.back.view && bloomRedTest != 3 ? B.back.view : T.dummyView;
-	if ( T.descDirty || boundMeasure != measureBound || boundComb != combView || boundBack != backView ) {
+	const VkImageView fogView = fogS ? fogS->view : T.colorView;  // off: any multisample view (the shader does not read it)
+	if ( T.descDirty || boundMeasure != measureBound || boundComb != combView || boundBack != backView || boundFog != fogView
+		|| ( fogS && boundFogGen != sharedGen() ) ) {
 		const VkImageView views[7] = { T.colorView, T.stencilView, combView, measureBound ? T.measureView : T.dummyView, T.lutView,
-			T.colorView, backView };
+			fogView, backView };
 		VkDescriptorImageInfo ii[8] = {};
 		VkWriteDescriptorSet wr[8] = {};
 		for ( std::uint32_t k = 0; k < 8; k++ ) {
@@ -4134,6 +4254,8 @@ bool toneRun( const ToneRun & t, std::string & why )
 		boundMeasure = measureBound;
 		boundComb = combView;
 		boundBack = backView;
+		boundFog = fogView;
+		boundFogGen = sharedGen();
 	}
 	T.slot = V.cur;
 	if ( t.vp[2] > 0 && t.vp[3] > 0 ) {
@@ -4147,7 +4269,20 @@ bool toneRun( const ToneRun & t, std::string & why )
 	T.splitSky = t.splitSky;
 	T.sorted = t.sorted;
 	T.job = t.job;
+	if ( fogS && t.fogRed == 1 )
+		T.job.ints[0] &= ~std::int32_t( 1 << 9 );  // the red: the target ignored (gain 1)
+	if ( lodOn ) {
+		// lane VKFAR2: cellIsFoBloomParams x / z / w and cellIsFoBloomFrame for the per-sample lod tent (red 4: lod 0)
+		T.job.ints[0] |= std::int32_t( 1 << 8 );
+		T.job.ints[3] = std::int32_t( B.W | ( B.H << 16 ) );
+		T.job.tent[0] = B.job.radius;
+		T.job.tent[1] = B.job.dispersion;
+		T.job.tent[2] = bloomRedTest == 4 ? 0.0f : B.job.perPixel;
+		T.job.tent[3] = 0.0f;
+	}
 	// GL's frame (and the view's depth GL blitted) done -> the worker's pass -> GL's later passes on the view
+	flToneReset();  // lane VKFAR2 P9: no sprites until celllensflare.cpp queues this frame's
+	p7ToneReset();  // lane VKFAR2 P7: no post passes until cellpost.cpp queues this frame's
 	T.defTex[0] = T.colorTex;
 	T.defTex[1] = T.dsTex;
 	T.defTex[2] = V.slot[V.cur].colorTex;
@@ -4155,6 +4290,8 @@ bool toneRun( const ToneRun & t, std::string & why )
 	T.defN = 4u;
 	if ( measureBound )
 		T.defTex[T.defN++] = T.measureTex;
+	if ( fogS )
+		T.defTex[T.defN++] = fogS->tex;
 	if ( B.measQw > 0 )
 		T.defTex[T.defN++] = B.meas.tex;  // lane VKBLOOM1: GL blurs the measure's quarter target at the next frame
 	if ( T.backoff > 0 )
@@ -4410,7 +4547,7 @@ bool taaRun( const TaaRun & t, std::string & why )
 	A.fromView = merge;
 	A.curImg = sCur.img;
 	// GL's blits (colour, depth), the lock clears and the inputs' copies done -> the worker's passes -> GL's later passes
-	GLuint tex[18] = { sCur.tex, sDepth.tex, sMv.tex, sPic.tex, sHist[0]->tex, sHist[1]->tex, sLock[0]->tex, sLock[1]->tex,
+	GLuint tex[40] = { sCur.tex, sDepth.tex, sMv.tex, sPic.tex, sHist[0]->tex, sHist[1]->tex, sLock[0]->tex, sLock[1]->tex,
 		V.slot[V.cur].colorTex };
 	GLuint nTex = 9;
 	if ( velTex )
@@ -4424,7 +4561,7 @@ bool taaRun( const TaaRun & t, std::string & why )
 				tex[nTex++] = T.defTex[k];
 		}
 	}
-	GLenum lay[18];
+	GLenum lay[40];
 	for ( GLenum & l : lay )
 		l = kLayoutGeneral;
 	g.signalSemaphore( A.glDoneGl, 0, nullptr, nTex, tex, lay );
@@ -4701,8 +4838,18 @@ struct Sky
 	VkFramebuffer fb = VK_NULL_HANDLE;  // over the tone frame's colour, made each run (the frame may be remade between)
 	int w = 0, h = 0, vp[4] = {};
 	WwVkPresent::SkyStat st;
+	// lane VKFAR2 G2: this frame's LUTs (GL's names, their twins, the views) for the bodies; held: the crossing waits for them
+	GLuint lutGl[4] = {}, lutTwin[4] = {};
+	VkImageView lutView[4] = {};
+	bool held = false;
 };
 constexpr VkDeviceSize kSkyLooseAt = 512;  // past b0 (336), on any minUniformBufferOffsetAlignment up to 256
+
+// lane VKFAR2 G2 (vkskybody.inc): the bodies' side of the sky's pass
+bool skyBodiesTakeArm();                          // the backdrop armed the bodies (cleared)
+void skyBodyTexNames( std::vector<GLuint> & out );  // the twins the joined bodies sample (the crossing's lists)
+void skyBodyRecord( VkCommandBuffer cmd );        // their draws, after the sky's triangle (the worker)
+void skyBodiesDone();                             // the crossing went or failed: nothing joined any more
 
 Sky & sky()
 {
@@ -4960,6 +5107,7 @@ bool skyWork( std::string & why )
 	v.vkCmdBindPipeline( S.cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, S.pipe );
 	v.vkCmdBindDescriptorSets( S.cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, S.layout, 0, 1, &S.set, 0, nullptr );
 	v.vkCmdDraw( S.cmd, 3, 1, 0, 0 );
+	skyBodyRecord( S.cmd );  // lane VKFAR2 G2: the stars and the moon globe that joined, in GL's order
 	v.vkCmdEndRenderPass( S.cmd );
 	if ( v.vkEndCommandBuffer( S.cmd ) != VK_SUCCESS ) {
 		why = "vkEndCommandBuffer (the sky) failed";
@@ -4991,10 +5139,49 @@ void skyDrop()
 	drain();
 	vk().vkDeviceWaitIdle( vk().dev );
 	S.pending = false;
+	S.held = false;
+	skyBodiesDone();
 	if ( S.fb )
 		vk().vkDestroyFramebuffer( vk().dev, S.fb, nullptr );
 	S.fb = VK_NULL_HANDLE;
 	skySemsDrop( gl().ok && S.semCtx == gl().ctx );
+}
+
+/* the crossing: GL's frame so far and the LUT copies (and the bodies' twins) signalled -> the worker's sky and bodies ->
+ * GL waits. false: why; nothing signals vkDone (GL does not wait it) */
+bool skyCross( std::string & why )
+{
+	Sky & S = sky();
+	Gl & g = gl();
+	std::vector<GLuint> tex = { tone().colorTex, S.lutTwin[0], S.lutTwin[1], S.lutTwin[2], S.lutTwin[3] };
+	skyBodyTexNames( tex );
+	const std::vector<GLenum> lay( tex.size(), kLayoutGeneral );
+	g.signalSemaphore( S.glDoneGl, 0, nullptr, GLuint( tex.size() ), tex.data(), lay.data() );
+	g.flush();
+	Worker & W = wk();
+	std::uint64_t want = 0;
+	{
+		std::lock_guard<std::mutex> lk( W.m );
+		want = W.toneDone + 1;
+	}
+	Work j;
+	j.k = -1;
+	j.sky = true;
+	hand( j );
+	bool ok = false;
+	{
+		std::unique_lock<std::mutex> lk( W.m );
+		W.idle.wait( lk, [&W, want]() { return W.toneDone >= want; } );
+		ok = W.toneOk;
+		why = W.toneWhy;
+	}
+	S.held = false;
+	skyBodiesDone();
+	if ( !ok )
+		return false;
+	g.waitSemaphore( S.vkDoneGl, 0, nullptr, GLuint( tex.size() ), tex.data(), lay.data() );
+	S.pending = true;
+	return true;
 }
 }  // namespace
 
@@ -5018,6 +5205,13 @@ bool skyRun( const SkyRun & t, std::string & why )
 		S.brokenWhy = "the sky on Vulkan broke: " + w;
 		return refuse( S.brokenWhy );
 	};
+	const bool hold = skyBodiesTakeArm();  // lane VKFAR2 G2
+	if ( S.held ) {  // a held crossing never sent (nothing was signalled): dropped, it drew nothing
+		S.held = false;
+		skyBodiesDone();
+		S.st.flushFails++;
+		S.st.bodyWhy = "a held sky crossing was never flushed (dropped)";
+	}
 	if ( S.broken )
 		return refuse( S.brokenWhy );
 	if ( !v.ok || !g.ok || g.ctx != reinterpret_cast<void *>( wglGetCurrentContext() ) )
@@ -5095,34 +5289,17 @@ bool skyRun( const SkyRun & t, std::string & why )
 	S.w = t.w;
 	S.h = t.h;
 	std::memcpy( S.vp, t.vp, sizeof( S.vp ) );
-	// GL's frame so far and the LUT copies done -> the worker's sky -> GL's backdrop layers and objects
-	GLuint tex[5] = { T.colorTex, lutTex[0], lutTex[1], lutTex[2], lutTex[3] };
-	GLenum lay[5];
-	for ( GLenum & l : lay )
-		l = kLayoutGeneral;
-	g.signalSemaphore( S.glDoneGl, 0, nullptr, 5, tex, lay );
-	g.flush();
-	Worker & W = wk();
-	std::uint64_t want = 0;
-	{
-		std::lock_guard<std::mutex> lk( W.m );
-		want = W.toneDone + 1;
+	for ( int k = 0; k < 4; k++ ) {
+		S.lutGl[k] = t.lut[k];
+		S.lutTwin[k] = lutTex[k];
+		S.lutView[k] = sLut[k]->view;
 	}
-	Work j;
-	j.k = -1;
-	j.sky = true;
-	hand( j );
-	bool ok = false;
-	{
-		std::unique_lock<std::mutex> lk( W.m );
-		W.idle.wait( lk, [&W, want]() { return W.toneDone >= want; } );
-		ok = W.toneOk;
-		w = W.toneWhy;
-	}
-	if ( !ok )
+	// lane VKFAR2 G2: armed, the crossing waits for the bodies (skyBodiesFlush sends it); else it goes now
+	if ( hold ) {
+		S.held = true;
+	} else if ( !skyCross( w ) ) {
 		return breakOff( w );  // nothing signals vkDone: GL does not wait it; GL draws its quad this frame
-	g.waitSemaphore( S.vkDoneGl, 0, nullptr, 5, tex, lay );
-	S.pending = true;
+	}
 	const double ms = nowMs() - t0;
 	S.st.runs++;
 	S.st.cpuMs += ms;
@@ -5196,7 +5373,7 @@ struct Fx
 	VkFence fence = VK_NULL_HANDLE;
 	bool pending = false;
 	// this run's job, written by the drawing thread before the hand
-	int kind = 0;  // 0 the air, 1 the clouds, 2 the far dots (lane VKFAR1), 3 the water draw (lane VKWATER3)
+	int kind = 0;  // 0 the air, 1 the clouds, 2 the far dots (lane VKFAR1), 3 the far cards (lane VKFAR2), 4 the water draw (lane VKWATER3), 6 the fog bloom (lane VKFAR2)
 	VkFramebuffer fbAir = VK_NULL_HANDLE, fbM = VK_NULL_HANDLE, fbR = VK_NULL_HANDLE;
 	int w = 0, h = 0, vp[4] = {}, stencilRef = 1, march = kFxMarch, resolve = kFxResolve, mw = 0, mh = 0, hw = 0, hh = 0;
 	bool blend = false, skipMarch = false;
@@ -5629,8 +5806,23 @@ bool fxWork( std::string & why )
 			v.vkEndCommandBuffer( F.cmd );
 			return false;
 		}
-	} else if ( F.kind == 3 ) {  // lane VKWATER3: the shaded water draw
+	} else if ( F.kind == 3 ) {  // lane VKFAR2: the far cards
+		if ( !fcRecord( why ) ) {
+			v.vkEndCommandBuffer( F.cmd );
+			return false;
+		}
+	} else if ( F.kind == 4 || F.kind == 5 ) {  // lane VKWATER3: the shaded water draw; lane VKFAR2: 5 the far LOD rings
 		if ( !waterRecord( why ) ) {
+			v.vkEndCommandBuffer( F.cmd );
+			return false;
+		}
+	} else if ( F.kind == 6 ) {  // lane VKFAR2 (row P4b): the fog bloom's target
+		if ( !fbRecord( why ) ) {
+			v.vkEndCommandBuffer( F.cmd );
+			return false;
+		}
+	} else if ( F.kind == 7 ) {  // lane VKFAR2 (row P8): the clouds in front of the scene
+		if ( !cfRecord( why ) ) {
 			v.vkEndCommandBuffer( F.cmd );
 			return false;
 		}
@@ -5711,18 +5903,39 @@ bool fxFb( VkFramebuffer & fb, VkRenderPass pass, const VkImageView * views, int
 // the GL names a crossing hands over (the frame, the targets, every twin), each once
 struct FxNames
 {
-	GLuint tex[24] = {};
-	GLenum lay[24] = {};
+	static constexpr GLuint kMax = 256;  // lane VKFAR2: the far cards' sheets (4 a card set) and texel buffers
+	GLuint tex[kMax] = {};
+	GLenum lay[kMax] = {};
 	GLuint n = 0;
+	GLuint buf[32] = {};
+	GLuint nb = 0;
+	bool full = false;  // a name did not fit: the caller refuses (GL would not hand it over)
 	void add( GLuint t )
 	{
-		if ( !t || n >= 24 )
+		if ( !t )
 			return;
 		for ( GLuint k = 0; k < n; k++ )
 			if ( tex[k] == t )
 				return;
+		if ( n >= kMax ) {
+			full = true;
+			return;
+		}
 		tex[n] = t;
 		lay[n++] = kLayoutGeneral;
+	}
+	void addBuf( GLuint b )
+	{
+		if ( !b )
+			return;
+		for ( GLuint k = 0; k < nb; k++ )
+			if ( buf[k] == b )
+				return;
+		if ( nb >= 32 ) {
+			full = true;
+			return;
+		}
+		buf[nb++] = b;
 	}
 };
 
@@ -5821,7 +6034,11 @@ bool fxCross( FxNames & names, std::string & why )
 {
 	Gl & g = gl();
 	Fx & F = fx();
-	g.signalSemaphore( F.glDoneGl, 0, nullptr, names.n, names.tex, names.lay );
+	if ( names.full ) {
+		why = "more GL names than a crossing hands over";
+		return false;
+	}
+	g.signalSemaphore( F.glDoneGl, names.nb, names.buf, names.n, names.tex, names.lay );
 	g.flush();
 	Worker & W = wk();
 	std::uint64_t want = 0;
@@ -5842,7 +6059,7 @@ bool fxCross( FxNames & names, std::string & why )
 	}
 	if ( !ok )
 		return false;
-	g.waitSemaphore( F.vkDoneGl, 0, nullptr, names.n, names.tex, names.lay );
+	g.waitSemaphore( F.vkDoneGl, names.nb, names.buf, names.n, names.tex, names.lay );
 	F.pending = true;
 	return true;
 }
@@ -6066,6 +6283,9 @@ FxStat takeCloudStat()
 
 #include "features/vkframe/vkfardots.inc"  // lane VKFAR1 (row G3): the far bulb dots on the view
 #include "features/vkframe/vkfarcards.inc"  // lane VKFAR1 round 2: the far cards' inputs
+#include "features/vkframe/vkfarcardsdraw.inc"  // lane VKFAR2: the far cards drawn on the view
+#include "features/vkframe/vkfogbloom.inc"  // lane VKFAR2 (row P4b): the fog bloom's own pass
+#include "features/vkframe/vkcloudfront.inc"  // lane VKFAR2 (row P8): the clouds in front of the scene
 
 // lane VKLIGHT1: AO, the contact shadow lines and the SSGI cast as compute on the present device (vkpresent.h LightRun)
 namespace
@@ -8201,6 +8421,10 @@ ObjStat takeObjStat()
 
 #include "features/vkframe/vkbindless.inc"  // lane VKOBJ2: the bindless maps as descriptor indexing
 #include "features/vkframe/vkobjtex.inc"  // lane VKOBJ3: the texture cache's BC twins and their handles in the table
+#include "features/vkframe/vkskybody.inc"  // lane VKFAR2 G2: the stars and the moon globe in the sky's pass
+#include "features/vkframe/vkfog.inc"  // lane VKFAR2: the air's integrate (the froxel volume) on the view
+#include "features/vkframe/vkflare.inc"  // lane VKFAR2 P9: the lens-flare sprites in the deferred tone pass
+#include "features/vkframe/vkpost7.inc"  // lane VKFAR2 P7: DoF, motion blur and object blur in the deferred tone pass
 
 namespace
 {
@@ -8607,6 +8831,41 @@ void objSay( bool wanted, const char * glWhy )
 	qInfo().noquote() << line;
 }
 
+// lane VKFAR2: the air's integrate's route line, one a 5 s window while it is wanted on Vulkan
+void fogSay( bool wanted, const char * glWhy )
+{
+	static QString said;
+	static double at = 0.0;
+	const QString head = QStringLiteral( "vk fog: " );
+	if ( !wanted ) {
+		const QString line = head + QStringLiteral( "integrate on GL (%1)" ).arg( QString::fromUtf8( glWhy ? glWhy : "" ) );
+		if ( line != said ) {
+			said = line;
+			qInfo().noquote() << line;
+		}
+		return;
+	}
+	const double now = nowMs();
+	if ( now - at < 5000.0 && said.startsWith( head + QStringLiteral( "integrate on V" ) ) )
+		return;
+	at = now;
+	const FogStat st = takeFogStat();
+	QString line;
+	if ( st.runs > 0 )
+		line = head + QStringLiteral( "integrate on Vulkan %1 crossings (%2 grid dispatches, the volume shared; "
+			"%3 pipelines built in %4 ms; drawing thread %5 ms, max %6)" )
+			.arg( st.runs ).arg( st.dispatches ).arg( st.pipelines ).arg( st.buildMs, 0, 'f', 1 )
+			.arg( st.cpuMs / st.runs, 0, 'f', 3 ).arg( st.maxMs, 0, 'f', 3 );
+	else
+		line = head + QStringLiteral( "integrate on Vulkan wanted, 0 frames run" );
+	if ( st.gl > 0 )
+		line += QStringLiteral( ", on GL %1 frames (last: %2)" ).arg( st.gl ).arg( QString::fromStdString( st.glWhy ) );
+	if ( st.fails > 0 )
+		line += QStringLiteral( ", %1 refused to GL (last: %2)" ).arg( st.fails ).arg( QString::fromStdString( st.failWhy ) );
+	said = line;
+	qInfo().noquote() << line;
+}
+
 bool frame( QOpenGLWindow * w, const std::function<void()> & paint )
 {
 	static QString said;
@@ -8796,7 +9055,7 @@ bool frame( QOpenGLWindow * w, const std::function<void()> & paint )
 				sayRoute( QStringLiteral( "vk view, %1 of %2 frames: GL draws the view into the present device's images (%3x%4 "
 					"MS%5 RGBA8 + D24S8, %6 views, %7 MB, made in %8 ms), the worker resolves on Vulkan (no GL blit: drawing "
 					"thread present %9 ms); %10 views still read when GL wanted them (wait %11 ms); bakert hop none (the view is "
-					"made on the present device); %12; still on GL into the view: the fog bloom's tone (and the Fusion "
+					"made on the present device); %12; still on GL into the view: the tone when the fog bloom drew on GL (and the Fusion "
 					"Shaders bloom's mode 3 under WW_VKVIEW_BLOOM_RED=1), clouds in front (%13), P7, lens flare, overlays + QPainter (the overlay target is the view); %14" )
 					.arg( winView ).arg( winN ).arg( vs.w ).arg( vs.h ).arg( vs.samples ).arg( vs.views ).arg( vs.mb, 0, 'f', 1 )
 					.arg( vs.makeMs, 0, 'f', 1 ).arg( winSum / winN, 0, 'f', 3 ).arg( vs.busy ).arg( vs.waitMs, 0, 'f', 3 )

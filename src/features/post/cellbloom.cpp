@@ -592,17 +592,31 @@ bool wwCellBloomRun( Scene * scene, unsigned hdrColor, unsigned ds, int W, int H
 	BloomGpu & g = bloomGpus()[r];
 	/* lane VKBLOOM1: the tone map runs on the present device (cellhdr.cpp allowed it) and the frame is its shared one: the
 	 * whole chain goes into that pass (WwVkPresent::ToneBloom, the same kernels as runBloom), nothing on GL here. The
-	 * dump, the combine's red, Bloom Mip's wide red and the fog bloom keep GL's chain. Red WW_VKVIEW_BLOOM_RED=1. */
+	 * dump, the combine's red and Bloom Mip's wide red keep GL's chain. Lane VKFAR2: with the fog bloom on it goes too
+	 * when the fog bloom drew on the present device last frame (it runs after this; on GL the tone map is GL's). Not with
+	 * Bloom Mip under the fog bloom: cell_hdr.frag then reads the top's mips from glGenerateMipmap, and the driver's mips
+	 * of a level with an odd side are not reproducible (an area filter on the odd side, the even side one texel left at
+	 * some sizes only: 80x45, 240x135 yes, 80x7, 64x45 no), so the tone pass's mips (ToneBloom::lod) differ there
+	 * (tests/vkframe/toneview.sh BOTH arm, measured, not routed). Red WW_VKVIEW_BLOOM_RED=1. */
 	const float perPixelPlan = !wwLookOn( WwLook::BloomMip ) ? 0.0f
 		: wwEnvStr( "WW_CELL_BLOOM_PERPIX_RED" ) == QLatin1String( "wide" ) ? -1.0f : 1.0f;
 	const float dispersionPlan = set.glare ? std::clamp( set.glareDispersion, 0.0f, 2.0f ) : 0.0f;
+	const bool fogOn = wwCellFogBloomOn();
+	const bool fogMips = fogOn && perPixelPlan > 0.0f;
+	static bool saidMips = false;
+	if ( s.presentAllow && fogMips != saidMips ) {
+		saidMips = fogMips;
+		if ( fogMips )
+			qInfo().noquote() << "cell bloom: fo4cs stays on GL: Bloom Mip under the fog bloom reads GL's driver mips";
+	}
 	if ( s.presentAllow && wwEnvInt( "WW_VKVIEW_BLOOM_RED" ) != 1 && samples > 1 && s.dumpDir.isEmpty() && !s.combRed
-		&& dispersionPlan > 0.0f && perPixelPlan >= 0.0f && !wwCellFogBloomOn() && mipCount <= WwVkPresent::kToneBloomMips
-		&& WwVkPresent::toneFrameIs( hdrColor ) && WwVkPresent::toneBloomReady() ) {
+		&& dispersionPlan > 0.0f && perPixelPlan >= 0.0f && ( !fogOn || wwCellFogBloomVkLast() ) && !fogMips
+		&& mipCount <= WwVkPresent::kToneBloomMips && WwVkPresent::toneFrameIs( hdrColor ) && WwVkPresent::toneBloomReady() ) {
 		WwVkPresent::ToneBloom & j = s.presentJob;
 		s.ecK = wwPhysBloomK();
 		const bool ec = s.ecK > 0.0f;
 		j = WwVkPresent::ToneBloom();
+		j.perPixel = perPixelPlan;
 		j.mips = mipCount;
 		for ( int i = 0; i < mipCount; i++ ) {
 			j.dims[i][0] = dims[i][0];
@@ -672,9 +686,10 @@ bool wwCellBloomRun( Scene * scene, unsigned hdrColor, unsigned ds, int W, int H
 		s.perPixel = perPixelPlan;
 		s.finalWeight = finalWeightOf( s, set, weight, mipCount, ec );
 		note( s, QStringLiteral( "fo4cs on the present device, in the tone pass: mips=%1 (%2x%3..%4x%5) threshold=%6 knee=%7 radius=%8 "
-			"weight=%9 hold=%10" ).arg( mipCount ).arg( dims[0][0] ).arg( dims[0][1] ).arg( dims[mipCount - 1][0] ).arg( dims[mipCount - 1][1] )
+			"weight=%9 hold=%10 fog=%11" ).arg( mipCount ).arg( dims[0][0] ).arg( dims[0][1] ).arg( dims[mipCount - 1][0] ).arg( dims[mipCount - 1][1] )
 			.arg( f6( j.thr ), f6( j.knee ), f6( j.radius ), f6( s.finalWeight ),
-				j.hold ? QStringLiteral( "%1/8" ).arg( j.holdN ) : QStringLiteral( "off" ) ) );
+				j.hold ? QStringLiteral( "%1/8" ).arg( j.holdN ) : QStringLiteral( "off" ),
+				fogOn ? QStringLiteral( "on (its target per sample)" ) : QStringLiteral( "off" ) ) );
 		return false;	// GL drew nothing: cellhdr.cpp hands the job to toneRun
 	}
 	if ( g.ringPresent ) {	// back on GL: its own ring counts from 1

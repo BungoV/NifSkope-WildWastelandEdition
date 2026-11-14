@@ -532,7 +532,7 @@ void frag_main()
 	 * has the same size). */
 	float2  stipTexels = float2( textureSize( ColourSheet, 0 ) ) * frameRect[0].zw;
 	float2  stipCell   = floor( cardQuadUv * stipTexels );
-	float stipNoise  = frac( sin( dot( stipCell, float2( 12.9898, 78.233 ) ) ) * 43758.5453 );
+	float stipNoise  = frac( sin( mad( stipCell.y, 78.233, stipCell.x * 12.9898 ) ) * 43758.5453 );	// NV GL's order: the dot y first (lane VKFAR2)
 
 	for ( int k = 0; k < 3; k++ ) {
 		if ( k >= frameCount )

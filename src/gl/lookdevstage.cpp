@@ -47,6 +47,7 @@ BSD License - see nifskope.h
 #include "features/exposure/physunits.h"	// lane PHYSUNITS1: real units
 #include "features/exposure/physcamera.h"	// MODULES1 R6-12: the camera's adaptation floor (the gameplay moon)
 #include "features/weather/wxoverride.h"	// lane MODULES1 item 12: live weather overrides
+#include "features/vkframe/vkskybody.h"	// lane VKFAR2 G2: the stars and the moon globe in the sky's Vulkan pass
 
 #include <QBuffer>
 #include <QDir>
@@ -57,6 +58,7 @@ BSD License - see nifskope.h
 #include <QDebug>
 #include <QMap>
 #include <QMutex>
+#include <QOpenGLContext>
 #include <atomic>
 #include <QRegularExpression>
 #include <QSettings>
@@ -64,8 +66,11 @@ BSD License - see nifskope.h
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <cstring>
+#include <iterator>
 #include <limits>
 
+const void * wwGlobalUboBytes( const NifSkopeOpenGLContext * ctx );	// glcontext.cpp: b0's bytes (lane VKAIR1)
 bool wwAtmoGiSkyAxes( const float sunTo[3], float out[6][3], float * trans = nullptr, float hKm = 0.002f );	// atmosphere.cpp
 
 namespace
@@ -3037,6 +3042,128 @@ void skyState( Renderer * r, bool blend, bool additive )
 	}
 }
 
+/* lane VKFAR2 G2: the stars and the moon globe join the sky's held Vulkan pass (features/vkframe/vkskybody.h). A body that
+ * cannot join sends the held crossing first and draws on GL after it; a crossing that fails draws the sky and the joined
+ * bodies again on GL, in GL's order. Red WW_VKVIEW_SKYBODY_RED=1: the bodies on GL, the sky's crossing at once. */
+struct SkyBodyVk
+{
+	bool gl = false;                   // the redraw after a failed crossing: every body on GL
+	bool stars = false, moon = false;  // joined this frame
+	const SkyFrame * f = nullptr;      // the backdrop's frame (the redraw's)
+	float moonMul = 1.0f;
+};
+
+SkyBodyVk & skyBodyVk()
+{
+	static SkyBodyVk b;
+	return b;
+}
+
+WwVkPresent::GlProc skyGlProc()
+{
+	return []( const char * n ) -> void * {
+		QOpenGLContext * gc = QOpenGLContext::currentContext();
+		return gc ? reinterpret_cast<void *>( gc->getProcAddress( n ) ) : nullptr;
+	};
+}
+
+void drawStars( Scene * scene, const SkyFrame & f, QStringList & drew );
+bool drawMoonGlobe( Scene * scene, const SkyFrame & f, float mul, QStringList & drew );
+
+/* the held crossing goes (none held: nothing to do). With also (1 the stars, 2 the moon) the body refused now joins the
+ * redraw. True: the crossing failed and the sky and the bodies were drawn again on GL (the caller draws nothing more) */
+bool skyBodySettle( Scene * scene, int also = 0 )
+{
+	SkyBodyVk & b = skyBodyVk();
+	std::string why;
+	bool redrew = false;
+	if ( !WwVkPresent::skyBodiesFlush( why ) ) {
+		wwAtmoSkyGlAgain( scene->renderer );
+		if ( b.f ) {  // set by the body that joined or refused this frame
+			b.gl = true;
+			QStringList scratch;
+			if ( b.stars || ( also & 1 ) )
+				drawStars( scene, *b.f, scratch );
+			if ( b.moon || ( also & 2 ) )
+				drawMoonGlobe( scene, *b.f, b.moonMul, scratch );
+			b.gl = false;
+			redrew = also != 0;
+		}
+	}
+	b.stars = b.moon = false;
+	b.f = nullptr;
+	return redrew;
+}
+
+// 1 joined, 0 GL draws it now (its state intact), 2 drawn already (a failed crossing's redraw)
+int skyStarsJoin( Scene * scene, NifSkopeOpenGLContext::Program * prog, const SkyFrame & f, int nv, const float * pos,
+	const float * col, const float * uv, int ni, const std::uint16_t * idx )
+{
+	SkyBodyVk & b = skyBodyVk();
+	if ( b.gl || !WwVkPresent::skyBodiesHeld() )
+		return 0;
+	b.f = &f;
+	Renderer * r = scene->renderer;
+	static WwVkPresent::SkyStars s;
+	s = WwVkPresent::SkyStars();
+	const void * ubo = wwGlobalUboBytes( r );
+	std::string why;
+	bool ok = false;
+	if ( ubo ) {
+		s.nv = nv;
+		s.ni = ni;
+		s.pos = pos;
+		s.col = col;
+		s.uv = uv;
+		s.idx = idx;
+		static const char * const kTex[WwVkPresent::kSkyStarsTex] = { "Tex", "Tex2", "ldTrans" };
+		for ( int k = 0; k < WwVkPresent::kSkyStarsTex; k++ )
+			s.tex[k] = WwVkPresent::skyBodyUnitTex( r->fn, prog->id, kTex[k] );
+		glGetIntegerv( GL_VIEWPORT, s.vp );
+		std::memcpy( s.global, ubo, sizeof( s.global ) );
+		WwVkPresent::fxPack( r->fn, prog->id, WwVkPresent::kT_skyStarsVs, int( std::size( WwVkPresent::kT_skyStarsVs ) ), s.vs );
+		WwVkPresent::fxPack( r->fn, prog->id, WwVkPresent::kT_skyStarsPs, int( std::size( WwVkPresent::kT_skyStarsPs ) ), s.ps );
+		s.gp = skyGlProc();
+		ok = WwVkPresent::skyStars( s, why );
+	}
+	if ( ok ) {
+		b.stars = true;
+		return 1;
+	}
+	return skyBodySettle( scene, 1 ) ? 2 : 0;
+}
+
+int skyMoonJoin( Scene * scene, NifSkopeOpenGLContext::Program * prog, const SkyFrame & f, float mul )
+{
+	SkyBodyVk & b = skyBodyVk();
+	if ( b.gl || !WwVkPresent::skyBodiesHeld() )
+		return 0;
+	b.f = &f;
+	b.moonMul = mul;
+	Renderer * r = scene->renderer;
+	static WwVkPresent::SkyMoon m;
+	m = WwVkPresent::SkyMoon();
+	const void * ubo = wwGlobalUboBytes( r );
+	std::string why;
+	bool ok = false;
+	if ( ubo ) {
+		static const char * const kTex[WwVkPresent::kSkyMoonTex] = { "atAlbedo", "atRelief", "atTransTex", "atSunView", "atMoonView" };
+		for ( int k = 0; k < WwVkPresent::kSkyMoonTex; k++ )
+			m.tex[k] = WwVkPresent::skyBodyUnitTex( r->fn, prog->id, kTex[k] );
+		glGetIntegerv( GL_VIEWPORT, m.vp );
+		std::memcpy( m.global, ubo, sizeof( m.global ) );
+		WwVkPresent::fxPack( r->fn, prog->id, WwVkPresent::kT_skyMoonVs, int( std::size( WwVkPresent::kT_skyMoonVs ) ), m.vs );
+		WwVkPresent::fxPack( r->fn, prog->id, WwVkPresent::kT_skyMoonPs, int( std::size( WwVkPresent::kT_skyMoonPs ) ), m.ps );
+		m.gp = skyGlProc();
+		ok = WwVkPresent::skyMoon( m, why );
+	}
+	if ( ok ) {
+		b.moon = true;
+		return 1;
+	}
+	return skyBodySettle( scene, 2 ) ? 2 : 0;
+}
+
 QString f3( float v )
 {
 	return QString::number( double( v ), 'f', 3 );
@@ -3322,7 +3449,9 @@ bool drawMoonGlobe( Scene * scene, const SkyFrame & f, float mul, QStringList & 
 	static const float quad[12] = { -1, -1, 0, 1, -1, 0, -1, 1, 0, 1, 1, 0 };
 	static const std::uint16_t idx[6] = { 0, 1, 2, 2, 1, 3 };
 	const float * attrs = quad;
-	r->drawShape( 4, 3, 6, GL_TRIANGLES, GL_UNSIGNED_SHORT, &attrs, idx );
+	// lane VKFAR2 G2: in the sky's held Vulkan pass when it can join (0: GL draws it here)
+	if ( skyMoonJoin( scene, prog, f, mul ) == 0 )
+		r->drawShape( 4, 3, 6, GL_TRIANGLES, GL_UNSIGNED_SHORT, &attrs, idx );
 	r->stopProgram();
 	for ( int u = 4; u >= 0; u-- ) {
 		r->fn->glActiveTexture( GLenum( GL_TEXTURE0 + u ) );
@@ -3773,7 +3902,9 @@ void drawStars( Scene * scene, const SkyFrame & f, QStringList & drew )
 	const float * attrs[8] = { pos.constData(), colExt.isEmpty() ? m->col.constData() : colExt.constData(), nullptr,
 		nullptr, nullptr, nullptr, nullptr,
 		m->uv.constData() };
-	r->drawShape( m->nv, 0x20000043ULL, unsigned( m->idx.size() ), GL_TRIANGLES, GL_UNSIGNED_SHORT, attrs, m->idx.constData() );
+	// lane VKFAR2 G2: in the sky's held Vulkan pass when it can join (0: GL draws them here)
+	if ( skyStarsJoin( scene, prog, f, int( m->nv ), attrs[0], attrs[1], attrs[7], int( m->idx.size() ), m->idx.constData() ) == 0 )
+		r->drawShape( m->nv, 0x20000043ULL, unsigned( m->idx.size() ), GL_TRIANGLES, GL_UNSIGNED_SHORT, attrs, m->idx.constData() );
 	r->stopProgram();
 	drew << QString( "stars:%1(alpha=%2,turn=%3deg,level=%4)" ).arg( path, f3( a ) ).arg( double( ang ) * 360.0 / kTau, 0, 'f', 1 )
 		.arg( double( ( 0.2126f * f.stars[0] + 0.7152f * f.stars[1] + 0.0722f * f.stars[2] ) * starK * f.skyScale ), 0, 'g', 3 );
@@ -4007,7 +4138,10 @@ bool wwLookdevDrawBackground( Scene * scene )
 		// the dome replaces the cube; a dome that will not resolve falls back to the cube, by name
 		bool dome = false, physical = false;
 		if ( sx.sky ) {
+			// lane VKFAR2 G2: the stars and the globe may join the sky's Vulkan pass (its crossing held until skyBodySettle)
+			WwVkPresent::skyBodiesArm( WwVkPresent::shareWanted( "WW_VKVIEW_SKYBODY_RED" ) );
 			physical = drawAtmo( scene, drew );	// lane ATMO1: Physical Sky Off = the dome below, as before
+			WwVkPresent::skyBodiesArm( false );	// skyRun took it, or the sky stayed on GL
 			// the dome is never fogged (ruling); red "fogsky": Fog ON darkens the dome, the sky gate must fail
 			dome = physical || drawDome( scene, f, ( sx.fog && wwLookdevRed( "fogsky" ) ) ? 0.97f : 1.0f, drew );
 		}
@@ -4027,7 +4161,9 @@ bool wwLookdevDrawBackground( Scene * scene )
 			drawDome( scene, f, 0.02f, drew );
 		const float moonMul = sx.moon ? 1.0f : ( wwLookdevRed( "moonleak" ) ? 0.02f : 0.0f );
 		// lane SKYDISC1: the Physical Sky's moon is our globe; missing loose files = the vanilla moon, named in the line
-		if ( moonMul > 0.0f && !( physical && wwAtmoDiscs() && drawMoonGlobe( scene, f, moonMul, drew ) ) )
+		const bool globe = moonMul > 0.0f && physical && wwAtmoDiscs() && drawMoonGlobe( scene, f, moonMul, drew );
+		skyBodySettle( scene );	// lane VKFAR2 G2: the held sky crossing goes before anything else draws
+		if ( moonMul > 0.0f && !globe )
 			drawMoon( scene, f, moonMul, drew );
 		// lane ATMO1: the physical sky draws its own disc; glow comes from the bloom (post), never a drawn glare
 		const float sunMul = physical ? 0.0f : sx.sun ? 1.0f : ( wwLookdevRed( "sunleak" ) ? 0.02f : 0.0f );
