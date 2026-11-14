@@ -1,3 +1,16 @@
+## VKFAR3 G3 (2026-11-14): the near far ground (ring 0's live terrain) draws on Vulkan (WW_VKVIEW=1)
+
+Changed, not built, not checked live.
+
+- With Show > Far ground at "Live, shader decals" (the default) and sun shadows on, ring 0's terrain shapes
+  (fo4_cellcsmfgl) draw on the Vulkan view: the grid of ground layers, the layer textures and the shader decals are
+  copied to the present device, one draw a shape.
+- Red WW_VKVIEW_FARGROUND_RED=1 keeps GL's draw. A `vk farground:` line counts shapes drawn on Vulkan and on GL and
+  names why GL kept a shape: Baked sheet, no sun shadows (fo4_cellfgl), "Live, cached pages", the oldpages red.
+- Offline gate tests/vkframe/fargrounddraw.sh against GL's own program: 2 seeds, depth EXACT, colour inside the bar
+  (max rel 0.0088), every red FAILS (offset, plain samplers, cull, depth test, polygon offset, first index, grid and
+  decals rewritten after GL's draw).
+
 ## VKFAR2 L8 slice 1 (2026-11-14): rain / snow pass for the Vulkan view, not wired in (gate red)
 
 Changed, not built, not checked live. Nothing in the app calls it yet, so no frame changes.

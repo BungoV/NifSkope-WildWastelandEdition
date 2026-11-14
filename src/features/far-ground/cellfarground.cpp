@@ -17,6 +17,9 @@ BSD License - see nifskope.h
 #include "features/far-lod/lodgen.h"
 #include "features/far-lod/lodtfile.h"
 #include "features/far-lod/loddecal.h"
+#include "features/exposure/cellhdr.h"	// lane VKFAR3: the shared tone frame
+#include "features/vkframe/vkpresent.h"	// lane VKFAR3: ring 0 on the Vulkan view (row G3)
+#include "features/vkframe/vkwater.h"
 
 #include <QElapsedTimer>
 #include <QHash>
@@ -28,7 +31,11 @@ BSD License - see nifskope.h
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <string>
+#include <string_view>
 #include <vector>
+
+bool wwFogLeakShaderDefine();	// src/features/air/cellvolair.cpp: WW_CELL_FOGLEAK in the cell programs
 
 namespace
 {
@@ -1397,6 +1404,73 @@ bool wantsFrames( Scene * scene )
 {
 	const auto it = docs().constFind( scene ? scene->nifModel : nullptr );
 	return it != docs().constEnd() && it->gpu.ready == 3 && it->gpu.busy;
+}
+
+bool vkDraw( Scene * scene, NifSkopeOpenGLContext::Program * prog, int block, int indexCount, long long idxOff, int baseVertex )
+{
+	if ( !scene || !scene->renderer || !prog || !ring0( scene->nifModel, block ) )
+		return false;
+	if ( !WwVkPresent::shareWanted( "WW_VKVIEW_FARGROUND_RED" ) ) {
+		WwVkPresent::farGroundSay( false, "red WW_VKVIEW_FARGROUND_RED=1 or the view not on Vulkan" );
+		return false;
+	}
+	auto fn = scene->renderer->fn;
+	const std::string_view name( prog->name );
+	const char * no = nullptr;
+	unsigned int color = 0;
+	if ( name == "fo4_cellcsmfgc.prog" || name == "fo4_cellfgc.prog" )
+		no = "red oldpages (fo4_cellcsmfgc, FARDRAW1's decal-only pages: no Vulkan twin)";
+	else if ( name == "fo4_cellcsmfgp.prog" || name == "fo4_cellfgp.prog" )
+		no = "Live, cached pages (fo4_cellcsmfgp: no Vulkan twin yet)";
+	else if ( name != "fo4_cellcsmfgl.prog" )
+		no = "not the shader-decals twin (Baked sheet, or no sun shadows: fo4_cellcsmfgl.prog only)";
+	else if ( prog->wwBindless )
+		no = "a bindless program (no Vulkan twin)";
+	else if ( !wwFogLeakShaderDefine() )
+		no = "WW_CELL_FOGLEAK=0: GL's program is not the Vulkan twin";
+	else if ( !prog->wwShadowFrame )
+		no = "WW_FRAME_UBO off: GL's program is not the Vulkan twin";
+	else if ( idxOff & 1 )
+		no = "an odd element offset";
+	else {
+		GLint drawFb = 0;
+		fn->glGetIntegerv( GL_DRAW_FRAMEBUFFER_BINDING, &drawFb );
+		color = wwCellHdrVkToneColor( GLuint( drawFb ) );
+		if ( !color )
+			no = "the draw target is not the shared tone frame";
+	}
+	if ( !no ) {
+		GLint cur = 0;
+		fn->glGetIntegerv( GL_CURRENT_PROGRAM, &cur );
+		if ( GLuint( cur ) != prog->id )
+			no = "another program at the shape's draw";
+	}
+	if ( no ) {
+		WwVkPresent::farGroundOnGl( no );
+		WwVkPresent::farGroundSay( true, nullptr );
+		return false;
+	}
+	static WwVkPresent::WaterRun r;
+	static char keys[192];	// the twins' keys (key + slot index)
+	r = WwVkPresent::WaterRun();
+	WwVkPresent::farGroundStateOf( fn, prog->id, r );
+	wwCellHdrFrameSize( r.w, r.h );
+	r.color = color;
+	WwVkPresent::WaterCmd c;	// the shape's one range as the rings' command
+	c.count = std::uint32_t( indexCount );
+	c.instanceCount = 1;
+	c.firstIndex = std::uint32_t( idxOff / 2 );
+	c.baseVertex = baseVertex;
+	r.cmds.push_back( c );
+	r.key = reinterpret_cast<std::uintptr_t>( keys );
+	std::string why;
+	const bool ok = WwVkPresent::farGroundRun( r, why );
+	if ( !ok )
+		WwVkPresent::farGroundOnGl( why.c_str() );
+	else
+		PassTime::countDraw( 1 );
+	WwVkPresent::farGroundSay( true, nullptr );
+	return ok;
 }
 
 }

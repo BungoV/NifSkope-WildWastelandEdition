@@ -196,4 +196,20 @@ fxs precip_view_cs weather/precip_view_cs
 fxv precip_view_vs weather/precip_view_vs
 fx precip_view_ps weather/precip_view_ps
 ls -la precip_view_cs.spv.h precip_view_vs.spv.h precip_view_ps.spv.h
+# lane VKFAR3 (G3): the far ground's ring-0 terrain (vkfarground.inc). The pixel stage is fo4_cellcsmfgl's readable source under
+# the app's variant (FOGLEAK + FRAME_UBO) on fxk()'s shifts: images 64..126, samplers 128..190. Its vertex stage is
+# water_view_vs's source with t at 200 and s at 216, past both (every declared binding is in the merged set, used or not)
+fxg() {
+	"$DXC" -spirv -fspv-target-env=vulkan1.2 -T ps_6_0 -E main -fvk-b-shift 0 0 -fvk-t-shift 64 0 -fvk-s-shift 128 0 -fvk-u-shift 192 0 -fspv-preserve-bindings -D WW_CELL_FOGLEAK=1 -D WW_FRAME_UBO=1 -Fo "$1.spv" "$(cygpath -m "$ROOT/res/shaders/hlsl/$2.hlsl" 2>/dev/null || echo "$ROOT/res/shaders/hlsl/$2.hlsl")"
+	python -I "$ROOT/tools/spv_header.py" "$1.spv" "vkframe_$1_spv" "$1.spv.h" < /dev/null
+	rm -f "$1.spv"
+}
+fxg fargnd_view_ps far-ground/fo4_cellcsmfgl_ps
+fxt() {
+	"$DXC" -spirv -fspv-target-env=vulkan1.2 -T vs_6_0 -E main -fvk-b-shift 256 0 -fvk-t-shift 200 0 -fvk-s-shift 216 0 -fvk-u-shift 240 0 -fspv-preserve-bindings -Fo "$1.spv" "$(cygpath -m "$ROOT/res/shaders/hlsl/$2.hlsl" 2>/dev/null || echo "$ROOT/res/shaders/hlsl/$2.hlsl")"
+	python -I "$ROOT/tools/spv_header.py" "$1.spv" "vkframe_$1_spv" "$1.spv.h" < /dev/null
+	rm -f "$1.spv"
+}
+fxt fargnd_view_vs core/water_view_vs
+ls -la fargnd_view_ps.spv.h fargnd_view_vs.spv.h
 ls -la csm_view_vs.spv.h obj_depth_vs.spv.h sky_view_ps.spv.h bloom_down.spv.h bloom_hold.spv.h bloom_up.spv.h bloom_src.spv.h bloom_comb.spv.h bloom_back.spv.h tonemap.spv.h measure_q.spv.h tone_view_vs.spv.h tone_view_ps.spv.h taa_view_mv_cs.spv.h taa_view_resolve_cs.spv.h taa_view_rcas_ps.spv.h

@@ -81,6 +81,7 @@ struct TwinSpec
 	VkDeviceSize constAt, hostBytes;
 	bool rings;
 	int kind;  //!< fxWork's kind
+	bool psGlobalB0 = false;  //!< lane VKFAR3: the pixel stage's globalUniforms at b0, wwShadowFrame at b1 (the far ground's)
 };
 const TwinSpec kWaterSpec { "water", vkframe_water_view_vs_spv, sizeof( vkframe_water_view_vs_spv ), vkframe_water_view_ps_spv,
 	sizeof( vkframe_water_view_ps_spv ), kWaterImg, sizeof( kWaterImg ) / sizeof( kWaterImg[0] ), kWaterInts,
@@ -138,6 +139,7 @@ WaterDraw & farLodD()
 	static WaterDraw D;
 	return D;
 }
+WaterDraw & farGroundD();  // lane VKFAR3 (vkfarground.inc): fxWork's kind 9
 
 VkFormat waterAttrFormat( const WwVkPresent::WaterAttrib & a )
 {
@@ -575,7 +577,7 @@ bool waterRecord( std::string & why )
 {
 	Vk & v = vk();
 	Fx & F = fx();
-	WaterDraw & D = F.kind == 5 ? farLodD() : waterD();
+	WaterDraw & D = F.kind == 5 ? farLodD() : F.kind == 9 ? farGroundD() : waterD();
 	if ( !F.fbAir || !D.pipe ) {
 		why = "no framebuffer / pipeline for the water draw";
 		return false;
@@ -603,7 +605,7 @@ bool waterRecord( std::string & why )
 // shutdown (after fxDrop waited the device): the exported copy is GL's name too
 void waterDrop()
 {
-	for ( WaterDraw * D : { &waterD(), &farLodD() } ) {
+	for ( WaterDraw * D : { &waterD(), &farLodD(), &farGroundD() } ) {
 		if ( !D->geo.buf && !D->host.buf )
 			continue;
 		vk().vkDeviceWaitIdle( vk().dev );
@@ -898,8 +900,9 @@ static bool twinRun( WaterDraw & D, const TwinSpec & P, const WaterRun & r, std:
 		x.descriptorCount = 1;
 		if ( b.kind == 0 ) {
 			x.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-			// vs blocks at 256 + n (fxw's b-shift), ps blocks at n
-			const int k = ( b.binding == 257 || b.binding == 1 ) ? 0 : b.binding == 0 ? 1 : b.binding == 256 ? 2 : -1;
+			// vs blocks at 256 + n (fxw's b-shift), ps blocks at n (globalUniforms b1, wwShadowFrame b0; psGlobalB0: swapped)
+			const std::uint32_t psGlobal = P.psGlobalB0 ? 0 : 1, psShadow = P.psGlobalB0 ? 1 : 0;
+			const int k = ( b.binding == 257 || b.binding == psGlobal ) ? 0 : b.binding == psShadow ? 1 : b.binding == 256 ? 2 : -1;
 			if ( k >= 0 )
 				bi[i] = uboHost[k] ? VkDescriptorBufferInfo { D.host.buf, kWaterZeroAt, uboNeed[k] }
 					: VkDescriptorBufferInfo { D.geo.buf, uboAt[k], uboNeed[k] };
