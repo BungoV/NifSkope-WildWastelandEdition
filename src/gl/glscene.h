@@ -438,6 +438,7 @@ public:
 	unsigned int fxDepthTexId = 0;
 	unsigned int fxDepthFbo = 0;
 	int fxDepthTexW = 0, fxDepthTexH = 0;
+	bool fxDepthShared = false;	//!< lane VKOBJ5: fxDepthTexId is a shared target (WW_VKOBJ_SHADE: the particles' pixel twin reads it)
 	int fxDepthState = 0;   //!< 0 not grabbed this second pass, 1 grabbed, -1 the blit failed (no soft fade)
 	int fxDepthPass = -1;   //!< the second pass fxDepthState belongs to
 	static inline int fxDepthPassNow = 0;	//!< bumped by drawDeferredShapes (static: it draws every scene's pass)

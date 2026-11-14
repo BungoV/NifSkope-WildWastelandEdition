@@ -286,7 +286,7 @@ namespace
 {
 std::vector<Row> vkRows;  // lane VKOBJ3: the frame's rows, translated by the Vulkan table at frame()
 bool vkTexEver = false;
-std::string vkLine, vkLoadLine, vkShadeLine, vkCellLine, vkPbrmLine;
+std::string vkLine, vkLoadLine, vkShadeLine, vkCellLine, vkPbrmLine, vkPfxLine;
 
 void vkRowCensus()
 {
@@ -718,6 +718,7 @@ bool rtddgiRestirGiShaderDefine();  // WW_CELL_RESTIRGI
 bool wwFogLeakShaderDefine();       // src/features/air/cellvolair.cpp: WW_CELL_FOGLEAK
 int wwCellGiVis();                  // src/gl/celllights.cpp: 1 = WW_CELL_GI_MARCH
 bool wwCellPrtOn();                 // WW_CELL_PRT
+bool wwAirZoneShaderDefine();       // src/features/air/cellairzone.cpp: WW_CELL_AIRZONE (lane VKOBJ5: the particle twin's)
 namespace WwBl
 {
 namespace
@@ -776,6 +777,58 @@ bool vkCellDraw( const NifSkopeOpenGLContext::Program * prog, const GLsizei * co
 		( pbrm ? pbrmDrawn : cellDrawn )++;
 	else
 		lastWhy = why;
+	return drew;
+}
+
+namespace
+{
+long long pfxTried = 0, pfxDrawn = 0, pfxPoints = 0;	// lane VKOBJ5: particles_cell systems (vkPfxDraw, `vk objpfx:`)
+std::string pfxWhy;
+}  // namespace
+
+bool vkPfxDraw( const NifSkopeOpenGLContext::Program * prog, const float * pos, const float * col, const float * uv, const float * angle,
+	const float * size, std::size_t n )
+{
+	QOpenGLContext * qc = QOpenGLContext::currentContext();
+	if ( !vkShadeOn() || !prog || !n || !pos || !qc || std::string_view( prog->name ) != "particles_cell.prog" )
+		return false;
+	pfxTried++;
+	GLboolean mask[4] = {};
+	qc->functions()->glGetBooleanv( GL_COLOR_WRITEMASK, mask );
+	// the twin is particles_cell.frag@WW_CELL_AIRZONE+WW_CELL_FOGLEAK+WW_FRAME_UBO (vkframe_spirv.sh fxp)
+	const char * no = !wwFogLeakShaderDefine() ? "WW_CELL_FOGLEAK=0: GL's program is not the Vulkan twin"
+		: !wwAirZoneShaderDefine() ? "WW_CELL_AIRZONE off: GL's program is not the Vulkan twin"
+		: !prog->wwShadowFrame ? "WW_FRAME_UBO off: GL's program is not the Vulkan twin"
+		: wwCellGiVis() == 1 ? "WW_CELL_GI_MARCH in GL's program: no Vulkan twin"
+		: wwCellPrtOn() ? "WW_CELL_PRT in GL's program: no Vulkan twin"
+		: rtddgiCellShaderDefine() ? "WW_CELL_RTDDGI in GL's program: no Vulkan twin"
+		: rtddgiRestirShaderDefine() ? "WW_CELL_RESTIR in GL's program: no Vulkan twin"
+		: rtddgiRestirGiShaderDefine() ? "WW_CELL_RESTIRGI in GL's program: no Vulkan twin"
+		: !( mask[0] && mask[1] && mask[2] && mask[3] ) ? "a colour write mask (the imagespace's measure pass)" : nullptr;
+	if ( no ) {
+		WwVkPresent::objBlOnGl( no );
+		pfxWhy = no;
+		return false;
+	}
+	WW_SWITCH_STATIC( int, red, WwVkPresent::objPfxRed( wwEnv( "WW_VKVIEW_OBJPFX_RED" ).trimmed().toStdString().c_str() ) );
+	WwVkPresent::ObjPfxShade s;
+	s.prog = prog->id;
+	s.pos = pos;
+	s.col = col;
+	s.uv = uv;
+	s.angle = angle;
+	s.size = size;
+	s.n = n;
+	s.red = red;
+	std::string why;
+	const bool drew = WwVkPresent::objPfxShade( []( const char * name ) -> void * {
+		return reinterpret_cast<void *>( QOpenGLContext::currentContext()->getProcAddress( name ) );
+	}, s, why );
+	if ( drew ) {
+		pfxDrawn++;
+		pfxPoints += static_cast<long long>( n );
+	} else
+		pfxWhy = why;
 	return drew;
 }
 
@@ -1468,6 +1521,19 @@ void frame()
 				std::fprintf( stderr, "%s\n", b );
 			}
 		}
+		// lane VKOBJ5: the particles_cell systems (vkPfxDraw) drawn on Vulkan, their points, and the last refusal
+		if ( pfxTried ) {
+			WW_SWITCH_STATIC( QString, pfxRed, wwEnv( "WW_VKVIEW_OBJPFX_RED" ).trimmed() );
+			std::snprintf( b, sizeof( b ), "vk objpfx: systems=%lld drawn=%lld gl=%lld points=%lld%s%s%s%s", pfxTried, pfxDrawn,
+				pfxTried - pfxDrawn, pfxPoints, pfxWhy.empty() ? "" : " glWhy=", pfxWhy.c_str(),
+				WwVkPresent::objPfxRed( pfxRed.toStdString().c_str() ) ? " RED " : "", pfxRed.toStdString().c_str() );
+			if ( vkPfxLine != b && wwFrameLog() ) {
+				vkPfxLine = b;
+				std::fprintf( stderr, "%s\n", b );
+			}
+		}
+		pfxTried = pfxDrawn = pfxPoints = 0;
+		pfxWhy.clear();
 		cellTried = cellDrawn = pbrmTried = pbrmDrawn = 0;
 		std::fill( cellVar, cellVar + 3, 0 );
 		std::fill( pbrmVar, pbrmVar + 3, 0 );
