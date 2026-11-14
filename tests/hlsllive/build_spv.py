@@ -25,23 +25,70 @@ def shifts_of(path, src):
     return sh
 
 
-def bool_names(src):
-    """the LooseUniforms members declared bool / boolN (a uint in SPIR-V, set by the app with glUniform1i)"""
+def bool_names(src, path=None, seen=None):
+    """the LooseUniforms members declared bool / boolN (a uint in SPIR-V, set by the app with glUniform1i); HLSLSRC1: a
+    readable source keeps them as global `uniform bool`s ($Globals), in the entry or any file it #includes (path given)"""
     out = set()
     for m in re.finditer(r'(?:cbuffer LooseUniforms[^{]*|\nstruct \w+\s*)\{(.*?)\n\};?', src, re.S):   # R9: struct members too (spvgl checks the leaf is a uint)
         for d in re.finditer(r'\bbool[1-4]?\s+(\w+)', m.group(1)):
             out.add(d.group(1))
+    for d in re.finditer(r'^\s*uniform\s+bool[1-4]?\s+(\w+)', src, re.M):
+        out.add(d.group(1))
+    if path:
+        seen = seen if seen is not None else set()
+        for inc in re.findall(r'^\s*#\s*include\s+"([^"]+)"', src, re.M):
+            p = os.path.normpath(os.path.join(os.path.dirname(path), inc))
+            if p not in seen and os.path.exists(p):
+                seen.add(p)
+                out |= bool_names(open(p, encoding='utf-8', errors='replace').read(), p, seen)
     return out
+
+
+def with_loose_halves(path, src, seen=None):
+    """HLSLSRC2: a readable source's LooseUniforms take members from its .hlsli loose halves (`#elif defined(WW_LOOSE_UNIFORMS)`):
+    append each included file's half (and its types half) as a cbuffer / struct text so bool_names sees those bools too"""
+    # HLSLSRC1: a wrapper (`#define X` + `#include "<entry>_ps.hlsl"`) mentions neither; its included entry's halves count
+    if 'WW_HLSL_SRC' not in src and 'WW_LOOSE_UNIFORMS' not in src and not re.search(r'#\s*include\s+"[^"]+\.hlsl"', src):
+        return src
+    seen = set() if seen is None else seen
+    add = []
+    for inc in re.findall(r'#\s*include\s+"([^"]+)"', src):
+        d = os.path.dirname(path)
+        for p in (os.path.join(d, inc), os.path.join(d, '..', inc)):
+            p = os.path.normpath(p)
+            if os.path.isfile(p):
+                break
+        else:
+            continue
+        if p in seen:
+            continue
+        seen.add(p)
+        t = open(p, encoding='utf-8', errors='replace').read()
+        m = re.search(r'#elif defined\(WW_LOOSE_UNIFORMS\)(.*?)\n#else', t, re.S)
+        if m:
+            add.append('\ncbuffer LooseUniforms {%s\n};' % m.group(1))
+        m = re.search(r'\ncbuffer LooseUniforms[^{]*\{.*?\n\};', t, re.S)
+        if m:
+            # HLSLSRC3: a wrapper includes another readable ENTRY (fo4_waterlook -> fo4_water_ps.hlsl): its own LooseUniforms
+            # cbuffer holds the bools (waterUnderOn, waterSsrOn ...); without it they stay uint and glUniform1i is refused
+            add.append(m.group(0))
+        m = re.search(r'#if defined\(WW_LOOSE_TYPES\)(.*?)\n#elif', t, re.S)
+        if m:
+            add.append(m.group(1))
+        add.append(with_loose_halves(p, t, seen)[len(t):])
+    return src + ''.join(add)
 
 
 def compile_raw(hlsl, raw, defines=()):
     '''R7: the DXC step alone (thread safe: no shared state), so build_all can run many at once -> (ok, stderr tail)'''
-    st = os.path.basename(hlsl).rsplit('.', 1)[0].rsplit('_', 1)[1]
-    src = open(hlsl, encoding='utf-8', errors='replace').read()
+    f, extra = stamps.real(hlsl)   # HLSLSRC: a virtual variant = its readable source + the tag's defines
+    st = os.path.basename(f).rsplit('.', 1)[0].rsplit('_', 1)[1]
+    src = open(f, encoding='utf-8', errors='replace').read()
     pm = re.search(r'// profile: (\w+)', src)
-    cmd = [DXC, '-spirv', '-fspv-target-env=vulkan1.0'] + shifts_of(hlsl, src) + [stamps.opt_of(hlsl), '-T', pm.group(1) if pm else PROFILE[st],
-           '-E', 'main', '-I', os.path.dirname(hlsl), '-Fo', raw, hlsl]
-    for d in defines:
+    # HLSLSRC1: a readable source's loose GLSL uniforms are HLSL globals ($Globals): b31 like the LooseUniforms cbuffer
+    cmd = [DXC, '-spirv', '-fspv-target-env=vulkan1.0', '-fvk-bind-globals', '31', '0'] + shifts_of(f, src) + [stamps.opt_of(hlsl), '-T', pm.group(1) if pm else PROFILE[st],
+           '-E', 'main', '-I', os.path.dirname(f), '-Fo', raw, f]
+    for d in list(defines) + extra:
         cmd += ['-D', d]
     if GL_BINDLESS in src:
         # -Vd: DXC's validator wants OpSamplerImageAddressingModeNV, which HLSL cannot write; spvgl.patch adds it
@@ -54,13 +101,15 @@ def compile_raw(hlsl, raw, defines=()):
 
 def build(hlsl, out, defines=(), locs=None, precompiled=False, ps_remap=None):
     raw = out + '.raw'
-    src = open(hlsl, encoding='utf-8', errors='replace').read()
+    real = stamps.real(hlsl)[0]
+    src = open(real, encoding='utf-8', errors='replace').read()
+    src = with_loose_halves(real, src)
     if not precompiled:
         ok, err = compile_raw(hlsl, raw, defines)
         if not ok:
             return None, err
     rep = {}
-    data, rep = spvgl.patch(open(raw, 'rb').read(), BLOCKS, rep, locs, bool_names(src), ps_remap)
+    data, rep = spvgl.patch(open(raw, 'rb').read(), BLOCKS, rep, locs, bool_names(src, real), ps_remap)
     os.remove(raw)
     open(out, 'wb').write(data)
     return len(data), rep
