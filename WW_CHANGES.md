@@ -49,6 +49,15 @@ Changed, not built, not checked live. Nothing in the app calls it yet, so no fra
   interior) are refused until slice 2b, and the app's atlases are compressed and clamp-to-edge, a sampling the pass
   does not take. A volume-fogged run is refused while WW_CELL_FOGLEAK is compiled in (the default), because the gate
   judged the program without it. The gate's own atlas is RGBA8 with repeat, which the app never uses.
+- The app's real path (not compiled into the app, not run there; gate run offline): the pass now takes the app's
+  compressed, clamp-to-edge, mipmapped atlases, and the gate draws with the same kind (BC3, and sRGB BC3 on one case;
+  the rain atlas's real format was not found on disk). The rain cases read an atlas now too. The fog-leak define the
+  loader compiles into GL's program by default is compiled into the Vulkan pass as well, so fogged runs are no longer
+  refused; only a run with the define switched off goes back to GL. New red: the atlas dropped (fails in every case
+  that reads one). Gate (precipviewB1): far snow EXACT, the drop BOUND, but near rain with its atlas now FAILS
+  (335 flips of 151255, 0.22 %; it was BOUND with no atlas). Pinning the atlas to its top level does not clear it
+  (232 flips), and GL differs from its own repeat draw there (36 flips), so it sits with the near snow's open
+  pixel-stage rows. Lit cells stay on GL.
 - No existing rain / snow shader and no cellprecip.cpp line changed.
 
 ## VKFAR2 P7 (2026-11-14): depth of field, motion blur and object blur join the tone pass on Vulkan (WW_VKVIEW=1)

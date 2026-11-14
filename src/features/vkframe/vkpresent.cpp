@@ -5427,8 +5427,8 @@ bool fxStatic( std::string & why )
 	// GL's sampling states of the inputs: LUTs / volumes LINEAR CLAMP, the tile NEAREST, the noise trilinear REPEAT
 	for ( int k = 0; k < WwVkPresent::kFxSamplers; k++ ) {
 		const bool nearest = k == WwVkPresent::kFxNearestClamp || k == WwVkPresent::kFxNearestRepeat;
-		const bool mipped = k == WwVkPresent::kFxMipRepeat || k == WwVkPresent::kFxMipRepeatAniso;
-		const bool repeat = k == WwVkPresent::kFxLinearRepeat || mipped || k == WwVkPresent::kFxNearestRepeat;
+		const bool mipped = k == WwVkPresent::kFxMipRepeat || k == WwVkPresent::kFxMipRepeatAniso || k == WwVkPresent::kFxMipClamp;
+		const bool repeat = k == WwVkPresent::kFxLinearRepeat || ( mipped && k != WwVkPresent::kFxMipClamp ) || k == WwVkPresent::kFxNearestRepeat;
 		VkSamplerCreateInfo sci { VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO };
 		sci.magFilter = sci.minFilter = nearest ? VK_FILTER_NEAREST : VK_FILTER_LINEAR;
 		sci.mipmapMode = mipped ? VK_SAMPLER_MIPMAP_MODE_LINEAR : VK_SAMPLER_MIPMAP_MODE_NEAREST;

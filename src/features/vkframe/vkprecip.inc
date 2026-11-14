@@ -45,6 +45,7 @@ struct Precip
 	int n = 0;
 	bool look = false;  // the look's pipelines
 	WwVkPresent::FxStat st;
+	std::map<std::uintptr_t, std::pair<unsigned, VkImage>> atlasCopied;  // a BC atlas twin's GL source and image once copied
 };
 
 Precip & precip()
@@ -60,6 +61,40 @@ int precipAt( const WwVkPresent::FxField * f, int n, const char * name )
 		if ( std::strcmp( f[i].name, name ) == 0 )
 			return f[i].offset;
 	return -1;
+}
+
+/* the app's atlases are BC DDS (cellprecip.cpp loadDds: BC1 / BC3 / BC7, sRGB kept, every level, trilinear clamp), which
+ * sharedTarget cannot twin (a colour attachment): the far cards' farTwin (vkfarcards.inc), every level copied once a GL
+ * name, as fcSheet (the DDS never changes once loaded) */
+bool precipAtlas( const WwVkPresent::FxTex & t, VkImageView & view, FxNames & names, int & copies, std::string & why )
+{
+	Gl & g = gl();
+	unsigned twin = 0;
+	if ( !t.twin ) {
+		why = "an atlas with no twin key";
+		return false;
+	}
+	if ( !WwVkPresent::farTwin( t.twin, 0, t.w, t.h, 1, t.glFmt, twin, why, t.levels ) )
+		return false;
+	const Shared * s = farTwinFind( t.twin );
+	if ( !s || !s->view ) {
+		why = "an atlas twin has no view";
+		return false;
+	}
+	if ( s->levels != std::max( t.levels, 1 ) ) {
+		why = "an atlas twin has " + std::to_string( s->levels ) + " levels, the atlas " + std::to_string( t.levels );
+		return false;
+	}
+	auto it = precip().atlasCopied.find( t.twin );
+	if ( it == precip().atlasCopied.end() || it->second.first != t.tex || it->second.second != s->img ) {
+		for ( int l = 0; l < s->levels; l++ )
+			g.copyImageSubData( t.tex, kTexture2D, l, 0, 0, 0, twin, kTexture2D, l, 0, 0, 0, std::max( t.w >> l, 1 ), std::max( t.h >> l, 1 ), 1 );
+		precip().atlasCopied[t.twin] = { t.tex, s->img };
+		copies++;
+	}
+	view = s->view;
+	names.add( twin );
+	return true;
 }
 
 bool precipStatic( std::string & why )
@@ -437,11 +472,16 @@ bool precipRun( const PrecipRun & t, std::string & why )
 	const int slotType[8] = { 0, 0, 1, 1, 0, 2, 0, 0 };  // an empty slot binds the zero texture of the shader's type
 	for ( int k = 0; k < 8; k++ ) {
 		FxTex x = t.tex[k];
+		if ( ( k == 1 || k == 7 ) && ( t.red & 32 ) ) {  // red: the atlas dropped (the zero texture)
+			x = FxTex();
+			x.sampler = t.tex[k].sampler;
+		}
 		if ( !x.tex && !x.shared )
 			x.type = slotType[k];
 		if ( !x.shared && x.tex )
 			x.shared = farSharedOf( x.tex );
-		if ( !fxSlot( x, views[k], names, S.copies, w ) )
+		const bool bc = ( k == 1 || k == 7 ) && x.tex && !x.shared && x.type == 0 && fcFormat( GLenum( x.glFmt ) ).block != 0;
+		if ( bc ? !precipAtlas( x, views[k], names, S.copies, w ) : !fxSlot( x, views[k], names, S.copies, w ) )
 			return refuse( "rain / snow's input t" + std::to_string( k ) + ": " + w );
 		smp[k] = std::clamp( x.sampler, 0, int( kFxSamplers ) - 1 );
 	}
