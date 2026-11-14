@@ -1,6 +1,6 @@
 """lane FO4MATCH1 (2026-11-14): the BC7 encoder's GLSL as the runtime compiles it, for tests/hlslmatch/cullmatch.sh bc7.
 src/features/far-lod/lodgengpu.cpp bc7Source() replaces %TABLES% in res/shaders/features/far-lod/lodgen_bc7.glsl with the
-vendored detex partition tables (lib/libfo76utils/src/bptc-tables.c); this writes the same text, and checks that the HLSL
+vendored detex partition tables (bptc-tables.c under lib/); this writes the same text, and checks that the HLSL
 twin (res/shaders/hlsl/far-lod/lodgen_bc7_cs.hlsl) holds the same tables.
   python -I -X utf8 bc7tables.py <bptc-tables.c> <lodgen_bc7.glsl> <out .comp> <lodgen_bc7_cs.hlsl>
 Last line: BC7TABLES OK | BC7TABLES FAIL <why> (exit 1)."""

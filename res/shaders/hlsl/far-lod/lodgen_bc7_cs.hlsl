@@ -3,7 +3,7 @@
 // variants: #if none (the loader's defines; res/shaders/hlsl/variants.txt lists the sets built)
 // profile: cs_6_0
 // GL compiles the GLSL from text (src/features/far-lod/lodgengpu.cpp bc7Source()): its %TABLES% line is
-// filled there from the vendored detex tables (lib/libfo76utils/src/bptc-tables.c); here they are written out
+// filled there from the vendored detex tables (bptc-tables.c under lib/); here they are written out
 // (notes/fo4match1/scratch/bc7prep.py, the same text). Fusion Shaders (F4FS) has no host for it: nothing loads it.
 #include "FarLodBindingsVk.hlsli"
 #define WW_HLSL_SRC 1	// the shared .hlsli files give their readable half

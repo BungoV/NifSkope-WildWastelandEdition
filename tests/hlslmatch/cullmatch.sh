@@ -37,8 +37,11 @@ for k in "${KS[@]}"; do
 		# the file carries its own #version; a sparse checkout has no lib/: the tables come from the commit then
 		RED=LODGEN_BC7_RED
 		H="$ROOT/res/shaders/hlsl/far-lod/lodgen_bc7_cs.hlsl"
-		TB="$ROOT/lib/libfo76utils/src/bptc-tables.c"
-		[ -f "$TB" ] || { TB="$OUT/bptc-tables.c"; "${GIT:-git}" -C "$ROOT" show HEAD:lib/libfo76utils/src/bptc-tables.c > "$TB"; }
+		# the vendored detex tables: found by name under lib/ in the commit (the same file on disk when lib/ is checked out)
+		TBP="$("${GIT:-git}" -C "$ROOT" ls-tree -r --name-only HEAD -- lib | grep '/bptc-tables\.c$' | head -1)"
+		[ -n "$TBP" ] || { echo "CULLMATCH GATE FAILED (bc7: no bptc-tables.c under lib/)"; exit 1; }
+		TB="$ROOT/$TBP"
+		[ -f "$TB" ] || { TB="$OUT/bptc-tables.c"; "${GIT:-git}" -C "$ROOT" show "HEAD:$TBP" > "$TB"; }
 		python -I -X utf8 "$ROOT/tests/hlslmatch/bc7tables.py" "$(W "$TB")" "$(W "$ROOT/res/shaders/features/far-lod/lodgen_bc7.glsl")" \
 			"$(W "$OUT/$k.comp")" "$(W "$H")" || { echo "CULLMATCH GATE FAILED (bc7 tables)"; exit 1; }
 	else
