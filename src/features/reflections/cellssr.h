@@ -50,6 +50,9 @@ bool wwCellSsrWaterFlat();
 bool wwCellSsrWaterAll();
 //! true while the water ray pass draws; gbufTex = the obscurance pass's target (its .a the opaque view depth)
 bool wwCellSsrWaterRayPass( unsigned int * gbufTex );
+/*! lane VKWATER4: fbo is the water ray pass's shared target with its depth twin made this pass (the water's draws may run
+ *  on the present device): nullptr and the names / size; otherwise why not (red WW_VKVIEW_WATER_RAY_RED=1 among them) */
+const char * wwCellSsrVkRayTarget( unsigned int fbo, unsigned int & color, unsigned int & depth, int & w, int & h );
 //! true while either of the reflections' scene passes draws (the water then grabs no frame copy)
 bool wwCellSsrInPass();
 //! lane SSGI1: this frame's scene pass (full size RGBA32F, bottom row first), drawn for the reflections or the bounce

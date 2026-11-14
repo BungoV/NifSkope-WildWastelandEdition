@@ -17,6 +17,7 @@ BSD License - see nifskope.h
 #include "features/far-lod/cellfarinst.h"
 #include "features/exposure/cellhdr.h"	// lane FRAMEFMT1: the frame's colour format for the previous-frame copy
 #include "features/vkframe/vkpresent.h"	// lane VKLIGHT2: the full-screen stages on the present device
+#include "features/vkframe/vkwater.h"	// lane VKWATER4: the water ray pass's depth twin
 #include "features/water/cellwater.h"
 #include "gl/celllooks.h"	// lane WATERREFL1: the Water reflections row picks the water march's twin
 #include "gl/glnode.h"
@@ -56,6 +57,10 @@ struct SsrState
 	bool pass = false;		// the scene pass is drawing
 	bool waterRay = false;	// the water ray pass is drawing
 	bool waterRayShut = false;	// lane PERFFIX1: in it, a draw that is not water shut the masks (wwCellSsrDraw)
+	// lane VKWATER4: the ray pass's shared target + depth twin this pass (0: the water's rays on GL, vkRayNo why)
+	unsigned int vkRayFbo = 0, vkRayColor = 0, vkRayDepth = 0;
+	int vkRayW = 0, vkRayH = 0;
+	std::string vkRayNo;
 	unsigned int gbuf = 0;
 	bool flagged = false;	// the draw being set up carries the flag
 	int zreuse = 0;			// lane PERF4: the scene pass tests against the obscurance pass's depth (1; 2 = its red)
@@ -689,6 +694,39 @@ void wwCellSsrPass( Scene * scene, bool run )
 			s.pass = true;
 			s.waterRay = true;
 			s.gbuf = ao.gbuf;
+			/* lane VKWATER4: the water's draws on the present device into the shared target (while the SSR stages run there),
+			 * against a twin of the opaque depth copied once here (the pass writes no depth). Red WW_VKVIEW_WATER_RAY_RED=1 */
+			s.vkRayFbo = s.vkRayColor = s.vkRayDepth = 0;
+			s.vkRayNo = "the water ray pass's target is GL's own (the SSR stages on GL)";
+			if ( g.wray.vk && wwEnvInt( "WW_VKVIEW_WATER_RAY_RED" ) == 1 ) {
+				s.vkRayNo = "red WW_VKVIEW_WATER_RAY_RED=1 (the water ray pass on GL)";
+			} else if ( g.wray.vk ) {
+				static GLuint rbSeen = 0;
+				static int rbW = 0, rbH = 0;
+				static GLint rbFmt = 0;
+				if ( rbSeen != ao.depthRb || rbW != W || rbH != H ) {	// its format: asked once a renderbuffer / size
+					fn->glBindRenderbuffer( GL_RENDERBUFFER, ao.depthRb );
+					fn->glGetRenderbufferParameteriv( GL_RENDERBUFFER, GL_RENDERBUFFER_INTERNAL_FORMAT, &rbFmt );
+					fn->glBindRenderbuffer( GL_RENDERBUFFER, 0 );
+					rbSeen = ao.depthRb;
+					rbW = W;
+					rbH = H;
+				}
+				unsigned depthTwin = 0;
+				std::string why;
+				if ( WwVkPresent::waterRayDepth( reinterpret_cast<std::uintptr_t>( &s.vkRayDepth ), ao.depthRb, unsigned( rbFmt ), W, H,
+						depthTwin, why ) ) {
+					s.vkRayFbo = g.wray.fbo;
+					s.vkRayColor = g.wray.tex;
+					s.vkRayDepth = depthTwin;
+					s.vkRayW = W;
+					s.vkRayH = H;
+					s.vkRayNo.clear();
+				} else {
+					s.vkRayNo = "the water ray pass's depth twin: " + why;
+				}
+				fn->glBindFramebuffer( GL_FRAMEBUFFER, g.wray.fbo );
+			}
 			const bool rayMemo = memo && wwCellSortedMemo();	// lane PERFHUNT2: the rays' draws as the main sorted pass
 			if ( rayMemo )
 				wwSetupMemoArm( true );
@@ -816,6 +854,7 @@ void wwCellSsrPass( Scene * scene, bool run )
 				wwSetupMemoArm( false );
 			s.pass = false;
 			s.waterRay = false;
+			s.vkRayFbo = s.vkRayColor = s.vkRayDepth = 0;
 			g.haveWater = true;
 			fn->glColorMask( GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE );
 			fn->glDepthMask( GL_TRUE );
@@ -1126,6 +1165,24 @@ bool wwCellSsrWaterRayPass( unsigned int * gbufTex )
 	if ( gbufTex )
 		*gbufTex = s.waterRay ? s.gbuf : 0;
 	return s.pass && s.waterRay;
+}
+
+const char * wwCellSsrVkRayTarget( unsigned int fbo, unsigned int & color, unsigned int & depth, int & w, int & h )
+{
+	const SsrState & s = ssr();
+	color = depth = 0;
+	w = h = 0;
+	if ( !s.pass || !s.waterRay )
+		return "not in the water ray pass";
+	if ( !s.vkRayFbo )
+		return s.vkRayNo.c_str();
+	if ( fbo != s.vkRayFbo )
+		return "the bound framebuffer is not the water ray pass's target";
+	color = s.vkRayColor;
+	depth = s.vkRayDepth;
+	w = s.vkRayW;
+	h = s.vkRayH;
+	return nullptr;
 }
 
 bool wwCellSsrInPass()
