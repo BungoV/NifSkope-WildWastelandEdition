@@ -42,11 +42,24 @@
  * moves GL's colour on >= 20 % of the pixels GL covers (the map reaches the colour). Red csmmap: the map's checker
  * inverted after GL drew must FAIL and move the Vulkan colour (Vulkan reads the map, not a stand-in). cellShadow: no
  * light reaches the fixture (the cluster and light units unbound: the zero texel on both sides), so its unit is not read. */
+/* lane VKOBJ5 (plan row G4: skinned and alpha-tested, the app's vkBlDraw): colourGate's kind 1 skin / 2 alpha runs the main arm
+ * only (GL's draw, objBlShade, depth and colour vs GL, one red), the lines `BLVIEW colour[csm] skin` / `... alpha`.
+ * Skin (stated before the first run, never widened): the class gains the bone codes at locations 5 / 6 (bone + weight: 4 bones
+ * at 0.5 / 0.25 / 0.125 / 0.0625 on every vertex, a fifth at 0.0625 on the odd ones, bones v % 8 on), 8 distinct bone
+ * transforms in skinningUniforms (a turn about z and a shift, row-major 3 x 4), globalUniforms.doSkinning 1 (a uint).
+ * GL probe: doSkinning 0 moves GL's depth on >= 20 % of the covered pixels. Red bone (ObjBlShade.skinRed): bone i reads
+ * bone i + 1's transform. Alpha: alphaFlags 4 ('>') at alphaThreshold 0.5 over the rows' maps' alpha. GL probe: alphaFlags 0
+ * covers >= 5 % more pixels than the test, and the test leaves >= 2000. Red flags (ObjBlShade.alphaRed): the mirrored
+ * alphaFlags 0. Bars as the main arm: depth EXACT or BOUND (the word printed), colour EXACT or BOUND 4e-3, lit >= 90 %;
+ * the red must FAIL and move the Vulkan colour or depth. */
 static int gColTwin = 0;  // colPrintf: 1 prints `BLVIEW colourcsm` for `BLVIEW colour`
+static int gColKind = 0;  // lane VKOBJ5: 1 ` skin`, 2 ` alpha` after it
 void colPrintf( const char * fmt, ... )
 {
 	std::string f2( fmt );
 	const std::size_t at = f2.find( "colour" );
+	if ( gColKind && at != std::string::npos )
+		f2.insert( at + 6, gColKind == 1 ? " skin" : " alpha" );
 	if ( gColTwin && at != std::string::npos )
 		f2.insert( at + 6, "csm" );
 	va_list ap;
@@ -54,10 +67,12 @@ void colPrintf( const char * fmt, ... )
 	std::vprintf( f2.c_str(), ap );
 	va_end( ap );
 }
-bool colourGate( const std::string & spirvDir, const std::vector<GLuint64> & fixture, int anisoAt, GLuint64 aniso1, int twin = 0 )
+bool colourGate( const std::string & spirvDir, const std::vector<GLuint64> & fixture, int anisoAt, GLuint64 aniso1, int twin = 0,
+	int kind = 0 )
 {
 	using namespace WwVkPresent;
 	gColTwin = twin;
+	gColKind = kind;
 	const std::uint32_t * psWords = twin ? vkframe_objbl_cellcsm_ps_spv : vkframe_objbl_cell_ps_spv;
 	const std::size_t psCount = twin ? sizeof( vkframe_objbl_cellcsm_ps_spv ) / 4 : sizeof( vkframe_objbl_cell_ps_spv ) / 4;
 	std::vector<GLuint64> handles = fixture;  // the fixture's handles, texture anisoAt as its anisotropy-1 twin
@@ -235,6 +250,10 @@ bool colourGate( const std::string & spirvDir, const std::vector<GLuint64> & fix
 	put( "paletteScale", { 1 } );
 	put( "cellIsLinear", { 1 } );
 	put( "wwDrawBase", { float( sx.base ) } );
+	if ( kind == 2 ) {  // lane VKOBJ5: the alpha test '>' 0.5
+		put( "alphaFlags", { 4 } );
+		put( "alphaThreshold", { 0.5f } );
+	}
 	// gap 4: the sun cascades on a shared D16 2D array (cascade 0: u = 0.5 + x / 80, v = 0.5 + y / 80, depth 0.5)
 	static int csmKeyAt = 0;
 	const std::uintptr_t csmKey = reinterpret_cast<std::uintptr_t>( &csmKeyAt );
@@ -309,8 +328,24 @@ bool colourGate( const std::string & spirvDir, const std::vector<GLuint64> & fix
 		else if ( m.name == "viewportDimensions" ) {
 			const std::int32_t vp[4] = { 0, 0, kSW, kSH };
 			std::memcpy( gBytes.data() + m.offset, vp, 16 );
+		} else if ( m.name == "doSkinning" && kind == 1 ) {  // lane VKOBJ5: a uint, written as one
+			const std::uint32_t one = 1;
+			std::memcpy( gBytes.data() + m.offset, &one, 4 );
 		}
 	}
+	std::size_t skinAt = 0;  // lane VKOBJ5: doSkinning's offset (the GL probe turns it off)
+	for ( const SpvMember & m : gb->members )
+		skinAt = m.name == "doSkinning" ? m.offset : skinAt;
+	if ( kind == 1 && !skinAt ) {
+		colPrintf( "BLVIEW colour FAIL (no globalUniforms.doSkinning in the twin)\n" );
+		return false;
+	}
+	if ( kind == 1 )  // lane VKOBJ5: 8 bones, a turn about z and a shift each (row-major 3 x 4: rows dot (x, y, z, 1))
+		for ( int j = 0; j < 8; j++ ) {
+			const float a = 0.05f * float( j + 1 ), c = std::cos( a ), s = std::sin( a );
+			const float bone[12] = { c, -s, 0, 0.03f * float( j ) - 0.1f, s, c, 0, 0.02f * float( j % 3 ) - 0.02f, 0, 0, 1, 0.01f * float( j % 4 ) };
+			std::memcpy( sBytes.data() + std::size_t( j ) * 48, bone, 48 );
+		}
 	GLuint ubo[2] = {}, rowsBuf = 0, vao = 0;
 	f.genBuffers( 2, ubo );
 	f.bindBuffer( 0x8A11, ubo[0] );
@@ -341,6 +376,28 @@ bool colourGate( const std::string & spirvDir, const std::vector<GLuint64> & fix
 		f.bindBuffer( 0x8892, sx.pool.vbo[i] );
 		sf.vertexAttribPointer( GLuint( i ), n, GL_FLOAT, GL_FALSE, 0, nullptr );
 		sf.enableVertexAttribArray( GLuint( i ) );
+	}
+	// lane VKOBJ5: the skin kind's bone codes at locations 5 / 6 (the class's own buffers there, as the app's pool has them)
+	ObjBlPool kindPool = sx.pool;
+	GLuint boneBuf[2] = {};
+	if ( kind == 1 ) {
+		std::vector<float> codes[2];
+		for ( std::size_t v = 0; v < sx.pool.verts; v++ ) {
+			const float b = float( v % 8 );
+			const float c5[4] = { b + 0.5f, float( ( v + 1 ) % 8 ) + 0.25f, float( ( v + 2 ) % 8 ) + 0.125f, float( ( v + 3 ) % 8 ) + 0.0625f };
+			const float c6[4] = { ( v & 1 ) ? float( ( v + 4 ) % 8 ) + 0.0625f : 0.0f, 0, 0, 0 };
+			codes[0].insert( codes[0].end(), c5, c5 + 4 );
+			codes[1].insert( codes[1].end(), c6, c6 + 4 );
+		}
+		f.genBuffers( 2, boneBuf );
+		for ( int k = 0; k < 2; k++ ) {
+			f.bindBuffer( 0x8892, boneBuf[k] );
+			f.bufferData( 0x8892, std::ptrdiff_t( codes[k].size() * 4 ), codes[k].data(), 0x88E4 );
+			sf.vertexAttribPointer( GLuint( 5 + k ), 4, GL_FLOAT, GL_FALSE, 0, nullptr );
+			sf.enableVertexAttribArray( GLuint( 5 + k ) );
+			kindPool.vbo[5 + k] = boneBuf[k];
+			kindPool.attrMask |= 4ull << ( 4 * ( 5 + k ) );
+		}
 	}
 	f.bindBuffer( 0x8893, sx.pool.ebo );
 	f.bindVertexArray( 0 );
@@ -436,6 +493,51 @@ bool colourGate( const std::string & spirvDir, const std::vector<GLuint64> & fix
 			ch += gl.c0[i] != g2.c0[i];
 		colPrintf( "BLVIEW colour GL glow probe: glowMult 0 changes %zu GL colour values\n", ch );
 	}
+	bool kindReach = true;
+	if ( kind ) {  // lane VKOBJ5: does the kind reach GL (skin: doSkinning 0 moves the depth; alpha: alphaFlags 0 covers more)
+		ColOut g2;
+		std::vector<std::uint8_t> gOff = gBytes;
+		std::memset( gOff.data() + skinAt, 0, 4 );
+		auto gUp = [&]( const std::vector<std::uint8_t> & bytes ) {
+			f.bindBuffer( 0x8A11, ubo[0] );
+			f.bufferData( 0x8A11, std::ptrdiff_t( bytes.size() ), bytes.data(), 0x88E4 );
+			f.bindBuffer( 0x8A11, 0 );
+		};
+		if ( kind == 1 )
+			gUp( gOff );
+		else
+			put( "alphaFlags", { 0 } );
+		shadeClear();
+		frameState();
+		f.bindVertexArray( vao );
+		f.bindBuffer( 0x8F3F, sx.ind );
+		sf.multiDrawElementsIndirect( GL_TRIANGLES, GL_UNSIGNED_SHORT, nullptr, GLsizei( sx.cmds.size() / 5 ), 20 );
+		f.bindBuffer( 0x8F3F, 0 );
+		f.bindVertexArray( 0 );
+		frameOff();
+		shadeRead( g2.depth, &g2.c0, &g2.c1 );
+		if ( kind == 1 )
+			gUp( gBytes );
+		else
+			put( "alphaFlags", { 4 } );
+		std::size_t cov = 0, moved = 0, cov2 = 0;
+		for ( std::size_t i = 0; i < gl.depth.size(); i++ ) {
+			cov2 += g2.depth[i] < 1.0f;
+			if ( !( gl.depth[i] < 1.0f ) )
+				continue;
+			cov++;
+			moved += gl.depth[i] != g2.depth[i];
+		}
+		if ( kind == 1 ) {
+			kindReach = cov > 0 && double( moved ) >= 0.2 * double( cov );
+			colPrintf( "BLVIEW colour GL skin probe %s: doSkinning 0 moves GL's depth on %zu of %zu covered pixels (bar >= 20 %%)\n",
+				kindReach ? "OK" : "FAIL", moved, cov );
+		} else {
+			kindReach = cov >= 2000 && double( cov2 ) >= 1.05 * double( cov );
+			colPrintf( "BLVIEW colour GL alpha probe %s: the test covers %zu pixels, alphaFlags 0 covers %zu (bar: >= 5 %% more, the test >= 2000)\n",
+				kindReach ? "OK" : "FAIL", cov, cov2 );
+		}
+	}
 	bool csmReach = true;
 	if ( twin ) {  // does the cascade map reach GL's colour (csmForce 1: no shadow)
 		ColOut g2;
@@ -480,13 +582,16 @@ bool colourGate( const std::string & spirvDir, const std::vector<GLuint64> & fix
 		ObjBlShade s;
 		s.twin = twin;
 		s.prog = prog;
-		s.poolKey = sx.key;
-		s.pool = sx.pool;
+		static int kindKey[3] = {};  // lane VKOBJ5: the skin kind's class (bone codes added) is its own pool
+		s.poolKey = kind == 1 ? reinterpret_cast<std::uintptr_t>( &kindKey[1] ) : sx.key;
+		s.pool = kindPool;
 		s.rows = red == 9 ? rowsT.data() : red == 2 ? rowsSlot.data() : rows.data();
 		s.nRows = nRows;
 		s.cmds = sx.cmds.data();
 		s.nCmds = sx.cmds.size() / 5;
 		s.red = red == 10 ? 1 : 0;
+		s.skinRed = red == 11 ? 1 : 0;   // lane VKOBJ5 red bone
+		s.alphaRed = red == 12 ? 1 : 0;  // lane VKOBJ5 red flags
 		const bool ran = objBlShade( glProc, s, w );
 		frameOff();
 		if ( red == 1 )
@@ -574,11 +679,12 @@ bool colourGate( const std::string & spirvDir, const std::vector<GLuint64> & fix
 				double( fromHalf( g[p * 4 + 3] ) ), double( fromHalf( a[p * 4] ) ), double( fromHalf( a[p * 4 + 1] ) ), double( fromHalf( a[p * 4 + 2] ) ),
 				double( fromHalf( a[p * 4 + 3] ) ) );
 		}
-		ok = ok && crossOk &&( dc.exact() || dc.bound() ) && litOk && ( cc.exact() || cc.bound() ) && csmReach;
+		ok = ok && crossOk &&( dc.exact() || dc.bound() ) && litOk && ( cc.exact() || cc.bound() ) && csmReach && kindReach;
 	}
 	const char * redName[3] = { "glow (glowMult 0 after GL drew)", "slot (each row's maps one slot on)",
 		"map (the cascade map's checker inverted after GL drew)" };
-	for ( int r = 1; r <= ( twin ? 3 : 2 ); r++ ) {
+	const char * kindRedName[2] = { " bone (bone i reads bone i + 1's transform)", " flags (the mirrored alphaFlags 0)" };  // lane VKOBJ5
+	for ( int r = kind ? 10 + kind : 1; r <= ( kind ? 10 + kind : twin ? 3 : 2 ); r++ ) {
 		ColOut o;
 		std::string rw;
 		const bool rr = vkRun( r, o, rw );
@@ -590,11 +696,29 @@ bool colourGate( const std::string & spirvDir, const std::vector<GLuint64> & fix
 			over = cc.over;
 			for ( std::size_t i = 0; ran && i < o.c0.size() && i < vk0.c0.size(); i++ )
 				vch += o.c0[i] != vk0.c0[i];
+			for ( std::size_t i = 0; kind && ran && i < o.depth.size() && i < vk0.depth.size(); i++ )
+				vch += o.depth[i] != vk0.depth[i];  // lane VKOBJ5: a kind red may move the depth alone
 			passes = ( dc.exact() || dc.bound() ) && ( cc.exact() || cc.bound() );
 		}
-		colPrintf( "BLVIEW RED colour%s %s (%zu values over the bound, %zu Vulkan colour values moved off the Vulkan base%s%s)\n", redName[r - 1],
+		colPrintf( "BLVIEW RED colour%s %s (%zu values over the bound, %zu Vulkan colour values moved off the Vulkan base%s%s)\n",
+			r > 10 ? kindRedName[r - 11] : redName[r - 1],
 			passes ? "PASSED" : vch ? "FAIL" : "TESTS NOTHING", over, vch, rr ? "" : "; refused: ", rr ? "" : rw.c_str() );
 		ok = ok && !passes && vch > 0;
+	}
+	if ( kind ) {  // lane VKOBJ5: a kind runs the main arm only (its buffers stay with the context, as the arm's own do)
+		if ( csmTex ) {
+			u.bindTextures( 0, 64, nullptr );
+			sharedTargetDrop( csmKey );
+		}
+		gColTwin = gColKind = 0;
+		objBlLocsLoad( spirvDir + "/no_locs.txt", why );
+		f.useProgram( 0 );
+		u.deleteProgram( prog );
+		if ( const GLenum e = glGetError(); e != GL_NO_ERROR ) {
+			std::printf( "BLVIEW colour %s FAIL (GL error 0x%x left)\n", kind == 1 ? "skin" : "alpha", unsigned( e ) );
+			ok = false;
+		}
+		return ok;
 	}
 	{  // the 1-buffer arm: GL's frame with draw buffer 0 only, both targets cleared to 0.25
 		const float k = 0.25f;

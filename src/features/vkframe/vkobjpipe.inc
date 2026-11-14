@@ -2526,6 +2526,22 @@ bool objBlShade( GlProc gp, const ObjBlShade & s, std::string & why )
 		return fail( "the uniforms: " + w2 );
 	if ( !ust.mirrored )
 		return fail( "GL names none of the loose uniforms (a program linked from SPIR-V)" );
+	if ( s.skinRed )  // lane VKOBJ5 red `bone`: bone i reads bone i + 1's transform (48 bytes a bone)
+		for ( const SpvBind & b : vm.binds )
+			if ( b.name.find( "skinningUniforms" ) != std::string::npos )
+				for ( auto & u : d.ubos )
+					if ( u.first == b.binding && u.second.size() > 48 )
+						std::rotate( u.second.begin(), u.second.begin() + 48, u.second.end() );
+	if ( s.alphaRed ) {  // lane VKOBJ5 red `flags`: the mirrored alphaFlags 0
+		SpvModule pm;
+		if ( spvReflect( d.ps, d.psWords, pm, w2 ) )
+			for ( const SpvBind & b : pm.binds )
+				for ( const SpvMember & m : b.members )
+					if ( m.name == "alphaFlags" )
+						for ( auto & u : d.ubos )
+							if ( u.first == b.binding && m.offset + 4 <= u.second.size() )
+								std::memset( u.second.data() + m.offset, 0, 4 );
+	}
 	ObjBlBindStat bst;
 	if ( !objBlBindUnits( gp, s.prog, d, bst, w2 ) )
 		return fail( "the texture units: " + w2 );
