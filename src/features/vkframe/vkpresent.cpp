@@ -37,6 +37,9 @@
 #include "features/vkframe/light_ao_blurf.spv.h"
 #include "features/vkframe/light_contact.spv.h"
 #include "features/vkframe/light_ssgi.spv.h"
+#include "features/vkframe/light_aox_z.spv.h"  // lane VKFAR3: the ported AO methods (XeGTAO, GTAO)
+#include "features/vkframe/light_aox_xe.spv.h"
+#include "features/vkframe/light_aox_r8.spv.h"
 // lane VKLIGHT2: the reflections' stages (ssr_vk.hlsl SSR_LIVE; w = the water look)
 #include "features/vkframe/ssr_view_s1.spv.h"
 #include "features/vkframe/ssr_view_s1w.spv.h"
@@ -6483,7 +6486,9 @@ bool lightStatic( std::string & why )
 	const Code code[WwVkPresent::LightKernels] = { { vkframe_light_ao_gbuf_spv, sizeof( vkframe_light_ao_gbuf_spv ) },
 		{ vkframe_light_ao_mip_spv, sizeof( vkframe_light_ao_mip_spv ) }, { vkframe_light_ao_raw_spv, sizeof( vkframe_light_ao_raw_spv ) },
 		{ vkframe_light_ao_blur_spv, sizeof( vkframe_light_ao_blur_spv ) }, { vkframe_light_ao_blurf_spv, sizeof( vkframe_light_ao_blurf_spv ) },
-		{ vkframe_light_contact_spv, sizeof( vkframe_light_contact_spv ) }, { vkframe_light_ssgi_spv, sizeof( vkframe_light_ssgi_spv ) } };
+		{ vkframe_light_contact_spv, sizeof( vkframe_light_contact_spv ) }, { vkframe_light_ssgi_spv, sizeof( vkframe_light_ssgi_spv ) },
+		{ vkframe_light_aox_z_spv, sizeof( vkframe_light_aox_z_spv ) }, { vkframe_light_aox_xe_spv, sizeof( vkframe_light_aox_xe_spv ) },
+		{ vkframe_light_aox_r8_spv, sizeof( vkframe_light_aox_r8_spv ) } };
 	for ( int k = 0; k < WwVkPresent::LightKernels; k++ ) {
 		if ( k == WwVkPresent::LightAoRaw && !v.float64 )
 			continue;  // AO refuses with the reason
@@ -8752,7 +8757,8 @@ void lightSay( int pass, bool wanted, const char * glWhy )
 	if ( pass < 0 || pass >= LightPasses )
 		return;
 	static const char * const kName[LightPasses] = { "ao", "contact", "ssgi" };
-	static const char * const kWhat[LightPasses] = { "ao_vk: 4 mips, raw, across, fin; gbuf on GL", "contact_vk: the shadow lines",
+	static const char * const kWhat[LightPasses] = { "ao_vk: 4 mips, raw, across, fin, or aox_vk: a ported method's stages; gbuf on GL",
+		"contact_vk: the shadow lines",
 		"ssgi_vk: the cast" };
 	static QString said[LightPasses];
 	static double at[LightPasses] = {};

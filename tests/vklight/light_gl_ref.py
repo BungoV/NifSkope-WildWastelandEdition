@@ -709,7 +709,85 @@ def ssr_main():
     ssr_job('ss_S', sdir, sw, sh, sg, sms, col, proj, srot, None, 0, [])
 
 
+# --------------------------------------------------------------------------------------- ported AO methods (lane VKFAR3)
+AOX = 'ao/cell_aox.frag'
+
+
+def aox_job(name, srcd, W, H, gb, proj, method, slices, steps, time_it, reds):
+    """src/features/ao/ao.cpp aoxPasses: stage 1, stage 2 x4, then the method's stages (xe 6 7 5, gtao 3 5 5, hbao 4 5 5)
+    ping-ponging xa / xb as the app does; gbuf = the AO stage 5 g-buffer of the same frame"""
+    ms = [(W, H)]
+    for m in range(1, 5):
+        ms.append((max(ms[m - 1][0] // 2, 1), max(ms[m - 1][1] // 2, 1)))
+    p00, p11 = np.float32(proj[0][0]), np.float32(proj[1][1])
+    ndc = (np.float32(2.0) / p00, np.float32(-2.0) / p11, np.float32(-1.0) / p00, np.float32(1.0) / p11)
+    params, den = (38.4, 0.615, 1.0, 1.5), (2.0, 0.08, 1.2)
+    imgs = [Img('gbuf', 'rgba32f', W, H, NEAREST, gb, os.path.basename(srcd) + '/gbuf.bin')]
+    imgs += [Img('xz%d' % m, 'r32f', ms[m][0], ms[m][1], NEAREST) for m in range(5)]
+    imgs += [Img('xa', 'r8', W, H, NEAREST), Img('xb', 'r8', W, H, NEAREST)]
+    if method == 'xe':
+        imgs.append(Img('xe', 'rg32f', W, H, NEAREST))
+    base = [('fullSize', '2i', (W, H))] + [('mipSize[%d]' % m, '2i', ms[m]) for m in range(5)] + \
+        [('ndcToView', '4fv', [ndc]), ('aoxParams', '4fv', [params]), ('aoxCounts', '2f', (slices, steps)), ('aoxDenoise', '3f', den)]
+    c = [ndc, params, (slices, steps, den[0], den[1]), (den[2], W, H, 0), ms[1] + ms[2], ms[3] + ms[4]]
+    allz = [('gbuf', 'gbuf')] + [('xz%d' % m, 'xz%d' % m) for m in range(5)]
+    ps = [Pass('s1', 'aox_z', AOX, ['xz0'], [('gbuf', 'gbuf')], ['gbuf'], base + [('aoxStage', 'i', 1)], c, (1, 0))]
+    for m in range(1, 5):
+        ps.append(Pass('s2m%d' % m, 'aox_z', AOX, ['xz%d' % m], [('src', 'xz%d' % (m - 1))], ['-', 'xz%d' % (m - 1)],
+                       base + [('aoxStage', 'i', 2), ('mipLevel', 'i', m)], c, (2, m)))
+    st = {'xe': (6, 7, 5), 'gtao': (3, 5, 5), 'hbao': (4, 5, 5)}[method]
+    src = None
+    for k, s in enumerate(st):
+        out = 'xe' if s == 6 else 'xb' if src == 'xa' else 'xa'
+        if s in (3, 4, 6):
+            units, vk = allz, ['gbuf', 'xz1', 'xz2', 'xz3', 'xz4']
+        elif s == 5:
+            units, vk = allz + [('src', src)], ['gbuf', src]
+        else:
+            units, vk = [('src', src)], ['-', src]
+        ps.append(Pass('s%d_%d' % (s, k), 'aox_xe' if s == 6 else 'aox_r8', AOX, [out], units, vk,
+                       base + [('aoxStage', 'i', s)], c, (s, 0)))
+        src = out
+    # xz1-4: the depth mip filter's dot / sum lands 1-16 ulp apart on NV's GL and Vulkan compilers (measured 4, 11, 16, 14;
+    # no float order fits either side); the method stages: a sample position or a hard branch flips on a last-bit
+    # difference (step); GTAO's slice angle is the SSGI divide (sector)
+    cmps = [('xz0', 'ulp1'), ('xz1', 'ulp4')] + [('xz%d' % m, 'ulp16') for m in range(2, 5)]
+    if method == 'xe':
+        cmps.append(('xe', 'step'))
+    r = 'sector' if method == 'gtao' else 'step'
+    cmps += [('xa', r), ('xb', r)]
+    job(name, imgs, ps, cmps, reds, time_it)
+    print('  %s: %dx%d method %s slices %d steps %d' % (name, W, H, method, slices, steps))
+
+
+def aox_main():
+    W, H, px, proj, depth = load_dump()
+    srcd = os.path.join(OUT, 'in_real_ax')
+    os.makedirs(srcd, exist_ok=True)
+    gb = gl_gbuf(srcd, W, H, depth, proj)
+    # XeGTAO at Ultra (4 x 3, the all-on route's tier) with every kernel's red; GTAO at High. HBAO stays on GL: its
+    # first step can land on the centre texel, and delta / max( dist, 1e-5 ) then turns two equal view positions' last-bit
+    # rounding into a random unit vector (3.6 % of texels differ by up to 239 codes; neither side is right)
+    aox_job('ax_X', srcd, W, H, gb, proj, 'xe', 4, 3, True, ['aox_z', 'aox_xe', 'aox_r8'])
+    aox_job('ax_G', srcd, W, H, gb, proj, 'gtao', 3, 3, False, [])
+    # syn: an odd size, a sky band, steps (as ao_S), XeGTAO at Low
+    sw, sh = 641, 361
+    rng = np.random.default_rng(31)
+    sy, sx = np.mgrid[0:sh, 0:sw].astype(np.float32)
+    sd = (0.9990 + 0.0008 * np.sin(sx / 29.0) * np.cos(sy / 17.0)).astype(np.float32)
+    for _ in range(40):
+        x0, y0 = rng.integers(0, sw - 40), rng.integers(0, sh - 40)
+        sd[y0:y0 + rng.integers(5, 60), x0:x0 + rng.integers(5, 80)] -= np.float32(rng.uniform(0.0002, 0.0008))
+    sd[: sh // 7] = 1.0
+    sdir = os.path.join(OUT, 'in_syn_ax')
+    os.makedirs(sdir, exist_ok=True)
+    sg = gl_gbuf(sdir, sw, sh, sd, proj)
+    aox_job('ax_S', sdir, sw, sh, sg, proj, 'xe', 2, 2, False, [])
+
+
 def main():
+    if 'aox' in WANT:
+        aox_main()
     if 'ssr' in WANT:
         ssr_main()
     if 'ao' in WANT:
