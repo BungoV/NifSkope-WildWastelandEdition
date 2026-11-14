@@ -71,6 +71,17 @@ Changed, not built, not checked live. Nothing in the app calls it yet, so no fra
   tests/spvsync/check_spv.py (the three look kernels), the precipview harness. The plain kernels' SPIR-V is unchanged.
 - When the app hooks this up, src/features/weather/cellprecip.cpp must hand the run to Vulkan where it draws GL's
   points (the rule for this lane keeps that file closed: a note, not a change).
+- Localising the snow near red (harness only, a9957342). GL's particle stage was captured twice and came out
+  identical, so GL's near snow has no seed or clock that changes between runs. Its run-to-run noise comes from drawing
+  the pixels. Per particle, the Vulkan records match GL's capture: colour, texture box and light are exact for every
+  particle, and only a few corner positions differ (17 of 3146 by more than 4 ulp). Most flipped pixels (5883 of 6030)
+  are under no differing particle, so the red sits in the pixel stage.
+- The app hookup (5e889438, not compiled, not run): cellprecip.cpp now offers each rain / snow run to the Vulkan view
+  first and draws GL's points when it is refused (two lines: the call plus the header include). New `vk precip:` log
+  line, red WW_VKVIEW_PRECIP_RED=1 = GL's. Expected in the app today: most runs stay on GL. Lit cells (sun or
+  interior) are refused until slice 2b, and the app's atlases are compressed and clamp-to-edge, a sampling the pass
+  does not take. A volume-fogged run is refused while WW_CELL_FOGLEAK is compiled in (the default), because the gate
+  judged the program without it. The gate's own atlas is RGBA8 with repeat, which the app never uses.
 - No existing rain / snow shader and no cellprecip.cpp line changed.
 
 ## VKFAR2 P7 (2026-11-14): depth of field, motion blur and object blur join the tone pass on Vulkan (WW_VKVIEW=1)
