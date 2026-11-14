@@ -58,7 +58,7 @@ Changed, not built, not checked live. Nothing in the app calls it yet, so no fra
   (335 flips of 151255, 0.22 %; it was BOUND with no atlas). Pinning the atlas to its top level does not clear it
   (232 flips), and GL differs from its own repeat draw there (36 flips), so it sits with the near snow's open
   pixel-stage rows. Lit cells stay on GL.
-- Known open red: textured near rain (rain_near_disc 335 flips, rain_near_fog 342) still fails, and the hookup stays as
+- (Closed by the ruling below; kept as the record.) Was an open red: textured near rain (rain_near_disc 335 flips, rain_near_fog 342) failed, and the hookup stays as
   it is behind WW_VKVIEW=1 for the flight to judge. Localised (harness diagnostics only, reverted; nothing committed
   from them): with blending off, GL and Vulkan write bit-identical colours, so the pixel stage itself matches. Every
   flipped pixel is one where a streak covers only part of the pixel: Vulkan keeps its four samples apart, while GL
@@ -68,7 +68,7 @@ Changed, not built, not checked live. Nothing in the app calls it yet, so no fra
   (rain_near_disc 21702 of them; far snow all 6149). What makes GL merge the samples in these few pixels is not found
   yet (not the slab half: both halves show it). GL's state at the draw is ordinary 4x multisampling (no
   alpha-to-coverage, no sample shading, no sample mask); by reading glview.cpp the app draws with the same state, but
-  that was not run. The cause is open, so lit (slice 2b) waits.
+  that was not run. (Then: the cause open, lit waiting. Now: the NV GL blend quirk, see the next item.)
 - Ruling 11-14 (coordinator): NVIDIA GL's 4x blend sometimes writing a pixel's mean to all its samples is a driver
   quirk; Vulkan's per-sample blend is the right one. tests/vkframe/precipview.cpp now judges Vulkan against a
   per-sample reference built from GL's own programs: each particle drawn on its own, in draw order, with blending off
