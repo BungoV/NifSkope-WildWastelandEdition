@@ -7,7 +7,9 @@
 // dummy vertex block (firstIndex 900, baseVertex 10), a depth slab over the left half, GL's polygon offset (1, 2) on. The far
 // ground's own data as cellfarground.cpp uploads it: fgGrid RGBA32UI 16 x 16 (four LTEX ids, unorm8 weights, vertex colour),
 // fgLtex RGBA8 2D array 64 px x 4 layers, mipped, REPEAT, anisotropy 8, fgDecal RGBA32F records + 4 x 4 bins + ids, fgAtlas
-// RGBA8; cellRow maps view space onto the grid's world square, fgMode 1, fgDecalsOn 1.
+// RGBA8 mipped; cellRow maps view space onto the grid's world square, fgMode 1, fgDecalsOn 1. fgGrid, fgLtex and fgAtlas are
+// shared targets as on the view (no copy a run): GL on them vs GL on plain twins must be EXACT, and seed 1's plain-twin run
+// must copy exactly three more images; seed 2 lifts the atlas lod clamp (fgBinMap.w 3).
 // Bar (farloddraw's, never widened): covered >= 1000; one side only <= 0.05 %; depth within 1 D24 unit; colour rel <= 1e-2 on
 // >= 99.9 % of the samples covered on both sides; GL >= 1000 distinct colours over the ground.
 // Reds (each must FAIL, never refuse; seed 1): 1 the ps loose block a vec4 off, 2 plain samplers, 4 cull flipped, 8 depth
@@ -193,8 +195,9 @@ int main( int argc, char ** argv )
 			} else if ( s.name == "fgDecal" ) {
 				iDecal = at;	// RGBA32F texel buffer (smpOf), its contents below
 			} else if ( s.name == "fgAtlas" ) {
-				s.fmt = 0x8058;
+				s.fmt = 0x8058;	// mipped (cellfarground.cpp's atlas; seed 2 lifts fgBinMap.w's lod clamp off 0)
 				s.w = s.h = 64;
+				s.levels = 7;
 				iAtlas = at;
 			}
 			s.unit = at + 1;
@@ -516,6 +519,64 @@ int main( int argc, char ** argv )
 	static char twinKeys[192];
 	bool gateOk = true;
 	int runs = 0;
+	// fgGrid, fgLtex and fgAtlas on the present device as cellfarground.cpp makes them on the view (sharedTarget: the twin
+	// reads them in place, no copy a run); plain GL twins of the same contents for the GL-vs-GL check and the copy count
+	using CopyImg = void( WINAPI * )( GLuint, GLenum, GLint, GLint, GLint, GLint, GLuint, GLenum, GLint, GLint, GLint, GLint, GLsizei,
+		GLsizei, GLsizei );
+	const auto copyImg = reinterpret_cast<CopyImg>( wglGetProcAddress( "glCopyImageSubData" ) );
+	if ( !copyImg )
+		return fatal( "glCopyImageSubData" );
+	static char sharedKeys[3];
+	const int iShared[3] = { iGrid, iLtex, iAtlas };
+	GLuint plain[3] = {};
+	for ( int k = 0; k < 3; k++ ) {
+		Smp & s = smp[size_t( iShared[k] )];
+		const unsigned tg = targetOf( s.kind );
+		unsigned t = 0;
+		if ( !WwVkPresent::sharedTarget( reinterpret_cast<std::uintptr_t>( sharedKeys + k ), s.kind == 2 ? 2 : 0, s.w, s.h, s.d, s.fmt, t,
+				why, s.levels ) )
+			return fatal( "sharedTarget " + s.name + ": " + why );
+		s.tex = t;
+		glGenTextures( 1, &plain[k] );
+		for ( const GLuint x : { GLuint( t ), plain[k] } ) {
+			glBindTexture( tg, x );
+			if ( x == plain[k] ) {
+				if ( s.kind == 0 )
+					ex.texStorage2D( tg, s.levels, s.fmt, s.w, s.h );
+				else
+					ex.texStorage3D( tg, s.levels, s.fmt, s.w, s.h, s.d );
+			}
+			const bool mip = s.levels > 1, lin = k != 0;	// the grid: nearest, clamped
+			glTexParameteri( tg, GL_TEXTURE_MIN_FILTER, mip ? GL_LINEAR_MIPMAP_LINEAR : lin ? GL_LINEAR : GL_NEAREST );
+			glTexParameteri( tg, GL_TEXTURE_MAG_FILTER, lin ? GL_LINEAR : GL_NEAREST );
+			glTexParameteri( tg, GL_TEXTURE_WRAP_S, mip ? GL_REPEAT : 0x812F );
+			glTexParameteri( tg, GL_TEXTURE_WRAP_T, mip ? GL_REPEAT : 0x812F );
+			glTexParameteri( tg, fMaxLevel, s.levels - 1 );
+			if ( k == 1 )
+				glTexParameterf( tg, 0x84FE /* GL_TEXTURE_MAX_ANISOTROPY */, 8.0f );
+		}
+		glBindTexture( tg, 0 );
+	}
+	auto toPlain = [&]() {	// the shared contents into the plain twins, every level
+		for ( int k = 0; k < 3; k++ ) {
+			const Smp & s = smp[size_t( iShared[k] )];
+			const GLenum tg = targetOf( s.kind );
+			for ( int l = 0; l < s.levels; l++ )
+				copyImg( s.tex, tg, l, 0, 0, 0, plain[k], tg, l, 0, 0, 0, std::max( s.w >> l, 1 ), std::max( s.h >> l, 1 ), s.kind == 2 ? s.d : 1 );
+		}
+	};
+	auto swapPlain = [&]() {
+		for ( int k = 0; k < 3; k++ )
+			std::swap( smp[size_t( iShared[k] )].tex, plain[k] );
+	};
+	WwVkPresent::FxStat tot;
+	auto take = [&]() {	// one run's stat into the total
+		const WwVkPresent::FxStat st = WwVkPresent::takeFarGroundDrawStat();
+		tot.runs += st.runs, tot.fails += st.fails, tot.cpuMs += st.cpuMs, tot.maxMs = std::max( tot.maxMs, st.maxMs );
+		tot.pipelines = st.pipelines, tot.buildMs = st.buildMs, tot.copies += st.copies;	// the build counts are running totals
+		return st;
+	};
+	take();
 	for ( int seed = 1; seed <= 2; seed++ ) {
 		std::mt19937 rng( 20261114u + std::uint32_t( seed ) * 7919u
 			+ std::uint32_t( getenv( "FLD_SEED" ) ? std::atoi( getenv( "FLD_SEED" ) ) : 0 ) );
@@ -564,7 +625,7 @@ int main( int argc, char ** argv )
 			if ( l >= 0 )
 				f.uniform2fv( l, 1, v );
 		}
-		set4( "fgBinMap", kOx, kOy, 1.0f / kBin, 0.0f );
+		set4( "fgBinMap", kOx, kOy, 1.0f / kBin, seed == 2 ? 3.0f : 0.0f );	// .w: the atlas lod clamp (cellfarground.cpp's maxLod)
 		set4( "fgBinN", float( kBins ), float( kBins ), float( kBinOff ), float( kIdOff ) );
 		{	// view space onto the grid's world square: world = (x + 5000, -z + 7000, y + 300)
 			const GLint l = f.getUniformLocation( pFg, "cellRow" );
@@ -597,6 +658,26 @@ int main( int argc, char ** argv )
 			return fatal( "the GL reference draw: GL error " + std::to_string( ge ) );
 		const std::vector<std::uint16_t> glC = readColor( refCol );
 		const std::vector<float> glD = readDepth( refDs, false );
+		{	// GL on the shared inputs vs GL on plain twins of the same bytes: EXACT (the shared storage changes nothing GL reads)
+			toPlain();
+			swapPlain();
+			before( fbRef );
+			drawState( fbRef, scissor );
+			glDraw();
+			stateEnd();
+			swapPlain();
+			const std::vector<std::uint16_t> plC = readColor( refCol );
+			const std::vector<float> plD = readDepth( refDs, false );
+			size_t cDiff = 0, dDiff = 0;
+			for ( size_t i = 0; i < plC.size() && i < glC.size(); i++ )
+				cDiff += plC[i] != glC[i];
+			for ( size_t i = 0; i < plD.size() && i < glD.size(); i++ )
+				dDiff += plD[i] != glD[i];
+			const bool exact = !cDiff && !dDiff && plC.size() == glC.size() && plD.size() == glD.size() && glGetError() == GL_NO_ERROR;
+			std::printf( "FARGROUNDDRAW seed %d GL shared vs plain inputs: %s (%zu colour halves, %zu depth samples differ)\n", seed,
+				exact ? "EXACT" : "DIFFER", cDiff, dDiff );
+			gateOk = gateOk && exact;
+		}
 		{
 			float lo[4] = { 1e30f, 1e30f, 1e30f, 1e30f }, hi[4] = { -1e30f, -1e30f, -1e30f, -1e30f };
 			std::set<std::uint64_t> distinct;
@@ -619,9 +700,14 @@ int main( int argc, char ** argv )
 			}
 		}
 
-		for ( int red : { 0, 1, 2, 4, 8, 16, 64, 128, 256 } ) {
-			if ( red && seed != 1 )
+		int copiesShared = -1, copiesPlain = -1;
+		for ( int pick : { 0, -1, 1, 2, 4, 8, 16, 64, 128, 256 } ) {
+			const bool viaPlain = pick < 0;	// seed 1: the same draw on the plain twins (copied a run): the copy count's other side
+			const int red = viaPlain ? 0 : pick;
+			if ( ( red || viaPlain ) && seed != 1 )
 				continue;
+			if ( viaPlain )
+				swapPlain();
 			if ( red == 128 )
 				putGrid( gridRed );
 			if ( red == 256 )
@@ -644,13 +730,19 @@ int main( int argc, char ** argv )
 			r.red = red & 31;
 			const bool ran = WwVkPresent::farGroundRun( r, why );
 			stateEnd();
+			if ( viaPlain )
+				swapPlain();
 			if ( red == 128 )
 				putGrid( grid );
 			if ( red == 256 )
 				putDecals( decals );
 			runs++;
+			const int copies = take().copies;
+			if ( !red )
+				( viaPlain ? copiesPlain : copiesShared ) = copies;
 			if ( !ran ) {
-				std::printf( "FARGROUNDDRAW seed %d red %d: REFUSED (%s)\n", seed, red, why.c_str() );
+				std::printf( "FARGROUNDDRAW seed %d %s: REFUSED (%s)\n", seed, viaPlain ? "plain inputs" : ( "red " + std::to_string( red ) ).c_str(),
+					why.c_str() );
 				gateOk = false;
 				continue;
 			}
@@ -659,16 +751,23 @@ int main( int argc, char ** argv )
 			const Verdict v = judge( bgC, bgD, vkC, vkD, glC, glD );
 			const char * word = v.word();
 			const bool fail = std::strcmp( word, "FAIL" ) == 0;
-			std::printf( "FARGROUNDDRAW seed %d red %d: %s covered %zu (both %zu, one side only %zu), depth max %ld D24 units (%zu past 1), "
-				"colour %zu halves differ, %zu samples past 1e-2 (max rel %.3g)%s\n", seed, red, word, v.covered, v.both, v.onlyOne,
-				v.maxDepthU, v.depthPast, v.halvesDiff, v.colPast, v.maxRel, red ? ( fail ? " -> red FAILS as it must" : " -> red PASSES: the gate is blind" ) : "" );
+			std::printf( "FARGROUNDDRAW seed %d %s %d: %s covered %zu (both %zu, one side only %zu), depth max %ld D24 units (%zu past 1), "
+				"colour %zu halves differ, %zu samples past 1e-2 (max rel %.3g), %d copies%s\n", seed, viaPlain ? "plain inputs, red" : "red", red,
+				word, v.covered, v.both, v.onlyOne, v.maxDepthU, v.depthPast, v.halvesDiff, v.colPast, v.maxRel, copies,
+				red ? ( fail ? " -> red FAILS as it must" : " -> red PASSES: the gate is blind" ) : "" );
 			if ( red ? !fail : fail )
 				gateOk = false;
 		}
+		if ( seed == 1 ) {	// the three shared inputs never copied: exactly three copies fewer a run than on the plain twins
+			const bool fewer = copiesShared >= 0 && copiesPlain - copiesShared == 3;
+			std::printf( "FARGROUNDDRAW seed 1 copies a run: %d on the shared inputs, %d on plain ones (%s)\n", copiesShared, copiesPlain,
+				fewer ? "fgGrid, fgLtex, fgAtlas read in place" : "NOT three fewer" );
+			gateOk = gateOk && fewer;
+		}
 	}
-	const WwVkPresent::FxStat st = WwVkPresent::takeFarGroundDrawStat();
-	std::printf( "FARGROUNDDRAW %d runs: %d on Vulkan, %.2f ms CPU each (max %.2f; the harness's hand-off wait included), %d fails\n", runs,
-		st.runs, st.runs ? st.cpuMs / st.runs : 0.0, st.maxMs, st.fails );
+	std::printf( "FARGROUNDDRAW %d runs: %d on Vulkan, %.2f ms CPU each (max %.2f; the harness's hand-off wait included), %d fails, "
+		"%d pipelines built in %.1f ms (%.2f ms CPU a run without them)\n", runs, tot.runs, tot.runs ? tot.cpuMs / tot.runs : 0.0, tot.maxMs,
+		tot.fails, tot.pipelines, tot.buildMs, tot.runs ? ( tot.cpuMs - tot.buildMs ) / tot.runs : 0.0 );
 	std::printf( gateOk ? "FARGROUNDDRAW GATE OK\n" : "FARGROUNDDRAW GATE FAILED\n" );
 	return gateOk ? 0 : 1;
 }
