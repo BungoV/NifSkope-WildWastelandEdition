@@ -59,6 +59,7 @@ static bool gl_FrontFacing;
 #include "../water/water_shore.hlsli"
 #include "land_swash.hlsli"
 #include "../weather/rain_wet.hlsli"
+#include "../far-lod/far_skymap.hlsli"
 #endif
 #undef WW_LOOSE_TYPES
 cbuffer LooseUniforms : register(b31, space0)
@@ -115,6 +116,7 @@ cbuffer LooseUniforms : register(b31, space0)
 #include "../water/water_shore.hlsli"
 #include "land_swash.hlsli"
 #include "../weather/rain_wet.hlsli"
+#include "../far-lod/far_skymap.hlsli"
 #endif
 #undef WW_LOOSE_UNIFORMS
 #if defined(WW_CELLLIGHTS)
@@ -205,6 +207,7 @@ cbuffer LooseUniforms : register(b31, space0)
 #include "../water/water_shore.hlsli"
 #include "land_swash.hlsli"
 #include "../weather/rain_wet.hlsli"
+#include "../far-lod/far_skymap.hlsli"
 #define WW_CELL_FOGGED cellOn	// a cell-lit draw is fogged before its imagespace
 Texture2D<float4> CellSpecMap : register(t49, space0); SamplerState _CellSpecMap_sampler : register(s49, space0);	// a legacy material's specular map (R scale, G smoothness), for the cube term
 #else
@@ -699,7 +702,13 @@ void frag_main()
 
 	// --- ambient + environment ---
 	// AO belongs on ambient only: applying it to a direct lobe double-darkens contact shadows.
+#ifdef WW_CELLLIGHTS
+	// FARSKYMAP1: with probe GI drawn, the far sky map adds the cell probe's direction (far-lod/far_skymap.hlsli);
+	// probes off returns wwFarSkyVis bit for bit
+	s.ao *= clamp( farSkyVisAt( wwFarSkyVis, cellWorldPos( -ViewDir ), cellWorldDir( s.N ) ), 0.0, 1.0 );
+#else
 	s.ao *= clamp( wwFarSkyVis, 0.0, 1.0 );	// MODULES1 10c: the far bake's sky occlusion on the ambient (1 elsewhere)
+#endif
 	float3 preAmbDiff = outDiff;	// what the block below adds is the ambient's diffuse
 	float3 preAmbSpec = outSpec;	// lane SPECOCC1: what the block below adds is the cube reflection
 #ifdef WW_DV

@@ -60,5 +60,10 @@ QString probeFarCensusText( const ProbeFarResult & r );
 bool probeFarAppendRing( const QString & lodl, const QString & lodi, int cx, int cy, int half, int radius,
 	ProbeSoup & soup, ProbeFarResult * out, bool normals = false );
 int probeFarCli( const QStringList & args );
+/*! lane FARSKYMAP1 (deck D6 s57-58): the far sky-visibility map (src/features/far-lod/farskymap.h) from a probefar
+ *  folder's sector_*.tbk probes, saved to `outFile`; prints its census. 0 = written. */
+int farSkyMapWrite( const QString & dir, const QString & outFile );
+//! `farskymap <probefar folder> --out <world>.farsky`
+int farSkyMapCli( const QStringList & args );
 
 #endif

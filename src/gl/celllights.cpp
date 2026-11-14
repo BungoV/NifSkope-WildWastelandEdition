@@ -50,6 +50,8 @@ BSD License - see nifskope.h
 #include "features/sky/atmosphere.h"	// lane FIX1101A (atmo): wwAtmoWbGain, the test white balance
 #include "features/sky/cellsunlit.h"	// lane INTSKY1: the sunlit interior rule
 #include "features/lights/cellflickclock.h"	// lane PERFFIX2 a: the flicker's phase on the world clock
+#include "features/far-lod/cellfarlod.h"	// lane FARSKYMAP1: the far field's sky map
+#include "features/far-lod/farskymap.h"	// lane FARSKYMAP1: its texels and rect
 
 #include <QDateTime>
 #include <QDir>	// lane INTSKY1: the Cells file in the census
@@ -1706,6 +1708,70 @@ void wwCellLightsUniforms( Scene * scene )
 		rec.f3( prog, "cellFarPlacedOrigin", Fr->placedOrigin[0], Fr->placedOrigin[1], Fr->placedOrigin[2] );
 		rec.f( prog, "cellFarPlacedVoxel", Fr->placedVoxel );
 		rec.f3( prog, "cellFarPlacedDims", float( Fr->placedDims[0] ), float( Fr->placedDims[1] ), float( Fr->placedDims[2] ) );
+	}
+	{	/* lane FARSKYMAP1 (deck D6 s57-58): the far sky-visibility map, read by the readable HLSL past the last cascade
+		 * (res/shaders/hlsl/far-lod/far_skymap.hlsli). On the probe GI row: drawn only while probe GI draws on an
+		 * exterior; else farSkyOn false and the per-vertex byte as before. Unit 111 is past GL_MAX_TEXTURE_IMAGE_UNITS
+		 * on some GPUs (g.units), so the combined limit decides, as the cloud shadow's units. */
+		if ( g.maxUnits < 0 ) {
+			GLint units = 0;
+			fn->glGetIntegerv( GL_MAX_COMBINED_TEXTURE_IMAGE_UNITS, &units );
+			g.maxUnits = units;
+		}
+		const bool skyFits = g.maxUnits > WwCellUnit::FarSkyMap;
+		const std::shared_ptr<const FarSkyMap::Map> skyDoc = on && pass == 0 ? wwCellFarSkyMap( scene ) : nullptr;
+		const FarSkyMap::Map * fsm = skyDoc && giDraw && skyFits && L && wwCellAsOutdoor( L ) ? skyDoc.get() : nullptr;
+		if ( fsm && g.farSkyFor.get() != fsm ) {
+			if ( !g.farSkyTex )
+				fn->glGenTextures( 1, &g.farSkyTex );
+			u.raw( WwCellUnit::FarSkyMap );
+			fn->glBindTexture( GL_TEXTURE_2D_ARRAY, g.farSkyTex );
+			const int levels = int( fsm->mips.size() );
+			fn->glTexParameteri( GL_TEXTURE_2D_ARRAY, GL_TEXTURE_BASE_LEVEL, 0 );
+			fn->glTexParameteri( GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAX_LEVEL, levels - 1 );
+			fn->glTexParameteri( GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR );
+			fn->glTexParameteri( GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAG_FILTER, GL_LINEAR );
+			fn->glTexParameteri( GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE );
+			fn->glTexParameteri( GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE );
+			fn->glPixelStorei( GL_UNPACK_ALIGNMENT, 4 );
+			std::vector<float> two;	// a level's 8 floats a texel split into its 2 layers
+			for ( int l = 0; l < levels; l++ ) {
+				const size_t n = size_t( fsm->mipW( l ) ) * size_t( fsm->mipH( l ) );
+				const std::vector<float> & src = fsm->mips[size_t( l )];
+				two.assign( n * 8, 0.0f );
+				for ( size_t t = 0; t < n; t++ )
+					for ( size_t c = 0; c < 4; c++ ) {
+						two[t * 4 + c] = src[t * 8 + c];
+						two[( n + t ) * 4 + c] = src[t * 8 + 4 + c];
+					}
+				fn->glTexImage3D( GL_TEXTURE_2D_ARRAY, l, GL_RGBA16F, fsm->mipW( l ), fsm->mipH( l ), 2, 0, GL_RGBA, GL_FLOAT,
+					two.data() );
+			}
+			g.farSkyFor = skyDoc;
+		}
+		const bool skyMapDraw = fsm && g.farSkyTex && g.farSkyFor.get() == fsm;
+		if ( skyFits )
+			rec.bind( u, WwCellUnit::FarSkyMap, GL_TEXTURE_2D_ARRAY, skyMapDraw ? g.farSkyTex : 0 );
+		// never read while off: a GPU without unit 111 points it at a unit of its own type
+		rec.i( prog, "farSkyMap", skyFits ? WwCellUnit::FarSkyMap : WwCellUnit::LandLodDiff );
+		rec.b( prog, "farSkyOn", skyMapDraw );
+		if ( skyMapDraw ) {
+			float r[4];
+			FarSkyMap::rect( *fsm, 0.0f, 0.0f, r );	// no shift: the cell scene is in world units, as the probes (cellfarlod.cpp)
+			rec.f4( prog, "farSkyRect", FloatVector4( r[0], r[1], r[2], r[3] ) );
+		}
+		if ( on && pass == 0 ) {	// telemetry: one line a change
+			static QString said;
+			const QString line = skyMapDraw
+				? QStringLiteral( "far sky map: drawn past the last cascade (%1)" ).arg( QString::fromStdString( FarSkyMap::census( *fsm ) ) )
+				: !skyDoc ? QStringLiteral( "far sky map: none for this scene: the per-vertex byte" )
+				: !skyFits ? QStringLiteral( "far sky map: unit %1 past the GPU's %2: the per-vertex byte" ).arg( WwCellUnit::FarSkyMap ).arg( g.maxUnits )
+				: QStringLiteral( "far sky map: probe GI not drawn here: the per-vertex byte" );
+			if ( line != said ) {
+				said = line;
+				qInfo().noquote() << line;
+			}
+		}
 	}
 	u.done();
 	prof.at( 8, "far" );

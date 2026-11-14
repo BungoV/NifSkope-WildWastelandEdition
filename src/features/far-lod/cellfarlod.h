@@ -12,12 +12,14 @@ BSD License - see nifskope.h
 #include <QStringList>
 
 #include <array>
+#include <memory>
 #include <vector>
 
 class EsmWorld;
 class NifModel;
 class Scene;
 class Vector3;
+namespace FarSkyMap { struct Map; }
 
 /* The cell view's far field: appends the worldspace's LOD (terrain rings, objects, tree cards)
  * under one "FarLOD" node of the cell document, so it draws with the cell's own programs.
@@ -93,6 +95,9 @@ QString cellFarLodAppend( NifModel * nif, const QModelIndex & iRoot, const EsmWo
 float wwCellFarLodReach( const Scene * scene );
 //! the far field's center in scene units (the reach is measured from it)
 Vector3 wwCellFarLodOrigin( const Scene * scene );
+/*! lane FARSKYMAP1 (deck D6 s57-58): the far sky-visibility map loaded with the scene's far field (<ws>.farsky beside
+ *  the .lodl, written by `probefar` / `farskymap`); null = none baked (the per-vertex byte alone) */
+std::shared_ptr<const FarSkyMap::Map> wwCellFarSkyMap( const Scene * scene );
 
 //! Before the scene draws: the far sway uniforms (zeroed once when no far field is active).
 void wwCellFarLodFrame( Scene * scene );
