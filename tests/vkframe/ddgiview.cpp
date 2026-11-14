@@ -4,7 +4,9 @@
 // pattern, exports a handle; WwVkPresent::ddgiAtlasImport takes it and ddgiAtlasRead fetches every texel THROUGH THE VIEW.
 // Greens: the read is byte-EXACT; a second pattern written by the exporter reads EXACT with no new import; every import closes
 // its handle. Reds (must FAIL): a view one texel late, a view over half the atlas. Refusals (must refuse, handle closed):
-// another driver UUID, an exporter buffer without UNIFORM_TEXEL usage. Last line DDGIVIEW GATE OK / FAILED.
+// another driver UUID, an exporter buffer without UNIFORM_TEXEL usage. The cascades' route: a farTexelBuffer GL writes is
+// found by the same lookup (ddgiAtlasView), reads EXACT, its red 1 FAILS, ddgiAtlasGen moves at its make and its drop.
+// Last line DDGIVIEW GATE OK / FAILED.
 #define WW_VKPRESENT_NO_QT
 #include "../../src/features/vkframe/vkpresent.cpp"
 
@@ -398,6 +400,42 @@ int main()
 	}
 	WwVkPresent::ddgiAtlasDrop( &key );
 	verdict( "drop", WwVkPresent::ddgiAtlasView( &key ) == 0, "no view under the key after the drop" );
+	// the cascades' route (rtddgicell.cpp combinedShare): GL writes a farTexelBuffer, the same lookup finds its view
+	{
+		using BindBuf = void( APIENTRY * )( GLenum, GLuint );
+		using SubData = void( APIENTRY * )( GLenum, std::intptr_t, std::intptr_t, const void * );
+		auto bindBuf = reinterpret_cast<BindBuf>( glProc( "glBindBuffer" ) );
+		auto subData = reinterpret_cast<SubData>( glProc( "glBufferSubData" ) );
+		const int ckey = 0;
+		const std::uintptr_t ck = reinterpret_cast<std::uintptr_t>( &ckey );
+		const std::uint64_t g0 = WwVkPresent::ddgiAtlasGen();
+		unsigned gb = 0, gt = 0;
+		const bool made = bindBuf && subData && WwVkPresent::farTexelBuffer( ck, 0x8814u, size_t( kBytes ), gb, gt, why );
+		const std::uint64_t g1 = WwVkPresent::ddgiAtlasGen();
+		std::uint64_t ct = 0;
+		const bool cview = made && WwVkPresent::ddgiAtlasView( &ckey, &ct ) != 0 && ct == kTexels;
+		verdict( "cascades' buffer seen by the lookup", cview && g1 != g0, made ? std::to_string( ct ) + " texels, gen "
+			+ std::to_string( g0 ) + " -> " + std::to_string( g1 ) : why );
+		if ( made ) {
+			exporterWrite( E, 0xCA5Cu, want );   // only for its pattern: GL writes these bytes
+			bindBuf( 0x8892u, gb );   // GL_ARRAY_BUFFER
+			subData( 0x8892u, 0, std::intptr_t( kBytes ), want.data() );
+			bindBuf( 0x8892u, 0 );
+			glFinish();
+			const bool rc = WwVkPresent::ddgiAtlasRead( &ckey, 0, std::uint32_t( kTexels ), got, 0, why );
+			const std::uint64_t nc = rc ? differ( got, want, &first ) : kTexels;
+			verdict( "cascades' buffer read EXACT", rc && nc == 0, rc ? std::to_string( nc ) + " of " + std::to_string( kTexels ) + " texels differ" : why );
+			const bool rr = WwVkPresent::ddgiAtlasRead( &ckey, 0, std::uint32_t( kTexels ), got, 1, why );
+			const std::uint64_t nr = rr ? differ( got, want, &first ) : 0;
+			verdict( "cascades' red 1 FAILS", rr && nr > 0, std::to_string( nr ) + " texels differ" );
+		} else {
+			verdict( "cascades' buffer read EXACT", false, why );
+			verdict( "cascades' red 1 FAILS", false, why );
+		}
+		WwVkPresent::farTexelBufferDrop( ck );
+		const std::uint64_t g2 = WwVkPresent::ddgiAtlasGen();
+		verdict( "cascades' buffer dropped", WwVkPresent::ddgiAtlasView( &ckey ) == 0 && g2 != g1, "gen " + std::to_string( g2 ) );
+	}
 	exporterFree( E );
 	WwVkPresent::shutdown();
 	wglMakeCurrent( nullptr, nullptr );

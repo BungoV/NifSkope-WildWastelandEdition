@@ -16,6 +16,7 @@
 #include "features/gi/bakert.h"          // lane VKCOMPUTE1: asyncQueue
 #include "features/gi/vkasyncrule.h"     // lane VKCOMPUTE1: GL's wait placement
 #include "features/vkframe/vkpresent.h"   // lane VKFAR3: the atlas imported on the present device
+#include "features/vkframe/vkfarcards.h"  // lane VKFAR3: farTexelBuffer (the cascades' buffer on the present device)
 #include <chrono>
 #include "version.h"
 #include "wwswitch.h"
@@ -527,6 +528,7 @@ struct Combined
 	GLuint buf = 0, tex = 0;
 	size_t bytes = 0;
 	bool attach = false;
+	bool shared = false, shareWanted = false;   // lane VKFAR3: buf / tex are a farTexelBuffer on the present device
 	int count = 0;
 	int base[rtddgi::kMaxCascades] = {}, nP[rtddgi::kMaxCascades] = {};
 	// lane VKCOMPUTE1: each cascade's origin / step / dims at its last copy (the tiles' own; a later step may scroll)
@@ -649,7 +651,9 @@ void freeGl( Cell & c, Renderer * r )
 	c.interop = c.glRead = false;
 	c.fresh = false;
 	c.vk.reset();
-	WwVkPresent::ddgiAtlasDrop( &c );   // lane VKFAR3: the present device's import of the same memory (none: returns at once)
+	// lane VKFAR3: the present device's import of the same memory (none: returns at once); the drop idles the device
+	if ( const double ms = WwVkPresent::ddgiAtlasDrop( &c ); ms >= 0.0 )
+		say( c.tag + QStringLiteral( "vk ddgi: the import dropped (%1 ms, the present device idled)" ).arg( ms, 0, 'f', 2 ) );
 }
 
 //! the volume and its GL objects (GL first: its import holds the device's memory)
@@ -869,6 +873,11 @@ bool importShare( Cell & c, Renderer * r, RtDdgiLive & L, QString * why )
 void vkDdgiImport( Cell & c, RtDdgiLive & L )
 {
 	if ( !WwVkPresent::shareKept( "WW_VKVIEW_DDGI_RED" ) ) {
+		WwVkPresent::ddgiAtlasDrop( &c );
+		return;
+	}
+	// with cascades (the preset default) GL and the view read the cascades' buffer (combinedShare), not this atlas
+	if ( rtddgiCellShaderDefine() && rtddgiCellCascades() > 1 ) {
 		WwVkPresent::ddgiAtlasDrop( &c );
 		return;
 	}
@@ -2687,12 +2696,41 @@ static void freeCombined( Renderer * r )
 {
 	Combined & K = combined();
 	if ( r && K.owner == r ) {
-		if ( K.tex )
-			r->fn->glDeleteTextures( 1, &K.tex );
-		if ( K.buf )
-			r->fn->glDeleteBuffers( 1, &K.buf );
+		if ( K.shared )
+			WwVkPresent::farTexelBufferDrop( reinterpret_cast<std::uintptr_t>( &K ) );   // its GL names too
+		else {
+			if ( K.tex )
+				r->fn->glDeleteTextures( 1, &K.tex );
+			if ( K.buf )
+				r->fn->glDeleteBuffers( 1, &K.buf );
+		}
 	}
 	K = Combined();
+}
+
+/*! lane VKFAR3 (row A1): with the view on Vulkan the cascades' buffer is made on the present device (farTexelBuffer, keyed
+ *  by &K), so passes on the view read GL's copies in place (WwVkPresent::ddgiAtlasView( &K )). GL's copies are GL work:
+ *  a reader behind GL's crossing sees them. Decided again when the switch flips or the buffer grows; a refusal keeps GL's
+ *  own buffer until then. Red WW_VKVIEW_DDGI_RED=1 */
+static bool combinedShare( Renderer * r, Combined & K, size_t bytes )
+{
+	unsigned b = 0, tx = 0;
+	std::string why;
+	if ( !WwVkPresent::farTexelBuffer( reinterpret_cast<std::uintptr_t>( &K ), GL_RGBA32F, bytes, b, tx, why ) ) {
+		say( QStringLiteral( "rtddgi cell: vk ddgi: the cascades' buffer stays GL's (%1)" ).arg( QString::fromStdString( why ) ) );
+		K.buf = K.tex = 0;   // a grown one was freed before the make failed
+		K.shared = false;
+		K.bytes = 0;
+		return false;
+	}
+	K.buf = b;
+	K.tex = tx;   // farTexelBuffer's GL_TEXTURE_BUFFER view of b, already attached
+	K.owner = r;
+	K.shared = true;
+	K.bytes = bytes;
+	K.attach = false;
+	say( QStringLiteral( "rtddgi cell: vk ddgi: the cascades' buffer on the present device (%1 MB)" ).arg( double( bytes ) / 1048576.0, 0, 'f', 1 ) );
+	return true;
 }
 
 /*! RTXCASCADE1: the ready cascades (from 0, each live with tiles in its own buffer in this context) copied into the one
@@ -2718,6 +2756,12 @@ static void combinedUpdate( Renderer * r, int n, const void * nif )
 		return;
 	auto fn = r->fn;
 	bool relayout = false;
+	const bool share = WwVkPresent::shareKept( "WW_VKVIEW_DDGI_RED" );   // lane VKFAR3: before the layout (a free resets it)
+	if ( K.buf && share != K.shareWanted ) {
+		freeCombined( r );
+		relayout = true;
+	}
+	K.shareWanted = share;
 	size_t texels = 0;
 	for ( int l = 0; l < m; l++ ) {
 		relayout = relayout || K.base[l] != int( texels ) || K.nP[l] != nP[l];
@@ -2726,14 +2770,16 @@ static void combinedUpdate( Renderer * r, int n, const void * nif )
 		texels += size_t( nP[l] ) * kAtlasTexels;
 	}
 	const size_t bytes = texels * 16;
+	QElapsedTimer t;
+	t.start();
+	if ( share && ( !K.buf || ( K.shared && bytes > K.bytes ) ) && combinedShare( r, K, bytes ) )
+		relayout = true;
 	if ( !K.buf ) {
 		fn->glGenBuffers( 1, &K.buf );
 		fn->glGenTextures( 1, &K.tex );
 		K.owner = r;
 	}
-	QElapsedTimer t;
-	t.start();
-	if ( bytes > K.bytes ) {   // grows only: a smaller layout reads the front of it
+	if ( !K.shared && bytes > K.bytes ) {   // grows only: a smaller layout reads the front of it
 		fn->glBindBuffer( GL_COPY_WRITE_BUFFER, K.buf );
 		fn->glBufferData( GL_COPY_WRITE_BUFFER, GLsizeiptr( bytes ), nullptr, GL_DYNAMIC_COPY );
 		fn->glBindBuffer( GL_COPY_WRITE_BUFFER, 0 );

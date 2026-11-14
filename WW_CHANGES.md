@@ -75,6 +75,13 @@ frame changes.
 - Offline gate tests/vkframe/ddgiview.sh: a second device exports a 4096-probe atlas, the present device imports it
   and reads it back through the view: EXACT (0 of 790528 texels, twice, and a window); reds (a view one texel late,
   half a view) FAIL; another driver and a buffer without texel use are refused, and every handle is closed.
+- With cascades (the RT preset's default) GL reads one buffer it copies every cascade into, not a cascade's atlas. With
+  the view on, that buffer is now made on the present device (GL fills it by the same copies), so passes on the view
+  read what GL reads; it follows the switch every frame. The per-cascade import is skipped then (it would go unread).
+  The single-volume import (cascades 1) comes only at the next volume hand-over when the view is turned on live; its
+  drop now logs how long the present device idled.
+- One lookup for both (ddgiAtlasView) and a counter that moves on every make / drop (ddgiAtlasGen), so a pass knows
+  to rewrite its descriptor. Gate: 17 of 17, the cascades' buffer EXACT, its red FAILS.
 
 ## VKFAR2 L8 slice 1 (2026-11-14): rain / snow pass for the Vulkan view, not wired in (gate red)
 

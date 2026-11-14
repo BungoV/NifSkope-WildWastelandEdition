@@ -924,10 +924,18 @@ struct DdgiAtlasShare
 };
 //! the import under key (one a volume; an older one under key is dropped first). false: why; nothing kept
 bool ddgiAtlasImport( const void * key, const DdgiAtlasShare & in, std::string & why );
-//! the texel view (VkBufferView as a handle) and the atlas's texels under key; 0 when none
+/* the texel view (VkBufferView as a handle) and the atlas's texels under key; 0 when none. With cascades (the preset
+ * default) GL reads ONE buffer it copies every cascade's atlas into (rtddgicell.cpp combinedUpdate); with the view on
+ * that buffer is a farTexelBuffer (GL writes it, the present device holds the view): its key (an address) is looked up
+ * here too, so a consumer asks one function. GL's copies are GL work, so a reader behind GL's crossing sees them. */
 std::uint64_t ddgiAtlasView( const void * key, std::uint64_t * texels = nullptr );
-//! the import under key goes (drains the worker and waits the device idle first; nothing under key: returns at once)
-void ddgiAtlasDrop( const void * key );
+/* moves whenever any view above may have changed (an import, a drop, a texel buffer made or dropped): a consumer whose
+ * descriptor set holds a view rewrites it when this moved (never by comparing handles: the driver reuses them) */
+std::uint64_t ddgiAtlasGen();
+/* the import under key goes (drains the worker and waits the device idle first): the ms it took, -1 when nothing was
+ * under key (returns at once). An import is made at a volume's hand-over only (rtddgicell.cpp vkDdgiImport): the view
+ * turned on live gets one at the next hand-over; with cascades the cascades' buffer follows the switch every frame */
+double ddgiAtlasDrop( const void * key );
 /* gates only: texels [first, first + count) fetched through the view on the worker (ddgi_atlas_fetch_cs), 4 floats each.
  * red 1: a view one texel late (offset minTexelBufferOffsetAlignment rounded to a texel), red 2: a view over the first
  * half of the atlas (fetches past it read 0). false: why */

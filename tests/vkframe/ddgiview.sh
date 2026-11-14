@@ -16,6 +16,6 @@ g++ -O2 -std=c++17 -pthread -I"$ROOT/src" "$ROOT/tests/vkframe/ddgiview.cpp" -o 
 "$OUT/ddgiview.exe" > "$OUT/ddgiview.txt" 2>&1
 cat "$OUT/ddgiview.txt"
 N=$(grep -c '^DDGIVIEW .* OK (' "$OUT/ddgiview.txt")
-[ "$N" = 13 ] || { echo "DDGIVIEW GATE FAILED ($N of 13 checks OK)"; exit 1; }
+[ "$N" = 17 ] || { echo "DDGIVIEW GATE FAILED ($N of 17 checks OK)"; exit 1; }
 tail -1 "$OUT/ddgiview.txt" | grep -q "DDGIVIEW GATE OK" || { echo "DDGIVIEW GATE FAILED"; exit 1; }
 echo "DDGIVIEW GATE OK"

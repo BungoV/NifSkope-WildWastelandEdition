@@ -48,6 +48,15 @@ struct Ddgi
 	VkDevice dev = VK_NULL_HANDLE;
 	std::uint32_t maxTexels = 0, maxGroups = 0;
 	VkDeviceSize texelAlign = 16;
+	std::uint64_t gen = 0;  // an import or a drop
+};
+
+// the atlas a key names: an import, else the cascades' farTexelBuffer of that key (vkfarcards.inc)
+struct DdgiSrc
+{
+	VkBuffer buf = VK_NULL_HANDLE;
+	VkBufferView view = VK_NULL_HANDLE;
+	VkDeviceSize bytes = 0;
 };
 
 Ddgi & ddgi()
@@ -394,28 +403,64 @@ bool ddgiAtlasImport( const void * key, const DdgiAtlasShare & in, std::string &
 	a.atlasBytes = in.atlasBytes;
 	a.texels = texels;
 	D.imports[key] = a;
+	D.gen++;
 	return true;
 }
 
+}  // namespace WwVkPresent
+
+namespace
+{
+DdgiSrc ddgiSrc( const void * key )
+{
+	DdgiSrc s;
+	const auto & m = ddgi().imports;
+	if ( const auto it = m.find( key ); it != m.end() ) {
+		s.buf = it->second.buf;
+		s.view = it->second.view;
+		s.bytes = it->second.atlasBytes;
+		return s;
+	}
+	const auto & b = farCards().bufs;
+	if ( const auto it = b.find( reinterpret_cast<std::uintptr_t>( key ) ); it != b.end() && it->second.glFmt == 0x8814u ) {  // GL_RGBA32F
+		s.buf = it->second.buf;
+		s.view = it->second.view;
+		s.bytes = it->second.bytes;
+	}
+	return s;
+}
+}  // namespace
+
+namespace WwVkPresent
+{
+
 std::uint64_t ddgiAtlasView( const void * key, std::uint64_t * texels )
 {
-	const auto & m = ddgi().imports;
-	const auto it = m.find( key );
+	const DdgiSrc s = ddgiSrc( key );
 	if ( texels )
-		*texels = it == m.end() ? 0 : it->second.texels;
-	return it == m.end() ? 0 : std::uint64_t( reinterpret_cast<std::uintptr_t>( it->second.view ) );
+		*texels = s.view ? s.bytes / 16 : 0;
+	return std::uint64_t( reinterpret_cast<std::uintptr_t>( s.view ) );
 }
 
-void ddgiAtlasDrop( const void * key )
+std::uint64_t ddgiAtlasGen()
+{
+	const FarTwinStat & st = farCards().st;
+	return ddgi().gen + std::uint64_t( st.made ) + std::uint64_t( st.dropped );
+}
+
+double ddgiAtlasDrop( const void * key )
 {
 	Ddgi & D = ddgi();
 	const auto it = D.imports.find( key );
 	if ( it == D.imports.end() )
-		return;
+		return -1.0;
+	const auto t0 = std::chrono::steady_clock::now();
 	drain();
 	vk().vkDeviceWaitIdle( vk().dev );
 	ddgiImportFree( it->second );
 	D.imports.erase( it );
+	D.gen++;
+	return std::chrono::duration<double, std::milli>( std::chrono::steady_clock::now() - t0 ).count();
 }
 
 bool ddgiAtlasRead( const void * key, std::uint32_t first, std::uint32_t count, std::vector<float> & out, int red, std::string & why )
@@ -423,16 +468,18 @@ bool ddgiAtlasRead( const void * key, std::uint32_t first, std::uint32_t count, 
 	Vk & v = vk();
 	Ddgi & D = ddgi();
 	out.clear();
-	const auto it = D.imports.find( key );
-	if ( it == D.imports.end() ) {
+	const DdgiSrc a = ddgiSrc( key );
+	if ( !a.view ) {
 		why = "no DDGI atlas under that key";
 		return false;
 	}
-	const DdgiImport & a = it->second;
-	if ( count == 0 || std::uint64_t( first ) + count > a.texels ) {
-		why = "texels " + std::to_string( first ) + " + " + std::to_string( count ) + " past the atlas's " + std::to_string( a.texels );
+	const std::uint64_t texels = a.bytes / 16;
+	if ( count == 0 || std::uint64_t( first ) + count > texels ) {
+		why = "texels " + std::to_string( first ) + " + " + std::to_string( count ) + " past the atlas's " + std::to_string( texels );
 		return false;
 	}
+	if ( !ddgiDev( why ) )  // a farTexelBuffer source: no import loaded the entry points yet
+		return false;
 	if ( ( count + 63 ) / 64 > D.maxGroups ) {
 		why = "a read of " + std::to_string( count ) + " texels passes the device's work group count";
 		return false;
@@ -447,7 +494,7 @@ bool ddgiAtlasRead( const void * key, std::uint32_t first, std::uint32_t count, 
 		vi.format = VK_FORMAT_R32G32B32A32_SFLOAT;
 		const VkDeviceSize late = ( 16 + D.texelAlign - 1 ) / D.texelAlign * D.texelAlign;
 		vi.offset = red == 1 ? ( late + 15 ) / 16 * 16 : 0;
-		vi.range = red == 1 ? a.atlasBytes - vi.offset : a.texels / 2 * 16;
+		vi.range = red == 1 ? a.bytes - vi.offset : texels / 2 * 16;
 		if ( D.createView( v.dev, &vi, nullptr, &redView ) != VK_SUCCESS ) {
 			why = "vkCreateBufferView (a red's view) failed";
 			return false;
