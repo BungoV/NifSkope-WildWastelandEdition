@@ -4,6 +4,7 @@
 #include "features/shared/cellpasstime.h"	// lane POSTFX1: the post zone's sub-timers
 #include "features/post/taainputs.h"	// lane POSTFX1: the object vectors
 #include "features/vkframe/vkpresent.h"	// lane VKPOST2: a deferred tone pass crosses before this pass reads the view
+#include "features/post/postroute.h"	// lane VKFAR2 P7: the Vulkan route's refusals and route lines
 
 #include "esmdata.h"
 #include "features/post/gametaa.h"
@@ -629,30 +630,25 @@ void postVkSay( bool vk, bool dof, bool lens, bool mb, bool ob )
 		sum.glWhy = st.glWhy;
 	if ( !st.failWhy.empty() )
 		sum.failWhy = st.failWhy;
-	const int key = ( vk ? 1 : 0 ) | ( dof ? 2 : 0 ) | ( lens ? 4 : 0 ) | ( mb ? 8 : 0 ) | ( ob ? 16 : 0 );
+	static int builtSaid = 0;  // "vk post build:" when a pass built its kernels (the ms each part cost the drawing thread)
+	if ( st.pipelines != builtSaid ) {
+		builtSaid = st.pipelines;
+		const WwVkPresent::PostBuild b = WwVkPresent::tonePostBuild();
+		QString parts;
+		for ( int k = 0; k < WwVkPresent::kPostParts; k++ )
+			parts += QStringLiteral( "%1%2 %3 in %4 ms" ).arg( k ? QStringLiteral( ", " ) : QString() )
+				.arg( QLatin1String( WwVkPresent::tonePostPart( k ) ) ).arg( b.pipes[k] ).arg( b.ms[k], 0, 'f', 1 );
+		qInfo().noquote() << QStringLiteral( "vk post build: %1; most in one frame %2 in %3 ms" ).arg( parts ).arg( b.most )
+			.arg( b.mostMs, 0, 'f', 1 );
+	}
+	const int key =( vk ? 1 : 0 ) | ( dof ? 2 : 0 ) | ( lens ? 4 : 0 ) | ( mb ? 8 : 0 ) | ( ob ? 16 : 0 );
 	const auto now = std::chrono::steady_clock::now();
 	if ( was == key && std::chrono::duration<double>( now - at ).count() < 5.0 )
 		return;
 	was = key;
 	at = now;
-	QString tail = sum.runs > 0
-		? QStringLiteral( "in the deferred tone pass %1 frames (%2 pipelines built in %3 ms; %4 vector copies; drawing thread %5 ms, "
-			"max %6)" ).arg( sum.runs ).arg( sum.pipelines ).arg( sum.buildMs, 0, 'f', 1 ).arg( sum.copies )
-			.arg( sum.cpuMs / sum.runs, 0, 'f', 3 ).arg( sum.maxMs, 0, 'f', 3 )
-		: QStringLiteral( "0 frames in the tone pass" );
-	if ( sum.gl > 0 )
-		tail += QStringLiteral( ", on GL %1 frames (last: %2)" ).arg( sum.gl ).arg( QString::fromStdString( sum.glWhy ) );
-	if ( sum.fails > 0 )
-		tail += QStringLiteral( ", refused %1 (last: %2)" ).arg( sum.fails ).arg( QString::fromStdString( sum.failWhy ) );
-	const QString route = vk ? QStringLiteral( "on Vulkan" ) : QStringLiteral( "on GL" );
-	if ( dof )
-		qInfo().noquote() << QStringLiteral( "vk dof: %1 (%2), %3" ).arg( route, lens ? QStringLiteral( "the thin lens" )
-			: QStringLiteral( "the game's passes" ), tail );
-	if ( mb )
-		qInfo().noquote() << QStringLiteral( "vk motionblur: %1 (%2), %3" ).arg( route, dof ? QStringLiteral( "with the depth of field" )
-			: QStringLiteral( "alone" ), tail );
-	if ( ob )
-		qInfo().noquote() << QStringLiteral( "vk objblur: %1, %2" ).arg( route, tail );
+	for ( const std::string & line : WwPostRoute::lines( vk, dof, lens, mb, ob, sum ) )  // postroute.h (the offline gate runs it too)
+		qInfo().noquote() << QString::fromStdString( line );
 	sum = WwVkPresent::FxStat();
 }
 
@@ -945,22 +941,11 @@ void postApply( Scene * scene, bool linear )
 	 * frame, a dump frame, a refusal, the red WW_VKVIEW_POST_RED=1) the tone pass crosses first and GL runs them as before */
 	const bool dump = !s.dumpDir.isEmpty() && frame == s.dumpFrame;
 	WW_SWITCH_STATIC( bool, vkRed, wwEnvInt( "WW_VKVIEW_POST_RED" ) == 1 );
-	std::string vkWhy;
-	if ( vkRed )
-		vkWhy = "red WW_VKVIEW_POST_RED=1";
-	else if ( linear )
-		vkWhy = "the linear frame (before the tone map)";
-	else if ( dump )
-		vkWhy = "a dump frame (GL's targets are read back)";
-	else if ( !WwVkPresent::tonePending() )
-		vkWhy = "no deferred tone pass (the view is not on Vulkan, or a GL pass crossed first)";
-	else if ( GLuint( prevDraw ) != GLuint( WwVkPresent::viewFbo() ) )
-		vkWhy = "the frame is not the view";
-	else if ( dsFormat != GL_DEPTH24_STENCIL8 )
-		vkWhy = "the frame's depth is not D24S8";
-	else if ( s.redRg32 )
-		vkWhy = "red WW_CELL_MBLUR_RED=rg32 (RG32F vectors)";
-	else {
+	const bool pending = !vkRed && !linear && !dump && WwVkPresent::tonePending();
+	const char * notVk = WwPostRoute::whyNotVk( vkRed, linear, dump, pending,
+		pending && GLuint( prevDraw ) == GLuint( WwVkPresent::viewFbo() ), dsFormat == GL_DEPTH24_STENCIL8, s.redRg32 );
+	std::string vkWhy = notVk ? notVk : "";
+	if ( !notVk ) {
 		WwVkPresent::PostRun p;
 		p.w = W;
 		p.h = H;

@@ -609,6 +609,68 @@ bool farDotsRun( const FarDotsRun & t, std::string & why );
 void farDotsOnGl( const char * why );
 FxStat takeFarDotsStat();
 
+// lane VKFAR2 (row L8 slice 1): rain / snow (cell_precip_gpu): precip_view_cs's b31 (GL's names; pcFirst / pcCount / pcRed
+// are not GL's, precipRun writes them) and precip_view_ps's (spirv-cross --reflect of the shipped SPIR-V)
+inline constexpr FxField kT_precipcs[] = {
+	{ "pcSeedS", 0, 1, 1, 1, 0 }, { "pcL", 4, 1, 1, 0, 0 }, { "pcInner", 8, 1, 1, 0, 0 }, { "pcOffXY", 16, 2, 1, 0, 0 },
+	{ "pcOffZ", 32, 1, 16, 0, 0 }, { "pcNCand", 288, 1, 1, 1, 0 }, { "pcBest", 292, 1, 1, 1, 0 },
+	{ "pcCand", 304, 1, 16, 1, 0 }, { "pcFallU", 560, 1, 16, 0, 0 }, { "pcHalfU", 816, 1, 16, 0, 0 },
+	{ "pcWind", 1072, 2, 1, 0, 0 }, { "pcSway", 1080, 1, 1, 0, 0 }, { "pcSpin", 1084, 1, 1, 0, 0 },
+	{ "pcT", 1088, 1, 1, 0, 0 }, { "pcCols", 1092, 1, 1, 1, 0 }, { "pcCells", 1096, 1, 1, 1, 0 },
+	{ "pcCellUv", 1104, 2, 1, 0, 0 }, { "pcRoofOn", 1112, 1, 1, 1, 0 }, { "pcRoofCam", 1120, 3, 1, 0, 0 },
+	{ "pcRoofInv", 1132, 1, 1, 0, 0 }, { "pcRow", 1136, 4, 3, 0, 0 }, { "pcProj", 1184, 4, 1, 0, 4 },
+	{ "pcFocal", 1248, 1, 1, 0, 0 }, { "pcMinPx", 1252, 1, 1, 0, 0 }, { "pcShutter", 1256, 1, 1, 0, 0 },
+	{ "pcThin", 1260, 1, 1, 0, 0 }, { "pcAtlas", 1264, 4, 1, 0, 0 }, { "pcInset", 1280, 2, 1, 0, 0 },
+	{ "pcFar", 1288, 1, 1, 1, 0 }, { "pcHasTex", 1292, 1, 1, 1, 0 }, { "pcFirst", 1296, 1, 1, 1, 0 },
+	{ "pcCount", 1300, 1, 1, 1, 0 }, { "pcRed", 1304, 1, 1, 1, 0 }, { "pcViewport", 1312, 4, 1, 0, 0 },
+	{ "fogOn", 1328, 1, 1, 1, 0 }, { "fogK", 1344, 4, 6, 0, 0 }, { "fogView", 1440, 4, 1, 0, 0 },
+	{ "fogDistScale", 1456, 1, 1, 0, 0 }, { "fogSun", 1472, 4, 1, 0, 0 }, { "fogSunColour", 1488, 4, 1, 0, 0 },
+	{ "fogUnit", 1504, 1, 1, 0, 0 }, { "fogProbe", 1520, 4, 1, 0, 0 }, { "fogRed", 1536, 1, 1, 1, 0 },
+	{ "fogNight", 1552, 4, 1, 0, 0 }, { "fogNightHue", 1568, 1, 1, 0, 0 }, { "atAp", 1584, 4, 1, 0, 0 },
+	{ "atApProj", 1600, 4, 1, 0, 0 }, { "atApDouble", 1616, 1, 1, 0, 0 }, { "volOn", 1620, 1, 1, 1, 0 },
+	{ "volRect", 1632, 4, 1, 0, 0 }, { "volFarClamp", 1648, 1, 1, 1, 0 }, { "volSlices", 1664, 4, 1, 0, 0 },
+	{ "volProbe", 1680, 1, 1, 1, 0 }, { "volFogBlend", 1684, 1, 1, 1, 0 }, { "volFar", 1696, 4, 1, 0, 0 },
+	{ "volPack", 1712, 4, 1, 0, 0 }, { "volPackDims", 1728, 4, 1, 0, 0 }, { "volAirMed", 1744, 4, 1, 0, 0 },
+	{ "volAirLayer", 1760, 4, 1, 0, 0 }, { "volAirGround", 1776, 4, 1, 0, 0 }, { "volAirFlags", 1792, 1, 1, 1, 0 },
+	{ "volAirTerrU", 1808, 4, 1, 0, 0 }, { "volAirTerrV", 1824, 4, 1, 0, 0 }, { "volAirTerrFU", 1840, 4, 1, 0, 0 },
+	{ "volAirTerrFV", 1856, 4, 1, 0, 0 }, { "volAirTerrRef", 1872, 1, 1, 0, 0 }, { "volAirRain", 1888, 4, 1, 0, 0 },
+	{ "volAirRainFar", 1904, 4, 1, 0, 0 }, { "volAirRainXf", 1920, 4, 1, 0, 4 }, { "volAirDrift", 1984, 4, 1, 0, 0 },
+	{ "volAirDriftUv", 2000, 4, 6, 0, 0 }, { "volAirDriftRed", 2096, 1, 1, 1, 0 },
+};
+inline constexpr int kT_precipcsBytes = 2112;
+inline constexpr FxField kT_precipps[] = {
+	{ "pcHasTex", 0, 1, 1, 1, 0 }, { "pcFar", 4, 1, 1, 1, 0 }, { "pcAtlas", 16, 4, 1, 0, 0 },
+	{ "pcNear", 32, 2, 1, 0, 0 },
+};
+inline constexpr int kT_precippsBytes = 48;
+// slice 3: the look's members past those (precip_look_view_cs / _ps, cell_precip_look.prog), packed into the same bytes
+inline constexpr FxField kT_preciplookcs[] = {
+	{ "pcLook", 2100, 1, 1, 1, 0 }, { "pcMmPerView", 2104, 1, 1, 0, 0 },
+};
+inline constexpr FxField kT_preciplookps[] = {
+	{ "pcLook", 40, 1, 1, 1, 0 }, { "pcHasN", 44, 1, 1, 1, 0 }, { "pcClump", 48, 2, 1, 0, 0 }, { "pcAlbedo", 56, 1, 1, 0, 0 },
+	{ "pcTrans", 60, 1, 1, 0, 0 },
+};
+inline constexpr int kT_preciplookpsBytes = 64;
+struct PrecipRun
+{
+	int w = 0, h = 0, vp[4] = {};    //!< the tone frame's size, GL's viewport
+	unsigned color = 0;             //!< the tone frame's colour (toneFrameIs)
+	int first = 0, n = 0;           //!< the run: glDrawArrays( GL_POINTS, first, n )
+	bool lit = false, fogged = false, roofOn = false;  //!< lit and roofOn refused (GL draws); fogged: slice 2a
+	bool look = false;              //!< slice 3: cell_precip_look.prog's run (cs / ps also hold kT_preciplook*)
+	FxTex tex[8];                   //!< t0 pcRoof (none yet), t1 pcTex (the atlas), the air's t25 atApTex, t26 volTex, t27 volTile, t28 volAirTerr, t29 volAirRainMap, the look's pcTexN
+	std::uint8_t cs[kT_precipcsBytes] = {};  //!< fxPack( cell_precip_gpu, kT_precipcs ) (+ kT_preciplookcs for a look run)
+	std::uint8_t ps[kT_preciplookpsBytes] = {};  //!< fxPack( cell_precip_gpu, kT_precipps ) (+ kT_preciplookps for a look run)
+	int red = 0;                    //!< gates only: 1 the cull radius 0, 2 the strip's last two corners swapped, 4 no near fade, 8 the air dropped, 16 the look dropped (the plain pipelines draw a look run)
+};
+/* GL current, the tone frame bound, cell_precip_gpu's uniforms set: one run of particles on Vulkan, a record pass then
+ * instanced quads (depth LEQUAL no write, blend SRC_ALPHA / ONE_MINUS_SRC_ALPHA, stencil ALWAYS ref 1 REPLACE mask 0x03,
+ * as GL's). false: why; nothing drawn (GL draws its points) */
+bool precipRun( const PrecipRun & t, std::string & why );
+void precipOnGl( const char * why );
+FxStat takePrecipStat();
+
 // lane VKFAR2 (row P4b): the fog bloom's own pass (fogbloom_view_ps's b31, spirv-cross --reflect of the shipped SPIR-V)
 inline constexpr FxField kT_fogbloom[] = {
 	{ "fogOn", 0, 1, 1, 1, 0 }, { "fogK", 16, 4, 6, 0, 0 }, { "fogView", 112, 4, 1, 0, 0 },
@@ -720,6 +782,19 @@ struct PostRun
 bool tonePostQueue( const PostRun & p, std::string & why );
 void tonePostOnGl( const char * why );
 FxStat takeTonePostStat();
+/* the kernels are built when their pass first runs, not all on the first queue. Per part (tonePostPart: the sources, dof,
+ * lens, motion blur with its fused kernels, object blur, copy back): pipelines built and their ms since launch; most: the
+ * most one queue built, and that queue's build ms */
+constexpr int kPostParts = 6;
+struct PostBuild
+{
+	int pipes[kPostParts] = {};
+	double ms[kPostParts] = {};
+	int most = 0;
+	double mostMs = 0.0;
+};
+PostBuild tonePostBuild();
+const char * tonePostPart( int k );
 
 /* Lane VKOBJ1 (plan row G4, slice 1): the objects' opaque depth prepass (cellgpucull.cpp, lookdev_csmdepth_q.prog) on the
  * present device into a shared multisample depth target (sharedTarget type 0 with samples, GL_DEPTH_COMPONENT24 / 32F) that

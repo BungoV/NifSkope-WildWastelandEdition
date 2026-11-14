@@ -29,6 +29,9 @@ enum P7Pipe { kP7Res, kP7Dep, kP7Down, kP7Blur, kP7Comp, kP7LensComp, kP7LensPre
 constexpr int kP7Sets = 24;      // one per op (at most 20) + the copy back's
 constexpr int kP7Ops = 24;
 constexpr int kP7LensTileSize = 8;  // cellpost.cpp's kLensTile
+// each kernel's part (vkpresent.h kPostParts: 0 the sources, 1 the game's DoF, 2 the thin lens, 3 the motion blur and its fused
+// kernels, 4 the object blur; 5 the copy back)
+constexpr int kP7PartOf[kP7Pipes] = { 0, 0, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 4, 4, 4 };
 
 // one recorded step: a dispatch (its own set and push block), an image copy, or a clear of up to two images
 struct P7Op
@@ -55,6 +58,11 @@ struct Post7
 	VkRenderPass copyPass = VK_NULL_HANDLE;
 	int copySamples = 0, pipelines = 0;
 	double buildMs = 0.0;
+	// the kernels built per part and their ms; most: the most one queue built, and that queue's build ms
+	int partPipes[WwVkPresent::kPostParts] = {};
+	double partMs[WwVkPresent::kPostParts] = {};
+	int most = 0;
+	double mostMs = 0.0;
 	// the images, per frame shape (W x H, the view's samples); fresh: made since the last record (UNDEFINED)
 	int W = 0, H = 0, S = 0;
 	BloomImg msCol, cur, depth, blur[2], mv, out, lensFar, lensNear, lensTile[2], obVec, obTile[2], fill;
@@ -86,11 +94,10 @@ std::uintptr_t p7VelKey()
 }
 
 /* device-time parts (once): the set layout (0-4 sampled, 5 linear, 6 point, 7 / 8 storage; compute and the copy's fragment
- * stage), the pool, the samplers and the 16 compute pipelines */
+ * stage), the pool, the samplers and the copy's module (the 16 compute kernels: p7Kernel, when a pass first runs) */
 bool p7Static( std::string & why )
 {
 	Vk & v = vk();
-	Tone & T = tone();
 	Post7 & P = post7();
 	if ( P.made )
 		return true;
@@ -148,12 +155,27 @@ bool p7Static( std::string & why )
 		why = "the post passes' sets, layout, samplers or copy module failed";
 		return false;
 	}
+	P.buildMs += nowMs() - t0;
+	P.made = true;
+	return true;
+}
+
+/* one kernel, built the first time a queue's ops use it (lane VKFAR2: all 16 on the first queue stalled the drawing thread
+ * 621 ms); its ms go to its part */
+bool p7Kernel( int k, std::string & why )
+{
+	Vk & v = vk();
+	Tone & T = tone();
+	Post7 & P = post7();
+	if ( P.pipe[k] )
+		return true;
+	const double t0 = nowMs();
 	struct Code
 	{
 		const std::uint32_t * code;
 		std::size_t bytes;
 	};
-	const Code codes[kP7Pipes] = { { vkframe_p7_res_spv, sizeof( vkframe_p7_res_spv ) }, { vkframe_p7_dep_spv, sizeof( vkframe_p7_dep_spv ) },
+	static const Code codes[kP7Pipes] = { { vkframe_p7_res_spv, sizeof( vkframe_p7_res_spv ) }, { vkframe_p7_dep_spv, sizeof( vkframe_p7_dep_spv ) },
 		{ vkframe_p7_dof_down_spv, sizeof( vkframe_p7_dof_down_spv ) }, { vkframe_p7_dof_blur_spv, sizeof( vkframe_p7_dof_blur_spv ) },
 		{ vkframe_p7_dof_comp_spv, sizeof( vkframe_p7_dof_comp_spv ) }, { vkframe_p7_lens_comp_spv, sizeof( vkframe_p7_lens_comp_spv ) },
 		{ vkframe_p7_lens_prep_spv, sizeof( vkframe_p7_lens_prep_spv ) }, { vkframe_p7_lens_tile_spv, sizeof( vkframe_p7_lens_tile_spv ) },
@@ -161,34 +183,53 @@ bool p7Static( std::string & why )
 		{ vkframe_p7_dofmblur_spv, sizeof( vkframe_p7_dofmblur_spv ) }, { vkframe_p7_lensmblur_spv, sizeof( vkframe_p7_lensmblur_spv ) },
 		{ vkframe_p7_mv_spv, sizeof( vkframe_p7_mv_spv ) }, { vkframe_p7_ob_vec_spv, sizeof( vkframe_p7_ob_vec_spv ) },
 		{ vkframe_p7_ob_tile_spv, sizeof( vkframe_p7_ob_tile_spv ) }, { vkframe_p7_ob_spv, sizeof( vkframe_p7_ob_spv ) } };
-	for ( int k = 0; k < kP7Pipes; k++ ) {
-		VkShaderModuleCreateInfo cm { VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO };
-		cm.codeSize = codes[k].bytes;
-		cm.pCode = codes[k].code;
-		VkShaderModule mod = VK_NULL_HANDLE;
-		if ( v.vkCreateShaderModule( v.dev, &cm, nullptr, &mod ) != VK_SUCCESS ) {
-			why = "the post passes' kernel " + std::to_string( k ) + ": vkCreateShaderModule failed";
-			return false;
-		}
-		VkComputePipelineCreateInfo cp { VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO };
-		cp.stage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-		cp.stage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
-		cp.stage.module = mod;
-		cp.stage.pName = "main";
-		cp.layout = P.layout;
-		const VkResult r = v.vkCreateComputePipelines( v.dev, T.cache, 1, &cp, nullptr, &P.pipe[k] );
-		v.vkDestroyShaderModule( v.dev, mod, nullptr );
-		if ( r != VK_SUCCESS ) {
-			P.pipe[k] = VK_NULL_HANDLE;
-			why = "the post passes' kernel " + std::to_string( k ) + ": vkCreateComputePipelines failed";
-			return false;
-		}
-		P.pipelines++;
+	VkShaderModuleCreateInfo cm { VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO };
+	cm.codeSize = codes[k].bytes;
+	cm.pCode = codes[k].code;
+	VkShaderModule mod = VK_NULL_HANDLE;
+	if ( v.vkCreateShaderModule( v.dev, &cm, nullptr, &mod ) != VK_SUCCESS ) {
+		why = "the post passes' kernel " + std::to_string( k ) + ": vkCreateShaderModule failed";
+		return false;
 	}
-	toneCacheSave();
-	P.buildMs += nowMs() - t0;
-	P.made = true;
+	VkComputePipelineCreateInfo cp { VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO };
+	cp.stage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+	cp.stage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+	cp.stage.module = mod;
+	cp.stage.pName = "main";
+	cp.layout = P.layout;
+	const VkResult r = v.vkCreateComputePipelines( v.dev, T.cache, 1, &cp, nullptr, &P.pipe[k] );
+	v.vkDestroyShaderModule( v.dev, mod, nullptr );
+	if ( r != VK_SUCCESS ) {
+		P.pipe[k] = VK_NULL_HANDLE;
+		why = "the post passes' kernel " + std::to_string( k ) + ": vkCreateComputePipelines failed";
+		return false;
+	}
+	const double ms = nowMs() - t0;
+	P.pipelines++;
+	P.buildMs += ms;
+	P.partPipes[kP7PartOf[k]]++;
+	P.partMs[kP7PartOf[k]] += ms;
 	return true;
+}
+
+// harness only (toneview.cpp's red 7): the kernels dropped, as before the first queue (the copy back and the sets stay)
+void p7KernelsDrop()
+{
+	Vk & v = vk();
+	Post7 & P = post7();
+	v.vkDeviceWaitIdle( v.dev );
+	for ( VkPipeline & p : P.pipe )
+		if ( p ) {
+			v.vkDestroyPipeline( v.dev, p, nullptr );
+			p = VK_NULL_HANDLE;
+			P.pipelines--;
+		}
+	for ( int k = 0; k < WwVkPresent::kPostParts - 1; k++ ) {
+		P.partPipes[k] = 0;
+		P.partMs[k] = 0.0;
+	}
+	P.most = 0;
+	P.mostMs = 0.0;
 }
 
 /* the copy back in the tone pass (its samples): tone_view_vs's triangle, post7_copy_ps, no blend, no depth or stencil test
@@ -255,9 +296,11 @@ bool p7CopyPipe( std::string & why )
 	}
 	P.copyPass = T.pass;
 	P.copySamples = T.pipeSamples;
+	const double took = nowMs() - t0;
 	P.pipelines++;
-	P.buildMs += nowMs() - t0;
-	toneCacheSave();
+	P.buildMs += took;
+	P.partPipes[WwVkPresent::kPostParts - 1]++;
+	P.partMs[WwVkPresent::kPostParts - 1] += took;
 	return true;
 }
 
@@ -513,6 +556,8 @@ bool tonePostQueue( const PostRun & p, std::string & why )
 	if ( p.ob && ( p.tile < 1 || p.samples < 1 ) )
 		return refuse( "object blur tile " + std::to_string( p.tile ) + " samples " + std::to_string( p.samples ) );
 	std::string w;
+	const int hadPipes = P.pipelines;
+	const double hadMs = P.buildMs;
 	if ( !p7Static( w ) || !p7CopyPipe( w ) || !p7Images( p.w, p.h, V.samples, w ) || ( p.ob && !p7ObTiles( p.tile, w ) ) )
 		return breakOff( w );
 	// the object blur's inputs: GL's velocity and mask copied into shared twins (the crossing's names)
@@ -742,6 +787,21 @@ bool tonePostQueue( const PostRun & p, std::string & why )
 		run( kP7Ob, { picture->view, P.obVec.view, P.obTile[1].view, P.depth.view }, dst, nullptr, b );
 		picture = &dst;
 	}
+	// the kernels this queue's ops use, built the first time their pass runs (red 7: all 16 now, the old first-queue build)
+	bool use[kP7Pipes] = {};
+	for ( int k = 0; k < nOps; k++ )
+		if ( P.ops[k].kind == 0 )
+			use[P.ops[k].pipe] = true;
+	for ( int k = 0; k < kP7Pipes; k++ )
+		if ( ( use[k] || postRedTest == 7 ) && !p7Kernel( k, w ) )
+			return breakOff( w );
+	if ( P.pipelines != hadPipes ) {
+		toneCacheSave();
+		if ( P.pipelines - hadPipes > P.most ) {
+			P.most = P.pipelines - hadPipes;
+			P.mostMs = P.buildMs - hadMs;
+		}
+	}
 	P.copySet = setOf( { picture->view }, VK_NULL_HANDLE, VK_NULL_HANDLE );
 	v.vkUpdateDescriptorSets( v.dev, std::uint32_t( nw ), ws, 0, nullptr );
 	for ( int k = 0; k < 2; k++ )
@@ -775,5 +835,24 @@ FxStat takeTonePostStat()
 		s.failWhy = P.brokenWhy;
 	P.st = FxStat();
 	return s;
+}
+
+PostBuild tonePostBuild()
+{
+	const Post7 & P = post7();
+	PostBuild b;
+	for ( int k = 0; k < kPostParts; k++ ) {
+		b.pipes[k] = P.partPipes[k];
+		b.ms[k] = P.partMs[k];
+	}
+	b.most = P.most;
+	b.mostMs = P.mostMs;
+	return b;
+}
+
+const char * tonePostPart( int k )
+{
+	static const char * const kName[kPostParts] = { "sources", "dof", "lens", "motion blur", "object blur", "copy back" };
+	return k >= 0 && k < kPostParts ? kName[k] : "";
 }
 }  // namespace WwVkPresent

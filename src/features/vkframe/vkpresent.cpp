@@ -57,6 +57,13 @@
 #include "features/vkframe/fardots_view_ps.spv.h"
 #include "features/vkframe/fogbloom_view_ps.spv.h"  // lane VKFAR2 (row P4b): the fog bloom's own pass (vkfogbloom.inc)
 #include "features/vkframe/cloud_composite_view_ps.spv.h"  // lane VKFAR2 (row P8): the clouds in front (vkcloudfront.inc)
+// lane VKFAR2 (row L8 slice 1): rain / snow as a record pass + instanced quads (vkprecip.inc)
+#include "features/vkframe/precip_view_cs.spv.h"
+#include "features/vkframe/precip_view_vs.spv.h"
+#include "features/vkframe/precip_view_ps.spv.h"
+#include "features/vkframe/precip_look_view_cs.spv.h"  // slice 3: the precipitation look
+#include "features/vkframe/precip_look_view_vs.spv.h"
+#include "features/vkframe/precip_look_view_ps.spv.h"
 #include "features/vkframe/vkfarcards.h"  // lane VKFAR1 round 2: the far cards' inputs (vkfarcards.inc)
 #include "features/vkframe/obj_depth_vs.spv.h"  // lane VKOBJ1
 
@@ -714,6 +721,7 @@ bool fcRecord( std::string & why );   // lane VKFAR2 (vkfarcardsdraw.inc): fxWor
 bool waterRecord( std::string & why );  // lane VKWATER3 (vkwater.inc): fxWork's kind 4 (VKFAR2: and 5, the far LOD rings)
 bool fbRecord( std::string & why );  // lane VKFAR2 (vkfogbloom.inc): fxWork's kind 6, the fog bloom
 bool cfRecord( std::string & why );  // lane VKFAR2 (vkcloudfront.inc): fxWork's kind 7, the clouds in front
+bool precipRecord( std::string & why );  // lane VKFAR2 (vkprecip.inc): fxWork's kind 8, rain / snow
 void waterDrop();
 void objDrop();  // lane VKOBJ1
 void blFree();  // lane VKOBJ2
@@ -2705,7 +2713,8 @@ bool flRecordIn( VkCommandBuffer cmd );
 /* lane VKFAR2 P7: cellpost.cpp's post passes queued into a deferred tone pass (vkpost7.inc), recorded before the flare (GL's
  * order: the post passes, then the flare, then the TAA). Harness only (toneview.cpp's P7 reds, must FAIL): 1 = the resolve
  * takes sample 0, 2 = the DoF blur skipped, 3 = the lens gather skipped, 4 = the vectors zero, 5 = the object blur's tile
- * passes skipped, 6 = the fused pass replaced by the plain blur */
+ * passes skipped, 6 = the fused pass replaced by the plain blur, 7 = all 16 kernels built on this queue (the old first-queue
+ * stall) */
 int postRedTest = 0;
 void p7ToneReset();
 bool p7Record( VkCommandBuffer cmd, const VkRenderPassBeginInfo & rbi );
@@ -5373,7 +5382,7 @@ struct Fx
 	VkFence fence = VK_NULL_HANDLE;
 	bool pending = false;
 	// this run's job, written by the drawing thread before the hand
-	int kind = 0;  // 0 the air, 1 the clouds, 2 the far dots (lane VKFAR1), 3 the far cards (lane VKFAR2), 4 the water draw (lane VKWATER3), 6 the fog bloom (lane VKFAR2)
+	int kind = 0;  // 0 the air, 1 the clouds, 2 the far dots (lane VKFAR1), 3 the far cards (lane VKFAR2), 4 the water draw (lane VKWATER3), 6 the fog bloom (lane VKFAR2), 8 rain / snow (lane VKFAR2)
 	VkFramebuffer fbAir = VK_NULL_HANDLE, fbM = VK_NULL_HANDLE, fbR = VK_NULL_HANDLE;
 	int w = 0, h = 0, vp[4] = {}, stencilRef = 1, march = kFxMarch, resolve = kFxResolve, mw = 0, mh = 0, hw = 0, hh = 0;
 	bool blend = false, skipMarch = false;
@@ -5823,6 +5832,11 @@ bool fxWork( std::string & why )
 		}
 	} else if ( F.kind == 7 ) {  // lane VKFAR2 (row P8): the clouds in front of the scene
 		if ( !cfRecord( why ) ) {
+			v.vkEndCommandBuffer( F.cmd );
+			return false;
+		}
+	} else if ( F.kind == 8 ) {  // lane VKFAR2 (row L8): rain / snow
+		if ( !precipRecord( why ) ) {
 			v.vkEndCommandBuffer( F.cmd );
 			return false;
 		}
@@ -6286,6 +6300,7 @@ FxStat takeCloudStat()
 #include "features/vkframe/vkfarcardsdraw.inc"  // lane VKFAR2: the far cards drawn on the view
 #include "features/vkframe/vkfogbloom.inc"  // lane VKFAR2 (row P4b): the fog bloom's own pass
 #include "features/vkframe/vkcloudfront.inc"  // lane VKFAR2 (row P8): the clouds in front of the scene
+#include "features/vkframe/vkprecip.inc"  // lane VKFAR2 (row L8 slice 1): rain / snow on the view
 
 // lane VKLIGHT1: AO, the contact shadow lines and the SSGI cast as compute on the present device (vkpresent.h LightRun)
 namespace
