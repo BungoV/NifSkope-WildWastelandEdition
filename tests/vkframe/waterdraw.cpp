@@ -270,9 +270,15 @@ bool fill( Smp & s, std::mt19937 & rng )
 		} else if ( s.fmt == 0x8CAD ) {
 			pf = 0x84F9;  // DEPTH_STENCIL
 			ty = 0x8DAD;  // FLOAT_32_UNSIGNED_INT_24_8_REV
+			/* piece 2: a seeded smooth scene depth (two low waves per axis), as a drawn scene's: per-texel noise turned the
+			 * refraction fetch's truncated texel (ivec2( offUV * size )) into a coin, one ulp of offUV a different depth
+			 * (base and d 1665 .. 37453 samples past on other draws, every one gone with waterHaveDepth 0) */
 			data.resize( n * 2 );
+			const float fx = float( 1 + ( rng() & 1u ) ) * 6.2831853f / float( lw ), fy = float( 1 + ( rng() & 1u ) ) * 6.2831853f / float( lh );
+			const float p0 = 6.2831853f * u01( rng ), p1 = 6.2831853f * u01( rng );
 			for ( size_t i = 0; i < n; i++ ) {
-				const float dv = 0.3f + 0.7f * u01( rng );
+				const float x = float( i % size_t( lw ) ), y = float( ( i / size_t( lw ) ) % size_t( lh ) );
+				const float dv = 0.3f + 0.7f * ( 0.5f + 0.5f * std::sin( fx * x + p0 ) * std::cos( fy * y + p1 ) );
 				std::memcpy( &data[i * 2], &dv, 4 );
 				data[i * 2 + 1] = 0;
 			}
@@ -314,6 +320,11 @@ int seedUnis( GLuint p, std::mt19937 & rng )
 	GLint n = 0;
 	f.getProgramiv( p, fActiveUnis, &n );
 	int set = 0;
+	/* piece 2: each name draws from its own stream (the seed's one draw ^ FNV-1a of the name), so a name holds the same
+	 * value in every variant: one stream in GL's active order shifted every later draw by the variant's uniform set */
+	std::uint32_t s0 = std::uint32_t( rng() );
+	if ( const char * sa = std::getenv( "WATERDRAW_SALT" ) )	// diagnostic only (never in a gate run): another draw per name
+		s0 ^= std::uint32_t( std::strtoul( sa, nullptr, 10 ) ) * 0x9E3779B9u;
 	for ( GLint i = 0; i < n; i++ ) {
 		char nm[256] = {};
 		GLint sz = 0;
@@ -354,10 +365,16 @@ int seedUnis( GLuint p, std::mt19937 & rng )
 		const bool zero = base == "farInst" || base == "farStreamOn" || base == "farSwayAmp" || base == "lodTreeAnim"
 			|| base == "wwGrassWind2" || base == "wwTreeWind2" || base == "farVcAo" || base == "lodViewCode"
 			|| base == "vertexColorOverride" || base.find( "Red" ) != std::string::npos || base.find( "red" ) != std::string::npos;
+		std::uint32_t h = 2166136261u;
+		for ( const char c : base )
+			h = ( h ^ std::uint8_t( c ) ) * 16777619u;
+		std::mt19937 nr( s0 ^ h );
 		for ( size_t k = 0; k < total; k++ ) {
-			fv[k] = zero ? 0.0f : u01( rng );
-			iv[k] = zero ? 0 : GLint( rng() & 1u );
+			fv[k] = zero ? 0.0f : u01( nr );
+			iv[k] = zero ? 0 : GLint( nr() & 1u );
 		}
+		if ( std::getenv( "WATERDRAW_DUMPI" ) && ( kind == 'i' || kind == 'u' ) && iv[0] != 0 )	// diagnostic only
+			std::printf( "WATERDRAW int %s = %d\n", base.c_str(), int( iv[0] ) );
 		if ( base == "modelViewMatrix" || base == "normalMatrix" ) {
 			const int dim = kind == '4' ? 4 : 3;
 			for ( int r = 0; r < dim; r++ )
@@ -861,6 +878,34 @@ int main( int argc, char ** argv )
 			if ( !fill( s, rng ) )
 				return fatal( "texture " + s.name );
 		const int nu = seedUnis( pWater, rng );
+		/* piece 2: a probe twin (fo4_waterlookp / dp) seeded 0 / 1 drew probe 1, the normal, which reads no texture (red 2
+		 * blind). Its look under probe 0 on seeds 1 and 3 (the reds judged there), probe 25 (the light it writes) on seed 2 */
+		if ( f.getUniformLocation( pWater, "waterProbe" ) >= 0 ) {
+			f.useProgram( pWater );
+			const GLint pr = seed == 2 ? 25 : 0;
+			f.uniform1iv( f.getUniformLocation( pWater, "waterProbe" ), 1, &pr );
+			std::printf( "WATERDRAW seed %d: waterProbe %d\n", seed, int( pr ) );
+		}
+		// diagnostic only (never in a gate run): WATERDRAW_SETI=name=v[,name=v] sets int uniforms on every seed
+		if ( const char * si = std::getenv( "WATERDRAW_SETI" ) ) {
+			f.useProgram( pWater );
+			std::string all( si );
+			for ( size_t a = 0; a < all.size(); ) {
+				size_t e = all.find( ',', a );
+				if ( e == std::string::npos )
+					e = all.size();
+				const std::string kv = all.substr( a, e - a );
+				const size_t q = kv.find( '=' );
+				if ( q != std::string::npos ) {
+					const GLint v = GLint( std::atoi( kv.c_str() + q + 1 ) );
+					const GLint l = f.getUniformLocation( pWater, kv.substr( 0, q ).c_str() );
+					if ( l >= 0 )
+						f.uniform1iv( l, 1, &v );
+					std::printf( "WATERDRAW diagnostic: %s = %d%s\n", kv.substr( 0, q ).c_str(), int( v ), l >= 0 ? "" : " (no location)" );
+				}
+				a = e + 1;
+			}
+		}
 		if ( seed == 3 ) {
 			/* the info zero (integer inputs) names no body: wwOcBody finds no set and the ds adds nothing. One sea body
 			 * over the whole lookup: every index tile uniform with word body 1 | open-water shore and depth codes, body

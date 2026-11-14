@@ -462,14 +462,14 @@ struct VkWaterArm
 	NifSkopeOpenGLContext::GLFunctions * fn = nullptr;
 	GLuint prog = 0;
 	unsigned int color = 0;
-	int variant = 0;	// WwVkPresent::WaterVariant (item 4: fo4_waterlook / fo4_waterlookd)
+	int variant = 0;	// WwVkPresent::WaterVariant (item 4: fo4_waterlook / d / m / p / dp)
 };
 static VkWaterArm g_vkWaterArm;
 static char g_vkWaterKeys[128];	// the twins' keys (key + slot index)
 
 /* lane VKWATER1 (row G5): the water on the Vulkan view (WW_VKVIEW=1; red WW_VKVIEW_WATER_RED=1). A census of the program GL
  * draws with (a new program, or every 5 s), its verdict against the present device, the `vk water:` line.
- * lane VKWATER3: a clear verdict on a program with twins (WwVkPresent::waterVariantOf: fo4_waterlook, fo4_waterlookd) and
+ * lane VKWATER3: a clear verdict on a program with twins (WwVkPresent::waterVariantOf: fo4_waterlook / d / m / p / dp) and
  * their defines into the shared tone frame arms the shape's draw for the present device; anything else stays on GL with
  * its reason. */
 static void wwCellWaterVkRoute( NifSkopeOpenGLContext::GLFunctions * fn, NifSkopeOpenGLContext::Program * program )
@@ -500,7 +500,7 @@ static void wwCellWaterVkRoute( NifSkopeOpenGLContext::GLFunctions * fn, NifSkop
 	if ( !verdict.empty() )
 		no = verdict.c_str();
 	else if ( variant < 0 )
-		no = "this water program has no Vulkan twin (fo4_waterlook / fo4_waterlookd only)";
+		no = "this water program has no Vulkan twin (fo4_waterlook / d / m / p / dp only)";
 	else if ( !wwFogLeakShaderDefine() )
 		no = "WW_CELL_FOGLEAK=0: GL's program is not the Vulkan twin";
 	else if ( !program->wwShadowFrame && WwVkPresent::waterPsReads( variant, "wwShadowFrame" ) )

@@ -6,6 +6,9 @@
 #include "features/vkframe/water_view_hs.spv.h"  // item 4: the tessellated variant (fo4_waterlookd)
 #include "features/vkframe/water_view_ds.spv.h"
 #include "features/vkframe/water_view_d_ps.spv.h"
+#include "features/vkframe/water_view_m_ps.spv.h"  // piece 2: fo4_waterlookm, fo4_waterlookp, fo4_waterlookdp
+#include "features/vkframe/water_view_p_ps.spv.h"
+#include "features/vkframe/water_view_dp_ps.spv.h"
 
 namespace
 {
@@ -64,10 +67,16 @@ int waterStages( int v, WaterStage * out )
 		out[n++] = { vkframe_water_view_ds_spv, sizeof( vkframe_water_view_ds_spv ), VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT,
 			kN_waterDs, waterN( kN_waterDs ) };
 	}
-	if ( v == kWaterLookD )
-		out[n++] = { vkframe_water_view_d_ps_spv, sizeof( vkframe_water_view_d_ps_spv ), VK_SHADER_STAGE_FRAGMENT_BIT, t.psNames, t.psNamesN };
-	else
-		out[n++] = { vkframe_water_view_ps_spv, sizeof( vkframe_water_view_ps_spv ), VK_SHADER_STAGE_FRAGMENT_BIT, t.psNames, t.psNamesN };
+	const std::uint32_t * ps = vkframe_water_view_ps_spv;
+	std::size_t psBytes = sizeof( vkframe_water_view_ps_spv );
+	switch ( v ) {
+	case kWaterLookD: ps = vkframe_water_view_d_ps_spv, psBytes = sizeof( vkframe_water_view_d_ps_spv ); break;
+	case kWaterLookM: ps = vkframe_water_view_m_ps_spv, psBytes = sizeof( vkframe_water_view_m_ps_spv ); break;
+	case kWaterLookP: ps = vkframe_water_view_p_ps_spv, psBytes = sizeof( vkframe_water_view_p_ps_spv ); break;
+	case kWaterLookDp: ps = vkframe_water_view_dp_ps_spv, psBytes = sizeof( vkframe_water_view_dp_ps_spv ); break;
+	default: break;
+	}
+	out[n++] = { ps, psBytes, VK_SHADER_STAGE_FRAGMENT_BIT, t.psNames, t.psNamesN };
 	return n;
 }
 
