@@ -1,5 +1,6 @@
-// HLSL source of features/far-lod/lodgen_bc7.glsl (compute shader), lane FO4MATCH1 (notes/hlsltools/glsl2hlsl.py): one readable file for every
-// variant, the GLSL's comments, names and order kept. Loose uniforms are the LooseUniforms cbuffer (b31).
+// HLSL source of features/far-lod/lodgen_bc7.glsl (compute shader), the hand-kept twin of lane FO4MATCH1 (the
+// translator refuses its %TABLES% host template: the tables are written out, tests/hlslmatch/bc7tables.py checks them):
+// one readable file for every variant, the GLSL's comments, names and order kept.
 // variants: #if none (the loader's defines; res/shaders/hlsl/variants.txt lists the sets built)
 // profile: cs_6_0
 // GL compiles the GLSL from text (src/features/far-lod/lodgengpu.cpp bc7Source()): its %TABLES% line is

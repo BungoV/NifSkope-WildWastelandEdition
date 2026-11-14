@@ -1,5 +1,10 @@
-// HLSL source of fo4_default.frag (fragment shader), lane HLSLSRC1 (notes/hlsltools/glsl2hlsl.py): one readable file for every
-// variant, the GLSL's comments, names and order kept. Loose uniforms are the LooseUniforms cbuffer (b31).
+// HLSL source of fo4_default.frag (fragment shader), the hand-kept twin of lane HLSLSRC1: notes/hlsltools/glsl2hlsl.py's
+// text, one readable file for every variant, the GLSL's comments, names and order kept. Loose uniforms are the
+// LooseUniforms cbuffer (b31). Hand parts (FO4MATCH1), so g2h_mods.sh never regenerates it:
+//   - the vanilla path's terms are the game's (Schlick ^5 + lobe cap 15, ambSpecGame, sunTailGame, Oren-Nayar), HLSL only;
+//   - bindless (WW_BINDLESS): the thin twins near/fo4_cellbl, fo4_cellcsmbl and fo4_defaultbl include this file; the
+//     maps come from near/ww_bindless.hlsli (the route picks GL handles or Vulkan indices), the plain maps keep t50-t56,
+//     the registers after them keep t57-t62, and the row comes flat from the vertex stage (wwBlRow, TEXCOORD16).
 // variants: #if WW_CELL_FOGLEAK, WW_CELL_RESTIR, WW_CELL_RESTIRGI, WW_CELL_RTDDGI, WW_CELL_RTDDGI_CASCADES, WW_FRAME_UBO (the loader's defines; res/shaders/hlsl/variants.txt lists the sets built)
 // profile: ps_6_0
 #include "CoreBindingsVk.hlsli"

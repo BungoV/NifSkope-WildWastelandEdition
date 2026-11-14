@@ -1,5 +1,7 @@
-// HLSL source of fo4_default.vert (vertex shader), lane HLSLSRC1 (notes/hlsltools/glsl2hlsl.py): one readable file for every
-// variant, the GLSL's comments, names and order kept. Loose uniforms are the LooseUniforms cbuffer (b31).
+// HLSL source of fo4_default.vert (vertex shader), the hand-kept twin of lane HLSLSRC1: notes/hlsltools/glsl2hlsl.py's
+// text, one readable file for every variant, the GLSL's comments, names and order kept. Loose uniforms are the
+// LooseUniforms cbuffer (b31). Hand part (FO4MATCH1), so g2h_mods.sh never regenerates it: under WW_BL_VERT this main
+// sets the draw's row (wwBlRow = wwDrawBase + the base instance) for the thin bindless twins, and farStream keeps t50.
 // variants: #if none (the loader's defines; res/shaders/hlsl/variants.txt lists the sets built)
 // profile: vs_6_0
 #include "CoreBindingsVk.hlsli"
