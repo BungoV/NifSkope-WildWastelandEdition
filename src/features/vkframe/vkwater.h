@@ -374,8 +374,9 @@ constexpr int kTwinPsMax = kT_farlodPsBytes > kWaterPsLooseMax ? kT_farlodPsByte
  * Indices GL_UNSIGNED_SHORT triangles, or 3-vertex patches for a tessellated variant (bsshape's drawElements). */
 struct WaterRun
 {
-	int w = 0, h = 0;               //!< the tone frame's size
-	unsigned color = 0;             //!< the tone frame's colour (toneFrameIs)
+	int w = 0, h = 0;               //!< the target's size
+	unsigned color = 0;             //!< the tone frame's colour (toneFrameIs), or the ray target's (rayDepth set)
+	unsigned rayDepth = 0;          //!< lane VKWATER4: the water ray pass's depth twin (waterRayDepth); 0: the tone frame
 	int variant = kWaterLook;       //!< the caller's (waterVariantOf GL's program), before waterStateOf
 	WaterCensus census;
 	WaterAttrib attr[kWaterAttribs];
@@ -530,19 +531,23 @@ WaterCaps waterCaps();
  * 3D / array), VKFAR1's farTwin (BC 2D / array, cube-map arrays) or farTexelBuffer (texel buffers). false: why */
 bool waterTwin( std::uintptr_t key, const WaterSlot & s, unsigned & tex, std::string & why );
 void waterTwinDrop( std::uintptr_t key, const WaterSlot & s );
-//! one water draw stayed on GL (why: the verdict or the route's reason)
-void waterOnGl( const char * why );
+//! one water draw stayed on GL (why: the verdict or the route's reason; variant: its twin, -1 none)
+void waterOnGl( const char * why, int variant = -1 );
 struct WaterStat
 {
 	int gl = 0, census = 0;
 	std::string glWhy;
 	double censusMs = 0.0;
+	int vk[kWaterVariants] = {}, glV[kWaterVariants] = {};	// lane VKWATER4: per twin (look / d / m / p / dp)
 };
 WaterStat takeWaterStat();
 void waterCensusTook( double ms );
 /*! lane VKWATER3: the shaded water draw (r.variant's twins: fo4_default vs [+ fo4_waterdisp hs + ds] + the pixel twin)
  * into the tone frame on Vulkan, one crossing. false: why; nothing drawn (GL draws the shape) */
 bool waterRun( const WaterRun & r, std::string & why );
+/*! lane VKWATER4: the water ray pass's depth on the present device: a shared twin (key, w x h, GL's renderbuffer format,
+ * D24S8 or D32F_S8, 1 sample) GL copies the renderbuffer rb into, once a pass (the pass writes no depth). false: why */
+bool waterRayDepth( std::uintptr_t key, unsigned rb, unsigned glFmt, int w, int h, unsigned & tex, std::string & why );
 //! what waterRun cannot take on this device (empty: none)
 std::string waterDrawRefusal();
 FxStat takeWaterDrawStat();

@@ -463,6 +463,8 @@ struct VkWaterArm
 	GLuint prog = 0;
 	unsigned int color = 0;
 	int variant = 0;	// WwVkPresent::WaterVariant (item 4: fo4_waterlook / d / m / p / dp)
+	unsigned int depth = 0;	// lane VKWATER4: the water ray pass (color its target): its depth twin and size; 0 the tone frame
+	int w = 0, h = 0;
 };
 static VkWaterArm g_vkWaterArm;
 static char g_vkWaterKeys[128];	// the twins' keys (key + slot index)
@@ -495,9 +497,18 @@ static void wwCellWaterVkRoute( NifSkopeOpenGLContext::GLFunctions * fn, NifSkop
 		censusAt = now;
 	}
 	const char * no = nullptr;
-	unsigned int color = 0;
+	unsigned int color = 0, rayDepth = 0;
+	int rayW = 0, rayH = 0;
 	const int variant = WwVkPresent::waterVariantOf( program->name );
-	if ( !verdict.empty() )
+	// lane VKWATER4: one red per twin (=1: that twin stays on GL), read every draw
+	static const char * const kTwinRed[WwVkPresent::kWaterVariants] = { "WW_VKVIEW_WATER_LOOK_RED", "WW_VKVIEW_WATER_D_RED",
+		"WW_VKVIEW_WATER_M_RED", "WW_VKVIEW_WATER_P_RED", "WW_VKVIEW_WATER_DP_RED" };
+	static const char * const kTwinRedWhy[WwVkPresent::kWaterVariants] = { "red WW_VKVIEW_WATER_LOOK_RED=1 (fo4_waterlook on GL)",
+		"red WW_VKVIEW_WATER_D_RED=1 (fo4_waterlookd on GL)", "red WW_VKVIEW_WATER_M_RED=1 (fo4_waterlookm on GL)",
+		"red WW_VKVIEW_WATER_P_RED=1 (fo4_waterlookp on GL)", "red WW_VKVIEW_WATER_DP_RED=1 (fo4_waterlookdp on GL)" };
+	if ( variant >= 0 && variant < WwVkPresent::kWaterVariants && wwEnvInt( kTwinRed[variant] ) == 1 )
+		no = kTwinRedWhy[variant];
+	else if ( !verdict.empty() )
 		no = verdict.c_str();
 	else if ( variant < 0 )
 		no = "this water program has no Vulkan twin (fo4_waterlook / d / m / p / dp only)";
@@ -509,13 +520,18 @@ static void wwCellWaterVkRoute( NifSkopeOpenGLContext::GLFunctions * fn, NifSkop
 		GLint drawFb = 0;
 		fn->glGetIntegerv( GL_DRAW_FRAMEBUFFER_BINDING, &drawFb );
 		color = wwCellHdrVkToneColor( GLuint( drawFb ) );
-		if ( !color )
-			no = "the draw target is not the shared tone frame";
+		// lane VKWATER4: else the water ray pass's shared target (red WW_VKVIEW_WATER_RAY_RED=1 keeps it on GL)
+		if ( !color && wwCellSsrWaterRayPass( nullptr ) && variant != WwVkPresent::kWaterLookM )
+			no = "the water ray pass draws fo4_waterlookm alone on Vulkan (this twin there: WW_CELL_SSR_WATER_RED=1 or a probe)";
+		else if ( !color && wwCellSsrWaterRayPass( nullptr ) )
+			no = wwCellSsrVkRayTarget( GLuint( drawFb ), color, rayDepth, rayW, rayH );
+		else if ( !color )
+			no = "the draw target is neither the shared tone frame nor the water ray pass's target";
 	}
 	if ( no )
-		WwVkPresent::waterOnGl( no );
+		WwVkPresent::waterOnGl( no, variant );
 	else
-		g_vkWaterArm = VkWaterArm { fn, prog, color, variant };
+		g_vkWaterArm = VkWaterArm { fn, prog, color, variant, rayDepth, rayW, rayH };
 	WwVkPresent::waterSay( true, nullptr );
 }
 
@@ -528,14 +544,20 @@ bool wwCellWaterVkDraw( int indexCount )
 	GLint cur = 0;
 	a.fn->glGetIntegerv( GL_CURRENT_PROGRAM, &cur );
 	if ( GLuint( cur ) != a.prog ) {
-		WwVkPresent::waterOnGl( "another program at the shape's draw" );
+		WwVkPresent::waterOnGl( "another program at the shape's draw", a.variant );
 		return false;
 	}
 	static WwVkPresent::WaterRun r;
 	r = WwVkPresent::WaterRun();
 	r.variant = a.variant;	// before waterStateOf: its tables
 	WwVkPresent::waterStateOf( a.fn, a.prog, r );
-	wwCellHdrFrameSize( r.w, r.h );
+	if ( a.depth ) {	// lane VKWATER4: the water ray pass
+		r.w = a.w;
+		r.h = a.h;
+		r.rayDepth = a.depth;
+	} else {
+		wwCellHdrFrameSize( r.w, r.h );
+	}
 	r.color = a.color;
 	r.count = indexCount;
 	r.idxOff = WwBl::geo.on ? (long long) WwBl::geo.idxOff : 0;	// a pooled shape: its arena range
@@ -543,7 +565,7 @@ bool wwCellWaterVkDraw( int indexCount )
 	r.key = reinterpret_cast<std::uintptr_t>( g_vkWaterKeys );
 	std::string why;
 	if ( !WwVkPresent::waterRun( r, why ) ) {
-		WwVkPresent::waterOnGl( why.c_str() );
+		WwVkPresent::waterOnGl( why.c_str(), a.variant );
 		return false;
 	}
 	return true;
