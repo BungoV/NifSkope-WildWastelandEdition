@@ -2491,6 +2491,72 @@ bool objBlFrameSamples( unsigned colorTex, unsigned dsTex, std::vector<std::uint
 	return true;
 }
 
+/* lane VKOBJ5 (an unpooled bl shape, objBlShade's ownVao): the bound VAO as a pool, read as objCellShade reads it (lane
+ * VKWATER3's reader, kept as it is there): per location in `need` (comps: the stage's components) enabled, 1 to 4 floats or
+ * halves, not normalised or integer, divisor 0, its buffer / offset / stride; a disabled one must hold (0,0,0,1). The
+ * index buffer: the VAO's (GL_UNSIGNED_SHORT, BUFFER_SIZE / 2 indices). red 1 reads every attribute from offset 0 */
+static bool objOwnVao( GlProc gp, std::uint32_t need, const std::uint32_t * comps, int red, ObjBlPool & pool, std::string & why )
+{
+	using GetIv = void( WINAPI * )( unsigned, int * );
+	using GetIiv = void( WINAPI * )( unsigned, unsigned, int * );
+	using GetAfv = void( WINAPI * )( unsigned, unsigned, float * );
+	const auto getIv = gp ? reinterpret_cast<GetIv>( gp( "glGetIntegerv" ) ) : nullptr;
+	const auto getIiv = gp ? reinterpret_cast<GetIiv>( gp( "glGetIntegeri_v" ) ) : nullptr;
+	const auto getAiv = gp ? reinterpret_cast<GetIiv>( gp( "glGetVertexAttribiv" ) ) : nullptr;
+	const auto getAfv = gp ? reinterpret_cast<GetAfv>( gp( "glGetVertexAttribfv" ) ) : nullptr;
+	const auto getBiv = gp ? reinterpret_cast<GetIiv>( gp( "glGetNamedBufferParameteriv" ) ) : nullptr;
+	if ( !getIv || !getIiv || !getAiv || !getAfv || !getBiv )
+		return why = "GL has no glGetIntegeri_v / glGetVertexAttribiv / glGetVertexAttribfv / glGetNamedBufferParameteriv", false;
+	const std::size_t verts = pool.verts;
+	pool = ObjBlPool();
+	pool.verts = verts;
+	for ( unsigned l = 0; l < 16; l++ ) {
+		if ( !( need >> l & 1u ) )
+			continue;
+		const std::string at = "GL location " + std::to_string( l ) + ": ";
+		int on = 0, size = 0, type = 0, norm = 0, integer = 0, bind = 0, rel = 0, buf = 0, off = 0, stride = 0, div = 0;
+		getAiv( l, 0x8622u, &on );  // VERTEX_ATTRIB_ARRAY_ENABLED
+		if ( !on ) {
+			float c[4] = {};
+			getAfv( l, 0x8626u, c );  // CURRENT_VERTEX_ATTRIB
+			if ( c[0] != 0.0f || c[1] != 0.0f || c[2] != 0.0f || c[3] != 1.0f )
+				return why = at + "disabled with a current value other than (0,0,0,1)", false;
+			continue;  // the constant binding
+		}
+		getAiv( l, 0x8623u, &size );     // SIZE
+		getAiv( l, 0x8625u, &type );     // TYPE
+		getAiv( l, 0x886Au, &norm );     // NORMALIZED
+		getAiv( l, 0x88FDu, &integer );  // INTEGER
+		getAiv( l, 0x82D4u, &bind );     // VERTEX_ATTRIB_BINDING
+		getAiv( l, 0x82D5u, &rel );      // VERTEX_ATTRIB_RELATIVE_OFFSET
+		getIiv( 0x8F4Fu, unsigned( bind ), &buf );     // VERTEX_BINDING_BUFFER
+		getIiv( 0x82D7u, unsigned( bind ), &off );     // VERTEX_BINDING_OFFSET
+		getIiv( 0x82D8u, unsigned( bind ), &stride );  // VERTEX_BINDING_STRIDE
+		getIiv( 0x82D6u, unsigned( bind ), &div );     // VERTEX_BINDING_DIVISOR
+		if ( size < 1 || size > 4 || ( type != 0x1406 && type != 0x140B ) || norm || integer )
+			return why = at + "not 1 to 4 floats or halves (size " + std::to_string( size ) + ", type " + std::to_string( type ) + ")", false;
+		if ( div || !buf || off < 0 || rel < 0 || stride < 0 )
+			return why = at + "instanced, or no buffer", false;
+		const bool half = type == 0x140B;
+		if ( half && size == 3 && comps[l] > 3 )
+			return why = at + "3 halves the stage reads as 4", false;
+		pool.attrMask |= std::uint64_t( size ) << ( 4 * l );
+		pool.vbo[l] = unsigned( buf );
+		pool.offset[l] = red == 1 ? 0 : std::size_t( off ) + std::size_t( rel );
+		pool.stride[l] = std::uint32_t( stride );
+		pool.halfMask |= half ? 1u << l : 0u;
+	}
+	int ebo = 0, ebytes = 0;
+	getIv( 0x8895u, &ebo );  // ELEMENT_ARRAY_BUFFER_BINDING (the VAO's)
+	if ( ebo )
+		getBiv( unsigned( ebo ), 0x8764u, &ebytes );  // BUFFER_SIZE
+	if ( !ebo || ebytes < 2 )
+		return why = "the shape has no index buffer", false;
+	pool.ebo = unsigned( ebo );
+	pool.indices = std::size_t( ebytes ) / 2;
+	return true;
+}
+
 bool objBlShade( GlProc gp, const ObjBlShade & s, std::string & why )
 {
 	auto fail = [&]( const std::string & w ) {
@@ -2513,19 +2579,47 @@ bool objBlShade( GlProc gp, const ObjBlShade & s, std::string & why )
 	SpvModule vm;
 	if ( !spvReflect( d.vs, d.vsWords, vm, w2 ) )
 		return fail( "the vertex twin: " + w2 );
+	std::uint32_t comps[32] = {};  // lane VKOBJ5: the stage's components a location (objOwnVao)
 	for ( const SpvIo & in : vm.inputs ) {
 		const std::size_t at = in.name.find( "TEXCOORD" );
 		if ( at != std::string::npos )
-			for ( std::uint32_t j = 0; j < in.locs; j++ )
-				d.need |= 1u << ( ( std::atoi( in.name.c_str() + at + 8 ) + int( j ) ) & 31 );
+			for ( std::uint32_t j = 0; j < in.locs; j++ ) {
+				const int l = ( std::atoi( in.name.c_str() + at + 8 ) + int( j ) ) & 31;
+				d.need |= 1u << l;
+				comps[l] = in.comps;
+			}
 	}
 	d.poolKey = s.poolKey;
 	d.attrMask = s.pool.attrMask;
+	ObjBlPool own;  // lane VKOBJ5: an unpooled shape's VAO as its pool
+	if ( s.ownVao ) {
+		own.verts = s.pool.verts;
+		if ( !own.verts )
+			return fail( "the shape's VAO: no vertex count" );
+		if ( !objOwnVao( gp, d.need, comps, s.ownRed == 1 ? 1 : 0, own, w2 ) )
+			return fail( "the shape's VAO: " + w2 );
+		d.attrMask = own.attrMask;
+		d.halfMask = own.halfMask;
+		d.halfRed = s.ownRed == 2;
+		for ( int i = 0; i < 16; i++ )
+			d.attrStride[i] = own.stride[i];
+	}
 	ObjBlUniStat ust;
 	if ( !objBlMirror( gp, s.prog, d.vs, d.vsWords, d.ps, d.psWords, d.ubos, ust, w2 ) )
 		return fail( "the uniforms: " + w2 );
 	if ( !ust.mirrored )
 		return fail( "GL names none of the loose uniforms (a program linked from SPIR-V)" );
+	if ( s.rowsAtBase ) {  // lane VKOBJ5: the rows start at GL's wwDrawBase row, so Vulkan's wwDrawBase is 0
+		SpvModule pm;
+		const bool psOk = spvReflect( d.ps, d.psWords, pm, w2 );
+		for ( const SpvModule * mm : { &vm, psOk ? &pm : &vm } )
+			for ( const SpvBind & b : mm->binds )
+				for ( const SpvMember & m : b.members )
+					if ( m.name == "wwDrawBase" )
+						for ( auto & u : d.ubos )
+							if ( u.first == b.binding && m.offset + 4 <= u.second.size() )
+								std::memset( u.second.data() + m.offset, 0, 4 );
+	}
 	if ( s.skinRed )  // lane VKOBJ5 red `bone`: bone i reads bone i + 1's transform (48 bytes a bone)
 		for ( const SpvBind & b : vm.binds )
 			if ( b.name.find( "skinningUniforms" ) != std::string::npos )
@@ -2555,7 +2649,11 @@ bool objBlShade( GlProc gp, const ObjBlShade & s, std::string & why )
 		rs.compare += bst.compare;
 	}
 	std::vector<unsigned> names;
-	if ( !objBlPoolCopy( s.poolKey, s.pool, names, w2 ) )
+	if ( s.ownVao ) {  // lane VKOBJ5: one key serves every unpooled shape (objCellShade's order)
+		objTexFlush();
+		opRunWait();
+	}
+	if ( !objBlPoolCopy( s.poolKey, s.ownVao ? own : s.pool, names, w2 ) )
 		return fail( "the pool: " + w2 );
 	names.insert( names.end(), bst.glBufs.begin(), bst.glBufs.end() );  // the texel twins GL wrote
 	d.glRows = s.rows;

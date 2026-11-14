@@ -52,14 +52,24 @@
  * covers >= 5 % more pixels than the test, and the test leaves >= 2000. Red flags (ObjBlShade.alphaRed): the mirrored
  * alphaFlags 0. Bars as the main arm: depth EXACT or BOUND (the word printed), colour EXACT or BOUND 4e-3, lit >= 90 %;
  * the red must FAIL and move the Vulkan colour or depth. */
+/* lane VKOBJ5 round 2 (the rigid opaque single draws and the unpooled shapes; stated before the first run, never widened):
+ * kind 3 single: GL draws the class one shape at a time as the app's single draw does (base instance 0, wwDrawBase the
+ * shape's row, set before each draw), Vulkan crosses once per shape with that one row (rows from it, nRows 1, rowsAtBase).
+ * Bars as the main arm, crossing 64 runs 0 failed. Red base (rowsAtBase off: the mirrored wwDrawBase kept, the rows padded
+ * so the read stays in the buffer) must FAIL and move: it is the defect the flag fixes. Kind 4 own: GL and Vulkan draw from a
+ * shape VAO (no pool): locations 0..4 interleaved fp32 at stride 64 from byte 32 of one buffer, the uv (location 7) two
+ * halves at stride 4 from byte 8 of another, the class's index buffer; Vulkan through ownVao. Bars as the main arm, 1 run.
+ * Reds offset (every attribute read from offset 0) and half (the halves read as 16-bit unorm) must FAIL and move. Check:
+ * location 5 disabled with current value (0.5,0,0,1) must refuse ("disabled with a current value"). */
 static int gColTwin = 0;  // colPrintf: 1 prints `BLVIEW colourcsm` for `BLVIEW colour`
-static int gColKind = 0;  // lane VKOBJ5: 1 ` skin`, 2 ` alpha` after it
+static int gColKind = 0;  // lane VKOBJ5: 1 ` skin`, 2 ` alpha`, 3 ` single`, 4 ` own` after it
+static const char * kColKindName[5] = { "", " skin", " alpha", " single", " own" };
 void colPrintf( const char * fmt, ... )
 {
 	std::string f2( fmt );
 	const std::size_t at = f2.find( "colour" );
 	if ( gColKind && at != std::string::npos )
-		f2.insert( at + 6, gColKind == 1 ? " skin" : " alpha" );
+		f2.insert( at + 6, kColKindName[gColKind] );
 	if ( gColTwin && at != std::string::npos )
 		f2.insert( at + 6, "csm" );
 	va_list ap;
@@ -362,6 +372,8 @@ bool colourGate( const std::string & spirvDir, const std::vector<GLuint64> & fix
 			std::memcpy( &rows[r * kBlRowBytes + kBlTexAt + 8 * i], &h, 8 );
 			std::memcpy( &rowsSlot[r * kBlRowBytes + kBlTexAt + 8 * i], &hn, 8 );
 		}
+	std::vector<unsigned char> rowsPad = rows;  // lane VKOBJ5 red base: twice the rows (a read at 2 x the row stays inside)
+	rowsPad.insert( rowsPad.end(), rows.begin(), rows.end() );
 	f.genBuffers( 1, &rowsBuf );
 	f.bindBuffer( kSsbo, rowsBuf );
 	f.bufferData( kSsbo, std::ptrdiff_t( rows.size() ), rows.data(), 0x88E4 );
@@ -398,6 +410,58 @@ bool colourGate( const std::string & spirvDir, const std::vector<GLuint64> & fix
 			kindPool.vbo[5 + k] = boneBuf[k];
 			kindPool.attrMask |= 4ull << ( 4 * ( 5 + k ) );
 		}
+	}
+	// lane VKOBJ5 kind 4: the shape's own VAO (locations 0..4 fp32 interleaved, stride 64 from byte 32; uv half2, stride 4 from 8)
+	GLuint ownBuf[2] = {};
+	if ( kind == 4 ) {
+		void( WINAPI * getSub )( GLuint, std::intptr_t, std::ptrdiff_t, void * ) = nullptr;
+		if ( !load( getSub, "glGetNamedBufferSubData" ) ) {
+			colPrintf( "BLVIEW colour FAIL (no glGetNamedBufferSubData)\n" );
+			return false;
+		}
+		const std::size_t nv = sx.pool.verts;
+		std::vector<float> inter( 8 + nv * 16, 0.0f ), src;
+		std::vector<std::uint16_t> uv( 4 + nv * 2, 0 );
+		std::size_t at = 0;
+		for ( int i = 0; i < 5; i++ ) {
+			const int n = int( ( sx.pool.attrMask >> ( 4 * i ) ) & 15 );
+			src.assign( nv * std::size_t( n ), 0.0f );
+			getSub( sx.pool.vbo[i], 0, std::ptrdiff_t( src.size() * 4 ), src.data() );
+			for ( std::size_t v = 0; v < nv; v++ )
+				for ( int c = 0; c < n; c++ )
+					inter[8 + v * 16 + at + std::size_t( c )] = src[v * std::size_t( n ) + std::size_t( c )];
+			at += std::size_t( n );
+		}
+		src.assign( nv * 2, 0.0f );
+		getSub( sx.pool.vbo[7], 0, std::ptrdiff_t( src.size() * 4 ), src.data() );
+		for ( std::size_t k = 0; k < nv * 2; k++ )
+			uv[4 + k] = toHalf( src[k] );
+		if ( at != 16 || ( ( sx.pool.attrMask >> 28 ) & 15 ) != 2 ) {
+			colPrintf( "BLVIEW colour FAIL (the fixture is not locations 0..4 = 16 floats and a 2-float uv: %zu floats)\n", at );
+			return false;
+		}
+		f.genBuffers( 2, ownBuf );
+		f.bindBuffer( 0x8892, ownBuf[0] );
+		f.bufferData( 0x8892, std::ptrdiff_t( inter.size() * 4 ), inter.data(), 0x88E4 );
+		for ( int i = 0, off = 32; i < 5; i++ ) {
+			const int n = int( ( sx.pool.attrMask >> ( 4 * i ) ) & 15 );
+			sf.vertexAttribPointer( GLuint( i ), n, GL_FLOAT, GL_FALSE, 64, reinterpret_cast<const void *>( std::uintptr_t( off ) ) );
+			off += n * 4;
+		}
+		f.bindBuffer( 0x8892, ownBuf[1] );
+		f.bufferData( 0x8892, std::ptrdiff_t( uv.size() * 2 ), uv.data(), 0x88E4 );
+		sf.vertexAttribPointer( 7, 2, 0x140B, GL_FALSE, 4, reinterpret_cast<const void *>( std::uintptr_t( 8 ) ) );  // HALF_FLOAT
+	}
+	// lane VKOBJ5 kind 3: the class's commands with base instance 0 (the single draw's row is wwDrawBase)
+	GLuint singleInd = 0;
+	std::vector<std::uint32_t> single = sx.cmds;
+	for ( std::size_t c = 0; c + 4 < single.size(); c += 5 )
+		single[c + 4] = 0;
+	if ( kind == 3 ) {
+		f.genBuffers( 1, &singleInd );
+		f.bindBuffer( 0x8F3F, singleInd );
+		f.bufferData( 0x8F3F, std::ptrdiff_t( single.size() * 4 ), single.data(), 0x88E4 );
+		f.bindBuffer( 0x8F3F, 0 );
 	}
 	f.bindBuffer( 0x8893, sx.pool.ebo );
 	f.bindVertexArray( 0 );
@@ -456,12 +520,29 @@ bool colourGate( const std::string & spirvDir, const std::vector<GLuint64> & fix
 		glEnable( 0x92E0 );  // GL_DEBUG_OUTPUT: the driver's reason for an error lands in the log
 		glEnable( 0x8242 );  // _SYNCHRONOUS
 	}
-	f.bindVertexArray( vao );
-	f.bindBuffer( 0x8F3F, sx.ind );
-	sf.multiDrawElementsIndirect( GL_TRIANGLES, GL_UNSIGNED_SHORT, nullptr, GLsizei( sx.cmds.size() / 5 ), 20 );
-	const GLenum drawErr = glGetError();
-	f.bindBuffer( 0x8F3F, 0 );
-	f.bindVertexArray( 0 );
+	// GL's draw of the class: one multi-draw; lane VKOBJ5 kind 3: one draw a shape, wwDrawBase its row (the first error back)
+	auto glDraws = [&]() {
+		GLenum e = GL_NO_ERROR;
+		f.bindVertexArray( vao );
+		if ( kind == 3 ) {
+			f.bindBuffer( 0x8F3F, singleInd );
+			for ( std::size_t c = 0; c < single.size() / 5; c++ ) {
+				put( "wwDrawBase", { float( sx.base + sx.cmds[c * 5 + 4] ) } );
+				sf.multiDrawElementsIndirect( GL_TRIANGLES, GL_UNSIGNED_SHORT, reinterpret_cast<const void *>( c * 20 ), 1, 20 );
+				const GLenum e1 = glGetError();
+				e = e == GL_NO_ERROR ? e1 : e;
+			}
+			put( "wwDrawBase", { float( sx.base ) } );
+		} else {
+			f.bindBuffer( 0x8F3F, sx.ind );
+			sf.multiDrawElementsIndirect( GL_TRIANGLES, GL_UNSIGNED_SHORT, nullptr, GLsizei( sx.cmds.size() / 5 ), 20 );
+			e = glGetError();
+		}
+		f.bindBuffer( 0x8F3F, 0 );
+		f.bindVertexArray( 0 );
+		return e;
+	};
+	const GLenum drawErr = glDraws();
 	frameOff();
 	if ( drawErr != GL_NO_ERROR ) {
 		std::string msg;
@@ -480,11 +561,7 @@ bool colourGate( const std::string & spirvDir, const std::vector<GLuint64> & fix
 		put( "glowMult", { 0 } );
 		shadeClear();
 		frameState();
-		f.bindVertexArray( vao );
-		f.bindBuffer( 0x8F3F, sx.ind );
-		sf.multiDrawElementsIndirect( GL_TRIANGLES, GL_UNSIGNED_SHORT, nullptr, GLsizei( sx.cmds.size() / 5 ), 20 );
-		f.bindBuffer( 0x8F3F, 0 );
-		f.bindVertexArray( 0 );
+		glDraws();
 		frameOff();
 		shadeRead( g2.depth, &g2.c0, &g2.c1 );
 		put( "glowMult", { 1.5f } );
@@ -494,7 +571,7 @@ bool colourGate( const std::string & spirvDir, const std::vector<GLuint64> & fix
 		colPrintf( "BLVIEW colour GL glow probe: glowMult 0 changes %zu GL colour values\n", ch );
 	}
 	bool kindReach = true;
-	if ( kind ) {  // lane VKOBJ5: does the kind reach GL (skin: doSkinning 0 moves the depth; alpha: alphaFlags 0 covers more)
+	if ( kind == 1 || kind == 2 ) {  // lane VKOBJ5: does the kind reach GL (skin: doSkinning 0 moves the depth; alpha: alphaFlags 0 covers more)
 		ColOut g2;
 		std::vector<std::uint8_t> gOff = gBytes;
 		std::memset( gOff.data() + skinAt, 0, 4 );
@@ -509,11 +586,7 @@ bool colourGate( const std::string & spirvDir, const std::vector<GLuint64> & fix
 			put( "alphaFlags", { 0 } );
 		shadeClear();
 		frameState();
-		f.bindVertexArray( vao );
-		f.bindBuffer( 0x8F3F, sx.ind );
-		sf.multiDrawElementsIndirect( GL_TRIANGLES, GL_UNSIGNED_SHORT, nullptr, GLsizei( sx.cmds.size() / 5 ), 20 );
-		f.bindBuffer( 0x8F3F, 0 );
-		f.bindVertexArray( 0 );
+		glDraws();
 		frameOff();
 		shadeRead( g2.depth, &g2.c0, &g2.c1 );
 		if ( kind == 1 )
@@ -544,11 +617,7 @@ bool colourGate( const std::string & spirvDir, const std::vector<GLuint64> & fix
 		put( "csmForce", { 1.0f } );
 		shadeClear();
 		frameState();
-		f.bindVertexArray( vao );
-		f.bindBuffer( 0x8F3F, sx.ind );
-		sf.multiDrawElementsIndirect( GL_TRIANGLES, GL_UNSIGNED_SHORT, nullptr, GLsizei( sx.cmds.size() / 5 ), 20 );
-		f.bindBuffer( 0x8F3F, 0 );
-		f.bindVertexArray( 0 );
+		glDraws();
 		frameOff();
 		shadeRead( g2.depth, &g2.c0, &g2.c1 );
 		put( "csmForce", { -1.0f } );
@@ -582,8 +651,8 @@ bool colourGate( const std::string & spirvDir, const std::vector<GLuint64> & fix
 		ObjBlShade s;
 		s.twin = twin;
 		s.prog = prog;
-		static int kindKey[3] = {};  // lane VKOBJ5: the skin kind's class (bone codes added) is its own pool
-		s.poolKey = kind == 1 ? reinterpret_cast<std::uintptr_t>( &kindKey[1] ) : sx.key;
+		static int kindKey[5] = {};  // lane VKOBJ5: the skin kind's class (bone codes added) and the own VAO are their own pools
+		s.poolKey = kind == 1 || kind == 4 ? reinterpret_cast<std::uintptr_t>( &kindKey[kind] ) : sx.key;
 		s.pool = kindPool;
 		s.rows = red == 9 ? rowsT.data() : red == 2 ? rowsSlot.data() : rows.data();
 		s.nRows = nRows;
@@ -592,7 +661,31 @@ bool colourGate( const std::string & spirvDir, const std::vector<GLuint64> & fix
 		s.red = red == 10 ? 1 : 0;
 		s.skinRed = red == 11 ? 1 : 0;   // lane VKOBJ5 red bone
 		s.alphaRed = red == 12 ? 1 : 0;  // lane VKOBJ5 red flags
-		const bool ran = objBlShade( glProc, s, w );
+		s.ownVao = kind == 4;            // lane VKOBJ5 round 2: the VAO bound below
+		s.ownRed = red == 14 ? 1 : red == 15 ? 2 : 0;  // reds offset / half
+		bool ran = true;
+		if ( kind == 3 ) {  // lane VKOBJ5 round 2: a crossing a shape, its one row (red 13 base: rowsAtBase off, padded rows)
+			for ( std::size_t c = 0; c < single.size() / 5; c++ ) {
+				const std::size_t row = std::size_t( sx.base ) + sx.cmds[c * 5 + 4];
+				put( "wwDrawBase", { float( row ) } );
+				s.cmds = &single[c * 5];
+				s.nCmds = 1;
+				s.rows = ( red == 13 ? rowsPad.data() : rows.data() ) + row * kBlRowBytes;
+				s.nRows = red == 13 ? 2 * nRows - row : 1;
+				s.rowsAtBase = red != 13;
+				std::string w1;
+				if ( !objBlShade( glProc, s, w1 ) && ran ) {
+					ran = false;
+					w = w1;
+				}
+			}
+			put( "wwDrawBase", { float( sx.base ) } );
+		} else {
+			if ( kind == 4 )
+				f.bindVertexArray( vao );
+			ran = objBlShade( glProc, s, w );
+			f.bindVertexArray( 0 );
+		}
 		frameOff();
 		if ( red == 1 )
 			put( "glowMult", { 1.5f } );
@@ -660,7 +753,7 @@ bool colourGate( const std::string & spirvDir, const std::vector<GLuint64> & fix
 		const DepthCmp dc = depthCmp( vk0.depth, gl.depth );
 		const ColCmp cc = colCmp( vk0 );
 		const bool litOk = cc.both >= 2000 && double( cc.lit ) >= 0.9 * double( cc.both );
-		const bool crossOk = rs.runs == 1 && rs.fails == 0;
+		const bool crossOk = rs.runs == ( kind == 3 ? int( single.size() / 5 ) : 1 ) && rs.fails == 0;
 		colPrintf( "BLVIEW colour state: %d samplers on their own units, %d values with no active location; set 0 units: %d shared, %d GL-only, "
 			"%d GL texel buffers; crossing %s (%d runs, %d failed)\n", units, inactive, rs.shared, rs.glOwn, rs.texelGl, crossOk ? "OK" : "FAIL",
 			rs.runs, rs.fails );
@@ -683,8 +776,11 @@ bool colourGate( const std::string & spirvDir, const std::vector<GLuint64> & fix
 	}
 	const char * redName[3] = { "glow (glowMult 0 after GL drew)", "slot (each row's maps one slot on)",
 		"map (the cascade map's checker inverted after GL drew)" };
-	const char * kindRedName[2] = { " bone (bone i reads bone i + 1's transform)", " flags (the mirrored alphaFlags 0)" };  // lane VKOBJ5
-	for ( int r = kind ? 10 + kind : 1; r <= ( kind ? 10 + kind : twin ? 3 : 2 ); r++ ) {
+	const char * kindRedName[5] = { " bone (bone i reads bone i + 1's transform)", " flags (the mirrored alphaFlags 0)",  // lane VKOBJ5
+		" base (rowsAtBase off: the mirrored wwDrawBase kept)", " offset (every attribute read from offset 0)",
+		" half (the halves read as 16-bit unorm)" };
+	const int redLo = kind == 0 ? 1 : kind == 4 ? 14 : 10 + kind, redHi = kind == 0 ? ( twin ? 3 : 2 ) : kind == 4 ? 15 : 10 + kind;
+	for ( int r = redLo; r <= redHi; r++ ) {
 		ColOut o;
 		std::string rw;
 		const bool rr = vkRun( r, o, rw );
@@ -705,6 +801,19 @@ bool colourGate( const std::string & spirvDir, const std::vector<GLuint64> & fix
 			passes ? "PASSED" : vch ? "FAIL" : "TESTS NOTHING", over, vch, rr ? "" : "; refused: ", rr ? "" : rw.c_str() );
 		ok = ok && !passes && vch > 0;
 	}
+	if ( kind == 4 ) {  // lane VKOBJ5 round 2: location 5 disabled with a current value other than (0,0,0,1) must refuse
+		void( WINAPI * attrib4f )( GLuint, GLfloat, GLfloat, GLfloat, GLfloat ) = nullptr;
+		std::string rw;
+		bool refused = false;
+		if ( load( attrib4f, "glVertexAttrib4f" ) ) {
+			attrib4f( 5, 0.5f, 0.0f, 0.0f, 1.0f );
+			ColOut o;
+			refused = !vkRun( 0, o, rw ) && rw.find( "disabled with a current value" ) != std::string::npos;
+			attrib4f( 5, 0.0f, 0.0f, 0.0f, 1.0f );
+		}
+		colPrintf( "BLVIEW colour check location 5 current (0.5,0,0,1): %s (%s)\n", refused ? "REFUSED OK" : "FAIL", rw.c_str() );
+		ok = ok && refused;
+	}
 	if ( kind ) {  // lane VKOBJ5: a kind runs the main arm only (its buffers stay with the context, as the arm's own do)
 		if ( csmTex ) {
 			u.bindTextures( 0, 64, nullptr );
@@ -715,7 +824,7 @@ bool colourGate( const std::string & spirvDir, const std::vector<GLuint64> & fix
 		f.useProgram( 0 );
 		u.deleteProgram( prog );
 		if ( const GLenum e = glGetError(); e != GL_NO_ERROR ) {
-			std::printf( "BLVIEW colour %s FAIL (GL error 0x%x left)\n", kind == 1 ? "skin" : "alpha", unsigned( e ) );
+			std::printf( "BLVIEW colour%s FAIL (GL error 0x%x left)\n", kColKindName[kind], unsigned( e ) );
 			ok = false;
 		}
 		return ok;

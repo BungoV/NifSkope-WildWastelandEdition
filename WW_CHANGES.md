@@ -1,4 +1,4 @@
-## VKOBJ5 (2026-11-14): skinned and alpha-tested bindless object draws on Vulkan (WW_VKOBJ_SHADE=1)
+## VKOBJ5 (2026-11-14): skinned, alpha-tested, single rigid and unpooled bindless object draws on Vulkan (WW_VKOBJ_SHADE=1)
 
 Changed, not built, not checked live. Offline: tests/vkframe/blview.sh colourGate gained a skinned and an alpha-tested
 pass for both bindless twins (fo4_cellbl, fo4_cellcsmbl): depth EXACT, colour inside the existing bar, reds FAIL.
@@ -10,6 +10,13 @@ pass for both bindless twins (fo4_cellbl, fo4_cellcsmbl): depth EXACT, colour in
   is not made yet, and the line says so.
 - Reds: WW_VKVIEW_OBJSKIN_RED=bone (each bone reads the next bone's transform), WW_VKVIEW_OBJALPHA_RED=flags (alpha
   test off).
+- Round 2: a rigid opaque bindless shape drawn on its own (not in a run) and a bindless shape with no pool entry (its own
+  vertex array) also draw on Vulkan. Lines `vk objrigid:` and `vk objown:`. A blended rigid shape stays on GL.
+- Fix: Vulkan read the draw's row twice offset (GL's wwDrawBase was mirrored on top of rows that already start at that
+  row), so run draws and single draws on Vulkan read past their rows. Now the mirrored value is 0 for those draws.
+- Red: WW_VKVIEW_OBJOWN_RED=offset (the vertex array read from its start) / half (half floats read as 16-bit unorm).
+  Offline: blview colourGate kinds single and own, both twins: depth EXACT, colour EXACT / BOUND, reds base / offset / half
+  FAIL.
 - The bindless twins' alpha test discards after the last texture sample (as VKWATER3 did for fo4_default /
   pbrm_default). A discard in the middle ended the pixel on Vulkan and broke its neighbours' texture filtering
   (colour max 0.88 off before, BOUND after).

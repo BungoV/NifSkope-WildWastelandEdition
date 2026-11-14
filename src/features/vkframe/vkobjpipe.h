@@ -321,7 +321,8 @@ ObjBlRunStat takeObjBlRunStat();  //!< and starts the next count
  * of GL's glMultiDrawElementsIndirect. Read from GL here: the draw framebuffer (every colour draw buffer and the depth must
  * be shared targets), the depth / cull / blend state (objBlTargetState; refused: a viewport that is not the frame),
  * program `prog`'s uniforms (objBlMirror). The rows are the run's own from its leader: Vulkan's wwDrawBase is 0 (GL's
- * wwDrawIdx is not a module member: the mirror leaves it 0). false: why (nothing drawn; GL draws the run) */
+ * wwDrawIdx is not a module member: the mirror leaves it 0). false: why (nothing drawn; GL draws the run)
+ * Lane VKOBJ5: the mirror does carry GL's wwDrawBase uniform (the leader's row, commit's); rowsAtBase sets it 0. */
 struct ObjBlShade
 {
 	int twin = 0;           //!< 0 fo4_cellbl, 1 fo4_cellcsmbl
@@ -335,6 +336,14 @@ struct ObjBlShade
 	int red = 0;  //!< gates only: 1 objBlPipe's strict target count (a 1-buffer frame must refuse)
 	int skinRed = 0;   //!< lane VKOBJ5 red `bone`: the mirrored skinningUniforms one bone on (bone i reads i + 1's transform)
 	int alphaRed = 0;  //!< lane VKOBJ5 red `flags`: the mirrored alphaFlags 0 (no alpha test, no blend bit)
+	/*! lane VKOBJ5: `rows` starts at the row GL's wwDrawBase names (a run's leader, a single draw's own row), so the
+	 * mirrored wwDrawBase is set 0 (false: GL's wwDrawBase as mirrored, the rows from GL's row 0) */
+	bool rowsAtBase = false;
+	/*! lane VKOBJ5 (an unpooled bl shape): the vertices from the bound VAO, read as objCellShade reads it (per location the
+	 * stage reads: float or half, its buffer / offset / stride; a disabled one must hold (0,0,0,1); the VAO's index buffer);
+	 * of `pool` only verts is read */
+	bool ownVao = false;
+	int ownRed = 0;  //!< gates only: 1 `offset` (the attributes read from offset 0), 2 `half` (the halves read as 16-bit unorm)
 };
 bool objBlShade( GlProc gp, const ObjBlShade & s, std::string & why );
 /* lane VKWATER3 (plan row G4 by draws): one shape's draw (bsshape.cpp, WW_VKOBJ_SHADE=1) through the non-bindless twins
