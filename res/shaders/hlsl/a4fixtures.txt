@@ -15,3 +15,11 @@ cell_precip.prog	pcRow=1:0:0:0:0:1:0:0:0:0:0:-5,pcProj=1:0:0:0:0:1:0:0:0:0:-1:-1
 # cell_precip_gpu / _look: the particles from gl_VertexID in a 40-unit box round the eye (random pcL < 1 culls them all), no roof, no inner box
 cell_precip_gpu.prog	pcL=40,pcInner=0,pcRoofOn=0,pcRow=1:0:0:0:0:1:0:0:0:0:1:0,pcProj=1:0:0:0:0:1:0:0:0:0:-1:-1:0:0:-2:0,pcFocal=500,pcMinPx=0,pcShutter=0,pcNear=0:0.001,pcThin=1
 cell_precip_look.prog	pcL=40,pcInner=0,pcRoofOn=0,pcRow=1:0:0:0:0:1:0:0:0:0:1:0,pcProj=1:0:0:0:0:1:0:0:0:0:-1:-1:0:0:-2:0,pcFocal=500,pcMinPx=0,pcShutter=0,pcNear=0:0.001,pcThin=1
+# fo4_water and its looks (VKWATER3): the app's depth-copy state (no reflection-ray pass, the scene depth bound), so the scene
+# point behind the water is rebuilt from 1/gl_FragCoord.w; random ints left it unread and A4 missed a doubled w inversion
+fo4_water.prog	waterSslr=0,waterHaveDepth=1
+fo4_waterlook.prog	waterSslr=0,waterHaveDepth=1
+fo4_waterlookd.prog	waterSslr=0,waterHaveDepth=1
+fo4_waterlookdp.prog	waterSslr=0,waterHaveDepth=1
+fo4_waterlookm.prog	waterSslr=0,waterHaveDepth=1
+fo4_waterlookp.prog	waterSslr=0,waterHaveDepth=1
