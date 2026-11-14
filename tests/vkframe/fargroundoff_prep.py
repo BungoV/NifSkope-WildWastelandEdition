@@ -63,8 +63,38 @@ def cut(lines, rung):
     return "\n\n".join(t for _, t in parts) + "\n", found
 
 
+def pass_rest(lines, rung):
+    """pass() without its upload block (the rung's 6 lines to `} else {`, this tree's 4 to `if ( !lookup ) {`)."""
+    p = next(i for i, l in enumerate(lines) if l.startswith("void pass( Scene * scene )"))
+    e = block_end(lines, p, "}")
+    if rung:
+        a = next(i for i in range(p, e) if lines[i] == "\tuploadBase( fn, d );")
+        b = a + 5
+        if lines[b] != "\t} else {":
+            raise SystemExit("rung pass: no `} else {` after the upload block")
+    else:
+        a = next(i for i in range(p, e) if lines[i].startswith("\tconst bool lookup = want == 1;"))
+        b = a + 3
+        if lines[b] != "\tif ( !lookup ) {":
+            raise SystemExit("head pass: no `if ( !lookup ) {` after the upload block")
+    return lines[p:a] + lines[b + 1:e + 1]
+
+
+def pass_check(rung_lines, head_lines):
+    """the rest of pass() is the same text in both: the cut uploads are all that changed (red: one flipped line)."""
+    r, h = pass_rest(rung_lines, True), pass_rest(head_lines, False)
+    same = r == h
+    red = list(h)
+    red[len(red) // 2] += " !"
+    print("FARGROUNDOFF pass rest: %d vs %d lines, %s; red (one line changed) %s"
+          % (len(r), len(h), "same" if same else "DIFFER", "caught" if red != r else "MISSED"))
+    return same and red != r
+
+
 def main():
     rung, head, out = sys.argv[1], sys.argv[2], sys.argv[3]
+    if not pass_check(read(rung), read(head)):
+        raise SystemExit("pass() outside the upload block differs from the rung")
     for src, name, is_rung in ((rung, "rung_tu.inc", True), (head, "head_tu.inc", False)):
         text, found = cut(read(src), is_rung)
         with open(os.path.join(out, name), "w", newline="\n") as f:
