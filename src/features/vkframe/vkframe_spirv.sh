@@ -136,4 +136,14 @@ fxk skystars_view_ps clouds/lookdev_clouds_ps
 fxb skymoon_view_vs core/lookdev_bill_vs
 fxk skymoon_view_ps sky/sky_moon_ps
 ls -la skystars_view_vs.spv.h skystars_view_ps.spv.h skymoon_view_vs.spv.h skymoon_view_ps.spv.h
+# lane VKFAR2 (the froxel item): the air's integrate as compute (res/shaders/hlsl/air/volair_integ_cs.hlsl, vkfog.inc), the
+# RGBA16F volume and the f32 red's RGBA32F one
+fog() {
+	"$DXC" -spirv -fspv-target-env=vulkan1.2 -T cs_6_0 -E main $2 -Fo "$1.spv" "$(cygpath -m "$ROOT/res/shaders/hlsl/air/volair_integ_cs.hlsl" 2>/dev/null || echo "$ROOT/res/shaders/hlsl/air/volair_integ_cs.hlsl")"
+	python -I "$ROOT/tools/spv_header.py" "$1.spv" "vkframe_$1_spv" "$1.spv.h" < /dev/null
+	rm -f "$1.spv"
+}
+fog fog_integ_cs ""
+fog fog_integ32_cs "-DVOLAIR_INTEG_F32"
+ls -la fog_integ_cs.spv.h fog_integ32_cs.spv.h
 ls -la csm_view_vs.spv.h obj_depth_vs.spv.h sky_view_ps.spv.h bloom_down.spv.h bloom_hold.spv.h bloom_up.spv.h bloom_src.spv.h bloom_comb.spv.h bloom_back.spv.h tonemap.spv.h measure_q.spv.h tone_view_vs.spv.h tone_view_ps.spv.h taa_view_mv_cs.spv.h taa_view_resolve_cs.spv.h taa_view_rcas_ps.spv.h

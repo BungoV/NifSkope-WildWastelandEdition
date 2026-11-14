@@ -9,6 +9,7 @@ BSD License - see nifskope.h
 
 #include <QString>
 
+#include <cstdint>
 #include <functional>
 
 class Scene;
@@ -130,6 +131,29 @@ QString wwVolAirSummary();
 //! lane FIX1101A (moon, 24d(2)): the last air pass's medium (airMed, airLayer, airGround.xy); false when no pass ran in
 //! the last second (the air off) or under the red nosky. gl/moonlight.h discAirGain reads it for the sun disc and moon.
 bool wwVolAirMediumNow( float med[4], float layer[4], float ground[2] );
+/*! lane VKFAR2 (plan rows L5, P4b, L8): the finished froxel volume and the numbers that read it, for a reader on the
+ *  present device. integKey finds the volume there (WwVkPresent::sharedFind, a 3D image: RGBA16F, half false RGBA32F)
+ *  when integShared; the rest are the uniforms wwVolAirUniforms sets on a GL reader (lookdev_fog.glsl wwVolAirAt /
+ *  wwVolAirSunT / wwVolAirSky), with the same values and the same names in the comments. false: no air this frame
+ *  (on false; the reader's volOn = false) */
+struct WwVolAirShare
+{
+	bool on = false;
+	std::uintptr_t integKey = 0;	//!< the volume's sharedTarget key (vkpresent.h)
+	unsigned integTex = 0;	//!< GL's name (volTex)
+	bool integShared = false, half = true;
+	int texW = 0, texH = 0, texD = 0;	//!< the packed volume: the near grid's layers, then the far grid's
+	int cols = 0, rows = 0, slices = 0;	//!< the near grid
+	float volSlices[4] = {};	//!< near, log(far / near), slices, 1 (0: the red's linear slices)
+	float volFar[4] = {};	//!< the far grid: start, log(end / start), slices, on
+	float volPack[4] = {}, volPackDims[4] = {};
+	float volAirMed[4] = {}, volAirLayer[4] = {}, volAirGround[4] = {};
+	int volAirFlags = 0, volProbe = 0, volFogBlend = 0;
+	bool volFarClamp = false;	//!< the tile clamp is read (volTile = tileTex)
+	unsigned tileTex = 0;
+	unsigned frame = 0;	//!< the air pass's frame counter (volAirFlags bits 10-13 are its low bits)
+};
+bool wwVolAirShareOf( Scene * scene, WwVolAirShare & out );
 
 /*! VOLUMETRIC PARTICLES (lane VOLPART1): a particle system the cell lights (steam, smoke, fog puffs) is a little
  *  piece of the air. In particles_cell.prog (res/shaders/features/particles/particles.frag, the law written out there):

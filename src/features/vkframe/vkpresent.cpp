@@ -713,6 +713,7 @@ bool waterRecord( std::string & why );  // lane VKWATER3 (vkwater.inc): fxWork's
 void waterDrop();
 void objDrop();  // lane VKOBJ1
 void blFree();  // lane VKOBJ2
+void fogDrop();  // lane VKFAR2 (vkfog.inc): the air's integrate
 
 struct Worker
 {
@@ -3601,6 +3602,7 @@ void shutdown()
 	}
 	csmDrop();  // lane VKSHADOW1: the cascades' layer views go before the shared arrays they view
 	objDrop();  // lane VKOBJ1: the prepass framebuffer goes before the shared depth it holds
+	fogDrop();  // lane VKFAR2: the integrate's set goes before the shared volumes it views
 	blFree();  // lane VKOBJ2: the bindless table's set and samplers (it holds the shared targets' views)
 	// lane VKSHARE1: the keyed shared targets (their owners see sharedTargetIs false and make GL's own again)
 	if ( !shareds().empty() ) {
@@ -8289,6 +8291,7 @@ ObjStat takeObjStat()
 #include "features/vkframe/vkbindless.inc"  // lane VKOBJ2: the bindless maps as descriptor indexing
 #include "features/vkframe/vkobjtex.inc"  // lane VKOBJ3: the texture cache's BC twins and their handles in the table
 #include "features/vkframe/vkskybody.inc"  // lane VKFAR2 G2: the stars and the moon globe in the sky's pass
+#include "features/vkframe/vkfog.inc"  // lane VKFAR2: the air's integrate (the froxel volume) on the view
 
 namespace
 {
@@ -8687,6 +8690,41 @@ void objSay( bool wanted, const char * glWhy )
 			.arg( st.cpuMs / st.runs, 0, 'f', 3 ).arg( st.maxMs, 0, 'f', 3 );
 	else
 		line = head + QStringLiteral( "prepass on Vulkan wanted, 0 frames run" );
+	if ( st.gl > 0 )
+		line += QStringLiteral( ", on GL %1 frames (last: %2)" ).arg( st.gl ).arg( QString::fromStdString( st.glWhy ) );
+	if ( st.fails > 0 )
+		line += QStringLiteral( ", %1 refused to GL (last: %2)" ).arg( st.fails ).arg( QString::fromStdString( st.failWhy ) );
+	said = line;
+	qInfo().noquote() << line;
+}
+
+// lane VKFAR2: the air's integrate's route line, one a 5 s window while it is wanted on Vulkan
+void fogSay( bool wanted, const char * glWhy )
+{
+	static QString said;
+	static double at = 0.0;
+	const QString head = QStringLiteral( "vk fog: " );
+	if ( !wanted ) {
+		const QString line = head + QStringLiteral( "integrate on GL (%1)" ).arg( QString::fromUtf8( glWhy ? glWhy : "" ) );
+		if ( line != said ) {
+			said = line;
+			qInfo().noquote() << line;
+		}
+		return;
+	}
+	const double now = nowMs();
+	if ( now - at < 5000.0 && said.startsWith( head + QStringLiteral( "integrate on V" ) ) )
+		return;
+	at = now;
+	const FogStat st = takeFogStat();
+	QString line;
+	if ( st.runs > 0 )
+		line = head + QStringLiteral( "integrate on Vulkan %1 crossings (%2 grid dispatches, the volume shared; "
+			"%3 pipelines built in %4 ms; drawing thread %5 ms, max %6)" )
+			.arg( st.runs ).arg( st.dispatches ).arg( st.pipelines ).arg( st.buildMs, 0, 'f', 1 )
+			.arg( st.cpuMs / st.runs, 0, 'f', 3 ).arg( st.maxMs, 0, 'f', 3 );
+	else
+		line = head + QStringLiteral( "integrate on Vulkan wanted, 0 frames run" );
 	if ( st.gl > 0 )
 		line += QStringLiteral( ", on GL %1 frames (last: %2)" ).arg( st.gl ).arg( QString::fromStdString( st.glWhy ) );
 	if ( st.fails > 0 )

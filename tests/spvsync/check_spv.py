@@ -91,6 +91,10 @@ HLSL_SPECS += [('src/features/vkframe', k, 'vulkan1.2', 'vkframe_%s_spv' % k) fo
 VKFRAME_FXB_ARGS = ['-fvk-bind-register', 'b0', '0', '0', '0', '-fvk-bind-register', 'b31', '0', '32', '0', '-fspv-preserve-bindings']
 VKFRAME_FXB = {'skystars_view_vs': 'clouds/lookdev_clouds_vs', 'skymoon_view_vs': 'core/lookdev_bill_vs'}
 HLSL_SPECS += [('src/features/vkframe', k, 'vulkan1.2', 'vkframe_%s_spv' % k) for k in VKFRAME_FXB]
+# lane VKFAR2 (the froxel item): the air's integrate, the script's `fog <name> "<defines>"` lines (cs_6_0, one source)
+VKFRAME_FOG_SRC = 'res/shaders/hlsl/air/volair_integ_cs.hlsl'
+VKFRAME_FOG = {'fog_integ_cs': '', 'fog_integ32_cs': '-DVOLAIR_INTEG_F32'}
+HLSL_SPECS += [('src/features/vkframe', k, 'vulkan1.2', 'vkframe_%s_spv' % k) for k in VKFRAME_FOG]
 DEFAULT_G = 'E:/Tools/RenderDoc/RenderDoc_1.45_64/plugins/spirv/glslangValidator.exe'
 DEFAULT_DXC = 'E:/Tools/dxc/bin/x64/dxc.exe'
 
@@ -208,6 +212,11 @@ def script_ok(tree):
 	blines = dict(re.findall(r'^fxb ([a-z0-9_]+) ([A-Za-z0-9_/+-]+)$', vf, re.M))
 	if blines != VKFRAME_FXB:
 		bad.append('src/features/vkframe/vkframe_spirv.sh: its fxb lines (%s) are not this checker\'s sky-body vertex stages' % ' '.join(sorted(blines)))
+	if '\t"$DXC" -spirv -fspv-target-env=vulkan1.2 -T cs_6_0 -E main $2 -Fo "$1.spv" "$(cygpath -m "$ROOT/' + VKFRAME_FOG_SRC + '" ' not in vf:
+		bad.append('src/features/vkframe/vkframe_spirv.sh: its fog() compile line changed')
+	glines = dict(re.findall(r'^fog ([a-z0-9_]+) "([^"]*)"$', vf, re.M))
+	if glines != VKFRAME_FOG:
+		bad.append('src/features/vkframe/vkframe_spirv.sh: its fog lines (%s) are not this checker\'s air integrate kernels' % ' '.join(sorted(glines)))
 	return bad
 
 
@@ -342,6 +351,9 @@ def main(argv):
 			if k in VKFRAME_FXL:
 				src = os.path.join(tree, 'res/shaders/hlsl', VKFRAME_FXL[k] + '.hlsl')
 				hdefs = VKFRAME_FXL_ARGS
+			if k in VKFRAME_FOG:
+				src = os.path.join(tree, VKFRAME_FOG_SRC)
+				hdefs = VKFRAME_FOG[k].split()
 			if k in VKFRAME_FXB:
 				src = os.path.join(tree, 'res/shaders/hlsl', VKFRAME_FXB[k] + '.hlsl')
 				hdefs = VKFRAME_FXB_ARGS
