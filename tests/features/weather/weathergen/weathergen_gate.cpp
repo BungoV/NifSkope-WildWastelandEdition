@@ -57,6 +57,23 @@ static std::map<std::string, std::string> outputs( const WwWeatherGen::Out & o, 
 	m["lightningEnd"] = f( o.lightningEnd );
 	m["stars"] = f( o.stars );
 	m["moonlight"] = f( o.moonlight );
+	// lane WEATHERRECX2 (1.8): the day's course and the filled keys (Python None = C++ < 0 = "-")
+	auto opt = [&]( double x ) { return x < 0 ? std::string( "-" ) : f( x ); };
+	m["humidityDawn"] = f( o.humidityDawn );
+	m["hazeHeightDawn"] = f( o.hazeHeightDawn );
+	m["coverageDawn"] = f( o.coverageDawn );
+	m["windSpeedNight"] = f( o.windSpeedNight );
+	m["gustsNight"] = f( o.gustsNight );
+	m["angstrom"] = f( o.angstrom );
+	m["angstromDawn"] = f( o.angstromDawn );
+	m["hazeAnisotropy"] = f( o.hazeAnisotropy );
+	m["hazeAnisotropyDawn"] = f( o.hazeAnisotropyDawn );
+	m["airglow"] = f( o.airglow );
+	m["iceFraction"] = f( o.iceFraction );
+	m["evolution"] = f( o.evolution );
+	m["precipitationBase"] = opt( o.precipitationBase );
+	m["cloudToGround"] = opt( o.cloudToGround );
+	m["lightningDistance"] = opt( o.lightningDistance );
 	return m;
 }
 

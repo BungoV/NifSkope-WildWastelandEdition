@@ -2,6 +2,7 @@
 #include "features/sky/atmomath.h"
 #include "features/weather/weatherrecx.h"	// lane WX1: the weather .recx atmosphere block
 #include "features/weather/weatherrecxmath.h"	// SHAFTS1b: hazeFromVisibility for the clear-day aerosol
+#include "features/weather/weatherrecxwire.h"	// lane WEATHERRECX4: atmosphere.multiScattering
 #include "features/clouds/cloudmath.h"	// SHAFTS1b: the WTHR class flags
 #include "gl/lookdevstage.h"	// SHAFTS1b: the Lookdev weather's class
 #include "features/sky/skydisc.h"
@@ -203,6 +204,11 @@ bool apRed( const char * word )
  * atmosphere.visibility (metres, recx/SPEC.md) still wins; every other weather keeps the record's fog. Red
  * WW_CELL_AIR_RED=recordhaze: the record for every weather (today's rule). */
 constexpr float kClearDayVisM = 30000.0f;
+//! lane WEATHERRECX4: atMsOn = atmosphere.multiScattering (1 unset; 0 under the red noms, which wins)
+float msOnOf( bool noMs )
+{
+	return WwRecxWire::multiScatter( noMs ? 0.0f : 1.0f, wwWeatherRecx().multiScattering );
+}
 const char * g_hazeSrc = "record";
 float g_airglow = 1.0f;	// lane WEATHERRECX1: atmosphere.airglow (the hazeType's; 1 = the night floor as before)
 WwNightSky g_night;	// MODULES1 round 10: the one night sky's factor (atmosphere.h)
@@ -676,7 +682,7 @@ bool buildAp( Scene * scene, AtGpu & g, int msN, float camR, const float sunW[3]
 	p->uni3f( "atMoonW", moonW[0], moonW[1], moonW[2] );
 	p->uni1f( "atSunK", sunK );
 	p->uni1f( "atMoonK", moonK );
-	p->uni1f( "atMsOn", noMs ? 0.0f : 1.0f );
+	p->uni1f( "atMsOn", msOnOf( noMs ) );
 	p->uni1f( "atApNoSunT", apRed( "nosunt" ) ? 1.0f : 0.0f );
 	// SKY2B (SKYTINT2): under Weather Tint the haze in front of distant geometry takes the dome's color like the sky
 	p->uni1f( "atTintOn", tint ? 1.0f : 0.0f );
@@ -928,7 +934,7 @@ bool wwAtmoDrawSky( Scene * scene, const WwAtmoInputs & in, QString * line )
 		p->uni2f( "atViewSize", float( vw ), float( vh ) );
 		p->uni1f( "atCamR", camR );
 		p->uni1f( "atLightMu", l[2] );
-		p->uni1f( "atMsOn", noMs ? 0.0f : 1.0f );
+		p->uni1f( "atMsOn", msOnOf( noMs ) );
 		p->uni1f( "atGround", noGround ? 0.0f : 1.0f );
 		bindTex( fn, p, 0, "atTransTex", g.trans.tex );
 		bindTex( fn, p, 1, "atMsTex", g.ms.tex );
@@ -1056,7 +1062,7 @@ bool wwAtmoDrawSky( Scene * scene, const WwAtmoInputs & in, QString * line )
 			bindTex( fn, p, 2, "atMoonView", g.moonView.tex );
 			bindTex( fn, p, 3, "atMsTex", g.ms.tex );
 			p->uni2f( "atMsSize", float( msN ), float( msN ) );
-			p->uni1f( "atMsOn", noMs ? 0.0f : 1.0f );
+			p->uni1f( "atMsOn", msOnOf( noMs ) );
 			p->uni1f( "atGround", noGround ? 0.0f : 1.0f );
 			p->uni1f( "atPerPixel", perPixel ? 1.0f : 0.0f );
 			p->uni2f( "atViewSize", float( vw ), float( vh ) );
@@ -1268,6 +1274,18 @@ unsigned wwAtmoSkyViewTex()
 void wwAtmoTransmittance( float heightKm, float cosZenith, float out[3] )
 {
 	cpuTrans( heightKm, cosZenith, as().haze, red( "noozone" ), out, g_ozone );
+}
+
+float wwAtmoClearZenithTransmittance()
+{
+	static float memo = -1.0f;
+	if ( memo < 0.0f ) {	// the clear-day reference air (kClearDayVisM, the hazek reference above), sea level, ozone x1
+		const float ref[3] = { WwWeatherRecxMath::hazeFromVisibility( kClearDayVisM, kRay[1] + kMieE ), 1.2f, 0.0f };
+		float t[3];
+		cpuTrans( 0.0f, 1.0f, ref, false, t );
+		memo = lum( t );
+	}
+	return memo;
 }
 
 int wwAtmoAp()

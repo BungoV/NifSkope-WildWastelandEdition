@@ -2,19 +2,21 @@
 #define WW_PRECIPSPEC_H
 
 /* lane WEATHERLOOK1 phase B: a weather's precipitation layers, from its .recx block "precipitation" (docs/RECX.md)
- * or, with no block, from its own record (WTHR DATA class flags: Rainy -> one rain layer, Snow -> one snow_fine
+ * or, with no block, from its own record (WTHR DATA class flags: Rainy -> one rain layer, Snow -> one snowFine
  * layer, the type defaults of gl/precipmath.h). Header only (Qt Core), so tests/features/weather/precip reads the same parser.
  *
- *   "precipitation": { "layers": [ { "type": "snow_fine", "rate": 1.5, "size": 5.5, "drawScale": 3,
+ *   "precipitation": { "layers": [ { "type": "snowFine", "rate": 1.5, "size": 5.5, "drawScale": 3,
  *                                    "texture": "FO4CS/Precip/snow_fine_d.dds", "atlas": [4, 4] }, ... ] }
  *
- * Keys of a layer (all but type optional; the type's default where absent): type (rain, hail, snow_fine,
- * snow_far_dot, snow_wet_clump, snow_big_clump), rate (mm/h of water), density (particles per m^3; wins over rate),
+ * Keys of a layer (all but type optional; the type's default where absent): type (rain, hail, snowFine,
+ * snowFarDot, snowWetClump, snowBigClump, or any Weathers/Precip type file, preciptypes.h; the old snake_case names
+ * are read as aliases with a note), rate (mm/h of water), density (particles per m^3; wins over rate),
  * size (mm), drawScale, wind (the share of the wind it rides, 0..2), translucency (0..1), spin (rad/s), sway (game
  * units), texture (under Textures\, as the game links textures), atlas ([columns, rows]). Unknown keys and bad values
  * are reported in `notes` and dropped. */
 
 #include "features/weather/precipmath.h"
+#include "features/weather/preciptypes.h"
 
 #include <QJsonArray>
 #include <QJsonObject>
@@ -31,6 +33,7 @@ struct WwPrecipLayerSpec
 	double sizeMm = 0.0, rateMmH = 0.0, density = -1.0;	// density < 0: from the rate
 	double drawScale = 1.0, windShare = 1.0, translucency = 0.5, spin = 0.0, sway = 0.0;
 	QString texture;	// under Textures\ (the type's default when the file names none)
+	bool textureOwn = false;	// lane WEATHERRECX2: the layer named its texture (it wins over the weather's textures slot)
 	int cols = 1, rows = 1;
 	QString from;	// "recx" or "record"
 
@@ -42,6 +45,16 @@ struct WwPrecipLayerSpec
 		return density >= 0.0 ? density : WwPrecip::densityFromRate( type, sizeMm, rateMmH );
 	}
 };
+
+//! lane WEATHERRECX2 (1.8): the weather's textures slot fills a layer that names no texture (fallback only: the
+//! layer's own texture wins); true when the slot was taken. The atlas grid stays the type's.
+inline bool wwPrecipTextureFallback( WwPrecipLayerSpec & s, const QString & slotTexture )
+{
+	if ( s.textureOwn || slotTexture.trimmed().isEmpty() )
+		return false;
+	s.texture = slotTexture.trimmed();
+	return true;
+}
 
 //! the type's defaults
 inline WwPrecipLayerSpec wwPrecipDefault( int type, const QString & from )
@@ -125,8 +138,14 @@ inline QVector<WwPrecipLayerSpec> wwPrecipParse( const QJsonObject & block, QStr
 			if ( get( o, "type" ).toString().trimmed().compare( QLatin1String( "sleet" ), Qt::CaseInsensitive ) == 0 )
 				notes << where + QStringLiteral( " dropped (sleet removed by PRECIPLOOK1: use rain or hail)" );
 			else
-				notes << where + QStringLiteral( " dropped (not-type \"%1\")" ).arg( get( o, "type" ).toString() );
+				notes << where + QStringLiteral( " dropped (not-type \"%1\"; looked for %2)" )
+					.arg( get( o, "type" ).toString(), wwPrecipTypeWhere( get( o, "type" ).toString().trimmed() ) );
 			continue;
+		}
+		{
+			const QByteArray w = get( o, "type" ).toString().trimmed().toLower().toLatin1();
+			if ( const char * a = WwPrecip::typeAlias( w.constData() ) )
+				notes << where + QStringLiteral( ": type \"%1\" is the old name of \"%2\" (read as it)" ).arg( QLatin1String( w ), QLatin1String( a ) );
 		}
 		for ( auto it = o.constBegin(); it != o.constEnd(); ++it ) {
 			bool ok = it.key().startsWith( QLatin1Char( '_' ) );
@@ -160,8 +179,10 @@ inline QVector<WwPrecipLayerSpec> wwPrecipParse( const QJsonObject & block, QStr
 		num( "spin", 0.0, 20.0, s.spin );
 		num( "sway", 0.0, 200.0, s.sway );
 		const QJsonValue tv = get( o, "texture" );
-		if ( tv.isString() && !tv.toString().trimmed().isEmpty() )
+		if ( tv.isString() && !tv.toString().trimmed().isEmpty() ) {
 			s.texture = tv.toString().trimmed();
+			s.textureOwn = true;
+		}
 		const QJsonValue av = get( o, "atlas" );
 		if ( !av.isUndefined() ) {
 			const QJsonArray a = av.toArray();

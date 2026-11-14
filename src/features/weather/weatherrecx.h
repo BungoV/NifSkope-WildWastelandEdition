@@ -76,6 +76,25 @@ struct WwWeatherRecx
 	float lightningFreqLast = -1.0f;	//!< ... and its own lightning.frequency
 	QString blocksState, blocksLine;	//!< the echo per block family: switch, who decides (and the numbers)
 	QStringList sources;	//!< "<key>=<source>" per input (file:<path> | generated | record)
+	/* lane WEATHERRECX2 (SPEC.md 1.8). source: "override", "override[fog,clouds.layers]", "augment" or "skipped" (the
+	 * spec COMMON "override" key of the entries that won); overrideAll / overrideFuncs: what it replaces of the record.
+	 * stored: the keys the spec lists as "stored for later" ("atmosphere.rayleighScale" -> value; an rgb as .r/.g/.b,
+	 * a bool as 0/1), read, range-checked and echoed, no user yet. recordFields: the WTHR fields the entry's
+	 * vanillaRecord block carries (part 8: the file holds the whole record; xEdit's FO4 WTHR names) */
+	QString source;
+	bool overrideAll = false;
+	QStringList overrideFuncs;
+	QStringList stored;	//!< "<block>.<key>=<value>", sorted
+	QStringList recordFields;
+	/* lane WEATHERRECX4 (SPEC.md 1.8 "Read by the drawing"): the keys moved out of "stored for later", in the spec's
+	 * units; < 0 = not set (today's value; weatherrecxwire.h applies them). wired = "<key>=<value> <unit> (<source>)"
+	 * per key, file:<path> or "default (today)" */
+	float fogStartM = -1.0f, fogCutoffM = -1.0f, fogMaxOpacity = -1.0f, skyLightInFog = -1.0f;
+	float volExtinctionScale = -1.0f, volNearFadeInM = -1.0f, volViewDistanceM = -1.0f;
+	float multiScattering = -1.0f, skyLuminance[3] = { -1.0f, -1.0f, -1.0f }, localFogScale = -1.0f;
+	float sunIlluminance = -1.0f, precipFogExtinction = -1.0f, moonGameFactor = -1.0f, adaptFloor = -1.0f;
+	int precipOcclusion = -1;	//!< precipitation.occlusion: -1 not set, 0 false, 1 true
+	QStringList wired;
 	unsigned long long stamp = 0;	//!< moves whenever a value moves (memo keys)
 	QString key;	//!< the values as text (rebuild keys); empty when off
 	WwWeatherRecx()
@@ -130,7 +149,20 @@ bool wwWeatherRecxAirFilters( float glow[3], float cloudAlbedo[3], float inscatt
 bool wwWeatherRecxWindBytes( float & speed, float & dir, float & turb );
 //! lane WEATHERRECX1: the texture slot names (SPEC.md textures), index into WwWeatherRecx::textures
 int wwWeatherRecxTextureSlot( const char * name );
+/*! lane WEATHERRECX2 (1.8): the weather file's textures slot for a precipitation type, a FALLBACK only: a layer's own
+ *  "texture" wins, and empty = none set (the type file's texture stays). The slot is named like the type; any snow*
+ *  type falls back to the "snow" slot. */
+QString wwWeatherRecxTextureFor( const QString & type );
+QString wwWeatherRecxTextureFor( const WwWeatherRecx & r, const QString & type );	//!< the same on a resolved weather
 //! lane WEATHERRECX1: the slot's texture, the weather's or the shared default (Textures\FO4CS\<slot>\...)
 QString wwWeatherRecxTexture( const char * slot );
+
+/*! lane WEATHERRECX2: the weather functions an entry's "override" list may name (spec, Weathers) */
+QStringList wwWeatherRecxFunctions();
+/*! lane WEATHERRECX2: one weather resolved with no window (the offline gates): `haveRecord` false = a weather that
+ *  exists only as a file (formID 0, no owner); the generated rung's inputs are the record's when given. Returns the
+ *  values; `line` = the source line. Not used by the application. */
+WwWeatherRecx wwWeatherRecxResolveForTest( const QString & edid, const QString & owner, unsigned formID, bool haveRecord,
+	const void * genIn, const QStringList & roots, double hour, QString & line );
 
 #endif
