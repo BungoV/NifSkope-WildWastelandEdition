@@ -7,12 +7,21 @@
 #include "gl/lookdevstage.h"
 #include "gl/renderer.h"
 #include "harnesswindow.h"
+#include "features/exposure/cellhdr.h"	// lane VKFAR2 (row P4b): wwCellHdrVkToneColor
+#include "features/vkframe/vkpresent.h"	// lane VKFAR2 (row P4b): the fog bloom's own pass on the Vulkan view
 
 #include <QDebug>
 #include <QHash>
 #include <QSettings>
 
+#include <algorithm>
+#include <chrono>
 #include <cstdint>
+#include <cstring>
+#include <iterator>
+#include <string>
+
+bool wwFogLeakShaderDefine();	// src/features/air/cellvolair.cpp: WW_CELL_FOGLEAK in the cell programs (the Vulkan twin's define)
 
 // lane FOGBLOOM1: the bloom-intensity target (cellfogbloom.h)
 
@@ -97,6 +106,102 @@ void timeRead( NifSkopeOpenGLContext::GLFunctions * fn, FbGpu & g, FbState & s, 
 	g.pending[slot] = false;
 	if ( ++s.frames % 60 == 1 )
 		qInfo().noquote() << QStringLiteral( "cell fog bloom: gpu %1 ms" ).arg( s.ms, 0, 'f', 4 );
+}
+
+/* lane VKFAR2 (row P4b): the target drawn on the present device (vkfogbloom.inc: GL's clear and two draws, the tone
+ * frame's own depth sample 0 and stencil read in the pass, no blit). cell_fogbloom's uniforms are set here as for GL's
+ * draws and read back. true: target = the shared R8 the tone map binds; false: GL's pass (the reason on "vk fogbloom:") */
+bool onVulkan( Scene * scene, Renderer * r, GLuint color, int W, int H, int S, unsigned dsFormat, const GLint * vp, GLuint & target )
+{
+	auto fn = r->fn;
+	target = 0;
+	static QString said;
+	static auto at = std::chrono::steady_clock::now();
+	auto say = [&]( const QString & line ) {
+		if ( line == said )
+			return;
+		said = line;
+		at = std::chrono::steady_clock::now();
+		qInfo().noquote() << line;
+	};
+	if ( !WwVkPresent::shareWanted( "WW_VKVIEW_FOGBLOOM_RED" ) ) {
+		say( QStringLiteral( "vk fogbloom: on GL (red WW_VKVIEW_FOGBLOOM_RED=1 or the view not on Vulkan)" ) );
+		return false;
+	}
+	static WwVkPresent::FogBloomRun t;
+	t = WwVkPresent::FogBloomRun();
+	std::string why;
+	bool drew = false;
+	if ( !wwFogLeakShaderDefine() ) {
+		WwVkPresent::fogBloomOnGl( "WW_CELL_FOGLEAK=0: GL's program is not the Vulkan pass's twin" );
+	} else if ( dsFormat != GL_DEPTH24_STENCIL8 ) {
+		WwVkPresent::fogBloomOnGl( "the frame's depth is not D24S8 (the tone frame's)" );
+	} else if ( auto prog = r->useProgram( "cell_fogbloom.prog" ); !prog ) {
+		WwVkPresent::fogBloomOnGl( "no cell_fogbloom.prog" );
+	} else {
+		wwLookdevFogUniforms( scene );	// the fog and the air, as GL's draws take them
+		const auto & pm = r->globalUniforms->projectionMatrix;
+		prog->uni2f( "fbProj", pm[0][0], pm[1][1] );
+		prog->uni2f( "fbProjZ", pm[2][2], pm[3][2] );
+		prog->uni4f( "fbParams", FloatVector4( kStrength, kTranslucent, kSigmaMist, kSigmaFog ) );
+		prog->uni1i( "fbTranslucent", 0 );	// the pass writes 0 / 1 into its two sets itself
+		t.w = W;
+		t.h = H;
+		t.samples = S;
+		std::memcpy( t.vp, vp, sizeof( t.vp ) );
+		t.color = color;
+		static char key;	// the target's shared key
+		t.key = reinterpret_cast<std::uintptr_t>( &key );
+		// fogbloom_view_ps's t26..t29 (lookdev_fog's air); the air's integrated volume is read where it is shared
+		static const char * const kName[4] = { "volTex", "volTile", "volAirTerr", "volAirRainMap" };
+		static const int kType[4] = { 1, 0, 2, 0 };
+		static char twin[4];
+		bool ok = true;
+		for ( int k = 0; k < 4 && ok; k++ ) {
+			ok = WwVkPresent::fxTexOf( fn, prog->id, kName[k], kType[k], t.tex[k], why );
+			t.tex[k].twin = reinterpret_cast<std::uintptr_t>( &twin[k] );
+		}
+		if ( !ok ) {
+			WwVkPresent::fogBloomOnGl( why.c_str() );
+		} else {
+			WwVkPresent::fxPack( fn, prog->id, WwVkPresent::kT_fogbloom, int( std::size( WwVkPresent::kT_fogbloom ) ), t.loose );
+			unsigned got = 0;
+			drew = WwVkPresent::fogBloomRun( t, got, why );
+			target = GLuint( got );
+		}
+		r->stopProgram();
+	}
+	const WwVkPresent::FxStat st = WwVkPresent::takeFogBloomStat();
+	static WwVkPresent::FxStat sum;
+	sum.runs += st.runs;
+	sum.gl += st.gl;
+	sum.fails += st.fails;
+	sum.cpuMs += st.cpuMs;
+	sum.maxMs = std::max( sum.maxMs, st.maxMs );
+	sum.copies += st.copies;
+	sum.pipelines = st.pipelines;
+	sum.buildMs = st.buildMs;
+	if ( !st.glWhy.empty() )
+		sum.glWhy = st.glWhy;
+	if ( !st.failWhy.empty() )
+		sum.failWhy = st.failWhy;
+	if ( std::chrono::duration<double>( std::chrono::steady_clock::now() - at ).count() >= 5.0 || !said.startsWith( QStringLiteral( "vk fogbloom: on V" ) ) ) {
+		QString line = sum.runs > 0
+			? QStringLiteral( "vk fogbloom: on Vulkan %1 frames (%2x%3 x%4, the R8 target cleared + 2 draws, the tone frame's depth and stencil "
+				"read in the pass, one crossing; %5 pipelines built in %6 ms; %7 input copies; drawing thread %8 ms, max %9)" ).arg( sum.runs )
+				.arg( W ).arg( H ).arg( S ).arg( sum.pipelines ).arg( sum.buildMs, 0, 'f', 1 ).arg( sum.copies )
+				.arg( sum.cpuMs / sum.runs, 0, 'f', 3 ).arg( sum.maxMs, 0, 'f', 3 )
+			: QStringLiteral( "vk fogbloom: on Vulkan wanted, 0 frames drawn" );
+		if ( sum.gl > 0 )
+			line += QStringLiteral( ", on GL %1 frames (last: %2)" ).arg( sum.gl ).arg( QString::fromStdString( sum.glWhy ) );
+		if ( sum.fails > 0 )
+			line += QStringLiteral( ", refused %1 (last: %2)" ).arg( sum.fails ).arg( QString::fromStdString( sum.failWhy ) );
+		line += QStringLiteral( "; the tone map reads it on GL (its Vulkan pass refuses the fog bloom)" );
+		said.clear();
+		say( line );
+		sum = WwVkPresent::FxStat();
+	}
+	return drew;
 }
 
 }
@@ -197,8 +302,12 @@ bool wwCellFogBloomRun( Scene * scene, unsigned hdrFbo, unsigned ds, int W, int 
 	GLboolean colorMask[4], depthMask = GL_TRUE;
 	GLint stFunc = GL_ALWAYS, stRef = 0, stValMask = 0xFF, stWriteMask = 0xFF, stFail = GL_KEEP, stZFail = GL_KEEP, stZPass = GL_KEEP;
 	bool wasDepth = false, wasBlend = false, wasCull = false, wasStencil = false, wasScissor = false;
+	GLint vp[4] = {};	// lane VKFAR2: the Vulkan pass's viewport (asked only when not known and the Vulkan route is tried)
+	bool vpKnown = false;
 	// lane CELLUNI4: the tone map's known state, unless the block above made the targets (it bound its own framebuffer)
 	if ( const WwCellUni::KnownGl * kn = made ? nullptr : WwCellUni::known( fn ) ) {
+		std::memcpy( vp, kn->vp, sizeof vp );
+		vpKnown = true;
 		prevDraw = kn->draw;
 		prevRead = kn->read;
 		prevActive = kn->active;
@@ -229,19 +338,30 @@ bool wwCellFogBloomRun( Scene * scene, unsigned hdrFbo, unsigned ds, int W, int 
 
 	bool ok = true;
 	QString why;
+	/* lane VKFAR2 (row P4b): on the present device's tone frame the pass is drawn there (vkfogbloom.inc) into a shared R8
+	 * target the tone quads bind; every refusal draws GL's steps below (the reason on the "vk fogbloom:" line) */
+	GLuint vkTarget = 0;
+	bool vkDrew = false;
+	if ( const GLuint color = wwCellHdrVkToneColor( GLuint( hdrFbo ) ) ) {
+		if ( !vpKnown )
+			fn->glGetIntegerv( GL_VIEWPORT, vp );
+		vkDrew = onVulkan( scene, r, color, W, H, S, dsFormat, vp, vkTarget ) && vkTarget;
+	}
 	// 1. the depth, samples nearest-resolved
-	fn->glBindFramebuffer( GL_READ_FRAMEBUFFER, GLuint( hdrFbo ) );
-	fn->glBindFramebuffer( GL_DRAW_FRAMEBUFFER, g.depthFbo );
-	fn->glBlitFramebuffer( 0, 0, W, H, 0, 0, W, H, GL_DEPTH_BUFFER_BIT, GL_NEAREST );
-	if ( const GLenum e = check ? fn->glGetError() : GLenum( GL_NO_ERROR ); e != GL_NO_ERROR ) {
-		if ( trustErrCheck )
-			WwCellUni::trustedError( "fog bloom", "the depth resolve", unsigned( e ) );
-		ok = false;
-		why = QStringLiteral( "the depth resolve failed, GL error %1" ).arg( e );
+	if ( !vkDrew ) {
+		fn->glBindFramebuffer( GL_READ_FRAMEBUFFER, GLuint( hdrFbo ) );
+		fn->glBindFramebuffer( GL_DRAW_FRAMEBUFFER, g.depthFbo );
+		fn->glBlitFramebuffer( 0, 0, W, H, 0, 0, W, H, GL_DEPTH_BUFFER_BIT, GL_NEAREST );
+		if ( const GLenum e = check ? fn->glGetError() : GLenum( GL_NO_ERROR ); e != GL_NO_ERROR ) {
+			if ( trustErrCheck )
+				WwCellUni::trustedError( "fog bloom", "the depth resolve", unsigned( e ) );
+			ok = false;
+			why = QStringLiteral( "the depth resolve failed, GL error %1" ).arg( e );
+		}
 	}
 	// 2. the target on the frame's stencil
 	const GLenum one = GL_COLOR_ATTACHMENT0;
-	if ( ok ) {
+	if ( ok && !vkDrew ) {
 		fn->glBindFramebuffer( GL_FRAMEBUFFER, g.fbo );
 		fn->glFramebufferTexture2D( GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D_MULTISAMPLE, g.target, 0 );
 		// lane LIVESET2: the frame's depth / stencil is a texture by default (TONEMAP1); a texture name given as a
@@ -256,7 +376,7 @@ bool wwCellFogBloomRun( Scene * scene, unsigned hdrFbo, unsigned ds, int W, int 
 			why = QStringLiteral( "the target is incomplete" );
 		}
 	}
-	if ( ok ) {
+	if ( ok && !vkDrew ) {
 		fn->glDisable( GL_SCISSOR_TEST );
 		fn->glDisable( GL_DEPTH_TEST );
 		fn->glDisable( GL_BLEND );
@@ -332,8 +452,8 @@ bool wwCellFogBloomRun( Scene * scene, unsigned hdrFbo, unsigned ds, int W, int 
 		return false;
 	}
 	s.ran = true;
-	s.target = g.target;
-	note( s, QStringLiteral( "on %1x%2 x%3 k=%4 translucent=%5 sigma=%6..%7" ).arg( W ).arg( H ).arg( S )
+	s.target = vkDrew ? vkTarget : g.target;
+	note( s, QStringLiteral( "on %1%2x%3 x%4 k=%5 translucent=%6 sigma=%7..%8" ).arg( vkDrew ? QStringLiteral( "Vulkan " ) : QString() ).arg( W ).arg( H ).arg( S )
 		.arg( double( kStrength ) ).arg( double( kTranslucent ) ).arg( double( kSigmaMist ), 0, 'g', 4 ).arg( double( kSigmaFog ), 0, 'g', 4 ) );
 	return true;
 }

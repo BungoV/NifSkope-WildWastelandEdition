@@ -599,6 +599,41 @@ bool farDotsRun( const FarDotsRun & t, std::string & why );
 void farDotsOnGl( const char * why );
 FxStat takeFarDotsStat();
 
+// lane VKFAR2 (row P4b): the fog bloom's own pass (fogbloom_view_ps's b31, spirv-cross --reflect of the shipped SPIR-V)
+inline constexpr FxField kT_fogbloom[] = {
+	{ "fogOn", 0, 1, 1, 1, 0 }, { "fogK", 16, 4, 6, 0, 0 }, { "fogView", 112, 4, 1, 0, 0 },
+	{ "fogDistScale", 128, 1, 1, 0, 0 }, { "fogSun", 144, 4, 1, 0, 0 }, { "fogSunColour", 160, 4, 1, 0, 0 },
+	{ "fogUnit", 176, 1, 1, 0, 0 }, { "fogProbe", 192, 4, 1, 0, 0 }, { "fogRed", 208, 1, 1, 1, 0 },
+	{ "fogNight", 224, 4, 1, 0, 0 }, { "fogNightHue", 240, 1, 1, 0, 0 }, { "atAp", 256, 4, 1, 0, 0 },
+	{ "atApProj", 272, 4, 1, 0, 0 }, { "atApDouble", 288, 1, 1, 0, 0 }, { "volOn", 292, 1, 1, 1, 0 },
+	{ "volRect", 304, 4, 1, 0, 0 }, { "volFarClamp", 320, 1, 1, 1, 0 }, { "volSlices", 336, 4, 1, 0, 0 },
+	{ "volProbe", 352, 1, 1, 1, 0 }, { "volFogBlend", 356, 1, 1, 1, 0 }, { "volFar", 368, 4, 1, 0, 0 },
+	{ "volPack", 384, 4, 1, 0, 0 }, { "volPackDims", 400, 4, 1, 0, 0 }, { "volAirMed", 416, 4, 1, 0, 0 },
+	{ "volAirLayer", 432, 4, 1, 0, 0 }, { "volAirGround", 448, 4, 1, 0, 0 }, { "volAirFlags", 464, 1, 1, 1, 0 },
+	{ "volAirTerrU", 480, 4, 1, 0, 0 }, { "volAirTerrV", 496, 4, 1, 0, 0 }, { "volAirTerrFU", 512, 4, 1, 0, 0 },
+	{ "volAirTerrFV", 528, 4, 1, 0, 0 }, { "volAirTerrRef", 544, 1, 1, 0, 0 }, { "volAirRain", 560, 4, 1, 0, 0 },
+	{ "volAirRainFar", 576, 4, 1, 0, 0 }, { "volAirRainXf", 592, 4, 1, 0, 4 }, { "volAirDrift", 656, 4, 1, 0, 0 },
+	{ "volAirDriftUv", 672, 4, 6, 0, 0 }, { "volAirDriftRed", 768, 1, 1, 1, 0 }, { "fbProj", 772, 2, 1, 0, 0 },
+	{ "fbProjZ", 784, 2, 1, 0, 0 }, { "fbParams", 800, 4, 1, 0, 0 }, { "fbTranslucent", 816, 1, 1, 1, 0 },
+};
+inline constexpr int kT_fogbloomBytes = 832;
+inline constexpr int kT_fogbloomTranslucentAt = 816;  //!< fbTranslucent: 0 the first draw's set, 1 the second's
+struct FogBloomRun
+{
+	int w = 0, h = 0, samples = 0, vp[4] = {};  //!< the tone frame's size and samples, GL's viewport at the pass
+	unsigned color = 0;             //!< the tone frame's colour (toneFrameIs)
+	std::uintptr_t key = 0;         //!< the target's sharedTarget key (R8, the frame's samples)
+	FxTex tex[4];                   //!< volTex, volTile, volAirTerr, volAirRainMap (fogbloom_view_ps's t26..t29)
+	std::uint8_t loose[kT_fogbloomBytes] = {};
+	int red = 0;                    //!< gates only: 1 no second draw, 2 the first draw with fbTranslucent 1, 4 fbProj.y doubled
+};
+/* GL current, cell_fogbloom's uniforms set: the bloom-intensity target drawn on Vulkan (cleared to 0; draw 1 every
+ * sample, draw 2 the samples whose stencil has 0x04, fbTranslucent 1), reading the tone frame's depth (sample 0, as GL's
+ * NEAREST blit keeps) and stencil. target: the shared R8 GL name the tone map binds. false: why; nothing drawn (GL's pass) */
+bool fogBloomRun( const FogBloomRun & t, unsigned & target, std::string & why );
+void fogBloomOnGl( const char * why );
+FxStat takeFogBloomStat();
+
 /* Lane VKOBJ1 (plan row G4, slice 1): the objects' opaque depth prepass (cellgpucull.cpp, lookdev_csmdepth_q.prog) on the
  * present device into a shared multisample depth target (sharedTarget type 0 with samples, GL_DEPTH_COMPONENT24 / 32F) that
  * GL's Hi-Z then reads. GL clears it; the two spans (back faces culled, then two-sided) run in one crossing (depth-only

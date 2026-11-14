@@ -55,6 +55,7 @@
 // lane VKFAR1: the far bulb dots as instanced quads (cell_fardots)
 #include "features/vkframe/fardots_view_vs.spv.h"
 #include "features/vkframe/fardots_view_ps.spv.h"
+#include "features/vkframe/fogbloom_view_ps.spv.h"  // lane VKFAR2 (row P4b): the fog bloom's own pass (vkfogbloom.inc)
 #include "features/vkframe/vkfarcards.h"  // lane VKFAR1 round 2: the far cards' inputs (vkfarcards.inc)
 #include "features/vkframe/obj_depth_vs.spv.h"  // lane VKOBJ1
 
@@ -710,6 +711,7 @@ void fxDrop();
 bool farRecord( std::string & why );  // lane VKFAR1 (vkfardots.inc): fxWork's kind 2
 bool fcRecord( std::string & why );   // lane VKFAR2 (vkfarcardsdraw.inc): fxWork's kind 3
 bool waterRecord( std::string & why );  // lane VKWATER3 (vkwater.inc): fxWork's kind 4 (VKFAR2: and 5, the far LOD rings)
+bool fbRecord( std::string & why );  // lane VKFAR2 (vkfogbloom.inc): fxWork's kind 6, the fog bloom
 void waterDrop();
 void objDrop();  // lane VKOBJ1
 void blFree();  // lane VKOBJ2
@@ -1607,6 +1609,7 @@ struct Tone
 	GLuint colorTex = 0, dsTex = 0, colorObj = 0, dsObj = 0;
 	VkImageView colorView = VK_NULL_HANDLE, stencilView = VK_NULL_HANDLE;
 	VkImageView dsView = VK_NULL_HANDLE;  // lane VKAIR1: depth + stencil, the air pass's stencil attachment
+	VkImageView depthView = VK_NULL_HANDLE;  // lane VKFAR2: the depth alone, sampled (the fog bloom's per-sample depth)
 	double frameMb = 0.0;
 	// the measure's bloom, copied by GL into an image of this device (RGBA32F, 1 sample) when it changes
 	int mw = 0, mh = 0;
@@ -2302,7 +2305,7 @@ void toneFrameFree( bool glAlive )
 			if ( *o )
 				g.deleteMemoryObjects( 1, o );
 	}
-	for ( VkImageView * iv : { &T.colorView, &T.stencilView, &T.dsView } )
+	for ( VkImageView * iv : { &T.colorView, &T.stencilView, &T.dsView, &T.depthView } )
 		if ( *iv )
 			v.vkDestroyImageView( v.dev, *iv, nullptr );
 	for ( VkImage * i : { &T.color, &T.ds } )
@@ -2314,7 +2317,7 @@ void toneFrameFree( bool glAlive )
 	toneMeasureDrop( glAlive );
 	toneBloomFree( glAlive );
 	T.colorTex = T.dsTex = T.colorObj = T.dsObj = 0;
-	T.colorView = T.stencilView = T.dsView = VK_NULL_HANDLE;
+	T.colorView = T.stencilView = T.dsView = T.depthView = VK_NULL_HANDLE;
 	T.color = T.ds = VK_NULL_HANDLE;
 	T.colorMem = T.dsMem = VK_NULL_HANDLE;
 	T.w = T.h = T.samples = 0;
@@ -3777,7 +3780,8 @@ bool toneFrame( int w, int h, int samples, unsigned & color, unsigned & ds, std:
 	T.stencilView = imageView( T.ds, VK_IMAGE_VIEW_TYPE_2D, VK_FORMAT_D24_UNORM_S8_UINT, VK_IMAGE_ASPECT_STENCIL_BIT );
 	const GLenum err = g.getError();
 	T.dsView = imageView( T.ds, VK_IMAGE_VIEW_TYPE_2D, VK_FORMAT_D24_UNORM_S8_UINT, VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT );
-	if ( !T.colorView || !T.stencilView || !T.dsView || err != 0 ) {
+	T.depthView = imageView( T.ds, VK_IMAGE_VIEW_TYPE_2D, VK_FORMAT_D24_UNORM_S8_UINT, VK_IMAGE_ASPECT_DEPTH_BIT );
+	if ( !T.colorView || !T.stencilView || !T.dsView || !T.depthView || err != 0 ) {
 		why = "the tone frame's views / stencil mode failed (GL error " + std::to_string( err ) + ")";
 		toneFrameFree( true );
 		return false;
@@ -5254,7 +5258,7 @@ struct Fx
 	VkFence fence = VK_NULL_HANDLE;
 	bool pending = false;
 	// this run's job, written by the drawing thread before the hand
-	int kind = 0;  // 0 the air, 1 the clouds, 2 the far dots (lane VKFAR1), 3 the far cards (lane VKFAR2), 4 the water draw (lane VKWATER3)
+	int kind = 0;  // 0 the air, 1 the clouds, 2 the far dots (lane VKFAR1), 3 the far cards (lane VKFAR2), 4 the water draw (lane VKWATER3), 6 the fog bloom (lane VKFAR2)
 	VkFramebuffer fbAir = VK_NULL_HANDLE, fbM = VK_NULL_HANDLE, fbR = VK_NULL_HANDLE;
 	int w = 0, h = 0, vp[4] = {}, stencilRef = 1, march = kFxMarch, resolve = kFxResolve, mw = 0, mh = 0, hw = 0, hh = 0;
 	bool blend = false, skipMarch = false;
@@ -5694,6 +5698,11 @@ bool fxWork( std::string & why )
 		}
 	} else if ( F.kind == 4 || F.kind == 5 ) {  // lane VKWATER3: the shaded water draw; lane VKFAR2: 5 the far LOD rings
 		if ( !waterRecord( why ) ) {
+			v.vkEndCommandBuffer( F.cmd );
+			return false;
+		}
+	} else if ( F.kind == 6 ) {  // lane VKFAR2 (row P4b): the fog bloom's target
+		if ( !fbRecord( why ) ) {
 			v.vkEndCommandBuffer( F.cmd );
 			return false;
 		}
@@ -6155,6 +6164,7 @@ FxStat takeCloudStat()
 #include "features/vkframe/vkfardots.inc"  // lane VKFAR1 (row G3): the far bulb dots on the view
 #include "features/vkframe/vkfarcards.inc"  // lane VKFAR1 round 2: the far cards' inputs
 #include "features/vkframe/vkfarcardsdraw.inc"  // lane VKFAR2: the far cards drawn on the view
+#include "features/vkframe/vkfogbloom.inc"  // lane VKFAR2 (row P4b): the fog bloom's own pass
 
 // lane VKLIGHT1: AO, the contact shadow lines and the SSGI cast as compute on the present device (vkpresent.h LightRun)
 namespace
