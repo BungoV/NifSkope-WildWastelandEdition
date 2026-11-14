@@ -23,6 +23,9 @@
 #include <vector>
 
 bool wwFrameLog();	// gl/cellcull.cpp
+bool rtddgiCellShaderDefine();      // lane VKOBJ5 (vkBlDraw): src/features/gi/rtddgicell.cpp, WW_CELL_RTDDGI in the cell programs
+bool rtddgiRestirShaderDefine();    // WW_CELL_RESTIR
+bool rtddgiRestirGiShaderDefine();  // WW_CELL_RESTIRGI
 
 #include "features/vkframe/vkobjtex.h"	// lane VKOBJ3: the cache's BC twins in the Vulkan bindless table
 #include "features/vkframe/vkobjpipe.h"	// lane VKOBJ4: a run's multi-draw on Vulkan (WW_VKOBJ_SHADE)
@@ -613,6 +616,18 @@ bool vkBlDraw( const NifSkopeOpenGLContext::Program * prog, const GLsizei * coun
 		return false;  // a rigid opaque shape outside a run: not this route (it stays on GL)
 	skinTried += skinned;
 	alphaTried += alphaTest;
+	/* the shipped bl twins are the code-default route; the RT GI variant (WW_CELL_RTDDGI + cascades + RESTIR / RESTIRGI) is
+	 * lane VKWATER3's: until its twin lands, such a program stays on GL with the reason in the line */
+	const char * no = ::rtddgiCellShaderDefine() ? "WW_CELL_RTDDGI in GL's program: no Vulkan twin"
+		: ::rtddgiRestirShaderDefine() ? "WW_CELL_RESTIR in GL's program: no Vulkan twin"
+		: ::rtddgiRestirGiShaderDefine() ? "WW_CELL_RESTIRGI in GL's program: no Vulkan twin" : nullptr;
+	if ( no ) {
+		if ( skinned )
+			skinWhy = no;
+		if ( alphaTest )
+			alphaWhy = no;
+		return false;
+	}
 	static std::vector<std::uint32_t> cmds;
 	cmds.clear();
 	for ( GLsizei i = 0; i < n; i++ )

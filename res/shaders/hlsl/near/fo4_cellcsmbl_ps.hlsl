@@ -1507,6 +1507,10 @@ bool wwSunShadowProbe(float3 posView, float3 shaded, out float3 outc)
 #include "../reflections/cell_ssr.hlsli"
 #undef WW_FN_cellSsrProbeOut
 
+// lane VKOBJ5: the alpha test's discard, taken after frag_main (every texture sample done, so a quad's derivatives
+// stay defined on Vulkan, where discard ends the invocation; as fo4_default_ps's killPx, VKWATER3)
+static bool wwKillPx = false;
+
 void frag_main()
 {
     wwAirFree = false;
@@ -1803,7 +1807,7 @@ void frag_main()
         int m = mPick;
         if ((m & (1 << alphaFlags)) == 0)
         {
-            discard;
+            wwKillPx = true;
         }
         if ((alphaFlags & 8) != 0)
         {
@@ -3136,6 +3140,10 @@ SPIRV_Cross_Output main(SPIRV_Cross_Input stage_input)
     wwFarSkyVis = stage_input.wwFarSkyVis;
     wwFarAo = stage_input.wwFarAo;
     frag_main();
+    if (wwKillPx)
+    {
+        discard;
+    }
     SPIRV_Cross_Output stage_output;
     stage_output.cellEmitOut = cellEmitOut;
     stage_output.fragColor = fragColor;

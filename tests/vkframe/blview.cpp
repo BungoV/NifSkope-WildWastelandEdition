@@ -1110,6 +1110,12 @@ int main( int argc, char ** argv )
 	}
 	const bool colOk = twinOk && colourGate( spvDir + "/spvset/spirv", handles, anisoAt, aniso1H, 0 );
 	const bool colCsmOk = twinOk && colourGate( spvDir + "/spvset/spirv", handles, anisoAt, aniso1H, 1 );  // gap 4: fo4_cellcsmbl
+	// lane VKOBJ5 (G4): skinned (kind 1) and alpha-tested (kind 2) draws through both bl twins
+	bool kindOk = true;
+	for ( int tw = 0; tw < 2; tw++ )
+		for ( int kd = 1; kd <= 2; kd++ )
+			kindOk = ( twinOk && colourGate( spvDir + "/spvset/spirv", handles, anisoAt, aniso1H, tw, kd ) ) && kindOk;
+	ok = kindOk && ok;
 	ok = colOk && colCsmOk && ok;
 	if ( bc ) {  // lane VKWATER3 G4: GL's fo4_cell / fo4_cellcsm against the non-bindless twins through objCellShade
 		/* BaseMap DXT5, NormalMap DXT1, SpecularMap BC5 signed (R,G,0,1: .g the gloss), GlowMap DXT1. Not texture 4: the twin made

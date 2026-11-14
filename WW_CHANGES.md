@@ -1,3 +1,19 @@
+## VKOBJ5 (2026-11-14): skinned and alpha-tested bindless object draws on Vulkan (WW_VKOBJ_SHADE=1)
+
+Changed, not built, not checked live. Offline: tests/vkframe/blview.sh colourGate gained a skinned and an alpha-tested
+pass for both bindless twins (fo4_cellbl, fo4_cellcsmbl): depth EXACT, colour inside the existing bar, reds FAIL.
+
+- A pooled fo4_cellbl / fo4_cellcsmbl shape outside a multi-draw run that is skinned or alpha-tested now draws on Vulkan
+  through the bindless twins (one row: the one the draw wrote). Before, only rigid opaque runs reached Vulkan.
+- Frame lines `vk objskin:` and `vk objalpha:` (shapes, drawn, left on GL and why).
+- With ray-traced GI on (WW_CELL_RTDDGI, RESTIR or RESTIRGI in GL's program) these shapes stay on GL: that variant's twin
+  is not made yet, and the line says so.
+- Reds: WW_VKVIEW_OBJSKIN_RED=bone (each bone reads the next bone's transform), WW_VKVIEW_OBJALPHA_RED=flags (alpha
+  test off).
+- The bindless twins' alpha test discards after the last texture sample (as VKWATER3 did for fo4_default /
+  pbrm_default). A discard in the middle ended the pixel on Vulkan and broke its neighbours' texture filtering
+  (colour max 0.88 off before, BOUND after).
+
 ## VKBLOOM1 (2026-11-12): the Fusion Shaders bloom and the exposure measure join the tone pass on Vulkan (WW_VKVIEW=1)
 
 Changed, not built, not checked live. Offline: tests/vkframe/toneview.sh gained a BLOOM arm (GL's own bloom chain and
