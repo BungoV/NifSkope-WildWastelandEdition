@@ -582,9 +582,76 @@ bool vkShade( const NifSkopeOpenGLContext::Program * prog, GLsizei n )
 		return reinterpret_cast<void *>( QOpenGLContext::currentContext()->getProcAddress( name ) );
 	}, s, why );
 }
+
+/* lane VKOBJ5 (plan row G4: skinned and alpha-tested): the shapes that never join a run (bsshape's run predicate takes rigid,
+ * opaque shapes only), counted per kind for `vk objskin:` / `vk objalpha:` (a shape both skinned and alpha-tested counts in both) */
+long long skinTried = 0, skinDrawn = 0, alphaTried = 0, alphaDrawn = 0;
+std::string skinWhy, alphaWhy, vkSkinLine, vkAlphaLine;
 }  // namespace
 
-bool runIssue( NifSkopeOpenGLContext::GLFunctions * f, const NifSkopeOpenGLContext::Program * prog )
+bool vkBlDraw( const NifSkopeOpenGLContext::Program * prog, const GLsizei * counts, const void * const * offs, GLsizei n )
+{
+	Ctx & c = cx();
+	if ( !vkShadeOn() || !prog || n <= 0 || !geo.on || !c.boundCls || !c.map )
+		return false;
+	const std::string_view nm = prog->name;
+	const int twin = nm.find( "cellcsmbl" ) != std::string_view::npos ? 1 : nm.find( "cellbl" ) != std::string_view::npos ? 0 : -1;
+	if ( twin < 0 )
+		return false;
+	const Class & k = *c.boundCls;
+	// skinned: the class carries the bone codes (location 5; bsshape feeds them only for a GPU-skinned shape)
+	const bool skinned = ( ( k.attrMask >> 20 ) & 15u ) != 0;
+	// alpha-tested: alphaFlags' test bits (0 always, 1 <, 2 ==, 3 <=, 4 >, 5 !=, 6 >=, 7 never; bit 3 is the blend)
+	GLint alphaFlags = 0;
+	if ( QOpenGLContext * qc = QOpenGLContext::currentContext() ) {
+		const GLint at = qc->functions()->glGetUniformLocation( prog->id, "alphaFlags" );
+		if ( at >= 0 )
+			qc->functions()->glGetUniformiv( prog->id, at, &alphaFlags );
+	}
+	const bool alphaTest = ( alphaFlags & 7 ) != 0;
+	if ( !skinned && !alphaTest )
+		return false;  // a rigid opaque shape outside a run: not this route (it stays on GL)
+	skinTried += skinned;
+	alphaTried += alphaTest;
+	static std::vector<std::uint32_t> cmds;
+	cmds.clear();
+	for ( GLsizei i = 0; i < n; i++ )
+		cmds.insert( cmds.end(), { std::uint32_t( counts[i] ), 1u, std::uint32_t( ( std::uintptr_t( offs[i] ) + geo.idxOff ) / 2 ),
+			std::uint32_t( geo.baseVertex ), 0u } );
+	WW_SWITCH_STATIC( int, redSkin, wwEnv( "WW_VKVIEW_OBJSKIN_RED" ).trimmed() == "bone" ? 1 : 0 );
+	WW_SWITCH_STATIC( int, redAlpha, wwEnv( "WW_VKVIEW_OBJALPHA_RED" ).trimmed() == "flags" ? 1 : 0 );
+	WwVkPresent::ObjBlShade s;
+	s.twin = twin;
+	s.prog = prog->id;
+	s.poolKey = reinterpret_cast<std::uintptr_t>( &k );
+	s.pool.attrMask = k.attrMask;
+	std::copy( k.vbo, k.vbo + 16, s.pool.vbo );
+	s.pool.ebo = k.ebo;
+	s.pool.verts = k.a.vertUsed;
+	s.pool.indices = k.a.idxUsed;
+	s.rows = c.map + std::size_t( ( c.cursor + kRows - 1 ) % kRows ) * sizeof( Row );  // the shape's own row (commit wrote it)
+	s.nRows = 1;
+	s.cmds = cmds.data();
+	s.nCmds = cmds.size() / 5;
+	s.skinRed = skinned ? redSkin : 0;
+	s.alphaRed = alphaTest ? redAlpha : 0;
+	std::string why;
+	const bool drew = WwVkPresent::objBlShade( []( const char * name ) -> void * {
+		return reinterpret_cast<void *>( QOpenGLContext::currentContext()->getProcAddress( name ) );
+	}, s, why );
+	if ( drew ) {
+		skinDrawn += skinned;
+		alphaDrawn += alphaTest;
+	} else {
+		if ( skinned )
+			skinWhy = why;
+		if ( alphaTest )
+			alphaWhy = why;
+	}
+	return drew;
+}
+
+bool runIssue(NifSkopeOpenGLContext::GLFunctions * f, const NifSkopeOpenGLContext::Program * prog )
 {
 	Ctx & c = cx();
 	if ( !run.open )
@@ -1297,6 +1364,30 @@ void frame()
 			vkLoadLine = b;
 			std::fprintf( stderr, "%s\n", b );
 		}
+	}
+	// lane VKOBJ5: the skinned / alpha-tested bindless shapes outside a run (vkBlDraw) drawn on Vulkan, and the last refusal
+	if ( vkShadeOn() ) {
+		WW_SWITCH_STATIC( QString, skinRed, wwEnv( "WW_VKVIEW_OBJSKIN_RED" ).trimmed() );
+		WW_SWITCH_STATIC( QString, alphaRed, wwEnv( "WW_VKVIEW_OBJALPHA_RED" ).trimmed() );
+		char b[640];
+		for ( int kind = 0; kind < 2; kind++ ) {
+			const long long tried = kind ? alphaTried : skinTried, drawn = kind ? alphaDrawn : skinDrawn;
+			const std::string & why = kind ? alphaWhy : skinWhy;
+			const QString & red = kind ? alphaRed : skinRed;
+			const bool redOn = kind ? red == "flags" : red == "bone";
+			if ( !tried )
+				continue;
+			std::snprintf( b, sizeof( b ), "vk %s: shapes=%lld drawn=%lld gl=%lld%s%s%s%s", kind ? "objalpha" : "objskin", tried, drawn,
+				tried - drawn, why.empty() ? "" : " glWhy=", why.c_str(), redOn ? " RED " : "", redOn ? red.toStdString().c_str() : "" );
+			std::string & line = kind ? vkAlphaLine : vkSkinLine;
+			if ( line != b && wwFrameLog() ) {
+				line = b;
+				std::fprintf( stderr, "%s\n", b );
+			}
+		}
+		skinTried = skinDrawn = alphaTried = alphaDrawn = 0;
+		skinWhy.clear();
+		alphaWhy.clear();
 	}
 	// lane VKOBJ4: the runs drawn on Vulkan this frame, the ones GL drew and why
 	if ( vkShadeOn() ) {

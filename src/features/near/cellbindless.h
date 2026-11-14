@@ -85,6 +85,11 @@ bool vkShadeOn();
  * (`vk objpbrm:`). counts / offs as glMultiDrawElements (16-bit indices), verts the shape's vertex count.
  * Reds WW_VKVIEW_OBJCELL_RED / WW_VKVIEW_OBJPBRM_RED=offset|half|swz|key */
 bool vkCellDraw( const NifSkopeOpenGLContext::Program * prog, const GLsizei * counts, const void * const * offs, GLsizei n, std::size_t verts );
+/* lane VKOBJ5 (plan row G4: skinned and alpha-tested): a POOLED fo4_cellbl / fo4_cellcsmbl shape outside a run that is skinned
+ * (its class carries the bone codes, location 5) or alpha-tested (alphaFlags & 7) on Vulkan through the bl twins (objBlShade,
+ * one row: the one commit wrote, under vkShadeOn); false: GL draws it, the reason in `vk objskin:` / `vk objalpha:`.
+ * Reds WW_VKVIEW_OBJSKIN_RED=bone (the bone transforms one bone on), WW_VKVIEW_OBJALPHA_RED=flags (alphaFlags 0) */
+bool vkBlDraw( const NifSkopeOpenGLContext::Program * prog, const GLsizei * counts, const void * const * offs, GLsizei n );
 //! the cache deletes tex next (its handles were dropped): a twin leaves the table, its Vulkan half at the next frame
 void texGone( GLuint tex );
 

@@ -632,7 +632,9 @@ void BSShape::drawShapes( NodeList * secondPass )
 		// lane VKWATER3 G4: a fo4_cell / fo4_cellcsm shape on Vulkan (WW_VKOBJ_SHADE, the base variant; `vk objcell:`)
 		if ( !cullCounts.empty() && !wwMdiDraw( mdiHint, &cullRanges, numTriangles )
 			&& !WwBl::vkCellDraw( context->getCurrentProgram(), cullCounts.data(), cullOffsets.data(), GLsizei( cullCounts.size() ),
-				size_t( verts.size() ) ) ) {
+				size_t( verts.size() ) )
+			&& !WwBl::vkBlDraw( context->getCurrentProgram(), cullCounts.data(), cullOffsets.data(), GLsizei( cullCounts.size() ) ) ) {
+			// lane VKOBJ5: a pooled skinned / alpha-tested fo4_cellbl shape outside a run on Vulkan (`vk objskin:` / `vk objalpha:`)
 			WwBl::multiDrawElements( context->fn, cullCounts.data(), cullOffsets.data(), GLsizei( cullCounts.size() ),
 				GLenum( context->triMode() ) );
 			PassTime::countDraw( qint64( cullCounts.size() ) );	// lane PERF1
@@ -642,7 +644,8 @@ void BSShape::drawShapes( NodeList * secondPass )
 		const GLsizei vkCount = GLsizei( numTriangles * 3 );	// lane VKWATER3 G4: the shape's one command
 		const void * vkOff = nullptr;
 		if ( !wwMdiDraw( mdiHint, nullptr, numTriangles )
-			&& ( selectionFlags || !WwBl::vkCellDraw( context->getCurrentProgram(), &vkCount, &vkOff, 1, size_t( verts.size() ) ) ) ) {
+			&& ( selectionFlags || ( !WwBl::vkCellDraw( context->getCurrentProgram(), &vkCount, &vkOff, 1, size_t( verts.size() ) )
+				&& !WwBl::vkBlDraw( context->getCurrentProgram(), &vkCount, &vkOff, 1 ) ) ) ) {	// lane VKOBJ5: + the bl twins
 			WwBl::drawElements( context->fn, GLsizei( numTriangles * 3 ), 0, GLenum( context->triMode() ) );
 			PassTime::countDraw( 1 );	// lane PERF1
 		}

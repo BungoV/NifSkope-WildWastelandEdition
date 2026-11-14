@@ -331,6 +331,8 @@ struct ObjBlShade
 	const void * cmds = nullptr;  //!< 5 words a command (the base instance relative to the leader)
 	std::size_t nCmds = 0;
 	int red = 0;  //!< gates only: 1 objBlPipe's strict target count (a 1-buffer frame must refuse)
+	int skinRed = 0;   //!< lane VKOBJ5 red `bone`: the mirrored skinningUniforms one bone on (bone i reads i + 1's transform)
+	int alphaRed = 0;  //!< lane VKOBJ5 red `flags`: the mirrored alphaFlags 0 (no alpha test, no blend bit)
 };
 bool objBlShade( GlProc gp, const ObjBlShade & s, std::string & why );
 /* lane VKWATER3 (plan row G4 by draws): one shape's draw (bsshape.cpp, WW_VKOBJ_SHADE=1) through the non-bindless twins
