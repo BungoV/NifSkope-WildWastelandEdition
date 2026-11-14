@@ -11,6 +11,8 @@
 #include "features/vkframe/objcell_pbrm_ps.spv.h"  // pbrm_default.prog's pixel twin (its vertex stage is objcell_vs)
 #include "features/vkframe/objcell_pbrmcell_ps.spv.h"     // pbrm_cell.prog's (the cell-lit pbrm_default)
 #include "features/vkframe/objcell_pbrmcellcsm_ps.spv.h"  // pbrm_cellcsm.prog's (and the sun cascades)
+#include "features/vkframe/objcell_effectcell_ps.spv.h"   // fo4_effectcell.prog's (+ WW_CELL_AIRZONE, ships on)
+#include "features/vkframe/objcell_effectdecalcsm_ps.spv.h"  // fo4_effectdecalcsm.prog's
 
 #include <algorithm>
 #include <cstdlib>
@@ -147,6 +149,7 @@ struct Op
 	VkBufferView texelView[3] = {};             // float / int / uint
 	std::map<unsigned, OpTexel> texTwins;       // GL's buffer texture -> its twin
 	std::map<unsigned, OpStore> stores;         // GL's buffer name -> the store under it
+	std::map<unsigned, std::uint64_t> copyMemo; // lane VKWATER3: GL's texture -> sharedGen() when copied this frame (objCellCopyTwin)
 	GLuint storeStage = 0;                      // GL's staging buffer, only if a store refuses glNamedBufferSubData
 	int storeSubData = -1;                      // -1 not tried, 0 refused (staged), 1 written in place
 	WwVkPresent::ObjBlStoreStat storeSt;
@@ -1398,7 +1401,71 @@ bool objBlSharedFits( std::uintptr_t key, std::uint32_t dim, std::uint32_t array
 	return true;
 }
 
-bool objBlBindUnits( GlProc gp, unsigned prog, ObjBlDraw & d, ObjBlBindStat & st, std::string & why )
+/* lane VKWATER3 G4 rest: a GL-owned texture an effect twin samples (the soft fade's depth copy, the air's terrain grid and env
+ * strata, the GI air volume) as a shared copy twin of its own: GL's level(s) copied in (glCopyImageSubData) once a frame,
+ * before the crossing's signal. 2D / 2D array / 3D, single-sample, a format vkFormatOf knows. red 1 copies from x = 1. */
+std::uintptr_t objCellCopyTwin( GlProc gp, const ObjBlTexUnit & u, int red, std::string & why )
+{
+	Gl & g = gl();
+	using LevelIv = void( WINAPI * )( unsigned, int, unsigned, int * );
+	using TexIv = void( WINAPI * )( unsigned, unsigned, int * );
+	const auto lv = gp ? reinterpret_cast<LevelIv>( gp( "glGetTextureLevelParameteriv" ) ) : nullptr;
+	const auto tv = gp ? reinterpret_cast<TexIv>( gp( "glGetTextureParameteriv" ) ) : nullptr;
+	if ( !lv || !tv || !g.copyImageSubData )
+		return why = "no glGetTextureLevelParameteriv / glCopyImageSubData", 0;
+	const int type = u.glTarget == kTexture2D ? 0 : u.glTarget == kTexture3D ? 1 : u.glTarget == kTexture2DArray ? 2 : -1;
+	if ( type < 0 )
+		return why = "GL target " + std::to_string( u.glTarget ) + " has no copy twin", 0;
+	int w = 0, h = 0, d = 1, fmt = 0, samples = 0, minF = 0, immLevels = 0;
+	lv( u.glTex, 0, 0x1000, &w );       // TEXTURE_WIDTH
+	lv( u.glTex, 0, 0x1001, &h );       // TEXTURE_HEIGHT
+	lv( u.glTex, 0, 0x8071, &d );       // TEXTURE_DEPTH
+	lv( u.glTex, 0, 0x1003, &fmt );     // TEXTURE_INTERNAL_FORMAT
+	lv( u.glTex, 0, 0x9106, &samples ); // TEXTURE_SAMPLES
+	tv( u.glTex, 0x2801, &minF );       // TEXTURE_MIN_FILTER
+	tv( u.glTex, 0x82DF, &immLevels );  // TEXTURE_IMMUTABLE_LEVELS
+	if ( w < 1 || h < 1 || samples > 1 )
+		return why = "an empty or multisampled GL texture", 0;
+	int levels = 1;
+	if ( minF != 0x2600 && minF != 0x2601 ) {  // a mip filter: every level GL holds
+		levels = immLevels > 0 ? immLevels : 0;
+		for ( int l = 0, lw = 0; !immLevels && l < 16 && ( lv( u.glTex, l, 0x1000, &lw ), lw > 0 ); l++ )
+			levels = l + 1;
+	}
+	const std::uintptr_t key = ( std::uintptr_t( 0xC07 ) << 40 ) | std::uintptr_t( u.glTex );
+	unsigned twin = 0;
+	if ( !sharedTarget( key, type, w, h, type ? d : 1, unsigned( fmt ), twin, why, levels ) || !twin )
+		return 0;
+	const std::uint64_t gen = sharedGen();
+	auto it = opS().copyMemo.find( u.glTex );
+	if ( it != opS().copyMemo.end() && it->second == gen )
+		return key;  // copied this frame
+	const double t0 = nowMs();
+	std::uint64_t bytes = 0;
+	const Shared * s = sharedFind( key );
+	int px = 4;  // the twin's texel size, for the copy's byte count
+	switch ( s ? s->fmt : VK_FORMAT_UNDEFINED ) {
+	case VK_FORMAT_R32G32B32A32_SFLOAT: case VK_FORMAT_R32G32B32A32_SINT: case VK_FORMAT_R32G32B32A32_UINT: px = 16; break;
+	case VK_FORMAT_R16G16B16A16_SFLOAT: case VK_FORMAT_R32G32_SFLOAT: case VK_FORMAT_R32G32_UINT: case VK_FORMAT_D32_SFLOAT_S8_UINT: px = 8; break;
+	case VK_FORMAT_D16_UNORM: case VK_FORMAT_R8G8_UNORM: px = 2; break;
+	case VK_FORMAT_R8_UNORM: case VK_FORMAT_R8_UINT: px = 1; break;
+	default: break;
+	}
+	for ( int l = 0; l < levels; l++ ) {
+		const int lw = std::max( w >> l, 1 ), lh = std::max( h >> l, 1 ), ld = type == 1 ? std::max( d >> l, 1 ) : type == 2 ? d : 1;
+		const int x0 = red == 1 && lw > 1 ? 1 : 0;
+		g.copyImageSubData( u.glTex, u.glTarget, l, x0, 0, 0, twin, u.glTarget, l, 0, 0, 0, lw - x0, lh, ld );
+		bytes += std::uint64_t( lw ) * std::uint64_t( lh ) * std::uint64_t( ld ) * std::uint64_t( px );
+	}
+	opS().copyMemo[u.glTex] = sharedGen();  // a twin made above bumped it
+	ObjBlRunStat & rs = opS().st;
+	rs.copies++;
+	rs.copyBytes += bytes;
+	rs.copyMs += nowMs() - t0;
+	return key;
+}
+
+bool objBlBindUnits(GlProc gp, unsigned prog, ObjBlDraw & d, ObjBlBindStat & st, std::string & why )
 {
 	const std::uint32_t * words[2] = { d.vs, d.ps };
 	const std::size_t counts[2] = { d.vsWords, d.psWords };
@@ -1470,11 +1537,22 @@ bool objBlBindUnits( GlProc gp, unsigned prog, ObjBlDraw & d, ObjBlBindStat & st
 				st.twins++;
 				continue;
 			}
+			std::string w;
+			// lane VKWATER3: the effect twins read GL's own frame inputs (only these: a material map stays a refusal) through copy twins
+			if ( !key && d.twin >= 7 && ( u.name == "fxDepth" || u.name == "airTerr" || u.name == "cellGiAir" || u.name == "volEnvHist" ) ) {
+				key = objCellCopyTwin( gp, u, d.copyRed, w );
+				if ( !key ) {
+					st.misfit++;
+					if ( st.misfitWhy.empty() )
+						st.misfitWhy = u.name + ": " + w;
+					continue;
+				}
+				st.copied++;
+			}
 			if ( !key ) {
 				st.glOwn++;
 				continue;
 			}
-			std::string w;
 			if ( !objBlSharedFits( key, u.dim, u.arrayed, w ) ) {
 				st.misfit++;
 				if ( st.misfitWhy.empty() )
@@ -2171,7 +2249,13 @@ ObjBlRunStat takeObjBlRunStat()
 {
 	ObjBlRunStat s = opS().st;
 	opS().st = ObjBlRunStat();
+	opS().copyMemo.clear();  // the next frame copies each GL texture again
 	return s;
+}
+
+void objCellCopiesStale()
+{
+	opS().copyMemo.clear();
 }
 
 bool objBlTargetState( GlProc gp, std::uint32_t colorCount, ObjBlTarget & t, std::string & why, int red )
@@ -2557,8 +2641,8 @@ bool objBlShade( GlProc gp, const ObjBlShade & s, std::string & why )
 
 int objCellRed( const char * name )
 {
-	static const char * names[7] = { "offset", "half", "swz", "key", "light", "bone", "blend" };
-	for ( int i = 0; name && i < 7; i++ )
+	static const char * names[8] = { "offset", "half", "swz", "key", "light", "bone", "blend", "copy" };
+	for ( int i = 0; name && i < 8; i++ )
 		if ( std::strcmp( name, names[i] ) == 0 )
 			return i + 1;
 	return 0;
@@ -2571,6 +2655,8 @@ void objCellPs( int twin, const std::uint32_t *& words, std::size_t & count )
 	case 4: words = vkframe_objcell_pbrm_ps_spv; count = sizeof( vkframe_objcell_pbrm_ps_spv ) / 4; return;
 	case 5: words = vkframe_objcell_pbrmcell_ps_spv; count = sizeof( vkframe_objcell_pbrmcell_ps_spv ) / 4; return;
 	case 6: words = vkframe_objcell_pbrmcellcsm_ps_spv; count = sizeof( vkframe_objcell_pbrmcellcsm_ps_spv ) / 4; return;
+	case 7: words = vkframe_objcell_effectcell_ps_spv; count = sizeof( vkframe_objcell_effectcell_ps_spv ) / 4; return;
+	case 8: words = vkframe_objcell_effectdecalcsm_ps_spv; count = sizeof( vkframe_objcell_effectdecalcsm_ps_spv ) / 4; return;
 	default: words = vkframe_objcell_cell_ps_spv; count = sizeof( vkframe_objcell_cell_ps_spv ) / 4; return;
 	}
 }
@@ -2581,7 +2667,7 @@ bool objCellShade( GlProc gp, const ObjCellShade & s, std::string & why )
 		objBlOnGl( w.c_str() );
 		return why = w, false;
 	};
-	if ( s.twin < 2 || s.twin > 6 || !s.prog || !s.verts || !s.cmds || !s.nCmds )
+	if ( s.twin < 2 || s.twin > 8 || !s.prog || !s.verts || !s.cmds || !s.nCmds )
 		return fail( "no twin, program, vertices or commands" );
 	if ( !gp )
 		return fail( "no GL entry points" );
@@ -2603,6 +2689,7 @@ bool objCellShade( GlProc gp, const ObjCellShade & s, std::string & why )
 	d.vsWords = sizeof( vkframe_objcell_vs_spv ) / 4;
 	objCellPs( s.twin, d.ps, d.psWords );
 	d.texelRed = s.red == 5 ? 1 : 0;
+	d.copyRed = s.red == 8 ? 1 : 0;
 	std::string w2;
 	if ( !objBlFrameRead( gp, d, w2, s.red == 7 ? 1 : 0 ) )
 		return fail( w2 );

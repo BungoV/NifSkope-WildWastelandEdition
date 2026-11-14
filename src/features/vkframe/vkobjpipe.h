@@ -214,6 +214,7 @@ struct ObjBlDraw
 	std::vector<std::uint32_t> imageSwz;  //!< lane VKWATER3: per image, a twin's swizzle (blSwizzleCode; 0 none)
 	int texRed = 0;                       //!< lane VKWATER3, gates only: 1 the twin made before (objTexKey), 2 the swizzle dropped
 	int texelRed = 0;                     //!< lane VKWATER3, gates only: objBlTexelCopy's red (1: copied from 16 bytes past the start)
+	int copyRed = 0;                      //!< lane VKWATER3, gates only: objCellCopyTwin's red (1: copied from one texel on in x)
 	std::vector<std::pair<std::uint32_t, ObjBlSampler>> samplers;          //!< binding -> GL's state, else the default
 	std::vector<std::pair<std::uint32_t, unsigned>> texels;                //!< binding -> GL's buffer texture (objBlTexelCopy made its twin)
 	const void * glRows = nullptr;  //!< GL's draw rows (the bindless ring, GL form), translated into wwDraws
@@ -236,7 +237,8 @@ struct ObjBlBindStat
 	int shared = 0;    //!< images from a shared target
 	int twins = 0;     //!< images from a texture cache twin (lane VKWATER3: twin 2 and up only)
 	int glOwn = 0;     //!< a GL texture that is no shared target (a stand-in)
-	int misfit = 0;    //!< a shared target the binding cannot take (shape or samples; a stand-in)
+	int copied = 0;    //!< lane VKWATER3: GL textures read through a copy twin (twin 7 and up; objCellCopyTwin)
+	int misfit = 0;   //!< a shared target the binding cannot take (shape or samples; a stand-in)
 	int unbound = 0;   //!< no unit or no texture
 	int texelGl = 0;   //!< a texel buffer GL binds
 	int texelShared = 0, texelRefused = 0;  //!< of those, copied into a twin (d.texels) / refused (the zero texel on Vulkan)
@@ -310,12 +312,17 @@ struct ObjBlRunStat
 	int cells = 0;        //!< lane VKWATER3: objCellShade's draws on Vulkan
 	int cellLit = 0, cellSkinned = 0, cellBlended = 0;  //!< of those: with the cell's light buffer, with bone weights, blended
 	int dropped = 0;      //!< pixel outputs past the frame's targets in the draws' pipelines (objBlPipe; Vulkan discards them)
+	int copies = 0;       //!< lane VKWATER3: copy twins written this frame (once a frame each), their bytes and GL-side ms
+	std::uint64_t copyBytes = 0;
+	double copyMs = 0.0;
 	double cpuMs = 0.0, maxMs = 0.0;
 	std::string glWhy, failWhy;
 };
 bool objBlRun( const std::vector<unsigned> & glBufs, int mode, std::string & why );
 void objBlOnGl( const char * why );
 ObjBlRunStat takeObjBlRunStat();  //!< and starts the next count
+//! lane VKWATER3: a GL owner rewrote a texture the effect twins copy (Scene::grabEffectDepth's second pass): copy them again
+void objCellCopiesStale();
 
 /* the app's crossing (cellbindless.cpp runIssue, WW_VKOBJ_SHADE=1): one multi-draw run of class `poolKey` on Vulkan instead
  * of GL's glMultiDrawElementsIndirect. Read from GL here: the draw framebuffer (every colour draw buffer and the depth must
@@ -343,7 +350,7 @@ bool objBlShade( GlProc gp, const ObjBlShade & s, std::string & why );
  * (0,0,0,1)) and its index buffer (GL_UNSIGNED_SHORT, its size). false: why (nothing drawn; GL draws the shape) */
 struct ObjCellShade
 {
-	int twin = 2;                 //!< 2 fo4_cell, 3 fo4_cellcsm, 4 pbrm_default, 5 pbrm_cell, 6 pbrm_cellcsm
+	int twin = 2;                 //!< 2 fo4_cell, 3 fo4_cellcsm, 4 pbrm_default, 5 pbrm_cell, 6 pbrm_cellcsm, 7 fo4_effectcell, 8 fo4_effectdecalcsm
 	unsigned prog = 0;            //!< GL's current program
 	std::uintptr_t poolKey = 0;   //!< one key per route (the shape's twins are rewritten each draw)
 	std::size_t verts = 0;        //!< the shape's vertex count
@@ -351,14 +358,15 @@ struct ObjCellShade
 	std::size_t nCmds = 0;
 	/*! gates only, each must FAIL: 1 `offset` (the attributes read from offset 0), 2 `half` (half floats read as 16-bit unorm),
 	 * 3 `swz` (the twins' swizzle dropped), 4 `key` (the twin made before); the variants': 5 `light` (the light texel buffer
-	 * copied from one texel on), 6 `bone` (the bone transforms one bone on), 7 `blend` (GL's source / destination factors swapped) */
+	 * copied from one texel on), 6 `bone` (the bone transforms one bone on), 7 `blend` (GL's source / destination factors swapped),
+	 * 8 `copy` (a copy twin copied from one texel on in x) */
 	int red = 0;
 	int * variants = nullptr;  //!< drawn: [0] += with the light buffer, [1] += with bone weights, [2] += blended (null: not counted)
 };
 bool objCellShade( GlProc gp, const ObjCellShade & s, std::string & why );
 //! twin's pixel stage (objcell_*_ps.spv.h)
 void objCellPs( int twin, const std::uint32_t *& words, std::size_t & count );
-//! the red's name (WW_VKVIEW_OBJCELL_RED / _OBJPBRM_RED: offset | half | swz | key | light | bone | blend) as ObjCellShade.red, 0 else
+//! the red's name (WW_VKVIEW_OBJCELL_RED / _OBJPBRM_RED / _OBJFX_RED: offset | half | swz | key | light | bone | blend | copy) as ObjCellShade.red, 0 else
 int objCellRed( const char * name );
 /*! objBlShade's frame read on its own: GL's draw framebuffer as d's targets (every colour draw buffer and the depth / stencil
  * a shared target: keys, formats, size, samples; the tone frame's too, as borrowed shared targets), the viewport the whole

@@ -638,6 +638,8 @@ void Scene::collectShapes( NodeList & secondPass )
 	}
 }
 
+namespace WwVkPresent { void objCellCopiesStale(); }	// lane VKWATER3: the effect twins' copy of this depth (vkobjpipe.inc)
+
 bool Scene::grabEffectDepth()
 {
 	if ( fxDepthPass != fxDepthPassNow ) {
@@ -738,6 +740,7 @@ bool Scene::grabEffectDepth()
 		return false;
 	}
 	fxDepthState = 1;
+	WwVkPresent::objCellCopiesStale();	// a second pass's grab: the Vulkan effect twins copy it again
 	return true;
 }
 

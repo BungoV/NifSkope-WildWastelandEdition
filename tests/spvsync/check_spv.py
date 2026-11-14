@@ -101,9 +101,12 @@ HLSL_SRC['objbl_samples_cs'] = 'res/shaders/hlsl/near'
 # lane VKWATER3 (G4 by draws): the script's `fxc <name> <core file> <profile> "$PS_SHIFT|$VS_SHIFT"` lines, the non-bindless
 # fallbacks on the app's base variant, the frozen FragCoord.w fixup's flag
 VKFRAME_FXC_ARGS = ['-HV', '2021', '-D', 'WW_CELL_FOGLEAK=1', '-D', 'WW_FRAME_UBO=1']
-VKFRAME_FXC = {'objcell_vs': ('fo4_default_vs', 'vs_6_0', 'VS_SHIFT'), 'objcell_cell_ps': ('fo4_cell_ps', 'ps_6_0', 'PS_SHIFT'),
-	'objcell_cellcsm_ps': ('fo4_cellcsm_ps', 'ps_6_0', 'PS_SHIFT'), 'objcell_pbrm_ps': ('pbrm_default_ps', 'ps_6_0', 'PS_SHIFT'),
-	'objcell_pbrmcell_ps': ('pbrm_cell_ps', 'ps_6_0', 'PS_SHIFT'), 'objcell_pbrmcellcsm_ps': ('pbrm_cellcsm_ps', 'ps_6_0', 'PS_SHIFT')}
+# (G4 rest: a 5th quoted field, a variant's other defines)
+VKFRAME_FXC = {'objcell_vs': ('fo4_default_vs', 'vs_6_0', 'VS_SHIFT', ''), 'objcell_cell_ps': ('fo4_cell_ps', 'ps_6_0', 'PS_SHIFT', ''),
+	'objcell_cellcsm_ps': ('fo4_cellcsm_ps', 'ps_6_0', 'PS_SHIFT', ''), 'objcell_pbrm_ps': ('pbrm_default_ps', 'ps_6_0', 'PS_SHIFT', ''),
+	'objcell_pbrmcell_ps': ('pbrm_cell_ps', 'ps_6_0', 'PS_SHIFT', ''), 'objcell_pbrmcellcsm_ps': ('pbrm_cellcsm_ps', 'ps_6_0', 'PS_SHIFT', ''),
+	'objcell_effectcell_ps': ('fo4_effectcell_ps', 'ps_6_0', 'PS_SHIFT', '-D WW_CELL_AIRZONE=1'),
+	'objcell_effectdecalcsm_ps': ('fo4_effectdecalcsm_ps', 'ps_6_0', 'PS_SHIFT', '')}
 HLSL_SPECS += [('src/features/vkframe', k, 'vulkan1.2', 'vkframe_%s_spv' % k) for k in VKFRAME_FXC]
 DEFAULT_G = 'E:/Tools/RenderDoc/RenderDoc_1.45_64/plugins/spirv/glslangValidator.exe'
 DEFAULT_DXC = 'E:/Tools/dxc/bin/x64/dxc.exe'
@@ -227,10 +230,11 @@ def script_ok(tree):
 	blines = dict((k, (f, p, s)) for k, f, p, s in re.findall(r'^fxb ([a-z0-9_]+) ([a-z0-9_]+) ([vp]s_6_0) "\$([A-Z_]+)"$', vf, re.M))
 	if blines != VKFRAME_FXB:
 		bad.append('src/features/vkframe/vkframe_spirv.sh: its fxb lines (%s) are not this checker\'s bl twins' % ' '.join(sorted(blines)))
-	if '\t"$DXC" -spirv -fspv-target-env=vulkan1.2 -HV 2021 -T "$3" -E main -D WW_CELL_FOGLEAK=1 -D WW_FRAME_UBO=1 $4 -fspv-preserve-bindings ' \
+	if '\t"$DXC" -spirv -fspv-target-env=vulkan1.2 -HV 2021 -T "$3" -E main -D WW_CELL_FOGLEAK=1 -D WW_FRAME_UBO=1 $4 ${5:-} -fspv-preserve-bindings ' \
 			'-fvk-use-dx-position-w -Fo "$1.spv" ' not in vf:
 		bad.append('src/features/vkframe/vkframe_spirv.sh: its fxc() compile line changed')
-	clines = dict((k, (f, p, s)) for k, f, p, s in re.findall(r'^fxc ([a-z0-9_]+) ([a-z0-9_]+) ([vp]s_6_0) "\$([A-Z_]+)"$', vf, re.M))
+	clines = dict((k, (f, p, s, x)) for k, f, p, s, x in
+	              re.findall(r'^fxc ([a-z0-9_]+) ([a-z0-9_]+) ([vp]s_6_0) "\$([A-Z_]+)"(?: "([^"]*)")?$', vf, re.M))
 	if clines != VKFRAME_FXC:
 		bad.append('src/features/vkframe/vkframe_spirv.sh: its fxc lines (%s) are not this checker\'s cell fallbacks' % ' '.join(sorted(clines)))
 	return bad
@@ -386,7 +390,7 @@ def main(argv):
 				m = re.match(r'(.*)', VKFRAME_FXB[k][1])
 			if k in VKFRAME_FXC:
 				hdefs = VKFRAME_FXC_ARGS + (VKFRAME_VS_SHIFT if VKFRAME_FXC[k][2] == 'VS_SHIFT' else VKFRAME_PS_SHIFT) \
-					+ ['-fspv-preserve-bindings', '-fvk-use-dx-position-w']
+					+ VKFRAME_FXC[k][3].split() + ['-fspv-preserve-bindings', '-fvk-use-dx-position-w']
 				m = re.match(r'(.*)', VKFRAME_FXC[k][1])
 			opt = [] if d == 'src/features/vkframe' else ['-O0']   # vkframe_spirv.sh builds optimised
 			r = subprocess.run([dxc, '-spirv', '-fspv-target-env=' + env, '-T', m.group(1) if m else 'ps_6_0' if k in VKFRAME_SKY or k in VKFRAME_FX or k in VKFRAME_FXK or k in VKFRAME_FXKW else 'cs_6_0', '-E', 'main']

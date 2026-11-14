@@ -50,13 +50,15 @@
 bool cellGate( const std::string & spirvDir, int twin, const GLuint maps[4], unsigned reds = 15u, const char * label = nullptr, unsigned vars = 0u )
 {
 	using namespace WwVkPresent;
-	static const char * twinTag[7] = { "", "", "cell", "cellcsm", "pbrm", "pbrmcell", "pbrmcellcsm" };
-	static const char * twinFrag[7] = { "", "", "fo4_cell", "fo4_cellcsm", "pbrm_default", "pbrm_cell", "pbrm_cellcsm" };
-	if ( twin < 2 || twin > 6 ) {
+	static const char * twinTag[8] = { "", "", "cell", "cellcsm", "pbrm", "pbrmcell", "pbrmcellcsm", "effectcell" };
+	static const char * twinFrag[8] = { "", "", "fo4_cell", "fo4_cellcsm", "pbrm_default", "pbrm_cell", "pbrm_cellcsm", "fo4_effectcell" };
+	if ( twin < 2 || twin > 7 ) {
 		std::printf( "BLVIEW cell FAIL (no twin %d)\n", twin );
 		return false;
 	}
-	const bool pbrmT = twin >= 4, csmT = twin == 3 || twin == 6, lightsV = ( vars & 1u ) != 0 || twin >= 5;
+	// twin 7: fo4_effectcell (the game's effect shader, cell-lit): one target, its own maps and state, the soft fade's depth
+	const bool fxT = twin == 7, pbrmT = twin >= 4 && !fxT, csmT = twin == 3 || twin == 6, lightsV = ( vars & 1u ) != 0 || twin >= 5;
+	const bool oneT = twin == 4 || fxT;  // writes target 0 only
 	const bool skinV = ( vars & 2u ) != 0, alphaV = ( vars & 4u ) != 0;
 	const std::string tagS = std::string( twinTag[twin] ) + ( label ? std::string( " " ) + label : std::string() );
 	const char * tag = tagS.c_str();
@@ -116,7 +118,8 @@ bool cellGate( const std::string & spirvDir, int twin, const GLuint maps[4], uns
 	}
 	// GL's program from the set, the app's base variant, the binaries as they are
 	const GLuint prog = f.createProgram();
-	const std::string stage[2] = { "fo4_default.vert", std::string( twinFrag[twin] ) + ".frag@WW_CELL_FOGLEAK+WW_FRAME_UBO" };
+	const std::string stage[2] = { "fo4_default.vert", std::string( twinFrag[twin] ) + ( fxT ? ".frag@WW_CELL_AIRZONE+WW_CELL_FOGLEAK+WW_FRAME_UBO"
+		: ".frag@WW_CELL_FOGLEAK+WW_FRAME_UBO" ) };
 	for ( int s = 0; s < 2; s++ ) {
 		const std::string bin = index.count( stage[s] ) ? readFile( spirvDir + "/" + index[stage[s]] ) : std::string();
 		const GLuint sh = f.createShader( s ? kFrag : kVert );
@@ -170,7 +173,8 @@ bool cellGate( const std::string & spirvDir, int twin, const GLuint maps[4], uns
 		return l;
 	};
 	const char * cellMaps[4] = { "BaseMap", "NormalMap", "SpecularMap", "GlowMap" }, * pbrmMaps[4] = { "BaseMap", "NormalMap", "RmaosMap", "EmissiveMap" };
-	const char * const * mapName = pbrmT ? pbrmMaps : cellMaps;
+	const char * fxMaps[4] = { "BaseMap", "GreyscaleMap", "NormalMap", "SpecularMap" };
+	const char * const * mapName = fxT ? fxMaps : pbrmT ? pbrmMaps : cellMaps;
 	int mapUnit[4] = {};
 	for ( int m = 0; m < 4; m++ ) {
 		const GLint l = locOf( mapName[m] );
@@ -405,6 +409,42 @@ bool cellGate( const std::string & spirvDir, int twin, const GLuint maps[4], uns
 			return false;
 		}
 	}
+	/* twin 7: the soft fade's depth (Scene::grabEffectDepth's copy), a plain GL DEPTH32F texture the crossing copies into a
+	 * twin once a frame; a saw of view depths 10 .. 17.75 behind the cards (7 .. 11; 0.25 a column, so the copy red's one-texel
+	 * shift moves the fade; nearer, half the cards faded out and the lit share fell under 0.9) */
+	GLuint fxDepthTex = 0;
+	int fxDepthUnit = -1;
+	if ( fxT ) {
+		std::vector<float> dz( std::size_t( kSW ) * std::size_t( kSH ) );
+		for ( int y = 0; y < kSH; y++ )
+			for ( int x = 0; x < kSW; x++ ) {
+				const float wv = 10.0f + 0.25f * float( ( x + y / 8 ) % 32 );
+				dz[std::size_t( y ) * std::size_t( kSW ) + std::size_t( x )] = 0.5f * ( sx.proj[14] / wv - sx.proj[10] + 1.0f );
+			}
+		glGenTextures( 1, &fxDepthTex );
+		glBindTexture( GL_TEXTURE_2D, fxDepthTex );
+		glTexImage2D( GL_TEXTURE_2D, 0, 0x8CAC, kSW, kSH, 0, 0x1902, GL_FLOAT, dz.data() );  // DEPTH_COMPONENT32F
+		glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST );
+		glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST );
+		glBindTexture( GL_TEXTURE_2D, 0 );
+		const GLint l = locOf( "fxDepth" );
+		fxDepthUnit = unitAt.count( l ) ? unitAt[l] : -1;
+		set( "cellInterior", { 1 } );
+		set( "hasSourceTexture", { 1 } );
+		set( "hasNormalMap", { 1 } );
+		set( "hasCubeMap", { 0 } );
+		set( "fxSoftDepth", { 10 } );
+		set( "fxDistScale", { 2 } );
+		set( "falloffParams", { 0.1f, 0.9f, 0.2f, 1.0f } );
+		set( "fxLitScale", { 1.0f, 1.0f, 1.0f, 1.0f } );
+		set( "fxLit", { -1.0f, -1.0f, -1.0f, -1.0f } );
+		set( "cellFxUnlitK", { 1.5f } );
+		set( "cellFxEmitK", { 1.25f } );
+		if ( fxDepthUnit < 0 || glGetError() != GL_NO_ERROR ) {
+			std::printf( "BLVIEW %s FAIL (fxDepth has no unit (location %d), or a GL error making the depth)\n", tag, int( l ) );
+			return false;
+		}
+	}
 	// variant 2: 6 distinct bones (a turn about z, a shift; mat3x4 rows as GL's std140 columns), doSkinning on
 	if ( skinV ) {
 		Blk * sk = nullptr;
@@ -538,7 +578,30 @@ bool cellGate( const std::string & spirvDir, int twin, const GLuint maps[4], uns
 	int probe = 0;  // the GL-only variant probes: 1 the lights off, 2 the skinning off, 3 the alpha test and blend off
 	bool oldBrdf = false;  // pbrm_default's red 8: r3Red 64, the BRDF before OpenPBR (GL's reference always draws without it)
 	static const int alphaMode[6] = { 4, 4 | 8, 8, 6, 0, 1 | 8 };  // '>', '>' + blend, blend, '>=', none, '<' + blend
+	static const int fxAlpha[6] = { 8, 4 | 8, 8, 6, 0, 8 };  // twin 7: blended (soft) draws 0, 1, 2, 5 (5 additive); a test on 1 and 3
 	auto drawState = [&]( int i ) {
+		if ( fxT ) {  // the effect's own state, seeded apart from the shared draw below (its names are inactive on the effect)
+			std::mt19937 r( std::uint32_t( 701 + i ) );
+			std::uniform_real_distribution<float> q( 0.0f, 1.0f );
+			const int am = fxAlpha[i];
+			set( "alphaFlags", { float( am ) } );
+			set( "alphaThreshold", { 0.3f } );
+			set( "fxSoft", { ( am & 8 ) != 0 ? 1.0f : 0.0f } );
+			set( "fxAdditive", { i == 5 ? 1.0f : 0.0f } );
+			if ( ( am & 8 ) != 0 ) {
+				glEnable( GL_BLEND );
+				glBlendFunc( GL_SRC_ALPHA, i == 5 ? GL_ONE : GL_ONE_MINUS_SRC_ALPHA );
+			}
+			set( "glowColor", { 0.3f + 0.7f * q( r ), 0.3f + 0.7f * q( r ), 0.3f + 0.7f * q( r ), 0.6f + 0.4f * q( r ) } );
+			set( "glowMult", { 0.5f + q( r ) } );
+			set( "greyscaleColor", { i == 3 ? 1.0f : 0.0f } );
+			set( "useFalloff", { i == 1 || i == 4 ? 1.0f : 0.0f } );
+			set( "hasRGBFalloff", { i == 4 ? 1.0f : 0.0f } );
+			set( "hasEnvMask", { i % 2 == 0 ? 1.0f : 0.0f } );
+			set( "lightingInfluence", { 0.4f + 0.6f * q( r ) } );
+			set( "fxLitMode", { i % 3 != 2 ? 3.0f : 0.0f } );  // lit by every light (cellLightCount), or unlit
+			set( "fxEmit", { 0.8f, 0.6f, 0.4f, i == 4 ? 1.0f : 0.0f } );
+		}
 		if ( lightsV )
 			set( "cellLightCount", { float( probe == 1 ? 0 : 3 - i % 3 ) } );
 		if ( skinV )
@@ -573,7 +636,9 @@ bool cellGate( const std::string & spirvDir, int twin, const GLuint maps[4], uns
 		const bool glow = i % 3 == 0;
 		set( "hasEmit", { glow ? 1.0f : 0.0f } );
 		set( "hasGlowMap", { glow ? 1.0f : 0.0f } );
-		set( "glowMult", { glow ? 0.5f + q( r ) : 0.0f } );
+		const float gm = glow ? 0.5f + q( r ) : 0.0f;
+		if ( !fxT )  // twin 7 keeps its own glowMult (the effect's colour scale: 0 would draw every card black)
+			set( "glowMult", { gm } );
 		set( "uvScale", { 0.5f + 1.5f * q( r ), 0.5f + 1.5f * q( r ) } );
 		set( "uvOffset", { q( r ), q( r ) } );
 		set( "vertexColorOverride", { i == 4 ? 0.7f : 0.0f, 0.0f, 0.0f, 0.0f } );
@@ -619,7 +684,7 @@ bool cellGate( const std::string & spirvDir, int twin, const GLuint maps[4], uns
 	auto frameState = [&]( bool glOnlyBase ) {
 		f.bindFramebuffer( kFb, sx.fbo );
 		const GLenum dbs[2] = { kColorAtt0, kColorAtt0 + 1 };
-		sf.drawBuffers( twin == 4 ? 1 : 2, dbs );  // pbrm_default's base variant writes target 0 only (the colour gate's 1buf frame)
+		sf.drawBuffers( oneT ? 1 : 2, dbs );  // pbrm_default's base variant and the effect write target 0 only (the colour gate's 1buf frame)
 		glViewport( 0, 0, kSW, kSH );
 		glDisable( GL_BLEND );
 		glDisable( GL_SCISSOR_TEST );
@@ -642,6 +707,8 @@ bool cellGate( const std::string & spirvDir, int twin, const GLuint maps[4], uns
 			u.bindTextures( GLuint( csmUnit ), 1, &csmTex );
 		if ( lightTex )
 			u.bindTextures( GLuint( lightUnit ), 1, &lightTex );
+		if ( fxDepthTex )
+			u.bindTextures( GLuint( fxDepthUnit ), 1, &fxDepthTex );
 		for ( Blk & x : blks )
 			f.bindBufferBase( 0x8A11, x.glBind, x.buf );
 	};
@@ -717,7 +784,7 @@ bool cellGate( const std::string & spirvDir, int twin, const GLuint maps[4], uns
 	for ( const Blk & x : blks )
 		std::printf( " %s@%u (%zu B)", x.name.c_str(), x.glBind, x.bytes.size() );
 	std::printf( "\n" );
-	if ( pbrmT ) {
+	if ( pbrmT || fxT ) {
 		std::printf( "BLVIEW %s not read:%s\n", tag, offNames.c_str() );
 		std::printf( "BLVIEW %s GL per draw (covered / rgb non-zero):", tag );
 		for ( int i = 0; i < nDraws; i++ ) {
@@ -729,7 +796,8 @@ bool cellGate( const std::string & spirvDir, int twin, const GLuint maps[4], uns
 					cov++;
 					lit += one.c0[p * 4] != 0 || one.c0[p * 4 + 1] != 0 || one.c0[p * 4 + 2] != 0;
 				}
-			std::printf( " %d: %zu / %zu", i, cov, lit );		}
+			std::printf( " %d: %zu / %zu", i, cov, lit );
+		}
 		std::printf( "\n" );
 	}
 	bool csmReach = true;
@@ -823,14 +891,17 @@ bool cellGate( const std::string & spirvDir, int twin, const GLuint maps[4], uns
 	} else {
 		const DepthCmp dc = depthCmp( vk0.depth, gl.depth );
 		const CellCmp cc = colCmp( vk0 );
-		const bool litOk = cc.both >= 2000 && double( cc.lit ) >= 0.9 * double( cc.both ) && ( pbrmT || cc.glow >= 200 );
+		const bool litOk = cc.both >= 2000 && double( cc.lit ) >= 0.9 * double( cc.both ) && ( oneT || cc.glow >= 200 );
 		int blendDraws = 0;
 		for ( int i = 0; i < nDraws; i++ )
-			blendDraws += alphaV && ( alphaMode[i] & 8 ) != 0 ? 1 : 0;
+			blendDraws += ( alphaV && ( alphaMode[i] & 8 ) != 0 ) || ( fxT && ( fxAlpha[i] & 8 ) != 0 ) ? 1 : 0;
 		const bool varOk = rs.cellLit == ( lightsV ? nDraws : 0 ) && rs.cellSkinned == ( skinV ? nDraws : 0 ) && rs.cellBlended == blendDraws;
-		const bool crossOk = rs.runs == nDraws && rs.fails == 0 && rs.cells == nDraws && rs.twins == 4 * nDraws && varOk;
-		std::printf( "BLVIEW %s crossing %s (%d runs, %d failed, %d cells, %d twin images, %d shared, %d GL-only; lit %d skinned %d blended %d)\n",
-			tag, crossOk ? "OK" : "FAIL", rs.runs, rs.fails, rs.cells, rs.twins, rs.shared, rs.glOwn, rs.cellLit, rs.cellSkinned, rs.cellBlended );
+		// twin 7: the depth copied once for the sweep (one frame), and its cost counted
+		const bool copyOk = fxT ? rs.copies == 1 && rs.copyBytes == std::uint64_t( kSW ) * std::uint64_t( kSH ) * 4u : rs.copies == 0;
+		const bool crossOk = rs.runs == nDraws && rs.fails == 0 && rs.cells == nDraws && rs.twins == 4 * nDraws && varOk && copyOk;
+		std::printf( "BLVIEW %s crossing %s (%d runs, %d failed, %d cells, %d twin images, %d shared, %d GL-only; lit %d skinned %d blended %d; "
+			"copies %d, %.1f KB, %.3f ms)\n", tag, crossOk ? "OK" : "FAIL", rs.runs, rs.fails, rs.cells, rs.twins, rs.shared, rs.glOwn, rs.cellLit,
+			rs.cellSkinned, rs.cellBlended, rs.copies, rs.copyBytes / 1024.0, rs.copyMs );
 		std::printf( "BLVIEW %s depth vs GL %s (%zu covered, %zu on one side, %zu differ, max %.3g)\n", tag, dc.word(), dc.covered, dc.oneSide,
 			dc.differ, double( dc.maxAbs ) );
 		const bool colOk = cc.over == 0;
@@ -868,17 +939,18 @@ bool cellGate( const std::string & spirvDir, int twin, const GLuint maps[4], uns
 		std::printf( "BLVIEW %s OpenPBR vs the old BRDF (GL, target 0 rgb): %zu pixels, %zu values differ, max %.4g, mean %.4g of max(1, |new|)\n",
 			tag, cc.both, cc.differ, double( cc.maxRel ), n ? sum / double( n ) : 0.0 );
 	}
-	const char * redName[8] = { "offset (every attribute read from offset 0)", "half (halves read as 16-bit unorm)",
+	const char * redName[9] = { "offset (every attribute read from offset 0)", "half (halves read as 16-bit unorm)",
 		"swz (the twins' swizzle dropped)", "key (each twin the one made before it)", "light (the light texel buffer copied from one texel on)",
 		"bone (the bone transforms one bone on)", "blend (GL's source / destination factors swapped)",
-		"oldbrdf (r3Red 64: the BRDF before OpenPBR)" };
-	for ( int r = 1; r <= 8; r++ ) {
+		"oldbrdf (r3Red 64: the BRDF before OpenPBR)", "copy (the GL inputs' copy twins copied from one texel on)" };
+	for ( int r = 1; r <= 9; r++ ) {  // reds bit r - 1; red 8 is a GL look (oldbrdf), bit 8 the crossing's red 8 (copy)
 		if ( !( reds >> ( r - 1 ) & 1u ) )
 			continue;
 		CellOut o;
 		std::string rw;
 		oldBrdf = r == 8;
-		const bool rr = vkSweep( r == 8 ? 0 : r, o, rw );
+		takeObjBlRunStat();  // a fresh frame: the copy twins copy again
+		const bool rr = vkSweep( r == 8 ? 0 : r == 9 ? 8 : r, o, rw );
 		oldBrdf = false;
 		bool passes = false;
 		std::size_t over = 0, vch = 0;
@@ -919,6 +991,8 @@ bool cellGate( const std::string & spirvDir, int twin, const GLuint maps[4], uns
 	glDeleteTextures( 1, &glOnly );
 	if ( lightTex )
 		glDeleteTextures( 1, &lightTex );  // its buffer stays with the gate's other buffers
+	if ( fxDepthTex )
+		glDeleteTextures( 1, &fxDepthTex );  // its copy twin stays shared until the present's shutdown (as the app's would)
 	objBlLocsLoad( spirvDir + "/no_locs.txt", why );  // the other gates never see it
 	std::printf( "BLVIEW %s %s\n", tag, ok ? "OK" : "FAILED" );
 	return ok;

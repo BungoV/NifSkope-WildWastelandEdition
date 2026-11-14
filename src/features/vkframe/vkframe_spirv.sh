@@ -153,8 +153,9 @@ fxb objbl_cellcsm_ps fo4_cellcsmbl_ps ps_6_0 "$PS_SHIFT"
 # objBlPipe; the frozen pixel stages invert FragCoord.w themselves (-fvk-use-dx-position-w). The alpha tests discard after
 # the last texture sample (killPx in the HLSL): a discard before it left NV GL and NV Vulkan different derivatives in part-killed
 # quads (3398 values over the bound in the G4 alpha pass, 11-14; demote gave the same 3398)
+# $5: a variant's other loader defines (-D WW_X=1 ...), the app site's define key matches them
 fxc() {
-	"$DXC" -spirv -fspv-target-env=vulkan1.2 -HV 2021 -T "$3" -E main -D WW_CELL_FOGLEAK=1 -D WW_FRAME_UBO=1 $4 -fspv-preserve-bindings -fvk-use-dx-position-w -Fo "$1.spv" "$(cygpath -m "$ROOT/res/shaders/hlsl/core/$2.hlsl" 2>/dev/null || echo "$ROOT/res/shaders/hlsl/core/$2.hlsl")"
+	"$DXC" -spirv -fspv-target-env=vulkan1.2 -HV 2021 -T "$3" -E main -D WW_CELL_FOGLEAK=1 -D WW_FRAME_UBO=1 $4 ${5:-} -fspv-preserve-bindings -fvk-use-dx-position-w -Fo "$1.spv" "$(cygpath -m "$ROOT/res/shaders/hlsl/core/$2.hlsl" 2>/dev/null || echo "$ROOT/res/shaders/hlsl/core/$2.hlsl")"
 	python -I "$ROOT/tools/spv_header.py" "$1.spv" "vkframe_$1_spv" "$1.spv.h" < /dev/null
 	rm -f "$1.spv"
 }
@@ -166,6 +167,10 @@ fxc objcell_pbrm_ps pbrm_default_ps ps_6_0 "$PS_SHIFT"
 # its cell-lit programs (pbrm_cell.prog, pbrm_cellcsm.prog: pbrm_default.frag with WW_CELLLIGHTS, and WW_SUNSHADOW)
 fxc objcell_pbrmcell_ps pbrm_cell_ps ps_6_0 "$PS_SHIFT"
 fxc objcell_pbrmcellcsm_ps pbrm_cellcsm_ps ps_6_0 "$PS_SHIFT"
+# G4 rest: the cell-lit effects (fo4_effectcell.prog with the air zones, which ship on; fo4_effectdecalcsm.prog, whose code
+# the air zones do not touch), fo4_default.vert's programs too
+fxc objcell_effectcell_ps fo4_effectcell_ps ps_6_0 "$PS_SHIFT" "-D WW_CELL_AIRZONE=1"
+fxc objcell_effectdecalcsm_ps fo4_effectdecalcsm_ps ps_6_0 "$PS_SHIFT"
 # the cell frame's per-sample readback (objBlFrameSamples): its own bindings, no shift
 "$DXC" -spirv -fspv-target-env=vulkan1.2 -T cs_6_0 -E main -Fo objbl_samples_cs.spv "$(cygpath -m "$ROOT/res/shaders/hlsl/near/objbl_samples_cs.hlsl" 2>/dev/null || echo "$ROOT/res/shaders/hlsl/near/objbl_samples_cs.hlsl")"
 python -I "$ROOT/tools/spv_header.py" objbl_samples_cs.spv vkframe_objbl_samples_cs_spv objbl_samples_cs.spv.h < /dev/null
