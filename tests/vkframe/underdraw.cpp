@@ -6,16 +6,28 @@
 // depth (cellhdr.cpp depthMaxMake), as the app makes it.
 // Scene (per sample, gl_SamplePosition): a floor whose depth ramps up the frame, a sky band (depth 1.0) and six discs
 // nearer, each with its own colour, so edge pixels hold samples of two depths (the per-sample draw's work).
-// Bar (set before the first run, never widened): per sample, every half within 2 ulp and <= 0.1 % of halves past 1 ulp
-// (fxview's volsky bar); floors: the fog changes >= 50 % of the samples against the frame before it, and the scene holds
-// >= 100 pixels whose samples differ in depth.
+// Reference (coordinator ruling 11-14: the blend equation is per sample, NVIDIA GL's 4x tile mean is a driver quirk, not
+// FO4's look): GL's two programs drawn again with blending off, fragAdd / fragMul moved to two RGBA32F targets (location
+// 0 and 1, fragMul's alpha cleared to -1 so an unwritten sample shows), read per sample, then frame = frame * mul + add
+// applied per sample by GL's own blend unit at 1x: every sample is one texel of a single-sample RGBA16F target, the
+// captures go back as fragAdd / fragMul with the same blend and colour mask, one pass per draw. (A float CPU blend misses
+// the blend unit by 1 ulp on ~8 % of halves even on constant outputs, so it stays an info line.) Reference checks (bars
+// written before the first run): the 1x constant probe has 0 samples off bare * 0.65 + 0.01 and equals the 4x probe on
+// every sample the 4x probe did not flag; the 1x blend of the captures equals GL's 4x blended frame exactly on the
+// pixels GL did not flatten (all four samples one value). GL's blended frame is printed against the reference (info).
+// Bar (set before the first run, never widened): Vulkan against that reference per sample, every half within 2 ulp and
+// <= 0.1 % of halves past 1 ulp (fxview's volsky bar); floors: the fog changes >= 50 % of the samples against the frame
+// before it, and the scene holds >= 100 pixels whose samples differ in depth.
 // Checks: GL's programs sample uwDepth and uwDepthMs only (the waterInfo / waterFlow images are not active in GL either);
 // GL's gl_FragCoord in a per-sample draw is the pixel centre (the per-sample twin takes the centre too);
 // arms A (WATR fog law), B (Underwater light row, class 1), C (the meniscus: the near plane crosses the surface).
-// Each arm also runs both APIs' per-pixel draw alone and tables which draw fogged each sample: Vulkan must fog every
-// sample by one draw at most ("both" 0). Arm A also draws GL's blend with constant outputs (info): on this PC GL's
-// 4x blend leaves bare * mul + add in some 2-pixel tiles and writes one value to all four samples (the pixel's mean
-// blended), single-source or dual, with or without a written sample mask; arm A's misses sit in those tiles.
+// Each arm also runs Vulkan's per-pixel draw alone and tables which draw changed each sample (GL: from the reference's
+// two passes): Vulkan must fog every sample by one draw at most ("both" 0); a sample the two APIs give to different draws
+// prints e against tol in double (uwNearMax's tie). Info: a probe copy of GL's per-sample program with fwidth( Pn.z )
+// taken before the discard, as the twin takes it (GLSL's derivative after a discard is undefined); arm C's waterline
+// samples are the ones it moves. Arm A also draws GL's blend with constant
+// outputs (info, the quirk's record): on this PC GL's 4x blend leaves bare * mul + add in some 2-pixel tiles and writes
+// one value to all four samples (the pixel's mean blended), single-source or dual, with or without a written sample mask.
 // Reds (each must FAIL, never refuse): 1 no per-sample draw, 2 blend without SRC1 (dst ONE), 8 uwRow one vec4 off (the whole b31 moved uwSamples
 // into a loop bound and hung the GPU: device lost on the next submit), 4 the
 // uwDepth copy skipped (on a scene whose depth differs from the last copied one). A last arm with uwSamples 0 must refuse.
@@ -72,6 +84,57 @@ const char * kSceneFs = "#version 410 core\n"
 const char * kDepthFs = "#version 410 core\n"
 	"uniform sampler2DMS src; uniform int S; out vec4 o;\n"
 	"void main() { ivec2 q = ivec2( gl_FragCoord.xy ); o = vec4( texelFetch( src, ivec2( q.x / S, q.y ), q.x % S ).r ); }\n";
+
+// float to half, round to nearest even (the blend's store into RGBA16F)
+std::uint16_t f2h( float x )
+{
+	std::uint32_t b;
+	std::memcpy( &b, &x, 4 );
+	const std::uint16_t s = std::uint16_t( ( b >> 16 ) & 0x8000 );
+	b &= 0x7FFFFFFFu;
+	if ( b >= 0x7F800000u )
+		return s | 0x7C00 | ( b > 0x7F800000u ? 0x200 : 0 );
+	if ( b >= 0x477FF000u )
+		return s | 0x7C00;
+	if ( b < 0x38800000u ) {
+		float v;
+		std::memcpy( &v, &b, 4 );
+		return s | std::uint16_t( std::nearbyint( v * 16777216.0f ) );
+	}
+	return s | std::uint16_t( ( b + 0xFFFu + ( ( b >> 13 ) & 1u ) - 0x38000000u ) >> 13 );
+}
+
+// the 1x blend pass: one texel per sample, the captured outputs back as the two sources (unwritten samples discarded)
+const char * kBlendFs = "#version 410 core\n"
+	"uniform sampler2D addT, mulT; layout(location=0,index=0) out vec4 fa; layout(location=0,index=1) out vec4 fm;\n"
+	"void main() { ivec2 q = ivec2( gl_FragCoord.xy ); vec4 m = texelFetch( mulT, q, 0 ); if ( m.a < 0.0 ) discard;\n"
+	"  fa = texelFetch( addT, q, 0 ); fm = m; }\n";
+
+// a probe copy of the per-sample program: fwidth( Pn.z ) taken before the discard, as the HLSL twin takes it (GLSL's
+// derivative after a discard in non-uniform flow is undefined)
+std::string fwidthFirst( std::string fs, bool & ok )
+{
+	const std::string n = "vec2 ndc = ( gl_FragCoord.xy - uwVp.xy ) / uwVp.zw * 2.0 - 1.0;", w = "fwidth( Pn.z )";
+	ok = fs.find( n ) != std::string::npos && fs.find( w ) != std::string::npos;
+	if ( ok ) {
+		fs.replace( fs.find( w ), w.size(), "uwPnW" );
+		fs.insert( fs.find( n ) + n.size(), " float uwPnW = fwidth( uwWorld( ndc, -1.0 ).z );" );
+	}
+	return fs;
+}
+
+// the capture programs: fragAdd / fragMul to locations 0 and 1 instead of one location's two indices
+std::string captureFs( std::string fs, bool & ok )
+{
+	const std::string a = "layout ( location = 0, index = 0 ) out vec4 fragAdd;", m = "layout ( location = 0, index = 1 ) out vec4 fragMul;";
+	const size_t pa = fs.find( a ), pm = fs.find( m );
+	ok = pa != std::string::npos && pm != std::string::npos;
+	if ( ok ) {
+		fs.replace( fs.find( m ), m.size(), "layout ( location = 1 ) out vec4 fragMul;" );
+		fs.replace( fs.find( a ), a.size(), "layout ( location = 0 ) out vec4 fragAdd;" );
+	}
+	return fs;
+}
 
 struct Arm
 {
@@ -143,6 +206,17 @@ int main( int argc, char ** argv )
 	const std::string hdrVs = readFile( dir + "/uw/prog.vert.glsl" );
 	const GLuint pUw = program( hdrVs, readFile( dir + "/uw/prog.frag.glsl" ), "cell_underwater" );
 	const GLuint pMs = program( readFile( dir + "/uwms/prog.vert.glsl" ), readFile( dir + "/uwms/prog.frag.glsl" ), "cell_underwater_ms" );
+	bool capOk[2] = {};
+	const GLuint pUwC = program( hdrVs, captureFs( readFile( dir + "/uw/prog.frag.glsl" ), capOk[0] ), "cell_underwater capture" );
+	const GLuint pMsC = program( readFile( dir + "/uwms/prog.vert.glsl" ), captureFs( readFile( dir + "/uwms/prog.frag.glsl" ), capOk[1] ),
+		"cell_underwater_ms capture" );
+	if ( !capOk[0] || !capOk[1] || !pUwC || !pMsC )
+		return fatal( "capture programs (fragAdd / fragMul declarations not found)" );
+	bool fwOk = false;
+	const GLuint pMsFw = program( readFile( dir + "/uwms/prog.vert.glsl" ),
+		fwidthFirst( captureFs( readFile( dir + "/uwms/prog.frag.glsl" ), capOk[1] ), fwOk ), "cell_underwater_ms capture, fwidth first" );
+	if ( !fwOk || !pMsFw )
+		return fatal( "probe program (fwidth before the discard)" );
 	const GLuint pMax = program( hdrVs, readFile( tree + "/res/shaders/features/exposure/cell_depthmax.frag" ), "cell_depthmax" );
 	const GLuint pScene = program( kTriVs, kSceneFs, "scene" ), pUnpack = program( kTriVs, kUnpackFs, "unpack" );
 	const GLuint pDepth = program( kTriVs, kDepthFs, "depth unpack" );
@@ -195,7 +269,14 @@ int main( int argc, char ** argv )
 	const GLuint fbMax = fbo( GL_TEXTURE_2D, maxTex, 0, 0 );
 	const GLuint unp = tex2d( WS, H, fRgba16f, GL_RGBA, GL_FLOAT, nullptr, false ), fbUnp = fbo( GL_TEXTURE_2D, unp, 0, 0 );
 	const GLuint unpD = tex2d( WS, H, fR32f, fRed, GL_FLOAT, nullptr, false ), fbUnpD = fbo( GL_TEXTURE_2D, unpD, 0, 0 );
-	if ( !fbFrame || !fbFrameC || !fbRef || !fbRefC || !fbMax || !fbUnp || !fbUnpD )
+	const GLuint capAdd = msTex( W, H, fRgba32f, S ), capMul = msTex( W, H, fRgba32f, S ), fbCap = fbo( fT2DMS, capAdd, capMul, 0 );
+	const GLuint bl1 = tex2d( WS, H, fRgba16f, GL_RGBA, GL_FLOAT, nullptr, false ), fbBl1 = fbo( GL_TEXTURE_2D, bl1, 0, 0 );
+	const GLuint addT = tex2d( WS, H, fRgba32f, GL_RGBA, GL_FLOAT, nullptr, false ), mulT = tex2d( WS, H, fRgba32f, GL_RGBA, GL_FLOAT, nullptr, false );
+	const GLuint pBlend = program( kTriVs, kBlendFs, "1x blend" );
+	const GLuint unpF = tex2d( WS, H, fRgba32f, GL_RGBA, GL_FLOAT, nullptr, false ), fbUnpF = fbo( GL_TEXTURE_2D, unpF, 0, 0 );
+	using ClearBufF = void( APIENTRY * )( GLenum, GLint, const GLfloat * );
+	const auto clearBufferfv = reinterpret_cast<ClearBufF>( glProc( "glClearBufferfv" ) );
+	if ( !fbFrame || !fbFrameC || !fbRef || !fbRefC || !fbMax || !fbUnp || !fbUnpD || !fbCap || !fbUnpF || !clearBufferfv || !fbBl1 || !pBlend )
 		return fatal( "GL targets" );
 	auto dsMode = [&]( GLuint t, GLenum mode ) {
 		glBindTexture( fT2DMS, t );
@@ -213,6 +294,20 @@ int main( int argc, char ** argv )
 		u1i( pUnpack, "S", S );
 		glDrawArrays( GL_TRIANGLES, 0, 3 );
 		glReadPixels( 0, 0, WS, H, GL_RGBA, fHalf, out.data() );
+		bindUnit( 15, fT2DMS, 0 );
+		return out;
+	};
+	auto readSamplesF = [&]( GLuint msColor ) {
+		std::vector<float> out( size_t( WS ) * H * 4 );
+		f.bindFramebuffer( fFb, fbUnpF );
+		glViewport( 0, 0, WS, H );
+		drawState0();
+		f.useProgram( pUnpack );
+		bindUnit( 15, fT2DMS, msColor );
+		u1i( pUnpack, "src", 15 );
+		u1i( pUnpack, "S", S );
+		glDrawArrays( GL_TRIANGLES, 0, 3 );
+		glReadPixels( 0, 0, WS, H, GL_RGBA, GL_FLOAT, out.data() );
 		bindUnit( 15, fT2DMS, 0 );
 		return out;
 	};
@@ -291,9 +386,9 @@ int main( int argc, char ** argv )
 		inv[14] = -1.0f;                                  // column 3, row 2
 		inv[15] = float( ( F + N ) / ( 2.0 * F * N ) );
 		const float rows[12] = { 0, 0, -1, ey[0], -1, 0, 0, ey[1], 0, 1, 0, ey[2] };  // forward +x, up +z
-		for ( GLuint p : { pUw, pMs } ) {
+		for ( GLuint p : { pUw, pMs, pUwC, pMsC, pMsFw } ) {
 			f.useProgram( p );
-			auto L = [&]( const char * n ) { return f.getUniformLocation( p, n ); };
+			auto L =[&]( const char * n ) { return f.getUniformLocation( p, n ); };
 			f.uniform1i( L( "uwDepth" ), 1 );
 			f.uniform1i( L( "uwDepthMs" ), 2 );
 			f.uniform1i( L( "uwSamples" ), a.samples );
@@ -342,6 +437,73 @@ int main( int argc, char ** argv )
 		glBindTexture( GL_TEXTURE_2D, 0 );
 		f.activeTexture( fTex0 );
 		drawState0();
+	};
+	// GL's two programs with blending off: per draw, fragAdd / fragMul per sample (fragMul alpha -1 where not written)
+	struct Cap { std::vector<float> add, mul; };
+	auto glCapture = [&]( GLuint ds, GLuint prog ) {
+		f.bindFramebuffer( fFb, fbCap );
+		glViewport( 0, 0, W, H );
+		drawState0();
+		const float z[4] = { 0.0f, 0.0f, 0.0f, 0.0f }, none[4] = { 0.0f, 0.0f, 0.0f, -1.0f };
+		clearBufferfv( GL_COLOR, 0, z );
+		clearBufferfv( GL_COLOR, 1, none );
+		f.activeTexture( fTex0 + 1 );
+		glBindTexture( GL_TEXTURE_2D, maxTex );
+		f.activeTexture( fTex0 + 2 );
+		glBindTexture( fT2DMS, ds );
+		ex.texParameteri( fT2DMS, kDsMode, kDepthComp );
+		f.useProgram( prog );
+		drawQuad();
+		ex.texParameteri( fT2DMS, kDsMode, kStencilIdx );
+		glBindTexture( fT2DMS, 0 );
+		f.activeTexture( fTex0 + 1 );
+		glBindTexture( GL_TEXTURE_2D, 0 );
+		f.activeTexture( fTex0 );
+		Cap c;
+		c.add = readSamplesF( capAdd );
+		c.mul = readSamplesF( capMul );
+		return c;
+	};
+	// the blend equation per sample by GL's blend unit at 1x: the frame's samples as texels of bl1, then one pass of prog
+	// (kBlendFs with the captures, or a constant probe) with cellunderwater.cpp's blend and colour mask
+	auto blend1x = [&]( const std::vector<std::uint16_t> & fr, GLuint prog, const Cap * c ) {
+		glBindTexture( GL_TEXTURE_2D, bl1 );
+		glTexSubImage2D( GL_TEXTURE_2D, 0, 0, 0, WS, H, GL_RGBA, fHalf, fr.data() );
+		if ( c ) {
+			glBindTexture( GL_TEXTURE_2D, addT );
+			glTexSubImage2D( GL_TEXTURE_2D, 0, 0, 0, WS, H, GL_RGBA, GL_FLOAT, c->add.data() );
+			glBindTexture( GL_TEXTURE_2D, mulT );
+			glTexSubImage2D( GL_TEXTURE_2D, 0, 0, 0, WS, H, GL_RGBA, GL_FLOAT, c->mul.data() );
+		}
+		glBindTexture( GL_TEXTURE_2D, 0 );
+		f.bindFramebuffer( fFb, fbBl1 );
+		glViewport( 0, 0, WS, H );
+		drawState0();
+		glColorMask( GL_TRUE, GL_TRUE, GL_TRUE, GL_FALSE );
+		glEnable( GL_BLEND );
+		f.blendFuncSeparate( GL_ONE, kSrc1Color, GL_ZERO, GL_ONE );
+		f.useProgram( prog );
+		if ( c ) {
+			bindUnit( 13, GL_TEXTURE_2D, addT );
+			bindUnit( 14, GL_TEXTURE_2D, mulT );
+			u1i( prog, "addT", 13 );
+			u1i( prog, "mulT", 14 );
+		}
+		glDrawArrays( GL_TRIANGLES, 0, 3 );
+		drawState0();
+		std::vector<std::uint16_t> out( fr.size() );
+		glReadPixels( 0, 0, WS, H, GL_RGBA, fHalf, out.data() );
+		bindUnit( 13, GL_TEXTURE_2D, 0 );
+		bindUnit( 14, GL_TEXTURE_2D, 0 );
+		return out;
+	};
+	// the same equation in float on the CPU (info only: it misses the blend unit by 1 ulp on some halves)
+	auto cpuBlend = [&]( std::vector<std::uint16_t> fr, const Cap & c ) {
+		for ( size_t i = 0; i < fr.size(); i += 4 )
+			if ( c.mul[i + 3] >= 0.0f )
+				for ( int k = 0; k < 3; k++ )
+					fr[i + k] = f2h( h2f( fr[i + k] ) * c.mul[i + k] + c.add[i + k] );
+		return fr;
 	};
 	auto vkFog = [&]( const Arm & a, std::string & w ) {
 		WwVkPresent::UnderRun r;
@@ -393,8 +555,48 @@ int main( int argc, char ** argv )
 		glFog( fbRefC, refDs, a.samples );
 		std::string w;
 		const bool ran = vkFog( a, w );
-		const std::vector<std::uint16_t> vk = readSamples( fc ), ref = readSamples( refCol );
+		const std::vector<std::uint16_t> vk = readSamples( fc ), glb = readSamples( refCol );
+		const Cap c1 = glCapture( refDs, pUwC ), c2 = a.samples > 0 ? glCapture( refDs, pMsC ) : Cap {};
+		const std::vector<std::uint16_t> ref1 = blend1x( bare, pBlend, &c1 ), ref = a.samples > 0 ? blend1x( ref1, pBlend, &c2 ) : ref1;
 		const Halves h = compareHalves( vk, ref );
+		std::vector<char> glFlat( size_t( W ) * H );  // GL holds one RGB in all four samples of the pixel
+		for ( size_t p = 0; p < glFlat.size(); p++ ) {
+			bool same = true;
+			for ( int k = 1; k < S; k++ )
+				for ( int c = 0; c < 3; c++ )
+					same = same && glb[( p * S + k ) * 4 + c] == glb[p * S * 4 + c];
+			glFlat[p] = same;
+		}
+		bool refOk = true;
+		if ( a.red == 0 ) {  // the reference's own check, then GL's blended frame against it (the tile mean, on record)
+			size_t outside = 0, ne = 0;
+			for ( size_t i = 0; i < ref.size(); i++ )
+				if ( !glFlat[i / 4 / S] ) {
+					outside++;
+					ne += ref[i] != glb[i];
+				}
+			refOk = outside > 0 && ne == 0;
+			std::printf( "UNDERDRAW   reference: 1x blend of the captures vs GL's 4x frame outside flattened pixels: %zu of %zu halves differ (want 0): %s\n",
+				ne, outside, refOk ? "OK" : "FAIL" );
+			const Halves cb = compareHalves( a.samples > 0 ? cpuBlend( cpuBlend( bare, c1 ), c2 ) : cpuBlend( bare, c1 ), ref );
+			std::printf( "UNDERDRAW   float CPU blend vs the reference (info): halves %zu differ, %zu past 1 ulp, max %d ulp\n", cb.diff, cb.past1, cb.maxu );
+			const Cap cf = glCapture( refDs, pMsFw );
+			const std::vector<std::uint16_t> reff = blend1x( ref1, pBlend, &cf );
+			const Halves hf = compareHalves( vk, reff ), mv = compareHalves( reff, ref );
+			std::printf( "UNDERDRAW   GL per-sample program with fwidth before the discard (info): Vulkan vs it %s (halves %zu differ, %zu past 1 ulp, "
+						 "max %d ulp); halves it moves from GL as linked %zu (max %d ulp)\n", hf.word(), hf.diff, hf.past1, hf.maxu, mv.diff, mv.maxu );
+			const Halves g = compareHalves( glb, ref );
+			size_t flat = 0;  // pixels GL flattened where the reference does not hold one value
+			for ( size_t p = 0; p < glFlat.size(); p++ ) {
+				bool rSame = true;
+				for ( int k = 1; k < S; k++ )
+					for ( int c = 0; c < 3; c++ )
+						rSame = rSame && ref[( p * S + k ) * 4 + c] == ref[p * S * 4 + c];
+				flat += glFlat[p] && !rSame;
+			}
+			std::printf( "UNDERDRAW   GL blended frame vs the per-sample reference (info): %s (halves %zu differ, %zu past 1 ulp, max %d ulp); "
+						 "pixels GL flattened to one value %zu\n", g.word(), g.diff, g.past1, g.maxu, flat );
+		}
 		size_t fogged = 0;  // samples whose RGB the fog changed
 		for ( size_t i = 0; i < ref.size(); i += 4 )
 			fogged += ref[i] != bare[i] || ref[i + 1] != bare[i + 1] || ref[i + 2] != bare[i + 2];
@@ -423,14 +625,11 @@ int main( int argc, char ** argv )
 				std::printf( "\n" );
 			}
 		}
-		// which draw fogged each sample, per API (0 neither, 1 per-pixel, 2 per-sample, 3 both), against the per-pixel
-		// draw alone (GL: glFog without the second draw; Vulkan: red 1). Vulkan "both" must be 0 (the twins agree on
-		// uwNearMax); the table, with the samples past 1 ulp per cell, shows where GL and Vulkan part
+		// which draw fogged each sample, per API (0 neither, 1 per-pixel, 2 per-sample, 3 both): GL, which draw wrote the
+		// sample in the capture; Vulkan, against its per-pixel draw alone (red 1). Vulkan "both" must be 0 (the twins agree
+		// on uwNearMax); the table, with the samples past 1 ulp per cell, shows where GL and Vulkan part
 		bool onceOk = true;
 		if ( a.red == 0 ) {
-			drawScene( fbRef, a.seed );
-			glFog( fbRefC, refDs, 0 );
-			const std::vector<std::uint16_t> ppG = readSamples( refCol );
 			drawScene( fbFrame, a.seed );
 			Arm a1 = a;
 			a1.red = 1;
@@ -442,9 +641,25 @@ int main( int argc, char ** argv )
 			};
 			size_t cross[4][4] = {}, bad[4][4] = {};
 			for ( size_t i = 0; i < vk.size(); i += 4 ) {
-				const int g = ( rgbNe( ppG, bare, i ) ? 1 : 0 ) | ( rgbNe( ref, ppG, i ) ? 2 : 0 );
+				const int g = ( rgbNe( ref1, bare, i ) ? 1 : 0 ) | ( rgbNe( ref, ref1, i ) ? 2 : 0 );
 				const int v = ( rgbNe( ppV, bare, i ) ? 1 : 0 ) | ( rgbNe( vk, ppV, i ) ? 2 : 0 );
 				cross[g][v]++;
+				if ( ( g == 1 && v == 2 ) || ( g == 2 && v == 1 ) ) {  // the two APIs split on uwNearMax: e against tol in double
+					const size_t smp = i / 4, y = smp / WS, xs = smp % WS, px = xs / S;
+					double dm = 0.0;
+					for ( int k = 0; k < S; k++ )
+						dm = std::max( dm, double( depthS[y * WS + px * S + k] ) );
+					const double nx = ( px + 0.5 ) / W * 2.0 - 1.0, ny = ( y + 0.5 ) / H * 2.0 - 1.0;
+					auto world = [&]( double z ) {
+						const double vw = ( N - F ) / ( 2.0 * F * N ) * z + ( F + N ) / ( 2.0 * F * N );
+						const double p[3] = { asp / fy * nx / vw, 1.0 / fy * ny / vw, -1.0 / vw };
+						return std::array<double, 3> { -p[2] + 100.0, -p[0] + 200.0, p[1] + double( a.eyeZ ) };
+					};
+					const std::array<double, 3> pa = world( dm * 2.0 - 1.0 ), pb = world( double( depthS[smp] ) * 2.0 - 1.0 );
+					const double e = std::sqrt( ( pa[0] - pb[0] ) * ( pa[0] - pb[0] ) + ( pa[1] - pb[1] ) * ( pa[1] - pb[1] ) + ( pa[2] - pb[2] ) * ( pa[2] - pb[2] ) );
+					std::printf( "UNDERDRAW   split x %zu y %zu s %zu: gl draw %d, vk draw %d; e %.7f world units, tol %s %.7f\n", px, y, xs % S, g, v, e,
+						a.light ? "(light row, not computed)" : "", a.light ? 0.0 : 1500.0 / ( 512.0 * 0.9f ) );
+				}
 				for ( int c = 0; c < 3; c++ )
 					if ( std::abs( ordered( vk[i + c] ) - ordered( ref[i + c] ) ) > 1 ) {
 						bad[g][v]++;
@@ -486,35 +701,76 @@ int main( int argc, char ** argv )
 						drawQuad();
 					drawState0();
 					const std::vector<std::uint16_t> pp = readSamples( refCol );
-					size_t off = 0, n = 0;  // samples off by more than 2 ulp at the value
+					auto offAt = [&]( const std::vector<std::uint16_t> & x, size_t j ) {  // off by more than 2 ulp at the value
+						const float want = h2f( bare[j] ) * 0.65f + 0.01f;
+						return std::fabs( h2f( x[j] ) - want ) > std::max( 0.002f * want, 1e-4f );
+					};
+					size_t off = 0, n = 0;
 					for ( size_t j = 0; j < pp.size(); j += 4 ) {
-						const float want = h2f( bare[j] ) * 0.65f + 0.01f, got = h2f( pp[j] );
-						off += std::fabs( got - want ) > std::max( 0.002f * want, 1e-4f );
+						off += offAt( pp, j );
 						n++;
 					}
 					std::printf( "UNDERDRAW   GL blend %s (info): %zu of %zu samples off bare * 0.65 + 0.01\n", v.n, off, n );
+					if ( v.p == qNo ) {  // the reference's blend unit check: the same probe at 1x
+						const GLuint p1x = program( kTriVs, fsNoMask, "probe 1x" );
+						const std::vector<std::uint16_t> q = blend1x( bare, p1x, nullptr );
+						size_t off1 = 0, kept = 0, ne = 0;
+						for ( size_t j = 0; j < q.size(); j += 4 ) {
+							off1 += offAt( q, j );
+							if ( !offAt( pp, j ) ) {
+								kept++;
+								for ( int c = 0; c < 4; c++ )
+									ne += q[j + c] != pp[j + c];
+							}
+						}
+						const bool ok1 = p1x && off1 == 0 && kept > 0 && ne == 0;
+						std::printf( "UNDERDRAW   reference: GL blend at 1x, same probe: %zu samples off (want 0), %zu halves differ from 4x on the %zu "
+									 "samples 4x kept (want 0): %s\n", off1, ne, kept, ok1 ? "OK" : "FAIL" );
+						refOk = refOk && ok1;
+						size_t neFlat = 0, neRest = 0, flatPx = 0;  // where those halves sit: pixels 4x flattened (one RGB in all four samples)
+						for ( size_t p = 0; p < size_t( W ) * H; p++ ) {
+							bool same = true;
+							for ( int k = 1; k < S; k++ )
+								for ( int c = 0; c < 3; c++ )
+									same = same && pp[( p * S + k ) * 4 + c] == pp[p * S * 4 + c];
+							flatPx += same;
+							for ( int k = 0; k < S; k++ ) {
+								const size_t j = ( p * S + k ) * 4;
+								if ( !offAt( pp, j ) )
+									for ( int c = 0; c < 4; c++ )
+										( same ? neFlat : neRest ) += q[j + c] != pp[j + c];
+							}
+						}
+						std::printf( "UNDERDRAW   reference (info): of those halves, %zu in the %zu pixels 4x flattened, %zu elsewhere\n", neFlat, flatPx, neRest );
+					}
 				}
 			}
 			int shown = 0;
-			for ( size_t i = 0; i < vk.size() && shown < 6 && !h.ok() && a.red == 0; i += 4 ) {
-				const int d = std::abs( ordered( vk[i] ) - ordered( ref[i] ) );
-				if ( d > 16 ) {
+			for ( size_t i = 0; i < vk.size() && shown < 20 && !h.ok() && a.red == 0; i += 4 ) {
+				int d = 0;
+				for ( int c = 0; c < 3; c++ )
+					d = std::max( d, std::abs( ordered( vk[i + c] ) - ordered( ref[i + c] ) ) );
+				if ( d > 1 ) {
 					const size_t smp = i / 4, y = smp / WS, xs = smp % WS;
 					float dm = 0.0f;
 					for ( int k = 0; k < S; k++ )
 						dm = std::max( dm, depthS[y * WS + ( xs / S ) * S + k] );
-					std::printf( "UNDERDRAW   x %zu y %zu s %zu %s depth %.7f pixel max %.7f: vk %.4f %.4f %.4f gl %.4f %.4f %.4f bare %.4f\n",
+					std::printf( "UNDERDRAW   x %zu y %zu s %zu %s depth %.7f pixel max %.7f: vk %.4f %.4f %.4f ref %.4f %.4f %.4f bare %.4f\n",
 						xs / S, y, xs % S, mixMap[y * W + xs / S] ? "mixed" : "plain", double( depthS[smp] ), double( dm ), double( h2f( vk[i] ) ),
 						double( h2f( vk[i + 1] ) ), double( h2f( vk[i + 2] ) ), double( h2f( ref[i] ) ), double( h2f( ref[i + 1] ) ),
 						double( h2f( ref[i + 2] ) ), double( h2f( bare[i] ) ) );
+					std::printf( "UNDERDRAW     gl capture r: per-pixel %s add %.5f mul %.5f, per-sample %s add %.5f mul %.5f; GL blended %.4f\n",
+						c1.mul[i + 3] >= 0.0f ? "wrote" : "skipped", double( c1.add[i] ), double( c1.mul[i] ),
+						c2.mul.empty() || c2.mul[i + 3] < 0.0f ? "skipped" : "wrote", c2.mul.empty() ? 0.0 : double( c2.add[i] ),
+						c2.mul.empty() ? 0.0 : double( c2.mul[i] ), double( h2f( glb[i] ) ) );
 					shown++;
 				}
 			}
 		if ( a.red == 0 ) {
-			const bool ok = ran && h.ok() && floorOk && onceOk;
-			std::printf( "UNDERDRAW arm %s: %s (halves %zu differ, %zu past 1 ulp, max %d ulp of %zu); fogged %zu / %zu samples, "
-						 "mixed-depth pixels %d (floors 50 %%, 100); Vulkan fogs each sample once: %s%s%s: %s\n",
-				a.name, ran ? h.word() : "REFUSED", h.diff, h.past1, h.maxu, h.total, fogged, total, mixed, onceOk ? "yes" : "NO",
+			const bool ok = ran && h.ok() && floorOk && onceOk && refOk;
+			std::printf( "UNDERDRAW arm %s: %s against the per-sample reference (halves %zu differ, %zu past 1 ulp, max %d ulp of %zu); fogged %zu / "
+						 "%zu samples, mixed-depth pixels %d (floors 50 %%, 100); Vulkan fogs each sample once: %s; reference checks %s%s%s: %s\n",
+				a.name, ran ? h.word() : "REFUSED", h.diff, h.past1, h.maxu, h.total, fogged, total, mixed, onceOk ? "yes" : "NO", refOk ? "OK" : "FAIL",
 				ran ? "" : " why: ", ran ? "" : w.c_str(), ok ? "OK" : "FAIL" );
 			gateOk = gateOk && ok;
 		} else {

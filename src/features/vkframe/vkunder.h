@@ -35,6 +35,8 @@ bool underRun( const UnderRun & r, std::string & why );
 std::string underRefusal();
 void underOnGl( const char * why );
 FxStat takeUnderStat();
+//! the fog's route line ("vk under:"), one a 5 s window while on Vulkan (not in WW_VKPRESENT_NO_QT builds)
+void underSay( bool wanted, const char * glWhy );
 
 //! the loose block GL's program holds now (both programs share the table: water_tables.py reflects the same 27 fields)
 template <class Fn> void underPack( Fn * fn, unsigned prog, std::uint8_t * out )
