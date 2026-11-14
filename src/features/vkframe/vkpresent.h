@@ -643,16 +643,26 @@ inline constexpr FxField kT_precipps[] = {
 	{ "pcNear", 32, 2, 1, 0, 0 },
 };
 inline constexpr int kT_precippsBytes = 48;
+// slice 3: the look's members past those (precip_look_view_cs / _ps, cell_precip_look.prog), packed into the same bytes
+inline constexpr FxField kT_preciplookcs[] = {
+	{ "pcLook", 2100, 1, 1, 1, 0 }, { "pcMmPerView", 2104, 1, 1, 0, 0 },
+};
+inline constexpr FxField kT_preciplookps[] = {
+	{ "pcLook", 40, 1, 1, 1, 0 }, { "pcHasN", 44, 1, 1, 1, 0 }, { "pcClump", 48, 2, 1, 0, 0 }, { "pcAlbedo", 56, 1, 1, 0, 0 },
+	{ "pcTrans", 60, 1, 1, 0, 0 },
+};
+inline constexpr int kT_preciplookpsBytes = 64;
 struct PrecipRun
 {
 	int w = 0, h = 0, vp[4] = {};    //!< the tone frame's size, GL's viewport
 	unsigned color = 0;             //!< the tone frame's colour (toneFrameIs)
 	int first = 0, n = 0;           //!< the run: glDrawArrays( GL_POINTS, first, n )
 	bool lit = false, fogged = false, roofOn = false;  //!< lit and roofOn refused (GL draws); fogged: slice 2a
-	FxTex tex[7];                   //!< t0 pcRoof (none yet), t1 pcTex (the atlas), the air's t25 atApTex, t26 volTex, t27 volTile, t28 volAirTerr, t29 volAirRainMap
-	std::uint8_t cs[kT_precipcsBytes] = {};  //!< fxPack( cell_precip_gpu, kT_precipcs )
-	std::uint8_t ps[kT_precippsBytes] = {};  //!< fxPack( cell_precip_gpu, kT_precipps )
-	int red = 0;                    //!< gates only: 1 the cull radius 0, 2 the strip's last two corners swapped, 4 no near fade, 8 the air dropped
+	bool look = false;              //!< slice 3: cell_precip_look.prog's run (cs / ps also hold kT_preciplook*)
+	FxTex tex[8];                   //!< t0 pcRoof (none yet), t1 pcTex (the atlas), the air's t25 atApTex, t26 volTex, t27 volTile, t28 volAirTerr, t29 volAirRainMap, the look's pcTexN
+	std::uint8_t cs[kT_precipcsBytes] = {};  //!< fxPack( cell_precip_gpu, kT_precipcs ) (+ kT_preciplookcs for a look run)
+	std::uint8_t ps[kT_preciplookpsBytes] = {};  //!< fxPack( cell_precip_gpu, kT_precipps ) (+ kT_preciplookps for a look run)
+	int red = 0;                    //!< gates only: 1 the cull radius 0, 2 the strip's last two corners swapped, 4 no near fade, 8 the air dropped, 16 the look dropped (the plain pipelines draw a look run)
 };
 /* GL current, the tone frame bound, cell_precip_gpu's uniforms set: one run of particles on Vulkan, a record pass then
  * instanced quads (depth LEQUAL no write, blend SRC_ALPHA / ONE_MINUS_SRC_ALPHA, stencil ALWAYS ref 1 REPLACE mask 0x03,

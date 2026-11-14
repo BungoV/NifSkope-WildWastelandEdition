@@ -4,7 +4,8 @@
 // far tier's cell mean, the uv box), into one record a particle in GL's order. A culled particle keeps its slot (c.w 0):
 // alpha blending needs GL's order, so nothing is compacted. precip_view_vs.hlsl builds the four corners from the record.
 // Slice 1 is unlit and unfogged (lit 1: A = 1, B = 0 with the air off); slice 2a adds the air (wwFogFx, the shared
-// lookdev_fog.hlsli as it stands); vkprecip.inc refuses a lit cell until slice 2b.
+// lookdev_fog.hlsli as it stands); vkprecip.inc refuses a lit cell until slice 2b. Slice 3: PC_LOOK
+// (precip_look_view_cs.hlsl, cell_precip_look.prog) adds the drop / flake terms to the record (unlit: thin = thick = 1).
 // cell_precip_field.hlsli is included unchanged (its hashes, roof test); pcParticleVk below is a twin-local copy of its
 // pcParticle spelled in NV GL's order of operations. A change to pcParticle there must be mirrored here.
 // profile: cs_6_0
@@ -45,6 +46,10 @@ cbuffer LooseUniforms : register(b31, space0)
 #define WW_LOOSE_UNIFORMS 1
 #include "../air/lookdev_fog.hlsli"
 #undef WW_LOOSE_UNIFORMS
+#ifdef PC_LOOK
+	int pcLook;			// slice 3 (precip_look_view_cs.hlsl, cell_precip_look.prog): 1 a raindrop, 2 a snow flake
+	float pcMmPerView;	// mm of the particle's true size per view unit
+#endif
 };
 #include "cell_precip_field.hlsli"
 #include "../air/lookdev_fog.hlsli"
@@ -118,6 +123,13 @@ struct PrecipRec
 	float4 box;
 	float4 a;		// the fogged light per unit albedo (slice 1: 1)
 	float4 b;		// the fog's own light (slice 1: 0)
+#ifdef PC_LOOK
+	float4 drop;	// gDrop
+	float4 thin;	// gThin, w gOsc
+	float4 thick;	// gThick
+	float4 domL;	// gDomL
+	float4 domE;	// gDomE
+#endif
 };
 RWStructuredBuffer<PrecipRec> pcOut : register(u0, space0);
 
@@ -170,7 +182,23 @@ void main( uint3 id : SV_DispatchThreadID )
 	col.a = aF * 0.5;
 	float2 ax, ay;
 	float hx = hd, hy = hd;
+#ifdef PC_LOOK
+	float4 pDrop = (float4)( 0.0 );
+	float pOsc = 0.0;
+	if ( pcLook == 1 ) {
+		// the coverage is the fragment's (swept disc): here only the least-size spread (h^2 / hd^2)
+		col = float4( vsColor.rgb, vsColor.a * h * h / ( hd * hd ) );
+		float D = 2.0 * h * pcMmPerView;	// mm
+		float r0 = 0.0005 * D;	// m
+		float w2 = sqrt( 8.0 * 0.0728 / ( 1000.0 * r0 * r0 * r0 ) );	// rad/s, n = 2
+		float kf = 0.51 * clamp( ( D - 0.5 ) / 1.5, 0.0, 1.0 ) * lerp( 1.0, 0.53, clamp( ( D - 2.0 ) / 2.0, 0.0, 1.0 ) );
+		pDrop = float4( hd, tl, kf, w2 * pcShutter / 6.2831853 );
+		pOsc = angle * 7.0;
+	}
+	if ( tl > ( pcLook == 1 ? 1e-4 * hd : 0.2 * hd ) ) {
+#else
 	if ( tl > 0.2 * hd ) {
+#endif
 		ax = tr / tl;
 		precise float hxS = mad( tl, 0.5, hd );
 		hx = hxS;
@@ -180,7 +208,11 @@ void main( uint3 id : SV_DispatchThreadID )
 	ay = float2( -ax.y, ax.x );
 	float2 cell = pcAtlas.xy;
 	r.box = float4( cellUv + pcInset, cellUv + cell - pcInset );
+#ifdef PC_LOOK
+	if ( pcFar != 0 && pcLook != 1 ) {
+#else
 	if ( pcFar != 0 ) {
+#endif
 		// the cell's mean: 16 taps at the one-texel-a-cell mip
 		float4 m = (float4)( 0.0 );
 		if ( pcHasTex ) {
@@ -218,5 +250,15 @@ void main( uint3 id : SV_DispatchThreadID )
 	}
 	r.a = float4( fogA, 0.0 );
 	r.b = float4( fogB, 0.0 );
+#ifdef PC_LOOK
+	// unlit (slice 2b refuses a lit cell): GL's thin = thick = lit = 1 and its key light 0 (cell_precip_gpu_gs.hlsl's
+	// defaults), so its wwFogFx( thin ) - B = wwFogFx( thick ) - B = A and wwFogFx( 0 ) - B = 0, the same calls on the same
+	// arguments. Slice 2b must spell the three calls out once thin, thick and the key light differ.
+	r.drop = pDrop;
+	r.thin = float4( pcLook == 2 ? fogA : (float3)( 0.0 ), pOsc );
+	r.thick = float4( pcLook == 2 ? fogA : (float3)( 0.0 ), 0.0 );
+	r.domL = float4( 0.0, 0.0, 1.0, 0.0 );
+	r.domE = (float4)( 0.0 );
+#endif
 	pcOut[id.x] = r;
 }

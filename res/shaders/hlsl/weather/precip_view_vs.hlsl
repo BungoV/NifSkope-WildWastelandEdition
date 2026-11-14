@@ -21,6 +21,13 @@ struct PrecipRec
 	float4 box;
 	float4 a;
 	float4 b;
+#ifdef PC_LOOK
+	float4 drop;
+	float4 thin;	// w gOsc
+	float4 thick;
+	float4 domL;
+	float4 domE;
+#endif
 };
 StructuredBuffer<PrecipRec> pcRec : register(t1, space0);
 
@@ -33,6 +40,16 @@ struct VsOut
 	nointerpolation float4 gBox : TEXCOORD4;
 	nointerpolation float3 gA : TEXCOORD5;
 	nointerpolation float3 gB : TEXCOORD6;
+#ifdef PC_LOOK
+	// slice 3 (precip_look_view_vs.hlsl): cell_precip_look's interpolants, the geometry stage's order
+	nointerpolation float4 gDrop : TEXCOORD7;
+	nointerpolation float gOsc : TEXCOORD8;
+	nointerpolation float3 gThin : TEXCOORD9;
+	nointerpolation float3 gThick : TEXCOORD10;
+	nointerpolation float4 gDomL : TEXCOORD11;
+	nointerpolation float3 gDomE : TEXCOORD12;
+	nointerpolation float2 gAx : TEXCOORD13;
+#endif
 	float4 pos : SV_Position;
 };
 
@@ -59,6 +76,15 @@ VsOut main( uint corner : SV_VertexID, uint inst : SV_InstanceID )
 	o.gBox = r.box;
 	o.gA = r.a.xyz;
 	o.gB = r.b.xyz;
+#ifdef PC_LOOK
+	o.gDrop = r.drop;
+	o.gOsc = r.thin.w;
+	o.gThin = r.thin.xyz;
+	o.gThick = r.thick.xyz;
+	o.gDomL = r.domL;
+	o.gDomE = r.domE.xyz;
+	o.gAx = ax;
+#endif
 	precise float4 cp0 = p.y * pcProj[1];
 	precise float4 cp1 = mad( p.x, pcProj[0], cp0 );
 	precise float4 cp2 = mad( p.z, pcProj[2], cp1 );

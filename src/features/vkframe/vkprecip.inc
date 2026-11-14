@@ -5,8 +5,9 @@
  * compute pass (precip_view_cs.hlsl: the field, the cull, the geometry stage's per-particle part) writes one record a
  * particle in GL's order, and each particle is an instance of four strip vertices (precip_view_vs.hlsl) read by
  * cell_precip_gpu_ps.hlsl's frozen copy (precip_view_ps.hlsl). Nothing is compacted: the blend needs GL's order.
- * Slice 1 is unlit; slice 2a adds the air (wwFogFx's A / B in the record pass, its five textures in the compute set).
- * A lit cell or the roof map are refused (GL draws).
+ * Slice 1 is unlit; slice 2a adds the air (wwFogFx's A / B in the record pass, its five textures in the compute set);
+ * slice 3 the precipitation look (cell_precip_look.prog: precip_look_view_cs / _vs / _ps, a 192-byte record, the flake's
+ * normal map at t2 of the pixel stage). A lit cell or the roof map are refused (GL draws).
  * GL's state (cellprecip.cpp): depth LEQUAL, no depth write, cull off, blend SRC_ALPHA / ONE_MINUS_SRC_ALPHA, stencil ALWAYS
  * ref 1, REPLACE on depth pass, write mask 0x03. */
 namespace
@@ -15,6 +16,7 @@ constexpr VkDeviceSize kPrecipViewBytes = 96;   // precip_view_vs PrecipView (b1
 constexpr VkDeviceSize kPrecipCsAt = 256;       // the compute pass's b31
 constexpr VkDeviceSize kPrecipPsAt = 2560;      // the pixel stage's b31 (past the compute block's 2112)
 constexpr VkDeviceSize kPrecipRecBytes = 112;   // PrecipRec: 7 float4
+constexpr VkDeviceSize kPrecipLookRecBytes = 192;  // the look's PrecipRec: 12 float4
 
 struct Precip
 {
@@ -25,19 +27,21 @@ struct Precip
 	VkDescriptorSet csSet = VK_NULL_HANDLE, gSet = VK_NULL_HANDLE;
 	VkPipelineLayout csLayout = VK_NULL_HANDLE, gLayout = VK_NULL_HANDLE;
 	VkShaderModule cs = VK_NULL_HANDLE, vs = VK_NULL_HANDLE, ps = VK_NULL_HANDLE;
-	VkPipeline csPipe = VK_NULL_HANDLE;
+	VkShaderModule csLook = VK_NULL_HANDLE, vsLook = VK_NULL_HANDLE, psLook = VK_NULL_HANDLE;  // slice 3
+	VkPipeline csPipe = VK_NULL_HANDLE, csPipeLook = VK_NULL_HANDLE;
 	VkBuffer ubo = VK_NULL_HANDLE;  // the vertex block at 0, the compute b31 at kPrecipCsAt, the pixel b31 at kPrecipPsAt
 	VkDeviceMemory uboMem = VK_NULL_HANDLE;
 	std::uint8_t * uboPtr = nullptr;
 	VkBuffer rec = VK_NULL_HANDLE;  // the records, one a particle
 	VkDeviceMemory recMem = VK_NULL_HANDLE;
 	VkDeviceSize recCap = 0;
-	VkPipeline pipe = VK_NULL_HANDLE;
+	VkPipeline pipe = VK_NULL_HANDLE, pipeLook = VK_NULL_HANDLE;
 	VkRenderPass pipePass = VK_NULL_HANDLE;
 	int pipeSamples = 0, pipelines = 0;
 	double buildMs = 0.0;
 	// this run's job (the drawing thread writes it before the hand, the worker records it)
 	int n = 0;
+	bool look = false;  // the look's pipelines
 	WwVkPresent::FxStat st;
 };
 
@@ -81,12 +85,13 @@ bool precipStatic( std::string & why )
 		cb[k].descriptorCount = 1;
 		cb[k].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
 	}
-	// graphics: b1 the vertex block, t1 the records at 65 (vertex); b31, t0 pcTex at 64, s0 at 128 (pixel)
-	VkDescriptorSetLayoutBinding gb[5] = {};
-	const std::uint32_t gBind[5] = { 1, 65, 31, 64, 128 };
-	const VkDescriptorType gType[5] = { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-		VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, VK_DESCRIPTOR_TYPE_SAMPLER };
-	for ( int k = 0; k < 5; k++ ) {
+	// graphics: b1 the vertex block, t1 the records at 65 (vertex); b31, t0 pcTex at 64, s0 at 128, the look's t2 pcTexN at
+	// 66 and s2 at 130 (pixel)
+	VkDescriptorSetLayoutBinding gb[7] = {};
+	const std::uint32_t gBind[7] = { 1, 65, 31, 64, 128, 66, 130 };
+	const VkDescriptorType gType[7] = { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+		VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, VK_DESCRIPTOR_TYPE_SAMPLER, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, VK_DESCRIPTOR_TYPE_SAMPLER };
+	for ( int k = 0; k < 7; k++ ) {
 		gb[k].binding = gBind[k];
 		gb[k].descriptorType = gType[k];
 		gb[k].descriptorCount = 1;
@@ -96,10 +101,10 @@ bool precipStatic( std::string & why )
 	lci.bindingCount = 15;
 	lci.pBindings = cb;
 	VkDescriptorSetLayoutCreateInfo lgi = lci;
-	lgi.bindingCount = 5;
+	lgi.bindingCount = 7;
 	lgi.pBindings = gb;
-	VkDescriptorPoolSize ps[4] = { { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 3 }, { VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 8 },
-		{ VK_DESCRIPTOR_TYPE_SAMPLER, 7 }, { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 2 } };
+	VkDescriptorPoolSize ps[4] = { { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 3 }, { VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 9 },
+		{ VK_DESCRIPTOR_TYPE_SAMPLER, 8 }, { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 2 } };
 	VkDescriptorPoolCreateInfo pci { VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO };
 	pci.maxSets = 2;
 	pci.poolSizeCount = 4;
@@ -131,7 +136,10 @@ bool precipStatic( std::string & why )
 	D.gSet = sets[1];
 	if ( !fxModule( vkframe_precip_view_cs_spv, sizeof( vkframe_precip_view_cs_spv ), D.cs )
 		|| !fxModule( vkframe_precip_view_vs_spv, sizeof( vkframe_precip_view_vs_spv ), D.vs )
-		|| !fxModule( vkframe_precip_view_ps_spv, sizeof( vkframe_precip_view_ps_spv ), D.ps ) ) {
+		|| !fxModule( vkframe_precip_view_ps_spv, sizeof( vkframe_precip_view_ps_spv ), D.ps )
+		|| !fxModule( vkframe_precip_look_view_cs_spv, sizeof( vkframe_precip_look_view_cs_spv ), D.csLook )
+		|| !fxModule( vkframe_precip_look_view_vs_spv, sizeof( vkframe_precip_look_view_vs_spv ), D.vsLook )
+		|| !fxModule( vkframe_precip_look_view_ps_spv, sizeof( vkframe_precip_look_view_ps_spv ), D.psLook ) ) {
 		why = "the rain / snow shader modules failed";
 		return false;
 	}
@@ -141,13 +149,16 @@ bool precipStatic( std::string & why )
 	cp.stage.module = D.cs;
 	cp.stage.pName = "main";
 	cp.layout = D.csLayout;
-	if ( v.vkCreateComputePipelines( v.dev, tone().cache, 1, &cp, nullptr, &D.csPipe ) != VK_SUCCESS ) {
+	VkComputePipelineCreateInfo cpLook = cp;
+	cpLook.stage.module = D.csLook;
+	if ( v.vkCreateComputePipelines( v.dev, tone().cache, 1, &cp, nullptr, &D.csPipe ) != VK_SUCCESS
+		|| v.vkCreateComputePipelines( v.dev, tone().cache, 1, &cpLook, nullptr, &D.csPipeLook ) != VK_SUCCESS ) {
 		why = "vkCreateComputePipelines (the rain / snow records) failed";
 		return false;
 	}
-	D.pipelines++;
+	D.pipelines += 2;
 	VkBufferCreateInfo bci { VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
-	bci.size = kPrecipPsAt + VkDeviceSize( WwVkPresent::kT_precippsBytes );
+	bci.size = kPrecipPsAt + VkDeviceSize( WwVkPresent::kT_preciplookpsBytes );
 	bci.usage = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
 	bool mapped = v.vkCreateBuffer( v.dev, &bci, nullptr, &D.ubo ) == VK_SUCCESS;
 	if ( mapped ) {
@@ -216,13 +227,14 @@ bool precipPipe( std::string & why )
 	Vk & v = vk();
 	Fx & F = fx();
 	Precip & D = precip();
-	if ( D.pipePass == F.airPass && D.pipeSamples == F.airSamples && D.pipe )
+	if ( D.pipePass == F.airPass && D.pipeSamples == F.airSamples && D.pipe && D.pipeLook )
 		return true;
 	const double t0 = nowMs();
-	if ( D.pipe ) {
-		v.vkDestroyPipeline( v.dev, D.pipe, nullptr );
-		D.pipe = VK_NULL_HANDLE;
-	}
+	for ( VkPipeline * p : { &D.pipe, &D.pipeLook } )
+		if ( *p ) {
+			v.vkDestroyPipeline( v.dev, *p, nullptr );
+			*p = VK_NULL_HANDLE;
+		}
 	D.pipePass = VK_NULL_HANDLE;
 	VkPipelineShaderStageCreateInfo st[2] = { { VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO },
 		{ VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO } };
@@ -285,7 +297,13 @@ bool precipPipe( std::string & why )
 		why = "vkCreateGraphicsPipelines (rain / snow) failed";
 		return false;
 	}
-	D.pipelines++;
+	st[0].module = D.vsLook;  // slice 3: the same state with the look's stages
+	st[1].module = D.psLook;
+	if ( v.vkCreateGraphicsPipelines( v.dev, tone().cache, 1, &gp, nullptr, &D.pipeLook ) != VK_SUCCESS ) {
+		why = "vkCreateGraphicsPipelines (rain / snow, the look) failed";
+		return false;
+	}
+	D.pipelines += 2;
 	D.pipePass = F.airPass;
 	D.pipeSamples = F.airSamples;
 	D.buildMs += nowMs() - t0;
@@ -299,11 +317,12 @@ bool precipRecord( std::string & why )
 	Vk & v = vk();
 	Fx & F = fx();
 	Precip & D = precip();
-	if ( !F.fbAir || !D.pipe || !D.csPipe || !D.rec ) {
+	const VkPipeline gPipe = D.look ? D.pipeLook : D.pipe, cPipe = D.look ? D.csPipeLook : D.csPipe;
+	if ( !F.fbAir || !gPipe || !cPipe || !D.rec ) {
 		why = "no framebuffer / pipeline / record buffer for rain / snow";
 		return false;
 	}
-	v.vkCmdBindPipeline( F.cmd, VK_PIPELINE_BIND_POINT_COMPUTE, D.csPipe );
+	v.vkCmdBindPipeline( F.cmd, VK_PIPELINE_BIND_POINT_COMPUTE, cPipe );
 	v.vkCmdBindDescriptorSets( F.cmd, VK_PIPELINE_BIND_POINT_COMPUTE, D.csLayout, 0, 1, &D.csSet, 0, nullptr );
 	v.vkCmdDispatch( F.cmd, std::uint32_t( ( D.n + 63 ) / 64 ), 1, 1 );
 	VkMemoryBarrier mb { VK_STRUCTURE_TYPE_MEMORY_BARRIER };  // the records written -> the vertex stage reads them
@@ -322,7 +341,7 @@ bool precipRecord( std::string & why )
 	const VkRect2D sc { { x0, y0 }, { std::uint32_t( std::max( x1 - x0, 0 ) ), std::uint32_t( std::max( y1 - y0, 0 ) ) } };
 	v.vkCmdSetViewport( F.cmd, 0, 1, &vpt );
 	v.vkCmdSetScissor( F.cmd, 0, 1, &sc );
-	v.vkCmdBindPipeline( F.cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, D.pipe );
+	v.vkCmdBindPipeline( F.cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, gPipe );
 	v.vkCmdSetStencilReference( F.cmd, VK_STENCIL_FACE_FRONT_AND_BACK, 1u );
 	v.vkCmdBindDescriptorSets( F.cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, D.gLayout, 0, 1, &D.gSet, 0, nullptr );
 	v.vkCmdDraw( F.cmd, 4, std::uint32_t( D.n ), 0, 0 );
@@ -390,15 +409,17 @@ bool precipRun( const PrecipRun & t, std::string & why )
 		return breakOff( w );
 	if ( F.airSamples != T.samples )
 		return breakOff( "rain / snow's pipeline is not at the frame's sample count" );
-	if ( !precipRecords( VkDeviceSize( t.n ) * kPrecipRecBytes, w ) )
+	const bool look = t.look && ( t.red & 16 ) == 0;  // red 16: a look run through the plain pipelines
+	const VkDeviceSize recStride = look ? kPrecipLookRecBytes : kPrecipRecBytes;
+	if ( !precipRecords( VkDeviceSize( t.n ) * recStride, w ) )
 		return breakOff( w );
 	FxNames names;
 	names.add( T.colorTex );
 	names.add( T.dsTex );
-	VkImageView views[7] = {};
-	int smp[7] = {};
-	const int slotType[7] = { 0, 0, 1, 1, 0, 2, 0 };  // an empty slot binds the zero texture of the shader's type
-	for ( int k = 0; k < 7; k++ ) {
+	VkImageView views[8] = {};
+	int smp[8] = {};
+	const int slotType[8] = { 0, 0, 1, 1, 0, 2, 0, 0 };  // an empty slot binds the zero texture of the shader's type
+	for ( int k = 0; k < 8; k++ ) {
 		FxTex x = t.tex[k];
 		if ( !x.tex && !x.shared )
 			x.type = slotType[k];
@@ -426,14 +447,14 @@ bool precipRun( const PrecipRun & t, std::string & why )
 	const int vsRed = ( t.red & 2 ) ? 1 : 0;
 	std::memcpy( u + 80, &vsRed, 4 );
 	std::uint8_t * p = u + kPrecipPsAt;
-	std::memcpy( p, t.ps, size_t( kT_precippsBytes ) );
+	std::memcpy( p, t.ps, size_t( kT_preciplookpsBytes ) );
 	if ( t.red & 4 ) {  // red: the near fade dropped (whole from the eye on)
 		const float nf[2] = { -2.0f, -1.0f };
 		std::memcpy( p + atNear, nf, 8 );
 	}
-	const VkDeviceSize recBytes = VkDeviceSize( t.n ) * kPrecipRecBytes;
+	const VkDeviceSize recBytes = VkDeviceSize( t.n ) * recStride;
 	VkDescriptorBufferInfo bi[5] = { { D.ubo, kPrecipCsAt, VkDeviceSize( kT_precipcsBytes ) }, { D.rec, 0, recBytes },
-		{ D.ubo, 0, kPrecipViewBytes }, { D.rec, 0, recBytes }, { D.ubo, kPrecipPsAt, VkDeviceSize( kT_precippsBytes ) } };
+		{ D.ubo, 0, kPrecipViewBytes }, { D.rec, 0, recBytes }, { D.ubo, kPrecipPsAt, VkDeviceSize( kT_preciplookpsBytes ) } };
 	VkDescriptorImageInfo ii[5] = {};
 	ii[0].imageView = views[0];
 	ii[1].imageView = views[1];
@@ -448,7 +469,11 @@ bool precipRun( const PrecipRun & t, std::string & why )
 		fi[k].imageLayout = VK_IMAGE_LAYOUT_GENERAL;
 		fi[5 + k].sampler = F.smp[smp[2 + k]];
 	}
-	VkWriteDescriptorSet ws[20] = {};
+	VkDescriptorImageInfo ni[2] = {};  // the look's pcTexN (slot 7) at 66, its sampler at 130
+	ni[0].imageView = views[7];
+	ni[0].imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+	ni[1].sampler = F.smp[smp[7]];
+	VkWriteDescriptorSet ws[22] = {};
 	auto put = [&]( int k, VkDescriptorSet s, std::uint32_t b, VkDescriptorType ty, const VkDescriptorBufferInfo * bp, const VkDescriptorImageInfo * ip ) {
 		ws[k].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
 		ws[k].dstSet = s;
@@ -472,8 +497,11 @@ bool precipRun( const PrecipRun & t, std::string & why )
 		put( 10 + k, D.csSet, std::uint32_t( 89 + k ), VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, nullptr, &fi[k] );
 		put( 15 + k, D.csSet, std::uint32_t( 153 + k ), VK_DESCRIPTOR_TYPE_SAMPLER, nullptr, &fi[5 + k] );
 	}
-	v.vkUpdateDescriptorSets( v.dev, 20, ws, 0, nullptr );
+	put( 20, D.gSet, 66, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, nullptr, &ni[0] );
+	put( 21, D.gSet, 130, VK_DESCRIPTOR_TYPE_SAMPLER, nullptr, &ni[1] );
+	v.vkUpdateDescriptorSets( v.dev, 22, ws, 0, nullptr );
 	D.n = t.n;
+	D.look = look;
 	F.kind = 8;
 	F.w = t.w;
 	F.h = t.h;

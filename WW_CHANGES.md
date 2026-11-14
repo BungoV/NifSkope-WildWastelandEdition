@@ -1,10 +1,11 @@
-## VKFAR2 L8 slice 1 (2026-11-14): rain / snow pass for the Vulkan view, not wired in (gate red)
+## VKFAR2 L8 slices 1, 2a, 3 (2026-11-14): rain / snow pass for the Vulkan view, not wired in (gate red)
 
 Changed, not built, not checked live. Nothing in the app calls it yet, so no frame changes.
 
 - A Vulkan twin of the rain / snow draw without a geometry stage: a compute pass writes one record a particle in GL's
-  order, then each particle is four strip vertices, shaded by a frozen copy of the pixel stage. Unlit and unfogged only;
-  a lit cell, the fog or the roof map are refused.
+  order, then each particle is four strip vertices, shaded by a frozen copy of the pixel stage. Slice 1 was unlit and
+  unfogged; slice 2a below adds the fog and slice 3 the precipitation look. A lit cell and the roof map are still
+  refused.
 - Offline gate tests/vkframe/precipview.sh against GL's own program: rain near and snow far within the bar, every red
   seen, snow near FAILS (1.45 % of samples past 2 ulp, bar 0.05 %). Under review before any app hookup.
 - The particle maths of the compute pass and the corners now follow NV GL's own order of operations (read from the
@@ -19,6 +20,23 @@ Changed, not built, not checked live. Nothing in the app calls it yet, so no fra
   the bar (48 flips), snow exact, and a red that drops the air fails on both. A lit cell and the roof map are still
   refused. Existing files touched: vkpresent.h (the pass's fields and textures), vkprecip.inc (its bindings) and the
   precipview harness; no cell_precip_* file.
+- Slice 2b, the light, is not built: no offline fixture has a lit cell (sun + cascades, cell lights and their
+  cluster, cube shadows, the sky-visibility maps, the air medium) to gate it against GL. A lit cell stays on GL.
+- Slice 3, the precipitation look (GL's cell_precip_look program: the raindrop's swept disc and flicker, the snow's
+  clump threshold, albedo and normal map): three new look shaders built from the same Vulkan files with the look
+  switched on, picked per run. Gate: the drop is within the bar (16 flips); the near snow look FAILS like the open snow
+  near row (16571 flips, 1.1 %; GL's own 5 draws differ by up to 193). Unlit, the snow's normal map cannot change a
+  sample, so it is bound but not yet checked; it needs the lit fixture. A red that draws a look run with the plain
+  pipelines fails on both cases.
+- The snow near row is not only the clock: at a small clock (37 s instead of 600 s) the textured near snow still fails
+  the same way (mostly whole pixels), and near snow with no texture fails too, with fewer flips (5869, 0.39 %). GL does
+  not repeat itself exactly on any near snow case either. Cause still open.
+- Existing files touched in slice 3: vkpresent.h (the look's fields, a 192-byte record, the red), vkpresent.cpp (three
+  includes), vkprecip.inc (the look pipelines and the normal map's binding), precip_view_cs / vs / ps.hlsl (the look
+  under PC_LOOK; the pixel stage's normal map moved from t1 to t2, which the record buffer holds), vkframe_spirv.sh and
+  tests/spvsync/check_spv.py (the three look kernels), the precipview harness. The plain kernels' SPIR-V is unchanged.
+- When the app hooks this up, src/features/weather/cellprecip.cpp must hand the run to Vulkan where it draws GL's
+  points (the rule for this lane keeps that file closed: a note, not a change).
 - No existing rain / snow shader and no cellprecip.cpp line changed.
 
 ## VKFAR2 P7 (2026-11-14): depth of field, motion blur and object blur join the tone pass on Vulkan (WW_VKVIEW=1)

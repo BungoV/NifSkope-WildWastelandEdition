@@ -64,14 +64,16 @@ VKFRAME_FX = {'volsky_view_ps': 'air/volsky_view_ps', 'cloud_march_view_ps': 'cl
 	'fardots_view_ps': 'far-lod/fardots_view_ps',	# lane VKFAR1
 	'fogbloom_view_ps': 'post/fogbloom_view_ps',	# lane VKFAR2: hand-kept readable twin (P4b)
 	'cloud_composite_view_ps': 'clouds/cloud_composite_view_ps',	# lane VKFAR2: P8, frozen copy
-	'precip_view_ps': 'weather/precip_view_ps'}	# lane VKFAR2: L8 slice 1, frozen copy of cell_precip_gpu_ps
+	'precip_view_ps': 'weather/precip_view_ps',	# lane VKFAR2: L8 slice 1, frozen copy of cell_precip_gpu_ps
+	'precip_look_view_ps': 'weather/precip_look_view_ps'}	# lane VKFAR2: L8 slice 3, the look over that copy
 HLSL_SPECS += [('src/features/vkframe', k, 'vulkan1.2', 'vkframe_%s_spv' % k) for k in VKFRAME_FX]
 # lane VKFAR1: the far dots' vertex stage, the script's `fxv <name> <dir/file>` lines (fx()'s shifts, vs_6_0)
 VKFRAME_FXV = {'fardots_view_vs': 'far-lod/cell_fardots_view_vs',
-	'precip_view_vs': 'weather/precip_view_vs'}	# lane VKFAR2: L8 slice 1, rain / snow's instanced corners
+	'precip_view_vs': 'weather/precip_view_vs',	# lane VKFAR2: L8 slice 1, rain / snow's instanced corners
+	'precip_look_view_vs': 'weather/precip_look_view_vs'}	# lane VKFAR2: L8 slice 3, with the look's interpolants
 HLSL_SPECS += [('src/features/vkframe', k, 'vulkan1.2', 'vkframe_%s_spv' % k) for k in VKFRAME_FXV]
 # lane VKFAR2 L8 slice 1: rain / snow's record pass, the script's `fxs <name> <dir/file>` lines (fx()'s shifts, cs_6_0)
-VKFRAME_FXS = {'precip_view_cs': 'weather/precip_view_cs'}
+VKFRAME_FXS = {'precip_view_cs': 'weather/precip_view_cs', 'precip_look_view_cs': 'weather/precip_look_view_cs'}
 HLSL_SPECS += [('src/features/vkframe', k, 'vulkan1.2', 'vkframe_%s_spv' % k) for k in VKFRAME_FXS]
 # lane VKFAR1 round 2: the far cards' pixel stage, the script's `fxk <name> <dir/file>` lines (fx() + every declared binding kept)
 VKFRAME_FXK = {'farcards_view_ps': 'far-lod/farcards_view_ps',

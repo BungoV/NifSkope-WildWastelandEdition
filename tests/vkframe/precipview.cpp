@@ -5,7 +5,10 @@
 // Cases (precipview_prep.py): snow near with an RGBA8 atlas, rain near with no texture (the round disc), snow far (the
 // cell's 16-tap mean at the one-texel mip), unfogged; slice 2a: rain near and snow far again through the air
 // (frag_jobs.py's volsky inputs, the volume in a shared target), each checked to change GL's own picture on >= 1000
-// samples (fogOn 0 vs on). Each run starts past particle 0 (pcFirst) and is unlit.
+// samples (fogOn 0 vs on); slice 3: cell_precip_look.prog (the drop unfogged, the snow through the air), each checked to
+// differ from cell_precip_gpu.prog on >= 1000 samples. Unlit, the snow's normal-map split cannot change a sample (thin =
+// thick, no key light): its pcTexN binding is bound but not judged until a lit fixture (slice 2b). Each run starts past
+// particle 0 (pcFirst) and is unlit.
 // Frame before the particles: a sky clear and a depth slab over the left half halfway across a gap between particle
 // depths. After them a full-screen draw where stencil == 1 sets alpha 1, so the stencil the particles wrote is read too.
 // Bar (farview's, set before the first run, never widened):
@@ -14,7 +17,7 @@
 //   1 ulp outside flips <= 0.1 % of the covered halves, stencil differs on <= 0.05 % of covered samples. Else FAIL.
 // Also: pcSeedS's bits as fxPack reads them (glGetUniformiv on a uint) equal the value set, or the gate fails.
 // Reds (each must FAIL in at least one case): red 1 the cull radius 0, red 2 the strip's last two corners swapped,
-// red 4 the near fade dropped, red 8 the air dropped (A = 1, B = 0). Last line `PRECIPVIEW GATE OK` or `PRECIPVIEW GATE FAILED`.
+// red 4 the near fade dropped, red 8 the air dropped (A = 1, B = 0), red 16 a look run on the plain pipelines. Last line `PRECIPVIEW GATE OK` or `PRECIPVIEW GATE FAILED`.
 #define main fxview_main
 #include "fxview.cpp"
 #undef main
@@ -101,13 +104,15 @@ GLuint program3( const std::string & vs, const std::string & gs, const std::stri
 struct Job
 {
 	std::string name;
-	int w = 0, h = 0, first = 0, n = 0, hasTex = 0, farT = 0, fog = 0;  // (windows.h defines far)
+	int w = 0, h = 0, first = 0, n = 0, hasTex = 0, farT = 0, fog = 0, look = 0;  // (windows.h defines far)
 	unsigned seed = 0;
 	float zd = 0.5f;
 	UniMap uni;
 	std::vector<TexIn> tex;
-	int atlasAt = -1, airAt[5] = { -1, -1, -1, -1, -1 };  // into tex
+	int atlasAt = -1, airAt[5] = { -1, -1, -1, -1, -1 }, normAt = -1;  // into tex
+	bool hasN() const { return look == 2 && hasTex; }
 };
+const int kNormUnit = 8;  // slice 3: the look's pcTexN
 // slice 2a: the air's textures, in precipRun's tex[2..6] order, their GL units and fxTexOf types
 const char * kAirTex[5] = { "atApTex", "volTex", "volTile", "volAirTerr", "volAirRainMap" };
 const int kAirType[5] = { 1, 1, 0, 2, 0 };
@@ -137,7 +142,7 @@ int main( int argc, char ** argv )
 			Job j;
 			j.name = nm;
 			std::ifstream jf( dir + "/" + nm + "/job.txt" );
-			if ( !( jf >> j.w >> j.h >> j.first >> j.n >> j.hasTex >> j.seed >> j.farT >> j.zd >> j.fog ) )
+			if ( !( jf >> j.w >> j.h >> j.first >> j.n >> j.hasTex >> j.seed >> j.farT >> j.zd >> j.fog >> j.look ) )
 				return fatal( nm + "/job.txt" );
 			j.uni = readUni( dir + "/" + nm + "/uni.txt" );
 			if ( j.hasTex || j.fog ) {
@@ -145,11 +150,14 @@ int main( int argc, char ** argv )
 				for ( size_t k = 0; k < j.tex.size(); k++ ) {
 					if ( j.tex[k].name == "pcTex" )
 						j.atlasAt = int( k );
+					if ( j.tex[k].name == "pcTexN" )
+						j.normAt = int( k );
 					for ( int a = 0; a < 5; a++ )
 						if ( j.tex[k].name == kAirTex[a] && j.tex[k].type == kAirType[a] )
 							j.airAt[a] = int( k );
 				}
-				if ( j.tex.size() != size_t( ( j.hasTex ? 1 : 0 ) + ( j.fog ? 5 : 0 ) ) || ( j.hasTex && j.atlasAt < 0 ) )
+				if ( j.tex.size() != size_t( ( j.hasTex ? 1 : 0 ) + ( j.fog ? 5 : 0 ) + ( j.hasN() ? 1 : 0 ) ) || ( j.hasTex && j.atlasAt < 0 )
+					|| ( j.hasN() && j.normAt < 0 ) )
 					return fatal( nm + "/tex.txt" );
 				for ( int a = 0; a < 5 && j.fog; a++ )
 					if ( j.airAt[a] < 0 )
@@ -213,18 +221,20 @@ int main( int argc, char ** argv )
 		pReveal = program( kTriVs, kRevealFs, "reveal" );
 	const GLuint pPrecip = program3( readFile( dir + "/prog.vert.glsl" ), readFile( dir + "/prog.geom.glsl" ), readFile( dir + "/prog.frag.glsl" ),
 		"cell_precip_gpu" );
-	if ( !pUnpack || !pSlab || !pReveal || !pPrecip )
+	const GLuint pLook = program3( readFile( dir + "/prog_look.vert.glsl" ), readFile( dir + "/prog_look.geom.glsl" ),
+		readFile( dir + "/prog_look.frag.glsl" ), "cell_precip_look" );
+	if ( !pUnpack || !pSlab || !pReveal || !pPrecip || !pLook )
 		return fatal( "GL programs" );
-	{  // every sampler its own empty unit from 20 (unit 0's default mixes sampler types: GL_INVALID_OPERATION at the draw
-	   // once the air's textures are bound); bindJob then sets the read ones (farcards.cpp's rule)
-		f.useProgram( pPrecip );
+	for ( const GLuint prog : { pPrecip, pLook } ) {  // every sampler its own empty unit from 20 (unit 0's default mixes sampler
+		// types: GL_INVALID_OPERATION at the draw once the air's textures are bound); bindJob then sets the read ones (farcards.cpp's rule)
+		f.useProgram( prog );
 		GLint n = 0, next = 20;
-		f.getProgramiv( pPrecip, fActiveUnis, &n );
+		f.getProgramiv( prog, fActiveUnis, &n );
 		for ( GLint i = 0; i < n; i++ ) {
 			char nm[256] = {};
 			GLint sz = 0;
 			GLenum ty = 0;
-			f.getActiveUniform( pPrecip, GLuint( i ), 256, nullptr, &sz, &ty, nm );
+			f.getActiveUniform( prog, GLuint( i ), 256, nullptr, &sz, &ty, nm );
 			const bool smp = ( ty >= 0x8B5D && ty <= 0x8B64 ) || ( ty >= 0x8DC0 && ty <= 0x8DD8 && !( ty >= 0x8DC6 && ty <= 0x8DC8 ) )
 				|| ( ty >= 0x900C && ty <= 0x900F ) || ( ty >= 0x9108 && ty <= 0x910D );
 			if ( !smp )
@@ -232,7 +242,7 @@ int main( int argc, char ** argv )
 			std::vector<GLint> units( size_t( std::max( sz, 1 ) ) );
 			for ( GLint & u : units )
 				u = next++;
-			f.uniform1iv( f.getUniformLocation( pPrecip, nm ), GLsizei( units.size() ), units.data() );
+			f.uniform1iv( f.getUniformLocation( prog, nm ), GLsizei( units.size() ), units.data() );
 		}
 	}
 	std::string why;
@@ -254,12 +264,14 @@ int main( int argc, char ** argv )
 	f.genBuffers( 1, &ubo );
 	f.bindBuffer( fUbo, ubo );
 	f.bufferData( fUbo, std::ptrdiff_t( zeros.size() ), zeros.data(), fStatic );
-	const GLuint bi = f.getUniformBlockIndex( pPrecip, "globalUniforms" );
-	if ( bi != 0xFFFFFFFFu )
-		f.uniformBlockBinding( pPrecip, bi, 0 );
+	for ( const GLuint prog : { pPrecip, pLook } ) {
+		const GLuint bi = f.getUniformBlockIndex( prog, "globalUniforms" );
+		if ( bi != 0xFFFFFFFFu )
+			f.uniformBlockBinding( prog, bi, 0 );
+	}
 	GLuint vao = 0;
 	genVertexArrays( 1, &vao );
-	static char twinKeys[8];  // one atlas twin a case (the atlases' sizes differ)
+	static char twinKeys[8], normKeys[8];  // one atlas twin a case (the atlases' sizes differ), one normal-map twin a case
 	static char airKeys[8][5], volKeys[8];  // the air's twins a case, its volume's shared target a case
 	if ( jobs.size() > 8 )
 		return fatal( "more than 8 cases" );
@@ -316,12 +328,16 @@ int main( int argc, char ** argv )
 		const char * name;
 		int red;
 		bool seen;
-	} reds[4] = { { "cull (radius 0)", 1, false }, { "corners (the strip's last two swapped)", 2, false }, { "near fade (dropped)", 4, false },
-		{ "air (dropped)", 8, false } };
+	} reds[5] = { { "cull (radius 0)", 1, false }, { "corners (the strip's last two swapped)", 2, false }, { "near fade (dropped)", 4, false },
+		{ "air (dropped)", 8, false }, { "look (dropped: the plain pipelines)", 16, false } };
 	for ( Job & j : jobs ) {
 		if ( j.hasTex && !upload( dir + "/" + j.name, j.tex[size_t( j.atlasAt )], 0 ) )
 			return fatal( j.name + ": the atlas upload" );
 		const GLuint atlas = j.hasTex ? j.tex[size_t( j.atlasAt )].gl : 0;
+		if ( j.hasN() && !upload( dir + "/" + j.name, j.tex[size_t( j.normAt )], 0 ) )
+			return fatal( j.name + ": the normal map upload" );
+		const GLuint normMap = j.hasN() ? j.tex[size_t( j.normAt )].gl : 0;
+		const GLuint pJob = j.look ? pLook : pPrecip;
 		for ( int a = 0; a < 5 && j.fog; a++ ) {  // the volume in a shared target, as the app's
 			TexIn & t = j.tex[size_t( j.airAt[a] )];
 			GLuint into = 0;
@@ -330,18 +346,26 @@ int main( int argc, char ** argv )
 			if ( !upload( dir + "/" + j.name, t, into ) )
 				return fatal( j.name + ": upload " + t.name );
 		}
-		auto bindJob = [&]() {
-			f.useProgram( pPrecip );
-			setUnis( pPrecip, j.uni );
+		auto bindJob = [&]( GLuint prog ) {
+			f.useProgram( prog );
+			setUnis( prog, j.uni );
 			bindUnit( 0, GL_TEXTURE_2D, atlas );
-			u1i( pPrecip, "pcTex", 0 );
-			u1i( pPrecip, "pcRoof", 7 );  // nothing bound there (pcRoofOn 0)
+			u1i( prog, "pcTex", 0 );
+			u1i( prog, "pcRoof", 7 );  // nothing bound there (pcRoofOn 0)
 			for ( int a = 0; a < 5; a++ ) {  // unfogged: nothing bound (fogOn 0, atAp off)
 				const TexIn * t = j.fog ? &j.tex[size_t( j.airAt[a] )] : nullptr;
 				bindUnit( kAirUnit + a, kAirType[a] == 1 ? fT3D : kAirType[a] == 2 ? fT2DA : GLenum( GL_TEXTURE_2D ), t ? t->gl : 0 );
-				u1i( pPrecip, kAirTex[a], kAirUnit + a );
+				u1i( prog, kAirTex[a], kAirUnit + a );
 			}
-			f.useProgram( pPrecip );
+			if ( !j.fog ) {  // an unfogged case: the air fully off (a program keeps the last fogged case's uniforms)
+				static const float zero4[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+				u1i( prog, "fogOn", 0 );
+				u1i( prog, "volOn", 0 );
+				f.uniform4fv( f.getUniformLocation( prog, "atAp" ), 1, zero4 );
+			}
+			bindUnit( kNormUnit, GL_TEXTURE_2D, normMap );
+			u1i( prog, "pcTexN", kNormUnit );  // (not in the plain program: no location, nothing set)
+			f.useProgram( prog );
 			f.bindBufferBase( fUbo, 0, ubo );
 		};
 		// GL: cellprecip.cpp's state, its points
@@ -353,17 +377,19 @@ int main( int argc, char ** argv )
 		// pass 0 warms the driver (its first-use cost is not the draw's), pass 1 is timed and judged, passes 2-5 repeat it
 		// (pass 2 is the repeat line's; passes 1-5 are the GL noise reference line's five draws)
 		// (a fogged case's pass 6 draws with the air off: the air must change the picture, or the case does not test it)
-		std::vector<std::uint16_t> refOff;
+		// (a look case's last pass draws cell_precip_gpu.prog instead: the look must change the picture too)
+		std::vector<std::uint16_t> refOff, refPlain;
 		if ( const GLenum e = glGetError() )
 			return fatal( j.name + ": a GL error before the reference draw (0x" + std::to_string( unsigned( e ) ) + ")" );
-		for ( int pass = 0; pass < ( j.fog ? 7 : 6 ); pass++ ) {
+		const int passAir = j.fog ? 6 : -1, passPlain = j.look ? 6 + ( j.fog ? 1 : 0 ) : -1;
+		for ( int pass = 0; pass < 6 + ( j.fog ? 1 : 0 ) + ( j.look ? 1 : 0 ); pass++ ) {
 			before( fbRef, j.zd );
-			bindJob();
-			if ( pass == 6 ) {  // the air off: fogOn 0 alone leaves the volume and the aerial perspective on
+			bindJob( pass == passPlain ? pPrecip : pJob );
+			if ( pass == passAir ) {  // the air off: fogOn 0 alone leaves the volume and the aerial perspective on
 				static const float zero4[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
-				u1i( pPrecip, "fogOn", 0 );
-				u1i( pPrecip, "volOn", 0 );
-				f.uniform4fv( f.getUniformLocation( pPrecip, "atAp" ), 1, zero4 );
+				u1i( pJob, "fogOn", 0 );
+				u1i( pJob, "volOn", 0 );
+				f.uniform4fv( f.getUniformLocation( pJob, "atAp" ), 1, zero4 );
 			}
 			f.bindFramebuffer( fFb, fbRef );
 			glViewport( 0, 0, W, H );
@@ -386,8 +412,10 @@ int main( int argc, char ** argv )
 			bindVertexArray( 0 );
 			drawState0();
 			glDepthFunc( GL_LESS );
-			if ( pass == 6 )
+			if ( pass == passAir )
 				refOff = readSamples( refCol );
+			else if ( pass == passPlain )
+				refPlain = readSamples( refCol );
 			else if ( pass ) {
 				( pass == 1 ? refA : refAn[pass - 2] ) = readSamples( refCol );
 				reveal( fbRef );
@@ -404,10 +432,16 @@ int main( int argc, char ** argv )
 				o.flips, o.covered, o.flips >= 1000 ? "the air is seen" : "TOO FEW: the case does not test the air" );
 			ok = ok && o.flips >= 1000;
 		}
+		if ( j.look ) {  // the same: cell_precip_gpu.prog against cell_precip_look.prog on the same uniforms
+			const Verdict o = judge( bg, refPlain, refA, refB, refB );
+			std::printf( "PRECIPVIEW %s look check: GL's plain program differs from its look program %zu of %zu covered samples (%s)\n", j.name.c_str(),
+				o.flips, o.covered, o.flips >= 1000 ? "the look is seen" : "TOO FEW: the case does not test the look" );
+			ok = ok && o.flips >= 1000;
+		}
 
 		auto runVk = [&]( int red, std::vector<std::uint16_t> & a, std::vector<std::uint16_t> & b, bool checkSeed ) -> bool {
 			before( fbFrame, j.zd );
-			bindJob();
+			bindJob( pJob );
 			f.bindFramebuffer( fFb, fbFrame );
 			glViewport( 0, 0, W, H );
 			WwVkPresent::PrecipRun t;
@@ -418,21 +452,31 @@ int main( int argc, char ** argv )
 			t.first = j.first;
 			t.n = j.n;
 			// t0 pcRoof: none (pcRoofOn 0; its sampler shares unit 0's atlas in GL's state, so it is not read from there)
-			if ( !WwVkPresent::fxTexOf( &ga, pPrecip, "pcTex", 0, t.tex[1], why ) ) {
+			if ( !WwVkPresent::fxTexOf( &ga, pJob, "pcTex", 0, t.tex[1], why ) ) {
 				std::printf( "PRECIPVIEW fxTexOf refused: %s\n", why.c_str() );
 				return false;
 			}
 			t.tex[1].twin = reinterpret_cast<std::uintptr_t>( &twinKeys[jobAt] );
 			t.fogged = j.fog != 0;
 			for ( int a = 0; a < 5 && j.fog; a++ ) {
-				if ( !WwVkPresent::fxTexOf( &ga, pPrecip, kAirTex[a], kAirType[a], t.tex[2 + a], why ) ) {
+				if ( !WwVkPresent::fxTexOf( &ga, pJob, kAirTex[a], kAirType[a], t.tex[2 + a], why ) ) {
 					std::printf( "PRECIPVIEW fxTexOf refused (%s): %s\n", kAirTex[a], why.c_str() );
 					return false;
 				}
 				t.tex[2 + a].twin = reinterpret_cast<std::uintptr_t>( &airKeys[jobAt][a] );
 			}
-			WwVkPresent::fxPack( &ga, pPrecip, WwVkPresent::kT_precipcs, int( std::size( WwVkPresent::kT_precipcs ) ), t.cs );
-			WwVkPresent::fxPack( &ga, pPrecip, WwVkPresent::kT_precipps, int( std::size( WwVkPresent::kT_precipps ) ), t.ps );
+			WwVkPresent::fxPack( &ga, pJob, WwVkPresent::kT_precipcs, int( std::size( WwVkPresent::kT_precipcs ) ), t.cs );
+			WwVkPresent::fxPack( &ga, pJob, WwVkPresent::kT_precipps, int( std::size( WwVkPresent::kT_precipps ) ), t.ps );
+			if ( j.look ) {  // slice 3: cell_precip_look.prog's run (its fields, pcTexN at tex[7])
+				t.look = true;
+				WwVkPresent::fxPack( &ga, pJob, WwVkPresent::kT_preciplookcs, int( std::size( WwVkPresent::kT_preciplookcs ) ), t.cs );
+				WwVkPresent::fxPack( &ga, pJob, WwVkPresent::kT_preciplookps, int( std::size( WwVkPresent::kT_preciplookps ) ), t.ps );
+				if ( !WwVkPresent::fxTexOf( &ga, pJob, "pcTexN", 0, t.tex[7], why ) ) {
+					std::printf( "PRECIPVIEW fxTexOf refused (pcTexN): %s\n", why.c_str() );
+					return false;
+				}
+				t.tex[7].twin = reinterpret_cast<std::uintptr_t>( &normKeys[jobAt] );
+			}
 			if ( checkSeed ) {
 				std::uint32_t seed = 0;
 				std::memcpy( &seed, t.cs, 4 );  // pcSeedS at 0
@@ -486,6 +530,8 @@ int main( int argc, char ** argv )
 			}
 		}
 		for ( RedSeen & r : reds ) {
+			if ( r.red == 16 && !j.look )
+				continue;  // a plain run has no look to drop
 			std::vector<std::uint16_t> a, b;
 			if ( !runVk( r.red, a, b, false ) ) {
 				std::printf( "PRECIPVIEW %s red %s: the run failed (counts as a FAIL)\n", j.name.c_str(), r.name );
@@ -509,6 +555,8 @@ int main( int argc, char ** argv )
 		"(max %.3f; includes the harness's hand-off wait, not a frame cost)\n", st.runs, st.fails, st.failWhy.c_str(), st.pipelines, st.buildMs,
 		st.copies, st.runs ? st.cpuMs / st.runs : 0.0, st.maxMs );
 	for ( char & k : twinKeys )
+		WwVkPresent::sharedTargetDrop( reinterpret_cast<std::uintptr_t>( &k ) );
+	for ( char & k : normKeys )
 		WwVkPresent::sharedTargetDrop( reinterpret_cast<std::uintptr_t>( &k ) );
 	for ( int c = 0; c < 8; c++ ) {
 		WwVkPresent::sharedTargetDrop( reinterpret_cast<std::uintptr_t>( &volKeys[c] ) );
