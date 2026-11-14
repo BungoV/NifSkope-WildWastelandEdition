@@ -65,7 +65,8 @@ int precipAt( const WwVkPresent::FxField * f, int n, const char * name )
 
 /* the app's atlases are BC DDS (cellprecip.cpp loadDds: BC1 / BC3 / BC7, sRGB kept, every level, trilinear clamp), which
  * sharedTarget cannot twin (a colour attachment): the far cards' farTwin (vkfarcards.inc), every level copied once a GL
- * name, as fcSheet (the DDS never changes once loaded) */
+ * name, as fcSheet (the DDS never changes once loaded: loadDds fills a fresh name once per path and nothing re-uploads or
+ * deletes it; a reload in place there must also drop this name's atlasCopied entry) */
 bool precipAtlas( const WwVkPresent::FxTex & t, VkImageView & view, FxNames & names, int & copies, std::string & why )
 {
 	Gl & g = gl();

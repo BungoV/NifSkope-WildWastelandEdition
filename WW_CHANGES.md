@@ -133,6 +133,21 @@ Changed, not built, not checked live. Nothing in the app calls it yet, so no fra
   (335 flips of 151255, 0.22 %; it was BOUND with no atlas). Pinning the atlas to its top level does not clear it
   (232 flips), and GL differs from its own repeat draw there (36 flips), so it sits with the near snow's open
   pixel-stage rows. Lit cells stay on GL.
+- Known open red: textured near rain (rain_near_disc 335 flips, rain_near_fog 342) still fails, and the hookup stays as
+  it is behind WW_VKVIEW=1 for the flight to judge. Localised (harness diagnostics only, reverted; nothing committed
+  from them): with blending off, GL and Vulkan write bit-identical colours, so the pixel stage itself matches. Every
+  flipped pixel is one where a streak covers only part of the pixel: Vulkan keeps its four samples apart, while GL
+  stores one value in all four, equal to the mean of Vulkan's four (within 2 half-float steps): rain_near_disc 85 of 85,
+  rain_near_fog 86 of 86, snow_near_tex 4207 of 4345, snow_near_disc 1609 of 1617. This is NOT what GL does in
+  general: in the other partly covered pixels GL keeps the samples apart and matches Vulkan sample for sample
+  (rain_near_disc 21702 of them; far snow all 6149). What makes GL merge the samples in these few pixels is not found
+  yet (not the slab half: both halves show it). GL's state at the draw is ordinary 4x multisampling (no
+  alpha-to-coverage, no sample shading, no sample mask); by reading glview.cpp the app draws with the same state, but
+  that was not run. The cause is open, so lit (slice 2b) waits.
+- Same-name atlas reload: cannot happen today. cellprecip.cpp loads each atlas once per texture path into its
+  lifelong cache and never deletes or re-uploads it (a failed load deletes its name before anyone sees it), so a GL
+  name never gets new pixels and the copy kept per name and Vulkan image stays right. A change there that reloads an
+  atlas in place must also make vkprecip.inc copy it again.
 - No existing rain / snow shader and no cellprecip.cpp line changed.
 
 ## VKFAR2 P7 (2026-11-14): depth of field, motion blur and object blur join the tone pass on Vulkan (WW_VKVIEW=1)
