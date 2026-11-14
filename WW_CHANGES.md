@@ -58,6 +58,19 @@ Changed, not built, not checked live. Nothing in the app calls it yet, so no fra
   (335 flips of 151255, 0.22 %; it was BOUND with no atlas). Pinning the atlas to its top level does not clear it
   (232 flips), and GL differs from its own repeat draw there (36 flips), so it sits with the near snow's open
   pixel-stage rows. Lit cells stay on GL.
+- Known open red: textured near rain (rain_near_disc 335 flips, rain_near_fog 342) still fails, and the hookup stays as
+  it is behind WW_VKVIEW=1 for the flight to judge. Localised (harness diagnostics only, reverted; nothing committed
+  from them): with blending off, GL and Vulkan write bit-identical colours, so the pixel stage itself matches. The
+  difference is where a pixel is only partly covered by a streak's edge. Vulkan keeps the four samples apart (some
+  got one more streak than others), while GL stores the same value in all four, equal to the mean of Vulkan's four.
+  This holds for every flipped pixel (85 of 85 near rain, 86 of 86 fogged) and for nearly all of the near snow
+  (snow_near_tex 4211 of 4348, snow_near_disc 1604 of 1612). GL's state at the draw is ordinary 4x multisampling
+  (no alpha-to-coverage, no sample shading, no sample mask), the same as the app's own draw. No shader change can make
+  the twin do this, so the open reds are waiting on a ruling. Lit (slice 2b) waits for that too.
+- Same-name atlas reload: cannot happen today. cellprecip.cpp loads each atlas once per texture path into its
+  lifelong cache and never deletes or re-uploads it (a failed load deletes its name before anyone sees it), so a GL
+  name never gets new pixels and the copy kept per name and Vulkan image stays right. A change there that reloads an
+  atlas in place must also make vkprecip.inc copy it again.
 - No existing rain / snow shader and no cellprecip.cpp line changed.
 
 ## VKFAR2 P7 (2026-11-14): depth of field, motion blur and object blur join the tone pass on Vulkan (WW_VKVIEW=1)
