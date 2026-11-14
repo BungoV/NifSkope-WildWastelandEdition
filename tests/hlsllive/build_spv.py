@@ -10,6 +10,26 @@ PROFILE = {'vs': 'vs_6_0', 'ps': 'ps_6_0', 'gs': 'gs_6_0', 'hs': 'hs_6_0', 'ds':
 BLOCKS = {'globalUniforms': 0, 'skinningUniforms': 1, 'wwShadowFrame': 2,
           'wwDraws': 12}   # HLSLFIX3: the bindless row buffer (ww_bindless.glsl: std430, binding 12; an SSBO: BufferBlock)
 GL_BINDLESS = 'WW_GL_BINDLESS'   # a source naming it takes its GL bindless route (SPV_NV_bindless_texture; ww_bindless_gl.hlsli)
+# VKWATER3: entries whose frozen spirv-cross main does `gl_FragCoord.w = 1.0 / gl_FragCoord.w` (D3D's SV_Position.w is w) and
+# then reads 1/gl_FragCoord.w. DXC's default SV_Position.w on SPIR-V is already 1/w, so w was inverted twice (fragW = 1/w);
+# -fvk-use-dx-position-w gives D3D's w. A pixel file is listed when it is, or #includes (any depth), one of these.
+# Red: WW_HLSL_POSW_RED=1 drops the flag (A4 with the a4fixtures.txt water rows must FAIL).
+# FO4MATCH1: the soft fades' fragW of the effect shader (fo4_effectcell / decal / decalcsm wrappers), the cell effect, the
+# particles (particles_cell) and the TAA object velocities, each with its a4fixtures.txt row.
+POSITION_W = ('fo4_water_ps.hlsl', 'fo4_effectshader_ps.hlsl', 'fo4_effectcellfx_ps.hlsl', 'particles_ps.hlsl', 'taa_objvel_ps.hlsl')
+
+
+def reaches(path, names, seen=None):
+    if os.path.basename(path) in names:
+        return True
+    seen = seen if seen is not None else set()
+    for inc in re.findall(r'^\s*#\s*include\s+"([^"]+)"', open(path, encoding='utf-8', errors='replace').read(), re.M):
+        p = os.path.normpath(os.path.join(os.path.dirname(path), inc))
+        if p not in seen and os.path.exists(p):
+            seen.add(p)
+            if reaches(p, names, seen):
+                return True
+    return False
 
 
 def shifts_of(path, src):
@@ -90,6 +110,8 @@ def compile_raw(hlsl, raw, defines=()):
            '-E', 'main', '-I', os.path.dirname(f), '-Fo', raw, f]
     for d in list(defines) + extra:
         cmd += ['-D', d]
+    if st == 'ps' and reaches(f, POSITION_W) and os.environ.get('WW_HLSL_POSW_RED') != '1':
+        cmd += ['-fvk-use-dx-position-w']
     if GL_BINDLESS in src:
         # -Vd: DXC's validator wants OpSamplerImageAddressingModeNV, which HLSL cannot write; spvgl.patch adds it
         cmd += ['-D', GL_BINDLESS, '-Vd']

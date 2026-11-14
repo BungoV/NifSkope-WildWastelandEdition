@@ -1,4 +1,5 @@
-// HLSL port of features/water/fo4_waterdisp.tesc (tessellation control shader), written by hand (HLSLBULK1 round 2):
+// HLSL source of features/water/fo4_waterdisp.tesc (tessellation control shader), written by hand (HLSLBULK1 round 2;
+// readable header and the GLSL's comments: lane FO4MATCH1). One file, no variants (variants.txt: the stage has no defines).
 // SPIRV-Cross cannot emit tessellation HLSL, so this is a hull shader. GLSL `layout(vertices = 3) out` is
 // [outputcontrolpoints(3)], gl_TessLevelOuter / gl_TessLevelInner are the patch constant function's
 // SV_TessFactor / SV_InsideTessFactor, and the per-vertex copy block (gl_InvocationID) is the control-point function.
@@ -6,8 +7,15 @@
 // An edge's level is a function of the edge alone, symmetric in its two ends, so two triangles that share an edge
 // split it alike: no cracks. Past the fade every level is 1. Fusion Shaders (F4FS) feeds the VS outputs of
 // fo4_default_vs.hlsl (the semantics below are its) and the loose uniforms. Not wired: nothing loads this file.
+// variants: #if none (the loader's defines; res/shaders/hlsl/variants.txt lists the sets built)
 // profile: hs_6_0
 #include "WaterBindingsVk.hlsli"
+#define WW_HLSL_SRC 1	// the shared .hlsli files give their readable half (none included here)
+
+// lane WATERLOOK1 step 2 (src/gl/cellocean.h): the water's triangles are split near the camera so the wave heights can
+// move its vertices (fo4_waterdisp.tese). An edge's level is a function of the edge alone, symmetric in its two ends
+// (a + b, a - b up to sign), so the two triangles that share an edge split it alike: no cracks. Past the fade (no
+// displacement) every level is 1, the triangle as fo4_default.vert drew it.
 cbuffer globalUniforms : register(b0, space0)
 {
     row_major float3x3 viewMatrix : packoffset(c0);
@@ -84,8 +92,10 @@ float wwDispLevel(float3 a, float3 b)
     }
     float pxu = ((projectionMatrix[1][1] * 0.5f) * float(viewportDimensions.w)) / max(dm, 1.0f);	// pixels a unit there
     float lv = max((L * pxu) / waterOceanDisp.z, L * 0.00390625f);	// and never coarser than 256 u where it moves
-    /* lane PERFFIX3 (PERFRES1101 B water OPT 2): no vertex step finer than the heights' own filter (64 u): an edge's
-     * own length bounds it, so two triangles sharing the edge still split it alike. */
+    /* lane PERFFIX3 (PERFRES1101 B water OPT 2): no vertex step finer than the heights' own filter (fo4_waterdisp.tese:
+     * step >= 4096 / waterOceanDisp.w = 64 u): the pre-split 1024 u quads (src/cellview.cpp) split to 16 u and sampled
+     * a field already smoothed over 64 u four times over, ~1 M triangles near the camera (+1.4 ms at 1080p 4x MSAA,
+     * tests/watertess). An edge's own length bounds it, so two triangles sharing the edge still split it alike. */
     float cap = ((waterOceanRed & 8192) != 0) ? waterOceanDisp.w : clamp((L * waterOceanDisp.w) * 0.000244140625f, 1.0f, waterOceanDisp.w);
     return clamp(lv, 1.0f, cap);
 }

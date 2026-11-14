@@ -2155,6 +2155,14 @@ float3 cellAmbient( float3 N, float3 P )
 }
 #endif
 
+/* The game's ambient specular (its sun pass): (1 - saturate(NdotV))^(3 - gloss) x 0.25 x the ambient at the mirror
+ * direction R = 2 NdotV N - V (NdotV not clamped there). The caller multiplies the spec mask and colour. */
+float3 cellEnvSpecGame( float3 N, float3 V, float3 P, float gloss )
+{
+	float NdotV = dot( N, V );
+	return pow( 1.0 - clamp( NdotV, 0.0, 1.0 ), 3.0 - gloss ) * 0.25 * cellAmbient( 2.0 * NdotV * N - V, P );
+}
+
 /* the interior ambient beside our GI, as WW_CELL_GI_AMB asks (gi = the GI's irradiance / pi): keep (0), replace (1,
  * default: ambient x (1 - the grid's valid share)), off (2), max (3), asgi (4, debug: ambient := GI).
  * Without the GI every rule but off keeps the ambient. */
@@ -2304,6 +2312,7 @@ float3 cellLit( float3 color, float3 albedo, float3 normalView, float3 posView, 
 			amb = cellAmbGi( amb, gi, P, N );
 		E += amb;
 		Ed += amb;
+		spec += cellEnvSpecGame( N, Vw, P, gloss );	// the game's ambient specular, from the same DALC
 #ifdef WW_DV
 		wwDvAmb = alb * amb;
 #endif
@@ -2314,7 +2323,11 @@ float3 cellLit( float3 color, float3 albedo, float3 normalView, float3 posView, 
 		float3 dir = cellDirColor * max( nl, 0.0 );
 		E += dir;
 		Ed += dir * ( cellOren( N, Ld, Vw, nl, gloss ) + cellRim( N, Ld, Vw, gloss ) ) + cellDirColor * cellBackK;
+		spec += dir * cellSpecGame( N, Ld, Vw, gloss );	// the game's sun shader lights it, specular included
 	}
+#ifdef WW_DV
+	wwDvSpec = spec * specMask * specCol;
+#endif
 	// the game multiplies its cube term by the diffuse light (Ed); debug cubeold takes the Lambert sum
 #ifdef WW_DV
 	wwDvRefl = cubeK * ( ( cellRed & 512 ) != 0 ? E : Ed ) + cellReflAdd;
