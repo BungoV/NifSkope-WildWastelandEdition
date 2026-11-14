@@ -14,7 +14,9 @@ GL_BINDLESS = 'WW_GL_BINDLESS'   # a source naming it takes its GL bindless rout
 # then reads 1/gl_FragCoord.w. DXC's default SV_Position.w on SPIR-V is already 1/w, so w was inverted twice (fragW = 1/w);
 # -fvk-use-dx-position-w gives D3D's w. A pixel file is listed when it is, or #includes (any depth), one of these.
 # Red: WW_HLSL_POSW_RED=1 drops the flag (A4 with the a4fixtures.txt water rows must FAIL).
-POSITION_W = ('fo4_water_ps.hlsl',)
+# FO4MATCH1: the soft fades' fragW of the effect shader (fo4_effectcell / decal / decalcsm wrappers), the cell effect, the
+# particles (particles_cell) and the TAA object velocities, each with its a4fixtures.txt row.
+POSITION_W = ('fo4_water_ps.hlsl', 'fo4_effectshader_ps.hlsl', 'fo4_effectcellfx_ps.hlsl', 'particles_ps.hlsl', 'taa_objvel_ps.hlsl')
 
 
 def reaches(path, names, seen=None):

@@ -137,6 +137,7 @@ class Prog:
         except Exception:
             self.ssbos = []
         self.members = {}
+        self.mnames = {}
         for bname, bi, _sz, _bd in self.blocks:
             cnt = GLint()
             g('glGetActiveUniformBlockiv', None, GLuint, GLuint, GLenum, ctypes.POINTER(GLint))(p, bi, 0x8A42, ctypes.byref(cnt))
@@ -148,6 +149,11 @@ class Prog:
                 g('glGetActiveUniformsiv', None, GLuint, GLsizei, c_p, GLenum, c_p)(p, cnt.value, ctypes.cast(idx, c_p), tok, ctypes.cast(arr, c_p))
                 info[key] = list(arr)
             self.members[bname] = [tuple(info[k][j] for k in ('type', 'size', 'off', 'astride', 'mstride', 'rowmajor')) for j in range(cnt.value)]
+            # FO4MATCH1: member names, so A4_FORCE reaches a block member too (globalUniforms.projectionMatrix)
+            for j in range(cnt.value):
+                nm = cstr_buf()
+                g('glGetActiveUniformName', None, GLuint, GLuint, GLsizei, c_p, c_c)(p, idx[j], 512, None, nm)
+                self.mnames.setdefault(bname, []).append((nm.value.decode().rsplit('.', 1)[-1],) + self.members[bname][j])
 
     def has(self, tok):
         v = GLint(); g('glGetProgramiv', None, GLuint, GLenum, ctypes.POINTER(GLint))(self.p, tok, ctypes.byref(v)); return v.value
@@ -346,11 +352,16 @@ class Rig:
         self.tex = {}
         self.rows = {}
 
-    def ubo_for(self, name, size, seed, members=()):
+    def ubo_for(self, name, size, seed, members=(), named=()):
         # HLSLFIX2: the member layout is in the key; without it the first program to use a block name decided the int lanes for
         # every later one, so a verdict hung on render order (cell_volair AIRZONE+BOUNCE rows: EXACT serial, FAIL sharded)
         members = tuple(sorted(members))
-        k = (name, size, seed, MODE, members)
+        # FO4MATCH1: an a4fixtures.txt row or A4_FORCE pins a block member by name too, in both runs (globalUniforms'
+        # projectionMatrix: the soft fades read 1 / gl_FragCoord.w against it). The values are in the key.
+        force = dict(kv.split('=') for kv in FIXTURE.split(',') if kv)
+        force.update(kv.split('=') for kv in os.environ.get('A4_FORCE', '').split(',') if kv)
+        named = tuple(sorted(m for m in named if m[0].replace('[0]', '') in force))
+        k = (name, size, seed, MODE, members, named, tuple(force[m[0].replace('[0]', '')] for m in named))
         if k not in self.ubo:
             b = GLuint(); g('glGenBuffers', None, GLsizei, ctypes.POINTER(GLuint))(1, ctypes.byref(b))
             a = (rng_for(name, seed).random(max(size, 16) // 4 + 4) * 0.8 + 0.1).astype(np.float32)
@@ -371,6 +382,17 @@ class Rig:
                         for col in range(c):
                             for row in range(c):
                                 a[base + col * (mst // 4) + row] = (1.0 if col == row else 0.0) + (a[base + col * (mst // 4) + row] - 0.5) * 0.05
+            for mn, ty, sz, off, ast, mst, rowm in named:
+                v = force[mn.replace('[0]', '')].split(':')
+                base = off // 4
+                if ty in MAT_T and mst > 0 and len(v) == MAT_T[ty][0] * MAT_T[ty][1] and not rowm:   # column-major, ':'-joined
+                    c, rr = MAT_T[ty]
+                    for col in range(c):
+                        a[base + col * (mst // 4):base + col * (mst // 4) + rr] = [float(x) for x in v[col * rr:(col + 1) * rr]]
+                elif ty in FLOAT_T and len(v) == FLOAT_T[ty]:
+                    a[base:base + len(v)] = [float(x) for x in v]
+                elif (ty in INT_T or ty in BOOL_T) and len(v) == (INT_T.get(ty) or BOOL_T[ty]):
+                    iv[base:base + len(v)] = [int(x) for x in v]
             g('glBindBuffer', None, GLenum, GLuint)(0x8A11, b.value)
             g('glBufferData', None, GLenum, ctypes.c_ssize_t, c_p, GLenum)(0x8A11, a.nbytes, a.ctypes.data, 0x88E4)
             self.ubo[k] = b.value
@@ -494,7 +516,7 @@ class Rig:
         bu = g('glBindBufferBase', None, GLenum, GLuint, GLuint)
         for name, idx, size, bind in pr.blocks:
             ref_sz = next((s for n2, _i, s, _b in ref.blocks if n2 == name), size)
-            bu(0x8A11, bind, self.ubo_for(name, ref_sz, seed, ref.members.get(name, ())))
+            bu(0x8A11, bind, self.ubo_for(name, ref_sz, seed, ref.members.get(name, ()), ref.mnames.get(name, ())))
         for name, bind, size in ref.ssbos:   # HLSLFIX3: at the GLSL program's binding, so a SPIR-V one elsewhere reads nothing
             if bind == 12:
                 bu(0x90D2, bind, self.rows_for(seed))
