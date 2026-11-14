@@ -98,8 +98,15 @@ fxk farcards_view_ps far-lod/farcards_view_ps
 # lane VKWATER3: the shaded water (fo4_waterlook, the app's FOGLEAK + FRAME_UBO variant) through fxk(); its vertex stage
 # (fo4_default) on its own shifts: its b0 / b1 / b31 / t0 would land on the pixel stage's under fx()'s (blocks at 256 + n:
 # b31 at 40 + 31 = 71 was the pixel stage's t7). Both are frozen spirv-cross twins under the view's name (HLSLSRC2's rule):
-# vkwater_tables.h holds their layout
-fxk water_view_ps water/water_view_ps
+# vkwater_tables.h holds their layout. fxkw() = fxk() + -fvk-use-dx-position-w: the twins carry spirv-cross's D3D fixup
+# (gl_FragCoord.w = 1.0 / gl_FragCoord.w), so SV_Position.w must hold D3D's clip w, not Vulkan's 1 / w (without the flag
+# the fixup inverts twice and the scene-depth path's fragW = 1 / gl_FragCoord.w misplaces every scene point)
+fxkw() {
+	"$DXC" -spirv -fspv-target-env=vulkan1.2 -T ps_6_0 -E main -fvk-b-shift 0 0 -fvk-t-shift 64 0 -fvk-s-shift 128 0 -fvk-u-shift 192 0 -fspv-preserve-bindings -fvk-use-dx-position-w -Fo "$1.spv" "$(cygpath -m "$ROOT/res/shaders/hlsl/$2.hlsl" 2>/dev/null || echo "$ROOT/res/shaders/hlsl/$2.hlsl")"
+	python -I "$ROOT/tools/spv_header.py" "$1.spv" "vkframe_$1_spv" "$1.spv.h" < /dev/null
+	rm -f "$1.spv"
+}
+fxkw water_view_ps water/water_view_ps
 fxw() {
 	"$DXC" -spirv -fspv-target-env=vulkan1.2 -T vs_6_0 -E main -fvk-b-shift 256 0 -fvk-t-shift 110 0 -fvk-s-shift 180 0 -fvk-u-shift 220 0 -fspv-preserve-bindings -Fo "$1.spv" "$(cygpath -m "$ROOT/res/shaders/hlsl/$2.hlsl" 2>/dev/null || echo "$ROOT/res/shaders/hlsl/$2.hlsl")"
 	python -I "$ROOT/tools/spv_header.py" "$1.spv" "vkframe_$1_spv" "$1.spv.h" < /dev/null
@@ -123,9 +130,9 @@ fxd() {
 	rm -f "$1.spv"
 }
 fxd water_view_ds water/fo4_waterdisp_ds
-fxk water_view_d_ps water/water_view_d_ps
+fxkw water_view_d_ps water/water_view_d_ps
 # item 4 piece 2: the Medium / ray-pass look (fo4_waterlookm), the probes' looks (fo4_waterlookp, tessellated _dp)
-fxk water_view_m_ps water/water_view_m_ps
-fxk water_view_p_ps water/water_view_p_ps
-fxk water_view_dp_ps water/water_view_dp_ps
+fxkw water_view_m_ps water/water_view_m_ps
+fxkw water_view_p_ps water/water_view_p_ps
+fxkw water_view_dp_ps water/water_view_dp_ps
 ls -la csm_view_vs.spv.h obj_depth_vs.spv.h sky_view_ps.spv.h bloom_down.spv.h bloom_hold.spv.h bloom_up.spv.h bloom_src.spv.h bloom_comb.spv.h bloom_back.spv.h tonemap.spv.h measure_q.spv.h tone_view_vs.spv.h tone_view_ps.spv.h taa_view_mv_cs.spv.h taa_view_resolve_cs.spv.h taa_view_rcas_ps.spv.h
