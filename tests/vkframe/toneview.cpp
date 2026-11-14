@@ -1487,6 +1487,253 @@ int main( int argc, char ** argv )
 	std::printf( "TONEVIEW stat: %d runs on Vulkan, %d failed (%s), drawing thread %.3f ms a run (max %.3f), %d pipelines built in "
 		"%.1f ms, %.1f MB; merge arm: %d runs, %d deferred, %d flushed\n", st0.runs, st0.fails, st0.failWhy.c_str(),
 		st0.runs ? st0.cpuMs / st0.runs : 0.0, st0.maxMs, st0.pipelines, st0.buildMs, st0.mb, st.runs, st.deferred, st.flushed );
+	/* lane VKFAR2 P9: the lens-flare sprites recorded in the deferred tone pass after its modes (vkflare.inc, toneFlareQueue)
+	 * against GL's cell_lensflare program drawn over the view after the tone pass crossed alone (celllensflare.cpp's GL route),
+	 * per sample. The maps are the cache's BC1 twins (objTexMake) with full mips, one anisotropic; the opaque depth a 2D
+	 * D24S8 texture as Scene::grabEffectDepth keeps it (left third clear, middle random, right third a wall at 30 units).
+	 * Reds: flareRedTest 1 (the sprites under the tone modes) and 2 (the depth ignored) must FAIL. */
+	{
+		using CompSub = void( WINAPI * )( GLuint, GLint, GLint, GLint, GLsizei, GLsizei, GLenum, GLsizei, const void * );
+		using UniMat = void( WINAPI * )( GLint, GLsizei, GLboolean, const GLfloat * );
+		const auto compSub = reinterpret_cast<CompSub>( glProc( "glCompressedTextureSubImage2D" ) );
+		const auto uniMat = reinterpret_cast<UniMat>( glProc( "glUniformMatrix4fv" ) );
+		const GLuint pFl = program( readFile( dir + "/cell_lensflare.vert.glsl" ), readFile( dir + "/cell_lensflare.frag.glsl" ),
+			"cell_lensflare" );
+		constexpr GLenum kBc1 = 0x83F0;
+		struct FlMap
+		{
+			int w, h, levels;
+			bool aniso;
+			unsigned tex;
+		};
+		/* the 4th map: 8x anisotropy, measured, not judged: NV's anisotropic footprint differs GL vs Vulkan (skybody.cpp's
+		 * kJudgedAniso finding; first run here: 4674 bytes, max 36 on 12 sprites, and 1x matched EXACT) */
+		FlMap maps[4] = { { 64, 64, 7, false, 0 }, { 128, 32, 8, false, 0 }, { 32, 32, 6, false, 0 }, { 128, 32, 8, true, 0 } };
+		std::mt19937 fr( 71 );
+		bool made = compSub && uniMat && pFl;
+		for ( FlMap & m : maps ) {
+			if ( !made || !( made = WwVkPresent::objTexMake( kBc1, m.w, m.h, m.levels, m.tex, why ) ) )
+				break;
+			for ( int l = 0; l < m.levels; l++ ) {	// random blocks per level, as a DDS's own mips
+				const int w = std::max( m.w >> l, 1 ), h = std::max( m.h >> l, 1 );
+				std::vector<std::uint8_t> blocks( size_t( ( w + 3 ) / 4 ) * size_t( ( h + 3 ) / 4 ) * 8 );
+				for ( auto & b : blocks )
+					b = std::uint8_t( fr() );
+				compSub( m.tex, l, 0, 0, w, h, kBc1, GLsizei( blocks.size() ), blocks.data() );
+			}
+			glBindTexture( GL_TEXTURE_2D, m.tex );
+			glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR );
+			glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR );
+			glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, kClamp );
+			glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, kClamp );
+			if ( m.aniso )
+				glTexParameterf( GL_TEXTURE_2D, 0x84FE, 8.0f );	// GL_TEXTURE_MAX_ANISOTROPY
+			glBindTexture( GL_TEXTURE_2D, 0 );
+		}
+		// the projection (near 1, far 10000) and the opaque depth: view depth wv stored as GL's window depth
+		const float pA = -10001.0f / 9999.0f, pB = -20000.0f / 9999.0f;
+		const float proj[16] = { 1.2f, 0, 0, 0, 0, 2.0f, 0, 0, 0, 0, pA, -1.0f, 0, 0, pB, 0 };
+		std::vector<std::uint32_t> dsv( size_t( W ) * H );
+		for ( int y = 0; y < H; y++ )
+			for ( int x = 0; x < W; x++ ) {
+				float wv = -1.0f;	// clear
+				if ( x >= 2 * W / 3 )
+					wv = 30.0f;
+				else if ( x >= W / 3 && fr() % 10 >= 3 )
+					wv = 10.0f + float( fr() % 4000 );
+				std::uint32_t d24 = 0xFFFFFFu;
+				if ( wv > 0.0f )
+					d24 = std::uint32_t( std::clamp( ( pB / wv - pA ) * 0.5f + 0.5f, 0.0f, 1.0f ) * 16777215.0f );
+				dsv[size_t( y ) * W + x] = ( d24 << 8 ) | ( fr() & 0xFF );
+			}
+		GLuint dTex = 0;
+		glGenTextures( 1, &dTex );
+		glBindTexture( GL_TEXTURE_2D, dTex );
+		glTexImage2D( GL_TEXTURE_2D, 0, GLint( kD24s8 ), W, H, 0, 0x84F9, 0x84FA, dsv.data() );	// DEPTH_STENCIL, UNSIGNED_INT_24_8
+		glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST );
+		glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST );
+		glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, kClamp );
+		glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, kClamp );
+		glTexParameteri( GL_TEXTURE_2D, 0x884C, 0 );		// GL_TEXTURE_COMPARE_MODE none
+		glTexParameteri( GL_TEXTURE_2D, 0x90EA, 0x1902 );	// GL_DEPTH_STENCIL_TEXTURE_MODE depth
+		glBindTexture( GL_TEXTURE_2D, 0 );
+		made = made && glGetError() == GL_NO_ERROR;
+
+		struct FlCase
+		{
+			const char * name;
+			int n;
+			bool depth;	// grabbed: the opaque depth kept
+			int red;	// flareRed's bit 0 asked with the depth kept
+			bool sun;	// every 4th light at view depth 1e30 (the sun: seen only where the depth is clear)
+			bool mixed;	// the maps alternate per sprite (one draw each) instead of three runs
+			int only;	// 1..3: every sprite on that map (one set, one draw)
+		};
+		const FlCase cases[9] = { { "occluded runs", 40, true, 0, false, false, 0 }, { "occluded mixed sun", 60, true, 0, true, true, 0 },
+			{ "no depth kept", 24, false, 0, false, true, 0 }, { "red bit", 24, true, 1, true, false, 0 },
+			{ "one sprite", 1, false, 0, false, false, 0 }, { "map 64^2 only", 12, false, 0, false, false, 1 },
+			{ "map 128x32 only", 12, false, 0, false, false, 2 }, { "map 32^2 only", 12, false, 0, false, false, 3 },
+			{ "map 128x32 at 8x anisotropy", 12, false, 0, false, false, 4 } };
+		static const float kCorner[4][2] = { { -1, -1 }, { 1, -1 }, { 1, 1 }, { -1, 1 } };
+		static const std::uint16_t kIdx[6] = { 0, 1, 2, 0, 2, 3 };
+		// celllensflare.cpp spriteOf's rows: per corner pos (centre, rotated offset), col (rgb, shrinks), uv, lit (ndc, view depth)
+		auto rowsOf = [&]( const FlCase & c, std::vector<float> & rows, std::vector<unsigned> & texs ) {
+			std::mt19937 sr( 101u + unsigned( c.n ) );
+			auto u = [&]( float a, float b ) { return a + ( b - a ) * float( sr() & 0xFFFF ) / 65535.0f; };
+			rows.clear();
+			texs.clear();
+			const float aspect = float( H ) / float( W );
+			for ( int s = 0; s < c.n; s++ ) {
+				const float lx = u( -0.95f, 0.95f ), ly = u( -0.95f, 0.95f );
+				const float lz = c.sun && s % 4 == 0 ? 1e30f : u( 5.0f, 3000.0f );
+				const float m = u( -1.0f, 1.0f ), wd = u( 0.02f, 0.4f ), ht = u( 0.02f, 0.4f ), a = u( -3.1f, 3.1f );
+				const float ca = std::cos( a ), sa = std::sin( a );
+				const float col[3] = { u( 0.05f, 0.6f ), u( 0.05f, 0.6f ), u( 0.05f, 0.6f ) };
+				const float shrinks = s % 3 == 0 ? 1.0f : 0.0f;
+				for ( int v = 0; v < 4; v++ ) {
+					const float x = kCorner[v][0] * wd, y = kCorner[v][1] * ht;
+					const float r[16] = { lx * m, ly * m, ( x * ca - y * sa ) * aspect, x * sa + y * ca, col[0], col[1], col[2], shrinks,
+						kCorner[v][0] * 0.5f + 0.5f, 0.5f - kCorner[v][1] * 0.5f, 0, 0, lx, ly, lz, 0 };
+					rows.insert( rows.end(), r, r + 16 );
+				}
+				texs.push_back( maps[c.only ? c.only - 1 : c.mixed ? s % 3 : s * 3 / c.n].tex );
+			}
+		};
+		// celllensflare.cpp's GL draw: no depth test, additive, the depth on unit 1, one draw per sprite
+		auto glFlare = [&]( const FlCase & c, const std::vector<float> & rows, const std::vector<unsigned> & texs, GLuint vfb ) {
+			f.bindFramebuffer( kFb, vfb );
+			glViewport( 0, 0, W, H );
+			glDisable( GL_SCISSOR_TEST );
+			glDisable( GL_DEPTH_TEST );
+			glDepthMask( GL_FALSE );
+			glDisable( GL_CULL_FACE );
+			glDisable( GL_STENCIL_TEST );
+			glEnable( GL_BLEND );
+			glBlendFunc( GL_ONE, GL_ONE );
+			f.useProgram( pFl );
+			bindUnit( 1, GL_TEXTURE_2D, c.depth ? dTex : 0 );
+			u1i( pFl, "flareDepth", 1 );
+			uniMat( f.getUniformLocation( pFl, "flareProj" ), 1, GL_FALSE, proj );
+			u2f( pFl, "flareViewport", float( W ), float( H ) );
+			u1f( pFl, "flareSlack", 10.0f );
+			u1i( pFl, "flareRed", c.depth ? c.red : 1 );
+			u1i( pFl, "flareTex", 0 );
+			f.activeTexture( kTex0 );
+			for ( GLuint a = 0; a < 4; a++ )
+				f.enableVertexAttribArray( a );
+			for ( size_t s = 0; s < texs.size(); s++ ) {
+				glBindTexture( GL_TEXTURE_2D, texs[s] );
+				for ( GLuint a = 0; a < 4; a++ )
+					f.vertexAttribPointer( a, 4, GL_FLOAT, GL_FALSE, 64, rows.data() + s * 64 + a * 4 );
+				glDrawElements( GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, kIdx );
+			}
+			for ( GLuint a = 0; a < 4; a++ )
+				f.disableVertexAttribArray( a );
+			glBindTexture( GL_TEXTURE_2D, 0 );
+			bindUnit( 1, GL_TEXTURE_2D, 0 );
+			f.activeTexture( kTex0 );
+			glDisable( GL_BLEND );
+			glDepthMask( GL_TRUE );
+		};
+		// one frame: the tone pass deferred; the sprites queued into it (Vulkan) or drawn by GL after it crossed alone; c null:
+		// no sprites (the floor's frame)
+		auto route = [&]( const FlCase * c, bool onVk, int red, std::vector<std::uint8_t> & out ) -> bool {
+			if ( !WwVkPresent::viewBegin( W, H, S, glProc, why ) ) {
+				std::printf( "TONEVIEW FLARE: the view: %s\n", why.c_str() );
+				return false;
+			}
+			const GLuint vfb = WwVkPresent::viewFbo();
+			Tone & T = tone();
+			T.mergeRed = false;
+			T.mergeHint = true;
+			T.backoff = 0;
+			const WwVkPresent::ToneRun tr = toneOf( jobs[0], jobs[0].splitSky, vfb );
+			if ( !WwVkPresent::toneRun( tr, why ) || !T.deferred ) {
+				std::printf( "TONEVIEW FLARE: the tone pass was not deferred (%s)\n", why.c_str() );
+				return false;
+			}
+			std::vector<float> rows;
+			std::vector<unsigned> texs;
+			if ( c )
+				rowsOf( *c, rows, texs );
+			if ( c && onVk ) {
+				WwVkPresent::FlareRun fl;
+				fl.n = c->n;
+				fl.rows = rows.data();
+				fl.tex = texs.data();
+				std::memcpy( fl.proj, proj, sizeof( proj ) );
+				fl.slack = 10.0f;
+				fl.red = c->depth ? c->red : 1;
+				fl.depth = c->depth ? unsigned( dTex ) : 0u;
+				fl.vp[2] = W;
+				fl.vp[3] = H;
+				fl.gp = glProc;
+				flareRedTest = red;
+				if ( !WwVkPresent::toneFlareQueue( fl, why ) ) {
+					flareRedTest = 0;
+					std::printf( "TONEVIEW FLARE %s: toneFlareQueue refused: %s\n", c->name, why.c_str() );
+					return false;
+				}
+			}
+			const bool flushed = WwVkPresent::toneFlush( &why );
+			flareRedTest = 0;
+			if ( !flushed ) {
+				std::printf( "TONEVIEW FLARE: toneFlush: %s\n", why.c_str() );
+				return false;
+			}
+			if ( c && !onVk )
+				glFlare( *c, rows, texs, vfb );
+			View & V = view();
+			out = readSamples( V.slot[V.cur].colorTex );
+			if ( !WwVkPresent::present( wnd, W, H, false, glProc, why ) ) {
+				std::printf( "TONEVIEW FLARE: present: %s\n", why.c_str() );
+				return false;
+			}
+			pump();
+			return glGetError() == GL_NO_ERROR;
+		};
+		if ( !made ) {
+			std::printf( "TONEVIEW FLARE FAIL (the maps, the depth or the GL program: %s)\n", why.c_str() );
+			ok = false;
+		} else {
+			WwVkPresent::takeToneFlareStat();
+			std::vector<std::uint8_t> bare, ref0;
+			const bool bareRan = route( nullptr, false, 0, bare );
+			int vkRuns = 0, depthCopies = 0;
+			for ( const FlCase & c : cases ) {
+				std::vector<std::uint8_t> vk, ref;
+				const bool ran = bareRan && route( &c, false, 0, ref ) && route( &c, true, 0, vk );
+				vkRuns++;
+				depthCopies += c.depth && !( c.red & 1 ) ? 1 : 0;
+				const Verdict v = compare( vk, ref ), fl = compare( ref, bare );
+				const bool drew = fl.diff > size_t( 64 );	// the floor: the sprites changed GL's frame
+				const bool judged = c.only != 4;
+				std::printf( "TONEVIEW FLARE %s %s%s (%zu of %zu bytes differ, max %d; %d sprites changed %zu bytes of GL's frame)\n", c.name,
+					judged ? "" : "measured ", ran && drew ? v.word() : "FAIL", v.diff, v.total, v.maxd, c.n, fl.diff );
+				ok = ok && ran && drew && ( v.ok() || !judged );
+				if ( &c == &cases[0] )
+					ref0 = ref;
+			}
+			const char * redNames[2] = { "the sprites under the tone modes", "the depth ignored" };
+			for ( int red = 1; red <= 2; red++ ) {
+				std::vector<std::uint8_t> vk;
+				const bool ran = route( &cases[0], true, red, vk );
+				vkRuns++;
+				depthCopies += red == 1 ? 1 : 0;
+				const Verdict v = compare( vk, ref0 );
+				const bool redFails = !ran || !v.ok();
+				std::printf( "TONEVIEW FLARE RED %d %s (%s: %zu bytes differ, max %d; must FAIL)\n", red, redFails ? "FAIL" : v.word(),
+					redNames[red - 1], v.diff, v.maxd );
+				ok = ok && redFails;
+			}
+			const WwVkPresent::FxStat fs = WwVkPresent::takeToneFlareStat();
+			std::printf( "TONEVIEW FLARE stat: %d queued (want %d), %d refused (%s), %d depth copies (want %d), %d pipelines in %.1f ms, "
+				"drawing thread %.3f ms a queue (max %.3f)\n", fs.runs, vkRuns, fs.fails, fs.failWhy.c_str(), fs.copies, depthCopies,
+				fs.pipelines, fs.buildMs, fs.runs ? fs.cpuMs / fs.runs : 0.0, fs.maxMs );
+			ok = ok && fs.runs == vkRuns && fs.fails == 0 && fs.copies == depthCopies;
+		}
+		glDeleteTextures( 1, &dTex );
+	}
 	f.bindFramebuffer( kFb, 0 );
 	WwVkPresent::toneFrameDrop();
 	WwVkPresent::shutdown();

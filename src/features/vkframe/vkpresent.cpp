@@ -1603,6 +1603,10 @@ struct ToneBloomState
 	bool measRan = false, measHave = false, measDone = false;
 	int measW = 0, measH = 0;
 };
+/* the deferred crossing's GL names: the frame, its depth, the view slot, the measure, the fog bloom and the measure's
+ * quarter (7), lane VKFAR2 P9's flare depth twin and up to kFlareTexMax sprite twins (vkflare.inc) */
+constexpr int kFlareTexMax = 16;
+constexpr int kToneDefMax = 8 + kFlareTexMax;
 struct Tone
 {
 	void * glCtx = nullptr;
@@ -1675,7 +1679,7 @@ struct Tone
 	 * right after a tone pass; backoff: frames without deferring after a flush; red WW_VKVIEW_MERGE_RED=1 never defers */
 	bool deferred = false, ranSinceTaa = false, mergeHint = false, mergeRed = false, subOk = false;
 	int backoff = 0;
-	GLuint defTex[8] = {};  // lane VKBLOOM1: + the combine and the measure's quarter target
+	GLuint defTex[kToneDefMax] = {};  // lane VKBLOOM1: + the combine and the measure's quarter target; VKFAR2 P9: + the flares'
 	GLuint defN = 0;
 	ToneBloomState bloom;  // lane VKBLOOM1
 };
@@ -2690,6 +2694,13 @@ bool toneFbs( std::string & why )
 // lane VKBLOOM1: harness only (tests/vkframe/toneview.cpp's reds, must FAIL); 1 = mode 3 not drawn, 2 = the measure not
 // dispatched, 3 = mode 3 reads no backdrop, 4 (lane VKFAR2) = the lod tent reads level 0 only
 int bloomRedTest = 0;
+/* lane VKFAR2 P9: the lens-flare sprites queued into a deferred tone pass (vkflare.inc): the table's upload before the pass,
+ * the sprites after the modes. Harness only (toneview.cpp's flare reds, must FAIL): 1 = drawn before the modes, 2 = the
+ * depth ignored (no occlusion) */
+int flareRedTest = 0;
+void flToneReset();
+void flRecordPre( VkCommandBuffer cmd );
+bool flRecordIn( VkCommandBuffer cmd );
 
 // the worker: record the LUT's copy (when new) and the pass into this frame's view slot (toneWork submits it)
 bool toneRecord( std::string & why )
@@ -2724,6 +2735,7 @@ bool toneRecord( std::string & why )
 		v.vkCmdPipelineBarrier( T.cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0, nullptr, 0, nullptr, 1, &b );
 		T.lutCopy = false;
 	}
+	flRecordPre( T.cmd );  // lane VKFAR2 P9: the queued flare sprites' table
 	ToneBloomState & B = T.bloom;
 	if ( B.on || B.measQw > 0 ) {
 		/* lane VKBLOOM1: vkframe.cpp runBloom's dispatches on this command buffer, from the shared frame GL just drew (the
@@ -2867,6 +2879,11 @@ bool toneRecord( std::string & why )
 		v.vkCmdPushConstants( T.cmd, T.layout, VK_SHADER_STAGE_FRAGMENT_BIT, 0, std::uint32_t( sizeof( j ) ), &j );
 		v.vkCmdDraw( T.cmd, 3, 1, 0, 0 );
 	};
+	if ( flareRedTest == 1 && flRecordIn( T.cmd ) ) {  // the red: the sprites under the modes
+		v.vkCmdSetViewport( T.cmd, 0, 1, &vp );
+		v.vkCmdSetScissor( T.cmd, 0, 1, &sc );
+		v.vkCmdBindDescriptorSets( T.cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, T.layout, 0, 1, &T.set, 0, nullptr );
+	}
 	// cellhdr.cpp's quads: mode 0 where an opaque draw reached (GREATER), mode 2 over the far plane, mode 1 stencil 2
 	if ( T.splitSky ) {
 		draw( 1, 0, 1, 1 );
@@ -2916,6 +2933,8 @@ bool toneRecord( std::string & why )
 		if ( T.splitSky )
 			draw( 4, 3, 1, 1 );
 	}
+	if ( flareRedTest != 1 )
+		flRecordIn( T.cmd );  // lane VKFAR2 P9: celllensflare.cpp's sprites over the toned view, before the TAA
 	v.vkCmdEndRenderPass( T.cmd );
 	if ( v.vkEndCommandBuffer( T.cmd ) != VK_SUCCESS ) {
 		why = "vkEndCommandBuffer (the tone pass) failed";
@@ -3960,7 +3979,7 @@ static bool toneCross( std::string & w )
 {
 	Tone & T = tone();
 	Gl & g = gl();
-	GLenum lay[8];
+	GLenum lay[kToneDefMax];
 	for ( GLenum & l : lay )
 		l = kLayoutGeneral;
 	g.signalSemaphore( T.glDoneGl, 0, nullptr, T.defN, T.defTex, lay );
@@ -4253,6 +4272,7 @@ bool toneRun( const ToneRun & t, std::string & why )
 		T.job.tent[3] = 0.0f;
 	}
 	// GL's frame (and the view's depth GL blitted) done -> the worker's pass -> GL's later passes on the view
+	flToneReset();  // lane VKFAR2 P9: no sprites until celllensflare.cpp queues this frame's
 	T.defTex[0] = T.colorTex;
 	T.defTex[1] = T.dsTex;
 	T.defTex[2] = V.slot[V.cur].colorTex;
@@ -4517,7 +4537,7 @@ bool taaRun( const TaaRun & t, std::string & why )
 	A.fromView = merge;
 	A.curImg = sCur.img;
 	// GL's blits (colour, depth), the lock clears and the inputs' copies done -> the worker's passes -> GL's later passes
-	GLuint tex[18] = { sCur.tex, sDepth.tex, sMv.tex, sPic.tex, sHist[0]->tex, sHist[1]->tex, sLock[0]->tex, sLock[1]->tex,
+	GLuint tex[40] = { sCur.tex, sDepth.tex, sMv.tex, sPic.tex, sHist[0]->tex, sHist[1]->tex, sLock[0]->tex, sLock[1]->tex,
 		V.slot[V.cur].colorTex };
 	GLuint nTex = 9;
 	if ( velTex )
@@ -4531,7 +4551,7 @@ bool taaRun( const TaaRun & t, std::string & why )
 				tex[nTex++] = T.defTex[k];
 		}
 	}
-	GLenum lay[18];
+	GLenum lay[40];
 	for ( GLenum & l : lay )
 		l = kLayoutGeneral;
 	g.signalSemaphore( A.glDoneGl, 0, nullptr, nTex, tex, lay );
@@ -8393,6 +8413,7 @@ ObjStat takeObjStat()
 #include "features/vkframe/vkobjtex.inc"  // lane VKOBJ3: the texture cache's BC twins and their handles in the table
 #include "features/vkframe/vkskybody.inc"  // lane VKFAR2 G2: the stars and the moon globe in the sky's pass
 #include "features/vkframe/vkfog.inc"  // lane VKFAR2: the air's integrate (the froxel volume) on the view
+#include "features/vkframe/vkflare.inc"  // lane VKFAR2 P9: the lens-flare sprites in the deferred tone pass
 
 namespace
 {

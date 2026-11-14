@@ -567,6 +567,16 @@ static bool wwSkyTexTwin( const QString & fileName )
 		|| f.contains( QLatin1StringView( "/textures/sky/" ), Qt::CaseInsensitive );
 }
 
+/* lane VKFAR2 P9: a lens-flare sprite's map (celllensflare.cpp names it before its first bind) is made as a BC twin too, so
+ * the sprites drawn in the deferred tone pass sample the bytes GL uploaded once (vkflare.inc) */
+bool wwCellLensFlareTexWanted( const QString & fileName );
+static bool wwLensTexTwin( const QString & fileName )
+{
+	WW_SWITCH_STATIC( bool, want, wwEnvInt( "WW_VKVIEW" ) == 1 && wwEnvInt( "WW_VKVIEW_RED" ) != 1
+		&& wwEnvInt( "WW_VKVIEW_LENS_RED" ) != 1 );
+	return want && wwCellLensFlareTexWanted( fileName );
+}
+
 std::uint16_t TexCache::loadTex( Tex & txIn, const NifModel * nif )
 {
 	WwDp::abortRecording();	// lane GAPPERF-BINDLESS: a load is never replayed
@@ -634,7 +644,7 @@ std::uint16_t TexCache::loadTex( Tex & txIn, const NifModel * nif )
 	wwTexLoadSize = 0;
 	const GLuint wwId0 = t->id[0];	// lane VKOBJ3: a BC twin replaces the name
 	wwVkObjTexArm = true;
-	wwVkSkyTexArm = wwSkyTexTwin( fileName );
+	wwVkSkyTexArm = wwSkyTexTwin( fileName ) || wwLensTexTwin( fileName );
 	try
 	{
 		i->mipmaps = texLoad( nif, i->filepath, i->format, t->target, i->width, i->height, t->id );

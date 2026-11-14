@@ -93,6 +93,9 @@ HLSL_SPECS += [('src/features/vkframe', k, 'vulkan1.2', 'vkframe_%s_spv' % k) fo
 VKFRAME_FXB_ARGS = ['-fvk-bind-register', 'b0', '0', '0', '0', '-fvk-bind-register', 'b31', '0', '32', '0', '-fspv-preserve-bindings']
 VKFRAME_FXB = {'skystars_view_vs': 'clouds/lookdev_clouds_vs', 'skymoon_view_vs': 'core/lookdev_bill_vs'}
 HLSL_SPECS += [('src/features/vkframe', k, 'vulkan1.2', 'vkframe_%s_spv' % k) for k in VKFRAME_FXB]
+# lane VKFAR2 P9: the lens-flare sprites, the script's `fxf <name> <dir/file> <profile>` lines (no shifts, no options)
+VKFRAME_FXF = {'lensflare_view_vs': ('post/lens_flare_view_vs', 'vs_6_0'), 'lensflare_view_ps': ('post/lens_flare', 'ps_6_0')}
+HLSL_SPECS += [('src/features/vkframe', k, 'vulkan1.2', 'vkframe_%s_spv' % k) for k in VKFRAME_FXF]
 # lane VKFAR2 (the froxel item): the air's integrate, the script's `fog <name> "<defines>"` lines (cs_6_0, one source)
 VKFRAME_FOG_SRC = 'res/shaders/hlsl/air/volair_integ_cs.hlsl'
 VKFRAME_FOG = {'fog_integ_cs': '', 'fog_integ32_cs': '-DVOLAIR_INTEG_F32'}
@@ -214,6 +217,11 @@ def script_ok(tree):
 	blines = dict(re.findall(r'^fxb ([a-z0-9_]+) ([A-Za-z0-9_/+-]+)$', vf, re.M))
 	if blines != VKFRAME_FXB:
 		bad.append('src/features/vkframe/vkframe_spirv.sh: its fxb lines (%s) are not this checker\'s sky-body vertex stages' % ' '.join(sorted(blines)))
+	if '\t"$DXC" -spirv -fspv-target-env=vulkan1.2 -T $3 -E main -Fo "$1.spv" ' not in vf:
+		bad.append('src/features/vkframe/vkframe_spirv.sh: its fxf() compile line changed')
+	flines = {a: (b, c) for a, b, c in re.findall(r'^fxf ([a-z0-9_]+) ([A-Za-z0-9_/+-]+) ([vp]s_6_0)$', vf, re.M)}
+	if flines != VKFRAME_FXF:
+		bad.append('src/features/vkframe/vkframe_spirv.sh: its fxf lines (%s) are not this checker\'s lens-flare stages' % ' '.join(sorted(flines)))
 	if '\t"$DXC" -spirv -fspv-target-env=vulkan1.2 -T cs_6_0 -E main $2 -Fo "$1.spv" "$(cygpath -m "$ROOT/' + VKFRAME_FOG_SRC + '" ' not in vf:
 		bad.append('src/features/vkframe/vkframe_spirv.sh: its fog() compile line changed')
 	glines = dict(re.findall(r'^fog ([a-z0-9_]+) "([^"]*)"$', vf, re.M))
@@ -359,10 +367,15 @@ def main(argv):
 			if k in VKFRAME_FXB:
 				src = os.path.join(tree, 'res/shaders/hlsl', VKFRAME_FXB[k] + '.hlsl')
 				hdefs = VKFRAME_FXB_ARGS
-			m = re.search(r'hlsl profile: ([cvp]s_6_[0-9])', open(src, encoding='utf-8', errors='replace').read())
+			if k in VKFRAME_FXF:  # the profile is the table's (lens_flare.hlsl holds both stages)
+				src = os.path.join(tree, 'res/shaders/hlsl', VKFRAME_FXF[k][0] + '.hlsl')
+				hdefs = []
+				m = re.match(r'([vp]s_6_0)', VKFRAME_FXF[k][1])
+			else:
+				m = re.search(r'hlsl profile: ([cvp]s_6_[0-9])', open(src, encoding='utf-8', errors='replace').read())
 			if k in VKFRAME_FXV or k in VKFRAME_FXC or k in VKFRAME_FXW or k in VKFRAME_FXL or k in VKFRAME_FXB:
 				m = re.match(r'(vs_6_0)', 'vs_6_0')
-			opt = [] if d == 'src/features/vkframe' else ['-O0']   # vkframe_spirv.sh builds optimised
+			opt =[] if d == 'src/features/vkframe' else ['-O0']   # vkframe_spirv.sh builds optimised
 			r = subprocess.run([dxc, '-spirv', '-fspv-target-env=' + env, '-T', m.group(1) if m else 'ps_6_0' if k in VKFRAME_SKY or k in VKFRAME_FX or k in VKFRAME_FXK else 'cs_6_0', '-E', 'main']
 			                   + opt + hdefs + ['-Fo', spv, src], capture_output=True, text=True, timeout=300)
 			if r.returncode == 0:

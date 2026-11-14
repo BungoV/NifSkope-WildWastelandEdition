@@ -140,6 +140,16 @@ fxk skystars_view_ps clouds/lookdev_clouds_ps
 fxb skymoon_view_vs core/lookdev_bill_vs
 fxk skymoon_view_ps sky/sky_moon_ps
 ls -la skystars_view_vs.spv.h skystars_view_ps.spv.h skymoon_view_vs.spv.h skymoon_view_ps.spv.h
+# lane VKFAR2 P9: the lens-flare sprites in the tone pass (vkflare.inc): lens_flare.hlsl's pixel entry as it stands, its
+# vertex entry through lens_flare_view_vs.hlsl (renamed main). PostFxBindingsVk.hlsli's own bindings, unused ones stripped
+fxf() {
+	"$DXC" -spirv -fspv-target-env=vulkan1.2 -T $3 -E main -Fo "$1.spv" "$(cygpath -m "$ROOT/res/shaders/hlsl/$2.hlsl" 2>/dev/null || echo "$ROOT/res/shaders/hlsl/$2.hlsl")"
+	python -I "$ROOT/tools/spv_header.py" "$1.spv" "vkframe_$1_spv" "$1.spv.h" < /dev/null
+	rm -f "$1.spv"
+}
+fxf lensflare_view_vs post/lens_flare_view_vs vs_6_0
+fxf lensflare_view_ps post/lens_flare ps_6_0
+ls -la lensflare_view_vs.spv.h lensflare_view_ps.spv.h
 # lane VKFAR2 (the froxel item): the air's integrate as compute (res/shaders/hlsl/air/volair_integ_cs.hlsl, vkfog.inc), the
 # RGBA16F volume and the f32 red's RGBA32F one
 fog() {

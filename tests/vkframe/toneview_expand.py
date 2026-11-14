@@ -21,7 +21,10 @@ for name, rel in (('cell_hdr.vert.glsl', ('res', 'shaders', 'cell_hdr.vert')),
                   ('cell_bloom_hold.frag.glsl', POST + ('cell_bloom_hold.frag',)),
                   ('cell_bloom_up.frag.glsl', POST + ('cell_bloom_up.frag',)),
                   ('cell_bloom_comb.frag.glsl', POST + ('cell_bloom_comb.frag',)),
-                  ('cell_is_measure_q.frag.glsl', ('res', 'shaders', 'features', 'exposure', 'cell_is_measure_q.frag'))):
+                  ('cell_is_measure_q.frag.glsl', ('res', 'shaders', 'features', 'exposure', 'cell_is_measure_q.frag')),
+                  # lane VKFAR2 P9: the lens-flare sprites (the FLARE arm's GL reference)
+                  ('cell_lensflare.vert.glsl', POST + ('cell_lensflare.vert',)),
+                  ('cell_lensflare.frag.glsl', POST + ('cell_lensflare.frag',))):
     src = S.expand(os.path.join(TREE, *rel))
     with open(os.path.join(out, name), 'w', newline='\n', encoding='latin-1') as f:
         f.write(src)

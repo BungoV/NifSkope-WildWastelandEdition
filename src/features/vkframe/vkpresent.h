@@ -669,6 +669,28 @@ bool cloudFrontRun( const CloudFrontRun & t, std::string & why );
 void cloudFrontOnGl( const char * why );
 FxStat takeCloudFrontStat();
 
+/* Lane VKFAR2 P9: the lens-flare sprites (celllensflare.cpp, cell_lensflare.vert/.frag) recorded in the DEFERRED tone pass,
+ * after its modes, before the crossing (res/shaders/hlsl/post/lens_flare.hlsl; vkflare.inc). Only while tonePending(): no
+ * GL pass came between the tone map and the flare. The sprite maps are the texture cache's BC twins (loaded with the twin
+ * armed, gltex.cpp), sampled with GL's sampler state; the opaque depth is copied into a shared twin. GL current. false: why;
+ * nothing queued (the caller flushes and draws on GL). */
+constexpr int kFlareMaxSprites = 256;
+struct FlareRun
+{
+	int n = 0;                       //!< sprites, GL's draw order
+	const float * rows = nullptr;    //!< n x 4 corners x (pos, col, uv, lit) x 4 floats: GL's four attributes
+	const unsigned * tex = nullptr;  //!< n: each sprite's GL 2D texture (the cache's name)
+	float proj[16] = {};             //!< flareProj, GL's column order
+	float slack = 0.0f;              //!< flareSlack
+	int red = 0;                     //!< flareRed (bit 0: no occlusion)
+	unsigned depth = 0;              //!< flareDepth (Scene::fxDepthTexId), vp[2] x vp[3]; 0: none (red bit 0)
+	int vp[4] = {};                  //!< GL's viewport: the draws' and flareViewport
+	GlProc gp = nullptr;             //!< the maps' sampler state and the depth's format
+};
+bool toneFlareQueue( const FlareRun & f, std::string & why );
+void toneFlareOnGl( const char * why );
+FxStat takeToneFlareStat();
+
 /* Lane VKOBJ1 (plan row G4, slice 1): the objects' opaque depth prepass (cellgpucull.cpp, lookdev_csmdepth_q.prog) on the
  * present device into a shared multisample depth target (sharedTarget type 0 with samples, GL_DEPTH_COMPONENT24 / 32F) that
  * GL's Hi-Z then reads. GL clears it; the two spans (back faces culled, then two-sided) run in one crossing (depth-only
