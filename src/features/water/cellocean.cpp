@@ -7,6 +7,7 @@
 #include "features/water/cellwater.h"
 #include "cellworldanim.h"
 #include "features/water/oceanspectrum.h"
+#include "features/vkframe/vkpresent.h"
 #include "gl/glscene.h"
 #include "gl/renderer.h"
 
@@ -16,6 +17,8 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <cstring>
+#include <string>
 #include <vector>
 
 namespace
@@ -183,6 +186,74 @@ void quad( Renderer * r )
 	r->drawShape( 4, 3, 6, GL_TRIANGLES, GL_UNSIGNED_SHORT, &attrs, idx );
 }
 
+// lane VKWATER4 (G5): the spectrum, the 14 FFT stages, the fields and the mips as 31 dispatches on the present device,
+// written back into arrB / arrC / arrD level by level (gated EXACT against GL by tests/vkframe/oceanview.sh)
+bool oceanVk( const OceanGpu & g, float phase, const float dk[WwOcean::kTiles], std::string & why )
+{
+	using namespace WwVkPresent;
+	constexpr int kN = WwOcean::kN;
+	auto img = [&]( GLuint tex, GLenum fmt, int w, int h, bool in, bool out, int tiles, int lv ) {
+		LightImage x;
+		x.tex = tex;
+		x.glFmt = fmt;
+		x.w = w;
+		x.h = h;
+		x.in = in;
+		x.out = out;
+		x.tiles = tiles;
+		x.outLevel = lv;
+		return x;
+	};
+	auto disp = [&]( int kernel, int out0, int out1, int t0, int t1 ) {
+		LightDispatch d;
+		d.kernel = kernel;
+		d.out0 = out0;
+		d.out1 = out1;
+		d.t[0] = t0;
+		d.t[1] = t1;
+		return d;
+	};
+	auto pcF = [&]( LightDispatch & d, int slot, float v ) { std::memcpy( d.pc + slot * 4, &v, 4 ); };
+	auto pcI = [&]( LightDispatch & d, int comp, int v ) { std::memcpy( d.pc + 112 + comp * 4, &v, 4 ); };
+	LightRun t;
+	t.pass = LightOcean;
+	t.img.push_back( img( g.h0, GL_RGBA32F, kW, kN, true, false, 0, 0 ) );
+	t.img.push_back( img( g.q, GL_R32F, kW, kN, true, false, 0, 0 ) );
+	for ( int k = 0; k < 4; k++ )
+		t.img.push_back( img( 0, GL_RGBA32F, kW, kN, false, false, 0, 0 ) );	// ping [0][0], [0][1], [1][0], [1][1]
+	const GLuint arr[3] = { g.arrB, g.arrC, g.arrD };
+	const GLenum fm[3] = { GL_RGBA16F, GL_RGBA32F, GL_RGBA16F };
+	for ( int lv = 0; lv < kLevels; lv++ )
+		for ( int k = 0; k < 3; k++ )
+			t.img.push_back( img( arr[k], fm[k], kW >> lv, kN >> lv, false, true, WwOcean::kTiles, lv ) );
+	auto strip = [&]( int lv, int k ) { return 6 + lv * 3 + k; };
+	LightDispatch s = disp( LightOceanSpecK, 2, 3, 0, 1 );
+	pcF( s, 0, phase );
+	for ( int k = 0; k < WwOcean::kTiles; k++ )
+		pcF( s, 4 + k, dk[k] );
+	t.d.push_back( s );
+	int cur = 0;
+	for ( int ax = 0; ax < 2; ax++ )
+		for ( int st = 0; st < 7; st++ ) {
+			LightDispatch d = disp( LightOceanFftK, 2 + 2 * ( 1 - cur ), 3 + 2 * ( 1 - cur ), 2 + 2 * cur, 3 + 2 * cur );
+			pcI( d, 0, 1 << st );
+			pcI( d, 1, ax );
+			t.d.push_back( d );
+			cur = 1 - cur;
+		}
+	LightDispatch fbc = disp( LightOceanFinBcK, strip( 0, 0 ), strip( 0, 1 ), 2 + 2 * cur, 3 + 2 * cur );
+	pcI( fbc, 0, kN );
+	t.d.push_back( fbc );
+	LightDispatch fd = disp( LightOceanFinDK, strip( 0, 2 ), -1, 3 + 2 * cur, -1 );
+	pcI( fd, 0, kN );
+	t.d.push_back( fd );
+	for ( int lv = 1; lv < kLevels; lv++ ) {
+		t.d.push_back( disp( LightOceanMipBcK, strip( lv, 0 ), strip( lv, 1 ), strip( lv - 1, 0 ), strip( lv - 1, 1 ) ) );
+		t.d.push_back( disp( LightOceanMipDK, strip( lv, 2 ), -1, strip( lv - 1, 2 ), -1 ) );
+	}
+	return lightRun( t, why );
+}
+
 }	// namespace
 
 void wwCellOceanPass( Scene * scene, bool cellPasses )
@@ -281,17 +352,29 @@ void wwCellOceanPass( Scene * scene, bool cellPasses )
 	float dk[WwOcean::kTiles];
 	for ( int t = 0; t < WwOcean::kTiles; t++ )
 		dk[t] = float( 2.0 * WwOcean::kPi / WwOcean::set( t / 3 ).L[t % 3] );
-	fn->glBindFramebuffer( GL_FRAMEBUFFER, g.fb[0] );
-	fn->glViewport( 0, 0, kW, WwOcean::kN );
-	bind2( g.h0, g.q );
-	pSpec->uni1i( "oceanH0", units[0] );
-	pSpec->uni1i( "oceanQ", units[1] );
-	pSpec->uni1f( "oceanPhase", float( phase ) );
-	pSpec->uni1fv_l( pSpec->uniLocation( "oceanDk" ), dk, WwOcean::kTiles );
-	quad( r );
+	// lane VKWATER4 (G5): the whole build on the present device (WW_VKVIEW=1; red WW_VKVIEW_OCEAN_RED=1: GL's draws)
+	bool onVk = false;
+	const bool vkWant = WwVkPresent::shareWanted( "WW_VKVIEW_OCEAN_RED" );
+	WwVkPresent::lightSay( WwVkPresent::LightOcean, vkWant, vkWant ? nullptr : "red WW_VKVIEW_OCEAN_RED=1 or the view not on Vulkan" );
+	if ( vkWant ) {
+		std::string why;
+		onVk = oceanVk( g, float( phase ), dk, why );
+	}
+	if ( !onVk ) {
+		fn->glBindFramebuffer( GL_FRAMEBUFFER, g.fb[0] );
+		fn->glViewport( 0, 0, kW, WwOcean::kN );
+		bind2( g.h0, g.q );
+		pSpec->uni1i( "oceanH0", units[0] );
+		pSpec->uni1i( "oceanQ", units[1] );
+		pSpec->uni1f( "oceanPhase", float( phase ) );
+		pSpec->uni1fv_l( pSpec->uniLocation( "oceanDk" ), dk, WwOcean::kTiles );
+		quad( r );
+	}
 	int cur = 0;
 	// the inverse FFT, rows then columns, 7 radix-2 Stockham stages each
-	if ( auto pFft = r->useProgram( "ocean_fft.prog" ) ) {
+	if ( onVk ) {
+		s.built = true;
+	} else if ( auto pFft = r->useProgram( "ocean_fft.prog" ) ) {
 		pFft->uni1i( "oceanIn0", units[0] );
 		pFft->uni1i( "oceanIn1", units[1] );
 		for ( int ax = 0; ax < 2; ax++ ) {

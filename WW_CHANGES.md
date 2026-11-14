@@ -1,3 +1,13 @@
+## VKWATER4 (2026-11-15): the ultra ocean builds on Vulkan compute (WW_VKVIEW=1)
+
+Changed, not built, not checked live. Offline: tests/vkframe/oceanview.sh, 96 greens EXACT against GL (spectrum, 14 FFT
+stages, fields, mips 1-7, end to end), 20 reds FAIL.
+
+- features/water/cellocean.cpp records the spectrum, the inverse FFT, the fields and the mips as 31 dispatches
+  (res/shaders/hlsl/vklight/ocean_vk.hlsl) and writes them back into the three arrays. Red WW_VKVIEW_OCEAN_RED=1: GL's draws.
+- The spectrum keeps GL's float order with an opaque no-op: NVIDIA's Vulkan compiler reorders multiply chains even
+  under precise.
+
 ## VKWATER4 (2026-11-15): the camera-underwater meniscus takes its derivative before the discard (HLSL)
 
 Changed, not built, not checked live. Offline: tests/vkframe/underdraw.sh arms A, B, C BOUND, red "old order" FAILS.
