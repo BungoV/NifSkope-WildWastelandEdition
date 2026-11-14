@@ -720,6 +720,19 @@ struct PostRun
 bool tonePostQueue( const PostRun & p, std::string & why );
 void tonePostOnGl( const char * why );
 FxStat takeTonePostStat();
+/* the kernels are built when their pass first runs, not all on the first queue. Per part (tonePostPart: the sources, dof,
+ * lens, motion blur with its fused kernels, object blur, copy back): pipelines built and their ms since launch; most: the
+ * most one queue built, and that queue's build ms */
+constexpr int kPostParts = 6;
+struct PostBuild
+{
+	int pipes[kPostParts] = {};
+	double ms[kPostParts] = {};
+	int most = 0;
+	double mostMs = 0.0;
+};
+PostBuild tonePostBuild();
+const char * tonePostPart( int k );
 
 /* Lane VKOBJ1 (plan row G4, slice 1): the objects' opaque depth prepass (cellgpucull.cpp, lookdev_csmdepth_q.prog) on the
  * present device into a shared multisample depth target (sharedTarget type 0 with samples, GL_DEPTH_COMPONENT24 / 32F) that

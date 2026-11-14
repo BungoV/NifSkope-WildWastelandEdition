@@ -1739,7 +1739,7 @@ int main( int argc, char ** argv )
 	 * game_* / cell_objblur* programs) drawn on the view after the tone pass crossed alone, as postApply draws it (the
 	 * tone-mapped frame: no linear copy back). Both from the same PostRun. Reds (postRedTest) must FAIL: 1 the colour's
 	 * sample 0 for the samples' mean, 2 the game's blur skipped, 3 the lens gather cleared, 4 the vectors cleared, 5 the
-	 * object tiles cleared, 6 the fused composite dropped. */
+	 * object tiles cleared, 6 the fused composite dropped, 7 all 16 kernels built on one queue (the old first-queue stall). */
 	{
 		using Uni4fv = void( WINAPI * )( GLint, GLsizei, const GLfloat * );
 		using UniMat = void( WINAPI * )( GLint, GLsizei, GLboolean, const GLfloat * );
@@ -2237,6 +2237,41 @@ int main( int argc, char ** argv )
 				"drawing thread %.3f ms a queue (max %.3f)\n", fs.runs, vkRuns, fs.fails, fs.failWhy.c_str(), fs.copies, twinCopies,
 				fs.pipelines, fs.buildMs, fs.runs ? fs.cpuMs / fs.runs : 0.0, fs.maxMs );
 			ok = ok && fs.runs == vkRuns && fs.fails == 0 && fs.copies == twinCopies;
+			/* the first-queue stall: each pass's kernels built when it first runs, so no queue builds all 16 (the first
+			 * builds the sources, the game's DoF and the copy back: 6). Red 7 drops the kernels and builds all 16 on one
+			 * queue, the old eager build: must FAIL the bar */
+			auto buildSay = [&]( const char * tag, int & total ) {
+				const WwVkPresent::PostBuild b = WwVkPresent::tonePostBuild();
+				std::string parts;
+				total = 0;
+				for ( int k = 0; k < WwVkPresent::kPostParts; k++ ) {
+					char one[96];
+					std::snprintf( one, sizeof( one ), "%s%s %d in %.1f ms", k ? ", " : "", WwVkPresent::tonePostPart( k ), b.pipes[k], b.ms[k] );
+					parts += one;
+					total += b.pipes[k];
+				}
+				std::printf( "TONEVIEW POST build%s: %s; most in one queue %d in %.1f ms\n", tag, parts.c_str(), b.most, b.mostMs );
+				return b;
+			};
+			int built = 0;
+			const WwVkPresent::PostBuild lazy = buildSay( "", built );
+			const bool lazyOk = built == fs.pipelines && built == 17 && lazy.most > 0 && lazy.most < 16;
+			std::printf( "TONEVIEW POST lazy build %s (%d pipelines over the parts, want 17; most in one queue %d, want under 16)\n",
+				lazyOk ? "OK" : "FAIL", built, lazy.most );
+			ok = ok && lazyOk;
+			p7KernelsDrop();
+			{
+				const WwVkPresent::PostRun p = runOf( cases[0] );
+				std::vector<std::uint8_t> vk;
+				const bool ran = route( &p, true, 7, vk );
+				const Verdict v = compare( vk, refs[0] );
+				const WwVkPresent::PostBuild eager = buildSay( " RED 7", built );
+				const bool redFails = !( eager.most > 0 && eager.most < 16 );
+				std::printf( "TONEVIEW POST RED 7 %s (all 16 kernels on the first queue of %s: most in one queue %d in %.1f ms, the picture "
+					"%s; must FAIL)\n", redFails ? "FAIL" : "OK", cases[0].name, eager.most, eager.mostMs, ran ? v.word() : "not drawn" );
+				ok = ok && redFails && ran && v.ok();
+				WwVkPresent::takeTonePostStat();
+			}
 		}
 		const GLuint dead[15] = { gCur, gDepth, gBlur[0], gBlur[1], gMv, gOut, gFar, gNear, gLt[0], gLt[1], gObVec, gObT[0], gObT[1],
 			oVel, oMask };

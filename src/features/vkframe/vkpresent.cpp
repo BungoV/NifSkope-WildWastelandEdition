@@ -2705,7 +2705,8 @@ bool flRecordIn( VkCommandBuffer cmd );
 /* lane VKFAR2 P7: cellpost.cpp's post passes queued into a deferred tone pass (vkpost7.inc), recorded before the flare (GL's
  * order: the post passes, then the flare, then the TAA). Harness only (toneview.cpp's P7 reds, must FAIL): 1 = the resolve
  * takes sample 0, 2 = the DoF blur skipped, 3 = the lens gather skipped, 4 = the vectors zero, 5 = the object blur's tile
- * passes skipped, 6 = the fused pass replaced by the plain blur */
+ * passes skipped, 6 = the fused pass replaced by the plain blur, 7 = all 16 kernels built on this queue (the old first-queue
+ * stall) */
 int postRedTest = 0;
 void p7ToneReset();
 bool p7Record( VkCommandBuffer cmd, const VkRenderPassBeginInfo & rbi );

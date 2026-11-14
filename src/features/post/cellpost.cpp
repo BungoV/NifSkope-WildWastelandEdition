@@ -629,7 +629,18 @@ void postVkSay( bool vk, bool dof, bool lens, bool mb, bool ob )
 		sum.glWhy = st.glWhy;
 	if ( !st.failWhy.empty() )
 		sum.failWhy = st.failWhy;
-	const int key = ( vk ? 1 : 0 ) | ( dof ? 2 : 0 ) | ( lens ? 4 : 0 ) | ( mb ? 8 : 0 ) | ( ob ? 16 : 0 );
+	static int builtSaid = 0;  // "vk post build:" when a pass built its kernels (the ms each part cost the drawing thread)
+	if ( st.pipelines != builtSaid ) {
+		builtSaid = st.pipelines;
+		const WwVkPresent::PostBuild b = WwVkPresent::tonePostBuild();
+		QString parts;
+		for ( int k = 0; k < WwVkPresent::kPostParts; k++ )
+			parts += QStringLiteral( "%1%2 %3 in %4 ms" ).arg( k ? QStringLiteral( ", " ) : QString() )
+				.arg( QLatin1String( WwVkPresent::tonePostPart( k ) ) ).arg( b.pipes[k] ).arg( b.ms[k], 0, 'f', 1 );
+		qInfo().noquote() << QStringLiteral( "vk post build: %1; most in one frame %2 in %3 ms" ).arg( parts ).arg( b.most )
+			.arg( b.mostMs, 0, 'f', 1 );
+	}
+	const int key =( vk ? 1 : 0 ) | ( dof ? 2 : 0 ) | ( lens ? 4 : 0 ) | ( mb ? 8 : 0 ) | ( ob ? 16 : 0 );
 	const auto now = std::chrono::steady_clock::now();
 	if ( was == key && std::chrono::duration<double>( now - at ).count() < 5.0 )
 		return;
