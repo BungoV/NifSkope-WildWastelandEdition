@@ -124,4 +124,8 @@ fxd() {
 }
 fxd water_view_ds water/fo4_waterdisp_ds
 fxk water_view_d_ps water/water_view_d_ps
+# item 4 piece 2: the Medium / ray-pass look (fo4_waterlookm), the probes' looks (fo4_waterlookp, tessellated _dp)
+fxk water_view_m_ps water/water_view_m_ps
+fxk water_view_p_ps water/water_view_p_ps
+fxk water_view_dp_ps water/water_view_dp_ps
 ls -la csm_view_vs.spv.h obj_depth_vs.spv.h sky_view_ps.spv.h bloom_down.spv.h bloom_hold.spv.h bloom_up.spv.h bloom_src.spv.h bloom_comb.spv.h bloom_back.spv.h tonemap.spv.h measure_q.spv.h tone_view_vs.spv.h tone_view_ps.spv.h taa_view_mv_cs.spv.h taa_view_resolve_cs.spv.h taa_view_rcas_ps.spv.h

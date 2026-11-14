@@ -313,8 +313,9 @@ struct WaterUbo
 	int need = 0;  //!< the block's size in the program (GL_UNIFORM_BLOCK_DATA_SIZE)
 };
 /* lane VKWATER3 item 4: the water programs with Vulkan twins (cellwater.cpp wwCellWaterProgram's names), their pixel
- * stage's tables. Every one takes water_view_vs; a tessellated one adds water_view_hs + water_view_ds (fo4_waterdisp). */
-enum WaterVariant { kWaterLook = 0, kWaterLookD, kWaterVariants };
+ * stage's tables. Every one takes water_view_vs; a tessellated one adds water_view_hs + water_view_ds (fo4_waterdisp).
+ * Piece 2: the Medium / ray-pass look (m) and the probes' looks (p, tessellated dp). */
+enum WaterVariant { kWaterLook = 0, kWaterLookD, kWaterLookM, kWaterLookP, kWaterLookDp, kWaterVariants };
 struct WaterTables
 {
 	const char * prog;  //!< GL's program file
@@ -332,7 +333,10 @@ inline const WaterTables & waterTables( int v )
 {
 	static const WaterTables k[kWaterVariants] = {
 		{ "fo4_waterlook.prog", false, kT_waterPs, waterN( kT_waterPs ), kT_waterPsBytes, kN_waterPs, waterN( kN_waterPs ) },
-		{ "fo4_waterlookd.prog", true, kT_waterPsD, waterN( kT_waterPsD ), kT_waterPsDBytes, kN_waterPsD, waterN( kN_waterPsD ) } };
+		{ "fo4_waterlookd.prog", true, kT_waterPsD, waterN( kT_waterPsD ), kT_waterPsDBytes, kN_waterPsD, waterN( kN_waterPsD ) },
+		{ "fo4_waterlookm.prog", false, kT_waterPsM, waterN( kT_waterPsM ), kT_waterPsMBytes, kN_waterPsM, waterN( kN_waterPsM ) },
+		{ "fo4_waterlookp.prog", false, kT_waterPsP, waterN( kT_waterPsP ), kT_waterPsPBytes, kN_waterPsP, waterN( kN_waterPsP ) },
+		{ "fo4_waterlookdp.prog", true, kT_waterPsDp, waterN( kT_waterPsDp ), kT_waterPsDpBytes, kN_waterPsDp, waterN( kN_waterPsDp ) } };
 	return k[v >= 0 && v < kWaterVariants ? v : 0];
 }
 //! the variant of GL's program file (-1: no twin)
@@ -352,7 +356,7 @@ inline bool waterPsReads( int v, std::string_view name )
 			return true;
 	return false;
 }
-inline constexpr int kWaterPsLooseMax = std::max( { kT_waterPsBytes, kT_waterPsDBytes } );
+inline constexpr int kWaterPsLooseMax = std::max( { kT_waterPsBytes, kT_waterPsDBytes, kT_waterPsMBytes, kT_waterPsPBytes, kT_waterPsDpBytes } );
 
 /* everything the shaded draw reads: the census, GL's vertex array, element range, blocks, loose uniforms, raster state.
  * Indices GL_UNSIGNED_SHORT triangles, or 3-vertex patches for a tessellated variant (bsshape's drawElements). */
