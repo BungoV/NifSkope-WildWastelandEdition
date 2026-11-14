@@ -24,6 +24,7 @@
 #include "features/weather/precipspec.h"
 #include "gl/renderer.h"
 #include "features/shadows/sunshadow.h"
+#include "features/vkframe/vkpresent.h"	// lane VKFAR2 (row L8): the run on the Vulkan view (WW_VKVIEW=1)
 
 #include <QElapsedTimer>
 #include <QJsonArray>
@@ -1143,7 +1144,8 @@ int wwCellPrecipDraw( Scene * scene )
 			prog->uni1i( "pcCells", std::max( 1, L.spec.cols * L.spec.rows ) );
 			prog->uni2f( "pcCellUv", 1.0f / float( cols ), 1.0f / float( rows ) );
 		}
-		fn->glDrawArrays( GL_POINTS, GLint( run.first ), GLsizei( run.count ) );
+		if ( !WwVkPresent::precipDraw( fn, prog->id, GLint( run.first ), GLsizei( run.count ) ) )	// lane VKFAR2 (row L8)
+			fn->glDrawArrays( GL_POINTS, GLint( run.first ), GLsizei( run.count ) );
 		drawn += run.count;
 	}
 	fn->glBindVertexArray( 0 );

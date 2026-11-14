@@ -35,6 +35,8 @@ struct Precip
 	VkBuffer rec = VK_NULL_HANDLE;  // the records, one a particle
 	VkDeviceMemory recMem = VK_NULL_HANDLE;
 	VkDeviceSize recCap = 0;
+	bool recHost = false;  // gates only (PrecipRun::recOut): host-visible, mapped at recPtr
+	std::uint8_t * recPtr = nullptr;
 	VkPipeline pipe = VK_NULL_HANDLE, pipeLook = VK_NULL_HANDLE;
 	VkRenderPass pipePass = VK_NULL_HANDLE;
 	int pipeSamples = 0, pipelines = 0;
@@ -184,12 +186,14 @@ bool precipStatic( std::string & why )
 }
 
 // the record buffer, grown (the last run's fence already waited); device memory, written and read only on the device
-bool precipRecords( VkDeviceSize need, std::string & why )
+// (host: a gate reads the records back, host-visible coherent memory mapped at recPtr)
+bool precipRecords( VkDeviceSize need, bool host, std::string & why )
 {
 	Vk & v = vk();
 	Precip & D = precip();
-	if ( D.rec && D.recCap >= need )
+	if ( D.rec && D.recCap >= need && D.recHost == host )
 		return true;
+	D.recPtr = nullptr;
 	if ( D.rec )
 		v.vkDestroyBuffer( v.dev, D.rec, nullptr );
 	if ( D.recMem )
@@ -207,17 +211,23 @@ bool precipRecords( VkDeviceSize need, std::string & why )
 		v.vkGetBufferMemoryRequirements( v.dev, D.rec, &br );
 		VkMemoryAllocateInfo ai { VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO };
 		ai.allocationSize = br.size;
-		ai.memoryTypeIndex = memType( br.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT );
-		if ( ai.memoryTypeIndex == UINT32_MAX )
+		ai.memoryTypeIndex = host ? memType( br.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT )
+			: memType( br.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT );
+		if ( ai.memoryTypeIndex == UINT32_MAX && !host )
 			ai.memoryTypeIndex = memType( br.memoryTypeBits, 0 );
 		ok = ai.memoryTypeIndex != UINT32_MAX && v.vkAllocateMemory( v.dev, &ai, nullptr, &D.recMem ) == VK_SUCCESS
 			&& v.vkBindBufferMemory( v.dev, D.rec, D.recMem, 0 ) == VK_SUCCESS;
+		void * p = nullptr;
+		if ( ok && host )
+			ok = v.vkMapMemory( v.dev, D.recMem, 0, VK_WHOLE_SIZE, 0, &p ) == VK_SUCCESS;
+		D.recPtr = static_cast<std::uint8_t *>( p );
 	}
 	if ( !ok ) {
 		why = "the rain / snow record buffer (" + std::to_string( need ) + " bytes) failed";
 		return false;
 	}
 	D.recCap = cap;
+	D.recHost = host;
 	return true;
 }
 
@@ -346,6 +356,12 @@ bool precipRecord( std::string & why )
 	v.vkCmdBindDescriptorSets( F.cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, D.gLayout, 0, 1, &D.gSet, 0, nullptr );
 	v.vkCmdDraw( F.cmd, 4, std::uint32_t( D.n ), 0, 0 );
 	v.vkCmdEndRenderPass( F.cmd );
+	if ( D.recHost ) {  // gates only: the records -> the host's read after the fence
+		VkMemoryBarrier hb { VK_STRUCTURE_TYPE_MEMORY_BARRIER };
+		hb.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+		hb.dstAccessMask = VK_ACCESS_HOST_READ_BIT;
+		v.vkCmdPipelineBarrier( F.cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_HOST_BIT, 0, 1, &hb, 0, nullptr, 0, nullptr );
+	}
 	return true;
 }
 }  // namespace
@@ -411,7 +427,7 @@ bool precipRun( const PrecipRun & t, std::string & why )
 		return breakOff( "rain / snow's pipeline is not at the frame's sample count" );
 	const bool look = t.look && ( t.red & 16 ) == 0;  // red 16: a look run through the plain pipelines
 	const VkDeviceSize recStride = look ? kPrecipLookRecBytes : kPrecipRecBytes;
-	if ( !precipRecords( VkDeviceSize( t.n ) * recStride, w ) )
+	if ( !precipRecords( VkDeviceSize( t.n ) * recStride, t.recOut != nullptr, w ) )
 		return breakOff( w );
 	FxNames names;
 	names.add( T.colorTex );
@@ -508,6 +524,11 @@ bool precipRun( const PrecipRun & t, std::string & why )
 	std::memcpy( F.vp, t.vp, sizeof( F.vp ) );
 	if ( !fxCross( names, w ) )
 		return breakOff( w );  // nothing signals vkDone: GL does not wait it; GL draws its points this frame
+	if ( t.recOut && D.recPtr ) {  // gates only: wait the run, copy its records out
+		v.vkWaitForFences( v.dev, 1, &F.fence, VK_TRUE, 1000000000ull );
+		F.pending = false;
+		std::memcpy( t.recOut, D.recPtr, size_t( recBytes ) );
+	}
 	const double ms = nowMs() - t0;
 	S.runs++;
 	S.cpuMs += ms;

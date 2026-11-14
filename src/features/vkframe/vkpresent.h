@@ -100,6 +100,8 @@ static_assert( sizeof( ToneJob ) == 112, "ToneJob is the shader's push constant 
 bool toneFrame( int w, int h, int samples, unsigned & color, unsigned & ds, std::string & why );
 //! color is the live shared frame's colour name (a shutdown or a remake drops it)
 bool toneFrameIs( unsigned color );
+//! lane VKFAR2 (row L8): the live shared frame's size (false: none in this context)
+bool toneFrameSize( int & w, int & h );
 //! the shared frame goes (GL current)
 void toneFrameDrop();
 /* Lane VKBLOOM1: the Fusion Shaders bloom (cellbloom.cpp, mode 3) on the present device, in the tone pass's command
@@ -688,6 +690,7 @@ struct PrecipRun
 	std::uint8_t cs[kT_precipcsBytes] = {};  //!< fxPack( cell_precip_gpu, kT_precipcs ) (+ kT_preciplookcs for a look run)
 	std::uint8_t ps[kT_preciplookpsBytes] = {};  //!< fxPack( cell_precip_gpu, kT_precipps ) (+ kT_preciplookps for a look run)
 	int red = 0;                    //!< gates only: 1 the cull radius 0, 2 the strip's last two corners swapped, 4 no near fade, 8 the air dropped, 16 the look dropped (the plain pipelines draw a look run)
+	std::uint8_t * recOut = nullptr;  //!< gates only: the run's records read back (n x 112 bytes, 192 a look run; host-visible records, a fence wait); null in the app
 };
 /* GL current, the tone frame bound, cell_precip_gpu's uniforms set: one run of particles on Vulkan, a record pass then
  * instanced quads (depth LEQUAL no write, blend SRC_ALPHA / ONE_MINUS_SRC_ALPHA, stencil ALWAYS ref 1 REPLACE mask 0x03,
@@ -955,6 +958,9 @@ template <class Fn> bool fxTexOf( Fn * fn, unsigned prog, const char * sampler, 
 class QOpenGLWindow;
 class QPaintDevice;
 #include <functional>
+#include <iterator>
+#include <map>
+bool wwFogLeakShaderDefine();  // src/features/air/cellvolair.cpp: WW_CELL_FOGLEAK in the cell programs (precipDraw)
 namespace WwVkPresent
 {
 /* round 10: what the view's QPainter draws through: the window (its back buffer) or, while the view is on Vulkan, a
@@ -975,5 +981,89 @@ void lightSay( int pass, bool wanted, const char * glWhy );
 void csmSay( bool wanted, const char * glWhy );
 //! lane VKOBJ1: the objects' prepass route line ("vk obj:"), one a 5 s window while on Vulkan
 void objSay( bool wanted, const char * glWhy );
+//! lane VKFAR2 (row L8): rain / snow's route line ("vk precip:"), one a 5 s window while on Vulkan
+void precipSay( bool wanted, const char * glWhy );
+
+/* lane VKFAR2 (row L8, the app hook): cellprecip.cpp's run, GL current, prog (cell_precip_gpu / cell_precip_look) in use
+ * with the run's uniforms set, the atlas on pcTex's unit (pcTexN's for a look run), the draw framebuffer bound. On the
+ * present device's tone frame with the view on Vulkan: the run through precipRun. false: GL draws its points (the reason
+ * in the "vk precip:" line); a target other than the tone frame returns false with no line. Red WW_VKVIEW_PRECIP_RED=1:
+ * GL's. GL enums as numbers (this header carries no GL header). */
+template <class Fn> bool precipDraw( Fn * fn, unsigned prog, int first, int count )
+{
+	int fbo = 0, color = 0;
+	fn->glGetIntegerv( 0x8CA6, &fbo );  // GL_DRAW_FRAMEBUFFER_BINDING
+	if ( fbo )
+		fn->glGetFramebufferAttachmentParameteriv( 0x8CA9, 0x8CE0, 0x8CD1, &color );  // DRAW_FRAMEBUFFER, COLOR_ATTACHMENT0, OBJECT_NAME
+	if ( !fbo || !toneFrameIs( unsigned( color ) ) )
+		return false;  // not the present device's tone frame: GL's, as before
+	if ( !shareWanted( "WW_VKVIEW_PRECIP_RED" ) ) {
+		precipSay( false, "red WW_VKVIEW_PRECIP_RED=1 or the view not on Vulkan" );
+		return false;
+	}
+	auto geti = [&]( const char * nm ) {
+		int v = 0;
+		const int l = fn->glGetUniformLocation( prog, nm );
+		if ( l >= 0 )
+			fn->glGetUniformiv( prog, l, &v );
+		return v;
+	};
+	static PrecipRun t;
+	t = PrecipRun();
+	std::string why;
+	bool drew = false;
+	const bool vol = geti( "volOn" ) != 0;
+	if ( fn->glGetUniformLocation( prog, "pcSeedS" ) < 0 ) {
+		precipOnGl( "the CPU field (cell_precip.prog): no Vulkan twin" );
+	} else if ( vol && wwFogLeakShaderDefine() ) {
+		// the loader injects WW_CELL_FOGLEAK into GL's program (glcontext.cpp): the air's far tail is the one-tail shape,
+		// the record pass the gate judged is the shape without it
+		precipOnGl( "WW_CELL_FOGLEAK compiled into GL's program: the record pass is the FOGLEAK=0 twin" );
+	} else {
+		toneFrameSize( t.w, t.h );
+		fn->glGetIntegerv( 0x0BA2, t.vp );  // GL_VIEWPORT
+		t.color = unsigned( color );
+		t.first = first;
+		t.n = count;
+		t.lit = geti( "cellInterior" ) != 0 || geti( "cellHasDir" ) != 0;  // the geometry stage's vpLight condition
+		t.roofOn = geti( "pcRoofOn" ) != 0;
+		t.look = fn->glGetUniformLocation( prog, "pcLook" ) >= 0;
+		t.fogged = vol || geti( "fogOn" ) != 0;
+		// twins: one a GL atlas (sizes differ by layer; the DDS never changes once loaded), one a slot for the air
+		static std::map<unsigned, char> atlasKeys;
+		static char airKeys[5];
+		static const char * const kAir[5] = { "atApTex", "volTex", "volTile", "volAirTerr", "volAirRainMap" };
+		static const int kAirType[5] = { 1, 1, 0, 2, 0 };
+		bool ok = fxTexOf( fn, prog, "pcTex", 0, t.tex[1], why );
+		if ( ok && t.tex[1].tex ) {
+			t.tex[1].twin = reinterpret_cast<std::uintptr_t>( &atlasKeys[t.tex[1].tex] );
+			t.tex[1].still = true;
+		}
+		for ( int k = 0; k < 5 && ok; k++ ) {
+			ok = fxTexOf( fn, prog, kAir[k], kAirType[k], t.tex[2 + k], why );
+			t.tex[2 + k].twin = reinterpret_cast<std::uintptr_t>( &airKeys[k] );
+		}
+		if ( ok && t.look ) {
+			ok = fxTexOf( fn, prog, "pcTexN", 0, t.tex[7], why );
+			if ( ok && t.tex[7].tex ) {
+				t.tex[7].twin = reinterpret_cast<std::uintptr_t>( &atlasKeys[t.tex[7].tex] );
+				t.tex[7].still = true;
+			}
+		}
+		if ( !ok ) {
+			precipOnGl( why.c_str() );
+		} else {
+			fxPack( fn, prog, kT_precipcs, int( std::size( kT_precipcs ) ), t.cs );
+			fxPack( fn, prog, kT_precipps, int( std::size( kT_precipps ) ), t.ps );
+			if ( t.look ) {
+				fxPack( fn, prog, kT_preciplookcs, int( std::size( kT_preciplookcs ) ), t.cs );
+				fxPack( fn, prog, kT_preciplookps, int( std::size( kT_preciplookps ) ), t.ps );
+			}
+			drew = precipRun( t, why );  // a refusal is counted there
+		}
+	}
+	precipSay( true, nullptr );
+	return drew;
+}
 }
 #endif

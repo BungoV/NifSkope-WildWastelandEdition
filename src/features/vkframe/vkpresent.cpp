@@ -3945,6 +3945,15 @@ bool toneFrameIs( unsigned color )
 	return color && tone().colorTex == color && tone().glCtx == gl().ctx;
 }
 
+bool toneFrameSize( int & w, int & h )
+{
+	const Tone & T = tone();
+	const bool live = T.colorTex && T.glCtx == gl().ctx;
+	w = live ? T.w : 0;
+	h = live ? T.h : 0;
+	return live;
+}
+
 void toneFrameDrop()
 {
 	Tone & T = tone();
@@ -9028,6 +9037,41 @@ void fogSay( bool wanted, const char * glWhy )
 		line = head + QStringLiteral( "integrate on Vulkan wanted, 0 frames run" );
 	if ( st.gl > 0 )
 		line += QStringLiteral( ", on GL %1 frames (last: %2)" ).arg( st.gl ).arg( QString::fromStdString( st.glWhy ) );
+	if ( st.fails > 0 )
+		line += QStringLiteral( ", %1 refused to GL (last: %2)" ).arg( st.fails ).arg( QString::fromStdString( st.failWhy ) );
+	said = line;
+	qInfo().noquote() << line;
+}
+
+// lane VKFAR2 (row L8): rain / snow's route line, one a 5 s window while it is wanted on Vulkan
+void precipSay( bool wanted, const char * glWhy )
+{
+	static QString said;
+	static double at = 0.0;
+	const QString head = QStringLiteral( "vk precip: " );
+	if ( !wanted ) {
+		const QString line = head + QStringLiteral( "runs on GL (%1)" ).arg( QString::fromUtf8( glWhy ? glWhy : "" ) );
+		if ( line != said ) {
+			said = line;
+			qInfo().noquote() << line;
+		}
+		return;
+	}
+	const double now = nowMs();
+	if ( now - at < 5000.0 && said.startsWith( head + QStringLiteral( "runs on V" ) ) )
+		return;
+	at = now;
+	const FxStat st = takePrecipStat();
+	QString line;
+	if ( st.runs > 0 )
+		line = head + QStringLiteral( "runs on Vulkan %1 (a record pass + instanced quads into the tone frame + stencil, one crossing "
+			"a run; %2 pipelines built in %3 ms; %4 input copies; drawing thread %5 ms, max %6)" )
+			.arg( st.runs ).arg( st.pipelines ).arg( st.buildMs, 0, 'f', 1 ).arg( st.copies )
+			.arg( st.cpuMs / st.runs, 0, 'f', 3 ).arg( st.maxMs, 0, 'f', 3 );
+	else
+		line = head + QStringLiteral( "runs on Vulkan wanted, 0 run" );
+	if ( st.gl > 0 )
+		line += QStringLiteral( ", on GL %1 runs (last: %2)" ).arg( st.gl ).arg( QString::fromStdString( st.glWhy ) );
 	if ( st.fails > 0 )
 		line += QStringLiteral( ", %1 refused to GL (last: %2)" ).arg( st.fails ).arg( QString::fromStdString( st.failWhy ) );
 	said = line;
