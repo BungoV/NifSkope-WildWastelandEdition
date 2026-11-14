@@ -1,7 +1,10 @@
 // lane VKWATER4 (L7): the Vulkan twin of cell_underwater.prog, frozen from water/cell_underwater_ps.hlsl at b418ac4a.
-// Two changes only: SV_SampleIndex is read by the per-sample twin alone (GL's cell_underwater.frag never reads
-// gl_SampleID, so the per-pixel draw must not shade per sample), and both outputs sit at location 0 (index 0 / 1) so
-// Vulkan's dual-source blend (ONE, SRC1_COLOR, ZERO, ONE) takes fragMul as SRC1.
+// Five changes only: SV_SampleIndex is read by the per-sample twin alone (GL's cell_underwater.frag never reads
+// gl_SampleID, so the per-pixel draw must not shade per sample); both outputs sit at location 0 (index 0 / 1) so
+// Vulkan's dual-source blend (ONE, SRC1_COLOR, ZERO, ONE) takes fragMul as SRC1; uwNearMax calls a precise copy of
+// uwWorld (DXC does not carry the caller's precise into a callee); the per-sample twin takes gl_FragCoord at the pixel
+// centre (GL's is the centre there, tests/vkframe/underdraw.cpp checks it; Vulkan's is the sample's position); fwidth
+// runs before the discard (DXC's discard is OpKill, after which the quad's derivatives are undefined).
 // profile: ps_6_0
 #include "WaterBindingsVk.hlsli"
 #define WW_HLSL_SRC 1	// the shared .hlsli files give their readable half
@@ -57,6 +60,15 @@ float3 uwWorld( float2 ndc, float z )
 	return float3( dot( uwRow[0], p ), dot( uwRow[1], p ), dot( uwRow[2], p ) );
 }
 
+// lane VKWATER4: uwNearMax's copy, precise inside (DXC does not carry the caller's precise into a callee)
+float3 uwWorldPrecise( float2 ndc, float z )
+{
+	precise float4 v = mul(float4( ndc, z, 1.0 ), uwInvProj);
+	precise float4 p = float4( v.xyz / v.w, 1.0 );
+	precise float3 r = float3( dot( uwRow[0], p ), dot( uwRow[1], p ), dot( uwRow[2], p ) );
+	return r;
+}
+
 // a sample this near the farthest one takes its fog: the law moves under 1/512 over the gap
 float uwEdgeTol()
 {
@@ -74,8 +86,9 @@ bool uwNearMax( float2 ndc, float dMax, float dS, float tol )
 {
 	if ( ( dS >= 1.0 ) != ( dMax >= 1.0 ) )
 		return false;
-	precise float3 a = uwWorld( ndc, dMax * 2.0 - 1.0 );
-	precise float3 b = uwWorld( ndc, dS * 2.0 - 1.0 );
+	precise float zA = dMax * 2.0 - 1.0, zB = dS * 2.0 - 1.0;
+	precise float3 a = uwWorldPrecise( ndc, zA );
+	precise float3 b = uwWorldPrecise( ndc, zB );
 	precise float e = distance( a, b );
 	return e <= tol;
 }
@@ -84,6 +97,8 @@ void frag_main()
 {
 	float d = uwDepth.Load( int3(int2( gl_FragCoord.xy ), 0) ).r;
 	float2 ndc = ( gl_FragCoord.xy - uwVp.xy ) / uwVp.zw * 2.0 - 1.0;
+	float3 Pn = uwWorld( ndc, -1.0 );
+	float PnW = fwidth( Pn.z );	// lane VKWATER4: before the discard (DXC's discard is OpKill: the quad's derivatives die with it)
 #ifdef WW_UW_SAMPLE
 	float dS = uwDepthMs.Load( int2( gl_FragCoord.xy ), gl_SampleID ).r;
 	if ( uwNearMax( ndc, d, dS, uwEdgeTol() ) )
@@ -100,7 +115,6 @@ void frag_main()
 	}
 	gl_SampleMask[0] = mask;
 #endif
-	float3 Pn = uwWorld( ndc, -1.0 );
 	float3 Pw = uwWorld( ndc, d * 2.0 - 1.0 );
 	float3 add, mul;
 	if ( uwLight != 0 && ( uwLightRed & 4 ) == 0 )
@@ -108,7 +122,7 @@ void frag_main()
 	else
 		wwUnderwater( uwEye, Pn, Pw, d >= 1.0, uwFog, uwColor, uwTint, uwRed,
 			( uwRed & 4 ) != 0 ? (float3)( 0.0 ) : -normalize( float3( uwRow[0].z, uwRow[1].z, uwRow[2].z ) ), add, mul );
-	float men = wwUnderMeniscus( Pn.z - uwFog.w, fwidth( Pn.z ) * uwMenK.x );	// 0 with the row off
+	float men = wwUnderMeniscus( Pn.z - uwFog.w, PnW * uwMenK.x );	// 0 with the row off
 	fragAdd = float4( add * ( 1.0 - men ), 0.0 );
 	fragMul = float4( mul * ( 1.0 - men ), 1.0 );
 }
@@ -136,6 +150,7 @@ SPIRV_Cross_Output main(SPIRV_Cross_Input stage_input)
     gl_FragCoord.w = 1.0 / gl_FragCoord.w;
 #if defined(WW_UW_SAMPLE)
     gl_SampleID = int(stage_input.gl_SampleID);
+    gl_FragCoord.xy = floor( gl_FragCoord.xy ) + 0.5;	// GL's per-sample gl_FragCoord: the pixel centre
 #endif
     frag_main();
     SPIRV_Cross_Output stage_output;

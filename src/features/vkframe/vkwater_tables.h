@@ -652,4 +652,25 @@ inline constexpr WaterBindName kN_waterPsOff[] = {
 	{ 149, "cellRooms" }, { 150, "cellShadow" }, { 153, "cellFarPlaced" }, { 154, "cellCtGbuf" }, { 155, "cellAoDecal" },
 	{ 156, "cellSsgi" }, { 157, "waterInfoBodies" }, { 158, "waterFlowIndex" }, { 159, "waterFlowAtlas" },
 };
+// lane VKWATER4 (L7) underwater_view_ps: LooseUniforms b31, 27 fields, 384 bytes; 14 bindings (water_tables.py). The
+// per-sample twin underwater_view_ms_ps reflects the same 27 fields and 14 bindings. Both read only b31, t104 uwDepth and
+// t105 uwDepthMs (notes/vkwater4/tools/spv_used.py): the waterInfo / waterFlow images and every sampler are declared, unread.
+inline constexpr FxField kT_waterUw[] = {
+	{ "waterInfoGrid", 0, 4, 1, 0, 0 }, { "waterInfoLayout", 16, 4, 1, 0, 0 }, { "waterInfoOn", 32, 1, 1, 1, 0 },
+	{ "waterSeam", 48, 4, 1, 0, 0 }, { "waterSeamBox", 64, 4, 1, 0, 0 }, { "waterFlowGrid", 80, 4, 1, 0, 0 },
+	{ "waterFlowLayout", 96, 4, 1, 0, 0 }, { "waterFlowOn", 112, 1, 1, 1, 0 }, { "waterDepthRed", 116, 1, 1, 1, 0 },
+	{ "waterDepthOn", 120, 1, 1, 1, 0 }, { "waterClearOn", 124, 1, 1, 1, 0 }, { "waterClearRed", 128, 1, 1, 1, 0 },
+	{ "uwLight", 132, 1, 1, 1, 0 }, { "uwLightRed", 136, 1, 1, 1, 0 }, { "uwSun", 144, 4, 1, 0, 0 },
+	{ "uwSky", 160, 3, 1, 0, 0 }, { "uwClass", 172, 1, 1, 1, 0 }, { "uwMenK", 176, 2, 1, 0, 0 },
+	{ "uwSamples", 184, 1, 1, 1, 0 }, { "uwInvProj", 192, 4, 1, 0, 4 }, { "uwRow", 256, 4, 3, 0, 0 },
+	{ "uwVp", 304, 4, 1, 0, 0 }, { "uwEye", 320, 3, 1, 0, 0 }, { "uwFog", 336, 4, 1, 0, 0 },
+	{ "uwColor", 352, 3, 1, 0, 0 }, { "uwTint", 368, 3, 1, 0, 0 }, { "uwRed", 380, 1, 1, 1, 0 },
+};
+inline constexpr int kT_waterUwBytes = 384;
+inline constexpr WaterBindName kN_waterUw[] = {
+	{ 31, "LooseUniforms" }, { 99, "waterInfoIndex" }, { 100, "waterInfoAtlas" }, { 101, "waterInfoBodies" },
+	{ 102, "waterFlowIndex" }, { 103, "waterFlowAtlas" }, { 104, "uwDepth" }, { 105, "uwDepthMs" },
+	{ 163, "waterInfoIndex" }, { 164, "waterInfoAtlas" }, { 165, "waterInfoBodies" }, { 166, "waterFlowIndex" },
+	{ 167, "waterFlowAtlas" }, { 168, "uwDepth" },
+};
 }  // namespace WwVkPresent
