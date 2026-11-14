@@ -131,6 +131,10 @@ bool fcFeatures( bool bc, bool cubeArray, std::string & why )
 	return true;
 }
 
+/* lane VKOBJ4: set around objTexMake's farTwin (vkobjtex.inc): a new twin gets no layout change of its own (no submit, so
+ * no drain or idle wait either); GL's semaphore signal at the batch's flush hands it over as GENERAL */
+bool fcLayoutByGl = false;
+
 // one image the present device makes and GL imports, sampled only (BC has no attachment use); a cube array is
 // cube-compatible with layers = 6 x cubes. GENERAL from the start, as makeShared's.
 bool fcMake( Shared & s, const FcFormat & f, GLenum glFmt, int type, int w, int h, int layers, int levels, std::string & why )
@@ -194,8 +198,8 @@ bool fcMake( Shared & s, const FcFormat & f, GLenum glFmt, int type, int w, int 
 	VkCommandBuffer cmd = VK_NULL_HANDLE;
 	VkFence fence = VK_NULL_HANDLE;
 	VkFenceCreateInfo fi { VK_STRUCTURE_TYPE_FENCE_CREATE_INFO };
-	bool laid = false;
-	if ( v.vkAllocateCommandBuffers( v.dev, &cai, &cmd ) == VK_SUCCESS && v.vkCreateFence( v.dev, &fi, nullptr, &fence ) == VK_SUCCESS ) {
+	bool laid = fcLayoutByGl;
+	if ( !laid && v.vkAllocateCommandBuffers( v.dev, &cai, &cmd ) == VK_SUCCESS && v.vkCreateFence( v.dev, &fi, nullptr, &fence ) == VK_SUCCESS ) {
 		VkCommandBufferBeginInfo bi { VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
 		bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
 		v.vkBeginCommandBuffer( cmd, &bi );
@@ -477,8 +481,10 @@ bool farTwin( std::uintptr_t key, int type, int w, int h, int layers, unsigned g
 			return true;
 		}
 	}
-	drain();
-	v.vkDeviceWaitIdle( v.dev );
+	if ( !fcLayoutByGl || it != C.twins.end() ) {
+		drain();
+		v.vkDeviceWaitIdle( v.dev );
+	}
 	if ( it != C.twins.end() ) {
 		C.st.mb -= it->second.mb;
 		sharedFree( it->second, it->second.glCtx == g.ctx );

@@ -77,6 +77,9 @@ void forgetAll();
  * handle joins with the twin made before its texture's (must FAIL the gate) */
 bool vkTexOn();
 int vkTexRed();
+/* lane VKOBJ4: WW_VKOBJ_SHADE=1 (with vkTexOn): a cell run draws on Vulkan through its program's twin; the cell frame's
+ * colour and depth / stencil are then shared targets (cellhdr: objBlFrame) */
+bool vkShadeOn();
 //! the cache deletes tex next (its handles were dropped): a twin leaves the table, its Vulkan half at the next frame
 void texGone( GLuint tex );
 
@@ -112,8 +115,10 @@ bool runPoolPeek( const Shape * sh, std::uintptr_t & idxOff, std::int32_t & base
 //! writes the staged row (a follower's) and returns its base instance
 std::uint32_t runRow();
 void runCmd( GLsizei count, std::uintptr_t offBytes, std::uintptr_t idxOff, std::int32_t baseVertex, std::uint32_t rel );
-//! one multi-draw for the run; false = no follower joined (the caller draws the leader as before)
-bool runIssue( NifSkopeOpenGLContext::GLFunctions * f );
+/*! one multi-draw for the run; false = no follower joined (the caller draws the leader as before). lane VKOBJ4:
+ * WW_VKOBJ_SHADE=1 (with WW_VKOBJ_TEX=1) draws it on Vulkan through `prog`'s twin when the frame's targets are shared
+ * (WwVkPresent::objBlShade), else GL draws it; the `vk objshade:` line says which and why */
+bool runIssue( NifSkopeOpenGLContext::GLFunctions * f, const NifSkopeOpenGLContext::Program * prog = nullptr );
 }
 
 #endif

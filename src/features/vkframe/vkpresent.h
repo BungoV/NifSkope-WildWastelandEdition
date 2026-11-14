@@ -175,7 +175,9 @@ void toneCachePath( const std::string & path );
  * name; another shape: the old one goes first (a full drain). false: why; tex 0 (the owner makes GL's own). The GL
  * texture has NEAREST filters; the owner sets its own. levels (lane VKAIR1): a mip chain (colour formats; the clouds'
  * noise volumes), the owner fills each level. samples (lane VKOBJ1): a multisample 2D (type 0, one level; the objects'
- * depth prepass in GL_DEPTH_COMPONENT24 / 32F), GL_TEXTURE_2D_MULTISAMPLE with fixed sample locations. */
+ * depth prepass in GL_DEPTH_COMPONENT24 / 32F), GL_TEXTURE_2D_MULTISAMPLE with fixed sample locations. type 3 (lane
+ * VKOBJ4): a cube array of w x w, d layers (6 a cube, as farTwin counts) as GL_TEXTURE_CUBE_MAP_ARRAY (the lamps' D16 shadow
+ * cubes, cellShadow). */
 bool sharedTarget( std::uintptr_t key, int type, int w, int h, int d, unsigned glFmt, unsigned & tex, std::string & why,
 	int levels = 1, int samples = 1 );
 //! tex is key's live shared name in the current GL context (a shutdown drops every one: the owner makes GL's own again)
@@ -190,6 +192,29 @@ struct SharedStat
 	std::string failWhy;
 };
 SharedStat takeSharedStat();
+
+/* Lane VKOBJ4 item 2: the bloom chain (vkframe.cpp) on the present device. shareDevice (GL current): the present device,
+ * made on GL's GPU if it is not yet (the view off too), and its handles for wwVkFrameSetDevice. onWorker: fn( arg ) runs
+ * on the present worker (the queue is the worker's alone), the caller waits for it; false: fn's false (why). borrowTarget:
+ * another owner's image on the present device joins the shared targets as a borrowed entry (objBlFrameRead finds GL's
+ * framebuffer over it), never freed here; an image of another device is refused. GL current. */
+struct Device
+{
+	void * instance = nullptr, * physical = nullptr, * device = nullptr, * queue = nullptr, * getDeviceProcAddr = nullptr;
+	unsigned family = 0;
+	unsigned char uuid[16] = {};
+};
+bool shareDevice( GlProc gl, Device & out, std::string & why );
+bool onWorker( bool ( *fn )( void * arg, std::string & why ), void * arg, std::string & why );
+struct Borrow
+{
+	void * device = nullptr, * image = nullptr, * view = nullptr;
+	void * attView = nullptr;  //!< a depth / stencil format's depth and stencil view (the render pass attachment)
+	unsigned tex = 0, glFmt = 0;  //!< the GL name in the current context; GL_RGBA16F / GL_DEPTH24_STENCIL8 / GL_DEPTH32F_STENCIL8
+	int w = 0, h = 0, samples = 1;
+};
+bool borrowTarget( std::uintptr_t key, const Borrow & b, std::string & why );
+void borrowDrop( std::uintptr_t key );
 
 /* Lane VKSHARE1: the Modern temporal AA (gametaa.cpp, tier High) on the present device. GL blits the frame's colour and
  * depth into shared targets (sharedTarget) as before; taaRun: GL signals, the worker submits the camera vectors, the

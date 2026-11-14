@@ -776,7 +776,7 @@ bool BSShape::wwMdiDraw( const void * hint, const std::vector<std::uint32_t> * r
 		joined.push_back( f );
 		wwCellAnimObjNoteDraw( static_cast<const Node *>( f ) );	// lane FIREFX1: a follower draws in its leader's multi-draw
 	}
-	if ( !WwBl::runIssue( context->fn ) )
+	if ( !WwBl::runIssue( context->fn, prog ) )
 		return false;
 	PassTime::countDraw( 1 );
 	// the geometry cache's use stamps, as each follower's own bind would leave them (no vertex array bind)

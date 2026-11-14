@@ -7,6 +7,7 @@ BSD License - see nifskope.h
 /* lane MODULES1 (lights): the lamp half of the cell light law, split out of gl/celllights.cpp: flicker, XEMI
  * lights, gobo patterns, fog scale, .nifx fixture lights, the lamp cube shadows and the light spheres. */
 #include "gl/celllights.h"
+#include "features/vkframe/vkpresent.h"	// lane VKOBJ4: the shadow cubes as a shared cube array (WW_VKOBJ_SHADE)
 #include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 
 #include "cellclustergl.h"
@@ -582,16 +583,32 @@ static void shadowDump( Scene * scene )
 //! the depth cube array (kShadowSlots cubes of face x face) and its framebuffer, once
 static void shadowAlloc( Renderer * r, Gpu & g, int face )
 {
+	const std::uintptr_t key = reinterpret_cast<std::uintptr_t>( &g.shTex );
+	if ( g.shTex && g.shShared && !WwVkPresent::sharedTargetIs( key, g.shTex ) ) {
+		g.shTex = 0;	// lane VKOBJ4: the present device dropped it (its GL name went with it); the slots are empty
+		g.shShared = false;
+		std::fill( g.shSlot, g.shSlot + kShadowSlots, -1 );
+		g.shStamp++;
+	}
 	if ( g.shTex )
 		return;
 	auto fn = r->fn;
 	GLint prevActive = 0;
 	fn->glGetIntegerv( GL_ACTIVE_TEXTURE, &prevActive );
-	fn->glGenTextures( 1, &g.shTex );
+	// lane VKOBJ4: under WW_VKOBJ_SHADE a shared cube array (the Vulkan runs' cellShadow), else GL's own
+	unsigned shared = 0;
+	std::string why;
+	if ( wwEnv( "WW_VKOBJ_SHADE" ).trimmed() == "1"
+		&& WwVkPresent::sharedTarget( key, 3, face, face, 6 * kShadowSlots, GL_DEPTH_COMPONENT16, shared, why ) && shared ) {
+		g.shTex = shared;
+		g.shShared = true;
+	} else
+		fn->glGenTextures( 1, &g.shTex );
 	fn->glActiveTexture( GLenum( GL_TEXTURE0 + kShadowUnit ) );
 	fn->glBindTexture( GL_TEXTURE_CUBE_MAP_ARRAY, g.shTex );
-	fn->glTexImage3D( GL_TEXTURE_CUBE_MAP_ARRAY, 0, GL_DEPTH_COMPONENT16, face, face, 6 * kShadowSlots, 0,
-		GL_DEPTH_COMPONENT, GL_UNSIGNED_SHORT, nullptr );
+	if ( !g.shShared )
+		fn->glTexImage3D( GL_TEXTURE_CUBE_MAP_ARRAY, 0, GL_DEPTH_COMPONENT16, face, face, 6 * kShadowSlots, 0,
+			GL_DEPTH_COMPONENT, GL_UNSIGNED_SHORT, nullptr );
 	fn->glTexParameteri( GL_TEXTURE_CUBE_MAP_ARRAY, GL_TEXTURE_MIN_FILTER, GL_LINEAR );
 	fn->glTexParameteri( GL_TEXTURE_CUBE_MAP_ARRAY, GL_TEXTURE_MAG_FILTER, GL_LINEAR );
 	fn->glTexParameteri( GL_TEXTURE_CUBE_MAP_ARRAY, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE );
@@ -601,7 +618,8 @@ static void shadowAlloc( Renderer * r, Gpu & g, int face )
 	fn->glTexParameteri( GL_TEXTURE_CUBE_MAP_ARRAY, GL_TEXTURE_COMPARE_FUNC, GL_LEQUAL );
 	fn->glBindTexture( GL_TEXTURE_CUBE_MAP_ARRAY, 0 );
 	fn->glActiveTexture( GLenum( prevActive ) );
-	fn->glGenFramebuffers( 1, &g.shFbo );
+	if ( !g.shFbo )
+		fn->glGenFramebuffers( 1, &g.shFbo );
 	g.shFace = face;
 }
 
@@ -1399,9 +1417,13 @@ void wwCellShadowPass( Scene * scene )
 	// lane LAMPSHADOW1: the tier's face edge; a change remakes the cube array and empties the slots
 	const int face = wwCellLampShadowFace();
 	if ( g.shTex && g.shFace != face ) {
-		r->fn->glDeleteTextures( 1, &g.shTex );
+		if ( g.shShared )
+			WwVkPresent::sharedTargetDrop( reinterpret_cast<std::uintptr_t>( &g.shTex ) );	// lane VKOBJ4: its GL name too
+		else
+			r->fn->glDeleteTextures( 1, &g.shTex );
 		r->fn->glDeleteFramebuffers( 1, &g.shFbo );
 		g.shTex = g.shFbo = 0;
+		g.shShared = false;
 		std::fill( g.shSlot, g.shSlot + kShadowSlots, -1 );
 		g.shStamp++;
 	}

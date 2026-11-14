@@ -15,7 +15,7 @@ namespace WwVkFrame
 
 enum class Side { Gl, Vk };
 
-/* Which side runs a moved pass this frame. Vulkan only with the device registered (bakert's, wwVkFrameSetDevice), the
+/* Which side runs a moved pass this frame. Vulkan only with the device registered (the present device's, wwVkFrameSetDevice), the
  * GL import extensions present, every pipeline of the pass already built, and the pass's red off (WW_VKPOST_RED=1).
  * `why` is the `vk frame:` line's reason. */
 struct Route

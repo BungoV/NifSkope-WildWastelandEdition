@@ -100,6 +100,7 @@ struct Gpu
 {
 	GLuint buf = 0, tex = 0;
 	bool texAttached = false;	// lane PERF1: the buffer texture keeps its buffer across glBufferData; attached once
+	bool bufStored = false;	// lane VKOBJ4: buf is a store (WW_VKOBJ_SHADE: objBlTexelFill; the Vulkan runs read it in place)
 	quint64 bufLiveGen = 0;	// lane TESTDRIVER1: a live set (light copies, reds) rebuilds the buffer
 	std::uint64_t bufXemiStamp = 0;	// lane LIGHTS4: the XEMI light factors the buffer was built with
 	float bufCurve = 1.0f;	// lane LIGHTPHYS1: the intensity curve folded into the colours (menu sets bump no switch generation)
@@ -138,12 +139,14 @@ struct Gpu
 	GLuint bloomTex = 0;
 	GLuint farSlotBuf = 0, farSlotTex = 0, farRecBuf = 0, farRecTex = 0, farPlacedTex = 0;
 	GLuint farSlotAtt = 0, farRecAtt = 0;	// lane CELLUNI1: the buffer each far texture holds (kept across glBufferData)
+	bool farSlotStored = false, farRecStored = false;	// lane VKOBJ4: stores, as bufStored
 	const void * farDoc = nullptr;
 	int farVersion = 0;
 	const void * bloomDoc = nullptr;
 	int bloomVersion = 0;
 	// the depth cube array, the light each slot holds (-1 free), and a stamp the light buffer re-uploads on
 	GLuint shTex = 0, shFbo = 0;
+	bool shShared = false;	// lane VKOBJ4: shTex is a shared cube array on the present device (WW_VKOBJ_SHADE, keyed &shTex)
 	const void * shDoc = nullptr;
 	int shVersion = 0;
 	int shSlot[kShadowSlots];
