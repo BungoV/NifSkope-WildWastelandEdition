@@ -4,7 +4,9 @@ uniform blocks (name, data size, member names and offsets), vertex attributes (n
   python -I -X utf8 tests/hlsllive/a2_iface.py <tree> <spv dir from a1_sweep> [--only substr] [--plant]
 A uniform the GLSL keeps active and the SPIR-V program lacks is 'missing' (the app's glUniform* on it would be silently
 dropped: the program must fall back unless the GLSL one is dead); a type/size/offset difference is 'differ'.
---plant renames one uniform in memory: the gate must then report it."""
+--plant renames one uniform in memory: the gate must then report it. A loose bool uniform reported GL_BOOL by GLSL and
+GL_INT by SPIR-V (spvgl declares it int on purpose) is the same; --plant-type turns one such uniform's SPIR-V type into
+GL_FLOAT in memory and the program must then show 'differ'."""
 import ctypes, os, sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -16,6 +18,17 @@ import shader_link_check as slc
 
 # GL sampler / image / buffer-sampler types (the ones whose loss would be a real hole, not a dead uniform)
 SAMPLER_TYPES = set(range(0x8B5E, 0x8B63)) | set(range(0x8DC0, 0x8DD0)) | set(range(0x8DD0, 0x8DDA)) | {0x8DC1, 0x8DC2, 0x8DC3, 0x8DC4, 0x8DC5, 0x8DC6, 0x8DC7, 0x8DC8, 0x8DC9, 0x8DCA, 0x8DCB, 0x8DCC, 0x8DCD, 0x8DCE, 0x8DCF, 0x8DD2, 0x8DD3, 0x8DD4, 0x8DD5, 0x8DD6, 0x8DD7, 0x8DD8, 0x8DD9, 0x8DC0, 0x9108, 0x9109, 0x910A, 0x910B, 0x910C, 0x910D, 0x910E, 0x910F, 0x9110, 0x9111, 0x9112, 0x9113, 0x9114, 0x9115, 0x9116, 0x900D, 0x900E, 0x900F, 0x9010, 0x9011}
+
+# HLSLSRC1 11-14: a loose bool uniform is declared int on purpose by spvgl (the app sets it with glUniform1i; see
+# spvgl.int_twin), so the GLSL program reports GL_BOOL[_VECn] where the SPIR-V one reports GL_INT[_VECn]. Same size: not
+# a difference. Loose uniforms only (block members keep their own bool/uint rule); --plant-type proves a real type change
+# on such a uniform still differs.
+BOOL_AS_INT = {0x8B56: 0x1404, 0x8B57: 0x8B53, 0x8B58: 0x8B54, 0x8B59: 0x8B55}
+
+
+def same_loose(g, s):
+    return g == s or (BOOL_AS_INT.get(g[0]) == s[0] and g[1:] == s[1:])
+
 
 STG = {'vert': 'vs', 'frag': 'ps', 'geom': 'gs', 'tesc': 'hs', 'tese': 'ds'}
 GLTYPE = {'vert': 0x8B31, 'frag': 0x8B30, 'geom': 0x8DD9, 'tesc': 0x8E88, 'tese': 0x8E87}
@@ -118,6 +131,7 @@ def main():
     tree, spvdir = a[0], a[1]
     only = a[a.index('--only') + 1] if '--only' in a else None
     plant = '--plant' in a
+    plant_type = '--plant-type' in a
     glctx.context()
     units = GLint(0); glctx.gl.glGetIntegerv(0x8872, ctypes.byref(units))
     units = min(max(units.value, 1), 32) - 2
@@ -153,6 +167,12 @@ def main():
         if plant and s[2]:
             k = sorted(s[2])[0]
             s[2][k] += 4          # a planted block-size fault: the gate must report it
+        if plant_type:
+            # a planted type change on a bool uniform spvgl declared int (int -> float): the bool/int pair must not hide it
+            ks = sorted(k for k, v in g[0].items() if k in s[0] and v[0] in BOOL_AS_INT and same_loose(v, s[0][k]))
+            if ks:
+                s[0][ks[0]] = (0x1406,) + s[0][ks[0]][1:]
+                print('PLANT-TYPE', name, ks[0], 'GL_INT -> GL_FLOAT', flush=True)
         tot['programs'] += 1
         miss, diff, dropped = [], [], []
         for ix, label in ((0, 'uniform'), (1, 'blockmember'), (3, 'attrib')):
@@ -164,6 +184,8 @@ def main():
                         dropped.append(k)
                         continue
                     miss.append('%s %s' % (label, k))
+                elif ix == 0 and same_loose(v, s[ix][k]):
+                    continue
                 elif s[ix][k] != v and not (ix == 1 and s[ix][k][0] == 5125 and v[0] == 35670 and s[ix][k][1:] == v[1:]):   # a bool member is a uint in SPIR-V
                     diff.append('%s %s glsl=%s spv=%s' % (label, k, v, s[ix][k]))
         for k, v in g[2].items():
