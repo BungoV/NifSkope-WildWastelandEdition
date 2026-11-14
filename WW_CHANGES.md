@@ -37,6 +37,19 @@ Changed, not built, not checked live.
   against GL (107 of 1969920 values 1 ulp apart), red ssgie (the emission read as zero) FAILS (274244 differ);
   lightview.sh runs it through the app's lightRun: BOUND, red FAILS. sg_A / sg_B / sg_S unchanged (27 / 106 / 231).
 
+## VKFAR3 A1 AO methods (2026-11-14): XeGTAO and GTAO on Vulkan (WW_VKVIEW=1), gate red
+
+Changed, not built, not checked live. With the view off nothing changes.
+
+- With the view on Vulkan, the XeGTAO and GTAO methods (WW_CELL_AO_METHOD) run in the same Vulkan pass as the
+  obscurance: depth mips, the AO term and its edges, the two blur stages. Red WW_VKVIEW_AOX_RED=1 keeps them on GL.
+  Log line `vk aox:` says which route ran and why.
+- HBAO stays on GL: its first step can land on the pixel itself, where two equal positions give a random direction
+  (3.6 % of pixels differ by up to 239 codes between GL and Vulkan; neither is right). Fixing that changes GL's shader.
+- Offline gate tests/vklight/light.sh on the mem_main dump: all three jobs within their bars, 3 reds FAIL. On mem_base
+  (lightview.sh) the first depth mip of the synthetic job has 1 value at 5 ulp against its 4 ulp bar (the AO result
+  itself is within its bar): LIGHTVIEW is red until that bar is decided.
+
 ## VKFAR2 L8 slice 1 (2026-11-14): rain / snow pass for the Vulkan view, not wired in (gate red)
 
 Changed, not built, not checked live. Nothing in the app calls it yet, so no frame changes.
