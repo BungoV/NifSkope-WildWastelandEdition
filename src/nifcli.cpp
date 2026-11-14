@@ -8289,6 +8289,13 @@ int nifskopeCliMain( const QStringList & args )
 		err().flush();
 		return rc;
 	}
+	// `farskymap` writes the far sky-visibility map from a probefar folder (lane FARSKYMAP1; src/features/gi/probefar.cpp)
+	if ( cmd == QLatin1String( "farskymap" ) ) {
+		const int rc = farSkyMapCli( a );
+		out().flush();
+		err().flush();
+		return rc;
+	}
 	// lane CELLSPAWN1: where a cell's camera starts, and the eye-height check (src/cellspawn.cpp)
 	if ( cmd == QLatin1String( "cellspawn" ) ) {
 		const int rc = cellSpawnCli( a );

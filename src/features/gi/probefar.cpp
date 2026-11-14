@@ -8,6 +8,7 @@
 #include "features/gi/probebake.h"
 #include "features/far-lod/lodvfile.h"
 #include "features/far-lod/lodmfile.h"
+#include "features/far-lod/farskymap.h"	// lane FARSKYMAP1
 
 #include "ddstxt16.hpp"
 
@@ -885,5 +886,48 @@ int probeFarCli( const QStringList & args )
 		  << "probes " << br.probes << "\n"
 		  << "world " << QFileInfo( fs.lodl ).completeBaseName() << "\n";
 	}
+	// lane FARSKYMAP1: the far sky map of the same probes; the cell view reads it beside the .lodl
+	return farSkyMapWrite( outDir, QDir( outDir ).filePath( QFileInfo( fs.lodl ).completeBaseName() + QStringLiteral( ".farsky" ) ) );
+}
+
+int farSkyMapWrite( const QString & dir, const QString & outFile )
+{
+	const QStringList tbks = QDir( dir ).entryList( { QStringLiteral( "sector_*.tbk" ) }, QDir::Files, QDir::Name );
+	std::vector<FarSkyMap::Probe> probes;
+	for ( const QString & t : tbks ) {
+		const QString p = QDir::toNativeSeparators( QDir( dir ).filePath( t ) );
+		if ( !FarSkyMap::readTbkProbes( QFile::encodeName( p ).toStdString(), probes ) ) {
+			std::fprintf( stderr, "far: sky map: %s refused (not a probe bake v3..v5)\n", qPrintable( p ) );
+			return 1;
+		}
+	}
+	if ( probes.empty() ) {
+		std::fprintf( stderr, "far: sky map: no probes in %s (%d sector files)\n", qPrintable( dir ), int( tbks.size() ) );
+		return 1;
+	}
+	const FarSkyMap::Map m = FarSkyMap::build( probes );
+	const QString out = QDir::toNativeSeparators( outFile );
+	if ( !FarSkyMap::save( m, QFile::encodeName( out ).toStdString() ) ) {
+		std::fprintf( stderr, "far: sky map: cannot write %s\n", qPrintable( out ) );
+		return 1;
+	}
+	std::fprintf( stdout, "far: sky map %s -- %s, from %d probes in %d sector files; copy it beside the .lodl\n",
+		qPrintable( out ), FarSkyMap::census( m ).c_str(), int( probes.size() ), int( tbks.size() ) );
 	return 0;
+}
+
+int farSkyMapCli( const QStringList & args )
+{
+	QString dir, out;
+	for ( int i = 0; i < args.size(); i++ ) {
+		if ( args[i] == QLatin1String( "--out" ) && i + 1 < args.size() )
+			out = args[++i];
+		else if ( dir.isEmpty() )
+			dir = args[i];
+	}
+	if ( dir.isEmpty() || out.isEmpty() ) {
+		std::fprintf( stderr, "usage: farskymap <probefar folder with sector_*.tbk> --out <world>.farsky\n" );
+		return 2;
+	}
+	return farSkyMapWrite( dir, out );
 }

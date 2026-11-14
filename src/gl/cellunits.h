@@ -94,6 +94,7 @@ constexpr int WaterFlowAtlas = 67;	// lane WATERFLOWBAKE1: its sparse tiles (usa
 
 constexpr int CloudSheetBase = 95;	// lane MODULES1 10c: the cloud shadow map's sheets, a cloud layer's texture each (sampler2D x 8: 95-102)
 constexpr int CloudSheetBlend = 103;	// lane MODULES1 10c: their blend targets during a weather change (sampler2D x 8: 103-110)
+constexpr int FarSkyMap = 111;	// lane FARSKYMAP1: the far sky-visibility map, one texel a cell (sampler2DArray RGBA16F, 2 layers; HLSL t63)
 constexpr int kAll[] = { Shadow, Bloom, Lut, Gi, Lights, Csm, Ao, Ssr, GiSlot, Room, FarSlot, FarRec, FarPlaced, AoDecal,
 	AirVol, AirInject, AirCluster, AirGbuf, AirTile, GiHalf, GiHalfKey, TerrShadow, ContactShadow, Ssgi, LightCluster,
 	CardData, CardFrames, ReflProbe, ReflGbufAlb, ReflGbufNd, AirNoise, AtmoAp, AtmoTrans, ContactGbuf, GiAir, CardDepth,
@@ -106,7 +107,7 @@ constexpr int kAll[] = { Shadow, Bloom, Lut, Gi, Lights, Csm, Ao, Ssr, GiSlot, R
 	AirLampAtlas, AirLampTable, AirLampRays, AirLampNow, AirLampHist, AirStbn, AirEnvHist,
 	CloudSheetBase, CloudSheetBase + 1, CloudSheetBase + 2, CloudSheetBase + 3, CloudSheetBase + 4, CloudSheetBase + 5,
 	CloudSheetBase + 6, CloudSheetBase + 7, CloudSheetBlend, CloudSheetBlend + 1, CloudSheetBlend + 2, CloudSheetBlend + 3,
-	CloudSheetBlend + 4, CloudSheetBlend + 5, CloudSheetBlend + 6, CloudSheetBlend + 7, RestirGi };
+	CloudSheetBlend + 4, CloudSheetBlend + 5, CloudSheetBlend + 6, CloudSheetBlend + 7, RestirGi, FarSkyMap };
 
 constexpr bool distinct()
 {

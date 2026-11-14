@@ -2,6 +2,10 @@
  * (features/lights/celllamps.cpp). Not an interface: only those two include it, after their own includes. */
 #pragma once
 
+#include <memory>
+
+namespace FarSkyMap { struct Map; }	// lane FARSKYMAP1 (src/features/far-lod/farskymap.h)
+
 namespace WwCellLightsP
 {
 
@@ -138,6 +142,10 @@ struct Gpu
 	GLuint bloomTex = 0;
 	GLuint farSlotBuf = 0, farSlotTex = 0, farRecBuf = 0, farRecTex = 0, farPlacedTex = 0;
 	GLuint farSlotAtt = 0, farRecAtt = 0;	// lane CELLUNI1: the buffer each far texture holds (kept across glBufferData)
+	// lane FARSKYMAP1: the far sky map's texture, the map it holds (kept alive while held) and the GPU's combined units
+	GLuint farSkyTex = 0;
+	std::shared_ptr<const FarSkyMap::Map> farSkyFor;
+	int maxUnits = -1;
 	const void * farDoc = nullptr;
 	int farVersion = 0;
 	const void * bloomDoc = nullptr;

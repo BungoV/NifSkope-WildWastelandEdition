@@ -60,6 +60,7 @@ static bool gl_FrontFacing;
 #include "../water/water_shore.hlsli"
 #include "land_swash.hlsli"
 #include "../weather/rain_wet.hlsli"
+#include "../far-lod/far_skymap.hlsli"
 #endif
 #if defined(WW_FARGROUND)
 #include "../far-ground/cell_farground.hlsli"
@@ -120,6 +121,7 @@ cbuffer LooseUniforms : register(b31, space0)
 #include "../water/water_shore.hlsli"
 #include "land_swash.hlsli"
 #include "../weather/rain_wet.hlsli"
+#include "../far-lod/far_skymap.hlsli"
 #endif
 #if defined(WW_FARGROUND)
 #include "../far-ground/cell_farground.hlsli"
@@ -461,6 +463,7 @@ float3 tonemap(float3 x)
 #include "../water/water_shore.hlsli"
 #include "land_swash.hlsli"
 #include "../weather/rain_wet.hlsli"
+#include "../far-lod/far_skymap.hlsli"
 
 #ifndef WW_LANDSPEC_NONE
 
@@ -1087,10 +1090,13 @@ void frag_main()
 		}
 		/* lane FIX1101A lodch: the share of the weather's ambient the GI did not replace takes the far placement's
 		 * baked sky visibility (src/features/far-lod/lodchsky.h: the byte read as the GI's share, so near (GI) and far (bake) agree at
-		 * the last cascade edge). Exactly 1 on every other shape: nothing changes there */
-		if ( wwFarSkyVis < 0.9999 ) {
-			color.rgb *= sqrt( max( wwFarSkyVis, 0.0 ) );
-			cellExtAmb *= max( wwFarSkyVis, 0.0 );
+		 * the last cascade edge). Exactly 1 on every other shape: nothing changes there.
+		 * FARSKYMAP1: with probe GI drawn, the far sky map (far-lod/far_skymap.hlsli) adds the cell probe's direction
+		 * on top; the byte stays the detail. Probes off: fsv = wwFarSkyVis bit for bit */
+		float fsv = farSkyVisAt( wwFarSkyVis, cellWorldPos( -ViewDir ), cellWorldDir( normal ) );
+		if ( fsv < 0.9999 ) {
+			color.rgb *= sqrt( max( fsv, 0.0 ) );
+			cellExtAmb *= max( fsv, 0.0 );
 		}
 	}
 	if ( cellOn && cellGiSky && ( cellRed & 131072 ) == 0 && !( !cellInterior && cellHasDir ) ) {

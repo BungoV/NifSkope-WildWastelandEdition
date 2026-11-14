@@ -34,6 +34,7 @@ BSD License - see nifskope.h
 #include "features/near/cellbindless.h"	// lane BINDLESS2FIX: the sway reaches the bindless twins
 #include "features/far-lod/cellfarinst.h"	// lane FARLOOK1101: and the far splat twins
 #include "features/far-lod/lodpreview.h"	// lane PERFLOAD1 P8: the LOD preview's forced slot
+#include "features/far-lod/farskymap.h"	// lane FARSKYMAP1: the far sky-visibility map
 #include "features/far-ground/cellfarground.h"	// lane FARDRAW1: the far ring 0's live ground
 #include "gl/glscene.h"
 #include "gl/glshape.h"
@@ -88,6 +89,7 @@ struct FarDoc
 	int fx0 = 0, fy0 = 0, fx1 = -1, fy1 = -1;   //!< the outermost built ring's footprint, cells (the far field's edge)
 	mutable float topZ = 3.4e38f; //!< lane PERFLOAD1: the drawn far field's highest point, scene units (wwCellFarLodNearCap)
 	mutable bool topAsked = false; //!< topZ measured from the scene's far shapes (once a far document)
+	std::shared_ptr<const FarSkyMap::Map> sky;   //!< lane FARSKYMAP1: <ws>.farsky beside the .lodl; null = none baked
 };
 
 QHash<const void *, FarDoc> & docs()
@@ -1615,6 +1617,23 @@ QString cellFarLodAppend( NifModel * nif, const QModelIndex & iRoot, const EsmWo
 		fd.fy1 = r[3];
 	}
 	say( farlod1CullRegister( nif, firstFarBlock ) );   // the cull table, when merged
+	/* lane FARSKYMAP1 (deck D6 s57-58): the far sky-visibility map probefar baked from its per-cell probes, one texel
+	 * a cell, read by every ring alike (world-positioned). No switch of its own: it draws while probe GI draws
+	 * (gl/celllights.cpp), else the per-vertex byte as before. */
+	if ( ours ) {
+		const QString skyPath = QFileInfo( lodlPath ).absoluteDir().filePath( ws + QStringLiteral( ".farsky" ) );
+		auto sky = std::make_shared<FarSkyMap::Map>();
+		if ( !QFileInfo::exists( skyPath ) )
+			say( QStringLiteral( "far sky map: none baked (%1): the per-vertex byte" ).arg( QDir::toNativeSeparators( skyPath ) ) );
+		else if ( !FarSkyMap::load( *sky, QFile::encodeName( QDir::toNativeSeparators( skyPath ) ).toStdString() ) || sky->empty() )
+			say( QStringLiteral( "far sky map: REFUSED %1 (not an FSKY v%2 map): the per-vertex byte" )
+				.arg( QDir::toNativeSeparators( skyPath ) ).arg( FarSkyMap::kFileVersion ) );
+		else {
+			fd.sky = sky;
+			say( QStringLiteral( "far sky map: %1 -- %2; drawn while probe GI draws, else the per-vertex byte" )
+				.arg( QDir::toNativeSeparators( skyPath ), QString::fromStdString( FarSkyMap::census( *sky ) ) ) );
+		}
+	}
 	docs().insert( nif, fd );
 	if ( !hooked().contains( nif ) ) {
 		hooked().insert( nif );
@@ -1817,6 +1836,12 @@ Vector3 wwCellFarLodOrigin( const Scene * scene )
 {
 	const FarDoc * f = farFor( scene );
 	return f ? Vector3( f->origin[0], f->origin[1], f->origin[2] ) : Vector3();
+}
+
+std::shared_ptr<const FarSkyMap::Map> wwCellFarSkyMap( const Scene * scene )
+{
+	const FarDoc * f = farFor( scene );
+	return f ? f->sky : nullptr;
 }
 
 quint64 wwGlPaintCount();	// glview.cpp
