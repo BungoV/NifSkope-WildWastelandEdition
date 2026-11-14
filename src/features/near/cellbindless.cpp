@@ -687,7 +687,8 @@ namespace WwBl
 {
 namespace
 {
-long long cellTried = 0, cellDrawn = 0, pbrmTried = 0, pbrmDrawn = 0;	// pbrm: pbrm_default (twin 4, `vk objpbrm:`)
+long long cellTried = 0, cellDrawn = 0, pbrmTried = 0, pbrmDrawn = 0;	// pbrm: pbrm_default / pbrm_cell / pbrm_cellcsm (twins 4-6, `vk objpbrm:`)
+int cellVar[3] = {}, pbrmVar[3] = {};	// of the drawn: lit (the light buffer), skinned, blended (ObjBlRunStat's, per route)
 std::string cellWhy, pbrmWhy;
 }  // namespace
 
@@ -695,10 +696,12 @@ bool vkCellDraw( const NifSkopeOpenGLContext::Program * prog, const GLsizei * co
 {
 	if ( !vkShadeOn() || !prog || n <= 0 || geo.on )
 		return false;
-	const int twin = prog->name == "fo4_cellcsm.prog" ? 3 : prog->name == "fo4_cell.prog" ? 2 : prog->name == "pbrm_default.prog" ? 4 : 0;
+	const std::string_view pn = prog->name;
+	const int twin = pn == "fo4_cellcsm.prog" ? 3 : pn == "fo4_cell.prog" ? 2 : pn == "pbrm_default.prog" ? 4 : pn == "pbrm_cell.prog" ? 5
+		: pn == "pbrm_cellcsm.prog" ? 6 : 0;
 	if ( !twin )
 		return false;
-	const bool pbrm = twin == 4;
+	const bool pbrm = twin >= 4;
 	( pbrm ? pbrmTried : cellTried )++;
 	std::string & lastWhy = pbrm ? pbrmWhy : cellWhy;
 	// the twins are the base variant (fo4_cell.frag@WW_CELL_FOGLEAK+WW_FRAME_UBO): the loader's other defines make another program
@@ -729,6 +732,7 @@ bool vkCellDraw( const NifSkopeOpenGLContext::Program * prog, const GLsizei * co
 	s.cmds = cmds.data();
 	s.nCmds = std::size_t( n );
 	s.red = pbrm ? redPbrm : red;
+	s.variants = pbrm ? pbrmVar : cellVar;
 	std::string why;
 	const bool drew = WwVkPresent::objCellShade( []( const char * name ) -> void * {
 		return reinterpret_cast<void *>( QOpenGLContext::currentContext()->getProcAddress( name ) );
@@ -1407,18 +1411,19 @@ void frame()
 		// lane VKWATER3 G4: the non-bindless fo4_cell / fo4_cellcsm shapes (vkCellDraw) drawn on Vulkan, and the last refusal
 		if ( cellTried ) {
 			WW_SWITCH_STATIC( QString, cellRed, wwEnv( "WW_VKVIEW_OBJCELL_RED" ).trimmed() );
-			std::snprintf( b, sizeof( b ), "vk objcell: shapes=%lld drawn=%lld gl=%lld twinImages=%d cells=%d%s%s%s%s", cellTried, cellDrawn,
-				cellTried - cellDrawn, r.twins, r.cells, cellWhy.empty() ? "" : " glWhy=", cellWhy.c_str(),
+			std::snprintf( b, sizeof( b ), "vk objcell: shapes=%lld drawn=%lld gl=%lld lit=%d skinned=%d blended=%d twinImages=%d cells=%d%s%s%s%s",
+				cellTried, cellDrawn, cellTried - cellDrawn, cellVar[0], cellVar[1], cellVar[2], r.twins, r.cells, cellWhy.empty() ? "" : " glWhy=", cellWhy.c_str(),
 				WwVkPresent::objCellRed( cellRed.toStdString().c_str() ) ? " RED " : "", cellRed.toStdString().c_str() );
 			if ( vkCellLine != b && wwFrameLog() ) {
 				vkCellLine = b;
 				std::fprintf( stderr, "%s\n", b );
 			}
 		}
-		// lane VKWATER3 G4: the non-bindless pbrm_default shapes, the same route (twin 4)
+		// lane VKWATER3 G4: the non-bindless pbrm_default / pbrm_cell / pbrm_cellcsm shapes, the same route (twins 4-6)
 		if ( pbrmTried ) {
 			WW_SWITCH_STATIC( QString, pbrmRed, wwEnv( "WW_VKVIEW_OBJPBRM_RED" ).trimmed() );
-			std::snprintf( b, sizeof( b ), "vk objpbrm: shapes=%lld drawn=%lld gl=%lld%s%s%s%s", pbrmTried, pbrmDrawn, pbrmTried - pbrmDrawn,
+			std::snprintf( b, sizeof( b ), "vk objpbrm: shapes=%lld drawn=%lld gl=%lld lit=%d skinned=%d blended=%d%s%s%s%s", pbrmTried, pbrmDrawn,
+				pbrmTried - pbrmDrawn, pbrmVar[0], pbrmVar[1], pbrmVar[2],
 				pbrmWhy.empty() ? "" : " glWhy=", pbrmWhy.c_str(), WwVkPresent::objCellRed( pbrmRed.toStdString().c_str() ) ? " RED " : "",
 				pbrmRed.toStdString().c_str() );
 			if ( vkPbrmLine != b && wwFrameLog() ) {
@@ -1427,6 +1432,8 @@ void frame()
 			}
 		}
 		cellTried = cellDrawn = pbrmTried = pbrmDrawn = 0;
+		std::fill( cellVar, cellVar + 3, 0 );
+		std::fill( pbrmVar, pbrmVar + 3, 0 );
 		cellWhy.clear();
 		pbrmWhy.clear();
 	}

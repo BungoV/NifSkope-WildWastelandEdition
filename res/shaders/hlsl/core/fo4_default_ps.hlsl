@@ -559,6 +559,7 @@ static float2 farLadder;
 
 void frag_main()
 {
+	bool killPx = false;	// the alpha test's discard, taken after the last texture sample (derivatives defined on every route)
 #ifdef WW_CELLLIGHTS
 	// finer side keeps noise < w (x = 1 + w), coarser keeps noise >= 1 - w (x = -(1 + w)): impostor_oct.frag's noise
 	if ( farLadder.x != 0.0 ) {
@@ -680,7 +681,7 @@ void frag_main()
 		// 0: always, 1: <, 2: ==, 3: <=, 4: >, 5: !=, 6: >=, 7: never
 		int	m = ( a < alphaThreshold ? 0x2B2B : ( a > alphaThreshold ? 0x7171 : 0x4D4D ) );
 		if ( ( m & ( 1 << alphaFlags ) ) == 0 )
-			discard;
+			killPx = true;
 		if ( ( alphaFlags & 8 ) != 0 )
 			color.a = a;
 	}
@@ -783,6 +784,8 @@ void frag_main()
 			v = C.rrr;                      // raw red: water depth
 		}
 		fragColor = float4( v, 1.0 );
+		if ( killPx )
+			discard;
 		return;
 	}
 
@@ -833,6 +836,8 @@ void frag_main()
 #ifdef WW_CELLLIGHTS
 	if ( cellOn && cellProbe == 20 && ( or( cellAoEarly == 1, cellAoEarly == 4 ) ) ) {	// lane PERF1: the obscurance pass reads the normal and depth only
 		fragColor = cellAoPassOut( normal, -ViewDir );
+		if ( killPx )
+			discard;
 		return;
 	}
 #endif
@@ -1318,6 +1323,8 @@ void frag_main()
 	fragColor.a = farSplatA;
 	cellEmitOut.a *= farSplatA;
 #endif
+	if ( killPx )
+		discard;
 }
 
 // the GLSL's macros named after a varying end with its main()
