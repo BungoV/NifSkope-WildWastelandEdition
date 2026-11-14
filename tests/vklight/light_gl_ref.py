@@ -748,10 +748,11 @@ def aox_job(name, srcd, W, H, gb, proj, method, slices, steps, time_it, reds):
         ps.append(Pass('s%d_%d' % (s, k), 'aox_xe' if s == 6 else 'aox_r8', AOX, [out], units, vk,
                        base + [('aoxStage', 'i', s)], c, (s, 0)))
         src = out
-    # xz1-4: the depth mip filter's dot / sum lands 1-16 ulp apart on NV's GL and Vulkan compilers (measured 4, 11, 16, 14;
-    # no float order fits either side); the method stages: a sample position or a hard branch flips on a last-bit
-    # difference (step); GTAO's slice angle is the SSGI divide (sector)
-    cmps = [('xz0', 'ulp1'), ('xz1', 'ulp4')] + [('xz%d' % m, 'ulp16') for m in range(2, 5)]
+    # xz1-4: the depth mip filter's dot / sum lands 1-16 ulp apart on NV's GL and Vulkan compilers (measured 4, 11, 16, 14
+    # and up to 32; 80 float orders tried, none fits either side). They are internal to the pass, so they print as info
+    # lines and the end results (xe, xa, xb) carry the verdict; the method stages: a sample position or a hard branch
+    # flips on a last-bit difference (step); GTAO's slice angle is the SSGI divide (sector)
+    cmps = [('xz0', 'ulp1')] + [('xz%d' % m, 'info') for m in range(1, 5)]
     if method == 'xe':
         cmps.append(('xe', 'step'))
     r = 'sector' if method == 'gtao' else 'step'

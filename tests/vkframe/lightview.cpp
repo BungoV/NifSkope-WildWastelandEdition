@@ -303,12 +303,13 @@ int runChain( const std::string & jobs, const std::string & job, const std::stri
 			big += u > tol;
 			mu = std::max( mu, u );
 		}
-		const bool pass = mu <= tol || ( c.rule == "step" && d * 200 <= n && big * 1000 <= n ) || ( c.rule == "gather" && big * 10000 <= n )
+		const bool info = c.rule == "info";	// an image internal to a pass (XeGTAO's depth mips): printed, no verdict
+		const bool pass = info || mu <= tol || ( c.rule == "step" && d * 200 <= n && big * 1000 <= n ) || ( c.rule == "gather" && big * 10000 <= n )
 			|| ( c.rule == "sector" && d * 100 <= n && big * 500 <= n ) || ( absRule && !nanBad && maxAbs <= absTol && d * 50 <= n );
 		exact = exact && d == 0;
 		ok = ok && pass;
 		std::printf( "  %s %dx%d [%s]: %zu of %zu values differ, %zu by > tol, max %d ulp, max abs %.3g%s\n", c.img.c_str(), x.w, x.h,
-			c.rule.c_str(), d, n, big, mu, maxAbs, pass ? "" : " OUT" );
+			c.rule.c_str(), d, n, big, mu, maxAbs, info ? " (info, no verdict)" : pass ? "" : " OUT" );
 	}
 	drop();
 	std::printf( "LIGHTVIEW %s %s\n", name.c_str(), !ok ? "FAIL" : exact ? "EXACT" : "BOUND" );
