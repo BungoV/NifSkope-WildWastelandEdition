@@ -9,10 +9,16 @@ Changed, not built, not checked live. Nothing in the app calls it yet, so no fra
   seen, snow near FAILS (1.45 % of samples past 2 ulp, bar 0.05 %). Under review before any app hookup.
 - The particle maths of the compute pass and the corners now follow NV GL's own order of operations (read from the
   driver's program binary), in a twin-local copy of the field function: snow far is now exact, rain near unchanged
-  (within the bar), snow near still fails (1.40 %, the particle shapes now match, the difference is in the shading). A
+  (within the bar), snow near still fails (1.40 %, nearly all of it in whole pixels, so in the shading; GL's own
+  repeat of that case is not exact either). A
   change to the shared field function must be copied into the twin. The gate also prints GL's own run-to-run noise
   over 5 draws as a reference line (not the bar).
 - The earlier work-in-progress commit (ece0d2a3) says "kept local"; it was pushed like every lane commit.
+- Slice 2a, the air: the compute pass now runs the cell view's fog per particle (the air's five textures bound the
+  GL way), so a fogged cell is drawn instead of refused. Two new gate cases, rain near and snow far in fog: rain within
+  the bar (48 flips), snow exact, and a red that drops the air fails on both. A lit cell and the roof map are still
+  refused. Existing files touched: vkpresent.h (the pass's fields and textures), vkprecip.inc (its bindings) and the
+  precipview harness; no cell_precip_* file.
 - No existing rain / snow shader and no cellprecip.cpp line changed.
 
 ## VKFAR2 P7 (2026-11-14): depth of field, motion blur and object blur join the tone pass on Vulkan (WW_VKVIEW=1)

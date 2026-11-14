@@ -5,14 +5,15 @@
  * compute pass (precip_view_cs.hlsl: the field, the cull, the geometry stage's per-particle part) writes one record a
  * particle in GL's order, and each particle is an instance of four strip vertices (precip_view_vs.hlsl) read by
  * cell_precip_gpu_ps.hlsl's frozen copy (precip_view_ps.hlsl). Nothing is compacted: the blend needs GL's order.
- * Slice 1 is unlit and unfogged: a lit cell, the fog or the roof map are refused (GL draws).
+ * Slice 1 is unlit; slice 2a adds the air (wwFogFx's A / B in the record pass, its five textures in the compute set).
+ * A lit cell or the roof map are refused (GL draws).
  * GL's state (cellprecip.cpp): depth LEQUAL, no depth write, cull off, blend SRC_ALPHA / ONE_MINUS_SRC_ALPHA, stencil ALWAYS
  * ref 1, REPLACE on depth pass, write mask 0x03. */
 namespace
 {
 constexpr VkDeviceSize kPrecipViewBytes = 96;   // precip_view_vs PrecipView (b1)
 constexpr VkDeviceSize kPrecipCsAt = 256;       // the compute pass's b31
-constexpr VkDeviceSize kPrecipPsAt = 1792;      // the pixel stage's b31 (past the compute block's 1312)
+constexpr VkDeviceSize kPrecipPsAt = 2560;      // the pixel stage's b31 (past the compute block's 2112)
 constexpr VkDeviceSize kPrecipRecBytes = 112;   // PrecipRec: 7 float4
 
 struct Precip
@@ -66,12 +67,15 @@ bool precipStatic( std::string & why )
 		why = "no vkCmdDispatch / vkCreateComputePipelines / vkCmdPipelineBarrier";
 		return false;
 	}
-	// compute: b31, t0 pcRoof / t1 pcTex at 64 / 65, s1 at 129, u0 the records at 192 (vkframe_spirv.sh fxs()'s shifts)
-	VkDescriptorSetLayoutBinding cb[5] = {};
-	const std::uint32_t cBind[5] = { 31, 64, 65, 129, 192 };
-	const VkDescriptorType cType[5] = { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
+	// compute: b31, t0 pcRoof / t1 pcTex at 64 / 65, s1 at 129, u0 the records at 192, the air's t25..t29 at 89..93 and
+	// s25..s29 at 153..157 (vkframe_spirv.sh fxs()'s shifts)
+	VkDescriptorSetLayoutBinding cb[15] = {};
+	const std::uint32_t cBind[15] = { 31, 64, 65, 129, 192, 89, 90, 91, 92, 93, 153, 154, 155, 156, 157 };
+	VkDescriptorType cType[15] = { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
 		VK_DESCRIPTOR_TYPE_SAMPLER, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER };
-	for ( int k = 0; k < 5; k++ ) {
+	for ( int k = 5; k < 15; k++ )
+		cType[k] = k < 10 ? VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE : VK_DESCRIPTOR_TYPE_SAMPLER;
+	for ( int k = 0; k < 15; k++ ) {
 		cb[k].binding = cBind[k];
 		cb[k].descriptorType = cType[k];
 		cb[k].descriptorCount = 1;
@@ -89,12 +93,13 @@ bool precipStatic( std::string & why )
 		gb[k].stageFlags = k < 2 ? VK_SHADER_STAGE_VERTEX_BIT : VK_SHADER_STAGE_FRAGMENT_BIT;
 	}
 	VkDescriptorSetLayoutCreateInfo lci { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
-	lci.bindingCount = 5;
+	lci.bindingCount = 15;
 	lci.pBindings = cb;
 	VkDescriptorSetLayoutCreateInfo lgi = lci;
+	lgi.bindingCount = 5;
 	lgi.pBindings = gb;
-	VkDescriptorPoolSize ps[4] = { { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 3 }, { VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 3 },
-		{ VK_DESCRIPTOR_TYPE_SAMPLER, 2 }, { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 2 } };
+	VkDescriptorPoolSize ps[4] = { { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 3 }, { VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 8 },
+		{ VK_DESCRIPTOR_TYPE_SAMPLER, 7 }, { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 2 } };
 	VkDescriptorPoolCreateInfo pci { VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO };
 	pci.maxSets = 2;
 	pci.poolSizeCount = 4;
@@ -352,8 +357,6 @@ bool precipRun( const PrecipRun & t, std::string & why )
 		return refuse( D.brokenWhy );
 	if ( t.lit )
 		return refuse( "a lit cell (the particles' light is slice 2's)" );
-	if ( t.fogged )
-		return refuse( "the fog on (its A / B are slice 2's)" );
 	if ( t.roofOn || t.tex[0].tex )
 		return refuse( "the roof map on (slice 3's)" );
 	if ( !toneFrameIs( t.color ) || !T.colorView || !T.dsView )
@@ -392,10 +395,13 @@ bool precipRun( const PrecipRun & t, std::string & why )
 	FxNames names;
 	names.add( T.colorTex );
 	names.add( T.dsTex );
-	VkImageView views[2] = {};
-	int smp[2] = {};
-	for ( int k = 0; k < 2; k++ ) {
+	VkImageView views[7] = {};
+	int smp[7] = {};
+	const int slotType[7] = { 0, 0, 1, 1, 0, 2, 0 };  // an empty slot binds the zero texture of the shader's type
+	for ( int k = 0; k < 7; k++ ) {
 		FxTex x = t.tex[k];
+		if ( !x.tex && !x.shared )
+			x.type = slotType[k];
 		if ( !x.shared && x.tex )
 			x.shared = farSharedOf( x.tex );
 		if ( !fxSlot( x, views[k], names, S.copies, w ) )
@@ -410,7 +416,7 @@ bool precipRun( const PrecipRun & t, std::string & why )
 	std::uint8_t * c = u + kPrecipCsAt;
 	std::memcpy( c, t.cs, size_t( kT_precipcsBytes ) );
 	const std::uint32_t first = std::uint32_t( t.first ), count = std::uint32_t( t.n );
-	const int csRed = ( t.red & 1 ) ? 1 : 0;
+	const int csRed = ( ( t.red & 1 ) ? 1 : 0 ) | ( ( t.red & 8 ) ? 2 : 0 );
 	std::memcpy( c + atFirst, &first, 4 );
 	std::memcpy( c + atCount, &count, 4 );
 	std::memcpy( c + atRed, &csRed, 4 );
@@ -436,7 +442,13 @@ bool precipRun( const PrecipRun & t, std::string & why )
 	ii[4].sampler = F.smp[smp[1]];
 	for ( int k : { 0, 1, 3 } )
 		ii[k].imageLayout = VK_IMAGE_LAYOUT_GENERAL;
-	VkWriteDescriptorSet ws[10] = {};
+	VkDescriptorImageInfo fi[10] = {};  // the air: views 2..6 at 89..93, their samplers at 153..157
+	for ( int k = 0; k < 5; k++ ) {
+		fi[k].imageView = views[2 + k];
+		fi[k].imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+		fi[5 + k].sampler = F.smp[smp[2 + k]];
+	}
+	VkWriteDescriptorSet ws[20] = {};
 	auto put = [&]( int k, VkDescriptorSet s, std::uint32_t b, VkDescriptorType ty, const VkDescriptorBufferInfo * bp, const VkDescriptorImageInfo * ip ) {
 		ws[k].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
 		ws[k].dstSet = s;
@@ -456,7 +468,11 @@ bool precipRun( const PrecipRun & t, std::string & why )
 	put( 7, D.gSet, 31, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, &bi[4], nullptr );
 	put( 8, D.gSet, 64, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, nullptr, &ii[3] );
 	put( 9, D.gSet, 128, VK_DESCRIPTOR_TYPE_SAMPLER, nullptr, &ii[4] );
-	v.vkUpdateDescriptorSets( v.dev, 10, ws, 0, nullptr );
+	for ( int k = 0; k < 5; k++ ) {
+		put( 10 + k, D.csSet, std::uint32_t( 89 + k ), VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, nullptr, &fi[k] );
+		put( 15 + k, D.csSet, std::uint32_t( 153 + k ), VK_DESCRIPTOR_TYPE_SAMPLER, nullptr, &fi[5 + k] );
+	}
+	v.vkUpdateDescriptorSets( v.dev, 20, ws, 0, nullptr );
 	D.n = t.n;
 	F.kind = 8;
 	F.w = t.w;

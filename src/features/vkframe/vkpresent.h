@@ -622,9 +622,22 @@ inline constexpr FxField kT_precipcs[] = {
 	{ "pcFocal", 1248, 1, 1, 0, 0 }, { "pcMinPx", 1252, 1, 1, 0, 0 }, { "pcShutter", 1256, 1, 1, 0, 0 },
 	{ "pcThin", 1260, 1, 1, 0, 0 }, { "pcAtlas", 1264, 4, 1, 0, 0 }, { "pcInset", 1280, 2, 1, 0, 0 },
 	{ "pcFar", 1288, 1, 1, 1, 0 }, { "pcHasTex", 1292, 1, 1, 1, 0 }, { "pcFirst", 1296, 1, 1, 1, 0 },
-	{ "pcCount", 1300, 1, 1, 1, 0 }, { "pcRed", 1304, 1, 1, 1, 0 },
+	{ "pcCount", 1300, 1, 1, 1, 0 }, { "pcRed", 1304, 1, 1, 1, 0 }, { "pcViewport", 1312, 4, 1, 0, 0 },
+	{ "fogOn", 1328, 1, 1, 1, 0 }, { "fogK", 1344, 4, 6, 0, 0 }, { "fogView", 1440, 4, 1, 0, 0 },
+	{ "fogDistScale", 1456, 1, 1, 0, 0 }, { "fogSun", 1472, 4, 1, 0, 0 }, { "fogSunColour", 1488, 4, 1, 0, 0 },
+	{ "fogUnit", 1504, 1, 1, 0, 0 }, { "fogProbe", 1520, 4, 1, 0, 0 }, { "fogRed", 1536, 1, 1, 1, 0 },
+	{ "fogNight", 1552, 4, 1, 0, 0 }, { "fogNightHue", 1568, 1, 1, 0, 0 }, { "atAp", 1584, 4, 1, 0, 0 },
+	{ "atApProj", 1600, 4, 1, 0, 0 }, { "atApDouble", 1616, 1, 1, 0, 0 }, { "volOn", 1620, 1, 1, 1, 0 },
+	{ "volRect", 1632, 4, 1, 0, 0 }, { "volFarClamp", 1648, 1, 1, 1, 0 }, { "volSlices", 1664, 4, 1, 0, 0 },
+	{ "volProbe", 1680, 1, 1, 1, 0 }, { "volFogBlend", 1684, 1, 1, 1, 0 }, { "volFar", 1696, 4, 1, 0, 0 },
+	{ "volPack", 1712, 4, 1, 0, 0 }, { "volPackDims", 1728, 4, 1, 0, 0 }, { "volAirMed", 1744, 4, 1, 0, 0 },
+	{ "volAirLayer", 1760, 4, 1, 0, 0 }, { "volAirGround", 1776, 4, 1, 0, 0 }, { "volAirFlags", 1792, 1, 1, 1, 0 },
+	{ "volAirTerrU", 1808, 4, 1, 0, 0 }, { "volAirTerrV", 1824, 4, 1, 0, 0 }, { "volAirTerrFU", 1840, 4, 1, 0, 0 },
+	{ "volAirTerrFV", 1856, 4, 1, 0, 0 }, { "volAirTerrRef", 1872, 1, 1, 0, 0 }, { "volAirRain", 1888, 4, 1, 0, 0 },
+	{ "volAirRainFar", 1904, 4, 1, 0, 0 }, { "volAirRainXf", 1920, 4, 1, 0, 4 }, { "volAirDrift", 1984, 4, 1, 0, 0 },
+	{ "volAirDriftUv", 2000, 4, 6, 0, 0 }, { "volAirDriftRed", 2096, 1, 1, 1, 0 },
 };
-inline constexpr int kT_precipcsBytes = 1312;
+inline constexpr int kT_precipcsBytes = 2112;
 inline constexpr FxField kT_precipps[] = {
 	{ "pcHasTex", 0, 1, 1, 1, 0 }, { "pcFar", 4, 1, 1, 1, 0 }, { "pcAtlas", 16, 4, 1, 0, 0 },
 	{ "pcNear", 32, 2, 1, 0, 0 },
@@ -635,11 +648,11 @@ struct PrecipRun
 	int w = 0, h = 0, vp[4] = {};    //!< the tone frame's size, GL's viewport
 	unsigned color = 0;             //!< the tone frame's colour (toneFrameIs)
 	int first = 0, n = 0;           //!< the run: glDrawArrays( GL_POINTS, first, n )
-	bool lit = false, fogged = false, roofOn = false;  //!< slice 1 refuses each (GL draws)
-	FxTex tex[2];                   //!< t0 pcRoof (slice 1: none), t1 pcTex (the atlas)
+	bool lit = false, fogged = false, roofOn = false;  //!< lit and roofOn refused (GL draws); fogged: slice 2a
+	FxTex tex[7];                   //!< t0 pcRoof (none yet), t1 pcTex (the atlas), the air's t25 atApTex, t26 volTex, t27 volTile, t28 volAirTerr, t29 volAirRainMap
 	std::uint8_t cs[kT_precipcsBytes] = {};  //!< fxPack( cell_precip_gpu, kT_precipcs )
 	std::uint8_t ps[kT_precippsBytes] = {};  //!< fxPack( cell_precip_gpu, kT_precipps )
-	int red = 0;                    //!< gates only: 1 the cull radius 0, 2 the strip's last two corners swapped, 4 no near fade
+	int red = 0;                    //!< gates only: 1 the cull radius 0, 2 the strip's last two corners swapped, 4 no near fade, 8 the air dropped
 };
 /* GL current, the tone frame bound, cell_precip_gpu's uniforms set: one run of particles on Vulkan, a record pass then
  * instanced quads (depth LEQUAL no write, blend SRC_ALPHA / ONE_MINUS_SRC_ALPHA, stencil ALWAYS ref 1 REPLACE mask 0x03,

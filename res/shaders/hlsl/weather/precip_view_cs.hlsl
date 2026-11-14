@@ -3,15 +3,25 @@
 // then cell_precip_gpu_gs.hlsl's per-particle part (the least drawn size, the motion stretch, the axes, the colour, the
 // far tier's cell mean, the uv box), into one record a particle in GL's order. A culled particle keeps its slot (c.w 0):
 // alpha blending needs GL's order, so nothing is compacted. precip_view_vs.hlsl builds the four corners from the record.
-// Slice 1 is unlit and unfogged (lit 1, the fog off: A = 1, B = 0); vkprecip.inc refuses a lit cell or the fog.
+// Slice 1 is unlit and unfogged (lit 1: A = 1, B = 0 with the air off); slice 2a adds the air (wwFogFx, the shared
+// lookdev_fog.hlsli as it stands); vkprecip.inc refuses a lit cell until slice 2b.
 // cell_precip_field.hlsli is included unchanged (its hashes, roof test); pcParticleVk below is a twin-local copy of its
 // pcParticle spelled in NV GL's order of operations. A change to pcParticle there must be mirrored here.
 // profile: cs_6_0
 #include "WeatherBindingsVk.hlsli"
 #define WW_HLSL_SRC 1	// the shared .hlsli files give their readable half
+// slice 2a: the air at the particle's centre, as cell_precip_gpu_gs.hlsl reads it outside a fragment stage
+#define Sample( s, uv ) SampleLevel( s, uv, 0 )	// GLSL: texture() outside a fragment shader reads level 0
+#define SampleCmp SampleCmpLevelZero
+static float4 pcFragCoord;
+static float3 pcDPx, pcDPy;
+#define gl_FragCoord pcFragCoord
+#define ddx( p ) pcDPx
+#define ddy( p ) pcDPy
 
 #define WW_LOOSE_TYPES 1
 #include "cell_precip_field.hlsli"
+#include "../air/lookdev_fog.hlsli"
 #undef WW_LOOSE_TYPES
 cbuffer LooseUniforms : register(b31, space0)
 {
@@ -30,9 +40,14 @@ cbuffer LooseUniforms : register(b31, space0)
 	bool pcHasTex;
 	uint pcFirst;		// not GL's: the run's first vertex
 	uint pcCount;		// not GL's: the run's particles
-	int pcRed;			// not GL's: gates only, 1 the cull radius 0 (cell_precip_gpu_vs.hlsl's PC_CULL_RED)
+	int pcRed;			// not GL's: gates only, 1 the cull radius 0 (cell_precip_gpu_vs.hlsl's PC_CULL_RED), 2 the air dropped
+	float4 pcViewport;	// the frame's viewport (x, y, w, h): the centre's window position
+#define WW_LOOSE_UNIFORMS 1
+#include "../air/lookdev_fog.hlsli"
+#undef WW_LOOSE_UNIFORMS
 };
 #include "cell_precip_field.hlsli"
+#include "../air/lookdev_fog.hlsli"
 
 // pcWrap in NV GL's order: the remainder fused, r = fma( -floor( x / L ), L, x )
 float pcWrapVk( float x, float L )
@@ -182,6 +197,26 @@ void main( uint3 id : SV_DispatchThreadID )
 	r.axes = float4( ax, ay );
 	r.ext = float4( hx, hy, cellUv );
 	r.col = col;
-	r.a = float4( 1.0, 1.0, 1.0, 0.0 );
+	// slice 2a: the air, once, at the centre (cell_precip_gpu_gs.hlsl: B = wwFogFx( 0 ), A = wwFogFx( lit ) - B); the
+	// window position in NV GL's order (clip y-row first, then x, z, w; the viewport by fma)
+	precise float4 cc0 = c.y * pcProj[1];
+	precise float4 cc1 = mad( c.x, pcProj[0], cc0 );
+	precise float4 cc2 = mad( c.z, pcProj[2], cc1 );
+	precise float4 cc = cc2 + pcProj[3];
+	precise float2 ndc = mad( cc.xy / cc.w, 0.5, 0.5 );
+	precise float2 win = mad( ndc, pcViewport.zw, pcViewport.xy );
+	pcFragCoord = float4( win, cc.z / cc.w * 0.5 + 0.5, 1.0 / cc.w );
+	float pk = rcp( k );
+	pcDPx = float3( pk, 0.0, 0.0 );
+	pcDPy = float3( 0.0, pk, 0.0 );
+	float3 lit = (float3)( 1.0 );	// slice 2b: vpLight (vkprecip.inc refuses a lit cell until then)
+	float3 fogB = wwFogFx( (float3)( 0.0 ), c, false );
+	float3 fogA = wwFogFx( lit, c, false ) - fogB;
+	if ( ( pcRed & 2 ) != 0 ) {	// red: the air dropped (A = lit, B = 0)
+		fogA = lit;
+		fogB = (float3)( 0.0 );
+	}
+	r.a = float4( fogA, 0.0 );
+	r.b = float4( fogB, 0.0 );
 	pcOut[id.x] = r;
 }

@@ -21,15 +21,51 @@ EXE = sys.argv[2]
 W, H, FOV = 960, 540, 55.0
 MINPX, SHUTTER = 0.75, 1.0 / 120.0
 CELL_PX = 64
-# name, type, size, rate, seed, t, cam, wind, far, drawScale, spin, sway, windShare, weight, hasTex, yaw, pitch, cap
+# name, type, size, rate, seed, t, cam, wind, far, drawScale, spin, sway, windShare, weight, hasTex, yaw, pitch, cap, fog
 CASES = [
     ('snow_near_tex', 3, 5.5, 1.0, 97, 600.125, (12345.6, -98765.4, 7210.0), (-55.0, 210.0), 0, 3.0, 0.5, 6.0, 1.0, 1.0, 1,
-     0.7, -0.15, 40000),
+     0.7, -0.15, 40000, 0),
     ('rain_near_disc', 0, 2.0, 4.0, 11, 37.25, (-60500.0, 70000.0, 6300.0), (120.0, -40.0), 0, 1.0, 0.0, 0.0, 1.0, 1.0, 0,
-     2.0, -0.08, 40000),
+     2.0, -0.08, 40000, 0),
     ('snow_far_mean', 3, 5.5, 1.0, 97, 600.125, (12345.6, -98765.4, 7210.0), (-55.0, 210.0), 1, 3.0, 0.5, 6.0, 1.0, 0.6, 1,
-     3.3, -0.01, 40000),
+     3.3, -0.01, 40000, 0),
+    # slice 2a: the same runs seen through the air (wwFogFx's A / B in the record pass)
+    ('rain_near_fog', 0, 2.0, 4.0, 11, 37.25, (-60500.0, 70000.0, 6300.0), (120.0, -40.0), 0, 1.0, 0.0, 0.0, 1.0, 1.0, 0,
+     2.0, -0.08, 40000, 1),
+    ('snow_far_fog', 3, 5.5, 1.0, 97, 600.125, (12345.6, -98765.4, 7210.0), (-55.0, 210.0), 1, 3.0, 0.5, 6.0, 1.0, 0.6, 1,
+     3.3, -0.01, 40000, 1),
 ]
+FOG_TEX = ['atApTex', 'volTex', 'volTile', 'volAirTerr', 'volAirRainMap']  # precipRun's tex[2..6]
+FMT_DT = {'rgba32f': np.float32, 'rgba16f': np.float32, 'r32f': np.float32, 'rg32f': np.float32, 'r8': np.uint8, 'rgba8': np.uint8}
+
+
+class Tex:
+    """frag_jobs' texture record, as farview_prep.py gives it (the data the C++ harness uploads)"""
+    def __init__(self, kind, fmt, data, filt='linear', wrap='clamp', mips=0):
+        a = np.asarray(data)
+        if a.ndim == 2 + (kind != '2d'):
+            a = a[..., None]
+        if fmt == 'rgba16f':
+            a = a.astype(np.float16).astype(np.float32)
+        self.kind, self.fmt, self.filt, self.wrap, self.mips = kind, fmt, filt, wrap, mips
+        self.data = np.ascontiguousarray(a.astype(FMT_DT[fmt]))
+        if kind == '2d':
+            self.h, self.w = a.shape[:2]; self.d = 1
+        else:
+            self.d, self.h, self.w = a.shape[:3]
+
+
+_AIR = []
+
+
+def air():
+    """tests/vklight/frag_jobs.py's volsky job (the air the HLSL ports were gated on), made once"""
+    if not _AIR:
+        sys.path.insert(0, os.path.join(TREE, 'tests', 'vklight'))
+        import frag_jobs as FJ  # noqa: E402
+        FJ.Tex = Tex
+        _AIR.append(FJ.volsky('precip', 'air/volsky_view_ps.hlsl', []))
+    return _AIR[0]
 
 
 def dump(c):
@@ -130,11 +166,29 @@ for ci, c in enumerate(CASES):
         'pcInset': [0.5 * 2 ** maxLod / tw if has else 0.0, 0.5 * 2 ** maxLod / th if has else 0.0],
         'pcHasTex': [has], 'pcFar': [c[8]], 'pcTrans': [0.5],
     }
+    fog = c[18]
+    if fog:
+        # the air's uniforms and textures; its view-bound rows follow this case's view (frag_jobs' R is view -> world)
+        A = air()
+        sun = np.array([0.4, 0.3, 0.35]); sun /= np.linalg.norm(sun)
+        AU = {k: v for k, v in A['uniforms'].items()
+              if k not in ('viewMatrix', 'projectionMatrix', 'envMapRotation', 'viewportDimensions')}
+        AU['volRect'] = [0, 0, 1.0 / W, 1.0 / H]
+        AU['atApProj'] = [P[0, 0], P[1, 1], P[0, 2], P[1, 2]]
+        AU['fogView'] = list(R @ np.array([0.0, 0.0, 1.0])) + [c[6][2]]
+        AU['fogSun'] = list(R @ sun) + [1.0]
+        U.update(AU)
+        with open(os.path.join(d, 'tex.txt'), 'a' if has else 'w', newline='\n') as f:
+            for k in FOG_TEX:
+                t = A['textures'][k]
+                fn = 'tex_%s.bin' % k
+                t.data.tofile(os.path.join(d, fn))
+                f.write('%s %s %s %d %d %d %s %s %d %s\n' % (k, t.kind, t.fmt, t.w, t.h, t.d, t.filt, t.wrap, t.mips, fn))
     with open(os.path.join(d, 'uni.txt'), 'w', newline='\n') as f:
         for key, val in U.items():
             f.write('%s %s\n' % (key, fl(val)))
     with open(os.path.join(d, 'job.txt'), 'w', newline='\n') as f:
-        f.write('%d %d %d %d %d %u %d\n%.9g\n' % (W, H, first, n, has, seed, c[8], zd))
+        f.write('%d %d %d %d %d %u %d\n%.9g\n%d\n' % (W, H, first, n, has, seed, c[8], zd, fog))
     names.append(c[0])
     print('precipview case %s: %d particles (run %d + %d, %d in the view), atlas %dx%d (%d x %d cells), slab %.7f'
           % (c[0], n_all, first, n, int(inview.sum()), tw, th, cols, rows, zd))
