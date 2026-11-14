@@ -9,7 +9,7 @@ then keeps GLSL for them); the old file is kept as programs_prea4.txt. Writes <s
 HLSLFIX2 shards: `--shard i/N` renders only the programs whose crc32(name) % N == i (one hidden context per process) and writes
 a4.shard<i>of<N>.txt + a4cache.shard<i>of<N>.txt (no a4.txt, no --apply); `--merge N` (no GL) joins the N parts in the serial
 order into a4.txt / a4cache.txt and then does --apply, so the files equal a serial run's byte for byte (tests/hlsllive/a4_shards.sh)."""
-import ctypes, json, os, sys, zlib
+import ctypes, json, os, re, sys, zlib
 import numpy as np
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -162,6 +162,29 @@ MODE = ''   # R6 coverage retry: '' random ints and bools | 'zero' all 0 | 'one'
 # program that random inputs never cover (a range test on a few ints, a depth-only output). <program> is the .prog name; a row
 # for the base name covers its define variants too. The row is part of the program's cache key.
 FIXTURE = ''
+# FO4MATCH1 11-14 (VKWATER3's real-switch seed): ints the app sets from a switch, at the values it really sets. A program holding
+# one gets one more sweep (MODE 'real'): every other int and bool 0, these at their real values; a FAIL there is the row's verdict.
+# With ints 0, fgMode was 0 and fgGround returned the sheet in every option: A4 could not tell the far-ground options apart.
+#   fgMode      src/features/far-ground/cellfarground.cpp uniforms(): d.gpu.ready = the program's option (its #define WW_FARGROUND)
+#   fgDecalsOn  same place: 1 (0 only under the red WW_CELL_FARGROUND_RED=nodecals)
+# A value is a number, or the name of a define read from the program's GLSL sources (`#define <name> <int>`).
+REAL_INTS = {'fgMode': 'WW_FARGROUND', 'fgDecalsOn': '1'}
+REALV = {}
+
+
+def real_values(unis, texts):
+    out = {}
+    for n, v in REAL_INTS.items():
+        if not any(u[0] == n for u in unis):
+            continue
+        if v.isdigit():
+            out[n] = int(v)
+            continue
+        m = [re.match(r'\s*#\s*define\s+' + v + r'\s+(\d+)\s*$', ln) for t in texts for ln in t.splitlines()]
+        m = [x for x in m if x]
+        if m:
+            out[n] = int(m[0].group(1))
+    return out
 
 
 def fixtures(tree):
@@ -213,6 +236,8 @@ def set_uniform(prog, name, loc, ty, size, seed, plant):
         a = r.integers(0, 2 if ty in BOOL_T else 3, n * size).astype(np.int32)   # a bool is 0 or 1 as the app sets it
         if MODE and ty in INT_T | BOOL_T and ty != 0x8B55:
             a[:] = 1 if MODE == 'one' else 0
+        if MODE == 'real' and name in REALV:
+            a[:] = REALV[name]
         if ty == 0x8B55:
             a[:] = np.tile(np.array([0, 0, SZ, SZ], dtype=np.int32), size)
         g('glUniform%div' % n, None, GLint, GLsizei, c_p)(loc, size, a.ctypes.data)
@@ -689,6 +714,20 @@ def main():
                 verdict, detail, cov, o1, o2 = sweep()
                 if cov:
                     detail = ('ints and bools all ' + md + (' | ' + detail if detail else '')).strip()
+        global REALV
+        REALV = real_values(G.unis, [open(os.path.join(tree, byn.get(s_, 'res/shaders/' + s_)), encoding='utf-8', errors='replace').read()
+                                     for s_ in shaders])
+        if REALV and verdict in ('EXACT', 'BOUND'):
+            MODE = 'real'
+            rtag = 'real switches ' + ','.join('%s=%d' % kv for kv in sorted(REALV.items()))
+            rv, rd, rc, r1, r2 = sweep()
+            if rv == 'FAIL' or rv == 'SKIP':
+                verdict, detail, o1, o2 = rv, rtag + ' | ' + rd, r1, r2
+            else:
+                if rv == 'BOUND' and verdict == 'EXACT':
+                    verdict = 'BOUND'
+                detail = (detail + ' | ' if detail else '') + rtag + (' ' + rv + (' ' + rd if rd else '') if rc else ' covered no pixel')
+                cov += rc
         MODE = ''
         if verdict == 'FAIL' and os.environ.get('A4_DEBUG'):
             dd = np.nonzero(o1.view(np.uint32) != o2.view(np.uint32))[0]
