@@ -18,6 +18,10 @@ BAKERT_BIND( 0 ) StructuredBuffer<BakeRTXRay> BakeRTXRays : register( t0 );
 #else
 BAKERT_BIND( 0 ) StructuredBuffer<BakeRTRay> BakeRTRays : register( t0 );
 #endif
+// binding 1, see each kernel: bvh / rq (common.glsl)
+// t bits, tri (0xFFFFFFFF = miss)
+// rqx.comp (tri, then the unsure reason bits):
+// tri (0xFFFFFFFF = miss), 1 = unsure
 BAKERT_BIND( 1 ) RWStructuredBuffer<uint2> BakeRTHits : register( u1 );   // see each kernel
 BAKERT_BIND( 2 ) StructuredBuffer<int> BakeRTTriOf : register( t2 );      // soup triangle -> masked record
 BAKERT_BIND( 3 ) StructuredBuffer<uint> BakeRTMaskTris : register( t3 );  // 12 words a masked triangle
@@ -26,13 +30,16 @@ BAKERT_BIND( 5 ) StructuredBuffer<uint> BakeRTAlpha : register( t5 );     // the
 #ifdef BAKERT_BVH
 BAKERT_BIND( 6 ) StructuredBuffer<uint> BakeRTNodes : register( t6 );     // 9 words a node: lo3 hi3 left first count
 BAKERT_BIND( 7 ) StructuredBuffer<int> BakeRTIdx : register( t7 );
-BAKERT_BIND( 8 ) StructuredBuffer<float> BakeRTTris : register( t8 );     // 9 floats a soup triangle
+BAKERT_BIND( 8 ) StructuredBuffer<float> BakeRTTris : register( t8 );     // 9 floats a triangle
 #else
 BAKERT_BIND( 6 ) RaytracingAccelerationStructure BakeRTTLAS : register( t6 );
+// rqx.comp's words for binding 7:
+// BLAS primitive -> soup triangle
 BAKERT_BIND( 7 ) StructuredBuffer<int> BakeRTRemap : register( t7 );      // BLAS primitive order -> soup triangle
 #endif
 #ifdef BAKERT_RQX
-BAKERT_BIND( 8 ) StructuredBuffer<float> BakeRTVerts : register( t8 );    // 9 floats a BLAS primitive (the true triangle)
+// the true triangle:
+BAKERT_BIND( 8 ) StructuredBuffer<float> BakeRTVerts : register( t8 );    // 9 floats a BLAS primitive
 #endif
 [[vk::push_constant]] ConstantBuffer<BakeRTPc> BakeRTPcCb : register( b0 );
 #define BAKERT_PC BakeRTPcCb

@@ -1,6 +1,8 @@
 // DDGI volume, relocation (mode 4) and classification (mode 5) (lane VKCOMPUTE1, 2026-11-12; from
-// src/features/gi/rtddgi/reloc.comp). Shared, no bindings. One invocation a probe, from its 32 fixed rays
-// (rtddgimath.h relocateStep / classify). job.y = 1: a scroll's pass, fresh probes only. Dispatch: ceil(probes / 64) of 64.
+// src/features/gi/rtddgi/reloc.comp). Shared, no bindings. reloc.comp's header:
+// Lane RTXGI1: relocation (mode 4) and classification (mode 5), one invocation a probe, from its 32 fixed rays
+// (src/rtddgimath.h relocateStep / classify; [J21] 5 and 6, the SDK doc's two classification phases).
+// job.y = 1: a scroll's pass, fresh probes only. Dispatch: ceil(probes / 64) of 64.
 // RELOC_RED (the gate's red) drops the classification's write.
 #ifndef DDGI_RELOC_HLSLI
 #define DDGI_RELOC_HLSLI
@@ -12,7 +14,7 @@ void DDGI_RelocCS( uint p )
 	if ( p >= uint( DDGI_P.dims.w ) )
 		return;
 	if ( DDGI_JOB.job.y == 1u && DDGI_ProbeState( p ) != DDGI_FRESH )
-		return;   // a scroll's pass touches its fresh probes only (the kept ones keep offset and state)
+		return;   // M3: a scroll's pass touches its fresh probes only (the kept ones keep offset and state)
 	const int N = DDGI_P.counts.x;
 	const float3 stepv = DDGI_P.stepv.xyz;
 	if ( DDGI_JOB.job.x == 4u ) {

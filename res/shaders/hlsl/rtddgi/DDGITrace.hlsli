@@ -1,23 +1,40 @@
 // DDGI volume, the probe trace (lane VKCOMPUTE1, 2026-11-12; from src/features/gi/rtddgi/trace.comp). Shared, no
-// bindings (the shim declares the volume's buffers and DDGITLAS; DDGI_USE_TLAS, DXIL cs_6_5). One invocation a
-// (probe, ray): the nearest hit on the TRUE triangles, then
-//   miss          sky radiance above the horizon, the ground's below it (DDGI_Miss; 0 without sky), distance DDGI_MISS
+// bindings (the shim declares the volume's buffers and DDGITLAS; DDGI_USE_TLAS, DXIL cs_6_5). trace.comp's header:
+// Lane RTXGI1: the probe trace. One invocation a (probe, ray): ray query against bakert's BLAS (geometry 0 opaque,
+// geometry 1 alpha-tested), nearest hit. The CPU twin is src/rtddgi.cpp traceRay(); the rules:
+//   miss          sky radiance above the horizon, the ground's below it (SKYBELOW1, ddgiMiss; 0 without sky),
+//                 distance DDGI_MISS
 //   backface      radiance 0, distance -0.2 t (a one-sided face seen from behind) [J21 4.1]
-//   fixed ray     distance only (rays < 32 are never blended)
-//   front face    albedo / pi x (sun behind a shadow ray + interior directional + the placed lights behind shadow rays
-//                 + the volume's own irradiance at the hit, the infinite bounce [J19 5.3]) + Le
-// job.x 0 = an update (active probes, every ray), 1 = the fixed rays of every probe (job.y = 1: fresh probes only).
+//   fixed ray     distance only (rays < 32 are never blended [SDK])
+//   front face    albedo / pi x (sun behind a shadow ray + interior directional + the placed lights behind shadow
+//                 rays + the volume's own irradiance at the hit, the infinite bounce [J19 5.3]) + Le
+// mode 0 = an update (active probes, every ray), mode 1 = the fixed rays of every probe (relocation, classification).
+//
+// M1FIX (10-29): bakert builds the BLAS from GROWN triangles (src/bakert.cpp buildRt, lane GIBAKE2: each edge moved
+// out by 4e-6 x (|coord| + diagonal + 1) so the float hardware never misses a true edge hit). The hardware's answer is
+// therefore a superset: every candidate of both geometries (gl_RayFlagsNoOpaqueEXT) is re-tested here on its TRUE
+// triangle (binding 8) with probebvh's test and rules (t > 1e-4, t <= the nearest so far, the alpha hole at the TRUE
+// barycentrics), then a tie pass picks the same face the twin picks (rtddgimath.h tieWins). M1 trusted the hardware:
+// opaque rim hits committed unseen, holes read at the grown triangle's barycentrics, tmin 0. Red DDGI_RED_HWHIT keeps
+// that rule (GPU only), DDGI_RED_NOTIE drops the tie pass (both tracers).
+//
+// HLSL: the mode is job.x (job.y = 1: fresh probes only); gl_RayFlagsNoOpaqueEXT is RAY_FLAG_FORCE_NON_OPAQUE.
+// trace_body.glsl's helpers (ddgiNearest, ddgiDirect, ddgiIrradianceAt) are here too, its ray tests in
+// DDGIRayQuery.hlsli, ddgiShadow and ddgiHitRadiance in trace_body.hlsli. trace_body.glsl's header:
+// Lane RTEMIS1: the probe trace's helpers (ddgiNearest, ddgiShadow, ddgiDirect, ddgiIrradianceAt, ddgiHitRadiance),
+// split out of trace.comp so restirgi.comp shades its rays with the same rules. Include after ddgi_common.glsl.
 // Dispatch: ceil(probes x job.w / 64) of 64. TRACE_RED (the gate's red) drops the backface rule.
 #ifndef DDGI_TRACE_HLSLI
 #define DDGI_TRACE_HLSLI
 
 #include "DDGIRayQuery.hlsli"
 
-// the bounce read's runtime red (the CLI's --red bouncenocover, src/rtddgi.cpp kRedBounceNoCover)
+// FIX1101A: the bounce read's runtime red (the CLI's --red bouncenocover, src/rtddgi.cpp kRedBounceNoCover): today's main
 #define DDGI_RED_BOUNCENOCOVER 32u
 
-// MIRROR src/rtddgi.cpp Twin::nearest: the nearest hit on the true triangles (probebvh::Bvh::ray's rule), then the tie
-// pass: of every face hit within DDGI_TieWindow of that t, the one DDGI_TieWins keeps. bestPr = the BLAS row.
+// MIRROR src/rtddgi.cpp Twin::nearest: the nearest hit on the true triangles (probebvh::Bvh::ray's rule), then the
+// tie pass: of every face hit within ddgiTieWindow of that t, the one ddgiTieWins keeps. bestPr = the BLAS row.
+// (ddgiTieWindow / ddgiTieWins = DDGI_TieWindow / DDGI_TieWins here)
 bool DDGI_Nearest( float3 o, float3 d, float tmax, out uint bestPr, out float bestT )
 {
 	bestPr = 0u;
@@ -28,7 +45,8 @@ bool DDGI_Nearest( float3 o, float3 d, float tmax, out uint bestPr, out float be
 	r.TMin = 0.0;
 	r.Direction = d;
 	r.TMax = tmax;
-	if ( ( red & DDGI_RED_HWHIT ) != 0u ) {   // the refuter: M1's rule (the hardware's hit, its barycentrics)
+	// (the hardware's hit, its barycentrics)
+	if ( ( red & DDGI_RED_HWHIT ) != 0u ) {   // the refuter: M1's rule
 		RayQuery<RAY_FLAG_NONE> q;
 		q.TraceRayInline( DDGITLAS, RAY_FLAG_NONE, 0xFF, r );
 		while ( q.Proceed() ) {
@@ -64,7 +82,8 @@ bool DDGI_Nearest( float3 o, float3 d, float tmax, out uint bestPr, out float be
 	}
 	if ( !hit || ( red & DDGI_RED_NOTIE ) != 0u )
 		return hit;
-	// the tie pass: a short query over [t0 - w, t0 + w], nothing committed, every face in it seen
+	// the tie pass: a short query over [t0 - w, t0 + w], nothing confirmed, every face in it seen
+	// (HLSL: nothing committed)
 	const float t0 = bestT;
 	const float w = DDGI_TieWindow( o, t0 );
 	int keepTri = DDGIRemap[bestPr];
@@ -107,8 +126,9 @@ float3 DDGI_FlatAmbient( float3 n )
 	return n.x * n.x * ex + n.y * n.y * ey + n.z * n.z * ez;
 }
 
-// MIRROR src/rtddgi.cpp sampleVolume: the 8-probe irradiance at Pw (normal n, viewer direction o), x 2 pi, x the fade
-// (box faces x cover: rtddgimath.h sampleVolume), the flat ambient for the rest (bounceIrradiance)
+// MIRROR src/rtddgi.cpp sampleVolume: the 8-probe irradiance at P (normal n, viewer direction o), x 2 pi.
+// FIX1101A: x the fade (box faces x cover: rtddgimath.h sampleVolume), the flat ambient for the rest (bounceIrradiance)
+// (P = Pw here)
 float3 DDGI_IrradianceAt( float3 Pw, float3 n, float3 o )
 {
 	const float D = DDGI_P.stepv.w;
@@ -227,16 +247,16 @@ void DDGI_TraceCS( uint id )
 	const int N = DDGI_P.counts.x;
 	const int st = DDGI_ProbeState( p );
 	if ( DDGI_JOB.job.x == 0u && ( st == DDGI_OFF || ( st == DDGI_ASLEEP && DDGI_P.flags.y != 0 ) || DDGI_Skipped( DDGI_P, p ) ) )
-		return;   // and a coarse probe a finer cascade covers (DDGI_Skipped: off unless the cell view sets it)
+		return;   // RTXCASCADE2: and a coarse probe a finer cascade covers (ddgiSkipped: off unless the cell view sets it)
 	if ( DDGI_JOB.job.x == 1u && DDGI_JOB.job.y == 1u && st != DDGI_FRESH )
-		return;   // a scroll relocates and classifies its fresh probes only
+		return;   // M3: a scroll relocates and classifies its fresh probes only
 	const float3 o = DDGI_ProbePos( p );
 	const float3 d = DDGI_JobRayDir( i, N );
 	uint pr;
 	float t;
 	float4 rec;
 	if ( !DDGI_Nearest( o, d, DDGI_P.sun.w, pr, t ) ) {
-		rec = float4( DDGI_P.sky[0].w > 0.5 && i >= DDGI_FIXED ? DDGI_Miss( DDGI_P, d ) : float3( 0.0, 0.0, 0.0 ), DDGI_MISS );   // ground below
+		rec = float4( DDGI_P.sky[0].w > 0.5 && i >= DDGI_FIXED ? DDGI_Miss( DDGI_P, d ) : float3( 0.0, 0.0, 0.0 ), DDGI_MISS );   // SKYBELOW1: ground below
 	} else {
 		const int tri = DDGIRemap[pr];
 		const uint vb = pr * 9u;
@@ -261,6 +281,7 @@ void DDGI_TraceCS( uint id )
 			float3 E = DDGI_Direct( Pw, n );
 			if ( DDGI_P.flags.x == 0 )
 				E += DDGI_IrradianceAt( Pw, n, -d );
+			// RTEMIS1
 			rec = float4( a0.rgb * E / DDGI_PI + DDGITriAttr[uint( tri ) * 2u + 1u].rgb, t );
 		}
 	}

@@ -10,7 +10,7 @@ struct AirParams
 {
 	int4 size;        // froxel columns, rows, slices, frame
 	int4 opts;        // samples a froxel, the frames clamp, red bits, history valid (1)
-	float4 slice;     // near, ln(far / near), shadow-ray bias, t per view unit (fogDistScale)
+	float4 slice;     // near, ln(far / near) (cell_volair.frag volSlices.xy, ray distances t), shadow-ray bias, t per view unit (fogDistScale)
 	float4 rows[3];   // view -> world (the soup's local frame)
 	float4 proj;      // P00, P11, P20, P21
 	float4 prows[3];  // the previous frame's

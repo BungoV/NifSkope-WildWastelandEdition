@@ -4,6 +4,11 @@
 // Converted from src/features/gi/rtddgi/ddgi_common.glsl, the same math line for line. Every MIRROR mark names
 // src/features/gi/rtddgimath.h's function (the C++ twin the unit test checks; change all three or none).
 // SM 6.0 math (no wave ops, no 16-bit types): compiles as cs_6_0 to DXIL and to SPIR-V.
+// ddgi_common.glsl's header:
+// Lane RTXGI1 (2026-10-29): what the DDGI kernels share -- the bindings, the volume's parameters and the probe math.
+// Every function marked MIRROR is src/features/gi/rtddgimath.h's function of that name, line for line (the C++ is the twin the
+// unit test checks; change both or neither). Compiled into trace/blend/border/reloc.comp by tools/rtddgi_spirv.sh.
+// (HLSL: the bindings live in the shim, DDGIBindingsVk.hlsli; the parameters and the math here.)
 #ifndef DDGI_COMMON_HLSLI
 #define DDGI_COMMON_HLSLI
 
@@ -14,17 +19,18 @@
 #define DDGI_DIST_N 14
 #define DDGI_DIST_S 16
 #define DDGI_MISS 1e27
-#define DDGI_TMIN 1e-4   // rtddgimath.h kTraceTmin
+#define DDGI_TMIN 1e-4   // rtddgimath.h kTraceTmin: probebvh's t > 1e-4
 #define DDGI_OFF 0
 #define DDGI_ASLEEP 1
 #define DDGI_VIGILANT 2
-#define DDGI_FRESH 3     // a probe a scroll reset (relocated + classified alone, never read)
-// red bits (DDGIParams.flags.w): the volume's runtime refuters (src/features/gi/rtddgi.h RtDdgiSpec::red)
+#define DDGI_FRESH 3     // M3: rtddgimath.h kFresh, a probe a scroll reset (relocated + classified alone, never read)
+// red bits (params.flags.w): the volume's runtime refuters (src/features/gi/rtddgi.h RtDdgiSpec::red)
+// (HLSL: params = DDGIParams)
 #define DDGI_RED_NOBACK 1u   // backface hits shaded as front faces, distance kept
 #define DDGI_RED_NOCHEB 2u   // the bounce sampler without the Chebyshev factor
 #define DDGI_RED_NOBIAS 4u   // the bounce sampler without the self-shadow bias
-#define DDGI_RED_HWHIT 8u    // the hardware's hit on the grown BLAS (no true-triangle test, tmin 0, no tie pass)
-#define DDGI_RED_NOTIE 16u   // no tie pass
+#define DDGI_RED_HWHIT 8u    // GPU only: M1's trace, the hardware's hit on the grown BLAS (no true-triangle test, tmin 0, no tie pass)
+#define DDGI_RED_NOTIE 16u   // no tie pass: the nearest face whichever the tree keeps (CPU and GPU)
 
 // the volume's parameters (std430 / structured-buffer layout, 18 float4)
 struct DDGIParams {
@@ -39,17 +45,18 @@ struct DDGIParams {
 	int4 counts;      // rays per probe, lights, soup triangles, opaque triangles (the BLAS's geometry 0)
 	int4 flags;       // oneBounce, skipAsleep, useMask, red bits
 	float4 blendp;    // base hysteresis, distance sharpness, self-shadow bias B, 0
-	int4 skipLo;      // the probes the updates skip, grid indices skipLo.xyz..skipHi.xyz; skipLo.w = 1 on
+	int4 skipLo;      // RTXCASCADE2: the probes the updates skip, grid indices skipLo.xyz..skipHi.xyz; skipLo.w = 1 on
 	int4 skipHi;
 };
 
-// the per-pass job (NifSkope: push constants). mode 0 trace an update, 1 trace the fixed rays, 2 blend, 3 border,
-// 4 relocate, 5 classify; modes 1, 4 and 5 with job.y = 1 take only DDGI_FRESH probes (a scroll's new planes)
+// the per-pass job (NifSkope: push constants).
+// mode 0 trace an update, 1 trace the fixed rays (relocation / classification), 2 blend, 3 border, 4 relocate, 5 classify
+// M3: modes 1, 4 and 5 with job.y = 1 take only DDGI_FRESH probes (a scroll's new planes); 0 = every probe (M1's)
 struct DDGIJob {
 	float4 rot0;   // this update's ray rotation, rows
 	float4 rot1;
 	float4 rot2;
-	uint4 job;     // mode, frame, ray first, ray count
+	uint4 job;     // job: mode, frame, ray first, ray count
 };
 
 float DDGI_SignNotZero( float v ) { return v >= 0.0 ? 1.0 : -1.0; }
@@ -107,7 +114,8 @@ int2 DDGI_BorderXY( int k, int S )
 	k -= S - 2;
 	return int2( S - 1, 1 + k );
 }
-// MIRROR rtddgimath.h sampleTile (the bilinear corner and weights; one reader per buffer in DDGIResources.hlsli)
+// MIRROR rtddgimath.h sampleTile (the bilinear corner and weights; one reader per buffer below)
+// (HLSL: the readers are in DDGIResources.hlsli)
 void DDGI_TileTaps( float3 d, int S, out int2 x0y0, out float2 a )
 {
 	const float2 uv = DDGI_OctEncode( d );
@@ -125,7 +133,8 @@ float3 DDGI_Fibonacci( int i, int n )
 	const float sinT = sqrt( clamp( 1.0 - cosT * cosT, 0.0, 1.0 ) );
 	return float3( cos( phi ) * sinT, sin( phi ) * sinT, cosT );
 }
-// MIRROR rtddgimath.h rayDir (rot0..2 = the update's rotation rows)
+// MIRROR rtddgimath.h rayDir (the rotation's rows in pc.rot0..2)
+// (HLSL: rot0..2 = DDGIJob's rows)
 float3 DDGI_RayDir( int i, int n, float3 rot0, float3 rot1, float3 rot2 )
 {
 	if ( i < DDGI_FIXED )
@@ -204,8 +213,9 @@ float3 DDGI_Sky( DDGIParams p, float3 d )
 	const float3 rz = d.z >= 0.0 ? p.sky[4].rgb : p.sky[5].rgb;
 	return d.x * d.x * rx + d.y * d.y * ry + d.z * d.z * rz;
 }
-// below the horizon is ground, never sky. sky[1..3].w = the ground's radiance (an exterior's albedo x the sky
-// irradiance from above / pi; 0 in an interior), sky[4].w = 1 the rule, 0 the red (sky in every direction)
+// lane SKYBELOW1 (bungo 10-30): below the horizon is ground, never sky. P.sky[1..3].w = the ground's radiance (an
+// exterior's albedo x the sky irradiance from above / pi; 0 in an interior), P.sky[4].w = 1 the rule, 0 the red
+// (WW_SKYBELOW_RED: today's main, the sky in every direction and every miss sky visibility)
 // MIRROR rtddgimath.h belowHorizon
 bool DDGI_BelowHorizon( float3 d ) { return d.z < 0.0; }
 // MIRROR rtddgimath.h skyVisRay
@@ -217,9 +227,13 @@ float3 DDGI_Miss( DDGIParams p, float3 d )
 		return float3( p.sky[1].w, p.sky[2].w, p.sky[3].w );
 	return DDGI_Sky( p, d );
 }
-// probe p's grid index
+// probe p's grid index, position (grid + offset) and state
+// (HLSL: the grid index here; position and state read the buffers, DDGIResources.hlsli)
 int3 DDGI_ProbeCoord( DDGIParams p, uint i ) { return int3( int( i ) % p.dims.x, ( int( i ) / p.dims.x ) % p.dims.y, int( i ) / ( p.dims.x * p.dims.y ) ); }
-// a coarse cascade's probe a finer cascade covers whole (rtddgimath.h cascadeCovered; skipLo.w = 0: off)
+// RTXCASCADE2: a coarse cascade's probe a finer cascade covers whole (the range: src/features/gi/rtddgimath.h cascadeCovered, set per
+// step by the cell view; src/features/gi/rtddgi/rtddgi_vk.inc ddgiSkipped is this test on the CPU for the active count). The CPU
+// twin never sets it (rtddgiRun is one volume): off, every probe as before
+// (HLSL: skipLo.w = 0: off)
 bool DDGI_Skipped( DDGIParams p, uint i )
 {
 	if ( p.skipLo.w == 0 )
