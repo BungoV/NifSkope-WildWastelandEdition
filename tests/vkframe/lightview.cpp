@@ -85,7 +85,8 @@ int kernelOf( std::string spv )
 		{ "ao_raw", WwVkPresent::LightAoRaw }, { "ao_blur", WwVkPresent::LightAoBlur }, { "ao_blurf", WwVkPresent::LightAoBlurF },
 		{ "contact", WwVkPresent::LightContactK }, { "ssgi", WwVkPresent::LightSsgiK },
 		{ "ssgie", WwVkPresent::LightSsgiK },	// lane VKFAR3: the cast with the emission subtracted (its own red)
-		{ "aox_z", WwVkPresent::LightAoxZ }, { "aox_xe", WwVkPresent::LightAoxXe }, { "aox_r8", WwVkPresent::LightAoxR8 } };
+		{ "aox_z", WwVkPresent::LightAoxZ }, { "aox_xe", WwVkPresent::LightAoxXe }, { "aox_r8", WwVkPresent::LightAoxR8 },
+		{ "aox_hb", WwVkPresent::LightAoxR8 } };	// HBAO's stage 4: aox_r8's build, its own red (the old divide)
 	const auto i = k.find( spv );
 	return i == k.end() ? -1 : i->second;
 }

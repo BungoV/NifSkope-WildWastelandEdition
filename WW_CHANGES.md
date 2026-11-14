@@ -50,6 +50,18 @@ Changed, not built, not checked live. With the view off nothing changes.
   (lightview.sh) the first depth mip of the synthetic job has 1 value at 5 ulp against its 4 ulp bar (the AO result
   itself is within its bar): LIGHTVIEW is red until that bar is decided.
 
+## VKFAR3 A1 HBAO (2026-11-14): HBAO's centre-pixel step fixed, HBAO on Vulkan too (WW_VKVIEW=1)
+
+Changed, not built, not checked live. The look is for bungo's flight.
+
+- HBAO skipped no step that rounded onto the pixel itself, and made a random direction out of rounding noise there.
+  That step is now skipped, in the readable HLSL (cell_aox_ps.hlsl), so GL changes as well when it runs the SPIR-V
+  shader (the GLSL fallback keeps the old step). On the mem_base dump: 4.2 % of pixels of the raw term changed (up to
+  233 codes), the final AO about half the pixels by up to 133 codes after the blur.
+- HBAO now runs on the Vulkan view like XeGTAO and GTAO (red WW_VKVIEW_AOX_RED=1 keeps it on GL).
+- The AO gate's depth mips 1-4 print as information lines (they are internal to the pass); the AO results keep their
+  bars. lightview.sh: LIGHTVIEW GATE OK, 29 greens, 19 reds FAIL (new job ax_H: GL from SPIR-V, red = the old step).
+
 ## VKFAR2 L8 slice 1 (2026-11-14): rain / snow pass for the Vulkan view, not wired in (gate red)
 
 Changed, not built, not checked live. Nothing in the app calls it yet, so no frame changes.

@@ -1265,10 +1265,9 @@ void wwCellAoPass( Scene * scene, bool run )
 	const bool aoObs = a.on && ( method == WwAoVanilla || a.methodRed == 1 );
 	// lane VKLIGHT1 (L1): the pyramid and the obscurance on the present device (WW_VKVIEW=1; red WW_VKVIEW_AO_RED=1: GL)
 	bool aoVk = false;
-	/* lane VKFAR3 (row 2): XeGTAO and GTAO in the same run (red WW_VKVIEW_AOX_RED=1: GL). HBAO stays on GL: its first step
-	 * can land on the centre texel, where delta / max( dist, 1e-5 ) turns two equal positions' last bits into a direction */
-	const char * aoxGlWhy = method == WwAoVanilla ? nullptr : method == WwAoHbao ? "hbao (a centre-texel step, not gated)"
-		: a.methodRed == 1 ? "red WW_CELL_AO_METHOD_RED=vanilla" : wwEnvInt( "WW_VKVIEW_AOX_RED" ) == 1 ? "red WW_VKVIEW_AOX_RED=1" : nullptr;
+	/* lane VKFAR3 (row 2): XeGTAO, GTAO and HBAO in the same run (red WW_VKVIEW_AOX_RED=1: GL). HBAO since round 3: its step
+	 * that lands on the centre texel is skipped in the readable HLSL (a direction from rounding noise before) */
+	const char * aoxGlWhy = method == WwAoVanilla ? nullptr : a.methodRed == 1 ? "red WW_CELL_AO_METHOD_RED=vanilla" : wwEnvInt( "WW_VKVIEW_AOX_RED" ) == 1 ? "red WW_VKVIEW_AOX_RED=1" : nullptr;
 	const bool aoxWant = method != WwAoVanilla && !aoxGlWhy;
 	const AoTarget * aoxVkOut = nullptr;
 	if ( WwVkPresent::shareWanted( "WW_VKVIEW_AO_RED" ) ) {

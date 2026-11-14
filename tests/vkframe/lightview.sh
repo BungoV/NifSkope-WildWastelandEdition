@@ -27,10 +27,10 @@ for d in $DIRS; do
 	NEED_G=$((NEED_G + $(ls "$d" | grep -cE '^(ao|ct|sg|ax)_')))
 	NEED_R=$((NEED_R + $(ls "$d"/ao_*/red_*.txt "$d"/ct_*/red_*.txt "$d"/sg_*/red_*.txt "$d"/ax_*/red_*.txt 2>/dev/null | wc -l)))
 done
-# the default two sets: the fresh one 16 jobs and 11 reds (lane VKFAR3 added sg_E + red ssgie, ax_X / ax_G / ax_S + the 3 aox
-# reds), the kept one 12 and 7
-[ -n "${LIGHTVIEW_JOBS:-}" ] || [ -n "${LIGHTVIEW_KEPT+x}" ] || [ "$NEED_G $NEED_R" = "28 18" ] \
-	|| { echo "LIGHTVIEW GATE FAILED (the two sets hold $NEED_G jobs and $NEED_R reds, 28 and 18 expected)"; exit 1; }
+# the default two sets: the fresh one 17 jobs and 12 reds (lane VKFAR3 added sg_E + red ssgie, ax_X / ax_G / ax_S / ax_H + the
+# 4 aox reds), the kept one 12 and 7
+[ -n "${LIGHTVIEW_JOBS:-}" ] || [ -n "${LIGHTVIEW_KEPT+x}" ] || [ "$NEED_G $NEED_R" = "29 19" ] \
+	|| { echo "LIGHTVIEW GATE FAILED (the two sets hold $NEED_G jobs and $NEED_R reds, 29 and 19 expected)"; exit 1; }
 export PATH="/c/msys64/ucrt64/bin:$PATH"
 g++ -O2 -std=c++17 -pthread -I"$ROOT/src" "$ROOT/tests/vkframe/lightview.cpp" -o "$OUT/lightview.exe" -lopengl32 -lgdi32 -luser32 \
 	|| { echo "LIGHTVIEW GATE FAILED (g++)"; exit 1; }
