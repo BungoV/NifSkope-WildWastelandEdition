@@ -255,6 +255,11 @@ const char * kGenFs = "#version 410 core\n"
 const char * kUnpackFs = "#version 410 core\n"
 	"uniform sampler2DMS src; uniform int S; out vec4 o;\n"
 	"void main() { ivec2 q = ivec2( gl_FragCoord.xy ); o = texelFetch( src, ivec2( q.x / S, q.y ), q.x % S ); }\n";
+// lane VKFAR2: the fog bloom's R8 target per sample (k / 255 values, so the 8-bit store is exact)
+const char * kFogFs = "#version 410 core\n"
+	"uniform sampler2D fogData; uniform int genS; out vec4 o;\n"
+	"void main() { ivec2 q = ivec2( int( gl_FragCoord.x ) * genS + gl_SampleID, int( gl_FragCoord.y ) );\n"
+	"  o = vec4( texelFetch( fogData, q, 0 ).r, 0.0, 0.0, 1.0 ); }\n";
 
 struct Job
 {
@@ -346,8 +351,9 @@ int main( int argc, char ** argv )
 	std::printf( "view %dx%d x%d, GL on %s\n", W, H, S, reinterpret_cast<const char *>( glGetString( GL_RENDERER ) ) );
 
 	const GLuint pGen = program( kTriVs, kGenFs, "gen" ), pUnpack = program( kTriVs, kUnpackFs, "unpack" );
+	const GLuint pFog = program( kTriVs, kFogFs, "fog" );
 	const GLuint pHdr = program( readFile( dir + "/cell_hdr.vert.glsl" ), readFile( dir + "/cell_hdr.frag.glsl" ), "cell_hdr" );
-	if ( !pGen || !pUnpack || !pHdr ) {
+	if ( !pGen || !pUnpack || !pFog || !pHdr ) {
 		std::printf( "TONEVIEW GATE FAILED (GL programs)\n" );
 		return 2;
 	}
@@ -548,6 +554,11 @@ int main( int argc, char ** argv )
 	float bloomFo[3] = {};
 	bool measNow = false;
 	const int qw = std::max( 1, W >> 2 ), qh = std::max( 1, H >> 2 );
+	// lane VKFAR2: the fog bloom target the next passes read (0: off); GL binds the same shared name as cellFogBloom
+	std::uintptr_t vkFogKey = 0;
+	unsigned vkFogTex = 0;
+	int vkFogRed = 0;
+	GLuint glFogNow = 0;
 
 	// the frame into the shared frame, its depth into the view, the backdrop; the tone pass's job for it
 	auto toneOf = [&]( const Job & j, bool splitSky, GLuint vfb ) {
@@ -601,7 +612,13 @@ int main( int argc, char ** argv )
 			std::printf( "TONEVIEW %s: the view: %s\n", j.name, why.c_str() );
 			return false;
 		}
-		const WwVkPresent::ToneRun t = toneOf( j, splitSky, WwVkPresent::viewFbo() );
+		WwVkPresent::ToneRun t = toneOf( j, splitSky, WwVkPresent::viewFbo() );
+		if ( vkFogKey ) {	// lane VKFAR2: cellhdr.cpp's flag 9 with the fog bloom's shared target
+			t.job.ints[0] |= 1 << 9;
+			t.fogKey = vkFogKey;
+			t.fogTex = vkFogTex;
+			t.fogRed = vkFogRed;
+		}
 		if ( !WwVkPresent::toneRun( t, why ) ) {
 			std::printf( "TONEVIEW %s: toneRun refused: %s\n", j.name, why.c_str() );
 			return false;
@@ -673,7 +690,10 @@ int main( int argc, char ** argv )
 			u1f( pHdr, "cellIsFoBloomFogCap", bg->fogCap );
 			u2f( pHdr, "cellIsFoBloomFrame", float( W ), float( H ) );
 		}
-		u1i( pHdr, "cellFogBloomOn", 0 );
+		// lane VKFAR2: cellfogbloom.cpp wwCellFogBloomFinal (the target on its own unit, a sampler2DMS)
+		bindUnit( 16, kT2DMS, glFogNow );
+		u1i( pHdr, "cellFogBloom", 16 );
+		u1i( pHdr, "cellFogBloomOn", glFogNow ? 1 : 0 );
 		static const float quad[12] = { -1, -1, 0, 1, -1, 0, -1, 1, 0, 1, 1, 0 };
 		static const std::uint16_t idx[6] = { 0, 1, 2, 2, 1, 3 };
 		f.enableVertexAttribArray( 0 );
@@ -766,6 +786,87 @@ int main( int argc, char ** argv )
 		std::printf( "TONEVIEW RED %s (splitSky off on Vulkan: %zu bytes differ, max %d; must FAIL)\n", redFails ? "FAIL" : v.word(),
 			v.diff, v.maxd );
 		ok = ok && redFails;
+	}
+	/* lane VKFAR2: the fog bloom on (cellhdr.cpp flag 9): the tone pass reads fogBloomRun's shared R8 target per sample at
+	 * binding 5; GL's quads bind the same name as cellFogBloom (wwCellFogBloomFinal). Two seeded fills (A: 40 % clear air,
+	 * B: dense), four cases (split A, unsorted A, skyin A, split B: 3 + 1 + 1 + 3 draws). Bound as the jobs above (BOUND: no
+	 * byte off by more than 1). Armed: GL's split with fog A must differ from GL's split without it. Red
+	 * (WW_VKVIEW_TONE_FOGBLOOM_RED=1, ToneRun::fogRed): the pass ignores the target, must FAIL. */
+	{
+		static char fogKeyTag;
+		const std::uintptr_t fogKey = reinterpret_cast<std::uintptr_t>( &fogKeyTag );
+		unsigned fogTex = 0;
+		GLuint fbFog = 0;
+		if ( !WwVkPresent::sharedTarget( fogKey, 0, W, H, 1, kGlR8, fogTex, why, 1, S ) || !( fbFog = fbo( kT2DMS, fogTex, 0 ) ) ) {
+			std::printf( "TONEVIEW FOG FAIL (the shared R8 target: %s)\n", why.c_str() );
+			ok = false;
+		} else {
+			std::mt19937 fr( 31 );	// its own seed: the arms after this one keep their data
+			std::vector<float> fogA( size_t( WS ) * H ), fogB( size_t( WS ) * H );
+			for ( size_t i = 0; i < fogA.size(); i++ ) {
+				fogA[i] = ur( fr ) < 0.4f ? 0.0f : float( int( ur( fr ) * 256.0f ) & 255 ) / 255.0f;
+				fogB[i] = float( 128 + ( int( ur( fr ) * 128.0f ) & 127 ) ) / 255.0f;
+			}
+			const GLuint tFogA = tex2d( WS, H, kR32f, kRed, GL_FLOAT, fogA.data(), false );
+			const GLuint tFogB = tex2d( WS, H, kR32f, kRed, GL_FLOAT, fogB.data(), false );
+			auto fill = [&]( GLuint src ) {	// what fogBloomRun leaves in the target
+				f.bindFramebuffer( kFb, fbFog );
+				glViewport( 0, 0, W, H );
+				glDisable( GL_DEPTH_TEST );
+				glDisable( GL_STENCIL_TEST );
+				glDisable( GL_BLEND );
+				glDisable( GL_SCISSOR_TEST );
+				f.useProgram( pFog );
+				bindUnit( 8, GL_TEXTURE_2D, src );
+				u1i( pFog, "fogData", 8 );
+				u1i( pFog, "genS", S );
+				glDrawArrays( GL_TRIANGLES, 0, 3 );
+			};
+			struct FogCase
+			{
+				const char * name;
+				const Job * job;
+				GLuint data;
+			};
+			const FogCase cases[4] = { { "fog split A", &jobs[0], tFogA }, { "fog unsorted A", &jobs[2], tFogA },
+				{ "fog skyin A", &jobs[1], tFogA }, { "fog split B", &jobs[0], tFogB } };
+			std::vector<std::uint8_t> refFogSplit;
+			for ( const FogCase & c : cases ) {
+				std::vector<std::uint8_t> vk, ref;
+				fill( c.data );
+				vkFogKey = fogKey;
+				vkFogTex = fogTex;
+				glFogNow = fogTex;
+				const bool ran = runVk( *c.job, c.job->splitSky, vk ) && runGl( *c.job, ref );
+				const Verdict v = compare( vk, ref );
+				std::printf( "TONEVIEW %s %s (%zu of %zu bytes differ, max %d)\n", c.name, ran ? v.word() : "FAIL (a run failed)", v.diff,
+					v.total, v.maxd );
+				ok = ok && ran && v.ok();
+				if ( &c == &cases[0] )
+					refFogSplit = ref;
+			}
+			const Verdict armed = compare( refFogSplit, refSplit );
+			std::printf( "TONEVIEW FOG armed %s (GL split with fog A vs without: %zu bytes differ; must differ)\n",
+				armed.diff > 0 ? "yes" : "NO", armed.diff );
+			ok = ok && armed.diff > 0;
+			{	// the red: the pass ignores the target (gain 1) against GL's split with fog A
+				std::vector<std::uint8_t> vk;
+				fill( tFogA );
+				vkFogRed = 1;
+				const bool ran = runVk( jobs[0], true, vk );
+				vkFogRed = 0;
+				const Verdict v = compare( vk, refFogSplit );
+				const bool redFails = !ran || !v.ok();
+				std::printf( "TONEVIEW FOG RED %s (the tone pass ignores the fog bloom target: %zu bytes differ, max %d; must FAIL)\n",
+					redFails ? "FAIL" : v.word(), v.diff, v.maxd );
+				ok = ok && redFails;
+			}
+			vkFogKey = 0;
+			vkFogTex = 0;
+			glFogNow = 0;
+			bindUnit( 16, kT2DMS, 0 );
+		}
+		WwVkPresent::sharedTargetDrop( fogKey );	// fbFog stays (the harness frees no FBO; the context ends with it)
 	}
 	/* lane VKBLOOM1: the Fusion Shaders bloom (source, down / hold / up, combine) and the exposure measure in the tone pass
 	 * on the present device (toneRun with the job cellbloom.cpp fills, flags 7 + 11, the measure's quarter ask) against

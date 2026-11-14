@@ -3,6 +3,8 @@
 
 #include <QString>
 
+#include <cstdint>
+
 class Renderer;
 class Scene;
 
@@ -31,6 +33,9 @@ bool wwCellFogBloomRun( Scene * scene, unsigned hdrFbo, unsigned ds, int w, int 
 //! knownActive: the active unit (GL_TEXTURE0 + n) the caller knows, -1 = ask (lane CELLUNI5)
 void wwCellFogBloomFinal( Renderer * r, int unit, bool ran, int knownActive = -1 );
 void wwCellFogBloomDone( Renderer * r, int unit, int knownActive = -1 );
+/*! Lane VKFAR2: this frame's target when the present device drew it (its sharedTarget key and GL name, for the Vulkan
+ *  tone pass); false: GL drew its own target (or none ran) */
+bool wwCellFogBloomVkTarget( std::uintptr_t & key, unsigned & tex );
 QString wwCellFogBloomEcho();
 
 #endif

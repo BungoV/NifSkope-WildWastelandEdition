@@ -133,6 +133,11 @@ struct ToneRun
 	std::uint64_t measureGen = 0;  //!< copied into the shared image when it changes
 	int vp[4] = {};                //!< GL's viewport (x, y, w, h; w 0: the whole frame): the pass's viewport and scissor
 	unsigned drawFb = 0, readFb = 0;  //!< bound again after the measure's copy (no glGet)
+	/* lane VKFAR2: flag 9 (cellFogBloomOn): the fog bloom's shared R8 target (fogBloomRun's sharedTarget key and GL name,
+	 * the frame's size and samples), read per sample at binding 5; key 0 refuses (GL drew its own target) */
+	std::uintptr_t fogKey = 0;
+	unsigned fogTex = 0;
+	int fogRed = 0;  //!< WW_VKVIEW_TONE_FOGBLOOM_RED=1: the pass ignores the target (gain 1; must FAIL the view gate)
 };
 /* GL current, the view (viewBegin) bound and the frame's depth already in it: the tone draws on Vulkan into the view.
  * false: why; nothing drawn (GL draws its quads). */

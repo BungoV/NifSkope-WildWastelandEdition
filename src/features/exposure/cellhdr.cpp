@@ -1858,10 +1858,12 @@ void wwCellHdrEnd( Scene * scene )
 	bool vkDrew = false;
 	if ( g.vkTone ) {
 		const char * glWhy = nullptr;
+		std::uintptr_t fogKey = 0;	// lane VKFAR2: the fog bloom's shared R8 when the present device drew it
+		unsigned fogTex = 0;
 		if ( foBloom )
 			glWhy = "the Fusion Shaders bloom ran on GL (mode 3 reads GL's chain)";
-		else if ( fogBloom )
-			glWhy = "the fog bloom is on";
+		else if ( fogBloom && !wwCellFogBloomVkTarget( fogKey, fogTex ) )
+			glWhy = "the fog bloom drew on GL (its target is not shared)";
 		else if ( !g.dsTex )
 			glWhy = "no stencil texture";
 		else if ( stexBreak || earlyRed )
@@ -1898,6 +1900,13 @@ void wwCellHdrEnd( Scene * scene )
 				flags |= 1 << 6;
 			if ( toneI( "cellOn" ) && toneI( "cellIsOn" ) )
 				flags |= 1 << 10;
+			if ( fogBloom ) {	// lane VKFAR2: the pass reads the shared target per sample (red: it ignores it)
+				flags |= 1 << 9;
+				t.fogKey = fogKey;
+				t.fogTex = fogTex;
+				WW_SWITCH_STATIC( int, fogRedVk, qEnvironmentVariableIntValue( "WW_VKVIEW_TONE_FOGBLOOM_RED" ) );
+				t.fogRed = fogRedVk;
+			}
 			// lane VKBLOOM1: the bloom's chain and mode 3 in this pass (11: over the backdrop, unless the sky red adds it)
 			if ( wwCellBloomPresent() ) {
 				WW_SWITCH_STATIC( bool, skyAddVk, wwEnv( "WW_CELL_BLOOM_SKY_RED" ).trimmed() == "add" );

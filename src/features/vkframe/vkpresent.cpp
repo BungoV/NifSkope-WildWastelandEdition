@@ -1548,7 +1548,7 @@ bool makeView( int w, int h, int samples, std::string & why )
  * view's samples). The crossing: GL signals A (the frame, the view slot, the measure), the worker's submit waits A and
  * signals B, GL waits B before its next pass on the view; the drawing thread waits the worker's submit first (GL may
  * wait a binary semaphore only after its signal is submitted). The LUT goes up from the CPU bytes GL uploads (16^3,
- * 16 KB), not through a GL import; the fog bloom stays GL's. Lane VKBLOOM1: the Fusion Shaders bloom (its chain as
+ * 16 KB), not through a GL import; the fog bloom's R8 is read where fogBloomRun drew it (lane VKFAR2). Lane VKBLOOM1: the Fusion Shaders bloom (its chain as
  * compute dispatches, then mode 3 over the backdrop) and the exposure measure run in the same command buffer. */
 // lane VKBLOOM1: one image of the bloom chain (device-local, or shared when GL reads it: the combine, the measure)
 struct BloomImg
@@ -4005,8 +4005,15 @@ bool toneRun( const ToneRun & t, std::string & why )
 	if ( V.samples != T.samples || T.w > V.w || T.h > V.h )
 		return refuse( "the tone frame's shape is not the view's" );
 	const std::int32_t f = t.job.ints[0];
-	if ( f & ( 1 << 9 ) )
-		return refuse( "the fog bloom is on (GL's)" );
+	// lane VKFAR2: the fog bloom's shared R8 (fogBloomRun drew it on this device), read per sample at binding 5
+	const Shared * fogS = nullptr;
+	if ( f & ( 1 << 9 ) ) {
+		fogS = t.fogKey ? sharedFind( t.fogKey ) : nullptr;
+		if ( !fogS || !t.fogTex || fogS->tex != t.fogTex )
+			return refuse( "the fog bloom drew on GL (no shared target to read)" );
+		if ( fogS->fmt != VK_FORMAT_R8_UNORM || fogS->samples != T.samples || fogS->w != T.w || fogS->h != T.h || !fogS->view )
+			return refuse( "the fog bloom's shared target is not the tone frame's shape" );
+	}
 	const bool bloomOn = ( f & ( 1 << 7 ) ) != 0, backOn = ( f & ( 1 << 11 ) ) != 0;
 	if ( ( bloomOn || backOn ) != ( t.bloom != nullptr ) || ( backOn && !bloomOn ) )
 		return refuse( "the Fusion Shaders bloom's flags and its job do not agree (GL's bloom)" );
@@ -4130,12 +4137,15 @@ bool toneRun( const ToneRun & t, std::string & why )
 	}
 	const bool measureBound = measureOn && T.measureView;
 	static bool boundMeasure = false;
-	static VkImageView boundComb = VK_NULL_HANDLE, boundBack = VK_NULL_HANDLE;
+	static VkImageView boundComb = VK_NULL_HANDLE, boundBack = VK_NULL_HANDLE, boundFog = VK_NULL_HANDLE;
+	static std::uint64_t boundFogGen = 0;
 	const VkImageView combView = B.on && B.comb.view ? B.comb.view : T.dummyView;
 	const VkImageView backView = B.backdrop && B.back.view && bloomRedTest != 3 ? B.back.view : T.dummyView;
-	if ( T.descDirty || boundMeasure != measureBound || boundComb != combView || boundBack != backView ) {
+	const VkImageView fogView = fogS ? fogS->view : T.colorView;  // off: any multisample view (the shader does not read it)
+	if ( T.descDirty || boundMeasure != measureBound || boundComb != combView || boundBack != backView || boundFog != fogView
+		|| ( fogS && boundFogGen != sharedGen() ) ) {
 		const VkImageView views[7] = { T.colorView, T.stencilView, combView, measureBound ? T.measureView : T.dummyView, T.lutView,
-			T.colorView, backView };
+			fogView, backView };
 		VkDescriptorImageInfo ii[8] = {};
 		VkWriteDescriptorSet wr[8] = {};
 		for ( std::uint32_t k = 0; k < 8; k++ ) {
@@ -4156,6 +4166,8 @@ bool toneRun( const ToneRun & t, std::string & why )
 		boundMeasure = measureBound;
 		boundComb = combView;
 		boundBack = backView;
+		boundFog = fogView;
+		boundFogGen = sharedGen();
 	}
 	T.slot = V.cur;
 	if ( t.vp[2] > 0 && t.vp[3] > 0 ) {
@@ -4169,6 +4181,8 @@ bool toneRun( const ToneRun & t, std::string & why )
 	T.splitSky = t.splitSky;
 	T.sorted = t.sorted;
 	T.job = t.job;
+	if ( fogS && t.fogRed == 1 )
+		T.job.ints[0] &= ~std::int32_t( 1 << 9 );  // the red: the target ignored (gain 1)
 	// GL's frame (and the view's depth GL blitted) done -> the worker's pass -> GL's later passes on the view
 	T.defTex[0] = T.colorTex;
 	T.defTex[1] = T.dsTex;
@@ -4177,6 +4191,8 @@ bool toneRun( const ToneRun & t, std::string & why )
 	T.defN = 4u;
 	if ( measureBound )
 		T.defTex[T.defN++] = T.measureTex;
+	if ( fogS )
+		T.defTex[T.defN++] = fogS->tex;
 	if ( B.measQw > 0 )
 		T.defTex[T.defN++] = B.meas.tex;  // lane VKBLOOM1: GL blurs the measure's quarter target at the next frame
 	if ( T.backoff > 0 )
@@ -8932,7 +8948,7 @@ bool frame( QOpenGLWindow * w, const std::function<void()> & paint )
 				sayRoute( QStringLiteral( "vk view, %1 of %2 frames: GL draws the view into the present device's images (%3x%4 "
 					"MS%5 RGBA8 + D24S8, %6 views, %7 MB, made in %8 ms), the worker resolves on Vulkan (no GL blit: drawing "
 					"thread present %9 ms); %10 views still read when GL wanted them (wait %11 ms); bakert hop none (the view is "
-					"made on the present device); %12; still on GL into the view: the fog bloom's tone (and the Fusion "
+					"made on the present device); %12; still on GL into the view: the tone when the fog bloom drew on GL (and the Fusion "
 					"Shaders bloom's mode 3 under WW_VKVIEW_BLOOM_RED=1), clouds in front (%13), P7, lens flare, overlays + QPainter (the overlay target is the view); %14" )
 					.arg( winView ).arg( winN ).arg( vs.w ).arg( vs.h ).arg( vs.samples ).arg( vs.views ).arg( vs.mb, 0, 'f', 1 )
 					.arg( vs.makeMs, 0, 'f', 1 ).arg( winSum / winN, 0, 'f', 3 ).arg( vs.busy ).arg( vs.waitMs, 0, 'f', 3 )

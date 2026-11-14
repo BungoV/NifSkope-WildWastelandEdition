@@ -52,6 +52,7 @@ struct FbState
 	quint64 liveGen = 0;	// lane LIVESET1
 	bool ran = false;
 	GLuint target = 0;
+	bool vk = false;	// lane VKFAR2: target is the present device's shared R8 (vkTargetKey)
 	double ms = -1.0;
 	int frames = 0;
 	QString last = QStringLiteral( "off" ), said;
@@ -108,6 +109,13 @@ void timeRead( NifSkopeOpenGLContext::GLFunctions * fn, FbGpu & g, FbState & s, 
 		qInfo().noquote() << QStringLiteral( "cell fog bloom: gpu %1 ms" ).arg( s.ms, 0, 'f', 4 );
 }
 
+// lane VKFAR2: the shared R8 target's key (fogBloomRun makes it; the Vulkan tone pass finds it by this key)
+std::uintptr_t vkTargetKey()
+{
+	static char key;
+	return reinterpret_cast<std::uintptr_t>( &key );
+}
+
 /* lane VKFAR2 (row P4b): the target drawn on the present device (vkfogbloom.inc: GL's clear and two draws, the tone
  * frame's own depth sample 0 and stencil read in the pass, no blit). cell_fogbloom's uniforms are set here as for GL's
  * draws and read back. true: target = the shared R8 the tone map binds; false: GL's pass (the reason on "vk fogbloom:") */
@@ -150,8 +158,7 @@ bool onVulkan( Scene * scene, Renderer * r, GLuint color, int W, int H, int S, u
 		t.samples = S;
 		std::memcpy( t.vp, vp, sizeof( t.vp ) );
 		t.color = color;
-		static char key;	// the target's shared key
-		t.key = reinterpret_cast<std::uintptr_t>( &key );
+		t.key = vkTargetKey();
 		// fogbloom_view_ps's t26..t29 (lookdev_fog's air); the air's integrated volume is read where it is shared
 		static const char * const kName[4] = { "volTex", "volTile", "volAirTerr", "volAirRainMap" };
 		static const int kType[4] = { 1, 0, 2, 0 };
@@ -196,7 +203,7 @@ bool onVulkan( Scene * scene, Renderer * r, GLuint color, int W, int H, int S, u
 			line += QStringLiteral( ", on GL %1 frames (last: %2)" ).arg( sum.gl ).arg( QString::fromStdString( sum.glWhy ) );
 		if ( sum.fails > 0 )
 			line += QStringLiteral( ", refused %1 (last: %2)" ).arg( sum.fails ).arg( QString::fromStdString( sum.failWhy ) );
-		line += QStringLiteral( "; the tone map reads it on GL (its Vulkan pass refuses the fog bloom)" );
+		line += QStringLiteral( "; the tone map reads it where it runs (its Vulkan pass binds the shared target)" );
 		said.clear();
 		say( line );
 		sum = WwVkPresent::FxStat();
@@ -453,6 +460,7 @@ bool wwCellFogBloomRun( Scene * scene, unsigned hdrFbo, unsigned ds, int W, int 
 	}
 	s.ran = true;
 	s.target = vkDrew ? vkTarget : g.target;
+	s.vk = vkDrew;
 	note( s, QStringLiteral( "on %1%2x%3 x%4 k=%5 translucent=%6 sigma=%7..%8" ).arg( vkDrew ? QStringLiteral( "Vulkan " ) : QString() ).arg( W ).arg( H ).arg( S )
 		.arg( double( kStrength ) ).arg( double( kTranslucent ) ).arg( double( kSigmaMist ), 0, 'g', 4 ).arg( double( kSigmaFog ), 0, 'g', 4 ) );
 	return true;
@@ -486,6 +494,15 @@ void wwCellFogBloomDone( Renderer * r, int unit, int knownActive )
 	}
 	s.ran = false;
 	s.target = 0;
+	s.vk = false;
+}
+
+bool wwCellFogBloomVkTarget( std::uintptr_t & key, unsigned & tex )
+{
+	const FbState & s = fs();
+	key = s.ran && s.vk ? vkTargetKey() : 0;
+	tex = key ? unsigned( s.target ) : 0u;
+	return key != 0 && tex != 0;
 }
 
 QString wwCellFogBloomEcho()
