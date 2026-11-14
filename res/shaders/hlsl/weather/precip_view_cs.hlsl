@@ -22,10 +22,48 @@ static float3 pcDPx, pcDPy;
 #define gl_FragCoord pcFragCoord
 #define ddx( p ) pcDPx
 #define ddy( p ) pcDPy
+#ifdef PC_LIT
+#ifdef PC_LOOK
+#error "slice 2b lights the plain particles only; the lit look is a later increment"
+#endif
+// slice 2b (precip_lit_view_cs.hlsl): cell_precip_gpu_gs.hlsl's light at the centre, its include chain in its order
+#define WW_CELLLIGHTS 1
+cbuffer globalUniforms : register(b0, space0)
+{
+	row_major float3x3	viewMatrix : packoffset(c0);
+	row_major float3x3	envMapRotation : packoffset(c3);
+	row_major float4x4	projectionMatrix : packoffset(c6);
+	float4	lightSourcePosition[3] : packoffset(c10);
+	float4	lightSourceDiffuse[3] : packoffset(c13);
+	float4	lightSourceAmbient : packoffset(c16);
+	float	toneMapScale : packoffset(c17);
+	float	brightnessScale : packoffset(c17.y);
+	float	glowScale : packoffset(c17.z);
+	float	glowScaleSRGB : packoffset(c17.w);
+	int4	viewportDimensions : packoffset(c18);
+	uint	doSkinning : packoffset(c19);
+	int	sceneOptions : packoffset(c19.y);
+	int	cubeBgndMipLevel : packoffset(c19.z);
+	int	sfParallaxMaxSteps : packoffset(c19.w);
+	float	sfParallaxScale : packoffset(c20);
+	float	sfParallaxOffset : packoffset(c20.y);
+	float	unusedUniform1 : packoffset(c20.z);
+	float	unusedUniform2 : packoffset(c20.w);
+};
+#endif
 
 #define WW_LOOSE_TYPES 1
 #include "cell_precip_field.hlsli"
 #include "../air/lookdev_fog.hlsli"
+#ifdef PC_LIT
+#include "../lights/cell_lights.hlsli"
+#include "../lights/cell_cluster.hlsli"
+#include "../air/cell_volpart.hlsli"
+#include "../lights/cell_fxlaw.hlsli"
+#include "../shadows/ww_sunshadow.hlsli"
+#define WW_AIR_GIVOL 1
+#include "../air/cell_airmed.hlsli"
+#endif
 #undef WW_LOOSE_TYPES
 cbuffer LooseUniforms : register(b31, space0)
 {
@@ -44,11 +82,24 @@ cbuffer LooseUniforms : register(b31, space0)
 	bool pcHasTex;
 	uint pcFirst;		// not GL's: the run's first vertex
 	uint pcCount;		// not GL's: the run's particles
-	int pcRed;			// not GL's: gates only, 1 the cull radius 0 (cell_precip_gpu_vs.hlsl's PC_CULL_RED), 2 the air dropped
+	int pcRed;			// not GL's: gates only, 1 the cull radius 0 (cell_precip_gpu_vs.hlsl's PC_CULL_RED), 2 the air dropped, 4 the light dropped (PC_LIT)
 	float4 pcViewport;	// the frame's viewport (x, y, w, h): the centre's window position
 #define WW_LOOSE_UNIFORMS 1
 #include "../air/lookdev_fog.hlsli"
+#ifdef PC_LIT
+#include "../lights/cell_lights.hlsli"
+#include "../lights/cell_cluster.hlsli"
+#include "../air/cell_volpart.hlsli"
+#include "../lights/cell_fxlaw.hlsli"
+#include "../shadows/ww_sunshadow.hlsli"
+#include "../air/cell_airmed.hlsli"
+#endif
 #undef WW_LOOSE_UNIFORMS
+#ifdef PC_LIT
+	float lightingInfluence;	// cell_volpart's vpLit reads them (not used here)
+	int fxLitMode;
+	float pcTrans;		// the thin (scattering) share
+#endif
 #ifdef PC_LOOK
 	int pcLook;			// slice 3 (precip_look_view_cs.hlsl, cell_precip_look.prog): 1 a raindrop, 2 a snow flake
 	float pcMmPerView;	// mm of the particle's true size per view unit
@@ -56,6 +107,10 @@ cbuffer LooseUniforms : register(b31, space0)
 };
 #include "cell_precip_field.hlsli"
 #include "../air/lookdev_fog.hlsli"
+#ifdef PC_LIT
+#include "../lights/cell_lights.hlsli"
+#include "../air/cell_volpart.hlsli"
+#endif
 
 // pcWrap in NV GL's order: the remainder fused, r = fma( -floor( x / L ), L, x )
 float pcWrapVk( float x, float L )
@@ -112,10 +167,18 @@ bool pcParticleVk( uint i, out float3 rel, out float3 vel, out float hs, out flo
 	cellUv = float2( float( cell % max( pcCols, 1 ) ), float( cell / max( pcCols, 1 ) ) ) * pcCellUv;
 	if ( pcInner > 0.0 && all( (abs( rel ) < (float3)( 0.5 * pcInner )) ) )
 		return false;
+#ifdef PC_LIT
+	return true;	// t0 is cellLights here: vkprecip.inc refuses the roof map to every run (pcRoofOn false)
+#else
 	return or( !pcRoofOn, pcRoofOpen( rel ) );
+#endif
 }
 
+#ifdef PC_LIT
+Texture2D<float4> pcTex : register(t46, space0); SamplerState _pcTex_sampler : register(s46, space0);	// the GS's (t1 is cellGi)
+#else
 Texture2D<float4> pcTex : register(t1, space0); SamplerState _pcTex_sampler : register(s1, space0);
+#endif
 
 struct PrecipRec
 {
@@ -244,7 +307,18 @@ void main( uint3 id : SV_DispatchThreadID )
 	float pk = rcp( k );
 	pcDPx = float3( pk, 0.0, 0.0 );
 	pcDPy = float3( 0.0, pk, 0.0 );
-	float3 lit = (float3)( 1.0 );	// slice 2b: vpLight (vkprecip.inc refuses a lit cell until then)
+	float3 lit = (float3)( 1.0 );	// unlit: vkprecip.inc refuses a lit cell to precip_view_cs
+#ifdef PC_LIT
+	// slice 2b: cell_precip_gpu_gs.hlsl's call, its arguments as written there
+	if ( or( cellInterior, cellHasDir ) ) {
+		float3 thin, thick;
+		vpLight( c, cellWorldPos( c ), cellWorldDir( c ), dot( fogView.xyz, c ) + fogView.w,
+			cellWorldDir( float3( 0.0, 0.0, 1.0 ) ), pcTrans, thin, thick );
+		lit = pcTrans * thin + ( 1.0 - pcTrans ) * thick;
+	}
+	if ( ( pcRed & 4 ) != 0 )	// red: the light dropped (lit = 1, as unlit)
+		lit = (float3)( 1.0 );
+#endif
 	float3 fogB = wwFogFx( (float3)( 0.0 ), c, false );
 	float3 fogA = wwFogFx( lit, c, false ) - fogB;
 	if ( ( pcRed & 2 ) != 0 ) {	// red: the air dropped (A = lit, B = 0)

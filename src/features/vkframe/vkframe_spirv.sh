@@ -199,5 +199,8 @@ fx precip_view_ps weather/precip_view_ps
 fxs precip_look_view_cs weather/precip_look_view_cs
 fxv precip_look_view_vs weather/precip_look_view_vs
 fx precip_look_view_ps weather/precip_look_view_ps
+# slice 2b: the record pass lit at the centre (the plain particles' vs / ps unchanged)
+fxs precip_lit_view_cs weather/precip_lit_view_cs
+ls -la precip_lit_view_cs.spv.h
 ls -la precip_view_cs.spv.h precip_view_vs.spv.h precip_view_ps.spv.h precip_look_view_cs.spv.h precip_look_view_vs.spv.h precip_look_view_ps.spv.h
 ls -la csm_view_vs.spv.h obj_depth_vs.spv.h sky_view_ps.spv.h bloom_down.spv.h bloom_hold.spv.h bloom_up.spv.h bloom_src.spv.h bloom_comb.spv.h bloom_back.spv.h tonemap.spv.h measure_q.spv.h tone_view_vs.spv.h tone_view_ps.spv.h taa_view_mv_cs.spv.h taa_view_resolve_cs.spv.h taa_view_rcas_ps.spv.h
