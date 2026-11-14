@@ -1560,7 +1560,7 @@ struct BloomImg
 	VkImageView view = VK_NULL_HANDLE;
 	VkImageView layer[8] = {};  // the ring's layers, each a 2D storage view
 	GLuint tex = 0, obj = 0;
-	int w = 0, h = 0, layers = 1, samples = 1;
+	int w = 0, h = 0, layers = 1, samples = 1, levels = 1;
 };
 struct ToneBloomState
 {
@@ -1572,6 +1572,7 @@ struct ToneBloomState
 	// per chain shape (W x H, the mips' dims); the frame's views are in the sets: made again with the frame
 	int W = 0, H = 0, mips = 0, dims[WwVkPresent::kToneBloomMips][2] = {};
 	BloomImg src, ring, comb, mip[WwVkPresent::kToneBloomMips], up[WwVkPresent::kToneBloomMips];
+	BloomImg lod;  // lane VKFAR2: the top's mips (ToneBloom::lod), made at the first lod frame of this shape
 	VkDescriptorPool pool = VK_NULL_HANDLE;
 	VkDescriptorSet down[WwVkPresent::kToneBloomMips] = {}, downRing[8] = {}, hold = VK_NULL_HANDLE,
 		upSet[WwVkPresent::kToneBloomMips] = {}, srcSet = VK_NULL_HANDLE, combSet = VK_NULL_HANDLE;
@@ -1831,14 +1832,15 @@ VkImageView layerView( VkImage img, VkImageViewType type, VkFormat fmt, int base
 
 /* lane VKBLOOM1: a chain image only this device reads (device-local; layers > 1: the ring, a 2D array view and a 2D view
  * per layer), left UNDEFINED (bloomGeneral lays it out) */
-bool bloomLocal( BloomImg & I, VkFormat fmt, VkImageUsageFlags usage, int w, int h, int layers, double & mb, int samples = 1 )
+bool bloomLocal( BloomImg & I, VkFormat fmt, VkImageUsageFlags usage, int w, int h, int layers, double & mb, int samples = 1,
+	int levels = 1 )
 {
 	Vk & v = vk();
 	VkImageCreateInfo ci { VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO };
 	ci.imageType = VK_IMAGE_TYPE_2D;
 	ci.format = fmt;
 	ci.extent = { std::uint32_t( w ), std::uint32_t( h ), 1 };
-	ci.mipLevels = 1;
+	ci.mipLevels = std::uint32_t( levels );
 	ci.arrayLayers = std::uint32_t( layers );
 	ci.samples = VkSampleCountFlagBits( samples );
 	ci.tiling = VK_IMAGE_TILING_OPTIMAL;
@@ -1858,7 +1860,9 @@ bool bloomLocal( BloomImg & I, VkFormat fmt, VkImageUsageFlags usage, int w, int
 	I.h = h;
 	I.layers = layers;
 	I.samples = samples;
-	I.view = layerView( I.img, layers > 1 ? VK_IMAGE_VIEW_TYPE_2D_ARRAY : VK_IMAGE_VIEW_TYPE_2D, fmt, 0, layers );
+	I.levels = levels;
+	I.view = levels > 1 ? imageView( I.img, VK_IMAGE_VIEW_TYPE_2D, fmt, VK_IMAGE_ASPECT_COLOR_BIT, std::uint32_t( levels ) )
+		: layerView( I.img, layers > 1 ? VK_IMAGE_VIEW_TYPE_2D_ARRAY : VK_IMAGE_VIEW_TYPE_2D, fmt, 0, layers );
 	if ( !I.view )
 		return false;
 	for ( int l = 0; layers > 1 && l < layers && l < 8; l++ )
@@ -1881,7 +1885,7 @@ bool bloomGeneral( const std::vector<const BloomImg *> & imgs )
 		b.newLayout = VK_IMAGE_LAYOUT_GENERAL;
 		b.srcQueueFamilyIndex = b.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
 		b.image = I->img;
-		b.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, std::uint32_t( I->layers ) };
+		b.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, std::uint32_t( I->levels ), 0, std::uint32_t( I->layers ) };
 		bars.push_back( b );
 	}
 	if ( bars.empty() )
@@ -1919,6 +1923,7 @@ void toneBloomFree( bool glAlive )
 	bloomImgDrop( B.src, glAlive );
 	bloomImgDrop( B.ring, glAlive );
 	bloomImgDrop( B.comb, glAlive );
+	bloomImgDrop( B.lod, glAlive );
 	for ( int i = 0; i < WwVkPresent::kToneBloomMips; i++ ) {
 		bloomImgDrop( B.mip[i], glAlive );
 		bloomImgDrop( B.up[i], glAlive );
@@ -2065,6 +2070,7 @@ bool toneBloomChain( const WwVkPresent::ToneBloom & b, std::string & why )
 	bloomImgDrop( B.src, true );
 	bloomImgDrop( B.ring, true );
 	bloomImgDrop( B.comb, true );
+	bloomImgDrop( B.lod, true );
 	for ( int i = 0; i < WwVkPresent::kToneBloomMips; i++ ) {
 		bloomImgDrop( B.mip[i], true );
 		bloomImgDrop( B.up[i], true );
@@ -2358,9 +2364,10 @@ bool toneStatic( std::string & why )
 		return true;
 	VkSamplerCreateInfo sci { VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO };
 	sci.magFilter = sci.minFilter = VK_FILTER_LINEAR;
-	sci.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
+	// lane VKFAR2: GL_LINEAR_MIPMAP_LINEAR over the top's mips (the lod tent); every other read is SampleLevel 0 of one level
+	sci.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
 	sci.addressModeU = sci.addressModeV = sci.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-	sci.maxLod = 0.0f;
+	sci.maxLod = 1000.0f;
 	if ( v.vkCreateSampler( v.dev, &sci, nullptr, &T.sampler ) != VK_SUCCESS ) {
 		why = "vkCreateSampler (the tone pass) failed";
 		return false;
@@ -2681,7 +2688,7 @@ bool toneFbs( std::string & why )
 }
 
 // lane VKBLOOM1: harness only (tests/vkframe/toneview.cpp's reds, must FAIL); 1 = mode 3 not drawn, 2 = the measure not
-// dispatched, 3 = mode 3 reads no backdrop
+// dispatched, 3 = mode 3 reads no backdrop, 4 (lane VKFAR2) = the lod tent reads level 0 only
 int bloomRedTest = 0;
 
 // the worker: record the LUT's copy (when new) and the pass into this frame's view slot (toneWork submits it)
@@ -2786,10 +2793,42 @@ bool toneRecord( std::string & why )
 				j.params[3] = b.dispersion;
 				dispatch( 2, B.upSet[level], B.dims[level][0], B.dims[level][1], j, 8 );
 			}
-			Pc j {};  // the final tent once per pixel (bloom_comb.hlsl), lod 0 of the top; the tone pass weighs it
-			j.params[0] = b.radius;
-			j.params[2] = b.dispersion;
-			dispatch( 4, B.combSet, B.W, B.H, j, 8 );
+			if ( b.lod && B.lod.img ) {
+				/* lane VKFAR2: Bloom Mip under the fog bloom: no combine; cell_hdr.frag reads the top's mips per sample
+				 * (cellbloom.cpp's glGenerateMipmap, levels 0-3), so the top goes to level 0 and each level is a linear blit
+				 * of the one above (GL's sizes: max(1, size >> level)) */
+				const BloomImg & top = n == 1 ? B.mip[0] : B.up[0];
+				VkMemoryBarrier tb { VK_STRUCTURE_TYPE_MEMORY_BARRIER };
+				tb.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT | VK_ACCESS_SHADER_READ_BIT;
+				tb.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT | VK_ACCESS_TRANSFER_WRITE_BIT;
+				v.vkCmdPipelineBarrier( T.cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+					VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 1, &tb, 0, nullptr, 0, nullptr );
+				VkImageCopy cp {};
+				cp.srcSubresource = cp.dstSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
+				cp.extent = { std::uint32_t( B.dims[0][0] ), std::uint32_t( B.dims[0][1] ), 1 };
+				v.vkCmdCopyImage( T.cmd, top.img, VK_IMAGE_LAYOUT_GENERAL, B.lod.img, VK_IMAGE_LAYOUT_GENERAL, 1, &cp );
+				for ( int l = 1; l < B.lod.levels; l++ ) {
+					tb.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+					tb.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT | VK_ACCESS_TRANSFER_WRITE_BIT;
+					v.vkCmdPipelineBarrier( T.cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 1, &tb, 0, nullptr, 0,
+						nullptr );
+					VkImageBlit bl {};
+					bl.srcSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, std::uint32_t( l - 1 ), 0, 1 };
+					bl.dstSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, std::uint32_t( l ), 0, 1 };
+					bl.srcOffsets[1] = { std::max( 1, B.dims[0][0] >> ( l - 1 ) ), std::max( 1, B.dims[0][1] >> ( l - 1 ) ), 1 };
+					bl.dstOffsets[1] = { std::max( 1, B.dims[0][0] >> l ), std::max( 1, B.dims[0][1] >> l ), 1 };
+					v.vkCmdBlitImage( T.cmd, B.lod.img, VK_IMAGE_LAYOUT_GENERAL, B.lod.img, VK_IMAGE_LAYOUT_GENERAL, 1, &bl, VK_FILTER_LINEAR );
+				}
+				tb.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+				tb.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+				v.vkCmdPipelineBarrier( T.cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT
+					| VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 1, &tb, 0, nullptr, 0, nullptr );
+			} else {
+				Pc j {};  // the final tent once per pixel (bloom_comb.hlsl), lod 0 of the top; the tone pass weighs it
+				j.params[0] = b.radius;
+				j.params[2] = b.dispersion;
+				dispatch( 4, B.combSet, B.W, B.H, j, 8 );
+			}
 			B.records++;
 		}
 		if ( B.measQw > 0 ) {  // the measure's texels into the host buffer: read at the next frame (toneMeasureTake)
@@ -4123,6 +4162,24 @@ bool toneRun( const ToneRun & t, std::string & why )
 				return refuse( B.brokenWhy );
 			}
 		}
+		if ( b && b->lod && !B.lod.img ) {
+			// lane VKFAR2: the top's mips, levels 0-3 as GL's MAX_LEVEL 3 (fewer when the top is that small)
+			drain();
+			const int lw = b->dims[0][0], lh = b->dims[0][1];
+			int levels = 1;
+			while ( levels < 4 && ( std::max( lw, lh ) >> levels ) > 0 )
+				levels++;
+			bool ok = bloomLocal( B.lod, VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT
+				| VK_IMAGE_USAGE_TRANSFER_DST_BIT, lw, lh, 1, B.mb, 1, levels );
+			if ( ok )
+				ok = bloomGeneral( { &B.lod } );
+			if ( !ok ) {
+				bloomImgDrop( B.lod, true );
+				B.broken = true;
+				B.brokenWhy = "the bloom in the tone pass broke: the top's mips failed";
+				return refuse( B.brokenWhy );
+			}
+		}
 		if ( b ) {
 			B.job = *b;
 			bloomFresh = B.fresh;
@@ -4141,7 +4198,8 @@ bool toneRun( const ToneRun & t, std::string & why )
 	static bool boundMeasure = false;
 	static VkImageView boundComb = VK_NULL_HANDLE, boundBack = VK_NULL_HANDLE, boundFog = VK_NULL_HANDLE;
 	static std::uint64_t boundFogGen = 0;
-	const VkImageView combView = B.on && B.comb.view ? B.comb.view : T.dummyView;
+	const bool lodOn = B.on && B.job.lod && B.lod.view;
+	const VkImageView combView = lodOn ? B.lod.view : B.on && B.comb.view ? B.comb.view : T.dummyView;
 	const VkImageView backView = B.backdrop && B.back.view && bloomRedTest != 3 ? B.back.view : T.dummyView;
 	const VkImageView fogView = fogS ? fogS->view : T.colorView;  // off: any multisample view (the shader does not read it)
 	if ( T.descDirty || boundMeasure != measureBound || boundComb != combView || boundBack != backView || boundFog != fogView
@@ -4185,6 +4243,15 @@ bool toneRun( const ToneRun & t, std::string & why )
 	T.job = t.job;
 	if ( fogS && t.fogRed == 1 )
 		T.job.ints[0] &= ~std::int32_t( 1 << 9 );  // the red: the target ignored (gain 1)
+	if ( lodOn ) {
+		// lane VKFAR2: cellIsFoBloomParams x / z / w and cellIsFoBloomFrame for the per-sample lod tent (red 4: lod 0)
+		T.job.ints[0] |= std::int32_t( 1 << 8 );
+		T.job.ints[3] = std::int32_t( B.W | ( B.H << 16 ) );
+		T.job.tent[0] = B.job.radius;
+		T.job.tent[1] = B.job.dispersion;
+		T.job.tent[2] = bloomRedTest == 4 ? 0.0f : B.job.perPixel;
+		T.job.tent[3] = 0.0f;
+	}
 	// GL's frame (and the view's depth GL blitted) done -> the worker's pass -> GL's later passes on the view
 	T.defTex[0] = T.colorTex;
 	T.defTex[1] = T.dsTex;

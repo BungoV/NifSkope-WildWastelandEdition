@@ -256,8 +256,8 @@ static long long ulps32( uint32_t a, uint32_t b )
 
 VKF( vkCmdClearColorImage );
 
-// ToneBindingsVk.hlsli ToneJob (96 bytes)
-struct ToneJob { float cineE[4], tint[4], wbExposure[4], bloomRect[4], fo[4]; int32_t ints[4]; };
+// ToneBindingsVk.hlsli ToneJob (112 bytes; tent is read only under flag 8, which this gate leaves off)
+struct ToneJob { float cineE[4], tint[4], wbExposure[4], bloomRect[4], fo[4]; int32_t ints[4]; float tent[4]; };
 
 static Img makeImg3( int n, VkFormat fmt, VkImageUsageFlags usage )
 {

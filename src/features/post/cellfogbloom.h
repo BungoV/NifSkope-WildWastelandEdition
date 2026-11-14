@@ -36,6 +36,8 @@ void wwCellFogBloomDone( Renderer * r, int unit, int knownActive = -1 );
 /*! Lane VKFAR2: this frame's target when the present device drew it (its sharedTarget key and GL name, for the Vulkan
  *  tone pass); false: GL drew its own target (or none ran) */
 bool wwCellFogBloomVkTarget( std::uintptr_t & key, unsigned & tex );
+/*! Lane VKFAR2: the last run drew on the present device (cellbloom.cpp runs before it: its tone-pass route asks this) */
+bool wwCellFogBloomVkLast();
 QString wwCellFogBloomEcho();
 
 #endif

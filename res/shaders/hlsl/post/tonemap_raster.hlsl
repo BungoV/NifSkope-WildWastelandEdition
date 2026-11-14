@@ -24,7 +24,9 @@ float4 main( float4 pos : SV_Position, uint s : SV_SampleIndex ) : SV_Target
 	p.lutOn = false;
 #endif
 	float3 foBloom = float3( 0.0f, 0.0f, 0.0f );
-	if ( p.foOn )
+	if ( p.foOn && ( j.ints.x & TONE_F_FOBLOOMLOD ) != 0 )
+		foBloom = ToneFoBloomLod( j, px, s );
+	else if ( p.foOn )
 		foBloom = ToneComb.Load( int3( px, 0 ) ).rgb * j.fo.x;
 	float4 v;
 	if ( !ToneSample( j, p, px, s, foBloom, v ) )

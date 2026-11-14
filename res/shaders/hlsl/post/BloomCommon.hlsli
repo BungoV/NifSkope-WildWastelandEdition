@@ -109,6 +109,38 @@ float3 F4FX_UpsampleTentDispersed( Texture2D<float4> bloomMip, SamplerState line
 	return float3( r.r, g.g, b.b );
 }
 
+// The tent down the top's mips (GL twin cell_bloom.glsl bloomTentLod): the taps at mip lod, spread by 2^lod level-0 texels
+float3 F4FX_UpsampleTentLod( Texture2D<float4> bloomMip, SamplerState linearClamp, float2 uv, float2 texel, float radiusPixels,
+	float lod )
+{
+	const float2 o = texel * exp2( lod ) * max( radiusPixels, 0.0 );
+	float3 c = F4FX_SanitizeBloomSample( bloomMip.SampleLevel( linearClamp, uv, lod ).rgb ) * 4.0;
+	c += F4FX_SanitizeBloomSample( bloomMip.SampleLevel( linearClamp, uv + float2( -o.x, 0.0 ), lod ).rgb ) * 2.0;
+	c += F4FX_SanitizeBloomSample( bloomMip.SampleLevel( linearClamp, uv + float2( o.x, 0.0 ), lod ).rgb ) * 2.0;
+	c += F4FX_SanitizeBloomSample( bloomMip.SampleLevel( linearClamp, uv + float2( 0.0, -o.y ), lod ).rgb ) * 2.0;
+	c += F4FX_SanitizeBloomSample( bloomMip.SampleLevel( linearClamp, uv + float2( 0.0, o.y ), lod ).rgb ) * 2.0;
+	c += F4FX_SanitizeBloomSample( bloomMip.SampleLevel( linearClamp, uv + float2( -o.x, -o.y ), lod ).rgb );
+	c += F4FX_SanitizeBloomSample( bloomMip.SampleLevel( linearClamp, uv + float2( o.x, -o.y ), lod ).rgb );
+	c += F4FX_SanitizeBloomSample( bloomMip.SampleLevel( linearClamp, uv + float2( -o.x, o.y ), lod ).rgb );
+	c += F4FX_SanitizeBloomSample( bloomMip.SampleLevel( linearClamp, uv + float2( o.x, o.y ), lod ).rgb );
+	return c * ( 1.0 / 16.0 );
+}
+
+// The dispersed tent at mip lod (GL twin bloomTentDispersedLod): the push stays in level-0 texels
+float3 F4FX_UpsampleTentDispersedLod( Texture2D<float4> bloomMip, SamplerState linearClamp, float2 uv, float2 texel,
+	float radiusPixels, float dispersion, float lod )
+{
+	const float2 radial = uv - 0.5;
+	const float len = length( radial );
+	const float2 d = len > 1e-5 ? ( radial / len ) * texel * max( dispersion, 0.0 ) : float2( 0.0, 0.0 );
+	const float3 g = F4FX_UpsampleTentLod( bloomMip, linearClamp, uv, texel, radiusPixels, lod );
+	if ( all( d == float2( 0.0, 0.0 ) ) )
+		return g;
+	const float3 r = F4FX_UpsampleTentLod( bloomMip, linearClamp, uv + d, texel, radiusPixels, lod );
+	const float3 b = F4FX_UpsampleTentLod( bloomMip, linearClamp, uv - d, texel, radiusPixels, lod );
+	return float3( r.r, g.g, b.b );
+}
+
 // One up level: this level's band x its weight + the tent of the accumulated chain below x its weight
 float3 F4FX_BloomUp( Texture2D<float4> source, Texture2D<float4> bloomMip, SamplerState linearClamp, float2 uv, float2 bloomTexel,
 	float radiusPixels, float sourceWeight, float bloomWeight, float dispersion )

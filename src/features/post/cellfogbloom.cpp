@@ -53,6 +53,7 @@ struct FbState
 	bool ran = false;
 	GLuint target = 0;
 	bool vk = false;	// lane VKFAR2: target is the present device's shared R8 (vkTargetKey)
+	bool lastVk = false;	// lane VKFAR2: the last run drew on the present device (Done keeps it for the next frame's bloom)
 	double ms = -1.0;
 	int frames = 0;
 	QString last = QStringLiteral( "off" ), said;
@@ -243,6 +244,7 @@ bool wwCellFogBloomRun( Scene * scene, unsigned hdrFbo, unsigned ds, int W, int 
 	FbState & s = fs();
 	s.ran = false;
 	s.target = 0;
+	s.lastVk = false;
 	if ( !s.on ) {
 		note( s, QStringLiteral( "off" ) );
 		return false;
@@ -461,6 +463,7 @@ bool wwCellFogBloomRun( Scene * scene, unsigned hdrFbo, unsigned ds, int W, int 
 	s.ran = true;
 	s.target = vkDrew ? vkTarget : g.target;
 	s.vk = vkDrew;
+	s.lastVk = vkDrew;
 	note( s, QStringLiteral( "on %1%2x%3 x%4 k=%5 translucent=%6 sigma=%7..%8" ).arg( vkDrew ? QStringLiteral( "Vulkan " ) : QString() ).arg( W ).arg( H ).arg( S )
 		.arg( double( kStrength ) ).arg( double( kTranslucent ) ).arg( double( kSigmaMist ), 0, 'g', 4 ).arg( double( kSigmaFog ), 0, 'g', 4 ) );
 	return true;
@@ -495,6 +498,11 @@ void wwCellFogBloomDone( Renderer * r, int unit, int knownActive )
 	s.ran = false;
 	s.target = 0;
 	s.vk = false;
+}
+
+bool wwCellFogBloomVkLast()
+{
+	return fs().lastVk;
 }
 
 bool wwCellFogBloomVkTarget( std::uintptr_t & key, unsigned & tex )

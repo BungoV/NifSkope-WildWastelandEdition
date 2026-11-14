@@ -88,12 +88,13 @@ const char * routeName();
  * GL signals, the worker records and submits the pass (it waits GL's signal, signals back), the drawing thread waits the
  * submit and GL waits Vulkan's signal; GL's later passes (clouds in front, P7, lens flare, TAA, overlays) draw on the
  * result. Red WW_VKVIEW_TONE_RED=1 (or WW_VKVIEW off): GL's tone quads. */
-struct ToneJob  // 96 bytes: ToneBindingsVk.hlsli's ToneJob (push constants); ints[0]'s mode / test / ref are toneRun's
+struct ToneJob  // 112 bytes: ToneBindingsVk.hlsli's ToneJob (push constants); ints[0]'s mode / test / ref are toneRun's
 {
 	float cineE[4] = {}, tint[4] = {}, wbExposure[4] = {}, bloomRect[4] = {}, fo[4] = {};
 	std::int32_t ints[4] = {};
+	float tent[4] = {};  //!< lane VKFAR2: toneRun fills it (and ints[3], flag 8) from ToneRun::bloom when its lod is on
 };
-static_assert( sizeof( ToneJob ) == 96, "ToneJob is the shader's push constant block" );
+static_assert( sizeof( ToneJob ) == 112, "ToneJob is the shader's push constant block" );
 /* the linear frame (RGBA16F + D24S8, samples at the view's) GL draws the cell into, made on the present device; GL names
  * out (multisample textures; ds already in GL_STENCIL_INDEX mode). GL current. */
 bool toneFrame( int w, int h, int samples, unsigned & color, unsigned & ds, std::string & why );
@@ -118,6 +119,10 @@ struct ToneBloom
 	float exposure = 1.0f;  //!< cell_bloom_src.frag's uniforms
 	bool on = false;
 	float impulseX = 0.0f, impulseY = 0.0f, impulse = 0.0f;
+	/* lane VKFAR2: Bloom Mip under the fog bloom (cell_hdr.frag's lod tent): no combine; the top's mips (levels 0-3, as
+	 * glGenerateMipmap) read per sample by perPixel x log2 of the fog's gain (cellIsFoBloomParams.w) */
+	bool lod = false;
+	float perPixel = 0.0f;
 };
 struct ToneRun
 {

@@ -91,6 +91,7 @@ struct Fns
 	void( WINAPI * vertexAttribPointer )( GLuint, GLint, GLenum, GLboolean, GLsizei, const void * ) = nullptr;
 	void( WINAPI * uniform2f )( GLint, GLfloat, GLfloat ) = nullptr;  // lane VKBLOOM1: the bloom chain's GL reference
 	void( WINAPI * framebufferTextureLayer )( GLenum, GLenum, GLuint, GLint, GLint ) = nullptr;
+	void( WINAPI * generateMipmap )( GLenum ) = nullptr;  // lane VKFAR2: Bloom Mip's top mips
 };
 Fns f;
 
@@ -117,7 +118,7 @@ bool loadAll()
 		&& load( f.enableVertexAttribArray, "glEnableVertexAttribArray" )
 		&& load( f.disableVertexAttribArray, "glDisableVertexAttribArray" )
 		&& load( f.vertexAttribPointer, "glVertexAttribPointer" ) && load( f.uniform2f, "glUniform2f" )
-		&& load( f.framebufferTextureLayer, "glFramebufferTextureLayer" );
+		&& load( f.framebufferTextureLayer, "glFramebufferTextureLayer" ) && load( f.generateMipmap, "glGenerateMipmap" );
 }
 
 std::string readFile( const std::string & p )
@@ -637,6 +638,7 @@ int main( int argc, char ** argv )
 	{
 		GLuint top, comb;
 		float radius, weight, dispersion, ec, fogCap;
+		bool lod = false;	// lane VKFAR2: no combine; cell_hdr.frag's tent per sample down the top's mips
 	};
 	const GlBloom * glBloomNow = nullptr;
 	const GLuint backTex = tex2d( W, H, kRgba16f, GL_RGBA, GL_FLOAT, nullptr, false );
@@ -680,7 +682,7 @@ int main( int argc, char ** argv )
 		u4f( pHdr, "cellIsBloomRect", rect );
 		const GlBloom * bg = glBloomNow;
 		u1i( pHdr, "cellIsFoBloomOn", bg ? 1 : 0 );
-		u1i( pHdr, "cellIsFoBloomCombOn", bg ? 1 : 0 );
+		u1i( pHdr, "cellIsFoBloomCombOn", bg && !bg->lod ? 1 : 0 );
 		if ( bg ) {
 			bindUnit( 13, GL_TEXTURE_2D, bg->top );
 			bindUnit( 14, GL_TEXTURE_2D, bg->comb );
@@ -1147,6 +1149,150 @@ int main( int argc, char ** argv )
 				red == 1 ? "mode 3 not drawn" : red == 3 ? "mode 3 without the backdrop" : "the measure not dispatched", v.diff, v.maxd );
 			ok = ok && redFails;
 		}
+	}
+	/* lane VKFAR2: both blooms in the tone pass (cellbloom.cpp with the fog bloom on: the combine on the present device, the
+	 * fog bloom's shared R8 per sample). Cases: the fog arm's four (split A, unsorted A, skyin A, split B) on bloom_split's
+	 * chain, and bloom_add (hold) on fog B: 3 + 1 + 1 + 3 + 1 draws. Bound as the jobs above (BOUND: no byte off by more than
+	 * 1), stated before the run. Armed: GL's split on fog A must differ from fog B. Red (must FAIL): the hand-back
+	 * (cellbloom.cpp refusing as before: the bloom left to GL, the tone pass without it).
+	 * Measured, not gated: Bloom Mip under the fog bloom (ToneBloom::lod: the tone pass copies the top, blits its levels and
+	 * reads them per sample, ToneFoBloomLod) against GL's glGenerateMipmap + cell_hdr.frag. The driver's mips of a level with
+	 * an odd side differ (an area filter there, the even side one texel left at some sizes), so cellbloom.cpp keeps GL. */
+	{
+		static char bothKeyTag;
+		const std::uintptr_t fogKey = reinterpret_cast<std::uintptr_t>( &bothKeyTag );
+		unsigned fogTex = 0;
+		GLuint fbFog = 0;
+		if ( !WwVkPresent::sharedTarget( fogKey, 0, W, H, 1, kGlR8, fogTex, why, 1, S ) || !( fbFog = fbo( kT2DMS, fogTex, 0 ) ) ) {
+			std::printf( "TONEVIEW BOTH FAIL (the shared R8 target: %s)\n", why.c_str() );
+			ok = false;
+		} else {
+			std::mt19937 fr( 31 );	// the fog arm's data
+			std::vector<float> fogA( size_t( WS ) * H ), fogB( size_t( WS ) * H );
+			for ( size_t i = 0; i < fogA.size(); i++ ) {
+				fogA[i] = ur( fr ) < 0.4f ? 0.0f : float( int( ur( fr ) * 256.0f ) & 255 ) / 255.0f;
+				fogB[i] = float( 128 + ( int( ur( fr ) * 128.0f ) & 127 ) ) / 255.0f;
+			}
+			const GLuint tFogA = tex2d( WS, H, kR32f, kRed, GL_FLOAT, fogA.data(), false );
+			const GLuint tFogB = tex2d( WS, H, kR32f, kRed, GL_FLOAT, fogB.data(), false );
+			auto fill = [&]( GLuint src ) {
+				f.bindFramebuffer( kFb, fbFog );
+				glViewport( 0, 0, W, H );
+				glDisable( GL_DEPTH_TEST );
+				glDisable( GL_STENCIL_TEST );
+				glDisable( GL_BLEND );
+				glDisable( GL_SCISSOR_TEST );
+				f.useProgram( pFog );
+				bindUnit( 8, GL_TEXTURE_2D, src );
+				u1i( pFog, "fogData", 8 );
+				u1i( pFog, "genS", S );
+				glDrawArrays( GL_TRIANGLES, 0, 3 );
+			};
+			// cellbloom.cpp's Bloom Mip on the accumulated top (on), and back to one level for the arms after (off)
+			auto topMips = [&]( GLuint t, bool on ) {
+				glBindTexture( GL_TEXTURE_2D, t );
+				glTexParameteri( GL_TEXTURE_2D, kMaxLevel, on ? 3 : 0 );
+				glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, on ? GL_LINEAR_MIPMAP_LINEAR : GL_LINEAR );
+				if ( on )
+					f.generateMipmap( GL_TEXTURE_2D );
+				glBindTexture( GL_TEXTURE_2D, 0 );
+				return glGetError() == GL_NO_ERROR;
+			};
+			struct BothCase
+			{
+				const char * name;
+				const Job * job;
+				GLuint data;
+				int bc;
+			};
+			const BothCase cases[5] = { { "both split A", &jobs[0], tFogA, 0 }, { "both unsorted A", &jobs[2], tFogA, 0 },
+				{ "both skyin A", &jobs[1], tFogA, 0 }, { "both split B", &jobs[0], tFogB, 0 },
+				{ "both add B", &jobs[bcases[1].job], tFogB, 1 } };
+			// one case: GL (lod: down the mips; else the combine) into ref, Vulkan (bloom: with the job; else the hand-back) into vk
+			auto both = [&]( const BothCase & c, bool lod, bool bloom, std::vector<std::uint8_t> * ref, std::vector<std::uint8_t> * vk ) {
+				const BloomCase & bc = bcases[c.bc];
+				Job j = *c.job;
+				j.measure = 0;
+				WwVkPresent::ToneBloom b = bloomJob( bc );
+				b.lod = lod;
+				b.perPixel = lod ? 1.0f : 0.0f;
+				fill( c.data );
+				bool ran = true;
+				if ( ref ) {
+					genFrame( fbFrame );
+					GlBloom gb {};
+					ran = chainGl( bc, b, gb ) && ( !lod || topMips( gb.top, true ) );
+					gb.lod = lod;
+					glBloomNow = &gb;
+					glFogNow = fogTex;
+					ran = ran && runGl( j, *ref );
+					glBloomNow = nullptr;
+					glFogNow = 0;
+					if ( lod )
+						ran = topMips( gb.top, false ) && ran;
+				}
+				if ( vk ) {
+					bloomNow = bloom ? &b : nullptr;
+					bloomFo[0] = bc.weight;
+					bloomFo[1] = bc.ec;
+					bloomFo[2] = 2.0f;
+					vkFogKey = fogKey;
+					vkFogTex = fogTex;
+					ran = runVk( j, j.splitSky, *vk ) && ran;
+					bloomNow = nullptr;
+					vkFogKey = 0;
+					vkFogTex = 0;
+				}
+				return ran;
+			};
+			std::vector<std::uint8_t> refBothSplit, refBothSplitB;
+			for ( const BothCase & c : cases ) {
+				std::vector<std::uint8_t> vk, ref;
+				const bool ran = both( c, false, true, &ref, &vk );
+				const Verdict v = compare( vk, ref );
+				std::printf( "TONEVIEW BOTH %s %s (%zu of %zu bytes differ, max %d)\n", c.name, ran ? v.word() : "FAIL (a run failed)", v.diff,
+					v.total, v.maxd );
+				ok = ok && ran && v.ok();
+				if ( !v.ok() && vk.size() == ref.size() ) {
+					/* Refused, not widened (11-14 run: "both add B" 1 sample, G 76 vs 255). Mode 3's cellGlowShoulder:
+					 * cellCurveInv's a = 0.15 (yp - 1) changes sign at y = W(inf) (backdrop 0.80415 at E 0.4); there the
+					 * root it takes jumps from 0 (k 1) to the far one (k 0). The backdrop is BOUND to one fp16 step (0.00049),
+					 * so a mean within one step of 0.80415 can land either side (notes/vkfar2/shoulder2.py). */
+					size_t off = 0;
+					for ( size_t i = 0; i < vk.size(); i++ )
+						off += std::abs( int( vk[i] ) - int( ref[i] ) ) > 1;
+					std::printf( "TONEVIEW BOTH %s: %zu byte(s) off by more than 1\n", c.name, off );
+				}
+				if ( &c == &cases[0] )
+					refBothSplit = ref;
+				if ( &c == &cases[3] )
+					refBothSplitB = ref;
+			}
+			{
+				const Verdict armed = compare( refBothSplit, refBothSplitB );
+				std::printf( "TONEVIEW BOTH armed %s (GL split on fog A vs fog B: %zu bytes differ; must differ)\n", armed.diff > 0 ? "yes" : "NO",
+					armed.diff );
+				ok = ok && armed.diff > 0;
+			}
+			{	// the hand-back: no bloom in the tone pass
+				std::vector<std::uint8_t> vk;
+				const bool ran = both( cases[0], false, false, nullptr, &vk );
+				const Verdict v = compare( vk, refBothSplit );
+				const bool redFails = !ran || !v.ok();
+				std::printf( "TONEVIEW BOTH RED handback %s (the bloom handed back to GL: %zu bytes differ, max %d; must FAIL)\n",
+					redFails ? "FAIL" : v.word(), v.diff, v.maxd );
+				ok = ok && redFails;
+			}
+			for ( const BothCase & c : cases ) {	// Bloom Mip: measured, not routed (cellbloom.cpp keeps GL), not in the verdict
+				std::vector<std::uint8_t> vk, ref;
+				const bool ran = both( c, true, true, &ref, &vk );
+				const Verdict v = compare( vk, ref );
+				std::printf( "TONEVIEW BOTH MIPS %s measured %s (%zu of %zu bytes differ, max %d; not routed, not gated)\n", c.name,
+					ran ? v.word() : "(a run failed)", v.diff, v.total, v.maxd );
+			}
+			bindUnit( 16, kT2DMS, 0 );
+		}
+		WwVkPresent::sharedTargetDrop( fogKey );
 	}
 	/* lane VKPOST2: the tone pass and the TAA in ONE crossing (toneRun defers, taaRun colorFromView: Vulkan resolves the
 	 * view into cur) against the two crossings (toneRun alone, GL's colour blit into cur as gametaa.cpp does, taaRun).

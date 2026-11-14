@@ -5,6 +5,7 @@
 #define TONE_BINDINGS_VK_HLSLI
 
 #include "ToneCommon.hlsli"
+#include "BloomCommon.hlsli"
 
 #ifdef __spirv__
 #define TONE_BIND( b ) [[vk::binding( b, 0 )]]
@@ -14,7 +15,7 @@
 #define TONE_FORMAT32
 #endif
 
-// one dispatch's values (96 bytes): cell_hdr.frag's uniforms
+// one dispatch's values (112 bytes): cell_hdr.frag's uniforms
 struct ToneJob
 {
 	float4 cineE;		// cellIsCine (saturation, brightness, contrast), cellIsE
@@ -22,7 +23,8 @@ struct ToneJob
 	float4 wbExposure;	// cellIsWbD, cellIsExposure
 	float4 bloomRect;	// cellIsBloomRect: the view's origin, 1 / its size
 	float4 fo;			// the Fusion Shaders bloom's weight (cellIsFoBloomParams.y), cellIsFoBloomEc, cellIsFoBloomFogCap, cellIsAdapted
-	int4 ints;			// x: flags (TONE_F_*), y: wwDitherOn, z: wwDitherSeed, w: spare
+	int4 ints;			// x: flags (TONE_F_*), y: wwDitherOn, z: wwDitherSeed, w: cellIsFoBloomFrame (width | height << 16)
+	float4 tent;		// TONE_F_FOBLOOMLOD: cellIsFoBloomParams x (radius), z (dispersion), w (Bloom Mip), 0
 };
 
 // ints.x: bits 0-3 cellIsRed, then the switches, then hdrMode (16-17), hdrStencilTest (20-21), hdrStencilRef (24-25)
@@ -30,18 +32,19 @@ struct ToneJob
 #define TONE_F_LUT			( 1 << 5 )
 #define TONE_F_MEASURE		( 1 << 6 )	// cellIsBloomOn
 #define TONE_F_FOBLOOM		( 1 << 7 )	// cellIsFoBloomOn with its combine texture (the per-pixel tent)
+#define TONE_F_FOBLOOMLOD	( 1 << 8 )	// with FOBLOOM: no combine (Bloom Mip under the fog bloom); ToneComb is the top's mips
 #define TONE_F_FOGBLOOM		( 1 << 9 )	// cellFogBloomOn
 #define TONE_F_CELLON		( 1 << 10 )	// cellOn && cellIsOn
 #define TONE_F_BACKDROP		( 1 << 11 )	// hdrBackdropOn
 
 TONE_BIND( 0 ) Texture2DMS<float4> ToneFrame : register( t0 );			// the linear frame (GL draws it, shared)
 TONE_BIND( 1 ) Texture2DMS<uint> ToneStencil : register( t1 );			// its stencil (a stencil-aspect view)
-TONE_BIND( 2 ) Texture2D<float4> ToneComb : register( t2 );				// the bloom's tent once per pixel (bloom_comb.hlsl)
+TONE_BIND( 2 ) Texture2D<float4> ToneComb : register( t2 );				// the bloom's tent once per pixel (bloom_comb.hlsl), or the top's mips
 TONE_BIND( 3 ) Texture2D<float4> ToneMeasureBloom : register( t3 );		// the measure's blurred bright pass
 TONE_BIND( 4 ) Texture3D<float4> ToneLut : register( t4 );				// the weather's grading LUT
 TONE_BIND( 5 ) Texture2DMS<float4> ToneFogBloom : register( t5 );		// the fog's bloom gain, (gain - 1) / 4 in .r, per sample
 TONE_BIND( 6 ) Texture2D<float4> ToneBackdrop : register( t6 );			// the view as mode 3 finds it, resolved
-TONE_BIND( 7 ) SamplerState ToneLinearClamp : register( s0 );			// linear, clamp to edge, no mips
+TONE_BIND( 7 ) SamplerState ToneLinearClamp : register( s0 );			// linear, clamp to edge, linear between mips
 TONE_BIND( 8 ) TONE_FORMAT32 RWTexture2D<float4> ToneOut : register( u0 );	// per sample: column x * samples + s
 #ifdef __spirv__
 [[vk::push_constant]] ConstantBuffer<ToneJob> ToneJobPc;
@@ -72,6 +75,25 @@ F4FX_ImageSpace ToneImageSpace( ToneJob j )
 float2 ToneFragCoord( uint2 px )
 {
 	return float2( px ) + 0.5f;
+}
+
+/* lane VKFAR2: the Fusion Shaders bloom per sample times its weight, as cell_hdr.frag reads it when Bloom Mip runs under the
+ * fog bloom: the dispersed tent down the top's mips (glGenerateMipmap's levels 0-3) by Bloom Mip x log2 of the sample's fog
+ * gain (a negative Bloom Mip: level 2), at the pixel's centre over the frame; lod 0 is the plain tent */
+float3 ToneFoBloomLod( ToneJob j, int2 px, uint s )
+{
+	float gain = 1.0f;
+	if ( ( j.ints.x & TONE_F_FOGBLOOM ) != 0 )
+		gain = 1.0f + 4.0f * ToneFogBloom.Load( px, s ).r;
+	const float lod = j.tent.z < 0.0f ? 2.0f : j.tent.z * log2( max( gain, 1.0f ) );
+	uint tw, th, levels;
+	ToneComb.GetDimensions( 0, tw, th, levels );
+	const float2 texel = 1.0f / float2( max( uint2( tw, th ), uint2( 1, 1 ) ) );
+	const float2 frame = float2( float( j.ints.w & 0xFFFF ), float( ( j.ints.w >> 16 ) & 0xFFFF ) );
+	const float2 uv = ( float2( px ) + 0.5f ) / frame;
+	if ( lod > 0.0f )
+		return F4FX_UpsampleTentDispersedLod( ToneComb, ToneLinearClamp, uv, texel, j.tent.x, j.tent.y, lod ) * j.fo.x;
+	return F4FX_UpsampleTentDispersed( ToneComb, ToneLinearClamp, uv, texel, j.tent.x, j.tent.y ) * j.fo.x;
 }
 
 // one sample's value as cell_hdr.frag writes it; false where its stencil test discards the sample. foBloom: the Fusion
