@@ -11,6 +11,9 @@
 #include "features/vkframe/objcell_pbrm_ps.spv.h"  // pbrm_default.prog's pixel twin (its vertex stage is objcell_vs)
 #include "features/vkframe/objcell_pbrmcell_ps.spv.h"     // pbrm_cell.prog's (the cell-lit pbrm_default)
 #include "features/vkframe/objcell_pbrmcellcsm_ps.spv.h"  // pbrm_cellcsm.prog's (and the sun cascades)
+#include "features/vkframe/objpfx_cs.spv.h"       // lane VKOBJ5: particles_cell.prog's record pass, expand stage, pixel twin
+#include "features/vkframe/objpfx_vs.spv.h"       // (vkframe_spirv.sh fxp)
+#include "features/vkframe/objpfx_cell_ps.spv.h"
 
 #include <algorithm>
 #include <cstdlib>
@@ -91,6 +94,12 @@ struct OpDraw
 	int w = 0, h = 0;
 	VkRect2D scissor {};  // lane VKOBJ4 open item 3: GL's scissor box (objBlFrameRead), the whole frame when GL's test is off
 	std::vector<std::uintptr_t> keys;  // the shared targets it draws into or reads (the crossing hands them over)
+	// lane VKOBJ5 (objPfxShade): the record pass's set (its own pool), the inputs (host) and the records it writes
+	bool pfx = false;
+	VkDescriptorPool cpool = VK_NULL_HANDLE;
+	VkDescriptorSet cset = VK_NULL_HANDLE;
+	CsmBuf pfxIn, pfxRec;
+	std::uint32_t pfxN = 0;
 };
 
 // a set-0 image no one gives: a 1x1 (0,0,0,1) of its shape and element type (GL's incomplete texture)
@@ -175,6 +184,12 @@ struct Op
 	VkImageView smpStencil = VK_NULL_HANDLE;  // the depth target's stencil aspect, made per readback
 	CsmBuf smpOut;                            // host-visible: one uint4 per sample
 	std::uint32_t smpJob[4] = {};             // w, h, samples, red (objbl_samples_cs.hlsl's ReadJob)
+	// lane VKOBJ5: the record pass's pipeline (objPfxShade), made from its module's own bindings
+	const std::uint32_t * pfxCs = nullptr;
+	std::vector<WwVkPresent::SpvBind> pfxBinds;
+	VkDescriptorSetLayout pfxDsl = VK_NULL_HANDLE;
+	VkPipelineLayout pfxLayout = VK_NULL_HANDLE;
+	VkPipeline pfxPipe = VK_NULL_HANDLE;
 };
 
 Op & opS()
@@ -190,7 +205,7 @@ bool opSame( const OpEntry & e, int twin, const std::uint32_t * vs, std::size_t 
 		return false;
 	const WwVkPresent::ObjBlTarget & u = e.target;
 	if ( std::memcmp( t.colors, u.colors, sizeof( t.colors ) ) || t.colorCount != u.colorCount || t.depth != u.depth || t.samples != u.samples
-		|| t.depthOp != u.depthOp || t.depthWrite != u.depthWrite || t.twoSided != u.twoSided
+		|| t.depthOp != u.depthOp || t.depthWrite != u.depthWrite || t.twoSided != u.twoSided || t.strip != u.strip
 		|| std::memcmp( &t.blend, &u.blend, sizeof( t.blend ) ) || std::memcmp( &t.stencil, &u.stencil, sizeof( t.stencil ) ) )
 		return false;
 	for ( std::size_t i = 0; i < b.size(); i++ )
@@ -227,9 +242,13 @@ void opDrawFree( OpDraw & d )
 		v.vkDestroyFramebuffer( v.dev, d.fb, nullptr );
 	if ( d.dpool )
 		v.vkDestroyDescriptorPool( v.dev, d.dpool, nullptr );
+	if ( d.cpool )
+		v.vkDestroyDescriptorPool( v.dev, d.cpool, nullptr );
 	for ( auto & u : d.ubo )
 		csmBufFree( u.second, false );
 	csmBufFree( d.cmds, false );
+	csmBufFree( d.pfxIn, false );
+	csmBufFree( d.pfxRec, false );
 	d = OpDraw();
 }
 
@@ -439,35 +458,49 @@ bool spvReflect( const std::uint32_t * w, std::size_t n, SpvModule & out, std::s
 			b.type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
 		else if ( x.op == 30 && v.storage == 2 && block.count( t ) ) {
 			b.type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-			// the members: scalar / vector / matrix, or an array of one (a nested struct is base 3: the mirror refuses it)
-			const std::vector<std::uint32_t> & mt = structMembers[t];
-			for ( std::uint32_t k = 0; k < mt.size(); k++ ) {
-				SpvMember m;
-				m.name = memberNames[t].count( k ) ? memberNames[t][k] : "%" + std::to_string( k );
-				m.offset = memberOffset[t].count( k ) ? memberOffset[t][k] : 0;
-				m.colStride = memberStride[t].count( k ) ? memberStride[t][k] : 0;
-				m.rowMajor = memberRowMajor[t].count( k ) != 0;
-				Ty e = ty( mt[k] );
-				if ( e.op == 28 ) {
-					m.count = constants.count( e.b ) ? constants[e.b] : 1;
-					m.arrayStride = arrayStride.count( mt[k] ) ? arrayStride[mt[k]] : 0;
-					e = ty( e.a );
+			// the members: scalar / vector / matrix, or an array of one. A nested struct (or an array of them, particles'
+			// Texture textures[10]) is walked into one member a field and element, named as GL names them
+			// ("textures[3].uvScale"); deeper than 4 levels stays base 3 and the mirror refuses it
+			auto walk = [&]( auto & self, std::uint32_t st, const std::string & pre, std::uint32_t at, int depth ) -> void {
+				const std::vector<std::uint32_t> mt = structMembers[st];
+				for ( std::uint32_t k = 0; k < mt.size(); k++ ) {
+					SpvMember m;
+					m.name = pre + ( memberNames[st].count( k ) ? memberNames[st][k] : "%" + std::to_string( k ) );
+					m.offset = at + ( memberOffset[st].count( k ) ? memberOffset[st][k] : 0 );
+					m.colStride = memberStride[st].count( k ) ? memberStride[st][k] : 0;
+					m.rowMajor = memberRowMajor[st].count( k ) != 0;
+					std::uint32_t tid = mt[k];
+					Ty e = ty( tid );
+					const bool arr = e.op == 28;
+					if ( arr ) {
+						m.count = constants.count( e.b ) ? constants[e.b] : 1;
+						m.arrayStride = arrayStride.count( tid ) ? arrayStride[tid] : 0;
+						tid = e.a;
+						e = ty( tid );
+					}
+					if ( e.op == 30 && depth < 4 ) {
+						for ( std::uint32_t el = 0; el < m.count; el++ )
+							self( self, tid, m.name + ( arr ? "[" + std::to_string( el ) + "]" : "" ) + ".", m.offset + el * m.arrayStride,
+								depth + 1 );
+						continue;
+					}
+					if ( e.op == 24 ) {
+						m.cols = e.b;
+						e = ty( e.a );
+					}
+					if ( e.op == 23 ) {
+						m.comps = e.b;
+						e = ty( e.a );
+					}
+					m.base = e.op == 22 ? 0 : e.op == 21 ? ( e.b ? 1 : 2 ) : 3;
+					// the member's extent: the last element's last component
+					const std::uint32_t one = m.cols > 1 ? ( m.rowMajor ? ( m.comps - 1 ) * m.colStride + m.cols * 4 : ( m.cols - 1 ) * m.colStride + m.comps * 4 )
+						: m.comps * 4;
+					b.bytes = std::max( b.bytes, m.offset + ( m.count - 1 ) * m.arrayStride + one );
+					b.members.push_back( m );
 				}
-				if ( e.op == 24 ) {
-					m.cols = e.b;
-					e = ty( e.a );
-				}
-				if ( e.op == 23 ) {
-					m.comps = e.b;
-					e = ty( e.a );
-				}
-				m.base = e.op == 22 ? 0 : e.op == 21 ? ( e.b ? 1 : 2 ) : 3;
-				// the member's extent: the last element's last component
-				const std::uint32_t one = m.cols > 1 ? ( m.rowMajor ? ( m.comps - 1 ) * m.colStride + m.cols * 4 : ( m.cols - 1 ) * m.colStride + m.comps * 4 )
-					: m.comps * 4;
-				b.bytes = std::max( b.bytes, m.offset + ( m.count - 1 ) * m.arrayStride + one );
-				b.members.push_back( m );
-			}
+			};
+			walk( walk, t, "", 0u, 0 );
 			b.bytes = ( b.bytes + 15u ) & ~15u;
 		} else {
 			why = nm + ": a descriptor type the reader does not take";
@@ -703,7 +736,7 @@ bool objBlPipe( int twin, const std::uint32_t * vs, std::size_t vsN, const std::
 	vi.vertexAttributeDescriptionCount = std::uint32_t( va.size() );
 	vi.pVertexAttributeDescriptions = va.data();
 	VkPipelineInputAssemblyStateCreateInfo ia { VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO };
-	ia.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+	ia.topology = target.strip ? VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP : VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
 	// GL's clip z as the prepass takes it (objPipe), GL's CCW front = Vulkan's CW with no y flip
 	VkPipelineViewportDepthClipControlCreateInfoEXT cc { VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_DEPTH_CLIP_CONTROL_CREATE_INFO_EXT };
 	cc.negativeOneToOne = VK_TRUE;
@@ -915,7 +948,7 @@ void objBlPipeFree()
 {
 	Op & O = opS();
 	if ( ( !O.made.empty() || !O.pools.empty() || !O.draws.empty() || !O.stand.empty() || O.zeroTexel.buf || O.fence || O.runFence || O.glDone
-		|| !O.smps.empty() || !O.texTwins.empty() || O.smpDsl || !O.stores.empty() ) && vk().ok ) {
+		|| !O.smps.empty() || !O.texTwins.empty() || O.smpDsl || !O.stores.empty() || O.pfxDsl ) && vk().ok ) {
 		Vk & v = vk();
 		drain();
 		v.vkDeviceWaitIdle( v.dev );
@@ -939,6 +972,17 @@ void objBlPipeFree()
 		O.smpDsl = VK_NULL_HANDLE;
 		O.smpSet = VK_NULL_HANDLE;
 		csmBufFree( O.smpOut, false );
+		if ( O.pfxPipe )
+			v.vkDestroyPipeline( v.dev, O.pfxPipe, nullptr );
+		if ( O.pfxLayout )
+			v.vkDestroyPipelineLayout( v.dev, O.pfxLayout, nullptr );
+		if ( O.pfxDsl )
+			v.vkDestroyDescriptorSetLayout( v.dev, O.pfxDsl, nullptr );
+		O.pfxPipe = VK_NULL_HANDLE;
+		O.pfxLayout = VK_NULL_HANDLE;
+		O.pfxDsl = VK_NULL_HANDLE;
+		O.pfxCs = nullptr;
+		O.pfxBinds.clear();
 		for ( OpDraw & d : O.draws )
 			opDrawFree( d );
 		O.draws.clear();
@@ -1472,6 +1516,7 @@ bool objBlBindUnits( GlProc gp, unsigned prog, ObjBlDraw & d, ObjBlBindStat & st
 			}
 			if ( !key ) {
 				st.glOwn++;
+				st.glOwnNames += ( st.glOwnNames.empty() ? "" : "," ) + u.name;  // lane VKOBJ5: named in the refusal
 				continue;
 			}
 			std::string w;
@@ -1829,8 +1874,20 @@ bool objBlDrawRecord( VkCommandBuffer cmd, int mode, std::string & why )
 			return why = "a draw's pipeline went", false;
 		const OpEntry & e = O.made[d.entry];
 		VkBuffer vb[17] = {}, ib = VK_NULL_HANDLE;
-		if ( !WwVkPresent::objBlPoolBinds( d.poolKey, vb, ib ) )
+		if ( !d.pfx && !WwVkPresent::objBlPoolBinds( d.poolKey, vb, ib ) )
 			return why = "a draw's class has no twins", false;
+		if ( d.pfx ) {  // lane VKOBJ5: the record pass, its records before the expand stage reads them
+			if ( !O.pfxPipe || !v.vkCmdDispatch || !v.vkCmdDraw )
+				return why = "a particle draw has no record pass", false;
+			v.vkCmdBindPipeline( cmd, VK_PIPELINE_BIND_POINT_COMPUTE, O.pfxPipe );
+			v.vkCmdBindDescriptorSets( cmd, VK_PIPELINE_BIND_POINT_COMPUTE, O.pfxLayout, 0, 1, &d.cset, 0, nullptr );
+			v.vkCmdDispatch( cmd, ( d.pfxN + 63 ) / 64, 1, 1 );
+			VkMemoryBarrier rb { VK_STRUCTURE_TYPE_MEMORY_BARRIER };
+			rb.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+			rb.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+			v.vkCmdPipelineBarrier( cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_VERTEX_SHADER_BIT, 0, 1, &rb, 0, nullptr, 0,
+				nullptr );
+		}
 		// the draw before wrote the same targets: its writes before this pass's tests and writes
 		VkMemoryBarrier mb { VK_STRUCTURE_TYPE_MEMORY_BARRIER };
 		mb.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
@@ -1852,6 +1909,11 @@ bool objBlDrawRecord( VkCommandBuffer cmd, int mode, std::string & why )
 		v.vkCmdBindPipeline( cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, e.pipe );
 		const VkDescriptorSet sets[2] = { d.dset, table };
 		v.vkCmdBindDescriptorSets( cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, e.layout, 0, 2, sets, 0, nullptr );
+		if ( d.pfx ) {  // the geom's strip: 4 vertices, one instance a record
+			v.vkCmdDraw( cmd, 4, d.pfxN, 0, 0 );
+			v.vkCmdEndRenderPass( cmd );
+			continue;
+		}
 		for ( const WwVkPresent::ObjBlBuffer & b : e.buffers ) {
 			const VkDeviceSize zero = 0;
 			v.vkCmdBindVertexBuffers( cmd, b.binding, 1, &vb[std::min<std::uint32_t>( b.binding, 16 )], &zero );
@@ -2004,6 +2066,67 @@ bool opSmpMake( std::string & why )
 	v.vkDestroyShaderModule( v.dev, cs, nullptr );
 	if ( !ok )
 		return why = "vkCreateComputePipelines (the readback) failed", false;
+	return true;
+}
+
+/* lane VKOBJ5: the record pass's pipeline (objpfx_cs): its set from the module's own bindings (uniform and storage buffers,
+ * nothing else; no push constants), made once per module */
+bool opPfxMake( const std::uint32_t * cs, std::size_t csN, std::string & why )
+{
+	Vk & v = vk();
+	Op & O = opS();
+	if ( O.pfxPipe && O.pfxCs == cs )
+		return true;
+	if ( O.pfxPipe )
+		return why = "another record pass is made", false;
+	if ( O.pfxLayout )  // a half-made one before
+		v.vkDestroyPipelineLayout( v.dev, O.pfxLayout, nullptr );
+	if ( O.pfxDsl )
+		v.vkDestroyDescriptorSetLayout( v.dev, O.pfxDsl, nullptr );
+	O.pfxLayout = VK_NULL_HANDLE;
+	O.pfxDsl = VK_NULL_HANDLE;
+	if ( !v.vkCmdDispatch || !v.vkCreateComputePipelines )
+		return why = "no vkCmdDispatch / vkCreateComputePipelines", false;
+	WwVkPresent::SpvModule m;
+	if ( !WwVkPresent::spvReflect( cs, csN, m, why ) )
+		return why = "the record pass: " + why, false;
+	if ( m.stage != VK_SHADER_STAGE_COMPUTE_BIT )
+		return why = "the record pass is not a compute stage", false;
+	std::vector<VkDescriptorSetLayoutBinding> lb;
+	for ( const WwVkPresent::SpvBind & b : m.binds ) {
+		if ( b.set != 0 || b.count != 1
+			|| ( b.type != VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER && b.type != VK_DESCRIPTOR_TYPE_STORAGE_BUFFER ) )
+			return why = "the record pass's " + b.name + " is not a set-0 uniform or storage buffer", false;
+		lb.push_back( { b.binding, VkDescriptorType( b.type ), 1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr } );
+	}
+	VkDescriptorSetLayoutCreateInfo lci { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
+	lci.bindingCount = std::uint32_t( lb.size() );
+	lci.pBindings = lb.data();
+	if ( v.vkCreateDescriptorSetLayout( v.dev, &lci, nullptr, &O.pfxDsl ) != VK_SUCCESS )
+		return why = "the record pass's set layout failed", false;
+	VkPipelineLayoutCreateInfo plci { VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO };
+	plci.setLayoutCount = 1;
+	plci.pSetLayouts = &O.pfxDsl;
+	if ( v.vkCreatePipelineLayout( v.dev, &plci, nullptr, &O.pfxLayout ) != VK_SUCCESS )
+		return why = "the record pass's pipeline layout failed", false;
+	VkShaderModuleCreateInfo mci { VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO };
+	mci.codeSize = csN * 4;
+	mci.pCode = cs;
+	VkShaderModule md = VK_NULL_HANDLE;
+	if ( v.vkCreateShaderModule( v.dev, &mci, nullptr, &md ) != VK_SUCCESS )
+		return why = "the record pass's shader module failed", false;
+	VkComputePipelineCreateInfo cp { VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO };
+	cp.stage = { VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO };
+	cp.stage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+	cp.stage.module = md;
+	cp.stage.pName = "main";
+	cp.layout = O.pfxLayout;
+	const bool ok = v.vkCreateComputePipelines( v.dev, VK_NULL_HANDLE, 1, &cp, nullptr, &O.pfxPipe ) == VK_SUCCESS;
+	v.vkDestroyShaderModule( v.dev, md, nullptr );
+	if ( !ok )
+		return why = "vkCreateComputePipelines (the record pass) failed", false;
+	O.pfxCs = cs;
+	O.pfxBinds = m.binds;
 	return true;
 }
 
@@ -2842,6 +2965,99 @@ bool objCellShade( GlProc gp, const ObjCellShade & s, std::string & why )
 	return true;
 }
 
+int objPfxRed( const char * name )
+{
+	static const char * names[3] = { "offset", "light", "depth" };
+	for ( int i = 0; name && i < 3; i++ )
+		if ( std::strcmp( name, names[i] ) == 0 )
+			return i + 1;
+	return 0;
+}
+
+bool objPfxShade( GlProc gp, const ObjPfxShade & s, std::string & why )
+{
+	auto fail = [&]( const std::string & w ) {
+		objBlOnGl( w.c_str() );
+		return why = w, false;
+	};
+	if ( !s.prog || !s.n || !s.pos )
+		return fail( "no program, points or positions" );
+	if ( !gp )
+		return fail( "no GL entry points" );
+	using GetAfv = void( WINAPI * )( unsigned, unsigned, float * );
+	const auto getAfv = reinterpret_cast<GetAfv>( gp( "glGetVertexAttribfv" ) );
+	if ( !getAfv )
+		return fail( "GL has no glGetVertexAttribfv" );
+	ObjBlDraw d;
+	d.twin = 7;
+	d.cs = vkframe_objpfx_cs_spv;
+	d.csWords = sizeof( vkframe_objpfx_cs_spv ) / 4;
+	d.vs = vkframe_objpfx_vs_spv;
+	d.vsWords = sizeof( vkframe_objpfx_vs_spv ) / 4;
+	d.ps = vkframe_objpfx_cell_ps_spv;
+	d.psWords = sizeof( vkframe_objpfx_cell_ps_spv ) / 4;
+	d.texelRed = s.red == 2 ? 1 : 0;
+	std::string w2;
+	if ( !objBlFrameRead( gp, d, w2 ) )
+		return fail( w2 );
+	d.target.strip = true;
+	if ( s.red == 3 && d.target.depthOp == 7 )  // red `depth`: GL's ALWAYS read as LESS_OR_EQUAL
+		d.target.depthOp = 3;
+	// the points as the record pass's inputs (PfxIn: posAngle, color, uvSize); an array not given: GL's current value
+	float cur[5][4] = {};
+	const float * arr[5] = { s.pos, s.col, s.uv, s.angle, s.size };
+	for ( unsigned l = 0; l < 5; l++ )
+		if ( !arr[l] )
+			getAfv( l, 0x8626u, cur[l] );  // CURRENT_VERTEX_ATTRIB
+	std::vector<float> in( s.n * 12 );
+	for ( std::size_t i = 0; i < s.n; i++ ) {
+		float * p = &in[i * 12];
+		for ( int c = 0; c < 3; c++ )
+			p[c] = s.pos[i * 3 + c];
+		p[3] = s.angle ? s.angle[i] : cur[3][0];
+		for ( int c = 0; c < 4; c++ )
+			p[4 + c] = s.col ? s.col[i * 4 + c] : cur[1][c];
+		for ( int c = 0; c < 2; c++ )
+			p[8 + c] = s.uv ? s.uv[i * 2 + c] : cur[2][c];
+		p[10] = s.size ? s.size[i] : cur[4][0];
+	}
+	d.pfxIn = in.data();
+	d.pfxN = s.n;
+	d.pfxRed = s.red == 1 ? 1 : 0;
+	ObjBlUniStat ust;
+	if ( !objBlMirror( gp, s.prog, d.vs, d.vsWords, d.ps, d.psWords, d.ubos, ust, w2 ) )
+		return fail( "the uniforms: " + w2 );
+	if ( !ust.mirrored )
+		return fail( "GL names none of the loose uniforms" );
+	ObjBlBindStat bst;
+	if ( !objBlBindUnits( gp, s.prog, d, bst, w2 ) )
+		return fail( "the texture units: " + w2 );
+	if ( bst.misfit )
+		return fail( "a texture: " + bst.misfitWhy );
+	if ( bst.glOwn )
+		return fail( std::to_string( bst.glOwn ) + " GL textures with no twin: " + bst.glOwnNames );
+	if ( bst.texelRefused )
+		return fail( "a texel buffer: " + bst.texelWhy );
+	{
+		ObjBlRunStat & rs = opS().st;
+		rs.shared += bst.shared;
+		rs.twins += bst.twins;
+		rs.texelGl += bst.texelGl;
+		rs.texelShared += bst.texelShared;
+		rs.texelImported += bst.texelImported;
+		rs.compare += bst.compare;
+	}
+	objTexFlush();
+	opRunWait();
+	objBlDrawsReset();
+	ObjBlDrawStat dst;
+	if ( !objBlDrawPrep( d, dst, w2 ) )
+		return fail( "the draw: " + w2 );
+	if ( !objBlRun( bst.glBufs, 0, w2 ) )
+		return fail( "the crossing: " + w2 );
+	return true;
+}
+
 bool objBlTexelCopy( GlProc gp, unsigned tex, std::vector<unsigned> & glNames, std::string & why, int red )
 {
 	Gl & g = gl();
@@ -3106,8 +3322,11 @@ bool objBlDrawPrep( const ObjBlDraw & d, ObjBlDrawStat & st, std::string & why )
 	if ( !v.ok )
 		return why = "no present device", false;
 	opRunWait();  // the slots' host buffers and the rows are rewritten below
-	if ( !d.cmds || !d.cmdCount || d.w < 1 || d.h < 1 )
+	const bool pfx = d.cs && d.csWords && d.pfxIn && d.pfxN;  // lane VKOBJ5: a record pass and its strip (no commands)
+	if ( ( !pfx && ( !d.cmds || !d.cmdCount ) ) || d.w < 1 || d.h < 1 )
 		return why = "no commands or no frame", false;
+	if ( pfx && ( d.pfxN > 0xFFFFFFu || !opPfxMake( d.cs, d.csWords, why ) ) )
+		return why = "the record pass: " + ( why.empty() ? std::string( "too many particles" ) : why ), false;
 	// the pipeline of the class's layout
 	std::vector<ObjBlBuffer> bufs;
 	std::vector<ObjBlAttr> attrs;
@@ -3124,7 +3343,7 @@ bool objBlDrawPrep( const ObjBlDraw & d, ObjBlDrawStat & st, std::string & why )
 		return why = "the pipeline was made but is not found", false;
 	const OpEntry & e = O.made[entry];
 	VkBuffer vb[17] = {}, ib = VK_NULL_HANDLE;
-	if ( !objBlPoolBinds( d.poolKey, vb, ib ) )
+	if ( !pfx && !objBlPoolBinds( d.poolKey, vb, ib ) )
 		return why = "the class has no twins (objBlPoolCopy first)", false;
 	// the rows: this draw's, else the frame's so far
 	if ( d.glRows && d.rows ) {
@@ -3135,7 +3354,7 @@ bool objBlDrawPrep( const ObjBlDraw & d, ObjBlDrawStat & st, std::string & why )
 	}
 	bool rowsRead = false;  // lane VKWATER3: the non-bindless twins read no rows
 	for ( const SpvBind & b : e.set0 )
-		rowsRead = rowsRead || b.type == VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+		rowsRead = rowsRead || ( b.type == VK_DESCRIPTOR_TYPE_STORAGE_BUFFER && !pfx );  // the expand stage's are its records
 	if ( rowsRead && !O.rowCount )
 		return why = "no rows (wwDraws) this frame", false;
 	// the slot: a set 0 of this pipeline's layout
@@ -3166,6 +3385,45 @@ bool objBlDrawPrep( const ObjBlDraw & d, ObjBlDrawStat & st, std::string & why )
 			return why = "the draw's set 0 failed", false;
 		s.entry = entry;
 	}
+	// lane VKOBJ5: the record pass's set, its inputs and its records (n + 1: red `offset` reads 16 bytes on)
+	VkDeviceSize recOff = 0;
+	if ( pfx ) {
+		if ( !s.cpool ) {
+			std::map<VkDescriptorType, std::uint32_t> count;
+			for ( const SpvBind & b : O.pfxBinds )
+				count[VkDescriptorType( b.type )] += 1;
+			std::vector<VkDescriptorPoolSize> sizes;
+			for ( const auto & c : count )
+				sizes.push_back( { c.first, c.second } );
+			VkDescriptorPoolCreateInfo pci { VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO };
+			pci.maxSets = 1;
+			pci.poolSizeCount = std::uint32_t( sizes.size() );
+			pci.pPoolSizes = sizes.data();
+			VkDescriptorSetAllocateInfo ai { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO };
+			ai.descriptorSetCount = 1;
+			ai.pSetLayouts = &O.pfxDsl;
+			if ( v.vkCreateDescriptorPool( v.dev, &pci, nullptr, &s.cpool ) != VK_SUCCESS
+				|| ( ai.descriptorPool = s.cpool, v.vkAllocateDescriptorSets( v.dev, &ai, &s.cset ) != VK_SUCCESS ) )
+				return why = "the record pass's set failed", false;
+		}
+		if ( !opHostBuf( s.pfxIn, d.pfxN * 48, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, why )
+			|| !opHostBuf( s.pfxRec, ( d.pfxN + 1 ) * 80, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, why ) )
+			return false;
+		std::memcpy( s.pfxIn.ptr, d.pfxIn, d.pfxN * 48 );
+		std::memset( static_cast<std::uint8_t *>( s.pfxRec.ptr ) + d.pfxN * 80, 0, 80 );  // the record past the last (red `offset`)
+		if ( d.pfxRed == 1 ) {
+			VkPhysicalDeviceProperties2 pp { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2 };
+			v.vkGetPhysicalDeviceProperties2( v.phys, &pp );
+			// one vec4 on, not one record on: a whole record on draws the same quads in the same order bar the first (the
+			// first gate run: 0 pixels moved in three of five cases)
+			const VkDeviceSize al = std::max<VkDeviceSize>( pp.properties.limits.minStorageBufferOffsetAlignment, 1 );
+			if ( 16 % al )
+				return why = "red offset: 16 bytes is no storage offset step (" + std::to_string( al ) + ")", false;
+			recOff = 16;
+		}
+	}
+	s.pfx = pfx;
+	s.pfxN = pfx ? std::uint32_t( d.pfxN ) : 0;
 	// set 0, binding by binding (the frame's previous submit of this slot is done: the caller's fence)
 	std::string w;
 	BlSmpKey k0;
@@ -3180,6 +3438,7 @@ bool objBlDrawPrep( const ObjBlDraw & d, ObjBlDrawStat & st, std::string & why )
 	std::size_t total = 0;  // the arrays are reserved whole: the writes point into them
 	for ( const SpvBind & b : e.set0 )
 		total += b.count;
+	total += pfx ? O.pfxBinds.size() : 0;
 	bis.reserve( total );
 	iis.reserve( total );
 	tvs.reserve( total );
@@ -3206,6 +3465,11 @@ bool objBlDrawPrep( const ObjBlDraw & d, ObjBlDrawStat & st, std::string & why )
 			bis.push_back( { u.buf, 0, b.bytes } );
 			wr.pBufferInfo = &bis.back();
 			st.ubos++;
+		} else if ( b.type == VK_DESCRIPTOR_TYPE_STORAGE_BUFFER && pfx ) {
+			if ( b.name != "pfxRec" && b.name != "type.StructuredBuffer.PfxRec" )
+				return why = where + ": a storage buffer the particle draw does not know", false;
+			bis.push_back( { s.pfxRec.buf, recOff, VkDeviceSize( d.pfxN * 80 ) } );
+			wr.pBufferInfo = &bis.back();
 		} else if ( b.type == VK_DESCRIPTOR_TYPE_STORAGE_BUFFER ) {
 			if ( b.name != "wwDraws" && b.name != "type.StructuredBuffer.WwDraw" )
 				return why = where + ": a storage buffer the draw does not know", false;
@@ -3274,12 +3538,37 @@ bool objBlDrawPrep( const ObjBlDraw & d, ObjBlDrawStat & st, std::string & why )
 			return why = where + ": a descriptor type the draw does not write", false;
 		writes.push_back( wr );
 	}
+	// lane VKOBJ5: the record pass's set: the vertex side's mirrored blocks (the same bindings: both on VS_SHIFT), the
+	// inputs, the records
+	for ( const SpvBind & b : pfx ? O.pfxBinds : std::vector<SpvBind>() ) {
+		VkWriteDescriptorSet wr { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
+		wr.dstSet = s.cset;
+		wr.dstBinding = b.binding;
+		wr.descriptorCount = 1;
+		wr.descriptorType = VkDescriptorType( b.type );
+		const std::string where = "the record pass's binding " + std::to_string( b.binding ) + " (" + b.name + ")";
+		if ( b.type == VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER ) {
+			const auto u = s.ubo.find( b.binding );
+			if ( u == s.ubo.end() || !u->second.buf || u->second.cap < b.bytes )
+				return why = where + ": the expand stage holds no block of its size at that binding", false;
+			bis.push_back( { u->second.buf, 0, b.bytes } );
+		} else if ( b.name == "pfxIn" || b.name == "type.StructuredBuffer.PfxIn" )
+			bis.push_back( { s.pfxIn.buf, 0, VkDeviceSize( d.pfxN * 48 ) } );
+		else if ( b.name == "pfxOut" || b.name == "type.RWStructuredBuffer.PfxRec" )
+			bis.push_back( { s.pfxRec.buf, 0, VkDeviceSize( d.pfxN * 80 ) } );
+		else
+			return why = where + ": a storage buffer the record pass does not know", false;
+		wr.pBufferInfo = &bis.back();
+		writes.push_back( wr );
+	}
 	// the commands
-	if ( !opHostBuf( s.cmds, d.cmdCount * 20, VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT, why ) )
-		return false;
-	std::memcpy( s.cmds.ptr, d.cmds, d.cmdCount * 20 );
-	s.host.assign( static_cast<const std::uint8_t *>( d.cmds ), static_cast<const std::uint8_t *>( d.cmds ) + d.cmdCount * 20 );
-	s.cmdCount = d.cmdCount;
+	if ( !pfx ) {
+		if ( !opHostBuf( s.cmds, d.cmdCount * 20, VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT, why ) )
+			return false;
+		std::memcpy( s.cmds.ptr, d.cmds, d.cmdCount * 20 );
+		s.host.assign( static_cast<const std::uint8_t *>( d.cmds ), static_cast<const std::uint8_t *>( d.cmds ) + d.cmdCount * 20 );
+	}
+	s.cmdCount = pfx ? 0 : d.cmdCount;
 	s.poolKey = d.poolKey;
 	// the framebuffer of the targets (made again when a view or the size changed)
 	std::vector<VkImageView> views;

@@ -86,6 +86,7 @@ struct ObjBlTarget
 	std::uint32_t colors[4] = {}, colorCount = 0, depth = 0, samples = 1;
 	std::uint32_t depthOp = 3;  //!< a VkCompareOp (3 = LESS_OR_EQUAL)
 	bool depthWrite = false, twoSided = false;
+	bool strip = false;  //!< lane VKOBJ5: TRIANGLE_STRIP (objPfxShade's expand stage), else TRIANGLE_LIST
 	ObjBlBlend blend;
 	ObjBlStencil stencil;  //!< lane VKOBJ4 open item 3 (off: the defaults)
 };
@@ -221,6 +222,14 @@ struct ObjBlDraw
 	const void * cmds = nullptr;    //!< GL's indirect commands
 	std::size_t cmdCount = 0;
 	int pipeRed = 0;                //!< gates only: objBlPipe's red
+	/*! lane VKOBJ5 (objPfxShade): a record pass before the draw. `cs` writes one record a primitive from `pfxN` inputs of
+	 * 48 bytes at `pfxIn`; the expand stage reads them (no vertex buffers, no commands: 4 vertices, pfxN instances).
+	 * pfxRed 1 (gates only) binds the expand stage's records 16 bytes on */
+	const std::uint32_t * cs = nullptr;
+	std::size_t csWords = 0;
+	const void * pfxIn = nullptr;
+	std::size_t pfxN = 0;
+	int pfxRed = 0;
 };
 struct ObjBlDrawStat
 {
@@ -244,6 +253,7 @@ struct ObjBlBindStat
 	int samplers = 0;  //!< samplers given GL's state
 	int compare = 0;   //!< of those, depth compare
 	std::string misfitWhy, texelWhy;
+	std::string glOwnNames;  //!< lane VKOBJ5: the glOwn bindings' names, comma-separated
 	std::vector<unsigned> glBufs;  //!< the texel twins GL wrote (the crossing's signal takes them)
 };
 /*! GL's texture units of `prog` for both of d's modules: a set-0 image GL binds a shared target to joins d.images
@@ -371,6 +381,26 @@ bool objCellShade( GlProc gp, const ObjCellShade & s, std::string & why );
 void objCellPs( int twin, const std::uint32_t *& words, std::size_t & count );
 //! the red's name (WW_VKVIEW_OBJCELL_RED / _OBJPBRM_RED: offset | half | swz | key | light | bone | blend) as ObjCellShade.red, 0 else
 int objCellRed( const char * name );
+/* lane VKOBJ5 (plan row G4 round 3): particles_cell.prog's draw (glparticles.cpp, glDrawArrays( GL_POINTS ), WW_VKOBJ_SHADE=1)
+ * in VKFAR2's precip shape: the record pass objpfx_cs (particles.vert + the geom's per-primitive part, one record a point in
+ * GL's order), the expand stage objpfx_vs (the geom's 4-vertex strip, one instance a record), the pixel twin objpfx_cell_ps
+ * (particles_cell_ps.hlsl, WW_CELLLIGHTS on the app's variant). Read from GL here as objCellShade reads it: the frame and
+ * fixed state (objBlFrameRead: GL's depth function as it is, ALWAYS included), the uniforms (objBlMirror: one mirrored
+ * copy of the vertex-side blocks serves the record pass too), the units (objBlBindUnits: fxDepth a shared target). The
+ * particles come as the caller's arrays (GL's attribute locations 0 position 3, 1 colour 4, 2 uv 2, 3 angle 1, 4 size 1);
+ * an array not given reads GL's current value of that location. false: why (nothing drawn; GL draws the points) */
+struct ObjPfxShade
+{
+	unsigned prog = 0;  //!< GL's current program (particles_cell)
+	const float * pos = nullptr, * col = nullptr, * uv = nullptr, * angle = nullptr, * size = nullptr;
+	std::size_t n = 0;  //!< the points (glDrawArrays( GL_POINTS, 0, n ))
+	/*! gates only, each must FAIL: 1 `offset` (the expand stage reads its records 16 bytes on), 2 `light` (the light texel buffer copied
+	 * from one texel on), 3 `depth` (GL's ALWAYS read as LEQUAL) */
+	int red = 0;
+};
+bool objPfxShade( GlProc gp, const ObjPfxShade & s, std::string & why );
+//! the red's name (WW_VKVIEW_OBJPFX_RED: offset | light | depth) as ObjPfxShade.red, 0 else
+int objPfxRed( const char * name );
 /*! objBlShade's frame read on its own: GL's draw framebuffer as d's targets (every colour draw buffer and the depth / stencil
  * a shared target: keys, formats, size, samples; the tone frame's too, as borrowed shared targets), the viewport the whole
  * frame, the fixed state (objBlTargetState with `red`), GL's scissor box clamped to the frame (d.scissor; the frame when the

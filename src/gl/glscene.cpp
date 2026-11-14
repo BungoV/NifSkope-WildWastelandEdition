@@ -61,6 +61,8 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "features/near/cellqueue.h"	// lane GPUDRIVEN1
 #include "features/near/cellgpucull.h"	// lane GPUDRIVEN1 step B
 #include "features/post/taainputs.h"	// lane TAAINPUTS1
+#include "features/near/cellbindless.h"	// lane VKOBJ5: WwBl::vkShadeOn (fxDepth shared)
+#include "features/vkframe/vkpresent.h"	// lane VKOBJ5: WwVkPresent::sharedTarget
 
 #include <QOpenGLFunctions>
 #include <QCoreApplication>
@@ -702,11 +704,26 @@ bool Scene::grabEffectDepth()
 
 	while ( glGetError() != GL_NO_ERROR ) {}
 	if ( !fxDepthTexId || fxDepthTexW != w || fxDepthTexH != h ) {
+		/* lane VKOBJ5: under WW_VKOBJ_SHADE a shared target (keyed &fxDepthTexId; GL blits into it as before): the
+		 * particles' pixel twin on the present device samples it as fxDepth. Refused: GL's own texture, as before. */
+		const std::uintptr_t key = reinterpret_cast<std::uintptr_t>( &fxDepthTexId );
+		unsigned shared = 0;
+		std::string why;
+		if ( ( fxDepthShared || !fxDepthTexId ) && WwBl::vkShadeOn()
+			&& WwVkPresent::sharedTarget( key, 0, w, h, 1, unsigned( fmt ), shared, why ) && shared ) {
+			fxDepthTexId = shared;
+			fxDepthShared = true;
+		} else if ( fxDepthShared ) {
+			WwVkPresent::sharedTargetDrop( key );
+			fxDepthTexId = 0;
+			fxDepthShared = false;
+		}
 		if ( !fxDepthTexId )
 			fn->glGenTextures( 1, &fxDepthTexId );
 		fn->glGetIntegerv( GL_TEXTURE_BINDING_2D, &prevTex );
 		fn->glBindTexture( GL_TEXTURE_2D, fxDepthTexId );
-		fn->glTexImage2D( GL_TEXTURE_2D, 0, GLint( fmt ), w, h, 0, pixFmt, pixType, nullptr );
+		if ( !fxDepthShared )
+			fn->glTexImage2D( GL_TEXTURE_2D, 0, GLint( fmt ), w, h, 0, pixFmt, pixType, nullptr );
 		fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST );
 		fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST );
 		fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE );
