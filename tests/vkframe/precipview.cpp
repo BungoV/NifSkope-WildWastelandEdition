@@ -7,8 +7,9 @@
 // (frag_jobs.py's volsky inputs, the volume in a shared target), each checked to change GL's own picture on >= 1000
 // samples (fogOn 0 vs on); slice 3: cell_precip_look.prog (the drop unfogged, the snow through the air), each checked to
 // differ from cell_precip_gpu.prog on >= 1000 samples. Unlit, the snow's normal-map split cannot change a sample (thin =
-// thick, no key light): its pcTexN binding is bound but not judged until a lit fixture (slice 2b). Each run starts past
-// particle 0 (pcFirst) and is unlit.
+// thick, no key light): its pcTexN binding is bound but not judged until a lit fixture (slice 2b). A kept split case,
+// snow near with no atlas (plain, unfogged), sits next to the open snow near row. Each run starts past particle 0
+// (pcFirst) and is unlit.
 // Frame before the particles: a sky clear and a depth slab over the left half halfway across a gap between particle
 // depths. After them a full-screen draw where stencil == 1 sets alpha 1, so the stencil the particles wrote is read too.
 // Bar (farview's, set before the first run, never widened):

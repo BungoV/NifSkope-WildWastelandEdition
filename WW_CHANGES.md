@@ -24,8 +24,9 @@ Changed, not built, not checked live. Nothing in the app calls it yet, so no fra
   cluster, cube shadows, the sky-visibility maps, the air medium) to gate it against GL. A lit cell stays on GL.
 - Slice 3, the precipitation look (GL's cell_precip_look program: the raindrop's swept disc and flicker, the snow's
   clump threshold, albedo and normal map): three new look shaders built from the same Vulkan files with the look
-  switched on, picked per run. Gate: the drop is within the bar (16 flips); the near snow look FAILS like the open snow
-  near row (16571 flips, 1.1 %; GL's own 5 draws differ by up to 193). Unlit, the snow's normal map cannot change a
+  switched on, picked per run. Gate: the drop is within the bar (24 flips, drops sized 1-4 mm so its size ramp and
+  flicker are both live); the near snow look FAILS like the open snow near row (16503 flips, 1.1 %; GL's own 5 draws
+  differ by up to 193). Unlit, the snow's normal map cannot change a
   sample, so it is bound but not yet checked; it needs the lit fixture. A red that draws a look run with the plain
   pipelines fails on both cases.
 - The snow near row is not only the clock: at a small clock (37 s instead of 600 s) the textured near snow still fails

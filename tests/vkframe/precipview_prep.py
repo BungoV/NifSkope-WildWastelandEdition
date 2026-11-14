@@ -200,7 +200,10 @@ for ci, c in enumerate(CASES):
     look = c[19]
     hasN = 1 if look == 2 and has else 0
     if look:
-        U.update({'pcLook': [look], 'pcMmPerView': [14.28 / c[9]], 'pcHasN': [hasN], 'pcClump': [0.2, 0.6], 'pcAlbedo': [0.9]})
+        # the drop: the fixture's halves are ~3 view units, so 14.28 mm a unit gives ~90 mm drops (kf flat, ~0.003
+        # flicker cycles); 0.3 puts D at ~1-4 mm, where kf ramps and the flicker runs ~1 cycle over the streak
+        U.update({'pcLook': [look], 'pcMmPerView': [0.3 if look == 1 else 14.28 / c[9]], 'pcHasN': [hasN],
+                  'pcClump': [0.2, 0.6], 'pcAlbedo': [0.9]})
     fog = c[18]
     if fog:
         # the air's uniforms and textures; its view-bound rows follow this case's view (frag_jobs' R is view -> world)
