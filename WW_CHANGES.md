@@ -95,6 +95,10 @@ the reference): 11 cases BOUND (max 1 byte), the six reds FAIL, 17 queued, 0 ref
 - Any refusal draws them on GL as before. Red WW_VKVIEW_POST_RED=1: always GL. Log lines `vk dof:`, `vk motionblur:`
   and `vk objblur:` say which route ran and why.
 - The frame they read is the view's samples averaged and rounded to half float, as GL's blit into RGBA16F keeps it.
+- Follow-up (same day): their shaders are prepared the first time each effect runs, not all at once on the first
+  frame, so the first frame no longer stalls about 0.6 s (largest single step now about 0.15 s, measured offline).
+  Log line `vk post build:` gives the time per part. The GL fallback, the red and the three route lines are now
+  covered by the offline gate.
 
 ## VKBLOOM1 (2026-11-12): the Fusion Shaders bloom and the exposure measure join the tone pass on Vulkan (WW_VKVIEW=1)
 
