@@ -1,3 +1,14 @@
+## VKFAR2 L8 slice 1 (2026-11-14): rain / snow pass for the Vulkan view, not wired in (gate red)
+
+Changed, not built, not checked live. Nothing in the app calls it yet, so no frame changes.
+
+- A Vulkan twin of the rain / snow draw without a geometry stage: a compute pass writes one record a particle in GL's
+  order, then each particle is four strip vertices, shaded by a frozen copy of the pixel stage. Unlit and unfogged only;
+  a lit cell, the fog or the roof map are refused.
+- Offline gate tests/vkframe/precipview.sh against GL's own program: rain near and snow far within the bar, every red
+  seen, snow near FAILS (1.45 % of samples past 2 ulp, bar 0.05 %). Under review before any app hookup.
+- No existing rain / snow shader and no cellprecip.cpp line changed.
+
 ## VKFAR2 P7 (2026-11-14): depth of field, motion blur and object blur join the tone pass on Vulkan (WW_VKVIEW=1)
 
 Changed, not built, not checked live. Offline: tests/vkframe/toneview.sh gained a POST arm (GL's own cellpost passes as

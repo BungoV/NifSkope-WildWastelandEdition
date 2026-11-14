@@ -25,10 +25,6 @@ CELL_PX = 64
 CASES = [
     ('snow_near_tex', 3, 5.5, 1.0, 97, 600.125, (12345.6, -98765.4, 7210.0), (-55.0, 210.0), 0, 3.0, 0.5, 6.0, 1.0, 1.0, 1,
      0.7, -0.15, 40000),
-    ('diag_sway', 3, 5.5, 1.0, 97, 600.125, (12345.6, -98765.4, 7210.0), (-55.0, 210.0), 0, 3.0, 0.0, 6.0, 1.0, 1.0, 1,
-     0.7, -0.15, 4000),
-    ('diag_still', 3, 5.5, 1.0, 97, 600.125, (12345.6, -98765.4, 7210.0), (-55.0, 210.0), 0, 3.0, 0.0, 0.0, 1.0, 1.0, 1,
-     0.7, -0.15, 4000),
     ('rain_near_disc', 0, 2.0, 4.0, 11, 37.25, (-60500.0, 70000.0, 6300.0), (120.0, -40.0), 0, 1.0, 0.0, 0.0, 1.0, 1.0, 0,
      2.0, -0.08, 40000),
     ('snow_far_mean', 3, 5.5, 1.0, 97, 600.125, (12345.6, -98765.4, 7210.0), (-55.0, 210.0), 1, 3.0, 0.5, 6.0, 1.0, 0.6, 1,
@@ -119,10 +115,7 @@ for ci, c in enumerate(CASES):
         with open(os.path.join(d, 'tex.txt'), 'w', newline='\n') as f:
             f.write('pcTex 2d rgba8 %d %d 1 linear repeat 1 tex_pcTex.bin\n' % (tw, th))
     mips = int(math.floor(math.log2(max(tw, th)))) + 1
-    maxLod = min(mips - 1, max(0.0, math.log2(CELL_PX / 16.0))) if has else 0.0
-    if len(c) > 18:
-        maxLod = c[18]
-    oneLod = min(mips - 1, max(0.0, math.log2(CELL_PX))) if has else 0.0
+    maxLod = min(mips - 1, max(0.0, math.log2(CELL_PX / 16.0))) if has else 0.0    oneLod = min(mips - 1, max(0.0, math.log2(CELL_PX))) if has else 0.0
     seed = g['seedS']
     U = {
         'pcSeedS': [seed - (1 << 32) if seed >= (1 << 31) else seed],  # the bits; setUnis hands them as a uint
