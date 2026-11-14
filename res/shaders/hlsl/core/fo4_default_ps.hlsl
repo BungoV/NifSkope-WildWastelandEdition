@@ -1090,9 +1090,9 @@ void frag_main()
 		}
 		/* lane FIX1101A lodch: the share of the weather's ambient the GI did not replace takes the far placement's
 		 * baked sky visibility (src/features/far-lod/lodchsky.h: the byte read as the GI's share, so near (GI) and far (bake) agree at
-		 * the last cascade edge). Exactly 1 on every other shape: nothing changes there.
-		 * FARSKYMAP1: with probe GI drawn, the far sky map (far-lod/far_skymap.hlsli) adds the cell probe's direction
-		 * on top; the byte stays the detail. Probes off: fsv = wwFarSkyVis bit for bit */
+		 * the last cascade edge). Exactly 1 on every other shape: nothing changes there */
+		// FARSKYMAP1: with probe GI drawn, the far sky map (far-lod/far_skymap.hlsli) adds the cell probe's direction
+		// on top; the byte stays the detail. Probes off: fsv = wwFarSkyVis bit for bit
 		float fsv = farSkyVisAt( wwFarSkyVis, cellWorldPos( -ViewDir ), cellWorldDir( normal ) );
 		if ( fsv < 0.9999 ) {
 			color.rgb *= sqrt( max( fsv, 0.0 ) );
