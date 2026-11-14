@@ -7,6 +7,12 @@ Changed, not built, not checked live. Nothing in the app calls it yet, so no fra
   a lit cell, the fog or the roof map are refused.
 - Offline gate tests/vkframe/precipview.sh against GL's own program: rain near and snow far within the bar, every red
   seen, snow near FAILS (1.45 % of samples past 2 ulp, bar 0.05 %). Under review before any app hookup.
+- The particle maths of the compute pass and the corners now follow NV GL's own order of operations (read from the
+  driver's program binary), in a twin-local copy of the field function: snow far is now exact, rain near unchanged
+  (within the bar), snow near still fails (1.40 %, the particle shapes now match, the difference is in the shading). A
+  change to the shared field function must be copied into the twin. The gate also prints GL's own run-to-run noise
+  over 5 draws as a reference line (not the bar).
+- The earlier work-in-progress commit (ece0d2a3) says "kept local"; it was pushed like every lane commit.
 - No existing rain / snow shader and no cellprecip.cpp line changed.
 
 ## VKFAR2 P7 (2026-11-14): depth of field, motion blur and object blur join the tone pass on Vulkan (WW_VKVIEW=1)

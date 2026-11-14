@@ -4,7 +4,8 @@
 // far tier's cell mean, the uv box), into one record a particle in GL's order. A culled particle keeps its slot (c.w 0):
 // alpha blending needs GL's order, so nothing is compacted. precip_view_vs.hlsl builds the four corners from the record.
 // Slice 1 is unlit and unfogged (lit 1, the fog off: A = 1, B = 0); vkprecip.inc refuses a lit cell or the fog.
-// The source files are read as they stand (cell_precip_field.hlsli unchanged); the expressions below are theirs.
+// cell_precip_field.hlsli is included unchanged (its hashes, roof test); pcParticleVk below is a twin-local copy of its
+// pcParticle spelled in NV GL's order of operations. A change to pcParticle there must be mirrored here.
 // profile: cs_6_0
 #include "WeatherBindingsVk.hlsli"
 #define WW_HLSL_SRC 1	// the shared .hlsli files give their readable half
@@ -33,6 +34,64 @@ cbuffer LooseUniforms : register(b31, space0)
 };
 #include "cell_precip_field.hlsli"
 
+// pcWrap in NV GL's order: the remainder fused, r = fma( -floor( x / L ), L, x )
+float pcWrapVk( float x, float L )
+{
+	precise float f = floor( x / L );
+	precise float r = mad( -f, L, x );
+	return r >= L ? r - L : max( r, 0.0 );
+}
+
+// cell_precip_field.hlsli pcParticle in NV GL's order of operations (its vertex-stage NV_gpu_program5 assembly, driver
+// 610.74): mad() where GL fuses, separate precise ops where it keeps a multiply and an add apart, and its reassociations
+// ((om pcT) 0.7, (om sway sin) 0.7, the spin's 2^-23). sin / cos take the raw phase, as GL's SIN / COS do.
+bool pcParticleVk( uint i, out float3 rel, out float3 vel, out float hs, out float angle, out float2 cellUv )
+{
+	uint h = pcHash( i ^ pcSeedS );
+	float u0 = pcU01( h );
+	h = pcHash( h + 0x1B873593u );
+	float u1 = pcU01( h );
+	h = pcHash( h + 0x1B873593u );
+	float u2 = pcU01( h );
+	h = pcHash( h + 0x1B873593u );
+	int var = pcNCand > 0 ? pcCand[int( h % uint( pcNCand ) )] : pcBest;
+	h = pcHash( h + 0x1B873593u );
+	float a0 = pcU01( h ) * 6.283185307179586;
+	h = pcHash( h + 0x1B873593u );
+	precise float spU = float( h >> 8 ) * pcSpin;
+	precise float spin = mad( spU, 1.0 / 8388608.0, -pcSpin );
+	h = pcHash( h + 0x1B873593u );
+	precise float ph = pcU01( h ) * 6.283185307179586;
+	precise float om = mad( float( pcHash( h ^ 0x85EBCA6Bu ) >> 8 ), 0.8 / 16777216.0, 0.8 );
+	float fall = pcFallU[var];
+	precise float ph1 = mad( om, pcT, ph );
+	precise float omT = om * pcT;
+	precise float ph13 = ph * 1.3;
+	precise float ph2 = mad( omT, 0.7, ph13 );
+	float s1 = sin( ph1 ), c1 = cos( ph1 ), s2 = sin( ph2 ), c2 = cos( ph2 );
+	precise float omS = om * pcSway;
+	precise float vx = mad( omS, c1, pcWind.x );
+	precise float vyS = omS * s2;
+	precise float vy = mad( -vyS, 0.7, pcWind.y );
+	vel = float3( vx, vy, -fall );
+	float L = pcL;
+	precise float bx = mad( u0, L, pcOffXY.x );
+	precise float px = mad( s1, pcSway, bx );
+	precise float by = mad( u1, L, pcOffXY.y );
+	precise float sy = c2 * pcSway;
+	precise float py = by + sy;
+	precise float pz = mad( u2, L, pcOffZ[var] );
+	rel = float3( pcWrapVk( px, L ), pcWrapVk( py, L ), pcWrapVk( pz, L ) ) - 0.5 * L;
+	hs = pcHalfU[var];
+	precise float an = mad( spin, pcT, a0 );
+	angle = an;
+	int cell = var % max( pcCells, 1 );
+	cellUv = float2( float( cell % max( pcCols, 1 ) ), float( cell / max( pcCols, 1 ) ) ) * pcCellUv;
+	if ( pcInner > 0.0 && all( (abs( rel ) < (float3)( 0.5 * pcInner )) ) )
+		return false;
+	return or( !pcRoofOn, pcRoofOpen( rel ) );
+}
+
 Texture2D<float4> pcTex : register(t1, space0); SamplerState _pcTex_sampler : register(s1, space0);
 
 struct PrecipRec
@@ -57,10 +116,10 @@ void main( uint3 id : SV_DispatchThreadID )
 	float3 rel, vel;
 	float hs, angle;
 	float2 cellUv;
-	bool keep = pcParticle( pcFirst + id.x, rel, vel, hs, angle, cellUv );
+	bool keep = pcParticleVk( pcFirst + id.x, rel, vel, hs, angle, cellUv );
 	float3 vsView = float3( dot( pcRow[0].xyz, rel ), dot( pcRow[1].xyz, rel ), dot( pcRow[2].xyz, rel ) );
 	float3 vsVel = float3( dot( pcRow[0].xyz, vel ), dot( pcRow[1].xyz, vel ), dot( pcRow[2].xyz, vel ) );
-	float vsHalf = hs * length( pcRow[0].xyz );
+	precise float vsHalf = hs / rsqrt( dot( pcRow[0].xyz, pcRow[0].xyz ) );	// GL: DIV by RSQ
 	float4 vsColor = float4( 1.0, 1.0, 1.0, pcThin );
 	float depth = -vsView.z;
 	bool cull = or( !keep, depth < 1.0 );
@@ -83,18 +142,23 @@ void main( uint3 id : SV_DispatchThreadID )
 		pcOut[id.x] = r;
 		return;
 	}
+	// in NV GL's geometry-stage order (its NV_gpu_program5 assembly): tl = 1 / RSQ, the alpha's factors regrouped
 	float h = vsHalf;
 	float k = pcFocal / depth;	// pixels per view unit here
 	float2 tr = vsVel.xy * pcShutter;
-	float tl = length( tr );
+	precise float tl = rcp( rsqrt( dot( tr, tr ) ) );
 	float hd = max( h, pcMinPx / k );
 	float4 col = vsColor;
-	col.a *= 4.0 * h * h / ( ( 2.0 * hd + tl ) * 2.0 * hd );
+	precise float aDen = hd * mad( hd, 2.0, tl );
+	precise float aNum = h * ( h * 4.0 );
+	precise float aF = ( aNum / aDen ) * col.a;
+	col.a = aF * 0.5;
 	float2 ax, ay;
 	float hx = hd, hy = hd;
 	if ( tl > 0.2 * hd ) {
 		ax = tr / tl;
-		hx = hd + 0.5 * tl;
+		precise float hxS = mad( tl, 0.5, hd );
+		hx = hxS;
 	} else {
 		ax = float2( cos( angle ), sin( angle ) );
 	}

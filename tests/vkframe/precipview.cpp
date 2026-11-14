@@ -293,12 +293,14 @@ int main( int argc, char ** argv )
 			f.bindBufferBase( fUbo, 0, ubo );
 		};
 		// GL: cellprecip.cpp's state, its points
-		std::vector<std::uint16_t> bg, refA, refB, refA2, refB2;
+		std::vector<std::uint16_t> bg, refA, refB, refAn[4], refBn[4];
+		std::vector<std::uint16_t> & refA2 = refAn[0], & refB2 = refBn[0];
 		before( fbRef, j.zd );
 		bg = readSamples( refCol );
 		double glMs = 0.0;
-		// pass 0 warms the driver (its first-use cost is not the draw's), pass 1 is timed and judged, pass 2 repeats it
-		for ( int pass = 0; pass < 3; pass++ ) {
+		// pass 0 warms the driver (its first-use cost is not the draw's), pass 1 is timed and judged, passes 2-5 repeat it
+		// (pass 2 is the repeat line's; passes 1-5 are the GL noise reference line's five draws)
+		for ( int pass = 0; pass < 6; pass++ ) {
 			before( fbRef, j.zd );
 			bindJob();
 			f.bindFramebuffer( fFb, fbRef );
@@ -323,9 +325,9 @@ int main( int argc, char ** argv )
 			drawState0();
 			glDepthFunc( GL_LESS );
 			if ( pass ) {
-				( pass == 1 ? refA : refA2 ) = readSamples( refCol );
+				( pass == 1 ? refA : refAn[pass - 2] ) = readSamples( refCol );
 				reveal( fbRef );
-				( pass == 1 ? refB : refB2 ) = readSamples( refCol );
+				( pass == 1 ? refB : refBn[pass - 2] ) = readSamples( refCol );
 			}
 		}
 		if ( glGetError() != GL_NO_ERROR )
@@ -392,6 +394,17 @@ int main( int argc, char ** argv )
 					"%zu flips, stencil %zu)\n", j.name.c_str(), g.word(), g.diff, g.flips, g.stencil, vkRan ? w.word() : "FAIL (run failed)", w.diff,
 					w.flips, w.stencil );
 				ok = ok && g.diff == 0 && g.stencil == 0 && vkRan && w.diff == 0 && w.stencil == 0;
+				// reference only, never the bar: GL's own run-to-run noise, draws 2-5 each judged against draw 1
+				std::size_t nFl[4], nPa[4], nDi[4], nFlMax = 0, nPaMax = 0;
+				for ( int k = 0; k < 4; k++ ) {
+					const Verdict n = judge( bg, refAn[k], refA, refBn[k], refB );
+					nFl[k] = n.flips; nPa[k] = n.past1; nDi[k] = n.diff;
+					nFlMax = std::max( nFlMax, n.flips ); nPaMax = std::max( nPaMax, n.past1 );
+				}
+				std::printf( "PRECIPVIEW %s GL noise (reference, not the bar; 5 draws, 2-5 vs 1): flips %zu %zu %zu %zu (max %zu = %.4f %% of covered), "
+					"halves past 1 ulp %zu %zu %zu %zu (max %zu = %.4f %%), halves differ %zu %zu %zu %zu\n", j.name.c_str(), nFl[0], nFl[1], nFl[2],
+					nFl[3], nFlMax, v.covered ? 100.0 * double( nFlMax ) / double( v.covered ) : 0.0, nPa[0], nPa[1], nPa[2], nPa[3], nPaMax,
+					v.covered ? 100.0 * double( nPaMax ) / double( v.covered ) : 0.0, nDi[0], nDi[1], nDi[2], nDi[3] );
 			}
 		}
 		for ( RedSeen & r : reds ) {
