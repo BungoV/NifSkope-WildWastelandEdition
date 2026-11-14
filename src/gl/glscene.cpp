@@ -703,20 +703,30 @@ bool Scene::grabEffectDepth()
 	}
 
 	while ( glGetError() != GL_NO_ERROR ) {}
-	if ( !fxDepthTexId || fxDepthTexW != w || fxDepthTexH != h ) {
+	const bool vkOn = WwBl::vkShadeOn();
+	if ( fxDepthRetry.due( w, h, fxDepthPassNow, fxDepthShared, fxDepthTexId != 0, fxDepthTexW, fxDepthTexH, vkOn ) ) {
 		/* lane VKOBJ5: under WW_VKOBJ_SHADE a shared target (keyed &fxDepthTexId; GL blits into it as before): the
-		 * particles' pixel twin on the present device samples it as fxDepth. Refused: GL's own texture, as before. */
+		 * particles' pixel twin on the present device samples it as fxDepth. Refused: GL's own texture, as before, and
+		 * fxDepthRetry asks again on a size change or a few second passes later (the device may not be up yet). */
 		const std::uintptr_t key = reinterpret_cast<std::uintptr_t>( &fxDepthTexId );
 		unsigned shared = 0;
 		std::string why;
-		if ( ( fxDepthShared || !fxDepthTexId ) && WwBl::vkShadeOn()
-			&& WwVkPresent::sharedTarget( key, 0, w, h, 1, unsigned( fmt ), shared, why ) && shared ) {
+		const bool asked = vkOn && fxDepthRetry.ask( w, h, fxDepthPassNow, fxDepthShared, fxDepthTexId != 0 );
+		if ( asked && WwVkPresent::sharedTarget( key, 0, w, h, 1, unsigned( fmt ), shared, why ) && shared ) {
+			if ( fxDepthTexId && !fxDepthShared )
+				fn->glDeleteTextures( 1, &fxDepthTexId );
 			fxDepthTexId = shared;
 			fxDepthShared = true;
-		} else if ( fxDepthShared ) {
-			WwVkPresent::sharedTargetDrop( key );
-			fxDepthTexId = 0;
-			fxDepthShared = false;
+			if ( const int n = fxDepthRetry.granted() )
+				qInfo() << "lane VKOBJ5: fxDepth shared target granted after" << n << "refusals";
+		} else {
+			if ( asked && fxDepthRetry.refused( w, h, fxDepthPassNow ) )
+				qWarning() << "lane VKOBJ5: fxDepth shared target refused, GL's own texture until a retry:" << why.c_str();
+			if ( fxDepthShared ) {
+				WwVkPresent::sharedTargetDrop( key );
+				fxDepthTexId = 0;
+				fxDepthShared = false;
+			}
 		}
 		if ( !fxDepthTexId )
 			fn->glGenTextures( 1, &fxDepthTexId );
