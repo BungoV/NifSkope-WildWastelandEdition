@@ -209,4 +209,13 @@ fxp objpfx_vs pfx_view_vs vs_6_0 "$VS_SHIFT"
 fxp objpfx_cell_ps particles_cell_ps ps_6_0 "$PS_SHIFT"
 # round 5: its RT GI variant (the all-on route's WW_CELL_RTDDGI + RTDDGI_CASCADES + RESTIR, as the fxc _rt lines)
 fxp objpfx_cell_rt_ps particles_cell_ps ps_6_0 "$PS_SHIFT" "-D WW_CELL_RTDDGI=1 -D WW_CELL_RTDDGI_CASCADES=1 -D WW_CELL_RESTIR=1"
+# lane VKOBJ10: taa_objvel.prog (res/shaders/hlsl/post), the TAA inputs' moving-object redraw (taainputs.cpp step 3). The program
+# has no loader defines; its pixel stage reads 1 / gl_FragCoord.w (the soft fade): -fvk-use-dx-position-w; every binding kept
+fxo() {
+	"$DXC" -spirv -fspv-target-env=vulkan1.2 -HV 2021 -T "$3" -E main $4 -fspv-preserve-bindings -fvk-use-dx-position-w -Fo "$1.spv" "$(cygpath -m "$ROOT/res/shaders/hlsl/post/$2.hlsl" 2>/dev/null || echo "$ROOT/res/shaders/hlsl/post/$2.hlsl")"
+	python -I "$ROOT/tools/spv_header.py" "$1.spv" "vkframe_$1_spv" "$1.spv.h" < /dev/null
+	rm -f "$1.spv"
+}
+fxo objvel_vs taa_objvel_vs vs_6_0 "$VS_SHIFT"
+fxo objvel_ps taa_objvel_ps ps_6_0 "$PS_SHIFT"
 ls -la csm_view_vs.spv.h obj_depth_vs.spv.h sky_view_ps.spv.h bloom_down.spv.h bloom_hold.spv.h bloom_up.spv.h bloom_src.spv.h bloom_comb.spv.h bloom_back.spv.h tonemap.spv.h measure_q.spv.h tone_view_vs.spv.h tone_view_ps.spv.h taa_view_mv_cs.spv.h taa_view_resolve_cs.spv.h taa_view_rcas_ps.spv.h
