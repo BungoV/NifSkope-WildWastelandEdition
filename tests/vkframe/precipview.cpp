@@ -306,6 +306,21 @@
 // cascades GL reads from a block (volCsm on outdoors, wwShadowFrame in GL's program: fxPack would pack zero cascades),
 // so the app draws those runs on GL until the block is read. The old census lines stay byte-identical (verdict keys).
 // Done when both routes read 0 / 0.
+// The frame block (L8 route lift 1, VKFAR6 11-15; bar set before its first run, never widened): under WW_FRAME_UBO (the
+// default route) GL reads csmMat[3], csmInvRange, csmForce, csmParams, csmSplitOffset, csmProbe and csmRed from the std140
+// block wwShadowFrame (ww_sunshadow.glsl; sunshadow.cpp csmFrameUpload binds it at 2), not from loose uniforms. One case,
+// appended, element 31: rain_near_csm_ubo (rain_near_csm's run and fixture, drawn and read through pRoute, the route default
+// program; the gate uploads the case's cascade values into a block at binding 2, the layout of sunshadow.cpp's
+// CsmFrameBlock). The same verdict (depth EXACT, colour inside the bar), reference checks, repeat clause and term 3's sun's
+// shadow checks as rain_near_csm (GL with csmForce 1 writes the block's csmForce; a block member counts as found when the
+// program holds wwShadowFrame). The case must also show (else the gate fails): GL with the block's bytes zero differs on
+// >= 1000 covered samples (the block seen); wwShadowFrame found in GL's program and csmMat not a loose uniform there;
+// precipLitRead read the block's bytes (csmBlock 1). Reds, each must FAIL in rain_near_csm_ubo: 34359738368 the block's
+// bytes dropped (the packed cascade fields zero: the pack before the lift); 524288 (cascades 1 and 2 swapped) as in
+// rain_near_csm. Lifted with it: precipLitRead reads the bound block's bytes (its binding, offset and size as GL holds
+// them) and the lit pack takes the cascade fields from them; the block refusal stays for a block with no bytes read (no
+// buffer bound, or a short one); the closed list counts wwShadowFrame as read. Census after: route default 2 / 2, route
+// all-on 7 / 7 (the refusal and the block line gone outdoors, the block line indoors).
 #define main fxview_main
 #include "fxview.cpp"
 #undef main
