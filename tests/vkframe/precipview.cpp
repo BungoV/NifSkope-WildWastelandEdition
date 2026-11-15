@@ -271,6 +271,23 @@
 // refusal (every run); the lit record pass reads pcRoof at its own register (t47: t0 is cellLights there); a run with
 // pcRoofOn and no pcRoof in GL's program is refused by name; the app's rain / snow draw twins GL's pcRoof (copied every
 // run: the map changes with the cell). Census after: exterior 0, interior 1 (the roof line gone from both).
+// Interiors (L8 term 8, VKFAR6 11-15; bar set before its first run, never widened): cellInterior 1 changes the particle
+// law in cell_volpart (vpLight / vpLit): the local sun law off (vpLocal), the sun unshadowed (no volCsm read), the veil
+// off, the ambient's switch cellHasDalc (not cellExtDalc), the ambient dropped under cellGiAmb 2, GI's replace by
+// cellGiAmb 1, and a dark interior (cellHasDir 0) still lit (not cellFxLit's self-lit). Two cases, element 30, appended:
+// rain_near_int (1: a dark interior, rain_near_amb's run with the lamps, volTerms 11: cellHasDir 0, the lamps' flat loop,
+// the Ambient Only volumes; GI's bit is rain_near_gi's) and snow_far_int_sun (2: a sunlit interior, snow_far_lamps' fogged
+// run, volTerms 11, the sun, the lamps, the volumes, the veil's switches on). Each: cellInterior 1, cellHasDalc 1, cellGiAmb 0 and
+// cellExtDalc 1 (the ambient's fixture; unread inside). The same verdict (depth EXACT, colour inside the bar), reference
+// checks, repeat clause and lamp / ambient checks as each case's run; rain_near_int's lit check "GL with cellHasDir 0" is
+// printed, not judged (its sun is already off: the dark interior is the cellInterior check below). The case must also
+// show (else the gate fails): GL with cellInterior 0 differs on >= 1000 covered samples (the interior's law seen); GL
+// with cellHasDalc 0 on >= 1000 (the interior's ambient switch seen); GL with cellGiAmb 2 on >= 1000 (the ambient's GI
+// rule seen); cellInterior, cellHasDalc, cellGiAmb and cellExtDalc found in GL's program; cellInterior and cellHasDalc
+// packed non-zero. GL with cellExtDalc 0 and, fogged, volVeil 0 are printed (info: unread inside, want 0). Reds, each
+// must FAIL in each interior case: 4294967296 the interior off (the packed cellInterior 0); 8589934592 the interior's
+// ambient off (the packed cellHasDalc 0); 17179869184 the ambient's GI rule (the packed cellGiAmb 2). Lifted with it:
+// precipLitWhys' interior refusal. Census after: exterior 0, interior 0 (the L8 done line).
 #define main fxview_main
 #include "fxview.cpp"
 #undef main
