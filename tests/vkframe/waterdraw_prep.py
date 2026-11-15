@@ -3,7 +3,7 @@
 #include expansion and the two defines the app injects and the shipped SPIR-V twins carry (WW_CELL_FOGLEAK, WW_FRAME_UBO).
 The scene, the uniforms and the textures are made (seeded) by the harness.
 
-    python -I tests/vkframe/waterdraw_prep.py <out dir> [program, default fo4_waterlook]
+    python -I tests/vkframe/waterdraw_prep.py <out dir> [program, default fo4_waterlook] [extra defines, comma separated]
 
 Writes prog.vert.glsl, prog.frag.glsl and, for a tessellated program, prog.tesc.glsl + prog.tese.glsl.
 """
@@ -20,6 +20,8 @@ import shader_link_check as S  # noqa: E402
 OUT = os.path.abspath(sys.argv[1])
 PROG = sys.argv[2] if len(sys.argv) > 2 else 'fo4_waterlook'
 DEF = ['WW_CELL_FOGLEAK', 'WW_FRAME_UBO']
+if len(sys.argv) > 3 and sys.argv[3]:  # lane VKWATER4: extra defines, e.g. the all-on RT set (comma separated)
+    DEF += sys.argv[3].split(',')
 os.makedirs(OUT, exist_ok=True)
 stages = []
 for ln in open(os.path.join(WATER, PROG + '.prog'), encoding='latin-1'):

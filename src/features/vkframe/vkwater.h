@@ -62,6 +62,7 @@ struct WaterCensus
 	std::vector<WaterSlot> inputs;
 	bool tess = false;     //!< a tessellation stage (fo4_waterlookd / dp)
 	int loose = 0;         //!< active non-sampler uniforms outside blocks
+	std::vector<std::string> looseNames;  //!< their names (waterUnslotted)
 	int samplersSeen = 0;  //!< sampler uniforms the program reports (the gate: every one has a slot)
 };
 
@@ -194,8 +195,10 @@ template <class Fn> void waterCensusOf( Fn * fn, unsigned prog, WaterCensus & c 
 		int block = -1;
 		fn->glGetActiveUniformsiv( prog, 1, &idx, 0x8A3A, &block );  // GL_UNIFORM_BLOCK_INDEX
 		if ( !waterIsSampler( type ) ) {
-			if ( block < 0 )
+			if ( block < 0 ) {
 				c.loose++;
+				c.looseNames.push_back( nm );
+			}
 			continue;
 		}
 		c.samplersSeen++;
@@ -357,6 +360,48 @@ inline bool waterPsReads( int v, std::string_view name )
 		if ( name == t.psNames[k].name )
 			return true;
 	return false;
+}
+/* lane VKWATER4 (all-on census): GL's active inputs (samplers and loose uniforms) the variant's twins never declare, e.g.
+ * cellDdgiAtlas / cellRestir of a WW_CELL_RTDDGI / WW_CELL_RESTIR build; empty when every one has a slot */
+inline std::string waterUnslotted( int v, const WaterCensus & c )
+{
+	const WaterTables & t = waterTables( v );
+	auto has = [&]( std::string_view n ) {
+		auto inN = [&]( const WaterBindName * k, int nk ) {
+			for ( int i = 0; i < nk; i++ )
+				if ( n == k[i].name )
+					return true;
+			return false;
+		};
+		auto inT = [&]( const FxField * k, int nk ) {
+			for ( int i = 0; i < nk; i++ )
+				if ( n == k[i].name )
+					return true;
+			return false;
+		};
+		if ( inN( t.psNames, t.psNamesN ) || inT( t.ps, t.psN ) || inN( kN_waterVs, waterN( kN_waterVs ) )
+			|| inT( kT_waterVs, waterN( kT_waterVs ) ) )
+			return true;
+		return t.tess && ( inN( kN_waterHs, waterN( kN_waterHs ) ) || inT( kT_waterHs, waterN( kT_waterHs ) )
+			|| inN( kN_waterDs, waterN( kN_waterDs ) ) || inT( kT_waterDs, waterN( kT_waterDs ) ) );
+	};
+	std::string names;
+	int n = 0;
+	auto check = [&]( const std::string & full ) {
+		const std::string_view b = std::string_view( full ).substr( 0, full.find( '[' ) );
+		if ( b.substr( 0, 3 ) == "gl_" || has( b ) )
+			return;
+		if ( ++n <= 12 )
+			names += " " + std::string( b );
+	};
+	for ( const WaterSlot & s : c.inputs )
+		check( s.name );
+	for ( const std::string & s : c.looseNames )
+		check( s );
+	if ( !n )
+		return {};
+	return std::string( t.prog ) + ": GL's program reads " + std::to_string( n ) + " inputs its Vulkan twin has no slot for:" + names
+		+ ( n > 12 ? " ..." : "" );
 }
 inline constexpr int kWaterPsLooseMax = std::max( { kT_waterPsBytes, kT_waterPsDBytes, kT_waterPsMBytes, kT_waterPsPBytes, kT_waterPsDpBytes,
 	kT_waterPsOffBytes } );

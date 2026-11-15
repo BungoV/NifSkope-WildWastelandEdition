@@ -782,6 +782,8 @@ bool waterRun( const WaterRun & r, std::string & why )
 			+ ( tab.tess ? "" : "not" ) );
 	if ( tab.tess && r.patchVerts != 3 )
 		return refuse( "GL draws " + std::to_string( r.patchVerts ) + "-vertex patches (the twin's are 3)" );
+	if ( const std::string un = waterUnslotted( r.variant, r.census ); !un.empty() )
+		return refuse( un );
 	if ( r.census.inputs.size() >= 120 )
 		return refuse( "more than 120 census inputs (the twins' keys)" );
 	WaterCaps caps = waterCaps();

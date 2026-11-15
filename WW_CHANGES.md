@@ -1,3 +1,12 @@
+## VKWATER4 (2026-11-15): the water on the all-on route keeps its twins; an unknown input keeps it on GL by name
+
+Changed, not built, not checked live. Offline: GL's water programs built with the all-on RT set (WW_CELL_RESTIR,
+WW_CELL_RTDDGI, WW_CELL_RTDDGI_CASCADES) compile to the same driver code as without it (the water calls none of the RT
+GI / ReSTIR code), and tests/vkframe/waterdraw.sh passes against that build for the d and m twins.
+
+- The water's Vulkan route now checks that every input GL's water program reads has a slot in its twin; one that does
+  not keeps the water on GL with the names in the `vk water:` line.
+
 ## VKWATER4 (2026-11-15): the ocean's arrays are shared in place, no copies per frame (WW_VKVIEW=1)
 
 Changed, not built, not checked live. Offline: oceanview arm 6, B / C / D at all 8 levels EXACT against the copy route
