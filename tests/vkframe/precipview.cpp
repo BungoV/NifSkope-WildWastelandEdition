@@ -350,6 +350,30 @@
 // leaves the old census red nothing to under-read (old 0 >= route 0 would read PASSED); with route default at 0 the red is the
 // closed list itself: ussTerrMap dropped from the allow list, pRoute's closed list must read >= 1 (FAILS as it must). Above 0
 // the old census red stays as it was.
+// The lamps' shadows in GL's ReSTIR variant (L8 route lift 3, VKFAR11 11-15; bar set before its first run, never widened):
+// the all-on route links cell_precip_gpu with WW_CELL_RESTIR, where cellShadowF gives every casting lamp (t4.y > 0.5,
+// cellShadowOn 1; the hemisphere's plane test first) the pixel's traced ratio in place of its cube: cellRestirOn 1 reads
+// cellRestir (t7, RG32F texel buffer: ratio, linear depth; bottom row first) at the particle centre's window position q,
+// cellRestirSize (W, H) its size; q outside it -> 1; the particle's linear depth D (from cellRow) within 0.02 rr.y + 2 of
+// rr.y -> rr.x, else 1 (no CELL_RESTIR_MISS_PIXEL in the particles' program); no cube is read (cellShadow compiled out). One
+// case, appended, element 33: rain_near_restir (rain_near_shadow's run, lamps, slots and cubes, volTerms 3) drawn through
+// pAllOn (the route all-on program) with cellRestirOn 1, cellRestirSize (w, h, 0, 0) of the gate's frame and a w x h RG32F
+// cellRestir whose depth is one D0 for every texel (the prep picks the in-view particles' median depth and prints the share
+// of in-view particles within its tolerance: want 0.1 - 0.8) and whose ratio is a smooth field in 0.1 - 0.9 (two low
+// sines, no texel-sized steps). The same verdict (depth EXACT, colour inside the bar), reference checks, repeat clause, reds
+// 64 / 128 as the lit cases; the globals check and Vulkan's globals mirror as rain_near_shadow. The case must also show
+// (else the gate fails): GL with cellRestirOn 0 differs on >= 1000 covered samples (the ratio seen); cellRestirOn,
+// cellRestir and cellRestirSize found in GL's program and cellShadow not (the cubes compiled out); cellRestirOn and
+// cellRestirSize packed non-zero. Reds, each must FAIL in rain_near_restir: 1099511627776 the ratio dropped (Vulkan's
+// cellRestir the zero texel buffer); 2199023255552 the ratio off (the packed cellRestirOn 0); 4398046511104 the size's axes
+// swapped (the packed cellRestirSize x / y); 8796093022208 the block not repacked (the ReSTIR twin reads the plain lit
+// block's bytes: every field from cellFarOn on 32 bytes early). Lifted with it: precipLitWhys' ReSTIR refusal; a ReSTIR
+// run (cellRestirOn active in GL's program) takes a second lit twin, precip_lit_rt_view_cs (WW_CELL_RESTIR; its block is the
+// lit block with cellRestirOn / cellRestirSize inserted at 4352, every later field 32 bytes on, checked against the
+// reflect), its ratio GL's cellRestir copied a run into binding 71; refused by name instead: GL's ReSTIR variant with its
+// cubes compiled in (cellShadow active: WW_CELL_RESTIR_CUBES_RED), cellRestirOn 1 with no RG32F buffer on GL's unit. The
+// closed list counts cellRestir as a sampler slot and cellRestirSize as read. Census after: route default 0 / 0, route
+// all-on 1 / 1 (refusal 1 and both input lines gone, the physical falloff left).
 #define main fxview_main
 #include "fxview.cpp"
 #undef main
