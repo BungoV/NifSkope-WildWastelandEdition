@@ -401,6 +401,8 @@ void farLodVkArm( GLFunctions * fn, NifSkopeOpenGLContext::Program * prog, int s
 		no = "WW_CELL_FOGLEAK=0: GL's program is not the Vulkan twin";
 	else if ( !prog->wwShadowFrame )
 		no = "WW_FRAME_UBO off: GL's program is not the Vulkan twin";
+	else if ( prog->wwDefs != "WW_CELL_FOGLEAK+WW_FRAME_UBO" )	// lane VKFAR15: RT GI / ReSTIR keys read inputs the twin has no slot for
+		no = "an RT GI / ReSTIR key in GL's program (cellDdgiAtlas, cellRestir, cellGiHalf): the twin is the base key only";
 	else {
 		GLint drawFb = 0;
 		fn->glGetIntegerv( GL_DRAW_FRAMEBUFFER_BINDING, &drawFb );
