@@ -78,9 +78,11 @@ static int gColKind = 0;  // lane VKOBJ5: 1 ` skin`, 2 ` alpha`, 3 ` single`, 4 
 static const char * kColKindName[6] = { "", " skin", " alpha", " single", " own", " ao" };
 /* lane VKWATER3 (manager ruling 11-15, the AO note; stated before its first run, never widened): kind 5 `ao` runs the main arm
  * on the app's key with a GL R32F texture on cellAo (half the view, a ramp in y and a 7-texel saw in x, bilinear, clamped),
- * cellAoOn 1, cellAoRect the frame. GL probe: cellAoOn 0 moves GL's colour on >= 20 % of the covered pixels. Check: GL's own
- * texture has no twin, so objBlShade must refuse naming cellAo (`REFUSED OK`). Red standin (ObjBlShade.standInRed: the old
- * stand-in) must draw, FAIL the main arm's bars against GL and differ from GL's colour. */
+ * cellAoOn 1, cellAoRect the frame. GL probe: cellAoOn 0 moves GL's colour on >= 20 % of the covered pixels. Ruling item 3:
+ * cellAo reads GL's texture through its copy twin, so the main arm draws at the main arm's bars with one copy of the texture's
+ * bytes (half the view, 4 bytes a texel). Reds: standin (ObjBlShade.standInRed: no copy twin, the old stand-in) and copy (red 26 =
+ * objBlShade's 8: copied from one texel on in x) must FAIL. Check: the same texture on cellSsgi (GL's own, no twin) must refuse
+ * naming cellSsgi (`REFUSED OK`). */
 void colPrintf( const char * fmt, ... )
 {
 	std::string f2( fmt );
@@ -481,7 +483,7 @@ bool colourGate( const std::string & spirvDir, const std::vector<GLuint64> & fix
 	}
 	// lane VKWATER3 kind 5: GL's own obscurance texture on cellAo
 	GLuint aoTex = 0;
-	int aoUnit = -1;
+	int aoUnit = -1, ownUnit = -1;  // ownUnit: the refusal check's unit (cellSsgi), else none
 	if ( kind == 5 ) {
 		const int aw = kSW / 2, ah = kSH / 2;
 		std::vector<float> av( std::size_t( aw ) * std::size_t( ah ) );
@@ -694,6 +696,8 @@ bool colourGate( const std::string & spirvDir, const std::vector<GLuint64> & fix
 		}
 		if ( aoTex )
 			u.bindTextures( GLuint( aoUnit ), 1, &aoTex );
+		if ( aoTex && ownUnit >= 0 )
+			u.bindTextures( GLuint( ownUnit ), 1, &aoTex );
 		f.bindBufferBase( 0x8A11, 0, ubo[0] );
 		f.bindBufferBase( 0x8A11, 1, ubo[1] );
 		if ( sfB ) {  // the cascade values as put() left them (a red or probe set after GL drew reaches both sides)
@@ -966,7 +970,7 @@ bool colourGate( const std::string & spirvDir, const std::vector<GLuint64> & fix
 		s.nRows = nRows;
 		s.cmds = sx.cmds.data();
 		s.nCmds = sx.cmds.size() / 5;
-		s.red = red == 10 ? 1 : red >= 21 && red <= 24 ? red - 12 : 0;  // 21 .. 24: the RT reds (objBlShade's 9 .. 12)
+		s.red = red == 10 ? 1 : red >= 21 && red <= 24 ? red - 12 : red == 26 ? 8 : 0;  // 21 .. 24: the RT reds (objBlShade's 9 .. 12); 26 copy
 		s.rt = rt;
 		s.psGate = plainWords.empty() ? nullptr : plainWords.data();
 		s.psGateWords = plainWords.size();
@@ -1058,11 +1062,7 @@ bool colourGate( const std::string & spirvDir, const std::vector<GLuint64> & fix
 	std::string w;
 	const bool ran = vkRun( 0, vk0, w );
 	const ObjBlRunStat rs = takeObjBlRunStat();
-	if ( !ran && kind == 5 ) {  // lane VKWATER3: cellAo is GL's own texture (no twin): the draw must go to GL
-		const bool refused = w.find( "no twin" ) != std::string::npos && w.find( "cellAo" ) != std::string::npos;
-		colPrintf( "BLVIEW colour check cellAo (GL's own R32F, no twin) %s (%s)\n", refused ? "REFUSED OK" : "FAIL", w.c_str() );
-		ok = refused && kindReach;
-	} else if ( !ran ) {
+	if ( !ran ) {
 		colPrintf( "BLVIEW colour FAIL (objBlShade refused: %s)\n", w.c_str() );
 		ok = false;
 	} else {
@@ -1089,9 +1089,12 @@ bool colourGate( const std::string & spirvDir, const std::vector<GLuint64> & fix
 				double( fromHalf( a[p * 4 + 3] ) ) );
 		}
 		ok = ok && crossOk &&( dc.exact() || dc.bound() ) && litOk && ( cc.exact() || cc.bound() ) && csmReach && kindReach;
-		if ( kind == 5 ) {
-			colPrintf( "BLVIEW colour check cellAo FAIL (objBlShade drew with GL's own texture on cellAo)\n" );
-			ok = false;
+		if ( kind == 5 ) {  // lane VKWATER3: cellAo through its copy twin, once a frame
+			const std::uint64_t aoBytes = std::uint64_t( kSW / 2 ) * std::uint64_t( kSH / 2 ) * 4u;
+			const bool copyOk = rs.copies == 1 && rs.copyBytes == aoBytes;
+			colPrintf( "BLVIEW colour check cellAo copy twin %s (%d copies, %llu bytes, want 1 of %llu)\n", copyOk ? "OK" : "FAIL", rs.copies,
+				static_cast<unsigned long long>( rs.copyBytes ), static_cast<unsigned long long>( aoBytes ) );
+			ok = ok && copyOk;
 		}
 	}
 	const char * redName[3] = { "glow (glowMult 0 after GL drew)", "slot (each row's maps one slot on)",
@@ -1100,7 +1103,7 @@ bool colourGate( const std::string & spirvDir, const std::vector<GLuint64> & fix
 		" base (rowsAtBase off: the mirrored wwDrawBase kept)", " offset (every attribute read from offset 0)",
 		" half (the halves read as 16-bit unorm)" };
 	const int redLo = kind == 0 ? 1 : kind == 4 ? 14 : kind == 5 ? 25 : 10 + kind;
-	const int redHi = kind == 0 ? ( twin ? 3 : 2 ) : kind == 4 ? 15 : kind == 5 ? 25 : 10 + kind;
+	const int redHi = kind == 0 ? ( twin ? 3 : 2 ) : kind == 4 ? 15 : kind == 5 ? 26 : 10 + kind;
 	for ( int r = redLo; r <= redHi; r++ ) {
 		ColOut o;
 		std::string rw;
@@ -1115,14 +1118,25 @@ bool colourGate( const std::string & spirvDir, const std::vector<GLuint64> & fix
 				vch += o.c0[i] != vk0.c0[i];
 			for ( std::size_t i = 0; kind && ran && i < o.depth.size() && i < vk0.depth.size(); i++ )
 				vch += o.depth[i] != vk0.depth[i];  // lane VKOBJ5: a kind red may move the depth alone
-			for ( std::size_t i = 0; kind == 5 && i < o.c0.size() && i < gl.c0.size(); i++ )
-				vch += o.c0[i] != gl.c0[i];  // lane VKWATER3: the main arm refused, so the red's colour against GL's
 			passes = ( dc.exact() || dc.bound() ) && ( cc.exact() || cc.bound() );
 		}
 		colPrintf( "BLVIEW RED colour%s %s (%zu values over the bound, %zu Vulkan colour values moved off the Vulkan base%s%s)\n",
-			r == 25 ? " standin (GL's own cellAo texture stood in)" : r > 10 ? kindRedName[r - 11] : redName[r - 1],
+			r == 25 ? " standin (no copy twin: GL's own cellAo texture stood in)" : r == 26 ? " copy (cellAo copied from one texel on in x)"
+			: r > 10 ? kindRedName[r - 11] : redName[r - 1],
 			passes ? "PASSED" : vch ? "FAIL" : "TESTS NOTHING", over, vch, rr ? "" : "; refused: ", rr ? "" : rw.c_str() );
 		ok = ok && !passes && vch > 0;
+	}
+	if ( kind == 5 ) {  // lane VKWATER3: a GL-owned texture with no twin (the AO texture on cellSsgi) must refuse the draw to GL
+		const GLint l = reg.count( "cellSsgi" ) ? reg["cellSsgi"] : -1;
+		ownUnit = unitAt.count( l ) ? unitAt[l] : -1;
+		std::string rw;
+		ColOut o;
+		const bool refused = ownUnit >= 0 && !vkRun( 0, o, rw ) && rw.find( "no twin" ) != std::string::npos
+			&& rw.find( "cellSsgi" ) != std::string::npos;
+		ownUnit = -1;
+		colPrintf( "BLVIEW colour check cellSsgi (GL's own texture, no twin) %s (%s)\n", refused ? "REFUSED OK" : "FAIL",
+			rw.empty() ? "no unit for cellSsgi, or it drew" : rw.c_str() );
+		ok = ok && refused;
 	}
 	if ( kind == 4 ) {  // lane VKOBJ5 round 2: location 5 disabled with a current value other than (0,0,0,1) must refuse
 		void( WINAPI * attrib4f )( GLuint, GLfloat, GLfloat, GLfloat, GLfloat ) = nullptr;

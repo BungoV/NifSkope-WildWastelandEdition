@@ -220,7 +220,7 @@ struct ObjBlDraw
 	std::vector<std::uint32_t> imageSwz;  //!< lane VKWATER3: per image, a twin's swizzle (blSwizzleCode; 0 none)
 	int texRed = 0;                       //!< lane VKWATER3, gates only: 1 the twin made before (objTexKey), 2 the swizzle dropped
 	int texelRed = 0;                     //!< lane VKWATER3, gates only: objBlTexelCopy's red (1: copied from 16 bytes past the start)
-	int copyRed = 0;                      //!< lane VKWATER3, gates only: objCellCopyTwin's red (1: copied from one texel on in x)
+	int copyRed = 0;                      //!< lane VKWATER3, gates only: objCellCopyTwin's red (1: copied from one texel on in x, 2: no copy)
 	const char * texelRedName = nullptr;  //!< lane VKWATER3, gates only: texelRed for this one texel binding's name only
 	const char * dropName = nullptr;      //!< lane VKWATER3, gates only: this image binding left to the stand-in
 	std::vector<std::pair<std::uint32_t, ObjBlSampler>> samplers;         //!< binding -> GL's state, else the default
@@ -258,7 +258,7 @@ struct ObjBlBindStat
 	int shared = 0;    //!< images from a shared target
 	int twins = 0;     //!< images from a texture cache twin (lane VKWATER3: twin 2 and up only)
 	int glOwn = 0;     //!< a GL texture that is no shared target (a stand-in)
-	int copied = 0;    //!< lane VKWATER3: GL textures read through a copy twin (twin 7 and up; objCellCopyTwin)
+	int copied = 0;    //!< lane VKWATER3: GL textures read through a copy twin (objCopyTwinName's; objCellCopyTwin)
 	int misfit = 0;   //!< a shared target the binding cannot take (shape or samples; a stand-in)
 	int unbound = 0;   //!< no unit or no texture
 	int texelGl = 0;   //!< a texel buffer GL binds
@@ -376,7 +376,8 @@ struct ObjBlShade
 	const void * cmds = nullptr;  //!< 5 words a command (the base instance relative to the leader)
 	std::size_t nCmds = 0;
 	int red = 0;  //!< gates only: 1 objBlPipe's strict target count (a 1-buffer frame must refuse); RT GI: 9 the ReSTIR ratio /
-	              //!< 10 the atlas copied a texel on, 11 / 12 the screen GI / its key dropped to the stand-in
+	              //!< 10 the atlas copied a texel on, 11 / 12 the screen GI / its key dropped to the stand-in; 8 the copy twins
+	              //!< (cellAo, cellAoDecal, cellSsr) copied a texel on
 	const std::uint32_t * psGate = nullptr;  //!< gates only: this pixel module instead of the shipped twin (blview's plain row)
 	std::size_t psGateWords = 0;
 	int skinRed = 0;   //!< lane VKOBJ5 red `bone`: the mirrored skinningUniforms one bone on (bone i reads i + 1's transform)

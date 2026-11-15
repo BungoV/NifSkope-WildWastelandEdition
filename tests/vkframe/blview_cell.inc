@@ -58,9 +58,11 @@
  * (ObjCellShade.red 9 .. 12): restir (the ratio copied from two texels on), atlas (read one texel on), gihalf, gikey (each image
  * dropped to the stand-in).
  * Volumetric cards (lane VKWATER3 ruling 3, vars 16 with 8 on twin 7, `BLVIEW effectcell rtvol`; stated before its first run,
- * never widened): the lit cards (draws 0, 1, 3, 4) as volumetric cards (volPart 1, volTerms 2: their lamps through vpLight,
- * where a shadow-casting light takes the ReSTIR ratio on the ratio's depth), so the ratio reaches an effect. The RT row's bar,
- * probes (cellRestirOn 0 among them) and its four reds, restir with them. */
+ * never widened): lit draw 4 as a volumetric mesh card (volPart 1, fxAirCard 1 as renderer.cpp sets it,
+ * volTerms 2: their lamps through vpLight, where a shadow-casting light takes the ReSTIR ratio on the ratio's depth), so the
+ * ratio reaches an effect; lit draws 0, 1, 3 stay plain (an air card takes no GI surface term, so the GI probes and the atlas
+ * red reach GL through them; as air cards draws 1 and 3 fade out whole).
+ * The RT row's bar, probes (cellRestirOn 0 among them) and its four reds, restir with them. */
 bool cellGate( const std::string & spirvDir, int twin, const GLuint maps[4], unsigned reds = 15u, const char * label = nullptr, unsigned vars = 0u )
 {
 	using namespace WwVkPresent;
@@ -735,7 +737,9 @@ bool cellGate( const std::string & spirvDir, int twin, const GLuint maps[4], uns
 			set( "lightingInfluence", { 0.4f + 0.6f * q( r ) } );
 			set( "fxLitMode", { i % 3 != 2 ? 3.0f : 0.0f } );  // lit by every light (cellLightCount), or unlit
 			if ( volV ) {  // the lit cards volumetric, lit by their lamps alone (volTerms 2: placed)
-				set( "volPart", { i % 3 != 2 ? 1.0f : 0.0f } );
+				const float volCard = i == 4 ? 1.0f : 0.0f;
+				set( "volPart", { volCard } );
+				set( "fxAirCard", { volCard } );  // a volumetric mesh card is a slab of air (renderer.cpp)
 				set( "volTerms", { 2 } );
 				// the air's phase (the app's weather feeds it; left 0 the lamps scatter nothing): Rayleigh, forward, back
 				set( "volPhase", { 0.5f, 0.45f, 0.4f, 0.0f }, 0 );
