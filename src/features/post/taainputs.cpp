@@ -5,6 +5,7 @@
 #include "gl/cellunits.h"	// lane WATERFIX7: the passes' named units
 #include "gl/alphabgsm.h"	// lane ALPHABGSM1: the side passes' alpha-test census
 #include "features/post/gametaa.h"
+#include "features/vkframe/vkpresent.h"	// lane VKOBJ11: the targets shared with the present device while the view is on
 #include "features/particles/glparticles.h"
 #include "gl/glproperty.h"
 #include "gl/glscene.h"
@@ -142,6 +143,8 @@ struct InGpu
 	GLenum dsFormat = 0;
 	GLbitfield depthBits = 0;
 	bool ok = false;	// this frame's textures were drawn
+	bool vk = false, vkFailed = false;	// lane VKOBJ11: vel / mask / depth are shared targets; a share refused at this size
+	std::uintptr_t vkKey = 0;
 	GLuint q[4] = { 0, 0, 0, 0 };	// two begin/end timestamp pairs
 	bool qPending[2] = { false, false };
 	int qNext = 0;
@@ -242,6 +245,12 @@ GLuint makeTex( Renderer * r, GLenum internal, GLenum format, GLenum type, int w
 
 void freeTex( Renderer * r, InGpu & g )
 {
+	if ( g.vk ) {	// lane VKOBJ11: the shared names go with their keys (GL's names too)
+		for ( std::uintptr_t k = 0; k < 3; k++ )
+			WwVkPresent::sharedTargetDrop( g.vkKey + k );
+		g.vel = g.mask = g.depth = 0;
+		g.vk = false;
+	}
 	for ( GLuint * t : { &g.vel, &g.mask, &g.depth } ) {
 		if ( *t )
 			r->fn->glDeleteTextures( 1, t );
@@ -532,16 +541,64 @@ void wwTaaInputsPass( Scene * scene )
 	}
 
 	InGpu & g = gpus()[r];
-	if ( !g.fbo || g.w != W || g.h != H || g.dsFormat != dsFormat ) {
+	/* lane VKOBJ11 (item 2 step 2): while the Vulkan view is on, vel / mask / depth are shared targets made on the present
+	 * device (the objvel route draws step 3 into them; not wired yet: GL draws every step). A refused share leaves GL's own
+	 * at that size (said once). Red WW_VKVIEW_OBJVEL_RED=1: GL's own. The view off makes the old calls. */
+	const bool vkTry = WwVkPresent::shareWanted( "WW_VKVIEW_OBJVEL_RED" )
+		&& !( g.vkFailed && g.w == W && g.h == H && g.dsFormat == dsFormat );
+	const bool vkGone = g.vk && !WwVkPresent::sharedTargetIs( g.vkKey, g.vel );
+	if ( !g.fbo || g.w != W || g.h != H || g.dsFormat != dsFormat || g.vk != vkTry || vkGone ) {
+		if ( vkGone )
+			g.vel = g.mask = g.depth = 0;	// a present shutdown took them
 		freeTex( r, g );
 		if ( !g.fbo ) {
 			fn->glGenFramebuffers( 1, &g.fbo );
 			fn->glGenFramebuffers( 1, &g.camFbo );
 			fn->glGenQueries( 4, g.q );
 		}
-		g.vel = makeTex( r, GL_RG16F, GL_RG, GL_FLOAT, W, H );
-		g.mask = makeTex( r, GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE, W, H );
-		g.depth = makeTex( r, dsFormat, dsFmt, dsType, W, H );
+		if ( vkTry ) {
+			static std::uintptr_t nextKey = 0x54490000u;	// "TI": 16 keys a renderer
+			if ( !g.vkKey ) {
+				g.vkKey = nextKey;
+				nextKey += 16;
+			}
+			const GLenum fmts[3] = { GL_RG16F, GL_RGBA8, dsFormat };
+			unsigned t[3] = {};
+			std::string why;
+			bool shared = true;
+			for ( int i = 0; i < 3 && shared; i++ )
+				shared = WwVkPresent::sharedTarget( g.vkKey + std::uintptr_t( i ), 0, W, H, 1, fmts[i], t[i], why );
+			if ( shared ) {
+				g.vel = t[0];
+				g.mask = t[1];
+				g.depth = t[2];
+				// the shared names come NEAREST with GL's default wrap: makeTex's state
+				for ( int i = 0; i < 3; i++ ) {
+					fn->glBindTexture( GL_TEXTURE_2D, t[i] );
+					fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST );
+					fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST );
+					fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE );
+					fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE );
+					fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0 );
+					if ( i == 2 )
+						fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_COMPARE_MODE, GL_NONE );
+				}
+				fn->glBindTexture( GL_TEXTURE_2D, 0 );
+				g.vk = true;
+				g.vkFailed = false;
+			} else {
+				for ( std::uintptr_t k = 0; k < 3; k++ )
+					WwVkPresent::sharedTargetDrop( g.vkKey + k );
+				g.vkFailed = true;
+				qInfo().noquote() << QStringLiteral( "taa inputs: %1x%2 targets stay GL's own (shared target refused: %3)" ).arg( W ).arg( H )
+					.arg( QString::fromStdString( why ) );
+			}
+		}
+		if ( !g.vk ) {
+			g.vel = makeTex( r, GL_RG16F, GL_RG, GL_FLOAT, W, H );
+			g.mask = makeTex( r, GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE, W, H );
+			g.depth = makeTex( r, dsFormat, dsFmt, dsType, W, H );
+		}
 		fn->glBindFramebuffer( GL_FRAMEBUFFER, g.fbo );
 		fn->glFramebufferTexture2D( GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, g.vel, 0 );
 		fn->glFramebufferTexture2D( GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1, GL_TEXTURE_2D, g.mask, 0 );
