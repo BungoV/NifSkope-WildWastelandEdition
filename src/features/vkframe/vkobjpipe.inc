@@ -1557,6 +1557,10 @@ std::uintptr_t objCubeCopyTwin( GlProc gp, const ObjBlTexUnit & u, std::string &
 		return why = "GL format " + std::to_string( fmt ) + " has no cube twin", 0;
 	if ( blIsSrgb( f.fmt ) && decode == 0x8A4A )
 		return why = "an sRGB cube with its decode skipped", 0;
+	int swz[4] = { 0x1903, 0x1904, 0x1905, 0x1906 };
+	tv( u.glTex, 0x8E46, swz );  // TEXTURE_SWIZZLE_RGBA (the DDS loader sets one on BC4 / BC5 / luminance): the cube view has none
+	if ( swz[0] != 0x1903 || swz[1] != 0x1904 || swz[2] != 0x1905 || swz[3] != 0x1906 )
+		return why = "a swizzled GL cube (the cube twin's view is the identity)", 0;
 	const std::uintptr_t key = ( std::uintptr_t( 0xC0B ) << 40 ) | std::uintptr_t( u.glTex );
 	unsigned twin = 0;
 	if ( !farTwin( key, 4, w, w, 6, unsigned( fmt ), twin, why, levels ) || !twin )

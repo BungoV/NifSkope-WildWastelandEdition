@@ -25,7 +25,8 @@
  * Round 4, the maps (a .bgem's, glparticles.cpp binds each with its flag): 5 `normal` (hasNormalMap 1, useFalloff 1,
  * NormalMap = a DXT1 twin on its own unit), 6 `grey` (greyscaleColor 1, hasGreyscaleMap 1, GreyscaleMap = a DXT1 twin),
  * 7 `cube` (hasCubeMap 1, envReflection 1; round 5: CubeMap = the .bgem's env cube, 8x8 DXT1 with 4 levels, drawn on Vulkan
- * through its plain-cube copy twin under the same bar, 0 refused, >= 1 copy twin),
+ * through its plain-cube copy twin under the same bar, 0 refused, >= 1 copy twin; envMapRotation a half turn to the
+ * (1,1,1) corner, GL_TEXTURE_CUBE_MAP_SEAMLESS on as bindCube leaves it; a printed per-face probe counts the faces reached),
  * 8 `elem` (textures[0].textureUnit 3: textureUnits[2] a DXT1 twin on its own unit). Seen-check 4: the case's map off
  * (its flag 0, textureUnit 1). Reds 4 `nmap`, 5 `grey` (the map a stand-in with its flag 1), 6 `cubeoff` (CubeMap a
  * stand-in with hasCubeMap 1), 7 `elem0` (only element 0 of an array resolved, round 3's rule), each on its own case;
@@ -173,30 +174,39 @@ bool pfxGate( const std::string & spirvDir, GLuint baseTex, GLuint nrmTex, GLuin
 	glTexParameteri( 0x8513, GL_TEXTURE_MAG_FILTER, GL_LINEAR );
 	// round 5: the .bgem's env cube (glparticles.cpp's bindCube( cubeName ) with hasCubeMap 1): 8x8 DXT1, 4 levels, mipmapped,
 	// each face its own two end colours, the indices seeded mt19937( 37 ) (every level and texel its own value)
-	GLuint envCube = 0;
-	glGenTextures( 1, &envCube );
-	glBindTexture( 0x8513, envCube );
-	{
+	// (TexCache::bindCube's state: clamp to edge, linear mipmapped, GL_TEXTURE_CUBE_MAP_SEAMLESS on). whiteFace >= 0: that
+	// face solid white on every level (the per-face probe: which faces the system's lookups reach)
+	auto makeEnv = [&]( int whiteFace ) {
+		GLuint t = 0;
+		glGenTextures( 1, &t );
+		glBindTexture( 0x8513, t );
 		std::mt19937 cr( 37 );
 		static const std::uint16_t ends[6][2] = { { 0xF800, 0x2104 }, { 0x07E0, 0x0841 }, { 0x001F, 0x4208 }, { 0xFFE0, 0x18C3 }, { 0xF81F, 0x0000 },
 			{ 0x07FF, 0x3186 } };
 		for ( int l = 0; l < 4; l++ ) {
 			const int lw = 8 >> l, nb = ( ( lw + 3 ) / 4 ) * ( ( lw + 3 ) / 4 );
-			for ( GLenum fc = 0; fc < 6; fc++ ) {
+			for ( int fc = 0; fc < 6; fc++ ) {
 				std::vector<std::uint8_t> blk( std::size_t( nb ) * 8 );
 				for ( int b = 0; b < nb; b++ ) {
-					const std::uint32_t idx = std::uint32_t( cr() );
-					std::memcpy( &blk[std::size_t( b ) * 8], &ends[fc][0], 2 );
-					std::memcpy( &blk[std::size_t( b ) * 8 + 2], &ends[fc][1], 2 );
+					std::uint32_t idx = std::uint32_t( cr() );
+					std::uint16_t e0 = ends[fc][0], e1 = ends[fc][1];
+					if ( fc == whiteFace )
+						e0 = e1 = 0xFFFF, idx = 0;
+					std::memcpy( &blk[std::size_t( b ) * 8], &e0, 2 );
+					std::memcpy( &blk[std::size_t( b ) * 8 + 2], &e1, 2 );
 					std::memcpy( &blk[std::size_t( b ) * 8 + 4], &idx, 4 );
 				}
-				u.compressed2D( 0x8515 + fc, l, 0x83F0, lw, lw, 0, GLsizei( blk.size() ), blk.data() );
+				u.compressed2D( GLenum( 0x8515 + fc ), l, 0x83F0, lw, lw, 0, GLsizei( blk.size() ), blk.data() );
 			}
 		}
-	}
-	glTexParameteri( 0x8513, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR );
-	glTexParameteri( 0x8513, GL_TEXTURE_MAG_FILTER, GL_LINEAR );
-	glBindTexture( 0x8513, 0 );
+		for ( GLenum wr : { GLenum( GL_TEXTURE_WRAP_S ), GLenum( GL_TEXTURE_WRAP_T ), GLenum( 0x8072 ) } )  // WRAP_R
+			glTexParameteri( 0x8513, wr, 0x812F );                                                                   // CLAMP_TO_EDGE
+		glTexParameteri( 0x8513, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR );
+		glTexParameteri( 0x8513, GL_TEXTURE_MAG_FILTER, GL_LINEAR );
+		glBindTexture( 0x8513, 0 );
+		return t;
+	};
+	GLuint envCube = makeEnv( -1 );
 	if ( const GLenum e = glGetError(); e != GL_NO_ERROR ) {
 		std::printf( "BLVIEW pfx FAIL (GL error 0x%x making the env cube)\n", unsigned( e ) );
 		return false;
@@ -296,14 +306,29 @@ bool pfxGate( const std::string & spirvDir, GLuint baseTex, GLuint nrmTex, GLuin
 		inactive++;
 	};
 	const float ident[16] = { 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1 };
+	// round 5: envMapRotation a half turn that takes +z to the cube's (1,1,1) corner (symmetric: either storage order), so the
+	// sprites' reflections (about +z) spread over three faces and their seams; only case `cube` samples it
+	// round 5b: the six axis cases' half turns taking +z to face 0..5 (+x -x +y -y +z -z; symmetric too), 6 the corner
+	static const float kEnvRot[7][16] = { { 0, 0, 1, 0, 0, -1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1 }, { 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 0, 0, 0, 0, 1 },
+		{ -1, 0, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 0, 1 }, { -1, 0, 0, 0, 0, 0, -1, 0, 0, -1, 0, 0, 0, 0, 0, 1 },
+		{ 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1 }, { 1, 0, 0, 0, 0, -1, 0, 0, 0, 0, -1, 0, 0, 0, 0, 1 },
+		{ -0.78867513f, 0.21132487f, 0.57735027f, 0, 0.21132487f, -0.78867513f, 0.57735027f, 0, 0.57735027f, 0.57735027f, 0.57735027f, 0, 0, 0,
+			0, 1 } };
+	Blk * envBlk = nullptr;
+	const SpvMember * envMem = nullptr;
 	for ( Blk & x : blks ) {
 		if ( x.name != "globalUniforms" )
 			continue;
 		for ( const SpvMember & m : x.b->members ) {
 			if ( m.name == "projectionMatrix" )
 				shadePutMat( x.bytes, m, sx.proj );
-			else if ( m.name == "viewMatrix" || m.name == "envMapRotation" )
+			else if ( m.name == "viewMatrix" )
 				shadePutMat( x.bytes, m, ident );
+			else if ( m.name == "envMapRotation" ) {
+				shadePutMat( x.bytes, m, kEnvRot[6] );
+				envBlk = &x;
+				envMem = &m;
+			}
 			else if ( m.name == "toneMapScale" || m.name == "brightnessScale" || m.name == "glowScale" || m.name == "glowScaleSRGB" ) {
 				const float one = 1.0f;
 				std::memcpy( x.bytes.data() + m.offset, &one, 4 );
@@ -418,14 +443,17 @@ bool pfxGate( const std::string & spirvDir, GLuint baseTex, GLuint nrmTex, GLuin
 		const char * name;
 		GLenum func;
 		bool soft, write, noCol;
-		int map;  //!< round 4: 1 normal, 2 grey, 3 cube, 4 elem (0 none)
+		int map;       //!< round 4: 1 normal, 2 grey, 3 cube, 4 elem (0 none)
+		int face = 6;  //!< round 5b: envMapRotation kEnvRot[face] (0..5 the axis cases, 6 the corner)
 	};
 	// `always` is the app's soft case: the soft fade already zeroes every fragment behind fxDepth, so the depth func moves
 	// nothing there (first run: 0 pixels). `hard` (ALWAYS, soft off) is where the func, and its red, can be seen.
-	const PfxCase cases[9] = { { "leq", GL_LEQUAL, false, false, false, 0 }, { "always", GL_ALWAYS, true, false, false, 0 },
+	const PfxCase cases[15] = { { "leq", GL_LEQUAL, false, false, false, 0 }, { "always", GL_ALWAYS, true, false, false, 0 },
 		{ "hard", GL_ALWAYS, false, false, false, 0 }, { "write", GL_LEQUAL, false, true, false, 0 }, { "nocol", GL_LEQUAL, false, false, true, 0 },
 		{ "normal", GL_LEQUAL, false, false, false, 1 }, { "grey", GL_LEQUAL, false, false, false, 2 }, { "cube", GL_LEQUAL, false, false, false, 3 },
-		{ "elem", GL_LEQUAL, false, false, false, 4 } };
+		{ "elem", GL_LEQUAL, false, false, false, 4 }, { "cube+x", GL_LEQUAL, false, false, false, 3, 0 }, { "cube-x", GL_LEQUAL, false, false, false, 3, 1 },
+		{ "cube+y", GL_LEQUAL, false, false, false, 3, 2 }, { "cube-y", GL_LEQUAL, false, false, false, 3, 3 },
+		{ "cube+z", GL_LEQUAL, false, false, false, 3, 4 }, { "cube-z", GL_LEQUAL, false, false, false, 3, 5 } };
 	int probe = 0;  // 1 lights off, 2 soft off, 3 the depth func flipped (LEQUAL <-> ALWAYS), 4 the case's map off
 	auto frameState = [&]( const PfxCase & c ) {
 		f.bindFramebuffer( kFb, sx.fbo );
@@ -439,6 +467,7 @@ bool pfxGate( const std::string & spirvDir, GLuint baseTex, GLuint nrmTex, GLuin
 		glEnable( GL_BLEND );
 		glBlendFunc( GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA );
 		glEnable( GL_DEPTH_TEST );
+		glEnable( 0x884F );  // TEXTURE_CUBE_MAP_SEAMLESS: on from glparticles.cpp's first bindCube (Vulkan's cubes always are)
 		const GLenum func = probe == 3 ? ( c.func == GL_ALWAYS ? GL_LEQUAL : GL_ALWAYS ) : c.func;
 		glDepthFunc( func );
 		glDepthMask( c.write ? GL_TRUE : GL_FALSE );
@@ -465,6 +494,8 @@ bool pfxGate( const std::string & spirvDir, GLuint baseTex, GLuint nrmTex, GLuin
 		set( "CubeMap", { float( cubeUnit ) } );
 		for ( int e = 0; e < 10; e++ )
 			set( tuName, { float( c.map == 4 && e == 2 ? elemUnit : baseUnit ) }, e );
+		if ( envBlk )
+			shadePutMat( envBlk->bytes, *envMem, kEnvRot[c.face] );
 		for ( Blk & x : blks ) {
 			u.bufSub( x.buf, 0, std::ptrdiff_t( x.bytes.size() ), x.bytes.data() );
 			f.bindBufferBase( 0x8A11, x.glBind, x.buf );
@@ -493,6 +524,7 @@ bool pfxGate( const std::string & spirvDir, GLuint baseTex, GLuint nrmTex, GLuin
 		glDisable( GL_BLEND );
 		glDisable( GL_DEPTH_TEST );
 		glDisable( GL_CULL_FACE );
+		glDisable( 0x884F );
 		glDepthMask( GL_TRUE );
 		f.useProgram( 0 );
 		f.bindFramebuffer( kFb, 0 );
@@ -601,7 +633,8 @@ bool pfxGate( const std::string & spirvDir, GLuint baseTex, GLuint nrmTex, GLuin
 		std::printf( " %s@%u (%zu B)", x.name.c_str(), x.glBind, x.bytes.size() );
 	std::printf( "\n" );
 	const char * caseOnly = std::getenv( "BLVIEW_PFX_CASES" );  // gates only: a case list while a first run is localised
-	bool ok = true;
+	bool ok = true, cubeRan = false;
+	bool faceCov[6] = {};  // round 5b: the faces any cube case moves >= 1000 pixels on
 	for ( const PfxCase & c : cases ) {
 		if ( caseOnly && std::string( caseOnly ).find( c.name ) == std::string::npos )
 			continue;
@@ -631,12 +664,33 @@ bool pfxGate( const std::string & spirvDir, GLuint baseTex, GLuint nrmTex, GLuin
 			std::printf( "BLVIEW %s GL %s probe %s: moves %zu pixels (bar >= 1000)\n", tag.c_str(), pn[pr], mv >= 1000 ? "OK" : "FAIL", mv );
 			seen = seen && mv >= 1000;
 		}
+		bool faceOk = true;
+		if ( c.map == 3 ) {  // round 5: which env cube faces GL's picture reads (one face white at a time); 5b: an axis case needs its own
+			const GLuint keep = envCube;
+			int reached = 0;
+			std::string per;
+			for ( int fc = 0; fc < 6; fc++ ) {
+				envCube = makeEnv( fc );
+				PfxOut g2;
+				glDraw( c, g2 );
+				glDeleteTextures( 1, &envCube );
+				const std::size_t mv = moved( gl, g2 );
+				reached += mv > 0;
+				faceCov[fc] = faceCov[fc] || mv >= 1000;
+				per += ( fc ? " " : "" ) + std::to_string( mv );
+				if ( fc == c.face )
+					faceOk = mv >= 1000;
+			}
+			envCube = keep;
+			std::printf( "BLVIEW %s GL faces reached: %d of 6 (pixels moved with face 0..5 white: %s)%s\n", tag.c_str(), reached, per.c_str(),
+				c.face < 6 ? faceOk ? "; its own face OK (bar >= 1000)" : "; its own face FAIL (bar >= 1000)" : "" );
+		}
 		takeObjBlRunStat();
 		PfxOut vk0, vk1;
 		std::string w;
 		const bool ran = vkDraw( c, 0, vk0, w );
 		const ObjBlRunStat rs = takeObjBlRunStat();
-		bool caseOk = seen && glRep == 0;
+		bool caseOk = seen && glRep == 0 && faceOk;
 		if ( c.map == 3 ) {
 			// round 5: the env cube through its plain-cube copy twin; the app's `vk pfx:` refusal count for this system must be 0
 			std::printf( "BLVIEW %s vk pfx: 1 system, %d drawn, %d refused (%s); %d copy twins, %llu bytes\n", tag.c_str(), ran ? 1 : 0, ran ? 0 : 1,
@@ -668,7 +722,7 @@ bool pfxGate( const std::string & spirvDir, GLuint baseTex, GLuint nrmTex, GLuin
 					double( fromHalf( gl.c0[p * 4 + 3] ) ), double( fromHalf( vk0.c0[p * 4] ) ), double( fromHalf( vk0.c0[p * 4 + 1] ) ),
 					double( fromHalf( vk0.c0[p * 4 + 2] ) ), double( fromHalf( vk0.c0[p * 4 + 3] ) ) );
 			}
-			caseOk = caseOk && crossOk && covOk && dc.exact() && cc.over == 0 && vkRep == 0;
+			caseOk = caseOk && crossOk && covOk && dc.exact() && cc.over == 0 && vkRep == 0 && ( c.map != 3 || cc.differ == 0 );  // 5b: cube EXACT
 			// the reds: offset and light on every case, depth on `hard`
 			static const char * redName[9] = { "", "offset (the strip stage reads its records 16 bytes on)", "light (the light buffer copied from one texel on)",
 				"depth (ALWAYS read as LEQUAL)", "nmap (NormalMap a stand-in with hasNormalMap 1)", "grey (GreyscaleMap a stand-in with hasGreyscaleMap 1)",
@@ -696,6 +750,14 @@ bool pfxGate( const std::string & spirvDir, GLuint baseTex, GLuint nrmTex, GLuin
 		}
 		std::printf( "BLVIEW %s %s\n", tag.c_str(), caseOk ? "OK" : "FAILED" );
 		ok = ok && caseOk;
+		cubeRan = cubeRan || c.map == 3;
+	}
+	if ( cubeRan ) {  // round 5b: the union over the cube cases
+		int nCov = 0;
+		for ( bool b : faceCov )
+			nCov += b;
+		std::printf( "BLVIEW pfx cube faces covered: %d of 6 %s\n", nCov, nCov == 6 ? "OK" : "FAIL" );
+		ok = ok && ( nCov == 6 || caseOnly );
 	}
 	f.bindVertexArray( 0 );
 	glDeleteTextures( 1, &lightTex );

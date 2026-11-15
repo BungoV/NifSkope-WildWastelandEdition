@@ -417,8 +417,8 @@ int objCellRed( const char * name );
  * copy of the vertex-side blocks serves the record pass too), the units (objBlBindUnits: fxDepth a shared target). The
  * particles come as the caller's arrays (GL's attribute locations 0 position 3, 1 colour 4, 2 uv 2, 3 angle 1, 4 size 1);
  * an array not given reads GL's current value of that location. Round 4: textureUnits[10] element by element, and the
- * maps by their flags (hasNormalMap / hasGreyscaleMap / hasCubeMap 0: a stand-in, never sampled; 1: the map must resolve, a
- * cube has no twin and is refused by name). false: why (nothing drawn; GL draws the points) */
+ * maps by their flags (hasNormalMap / hasGreyscaleMap / hasCubeMap 0: a stand-in, never sampled; 1: the map must resolve;
+ * round 5: the cube through its plain-cube copy twin, objCubeCopyTwin). false: why (nothing drawn; GL draws the points) */
 struct ObjPfxShade
 {
 	unsigned prog = 0;  //!< GL's current program (particles_cell)
