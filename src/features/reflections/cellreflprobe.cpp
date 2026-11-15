@@ -30,6 +30,8 @@ BSD License - see nifskope.h
 #include "gl/lookdevstage.h"
 #include "gl/renderer.h"
 #include "features/shadows/sunshadow.h"
+#include "features/vkframe/vkpresent.h"	// lane VKFAR20: the atlas and G-buffer cubes shared with the Vulkan view
+#include "features/vkframe/vkreflrelight.h"	// lane VKFAR20: the relight on the present device
 
 #include <QElapsedTimer>
 #include <QFile>
@@ -135,6 +137,7 @@ struct RpGpu
 	GLuint alb = 0, nd = 0, depth = 0, capFbo = 0;	// the G-buffer cubes (RGBA8, RGBA16F; layer-faces 6 x slot)
 	GLuint atlas = 0, relFbo = 0;					// the relit probes (R11G11B10F, octahedral tiles)
 	bool failed = false;
+	bool shAsked = false, shShared = false;	// lane VKFAR20: the atlas and cubes on the present device (asked, made)
 	const void * doc = nullptr;
 	quint64 sceneKey = 0;			// the statics drawn: a change recaptures every probe
 	const void * roomsGi = nullptr;	// the GI the room candidates came from
@@ -181,17 +184,74 @@ quint64 mixF( quint64 h, float f )
 	return mix64( h, u );
 }
 
-bool allocGpu( NifSkopeOpenGLContext::GLFunctions * fn, RpGpu & g )
+/* lane VKFAR20: while the view is on Vulkan (WW_VKVIEW_REFLRELIGHT_RED unset) the atlas and the G-buffer cubes are shared
+ * targets: the relight's twin (vkreflrelight.h) draws the atlas in place reading the cubes; GL mips the atlas after. Keys:
+ * the renderer's + 3 / 5 / 7 (odd: no object's address; the lamps' cubes take + 1) */
+static bool rpShareWanted()
 {
+	return WwVkPresent::shareKept( "WW_VKVIEW_REFLRELIGHT_RED" );
+}
+
+static std::uintptr_t rpShareKey( const void * owner, int i )
+{
+	return reinterpret_cast<std::uintptr_t>( owner ) + std::uintptr_t( 3 + 2 * i );
+}
+
+bool allocGpu( NifSkopeOpenGLContext::GLFunctions * fn, RpGpu & g, const void * owner )
+{
+	// lane VKFAR20: a present shutdown took the shared names, or the view joined / left Vulkan: new textures, every probe
+	// captured and relit again
+	const bool lost = g.alb && g.shShared && !( WwVkPresent::sharedTargetIs( rpShareKey( owner, 0 ), g.atlas )
+		&& WwVkPresent::sharedTargetIs( rpShareKey( owner, 1 ), g.alb ) && WwVkPresent::sharedTargetIs( rpShareKey( owner, 2 ), g.nd ) );
+	if ( g.alb && ( lost || g.shAsked != rpShareWanted() ) ) {
+		if ( g.shShared ) {
+			for ( int i = 0; i < 3; i++ )
+				WwVkPresent::sharedTargetDrop( rpShareKey( owner, i ) );
+		} else {
+			fn->glDeleteTextures( 1, &g.alb );
+			fn->glDeleteTextures( 1, &g.nd );
+			fn->glDeleteTextures( 1, &g.atlas );
+		}
+		g.alb = g.nd = g.atlas = 0;
+		g.shShared = false;
+		for ( Probe & p : g.slot ) {
+			p.faces = 0;
+			p.lit = false;
+		}
+		std::fill( g.camFaceKey, g.camFaceKey + 6, quint64( 0 ) );
+		g.camLitKey = 0;
+		g.camFace = 0;
+		g.ready = false;
+		g.stamp++;
+	}
 	if ( g.alb || g.failed )
 		return !g.failed;
+	g.shAsked = rpShareWanted();
+	unsigned sh[3] = {};
+	std::string why;
+	g.shShared = g.shAsked
+		&& WwVkPresent::sharedTarget( rpShareKey( owner, 0 ), 0, kCols * kFace, kRows * kFace, 1, GL_R11F_G11F_B10F, sh[0], why, kLods + 1 )
+		&& WwVkPresent::sharedTarget( rpShareKey( owner, 1 ), 3, kFace, kFace, 6 * kSlots, GL_RGBA8, sh[1], why )
+		&& WwVkPresent::sharedTarget( rpShareKey( owner, 2 ), 3, kFace, kFace, 6 * kSlots, GL_RGBA16F, sh[2], why )
+		&& sh[0] && sh[1] && sh[2];
+	if ( g.shAsked && !g.shShared ) {	// refused: GL's own until the view leaves / joins Vulkan (never asked again a frame)
+		for ( int i = 0; i < 3; i++ )
+			if ( sh[i] )
+				WwVkPresent::sharedTargetDrop( rpShareKey( owner, i ) );
+		sh[0] = sh[1] = sh[2] = 0;
+		std::fprintf( stderr, "reflprobe: vk share refused (%s): GL's own textures\n", why.c_str() );
+	}
 	GLint prevActive = 0;
 	fn->glGetIntegerv( GL_ACTIVE_TEXTURE, &prevActive );
 	fn->glActiveTexture( GLenum( GL_TEXTURE0 + WwCellUnit::ReflGbufAlb ) );
-	auto cubeArray = [&]( GLuint & t, GLenum internal, GLenum type ) {
-		fn->glGenTextures( 1, &t );
+	auto cubeArray = [&]( GLuint & t, GLenum internal, GLenum type, unsigned shared ) {
+		if ( shared )
+			t = shared;
+		else
+			fn->glGenTextures( 1, &t );
 		fn->glBindTexture( GL_TEXTURE_CUBE_MAP_ARRAY, t );
-		fn->glTexImage3D( GL_TEXTURE_CUBE_MAP_ARRAY, 0, GLint( internal ), kFace, kFace, 6 * kSlots, 0, GL_RGBA, type, nullptr );
+		if ( !shared )
+			fn->glTexImage3D( GL_TEXTURE_CUBE_MAP_ARRAY, 0, GLint( internal ), kFace, kFace, 6 * kSlots, 0, GL_RGBA, type, nullptr );
 		fn->glTexParameteri( GL_TEXTURE_CUBE_MAP_ARRAY, GL_TEXTURE_MIN_FILTER, GL_NEAREST );
 		fn->glTexParameteri( GL_TEXTURE_CUBE_MAP_ARRAY, GL_TEXTURE_MAG_FILTER, GL_NEAREST );
 		fn->glTexParameteri( GL_TEXTURE_CUBE_MAP_ARRAY, GL_TEXTURE_MAX_LEVEL, 0 );
@@ -200,17 +260,22 @@ bool allocGpu( NifSkopeOpenGLContext::GLFunctions * fn, RpGpu & g )
 		fn->glTexParameteri( GL_TEXTURE_CUBE_MAP_ARRAY, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE );
 		fn->glBindTexture( GL_TEXTURE_CUBE_MAP_ARRAY, 0 );
 	};
-	cubeArray( g.alb, GL_RGBA8, GL_UNSIGNED_BYTE );
-	cubeArray( g.nd, GL_RGBA16F, GL_HALF_FLOAT );
-	fn->glGenRenderbuffers( 1, &g.depth );
-	fn->glBindRenderbuffer( GL_RENDERBUFFER, g.depth );
-	fn->glRenderbufferStorage( GL_RENDERBUFFER, GL_DEPTH_COMPONENT24, kFace, kFace );
-	fn->glBindRenderbuffer( GL_RENDERBUFFER, 0 );
-	fn->glGenFramebuffers( 1, &g.capFbo );
+	cubeArray( g.alb, GL_RGBA8, GL_UNSIGNED_BYTE, sh[1] );
+	cubeArray( g.nd, GL_RGBA16F, GL_HALF_FLOAT, sh[2] );
+	if ( !g.depth ) {	// lane VKFAR20: kept through a remake
+		fn->glGenRenderbuffers( 1, &g.depth );
+		fn->glBindRenderbuffer( GL_RENDERBUFFER, g.depth );
+		fn->glRenderbufferStorage( GL_RENDERBUFFER, GL_DEPTH_COMPONENT24, kFace, kFace );
+		fn->glBindRenderbuffer( GL_RENDERBUFFER, 0 );
+		fn->glGenFramebuffers( 1, &g.capFbo );
+	}
 
-	fn->glGenTextures( 1, &g.atlas );
+	if ( sh[0] )
+		g.atlas = sh[0];
+	else
+		fn->glGenTextures( 1, &g.atlas );
 	fn->glBindTexture( GL_TEXTURE_2D, g.atlas );
-	for ( int l = 0; l <= kLods; l++ )
+	for ( int l = 0; !sh[0] && l <= kLods; l++ )
 		fn->glTexImage2D( GL_TEXTURE_2D, l, GL_R11F_G11F_B10F, ( kCols * kFace ) >> l, ( kRows * kFace ) >> l, 0, GL_RGB,
 			GL_FLOAT, nullptr );
 	fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR );
@@ -220,7 +285,8 @@ bool allocGpu( NifSkopeOpenGLContext::GLFunctions * fn, RpGpu & g )
 	fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE );
 	fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE );
 	fn->glBindTexture( GL_TEXTURE_2D, 0 );
-	fn->glGenFramebuffers( 1, &g.relFbo );
+	if ( !g.relFbo )
+		fn->glGenFramebuffers( 1, &g.relFbo );
 	fn->glActiveTexture( GLenum( prevActive ) );
 	// G-buffer 12 B a texel x 6 faces, the atlas 4 B a texel with its mips
 	g.kb = ( qint64( kSlots ) * 6 * kFace * kFace * 12 + qint64( kCols * kRows ) * kFace * kFace * 4 * 4 / 3 ) / 1024;
@@ -402,7 +468,7 @@ void wwCellReflProbePass( Scene * scene, bool run )
 	if ( !L )
 		return;
 	auto fn = r->fn;
-	if ( !allocGpu( fn, g ) ) {
+	if ( !allocGpu( fn, g, r ) ) {
 		echo( QStringLiteral( "refused(no textures)" ) );
 		return;
 	}
@@ -944,6 +1010,44 @@ void wwCellReflProbePass( Scene * scene, bool run )
 			prog->uni1i( "rpAlb", WwCellUnit::ReflGbufAlb );
 			prog->uni1i( "rpNd", WwCellUnit::ReflGbufNd );
 			prog->uni4m( "rpViewFromWorld", vt.toMatrix4() );
+			/* lane VKFAR20: on Vulkan the twin draws the todo tiles into the shared atlas (GL's program, uniforms, blocks and
+			 * cubes as set above); a refusal (named in the vk line) draws on GL. The bookkeeping and GL's mips stay */
+			bool vkDrawn = false;
+			if ( WwVkPresent::shareWanted( "WW_VKVIEW_REFLRELIGHT_RED" ) ) {
+				std::string why;
+				if ( !g.shShared )
+					why = "the probe atlas and G-buffer cubes are not shared";
+				else if ( prog->wwDefs.find( "RESTIRGI" ) != std::string::npos )
+					why = "ReSTIR GI's relight variant has no twin";
+				else {
+					WwVkPresent::ReflRelightRun run;
+					run.prog = prog->id;
+					run.wwDefs = prog->wwDefs;
+					run.rt = prog->wwDefs.find( "WW_CELL_RTDDGI" ) != std::string::npos;
+					run.atlasKey = rpShareKey( r, 0 );
+					run.albKey = rpShareKey( r, 1 );
+					run.ndKey = rpShareKey( r, 2 );
+					for ( int k : todo ) {
+						WwVkPresent::ReflRelightTile t;
+						t.layer = k;
+						t.tile[0] = float( ( k % kCols ) * kFace );
+						t.tile[1] = float( ( k / kCols ) * kFace );
+						t.tile[2] = float( kFace );
+						std::copy( g.slot[k].pos, g.slot[k].pos + 3, t.pos );
+						run.tiles.push_back( t );
+					}
+					vkDrawn = WwVkPresent::reflRelightRun( run, *fn, why );
+				}
+				if ( !vkDrawn )
+					WwVkPresent::reflRelightOnGl( why.c_str() );
+				const WwVkPresent::ReflRelightStat st = WwVkPresent::takeReflRelightStat();
+				static QElapsedTimer said;	// one line a 5 s window
+				if ( !said.isValid() || said.elapsed() >= 5000 ) {
+					said.start();
+					std::fprintf( stderr, "vk reflrelight: tiles=%d drawn=%d gl=%d%s%s\n", int( todo.size() ), vkDrawn ? st.tiles : 0, st.gl,
+						st.glWhy.empty() ? "" : " glWhy=", st.glWhy.c_str() );
+				}
+			}
 			fn->glBindFramebuffer( GL_DRAW_FRAMEBUFFER, g.relFbo );
 			fn->glFramebufferTexture2D( GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, g.atlas, 0 );
 			fn->glDrawBuffer( GL_COLOR_ATTACHMENT0 );
@@ -956,11 +1060,13 @@ void wwCellReflProbePass( Scene * scene, bool run )
 				for ( int k : todo ) {
 					Probe & p = g.slot[k];
 					const int tx = ( k % kCols ) * kFace, ty = ( k / kCols ) * kFace;
-					fn->glViewport( tx, ty, kFace, kFace );
-					prog->uni1f( "rpLayer", float( k ) );
-					prog->uni3f( "rpTile", float( tx ), float( ty ), float( kFace ) );
-					prog->uni3f( "rpPos", p.pos[0], p.pos[1], p.pos[2] );
-					r->drawShape( 4, 3, 6, GL_TRIANGLES, GL_UNSIGNED_SHORT, &attrs, idx );
+					if ( !vkDrawn ) {	// lane VKFAR20: on Vulkan the twin drew it
+						fn->glViewport( tx, ty, kFace, kFace );
+						prog->uni1f( "rpLayer", float( k ) );
+						prog->uni3f( "rpTile", float( tx ), float( ty ), float( kFace ) );
+						prog->uni3f( "rpPos", p.pos[0], p.pos[1], p.pos[2] );
+						r->drawShape( 4, 3, 6, GL_TRIANGLES, GL_UNSIGNED_SHORT, &attrs, idx );
+					}
 					p.lit = true;
 					p.litHash = h;
 					if ( k == 0 )
