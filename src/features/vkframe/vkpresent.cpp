@@ -763,6 +763,7 @@ void lightDrop();
 bool ssrWork( std::string & why );
 void ssrDrop();
 void csmDrop();  // lane VKSHADOW1
+void lampDrop();  // lane VKLAMP1 (vklamp.inc)
 bool fxWork( std::string & why );
 void fxDrop();
 bool farRecord( std::string & why );  // lane VKFAR1 (vkfardots.inc): fxWork's kind 2
@@ -3837,6 +3838,7 @@ void shutdown()
 		toneSemsDrop( gl().ok && T.semCtx == gl().ctx );
 	}
 	csmDrop();  // lane VKSHADOW1: the cascades' layer views go before the shared arrays they view
+	lampDrop();  // lane VKLAMP1: the lamp cubes' layer views go before the shared cube array
 	objDrop();  // lane VKOBJ1: the prepass framebuffer goes before the shared depth it holds
 	fogDrop();  // lane VKFAR2: the integrate's set goes before the shared volumes it views
 	objBlPipeFree();  // lane VKOBJ4: the bl twins' pipelines (their layouts name the table's)
@@ -9624,3 +9626,4 @@ bool frame( QOpenGLWindow * w, const std::function<void()> & paint )
 #include "features/vkframe/vkfarground.inc"  // lane VKFAR3: the far ground's ring-0 terrain (row G3)
 #include "features/vkframe/vkunder.inc"  // lane VKWATER4 (L7): the underwater fog on the view
 #include "features/vkframe/vktaareactive.inc"  // lane VKFAR7: the TAA mask's reactive pass (taainputs.cpp pass 4)
+#include "features/vkframe/vklamp.inc"  // lane VKLAMP1: the lamps' plain shadow cubes (celllamps.cpp)
