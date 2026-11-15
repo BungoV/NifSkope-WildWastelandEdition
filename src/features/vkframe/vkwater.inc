@@ -2517,7 +2517,8 @@ static bool twinRunN( WaterDraw & D, const TwinSpec & P, const WaterRun * const 
 			for ( std::size_t k = 0; k < P.nInts; k++ )
 				if ( P.ints[k] == b.binding ) {
 					if ( !P.rings || b.dim != 1 || b.arrayed )
-						return refuse( std::string( nm ) + ": an unbound integer input" );
+						return refuse( std::string( nm ) + ": an unbound integer input (rings " + std::to_string( int( P.rings ) )
+							+ ", dim " + std::to_string( int( b.dim ) ) + ", arrayed " + std::to_string( int( b.arrayed ) ) + ")" );
 					view = D.zeroUView;
 				}
 		} else if ( s->tex == T.colorTex || s->tex == T.dsTex ) {
