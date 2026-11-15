@@ -119,8 +119,10 @@ HLSL_SPECS += [('src/features/vkframe', k, 'vulkan1.2', 'vkframe_%s_spv' % k) fo
 # lane VKOBJ5 (G4 round 3): the script's `fxp` lines, particles_cell.prog's record pass, expand stage and cell-lit pixel twin
 # (res/shaders/hlsl/particles) on the app's variant
 VKFRAME_FXP_ARGS = ['-HV', '2021', '-D', 'WW_CELL_AIRZONE=1', '-D', 'WW_CELL_FOGLEAK=1', '-D', 'WW_FRAME_UBO=1']
-VKFRAME_FXP = {'objpfx_cs': ('pfx_view_cs', 'cs_6_0', 'VS_SHIFT'), 'objpfx_vs': ('pfx_view_vs', 'vs_6_0', 'VS_SHIFT'),
-	'objpfx_cell_ps': ('particles_cell_ps', 'ps_6_0', 'PS_SHIFT')}
+# (round 5: a 4th field, a variant's other defines: the RT GI pixel twin, as VKFRAME_FXC_RT)
+VKFRAME_FXP = {'objpfx_cs': ('pfx_view_cs', 'cs_6_0', 'VS_SHIFT', ''), 'objpfx_vs': ('pfx_view_vs', 'vs_6_0', 'VS_SHIFT', ''),
+	'objpfx_cell_ps': ('particles_cell_ps', 'ps_6_0', 'PS_SHIFT', ''),
+	'objpfx_cell_rt_ps': ('particles_cell_ps', 'ps_6_0', 'PS_SHIFT', VKFRAME_FXC_RT)}
 HLSL_SPECS += [('src/features/vkframe', k, 'vulkan1.2', 'vkframe_%s_spv' % k) for k in VKFRAME_FXP]
 DEFAULT_G = 'E:/Tools/RenderDoc/RenderDoc_1.45_64/plugins/spirv/glslangValidator.exe'
 DEFAULT_DXC = 'E:/Tools/dxc/bin/x64/dxc.exe'
@@ -251,10 +253,11 @@ def script_ok(tree):
 	              re.findall(r'^fxc ([a-z0-9_]+) ([a-z0-9_]+) ([vp]s_6_0) "\$([A-Z_]+)"(?: "([^"]*)")?$', vf, re.M))
 	if clines != VKFRAME_FXC:
 		bad.append('src/features/vkframe/vkframe_spirv.sh: its fxc lines (%s) are not this checker\'s cell fallbacks' % ' '.join(sorted(clines)))
-	if '\t"$DXC" -spirv -fspv-target-env=vulkan1.2 -HV 2021 -T "$3" -E main -D WW_CELL_AIRZONE=1 -D WW_CELL_FOGLEAK=1 -D WW_FRAME_UBO=1 $4 ' \
+	if '\t"$DXC" -spirv -fspv-target-env=vulkan1.2 -HV 2021 -T "$3" -E main -D WW_CELL_AIRZONE=1 -D WW_CELL_FOGLEAK=1 -D WW_FRAME_UBO=1 $4 ${5:-} ' \
 			'-fspv-preserve-bindings -fvk-use-dx-position-w -Fo "$1.spv" "$(cygpath -m "$ROOT/res/shaders/hlsl/particles/$2.hlsl" ' not in vf:
 		bad.append('src/features/vkframe/vkframe_spirv.sh: its fxp() compile line changed')
-	plines = dict((k, (f, p, s)) for k, f, p, s in re.findall(r'^fxp ([a-z0-9_]+) ([a-z0-9_]+) ([cvp]s_6_0) "\$([A-Z_]+)"$', vf, re.M))
+	plines = dict((k, (f, p, s, x)) for k, f, p, s, x in
+	              re.findall(r'^fxp ([a-z0-9_]+) ([a-z0-9_]+) ([cvp]s_6_0) "\$([A-Z_]+)"(?: "([^"]*)")?$', vf, re.M))
 	if plines != VKFRAME_FXP:
 		bad.append('src/features/vkframe/vkframe_spirv.sh: its fxp lines (%s) are not this checker\'s particle twins' % ' '.join(sorted(plines)))
 	return bad
@@ -416,7 +419,7 @@ def main(argv):
 				m = re.match(r'(.*)', VKFRAME_FXC[k][1])
 			if k in VKFRAME_FXP:
 				hdefs = VKFRAME_FXP_ARGS + (VKFRAME_VS_SHIFT if VKFRAME_FXP[k][2] == 'VS_SHIFT' else VKFRAME_PS_SHIFT) \
-					+ ['-fspv-preserve-bindings', '-fvk-use-dx-position-w']
+					+ VKFRAME_FXP[k][3].split() + ['-fspv-preserve-bindings', '-fvk-use-dx-position-w']
 				m = re.match(r'(.*)', VKFRAME_FXP[k][1])
 			opt =[] if d == 'src/features/vkframe' else ['-O0']   # vkframe_spirv.sh builds optimised
 			r = subprocess.run([dxc, '-spirv', '-fspv-target-env=' + env, '-T', m.group(1) if m else 'ps_6_0' if k in VKFRAME_SKY or k in VKFRAME_FX or k in VKFRAME_FXK or k in VKFRAME_FXKW else 'cs_6_0', '-E', 'main']

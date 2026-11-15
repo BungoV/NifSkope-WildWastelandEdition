@@ -1113,6 +1113,8 @@ int main( int argc, char ** argv )
 	const bool pfxOnly = std::getenv( "BLVIEW_PFX_ONLY" ) != nullptr;  // gates only: the particle gate alone while it is localised
 	if ( bc )
 		ok = pfxGate( spvDir + "/pfxset/spirv", texs[3], texs[1], texs[0] ) && ok;
+	if ( bc )  // round 5 item 3: the RT GI variant (`pfx rt` lines), reds 9-12
+		ok = pfxGate( spvDir + "/pfxset/spirv", texs[3], texs[1], texs[0], 0xF00u, true ) && ok;
 	else
 		std::printf( "BLVIEW pfx not run (the sprite is the texture cache's twin: MODE=bc)\n" );
 	const bool colOk = twinOk && ( pfxOnly || colourGate( spvDir + "/spvset/spirv", handles, anisoAt, aniso1H, 0 ) );

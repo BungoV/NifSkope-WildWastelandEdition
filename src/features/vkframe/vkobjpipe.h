@@ -309,6 +309,9 @@ bool objBlTexelFill( unsigned & buf, bool & stored, bool shade, std::initializer
 ObjBlStoreStat objBlTexelStoreStat( bool reset = false );
 //! GL's buffer texture `tex` is read in place from a store (its last objBlTexelCopy)
 bool objBlTexelImported( unsigned tex );
+/*! GL's buffer texture `tex` is going: its texel twin goes with it (twins are keyed by GL's name, and GL hands a deleted
+ * name to the next texture: a smaller stale twin under it refused that texture while draws were prepared) */
+void objBlTexelForget( unsigned tex );
 //! the Vulkan side's bytes of `tex`'s view (its buffer, offset and range) copied back after one crossing (the gates)
 bool objBlTexelRead( unsigned tex, std::vector<std::uint8_t> & out, std::string & why );
 //! the shared target `key` fits a set-0 image of SPIR-V Dim `dim` / Arrayed (2D, 3D, 2D array, cube array; one sample)
@@ -426,11 +429,14 @@ struct ObjPfxShade
 	std::size_t n = 0;  //!< the points (glDrawArrays( GL_POINTS, 0, n ))
 	/*! gates only, each must FAIL: 1 `offset` (the expand stage reads its records 16 bytes on), 2 `light` (the light texel buffer copied
 	 * from one texel on), 3 `depth` (GL's ALWAYS read as LEQUAL); round 4: 4 `nmap`, 5 `grey`, 6 `cubeoff` (that map a stand-in
-	 * with its flag 1), 7 `elem0` (an array's element 0 alone) */
+	 * with its flag 1), 7 `elem0` (an array's element 0 alone); round 5 (rt), as ObjCellShade's: 9 `restir`, 10 `atlas` (that
+	 * texel buffer copied from one texel on), 11 `gihalf`, 12 `gikey` (that image dropped) */
 	int red = 0;
+	bool rt = false;  //!< round 5: GL's program is the RT GI variant (WW_CELL_RTDDGI + RTDDGI_CASCADES + RESTIR): its pixel twin
 };
 bool objPfxShade( GlProc gp, const ObjPfxShade & s, std::string & why );
-//! the red's name (WW_VKVIEW_OBJPFX_RED: offset | light | depth | nmap | grey | cubeoff | elem0) as ObjPfxShade.red, 0 else
+//! the red's name (WW_VKVIEW_OBJPFX_RED: offset | light | depth | nmap | grey | cubeoff | elem0 | restir | atlas | gihalf | gikey)
+//! as ObjPfxShade.red, 0 else
 int objPfxRed( const char * name );
 /*! objBlShade's frame read on its own: GL's draw framebuffer as d's targets (every colour draw buffer and the depth / stencil
  * a shared target: keys, formats, size, samples; the tone frame's too, as borrowed shared targets), the viewport the whole

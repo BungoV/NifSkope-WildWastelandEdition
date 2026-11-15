@@ -39,6 +39,21 @@ pass for both bindless twins (fo4_cellbl, fo4_cellcsmbl): depth EXACT, colour in
   app (all textureUnits and the maps' samplers on the sprite's unit, the grey cube, cull on): grey and elem EXACT,
   normal BOUND (12 values, max 1.2e-4), the 5 earlier cases EXACT; reds nmap / grey / elem0 FAIL; case cube refused by name, red cubeoff (drawn anyway) FAILs.
   Stencil is off at the particles' draw (StencilProperty::glProperty( nullptr ) after the write setup).
+- Round 5: a particle system with an environment map (a .bgem's hasCubeMap 1) draws on Vulkan through a plain-cube
+  copy twin (GL's six faces copied once a frame); a swizzled GL cube is refused by name. Offline: blview pfx `cube` plus
+  one case per cube face, each reaching its own face, colour EXACT, "cube faces covered: 6 of 6"; reds cubeoff and
+  cubegrey FAIL.
+- Round 5: particles_cell drawn with ray-traced GI on (WW_CELL_RESTIR + WW_CELL_RTDDGI + cascades in GL's program) now
+  draws on Vulkan through its RT twin (objpfx_cell_rt_ps), reading the traced shadow ratio, the DDGI atlas and the
+  screen GI's half target and key. Offline: blview `pfx rt` (case leq): depth EXACT, colour BOUND (1 value, 1.2e-7),
+  each RT input moves GL's picture (>= 11517 px), reds restir / atlas / gihalf / gikey FAIL. The bindless object twins
+  (fo4_cellbl, fo4_cellcsmbl) still stay on GL with ray-traced GI on: their HLSL has no RT variant (compiled with the RT
+  defines it is byte-identical), so a readable bindless source with the RT #ifs is needed first.
+- Fix (gates): a buffer texture's Vulkan twin is kept under GL's texture name, and GL gives a deleted name to the next
+  texture. A smaller twin left under a reused name refused the cell gate's ReSTIR ratio (`cellcsm rt FAIL ... the texel
+  twin would move under prepared draws`, already failing at 9772bc98). objBlTexelForget drops the twin; the pfx and cell
+  gates call it before deleting their buffer textures. The app does not call it yet: a buffer texture recreated at a
+  larger size under a reused name can be refused (GL draws it) until the next frame's first draw.
 
 ## VKBLOOM1 (2026-11-12): the Fusion Shaders bloom and the exposure measure join the tone pass on Vulkan (WW_VKVIEW=1)
 
