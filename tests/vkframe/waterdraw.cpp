@@ -24,6 +24,9 @@
 // renderbuffer with an occluder, depth mask off, waterSslr 1; same colour bar per pixel; reds 1 / 2 / 4 / 8 FAIL).
 // G5 (11-15): seed 3 also draws with waterOceanB / C / D as shared targets (no waterTwin copy) EXACT against the copy
 // route (ocean copies 3 there, 0 in place); red prev (the other shared set) FAILS and is EXACT against its own copy route.
+// All-on census (11-15): `WATERDRAW unslotted: none` (every GL input has a twin slot) or the gate fails; red: a fake
+// sampler + loose uniform must be refused by name. Argv 3 = extra defines for GL's program (the all-on RT set: every
+// bar above is judged against GL's RT build).
 // Last line `WATERDRAW GATE OK` or `WATERDRAW GATE FAILED`.
 // Sampling: judged at anisotropy 1 on both sides (NV's anisotropic footprint differs GL vs Vulkan at the same maxAnisotropy:
 // 10 248 samples past at the app's 16, BOUND at 1). The app's 16 is drawn once more on seed 1 and logged, never judged.
@@ -871,6 +874,38 @@ int main( int argc, char ** argv )
 	};
 
 	static char twinKeys[128];
+	// lane VKWATER4 (all-on census): GL's inputs the twin has no slot for (waterUnslotted) must be none (argv 3 adds
+	// defines, e.g. the all-on RT set, to GL's program). Red: a sampler and a loose uniform the twin never declares added
+	// to the census; waterRun must refuse with exactly waterUnslotted's text naming both, never draw.
+	bool unslottedOk = true;
+	{
+		before( fbFrame );
+		drawState( fbFrame, false );
+		WwVkPresent::WaterRun r;
+		r.variant = variant;
+		WwVkPresent::waterStateOf( &gw, pWater, r );
+		r.w = W;
+		r.h = H;
+		r.color = fc;
+		r.idxOff = 12;
+		r.count = triIdx;
+		r.key = reinterpret_cast<std::uintptr_t>( twinKeys );
+		const std::string un = WwVkPresent::waterUnslotted( variant, r.census );
+		std::printf( "WATERDRAW unslotted: %s\n", un.empty() ? "none" : un.c_str() );
+		WwVkPresent::WaterSlot fake;
+		fake.name = "wwUnslottedRedTex";
+		fake.kind = 0;
+		r.census.inputs.push_back( fake );
+		r.census.looseNames.push_back( "wwUnslottedRed[0]" );
+		const std::string unR = WwVkPresent::waterUnslotted( variant, r.census );
+		const bool ranR = WwVkPresent::waterRun( r, why );
+		stateEnd();
+		const std::string tail = " reads 2 inputs its Vulkan twin has no slot for: wwUnslottedRedTex wwUnslottedRed";
+		const bool redOk = !ranR && why == unR && unR.size() >= tail.size() && unR.compare( unR.size() - tail.size(), tail.size(), tail ) == 0;
+		std::printf( "WATERDRAW unslotted red: drew %d, refusal: %s -> %s\n", int( ranR ), why.c_str(),
+			redOk ? "red refused as it must" : "red NOT refused by name: the check is blind" );
+		unslottedOk = un.empty() && redOk;
+	}
 	// GL's draw and the twin's into the same frame contents, no scissor, judged against the frame before the water
 	auto pairRun = [&]( const std::vector<std::uint16_t> & bgC, const std::vector<float> & bgD, long long idxOff, int count, bool & ran ) {
 		const bool bsc = std::getenv( "WATERDRAW_BISSCI" ) != nullptr;	// diagnostic only: the bisect through the scissor
@@ -1538,6 +1573,7 @@ int main( int argc, char ** argv )
 	const WwVkPresent::FxStat st = WwVkPresent::takeWaterDrawStat();
 	std::printf( "WATERDRAW %d runs: %d on Vulkan, %.2f ms CPU each (max %.2f; the harness's hand-off wait included), %d fails\n", runs,
 		st.runs, st.runs ? st.cpuMs / st.runs : 0.0, st.maxMs, st.fails );
+	gateOk = gateOk && unslottedOk;
 	std::printf( gateOk ? "WATERDRAW GATE OK\n" : "WATERDRAW GATE FAILED\n" );
 	return gateOk ? 0 : 1;
 }

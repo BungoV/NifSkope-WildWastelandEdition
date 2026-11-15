@@ -485,7 +485,8 @@ static void wwCellWaterVkRoute( NifSkopeOpenGLContext::GLFunctions * fn, NifSkop
 	const GLuint prog = program->id;
 	static GLuint censusProg = 0;
 	static auto censusAt = std::chrono::steady_clock::now();
-	static std::string verdict;
+	static std::string verdict, unslotted;
+	const int variant = WwVkPresent::waterVariantOf( program->name );
 	const auto now = std::chrono::steady_clock::now();
 	if ( prog != censusProg || std::chrono::duration<double>( now - censusAt ).count() >= 5.0 ) {
 		WwVkPresent::WaterCensus c;
@@ -493,6 +494,8 @@ static void wwCellWaterVkRoute( NifSkopeOpenGLContext::GLFunctions * fn, NifSkop
 		WwVkPresent::WaterCaps caps = WwVkPresent::waterCaps();
 		caps.shadedDraw = WwVkPresent::waterDrawRefusal().empty();	// lane VKWATER3: wired (wwCellWaterVkDraw)
 		verdict = WwVkPresent::waterVerdict( c, caps );
+		// lane VKWATER4: an input the twin never declares (an all-on RT GI / ReSTIR build) keeps the water on GL, named
+		unslotted = variant >= 0 ? WwVkPresent::waterUnslotted( variant, c ) : std::string();
 		WwVkPresent::waterCensusTook( std::chrono::duration<double, std::milli>( std::chrono::steady_clock::now() - now ).count() );
 		censusProg = prog;
 		censusAt = now;
@@ -500,7 +503,6 @@ static void wwCellWaterVkRoute( NifSkopeOpenGLContext::GLFunctions * fn, NifSkop
 	const char * no = nullptr;
 	unsigned int color = 0, rayDepth = 0;
 	int rayW = 0, rayH = 0;
-	const int variant = WwVkPresent::waterVariantOf( program->name );
 	// lane VKWATER4: one red per twin (=1: that twin stays on GL), read every draw
 	static const char * const kTwinRed[WwVkPresent::kWaterVariants] = { "WW_VKVIEW_WATER_LOOK_RED", "WW_VKVIEW_WATER_D_RED",
 		"WW_VKVIEW_WATER_M_RED", "WW_VKVIEW_WATER_P_RED", "WW_VKVIEW_WATER_DP_RED", "WW_VKVIEW_WATER_OFF_RED" };
@@ -514,6 +516,8 @@ static void wwCellWaterVkRoute( NifSkopeOpenGLContext::GLFunctions * fn, NifSkop
 		no = verdict.c_str();
 	else if ( variant < 0 )
 		no = "this water program has no Vulkan twin (fo4_water, fo4_waterlook / d / m / p / dp only)";
+	else if ( !unslotted.empty() )
+		no = unslotted.c_str();
 	else if ( !wwFogLeakShaderDefine() )
 		no = "WW_CELL_FOGLEAK=0: GL's program is not the Vulkan twin";
 	else if ( !program->wwShadowFrame && WwVkPresent::waterPsReads( variant, "wwShadowFrame" ) )
