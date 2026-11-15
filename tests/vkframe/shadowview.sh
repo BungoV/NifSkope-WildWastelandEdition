@@ -29,4 +29,16 @@ for R in 1 2; do
 		exit 1
 	fi
 done
+# Lane VKSHADOW6: the remap pipeline built GL_ALWAYS (it overwrites GL's casters): a remap frame1 layer must fail past 1 unit
+# with remapRed >= 1 (the remap draws ran on the red pipeline)
+WW_VKCSM_REMAP_RED=1 "$OUT/shadowview.exe" "$ROOT" "${2:-1024}" > "$OUT/shadowview_remapred.txt" 2>&1
+fails=$(grep -cE "^SHADOWVIEW remap frame1 [a-z]+/[0-9] FAIL \([0-9]+ of [0-9]+ covered texels differ, [1-9][0-9]* past 1 unit" "$OUT/shadowview_remapred.txt")
+trig=$(grep -cE "^SHADOWVIEW remap stat: .*remapRed=[1-9]" "$OUT/shadowview_remapred.txt")
+if [ "$fails" -gt 0 ] && [ "$trig" -gt 0 ]; then
+	echo "SHADOWVIEW RED FAIL remap always ($fails frame1 layers past 1 unit, trigger lines $trig; must FAIL)"
+else
+	echo "SHADOWVIEW RED TESTS NOTHING remap always ($fails frame1 layers past 1 unit, trigger lines $trig)"
+	echo "SHADOWVIEW GATE FAILED"
+	exit 1
+fi
 echo "SHADOWVIEW GATE OK"

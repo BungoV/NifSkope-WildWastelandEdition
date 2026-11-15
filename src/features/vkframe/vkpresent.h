@@ -451,6 +451,12 @@ struct CsmDraw
 	bool cull = true;               //!< back faces culled (GL CCW front); false: two-sided
 	std::uint32_t first = 0, n = 0; //!< commands [first, first + n)
 	bool mesh = false;              //!< lane VKSHADOW4: first / n index the run's mesh draws (CsmRun::mdraws), not the pool's commands
+	/* lane VKSHADOW6: the cache's Scroll remap (sunshadow.cpp remap, lookdev_csmremap): one triangle over (0, 0, vw, vh) writes
+	 * depth 1, or clamp(o * zScale + zBias, 0, 1) with o = CsmRun::scratch layer src at (x + srcX, y + srcY) inside
+	 * [0, srcW) x [0, srcH); LEQUAL, no cull, no bias, no scissor (sc, clip, unit, slope, first, n unused) */
+	bool remap = false;
+	int src = 0, srcX = 0, srcY = 0, srcW = 0, srcH = 0;
+	float zScale = 1.0f, zBias = 0.0f;
 };
 /* Lane VKSHADOW4 (item 3 part 1): a per-draw caster (sunshadow.cpp drawShape, the whole shape or its cullIdx ranges) as a
  * mesh csmRun keeps on the device while (key, gen) and its sizes match (vklamp.inc lampPool's law): key = the shape,
@@ -480,6 +486,8 @@ struct CsmRun
 	std::size_t nMeshes = 0;
 	const std::uint32_t * mdraws = nullptr;  //!< 4 words a draw: mesh, matrix (in mats), first index, index count (mesh-local)
 	std::size_t nMDraws = 0;
+	unsigned scratch = 0;           //!< lane VKSHADOW6: the remaps' source, a shared D16 array of `layers` layers (0: no remap draws)
+	std::uintptr_t scratchKey = 0;
 };
 //! GL current, its own cascade draws issued: the queued draws run on Vulkan into the shared targets. false: why (GL draws them)
 bool csmRun( const CsmRun & t, std::string & why );
@@ -496,6 +504,8 @@ struct CsmStat
 	int copies = 0, hits = 0, regen = 0, repacks = 0, redSkips = 0, mdraws = 0;
 	//! lane VKSHADOW5: queue draws that follow a mesh draw inside one render pass (csmWork rebinds the queue's buffers there)
 	int requeues = 0;
+	//! lane VKSHADOW6: remap draws run, and of those on the gates-only red pipeline (WW_VKCSM_REMAP_RED=1: GL_ALWAYS)
+	int remaps = 0, remapRed = 0;
 	double copyKb = 0.0;
 };
 CsmStat takeCsmStat();

@@ -32,6 +32,24 @@
 // draw after a mesh draw in one render pass: the rebind ran), regen >= 1 in frame 1. Red (must FAIL past 1 unit): the
 // ground drawn without cull (the from-below quad then lands). No red removes the rebind: a queue draw on the mesh pool's
 // buffers reads out of range on the GPU (a hang risk on the desktop), so the requeues count is the proof that it ran.
+// Lane VKSHADOW6 (2026-11-16, item 3 part 3 bar), lines `SHADOWVIEW remap ...` after the ileave ones (those stay byte-equal):
+// the cache's Scroll (sunshadow.cpp: scratch <- old static layer i, static i = clear + remap(i) + GL casters + set 1, live
+// i = static i copied whole + set 2) with the remap moved into the crossing (route B): kCascades shared scratch layers
+// (sharedTarget type 2 on its own key, CsmRun::scratch), GL blits old static i into scratch layer i, the remap is a
+// CsmDraw (remap, src, srcX / srcY / srcW / srcH, zScale / zBias) recorded into BOTH static i and live i (GL's
+// static -> live copy now carries no remap), drawn LEQUAL: the remap is a hand-written depth (lookdev_csmremap.frag), and
+// GL's ALWAYS onto a fresh clear followed by LEQUAL casters keeps min(remap, casters), so LEQUAL in any order is the same.
+// GL reference: GL's own lookdev_csmremap.vert/.frag through a 1-layer scratch, GL_ALWAYS, in the app's order. The old
+// windows' content is frame 0's live layers of the base case (each arm its own: the inputs must be byte-equal on both
+// arms, printed); frame 1's matrices draw the new windows. Offsets and old sizes put the new viewport outside the old
+// window on all four sides; zScale / zBias away from 1 and powers of two. The same BOUND as above (EXACT expected).
+// Must hold: every layer EXACT or BOUND; remap branch counts each > 0 (outside, o == 1, clamped to 0, to 1, in range);
+// the remap wins > 0 texels against GL without it; GL's casters beat the remap on > 0 texels (else the ALWAYS red
+// proves nothing); the late GL fallback (refusal: GL remaps LEQUAL into static and live after its casters, then the
+// records, from scratch layer i through the 1-layer scratch) EXACT or BOUND, no device. Reds (each must FAIL past 1
+// unit): plain (no remap draws: the plain clear), wrong (scratch layer of the next cascade), static (the remap recorded
+// into the static layers only: the live layers FAIL). Process red (shadowview.sh): WW_VKCSM_REMAP_RED=1 builds the remap
+// pipeline GL_ALWAYS (it then overwrites GL's casters): a remap frame1 layer FAILs past 1 unit with remapRed >= 1.
 #define WW_VKPRESENT_NO_QT
 #include "../../src/features/vkframe/vkpresent.cpp"
 
@@ -113,6 +131,7 @@ struct Fns
 	GLuint( WINAPI * getUniformBlockIndex )( GLuint, const char * ) = nullptr;
 	void( WINAPI * uniformBlockBinding )( GLuint, GLuint, GLuint ) = nullptr;
 	void( WINAPI * bindBufferBase )( GLenum, GLuint, GLuint ) = nullptr;
+	void( WINAPI * blitFramebuffer )( GLint, GLint, GLint, GLint, GLint, GLint, GLint, GLint, GLbitfield, GLenum ) = nullptr;
 };
 Fns f;
 
@@ -145,6 +164,7 @@ bool loadAll()
 	load( f.getUniformBlockIndex, "glGetUniformBlockIndex" );
 	load( f.uniformBlockBinding, "glUniformBlockBinding" );
 	load( f.bindBufferBase, "glBindBufferBase" );
+	load( f.blitFramebuffer, "glBlitFramebuffer" );
 	return ok;
 }
 
@@ -1282,7 +1302,304 @@ int main( int argc, char ** argv )
 	}
 	std::printf( "SHADOWVIEW mesh %s\n", meshOk ? "OK" : "FAILED" );
 	std::printf( "SHADOWVIEW ileave %s\n", ilOk ? "OK" : "FAILED" );
-	ok = ok && meshOk && ilOk;
+
+	// ---- lane VKSHADOW6 (item 3 part 3 bar): the Scroll's remap in the crossing, see the header
+	bool rmOk = true;
+	{
+		constexpr GLenum kReadFb = 0x8CA8, kDrawFb = 0x8CA9;
+		const GLuint progR = program( readFile( root + "/res/shaders/features/shadows/lookdev_csmremap.vert" ),
+			readFile( root + "/res/shaders/features/shadows/lookdev_csmremap.frag" ) );
+		if ( !progR || !f.blitFramebuffer || !f.uniform1i || !f.uniform1f ) {
+			std::printf( "SHADOWVIEW remap FAIL (the remap program or its entry points)\n" );
+			rmOk = false;
+		}
+		// per cascade: the new window's offset into the old one, the old window's size, the depth map (zScale, zBias)
+		const int rOff[3][2] = { { 37, -23 }, { -51, 19 }, { 12, 44 } };
+		const int rSize[3][2] = { { casc[0].vw - 30, casc[0].vh - 17 }, { casc[1].vw + 9, casc[1].vh - 40 },
+			{ casc[2].vw - 21, casc[2].vh + 6 } };
+		const float rZ[3][2] = { { 1.31f, -0.27f }, { 0.77f, 0.29f }, { 1.13f, -0.04f } };
+		GLuint oldT = 0, scr1 = 0, fbo2 = 0, vaoR = 0, shS = 0;
+		static unsigned keyScr;
+		auto mkArr = [&]( GLuint & t, int layers ) {
+			glGenTextures( 1, &t );
+			glBindTexture( kTex2DArray, t );
+			f.texImage3D( kTex2DArray, 0, GLint( kD16 ), map, map, layers, 0, GL_DEPTH_COMPONENT, GL_UNSIGNED_SHORT, nullptr );
+			glTexParameteri( kTex2DArray, GL_TEXTURE_MIN_FILTER, GL_NEAREST );
+			glTexParameteri( kTex2DArray, GL_TEXTURE_MAG_FILTER, GL_NEAREST );
+			glBindTexture( kTex2DArray, 0 );
+		};
+		if ( rmOk ) {
+			mkArr( oldT, 3 );  // GL's old static layers (the reference's)
+			mkArr( scr1, 1 );  // sunshadow.cpp's 1-layer GL scratch
+			f.genFramebuffers( 1, &fbo2 );
+			f.genVertexArrays( 1, &vaoR );
+			if ( !WwVkPresent::sharedTarget( reinterpret_cast<std::uintptr_t>( &keyScr ), 2, map, map, 3, kD16, shS, why ) ) {
+				std::printf( "SHADOWVIEW remap FAIL (the shared scratch: %s)\n", why.c_str() );
+				rmOk = false;
+			}
+		}
+		// one whole layer, depth bits (sunshadow.cpp copyFrom)
+		auto blit = [&]( GLuint src, int sl, GLuint dst, int dl ) {
+			f.bindFramebuffer( kReadFb, fbo2 );
+			f.framebufferTextureLayer( kReadFb, kDepthAtt, src, 0, sl );
+			glReadBuffer( GL_NONE );
+			f.bindFramebuffer( kDrawFb, fbo );
+			f.framebufferTextureLayer( kDrawFb, kDepthAtt, dst, 0, dl );
+			glDrawBuffer( GL_NONE );
+			glDisable( GL_SCISSOR_TEST );
+			f.blitFramebuffer( 0, 0, map, map, 0, 0, map, map, GL_DEPTH_BUFFER_BIT, GL_NEAREST );
+			f.bindFramebuffer( kFb, fbo );
+		};
+		auto readL = [&]( GLuint tex, int l, std::vector<std::uint16_t> & o ) {
+			o.assign( size_t( map ) * map, 0 );
+			attach( tex, l );
+			glReadPixels( 0, 0, map, map, GL_DEPTH_COMPONENT, GL_UNSIGNED_SHORT, o.data() );
+		};
+		// sunshadow.cpp remap( l ): the old layer from the 1-layer scratch, cull and bias off, the cascade's viewport; func
+		// GL_ALWAYS (the app's Scroll on a fresh clear) or GL_LEQUAL (the refusal's late fallback over GL's casters)
+		auto glRemap = [&]( const GLuint * tex, int t, int l, GLenum func ) {
+			if ( !attach( tex[t], l ) )
+				return false;
+			f.useProgram( progR );
+			f.uniform1i( f.getUniformLocation( progR, "srcMap" ), 0 );
+			f.uniform1i( f.getUniformLocation( progR, "srcX" ), rOff[l][0] );
+			f.uniform1i( f.getUniformLocation( progR, "srcY" ), rOff[l][1] );
+			f.uniform1i( f.getUniformLocation( progR, "srcW" ), rSize[l][0] );
+			f.uniform1i( f.getUniformLocation( progR, "srcH" ), rSize[l][1] );
+			f.uniform1f( f.getUniformLocation( progR, "zScale" ), rZ[l][0] );
+			f.uniform1f( f.getUniformLocation( progR, "zBias" ), rZ[l][1] );
+			glBindTexture( kTex2DArray, scr1 );
+			f.bindVertexArray( vaoR );
+			glDisable( GL_CULL_FACE );
+			glDisable( kPolyFill );
+			glDepthFunc( func );
+			glViewport( 0, 0, casc[l].vw, casc[l].vh );
+			glDrawArrays( GL_TRIANGLES, 0, 3 );
+			glBindTexture( kTex2DArray, 0 );
+			glState();  // the casters' state again (LEQUAL, offset on, their program and VAO)
+			return true;
+		};
+		auto gnd = [&]( const GLuint * tex, int l ) { return glDraw( tex, Rec { 1, l, l, { 0, 0, 0, 0 }, false, std::uint32_t( kQueued ), 2 } ); };
+		// GL, the app's Scroll per layer: static = clear, scratch <- old, remap ALWAYS, GL's casters, set 1; live = static copied
+		// whole, set 2. withRemap false: the plain clear; withGround false: no GL casters
+		auto runGlR = [&]( bool withRemap, bool withGround, std::vector<std::uint16_t> out[2][3] ) {
+			bool ok2 = clearAll( refT );
+			glState();
+			for ( int l = 0; l < 3; l++ ) {
+				if ( withRemap ) {
+					blit( oldT, l, scr1, 0 );
+					ok2 = ok2 && glRemap( refT, 1, l, GL_ALWAYS );
+				}
+				if ( withGround )
+					ok2 = ok2 && gnd( refT, l );
+				for ( const Rec & R : recs )
+					if ( R.target == 1 && R.layer == l )
+						ok2 = ok2 && glDraw( refT, R );
+				blit( refT[1], l, refT[0], l );
+				for ( const Rec & R : recs )
+					if ( R.target == 0 && R.layer == l )
+						ok2 = ok2 && glDraw( refT, R );
+			}
+			readAll( refT, out );
+			return ok2 && glGetError() == GL_NO_ERROR;
+		};
+		enum RRed { rNone, rPlain, rWrong, rStatic };
+		// the route: GL keeps its casters and the whole copy (no remap on GL); Vulkan draws the remaps (static and live) and the
+		// records in one csmRun. lateGl: the refusal path instead (GL remaps LEQUAL after its casters, then the records)
+		auto runVkR = [&]( RRed red, bool lateGl, std::vector<std::uint16_t> out[2][3] ) {
+			bool ok2 = clearAll( shT );
+			glState();
+			for ( int l = 0; l < 3; l++ ) {
+				ok2 = ok2 && gnd( shT, l );
+				blit( shT[1], l, shT[0], l );
+			}
+			if ( lateGl ) {
+				for ( int l = 0; l < 3; l++ ) {
+					blit( shS, l, scr1, 0 );
+					ok2 = ok2 && glRemap( shT, 1, l, GL_LEQUAL ) && glRemap( shT, 0, l, GL_LEQUAL );
+				}
+				for ( const Rec & R : recs )
+					ok2 = ok2 && glDraw( shT, R );
+				readAll( shT, out );
+				return ok2 && glGetError() == GL_NO_ERROR;
+			}
+			WwVkPresent::CsmRun run;
+			run.map = map;
+			run.layers = 3;
+			for ( int t = 0; t < 2; t++ ) {
+				run.tex[t] = shT[t];
+				run.key[t] = reinterpret_cast<std::uintptr_t>( &keyHome[t] );
+			}
+			run.scratch = shS;
+			run.scratchKey = reinterpret_cast<std::uintptr_t>( &keyScr );
+			run.pos = bPos;
+			run.idx = bIdx;
+			run.posBytes = pos.size() * 4;
+			run.idxBytes = idx.size() * 2;
+			run.mats = mats.data();
+			run.nMats = std::size_t( kCasters );
+			run.cmds = reinterpret_cast<const std::uint32_t *>( cmds.data() );
+			run.nCmds = cmds.size();
+			for ( int l = 0; l < 3; l++ )  // the app's order: per layer the remap first, static then live
+				for ( int t = 1; t >= 0; t-- ) {
+					if ( red == rPlain || ( red == rStatic && t == 0 ) )
+						continue;
+					WwVkPresent::CsmDraw d;
+					d.target = t;
+					d.layer = l;
+					d.vw = casc[l].vw;
+					d.vh = casc[l].vh;
+					d.cull = false;
+					d.remap = true;
+					d.src = red == rWrong ? ( l + 1 ) % 3 : l;
+					d.srcX = rOff[l][0];
+					d.srcY = rOff[l][1];
+					d.srcW = rSize[l][0];
+					d.srcH = rSize[l][1];
+					d.zScale = rZ[l][0];
+					d.zBias = rZ[l][1];
+					run.d.push_back( d );
+				}
+			for ( const Rec & R : recs ) {
+				WwVkPresent::CsmDraw d;
+				const Casc & c = casc[R.cascade];
+				d.target = R.target;
+				d.layer = R.layer;
+				d.vw = c.vw;
+				d.vh = c.vh;
+				std::memcpy( d.sc, R.sc, sizeof( d.sc ) );
+				std::memcpy( d.clip, c.clip, sizeof( d.clip ) );
+				d.unit = unitBias;
+				d.slope = slopeBias;
+				d.clamp = c.clamp;
+				d.cull = R.cull;
+				d.first = R.first;
+				d.n = R.n;
+				run.d.push_back( d );
+			}
+			std::string w;
+			if ( !WwVkPresent::csmRun( run, w ) ) {
+				std::printf( "SHADOWVIEW remap csmRun refused: %s\n", w.c_str() );
+				return false;
+			}
+			readAll( shT, out );
+			return ok2 && glGetError() == GL_NO_ERROR;
+		};
+		std::vector<std::uint16_t> refR[2][3], vkR[2][3], cmpR[2][3], oldR[3], scrR[3];
+		// the old windows: frame 0 of the base case on each arm, its live layers into the old layers (GL's) and the scratch (shared)
+		upload( moves[0] );
+		if ( rmOk && ( !runGl( refR ) || !runVk( kNone, vkR ) ) ) {
+			std::printf( "SHADOWVIEW remap FAIL (the old windows' runs)\n" );
+			rmOk = false;
+		}
+		WwVkPresent::takeCsmStat();
+		std::size_t inDiff = 0, inCov = 0;
+		for ( int l = 0; l < 3 && rmOk; l++ ) {
+			blit( refT[0], l, oldT, l );
+			blit( shT[0], l, shS, l );
+			readL( oldT, l, oldR[l] );
+			readL( shS, l, scrR[l] );
+			for ( std::size_t i = 0; i < oldR[l].size(); i++ ) {
+				inDiff += oldR[l][i] != scrR[l][i];
+				inCov += oldR[l][i] != 0xFFFF;
+			}
+		}
+		std::printf( "SHADOWVIEW remap inputs: the old layers on both arms %s (%zu of %zu covered texels differ)\n",
+			inDiff == 0 && inCov > 0 ? "byte-equal" : "DIFFER", inDiff, inCov );
+		rmOk = rmOk && inDiff == 0 && inCov > 0;
+		// the remap's branches over the three new viewports (CPU, from GL's old layers): outside the old window (each side), o == 1,
+		// o * zScale + zBias below 0, above 1, in range
+		std::size_t bOut = 0, bOne = 0, bLo = 0, bHi = 0, bMid = 0, side[4] = {};
+		for ( int l = 0; l < 3 && rmOk; l++ )
+			for ( int y = 0; y < casc[l].vh; y++ )
+				for ( int x = 0; x < casc[l].vw; x++ ) {
+					const int px = x + rOff[l][0], py = y + rOff[l][1];
+					if ( px < 0 || py < 0 || px >= rSize[l][0] || py >= rSize[l][1] ) {
+						bOut++;
+						side[0] += px < 0;
+						side[1] += px >= rSize[l][0];
+						side[2] += py < 0;
+						side[3] += py >= rSize[l][1];
+						continue;
+					}
+					const std::uint16_t o = oldR[l][size_t( py ) * map + size_t( px )];
+					if ( o == 0xFFFF ) {
+						bOne++;
+						continue;
+					}
+					const double v = double( o ) / 65535.0 * rZ[l][0] + rZ[l][1];
+					bLo += v < 0.0;
+					bHi += v > 1.0;
+					bMid += v >= 0.0 && v <= 1.0;
+				}
+		std::printf( "SHADOWVIEW remap branches: outside %zu (left %zu right %zu bottom %zu top %zu), o == 1 %zu, clamped to 0 %zu, "
+			"clamped to 1 %zu, in range %zu (each > 0)\n", bOut, side[0], side[1], side[2], side[3], bOne, bLo, bHi, bMid );
+		rmOk = rmOk && side[0] > 0 && side[1] > 0 && side[2] > 0 && side[3] > 0 && bOne > 0 && bLo > 0 && bHi > 0 && bMid > 0;
+		// the new windows: frame 1's matrices
+		upload( moves[1] );
+		auto judge = [&]( const char * tag, std::vector<std::uint16_t> got[2][3] ) {
+			bool all = true;
+			for ( int t = 0; t < 2; t++ )
+				for ( int l = 0; l < 3; l++ ) {
+					const Diff v = compare( got[t][l], refR[t][l] );
+					std::printf( "SHADOWVIEW remap %s %s/%d %s (%zu of %zu covered texels differ, %zu past 1 unit, max %d)\n", tag,
+						t ? "static" : "live", l, v.word(), v.diff, v.covered, v.past1, v.maxu );
+					all = all && v.ok();
+				}
+			return all;
+		};
+		if ( rmOk && ( !runGlR( true, true, refR ) || !runVkR( rNone, false, vkR ) ) ) {
+			std::printf( "SHADOWVIEW remap frame1 FAIL (a run failed)\n" );
+			rmOk = false;
+		}
+		if ( rmOk ) {
+			rmOk = judge( "frame1", vkR );
+			const WwVkPresent::CsmStat rs = WwVkPresent::takeCsmStat();
+			std::printf( "SHADOWVIEW remap stat: %d runs on Vulkan, %d failed (%s), %d draws, remaps=%d remapRed=%d\n", rs.runs, rs.fails,
+				rs.failWhy.c_str(), rs.draws, rs.remaps, rs.remapRed );
+			rmOk = rmOk && rs.remaps == 6;
+			const bool lateRan = runVkR( rNone, true, vkR );
+			rmOk = judge( "late", vkR ) && lateRan && rmOk;
+			// the remap must win texels (against GL without it), GL's casters must beat it on some (against GL without them)
+			std::size_t won = 0, beat = 0;
+			if ( runGlR( false, true, cmpR ) )
+				for ( int t = 0; t < 2; t++ )
+					for ( int l = 0; l < 3; l++ )
+						for ( std::size_t i = 0; i < cmpR[t][l].size(); i++ )
+							won += cmpR[t][l][i] != refR[t][l][i];
+			if ( runGlR( true, false, cmpR ) )
+				for ( int t = 0; t < 2; t++ )
+					for ( int l = 0; l < 3; l++ )
+						for ( std::size_t i = 0; i < cmpR[t][l].size(); i++ )
+							beat += cmpR[t][l][i] != refR[t][l][i];
+			std::printf( "SHADOWVIEW remap won %zu texels against GL without it, GL's casters beat it on %zu (each > 0)\n", won, beat );
+			rmOk = rmOk && won > 0 && beat > 0;
+			const struct
+			{
+				const char * name;
+				RRed red;
+				bool liveOnly;
+			} rr[3] = { { "plain (no remap draws: the plain clear)", rPlain, false },
+				{ "wrong (the scratch layer of the next cascade)", rWrong, false },
+				{ "static (the remap recorded into the static layers only: the live layers)", rStatic, true } };
+			for ( const auto & r : rr ) {
+				const bool ran = runVkR( r.red, false, vkR );
+				Diff all;
+				for ( int t = 0; t < 2; t++ )
+					for ( int l = 0; l < 3; l++ )
+						if ( !r.liveOnly || t == 0 )
+							all.add( compare( vkR[t][l], refR[t][l] ) );
+				const bool redFails = !ran || all.past1 > 0;
+				std::printf( "SHADOWVIEW remap RED %s %s (%zu of %zu covered texels differ, %zu past 1 unit, max %d; must FAIL)\n",
+					redFails ? "FAIL" : "TESTS NOTHING", r.name, all.diff, all.covered, all.past1, all.maxu );
+				rmOk = rmOk && redFails;
+			}
+			WwVkPresent::takeCsmStat();
+		}
+		WwVkPresent::sharedTargetDrop( reinterpret_cast<std::uintptr_t>( &keyScr ) );
+	}
+	std::printf( "SHADOWVIEW remap %s\n", rmOk ? "OK" : "FAILED" );
+	ok = ok && meshOk && ilOk && rmOk;
 	f.bindFramebuffer( kFb, 0 );
 	for ( int t = 0; t < 2; t++ )
 		WwVkPresent::sharedTargetDrop( reinterpret_cast<std::uintptr_t>( &keyHome[t] ) );
