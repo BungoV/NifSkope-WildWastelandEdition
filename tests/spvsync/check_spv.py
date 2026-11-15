@@ -52,6 +52,9 @@ VKFRAME_LIGHT = {'ao_gbuf': ('ao_vk', 'AO_STAGE=5'), 'ao_mip': ('ao_vk', 'AO_STA
 	'ocean_finbca': ('ocean_vk', 'OCEAN_STAGE=7'), 'ocean_finda': ('ocean_vk', 'OCEAN_STAGE=8'),
 	'ocean_mipbca': ('ocean_vk', 'OCEAN_STAGE=9'), 'ocean_mipda': ('ocean_vk', 'OCEAN_STAGE=10')}
 HLSL_SPECS += [('src/features/vkframe', 'light_' + k, 'vulkan1.2', 'vkframe_light_%s_spv' % k) for k in VKFRAME_LIGHT]
+# lane VKFAR3 (A1 b): the screen GI's DDGI read, its own line after the light loop (four defines, -O0)
+VKFRAME_GIHALF_ARGS = ['-O0', '-D', 'WW_CELL_FOGLEAK=1', '-D', 'WW_CELL_RTDDGI=1', '-D', 'WW_CELL_RTDDGI_CASCADES=1', '-D', 'WW_FRAME_UBO=1']
+HLSL_SPECS += [('src/features/vkframe', 'light_gihalf', 'vulkan1.2', 'vkframe_light_gihalf_spv')]
 # lane VKLIGHT2: the reflections, the script's `ssr <name> "<defines>"` lines (res/shaders/hlsl/vklight/ssr_vk.hlsl -DSSR_LIVE)
 VKFRAME_SSR = {'ssr_view_s1': '-DSSR_STAGE=1', 'ssr_view_s1w': '-DSSR_STAGE=1 -DF4FX_SSR_WATER_LOOK',
 	'ssr_view_s2': '-DSSR_STAGE=2', 'ssr_view_s2w': '-DSSR_STAGE=2 -DF4FX_SSR_WATER_LOOK',
@@ -80,7 +83,8 @@ VKFRAME_FXV = {'fardots_view_vs': 'far-lod/cell_fardots_view_vs',
 HLSL_SPECS += [('src/features/vkframe', k, 'vulkan1.2', 'vkframe_%s_spv' % k) for k in VKFRAME_FXV]
 # lane VKFAR2 L8 slice 1: rain / snow's record pass, the script's `fxs <name> <dir/file>` lines (fx()'s shifts, cs_6_0)
 VKFRAME_FXS = {'precip_view_cs': 'weather/precip_view_cs', 'precip_look_view_cs': 'weather/precip_look_view_cs',
-	'precip_lit_view_cs': 'weather/precip_lit_view_cs'}	# lane VKFAR2: L8 slice 2b, lit at the centre
+	'precip_lit_view_cs': 'weather/precip_lit_view_cs',	# lane VKFAR2: L8 slice 2b, lit at the centre
+	'ddgi_atlas_fetch_cs': 'rtddgi/ddgi_atlas_fetch_cs'}	# lane VKFAR3: the DDGI atlas through the present device's view
 HLSL_SPECS += [('src/features/vkframe', k, 'vulkan1.2', 'vkframe_%s_spv' % k) for k in VKFRAME_FXS]
 # lane VKFAR1 round 2: the far cards' pixel stage, the script's `fxk <name> <dir/file>` lines (fx() + every declared binding kept)
 VKFRAME_FXK = {'farcards_view_ps': 'far-lod/farcards_view_ps',
@@ -259,6 +263,8 @@ def script_ok(tree):
 	lloop = dict((i.split(':')[0], (i.split(':')[1], i.split(':', 2)[2])) for i in m.group(1).split()) if m else {}
 	if lloop != VKFRAME_LIGHT:
 		bad.append('src/features/vkframe/vkframe_spirv.sh: its light loop (%s) is not this checker\'s light kernels' % ' '.join(sorted(lloop)))
+	if '"$DXC" -spirv -fspv-target-env=vulkan1.2 -T cs_6_0 -E main ' + ' '.join(VKFRAME_GIHALF_ARGS) + ' -Fo "light_gihalf.spv" ' not in vf:
+		bad.append('src/features/vkframe/vkframe_spirv.sh: its gihalf line is not this checker\'s')
 	if '\t"$DXC" -spirv -fspv-target-env=vulkan1.2 -T cs_6_0 -E main -DSSR_LIVE $2 -Fo "$1.spv" ' not in vf:
 		bad.append('src/features/vkframe/vkframe_spirv.sh: its ssr() compile line changed')
 	rlines = dict(re.findall(r'^ssr ([a-z0-9_]+) "([^"]*)"$', vf, re.M))
@@ -477,6 +483,9 @@ def main(argv):
 			if lk in VKFRAME_LIGHT:
 				src = os.path.join(tree, 'res/shaders/hlsl/vklight', VKFRAME_LIGHT[lk][0] + '.hlsl')
 				hdefs = ['-O0'] + (['-D', VKFRAME_LIGHT[lk][1]] if VKFRAME_LIGHT[lk][1] else [])
+			if lk == 'gihalf':
+				src = os.path.join(tree, 'res/shaders/hlsl/vklight/gihalf_vk.hlsl')
+				hdefs = VKFRAME_GIHALF_ARGS
 			if k in VKFRAME_CSM:
 				src = os.path.join(tree, VKFRAME_CSM[k][0], VKFRAME_CSM[k][1] + '.hlsl')
 			if k in VKFRAME_SSR:

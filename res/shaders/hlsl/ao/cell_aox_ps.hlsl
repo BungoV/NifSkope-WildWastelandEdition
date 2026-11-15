@@ -191,6 +191,10 @@ float aoxHbao( int2 P )
 			float t = ( s - stepNoise ) / stepCount;
 			float2 offset = dir * ( t * screenspaceRadius );
 			int2 sp = clamp( int2( round( float2( P ) + offset ) ), (int2)( 0 ), pmax );
+			// a step that rounds onto the centre texel has no direction: delta is the two view positions' rounding, and
+			// delta / max( dist, 1e-5 ) turned it into a random unit vector (VKFAR3: 3.6 % of texels, up to 239 codes)
+			if ( all( sp == P ) )
+				continue;
 			uint m = aoxSelectMip( length( offset ) );
 			float sz = aoxZMip( int( m ), sp >> int( m ) );
 			float3 delta = aoxViewPos( ( float2( sp ) + 0.5 ) * pix, sz ) - centerView;

@@ -6,7 +6,7 @@
 // chain.txt:  img <name> <rgba16f|rg16f|r16f|r32f|rg32f|rgba32f> <w> <h> <file relative to the job's parent | ->
 //             pass <label> <spv> <pc file> <out0> <out1|-> <t0> <t1> <t2> <t3> <t4>   (- = unbound)
 //             cmp <image> <gl file> <ulpN|step|gather|absX>   (ulpN: max N ulp of the image's own type, half or float;
-//             absX: float32, every value within X absolute, <= 2 % of values differ, no NaN mismatch)
+//             absX: float32, every value within X absolute, <= 2 % of values differ, no NaN mismatch; info: printed, no verdict)
 // Last line `LIGHTMATCH <job> EXACT|BOUND (...)|FAIL (...)`. Exit 0 for EXACT or BOUND. LIGHTMATCH_DUMP=1 writes vk_<image>.bin.
 #define VK_NO_PROTOTYPES
 #include <vulkan/vulkan.h>
@@ -756,14 +756,16 @@ int main( int argc, char ** argv )
 		/* sector (SSGI): the slice angle's divide by the slice count is lowered differently by NV's GL and Vulkan compilers
 		 * (1-2 ulp on ~40 % of texels, no single reciprocal fits either side); a sector bit or march sample then flips:
 		 * bound <= 1 % of values differ and <= 0.2 % by more than 1 ulp (the red: 12 %) */
-		const bool pass = mu <= tol || ( c.rule == "step" && d * 200 <= n && big * 1000 <= n ) || ( c.rule == "gather" && big * 10000 <= n )
+		/* info: an image internal to a pass whose end result has its own row (XeGTAO's depth mips): printed, no verdict */
+		const bool info = c.rule == "info";
+		const bool pass = info || mu <= tol || ( c.rule == "step" && d * 200 <= n && big * 1000 <= n ) || ( c.rule == "gather" && big * 10000 <= n )
 			|| ( c.rule == "sector" && d * 100 <= n && big * 500 <= n )
 			|| ( absRule && !nanBad && maxAbs <= absTol && d * 50 <= n );
 		exact = exact && d == 0;
 		ok = ok && pass;
 		std::printf( "%s %dx%d [%s]: %zu of %zu values differ, %zu by > tol, max %d ulp, max abs %.3g (GL non-zero %zu)%s", c.img.c_str(),
-			x.w, x.h, c.rule.c_str(), d, n, big, mu, maxAbs, nz, pass ? "" : " OUT");
-		if ( firstBad >= 0 )
+			x.w, x.h, c.rule.c_str(), d, n, big, mu, maxAbs, nz, info ? " (info, no verdict)" : pass ? "" : " OUT");
+		if ( firstBad >= 0 && !info )
 			std::printf( "; first > 1 ulp at x %ld y %ld ch %ld: vk 0x%x gl 0x%x", ( firstBad / ch ) % x.w, ( firstBad / ch ) / x.w,
 				firstBad % ch, b8 ? unsigned( v8[firstBad] ) : h16 ? unsigned( v[firstBad] ) : unsigned( v32[firstBad] ),
 				b8 ? unsigned( g8[firstBad] ) : h16 ? unsigned( gp[firstBad] ) : unsigned( g32[firstBad] ) );

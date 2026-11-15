@@ -46,7 +46,11 @@ for l in ao_gbuf:ao_vk:AO_STAGE=5 ao_mip:ao_vk:AO_STAGE=1 ao_raw:ao_vk:AO_STAGE=
 	python -I "$ROOT/tools/spv_header.py" "light_${n}.spv" "vkframe_light_${n}_spv" "light_${n}.spv.h" < /dev/null
 	rm -f "light_${n}.spv"
 done
-ls -la light_ao_gbuf.spv.h light_ao_mip.spv.h light_ao_raw.spv.h light_ao_blur.spv.h light_ao_blurf.spv.h light_contact.spv.h light_ssgi.spv.h light_aox_z.spv.h light_aox_xe.spv.h light_aox_r8.spv.h
+# lane VKFAR3 (A1 b): the screen GI's DDGI read (gihalf_vk.hlsl), the app's variant (cell_gihalf with cascades), -O0 like the rest
+"$DXC" -spirv -fspv-target-env=vulkan1.2 -T cs_6_0 -E main -O0 -D WW_CELL_FOGLEAK=1 -D WW_CELL_RTDDGI=1 -D WW_CELL_RTDDGI_CASCADES=1 -D WW_FRAME_UBO=1 -Fo "light_gihalf.spv" "$(cygpath -m "$ROOT/res/shaders/hlsl/vklight/gihalf_vk.hlsl" 2>/dev/null || echo "$ROOT/res/shaders/hlsl/vklight/gihalf_vk.hlsl")"
+python -I "$ROOT/tools/spv_header.py" "light_gihalf.spv" "vkframe_light_gihalf_spv" "light_gihalf.spv.h" < /dev/null
+rm -f "light_gihalf.spv"
+ls -la light_ao_gbuf.spv.h light_ao_mip.spv.h light_ao_raw.spv.h light_ao_blur.spv.h light_ao_blurf.spv.h light_contact.spv.h light_ssgi.spv.h light_aox_z.spv.h light_aox_xe.spv.h light_aox_r8.spv.h light_gihalf.spv.h
 # lane VKLIGHT2: the reflections (res/shaders/hlsl/vklight/ssr_vk.hlsl, SSR_LIVE) per stage; w = the water look twin
 ssr() {
 	"$DXC" -spirv -fspv-target-env=vulkan1.2 -T cs_6_0 -E main -DSSR_LIVE $2 -Fo "$1.spv" "$(cygpath -m "$ROOT/res/shaders/hlsl/vklight/ssr_vk.hlsl" 2>/dev/null || echo "$ROOT/res/shaders/hlsl/vklight/ssr_vk.hlsl")"
@@ -223,6 +227,8 @@ fxs() {
 	rm -f "$1.spv"
 }
 fxs precip_view_cs weather/precip_view_cs
+# lane VKFAR3: the DDGI atlas read through the present device's view (gate)
+fxs ddgi_atlas_fetch_cs rtddgi/ddgi_atlas_fetch_cs
 fxv precip_view_vs weather/precip_view_vs
 fx precip_view_ps weather/precip_view_ps
 # slice 3: the same three with the precipitation look (cell_precip_look.prog)

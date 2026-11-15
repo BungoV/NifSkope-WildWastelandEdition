@@ -37,8 +37,12 @@ for p in $PASSES; do
 	ssgi) K="$K ssgi:ssgi_vk.hlsl::SSGI_RED ssgie:ssgi_vk.hlsl::SSGI_EMIT_RED"	# ssgie: lane VKFAR3, the emission subtracted
 		JOBS="$JOBS sg_A sg_B sg_S sg_E"; NRED=$((NRED + 2)) ;;
 	aox) K="$K aox_z:aox_vk.hlsl:-DAOX_KERNEL=1:AOX_Z_RED aox_xe:aox_vk.hlsl:-DAOX_KERNEL=2:AOX_XE_RED
-		aox_r8:aox_vk.hlsl:-DAOX_KERNEL=3:AOX_R8_RED"	# lane VKFAR3: the ported AO methods (XeGTAO, GTAO; HBAO stays on GL)
-		JOBS="$JOBS ax_X ax_G ax_S"; NRED=$((NRED + 3)) ;;
+		aox_r8:aox_vk.hlsl:-DAOX_KERNEL=3:AOX_R8_RED aox_hb:aox_vk.hlsl:-DAOX_KERNEL=3:AOX_HB_RED"	# lane VKFAR3: the ported AO methods
+		# ax_H (HBAO) is held against the readable HLSL through SPIR-V on GL (the app's live route; the GLSL keeps the old divide)
+		"$PY" -I "$ROOT/tests/hlsllive/build_spv.py" "$(W "$OUT/glspv")" "$(W "$ROOT/tests/vklight/fullscreen_vs.hlsl")" \
+			"$(W "$ROOT/res/shaders/hlsl/ao/cell_aox_ps.hlsl")" | grep -v "^OK" && { echo "VKLIGHT GATE FAILED (GL SPIR-V)"; exit 1; }
+		export VKLIGHT_SPV_DIR="$(W "$OUT/glspv")"
+		JOBS="$JOBS ax_X ax_G ax_S ax_H"; NRED=$((NRED + 4)) ;;
 	ssr) K="$K ssr_ray:ssr_vk.hlsl:-DSSR_STAGE=1:SSR_RED ssr_march:ssr_vk.hlsl:-DSSR_STAGE=2:SSR_RED
 		ssr_across:ssr_vk.hlsl:-DSSR_STAGE=3:SSR_RED ssr_down:ssr_vk.hlsl:-DSSR_STAGE=4:SSR_RED"
 		JOBS="$JOBS ss_A ss_W ss_R ss_S"; NRED=$((NRED + 4)) ;;

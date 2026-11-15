@@ -1,3 +1,48 @@
+## VKFAR3 A1 HBAO (2026-11-14): HBAO's centre-pixel step fixed, HBAO on Vulkan too (WW_VKVIEW=1)
+
+Changed, not built, not checked live. The look is for bungo's flight.
+
+- HBAO skipped no step that rounded onto the pixel itself, and made a random direction out of rounding noise there.
+  That step is now skipped, in the readable HLSL (cell_aox_ps.hlsl), so GL changes as well when it runs the SPIR-V
+  shader (the GLSL fallback keeps the old step). On the mem_base dump: 4.2 % of pixels of the raw term changed (up to
+  233 codes), the final AO about half the pixels by up to 133 codes after the blur.
+- HBAO now runs on the Vulkan view like XeGTAO and GTAO (red WW_VKVIEW_AOX_RED=1 keeps it on GL).
+- The AO gate's depth mips 1-4 print as information lines (they are internal to the pass); the AO results keep their
+  bars. lightview.sh: LIGHTVIEW GATE OK, 29 greens, 19 reds FAIL (new job ax_H: GL from SPIR-V, red = the old step).
+
+## VKFAR3 A1 DDGI (2026-11-15): the traced GI's probe atlas imported on the present device (WW_VKVIEW=1)
+
+Changed, not built, not checked live. Nothing on the view reads it yet (its consumers are the next steps), so no
+frame changes.
+
+- When RT GI hands a new volume to GL and the view is on, the probe atlas is also imported on the present device (the
+  device that owns the window): its own export of the same memory, a buffer over it and a texel view. A `vk ddgi:` line
+  says it was imported or why not (another GPU or driver, wrong usage, sizes). Red WW_VKVIEW_DDGI_RED=1 skips it.
+- It is freed with GL's copy (a new volume, RT GI off, the cell closed) and at shutdown.
+- No wait of its own: readers on the view are ordered behind GL, which already waits for the traced GI's update.
+- Offline gate tests/vkframe/ddgiview.sh: a second device exports a 4096-probe atlas, the present device imports it
+  and reads it back through the view: EXACT (0 of 790528 texels, twice, and a window); reds (a view one texel late,
+  half a view) FAIL; another driver and a buffer without texel use are refused, and every handle is closed.
+- With cascades (the RT preset's default) GL reads one buffer it copies every cascade into, not a cascade's atlas. With
+  the view on, that buffer is now made on the present device (GL fills it by the same copies), so passes on the view
+  read what GL reads; it follows the switch every frame. The per-cascade import is skipped then (it would go unread).
+  The single-volume import (cascades 1) comes only at the next volume hand-over when the view is turned on live; its
+  drop now logs how long the present device idled.
+- One lookup for both (ddgiAtlasView) and a counter that moves on every make / drop (ddgiAtlasGen), so a pass knows
+  to rewrite its descriptor. Gate: 17 of 17, the cascades' buffer EXACT, its red FAILS.
+
+## VKFAR3 A1 screen GI (2026-11-15): the traced GI's screen read on Vulkan (WW_VKVIEW=1), gate red
+
+Changed, not built, not checked live.
+
+- With the traced GI on and the PRT off, the half-res screen GI (cell_gihalf) runs on the present device right after
+  the volume mask, reading the cascades' buffer in place. The `giHalf` echo line ends "drawn on Vulkan" or "on GL";
+  the route line names why GL kept it (the PRT, no cascades' read, the buffer not shared). Red WW_VKVIEW_GIHALF_RED=1.
+- Offline gate tests/vkframe/gihalfview.sh against the app's GL program on one shared atlas: the uniform table, the
+  atlas lookup and all three reds pass; the 4-ulp bar does NOT (giStep 1: 1694 of 57377 texels; decoded at most 0.3 %
+  of E, visibility codes within 1). The cause is float order (NV GL's choice for the world position, proven by a
+  probe; the rest is inside the read). The bar is left as written.
+
 ## VKWATER4 (2026-11-15): the ocean's arrays are shared in place, no copies per frame (WW_VKVIEW=1)
 
 Changed, not built, not checked live. Offline: oceanview arm 6, B / C / D at all 8 levels EXACT against the copy route

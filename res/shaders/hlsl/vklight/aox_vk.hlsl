@@ -10,7 +10,7 @@
 // Push: c[0] ndcToView, c[1] aoxParams (radius, falloff, intensity, power), c[2] (slices, steps, denoise radius, depth sigma),
 // c[3] (blur beta, full w, full h, -), c[4] (mip 1 w, h, mip 2 w, h), c[5] (mip 3, mip 4); i = (stage, mip level).
 // Reds (gate only): AOX_Z_RED the depth filter's plain mean, AOX_XE_RED the falloff halved, AOX_R8_RED the blur beta doubled
-// and the bilateral's depth sigma halved.
+// and the bilateral's depth sigma halved, AOX_HB_RED HBAO's old divide on the centre texel (kernel aox_hb = aox_r8's build).
 #ifndef AOX_KERNEL
 #define AOX_KERNEL 3
 #endif
@@ -242,6 +242,10 @@ float aoxHbao( int2 P )
 			float t = ( s - stepNoise ) / stepCount;
 			float2 offset = dir * ( t * screenspaceRadius );
 			int2 sp = clamp( int2( round( float2( P ) + offset ) ), (int2)( 0 ), pmax );
+#ifndef AOX_HB_RED
+			if ( all( sp == P ) )	// the centre texel: no direction (cell_aox_ps.hlsl, VKFAR3 round 3)
+				continue;
+#endif
 			uint m = aoxSelectMip( length( offset ) );
 			float sz = aoxZMip( int( m ), sp >> int( m ) );
 			float3 delta = aoxViewPos( ( float2( sp ) + 0.5 ) * pix, sz ) - centerView;

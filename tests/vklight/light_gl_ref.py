@@ -95,13 +95,35 @@ def compile_(kind, src):
 
 
 _progs = {}
+shaderBinary = _fn('glShaderBinary', None, I, ctypes.POINTER(U), E, VP, I)
+specialize = _fn('glSpecializeShaderARB', None, U, ctypes.c_char_p, U, VP, VP)
+# lane VKFAR3: a program named <name>_ps.spv is the readable HLSL built to SPIR-V (the app's live GL route, glcontext.cpp
+# wwSpv) instead of the GLSL: VKLIGHT_SPV_DIR/fullscreen_vs.spv + VKLIGHT_SPV_DIR/<name>_ps.spv from tests/hlsllive/build_spv.py
+# (light.sh builds them; a SPIR-V fragment does not link with a GLSL vertex shader)
+SPV_DIR = os.environ.get('VKLIGHT_SPV_DIR', '')
+
+
+def spv_shader(kind, path):
+    s = createShader(kind)
+    data = open(path, 'rb').read()
+    h = U(s)
+    shaderBinary(1, ctypes.byref(h), 0x9551, data, len(data))
+    specialize(s, b'main', 0, None, None)
+    ok = I(); getShaderiv(s, 0x8B81, ctypes.byref(ok))
+    if not ok.value:
+        print('LIGHT-GL-REF FAIL (specialize %s)' % path); sys.exit(2)
+    return s
 
 
 def program(frag):
     """frag: path under res/shaders/features (module/name.frag)"""
     if frag not in _progs:
         p = createProgram()
-        attach(p, compile_(0x8B31, VERT)); attach(p, compile_(0x8B30, S.expand(os.path.join(FEAT, frag)))); link(p)
+        if frag.endswith('.spv'):
+            attach(p, spv_shader(0x8B31, os.path.join(SPV_DIR, 'fullscreen_vs.spv')))
+            attach(p, spv_shader(0x8B30, os.path.join(SPV_DIR, os.path.basename(frag)))); link(p)
+        else:
+            attach(p, compile_(0x8B31, VERT)); attach(p, compile_(0x8B30, S.expand(os.path.join(FEAT, frag)))); link(p)
         ok = I(); getProgramiv(p, 0x8B82, ctypes.byref(ok))
         if not ok.value:
             print('LIGHT-GL-REF FAIL (link %s)' % frag); sys.exit(2)
@@ -713,9 +735,9 @@ def ssr_main():
 AOX = 'ao/cell_aox.frag'
 
 
-def aox_job(name, srcd, W, H, gb, proj, method, slices, steps, time_it, reds):
+def aox_job(name, srcd, W, H, gb, proj, method, slices, steps, time_it, reds, prog=AOX):
     """src/features/ao/ao.cpp aoxPasses: stage 1, stage 2 x4, then the method's stages (xe 6 7 5, gtao 3 5 5, hbao 4 5 5)
-    ping-ponging xa / xb as the app does; gbuf = the AO stage 5 g-buffer of the same frame"""
+    ping-ponging xa / xb as the app does; gbuf = the AO stage 5 g-buffer of the same frame; prog = the GL program"""
     ms = [(W, H)]
     for m in range(1, 5):
         ms.append((max(ms[m - 1][0] // 2, 1), max(ms[m - 1][1] // 2, 1)))
@@ -731,11 +753,13 @@ def aox_job(name, srcd, W, H, gb, proj, method, slices, steps, time_it, reds):
         [('ndcToView', '4fv', [ndc]), ('aoxParams', '4fv', [params]), ('aoxCounts', '2f', (slices, steps)), ('aoxDenoise', '3f', den)]
     c = [ndc, params, (slices, steps, den[0], den[1]), (den[2], W, H, 0), ms[1] + ms[2], ms[3] + ms[4]]
     allz = [('gbuf', 'gbuf')] + [('xz%d' % m, 'xz%d' % m) for m in range(5)]
-    ps = [Pass('s1', 'aox_z', AOX, ['xz0'], [('gbuf', 'gbuf')], ['gbuf'], base + [('aoxStage', 'i', 1)], c, (1, 0))]
+    ps = [Pass('s1', 'aox_z', prog, ['xz0'], [('gbuf', 'gbuf')], ['gbuf'], base + [('aoxStage', 'i', 1)], c, (1, 0))]
     for m in range(1, 5):
-        ps.append(Pass('s2m%d' % m, 'aox_z', AOX, ['xz%d' % m], [('src', 'xz%d' % (m - 1))], ['-', 'xz%d' % (m - 1)],
+        ps.append(Pass('s2m%d' % m, 'aox_z', prog, ['xz%d' % m], [('src', 'xz%d' % (m - 1))], ['-', 'xz%d' % (m - 1)],
                        base + [('aoxStage', 'i', 2), ('mipLevel', 'i', m)], c, (2, m)))
     st = {'xe': (6, 7, 5), 'gtao': (3, 5, 5), 'hbao': (4, 5, 5)}[method]
+    if os.environ.get('VKLIGHT_AOX_RAW'):   # the method's term alone (as WW_CELL_AO_METHOD_RED=raw): a probe, not the gate
+        st = st[:1]
     src = None
     for k, s in enumerate(st):
         out = 'xe' if s == 6 else 'xb' if src == 'xa' else 'xa'
@@ -745,13 +769,15 @@ def aox_job(name, srcd, W, H, gb, proj, method, slices, steps, time_it, reds):
             units, vk = allz + [('src', src)], ['gbuf', src]
         else:
             units, vk = [('src', src)], ['-', src]
-        ps.append(Pass('s%d_%d' % (s, k), 'aox_xe' if s == 6 else 'aox_r8', AOX, [out], units, vk,
+        # aox_hb: the R8 kernel for HBAO's stage 4, its own name so its red (the old divide) runs apart from aox_r8's
+        ps.append(Pass('s%d_%d' % (s, k), 'aox_xe' if s == 6 else 'aox_hb' if s == 4 else 'aox_r8', prog, [out], units, vk,
                        base + [('aoxStage', 'i', s)], c, (s, 0)))
         src = out
-    # xz1-4: the depth mip filter's dot / sum lands 1-16 ulp apart on NV's GL and Vulkan compilers (measured 4, 11, 16, 14;
-    # no float order fits either side); the method stages: a sample position or a hard branch flips on a last-bit
-    # difference (step); GTAO's slice angle is the SSGI divide (sector)
-    cmps = [('xz0', 'ulp1'), ('xz1', 'ulp4')] + [('xz%d' % m, 'ulp16') for m in range(2, 5)]
+    # xz1-4: the depth mip filter's dot / sum lands 1-16 ulp apart on NV's GL and Vulkan compilers (measured 4, 11, 16, 14
+    # and up to 32; 80 float orders tried, none fits either side). They are internal to the pass, so they print as info
+    # lines and the end results (xe, xa, xb) carry the verdict; the method stages: a sample position or a hard branch
+    # flips on a last-bit difference (step); GTAO's slice angle is the SSGI divide (sector)
+    cmps = [('xz0', 'ulp1')] + [('xz%d' % m, 'info') for m in range(1, 5)]
     if method == 'xe':
         cmps.append(('xe', 'step'))
     r = 'sector' if method == 'gtao' else 'step'
@@ -765,11 +791,16 @@ def aox_main():
     srcd = os.path.join(OUT, 'in_real_ax')
     os.makedirs(srcd, exist_ok=True)
     gb = gl_gbuf(srcd, W, H, depth, proj)
-    # XeGTAO at Ultra (4 x 3, the all-on route's tier) with every kernel's red; GTAO at High. HBAO stays on GL: its
-    # first step can land on the centre texel, and delta / max( dist, 1e-5 ) then turns two equal view positions' last-bit
-    # rounding into a random unit vector (3.6 % of texels differ by up to 239 codes; neither side is right)
+    # XeGTAO at Ultra (4 x 3, the all-on route's tier) with every kernel's red; GTAO at High
     aox_job('ax_X', srcd, W, H, gb, proj, 'xe', 4, 3, True, ['aox_z', 'aox_xe', 'aox_r8'])
     aox_job('ax_G', srcd, W, H, gb, proj, 'gtao', 3, 3, False, [])
+    # HBAO against the GL the app runs: the readable HLSL through SPIR-V (VKLIGHT_SPV_DIR), since the step that lands on the
+    # centre texel is skipped there (VKFAR3 round 3; the GLSL fallback keeps the old divide, which turned two equal view
+    # positions' last-bit rounding into a random direction: 3.6 % of texels, up to 239 codes). Red aox_hb: the old divide.
+    # VKLIGHT_AOXH_GLSL=1 runs the job on the GLSL instead (the tie of the SPIR-V route to the GLSL references)
+    if SPV_DIR or os.environ.get('VKLIGHT_AOXH_GLSL'):
+        aox_job('ax_H', srcd, W, H, gb, proj, 'hbao', 4, 3, False, ['aox_hb'],
+                AOX if os.environ.get('VKLIGHT_AOXH_GLSL') else 'ao/cell_aox_ps.spv')
     # syn: an odd size, a sky band, steps (as ao_S), XeGTAO at Low
     sw, sh = 641, 361
     rng = np.random.default_rng(31)

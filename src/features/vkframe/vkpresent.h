@@ -336,11 +336,13 @@ SkyStat takeSkyStat();
 /* Lane VKWATER4 (row G5): the ultra ocean (cellocean.cpp) is pass LightOcean, kernels ocean_vk.hlsl stages 1-6; 7-10
  * (the *A kernels) write the water's shared arrays in place (LightImage::share), so nothing is copied. Red
  * WW_VKVIEW_OCEAN_RED=1 (or WW_VKVIEW off): GL's draws; =prev: the water reads the arrays the frame before wrote. */
-enum LightPass { LightAo = 0, LightContact = 1, LightSsgi = 2, LightOcean = 3, LightPasses = 4 };
+// LightGi (lane VKFAR3 A1 b): the screen GI's own run (after the volume mask, which stays GL); red WW_VKVIEW_GIHALF_RED=1
+enum LightPass { LightAo = 0, LightContact = 1, LightSsgi = 2, LightOcean = 3, LightGi = 4, LightPasses = 5 };
 // LightAoxZ / Xe / R8 (lane VKFAR3): the ported AO methods' depth mips, XeGTAO's term + edges, the r8 stages (aox_vk.hlsl)
 enum LightKernel { LightAoGbuf = 0, LightAoMip, LightAoRaw, LightAoBlur, LightAoBlurF, LightContactK, LightSsgiK, LightAoxZ, LightAoxXe,
 	LightAoxR8, LightOceanSpecK, LightOceanFftK, LightOceanFinBcK, LightOceanFinDK, LightOceanMipBcK, LightOceanMipDK,
-	LightOceanFinBcAK, LightOceanFinDAK, LightOceanMipBcAK, LightOceanMipDAK, LightKernels };
+	LightOceanFinBcAK, LightOceanFinDAK, LightOceanMipBcAK, LightOceanMipDAK,
+	LightGiHalf, LightKernels };	// LightGiHalf (VKFAR3 A1 b): the screen GI's DDGI read (gihalf_vk.hlsl)
 struct LightImage
 {
 	unsigned tex = 0;              //!< GL's texture (GL_TEXTURE_2D; 0 for a twin only the dispatches use)
@@ -366,6 +368,12 @@ struct LightRun
 	std::vector<LightImage> img;
 	std::vector<LightDispatch> d;
 	std::vector<std::uint8_t> buf; //!< binding 9 (the contact bands); empty: 256 zero bytes
+	// lane VKFAR3 (A1 b), LightGiHalf: binding 31 = GL's uniforms (kT_gihalf), 44 = the DDGI atlas found under ddgiKey
+	// (ddgiAtlasView; none: refused), 46 = the first dispatch's t[0] (the g-buffer). ddgiGlBuf (GL's name of that buffer)
+	// joins GL's signal / wait lists
+	std::vector<std::uint8_t> ubo; //!< empty: 256 zero bytes
+	const void * ddgiKey = nullptr;
+	unsigned ddgiGlBuf = 0;
 };
 //! GL current, its inputs drawn: the dispatches run on Vulkan and the outputs are back in GL's textures
 bool lightRun( const LightRun & t, std::string & why );
@@ -496,6 +504,15 @@ inline constexpr FxField kT_volsky[] = {
 	{ "atHazeSpec", 832, 3, 1, 0, 0 }, { "atMsOld", 844, 1, 1, 0, 0 },
 };
 inline constexpr int kT_volskyBytes = 848;
+// kT_gihalf (lane VKFAR3): the 13 fields gihalf_vk.hlsl reads of its 176 (4112 bytes; spirv-cross --reflect of the
+// shipped SPIR-V, reflect_table.py, cut to the used ones by spirv-cross --hlsl)
+inline constexpr FxField kT_gihalf[] = {
+	{ "cellOn", 1248, 1, 1, 1, 0 }, { "cellRow", 1264, 4, 3, 0, 0 }, { "cellGiLoop8", 3604, 1, 1, 1, 0 },
+	{ "cellDdgiOn", 3772, 1, 1, 1, 0 }, { "cellDdgiCount", 3776, 1, 1, 1, 0 }, { "cellDdgiCOrigin", 3792, 4, 4, 0, 0 },
+	{ "cellDdgiCStep", 3856, 4, 4, 0, 0 }, { "cellDdgiCDims", 3920, 4, 4, 1, 0 }, { "cellDdgiCBase", 3984, 1, 4, 1, 0 },
+	{ "cellDdgiRed", 4048, 1, 1, 1, 0 }, { "giFull", 4084, 2, 1, 1, 0 }, { "giProj", 4096, 2, 1, 0, 0 }, { "giStep", 4104, 1, 1, 1, 0 },
+};
+inline constexpr int kT_gihalfBytes = 4112;
 // kT_march: 56 fields, 1152 bytes (spirv-cross --reflect of the shipped SPIR-V; tools: notes/vkair1/tools/reflect_table.py)
 inline constexpr FxField kT_march[] = {
 	{ "cvCal", 0, 1, 34, 0, 0 }, { "cvBands.baseKm", 544, 3, 1, 0, 0 }, { "cvBands.topKm", 560, 3, 1, 0, 0 },
@@ -1036,6 +1053,44 @@ template <class Fn> bool fxTexOf( Fn * fn, unsigned prog, const char * sampler, 
 	fn->glActiveTexture( unsigned( active ) );
 	return ok;
 }
+
+/* Lane VKFAR3 (row A1): the DDGI probe atlas (bakert's device, rtddgi_vk.inc) imported onto the present device as a
+ * VkBuffer + an RGBA32F texel view, so a pass on the view reads it in place (vkddgi.inc). The fields are what
+ * bakert::ddgiGpuShare hands out (rtddgi_gpu.h DdgiGpuShare); the import must repeat the exporter's buffer (size, usage)
+ * and allocation (size, memory type, dedicated), so the exporter says them rather than the importer guessing.
+ * Order: no semaphore of its own. bakert's submit signals vkDone once and GL waits it once (rtddgicell.cpp), so a reader
+ * on the present device is ordered through GL: its crossing's glDone comes after GL's vkDone wait in GL's stream, and
+ * GL's wait on the crossing's vkDone comes before GL's next glDone to bakert (which holds bakert's next write). A reader
+ * that runs outside such a crossing (deferred, no GL signal) is not ordered against bakert's writes. */
+struct DdgiAtlasShare
+{
+	void * memory = nullptr;          //!< an NT handle of the atlas's memory (OPAQUE_WIN32); the import closes it, always
+	std::uint64_t memorySize = 0;     //!< the allocation's size
+	std::uint64_t bufferSize = 0;     //!< the exporter's VkBuffer size
+	std::uint64_t atlasBytes = 0;     //!< the atlas itself, at offset 0 (probes x 193 texels x 16 bytes)
+	std::uint32_t usage = 0;          //!< the exporter's VkBufferUsageFlags (UNIFORM_TEXEL_BUFFER among them)
+	std::uint32_t memoryType = 0;     //!< the exporter's memory type index (the same GPU: the same index)
+	bool dedicated = true;
+	std::uint8_t deviceUuid[16] = {}, driverUuid[16] = {};
+};
+//! the import under key (one a volume; an older one under key is dropped first). false: why; nothing kept
+bool ddgiAtlasImport( const void * key, const DdgiAtlasShare & in, std::string & why );
+/* the texel view (VkBufferView as a handle) and the atlas's texels under key; 0 when none. With cascades (the preset
+ * default) GL reads ONE buffer it copies every cascade's atlas into (rtddgicell.cpp combinedUpdate); with the view on
+ * that buffer is a farTexelBuffer (GL writes it, the present device holds the view): its key (an address) is looked up
+ * here too, so a consumer asks one function. GL's copies are GL work, so a reader behind GL's crossing sees them. */
+std::uint64_t ddgiAtlasView( const void * key, std::uint64_t * texels = nullptr );
+/* moves whenever any view above may have changed (an import, a drop, a texel buffer made or dropped): a consumer whose
+ * descriptor set holds a view rewrites it when this moved (never by comparing handles: the driver reuses them) */
+std::uint64_t ddgiAtlasGen();
+/* the import under key goes (drains the worker and waits the device idle first): the ms it took, -1 when nothing was
+ * under key (returns at once). An import is made at a volume's hand-over only (rtddgicell.cpp vkDdgiImport): the view
+ * turned on live gets one at the next hand-over; with cascades the cascades' buffer follows the switch every frame */
+double ddgiAtlasDrop( const void * key );
+/* gates only: texels [first, first + count) fetched through the view on the worker (ddgi_atlas_fetch_cs), 4 floats each.
+ * red 1: a view one texel late (offset minTexelBufferOffsetAlignment rounded to a texel), red 2: a view over the first
+ * half of the atlas (fetches past it read 0). false: why */
+bool ddgiAtlasRead( const void * key, std::uint32_t first, std::uint32_t count, std::vector<float> & out, int red, std::string & why );
 
 }
 
