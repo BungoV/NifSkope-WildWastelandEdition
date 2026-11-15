@@ -28,6 +28,11 @@ const farlod::TwinSpec kSpec { "reflection capture", vkframe_reflcap_view_vs_spv
 char kDepthKey[1];
 constexpr int kBaseSlots = 256;
 char kBaseKeys[kBaseSlots];
+// blSamplerRead's GL entry points (a BaseMap's swizzle and sRGB decode as GL samples it)
+void * rcGlProc( const char * name )
+{
+	return reinterpret_cast<void *>( wglGetProcAddress( name ) );
+}
 constexpr VkFormat kAlbFmt = VK_FORMAT_R8G8B8A8_UNORM, kNdFmt = VK_FORMAT_R16G16B16A16_SFLOAT, kDepthFmt = VK_FORMAT_X8_D24_UNORM_PACK32;
 
 struct LayerFb
@@ -523,6 +528,7 @@ bool reflCaptureRun( const ReflCaptureRun & r, std::string & why )
 	std::vector<VkWriteDescriptorSet> ws;
 	std::map<unsigned, VkImageView> baseViews;  // this run's BaseMap views by GL name (each twin copied once a run)
 	int copies = 0, inPlace = 0;
+	bool otFlushed = false;  // the texture cache's hand-over, once a run before its first twin is read
 	VkDeviceSize at = 0;
 	for ( std::size_t d = 0; d < nd; d++ ) {
 		const ReflCaptureDraw & c = r.draws[d];
@@ -563,7 +569,8 @@ bool reflCaptureRun( const ReflCaptureRun & r, std::string & why )
 			std::memset( h + kVsAt + atUvOff, 0, 8 );
 		if ( r.red & 8 )
 			std::memset( h + kPsAt + atAt, 0, 4 );
-		// BaseMap: none (the zero 2D view), a shared image read in place, else its twin copied once a run
+		// BaseMap: none (the zero 2D view); the texture cache's twin (objTexKey) or a shared image read in place, else its twin
+		// copied once a run; every one through a view with GL's swizzle (BC4's R, R, R, 1)
 		const WaterSlot & b = c.base;
 		VkImageView view = F.d2;
 		if ( b.tex ) {
@@ -575,30 +582,56 @@ bool reflCaptureRun( const ReflCaptureRun & r, std::string & why )
 				return refuse( "BaseMap: samples the G-buffer it draws into" );
 			if ( auto it = baseViews.find( b.tex ); it != baseViews.end() ) {
 				view = it->second;
-			} else if ( const std::uintptr_t sk = farSharedOf( b.tex ) ) {
-				view = sharedFind( sk )->view;
-				texNames.push_back( b.tex );
-				inPlace++;
 			} else {
-				auto slot = S.baseSlot.find( b.tex );
-				if ( slot == S.baseSlot.end() ) {
-					if ( int( S.baseSlot.size() ) >= kBaseSlots )
-						return refuse( "BaseMap: more than 256 caster textures" );
-					slot = S.baseSlot.emplace( b.tex, int( S.baseSlot.size() ) ).first;
+				std::uintptr_t key = objTexKey( b.tex );
+				if ( key ) {
+					if ( !otFlushed ) {
+						if ( !objTexFlush( w ) )
+							return refuse( "BaseMap: the texture cache's hand-over: " + w );
+						otFlushed = true;
+					}
+					const Shared * th = farTwinFind( key );
+					if ( !th || !th->tex )
+						return refuse( "BaseMap: its texture cache twin went" );
+					texNames.push_back( th->tex );
+					inPlace++;
+				} else if ( ( key = farSharedOf( b.tex ) ) != 0 ) {
+					texNames.push_back( b.tex );
+					inPlace++;
+				} else {
+					auto slot = S.baseSlot.find( b.tex );
+					if ( slot == S.baseSlot.end() ) {
+						if ( int( S.baseSlot.size() ) >= kBaseSlots )
+							return refuse( "BaseMap: more than 256 caster textures" );
+						slot = S.baseSlot.emplace( b.tex, int( S.baseSlot.size() ) ).first;
+					}
+					key = reinterpret_cast<std::uintptr_t>( &kBaseKeys[slot->second] );
+					unsigned twin = 0;
+					if ( !waterTwin( key, b, twin, w ) )
+						return refuse( "BaseMap: " + w );
+					for ( int l = 0; l < std::max( b.levels, 1 ); l++ )
+						g.copyImageSubData( b.tex, 0x0DE1, l, 0, 0, 0, twin, 0x0DE1, l, 0, 0, 0, std::max( b.w >> l, 1 ), std::max( b.h >> l, 1 ), 1 );
+					copies++;
+					texNames.push_back( twin );
 				}
-				const std::uintptr_t tk = reinterpret_cast<std::uintptr_t>( &kBaseKeys[slot->second] );
-				unsigned twin = 0;
-				if ( !waterTwin( tk, b, twin, w ) )
+				// GL's swizzle as the view's own, the sRGB decode as GL samples it (red 64: the swizzle dropped)
+				BlSampler bs;
+				VkFormat fmt = VK_FORMAT_UNDEFINED;
+				std::uint32_t swz = 0;
+				if ( !blView( key, fmt ) )
+					return refuse( "BaseMap: its twin has no 2D view" );
+				if ( !blSamplerRead( b.tex, bs, rcGlProc, w ) )
 					return refuse( "BaseMap: " + w );
-				const bool viaFar = waterBcFormat( b.glFmt );
-				const Shared * th = viaFar ? farTwinFind( tk ) : sharedFind( tk );
-				if ( !th || !th->view )
-					return refuse( "BaseMap: its twin has no view" );
-				view = th->view;
-				for ( int l = 0; l < std::max( b.levels, 1 ); l++ )
-					g.copyImageSubData( b.tex, 0x0DE1, l, 0, 0, 0, twin, 0x0DE1, l, 0, 0, 0, std::max( b.w >> l, 1 ), std::max( b.h >> l, 1 ), 1 );
-				copies++;
-				texNames.push_back( twin );
+				if ( blIsSrgb( fmt ) && bs.srgbDecode == 0x8A4A )
+					return refuse( "BaseMap: an sRGB texture with its decode skipped" );
+				blSwizzleNorm( fmt, bs );
+				if ( !blSwizzleCode( bs, swz, w ) )
+					return refuse( "BaseMap: " + w );
+				if ( r.red & 64 )
+					swz = 0;
+				view = blView( key, fmt, swz );
+				if ( !view )
+					return refuse( "BaseMap: its twin's view (swizzle " + std::to_string( swz ) + ") failed" );
 			}
 			baseViews[b.tex] = view;
 		}

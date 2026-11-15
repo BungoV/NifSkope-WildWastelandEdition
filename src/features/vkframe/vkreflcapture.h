@@ -6,7 +6,8 @@
  * arrays (rpAlb RGBA8, rpNd RGBA16F) with a 64 x 64 D24 depth, all cleared first (colour 0, depth 1), depth LEQUAL with
  * writes, no cull, no blend. Here: one render pass a job over 2D views of those layers of the SHARED cube arrays and the
  * route's own shared D24 target, one draw a caster (its client arrays copied into a host ring, its b287 / b31 slices as GL's
- * program holds them when it would draw, BaseMap read in place or through a twin), every job of a run in one crossing.
+ * program holds them when it would draw, BaseMap read in place (a texture cache twin, a shared image) or through a copy twin,
+ * always with GL's swizzle: VKFAR23), every job of a run in one crossing.
  * Twins: reflcap_view_vs / reflcap_view_ps (vkframe_spirv.sh fxt / fxg). Gate: tests/vkframe/reflcapdraw.sh. */
 
 #include <cstdint>
@@ -44,7 +45,7 @@ struct ReflCaptureJob
 
 /*! the pass: GL's program (its pixel stage's loader defines: the twin is the define-free build), the shared G-buffer cube
  * arrays' keys, the jobs in GL's order. red (gates only): 1 job 0 into layer + 1, 2 rpClipFromRel's B (column 3, z) zero, 4 uvOffset
- * zero, 8 rpAlphaTest false, 16 location 1 fed (1, 1, 1, 1), 32 depth compare ALWAYS */
+ * zero, 8 rpAlphaTest false, 16 location 1 fed (1, 1, 1, 1), 32 depth compare ALWAYS, 64 BaseMap's swizzle dropped */
 struct ReflCaptureRun
 {
 	unsigned prog = 0;
