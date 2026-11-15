@@ -74,8 +74,13 @@
  * app's key, as the shipped twins (VKWATER3 ruling 1). */
 static int gColTwin = 0;  // colPrintf: 1 prints `BLVIEW colourcsm` for `BLVIEW colour`
 static const char * gColTag = "";  // the plain row: `BLVIEW colour plain`; the RT row: `BLVIEW colour rt`
-static int gColKind = 0;  // lane VKOBJ5: 1 ` skin`, 2 ` alpha`, 3 ` single`, 4 ` own` after it
-static const char * kColKindName[5] = { "", " skin", " alpha", " single", " own" };
+static int gColKind = 0;  // lane VKOBJ5: 1 ` skin`, 2 ` alpha`, 3 ` single`, 4 ` own` after it; lane VKWATER3: 5 ` ao`
+static const char * kColKindName[6] = { "", " skin", " alpha", " single", " own", " ao" };
+/* lane VKWATER3 (manager ruling 11-15, the AO note; stated before its first run, never widened): kind 5 `ao` runs the main arm
+ * on the app's key with a GL R32F texture on cellAo (half the view, a ramp in y and a 7-texel saw in x, bilinear, clamped),
+ * cellAoOn 1, cellAoRect the frame. GL probe: cellAoOn 0 moves GL's colour on >= 20 % of the covered pixels. Check: GL's own
+ * texture has no twin, so objBlShade must refuse naming cellAo (`REFUSED OK`). Red standin (ObjBlShade.standInRed: the old
+ * stand-in) must draw, FAIL the main arm's bars against GL and differ from GL's colour. */
 void colPrintf( const char * fmt, ... )
 {
 	std::string f2( fmt );
@@ -474,6 +479,37 @@ bool colourGate( const std::string & spirvDir, const std::vector<GLuint64> & fix
 			return false;
 		}
 	}
+	// lane VKWATER3 kind 5: GL's own obscurance texture on cellAo
+	GLuint aoTex = 0;
+	int aoUnit = -1;
+	if ( kind == 5 ) {
+		const int aw = kSW / 2, ah = kSH / 2;
+		std::vector<float> av( std::size_t( aw ) * std::size_t( ah ) );
+		for ( int y = 0; y < ah; y++ )
+			for ( int x = 0; x < aw; x++ )
+				av[std::size_t( y ) * std::size_t( aw ) + std::size_t( x )] = 0.15f + 0.5f * float( y ) / float( ah - 1 ) + 0.3f * float( x % 7 ) / 6.0f;
+		glGenTextures( 1, &aoTex );
+		glBindTexture( GL_TEXTURE_2D, aoTex );
+		glTexImage2D( GL_TEXTURE_2D, 0, 0x822E, aw, ah, 0, 0x1903, GL_FLOAT, av.data() );  // R32F from RED
+		glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR );
+		glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR );
+		glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, 0x812F );  // CLAMP_TO_EDGE
+		glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, 0x812F );
+		glTexParameteri( GL_TEXTURE_2D, 0x813D, 0 );  // MAX_LEVEL
+		glBindTexture( GL_TEXTURE_2D, 0 );
+		GLint( WINAPI * loc )( GLuint, const char * ) = nullptr;
+		load( loc, "glGetUniformLocation" );
+		GLint l = loc ? loc( prog, "cellAo" ) : -1;
+		if ( l < 0 && reg.count( "cellAo" ) )
+			l = reg["cellAo"];
+		aoUnit = unitAt.count( l ) ? unitAt[l] : -1;
+		put( "cellAoOn", { 1 } );
+		put( "cellAoRect", { 0.0f, 0.0f, 1.0f / float( kSW ), 1.0f / float( kSH ) } );
+		if ( aoUnit < 0 || glGetError() != GL_NO_ERROR ) {
+			colPrintf( "BLVIEW colour FAIL (no unit for cellAo, or a GL error making its texture)\n" );
+			return false;
+		}
+	}
 	// globalUniforms (binding 0) at the twin's layout, skinningUniforms (binding 1) zero
 	if ( !gb ) {
 		colPrintf( "BLVIEW colour FAIL (the twin's globalUniforms: %s)\n", why.c_str() );
@@ -656,6 +692,8 @@ bool colourGate( const std::string & spirvDir, const std::vector<GLuint64> & fix
 			for ( int k = 0; k < 5; k++ )
 				u.bindTextures( GLuint( rtUnit[k] ), 1, &rtTex[k] );
 		}
+		if ( aoTex )
+			u.bindTextures( GLuint( aoUnit ), 1, &aoTex );
 		f.bindBufferBase( 0x8A11, 0, ubo[0] );
 		f.bindBufferBase( 0x8A11, 1, ubo[1] );
 		if ( sfB ) {  // the cascade values as put() left them (a red or probe set after GL drew reaches both sides)
@@ -886,6 +924,25 @@ bool colourGate( const std::string & spirvDir, const std::vector<GLuint64> & fix
 			csmReach = csmReach && reach;
 		}
 	}
+	if ( kind == 5 ) {  // lane VKWATER3: the obscurance reaches GL's colour (else a stand-in could draw the same picture)
+		ColOut g2;
+		put( "cellAoOn", { 0 } );
+		glDraw( g2 );
+		put( "cellAoOn", { 1 } );
+		std::size_t cov = 0, moved = 0;
+		for ( std::size_t i = 0; i < gl.depth.size(); i++ ) {
+			if ( !( gl.depth[i] < 1.0f ) )
+				continue;
+			cov++;
+			bool mv = false;
+			for ( int ch = 0; ch < 4; ch++ )
+				mv = mv || gl.c0[i * 4 + ch] != g2.c0[i * 4 + ch];
+			moved += mv;
+		}
+		kindReach = cov > 0 && double( moved ) >= 0.2 * double( cov );
+		colPrintf( "BLVIEW colour GL ao probe %s: cellAoOn 0 moves GL's colour on %zu of %zu covered pixels (bar >= 20 %%)\n",
+			kindReach ? "OK" : "FAIL", moved, cov );
+	}
 	if ( const GLenum e = glGetError(); e != GL_NO_ERROR ) {
 		colPrintf( "BLVIEW colour FAIL (GL error 0x%x reading GL's fo4_cellbl draw)\n", unsigned( e ) );
 		return false;
@@ -917,6 +974,7 @@ bool colourGate( const std::string & spirvDir, const std::vector<GLuint64> & fix
 		s.alphaRed = red == 12 ? 1 : 0;  // lane VKOBJ5 red flags
 		s.ownVao = kind == 4;            // lane VKOBJ5 round 2: the VAO bound below
 		s.ownRed = red == 14 ? 1 : red == 15 ? 2 : 0;  // reds offset / half
+		s.standInRed = red == 25;        // lane VKWATER3 red standin
 		bool ran = true;
 		if ( kind == 3 ) {  // lane VKOBJ5 round 2: a crossing a shape, its one row (red 13 base: rowsAtBase off, padded rows)
 			for ( std::size_t c = 0; c < single.size() / 5; c++ ) {
@@ -1000,7 +1058,11 @@ bool colourGate( const std::string & spirvDir, const std::vector<GLuint64> & fix
 	std::string w;
 	const bool ran = vkRun( 0, vk0, w );
 	const ObjBlRunStat rs = takeObjBlRunStat();
-	if ( !ran ) {
+	if ( !ran && kind == 5 ) {  // lane VKWATER3: cellAo is GL's own texture (no twin): the draw must go to GL
+		const bool refused = w.find( "no twin" ) != std::string::npos && w.find( "cellAo" ) != std::string::npos;
+		colPrintf( "BLVIEW colour check cellAo (GL's own R32F, no twin) %s (%s)\n", refused ? "REFUSED OK" : "FAIL", w.c_str() );
+		ok = refused && kindReach;
+	} else if ( !ran ) {
 		colPrintf( "BLVIEW colour FAIL (objBlShade refused: %s)\n", w.c_str() );
 		ok = false;
 	} else {
@@ -1027,13 +1089,18 @@ bool colourGate( const std::string & spirvDir, const std::vector<GLuint64> & fix
 				double( fromHalf( a[p * 4 + 3] ) ) );
 		}
 		ok = ok && crossOk &&( dc.exact() || dc.bound() ) && litOk && ( cc.exact() || cc.bound() ) && csmReach && kindReach;
+		if ( kind == 5 ) {
+			colPrintf( "BLVIEW colour check cellAo FAIL (objBlShade drew with GL's own texture on cellAo)\n" );
+			ok = false;
+		}
 	}
 	const char * redName[3] = { "glow (glowMult 0 after GL drew)", "slot (each row's maps one slot on)",
 		"map (the cascade map's checker inverted after GL drew)" };
 	const char * kindRedName[5] = { " bone (bone i reads bone i + 1's transform)", " flags (the mirrored alphaFlags 0)",  // lane VKOBJ5
 		" base (rowsAtBase off: the mirrored wwDrawBase kept)", " offset (every attribute read from offset 0)",
 		" half (the halves read as 16-bit unorm)" };
-	const int redLo = kind == 0 ? 1 : kind == 4 ? 14 : 10 + kind, redHi = kind == 0 ? ( twin ? 3 : 2 ) : kind == 4 ? 15 : 10 + kind;
+	const int redLo = kind == 0 ? 1 : kind == 4 ? 14 : kind == 5 ? 25 : 10 + kind;
+	const int redHi = kind == 0 ? ( twin ? 3 : 2 ) : kind == 4 ? 15 : kind == 5 ? 25 : 10 + kind;
 	for ( int r = redLo; r <= redHi; r++ ) {
 		ColOut o;
 		std::string rw;
@@ -1048,10 +1115,12 @@ bool colourGate( const std::string & spirvDir, const std::vector<GLuint64> & fix
 				vch += o.c0[i] != vk0.c0[i];
 			for ( std::size_t i = 0; kind && ran && i < o.depth.size() && i < vk0.depth.size(); i++ )
 				vch += o.depth[i] != vk0.depth[i];  // lane VKOBJ5: a kind red may move the depth alone
+			for ( std::size_t i = 0; kind == 5 && i < o.c0.size() && i < gl.c0.size(); i++ )
+				vch += o.c0[i] != gl.c0[i];  // lane VKWATER3: the main arm refused, so the red's colour against GL's
 			passes = ( dc.exact() || dc.bound() ) && ( cc.exact() || cc.bound() );
 		}
 		colPrintf( "BLVIEW RED colour%s %s (%zu values over the bound, %zu Vulkan colour values moved off the Vulkan base%s%s)\n",
-			r > 10 ? kindRedName[r - 11] : redName[r - 1],
+			r == 25 ? " standin (GL's own cellAo texture stood in)" : r > 10 ? kindRedName[r - 11] : redName[r - 1],
 			passes ? "PASSED" : vch ? "FAIL" : "TESTS NOTHING", over, vch, rr ? "" : "; refused: ", rr ? "" : rw.c_str() );
 		ok = ok && !passes && vch > 0;
 	}
@@ -1103,7 +1172,9 @@ bool colourGate( const std::string & spirvDir, const std::vector<GLuint64> & fix
 		}
 		if ( csmTex )
 			sharedTargetDrop( csmKey );
-		if ( rt )
+		if ( aoTex )
+			glDeleteTextures( 1, &aoTex );
+		if ( rt || kind == 5 )
 			colPrintf( "BLVIEW colour %s\n", ok ? "OK" : "FAILED" );
 		gColTwin = gColKind = 0;
 		gColTag = "";

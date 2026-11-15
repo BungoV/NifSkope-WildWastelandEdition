@@ -389,6 +389,9 @@ struct ObjBlShade
 	 * of `pool` only verts is read */
 	bool ownVao = false;
 	int ownRed = 0;  //!< gates only: 1 `offset` (the attributes read from offset 0), 2 `half` (the halves read as 16-bit unorm)
+	/*! lane VKWATER3 (ruling 11-15): a GL-owned texture with no twin, a twin that does not fit or a refused texel buffer refuses
+	 * the draw to GL; gates only: true restores the old stand-in (the red `standin`: a silent wrong picture) */
+	bool standInRed = false;
 };
 bool objBlShade( GlProc gp, const ObjBlShade & s, std::string & why );
 /* lane VKWATER3 G4: the bl twin of GL's program by its pixel stage's loader key (Program::wwDefs): 0 the base

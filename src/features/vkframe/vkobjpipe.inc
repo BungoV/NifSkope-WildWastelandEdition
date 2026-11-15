@@ -3007,6 +3007,14 @@ bool objBlShade( GlProc gp, const ObjBlShade & s, std::string & why )
 	ObjBlBindStat bst;
 	if ( !objBlBindUnits( gp, s.prog, d, bst, w2 ) )
 		return fail( "the texture units: " + w2 );
+	// lane VKWATER3 (ruling 11-15): a GL-owned texture with no twin goes to GL, never a stand-in (a silent wrong picture);
+	// red standInRed restores the stand-in
+	if ( !s.standInRed && bst.misfit )
+		return fail( "a texture: " + bst.misfitWhy );
+	if ( !s.standInRed && bst.glOwn )
+		return fail( std::to_string( bst.glOwn ) + " GL textures with no twin: " + bst.glOwnNames );
+	if ( !s.standInRed && bst.texelRefused )
+		return fail( "a texel buffer: " + bst.texelWhy );
 	{
 		ObjBlRunStat & rs = opS().st;
 		rs.shared += bst.shared;
