@@ -616,6 +616,7 @@ struct FxStat
 	int pipelines = 0;
 	double buildMs = 0.0;
 	int copies = 0;                 //!< texture copies into twins since the last take
+	int refusedPacks = 0;           //!< rain / snow: fxPack calls made for runs then refused (asked before the packs: 0)
 };
 FxStat takeVolSkyStat();
 struct CloudRun
@@ -784,16 +785,35 @@ struct PrecipRun
 	bool lit = false, fogged = false, roofOn = false;  //!< lit: slice 2b (the sun alone; the rest refused); roofOn refused (GL draws); fogged: slice 2a
 	bool litBlock = false;          //!< cs holds kT_preciplitcs (a lit run without it is refused)
 	bool look = false;              //!< slice 3: cell_precip_look.prog's run (cs / ps also hold kT_preciplook*)
-	FxTex tex[8];                   //!< t0 pcRoof (none yet), t1 pcTex (the atlas; a BC one twinned by farTwin), the air's t25 atApTex, t26 volTex, t27 volTile, t28 volAirTerr, t29 volAirRainMap, the look's pcTexN
+	FxTex tex[9];                   //!< t0 pcRoof (none yet), t1 pcTex (the atlas; a BC one twinned by farTwin), the air's t25 atApTex, t26 volTex, t27 volTile, t28 volAirTerr, t29 volAirRainMap, the look's pcTexN, the lit pass's t17 airTerr (L8 terrain air)
 	std::uint8_t cs[kT_preciplitcsBytes] = {};  //!< fxPack( cell_precip_gpu, kT_precipcs ) (+ kT_preciplookcs for a look run, kT_preciplitcs for a lit one)
 	std::uint8_t ps[kT_preciplookpsBytes] = {};  //!< fxPack( cell_precip_gpu, kT_precipps ) (+ kT_preciplookps for a look run)
-	int red = 0;                    //!< gates only: 1 the cull radius 0, 2 the strip's last two corners swapped, 4 no near fade, 8 the air dropped, 16 the look dropped (the plain pipelines draw a look run), 32 the atlas dropped (t1 / t7 the zero texture), 128 the light dropped (lit = 1)
+	int red = 0;                    //!< gates only: 1 the cull radius 0, 2 the strip's last two corners swapped, 4 no near fade, 8 the air dropped, 16 the look dropped (the plain pipelines draw a look run), 32 the atlas dropped (t1 / t7 the zero texture), 128 the light dropped (lit = 1), 256 the lamps' lights dropped (the zero texel buffer), 512 b0 dropped (globalUniforms zero), 1024 the cluster's lists dropped (the zero texel buffer), 2048 the local sun law dropped (vpSun.w 0), 4096 the terrain air's grid dropped (t8 the zero texture)
+	const void * global = nullptr;  //!< GL's globalUniforms (b0, 336 bytes; the cluster reads projectionMatrix); null: zeros (a cluster run refused)
 	std::uint8_t * recOut = nullptr;  //!< gates only: the run's records read back (n x 112 bytes, 192 a look run; host-visible records, a fence wait); null in the app
+	struct LitIn
+	{
+		int terms = -1, interior = -1, partRed = -1, csm = 0, airTerr = 0;
+		float drift = 0.0f, sunA = 0.0f;
+		int shadow = -1, gobo = -1, cluster = -1, cellRed = -1;  //!< the lamps' switches (L8 term 2a): cellShadowOn, cellGoboOn, cellClusterOn, cellRed
+		float phys = 0.0f;              //!< cellLightPhys.x (the physical falloff)
+	};
+	LitIn litIn;                    //!< a lit run's switches as precipLitRead reads them from GL (before any pack; -1 absent)
+	struct TexBuf { unsigned tex = 0, buf = 0, glFmt = 0; long long off = 0, bytes = 0; };
+	TexBuf lights, cluster;         //!< the lamps' t0 cellLights / t45 cellCluster as GL samples them (precipTexBufOf; tex 0: the zero buffer)
+	int packs = 0;                  //!< fxPack calls made for this run (a refusal adds them to FxStat::refusedPacks)
 };
 /* GL current, the tone frame bound, cell_precip_gpu's uniforms set: one run of particles on Vulkan, a record pass then
  * instanced quads (depth LEQUAL no write, blend SRC_ALPHA / ONE_MINUS_SRC_ALPHA, stencil ALWAYS ref 1 REPLACE mask 0x03,
- * as GL's). false: why; nothing drawn (GL draws its points) */
+ * as GL's). false: why; nothing drawn (GL draws its points). It asks precipAdmits first. */
 bool precipRun( const PrecipRun & t, std::string & why );
+/* the refusals that need no packed bytes (the device, the target, the run, a lit run's litIn): asked before the packs so
+ * a refused run pays none. false: why, counted as a refusal (with t.packs) */
+bool precipAdmits( const PrecipRun & t, std::string & why );
+//! every refusal a lit run's switches would fire, in precipLitWhy's order (its count; at most max written): the census
+int precipLitWhys( const PrecipRun::LitIn & l, const char ** out, int max );
+//! a lit run's refusal from its switches (null: the light chain's admitted terms); precipAdmits and precipRun's block check
+const char * precipLitWhy( const PrecipRun::LitIn & l );
 void precipOnGl( const char * why );
 FxStat takePrecipStat();
 
@@ -1091,6 +1111,70 @@ double ddgiAtlasDrop( const void * key );
  * red 1: a view one texel late (offset minTexelBufferOffsetAlignment rounded to a texel), red 2: a view over the first
  * half of the atlas (fetches past it read 0). false: why */
 bool ddgiAtlasRead( const void * key, std::uint32_t first, std::uint32_t count, std::vector<float> & out, int red, std::string & why );
+/* lane VKFAR2 (row L8): a lit run's switches straight from the program, no pack (precipDraw and the gate, then
+ * precipAdmits); an int absent from the program reads -1 (the refusals then refuse) */
+template <class Fn> void precipLitRead( Fn * fn, unsigned prog, PrecipRun & t )
+{
+	auto geti = [&]( const char * nm ) {
+		const int l = fn->glGetUniformLocation( prog, nm );
+		int v[4] = { -1, 0, 0, 0 };
+		if ( l >= 0 )
+			fn->glGetUniformiv( prog, l, v );
+		return v[0];
+	};
+	auto getf = [&]( const char * nm, int k ) {  // a vec4 writes four floats
+		const int l = fn->glGetUniformLocation( prog, nm );
+		float v[4] = {};
+		if ( l >= 0 )
+			fn->glGetUniformfv( prog, l, v );
+		return v[k];
+	};
+	t.litIn.terms = geti( "volTerms" );
+	t.litIn.interior = geti( "cellInterior" );
+	t.litIn.partRed = geti( "volPartRed" );
+	t.litIn.csm = geti( "volCsm" );
+	t.litIn.airTerr = geti( "airTerrOn" );
+	t.litIn.drift = getf( "volAirDrift", 0 );
+	t.litIn.sunA = getf( "vpSun", 3 );
+	t.litIn.shadow = geti( "cellShadowOn" );
+	t.litIn.gobo = geti( "cellGoboOn" );
+	t.litIn.cluster = geti( "cellClusterOn" );
+	t.litIn.cellRed = geti( "cellRed" );
+	t.litIn.phys = getf( "cellLightPhys", 0 );
+}
+
+/* lane VKFAR2 (row L8 term 2a): a texture buffer the program samples (the lamps' cellLights / cellCluster): the name on
+ * the sampler's unit, its data store, range and format. false: why (bound with no data store) */
+template <class Fn> bool precipTexBufOf( Fn * fn, unsigned prog, const char * sampler, PrecipRun::TexBuf & b, std::string & why )
+{
+	b = PrecipRun::TexBuf();
+	const int l = fn->glGetUniformLocation( prog, sampler );
+	if ( l < 0 )
+		return true;  // not in the program: the zero buffer
+	int unit = 0, active = 0x84C0, name = 0;
+	fn->glGetUniformiv( prog, l, &unit );
+	fn->glGetIntegerv( 0x84E0, &active );  // GL_ACTIVE_TEXTURE
+	fn->glActiveTexture( unsigned( 0x84C0 + unit ) );
+	fn->glGetIntegerv( 0x8C2C, &name );  // GL_TEXTURE_BINDING_BUFFER
+	if ( name ) {
+		int buf = 0, off = 0, size = 0, fmt = 0;
+		fn->glGetTexLevelParameteriv( 0x8C2Au, 0, 0x8C2D, &buf );   // GL_TEXTURE_BUFFER_DATA_STORE_BINDING
+		fn->glGetTexLevelParameteriv( 0x8C2Au, 0, 0x919D, &off );   // GL_TEXTURE_BUFFER_OFFSET
+		fn->glGetTexLevelParameteriv( 0x8C2Au, 0, 0x919E, &size );  // GL_TEXTURE_BUFFER_SIZE
+		fn->glGetTexLevelParameteriv( 0x8C2Au, 0, 0x1003, &fmt );   // GL_TEXTURE_INTERNAL_FORMAT
+		b.tex = unsigned( name );
+		b.buf = unsigned( buf );
+		b.off = off;
+		b.bytes = size;
+		b.glFmt = unsigned( fmt );
+	}
+	fn->glActiveTexture( unsigned( active ) );
+	if ( b.tex && ( !b.buf || b.bytes <= 0 ) ) {
+		why = std::string( sampler ) + ": a texture buffer with no data store";
+		return false;
+	}
+	return true;
+}
 
 }
 
@@ -1131,7 +1215,7 @@ void precipSay( bool wanted, const char * glWhy );
  * present device's tone frame with the view on Vulkan: the run through precipRun. false: GL draws its points (the reason
  * in the "vk precip:" line); a target other than the tone frame returns false with no line. Red WW_VKVIEW_PRECIP_RED=1:
  * GL's. GL enums as numbers (this header carries no GL header). */
-template <class Fn> bool precipDraw( Fn * fn, unsigned prog, int first, int count )
+template <class Fn> bool precipDraw( Fn * fn, unsigned prog, int first, int count, const void * global = nullptr )
 {
 	int fbo = 0, color = 0;
 	fn->glGetIntegerv( 0x8CA6, &fbo );  // GL_DRAW_FRAMEBUFFER_BINDING
@@ -1167,10 +1251,17 @@ template <class Fn> bool precipDraw( Fn * fn, unsigned prog, int first, int coun
 		t.color = unsigned( color );
 		t.first = first;
 		t.n = count;
+		t.global = global;
 		t.lit = geti( "cellInterior" ) != 0 || geti( "cellHasDir" ) != 0;  // the geometry stage's vpLight condition
 		t.roofOn = geti( "pcRoofOn" ) != 0;
 		t.look = fn->glGetUniformLocation( prog, "pcLook" ) >= 0;
 		t.fogged = vol || geti( "fogOn" ) != 0;
+		if ( t.lit )
+			precipLitRead( fn, prog, t );
+		if ( !precipAdmits( t, why ) ) {  // a refused run reads no textures and packs nothing (counted there)
+			precipSay( true, nullptr );
+			return false;
+		}
 		// twins: one a GL atlas (sizes differ by layer; the DDS never changes once loaded), one a slot for the air
 		static std::map<unsigned, char> atlasKeys;
 		static char airKeys[5];
@@ -1185,6 +1276,11 @@ template <class Fn> bool precipDraw( Fn * fn, unsigned prog, int first, int coun
 			ok = fxTexOf( fn, prog, kAir[k], kAirType[k], t.tex[2 + k], why );
 			t.tex[2 + k].twin = reinterpret_cast<std::uintptr_t>( &airKeys[k] );
 		}
+		if ( ok && t.lit && t.litIn.airTerr > 0 ) {  // L8 terrain air: GL's airTerr (cellvolair.cpp's pass grid) into the lit set's t17
+			static char terrKey;
+			ok = fxTexOf( fn, prog, "airTerr", 2, t.tex[8], why );
+			t.tex[8].twin = reinterpret_cast<std::uintptr_t>( &terrKey );
+		}
 		if ( ok && t.look ) {
 			ok = fxTexOf( fn, prog, "pcTexN", 0, t.tex[7], why, true );
 			if ( ok && t.tex[7].tex ) {
@@ -1192,20 +1288,25 @@ template <class Fn> bool precipDraw( Fn * fn, unsigned prog, int first, int coun
 				t.tex[7].still = true;
 			}
 		}
+		if ( ok && t.lit && ( t.litIn.terms & 2 ) )  // L8 term 2a: the lamps' lights (and the cluster's lists)
+			ok = precipTexBufOf( fn, prog, "cellLights", t.lights, why ) && precipTexBufOf( fn, prog, "cellCluster", t.cluster, why );
 		if ( !ok ) {
 			precipOnGl( why.c_str() );
 		} else {
 			fxPack( fn, prog, kT_precipcs, int( std::size( kT_precipcs ) ), t.cs );
 			fxPack( fn, prog, kT_precipps, int( std::size( kT_precipps ) ), t.ps );
+			t.packs = 2;
 			if ( t.look ) {
 				fxPack( fn, prog, kT_preciplookcs, int( std::size( kT_preciplookcs ) ), t.cs );
 				fxPack( fn, prog, kT_preciplookps, int( std::size( kT_preciplookps ) ), t.ps );
+				t.packs += 2;
 			}
 			if ( t.lit ) {  // slice 2b: the light chain's block (its head is kT_precipcs's, packed again the same)
 				fxPack( fn, prog, kT_preciplitcs, int( std::size( kT_preciplitcs ) ), t.cs );
 				t.litBlock = true;
+				t.packs++;
 			}
-			drew = precipRun( t, why );  // a refusal is counted there
+			drew = precipRun( t, why );  // a refusal is counted there (with t.packs)
 		}
 	}
 	precipSay( true, nullptr );

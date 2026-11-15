@@ -56,6 +56,68 @@
 // Globals check (11-15, bar set before its first run): precipRun zeroes globalUniforms (b0) and so does this harness for
 // GL, so a sun-path read of it would pass EXACT here and be wrong in the app. Each lit case captures GL's geometry stage
 // (transform feedback, bit-exact run to run) with b0 zero and with b0 filled non-zero: 0 floats may differ.
+// Pack-order check (11-15, bar set before its first run): after the stat line, a lit run with volTerms 2 (a refused term)
+// read and asked as precipDraw does (precipLitRead, precipAdmits, then the packs) must be refused with 0 packs on refused
+// runs. Red: the same run packed first and handed to precipRun must be refused with its 3 packs counted (> 0), or FAIL.
+// Fixture move (11-15, the bar kept): the probe's refused switch is volPartRed 1 (refused for good), not volTerms 2 (the
+// lamps, lifted below).
+// Lamps (L8 term 2a, 11-15; bar set before its first run, never widened): cases rain_near_lamps (rain_near_lit's run,
+// unfogged) and snow_far_lamps (snow_far_lit's run through the air), volTerms 3 (the sun + the lamps), a cellLights texture
+// buffer this harness uploads (RGBA32F, 8 texels a light, celllights.cpp's layout) with cellLightCount 5: an omni, a
+// spot, a hemisphere, a box and one out of reach; cellShadowOn 0, cellGoboOn 0, cellClusterOn 0 (the flat loop),
+// cellLightPhys 0 (the game's curve, the app's default), cellRed 0. Every lit case sets these switches (the sun cases
+// cellLightCount 0), so the case order cannot carry them. precipRun twins GL's data store (farTexelBuffer). The same
+// verdict, reference checks, repeat clause, reds 64 / 128 and globals check as the lit cases. Each lamp case must also
+// show (else the gate fails): GL with volTerms 3 vs 1 differs on >= 1000 covered samples (the lamps seen); GL with
+// cellLightCount k vs k - 1 differs on >= 1000 for k = 1..4 (each shape seen) and on 0 for k = 5 (out of reach); every
+// name the lamp branch reads is found in GL's program; cellLightCount packed non-zero. Red 256 the lights dropped (Vulkan
+// binds the zero texel buffer); must FAIL in every lamp case. Still refused (precipLitWhy): the lamps' shadow cubes,
+// gobos, the physical falloff, cellRed, a light count past GL's buffer (the cluster lists: lifted in term 2b below).
+// Cluster lists (L8 term 2b, 11-15; bar set before its first run, never widened): case rain_near_cluster (rain_near_lamps'
+// run and five lights, unfogged), volTerms 3, cellClusterOn 1 (the app's default whenever a cell has lights:
+// cellclustergl.cpp wwCellClusterUniforms), globalUniforms (b0) zero but for projectionMatrix (the case's own projection;
+// vpLightsBegin reads it), volRect (0, 0, 1 / W, 1 / H), a 15 x 9 x 4 grid of 64-pixel tiles on log depth over the run's
+// particles and a cellCluster texture buffer (R32I, as cellclustergl.cpp): a third of the clusters walk every light
+// (count -1), a third list all five, a third list 0, 2, 4 (the spot and the box left out). GL gets the same b0 bytes the
+// Vulkan run gets (precipRun takes GL's bytes; the app hands it glcontext.cpp's last upload). The same verdict, reference
+// checks, repeat clause, reds 64 / 128 / 256 as the lamp cases, and the lamp check's volTerms 3 vs 1 (the per-shape and
+// out-of-reach checks stay with the flat-loop lamp cases: a list's own count overrides cellLightCount). The globals
+// check is inverted for this case: b0 filled non-zero vs the case's own b0 must move GL's geometry stage (> 0 floats).
+// The case must also show (else the gate fails): GL with cellClusterOn 0 differs on >= 1000 covered samples (the lists
+// seen); GL with b0 all zero differs on >= 1000 (the projection read); every name the cluster branch reads is found in
+// GL's program; cellClusterDims, cellClusterDepth, cellClusterLog, cellClusterBase and volRect packed non-zero. Red 512
+// b0 dropped (Vulkan's globalUniforms zero) and red 1024 the lists dropped (the zero texel buffer at cellCluster): each
+// must FAIL in the cluster case. Lifted with it: precipLitWhy's cluster refusal; precipAdmits refuses a cluster run with
+// no b0 bytes, precipRun one whose list buffer is not R32I or shorter than cellClusterBase. Not covered here: the
+// lights' radial falloff past (0, 1, 1) (every fixture light keeps it; the twin runs GL's own cellRadial).
+// Vulkan's globals mirror (11-15, bar set before its first run): precipDraw hands every lit run the app's b0, so each
+// lit case but the cluster one also runs Vulkan with the globals check's non-zero b0 as its bytes; it must be EXACT
+// against the judged run (b0 read by nothing but the cluster), else the gate fails.
+// Census (11-15, info, the L8 done line): the lit program set as the app's all-on defaults (exterior: the sun, volTerms
+// 15, volCsm 1, airTerrOn 1, the drift on, vpSun's local law, the lamps' shadow cubes, gobos and cluster lists; interior:
+// the same but no sun, no terrain air, no local law), every refusal precipLitWhys would fire printed. Done is 0 in both.
+// Local sun (L8 term 3, 11-15; bar set before its first run, never widened): case rain_near_sunlocal (rain_near_lit's run,
+// unfogged, volTerms 1) with vpSun (0.9, 1.3, 1.7, 1): the local law outdoors (celllights.cpp fxSunLocal, on by default),
+// the sun's colour from vpSun, not cellDirColor (1.6, 1.2, 0.75). Every other lit case sets vpSun 0 (GL keeps a
+// program's uniforms). The same verdict, reference checks, repeat clause, reds 64 / 128, the globals check and Vulkan's
+// globals mirror as rain_near_lit. The case must also show (else the gate fails): GL with vpSun.w 0 differs on >= 1000
+// covered samples (the law seen); vpSun found in GL's program; vpSun packed non-zero. Red 2048 the law dropped (Vulkan's
+// packed vpSun.w 0, so cellDirColor lights it) must FAIL in the case. Lifted with it: precipLitWhy's local-sun refusal.
+// Fixture move after the first run (11-15, the bar kept): vpSun (0.9, 1.3, 1.7) had cellDirColor's luminance (1.244 vs
+// 1.252) and the air colours the sky terms by luminance (airEnvColour), so the law moved 8 samples; vpSun is now
+// (0.5, 0.4, 0.3, 1), luminance 0.414.
+// Terrain air (L8, 11-15; bar set before its first run, never widened): case snow_far_terrair (snow_far_lit's run, fogged,
+// volTerms 1) with airTerrOn 1: the ground layer stands on the terrain grid (cell_volpart vpLight airGroundAt, on by default
+// with the air: cellvolair.cpp 4219). airTerr is the air's own volAirTerr grid (the app binds its pass grid to both
+// names), airTerrXf / airTerrFineXf its world rows, airTerrRef chosen before the run so the layer's anchor straddles the
+// run's particles (the prep prints the share under it; want 0.2 - 0.8). The same verdict, reference checks, repeat
+// clause, reds 64 / 128, the globals check and Vulkan's globals mirror as snow_far_lit. The case must also show (else the
+// gate fails): GL with airTerrOn 0 differs on >= 1000 covered samples (the grid seen); airTerr, airTerrOn, airTerrXf,
+// airTerrFineXf and airTerrRef found in GL's program; airTerrOn and airTerrXf packed non-zero. Red 4096 the grid dropped
+// (Vulkan's airTerr the zero texture) must FAIL in the case. Lifted with it: precipLitWhy's terrain-air refusal; the
+// app's rain / snow draw twins GL's airTerr (t17) into the lit set.
+// Census roof line (11-15, info): a cell with a roof map turns pcRoofOn on (cellprecip.cpp gpuRoof), refused for every
+// run, lit or not (precipAdmits, slice 3's); the census prints it beside the lit refusals and counts it.
 #define main fxview_main
 #include "fxview.cpp"
 #undef main
@@ -380,8 +442,44 @@ struct Job
 	std::vector<TexIn> tex;
 	int atlasAt = -1, airAt[5] = { -1, -1, -1, -1, -1 }, normAt = -1;  // into tex
 	bool hasN() const { return look == 2 && hasTex; }
+	struct Buf  // L8 term 2a: a texture buffer (buf.txt: name format texels file)
+	{
+		std::string name, fmt, file;
+		int texels = 0;
+		GLuint buf = 0, tex = 0;
+	};
+	std::vector<Buf> bufs;
+	GLuint bufTex( const char * nm ) const
+	{
+		for ( const Buf & b : bufs )
+			if ( b.name == nm )
+				return b.tex;
+		return 0;
+	}
+	bool lamps() const { return lit && !bufs.empty(); }
+	bool localSun() const  // L8 term 3: vpSun.w on (the local law)
+	{
+		const auto it = uni.find( "vpSun" );
+		return lit && it != uni.end() && it->second.size() == 4 && it->second[3] > 0.5;
+	}
+	bool terrAir() const  // L8 terrain air: airTerrOn 1 (the ground layer on the grid)
+	{
+		const auto it = uni.find( "airTerrOn" );
+		return lit && fog && it != uni.end() && !it->second.empty() && it->second[0] > 0.5;
+	}
+	std::vector<char> global;  // L8 term 2b: globalUniforms' bytes (global.bin; empty: zeros)
+	bool cluster() const
+	{
+		for ( const Buf & b : bufs )
+			if ( b.name == "cellCluster" )
+				return lit != 0;
+		return false;
+	}
 };
 const int kNormUnit = 8;  // slice 3: the look's pcTexN
+const int kLightsUnit = 9, kClusterUnit = 10;  // L8 term 2a: the lamps' cellLights / cellCluster
+const int kTerrUnit = 11;  // L8 terrain air: airTerr
+const GLenum kTexBuffer = 0x8C2A;  // GL_TEXTURE_BUFFER
 // slice 2a: the air's textures, in precipRun's tex[2..6] order, their GL units and fxTexOf types
 const char * kAirTex[5] = { "atApTex", "volTex", "volTile", "volAirTerr", "volAirRainMap" };
 const int kAirType[5] = { 1, 1, 0, 2, 0 };
@@ -416,6 +514,18 @@ int main( int argc, char ** argv )
 			if ( !( jf >> j.lit ) )  // slice 2b's field (absent in an older prep: unlit)
 				j.lit = 0;
 			j.uni = readUni( dir + "/" + nm + "/uni.txt" );
+			{
+				std::ifstream bf( dir + "/" + nm + "/buf.txt" );
+				Job::Buf b;
+				while ( bf >> b.name >> b.fmt >> b.texels >> b.file )
+					j.bufs.push_back( b );
+				std::ifstream gf( dir + "/" + nm + "/global.bin", std::ios::binary );
+				if ( gf ) {
+					j.global.assign( 336, 0 );
+					if ( !gf.read( j.global.data(), 336 ) )
+						return fatal( nm + "/global.bin" );
+				}
+			}
 			if ( j.hasTex || j.fog ) {
 				j.tex = readTex( dir + "/" + nm );
 				for ( size_t k = 0; k < j.tex.size(); k++ ) {
@@ -572,8 +682,9 @@ int main( int argc, char ** argv )
 	}
 	GLuint vao = 0;
 	genVertexArrays( 1, &vao );
-	constexpr int kCases = 12;
+	constexpr int kCases = 19;
 	static char twinKeys[kCases], normKeys[kCases];  // one atlas twin a case (the atlases' sizes differ), one normal-map twin a case
+	static char terrKeys[kCases];  // L8 terrain air: airTerr's twin a case
 	static char airKeys[kCases][5], volKeys[kCases];  // the air's twins a case, its volume's shared target a case
 	if ( jobs.size() > size_t( kCases ) )
 		return fatal( "more than " + std::to_string( kCases ) + " cases" );
@@ -630,12 +741,34 @@ int main( int argc, char ** argv )
 		const char * name;
 		int red;
 		bool seen;
-	} reds[7] = { { "cull (radius 0)", 1, false }, { "corners (the strip's last two swapped)", 2, false }, { "near fade (dropped)", 4, false },
+	} reds[12] = { { "cull (radius 0)", 1, false }, { "corners (the strip's last two swapped)", 2, false }, { "near fade (dropped)", 4, false },
 		{ "air (dropped)", 8, false }, { "look (dropped: the plain pipelines)", 16, false }, { "atlas (dropped: the zero texture)", 32, false },
-		{ "light (dropped)", 128, false } };
+		{ "light (dropped)", 128, false }, { "lamps' lights (dropped: the zero texel buffer)", 256, false },
+		{ "cluster's globals (dropped: b0 zero)", 512, false }, { "cluster lists (dropped: the zero texel buffer)", 1024, false },
+		{ "local sun (dropped: vpSun.w 0)", 2048, false }, { "terrain air (dropped: the zero airTerr)", 4096, false } };
+	using TexBufferFn = void( WINAPI * )( GLenum, GLenum, GLuint );
+	const auto texBuffer = reinterpret_cast<TexBufferFn>( wglGetProcAddress( "glTexBuffer" ) );
+	if ( !texBuffer )
+		return fatal( "no glTexBuffer" );
 	for ( Job & j : jobs ) {
 		if ( j.hasTex && !uploadAtlas( dir + "/" + j.name, j.tex[size_t( j.atlasAt )] ) )
 			return fatal( j.name + ": the atlas upload" );
+		for ( Job::Buf & b : j.bufs ) {  // L8 term 2a: a texture buffer as celllights.cpp makes it (glTexBuffer on a GL buffer)
+			const GLenum ifmt = b.fmt == "rgba32f" ? fRgba32f : b.fmt == "r32i" ? GLenum( 0x8235 ) : 0;
+			const size_t bytes = size_t( b.texels ) * ( b.fmt == "r32i" ? 4 : 16 );
+			std::vector<char> data( bytes );
+			std::ifstream bin( dir + "/" + j.name + "/" + b.file, std::ios::binary );
+			if ( !ifmt || !bin.read( data.data(), std::streamsize( bytes ) ) )
+				return fatal( j.name + ": the texture buffer " + b.name );
+			f.genBuffers( 1, &b.buf );
+			f.bindBuffer( kTexBuffer, b.buf );
+			f.bufferData( kTexBuffer, std::ptrdiff_t( bytes ), data.data(), fStatic );
+			f.bindBuffer( kTexBuffer, 0 );
+			glGenTextures( 1, &b.tex );
+			glBindTexture( kTexBuffer, b.tex );
+			texBuffer( kTexBuffer, ifmt, b.buf );
+			glBindTexture( kTexBuffer, 0 );
+		}
 		const GLuint atlas = j.hasTex ? j.tex[size_t( j.atlasAt )].gl : 0;
 		if ( j.hasN() && !uploadAtlas( dir + "/" + j.name, j.tex[size_t( j.normAt )] ) )
 			return fatal( j.name + ": the normal map upload" );
@@ -649,6 +782,8 @@ int main( int argc, char ** argv )
 			if ( !upload( dir + "/" + j.name, t, into ) )
 				return fatal( j.name + ": upload " + t.name );
 		}
+		const void * uboOver = nullptr;  // the globals check's other b0 (bindJob uploads it in place of the case's)
+		const void * vkGlobalOver = nullptr;  // the same bytes as Vulkan's b0 (the globals mirror)
 		auto bindJob = [&]( GLuint prog ) {
 			f.useProgram( prog );
 			setUnis( prog, j.uni );
@@ -660,6 +795,9 @@ int main( int argc, char ** argv )
 				bindUnit( kAirUnit + a, kAirType[a] == 1 ? fT3D : kAirType[a] == 2 ? fT2DA : GLenum( GL_TEXTURE_2D ), t ? t->gl : 0 );
 				u1i( prog, kAirTex[a], kAirUnit + a );
 			}
+			// L8 terrain air: the air's grid at airTerr too (the app binds its pass grid to both; read only with airTerrOn)
+			bindUnit( kTerrUnit, fT2DA, j.fog ? j.tex[size_t( j.airAt[3] )].gl : 0 );
+			u1i( prog, "airTerr", kTerrUnit );
 			if ( !j.fog ) {  // an unfogged case: the air fully off (a program keeps the last fogged case's uniforms)
 				static const float zero4[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
 				u1i( prog, "fogOn", 0 );
@@ -669,10 +807,17 @@ int main( int argc, char ** argv )
 			if ( !j.lit ) {  // an unlit case: GL's light chain off (a program keeps a lit case's uniforms)
 				u1i( prog, "cellHasDir", 0 );
 				u1i( prog, "cellInterior", 0 );
+				u1i( prog, "airTerrOn", 0 );
 			}
 			bindUnit( kNormUnit, GL_TEXTURE_2D, normMap );
 			u1i( prog, "pcTexN", kNormUnit );  // (not in the plain program: no location, nothing set)
+			bindUnit( kLightsUnit, kTexBuffer, j.bufTex( "cellLights" ) );  // L8 term 2a (none: the zero buffer)
+			u1i( prog, "cellLights", kLightsUnit );
+			bindUnit( kClusterUnit, kTexBuffer, j.bufTex( "cellCluster" ) );
+			u1i( prog, "cellCluster", kClusterUnit );
 			f.useProgram( prog );
+			f.bindBuffer( fUbo, ubo );  // L8 term 2b: the case's own b0 (zeros but the cluster case's projection)
+			f.bufferData( fUbo, std::ptrdiff_t( zeros.size() ), uboOver ? uboOver : j.global.empty() ? zeros.data() : j.global.data(), fStatic );
 			f.bindBufferBase( fUbo, 0, ubo );
 		};
 		// GL: cellprecip.cpp's state, its points
@@ -753,14 +898,28 @@ int main( int argc, char ** argv )
 			ok = ok && o.flips >= 1000;
 		}
 		if ( j.lit ) {  // slice 2b's seen-checks (header): the light seen, thin vs thick seen, no NaN / Inf, the sun's names found
-			auto drawGl = [&]( int mode ) {  // 1 cellHasDir 0, 2 pcTrans 1.0; the program's uniforms set back after
+			auto drawGl = [&]( int mode ) {  // 1 cellHasDir 0, 2 pcTrans 1.0, 3 volTerms 1, 10 + k cellLightCount k; set back after
 				before( fbRef, j.zd );
 				bindJob( pJob );
 				const float thick = 1.0f;
 				if ( mode == 1 )
 					u1i( pJob, "cellHasDir", 0 );
-				else
+				else if ( mode == 2 )
 					f.uniform1fv( f.getUniformLocation( pJob, "pcTrans" ), 1, &thick );
+				else if ( mode == 3 )
+					u1i( pJob, "volTerms", 1 );
+				else if ( mode == 7 )  // L8 terrain air: the grid off (the absolute anchor)
+					u1i( pJob, "airTerrOn", 0 );
+				else if ( mode == 4 )  // L8 term 2b: the lists off (the flat loop)
+					u1i( pJob, "cellClusterOn", 0 );
+				else if ( mode == 5 ) {  // L8 term 2b: b0 all zero (no projection: vpLightsBegin walks every light)
+					f.bindBuffer( fUbo, ubo );
+					f.bufferData( fUbo, std::ptrdiff_t( zeros.size() ), zeros.data(), fStatic );
+				} else if ( mode == 6 ) {  // L8 term 3: the local law off (vpSun.w 0)
+					const float off[4] = { 0.5f, 0.4f, 0.3f, 0.0f };
+					f.uniform4fv( f.getUniformLocation( pJob, "vpSun" ), 1, off );
+				} else
+					u1i( pJob, "cellLightCount", mode - 10 );
 				f.bindFramebuffer( fFb, fbRef );
 				glViewport( 0, 0, W, H );
 				glEnable( GL_DEPTH_TEST );
@@ -797,6 +956,59 @@ int main( int argc, char ** argv )
 				"NaN / Inf halves in GL's lit frame %zu (want 0); sun-branch names missing from GL's program: %s\n", j.name.c_str(), dark.flips, dark.covered,
 				thick.flips, bad, missing.empty() ? "none" : missing.c_str() );
 			ok = ok && dark.flips >= 1000 && thick.flips >= 1000 && bad == 0 && missing.empty();
+			if ( j.localSun() ) {  // L8 term 3's seen-checks (header): the law seen, vpSun found
+				const Verdict noLaw = judge( bg, drawGl( 6 ), refA, refB, refB );
+				const bool found = f.getUniformLocation( pJob, "vpSun" ) >= 0;
+				std::printf( "PRECIPVIEW %s local sun checks: GL with vpSun.w 0 differs %zu of %zu covered samples (want >= 1000); vpSun %s in GL's program\n",
+					j.name.c_str(), noLaw.flips, noLaw.covered, found ? "found" : "MISSING" );
+				ok = ok && noLaw.flips >= 1000 && found;
+			}
+			if ( j.terrAir() ) {  // L8 terrain air's seen-checks (header): the grid seen, its names found
+				const Verdict flatGround = judge( bg, drawGl( 7 ), refA, refB, refB );
+				std::string tmiss;
+				for ( const char * nm : { "airTerr", "airTerrOn", "airTerrXf", "airTerrFineXf", "airTerrRef" } )
+					if ( f.getUniformLocation( pJob, nm ) < 0 )
+						tmiss += std::string( tmiss.empty() ? "" : ", " ) + nm;
+				std::printf( "PRECIPVIEW %s terrain air checks: GL with airTerrOn 0 differs %zu of %zu covered samples (want >= 1000); terrain names "
+					"missing from GL's program: %s\n", j.name.c_str(), flatGround.flips, flatGround.covered, tmiss.empty() ? "none" : tmiss.c_str() );
+				ok = ok && flatGround.flips >= 1000 && tmiss.empty();
+			}
+			if ( j.cluster() ) {  // L8 term 2b's seen-checks (header): the lists seen, b0's projection read, the names, volTerms 3 vs 1
+				const Verdict noLamps = judge( bg, drawGl( 3 ), refA, refB, refB );
+				const Verdict flat = judge( bg, drawGl( 4 ), refA, refB, refB );
+				const Verdict noB0 = judge( bg, drawGl( 5 ), refA, refB, refB );
+				std::string cmiss;
+				for ( const char * nm : { "cellClusterOn", "cellCluster", "cellClusterDims", "cellClusterOrigin", "cellClusterDepth", "cellClusterLog",
+						"cellClusterBase", "volRect" } )
+					if ( f.getUniformLocation( pJob, nm ) < 0 )
+						cmiss += std::string( cmiss.empty() ? "" : ", " ) + nm;
+				std::printf( "PRECIPVIEW %s cluster checks: GL with volTerms 1 differs %zu of %zu covered samples, cellClusterOn 0 %zu, b0 all zero %zu "
+					"(each want >= 1000); cluster names missing from GL's program: %s\n", j.name.c_str(), noLamps.flips, noLamps.covered, flat.flips,
+					noB0.flips, cmiss.empty() ? "none" : cmiss.c_str() );
+				ok = ok && noLamps.flips >= 1000 && flat.flips >= 1000 && noB0.flips >= 1000 && cmiss.empty();
+			} else if ( j.lamps() ) {  // L8 term 2a's seen-checks (header): the lamps seen, each shape seen, the far one unseen
+				const Verdict noLamps = judge( bg, drawGl( 3 ), refA, refB, refB );
+				std::vector<std::uint16_t> prev = drawGl( 10 );
+				size_t shape[5] = {}, farDiff = 0;
+				for ( int k = 1; k <= 5; k++ ) {
+					std::vector<std::uint16_t> cur = drawGl( 10 + k );
+					const Verdict s = judge( bg, cur, prev, refB, refB );
+					shape[k - 1] = s.flips;
+					if ( k == 5 )
+						farDiff = s.diff;
+					prev.swap( cur );
+				}
+				std::string lmiss;
+				for ( const char * nm : { "cellLightCount", "cellLights", "cellShadowOn", "cellGoboOn", "cellClusterOn", "cellLightPhys", "cellRed" } )
+					if ( f.getUniformLocation( pJob, nm ) < 0 )
+						lmiss += std::string( lmiss.empty() ? "" : ", " ) + nm;
+				std::printf( "PRECIPVIEW %s lamp checks: GL with volTerms 1 differs %zu of %zu covered samples (want >= 1000); light k vs k - 1: omni %zu, "
+					"spot %zu, hemisphere %zu, box %zu (each want >= 1000), out of reach %zu flips / %zu halves (want 0); lamp names missing from GL's "
+					"program: %s\n", j.name.c_str(), noLamps.flips, noLamps.covered, shape[0], shape[1], shape[2], shape[3], shape[4], farDiff,
+					lmiss.empty() ? "none" : lmiss.c_str() );
+				ok = ok && noLamps.flips >= 1000 && shape[0] >= 1000 && shape[1] >= 1000 && shape[2] >= 1000 && shape[3] >= 1000 && shape[4] == 0
+					&& farDiff == 0 && lmiss.empty();
+			}
 		}
 
 		// the per-sample reference (header): GL's program per particle with blending off, blended per sample at 1x
@@ -993,6 +1205,20 @@ int main( int argc, char ** argv )
 			}
 			t.tex[1].twin = reinterpret_cast<std::uintptr_t>( &twinKeys[jobAt] );
 			t.fogged = j.fog != 0;
+			t.look = j.look != 0;
+			t.lit = j.lit != 0;
+			t.global = vkGlobalOver ? vkGlobalOver : j.global.empty() ? nullptr : j.global.data();  // L8 term 2b: GL's b0 bytes (the app: glcontext.cpp's last upload)
+			if ( t.lit )  // precipDraw's order: the switches from GL, the refusals, then the packs
+				WwVkPresent::precipLitRead( &ga, pJob, t );
+			if ( !WwVkPresent::precipAdmits( t, why ) ) {
+				std::printf( "PRECIPVIEW precipAdmits refused: %s\n", why.c_str() );
+				return false;
+			}
+			if ( t.lit && ( t.litIn.terms & 2 ) && ( !WwVkPresent::precipTexBufOf( &ga, pJob, "cellLights", t.lights, why )
+				|| !WwVkPresent::precipTexBufOf( &ga, pJob, "cellCluster", t.cluster, why ) ) ) {  // precipDraw's (L8 term 2a)
+				std::printf( "PRECIPVIEW precipTexBufOf refused: %s\n", why.c_str() );
+				return false;
+			}
 			for ( int a = 0; a < 5 && j.fog; a++ ) {
 				if ( !WwVkPresent::fxTexOf( &ga, pJob, kAirTex[a], kAirType[a], t.tex[2 + a], why ) ) {
 					std::printf( "PRECIPVIEW fxTexOf refused (%s): %s\n", kAirTex[a], why.c_str() );
@@ -1000,10 +1226,17 @@ int main( int argc, char ** argv )
 				}
 				t.tex[2 + a].twin = reinterpret_cast<std::uintptr_t>( &airKeys[jobAt][a] );
 			}
+			if ( t.lit && t.litIn.airTerr > 0 ) {  // precipDraw's (L8 terrain air): GL's airTerr into the lit set's t17
+				if ( !WwVkPresent::fxTexOf( &ga, pJob, "airTerr", 2, t.tex[8], why ) ) {
+					std::printf( "PRECIPVIEW fxTexOf refused (airTerr): %s\n", why.c_str() );
+					return false;
+				}
+				t.tex[8].twin = reinterpret_cast<std::uintptr_t>( &terrKeys[jobAt] );
+			}
 			WwVkPresent::fxPack( &ga, pJob, WwVkPresent::kT_precipcs, int( std::size( WwVkPresent::kT_precipcs ) ), t.cs );
 			WwVkPresent::fxPack( &ga, pJob, WwVkPresent::kT_precipps, int( std::size( WwVkPresent::kT_precipps ) ), t.ps );
+			t.packs = 2;
 			if ( j.look ) {  // slice 3: cell_precip_look.prog's run (its fields, pcTexN at tex[7])
-				t.look = true;
 				WwVkPresent::fxPack( &ga, pJob, WwVkPresent::kT_preciplookcs, int( std::size( WwVkPresent::kT_preciplookcs ) ), t.cs );
 				WwVkPresent::fxPack( &ga, pJob, WwVkPresent::kT_preciplookps, int( std::size( WwVkPresent::kT_preciplookps ) ), t.ps );
 				if ( !WwVkPresent::fxTexOf( &ga, pJob, "pcTexN", 0, t.tex[7], why, true ) ) {
@@ -1013,18 +1246,53 @@ int main( int argc, char ** argv )
 				t.tex[7].twin = reinterpret_cast<std::uintptr_t>( &normKeys[jobAt] );
 			}
 			if ( j.lit ) {  // slice 2b: the light chain's block, as precipDraw packs it
-				t.lit = true;
 				WwVkPresent::fxPack( &ga, pJob, WwVkPresent::kT_preciplitcs, int( std::size( WwVkPresent::kT_preciplitcs ) ), t.cs );
 				t.litBlock = true;
 				if ( checkSeed ) {  // the sun's inputs packed, not zero (header)
 					std::string zero;
-					for ( const char * nm : { "cellDirColor", "cellDirTo", "cellRow", "volPhase", "volGi" } ) {
+					for ( const char * nm : { "cellDirColor", "cellDirTo", "cellRow", "volPhase", "volGi", "cellLightCount" } ) {
+						if ( !j.lamps() && std::strcmp( nm, "cellLightCount" ) == 0 )
+							continue;  // (the sun cases: 0)
 						const int at = precipAt( WwVkPresent::kT_preciplitcs, int( std::size( WwVkPresent::kT_preciplitcs ) ), nm );
 						bool any = false;
-						for ( int b = 0; b < 12 && at >= 0; b++ )
+						for ( int b = 0; b < ( std::strcmp( nm, "cellLightCount" ) == 0 ? 4 : 12 ) && at >= 0; b++ )
 							any = any || t.cs[at + b] != 0;
 						if ( !any )
 							zero += std::string( zero.empty() ? "" : ", " ) + nm;
+					}
+					if ( j.cluster() ) {  // the grid and volRect packed, not zero (cluster bar)
+						const struct { const char * nm; int bytes; } cf[5] = {
+							{ "cellClusterDims", 16 }, { "cellClusterDepth", 16 }, { "cellClusterLog", 8 }, { "cellClusterBase", 4 }, { "volRect", 16 } };
+						for ( const auto & f : cf ) {
+							int at = precipAt( WwVkPresent::kT_preciplitcs, int( std::size( WwVkPresent::kT_preciplitcs ) ), f.nm );
+							const unsigned char * src = t.cs;
+							if ( at < 0 ) {
+								at = precipAt( WwVkPresent::kT_precipcs, int( std::size( WwVkPresent::kT_precipcs ) ), f.nm );
+							}
+							bool any = false;
+							for ( int b = 0; b < f.bytes && at >= 0; b++ )
+								any = any || src[at + b] != 0;
+							if ( !any )
+								zero += std::string( zero.empty() ? "" : ", " ) + f.nm;
+						}
+					}
+					if ( j.localSun() ) {  // vpSun packed, not zero (local sun bar)
+						const int at = precipAt( WwVkPresent::kT_preciplitcs, int( std::size( WwVkPresent::kT_preciplitcs ) ), "vpSun" );
+						bool any = false;
+						for ( int b = 0; b < 16 && at >= 0; b++ )
+							any = any || t.cs[at + b] != 0;
+						if ( !any )
+							zero += std::string( zero.empty() ? "" : ", " ) + "vpSun";
+					}
+					if ( j.terrAir() ) {  // airTerrOn and airTerrXf packed, not zero (terrain air bar)
+						for ( const auto & tf : { std::make_pair( "airTerrOn", 4 ), std::make_pair( "airTerrXf", 16 ) } ) {
+							const int at = precipAt( WwVkPresent::kT_preciplitcs, int( std::size( WwVkPresent::kT_preciplitcs ) ), tf.first );
+							bool any = false;
+							for ( int b = 0; b < tf.second && at >= 0; b++ )
+								any = any || t.cs[at + b] != 0;
+							if ( !any )
+								zero += std::string( zero.empty() ? "" : ", " ) + tf.first;
+						}
 					}
 					std::printf( "PRECIPVIEW %s lit packed: zero or absent in the light block: %s\n", j.name.c_str(), zero.empty() ? "none" : zero.c_str() );
 					if ( !zero.empty() )
@@ -1173,24 +1441,33 @@ int main( int argc, char ** argv )
 						std::printf( "PRECIPVIEW %s lit gA: %zu distinct captured values with unequal channels (want >= 100)\n", j.name.c_str(), distinct );
 						ok = ok && distinct >= 100;
 					}
-					if ( j.lit ) {  // the globals check (header): b0 filled non-zero must not move GL's geometry stage
+					if ( j.lit ) {  // the globals check (header): b0 filled non-zero moves GL's geometry stage only in the cluster case
 						std::vector<float> g( 84 );
 						for ( size_t k = 0; k < g.size(); k++ )
 							g[k] = 0.37f + 0.11f * float( k % 13 ) - 0.05f * float( k % 7 );
-						f.bindBuffer( fUbo, ubo );
-						f.bufferData( fUbo, std::ptrdiff_t( g.size() * 4 ), g.data(), fStatic );
+						uboOver = g.data();  // (bindJob uploads b0 itself: the other bytes go through it)
 						std::vector<float> tfG;
 						GLuint prG = 0;
 						capture( tfG, prG );
+						uboOver = nullptr;
 						f.bindBuffer( fUbo, ubo );
-						f.bufferData( fUbo, std::ptrdiff_t( zeros.size() ), zeros.data(), fStatic );
+						f.bufferData( fUbo, std::ptrdiff_t( zeros.size() ), j.global.empty() ? zeros.data() : j.global.data(), fStatic );
 						size_t gDiff = tfG.size() == tf1.size() ? 0 : std::max( tfG.size(), tf1.size() );
 						for ( size_t i = 0; i < std::min( tfG.size(), tf1.size() ); i++ )
 							gDiff += std::memcmp( &tfG[i], &tf1[i], 4 ) != 0;
 						const bool blk = f.getUniformBlockIndex( pTf, "globalUniforms" ) != 0xFFFFFFFFu;
-						std::printf( "PRECIPVIEW %s lit globals: b0 non-zero vs zero, %u / %u triangles, %zu floats differ (want 0; block %s in GL's program)\n",
-							j.name.c_str(), prG, pr1, gDiff, blk ? "active" : "not active" );
-						ok = ok && gDiff == 0 && prG == pr1 && prG > 0;
+						std::printf( "PRECIPVIEW %s lit globals: b0 other vs the case's, %u / %u triangles, %zu floats differ (want %s; block %s in GL's program)\n",
+							j.name.c_str(), prG, pr1, gDiff, j.cluster() ? "> 0, the cluster reads b0" : "0", blk ? "active" : "not active" );
+						ok = ok && ( j.cluster() ? gDiff > 0 : gDiff == 0 ) && prG == pr1 && prG > 0;
+						if ( !j.cluster() ) {  // Vulkan's globals mirror (header): the app's b0 must not move a run without the lists
+							std::vector<std::uint16_t> a4, b4;
+							vkGlobalOver = g.data();
+							const bool ran = runVk( 0, a4, b4, false );
+							vkGlobalOver = nullptr;
+							const char * word = ran ? judge( bg, a4, a, b4, b ).word() : "the run failed";
+							std::printf( "PRECIPVIEW %s lit globals on Vulkan: b0 other vs none, against the judged run %s (want EXACT)\n", j.name.c_str(), word );
+							ok = ok && ran && std::strcmp( word, "EXACT" ) == 0;
+						}
 					}
 					std::vector<std::uint8_t> rec( size_t( j.n ) * 112 );
 					std::vector<std::uint16_t> a3, b3;
@@ -1208,8 +1485,9 @@ int main( int argc, char ** argv )
 			}
 		}
 		for ( RedSeen & r : reds ) {
-			if ( ( r.red == 16 && !j.look ) || ( r.red == 32 && !j.hasTex ) || ( r.red == 128 && !j.lit ) )
-				continue;  // a plain run has no look to drop, a case with no atlas no atlas, an unlit one no light
+			if ( ( r.red == 16 && !j.look ) || ( r.red == 32 && !j.hasTex ) || ( r.red == 128 && !j.lit ) || ( r.red == 256 && !j.lamps() )
+				|| ( ( r.red == 512 || r.red == 1024 ) && !j.cluster() ) || ( r.red == 2048 && !j.localSun() ) || ( r.red == 4096 && !j.terrAir() ) )
+				continue;  // a plain run has no look to drop, a case with no atlas no atlas, an unlit one no light, no lamps no lights
 			std::vector<std::uint16_t> a, b;
 			if ( !runVk( r.red, a, b, false ) ) {
 				std::printf( "PRECIPVIEW %s red %s: the run failed (counts as a FAIL)\n", j.name.c_str(), r.name );
@@ -1229,6 +1507,14 @@ int main( int argc, char ** argv )
 				std::printf( "PRECIPVIEW %s red light PASSED: the case does not see its light\n", j.name.c_str() );
 				ok = false;
 			}
+			if ( r.red == 256 && v.ok() ) {  // every lamp case must see its lights dropped
+				std::printf( "PRECIPVIEW %s red lamps' lights PASSED: the case does not see its lights\n", j.name.c_str() );
+				ok = false;
+			}
+			if ( ( r.red == 512 || r.red == 1024 || r.red == 2048 || r.red == 4096 ) && v.ok() ) {  // the cluster case must see its b0 and its lists dropped
+				std::printf( "PRECIPVIEW %s red %s PASSED: the case does not see it\n", j.name.c_str(), r.name );
+				ok = false;
+			}
 		}
 		jobAt++;
 	}
@@ -1241,12 +1527,96 @@ int main( int argc, char ** argv )
 	std::printf( "PRECIPVIEW stat: %d runs, %d failed (%s), %d pipelines built in %.1f ms, %d input copies, drawing thread %.3f ms a run "
 		"(max %.3f; includes the harness's hand-off wait, not a frame cost)\n", st.runs, st.fails, st.failWhy.c_str(), st.pipelines, st.buildMs,
 		st.copies, st.runs ? st.cpuMs / st.runs : 0.0, st.maxMs );
+	{  // the pack-order check (header)
+		f.useProgram( pPrecip );
+		u1i( pPrecip, "cellHasDir", 1 );
+		u1i( pPrecip, "cellInterior", 0 );
+		u1i( pPrecip, "volTerms", 1 );
+		u1i( pPrecip, "volPartRed", 1 );  // refused for good (header's fixture move)
+		f.bindFramebuffer( fFb, fbFrame );
+		glViewport( 0, 0, W, H );
+		auto probe = [&]( bool packFirst ) {
+			WwVkPresent::PrecipRun t;
+			t.w = W;
+			t.h = H;
+			glGetIntegerv( GL_VIEWPORT, t.vp );
+			t.color = fc;
+			t.first = jobs[0].first;
+			t.n = jobs[0].n;
+			t.lit = true;
+			WwVkPresent::precipLitRead( &ga, pPrecip, t );
+			bool drew = false;
+			if ( packFirst || WwVkPresent::precipAdmits( t, why ) ) {
+				WwVkPresent::fxPack( &ga, pPrecip, WwVkPresent::kT_precipcs, int( std::size( WwVkPresent::kT_precipcs ) ), t.cs );
+				WwVkPresent::fxPack( &ga, pPrecip, WwVkPresent::kT_precipps, int( std::size( WwVkPresent::kT_precipps ) ), t.ps );
+				WwVkPresent::fxPack( &ga, pPrecip, WwVkPresent::kT_preciplitcs, int( std::size( WwVkPresent::kT_preciplitcs ) ), t.cs );
+				t.litBlock = true;
+				t.packs = 3;
+				drew = WwVkPresent::precipRun( t, why );
+			}
+			const WwVkPresent::FxStat s = WwVkPresent::takePrecipStat();
+			std::printf( "PRECIPVIEW pack order (%s): %s, %d refused, %d packs on refused runs (%s)\n",
+				packFirst ? "red: packed first" : "the app's: refusals first", drew ? "DREW" : "refused", s.fails, s.refusedPacks,
+				s.failWhy.c_str() );
+			return drew ? -1 : s.fails == 1 ? s.refusedPacks : -1;
+		};
+		const int asked = probe( false ), red = probe( true );
+		if ( asked != 0 ) {
+			std::printf( "PRECIPVIEW pack order FAILED: a refused run must pay 0 packs\n" );
+			ok = false;
+		}
+		if ( red <= 0 ) {
+			std::printf( "PRECIPVIEW red pack order PASSED: the count cannot see packs on a refused run\n" );
+			ok = false;
+		} else {
+			std::printf( "PRECIPVIEW red pack order FAILS as it must (%d packs counted)\n", red );
+		}
+		u1i( pPrecip, "volPartRed", 0 );
+	}
+	{  // the census (header): the app's all-on lit defaults, every refusal that would fire (info; 0 is the L8 done line)
+		const float drift[4] = { 0.5f, 0.0f, 1.0f, 0.5f }, sun[4] = { 1.0f, 0.9f, 0.8f, 1.0f }, zero4[4] = {};
+		struct { const char * name; int interior; } where[2] = { { "exterior", 0 }, { "interior", 1 } };
+		for ( const auto & w : where ) {
+			f.useProgram( pPrecip );
+			u1i( pPrecip, "cellHasDir", 1 - w.interior );          // celllights.cpp: the sun outdoors
+			u1i( pPrecip, "cellInterior", w.interior );
+			u1i( pPrecip, "volTerms", 15 );                         // cellvolair.cpp 4234: all four terms
+			u1i( pPrecip, "volCsm", 1 );                            // cellvolair.cpp 4233: the cascades drawn
+			u1i( pPrecip, "airTerrOn", 1 - w.interior );            // cellvolair.cpp 4219: the terrain air outdoors
+			f.uniform4fv( f.getUniformLocation( pPrecip, "volAirDrift" ), 1, drift );  // cellvolair.cpp 3575: drift on
+			f.uniform4fv( f.getUniformLocation( pPrecip, "vpSun" ), 1, w.interior ? zero4 : sun );  // celllights.cpp 2100
+			u1i( pPrecip, "cellShadowOn", 1 );                      // celllights.cpp 1849
+			u1i( pPrecip, "cellGoboOn", 1 );                        // celllights.cpp 1904
+			u1i( pPrecip, "cellClusterOn", 1 );                     // cellclustergl.cpp 370
+			WwVkPresent::PrecipRun t;
+			t.lit = true;
+			WwVkPresent::precipLitRead( &ga, pPrecip, t );
+			const char * whys[24] = {};
+			int n = WwVkPresent::precipLitWhys( t.litIn, whys, 24 );
+			if ( n < 24 )  // the roof map (header's census roof line): precipAdmits refuses pcRoofOn for every run, lit or not
+				whys[n] = "the roof map on (pcRoofOn: a cell with a roof map; precipAdmits, every run)";
+			n++;
+			std::printf( "PRECIPVIEW census %s (the app's all-on lit defaults): %d refusals (0 is the L8 done line)\n", w.name, n );
+			for ( int k = 0; k < n && k < 24; k++ )
+				std::printf( "PRECIPVIEW census %s refusal %d: %s\n", w.name, k + 1, whys[k] );
+		}
+		u1i( pPrecip, "cellInterior", 0 );
+		u1i( pPrecip, "volTerms", 1 );
+		u1i( pPrecip, "volCsm", 0 );
+		u1i( pPrecip, "airTerrOn", 0 );
+		f.uniform4fv( f.getUniformLocation( pPrecip, "volAirDrift" ), 1, zero4 );
+		f.uniform4fv( f.getUniformLocation( pPrecip, "vpSun" ), 1, zero4 );
+		u1i( pPrecip, "cellShadowOn", 0 );
+		u1i( pPrecip, "cellGoboOn", 0 );
+		u1i( pPrecip, "cellClusterOn", 0 );
+	}
 	for ( char & k : twinKeys )  // a BC atlas is a farTwin, an uncompressed one a shared target
 		WwVkPresent::farTwinDrop( reinterpret_cast<std::uintptr_t>( &k ) ), WwVkPresent::sharedTargetDrop( reinterpret_cast<std::uintptr_t>( &k ) );
 	for ( char & k : normKeys )
 		WwVkPresent::farTwinDrop( reinterpret_cast<std::uintptr_t>( &k ) ), WwVkPresent::sharedTargetDrop( reinterpret_cast<std::uintptr_t>( &k ) );
 	for ( int c = 0; c < kCases; c++ ) {
 		WwVkPresent::sharedTargetDrop( reinterpret_cast<std::uintptr_t>( &volKeys[c] ) );
+		WwVkPresent::sharedTargetDrop( reinterpret_cast<std::uintptr_t>( &terrKeys[c] ) );
 		for ( char & k : airKeys[c] )
 			WwVkPresent::sharedTargetDrop( reinterpret_cast<std::uintptr_t>( &k ) );
 	}

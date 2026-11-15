@@ -600,6 +600,94 @@ bool precipRecord( std::string & why )
 
 namespace WwVkPresent
 {
+int precipLitWhys( const PrecipRun::LitIn & l, const char ** out, int max )
+{
+	int n = 0;
+	auto add = [&]( const char * w ) {
+		if ( n < max )
+			out[n] = w;
+		n++;
+	};
+	if ( l.terms < 0 || l.interior < 0 || l.partRed < 0 || l.csm < 0 || l.airTerr < 0 )
+		add( "the lit program lacks a switch the refusals read" );
+	if ( l.interior > 0 )
+		add( "an interior's lit particles (its law is not judged)" );
+	// The gate judged the sun (volTerms 1), the lamps' flat loop (2, term 2a) and their cluster lists (term 2b); any other
+	// term refuses, idle or not.
+	if ( l.terms > 0 && ( l.terms & 2 ) ) {
+		if ( l.shadow < 0 || l.gobo < 0 || l.cluster < 0 || l.cellRed < 0 )
+			add( "the lit program lacks a lamp switch the refusals read" );
+		if ( l.shadow > 0 )
+			add( "the lamps' shadow cubes on the particles (refused in term 2a)" );
+		if ( l.gobo > 0 )
+			add( "the lamps' gobos on the particles (refused in term 2a)" );
+		if ( l.phys > 0.5f )
+			add( "the lamps' physical falloff on the particles (refused in term 2a)" );
+		if ( l.cellRed > 0 )
+			add( "a cell-light red (cellRed) in a lit run with lamps" );
+	}
+	if ( l.terms > 0 && ( l.terms & 4 ) )
+		add( "the GI term on the particles (refused in slice 2b)" );
+	if ( l.terms > 0 && ( l.terms & 8 ) )
+		add( "the ambient term on the particles (refused in slice 2b)" );
+	if ( l.terms > 0 && ( l.terms & ~15 ) )
+		add( "an unknown volTerms bit (refused in slice 2b)" );
+	if ( l.csm > 0 )  // (the sun's only shadow read, wwSunShadow, is behind volCsm)
+		add( "the sun's shadow map on the particles (refused in slice 2b)" );
+	if ( l.drift > 0.0f )
+		add( "the air's drift on the sun (refused in slice 2b)" );
+	if ( l.partRed > 0 )
+		add( "a particle-light red (volPartRed) in a lit run" );
+	return n;
+}
+
+const char * precipLitWhy( const PrecipRun::LitIn & l )
+{
+	const char * w = nullptr;
+	return precipLitWhys( l, &w, 1 ) > 0 ? w : nullptr;
+}
+
+bool precipAdmits( const PrecipRun & t, std::string & why )
+{
+	Precip & D = precip();
+	Tone & T = tone();
+	Vk & v = vk();
+	Gl & g = gl();
+	FxStat & S = D.st;
+	auto refuse = [&]( const std::string & w ) {
+		why = w;
+		S.fails++;
+		S.failWhy = w;
+		S.refusedPacks += t.packs;
+		return false;
+	};
+	if ( D.broken )
+		return refuse( D.brokenWhy );
+	if ( t.lit ) {  // slice 2b: the sun alone; the rest of GL's particle light is refused (GL draws)
+		if ( t.look )
+			return refuse( "a lit cell with the precipitation look (a later slice)" );
+		if ( const char * w = precipLitWhy( t.litIn ) )
+			return refuse( w );
+		if ( ( t.litIn.terms & 2 ) && t.litIn.cluster != 0 && !t.global )
+			return refuse( "the lamps' cluster lists with no globalUniforms bytes (b0's projection)" );
+	}
+	if ( t.roofOn || t.tex[0].tex )
+		return refuse( "the roof map on (slice 3's)" );
+	if ( !toneFrameIs( t.color ) || !T.colorView || !T.dsView )
+		return refuse( "the draw target is not the shared tone frame" );
+	if ( T.w != t.w || T.h != t.h )
+		return refuse( "rain / snow's size is not the tone frame's" );
+	if ( t.vp[2] < 1 || t.vp[3] < 1 )
+		return refuse( "an empty viewport" );
+	if ( t.n < 1 || t.first < 0 )
+		return refuse( "no particles" );
+	if ( !v.ok || !g.ok || g.ctx != reinterpret_cast<void *>( wglGetCurrentContext() ) )
+		return refuse( "the present device or GL's entry points are not ready in this context" );
+	if ( !g.copyImageSubData )
+		return refuse( "no glCopyImageSubData (the atlas' copy into its shared twin)" );
+	return true;
+}
+
 bool precipRun( const PrecipRun & t, std::string & why )
 {
 	Fx & F = fx();
@@ -613,6 +701,7 @@ bool precipRun( const PrecipRun & t, std::string & why )
 		why = w;
 		S.fails++;
 		S.failWhy = w;
+		S.refusedPacks += t.packs;
 		return false;
 	};
 	auto breakOff = [&]( const std::string & w ) {
@@ -620,13 +709,11 @@ bool precipRun( const PrecipRun & t, std::string & why )
 		D.brokenWhy = "rain / snow on Vulkan broke: " + w;
 		return refuse( D.brokenWhy );
 	};
-	if ( D.broken )
-		return refuse( D.brokenWhy );
-	if ( t.lit ) {  // slice 2b: the sun alone; the rest of GL's particle light is refused (GL draws)
+	if ( !precipAdmits( t, why ) )  // (counted there)
+		return false;
+	if ( t.lit ) {  // the packed block must say what litIn said (a backstop: the same refusals on the bytes the pass reads)
 		if ( !t.litBlock )
 			return refuse( "a lit cell without its light block packed" );
-		if ( t.look )
-			return refuse( "a lit cell with the precipitation look (a later slice)" );
 		auto litAt = [&]( const char * nm ) {  // the light block's own members past the head, or the head's (kT_precipcs)
 			const int at = precipAt( kT_preciplitcs, int( std::size( kT_preciplitcs ) ), nm );
 			return at >= 0 ? at : precipAt( kT_precipcs, int( std::size( kT_precipcs ) ), nm );
@@ -645,46 +732,36 @@ bool precipRun( const PrecipRun & t, std::string & why )
 				std::memcpy( &x, t.cs + at + 4 * k, 4 );
 			return x;
 		};
-		const int terms = litI( "volTerms" );
-		const bool local = litF( "vpSun", 3 ) > 0.5f;
-		if ( terms < 0 || litI( "cellInterior" ) < 0 || litI( "volPartRed" ) < 0 )
-			return refuse( "the light block lacks a member the refusals read" );
-		if ( litI( "cellInterior" ) != 0 )
-			return refuse( "an interior's lit particles (its law is not judged)" );
-		// The gate judged volTerms 1 only: any other term refuses, idle or not.
-		if ( terms & 2 )
-			return refuse( "the lamps term on the particles (refused in slice 2b)" );
-		if ( terms & 4 )
-			return refuse( "the GI term on the particles (refused in slice 2b)" );
-		if ( terms & 8 )
-			return refuse( "the ambient term on the particles (refused in slice 2b)" );
-		if ( terms & ~15 )
-			return refuse( "an unknown volTerms bit (refused in slice 2b)" );
-		if ( litI( "volCsm" ) != 0 )  // (the sun's only shadow read, wwSunShadow, is behind volCsm)
-			return refuse( "the sun's shadow map on the particles (refused in slice 2b)" );
-		if ( litF( "volAirDrift", 0 ) > 0.0f )
-			return refuse( "the air's drift on the sun (refused in slice 2b)" );
-		if ( litI( "airTerrOn" ) != 0 )
-			return refuse( "the terrain air on the sun (refused in slice 2b)" );
-		if ( local )
-			return refuse( "the local sun law (refused in slice 2b)" );
-		if ( litI( "volPartRed" ) != 0 )
-			return refuse( "a particle-light red (volPartRed) in a lit run" );
+		PrecipRun::LitIn b;
+		b.terms = litI( "volTerms" );
+		b.interior = litI( "cellInterior" );
+		b.partRed = litI( "volPartRed" );
+		b.csm = litI( "volCsm" );
+		b.airTerr = litI( "airTerrOn" );
+		b.drift = litF( "volAirDrift", 0 );
+		b.sunA = litF( "vpSun", 3 );
+		b.shadow = litI( "cellShadowOn" );
+		b.gobo = litI( "cellGoboOn" );
+		b.cluster = litI( "cellClusterOn" );
+		b.cellRed = litI( "cellRed" );
+		b.phys = litF( "cellLightPhys", 0 );
+		if ( const char * w = precipLitWhy( b ) )
+			return refuse( std::string( "the packed light block: " ) + w );
+		if ( b.terms & 2 ) {  // the lamps: GL's lights a float buffer holding every counted light (8 texels each)
+			const long long need = std::max( litI( "cellLightCount" ), 0 ) * 8LL * 16LL;
+			if ( t.lights.tex && t.lights.glFmt != 0x8814u )
+				return refuse( "the lamps' cellLights is not RGBA32F" );
+			if ( t.lights.tex && need > t.lights.bytes )
+				return refuse( "cellLightCount is past GL's cellLights buffer" );
+			if ( b.cluster != 0 ) {  // term 2b: the lists an R32I buffer past their heads (2 ints a cluster)
+				const long long base = std::max( litI( "cellClusterBase" ), 0 );
+				if ( !t.cluster.tex || t.cluster.glFmt != 0x8235u )
+					return refuse( "the lamps' cellCluster is not R32I" );
+				if ( base * 4LL > t.cluster.bytes )
+					return refuse( "cellClusterBase is past GL's cellCluster buffer" );
+			}
+		}
 	}
-	if ( t.roofOn || t.tex[0].tex )
-		return refuse( "the roof map on (slice 3's)" );
-	if ( !toneFrameIs( t.color ) || !T.colorView || !T.dsView )
-		return refuse( "the draw target is not the shared tone frame" );
-	if ( T.w != t.w || T.h != t.h )
-		return refuse( "rain / snow's size is not the tone frame's" );
-	if ( t.vp[2] < 1 || t.vp[3] < 1 )
-		return refuse( "an empty viewport" );
-	if ( t.n < 1 || t.first < 0 )
-		return refuse( "no particles" );
-	if ( !v.ok || !g.ok || g.ctx != reinterpret_cast<void *>( wglGetCurrentContext() ) )
-		return refuse( "the present device or GL's entry points are not ready in this context" );
-	if ( !g.copyImageSubData )
-		return refuse( "no glCopyImageSubData (the atlas' copy into its shared twin)" );
 	const int atFirst = precipAt( kT_precipcs, int( std::size( kT_precipcs ) ), "pcFirst" );
 	const int atCount = precipAt( kT_precipcs, int( std::size( kT_precipcs ) ), "pcCount" );
 	const int atRed = precipAt( kT_precipcs, int( std::size( kT_precipcs ) ), "pcRed" );
@@ -713,12 +790,12 @@ bool precipRun( const PrecipRun & t, std::string & why )
 	FxNames names;
 	names.add( T.colorTex );
 	names.add( T.dsTex );
-	VkImageView views[8] = {};
-	int smp[8] = {};
-	const int slotType[8] = { 0, 0, 1, 1, 0, 2, 0, 0 };  // an empty slot binds the zero texture of the shader's type
-	for ( int k = 0; k < 8; k++ ) {
+	VkImageView views[9] = {};
+	int smp[9] = {};
+	const int slotType[9] = { 0, 0, 1, 1, 0, 2, 0, 0, 2 };  // an empty slot binds the zero texture of the shader's type
+	for ( int k = 0; k < 9; k++ ) {
 		FxTex x = t.tex[k];
-		if ( ( k == 1 || k == 7 ) && ( t.red & 32 ) ) {  // red: the atlas dropped (the zero texture)
+		if ( ( ( k == 1 || k == 7 ) && ( t.red & 32 ) ) || ( k == 8 && ( t.red & 4096 ) ) ) {  // red: the atlas / the terrain grid dropped (the zero texture)
 			x = FxTex();
 			x.sampler = t.tex[k].sampler;
 		}
@@ -749,7 +826,15 @@ bool precipRun( const PrecipRun & t, std::string & why )
 		std::memcpy( l + atFirst, &first, 4 );
 		std::memcpy( l + atCount, &count, 4 );
 		std::memcpy( l + atRed, &csRed, 4 );
-		std::memset( u + kPrecipGlobalAt, 0, size_t( kPrecipGlobalBytes ) );
+		if ( t.red & 2048 ) {  // gates only: the local sun law dropped (vpSun.w 0)
+			const int atSun = precipAt( kT_preciplitcs, int( std::size( kT_preciplitcs ) ), "vpSun" );
+			if ( atSun >= 0 )
+				std::memset( l + atSun + 12, 0, 4 );
+		}
+		if ( t.global && ( t.red & 512 ) == 0 )  // term 2b: GL's b0 (the cluster's projectionMatrix)
+			std::memcpy( u + kPrecipGlobalAt, t.global, size_t( kPrecipGlobalBytes ) );
+		else
+			std::memset( u + kPrecipGlobalAt, 0, size_t( kPrecipGlobalBytes ) );
 	}
 	std::memset( u, 0, size_t( kPrecipViewBytes ) );
 	std::memcpy( u, t.cs + atProj, 64 );
@@ -814,14 +899,14 @@ bool precipRun( const PrecipRun & t, std::string & why )
 		const VkDescriptorBufferInfo lb[3] = { { D.ubo, kPrecipGlobalAt, kPrecipGlobalBytes },
 			{ D.ubo, kPrecipLitCsAt, VkDeviceSize( kT_preciplitcsBytes ) }, { D.rec, 0, recBytes } };
 		VkDescriptorImageInfo li[14] = {};
-		const VkImageView liv[14] = { D.litCube, F.d2a, F.d3, views[2], views[3], views[4], views[5], views[6], F.d3, D.litD2a,
+		const VkImageView liv[14] = { D.litCube, views[8], F.d3, views[2], views[3], views[4], views[5], views[6], F.d3, D.litD2a,
 			F.d2, F.d2, F.d2, views[1] };  // kPrecipLitImg's order
 		for ( int k = 0; k < 14; k++ ) {
 			li[k].imageView = liv[k];
 			li[k].imageLayout = VK_IMAGE_LAYOUT_GENERAL;
 		}
 		VkDescriptorImageInfo ls[13] = {};
-		const VkSampler lsv[13] = { D.litCmp, F.smp[0], F.smp[smp[2]], F.smp[smp[3]], F.smp[smp[4]], F.smp[smp[5]], F.smp[smp[6]],
+		const VkSampler lsv[13] = { D.litCmp, F.smp[smp[8]], F.smp[smp[2]], F.smp[smp[3]], F.smp[smp[4]], F.smp[smp[5]], F.smp[smp[6]],
 			F.smp[0], D.litCmp, F.smp[0], F.smp[0], F.smp[0], F.smp[smp[1]] };  // kPrecipLitSmp's order
 		for ( int k = 0; k < 13; k++ )
 			ls[k].sampler = lsv[k];
@@ -842,8 +927,26 @@ bool precipRun( const PrecipRun & t, std::string & why )
 		lput( 0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, &lb[0], nullptr, nullptr );
 		lput( 31, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, &lb[1], nullptr, nullptr );
 		lput( 192, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, &lb[2], nullptr, nullptr );
-		lput( 64, VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER, nullptr, nullptr, &D.litTbF );
-		lput( 109, VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER, nullptr, nullptr, &D.litTbI );
+		// L8 term 2a: GL's lights (and, when its lists are on, the cluster) copied into texel buffers both APIs see (as
+		// the water's twins); the zero ones when the lamps are off or for red 256 (the lights dropped)
+		VkBufferView tbv[2] = { D.litTbF, D.litTbI };
+		static char litBufKeys[2];
+		for ( int k = 0; k < 2 && ( t.red & 256 ) == 0; k++ ) {
+			const PrecipRun::TexBuf & b = k ? t.cluster : t.lights;
+			if ( !b.tex || ( k == 1 && ( t.litIn.cluster == 0 || ( t.red & 1024 ) ) ) )
+				continue;
+			if ( !g.copyNamedBufferSubData )
+				return refuse( "no glCopyNamedBufferSubData (the lamps' texel buffers)" );
+			const std::uintptr_t key = reinterpret_cast<std::uintptr_t>( &litBufKeys[k] );
+			unsigned tb = 0, tt = 0;
+			if ( !farTexelBuffer( key, b.glFmt, std::size_t( b.bytes ), tb, tt, w ) )
+				return refuse( std::string( k ? "cellCluster: " : "cellLights: " ) + w );
+			g.copyNamedBufferSubData( b.buf, tb, std::intptr_t( b.off ), 0, std::intptr_t( b.bytes ) );
+			names.addBuf( tb );
+			tbv[k] = farCards().bufs[key].view;
+		}
+		lput( 64, VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER, nullptr, nullptr, &tbv[0] );
+		lput( 109, VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER, nullptr, nullptr, &tbv[1] );
 		for ( int k = 0; k < 14; k++ )
 			lput( kPrecipLitImg[k], VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, nullptr, &li[k], nullptr );
 		for ( int k = 0; k < 13; k++ )

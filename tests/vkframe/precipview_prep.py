@@ -54,12 +54,68 @@ CASES = [
      2.0, -0.08, 40000, 0, 0, 1),
     ('snow_far_lit', 3, 5.5, 1.0, 97, 600.125, (12345.6, -98765.4, 7210.0), (-55.0, 210.0), 1, 3.0, 0.5, 6.0, 1.0, 0.6, 1,
      3.3, -0.01, 40000, 1, 0, 1),
+    # L8 term 2a (element 20 = volTerms): the sun + the lamps (flat loop, no shadow / gobo) on the two lit cases' runs
+    ('rain_near_lamps', 0, 2.0, 4.0, 11, 37.25, (-60500.0, 70000.0, 6300.0), (120.0, -40.0), 0, 1.0, 0.0, 0.0, 1.0, 1.0, 1,
+     2.0, -0.08, 40000, 0, 0, 3),
+    ('snow_far_lamps', 3, 5.5, 1.0, 97, 600.125, (12345.6, -98765.4, 7210.0), (-55.0, 210.0), 1, 3.0, 0.5, 6.0, 1.0, 0.6, 1,
+     3.3, -0.01, 40000, 1, 0, 3),
+    # L8 term 2b (element 21 = the cluster lists on): the lamp run with b0's projection, volRect and a list buffer
+    ('rain_near_cluster', 0, 2.0, 4.0, 11, 37.25, (-60500.0, 70000.0, 6300.0), (120.0, -40.0), 0, 1.0, 0.0, 0.0, 1.0, 1.0, 1,
+     2.0, -0.08, 40000, 0, 0, 3, 1),
+    # L8 term 3 (element 22 = the local sun law): rain_near_lit's run, the sun's colour from vpSun
+    ('rain_near_sunlocal', 0, 2.0, 4.0, 11, 37.25, (-60500.0, 70000.0, 6300.0), (120.0, -40.0), 0, 1.0, 0.0, 0.0, 1.0, 1.0, 1,
+     2.0, -0.08, 40000, 0, 0, 1, 0, 1),
+    # L8 terrain air (element 23 = airTerrOn): snow_far_lit's fogged run, the ground layer on the air's own grid
+    ('snow_far_terrair', 3, 5.5, 1.0, 97, 600.125, (12345.6, -98765.4, 7210.0), (-55.0, 210.0), 1, 3.0, 0.5, 6.0, 1.0, 0.6, 1,
+     3.3, -0.01, 40000, 1, 0, 1, 0, 0, 1),
 ]
 SUN = np.array([0.4, 0.3, 0.35]) / np.linalg.norm([0.4, 0.3, 0.35])  # world, toward the sun (the air's fogSun too)
 # a lit case's own sun (cellDirTo), chosen by the GS's mix: N = the eye's axis, thick / thin = 4 vpWrap( N.to, pcTrans )
 # (volGi 1). With SUN, rain_near_lit's view gives N.to -0.13, ratio 0.99: thin = thick, pcTrans unseen (51 samples, the
 # first lit run 11-15); this sun gives N.to 0.72, ratio 3.3, 44 degrees off the axis. SUN stays (the fogged cases' fogSun).
 LIT_SUN = {'rain_near_lit': np.array([0.3, -0.6, 0.75]) / np.linalg.norm([0.3, -0.6, 0.75])}
+LIT_SUN['rain_near_lamps'] = LIT_SUN['rain_near_lit']
+LIT_SUN['rain_near_cluster'] = LIT_SUN['rain_near_lit']
+LIT_SUN['rain_near_sunlocal'] = LIT_SUN['rain_near_lit']
+TILE, SLICES = 64, 4  # the cluster grid (L8 term 2b): 64-pixel tiles, 4 log-depth slices
+
+
+def cluster_lists(nc):
+    """R32I, cellclustergl.cpp's layout: (offset, count) a cluster, then the indices from 2 nc. A third walk every light
+    (count -1), a third list all five (offset 0), a third list 0, 2, 4 (offset 5: the spot and the box left out)"""
+    head = []
+    for c in range(nc):
+        head += [[0, -1], [0, 5], [5, 3]][c % 3]
+    return np.array(head + [0, 1, 2, 3, 4] + [0, 2, 4], dtype=np.int32)
+
+
+def lamps(v, R, eye):
+    """the lamp cases' cellLights (celllights.cpp's 8 texels a light): an omni, a spot, a hemisphere, a box and one out of
+    reach, placed round the in-view particles' middle (view units = world units, s = their median spread). t0 pos +
+    radius, t1 colour + shape (-2 omni, -3 hemisphere, -4 box, else the spot's outer cosine), t2 axis + cone exponent,
+    t3 bias / scale / exponent / flags (the game's curve 1 - x), t4 shadow slot -1, t5..t7 the box's rows"""
+    cen = np.median(v, axis=0)
+    s = float(np.median(np.linalg.norm(v - cen, axis=1)))
+    w = lambda p: R.T @ (cen + s * np.array(p)) + eye  # noqa: E731 (view offset -> world)
+    L = np.zeros((5, 8, 4))
+    def put(k, p, r, col, shape, axis=(0.0, 0.0, 1.0), cone=0.0):
+        L[k, 0] = list(w(p)) + [r * s]
+        L[k, 1] = list(col) + [shape]
+        L[k, 2] = list(axis) + [cone]
+        L[k, 3] = [0.0, 1.0, 1.0, 0.0]
+        L[k, 4] = [-1.0, 0.0, 0.0, 0.0]
+    put(0, (0.5, 0.3, 0.2), 2.0, (2.4, 1.3, 0.5), -2.0)
+    sp = w((-1.2, 0.2, 0.6))
+    ax = w((-0.3, 0.0, 0.0)) - sp
+    put(1, (-1.2, 0.2, 0.6), 3.5, (0.4, 1.0, 2.4), 0.8, ax / np.linalg.norm(ax), 1.5)
+    put(2, (0.0, -1.0, 0.0), 2.5, (1.5, 0.3, 1.2), -3.0, R.T @ np.array([0.0, 1.0, 0.0]))
+    put(3, (0.8, -0.6, -0.4), 3.0, (0.6, 1.8, 0.7), -4.0)
+    bc, h = w((0.5, -0.4, -0.2)), 1.2 * s
+    for i in range(3):  # k_i = dot( b_i.xyz, P ) + b_i.w in [-1, 1]: a world-axis box round bc
+        L[3, 5 + i, i] = 1.0 / h
+        L[3, 5 + i, 3] = -bc[i] / h
+    put(4, (60.0, 0.0, 0.0), 0.5, (3.0, 3.0, 3.0), -2.0)
+    return L.astype(np.float32)
 FOG_TEX = ['atApTex', 'volTex', 'volTile', 'volAirTerr', 'volAirRainMap']  # precipRun's tex[2..6]
 FMT_DT = {'rgba32f': np.float32, 'rgba16f': np.float32, 'r32f': np.float32, 'rg32f': np.float32, 'r8': np.uint8, 'rgba8': np.uint8}
 
@@ -260,12 +316,71 @@ for ci, c in enumerate(CASES):
         nto = float(R[2] @ sunL)  # N = cellWorldDir( 0, 0, 1 ) = R's third row (r, u, -d)
         print('precipview case %s: lit N.to %.3f, thick / thin %.3f (want far from 1)' % (c[0], nto, 4 * max(nto + 0.5, 0) / 1.5))
         U.update({'cellOn': [1], 'cellHasDir': [1], 'cellInterior': [0], 'cellDirColor': [1.6, 1.2, 0.75],
-                  'cellDirTo': list(sunL),'cellRow': np.c_[R.T, np.array(c[6])].reshape(-1), 'volTerms': [1],
+                  'cellDirTo': list(sunL),'cellRow': np.c_[R.T, np.array(c[6])].reshape(-1), 'volTerms': [lit],
                   'volPhase': [0.2, 0.25, 0.3, 0.0, 0.5, 0.45, 0.4, 0.6, 0.3, 0.3, 0.3, -0.3], 'volGi': [1.0, 1.0, 1.0, 0.0],
                   'pcTrans': [0.5]})
+        # L8 term 3: the local sun law (vpSun.w 1) in its case, off in every other lit case (GL keeps the uniform)
+        # (fixture move 11-15, the bar kept: (0.9, 1.3, 1.7) had cellDirColor's luminance, 1.244 vs 1.252, and the air colours
+        # the sky terms by luminance (airEnvColour): 8 samples moved. This sun's is 0.414.)
+        U['vpSun'] = [0.5, 0.4, 0.3, 1.0] if len(c) > 22 and c[22] else [0.0] * 4
+        # the lamps' switches in every lit case (GL keeps a program's uniforms: the order cannot carry them)
+        U.update({'cellLightCount': [5 if lit & 2 else 0], 'cellShadowOn': [0], 'cellGoboOn': [0], 'cellClusterOn': [0],
+                  'cellLightPhys': [0.0] * 4, 'cellLightPhysB': [0.0] * 4, 'cellRed': [0], 'airTerrOn': [0]})
+        if lit & 2:
+            lamps(v[inview], R, np.array(c[6])).tofile(os.path.join(d, 'buf_cellLights.bin'))
+            with open(os.path.join(d, 'buf.txt'), 'w', newline='\n') as f:
+                f.write('cellLights rgba32f 40 buf_cellLights.bin\n')
+        if len(c) > 21 and c[21]:
+            # L8 term 2b: the cluster lists. Depth = -(R[2] . (P - eye)) over the run's particles in the view, log slices
+            tx, ty = -(-W // TILE), -(-H // TILE)
+            nc = tx * ty * SLICES
+            dep = -v[inview, 2]
+            ln0, ln1 = math.log(float(dep.min())), math.log(float(dep.max()))
+            eye = np.array(c[6], np.float64)
+            U.update({'cellClusterOn': [1], 'cellClusterDims': [tx, ty, SLICES, TILE], 'cellClusterOrigin': [0, 0],
+                      'cellClusterDepth': list(-R[2]) + [float(R[2] @ eye)], 'cellClusterLog': [ln0, SLICES / (ln1 - ln0)],
+                      'cellClusterBase': [2 * nc], 'volRect': [0, 0, 1.0 / W, 1.0 / H]})
+            lists = cluster_lists(nc)
+            lists.tofile(os.path.join(d, 'buf_cellCluster.bin'))
+            with open(os.path.join(d, 'buf.txt'), 'a', newline='\n') as f:
+                f.write('cellCluster r32i %d buf_cellCluster.bin\n' % len(lists))
+            # globalUniforms (std140, 336 bytes): zero but projectionMatrix at 96 (column-major, as pcProj)
+            gb = np.zeros(84, np.float32)
+            gb[24:40] = P.T.reshape(-1)
+            gb.tofile(os.path.join(d, 'global.bin'))
+            print('precipview case %s: cluster grid %d x %d x %d, depth %.1f - %.1f, %d list texels'
+                  % (c[0], tx, ty, SLICES, math.exp(ln0), math.exp(ln1), len(lists)))
         if fog:  # the veil on, the air's column on the sun: the light chain's own names for the air's medium
             U.update({'volVeil': [1], 'airMed': AU['volAirMed'], 'airLayer': AU['volAirLayer'],
                       'airGround': AU['volAirGround'], 'airSunLayer': [0]})
+            if len(c) > 23 and c[23]:
+                # L8 terrain air: airTerr = the air's volAirTerr (2 layers: coarse 400000 u, fine 40000 u round the eye),
+                # its world rows u = x X.x + X.y, v = y X.z + X.w; airTerrRef puts the anchor (airGround.x + terrH - ref)
+                # at the particles' median height where the ground is its median (nearest texels: the choice only)
+                eye = np.array(c[6], np.float64)
+                tz = A['textures']['volAirTerr'].data[..., 0]
+                Pw = v[inview] @ R + eye
+
+                # (names kept off the module's: rows / at / n / th / ref are the atlas', the dump's and the run's, used below)
+                def grid_rows(span):
+                    return [1.0 / span, -(eye[0] - span / 2) / span, 1.0 / span, -(eye[1] - span / 2) / span]
+
+                def grid_at(layer, xf):
+                    gu, gv = Pw[:, 0] * xf[0] + xf[1], Pw[:, 1] * xf[2] + xf[3]
+                    gn = tz.shape[1]
+                    return tz[layer, np.clip((gv * gn).astype(int), 0, gn - 1), np.clip((gu * gn).astype(int), 0, gn - 1)], gu, gv
+
+                xc, xfn = grid_rows(400000.0), grid_rows(40000.0)
+                hc, _, _ = grid_at(0, xc)
+                hf, uf, vf = grid_at(1, xfn)
+                wf = np.clip(np.minimum(np.minimum(uf, 1 - uf), np.minimum(vf, 1 - vf)) * 16.0, 0.0, 1.0)
+                gh = hc + (hf - hc) * wf  # (not th / ref: the atlas' height and the dump's records, used below)
+                gref = float(np.median(gh) - np.median(Pw[:, 2]) + AU['volAirGround'][0])
+                zg = AU['volAirGround'][0] + gh - gref
+                print('precipview case %s: terrain air ref %.1f, ground %.1f - %.1f, particles z %.1f - %.1f, share under the '
+                      'anchor %.3f (want 0.2 - 0.8)' % (c[0], gref, gh.min(), gh.max(), Pw[:, 2].min(), Pw[:, 2].max(),
+                                                        float(np.mean(Pw[:, 2] < zg))))
+                U.update({'airTerrOn': [1], 'airTerrXf': xc, 'airTerrFineXf': xfn, 'airTerrRef': [gref]})
     if hasN:
         nl = bc3_levels(normals(tw, th, 31 + ci), os.path.join(d, 'tex_pcTexN.bin'))
         with open(os.path.join(d, 'tex.txt'), 'a', newline='\n') as f:
@@ -274,7 +389,7 @@ for ci, c in enumerate(CASES):
         for key, val in U.items():
             f.write('%s %s\n' % (key, fl(val)))
     with open(os.path.join(d, 'job.txt'), 'w', newline='\n') as f:
-        f.write('%d %d %d %d %d %u %d\n%.9g\n%d %d %d\n' % (W, H, first, n, has, seed, c[8], zd, fog, look, lit))
+        f.write('%d %d %d %d %d %u %d\n%.9g\n%d %d %d\n' % (W, H, first, n, has, seed, c[8], zd, fog, look, 1 if lit else 0))
     names.append(c[0])
     print('precipview case %s: %d particles (run %d + %d, %d in the view), atlas %dx%d (%d x %d cells), slab %.7f'
           % (c[0], n_all, first, n, int(inview.sum()), tw, th, cols, rows, zd))
