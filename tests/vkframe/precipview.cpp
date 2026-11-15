@@ -73,6 +73,23 @@
 // name the lamp branch reads is found in GL's program; cellLightCount packed non-zero. Red 256 the lights dropped (Vulkan
 // binds the zero texel buffer); must FAIL in every lamp case. Still refused (precipLitWhy): the lamps' shadow cubes,
 // gobos and cluster lists, the physical falloff, cellRed, a light count past GL's buffer.
+// Cluster lists (L8 term 2b, 11-15; bar set before its first run, never widened): case rain_near_cluster (rain_near_lamps'
+// run and five lights, unfogged), volTerms 3, cellClusterOn 1 (the app's default whenever a cell has lights:
+// cellclustergl.cpp wwCellClusterUniforms), globalUniforms (b0) zero but for projectionMatrix (the case's own projection;
+// vpLightsBegin reads it), volRect (0, 0, 1 / W, 1 / H), a 15 x 9 x 4 grid of 64-pixel tiles on log depth over the run's
+// particles and a cellCluster texture buffer (R32I, as cellclustergl.cpp): a third of the clusters walk every light
+// (count -1), a third list all five, a third list 0, 2, 4 (the spot and the box left out). GL gets the same b0 bytes the
+// Vulkan run gets (precipRun takes GL's bytes; the app hands it glcontext.cpp's last upload). The same verdict, reference
+// checks, repeat clause, reds 64 / 128 / 256 as the lamp cases, and the lamp check's volTerms 3 vs 1 (the per-shape and
+// out-of-reach checks stay with the flat-loop lamp cases: a list's own count overrides cellLightCount). The globals
+// check is inverted for this case: b0 filled non-zero vs the case's own b0 must move GL's geometry stage (> 0 floats).
+// The case must also show (else the gate fails): GL with cellClusterOn 0 differs on >= 1000 covered samples (the lists
+// seen); GL with b0 all zero differs on >= 1000 (the projection read); every name the cluster branch reads is found in
+// GL's program; cellClusterDims, cellClusterDepth, cellClusterLog, cellClusterBase and volRect packed non-zero. Red 512
+// b0 dropped (Vulkan's globalUniforms zero) and red 1024 the lists dropped (the zero texel buffer at cellCluster): each
+// must FAIL in the cluster case. Lifted with it: precipLitWhy's cluster refusal; precipAdmits refuses a cluster run with
+// no b0 bytes, precipRun one whose list buffer is not R32I or shorter than cellClusterBase. Not covered here: the
+// lights' radial falloff past (0, 1, 1) (every fixture light keeps it; the twin runs GL's own cellRadial).
 #define main fxview_main
 #include "fxview.cpp"
 #undef main
