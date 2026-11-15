@@ -34,6 +34,13 @@ struct OceanGpu
 	bool ok = false, pending[2] = {};
 	int cur = 0;
 	double U = -1.0, swell = -1.0;	// the wind the uploaded h0 is for
+	// lane VKWATER4 (G5): while the ocean runs on Vulkan, h0 / q and the arrays are shared targets (keys vKey + 0 h0,
+	// + 1 q, + 2 + set * 3 + k the arrays B / C / D); set 1 only for red prev. The water samples vArr[vRead] in place
+	std::uintptr_t vKey = 0;
+	GLuint vh0 = 0, vq = 0, vArr[2][3] = {};
+	double vU = -1.0, vSwell = -1.0;
+	bool vOn = false, vRefused = false;
+	int vRead = 0, vWrote = 0;
 };
 
 struct OceanState
@@ -86,14 +93,9 @@ GLuint tex2d( NifSkopeOpenGLContext::GLFunctions * fn, GLint ifmt, int w, int h,
 	return t;
 }
 
-GLuint texArr( NifSkopeOpenGLContext::GLFunctions * fn, GLint ifmt )
+// the bound 2D array's sampling state (the water's linear-mip REPEAT aniso read)
+void arrSampling( NifSkopeOpenGLContext::GLFunctions * fn )
 {
-	GLuint t = 0;
-	fn->glGenTextures( 1, &t );
-	fn->glBindTexture( GL_TEXTURE_2D_ARRAY, t );
-	for ( int lv = 0; lv < kLevels; lv++ )
-		fn->glTexImage3D( GL_TEXTURE_2D_ARRAY, lv, ifmt, WwOcean::kN >> lv, WwOcean::kN >> lv, WwOcean::kTiles, 0, GL_RGBA,
-			GL_FLOAT, nullptr );
 	fn->glTexParameteri( GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR );
 	fn->glTexParameteri( GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAG_FILTER, GL_LINEAR );
 	fn->glTexParameteri( GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_S, GL_REPEAT );
@@ -103,7 +105,72 @@ GLuint texArr( NifSkopeOpenGLContext::GLFunctions * fn, GLint ifmt )
 	GLfloat maxAniso = 1.0f;
 	fn->glGetFloatv( GL_MAX_TEXTURE_MAX_ANISOTROPY_EXT, &maxAniso );
 	fn->glTexParameterf( GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAX_ANISOTROPY_EXT, std::min( 16.0f, maxAniso ) );
+}
+
+GLuint texArr( NifSkopeOpenGLContext::GLFunctions * fn, GLint ifmt )
+{
+	GLuint t = 0;
+	fn->glGenTextures( 1, &t );
+	fn->glBindTexture( GL_TEXTURE_2D_ARRAY, t );
+	for ( int lv = 0; lv < kLevels; lv++ )
+		fn->glTexImage3D( GL_TEXTURE_2D_ARRAY, lv, ifmt, WwOcean::kN >> lv, WwOcean::kN >> lv, WwOcean::kTiles, 0, GL_RGBA,
+			GL_FLOAT, nullptr );
+	arrSampling( fn );
 	return t;
+}
+
+// lane VKWATER4 (G5): the shared targets, made or kept (sets 1 or 2); false: why (the caller drops them)
+bool oceanShare( NifSkopeOpenGLContext::GLFunctions * fn, OceanGpu & g, int sets, std::string & why )
+{
+	static std::uintptr_t nextKey = 0x4F430000u;	// "OC": 8 keys a renderer
+	if ( !g.vKey ) {
+		g.vKey = nextKey;
+		nextKey += 8;
+	}
+	bool live = g.vh0 && WwVkPresent::sharedTargetIs( g.vKey, g.vh0 ) && WwVkPresent::sharedTargetIs( g.vKey + 1, g.vq );
+	for ( int st = 0; st < sets; st++ )
+		for ( int k = 0; k < 3; k++ )
+			live = live && WwVkPresent::sharedTargetIs( g.vKey + 2 + std::uintptr_t( st * 3 + k ), g.vArr[st][k] );
+	if ( live )
+		return true;
+	unsigned t = 0;
+	if ( !WwVkPresent::sharedTarget( g.vKey, 0, kW, WwOcean::kN, 1, GL_RGBA32F, t, why ) )
+		return false;
+	g.vh0 = t;
+	if ( !WwVkPresent::sharedTarget( g.vKey + 1, 0, kW, WwOcean::kN, 1, GL_R32F, t, why ) )
+		return false;
+	g.vq = t;
+	for ( GLuint x : { g.vh0, g.vq } ) {	// tex2d's state
+		fn->glBindTexture( GL_TEXTURE_2D, x );
+		fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST );
+		fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST );
+		fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE );
+		fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE );
+	}
+	fn->glBindTexture( GL_TEXTURE_2D, 0 );
+	static const GLenum fm[3] = { GL_RGBA16F, GL_RGBA32F, GL_RGBA16F };
+	for ( int st = 0; st < sets; st++ )
+		for ( int k = 0; k < 3; k++ ) {
+			if ( !WwVkPresent::sharedTarget( g.vKey + 2 + std::uintptr_t( st * 3 + k ), 2, WwOcean::kN, WwOcean::kN, WwOcean::kTiles,
+					fm[k], t, why, kLevels ) )
+				return false;
+			g.vArr[st][k] = t;
+			fn->glBindTexture( GL_TEXTURE_2D_ARRAY, t );
+			arrSampling( fn );
+		}
+	fn->glBindTexture( GL_TEXTURE_2D_ARRAY, 0 );
+	g.vU = g.vSwell = -1.0;	// new h0 / q: uploaded again
+	return true;
+}
+
+void oceanShareDrop( OceanGpu & g )
+{
+	for ( std::uintptr_t i = 0; i < 8; i++ )
+		WwVkPresent::sharedTargetDrop( g.vKey + i );
+	g.vh0 = g.vq = 0;
+	std::memset( g.vArr, 0, sizeof( g.vArr ) );
+	g.vOn = false;
+	g.vU = g.vSwell = -1.0;
 }
 
 bool create( NifSkopeOpenGLContext::GLFunctions * fn, OceanGpu & g )
@@ -151,6 +218,14 @@ void upload( NifSkopeOpenGLContext::GLFunctions * fn, OceanGpu & g, OceanState &
 	fn->glTexSubImage2D( GL_TEXTURE_2D, 0, 0, 0, kW, WwOcean::kN, GL_RGBA, GL_FLOAT, h0.data() );
 	fn->glBindTexture( GL_TEXTURE_2D, g.q );
 	fn->glTexSubImage2D( GL_TEXTURE_2D, 0, 0, 0, kW, WwOcean::kN, GL_RED, GL_FLOAT, q.data() );
+	if ( g.vh0 && g.vq ) {	// lane VKWATER4: the shared twins take the same upload (GL's signal publishes it to Vulkan)
+		fn->glBindTexture( GL_TEXTURE_2D, g.vh0 );
+		fn->glTexSubImage2D( GL_TEXTURE_2D, 0, 0, 0, kW, WwOcean::kN, GL_RGBA, GL_FLOAT, h0.data() );
+		fn->glBindTexture( GL_TEXTURE_2D, g.vq );
+		fn->glTexSubImage2D( GL_TEXTURE_2D, 0, 0, 0, kW, WwOcean::kN, GL_RED, GL_FLOAT, q.data() );
+		g.vU = s.U;
+		g.vSwell = s.swell;
+	}
 	fn->glBindTexture( GL_TEXTURE_2D, 0 );
 	g.U = s.U;
 	g.swell = s.swell;
@@ -187,8 +262,9 @@ void quad( Renderer * r )
 }
 
 // lane VKWATER4 (G5): the spectrum, the 14 FFT stages, the fields and the mips as 31 dispatches on the present device,
-// written back into arrB / arrC / arrD level by level (gated EXACT against GL by tests/vkframe/oceanview.sh)
-bool oceanVk( const OceanGpu & g, float phase, const float dk[WwOcean::kTiles], std::string & why )
+// written back into arrB / arrC / arrD level by level (gated EXACT against GL by tests/vkframe/oceanview.sh). keys (the
+// shared route): h0, q, B, C, D shared targets; the fields and mips (the *A kernels) write the arrays in place, no copy
+bool oceanVk( const OceanGpu & g, const std::uintptr_t * keys, float phase, const float dk[WwOcean::kTiles], std::string & why )
 {
 	using namespace WwVkPresent;
 	constexpr int kN = WwOcean::kN;
@@ -204,6 +280,12 @@ bool oceanVk( const OceanGpu & g, float phase, const float dk[WwOcean::kTiles], 
 		x.outLevel = lv;
 		return x;
 	};
+	auto shared = [&]( std::uintptr_t key, GLenum fmt, int w, int h, int lv ) {
+		LightImage x = img( 0, fmt, w, h, false, false, 0, lv );
+		x.share = key;
+		return x;
+	};
+	const int ka = keys ? 4 : 0;	// LightOceanFinBcAK .. MipDAK follow FinBcK .. MipDK
 	auto disp = [&]( int kernel, int out0, int out1, int t0, int t1 ) {
 		LightDispatch d;
 		d.kernel = kernel;
@@ -217,15 +299,16 @@ bool oceanVk( const OceanGpu & g, float phase, const float dk[WwOcean::kTiles], 
 	auto pcI = [&]( LightDispatch & d, int comp, int v ) { std::memcpy( d.pc + 112 + comp * 4, &v, 4 ); };
 	LightRun t;
 	t.pass = LightOcean;
-	t.img.push_back( img( g.h0, GL_RGBA32F, kW, kN, true, false, 0, 0 ) );
-	t.img.push_back( img( g.q, GL_R32F, kW, kN, true, false, 0, 0 ) );
+	t.img.push_back( keys ? shared( keys[0], GL_RGBA32F, kW, kN, 0 ) : img( g.h0, GL_RGBA32F, kW, kN, true, false, 0, 0 ) );
+	t.img.push_back( keys ? shared( keys[1], GL_R32F, kW, kN, 0 ) : img( g.q, GL_R32F, kW, kN, true, false, 0, 0 ) );
 	for ( int k = 0; k < 4; k++ )
 		t.img.push_back( img( 0, GL_RGBA32F, kW, kN, false, false, 0, 0 ) );	// ping [0][0], [0][1], [1][0], [1][1]
 	const GLuint arr[3] = { g.arrB, g.arrC, g.arrD };
 	const GLenum fm[3] = { GL_RGBA16F, GL_RGBA32F, GL_RGBA16F };
 	for ( int lv = 0; lv < kLevels; lv++ )
 		for ( int k = 0; k < 3; k++ )
-			t.img.push_back( img( arr[k], fm[k], kW >> lv, kN >> lv, false, true, WwOcean::kTiles, lv ) );
+			t.img.push_back( keys ? shared( keys[2 + k], fm[k], kW >> lv, kN >> lv, lv )
+				: img( arr[k], fm[k], kW >> lv, kN >> lv, false, true, WwOcean::kTiles, lv ) );
 	auto strip = [&]( int lv, int k ) { return 6 + lv * 3 + k; };
 	LightDispatch s = disp( LightOceanSpecK, 2, 3, 0, 1 );
 	pcF( s, 0, phase );
@@ -241,15 +324,15 @@ bool oceanVk( const OceanGpu & g, float phase, const float dk[WwOcean::kTiles], 
 			t.d.push_back( d );
 			cur = 1 - cur;
 		}
-	LightDispatch fbc = disp( LightOceanFinBcK, strip( 0, 0 ), strip( 0, 1 ), 2 + 2 * cur, 3 + 2 * cur );
+	LightDispatch fbc = disp( LightOceanFinBcK + ka, strip( 0, 0 ), strip( 0, 1 ), 2 + 2 * cur, 3 + 2 * cur );
 	pcI( fbc, 0, kN );
 	t.d.push_back( fbc );
-	LightDispatch fd = disp( LightOceanFinDK, strip( 0, 2 ), -1, 3 + 2 * cur, -1 );
+	LightDispatch fd = disp( LightOceanFinDK + ka, strip( 0, 2 ), -1, 3 + 2 * cur, -1 );
 	pcI( fd, 0, kN );
 	t.d.push_back( fd );
 	for ( int lv = 1; lv < kLevels; lv++ ) {
-		t.d.push_back( disp( LightOceanMipBcK, strip( lv, 0 ), strip( lv, 1 ), strip( lv - 1, 0 ), strip( lv - 1, 1 ) ) );
-		t.d.push_back( disp( LightOceanMipDK, strip( lv, 2 ), -1, strip( lv - 1, 2 ), -1 ) );
+		t.d.push_back( disp( LightOceanMipBcK + ka, strip( lv, 0 ), strip( lv, 1 ), strip( lv - 1, 0 ), strip( lv - 1, 1 ) ) );
+		t.d.push_back( disp( LightOceanMipDK + ka, strip( lv, 2 ), -1, strip( lv - 1, 2 ), -1 ) );
 	}
 	return lightRun( t, why );
 }
@@ -317,7 +400,27 @@ void wwCellOceanPass( Scene * scene, bool cellPasses )
 		s.why = QStringLiteral( "ocean: refused (no ocean_spectrum.prog)" );
 		return;
 	}
-	if ( g.U != s.U || g.swell != s.swell )
+	// lane VKWATER4 (G5): the whole build on the present device (WW_VKVIEW=1; red WW_VKVIEW_OCEAN_RED=1: GL's draws),
+	// into the shared targets (a refusal: the copy route); red =prev: two sets, the water reads the one the frame before wrote
+	const bool vkWant = WwVkPresent::shareWanted( "WW_VKVIEW_OCEAN_RED" );
+	WW_SWITCH_STATIC( QByteArray, vkRed, wwEnv( "WW_VKVIEW_OCEAN_RED" ).trimmed() );
+	const bool prevRed = vkRed == "prev";
+	bool vkShared = false;
+	if ( !vkWant ) {
+		g.vRefused = false;	// asked again later: one more try
+		if ( g.vh0 )
+			oceanShareDrop( g );
+	} else if ( !g.vRefused ) {
+		std::string why;
+		vkShared = oceanShare( fn, g, prevRed ? 2 : 1, why );
+		if ( !vkShared ) {
+			oceanShareDrop( g );
+			g.vRefused = true;
+			qInfo().noquote() << QStringLiteral( "cell ocean: the arrays stay GL's own, copied back (shared target refused: %1)" )
+				.arg( QString::fromStdString( why ) );
+		}
+	}
+	if ( g.U != s.U || g.swell != s.swell || ( vkShared && ( g.vU != s.U || g.vSwell != s.swell ) ) )
 		upload( fn, g, s );
 
 	timeRead( fn, g, s, 1 - g.cur, false );
@@ -352,13 +455,24 @@ void wwCellOceanPass( Scene * scene, bool cellPasses )
 	float dk[WwOcean::kTiles];
 	for ( int t = 0; t < WwOcean::kTiles; t++ )
 		dk[t] = float( 2.0 * WwOcean::kPi / WwOcean::set( t / 3 ).L[t % 3] );
-	// lane VKWATER4 (G5): the whole build on the present device (WW_VKVIEW=1; red WW_VKVIEW_OCEAN_RED=1: GL's draws)
 	bool onVk = false;
-	const bool vkWant = WwVkPresent::shareWanted( "WW_VKVIEW_OCEAN_RED" );
 	WwVkPresent::lightSay( WwVkPresent::LightOcean, vkWant, vkWant ? nullptr : "red WW_VKVIEW_OCEAN_RED=1 or the view not on Vulkan" );
-	if ( vkWant ) {
+	g.vOn = false;
+	if ( vkShared ) {
 		std::string why;
-		onVk = oceanVk( g, float( phase ), dk, why );
+		const int set = prevRed ? 1 - g.vWrote : 0;
+		const std::uintptr_t keys[5] = { g.vKey, g.vKey + 1, g.vKey + 2 + std::uintptr_t( set * 3 ), g.vKey + 3 + std::uintptr_t( set * 3 ),
+			g.vKey + 4 + std::uintptr_t( set * 3 ) };
+		onVk = oceanVk( g, keys, float( phase ), dk, why );
+		if ( onVk ) {
+			g.vOn = true;
+			g.vRead = prevRed ? g.vWrote : set;	// red prev: the set the frame before wrote
+			g.vWrote = set;
+		}
+	}
+	if ( vkWant && !onVk ) {
+		std::string why;
+		onVk = oceanVk( g, nullptr, float( phase ), dk, why );
 	}
 	if ( !onVk ) {
 		fn->glBindFramebuffer( GL_FRAMEBUFFER, g.fb[0] );
@@ -471,12 +585,14 @@ void wwCellOceanUniforms( Scene * scene, float windDeg )
 	prog->uni1i( "waterOceanRed", s.red );
 	auto fn = r->fn;
 	OceanGpu * g = on ? &gpus()[r] : nullptr;
+	// lane VKWATER4 (G5): the shared arrays in place when the build wrote them (the Vulkan water draws take them uncopied)
+	const bool vs = g && g->vOn;
 	fn->glActiveTexture( GLenum( GL_TEXTURE0 + WwCellUnit::WaterOceanB ) );
-	fn->glBindTexture( GL_TEXTURE_2D_ARRAY, g ? g->arrB : 0 );
+	fn->glBindTexture( GL_TEXTURE_2D_ARRAY, g ? ( vs ? g->vArr[g->vRead][0] : g->arrB ) : 0 );
 	fn->glActiveTexture( GLenum( GL_TEXTURE0 + WwCellUnit::WaterOceanC ) );
-	fn->glBindTexture( GL_TEXTURE_2D_ARRAY, g ? g->arrC : 0 );
+	fn->glBindTexture( GL_TEXTURE_2D_ARRAY, g ? ( vs ? g->vArr[g->vRead][1] : g->arrC ) : 0 );
 	fn->glActiveTexture( GLenum( GL_TEXTURE0 + WwCellUnit::WaterOceanD ) );
-	fn->glBindTexture( GL_TEXTURE_2D_ARRAY, g ? g->arrD : 0 );
+	fn->glBindTexture( GL_TEXTURE_2D_ARRAY, g ? ( vs ? g->vArr[g->vRead][2] : g->arrD ) : 0 );
 	prog->uni1i( "waterOceanB", WwCellUnit::WaterOceanB );
 	prog->uni1i( "waterOceanC", WwCellUnit::WaterOceanC );
 	prog->uni1i( "waterOceanD", WwCellUnit::WaterOceanD );

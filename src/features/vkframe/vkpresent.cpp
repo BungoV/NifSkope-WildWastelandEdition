@@ -47,6 +47,10 @@
 #include "features/vkframe/light_ocean_find.spv.h"
 #include "features/vkframe/light_ocean_mipbc.spv.h"
 #include "features/vkframe/light_ocean_mipd.spv.h"
+#include "features/vkframe/light_ocean_finbca.spv.h"  // stages 7-10: the same into the shared arrays in place
+#include "features/vkframe/light_ocean_finda.spv.h"
+#include "features/vkframe/light_ocean_mipbca.spv.h"
+#include "features/vkframe/light_ocean_mipda.spv.h"
 // lane VKLIGHT2: the reflections' stages (ssr_vk.hlsl SSR_LIVE; w = the water look)
 #include "features/vkframe/ssr_view_s1.spv.h"
 #include "features/vkframe/ssr_view_s1w.spv.h"
@@ -6497,11 +6501,26 @@ struct LightImg
 	GLuint tex = 0, obj = 0;
 	int w = 0, h = 0, levels = 0;
 	unsigned glFmt = 0;
+	bool borrowed = false;  // lane VKWATER4: a shared target's level (img / tex are the owner's; only the view is ours)
+	int level = 0;
+	std::uint64_t gen = 0;  // sharedGen() when the view was made
 };
+
+// lane VKWATER4: the water draws' ocean inputs, for the `vk ocean:` line (say) and the harness (take)
+struct OceanWaterTally
+{
+	WwVkPresent::OceanWaterStat say, take;
+};
+OceanWaterTally & oceanWater()
+{
+	static OceanWaterTally t;
+	return t;
+}
 
 struct LightPassState
 {
 	bool broken = false;
+	bool shares = false;  // lane VKWATER4: this run binds shared targets (a closing compute -> any-stage read barrier)
 	std::string brokenWhy;
 	VkDescriptorPool dpool = VK_NULL_HANDLE;
 	VkDescriptorSet set[kLightSets] = {};
@@ -6560,6 +6579,12 @@ VkFormat lightVkFormat( unsigned glFmt )
 void lightImgDrop( LightImg & x, bool glAlive )
 {
 	Vk & v = vk();
+	if ( x.borrowed ) {  // the image is the shared target's owner's
+		if ( x.view )
+			v.vkDestroyImageView( v.dev, x.view, nullptr );
+		x = LightImg();
+		return;
+	}
 	if ( glAlive ) {
 		if ( x.tex )
 			gl().deleteTextures( 1, &x.tex );
@@ -6670,7 +6695,9 @@ bool lightStatic( std::string & why )
 		{ vkframe_light_aox_r8_spv, sizeof( vkframe_light_aox_r8_spv ) },
 		{ vkframe_light_ocean_spec_spv, sizeof( vkframe_light_ocean_spec_spv ) }, { vkframe_light_ocean_fft_spv, sizeof( vkframe_light_ocean_fft_spv ) },
 		{ vkframe_light_ocean_finbc_spv, sizeof( vkframe_light_ocean_finbc_spv ) }, { vkframe_light_ocean_find_spv, sizeof( vkframe_light_ocean_find_spv ) },
-		{ vkframe_light_ocean_mipbc_spv, sizeof( vkframe_light_ocean_mipbc_spv ) }, { vkframe_light_ocean_mipd_spv, sizeof( vkframe_light_ocean_mipd_spv ) } };
+		{ vkframe_light_ocean_mipbc_spv, sizeof( vkframe_light_ocean_mipbc_spv ) }, { vkframe_light_ocean_mipd_spv, sizeof( vkframe_light_ocean_mipd_spv ) },
+		{ vkframe_light_ocean_finbca_spv, sizeof( vkframe_light_ocean_finbca_spv ) }, { vkframe_light_ocean_finda_spv, sizeof( vkframe_light_ocean_finda_spv ) },
+		{ vkframe_light_ocean_mipbca_spv, sizeof( vkframe_light_ocean_mipbca_spv ) }, { vkframe_light_ocean_mipda_spv, sizeof( vkframe_light_ocean_mipda_spv ) } };
 	for ( int k = 0; k < WwVkPresent::LightKernels; k++ ) {
 		if ( k == WwVkPresent::LightAoRaw && !v.float64 )
 			continue;  // AO refuses with the reason
@@ -6834,6 +6861,12 @@ bool lightWork( int pass, std::string & why )
 		v.vkCmdPipelineBarrier( P.cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_TRANSFER_BIT,
 			0, 1, &mb, 0, nullptr, 0, nullptr );
 	}
+	if ( P.shares ) {  // lane VKWATER4: shared targets are read in place by later work on this queue (the water's draws)
+		VkMemoryBarrier mb { VK_STRUCTURE_TYPE_MEMORY_BARRIER };
+		mb.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+		mb.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_TRANSFER_READ_BIT;
+		v.vkCmdPipelineBarrier( P.cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 1, &mb, 0, nullptr, 0, nullptr );
+	}
 	if ( v.vkEndCommandBuffer( P.cmd ) != VK_SUCCESS ) {
 		why = "vkEndCommandBuffer (a light pass) failed";
 		return false;
@@ -6942,6 +6975,16 @@ bool lightRun( const LightRun & t, std::string & why )
 			return refuse( "a mipped output" );
 		if ( x.tiles < 0 || ( x.tiles > 0 && ( !x.out || x.in || x.w % x.tiles || x.outLevel < 0 ) ) )
 			return refuse( "a tiled output (an output only, its width a multiple of its tiles)" );
+		if ( x.share ) {  // lane VKWATER4: a shared target's level in place
+			const Shared * s = sharedFind( x.share );
+			if ( x.in || x.out || x.tiles || x.levels != 1 )
+				return refuse( "a shared-target entry is never copied (no in / out / tiles; one level)" );
+			if ( !s || s->glCtx != g.ctx || s->type == 1 || s->samples != 1 || s->glFmt != x.glFmt || x.outLevel < 0 || x.outLevel >= s->levels )
+				return refuse( "a shared-target entry (missing, another context, 3D, multisample, its format or level)" );
+			const int n = s->type == 2 ? s->d : 1;
+			if ( x.w != std::max( s->w >> x.outLevel, 1 ) * n || x.h != std::max( s->h >> x.outLevel, 1 ) )
+				return refuse( "a shared-target entry's size (its level's width x layers, height)" );
+		}
 	}
 	for ( const LightDispatch & d : t.d ) {
 		if ( d.kernel < 0 || d.kernel >= LightKernels || d.out0 < 0 || d.out0 >= ni || d.out1 >= ni )
@@ -6979,15 +7022,53 @@ bool lightRun( const LightRun & t, std::string & why )
 	for ( size_t i = size_t( ni ); i < P.img.size(); i++ )
 		lightImgDrop( P.img[i], true );
 	P.img.resize( size_t( ni ) );
+	P.shares = false;
 	for ( int i = 0; i < ni; i++ ) {
 		const LightImage & x = t.img[size_t( i )];
 		LightImg & y = P.img[size_t( i )];
-		if ( y.img && y.w == x.w && y.h == x.h && y.levels == x.levels && y.glFmt == x.glFmt )
-			continue;
-		lightImgDrop( y, true );
 		bool target = false;
 		for ( const LightDispatch & d : t.d )
 			target = target || d.out0 == i || d.out1 == i;
+		if ( x.share ) {  // lane VKWATER4: a view of the shared target's level (every layer), remade when any target moved
+			const Shared & s = *sharedFind( x.share );
+			P.shares = true;
+			P.st.shared++;
+			if ( y.borrowed && y.img == s.img && y.gen == sharedGen() && y.level == x.outLevel && y.glFmt == x.glFmt )
+				continue;
+			lightImgDrop( y, true );
+			const std::uint32_t n = std::uint32_t( s.type == 2 ? s.d : 1 );
+			if ( target ) {  // makeShared keeps storage use only when the device offers it with every other use
+				VkImageFormatProperties ip {};
+				const VkImageUsageFlags use = VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT
+					| VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_STORAGE_BIT;
+				if ( v.vkGetPhysicalDeviceImageFormatProperties( v.phys, s.fmt, VK_IMAGE_TYPE_2D, VK_IMAGE_TILING_OPTIMAL, use, 0, &ip ) != VK_SUCCESS
+					|| ip.maxArrayLayers < n || ip.maxMipLevels < std::uint32_t( s.levels ) )
+					return refuse( "shared target format " + std::to_string( x.glFmt ) + " takes no storage use on the device" );
+			}
+			VkImageViewCreateInfo ci { VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO };
+			ci.image = s.img;
+			ci.viewType = s.type == 2 ? VK_IMAGE_VIEW_TYPE_2D_ARRAY : VK_IMAGE_VIEW_TYPE_2D;
+			ci.format = s.fmt;
+			ci.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, std::uint32_t( x.outLevel ), 1, 0, n };
+			if ( v.vkCreateImageView( v.dev, &ci, nullptr, &y.view ) != VK_SUCCESS ) {
+				y = LightImg();
+				return refuse( "a shared target's level view failed" );
+			}
+			y.borrowed = true;
+			y.img = s.img;
+			y.view0 = y.view;
+			y.tex = s.tex;
+			y.w = x.w;
+			y.h = x.h;
+			y.levels = 1;
+			y.glFmt = x.glFmt;
+			y.level = x.outLevel;
+			y.gen = sharedGen();
+			continue;
+		}
+		if ( !y.borrowed && y.img && y.w == x.w && y.h == x.h && y.levels == x.levels && y.glFmt == x.glFmt )
+			continue;
+		lightImgDrop( y, true );
 		if ( target ) {  // a storage target: the format must take storage use (makeShared drops it quietly)
 			VkImageFormatProperties ip {};
 			if ( v.vkGetPhysicalDeviceImageFormatProperties( v.phys, lightVkFormat( x.glFmt ), VK_IMAGE_TYPE_2D, VK_IMAGE_TILING_OPTIMAL,
@@ -7002,9 +7083,11 @@ bool lightRun( const LightRun & t, std::string & why )
 		const LightImage & x = t.img[size_t( i )];
 		if ( !x.in )
 			continue;
-		for ( int m = 0; m < x.levels; m++ )
+		for ( int m = 0; m < x.levels; m++ ) {
 			g.copyImageSubData( x.tex, kTexture2D, m, 0, 0, 0, P.img[size_t( i )].tex, kTexture2D, m, 0, 0, 0, std::max( x.w >> m, 1 ),
 				std::max( x.h >> m, 1 ), 1 );
+			P.st.copies++;
+		}
 	}
 	// binding 9 (256 zero bytes when the pass has no table)
 	const VkDeviceSize bytes = std::max<VkDeviceSize>( 256, VkDeviceSize( t.buf.size() ) );
@@ -7046,11 +7129,14 @@ bool lightRun( const LightRun & t, std::string & why )
 	}
 	P.d = t.d;
 	// GL's inputs copied -> the worker's dispatches -> GL copies the targets back into its own textures
-	std::vector<GLuint> tex( static_cast<size_t>( ni ) );
-	std::vector<GLenum> lay( static_cast<size_t>( ni ), kLayoutGeneral );
+	// (each GL name once: a shared target's levels are one texture)
+	std::vector<GLuint> tex;
 	for ( int i = 0; i < ni; i++ )
-		tex[size_t( i )] = P.img[size_t( i )].tex;
-	g.signalSemaphore( P.glDoneGl, 0, nullptr, GLuint( ni ), tex.data(), lay.data() );
+		if ( std::find( tex.begin(), tex.end(), P.img[size_t( i )].tex ) == tex.end() )
+			tex.push_back( P.img[size_t( i )].tex );
+	const GLuint nt = GLuint( tex.size() );
+	std::vector<GLenum> lay( tex.size(), kLayoutGeneral );
+	g.signalSemaphore( P.glDoneGl, 0, nullptr, nt, tex.data(), lay.data() );
 	g.flush();
 	Worker & W = wk();
 	std::uint64_t want = 0;
@@ -7071,15 +7157,19 @@ bool lightRun( const LightRun & t, std::string & why )
 	}
 	if ( !ok )
 		return breakOff( w );  // nothing signals vkDone: GL does not wait it; GL draws its stages this frame
-	g.waitSemaphore( P.vkDoneGl, 0, nullptr, GLuint( ni ), tex.data(), lay.data() );
+	g.waitSemaphore( P.vkDoneGl, 0, nullptr, nt, tex.data(), lay.data() );
 	for ( int i = 0; i < ni; i++ ) {
 		const LightImage & x = t.img[size_t( i )];
 		if ( x.out && x.tiles > 0 ) {  // lane VKWATER4: a strip of tiles into the layers of GL's 2D array
 			const int tw = x.w / x.tiles;
-			for ( int l = 0; l < x.tiles; l++ )
+			for ( int l = 0; l < x.tiles; l++ ) {
 				g.copyImageSubData( P.img[size_t( i )].tex, kTexture2D, 0, l * tw, 0, 0, x.tex, kTexture2DArray, x.outLevel, 0, 0, l, tw, x.h, 1 );
-		} else if ( x.out )
+				P.st.copies++;
+			}
+		} else if ( x.out ) {
 			g.copyImageSubData( P.img[size_t( i )].tex, kTexture2D, 0, 0, 0, 0, x.tex, kTexture2D, 0, 0, 0, 0, x.w, x.h, 1 );
+			P.st.copies++;
+		}
 	}
 	P.pending = true;
 	const double ms = nowMs() - t0;
@@ -7096,6 +7186,13 @@ void lightOnGl( int pass, const char * why )
 	LightStat & s = light().p[pass].st;
 	s.gl++;
 	s.glWhy = why ? why : "";
+}
+
+OceanWaterStat takeOceanWaterStat()
+{
+	const OceanWaterStat s = oceanWater().take;
+	oceanWater().take = OceanWaterStat();
+	return s;
 }
 
 LightStat takeLightStat( int pass )
@@ -8948,7 +9045,7 @@ void lightSay( int pass, bool wanted, const char * glWhy )
 	static const char * const kName[LightPasses] = { "ao", "contact", "ssgi", "ocean" };
 	static const char * const kWhat[LightPasses] = { "ao_vk: 4 mips, raw, across, fin, or aox_vk: a ported method's stages; gbuf on GL",
 		"contact_vk: the shadow lines",
-		"ssgi_vk: the cast", "ocean_vk: spectrum, 14 FFT stages, layers, 7 mips; arrays copied back" };
+		"ssgi_vk: the cast", "ocean_vk: spectrum, 14 FFT stages, layers, 7 mips" };
 	static QString said[LightPasses];
 	static double at[LightPasses] = {};
 	const QString head = QStringLiteral( "vk %1: " ).arg( QLatin1String( kName[pass] ) );
@@ -8976,6 +9073,14 @@ void lightSay( int pass, bool wanted, const char * glWhy )
 		line += QStringLiteral( ", on GL %1 frames (last: %2)" ).arg( st.gl ).arg( QString::fromStdString( st.glWhy ) );
 	if ( st.fails > 0 )
 		line += QStringLiteral( ", %1 refused to GL (last: %2)" ).arg( st.fails ).arg( QString::fromStdString( st.failWhy ) );
+	if ( pass == LightOcean ) {  // lane VKWATER4: texture copies per frame, the pass's own plus the water twins' ocean inputs
+		const OceanWaterStat ws = oceanWater().say;
+		oceanWater().say = OceanWaterStat();
+		const int n = std::max( st.runs, 1 );
+		line += QStringLiteral( "; copies per frame %1 (pass %2, water twins %3), shared %4 in place" )
+			.arg( double( st.copies + ws.copies ) / n, 0, 'f', 1 ).arg( double( st.copies ) / n, 0, 'f', 1 )
+			.arg( double( ws.copies ) / n, 0, 'f', 1 ).arg( double( st.shared + ws.shared ) / n, 0, 'f', 1 );
+	}
 	said[pass] = line;
 	qInfo().noquote() << line;
 }

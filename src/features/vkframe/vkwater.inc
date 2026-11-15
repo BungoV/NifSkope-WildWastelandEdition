@@ -1563,6 +1563,10 @@ bool waterRun( const WaterRun & r, std::string & why )
 			} else if ( const std::uintptr_t sk = farSharedOf( s->tex ) ) {
 				view = sharedFind( sk )->view;  // already on the present device (another pass's target)
 				texNames.push_back( s->tex );
+				if ( std::strncmp( nm, "waterOcean", 10 ) == 0 ) {  // lane VKWATER4: the ocean's arrays in place
+					oceanWater().say.shared++;
+					oceanWater().take.shared++;
+				}
 			} else {
 				unsigned twin = 0;
 				if ( !waterTwin( key, *s, twin, w ) )
@@ -1580,6 +1584,10 @@ bool waterRun( const WaterRun & r, std::string & why )
 					g.copyImageSubData( s->tex, target, l, 0, 0, 0, twin, target, l, 0, 0, 0, lw, lh, ld );
 				}
 				S.copies++;
+				if ( std::strncmp( nm, "waterOcean", 10 ) == 0 ) {  // lane VKWATER4: an ocean array copied into its twin
+					oceanWater().say.copies++;
+					oceanWater().take.copies++;
+				}
 				texNames.push_back( twin );
 			}
 			if ( s && s->tex )

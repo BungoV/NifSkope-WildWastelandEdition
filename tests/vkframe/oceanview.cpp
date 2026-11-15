@@ -17,6 +17,10 @@
 //   texel 2p. The end-to-end arrays are the stages' own (floored there).
 // Reds (each must FAIL, never refuse): spectrum dk one tile on; FFT stage 4 axis swapped; final tile offset 0 (tile 0 in
 //   every layer); mip level 2 from level 0 (two levels up); end to end with FFT stage 7 skipped.
+// Arm 6 (11-15, the arrays shared in place): B / C / D x 8 levels written in place into shared targets (the *A kernels,
+//   no copy) EXACT against the copy route on the same inputs (96 levels compared); lightRun copies 0 on the shared route,
+//   2 + 144 on the copy route (the control). Red `prev`: the readback takes the other set (the frame before's; a warm-up
+//   at phase 0.37 before case 1): must FAIL and equal the frame before's copy-route arrays bit for bit.
 // bash tests/vkframe/oceanview.sh <out dir>. Last line `OCEANVIEW GATE OK` or `OCEANVIEW GATE FAILED`.
 #define main fxview_main
 #include "fxview.cpp"
@@ -407,20 +411,31 @@ void arrToStrip( GLuint arr, int lv, GLuint strip )
 		f.copyImageSubData( arr, fT2DA, lv, 0, 0, l, strip, GL_TEXTURE_2D, 0, l * tw, 0, 0, tw, tw, 1 );
 }
 
-// end to end: the 31 dispatches the app records (skip = the FFT stage left out, 1-based; 0 none)
-LightRun e2e( GLuint h0, GLuint q, const GLuint outArr[3], float phase, const float dk[6], int skip )
+// a shared-target entry (lane VKWATER4 arm 6: cellocean.cpp's shared route)
+LightImage shareImg( std::uintptr_t key, GLenum fmt, int w, int h, int lv )
+{
+	LightImage x = img( 0, fmt, w, h, false, false, 0, lv );
+	x.share = key;
+	return x;
+}
+
+// end to end: the 31 dispatches the app records (skip = the FFT stage left out, 1-based; 0 none). keys (arm 6, the
+// shared route as cellocean.cpp records it): h0, q, B, C, D shared targets, the *A kernels writing the arrays in place
+LightRun e2e( GLuint h0, GLuint q, const GLuint outArr[3], float phase, const float dk[6], int skip, const std::uintptr_t * keys = nullptr )
 {
 	using namespace WwVkPresent;
 	LightRun t;
 	t.pass = LightOcean;
-	t.img.push_back( img( h0, fRgba32f, kW, kN, true, false ) );
-	t.img.push_back( img( q, fR32f, kW, kN, true, false ) );
+	t.img.push_back( keys ? shareImg( keys[0], fRgba32f, kW, kN, 0 ) : img( h0, fRgba32f, kW, kN, true, false ) );
+	t.img.push_back( keys ? shareImg( keys[1], fR32f, kW, kN, 0 ) : img( q, fR32f, kW, kN, true, false ) );
 	for ( int k = 0; k < 4; k++ )
 		t.img.push_back( img( 0, fRgba32f, kW, kN, false, false ) );	// ping [0][0], [0][1], [1][0], [1][1]
 	const GLenum fm[3] = { fRgba16f, fRgba32f, fRgba16f };
+	const int ka = keys ? 4 : 0;	// LightOceanFinBcAK .. MipDAK follow FinBcK .. MipDK
 	for ( int lv = 0; lv < kLv; lv++ )
 		for ( int k = 0; k < 3; k++ )
-			t.img.push_back( img( outArr[k], fm[k], kW >> lv, kN >> lv, false, true, kT, lv ) );
+			t.img.push_back( keys ? shareImg( keys[2 + k], fm[k], kW >> lv, kN >> lv, lv )
+				: img( outArr[k], fm[k], kW >> lv, kN >> lv, false, true, kT, lv ) );
 	auto strip = [&]( int lv, int k ) { return 6 + lv * 3 + k; };
 	LightDispatch s = disp( LightOceanSpecK, 2, 3, 0, 1 );
 	pcF( s, 0, phase );
@@ -438,15 +453,15 @@ LightRun e2e( GLuint h0, GLuint q, const GLuint outArr[3], float phase, const fl
 			t.d.push_back( d );
 			cur = 1 - cur;
 		}
-	LightDispatch fbc = disp( LightOceanFinBcK, strip( 0, 0 ), strip( 0, 1 ), 2 + 2 * cur, 3 + 2 * cur );
+	LightDispatch fbc = disp( LightOceanFinBcK + ka, strip( 0, 0 ), strip( 0, 1 ), 2 + 2 * cur, 3 + 2 * cur );
 	pcI( fbc, 0, kN );
 	t.d.push_back( fbc );
-	LightDispatch fd = disp( LightOceanFinDK, strip( 0, 2 ), -1, 3 + 2 * cur, -1 );
+	LightDispatch fd = disp( LightOceanFinDK + ka, strip( 0, 2 ), -1, 3 + 2 * cur, -1 );
 	pcI( fd, 0, kN );
 	t.d.push_back( fd );
 	for ( int lv = 1; lv < kLv; lv++ ) {
-		t.d.push_back( disp( LightOceanMipBcK, strip( lv, 0 ), strip( lv, 1 ), strip( lv - 1, 0 ), strip( lv - 1, 1 ) ) );
-		t.d.push_back( disp( LightOceanMipDK, strip( lv, 2 ), -1, strip( lv - 1, 2 ), -1 ) );
+		t.d.push_back( disp( LightOceanMipBcK + ka, strip( lv, 0 ), strip( lv, 1 ), strip( lv - 1, 0 ), strip( lv - 1, 1 ) ) );
+		t.d.push_back( disp( LightOceanMipDK + ka, strip( lv, 2 ), -1, strip( lv - 1, 2 ), -1 ) );
 	}
 	return t;
 }
@@ -456,6 +471,98 @@ struct Case
 	double U, swell;
 	float phase;
 };
+
+// lane VKWATER4 arm 6: the shared targets (cellocean.cpp's oceanShare shape: h0, q, two sets of B / C / D) and the frames
+struct Shared6
+{
+	std::uintptr_t key = 0x4F560000u;	// + 0 h0, + 1 q, + 2 + set * 3 + k
+	GLuint h0 = 0, q = 0, arr[2][3] = {}, ctl[3] = {};	// ctl: the copy route's arrays (the control)
+	std::vector<Got> prevRef;	// the frame before's copy-route arrays (24: level * 3 + k)
+	int frame = 0, cmps = 0;
+};
+Shared6 g6;
+
+bool shared6Make( std::string & why )
+{
+	unsigned t = 0;
+	if ( !WwVkPresent::sharedTarget( g6.key, 0, kW, kN, 1, fRgba32f, t, why ) )
+		return false;
+	g6.h0 = t;
+	if ( !WwVkPresent::sharedTarget( g6.key + 1, 0, kW, kN, 1, fR32f, t, why ) )
+		return false;
+	g6.q = t;
+	const GLenum fm[3] = { fRgba16f, fRgba32f, fRgba16f };
+	for ( int s = 0; s < 2; s++ )
+		for ( int k = 0; k < 3; k++ ) {
+			if ( !WwVkPresent::sharedTarget( g6.key + 2 + std::uintptr_t( s * 3 + k ), 2, kN, kN, kT, fm[k], t, why, kLv ) )
+				return false;
+			g6.arr[s][k] = t;
+		}
+	for ( int k = 0; k < 3; k++ )
+		g6.ctl[k] = texArr( fm[k] );
+	return true;
+}
+
+// one frame both ways from the uploaded h0 / q: the copy route into ctl (ref: its 24 arrays), the shared route into set
+// `set`; the lightRun copies and shared entries of each run
+bool frame6( GlSide & g, float phase, const float dk[6], int set, std::vector<Got> & ref, WwVkPresent::LightStat & ctl,
+	WwVkPresent::LightStat & sh, const std::string & name )
+{
+	using namespace WwVkPresent;
+	const bool half[3] = { true, false, true };
+	takeLightStat( LightOcean );
+	if ( !run( e2e( g.h0, g.q, g6.ctl, phase, dk, 0 ), name + " (copy route, the control)" ) )
+		return false;
+	ctl = takeLightStat( LightOcean );
+	ref.clear();
+	for ( int lv = 0; lv < kLv; lv++ )
+		for ( int k = 0; k < 3; k++ )
+			ref.push_back( grabArr( g6.ctl[k], lv, half[k] ) );
+	const std::uintptr_t keys[5] = { g6.key, g6.key + 1, g6.key + 2 + std::uintptr_t( set * 3 ), g6.key + 3 + std::uintptr_t( set * 3 ),
+		g6.key + 4 + std::uintptr_t( set * 3 ) };
+	if ( !run( e2e( 0, 0, nullptr, phase, dk, 0, keys ), name + " (shared route)" ) )
+		return false;
+	sh = takeLightStat( LightOcean );
+	return true;
+}
+
+void upload6( const std::vector<float> & h0, const std::vector<float> & q )
+{
+	glBindTexture( GL_TEXTURE_2D, g6.h0 );
+	glTexSubImage2D( GL_TEXTURE_2D, 0, 0, 0, kW, kN, GL_RGBA, GL_FLOAT, h0.data() );
+	glBindTexture( GL_TEXTURE_2D, g6.q );
+	glTexSubImage2D( GL_TEXTURE_2D, 0, 0, 0, kW, kN, fRed, GL_FLOAT, q.data() );
+	glBindTexture( GL_TEXTURE_2D, 0 );
+}
+
+void dkOf( float dk[6] )
+{
+	for ( int t = 0; t < kT; t++ )
+		dk[t] = float( 2.0 * WwOcean::kPi / WwOcean::set( t / 3 ).L[t % 3] );
+}
+
+// arm 6's warm-up: the frame before case 1 (case 1's wind, phase 0.37) writes set 0, its copy-route arrays the first prevRef
+bool warm6( GlSide & g, const Case & c )
+{
+	WwOcean::SetParams P[2];
+	WwOcean::params( c.U, c.swell, P );
+	std::vector<float> h0, q;
+	WwOcean::h0Tiles( P, h0, q );
+	glBindTexture( GL_TEXTURE_2D, g.h0 );
+	glTexSubImage2D( GL_TEXTURE_2D, 0, 0, 0, kW, kN, GL_RGBA, GL_FLOAT, h0.data() );
+	glBindTexture( GL_TEXTURE_2D, g.q );
+	glTexSubImage2D( GL_TEXTURE_2D, 0, 0, 0, kW, kN, fRed, GL_FLOAT, q.data() );
+	glBindTexture( GL_TEXTURE_2D, 0 );
+	upload6( h0, q );
+	float dk[6];
+	dkOf( dk );
+	WwVkPresent::LightStat ctl, sh;
+	if ( !frame6( g, 0.37f, dk, 0, g6.prevRef, ctl, sh, "warm-up ph0.370" ) )
+		return false;
+	std::printf( "OCEANVIEW warm-up ph0.370: set 0 written, copies copy route %d, shared route %d\n", ctl.copies, sh.copies );
+	g6.frame = 1;
+	return true;
+}
 
 void runCase( GlSide & g, const Case & c, const std::function<void()> & quad )
 {
@@ -663,6 +770,43 @@ void runCase( GlSide & g, const Case & c, const std::function<void()> & quad )
 		}
 		( r ? red : green )( name, ran, pass );
 	}
+
+	// 6 the arrays shared in place (cellocean.cpp's shared route: no copy in, no copy back) against the copy route on the
+	// same inputs; the red: the readback takes the other set, the one the frame before wrote
+	upload6( h0, q );
+	{
+		const int set = g6.frame % 2;
+		std::vector<Got> ref;
+		LightStat ctl, sh;
+		const std::string name = cs + " shared in place, set " + std::to_string( set );
+		const bool ran = frame6( g, c.phase, dk, set, ref, ctl, sh, name );
+		bool pass = false, prevEq = false, redPass = false;
+		if ( ran ) {
+			std::vector<std::pair<std::string, Cmp>> cmps, rcmps;
+			size_t prevDiff = 0;
+			for ( int lv = 0; lv < kLv; lv++ )
+				for ( int k = 0; k < 3; k++ ) {
+					const std::string l = std::string( an[k] ) + " level " + std::to_string( lv );
+					const Got & r0 = ref[size_t( lv * 3 + k )];
+					cmps.push_back( { l, compare( grabArr( g6.arr[set][k], lv, half[k] ), r0, 0 ) } );
+					const Got o = grabArr( g6.arr[1 - set][k], lv, half[k] );
+					rcmps.push_back( { l, compare( o, r0, 0 ) } );
+					const Cmp pc = compare( o, g6.prevRef[size_t( lv * 3 + k )], 0 );
+					prevDiff += pc.d + ( pc.nanBad ? 1 : 0 );
+				}
+			g6.cmps += int( cmps.size() );
+			std::printf( "    info %s: lightRun copies per run, shared route %d (shared entries %d), copy route %d (the control)\n",
+				name.c_str(), sh.copies, sh.shared, ctl.copies );
+			pass = verdict( name, cmps, 0, -1.0 ) && cmps.size() == 24 && sh.copies == 0 && sh.shared > 0 && ctl.copies == 2 + 6 * kLv * 3;
+			redPass = verdict( cs + " RED prev (the other set)", rcmps, 0, -1.0 );
+			prevEq = prevDiff == 0 && g6.prevRef.size() == 24;
+			std::printf( "    info %s RED prev: %zu values differ from the frame before's copy-route arrays (must be 0)\n", cs.c_str(), prevDiff );
+			g6.prevRef = ref;
+		}
+		g6.frame++;
+		green( name, ran, pass );
+		red( cs + " RED prev (the other set)", ran && prevEq, redPass );
+	}
 	glDeleteTextures( 2, V );
 	glDeleteTextures( 3, VA );
 	glDeleteTextures( 3, EA );
@@ -798,6 +942,10 @@ int main( int argc, char ** argv )
 		return fatal( "the view: " + why );
 	std::printf( "OCEANVIEW present device: storage formats %d\n", int( vk().storageExt ) );
 	const Case cases[4] = { { 5.0, 0.344, 0.137f }, { 5.0, 0.344, 0.618f }, { 12.0, 0.344, 0.137f }, { 12.0, 0.344, 0.618f } };
+	if ( !shared6Make( why ) )
+		return fatal( "arm 6 shared targets: " + why );
+	if ( !warm6( g, cases[0] ) )
+		return fatal( "arm 6 warm-up" );
 	for ( const Case & c : cases ) {
 		pump();
 		runCase( g, c, quad );
@@ -807,9 +955,10 @@ int main( int argc, char ** argv )
 		st.runs, st.fails, st.failWhy.c_str(), st.runs ? st.cpuMs / st.runs : 0.0, st.maxMs, st.pipelines, st.buildMs );
 	const GLenum err = glGetError();
 	std::printf( "OCEANVIEW GL error 0x%x\n", unsigned( err ) );
-	// 4 cases x ( 1 + 14 + 1 + 7 + 1 ) greens, 4 x 5 reds
-	const bool gate = gGreenBad == 0 && gRedBad == 0 && gFloorBad == 0 && gGreens == 96 && gReds == 20 && err == GL_NO_ERROR;
-	std::printf( "greens %d (%d out), reds %d (%d did not fail), floors low %d\n", gGreens, gGreenBad, gReds, gRedBad, gFloorBad );
+	// 4 cases x ( 1 + 14 + 1 + 7 + 1 + 1 shared ) greens, 4 x ( 5 + 1 prev ) reds; arm 6: 4 x 24 array levels compared
+	const bool gate = gGreenBad == 0 && gRedBad == 0 && gFloorBad == 0 && gGreens == 100 && gReds == 24 && g6.cmps == 96 && err == GL_NO_ERROR;
+	std::printf( "greens %d (%d out), reds %d (%d did not fail), floors low %d, shared levels compared %d\n", gGreens, gGreenBad, gReds,
+		gRedBad, gFloorBad, g6.cmps );
 	WwVkPresent::shutdown();
 	wglMakeCurrent( nullptr, nullptr );
 	wglDeleteContext( glrc );

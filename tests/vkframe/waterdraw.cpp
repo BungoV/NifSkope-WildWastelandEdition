@@ -22,6 +22,8 @@
 // off (seed 3, where a tessellated twin's red 2 is judged too). Seed 2 (the air) judges reds 1 and 2.
 // Lane VKWATER4: the m twin adds the SSR water ray arm (`WATERDRAW ray red N`: 200x120 RGBA32F over a D24S8
 // renderbuffer with an occluder, depth mask off, waterSslr 1; same colour bar per pixel; reds 1 / 2 / 4 / 8 FAIL).
+// G5 (11-15): seed 3 also draws with waterOceanB / C / D as shared targets (no waterTwin copy) EXACT against the copy
+// route (ocean copies 3 there, 0 in place); red prev (the other shared set) FAILS and is EXACT against its own copy route.
 // Last line `WATERDRAW GATE OK` or `WATERDRAW GATE FAILED`.
 // Sampling: judged at anisotropy 1 on both sides (NV's anisotropic footprint differs GL vs Vulkan at the same maxAnisotropy:
 // 10 248 samples past at the app's 16, BOUND at 1). The app's 16 is drawn once more on seed 1 and logged, never judged.
@@ -1167,6 +1169,114 @@ int main( int argc, char ** argv )
 				where( vkC, glC, W, H, S );
 			if ( red ? !fail : fail )
 				gateOk = false;
+		}
+		/* lane VKWATER4 (G5): the ocean's arrays shared in place (seed 3, the sea on). waterOceanB / C / D as shared targets
+		 * (vkwater.inc's farSharedOf branch: no waterTwin copy) EXACT against the same draw through the copy route; ocean
+		 * copies 3 there, 0 shared. Red prev: the other shared set (other contents, the frame before's) FAILS against this
+		 * draw and is EXACT against the copy route drawn from those other contents */
+		if ( seed == 3 ) {
+			auto vkDraw = [&]( std::vector<std::uint16_t> & C, std::vector<float> & D, WwVkPresent::OceanWaterStat & st, const char * what ) {
+				WwVkPresent::takeOceanWaterStat();
+				before( fbFrame );
+				drawState( fbFrame, scissor );
+				WwVkPresent::WaterRun r;
+				r.variant = variant;
+				WwVkPresent::waterStateOf( &gw, pWater, r );
+				r.w = W;
+				r.h = H;
+				r.color = fc;
+				r.idxOff = idxOff;
+				r.count = count;
+				r.baseVertex = 0;
+				r.key = reinterpret_cast<std::uintptr_t>( twinKeys );
+				const bool ran = WwVkPresent::waterRun( r, why );
+				stateEnd();
+				runs++;
+				st = WwVkPresent::takeOceanWaterStat();
+				if ( ran ) {
+					C = readColor( fc );
+					D = readDepth( fds, true );
+				} else
+					std::printf( "WATERDRAW shared %s: REFUSED (%s)\n", what, why.c_str() );
+				return ran;
+			};
+			std::vector<Smp *> oc;
+			for ( Smp & s : smp )
+				if ( s.name.compare( 0, 10, "waterOcean" ) == 0 && s.kind == 2 )
+					oc.push_back( &s );
+			GLuint orig[3] = {}, prev[3] = {}, sh[2][3] = {};
+			bool ok6 = oc.size() == 3;
+			std::mt19937 rp( 20261115u );
+			for ( size_t k = 0; ok6 && k < 3; k++ ) {
+				Smp & s = *oc[k];
+				orig[k] = s.tex;
+				Smp p = s;
+				p.tex = 0;
+				ok6 = fill( p, rp );
+				prev[k] = p.tex;
+				for ( int set = 0; ok6 && set < 2; set++ ) {
+					unsigned t = 0;
+					ok6 = WwVkPresent::sharedTarget( 0x57440000u + std::uintptr_t( set * 3 ) + k, 2, s.w, s.h, s.d, s.fmt, t, why, s.levels );
+					if ( !ok6 )
+						break;
+					sh[set][k] = t;
+					const unsigned tg = targetOf( s.kind );
+					glBindTexture( tg, t );
+					glTexParameteri( tg, GL_TEXTURE_MIN_FILTER, s.levels > 1 ? GL_LINEAR_MIPMAP_LINEAR : GL_LINEAR );
+					glTexParameteri( tg, GL_TEXTURE_MAG_FILTER, GL_LINEAR );
+					glTexParameteri( tg, GL_TEXTURE_WRAP_S, s.levels > 1 ? GL_REPEAT : 0x812F );
+					glTexParameteri( tg, GL_TEXTURE_WRAP_T, s.levels > 1 ? GL_REPEAT : 0x812F );
+					glTexParameteri( tg, 0x8072, 0x812F );
+					glTexParameteri( tg, fMaxLevel, s.levels - 1 );
+					glBindTexture( tg, 0 );
+					for ( int l = 0; l < s.levels; l++ )
+						f.copyImageSubData( set ? prev[k] : orig[k], tg, l, 0, 0, 0, t, tg, l, 0, 0, 0, std::max( s.w >> l, 1 ), std::max( s.h >> l, 1 ), s.d );
+				}
+			}
+			ok6 = ok6 && glGetError() == GL_NO_ERROR;
+			if ( !ok6 ) {
+				std::printf( "WATERDRAW shared: could not make the shared ocean arrays (%zu found; %s)\n", oc.size(), why.c_str() );
+				gateOk = false;
+			} else {
+				std::vector<std::uint16_t> c0, c1, cp, cr;
+				std::vector<float> d0, d1, dp, dr;
+				WwVkPresent::OceanWaterStat s0, s1, sp, sr;
+				auto use = [&]( const GLuint * t ) {
+					for ( size_t k = 0; k < 3; k++ )
+						oc[k]->tex = t[k];
+				};
+				bool ran = vkDraw( c0, d0, s0, "copy route" );
+				use( sh[0] );
+				ran = vkDraw( c1, d1, s1, "in place" ) && ran;
+				use( prev );
+				ran = vkDraw( cp, dp, sp, "copy route, the other contents" ) && ran;
+				use( sh[1] );
+				ran = vkDraw( cr, dr, sr, "RED prev" ) && ran;
+				use( orig );
+				if ( !ran )
+					gateOk = false;
+				else {
+					const Verdict v = judge( bgC, bgD, c1, d1, c0, d0 ), vr = judge( bgC, bgD, cr, dr, c0, d0 ), vp = judge( bgC, bgD, cr, dr, cp, dp );
+					std::printf( "WATERDRAW shared in place: %s against the copy route, covered %zu (one side only %zu), %zu halves and %zu depths "
+						"differ; ocean copies %d / shared %d in place, copy route %d / %d\n", v.word(), v.covered, v.onlyOne, v.halvesDiff,
+						v.depthDiff, s1.copies, s1.shared, s0.copies, s0.shared );
+					std::printf( "WATERDRAW shared RED prev: %s against this draw (%zu samples past 1e-2) -> %s; against the copy route of "
+						"the other contents %s (%zu halves, %zu depths differ)\n", vr.word(), vr.colPast,
+						std::strcmp( vr.word(), "FAIL" ) == 0 ? "red FAILS as it must" : "red PASSES: the gate is blind", vp.word(),
+						vp.halvesDiff, vp.depthDiff );
+					const bool good = std::strcmp( v.word(), "EXACT" ) == 0 && s1.copies == 0 && s1.shared == 3 && s0.copies == 3
+						&& s0.shared == 0 && std::strcmp( vr.word(), "FAIL" ) == 0 && std::strcmp( vp.word(), "EXACT" ) == 0;
+					if ( !good )
+						gateOk = false;
+				}
+			}
+			for ( int set = 0; set < 2; set++ )
+				for ( size_t k = 0; k < 3; k++ )
+					if ( sh[set][k] )
+						WwVkPresent::sharedTargetDrop( 0x57440000u + std::uintptr_t( set * 3 ) + k );
+			for ( GLuint & t : prev )
+				if ( t )
+					glDeleteTextures( 1, &t );
 		}
 		// diagnostic (WATERDRAW_BISECT=<seed>): each seeded loose scalar set to 0 alone, both sides redrawn; the ones that
 		// move the colour misses are printed. Never part of the verdict.

@@ -30,16 +30,29 @@ struct LpxJob
 	int4 i;
 };
 
+// LPX_IN_ARRAY: T0 / T1 are 2D arrays; LPX_OUT_ARRAY: the targets are (one level of a shared 2D array, lane VKWATER4)
+#ifdef LPX_IN_ARRAY
+LPX_BIND( 0 ) Texture2DArray<float4> LpxT0 : register( t0 );
+LPX_BIND( 1 ) Texture2DArray<float4> LpxT1 : register( t1 );
+#else
 LPX_BIND( 0 ) Texture2D<float4> LpxT0 : register( t0 );
 LPX_BIND( 1 ) Texture2D<float4> LpxT1 : register( t1 );
+#endif
 LPX_BIND( 2 ) Texture2D<float4> LpxT2 : register( t2 );
 LPX_BIND( 3 ) Texture2D<float4> LpxT3 : register( t3 );
 LPX_BIND( 4 ) Texture2D<float4> LpxT4 : register( t4 );
 LPX_BIND( 5 ) SamplerState LpxLinear : register( s0 );	// linear, clamp to edge, no mips
 LPX_BIND( 6 ) SamplerState LpxPoint : register( s1 );	// nearest, clamp to edge, no mips
+#ifdef LPX_OUT_ARRAY
+LPX_BIND( 7 ) LPX_FORMAT( LPX_OUT0_FORMAT ) RWTexture2DArray<LPX_OUT0_TYPE> LpxOut0 : register( u0 );
+#ifdef LPX_OUT1_FORMAT
+LPX_BIND( 8 ) LPX_FORMAT( LPX_OUT1_FORMAT ) RWTexture2DArray<LPX_OUT1_TYPE> LpxOut1 : register( u1 );
+#endif
+#else
 LPX_BIND( 7 ) LPX_FORMAT( LPX_OUT0_FORMAT ) RWTexture2D<LPX_OUT0_TYPE> LpxOut0 : register( u0 );
 #ifdef LPX_OUT1_FORMAT
 LPX_BIND( 8 ) LPX_FORMAT( LPX_OUT1_FORMAT ) RWTexture2D<LPX_OUT1_TYPE> LpxOut1 : register( u1 );
+#endif
 #endif
 #ifdef LPX_BUF_TYPE
 LPX_BIND( 9 ) StructuredBuffer<LPX_BUF_TYPE> LpxBuf : register( t5 );	// a kernel's read-only table (the contact bands)
@@ -50,11 +63,17 @@ LPX_BIND( 9 ) StructuredBuffer<LPX_BUF_TYPE> LpxBuf : register( t5 );	// a kerne
 ConstantBuffer<LpxJob> LpxJobPc : register( b0 );
 #endif
 
-// this thread's texel and the target's size; false past the edge
+// this thread's texel and the target's size; false past the edge. An array target: its layers side by side (a strip)
 bool LpxTexel( uint3 id, out uint2 size )
 {
 	uint w, h;
+#ifdef LPX_OUT_ARRAY
+	uint n;
+	LpxOut0.GetDimensions( w, h, n );
+	w *= n;
+#else
 	LpxOut0.GetDimensions( w, h );
+#endif
 	size = uint2( w, h );
 	return all( id.xy < size );
 }

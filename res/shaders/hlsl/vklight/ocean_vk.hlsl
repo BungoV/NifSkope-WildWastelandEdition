@@ -11,14 +11,27 @@
 //   -D OCEAN_STAGE=4  layers D (out0 RGBA16F): T0 x1; i.x the tile offset
 //   -D OCEAN_STAGE=5  one mip of B (out0 RGBA16F) + C (out1 RGBA32F): T0, T1 the level above
 //   -D OCEAN_STAGE=6  one mip of D (out0 RGBA16F): T0 the level above
+//   -D OCEAN_STAGE=7..10  stages 3..6 into one level of the shared arrays in place (2D array targets; the mips read the
+//                     level above from the array): the same threads (the strip) and arithmetic, the store at (x mod n, y, x / n)
 #ifndef OCEAN_STAGE
 #define OCEAN_STAGE 1
 #endif
-#if OCEAN_STAGE == 1 || OCEAN_STAGE == 2
+#if OCEAN_STAGE >= 7
+#define OCEAN_ARRAY 1
+#define OCEAN_PASS ( OCEAN_STAGE - 4 )
+#define LPX_OUT_ARRAY
+#if OCEAN_STAGE >= 9
+#define LPX_IN_ARRAY
+#endif
+#else
+#define OCEAN_ARRAY 0
+#define OCEAN_PASS OCEAN_STAGE
+#endif
+#if OCEAN_PASS == 1 || OCEAN_PASS == 2
 #define LPX_OUT0_FORMAT "rgba32f"
 #define LPX_OUT1_FORMAT "rgba32f"
 #define LPX_OUT1_TYPE float4
-#elif OCEAN_STAGE == 3 || OCEAN_STAGE == 5
+#elif OCEAN_PASS == 3 || OCEAN_PASS == 5
 #define LPX_OUT0_FORMAT "rgba16f"
 #define LPX_OUT1_FORMAT "rgba32f"
 #define LPX_OUT1_TYPE float4
@@ -27,6 +40,33 @@
 #endif
 #define LPX_OUT0_TYPE float4
 #include "LightBindingsVk.hlsli"
+
+#if OCEAN_ARRAY
+// strip texel p into its layer: layer p.x / n, column p.x mod n (n the level's tile width)
+uint3 oceanAt( uint2 p )
+{
+	uint w, h, n;
+	LpxOut0.GetDimensions( w, h, n );
+	return uint3( p.x % w, p.y, p.x / w );
+}
+#define OCEAN_PUT0( p, v ) LpxOut0[oceanAt( p )] = ( v )
+#define OCEAN_PUT1( p, v ) LpxOut1[oceanAt( p )] = ( v )
+#else
+#define OCEAN_PUT0( p, v ) LpxOut0[p] = ( v )
+#define OCEAN_PUT1( p, v ) LpxOut1[p] = ( v )
+#endif
+#if OCEAN_ARRAY && OCEAN_PASS >= 5
+// the level above's strip texel q, read from its layer
+float4 oceanUp( Texture2DArray<float4> t, int2 q )
+{
+	uint w, h, n;
+	t.GetDimensions( w, h, n );
+	return t.Load( int4( q.x % int( w ), q.y, q.x / int( w ), 0 ) );
+}
+#define OCEAN_UP( t, q ) oceanUp( t, q )
+#else
+#define OCEAN_UP( t, q ) LPX_FETCH( t, q )
+#endif
 
 // a b, GL's fused form
 float2 oceanCmul( float2 a, float2 b )
@@ -106,28 +146,28 @@ void main( uint3 id : SV_DispatchThreadID )
 	precise float4 o1 = a1 + float4( oceanCmul( b1.xy, w ), oceanCmul( b1.zw, w ) );
 	LpxOut0[id.xy] = o0;
 	LpxOut1[id.xy] = o1;
-#elif OCEAN_STAGE == 3 || OCEAN_STAGE == 4
+#elif OCEAN_PASS == 3 || OCEAN_PASS == 4
 	const int2 pr = int2( ( p.x & 127 ) + LpxJobPc.i.x * ( p.x >> 7 ), p.y );
-#if OCEAN_STAGE == 3
+#if OCEAN_PASS == 3
 	const float4 x0 = LPX_FETCH( LpxT0, pr ), x1 = LPX_FETCH( LpxT1, pr );
 	precise float4 oc = float4( x0.x * x0.x, x0.y * x0.y, x0.x * x0.y, x1.x );
-	LpxOut0[id.xy] = x0;
-	LpxOut1[id.xy] = oc;
+	OCEAN_PUT0( id.xy, x0 );
+	OCEAN_PUT1( id.xy, oc );
 #else
 	const float4 x1 = LPX_FETCH( LpxT0, pr );
-	LpxOut0[id.xy] = float4( x1.yzw, 0.0 );
+	OCEAN_PUT0( id.xy, float4( x1.yzw, 0.0 ) );
 #endif
 #else
 	const int2 q = 2 * p;
-	precise float4 m0 = ( ( LPX_FETCH( LpxT0, q ) + LPX_FETCH( LpxT0, q + int2( 1, 0 ) ) ) + LPX_FETCH( LpxT0, q + int2( 0, 1 ) ) )
-		+ LPX_FETCH( LpxT0, q + int2( 1, 1 ) );
+	precise float4 m0 = ( ( OCEAN_UP( LpxT0, q ) + OCEAN_UP( LpxT0, q + int2( 1, 0 ) ) ) + OCEAN_UP( LpxT0, q + int2( 0, 1 ) ) )
+		+ OCEAN_UP( LpxT0, q + int2( 1, 1 ) );
 	precise float4 r0 = m0 * 0.25;
-	LpxOut0[id.xy] = r0;
-#if OCEAN_STAGE == 5
-	precise float4 m1 = ( ( LPX_FETCH( LpxT1, q ) + LPX_FETCH( LpxT1, q + int2( 1, 0 ) ) ) + LPX_FETCH( LpxT1, q + int2( 0, 1 ) ) )
-		+ LPX_FETCH( LpxT1, q + int2( 1, 1 ) );
+	OCEAN_PUT0( id.xy, r0 );
+#if OCEAN_PASS == 5
+	precise float4 m1 = ( ( OCEAN_UP( LpxT1, q ) + OCEAN_UP( LpxT1, q + int2( 1, 0 ) ) ) + OCEAN_UP( LpxT1, q + int2( 0, 1 ) ) )
+		+ OCEAN_UP( LpxT1, q + int2( 1, 1 ) );
 	precise float4 r1 = m1 * 0.25;
-	LpxOut1[id.xy] = r1;
+	OCEAN_PUT1( id.xy, r1 );
 #endif
 #endif
 }
