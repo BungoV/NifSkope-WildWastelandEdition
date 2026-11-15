@@ -1,3 +1,43 @@
+## VKFAR4 (2026-11-15): the far ground's ring-0 tiles go to Vulkan in one hand-off a frame
+
+Changed, not built, not checked live. Offline: tests/vkframe/fargrounddraw.sh passes, with new batch checks added.
+
+- With the view on Vulkan (WW_VKVIEW=1), the ring-0 ground tiles used to cross to Vulkan one tile at a time (about 16
+  hand-offs a frame). They are now queued and drawn together in one hand-off. Each tile keeps its own uniforms and
+  descriptor set. The queue is drawn before any other shape, at the end of the shape walk, and before the bindless
+  buffer pool moves, so the draw order matches GL's.
+- If a batch fails, its tiles are missing for that one frame. After that the view falls back to one hand-off per tile,
+  and the `vk farground:` line says why.
+- Gate: three tiles drawn as one batch match GL, with depth exact. They are identical to three single runs. Two reds on
+  one tile (it reads the previous tile's data, or it is dropped) must FAIL, and both do. The water, far LOD, waterview
+  and farview gates print byte-identical results.
+
+## VKFAR4 (2026-11-15): the screen GI's Vulkan twin rounds closer to GL's (still refused)
+
+Changed, not built, not checked live. Offline: tests/vkframe/gihalfview.sh still FAILS (13 of 15 checks), so the view
+keeps the screen GI on GL as before.
+
+- The Vulkan copy of the screen GI read now does its arithmetic in the same order as the NVIDIA GL compiler in three
+  places (the view direction, the probe bias step, the probe tile position). Texels that differ from GL dropped from
+  1174 to 104 of 57,377. Only this pass changes; every other shader that reads the GI volume is byte-identical.
+
+## VKFAR4 (2026-11-15): a stuck Vulkan far dots or far cards run hands the frame to GL
+
+Changed, not built, not checked live. Offline: tests/vkframe/farview.sh and farcards.sh GATE OK with no `vk fence:` line;
+their reds WW_VKFENCE_RED=fardots / farcards (a faked 1 s timeout) print the site's line and FAIL.
+
+- When the wait for the last Vulkan run timed out (or the device was lost), these passes went on and rewrote commands
+  the GPU might still be running. That frame now stays on GL, with a `vk fence: the last fardots run ...` (or farcards)
+  line naming the wait's result. Same helper and line as VKWATER4's other passes (fenceDone).
+
+## VKFAR4 (2026-11-15): far card sheets are copied again when their Vulkan copy is remade
+
+Changed, not built, not checked live. Offline: tests/vkframe/farcards.sh GATE OK; its new red (the old check) drew
+differently after a remade sheet came back at the same image handle.
+
+- A far card sheet's Vulkan copy remembered which image it had filled by the image handle alone. A copy remade at the
+  same handle was left empty and the cards read garbage. The same for the empty shadow cube's clear.
+
 ## VKOBJ5 round 7 (2026-11-15): object fence waits refuse the frame; twins take only their own keys
 
 Changed, not built, not checked live. Offline: regress gates OK, every green run prints no `vk fence:` line; the reds

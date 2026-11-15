@@ -112,7 +112,11 @@ void frag_main()
 #if !defined( WW_CELL_PRT )
 	/* PERFFIX2: the volume's own read (cellGiSample's: o to the eye, d the normal), with the mirror direction's sky
 	 * visibility riding it (FIX1101A's cellDdgiTwo: the same 8 probes and weights), packed for the specular occlusion */
+#ifdef CELL_DDGI_GL_ORDER	// lane VKFAR4: NV GL cancels the translation in t - ( R posView + t ): V = -( R posView )
+	float3 V = normalize( -float3( dot( cellRow[0].xyz, posView ), dot( cellRow[1].xyz, posView ), dot( cellRow[2].xyz, posView ) ) );
+#else
 	float3 V = normalize( float3( cellRow[0].w, cellRow[1].w, cellRow[2].w ) - P );
+#endif
 	float3 R = reflect( -V, N );
 	cellDdgiTwo = true;
 	cellDdgiD2 = normalize( N + R );	// half way: cellSpecSky's bend at k 0.5

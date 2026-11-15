@@ -10,6 +10,8 @@
 #define LPX_OUT1_FORMAT "rgba32f"
 #define LPX_OUT1_TYPE float4
 #include "LightBindingsVk.hlsli"
+// lane VKFAR4: NV GL's own operation order where the Vulkan compiler regrouped the read (cell_ddgi.hlsli, cell_gihalf_ps.hlsl)
+#define CELL_DDGI_GL_ORDER 1
 
 #define main gihalf_ps_main
 #include "../ao/cell_gihalf_ps.hlsl"

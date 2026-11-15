@@ -800,6 +800,190 @@ int main( int argc, char ** argv )
 				round + 1, L, double( side ) * side * 4.0 * L * 4.0 / 3.0 / 1048576.0, make, fill, drop );
 		}
 	}
+	{
+		/* lane VKFAR4 (batching, option a): three ring-0 tiles (own vertex / element buffers, own modelViewMatrix) in ONE
+		 * crossing (farGroundRunN; farGroundQueue + farGroundFlush, the app's route) against GL's three draws (depth max 0,
+		 * colour in the bar above) and EXACT against three single crossings. Reds on tile 1 (1024 tile 0's set and host
+		 * slice, 2048 the tile dropped) must FAIL; tiles 1 and 2 on another fgDecal buffer split the batch in two crossings;
+		 * one single run after the batches equals the one before (twinRun records its own draw again). */
+		struct Tile
+		{
+			GLuint vao = 0, vb = 0, eb = 0;
+			float mv[16] = {};
+		};
+		Tile tiles[3];
+		const GLint lMv = f.getUniformLocation( pFg, "modelViewMatrix" );
+		if ( lMv < 0 ) {
+			std::printf( "FARGROUNDDRAW batch: modelViewMatrix has no location (the tiles' own loose blocks are not exercised)\n" );
+			gateOk = false;
+		}
+		for ( int k = 0; k < 3; k++ ) {
+			Tile & t = tiles[k];
+			for ( int i = 0; i < 16; i++ )
+				t.mv[i] = i % 5 == 0 ? 1.0f : 0.0f;
+			t.mv[12] = -300.0f + 300.0f * float( k ), t.mv[13] = 10.0f * float( k ), t.mv[14] = -40.0f * float( k );
+			if ( !k ) {
+				t.vao = vao, t.vb = vb, t.eb = eb;
+				continue;
+			}
+			std::vector<Vtx> lifted( vtx );
+			for ( Vtx & v : lifted )
+				v.p[1] += 8.0f * float( k );
+			ex.genVertexArrays( 1, &t.vao );
+			ex.bindVertexArray( t.vao );
+			f.genBuffers( 1, &t.vb );
+			f.bindBuffer( 0x8892, t.vb );
+			f.bufferData( 0x8892, std::ptrdiff_t( lifted.size() * sizeof( Vtx ) ), lifted.data(), fStatic );
+			ex.vertexAttribPointer( 0, 3, GL_FLOAT, GL_FALSE, 36, reinterpret_cast<const void *>( 0 ) );
+			ex.vertexAttribPointer( 1, 4, GL_UNSIGNED_BYTE, GL_TRUE, 36, reinterpret_cast<const void *>( 12 ) );
+			for ( int a = 0; a < 3; a++ )
+				ex.vertexAttribPointer( GLuint( 2 + a ), 4, 0x8D9F, GL_TRUE, 36, reinterpret_cast<const void *>( std::uintptr_t( 16 + 4 * a ) ) );
+			ex.vertexAttribPointer( 7, 2, GL_FLOAT, GL_FALSE, 36, reinterpret_cast<const void *>( 28 ) );
+			for ( GLuint l : { 0u, 1u, 2u, 3u, 4u, 7u } )
+				ex.enableVertexAttribArray( l );
+			f.genBuffers( 1, &t.eb );
+			f.bindBuffer( 0x8893, t.eb );
+			f.bufferData( 0x8893, std::ptrdiff_t( idx.size() * 2 ), idx.data(), fStatic );
+			ex.bindVertexArray( 0 );
+		}
+		// a second fgDecal texel buffer (the shifted decals): tiles reading it are another batch
+		const Smp & sd = smp[size_t( iDecal )];
+		GLuint decal2 = 0, decal2Buf = 0;
+		{
+			std::mt19937 rr( 777u + 2u );
+			const std::vector<float> d2 = decalData( rr, 90.0f, decalTexels );
+			glGenTextures( 1, &decal2 );
+			f.genBuffers( 1, &decal2Buf );
+			f.bindBuffer( 0x8C2A, decal2Buf );
+			f.bufferData( 0x8C2A, sd.bufBytes, nullptr, fStatic );
+			ex.bufferSubData( 0x8C2A, 0, std::ptrdiff_t( d2.size() * 4 ), d2.data() );
+			glBindTexture( 0x8C2A, decal2 );
+			ex.texBuffer( 0x8C2A, sd.fmt, decal2Buf );
+			glBindTexture( 0x8C2A, 0 );
+		}
+		const GLuint decalsSplit[3] = { 0, decal2, decal2 };
+		auto tileOn = [&]( GLuint fb, int k, const GLuint * decal ) {
+			drawState( fb, false );
+			f.uniformMatrix4fv( lMv, 1, GL_FALSE, tiles[k].mv );
+			ex.bindVertexArray( tiles[k].vao );
+			if ( decal && decal[k] )
+				bindUnit( sd.unit, targetOf( sd.kind ), decal[k] );
+		};
+		auto tileRun = [&]( int red ) {
+			WwVkPresent::WaterRun r;
+			WwVkPresent::farGroundStateOf( &gw, pFg, r );
+			r.w = W;
+			r.h = H;
+			r.color = fc;
+			WwVkPresent::WaterCmd c;
+			c.count = count;
+			c.instanceCount = 1;
+			c.firstIndex = std::uint32_t( idxOff / 2 );
+			c.baseVertex = base;
+			c.baseInstance = 0;
+			r.cmds.assign( 1, c );
+			r.key = reinterpret_cast<std::uintptr_t>( twinKeys );
+			r.red = red;
+			return r;
+		};
+		struct Img
+		{
+			std::vector<std::uint16_t> c;
+			std::vector<float> d;
+			bool ran = true;
+			int runs = 0;
+			WwVkPresent::TwinBatchStat bs;
+		};
+		auto glTiles = [&]( int n, const GLuint * decal ) {
+			before( fbRef );
+			for ( int k = 0; k < n; k++ ) {
+				tileOn( fbRef, k, decal );
+				ex.drawInst( GL_TRIANGLES, GLsizei( count ), GL_UNSIGNED_SHORT, reinterpret_cast<const void *>( std::uintptr_t( idxOff ) ), 1, base, 0 );
+				stateEnd();
+			}
+			Img o;
+			o.c = readColor( refCol );
+			o.d = readDepth( refDs, false );
+			return o;
+		};
+		// mode 0: one crossing a tile (farGroundRun), 1: farGroundRunN, 2: farGroundQueue + farGroundFlush
+		auto vkTiles = [&]( int mode, int n, int red1, const GLuint * decal ) {
+			Img o;
+			before( fbFrame );
+			std::vector<WwVkPresent::WaterRun> rs( static_cast<std::size_t>( n ) );
+			for ( int k = 0; k < n; k++ ) {
+				tileOn( fbFrame, k, decal );
+				rs[size_t( k )] = tileRun( k == 1 ? red1 : 0 );
+				if ( mode == 0 )
+					o.ran = WwVkPresent::farGroundRun( rs[size_t( k )], why ) && o.ran;
+				if ( mode == 2 )
+					o.ran = WwVkPresent::farGroundQueue( rs[size_t( k )], why ) && o.ran;
+				stateEnd();
+			}
+			if ( mode == 1 ) {
+				std::vector<const WwVkPresent::WaterRun *> ps;
+				for ( const WwVkPresent::WaterRun & r : rs )
+					ps.push_back( &r );
+				o.ran = WwVkPresent::farGroundRunN( ps.data(), n, why );
+			}
+			if ( mode == 2 )
+				o.ran = WwVkPresent::farGroundFlush( why ) && o.ran;
+			runs++;
+			o.runs = take().runs;
+			o.bs = WwVkPresent::takeFarGroundBatchStat();
+			o.c = readColor( fc );
+			o.d = readDepth( fds, true );
+			return o;
+		};
+		before( fbRef );
+		const std::vector<std::uint16_t> bC = readColor( refCol );
+		const std::vector<float> bD = readDepth( refDs, false );
+		const Img gl3 = glTiles( 3, nullptr ), gl1 = glTiles( 1, nullptr ), glSplit = glTiles( 3, decalsSplit );
+		auto arm = [&]( const char * what, const Img & vk, const Img & gl, bool mustFail, int wantCross, int wantDraws ) {
+			if ( !vk.ran ) {
+				std::printf( "FARGROUNDDRAW batch %s: REFUSED (%s)\n", what, why.c_str() );
+				gateOk = false;
+				return;
+			}
+			const Verdict v = judge( bC, bD, vk.c, vk.d, gl.c, gl.d );
+			const char * word = v.word();
+			const bool fail = std::strcmp( word, "FAIL" ) == 0;
+			const bool depthOk = v.maxDepthU == 0 && v.depthPast == 0;
+			const bool crossOk = wantCross < 0 || ( vk.bs.crossings == wantCross && vk.bs.draws == wantDraws && !vk.bs.lost && !vk.bs.off );
+			std::printf( "FARGROUNDDRAW batch %s: %s covered %zu (both %zu, one side only %zu), depth max %ld D24 units (%zu past 1), colour %zu "
+				"halves differ, %zu samples past 1e-2 (max rel %.3g); %d single runs, %d batched crossings for %d draws, %d lost%s\n", what, word,
+				v.covered, v.both, v.onlyOne, v.maxDepthU, v.depthPast, v.halvesDiff, v.colPast, v.maxRel, vk.runs - vk.bs.draws, vk.bs.crossings,
+				vk.bs.draws, vk.bs.lost, mustFail ? ( fail ? " -> red FAILS as it must" : " -> red PASSES: the gate is blind" )
+				: crossOk ? "" : " -> NOT the crossings wanted" );
+			if ( mustFail ? !fail : ( fail || !depthOk || !crossOk ) )
+				gateOk = false;
+		};
+		auto exact = [&]( const char * what, const Img & a, const Img & b ) {
+			size_t cd = 0, dd = 0;
+			for ( size_t i = 0; i < a.c.size() && i < b.c.size(); i++ )
+				cd += a.c[i] != b.c[i];
+			for ( size_t i = 0; i < a.d.size() && i < b.d.size(); i++ )
+				dd += a.d[i] != b.d[i];
+			const bool ok = !cd && !dd && a.c.size() == b.c.size() && a.d.size() == b.d.size() && a.ran && b.ran;
+			std::printf( "FARGROUNDDRAW batch %s: %s (%zu colour halves, %zu depth samples differ)\n", what, ok ? "EXACT" : "DIFFER", cd, dd );
+			gateOk = gateOk && ok;
+		};
+		const Img one0 = vkTiles( 0, 1, 0, nullptr );
+		arm( "tile 0, one crossing", one0, gl1, false, -1, 0 );
+		const Img singles = vkTiles( 0, 3, 0, nullptr );
+		arm( "3 tiles, a crossing each", singles, gl3, false, 0, 0 );
+		const Img batch = vkTiles( 1, 3, 0, nullptr );
+		arm( "3 tiles, one crossing", batch, gl3, false, 1, 3 );
+		exact( "one crossing vs a crossing each", batch, singles );
+		const Img queued = vkTiles( 2, 3, 0, nullptr );
+		arm( "3 tiles queued + flushed", queued, gl3, false, 1, 3 );
+		exact( "queued vs one crossing", queued, batch );
+		arm( "red 1024 (tile 1 on tile 0's set and host slice)", vkTiles( 1, 3, 1024, nullptr ), gl3, true, -1, 0 );
+		arm( "red 2048 (tile 1 dropped)", vkTiles( 1, 3, 2048, nullptr ), gl3, true, -1, 0 );
+		arm( "tiles 1 + 2 on another fgDecal buffer", vkTiles( 1, 3, 0, decalsSplit ), glSplit, false, 2, 3 );
+		arm( "the same, queued + flushed", vkTiles( 2, 3, 0, decalsSplit ), glSplit, false, 2, 3 );
+		exact( "tile 0 after the batches vs before", vkTiles( 0, 1, 0, nullptr ), one0 );
+	}
 	std::printf( gateOk ? "FARGROUNDDRAW GATE OK\n" : "FARGROUNDDRAW GATE FAILED\n" );
 	return gateOk ? 0 : 1;
 }
