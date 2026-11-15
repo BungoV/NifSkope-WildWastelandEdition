@@ -70,6 +70,7 @@ struct Fns
 	void( WINAPI * uniformMatrix4fv )( GLint, GLsizei, GLboolean, const GLfloat * ) = nullptr;
 	void( WINAPI * uniform2f )( GLint, GLfloat, GLfloat ) = nullptr;
 	void( WINAPI * uniform1i )( GLint, GLint ) = nullptr;
+	void( WINAPI * uniform1f )( GLint, GLfloat ) = nullptr;
 	void( WINAPI * genBuffers )( GLsizei, GLuint * ) = nullptr;
 	void( WINAPI * bindBuffer )( GLenum, GLuint ) = nullptr;
 	void( WINAPI * bufferData )( GLenum, std::ptrdiff_t, const void *, GLenum ) = nullptr;
@@ -101,7 +102,7 @@ bool loadAll()
 		&& load( f.getProgramiv, "glGetProgramiv" ) && load( f.getProgramInfoLog, "glGetProgramInfoLog" )
 		&& load( f.useProgram, "glUseProgram" ) && load( f.getUniformLocation, "glGetUniformLocation" )
 		&& load( f.uniformMatrix4fv, "glUniformMatrix4fv" ) && load( f.uniform2f, "glUniform2f" ) && load( f.uniform1i, "glUniform1i" )
-		&& load( f.genBuffers, "glGenBuffers" ) && load( f.bindBuffer, "glBindBuffer" ) && load( f.bufferData, "glBufferData" )
+		&& load( f.uniform1f, "glUniform1f" ) && load( f.genBuffers, "glGenBuffers" ) && load( f.bindBuffer, "glBindBuffer" ) && load( f.bufferData, "glBufferData" )
 		&& load( f.genVertexArrays, "glGenVertexArrays" ) && load( f.bindVertexArray, "glBindVertexArray" )
 		&& load( f.enableVertexAttribArray, "glEnableVertexAttribArray" ) && load( f.vertexAttribPointer, "glVertexAttribPointer" )
 		&& load( f.drawElementsBaseVertex, "glDrawElementsBaseVertex" ) && load( f.genFramebuffers, "glGenFramebuffers" )
@@ -268,7 +269,10 @@ int main( int argc, char ** argv )
 	const GLint lRel = f.getUniformLocation( prog, "shRelFromView" ), lClip = f.getUniformLocation( prog, "shClipFromRel" );
 	const GLint lRn = f.getUniformLocation( prog, "shRadiusNear" ), lMv = f.getUniformLocation( prog, "modelViewMatrix" );
 	const GLint lAt = f.getUniformLocation( prog, "shAlphaTest" );
-	if ( lRel < 0 || lClip < 0 || lRn < 0 || lMv < 0 ) {
+	const GLint lBase = f.getUniformLocation( prog, "BaseMap" ), lUvS = f.getUniformLocation( prog, "uvScale" );
+	const GLint lUvO = f.getUniformLocation( prog, "uvOffset" ), lAlpha = f.getUniformLocation( prog, "alpha" );
+	const GLint lThr = f.getUniformLocation( prog, "alphaThreshold" );
+	if ( lRel < 0 || lClip < 0 || lRn < 0 || lMv < 0 || lAt < 0 || lBase < 0 || lUvS < 0 || lUvO < 0 || lAlpha < 0 || lThr < 0 ) {
 		std::printf( "LAMPVIEW GATE FAILED (a uniform of cell_shadowdepth is not active)\n" );
 		return 2;
 	}
@@ -319,6 +323,12 @@ int main( int argc, char ** argv )
 		endMesh();
 	}
 	const int kMeshes = int( meshes.size() );
+	// lane VKLAMP2: location 7 UVs from the positions (no rng draw: the cases before keep their fixture)
+	std::vector<float> uvs;
+	for ( std::size_t v = 0; v + 2 < pos.size(); v += 3 ) {
+		uvs.push_back( 2.3f * pos[v] + 0.7f * pos[v + 2] );
+		uvs.push_back( 1.9f * pos[v + 1] - 0.4f * pos[v + 2] );
+	}
 
 	// ---- the view (celllamps' vt / sc / cam) and the lights
 	double Rv[3][3];
@@ -468,15 +478,20 @@ int main( int argc, char ** argv )
 		kCasters, cmds.size() / 5, opsFor( -1 ).size(), opsFor( 1 ).size() );
 
 	// ---- GL: the pool buffers and the VAO (location 0, the u16 elements)
-	GLuint bPos = 0, bIdx = 0, vao = 0;
+	GLuint bPos = 0, bIdx = 0, bUv = 0, vao = 0;
 	f.genBuffers( 1, &bPos );
 	f.genBuffers( 1, &bIdx );
+	f.genBuffers( 1, &bUv );
 	f.genVertexArrays( 1, &vao );
 	f.bindVertexArray( vao );
 	f.bindBuffer( kArrayBuf, bPos );
 	f.bufferData( kArrayBuf, std::ptrdiff_t( pos.size() * 4 ), pos.data(), kStatic );
 	f.enableVertexAttribArray( 0 );
 	f.vertexAttribPointer( 0, 3, GL_FLOAT, GL_FALSE, 12, nullptr );
+	f.bindBuffer( kArrayBuf, bUv );
+	f.bufferData( kArrayBuf, std::ptrdiff_t( uvs.size() * 4 ), uvs.data(), kStatic );
+	f.enableVertexAttribArray( 7 );
+	f.vertexAttribPointer( 7, 2, GL_FLOAT, GL_FALSE, 8, nullptr );
 	f.bindBuffer( kElemBuf, bIdx );
 	f.bufferData( kElemBuf, std::ptrdiff_t( idx.size() * 2 ), idx.data(), kStatic );
 	f.bindVertexArray( 0 );
@@ -581,7 +596,10 @@ int main( int argc, char ** argv )
 		return ok && glGetError() == GL_NO_ERROR;
 	};
 	enum Red { kNone, kFaceOrder, kSlotOffset, kRadius, kNoClear, kMoverCleared };
-	auto runVk = [&]( Red red, const std::vector<OpDef> & d, const std::vector<float> & mv, int held, std::vector<std::uint16_t> & out ) {
+	const std::vector<std::uint32_t> & lmvCmds = cmds;
+	auto runVk = [&]( Red red, const std::vector<OpDef> & d, const std::vector<float> & mv, int held, std::vector<std::uint16_t> & out,
+					 const std::vector<std::uint32_t> * cmdsIn = nullptr ) {
+		const std::vector<std::uint32_t> & cmds = cmdsIn ? *cmdsIn : lmvCmds;
 		bool ok = junk( shT, held );
 		WwVkPresent::LampRun run;
 		run.tex = shT;
@@ -656,8 +674,8 @@ int main( int argc, char ** argv )
 			}
 			ok = ok && lok;
 			if ( print )
-				std::printf( "LAMPVIEW frame%d slot%d/face%d %s%s (%zu of %zu covered texels differ, %zu past 1 unit, max %d; set vk %zu gl %zu)\n",
-					fr, l / 6, l % 6, word, touched ? "" : " held", v.diff, v.covered, v.past1, v.maxu, v.vkSet, v.refSet );
+				std::printf( "LAMPVIEW %s%d slot%d/face%d %s%s (%zu of %zu covered texels differ, %zu past 1 unit, max %d; set vk %zu gl %zu)\n",
+					fr ? "frame" : "alpha", fr ? fr : 1, l / 6, l % 6, word, touched ? "" : " held", v.diff, v.covered, v.past1, v.maxu, v.vkSet, v.refSet );
 		}
 		return ok;
 	};
@@ -701,6 +719,139 @@ int main( int argc, char ** argv )
 		const bool passes = ran && !ref[0].empty() && judge( d1, vkO, ref[0], 1, false, &all );
 		std::printf( "LAMPVIEW RED %s %s (%zu of %zu covered texels differ, %zu past 1 unit, max %d; must FAIL)\n", passes ? "PASSES" : "FAIL",
 			r.name, all.diff, all.covered, all.past1, all.maxu );
+		ok = ok && !passes;
+	}
+
+	// ---- lane VKLAMP2: GL's alpha-tested casters on a Vulkan-written layer (the app's route) against GL doing every face.
+	// 4 of each slot's 8 random casters alpha-tested; a 64 x 64 checker BaseMap (8 px cells, alpha 0 / 1), threshold 0.5.
+	std::vector<char> isAt( std::size_t( kCasters ), 0 );
+	for ( int k = 0; k < kSlots; k++ )
+		for ( int i = 1; i < 8; i += 2 )
+			isAt[std::size_t( slotFirst[k] + 6 + i )] = 1;
+	GLuint baseT = 0;
+	{
+		std::vector<std::uint8_t> px( 64 * 64 * 4 );
+		for ( int y = 0; y < 64; y++ )
+			for ( int x = 0; x < 64; x++ ) {
+				std::uint8_t * p = &px[std::size_t( y * 64 + x ) * 4];
+				p[0] = p[1] = p[2] = 200;
+				p[3] = ( ( x / 8 + y / 8 ) & 1 ) ? 255 : 0;
+			}
+		glGenTextures( 1, &baseT );
+		glBindTexture( GL_TEXTURE_2D, baseT );
+		glTexImage2D( GL_TEXTURE_2D, 0, GL_RGBA8, 64, 64, 0, GL_RGBA, GL_UNSIGNED_BYTE, px.data() );
+		glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST );
+		glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST );
+		glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT );
+		glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT );
+		glTexParameteri( GL_TEXTURE_2D, 0x813D, 0 );  // GL_TEXTURE_MAX_LEVEL
+	}
+	// the Vulkan arm's commands: each slot's solid casters only (the app's build loop skips isAt), then the mover
+	std::vector<std::uint32_t> solidCmds;
+	std::uint32_t slotSolid[kSlots], slotSolidN[kSlots];
+	for ( int k = 0; k < kSlots; k++ ) {
+		slotSolid[k] = std::uint32_t( solidCmds.size() / 5 );
+		for ( std::uint32_t c = slotCmd[k]; c < slotCmd[k] + std::uint32_t( slotCount[k] ); c++ )
+			if ( !isAt[cmds[std::size_t( c ) * 5 + 4]] )
+				solidCmds.insert( solidCmds.end(), &cmds[std::size_t( c ) * 5], &cmds[std::size_t( c ) * 5] + 5 );
+		slotSolidN[k] = std::uint32_t( solidCmds.size() / 5 ) - slotSolid[k];
+	}
+	const std::uint32_t moverSolid = std::uint32_t( solidCmds.size() / 5 );
+	solidCmds.insert( solidCmds.end(), &cmds[std::size_t( moverCmd ) * 5], &cmds[std::size_t( moverCmd ) * 5] + 5 );
+	std::vector<OpDef> dSolid = d1;
+	for ( OpDef & o : dSolid ) {
+		const bool isMover = !o.clear;
+		o.first = isMover ? moverSolid : slotSolid[o.slot];
+		o.n = isMover ? 1u : o.n ? slotSolidN[o.slot] : 0u;
+	}
+	enum AlphaArm { kRefAll, kRefSolid, kAlphaOnly };
+	enum AlphaRed { kANone, kAClear, kAAlways, kATestOff };
+	// GL: celllamps' plain pass state; kAlphaOnly = the app's GL loop on the Vulkan route (no clear, isAt casters only)
+	auto glCasters = [&]( GLuint tex, AlphaArm arm, AlphaRed red, const std::vector<OpDef> & d, const std::vector<float> & mv ) {
+		bool ok = true;
+		f.useProgram( prog );
+		glBindTexture( GL_TEXTURE_2D, baseT );
+		f.uniform1i( lBase, 0 );
+		f.uniform2f( lUvS, 1.0f, 1.0f );
+		f.uniform2f( lUvO, 0.0f, 0.0f );
+		f.uniform1f( lAlpha, 1.0f );
+		f.uniform1f( lThr, 0.5f );
+		f.bindVertexArray( vao );
+		glDisable( GL_SCISSOR_TEST );
+		glDisable( GL_BLEND );
+		glDisable( GL_CULL_FACE );
+		glDisable( 0x8037 );  // GL_POLYGON_OFFSET_FILL
+		glEnable( GL_DEPTH_TEST );
+		glDepthFunc( red == kAAlways ? GL_ALWAYS : GL_LEQUAL );
+		glDepthMask( GL_TRUE );
+		glPolygonMode( GL_FRONT_AND_BACK, GL_FILL );
+		for ( const OpDef & o : d ) {
+			ok = ok && attach( tex, 6 * o.slot + o.face );
+			glViewport( 0, 0, F, F );
+			float rel[16], clip[16];
+			relOf( o.slot, rel );
+			WwVkPresent::lampFaceClip( o.face, lights[o.slot].radius, clip );
+			f.uniformMatrix4fv( lRel, 1, GL_FALSE, rel );
+			f.uniform2f( lRn, lights[o.slot].radius, lights[o.slot].nearClip );
+			f.uniformMatrix4fv( lClip, 1, GL_FALSE, clip );
+			if ( arm == kAlphaOnly ? ( red == kAClear && o.clear ) : o.clear ) {
+				glClearDepth( 1.0 );
+				glClear( GL_DEPTH_BUFFER_BIT );
+			}
+			for ( std::uint32_t c = o.first; c < o.first + o.n; c++ ) {
+				const std::uint32_t * cm = &cmds[std::size_t( c ) * 5];
+				const bool at = isAt[cm[4]] != 0;
+				if ( ( arm == kRefSolid && at ) || ( arm == kAlphaOnly && !at ) )
+					continue;
+				f.uniform1i( lAt, at && red != kATestOff ? 1 : 0 );
+				f.uniformMatrix4fv( lMv, 1, GL_FALSE, &mv[std::size_t( cm[4] ) * 16] );
+				f.drawElementsBaseVertex( GL_TRIANGLES, GLsizei( cm[0] ), GL_UNSIGNED_SHORT,
+					reinterpret_cast<const void *>( std::size_t( cm[2] ) * 2 ), GLint( cm[3] ) );
+			}
+		}
+		f.uniform1i( lAt, 0 );
+		f.bindVertexArray( 0 );
+		glBindTexture( GL_TEXTURE_2D, 0 );
+		glDepthFunc( GL_LEQUAL );
+		return ok && glGetError() == GL_NO_ERROR;
+	};
+	std::vector<std::uint16_t> refA, refS, vkA;
+	bool aRan = junk( refT, -1 ) && glCasters( refT, kRefAll, kANone, d1, mats[0] );
+	readAll( refT, refA );
+	aRan = aRan && junk( refT, -1 ) && glCasters( refT, kRefSolid, kANone, d1, mats[0] );
+	readAll( refT, refS );
+	std::size_t alphaWon = 0;
+	for ( std::size_t i = 0; i < refA.size(); i++ )
+		alphaWon += refA[i] != refS[i];
+	auto alphaArm = [&]( AlphaRed red ) {
+		bool r = runVk( kNone, dSolid, mats[0], -1, vkA, &solidCmds ) && glCasters( shT, kAlphaOnly, red, d1, mats[0] );
+		readAll( shT, vkA );
+		return r && glGetError() == GL_NO_ERROR;
+	};
+	if ( !aRan || !alphaArm( kANone ) ) {
+		std::printf( "LAMPVIEW alpha FAIL (a run failed)\n" );
+		ok = false;
+	} else {
+		ok = judge( d1, vkA, refA, 0, true, nullptr ) && ok;
+	}
+	std::printf( "LAMPVIEW alpha casters win %zu texels over the solid-only picture (%s)\n", alphaWon, alphaWon ? "ok" : "FAIL: proves nothing" );
+	ok = ok && alphaWon > 0;
+	const struct
+	{
+		const char * name;
+		AlphaRed red;
+	} aReds[3] = { { "alpha clear (GL clears before its alpha draw)", kAClear }, { "alpha depth func (GL_ALWAYS, not LEQUAL)", kAAlways },
+		{ "alpha test off (shAlphaTest 0 on the alpha draw)", kATestOff } };
+	for ( const auto & r : aReds ) {
+		Diff all;
+		const bool ran = alphaArm( r.red );
+		const bool passes = ran && !refA.empty() && judge( d1, vkA, refA, 0, false, &all );
+		std::printf( "LAMPVIEW RED %s %s (%zu of %zu covered texels differ, %zu past 1 unit, max %d; must FAIL)\n", passes ? "PASSES" : "FAIL",
+			r.name, all.diff, all.covered, all.past1, all.maxu );
+		if ( r.red == kATestOff && all.diff == 0 ) {
+			std::printf( "LAMPVIEW alpha FAIL (the alpha test discards nothing)\n" );
+			ok = false;
+		}
 		ok = ok && !passes;
 	}
 	const WwVkPresent::LampStat st = WwVkPresent::takeLampStat();
