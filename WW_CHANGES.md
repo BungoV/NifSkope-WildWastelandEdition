@@ -1,3 +1,13 @@
+## VKWATER4 (2026-11-15): a stuck Vulkan pass hands its frame to GL instead of writing over it
+
+Changed, not built, not checked live. Offline: each pass's harness passes as before with no new line, and with its
+red (WW_VKFENCE_RED=<pass>, a faked 1 s timeout) it is refused with its reason.
+
+- The tone, TAA, sky, volumetric / cloud, light (AO, contact, SSGI, ocean), SSR, cascade shadow, object depth and
+  underwater passes, the view and the present went on when the wait for their last Vulkan work timed out (or the
+  device was lost), rewriting commands the GPU might still be running. That frame now stays on GL, with a
+  `vk fence:` line naming the pass and the wait's result. At shutdown a slot still in use is left, not freed.
+
 ## VKWATER4 (2026-11-15): the underwater fog's depth view is remade with a remade frame
 
 Changed, not built, not checked live. Offline: tests/vkframe/underdraw.sh GATE OK.
