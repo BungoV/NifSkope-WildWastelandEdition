@@ -66,6 +66,93 @@ pass for both bindless twins (fo4_cellbl, fo4_cellcsmbl): depth EXACT, colour in
   module that compiles its own pixel source with the key's defines; each key one RT define short refuses; red swap
   (twins 2 and 3's RT modules swapped) and red noinert FAIL.
 
+## VKWATER4 (2026-11-15): the bloom chain's Vulkan frames also hand a stuck frame to GL
+
+Changed, not built, not checked live; no offline harness reaches these waits (reds: WW_VKFENCE_RED=frame cap,
+frame layout, chain layout).
+
+- The bloom / combine / exposure frames in flight, and the one-time layout step when their shared frame or chain is
+  made, went on when the wait for earlier Vulkan work timed out. That frame now stays on GL with a `vk fence:` line;
+  a frame or chain that is still in use when it is remade is left, not freed.
+
+## VKWATER4 (2026-11-15): a stuck Vulkan pass hands its frame to GL instead of writing over it
+
+Changed, not built, not checked live. Offline: each pass's harness passes as before with no new line, and with its
+red (WW_VKFENCE_RED=<pass>, a faked 1 s timeout) it is refused with its reason.
+
+- The tone, TAA, sky, volumetric / cloud, light (AO, contact, SSGI, ocean), SSR, cascade shadow, object depth and
+  underwater passes, the view and the present went on when the wait for their last Vulkan work timed out (or the
+  device was lost), rewriting commands the GPU might still be running. That frame now stays on GL, with a
+  `vk fence:` line naming the pass and the wait's result. At shutdown a slot still in use is left, not freed.
+
+## VKWATER4 (2026-11-15): the underwater fog's depth view is remade with a remade frame
+
+Changed, not built, not checked live. Offline: tests/vkframe/underdraw.sh GATE OK.
+
+- The underwater fog kept its view of the frame's depth while the image handle stayed the same, so a frame remade at the
+  same handle (a resize) could leave it reading the freed depth. Making the frame now counts as a new shared target and
+  the view is made again.
+
+## VKWATER4 (2026-11-15): a stuck Vulkan water draw hands the frame to GL instead of writing over it
+
+Changed, not built, not checked live. Offline: tests/vkframe/waterdraw.sh's new red (a faked 1 s timeout) is refused
+with its reason and the next draw passes.
+
+- When the wait for the last Vulkan crossing timed out (or the device was lost), the water draw went on and rewrote
+  commands the GPU might still be running. That frame now stays on GL, with a `vk water:` line naming the wait's result.
+
+## VKWATER4 (2026-11-15): the water's SSR ray pass no longer draws nothing after its depth format changes
+
+Changed, not built, not checked live. Offline: tests/vkframe/waterdraw.sh's D32F_S8 ray arm (fo4_waterlookm, RT build),
+150 runs (120 of them 6 processes at once) with 0 empty draws; the red (the old key) drew nothing in 2 of 30, each time on the
+trigger the harness now reports (`WATERDRAW ray handle reused: N runs`). With the trigger forced on every ray run
+(WW_WATERDRAW_RAYREUSE=1: the depth format flips each run and the target comes back at its freed handle), 30 of 30
+harness runs passed with the view remade 19 times each; the old key drew nothing on 29 of 30 cross-format runs that
+still had a device.
+
+- When the water ray pass's depth target was remade in another format (D24S8 to D32F_S8), Vulkan could keep a view of
+  the freed target and test depth against garbage, so the water drew nothing that frame on. The view is now remade
+  whenever a shared target was made, not only when the image handle differs.
+
+## VKWATER4 (2026-11-15): the water on the all-on route keeps its twins; an unknown input keeps it on GL by name
+
+Changed, not built, not checked live. Offline: GL's water programs built with the all-on RT set (WW_CELL_RESTIR,
+WW_CELL_RTDDGI, WW_CELL_RTDDGI_CASCADES) compile to the same driver code as without it (the water calls none of the RT
+GI / ReSTIR code), and tests/vkframe/waterdraw.sh passes against that build for the d and m twins.
+
+- The water's Vulkan route now checks that every input GL's water program reads has a slot in its twin; one that does
+  not keeps the water on GL with the names in the `vk water:` line.
+
+## VKWATER4 (2026-11-15): the ocean's arrays are shared in place, no copies per frame (WW_VKVIEW=1)
+
+Changed, not built, not checked live. Offline: oceanview arm 6, B / C / D at all 8 levels EXACT against the copy route
+(2 winds x 2 phases), lightRun copies 0 (copy route 146); waterdraw seed 3 EXACT against the copy route, ocean copies 0.
+
+- features/water/cellocean.cpp makes h0, q and the three arrays shared targets; ocean_vk.hlsl stages 7-10 write the
+  array levels in place, so the pass and the water draw copy nothing. The `vk ocean:` line counts copies per frame.
+- Red WW_VKVIEW_OCEAN_RED=prev: the water reads the other set (the frame before's) and must differ.
+
+## VKWATER4 (2026-11-15): the ultra ocean builds on Vulkan compute (WW_VKVIEW=1)
+
+Changed, not built, not checked live. Offline: tests/vkframe/oceanview.sh, 96 greens EXACT against GL (spectrum, 14 FFT
+stages, fields, mips 1-7, end to end), 20 reds FAIL.
+
+- features/water/cellocean.cpp records the spectrum, the inverse FFT, the fields and the mips as 31 dispatches
+  (res/shaders/hlsl/vklight/ocean_vk.hlsl) and writes them back into the three arrays. Red WW_VKVIEW_OCEAN_RED=1: GL's draws.
+- The spectrum keeps GL's float order with an opaque no-op: NVIDIA's Vulkan compiler reorders multiply chains even
+  under precise.
+
+## VKWATER4 (2026-11-15): the camera-underwater meniscus takes its derivative before the discard (HLSL)
+
+Changed, not built, not checked live. Offline: tests/vkframe/underdraw.sh arms A, B, C BOUND, red "old order" FAILS.
+
+- res/shaders/hlsl/water/cell_underwater_ps.hlsl (and its per-sample twin cell_underwater_ms_ps.hlsl) takes
+  fwidth( Pn.z ) before the per-sample draw's discard. After a discard the derivative is undefined; on NVIDIA GL it moved
+  the waterline's meniscus by up to 1168 half-float steps on edge samples.
+- GL's GLSL (features/water/cell_underwater.frag) keeps the old order until the HLSL switch.
+- The Vulkan twin's near-the-farthest-sample test now spells NVIDIA GL's own float form; in the gate's plain fog arm both
+  pick the same draw for a sample on the threshold. The light row still splits 13 samples (cause open).
+
 ## VKBLOOM1 (2026-11-12): the Fusion Shaders bloom and the exposure measure join the tone pass on Vulkan (WW_VKVIEW=1)
 
 Changed, not built, not checked live. Offline: tests/vkframe/toneview.sh gained a BLOOM arm (GL's own bloom chain and

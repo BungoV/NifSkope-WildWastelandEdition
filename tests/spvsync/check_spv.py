@@ -44,7 +44,12 @@ VKFRAME_SKY = {'sky_view_ps': ('res/shaders/hlsl/sky', 'atmo_sky_ps')}
 HLSL_SPECS += [('src/features/vkframe', k, 'vulkan1.2', 'vkframe_%s_spv' % k) for k in VKFRAME_SKY]
 # lane VKLIGHT1: AO / contact / SSGI, the script's sixth loop: res/shaders/hlsl/vklight/<src>.hlsl -D <def>, built -O0
 VKFRAME_LIGHT = {'ao_gbuf': ('ao_vk', 'AO_STAGE=5'), 'ao_mip': ('ao_vk', 'AO_STAGE=1'), 'ao_raw': ('ao_vk', 'AO_STAGE=2'),
-	'ao_blur': ('ao_vk', 'AO_STAGE=3'), 'ao_blurf': ('ao_vk', 'AO_STAGE=4'), 'contact': ('contact_vk', ''), 'ssgi': ('ssgi_vk', '')}
+	'ao_blur': ('ao_vk', 'AO_STAGE=3'), 'ao_blurf': ('ao_vk', 'AO_STAGE=4'), 'contact': ('contact_vk', ''), 'ssgi': ('ssgi_vk', ''),
+	# lane VKWATER4 (row G5): the ultra ocean, ocean_vk.hlsl stages 1-6, and 7-10 (3-6 into the shared arrays in place)
+	'ocean_spec': ('ocean_vk', 'OCEAN_STAGE=1'), 'ocean_fft': ('ocean_vk', 'OCEAN_STAGE=2'), 'ocean_finbc': ('ocean_vk', 'OCEAN_STAGE=3'),
+	'ocean_find': ('ocean_vk', 'OCEAN_STAGE=4'), 'ocean_mipbc': ('ocean_vk', 'OCEAN_STAGE=5'), 'ocean_mipd': ('ocean_vk', 'OCEAN_STAGE=6'),
+	'ocean_finbca': ('ocean_vk', 'OCEAN_STAGE=7'), 'ocean_finda': ('ocean_vk', 'OCEAN_STAGE=8'),
+	'ocean_mipbca': ('ocean_vk', 'OCEAN_STAGE=9'), 'ocean_mipda': ('ocean_vk', 'OCEAN_STAGE=10')}
 HLSL_SPECS += [('src/features/vkframe', 'light_' + k, 'vulkan1.2', 'vkframe_light_%s_spv' % k) for k in VKFRAME_LIGHT]
 # lane VKLIGHT2: the reflections, the script's `ssr <name> "<defines>"` lines (res/shaders/hlsl/vklight/ssr_vk.hlsl -DSSR_LIVE)
 VKFRAME_SSR = {'ssr_view_s1': '-DSSR_STAGE=1', 'ssr_view_s1w': '-DSSR_STAGE=1 -DF4FX_SSR_WATER_LOOK',
@@ -73,7 +78,10 @@ HLSL_SPECS += [('src/features/vkframe', k, 'vulkan1.2', 'vkframe_%s_spv' % k) fo
 # (their spirv-cross fixup gl_FragCoord.w = 1.0 / gl_FragCoord.w wants D3D's clip w in SV_Position.w)
 VKFRAME_FXKW = {'water_view_ps': 'water/water_view_ps',
 	'water_view_d_ps': 'water/water_view_d_ps', 'water_view_m_ps': 'water/water_view_m_ps',
-	'water_view_p_ps': 'water/water_view_p_ps', 'water_view_dp_ps': 'water/water_view_dp_ps'}
+	'water_view_p_ps': 'water/water_view_p_ps', 'water_view_dp_ps': 'water/water_view_dp_ps',
+	'water_view_off_ps': 'water/water_view_off_ps',	# lane VKWATER4: fo4_water.prog (the water look off)
+	'underwater_view_ps': 'water/underwater_view_ps',	# lane VKWATER4 (L7): cell_underwater.prog
+	'underwater_view_ms_ps': 'water/underwater_view_ms_ps'}	# and its per-sample cell_underwater_ms.prog
 HLSL_SPECS += [('src/features/vkframe', k, 'vulkan1.2', 'vkframe_%s_spv' % k) for k in VKFRAME_FXKW]
 # lane VKWATER3: the water's vertex stage, the script's `fxw <name> <dir/file>` lines (vs_6_0, own shifts, bindings kept)
 VKFRAME_FXW_ARGS = ['-fvk-b-shift', '256', '0', '-fvk-t-shift', '110', '0', '-fvk-s-shift', '180', '0', '-fvk-u-shift', '220', '0',
@@ -421,7 +429,7 @@ def main(argv):
 				hdefs = VKFRAME_FXP_ARGS + (VKFRAME_VS_SHIFT if VKFRAME_FXP[k][2] == 'VS_SHIFT' else VKFRAME_PS_SHIFT) \
 					+ VKFRAME_FXP[k][3].split() + ['-fspv-preserve-bindings', '-fvk-use-dx-position-w']
 				m = re.match(r'(.*)', VKFRAME_FXP[k][1])
-			opt =[] if d == 'src/features/vkframe' else ['-O0']   # vkframe_spirv.sh builds optimised
+			opt = [] if d == 'src/features/vkframe' else ['-O0']   # vkframe_spirv.sh builds optimised
 			r = subprocess.run([dxc, '-spirv', '-fspv-target-env=' + env, '-T', m.group(1) if m else 'ps_6_0' if k in VKFRAME_SKY or k in VKFRAME_FX or k in VKFRAME_FXK or k in VKFRAME_FXKW else 'cs_6_0', '-E', 'main']
 			                   + opt + hdefs + ['-Fo', spv, src], capture_output=True, text=True, timeout=300)
 			if r.returncode == 0:

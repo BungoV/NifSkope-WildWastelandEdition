@@ -38,6 +38,16 @@
 #include "features/vkframe/light_ao_blurf.spv.h"
 #include "features/vkframe/light_contact.spv.h"
 #include "features/vkframe/light_ssgi.spv.h"
+#include "features/vkframe/light_ocean_spec.spv.h"  // lane VKWATER4 (row G5): the ultra ocean (ocean_vk.hlsl stages 1-6)
+#include "features/vkframe/light_ocean_fft.spv.h"
+#include "features/vkframe/light_ocean_finbc.spv.h"
+#include "features/vkframe/light_ocean_find.spv.h"
+#include "features/vkframe/light_ocean_mipbc.spv.h"
+#include "features/vkframe/light_ocean_mipd.spv.h"
+#include "features/vkframe/light_ocean_finbca.spv.h"  // stages 7-10: the same into the shared arrays in place
+#include "features/vkframe/light_ocean_finda.spv.h"
+#include "features/vkframe/light_ocean_mipbca.spv.h"
+#include "features/vkframe/light_ocean_mipda.spv.h"
 // lane VKLIGHT2: the reflections' stages (ssr_vk.hlsl SSR_LIVE; w = the water look)
 #include "features/vkframe/ssr_view_s1.spv.h"
 #include "features/vkframe/ssr_view_s1w.spv.h"
@@ -240,6 +250,7 @@ struct Vk
 	VKP( vkMapMemory ); VKP( vkUnmapMemory ); VKP( vkCmdCopyImageToBuffer ); VKP( vkCmdResolveImage ); VKP( vkCmdCopyImage );
 	// round 11: the tone pass on the view (a render pass of the present device)
 	bool sampleShading = false;  // the device feature SV_SampleIndex needs (enabled when offered)
+	bool dualSrcBlend = false;   // lane VKWATER4 (L7): the underwater pass's SRC1_COLOR blend (enabled when offered)
 	VKP( vkGetPhysicalDeviceFeatures );
 	VKP( vkCreateImageView ); VKP( vkDestroyImageView ); VKP( vkCreateSampler ); VKP( vkDestroySampler );
 	VKP( vkCreateDescriptorSetLayout ); VKP( vkDestroyDescriptorSetLayout ); VKP( vkCreateDescriptorPool );
@@ -388,6 +399,22 @@ double nowMs()
 	return std::chrono::duration<double, std::milli>( C::now().time_since_epoch() ).count();
 }
 
+/* lane VKWATER4: a 1 s wait on a pass's last fence (pending: its last submit). Anything but VK_SUCCESS (a timeout, a lost
+ * device) means its commands may still run: false, why (also on stderr); the caller keeps its pending flag and leaves
+ * the frame to GL. Red WW_VKFENCE_RED=<site>[,<site>...] (gates only) fakes VK_TIMEOUT at those sites, pending or not. */
+bool fenceDone( VkFence fence, bool pending, const char * site, std::string & why )
+{
+	const bool fake = WwVkPresent::fenceRed( site );
+	if ( !pending && !fake )
+		return true;
+	Vk & v = vk();
+	const VkResult r = fake ? VK_TIMEOUT : v.vkWaitForFences( v.dev, 1, &fence, VK_TRUE, 1000000000ull );
+	if ( r == VK_SUCCESS )
+		return true;
+	why = WwVkPresent::fenceMiss( site, int( r ) );
+	return false;
+}
+
 const char * modeName( VkPresentModeKHR m )
 {
 	switch ( m ) {
@@ -526,6 +553,8 @@ bool makeDevice( std::string & why )
 		v.vkGetPhysicalDeviceFeatures( v.phys, &offered );
 	en.sampleRateShading = offered.sampleRateShading;
 	v.sampleShading = offered.sampleRateShading == VK_TRUE;
+	en.dualSrcBlend = offered.dualSrcBlend;
+	v.dualSrcBlend = offered.dualSrcBlend == VK_TRUE;
 	en.shaderStorageImageExtendedFormats = offered.shaderStorageImageExtendedFormats;
 	v.storageExt = offered.shaderStorageImageExtendedFormats == VK_TRUE;
 	en.shaderFloat64 = offered.shaderFloat64;
@@ -705,7 +734,9 @@ bool fxWork( std::string & why );
 void fxDrop();
 bool farRecord( std::string & why );  // lane VKFAR1 (vkfardots.inc): fxWork's kind 2
 bool waterRecord( std::string & why );  // lane VKWATER3 (vkwater.inc): fxWork's kind 3
+bool underRecord( std::string & why );  // lane VKWATER4 (vkunder.inc): fxWork's kind 4, the underwater fog
 void waterDrop();
+void underDrop();  // lane VKWATER4 (vkunder.inc)
 void objDrop();  // lane VKOBJ1
 void blFree();  // lane VKOBJ2
 
@@ -924,8 +955,12 @@ void dropSlots( bool glAlive )
 	Chain & c = ch();
 	Gl & g = gl();
 	for ( Slot & s : c.slot ) {
-		if ( s.pending )
-			v.vkWaitForFences( v.dev, 1, &s.fence, VK_TRUE, 1000000000ull );
+		std::string fw;
+		if ( !fenceDone( s.fence, s.pending, "slot drop", fw ) ) {
+			// its blit may still read the slot: the slot's GL and Vulkan objects are left (a leak beats freeing them in use)
+			s = Slot();
+			continue;
+		}
 		if ( glAlive ) {
 			if ( s.fbo )
 				g.deleteFramebuffers( 1, &s.fbo );
@@ -1099,15 +1134,26 @@ bool exportSem( VkSemaphore & s, GLuint & gs, std::string & why )
 	return true;
 }
 
+// lane VKWATER4: the last oneShot's result (submit, wait, reset: the first that failed), for the failure lines
+VkResult & oneShotResult()
+{
+	static VkResult r = VK_SUCCESS;
+	return r;
+}
+
 bool oneShot( VkCommandBuffer cmd, VkFence fence )
 {
 	Vk & v = vk();
 	VkSubmitInfo si { VK_STRUCTURE_TYPE_SUBMIT_INFO };
 	si.commandBufferCount = 1;
 	si.pCommandBuffers = &cmd;
-	if ( v.vkQueueSubmit( v.queue, 1, &si, fence ) != VK_SUCCESS )
-		return false;
-	return v.vkWaitForFences( v.dev, 1, &fence, VK_TRUE, 1000000000ull ) == VK_SUCCESS && v.vkResetFences( v.dev, 1, &fence ) == VK_SUCCESS;
+	VkResult r = v.vkQueueSubmit( v.queue, 1, &si, fence );
+	if ( r == VK_SUCCESS )
+		r = v.vkWaitForFences( v.dev, 1, &fence, VK_TRUE, 1000000000ull );
+	if ( r == VK_SUCCESS )
+		r = v.vkResetFences( v.dev, 1, &fence );
+	oneShotResult() = r;
+	return r == VK_SUCCESS;
 }
 
 // a ring slot: an RGBA8 image GL imported (its frame lands there), its two semaphores, its fence and command buffer
@@ -1333,7 +1379,7 @@ bool makeShared( VkImage & img, VkDeviceMemory & mem, GLuint & tex, GLuint & obj
 	if ( fence )
 		v.vkDestroyFence( v.dev, fence, nullptr );
 	if ( !laid ) {
-		why = "a view image's first layout change failed";
+		why = "a view image's first layout change failed (VkResult " + std::to_string( int( oneShotResult() ) ) + ")";
 		return false;
 	}
 	VkMemoryGetWin32HandleInfoKHR mi { VK_STRUCTURE_TYPE_MEMORY_GET_WIN32_HANDLE_INFO_KHR };
@@ -3616,6 +3662,24 @@ bool glCurrent( WwVkPresent::GlProc gp, std::string & why )
 namespace WwVkPresent
 {
 
+bool fenceRed( const char * site )
+{
+	static const std::string red = [] {
+		const char * e = std::getenv( "WW_VKFENCE_RED" );
+		return e && *e ? "," + std::string( e ) + "," : std::string();
+	}();
+	return !red.empty() && red.find( "," + std::string( site ) + "," ) != std::string::npos;
+}
+
+std::string fenceMiss( const char * site, int vkResult )
+{
+	const std::string why = std::string( "the last " ) + site + " run's fence wait returned VkResult "
+		+ std::to_string( vkResult ) + ( vkResult == int( VK_TIMEOUT ) ? " (timed out after 1 s)" : "" )
+		+ ": its commands may still run, this frame stays on GL";
+	std::fprintf( stderr, "vk fence: %s\n", why.c_str() );
+	return why;
+}
+
 const Stat & last()
 {
 	return stat();
@@ -3677,6 +3741,7 @@ void shutdown()
 	ssrDrop();  // lane VKLIGHT2: the reflections' crossing semaphores
 	fxDrop();   // lane VKAIR1: the air's and the clouds' crossing semaphores and framebuffers
 	waterDrop();  // lane VKWATER3: the water draw's buffers (GL's names); pipelines and samplers stay with the device
+	underDrop();  // lane VKWATER4 (L7): the underwater draw's framebuffer, depth view and host buffer
 }
 
 bool viewBegin( int w, int h, int samples, GlProc gp, std::string & why )
@@ -3713,11 +3778,12 @@ bool viewBegin( int w, int h, int samples, GlProc gp, std::string & why )
 		waitSlot( s.reader );
 		Vk & v = vk();
 		Slot & p = ch().slot[s.reader];
-		if ( p.pending && p.fence && v.vkGetFenceStatus( v.dev, p.fence ) == VK_NOT_READY ) {
-			V.busy++;
-			v.vkWaitForFences( v.dev, 1, &p.fence, VK_TRUE, 1000000000ull );
-		}
+		const bool busy = p.pending && p.fence && v.vkGetFenceStatus( v.dev, p.fence ) != VK_SUCCESS;
+		V.busy += busy ? 1 : 0;
+		const bool done = fenceDone( p.fence, busy, "view", why );
 		V.waitMs += nowMs() - tw;
+		if ( !done )
+			return false;  // s.reader kept: the next use of this slot waits again
 		s.reader = -1;
 	}
 	const GLenum target = V.samples > 1 ? kTexture2DMs : kTexture2D;
@@ -3833,6 +3899,7 @@ bool toneFrame( int w, int h, int samples, unsigned & color, unsigned & ds, std:
 	T.samples = samples;
 	T.descDirty = true;
 	toneShare( true );  // lane VKOBJ4 open item 3: the cell runs on Vulkan draw into this frame
+	sharedGen()++;  // lane VKWATER4: a view kept of the frame (vkunder's msView) is keyed on it, the image handle can come back
 	color = T.colorTex;
 	ds = T.dsTex;
 	return true;
@@ -4145,8 +4212,9 @@ bool toneRun( const ToneRun & t, std::string & why )
 		return refuse( "the measure is on but no measure texture" );
 	// the last pass is done before its command buffer, set and staging are written again (the worker submitted it)
 	ToneBloomState & B = T.bloom;
+	if ( std::string fw; !fenceDone( T.fence, T.pending, "tone", fw ) )
+		return refuse( fw );
 	if ( T.pending ) {
-		v.vkWaitForFences( v.dev, 1, &T.fence, VK_TRUE, 1000000000ull );
 		T.pending = false;
 		if ( B.measHave )
 			B.measDone = true;  // lane VKBLOOM1: its read buffer is filled (toneMeasureTake)
@@ -4471,10 +4539,9 @@ bool taaRun( const TaaRun & t, std::string & why )
 	if ( ( inputs & 3 ) && !g.copyImageSubData )
 		return refuse( "TAAINPUTS1's velocity / mask are on but no glCopyImageSubData" );
 	// the last run is done before its command buffer and sets are written again
-	if ( A.pending ) {
-		v.vkWaitForFences( v.dev, 1, &A.fence, VK_TRUE, 1000000000ull );
-		A.pending = false;
-	}
+	if ( std::string fw; !fenceDone( A.fence, A.pending, "taa", fw ) )
+		return refuse( fw );
+	A.pending = false;
 	std::string w;
 	if ( !taaStatic( w ) || !taaSems( w ) || !taaPipes( V.samples, w ) || !taaFbs( w ) )
 		return breakOff( w );
@@ -4696,11 +4763,9 @@ bool present( void * hwnd, int w, int h, bool vsync, GlProc gp, std::string & wh
 	 * writes the slot with no GPU wait on Vulkan (the frame cap fence measures GL's own work only) */
 	const double tw = nowMs();
 	waitSlot( k );
-	bool busy = false;
-	if ( s.pending && v.vkGetFenceStatus( v.dev, s.fence ) == VK_NOT_READY ) {
-		busy = true;
-		v.vkWaitForFences( v.dev, 1, &s.fence, VK_TRUE, 1000000000ull );
-	}
+	const bool busy = s.pending && v.vkGetFenceStatus( v.dev, s.fence ) != VK_SUCCESS;
+	if ( !fenceDone( s.fence, busy, "present", why ) )
+		return false;  // GL swaps this frame; the slot's next use waits again
 	const double waited = nowMs() - tw;
 	/* GL: resolve the back buffer into the slot, signal (GENERAL both sides). Nothing is asked: with
 	 * glBlitNamedFramebuffer no binding changes, and the scissor test is switched off without asking (glIsEnabled
@@ -5181,10 +5246,9 @@ bool skyRun( const SkyRun & t, std::string & why )
 	if ( !g.copyImageSubData )
 		return refuse( "no glCopyImageSubData (the LUTs' copies into their shared twins)" );
 	// the last run is done before its command buffer, set, framebuffer and uniforms are written again
-	if ( S.pending ) {
-		v.vkWaitForFences( v.dev, 1, &S.fence, VK_TRUE, 1000000000ull );
-		S.pending = false;
-	}
+	if ( std::string fw; !fenceDone( S.fence, S.pending, "sky", fw ) )
+		return refuse( fw );
+	S.pending = false;
 	std::string w;
 	if ( !skyStatic( w ) || !skySems( w ) || !skyPipes( T.samples, w ) )
 		return breakOff( w );
@@ -5784,6 +5848,11 @@ bool fxWork( std::string & why )
 			v.vkEndCommandBuffer( F.cmd );
 			return false;
 		}
+	} else if ( F.kind == 4 ) {  // lane VKWATER4 (L7): the underwater fog, its per-pixel and per-sample draws
+		if ( !underRecord( why ) ) {
+			v.vkEndCommandBuffer( F.cmd );
+			return false;
+		}
 	} else {
 		if ( !F.fbR || ( !F.skipMarch && !F.fbM ) ) {
 			v.vkEndCommandBuffer( F.cmd );
@@ -6017,10 +6086,9 @@ bool fxBegin( int which, bool & broken, std::string & why )
 		return false;
 	}
 	// the last run is done before its command buffer, sets, framebuffers and uniforms are written again
-	if ( F.pending ) {
-		v.vkWaitForFences( v.dev, 1, &F.fence, VK_TRUE, 1000000000ull );
-		F.pending = false;
-	}
+	if ( !fenceDone( F.fence, F.pending, "fx", why ) )
+		return false;  // not broken: GL draws this frame
+	F.pending = false;
 	const int samples = tone().samples > 0 ? tone().samples : std::max( F.airSamples, 1 );
 	if ( !fxStatic( why ) || !fxSems( why ) || !fxPasses( samples, why ) ) {
 		broken = true;
@@ -6220,7 +6288,7 @@ FxStat takeCloudStat()
 // lane VKLIGHT1: AO, the contact shadow lines and the SSGI cast as compute on the present device (vkpresent.h LightRun)
 namespace
 {
-constexpr int kLightSets = 16;  // dispatches one pass may record (AO: gbuf + 4 mips + raw + across + fin = 8)
+constexpr int kLightSets = 32;  // dispatches one pass may record (AO 8; the ocean 1 + 14 + 2 + 14 = 31)
 
 struct LightImg
 {
@@ -6230,11 +6298,26 @@ struct LightImg
 	GLuint tex = 0, obj = 0;
 	int w = 0, h = 0, levels = 0;
 	unsigned glFmt = 0;
+	bool borrowed = false;  // lane VKWATER4: a shared target's level (img / tex are the owner's; only the view is ours)
+	int level = 0;
+	std::uint64_t gen = 0;  // sharedGen() when the view was made
 };
+
+// lane VKWATER4: the water draws' ocean inputs, for the `vk ocean:` line (say) and the harness (take)
+struct OceanWaterTally
+{
+	WwVkPresent::OceanWaterStat say, take;
+};
+OceanWaterTally & oceanWater()
+{
+	static OceanWaterTally t;
+	return t;
+}
 
 struct LightPassState
 {
 	bool broken = false;
+	bool shares = false;  // lane VKWATER4: this run binds shared targets (a closing compute -> any-stage read barrier)
 	std::string brokenWhy;
 	VkDescriptorPool dpool = VK_NULL_HANDLE;
 	VkDescriptorSet set[kLightSets] = {};
@@ -6293,6 +6376,12 @@ VkFormat lightVkFormat( unsigned glFmt )
 void lightImgDrop( LightImg & x, bool glAlive )
 {
 	Vk & v = vk();
+	if ( x.borrowed ) {  // the image is the shared target's owner's
+		if ( x.view )
+			v.vkDestroyImageView( v.dev, x.view, nullptr );
+		x = LightImg();
+		return;
+	}
 	if ( glAlive ) {
 		if ( x.tex )
 			gl().deleteTextures( 1, &x.tex );
@@ -6398,7 +6487,12 @@ bool lightStatic( std::string & why )
 	const Code code[WwVkPresent::LightKernels] = { { vkframe_light_ao_gbuf_spv, sizeof( vkframe_light_ao_gbuf_spv ) },
 		{ vkframe_light_ao_mip_spv, sizeof( vkframe_light_ao_mip_spv ) }, { vkframe_light_ao_raw_spv, sizeof( vkframe_light_ao_raw_spv ) },
 		{ vkframe_light_ao_blur_spv, sizeof( vkframe_light_ao_blur_spv ) }, { vkframe_light_ao_blurf_spv, sizeof( vkframe_light_ao_blurf_spv ) },
-		{ vkframe_light_contact_spv, sizeof( vkframe_light_contact_spv ) }, { vkframe_light_ssgi_spv, sizeof( vkframe_light_ssgi_spv ) } };
+		{ vkframe_light_contact_spv, sizeof( vkframe_light_contact_spv ) }, { vkframe_light_ssgi_spv, sizeof( vkframe_light_ssgi_spv ) },
+		{ vkframe_light_ocean_spec_spv, sizeof( vkframe_light_ocean_spec_spv ) }, { vkframe_light_ocean_fft_spv, sizeof( vkframe_light_ocean_fft_spv ) },
+		{ vkframe_light_ocean_finbc_spv, sizeof( vkframe_light_ocean_finbc_spv ) }, { vkframe_light_ocean_find_spv, sizeof( vkframe_light_ocean_find_spv ) },
+		{ vkframe_light_ocean_mipbc_spv, sizeof( vkframe_light_ocean_mipbc_spv ) }, { vkframe_light_ocean_mipd_spv, sizeof( vkframe_light_ocean_mipd_spv ) },
+		{ vkframe_light_ocean_finbca_spv, sizeof( vkframe_light_ocean_finbca_spv ) }, { vkframe_light_ocean_finda_spv, sizeof( vkframe_light_ocean_finda_spv ) },
+		{ vkframe_light_ocean_mipbca_spv, sizeof( vkframe_light_ocean_mipbca_spv ) }, { vkframe_light_ocean_mipda_spv, sizeof( vkframe_light_ocean_mipda_spv ) } };
 	for ( int k = 0; k < WwVkPresent::LightKernels; k++ ) {
 		if ( k == WwVkPresent::LightAoRaw && !v.float64 )
 			continue;  // AO refuses with the reason
@@ -6562,6 +6656,12 @@ bool lightWork( int pass, std::string & why )
 		v.vkCmdPipelineBarrier( P.cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_TRANSFER_BIT,
 			0, 1, &mb, 0, nullptr, 0, nullptr );
 	}
+	if ( P.shares ) {  // lane VKWATER4: shared targets are read in place by later work on this queue (the water's draws)
+		VkMemoryBarrier mb { VK_STRUCTURE_TYPE_MEMORY_BARRIER };
+		mb.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+		mb.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_TRANSFER_READ_BIT;
+		v.vkCmdPipelineBarrier( P.cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 1, &mb, 0, nullptr, 0, nullptr );
+	}
 	if ( v.vkEndCommandBuffer( P.cmd ) != VK_SUCCESS ) {
 		why = "vkEndCommandBuffer (a light pass) failed";
 		return false;
@@ -6668,6 +6768,18 @@ bool lightRun( const LightRun & t, std::string & why )
 			return refuse( "an image entry (size, levels, format " + std::to_string( x.glFmt ) + " or texture)" );
 		if ( x.out && x.levels > 1 )
 			return refuse( "a mipped output" );
+		if ( x.tiles < 0 || ( x.tiles > 0 && ( !x.out || x.in || x.w % x.tiles || x.outLevel < 0 ) ) )
+			return refuse( "a tiled output (an output only, its width a multiple of its tiles)" );
+		if ( x.share ) {  // lane VKWATER4: a shared target's level in place
+			const Shared * s = sharedFind( x.share );
+			if ( x.in || x.out || x.tiles || x.levels != 1 )
+				return refuse( "a shared-target entry is never copied (no in / out / tiles; one level)" );
+			if ( !s || s->glCtx != g.ctx || s->type == 1 || s->samples != 1 || s->glFmt != x.glFmt || x.outLevel < 0 || x.outLevel >= s->levels )
+				return refuse( "a shared-target entry (missing, another context, 3D, multisample, its format or level)" );
+			const int n = s->type == 2 ? s->d : 1;
+			if ( x.w != std::max( s->w >> x.outLevel, 1 ) * n || x.h != std::max( s->h >> x.outLevel, 1 ) )
+				return refuse( "a shared-target entry's size (its level's width x layers, height)" );
+		}
 	}
 	for ( const LightDispatch & d : t.d ) {
 		if ( d.kernel < 0 || d.kernel >= LightKernels || d.out0 < 0 || d.out0 >= ni || d.out1 >= ni )
@@ -6679,10 +6791,9 @@ bool lightRun( const LightRun & t, std::string & why )
 			return refuse( "the device lacks shaderFloat64 (the AO raw kernel's doubles)" );
 	}
 	// the last run is done before its sets, buffer, images and command buffer are touched again
-	if ( P.pending ) {
-		v.vkWaitForFences( v.dev, 1, &P.fence, VK_TRUE, 1000000000ull );
-		P.pending = false;
-	}
+	if ( std::string fw; !fenceDone( P.fence, P.pending, "light", fw ) )
+		return refuse( fw );
+	P.pending = false;
 	std::string w;
 	if ( !lightStatic( w ) || !lightPassMake( P, w ) || !lightSems( P, w ) )
 		return breakOff( w );
@@ -6705,15 +6816,53 @@ bool lightRun( const LightRun & t, std::string & why )
 	for ( size_t i = size_t( ni ); i < P.img.size(); i++ )
 		lightImgDrop( P.img[i], true );
 	P.img.resize( size_t( ni ) );
+	P.shares = false;
 	for ( int i = 0; i < ni; i++ ) {
 		const LightImage & x = t.img[size_t( i )];
 		LightImg & y = P.img[size_t( i )];
-		if ( y.img && y.w == x.w && y.h == x.h && y.levels == x.levels && y.glFmt == x.glFmt )
-			continue;
-		lightImgDrop( y, true );
 		bool target = false;
 		for ( const LightDispatch & d : t.d )
 			target = target || d.out0 == i || d.out1 == i;
+		if ( x.share ) {  // lane VKWATER4: a view of the shared target's level (every layer), remade when any target moved
+			const Shared & s = *sharedFind( x.share );
+			P.shares = true;
+			P.st.shared++;
+			if ( y.borrowed && y.img == s.img && y.gen == sharedGen() && y.level == x.outLevel && y.glFmt == x.glFmt )
+				continue;
+			lightImgDrop( y, true );
+			const std::uint32_t n = std::uint32_t( s.type == 2 ? s.d : 1 );
+			if ( target ) {  // makeShared keeps storage use only when the device offers it with every other use
+				VkImageFormatProperties ip {};
+				const VkImageUsageFlags use = VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT
+					| VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_STORAGE_BIT;
+				if ( v.vkGetPhysicalDeviceImageFormatProperties( v.phys, s.fmt, VK_IMAGE_TYPE_2D, VK_IMAGE_TILING_OPTIMAL, use, 0, &ip ) != VK_SUCCESS
+					|| ip.maxArrayLayers < n || ip.maxMipLevels < std::uint32_t( s.levels ) )
+					return refuse( "shared target format " + std::to_string( x.glFmt ) + " takes no storage use on the device" );
+			}
+			VkImageViewCreateInfo ci { VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO };
+			ci.image = s.img;
+			ci.viewType = s.type == 2 ? VK_IMAGE_VIEW_TYPE_2D_ARRAY : VK_IMAGE_VIEW_TYPE_2D;
+			ci.format = s.fmt;
+			ci.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, std::uint32_t( x.outLevel ), 1, 0, n };
+			if ( v.vkCreateImageView( v.dev, &ci, nullptr, &y.view ) != VK_SUCCESS ) {
+				y = LightImg();
+				return refuse( "a shared target's level view failed" );
+			}
+			y.borrowed = true;
+			y.img = s.img;
+			y.view0 = y.view;
+			y.tex = s.tex;
+			y.w = x.w;
+			y.h = x.h;
+			y.levels = 1;
+			y.glFmt = x.glFmt;
+			y.level = x.outLevel;
+			y.gen = sharedGen();
+			continue;
+		}
+		if ( !y.borrowed && y.img && y.w == x.w && y.h == x.h && y.levels == x.levels && y.glFmt == x.glFmt )
+			continue;
+		lightImgDrop( y, true );
 		if ( target ) {  // a storage target: the format must take storage use (makeShared drops it quietly)
 			VkImageFormatProperties ip {};
 			if ( v.vkGetPhysicalDeviceImageFormatProperties( v.phys, lightVkFormat( x.glFmt ), VK_IMAGE_TYPE_2D, VK_IMAGE_TILING_OPTIMAL,
@@ -6728,9 +6877,11 @@ bool lightRun( const LightRun & t, std::string & why )
 		const LightImage & x = t.img[size_t( i )];
 		if ( !x.in )
 			continue;
-		for ( int m = 0; m < x.levels; m++ )
+		for ( int m = 0; m < x.levels; m++ ) {
 			g.copyImageSubData( x.tex, kTexture2D, m, 0, 0, 0, P.img[size_t( i )].tex, kTexture2D, m, 0, 0, 0, std::max( x.w >> m, 1 ),
 				std::max( x.h >> m, 1 ), 1 );
+			P.st.copies++;
+		}
 	}
 	// binding 9 (256 zero bytes when the pass has no table)
 	const VkDeviceSize bytes = std::max<VkDeviceSize>( 256, VkDeviceSize( t.buf.size() ) );
@@ -6772,11 +6923,14 @@ bool lightRun( const LightRun & t, std::string & why )
 	}
 	P.d = t.d;
 	// GL's inputs copied -> the worker's dispatches -> GL copies the targets back into its own textures
-	std::vector<GLuint> tex( static_cast<size_t>( ni ) );
-	std::vector<GLenum> lay( static_cast<size_t>( ni ), kLayoutGeneral );
+	// (each GL name once: a shared target's levels are one texture)
+	std::vector<GLuint> tex;
 	for ( int i = 0; i < ni; i++ )
-		tex[size_t( i )] = P.img[size_t( i )].tex;
-	g.signalSemaphore( P.glDoneGl, 0, nullptr, GLuint( ni ), tex.data(), lay.data() );
+		if ( std::find( tex.begin(), tex.end(), P.img[size_t( i )].tex ) == tex.end() )
+			tex.push_back( P.img[size_t( i )].tex );
+	const GLuint nt = GLuint( tex.size() );
+	std::vector<GLenum> lay( tex.size(), kLayoutGeneral );
+	g.signalSemaphore( P.glDoneGl, 0, nullptr, nt, tex.data(), lay.data() );
 	g.flush();
 	Worker & W = wk();
 	std::uint64_t want = 0;
@@ -6797,11 +6951,19 @@ bool lightRun( const LightRun & t, std::string & why )
 	}
 	if ( !ok )
 		return breakOff( w );  // nothing signals vkDone: GL does not wait it; GL draws its stages this frame
-	g.waitSemaphore( P.vkDoneGl, 0, nullptr, GLuint( ni ), tex.data(), lay.data() );
+	g.waitSemaphore( P.vkDoneGl, 0, nullptr, nt, tex.data(), lay.data() );
 	for ( int i = 0; i < ni; i++ ) {
 		const LightImage & x = t.img[size_t( i )];
-		if ( x.out )
+		if ( x.out && x.tiles > 0 ) {  // lane VKWATER4: a strip of tiles into the layers of GL's 2D array
+			const int tw = x.w / x.tiles;
+			for ( int l = 0; l < x.tiles; l++ ) {
+				g.copyImageSubData( P.img[size_t( i )].tex, kTexture2D, 0, l * tw, 0, 0, x.tex, kTexture2DArray, x.outLevel, 0, 0, l, tw, x.h, 1 );
+				P.st.copies++;
+			}
+		} else if ( x.out ) {
 			g.copyImageSubData( P.img[size_t( i )].tex, kTexture2D, 0, 0, 0, 0, x.tex, kTexture2D, 0, 0, 0, 0, x.w, x.h, 1 );
+			P.st.copies++;
+		}
 	}
 	P.pending = true;
 	const double ms = nowMs() - t0;
@@ -6818,6 +6980,13 @@ void lightOnGl( int pass, const char * why )
 	LightStat & s = light().p[pass].st;
 	s.gl++;
 	s.glWhy = why ? why : "";
+}
+
+OceanWaterStat takeOceanWaterStat()
+{
+	const OceanWaterStat s = oceanWater().take;
+	oceanWater().take = OceanWaterStat();
+	return s;
 }
 
 LightStat takeLightStat( int pass )
@@ -7133,10 +7302,9 @@ bool ssrRun( const SsrRun & t, std::string & why )
 		return refuse( "an input texture is missing" );
 	if ( t.prevOn && t.prevFmt != kRgba16f && t.prevFmt != kRgba32f )
 		return refuse( "the previous frame's format " + std::to_string( t.prevFmt ) + " has no twin" );
-	if ( S.pending ) {
-		v.vkWaitForFences( v.dev, 1, &S.fence, VK_TRUE, 1000000000ull );
-		S.pending = false;
-	}
+	if ( std::string fw; !fenceDone( S.fence, S.pending, "ssr", fw ) )
+		return refuse( fw );
+	S.pending = false;
 	std::string w;
 	if ( !ssrStatic( w ) || !ssrSems( w ) )
 		return breakOff( w );
@@ -7809,10 +7977,9 @@ bool csmRun( const CsmRun & t, std::string & why )
 		if ( t.tex[k] && !sharedTargetIs( t.key[k], t.tex[k] ) )
 			return refuse( "a cascade target is not the shared one" );
 	// the last run is done before its command buffer, buffers and framebuffers are touched again
-	if ( S.pending ) {
-		v.vkWaitForFences( v.dev, 1, &S.fence, VK_TRUE, 1000000000ull );
-		S.pending = false;
-	}
+	if ( std::string fw; !fenceDone( S.fence, S.pending, "csm", fw ) )
+		return refuse( fw );
+	S.pending = false;
 	std::string w;
 	if ( !csmStatic( w ) || !csmSems( w ) )
 		return breakOff( w );
@@ -8246,10 +8413,9 @@ bool objRun( const ObjRun & t, std::string & why )
 		|| ( sh->fmt != VK_FORMAT_X8_D24_UNORM_PACK32 && sh->fmt != VK_FORMAT_D32_SFLOAT && sh->fmt != VK_FORMAT_D16_UNORM ) )
 		return refuse( "the prepass target is not the shared depth one" );
 	// the last run is done before its command buffer, buffers and framebuffer are touched again
-	if ( S.pending ) {
-		v.vkWaitForFences( v.dev, 1, &S.fence, VK_TRUE, 1000000000ull );
-		S.pending = false;
-	}
+	if ( std::string fw; !fenceDone( S.fence, S.pending, "obj", fw ) )
+		return refuse( fw );
+	S.pending = false;
 	std::string w;
 	if ( !objStatic( w ) || !objSems( w ) )
 		return breakOff( w );
@@ -8365,8 +8531,20 @@ bool vkPart( int k, int w, int h, int vs, std::string & why, bool & rebuild, WwV
 	const ViewSlot * vw = vs >= 0 ? &view().slot[vs] : nullptr;
 	const int vSamples = view().samples;
 	const double tw = nowMs();
+	if ( !fenceDone( s.fence, s.pending, "present worker", why ) ) {
+		sp.fenceMs += nowMs() - tw;
+		// the fence still belongs to the last submit: GL's signal is carried by an empty batch with no fence
+		if ( !s.glWaited ) {
+			const VkPipelineStageFlags st = VK_PIPELINE_STAGE_TRANSFER_BIT;
+			VkSubmitInfo si { VK_STRUCTURE_TYPE_SUBMIT_INFO };
+			si.waitSemaphoreCount = 1;
+			si.pWaitSemaphores = &s.glDone;
+			si.pWaitDstStageMask = &st;
+			v.vkQueueSubmit( v.queue, 1, &si, VK_NULL_HANDLE );
+		}
+		return false;
+	}
 	if ( s.pending ) {
-		v.vkWaitForFences( v.dev, 1, &s.fence, VK_TRUE, 1000000000ull );
 		v.vkResetFences( v.dev, 1, &s.fence );
 		s.pending = false;
 	}
@@ -8502,7 +8680,13 @@ bool vkPart( int k, int w, int h, int vs, std::string & why, bool & rebuild, WwV
 	if ( pr == VK_SUBOPTIMAL_KHR || pr == VK_ERROR_OUT_OF_DATE_KHR )
 		rebuild = true;
 	if ( c.capture ) {
-		v.vkWaitForFences( v.dev, 1, &s.fence, VK_TRUE, 1000000000ull );
+		if ( std::string fw; !fenceDone( s.fence, true, "capture", fw ) ) {
+			// the copy may still run: its buffer is left (a leak beats freeing it in use), no picture this frame
+			c.capture->clear();
+			c.capture = nullptr;
+			why = fw;
+			return false;
+		}
 		void * m = nullptr;
 		c.capture->assign( size_t( bytes ), 0 );
 		if ( bufMem && v.vkMapMemory( v.dev, bufMem, 0, bytes, 0, &m ) == VK_SUCCESS ) {
@@ -8655,9 +8839,9 @@ void lightSay( int pass, bool wanted, const char * glWhy )
 {
 	if ( pass < 0 || pass >= LightPasses )
 		return;
-	static const char * const kName[LightPasses] = { "ao", "contact", "ssgi" };
+	static const char * const kName[LightPasses] = { "ao", "contact", "ssgi", "ocean" };
 	static const char * const kWhat[LightPasses] = { "ao_vk: 4 mips, raw, across, fin; gbuf on GL", "contact_vk: the shadow lines",
-		"ssgi_vk: the cast" };
+		"ssgi_vk: the cast", "ocean_vk: spectrum, 14 FFT stages, layers, 7 mips" };
 	static QString said[LightPasses];
 	static double at[LightPasses] = {};
 	const QString head = QStringLiteral( "vk %1: " ).arg( QLatin1String( kName[pass] ) );
@@ -8685,6 +8869,14 @@ void lightSay( int pass, bool wanted, const char * glWhy )
 		line += QStringLiteral( ", on GL %1 frames (last: %2)" ).arg( st.gl ).arg( QString::fromStdString( st.glWhy ) );
 	if ( st.fails > 0 )
 		line += QStringLiteral( ", %1 refused to GL (last: %2)" ).arg( st.fails ).arg( QString::fromStdString( st.failWhy ) );
+	if ( pass == LightOcean ) {  // lane VKWATER4: texture copies per frame, the pass's own plus the water twins' ocean inputs
+		const OceanWaterStat ws = oceanWater().say;
+		oceanWater().say = OceanWaterStat();
+		const int n = std::max( st.runs, 1 );
+		line += QStringLiteral( "; copies per frame %1 (pass %2, water twins %3), shared %4 in place" )
+			.arg( double( st.copies + ws.copies ) / n, 0, 'f', 1 ).arg( double( st.copies ) / n, 0, 'f', 1 )
+			.arg( double( ws.copies ) / n, 0, 'f', 1 ).arg( double( st.shared + ws.shared ) / n, 0, 'f', 1 );
+	}
 	said[pass] = line;
 	qInfo().noquote() << line;
 }
@@ -8970,3 +9162,4 @@ bool frame( QOpenGLWindow * w, const std::function<void()> & paint )
 #endif
 
 #include "features/vkframe/vkwater.inc"  // lane VKWATER1: the water's route and census (row G5)
+#include "features/vkframe/vkunder.inc"  // lane VKWATER4 (L7): the underwater fog on the view

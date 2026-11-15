@@ -39,7 +39,8 @@ for s in sky_view_ps; do
 	rm -f "${s}.spv"
 done
 # lane VKLIGHT1: AO, contact shadows and the SSGI cast (res/shaders/hlsl/vklight), -O0 as tests/vklight/light.sh proved them
-for l in ao_gbuf:ao_vk:AO_STAGE=5 ao_mip:ao_vk:AO_STAGE=1 ao_raw:ao_vk:AO_STAGE=2 ao_blur:ao_vk:AO_STAGE=3 ao_blurf:ao_vk:AO_STAGE=4 contact:contact_vk: ssgi:ssgi_vk:; do
+# lane VKWATER4 (row G5): the ultra ocean, ocean_vk.hlsl stages 1-6 (one line: tests/spvsync/check_spv.py reads it)
+for l in ao_gbuf:ao_vk:AO_STAGE=5 ao_mip:ao_vk:AO_STAGE=1 ao_raw:ao_vk:AO_STAGE=2 ao_blur:ao_vk:AO_STAGE=3 ao_blurf:ao_vk:AO_STAGE=4 contact:contact_vk: ssgi:ssgi_vk: ocean_spec:ocean_vk:OCEAN_STAGE=1 ocean_fft:ocean_vk:OCEAN_STAGE=2 ocean_finbc:ocean_vk:OCEAN_STAGE=3 ocean_find:ocean_vk:OCEAN_STAGE=4 ocean_mipbc:ocean_vk:OCEAN_STAGE=5 ocean_mipd:ocean_vk:OCEAN_STAGE=6 ocean_finbca:ocean_vk:OCEAN_STAGE=7 ocean_finda:ocean_vk:OCEAN_STAGE=8 ocean_mipbca:ocean_vk:OCEAN_STAGE=9 ocean_mipda:ocean_vk:OCEAN_STAGE=10; do
 	n="${l%%:*}"; r="${l#*:}"; f="${r%%:*}"; d="${r#*:}"
 	"$DXC" -spirv -fspv-target-env=vulkan1.2 -T cs_6_0 -E main -O0 ${d:+-D "$d"} -Fo "light_${n}.spv" "$(cygpath -m "$ROOT/res/shaders/hlsl/vklight/${f}.hlsl" 2>/dev/null || echo "$ROOT/res/shaders/hlsl/vklight/${f}.hlsl")"
 	python -I "$ROOT/tools/spv_header.py" "light_${n}.spv" "vkframe_light_${n}_spv" "light_${n}.spv.h" < /dev/null
@@ -135,6 +136,12 @@ fxkw water_view_d_ps water/water_view_d_ps
 fxkw water_view_m_ps water/water_view_m_ps
 fxkw water_view_p_ps water/water_view_p_ps
 fxkw water_view_dp_ps water/water_view_dp_ps
+# lane VKWATER4: the water look off (fo4_water.prog), frozen from the old fo4_water_ps FOGLEAK + FRAME_UBO spirv-cross file
+fxkw water_view_off_ps water/water_view_off_ps
+# lane VKWATER4 (L7): the camera-underwater fog (cell_underwater.prog + its per-sample _ms), frozen twins: both outputs at
+# location 0 index 0 / 1 (dual-source blend), SV_SampleIndex in the _ms twin only
+fxkw underwater_view_ps water/underwater_view_ps
+fxkw underwater_view_ms_ps water/underwater_view_ms_ps
 # lane VKOBJ4: the shift sets by stage. A pipeline whose vertex stage declares resources takes VS_SHIFT for it: on PS_SHIFT the
 # bl vertex stage's b0 (skinning) lands on the pixel stage's b0 (global). fxv() keeps PS_SHIFT (fardots' vertex block is b1).
 PS_SHIFT="-fvk-b-shift 0 0 -fvk-t-shift 64 0 -fvk-s-shift 128 0 -fvk-u-shift 192 0"

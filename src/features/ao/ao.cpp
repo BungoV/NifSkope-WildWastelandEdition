@@ -1386,6 +1386,7 @@ bool wwCellAoTargets( Scene * scene, WwCellAoTargets & out )
 		return false;
 	out.gbuf = g.gbuf.tex;
 	out.depthRb = g.gbufDepth;
+	out.depthFmt = g.gbufFmt;
 	out.w = g.gbuf.w;
 	out.h = g.gbuf.h;
 	for ( int m = 1; m < 5; m++ ) {
