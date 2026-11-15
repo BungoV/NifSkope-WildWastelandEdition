@@ -54,12 +54,47 @@ CASES = [
      2.0, -0.08, 40000, 0, 0, 1),
     ('snow_far_lit', 3, 5.5, 1.0, 97, 600.125, (12345.6, -98765.4, 7210.0), (-55.0, 210.0), 1, 3.0, 0.5, 6.0, 1.0, 0.6, 1,
      3.3, -0.01, 40000, 1, 0, 1),
+    # L8 term 2a (element 20 = volTerms): the sun + the lamps (flat loop, no shadow / gobo) on the two lit cases' runs
+    ('rain_near_lamps', 0, 2.0, 4.0, 11, 37.25, (-60500.0, 70000.0, 6300.0), (120.0, -40.0), 0, 1.0, 0.0, 0.0, 1.0, 1.0, 1,
+     2.0, -0.08, 40000, 0, 0, 3),
+    ('snow_far_lamps', 3, 5.5, 1.0, 97, 600.125, (12345.6, -98765.4, 7210.0), (-55.0, 210.0), 1, 3.0, 0.5, 6.0, 1.0, 0.6, 1,
+     3.3, -0.01, 40000, 1, 0, 3),
 ]
 SUN = np.array([0.4, 0.3, 0.35]) / np.linalg.norm([0.4, 0.3, 0.35])  # world, toward the sun (the air's fogSun too)
 # a lit case's own sun (cellDirTo), chosen by the GS's mix: N = the eye's axis, thick / thin = 4 vpWrap( N.to, pcTrans )
 # (volGi 1). With SUN, rain_near_lit's view gives N.to -0.13, ratio 0.99: thin = thick, pcTrans unseen (51 samples, the
 # first lit run 11-15); this sun gives N.to 0.72, ratio 3.3, 44 degrees off the axis. SUN stays (the fogged cases' fogSun).
 LIT_SUN = {'rain_near_lit': np.array([0.3, -0.6, 0.75]) / np.linalg.norm([0.3, -0.6, 0.75])}
+LIT_SUN['rain_near_lamps'] = LIT_SUN['rain_near_lit']
+
+
+def lamps(v, R, eye):
+    """the lamp cases' cellLights (celllights.cpp's 8 texels a light): an omni, a spot, a hemisphere, a box and one out of
+    reach, placed round the in-view particles' middle (view units = world units, s = their median spread). t0 pos +
+    radius, t1 colour + shape (-2 omni, -3 hemisphere, -4 box, else the spot's outer cosine), t2 axis + cone exponent,
+    t3 bias / scale / exponent / flags (the game's curve 1 - x), t4 shadow slot -1, t5..t7 the box's rows"""
+    cen = np.median(v, axis=0)
+    s = float(np.median(np.linalg.norm(v - cen, axis=1)))
+    w = lambda p: R.T @ (cen + s * np.array(p)) + eye  # noqa: E731 (view offset -> world)
+    L = np.zeros((5, 8, 4))
+    def put(k, p, r, col, shape, axis=(0.0, 0.0, 1.0), cone=0.0):
+        L[k, 0] = list(w(p)) + [r * s]
+        L[k, 1] = list(col) + [shape]
+        L[k, 2] = list(axis) + [cone]
+        L[k, 3] = [0.0, 1.0, 1.0, 0.0]
+        L[k, 4] = [-1.0, 0.0, 0.0, 0.0]
+    put(0, (0.5, 0.3, 0.2), 2.0, (2.4, 1.3, 0.5), -2.0)
+    sp = w((-1.2, 0.2, 0.6))
+    ax = w((-0.3, 0.0, 0.0)) - sp
+    put(1, (-1.2, 0.2, 0.6), 3.5, (0.4, 1.0, 2.4), 0.8, ax / np.linalg.norm(ax), 1.5)
+    put(2, (0.0, -1.0, 0.0), 2.5, (1.5, 0.3, 1.2), -3.0, R.T @ np.array([0.0, 1.0, 0.0]))
+    put(3, (0.8, -0.6, -0.4), 3.0, (0.6, 1.8, 0.7), -4.0)
+    bc, h = w((0.5, -0.4, -0.2)), 1.2 * s
+    for i in range(3):  # k_i = dot( b_i.xyz, P ) + b_i.w in [-1, 1]: a world-axis box round bc
+        L[3, 5 + i, i] = 1.0 / h
+        L[3, 5 + i, 3] = -bc[i] / h
+    put(4, (60.0, 0.0, 0.0), 0.5, (3.0, 3.0, 3.0), -2.0)
+    return L.astype(np.float32)
 FOG_TEX = ['atApTex', 'volTex', 'volTile', 'volAirTerr', 'volAirRainMap']  # precipRun's tex[2..6]
 FMT_DT = {'rgba32f': np.float32, 'rgba16f': np.float32, 'r32f': np.float32, 'rg32f': np.float32, 'r8': np.uint8, 'rgba8': np.uint8}
 
@@ -260,9 +295,16 @@ for ci, c in enumerate(CASES):
         nto = float(R[2] @ sunL)  # N = cellWorldDir( 0, 0, 1 ) = R's third row (r, u, -d)
         print('precipview case %s: lit N.to %.3f, thick / thin %.3f (want far from 1)' % (c[0], nto, 4 * max(nto + 0.5, 0) / 1.5))
         U.update({'cellOn': [1], 'cellHasDir': [1], 'cellInterior': [0], 'cellDirColor': [1.6, 1.2, 0.75],
-                  'cellDirTo': list(sunL),'cellRow': np.c_[R.T, np.array(c[6])].reshape(-1), 'volTerms': [1],
+                  'cellDirTo': list(sunL),'cellRow': np.c_[R.T, np.array(c[6])].reshape(-1), 'volTerms': [lit],
                   'volPhase': [0.2, 0.25, 0.3, 0.0, 0.5, 0.45, 0.4, 0.6, 0.3, 0.3, 0.3, -0.3], 'volGi': [1.0, 1.0, 1.0, 0.0],
                   'pcTrans': [0.5]})
+        # the lamps' switches in every lit case (GL keeps a program's uniforms: the order cannot carry them)
+        U.update({'cellLightCount': [5 if lit & 2 else 0], 'cellShadowOn': [0], 'cellGoboOn': [0], 'cellClusterOn': [0],
+                  'cellLightPhys': [0.0] * 4, 'cellLightPhysB': [0.0] * 4, 'cellRed': [0]})
+        if lit & 2:
+            lamps(v[inview], R, np.array(c[6])).tofile(os.path.join(d, 'buf_cellLights.bin'))
+            with open(os.path.join(d, 'buf.txt'), 'w', newline='\n') as f:
+                f.write('cellLights rgba32f 40 buf_cellLights.bin\n')
         if fog:  # the veil on, the air's column on the sun: the light chain's own names for the air's medium
             U.update({'volVeil': [1], 'airMed': AU['volAirMed'], 'airLayer': AU['volAirLayer'],
                       'airGround': AU['volAirGround'], 'airSunLayer': [0]})
@@ -274,7 +316,7 @@ for ci, c in enumerate(CASES):
         for key, val in U.items():
             f.write('%s %s\n' % (key, fl(val)))
     with open(os.path.join(d, 'job.txt'), 'w', newline='\n') as f:
-        f.write('%d %d %d %d %d %u %d\n%.9g\n%d %d %d\n' % (W, H, first, n, has, seed, c[8], zd, fog, look, lit))
+        f.write('%d %d %d %d %d %u %d\n%.9g\n%d %d %d\n' % (W, H, first, n, has, seed, c[8], zd, fog, look, 1 if lit else 0))
     names.append(c[0])
     print('precipview case %s: %d particles (run %d + %d, %d in the view), atlas %dx%d (%d x %d cells), slab %.7f'
           % (c[0], n_all, first, n, int(inview.sum()), tw, th, cols, rows, zd))

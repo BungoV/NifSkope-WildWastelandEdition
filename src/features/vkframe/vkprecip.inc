@@ -606,9 +606,21 @@ const char * precipLitWhy( const PrecipRun::LitIn & l )
 		return "the lit program lacks a switch the refusals read";
 	if ( l.interior != 0 )
 		return "an interior's lit particles (its law is not judged)";
-	// The gate judged volTerms 1 only: any other term refuses, idle or not.
-	if ( l.terms & 2 )
-		return "the lamps term on the particles (refused in slice 2b)";
+	// The gate judged the sun (volTerms 1) and the lamps' flat loop (2, term 2a); any other term refuses, idle or not.
+	if ( l.terms & 2 ) {
+		if ( l.shadow < 0 || l.gobo < 0 || l.cluster < 0 || l.cellRed < 0 )
+			return "the lit program lacks a lamp switch the refusals read";
+		if ( l.shadow != 0 )
+			return "the lamps' shadow cubes on the particles (refused in term 2a)";
+		if ( l.gobo != 0 )
+			return "the lamps' gobos on the particles (refused in term 2a)";
+		if ( l.cluster != 0 )
+			return "the lamps' cluster lists on the particles (b0 unread; refused in term 2a)";
+		if ( l.phys > 0.5f )
+			return "the lamps' physical falloff on the particles (refused in term 2a)";
+		if ( l.cellRed != 0 )
+			return "a cell-light red (cellRed) in a lit run with lamps";
+	}
 	if ( l.terms & 4 )
 		return "the GI term on the particles (refused in slice 2b)";
 	if ( l.terms & 8 )
@@ -719,8 +731,20 @@ bool precipRun( const PrecipRun & t, std::string & why )
 		b.airTerr = litI( "airTerrOn" );
 		b.drift = litF( "volAirDrift", 0 );
 		b.sunA = litF( "vpSun", 3 );
+		b.shadow = litI( "cellShadowOn" );
+		b.gobo = litI( "cellGoboOn" );
+		b.cluster = litI( "cellClusterOn" );
+		b.cellRed = litI( "cellRed" );
+		b.phys = litF( "cellLightPhys", 0 );
 		if ( const char * w = precipLitWhy( b ) )
 			return refuse( std::string( "the packed light block: " ) + w );
+		if ( b.terms & 2 ) {  // the lamps: GL's lights a float buffer holding every counted light (8 texels each)
+			const long long need = std::max( litI( "cellLightCount" ), 0 ) * 8LL * 16LL;
+			if ( t.lights.tex && t.lights.glFmt != 0x8814u )
+				return refuse( "the lamps' cellLights is not RGBA32F" );
+			if ( t.lights.tex && need > t.lights.bytes )
+				return refuse( "cellLightCount is past GL's cellLights buffer" );
+		}
 	}
 	const int atFirst = precipAt( kT_precipcs, int( std::size( kT_precipcs ) ), "pcFirst" );
 	const int atCount = precipAt( kT_precipcs, int( std::size( kT_precipcs ) ), "pcCount" );
@@ -879,8 +903,26 @@ bool precipRun( const PrecipRun & t, std::string & why )
 		lput( 0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, &lb[0], nullptr, nullptr );
 		lput( 31, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, &lb[1], nullptr, nullptr );
 		lput( 192, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, &lb[2], nullptr, nullptr );
-		lput( 64, VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER, nullptr, nullptr, &D.litTbF );
-		lput( 109, VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER, nullptr, nullptr, &D.litTbI );
+		// L8 term 2a: GL's lights (and, when its lists are on, the cluster) copied into texel buffers both APIs see (as
+		// the water's twins); the zero ones when the lamps are off or for red 256 (the lights dropped)
+		VkBufferView tbv[2] = { D.litTbF, D.litTbI };
+		static char litBufKeys[2];
+		for ( int k = 0; k < 2 && ( t.red & 256 ) == 0; k++ ) {
+			const PrecipRun::TexBuf & b = k ? t.cluster : t.lights;
+			if ( !b.tex || ( k == 1 && t.litIn.cluster == 0 ) )
+				continue;
+			if ( !g.copyNamedBufferSubData )
+				return refuse( "no glCopyNamedBufferSubData (the lamps' texel buffers)" );
+			const std::uintptr_t key = reinterpret_cast<std::uintptr_t>( &litBufKeys[k] );
+			unsigned tb = 0, tt = 0;
+			if ( !farTexelBuffer( key, b.glFmt, std::size_t( b.bytes ), tb, tt, w ) )
+				return refuse( std::string( k ? "cellCluster: " : "cellLights: " ) + w );
+			g.copyNamedBufferSubData( b.buf, tb, std::intptr_t( b.off ), 0, std::intptr_t( b.bytes ) );
+			names.addBuf( tb );
+			tbv[k] = farCards().bufs[key].view;
+		}
+		lput( 64, VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER, nullptr, nullptr, &tbv[0] );
+		lput( 109, VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER, nullptr, nullptr, &tbv[1] );
 		for ( int k = 0; k < 14; k++ )
 			lput( kPrecipLitImg[k], VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, nullptr, &li[k], nullptr );
 		for ( int k = 0; k < 13; k++ )
