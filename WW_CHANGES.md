@@ -157,8 +157,14 @@ Changed, not built, not checked live. Nothing in the app calls it yet, so no fra
   near rain plain (EXACT), near rain lit (151274 samples, 2 halves 1 ulp apart, 0 flips) and near snow with the look
   (52 halves, max 2 ulp, 0 flips); the roof off moves 32408 / 42415 / 734579 samples in GL. Dropping the map, turning
   it off or swapping its axes FAILs in each case.
-- Still on GL (the census, exterior 0, interior 1): interiors. The app turns them on by default, so lit runs in an
-  interior still go to GL.
+- Interiors (VKFAR6, 3aaa59eb bar, then 33e277fd): an interior's own particle law (no sun shadow, no veil, its own
+  ambient switch, the ambient's GI rule, a dark interior still lit) was already in the shared shader; the refusal is
+  gone, so lit rain / snow in an interior draws on Vulkan. New gate cases: a dark interior with lamps and ambient
+  volumes (151282 samples, EXACT) and a sunlit fogged interior (28114 samples, EXACT); the interior off moves 151269 /
+  14601 in GL, its ambient switch off 150971 / 28114. Turning the interior or its ambient off, or the ambient's GI rule
+  on, FAILs in each case.
+- The census reads exterior 0, interior 0: every lit term GL draws on rain / snow now draws on Vulkan in the gate. Lit
+  + the look together is still refused (the look is off by default).
 
 ## VKFAR2 P7 (2026-11-14): depth of field, motion blur and object blur join the tone pass on Vulkan (WW_VKVIEW=1)
 
