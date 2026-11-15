@@ -1,3 +1,24 @@
+## VKWATER4 (2026-11-15): the ultra ocean builds on Vulkan compute (WW_VKVIEW=1)
+
+Changed, not built, not checked live. Offline: tests/vkframe/oceanview.sh, 96 greens EXACT against GL (spectrum, 14 FFT
+stages, fields, mips 1-7, end to end), 20 reds FAIL.
+
+- features/water/cellocean.cpp records the spectrum, the inverse FFT, the fields and the mips as 31 dispatches
+  (res/shaders/hlsl/vklight/ocean_vk.hlsl) and writes them back into the three arrays. Red WW_VKVIEW_OCEAN_RED=1: GL's draws.
+- The spectrum keeps GL's float order with an opaque no-op: NVIDIA's Vulkan compiler reorders multiply chains even
+  under precise.
+
+## VKWATER4 (2026-11-15): the camera-underwater meniscus takes its derivative before the discard (HLSL)
+
+Changed, not built, not checked live. Offline: tests/vkframe/underdraw.sh arms A, B, C BOUND, red "old order" FAILS.
+
+- res/shaders/hlsl/water/cell_underwater_ps.hlsl (and its per-sample twin cell_underwater_ms_ps.hlsl) takes
+  fwidth( Pn.z ) before the per-sample draw's discard. After a discard the derivative is undefined; on NVIDIA GL it moved
+  the waterline's meniscus by up to 1168 half-float steps on edge samples.
+- GL's GLSL (features/water/cell_underwater.frag) keeps the old order until the HLSL switch.
+- The Vulkan twin's near-the-farthest-sample test now spells NVIDIA GL's own float form; in the gate's plain fog arm both
+  pick the same draw for a sample on the threshold. The light row still splits 13 samples (cause open).
+
 ## VKFAR3 A1 SSGI (2026-11-14): the SSGI cast stays on Vulkan when the traced volume carries the emission
 
 Changed, not built, not checked live.

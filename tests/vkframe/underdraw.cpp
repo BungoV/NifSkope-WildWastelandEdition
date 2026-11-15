@@ -11,10 +11,12 @@
 // 0 and 1, fragMul's alpha cleared to -1 so an unwritten sample shows), read per sample, then frame = frame * mul + add
 // applied per sample by GL's own blend unit at 1x: every sample is one texel of a single-sample RGBA16F target, the
 // captures go back as fragAdd / fragMul with the same blend and colour mask, one pass per draw. (A float CPU blend misses
-// the blend unit by 1 ulp on ~8 % of halves even on constant outputs, so it stays an info line.) Reference checks (bars
-// written before the first run): the 1x constant probe has 0 samples off bare * 0.65 + 0.01 and equals the 4x probe on
-// every sample the 4x probe did not flag; the 1x blend of the captures equals GL's 4x blended frame exactly on the
-// pixels GL did not flatten (all four samples one value). GL's blended frame is printed against the reference (info).
+// the blend unit by 1 ulp on ~8 % of halves even on constant outputs, so it stays an info line.) Reference check (bar
+// written before the first run): the 1x blend of the captures (of the programs as linked, which GL's 4x frame ran)
+// equals GL's 4x blended frame exactly on the pixels GL did not flatten (all four samples one value). The 1x constant probe against the 4x one is info only (ruling 11-14: its
+// premise is wrong, GL flattens 2x2 tiles). GL's blended frame is printed against the reference (info).
+// The per-sample capture is GL's program with fwidth( Pn.z ) moved before the discard (ruling 11-14: the fixed
+// cell_underwater_ps.hlsl draws that order; GLSL's derivative after a discard is undefined, GL's GLSL keeps it).
 // Bar (set before the first run, never widened): Vulkan against that reference per sample, every half within 2 ulp and
 // <= 0.1 % of halves past 1 ulp (fxview's volsky bar); floors: the fog changes >= 50 % of the samples against the frame
 // before it, and the scene holds >= 100 pixels whose samples differ in depth.
@@ -23,14 +25,15 @@
 // arms A (WATR fog law), B (Underwater light row, class 1), C (the meniscus: the near plane crosses the surface).
 // Each arm also runs Vulkan's per-pixel draw alone and tables which draw changed each sample (GL: from the reference's
 // two passes): Vulkan must fog every sample by one draw at most ("both" 0); a sample the two APIs give to different draws
-// prints e against tol in double (uwNearMax's tie). Info: a probe copy of GL's per-sample program with fwidth( Pn.z )
-// taken before the discard, as the twin takes it (GLSL's derivative after a discard is undefined); arm C's waterline
-// samples are the ones it moves. Arm A also draws GL's blend with constant
+// prints e against tol in double (uwNearMax's tie; the twin spells GL's float form of it, read from GL's fp assembly).
+// Info: GL's per-sample program as linked (the old order); arm C's waterline samples are the ones it moves.
+// Arm A also draws GL's blend with constant
 // outputs (info, the quirk's record): on this PC GL's 4x blend leaves bare * mul + add in some 2-pixel tiles and writes
 // one value to all four samples (the pixel's mean blended), single-source or dual, with or without a written sample mask.
 // Reds (each must FAIL, never refuse): 1 no per-sample draw, 2 blend without SRC1 (dst ONE), 8 uwRow one vec4 off (the whole b31 moved uwSamples
 // into a loop bound and hung the GPU: device lost on the next submit), 4 the
-// uwDepth copy skipped (on a scene whose depth differs from the last copied one). A last arm with uwSamples 0 must refuse.
+// uwDepth copy skipped (on a scene whose depth differs from the last copied one), old order (arm C against GL's program as
+// linked, fwidth after the discard). A last arm with uwSamples 0 must refuse.
 // Stat: 10 runs (3 of them the tables' red 1), 1 refusal, 9 uwDepth copies. Last line `UNDERDRAW GATE OK` or `UNDERDRAW GATE FAILED`.
 #define main fxview_main
 #include "fxview.cpp"
@@ -556,7 +559,8 @@ int main( int argc, char ** argv )
 		std::string w;
 		const bool ran = vkFog( a, w );
 		const std::vector<std::uint16_t> vk = readSamples( fc ), glb = readSamples( refCol );
-		const Cap c1 = glCapture( refDs, pUwC ), c2 = a.samples > 0 ? glCapture( refDs, pMsC ) : Cap {};
+		// the per-sample capture from the fwidth-first program (what the HLSL draws, ruling 11-14); GL's GLSL as linked kept
+		const Cap c1 = glCapture( refDs, pUwC ), c2 = a.samples > 0 ? glCapture( refDs, pMsFw ) : Cap {};
 		const std::vector<std::uint16_t> ref1 = blend1x( bare, pBlend, &c1 ), ref = a.samples > 0 ? blend1x( ref1, pBlend, &c2 ) : ref1;
 		const Halves h = compareHalves( vk, ref );
 		std::vector<char> glFlat( size_t( W ) * H );  // GL holds one RGB in all four samples of the pixel
@@ -569,22 +573,29 @@ int main( int argc, char ** argv )
 		}
 		bool refOk = true;
 		if ( a.red == 0 ) {  // the reference's own check, then GL's blended frame against it (the tile mean, on record)
+			// the 1x blend method is checked on the captures of the programs GL's 4x frame ran (as linked, old order)
+			const Cap cl = a.samples > 0 ? glCapture( refDs, pMsC ) : Cap {};
+			const std::vector<std::uint16_t> refl = a.samples > 0 ? blend1x( ref1, pBlend, &cl ) : ref1;
 			size_t outside = 0, ne = 0;
-			for ( size_t i = 0; i < ref.size(); i++ )
+			for ( size_t i = 0; i < refl.size(); i++ )
 				if ( !glFlat[i / 4 / S] ) {
 					outside++;
-					ne += ref[i] != glb[i];
+					ne += refl[i] != glb[i];
 				}
 			refOk = outside > 0 && ne == 0;
-			std::printf( "UNDERDRAW   reference: 1x blend of the captures vs GL's 4x frame outside flattened pixels: %zu of %zu halves differ (want 0): %s\n",
+			std::printf( "UNDERDRAW   reference: 1x blend of the as-linked captures vs GL's 4x frame outside flattened pixels: %zu of %zu halves differ (want 0): %s\n",
 				ne, outside, refOk ? "OK" : "FAIL" );
 			const Halves cb = compareHalves( a.samples > 0 ? cpuBlend( cpuBlend( bare, c1 ), c2 ) : cpuBlend( bare, c1 ), ref );
 			std::printf( "UNDERDRAW   float CPU blend vs the reference (info): halves %zu differ, %zu past 1 ulp, max %d ulp\n", cb.diff, cb.past1, cb.maxu );
-			const Cap cf = glCapture( refDs, pMsFw );
-			const std::vector<std::uint16_t> reff = blend1x( ref1, pBlend, &cf );
-			const Halves hf = compareHalves( vk, reff ), mv = compareHalves( reff, ref );
-			std::printf( "UNDERDRAW   GL per-sample program with fwidth before the discard (info): Vulkan vs it %s (halves %zu differ, %zu past 1 ulp, "
-						 "max %d ulp); halves it moves from GL as linked %zu (max %d ulp)\n", hf.word(), hf.diff, hf.past1, hf.maxu, mv.diff, mv.maxu );
+			const Halves hl = compareHalves( vk, refl ), mv = compareHalves( refl, ref );
+			std::printf( "UNDERDRAW   GL per-sample program as linked, fwidth after the discard (info): Vulkan vs it %s (halves %zu differ, %zu past 1 ulp, "
+						 "max %d ulp); halves the old order moves from the reference %zu (max %d ulp)\n", hl.word(), hl.diff, hl.past1, hl.maxu, mv.diff, mv.maxu );
+			if ( a.seed == 2 ) {  // red: the old order (GL's GLSL as linked) as the reference must FAIL on the meniscus arm
+				const bool failed = ran && !hl.ok();
+				std::printf( "UNDERDRAW red old order (fwidth after the discard, arm C): %s (halves %zu differ, %zu past 1 ulp, max %d ulp), want FAIL: %s\n",
+					ran ? ( hl.ok() ? hl.word() : "FAIL" ) : "REFUSED", hl.diff, hl.past1, hl.maxu, failed ? "OK" : "NOT ARMED" );
+				gateOk = gateOk && failed;
+			}
 			const Halves g = compareHalves( glb, ref );
 			size_t flat = 0;  // pixels GL flattened where the reference does not hold one value
 			for ( size_t p = 0; p < glFlat.size(); p++ ) {
@@ -670,6 +681,9 @@ int main( int argc, char ** argv )
 				std::printf( "UNDERDRAW   draws gl %d: vk 0 %zu (%zu past 1 ulp), vk 1 %zu (%zu), vk 2 %zu (%zu), vk 3 %zu (%zu)\n", g, cross[g][0],
 					bad[g][0], cross[g][1], bad[g][1], cross[g][2], bad[g][2], cross[g][3], bad[g][3] );
 			onceOk = cross[0][3] + cross[1][3] + cross[2][3] + cross[3][3] == 0;
+			if ( !h.ok() && !a.light && cross[1][2] + cross[2][1] > 0 )  // still counted as failing; the bar is not widened
+				std::printf( "UNDERDRAW   known: uwNearMax threshold ties, double agrees with neither side (%zu samples split, e / tol on the split lines)\n",
+					cross[1][2] + cross[2][1] );
 		}
 		if ( a.red == 0 && a.seed == 0 ) {  // GL's own blend, constant outputs (add 0.01, mul 0.65): does it keep bare * 0.65 + 0.01 per sample?
 				static const char * fsMask = "#version 410 core\nlayout(location=0,index=0) out vec4 fa; layout(location=0,index=1) out vec4 fm;\n"
@@ -723,10 +737,10 @@ int main( int argc, char ** argv )
 									ne += q[j + c] != pp[j + c];
 							}
 						}
-						const bool ok1 = p1x && off1 == 0 && kept > 0 && ne == 0;
-						std::printf( "UNDERDRAW   reference: GL blend at 1x, same probe: %zu samples off (want 0), %zu halves differ from 4x on the %zu "
-									 "samples 4x kept (want 0): %s\n", off1, ne, kept, ok1 ? "OK" : "FAIL" );
-						refOk = refOk && ok1;
+						// retired as a verdict (ruling 11-14): its premise, 4x keeps a sample's own blend outside the off ones, is
+						// wrong: GL flattens whole 2x2 tiles. The reference check is the captures' 1x blend vs GL's 4x frame above.
+						std::printf( "UNDERDRAW   reference (info, premise wrong: GL flattens 2x2 tiles): GL blend at 1x, same probe: %zu samples off, "
+									 "%zu halves differ from 4x on the %zu samples 4x kept%s\n", off1, ne, kept, p1x ? "" : " (probe 1x not linked)" );
 						size_t neFlat = 0, neRest = 0, flatPx = 0;  // where those halves sit: pixels 4x flattened (one RGB in all four samples)
 						for ( size_t p = 0; p < size_t( W ) * H; p++ ) {
 							bool same = true;

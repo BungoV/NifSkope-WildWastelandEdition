@@ -41,6 +41,12 @@
 #include "features/vkframe/light_aox_z.spv.h"  // lane VKFAR3: the ported AO methods (XeGTAO, GTAO)
 #include "features/vkframe/light_aox_xe.spv.h"
 #include "features/vkframe/light_aox_r8.spv.h"
+#include "features/vkframe/light_ocean_spec.spv.h"  // lane VKWATER4 (row G5): the ultra ocean (ocean_vk.hlsl stages 1-6)
+#include "features/vkframe/light_ocean_fft.spv.h"
+#include "features/vkframe/light_ocean_finbc.spv.h"
+#include "features/vkframe/light_ocean_find.spv.h"
+#include "features/vkframe/light_ocean_mipbc.spv.h"
+#include "features/vkframe/light_ocean_mipd.spv.h"
 // lane VKLIGHT2: the reflections' stages (ssr_vk.hlsl SSR_LIVE; w = the water look)
 #include "features/vkframe/ssr_view_s1.spv.h"
 #include "features/vkframe/ssr_view_s1w.spv.h"
@@ -6480,7 +6486,7 @@ FxStat takeCloudStat()
 // lane VKLIGHT1: AO, the contact shadow lines and the SSGI cast as compute on the present device (vkpresent.h LightRun)
 namespace
 {
-constexpr int kLightSets = 16;  // dispatches one pass may record (AO: gbuf + 4 mips + raw + across + fin = 8)
+constexpr int kLightSets = 32;  // dispatches one pass may record (AO 8; the ocean 1 + 14 + 2 + 14 = 31)
 
 struct LightImg
 {
@@ -6660,7 +6666,10 @@ bool lightStatic( std::string & why )
 		{ vkframe_light_ao_blur_spv, sizeof( vkframe_light_ao_blur_spv ) }, { vkframe_light_ao_blurf_spv, sizeof( vkframe_light_ao_blurf_spv ) },
 		{ vkframe_light_contact_spv, sizeof( vkframe_light_contact_spv ) }, { vkframe_light_ssgi_spv, sizeof( vkframe_light_ssgi_spv ) },
 		{ vkframe_light_aox_z_spv, sizeof( vkframe_light_aox_z_spv ) }, { vkframe_light_aox_xe_spv, sizeof( vkframe_light_aox_xe_spv ) },
-		{ vkframe_light_aox_r8_spv, sizeof( vkframe_light_aox_r8_spv ) } };
+		{ vkframe_light_aox_r8_spv, sizeof( vkframe_light_aox_r8_spv ) },
+		{ vkframe_light_ocean_spec_spv, sizeof( vkframe_light_ocean_spec_spv ) }, { vkframe_light_ocean_fft_spv, sizeof( vkframe_light_ocean_fft_spv ) },
+		{ vkframe_light_ocean_finbc_spv, sizeof( vkframe_light_ocean_finbc_spv ) }, { vkframe_light_ocean_find_spv, sizeof( vkframe_light_ocean_find_spv ) },
+		{ vkframe_light_ocean_mipbc_spv, sizeof( vkframe_light_ocean_mipbc_spv ) }, { vkframe_light_ocean_mipd_spv, sizeof( vkframe_light_ocean_mipd_spv ) } };
 	for ( int k = 0; k < WwVkPresent::LightKernels; k++ ) {
 		if ( k == WwVkPresent::LightAoRaw && !v.float64 )
 			continue;  // AO refuses with the reason
@@ -6930,6 +6939,8 @@ bool lightRun( const LightRun & t, std::string & why )
 			return refuse( "an image entry (size, levels, format " + std::to_string( x.glFmt ) + " or texture)" );
 		if ( x.out && x.levels > 1 )
 			return refuse( "a mipped output" );
+		if ( x.tiles < 0 || ( x.tiles > 0 && ( !x.out || x.in || x.w % x.tiles || x.outLevel < 0 ) ) )
+			return refuse( "a tiled output (an output only, its width a multiple of its tiles)" );
 	}
 	for ( const LightDispatch & d : t.d ) {
 		if ( d.kernel < 0 || d.kernel >= LightKernels || d.out0 < 0 || d.out0 >= ni || d.out1 >= ni )
@@ -7062,7 +7073,11 @@ bool lightRun( const LightRun & t, std::string & why )
 	g.waitSemaphore( P.vkDoneGl, 0, nullptr, GLuint( ni ), tex.data(), lay.data() );
 	for ( int i = 0; i < ni; i++ ) {
 		const LightImage & x = t.img[size_t( i )];
-		if ( x.out )
+		if ( x.out && x.tiles > 0 ) {  // lane VKWATER4: a strip of tiles into the layers of GL's 2D array
+			const int tw = x.w / x.tiles;
+			for ( int l = 0; l < x.tiles; l++ )
+				g.copyImageSubData( P.img[size_t( i )].tex, kTexture2D, 0, l * tw, 0, 0, x.tex, kTexture2DArray, x.outLevel, 0, 0, l, tw, x.h, 1 );
+		} else if ( x.out )
 			g.copyImageSubData( P.img[size_t( i )].tex, kTexture2D, 0, 0, 0, 0, x.tex, kTexture2D, 0, 0, 0, 0, x.w, x.h, 1 );
 	}
 	P.pending = true;
@@ -8929,10 +8944,10 @@ void lightSay( int pass, bool wanted, const char * glWhy )
 {
 	if ( pass < 0 || pass >= LightPasses )
 		return;
-	static const char * const kName[LightPasses] = { "ao", "contact", "ssgi" };
+	static const char * const kName[LightPasses] = { "ao", "contact", "ssgi", "ocean" };
 	static const char * const kWhat[LightPasses] = { "ao_vk: 4 mips, raw, across, fin, or aox_vk: a ported method's stages; gbuf on GL",
 		"contact_vk: the shadow lines",
-		"ssgi_vk: the cast" };
+		"ssgi_vk: the cast", "ocean_vk: spectrum, 14 FFT stages, layers, 7 mips; arrays copied back" };
 	static QString said[LightPasses];
 	static double at[LightPasses] = {};
 	const QString head = QStringLiteral( "vk %1: " ).arg( QLatin1String( kName[pass] ) );
