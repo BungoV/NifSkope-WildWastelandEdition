@@ -110,6 +110,10 @@ CASES = [
     # fixture, frame block and route program, with the app's ultra tiers (Vogel cascades, terrain map, contact mask)
     ('rain_near_uss', 0, 2.0, 4.0, 11, 37.25, (-60500.0, 70000.0, 6300.0), (120.0, -40.0), 0, 1.0, 0.0, 0.0, 1.0, 1.0, 1,
      2.0, -0.08, 40000, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 1),
+    # L8 route lift 3 (VKFAR11 bar, element 33 = GL's ReSTIR variant, cellRestirOn 1), appended: rain_near_shadow's run,
+    # lamps, slots and cubes, drawn through pAllOn; a W x H RG32F cellRestir (a smooth ratio, one depth D0)
+    ('rain_near_restir', 0, 2.0, 4.0, 11, 37.25, (-60500.0, 70000.0, 6300.0), (120.0, -40.0), 0, 1.0, 0.0, 0.0, 1.0, 1.0, 1,
+     2.0, -0.08, 40000, 0, 0, 3, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1),
 ]
 SUN = np.array([0.4, 0.3, 0.35]) / np.linalg.norm([0.4, 0.3, 0.35])  # world, toward the sun (the air's fogSun too)
 # a lit case's own sun (cellDirTo), chosen by the GS's mix: N = the eye's axis, thick / thin = 4 vpWrap( N.to, pcTrans )
@@ -128,6 +132,7 @@ LIT_SUN['rain_near_amb'] = LIT_SUN['rain_near_lit']
 LIT_SUN['rain_near_csm'] = LIT_SUN['rain_near_lit']
 LIT_SUN['rain_near_csm_ubo'] = LIT_SUN['rain_near_lit']
 LIT_SUN['rain_near_uss'] = LIT_SUN['rain_near_lit']
+LIT_SUN['rain_near_restir'] = LIT_SUN['rain_near_lit']
 TILE, SLICES = 64, 4  # the cluster grid (L8 term 2b): 64-pixel tiles, 4 log-depth slices
 
 
@@ -790,6 +795,21 @@ for ci, c in enumerate(CASES):
         print('precipview case %s: the shadow set, slope %.2f, terrain z bias %.1f, map %.1f units (texel %.3f), heights %.1f +- %.1f; '
               'in-view shares under the hard terrain lookup < 1 %.3f, the contact mask < 1 %.3f (sigma %.0f px) (want each 0.2 - 0.8)'
               % (c[0], us_g, float(us_z[0] - us_P[0, 2]), us_S, us_tex, float(np.median(us_z)), us_amp, us_terr, us_con, us_sig))
+    if lit and len(c) > 33 and c[33]:
+        # L8 route lift 3: cellRestirOn 1 (rtddgicell.cpp restirUniforms). The ratio a smooth field in 0.1 - 0.9 over the
+        # window (two low sines, bottom row first as gl_FragCoord), the depth one D0 for every texel: the in-view
+        # particles' median linear depth; GL takes the ratio where |D - D0| <= 0.02 D0 + 2, else 1
+        rs_dep = -v[inview, 2].astype(np.float64)
+        rs_D0 = float(np.median(rs_dep))
+        rs_share = float(np.mean(np.abs(rs_dep - rs_D0) <= 0.02 * rs_D0 + 2.0))
+        rs_x, rs_y = np.meshgrid((np.arange(W) + 0.5) / W, (np.arange(H) + 0.5) / H)  # [row y from the bottom, column x]
+        rs_r = 0.5 + 0.4 * np.sin(2.0 * math.pi * 1.3 * rs_x + 0.4) * np.cos(2.0 * math.pi * 0.9 * rs_y + 1.1)
+        np.stack([rs_r, np.full_like(rs_r, rs_D0)], -1).astype(np.float32).tofile(os.path.join(d, 'buf_cellRestir.bin'))
+        with open(os.path.join(d, 'buf.txt'), 'a', newline='\n') as f:
+            f.write('cellRestir rg32f %d buf_cellRestir.bin\n' % (W * H))
+        U.update({'cellRestirOn': [1], 'cellRestirSize': [float(W), float(H), 0.0, 0.0]})
+        print('precipview case %s: the ReSTIR ratio %.2f - %.2f, depth D0 %.3f; in-view share within its tolerance %.3f (want 0.1 - 0.8)'
+              % (c[0], float(rs_r.min()), float(rs_r.max()), rs_D0, rs_share))
     with open(os.path.join(d, 'uni.txt'), 'w', newline='\n') as f:
         for key, val in U.items():
             f.write('%s %s\n' % (key, fl(val)))

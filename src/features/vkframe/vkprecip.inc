@@ -28,6 +28,7 @@ constexpr VkDeviceSize kPrecipLitCsAt = 2816;
 constexpr VkDeviceSize kPrecipGlobalAt = 8704, kPrecipGlobalBytes = 336;
 static_assert( kPrecipLitCsAt >= kPrecipPsAt + VkDeviceSize( WwVkPresent::kT_preciplookpsBytes ), "the lit block overlaps the pixel block" );
 static_assert( kPrecipGlobalAt >= kPrecipLitCsAt + VkDeviceSize( WwVkPresent::kT_preciplitcsBytes ), "globalUniforms overlaps the lit block" );
+static_assert( kPrecipGlobalAt >= kPrecipLitCsAt + VkDeviceSize( WwVkPresent::kT_preciplitrtcsBytes ), "globalUniforms overlaps the ReSTIR lit block" );
 
 struct Precip
 {
@@ -56,6 +57,7 @@ struct Precip
 	int n = 0;
 	bool look = false;  // the look's pipelines
 	bool lit = false;   // slice 2b: the lit record pass
+	bool litRt = false; // L8 route lift 3: the lit pass in GL's ReSTIR variant (precip_lit_rt_view_cs, the same set + t7 at 71)
 	// slice 2b, made on the first lit run (a failure refuses lit runs only): its set (32 bindings), pipeline, and the zero
 	// inputs of what the sun alone does not read (a D16 1x1 x6 image as the shadow cubes / CSM, a zero texel buffer)
 	bool litMade = false, litBroken = false, litLaid = false;  // litLaid: the zero depth image cleared (the first lit record)
@@ -66,6 +68,8 @@ struct Precip
 	VkPipelineLayout litLayout = VK_NULL_HANDLE;
 	VkShaderModule csLit = VK_NULL_HANDLE;
 	VkPipeline csPipeLit = VK_NULL_HANDLE;
+	VkShaderModule csLitRt = VK_NULL_HANDLE;
+	VkPipeline csPipeLitRt = VK_NULL_HANDLE;
 	VkImage litDepth = VK_NULL_HANDLE;
 	VkDeviceMemory litDepthMem = VK_NULL_HANDLE;
 	VkImageView litCube = VK_NULL_HANDLE, litD2a = VK_NULL_HANDLE;
@@ -294,6 +298,7 @@ bool precipLitStatic( std::string & why )
 	add( 31, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER );
 	add( 64, VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER );
 	add( 109, VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER );
+	add( 71, VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER );  // L8 route lift 3: the ReSTIR twin's t7 cellRestir
 	add( 192, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER );
 	for ( std::uint32_t at : kPrecipLitImg )
 		add( at, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE );
@@ -302,7 +307,7 @@ bool precipLitStatic( std::string & why )
 	VkDescriptorSetLayoutCreateInfo lci { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
 	lci.bindingCount = std::uint32_t( nb );
 	lci.pBindings = b;
-	const VkDescriptorPoolSize ps[5] = { { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 2 }, { VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER, 2 },
+	const VkDescriptorPoolSize ps[5] = { { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 2 }, { VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER, 3 },
 		{ VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1 }, { VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 15 }, { VK_DESCRIPTOR_TYPE_SAMPLER, 13 } };
 	VkDescriptorPoolCreateInfo pci { VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO };
 	pci.maxSets = 1;
@@ -331,6 +336,13 @@ bool precipLitStatic( std::string & why )
 	cp.layout = D.litLayout;
 	if ( v.vkCreateComputePipelines( v.dev, tone().cache, 1, &cp, nullptr, &D.csPipeLit ) != VK_SUCCESS )
 		return fail( "vkCreateComputePipelines failed" );
+	D.pipelines += 1;
+	// L8 route lift 3: GL's ReSTIR variant (WW_CELL_RESTIR): the same set (it declares t7 at 71, not t6 / its sampler)
+	if ( !fxModule( vkframe_precip_lit_rt_view_cs_spv, sizeof( vkframe_precip_lit_rt_view_cs_spv ), D.csLitRt ) )
+		return fail( "the ReSTIR shader module failed" );
+	cp.stage.module = D.csLitRt;
+	if ( v.vkCreateComputePipelines( v.dev, tone().cache, 1, &cp, nullptr, &D.csPipeLitRt ) != VK_SUCCESS )
+		return fail( "vkCreateComputePipelines failed (ReSTIR)" );
 	D.pipelines += 1;
 	// the shadow cubes' and the CSM's zero input: one D16 1x1 image of 6 layers (depth 1: nothing shadows), cleared by
 	// the first lit record; a cube-array view and a 2D-array view, a LEQUAL compare sampler (GL's shadow samplers)
@@ -565,7 +577,7 @@ bool precipRecord( std::string & why )
 	Vk & v = vk();
 	Fx & F = fx();
 	Precip & D = precip();
-	const VkPipeline gPipe = D.look ? D.pipeLook : D.pipe, cPipe = D.lit ? D.csPipeLit : D.look ? D.csPipeLook : D.csPipe;
+	const VkPipeline gPipe = D.look ? D.pipeLook : D.pipe, cPipe = D.litRt ? D.csPipeLitRt : D.lit ? D.csPipeLit : D.look ? D.csPipeLook : D.csPipe;
 	if ( !F.fbAir || !gPipe || !cPipe || !D.rec ) {
 		why = "no framebuffer / pipeline / record buffer for rain / snow";
 		return false;
@@ -638,8 +650,8 @@ int precipLitWhys( const PrecipRun::LitIn & l, const char ** out, int max )
 	if ( l.terms > 0 && ( l.terms & 2 ) ) {
 		if ( l.shadow < 0 || l.gobo < 0 || l.cluster < 0 || l.cellRed < 0 )
 			add( "the lit program lacks a lamp switch the refusals read" );
-		if ( l.shadow > 0 && l.restir >= 0 )  // L8 term 5: the cubes are judged; GL's ReSTIR variant does not read them
-			add( "the lamps' shadows in GL's ReSTIR variant (cellRestirOn: its cubes are not read)" );
+		if ( l.shadow > 0 && l.restir >= 0 && l.restirCubes > 0 )  // L8 route lift 3: the ReSTIR twin compiles the cubes out
+			add( "the lamps' cubes compiled into GL's ReSTIR variant (cellShadow active: WW_CELL_RESTIR_CUBES_RED)" );
 		if ( l.gobo > 0 && l.goboPin > 0 )  // L8 term 6: the gobos are judged with every pin and red at 0
 			add( "a gobo pin or red (cellGoboRot / Flat / Gam / Map) in a lit run" );
 		if ( l.phys > 0.5f )
@@ -795,6 +807,17 @@ bool precipRun( const PrecipRun & t, std::string & why )
 				if ( base * 4LL > t.cluster.bytes )
 					return refuse( "cellClusterBase is past GL's cellCluster buffer" );
 			}
+			if ( t.litIn.restir >= 0 && b.shadow > 0 ) {  // L8 route lift 3: the traced ratio, RG32F, W x H texels on GL's unit
+				int on = 0;
+				float sz[2] = {};
+				std::memcpy( &on, t.rt, 4 );
+				std::memcpy( sz, t.rt + 16, 8 );
+				const long long rw = std::max( 0LL, (long long)sz[0] ), rh = std::max( 0LL, (long long)sz[1] );
+				if ( on != 0 && ( !t.restirBuf.tex || t.restirBuf.glFmt != 0x8230u ) )
+					return refuse( "the lamps' cellRestir is not an RG32F texture buffer" );
+				if ( on != 0 && rw * rh * 8LL > t.restirBuf.bytes )
+					return refuse( "cellRestirSize is past GL's cellRestir buffer" );
+			}
 		}
 	}
 	const int atFirst = precipAt( kT_precipcs, int( std::size( kT_precipcs ) ), "pcFirst" );
@@ -832,7 +855,8 @@ bool precipRun( const PrecipRun & t, std::string & why )
 		return refuse( "the sun's shadow map: no D16 linear filtering on the present device" );
 	if ( t.lit && t.litIn.drift > 0.0f && !t.tex[12].tex )  // L8 term 4: GL reads the drift's noise; Vulkan has none to read
 		return refuse( "the air's drift with no volAirNoise in GL's program" );
-	const bool cubes = t.lit && ( t.litIn.terms & 2 ) && t.litIn.shadow > 0;  // L8 term 5: the lamps' shadow cubes read
+	// L8 term 5: the lamps' shadow cubes read (not in GL's ReSTIR variant, L8 route lift 3: the traced ratio replaces them)
+	const bool cubes = t.lit && ( t.litIn.terms & 2 ) && t.litIn.shadow > 0 && t.litIn.restir < 0;
 	if ( cubes && !t.tex[13].tex )
 		return refuse( "the lamps' shadows on with no cellShadow in GL's program" );
 	if ( cubes && !D.csmLinear )
@@ -1003,6 +1027,22 @@ bool precipRun( const PrecipRun & t, std::string & why )
 				std::memcpy( l + atTerms, &terms, 4 );
 			}
 		}
+		if ( t.litIn.restir >= 0 ) {  // L8 route lift 3: the ReSTIR twin's block: cellRestirOn / Size in at 4352, the rest 32 on
+			std::uint8_t rt[kPrecipLitRtShift];
+			std::memcpy( rt, t.rt, sizeof( rt ) );
+			if ( t.red & 2199023255552LL )  // gates only: the ratio off (the packed cellRestirOn 0)
+				std::memset( rt, 0, 4 );
+			if ( t.red & 4398046511104LL ) {  // gates only: the size's axes swapped
+				std::uint8_t s[4];
+				std::memcpy( s, rt + 16, 4 );
+				std::memcpy( rt + 16, rt + 20, 4 );
+				std::memcpy( rt + 20, s, 4 );
+			}
+			if ( ( t.red & 8796093022208LL ) == 0 ) {  // (red: the plain block's bytes, every later field 32 bytes early)
+				std::memmove( l + kPrecipLitRtAt + kPrecipLitRtShift, l + kPrecipLitRtAt, size_t( kT_preciplitcsBytes - kPrecipLitRtAt ) );
+				std::memcpy( l + kPrecipLitRtAt, rt, sizeof( rt ) );
+			}
+		}
 		if ( t.global && ( t.red & 512 ) == 0 )  // term 2b: GL's b0 (the cluster's and the ambient keep's projectionMatrix)
 			std::memcpy( u + kPrecipGlobalAt, t.global, size_t( kPrecipGlobalBytes ) );
 		else
@@ -1069,7 +1109,7 @@ bool precipRun( const PrecipRun & t, std::string & why )
 	v.vkUpdateDescriptorSets( v.dev, 22, ws, 0, nullptr );
 	if ( t.lit ) {  // the lit record pass's set: the run's inputs as the unlit pass, the zero inputs of the refused terms
 		const VkDescriptorBufferInfo lb[3] = { { D.ubo, kPrecipGlobalAt, kPrecipGlobalBytes },
-			{ D.ubo, kPrecipLitCsAt, VkDeviceSize( kT_preciplitcsBytes ) }, { D.rec, 0, recBytes } };
+			{ D.ubo, kPrecipLitCsAt, VkDeviceSize( t.litIn.restir >= 0 ? kT_preciplitrtcsBytes : kT_preciplitcsBytes ) }, { D.rec, 0, recBytes } };
 		VkDescriptorImageInfo li[15] = {};
 		// (L8 term 3: t31 csmMap GL's shared cascades, else the zero D16 array; t34 ussCloudMap; L8 term 4: t30 volAirNoise)
 		const bool cubeIn = views[13] != D.litCube;  // L8 term 5: t6 GL's shared lamp cubes, else the zero cube array
@@ -1121,6 +1161,21 @@ bool precipRun( const PrecipRun & t, std::string & why )
 		}
 		lput( 64, VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER, nullptr, nullptr, &tbv[0] );
 		lput( 109, VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER, nullptr, nullptr, &tbv[1] );
+		// L8 route lift 3: GL's cellRestir (the lamps' traced ratio, RG32F) copied a run; the zero one otherwise or for red 2^40
+		VkBufferView rtv = D.litTbF;
+		static char restirKey;
+		if ( t.restirBuf.tex && t.litIn.restir >= 0 && ( t.red & 1099511627776LL ) == 0 ) {
+			if ( !g.copyNamedBufferSubData )
+				return refuse( "no glCopyNamedBufferSubData (the lamps' ReSTIR ratio)" );
+			const std::uintptr_t key = reinterpret_cast<std::uintptr_t>( &restirKey );
+			unsigned tb = 0, tt = 0;
+			if ( !farTexelBuffer( key, t.restirBuf.glFmt, std::size_t( t.restirBuf.bytes ), tb, tt, w ) )
+				return refuse( std::string( "cellRestir: " ) + w );
+			g.copyNamedBufferSubData( t.restirBuf.buf, tb, std::intptr_t( t.restirBuf.off ), 0, std::intptr_t( t.restirBuf.bytes ) );
+			names.addBuf( tb );
+			rtv = farCards().bufs[key].view;
+		}
+		lput( 71, VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER, nullptr, nullptr, &rtv );
 		for ( int k = 0; k < 15; k++ )
 			lput( kPrecipLitImg[k], VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, nullptr, &li[k], nullptr );
 		for ( int k = 0; k < 13; k++ )
@@ -1130,6 +1185,7 @@ bool precipRun( const PrecipRun & t, std::string & why )
 	D.n = t.n;
 	D.look = look;
 	D.lit = t.lit;
+	D.litRt = t.lit && t.litIn.restir >= 0;
 	F.kind = 8;
 	F.w = t.w;
 	F.h = t.h;

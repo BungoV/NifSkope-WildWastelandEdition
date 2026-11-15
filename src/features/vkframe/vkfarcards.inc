@@ -277,19 +277,19 @@ const Shared * farTwinFind( std::uintptr_t key )
 }
 
 constexpr GLenum kFcTexBuffer = 0x8C2A, kFcBindingTexBuffer = 0x8C2C, kFcRgba32f = 0x8814, kFcRgba32i = 0x8D82, kFcRgba32ui = 0x8D70,
-	kFcR32i = 0x8235, kFcRg8 = 0x822B;
+	kFcR32i = 0x8235, kFcRg8 = 0x822B, kFcRg32f = 0x8230;
 
 VkFormat fcTexelFormat( GLenum f )
 {
 	// lane VKFAR2: R32I (the cell lights' cluster) and RG8 (the far objects' AO / sky stream) beside the 16-byte ones
 	return f == kFcRgba32f ? VK_FORMAT_R32G32B32A32_SFLOAT : f == kFcRgba32i ? VK_FORMAT_R32G32B32A32_SINT
 		: f == kFcRgba32ui ? VK_FORMAT_R32G32B32A32_UINT : f == kFcR32i ? VK_FORMAT_R32_SINT : f == kFcRg8 ? VK_FORMAT_R8G8_UNORM
-		: VK_FORMAT_UNDEFINED;
+		: f == kFcRg32f ? VK_FORMAT_R32G32_SFLOAT : VK_FORMAT_UNDEFINED;  // lane VKFAR11: RG32F, the ReSTIR ratio / depth
 }
 
 std::size_t fcTexelBytes( GLenum f )
 {
-	return f == kFcR32i ? 4u : f == kFcRg8 ? 2u : 16u;
+	return f == kFcR32i ? 4u : f == kFcRg8 ? 2u : f == kFcRg32f ? 8u : 16u;
 }
 
 bool fcDev( std::string & why )

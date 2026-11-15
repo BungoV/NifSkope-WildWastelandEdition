@@ -85,6 +85,7 @@ HLSL_SPECS += [('src/features/vkframe', k, 'vulkan1.2', 'vkframe_%s_spv' % k) fo
 # lane VKFAR2 L8 slice 1: rain / snow's record pass, the script's `fxs <name> <dir/file>` lines (fx()'s shifts, cs_6_0)
 VKFRAME_FXS = {'precip_view_cs': 'weather/precip_view_cs', 'precip_look_view_cs': 'weather/precip_look_view_cs',
 	'precip_lit_view_cs': 'weather/precip_lit_view_cs',	# lane VKFAR2: L8 slice 2b, lit at the centre
+	'precip_lit_rt_view_cs': 'weather/precip_lit_rt_view_cs',	# lane VKFAR11: L8 route lift 3, GL's ReSTIR variant
 	'ddgi_atlas_fetch_cs': 'rtddgi/ddgi_atlas_fetch_cs'}	# lane VKFAR3: the DDGI atlas through the present device's view
 HLSL_SPECS += [('src/features/vkframe', k, 'vulkan1.2', 'vkframe_%s_spv' % k) for k in VKFRAME_FXS]
 # lane VKFAR1 round 2: the far cards' pixel stage, the script's `fxk <name> <dir/file>` lines (fx() + every declared binding kept)
