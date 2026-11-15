@@ -248,7 +248,7 @@ TextureCube<float4> CubeMap : register(t57, space0); SamplerState _CubeMap_sampl
 #ifdef WW_BINDLESS
 // lane BINDLESS2FIX: the twin's normal matrix is in the draw's row (the uniform is never set for it: a zero matrix
 // turned every model-space normal into NaN)
-#define normalMatrix float3x3( wwDraws[wwDrawIdx].nm[0].xyz, wwDraws[wwDrawIdx].nm[1].xyz, wwDraws[wwDrawIdx].nm[2].xyz )
+#define normalMatrix float3x3( wwDraws[wwBlRow].nm[0].xyz, wwDraws[wwBlRow].nm[1].xyz, wwDraws[wwBlRow].nm[2].xyz )
 #else
 
 #endif
