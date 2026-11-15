@@ -813,6 +813,7 @@ struct PrecipRun
 		float drift = 0.0f, sunA = 0.0f;
 		int shadow = -1, gobo = -1, cluster = -1, cellRed = -1;  //!< the lamps' switches (L8 term 2a): cellShadowOn, cellGoboOn, cellClusterOn, cellRed
 		float phys = 0.0f;              //!< cellLightPhys.x (the physical falloff)
+		float physRed = 0.0f;           //!< cellLightPhysB.z: the falloff's red bits (L8 route lift 4: refused non-zero)
 		float envKeep = 0.0f;           //!< volEnvGrid.w: the ambient's keep on (L8 term 2; it reads b0's projection)
 		int gi = 0;                     //!< GI names active in GL's program (a WW_CELL_PRT / RT GI variant reads a GI volume; L8 term 1)
 		int uss = 0, cloud = 0, csmProbe = 0, csmRed = 0;  //!< L8 term 3: ussOn (the shadow set's composition), ussCloudOn, csmProbe, csmRed
@@ -1169,6 +1170,7 @@ template <class Fn> void precipLitRead( Fn * fn, unsigned prog, PrecipRun & t )
 	t.litIn.cluster = geti( "cellClusterOn" );
 	t.litIn.cellRed = geti( "cellRed" );
 	t.litIn.phys = getf( "cellLightPhys", 0 );
+	t.litIn.physRed = getf( "cellLightPhysB", 2 );  // L8 route lift 4
 	t.litIn.envKeep = getf( "volEnvGrid", 3 );
 	t.litIn.uss = geti( "ussOn" );  // L8 term 3 (VKFAR6): absent names read -1 (refused: a shadowed run needs them read)
 	t.litIn.cloud = geti( "ussCloudOn" );

@@ -24,6 +24,17 @@ EXE = sys.argv[2]
 W, H, FOV = 960, 540, 55.0
 MINPX, SHUTTER = 0.75, 1.0 / 120.0
 CELL_PX = 64
+# VKFAR12: every in-view share a bar states is checked; one outside its range fails the job (PRECIPVIEW GATE FAILED (job))
+PREP_MISS, PREP_N = [], [0]
+
+
+def want(case, what, val, lo, hi=1.0):
+    PREP_N[0] += 1
+    if not (lo <= val <= hi):
+        PREP_MISS.append('%s: %s %.3f outside %.2f - %.2f' % (case, what, val, lo, hi))
+    return val
+
+
 # name, type, size, rate, seed, t, cam, wind, far, drawScale, spin, sway, windShare, weight, hasTex, yaw, pitch, cap, fog,
 # look (0 cell_precip_gpu.prog, 1 the drop / 2 the snow of cell_precip_look.prog)
 CASES = [
@@ -111,9 +122,14 @@ CASES = [
     ('rain_near_uss', 0, 2.0, 4.0, 11, 37.25, (-60500.0, 70000.0, 6300.0), (120.0, -40.0), 0, 1.0, 0.0, 0.0, 1.0, 1.0, 1,
      2.0, -0.08, 40000, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 1),
     # L8 route lift 3 (VKFAR11 bar, element 33 = GL's ReSTIR variant, cellRestirOn 1), appended: rain_near_shadow's run,
-    # lamps, slots and cubes, drawn through pAllOn; a W x H RG32F cellRestir (a smooth ratio, one depth D0)
+    # lamps, slots and cubes, drawn through pAllOn; a W x H RG32F cellRestir (a smooth ratio; depth D0, half the particles'
+# own depths stamped round them: VKFAR12)
     ('rain_near_restir', 0, 2.0, 4.0, 11, 37.25, (-60500.0, 70000.0, 6300.0), (120.0, -40.0), 0, 1.0, 0.0, 0.0, 1.0, 1.0, 1,
      2.0, -0.08, 40000, 0, 0, 3, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1),
+    # L8 route lift 4 (VKFAR12 bar, element 34 = the lamps' physical falloff, cellLightPhys.x 1), appended: rain_near_restir's
+    # run, lamps, slots, cubes and ReSTIR fixture through pAllOn, with the app's Physical values (lightphys.h)
+    ('rain_near_phys', 0, 2.0, 4.0, 11, 37.25, (-60500.0, 70000.0, 6300.0), (120.0, -40.0), 0, 1.0, 0.0, 0.0, 1.0, 1.0, 1,
+     2.0, -0.08, 40000, 0, 0, 3, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 1),
 ]
 SUN = np.array([0.4, 0.3, 0.35]) / np.linalg.norm([0.4, 0.3, 0.35])  # world, toward the sun (the air's fogSun too)
 # a lit case's own sun (cellDirTo), chosen by the GS's mix: N = the eye's axis, thick / thin = 4 vpWrap( N.to, pcTrans )
@@ -133,6 +149,7 @@ LIT_SUN['rain_near_csm'] = LIT_SUN['rain_near_lit']
 LIT_SUN['rain_near_csm_ubo'] = LIT_SUN['rain_near_lit']
 LIT_SUN['rain_near_uss'] = LIT_SUN['rain_near_lit']
 LIT_SUN['rain_near_restir'] = LIT_SUN['rain_near_lit']
+LIT_SUN['rain_near_phys'] = LIT_SUN['rain_near_lit']
 TILE, SLICES = 64, 4  # the cluster grid (L8 term 2b): 64-pixel tiles, 4 log-depth slices
 
 
@@ -517,7 +534,7 @@ for ci, c in enumerate(CASES):
                 zg = AU['volAirGround'][0] + gh - gref
                 print('precipview case %s: terrain air ref %.1f, ground %.1f - %.1f, particles z %.1f - %.1f, share under the '
                       'anchor %.3f (want 0.2 - 0.8)' % (c[0], gref, gh.min(), gh.max(), Pw[:, 2].min(), Pw[:, 2].max(),
-                                                        float(np.mean(Pw[:, 2] < zg))))
+                                                        want(c[0], 'share under the anchor', float(np.mean(Pw[:, 2] < zg)), 0.2, 0.8)))
                 U.update({'airTerrOn': [1], 'airTerrXf': xc, 'airTerrFineXf': xfn, 'airTerrRef': [gref]})
         amb = c[24] if len(c) > 24 else 0
         if amb:
@@ -543,7 +560,7 @@ for ci, c in enumerate(CASES):
             U.update({'cellAmboCount': [2], 'cellAmbo': list(c0) + [r0] + list(c1) + [0.0],
                       'cellAmboK': [0.4, 0.6, 1.5, 0.0, 1.8, 0.7, 0.3, 1.0], 'cellAmboBox': box.reshape(-1)})
             print('precipview case %s: ambient volumes, sphere share %.3f, box share %.3f (want each 0.1 - 0.6)'
-                  % (c[0], float(ins0.mean()), float(ins1.mean())))
+                  % (c[0], want(c[0], 'sphere share', float(ins0.mean()), 0.1, 0.6), want(c[0], 'box share', float(ins1.mean()), 0.1, 0.6)))
         if amb == 2:
             # the air's keep: volEnvGrid (16, 9, slices, 1), a 16 x 9 x 6 slices RGBA16F history (the app's strata), b0's
             # projection (vpAmbKeep reads projectionMatrix)
@@ -587,7 +604,7 @@ for ci, c in enumerate(CASES):
                 keeps.append(1.0 - fade + fade * rr if rr >= 0.0 else 1.0 - fade)
             keeps = np.array(keeps)
             print('precipview case %s: the air keep, %d slices, share of in-view particles with keep < 1 %.3f (want 0.2 - 0.8), '
-                  'keep %.3f - %.3f' % (c[0], nz, float(np.mean(keeps < 0.9999)), keeps.min(), keeps.max()))
+                  'keep %.3f - %.3f' % (c[0], nz, want(c[0], 'keep < 1 share', float(np.mean(keeps < 0.9999)), 0.2, 0.8), keeps.min(), keeps.max()))
     if lit and len(c) > 25 and c[25]:
         # L8 term 3: three orthographic cascades along the case's sun in view space (each fitted to its view-depth third
         # of the in-view particles), a 256 x 256 x 3 D16 map of stripe occluders, and a 64 x 64 clouds' map along the sun
@@ -662,8 +679,9 @@ for ci, c in enumerate(CASES):
                   'ussCsmStable': [1.0, 0.0, 0.0, 1.0], 'ussCsmTexel': texel, 'ussCsmBias': [0.25 * t_ for t_ in texel],
                   'ussCloudFromView': Mc.T.reshape(-1), 'ussCloudFar': [0.6, 0.15, 0.0, 0.0]})
         print('precipview case %s: the cascades, in-view shares %.3f %.3f %.3f (want each >= 0.1), one hard tap shadows %.3f '
-              '(want 0.2 - 0.8); the clouds, transmittance %.3f - %.3f, share < 0.9 %.3f' % (c[0], float(np.mean(casc == 0)),
-              float(np.mean(casc == 1)), float(np.mean(casc == 2)), float(np.mean(shad)), tc.min(), tc.max(), float(np.mean(tc < 0.9))))
+              '(want 0.2 - 0.8); the clouds, transmittance %.3f - %.3f, share < 0.9 %.3f' % (c[0], want(c[0], 'cascade 0 share', float(np.mean(casc == 0)), 0.1),
+              want(c[0], 'cascade 1 share', float(np.mean(casc == 1)), 0.1), want(c[0], 'cascade 2 share', float(np.mean(casc == 2)), 0.1),
+              want(c[0], 'hard tap shadow share', float(np.mean(shad)), 0.2, 0.8), tc.min(), tc.max(), float(np.mean(tc < 0.9))))
     if lit and fog and len(c) > 26 and c[26]:
         # L8 term 4: the drift (cellvolair.cpp volDrift): amp 0.5, the fade from the in-view particles' median distance over
         # their distance span, two skewed octaves (about 2 and 5 noise tiles across the run), a 32^3 R8 noise (linear,
@@ -794,22 +812,55 @@ for ci, c in enumerate(CASES):
                   'ussContactOn': [1], 'ussContactInvSize': [1.0 / W, 1.0 / H], 'ussView': [0], 'ussRed': [0]})
         print('precipview case %s: the shadow set, slope %.2f, terrain z bias %.1f, map %.1f units (texel %.3f), heights %.1f +- %.1f; '
               'in-view shares under the hard terrain lookup < 1 %.3f, the contact mask < 1 %.3f (sigma %.0f px) (want each 0.2 - 0.8)'
-              % (c[0], us_g, float(us_z[0] - us_P[0, 2]), us_S, us_tex, float(np.median(us_z)), us_amp, us_terr, us_con, us_sig))
+              % (c[0], us_g, float(us_z[0] - us_P[0, 2]), us_S, us_tex, float(np.median(us_z)), us_amp, want(c[0], 'terrain lookup share', us_terr, 0.2, 0.8), want(c[0], 'contact mask share', us_con, 0.2, 0.8), us_sig))
     if lit and len(c) > 33 and c[33]:
         # L8 route lift 3: cellRestirOn 1 (rtddgicell.cpp restirUniforms). The ratio a smooth field in 0.1 - 0.9 over the
         # window (two low sines, bottom row first as gl_FragCoord), the depth one D0 for every texel: the in-view
-        # particles' median linear depth; GL takes the ratio where |D - D0| <= 0.02 D0 + 2, else 1
+        # particles' median linear depth; GL takes the ratio where |D - D0| <= 0.02 D0 + 2, else 1.
+        # VKFAR12 fixture fix (bar kept, 0.070 missed its 0.1 - 0.8): half the in-view particles (seed 33) stamp their own
+        # depth on a 7 x 7 texel square round their centre, far first (the nearer one keeps a shared texel); the rest D0
         rs_dep = -v[inview, 2].astype(np.float64)
         rs_D0 = float(np.median(rs_dep))
-        rs_share = float(np.mean(np.abs(rs_dep - rs_D0) <= 0.02 * rs_D0 + 2.0))
+        rs_cl = cl[inview]
+        rs_px = np.clip((rs_cl[:, 0] / rs_cl[:, 3] * 0.5 + 0.5) * W, 0, W - 1).astype(int)
+        rs_py = np.clip((rs_cl[:, 1] / rs_cl[:, 3] * 0.5 + 0.5) * H, 0, H - 1).astype(int)
+        rs_Dm = np.full((H, W), rs_D0)
+        rs_pick = np.random.default_rng(33).choice(len(rs_dep), len(rs_dep) // 2, replace=False)
+        for rs_k in rs_pick[np.argsort(-rs_dep[rs_pick])]:
+            rs_Dm[max(rs_py[rs_k] - 3, 0):rs_py[rs_k] + 4, max(rs_px[rs_k] - 3, 0):rs_px[rs_k] + 4] = rs_dep[rs_k]
+        rs_Dc = rs_Dm[rs_py, rs_px]
+        rs_share = float(np.mean(np.abs(rs_dep - rs_Dc) <= 0.02 * rs_Dc + 2.0))
         rs_x, rs_y = np.meshgrid((np.arange(W) + 0.5) / W, (np.arange(H) + 0.5) / H)  # [row y from the bottom, column x]
         rs_r = 0.5 + 0.4 * np.sin(2.0 * math.pi * 1.3 * rs_x + 0.4) * np.cos(2.0 * math.pi * 0.9 * rs_y + 1.1)
-        np.stack([rs_r, np.full_like(rs_r, rs_D0)], -1).astype(np.float32).tofile(os.path.join(d, 'buf_cellRestir.bin'))
+        np.stack([rs_r, rs_Dm], -1).astype(np.float32).tofile(os.path.join(d, 'buf_cellRestir.bin'))
         with open(os.path.join(d, 'buf.txt'), 'a', newline='\n') as f:
             f.write('cellRestir rg32f %d buf_cellRestir.bin\n' % (W * H))
         U.update({'cellRestirOn': [1], 'cellRestirSize': [float(W), float(H), 0.0, 0.0]})
         print('precipview case %s: the ReSTIR ratio %.2f - %.2f, depth D0 %.3f; in-view share within its tolerance %.3f (want 0.1 - 0.8)'
-              % (c[0], float(rs_r.min()), float(rs_r.max()), rs_D0, rs_share))
+              % (c[0], float(rs_r.min()), float(rs_r.max()), rs_D0, want(c[0], 'ReSTIR depth share', rs_share, 0.1, 0.8)))
+    if lit and len(c) > 34 and c[34]:
+        # L8 route lift 4: the app's Physical falloff (lightphys.h kAnchor, kSourceFraction, kAdvMinMetres; no area, no red).
+        # A lamp's curve (t3: bias, scale, exponent) takes it by GL's own test (cell_lights.glsl cellPhysFalloff)
+        ph_a, ph_s = 0.38164, 0.30
+        U.update({'cellLightPhys': [1.0, ph_a, ph_s, 0.0], 'cellLightPhysB': [0.05, 0.0, 0.0, 0.0]})
+        ph_L = lamps(v[inview], R, np.array(c[6])).astype(np.float64)
+        ph_P = v[inview].astype(np.float64) @ R + np.array(c[6], np.float64)
+
+        def ph_van(x, b):
+            return (1.0 - min(max(b[1] * (x ** b[2] if b[2] > 0 else 1.0) + b[0], 0.0), 1.0)) ** 2.2
+
+        ph_hit = np.zeros(len(ph_P), bool)
+        ph_n = 0
+        for ph_k in range(len(ph_L)):
+            ph_b = ph_L[ph_k, 3, :3]
+            ph_takes = (ph_b[2] > 0 and min(max(ph_b[1] + ph_b[0], 0.0), 1.0) > min(max(ph_b[0], 0.0), 1.0)
+                        and ph_van(1.0, ph_b) < 1.0 / 255.0 and ph_van(ph_a, ph_b) <= (1.0 - ph_a * ph_a) ** 1.1)
+            ph_in = np.linalg.norm(ph_P - ph_L[ph_k, 0, :3], axis=1) < ph_L[ph_k, 0, 3]
+            ph_n += int(ph_takes and ph_in.any())
+            if ph_takes:
+                ph_hit |= ph_in
+        print('precipview case %s: the physical falloff, %d lamps reaching the view take it; in-view share inside such a lamp\'s '
+              'reach %.3f (want >= 0.2)' % (c[0], ph_n, want(c[0], 'physical falloff reach share', float(ph_hit.mean()), 0.2)))
     with open(os.path.join(d, 'uni.txt'), 'w', newline='\n') as f:
         for key, val in U.items():
             f.write('%s %s\n' % (key, fl(val)))
@@ -820,3 +871,8 @@ for ci, c in enumerate(CASES):
           % (c[0], n_all, first, n, int(inview.sum()), tw, th, cols, rows, zd))
 with open(os.path.join(OUT, 'cases.txt'), 'w', newline='\n') as f:
     f.write('\n'.join(names) + '\n')
+print('precipview prep: %d stated shares checked, %d outside their range' % (PREP_N[0], len(PREP_MISS)))
+for m in PREP_MISS:
+    print('PRECIPVIEW prep FAIL: ' + m)
+if PREP_MISS:
+    sys.exit(1)

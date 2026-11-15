@@ -359,7 +359,9 @@
 // case, appended, element 33: rain_near_restir (rain_near_shadow's run, lamps, slots and cubes, volTerms 3) drawn through
 // pAllOn (the route all-on program) with cellRestirOn 1, cellRestirSize (w, h, 0, 0) of the gate's frame and a w x h RG32F
 // cellRestir whose depth is one D0 for every texel (the prep picks the in-view particles' median depth and prints the share
-// of in-view particles within its tolerance: want 0.1 - 0.8) and whose ratio is a smooth field in 0.1 - 0.9 (two low
+// of in-view particles within its tolerance: want 0.1 - 0.8; VKFAR12 11-15, the bar kept: one D0 read 0.070, so half the
+// in-view particles, seed 33, now stamp their own depth on 7 x 7 texels round their centre, far first, D0 elsewhere, and the
+// prep fails the job when any share it prints is outside its stated range) and whose ratio is a smooth field in 0.1 - 0.9 (two low
 // sines, no texel-sized steps). The same verdict (depth EXACT, colour inside the bar), reference checks, repeat clause, reds
 // 64 / 128 as the lit cases; the globals check and Vulkan's globals mirror as rain_near_shadow. The case must also show
 // (else the gate fails): GL with cellRestirOn 0 differs on >= 1000 covered samples (the ratio seen); cellRestirOn,
@@ -374,6 +376,25 @@
 // cubes compiled in (cellShadow active: WW_CELL_RESTIR_CUBES_RED), cellRestirOn 1 with no RG32F buffer on GL's unit. The
 // closed list counts cellRestir as a sampler slot and cellRestirSize as read. Census after: route default 0 / 0, route
 // all-on 1 / 1 (refusal 1 and both input lines gone, the physical falloff left).
+// The lamps' physical falloff (L8 route lift 4, VKFAR12 11-15; bar set before its first run, never widened): cellLightPhys.x 1
+// (WW_CELL_LIGHT_PHYS 1, lightphys.h Physical; the all-on route) makes cellRadial return cellPhysFalloff( the game's value,
+// x = d / r, r, the curve ) = k saturate( 1 - x^4 )^2 / ( x^2 + s^2 ), k fitting the game's curve at x = the anchor
+// (cellLightPhys.y), s the source fraction (cellLightPhys.z); a curve that is no falloff keeps the game's. One case, appended,
+// element 34: rain_near_phys (rain_near_restir's run, lamps, slots, cubes and ReSTIR fixture, volTerms 3, drawn through pAllOn:
+// the program the all-on route links) with the app's Physical values: cellLightPhys (1, 0.38164, 0.3, 0) (kAnchor,
+// kSourceFraction, no advanced numerator) and cellLightPhysB (0.05, 0, 0, 0) (kAdvMinMetres, no area, no red). The prep prints
+// the share of in-view particles inside a lamp's reach whose curve takes the physical falloff (GL's own test: a falloff, and
+// not brighter at the anchor than 1 - a^2 to the 1.1; want >= 0.2, checked by the prep). The same verdict (depth EXACT, colour
+// inside the bar), reference checks, repeat clause and lift 3's ReSTIR checks as rain_near_restir. The case must also show
+// (else the gate fails): GL with cellLightPhys (0, 0, 0, 0) differs on >= 1000 covered samples (the falloff seen, drawGl mode
+// 48); cellLightPhys and cellLightPhysB found in GL's program; cellLightPhys.x and .y packed non-zero. Reds, each must FAIL in
+// rain_near_phys: 17592186044416 the falloff off (the packed cellLightPhys.x 0); 35184372088832 the anchor and the source
+// fraction swapped (the packed cellLightPhys .y / .z); 70368744177664 the falloff's red bit 1 packed (cellLightPhysB.z 1: k = 1).
+// Lifted with it: precipLitWhys' falloff refusal for a ReSTIR run (the judged twin); refused by name instead: the physical
+// falloff in a run without GL's ReSTIR variant (the plain lit twin, not judged here), the advanced falloff (cellLightPhys.x >
+// 1.5), a falloff red (cellLightPhysB.z non-zero). Census after: route default 0 / 0, route all-on 0 / 0 (the falloff refusal
+// gone; the census' own all-on values (1, 0, 0, 0) only switch the row). The all-on totals are printed, not judged: at 0 / 0
+// no red reads them, the old census red stays the closed-list red of lift 2.
 #define main fxview_main
 #include "fxview.cpp"
 #undef main
@@ -760,6 +781,11 @@ struct Job
 			buf = buf || b.name == "cellRestir";
 		const auto it = uni.find( "cellRestirOn" );
 		return lit && buf && it != uni.end() && !it->second.empty() && it->second[0] != 0.0;
+	}
+	bool phys() const  // L8 route lift 4: the lamps' physical falloff (cellLightPhys.x 1) in GL's ReSTIR variant
+	{
+		const auto it = uni.find( "cellLightPhys" );
+		return restir() && lamps() && it != uni.end() && it->second.size() == 4 && it->second[0] > 0.5f && it->second[0] < 1.5f;
 	}
 	bool amb() const  // L8 term 2 (VKFAR5): volTerms' ambient bit (8)
 	{
@@ -1169,7 +1195,7 @@ int main( int argc, char ** argv )
 	};
 	GLuint vao = 0;
 	genVertexArrays( 1, &vao );
-	constexpr int kCases = 30;
+	constexpr int kCases = 31;
 	static char twinKeys[kCases], normKeys[kCases];  // one atlas twin a case (the atlases' sizes differ), one normal-map twin a case
 	static char terrKeys[kCases];  // L8 terrain air: airTerr's twin a case
 	static char envKeys[kCases];  // L8 term 2: volEnvHist's twin a case
@@ -1234,7 +1260,7 @@ int main( int argc, char ** argv )
 		const char * name;
 		long long red;  // past bit 30 from L8 term 7 on
 		bool seen;
-	} reds[42] = { { "cull (radius 0)", 1, false }, { "corners (the strip's last two swapped)", 2, false }, { "near fade (dropped)", 4, false },
+	} reds[45] = { { "cull (radius 0)", 1, false }, { "corners (the strip's last two swapped)", 2, false }, { "near fade (dropped)", 4, false },
 		{ "air (dropped)", 8, false }, { "look (dropped: the plain pipelines)", 16, false }, { "atlas (dropped: the zero texture)", 32, false },
 		{ "light (dropped)", 128, false }, { "lamps' lights (dropped: the zero texel buffer)", 256, false },
 		{ "cluster's globals (dropped: b0 zero)", 512, false }, { "cluster lists (dropped: the zero texel buffer)", 1024, false },
@@ -1253,7 +1279,10 @@ int main( int argc, char ** argv )
 		{ "terrain map (dropped: the zero texture)", 68719476736LL, false }, { "contact map (dropped: the zero texture)", 137438953472LL, false },
 		{ "composition (off: the packed ussOn 0)", 274877906944LL, false }, { "contact lookup (axes swapped: ussContactInvSize)", 549755813888LL, false },
 		{ "ReSTIR ratio (dropped: the zero texel buffer)", 1099511627776LL, false }, { "ReSTIR ratio (off: the packed cellRestirOn 0)", 2199023255552LL, false },
-		{ "ReSTIR size (axes swapped: cellRestirSize)", 4398046511104LL, false }, { "ReSTIR block (not repacked)", 8796093022208LL, false } };
+		{ "ReSTIR size (axes swapped: cellRestirSize)", 4398046511104LL, false }, { "ReSTIR block (not repacked)", 8796093022208LL, false },
+		{ "falloff (off: the packed cellLightPhys.x 0)", 17592186044416LL, false },
+		{ "falloff's anchor and source fraction (swapped: cellLightPhys .y / .z)", 35184372088832LL, false },
+		{ "falloff's red bit 1 (packed: cellLightPhysB.z 1)", 70368744177664LL, false } };
 	using TexBufferFn = void( WINAPI * )( GLenum, GLenum, GLuint );
 	const auto texBuffer = reinterpret_cast<TexBufferFn>( wglGetProcAddress( "glTexBuffer" ) );
 	if ( !texBuffer )
@@ -1629,6 +1658,9 @@ int main( int argc, char ** argv )
 					u1i( pJob, "ussContactOn", 0 );
 				} else if ( mode == 47 ) {  // L8 route lift 3: the ReSTIR ratio off (cellRestirOn 0)
 					u1i( pJob, "cellRestirOn", 0 );
+				} else if ( mode == 48 ) {  // L8 route lift 4: the falloff off (cellLightPhys 0: the game's curve)
+					const float off[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+					f.uniform4fv( f.getUniformLocation( pJob, "cellLightPhys" ), 1, off );
 				} else if ( mode == 6 ) {  // L8 term 3: the local law off (vpSun.w 0)
 					const float off[4] = { 0.5f, 0.4f, 0.3f, 0.0f };
 					f.uniform4fv( f.getUniformLocation( pJob, "vpSun" ), 1, off );
@@ -1797,6 +1829,16 @@ int main( int argc, char ** argv )
 					"missing from GL's program: %s; cellShadow in GL's program: %s (want no)\n", j.name.c_str(), noRs.flips, noRs.covered,
 					rmiss.empty() ? "none" : rmiss.c_str(), cubesIn ? "yes" : "no" );
 				ok = ok && noRs.flips >= 1000 && rmiss.empty() && !cubesIn;
+			}
+			if ( j.phys() ) {  // L8 route lift 4's seen-checks (header): the falloff seen, its names found
+				const Verdict noPhys = judge( bg, drawGl( 48 ), refA, refB, refB );
+				std::string pmiss;
+				for ( const char * nm : { "cellLightPhys", "cellLightPhysB" } )
+					if ( f.getUniformLocation( pJob, nm ) < 0 )
+						pmiss += std::string( pmiss.empty() ? "" : ", " ) + nm;
+				std::printf( "PRECIPVIEW %s falloff checks: GL with cellLightPhys 0 differs %zu of %zu covered samples (want >= 1000); falloff names "
+					"missing from GL's program: %s\n", j.name.c_str(), noPhys.flips, noPhys.covered, pmiss.empty() ? "none" : pmiss.c_str() );
+				ok = ok && noPhys.flips >= 1000 && pmiss.empty();
 			}
 			if ( j.amb() ) {  // L8 term 2's seen-checks (header): the ambient seen, its names found, the volumes / the keep seen
 				const Verdict noAmb = judge( bg, drawGl( 3 ), refA, refB, refB );
@@ -2239,6 +2281,18 @@ int main( int argc, char ** argv )
 							return false;
 					}
 				}
+				if ( checkSeed && j.phys() ) {  // packed, not zero (the falloff bar: .x and .y)
+					const int at = precipAt( WwVkPresent::kT_preciplitcs, int( std::size( WwVkPresent::kT_preciplitcs ) ), "cellLightPhys" );
+					bool x = false, y = false;
+					for ( int b = 0; b < 4 && at >= 0; b++ ) {
+						x = x || t.cs[at + b] != 0;
+						y = y || t.cs[at + 4 + b] != 0;
+					}
+					std::printf( "PRECIPVIEW %s falloff packed: cellLightPhys.x %s, .y %s\n", j.name.c_str(), x ? "non-zero" : "zero or absent",
+						y ? "non-zero" : "zero or absent" );
+					if ( !x || !y )
+						return false;
+				}
 				if ( checkSeed ) {  // the sun's inputs packed, not zero (header)
 					std::string zero;
 					for ( const char * nm : { "cellDirColor", "cellDirTo", "cellRow", "volPhase", "volGi", "cellLightCount" } ) {
@@ -2649,7 +2703,8 @@ int main( int argc, char ** argv )
 				|| ( ( r.red == 4294967296LL || r.red == 8589934592LL || r.red == 17179869184LL ) && !j.interior() )
 				|| ( r.red == 34359738368LL && !j.frameUbo() )
 				|| ( ( r.red == 68719476736LL || r.red == 137438953472LL || r.red == 274877906944LL || r.red == 549755813888LL ) && !j.uss() )
-				|| ( ( r.red == 1099511627776LL || r.red == 2199023255552LL || r.red == 4398046511104LL || r.red == 8796093022208LL ) && !j.restir() ) )
+				|| ( ( r.red == 1099511627776LL || r.red == 2199023255552LL || r.red == 4398046511104LL || r.red == 8796093022208LL ) && !j.restir() )
+				|| ( ( r.red == 17592186044416LL || r.red == 35184372088832LL || r.red == 70368744177664LL ) && !j.phys() ) )
 				continue;  // a plain run has no look to drop, a case with no atlas no atlas, an unlit one no light, no lamps no lights
 			std::vector<std::uint16_t> a, b;
 			if ( !runVk( r.red, a, b, false ) ) {
@@ -2680,7 +2735,8 @@ int main( int argc, char ** argv )
 				|| r.red == 268435456 || r.red == 536870912LL || r.red == 1073741824LL || r.red == 2147483648LL || r.red == 4294967296LL
 				|| r.red == 8589934592LL || r.red == 17179869184LL || r.red == 34359738368LL
 				|| r.red == 68719476736LL || r.red == 137438953472LL || r.red == 274877906944LL || r.red == 549755813888LL
-				|| r.red == 1099511627776LL || r.red == 2199023255552LL || r.red == 4398046511104LL || r.red == 8796093022208LL ) && v.ok() ) {  // the cluster case must see its b0 and its lists dropped
+				|| r.red == 1099511627776LL || r.red == 2199023255552LL || r.red == 4398046511104LL || r.red == 8796093022208LL
+				|| r.red == 17592186044416LL || r.red == 35184372088832LL || r.red == 70368744177664LL ) && v.ok() ) {  // the cluster case must see its b0 and its lists dropped
 				std::printf( "PRECIPVIEW %s red %s PASSED: the case does not see it\n", j.name.c_str(), r.name );
 				ok = false;
 			}
