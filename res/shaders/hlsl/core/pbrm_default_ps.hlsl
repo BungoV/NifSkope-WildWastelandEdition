@@ -549,7 +549,9 @@ void frag_main()
 #ifdef WW_CELLLIGHTS
 	cellEmitOut = (float4)( 0.0 );
 #endif
-	float2 offset = texCoord.xy * uvScale + uvOffset;
+	/* lane VKWATER3: unfused (GL's order): NV's Vulkan compiler fused it, a last-bit uv moved the base map's mip LOD one
+	 * 1/256 step (pbrmcell rt, 0.00439) */
+	precise float2 offset = texCoord.xy * uvScale + uvOffset;
 
 	// --- base color / opacity ---
 	float3 base = pbrBaseColor;
