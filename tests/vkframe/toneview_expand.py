@@ -31,6 +31,12 @@ for name, rel in (('cell_hdr.vert.glsl', ('res', 'shaders', 'cell_hdr.vert')),
                       'game_doflens_gather', 'game_doflens', 'game_taa_mv', 'game_mblur', 'game_dofmblur',
                       'game_doflensmblur', 'cell_objblur_vec', 'cell_objblur_tile', 'cell_objblur', 'game_taa_copy')):
     src = S.expand(os.path.join(TREE, *rel))
+    if name == 'cell_hdr.frag.glsl' and os.environ.get('TONEVIEW_RED') == 'root':
+        # lane BATCH1120 red: GL's reference on the old -sqrt root (cellCurveInv), Vulkan on the shipped +sqrt one: must FAIL
+        new = '( -b + sqrt( max( b * b - 4.0 * a * c, 0.0 ) ) )'
+        assert src.count(new) == 1, 'red root: the +sqrt root is not in cell_hdr.frag once'
+        src = src.replace(new, '( -b - sqrt( max( b * b - 4.0 * a * c, 0.0 ) ) )')
+        print('RED root: cell_hdr.frag on the -sqrt root')
     with open(os.path.join(out, name), 'w', newline='\n', encoding='latin-1') as f:
         f.write(src)
     print('expanded %s: %d lines' % (name, src.count('\n') + 1))

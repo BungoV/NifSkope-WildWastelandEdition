@@ -172,7 +172,9 @@ float cellCurveInv( float y )
 	float a = 0.15 * ( yp - 1.0 ), b = 0.5 * yp - 0.05, c = 0.06 * yp - 0.2 * E;
 	if ( abs( a ) < 1e-7 )
 		return max( -c / b, 0.0 );
-	return max( ( -b - sqrt( max( b * b - 4.0 * a * c, 0.0 ) ) ) / ( 2.0 * a ), 0.0 );
+	// lane BATCH1120: the +sqrt root, the curve's rising branch (input < 1): k is continuous over every backdrop. The -sqrt
+	// root gave u 0 (the glow kept whole) below backdrop 0.80415 and jumped to the far root there (notes/batch1119/shoulder3.py)
+	return max( ( -b + sqrt( max( b * b - 4.0 * a * c, 0.0 ) ) ) / ( 2.0 * a ), 0.0 );
 }
 
 /* lane GLAREBLOW2: the share of the glow's response from black (mode 3's IS(bloom) - IS(0)) that the curve gives at

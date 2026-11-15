@@ -168,7 +168,8 @@ float F4FX_CellCurveInv( float y, F4FX_ImageSpace p )
 	float a = 0.15f * ( yp - 1.0f ), b = 0.5f * yp - 0.05f, c = 0.06f * yp - 0.2f * E;
 	if ( abs( a ) < 1e-7f )
 		return max( -c / b, 0.0f );
-	return max( ( -b - sqrt( max( b * b - 4.0f * a * c, 0.0f ) ) ) / ( 2.0f * a ), 0.0f );
+	// lane BATCH1120: the +sqrt root (the rising branch, input < 1), continuous over every backdrop; -sqrt jumped at 0.80415
+	return max( ( -b + sqrt( max( b * b - 4.0f * a * c, 0.0f ) ) ) / ( 2.0f * a ), 0.0f );
 }
 
 // the share of the glow's response from black the curve gives at the backdrop d's place on it, per channel

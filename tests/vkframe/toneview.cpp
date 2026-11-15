@@ -1258,7 +1258,8 @@ int main( int argc, char ** argv )
 					/* Refused, not widened (11-14 run: "both add B" 1 sample, G 76 vs 255). Mode 3's cellGlowShoulder:
 					 * cellCurveInv's a = 0.15 (yp - 1) changes sign at y = W(inf) (backdrop 0.80415 at E 0.4); there the
 					 * root it takes jumps from 0 (k 1) to the far one (k 0). The backdrop is BOUND to one fp16 step (0.00049),
-					 * so a mean within one step of 0.80415 can land either side (notes/vkfar2/shoulder2.py). */
+					 * so a mean within one step of 0.80415 can land either side (notes/vkfar2/shoulder2.py).
+					 * Lane BATCH1120: cellCurveInv now takes the +sqrt root (continuous, no jump); this print stays for a red. */
 					size_t off = 0;
 					for ( size_t i = 0; i < vk.size(); i++ )
 						off += std::abs( int( vk[i] ) - int( ref[i] ) ) > 1;

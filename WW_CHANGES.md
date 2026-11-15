@@ -1,3 +1,12 @@
+## BATCH1120 (2026-11-16): the glow shoulder acts smoothly over darker backgrounds
+
+Changed, not checked live. Offline: tests/vkframe/toneview.sh `BOTH both add B` (see notes/batch1120/next.md).
+
+- The glow shoulder (the vanilla curve's mode 3) now acts smoothly over backgrounds darker than 0.80. Before, it did
+  nothing below 0.80415 and jumped at that value: the curve's inverse took the wrong root (GL, readable HLSL and the
+  Vulkan tone pass all changed the same way).
+- Gate: toneview's bar is unchanged; a red (TONEVIEW_RED=root: GL's reference on the old root) must FAIL.
+
 ## VKFAR11 (2026-11-15): rain and snow on Vulkan keep the lamps' shadows in the ReSTIR route (L8 route lift 3)
 
 Changed, not built, not checked live. Offline: tests/vkframe/precipview.sh passes (GATE OK).
