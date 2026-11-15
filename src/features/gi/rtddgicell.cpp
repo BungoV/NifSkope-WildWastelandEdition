@@ -15,6 +15,8 @@
 #include "features/gi/rttracesetrule.h"   // lane AIRPERF1 r5: warmUpdates
 #include "features/gi/bakert.h"          // lane VKCOMPUTE1: asyncQueue
 #include "features/gi/vkasyncrule.h"     // lane VKCOMPUTE1: GL's wait placement
+#include "features/vkframe/vkpresent.h"   // lane VKFAR3: the atlas imported on the present device
+#include "features/vkframe/vkfarcards.h"  // lane VKFAR3: farTexelBuffer (the cascades' buffer on the present device)
 #include <chrono>
 #include "version.h"
 #include "wwswitch.h"
@@ -24,6 +26,8 @@
 #include "features/clouds/cloudvol.h"   // SKYLIGHT1 round 2: the deck on the miss sky
 #include "gl/celllights.h"
 #include "gl/cellunits.h"
+#include "features/vkframe/vkobjpipe.h"	// lane VKWATER3: the cascades' atlas as a store (objBlTexelStore)
+#include "features/near/cellbindless.h"	// WwBl::vkShadeOn
 #include "gl/celluniform.h"	// lane PERFFIX1: the volume's unit bound without asking the driver
 #include "features/reflections/cellssr.h"      // lane RESTIRDI1: wwCellAoTargets (the shared opaque pass ReSTIR reads)
 #include "gl/glscene.h"
@@ -526,6 +530,7 @@ struct Combined
 	GLuint buf = 0, tex = 0;
 	size_t bytes = 0;
 	bool attach = false;
+	bool shared = false, shareWanted = false;   // lane VKFAR3: buf / tex are a farTexelBuffer on the present device
 	int count = 0;
 	int base[rtddgi::kMaxCascades] = {}, nP[rtddgi::kMaxCascades] = {};
 	// lane VKCOMPUTE1: each cascade's origin / step / dims at its last copy (the tiles' own; a later step may scroll)
@@ -533,6 +538,8 @@ struct Combined
 	GLint dims[4 * rtddgi::kMaxCascades] = {};
 	double copyMs = 0;
 	qint64 copies = 0;
+	bool stored = false;   // lane VKWATER3: buf is a store (the view on Vulkan: the cell twins' RT GI variant reads it in place)
+	bool storeRefused = false;   // the device refused the store while the view is on (asked again once it went off)
 };
 
 Combined & combined()
@@ -648,6 +655,9 @@ void freeGl( Cell & c, Renderer * r )
 	c.interop = c.glRead = false;
 	c.fresh = false;
 	c.vk.reset();
+	// lane VKFAR3: the present device's import of the same memory (none: returns at once); the drop idles the device
+	if ( const double ms = WwVkPresent::ddgiAtlasDrop( &c ); ms >= 0.0 )
+		say( c.tag + QStringLiteral( "vk ddgi: the import dropped (%1 ms, the present device idled)" ).arg( ms, 0, 'f', 2 ) );
 }
 
 //! the volume and its GL objects (GL first: its import holds the device's memory)
@@ -859,6 +869,45 @@ bool importShare( Cell & c, Renderer * r, RtDdgiLive & L, QString * why )
 	c.interop = true;
 	c.glRead = false;
 	return true;
+}
+
+/*! lane VKFAR3 (row A1): the atlas on the present device too (vkddgi.inc), for the passes on the view that read the volume.
+ *  Its own ddgiGpuShare: importShare closed GL's handles. The semaphore handles go unused: the present device's readers are
+ *  ordered through GL's crossings (vkpresent.h DdgiAtlasShare). Red WW_VKVIEW_DDGI_RED=1: no import */
+void vkDdgiImport( Cell & c, RtDdgiLive & L )
+{
+	if ( !WwVkPresent::shareKept( "WW_VKVIEW_DDGI_RED" ) ) {
+		WwVkPresent::ddgiAtlasDrop( &c );
+		return;
+	}
+	// with cascades (the preset default) GL and the view read the cascades' buffer (combinedShare), not this atlas
+	if ( rtddgiCellShaderDefine() && rtddgiCellCascades() > 1 ) {
+		WwVkPresent::ddgiAtlasDrop( &c );
+		return;
+	}
+	bakert::DdgiGpuShare sh;
+	if ( !bakert::ddgiGpuShare( L.session(), &sh ) ) {
+		say( c.tag + QStringLiteral( "vk ddgi: not imported (%1)" ).arg( QString::fromStdString( sh.why ) ) );
+		return;
+	}
+	bakert::ddgiGpuCloseHandle( sh.vkDone );
+	bakert::ddgiGpuCloseHandle( sh.glDone );
+	WwVkPresent::DdgiAtlasShare in;
+	in.memory = sh.memory;
+	in.memorySize = sh.memorySize;
+	in.bufferSize = sh.bufferSize;
+	in.atlasBytes = sh.atlasBytes;
+	in.usage = sh.usage;
+	in.memoryType = sh.memoryType;
+	in.dedicated = sh.dedicated;
+	std::memcpy( in.deviceUuid, sh.deviceUuid, 16 );
+	std::memcpy( in.driverUuid, sh.driverUuid, 16 );
+	std::string why;
+	if ( WwVkPresent::ddgiAtlasImport( &c, in, why ) )   // closes in.memory
+		say( c.tag + QStringLiteral( "vk ddgi: the atlas imported on the present device (%1 MB, %2 texels, a view, no copy)" )
+			.arg( double( sh.atlasBytes ) / 1048576.0, 0, 'f', 1 ).arg( qulonglong( sh.atlasBytes / 16 ) ) );
+	else
+		say( c.tag + QStringLiteral( "vk ddgi: not imported (%1)" ).arg( QString::fromStdString( why ) ) );
 }
 
 //! the readback path (M2's, the red): the tiles of the last step into the texture buffer, the probes' texels when moved
@@ -2505,6 +2554,8 @@ static void volumeFrame( Scene * scene, Cell & c, const CellSpec * spIn, bool du
 					QString why;
 					if ( !importShare( c, r, b->live, &why ) )
 						c.interopWhy = QStringLiteral( "interop refused: " ) + why;
+					else
+						vkDdgiImport( c, b->live );   // lane VKFAR3
 				} else {
 					c.interopWhy = QStringLiteral( "WW_CELL_RTDDGI_RED=readback" );
 				}
@@ -2649,12 +2700,43 @@ static void freeCombined( Renderer * r )
 {
 	Combined & K = combined();
 	if ( r && K.owner == r ) {
-		if ( K.tex )
-			r->fn->glDeleteTextures( 1, &K.tex );
-		if ( K.buf )
-			r->fn->glDeleteBuffers( 1, &K.buf );
+		if ( K.shared )
+			WwVkPresent::farTexelBufferDrop( reinterpret_cast<std::uintptr_t>( &K ) );   // its GL names too
+		else {
+			if ( K.tex )
+				r->fn->glDeleteTextures( 1, &K.tex );
+			if ( K.stored )
+				WwVkPresent::objBlTexelStoreDrop( K.buf );
+			else if ( K.buf )
+				r->fn->glDeleteBuffers( 1, &K.buf );
+		}
 	}
 	K = Combined();
+}
+
+/*! lane VKFAR3 (row A1): with the view on Vulkan the cascades' buffer is made on the present device (farTexelBuffer, keyed
+ *  by &K), so passes on the view read GL's copies in place (WwVkPresent::ddgiAtlasView( &K )). GL's copies are GL work:
+ *  a reader behind GL's crossing sees them. Decided again when the switch flips or the buffer grows; a refusal keeps GL's
+ *  own buffer until then. Red WW_VKVIEW_DDGI_RED=1 */
+static bool combinedShare( Renderer * r, Combined & K, size_t bytes )
+{
+	unsigned b = 0, tx = 0;
+	std::string why;
+	if ( !WwVkPresent::farTexelBuffer( reinterpret_cast<std::uintptr_t>( &K ), GL_RGBA32F, bytes, b, tx, why ) ) {
+		say( QStringLiteral( "rtddgi cell: vk ddgi: the cascades' buffer stays GL's (%1)" ).arg( QString::fromStdString( why ) ) );
+		K.buf = K.tex = 0;   // a grown one was freed before the make failed
+		K.shared = false;
+		K.bytes = 0;
+		return false;
+	}
+	K.buf = b;
+	K.tex = tx;   // farTexelBuffer's GL_TEXTURE_BUFFER view of b, already attached
+	K.owner = r;
+	K.shared = true;
+	K.bytes = bytes;
+	K.attach = false;
+	say( QStringLiteral( "rtddgi cell: vk ddgi: the cascades' buffer on the present device (%1 MB)" ).arg( double( bytes ) / 1048576.0, 0, 'f', 1 ) );
+	return true;
 }
 
 /*! RTXCASCADE1: the ready cascades (from 0, each live with tiles in its own buffer in this context) copied into the one
@@ -2680,6 +2762,12 @@ static void combinedUpdate( Renderer * r, int n, const void * nif )
 		return;
 	auto fn = r->fn;
 	bool relayout = false;
+	const bool share = WwVkPresent::shareKept( "WW_VKVIEW_DDGI_RED" );   // lane VKFAR3: before the layout (a free resets it)
+	if ( K.buf && share != K.shareWanted ) {
+		freeCombined( r );
+		relayout = true;
+	}
+	K.shareWanted = share;
 	size_t texels = 0;
 	for ( int l = 0; l < m; l++ ) {
 		relayout = relayout || K.base[l] != int( texels ) || K.nP[l] != nP[l];
@@ -2688,18 +2776,47 @@ static void combinedUpdate( Renderer * r, int n, const void * nif )
 		texels += size_t( nP[l] ) * kAtlasTexels;
 	}
 	const size_t bytes = texels * 16;
-	if ( !K.buf ) {
-		fn->glGenBuffers( 1, &K.buf );
-		fn->glGenTextures( 1, &K.tex );
-		K.owner = r;
+	/* lane VKWATER3 G4: while the cell shapes draw on Vulkan the atlas is a store (exported Vulkan memory GL copies into),
+	 * which the cell twins' RT GI variant reads in place; a store the device dropped, or the view back on GL: GL's own again.
+	 * BATCH1114: VKFAR3's shared buffer (below) comes first; a store only while the buffer is not shared */
+	const bool shade = WwBl::vkShadeOn();
+	if ( K.stored && ( !shade || !WwVkPresent::objBlTexelStoreIs( K.buf ) ) ) {
+		WwVkPresent::objBlTexelStoreDrop( K.buf );
+		K.buf = 0;
+		K.bytes = 0;
+		K.stored = false;
 	}
 	QElapsedTimer t;
 	t.start();
-	if ( bytes > K.bytes ) {   // grows only: a smaller layout reads the front of it
-		fn->glBindBuffer( GL_COPY_WRITE_BUFFER, K.buf );
-		fn->glBufferData( GL_COPY_WRITE_BUFFER, GLsizeiptr( bytes ), nullptr, GL_DYNAMIC_COPY );
-		fn->glBindBuffer( GL_COPY_WRITE_BUFFER, 0 );
-		K.bytes = bytes;
+	if ( share && ( !K.buf || ( K.shared && bytes > K.bytes ) ) && combinedShare( r, K, bytes ) )
+		relayout = true;
+	if ( !K.buf ) {
+		fn->glGenBuffers( 1, &K.buf );
+		if ( !K.tex )
+			fn->glGenTextures( 1, &K.tex );
+		K.owner = r;
+		K.attach = true;
+		K.bytes = 0;
+	}
+	if ( !shade )
+		K.storeRefused = false;
+	const bool toStore = shade && !K.shared && !K.stored && !K.storeRefused && K.bytes > 0;   // the view went on: the atlas moves into a store
+	if ( !K.shared && ( bytes > K.bytes || toStore ) ) {   // grows only: a smaller layout reads the front of it
+		const size_t want = std::max( bytes, K.bytes );
+		const bool was = K.stored;
+		std::string storeWhy;
+		K.stored = shade && WwVkPresent::objBlTexelStore( K.buf, want, storeWhy );   // GL's own buffer goes into the store
+		K.storeRefused = shade && !K.stored;
+		if ( !K.stored ) {
+			if ( was ) {   // the old store stays the device's (its storage is immutable): GL takes a buffer of its own
+				WwVkPresent::objBlTexelStoreDrop( K.buf );
+				fn->glGenBuffers( 1, &K.buf );
+			}
+			fn->glBindBuffer( GL_COPY_WRITE_BUFFER, K.buf );
+			fn->glBufferData( GL_COPY_WRITE_BUFFER, GLsizeiptr( want ), nullptr, GL_DYNAMIC_COPY );
+			fn->glBindBuffer( GL_COPY_WRITE_BUFFER, 0 );
+		}
+		K.bytes = want;
 		K.attach = true;
 		relayout = true;
 	}
@@ -2992,6 +3109,21 @@ bool rtddgiCellReadUp( Scene * scene )
 bool rtddgiCellEmissiveTraced( Scene * scene )
 {
 	return rtddgiEmissiveRed() != 1 && rtddgiCellReadUp( scene );
+}
+
+const void * rtddgiCellVkAtlas( Scene * scene, unsigned * glBuf )
+{
+	if ( glBuf )
+		*glBuf = 0;
+	Renderer * r = scene ? scene->renderer : nullptr;
+	if ( !r || !rtddgiCellShaderDefine() || cell().nif != scene->nifModel )
+		return nullptr;
+	Combined & K = combined();
+	if ( !K.shared || K.owner != r || !K.tex || K.count <= 0 || !cascCell( 0 ).live )
+		return nullptr;
+	if ( glBuf )
+		*glBuf = K.buf;
+	return &K;
 }
 
 // lane INTGI1 (SSGIHO-INT): the densest read volume's smallest spacing (cascade 0 under the cascades), 0 when none is up

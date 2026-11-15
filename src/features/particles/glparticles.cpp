@@ -42,6 +42,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "features/exposure/cellhdr.h"	// lane SUNCELL1: the HDR frame's stencil
 #include "features/near/cellqueue.h"	// lane GPUFIX1
+#include "features/near/cellbindless.h"	// lane VKOBJ5: WwBl::vkPfxDraw
 #include "gl/cellunits.h"	// lane WATERFIX7: the soft-depth unit
 #include "gl/celllights.h"	// lane SUNCELL1: the cell effect law
 #include "features/lights/cellfxlit.h"	// lane SUNCELL1: a lit particle's placed lights
@@ -712,7 +713,10 @@ void Particles::drawShapes( NodeList * secondPass )
 		glGetIntegerv( GL_DEPTH_FUNC, &prevDepthFunc );
 		glDepthFunc( GL_ALWAYS );
 	}
-	scene->renderer->fn->glDrawArrays( GL_POINTS, 0, GLsizei( numVerts ) );
+	// lane VKOBJ5 (plan row G4 round 3): a particles_cell system on Vulkan (WW_VKOBJ_SHADE, the base variant; `vk objpfx:`)
+	if ( !( cellPfx && numVerts > 0 && WwBl::vkPfxDraw( prog, attrData[0], attrData[1], attrData[2],
+			attrData[3], attrData[4], std::size_t( numVerts ) ) ) )
+		scene->renderer->fn->glDrawArrays( GL_POINTS, 0, GLsizei( numVerts ) );
 	if ( vpAlways )
 		glDepthFunc( GLenum( prevDepthFunc ) );
 	if ( !scene->selecting )

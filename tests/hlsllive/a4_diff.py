@@ -9,7 +9,7 @@ then keeps GLSL for them); the old file is kept as programs_prea4.txt. Writes <s
 HLSLFIX2 shards: `--shard i/N` renders only the programs whose crc32(name) % N == i (one hidden context per process) and writes
 a4.shard<i>of<N>.txt + a4cache.shard<i>of<N>.txt (no a4.txt, no --apply); `--merge N` (no GL) joins the N parts in the serial
 order into a4.txt / a4cache.txt and then does --apply, so the files equal a serial run's byte for byte (tests/hlsllive/a4_shards.sh)."""
-import ctypes, json, os, sys, zlib
+import ctypes, json, os, re, sys, zlib
 import numpy as np
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -137,6 +137,7 @@ class Prog:
         except Exception:
             self.ssbos = []
         self.members = {}
+        self.mnames = {}
         for bname, bi, _sz, _bd in self.blocks:
             cnt = GLint()
             g('glGetActiveUniformBlockiv', None, GLuint, GLuint, GLenum, ctypes.POINTER(GLint))(p, bi, 0x8A42, ctypes.byref(cnt))
@@ -148,6 +149,11 @@ class Prog:
                 g('glGetActiveUniformsiv', None, GLuint, GLsizei, c_p, GLenum, c_p)(p, cnt.value, ctypes.cast(idx, c_p), tok, ctypes.cast(arr, c_p))
                 info[key] = list(arr)
             self.members[bname] = [tuple(info[k][j] for k in ('type', 'size', 'off', 'astride', 'mstride', 'rowmajor')) for j in range(cnt.value)]
+            # FO4MATCH1: member names, so A4_FORCE reaches a block member too (globalUniforms.projectionMatrix)
+            for j in range(cnt.value):
+                nm = cstr_buf()
+                g('glGetActiveUniformName', None, GLuint, GLuint, GLsizei, c_p, c_c)(p, idx[j], 512, None, nm)
+                self.mnames.setdefault(bname, []).append((nm.value.decode().rsplit('.', 1)[-1],) + self.members[bname][j])
 
     def has(self, tok):
         v = GLint(); g('glGetProgramiv', None, GLuint, GLenum, ctypes.POINTER(GLint))(self.p, tok, ctypes.byref(v)); return v.value
@@ -162,6 +168,29 @@ MODE = ''   # R6 coverage retry: '' random ints and bools | 'zero' all 0 | 'one'
 # program that random inputs never cover (a range test on a few ints, a depth-only output). <program> is the .prog name; a row
 # for the base name covers its define variants too. The row is part of the program's cache key.
 FIXTURE = ''
+# FO4MATCH1 11-14 (VKWATER3's real-switch seed): ints the app sets from a switch, at the values it really sets. A program holding
+# one gets one more sweep (MODE 'real'): every other int and bool 0, these at their real values; a FAIL there is the row's verdict.
+# With ints 0, fgMode was 0 and fgGround returned the sheet in every option: A4 could not tell the far-ground options apart.
+#   fgMode      src/features/far-ground/cellfarground.cpp uniforms(): d.gpu.ready = the program's option (its #define WW_FARGROUND)
+#   fgDecalsOn  same place: 1 (0 only under the red WW_CELL_FARGROUND_RED=nodecals)
+# A value is a number, or the name of a define read from the program's GLSL sources (`#define <name> <int>`).
+REAL_INTS = {'fgMode': 'WW_FARGROUND', 'fgDecalsOn': '1'}
+REALV = {}
+
+
+def real_values(unis, texts):
+    out = {}
+    for n, v in REAL_INTS.items():
+        if not any(u[0] == n for u in unis):
+            continue
+        if v.isdigit():
+            out[n] = int(v)
+            continue
+        m = [re.match(r'\s*#\s*define\s+' + v + r'\s+(\d+)\s*$', ln) for t in texts for ln in t.splitlines()]
+        m = [x for x in m if x]
+        if m:
+            out[n] = int(m[0].group(1))
+    return out
 
 
 def fixtures(tree):
@@ -213,6 +242,8 @@ def set_uniform(prog, name, loc, ty, size, seed, plant):
         a = r.integers(0, 2 if ty in BOOL_T else 3, n * size).astype(np.int32)   # a bool is 0 or 1 as the app sets it
         if MODE and ty in INT_T | BOOL_T and ty != 0x8B55:
             a[:] = 1 if MODE == 'one' else 0
+        if MODE == 'real' and name in REALV:
+            a[:] = REALV[name]
         if ty == 0x8B55:
             a[:] = np.tile(np.array([0, 0, SZ, SZ], dtype=np.int32), size)
         g('glUniform%div' % n, None, GLint, GLsizei, c_p)(loc, size, a.ctypes.data)
@@ -321,11 +352,16 @@ class Rig:
         self.tex = {}
         self.rows = {}
 
-    def ubo_for(self, name, size, seed, members=()):
+    def ubo_for(self, name, size, seed, members=(), named=()):
         # HLSLFIX2: the member layout is in the key; without it the first program to use a block name decided the int lanes for
         # every later one, so a verdict hung on render order (cell_volair AIRZONE+BOUNCE rows: EXACT serial, FAIL sharded)
         members = tuple(sorted(members))
-        k = (name, size, seed, MODE, members)
+        # FO4MATCH1: an a4fixtures.txt row or A4_FORCE pins a block member by name too, in both runs (globalUniforms'
+        # projectionMatrix: the soft fades read 1 / gl_FragCoord.w against it). The values are in the key.
+        force = dict(kv.split('=') for kv in FIXTURE.split(',') if kv)
+        force.update(kv.split('=') for kv in os.environ.get('A4_FORCE', '').split(',') if kv)
+        named = tuple(sorted(m for m in named if m[0].replace('[0]', '') in force))
+        k = (name, size, seed, MODE, members, named, tuple(force[m[0].replace('[0]', '')] for m in named))
         if k not in self.ubo:
             b = GLuint(); g('glGenBuffers', None, GLsizei, ctypes.POINTER(GLuint))(1, ctypes.byref(b))
             a = (rng_for(name, seed).random(max(size, 16) // 4 + 4) * 0.8 + 0.1).astype(np.float32)
@@ -346,6 +382,17 @@ class Rig:
                         for col in range(c):
                             for row in range(c):
                                 a[base + col * (mst // 4) + row] = (1.0 if col == row else 0.0) + (a[base + col * (mst // 4) + row] - 0.5) * 0.05
+            for mn, ty, sz, off, ast, mst, rowm in named:
+                v = force[mn.replace('[0]', '')].split(':')
+                base = off // 4
+                if ty in MAT_T and mst > 0 and len(v) == MAT_T[ty][0] * MAT_T[ty][1] and not rowm:   # column-major, ':'-joined
+                    c, rr = MAT_T[ty]
+                    for col in range(c):
+                        a[base + col * (mst // 4):base + col * (mst // 4) + rr] = [float(x) for x in v[col * rr:(col + 1) * rr]]
+                elif ty in FLOAT_T and len(v) == FLOAT_T[ty]:
+                    a[base:base + len(v)] = [float(x) for x in v]
+                elif (ty in INT_T or ty in BOOL_T) and len(v) == (INT_T.get(ty) or BOOL_T[ty]):
+                    iv[base:base + len(v)] = [int(x) for x in v]
             g('glBindBuffer', None, GLenum, GLuint)(0x8A11, b.value)
             g('glBufferData', None, GLenum, ctypes.c_ssize_t, c_p, GLenum)(0x8A11, a.nbytes, a.ctypes.data, 0x88E4)
             self.ubo[k] = b.value
@@ -469,7 +516,7 @@ class Rig:
         bu = g('glBindBufferBase', None, GLenum, GLuint, GLuint)
         for name, idx, size, bind in pr.blocks:
             ref_sz = next((s for n2, _i, s, _b in ref.blocks if n2 == name), size)
-            bu(0x8A11, bind, self.ubo_for(name, ref_sz, seed, ref.members.get(name, ())))
+            bu(0x8A11, bind, self.ubo_for(name, ref_sz, seed, ref.members.get(name, ()), ref.mnames.get(name, ())))
         for name, bind, size in ref.ssbos:   # HLSLFIX3: at the GLSL program's binding, so a SPIR-V one elsewhere reads nothing
             if bind == 12:
                 bu(0x90D2, bind, self.rows_for(seed))
@@ -689,6 +736,20 @@ def main():
                 verdict, detail, cov, o1, o2 = sweep()
                 if cov:
                     detail = ('ints and bools all ' + md + (' | ' + detail if detail else '')).strip()
+        global REALV
+        REALV = real_values(G.unis, [open(os.path.join(tree, byn.get(s_, 'res/shaders/' + s_)), encoding='utf-8', errors='replace').read()
+                                     for s_ in shaders])
+        if REALV and verdict in ('EXACT', 'BOUND'):
+            MODE = 'real'
+            rtag = 'real switches ' + ','.join('%s=%d' % kv for kv in sorted(REALV.items()))
+            rv, rd, rc, r1, r2 = sweep()
+            if rv == 'FAIL' or rv == 'SKIP':
+                verdict, detail, o1, o2 = rv, rtag + ' | ' + rd, r1, r2
+            else:
+                if rv == 'BOUND' and verdict == 'EXACT':
+                    verdict = 'BOUND'
+                detail = (detail + ' | ' if detail else '') + rtag + (' ' + rv + (' ' + rd if rd else '') if rc else ' covered no pixel')
+                cov += rc
         MODE = ''
         if verdict == 'FAIL' and os.environ.get('A4_DEBUG'):
             dd = np.nonzero(o1.view(np.uint32) != o2.view(np.uint32))[0]

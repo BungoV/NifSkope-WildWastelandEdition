@@ -92,6 +92,11 @@ static float3 cellDdgiD5 = float3( 0.0, 0.0, 1.0 );
 int cellDdgiIMin( int a, int b ) { return a < b ? a : b; }
 int cellDdgiIMax( int a, int b ) { return a > b ? a : b; }
 float cellDdgiSignNotZero( float v ) { return v >= 0.0 ? 1.0 : -1.0; }
+#ifdef CELL_DDGI_GL_ORDER
+// lane VKFAR4 (gihalf_vk.hlsl): an opaque pass-through (cellDdgiRed's top byte is 0) that keeps the compiler from
+// regrouping a product into the next add, so the read rounds in NV GL's order (skill ww-vk-image-pass-match)
+float cellDdgiKeep( float v ) { return asfloat( asuint( v ) ^ ( uint( cellDdgiRed ) >> 24 ) ); }
+#endif
 
 // MIRROR rtddgimath.h sampleTile (octEncode inside): probe p's tile at unit direction d, S = 8 irradiance, 16 distance
 float4 cellDdgiTile( int p, float3 d, int S )
@@ -105,8 +110,13 @@ float4 cellDdgiTile( int p, float3 d, int S )
 		v = ( 1.0 - abs( ou ) ) * cellDdgiSignNotZero( v );
 	}
 	int n = S - 2;
+#ifdef CELL_DDGI_GL_ORDER	// NV GL folds 1 ... - 0.5: fma( u 0.5 + 0.5, n, 0.5 ), not fma( u, 3, 3.5 )
+	float fx = mad( cellDdgiKeep( u * 0.5 + 0.5 ), float( n ), 0.5 );
+	float fy = mad( cellDdgiKeep( v * 0.5 + 0.5 ), float( n ), 0.5 );
+#else
 	float fx = 1.0 + ( u * 0.5 + 0.5 ) * float( n ) - 0.5;
 	float fy = 1.0 + ( v * 0.5 + 0.5 ) * float( n ) - 0.5;
+#endif
 	int x0 = cellDdgiIMin( cellDdgiIMax( int( floor( fx ) ), 0 ), S - 2 );
 	int y0 = cellDdgiIMin( cellDdgiIMax( int( floor( fy ) ), 0 ), S - 2 );
 	float ax = clamp( fx - float( x0 ), 0.0, 1.0 );
@@ -157,8 +167,18 @@ CellDdgiOut cellDdgiRead( float3 P, float3 n, float3 o, float3 d )
 	float v5sum = 0.0;
 #endif
 	float3 Pb = P;
+#ifdef CELL_DDGI_GL_ORDER	// NV GL: 0.75 ( O.w S.w )
+	if ( ( cellDdgiRed & 4 ) == 0 ) {
+		float3 bo = o * 0.8;	// before bn: the NV driver's fusing follows the SPIR-V order (gate 104 vs 139 differ)
+		float3 bn = n * 0.2;
+		float3 bt = bn + bo;
+		float bs = 0.75 * cellDdgiKeep( cellDdgiOrigin.w * cellDdgiStep.w );
+		Pb = Pb + bt * bs;
+	}
+#else
 	if ( ( cellDdgiRed & 4 ) == 0 )
 		Pb = Pb + ( n * 0.2 + o * 0.8 ) * ( 0.75 * cellDdgiOrigin.w * cellDdgiStep.w );
+#endif
 	float gx = ( Pb.x - cellDdgiOrigin.x ) / cellDdgiStep.x;
 	float gy = ( Pb.y - cellDdgiOrigin.y ) / cellDdgiStep.y;
 	float gz = ( Pb.z - cellDdgiOrigin.z ) / cellDdgiStep.z;

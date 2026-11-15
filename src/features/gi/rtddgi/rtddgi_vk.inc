@@ -406,7 +406,8 @@ void ddgiCopy( Dev & D, Buf & from, Buf & to, VkDeviceSize bytes, VkDeviceSize f
 
 /* M3: a device-local buffer whose memory GL can import (Win32 opaque handle, a dedicated allocation); false + why when
  * the device refuses (the caller then makes a plain one and the volume reads back) */
-bool ddgiMakeShared( Dev & D, VkDeviceSize size, VkBufferUsageFlags usage, Buf & out, VkDeviceSize * alloc, std::string * why )
+bool ddgiMakeShared( Dev & D, VkDeviceSize size, VkBufferUsageFlags usage, Buf & out, VkDeviceSize * alloc, std::string * why,
+	uint32_t * typeOut = nullptr )
 {
 	out = Buf();
 #ifdef _WIN32
@@ -445,12 +446,15 @@ bool ddgiMakeShared( Dev & D, VkDeviceSize size, VkBufferUsageFlags usage, Buf &
 	}
 	out.size = bi.size;
 	*alloc = mr.size;
+	if ( typeOut )
+		*typeOut = ti;
 	return true;
 #else
 	(void)D;
 	(void)size;
 	(void)usage;
 	(void)alloc;
+	(void)typeOut;
 	*why = "GL interop is written for Win32 handles only";
 	return false;
 #endif
@@ -505,6 +509,8 @@ struct DdgiGpuSession
 	Buf irrRb, distRb, probesRb, ageRb, raysRb;   // the host copies
 	Buf scratch, freshTpl;                         // M3: a scroll's copy through, and nP x (0, 0, 0, DDGI_FRESH)
 	VkDeviceSize offIrr = 0, offDist = 0, offProbes = 0, atlasBytes = 0, atlasAlloc = 0;
+	VkBufferUsageFlags atlasUsage = 0;             // lane VKFAR3: the shared atlas's buffer usage and memory type (an importer repeats them)
+	uint32_t atlasType = 0;
 	VkDescriptorSet set = VK_NULL_HANDLE;
 	VkQueryPool qp = VK_NULL_HANDLE;
 	VkCommandBuffer cb = VK_NULL_HANDLE;           // M3: the steps' own (a submit may run past its step)
@@ -751,12 +757,14 @@ DdgiGpuSession * ddgiGpuOpen( const DdgiGpuJob & job, DdgiGpuOut * out )
 	s->offProbes = s->offDist + VkDeviceSize( nProbes ) * kAtlasDist;
 	s->atlasBytes = s->offProbes + VkDeviceSize( nProbes ) * kAtlasProbe;
 	bool ok = true;
+	// lane VKFAR3: the shared atlas is also a UNIFORM_TEXEL_BUFFER, so the present device's import views it as GL does
+	s->atlasUsage = u | VK_BUFFER_USAGE_UNIFORM_TEXEL_BUFFER_BIT;
 	if ( job.share ) {
 		if ( !D.share )
 			s->shareWhy = "the bake device has no Win32 external memory / semaphore extensions";
 		else if ( !X.getMemWin32 || !X.getSemWin32 || !X.createSem )
 			s->shareWhy = "the export entry points did not load";
-		else if ( ddgiMakeShared( D, s->atlasBytes, u, s->atlas, &s->atlasAlloc, &s->shareWhy ) ) {
+		else if ( ddgiMakeShared( D, s->atlasBytes, s->atlasUsage, s->atlas, &s->atlasAlloc, &s->shareWhy, &s->atlasType ) ) {
 			s->vkDone = ddgiMakeSemaphore( D, X );
 			s->glDone = ddgiMakeSemaphore( D, X );
 			s->shared = s->vkDone && s->glDone;
@@ -1304,6 +1312,9 @@ bool ddgiGpuShare( DdgiGpuSession * s, DdgiGpuShare * out )
 	out->glDone = h2;
 	out->memorySize = uint64_t( s->atlasAlloc );
 	out->atlasBytes = uint64_t( s->atlasBytes );
+	out->bufferSize = uint64_t( s->atlas.size );
+	out->usage = uint32_t( s->atlasUsage );
+	out->memoryType = s->atlasType;
 	out->dedicated = true;
 	std::memcpy( out->deviceUuid, D.deviceUuid, 16 );
 	std::memcpy( out->driverUuid, D.driverUuid, 16 );

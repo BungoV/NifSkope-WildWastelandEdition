@@ -2,6 +2,12 @@
 // statement for statement). Shared, no bindings; it calls Restir_Rand / Restir_Seed / Restir_Lum (RestirCommon.hlsli).
 // Every function marked MIRROR is src/features/gi/restirgimath.h's function of that name; change all three or none.
 // Gate: tests/hlslmatch restirgi / restirgi_filt (this file inside restirgi.hlsl against restirgi.comp, byte for byte).
+// restirgi_common.glsl's header:
+// Lane RTEMIS1 part 2 (2026-11-06): ReSTIR GI's per-pixel rules, included by restirgi.comp after restir_common.glsl
+// (restirLum, restirRand, restirSeed) and compiled as C++ by tests/features/gi/restirgi_math (through
+// tests/restir_math/restir_shim.h and restirgi_shim.h). Every function marked MIRROR is src/features/gi/restirgimath.h's
+// function of that name; change both or neither. The subset restir_common.glsl keeps: no swizzles, no out/inout
+// parameters, struct returns, literals that read the same in both languages.
 #ifndef RESTIRGI_COMMON_HLSLI
 #define RESTIRGI_COMMON_HLSLI
 
@@ -122,7 +128,8 @@ int2 RestirGi_SnapTraced( int x, int y, uint f, int red )
 	return int2( x, y );
 }
 
-// MIRROR restirgimath.h bounceDir (the caller reads the mask's two bytes at RestirGi_StbnIndex dim 0 and 1; mask: it has one)
+// MIRROR restirgimath.h bounceDir (the caller reads the mask's two bytes at rgStbnIndex dim 0 and 1; mask: it has one)
+// (HLSL: rgStbnIndex = RestirGi_StbnIndex)
 float3 RestirGi_BounceDir( float3 n, int x, int y, int W, uint seed, uint f, int red, bool mask, uint m0, uint m1 )
 {
 	if ( ( red & RESTIRGI_BIT_WHITE ) != 0 ) {

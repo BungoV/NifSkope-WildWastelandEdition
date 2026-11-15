@@ -1,5 +1,7 @@
-// HLSL source of fo4_default.vert (vertex shader), lane HLSLSRC1 (notes/hlsltools/glsl2hlsl.py): one readable file for every
-// variant, the GLSL's comments, names and order kept. Loose uniforms are the LooseUniforms cbuffer (b31).
+// HLSL source of fo4_default.vert (vertex shader), the hand-kept twin of lane HLSLSRC1: notes/hlsltools/glsl2hlsl.py's
+// text, one readable file for every variant, the GLSL's comments, names and order kept. Loose uniforms are the
+// LooseUniforms cbuffer (b31). Hand part (FO4MATCH1), so g2h_mods.sh never regenerates it: under WW_BL_VERT this main
+// sets the draw's row (wwBlRow = wwDrawBase + the base instance) for the thin bindless twins, and farStream keeps t50.
 // variants: #if none (the loader's defines; res/shaders/hlsl/variants.txt lists the sets built)
 // profile: vs_6_0
 #include "CoreBindingsVk.hlsli"
@@ -280,6 +282,13 @@ struct SPIRV_Cross_Input
     float4 farInstBoxC : TEXCOORD14;
     float4 farInstBoxE : TEXCOORD15;
 #endif
+#if defined(WW_BL_VERT)
+#ifdef __spirv__
+    [[vk::builtin("BaseInstance")]] uint wwBaseInstance : BASEINSTANCE;	// GL_ARB_shader_draw_parameters gl_BaseInstanceARB
+#else
+    uint wwBaseInstance : SV_StartInstanceLocation;	// SM 6.8 (Fusion Shaders)
+#endif
+#endif
 };
 
 struct SPIRV_Cross_Output
@@ -299,11 +308,18 @@ struct SPIRV_Cross_Output
 #if defined(WW_FAR_SPLAT)
     WW_LOC(16) nointerpolation float farSplatA : TEXCOORD16;
 #endif
+#if defined(WW_BL_VERT)
+    WW_LOC(16) nointerpolation uint wwBlRow : TEXCOORD16;	// the draw's row, flat to the pixel stage (no far splat here)
+#endif
     precise float4 gl_Position : SV_Position;
 };
 
 SPIRV_Cross_Output main(SPIRV_Cross_Input stage_input)
 {
+#if defined(WW_BL_VERT)
+    // lane BINDLESSMDI1: the row once per vertex, so a multi-draw's fragments read their own draw's maps (wwDrawIdx)
+    wwBlRow = wwDrawBase + ( wwBlUniformRow ? 0u : stage_input.wwBaseInstance );
+#endif
     vertexPosition = stage_input.vertexPosition;
     vertexColor = stage_input.vertexColor;
     normalVector = stage_input.normalVector;
@@ -338,6 +354,9 @@ SPIRV_Cross_Output main(SPIRV_Cross_Input stage_input)
     stage_output.wwFarAo = wwFarAo;
 #if defined(WW_FAR_SPLAT)
     stage_output.farSplatA = farSplatA;
+#endif
+#if defined(WW_BL_VERT)
+    stage_output.wwBlRow = wwBlRow;
 #endif
     return stage_output;
 }

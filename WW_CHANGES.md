@@ -1,3 +1,174 @@
+## VKFAR4 (2026-11-15): the far ground's ring-0 tiles go to Vulkan in one hand-off a frame
+
+Changed, not built, not checked live. Offline: tests/vkframe/fargrounddraw.sh passes, with new batch checks added.
+
+- With the view on Vulkan (WW_VKVIEW=1), the ring-0 ground tiles used to cross to Vulkan one tile at a time (about 16
+  hand-offs a frame). They are now queued and drawn together in one hand-off. Each tile keeps its own uniforms and
+  descriptor set. The queue is drawn before any other shape, at the end of the shape walk, and before the bindless
+  buffer pool moves, so the draw order matches GL's.
+- If a batch fails, its tiles are missing for that one frame. After that the view falls back to one hand-off per tile,
+  and the `vk farground:` line says why.
+- Gate: three tiles drawn as one batch match GL, with depth exact. They are identical to three single runs. Two reds on
+  one tile (it reads the previous tile's data, or it is dropped) must FAIL, and both do. The water, far LOD, waterview
+  and farview gates print byte-identical results.
+
+## VKFAR4 (2026-11-15): the screen GI's Vulkan twin rounds closer to GL's (still refused)
+
+Changed, not built, not checked live. Offline: tests/vkframe/gihalfview.sh still FAILS (13 of 15 checks), so the view
+keeps the screen GI on GL as before.
+
+- The Vulkan copy of the screen GI read now does its arithmetic in the same order as the NVIDIA GL compiler in three
+  places (the view direction, the probe bias step, the probe tile position). Texels that differ from GL dropped from
+  1174 to 104 of 57,377. Only this pass changes; every other shader that reads the GI volume is byte-identical.
+
+## VKFAR4 (2026-11-15): a stuck Vulkan far dots or far cards run hands the frame to GL
+
+Changed, not built, not checked live. Offline: tests/vkframe/farview.sh and farcards.sh GATE OK with no `vk fence:` line;
+their reds WW_VKFENCE_RED=fardots / farcards (a faked 1 s timeout) print the site's line and FAIL.
+
+- When the wait for the last Vulkan run timed out (or the device was lost), these passes went on and rewrote commands
+  the GPU might still be running. That frame now stays on GL, with a `vk fence: the last fardots run ...` (or farcards)
+  line naming the wait's result. Same helper and line as VKWATER4's other passes (fenceDone).
+
+## VKFAR4 (2026-11-15): far card sheets are copied again when their Vulkan copy is remade
+
+Changed, not built, not checked live. Offline: tests/vkframe/farcards.sh GATE OK; its new red (the old check) drew
+differently after a remade sheet came back at the same image handle.
+
+- A far card sheet's Vulkan copy remembered which image it had filled by the image handle alone. A copy remade at the
+  same handle was left empty and the cards read garbage. The same for the empty shadow cube's clear.
+
+## VKOBJ5 round 7 (2026-11-15): object fence waits refuse the frame; twins take only their own keys
+
+Changed, not built, not checked live. Offline: regress gates OK, every green run prints no `vk fence:` line; the reds
+below FAIL their gate (blview; objview reaches oneshot only).
+
+- The bindless object run's wait (opRunWait), the object texture flush (otFlush) and the one-shot submit (oneShot) go
+  through WwVkPresent::fenceRed / fenceMiss. A missed wait prints `vk fence:` and the frame stays on GL: no slot is
+  touched, no unsignalled fence is reused, resources freed while in flight are held until a later wait passes, and
+  oneShot waits the device idle and resets its fence.
+- Reds: WW_VKFENCE_RED=objbl, objtex, oneshot.
+- Twins 2-6 now take only their base or RT GI key, like twins 7-9: a key with an extra loader define (a debug view, a
+  probe build) is another program and stays on GL. tests/vkframe/twinpick: red anybase (the old rule) FAILs.
+
+## VKWATER4 (2026-11-15): the bloom chain's Vulkan frames also hand a stuck frame to GL
+
+Changed, not built, not checked live; no offline harness reaches these waits (reds: WW_VKFENCE_RED=frame cap,
+frame layout, chain layout).
+
+- The bloom / combine / exposure frames in flight, and the one-time layout step when their shared frame or chain is
+  made, went on when the wait for earlier Vulkan work timed out. That frame now stays on GL with a `vk fence:` line;
+  a frame or chain that is still in use when it is remade is left, not freed.
+
+## VKWATER4 (2026-11-15): a stuck Vulkan pass hands its frame to GL instead of writing over it
+
+Changed, not built, not checked live. Offline: each pass's harness passes as before with no new line, and with its
+red (WW_VKFENCE_RED=<pass>, a faked 1 s timeout) it is refused with its reason.
+
+- The tone, TAA, sky, volumetric / cloud, light (AO, contact, SSGI, ocean), SSR, cascade shadow, object depth and
+  underwater passes, the view and the present went on when the wait for their last Vulkan work timed out (or the
+  device was lost), rewriting commands the GPU might still be running. That frame now stays on GL, with a
+  `vk fence:` line naming the pass and the wait's result. At shutdown a slot still in use is left, not freed.
+
+## VKWATER4 (2026-11-15): the underwater fog's depth view is remade with a remade frame
+
+Changed, not built, not checked live. Offline: tests/vkframe/underdraw.sh GATE OK.
+
+- The underwater fog kept its view of the frame's depth while the image handle stayed the same, so a frame remade at the
+  same handle (a resize) could leave it reading the freed depth. Making the frame now counts as a new shared target and
+  the view is made again.
+
+## VKWATER4 (2026-11-15): a stuck Vulkan water draw hands the frame to GL instead of writing over it
+
+Changed, not built, not checked live. Offline: tests/vkframe/waterdraw.sh's new red (a faked 1 s timeout) is refused
+with its reason and the next draw passes.
+
+- When the wait for the last Vulkan crossing timed out (or the device was lost), the water draw went on and rewrote
+  commands the GPU might still be running. That frame now stays on GL, with a `vk water:` line naming the wait's result.
+
+## VKWATER4 (2026-11-15): the water's SSR ray pass no longer draws nothing after its depth format changes
+
+Changed, not built, not checked live. Offline: tests/vkframe/waterdraw.sh's D32F_S8 ray arm (fo4_waterlookm, RT build),
+150 runs (120 of them 6 processes at once) with 0 empty draws; the red (the old key) drew nothing in 2 of 30, each time on the
+trigger the harness now reports (`WATERDRAW ray handle reused: N runs`). With the trigger forced on every ray run
+(WW_WATERDRAW_RAYREUSE=1: the depth format flips each run and the target comes back at its freed handle), 30 of 30
+harness runs passed with the view remade 19 times each; the old key drew nothing on 29 of 30 cross-format runs that
+still had a device.
+
+- When the water ray pass's depth target was remade in another format (D24S8 to D32F_S8), Vulkan could keep a view of
+  the freed target and test depth against garbage, so the water drew nothing that frame on. The view is now remade
+  whenever a shared target was made, not only when the image handle differs.
+
+## VKWATER4 (2026-11-15): the water on the all-on route keeps its twins; an unknown input keeps it on GL by name
+
+Changed, not built, not checked live. Offline: GL's water programs built with the all-on RT set (WW_CELL_RESTIR,
+WW_CELL_RTDDGI, WW_CELL_RTDDGI_CASCADES) compile to the same driver code as without it (the water calls none of the RT
+GI / ReSTIR code), and tests/vkframe/waterdraw.sh passes against that build for the d and m twins.
+
+- The water's Vulkan route now checks that every input GL's water program reads has a slot in its twin; one that does
+  not keeps the water on GL with the names in the `vk water:` line.
+
+## VKFAR3 A1 HBAO (2026-11-14): HBAO's centre-pixel step fixed, HBAO on Vulkan too (WW_VKVIEW=1)
+
+Changed, not built, not checked live. The look is for bungo's flight.
+
+- HBAO skipped no step that rounded onto the pixel itself, and made a random direction out of rounding noise there.
+  That step is now skipped, in the readable HLSL (cell_aox_ps.hlsl), so GL changes as well when it runs the SPIR-V
+  shader (the GLSL fallback keeps the old step). On the mem_base dump: 4.2 % of pixels of the raw term changed (up to
+  233 codes), the final AO about half the pixels by up to 133 codes after the blur.
+- HBAO now runs on the Vulkan view like XeGTAO and GTAO (red WW_VKVIEW_AOX_RED=1 keeps it on GL).
+- The AO gate's depth mips 1-4 print as information lines (they are internal to the pass); the AO results keep their
+  bars. lightview.sh: LIGHTVIEW GATE OK, 29 greens, 19 reds FAIL (new job ax_H: GL from SPIR-V, red = the old step).
+
+## VKFAR3 A1 DDGI (2026-11-15): the traced GI's probe atlas imported on the present device (WW_VKVIEW=1)
+
+Changed, not built, not checked live. Nothing on the view reads it yet (its consumers are the next steps), so no
+frame changes.
+
+- When RT GI hands a new volume to GL and the view is on, the probe atlas is also imported on the present device (the
+  device that owns the window): its own export of the same memory, a buffer over it and a texel view. A `vk ddgi:` line
+  says it was imported or why not (another GPU or driver, wrong usage, sizes). Red WW_VKVIEW_DDGI_RED=1 skips it.
+- It is freed with GL's copy (a new volume, RT GI off, the cell closed) and at shutdown.
+- No wait of its own: readers on the view are ordered behind GL, which already waits for the traced GI's update.
+- Offline gate tests/vkframe/ddgiview.sh: a second device exports a 4096-probe atlas, the present device imports it
+  and reads it back through the view: EXACT (0 of 790528 texels, twice, and a window); reds (a view one texel late,
+  half a view) FAIL; another driver and a buffer without texel use are refused, and every handle is closed.
+- With cascades (the RT preset's default) GL reads one buffer it copies every cascade into, not a cascade's atlas. With
+  the view on, that buffer is now made on the present device (GL fills it by the same copies), so passes on the view
+  read what GL reads; it follows the switch every frame. The per-cascade import is skipped then (it would go unread).
+  The single-volume import (cascades 1) comes only at the next volume hand-over when the view is turned on live; its
+  drop now logs how long the present device idled.
+- One lookup for both (ddgiAtlasView) and a counter that moves on every make / drop (ddgiAtlasGen), so a pass knows
+  to rewrite its descriptor. Gate: 17 of 17, the cascades' buffer EXACT, its red FAILS.
+
+## VKFAR3 A1 screen GI (2026-11-15): the traced GI's screen read on Vulkan (WW_VKVIEW=1), gate red
+
+Changed, not built, not checked live.
+
+- With the traced GI on and the PRT off, the half-res screen GI (cell_gihalf) runs on the present device right after
+  the volume mask, reading the cascades' buffer in place. The `giHalf` echo line ends "drawn on Vulkan" or "on GL";
+  the route line names why GL kept it (the PRT, no cascades' read, the buffer not shared). Red WW_VKVIEW_GIHALF_RED=1.
+- Offline gate tests/vkframe/gihalfview.sh against the app's GL program on one shared atlas: the uniform table, the
+  atlas lookup and all three reds pass; the 4-ulp bar does NOT (giStep 1: 1694 of 57377 texels; decoded at most 0.3 %
+  of E, visibility codes within 1). The cause is float order (NV GL's choice for the world position, proven by a
+  probe; the rest is inside the read). The bar is left as written.
+- VKFAR4: until that gate is green the Vulkan route is refused by default: GL draws the screen GI and the route line
+  says "its gate is red". The red WW_VKVIEW_GIHALF_RED=1 stays.
+- VKFAR4: the screen GI's view position now follows NV GL's order (u = c x 1/F, then (z - 2u z) x 1/p unfused): the
+  key (world position) is bit-exact on every texel of both steps (before: 2446 / 3589 / 1190 bits of x / y / z off).
+  The gate still fails 13 of 15: giStep 1 1170 texels past the bar (61 past one E step), giStep 2 305 (14). With the
+  read's stages turned off one by one: the Chebyshev test makes the big E misses, the bias makes the 66 fade misses,
+  about 200 texels stay with every stage off. The read's text equals GL's; the rest is compiler lowering.
+
+## VKWATER4 (2026-11-15): the ocean's arrays are shared in place, no copies per frame (WW_VKVIEW=1)
+
+Changed, not built, not checked live. Offline: oceanview arm 6, B / C / D at all 8 levels EXACT against the copy route
+(2 winds x 2 phases), lightRun copies 0 (copy route 146); waterdraw seed 3 EXACT against the copy route, ocean copies 0.
+
+- features/water/cellocean.cpp makes h0, q and the three arrays shared targets; ocean_vk.hlsl stages 7-10 write the
+  array levels in place, so the pass and the water draw copy nothing. The `vk ocean:` line counts copies per frame.
+- Red WW_VKVIEW_OCEAN_RED=prev: the water reads the other set (the frame before's) and must differ.
+
 ## VKFAR2 L8 slices 1, 2a, 2b, 3 (2026-11-14/15): rain / snow pass for the Vulkan view (gate OK, not compiled into the app)
 
 Changed, not built, not checked live. Nothing in the app calls it yet, so no frame changes.
@@ -165,6 +336,147 @@ Changed, not built, not checked live. Nothing in the app calls it yet, so no fra
   on, FAILs in each case.
 - The census reads exterior 0, interior 0: every lit term GL draws on rain / snow now draws on Vulkan in the gate. Lit
   + the look together is still refused (the look is off by default).
+
+## VKWATER4 (2026-11-15): the ultra ocean builds on Vulkan compute (WW_VKVIEW=1)
+
+Changed, not built, not checked live. Offline: tests/vkframe/oceanview.sh, 96 greens EXACT against GL (spectrum, 14 FFT
+stages, fields, mips 1-7, end to end), 20 reds FAIL.
+
+- features/water/cellocean.cpp records the spectrum, the inverse FFT, the fields and the mips as 31 dispatches
+  (res/shaders/hlsl/vklight/ocean_vk.hlsl) and writes them back into the three arrays. Red WW_VKVIEW_OCEAN_RED=1: GL's draws.
+- The spectrum keeps GL's float order with an opaque no-op: NVIDIA's Vulkan compiler reorders multiply chains even
+  under precise.
+
+## VKWATER4 (2026-11-15): the camera-underwater meniscus takes its derivative before the discard (HLSL)
+
+Changed, not built, not checked live. Offline: tests/vkframe/underdraw.sh arms A, B, C BOUND, red "old order" FAILS.
+
+- res/shaders/hlsl/water/cell_underwater_ps.hlsl (and its per-sample twin cell_underwater_ms_ps.hlsl) takes
+  fwidth( Pn.z ) before the per-sample draw's discard. After a discard the derivative is undefined; on NVIDIA GL it moved
+  the waterline's meniscus by up to 1168 half-float steps on edge samples.
+- GL's GLSL (features/water/cell_underwater.frag) keeps the old order until the HLSL switch.
+- The Vulkan twin's near-the-farthest-sample test now spells NVIDIA GL's own float form; in the gate's plain fog arm both
+  pick the same draw for a sample on the threshold. The light row still splits 13 samples (cause open).
+
+## VKFAR3 A1 SSGI (2026-11-14): the SSGI cast stays on Vulkan when the traced volume carries the emission
+
+Changed, not built, not checked live.
+
+- With RT GI on (WW_CELL_RTDDGI=1, the all-on route), SSGI takes the emission off what it gathers (the traced volume
+  counts it). The Vulkan cast (WW_VKVIEW=1) refused that case and the cast went back to GL; it now subtracts the same
+  emission on Vulkan. Only the emissive cast's own chain (red emitchain) still stays on GL, named on the `vk ssgi:` line.
+- Gate tests/vklight/light.sh job sg_E (the ultra tier, half size, 4 x 12, the emission over the bright texels): BOUND
+  against GL (107 of 1969920 values 1 ulp apart), red ssgie (the emission read as zero) FAILS (274244 differ);
+  lightview.sh runs it through the app's lightRun: BOUND, red FAILS. sg_A / sg_B / sg_S unchanged (27 / 106 / 231).
+
+## VKFAR3 A1 AO methods (2026-11-14): XeGTAO and GTAO on Vulkan (WW_VKVIEW=1), gate red
+
+Changed, not built, not checked live. With the view off nothing changes.
+
+- With the view on Vulkan, the XeGTAO and GTAO methods (WW_CELL_AO_METHOD) run in the same Vulkan pass as the
+  obscurance: depth mips, the AO term and its edges, the two blur stages. Red WW_VKVIEW_AOX_RED=1 keeps them on GL.
+  Log line `vk aox:` says which route ran and why.
+- HBAO stays on GL: its first step can land on the pixel itself, where two equal positions give a random direction
+  (3.6 % of pixels differ by up to 239 codes between GL and Vulkan; neither is right). Fixing that changes GL's shader.
+- Offline gate tests/vklight/light.sh on the mem_main dump: all three jobs within their bars, 3 reds FAIL. On mem_base
+  (lightview.sh) the first depth mip of the synthetic job has 1 value at 5 ulp against its 4 ulp bar (the AO result
+  itself is within its bar): LIGHTVIEW is red until that bar is decided.
+
+## VKFAR3 G3 (2026-11-14): the near far ground (ring 0's live terrain) draws on Vulkan (WW_VKVIEW=1)
+
+Changed, not built, not checked live.
+
+- With Show > Far ground at "Live, shader decals" (the default) and sun shadows on, ring 0's terrain shapes
+  (fo4_cellcsmfgl) draw on the Vulkan view, one draw a shape.
+- While the view is on, the ground grid, the layer textures (~180 MB) and the decal atlas are made on the present
+  device and shared with GL, so no draw copies them. The view off keeps GL's own textures as before. If one cannot be
+  shared, GL draws the shape and the line says why.
+- Red WW_VKVIEW_FARGROUND_RED=1 keeps GL's draw. A `vk farground:` line counts shapes drawn on Vulkan and on GL and
+  names why GL kept a shape: Baked sheet, no sun shadows (fo4_cellfgl), "Live, cached pages", the oldpages red,
+  the textures not shared.
+- Offline gate tests/vkframe/fargrounddraw.sh against GL's own program: 2 seeds, depth EXACT, colour inside the bar
+  (max rel 0.0098, mipped atlas), GL on the shared textures vs GL on plain ones EXACT, three copies fewer a draw, every
+  red FAILS (offset, plain samplers, cull, depth test, polygon offset, first index, grid and decals rewritten after
+  GL's draw).
+- Round 2: a frame with no Vulkan view (a resize, a grab) no longer hands the shared textures back to GL and makes
+  them again the next frame (each round trip was ~60-115 ms of remake and refill for the layers alone). They go back
+  to GL only when the view is turned off or the red is set.
+- Offline gate tests/vkframe/fargroundoff.sh (CPU only): with the view off, the far ground's GL uploads and frees match
+  c7e7d1a2 (the tree before the lane) call for call, cut from both versions of cellfarground.cpp: 535 of 535 calls the
+  same, no call to the present device. Reds: a flipped argument and a removed call are caught, sharing on differs. It
+  also walks the shared textures through view on / no view / off / a shutdown / a refusal / no key slot; the old rule
+  as red churns twice.
+- Crossing cells costs nothing here: the far ground is only prepared when a cell opens without streaming; streamed
+  roaming never makes it, so nothing is dropped or made on a crossing. The same gate checks the rest of pass() is the
+  tree's text before the lane (95 of 95 lines, a changed line caught).
+
+## VKOBJ5 (2026-11-14): skinned, alpha-tested, single rigid and unpooled bindless object draws on Vulkan (WW_VKOBJ_SHADE=1)
+
+Changed, not built, not checked live. Offline: tests/vkframe/blview.sh colourGate gained a skinned and an alpha-tested
+pass for both bindless twins (fo4_cellbl, fo4_cellcsmbl): depth EXACT, colour inside the existing bar, reds FAIL.
+
+- A pooled fo4_cellbl / fo4_cellcsmbl shape outside a multi-draw run that is skinned or alpha-tested now draws on Vulkan
+  through the bindless twins (one row: the one the draw wrote). Before, only rigid opaque runs reached Vulkan.
+- Frame lines `vk objskin:` and `vk objalpha:` (shapes, drawn, left on GL and why).
+- With ray-traced GI on (WW_CELL_RTDDGI, RESTIR or RESTIRGI in GL's program) these shapes stay on GL: that variant's twin
+  is not made yet, and the line says so.
+- Reds: WW_VKVIEW_OBJSKIN_RED=bone (each bone reads the next bone's transform), WW_VKVIEW_OBJALPHA_RED=flags (alpha
+  test off).
+- Round 2: a rigid opaque bindless shape drawn on its own (not in a run) and a bindless shape with no pool entry (its own
+  vertex array) also draw on Vulkan. Lines `vk objrigid:` and `vk objown:`. A blended rigid shape stays on GL.
+- Fix: Vulkan read the draw's row twice offset (GL's wwDrawBase was mirrored on top of rows that already start at that
+  row), so run draws and single draws on Vulkan read past their rows. Now the mirrored value is 0 for those draws.
+- Red: WW_VKVIEW_OBJOWN_RED=offset (the vertex array read from its start) / half (half floats read as 16-bit unorm).
+  Offline: blview colourGate kinds single and own, both twins: depth EXACT, colour EXACT / BOUND, reds base / offset / half
+  FAIL.
+- The bindless twins' alpha test discards after the last texture sample (as VKWATER3 did for fo4_default /
+  pbrm_default). A discard in the middle ended the pixel on Vulkan and broke its neighbours' texture filtering
+  (colour max 0.88 off before, BOUND after).
+- Round 3: the cell-lit particle systems (particles_cell) can draw on Vulkan under WW_VKOBJ_SHADE: a record pass and a
+  4-vertex strip per particle through the particles' pixel twin, which reads the soft fade's depth (fxDepth) from a
+  shared target. Offline: blview pfx cases leq / always / hard / write / nocol, depth and colour EXACT, reds FAIL.
+  In the app every system was still refused (GL drew it) until round 4: see the units bullet below.
+- **Soft particles on the GL HLSL route changed.** Their pixel program was compiled without -fvk-use-dx-position-w,
+  so the soft fade read 1/w for the pixel's w and faded nearly to nothing. tests/hlsllive/build_spv.py now passes that
+  flag for the frozen pixel files that invert gl_FragCoord.w: soft particles there fade by depth as on the GLSL route.
+- Round 4: when the present device refuses the fxDepth shared target, GL's own texture is used as before, and the shared
+  target is asked for again on a size change or every 120 second passes (at most 4 asks per size; a grant frees GL's
+  texture). Lines: `lane VKOBJ5: fxDepth shared target refused, ...` (once) and `... granted after N refusals`.
+  Offline: tests/vkframe/fxdepthshare.sh (forced first refusal recovers; the old rule as the red fails).
+- Round 4, the particles' units as the app binds them: glparticles.cpp always puts a grey cube on CubeMap's unit, which
+  has no Vulkan twin, so objPfxShade refused every particles_cell system (`1 GL textures with no twin: CubeMap`). It now
+  reads hasNormalMap / hasGreyscaleMap / hasCubeMap: a map whose flag is 0 is never sampled and stays a stand-in; a map
+  whose flag is 1 must resolve (a .bgem's normal or greyscale map: its texture twin; an environment cube: still
+  refused by name, GL draws that system). All 10 textureUnits[i] resolve element by element. The gate binds as the
+  app (all textureUnits and the maps' samplers on the sprite's unit, the grey cube, cull on): grey and elem EXACT,
+  normal BOUND (12 values, max 1.2e-4), the 5 earlier cases EXACT; reds nmap / grey / elem0 FAIL; case cube refused by name, red cubeoff (drawn anyway) FAILs.
+  Stencil is off at the particles' draw (StencilProperty::glProperty( nullptr ) after the write setup).
+- Round 5: a particle system with an environment map (a .bgem's hasCubeMap 1) draws on Vulkan through a plain-cube
+  copy twin (GL's six faces copied once a frame); a swizzled GL cube is refused by name. Offline: blview pfx `cube` plus
+  one case per cube face, each reaching its own face, colour EXACT, "cube faces covered: 6 of 6"; reds cubeoff and
+  cubegrey FAIL.
+- Round 5: particles_cell drawn with ray-traced GI on (WW_CELL_RESTIR + WW_CELL_RTDDGI + cascades in GL's program) now
+  draws on Vulkan through its RT twin (objpfx_cell_rt_ps), reading the traced shadow ratio, the DDGI atlas and the
+  screen GI's half target and key. Offline: blview `pfx rt` (case leq): depth EXACT, colour BOUND (1 value, 1.2e-7),
+  each RT input moves GL's picture (>= 11517 px), reds restir / atlas / gihalf / gikey FAIL. The bindless object twins
+  (fo4_cellbl, fo4_cellcsmbl) still stay on GL with ray-traced GI on: their HLSL has no RT variant (compiled with the RT
+  defines it is byte-identical), so a readable bindless source with the RT #ifs is needed first.
+- Fix (gates): a buffer texture's Vulkan twin is kept under GL's texture name, and GL gives a deleted name to the next
+  texture. A smaller twin left under a reused name refused the cell gate's ReSTIR ratio (`cellcsm rt FAIL ... the texel
+  twin would move under prepared draws`, already failing at 9772bc98). objBlTexelForget drops the twin; the pfx and cell
+  gates call it before deleting their buffer textures. The app does not call it yet: a buffer texture recreated at a
+  larger size under a reused name can be refused (GL draws it) until the next frame's first draw.
+- Round 6: texel twins are keyed on (GL name, generation). The generation moves when GL's view of the buffer texture
+  changed (its buffer, format, offset or size); the old twin is held for the prepared draws (freed by objBlDrawsReset)
+  or freed at once, and a fresh twin is made. A buffer recreated larger under the same name no longer refuses or reads a
+  stale twin. Offline: blview `texel reuse` (128 KiB re-specify under a live draw: 1 new generation, 1 held, 0 of 131072
+  bytes differ, 0 held after the reset); red texelreuse (the name-only key) FAILs.
+- Round 6: a bl twin draw's framebuffer is remade when sharedGen() moved, not only when its view handles changed (a
+  target remade can hand back the same VkImageView handle).
+- Round 6: the RT-twin pick (vkCellDraw, vkPfxDraw) moved into src/features/near/celltwinpick.h, unchanged in behaviour.
+  Offline table gate tests/vkframe/twinpick/run.sh: every twin 2-9, base and RT key, picks exactly its own twin and the
+  module that compiles its own pixel source with the key's defines; each key one RT define short refuses; red swap
+  (twins 2 and 3's RT modules swapped) and red noinert FAIL.
 
 ## VKFAR2 P7 (2026-11-14): depth of field, motion blur and object blur join the tone pass on Vulkan (WW_VKVIEW=1)
 

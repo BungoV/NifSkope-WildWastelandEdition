@@ -15,11 +15,15 @@ import reference_reader as rr  # noqa: E402
 REQUIRED = ['atmosphere', 'clouds', 'night', 'wind', 'temperature', 'transitions', 'groundFog']
 INPUTS = [('atmosphere', k) for k in ('visibility', 'hazeHeight', 'ozone', 'hazeType', 'humidity', 'groundAlbedo',
                                       'angstrom', 'hazeAnisotropy', 'airglow')] + \
-    [('clouds', k) for k in ('coverage', 'type', 'density')] + [('night', k) for k in ('stars', 'moonlight')] + \
+    [('clouds', k) for k in ('coverage', 'type', 'liquidWater', 'iceFraction', 'evolution')] + \
+    [('night', k) for k in ('stars', 'moonlight')] + \
     [('wind', k) for k in ('speed', 'direction', 'gusts', 'turbulence')] + [('temperature', 'air')] + \
-    [('lightning', k) for k in ('frequency', 'cloudToGround', 'distance')] + \
-    [('transitions', k) for k in ('duration', 'precipitationStart', 'precipitationEnd', 'lightningStart', 'lightningEnd')] + \
-    [('precipitation', k) for k in ('wetting', 'drying', 'layers')] + [('groundFog', 'thickness')]
+    [('lightning', k) for k in ('frequency', 'cloudToGround', 'distance', 'fadeIn', 'fadeOut')] + \
+    [('transitions', 'duration')] + \
+    [('precipitation', k) for k in ('wetting', 'drying', 'base', 'fadeIn', 'fadeOut', 'layers')] + \
+    [('groundFog', 'thickness')]
+# lane WEATHERRECX2 (spec 1.8): the reference reader answers in the 1.6 names and units (wetting / drying in minutes,
+# lightning.distance in km); the fades and the shaft base sit in precipitation / lightning, the cloud water in liquidWater
 # not written by the generated rung: the hazeType preset (OPAC) or the reader's own default supplies them
 PRESET = {('atmosphere', 'angstrom'), ('atmosphere', 'hazeAnisotropy'), ('atmosphere', 'airglow')}
 

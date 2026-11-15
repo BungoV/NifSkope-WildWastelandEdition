@@ -15,7 +15,8 @@ struct FarTwinStat
 	double mb = 0.0;
 	std::string failWhy;
 };
-/*! a twin sharedTarget does not make: type 0 2D, 2 2D array (layers), 3 cube-map array (layers = 6 x cubes);
+/*! a twin sharedTarget does not make: type 0 2D, 2 2D array (layers), 3 cube-map array (layers = 6 x cubes), 4 a plain cube
+ * (layers 6, square; GL_TEXTURE_CUBE_MAP, lane VKOBJ5: the particles' CubeMap);
  * glFmt a BC name (S3TC / RGTC / BPTC, sRGB too), GL_DEPTH_COMPONENT16, or one of sharedTarget's colour formats.
  * GL draws / copies into tex as into its own texture (GL_TEXTURE_2D, _2D_ARRAY, _CUBE_MAP_ARRAY); the present device
  * samples the same memory. Keyed like sharedTarget (its own map); refused without textureCompressionBC / imageCubeArray. */
@@ -155,7 +156,8 @@ struct FarCardsRun
 	FarCardsStencil stencil;
 	std::uint8_t global[kFxGlobalBytes] = {};
 	std::vector<FarCardsSet> sets;
-	int red = 0;  //!< gates only: 1 no depth write, 2 every set's cardBase 0, 4 the shadow compare inverted
+	int red = 0;  //!< gates only: 1 no depth write, 2 every set's cardBase 0, 4 the shadow compare inverted, lane VKFAR4:
+	              //!< 16 a sheet's copy keyed on its VkImage handle only (a twin remade at the old handle value keeps its empty image)
 };
 /* GL current, the tone frame bound, impostor_cellinstez's uniforms set: the sets drawn on Vulkan, one crossing.
  * false: why; nothing drawn (GL draws them) */

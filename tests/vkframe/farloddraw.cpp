@@ -500,6 +500,7 @@ std::uint32_t pack1010102( float x, float y, float z, float w )
 }
 }  // namespace fld
 
+#ifndef FLD_NO_MAIN	// lane VKFAR3: fargrounddraw.cpp reuses the helpers above with its own main
 int main( int argc, char ** argv )
 {
 	using namespace fv;
@@ -1073,3 +1074,4 @@ int main( int argc, char ** argv )
 	std::printf( gateOk ? "FARLODDRAW GATE OK\n" : "FARLODDRAW GATE FAILED\n" );
 	return gateOk ? 0 : 1;
 }
+#endif

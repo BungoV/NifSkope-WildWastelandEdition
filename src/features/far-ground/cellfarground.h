@@ -46,6 +46,14 @@ bool wantsFrames( Scene * scene );
 void pass( Scene * scene );
 //! A twin program's textures and uniforms (every draw of one).
 void uniforms( Scene * scene, NifSkopeOpenGLContext::Program * prog );
+/* lane VKFAR3 (row G3): a ring-0 shape's draw on the Vulkan view (WW_VKVIEW=1; red WW_VKVIEW_FARGROUND_RED=1): the
+ * shader-decals twin (fo4_cellcsmfgl) into the shared tone frame, the shape's element range (idxOff bytes, baseVertex).
+ * True: drawn on the present device; false: GL draws it, the reason in the `vk farground:` line. */
+bool vkDraw( Scene * scene, NifSkopeOpenGLContext::Program * prog, int block, int indexCount, long long idxOff, int baseVertex );
+/* lane VKFAR4 (batching): vkDraw queues the tile; vkFlush draws the queued tiles in one crossing (the end of the shapes'
+ * walk, before the queues' flush, before the bindless arena moves); vkFlushBefore: before any other shape's draw */
+void vkFlush();
+void vkFlushBefore( Scene * scene, int block );
 }
 
 #endif

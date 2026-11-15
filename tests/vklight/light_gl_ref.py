@@ -95,13 +95,35 @@ def compile_(kind, src):
 
 
 _progs = {}
+shaderBinary = _fn('glShaderBinary', None, I, ctypes.POINTER(U), E, VP, I)
+specialize = _fn('glSpecializeShaderARB', None, U, ctypes.c_char_p, U, VP, VP)
+# lane VKFAR3: a program named <name>_ps.spv is the readable HLSL built to SPIR-V (the app's live GL route, glcontext.cpp
+# wwSpv) instead of the GLSL: VKLIGHT_SPV_DIR/fullscreen_vs.spv + VKLIGHT_SPV_DIR/<name>_ps.spv from tests/hlsllive/build_spv.py
+# (light.sh builds them; a SPIR-V fragment does not link with a GLSL vertex shader)
+SPV_DIR = os.environ.get('VKLIGHT_SPV_DIR', '')
+
+
+def spv_shader(kind, path):
+    s = createShader(kind)
+    data = open(path, 'rb').read()
+    h = U(s)
+    shaderBinary(1, ctypes.byref(h), 0x9551, data, len(data))
+    specialize(s, b'main', 0, None, None)
+    ok = I(); getShaderiv(s, 0x8B81, ctypes.byref(ok))
+    if not ok.value:
+        print('LIGHT-GL-REF FAIL (specialize %s)' % path); sys.exit(2)
+    return s
 
 
 def program(frag):
     """frag: path under res/shaders/features (module/name.frag)"""
     if frag not in _progs:
         p = createProgram()
-        attach(p, compile_(0x8B31, VERT)); attach(p, compile_(0x8B30, S.expand(os.path.join(FEAT, frag)))); link(p)
+        if frag.endswith('.spv'):
+            attach(p, spv_shader(0x8B31, os.path.join(SPV_DIR, 'fullscreen_vs.spv')))
+            attach(p, spv_shader(0x8B30, os.path.join(SPV_DIR, os.path.basename(frag)))); link(p)
+        else:
+            attach(p, compile_(0x8B31, VERT)); attach(p, compile_(0x8B30, S.expand(os.path.join(FEAT, frag)))); link(p)
         ok = I(); getProgramiv(p, 0x8B82, ctypes.byref(ok))
         if not ok.value:
             print('LIGHT-GL-REF FAIL (link %s)' % frag); sys.exit(2)
@@ -515,9 +537,9 @@ def mip_img(name, srcd, W, H, rgba, levels):
     return x
 
 
-def ssgi_job(name, srcd, W, H, proj, div, slices, steps, blue, frame, radius, time_it, reds):
+def ssgi_job(name, srcd, W, H, proj, div, slices, steps, blue, frame, radius, time_it, reds, emit=None):
     """src/features/gi/cellssgi.cpp stage 1 (the cast) at a tier's work size; the interval pyramid off (its default),
-    the full-mask early out on, no emissive subtraction"""
+    the full-mask early out on; emit (lane VKFAR3): the donor less that emission (kernel ssgie, flag 4), else none"""
     ww = (W + div - 1) // div if div > 1 else W
     wh = (H + div - 1) // div if div > 1 else H
     P00, P11 = float(proj[0][0]), float(proj[1][1])
@@ -527,13 +549,19 @@ def ssgi_job(name, srcd, W, H, proj, div, slices, steps, blue, frame, radius, ti
     imgs = [Img('gbuf', 'rgba32f', W, H, NEAREST, gb, gbf), SCENE[srcd],
             Img('noise', 'rgba16f', 128, 64 * 128, NEAREST, NOISE, 'noise.bin'), Img('cast', 'rgba16f', ww, wh, NEAREST)]
     thick, srcb, sat = 32.0, 1.0, 0.8
-    flags = (1 if blue else 0) | 2
+    flags = (1 if blue else 0) | 2 | (4 if emit is not None else 0)
     uni = [('ssgiStage', 'i', 1), ('fullSize', '2i', (W, H)), ('workSize', '2i', (ww, wh)), ('proj', '2f', (P00, P11)),
            ('slices', 'i', slices), ('steps', 'i', steps), ('radius', 'f', radius), ('thickness', 'f', thick),
            ('sourceBrightness', 'f', srcb), ('saturation', 'f', sat), ('frameIndex', 'i', frame), ('blueNoise', 'i', int(blue)),
-           ('hizLevels', 'i', 0), ('fullBreak', 'i', 1), ('emitSub', 'i', 0), ('oldLaw', 'i', 0)]
-    ps = [Pass('cast', 'ssgi', SSGI, ['cast'], [('gbuf', 'gbuf'), ('scene', 'scene'), ('noiseTex', 'noise')],
-               ['gbuf', 'scene', 'noise'], uni, [(W, H, ww, wh), (P00, P11, radius, thick), (srcb, sat, 0, 0)],
+           ('hizLevels', 'i', 0), ('fullBreak', 'i', 1), ('emitSub', 'i', int(emit is not None)), ('oldLaw', 'i', 0)]
+    units = [('gbuf', 'gbuf'), ('scene', 'scene'), ('noiseTex', 'noise')]
+    vk = ['gbuf', 'scene', 'noise']
+    if emit is not None:
+        imgs.append(emit)
+        units.append(('emitTex', emit.name))
+        vk.append(emit.name)
+    ps = [Pass('cast', 'ssgie' if emit is not None else 'ssgi', SSGI, ['cast'], units,
+               vk, uni, [(W, H, ww, wh), (P00, P11, radius, thick), (srcb, sat, 0, 0)],
                (slices, steps, frame, flags))]
     job(name, imgs, ps, [('cast', os.environ.get('VKLIGHT_SSGI_RULE', 'sector'))], reds, time_it)
 
@@ -555,6 +583,16 @@ def ssgi_main():
     ssgi_job('sg_A', srcd, W, H, proj, 4, 3, 12, True, 5, 256.0, True, ['ssgi'])
     # quality 3 (half work size, 4 x 12), the closed-form noise
     ssgi_job('sg_B', srcd, W, H, proj, 2, 4, 12, False, 41, 256.0, True, [])
+    # lane VKFAR3: quality 3 (ultra, the all-on route) with the traced volume carrying the emission: the donor less the
+    # emitted share (the bright texels' colour, 0.8 of it in a checker so the subtraction leaves a remainder, a = coverage)
+    sc = np.nan_to_num(px, posinf=6.0e4, neginf=0.0).astype(np.float32)
+    lum = 0.2126 * sc[..., 0] + 0.7152 * sc[..., 1] + 0.0722 * sc[..., 2]
+    ey, ex = np.mgrid[0:H, 0:W]
+    k = np.where((lum > np.percentile(lum, 85.0)) & (((ex // 8 + ey // 8) % 2) == 0), 0.8, 0.0).astype(np.float32)
+    em = np.zeros_like(sc)
+    em[..., :3] = sc[..., :3] * k[..., None]
+    em[..., 3] = (k > 0).astype(np.float32)
+    ssgi_job('sg_E', srcd, W, H, proj, 2, 4, 12, True, 17, 256.0, False, ['ssgie'], emit=mip_img('emit', srcd, W, H, em, 5))
     # synthetic: odd sizes, sky rows, a bright scene with steps; full work size, a short radius (the interior's spacing)
     sw, sh = 641, 361
     sy, sx = np.mgrid[0:sh, 0:sw].astype(np.float32)
@@ -693,7 +731,94 @@ def ssr_main():
     ssr_job('ss_S', sdir, sw, sh, sg, sms, col, proj, srot, None, 0, [])
 
 
+# --------------------------------------------------------------------------------------- ported AO methods (lane VKFAR3)
+AOX = 'ao/cell_aox.frag'
+
+
+def aox_job(name, srcd, W, H, gb, proj, method, slices, steps, time_it, reds, prog=AOX):
+    """src/features/ao/ao.cpp aoxPasses: stage 1, stage 2 x4, then the method's stages (xe 6 7 5, gtao 3 5 5, hbao 4 5 5)
+    ping-ponging xa / xb as the app does; gbuf = the AO stage 5 g-buffer of the same frame; prog = the GL program"""
+    ms = [(W, H)]
+    for m in range(1, 5):
+        ms.append((max(ms[m - 1][0] // 2, 1), max(ms[m - 1][1] // 2, 1)))
+    p00, p11 = np.float32(proj[0][0]), np.float32(proj[1][1])
+    ndc = (np.float32(2.0) / p00, np.float32(-2.0) / p11, np.float32(-1.0) / p00, np.float32(1.0) / p11)
+    params, den = (38.4, 0.615, 1.0, 1.5), (2.0, 0.08, 1.2)
+    imgs = [Img('gbuf', 'rgba32f', W, H, NEAREST, gb, os.path.basename(srcd) + '/gbuf.bin')]
+    imgs += [Img('xz%d' % m, 'r32f', ms[m][0], ms[m][1], NEAREST) for m in range(5)]
+    imgs += [Img('xa', 'r8', W, H, NEAREST), Img('xb', 'r8', W, H, NEAREST)]
+    if method == 'xe':
+        imgs.append(Img('xe', 'rg32f', W, H, NEAREST))
+    base = [('fullSize', '2i', (W, H))] + [('mipSize[%d]' % m, '2i', ms[m]) for m in range(5)] + \
+        [('ndcToView', '4fv', [ndc]), ('aoxParams', '4fv', [params]), ('aoxCounts', '2f', (slices, steps)), ('aoxDenoise', '3f', den)]
+    c = [ndc, params, (slices, steps, den[0], den[1]), (den[2], W, H, 0), ms[1] + ms[2], ms[3] + ms[4]]
+    allz = [('gbuf', 'gbuf')] + [('xz%d' % m, 'xz%d' % m) for m in range(5)]
+    ps = [Pass('s1', 'aox_z', prog, ['xz0'], [('gbuf', 'gbuf')], ['gbuf'], base + [('aoxStage', 'i', 1)], c, (1, 0))]
+    for m in range(1, 5):
+        ps.append(Pass('s2m%d' % m, 'aox_z', prog, ['xz%d' % m], [('src', 'xz%d' % (m - 1))], ['-', 'xz%d' % (m - 1)],
+                       base + [('aoxStage', 'i', 2), ('mipLevel', 'i', m)], c, (2, m)))
+    st = {'xe': (6, 7, 5), 'gtao': (3, 5, 5), 'hbao': (4, 5, 5)}[method]
+    if os.environ.get('VKLIGHT_AOX_RAW'):   # the method's term alone (as WW_CELL_AO_METHOD_RED=raw): a probe, not the gate
+        st = st[:1]
+    src = None
+    for k, s in enumerate(st):
+        out = 'xe' if s == 6 else 'xb' if src == 'xa' else 'xa'
+        if s in (3, 4, 6):
+            units, vk = allz, ['gbuf', 'xz1', 'xz2', 'xz3', 'xz4']
+        elif s == 5:
+            units, vk = allz + [('src', src)], ['gbuf', src]
+        else:
+            units, vk = [('src', src)], ['-', src]
+        # aox_hb: the R8 kernel for HBAO's stage 4, its own name so its red (the old divide) runs apart from aox_r8's
+        ps.append(Pass('s%d_%d' % (s, k), 'aox_xe' if s == 6 else 'aox_hb' if s == 4 else 'aox_r8', prog, [out], units, vk,
+                       base + [('aoxStage', 'i', s)], c, (s, 0)))
+        src = out
+    # xz1-4: the depth mip filter's dot / sum lands 1-16 ulp apart on NV's GL and Vulkan compilers (measured 4, 11, 16, 14
+    # and up to 32; 80 float orders tried, none fits either side). They are internal to the pass, so they print as info
+    # lines and the end results (xe, xa, xb) carry the verdict; the method stages: a sample position or a hard branch
+    # flips on a last-bit difference (step); GTAO's slice angle is the SSGI divide (sector)
+    cmps = [('xz0', 'ulp1')] + [('xz%d' % m, 'info') for m in range(1, 5)]
+    if method == 'xe':
+        cmps.append(('xe', 'step'))
+    r = 'sector' if method == 'gtao' else 'step'
+    cmps += [('xa', r), ('xb', r)]
+    job(name, imgs, ps, cmps, reds, time_it)
+    print('  %s: %dx%d method %s slices %d steps %d' % (name, W, H, method, slices, steps))
+
+
+def aox_main():
+    W, H, px, proj, depth = load_dump()
+    srcd = os.path.join(OUT, 'in_real_ax')
+    os.makedirs(srcd, exist_ok=True)
+    gb = gl_gbuf(srcd, W, H, depth, proj)
+    # XeGTAO at Ultra (4 x 3, the all-on route's tier) with every kernel's red; GTAO at High
+    aox_job('ax_X', srcd, W, H, gb, proj, 'xe', 4, 3, True, ['aox_z', 'aox_xe', 'aox_r8'])
+    aox_job('ax_G', srcd, W, H, gb, proj, 'gtao', 3, 3, False, [])
+    # HBAO against the GL the app runs: the readable HLSL through SPIR-V (VKLIGHT_SPV_DIR), since the step that lands on the
+    # centre texel is skipped there (VKFAR3 round 3; the GLSL fallback keeps the old divide, which turned two equal view
+    # positions' last-bit rounding into a random direction: 3.6 % of texels, up to 239 codes). Red aox_hb: the old divide.
+    # VKLIGHT_AOXH_GLSL=1 runs the job on the GLSL instead (the tie of the SPIR-V route to the GLSL references)
+    if SPV_DIR or os.environ.get('VKLIGHT_AOXH_GLSL'):
+        aox_job('ax_H', srcd, W, H, gb, proj, 'hbao', 4, 3, False, ['aox_hb'],
+                AOX if os.environ.get('VKLIGHT_AOXH_GLSL') else 'ao/cell_aox_ps.spv')
+    # syn: an odd size, a sky band, steps (as ao_S), XeGTAO at Low
+    sw, sh = 641, 361
+    rng = np.random.default_rng(31)
+    sy, sx = np.mgrid[0:sh, 0:sw].astype(np.float32)
+    sd = (0.9990 + 0.0008 * np.sin(sx / 29.0) * np.cos(sy / 17.0)).astype(np.float32)
+    for _ in range(40):
+        x0, y0 = rng.integers(0, sw - 40), rng.integers(0, sh - 40)
+        sd[y0:y0 + rng.integers(5, 60), x0:x0 + rng.integers(5, 80)] -= np.float32(rng.uniform(0.0002, 0.0008))
+    sd[: sh // 7] = 1.0
+    sdir = os.path.join(OUT, 'in_syn_ax')
+    os.makedirs(sdir, exist_ok=True)
+    sg = gl_gbuf(sdir, sw, sh, sd, proj)
+    aox_job('ax_S', sdir, sw, sh, sg, proj, 'xe', 2, 2, False, [])
+
+
 def main():
+    if 'aox' in WANT:
+        aox_main()
     if 'ssr' in WANT:
         ssr_main()
     if 'ao' in WANT:

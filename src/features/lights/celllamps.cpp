@@ -7,6 +7,7 @@ BSD License - see nifskope.h
 /* lane MODULES1 (lights): the lamp half of the cell light law, split out of gl/celllights.cpp: flicker, XEMI
  * lights, gobo patterns, fog scale, .nifx fixture lights, the lamp cube shadows and the light spheres. */
 #include "gl/celllights.h"
+#include "features/vkframe/vkpresent.h"	// lane VKOBJ4: the shadow cubes as a shared cube array (WW_VKOBJ_SHADE)
 #include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
 #include "features/vkframe/vkpresent.h"	// lane VKFAR6 (L8 term 5): the lamp cubes shared with the Vulkan view
 
@@ -584,7 +585,7 @@ static void shadowDump( Scene * scene )
  * (the lit rain and snow read them in place); red WW_VKVIEW_LAMPSHADOW_RED=1 keeps GL's own */
 static bool shadowShareWanted()
 {
-	return WwVkPresent::shareWanted( "WW_VKVIEW_LAMPSHADOW_RED" );
+	return WwVkPresent::shareWanted( "WW_VKVIEW_LAMPSHADOW_RED" ) || wwEnv( "WW_VKOBJ_SHADE" ).trimmed() == "1";  // BATCH1114: or VKOBJ4's runs
 }
 
 //! the shared cubes' key: the renderer's (gpus() is a QHash, whose values move when it grows; an odd address no object has)
@@ -596,6 +597,13 @@ static std::uintptr_t shadowShareKey( Renderer * r )
 //! the depth cube array (kShadowSlots cubes of face x face) and its framebuffer, once
 static void shadowAlloc( Renderer * r, Gpu & g, int face )
 {
+	const std::uintptr_t key = shadowShareKey( r );  // BATCH1114: VKFAR6's key (gpus() moves &g.shTex)
+	if ( g.shTex && g.shShared && !WwVkPresent::sharedTargetIs( key, g.shTex ) ) {
+		g.shTex = 0;	// lane VKOBJ4: the present device dropped it (its GL name went with it); the slots are empty
+		g.shShared = false;
+		std::fill( g.shSlot, g.shSlot + kShadowSlots, -1 );
+		g.shStamp++;
+	}
 	if ( g.shTex )
 		return;
 	auto fn = r->fn;
@@ -605,7 +613,7 @@ static void shadowAlloc( Renderer * r, Gpu & g, int face )
 	std::string why;
 	g.shAsked = shadowShareWanted();  // what the remake test compares (a refused share falls back to GL's own, kept)
 	g.shShared = g.shAsked && WwVkPresent::sharedTarget( shadowShareKey( r ), 3, face, face,
-		kShadowSlots, GL_DEPTH_COMPONENT16, shared, why ) && shared;
+		6 * kShadowSlots, GL_DEPTH_COMPONENT16, shared, why ) && shared;
 	if ( g.shShared )
 		g.shTex = shared;
 	else
@@ -624,7 +632,8 @@ static void shadowAlloc( Renderer * r, Gpu & g, int face )
 	fn->glTexParameteri( GL_TEXTURE_CUBE_MAP_ARRAY, GL_TEXTURE_COMPARE_FUNC, GL_LEQUAL );
 	fn->glBindTexture( GL_TEXTURE_CUBE_MAP_ARRAY, 0 );
 	fn->glActiveTexture( GLenum( prevActive ) );
-	fn->glGenFramebuffers( 1, &g.shFbo );
+	if ( !g.shFbo )
+		fn->glGenFramebuffers( 1, &g.shFbo );
 	g.shFace = face;
 }
 
@@ -1438,6 +1447,7 @@ void wwCellShadowPass( Scene * scene )
 		g.shShared = false;
 		r->fn->glDeleteFramebuffers( 1, &g.shFbo );
 		g.shTex = g.shFbo = 0;
+		g.shShared = false;
 		std::fill( g.shSlot, g.shSlot + kShadowSlots, -1 );
 		g.shStamp++;
 	}

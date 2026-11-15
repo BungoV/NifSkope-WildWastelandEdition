@@ -2,6 +2,10 @@
  * (features/lights/celllamps.cpp). Not an interface: only those two include it, after their own includes. */
 #pragma once
 
+#include <memory>
+
+namespace FarSkyMap { struct Map; }	// lane FARSKYMAP1 (src/features/far-lod/farskymap.h)
+
 namespace WwCellLightsP
 {
 
@@ -100,6 +104,7 @@ struct Gpu
 {
 	GLuint buf = 0, tex = 0;
 	bool texAttached = false;	// lane PERF1: the buffer texture keeps its buffer across glBufferData; attached once
+	bool bufStored = false;	// lane VKOBJ4: buf is a store (WW_VKOBJ_SHADE: objBlTexelFill; the Vulkan runs read it in place)
 	quint64 bufLiveGen = 0;	// lane TESTDRIVER1: a live set (light copies, reds) rebuilds the buffer
 	std::uint64_t bufXemiStamp = 0;	// lane LIGHTS4: the XEMI light factors the buffer was built with
 	float bufCurve = 1.0f;	// lane LIGHTPHYS1: the intensity curve folded into the colours (menu sets bump no switch generation)
@@ -138,12 +143,18 @@ struct Gpu
 	GLuint bloomTex = 0;
 	GLuint farSlotBuf = 0, farSlotTex = 0, farRecBuf = 0, farRecTex = 0, farPlacedTex = 0;
 	GLuint farSlotAtt = 0, farRecAtt = 0;	// lane CELLUNI1: the buffer each far texture holds (kept across glBufferData)
+	// lane FARSKYMAP1: the far sky map's texture, the map it holds (kept alive while held) and the GPU's combined units
+	GLuint farSkyTex = 0;
+	std::shared_ptr<const FarSkyMap::Map> farSkyFor;
+	int maxUnits = -1;
+	bool farSlotStored = false, farRecStored = false;	// lane VKOBJ4: stores, as bufStored
 	const void * farDoc = nullptr;
 	int farVersion = 0;
 	const void * bloomDoc = nullptr;
 	int bloomVersion = 0;
 	// the depth cube array, the light each slot holds (-1 free), and a stamp the light buffer re-uploads on
 	GLuint shTex = 0, shFbo = 0;
+	bool shShared = false;	// lanes VKOBJ4 / VKFAR6: shTex is the present device's shared D16 cube array (WW_VKOBJ_SHADE or the view on Vulkan; celllamps.cpp shadowShareKey)
 	const void * shDoc = nullptr;
 	int shVersion = 0;
 	int shSlot[kShadowSlots];
@@ -151,7 +162,6 @@ struct Gpu
 	int shKick = 0;	// lane DOORLIVE1: a moving caster (a live door) re-renders every held slot
 	int shPend[kShadowSlots];	// lane PERFFIX2 b: the light a slot holds whose first store waits for a later frame (-1 none)
 	int shFace = 0;	// lane LAMPSHADOW1: the face edge shTex was made at (the tier's)
-	bool shShared = false;	// lane VKFAR6 (L8 term 5): shTex is the present device's shared D16 cube array
 	bool shAsked = false;	// lane VKFAR6: the share was wanted when shTex was made (shared or refused)
 	float shFade[kShadowSlots];	// lane GAPLOOK1: each slot's shadow strength under the budget (1 without it)
 	int shBudget = 0;

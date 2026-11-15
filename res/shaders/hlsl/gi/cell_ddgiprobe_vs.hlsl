@@ -6,7 +6,6 @@
 #define WW_HLSL_SRC 1	// the shared .hlsli files give their readable half
 #define Sample( s, uv ) SampleLevel( s, uv, 0 )	// GLSL: texture() outside a fragment shader reads level 0
 #define SampleCmp SampleCmpLevelZero	// the same for a shadow compare (SampleCmp is fragment-only)
-// inlined (no readable .hlsli yet): uniforms.glsl
 static float4 gl_Position;
 static int gl_VertexID;
 static int gl_InstanceID;
@@ -15,30 +14,7 @@ static int gl_InstanceID;
  * index, y = its state code for the states view). The probe's centre is the volume's own (the grid point + the atlas's
  * relocation offset), so the sphere sits where the read takes the probe, scroll and relocation included. */
 
-// uniforms.glsl inlined here: its .hlsli has no readable half yet (lane HLSLSRC1)
-cbuffer globalUniforms : register(b0, space0)
-{
-	row_major float3x3	viewMatrix : packoffset(c0);					// rotation part of view transform
-	row_major float3x3	envMapRotation : packoffset(c3);				// view space to environment map
-	row_major float4x4	projectionMatrix : packoffset(c6);
-	float4	lightSourcePosition[3] : packoffset(c10);
-	float4	lightSourceDiffuse[3] : packoffset(c13);
-	float4	lightSourceAmbient : packoffset(c16);
-	float	toneMapScale : packoffset(c17);				// 1.0 = full tone mapping
-	float	brightnessScale : packoffset(c17.y);
-	float	glowScale : packoffset(c17.z);
-	float	glowScaleSRGB : packoffset(c17.w);
-	int4	viewportDimensions : packoffset(c18);			// X, Y, width, height
-	uint	doSkinning : packoffset(c19);
-	int	sceneOptions : packoffset(c19.y);
-	int	cubeBgndMipLevel : packoffset(c19.z);
-	int	sfParallaxMaxSteps : packoffset(c19.w);
-	float	sfParallaxScale : packoffset(c20);
-	float	sfParallaxOffset : packoffset(c20.y);
-	float	unusedUniform1 : packoffset(c20.z);
-	float	unusedUniform2 : packoffset(c20.w);
-};
-// end of uniforms.glsl
+#include "../core/uniforms.hlsli"
 
 cbuffer LooseUniforms : register(b31, space0)
 {

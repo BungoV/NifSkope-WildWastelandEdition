@@ -5,6 +5,8 @@
 #include "cellworldanim.h"
 #include "wwswitch.h"
 #include "features/shared/camunired.h"	// lane EMPTY240 R12-1: the master's pin read once per switch generation
+#include "features/weather/weatherrecx.h"	// lane WEATHERRECX4: night.adaptFloor
+#include "features/weather/weatherrecxwire.h"
 
 #include <QByteArray>
 #include <QElapsedTimer>
@@ -346,6 +348,7 @@ float wwPhysExposure( const float * h, float adapted )
 	in.dayW = s.dayW;
 	in.hiSpread = wwEnvInt( "WW_PHYSUNITS_HILITE_RED" ) != 1 ? s.hiSpread : 0.0f;
 	in.red = camRed;
+	in.floor = WwRecxWire::adaptFloor( wwphys::kAdaptFloorCdm2, wwWeatherRecx().adaptFloor );	// lane WEATHERRECX4
 	const wwphys::CameraOut c = wwphys::cameraTarget( in );
 	const float target = pinned ? manual : c.target;
 	// the adaptation: the camera follows its target like the eye, and steps where a fade would show a load or a set

@@ -204,6 +204,7 @@ struct AoGpu
 	int giKeyW = 0, giKeyH = 0;
 	int giStep = 2;			// 2 half resolution, 1 full
 	bool giReady = false;	// this frame's screen GI
+	bool giShared = false;	// lane VKWATER3: giHalf.tex and giKey are shared targets of the present device (giShare)
 	bool volOn = false;		// this frame's volumes' mask was drawn
 	AoTarget volMask;		// lane PERF1: full size, the pixel's interior volume's room + 1 (R32F; 0 none)
 	GLuint volBuf = 0, volTex = 0, volVao = 0;	// the shapes, 3 RGBA32F texels each (a buffer texture)
@@ -226,10 +227,10 @@ void aoAlloc( NifSkopeOpenGLContext::GLFunctions * fn, AoTarget & t, int w, int 
 {
 	if ( t.tex && t.w == w && t.h == h )
 		return;
-	if ( !t.tex ) {
+	if ( !t.tex )
 		fn->glGenTextures( 1, &t.tex );
+	if ( !t.fbo )	// lane VKWATER3: kept when a shared texture went (giShare)
 		fn->glGenFramebuffers( 1, &t.fbo );
-	}
 	fn->glBindTexture( GL_TEXTURE_2D, t.tex );
 	fn->glTexImage2D( GL_TEXTURE_2D, 0, GLint( ifmt ), w, h, 0, fmt, GL_FLOAT, nullptr );
 	fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, linear ? GL_LINEAR : GL_NEAREST );
@@ -386,6 +387,59 @@ bool giVolMaskPass( Scene * scene, AoGpu & g, const WwCellGi * G, int W, int H, 
  * g-buffer, in each pixel's volume (the mask above, else the room grid): the sample and its key (world position,
  * packed normal), which the opaque cell-lit draws upsample (cell_lights.glsl cellGiSample). Runs inside wwCellAoPass,
  * after the depth pyramid; the caller restores the state. */
+/* lane VKWATER3 G4: while the view is on Vulkan the screen GI and its key are shared targets of the present device, so the
+ * cell twins' RT GI variant reads them with no copy (red WW_VKVIEW_GIHALF_RED=1, or a refusal: GL's own, as before; the
+ * twins then refuse the draws: "GL textures with no twin"). Sizes them hw x hh; aoAlloc and the key's upload then keep them */
+void giShare( NifSkopeOpenGLContext::GLFunctions * fn, AoGpu & g, int hw, int hh )
+{
+	const std::uintptr_t kHalf = reinterpret_cast<std::uintptr_t>( &g.giHalf.tex ), kKey = reinterpret_cast<std::uintptr_t>( &g.giKey );
+	const bool want = WwVkPresent::shareWanted( "WW_VKVIEW_GIHALF_RED" );
+	if ( g.giShared && ( !want || !WwVkPresent::sharedTargetIs( kHalf, g.giHalf.tex ) || !WwVkPresent::sharedTargetIs( kKey, g.giKey )
+		|| g.giHalf.w != hw || g.giHalf.h != hh ) ) {
+		WwVkPresent::sharedTargetDrop( kHalf );	// the present device's names: dropped there, not deleted here
+		WwVkPresent::sharedTargetDrop( kKey );
+		g.giHalf.tex = g.giKey = 0;
+		g.giHalf.w = g.giHalf.h = g.giKeyW = g.giKeyH = 0;
+		g.giShared = false;
+	}
+	if ( !want || g.giShared )
+		return;
+	unsigned a = 0, b = 0;
+	std::string why;
+	if ( !WwVkPresent::sharedTarget( kHalf, 0, hw, hh, 1, GL_RGBA32F, a, why ) || !WwVkPresent::sharedTarget( kKey, 0, hw, hh, 1, GL_RGBA32F, b, why ) ) {
+		WwVkPresent::sharedTargetDrop( kHalf );
+		WwVkPresent::sharedTargetDrop( kKey );
+		static std::string said;
+		if ( said != why ) {
+			said = why;
+			qInfo().noquote() << "vk gihalf: the screen GI stays GL's (" << QString::fromStdString( why ) << ")";
+		}
+		return;
+	}
+	if ( g.giHalf.tex )
+		fn->glDeleteTextures( 1, &g.giHalf.tex );
+	if ( g.giKey )
+		fn->glDeleteTextures( 1, &g.giKey );
+	for ( const unsigned t : { a, b } ) {
+		fn->glBindTexture( GL_TEXTURE_2D, t );
+		fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST );
+		fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST );
+		fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE );
+		fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE );
+		fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0 );
+	}
+	fn->glBindTexture( GL_TEXTURE_2D, 0 );
+	if ( !g.giHalf.fbo )
+		fn->glGenFramebuffers( 1, &g.giHalf.fbo );
+	fn->glBindFramebuffer( GL_FRAMEBUFFER, g.giHalf.fbo );
+	fn->glFramebufferTexture2D( GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, a, 0 );
+	g.giHalf.tex = a;
+	g.giKey = b;
+	g.giHalf.w = g.giKeyW = hw;
+	g.giHalf.h = g.giKeyH = hh;
+	g.giShared = true;
+}
+
 void giHalfPass( Scene * scene, AoGpu & g, int W, int H, float p00, float p11 )
 {
 	Renderer * r = scene->renderer;
@@ -398,6 +452,7 @@ void giHalfPass( Scene * scene, AoGpu & g, int W, int H, float p00, float p11 )
 	const int rate = wwCellGiRate();
 	g.giStep = rate == 1 || ( rate == 0 && !wwCellPrtOn() ) ? 1 : 2;
 	const int hw = ( W + g.giStep - 1 ) / g.giStep, hh = ( H + g.giStep - 1 ) / g.giStep;
+	giShare( fn, g, hw, hh );
 	aoAlloc( fn, g.giHalf, hw, hh, GL_RGBA32F, GL_RGBA, false );
 	if ( !g.giKey )
 		fn->glGenTextures( 1, &g.giKey );
@@ -442,15 +497,65 @@ void giHalfPass( Scene * scene, AoGpu & g, int W, int H, float p00, float p11 )
 	prog->uni1i( "giStep", g.giStep );
 	fn->glUniform2i( prog->uniLocation( "giFull" ), W, H );
 	prog->uni2f( "giProj", p00, p11 );
-	fn->glViewport( 0, 0, hw, hh );
-	fn->glDisable( GL_DEPTH_TEST );
-	fn->glDisable( GL_STENCIL_TEST );
-	fn->glDisable( GL_BLEND );
-	fn->glDisable( GL_CULL_FACE );
-	static const float quad[12] = { -1, -1, 0, 1, -1, 0, -1, 1, 0, 1, 1, 0 };
-	static const std::uint16_t idx[6] = { 0, 1, 2, 2, 1, 3 };
-	const float * attrs = quad;
-	r->drawShape( 4, 3, 6, GL_TRIANGLES, GL_UNSIGNED_SHORT, &attrs, idx );
+	/* lane VKFAR3 (A1 b): the ray-traced cascades' read on the present device (gihalf_vk.hlsl), the atlas read in place
+	 * (WwVkPresent::ddgiAtlasView), the uniforms this program was just given (kT_gihalf). Red WW_VKVIEW_GIHALF_RED=1: GL.
+	 * VKFAR4: refused while its gate (tests/vkframe/gihalfview.sh) is red; true only with that gate green */
+	static constexpr bool kGiHalfGateGreen = false;
+	bool vkDrew = false;
+	const char * vkGlWhy = nullptr;
+	if ( !WwVkPresent::shareWanted( "WW_VKVIEW_GIHALF_RED" ) )
+		vkGlWhy = "red WW_VKVIEW_GIHALF_RED=1 or the view not on Vulkan";
+	else if ( !kGiHalfGateGreen )
+		vkGlWhy = "its gate is red (gihalfview: NV GL's float order on the key, 82 E texels), GL draws it";
+	else if ( wwCellPrtOn() )
+		vkGlWhy = "the PRT read (the kernel holds the ray-traced branch only)";
+	else if ( prog->uniLocation( "cellDdgiCount" ) < 0 )
+		vkGlWhy = "the program has no cascades' read (cellDdgiCount)";
+	else {
+		unsigned ddgiBuf = 0;
+		const void * ddgiKey = rtddgiCellVkAtlas( scene, &ddgiBuf );
+		if ( !ddgiKey ) {
+			vkGlWhy = "the cascades' buffer is not shared with the present device";
+		} else {
+			WwVkPresent::LightRun t;
+			t.pass = WwVkPresent::LightGi;
+			auto put = [&]( unsigned tex, int w, int h, bool in, bool out ) {
+				WwVkPresent::LightImage i;
+				i.tex = tex;
+				i.glFmt = GL_RGBA32F;
+				i.w = w;
+				i.h = h;
+				i.in = in;
+				i.out = out;
+				t.img.push_back( i );
+				return int( t.img.size() ) - 1;
+			};
+			WwVkPresent::LightDispatch d;
+			d.kernel = WwVkPresent::LightGiHalf;
+			d.t[0] = put( g.gbuf.tex, g.gbuf.w, g.gbuf.h, true, false );
+			d.out0 = put( g.giHalf.tex, hw, hh, false, true );
+			d.out1 = put( g.giKey, hw, hh, false, true );
+			t.d.push_back( d );
+			t.ubo.assign( size_t( WwVkPresent::kT_gihalfBytes ), 0 );
+			WwVkPresent::fxPack( fn, prog->id, WwVkPresent::kT_gihalf, int( std::size( WwVkPresent::kT_gihalf ) ), t.ubo.data() );
+			t.ddgiKey = ddgiKey;
+			t.ddgiGlBuf = ddgiBuf;
+			std::string why;
+			vkDrew = WwVkPresent::lightRun( t, why );
+		}
+	}
+	WwVkPresent::lightSay( WwVkPresent::LightGi, !vkGlWhy, vkGlWhy );
+	if ( !vkDrew ) {
+		fn->glViewport( 0, 0, hw, hh );
+		fn->glDisable( GL_DEPTH_TEST );
+		fn->glDisable( GL_STENCIL_TEST );
+		fn->glDisable( GL_BLEND );
+		fn->glDisable( GL_CULL_FACE );
+		static const float quad[12] = { -1, -1, 0, 1, -1, 0, -1, 1, 0, 1, 1, 0 };
+		static const std::uint16_t idx[6] = { 0, 1, 2, 2, 1, 3 };
+		const float * attrs = quad;
+		r->drawShape( 4, 3, 6, GL_TRIANGLES, GL_UNSIGNED_SHORT, &attrs, idx );
+	}
 	r->stopProgram();
 	fn->glBindTexture( GL_TEXTURE_2D, 0 );
 	fn->glActiveTexture( GLenum( GL_TEXTURE0 + WwCellUnit::GiHalf ) );
@@ -459,11 +564,12 @@ void giHalfPass( Scene * scene, AoGpu & g, int W, int H, float p00, float p11 )
 	const GLenum one = GL_COLOR_ATTACHMENT0;
 	fn->glDrawBuffers( 1, &one );
 	g.giReady = true;
-	giEcho( QStringLiteral( "%1 %2x%3 screen %4x%5; volumes: mask %6 (%7 shapes)%8" ).arg( wwCellGiRate() == 3
+	giEcho( QStringLiteral( "%1 %2x%3 screen %4x%5; volumes: mask %6 (%7 shapes)%8; drawn on %9" ).arg( wwCellGiRate() == 3
 		? QStringLiteral( "red (the screen pass runs, the surfaces read inline)" ) : g.giStep == 1 ? QStringLiteral( "full" )
 		: QStringLiteral( "half" ) ).arg( W ).arg( H ).arg( hw ).arg( hh ).arg( volOn ? QStringLiteral( "on" ) : QStringLiteral( "off" ) )
 		.arg( G ? qint64( G->volShapes.size() / 12 ) : 0 )
-		.arg( wwCellPrtOn() ? QString() : QStringLiteral( "; the ray-traced volume's read (PERFFIX2)" ) ) );
+		.arg( wwCellPrtOn() ? QString() : QStringLiteral( "; the ray-traced volume's read (PERFFIX2)" ) )
+		.arg( vkDrew ? QStringLiteral( "Vulkan" ) : QStringLiteral( "GL" ) ) );
 }
 
 //! the telemetry line, printed when it changes
@@ -478,8 +584,13 @@ void aoEcho( const QString & line )
 
 /* lane VKLIGHT1 (L1): the depth mips and the obscurance (stages 1-4) as Vulkan compute (ao_vk.hlsl) on GL's own targets.
  * The g-buffer (stage 5) stays GL: it reads the depth-stencil resolve, which has no colour twin. false: why; GL's stages */
+const AoTarget * aoxVkAppend( WwVkPresent::LightRun & t, const AoGpu & g, int gbufImg, int method, int red, int W, int H,
+	const int ms[5][2], float p00, float p11 );
+
+/* aoxMethod != WwAoVanilla (lane VKFAR3): that ported method's stages ride in the same run (one crossing); aoxOut = the GL
+ * target that holds its term */
 bool aoVkStages( const AoGpu & g, bool obs, int W, int H, int hw, int hh, const int ms[5][2], float p00, float p11,
-	float radius, int angles, bool noBlur, bool noReset, std::string & why )
+	float radius, int angles, bool noBlur, bool noReset, int aoxMethod, int aoxRed, const AoTarget *& aoxOut, std::string & why )
 {
 	WwVkPresent::LightRun t;
 	t.pass = WwVkPresent::LightAo;
@@ -539,6 +650,14 @@ bool aoVkStages( const AoGpu & g, bool obs, int W, int H, int hw, int hh, const 
 		d.t[0] = across;
 		t.d.push_back( d );
 	}
+	aoxOut = nullptr;
+	if ( aoxMethod != WwAoVanilla ) {
+		aoxOut = aoxVkAppend( t, g, mip[0], aoxMethod, aoxRed, W, H, ms, p00, p11 );
+		if ( !aoxOut ) {
+			why = "no aox stage";
+			return false;
+		}
+	}
 	return WwVkPresent::lightRun( t, why );
 }
 
@@ -546,6 +665,76 @@ bool aoVkStages( const AoGpu & g, bool obs, int W, int H, int hw, int hh, const 
 constexpr float kAoxRadius = 38.4f, kAoxFalloff = 0.615f, kAoxIntensity = 1.0f, kAoxPower = 1.5f;
 constexpr int kAoxSlices = 9, kAoxSteps = 3;
 constexpr float kAoxDenoiseRadius = 2.0f, kAoxDenoiseSigma = 0.08f, kAoxBlurBeta = 1.2f;
+
+/* lane VKFAR3 (row 2): aoxPasses' draws as dispatches of aox_vk.hlsl (gate tests/vklight/light.sh aox): stage 1, stage 2 x4,
+ * then the method's stages ping-ponging xa / xb as GL does; every target but the last stays on Vulkan's side.
+ * nullptr: no stage (GL draws aoxPasses) */
+const AoTarget * aoxVkAppend( WwVkPresent::LightRun & t, const AoGpu & g, int gbufImg, int method, int red, int W, int H,
+	const int ms[5][2], float p00, float p11 )
+{
+	auto img = [&]( const AoTarget & a, unsigned fmt ) {
+		WwVkPresent::LightImage i;
+		i.tex = a.tex;
+		i.glFmt = fmt;
+		i.w = a.w;
+		i.h = a.h;
+		t.img.push_back( i );
+		return int( t.img.size() ) - 1;
+	};
+	int xz[5];
+	for ( int m = 0; m < 5; m++ )
+		xz[m] = img( g.xz[m], GL_R32F );
+	const int xa = img( g.xa, GL_R8 ), xb = img( g.xb, GL_R8 ), xe = method == WwAoXeGtao ? img( g.xe, GL_RG32F ) : -1;
+	int slices = kAoxSlices, steps = kAoxSteps;
+	wwAoTierCounts( ao().quality, ao().qualityRedOld, slices, steps );
+	// the push block: cell_aox.frag's uniforms (aox_vk.hlsl aoxLoad), i = ( stage, mipLevel )
+	const float c[6][4] = { { 2.0f / p00, -2.0f / p11, -1.0f / p00, 1.0f / p11 }, { kAoxRadius, kAoxFalloff, kAoxIntensity, kAoxPower },
+		{ float( slices ), float( steps ), kAoxDenoiseRadius, kAoxDenoiseSigma }, { kAoxBlurBeta, float( W ), float( H ), 0.0f },
+		{ float( ms[1][0] ), float( ms[1][1] ), float( ms[2][0] ), float( ms[2][1] ) },
+		{ float( ms[3][0] ), float( ms[3][1] ), float( ms[4][0] ), float( ms[4][1] ) } };
+	auto job = [&]( int kernel, int out0, int stage, int level ) {
+		WwVkPresent::LightDispatch d;
+		d.kernel = kernel;
+		d.out0 = out0;
+		std::memcpy( d.pc, c, sizeof( c ) );
+		const int v[4] = { stage, level, 0, 0 };
+		std::memcpy( d.pc + 112, v, sizeof( v ) );
+		return d;
+	};
+	WwVkPresent::LightDispatch d = job( WwVkPresent::LightAoxZ, xz[0], 1, 0 );
+	d.t[0] = gbufImg;
+	t.d.push_back( d );
+	for ( int m = 1; m < 5; m++ ) {
+		d = job( WwVkPresent::LightAoxZ, xz[m], 2, m );
+		d.t[1] = xz[m - 1];
+		t.d.push_back( d );
+	}
+	const int * st = wwAoMethodStages( method );
+	int in = -1;
+	for ( int i = 0; st[i]; i++ ) {
+		if ( red == 2 && st[i] == 5 )
+			break;	// WW_CELL_AO_METHOD_RED=raw: the term before the bilateral denoise
+		const int out = st[i] == 6 ? xe : in == xa ? xb : xa;
+		if ( out < 0 )
+			return nullptr;
+		d = job( st[i] == 6 ? WwVkPresent::LightAoxXe : WwVkPresent::LightAoxR8, out, st[i], 0 );
+		if ( st[i] == 3 || st[i] == 4 || st[i] == 6 ) {
+			d.t[0] = gbufImg;
+			for ( int m = 1; m < 5; m++ )
+				d.t[m] = xz[m];
+		} else {
+			if ( st[i] == 5 )
+				d.t[0] = gbufImg;
+			d.t[1] = in;
+		}
+		t.d.push_back( d );
+		in = out;
+	}
+	if ( in < 0 || in == xe )
+		return nullptr;
+	t.img[size_t( in )].out = true;
+	return in == xa ? &g.xa : &g.xb;
+}
 
 //! lane SSAO2: a ported method's full-size passes (res/shaders/features/ao/cell_aox.frag) over the opaque pass; sets g.aoTex
 const char * aoxPasses( Renderer * r, AoGpu & g, int method, int red, int W, int H, const int ms[5][2], float p00, float p11 )
@@ -1182,9 +1371,15 @@ void wwCellAoPass( Scene * scene, bool run )
 	const bool aoObs = a.on && ( method == WwAoVanilla || a.methodRed == 1 );
 	// lane VKLIGHT1 (L1): the pyramid and the obscurance on the present device (WW_VKVIEW=1; red WW_VKVIEW_AO_RED=1: GL)
 	bool aoVk = false;
+	/* lane VKFAR3 (row 2): XeGTAO, GTAO and HBAO in the same run (red WW_VKVIEW_AOX_RED=1: GL). HBAO since round 3: its step
+	 * that lands on the centre texel is skipped in the readable HLSL (a direction from rounding noise before) */
+	const char * aoxGlWhy = method == WwAoVanilla ? nullptr : a.methodRed == 1 ? "red WW_CELL_AO_METHOD_RED=vanilla" : wwEnvInt( "WW_VKVIEW_AOX_RED" ) == 1 ? "red WW_VKVIEW_AOX_RED=1" : nullptr;
+	const bool aoxWant = method != WwAoVanilla && !aoxGlWhy;
+	const AoTarget * aoxVkOut = nullptr;
 	if ( WwVkPresent::shareWanted( "WW_VKVIEW_AO_RED" ) ) {
 		std::string why;
-		aoVk = aoVkStages( g, aoObs, W, H, hw, hh, ms, p00, p11, radius, angles, ( a.red & 4 ) != 0, ( a.red & 8 ) != 0, why );
+		aoVk = aoVkStages( g, aoObs, W, H, hw, hh, ms, p00, p11, radius, angles, ( a.red & 4 ) != 0, ( a.red & 8 ) != 0,
+			aoxWant ? method : int( WwAoVanilla ), a.methodRed, aoxVkOut, why );
 		WwVkPresent::lightSay( WwVkPresent::LightAo, true, nullptr );
 	} else {
 		WwVkPresent::lightSay( WwVkPresent::LightAo, false, "red WW_VKVIEW_AO_RED=1 or the view not on Vulkan" );
@@ -1203,8 +1398,20 @@ void wwCellAoPass( Scene * scene, bool run )
 	r->stopProgram();
 	g.aoTex = a.on ? g.fin.tex : 0;
 	const char * aoxRefused = nullptr;
-	if ( method != WwAoVanilla )
+	const bool aoxOnVk = aoVk && aoxVkOut;
+	if ( aoxOnVk )
+		g.aoTex = aoxVkOut->tex;
+	else if ( method != WwAoVanilla )
 		aoxRefused = aoxPasses( r, g, method, a.methodRed, W, H, ms, p00, p11 );
+	if ( method != WwAoVanilla ) {
+		static std::string said;
+		const std::string line = aoxOnVk ? std::string( "on Vulkan (" ) + wwAoMethodName( method ) + ", in the ao run)"
+			: std::string( "on GL (" ) + ( aoxGlWhy ? aoxGlWhy : aoVk ? "the ao run had no aox stage" : "the ao run on GL" ) + ")";
+		if ( line != said ) {
+			said = line;
+			std::fprintf( stderr, "vk aox: %s\n", line.c_str() );
+		}
+	}
 	for ( int u = 0; u < 6; u++ ) {
 		fn->glActiveTexture( GLenum( GL_TEXTURE0 + u ) );
 		fn->glBindTexture( GL_TEXTURE_2D, 0 );
@@ -1229,7 +1436,7 @@ void wwCellAoPass( Scene * scene, bool run )
 			.arg( double( kAoxRadius ), 0, 'f', 2 ).arg( double( kAoxFalloff ), 0, 'f', 3 ).arg( double( kAoxIntensity ), 0, 'f', 2 )
 			.arg( double( kAoxPower ), 0, 'f', 2 ).arg( aoxSl ).arg( aoxSt )
 			.arg( aoxRefused ? QString::fromLatin1( aoxRefused ) : g.aoTex == g.fin.tex ? QStringLiteral( "vanilla(red)" )
-				: QStringLiteral( "aox" ) ).arg( a.methodRed ).arg( timer.elapsed() ).arg( a.quality );
+				: aoxOnVk ? QStringLiteral( "aox vk" ) : QStringLiteral( "aox" ) ).arg( a.methodRed ).arg( timer.elapsed() ).arg( a.quality );
 	} else {
 		a.last = QStringLiteral( "on %1x%2 half %3x%4 radius %5 bias %6 intensity %7 angles %8 p00 %9 p11 %10 p20 %11 p21 %12 "
 			"unit %13 red %14 ms %15 quality %16" ).arg( W ).arg( H ).arg( hw ).arg( hh ).arg( double( radius ), 0, 'f', 2 )
@@ -1331,6 +1538,7 @@ bool wwCellAoTargets( Scene * scene, WwCellAoTargets & out )
 		return false;
 	out.gbuf = g.gbuf.tex;
 	out.depthRb = g.gbufDepth;
+	out.depthFmt = g.gbufFmt;
 	out.w = g.gbuf.w;
 	out.h = g.gbuf.h;
 	for ( int m = 1; m < 5; m++ ) {

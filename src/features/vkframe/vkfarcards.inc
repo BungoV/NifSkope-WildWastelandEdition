@@ -11,6 +11,7 @@ namespace
 {
 constexpr GLenum kFcCubeArray = 0x9009, kFcBindingCubeArray = 0x900A, kFcDepth16 = 0x81A5;
 constexpr std::uint32_t kFcSets = 256;  // lane VKFAR2: descriptor sets, one a card set drawn in a pass (more: GL draws the pass)
+constexpr GLenum kFcCube = 0x8513, kFcBindingCube = 0x8514;  // lane VKOBJ5: TEXTURE_CUBE_MAP / its binding
 
 struct FcFormat
 {
@@ -93,6 +94,7 @@ VkDeviceSize fcLayerBytes( const FcFormat & f, int w, int h )
 struct FarCards
 {
 	std::map<std::uintptr_t, Shared> twins;
+	std::map<std::uintptr_t, std::uint64_t> twinGen;  // lane VKFAR4: sharedGen() at each key's last make (a cache of a twin keys on it)
 	std::map<std::uintptr_t, FcBuf> bufs;
 	FcDev d;
 	// 3. the far cards' set (farCardsSet)
@@ -134,19 +136,24 @@ bool fcFeatures( bool bc, bool cubeArray, std::string & why )
 	return true;
 }
 
+/* lane VKOBJ4: set around objTexMake's farTwin (vkobjtex.inc): a new twin gets no layout change of its own (no submit, so
+ * no drain or idle wait either); GL's semaphore signal at the batch's flush hands it over as GENERAL */
+bool fcLayoutByGl = false;
+
 // one image the present device makes and GL imports, sampled only (BC has no attachment use); a cube array is
-// cube-compatible with layers = 6 x cubes. GENERAL from the start, as makeShared's.
+// cube-compatible with layers = 6 x cubes. GENERAL from the start, as makeShared's. Lane VKOBJ5: type 4 a plain cube
+// (6 layers, GL_TEXTURE_CUBE_MAP; the particles' CubeMap)
 bool fcMake( Shared & s, const FcFormat & f, GLenum glFmt, int type, int w, int h, int layers, int levels, std::string & why )
 {
 	Vk & v = vk();
 	Gl & g = gl();
-	const bool cube = type == 3;
+	const bool cube = type == 3, plainCube = type == 4;
 	VkImageUsageFlags usage = VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
 	if ( f.depth )
 		usage |= VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;  // GL's shadow cubes are drawn into: the import wants every use
 	else if ( !f.block )
 		usage |= VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
-	const VkImageCreateFlags flags = cube ? VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT : 0;
+	const VkImageCreateFlags flags = cube || plainCube ? VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT : 0;
 	VkImageFormatProperties ip {};
 	if ( v.vkGetPhysicalDeviceImageFormatProperties( v.phys, f.fmt, VK_IMAGE_TYPE_2D, VK_IMAGE_TILING_OPTIMAL, usage, flags, &ip ) != VK_SUCCESS
 		|| ip.maxExtent.width < std::uint32_t( w ) || ip.maxExtent.height < std::uint32_t( h ) || ip.maxArrayLayers < std::uint32_t( layers )
@@ -197,8 +204,8 @@ bool fcMake( Shared & s, const FcFormat & f, GLenum glFmt, int type, int w, int 
 	VkCommandBuffer cmd = VK_NULL_HANDLE;
 	VkFence fence = VK_NULL_HANDLE;
 	VkFenceCreateInfo fi { VK_STRUCTURE_TYPE_FENCE_CREATE_INFO };
-	bool laid = false;
-	if ( v.vkAllocateCommandBuffers( v.dev, &cai, &cmd ) == VK_SUCCESS && v.vkCreateFence( v.dev, &fi, nullptr, &fence ) == VK_SUCCESS ) {
+	bool laid = fcLayoutByGl;
+	if ( !laid && v.vkAllocateCommandBuffers( v.dev, &cai, &cmd ) == VK_SUCCESS && v.vkCreateFence( v.dev, &fi, nullptr, &fence ) == VK_SUCCESS ) {
 		VkCommandBufferBeginInfo bi { VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
 		bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
 		v.vkBeginCommandBuffer( cmd, &bi );
@@ -228,10 +235,10 @@ bool fcMake( Shared & s, const FcFormat & f, GLenum glFmt, int type, int w, int 
 		why = "vkGetMemoryWin32HandleKHR (a far-card twin) failed";
 		return false;
 	}
-	const GLenum target = cube ? kFcCubeArray : layers > 1 || type == 2 ? kTexture2DArray : kTexture2D;
+	const GLenum target = plainCube ? kFcCube : cube ? kFcCubeArray : layers > 1 || type == 2 ? kTexture2DArray : kTexture2D;
 	while ( g.getError() != 0 ) {}
 	GLint was = 0;
-	g.getIntegerv( cube ? kFcBindingCubeArray : target == kTexture2DArray ? kTexBinding2DArray : kTexBinding2D, &was );
+	g.getIntegerv( plainCube ? kFcBindingCube : cube ? kFcBindingCubeArray : target == kTexture2DArray ? kTexBinding2DArray : kTexBinding2D, &was );
 	g.createMemoryObjects( 1, &s.obj );
 	const GLint one = 1;
 	g.memoryObjectParameteriv( s.obj, kDedicated, &one );
@@ -240,7 +247,7 @@ bool fcMake( Shared & s, const FcFormat & f, GLenum glFmt, int type, int w, int 
 	CloseHandle( mh );
 	g.genTextures( 1, &s.tex );
 	g.bindTexture( target, s.tex );
-	if ( target == kTexture2D )
+	if ( target == kTexture2D || plainCube )  // a cube's 6 faces: 2D storage on GL_TEXTURE_CUBE_MAP
 		g.texStorageMem2D( target, levels, glFmt, w, h, s.obj, 0 );
 	else
 		g.texStorageMem3D( target, levels, glFmt, w, h, layers, s.obj, 0 );
@@ -253,7 +260,7 @@ bool fcMake( Shared & s, const FcFormat & f, GLenum glFmt, int type, int w, int 
 			+ std::to_string( errStorage ) + ")";
 		return false;
 	}
-	s.view = imageView( s.img, cube ? VK_IMAGE_VIEW_TYPE_CUBE_ARRAY : target == kTexture2DArray ? VK_IMAGE_VIEW_TYPE_2D_ARRAY : VK_IMAGE_VIEW_TYPE_2D,
+	s.view = imageView( s.img, plainCube ? VK_IMAGE_VIEW_TYPE_CUBE : cube ? VK_IMAGE_VIEW_TYPE_CUBE_ARRAY : target == kTexture2DArray ? VK_IMAGE_VIEW_TYPE_2D_ARRAY : VK_IMAGE_VIEW_TYPE_2D,
 		f.fmt, aspect, std::uint32_t( levels ), std::uint32_t( layers ) );
 	if ( !s.view ) {
 		why = "a far-card twin's image view failed";
@@ -472,9 +479,10 @@ bool farTwin( std::uintptr_t key, int type, int w, int h, int layers, unsigned g
 	};
 	if ( !v.ok || !g.ok || g.ctx != reinterpret_cast<void *>( wglGetCurrentContext() ) )
 		return fail( "the present device or GL's entry points are not ready in this context" );
-	if ( !g.texStorageMem3D && type != 0 )
+	if ( !g.texStorageMem3D && type != 0 && type != 4 )
 		return fail( "no glTexStorageMem3DEXT (a 2D array / cube array twin)" );
-	if ( w < 1 || h < 1 || ( type != 0 && type != 2 && type != 3 ) || ( type == 3 && ( layers < 6 || layers % 6 ) ) )
+	if ( w < 1 || h < 1 || ( type != 0 && type != 2 && type != 3 && type != 4 ) || ( type == 3 && ( layers < 6 || layers % 6 ) )
+		|| ( type == 4 && ( layers != 6 || w != h ) ) )
 		return fail( "a far-card twin of size " + std::to_string( w ) + "x" + std::to_string( h ) + "x" + std::to_string( layers ) + " type "
 			+ std::to_string( type ) );
 	const FcFormat f = fcFormat( GLenum( glFmt ) );
@@ -492,8 +500,10 @@ bool farTwin( std::uintptr_t key, int type, int w, int h, int layers, unsigned g
 			return true;
 		}
 	}
-	drain();
-	v.vkDeviceWaitIdle( v.dev );
+	if ( !fcLayoutByGl || it != C.twins.end() ) {
+		drain();
+		v.vkDeviceWaitIdle( v.dev );
+	}
 	if ( it != C.twins.end() ) {
 		C.st.mb -= it->second.mb;
 		sharedFree( it->second, it->second.glCtx == g.ctx );
@@ -517,6 +527,7 @@ bool farTwin( std::uintptr_t key, int type, int w, int h, int layers, unsigned g
 	C.st.mb += s.mb;
 	tex = s.tex;
 	C.twins[key] = s;
+	C.twinGen[key] = ++sharedGen();  // lane VKFAR4: what is kept of a twin (fcSheet's copy, the zero cube's clear) keys on it
 	return true;
 }
 
@@ -532,6 +543,7 @@ void farTwinDrop( std::uintptr_t key )
 	C.st.dropped++;
 	sharedFree( it->second, gl().ok && it->second.glCtx == gl().ctx );
 	C.twins.erase( it );
+	sharedGen()++;
 }
 
 // one level of one layer as the present device sees it (the gates compare it with what GL wrote; GL finished first)

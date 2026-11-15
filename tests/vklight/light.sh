@@ -2,7 +2,7 @@
 # Lane VKLIGHT1 (2026-11-12): the lighting passes on Vulkan compute (res/shaders/hlsl/vklight/*.hlsl) against the GL .frag
 # chains on the same inputs (tests/vklight/light_gl_ref.py, a hidden GL context; tests/vklight/lightmatch.cpp, a headless
 # Vulkan device). Copied from VKFRAME1's tests/vkframe/postfx.sh.
-# bash tests/vklight/light.sh <out dir> [<WW_CELL_HDR_DUMP .hdr>] [<pass> ...]     (passes: ao contact ssgi ssr; default all)
+# bash tests/vklight/light.sh <out dir> [<WW_CELL_HDR_DUMP .hdr>] [<pass> ...]     (passes: ao contact ssgi ssr aox; default all)
 # VKLIGHT_NOTIME=1 skips every timing (gate only, while another job loads the GPU).
 # Needs MSYS2 UCRT64 g++ (Vulkan headers), DXC (DXC= to override) and python with numpy.
 # Green: every job LIGHTMATCH EXACT or BOUND; each kernel's red build must FAIL its job. Last line `VKLIGHT GATE OK` / `FAILED`.
@@ -10,7 +10,7 @@ set -u
 OUT="${1:?out dir}"
 HDR="${2:-X:/ClaudeOverflow/fogmatch1/m1/mem_fm_def.hdr}"
 shift; [ $# -gt 0 ] && shift
-PASSES="${*:-ao contact ssgi ssr}"
+PASSES="${*:-ao contact ssgi ssr aox}"
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 DXC="${DXC:-/e/Tools/dxc/bin/x64/dxc.exe}"
 PY="${PY:-$(command -v python)}"	# before the UCRT64 PATH: its python has no numpy
@@ -34,8 +34,15 @@ for p in $PASSES; do
 		JOBS="$JOBS ao_A ao_L ao_N ao_S ao_SL"; NRED=$((NRED + 5)) ;;
 	contact) K="$K contact:contact_vk.hlsl::CONTACT_RED"
 		JOBS="$JOBS ct_A ct_B ct_C ct_S"; NRED=$((NRED + 1)) ;;
-	ssgi) K="$K ssgi:ssgi_vk.hlsl::SSGI_RED"
-		JOBS="$JOBS sg_A sg_B sg_S"; NRED=$((NRED + 1)) ;;
+	ssgi) K="$K ssgi:ssgi_vk.hlsl::SSGI_RED ssgie:ssgi_vk.hlsl::SSGI_EMIT_RED"	# ssgie: lane VKFAR3, the emission subtracted
+		JOBS="$JOBS sg_A sg_B sg_S sg_E"; NRED=$((NRED + 2)) ;;
+	aox) K="$K aox_z:aox_vk.hlsl:-DAOX_KERNEL=1:AOX_Z_RED aox_xe:aox_vk.hlsl:-DAOX_KERNEL=2:AOX_XE_RED
+		aox_r8:aox_vk.hlsl:-DAOX_KERNEL=3:AOX_R8_RED aox_hb:aox_vk.hlsl:-DAOX_KERNEL=3:AOX_HB_RED"	# lane VKFAR3: the ported AO methods
+		# ax_H (HBAO) is held against the readable HLSL through SPIR-V on GL (the app's live route; the GLSL keeps the old divide)
+		"$PY" -I "$ROOT/tests/hlsllive/build_spv.py" "$(W "$OUT/glspv")" "$(W "$ROOT/tests/vklight/fullscreen_vs.hlsl")" \
+			"$(W "$ROOT/res/shaders/hlsl/ao/cell_aox_ps.hlsl")" | grep -v "^OK" && { echo "VKLIGHT GATE FAILED (GL SPIR-V)"; exit 1; }
+		export VKLIGHT_SPV_DIR="$(W "$OUT/glspv")"
+		JOBS="$JOBS ax_X ax_G ax_S ax_H"; NRED=$((NRED + 4)) ;;
 	ssr) K="$K ssr_ray:ssr_vk.hlsl:-DSSR_STAGE=1:SSR_RED ssr_march:ssr_vk.hlsl:-DSSR_STAGE=2:SSR_RED
 		ssr_across:ssr_vk.hlsl:-DSSR_STAGE=3:SSR_RED ssr_down:ssr_vk.hlsl:-DSSR_STAGE=4:SSR_RED"
 		JOBS="$JOBS ss_A ss_W ss_R ss_S"; NRED=$((NRED + 4)) ;;

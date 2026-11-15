@@ -2,12 +2,14 @@
 
 #include "features/near/cellbindlesspool.h"
 #include "features/near/cellbindlessreopen.h"
+#include "features/near/celltwinpick.h"	// lane VKOBJ5: the twin and its variant a GL program is drawn by
 #include "gl/celllooks.h"
 #include "gl/glshape.h"
 #include "wwswitch.h"
 #include "wwsyncwait.h"	// lane EMPTY240 R4-2: the ring's wrap wait by name
 #include "gl/gpustage.h"	// MODULES1: the pool is filled by a GPU copy (no driver RAM copy)
 #include "gl/wwuploadcap.h"	// lane EMPTY240 R5-1: the pool's intake counts in the paint's upload budget
+#include "features/far-ground/cellfarground.h"	// lane VKFAR4: queued far-ground tiles drawn before the arena moves
 
 #include <QObject>
 #include <QOpenGLContext>
@@ -23,8 +25,12 @@
 #include <vector>
 
 bool wwFrameLog();	// gl/cellcull.cpp
+bool rtddgiCellShaderDefine();      // lane VKOBJ5 (vkBlDraw): src/features/gi/rtddgicell.cpp, WW_CELL_RTDDGI in the cell programs
+bool rtddgiRestirShaderDefine();    // WW_CELL_RESTIR
+bool rtddgiRestirGiShaderDefine();  // WW_CELL_RESTIRGI
 
 #include "features/vkframe/vkobjtex.h"	// lane VKOBJ3: the cache's BC twins in the Vulkan bindless table
+#include "features/vkframe/vkobjpipe.h"	// lane VKOBJ4: a run's multi-draw on Vulkan (WW_VKOBJ_SHADE)
 
 #ifndef GL_SHADER_STORAGE_BUFFER
 #define GL_SHADER_STORAGE_BUFFER 0x90D2
@@ -130,6 +136,7 @@ struct Ctx
 	long long draws = 0, pooled = 0, uploads = 0, waits = 0, conflicts = 0, fallbacks = 0, rebuilds = 0;
 	long long conflictsAll = 0;
 	long long runs = 0, merged = 0, mdiCalls = 0, longest = 0;	// lane BINDLESSMDI1
+	long long vkRuns = 0;	// lane VKOBJ4: runs drawn on Vulkan (WW_VKOBJ_SHADE)
 	QString line;
 	/* lane BINDREOPEN1: the functions of the last draw (the frame sweep's fences and shrinks have no caller's), one
 	 * fence per frame that released pool spans (a grave's range is reused once its frame's fence passed), counters */
@@ -267,7 +274,8 @@ bool vkTexOn()
 
 int vkTexRed()
 {
-	WW_SWITCH_STATIC( int, r, wwEnv( "WW_VKOBJ_TEX_RED" ).trimmed() == "key" ? 1 : 0 );
+	// lane VKOBJ4: `swz`, the swizzle's own view dropped (BC4's R,R,R,1 reads R,0,0,1)
+	WW_SWITCH_STATIC( int, r, wwEnv( "WW_VKOBJ_TEX_RED" ).trimmed() == "key" ? 1 : wwEnv( "WW_VKOBJ_TEX_RED" ).trimmed() == "swz" ? 2 : 0 );
 	return r;
 }
 
@@ -280,7 +288,7 @@ namespace
 {
 std::vector<Row> vkRows;  // lane VKOBJ3: the frame's rows, translated by the Vulkan table at frame()
 bool vkTexEver = false;
-std::string vkLine;
+std::string vkLine, vkLoadLine, vkShadeLine, vkCellLine, vkPbrmLine, vkPfxLine, vkFxLine;
 
 void vkRowCensus()
 {
@@ -538,7 +546,158 @@ bool runPoolPeek( const Shape * sh, std::uintptr_t & idxOff, std::int32_t & base
 	return true;
 }
 
-bool runIssue( NifSkopeOpenGLContext::GLFunctions * f )
+bool vkShadeOn()
+{
+	WW_SWITCH_STATIC( bool, want, wwEnv( "WW_VKOBJ_SHADE" ).trimmed() == "1" );
+	return want && vkTexOn();
+}
+
+namespace
+{
+// lane VKOBJ4: the run on Vulkan through its program's twin (false: GL draws it; objBlShade counted why)
+bool vkShade( const NifSkopeOpenGLContext::Program * prog, GLsizei n )
+{
+	Ctx & c = cx();
+	if ( !prog || !c.boundCls ) {
+		WwVkPresent::objBlOnGl( "no program or class" );
+		return false;
+	}
+	const std::string_view nm = prog->name;
+	const int twin = nm.find( "cellcsmbl" ) != std::string_view::npos ? 1 : nm.find( "cellbl" ) != std::string_view::npos ? 0 : -1;
+	if ( twin < 0 ) {
+		WwVkPresent::objBlOnGl( "the program has no Vulkan twin" );
+		return false;
+	}
+	/* lane VKWATER3 G4: the bl twins are the base variant (fo4_cellbl.frag@WW_CELL_FOGLEAK+WW_FRAME_UBO) and the all-on route's
+	 * RT GI variant (objBlVariant); the loader's other defines make another program, which GL draws. The RT twin is built
+	 * (objbl_cell(csm)_rt_ps) but its colour gate is owed: GL draws that key until it passes */
+	const char * no = nullptr;
+	const int variant = WwVkPresent::objBlVariant( prog->wwDefs, no );
+	if ( variant != 0 ) {
+		WwVkPresent::objBlOnGl( variant < 0 ? no : "the RT GI variant: its bl twin is built, its colour gate owed (GL draws it)" );
+		return false;
+	}
+	const Class & k = *c.boundCls;
+	WwVkPresent::ObjBlShade s;
+	s.twin = twin;
+	s.prog = prog->id;
+	s.poolKey = reinterpret_cast<std::uintptr_t>( &k );
+	s.pool.attrMask = k.attrMask;
+	std::copy( k.vbo, k.vbo + 16, s.pool.vbo );
+	s.pool.ebo = k.ebo;
+	s.pool.verts = k.a.vertUsed;
+	s.pool.indices = k.a.idxUsed;
+	s.rows = c.map + std::size_t( run.base ) * sizeof( Row );
+	s.nRows = run.rows;
+	s.rowsAtBase = true;  // lane VKOBJ5: GL's wwDrawBase is the leader's row (commit), the rows start there
+	s.cmds = c.cmdMap + std::size_t( run.cmd0 ) * kCmdBytes;
+	s.nCmds = std::size_t( n );
+	std::string why;
+	return WwVkPresent::objBlShade( []( const char * name ) -> void * {
+		return reinterpret_cast<void *>( QOpenGLContext::currentContext()->getProcAddress( name ) );
+	}, s, why );
+}
+
+/* lane VKOBJ5 (plan row G4): the shapes that never join a run (bsshape's run predicate takes rigid, opaque, pooled shapes
+ * only; a run of one rolls back to its leader's plain draw), counted per kind: 0 skinned `vk objskin:`, 1 alpha-tested
+ * `vk objalpha:`, 2 rigid `vk objrigid:` (neither), 3 unpooled `vk objown:` (any of them; a shape counts in each kind it is) */
+constexpr int kBlKinds = 4;
+long long blTried[kBlKinds] = {}, blDrawn[kBlKinds] = {};
+std::string blWhy[kBlKinds], vkBlLine[kBlKinds];
+int blOwnKey = 0;  // the unpooled shapes' one pool key (objBlShade waits the last crossing before refilling it)
+}  // namespace
+
+bool vkBlDraw( const NifSkopeOpenGLContext::Program * prog, const GLsizei * counts, const void * const * offs, GLsizei n,
+	std::size_t verts )
+{
+	Ctx & c = cx();
+	QOpenGLContext * qc = QOpenGLContext::currentContext();
+	if ( !vkShadeOn() || !prog || n <= 0 || !c.map || !qc )
+		return false;
+	const bool own = !geo.on;  // unpooled: the shape's own VAO is bound (bsshape), its indices from 0, base vertex 0
+	if ( ( !own && !c.boundCls ) || ( own && !verts ) )
+		return false;
+	const std::string_view nm = prog->name;
+	const int twin = nm.find( "cellcsmbl" ) != std::string_view::npos ? 1 : nm.find( "cellbl" ) != std::string_view::npos ? 0 : -1;
+	if ( twin < 0 )
+		return false;
+	QOpenGLFunctions * gf = qc->functions();
+	// skinned: the bone codes at location 5 (bsshape feeds them only for a GPU-skinned shape): the class's, or the VAO's
+	GLint loc5 = 0;
+	if ( own )
+		gf->glGetVertexAttribiv( 5, GL_VERTEX_ATTRIB_ARRAY_ENABLED, &loc5 );
+	const bool skinned = own ? loc5 != 0 : ( ( c.boundCls->attrMask >> 20 ) & 15u ) != 0;
+	// alpha-tested: alphaFlags' test bits (0 always, 1 <, 2 ==, 3 <=, 4 >, 5 !=, 6 >=, 7 never; bit 3 is the blend)
+	GLint alphaFlags = 0;
+	const GLint at = gf->glGetUniformLocation( prog->id, "alphaFlags" );
+	if ( at >= 0 )
+		gf->glGetUniformiv( prog->id, at, &alphaFlags );
+	const bool alphaTest = ( alphaFlags & 7 ) != 0;
+	const bool rigid = !skinned && !alphaTest;
+	const bool in[kBlKinds] = { skinned, alphaTest, rigid, own };
+	for ( int i = 0; i < kBlKinds; i++ )
+		blTried[i] += in[i];
+	auto refuse = [&]( const std::string & w ) {
+		for ( int i = 0; i < kBlKinds; i++ )
+			if ( in[i] )
+				blWhy[i] = w;
+		return false;
+	};
+	/* the shipped bl twins are the code-default route; the RT GI variant (WW_CELL_RTDDGI + cascades + RESTIR / RESTIRGI) is
+	 * lane VKWATER3's: until its twin lands, such a program stays on GL with the reason in the line */
+	const char * no = ::rtddgiCellShaderDefine() ? "WW_CELL_RTDDGI in GL's program: no Vulkan twin"
+		: ::rtddgiRestirShaderDefine() ? "WW_CELL_RESTIR in GL's program: no Vulkan twin"
+		: ::rtddgiRestirGiShaderDefine() ? "WW_CELL_RESTIRGI in GL's program: no Vulkan twin" : nullptr;
+	if ( no )
+		return refuse( no );
+	if ( rigid && gf->glIsEnabled( GL_BLEND ) )
+		return refuse( "a blended rigid shape (the opaque route only)" );
+	static std::vector<std::uint32_t> cmds;
+	cmds.clear();
+	const std::uintptr_t idxOff = own ? 0 : geo.idxOff;
+	const std::int32_t baseVertex = own ? 0 : geo.baseVertex;
+	for ( GLsizei i = 0; i < n; i++ )
+		cmds.insert( cmds.end(), { std::uint32_t( counts[i] ), 1u, std::uint32_t( ( std::uintptr_t( offs[i] ) + idxOff ) / 2 ),
+			std::uint32_t( baseVertex ), 0u } );
+	WW_SWITCH_STATIC( int, redSkin, wwEnv( "WW_VKVIEW_OBJSKIN_RED" ).trimmed() == "bone" ? 1 : 0 );
+	WW_SWITCH_STATIC( int, redAlpha, wwEnv( "WW_VKVIEW_OBJALPHA_RED" ).trimmed() == "flags" ? 1 : 0 );
+	WW_SWITCH_STATIC( QString, redOwnName, wwEnv( "WW_VKVIEW_OBJOWN_RED" ).trimmed() );
+	WwVkPresent::ObjBlShade s;
+	s.twin = twin;
+	s.prog = prog->id;
+	if ( own ) {
+		s.poolKey = reinterpret_cast<std::uintptr_t>( &blOwnKey );
+		s.pool.verts = verts;
+		s.ownVao = true;
+		s.ownRed = redOwnName == "offset" ? 1 : redOwnName == "half" ? 2 : 0;
+	} else {
+		const Class & k = *c.boundCls;
+		s.poolKey = reinterpret_cast<std::uintptr_t>( &k );
+		s.pool.attrMask = k.attrMask;
+		std::copy( k.vbo, k.vbo + 16, s.pool.vbo );
+		s.pool.ebo = k.ebo;
+		s.pool.verts = k.a.vertUsed;
+		s.pool.indices = k.a.idxUsed;
+	}
+	s.rows = c.map + std::size_t( ( c.cursor + kRows - 1 ) % kRows ) * sizeof( Row );  // the shape's own row (commit wrote it)
+	s.nRows = 1;
+	s.rowsAtBase = true;  // GL's wwDrawBase is that row
+	s.cmds = cmds.data();
+	s.nCmds = cmds.size() / 5;
+	s.skinRed = skinned ? redSkin : 0;
+	s.alphaRed = alphaTest ? redAlpha : 0;
+	std::string why;
+	const bool drew = WwVkPresent::objBlShade( []( const char * name ) -> void * {
+		return reinterpret_cast<void *>( QOpenGLContext::currentContext()->getProcAddress( name ) );
+	}, s, why );
+	if ( !drew )
+		return refuse( why );
+	for ( int i = 0; i < kBlKinds; i++ )
+		blDrawn[i] += in[i];
+	return true;
+}
+
+bool runIssue(NifSkopeOpenGLContext::GLFunctions * f, const NifSkopeOpenGLContext::Program * prog )
 {
 	Ctx & c = cx();
 	if ( !run.open )
@@ -549,7 +708,9 @@ bool runIssue( NifSkopeOpenGLContext::GLFunctions * f )
 		return false;
 	}
 	const GLsizei n = GLsizei( c.cmdCursor - run.cmd0 );
-	if ( n > 0 ) {
+	if ( n > 0 && vkShadeOn() && vkShade( prog, n ) ) {
+		c.vkRuns++;
+	} else if ( n > 0 ) {
 		f->glBindBuffer( GL_DRAW_INDIRECT_BUFFER, c.cmdBuf );
 		c.mdi( GL_TRIANGLES, GL_UNSIGNED_SHORT, (const void *) ( std::size_t( run.cmd0 ) * kCmdBytes ), n, GLsizei( kCmdBytes ) );
 		f->glBindBuffer( GL_DRAW_INDIRECT_BUFFER, 0 );
@@ -559,6 +720,138 @@ bool runIssue( NifSkopeOpenGLContext::GLFunctions * f )
 	c.merged += run.rows - 1;
 	c.longest = std::max<long long>( c.longest, run.rows );
 	return true;
+}
+
+}  // namespace WwBl
+bool rtddgiCellShaderDefine();      // src/features/gi/rtddgicell.cpp: WW_CELL_RTDDGI in the cell programs
+bool rtddgiRestirShaderDefine();    // WW_CELL_RESTIR
+bool rtddgiRestirGiShaderDefine();  // WW_CELL_RESTIRGI
+bool wwFogLeakShaderDefine();       // src/features/air/cellvolair.cpp: WW_CELL_FOGLEAK
+int wwCellGiVis();                  // src/gl/celllights.cpp: 1 = WW_CELL_GI_MARCH
+bool wwCellPrtOn();                 // WW_CELL_PRT
+bool wwAirZoneShaderDefine();       // src/features/air/cellairzone.cpp: WW_CELL_AIRZONE (lane VKOBJ5: the particle twin's)
+namespace WwBl
+{
+namespace
+{
+long long cellTried = 0, cellDrawn = 0, pbrmTried = 0, pbrmDrawn = 0;	// pbrm: pbrm_default / pbrm_cell / pbrm_cellcsm (twins 4-6, `vk objpbrm:`)
+long long fxTried = 0, fxDrawn = 0;	// fx: fo4_effectcell / fo4_effectdecalcsm (twins 7-8, `vk objfx:`)
+int cellVar[4] = {}, pbrmVar[4] = {}, fxVar[4] = {};	// of the drawn: lit (the light buffer), skinned, blended, RT GI (per route)
+std::string cellWhy, pbrmWhy, fxWhy;
+
+// lane VKOBJ5: the route's switches the twin pick reads (cellTwinPick)
+CellTwinRoute cellTwinRoute( const NifSkopeOpenGLContext::Program * prog )
+{
+	CellTwinRoute r;
+	r.fogLeak = wwFogLeakShaderDefine();
+	r.frameUbo = prog->wwShadowFrame;
+	r.giMarch = wwCellGiVis() == 1;
+	r.prt = wwCellPrtOn();
+	r.rtddgi = rtddgiCellShaderDefine();
+	r.restir = rtddgiRestirShaderDefine();
+	r.restirGi = rtddgiRestirGiShaderDefine();
+	r.airZone = wwAirZoneShaderDefine();
+	return r;
+}
+}  // namespace
+
+bool vkCellDraw( const NifSkopeOpenGLContext::Program * prog, const GLsizei * counts, const void * const * offs, GLsizei n, std::size_t verts )
+{
+	if ( !vkShadeOn() || !prog || n <= 0 || geo.on )
+		return false;
+	const int twin = cellTwinOf( prog->name );
+	if ( twin < 2 || twin > 8 )
+		return false;
+	const bool fx = twin >= 7;
+	const bool pbrm = twin >= 4 && !fx;
+	( fx ? fxTried : pbrm ? pbrmTried : cellTried )++;
+	std::string & lastWhy = fx ? fxWhy : pbrm ? pbrmWhy : cellWhy;
+	// the variant from the pixel stage's loader key (Program::wwDefs): the base, or the all-on route's RT GI (celltwinpick.h)
+	const CellTwinPick pick = cellTwinPick( prog->name, prog->wwDefs, cellTwinRoute( prog ) );
+	const bool rt = pick.rt;
+	const char * no = pick.no;
+	if ( no ) {
+		WwVkPresent::objBlOnGl( no );
+		lastWhy = no;
+		return false;
+	}
+	static std::vector<std::uint32_t> cmds;
+	cmds.clear();
+	for ( GLsizei i = 0; i < n; i++ )
+		cmds.insert( cmds.end(), { std::uint32_t( counts[i] ), 1u, std::uint32_t( std::uintptr_t( offs[i] ) / 2 ), 0u, 0u } );
+	WW_SWITCH_STATIC( int, red, WwVkPresent::objCellRed( wwEnv( "WW_VKVIEW_OBJCELL_RED" ).trimmed().toStdString().c_str() ) );
+	WW_SWITCH_STATIC( int, redPbrm, WwVkPresent::objCellRed( wwEnv( "WW_VKVIEW_OBJPBRM_RED" ).trimmed().toStdString().c_str() ) );
+	WW_SWITCH_STATIC( int, redFx, WwVkPresent::objCellRed( wwEnv( "WW_VKVIEW_OBJFX_RED" ).trimmed().toStdString().c_str() ) );
+	WwVkPresent::ObjCellShade s;
+	s.twin = twin;
+	s.prog = prog->id;
+	static int poolHome = 0;	// one pool for every shape (objCellShade waits for the last crossing before it refills it)
+	s.poolKey = reinterpret_cast<std::uintptr_t>( &poolHome );
+	s.verts = verts;
+	s.cmds = cmds.data();
+	s.nCmds = std::size_t( n );
+	s.red = fx ? redFx : pbrm ? redPbrm : red;
+	s.rt = rt;
+	s.variants = fx ? fxVar : pbrm ? pbrmVar : cellVar;
+	std::string why;
+	const bool drew = WwVkPresent::objCellShade( []( const char * name ) -> void * {
+		return reinterpret_cast<void *>( QOpenGLContext::currentContext()->getProcAddress( name ) );
+	}, s, why );
+	if ( drew )
+		( fx ? fxDrawn : pbrm ? pbrmDrawn : cellDrawn )++;
+	else
+		lastWhy = why;
+	return drew;
+}
+
+namespace
+{
+long long pfxTried = 0, pfxDrawn = 0, pfxPoints = 0;	// lane VKOBJ5: particles_cell systems (vkPfxDraw, `vk objpfx:`)
+std::string pfxWhy;
+}  // namespace
+
+bool vkPfxDraw( const NifSkopeOpenGLContext::Program * prog, const float * pos, const float * col, const float * uv, const float * angle,
+	const float * size, std::size_t n )
+{
+	QOpenGLContext * qc = QOpenGLContext::currentContext();
+	if ( !vkShadeOn() || !prog || !n || !pos || !qc || std::string_view( prog->name ) != "particles_cell.prog" )
+		return false;
+	pfxTried++;
+	GLboolean mask[4] = {};
+	qc->functions()->glGetBooleanv( GL_COLOR_WRITEMASK, mask );
+	// the twin is particles_cell.frag@WW_CELL_AIRZONE+WW_CELL_FOGLEAK+WW_FRAME_UBO (vkframe_spirv.sh fxp), its RT GI variant the
+	// all-on route's air key (celltwinpick.h)
+	CellTwinRoute route = cellTwinRoute( prog );
+	route.colourMask = mask[0] && mask[1] && mask[2] && mask[3];
+	const CellTwinPick pick = cellTwinPick( prog->name, prog->wwDefs, route );
+	const bool rt = pick.rt;
+	const char * no = pick.no;
+	if ( no ) {
+		WwVkPresent::objBlOnGl( no );
+		pfxWhy = no;
+		return false;
+	}
+	WW_SWITCH_STATIC( int, red, WwVkPresent::objPfxRed( wwEnv( "WW_VKVIEW_OBJPFX_RED" ).trimmed().toStdString().c_str() ) );
+	WwVkPresent::ObjPfxShade s;
+	s.prog = prog->id;
+	s.pos = pos;
+	s.col = col;
+	s.uv = uv;
+	s.angle = angle;
+	s.size = size;
+	s.n = n;
+	s.red = red;
+	s.rt = rt;
+	std::string why;
+	const bool drew = WwVkPresent::objPfxShade( []( const char * name ) -> void * {
+		return reinterpret_cast<void *>( QOpenGLContext::currentContext()->getProcAddress( name ) );
+	}, s, why );
+	if ( drew ) {
+		pfxDrawn++;
+		pfxPoints += static_cast<long long>( n );
+	} else
+		pfxWhy = why;
+	return drew;
 }
 
 namespace
@@ -657,6 +950,7 @@ void setupVao( NifSkopeOpenGLContext::GLFunctions * f, Class & k )
 //! a bigger (packed) arena for `k`, its live spans copied over on the GPU
 void rebuild( Ctx & c, NifSkopeOpenGLContext::GLFunctions * f, Class & k, std::uint32_t verts, std::uint32_t idx )
 {
+	CellFarGround::vkFlush();	// lane VKFAR4: the queued tiles read the old buffers' names and offsets
 	std::uint32_t nv = 0, ni = 0;
 	k.a.plan( verts, idx, nv, ni );
 	std::vector<Entry *> live;
@@ -1171,12 +1465,121 @@ void frame()
 			"addFails=%d rows=%zu whole=%zu misses=%d images=%d samplers=%d mb=%.1f makeMs=%.2f freeMs=%.2f%s%s%s%s%s",
 			s.twins, s.made, s.refused, s.gone, s.freed, s.handles, s.adds, s.addFails, s.rows, s.whole, s.misses, s.images,
 			s.samplers, s.mb, s.makeMs, s.freeMs, s.why.empty() ? "" : " refusedWhy=", s.why.c_str(),
-			s.addWhy.empty() ? "" : " addWhy=", s.addWhy.c_str(), vkTexRed() == 1 ? " RED key" : "" );
+			s.addWhy.empty() ? "" : " addWhy=", s.addWhy.c_str(), vkTexRed() == 1 ? " RED key" : vkTexRed() == 2 ? " RED swz" : "" );
 		if ( vkLine != b && wwFrameLog() ) {
 			vkLine = b;
 			std::fprintf( stderr, "%s\n", b );
 		}
+		/* lane VKOBJ4: the batch (one GL signal + one submit per flush) and the cell's load cost so far (make + flush time;
+		 * it ends 30 frames after the last make) */
+		std::snprintf( b, sizeof( b ), "vk objtex load: twins=%d ms=%.2f each=%.3f flushes=%d (this frame: batched=%d flushed=%d "
+			"flushMs=%.2f flushFails=%d) swizzled=%d", s.loadTwins, s.loadMs, s.loadTwins ? s.loadMs / s.loadTwins : 0.0,
+			s.loadFlushes, s.batched, s.flushed, s.flushMs, s.flushFails, s.swizzled );
+		if ( s.loadTwins && vkLoadLine != b && wwFrameLog() ) {
+			vkLoadLine = b;
+			std::fprintf( stderr, "%s\n", b );
+		}
 	}
+	// lane VKOBJ5: the bindless shapes outside a run (vkBlDraw) drawn on Vulkan per kind, and the last refusal
+	if ( vkShadeOn() ) {
+		WW_SWITCH_STATIC( QString, skinRed, wwEnv( "WW_VKVIEW_OBJSKIN_RED" ).trimmed() );
+		WW_SWITCH_STATIC( QString, alphaRed, wwEnv( "WW_VKVIEW_OBJALPHA_RED" ).trimmed() );
+		WW_SWITCH_STATIC( QString, ownRed, wwEnv( "WW_VKVIEW_OBJOWN_RED" ).trimmed() );
+		static const char * kindName[kBlKinds] = { "objskin", "objalpha", "objrigid", "objown" };
+		char b[640];
+		for ( int kind = 0; kind < kBlKinds; kind++ ) {
+			const QString none;
+			const QString & red = kind == 0 ? skinRed : kind == 1 ? alphaRed : kind == 3 ? ownRed : none;
+			const bool redOn = kind == 0 ? red == "bone" : kind == 1 ? red == "flags" : kind == 3 && ( red == "offset" || red == "half" );
+			if ( !blTried[kind] )
+				continue;
+			std::snprintf( b, sizeof( b ), "vk %s: shapes=%lld drawn=%lld gl=%lld%s%s%s%s", kindName[kind], blTried[kind], blDrawn[kind],
+				blTried[kind] - blDrawn[kind], blWhy[kind].empty() ? "" : " glWhy=", blWhy[kind].c_str(), redOn ? " RED " : "",
+				redOn ? red.toStdString().c_str() : "" );
+			if ( vkBlLine[kind] != b && wwFrameLog() ) {
+				vkBlLine[kind] = b;
+				std::fprintf( stderr, "%s\n", b );
+			}
+		}
+		for ( int kind = 0; kind < kBlKinds; kind++ ) {
+			blTried[kind] = blDrawn[kind] = 0;
+			blWhy[kind].clear();
+		}
+	}
+	// lane VKOBJ4: the runs drawn on Vulkan this frame, the ones GL drew and why
+	if ( vkShadeOn() ) {
+		const WwVkPresent::ObjBlRunStat r = WwVkPresent::takeObjBlRunStat();
+		/* the texel buffers (the lights, the RT GI variant's ReSTIR ratio and DDGI atlas): read in place from stores (no copy) or
+		 * copied once a frame at the first crossing (copied / KB / ms that cost); the owners' updates */
+		const WwVkPresent::ObjBlStoreStat ls = WwVkPresent::objBlTexelStoreStat( true );
+		char b[768];
+		std::snprintf( b, sizeof( b ), "vk objshade: runs=%lld crossings=%d draws=%d cmds=%d gl=%d fails=%d ms=%.2f max=%.2f "
+			"units shared=%d glOnly=%d texelGl=%d compare=%d texel imported=%d copied=%llu copiedKB=%.1f copiedMs=%.3f stores=%d writes=%llu staged=%llu%s%s%s%s",
+			c.vkRuns, r.runs, r.draws, r.cmds, r.gl, r.fails, r.cpuMs, r.maxMs, r.shared, r.glOwn, r.texelGl, r.compare, r.texelImported,
+			(unsigned long long)ls.copied, ls.copiedBytes / 1024.0, ls.copiedMs, ls.stores, (unsigned long long)ls.writes, (unsigned long long)ls.staged,
+			r.glWhy.empty() ? "" : " glWhy=", r.glWhy.c_str(), r.failWhy.empty() ? "" : " failWhy=", r.failWhy.c_str() );
+		if ( vkShadeLine != b && wwFrameLog() ) {
+			vkShadeLine = b;
+			std::fprintf( stderr, "%s\n", b );
+		}
+		// lane VKWATER3 G4: the non-bindless fo4_cell / fo4_cellcsm shapes (vkCellDraw) drawn on Vulkan, and the last refusal
+		if ( cellTried ) {
+			WW_SWITCH_STATIC( QString, cellRed, wwEnv( "WW_VKVIEW_OBJCELL_RED" ).trimmed() );
+			std::snprintf( b, sizeof( b ), "vk objcell: shapes=%lld drawn=%lld gl=%lld lit=%d skinned=%d blended=%d rt=%d twinImages=%d cells=%d%s%s%s%s",
+				cellTried, cellDrawn, cellTried - cellDrawn, cellVar[0], cellVar[1], cellVar[2], cellVar[3], r.twins, r.cells, cellWhy.empty() ? "" : " glWhy=", cellWhy.c_str(),
+				WwVkPresent::objCellRed( cellRed.toStdString().c_str() ) ? " RED " : "", cellRed.toStdString().c_str() );
+			if ( vkCellLine != b && wwFrameLog() ) {
+				vkCellLine = b;
+				std::fprintf( stderr, "%s\n", b );
+			}
+		}
+		// lane VKWATER3 G4: the non-bindless pbrm_default / pbrm_cell / pbrm_cellcsm shapes, the same route (twins 4-6)
+		if ( pbrmTried ) {
+			WW_SWITCH_STATIC( QString, pbrmRed, wwEnv( "WW_VKVIEW_OBJPBRM_RED" ).trimmed() );
+			std::snprintf( b, sizeof( b ), "vk objpbrm: shapes=%lld drawn=%lld gl=%lld lit=%d skinned=%d blended=%d rt=%d%s%s%s%s", pbrmTried, pbrmDrawn,
+				pbrmTried - pbrmDrawn, pbrmVar[0], pbrmVar[1], pbrmVar[2], pbrmVar[3],
+				pbrmWhy.empty() ? "" : " glWhy=", pbrmWhy.c_str(), WwVkPresent::objCellRed( pbrmRed.toStdString().c_str() ) ? " RED " : "",
+				pbrmRed.toStdString().c_str() );
+			if ( vkPbrmLine != b && wwFrameLog() ) {
+				vkPbrmLine = b;
+				std::fprintf( stderr, "%s\n", b );
+			}
+		}
+		// lane VKOBJ5: the particles_cell systems (vkPfxDraw) drawn on Vulkan, their points, and the last refusal
+		if ( pfxTried ) {
+			WW_SWITCH_STATIC( QString, pfxRed, wwEnv( "WW_VKVIEW_OBJPFX_RED" ).trimmed() );
+			std::snprintf( b, sizeof( b ), "vk objpfx: systems=%lld drawn=%lld gl=%lld points=%lld%s%s%s%s", pfxTried, pfxDrawn,
+				pfxTried - pfxDrawn, pfxPoints, pfxWhy.empty() ? "" : " glWhy=", pfxWhy.c_str(),
+				WwVkPresent::objPfxRed( pfxRed.toStdString().c_str() ) ? " RED " : "", pfxRed.toStdString().c_str() );
+			if ( vkPfxLine != b && wwFrameLog() ) {
+				vkPfxLine = b;
+				std::fprintf( stderr, "%s\n", b );
+			}
+		}
+		pfxTried = pfxDrawn = pfxPoints = 0;
+		pfxWhy.clear();
+		/* lane VKWATER3 G4: the cell-lit effects (twins 7-8); their GL-owned frame inputs (the soft fade's depth copy, the air's
+		 * layers, the air GI volume) reach Vulkan as copy twins, copied once a frame: copies / KB / ms are that cost */
+		if ( fxTried ) {
+			WW_SWITCH_STATIC( QString, fxRed, wwEnv( "WW_VKVIEW_OBJFX_RED" ).trimmed() );
+			std::snprintf( b, sizeof( b ), "vk objfx: shapes=%lld drawn=%lld gl=%lld lit=%d skinned=%d blended=%d rt=%d copies=%d copyKB=%.1f copyMs=%.3f%s%s%s%s",
+				fxTried, fxDrawn, fxTried - fxDrawn, fxVar[0], fxVar[1], fxVar[2], fxVar[3], r.copies, r.copyBytes / 1024.0, r.copyMs,
+				fxWhy.empty() ? "" : " glWhy=", fxWhy.c_str(), WwVkPresent::objCellRed( fxRed.toStdString().c_str() ) ? " RED " : "",
+				fxRed.toStdString().c_str() );
+			if ( vkFxLine != b && wwFrameLog() ) {
+				vkFxLine = b;
+				std::fprintf( stderr, "%s\n", b );
+			}
+		}
+		cellTried = cellDrawn = pbrmTried = pbrmDrawn = fxTried = fxDrawn = 0;
+		std::fill( cellVar, cellVar + 4, 0 );
+		std::fill( pbrmVar, pbrmVar + 4, 0 );
+		std::fill( fxVar, fxVar + 4, 0 );
+		cellWhy.clear();
+		pbrmWhy.clear();
+		fxWhy.clear();
+	}
+	c.vkRuns = 0;
 }
 }
 

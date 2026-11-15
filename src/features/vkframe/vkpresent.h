@@ -57,6 +57,11 @@ struct Split
 Split takeSplit();
 //! the child window, the swapchain and the ring go (GL current: its textures and semaphores go too); the device stays
 void shutdown();
+/* lane VKWATER4: the fence waits' red and refusal, shared with vkframe.cpp. fenceRed: WW_VKFENCE_RED=<site>[,<site>...]
+ * (gates only) names this site (a faked VK_TIMEOUT, pending or not). fenceMiss: a wait that returned vkResult (not
+ * VK_SUCCESS): the why, also on stderr (`vk fence:`) */
+bool fenceRed( const char * site );
+std::string fenceMiss( const char * site, int vkResult );
 
 /* Round 10 (VKFRAME1, the view on Vulkan, WW_VKVIEW=1; red WW_VKVIEW_RED=1 = the old route): before the paint, GL binds
  * (GL_FRAMEBUFFER) a view the present device made, w x h at the back buffer's samples (RGBA8 + D24S8), and draws the
@@ -183,12 +188,14 @@ void toneCachePath( const std::string & path );
 
 /* Lane VKSHARE1: single-sample targets another pass owns (the clouds' march and history, TAA's), made on the present
  * device and imported into GL, keyed by the owner. type 0 = 2D, 1 = 3D (d deep), 2 = 2D array (d layers); glFmt one of
- * GL_RGBA16F / RGBA32F / RGBA8 / RG32F / RG16F / R32F / R8 / DEPTH24_STENCIL8 (type 3, lane VKFAR6: a D16 cube array of d cubes,
- * w = h, GL_TEXTURE_CUBE_MAP_ARRAY of 6 d layer-faces; GL_DEPTH_COMPONENT16 only). GL current. Same key and shape: the same
+ * GL_RGBA16F / RGBA32F / RGBA8 / RG32F / RG16F / R32F / R8 / DEPTH24_STENCIL8 (type 3, lane VKFAR6: a D16 cube array,
+ * w = h, d layer-faces, 6 a cube; GL_DEPTH_COMPONENT16 only). GL current. Same key and shape: the same
  * name; another shape: the old one goes first (a full drain). false: why; tex 0 (the owner makes GL's own). The GL
  * texture has NEAREST filters; the owner sets its own. levels (lane VKAIR1): a mip chain (colour formats; the clouds'
  * noise volumes), the owner fills each level. samples (lane VKOBJ1): a multisample 2D (type 0, one level; the objects'
- * depth prepass in GL_DEPTH_COMPONENT24 / 32F), GL_TEXTURE_2D_MULTISAMPLE with fixed sample locations. */
+ * depth prepass in GL_DEPTH_COMPONENT24 / 32F), GL_TEXTURE_2D_MULTISAMPLE with fixed sample locations. type 3 (lane
+ * VKOBJ4): a cube array of w x w, d layers (6 a cube, as farTwin counts) as GL_TEXTURE_CUBE_MAP_ARRAY (the lamps' D16 shadow
+ * cubes, cellShadow). */
 bool sharedTarget( std::uintptr_t key, int type, int w, int h, int d, unsigned glFmt, unsigned & tex, std::string & why,
 	int levels = 1, int samples = 1 );
 //! tex is key's live shared name in the current GL context (a shutdown drops every one: the owner makes GL's own again)
@@ -203,6 +210,29 @@ struct SharedStat
 	std::string failWhy;
 };
 SharedStat takeSharedStat();
+
+/* Lane VKOBJ4 item 2: the bloom chain (vkframe.cpp) on the present device. shareDevice (GL current): the present device,
+ * made on GL's GPU if it is not yet (the view off too), and its handles for wwVkFrameSetDevice. onWorker: fn( arg ) runs
+ * on the present worker (the queue is the worker's alone), the caller waits for it; false: fn's false (why). borrowTarget:
+ * another owner's image on the present device joins the shared targets as a borrowed entry (objBlFrameRead finds GL's
+ * framebuffer over it), never freed here; an image of another device is refused. GL current. */
+struct Device
+{
+	void * instance = nullptr, * physical = nullptr, * device = nullptr, * queue = nullptr, * getDeviceProcAddr = nullptr;
+	unsigned family = 0;
+	unsigned char uuid[16] = {};
+};
+bool shareDevice( GlProc gl, Device & out, std::string & why );
+bool onWorker( bool ( *fn )( void * arg, std::string & why ), void * arg, std::string & why );
+struct Borrow
+{
+	void * device = nullptr, * image = nullptr, * view = nullptr;
+	void * attView = nullptr;  //!< a depth / stencil format's depth and stencil view (the render pass attachment)
+	unsigned tex = 0, glFmt = 0;  //!< the GL name in the current context; GL_RGBA16F / GL_DEPTH24_STENCIL8 / GL_DEPTH32F_STENCIL8
+	int w = 0, h = 0, samples = 1;
+};
+bool borrowTarget( std::uintptr_t key, const Borrow & b, std::string & why );
+void borrowDrop( std::uintptr_t key );
 
 /* Lane VKSHARE1: the Modern temporal AA (gametaa.cpp, tier High) on the present device. GL blits the frame's colour and
  * depth into shared targets (sharedTarget) as before; taaRun: GL signals, the worker submits the camera vectors, the
@@ -309,14 +339,26 @@ SkyStat takeSkyStat();
  * the worker records the dispatches (LightBindingsVk.hlsli's set, a 128-byte push block each), GL waits and copies the
  * `out` twins back into GL's textures, so every consumer reads what it read before. false: why; nothing changed (GL draws
  * its stages). Reds WW_VKVIEW_AO_RED / _CONTACT_RED / _SSGI_RED = 1 (or WW_VKVIEW off): GL. */
-enum LightPass { LightAo = 0, LightContact = 1, LightSsgi = 2, LightPasses = 3 };
-enum LightKernel { LightAoGbuf = 0, LightAoMip, LightAoRaw, LightAoBlur, LightAoBlurF, LightContactK, LightSsgiK, LightKernels };
+/* Lane VKWATER4 (row G5): the ultra ocean (cellocean.cpp) is pass LightOcean, kernels ocean_vk.hlsl stages 1-6; 7-10
+ * (the *A kernels) write the water's shared arrays in place (LightImage::share), so nothing is copied. Red
+ * WW_VKVIEW_OCEAN_RED=1 (or WW_VKVIEW off): GL's draws; =prev: the water reads the arrays the frame before wrote. */
+// LightGi (lane VKFAR3 A1 b): the screen GI's own run (after the volume mask, which stays GL); red WW_VKVIEW_GIHALF_RED=1
+enum LightPass { LightAo = 0, LightContact = 1, LightSsgi = 2, LightOcean = 3, LightGi = 4, LightPasses = 5 };
+// LightAoxZ / Xe / R8 (lane VKFAR3): the ported AO methods' depth mips, XeGTAO's term + edges, the r8 stages (aox_vk.hlsl)
+enum LightKernel { LightAoGbuf = 0, LightAoMip, LightAoRaw, LightAoBlur, LightAoBlurF, LightContactK, LightSsgiK, LightAoxZ, LightAoxXe,
+	LightAoxR8, LightOceanSpecK, LightOceanFftK, LightOceanFinBcK, LightOceanFinDK, LightOceanMipBcK, LightOceanMipDK,
+	LightOceanFinBcAK, LightOceanFinDAK, LightOceanMipBcAK, LightOceanMipDAK,
+	LightGiHalf, LightKernels };	// LightGiHalf (VKFAR3 A1 b): the screen GI's DDGI read (gihalf_vk.hlsl)
 struct LightImage
 {
-	unsigned tex = 0;              //!< GL's texture (GL_TEXTURE_2D)
+	unsigned tex = 0;              //!< GL's texture (GL_TEXTURE_2D; 0 for a twin only the dispatches use)
 	unsigned glFmt = 0;            //!< its internal format: RGBA32F / RGBA16F / RG32F / R32F / R8 / RG8
 	int w = 0, h = 0, levels = 1;  //!< levels > 1: every level is copied in (an input only)
 	bool in = false, out = false;  //!< copied into the twin before / back into GL's texture after
+	int tiles = 0, outLevel = 0;   //!< tiles > 0 (an output): tex is a GL_TEXTURE_2D_ARRAY; the twin's `tiles` side-by-side
+	                               //!< w / tiles wide tiles go back into its layers 0.. at level outLevel
+	std::uintptr_t share = 0;      //!< lane VKWATER4: a sharedTarget key (2D or 2D array): the dispatches use that image's
+	                               //!< level outLevel itself (every layer; w = its width x layers, h its height), no twin, no copy
 };
 struct LightDispatch
 {
@@ -332,6 +374,12 @@ struct LightRun
 	std::vector<LightImage> img;
 	std::vector<LightDispatch> d;
 	std::vector<std::uint8_t> buf; //!< binding 9 (the contact bands); empty: 256 zero bytes
+	// lane VKFAR3 (A1 b), LightGiHalf: binding 31 = GL's uniforms (kT_gihalf), 44 = the DDGI atlas found under ddgiKey
+	// (ddgiAtlasView; none: refused), 46 = the first dispatch's t[0] (the g-buffer). ddgiGlBuf (GL's name of that buffer)
+	// joins GL's signal / wait lists
+	std::vector<std::uint8_t> ubo; //!< empty: 256 zero bytes
+	const void * ddgiKey = nullptr;
+	unsigned ddgiGlBuf = 0;
 };
 //! GL current, its inputs drawn: the dispatches run on Vulkan and the outputs are back in GL's textures
 bool lightRun( const LightRun & t, std::string & why );
@@ -344,8 +392,15 @@ struct LightStat
 	std::string glWhy, failWhy;
 	int pipelines = 0;
 	double buildMs = 0.0;
+	int copies = 0, shared = 0;        //!< lane VKWATER4: glCopyImageSubData calls / shared-target entries, since the last take
 };
 LightStat takeLightStat( int pass );
+//! lane VKWATER4: the water draws' ocean inputs (waterOcean*) since the last take: copied into a twin / sampled in place
+struct OceanWaterStat
+{
+	int copies = 0, shared = 0;
+};
+OceanWaterStat takeOceanWaterStat();
 
 /* Lane VKLIGHT2 (row L4): the reflections' full-screen stages (cell_ssr.frag 5, 1-4) as Vulkan compute,
  * res/shaders/hlsl/vklight/ssr_vk.hlsl (SSR_LIVE). GL keeps stage 0, the scene pass and the water's rays; the pass's own
@@ -455,6 +510,15 @@ inline constexpr FxField kT_volsky[] = {
 	{ "atHazeSpec", 832, 3, 1, 0, 0 }, { "atMsOld", 844, 1, 1, 0, 0 },
 };
 inline constexpr int kT_volskyBytes = 848;
+// kT_gihalf (lane VKFAR3): the 13 fields gihalf_vk.hlsl reads of its 176 (4112 bytes; spirv-cross --reflect of the
+// shipped SPIR-V, reflect_table.py, cut to the used ones by spirv-cross --hlsl)
+inline constexpr FxField kT_gihalf[] = {
+	{ "cellOn", 1248, 1, 1, 1, 0 }, { "cellRow", 1264, 4, 3, 0, 0 }, { "cellGiLoop8", 3604, 1, 1, 1, 0 },
+	{ "cellDdgiOn", 3772, 1, 1, 1, 0 }, { "cellDdgiCount", 3776, 1, 1, 1, 0 }, { "cellDdgiCOrigin", 3792, 4, 4, 0, 0 },
+	{ "cellDdgiCStep", 3856, 4, 4, 0, 0 }, { "cellDdgiCDims", 3920, 4, 4, 1, 0 }, { "cellDdgiCBase", 3984, 1, 4, 1, 0 },
+	{ "cellDdgiRed", 4048, 1, 1, 1, 0 }, { "giFull", 4084, 2, 1, 1, 0 }, { "giProj", 4096, 2, 1, 0, 0 }, { "giStep", 4104, 1, 1, 1, 0 },
+};
+inline constexpr int kT_gihalfBytes = 4112;
 // kT_march: 56 fields, 1152 bytes (spirv-cross --reflect of the shipped SPIR-V; tools: notes/vkair1/tools/reflect_table.py)
 inline constexpr FxField kT_march[] = {
 	{ "cvCal", 0, 1, 34, 0, 0 }, { "cvBands.baseKm", 544, 3, 1, 0, 0 }, { "cvBands.topKm", 560, 3, 1, 0, 0 },
@@ -559,6 +623,8 @@ struct FxStat
 	double buildMs = 0.0;
 	int copies = 0;                 //!< texture copies into twins since the last take
 	int refusedPacks = 0;           //!< rain / snow: fxPack calls made for runs then refused (asked before the packs: 0)
+	int reusedHandles = 0;          //!< lane VKWATER4: water ray runs whose depth twin kept its VkImage handle over a sharedGen() move
+	int fenceMisses = 0;            //!< lane VKWATER4: waterRun's wait on the last crossing's fence that did not return VK_SUCCESS
 };
 FxStat takeVolSkyStat();
 struct CloudRun
@@ -1022,6 +1088,43 @@ template <class Fn> bool fxTexOf( Fn * fn, unsigned prog, const char * sampler, 
 	return ok;
 }
 
+/* Lane VKFAR3 (row A1): the DDGI probe atlas (bakert's device, rtddgi_vk.inc) imported onto the present device as a
+ * VkBuffer + an RGBA32F texel view, so a pass on the view reads it in place (vkddgi.inc). The fields are what
+ * bakert::ddgiGpuShare hands out (rtddgi_gpu.h DdgiGpuShare); the import must repeat the exporter's buffer (size, usage)
+ * and allocation (size, memory type, dedicated), so the exporter says them rather than the importer guessing.
+ * Order: no semaphore of its own. bakert's submit signals vkDone once and GL waits it once (rtddgicell.cpp), so a reader
+ * on the present device is ordered through GL: its crossing's glDone comes after GL's vkDone wait in GL's stream, and
+ * GL's wait on the crossing's vkDone comes before GL's next glDone to bakert (which holds bakert's next write). A reader
+ * that runs outside such a crossing (deferred, no GL signal) is not ordered against bakert's writes. */
+struct DdgiAtlasShare
+{
+	void * memory = nullptr;          //!< an NT handle of the atlas's memory (OPAQUE_WIN32); the import closes it, always
+	std::uint64_t memorySize = 0;     //!< the allocation's size
+	std::uint64_t bufferSize = 0;     //!< the exporter's VkBuffer size
+	std::uint64_t atlasBytes = 0;     //!< the atlas itself, at offset 0 (probes x 193 texels x 16 bytes)
+	std::uint32_t usage = 0;          //!< the exporter's VkBufferUsageFlags (UNIFORM_TEXEL_BUFFER among them)
+	std::uint32_t memoryType = 0;     //!< the exporter's memory type index (the same GPU: the same index)
+	bool dedicated = true;
+	std::uint8_t deviceUuid[16] = {}, driverUuid[16] = {};
+};
+//! the import under key (one a volume; an older one under key is dropped first). false: why; nothing kept
+bool ddgiAtlasImport( const void * key, const DdgiAtlasShare & in, std::string & why );
+/* the texel view (VkBufferView as a handle) and the atlas's texels under key; 0 when none. With cascades (the preset
+ * default) GL reads ONE buffer it copies every cascade's atlas into (rtddgicell.cpp combinedUpdate); with the view on
+ * that buffer is a farTexelBuffer (GL writes it, the present device holds the view): its key (an address) is looked up
+ * here too, so a consumer asks one function. GL's copies are GL work, so a reader behind GL's crossing sees them. */
+std::uint64_t ddgiAtlasView( const void * key, std::uint64_t * texels = nullptr );
+/* moves whenever any view above may have changed (an import, a drop, a texel buffer made or dropped): a consumer whose
+ * descriptor set holds a view rewrites it when this moved (never by comparing handles: the driver reuses them) */
+std::uint64_t ddgiAtlasGen();
+/* the import under key goes (drains the worker and waits the device idle first): the ms it took, -1 when nothing was
+ * under key (returns at once). An import is made at a volume's hand-over only (rtddgicell.cpp vkDdgiImport): the view
+ * turned on live gets one at the next hand-over; with cascades the cascades' buffer follows the switch every frame */
+double ddgiAtlasDrop( const void * key );
+/* gates only: texels [first, first + count) fetched through the view on the worker (ddgi_atlas_fetch_cs), 4 floats each.
+ * red 1: a view one texel late (offset minTexelBufferOffsetAlignment rounded to a texel), red 2: a view over the first
+ * half of the atlas (fetches past it read 0). false: why */
+bool ddgiAtlasRead( const void * key, std::uint32_t first, std::uint32_t count, std::vector<float> & out, int red, std::string & why );
 /* lane VKFAR2 (row L8): a lit run's switches straight from the program, no pack (precipDraw and the gate, then
  * precipAdmits); an int absent from the program reads -1 (the refusals then refuse) */
 template <class Fn> void precipLitRead( Fn * fn, unsigned prog, PrecipRun & t )
@@ -1211,6 +1314,8 @@ bool toneWanted();
 /* lane VKSHARE1: a pass's targets go on the present device this frame (sharedTarget): the view on Vulkan with its size
  * settled (viewFbo), and the pass's red (redEnv=1) unset */
 bool shareWanted( const char * redEnv );
+//! lane VKFAR3: the view is on Vulkan by its switch and redEnv unset, with or without a view this frame (a resize, a grab)
+bool shareKept( const char * redEnv );
 //! lane VKLIGHT1: the pass's route line ("vk ao:", "vk contact:", "vk ssgi:"), one a 5 s window while on Vulkan
 void lightSay( int pass, bool wanted, const char * glWhy );
 //! lane VKSHADOW1: the cascades' route line ("vk csm:"), one a 5 s window while on Vulkan

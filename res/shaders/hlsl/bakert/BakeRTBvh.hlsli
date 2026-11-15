@@ -1,6 +1,7 @@
-// Bake tracer: the no-RT tracer (lane VKCOMPUTE1, 2026-11-12; from src/features/gi/bakert/bvh.comp). One thread a ray walks
-// src/probebvh.h's tree exactly as Bvh::ray does (same node order, same stack cap, same "t <= best" tie rule), in float.
-// Shared, no bindings: BakeRTRays, BakeRTHits, BakeRTNodes, BakeRTIdx, BakeRTTris. Hits: t bits, soup triangle.
+// Bake tracer: the no-RT tracer (lane VKCOMPUTE1, 2026-11-12; from src/features/gi/bakert/bvh.comp). bvh.comp's header:
+// Lane RTBAKE1: the no-RT GPU tracer. One invocation a ray walks src/probebvh.h's tree exactly as Bvh::ray does
+// (same node order, same stack cap, same "t <= best" tie rule), in float instead of double.
+// HLSL: one thread a ray. Shared, no bindings: BakeRTRays, BakeRTHits, BakeRTNodes, BakeRTIdx, BakeRTTris. Hits: t bits, soup triangle.
 #ifndef BAKERT_BVH_HLSLI
 #define BAKERT_BVH_HLSLI
 

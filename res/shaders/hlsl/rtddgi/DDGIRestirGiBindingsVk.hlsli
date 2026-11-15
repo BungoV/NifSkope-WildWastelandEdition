@@ -23,11 +23,12 @@ RESTIRGI_BIND( 6 ) RWStructuredBuffer<float4> RestirGiEst : register( u6, space1
 RESTIRGI_BIND( 7 ) RWStructuredBuffer<float4> RestirGiAcc : register( u7, space1 );       // the running mean: E rgb, frames
 RESTIRGI_BIND( 8 ) StructuredBuffer<float4> RestirGiAccPrev : register( t8, space1 );
 RESTIRGI_BIND( 9 ) RWStructuredBuffer<float4> RestirGiOut : register( u9, space1 );       // the filtered E rgb, the linear depth it is for
-RESTIRGI_BIND( 10 ) RWStructuredBuffer<float4> RestirGiCand : register( u10, space1 );    // the bounce's Lo rgb, hit (-1 no pixel)
-RESTIRGI_BIND( 11 ) StructuredBuffer<uint> RestirGiStbn : register( t11, space1 );        // the STBN mask, 128 x 128 x 64 bytes, 4 a uint
+RESTIRGI_BIND( 10 ) RWStructuredBuffer<float4> RestirGiCand : register( u10, space1 );    // the bounce's Lo rgb, hit (-1 no pixel): the CLI gate
+// the STBN mask, 128 x 128 x 64 bytes:
+RESTIRGI_BIND( 11 ) StructuredBuffer<uint> RestirGiStbn : register( t11, space1 );        // res/air/stbn_scalar_128x128x64.r8, 4 bytes a uint
 RESTIRGI_BIND( 12 ) RWStructuredBuffer<float4> RestirGiAtrA : register( u12, space1 );    // the a-trous ping-pong: E rgb, its variance
 RESTIRGI_BIND( 13 ) RWStructuredBuffer<float4> RestirGiAtrB : register( u13, space1 );
-RESTIRGI_BIND( 14 ) RWStructuredBuffer<uint2> RestirGiPk : register( u14, space1 );       // depth bits, octahedral normal (snorm16 x 2)
+RESTIRGI_BIND( 14 ) RWStructuredBuffer<uint2> RestirGiPk : register( u14, space1 );       // mode 2 -> the filters: depth bits, octahedral normal
 #define RG_G RestirGiParamBuf[0]
 
 #endif

@@ -83,7 +83,10 @@ int kernelOf( std::string spv )
 		spv.resize( spv.size() - 4 );
 	static const std::map<std::string, int> k = { { "ao_gbuf", WwVkPresent::LightAoGbuf }, { "ao_mip", WwVkPresent::LightAoMip },
 		{ "ao_raw", WwVkPresent::LightAoRaw }, { "ao_blur", WwVkPresent::LightAoBlur }, { "ao_blurf", WwVkPresent::LightAoBlurF },
-		{ "contact", WwVkPresent::LightContactK }, { "ssgi", WwVkPresent::LightSsgiK } };
+		{ "contact", WwVkPresent::LightContactK }, { "ssgi", WwVkPresent::LightSsgiK },
+		{ "ssgie", WwVkPresent::LightSsgiK },	// lane VKFAR3: the cast with the emission subtracted (its own red)
+		{ "aox_z", WwVkPresent::LightAoxZ }, { "aox_xe", WwVkPresent::LightAoxXe }, { "aox_r8", WwVkPresent::LightAoxR8 },
+		{ "aox_hb", WwVkPresent::LightAoxR8 } };	// HBAO's stage 4: aox_r8's build, its own red (the old divide)
 	const auto i = k.find( spv );
 	return i == k.end() ? -1 : i->second;
 }
@@ -162,7 +165,7 @@ int runChain( const std::string & jobs, const std::string & job, const std::stri
 	if ( t.d.empty() || cmps.empty() )
 		return broken( "no pass or no compare" );
 	const int k0 = t.d[0].kernel;
-	t.pass = k0 <= WwVkPresent::LightAoBlurF ? WwVkPresent::LightAo : k0 == WwVkPresent::LightContactK ? WwVkPresent::LightContact
+	t.pass = k0 <= WwVkPresent::LightAoBlurF || k0 >= WwVkPresent::LightAoxZ ? WwVkPresent::LightAo : k0 == WwVkPresent::LightContactK ? WwVkPresent::LightContact
 		: WwVkPresent::LightSsgi;
 	if ( !bufFile.empty() )
 		t.buf = readBytes( dir + bufFile );
@@ -301,12 +304,13 @@ int runChain( const std::string & jobs, const std::string & job, const std::stri
 			big += u > tol;
 			mu = std::max( mu, u );
 		}
-		const bool pass = mu <= tol || ( c.rule == "step" && d * 200 <= n && big * 1000 <= n ) || ( c.rule == "gather" && big * 10000 <= n )
+		const bool info = c.rule == "info";	// an image internal to a pass (XeGTAO's depth mips): printed, no verdict
+		const bool pass = info || mu <= tol || ( c.rule == "step" && d * 200 <= n && big * 1000 <= n ) || ( c.rule == "gather" && big * 10000 <= n )
 			|| ( c.rule == "sector" && d * 100 <= n && big * 500 <= n ) || ( absRule && !nanBad && maxAbs <= absTol && d * 50 <= n );
 		exact = exact && d == 0;
 		ok = ok && pass;
 		std::printf( "  %s %dx%d [%s]: %zu of %zu values differ, %zu by > tol, max %d ulp, max abs %.3g%s\n", c.img.c_str(), x.w, x.h,
-			c.rule.c_str(), d, n, big, mu, maxAbs, pass ? "" : " OUT" );
+			c.rule.c_str(), d, n, big, mu, maxAbs, info ? " (info, no verdict)" : pass ? "" : " OUT" );
 	}
 	drop();
 	std::printf( "LIGHTVIEW %s %s\n", name.c_str(), !ok ? "FAIL" : exact ? "EXACT" : "BOUND" );

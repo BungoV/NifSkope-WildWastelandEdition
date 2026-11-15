@@ -1217,7 +1217,7 @@ int main( int argc, char ** argv )
 			cloudTex = tex2d( j.cloudN, j.cloudN, fRgba16f, GL_RGBA, GL_FLOAT, j.cloudData.data(), true );
 		GLuint cubeTex = 0;  // L8 term 5: the lamps' cubes as the app's (sharedTarget type 3, D16, shadowAlloc's state)
 		if ( j.cubeN > 0 ) {
-			if ( !WwVkPresent::sharedTarget( reinterpret_cast<std::uintptr_t>( &cubeKeys[jobAt] ), 3, j.cubeN, j.cubeN, 16, 0x81A5, cubeTex, why ) )
+			if ( !WwVkPresent::sharedTarget( reinterpret_cast<std::uintptr_t>( &cubeKeys[jobAt] ), 3, j.cubeN, j.cubeN, 6 * 16, 0x81A5, cubeTex, why ) )  // BATCH1114: d is layers
 				return fatal( j.name + ": the shared cellShadow: " + why );
 			glBindTexture( 0x9009, cubeTex );
 			f.texSubImage3D( 0x9009, 0, 0, 0, 0, j.cubeN, j.cubeN, 96, 0x1902, 0x1403, j.cubeData.data() );  // DEPTH_COMPONENT, UNSIGNED_SHORT

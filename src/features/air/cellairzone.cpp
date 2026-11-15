@@ -4,6 +4,8 @@
 
 #include "features/air/airzone.h"
 #include "features/air/airzonemath.h"
+#include "features/weather/weatherrecx.h"	// lane WEATHERRECX4: atmosphere.localFogScale
+#include "features/weather/weatherrecxwire.h"
 #include "cellworldanim.h"	// the world clock (the fog noise's drift)
 #include "harnesswindow.h"	// wwHarnessSettingsSuffix: a harness scope starts the row Off
 #include "features/gi/probevolumes.h"	// ProbeVolumes: the volume view's geometry builder draws our shapes
@@ -49,6 +51,7 @@ struct Frame
 	double eye[3] = { 0, 0, 0 };
 	double seconds = -1.0;
 	int red = -1;
+	float wxScale = -1.0f;	// lane WEATHERRECX4: the atmosphere.localFogScale the packing was built with
 	int count = 0;
 	int all = 0;
 	int dropped = 0;
@@ -185,14 +188,23 @@ void wwAirZoneUniforms( Scene * scene )
 	}
 	const double seconds = wwCellWorldSeconds();
 	const int red = redBits();
-	moved = moved || seconds != f.seconds || red != f.red || eye[0] != f.eye[0] || eye[1] != f.eye[1] || eye[2] != f.eye[2];
+	const float wxScale = wwWeatherRecx().localFogScale;	// lane WEATHERRECX4 (< 0 unset: the volumes as authored)
+	moved = moved || seconds != f.seconds || red != f.red || eye[0] != f.eye[0] || eye[1] != f.eye[1] || eye[2] != f.eye[2]
+		|| wxScale != f.wxScale;
 	if ( moved ) {
 		std::copy( eye, eye + 3, f.eye );
 		f.seconds = seconds;
 		f.red = red;
+		f.wxScale = wxScale;
 		const std::vector<int> picked = az::pick( f.flat, eye, &f.dropped );
 		f.buf.assign( size_t( az::kMax * az::kVec4 * 4 ), 0.0f );
 		f.count = az::pack( f.flat, picked, seconds, f.buf.data() );
+		// lane WEATHERRECX4: atmosphere.localFogScale on every packed zone's fog (v5: scale, add per unit)
+		for ( int i = 0; i < f.count; i++ )
+			for ( int c = 0; c < 2; c++ ) {
+				float & d = f.buf[size_t( i * az::kVec4 * 4 + 20 + c )];
+				d = WwRecxWire::localFog( d, wxScale );
+			}
 		f.all = 0;
 		for ( const az::Volume & v : f.flat )
 			f.all += ( v.fog.on || v.part.on ) ? 1 : 0;

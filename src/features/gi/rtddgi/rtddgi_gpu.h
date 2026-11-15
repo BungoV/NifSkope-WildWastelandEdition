@@ -184,6 +184,8 @@ struct DdgiGpuShare
 	uint64_t memorySize = 0;              // the allocation's size: GL imports exactly this
 	uint64_t atlasBytes = 0;              // the atlas itself: probes x 193 x 16 bytes, at offset 0
 	bool dedicated = true;                // a dedicated allocation (GL_DEDICATED_MEMORY_OBJECT_EXT)
+	uint64_t bufferSize = 0;              // lane VKFAR3: the exporter's VkBuffer: a Vulkan importer repeats its size, usage
+	uint32_t usage = 0, memoryType = 0;   //   (VkBufferUsageFlags) and memory type index (the same GPU, the same index)
 	void * vkDone = nullptr, * glDone = nullptr;
 	uint8_t deviceUuid[16] = {}, driverUuid[16] = {};
 };
