@@ -68,6 +68,9 @@ CASES = [
     # L8 terrain air (element 23 = airTerrOn): snow_far_lit's fogged run, the ground layer on the air's own grid
     ('snow_far_terrair', 3, 5.5, 1.0, 97, 600.125, (12345.6, -98765.4, 7210.0), (-55.0, 210.0), 1, 3.0, 0.5, 6.0, 1.0, 0.6, 1,
      3.3, -0.01, 40000, 1, 0, 1, 0, 0, 1),
+    # L8 term 1 (VKFAR5, element 20 = volTerms 5): rain_near_lit's run with the GI bit on (idle unless WW_CELL_PRT)
+    ('rain_near_gi', 0, 2.0, 4.0, 11, 37.25, (-60500.0, 70000.0, 6300.0), (120.0, -40.0), 0, 1.0, 0.0, 0.0, 1.0, 1.0, 1,
+     2.0, -0.08, 40000, 0, 0, 5),
 ]
 SUN = np.array([0.4, 0.3, 0.35]) / np.linalg.norm([0.4, 0.3, 0.35])  # world, toward the sun (the air's fogSun too)
 # a lit case's own sun (cellDirTo), chosen by the GS's mix: N = the eye's axis, thick / thin = 4 vpWrap( N.to, pcTrans )
@@ -77,6 +80,7 @@ LIT_SUN = {'rain_near_lit': np.array([0.3, -0.6, 0.75]) / np.linalg.norm([0.3, -
 LIT_SUN['rain_near_lamps'] = LIT_SUN['rain_near_lit']
 LIT_SUN['rain_near_cluster'] = LIT_SUN['rain_near_lit']
 LIT_SUN['rain_near_sunlocal'] = LIT_SUN['rain_near_lit']
+LIT_SUN['rain_near_gi'] = LIT_SUN['rain_near_lit']
 TILE, SLICES = 64, 4  # the cluster grid (L8 term 2b): 64-pixel tiles, 4 log-depth slices
 
 
@@ -230,7 +234,14 @@ for st, ext in (('vert', 'vert'), ('geom', 'geom'), ('frag', 'frag')):
         # without it are the fogleak check's reference only
         names_it = 'WW_CELL_FOGLEAK' in raw
         fl_seen += names_it
-        for suf, defs in (('', ['WW_CELL_FOGLEAK'] if names_it else []), ('_nofl', [])):
+        base_defs = ['WW_CELL_FOGLEAK'] if names_it else []
+        # L8 term 1 (VKFAR5): the loader's GI variants of the plain program (glcontext.cpp: WW_CELL_PRT under its red,
+        # WW_CELL_RTDDGI with the ray-traced GI on), each injected only where the source names it, as the loader does
+        variants = [('', base_defs), ('_nofl', [])]
+        if prog == 'prog':
+            variants += [('_prt', base_defs + (['WW_CELL_PRT'] if '_CELL_PRT' in raw else [])),
+                         ('_rtddgi', base_defs + (['WW_CELL_RTDDGI'] if '_CELL_RTDDGI' in raw else []))]
+        for suf, defs in variants:
             with open(os.path.join(OUT, '%s%s.%s.glsl' % (prog, suf, st)), 'w', newline='\n', encoding='latin-1') as f:
                 f.write(S.inject(raw, defs))
 print('precipview: WW_CELL_FOGLEAK named in %d of the 6 stage sources (injected there)' % fl_seen)

@@ -476,6 +476,11 @@ struct Job
 		const auto it = uni.find( "vpSun" );
 		return lit && it != uni.end() && it->second.size() == 4 && it->second[3] > 0.5;
 	}
+	bool gi() const  // L8 term 1 (VKFAR5): volTerms' GI bit (4)
+	{
+		const auto it = uni.find( "volTerms" );
+		return lit && it != uni.end() && !it->second.empty() && ( int( it->second[0] ) & 4 ) != 0;
+	}
 	bool terrAir() const  // L8 terrain air: airTerrOn 1 (the ground layer on the grid)
 	{
 		const auto it = uni.find( "airTerrOn" );
@@ -493,6 +498,7 @@ struct Job
 const int kNormUnit = 8;  // slice 3: the look's pcTexN
 const int kLightsUnit = 9, kClusterUnit = 10;  // L8 term 2a: the lamps' cellLights / cellCluster
 const int kTerrUnit = 11;  // L8 terrain air: airTerr
+const int kGiUnit = 12;  // L8 term 1: the WW_CELL_PRT variant's cellGiAir
 const GLenum kTexBuffer = 0x8C2A;  // GL_TEXTURE_BUFFER
 // slice 2a: the air's textures, in precipRun's tex[2..6] order, their GL units and fxTexOf types
 const char * kAirTex[5] = { "atApTex", "volTex", "volTile", "volAirTerr", "volAirRainMap" };
@@ -632,9 +638,19 @@ int main( int argc, char ** argv )
 		readFile( dir + "/prog_nofl.frag.glsl" ), "cell_precip_gpu (no FOGLEAK)" );
 	const GLuint pLookNoFl = program3( readFile( dir + "/prog_look_nofl.vert.glsl" ), readFile( dir + "/prog_look_nofl.geom.glsl" ),
 		readFile( dir + "/prog_look_nofl.frag.glsl" ), "cell_precip_look (no FOGLEAK)" );
-	if ( !pUnpack || !pSlab || !pReveal || !pCapBlend || !pProbe || !pPrecip || !pLook || !pTf || !pNoFl || !pLookNoFl )
+	// L8 term 1 (VKFAR5): the loader's GI variants of the plain program (WW_CELL_PRT, the red; WW_CELL_RTDDGI, the RT GI on)
+	const GLuint pPrt = program3( readFile( dir + "/prog_prt.vert.glsl" ), readFile( dir + "/prog_prt.geom.glsl" ),
+		readFile( dir + "/prog_prt.frag.glsl" ), "cell_precip_gpu (WW_CELL_PRT)" );
+	const GLuint pRt = program3( readFile( dir + "/prog_rtddgi.vert.glsl" ), readFile( dir + "/prog_rtddgi.geom.glsl" ),
+		readFile( dir + "/prog_rtddgi.frag.glsl" ), "cell_precip_gpu (WW_CELL_RTDDGI)" );
+	const GLuint pTfRt = program3( readFile( dir + "/prog_rtddgi.vert.glsl" ), readFile( dir + "/prog_rtddgi.geom.glsl" ),
+		readFile( dir + "/prog_rtddgi.frag.glsl" ), "cell_precip_gpu (WW_CELL_RTDDGI, captured)", true );
+	// (the RT GI variant's twin of the default: a program as fresh as it, so no earlier case's uniforms ride on one side only)
+	const GLuint pTfNew = program3( readFile( dir + "/prog.vert.glsl" ), readFile( dir + "/prog.geom.glsl" ),
+		readFile( dir + "/prog.frag.glsl" ), "cell_precip_gpu (captured, fresh)", true );
+	if ( !pUnpack || !pSlab || !pReveal || !pCapBlend || !pProbe || !pPrecip || !pLook || !pTf || !pNoFl || !pLookNoFl || !pPrt || !pRt || !pTfRt || !pTfNew )
 		return fatal( "GL programs" );
-	for ( const GLuint prog : { pPrecip, pLook, pTf, pNoFl, pLookNoFl } ) {  // every sampler its own empty unit from 20 (unit 0's default mixes sampler
+	for ( const GLuint prog : { pPrecip, pLook, pTf, pNoFl, pLookNoFl, pPrt, pRt, pTfRt, pTfNew } ) {  // every sampler its own empty unit from 20 (unit 0's default mixes sampler
 		// types: GL_INVALID_OPERATION at the draw once the air's textures are bound); bindJob then sets the read ones (farcards.cpp's rule)
 		f.useProgram( prog );
 		GLint n = 0, next = 20;
@@ -689,7 +705,7 @@ int main( int argc, char ** argv )
 	f.genBuffers( 1, &ubo );
 	f.bindBuffer( fUbo, ubo );
 	f.bufferData( fUbo, std::ptrdiff_t( zeros.size() ), zeros.data(), fStatic );
-	for ( const GLuint prog : { pPrecip, pLook, pTf, pNoFl, pLookNoFl } ) {
+	for ( const GLuint prog : { pPrecip, pLook, pTf, pNoFl, pLookNoFl, pPrt, pRt, pTfRt, pTfNew } ) {
 		const GLuint bi = f.getUniformBlockIndex( prog, "globalUniforms" );
 		if ( bi != 0xFFFFFFFFu )
 			f.uniformBlockBinding( prog, bi, 0 );
@@ -846,6 +862,7 @@ int main( int argc, char ** argv )
 		// (a look case's last pass draws cell_precip_gpu.prog instead: the look must change the picture too)
 		// (a fogged case's last pass draws the same program without WW_CELL_FOGLEAK: the fogleak check, printed only)
 		std::vector<std::uint16_t> refOff, refPlain, refNoFl;
+		std::vector<std::uint16_t> refPrt;  // L8 term 1: the WW_CELL_PRT variant's frame, its GI fed (the GI case)
 		if ( const GLenum e = glGetError() )
 			return fatal( j.name + ": a GL error before the reference draw (0x" + std::to_string( unsigned( e ) ) + ")" );
 		const int passAir = j.fog ? 6 : -1, passPlain = j.look ? 6 + ( j.fog ? 1 : 0 ) : -1;
@@ -929,6 +946,29 @@ int main( int argc, char ** argv )
 				else if ( mode == 5 ) {  // L8 term 2b: b0 all zero (no projection: vpLightsBegin walks every light)
 					f.bindBuffer( fUbo, ubo );
 					f.bufferData( fUbo, std::ptrdiff_t( zeros.size() ), zeros.data(), fStatic );
+				} else if ( mode == 8 ) {  // L8 term 1: the WW_CELL_PRT variant, its GI fed (cellGiAir one bright constant)
+					static GLuint giTex = 0;
+					if ( !giTex ) {
+						const float c[4] = { 0.9f, 0.7f, 0.5f, 1.0f };
+						std::vector<float> d( 2 * 2 * 6 * 4 );
+						for ( size_t i = 0; i < d.size(); i++ )
+							d[i] = c[i % 4];
+						glGenTextures( 1, &giTex );
+						glBindTexture( fT3D, giTex );
+						f.texImage3D( fT3D, 0, GLint( fRgba32f ), 2, 2, 6, 0, GL_RGBA, GL_FLOAT, d.data() );
+						glTexParameteri( fT3D, GL_TEXTURE_MIN_FILTER, GL_LINEAR );
+						glTexParameteri( fT3D, GL_TEXTURE_MAG_FILTER, GL_LINEAR );
+						glBindTexture( fT3D, 0 );
+					}
+					bindJob( pPrt );
+					bindUnit( kGiUnit, fT3D, giTex );
+					u1i( pPrt, "cellGiAir", kGiUnit );
+					u1i( pPrt, "cellGiOn", 1 );
+					u1i( pPrt, "cellGiAirOn", 1 );
+					const float org[3] = { 0.0f, 0.0f, 0.0f }, dims[3] = { 2.0f, 2.0f, 1.0f }, vox = 1000.0f;
+					f.uniform3fv( f.getUniformLocation( pPrt, "cellGiAirOrigin" ), 1, org );
+					f.uniform3fv( f.getUniformLocation( pPrt, "cellGiAirDims" ), 1, dims );
+					f.uniform1fv( f.getUniformLocation( pPrt, "cellGiAirVoxel" ), 1, &vox );
 				} else if ( mode == 6 ) {  // L8 term 3: the local law off (vpSun.w 0)
 					const float off[4] = { 0.5f, 0.4f, 0.3f, 0.0f };
 					f.uniform4fv( f.getUniformLocation( pJob, "vpSun" ), 1, off );
@@ -1022,6 +1062,17 @@ int main( int argc, char ** argv )
 					lmiss.empty() ? "none" : lmiss.c_str() );
 				ok = ok && noLamps.flips >= 1000 && shape[0] >= 1000 && shape[1] >= 1000 && shape[2] >= 1000 && shape[3] >= 1000 && shape[4] == 0
 					&& farDiff == 0 && lmiss.empty();
+			}
+			if ( j.gi() ) {  // L8 term 1's seen-check (header): the WW_CELL_PRT variant with its GI fed against GL's default frame
+				refPrt = drawGl( 8 );
+				const Verdict seen = judge( bg, refPrt, refA, refB, refB );
+				std::string pmiss;
+				for ( const char * nm : { "cellGiOn", "cellGiAir" } )
+					if ( f.getUniformLocation( pPrt, nm ) < 0 )
+						pmiss += std::string( pmiss.empty() ? "" : ", " ) + nm;
+				std::printf( "PRECIPVIEW %s GI seen: the WW_CELL_PRT variant with its GI fed differs from GL's default frame %zu of %zu covered samples "
+					"(want >= 1000); its GI names missing: %s\n", j.name.c_str(), seen.flips, seen.covered, pmiss.empty() ? "none" : pmiss.c_str() );
+				ok = ok && seen.flips >= 1000 && pmiss.empty();
 			}
 		}
 
@@ -1200,7 +1251,10 @@ int main( int argc, char ** argv )
 						refPSB[s * 4 + c] = refB[s * 4 + c];
 		}
 
+		const GLuint pJobCase = pJob;
+		GLuint vkProgOver = 0;  // L8 term 1: Vulkan's run read from another GL program (the WW_CELL_PRT variant)
 		auto runVk = [&]( int red, std::vector<std::uint16_t> & a, std::vector<std::uint16_t> & b, bool checkSeed, std::uint8_t * recOut = nullptr ) -> bool {
+			const GLuint pJob = vkProgOver ? vkProgOver : pJobCase;
 			before( fbFrame, j.zd );
 			bindJob( pJob );
 			f.bindFramebuffer( fFb, fbFrame );
@@ -1224,6 +1278,8 @@ int main( int argc, char ** argv )
 			t.global = vkGlobalOver ? vkGlobalOver : j.global.empty() ? nullptr : j.global.data();  // L8 term 2b: GL's b0 bytes (the app: glcontext.cpp's last upload)
 			if ( t.lit )  // precipDraw's order: the switches from GL, the refusals, then the packs
 				WwVkPresent::precipLitRead( &ga, pJob, t );
+			if ( red & 8192 )  // red 8192 (L8 term 1): the GI program refusal's input dropped
+				t.litIn.gi = 0;
 			if ( !WwVkPresent::precipAdmits( t, why ) ) {
 				std::printf( "PRECIPVIEW precipAdmits refused: %s\n", why.c_str() );
 				return false;
@@ -1320,7 +1376,7 @@ int main( int argc, char ** argv )
 				if ( seed != j.seed )
 					return false;
 			}
-			t.red = red;
+			t.red = red & ~8192;
 			t.recOut = recOut;
 			f.bindFramebuffer( fFb, fbFrame );
 			if ( !WwVkPresent::precipRun( t, why ) ) {
@@ -1407,8 +1463,10 @@ int main( int argc, char ** argv )
 						genQueries( 1, &tfQ );
 					}
 					const std::ptrdiff_t tfBytes = std::ptrdiff_t( j.n ) * 6 * kTfFloats * 4;
-					auto capture = [&]( std::vector<float> & out, GLuint & prims ) {
-						bindJob( pTf );
+					auto capture = [&]( std::vector<float> & out, GLuint & prims, GLuint prog = 0, int terms = 0 ) {
+						bindJob( prog ? prog : pTf );
+						if ( terms )  // L8 term 1: volTerms other than the case's
+							u1i( prog ? prog : pTf, "volTerms", terms );
 						glEnable( 0x8C89 );  // GL_RASTERIZER_DISCARD
 						f.bindBuffer( 0x8C8E, tfBuf );  // GL_TRANSFORM_FEEDBACK_BUFFER
 						f.bufferData( 0x8C8E, tfBytes, nullptr, 0x88EA );  // GL_DYNAMIC_COPY
@@ -1482,6 +1540,65 @@ int main( int argc, char ** argv )
 							std::printf( "PRECIPVIEW %s lit globals on Vulkan: b0 other vs none, against the judged run %s (want EXACT)\n", j.name.c_str(), word );
 							ok = ok && ran && std::strcmp( word, "EXACT" ) == 0;
 						}
+					}
+					if ( j.gi() ) {  // L8 term 1's checks (header): GI idle in the default program and the RT GI variant; WW_CELL_PRT refused
+						std::string actDef, actRt;
+						for ( const char * nm : { "cellGiOn", "cellGi", "cellGiSlots", "cellRooms", "cellGiAir", "cellGiAirOn", "cellDdgiOn", "cellDdgiAtlas" } ) {
+							if ( f.getUniformLocation( pJob, nm ) >= 0 )
+								actDef += std::string( actDef.empty() ? "" : ", " ) + nm;
+							if ( f.getUniformLocation( pRt, nm ) >= 0 || f.getUniformLocation( pTfRt, nm ) >= 0 )
+								actRt += std::string( actRt.empty() ? "" : ", " ) + nm;
+						}
+						std::vector<float> tfT1, tfRt, tfNew;
+						GLuint prT1 = 0, prRt = 0, prNew = 0;
+						capture( tfT1, prT1, 0, 1 );
+						capture( tfRt, prRt, pTfRt );
+						capture( tfNew, prNew, pTfNew );
+						auto floatsDiff = [&]( const std::vector<float> & x, std::string & by, const std::vector<float> & ref ) {
+							size_t d = x.size() == ref.size() ? 0 : std::max( x.size(), ref.size() ), var[8] = {}, ulp[8] = {};
+							for ( size_t i = 0; i < std::min( x.size(), ref.size() ); i++ )
+								if ( std::memcmp( &x[i], &ref[i], 4 ) != 0 ) {
+									d++;
+									std::int32_t ia, ib;
+									std::memcpy( &ia, &x[i], 4 );
+									std::memcpy( &ib, &ref[i], 4 );
+									const size_t u = size_t( std::llabs( std::int64_t( ia ) - std::int64_t( ib ) ) );
+									const int at = int( i % size_t( kTfFloats ) );
+									for ( int q = 0; q < 8; q++ )
+										if ( at >= kTfAt[q] && at < kTfAt[q + 1] ) {
+											var[q]++;
+											ulp[q] = std::max( ulp[q], u );
+										}
+								}
+							const char * nm[8] = { "gl_Position", "gUv", "gQ", "gView", "gCol", "gBox", "gA", "gB" };
+							for ( int q = 0; q < 8; q++ )
+								if ( var[q] )
+									by += " " + std::string( nm[q] ) + " " + std::to_string( var[q] ) + " (max " + std::to_string( ulp[q] ) + " ulp)";
+							return d;
+						};
+						std::string byT1, byRt, byNew;
+						const size_t dT1 = floatsDiff( tfT1, byT1, tf1 ), dRt = floatsDiff( tfRt, byRt, tfNew ), dNew = floatsDiff( tfNew, byNew, tf1 );
+						std::printf( "PRECIPVIEW %s GI checks by field: volTerms 5 vs 1:%s; the RT GI variant vs a fresh default program:%s; (info) the fresh "
+							"default vs the gate's own (uniforms earlier cases left on it): %zu floats,%s\n", j.name.c_str(), byT1.empty() ? " none" : byT1.c_str(),
+							byRt.empty() ? " none" : byRt.c_str(), dNew, byNew.empty() ? " none" : byNew.c_str() );
+						ok = ok && prNew == pr1;
+						std::printf( "PRECIPVIEW %s GI checks: GI names active in GL's default program: %s; in the RT GI variant: %s (want none); captured "
+							"volTerms 5 vs 1 %zu floats differ, the RT GI variant vs a fresh default program %zu (%u / %u / %u triangles; each want 0)\n", j.name.c_str(),
+							actDef.empty() ? "none" : actDef.c_str(), actRt.empty() ? "none" : actRt.c_str(), dT1, dRt, pr1, prT1, prRt );
+						ok = ok && actDef.empty() && actRt.empty() && dT1 == 0 && dRt == 0 && prT1 == pr1 && prRt == pr1 && pr1 > 0;
+						std::vector<std::uint16_t> aP, bP, aR, bR;
+						vkProgOver = pPrt;
+						why.clear();
+						const bool prtRan = runVk( 0, aP, bP, false );
+						const std::string prtWhy = why;
+						const bool redRan = runVk( 8192, aR, bR, false );
+						vkProgOver = 0;
+						const bool refused = !prtRan && prtWhy.find( "GI volume" ) != std::string::npos;
+						const Verdict r = redRan && !refPrt.empty() ? judge( bg, aR, refPrt, bR, refB ) : Verdict();
+						std::printf( "PRECIPVIEW %s GI program refusal: the WW_CELL_PRT variant's lit run %s%s (want refused, a GI volume named); red 8192 (the "
+							"refusal's input dropped) against its frame: %s (%zu covered, %zu flips; want FAIL, >= 1000 flips)\n", j.name.c_str(),
+							prtRan ? "RAN" : "refused: ", prtRan ? "" : prtWhy.c_str(), redRan ? r.word() : "the run failed", r.covered, r.flips );
+						ok = ok && refused && redRan && !r.ok() && r.flips >= 1000;
 					}
 					std::vector<std::uint8_t> rec( size_t( j.n ) * 112 );
 					std::vector<std::uint16_t> a3, b3;

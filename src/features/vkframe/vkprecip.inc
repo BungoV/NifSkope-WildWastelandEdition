@@ -8,7 +8,9 @@
  * Slice 1 is unlit; slice 2a adds the air (wwFogFx's A / B in the record pass, its five textures in the compute set);
  * slice 3 the precipitation look (cell_precip_look.prog: precip_look_view_cs / _vs / _ps, a 192-byte record, the flake's
  * normal map at t2 of the pixel stage). Slice 2b lights the particles by the sun alone (precip_lit_view_cs, its own set);
- * the lamps, GI, ambient, shadow maps, drift, terrain air, local sun, interiors and the roof map are refused (GL draws).
+ * L8 added the lamps, the cluster lists, terrain air, the local sun and GI (volTerms 4: idle in the default program; a GL
+ * program variant that reads a GI volume is refused). Ambient, shadow maps, drift, interiors and the roof map are refused
+ * (GL draws).
  * GL's state (cellprecip.cpp): depth LEQUAL, no depth write, cull off, blend SRC_ALPHA / ONE_MINUS_SRC_ALPHA, stencil ALWAYS
  * ref 1, REPLACE on depth pass, write mask 0x03. */
 namespace
@@ -626,8 +628,8 @@ int precipLitWhys( const PrecipRun::LitIn & l, const char ** out, int max )
 		if ( l.cellRed > 0 )
 			add( "a cell-light red (cellRed) in a lit run with lamps" );
 	}
-	if ( l.terms > 0 && ( l.terms & 4 ) )
-		add( "the GI term on the particles (refused in slice 2b)" );
+	if ( l.gi != 0 )  // L8 term 1: volTerms 4 is idle in the default program; a GI read in GL's program is not twinned
+		add( "GL's program reads a GI volume (the WW_CELL_PRT / RT GI variant: not twinned)" );
 	if ( l.terms > 0 && ( l.terms & 8 ) )
 		add( "the ambient term on the particles (refused in slice 2b)" );
 	if ( l.terms > 0 && ( l.terms & ~15 ) )
@@ -745,6 +747,7 @@ bool precipRun( const PrecipRun & t, std::string & why )
 		b.cluster = litI( "cellClusterOn" );
 		b.cellRed = litI( "cellRed" );
 		b.phys = litF( "cellLightPhys", 0 );
+		b.gi = t.litIn.gi;  // (the program's, not a packed value)
 		if ( const char * w = precipLitWhy( b ) )
 			return refuse( std::string( "the packed light block: " ) + w );
 		if ( b.terms & 2 ) {  // the lamps: GL's lights a float buffer holding every counted light (8 texels each)
