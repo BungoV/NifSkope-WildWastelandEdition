@@ -1112,7 +1112,7 @@ int main( int argc, char ** argv )
 	// lane VKOBJ5 (G4 round 3): particles_cell (GL_POINTS + geometry stage) against objPfxShade; BaseMap's DXT5 twin as its sprite
 	const bool pfxOnly = std::getenv( "BLVIEW_PFX_ONLY" ) != nullptr;  // gates only: the particle gate alone while it is localised
 	if ( bc )
-		ok = pfxGate( spvDir + "/pfxset/spirv", texs[3] ) && ok;
+		ok = pfxGate( spvDir + "/pfxset/spirv", texs[3], texs[1], texs[0] ) && ok;
 	else
 		std::printf( "BLVIEW pfx not run (the sprite is the texture cache's twin: MODE=bc)\n" );
 	const bool colOk = twinOk && ( pfxOnly || colourGate( spvDir + "/spvset/spirv", handles, anisoAt, aniso1H, 0 ) );

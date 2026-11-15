@@ -4,7 +4,10 @@
  * draws the same system through the record pass (objpfx_cs), the strip stage (objpfx_vs) and the pixel twin (objpfx_cell_ps).
  * Fixture: 203 points (not a multiple of 64), view space x -4..4, y -3..3, z -5..-15, seeded mt19937( 31 ): colour, uv offset,
  * angle, size; the app's sequential arrays in one VBO (position 3, colour 4, uv 2, angle 1, size 1 at locations 0..4).
- * textureUnits[0] = the texture cache's DXT5 twin (textures[0].textureUnit 1); every other sampler on its own empty unit.
+ * Units as the app binds them (glparticles.cpp, round 4): all 10 textureUnits[i] and NormalMap / GreyscaleMap on the
+ * sprite's unit (textureUnits[0] = the texture cache's DXT5 twin, textures[0].textureUnit 1), CubeMap on its own unit
+ * holding a 1x1 grey cube (bindCube( "#FF555555c" )), hasNormalMap / hasGreyscaleMap / hasCubeMap 0; every other sampler on
+ * its own empty unit. Cull on, back faces, stencil off (StencilProperty::glProperty( nullptr ), the app's last word).
  * State: the app's (blend SRC_ALPHA / ONE_MINUS_SRC_ALPHA, depth mask off, target 0 only); the frame's depth cleared to a
  * slab at view z -10 (between particle depths). Air off (fogOn 0, volOn 0, atAp 0). Lit: fxLitMode 2, cellInterior 1, the
  * 3 placed lights of the cell gate (8 RGBA32F texels a light) on cellLights.
@@ -19,9 +22,16 @@
  * Reds (WW_VKVIEW_OBJPFX_RED through objPfxRed; each must FAIL against GL and move the Vulkan colour off the Vulkan base):
  * offset (the strip stage reads its records 16 bytes on), light (the light buffer copied from one texel on), depth (ALWAYS as LEQUAL,
  * case hard only). A refused red is "not judged" with its reason, never a pass.
- * Not judged here: stencil (the shade targets' depth read only), NormalMap / GreyscaleMap / CubeMap (the app binds them only
- * with a .bgem's maps), the air's textures (off by uniform), the probe passes. */
-bool pfxGate( const std::string & spirvDir, GLuint baseTex, unsigned reds = 7u )
+ * Round 4, the maps (a .bgem's, glparticles.cpp binds each with its flag): 5 `normal` (hasNormalMap 1, useFalloff 1,
+ * NormalMap = a DXT1 twin on its own unit), 6 `grey` (greyscaleColor 1, hasGreyscaleMap 1, GreyscaleMap = a DXT1 twin),
+ * 7 `cube` (hasCubeMap 1, envReflection 1: there is no cube twin, so Vulkan must REFUSE naming CubeMap and GL draws),
+ * 8 `elem` (textures[0].textureUnit 3: textureUnits[2] a DXT1 twin on its own unit). Seen-check 4: the case's map off
+ * (its flag 0, textureUnit 1). Reds 4 `nmap`, 5 `grey` (the map a stand-in with its flag 1), 6 `cubeoff` (CubeMap a
+ * stand-in with hasCubeMap 1: draws and must FAIL against GL), 7 `elem0` (only element 0 of an array resolved, round 3's
+ * rule), each on its own case.
+ * Not judged here: stencil (off at the app's draw: StencilProperty::glProperty( nullptr ) runs after glparticles.cpp's
+ * write setup, and FO4 particles carry no NiStencilProperty), the air's textures (off by uniform), the probe passes. */
+bool pfxGate( const std::string & spirvDir, GLuint baseTex, GLuint nrmTex, GLuint greyTex, unsigned reds = 0x7Fu )
 {
 	using namespace WwVkPresent;
 	struct PfxGl
@@ -143,6 +153,23 @@ bool pfxGate( const std::string & spirvDir, GLuint baseTex, unsigned reds = 7u )
 		std::printf( "BLVIEW pfx FAIL (units: textureUnits %d, cellLights %d, fxDepth %d; %d samplers)\n", baseUnit, lightUnit, depthUnit, units );
 		return false;
 	}
+	// round 4: the maps' own units (used by their cases), textureUnits[2]'s, the app's grey cube
+	const char * tuName = locOf( "textureUnits" ) >= 0 ? "textureUnits" : "textureUnits[0]";
+	const int nrmUnit = unitOf( "NormalMap" ), greyUnit = unitOf( "GreyscaleMap" ), cubeUnit = unitOf( "CubeMap" );
+	const int elemUnit = unitAt.count( locOf( tuName ) + 2 ) ? unitAt[locOf( tuName ) + 2] : -1;
+	if ( nrmUnit < 0 || greyUnit < 0 || cubeUnit < 0 || elemUnit < 0 ) {
+		std::printf( "BLVIEW pfx FAIL (units: NormalMap %d, GreyscaleMap %d, CubeMap %d, textureUnits[2] %d)\n", nrmUnit, greyUnit, cubeUnit, elemUnit );
+		return false;
+	}
+	GLuint cubeTex = 0;
+	glGenTextures( 1, &cubeTex );
+	glBindTexture( 0x8513, cubeTex );  // TEXTURE_CUBE_MAP
+	const std::uint32_t greyTexel = 0xFF555555u;
+	for ( GLenum fc = 0; fc < 6; fc++ )
+		glTexImage2D( 0x8515 + fc, 0, GL_RGBA8, 1, 1, 0, GL_RGBA, GL_UNSIGNED_BYTE, &greyTexel );
+	glTexParameteri( 0x8513, GL_TEXTURE_MIN_FILTER, GL_LINEAR );
+	glTexParameteri( 0x8513, GL_TEXTURE_MAG_FILTER, GL_LINEAR );
+	glBindTexture( 0x8513, 0 );
 	// the named blocks at the twins' layout, on GL's bindings (build_spv.py BLOCKS)
 	struct Blk
 	{
@@ -359,12 +386,15 @@ bool pfxGate( const std::string & spirvDir, GLuint baseTex, unsigned reds = 7u )
 		const char * name;
 		GLenum func;
 		bool soft, write, noCol;
+		int map;  //!< round 4: 1 normal, 2 grey, 3 cube, 4 elem (0 none)
 	};
 	// `always` is the app's soft case: the soft fade already zeroes every fragment behind fxDepth, so the depth func moves
 	// nothing there (first run: 0 pixels). `hard` (ALWAYS, soft off) is where the func, and its red, can be seen.
-	const PfxCase cases[5] = { { "leq", GL_LEQUAL, false, false, false }, { "always", GL_ALWAYS, true, false, false },
-		{ "hard", GL_ALWAYS, false, false, false }, { "write", GL_LEQUAL, false, true, false }, { "nocol", GL_LEQUAL, false, false, true } };
-	int probe = 0;  // 1 lights off, 2 soft off, 3 the depth func flipped (LEQUAL <-> ALWAYS)
+	const PfxCase cases[9] = { { "leq", GL_LEQUAL, false, false, false, 0 }, { "always", GL_ALWAYS, true, false, false, 0 },
+		{ "hard", GL_ALWAYS, false, false, false, 0 }, { "write", GL_LEQUAL, false, true, false, 0 }, { "nocol", GL_LEQUAL, false, false, true, 0 },
+		{ "normal", GL_LEQUAL, false, false, false, 1 }, { "grey", GL_LEQUAL, false, false, false, 2 }, { "cube", GL_LEQUAL, false, false, false, 3 },
+		{ "elem", GL_LEQUAL, false, false, false, 4 } };
+	int probe = 0;  // 1 lights off, 2 soft off, 3 the depth func flipped (LEQUAL <-> ALWAYS), 4 the case's map off
 	auto frameState = [&]( const PfxCase & c ) {
 		f.bindFramebuffer( kFb, sx.fbo );
 		const GLenum dbs[1] = { kColorAtt0 };
@@ -372,7 +402,8 @@ bool pfxGate( const std::string & spirvDir, GLuint baseTex, unsigned reds = 7u )
 		glViewport( 0, 0, kSW, kSH );
 		glDisable( GL_SCISSOR_TEST );
 		glDisable( GL_STENCIL_TEST );
-		glDisable( GL_CULL_FACE );
+		glEnable( GL_CULL_FACE );  // the app's: StencilProperty::glProperty( nullptr )
+		glCullFace( GL_BACK );
 		glEnable( GL_BLEND );
 		glBlendFunc( GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA );
 		glEnable( GL_DEPTH_TEST );
@@ -384,6 +415,24 @@ bool pfxGate( const std::string & spirvDir, GLuint baseTex, unsigned reds = 7u )
 		set( "cellLightCount", { probe == 1 ? 0.0f : 3.0f } );
 		set( "fxSoft", { c.soft && probe != 2 ? 1.0f : 0.0f } );
 		set( "pfxGame", { c.soft ? 2.0f : 0.0f } );
+		// round 4: the maps as glparticles.cpp sets them (the sampler uniforms on the sprite's unit unless the case binds its map)
+		const bool mapOn = c.map != 0 && probe != 4;
+		set( "hasNormalMap", { c.map == 1 && mapOn ? 1.0f : 0.0f } );
+		set( "useFalloff", { c.map == 1 ? 1.0f : 0.0f } );
+		if ( c.map == 1 )
+			set( "falloffParams", { 0.0f, 1.0f, 0.2f, 1.0f } );
+		else
+			set( "falloffParams", { 1.0f, 0.0f, 1.0f, 1.0f } );
+		set( "greyscaleColor", { c.map == 2 ? 1.0f : 0.0f } );
+		set( "hasGreyscaleMap", { c.map == 2 && mapOn ? 1.0f : 0.0f } );
+		set( "hasCubeMap", { c.map == 3 && mapOn ? 1.0f : 0.0f } );
+		set( "envReflection", { c.map == 3 ? 1.0f : 0.0f } );
+		set( "textures[0].textureUnit", { c.map == 4 && mapOn ? 3.0f : 1.0f } );
+		set( "NormalMap", { float( c.map == 1 ? nrmUnit : baseUnit ) } );
+		set( "GreyscaleMap", { float( c.map == 2 ? greyUnit : baseUnit ) } );
+		set( "CubeMap", { float( cubeUnit ) } );
+		for ( int e = 0; e < 10; e++ )
+			set( tuName, { float( c.map == 4 && e == 2 ? elemUnit : baseUnit ) }, e );
 		for ( Blk & x : blks ) {
 			u.bufSub( x.buf, 0, std::ptrdiff_t( x.bytes.size() ), x.bytes.data() );
 			f.bindBufferBase( 0x8A11, x.glBind, x.buf );
@@ -393,6 +442,13 @@ bool pfxGate( const std::string & spirvDir, GLuint baseTex, unsigned reds = 7u )
 		u.bindTextures( GLuint( baseUnit ), 1, &baseTex );
 		u.bindTextures( GLuint( lightUnit ), 1, &lightTex );
 		u.bindTextures( GLuint( depthUnit ), 1, &depthTex );
+		u.bindTextures( GLuint( cubeUnit ), 1, &cubeTex );
+		if ( c.map == 1 )
+			u.bindTextures( GLuint( nrmUnit ), 1, &nrmTex );
+		if ( c.map == 2 )
+			u.bindTextures( GLuint( greyUnit ), 1, &greyTex );
+		if ( c.map == 4 )
+			u.bindTextures( GLuint( elemUnit ), 1, &greyTex );
 		f.bindVertexArray( vao );
 		if ( c.noCol ) {
 			u.disableAttr( 1 );
@@ -404,6 +460,7 @@ bool pfxGate( const std::string & spirvDir, GLuint baseTex, unsigned reds = 7u )
 		f.bindVertexArray( 0 );
 		glDisable( GL_BLEND );
 		glDisable( GL_DEPTH_TEST );
+		glDisable( GL_CULL_FACE );
 		glDepthMask( GL_TRUE );
 		f.useProgram( 0 );
 		f.bindFramebuffer( kFb, 0 );
@@ -525,8 +582,8 @@ bool pfxGate( const std::string & spirvDir, GLuint baseTex, unsigned reds = 7u )
 		const std::size_t glRep = moved( gl, gl2 );
 		// the seen-checks: each input reaches GL's picture
 		bool seen = true;
-		for ( int pr = 1; pr <= 3; pr++ ) {
-			if ( pr == 2 && !c.soft )
+		for ( int pr = 1; pr <= 4; pr++ ) {
+			if ( ( pr == 2 && !c.soft ) || ( pr == 4 && !c.map ) )
 				continue;
 			if ( pr == 3 && c.name != std::string( "leq" ) && c.name != std::string( "hard" ) )
 				continue;
@@ -535,7 +592,8 @@ bool pfxGate( const std::string & spirvDir, GLuint baseTex, unsigned reds = 7u )
 			glDraw( c, g2 );
 			probe = 0;
 			const std::size_t mv = moved( gl, g2 );
-			static const char * pn[4] = { "", "lights (cellLightCount 0)", "soft (fxSoft 0)", "depth func (LEQUAL <-> ALWAYS)" };
+			static const char * pn[5] = { "", "lights (cellLightCount 0)", "soft (fxSoft 0)", "depth func (LEQUAL <-> ALWAYS)",
+				"map (its flag 0 / textureUnit 1)" };
 			std::printf( "BLVIEW %s GL %s probe %s: moves %zu pixels (bar >= 1000)\n", tag.c_str(), pn[pr], mv >= 1000 ? "OK" : "FAIL", mv );
 			seen = seen && mv >= 1000;
 		}
@@ -545,7 +603,26 @@ bool pfxGate( const std::string & spirvDir, GLuint baseTex, unsigned reds = 7u )
 		const bool ran = vkDraw( c, 0, vk0, w );
 		const ObjBlRunStat rs = takeObjBlRunStat();
 		bool caseOk = seen && glRep == 0;
-		if ( !ran ) {
+		if ( c.map == 3 ) {
+			// no cube twin: Vulkan refuses by name and GL draws; the red draws with a stand-in cube and must FAIL
+			const bool named = !ran && w.find( "CubeMap" ) != std::string::npos;
+			std::printf( "BLVIEW %s refusal %s (%s)\n", tag.c_str(), named ? "OK" : "FAIL", ran ? "it drew" : w.c_str() );
+			caseOk = caseOk && named;
+			if ( reds >> 5 & 1u ) {
+				PfxOut o;
+				std::string rw;
+				if ( !vkDraw( c, 6, o, rw ) ) {
+					std::printf( "BLVIEW RED %s cubeoff NOT JUDGED (refused: %s)\n", tag.c_str(), rw.c_str() );
+					caseOk = false;
+				} else {
+					const PfxCmp rc = colCmp( gl, o );
+					const bool passes = depthCmp( o.depth, gl.depth ).exact() && rc.over == 0;
+					std::printf( "BLVIEW RED %s cubeoff (CubeMap a stand-in with hasCubeMap 1) %s (%zu values over the bound, %zu pixels written)\n",
+						tag.c_str(), passes ? "PASSED" : rc.cov >= 2000 ? "FAIL" : "TESTS NOTHING", rc.over, rc.cov );
+					caseOk = caseOk && !passes && rc.cov >= 2000;
+				}
+			}
+		} else if ( !ran ) {
 			std::printf( "BLVIEW %s FAIL (objPfxShade refused: %s)\n", tag.c_str(), w.c_str() );
 			caseOk = false;
 		} else {
@@ -572,10 +649,12 @@ bool pfxGate( const std::string & spirvDir, GLuint baseTex, unsigned reds = 7u )
 			}
 			caseOk = caseOk && crossOk && covOk && dc.exact() && cc.over == 0 && vkRep == 0;
 			// the reds: offset and light on every case, depth on `hard`
-			static const char * redName[4] = { "", "offset (the strip stage reads its records 16 bytes on)", "light (the light buffer copied from one texel on)",
-				"depth (ALWAYS read as LEQUAL)" };
-			for ( int rd = 1; rd <= 3; rd++ ) {
-				if ( !( reds >> ( rd - 1 ) & 1u ) || ( rd == 3 && ( c.func != GL_ALWAYS || c.soft ) ) || ( c.noCol && rd != 1 ) )
+			static const char * redName[8] = { "", "offset (the strip stage reads its records 16 bytes on)", "light (the light buffer copied from one texel on)",
+				"depth (ALWAYS read as LEQUAL)", "nmap (NormalMap a stand-in with hasNormalMap 1)", "grey (GreyscaleMap a stand-in with hasGreyscaleMap 1)",
+				"cubeoff", "elem0 (only element 0 of textureUnits resolved)" };
+			for ( int rd = 1; rd <= 7; rd++ ) {
+				if ( !( reds >> ( rd - 1 ) & 1u ) || ( rd == 3 && ( c.func != GL_ALWAYS || c.soft ) ) || ( c.noCol && rd != 1 )
+					|| ( c.map ? rd != 3 + c.map : rd > 3 ) )
 					continue;
 				PfxOut o;
 				std::string rw;
@@ -598,6 +677,7 @@ bool pfxGate( const std::string & spirvDir, GLuint baseTex, unsigned reds = 7u )
 	}
 	f.bindVertexArray( 0 );
 	glDeleteTextures( 1, &lightTex );
+	glDeleteTextures( 1, &cubeTex );
 	sharedTargetDrop( reinterpret_cast<std::uintptr_t>( &depthKeyAt ) );
 	objBlLocsLoad( spirvDir + "/no_locs.txt", why );
 	std::printf( "BLVIEW pfx %s\n", ok ? "OK" : "FAILED" );

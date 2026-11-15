@@ -20,9 +20,10 @@ pass for both bindless twins (fo4_cellbl, fo4_cellcsmbl): depth EXACT, colour in
 - The bindless twins' alpha test discards after the last texture sample (as VKWATER3 did for fo4_default /
   pbrm_default). A discard in the middle ended the pixel on Vulkan and broke its neighbours' texture filtering
   (colour max 0.88 off before, BOUND after).
-- Round 3: the cell-lit particle systems (particles_cell) draw on Vulkan under WW_VKOBJ_SHADE: a record pass and a
+- Round 3: the cell-lit particle systems (particles_cell) can draw on Vulkan under WW_VKOBJ_SHADE: a record pass and a
   4-vertex strip per particle through the particles' pixel twin, which reads the soft fade's depth (fxDepth) from a
   shared target. Offline: blview pfx cases leq / always / hard / write / nocol, depth and colour EXACT, reds FAIL.
+  In the app every system was still refused (GL drew it) until round 4: see the units bullet below.
 - **Soft particles on the GL HLSL route changed.** Their pixel program was compiled without -fvk-use-dx-position-w,
   so the soft fade read 1/w for the pixel's w and faded nearly to nothing. tests/hlsllive/build_spv.py now passes that
   flag for the frozen pixel files that invert gl_FragCoord.w: soft particles there fade by depth as on the GLSL route.
@@ -30,6 +31,14 @@ pass for both bindless twins (fo4_cellbl, fo4_cellcsmbl): depth EXACT, colour in
   target is asked for again on a size change or every 120 second passes (at most 4 asks per size; a grant frees GL's
   texture). Lines: `lane VKOBJ5: fxDepth shared target refused, ...` (once) and `... granted after N refusals`.
   Offline: tests/vkframe/fxdepthshare.sh (forced first refusal recovers; the old rule as the red fails).
+- Round 4, the particles' units as the app binds them: glparticles.cpp always puts a grey cube on CubeMap's unit, which
+  has no Vulkan twin, so objPfxShade refused every particles_cell system (`1 GL textures with no twin: CubeMap`). It now
+  reads hasNormalMap / hasGreyscaleMap / hasCubeMap: a map whose flag is 0 is never sampled and stays a stand-in; a map
+  whose flag is 1 must resolve (a .bgem's normal or greyscale map: its texture twin; an environment cube: still
+  refused by name, GL draws that system). All 10 textureUnits[i] resolve element by element. The gate binds as the
+  app (all textureUnits and the maps' samplers on the sprite's unit, the grey cube, cull on): grey and elem EXACT,
+  normal BOUND (12 values, max 1.2e-4), the 5 earlier cases EXACT; reds nmap / grey / elem0 FAIL; case cube refused by name, red cubeoff (drawn anyway) FAILs.
+  Stencil is off at the particles' draw (StencilProperty::glProperty( nullptr ) after the write setup).
 
 ## VKBLOOM1 (2026-11-12): the Fusion Shaders bloom and the exposure measure join the tone pass on Vulkan (WW_VKVIEW=1)
 

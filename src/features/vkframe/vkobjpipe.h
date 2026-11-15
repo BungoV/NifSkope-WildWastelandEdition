@@ -147,9 +147,11 @@ struct ObjBlTexUnit
 	std::string name;   //!< GL's sampler uniform
 	int unit = -1;      //!< -1: GL has no such uniform (the GLSL never reads it)
 	unsigned glTex = 0, glTarget = 0;
+	std::uint32_t elem = 0;  //!< lane VKOBJ5: the array element (objBlTextures elems; binding is the binding + elem)
 };
-//! the module's set-0 images, texel buffers and samplers with GL's units and textures (the active unit restored)
-bool objBlTextures( GlProc gp, unsigned prog, const SpvModule & m, std::vector<ObjBlTexUnit> & out, std::string & why );
+/*! the module's set-0 images, texel buffers and samplers with GL's units and textures (the active unit restored).
+ * elems (lane VKOBJ5): an array binding gives one unit per element (GL's location of element e), else element 0 alone */
+bool objBlTextures( GlProc gp, unsigned prog, const SpvModule & m, std::vector<ObjBlTexUnit> & out, std::string & why, bool elems = false );
 
 /* Slice 6 (the pools as vertex buffers): a class pool of cellbindless.cpp (setupVao: attribute i = nibble i of attrMask
  * floats, its own buffer, tightly packed GL_FLOATs; GL_UNSIGNED_SHORT indices) */
@@ -230,6 +232,11 @@ struct ObjBlDraw
 	const void * pfxIn = nullptr;
 	std::size_t pfxN = 0;
 	int pfxRed = 0;
+	/*! lane VKOBJ5 round 4 (objPfxShade): unitElems resolves each element of an image / sampler array on its own unit;
+	 * unitsOff names images the pixel stage never samples (their flag 0): they and their samplers stay stand-ins, counted in
+	 * ObjBlBindStat::gatedOff, never refused */
+	bool unitElems = false;
+	std::vector<std::string> unitsOff;
 };
 struct ObjBlDrawStat
 {
@@ -254,6 +261,7 @@ struct ObjBlBindStat
 	int compare = 0;   //!< of those, depth compare
 	std::string misfitWhy, texelWhy;
 	std::string glOwnNames;  //!< lane VKOBJ5: the glOwn bindings' names, comma-separated
+	int gatedOff = 0;        //!< lane VKOBJ5: units named in ObjBlDraw::unitsOff (stand-ins by their flag)
 	std::vector<unsigned> glBufs;  //!< the texel twins GL wrote (the crossing's signal takes them)
 };
 /*! GL's texture units of `prog` for both of d's modules: a set-0 image GL binds a shared target to joins d.images
@@ -388,18 +396,21 @@ int objCellRed( const char * name );
  * fixed state (objBlFrameRead: GL's depth function as it is, ALWAYS included), the uniforms (objBlMirror: one mirrored
  * copy of the vertex-side blocks serves the record pass too), the units (objBlBindUnits: fxDepth a shared target). The
  * particles come as the caller's arrays (GL's attribute locations 0 position 3, 1 colour 4, 2 uv 2, 3 angle 1, 4 size 1);
- * an array not given reads GL's current value of that location. false: why (nothing drawn; GL draws the points) */
+ * an array not given reads GL's current value of that location. Round 4: textureUnits[10] element by element, and the
+ * maps by their flags (hasNormalMap / hasGreyscaleMap / hasCubeMap 0: a stand-in, never sampled; 1: the map must resolve, a
+ * cube has no twin and is refused by name). false: why (nothing drawn; GL draws the points) */
 struct ObjPfxShade
 {
 	unsigned prog = 0;  //!< GL's current program (particles_cell)
 	const float * pos = nullptr, * col = nullptr, * uv = nullptr, * angle = nullptr, * size = nullptr;
 	std::size_t n = 0;  //!< the points (glDrawArrays( GL_POINTS, 0, n ))
 	/*! gates only, each must FAIL: 1 `offset` (the expand stage reads its records 16 bytes on), 2 `light` (the light texel buffer copied
-	 * from one texel on), 3 `depth` (GL's ALWAYS read as LEQUAL) */
+	 * from one texel on), 3 `depth` (GL's ALWAYS read as LEQUAL); round 4: 4 `nmap`, 5 `grey`, 6 `cubeoff` (that map a stand-in
+	 * with its flag 1), 7 `elem0` (an array's element 0 alone) */
 	int red = 0;
 };
 bool objPfxShade( GlProc gp, const ObjPfxShade & s, std::string & why );
-//! the red's name (WW_VKVIEW_OBJPFX_RED: offset | light | depth) as ObjPfxShade.red, 0 else
+//! the red's name (WW_VKVIEW_OBJPFX_RED: offset | light | depth | nmap | grey | cubeoff | elem0) as ObjPfxShade.red, 0 else
 int objPfxRed( const char * name );
 /*! objBlShade's frame read on its own: GL's draw framebuffer as d's targets (every colour draw buffer and the depth / stencil
  * a shared target: keys, formats, size, samples; the tone frame's too, as borrowed shared targets), the viewport the whole

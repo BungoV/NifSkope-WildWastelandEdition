@@ -1348,7 +1348,7 @@ bool objBlBlock( GlProc gp, unsigned prog, const SpvBind & block, std::vector<st
 	return true;
 }
 
-bool objBlTextures( GlProc gp, unsigned prog, const SpvModule & m, std::vector<ObjBlTexUnit> & out, std::string & why )
+bool objBlTextures( GlProc gp, unsigned prog, const SpvModule & m, std::vector<ObjBlTexUnit> & out, std::string & why, bool elems )
 {
 	out.clear();
 	OuGl g;
@@ -1364,39 +1364,45 @@ bool objBlTextures( GlProc gp, unsigned prog, const SpvModule & m, std::vector<O
 	for ( const SpvBind & b : m.binds ) {
 		if ( b.set != 0 || b.type == VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER || b.type == VK_DESCRIPTOR_TYPE_STORAGE_BUFFER )
 			continue;
-		ObjBlTexUnit u;
-		u.binding = b.binding;
-		u.type = b.type;
-		u.name = b.name;
-		const SpvBind * img = &b;
-		if ( b.type == VK_DESCRIPTOR_TYPE_SAMPLER ) {
-			// spirv-cross names a texture's sampler _<texture>_sampler
-			const std::size_t n = b.name.size();
-			if ( n > 9 && b.name[0] == '_' && b.name.compare( n - 8, 8, "_sampler" ) == 0 )
-				u.name = b.name.substr( 1, n - 9 );
-			auto it = images.find( u.name );
-			img = it == images.end() ? nullptr : it->second;
-		}
-		if ( img ) {
-			u.dim = img->dim;
-			u.arrayed = img->arrayed;
-		}
-		int loc = g.getUniformLocation( prog, u.name.c_str() );
-		if ( loc < 0 )
-			loc = al.at( u.name, 0 );  // linked from SPIR-V: the registry's location
-		if ( loc >= 0 && img ) {
-			g.getUniformiv( prog, loc, &u.unit );
-			unsigned query = 0;
-			ouTarget( u.dim, u.arrayed, u.glTarget, query );
-			if ( query && u.unit >= 0 ) {
-				int tex = 0;
-				g.activeTexture( 0x84C0u + unsigned( u.unit ) );  // TEXTURE0 + unit
-				g.getIntegerv( query, &tex );
-				u.glTex = unsigned( tex );
+		// lane VKOBJ5 (elems): each element of an array on its own unit, keyed binding + element as the set writer reads it
+		const std::uint32_t nEl = elems && b.count > 1 ? b.count : 1;
+		for ( std::uint32_t e = 0; e < nEl; e++ ) {
+			ObjBlTexUnit u;
+			u.binding = b.binding + e;
+			u.elem = e;
+			u.type = b.type;
+			u.name = b.name;
+			const SpvBind * img = &b;
+			if ( b.type == VK_DESCRIPTOR_TYPE_SAMPLER ) {
+				// spirv-cross names a texture's sampler _<texture>_sampler
+				const std::size_t n = b.name.size();
+				if ( n > 9 && b.name[0] == '_' && b.name.compare( n - 8, 8, "_sampler" ) == 0 )
+					u.name = b.name.substr( 1, n - 9 );
+				auto it = images.find( u.name );
+				img = it == images.end() ? nullptr : it->second;
 			}
-		} else
-			u.unit = -1;
-		out.push_back( u );
+			if ( img ) {
+				u.dim = img->dim;
+				u.arrayed = img->arrayed;
+			}
+			const std::string glName = nEl > 1 ? u.name + "[" + std::to_string( e ) + "]" : u.name;
+			int loc = g.getUniformLocation( prog, glName.c_str() );
+			if ( loc < 0 )
+				loc = al.at( u.name, e );  // linked from SPIR-V: the registry's location
+			if ( loc >= 0 && img ) {
+				g.getUniformiv( prog, loc, &u.unit );
+				unsigned query = 0;
+				ouTarget( u.dim, u.arrayed, u.glTarget, query );
+				if ( query && u.unit >= 0 ) {
+					int tex = 0;
+					g.activeTexture( 0x84C0u + unsigned( u.unit ) );  // TEXTURE0 + unit
+					g.getIntegerv( query, &tex );
+					u.glTex = unsigned( tex );
+				}
+			} else
+				u.unit = -1;
+			out.push_back( u );
+		}
 	}
 	g.activeTexture( unsigned( active ) );
 	return true;
@@ -1451,9 +1457,13 @@ bool objBlBindUnits( GlProc gp, unsigned prog, ObjBlDraw & d, ObjBlBindStat & st
 		if ( !spvReflect( words[m], counts[m], mod, why ) )
 			return false;
 		std::vector<ObjBlTexUnit> units;
-		if ( !objBlTextures( gp, prog, mod, units, why ) )
+		if ( !objBlTextures( gp, prog, mod, units, why, d.unitElems ) )
 			return false;
 		for ( const ObjBlTexUnit & u : units ) {
+			if ( std::find( d.unitsOff.begin(), d.unitsOff.end(), u.name ) != d.unitsOff.end() ) {
+				st.gatedOff++;  // lane VKOBJ5: the stage never samples it (its flag 0): a stand-in, not resolved
+				continue;
+			}
 			if ( u.type == VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER ) {
 				if ( !u.glTex ) {
 					st.unbound++;
@@ -1516,7 +1526,7 @@ bool objBlBindUnits( GlProc gp, unsigned prog, ObjBlDraw & d, ObjBlBindStat & st
 			}
 			if ( !key ) {
 				st.glOwn++;
-				st.glOwnNames += ( st.glOwnNames.empty() ? "" : "," ) + u.name;  // lane VKOBJ5: named in the refusal
+				st.glOwnNames += ( st.glOwnNames.empty() ? "" : "," ) + u.name + ( u.elem ? "[" + std::to_string( u.elem ) + "]" : "" );  // lane VKOBJ5: named in the refusal
 				continue;
 			}
 			std::string w;
@@ -2967,8 +2977,8 @@ bool objCellShade( GlProc gp, const ObjCellShade & s, std::string & why )
 
 int objPfxRed( const char * name )
 {
-	static const char * names[3] = { "offset", "light", "depth" };
-	for ( int i = 0; name && i < 3; i++ )
+	static const char * names[7] = { "offset", "light", "depth", "nmap", "grey", "cubeoff", "elem0" };
+	for ( int i = 0; name && i < 7; i++ )
 		if ( std::strcmp( name, names[i] ) == 0 )
 			return i + 1;
 	return 0;
@@ -3029,6 +3039,32 @@ bool objPfxShade( GlProc gp, const ObjPfxShade & s, std::string & why )
 		return fail( "the uniforms: " + w2 );
 	if ( !ust.mirrored )
 		return fail( "GL names none of the loose uniforms" );
+	// round 4: textureUnits[10] element by element; the maps by their flags (glparticles.cpp binds a .bgem's map with its
+	// flag, CubeMap always holds a grey cube): a map whose flag is 0 is never sampled and stays a stand-in, a map whose flag
+	// is 1 must resolve (a cube has no twin: refused by name, GL draws)
+	d.unitElems = s.red != 7;  // red `elem0`: element 0 alone, round 3's rule
+	{
+		SpvModule pm;
+		if ( !spvReflect( d.ps, d.psWords, pm, w2 ) )
+			return fail( "the pixel module: " + w2 );
+		static const char * maps[3][2] = { { "hasNormalMap", "NormalMap" }, { "hasGreyscaleMap", "GreyscaleMap" }, { "hasCubeMap", "CubeMap" } };
+		for ( int k = 0; k < 3; k++ ) {
+			std::uint32_t flag = 0;
+			bool found = false;
+			for ( const SpvBind & b : pm.binds )
+				for ( const SpvMember & m : b.members )
+					if ( m.name == maps[k][0] )
+						for ( const auto & u : d.ubos )
+							if ( u.first == b.binding && m.offset + 4 <= u.second.size() ) {
+								std::memcpy( &flag, u.second.data() + m.offset, 4 );
+								found = true;
+							}
+			if ( !found )
+				return fail( std::string( "no mirrored " ) + maps[k][0] );
+			if ( !flag || s.red == 4 + k )  // reds nmap / grey / cubeoff: the map a stand-in with its flag 1
+				d.unitsOff.push_back( maps[k][1] );
+		}
+	}
 	ObjBlBindStat bst;
 	if ( !objBlBindUnits( gp, s.prog, d, bst, w2 ) )
 		return fail( "the texture units: " + w2 );
