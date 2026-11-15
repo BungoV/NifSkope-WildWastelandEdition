@@ -8494,6 +8494,18 @@ bool csmRun( const CsmRun & t, std::string & why )
 		if ( S.dFb[k] < 0 )
 			return breakOff( w );
 	}
+	// lane VKSHADOW5: queue draws after a mesh draw in one render pass (csmWork rebinds the queue's buffers for them)
+	int requeues = 0;
+	{
+		std::vector<int> formAt;
+		for ( std::size_t k = 0; k < t.d.size(); k++ ) {
+			const std::size_t fb = std::size_t( S.dFb[k] );
+			if ( formAt.size() <= fb )
+				formAt.resize( fb + 1, -1 );
+			requeues += formAt[fb] == 1 && !t.d[k].mesh ? 1 : 0;
+			formAt[fb] = int( t.d[k].mesh );
+		}
+	}
 	if ( ( queue
 			 && ( !csmBuf( S.pos, VkDeviceSize( t.posBytes ), true, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, w )
 				 || !csmBuf( S.idx, VkDeviceSize( t.idxBytes ), true, VK_BUFFER_USAGE_INDEX_BUFFER_BIT, w )
@@ -8561,6 +8573,7 @@ bool csmRun( const CsmRun & t, std::string & why )
 	S.st.draws += int( t.d.size() );
 	S.st.cmds += queue ? int( t.nCmds ) : 0;
 	S.st.mdraws += mdrawn;
+	S.st.requeues += requeues;
 	S.st.cpuMs += ms;
 	S.st.maxMs = std::max( S.st.maxMs, ms );
 	return true;
@@ -9439,6 +9452,11 @@ void csmSay( bool wanted, const char * glWhy )
 		return;
 	at = now;
 	const CsmStat st = takeCsmStat();
+	// lane VKSHADOW5: the mesh pool (per-draw casters, the ground quad), summed since the last line
+	const QString pool = st.mdraws > 0 || st.copies > 0
+		? QStringLiteral( "; mesh pool since the last line: %1 mesh draws, %2 copied (%3 KiB), %4 kept, %5 regen, %6 repacks, %7 requeues" )
+			  .arg( st.mdraws ).arg( st.copies ).arg( st.copyKb, 0, 'f', 1 ).arg( st.hits ).arg( st.regen ).arg( st.repacks ).arg( st.requeues )
+		: QString();
 	QString line;
 	if ( st.runs > 0 )
 		line = head + QStringLiteral( "on Vulkan %1 passes (queued solid + two-sided casters, %2 draws, %3 commands; one crossing; "
@@ -9451,6 +9469,7 @@ void csmSay( bool wanted, const char * glWhy )
 		line += QStringLiteral( ", on GL %1 passes (last: %2)" ).arg( st.gl ).arg( QString::fromStdString( st.glWhy ) );
 	if ( st.fails > 0 )
 		line += QStringLiteral( ", %1 refused to GL (last: %2)" ).arg( st.fails ).arg( QString::fromStdString( st.failWhy ) );
+	line += pool;
 	said = line;
 	qInfo().noquote() << line;
 }
