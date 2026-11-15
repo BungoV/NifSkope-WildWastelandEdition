@@ -315,6 +315,11 @@ ls -la fargnd_view_ps.spv.h fargnd_view_vs.spv.h
 fx taareactive_view_ps post/taa_reactive_ps
 fxb taareactive_view_vs post/taa_reactive_vs
 ls -la taareactive_view_ps.spv.h taareactive_view_vs.spv.h
+# lane VKLAMP1: the lamps' plain shadow cube faces (celllamps.cpp, vklamp.inc): both stages on fx()'s shifts (the face block
+# b1 at 1, dynamic offset)
+fxv lamp_view_vs lights/lamp_view_vs
+fx lamp_view_ps lights/lamp_view_ps
+ls -la lamp_view_vs.spv.h lamp_view_ps.spv.h
 # lane VKWATER4: the water look off (fo4_water.prog), frozen from the old fo4_water_ps FOGLEAK + FRAME_UBO spirv-cross file
 fxkw water_view_off_ps water/water_view_off_ps
 # lane VKWATER4 (L7): the camera-underwater fog (cell_underwater.prog + its per-sample _ms), frozen twins: both outputs at
