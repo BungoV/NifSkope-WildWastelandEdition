@@ -120,6 +120,20 @@ float pcWrapVk( float x, float L )
 	return r >= L ? r - L : max( r, 0.0 );
 }
 
+#ifdef PC_LIT
+// L8 term 7: t0 is cellLights here, so the roof map sits at t47 (vkprecip.inc's lit set, binding 111); pcRoofOpen's
+// rule as cell_precip_field.hlsli writes it, op for op
+Texture2D<float4> pcRoofLit : register(t47, space0);
+bool pcRoofOpenLit( float3 rel )
+{
+	int2 t = int2( floor( pcRoofCam.xy + rel.xy * pcRoofInv ) );
+	int2 n = textureSize( pcRoofLit, 0 );
+	if ( or( any( (t < (int2)( 0 )) ), any( (t >= n) ) ) )
+		return true;
+	return pcRoofLit.Load( int3(t, 0) ).r - pcRoofCam.z < rel.z;
+}
+#endif
+
 // cell_precip_field.hlsli pcParticle in NV GL's order of operations (its vertex-stage NV_gpu_program5 assembly, driver
 // 610.74): mad() where GL fuses, separate precise ops where it keeps a multiply and an add apart, and its reassociations
 // ((om pcT) 0.7, (om sway sin) 0.7, the spin's 2^-23). sin / cos take the raw phase, as GL's SIN / COS do.
@@ -168,7 +182,7 @@ bool pcParticleVk( uint i, out float3 rel, out float3 vel, out float hs, out flo
 	if ( pcInner > 0.0 && all( (abs( rel ) < (float3)( 0.5 * pcInner )) ) )
 		return false;
 #ifdef PC_LIT
-	return true;	// t0 is cellLights here: vkprecip.inc refuses the roof map to every run (pcRoofOn false)
+	return or( !pcRoofOn, pcRoofOpenLit( rel ) );	// L8 term 7: the map at t47
 #else
 	return or( !pcRoofOn, pcRoofOpen( rel ) );
 #endif

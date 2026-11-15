@@ -600,6 +600,8 @@ struct Job
 	std::vector<float> cloudData;
 	int cubeN = 0;  // L8 term 5: cubes.txt's face edge (16 cubes, D16; cubes.bin N x N x 96 layer-faces)
 	std::vector<std::uint16_t> cubeData;
+	int roofNx = 0, roofNy = 0;  // L8 term 7: roof.txt's map size (R32F; roof.bin nx x ny floats, row-major from y 0)
+	std::vector<float> roofData;
 	bool hasN() const { return look == 2 && hasTex; }
 	struct Buf  // L8 term 2a: a texture buffer (buf.txt: name format texels file)
 	{
@@ -669,6 +671,11 @@ struct Job
 	{
 		const auto it = uni.find( "cellGoboOn" );
 		return lamps() && it != uni.end() && !it->second.empty() && it->second[0] > 0.5;
+	}
+	bool roof() const  // L8 term 7 (VKFAR6): the roof map on (pcRoofOn 1, the map from roof.txt), any variant
+	{
+		const auto it = uni.find( "pcRoofOn" );
+		return roofNx > 0 && it != uni.end() && !it->second.empty() && it->second[0] > 0.5;
 	}
 };
 const int kNormUnit = 8;  // slice 3: the look's pcTexN
@@ -766,6 +773,15 @@ int main( int argc, char ** argv )
 					std::ifstream ub( dir + "/" + nm + "/cubes.bin", std::ios::binary );
 					if ( !ub.read( reinterpret_cast<char *>( j.cubeData.data() ), std::streamsize( j.cubeData.size() * 2 ) ) )
 						return fatal( nm + "/cubes.txt: cubes.bin" );
+				}
+			}
+			{  // L8 term 7: the roof map (roof.txt: nx ny; roof.bin R32F)
+				std::ifstream rf( dir + "/" + nm + "/roof.txt" );
+				if ( rf >> j.roofNx >> j.roofNy ) {
+					j.roofData.resize( size_t( j.roofNx ) * size_t( j.roofNy ) );
+					std::ifstream rb( dir + "/" + nm + "/roof.bin", std::ios::binary );
+					if ( !rb.read( reinterpret_cast<char *>( j.roofData.data() ), std::streamsize( j.roofData.size() * 4 ) ) )
+						return fatal( nm + "/roof.txt: roof.bin" );
 				}
 			}
 			jobs.push_back( j );
@@ -989,13 +1005,14 @@ int main( int argc, char ** argv )
 	};
 	GLuint vao = 0;
 	genVertexArrays( 1, &vao );
-	constexpr int kCases = 22;
+	constexpr int kCases = 25;
 	static char twinKeys[kCases], normKeys[kCases];  // one atlas twin a case (the atlases' sizes differ), one normal-map twin a case
 	static char terrKeys[kCases];  // L8 terrain air: airTerr's twin a case
 	static char envKeys[kCases];  // L8 term 2: volEnvHist's twin a case
 	static char csmKeys[kCases], cloudKeys[kCases];  // L8 term 3: csmMap's shared target, ussCloudMap's twin a case
 	static char noiseKeys[kCases];  // L8 term 4: volAirNoise's twin a case
 	static char cubeKeys[kCases];  // L8 term 5: cellShadow's shared target a case
+	static char roofKeys[kCases];  // L8 term 7: pcRoof's twin a case
 	static char airKeys[kCases][5], volKeys[kCases];  // the air's twins a case, its volume's shared target a case
 	if ( jobs.size() > size_t( kCases ) )
 		return fatal( "more than " + std::to_string( kCases ) + " cases" );
@@ -1052,7 +1069,7 @@ int main( int argc, char ** argv )
 		const char * name;
 		long long red;  // past bit 30 from L8 term 7 on
 		bool seen;
-	} reds[27] = { { "cull (radius 0)", 1, false }, { "corners (the strip's last two swapped)", 2, false }, { "near fade (dropped)", 4, false },
+	} reds[30] = { { "cull (radius 0)", 1, false }, { "corners (the strip's last two swapped)", 2, false }, { "near fade (dropped)", 4, false },
 		{ "air (dropped)", 8, false }, { "look (dropped: the plain pipelines)", 16, false }, { "atlas (dropped: the zero texture)", 32, false },
 		{ "light (dropped)", 128, false }, { "lamps' lights (dropped: the zero texel buffer)", 256, false },
 		{ "cluster's globals (dropped: b0 zero)", 512, false }, { "cluster lists (dropped: the zero texel buffer)", 1024, false },
@@ -1064,7 +1081,8 @@ int main( int argc, char ** argv )
 		{ "drift's octaves (swapped: volAirDriftUv)", 4194304, false }, { "lamps' cubes (dropped: the zero D16 cube array)", 8388608, false },
 		{ "lamps' shadows (dropped: cellShadowOn 0)", 16777216, false }, { "lamps' shadow fade (dropped: cellShadowFadeOn 0)", 33554432, false },
 		{ "lamps' gobos (dropped: cellGoboOn 0)", 67108864, false }, { "lamps' gobo table (dropped: cellGoboTbl 0)", 134217728, false },
-		{ "lamps' gobo uv (flipped: cellGoboRot 3)", 268435456, false } };
+		{ "lamps' gobo uv (flipped: cellGoboRot 3)", 268435456, false }, { "roof map (dropped: the zero pcRoof)", 536870912LL, false },
+		{ "roof (off: pcRoofOn 0)", 1073741824LL, false }, { "roof map's axes (swapped: pcRoofCam x / y)", 2147483648LL, false } };
 	using TexBufferFn = void( WINAPI * )( GLenum, GLenum, GLuint );
 	const auto texBuffer = reinterpret_cast<TexBufferFn>( wglGetProcAddress( "glTexBuffer" ) );
 	if ( !texBuffer )
@@ -1143,6 +1161,9 @@ int main( int argc, char ** argv )
 			glTexParameteri( 0x9009, 0x813D, 0 );  // MAX_LEVEL
 			glBindTexture( 0x9009, 0 );
 		}
+		GLuint roofTex = 0;  // L8 term 7: the roof map as the app's (R32F, NEAREST, clamp to edge; cellprecip.cpp)
+		if ( j.roofNx > 0 )
+			roofTex = tex2d( j.roofNx, j.roofNy, 0x822E, fRed, GL_FLOAT, j.roofData.data(), false );
 		const void * uboOver = nullptr;  // the globals check's other b0 (bindJob uploads it in place of the case's)
 		const void * vkGlobalOver = nullptr;  // the same bytes as Vulkan's b0 (the globals mirror)
 		auto bindJob = [&]( GLuint prog ) {
@@ -1152,7 +1173,8 @@ int main( int argc, char ** argv )
 			setUnis( prog, j.uni );
 			bindUnit( 0, GL_TEXTURE_2D, atlas );
 			u1i( prog, "pcTex", 0 );
-			u1i( prog, "pcRoof", 7 );  // nothing bound there (pcRoofOn 0)
+			bindUnit( 7, GL_TEXTURE_2D, roofTex );  // L8 term 7 (none: read only with pcRoofOn 1)
+			u1i( prog, "pcRoof", 7 );
 			for ( int a = 0; a < 5; a++ ) {  // unfogged: nothing bound (fogOn 0, atAp off)
 				const TexIn * t = j.fog ? &j.tex[size_t( j.airAt[a] )] : nullptr;
 				bindUnit( kAirUnit + a, kAirType[a] == 1 ? fT3D : kAirType[a] == 2 ? fT2DA : GLenum( GL_TEXTURE_2D ), t ? t->gl : 0 );
@@ -1204,13 +1226,14 @@ int main( int argc, char ** argv )
 		// (a fogged case's pass 6 draws with the air off: the air must change the picture, or the case does not test it)
 		// (a look case's last pass draws cell_precip_gpu.prog instead: the look must change the picture too)
 		// (a fogged case's last pass draws the same program without WW_CELL_FOGLEAK: the fogleak check, printed only)
-		std::vector<std::uint16_t> refOff, refPlain, refNoFl;
+		std::vector<std::uint16_t> refOff, refPlain, refNoFl, refRoof;  // (refRoof: L8 term 7's pass, pcRoofOn 0)
 		std::vector<std::uint16_t> refPrt;  // L8 term 1: the WW_CELL_PRT variant's frame, its GI fed (the GI case)
 		if ( const GLenum e = glGetError() )
 			return fatal( j.name + ": a GL error before the reference draw (0x" + std::to_string( unsigned( e ) ) + ")" );
 		const int passAir = j.fog ? 6 : -1, passPlain = j.look ? 6 + ( j.fog ? 1 : 0 ) : -1;
 		const int passNoFl = j.fog ? 6 + 1 + ( j.look ? 1 : 0 ) : -1;
-		for ( int pass = 0; pass < 6 + ( j.fog ? 2 : 0 ) + ( j.look ? 1 : 0 ); pass++ ) {
+		const int passRoof = j.roof() ? 6 + ( j.fog ? 2 : 0 ) + ( j.look ? 1 : 0 ) : -1;  // L8 term 7: the roof off
+		for ( int pass = 0; pass < 6 + ( j.fog ? 2 : 0 ) + ( j.look ? 1 : 0 ) + ( j.roof() ? 1 : 0 ); pass++ ) {
 			before( fbRef, j.zd );
 			bindJob( pass == passPlain ? pPrecip : pass == passNoFl ? ( j.look ? pLookNoFl : pNoFl ) : pJob );
 			if ( pass == passAir ) {  // the air off: fogOn 0 alone leaves the volume and the aerial perspective on
@@ -1219,6 +1242,8 @@ int main( int argc, char ** argv )
 				u1i( pJob, "volOn", 0 );
 				f.uniform4fv( f.getUniformLocation( pJob, "atAp" ), 1, zero4 );
 			}
+			if ( pass == passRoof )
+				u1i( pJob, "pcRoofOn", 0 );
 			f.bindFramebuffer( fFb, fbRef );
 			glViewport( 0, 0, W, H );
 			glEnable( GL_DEPTH_TEST );
@@ -1246,6 +1271,8 @@ int main( int argc, char ** argv )
 				refPlain = readSamples( refCol );
 			else if ( pass == passNoFl )
 				refNoFl = readSamples( refCol );
+			else if ( pass == passRoof )
+				refRoof = readSamples( refCol );
 			else if ( pass ) {
 				( pass == 1 ? refA : refAn[pass - 2] ) = readSamples( refCol );
 				reveal( fbRef );
@@ -1270,6 +1297,16 @@ int main( int argc, char ** argv )
 			std::printf( "PRECIPVIEW %s look check: GL's plain program differs from its look program %zu of %zu covered samples (%s)\n", j.name.c_str(),
 				o.flips, o.covered, o.flips >= 1000 ? "the look is seen" : "TOO FEW: the case does not test the look" );
 			ok = ok && o.flips >= 1000;
+		}
+		if ( j.roof() ) {  // L8 term 7's seen-checks (header): the roof seen, its names found
+			const Verdict o = judge( bg, refRoof, refA, refB, refB );
+			std::string umiss;
+			for ( const char * nm : { "pcRoof", "pcRoofOn", "pcRoofCam", "pcRoofInv" } )
+				if ( f.getUniformLocation( pJob, nm ) < 0 )
+					umiss += std::string( umiss.empty() ? "" : ", " ) + nm;
+			std::printf( "PRECIPVIEW %s roof checks: GL with pcRoofOn 0 differs %zu of %zu covered samples (want >= 1000); roof names missing "
+				"from GL's program: %s\n", j.name.c_str(), o.flips, o.covered, umiss.empty() ? "none" : umiss.c_str() );
+			ok = ok && o.flips >= 1000 && umiss.empty();
 		}
 		if ( j.lit ) {  // slice 2b's seen-checks (header): the light seen, thin vs thick seen, no NaN / Inf, the sun's names found
 			auto drawGl = [&]( int mode ) {  // 1 cellHasDir 0, 2 pcTrans 1.0, 3 volTerms 1, 10 + k cellLightCount k; set back after
@@ -1773,7 +1810,14 @@ int main( int argc, char ** argv )
 			t.color = fc;
 			t.first = j.first;
 			t.n = j.n;
-			// t0 pcRoof: none (pcRoofOn 0; its sampler shares unit 0's atlas in GL's state, so it is not read from there)
+			t.roofOn = j.roof();  // precipDraw's (L8 term 7): pcRoofOn, then GL's pcRoof into t0 (the lit pass's t47)
+			if ( t.roofOn ) {
+				if ( !WwVkPresent::fxTexOf( &ga, pJob, "pcRoof", 0, t.tex[0], why ) ) {
+					std::printf( "PRECIPVIEW fxTexOf refused (pcRoof): %s\n", why.c_str() );
+					return false;
+				}
+				t.tex[0].twin = reinterpret_cast<std::uintptr_t>( &roofKeys[jobAt] );
+			}
 			if ( !WwVkPresent::fxTexOf( &ga, pJob, "pcTex", 0, t.tex[1], why, true ) ) {
 				std::printf( "PRECIPVIEW fxTexOf refused: %s\n", why.c_str() );
 				return false;
@@ -1846,6 +1890,15 @@ int main( int argc, char ** argv )
 			WwVkPresent::fxPack( &ga, pJob, WwVkPresent::kT_precipcs, int( std::size( WwVkPresent::kT_precipcs ) ), t.cs );
 			WwVkPresent::fxPack( &ga, pJob, WwVkPresent::kT_precipps, int( std::size( WwVkPresent::kT_precipps ) ), t.ps );
 			t.packs = 2;
+			if ( checkSeed && j.roof() ) {  // the roof's switch packed, not zero (the roof bar; kT_precipcs's head)
+				const int at = precipAt( WwVkPresent::kT_precipcs, int( std::size( WwVkPresent::kT_precipcs ) ), "pcRoofOn" );
+				bool any = false;
+				for ( int b = 0; b < 4 && at >= 0; b++ )
+					any = any || t.cs[at + b] != 0;
+				std::printf( "PRECIPVIEW %s roof packed: pcRoofOn %s\n", j.name.c_str(), any ? "non-zero" : "zero or absent" );
+				if ( !any )
+					return false;
+			}
 			if ( j.look ) {  // slice 3: cell_precip_look.prog's run (its fields, pcTexN at tex[7])
 				WwVkPresent::fxPack( &ga, pJob, WwVkPresent::kT_preciplookcs, int( std::size( WwVkPresent::kT_preciplookcs ) ), t.cs );
 				WwVkPresent::fxPack( &ga, pJob, WwVkPresent::kT_preciplookps, int( std::size( WwVkPresent::kT_preciplookps ) ), t.ps );
@@ -2244,7 +2297,8 @@ int main( int argc, char ** argv )
 				|| ( ( r.red == 65536 || r.red == 131072 || r.red == 262144 || r.red == 524288 ) && !j.csm() )
 				|| ( ( r.red == 1048576 || r.red == 2097152 || r.red == 4194304 ) && !j.drift() )
 				|| ( ( r.red == 8388608 || r.red == 16777216 || r.red == 33554432 ) && !j.cube() )
-				|| ( ( r.red == 67108864 || r.red == 134217728 || r.red == 268435456 ) && !j.gobo() ) )
+				|| ( ( r.red == 67108864 || r.red == 134217728 || r.red == 268435456 ) && !j.gobo() )
+				|| ( ( r.red == 536870912LL || r.red == 1073741824LL || r.red == 2147483648LL ) && !j.roof() ) )
 				continue;  // a plain run has no look to drop, a case with no atlas no atlas, an unlit one no light, no lamps no lights
 			std::vector<std::uint16_t> a, b;
 			if ( !runVk( r.red, a, b, false ) ) {
@@ -2272,7 +2326,7 @@ int main( int argc, char ** argv )
 			if ( ( r.red == 512 || r.red == 1024 || r.red == 2048 || r.red == 4096 || r.red == 16384 || r.red == 32768 || r.red == 65536
 				|| r.red == 131072 || r.red == 262144 || r.red == 524288 || r.red == 1048576 || r.red == 2097152 || r.red == 4194304
 				|| r.red == 8388608 || r.red == 16777216 || r.red == 33554432 || r.red == 67108864 || r.red == 134217728
-				|| r.red == 268435456 ) && v.ok() ) {  // the cluster case must see its b0 and its lists dropped
+				|| r.red == 268435456 || r.red == 536870912LL || r.red == 1073741824LL || r.red == 2147483648LL ) && v.ok() ) {  // the cluster case must see its b0 and its lists dropped
 				std::printf( "PRECIPVIEW %s red %s PASSED: the case does not see it\n", j.name.c_str(), r.name );
 				ok = false;
 			}
@@ -2356,9 +2410,6 @@ int main( int argc, char ** argv )
 			WwVkPresent::precipLitRead( &ga, pPrecip, t );
 			const char * whys[24] = {};
 			int n = WwVkPresent::precipLitWhys( t.litIn, whys, 24 );
-			if ( n < 24 )  // the roof map (header's census roof line): precipAdmits refuses pcRoofOn for every run, lit or not
-				whys[n] = "the roof map on (pcRoofOn: a cell with a roof map; precipAdmits, every run)";
-			n++;
 			std::printf( "PRECIPVIEW census %s (the app's all-on lit defaults): %d refusals (0 is the L8 done line)\n", w.name, n );
 			for ( int k = 0; k < n && k < 24; k++ )
 				std::printf( "PRECIPVIEW census %s refusal %d: %s\n", w.name, k + 1, whys[k] );
@@ -2385,6 +2436,7 @@ int main( int argc, char ** argv )
 		WwVkPresent::sharedTargetDrop( reinterpret_cast<std::uintptr_t>( &csmKeys[c] ) );
 		WwVkPresent::sharedTargetDrop( reinterpret_cast<std::uintptr_t>( &noiseKeys[c] ) );
 		WwVkPresent::sharedTargetDrop( reinterpret_cast<std::uintptr_t>( &cubeKeys[c] ) );
+		WwVkPresent::sharedTargetDrop( reinterpret_cast<std::uintptr_t>( &roofKeys[c] ) );
 		WwVkPresent::farTwinDrop( reinterpret_cast<std::uintptr_t>( &cloudKeys[c] ) ), WwVkPresent::sharedTargetDrop( reinterpret_cast<std::uintptr_t>( &cloudKeys[c] ) );
 		for ( char & k : airKeys[c] )
 			WwVkPresent::sharedTargetDrop( reinterpret_cast<std::uintptr_t>( &k ) );

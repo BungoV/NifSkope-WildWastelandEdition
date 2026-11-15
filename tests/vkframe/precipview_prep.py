@@ -88,6 +88,14 @@ CASES = [
     # L8 term 6 (VKFAR6, element 28 = the lamps' gobos): rain_near_lamps' run, volTerms 3
     ('rain_near_gobo', 0, 2.0, 4.0, 11, 37.25, (-60500.0, 70000.0, 6300.0), (120.0, -40.0), 0, 1.0, 0.0, 0.0, 1.0, 1.0, 1,
      2.0, -0.08, 40000, 0, 0, 3, 0, 0, 0, 0, 0, 0, 0, 1),
+    # L8 term 7 (VKFAR6, element 29 = the roof map), appended (the earlier cases' atlas seeds kept; bindJob resets an
+    # unlit case's light chain): rain_near_lit's run lit, rain_near_disc's plain, snow_look_near's look
+    ('rain_near_roof_lit', 0, 2.0, 4.0, 11, 37.25, (-60500.0, 70000.0, 6300.0), (120.0, -40.0), 0, 1.0, 0.0, 0.0, 1.0, 1.0, 1,
+     2.0, -0.08, 40000, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1),
+    ('rain_near_roof', 0, 2.0, 4.0, 11, 37.25, (-60500.0, 70000.0, 6300.0), (120.0, -40.0), 0, 1.0, 0.0, 0.0, 1.0, 1.0, 1,
+     2.0, -0.08, 40000, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1),
+    ('snow_look_roof', 3, 5.5, 1.0, 97, 37.25, (12345.6, -98765.4, 7210.0), (-55.0, 210.0), 0, 3.0, 0.5, 6.0, 1.0, 1.0, 1,
+     0.7, -0.15, 40000, 1, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1),
 ]
 SUN = np.array([0.4, 0.3, 0.35]) / np.linalg.norm([0.4, 0.3, 0.35])  # world, toward the sun (the air's fogSun too)
 # a lit case's own sun (cellDirTo), chosen by the GS's mix: N = the eye's axis, thick / thin = 4 vpWrap( N.to, pcTrans )
@@ -97,6 +105,7 @@ LIT_SUN = {'rain_near_lit': np.array([0.3, -0.6, 0.75]) / np.linalg.norm([0.3, -
 LIT_SUN['rain_near_lamps'] = LIT_SUN['rain_near_lit']
 LIT_SUN['rain_near_shadow'] = LIT_SUN['rain_near_lit']
 LIT_SUN['rain_near_gobo'] = LIT_SUN['rain_near_lit']
+LIT_SUN['rain_near_roof_lit'] = LIT_SUN['rain_near_lit']
 LIT_SUN['rain_near_cluster'] = LIT_SUN['rain_near_lit']
 LIT_SUN['rain_near_sunlocal'] = LIT_SUN['rain_near_lit']
 LIT_SUN['rain_near_gi'] = LIT_SUN['rain_near_lit']
@@ -663,6 +672,26 @@ for ci, c in enumerate(CASES):
         nl = bc3_levels(normals(tw, th, 31 + ci), os.path.join(d, 'tex_pcTexN.bin'))
         with open(os.path.join(d, 'tex.txt'), 'a', newline='\n') as f:
             f.write('pcTexN 2d bc3 %d %d 1 linear clamp %d tex_pcTexN.bin\n' % (tw, th, nl))
+    if len(c) > 29 and c[29]:
+        # L8 term 7: the roof map (cellprecip.cpp's R32F, the highest occluder z a texel, -1e30 open), 24 x 16, the texel
+        # L / 16, the eye at texel (6.3, 11.7): the map covers part of the box, off the map at low x and high y; a quarter
+        # open, the rest a roof at the eye's z + uniform( -L / 2, L / 2 )
+        rf_nx, rf_ny, rf_inv = 24, 16, 16.0 / g['L']
+        rf_rs = np.random.RandomState(290 + ci)
+        rf_z = (c[6][2] + rf_rs.uniform(-0.5, 0.5, (rf_ny, rf_nx)) * g['L']).astype(np.float32)
+        rf_z[rf_rs.rand(rf_ny, rf_nx) < 0.25] = np.float32(-1e30)
+        rf_z.tofile(os.path.join(d, 'roof.bin'))  # row y = 0 first, as glTexImage2D takes it
+        with open(os.path.join(d, 'roof.txt'), 'w', newline='\n') as f:
+            f.write('%d %d\n' % (rf_nx, rf_ny))
+        U.update({'pcRoofOn': [1], 'pcRoofCam': [6.3, 11.7, c[6][2]], 'pcRoofInv': [rf_inv]})
+        # the prediction (the CPU particles in float32, pcRoofOpen's rule): how many in-view particles sit under a roof
+        rf_p = rel[inview].astype(np.float32)
+        rf_t = np.floor(np.array([6.3, 11.7], np.float32) + rf_p[:, :2] * np.float32(rf_inv)).astype(np.int64)
+        rf_on = (rf_t >= 0).all(1) & (rf_t[:, 0] < rf_nx) & (rf_t[:, 1] < rf_ny)
+        rf_under = np.zeros(len(rf_p), bool)
+        rf_under[rf_on] = ~(rf_z[rf_t[rf_on, 1], rf_t[rf_on, 0]] - np.float32(c[6][2]) < rf_p[rf_on, 2])
+        print('precipview case %s: the roof map %d x %d, %d of %d in-view particles on the map, %d under a roof (dropped)'
+              % (c[0], rf_nx, rf_ny, int(rf_on.sum()), len(rf_p), int(rf_under.sum())))
     with open(os.path.join(d, 'uni.txt'), 'w', newline='\n') as f:
         for key, val in U.items():
             f.write('%s %s\n' % (key, fl(val)))

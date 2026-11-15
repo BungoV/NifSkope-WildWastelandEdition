@@ -12,7 +12,7 @@
  * program variant that reads a GI volume is refused) and the ambient (volTerms 8: the weather's cellDalc, the Ambient
  * Only volumes, the air's keep through volEnvHist at t19), the sun's cascades and the clouds (t31 / t34) and the air's
  * drift (volAirNoise at t30), the lamps' shadow cubes (GL's shared D16 cube array at t6), their gobos (in cellLights).
- * Interiors and the roof map are refused (GL draws).
+ * The roof map (pcRoofOn: GL's pcRoof twinned, t0 / the lit pass's t47) on every variant. Interiors are refused (GL draws).
  * GL's state (cellprecip.cpp): depth LEQUAL, no depth write, cull off, blend SRC_ALPHA / ONE_MINUS_SRC_ALPHA, stencil ALWAYS
  * ref 1, REPLACE on depth pass, write mask 0x03. */
 namespace
@@ -255,7 +255,7 @@ bool precipStatic( std::string & why )
 /* slice 2b: the lit record pass (precip_lit_view_cs; its bindings as spirv-cross --reflect gives them, fxs()'s shifts):
  * b0 globalUniforms, b31, t0 cellLights / t45 cellCluster (texel buffers) at 64 / 109, u0 the records at 192, the images
  * below with their samplers. Made on the first lit run; a failure refuses lit runs only (the unlit ones keep drawing). */
-constexpr std::uint32_t kPrecipLitImg[14] = { 70, 81, 83, 89, 90, 91, 92, 93, 94, 95, 96, 97, 98, 110 };
+constexpr std::uint32_t kPrecipLitImg[15] = { 70, 81, 83, 89, 90, 91, 92, 93, 94, 95, 96, 97, 98, 110, 111 };  // 111: t47 pcRoofLit (L8 term 7)
 constexpr std::uint32_t kPrecipLitSmp[13] = { 134, 145, 153, 154, 155, 156, 157, 158, 159, 160, 161, 162, 174 };
 PFN_vkCmdClearDepthStencilImage precipClearDs = nullptr;
 
@@ -280,7 +280,7 @@ bool precipLitStatic( std::string & why )
 	precipClearDs = reinterpret_cast<PFN_vkCmdClearDepthStencilImage>( v.vkGetDeviceProcAddr( v.dev, "vkCmdClearDepthStencilImage" ) );
 	if ( !createBufferView || !precipClearDs )
 		return fail( "no vkCreateBufferView / vkCmdClearDepthStencilImage" );
-	VkDescriptorSetLayoutBinding b[32] = {};
+	VkDescriptorSetLayoutBinding b[40] = {};  // 5 buffers + kPrecipLitImg + kPrecipLitSmp (33 from L8 term 7)
 	int nb = 0;
 	auto add = [&]( std::uint32_t at, VkDescriptorType ty ) {
 		b[nb].binding = at;
@@ -302,7 +302,7 @@ bool precipLitStatic( std::string & why )
 	lci.bindingCount = std::uint32_t( nb );
 	lci.pBindings = b;
 	const VkDescriptorPoolSize ps[5] = { { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 2 }, { VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER, 2 },
-		{ VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1 }, { VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 14 }, { VK_DESCRIPTOR_TYPE_SAMPLER, 13 } };
+		{ VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1 }, { VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 15 }, { VK_DESCRIPTOR_TYPE_SAMPLER, 13 } };
 	VkDescriptorPoolCreateInfo pci { VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO };
 	pci.maxSets = 1;
 	pci.poolSizeCount = 5;
@@ -694,8 +694,6 @@ bool precipAdmits( const PrecipRun & t, std::string & why )
 		if ( ( t.litIn.terms & 8 ) && t.litIn.envKeep >= 0.5f && !t.global )  // L8 term 2: vpAmbKeep reads b0's projection
 			return refuse( "the ambient's keep with no globalUniforms bytes (b0's projection)" );
 	}
-	if ( t.roofOn || t.tex[0].tex )
-		return refuse( "the roof map on (slice 3's)" );
 	if ( !toneFrameIs( t.color ) || !T.colorView || !T.dsView )
 		return refuse( "the draw target is not the shared tone frame" );
 	if ( T.w != t.w || T.h != t.h )
@@ -833,11 +831,13 @@ bool precipRun( const PrecipRun & t, std::string & why )
 		return refuse( "the lamps' shadows on with no cellShadow in GL's program" );
 	if ( cubes && !D.csmLinear )
 		return refuse( "the lamps' shadow cubes: no D16 linear filtering on the present device" );
+	if ( t.roofOn && !t.tex[0].tex )  // L8 term 7: GL drops particles under its map; Vulkan has none to read
+		return refuse( "the roof map on with no pcRoof in GL's program" );
 	for ( int k = 0; k < 14; k++ ) {
 		FxTex x = t.tex[k];
 		if ( ( ( k == 1 || k == 7 ) && ( t.red & 32 ) ) || ( k == 8 && ( t.red & 4096 ) ) || ( k == 9 && ( t.red & 16384 ) )
 			|| ( k == 10 && ( t.red & 65536 ) ) || ( k == 11 && ( t.red & 262144 ) ) || ( k == 12 && ( t.red & 1048576 ) )
-			|| ( k == 13 && ( t.red & 8388608 ) ) ) {  // red: the atlas / the terrain grid / the ambient's history / the shadow map / the clouds' map / the drift's noise dropped (the zero texture)
+			|| ( k == 13 && ( t.red & 8388608 ) ) || ( k == 0 && ( t.red & 536870912LL ) ) ) {  // (0: the roof map, L8 term 7)  // red: the atlas / the terrain grid / the ambient's history / the shadow map / the clouds' map / the drift's noise dropped (the zero texture)
 			x = FxTex();
 			x.sampler = t.tex[k].sampler;
 		}
@@ -873,12 +873,26 @@ bool precipRun( const PrecipRun & t, std::string & why )
 	std::memcpy( c + atFirst, &first, 4 );
 	std::memcpy( c + atCount, &count, 4 );
 	std::memcpy( c + atRed, &csRed, 4 );
+	auto roofRed = [&]( std::uint8_t * b ) {  // gates only (L8 term 7): the roof off (pcRoofOn 0) / the map's axes swapped (pcRoofCam x, y)
+		const int atOn = precipAt( kT_precipcs, int( std::size( kT_precipcs ) ), "pcRoofOn" );
+		const int atCam = precipAt( kT_precipcs, int( std::size( kT_precipcs ) ), "pcRoofCam" );
+		if ( ( t.red & 1073741824LL ) && atOn >= 0 )
+			std::memset( b + atOn, 0, 4 );
+		if ( ( t.red & 2147483648LL ) && atCam >= 0 ) {
+			std::uint8_t xy[8];
+			std::memcpy( xy, b + atCam, 8 );
+			std::memcpy( b + atCam, xy + 4, 4 );
+			std::memcpy( b + atCam + 4, xy, 4 );
+		}
+	};
+	roofRed( c );
 	if ( t.lit ) {  // the lit record pass's b31 (the head at kT_precipcs's offsets + the light block) and its zero globalUniforms
 		std::uint8_t * l = u + kPrecipLitCsAt;
 		std::memcpy( l, t.cs, size_t( kT_preciplitcsBytes ) );
 		std::memcpy( l + atFirst, &first, 4 );
 		std::memcpy( l + atCount, &count, 4 );
 		std::memcpy( l + atRed, &csRed, 4 );
+		roofRed( l );
 		if ( t.red & 2048 ) {  // gates only: the local sun law dropped (vpSun.w 0)
 			const int atSun = precipAt( kT_preciplitcs, int( std::size( kT_preciplitcs ) ), "vpSun" );
 			if ( atSun >= 0 )
@@ -1010,12 +1024,12 @@ bool precipRun( const PrecipRun & t, std::string & why )
 	if ( t.lit ) {  // the lit record pass's set: the run's inputs as the unlit pass, the zero inputs of the refused terms
 		const VkDescriptorBufferInfo lb[3] = { { D.ubo, kPrecipGlobalAt, kPrecipGlobalBytes },
 			{ D.ubo, kPrecipLitCsAt, VkDeviceSize( kT_preciplitcsBytes ) }, { D.rec, 0, recBytes } };
-		VkDescriptorImageInfo li[14] = {};
+		VkDescriptorImageInfo li[15] = {};
 		// (L8 term 3: t31 csmMap GL's shared cascades, else the zero D16 array; t34 ussCloudMap; L8 term 4: t30 volAirNoise)
 		const bool cubeIn = views[13] != D.litCube;  // L8 term 5: t6 GL's shared lamp cubes, else the zero cube array
-		const VkImageView liv[14] = { views[13], views[8], views[9], views[2], views[3], views[4], views[5], views[6], views[12],
-			t.tex[10].tex && ( t.red & 65536 ) == 0 ? views[10] : D.litD2a, F.d2, F.d2, views[11], views[1] };  // kPrecipLitImg's order
-		for ( int k = 0; k < 14; k++ ) {
+		const VkImageView liv[15] = { views[13], views[8], views[9], views[2], views[3], views[4], views[5], views[6], views[12],
+			t.tex[10].tex && ( t.red & 65536 ) == 0 ? views[10] : D.litD2a, F.d2, F.d2, views[11], views[1], views[0] };  // kPrecipLitImg's order (L8 term 7: t47 the roof map)
+		for ( int k = 0; k < 15; k++ ) {
 			li[k].imageView = liv[k];
 			li[k].imageLayout = VK_IMAGE_LAYOUT_GENERAL;
 		}
@@ -1024,7 +1038,7 @@ bool precipRun( const PrecipRun & t, std::string & why )
 			F.smp[smp[12]], D.csmCmp, F.smp[0], F.smp[0], F.smp[smp[11]], F.smp[smp[1]] };  // kPrecipLitSmp's order
 		for ( int k = 0; k < 13; k++ )
 			ls[k].sampler = lsv[k];
-		VkWriteDescriptorSet lw[32] = {};
+		VkWriteDescriptorSet lw[40] = {};  // 5 buffers + 15 images + 13 samplers
 		int nl = 0;
 		auto lput = [&]( std::uint32_t b, VkDescriptorType ty, const VkDescriptorBufferInfo * bp, const VkDescriptorImageInfo * ip,
 			const VkBufferView * tp ) {
@@ -1061,7 +1075,7 @@ bool precipRun( const PrecipRun & t, std::string & why )
 		}
 		lput( 64, VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER, nullptr, nullptr, &tbv[0] );
 		lput( 109, VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER, nullptr, nullptr, &tbv[1] );
-		for ( int k = 0; k < 14; k++ )
+		for ( int k = 0; k < 15; k++ )
 			lput( kPrecipLitImg[k], VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, nullptr, &li[k], nullptr );
 		for ( int k = 0; k < 13; k++ )
 			lput( kPrecipLitSmp[k], VK_DESCRIPTOR_TYPE_SAMPLER, nullptr, &ls[k], nullptr );
