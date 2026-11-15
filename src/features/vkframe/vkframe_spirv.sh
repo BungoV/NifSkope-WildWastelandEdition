@@ -229,6 +229,9 @@ fx precip_view_ps weather/precip_view_ps
 fxs precip_look_view_cs weather/precip_look_view_cs
 fxv precip_look_view_vs weather/precip_look_view_vs
 fx precip_look_view_ps weather/precip_look_view_ps
+# slice 2b: the record pass lit at the centre (the plain particles' vs / ps unchanged)
+fxs precip_lit_view_cs weather/precip_lit_view_cs
+ls -la precip_lit_view_cs.spv.h
 ls -la precip_view_cs.spv.h precip_view_vs.spv.h precip_view_ps.spv.h precip_look_view_cs.spv.h precip_look_view_vs.spv.h precip_look_view_ps.spv.h
 # lane VKOBJ4: the shift sets by stage. A pipeline whose vertex stage declares resources takes VS_SHIFT for it: on PS_SHIFT the
 # bl vertex stage's b0 (skinning) lands on the pixel stage's b0 (global). fxv() keeps PS_SHIFT (fardots' vertex block is b1).

@@ -28,9 +28,38 @@
 // feedback (gl_Position, gUv, gQ, gView and the flat outputs; any float differing between the two captures = GL not
 // deterministic before raster), and the Vulkan run is repeated with its records read back (PrecipRun::recOut) to diff
 // per particle against the capture: ulp buckets per field, and which flipped pixels lie under a differing particle.
+// Reference (coordinator ruling 11-14: Vulkan's per-sample blend is right; NVIDIA GL's 4x blend at times writes a pixel's
+// mean to all its samples, a driver quirk not reproduced): per particle, in draw order, GL's own program drawn with blending
+// off into a 4x RGBA32F target (alpha -1 = not written; a particle's two triangles cover a sample once), then blended per
+// sample by GL's own blend unit at 1x (a W*S x H RGBA16F target, one texel a sample, SRC_ALPHA / ONE_MINUS_SRC_ALPHA). The
+// stencil is GL's 4x one (not blended). Every verdict and red is judged against it; GL's 4x frame is an info line.
+// Reference checks (bars set before the first run, each must read 0 halves): R1 a constant full-screen blend at 1x vs 4x;
+// R2 the same loop with the 1x blend off vs one GL 4x draw with blending off; R3 the reference vs GL's 4x frame on pixels
+// no particle ever split (a capture with 1-3 samples written, or 4 unequal), and on GL's draws 2-5 there too (added after
+// the first run, E1: GL's own run-to-run variation must lie on split pixels). Info: GL's merged pixels (GL one value, the
+// reference split), how many hold the reference's mean. The repeat clause's GL side is the reference built twice (EXACT)
+// and GL's 4x stencil drawn twice (EXACT); GL's 4x colour drawn twice is info (its merge varies run to run). Red 64 (harness only): Vulkan's 4 samples averaged per pixel
+// (the reveal's samples kept); must FAIL in every near case.
+// Lit (slice 2b, plan L8 (12); bars set before the first lit run, never widened): the sun alone (volTerms 1; the lamps, GI,
+// ambient, CSM, the drift, the terrain air, the local sun law and an interior are refused by precipRun, GL draws them),
+// through precip_lit_view_cs. Cases rain_near_lit (rain_near_disc's run, unfogged) and snow_far_lit (snow_far_fog's run
+// through the air, the veil on, the air's column on the sun): cellOn 1, cellHasDir 1, a non-grey sun (1.6, 1.2, 0.75) off
+// the view axis, the phase (volPhase) and its isotropic tint (volGi) set, pcTrans 0.5. The same verdict, reference
+// checks, repeat clause and red 64 as the unlit cases. Each lit case must also show (else the gate fails): GL lit vs GL
+// with cellHasDir 0 differs on >= 1000 covered samples; GL with pcTrans 0.5 vs 1.0 differs on >= 1000 (thin vs thick);
+// no NaN / Inf half in GL's lit frame; every name the sun branch reads is found in GL's program (packed, not zero);
+// rain_near_lit's captured gA (unfogged: the light) holds >= 100 distinct particles with unequal channels. Red 128 the
+// light dropped (pcRed 4: lit = 1); must FAIL in every lit case.
+// Fixture fix after the first lit run (11-15, the bar kept): rain_near_lit's sun gave N.to -0.13 on its view axis, so
+// thick / thin = 0.99 and pcTrans 1.0 vs 0.5 moved 51 samples (the case did not test the mix); it takes its own sun
+// (precipview_prep.py LIT_SUN, N.to 0.72). The sun's inputs are also checked packed and non-zero in the light block.
+// Globals check (11-15, bar set before its first run): precipRun zeroes globalUniforms (b0) and so does this harness for
+// GL, so a sun-path read of it would pass EXACT here and be wrong in the app. Each lit case captures GL's geometry stage
+// (transform feedback, bit-exact run to run) with b0 zero and with b0 filled non-zero: 0 floats may differ.
 #define main fxview_main
 #include "fxview.cpp"
 #undef main
+#include <array>
 
 namespace pv
 {
@@ -39,6 +68,36 @@ using namespace fv;
 const char * kSlabFs = "#version 410 core\nuniform float zd; out vec4 o;\n"
 	"void main() { gl_FragDepth = zd; o = vec4( 0.6, 0.2, 0.1, 0.5 ); }\n";
 const char * kRevealFs = "#version 410 core\nout vec4 o; void main() { o = vec4( 0.0, 0.0, 0.0, 1.0 ); }\n";
+// the reference's 1x pass: one texel a sample; 0 the blended frame, 1 the pixel split by this particle (blend MAX), 2 the
+// last written output (blend off, check R2)
+const char * kCapBlendFs = "#version 410 core\n"
+	"uniform sampler2DMS cap; uniform int S;\n"
+	"layout(location=0) out vec4 o; layout(location=1) out vec4 sp; layout(location=2) out vec4 last;\n"
+	"void main() { ivec2 q = ivec2( gl_FragCoord.xy ), p = ivec2( q.x / S, q.y ); vec4 v = texelFetch( cap, p, q.x % S );\n"
+	"  if ( v.a < 0.0 ) discard;\n"
+	"  vec4 v0 = texelFetch( cap, p, 0 ); int w = 0; bool same = true;\n"
+	"  for ( int k = 0; k < S; k++ ) { vec4 u = texelFetch( cap, p, k ); w += u.a < 0.0 ? 0 : 1; same = same && u == v0; }\n"
+	"  o = v; sp = vec4( w < S || !same ? 1.0 : 0.0 ); last = v; }\n";
+const char * kProbeFs = "#version 410 core\nout vec4 o; void main() { o = vec4( 0.25, 0.5, 0.75, 0.4 ); }\n";
+
+// float to half, round to nearest even (red 64's mean)
+std::uint16_t f2h( float x )
+{
+	std::uint32_t b;
+	std::memcpy( &b, &x, 4 );
+	const std::uint16_t s = std::uint16_t( ( b >> 16 ) & 0x8000 );
+	b &= 0x7FFFFFFFu;
+	if ( b >= 0x7F800000u )
+		return s | 0x7C00 | ( b > 0x7F800000u ? 0x200 : 0 );
+	if ( b >= 0x477FF000u )
+		return s | 0x7C00;
+	if ( b < 0x38800000u ) {
+		float v;
+		std::memcpy( &v, &b, 4 );
+		return s | std::uint16_t( std::nearbyint( v * 16777216.0f ) );
+	}
+	return s | std::uint16_t( ( b + 0xFFFu + ( ( b >> 13 ) & 1u ) - 0x38000000u ) >> 13 );
+}
 
 struct Verdict
 {
@@ -104,6 +163,9 @@ const char * kTfVar[8] = { "gl_Position", "gUv", "gQ", "gView", "gCol", "gBox", 
 const int kTfAt[9] = { 0, 4, 6, 8, 11, 15, 19, 22, 25 };  // each varying's first float in a captured vertex, 25 a vertex
 const int kTfFloats = 25;
 void( WINAPI * compressedTexImage2D )( GLenum, GLint, GLenum, GLsizei, GLsizei, GLint, GLsizei, const void * ) = nullptr;
+void( WINAPI * clearBufferfv )( GLenum, GLint, const GLfloat * ) = nullptr;
+void( WINAPI * blendEquationi )( GLuint, GLenum ) = nullptr;
+void( WINAPI * disablei )( GLenum, GLuint ) = nullptr;
 
 // ruling 11-14 (step 1): the atlases as the app loads them (cellprecip.cpp loadDds): BC3 (fmt bc3, or bc3srgb), every level
 // from the prep's numpy encoder (mips = the level count), BASE 0, MAX_LEVEL levels - 1, trilinear, CLAMP_TO_EDGE
@@ -311,7 +373,7 @@ void particleDiff( const std::string & name, const std::vector<float> & gl, unsi
 struct Job
 {
 	std::string name;
-	int w = 0, h = 0, first = 0, n = 0, hasTex = 0, farT = 0, fog = 0, look = 0;  // (windows.h defines far)
+	int w = 0, h = 0, first = 0, n = 0, hasTex = 0, farT = 0, fog = 0, look = 0, lit = 0;  // (windows.h defines far)
 	unsigned seed = 0;
 	float zd = 0.5f;
 	UniMap uni;
@@ -351,6 +413,8 @@ int main( int argc, char ** argv )
 			std::ifstream jf( dir + "/" + nm + "/job.txt" );
 			if ( !( jf >> j.w >> j.h >> j.first >> j.n >> j.hasTex >> j.seed >> j.farT >> j.zd >> j.fog >> j.look ) )
 				return fatal( nm + "/job.txt" );
+			if ( !( jf >> j.lit ) )  // slice 2b's field (absent in an older prep: unlit)
+				j.lit = 0;
 			j.uni = readUni( dir + "/" + nm + "/uni.txt" );
 			if ( j.hasTex || j.fog ) {
 				j.tex = readTex( dir + "/" + nm );
@@ -423,13 +487,15 @@ int main( int argc, char ** argv )
 		|| !load( tfVaryings, "glTransformFeedbackVaryings" ) || !load( tfBegin, "glBeginTransformFeedback" )
 		|| !load( tfEnd, "glEndTransformFeedback" ) || !load( genQueries, "glGenQueries" ) || !load( beginQuery, "glBeginQuery" )
 		|| !load( endQuery, "glEndQuery" ) || !load( getQueryObjectuiv, "glGetQueryObjectuiv" ) || !load( getBufferSubData, "glGetBufferSubData" )
-		|| !load( compressedTexImage2D, "glCompressedTexImage2D" ) )
+		|| !load( compressedTexImage2D, "glCompressedTexImage2D" ) || !load( clearBufferfv, "glClearBufferfv" )
+		|| !load( blendEquationi, "glBlendEquationi" ) || !load( disablei, "glDisablei" ) )
 		return fatal( "GL entry points" );
 	std::printf( "PRECIPVIEW GL on %s\n", reinterpret_cast<const char *>( glGetString( GL_RENDERER ) ) );
 	glPixelStorei( GL_PACK_ALIGNMENT, 1 );
 	glPixelStorei( GL_UNPACK_ALIGNMENT, 1 );
 	const GLuint pUnpack = program( kTriVs, kUnpackFs, "unpack" ), pSlab = program( kTriVs, kSlabFs, "slab" ),
-		pReveal = program( kTriVs, kRevealFs, "reveal" );
+		pReveal = program( kTriVs, kRevealFs, "reveal" ), pCapBlend = program( kTriVs, kCapBlendFs, "1x blend" ),
+		pProbe = program( kTriVs, kProbeFs, "blend probe" );
 	const GLuint pPrecip = program3( readFile( dir + "/prog.vert.glsl" ), readFile( dir + "/prog.geom.glsl" ), readFile( dir + "/prog.frag.glsl" ),
 		"cell_precip_gpu" );
 	const GLuint pLook = program3( readFile( dir + "/prog_look.vert.glsl" ), readFile( dir + "/prog_look.geom.glsl" ),
@@ -442,7 +508,7 @@ int main( int argc, char ** argv )
 		readFile( dir + "/prog_nofl.frag.glsl" ), "cell_precip_gpu (no FOGLEAK)" );
 	const GLuint pLookNoFl = program3( readFile( dir + "/prog_look_nofl.vert.glsl" ), readFile( dir + "/prog_look_nofl.geom.glsl" ),
 		readFile( dir + "/prog_look_nofl.frag.glsl" ), "cell_precip_look (no FOGLEAK)" );
-	if ( !pUnpack || !pSlab || !pReveal || !pPrecip || !pLook || !pTf || !pNoFl || !pLookNoFl )
+	if ( !pUnpack || !pSlab || !pReveal || !pCapBlend || !pProbe || !pPrecip || !pLook || !pTf || !pNoFl || !pLookNoFl )
 		return fatal( "GL programs" );
 	for ( const GLuint prog : { pPrecip, pLook, pTf, pNoFl, pLookNoFl } ) {  // every sampler its own empty unit from 20 (unit 0's default mixes sampler
 		// types: GL_INVALID_OPERATION at the draw once the air's textures are bound); bindJob then sets the read ones (farcards.cpp's rule)
@@ -475,7 +541,23 @@ int main( int argc, char ** argv )
 	const GLuint fbRef = fbo( fT2DMS, refCol, 0, refDs );
 	const GLuint unp = tex2d( WS, H, fRgba16f, GL_RGBA, GL_FLOAT, nullptr, false );
 	const GLuint fbUnp = fbo( GL_TEXTURE_2D, unp, 0, 0 );
-	if ( !fbFrame || !fbRef || !fbUnp )
+	// the per-sample reference's targets: the capture (4x RGBA32F on refDs: the slab's depth) and the 1x frame's three
+	const GLuint capCol = msTex( W, H, fRgba32f, S );
+	const GLuint fbCap = fbo( fT2DMS, capCol, 0, refDs );
+	GLuint bl[3] = {};
+	for ( GLuint & t : bl )
+		t = tex2d( WS, H, fRgba16f, GL_RGBA, GL_FLOAT, nullptr, false );
+	const GLuint fbBl0 = fbo( GL_TEXTURE_2D, bl[0], 0, 0 );  // R1's probe: the blended frame alone
+	GLuint fbBl = 0;
+	f.genFramebuffers( 1, &fbBl );
+	f.bindFramebuffer( fFb, fbBl );
+	for ( int k = 0; k < 3; k++ )
+		f.framebufferTexture2D( fFb, fCol0 + GLenum( k ), GL_TEXTURE_2D, bl[k], 0 );
+	const GLenum bl3[3] = { fCol0, fCol0 + 1, fCol0 + 2 };
+	f.drawBuffers( 3, bl3 );
+	if ( f.checkFramebufferStatus( fFb ) != fComplete )
+		fbBl = 0;
+	if ( !fbFrame || !fbRef || !fbUnp || !fbCap || !fbBl0 || !fbBl )
 		return fatal( "GL targets" );
 	// uniforms.glsl's block (the geometry stage includes it; unlit and unfogged it reads none of it): zeros
 	std::vector<char> zeros( 336, 0 );
@@ -490,10 +572,11 @@ int main( int argc, char ** argv )
 	}
 	GLuint vao = 0;
 	genVertexArrays( 1, &vao );
-	static char twinKeys[8], normKeys[8];  // one atlas twin a case (the atlases' sizes differ), one normal-map twin a case
-	static char airKeys[8][5], volKeys[8];  // the air's twins a case, its volume's shared target a case
-	if ( jobs.size() > 8 )
-		return fatal( "more than 8 cases" );
+	constexpr int kCases = 12;
+	static char twinKeys[kCases], normKeys[kCases];  // one atlas twin a case (the atlases' sizes differ), one normal-map twin a case
+	static char airKeys[kCases][5], volKeys[kCases];  // the air's twins a case, its volume's shared target a case
+	if ( jobs.size() > size_t( kCases ) )
+		return fatal( "more than " + std::to_string( kCases ) + " cases" );
 	size_t jobAt = 0;
 
 	auto readSamples = [&]( GLuint msColor ) {
@@ -547,8 +630,9 @@ int main( int argc, char ** argv )
 		const char * name;
 		int red;
 		bool seen;
-	} reds[6] = { { "cull (radius 0)", 1, false }, { "corners (the strip's last two swapped)", 2, false }, { "near fade (dropped)", 4, false },
-		{ "air (dropped)", 8, false }, { "look (dropped: the plain pipelines)", 16, false }, { "atlas (dropped: the zero texture)", 32, false } };
+	} reds[7] = { { "cull (radius 0)", 1, false }, { "corners (the strip's last two swapped)", 2, false }, { "near fade (dropped)", 4, false },
+		{ "air (dropped)", 8, false }, { "look (dropped: the plain pipelines)", 16, false }, { "atlas (dropped: the zero texture)", 32, false },
+		{ "light (dropped)", 128, false } };
 	for ( Job & j : jobs ) {
 		if ( j.hasTex && !uploadAtlas( dir + "/" + j.name, j.tex[size_t( j.atlasAt )] ) )
 			return fatal( j.name + ": the atlas upload" );
@@ -581,6 +665,10 @@ int main( int argc, char ** argv )
 				u1i( prog, "fogOn", 0 );
 				u1i( prog, "volOn", 0 );
 				f.uniform4fv( f.getUniformLocation( prog, "atAp" ), 1, zero4 );
+			}
+			if ( !j.lit ) {  // an unlit case: GL's light chain off (a program keeps a lit case's uniforms)
+				u1i( prog, "cellHasDir", 0 );
+				u1i( prog, "cellInterior", 0 );
 			}
 			bindUnit( kNormUnit, GL_TEXTURE_2D, normMap );
 			u1i( prog, "pcTexN", kNormUnit );  // (not in the plain program: no location, nothing set)
@@ -664,6 +752,227 @@ int main( int argc, char ** argv )
 				o.flips, o.covered, o.flips >= 1000 ? "the look is seen" : "TOO FEW: the case does not test the look" );
 			ok = ok && o.flips >= 1000;
 		}
+		if ( j.lit ) {  // slice 2b's seen-checks (header): the light seen, thin vs thick seen, no NaN / Inf, the sun's names found
+			auto drawGl = [&]( int mode ) {  // 1 cellHasDir 0, 2 pcTrans 1.0; the program's uniforms set back after
+				before( fbRef, j.zd );
+				bindJob( pJob );
+				const float thick = 1.0f;
+				if ( mode == 1 )
+					u1i( pJob, "cellHasDir", 0 );
+				else
+					f.uniform1fv( f.getUniformLocation( pJob, "pcTrans" ), 1, &thick );
+				f.bindFramebuffer( fFb, fbRef );
+				glViewport( 0, 0, W, H );
+				glEnable( GL_DEPTH_TEST );
+				glDepthFunc( GL_LEQUAL );
+				glDepthMask( GL_FALSE );
+				glDisable( GL_CULL_FACE );
+				glEnable( GL_BLEND );
+				glBlendFunc( GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA );
+				glEnable( GL_STENCIL_TEST );
+				glStencilMask( 0x03 );
+				glStencilFunc( GL_ALWAYS, 1, 0xFF );
+				glStencilOp( GL_KEEP, GL_KEEP, GL_REPLACE );
+				bindVertexArray( vao );
+				glDrawArrays( GL_POINTS, j.first, j.n );
+				bindVertexArray( 0 );
+				drawState0();
+				glDepthFunc( GL_LESS );
+				std::vector<std::uint16_t> out = readSamples( refCol );
+				bindJob( pJob );  // the case's own uniforms again
+				return out;
+			};
+			const Verdict dark = judge( bg, drawGl( 1 ), refA, refB, refB );
+			const Verdict thick = judge( bg, drawGl( 2 ), refA, refB, refB );
+			size_t bad = 0;
+			for ( std::uint16_t hv : refA )
+				bad += ( hv & 0x7C00 ) == 0x7C00;
+			const char * sunNames[] = { "cellOn", "cellHasDir", "cellInterior", "cellDirColor", "cellDirTo", "cellRow[0]", "volTerms",
+				"volPhase[0]", "volGi", "pcTrans", "volVeil", "airMed", "airLayer", "airGround" };
+			std::string missing;
+			for ( int k = 0; k < int( std::size( sunNames ) ) - ( j.fog ? 0 : 4 ); k++ )
+				if ( f.getUniformLocation( pJob, sunNames[k] ) < 0 )
+					missing += std::string( missing.empty() ? "" : ", " ) + sunNames[k];
+			std::printf( "PRECIPVIEW %s lit checks: GL with cellHasDir 0 differs %zu of %zu covered samples, pcTrans 1.0 vs 0.5 %zu (each want >= 1000); "
+				"NaN / Inf halves in GL's lit frame %zu (want 0); sun-branch names missing from GL's program: %s\n", j.name.c_str(), dark.flips, dark.covered,
+				thick.flips, bad, missing.empty() ? "none" : missing.c_str() );
+			ok = ok && dark.flips >= 1000 && thick.flips >= 1000 && bad == 0 && missing.empty();
+		}
+
+		// the per-sample reference (header): GL's program per particle with blending off, blended per sample at 1x
+		std::vector<std::uint16_t> refPS, refPSB;
+		std::vector<char> mergedAt( size_t( W ) * H, 0 );
+		size_t refRep = 0;  // halves the reference's second build differs in
+		{
+			const double r0 = nowMs();
+			auto readBl = [&]( int k ) {
+				std::vector<std::uint16_t> out( size_t( WS ) * H * 4 );
+				f.bindFramebuffer( fFb, fbBl );
+				glReadBuffer( fCol0 + GLenum( k ) );
+				glReadPixels( 0, 0, WS, H, GL_RGBA, fHalf, out.data() );
+				glReadBuffer( fCol0 );
+				return out;
+			};
+			auto loadBg = [&]() {  // the frame before the particles into the blended frame and the last-written one
+				for ( int k : { 0, 2 } ) {
+					glBindTexture( GL_TEXTURE_2D, bl[k] );
+					glTexSubImage2D( GL_TEXTURE_2D, 0, 0, 0, WS, H, GL_RGBA, fHalf, bg.data() );
+				}
+				glBindTexture( GL_TEXTURE_2D, 0 );
+			};
+			auto halvesDiff = [&]( const std::vector<std::uint16_t> & x, const std::vector<std::uint16_t> & y ) {
+				size_t n = x.size() == y.size() ? 0 : x.size() + 1;
+				for ( size_t i = 0; i < std::min( x.size(), y.size() ); i++ )
+					n += x[i] != y[i];
+				return n;
+			};
+			auto probe = [&]() {
+				glEnable( GL_BLEND );
+				glBlendFunc( GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA );
+				f.useProgram( pProbe );
+				glDrawArrays( GL_TRIANGLES, 0, 3 );
+				drawState0();
+			};
+			// R1: one constant blended over the frame before, at 1x and at 4x
+			loadBg();
+			f.bindFramebuffer( fFb, fbBl0 );
+			glViewport( 0, 0, WS, H );
+			drawState0();
+			probe();
+			std::vector<std::uint16_t> p1( bg.size() );
+			glReadPixels( 0, 0, WS, H, GL_RGBA, fHalf, p1.data() );
+			before( fbRef, j.zd );
+			f.bindFramebuffer( fFb, fbRef );
+			glViewport( 0, 0, W, H );
+			drawState0();
+			probe();
+			glDepthFunc( GL_LESS );
+			const size_t r1 = halvesDiff( p1, readSamples( refCol ) );
+			// R2's GL side: every particle in one 4x draw, blending off (the last written output a sample)
+			before( fbRef, j.zd );
+			bindJob( pJob );
+			f.bindFramebuffer( fFb, fbRef );
+			glViewport( 0, 0, W, H );
+			glEnable( GL_DEPTH_TEST );
+			glDepthFunc( GL_LEQUAL );
+			glDepthMask( GL_FALSE );
+			bindVertexArray( vao );
+			glDrawArrays( GL_POINTS, j.first, j.n );
+			bindVertexArray( 0 );
+			drawState0();
+			glDepthFunc( GL_LESS );
+			const std::vector<std::uint16_t> off4 = readSamples( refCol );
+			// the loop (refDs holds the slab from before(): the capture's depth test reads it, writes none); run twice, the
+			// second build is the repeat clause's (GL's 4x frame varies run to run on the merged pixels)
+			auto perSample = [&]() {
+			loadBg();
+			f.bindFramebuffer( fFb, fbBl );
+			static const float zero4[4] = { 0.0f, 0.0f, 0.0f, 0.0f }, none[4] = { 0.0f, 0.0f, 0.0f, -1.0f };
+			clearBufferfv( GL_COLOR, 1, zero4 );
+			u1i( pCapBlend, "cap", 16 );
+			u1i( pCapBlend, "S", S );
+			bindUnit( 16, fT2DMS, capCol );
+			bindJob( pJob );
+			for ( int i = 0; i < j.n; i++ ) {
+				f.bindFramebuffer( fFb, fbCap );
+				glViewport( 0, 0, W, H );
+				drawState0();
+				clearBufferfv( GL_COLOR, 0, none );
+				f.useProgram( pJob );
+				glEnable( GL_DEPTH_TEST );
+				glDepthFunc( GL_LEQUAL );
+				bindVertexArray( vao );
+				glDrawArrays( GL_POINTS, j.first + i, 1 );
+				bindVertexArray( 0 );
+				f.bindFramebuffer( fFb, fbBl );
+				glViewport( 0, 0, WS, H );
+				drawState0();
+				glEnable( GL_BLEND );
+				glBlendFunc( GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA );
+				blendEquationi( 1, 0x8008 );  // GL_MAX: the split flag
+				disablei( GL_BLEND, 2 );
+				f.useProgram( pCapBlend );
+				glDrawArrays( GL_TRIANGLES, 0, 3 );
+			}
+			blendEquationi( 1, 0x8006 );  // GL_FUNC_ADD
+			drawState0();
+			glDepthFunc( GL_LESS );
+			bindUnit( 16, fT2DMS, 0 );
+			};
+			perSample();
+			refPS = readBl( 0 );
+			const std::vector<std::uint16_t> split = readBl( 1 ), last = readBl( 2 );
+			const size_t r2 = halvesDiff( last, off4 );
+			const double rMs = nowMs() - r0;
+			perSample();
+			refRep = halvesDiff( readBl( 0 ), refPS );
+			// R3 on the never-split pixels; the merge record on the split ones (a pixel's 4 samples: (p * 4 + s) * 4 + c)
+			// (R3 also on GL's draws 2-5: GL's run-to-run variation must sit on split pixels only)
+			size_t r3 = 0, r3n = 0, nSplit = 0, merged = 0, mergedMean = 0, splitSame = 0, rep = 0, repFlat = 0;
+			bool sizes = refA.size() == refPS.size();
+			for ( int k = 0; k < 4; k++ )
+				sizes = sizes && refAn[k].size() == refPS.size();
+			for ( size_t p = 0; p < size_t( W ) * H && sizes; p++ ) {
+				const size_t s0 = p * 4;
+				bool sp = false;
+				for ( size_t s = 0; s < 4; s++ )
+					sp = sp || split[( s0 + s ) * 4] != 0;
+				if ( !sp ) {
+					for ( size_t i = s0 * 4; i < ( s0 + 4 ) * 4; i++ ) {
+						r3 += refPS[i] != refA[i];
+						for ( int k = 0; k < 4; k++ )
+							r3n += refPS[i] != refAn[k][i];
+					}
+					continue;
+				}
+				nSplit++;
+				{  // GL's draw 2 against draw 1 here (info): differs, and GL one value in either draw
+					bool d = false, f1 = true, f2 = true;
+					for ( size_t i = s0 * 4; i < ( s0 + 4 ) * 4; i++ ) {
+						d = d || refA[i] != refA2[i];
+						f1 = f1 && refA[i] == refA[s0 * 4 + i % 4];
+						f2 = f2 && refA2[i] == refA2[s0 * 4 + i % 4];
+					}
+					rep += d;
+					repFlat += d && ( f1 || f2 );
+				}
+				bool glFlat = true, refFlat = true, same = true;
+				for ( size_t s = 1; s < 4; s++ )
+					for ( size_t c = 0; c < 4; c++ ) {
+						glFlat = glFlat && refA[( s0 + s ) * 4 + c] == refA[s0 * 4 + c];
+						refFlat = refFlat && refPS[( s0 + s ) * 4 + c] == refPS[s0 * 4 + c];
+					}
+				for ( size_t i = s0 * 4; i < ( s0 + 4 ) * 4; i++ )
+					same = same && refPS[i] == refA[i];
+				splitSame += same;
+				if ( glFlat && !refFlat ) {
+					merged++;
+					mergedAt[p] = 1;
+					bool mean = true;
+					for ( size_t c = 0; c < 4; c++ ) {
+						float m = 0.0f;
+						for ( size_t s = 0; s < 4; s++ )
+							m += h2f( refPS[( s0 + s ) * 4 + c] );
+						mean = mean && std::abs( ordered( f2h( m * 0.25f ) ) - ordered( refA[s0 * 4 + c] ) ) <= 1;
+					}
+					mergedMean += mean;
+				}
+			}
+			const bool refOk = r1 == 0 && r2 == 0 && r3 == 0 && r3n == 0 && sizes;
+			std::printf( "PRECIPVIEW %s reference: %d particles one by one in %.0f ms; R1 constant blend 1x vs 4x %zu halves differ, R2 blend off "
+				"1x vs GL 4x %zu, R3 vs GL's 4x frame on %zu never-split pixels %zu, the same on GL's draws 2-5 %zu (each want 0): %s\n", j.name.c_str(),
+				j.n, rMs, r1, r2, size_t( W ) * H - nSplit, r3, r3n, refOk ? "OK" : "FAILED" );
+			std::printf( "PRECIPVIEW %s GL merged pixels (info, NVIDIA's 4x blend): of %zu split pixels GL holds one value on %zu where the reference "
+				"is split (%zu of them the reference's mean within 1 ulp), %zu equal per sample, %zu other; GL draw 2 vs 1 differs on %zu split pixels, "
+				"%zu of them one value in either draw\n", j.name.c_str(), nSplit, merged, mergedMean, splitSame, nSplit - merged - splitSame, rep, repFlat );
+			ok = ok && refOk;
+			// the stencil is GL's 4x one: its samples take GL's reveal, the rest the reference
+			refPSB = refPS;
+			for ( size_t s = 0; s < refB.size() / 4 && refB.size() == refPS.size(); s++ )
+				if ( refB[s * 4] == 0 && refB[s * 4 + 1] == 0 && refB[s * 4 + 2] == 0 && refB[s * 4 + 3] == 0x3C00 )
+					for ( size_t c = 0; c < 4; c++ )
+						refPSB[s * 4 + c] = refB[s * 4 + c];
+		}
 
 		auto runVk = [&]( int red, std::vector<std::uint16_t> & a, std::vector<std::uint16_t> & b, bool checkSeed, std::uint8_t * recOut = nullptr ) -> bool {
 			before( fbFrame, j.zd );
@@ -703,6 +1012,25 @@ int main( int argc, char ** argv )
 				}
 				t.tex[7].twin = reinterpret_cast<std::uintptr_t>( &normKeys[jobAt] );
 			}
+			if ( j.lit ) {  // slice 2b: the light chain's block, as precipDraw packs it
+				t.lit = true;
+				WwVkPresent::fxPack( &ga, pJob, WwVkPresent::kT_preciplitcs, int( std::size( WwVkPresent::kT_preciplitcs ) ), t.cs );
+				t.litBlock = true;
+				if ( checkSeed ) {  // the sun's inputs packed, not zero (header)
+					std::string zero;
+					for ( const char * nm : { "cellDirColor", "cellDirTo", "cellRow", "volPhase", "volGi" } ) {
+						const int at = precipAt( WwVkPresent::kT_preciplitcs, int( std::size( WwVkPresent::kT_preciplitcs ) ), nm );
+						bool any = false;
+						for ( int b = 0; b < 12 && at >= 0; b++ )
+							any = any || t.cs[at + b] != 0;
+						if ( !any )
+							zero += std::string( zero.empty() ? "" : ", " ) + nm;
+					}
+					std::printf( "PRECIPVIEW %s lit packed: zero or absent in the light block: %s\n", j.name.c_str(), zero.empty() ? "none" : zero.c_str() );
+					if ( !zero.empty() )
+						return false;
+				}
+			}
 			if ( checkSeed ) {
 				std::uint32_t seed = 0;
 				std::memcpy( &seed, t.cs, 4 );  // pcSeedS at 0
@@ -728,21 +1056,55 @@ int main( int argc, char ** argv )
 				std::printf( "PRECIPVIEW %s FAIL (the Vulkan run failed)\n", j.name.c_str() );
 				ok = false;
 			} else {
-				const Verdict v = judge( bg, a, refA, b, refB );
+				const Verdict v = judge( bg, a, refPS, b, refPSB );
 				std::printf( "PRECIPVIEW %s %s (%zu samples covered, %zu halves differ, %zu edge flips, %zu halves past 1 ulp outside them, "
 					"max %d ulp outside them, stencil differs on %zu; flips by worst half 3-8 / 9-64 / past 64 ulp: %zu / %zu / %zu; "
 					"in whole / partly flipped pixels: %zu / %zu)\n", j.name.c_str(), v.word(), v.covered, v.diff, v.flips, v.past1, v.maxu,
 					v.stencil, v.flipBy[0], v.flipBy[1], v.flipBy[2], v.flipWhole, v.flipPart );
 				ok = ok && v.ok();
-				// repeatability: GL against its own second draw, Vulkan against a second run (each must be EXACT)
+				{  // info, never the bar: against GL's 4x frame, and how many of those flipped pixels are GL's merged ones
+					const Verdict g4 = judge( bg, a, refA, b, refB );
+					size_t fp = 0, fpm = 0;
+					for ( size_t p = 0; p < mergedAt.size() && a.size() == refA.size(); p++ ) {
+						int m = 0;
+						for ( size_t i = p * 16; i < p * 16 + 16; i++ )
+							m = std::max( m, std::abs( ordered( a[i] ) - ordered( refA[i] ) ) );
+						fp += m > 2;
+						fpm += m > 2 && mergedAt[p];
+					}
+					std::printf( "PRECIPVIEW %s against GL's 4x frame (info): %s (%zu flips, %zu past 1 ulp, stencil %zu); %zu flipped pixels, %zu of them "
+						"GL's merged ones\n", j.name.c_str(), g4.word(), g4.flips, g4.past1, g4.stencil, fp, fpm );
+				}
+				{  // red 64 (harness only): Vulkan's 4 samples averaged per pixel, the reveal's samples kept
+					std::vector<std::uint16_t> am( a.size() ), bm( b );
+					for ( size_t p = 0; p < a.size() / 16; p++ )
+						for ( size_t c = 0; c < 4; c++ ) {
+							float m = 0.0f;
+							for ( size_t s = 0; s < 4; s++ )
+								m += h2f( a[( p * 4 + s ) * 4 + c] );
+							for ( size_t s = 0; s < 4; s++ )
+								am[( p * 4 + s ) * 4 + c] = f2h( m * 0.25f );
+						}
+					for ( size_t s = 0; s < b.size() / 4; s++ )
+						if ( !( b[s * 4] == 0 && b[s * 4 + 1] == 0 && b[s * 4 + 2] == 0 && b[s * 4 + 3] == 0x3C00 ) )
+							for ( size_t c = 0; c < 4; c++ )
+								bm[s * 4 + c] = am[s * 4 + c];
+					const Verdict r = judge( bg, am, refPS, bm, refPSB );
+					const bool must = j.name.find( "_near" ) != std::string::npos;
+					std::printf( "PRECIPVIEW %s red 64 (Vulkan's samples averaged): %s (%zu covered, %zu flips, %zu past 1 ulp, stencil %zu)%s\n", j.name.c_str(),
+						r.word(), r.covered, r.flips, r.past1, r.stencil, must && r.ok() ? " PASSED in a near case: the gate cannot see it" : "" );
+					ok = ok && !( must && r.ok() );
+				}
+				// repeatability: the judged reference against its second build, GL's stencil against its second draw, Vulkan
+				// against a second run (each must be EXACT); GL's 4x colour against its second draw is info (the merge varies)
 				std::vector<std::uint16_t> a2, b2;
 				const Verdict g = judge( bg, refA2, refA, refB2, refB );
 				const bool vkRan = runVk( 0, a2, b2, false );
 				const Verdict w = vkRan ? judge( bg, a2, a, b2, b ) : Verdict();
-				std::printf( "PRECIPVIEW %s repeat: GL vs GL %s (%zu halves differ, %zu flips, stencil %zu), Vulkan vs Vulkan %s (%zu halves differ, "
-					"%zu flips, stencil %zu)\n", j.name.c_str(), g.word(), g.diff, g.flips, g.stencil, vkRan ? w.word() : "FAIL (run failed)", w.diff,
-					w.flips, w.stencil );
-				ok = ok && g.diff == 0 && g.stencil == 0 && vkRan && w.diff == 0 && w.stencil == 0;
+				std::printf( "PRECIPVIEW %s repeat: reference vs its second build %zu halves differ, GL's stencil %zu, Vulkan vs Vulkan %s (%zu halves "
+					"differ, %zu flips, stencil %zu); GL 4x vs GL 4x (info) %s (%zu halves differ, %zu flips)\n", j.name.c_str(), refRep, g.stencil,
+					vkRan ? w.word() : "FAIL (run failed)", w.diff, w.flips, w.stencil, g.word(), g.diff, g.flips );
+				ok = ok && refRep == 0 && g.stencil == 0 && vkRan && w.diff == 0 && w.stencil == 0;
 				// reference only, never the bar: GL's own run-to-run noise, draws 2-5 each judged against draw 1
 				std::size_t nFl[4], nPa[4], nDi[4], nFlMax = 0, nPaMax = 0;
 				for ( int k = 0; k < 4; k++ ) {
@@ -799,6 +1161,37 @@ int main( int argc, char ** argv )
 					std::printf( "PRECIPVIEW %s GL geometry stage captured twice: %u / %u triangles, %zu floats differ (gl_Position %zu, gUv %zu, gQ %zu, "
 						"gView %zu, gCol %zu, gBox %zu, gA %zu, gB %zu)%s\n", j.name.c_str(), pr1, pr2, tfDiff, tfVar[0], tfVar[1], tfVar[2], tfVar[3],
 						tfVar[4], tfVar[5], tfVar[6], tfVar[7], glGetError() == GL_NO_ERROR ? "" : " (a GL error in the capture)" );
+					if ( j.lit && !j.fog ) {  // unfogged, gA is the light: distinct values with unequal channels (header)
+						std::vector<std::array<float, 3>> ga3;
+						for ( size_t v0 = 0; v0 + size_t( kTfFloats ) <= tf1.size(); v0 += size_t( kTfFloats ) ) {
+							const float * q = &tf1[v0 + size_t( kTfAt[6] )];
+							if ( q[0] != q[1] || q[1] != q[2] )
+								ga3.push_back( { q[0], q[1], q[2] } );
+						}
+						std::sort( ga3.begin(), ga3.end() );
+						const size_t distinct = size_t( std::unique( ga3.begin(), ga3.end() ) - ga3.begin() );
+						std::printf( "PRECIPVIEW %s lit gA: %zu distinct captured values with unequal channels (want >= 100)\n", j.name.c_str(), distinct );
+						ok = ok && distinct >= 100;
+					}
+					if ( j.lit ) {  // the globals check (header): b0 filled non-zero must not move GL's geometry stage
+						std::vector<float> g( 84 );
+						for ( size_t k = 0; k < g.size(); k++ )
+							g[k] = 0.37f + 0.11f * float( k % 13 ) - 0.05f * float( k % 7 );
+						f.bindBuffer( fUbo, ubo );
+						f.bufferData( fUbo, std::ptrdiff_t( g.size() * 4 ), g.data(), fStatic );
+						std::vector<float> tfG;
+						GLuint prG = 0;
+						capture( tfG, prG );
+						f.bindBuffer( fUbo, ubo );
+						f.bufferData( fUbo, std::ptrdiff_t( zeros.size() ), zeros.data(), fStatic );
+						size_t gDiff = tfG.size() == tf1.size() ? 0 : std::max( tfG.size(), tf1.size() );
+						for ( size_t i = 0; i < std::min( tfG.size(), tf1.size() ); i++ )
+							gDiff += std::memcmp( &tfG[i], &tf1[i], 4 ) != 0;
+						const bool blk = f.getUniformBlockIndex( pTf, "globalUniforms" ) != 0xFFFFFFFFu;
+						std::printf( "PRECIPVIEW %s lit globals: b0 non-zero vs zero, %u / %u triangles, %zu floats differ (want 0; block %s in GL's program)\n",
+							j.name.c_str(), prG, pr1, gDiff, blk ? "active" : "not active" );
+						ok = ok && gDiff == 0 && prG == pr1 && prG > 0;
+					}
 					std::vector<std::uint8_t> rec( size_t( j.n ) * 112 );
 					std::vector<std::uint16_t> a3, b3;
 					if ( !runVk( 0, a3, b3, false, rec.data() ) )
@@ -809,21 +1202,21 @@ int main( int argc, char ** argv )
 						float M[16] = {}, atl[4] = {};
 						f.getUniformfv( pJob, f.getUniformLocation( pJob, "pcProj" ), M );
 						f.getUniformfv( pJob, f.getUniformLocation( pJob, "pcAtlas" ), atl );
-						particleDiff( j.name, tf1, pr1, rec, j.n, M, atl, W, H, a, refA );
+						particleDiff( j.name, tf1, pr1, rec, j.n, M, atl, W, H, a, refPS );
 					}
 				}
 			}
 		}
 		for ( RedSeen & r : reds ) {
-			if ( ( r.red == 16 && !j.look ) || ( r.red == 32 && !j.hasTex ) )
-				continue;  // a plain run has no look to drop, a case with no atlas no atlas
+			if ( ( r.red == 16 && !j.look ) || ( r.red == 32 && !j.hasTex ) || ( r.red == 128 && !j.lit ) )
+				continue;  // a plain run has no look to drop, a case with no atlas no atlas, an unlit one no light
 			std::vector<std::uint16_t> a, b;
 			if ( !runVk( r.red, a, b, false ) ) {
 				std::printf( "PRECIPVIEW %s red %s: the run failed (counts as a FAIL)\n", j.name.c_str(), r.name );
 				r.seen = true;
 				continue;
 			}
-			const Verdict v = judge( bg, a, refA, b, refB );
+			const Verdict v = judge( bg, a, refPS, b, refPSB );
 			std::printf( "PRECIPVIEW %s red %s: %s (%zu covered, %zu flips, %zu past 1 ulp, stencil differs on %zu)\n", j.name.c_str(), r.name,
 				v.word(), v.covered, v.flips, v.past1, v.stencil );
 			r.seen = r.seen || !v.ok();
@@ -831,6 +1224,10 @@ int main( int argc, char ** argv )
 				std::printf( "PRECIPVIEW %s red atlas %s\n", j.name.c_str(), j.look == 1 ? "PASSED: bound, not read (the drop's look reads no texture)"
 					: "PASSED: the case does not see its atlas" );
 				ok = ok && j.look == 1;
+			}
+			if ( r.red == 128 && v.ok() ) {  // every lit case must see its light dropped
+				std::printf( "PRECIPVIEW %s red light PASSED: the case does not see its light\n", j.name.c_str() );
+				ok = false;
 			}
 		}
 		jobAt++;
@@ -848,7 +1245,7 @@ int main( int argc, char ** argv )
 		WwVkPresent::farTwinDrop( reinterpret_cast<std::uintptr_t>( &k ) ), WwVkPresent::sharedTargetDrop( reinterpret_cast<std::uintptr_t>( &k ) );
 	for ( char & k : normKeys )
 		WwVkPresent::farTwinDrop( reinterpret_cast<std::uintptr_t>( &k ) ), WwVkPresent::sharedTargetDrop( reinterpret_cast<std::uintptr_t>( &k ) );
-	for ( int c = 0; c < 8; c++ ) {
+	for ( int c = 0; c < kCases; c++ ) {
 		WwVkPresent::sharedTargetDrop( reinterpret_cast<std::uintptr_t>( &volKeys[c] ) );
 		for ( char & k : airKeys[c] )
 			WwVkPresent::sharedTargetDrop( reinterpret_cast<std::uintptr_t>( &k ) );

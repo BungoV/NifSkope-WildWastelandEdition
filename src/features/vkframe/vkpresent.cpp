@@ -74,6 +74,7 @@
 #include "features/vkframe/precip_look_view_cs.spv.h"  // slice 3: the precipitation look
 #include "features/vkframe/precip_look_view_vs.spv.h"
 #include "features/vkframe/precip_look_view_ps.spv.h"
+#include "features/vkframe/precip_lit_view_cs.spv.h"  // slice 2b: the sun on the particles
 #include "features/vkframe/vkfarcards.h"  // lane VKFAR1 round 2: the far cards' inputs (vkfarcards.inc)
 #include "features/vkframe/obj_depth_vs.spv.h"  // lane VKOBJ1
 
