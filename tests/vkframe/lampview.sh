@@ -25,6 +25,19 @@
 #   test-off picture must differ from the reference in > 0 texels. Either at 0 FAILs (the case proves nothing).
 # Alpha reds (each must FAIL): alpha clear (GL clears the layer before its alpha draw), alpha depth func (GL_ALWAYS, not
 # LEQUAL), alpha test off (shAlphaTest 0 on the alpha draw).
+# Pool case (lane VKLAMP2, bar stated before its first run): lampRun keeps the casters' meshes on the device keyed by
+# (key, generation); a run copies only the meshes it misses. Printed per frame: `LAMPVIEW pool frame<n> copies= hits=
+# regen= repacks= redSkips=`.
+# - frame 1: copies 4 (the 4 meshes the casters use), hits 0. frame 2 (matrices moved only): copies 0, hits 4.
+#   The reds and the alpha case copy 0 meshes.
+# - frame 3 (all slots, frame 2's matrices; the plate re-specified in place, same size, new generation): copies 1,
+#   regen 1, the per-face bar above.
+# - frame 4 (the mover takes a new 81 x 81 plate, 6561 vertices: the positions pass the 64 KiB floor): repacks 1,
+#   copies 5 (every mesh of the run again), the per-face bar above.
+# - Every frame / alpha verdict line before frame 3 equals the last good run's.
+# Pool reds (each its own process, must FAIL): WW_VKLAMP_POOL_RED=1 (key only, the generation not compared): a
+# frame3 face FAILs and redSkips >= 1 (the trigger fired); WW_VKLAMP_POOL_RED=2 (the pool grows without copying its
+# kept meshes again): a frame4 face FAILs and repacks >= 1.
 # Fence red: the exe re-run with WW_VKFENCE_RED=lamp must end `LAMPVIEW GATE FAILED`.
 # Last line: `LAMPVIEW GATE OK` or `LAMPVIEW GATE FAILED`.
 set -u
