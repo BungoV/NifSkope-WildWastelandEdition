@@ -22,6 +22,7 @@ Changed, not built, not checked live. Nothing in the app calls it yet, so no fra
   precipview harness; no cell_precip_* file.
 - Slice 2b, the light, is not built: no offline fixture has a lit cell (sun + cascades, cell lights and their
   cluster, cube shadows, the sky-visibility maps, the air medium) to gate it against GL. A lit cell stays on GL.
+  (Then. Now: the sun alone is built and gated, see slice 2b at the end of this section.)
 - Slice 3, the precipitation look (GL's cell_precip_look program: the raindrop's swept disc and flicker, the snow's
   clump threshold, albedo and normal map): three new look shaders built from the same Vulkan files with the look
   switched on, picked per run. Gate: the drop is within the bar (24 flips, drops sized 1-4 mm so its size ramp and
@@ -87,6 +88,17 @@ Changed, not built, not checked live. Nothing in the app calls it yet, so no fra
   lifelong cache and never deletes or re-uploads it (a failed load deletes its name before anyone sees it), so a GL
   name never gets new pixels and the copy kept per name and Vulkan image stays right. A change there that reloads an
   atlas in place must also make vkprecip.inc copy it again.
+- Slice 2b, the sun (11-15; e7e88261, 3fcae7fe, 0ff69cdd; not compiled into the app, not run there): a lit twin of
+  the record pass (precip_lit_view_cs.hlsl, the plain file with PC_LIT on) lights each particle once by the sun the GL
+  way (sun colour, phase, wrap, the thin / thick mix), picked per run with its own bindings; the inputs the sun path
+  never reads at run time (cell lights, cluster, cube and cascade shadows, sky-visibility maps, terrain air) are bound
+  to small zero stand-ins. Two new gate cases, near rain lit and far snow in fog lit, judged against the same
+  per-sample reference: both EXACT. Each proves the sun is live in GL first (sun off, and a changed thin / thick mix,
+  each move over 150000 / 28000 samples), and a new red that drops the light FAILs on both. The 8 unlit cases'
+  verdicts are unchanged. Still on GL (refused one by one): interiors, placed lights, GI, ambient, cascade shadows,
+  air drift, terrain air, a local sun, particle volume reds, and the look when lit; so most real lit exteriors
+  likely still go to GL. The first lit run moved the thin / thick mix on only 51 samples, because that case's sun
+  sat nearly edge-on to the particles; the case got its own sun, the bar stayed.
 - No existing rain / snow shader and no cellprecip.cpp line changed.
 
 ## VKFAR2 P7 (2026-11-14): depth of field, motion blur and object blur join the tone pass on Vulkan (WW_VKVIEW=1)
