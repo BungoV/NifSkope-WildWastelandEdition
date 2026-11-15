@@ -9631,3 +9631,4 @@ bool frame( QOpenGLWindow * w, const std::function<void()> & paint )
 #include "features/vkframe/vkunder.inc"  // lane VKWATER4 (L7): the underwater fog on the view
 #include "features/vkframe/vktaareactive.inc"  // lane VKFAR7: the TAA mask's reactive pass (taainputs.cpp pass 4)
 #include "features/vkframe/vklamp.inc"  // lane VKLAMP1: the lamps' plain shadow cubes (celllamps.cpp)
+#include "features/vkframe/vkreflrelight.inc"  // lane VKFAR19: the reflection probe relight into the shared atlas
