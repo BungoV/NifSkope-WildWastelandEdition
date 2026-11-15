@@ -622,7 +622,7 @@ namespace
 {
 long long cellTried = 0, cellDrawn = 0, pbrmTried = 0, pbrmDrawn = 0;	// pbrm: pbrm_default / pbrm_cell / pbrm_cellcsm (twins 4-6, `vk objpbrm:`)
 long long fxTried = 0, fxDrawn = 0;	// fx: fo4_effectcell / fo4_effectdecalcsm (twins 7-8, `vk objfx:`)
-int cellVar[3] = {}, pbrmVar[3] = {}, fxVar[3] = {};	// of the drawn: lit (the light buffer), skinned, blended (ObjBlRunStat's, per route)
+int cellVar[4] = {}, pbrmVar[4] = {}, fxVar[4] = {};	// of the drawn: lit (the light buffer), skinned, blended, RT GI (per route)
 std::string cellWhy, pbrmWhy, fxWhy;
 }  // namespace
 
@@ -641,15 +641,20 @@ bool vkCellDraw( const NifSkopeOpenGLContext::Program * prog, const GLsizei * co
 	std::string & lastWhy = fx ? fxWhy : pbrm ? pbrmWhy : cellWhy;
 	/* the effect twins are one variant each, matched on the pixel stage's loader key (Program::wwDefs): fo4_effectcell with
 	 * the air zones (they ship on), fo4_effectdecalcsm with or without them (the zones' read is not in its code) */
-	const bool fxKey = !fx || prog->wwDefs == "WW_CELL_AIRZONE+WW_CELL_FOGLEAK+WW_FRAME_UBO"
+	/* lane VKWATER3 G4: the all-on route's RT GI variant (WW_CELL_RTDDGI + RTDDGI_CASCADES + RESTIR, the same key on every twin;
+	 * fo4_effectcell's with the air zones) is the rt twin (objCellPs); its other mixes stay GL's */
+	static const std::string rtKey = "WW_CELL_FOGLEAK+WW_CELL_RESTIR+WW_CELL_RTDDGI+WW_CELL_RTDDGI_CASCADES+WW_FRAME_UBO";
+	static const std::string rtKeyAir = "WW_CELL_AIRZONE+" + rtKey;
+	const bool rt = twin == 7 ? prog->wwDefs == rtKeyAir : prog->wwDefs == rtKey || ( twin == 8 && prog->wwDefs == rtKeyAir );
+	const bool fxKey = !fx || rt || prog->wwDefs == "WW_CELL_AIRZONE+WW_CELL_FOGLEAK+WW_FRAME_UBO"
 		|| ( twin == 8 && prog->wwDefs == "WW_CELL_FOGLEAK+WW_FRAME_UBO" );
 	// the twins are the base variant (fo4_cell.frag@WW_CELL_FOGLEAK+WW_FRAME_UBO): the loader's other defines make another program
 	const char * no = !wwFogLeakShaderDefine() ? "WW_CELL_FOGLEAK=0: GL's program is not the Vulkan twin"
 		: !prog->wwShadowFrame ? "WW_FRAME_UBO off: GL's program is not the Vulkan twin"
 		: wwCellGiVis() == 1 ? "WW_CELL_GI_MARCH in GL's program: no Vulkan twin"
 		: wwCellPrtOn() ? "WW_CELL_PRT in GL's program: no Vulkan twin"
-		: rtddgiCellShaderDefine() ? "WW_CELL_RTDDGI in GL's program: no Vulkan twin"
-		: rtddgiRestirShaderDefine() ? "WW_CELL_RESTIR in GL's program: no Vulkan twin"
+		: !rt && rtddgiCellShaderDefine() ? "WW_CELL_RTDDGI in GL's program without WW_CELL_RTDDGI_CASCADES + WW_CELL_RESTIR: no Vulkan twin"
+		: !rt && rtddgiRestirShaderDefine() ? "WW_CELL_RESTIR in GL's program without WW_CELL_RTDDGI: no Vulkan twin"
 		: rtddgiRestirGiShaderDefine() ? "WW_CELL_RESTIRGI in GL's program: no Vulkan twin"
 		: !fxKey ? "GL's effect program is another variant (its pixel stage's loader defines): no Vulkan twin" : nullptr;
 	if ( no ) {
@@ -673,6 +678,7 @@ bool vkCellDraw( const NifSkopeOpenGLContext::Program * prog, const GLsizei * co
 	s.cmds = cmds.data();
 	s.nCmds = std::size_t( n );
 	s.red = fx ? redFx : pbrm ? redPbrm : red;
+	s.rt = rt;
 	s.variants = fx ? fxVar : pbrm ? pbrmVar : cellVar;
 	std::string why;
 	const bool drew = WwVkPresent::objCellShade( []( const char * name ) -> void * {
@@ -1313,13 +1319,14 @@ void frame()
 	// lane VKOBJ4: the runs drawn on Vulkan this frame, the ones GL drew and why
 	if ( vkShadeOn() ) {
 		const WwVkPresent::ObjBlRunStat r = WwVkPresent::takeObjBlRunStat();
-		// the light texel buffers: read in place from stores (no copy) or copied at the crossing; the owners' updates
+		/* the texel buffers (the lights, the RT GI variant's ReSTIR ratio and DDGI atlas): read in place from stores (no copy) or
+		 * copied once a frame at the first crossing (copied / KB / ms that cost); the owners' updates */
 		const WwVkPresent::ObjBlStoreStat ls = WwVkPresent::objBlTexelStoreStat( true );
 		char b[768];
 		std::snprintf( b, sizeof( b ), "vk objshade: runs=%lld crossings=%d draws=%d cmds=%d gl=%d fails=%d ms=%.2f max=%.2f "
-			"units shared=%d glOnly=%d texelGl=%d compare=%d texel imported=%d copied=%llu copiedKB=%.1f stores=%d writes=%llu staged=%llu%s%s%s%s",
+			"units shared=%d glOnly=%d texelGl=%d compare=%d texel imported=%d copied=%llu copiedKB=%.1f copiedMs=%.3f stores=%d writes=%llu staged=%llu%s%s%s%s",
 			c.vkRuns, r.runs, r.draws, r.cmds, r.gl, r.fails, r.cpuMs, r.maxMs, r.shared, r.glOwn, r.texelGl, r.compare, r.texelImported,
-			(unsigned long long)ls.copied, ls.copiedBytes / 1024.0, ls.stores, (unsigned long long)ls.writes, (unsigned long long)ls.staged,
+			(unsigned long long)ls.copied, ls.copiedBytes / 1024.0, ls.copiedMs, ls.stores, (unsigned long long)ls.writes, (unsigned long long)ls.staged,
 			r.glWhy.empty() ? "" : " glWhy=", r.glWhy.c_str(), r.failWhy.empty() ? "" : " failWhy=", r.failWhy.c_str() );
 		if ( vkShadeLine != b && wwFrameLog() ) {
 			vkShadeLine = b;
@@ -1328,8 +1335,8 @@ void frame()
 		// lane VKWATER3 G4: the non-bindless fo4_cell / fo4_cellcsm shapes (vkCellDraw) drawn on Vulkan, and the last refusal
 		if ( cellTried ) {
 			WW_SWITCH_STATIC( QString, cellRed, wwEnv( "WW_VKVIEW_OBJCELL_RED" ).trimmed() );
-			std::snprintf( b, sizeof( b ), "vk objcell: shapes=%lld drawn=%lld gl=%lld lit=%d skinned=%d blended=%d twinImages=%d cells=%d%s%s%s%s",
-				cellTried, cellDrawn, cellTried - cellDrawn, cellVar[0], cellVar[1], cellVar[2], r.twins, r.cells, cellWhy.empty() ? "" : " glWhy=", cellWhy.c_str(),
+			std::snprintf( b, sizeof( b ), "vk objcell: shapes=%lld drawn=%lld gl=%lld lit=%d skinned=%d blended=%d rt=%d twinImages=%d cells=%d%s%s%s%s",
+				cellTried, cellDrawn, cellTried - cellDrawn, cellVar[0], cellVar[1], cellVar[2], cellVar[3], r.twins, r.cells, cellWhy.empty() ? "" : " glWhy=", cellWhy.c_str(),
 				WwVkPresent::objCellRed( cellRed.toStdString().c_str() ) ? " RED " : "", cellRed.toStdString().c_str() );
 			if ( vkCellLine != b && wwFrameLog() ) {
 				vkCellLine = b;
@@ -1339,8 +1346,8 @@ void frame()
 		// lane VKWATER3 G4: the non-bindless pbrm_default / pbrm_cell / pbrm_cellcsm shapes, the same route (twins 4-6)
 		if ( pbrmTried ) {
 			WW_SWITCH_STATIC( QString, pbrmRed, wwEnv( "WW_VKVIEW_OBJPBRM_RED" ).trimmed() );
-			std::snprintf( b, sizeof( b ), "vk objpbrm: shapes=%lld drawn=%lld gl=%lld lit=%d skinned=%d blended=%d%s%s%s%s", pbrmTried, pbrmDrawn,
-				pbrmTried - pbrmDrawn, pbrmVar[0], pbrmVar[1], pbrmVar[2],
+			std::snprintf( b, sizeof( b ), "vk objpbrm: shapes=%lld drawn=%lld gl=%lld lit=%d skinned=%d blended=%d rt=%d%s%s%s%s", pbrmTried, pbrmDrawn,
+				pbrmTried - pbrmDrawn, pbrmVar[0], pbrmVar[1], pbrmVar[2], pbrmVar[3],
 				pbrmWhy.empty() ? "" : " glWhy=", pbrmWhy.c_str(), WwVkPresent::objCellRed( pbrmRed.toStdString().c_str() ) ? " RED " : "",
 				pbrmRed.toStdString().c_str() );
 			if ( vkPbrmLine != b && wwFrameLog() ) {
@@ -1352,8 +1359,8 @@ void frame()
 		 * layers, the air GI volume) reach Vulkan as copy twins, copied once a frame: copies / KB / ms are that cost */
 		if ( fxTried ) {
 			WW_SWITCH_STATIC( QString, fxRed, wwEnv( "WW_VKVIEW_OBJFX_RED" ).trimmed() );
-			std::snprintf( b, sizeof( b ), "vk objfx: shapes=%lld drawn=%lld gl=%lld lit=%d skinned=%d blended=%d copies=%d copyKB=%.1f copyMs=%.3f%s%s%s%s",
-				fxTried, fxDrawn, fxTried - fxDrawn, fxVar[0], fxVar[1], fxVar[2], r.copies, r.copyBytes / 1024.0, r.copyMs,
+			std::snprintf( b, sizeof( b ), "vk objfx: shapes=%lld drawn=%lld gl=%lld lit=%d skinned=%d blended=%d rt=%d copies=%d copyKB=%.1f copyMs=%.3f%s%s%s%s",
+				fxTried, fxDrawn, fxTried - fxDrawn, fxVar[0], fxVar[1], fxVar[2], fxVar[3], r.copies, r.copyBytes / 1024.0, r.copyMs,
 				fxWhy.empty() ? "" : " glWhy=", fxWhy.c_str(), WwVkPresent::objCellRed( fxRed.toStdString().c_str() ) ? " RED " : "",
 				fxRed.toStdString().c_str() );
 			if ( vkFxLine != b && wwFrameLog() ) {
@@ -1362,9 +1369,9 @@ void frame()
 			}
 		}
 		cellTried = cellDrawn = pbrmTried = pbrmDrawn = fxTried = fxDrawn = 0;
-		std::fill( cellVar, cellVar + 3, 0 );
-		std::fill( pbrmVar, pbrmVar + 3, 0 );
-		std::fill( fxVar, fxVar + 3, 0 );
+		std::fill( cellVar, cellVar + 4, 0 );
+		std::fill( pbrmVar, pbrmVar + 4, 0 );
+		std::fill( fxVar, fxVar + 4, 0 );
 		cellWhy.clear();
 		pbrmWhy.clear();
 		fxWhy.clear();

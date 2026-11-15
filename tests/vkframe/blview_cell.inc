@@ -46,7 +46,17 @@
  *   GL_BLEND SRC_ALPHA / ONE_MINUS_SRC_ALPHA on the blended draws) over the DXT5 BaseMap's alpha. Red `blend` (7): GL's
  *   factors read swapped. Alpha probe: alphaFlags 0 everywhere moves GL's colour or depth on >= 20 % of the covered pixels.
  * Twins 5 / 6 (`BLVIEW pbrmcell`, `pbrmcellcsm`): pbrm_cell / pbrm_cellcsm (pbrm_default.frag with WW_CELLLIGHTS, and the
- * cascades) against objcell_pbrmcell_ps / objcell_pbrmcellcsm_ps, the pbrm state, two targets, always with the lights. */
+ * cascades) against objcell_pbrmcell_ps / objcell_pbrmcellcsm_ps, the pbrm state, two targets, always with the lights.
+ * RT GI (lane VKWATER3 11-15, vars 8, `BLVIEW <twin> rt`): GL's program on WW_CELL_FOGLEAK+WW_CELL_RESTIR+WW_CELL_RTDDGI+
+ * WW_CELL_RTDDGI_CASCADES+WW_FRAME_UBO (the app's ray-traced route) against the twin's _rt_ps header (objCellShade's s.rt), the
+ * lights on and shadow-casting. Its four inputs as the app binds them: the ReSTIR ratio (a GL RG32F buffer texture, kSW x kSH,
+ * ratio 0.1 .. 1 in a pattern, linear depth 9: the crossing copies it once a frame), the GI atlas (one 13 x 7 x 9 cascade, a
+ * store: read in place), the screen GI and its key (RGBA32F shared targets at half size; the key holds GL's own surface
+ * positions from a sweep with the screen GI off, normal +z, so part of the pixels upsample and the rest read the atlas).
+ * Probes: cellRestirOn 0, cellDdgiOn 0, cellGiHalfOn 0 each move GL's colour on >= 20 % of the covered pixels. The texel
+ * line: the ratio copied once for the sweep, the lights once a draw (copied 7, their bytes), the atlas imported once a draw. Reds
+ * (ObjCellShade.red 9 .. 12): restir (the ratio copied from two texels on), atlas (read one texel on), gihalf, gikey (each image
+ * dropped to the stand-in). */
 bool cellGate( const std::string & spirvDir, int twin, const GLuint maps[4], unsigned reds = 15u, const char * label = nullptr, unsigned vars = 0u )
 {
 	using namespace WwVkPresent;
@@ -57,9 +67,9 @@ bool cellGate( const std::string & spirvDir, int twin, const GLuint maps[4], uns
 		return false;
 	}
 	// twin 7: fo4_effectcell (the game's effect shader, cell-lit): one target, its own maps and state, the soft fade's depth
-	const bool fxT = twin == 7, pbrmT = twin >= 4 && !fxT, csmT = twin == 3 || twin == 6, lightsV = ( vars & 1u ) != 0 || twin >= 5;
+	const bool fxT = twin == 7, pbrmT = twin >= 4 && !fxT, csmT = twin == 3 || twin == 6, lightsV = ( vars & 9u ) != 0 || twin >= 5;
 	const bool oneT = twin == 4 || fxT;  // writes target 0 only
-	const bool skinV = ( vars & 2u ) != 0, alphaV = ( vars & 4u ) != 0;
+	const bool skinV = ( vars & 2u ) != 0, alphaV = ( vars & 4u ) != 0, rtV = ( vars & 8u ) != 0;
 	const std::string tagS = std::string( twinTag[twin] ) + ( label ? std::string( " " ) + label : std::string() );
 	const char * tag = tagS.c_str();
 	struct CellGl
@@ -82,6 +92,7 @@ bool cellGate( const std::string & spirvDir, int twin, const GLuint maps[4], uns
 		void( WINAPI * disableAttr )( GLuint ) = nullptr;
 		void( WINAPI * texBuffer )( GLenum, GLenum, GLuint ) = nullptr;
 		GLint( WINAPI * loc )( GLuint, const char * ) = nullptr;
+		void( WINAPI * ui4 )( GLint, GLsizei, const GLint * ) = nullptr;
 	} u;
 	const char * n4 = "1234";
 	bool okLoad = load( u.shaderBinary, "glShaderBinary" ) && load( u.specialize, "glSpecializeShader" ) && load( u.ifaceIv, "glGetProgramInterfaceiv" )
@@ -89,7 +100,8 @@ bool cellGate( const std::string & spirvDir, int twin, const GLuint maps[4], uns
 		&& load( u.um3, "glUniformMatrix3fv" ) && load( u.um4, "glUniformMatrix4fv" ) && load( u.bindTextures, "glBindTextures" )
 		&& load( u.bindSamplers, "glBindSamplers" ) && load( u.drawBv, "glDrawElementsBaseVertex" ) && load( u.bufSub, "glNamedBufferSubData" )
 		&& load( u.clearTexSub, "glClearTexSubImage" ) && load( u.texParami, "glTextureParameteri" )
-		&& load( u.disableAttr, "glDisableVertexAttribArray" ) && load( u.loc, "glGetUniformLocation" ) && load( u.texBuffer, "glTexBuffer" );
+		&& load( u.disableAttr, "glDisableVertexAttribArray" ) && load( u.loc, "glGetUniformLocation" ) && load( u.texBuffer, "glTexBuffer" )
+		&& load( u.ui4, "glUniform4iv" );
 	for ( int i = 0; i < 4; i++ )
 		okLoad = okLoad && load( u.uf[i], ( std::string( "glUniform" ) + n4[i] + "fv" ).c_str() );
 	if ( !okLoad || !sx.fbo ) {
@@ -118,8 +130,8 @@ bool cellGate( const std::string & spirvDir, int twin, const GLuint maps[4], uns
 	}
 	// GL's program from the set, the app's base variant, the binaries as they are
 	const GLuint prog = f.createProgram();
-	const std::string stage[2] = { "fo4_default.vert", std::string( twinFrag[twin] ) + ( fxT ? ".frag@WW_CELL_AIRZONE+WW_CELL_FOGLEAK+WW_FRAME_UBO"
-		: ".frag@WW_CELL_FOGLEAK+WW_FRAME_UBO" ) };
+	const std::string stage[2] = { "fo4_default.vert", std::string( twinFrag[twin] ) + ( fxT ? ".frag@WW_CELL_AIRZONE+WW_CELL_FOGLEAK+" : ".frag@WW_CELL_FOGLEAK+" )
+		+ ( rtV ? "WW_CELL_RESTIR+WW_CELL_RTDDGI+WW_CELL_RTDDGI_CASCADES+WW_FRAME_UBO" : "WW_FRAME_UBO" ) };
 	for ( int s = 0; s < 2; s++ ) {
 		const std::string bin = index.count( stage[s] ) ? readFile( spirvDir + "/" + index[stage[s]] ) : std::string();
 		const GLuint sh = f.createShader( s ? kFrag : kVert );
@@ -199,7 +211,7 @@ bool cellGate( const std::string & spirvDir, int twin, const GLuint maps[4], uns
 	SpvModule mods[2];
 	const std::uint32_t * words[2] = { vkframe_objcell_vs_spv, nullptr };
 	std::size_t counts[2] = { sizeof( vkframe_objcell_vs_spv ) / 4, 0 };
-	objCellPs( twin, words[1], counts[1] );
+	objCellPs( twin, rtV, words[1], counts[1] );
 	std::vector<Blk> blks;
 	for ( int m = 0; m < 2; m++ ) {
 		if ( !spvReflect( words[m], counts[m], mods[m], why ) ) {
@@ -257,7 +269,12 @@ bool cellGate( const std::string & spirvDir, int twin, const GLuint maps[4], uns
 				u.um3( at, 1, GL_FALSE, v );
 			else if ( t == 0x1405 )
 				u.uu1( at, GLuint( v[0] ) );
-			else
+			else if ( t == 0x8B55 ) {  // INT_VEC4
+				GLint iv[4] = {};
+				for ( std::size_t k = 0; k < vals.size() && k < 4; k++ )
+					iv[k] = GLint( v[k] );
+				u.ui4( at, 1, iv );
+			} else
 				u.ui1( at, GLint( v[0] ) );
 			if ( glGetError() != GL_NO_ERROR && putBad.empty() )
 				putBad = std::string( name ) + " (GL type " + std::to_string( t ) + ")";
@@ -390,10 +407,13 @@ bool cellGate( const std::string & spirvDir, int twin, const GLuint maps[4], uns
 	GLuint lightTex = 0, lightBuf = 0;
 	int lightUnit = -1;
 	if ( lightsV ) {
-		const float lt[3][8][4] = {
+		float lt[3][8][4] = {
 			{ { -3.0f, 1.5f, -6.0f, 8.0f }, { 1.2f, 0.9f, 0.6f, -2.0f }, { 0, 0, -1, 1 }, { 0, 1, 2, 0 }, { -1, 0, 0, 0 } },  // omni
 			{ { 2.0f, 0.0f, -3.0f, 9.0f }, { 0.6f, 0.9f, 1.4f, 0.5f }, { 0, 0, -1, 2 }, { 0, 1, 2, 0 }, { -1, 0, 0, 0 } },    // spot
 			{ { 5.0f, 2.0f, -8.0f, 9.0f }, { 0.8f, 1.3f, 0.7f, -2.0f }, { 0, 0, -1, 1 }, { 0, 1, 2, 1 }, { -1, 0, 0, 0 } } };  // omni, no specular
+		if ( rtV )  // RT GI: every light casts a shadow (texel 4 y), which the ReSTIR ratio replaces
+			for ( auto & l : lt )
+				l[4][1] = 1.0f;
 		f.genBuffers( 1, &lightBuf );
 		f.bindBuffer( 0x8C2A, lightBuf );  // TEXTURE_BUFFER
 		f.bufferData( 0x8C2A, std::ptrdiff_t( sizeof( lt ) ), lt, 0x88E4 );
@@ -442,6 +462,102 @@ bool cellGate( const std::string & spirvDir, int twin, const GLuint maps[4], uns
 		set( "cellFxEmitK", { 1.25f } );
 		if ( fxDepthUnit < 0 || glGetError() != GL_NO_ERROR ) {
 			std::printf( "BLVIEW %s FAIL (fxDepth has no unit (location %d), or a GL error making the depth)\n", tag, int( l ) );
+			return false;
+		}
+	}
+	/* RT GI (vars 8): the ReSTIR ratio (GL's buffer texture), the atlas (a store), the screen GI and its key (shared targets);
+	 * the key's surface positions come from GL's sweep below */
+	static int giHalfAt = 0, giKeyAt = 0;
+	const std::uintptr_t giHalfKey = reinterpret_cast<std::uintptr_t>( &giHalfAt ), giKeyKey = reinterpret_cast<std::uintptr_t>( &giKeyAt );
+	GLuint restirTex = 0, restirBuf = 0, atlasTex = 0, giHalfTex = 0, giKeyTex = 0;
+	unsigned atlasBuf = 0;
+	int restirUnit = -1, atlasUnit = -1, giHalfUnit = -1, giKeyUnit = -1;
+	const int hw = kSW / 2, hh = kSH / 2;
+	if ( rtV ) {
+		std::vector<float> rs( std::size_t( kSW ) * std::size_t( kSH ) * 2 );
+		for ( int y = 0; y < kSH; y++ )
+			for ( int x = 0; x < kSW; x++ ) {
+				const std::size_t p = ( std::size_t( y ) * std::size_t( kSW ) + std::size_t( x ) ) * 2;
+				rs[p] = 0.1f + 0.09f * float( ( x * 7 + y * 3 ) % 11 );
+				rs[p + 1] = 9.0f;
+			}
+		f.genBuffers( 1, &restirBuf );
+		f.bindBuffer( 0x8C2A, restirBuf );
+		f.bufferData( 0x8C2A, std::ptrdiff_t( rs.size() * 4 ), rs.data(), 0x88E4 );
+		f.bindBuffer( 0x8C2A, 0 );
+		glGenTextures( 1, &restirTex );
+		glBindTexture( 0x8C2A, restirTex );
+		u.texBuffer( 0x8C2A, 0x8230, restirBuf );  // RG32F
+		glBindTexture( 0x8C2A, 0 );
+		// one cascade over the shapes: irradiance tiles in 0.3 .. 0.9, distances far (no Chebyshev cut), every probe usable (2)
+		const int nP = 13 * 7 * 9;
+		std::vector<float> at( std::size_t( 193 * nP ) * 4, 0.0f );
+		std::mt19937 ar( 31 );
+		std::uniform_real_distribution<float> a01( 0.0f, 1.0f );
+		for ( std::size_t t = 0; t < std::size_t( 64 * nP ); t++ )
+			for ( int c = 0; c < 4; c++ )
+				at[t * 4 + std::size_t( c )] = c < 3 ? 0.3f + 0.6f * a01( ar ) : 0.4f + 0.6f * a01( ar );
+		for ( std::size_t t = std::size_t( 64 * nP ); t < std::size_t( 192 * nP ); t++ ) {
+			at[t * 4] = at[t * 4 + 2] = 1000.0f;
+			at[t * 4 + 1] = at[t * 4 + 3] = 1.0e6f;
+		}
+		for ( std::size_t t = std::size_t( 192 * nP ); t < std::size_t( 193 * nP ); t++ )
+			at[t * 4 + 3] = 2.0f;
+		const std::size_t aBytes = at.size() * 4;
+		if ( !objBlTexelStore( atlasBuf, aBytes, why ) || !objBlTexelStoreWrite( atlasBuf, 0, aBytes, at.data(), why ) ) {
+			std::printf( "BLVIEW %s FAIL (the atlas store: %s)\n", tag, why.c_str() );
+			return false;
+		}
+		glGenTextures( 1, &atlasTex );
+		glBindTexture( 0x8C2A, atlasTex );
+		u.texBuffer( 0x8C2A, kRgba32fi, GLuint( atlasBuf ) );
+		glBindTexture( 0x8C2A, 0 );
+		if ( !sharedTarget( giHalfKey, 0, hw, hh, 1, kRgba32fi, giHalfTex, why ) || !sharedTarget( giKeyKey, 0, hw, hh, 1, kRgba32fi, giKeyTex, why ) ) {
+			std::printf( "BLVIEW %s FAIL (the screen GI's shared targets: %s)\n", tag, why.c_str() );
+			return false;
+		}
+		std::vector<float> gh( std::size_t( hw ) * std::size_t( hh ) * 4 ), gk( gh.size(), -1.0f );
+		for ( int y = 0; y < hh; y++ )
+			for ( int x = 0; x < hw; x++ ) {
+				float * p = gh.data() + ( std::size_t( y ) * std::size_t( hw ) + std::size_t( x ) ) * 4;
+				p[0] = 0.2f + 0.075f * float( ( x + 2 * y ) % 9 );
+				p[1] = 0.2f + 0.1f * float( ( 3 * x + y ) % 7 );
+				p[2] = 0.3f + 0.125f * float( ( x * y ) % 5 );
+				p[3] = 0.5f + 0.25f * float( ( x + y ) % 3 );
+			}
+		for ( int k = 0; k < 2; k++ ) {
+			glBindTexture( GL_TEXTURE_2D, k ? giKeyTex : giHalfTex );
+			glTexSubImage2D( GL_TEXTURE_2D, 0, 0, 0, hw, hh, GL_RGBA, GL_FLOAT, k ? gk.data() : gh.data() );
+			glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST );
+			glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST );
+		}
+		glBindTexture( GL_TEXTURE_2D, 0 );
+		const char * nm[4] = { "cellRestir", "cellDdgiAtlas", "cellGiHalf", "cellGiHalfKey" };
+		int * un[4] = { &restirUnit, &atlasUnit, &giHalfUnit, &giKeyUnit };
+		for ( int k = 0; k < 4; k++ ) {
+			const GLint l = locOf( nm[k] );
+			*un[k] = unitAt.count( l ) ? unitAt[l] : -1;
+			if ( *un[k] < 0 ) {
+				std::printf( "BLVIEW %s FAIL (%s has no unit: location %d)\n", tag, nm[k], int( l ) );
+				return false;
+			}
+		}
+		set( "cellShadowOn", { 1 } );
+		set( "cellRestirOn", { 1 } );
+		set( "cellRestirSize", { float( kSW ), float( kSH ), 0.0f, 0.0f } );
+		set( "cellDdgiOn", { 1 } );
+		set( "cellDdgiCount", { 1 } );
+		set( "cellDdgiCOrigin", { -12.0f, -6.0f, -18.0f, 2.0f }, 0 );  // w: the smallest spacing
+		set( "cellDdgiCStep", { 2.0f, 2.0f, 2.0f, 0.1f }, 0 );        // w: the self-shadow bias
+		set( "cellDdgiCDims", { 13, 7, 9, float( nP ) }, 0 );
+		set( "cellDdgiCBase", { 0 }, 0 );
+		set( "cellDdgiRed", { 0 } );
+		set( "cellGiLoop8", { 8 } );
+		set( "cellGiHalfOn", { 0 } );  // on once the key holds GL's surfaces
+		set( "cellGiHalfRect", { 0.0f, 0.0f, float( hw ), float( hh ) } );
+		set( "cellGiHalfScale", { 0.5f } );
+		if ( glGetError() != GL_NO_ERROR ) {
+			std::printf( "BLVIEW %s FAIL (a GL error making the RT inputs)\n", tag );
 			return false;
 		}
 	}
@@ -709,6 +825,12 @@ bool cellGate( const std::string & spirvDir, int twin, const GLuint maps[4], uns
 			u.bindTextures( GLuint( lightUnit ), 1, &lightTex );
 		if ( fxDepthTex )
 			u.bindTextures( GLuint( fxDepthUnit ), 1, &fxDepthTex );
+		if ( rtV ) {
+			u.bindTextures( GLuint( restirUnit ), 1, &restirTex );
+			u.bindTextures( GLuint( atlasUnit ), 1, &atlasTex );
+			u.bindTextures( GLuint( giHalfUnit ), 1, &giHalfTex );
+			u.bindTextures( GLuint( giKeyUnit ), 1, &giKeyTex );
+		}
 		for ( Blk & x : blks )
 			f.bindBufferBase( 0x8A11, x.glBind, x.buf );
 	};
@@ -760,6 +882,7 @@ bool cellGate( const std::string & spirvDir, int twin, const GLuint maps[4], uns
 			s.cmds = draws[i].cmds.data();
 			s.nCmds = draws[i].cmds.size() / 5;
 			s.red = red;
+			s.rt = rtV;
 			ran = objCellShade( glProc, s, w );
 			frameOff();
 		}
@@ -774,6 +897,33 @@ bool cellGate( const std::string & spirvDir, int twin, const GLuint maps[4], uns
 	if ( const GLenum e = glGetError(); e != GL_NO_ERROR || !putBad.empty() ) {
 		std::printf( "BLVIEW %s FAIL (GL error 0x%x setting the state; first bad value %s)\n", tag, unsigned( e ), putBad.c_str() );
 		return false;
+	}
+	if ( rtV ) {  // the screen GI's key: GL's surfaces (a sweep with the screen GI off; cellRow the identity: view = world), normal +z
+		CellOut g0;
+		glSweep( g0 );
+		std::vector<float> gk( std::size_t( hw ) * std::size_t( hh ) * 4, -1.0f );
+		std::size_t keyed = 0;
+		for ( int y = 0; y < hh; y++ )
+			for ( int x = 0; x < hw; x++ ) {
+				const int px = 2 * x, py = 2 * y;
+				const float d = g0.depth[std::size_t( py ) * std::size_t( kSW ) + std::size_t( px )];
+				if ( !( d < 1.0f ) )
+					continue;
+				const float wv = sx.proj[14] / ( 2.0f * d - 1.0f + sx.proj[10] );
+				const float nx = 2.0f * ( float( px ) + 0.5f ) / float( kSW ) - 1.0f, ny = 2.0f * ( float( py ) + 0.5f ) / float( kSH ) - 1.0f;
+				float * p = gk.data() + ( std::size_t( y ) * std::size_t( hw ) + std::size_t( x ) ) * 4;
+				p[0] = nx * wv / sx.proj[0];
+				p[1] = ny * wv / sx.proj[5];
+				p[2] = -wv;
+				p[3] = 1024.0f * 2048.0f + 1024.0f;  // cellGiKeyNormal: (0, 0, 1)
+				keyed++;
+			}
+		glBindTexture( GL_TEXTURE_2D, giKeyTex );
+		glTexSubImage2D( GL_TEXTURE_2D, 0, 0, 0, hw, hh, GL_RGBA, GL_FLOAT, gk.data() );
+		glBindTexture( GL_TEXTURE_2D, 0 );
+		set( "cellGiHalfOn", { 1 } );
+		std::printf( "BLVIEW %s RT inputs: ratio %d x %d, atlas %u B (a store), screen GI %d x %d, %zu key texels on GL's surfaces\n", tag, kSW, kSH,
+			unsigned( 193 * 13 * 7 * 9 * 16 ), hw, hh, keyed );
 	}
 	CellOut gl;
 	if ( const GLenum e = glSweep( gl ); e != GL_NO_ERROR ) {
@@ -819,6 +969,29 @@ bool cellGate( const std::string & spirvDir, int twin, const GLuint maps[4], uns
 		csmReach = cov > 0 && double( moved ) >= 0.2 * double( cov );
 		std::printf( "BLVIEW %s GL map probe %s: csmForce 1 moves GL's colour on %zu of %zu covered pixels (bar >= 20 %%)\n", tag,
 			csmReach ? "OK" : "FAIL", moved, cov );
+	}
+	if ( rtV ) {  // RT GI: each input reaches GL's colour (else its red could test nothing)
+		static const char * rtOff[3] = { "cellRestirOn", "cellDdgiOn", "cellGiHalfOn" };
+		for ( const char * nm : rtOff ) {
+			CellOut g2;
+			set( nm, { 0 } );
+			glSweep( g2 );
+			set( nm, { 1 } );
+			std::size_t cov = 0, moved = 0;
+			for ( std::size_t i = 0; i < gl.depth.size(); i++ ) {
+				if ( !( gl.depth[i] < 1.0f ) )
+					continue;
+				cov++;
+				bool mv = false;
+				for ( int ch = 0; ch < 4; ch++ )
+					mv = mv || gl.c0[i * 4 + ch] != g2.c0[i * 4 + ch];
+				moved += mv;
+			}
+			const bool reach = cov > 0 && double( moved ) >= 0.2 * double( cov );
+			std::printf( "BLVIEW %s GL RT probe %s: %s 0 moves GL's colour on %zu of %zu covered pixels (bar >= 20 %%)\n", tag, reach ? "OK" : "FAIL", nm,
+				moved, cov );
+			csmReach = csmReach && reach;
+		}
 	}
 	// the variant probes: each variant's input reaches GL's picture (else its red could test nothing)
 	static const char * probeName[4] = { "", "lights (cellLightCount 0)", "skin (doSkinning 0)", "alpha (alphaFlags 0, no blend)" };
@@ -883,8 +1056,11 @@ bool cellGate( const std::string & spirvDir, int twin, const GLuint maps[4], uns
 	takeObjBlRunStat();
 	CellOut vk0;
 	std::string w;
+	if ( rtV )
+		objBlTexelStoreStat( true );
 	const bool ran = vkSweep( 0, vk0, w );
 	const ObjBlRunStat rs = takeObjBlRunStat();
+	const ObjBlStoreStat ts = rtV ? objBlTexelStoreStat( true ) : ObjBlStoreStat();
 	if ( !ran ) {
 		std::printf( "BLVIEW %s FAIL (objCellShade refused: %s)\n", tag, w.c_str() );
 		ok = false;
@@ -898,7 +1074,15 @@ bool cellGate( const std::string & spirvDir, int twin, const GLuint maps[4], uns
 		const bool varOk = rs.cellLit == ( lightsV ? nDraws : 0 ) && rs.cellSkinned == ( skinV ? nDraws : 0 ) && rs.cellBlended == blendDraws;
 		// twin 7: the depth copied once for the sweep (one frame), and its cost counted
 		const bool copyOk = fxT ? rs.copies == 1 && rs.copyBytes == std::uint64_t( kSW ) * std::uint64_t( kSH ) * 4u : rs.copies == 0;
-		const bool crossOk = rs.runs == nDraws && rs.fails == 0 && rs.cells == nDraws && rs.twins == 4 * nDraws && varOk && copyOk;
+		/* RT GI: the ratio copied once for the sweep (the frame's memo), the lights at each crossing (as before), the atlas read in
+		 * place once a draw */
+		const std::uint64_t texelBytes = std::uint64_t( kSW ) * std::uint64_t( kSH ) * 8u + std::uint64_t( nDraws ) * 3u * 8u * 16u;
+		const bool texelOk = !rtV || ( ts.copied == std::uint64_t( 1 + nDraws ) && ts.copiedBytes == texelBytes && ts.imported == std::uint64_t( nDraws ) );
+		if ( rtV )
+			std::printf( "BLVIEW %s texel buffers %s (copied %d, %.1f KB, %.3f ms; imported %d; want copied %d, %.1f KB, imported %d)\n", tag,
+				texelOk ? "OK" : "FAIL", int( ts.copied ), double( ts.copiedBytes ) / 1024.0, ts.copiedMs, int( ts.imported ), 1 + nDraws,
+				double( texelBytes ) / 1024.0, nDraws );
+		const bool crossOk = rs.runs == nDraws && rs.fails == 0 && rs.cells == nDraws && rs.twins == 4 * nDraws && varOk && copyOk && texelOk;
 		std::printf( "BLVIEW %s crossing %s (%d runs, %d failed, %d cells, %d twin images, %d shared, %d GL-only; lit %d skinned %d blended %d; "
 			"copies %d, %.1f KB, %.3f ms)\n", tag, crossOk ? "OK" : "FAIL", rs.runs, rs.fails, rs.cells, rs.twins, rs.shared, rs.glOwn, rs.cellLit,
 			rs.cellSkinned, rs.cellBlended, rs.copies, rs.copyBytes / 1024.0, rs.copyMs );
@@ -939,18 +1123,20 @@ bool cellGate( const std::string & spirvDir, int twin, const GLuint maps[4], uns
 		std::printf( "BLVIEW %s OpenPBR vs the old BRDF (GL, target 0 rgb): %zu pixels, %zu values differ, max %.4g, mean %.4g of max(1, |new|)\n",
 			tag, cc.both, cc.differ, double( cc.maxRel ), n ? sum / double( n ) : 0.0 );
 	}
-	const char * redName[9] = { "offset (every attribute read from offset 0)", "half (halves read as 16-bit unorm)",
+	const char * redName[13] = { "offset (every attribute read from offset 0)", "half (halves read as 16-bit unorm)",
 		"swz (the twins' swizzle dropped)", "key (each twin the one made before it)", "light (the light texel buffer copied from one texel on)",
 		"bone (the bone transforms one bone on)", "blend (GL's source / destination factors swapped)",
-		"oldbrdf (r3Red 64: the BRDF before OpenPBR)", "copy (the GL inputs' copy twins copied from one texel on)" };
-	for ( int r = 1; r <= 9; r++ ) {  // reds bit r - 1; red 8 is a GL look (oldbrdf), bit 8 the crossing's red 8 (copy)
+		"oldbrdf (r3Red 64: the BRDF before OpenPBR)", "copy (the GL inputs' copy twins copied from one texel on)",
+		"restir (the ReSTIR ratio copied from two texels on)", "atlas (the GI atlas read one texel on)",
+		"gihalf (the screen GI dropped to the stand-in)", "gikey (the screen GI's key dropped to the stand-in)" };
+	for ( int r = 1; r <= 13; r++ ) {  // reds bit r - 1; red 8 is a GL look (oldbrdf), bit 8 the crossing's red 8 (copy), bits 9 .. 12 its 9 .. 12
 		if ( !( reds >> ( r - 1 ) & 1u ) )
 			continue;
 		CellOut o;
 		std::string rw;
 		oldBrdf = r == 8;
 		takeObjBlRunStat();  // a fresh frame: the copy twins copy again
-		const bool rr = vkSweep( r == 8 ? 0 : r == 9 ? 8 : r, o, rw );
+		const bool rr = vkSweep( r == 8 ? 0 : r >= 9 ? r - 1 : r, o, rw );
 		oldBrdf = false;
 		bool passes = false;
 		std::size_t over = 0, vch = 0;
@@ -993,6 +1179,13 @@ bool cellGate( const std::string & spirvDir, int twin, const GLuint maps[4], uns
 		glDeleteTextures( 1, &lightTex );  // its buffer stays with the gate's other buffers
 	if ( fxDepthTex )
 		glDeleteTextures( 1, &fxDepthTex );  // its copy twin stays shared until the present's shutdown (as the app's would)
+	if ( rtV ) {
+		glDeleteTextures( 1, &restirTex );
+		glDeleteTextures( 1, &atlasTex );
+		objBlTexelStoreDrop( atlasBuf );
+		sharedTargetDrop( giHalfKey );
+		sharedTargetDrop( giKeyKey );
+	}
 	objBlLocsLoad( spirvDir + "/no_locs.txt", why );  // the other gates never see it
 	std::printf( "BLVIEW %s %s\n", tag, ok ? "OK" : "FAILED" );
 	return ok;

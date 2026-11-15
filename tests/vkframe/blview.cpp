@@ -1146,6 +1146,10 @@ int main( int argc, char ** argv )
 		const bool c7 = cellGate( spvDir + "/cellset/spirv", 7, fx, 0xBu | 1u << 4 | 1u << 8 );
 		const bool c7s = cellGate( spvDir + "/cellset/spirv", 7, fxBc4, 1u << 2, "bc4" );
 		ok = c7 && c7s && ok;
+		/* the RT GI variant (11-15, vars 8): GL's WW_CELL_RESTIR + RTDDGI + RTDDGI_CASCADES program against the twin's _rt_ps, the
+		 * lights on; reds restir, atlas, gihalf, gikey (ObjCellShade.red 9 .. 12) */
+		const bool c3rt = cellGate( spvDir + "/cellset/spirv", 3, maps, 0xFu << 9, "rt", 1u | 8u );
+		ok = c3rt && ok;
 	} else
 		std::printf( "BLVIEW cell not run (the cell twins read the texture cache's twins: MODE=bc)\n" );
 	vk().vkWaitForFences( vk().dev, 1, &gv.fence, VK_TRUE, 1000000000ull );

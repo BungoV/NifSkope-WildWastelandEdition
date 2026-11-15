@@ -215,7 +215,9 @@ struct ObjBlDraw
 	int texRed = 0;                       //!< lane VKWATER3, gates only: 1 the twin made before (objTexKey), 2 the swizzle dropped
 	int texelRed = 0;                     //!< lane VKWATER3, gates only: objBlTexelCopy's red (1: copied from 16 bytes past the start)
 	int copyRed = 0;                      //!< lane VKWATER3, gates only: objCellCopyTwin's red (1: copied from one texel on in x)
-	std::vector<std::pair<std::uint32_t, ObjBlSampler>> samplers;          //!< binding -> GL's state, else the default
+	const char * texelRedName = nullptr;  //!< lane VKWATER3, gates only: texelRed for this one texel binding's name only
+	const char * dropName = nullptr;      //!< lane VKWATER3, gates only: this image binding left to the stand-in
+	std::vector<std::pair<std::uint32_t, ObjBlSampler>> samplers;         //!< binding -> GL's state, else the default
 	std::vector<std::pair<std::uint32_t, unsigned>> texels;                //!< binding -> GL's buffer texture (objBlTexelCopy made its twin)
 	const void * glRows = nullptr;  //!< GL's draw rows (the bindless ring, GL form), translated into wwDraws
 	std::size_t rows = 0;
@@ -254,8 +256,10 @@ struct ObjBlBindStat
 bool objBlBindUnits( GlProc gp, unsigned prog, ObjBlDraw & d, ObjBlBindStat & st, std::string & why );
 /*! GL's buffer texture `tex` (its range: glTexBufferRange's, else the whole buffer) copied into its twin on the present device,
  * a buffer GL imports (glCopyNamedBufferSubData, ordered before the crossing's signal; glNames gets the twin's GL name).
- * Formats: R / RG / RGBA 32F, 32I, 32UI, RGBA16F, RGBA8; others are refused. red 1 copies from 16 bytes past the start. */
-bool objBlTexelCopy( GlProc gp, unsigned tex, std::vector<unsigned> & glNames, std::string & why, int red = 0 );
+ * Formats: R / RG / RGBA 32F, 32I, 32UI, RGBA16F, RGBA8; others are refused. red 1 copies from 16 bytes past the start.
+ * once (lane VKWATER3): copied once a frame (takeObjBlRunStat starts the next), for buffers the owner writes before the frame's
+ * first read (the RT GI variant's cellRestir and cellDdgiAtlas); otherwise copied at each call. */
+bool objBlTexelCopy( GlProc gp, unsigned tex, std::vector<unsigned> & glNames, std::string & why, int red = 0, bool once = false );
 /* the light stores: a GL buffer whose storage is exported memory of the present device. GL's owner writes it (the update),
  * the crossing reads that memory through the texel view (objBlTexelCopy sees the store: nothing is copied). */
 struct ObjBlStoreStat
@@ -263,7 +267,8 @@ struct ObjBlStoreStat
 	int stores = 0;                 //!< stores alive
 	int subData = -1;               //!< -1 no write yet, 1 glNamedBufferSubData into the store, 0 refused (writes staged)
 	std::uint64_t imported = 0;     //!< texel buffers read in place at a crossing
-	std::uint64_t copied = 0, copiedBytes = 0;  //!< texel buffers copied into a twin at a crossing (GL's own buffers)
+	std::uint64_t copied = 0, copiedBytes = 0;  //!< texel buffers copied into a twin at a crossing (GL's own buffers; once a frame each)
+	double copiedMs = 0.0;          //!< lane VKWATER3: those copies' CPU time
 	std::uint64_t writes = 0, staged = 0, writeBytes = 0;  //!< the owners' updates (staged: through GL's staging copy)
 };
 /*! `buf` made (or kept) a store of at least `bytes`: a store already big enough stays; else a new one replaces it (the old
@@ -359,14 +364,18 @@ struct ObjCellShade
 	/*! gates only, each must FAIL: 1 `offset` (the attributes read from offset 0), 2 `half` (half floats read as 16-bit unorm),
 	 * 3 `swz` (the twins' swizzle dropped), 4 `key` (the twin made before); the variants': 5 `light` (the light texel buffer
 	 * copied from one texel on), 6 `bone` (the bone transforms one bone on), 7 `blend` (GL's source / destination factors swapped),
-	 * 8 `copy` (a copy twin copied from one texel on in x) */
+	 * 8 `copy` (a copy twin copied from one texel on in x); the RT GI variant's: 9 `restir` (cellRestir's texel twin from one
+	 * texel on), 10 `atlas` (cellDdgiAtlas's the same), 11 `gihalf` (cellGiHalf the stand-in), 12 `gikey` (cellGiHalfKey the stand-in) */
 	int red = 0;
-	int * variants = nullptr;  //!< drawn: [0] += with the light buffer, [1] += with bone weights, [2] += blended (null: not counted)
+	//! the all-on route's RT GI variant (WW_CELL_RTDDGI + RTDDGI_CASCADES + RESTIR in GL's program): objCellPs's rt twin
+	bool rt = false;
+	//! drawn: [0] += with the light buffer, [1] += with bone weights, [2] += blended, [3] += the RT GI variant (null: not counted)
+	int * variants = nullptr;
 };
 bool objCellShade( GlProc gp, const ObjCellShade & s, std::string & why );
-//! twin's pixel stage (objcell_*_ps.spv.h)
-void objCellPs( int twin, const std::uint32_t *& words, std::size_t & count );
-//! the red's name (WW_VKVIEW_OBJCELL_RED / _OBJPBRM_RED / _OBJFX_RED: offset | half | swz | key | light | bone | blend | copy) as ObjCellShade.red, 0 else
+//! twin's pixel stage (objcell_*_ps.spv.h; rt: the RT GI variant's, objcell_*_rt_ps.spv.h)
+void objCellPs( int twin, bool rt, const std::uint32_t *& words, std::size_t & count );
+//! the red's name (WW_VKVIEW_OBJCELL_RED / _OBJPBRM_RED / _OBJFX_RED: offset | half | swz | key | light | bone | blend | copy | restir | atlas | gihalf | gikey) as ObjCellShade.red, 0 else
 int objCellRed( const char * name );
 /*! objBlShade's frame read on its own: GL's draw framebuffer as d's targets (every colour draw buffer and the depth / stencil
  * a shared target: keys, formats, size, samples; the tone frame's too, as borrowed shared targets), the viewport the whole

@@ -13,6 +13,13 @@
 #include "features/vkframe/objcell_pbrmcellcsm_ps.spv.h"  // pbrm_cellcsm.prog's (and the sun cascades)
 #include "features/vkframe/objcell_effectcell_ps.spv.h"   // fo4_effectcell.prog's (+ WW_CELL_AIRZONE, ships on)
 #include "features/vkframe/objcell_effectdecalcsm_ps.spv.h"  // fo4_effectdecalcsm.prog's
+// the all-on route's RT GI variant (WW_CELL_RTDDGI + RTDDGI_CASCADES + RESTIR) of each (pbrm_default's code is the same)
+#include "features/vkframe/objcell_cell_rt_ps.spv.h"
+#include "features/vkframe/objcell_cellcsm_rt_ps.spv.h"
+#include "features/vkframe/objcell_pbrmcell_rt_ps.spv.h"
+#include "features/vkframe/objcell_pbrmcellcsm_rt_ps.spv.h"
+#include "features/vkframe/objcell_effectcell_rt_ps.spv.h"
+#include "features/vkframe/objcell_effectdecalcsm_rt_ps.spv.h"
 
 #include <algorithm>
 #include <cstdlib>
@@ -150,6 +157,7 @@ struct Op
 	std::map<unsigned, OpTexel> texTwins;       // GL's buffer texture -> its twin
 	std::map<unsigned, OpStore> stores;         // GL's buffer name -> the store under it
 	std::map<unsigned, std::uint64_t> copyMemo; // lane VKWATER3: GL's texture -> sharedGen() when copied this frame (objCellCopyTwin)
+	std::map<unsigned, std::uint64_t> texelMemo; // lane VKWATER3: GL's buffer texture -> its copy's key, copied this frame (objBlTexelCopy)
 	GLuint storeStage = 0;                      // GL's staging buffer, only if a store refuses glNamedBufferSubData
 	int storeSubData = -1;                      // -1 not tried, 0 refused (staged), 1 written in place
 	WwVkPresent::ObjBlStoreStat storeSt;
@@ -1484,7 +1492,10 @@ bool objBlBindUnits(GlProc gp, unsigned prog, ObjBlDraw & d, ObjBlBindStat & st,
 				}
 				st.texelGl++;
 				std::string w;
-				if ( objBlTexelCopy( gp, u.glTex, st.glBufs, w, d.texelRed ) ) {
+				const int tr = d.texelRedName ? ( u.name == d.texelRedName ? 1 : 0 ) : d.texelRed;
+				// the RT GI variant's two screen-wide inputs: copied once a frame (their owners write them before the frame's first read)
+				const bool once = u.name == "cellRestir" || u.name == "cellDdgiAtlas";
+				if ( objBlTexelCopy( gp, u.glTex, st.glBufs, w, tr, once ) ) {
 					d.texels.emplace_back( u.binding, u.glTex );
 					st.texelShared++;
 					st.texelImported += objBlTexelImported( u.glTex ) ? 1 : 0;
@@ -1495,7 +1506,7 @@ bool objBlBindUnits(GlProc gp, unsigned prog, ObjBlDraw & d, ObjBlBindStat & st,
 				}
 				continue;
 			}
-			if ( !u.glTex ) {
+			if ( !u.glTex || ( d.dropName && u.name == d.dropName ) ) {
 				st.unbound++;
 				continue;
 			}
@@ -2250,6 +2261,7 @@ ObjBlRunStat takeObjBlRunStat()
 	ObjBlRunStat s = opS().st;
 	opS().st = ObjBlRunStat();
 	opS().copyMemo.clear();  // the next frame copies each GL texture again
+	opS().texelMemo.clear();
 	return s;
 }
 
@@ -2641,15 +2653,25 @@ bool objBlShade( GlProc gp, const ObjBlShade & s, std::string & why )
 
 int objCellRed( const char * name )
 {
-	static const char * names[8] = { "offset", "half", "swz", "key", "light", "bone", "blend", "copy" };
-	for ( int i = 0; name && i < 8; i++ )
+	static const char * names[12] = { "offset", "half", "swz", "key", "light", "bone", "blend", "copy", "restir", "atlas", "gihalf", "gikey" };
+	for ( int i = 0; name && i < 12; i++ )
 		if ( std::strcmp( name, names[i] ) == 0 )
 			return i + 1;
 	return 0;
 }
 
-void objCellPs( int twin, const std::uint32_t *& words, std::size_t & count )
+void objCellPs( int twin, bool rt, const std::uint32_t *& words, std::size_t & count )
 {
+	if ( rt )
+		switch ( twin ) {
+		case 2: words = vkframe_objcell_cell_rt_ps_spv; count = sizeof( vkframe_objcell_cell_rt_ps_spv ) / 4; return;
+		case 3: words = vkframe_objcell_cellcsm_rt_ps_spv; count = sizeof( vkframe_objcell_cellcsm_rt_ps_spv ) / 4; return;
+		case 5: words = vkframe_objcell_pbrmcell_rt_ps_spv; count = sizeof( vkframe_objcell_pbrmcell_rt_ps_spv ) / 4; return;
+		case 6: words = vkframe_objcell_pbrmcellcsm_rt_ps_spv; count = sizeof( vkframe_objcell_pbrmcellcsm_rt_ps_spv ) / 4; return;
+		case 7: words = vkframe_objcell_effectcell_rt_ps_spv; count = sizeof( vkframe_objcell_effectcell_rt_ps_spv ) / 4; return;
+		case 8: words = vkframe_objcell_effectdecalcsm_rt_ps_spv; count = sizeof( vkframe_objcell_effectdecalcsm_rt_ps_spv ) / 4; return;
+		default: break;  // 4: pbrm_default's code is the same
+		}
 	switch ( twin ) {
 	case 3: words = vkframe_objcell_cellcsm_ps_spv; count = sizeof( vkframe_objcell_cellcsm_ps_spv ) / 4; return;
 	case 4: words = vkframe_objcell_pbrm_ps_spv; count = sizeof( vkframe_objcell_pbrm_ps_spv ) / 4; return;
@@ -2687,9 +2709,14 @@ bool objCellShade( GlProc gp, const ObjCellShade & s, std::string & why )
 	d.texRed = s.red == 4 ? 1 : s.red == 3 ? 2 : 0;
 	d.vs = vkframe_objcell_vs_spv;
 	d.vsWords = sizeof( vkframe_objcell_vs_spv ) / 4;
-	objCellPs( s.twin, d.ps, d.psWords );
+	objCellPs( s.twin, s.rt, d.ps, d.psWords );
 	d.texelRed = s.red == 5 ? 1 : 0;
 	d.copyRed = s.red == 8 ? 1 : 0;
+	if ( s.red == 9 || s.red == 10 ) {  // the RT GI variant's texel buffers, one each
+		d.texelRed = 1;
+		d.texelRedName = s.red == 9 ? "cellRestir" : "cellDdgiAtlas";
+	}
+	d.dropName = s.red == 11 ? "cellGiHalf" : s.red == 12 ? "cellGiHalfKey" : nullptr;
 	std::string w2;
 	if ( !objBlFrameRead( gp, d, w2, s.red == 7 ? 1 : 0 ) )
 		return fail( w2 );
@@ -2811,11 +2838,12 @@ bool objCellShade( GlProc gp, const ObjCellShade & s, std::string & why )
 		s.variants[0] += bst.texelShared > 0 ? 1 : 0;
 		s.variants[1] += pool.vbo[5] ? 1 : 0;
 		s.variants[2] += d.target.blend.on ? 1 : 0;
+		s.variants[3] += s.rt ? 1 : 0;
 	}
 	return true;
 }
 
-bool objBlTexelCopy( GlProc gp, unsigned tex, std::vector<unsigned> & glNames, std::string & why, int red )
+bool objBlTexelCopy( GlProc gp, unsigned tex, std::vector<unsigned> & glNames, std::string & why, int red, bool once )
 {
 	Gl & g = gl();
 	using LevelIv = void( WINAPI * )( unsigned, int, unsigned, int * );
@@ -2875,6 +2903,17 @@ bool objBlTexelCopy( GlProc gp, unsigned tex, std::vector<unsigned> & glNames, s
 	}
 	t.ext = VK_NULL_HANDLE;
 	t.extOff = 0;
+	/* lane VKWATER3: `once`, once a frame (the RT GI variant's screen-sized ReSTIR ratio and the DDGI atlas when no store holds
+	 * it; the owners write them before the frame's first read); the key: GL's buffer, the range, the red. Every other buffer
+	 * is copied at each crossing, as before (an owner may rewrite it between two draws) */
+	const std::uint64_t memoKey = ( std::uint64_t( unsigned( buf ) ) << 40 ) ^ ( std::uint64_t( unsigned( from ) ) << 20 ) ^ std::uint64_t( unsigned( bytes ) );
+	const auto memo = opS().texelMemo.find( tex );
+	if ( once && memo != opS().texelMemo.end() && memo->second == memoKey && t.buf.buf && t.buf.glCtx == g.ctx && t.buf.cap >= need ) {
+		if ( std::find( glNames.begin(), glNames.end(), t.buf.gl ) == glNames.end() )
+			glNames.push_back( t.buf.gl );
+		return true;
+	}
+	const double t0 = nowMs();
 	if ( t.buf.buf && ( t.buf.cap < need || t.buf.glCtx != g.ctx ) ) {
 		if ( opS().live )
 			return why = "the texel twin would move under prepared draws", false;
@@ -2883,8 +2922,13 @@ bool objBlTexelCopy( GlProc gp, unsigned tex, std::vector<unsigned> & glNames, s
 	if ( !csmBuf( t.buf, need, true, VK_BUFFER_USAGE_UNIFORM_TEXEL_BUFFER_BIT, why ) )
 		return false;
 	g.copyNamedBufferSubData( GLuint( buf ), t.buf.gl, std::intptr_t( from ), 0, std::intptr_t( bytes ) );
+	if ( once )
+		opS().texelMemo[tex] = memoKey;
+	else
+		opS().texelMemo.erase( tex );
 	opS().storeSt.copied++;
 	opS().storeSt.copiedBytes += std::uint64_t( bytes );
+	opS().storeSt.copiedMs += nowMs() - t0;
 	t.fmt = f->vk;
 	t.cls = f->cls;
 	t.range = need / f->bytes * f->bytes;
