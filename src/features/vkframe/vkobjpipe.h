@@ -278,6 +278,9 @@ bool objBlBindUnits( GlProc gp, unsigned prog, ObjBlDraw & d, ObjBlBindStat & st
 /*! GL's buffer texture `tex` (its range: glTexBufferRange's, else the whole buffer) copied into its twin on the present device,
  * a buffer GL imports (glCopyNamedBufferSubData, ordered before the crossing's signal; glNames gets the twin's GL name).
  * Formats: R / RG / RGBA 32F, 32I, 32UI, RGBA16F, RGBA8; others are refused. red 1 copies from 16 bytes past the start.
+ * The twin is keyed on (name, generation) (lane VKOBJ5): the generation moves when GL's view of `tex` changed (another
+ * buffer, format, range or buffer size: a deleted name handed on, or the storage re-specified); the old twin is held for the
+ * prepared draws until objBlDrawsReset. red 2, gates only: the name-only key (the old twin grown in place).
  * once (lane VKWATER3): copied once a frame (takeObjBlRunStat starts the next), for buffers the owner writes before the frame's
  * first read (the RT GI variant's cellRestir and cellDdgiAtlas); otherwise copied at each call. */
 bool objBlTexelCopy( GlProc gp, unsigned tex, std::vector<unsigned> & glNames, std::string & why, int red = 0, bool once = false );
@@ -291,6 +294,8 @@ struct ObjBlStoreStat
 	std::uint64_t copied = 0, copiedBytes = 0;  //!< texel buffers copied into a twin at a crossing (GL's own buffers; once a frame each)
 	double copiedMs = 0.0;          //!< lane VKWATER3: those copies' CPU time
 	std::uint64_t writes = 0, staged = 0, writeBytes = 0;  //!< the owners' updates (staged: through GL's staging copy)
+	std::uint64_t regen = 0;        //!< lane VKOBJ5: texel twins made anew (GL's view of the name changed)
+	int retired = 0;                //!< lane VKOBJ5: old twins held for the prepared draws (freed at objBlDrawsReset)
 };
 /*! `buf` made (or kept) a store of at least `bytes`: a store already big enough stays; else a new one replaces it (the old
  * store, or the owner's own GL buffer, is deleted) and `buf` takes its name, so the owner re-attaches its texture */

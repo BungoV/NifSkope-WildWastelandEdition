@@ -809,6 +809,87 @@ bool texelGate()
 	return ok;
 }
 
+/* lane VKOBJ5 item 1: texel twins keyed on (name, generation). The texel crossing leaves its draw prepared; GL then re-specifies
+ * cellCluster's buffer at 128 KiB (glNamedBufferData on the same name: the recreated-larger buffer, past the old twin's 64 KiB;
+ * at 2 KiB it still fit and the red failed only on the count) and objBlTexelCopy runs again on the same texture name, the draw
+ * still prepared. BAR (before the first run): the copy taken (no refusal), 1 new generation, 1 old twin held for the prepared
+ * draw, the twin read back holds the new bytes with 0 differing, and
+ * objBlDrawsReset frees the held twin (0 held). Red (must FAIL): reuse (the name-only key: the old twin grown in place). */
+struct ReuseOut
+{
+	bool live = false, copied = false, read = false;
+	std::uint64_t regen = 0;
+	int retired = -1, after = -1;
+	std::size_t differ = ~std::size_t( 0 );
+	std::string why;
+	bool good() const { return live && copied && regen == 1 && retired == 1 && read && differ == 0 && after == 0; }
+};
+
+void texelReuseRun( int red, ReuseOut & o )
+{
+	using namespace WwVkPresent;
+	void( WINAPI * namedBufferData )( GLuint, std::intptr_t, const void *, GLenum ) = nullptr;
+	if ( !load( namedBufferData, "glNamedBufferData" ) ) {
+		o.why = "no glNamedBufferData";
+		return;
+	}
+	namedBufferData( tx.clusterBuf, 512, tx.cluster.data(), 0x88E4 );  // as texelBuild made it
+	TexelOut t;
+	texelRun( 0, t );
+	o.live = t.good() && opS().live > 0;
+	if ( !o.live ) {
+		o.why = "the texel crossing: " + t.why;
+		objBlDrawsReset();
+		return;
+	}
+	std::vector<std::uint8_t> big( 128 * 1024 );
+	std::uint32_t seed = 0x51ED27u;
+	for ( std::uint8_t & b : big )
+		b = std::uint8_t( ( seed = seed * 1664525u + 1013904223u ) >> 24 );
+	namedBufferData( tx.clusterBuf, std::intptr_t( big.size() ), big.data(), 0x88E4 );
+	objBlTexelStoreStat( true );
+	std::vector<unsigned> names;
+	o.copied = objBlTexelCopy( glProc, tx.clusterTex, names, o.why, red == 1 ? 2 : 0 );
+	const ObjBlStoreStat s = objBlTexelStoreStat( true );
+	o.regen = s.regen;
+	o.retired = s.retired;
+	if ( o.copied ) {
+		glFinish();
+		std::vector<std::uint8_t> got;
+		o.read = objBlTexelRead( tx.clusterTex, got, o.why );
+		if ( o.read && got.size() == big.size() ) {
+			o.differ = 0;
+			for ( std::size_t k = 0; k < big.size(); k++ )
+				o.differ += got[k] != big[k];
+		}
+	}
+	objBlDrawsReset();
+	o.after = objBlTexelStoreStat( false ).retired;
+	namedBufferData( tx.clusterBuf, 512, tx.cluster.data(), 0x88E4 );
+}
+
+bool texelReuseGate()
+{
+	ReuseOut o;
+	texelReuseRun( 0, o );
+	bool ok = o.good();
+	std::printf( "BLVIEW texel reuse %s (prepared %d; the copy %s; %llu new generation(s), %d held, %d held after the reset; read back %d, "
+		"%zu of 131072 bytes differ)%s%s\n", ok ? "OK" : "FAIL", int( o.live ), o.copied ? "taken" : "refused", (unsigned long long) o.regen,
+		o.retired, o.after, int( o.read ), o.differ, o.why.empty() ? "" : ": ", o.why.c_str() );
+	ReuseOut x;
+	texelReuseRun( 1, x );
+	const bool fails = !x.good();
+	std::printf( "BLVIEW RED texelreuse %s (the name-only key; prepared %d, the copy %s, %llu new generation(s), %zu bytes differ%s%s)\n",
+		fails ? "FAIL" : "OK", int( x.live ), x.copied ? "taken" : "refused", (unsigned long long) x.regen, x.differ, x.why.empty() ? "" : ": ",
+		x.why.c_str() );
+	ok = ok && fails && x.live;  // the red's trigger: its draw was prepared
+	if ( const GLenum e = glGetError(); e != GL_NO_ERROR ) {
+		std::printf( "BLVIEW texel reuse FAIL (GL error 0x%x left)\n", unsigned( e ) );
+		ok = false;
+	}
+	return ok;
+}
+
 /* lane VKOBJ4 gap 2: GL's light buffers as stores (objBlTexelStore: exported memory of the present device that GL writes;
  * the crossing reads it in place, nothing copied). BAR (stated before the first run, never widened): a 4 KiB RGBA32F light
  * buffer filled through objBlTexelFill is a store; its buffer texture is read in place (objBlTexelImported; 0 bytes copied;
@@ -1433,6 +1514,7 @@ bool shadeGate( const std::string & spvDir )
 	}
 	ok = unitsGate( spvDir ) && ok;
 	ok = texelGate() && ok;  // lane VKOBJ4 open item 4
+	ok = texelReuseGate() && ok;  // lane VKOBJ5 item 1
 	ok = storeGate() && ok;  // lane VKOBJ4 gap 2
 	ok = frameGate() && ok;  // lane VKOBJ4 open item 3
 	ok = blendGate() && ok;
