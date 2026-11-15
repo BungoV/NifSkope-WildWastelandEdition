@@ -600,6 +600,73 @@ bool precipRecord( std::string & why )
 
 namespace WwVkPresent
 {
+const char * precipLitWhy( const PrecipRun::LitIn & l )
+{
+	if ( l.terms < 0 || l.interior < 0 || l.partRed < 0 || l.csm < 0 || l.airTerr < 0 )
+		return "the lit program lacks a switch the refusals read";
+	if ( l.interior != 0 )
+		return "an interior's lit particles (its law is not judged)";
+	// The gate judged volTerms 1 only: any other term refuses, idle or not.
+	if ( l.terms & 2 )
+		return "the lamps term on the particles (refused in slice 2b)";
+	if ( l.terms & 4 )
+		return "the GI term on the particles (refused in slice 2b)";
+	if ( l.terms & 8 )
+		return "the ambient term on the particles (refused in slice 2b)";
+	if ( l.terms & ~15 )
+		return "an unknown volTerms bit (refused in slice 2b)";
+	if ( l.csm != 0 )  // (the sun's only shadow read, wwSunShadow, is behind volCsm)
+		return "the sun's shadow map on the particles (refused in slice 2b)";
+	if ( l.drift > 0.0f )
+		return "the air's drift on the sun (refused in slice 2b)";
+	if ( l.airTerr != 0 )
+		return "the terrain air on the sun (refused in slice 2b)";
+	if ( l.sunA > 0.5f )
+		return "the local sun law (refused in slice 2b)";
+	if ( l.partRed != 0 )
+		return "a particle-light red (volPartRed) in a lit run";
+	return nullptr;
+}
+
+bool precipAdmits( const PrecipRun & t, std::string & why )
+{
+	Precip & D = precip();
+	Tone & T = tone();
+	Vk & v = vk();
+	Gl & g = gl();
+	FxStat & S = D.st;
+	auto refuse = [&]( const std::string & w ) {
+		why = w;
+		S.fails++;
+		S.failWhy = w;
+		S.refusedPacks += t.packs;
+		return false;
+	};
+	if ( D.broken )
+		return refuse( D.brokenWhy );
+	if ( t.lit ) {  // slice 2b: the sun alone; the rest of GL's particle light is refused (GL draws)
+		if ( t.look )
+			return refuse( "a lit cell with the precipitation look (a later slice)" );
+		if ( const char * w = precipLitWhy( t.litIn ) )
+			return refuse( w );
+	}
+	if ( t.roofOn || t.tex[0].tex )
+		return refuse( "the roof map on (slice 3's)" );
+	if ( !toneFrameIs( t.color ) || !T.colorView || !T.dsView )
+		return refuse( "the draw target is not the shared tone frame" );
+	if ( T.w != t.w || T.h != t.h )
+		return refuse( "rain / snow's size is not the tone frame's" );
+	if ( t.vp[2] < 1 || t.vp[3] < 1 )
+		return refuse( "an empty viewport" );
+	if ( t.n < 1 || t.first < 0 )
+		return refuse( "no particles" );
+	if ( !v.ok || !g.ok || g.ctx != reinterpret_cast<void *>( wglGetCurrentContext() ) )
+		return refuse( "the present device or GL's entry points are not ready in this context" );
+	if ( !g.copyImageSubData )
+		return refuse( "no glCopyImageSubData (the atlas' copy into its shared twin)" );
+	return true;
+}
+
 bool precipRun( const PrecipRun & t, std::string & why )
 {
 	Fx & F = fx();
@@ -613,6 +680,7 @@ bool precipRun( const PrecipRun & t, std::string & why )
 		why = w;
 		S.fails++;
 		S.failWhy = w;
+		S.refusedPacks += t.packs;
 		return false;
 	};
 	auto breakOff = [&]( const std::string & w ) {
@@ -620,13 +688,11 @@ bool precipRun( const PrecipRun & t, std::string & why )
 		D.brokenWhy = "rain / snow on Vulkan broke: " + w;
 		return refuse( D.brokenWhy );
 	};
-	if ( D.broken )
-		return refuse( D.brokenWhy );
-	if ( t.lit ) {  // slice 2b: the sun alone; the rest of GL's particle light is refused (GL draws)
+	if ( !precipAdmits( t, why ) )  // (counted there)
+		return false;
+	if ( t.lit ) {  // the packed block must say what litIn said (a backstop: the same refusals on the bytes the pass reads)
 		if ( !t.litBlock )
 			return refuse( "a lit cell without its light block packed" );
-		if ( t.look )
-			return refuse( "a lit cell with the precipitation look (a later slice)" );
 		auto litAt = [&]( const char * nm ) {  // the light block's own members past the head, or the head's (kT_precipcs)
 			const int at = precipAt( kT_preciplitcs, int( std::size( kT_preciplitcs ) ), nm );
 			return at >= 0 ? at : precipAt( kT_precipcs, int( std::size( kT_precipcs ) ), nm );
@@ -645,46 +711,17 @@ bool precipRun( const PrecipRun & t, std::string & why )
 				std::memcpy( &x, t.cs + at + 4 * k, 4 );
 			return x;
 		};
-		const int terms = litI( "volTerms" );
-		const bool local = litF( "vpSun", 3 ) > 0.5f;
-		if ( terms < 0 || litI( "cellInterior" ) < 0 || litI( "volPartRed" ) < 0 )
-			return refuse( "the light block lacks a member the refusals read" );
-		if ( litI( "cellInterior" ) != 0 )
-			return refuse( "an interior's lit particles (its law is not judged)" );
-		// The gate judged volTerms 1 only: any other term refuses, idle or not.
-		if ( terms & 2 )
-			return refuse( "the lamps term on the particles (refused in slice 2b)" );
-		if ( terms & 4 )
-			return refuse( "the GI term on the particles (refused in slice 2b)" );
-		if ( terms & 8 )
-			return refuse( "the ambient term on the particles (refused in slice 2b)" );
-		if ( terms & ~15 )
-			return refuse( "an unknown volTerms bit (refused in slice 2b)" );
-		if ( litI( "volCsm" ) != 0 )  // (the sun's only shadow read, wwSunShadow, is behind volCsm)
-			return refuse( "the sun's shadow map on the particles (refused in slice 2b)" );
-		if ( litF( "volAirDrift", 0 ) > 0.0f )
-			return refuse( "the air's drift on the sun (refused in slice 2b)" );
-		if ( litI( "airTerrOn" ) != 0 )
-			return refuse( "the terrain air on the sun (refused in slice 2b)" );
-		if ( local )
-			return refuse( "the local sun law (refused in slice 2b)" );
-		if ( litI( "volPartRed" ) != 0 )
-			return refuse( "a particle-light red (volPartRed) in a lit run" );
+		PrecipRun::LitIn b;
+		b.terms = litI( "volTerms" );
+		b.interior = litI( "cellInterior" );
+		b.partRed = litI( "volPartRed" );
+		b.csm = litI( "volCsm" );
+		b.airTerr = litI( "airTerrOn" );
+		b.drift = litF( "volAirDrift", 0 );
+		b.sunA = litF( "vpSun", 3 );
+		if ( const char * w = precipLitWhy( b ) )
+			return refuse( std::string( "the packed light block: " ) + w );
 	}
-	if ( t.roofOn || t.tex[0].tex )
-		return refuse( "the roof map on (slice 3's)" );
-	if ( !toneFrameIs( t.color ) || !T.colorView || !T.dsView )
-		return refuse( "the draw target is not the shared tone frame" );
-	if ( T.w != t.w || T.h != t.h )
-		return refuse( "rain / snow's size is not the tone frame's" );
-	if ( t.vp[2] < 1 || t.vp[3] < 1 )
-		return refuse( "an empty viewport" );
-	if ( t.n < 1 || t.first < 0 )
-		return refuse( "no particles" );
-	if ( !v.ok || !g.ok || g.ctx != reinterpret_cast<void *>( wglGetCurrentContext() ) )
-		return refuse( "the present device or GL's entry points are not ready in this context" );
-	if ( !g.copyImageSubData )
-		return refuse( "no glCopyImageSubData (the atlas' copy into its shared twin)" );
 	const int atFirst = precipAt( kT_precipcs, int( std::size( kT_precipcs ) ), "pcFirst" );
 	const int atCount = precipAt( kT_precipcs, int( std::size( kT_precipcs ) ), "pcCount" );
 	const int atRed = precipAt( kT_precipcs, int( std::size( kT_precipcs ) ), "pcRed" );

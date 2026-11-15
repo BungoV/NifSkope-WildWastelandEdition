@@ -557,6 +557,7 @@ struct FxStat
 	int pipelines = 0;
 	double buildMs = 0.0;
 	int copies = 0;                 //!< texture copies into twins since the last take
+	int refusedPacks = 0;           //!< rain / snow: fxPack calls made for runs then refused (asked before the packs: 0)
 };
 FxStat takeVolSkyStat();
 struct CloudRun
@@ -730,11 +731,19 @@ struct PrecipRun
 	std::uint8_t ps[kT_preciplookpsBytes] = {};  //!< fxPack( cell_precip_gpu, kT_precipps ) (+ kT_preciplookps for a look run)
 	int red = 0;                    //!< gates only: 1 the cull radius 0, 2 the strip's last two corners swapped, 4 no near fade, 8 the air dropped, 16 the look dropped (the plain pipelines draw a look run), 32 the atlas dropped (t1 / t7 the zero texture), 128 the light dropped (lit = 1)
 	std::uint8_t * recOut = nullptr;  //!< gates only: the run's records read back (n x 112 bytes, 192 a look run; host-visible records, a fence wait); null in the app
+	struct LitIn { int terms = -1, interior = -1, partRed = -1, csm = 0, airTerr = 0; float drift = 0.0f, sunA = 0.0f; };
+	LitIn litIn;                    //!< a lit run's switches as precipLitRead reads them from GL (before any pack; -1 absent)
+	int packs = 0;                  //!< fxPack calls made for this run (a refusal adds them to FxStat::refusedPacks)
 };
 /* GL current, the tone frame bound, cell_precip_gpu's uniforms set: one run of particles on Vulkan, a record pass then
  * instanced quads (depth LEQUAL no write, blend SRC_ALPHA / ONE_MINUS_SRC_ALPHA, stencil ALWAYS ref 1 REPLACE mask 0x03,
- * as GL's). false: why; nothing drawn (GL draws its points) */
+ * as GL's). false: why; nothing drawn (GL draws its points). It asks precipAdmits first. */
 bool precipRun( const PrecipRun & t, std::string & why );
+/* the refusals that need no packed bytes (the device, the target, the run, a lit run's litIn): asked before the packs so
+ * a refused run pays none. false: why, counted as a refusal (with t.packs) */
+bool precipAdmits( const PrecipRun & t, std::string & why );
+//! a lit run's refusal from its switches (null: the light chain's admitted terms); precipAdmits and precipRun's block check
+const char * precipLitWhy( const PrecipRun::LitIn & l );
 void precipOnGl( const char * why );
 FxStat takePrecipStat();
 
@@ -995,6 +1004,33 @@ template <class Fn> bool fxTexOf( Fn * fn, unsigned prog, const char * sampler, 
 	return ok;
 }
 
+/* lane VKFAR2 (row L8): a lit run's switches straight from the program, no pack (precipDraw and the gate, then
+ * precipAdmits); an int absent from the program reads -1 (the refusals then refuse) */
+template <class Fn> void precipLitRead( Fn * fn, unsigned prog, PrecipRun & t )
+{
+	auto geti = [&]( const char * nm ) {
+		const int l = fn->glGetUniformLocation( prog, nm );
+		int v[4] = { -1, 0, 0, 0 };
+		if ( l >= 0 )
+			fn->glGetUniformiv( prog, l, v );
+		return v[0];
+	};
+	auto getf = [&]( const char * nm, int k ) {  // a vec4 writes four floats
+		const int l = fn->glGetUniformLocation( prog, nm );
+		float v[4] = {};
+		if ( l >= 0 )
+			fn->glGetUniformfv( prog, l, v );
+		return v[k];
+	};
+	t.litIn.terms = geti( "volTerms" );
+	t.litIn.interior = geti( "cellInterior" );
+	t.litIn.partRed = geti( "volPartRed" );
+	t.litIn.csm = geti( "volCsm" );
+	t.litIn.airTerr = geti( "airTerrOn" );
+	t.litIn.drift = getf( "volAirDrift", 0 );
+	t.litIn.sunA = getf( "vpSun", 3 );
+}
+
 }
 
 #ifndef WW_VKPRESENT_NO_QT
@@ -1072,6 +1108,12 @@ template <class Fn> bool precipDraw( Fn * fn, unsigned prog, int first, int coun
 		t.roofOn = geti( "pcRoofOn" ) != 0;
 		t.look = fn->glGetUniformLocation( prog, "pcLook" ) >= 0;
 		t.fogged = vol || geti( "fogOn" ) != 0;
+		if ( t.lit )
+			precipLitRead( fn, prog, t );
+		if ( !precipAdmits( t, why ) ) {  // a refused run reads no textures and packs nothing (counted there)
+			precipSay( true, nullptr );
+			return false;
+		}
 		// twins: one a GL atlas (sizes differ by layer; the DDS never changes once loaded), one a slot for the air
 		static std::map<unsigned, char> atlasKeys;
 		static char airKeys[5];
@@ -1098,15 +1140,18 @@ template <class Fn> bool precipDraw( Fn * fn, unsigned prog, int first, int coun
 		} else {
 			fxPack( fn, prog, kT_precipcs, int( std::size( kT_precipcs ) ), t.cs );
 			fxPack( fn, prog, kT_precipps, int( std::size( kT_precipps ) ), t.ps );
+			t.packs = 2;
 			if ( t.look ) {
 				fxPack( fn, prog, kT_preciplookcs, int( std::size( kT_preciplookcs ) ), t.cs );
 				fxPack( fn, prog, kT_preciplookps, int( std::size( kT_preciplookps ) ), t.ps );
+				t.packs += 2;
 			}
 			if ( t.lit ) {  // slice 2b: the light chain's block (its head is kT_precipcs's, packed again the same)
 				fxPack( fn, prog, kT_preciplitcs, int( std::size( kT_preciplitcs ) ), t.cs );
 				t.litBlock = true;
+				t.packs++;
 			}
-			drew = precipRun( t, why );  // a refusal is counted there
+			drew = precipRun( t, why );  // a refusal is counted there (with t.packs)
 		}
 	}
 	precipSay( true, nullptr );

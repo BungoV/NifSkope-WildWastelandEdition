@@ -8921,7 +8921,8 @@ void precipSay( bool wanted, const char * glWhy )
 	if ( st.gl > 0 )
 		line += QStringLiteral( ", on GL %1 runs (last: %2)" ).arg( st.gl ).arg( QString::fromStdString( st.glWhy ) );
 	if ( st.fails > 0 )
-		line += QStringLiteral( ", %1 refused to GL (last: %2)" ).arg( st.fails ).arg( QString::fromStdString( st.failWhy ) );
+		line += QStringLiteral( ", %1 refused to GL (last: %2; %3 packs on refused runs, 0 when the refusals come first)" )
+			.arg( st.fails ).arg( QString::fromStdString( st.failWhy ) ).arg( st.refusedPacks );
 	said = line;
 	qInfo().noquote() << line;
 }

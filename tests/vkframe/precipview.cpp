@@ -56,6 +56,9 @@
 // Globals check (11-15, bar set before its first run): precipRun zeroes globalUniforms (b0) and so does this harness for
 // GL, so a sun-path read of it would pass EXACT here and be wrong in the app. Each lit case captures GL's geometry stage
 // (transform feedback, bit-exact run to run) with b0 zero and with b0 filled non-zero: 0 floats may differ.
+// Pack-order check (11-15, bar set before its first run): after the stat line, a lit run with volTerms 2 (a refused term)
+// read and asked as precipDraw does (precipLitRead, precipAdmits, then the packs) must be refused with 0 packs on refused
+// runs. Red: the same run packed first and handed to precipRun must be refused with its 3 packs counted (> 0), or FAIL.
 #define main fxview_main
 #include "fxview.cpp"
 #undef main
@@ -993,6 +996,14 @@ int main( int argc, char ** argv )
 			}
 			t.tex[1].twin = reinterpret_cast<std::uintptr_t>( &twinKeys[jobAt] );
 			t.fogged = j.fog != 0;
+			t.look = j.look != 0;
+			t.lit = j.lit != 0;
+			if ( t.lit )  // precipDraw's order: the switches from GL, the refusals, then the packs
+				WwVkPresent::precipLitRead( &ga, pJob, t );
+			if ( !WwVkPresent::precipAdmits( t, why ) ) {
+				std::printf( "PRECIPVIEW precipAdmits refused: %s\n", why.c_str() );
+				return false;
+			}
 			for ( int a = 0; a < 5 && j.fog; a++ ) {
 				if ( !WwVkPresent::fxTexOf( &ga, pJob, kAirTex[a], kAirType[a], t.tex[2 + a], why ) ) {
 					std::printf( "PRECIPVIEW fxTexOf refused (%s): %s\n", kAirTex[a], why.c_str() );
@@ -1002,8 +1013,8 @@ int main( int argc, char ** argv )
 			}
 			WwVkPresent::fxPack( &ga, pJob, WwVkPresent::kT_precipcs, int( std::size( WwVkPresent::kT_precipcs ) ), t.cs );
 			WwVkPresent::fxPack( &ga, pJob, WwVkPresent::kT_precipps, int( std::size( WwVkPresent::kT_precipps ) ), t.ps );
+			t.packs = 2;
 			if ( j.look ) {  // slice 3: cell_precip_look.prog's run (its fields, pcTexN at tex[7])
-				t.look = true;
 				WwVkPresent::fxPack( &ga, pJob, WwVkPresent::kT_preciplookcs, int( std::size( WwVkPresent::kT_preciplookcs ) ), t.cs );
 				WwVkPresent::fxPack( &ga, pJob, WwVkPresent::kT_preciplookps, int( std::size( WwVkPresent::kT_preciplookps ) ), t.ps );
 				if ( !WwVkPresent::fxTexOf( &ga, pJob, "pcTexN", 0, t.tex[7], why, true ) ) {
@@ -1013,7 +1024,6 @@ int main( int argc, char ** argv )
 				t.tex[7].twin = reinterpret_cast<std::uintptr_t>( &normKeys[jobAt] );
 			}
 			if ( j.lit ) {  // slice 2b: the light chain's block, as precipDraw packs it
-				t.lit = true;
 				WwVkPresent::fxPack( &ga, pJob, WwVkPresent::kT_preciplitcs, int( std::size( WwVkPresent::kT_preciplitcs ) ), t.cs );
 				t.litBlock = true;
 				if ( checkSeed ) {  // the sun's inputs packed, not zero (header)
@@ -1241,6 +1251,51 @@ int main( int argc, char ** argv )
 	std::printf( "PRECIPVIEW stat: %d runs, %d failed (%s), %d pipelines built in %.1f ms, %d input copies, drawing thread %.3f ms a run "
 		"(max %.3f; includes the harness's hand-off wait, not a frame cost)\n", st.runs, st.fails, st.failWhy.c_str(), st.pipelines, st.buildMs,
 		st.copies, st.runs ? st.cpuMs / st.runs : 0.0, st.maxMs );
+	{  // the pack-order check (header)
+		f.useProgram( pPrecip );
+		u1i( pPrecip, "cellHasDir", 1 );
+		u1i( pPrecip, "cellInterior", 0 );
+		u1i( pPrecip, "volTerms", 2 );
+		f.bindFramebuffer( fFb, fbFrame );
+		glViewport( 0, 0, W, H );
+		auto probe = [&]( bool packFirst ) {
+			WwVkPresent::PrecipRun t;
+			t.w = W;
+			t.h = H;
+			glGetIntegerv( GL_VIEWPORT, t.vp );
+			t.color = fc;
+			t.first = jobs[0].first;
+			t.n = jobs[0].n;
+			t.lit = true;
+			WwVkPresent::precipLitRead( &ga, pPrecip, t );
+			bool drew = false;
+			if ( packFirst || WwVkPresent::precipAdmits( t, why ) ) {
+				WwVkPresent::fxPack( &ga, pPrecip, WwVkPresent::kT_precipcs, int( std::size( WwVkPresent::kT_precipcs ) ), t.cs );
+				WwVkPresent::fxPack( &ga, pPrecip, WwVkPresent::kT_precipps, int( std::size( WwVkPresent::kT_precipps ) ), t.ps );
+				WwVkPresent::fxPack( &ga, pPrecip, WwVkPresent::kT_preciplitcs, int( std::size( WwVkPresent::kT_preciplitcs ) ), t.cs );
+				t.litBlock = true;
+				t.packs = 3;
+				drew = WwVkPresent::precipRun( t, why );
+			}
+			const WwVkPresent::FxStat s = WwVkPresent::takePrecipStat();
+			std::printf( "PRECIPVIEW pack order (%s): %s, %d refused, %d packs on refused runs (%s)\n",
+				packFirst ? "red: packed first" : "the app's: refusals first", drew ? "DREW" : "refused", s.fails, s.refusedPacks,
+				s.failWhy.c_str() );
+			return drew ? -1 : s.fails == 1 ? s.refusedPacks : -1;
+		};
+		const int asked = probe( false ), red = probe( true );
+		if ( asked != 0 ) {
+			std::printf( "PRECIPVIEW pack order FAILED: a refused run must pay 0 packs\n" );
+			ok = false;
+		}
+		if ( red <= 0 ) {
+			std::printf( "PRECIPVIEW red pack order PASSED: the count cannot see packs on a refused run\n" );
+			ok = false;
+		} else {
+			std::printf( "PRECIPVIEW red pack order FAILS as it must (%d packs counted)\n", red );
+		}
+		u1i( pPrecip, "volTerms", 1 );
+	}
 	for ( char & k : twinKeys )  // a BC atlas is a farTwin, an uncompressed one a shared target
 		WwVkPresent::farTwinDrop( reinterpret_cast<std::uintptr_t>( &k ) ), WwVkPresent::sharedTargetDrop( reinterpret_cast<std::uintptr_t>( &k ) );
 	for ( char & k : normKeys )
