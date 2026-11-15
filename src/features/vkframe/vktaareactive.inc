@@ -435,7 +435,6 @@ bool taReactiveFlush( const TaReactiveRun & r, std::string & why )
 	D.depthTwin = depthTwin;
 	g.copyImageSubData( r.mask, kTexture2D, 0, 0, 0, 0, maskTwin, kTexture2D, 0, 0, 0, 0, r.w, r.h, 1 );
 	g.copyImageSubData( r.depth, kTexture2D, 0, 0, 0, 0, depthTwin, kTexture2D, 0, 0, 0, 0, r.w, r.h, 1 );
-	WaterDraw & smpD = waterD();  // the water draw's VkSampler per GL sampling state
 	const int n = int( q.size() );
 	int i0 = 0, crossings = 0;
 	while ( i0 < n ) {
@@ -547,7 +546,7 @@ bool taReactiveFlush( const TaReactiveRun & r, std::string & why )
 			VkImageView view = F.d2;
 			if ( d.useTex && d.base.tex )
 				view = texView[size_t( std::find( texs.begin(), texs.end(), d.base.tex ) - texs.begin() )];
-			VkSampler sm = waterSampler( smpD, d.base, false, false, w );
+			VkSampler sm = waterSampler( d.base, false, false, w );  // the water draw's VkSampler per GL sampling state
 			if ( !sm )
 				return breakOff( w );
 			bi[size_t( 2 * k )] = { D.host.buf, o, kTaVsBytes };
