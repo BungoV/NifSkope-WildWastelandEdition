@@ -139,6 +139,30 @@
 // unfogged lit cases). Every case reruns; a changed verdict is reported with its numbers, never absorbed. Red (a check
 // on rain_near_lit, not a red bit): GL drawn with the restore skipped and a fogged case's uniforms left on the program
 // must differ from rain_near_lit's judged GL frame on >= 1000 covered samples (the restore matters), else the gate fails.
+// Ambient (L8 term 2, VKFAR5 11-15; bar set before its first run, never widened): the ambient term (volTerms 8) adds the
+// weather's ambient, six axes of cellAmbient (pow( max( cellDalc rows . ( n, 1 ), 0 ), 2.2 ) x cellAmboScale) scaled by
+// vpAmbKeep, the share the air's env history keeps (volEnvHist, t19 / lit binding 83, read only when volEnvGrid.w >= 0.5,
+// through b0's projectionMatrix and volSlices; the app turns it on only with the air: cellvolair.cpp volEnvGrid). Two cases,
+// volTerms 9 (the sun + the ambient), cellExtDalc 1 (the exterior's R7-1 law), cellDalc three non-grey rows with non-zero
+// normal parts (the six axes differ): rain_near_amb (rain_near_lit's run, unfogged, volEnvGrid.w 0: keep 1) with
+// cellAmboCount 2, an Ambient Only sphere and a box-linked one (cellAmboK.w 1, cellAmboBox rows) each over part of the
+// run's particles, unequal scales; snow_far_amb (snow_far_lit's run, fogged) with volEnvGrid (16, 9, the air's slices,
+// 1), a 16 x 9 x 6 slices RGBA16F volEnvHist (the app's hist format and strata) whose stratum 4 .a varies smoothly and
+// whose stratum 5 holds .z exactly 1 on most texels (some 0.5: keep 1 there) and .y both negative and in 0..1, and b0
+// zero but for projectionMatrix (the case's own; vpAmbKeep reads it). The prep prints the share of the keep case's
+// in-view particles with keep < 1 (want 0.2 - 0.8). The same verdict, reference checks, repeat clause, reds 64 / 128 as
+// the lit cases; the globals check and Vulkan's globals mirror as rain_near_lit for rain_near_amb, and inverted for
+// snow_far_amb as for the cluster case (b0 filled non-zero vs the case's own must move GL's geometry stage, > 0 floats;
+// no mirror run). Each ambient case must also show (else the gate fails): GL with volTerms 1 differs on >= 1000 covered
+// samples (the ambient seen); cellDalc, cellExtDalc, cellAmboCount, cellAmbo, cellAmboK, cellAmboBox, volEnvGrid and
+// volEnvHist found in GL's program; cellDalc and cellExtDalc packed non-zero. rain_near_amb also: GL with cellAmboCount 0
+// differs on >= 1000 (the volumes seen). snow_far_amb also: GL with volEnvGrid.w 0 differs on >= 1000 (the keep seen), GL
+// with b0 all zero on >= 1000 (the projection read); volEnvGrid packed non-zero. Red 16384 the history dropped (Vulkan's
+// volEnvHist the zero texture) must FAIL in snow_far_amb; red 32768 the ambient dropped (Vulkan's packed volTerms bit 8
+// cleared) must FAIL in both; red 512 (b0 zero) must FAIL in snow_far_amb too. Lifted with it: precipLitWhy's volTerms 8
+// refusal; precipAdmits (and precipRun's backstop) refuse an ambient run with the keep on (volEnvGrid.w >= 0.5) and no
+// b0 bytes; the app's rain / snow draw twins GL's volEnvHist into the lit set's binding 83. Census after: exterior 5,
+// interior 6 (the ambient line gone from both).
 #define main fxview_main
 #include "fxview.cpp"
 #undef main
