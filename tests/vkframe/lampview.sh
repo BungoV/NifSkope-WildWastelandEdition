@@ -38,6 +38,20 @@
 # Pool reds (each its own process, must FAIL): WW_VKLAMP_POOL_RED=1 (key only, the generation not compared): a
 # frame3 face FAILs and redSkips >= 1 (the trigger fired); WW_VKLAMP_POOL_RED=2 (the pool grows without copying its
 # kept meshes again): a frame4 face FAILs and repacks >= 1.
+# Stored case (lane VKLAMP4, bar stated before its first run; celllamps.cpp lampShadowPass, the lamp tier's route): a D16
+# 2D array store (3 blocks of 3 layers; shared type 2 on the test arm, GL's own on the reference). Slot 0 = a full lamp
+# (6 faces into 2 blocks), slot 3 = a wall lamp (back = face 4: face 5 whole into its block's layer 0, the 4 side faces'
+# room halves packed 2 to a layer, x and y splits, with the viewport origin shifted and the scissored clear: vklamp.h's
+# lampSides / lampSideHalves / lampPacked / lampWallQuad, the app's helpers). Test arm = the app's route: run A (store key)
+# clears and draws the still casters into the store, GL blits store -> cube and draws the wall quads (scissored clear),
+# then run B (cube key) LOADs slot 3's mover over all 6 faces, with no read between the runs. Reference = GL all of it.
+# Frame S1 stores; frame S2 moves only the mover: no store run, the stored layers must keep their S1 bytes on both arms.
+# - Cube faces of slots 0 and 3 and every used store layer: per layer the bar above (EXACT, else BOUND); store layers in
+#   S2 EXACT against their own S1 bytes. Each packed half (member 0 and 1 of every side layer) covers > 0 texels on both
+#   arms, and the mover wins > 0 texels over the stored-only picture, in S1 and S2. Any of them at 0 FAILs.
+# Stored reds (each must FAIL): store origin (the shifted viewport origin dropped), whole-layer clear (the second member's
+# CLEAR over the whole layer: it wipes the first member), mover cleared (run B's LOAD ops set to clear).
+# Every verdict line before the stored case equals the last good run's (X:/ClaudeOverflow/vklamp3/lampview.log).
 # Fence red: the exe re-run with WW_VKFENCE_RED=lamp must end `LAMPVIEW GATE FAILED`.
 # Last line: `LAMPVIEW GATE OK` or `LAMPVIEW GATE FAILED`.
 set -u
