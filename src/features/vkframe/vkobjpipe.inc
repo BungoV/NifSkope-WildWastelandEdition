@@ -170,6 +170,7 @@ struct Op
 	std::map<unsigned, OpTexel> texTwins;       // GL's buffer texture -> its twin (the name's current generation)
 	std::vector<OpTexel> texRetired;            // lane VKOBJ5: older generations the prepared draws still read (objBlDrawsReset frees them)
 	std::map<unsigned, OpStore> stores;         // GL's buffer name -> the store under it
+	std::vector<OpStore> storeRetired;          // lane VKOBJ5: stores dropped while a crossing's wait missed (freed at objBlDrawsReset)
 	std::map<unsigned, std::uint64_t> copyMemo; // lane VKWATER3: GL's texture -> sharedGen() when copied this frame (objCellCopyTwin)
 	std::map<unsigned, std::uint64_t> texelMemo; // lane VKWATER3: GL's buffer texture -> its copy's key, copied this frame (objBlTexelCopy)
 	GLuint storeStage = 0;                      // GL's staging buffer, only if a store refuses glNamedBufferSubData
@@ -1037,6 +1038,9 @@ void objBlPipeFree()
 		for ( auto & s : O.stores )
 			csmBufFree( s.second.buf, gl().ok && s.second.buf.glCtx == gl().ctx );
 		O.stores.clear();
+		for ( OpStore & s : O.storeRetired )
+			csmBufFree( s.buf, gl().ok && s.buf.glCtx == gl().ctx );
+		O.storeRetired.clear();
 		if ( O.storeStage && gl().ok && gl().ctx == reinterpret_cast<void *>( wglGetCurrentContext() ) )
 			gl().deleteBuffers( 1, &O.storeStage );
 		O.storeStage = 0;
@@ -2145,14 +2149,16 @@ bool objBlDrawRecord( VkCommandBuffer cmd, int mode, std::string & why )
 	return true;
 }
 
-// the crossing's last submit done (its command buffer, the slots' host buffers and the rows are free again)
-void opRunWait()
+/* the crossing's last submit done (its command buffer, the slots' host buffers and the rows are free again). lane VKOBJ5:
+ * fenceDone's 1 s wait (red WW_VKFENCE_RED=objbl); a miss keeps pending and returns false with why: the caller stops
+ * before it touches the slot and leaves the frame to GL */
+bool opRunWait( std::string & why )
 {
 	Op & O = opS();
-	if ( !O.pending )
-		return;
-	vk().vkWaitForFences( vk().dev, 1, &O.runFence, VK_TRUE, 5000000000ull );
+	if ( !fenceDone( O.runFence, O.pending, "objbl", why ) )
+		return false;
 	O.pending = false;
+	return true;
 }
 
 // the worker's half of objBlRun: the prepared draws recorded, submitted after GL's signal, ours signalled back
@@ -2427,12 +2433,22 @@ bool objBlMirror( GlProc gp, unsigned prog, const std::uint32_t * vs, std::size_
 
 void objBlDrawsReset()
 {
-	opRunWait();
+	/* lane VKOBJ5: a missed wait keeps the held twins and stores (the frees wait for a reset whose wait is done); the
+	 * counters go, every path that touches the slots waits again first and refuses */
+	std::string fw;
+	const bool done = opRunWait( fw );
 	opS().live = 0;
 	opS().rowCount = 0;
+	if ( !done )
+		return;
 	for ( OpTexel & t : opS().texRetired )  // no prepared draw reads an older twin now
 		opTexelFree( t );
 	opS().texRetired.clear();
+	for ( OpStore & s : opS().storeRetired ) {
+		opStoreUnview( s.buf.buf );
+		csmBufFree( s.buf, gl().ok && s.buf.glCtx == gl().ctx );
+	}
+	opS().storeRetired.clear();
 }
 
 bool objBlRun( const std::vector<unsigned> & glBufs, int mode, std::string & why )
@@ -2454,8 +2470,9 @@ bool objBlRun( const std::vector<unsigned> & glBufs, int mode, std::string & why
 		return true;  // nothing prepared: nothing crosses
 	if ( mode < 0 || mode > 2 )
 		return refuse( "mode " + std::to_string( mode ) );
-	opRunWait();
 	std::string w;
+	if ( !opRunWait( w ) )
+		return refuse( w );
 	if ( !opRunMake( w ) )
 		return refuse( w );
 	// the textures: every shared target a draw writes or reads, once
@@ -2778,8 +2795,7 @@ bool objBlFrameSamples( unsigned colorTex, unsigned dsTex, std::vector<std::uint
 		return why = "the depth target has no stencil (the readback reads a depth-stencil frame)", false;
 	if ( col->samples < 2 || !col->view || !ds->img )
 		return why = "the readback reads a multisampled frame", false;
-	opRunWait();
-	if ( !opRunMake( why ) || !opSmpMake( why ) )
+	if ( !opRunWait( why ) || !opRunMake( why ) || !opSmpMake( why ) )
 		return false;
 	const std::size_t n = std::size_t( col->w ) * std::size_t( col->h ) * std::size_t( col->samples );
 	if ( !opHostBuf( O.smpOut, n * 16, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, why ) )
@@ -2820,7 +2836,8 @@ bool objBlFrameSamples( unsigned colorTex, unsigned dsTex, std::vector<std::uint
 		return false;  // nothing signals vkDone: GL does not wait it
 	g.waitSemaphore( O.vkDoneGl, 0, nullptr, 2, texs, lay );
 	O.pending = true;
-	opRunWait();
+	if ( !opRunWait( why ) )
+		return false;  // the readback may still run: its host copy is not read
 	out.resize( n * 4 );
 	std::memcpy( out.data(), O.smpOut.ptr, n * 16 );
 	return true;
@@ -2985,8 +3002,8 @@ bool objBlShade( GlProc gp, const ObjBlShade & s, std::string & why )
 	}
 	std::vector<unsigned> names;
 	if ( s.ownVao ) {  // lane VKOBJ5: one key serves every unpooled shape (objCellShade's order)
-		objTexFlush();
-		opRunWait();
+		if ( !objTexFlush( w2 ) || !opRunWait( w2 ) )
+			return fail( w2 );
 	}
 	if ( !objBlPoolCopy( s.poolKey, s.ownVao ? own : s.pool, names, w2 ) )
 		return fail( "the pool: " + w2 );
@@ -3168,8 +3185,10 @@ bool objCellShade( GlProc gp, const ObjCellShade & s, std::string & why )
 		rs.texelImported += bst.texelImported;
 		rs.compare += bst.compare;
 	}
-	objTexFlush();  // the twins made since the last flush: on the device before the run samples them
-	opRunWait();    // one pool key serves every shape: the last crossing done with it before its buffers are refilled (or regrown)
+	if ( !objTexFlush( w2 ) )  // the twins made since the last flush: on the device before the run samples them
+		return fail( w2 );
+	if ( !opRunWait( w2 ) )    // one pool key serves every shape: the last crossing done with it before its buffers are refilled (or regrown)
+		return fail( w2 );
 	std::vector<unsigned> names;
 	if ( !objBlPoolCopy( s.poolKey, pool, names, w2 ) )
 		return fail( "the shape: " + w2 );
@@ -3308,8 +3327,8 @@ bool objPfxShade( GlProc gp, const ObjPfxShade & s, std::string & why )
 		rs.texelImported += bst.texelImported;
 		rs.compare += bst.compare;
 	}
-	objTexFlush();
-	opRunWait();
+	if ( !objTexFlush( w2 ) || !opRunWait( w2 ) )
+		return fail( w2 );
 	objBlDrawsReset();
 	ObjBlDrawStat dst;
 	if ( !objBlDrawPrep( d, dst, w2 ) )
@@ -3372,7 +3391,8 @@ bool objBlTexelCopy( GlProc gp, unsigned tex, std::vector<unsigned> & glNames, s
 		if ( opS().live ) {
 			opS().texRetired.push_back( t );
 		} else {
-			opRunWait();
+			if ( !opRunWait( why ) )
+				return false;  // the old twin may still be read: left as it is
 			opTexelFree( t );
 		}
 		const std::uint32_t gen = t.gen + 1;
@@ -3413,7 +3433,8 @@ bool objBlTexelCopy( GlProc gp, unsigned tex, std::vector<unsigned> & glNames, s
 	if ( t.buf.buf && ( t.buf.cap < need || t.buf.glCtx != g.ctx ) ) {
 		if ( opS().live )
 			return why = "the texel twin would move under prepared draws", false;
-		opRunWait();
+		if ( !opRunWait( why ) )
+			return false;
 	}
 	if ( !csmBuf( t.buf, need, true, VK_BUFFER_USAGE_UNIFORM_TEXEL_BUFFER_BIT, why ) )
 		return false;
@@ -3453,7 +3474,10 @@ bool objBlTexelStore( unsigned & buf, std::size_t bytes, std::string & why )
 	}
 	s.bytes = bytes;
 	if ( it != O.stores.end() ) {  // the old store: Vulkan's last read of it done, its views gone
-		opRunWait();
+		if ( !opRunWait( why ) ) {
+			csmBufFree( s.buf, s.buf.glCtx == g.ctx );
+			return false;
+		}
 		opStoreUnview( it->second.buf.buf );
 		csmBufFree( it->second.buf, it->second.buf.glCtx == g.ctx );
 		O.stores.erase( it );
@@ -3513,9 +3537,12 @@ void objBlTexelStoreDrop( unsigned & buf )
 	const auto it = O.stores.find( buf );
 	if ( it == O.stores.end() )
 		return;
-	opRunWait();
-	opStoreUnview( it->second.buf.buf );
-	csmBufFree( it->second.buf, gl().ok && it->second.buf.glCtx == gl().ctx );
+	if ( std::string fw; opRunWait( fw ) ) {
+		opStoreUnview( it->second.buf.buf );
+		csmBufFree( it->second.buf, gl().ok && it->second.buf.glCtx == gl().ctx );
+	} else {
+		O.storeRetired.push_back( it->second );  // lane VKOBJ5: Vulkan may still read it (freed at objBlDrawsReset)
+	}
 	O.stores.erase( it );
 	buf = 0;
 }
@@ -3585,9 +3612,10 @@ void objBlTexelForget( unsigned tex )
 		return;
 	if ( O.live ) {
 		O.texRetired.push_back( it->second );  // the prepared draws still read it
-	} else {
-		opRunWait();
+	} else if ( std::string fw; opRunWait( fw ) ) {
 		opTexelFree( it->second );
+	} else {
+		O.texRetired.push_back( it->second );  // lane VKOBJ5: Vulkan may still read it (freed at objBlDrawsReset)
 	}
 	O.texTwins.erase( it );
 	O.texelMemo.erase( tex );
@@ -3610,8 +3638,7 @@ bool objBlTexelRead( unsigned tex, std::vector<std::uint8_t> & out, std::string 
 		for ( const auto & s : O.stores )
 			if ( s.second.buf.buf == t.ext )
 				name = s.second.buf.gl;
-	opRunWait();
-	if ( !opRunMake( why ) || !opHostBuf( O.texRead, std::size_t( t.range ), VK_BUFFER_USAGE_TRANSFER_DST_BIT, why ) )
+	if ( !opRunWait( why ) || !opRunMake( why ) || !opHostBuf( O.texRead, std::size_t( t.range ), VK_BUFFER_USAGE_TRANSFER_DST_BIT, why ) )
 		return false;
 	O.readSrc = t.ext ? t.ext : t.buf.buf;
 	O.readOff = t.ext ? t.extOff : 0;
@@ -3622,7 +3649,8 @@ bool objBlTexelRead( unsigned tex, std::vector<std::uint8_t> & out, std::string 
 		return false;  // nothing signals vkDone: GL does not wait it
 	g.waitSemaphore( O.vkDoneGl, 1, &name, 0, nullptr, nullptr );
 	O.pending = true;
-	opRunWait();
+	if ( !opRunWait( why ) )
+		return false;  // the copy may still run: its host copy is not read
 	out.resize( std::size_t( t.range ) );
 	std::memcpy( out.data(), O.texRead.ptr, out.size() );
 	return true;
@@ -3635,7 +3663,8 @@ bool objBlDrawPrep( const ObjBlDraw & d, ObjBlDrawStat & st, std::string & why )
 	st = ObjBlDrawStat();
 	if ( !v.ok )
 		return why = "no present device", false;
-	opRunWait();  // the slots' host buffers and the rows are rewritten below
+	if ( !opRunWait( why ) )  // the slots' host buffers and the rows are rewritten below
+		return false;
 	const bool pfx = d.cs && d.csWords && d.pfxIn && d.pfxN;  // lane VKOBJ5: a record pass and its strip (no commands)
 	if ( ( !pfx && ( !d.cmds || !d.cmdCount ) ) || d.w < 1 || d.h < 1 )
 		return why = "no commands or no frame", false;

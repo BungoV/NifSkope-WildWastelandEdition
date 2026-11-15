@@ -3,7 +3,8 @@
 #   bash tests/vkframe/twinpick/run.sh <out dir>        (from the tree root; CXX defaults to g++, DXC as vkframe_spirv.sh)
 # First dxc proves the inert defines (a source built with and without them gives the same SPIR-V bytes), then
 # green must print "TWINPICK PASS <n>"; reds (each must print its "FAIL <check>:" and exit 1): swap (the RT modules of
-# twins 2 and 3 swapped), noinert (no define taken as inert without the proof). Every run is capped by `timeout 30`.
+# twins 2 and 3 swapped), noinert (no define taken as inert without the proof), anybase (round 7: the old pick, twins 2-6
+# take a key with an extra define). Every run is capped by `timeout 30`.
 set -u
 OUT="${1:?usage: run.sh <out dir>}"
 CXX="${CXX:-g++}"
@@ -52,5 +53,7 @@ red() {	# red <name> <check> <exe> [args]
 "$CXX" -O1 -std=c++17 -I src -DTWINPICK_RED_SWAP "$SRC" -o "$OUT/red_swap.exe" -static || { echo "BUILD FAIL red swap"; exit 2; }
 red swap module "$OUT/red_swap.exe" . "${INERT[@]}"
 red noinert module "$OUT/green.exe" .
-[ $bad -eq 0 ] && echo "TWINPICK GATE OK (green + 2 reds)" || echo "TWINPICK GATE FAILED"
+"$CXX" -O1 -std=c++17 -I src -DCELLTWINPICK_RED_ANYBASE "$SRC" -o "$OUT/red_anybase.exe" -static || { echo "BUILD FAIL red anybase"; exit 2; }
+red anybase extra "$OUT/red_anybase.exe" . "${INERT[@]}"
+[ $bad -eq 0 ] && echo "TWINPICK GATE OK (green + 3 reds)" || echo "TWINPICK GATE FAILED"
 exit $bad

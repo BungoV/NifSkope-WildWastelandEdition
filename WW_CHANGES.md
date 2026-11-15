@@ -1,3 +1,16 @@
+## VKOBJ5 round 7 (2026-11-15): object fence waits refuse the frame; twins take only their own keys
+
+Changed, not built, not checked live. Offline: regress gates OK, every green run prints no `vk fence:` line; the reds
+below FAIL their gate (blview; objview reaches oneshot only).
+
+- The bindless object run's wait (opRunWait), the object texture flush (otFlush) and the one-shot submit (oneShot) go
+  through WwVkPresent::fenceRed / fenceMiss. A missed wait prints `vk fence:` and the frame stays on GL: no slot is
+  touched, no unsignalled fence is reused, resources freed while in flight are held until a later wait passes, and
+  oneShot waits the device idle and resets its fence.
+- Reds: WW_VKFENCE_RED=objbl, objtex, oneshot.
+- Twins 2-6 now take only their base or RT GI key, like twins 7-9: a key with an extra loader define (a debug view, a
+  probe build) is another program and stays on GL. tests/vkframe/twinpick: red anybase (the old rule) FAILs.
+
 ## VKOBJ5 (2026-11-14): skinned, alpha-tested, single rigid and unpooled bindless object draws on Vulkan (WW_VKOBJ_SHADE=1)
 
 Changed, not built, not checked live. Offline: tests/vkframe/blview.sh colourGate gained a skinned and an alpha-tested
