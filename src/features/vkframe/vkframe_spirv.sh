@@ -307,6 +307,17 @@ fxt() {
 }
 fxt fargnd_view_vs core/water_view_vs
 ls -la fargnd_view_ps.spv.h fargnd_view_vs.spv.h
+# lane VKFAR16: the probe relight (cell_reflrelight.prog, cellreflprobe.cpp) on fxg / fxt's shifts (its vertex stage declares
+# nothing), and fxr: fxg's flags + the all-on route's RT GI key (WW_CELL_RESTIR + RTDDGI + RTDDGI_CASCADES), the `_rt_ps` twins
+fxr() {
+	"$DXC" -spirv -fspv-target-env=vulkan1.2 -T ps_6_0 -E main -fvk-b-shift 0 0 -fvk-t-shift 64 0 -fvk-s-shift 128 0 -fvk-u-shift 192 0 -fspv-preserve-bindings -D WW_CELL_FOGLEAK=1 -D WW_FRAME_UBO=1 -D WW_CELL_RESTIR=1 -D WW_CELL_RTDDGI=1 -D WW_CELL_RTDDGI_CASCADES=1 -Fo "$1.spv" "$(cygpath -m "$ROOT/res/shaders/hlsl/$2.hlsl" 2>/dev/null || echo "$ROOT/res/shaders/hlsl/$2.hlsl")"
+	python -I "$ROOT/tools/spv_header.py" "$1.spv" "vkframe_$1_spv" "$1.spv.h" < /dev/null
+	rm -f "$1.spv"
+}
+fxg reflrelight_view_ps reflections/cell_reflrelight_ps
+fxr reflrelight_view_rt_ps reflections/cell_reflrelight_ps
+fxt reflrelight_view_vs reflections/cell_reflrelight_vs
+ls -la reflrelight_view_ps.spv.h reflrelight_view_rt_ps.spv.h reflrelight_view_vs.spv.h
 # lane VKFAR7: the TAA mask's reactive pass (taainputs.cpp pass 4, vktaareactive.inc): pixel stage on fx()'s shifts (b31 at 31,
 # BaseMap at 64 / 128), vertex stage on fxb()'s (its b31 at 32)
 fx taareactive_view_ps post/taa_reactive_ps
