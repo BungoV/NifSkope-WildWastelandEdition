@@ -16,14 +16,16 @@ const WaterImgName kFargndImg[] = { { 64, "cellLights" }, { 68, "cellIsLut" }, {
 	{ 82, "fgLtex" }, { 83, "fgDecal" }, { 84, "fgAtlas" }, { 89, "atApTex" }, { 90, "volTex" }, { 91, "volTile" }, { 92, "volAirTerr" },
 	{ 93, "volAirRainMap" }, { 94, "volAirNoise" }, { 95, "csmMap" }, { 96, "ussTerrMap" }, { 97, "ussContactMap" },
 	{ 98, "ussCloudMap" }, { 99, "waterInfoIndex" }, { 100, "waterInfoAtlas" }, { 101, "waterInfoBodies" }, { 106, "cellAo" },
-	{ 107, "cellSsr" }, { 109, "cellCluster" }, { 110, "rainCover" }, { 112, "BaseMap" }, { 113, "NormalMap" }, { 114, "GlowMap" },
-	{ 116, "SpecularMap" }, { 117, "GreyscaleMap" }, { 118, "EnvironmentMap" }, { 119, "CubeMap" }, { 120, "RefractionSrc" },
-	{ 121, "landShoreIndex" }, { 122, "landShoreAtlas" }, { 123, "LandLodDiff" }, { 124, "LandLodOuter" }, { 125, "LandLodNoise" },
-	{ 126, "LandLodDetail" }, { 65, "cellGi" }, { 66, "cellGiSlots" }, { 67, "cellRooms" }, { 79, "cellAoDecal" },
-	{ 102, "waterFlowIndex" }, { 103, "waterFlowAtlas" }, { 115, "BacklightMap" }, { 111, "landShoreIndex" }, { 200, "farStream" } };
-// the integer images (usampler2D): fgGrid (RGBA32UI), the water info, flow and shore lookups
-const std::uint32_t kFargndInts[] = { 81, 99, 100, 102, 103, 111, 121, 122 };
-// the pixel block (kT_fargndPsBytes 7104) ends at 19904: the constants after it, as the rings'
+	{ 107, "cellSsr" }, { 109, "cellCluster" }, { 110, "rainCover" }, { 111, "landShoreIndex" }, { 112, "landShoreAtlas" },
+	{ 114, "BaseMap" }, { 115, "NormalMap" }, { 116, "GlowMap" }, { 117, "BacklightMap" }, { 118, "SpecularMap" },
+	{ 119, "GreyscaleMap" }, { 120, "EnvironmentMap" }, { 121, "CubeMap" }, { 122, "RefractionSrc" }, { 123, "LandLodDiff" },
+	{ 124, "LandLodOuter" }, { 125, "LandLodNoise" }, { 126, "LandLodDetail" }, { 127, "farSkyMap" }, { 65, "cellGi" },
+	{ 66, "cellGiSlots" }, { 67, "cellRooms" }, { 79, "cellAoDecal" }, { 102, "waterFlowIndex" }, { 103, "waterFlowAtlas" },
+	{ 200, "farStream" } };
+// the integer images (usampler2D): fgGrid (RGBA32UI), the water info, flow and shore lookups (VKFAR14: renumbered to
+// the BATCH1114 regen of fargnd_view_ps.spv.h, shore at 111/112, farSkyMap at 127)
+const std::uint32_t kFargndInts[] = { 81, 99, 100, 102, 103, 111, 112 };
+// the pixel block (kT_fargndPsBytes 7168 since the BATCH1114 regen; 7104 before) ends at 19968: the constants after it, as the rings'
 constexpr VkDeviceSize kFargndConstAt = 19968, kFargndHostBytes = 20224;
 static_assert( kWaterPsLooseAt + WwVkPresent::kT_fargndPsBytes <= kFargndConstAt
 		&& kFargndConstAt + 16 * WwVkPresent::kWaterAttribs <= kFargndHostBytes && WwVkPresent::kT_fargndPsBytes <= WwVkPresent::kTwinPsMax,
