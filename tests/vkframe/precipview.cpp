@@ -395,6 +395,15 @@
 // 1.5), a falloff red (cellLightPhysB.z non-zero). Census after: route default 0 / 0, route all-on 0 / 0 (the falloff refusal
 // gone; the census' own all-on values (1, 0, 0, 0) only switch the row). The all-on totals are printed, not judged: at 0 / 0
 // no red reads them, the old census red stays the closed-list red of lift 2.
+// The lit look (L8 route lift 5, VKFAR13 11-15; bar set before its first run, never widened): a lit run (cellHasDir or
+// cellInterior) through cell_precip_look.prog (pcLook in the program) reaches the app only by the hand-set switch
+// WW_CELL_PRECIP_LOOK (default off, not in WW_ALL_ON: no census route links the look). It stays a named refusal, no twin:
+// precipAdmits must refuse it with WwVkPresent::kPrecipLitLookWhy, so GL draws it. Checks (else the gate fails): a
+// PrecipRun with lit and look set is refused with exactly that string; the same run with look clear is not refused with it.
+// Red, must FAIL: 140737488355328 (2^47) the lit look's refusal skipped (precipAdmits goes on to the lit chain). Census
+// clause: each route program (default, all-on, all-on + WW_CELL_RESTIRGI; exterior and interior) as a lit run with t.look
+// from its own pcLook, through precipAdmits: the count of the look refusal is printed per route (0 / 0 today; a route that
+// starts linking the look shows 1 there). Its red: the same clause on pLook (the look program) must count 1, else FAIL.
 #define main fxview_main
 #include "fxview.cpp"
 #undef main
@@ -2945,6 +2954,51 @@ int main( int argc, char ** argv )
 		}
 		std::printf( "PRECIPVIEW census routes: default %d / %d, all-on %d / %d (exterior / interior; 0 / 0 on both is the done line)\n",
 			route[0], route[1], allOnN[0], allOnN[1] );
+		{  // L8 route lift 5 (header): the lit look stays a named refusal; the census clause per route, pLook its red
+			auto lookWhy = [&]( GLuint prog, int interior, int look, long long red ) {
+				f.useProgram( prog );
+				u1i( prog, "cellHasDir", 1 - interior );
+				u1i( prog, "cellInterior", interior );
+				WwVkPresent::PrecipRun t;
+				t.lit = true;
+				t.look = look < 0 ? f.getUniformLocation( prog, "pcLook" ) >= 0 : look != 0;
+				t.red = red;
+				WwVkPresent::precipLitRead( &ga, prog, t );
+				std::string why;
+				WwVkPresent::precipAdmits( t, why );
+				return why;
+			};
+			const std::string kWhy = WwVkPresent::kPrecipLitLookWhy;
+			const bool green = lookWhy( pLook, 0, 1, 0 ) == kWhy, plain = lookWhy( pRoute, 0, 0, 0 ) != kWhy;
+			std::printf( "PRECIPVIEW lit look refusal %s: lit + look refused by name %d, lit without the look not by it %d\n",
+				green && plain ? "OK" : "FAIL", green ? 1 : 0, plain ? 1 : 0 );
+			if ( !green || !plain )
+				ok = false;
+			if ( lookWhy( pLook, 0, 1, 1LL << 47 ) == kWhy ) {
+				std::printf( "PRECIPVIEW red lit look PASSED: red 2^47 (the refusal skipped) still refused by name\n" );
+				ok = false;
+			} else {
+				std::printf( "PRECIPVIEW red lit look FAILS as it must (red 2^47: the lit look not refused by name)\n" );
+			}
+			int lk[3][2] = {};
+			const GLuint lkProg[3] = { pRoute, pAllOn, pRgi };
+			for ( int p = 0; p < 3; p++ )
+				for ( int w = 0; w < 2; w++ )
+					lk[p][w] = lookWhy( lkProg[p], w, -1, 0 ) == kWhy ? 1 : 0;
+			std::printf( "PRECIPVIEW census lit look refusals: default %d / %d, all-on %d / %d, all-on + WW_CELL_RESTIRGI %d / %d "
+				"(exterior / interior; info, 1 = the route links the look)\n", lk[0][0], lk[0][1], lk[1][0], lk[1][1], lk[2][0], lk[2][1] );
+			const int redN = ( lookWhy( pLook, 0, -1, 0 ) == kWhy ? 1 : 0 ) + ( lookWhy( pLook, 1, -1, 0 ) == kWhy ? 1 : 0 );
+			if ( redN != 2 ) {
+				std::printf( "PRECIPVIEW red census lit look PASSED: the clause on pLook counts %d / 2 (a route linking the look would not show)\n", redN );
+				ok = false;
+			} else {
+				std::printf( "PRECIPVIEW red census lit look FAILS as it must (the clause on pLook counts 2 / 2)\n" );
+			}
+			for ( const GLuint prog : { pLook, pRoute, pAllOn, pRgi } ) {
+				f.useProgram( prog );
+				u1i( prog, "cellInterior", 0 );
+			}
+		}
 		if ( route[0] + route[1] == 0 ) {  // L8 route lift 2 (header): nothing left for the old reading to under-read; the red is the
 			// closed list itself: one sampler slot (ussTerrMap) dropped from the allow list must be seen on pRoute
 			known.erase( "ussTerrMap" );
