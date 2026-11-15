@@ -168,6 +168,33 @@
 // refusal; precipAdmits (and precipRun's backstop) refuse an ambient run with the keep on (volEnvGrid.w >= 0.5) and no
 // b0 bytes; the app's rain / snow draw twins GL's volEnvHist into the lit set's binding 83. Census after: exterior 5,
 // interior 6 (the ambient line gone from both).
+// The sun's shadow (L8 term 3, VKFAR6 11-15; bar set before its first run, never widened): volCsm 1 multiplies the sun by
+// wwSunShadow = the cascades (csmMap t31, a D16 array read by compare taps) x the clouds' transmittance (ussCloudT,
+// ussCloudMap t34), outdoors only. The app's defaults on this program: ussOn 0 (shadowset.cpp 2757: the tiers 0 and the
+// cascades valid), ussCsmStable.w 1 (sunshadow.cpp 2363: the Off tier's stable bias, the normal offset from the geometry
+// stage's pcDPx; the program has no volStage), ussCloudOn 1 (cloudshadow.cpp 108: the cloud shadow follows the clouds, at
+// least Low). One case, rain_near_csm (rain_near_lit's run, unfogged, volTerms 1): volCsm 1, ussOn 0, csmForce -1, csmRed
+// 0, csmProbe 0, ussCsmStable (1, 0, 0, 1) with ussCsmTexel and ussCsmBias (0.25 texel) per cascade, csmParams (1, a
+// distance past the run, 256, a blend band), csmSplitOffset at the run's view-depth thirds, csmMat[3] orthographic along
+// the case's sun (each cascade fitted to its share of the particles), csmInvRange 1 / each depth span; a 256 x 256 x 3 D16
+// csmMap made by sharedTarget (type 2) as the app's, with csmTexParams' live state (linear, clamp to border 1, compare
+// LEQUAL), each layer a different stripe pattern of occluder depths; ussCloudOn 1 with ussCloudFromView along the sun,
+// ussCloudFar (0.6, 0.15, 0, 0) and a 64 x 64 RGBA16F ussCloudMap (linear, clamp to edge) whose start height, extinction and
+// depth vary. The prep prints the in-view particles' shares in cascades 0, 1 and 2 (want each >= 0.1) and the share one
+// hard tap shadows (want 0.2 - 0.8). The same verdict, reference checks, repeat clause, reds 64 / 128 as the lit cases; the
+// globals check and Vulkan's globals mirror as rain_near_lit. The case must also show (else the gate fails): GL with
+// volCsm 0 differs on >= 1000 covered samples (the sun's shadow seen); GL with csmForce 1 on >= 1000 (the map seen); GL
+// with ussCloudOn 0 on >= 1000 (the clouds seen); csmMap, csmMat, csmInvRange, csmParams, csmSplitOffset, csmForce,
+// ussCsmStable, ussCsmTexel, ussCsmBias, ussCloudOn, ussCloudMap, ussCloudFromView and ussCloudFar found in GL's program;
+// csmMat, csmParams, csmSplitOffset, ussCsmBias, ussCloudFromView and ussCloudFar packed non-zero. GL with ussCsmStable.w
+// 0 is printed (info). Reds, each must FAIL in rain_near_csm: 65536 the shadow map dropped (Vulkan's csmMap the zero D16
+// array, all lit); 131072 the shadow dropped (the packed volCsm cleared); 262144 the clouds' map dropped (the zero
+// texture); 524288 cascades 1 and 2 swapped (the packed csmMat[1] and csmMat[2]). Lifted with it: precipLitWhy's volCsm
+// refusal; refused by name instead: ussOn (the shadow set's composition: a cascade / terrain / contact tier), csmProbe or
+// csmRed non-zero; precipRun refuses a csmMap not shared with the present device (no per-run copy of the map); the app's
+// rain / snow draw twins GL's csmMap (refused unless linear, clamp to border 1, compare LEQUAL) into the lit set's binding
+// 95 with a compare sampler of that state and ussCloudMap into binding 98. The census sets ussOn 0 and ussCloudOn 1 (the
+// lines above). Census after: exterior 4, interior 5 (the sun's shadow map line gone from both).
 #define main fxview_main
 #include "fxview.cpp"
 #undef main
