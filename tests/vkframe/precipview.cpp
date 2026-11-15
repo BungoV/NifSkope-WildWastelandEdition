@@ -50,9 +50,13 @@
 // no NaN / Inf half in GL's lit frame; every name the sun branch reads is found in GL's program (packed, not zero);
 // rain_near_lit's captured gA (unfogged: the light) holds >= 100 distinct particles with unequal channels. Red 128 the
 // light dropped (pcRed 4: lit = 1); must FAIL in every lit case.
+// Fixture fix after the first lit run (11-15, the bar kept): rain_near_lit's sun gave N.to -0.13 on its view axis, so
+// thick / thin = 0.99 and pcTrans 1.0 vs 0.5 moved 51 samples (the case did not test the mix); it takes its own sun
+// (precipview_prep.py LIT_SUN, N.to 0.72). The sun's inputs are also checked packed and non-zero in the light block.
 #define main fxview_main
 #include "fxview.cpp"
 #undef main
+#include <array>
 
 namespace pv
 {
@@ -366,7 +370,7 @@ void particleDiff( const std::string & name, const std::vector<float> & gl, unsi
 struct Job
 {
 	std::string name;
-	int w = 0, h = 0, first = 0, n = 0, hasTex = 0, farT = 0, fog = 0, look = 0;  // (windows.h defines far)
+	int w = 0, h = 0, first = 0, n = 0, hasTex = 0, farT = 0, fog = 0, look = 0, lit = 0;  // (windows.h defines far)
 	unsigned seed = 0;
 	float zd = 0.5f;
 	UniMap uni;
@@ -406,6 +410,8 @@ int main( int argc, char ** argv )
 			std::ifstream jf( dir + "/" + nm + "/job.txt" );
 			if ( !( jf >> j.w >> j.h >> j.first >> j.n >> j.hasTex >> j.seed >> j.farT >> j.zd >> j.fog >> j.look ) )
 				return fatal( nm + "/job.txt" );
+			if ( !( jf >> j.lit ) )  // slice 2b's field (absent in an older prep: unlit)
+				j.lit = 0;
 			j.uni = readUni( dir + "/" + nm + "/uni.txt" );
 			if ( j.hasTex || j.fog ) {
 				j.tex = readTex( dir + "/" + nm );
@@ -563,10 +569,11 @@ int main( int argc, char ** argv )
 	}
 	GLuint vao = 0;
 	genVertexArrays( 1, &vao );
-	static char twinKeys[8], normKeys[8];  // one atlas twin a case (the atlases' sizes differ), one normal-map twin a case
-	static char airKeys[8][5], volKeys[8];  // the air's twins a case, its volume's shared target a case
-	if ( jobs.size() > 8 )
-		return fatal( "more than 8 cases" );
+	constexpr int kCases = 12;
+	static char twinKeys[kCases], normKeys[kCases];  // one atlas twin a case (the atlases' sizes differ), one normal-map twin a case
+	static char airKeys[kCases][5], volKeys[kCases];  // the air's twins a case, its volume's shared target a case
+	if ( jobs.size() > size_t( kCases ) )
+		return fatal( "more than " + std::to_string( kCases ) + " cases" );
 	size_t jobAt = 0;
 
 	auto readSamples = [&]( GLuint msColor ) {
@@ -620,8 +627,9 @@ int main( int argc, char ** argv )
 		const char * name;
 		int red;
 		bool seen;
-	} reds[6] = { { "cull (radius 0)", 1, false }, { "corners (the strip's last two swapped)", 2, false }, { "near fade (dropped)", 4, false },
-		{ "air (dropped)", 8, false }, { "look (dropped: the plain pipelines)", 16, false }, { "atlas (dropped: the zero texture)", 32, false } };
+	} reds[7] = { { "cull (radius 0)", 1, false }, { "corners (the strip's last two swapped)", 2, false }, { "near fade (dropped)", 4, false },
+		{ "air (dropped)", 8, false }, { "look (dropped: the plain pipelines)", 16, false }, { "atlas (dropped: the zero texture)", 32, false },
+		{ "light (dropped)", 128, false } };
 	for ( Job & j : jobs ) {
 		if ( j.hasTex && !uploadAtlas( dir + "/" + j.name, j.tex[size_t( j.atlasAt )] ) )
 			return fatal( j.name + ": the atlas upload" );
@@ -654,6 +662,10 @@ int main( int argc, char ** argv )
 				u1i( prog, "fogOn", 0 );
 				u1i( prog, "volOn", 0 );
 				f.uniform4fv( f.getUniformLocation( prog, "atAp" ), 1, zero4 );
+			}
+			if ( !j.lit ) {  // an unlit case: GL's light chain off (a program keeps a lit case's uniforms)
+				u1i( prog, "cellHasDir", 0 );
+				u1i( prog, "cellInterior", 0 );
 			}
 			bindUnit( kNormUnit, GL_TEXTURE_2D, normMap );
 			u1i( prog, "pcTexN", kNormUnit );  // (not in the plain program: no location, nothing set)
@@ -736,6 +748,52 @@ int main( int argc, char ** argv )
 			std::printf( "PRECIPVIEW %s look check: GL's plain program differs from its look program %zu of %zu covered samples (%s)\n", j.name.c_str(),
 				o.flips, o.covered, o.flips >= 1000 ? "the look is seen" : "TOO FEW: the case does not test the look" );
 			ok = ok && o.flips >= 1000;
+		}
+		if ( j.lit ) {  // slice 2b's seen-checks (header): the light seen, thin vs thick seen, no NaN / Inf, the sun's names found
+			auto drawGl = [&]( int mode ) {  // 1 cellHasDir 0, 2 pcTrans 1.0; the program's uniforms set back after
+				before( fbRef, j.zd );
+				bindJob( pJob );
+				const float thick = 1.0f;
+				if ( mode == 1 )
+					u1i( pJob, "cellHasDir", 0 );
+				else
+					f.uniform1fv( f.getUniformLocation( pJob, "pcTrans" ), 1, &thick );
+				f.bindFramebuffer( fFb, fbRef );
+				glViewport( 0, 0, W, H );
+				glEnable( GL_DEPTH_TEST );
+				glDepthFunc( GL_LEQUAL );
+				glDepthMask( GL_FALSE );
+				glDisable( GL_CULL_FACE );
+				glEnable( GL_BLEND );
+				glBlendFunc( GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA );
+				glEnable( GL_STENCIL_TEST );
+				glStencilMask( 0x03 );
+				glStencilFunc( GL_ALWAYS, 1, 0xFF );
+				glStencilOp( GL_KEEP, GL_KEEP, GL_REPLACE );
+				bindVertexArray( vao );
+				glDrawArrays( GL_POINTS, j.first, j.n );
+				bindVertexArray( 0 );
+				drawState0();
+				glDepthFunc( GL_LESS );
+				std::vector<std::uint16_t> out = readSamples( refCol );
+				bindJob( pJob );  // the case's own uniforms again
+				return out;
+			};
+			const Verdict dark = judge( bg, drawGl( 1 ), refA, refB, refB );
+			const Verdict thick = judge( bg, drawGl( 2 ), refA, refB, refB );
+			size_t bad = 0;
+			for ( std::uint16_t hv : refA )
+				bad += ( hv & 0x7C00 ) == 0x7C00;
+			const char * sunNames[] = { "cellOn", "cellHasDir", "cellInterior", "cellDirColor", "cellDirTo", "cellRow[0]", "volTerms",
+				"volPhase[0]", "volGi", "pcTrans", "volVeil", "airMed", "airLayer", "airGround" };
+			std::string missing;
+			for ( int k = 0; k < int( std::size( sunNames ) ) - ( j.fog ? 0 : 4 ); k++ )
+				if ( f.getUniformLocation( pJob, sunNames[k] ) < 0 )
+					missing += std::string( missing.empty() ? "" : ", " ) + sunNames[k];
+			std::printf( "PRECIPVIEW %s lit checks: GL with cellHasDir 0 differs %zu of %zu covered samples, pcTrans 1.0 vs 0.5 %zu (each want >= 1000); "
+				"NaN / Inf halves in GL's lit frame %zu (want 0); sun-branch names missing from GL's program: %s\n", j.name.c_str(), dark.flips, dark.covered,
+				thick.flips, bad, missing.empty() ? "none" : missing.c_str() );
+			ok = ok && dark.flips >= 1000 && thick.flips >= 1000 && bad == 0 && missing.empty();
 		}
 
 		// the per-sample reference (header): GL's program per particle with blending off, blended per sample at 1x
@@ -951,6 +1009,25 @@ int main( int argc, char ** argv )
 				}
 				t.tex[7].twin = reinterpret_cast<std::uintptr_t>( &normKeys[jobAt] );
 			}
+			if ( j.lit ) {  // slice 2b: the light chain's block, as precipDraw packs it
+				t.lit = true;
+				WwVkPresent::fxPack( &ga, pJob, WwVkPresent::kT_preciplitcs, int( std::size( WwVkPresent::kT_preciplitcs ) ), t.cs );
+				t.litBlock = true;
+				if ( checkSeed ) {  // the sun's inputs packed, not zero (header)
+					std::string zero;
+					for ( const char * nm : { "cellDirColor", "cellDirTo", "cellRow", "volPhase", "volGi" } ) {
+						const int at = precipAt( WwVkPresent::kT_preciplitcs, int( std::size( WwVkPresent::kT_preciplitcs ) ), nm );
+						bool any = false;
+						for ( int b = 0; b < 12 && at >= 0; b++ )
+							any = any || t.cs[at + b] != 0;
+						if ( !any )
+							zero += std::string( zero.empty() ? "" : ", " ) + nm;
+					}
+					std::printf( "PRECIPVIEW %s lit packed: zero or absent in the light block: %s\n", j.name.c_str(), zero.empty() ? "none" : zero.c_str() );
+					if ( !zero.empty() )
+						return false;
+				}
+			}
 			if ( checkSeed ) {
 				std::uint32_t seed = 0;
 				std::memcpy( &seed, t.cs, 4 );  // pcSeedS at 0
@@ -1081,6 +1158,18 @@ int main( int argc, char ** argv )
 					std::printf( "PRECIPVIEW %s GL geometry stage captured twice: %u / %u triangles, %zu floats differ (gl_Position %zu, gUv %zu, gQ %zu, "
 						"gView %zu, gCol %zu, gBox %zu, gA %zu, gB %zu)%s\n", j.name.c_str(), pr1, pr2, tfDiff, tfVar[0], tfVar[1], tfVar[2], tfVar[3],
 						tfVar[4], tfVar[5], tfVar[6], tfVar[7], glGetError() == GL_NO_ERROR ? "" : " (a GL error in the capture)" );
+					if ( j.lit && !j.fog ) {  // unfogged, gA is the light: distinct values with unequal channels (header)
+						std::vector<std::array<float, 3>> ga3;
+						for ( size_t v0 = 0; v0 + size_t( kTfFloats ) <= tf1.size(); v0 += size_t( kTfFloats ) ) {
+							const float * q = &tf1[v0 + size_t( kTfAt[6] )];
+							if ( q[0] != q[1] || q[1] != q[2] )
+								ga3.push_back( { q[0], q[1], q[2] } );
+						}
+						std::sort( ga3.begin(), ga3.end() );
+						const size_t distinct = size_t( std::unique( ga3.begin(), ga3.end() ) - ga3.begin() );
+						std::printf( "PRECIPVIEW %s lit gA: %zu distinct captured values with unequal channels (want >= 100)\n", j.name.c_str(), distinct );
+						ok = ok && distinct >= 100;
+					}
 					std::vector<std::uint8_t> rec( size_t( j.n ) * 112 );
 					std::vector<std::uint16_t> a3, b3;
 					if ( !runVk( 0, a3, b3, false, rec.data() ) )
@@ -1097,8 +1186,8 @@ int main( int argc, char ** argv )
 			}
 		}
 		for ( RedSeen & r : reds ) {
-			if ( ( r.red == 16 && !j.look ) || ( r.red == 32 && !j.hasTex ) )
-				continue;  // a plain run has no look to drop, a case with no atlas no atlas
+			if ( ( r.red == 16 && !j.look ) || ( r.red == 32 && !j.hasTex ) || ( r.red == 128 && !j.lit ) )
+				continue;  // a plain run has no look to drop, a case with no atlas no atlas, an unlit one no light
 			std::vector<std::uint16_t> a, b;
 			if ( !runVk( r.red, a, b, false ) ) {
 				std::printf( "PRECIPVIEW %s red %s: the run failed (counts as a FAIL)\n", j.name.c_str(), r.name );
@@ -1113,6 +1202,10 @@ int main( int argc, char ** argv )
 				std::printf( "PRECIPVIEW %s red atlas %s\n", j.name.c_str(), j.look == 1 ? "PASSED: bound, not read (the drop's look reads no texture)"
 					: "PASSED: the case does not see its atlas" );
 				ok = ok && j.look == 1;
+			}
+			if ( r.red == 128 && v.ok() ) {  // every lit case must see its light dropped
+				std::printf( "PRECIPVIEW %s red light PASSED: the case does not see its light\n", j.name.c_str() );
+				ok = false;
 			}
 		}
 		jobAt++;
@@ -1130,7 +1223,7 @@ int main( int argc, char ** argv )
 		WwVkPresent::farTwinDrop( reinterpret_cast<std::uintptr_t>( &k ) ), WwVkPresent::sharedTargetDrop( reinterpret_cast<std::uintptr_t>( &k ) );
 	for ( char & k : normKeys )
 		WwVkPresent::farTwinDrop( reinterpret_cast<std::uintptr_t>( &k ) ), WwVkPresent::sharedTargetDrop( reinterpret_cast<std::uintptr_t>( &k ) );
-	for ( int c = 0; c < 8; c++ ) {
+	for ( int c = 0; c < kCases; c++ ) {
 		WwVkPresent::sharedTargetDrop( reinterpret_cast<std::uintptr_t>( &volKeys[c] ) );
 		for ( char & k : airKeys[c] )
 			WwVkPresent::sharedTargetDrop( reinterpret_cast<std::uintptr_t>( &k ) );

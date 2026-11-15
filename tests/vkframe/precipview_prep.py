@@ -48,7 +48,18 @@ CASES = [
     # the per-fragment atlas read (this case clean) or the quad / position path (this case red too)
     ('snow_near_disc', 3, 5.5, 1.0, 97, 37.25, (12345.6, -98765.4, 7210.0), (-55.0, 210.0), 0, 3.0, 0.5, 6.0, 1.0, 1.0, 0,
      0.7, -0.15, 40000, 0, 0),
+    # slice 2b (lit = element 20, last: GL keeps a program's uniforms, the unlit cases reset theirs): the sun alone on
+    # rain_near_disc's run unfogged, and on snow_far_fog's through the air (the veil on, the air's column on the sun)
+    ('rain_near_lit', 0, 2.0, 4.0, 11, 37.25, (-60500.0, 70000.0, 6300.0), (120.0, -40.0), 0, 1.0, 0.0, 0.0, 1.0, 1.0, 1,
+     2.0, -0.08, 40000, 0, 0, 1),
+    ('snow_far_lit', 3, 5.5, 1.0, 97, 600.125, (12345.6, -98765.4, 7210.0), (-55.0, 210.0), 1, 3.0, 0.5, 6.0, 1.0, 0.6, 1,
+     3.3, -0.01, 40000, 1, 0, 1),
 ]
+SUN = np.array([0.4, 0.3, 0.35]) / np.linalg.norm([0.4, 0.3, 0.35])  # world, toward the sun (the air's fogSun too)
+# a lit case's own sun (cellDirTo), chosen by the GS's mix: N = the eye's axis, thick / thin = 4 vpWrap( N.to, pcTrans )
+# (volGi 1). With SUN, rain_near_lit's view gives N.to -0.13, ratio 0.99: thin = thick, pcTrans unseen (51 samples, the
+# first lit run 11-15); this sun gives N.to 0.72, ratio 3.3, 44 degrees off the axis. SUN stays (the fogged cases' fogSun).
+LIT_SUN = {'rain_near_lit': np.array([0.3, -0.6, 0.75]) / np.linalg.norm([0.3, -0.6, 0.75])}
 FOG_TEX = ['atApTex', 'volTex', 'volTile', 'volAirTerr', 'volAirRainMap']  # precipRun's tex[2..6]
 FMT_DT = {'rgba32f': np.float32, 'rgba16f': np.float32, 'r32f': np.float32, 'rg32f': np.float32, 'r8': np.uint8, 'rgba8': np.uint8}
 
@@ -226,8 +237,8 @@ for ci, c in enumerate(CASES):
     if fog:
         # the air's uniforms and textures; its view-bound rows follow this case's view (frag_jobs' R is view -> world)
         A = air()
-        sun = np.array([0.4, 0.3, 0.35]); sun /= np.linalg.norm(sun)
-        AU = {k: v for k, v in A['uniforms'].items()
+        sun = SUN
+        AU ={k: v for k, v in A['uniforms'].items()
               if k not in ('viewMatrix', 'projectionMatrix', 'envMapRotation', 'viewportDimensions')}
         AU['volRect'] = [0, 0, 1.0 / W, 1.0 / H]
         AU['atApProj'] = [P[0, 0], P[1, 1], P[0, 2], P[1, 2]]
@@ -240,6 +251,21 @@ for ci, c in enumerate(CASES):
                 fn = 'tex_%s.bin' % k
                 t.data.tofile(os.path.join(d, fn))
                 f.write('%s %s %s %d %d %d %s %s %d %s\n' % (k, t.kind, t.fmt, t.w, t.h, t.d, t.filt, t.wrap, t.mips, fn))
+    lit = c[20] if len(c) > 20 else 0
+    if lit:
+        # the sun alone (volTerms 1): a non-grey sun off the view axis, the view's world rows (cellRow: view -> world, the
+        # eye at w), the phase (Rayleigh + two HG lobes, unequal per channel; each channel's weights sum to 1) and its
+        # isotropic level (volGi.rgb = the weights' sums), the thin / thick mix 0.5
+        sunL = LIT_SUN.get(c[0], SUN)
+        nto = float(R[2] @ sunL)  # N = cellWorldDir( 0, 0, 1 ) = R's third row (r, u, -d)
+        print('precipview case %s: lit N.to %.3f, thick / thin %.3f (want far from 1)' % (c[0], nto, 4 * max(nto + 0.5, 0) / 1.5))
+        U.update({'cellOn': [1], 'cellHasDir': [1], 'cellInterior': [0], 'cellDirColor': [1.6, 1.2, 0.75],
+                  'cellDirTo': list(sunL),'cellRow': np.c_[R.T, np.array(c[6])].reshape(-1), 'volTerms': [1],
+                  'volPhase': [0.2, 0.25, 0.3, 0.0, 0.5, 0.45, 0.4, 0.6, 0.3, 0.3, 0.3, -0.3], 'volGi': [1.0, 1.0, 1.0, 0.0],
+                  'pcTrans': [0.5]})
+        if fog:  # the veil on, the air's column on the sun: the light chain's own names for the air's medium
+            U.update({'volVeil': [1], 'airMed': AU['volAirMed'], 'airLayer': AU['volAirLayer'],
+                      'airGround': AU['volAirGround'], 'airSunLayer': [0]})
     if hasN:
         nl = bc3_levels(normals(tw, th, 31 + ci), os.path.join(d, 'tex_pcTexN.bin'))
         with open(os.path.join(d, 'tex.txt'), 'a', newline='\n') as f:
@@ -248,7 +274,7 @@ for ci, c in enumerate(CASES):
         for key, val in U.items():
             f.write('%s %s\n' % (key, fl(val)))
     with open(os.path.join(d, 'job.txt'), 'w', newline='\n') as f:
-        f.write('%d %d %d %d %d %u %d\n%.9g\n%d %d\n' % (W, H, first, n, has, seed, c[8], zd, fog, look))
+        f.write('%d %d %d %d %d %u %d\n%.9g\n%d %d %d\n' % (W, H, first, n, has, seed, c[8], zd, fog, look, lit))
     names.append(c[0])
     print('precipview case %s: %d particles (run %d + %d, %d in the view), atlas %dx%d (%d x %d cells), slab %.7f'
           % (c[0], n_all, first, n, int(inview.sum()), tw, th, cols, rows, zd))

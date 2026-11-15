@@ -7,7 +7,8 @@
  * cell_precip_gpu_ps.hlsl's frozen copy (precip_view_ps.hlsl). Nothing is compacted: the blend needs GL's order.
  * Slice 1 is unlit; slice 2a adds the air (wwFogFx's A / B in the record pass, its five textures in the compute set);
  * slice 3 the precipitation look (cell_precip_look.prog: precip_look_view_cs / _vs / _ps, a 192-byte record, the flake's
- * normal map at t2 of the pixel stage). A lit cell or the roof map are refused (GL draws).
+ * normal map at t2 of the pixel stage). Slice 2b lights the particles by the sun alone (precip_lit_view_cs, its own set);
+ * the lamps, GI, ambient, shadow maps, drift, terrain air, local sun, interiors and the roof map are refused (GL draws).
  * GL's state (cellprecip.cpp): depth LEQUAL, no depth write, cull off, blend SRC_ALPHA / ONE_MINUS_SRC_ALPHA, stencil ALWAYS
  * ref 1, REPLACE on depth pass, write mask 0x03. */
 namespace
@@ -17,6 +18,11 @@ constexpr VkDeviceSize kPrecipCsAt = 256;       // the compute pass's b31
 constexpr VkDeviceSize kPrecipPsAt = 2560;      // the pixel stage's b31 (past the compute block's 2112)
 constexpr VkDeviceSize kPrecipRecBytes = 112;   // PrecipRec: 7 float4
 constexpr VkDeviceSize kPrecipLookRecBytes = 192;  // the look's PrecipRec: 12 float4
+// slice 2b: the lit record pass's b31 and its globalUniforms (b0, zeros: only the lamps read it, refused) past the rest
+constexpr VkDeviceSize kPrecipLitCsAt = 2816;
+constexpr VkDeviceSize kPrecipGlobalAt = 8704, kPrecipGlobalBytes = 336;
+static_assert( kPrecipLitCsAt >= kPrecipPsAt + VkDeviceSize( WwVkPresent::kT_preciplookpsBytes ), "the lit block overlaps the pixel block" );
+static_assert( kPrecipGlobalAt >= kPrecipLitCsAt + VkDeviceSize( WwVkPresent::kT_preciplitcsBytes ), "globalUniforms overlaps the lit block" );
 
 struct Precip
 {
@@ -44,6 +50,24 @@ struct Precip
 	// this run's job (the drawing thread writes it before the hand, the worker records it)
 	int n = 0;
 	bool look = false;  // the look's pipelines
+	bool lit = false;   // slice 2b: the lit record pass
+	// slice 2b, made on the first lit run (a failure refuses lit runs only): its set (32 bindings), pipeline, and the zero
+	// inputs of what the sun alone does not read (a D16 1x1 x6 image as the shadow cubes / CSM, a zero texel buffer)
+	bool litMade = false, litBroken = false, litLaid = false;  // litLaid: the zero depth image cleared (the first lit record)
+	std::string litWhy;
+	VkDescriptorSetLayout litDsl = VK_NULL_HANDLE;
+	VkDescriptorPool litPool = VK_NULL_HANDLE;
+	VkDescriptorSet litSet = VK_NULL_HANDLE;
+	VkPipelineLayout litLayout = VK_NULL_HANDLE;
+	VkShaderModule csLit = VK_NULL_HANDLE;
+	VkPipeline csPipeLit = VK_NULL_HANDLE;
+	VkImage litDepth = VK_NULL_HANDLE;
+	VkDeviceMemory litDepthMem = VK_NULL_HANDLE;
+	VkImageView litCube = VK_NULL_HANDLE, litD2a = VK_NULL_HANDLE;
+	VkSampler litCmp = VK_NULL_HANDLE;
+	VkBuffer litTb = VK_NULL_HANDLE;
+	VkDeviceMemory litTbMem = VK_NULL_HANDLE;
+	VkBufferView litTbF = VK_NULL_HANDLE, litTbI = VK_NULL_HANDLE;
 	WwVkPresent::FxStat st;
 	std::map<std::uintptr_t, std::pair<unsigned, VkImage>> atlasCopied;  // a BC atlas twin's GL source and image once copied
 };
@@ -196,7 +220,7 @@ bool precipStatic( std::string & why )
 	}
 	D.pipelines += 2;
 	VkBufferCreateInfo bci { VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
-	bci.size = kPrecipPsAt + VkDeviceSize( WwVkPresent::kT_preciplookpsBytes );
+	bci.size = kPrecipGlobalAt + kPrecipGlobalBytes;  // the unlit blocks, then slice 2b's (offsets of the unlit ones unchanged)
 	bci.usage = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
 	bool mapped = v.vkCreateBuffer( v.dev, &bci, nullptr, &D.ubo ) == VK_SUCCESS;
 	if ( mapped ) {
@@ -217,6 +241,161 @@ bool precipStatic( std::string & why )
 	std::memset( D.uboPtr, 0, size_t( bci.size ) );
 	D.buildMs += nowMs() - t0;
 	D.made = true;
+	toneCacheSave();
+	return true;
+}
+
+/* slice 2b: the lit record pass (precip_lit_view_cs; its bindings as spirv-cross --reflect gives them, fxs()'s shifts):
+ * b0 globalUniforms, b31, t0 cellLights / t45 cellCluster (texel buffers) at 64 / 109, u0 the records at 192, the images
+ * below with their samplers. Made on the first lit run; a failure refuses lit runs only (the unlit ones keep drawing). */
+constexpr std::uint32_t kPrecipLitImg[14] = { 70, 81, 83, 89, 90, 91, 92, 93, 94, 95, 96, 97, 98, 110 };
+constexpr std::uint32_t kPrecipLitSmp[13] = { 134, 145, 153, 154, 155, 156, 157, 158, 159, 160, 161, 162, 174 };
+PFN_vkCmdClearDepthStencilImage precipClearDs = nullptr;
+
+bool precipLitStatic( std::string & why )
+{
+	Vk & v = vk();
+	Precip & D = precip();
+	if ( D.litMade )
+		return true;
+	if ( D.litBroken ) {
+		why = D.litWhy;
+		return false;
+	}
+	const double t0 = nowMs();
+	auto fail = [&]( const std::string & w ) {
+		D.litBroken = true;
+		D.litWhy = "the lit rain / snow: " + w;
+		why = D.litWhy;
+		return false;
+	};
+	const auto createBufferView = reinterpret_cast<PFN_vkCreateBufferView>( v.vkGetDeviceProcAddr( v.dev, "vkCreateBufferView" ) );
+	precipClearDs = reinterpret_cast<PFN_vkCmdClearDepthStencilImage>( v.vkGetDeviceProcAddr( v.dev, "vkCmdClearDepthStencilImage" ) );
+	if ( !createBufferView || !precipClearDs )
+		return fail( "no vkCreateBufferView / vkCmdClearDepthStencilImage" );
+	VkDescriptorSetLayoutBinding b[32] = {};
+	int nb = 0;
+	auto add = [&]( std::uint32_t at, VkDescriptorType ty ) {
+		b[nb].binding = at;
+		b[nb].descriptorType = ty;
+		b[nb].descriptorCount = 1;
+		b[nb].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+		nb++;
+	};
+	add( 0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER );
+	add( 31, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER );
+	add( 64, VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER );
+	add( 109, VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER );
+	add( 192, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER );
+	for ( std::uint32_t at : kPrecipLitImg )
+		add( at, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE );
+	for ( std::uint32_t at : kPrecipLitSmp )
+		add( at, VK_DESCRIPTOR_TYPE_SAMPLER );
+	VkDescriptorSetLayoutCreateInfo lci { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
+	lci.bindingCount = std::uint32_t( nb );
+	lci.pBindings = b;
+	const VkDescriptorPoolSize ps[5] = { { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 2 }, { VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER, 2 },
+		{ VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1 }, { VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 14 }, { VK_DESCRIPTOR_TYPE_SAMPLER, 13 } };
+	VkDescriptorPoolCreateInfo pci { VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO };
+	pci.maxSets = 1;
+	pci.poolSizeCount = 5;
+	pci.pPoolSizes = ps;
+	if ( v.vkCreateDescriptorSetLayout( v.dev, &lci, nullptr, &D.litDsl ) != VK_SUCCESS
+		|| v.vkCreateDescriptorPool( v.dev, &pci, nullptr, &D.litPool ) != VK_SUCCESS )
+		return fail( "the descriptor set layout / pool failed" );
+	VkDescriptorSetAllocateInfo dai { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO };
+	dai.descriptorPool = D.litPool;
+	dai.descriptorSetCount = 1;
+	dai.pSetLayouts = &D.litDsl;
+	VkPipelineLayoutCreateInfo plci { VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO };
+	plci.setLayoutCount = 1;
+	plci.pSetLayouts = &D.litDsl;
+	if ( v.vkAllocateDescriptorSets( v.dev, &dai, &D.litSet ) != VK_SUCCESS
+		|| v.vkCreatePipelineLayout( v.dev, &plci, nullptr, &D.litLayout ) != VK_SUCCESS )
+		return fail( "the descriptor set / pipeline layout failed" );
+	if ( !fxModule( vkframe_precip_lit_view_cs_spv, sizeof( vkframe_precip_lit_view_cs_spv ), D.csLit ) )
+		return fail( "the shader module failed" );
+	VkComputePipelineCreateInfo cp { VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO };
+	cp.stage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+	cp.stage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+	cp.stage.module = D.csLit;
+	cp.stage.pName = "main";
+	cp.layout = D.litLayout;
+	if ( v.vkCreateComputePipelines( v.dev, tone().cache, 1, &cp, nullptr, &D.csPipeLit ) != VK_SUCCESS )
+		return fail( "vkCreateComputePipelines failed" );
+	D.pipelines += 1;
+	// the shadow cubes' and the CSM's zero input: one D16 1x1 image of 6 layers (depth 1: nothing shadows), cleared by
+	// the first lit record; a cube-array view and a 2D-array view, a LEQUAL compare sampler (GL's shadow samplers)
+	VkImageCreateInfo ici { VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO };
+	ici.flags = VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT;
+	ici.imageType = VK_IMAGE_TYPE_2D;
+	ici.format = VK_FORMAT_D16_UNORM;
+	ici.extent = { 1, 1, 1 };
+	ici.mipLevels = 1;
+	ici.arrayLayers = 6;
+	ici.samples = VK_SAMPLE_COUNT_1_BIT;
+	ici.tiling = VK_IMAGE_TILING_OPTIMAL;
+	ici.usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+	if ( v.vkCreateImage( v.dev, &ici, nullptr, &D.litDepth ) != VK_SUCCESS )
+		return fail( "the zero depth image failed" );
+	VkMemoryRequirements ir {};
+	v.vkGetImageMemoryRequirements( v.dev, D.litDepth, &ir );
+	VkMemoryAllocateInfo iai { VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO };
+	iai.allocationSize = ir.size;
+	iai.memoryTypeIndex = memType( ir.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT );
+	if ( iai.memoryTypeIndex == UINT32_MAX || v.vkAllocateMemory( v.dev, &iai, nullptr, &D.litDepthMem ) != VK_SUCCESS
+		|| v.vkBindImageMemory( v.dev, D.litDepth, D.litDepthMem, 0 ) != VK_SUCCESS )
+		return fail( "the zero depth image: no device memory" );
+	D.litCube = imageView( D.litDepth, VK_IMAGE_VIEW_TYPE_CUBE_ARRAY, VK_FORMAT_D16_UNORM, VK_IMAGE_ASPECT_DEPTH_BIT, 1, 6 );
+	D.litD2a = imageView( D.litDepth, VK_IMAGE_VIEW_TYPE_2D_ARRAY, VK_FORMAT_D16_UNORM, VK_IMAGE_ASPECT_DEPTH_BIT, 1, 6 );
+	if ( !D.litCube || !D.litD2a )
+		return fail( "the zero depth image's views failed" );
+	VkSamplerCreateInfo sci { VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO };
+	sci.magFilter = sci.minFilter = VK_FILTER_NEAREST;
+	sci.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
+	sci.addressModeU = sci.addressModeV = sci.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+	sci.compareEnable = VK_TRUE;
+	sci.compareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
+	if ( v.vkCreateSampler( v.dev, &sci, nullptr, &D.litCmp ) != VK_SUCCESS )
+		return fail( "the compare sampler failed" );
+	// the lamps' zero texel buffer (float4 cellLights, int4 cellCluster): 64 zero bytes, host-visible
+	for ( VkFormat tf : { VK_FORMAT_R32G32B32A32_SFLOAT, VK_FORMAT_R32G32B32A32_SINT } ) {
+		VkFormatProperties fp {};
+		v.vkGetPhysicalDeviceFormatProperties( v.phys, tf, &fp );
+		if ( !( fp.bufferFeatures & VK_FORMAT_FEATURE_UNIFORM_TEXEL_BUFFER_BIT ) )
+			return fail( "format " + std::to_string( int( tf ) ) + " is no uniform texel buffer on the present device" );
+	}
+	VkBufferCreateInfo bci { VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
+	bci.size = 64;
+	bci.usage = VK_BUFFER_USAGE_UNIFORM_TEXEL_BUFFER_BIT;
+	bool tb = v.vkCreateBuffer( v.dev, &bci, nullptr, &D.litTb ) == VK_SUCCESS;
+	if ( tb ) {
+		VkMemoryRequirements br {};
+		v.vkGetBufferMemoryRequirements( v.dev, D.litTb, &br );
+		VkMemoryAllocateInfo ai { VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO };
+		ai.allocationSize = br.size;
+		ai.memoryTypeIndex = memType( br.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT );
+		void * p = nullptr;
+		tb = ai.memoryTypeIndex != UINT32_MAX && v.vkAllocateMemory( v.dev, &ai, nullptr, &D.litTbMem ) == VK_SUCCESS
+			&& v.vkBindBufferMemory( v.dev, D.litTb, D.litTbMem, 0 ) == VK_SUCCESS && v.vkMapMemory( v.dev, D.litTbMem, 0, VK_WHOLE_SIZE, 0, &p ) == VK_SUCCESS;
+		if ( tb && p ) {
+			std::memset( p, 0, size_t( bci.size ) );
+			v.vkUnmapMemory( v.dev, D.litTbMem );
+		}
+		tb = tb && p;
+	}
+	if ( !tb )
+		return fail( "the zero texel buffer failed" );
+	VkBufferViewCreateInfo bvi { VK_STRUCTURE_TYPE_BUFFER_VIEW_CREATE_INFO };
+	bvi.buffer = D.litTb;
+	bvi.range = VK_WHOLE_SIZE;
+	bvi.format = VK_FORMAT_R32G32B32A32_SFLOAT;
+	VkBufferViewCreateInfo bvi2 = bvi;
+	bvi2.format = VK_FORMAT_R32G32B32A32_SINT;
+	if ( createBufferView( v.dev, &bvi, nullptr, &D.litTbF ) != VK_SUCCESS || createBufferView( v.dev, &bvi2, nullptr, &D.litTbI ) != VK_SUCCESS )
+		return fail( "the zero texel buffer's views failed" );
+	D.buildMs += nowMs() - t0;
+	D.litMade = true;
 	toneCacheSave();
 	return true;
 }
@@ -363,13 +542,30 @@ bool precipRecord( std::string & why )
 	Vk & v = vk();
 	Fx & F = fx();
 	Precip & D = precip();
-	const VkPipeline gPipe = D.look ? D.pipeLook : D.pipe, cPipe = D.look ? D.csPipeLook : D.csPipe;
+	const VkPipeline gPipe = D.look ? D.pipeLook : D.pipe, cPipe = D.lit ? D.csPipeLit : D.look ? D.csPipeLook : D.csPipe;
 	if ( !F.fbAir || !gPipe || !cPipe || !D.rec ) {
 		why = "no framebuffer / pipeline / record buffer for rain / snow";
 		return false;
 	}
+	if ( D.lit && !D.litLaid ) {  // the zero depth image: UNDEFINED -> cleared to 1 (nothing shadows) -> read by the record pass
+		VkImageMemoryBarrier ib { VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER };
+		ib.srcQueueFamilyIndex = ib.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+		ib.image = D.litDepth;
+		ib.subresourceRange = { VK_IMAGE_ASPECT_DEPTH_BIT, 0, 1, 0, 6 };
+		ib.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+		ib.newLayout = VK_IMAGE_LAYOUT_GENERAL;
+		ib.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+		v.vkCmdPipelineBarrier( F.cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1, &ib );
+		const VkClearDepthStencilValue one { 1.0f, 0 };
+		precipClearDs( F.cmd, D.litDepth, VK_IMAGE_LAYOUT_GENERAL, &one, 1, &ib.subresourceRange );
+		ib.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
+		ib.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+		ib.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+		v.vkCmdPipelineBarrier( F.cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 0, nullptr, 0, nullptr, 1, &ib );
+		D.litLaid = true;
+	}
 	v.vkCmdBindPipeline( F.cmd, VK_PIPELINE_BIND_POINT_COMPUTE, cPipe );
-	v.vkCmdBindDescriptorSets( F.cmd, VK_PIPELINE_BIND_POINT_COMPUTE, D.csLayout, 0, 1, &D.csSet, 0, nullptr );
+	v.vkCmdBindDescriptorSets( F.cmd, VK_PIPELINE_BIND_POINT_COMPUTE, D.lit ? D.litLayout : D.csLayout, 0, 1, D.lit ? &D.litSet : &D.csSet, 0, nullptr );
 	v.vkCmdDispatch( F.cmd, std::uint32_t( ( D.n + 63 ) / 64 ), 1, 1 );
 	VkMemoryBarrier mb { VK_STRUCTURE_TYPE_MEMORY_BARRIER };  // the records written -> the vertex stage reads them
 	mb.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
@@ -426,8 +622,52 @@ bool precipRun( const PrecipRun & t, std::string & why )
 	};
 	if ( D.broken )
 		return refuse( D.brokenWhy );
-	if ( t.lit )
-		return refuse( "a lit cell (the particles' light is slice 2's)" );
+	if ( t.lit ) {  // slice 2b: the sun alone; the rest of GL's particle light is refused (GL draws)
+		if ( !t.litBlock )
+			return refuse( "a lit cell without its light block packed" );
+		if ( t.look )
+			return refuse( "a lit cell with the precipitation look (a later slice)" );
+		auto litAt = [&]( const char * nm ) {  // the light block's own members past the head, or the head's (kT_precipcs)
+			const int at = precipAt( kT_preciplitcs, int( std::size( kT_preciplitcs ) ), nm );
+			return at >= 0 ? at : precipAt( kT_precipcs, int( std::size( kT_precipcs ) ), nm );
+		};
+		auto litI = [&]( const char * nm ) {
+			const int at = litAt( nm );
+			int x = 0;
+			if ( at >= 0 )
+				std::memcpy( &x, t.cs + at, 4 );
+			return at < 0 ? -1 : x;
+		};
+		auto litF = [&]( const char * nm, int k ) {
+			const int at = litAt( nm );
+			float x = 0.0f;
+			if ( at >= 0 )
+				std::memcpy( &x, t.cs + at + 4 * k, 4 );
+			return x;
+		};
+		const int terms = litI( "volTerms" );
+		const bool local = litF( "vpSun", 3 ) > 0.5f;
+		if ( terms < 0 || litI( "cellInterior" ) < 0 || litI( "volPartRed" ) < 0 )
+			return refuse( "the light block lacks a member the refusals read" );
+		if ( litI( "cellInterior" ) != 0 )
+			return refuse( "an interior's lit particles (its law is not judged)" );
+		if ( ( terms & 2 ) && litI( "cellLightCount" ) > 0 )
+			return refuse( "the lamps on the particles (refused in slice 2b)" );
+		if ( ( terms & 4 ) && litI( "cellGiOn" ) != 0 )
+			return refuse( "the GI on the particles (refused in slice 2b)" );
+		if ( ( terms & 8 ) && ( litI( "cellExtDalc" ) != 0 || local ) )
+			return refuse( "the ambient on the particles (refused in slice 2b)" );
+		if ( litI( "volCsm" ) != 0 )  // (the sun's only shadow read, wwSunShadow, is behind volCsm)
+			return refuse( "the sun's shadow map on the particles (refused in slice 2b)" );
+		if ( litF( "volAirDrift", 0 ) > 0.0f )
+			return refuse( "the air's drift on the sun (refused in slice 2b)" );
+		if ( litI( "airTerrOn" ) != 0 )
+			return refuse( "the terrain air on the sun (refused in slice 2b)" );
+		if ( local )
+			return refuse( "the local sun law (refused in slice 2b)" );
+		if ( litI( "volPartRed" ) != 0 )
+			return refuse( "a particle-light red (volPartRed) in a lit run" );
+	}
 	if ( t.roofOn || t.tex[0].tex )
 		return refuse( "the roof map on (slice 3's)" );
 	if ( !toneFrameIs( t.color ) || !T.colorView || !T.dsView )
@@ -461,6 +701,8 @@ bool precipRun( const PrecipRun & t, std::string & why )
 		return breakOff( w );
 	if ( F.airSamples != T.samples )
 		return breakOff( "rain / snow's pipeline is not at the frame's sample count" );
+	if ( t.lit && !precipLitStatic( w ) )
+		return refuse( w );  // the lit pass alone: the unlit runs keep drawing
 	const bool look = t.look && ( t.red & 16 ) == 0;  // red 16: a look run through the plain pipelines
 	const VkDeviceSize recStride = look ? kPrecipLookRecBytes : kPrecipRecBytes;
 	if ( !precipRecords( VkDeviceSize( t.n ) * recStride, t.recOut != nullptr, w ) )
@@ -494,10 +736,18 @@ bool precipRun( const PrecipRun & t, std::string & why )
 	std::uint8_t * c = u + kPrecipCsAt;
 	std::memcpy( c, t.cs, size_t( kT_precipcsBytes ) );
 	const std::uint32_t first = std::uint32_t( t.first ), count = std::uint32_t( t.n );
-	const int csRed = ( ( t.red & 1 ) ? 1 : 0 ) | ( ( t.red & 8 ) ? 2 : 0 );
+	const int csRed = ( ( t.red & 1 ) ? 1 : 0 ) | ( ( t.red & 8 ) ? 2 : 0 ) | ( ( t.red & 128 ) ? 4 : 0 );  // 4: the light dropped
 	std::memcpy( c + atFirst, &first, 4 );
 	std::memcpy( c + atCount, &count, 4 );
 	std::memcpy( c + atRed, &csRed, 4 );
+	if ( t.lit ) {  // the lit record pass's b31 (the head at kT_precipcs's offsets + the light block) and its zero globalUniforms
+		std::uint8_t * l = u + kPrecipLitCsAt;
+		std::memcpy( l, t.cs, size_t( kT_preciplitcsBytes ) );
+		std::memcpy( l + atFirst, &first, 4 );
+		std::memcpy( l + atCount, &count, 4 );
+		std::memcpy( l + atRed, &csRed, 4 );
+		std::memset( u + kPrecipGlobalAt, 0, size_t( kPrecipGlobalBytes ) );
+	}
 	std::memset( u, 0, size_t( kPrecipViewBytes ) );
 	std::memcpy( u, t.cs + atProj, 64 );
 	std::memcpy( u + 64, t.cs + atAtlas, 16 );
@@ -557,8 +807,49 @@ bool precipRun( const PrecipRun & t, std::string & why )
 	put( 20, D.gSet, 66, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, nullptr, &ni[0] );
 	put( 21, D.gSet, 130, VK_DESCRIPTOR_TYPE_SAMPLER, nullptr, &ni[1] );
 	v.vkUpdateDescriptorSets( v.dev, 22, ws, 0, nullptr );
+	if ( t.lit ) {  // the lit record pass's set: the run's inputs as the unlit pass, the zero inputs of the refused terms
+		const VkDescriptorBufferInfo lb[3] = { { D.ubo, kPrecipGlobalAt, kPrecipGlobalBytes },
+			{ D.ubo, kPrecipLitCsAt, VkDeviceSize( kT_preciplitcsBytes ) }, { D.rec, 0, recBytes } };
+		VkDescriptorImageInfo li[14] = {};
+		const VkImageView liv[14] = { D.litCube, F.d2a, F.d3, views[2], views[3], views[4], views[5], views[6], F.d3, D.litD2a,
+			F.d2, F.d2, F.d2, views[1] };  // kPrecipLitImg's order
+		for ( int k = 0; k < 14; k++ ) {
+			li[k].imageView = liv[k];
+			li[k].imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+		}
+		VkDescriptorImageInfo ls[13] = {};
+		const VkSampler lsv[13] = { D.litCmp, F.smp[0], F.smp[smp[2]], F.smp[smp[3]], F.smp[smp[4]], F.smp[smp[5]], F.smp[smp[6]],
+			F.smp[0], D.litCmp, F.smp[0], F.smp[0], F.smp[0], F.smp[smp[1]] };  // kPrecipLitSmp's order
+		for ( int k = 0; k < 13; k++ )
+			ls[k].sampler = lsv[k];
+		VkWriteDescriptorSet lw[32] = {};
+		int nl = 0;
+		auto lput = [&]( std::uint32_t b, VkDescriptorType ty, const VkDescriptorBufferInfo * bp, const VkDescriptorImageInfo * ip,
+			const VkBufferView * tp ) {
+			lw[nl].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+			lw[nl].dstSet = D.litSet;
+			lw[nl].dstBinding = b;
+			lw[nl].descriptorCount = 1;
+			lw[nl].descriptorType = ty;
+			lw[nl].pBufferInfo = bp;
+			lw[nl].pImageInfo = ip;
+			lw[nl].pTexelBufferView = tp;
+			nl++;
+		};
+		lput( 0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, &lb[0], nullptr, nullptr );
+		lput( 31, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, &lb[1], nullptr, nullptr );
+		lput( 192, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, &lb[2], nullptr, nullptr );
+		lput( 64, VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER, nullptr, nullptr, &D.litTbF );
+		lput( 109, VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER, nullptr, nullptr, &D.litTbI );
+		for ( int k = 0; k < 14; k++ )
+			lput( kPrecipLitImg[k], VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, nullptr, &li[k], nullptr );
+		for ( int k = 0; k < 13; k++ )
+			lput( kPrecipLitSmp[k], VK_DESCRIPTOR_TYPE_SAMPLER, nullptr, &ls[k], nullptr );
+		v.vkUpdateDescriptorSets( v.dev, std::uint32_t( nl ), lw, 0, nullptr );
+	}
 	D.n = t.n;
 	D.look = look;
+	D.lit = t.lit;
 	F.kind = 8;
 	F.w = t.w;
 	F.h = t.h;

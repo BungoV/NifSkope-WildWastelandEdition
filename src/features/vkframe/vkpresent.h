@@ -722,12 +722,13 @@ struct PrecipRun
 	int w = 0, h = 0, vp[4] = {};    //!< the tone frame's size, GL's viewport
 	unsigned color = 0;             //!< the tone frame's colour (toneFrameIs)
 	int first = 0, n = 0;           //!< the run: glDrawArrays( GL_POINTS, first, n )
-	bool lit = false, fogged = false, roofOn = false;  //!< lit and roofOn refused (GL draws); fogged: slice 2a
+	bool lit = false, fogged = false, roofOn = false;  //!< lit: slice 2b (the sun alone; the rest refused); roofOn refused (GL draws); fogged: slice 2a
+	bool litBlock = false;          //!< cs holds kT_preciplitcs (a lit run without it is refused)
 	bool look = false;              //!< slice 3: cell_precip_look.prog's run (cs / ps also hold kT_preciplook*)
 	FxTex tex[8];                   //!< t0 pcRoof (none yet), t1 pcTex (the atlas; a BC one twinned by farTwin), the air's t25 atApTex, t26 volTex, t27 volTile, t28 volAirTerr, t29 volAirRainMap, the look's pcTexN
-	std::uint8_t cs[kT_precipcsBytes] = {};  //!< fxPack( cell_precip_gpu, kT_precipcs ) (+ kT_preciplookcs for a look run)
+	std::uint8_t cs[kT_preciplitcsBytes] = {};  //!< fxPack( cell_precip_gpu, kT_precipcs ) (+ kT_preciplookcs for a look run, kT_preciplitcs for a lit one)
 	std::uint8_t ps[kT_preciplookpsBytes] = {};  //!< fxPack( cell_precip_gpu, kT_precipps ) (+ kT_preciplookps for a look run)
-	int red = 0;                    //!< gates only: 1 the cull radius 0, 2 the strip's last two corners swapped, 4 no near fade, 8 the air dropped, 16 the look dropped (the plain pipelines draw a look run), 32 the atlas dropped (t1 / t7 the zero texture)
+	int red = 0;                    //!< gates only: 1 the cull radius 0, 2 the strip's last two corners swapped, 4 no near fade, 8 the air dropped, 16 the look dropped (the plain pipelines draw a look run), 32 the atlas dropped (t1 / t7 the zero texture), 128 the light dropped (lit = 1)
 	std::uint8_t * recOut = nullptr;  //!< gates only: the run's records read back (n x 112 bytes, 192 a look run; host-visible records, a fence wait); null in the app
 };
 /* GL current, the tone frame bound, cell_precip_gpu's uniforms set: one run of particles on Vulkan, a record pass then
@@ -1100,6 +1101,10 @@ template <class Fn> bool precipDraw( Fn * fn, unsigned prog, int first, int coun
 			if ( t.look ) {
 				fxPack( fn, prog, kT_preciplookcs, int( std::size( kT_preciplookcs ) ), t.cs );
 				fxPack( fn, prog, kT_preciplookps, int( std::size( kT_preciplookps ) ), t.ps );
+			}
+			if ( t.lit ) {  // slice 2b: the light chain's block (its head is kT_precipcs's, packed again the same)
+				fxPack( fn, prog, kT_preciplitcs, int( std::size( kT_preciplitcs ) ), t.cs );
+				t.litBlock = true;
 			}
 			drew = precipRun( t, why );  // a refusal is counted there
 		}
