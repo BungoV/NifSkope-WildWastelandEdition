@@ -500,6 +500,21 @@ int main( int argc, char ** argv )
 	const float p00 = 1.7f, p11 = 1.7f * float( GW ) / float( GH );
 	float row[12];
 	rowsOf( row );
+	/* a diagnostic only (GIHALF_PROBE=rows_id / rows_perm / rows_three, never the gate): rows with no translation and one
+	 * entry a row, so cellWorldPos is exact in any float order and the key carries posView (times the entry): splits the
+	 * key's miss into z / posView and the matrix sum. id = identity, perm = (y 2, z 0.5, x 4), three = (z 3, x 3, y 3) */
+	if ( probe && std::string( probe ).rfind( "rows_", 0 ) == 0 ) {
+		const std::string mm = std::string( probe ).substr( 5 );
+		const bool eye = mm.size() > 4 && mm.compare( mm.size() - 4, 4, "_eye" ) == 0;	// rows_id_eye: the eye's translation kept
+		const std::string m = eye ? mm.substr( 0, mm.size() - 4 ) : mm;
+		const int col[3] = { m == "id" ? 0 : m == "perm" ? 1 : 2, m == "id" ? 1 : m == "perm" ? 2 : 0, m == "id" ? 2 : m == "perm" ? 0 : 1 };
+		const float sc[3] = { m == "id" ? 1.0f : m == "perm" ? 2.0f : 3.0f, m == "id" ? 1.0f : m == "perm" ? 0.5f : 3.0f,
+			m == "id" ? 1.0f : m == "perm" ? 4.0f : 3.0f };
+		for ( int r = 0; r < 3; r++ )
+			for ( int c = 0; c < 4; c++ )
+				row[r * 4 + c] = c == col[r] ? sc[r] : c == 3 && eye ? kEye[r] : 0.0f;
+		std::printf( "PROBE %s (not the gate): rows with one entry each, no translation\n", probe );
+	}
 	// GL's uniforms, as wwCellLightsUniforms + giHalfPass set them
 	auto loc = [&]( const char * n ) { return F.glGetUniformLocation( prog, n ); };
 	F.glUseProgram( prog );
@@ -508,7 +523,8 @@ int main( int argc, char ** argv )
 	F.glUniform1i( loc( "cellGiLoop8" ), 8 );
 	F.glUniform1i( loc( "cellDdgiOn" ), 1 );
 	F.glUniform1i( loc( "cellDdgiCount" ), kCasc );
-	F.glUniform1i( loc( "cellDdgiRed" ), 0 );
+	// a diagnostic only (GIHALF_PROBE=ddgired<N>, never the gate): the read's stage bits off by uniform (same binaries)
+	F.glUniform1i( loc( "cellDdgiRed" ), probe && std::string( probe ).rfind( "ddgired", 0 ) == 0 ? std::atoi( probe + 7 ) : 0 );
 	{
 		float o[16] = {}, s[16] = {};
 		int d[16] = {}, b[4] = {};

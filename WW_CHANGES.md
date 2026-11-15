@@ -96,6 +96,11 @@ Changed, not built, not checked live.
   probe; the rest is inside the read). The bar is left as written.
 - VKFAR4: until that gate is green the Vulkan route is refused by default: GL draws the screen GI and the route line
   says "its gate is red". The red WW_VKVIEW_GIHALF_RED=1 stays.
+- VKFAR4: the screen GI's view position now follows NV GL's order (u = c x 1/F, then (z - 2u z) x 1/p unfused): the
+  key (world position) is bit-exact on every texel of both steps (before: 2446 / 3589 / 1190 bits of x / y / z off).
+  The gate still fails 13 of 15: giStep 1 1170 texels past the bar (61 past one E step), giStep 2 305 (14). With the
+  read's stages turned off one by one: the Chebyshev test makes the big E misses, the bias makes the 66 fade misses,
+  about 200 texels stay with every stage off. The read's text equals GL's; the rest is compiler lowering.
 
 ## VKFAR2 L8 slice 1 (2026-11-14): rain / snow pass for the Vulkan view, not wired in (gate red)
 
