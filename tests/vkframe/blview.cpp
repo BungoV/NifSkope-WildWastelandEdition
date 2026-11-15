@@ -1203,6 +1203,14 @@ int main( int argc, char ** argv )
 		const bool c8s = cellGate( spvDir + "/cellset/spirv", 8, fxBc4, 1u << 2, "bc4" );
 		const bool c8rt = cellGate( spvDir + "/cellset/spirv", 8, fx, 0xFu << 9, "rt", 1u | 8u );
 		ok = c8 && c8s && c8rt && ok;
+		/* lane VKWATER5: the cell route's screen terms (vars 32): GL-owned cellAo (and cellSsr on twins 2, 3, 5, 6) bound as the app binds
+		 * them; the copy red (reds bit 8) must FAIL on each. Twin 4's base variant has no cell lights (no cellAo read) */
+		const bool a2 = cellGate( spvDir + "/cellset/spirv", 2, maps, 1u << 8, "ao", 32u );
+		const bool a3 = cellGate( spvDir + "/cellset/spirv", 3, maps, 1u << 8, "ao", 32u );
+		const bool a5 = cellGate( spvDir + "/cellset/spirv", 5, pbrm, 1u << 8, "ao", 32u );
+		const bool a6 = cellGate( spvDir + "/cellset/spirv", 6, pbrm, 1u << 8, "ao", 32u );
+		const bool a8 = cellGate( spvDir + "/cellset/spirv", 8, fx, 1u << 8, "ao", 32u );
+		ok = a2 && a3 && a5 && a6 && a8 && ok;
 	} else
 		std::printf( "BLVIEW cell not run (the cell twins read the texture cache's twins: MODE=bc)\n" );
 	vk().vkWaitForFences( vk().dev, 1, &gv.fence, VK_TRUE, 1000000000ull );

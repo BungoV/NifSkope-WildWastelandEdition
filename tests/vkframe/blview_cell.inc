@@ -62,7 +62,23 @@
  * volTerms 2: their lamps through vpLight, where a shadow-casting light takes the ReSTIR ratio on the ratio's depth), so the
  * ratio reaches an effect; lit draws 0, 1, 3 stay plain (an air card takes no GI surface term, so the GI probes and the atlas
  * red reach GL through them; as air cards draws 1 and 3 fade out whole).
- * The RT row's bar, probes (cellRestirOn 0 among them) and its four reds, restir with them. */
+ * The RT row's bar, probes (cellRestirOn 0 among them) and its four reds, restir with them.
+ * Screen terms (lane VKWATER5 11-15, `BLVIEW <twin> ao`, vars 32; stated before its first run, never widened): the cell route's twin
+ * of blview's colour ao row (VKWATER3 8b678da1 proved the copy twin on bl only). Twins 2, 3, 5, 6 and 8, the programs that sample
+ * cellAo (twin 4's base variant has no cell lights; twin 7 takes a row only if its GL probe below reaches). Bound as ao.cpp binds
+ * it: a sampler on its own unit, cellAoOn 1, cellAoRect = (0, 0, 1 / w, 1 / h) of the frame, cellAo a GL R32F texture of half the
+ * view, a ramp in y and a 7-texel saw in x, bilinear, clamped (the bl row's texture). Twins 2, 3, 5, 6 also bind cellSsr as
+ * cellssr.cpp does: a GL RGBA32F texture of half the view (rgb a ramp in y and a 5-texel saw in x, a 0.3 .. 1 confidence saw
+ * in x), cellSsrOn 1, cellSsrMat 1, cellSsrRect, with the cube term's inputs (envReflection 1, cellCubeMat 1 1 0 0) seeded so the
+ * reflection reaches the colour (unseeded, k = 0 and the term is nothing). cellAoDecal: GL's read is dead without WW_CELL_PRT (no gated
+ * variant carries it), r2 printed `cellAoDecal -1` on every twin (GL's program has no such sampler), so it is never bound; the code
+ * binds it as a copy-only input if a variant ever has the unit. Amended 11-15 after r1: cellSsr is bound wherever GL has the sampler,
+ * but its reach probe is a bar on twins 2 and 3 only; on pbrm (5, 6) cellSsrOn 0 moved 0 of 11571 pixels with these seeds, printed
+ * as info and not claimed. r1 also found the copy memo re-copying cellAo on the first frame of cellSsr's new twin (objCellCopyTwin).
+ * Bars: the twin's own (depth, colour, crossing counts); the copy line: the crossing takes exactly ONE copy of each GL-owned input
+ * a frame (cellAo kSW/2 x kSH/2 x 4 B, cellSsr x 16 B, and twin 8's soft-fade depth kSW x kSH x 4 B), copies and bytes equal.
+ * Probes: cellAoOn 0 (every twin), and cellSsrOn 0 (twins 2, 3), each move GL's colour on >= 20 % of the covered pixels. Red copy (reds bit 8:
+ * every copy twin copied from one texel on in x) must FAIL and move the Vulkan colour. */
 bool cellGate( const std::string & spirvDir, int twin, const GLuint maps[4], unsigned reds = 15u, const char * label = nullptr, unsigned vars = 0u )
 {
 	using namespace WwVkPresent;
@@ -84,6 +100,9 @@ bool cellGate( const std::string & spirvDir, int twin, const GLuint maps[4], uns
 	const bool oneT = twin == 4 || fxT;  // writes target 0 only
 	const bool skinV = ( vars & 2u ) != 0, alphaV = ( vars & 4u ) != 0, rtV = ( vars & 8u ) != 0;
 	const bool volV = twin == 7 && ( vars & 16u ) != 0;  // twin 7: the lit cards volumetric (the ReSTIR ratio's way into an effect)
+	const bool aoV = ( vars & 32u ) != 0;  // lane VKWATER5: cellAo (and cellSsr on twins 2, 3, 5, 6) bound as the app binds them
+	const bool ssrV = aoV;  // cellSsr and cellAoDecal are bound wherever GL's program has the sampler (a unit with none holds a stale texture)
+	const bool ssrJudged = twin == 2 || twin == 3;  // the SSR probe is a bar there only: pbrm's cube term never moved (r1: 0 of 11571)
 	const std::string tagS = std::string( twinTag[twin] ) + ( label ? std::string( " " ) + label : std::string() );
 	const char * tag = tagS.c_str();
 	struct CellGl
@@ -484,6 +503,71 @@ bool cellGate( const std::string & spirvDir, int twin, const GLuint maps[4], uns
 			return false;
 		}
 	}
+	/* lane VKWATER5: the screen terms as ao.cpp / cellssr.cpp bind them, GL-owned textures of half the view: cellAo R32F (a ramp in
+	 * y, a 7-texel saw in x, bilinear, clamped), cellSsr RGBA32F (rgb a ramp and a 5-texel saw, confidence a 7-texel saw 0.3 .. 1) */
+	GLuint aoTex = 0, ssrTex = 0, decalTex = 0;
+	int aoUnit = -1, ssrUnit = -1, decalUnit = -1;
+	if ( aoV ) {
+		const int aw = kSW / 2, ah = kSH / 2;
+		std::vector<float> av( std::size_t( aw ) * std::size_t( ah ) ), sv( std::size_t( aw ) * std::size_t( ah ) * 4 );
+		for ( int y = 0; y < ah; y++ )
+			for ( int x = 0; x < aw; x++ ) {
+				const std::size_t p = std::size_t( y ) * std::size_t( aw ) + std::size_t( x );
+				const float ry = float( y ) / float( ah - 1 );
+				av[p] = 0.15f + 0.5f * ry + 0.3f * float( x % 7 ) / 6.0f;
+				sv[p * 4] = 0.1f + 0.6f * ry;
+				sv[p * 4 + 1] = 0.1f + 0.5f * float( x % 5 ) / 4.0f;
+				sv[p * 4 + 2] = 0.4f;
+				sv[p * 4 + 3] = 0.3f + 0.7f * float( x % 7 ) / 6.0f;
+			}
+		auto make = [&]( GLuint & t, GLint ifmt, GLenum fmt, const float * px ) {
+			glGenTextures( 1, &t );
+			glBindTexture( GL_TEXTURE_2D, t );
+			glTexImage2D( GL_TEXTURE_2D, 0, ifmt, aw, ah, 0, fmt, GL_FLOAT, px );
+			glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR );
+			glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR );
+			glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, 0x812F );  // CLAMP_TO_EDGE
+			glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, 0x812F );
+			glTexParameteri( GL_TEXTURE_2D, 0x813D, 0 );  // MAX_LEVEL
+			glBindTexture( GL_TEXTURE_2D, 0 );
+		};
+		make( aoTex, 0x822E, 0x1903, av.data() );  // R32F from RED
+		const GLint la = locOf( "cellAo" );
+		aoUnit = unitAt.count( la ) ? unitAt[la] : -1;
+		/* cellAoDecal (r1: twins 2, 5 and 8 took one copy beyond cellAo / cellSsr): the app binds the AO decal target on its own unit
+		 * (ao.cpp), the same size as cellAo; a copy-only input here, its read needs WW_CELL_PRT which no gated variant carries */
+		const GLint ld = locOf( "cellAoDecal" );
+		decalUnit = unitAt.count( ld ) ? unitAt[ld] : -1;
+		if ( decalUnit >= 0 ) {
+			for ( float & v : av )
+				v = 1.0f - v;
+			make( decalTex, 0x822E, 0x1903, av.data() );
+			set( "cellAoDecalOn", { 1 } );
+			set( "cellAoDecalRect", { 0.0f, 0.0f, 0.0f, 0.0f } );
+		}
+		set( "cellAoOn", { 1 } );
+		set( "cellAoRect", { 0.0f, 0.0f, 1.0f / float( kSW ), 1.0f / float( kSH ) } );
+		if ( ssrV ) {
+			make( ssrTex, 0x8814, GL_RGBA, sv.data() );  // RGBA32F
+			const GLint ls = locOf( "cellSsr" );
+			ssrUnit = unitAt.count( ls ) ? unitAt[ls] : -1;
+			if ( ssrUnit < 0 ) {  // no such sampler in GL's program: nothing to bind
+				glDeleteTextures( 1, &ssrTex );
+				ssrTex = 0;
+			}
+			set( "cellSsrOn", { 1 } );
+			set( "cellSsrMat", { 1 } );
+			set( "cellSsrRect", { 0.0f, 0.0f, 1.0f / float( kSW ), 1.0f / float( kSH ) } );
+			set( "envReflection", { 1.0f } );  // unseeded the cube term's k is 0 and the reflection is nothing
+			set( "cellCubeMat", { 1.0f, 1.0f, 0.0f, 0.0f } );
+		}
+		if ( aoUnit < 0 || glGetError() != GL_NO_ERROR ) {
+			std::printf( "BLVIEW %s FAIL (no unit for cellAo (%d), or a GL error making the screen textures)\n", tag, aoUnit );
+			return false;
+		}
+		std::printf( "BLVIEW %s screen units: cellAo %d, cellAoDecal %d, cellSsr %d (-1: GL's program has no such sampler)\n", tag, aoUnit, decalUnit,
+			ssrUnit );
+	}
 	/* RT GI (vars 8): the ReSTIR ratio (GL's buffer texture), the atlas (a store), the screen GI and its key (shared targets);
 	 * the key's surface positions come from GL's sweep below */
 	static int giHalfAt = 0, giKeyAt = 0;
@@ -861,6 +945,12 @@ bool cellGate( const std::string & spirvDir, int twin, const GLuint maps[4], uns
 			u.bindTextures( GLuint( lightUnit ), 1, &lightTex );
 		if ( fxDepthTex )
 			u.bindTextures( GLuint( fxDepthUnit ), 1, &fxDepthTex );
+		if ( aoTex )
+			u.bindTextures( GLuint( aoUnit ), 1, &aoTex );
+		if ( ssrTex )
+			u.bindTextures( GLuint( ssrUnit ), 1, &ssrTex );
+		if ( decalTex )
+			u.bindTextures( GLuint( decalUnit ), 1, &decalTex );
 		if ( rtV && rtUnits ) {
 			u.bindTextures( GLuint( restirUnit ), 1, &restirTex );
 			u.bindTextures( GLuint( atlasUnit ), 1, &atlasTex );
@@ -1027,6 +1117,30 @@ bool cellGate( const std::string & spirvDir, int twin, const GLuint maps[4], uns
 		std::printf( "BLVIEW %s GL map probe %s: csmForce 1 moves GL's colour on %zu of %zu covered pixels (bar >= 20 %%)\n", tag,
 			csmReach ? "OK" : "FAIL", moved, cov );
 	}
+	if ( aoV ) {  // lane VKWATER5: each screen term reaches GL's colour (else the copy red could test nothing)
+		static const char * scr[2] = { "cellAoOn", "cellSsrOn" };
+		for ( int k = 0; k < ( ssrTex ? 2 : 1 ); k++ ) {
+			CellOut g2;
+			set( scr[k], { 0 } );
+			glSweep( g2 );
+			set( scr[k], { 1 } );  // back to its launch value
+			std::size_t cov = 0, moved = 0;
+			for ( std::size_t i = 0; i < gl.depth.size(); i++ ) {
+				if ( !( gl.depth[i] < 1.0f ) )
+					continue;
+				cov++;
+				bool mv = false;
+				for ( int ch = 0; ch < 4; ch++ )
+					mv = mv || gl.c0[i * 4 + ch] != g2.c0[i * 4 + ch];
+				moved += mv;
+			}
+			const bool reach = cov > 0 && double( moved ) >= 0.2 * double( cov );
+			std::printf( "BLVIEW %s GL screen probe %s: %s 0 moves GL's colour on %zu of %zu covered pixels (bar >= 20 %%)\n", tag,
+				reach ? "OK" : ( k == 0 || ssrJudged ? "FAIL" : "info (not claimed)" ), scr[k], moved, cov );
+			if ( k == 0 || ssrJudged )
+				csmReach = csmReach && reach;
+		}
+	}
 	if ( rtV && rtUnits ) {  // RT GI: each input reaches GL's colour (else its red could test nothing)
 		static const char * rtOff[3] = { "cellRestirOn", "cellDdgiOn", "cellGiHalfOn" };
 		for ( const char * nm : rtOff ) {
@@ -1132,7 +1246,15 @@ bool cellGate( const std::string & spirvDir, int twin, const GLuint maps[4], uns
 			blendDraws += ( alphaV && ( alphaMode[i] & 8 ) != 0 ) || ( fxT && ( fxAlpha[i] & 8 ) != 0 ) ? 1 : 0;
 		const bool varOk = rs.cellLit == ( lightsV ? nDraws : 0 ) && rs.cellSkinned == ( skinV ? nDraws : 0 ) && rs.cellBlended == blendDraws;
 		// twin 7: the depth copied once for the sweep (one frame), and its cost counted
-		const bool copyOk = fxT ? rs.copies == 1 && rs.copyBytes == std::uint64_t( kSW ) * std::uint64_t( kSH ) * 4u : rs.copies == 0;
+		/* lane VKWATER5: and the screen terms, one copy each a frame (cellAo R32F, cellSsr RGBA32F, half the view) */
+		const int wantCopies = ( fxT ? 1 : 0 ) + ( aoTex ? 1 : 0 ) + ( ssrTex ? 1 : 0 ) + ( decalTex ? 1 : 0 );
+		const std::uint64_t halfTexels = std::uint64_t( kSW / 2 ) * std::uint64_t( kSH / 2 );
+		const std::uint64_t wantBytes = ( fxT ? std::uint64_t( kSW ) * std::uint64_t( kSH ) * 4u : 0u ) + ( aoTex ? halfTexels * 4u : 0u )
+			+ ( ssrTex ? halfTexels * 16u : 0u ) + ( decalTex ? halfTexels * 4u : 0u );
+		const bool copyOk = rs.copies == wantCopies && rs.copyBytes == wantBytes;
+		if ( aoV )
+			std::printf( "BLVIEW %s copy twins %s (%d copies, %llu bytes; want %d of %llu)\n", tag, copyOk ? "OK" : "FAIL", rs.copies,
+				static_cast<unsigned long long>( rs.copyBytes ), wantCopies, static_cast<unsigned long long>( wantBytes ) );
 		/* RT GI: the ratio copied once for the sweep (the frame's memo), the lights at each crossing (as before), the atlas read in
 		 * place once a draw */
 		const int rtIn = rtUnits ? 1 : 0, litIn = lightsV ? nDraws : 0;  // the lights' texels only where the program reads them
@@ -1243,6 +1365,12 @@ bool cellGate( const std::string & spirvDir, int twin, const GLuint maps[4], uns
 		glDeleteTextures( 1, &lightTex );  // its buffer stays with the gate's other buffers
 	if ( fxDepthTex )
 		glDeleteTextures( 1, &fxDepthTex );  // its copy twin stays shared until the present's shutdown (as the app's would)
+	if ( aoTex )
+		glDeleteTextures( 1, &aoTex );
+	if ( ssrTex )
+		glDeleteTextures( 1, &ssrTex );
+	if ( decalTex )
+		glDeleteTextures( 1, &decalTex );
 	if ( rtV ) {
 		glDeleteTextures( 1, &restirTex );
 		glDeleteTextures( 1, &atlasTex );
