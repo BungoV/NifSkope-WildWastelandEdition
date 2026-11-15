@@ -118,6 +118,20 @@
 // app's rain / snow draw twins GL's airTerr (t17) into the lit set.
 // Census roof line (11-15, info): a cell with a roof map turns pcRoofOn on (cellprecip.cpp gpuRoof), refused for every
 // run, lit or not (precipAdmits, slice 3's); the census prints it beside the lit refusals and counts it.
+// GI (L8 term 1, VKFAR5 11-15; bar set before its first run, never widened): the GI term (volTerms 4) reads the grid only
+// when cellGiOn, and cell_lights compiles cellGiOn as the constant false unless the loader's WW_CELL_PRT (the old baked
+// probe GI's red, WW_CELL_PRT_RED=1) is in the program; the default program and the lit twin hold no GI read. Case
+// rain_near_gi (rain_near_lit's run, unfogged) with volTerms 5 (the sun + GI). The same verdict, reference checks, repeat
+// clause, reds 64 / 128, the globals check and Vulkan's globals mirror as rain_near_lit. The case must also show (else
+// the gate fails): none of cellGiOn, cellGi, cellGiSlots, cellRooms, cellGiAir, cellGiAirOn, cellDdgiOn, cellDdgiAtlas
+// active in GL's default program; GL's captured geometry stage with volTerms 5 vs 1: 0 floats differ; the loader's RT GI
+// variant (WW_CELL_RTDDGI, the ray-traced GI on) captured with volTerms 5 against the default program: 0 floats differ,
+// and none of those names active in it; the WW_CELL_PRT variant with its GI fed (cellGiOn 1, cellGiAirOn 1, a filled
+// cellGiAir) holds cellGiOn and cellGiAir and differs from GL's default frame on >= 1000 covered samples (the GI seen);
+// precipAdmits refuses the WW_CELL_PRT variant's lit run (a program that reads a GI volume), 0 packs. Red 8192 that
+// refusal's input dropped (precipLitRead's GI count forced 0, the run goes on to Vulkan): judged against the WW_CELL_PRT
+// variant's frame it must FAIL with >= 1000 flips. Lifted with it: precipLitWhy's volTerms 4 refusal, replaced by the
+// program refusal (a GL program with a GI read stays on GL).
 #define main fxview_main
 #include "fxview.cpp"
 #undef main
