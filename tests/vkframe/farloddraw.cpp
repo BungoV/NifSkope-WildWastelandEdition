@@ -334,10 +334,12 @@ bool onSwitch( const std::string & base )
 	return list.find( "," + base + "," ) != std::string::npos;
 }
 
-int seedUnis( GLuint p, std::mt19937 & rng )
+// into: the program the values go to, by name (BATCH1117, fargrounddraw: drawn in p's order and types, the legacy GLSL
+// program's, so the HLSL-built SPIR-V program gets the same world; a name only `into` has keeps its default 0)
+int seedUnis( GLuint p, std::mt19937 & rng, GLuint into = 0 )
 {
 	std::uniform_real_distribution<float> u01( 0.05f, 1.0f );
-	f.useProgram( p );
+	f.useProgram( into ? into : p );
 	GLint n = 0;
 	f.getProgramiv( p, fActiveUnis, &n );
 	int set = 0;
@@ -374,7 +376,7 @@ int seedUnis( GLuint p, std::mt19937 & rng )
 		case 0x8B5C: kind = '4'; comp = 16; break;
 		default: continue;  // a sampler: bound by unit
 		}
-		const GLint l = f.getUniformLocation( p, nm );
+		const GLint l = f.getUniformLocation( into ? into : p, nm );
 		const size_t total = size_t( std::max( sz, 1 ) ) * size_t( comp );
 		std::vector<float> fv( total );
 		std::vector<GLint> iv( total );

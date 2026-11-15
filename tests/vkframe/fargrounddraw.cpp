@@ -79,6 +79,46 @@ std::vector<float> decalData( std::mt19937 & rng, float shift, int texels )
 		d[size_t( kIdOff * 4 + k )] = float( ( k + k / kRec ) % kRec );	// each bin its own record order
 	return d;
 }
+
+// BATCH1117: GL's program from the HLSL-built SPIR-V pair (fargrounddraw_prep.py), as the app's wwSpvAttach links it
+// (glcontext.cpp): glShaderBinary 0x9551 + glSpecializeShader("main"); the blocks keep their decorated bindings.
+GLuint spvProgram( const std::string & vsBin, const std::string & psBin )
+{
+	using ShaderBinary = void( WINAPI * )( GLsizei, const GLuint *, GLenum, const void *, GLsizei );
+	using Specialize = void( WINAPI * )( GLuint, const char *, GLuint, const GLuint *, const GLuint * );
+	auto bin = reinterpret_cast<ShaderBinary>( wglGetProcAddress( "glShaderBinary" ) );
+	auto spec = reinterpret_cast<Specialize>( wglGetProcAddress( "glSpecializeShader" ) );
+	if ( !bin || !spec || vsBin.size() < 20 || psBin.size() < 20 ) {
+		std::printf( "FARGROUNDDRAW SPIR-V: %s\n", !bin || !spec ? "no glShaderBinary / glSpecializeShader" : "no prog.vert.spv / prog.frag.spv" );
+		return 0;
+	}
+	const GLuint p = f.createProgram();
+	const std::string * src[2] = { &vsBin, &psBin };
+	for ( int s = 0; s < 2; s++ ) {
+		const GLuint sh = f.createShader( s ? fFrag : fVert );
+		bin( 1, &sh, 0x9551, src[s]->data(), GLsizei( src[s]->size() ) );
+		spec( sh, "main", 0, nullptr, nullptr );
+		GLint ok = 0;
+		f.getShaderiv( sh, fCompiled, &ok );
+		if ( !ok ) {
+			std::vector<char> log( 65536 );
+			f.getShaderInfoLog( sh, GLsizei( log.size() ), nullptr, log.data() );
+			std::printf( "FARGROUNDDRAW SPIR-V %s stage refused: %.1500s\n", s ? "pixel" : "vertex", log.data() );
+			return 0;
+		}
+		f.attachShader( p, sh );
+	}
+	f.linkProgram( p );
+	GLint ok = 0;
+	f.getProgramiv( p, fLinked, &ok );
+	if ( !ok ) {
+		std::vector<char> log( 65536 );
+		f.getProgramInfoLog( p, GLsizei( log.size() ), nullptr, log.data() );
+		std::printf( "FARGROUNDDRAW SPIR-V link failed: %.1500s\n", log.data() );
+		return 0;
+	}
+	return p;
+}
 }  // namespace fgd
 
 int main( int argc, char ** argv )
@@ -141,9 +181,29 @@ int main( int argc, char ** argv )
 	glPixelStorei( GL_UNPACK_ALIGNMENT, 1 );
 	const GLuint pUnpack = program( kTriVs, kUnpackFs, "unpack" ), pDepth = program( kTriVs, kDepthFs, "depth" ),
 		pSlab = program( kTriVs, kSlabFs, "slab" );
-	const GLuint pFg = program( readFile( dir + "/prog.vert.glsl" ), readFile( dir + "/prog.frag.glsl" ), "fo4_cellcsmfgl" );
-	if ( !pUnpack || !pDepth || !pSlab || !pFg )
+	// BATCH1117: GL's side is the HLSL-built program (the HLSL is the reference); the legacy .frag only names the sampler
+	// types SPIR-V does not carry (a shadow sampler reads as its plain type) and is run instead with FARGROUNDDRAW_LEGACY=1
+	const char * legacyEnv = std::getenv( "FARGROUNDDRAW_LEGACY" );
+	const bool legacy = legacyEnv && std::string( legacyEnv ) == "1";
+	const GLuint pLegacy = program( readFile( dir + "/prog.vert.glsl" ), readFile( dir + "/prog.frag.glsl" ), "fo4_cellcsmfgl legacy" );
+	const GLuint pFg = legacy ? pLegacy : spvProgram( readFile( dir + "/prog.vert.spv" ), readFile( dir + "/prog.frag.spv" ) );
+	std::printf( "FARGROUNDDRAW GL program: %s (legacy fo4_cellcsmfgl.frag %s, info only)\n",
+		legacy ? "the legacy fo4_cellcsmfgl.frag (FARGROUNDDRAW_LEGACY=1)" : "HLSL-built SPIR-V fo4_cellcsmfgl@WW_CELL_FOGLEAK+WW_FRAME_UBO",
+		pLegacy ? "links" : "does not link" );
+	if ( !pUnpack || !pDepth || !pSlab || !pFg || !pLegacy )
 		return fatal( "GL programs" );
+	std::map<std::string, GLenum> legacyType;
+	{
+		GLint n = 0;
+		f.getProgramiv( pLegacy, fActiveUnis, &n );
+		for ( GLint i = 0; i < n; i++ ) {
+			char nm[256] = {};
+			GLint sz = 0;
+			GLenum ty = 0;
+			f.getActiveUniform( pLegacy, GLuint( i ), 256, nullptr, &sz, &ty, nm );
+			legacyType[nm] = ty;
+		}
+	}
 	std::string why;
 	unsigned fc = 0, fds = 0;
 	if ( !WwVkPresent::viewBegin( W, H, S, glProc, why ) )
@@ -173,7 +233,7 @@ int main( int argc, char ** argv )
 			f.getActiveUniform( pFg, GLuint( i ), 256, nullptr, &sz, &ty, nm );
 			Smp s;
 			s.name = nm;
-			s.glType = ty;
+			s.glType = legacyType.count( s.name ) ? legacyType[s.name] : ty;
 			if ( !smpOf( s, W, H ) ) {
 				const bool sampler = ( ty >= 0x8B5D && ty <= 0x8B64 ) || ( ty >= 0x8DC0 && ty <= 0x8DD8 ) || ( ty >= 0x9008 && ty <= 0x9110 );
 				if ( sampler )
@@ -238,43 +298,72 @@ int main( int argc, char ** argv )
 	f.genBuffers( 3, ubo );
 	const char * blockName[3] = { "globalUniforms", "wwShadowFrame", "skinningUniforms" };
 	GLint blockSize[3] = { 336, 248, 12288 };
+	GLint blockAt[3] = { 0, 1, 2 };  // BATCH1117: a SPIR-V program keeps its decorated binding (the app sets none), read here
 	for ( int k = 0; k < 3; k++ ) {
 		const GLuint bi = f.getUniformBlockIndex( pFg, blockName[k] );
 		if ( bi != 0xFFFFFFFFu ) {
-			f.uniformBlockBinding( pFg, bi, GLuint( k ) );
+			if ( legacy )
+				f.uniformBlockBinding( pFg, bi, GLuint( k ) );
+			else
+				f.getActiveUniformBlockiv( pFg, bi, 0x8A3F, &blockAt[k] );  // GL_UNIFORM_BLOCK_BINDING
 			f.getActiveUniformBlockiv( pFg, bi, fBlockSize, &blockSize[k] );
 		}
+		for ( int j = 0; j < k; j++ )
+			if ( blockAt[j] == blockAt[k] )
+				return fatal( std::string( "blocks " ) + blockName[j] + " and " + blockName[k] + " share binding " + std::to_string( blockAt[k] ) );
 		std::vector<std::uint8_t> z( size_t( std::max( blockSize[k], 16 ) ), 0 );
 		f.bindBuffer( fUbo, ubo[k] );
 		f.bufferData( fUbo, std::ptrdiff_t( z.size() ), z.data(), fStatic );
 	}
-	std::printf( "FARGROUNDDRAW blocks: globalUniforms %d, wwShadowFrame %d, skinningUniforms %d bytes\n", blockSize[0], blockSize[1], blockSize[2] );
+	std::printf( "FARGROUNDDRAW blocks: globalUniforms %d, wwShadowFrame %d, skinningUniforms %d bytes; bindings %d %d %d\n", blockSize[0],
+		blockSize[1], blockSize[2], blockAt[0], blockAt[1], blockAt[2] );
 	struct ShMember
 	{
 		std::string name;
 		GLint off = 0, type = 0, size = 1, stride = 0;
 	};
-	std::vector<ShMember> shMembers;
-	{
-		const GLuint sbi = f.getUniformBlockIndex( pFg, "wwShadowFrame" );
+	auto membersOf = [&]( GLuint q ) {
+		std::vector<ShMember> out;
+		const GLuint sbi = f.getUniformBlockIndex( q, "wwShadowFrame" );
 		GLint n = 0;
-		f.getProgramiv( pFg, fActiveUnis, &n );
+		f.getProgramiv( q, fActiveUnis, &n );
 		for ( GLint i = 0; i < n && sbi != 0xFFFFFFFFu; i++ ) {
 			const GLuint idx = GLuint( i );
 			GLint bi = -1;
-			f.getActiveUniformsiv( pFg, 1, &idx, fBlockIndex, &bi );
+			f.getActiveUniformsiv( q, 1, &idx, fBlockIndex, &bi );
 			if ( bi != GLint( sbi ) )
 				continue;
 			ShMember m;
 			char nm[256] = {};
 			GLenum ty = 0;
-			f.getActiveUniform( pFg, idx, 256, nullptr, &m.size, &ty, nm );
+			f.getActiveUniform( q, idx, 256, nullptr, &m.size, &ty, nm );
 			m.name = nm;
 			m.type = GLint( ty );
-			f.getActiveUniformsiv( pFg, 1, &idx, 0x8A3B, &m.off );     // GL_UNIFORM_OFFSET
-			f.getActiveUniformsiv( pFg, 1, &idx, 0x8A3C, &m.stride );  // GL_UNIFORM_ARRAY_STRIDE
-			shMembers.push_back( m );
+			f.getActiveUniformsiv( q, 1, &idx, 0x8A3B, &m.off );     // GL_UNIFORM_OFFSET
+			f.getActiveUniformsiv( q, 1, &idx, 0x8A3C, &m.stride );  // GL_UNIFORM_ARRAY_STRIDE
+			out.push_back( m );
 		}
+		return out;
+	};
+	// BATCH1117: seeded in the legacy program's member order (the same world on either program); the SPIR-V block must hold
+	// the same members at the same offsets (a bool reads uint there)
+	const std::vector<ShMember> shMembers = membersOf( pLegacy );
+	{
+		auto key = []( std::vector<ShMember> v ) {
+			std::vector<std::string> k;
+			for ( const ShMember & m : v ) {
+				const GLint t = m.type == 0x8B56 || m.type == 0x1404 ? 0x1405 : m.type;  // bool / int / uint: one 4-byte word
+				k.push_back( std::to_string( m.off ) + "/" + std::to_string( t ) + "/" + std::to_string( m.size ) + "/" + std::to_string( m.stride ) );
+			}
+			std::sort( k.begin(), k.end() );
+			return k;
+		};
+		const std::vector<ShMember> spv = membersOf( pFg );
+		const bool same = key( shMembers ) == key( spv );
+		std::printf( "FARGROUNDDRAW wwShadowFrame members: legacy %zu, GL's program %zu, layout %s\n", shMembers.size(), spv.size(),
+			same ? "the same" : "DIFFERS" );
+		if ( !same && !shMembers.empty() && !spv.empty() )
+			return fatal( "wwShadowFrame's layout differs between the legacy and the HLSL-built program" );
 	}
 	auto blocks = [&]( std::mt19937 & rng ) {
 		std::uniform_real_distribution<float> u01( 0.05f, 1.0f );
@@ -476,7 +565,7 @@ int main( int argc, char ** argv )
 		}
 		f.useProgram( pFg );
 		for ( int k = 0; k < 3; k++ )
-			f.bindBufferBase( fUbo, GLuint( k ), ubo[k] );
+			f.bindBufferBase( fUbo, GLuint( blockAt[k] ), ubo[k] );
 		for ( const Smp & s : smp ) {
 			bindUnit( s.unit, targetOf( s.kind ), s.tex );
 			f.uniform1i( f.getUniformLocation( pFg, s.name.c_str() ), s.unit );
@@ -611,7 +700,7 @@ int main( int argc, char ** argv )
 		if ( glGetError() != GL_NO_ERROR )
 			return fatal( "the far ground's data upload" );
 		g_profileSeed = seed;
-		const int nu = seedUnis( pFg, rng );
+		const int nu = seedUnis( pLegacy, rng, pFg );	// the legacy program's order and types: the same world on either program
 		blocks( rng );
 		const bool scissor = seed == 2;
 		f.useProgram( pFg );
