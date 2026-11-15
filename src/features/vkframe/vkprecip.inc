@@ -707,8 +707,8 @@ bool precipAdmits( const PrecipRun & t, std::string & why )
 	if ( D.broken )
 		return refuse( D.brokenWhy );
 	if ( t.lit ) {  // slice 2b: the sun alone; the rest of GL's particle light is refused (GL draws)
-		if ( t.look )
-			return refuse( "a lit cell with the precipitation look (a later slice)" );
+		if ( t.look && ( t.red & ( 1LL << 47 ) ) == 0 )  // L8 route lift 5: a named refusal (red 2^47: skipped, gates only)
+			return refuse( kPrecipLitLookWhy );
 		if ( const char * w = precipLitWhy( t.litIn ) )
 			return refuse( w );
 		if ( ( t.litIn.terms & 2 ) && t.litIn.cluster != 0 && !t.global )
