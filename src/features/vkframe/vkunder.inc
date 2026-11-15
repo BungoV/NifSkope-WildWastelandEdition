@@ -24,6 +24,7 @@ struct UnderDraw
 	std::map<int, VkPipeline> pipes;  // key: program * 4 + red's blend (2) at passSamples
 	CsmBuf host;
 	VkImage msImg = VK_NULL_HANDLE;  // the tone frame's depth, its depth-aspect view for uwDepthMs
+	std::uint64_t msGen = 0;  // sharedGen() when msView was made (toneFrame bumps it: a remade frame can reuse the handle)
 	VkImageView msView = VK_NULL_HANDLE;
 	VkFramebuffer fb = VK_NULL_HANDLE;
 	// this run's record (written before the hand)
@@ -379,7 +380,8 @@ bool underRun( const UnderRun & r, std::string & why )
 		S.copies++;
 	}
 	// uwDepthMs: the tone frame's depth read in place through a depth-aspect view (T.dsView is depth + stencil)
-	if ( T.ds != D.msImg ) {
+	if ( T.ds != D.msImg || D.msGen != sharedGen() ) {
+		D.msGen = sharedGen();
 		if ( D.msView )
 			v.vkDestroyImageView( v.dev, D.msView, nullptr );
 		D.msView = imageView( T.ds, VK_IMAGE_VIEW_TYPE_2D, VK_FORMAT_D24_UNORM_S8_UINT, VK_IMAGE_ASPECT_DEPTH_BIT );

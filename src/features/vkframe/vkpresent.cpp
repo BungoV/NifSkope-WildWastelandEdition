@@ -3795,6 +3795,7 @@ bool toneFrame( int w, int h, int samples, unsigned & color, unsigned & ds, std:
 	T.h = h;
 	T.samples = samples;
 	T.descDirty = true;
+	sharedGen()++;  // lane VKWATER4: a view kept of the frame (vkunder's msView) is keyed on it, the image handle can come back
 	color = T.colorTex;
 	ds = T.dsTex;
 	return true;
