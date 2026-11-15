@@ -357,6 +357,11 @@ Changed, not built, not checked live. Nothing in the app calls it yet, so no fra
   bytes zeroed move 123398 in GL. Dropping the copied cascades FAILs (123400 flips). The route census drops from
   4 / 3 to 2 / 2 (default) and from 9 / 8 to 7 / 7 (all-on); the two left on the default route are the contact and
   terrain shadow maps.
+- Shadow set (VKFAR9 e5533322 bar, VKFAR10 the lift): the app's ultra sun shadow (the filtered cascades, the terrain
+  height map and the screen contact mask, ussOn) is no longer refused: both maps are handed to the Vulkan pass, which
+  composes them as GL does. New gate case: near rain with all three tiers on (135532 samples, EXACT). Each tier off moves GL
+  (composition off 97796, terrain off 80745, contact off 8907). Dropping the terrain map, dropping the contact mask, the composition off and the contact lookup's axes
+  swapped each FAIL. The route census drops to 0 / 0 (default) and 4 / 4 (all-on).
 
 ## VKWATER4 (2026-11-15): the ultra ocean builds on Vulkan compute (WW_VKVIEW=1)
 

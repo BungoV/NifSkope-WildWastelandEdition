@@ -321,6 +321,35 @@
 // them) and the lit pack takes the cascade fields from them; the block refusal stays for a block with no bytes read (no
 // buffer bound, or a short one); the closed list counts wwShadowFrame as read. Census after: route default 2 / 2, route
 // all-on 7 / 7 (the refusal and the block line gone outdoors, the block line indoors).
+// The shadow set's composition (L8 route lift 2, VKFAR9 11-15; bar set before its first run, never widened): ussOn 1 (route
+// all-on: the cascade, terrain and contact tiers ultra, shadowset.cpp 2754) makes wwSunShadowGeo return ussCompose = min(
+// lerp( 1, the Vogel cascades, their fade ), the terrain tier, the contact mask ) in place of CSM1's blend. The terrain tier
+// reads ussTerrMap (t32, RG16, linear, clamp to edge: the heights above which a point is lit / below which it is shadowed),
+// the contact tier ussContactMap (t33, R8, linear, clamp to edge: the screen mask at the particle's window position). One
+// case, appended, element 32: rain_near_uss (rain_near_csm_ubo's run, fixture, frame block and route program pRoute) with
+// ussOn 1 and the app's ultra values: ussCsmOn 1, ussCsmFilter (1, 3.5, 44, 1) (preset 4's Vogel radius and taps, the
+// receiver plane's bias), ussCsmWorld (1, 2.8, 10.5, 42), ussCsmPhase 17, ussCsmCellX / ussCsmCellY per cascade; ussTerrOn 1
+// with a 128 x 128 RG16 ussTerrMap (the far tier alone: ussTerrSize (128, 0), ussTerrExtra 0, ussTerrSelf 0) whose heights
+// straddle the in-view particles' world heights, ussTerrXform, ussTerrRange (the edge fade a circle round the eye) and
+// ussWorldFromView from the case's view, ussTerrPen (1, the texel, tan lo, tan hi), ussTerrBias (1, sin elevation, 1, 0);
+// ussContactOn 1 with a w x h R8 ussContactMap (soft blobs) and ussContactInvSize (1 / w, 1 / h); ussView 0, ussRed 0. The
+// prep prints the in-view particles' shares under the hard terrain lookup < 1 and the contact mask < 1 (each want 0.2 -
+// 0.8). The same verdict (depth EXACT, colour inside the bar), reference checks, repeat clause, sun's shadow and frame block
+// checks as rain_near_csm_ubo. The case must also show (else the gate fails): GL with ussOn 0 differs on >= 1000 covered
+// samples (the composition seen); GL with ussTerrOn 0 on >= 1000 (the terrain tier seen through the min); GL with
+// ussContactOn 0 on >= 1000 (the contact tier seen through the min); ussOn, ussTerrOn, ussTerrMap, ussTerrXform,
+// ussTerrRange, ussWorldFromView, ussContactOn, ussContactMap and ussContactInvSize found in GL's program; ussOn, ussTerrOn
+// and ussContactOn packed non-zero. Reds, each must FAIL in rain_near_uss: 68719476736 the terrain map dropped (t32 the zero
+// texture); 137438953472 the contact map dropped (t33 the zero texture); 274877906944 the composition off (the packed ussOn
+// 0: CSM1's blend); 549755813888 the contact lookup's axes swapped (the packed ussContactInvSize x / y). Lifted with it:
+// precipLitWhys' ussOn refusal and the packed block's backstop; refused by name instead: ussView or ussRed non-zero (a
+// debug view, a red), a terrain / contact tier on with no texture on GL's unit; the app's rain / snow draw twins GL's
+// ussTerrMap into binding 96 and ussContactMap into binding 97 (copied a run, GL's sampler state); the closed list counts
+// both as sampler slots. Census after: route default 0 / 0, route all-on 4 / 4 (refusal 3 and both map lines gone); the
+// closed list on pPrecip reads 0 (its clause passes). Amended before lift 2's first run (VKFAR10 11-15): route default 0 / 0
+// leaves the old census red nothing to under-read (old 0 >= route 0 would read PASSED); with route default at 0 the red is the
+// closed list itself: ussTerrMap dropped from the allow list, pRoute's closed list must read >= 1 (FAILS as it must). Above 0
+// the old census red stays as it was.
 #define main fxview_main
 #include "fxview.cpp"
 #undef main
@@ -652,6 +681,14 @@ struct Job
 	std::vector<std::uint16_t> cubeData;
 	int roofNx = 0, roofNy = 0;  // L8 term 7: roof.txt's map size (R32F; roof.bin nx x ny floats, row-major from y 0)
 	std::vector<float> roofData;
+	int ussTN = 0, ussCW = 0, ussCH = 0;  // L8 route lift 2: uss.txt's ussTerrMap edge (RG16) and ussContactMap size (R8)
+	std::vector<std::uint16_t> ussTerrData;
+	std::vector<std::uint8_t> ussContactData;
+	bool uss() const  // L8 route lift 2: the shadow set's composition on (ussOn 1, its maps from uss.txt)
+	{
+		const auto it = uni.find( "ussOn" );
+		return it != uni.end() && !it->second.empty() && it->second[0] != 0.0 && ussTN > 0;
+	}
 	bool hasN() const { return look == 2 && hasTex; }
 	bool frameUbo() const { return uni.count( "wwGateFrameUbo" ) != 0; }  // L8 route lift 1: drawn through pRoute, the cascades in wwShadowFrame
 	struct Buf  // L8 term 2a: a texture buffer (buf.txt: name format texels file)
@@ -746,6 +783,7 @@ const int kGiUnit = 12;  // L8 term 1: the WW_CELL_PRT variant's cellGiAir
 const int kEnvUnit = 13;  // L8 term 2: the ambient's volEnvHist
 const int kCsmUnit = 17, kCloudUnit = 18;  // L8 term 3: csmMap, ussCloudMap (15 / 16 are the read-back's)
 const int kNoiseUnit = 19;  // L8 term 4: the drift's volAirNoise
+const int kUssTerrUnit = 70, kUssContactUnit = 71;  // L8 route lift 2: ussTerrMap, ussContactMap (past every empty unit below)
 const int kCubeUnit = 20;  // L8 term 5: the lamps' cellShadow (a D16 cube array)
 const GLenum kTexBuffer = 0x8C2A;  // GL_TEXTURE_BUFFER
 // slice 2a: the air's textures, in precipRun's tex[2..6] order, their GL units and fxTexOf types
@@ -825,6 +863,17 @@ int main( int argc, char ** argv )
 					if ( !cb.read( reinterpret_cast<char *>( j.csmData.data() ), std::streamsize( j.csmData.size() * 2 ) )
 						|| !lb.read( reinterpret_cast<char *>( j.cloudData.data() ), std::streamsize( j.cloudData.size() * 4 ) ) )
 						return fatal( nm + "/shadow.txt: csm.bin / cloud.bin" );
+				}
+			}
+			{  // L8 route lift 2: the shadow set's maps (uss.txt: ussTerrMap edge, ussContactMap width and height)
+				std::ifstream uf( dir + "/" + nm + "/uss.txt" );
+				if ( uf >> j.ussTN >> j.ussCW >> j.ussCH ) {
+					j.ussTerrData.resize( size_t( j.ussTN ) * size_t( j.ussTN ) * 2 );
+					j.ussContactData.resize( size_t( j.ussCW ) * size_t( j.ussCH ) );
+					std::ifstream tb( dir + "/" + nm + "/terr.bin", std::ios::binary ), ub( dir + "/" + nm + "/contact.bin", std::ios::binary );
+					if ( !tb.read( reinterpret_cast<char *>( j.ussTerrData.data() ), std::streamsize( j.ussTerrData.size() * 2 ) )
+						|| !ub.read( reinterpret_cast<char *>( j.ussContactData.data() ), std::streamsize( j.ussContactData.size() ) ) )
+						return fatal( nm + "/uss.txt: terr.bin / contact.bin" );
 				}
 			}
 			{  // L8 term 5: the lamps' shadow cubes (cubes.txt: the face edge; cubes.bin 16 cubes of 6 D16 faces)
@@ -956,6 +1005,8 @@ int main( int argc, char ** argv )
 			std::vector<GLint> units( size_t( std::max( sz, 1 ) ) );
 			for ( GLint & u : units )
 				u = next++;
+			if ( next > kUssTerrUnit )  // L8 route lift 2: the shadow set's units stay past every empty one
+				return fatal( "the empty sampler units reach unit " + std::to_string( next - 1 ) );
 			f.uniform1iv( f.getUniformLocation( prog, nm ), GLsizei( units.size() ), units.data() );
 		}
 	}
@@ -1085,12 +1136,13 @@ int main( int argc, char ** argv )
 	};
 	GLuint vao = 0;
 	genVertexArrays( 1, &vao );
-	constexpr int kCases = 28;
+	constexpr int kCases = 29;
 	static char twinKeys[kCases], normKeys[kCases];  // one atlas twin a case (the atlases' sizes differ), one normal-map twin a case
 	static char terrKeys[kCases];  // L8 terrain air: airTerr's twin a case
 	static char envKeys[kCases];  // L8 term 2: volEnvHist's twin a case
 	static char csmKeys[kCases], cloudKeys[kCases];  // L8 term 3: csmMap's shared target, ussCloudMap's twin a case
 	static char noiseKeys[kCases];  // L8 term 4: volAirNoise's twin a case
+	static char ussTerrKeys[kCases], ussContactKeys[kCases];  // L8 route lift 2: ussTerrMap's / ussContactMap's twin a case
 	static char cubeKeys[kCases];  // L8 term 5: cellShadow's shared target a case
 	static char roofKeys[kCases];  // L8 term 7: pcRoof's twin a case
 	static char airKeys[kCases][5], volKeys[kCases];  // the air's twins a case, its volume's shared target a case
@@ -1149,7 +1201,7 @@ int main( int argc, char ** argv )
 		const char * name;
 		long long red;  // past bit 30 from L8 term 7 on
 		bool seen;
-	} reds[34] = { { "cull (radius 0)", 1, false }, { "corners (the strip's last two swapped)", 2, false }, { "near fade (dropped)", 4, false },
+	} reds[38] = { { "cull (radius 0)", 1, false }, { "corners (the strip's last two swapped)", 2, false }, { "near fade (dropped)", 4, false },
 		{ "air (dropped)", 8, false }, { "look (dropped: the plain pipelines)", 16, false }, { "atlas (dropped: the zero texture)", 32, false },
 		{ "light (dropped)", 128, false }, { "lamps' lights (dropped: the zero texel buffer)", 256, false },
 		{ "cluster's globals (dropped: b0 zero)", 512, false }, { "cluster lists (dropped: the zero texel buffer)", 1024, false },
@@ -1164,7 +1216,9 @@ int main( int argc, char ** argv )
 		{ "lamps' gobo uv (flipped: cellGoboRot 3)", 268435456, false }, { "roof map (dropped: the zero pcRoof)", 536870912LL, false },
 		{ "roof (off: pcRoofOn 0)", 1073741824LL, false }, { "roof map's axes (swapped: pcRoofCam x / y)", 2147483648LL, false },
 		{ "interior (off: cellInterior 0)", 4294967296LL, false }, { "interior's ambient (off: cellHasDalc 0)", 8589934592LL, false },
-		{ "ambient's GI rule (cellGiAmb 2)", 17179869184LL, false }, { "frame block (dropped: the cascade fields zero)", 34359738368LL, false } };
+		{ "ambient's GI rule (cellGiAmb 2)", 17179869184LL, false }, { "frame block (dropped: the cascade fields zero)", 34359738368LL, false },
+		{ "terrain map (dropped: the zero texture)", 68719476736LL, false }, { "contact map (dropped: the zero texture)", 137438953472LL, false },
+		{ "composition (off: the packed ussOn 0)", 274877906944LL, false }, { "contact lookup (axes swapped: ussContactInvSize)", 549755813888LL, false } };
 	using TexBufferFn = void( WINAPI * )( GLenum, GLenum, GLuint );
 	const auto texBuffer = reinterpret_cast<TexBufferFn>( wglGetProcAddress( "glTexBuffer" ) );
 	if ( !texBuffer )
@@ -1227,6 +1281,11 @@ int main( int argc, char ** argv )
 		}
 		if ( j.cloudN > 0 )
 			cloudTex = tex2d( j.cloudN, j.cloudN, fRgba16f, GL_RGBA, GL_FLOAT, j.cloudData.data(), true );
+		GLuint ussTerrTex = 0, ussContactTex = 0;  // L8 route lift 2: the shadow set's maps as the app's (RG16 / R8, linear, clamp to edge)
+		if ( j.ussTN > 0 ) {
+			ussTerrTex = tex2d( j.ussTN, j.ussTN, 0x822C, fRg, 0x1403, j.ussTerrData.data(), true );  // RG16, UNSIGNED_SHORT
+			ussContactTex = tex2d( j.ussCW, j.ussCH, fR8, fRed, GL_UNSIGNED_BYTE, j.ussContactData.data(), true );
+		}
 		GLuint cubeTex = 0;  // L8 term 5: the lamps' cubes as the app's (sharedTarget type 3, D16, shadowAlloc's state)
 		if ( j.cubeN > 0 ) {
 			if ( !WwVkPresent::sharedTarget( reinterpret_cast<std::uintptr_t>( &cubeKeys[jobAt] ), 3, j.cubeN, j.cubeN, 6 * 16, 0x81A5, cubeTex, why ) )  // BATCH1114: d is layers
@@ -1298,6 +1357,10 @@ int main( int argc, char ** argv )
 			u1i( prog, "csmMap", kCsmUnit );
 			bindUnit( kCloudUnit, GL_TEXTURE_2D, cloudTex );
 			u1i( prog, "ussCloudMap", kCloudUnit );
+			bindUnit( kUssTerrUnit, GL_TEXTURE_2D, ussTerrTex );  // L8 route lift 2 (none: read only with ussOn 1)
+			u1i( prog, "ussTerrMap", kUssTerrUnit );
+			bindUnit( kUssContactUnit, GL_TEXTURE_2D, ussContactTex );
+			u1i( prog, "ussContactMap", kUssContactUnit );
 			bindUnit( kNoiseUnit, fT3D, noiseTex );  // L8 term 4 (none: read only with volAirDrift.x > 0)
 			u1i( prog, "volAirNoise", kNoiseUnit );
 			bindUnit( kCubeUnit, 0x9009, cubeTex );  // L8 term 5 (none: read only with cellShadowOn 1)
@@ -1521,6 +1584,12 @@ int main( int argc, char ** argv )
 				} else if ( mode == 9 ) {  // the case as it is (the restore check)
 				} else if ( mode == 43 ) {  // L8 route lift 1: the frame block's bytes zero (the block seen)
 					frameUpload( 2 );
+				} else if ( mode == 44 ) {  // L8 route lift 2: the composition off (ussOn 0: CSM1's blend)
+					u1i( pJob, "ussOn", 0 );
+				} else if ( mode == 45 ) {  // L8 route lift 2: the terrain tier off (ussTerrOn 0)
+					u1i( pJob, "ussTerrOn", 0 );
+				} else if ( mode == 46 ) {  // L8 route lift 2: the contact tier off (ussContactOn 0)
+					u1i( pJob, "ussContactOn", 0 );
 				} else if ( mode == 6 ) {  // L8 term 3: the local law off (vpSun.w 0)
 					const float off[4] = { 0.5f, 0.4f, 0.3f, 0.0f };
 					f.uniform4fv( f.getUniformLocation( pJob, "vpSun" ), 1, off );
@@ -1621,6 +1690,20 @@ int main( int argc, char ** argv )
 						"wwShadowFrame %s in GL's program, csmMat %s; precipLitRead csmBlock %d (want 1)\n", j.name.c_str(), noBlk.flips,
 						noBlk.covered, sfIn ? "found" : "MISSING", loose ? "LOOSE (a uniform)" : "not loose", tb.litIn.csmBlock );
 					ok = ok && noBlk.flips >= 1000 && sfIn && !loose && tb.litIn.csmBlock == 1;
+				}
+				if ( j.uss() ) {  // L8 route lift 2's seen-checks (header): the composition and both tiers seen, their names found
+					const Verdict noUss = judge( bg, drawGl( 44 ), refA, refB, refB );
+					const Verdict noTerr = judge( bg, drawGl( 45 ), refA, refB, refB );
+					const Verdict noCon = judge( bg, drawGl( 46 ), refA, refB, refB );
+					std::string umiss;
+					for ( const char * nm : { "ussOn", "ussTerrOn", "ussTerrMap", "ussTerrXform", "ussTerrRange", "ussWorldFromView", "ussContactOn",
+							 "ussContactMap", "ussContactInvSize" } )
+						if ( f.getUniformLocation( pJob, nm ) < 0 )
+							umiss += std::string( umiss.empty() ? "" : ", " ) + nm;
+					std::printf( "PRECIPVIEW %s composition checks: GL with ussOn 0 differs %zu of %zu covered samples, ussTerrOn 0 %zu, ussContactOn 0 %zu "
+						"(each want >= 1000); composition names missing from GL's program: %s\n", j.name.c_str(), noUss.flips, noUss.covered,
+						noTerr.flips, noCon.flips, umiss.empty() ? "none" : umiss.c_str() );
+					ok = ok && noUss.flips >= 1000 && noTerr.flips >= 1000 && noCon.flips >= 1000 && umiss.empty();
 				}
 			}
 			if ( j.drift() ) {  // L8 term 4's seen-checks (header): the drift and its noise seen, their names found
@@ -2033,6 +2116,20 @@ int main( int argc, char ** argv )
 					}
 					t.tex[11].twin = reinterpret_cast<std::uintptr_t>( &cloudKeys[jobAt] );
 				}
+				if ( t.litIn.uss > 0 && t.litIn.ussTerr > 0 ) {  // precipDraw's (L8 route lift 2): ussTerrMap into t32
+					if ( !WwVkPresent::fxTexOf( &ga, pJob, "ussTerrMap", 0, t.tex[14], why ) ) {
+						std::printf( "PRECIPVIEW fxTexOf refused (ussTerrMap): %s\n", why.c_str() );
+						return false;
+					}
+					t.tex[14].twin = reinterpret_cast<std::uintptr_t>( &ussTerrKeys[jobAt] );
+				}
+				if ( t.litIn.uss > 0 && t.litIn.ussContact > 0 ) {  // and ussContactMap into t33
+					if ( !WwVkPresent::fxTexOf( &ga, pJob, "ussContactMap", 0, t.tex[15], why ) ) {
+						std::printf( "PRECIPVIEW fxTexOf refused (ussContactMap): %s\n", why.c_str() );
+						return false;
+					}
+					t.tex[15].twin = reinterpret_cast<std::uintptr_t>( &ussContactKeys[jobAt] );
+				}
 			}
 			if ( t.lit && ( t.litIn.terms & 2 ) && t.litIn.shadow > 0 ) {  // precipDraw's (L8 term 5): cellShadow into t6
 				if ( !WwVkPresent::precipCubeOf( &ga, pJob, t.tex[13], why ) ) {
@@ -2127,6 +2224,16 @@ int main( int argc, char ** argv )
 								any = any || t.cs[at + b] != 0;
 							if ( !any )
 								zero += std::string( zero.empty() ? "" : ", " ) + tf.first;
+						}
+					}
+					if ( j.uss() ) {  // the composition's switches packed, not zero (the composition bar)
+						for ( const char * tf : { "ussOn", "ussTerrOn", "ussContactOn" } ) {
+							const int at = precipAt( WwVkPresent::kT_preciplitcs, int( std::size( WwVkPresent::kT_preciplitcs ) ), tf );
+							bool any = false;
+							for ( int b = 0; b < 4 && at >= 0; b++ )
+								any = any || t.cs[at + b] != 0;
+							if ( !any )
+								zero += std::string( zero.empty() ? "" : ", " ) + tf;
 						}
 					}
 					if ( j.gobo() ) {  // the gobos' fields packed, not zero (the gobo bar)
@@ -2470,7 +2577,8 @@ int main( int argc, char ** argv )
 				|| ( ( r.red == 67108864 || r.red == 134217728 || r.red == 268435456 ) && !j.gobo() )
 				|| ( ( r.red == 536870912LL || r.red == 1073741824LL || r.red == 2147483648LL ) && !j.roof() )
 				|| ( ( r.red == 4294967296LL || r.red == 8589934592LL || r.red == 17179869184LL ) && !j.interior() )
-				|| ( r.red == 34359738368LL && !j.frameUbo() ) )
+				|| ( r.red == 34359738368LL && !j.frameUbo() )
+				|| ( ( r.red == 68719476736LL || r.red == 137438953472LL || r.red == 274877906944LL || r.red == 549755813888LL ) && !j.uss() ) )
 				continue;  // a plain run has no look to drop, a case with no atlas no atlas, an unlit one no light, no lamps no lights
 			std::vector<std::uint16_t> a, b;
 			if ( !runVk( r.red, a, b, false ) ) {
@@ -2499,7 +2607,8 @@ int main( int argc, char ** argv )
 				|| r.red == 131072 || r.red == 262144 || r.red == 524288 || r.red == 1048576 || r.red == 2097152 || r.red == 4194304
 				|| r.red == 8388608 || r.red == 16777216 || r.red == 33554432 || r.red == 67108864 || r.red == 134217728
 				|| r.red == 268435456 || r.red == 536870912LL || r.red == 1073741824LL || r.red == 2147483648LL || r.red == 4294967296LL
-				|| r.red == 8589934592LL || r.red == 17179869184LL || r.red == 34359738368LL ) && v.ok() ) {  // the cluster case must see its b0 and its lists dropped
+				|| r.red == 8589934592LL || r.red == 17179869184LL || r.red == 34359738368LL
+				|| r.red == 68719476736LL || r.red == 137438953472LL || r.red == 274877906944LL || r.red == 549755813888LL ) && v.ok() ) {  // the cluster case must see its b0 and its lists dropped
 				std::printf( "PRECIPVIEW %s red %s PASSED: the case does not see it\n", j.name.c_str(), r.name );
 				ok = false;
 			}
@@ -2612,7 +2721,7 @@ int main( int argc, char ** argv )
 		addT( WwVkPresent::kT_preciplookps, int( std::size( WwVkPresent::kT_preciplookps ) ) );
 		addT( WwVkPresent::kT_preciplitcs, int( std::size( WwVkPresent::kT_preciplitcs ) ) );
 		for ( const char * nm : { "pcTex", "pcTexN", "pcRoof", "atApTex", "volTex", "volTile", "volAirTerr", "volAirRainMap", "airTerr",
-				  "volEnvHist", "csmMap", "ussCloudMap", "cellShadow", "volAirNoise", "cellLights", "cellCluster",  // the sampler slots
+				  "volEnvHist", "csmMap", "ussCloudMap", "cellShadow", "volAirNoise", "cellLights", "cellCluster", "ussTerrMap", "ussContactMap",  // the sampler slots
 				  "volTerms", "cellInterior", "volPartRed", "volCsm", "airTerrOn", "volAirDrift", "vpSun", "cellShadowOn", "cellGoboOn",
 				  "cellGoboRot", "cellGoboFlat", "cellGoboGam", "cellGoboMap", "cellClusterOn", "cellRed", "cellLightPhys", "volEnvGrid",
 				  "ussOn", "ussCloudOn", "csmProbe", "csmRed", "cellRestirOn",  // precipLitRead's switches
@@ -2707,12 +2816,25 @@ int main( int argc, char ** argv )
 		}
 		std::printf( "PRECIPVIEW census routes: default %d / %d, all-on %d / %d (exterior / interior; 0 / 0 on both is the done line)\n",
 			route[0], route[1], allOnN[0], allOnN[1] );
-		const int old = census( pPrecip, 0, false, "old", false, false ) + census( pPrecip, 1, false, "old", false, false );
-		if ( old >= route[0] + route[1] ) {
-			std::printf( "PRECIPVIEW red old census PASSED: the old reading (%d) is not below route default's (%d)\n", old, route[0] + route[1] );
-			ok = false;
+		if ( route[0] + route[1] == 0 ) {  // L8 route lift 2 (header): nothing left for the old reading to under-read; the red is the
+			// closed list itself: one sampler slot (ussTerrMap) dropped from the allow list must be seen on pRoute
+			known.erase( "ussTerrMap" );
+			const int dropped = closed( pRoute, "red allow list", false );
+			known["ussTerrMap"] = 1;
+			if ( dropped == 0 ) {
+				std::printf( "PRECIPVIEW red allow list PASSED: ussTerrMap dropped from the allow list, pRoute's closed list reads 0\n" );
+				ok = false;
+			} else {
+				std::printf( "PRECIPVIEW red allow list FAILS as it must (ussTerrMap dropped: pRoute's closed list reads %d)\n", dropped );
+			}
 		} else {
-			std::printf( "PRECIPVIEW red old census FAILS as it must (the old reading %d, route default %d)\n", old, route[0] + route[1] );
+			const int old = census( pPrecip, 0, false, "old", false, false ) + census( pPrecip, 1, false, "old", false, false );
+			if ( old >= route[0] + route[1] ) {
+				std::printf( "PRECIPVIEW red old census PASSED: the old reading (%d) is not below route default's (%d)\n", old, route[0] + route[1] );
+				ok = false;
+			} else {
+				std::printf( "PRECIPVIEW red old census FAILS as it must (the old reading %d, route default %d)\n", old, route[0] + route[1] );
+			}
 		}
 		for ( const GLuint prog : { pPrecip, pRoute, pAllOn, pRgi } ) {  // pPrecip back to the census' reset
 			f.useProgram( prog );
@@ -2736,6 +2858,8 @@ int main( int argc, char ** argv )
 		WwVkPresent::sharedTargetDrop( reinterpret_cast<std::uintptr_t>( &cubeKeys[c] ) );
 		WwVkPresent::sharedTargetDrop( reinterpret_cast<std::uintptr_t>( &roofKeys[c] ) );
 		WwVkPresent::farTwinDrop( reinterpret_cast<std::uintptr_t>( &cloudKeys[c] ) ), WwVkPresent::sharedTargetDrop( reinterpret_cast<std::uintptr_t>( &cloudKeys[c] ) );
+		WwVkPresent::farTwinDrop( reinterpret_cast<std::uintptr_t>( &ussTerrKeys[c] ) ), WwVkPresent::sharedTargetDrop( reinterpret_cast<std::uintptr_t>( &ussTerrKeys[c] ) );
+		WwVkPresent::farTwinDrop( reinterpret_cast<std::uintptr_t>( &ussContactKeys[c] ) ), WwVkPresent::sharedTargetDrop( reinterpret_cast<std::uintptr_t>( &ussContactKeys[c] ) );
 		for ( char & k : airKeys[c] )
 			WwVkPresent::sharedTargetDrop( reinterpret_cast<std::uintptr_t>( &k ) );
 	}

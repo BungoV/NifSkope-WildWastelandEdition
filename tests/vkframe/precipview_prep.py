@@ -106,6 +106,10 @@ CASES = [
     # (the route default program, WW_FRAME_UBO): the gate uploads its cascades into wwShadowFrame at binding 2
     ('rain_near_csm_ubo', 0, 2.0, 4.0, 11, 37.25, (-60500.0, 70000.0, 6300.0), (120.0, -40.0), 0, 1.0, 0.0, 0.0, 1.0, 1.0, 1,
      2.0, -0.08, 40000, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1),
+    # L8 route lift 2 (VKFAR9 bar, element 32 = the shadow set's composition, ussOn 1), appended: rain_near_csm_ubo's run,
+    # fixture, frame block and route program, with the app's ultra tiers (Vogel cascades, terrain map, contact mask)
+    ('rain_near_uss', 0, 2.0, 4.0, 11, 37.25, (-60500.0, 70000.0, 6300.0), (120.0, -40.0), 0, 1.0, 0.0, 0.0, 1.0, 1.0, 1,
+     2.0, -0.08, 40000, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 1),
 ]
 SUN = np.array([0.4, 0.3, 0.35]) / np.linalg.norm([0.4, 0.3, 0.35])  # world, toward the sun (the air's fogSun too)
 # a lit case's own sun (cellDirTo), chosen by the GS's mix: N = the eye's axis, thick / thin = 4 vpWrap( N.to, pcTrans )
@@ -123,6 +127,7 @@ LIT_SUN['rain_near_gi'] = LIT_SUN['rain_near_lit']
 LIT_SUN['rain_near_amb'] = LIT_SUN['rain_near_lit']
 LIT_SUN['rain_near_csm'] = LIT_SUN['rain_near_lit']
 LIT_SUN['rain_near_csm_ubo'] = LIT_SUN['rain_near_lit']
+LIT_SUN['rain_near_uss'] = LIT_SUN['rain_near_lit']
 TILE, SLICES = 64, 4  # the cluster grid (L8 term 2b): 64-pixel tiles, 4 log-depth slices
 
 
@@ -720,6 +725,71 @@ for ci, c in enumerate(CASES):
     if len(c) > 31 and c[31]:
         # L8 route lift 1: the gate draws this case through pRoute and uploads its cascade values into the frame block
         U['wwGateFrameUbo'] = [1]
+    if lit and len(c) > 32 and c[32]:
+        # L8 route lift 2: ussOn 1 (shadowset.cpp 2754, the tiers ultra). The cascades as the csm block made them, through the
+        # Vogel filter; a 128 x 128 RG16 terrain map (the far tier alone) whose limb heights straddle the in-view particles'
+        # biased heights; a W x H R8 contact mask of soft blobs at in-view particles' window positions
+        us_v = v[inview].astype(np.float64)
+        us_eye = np.array(c[6], np.float64)
+        us_P = us_v @ R + us_eye  # view -> world (R's rows r, u, -d)
+        us_sin = max(float(sunL[2]) / float(np.linalg.norm(sunL)), math.sin(math.radians(1.0)))
+        us_e = math.asin(us_sin)
+        us_nz = abs(float(R[2][2]))  # the flat-on quad's normal (the view axis) in the world: ussSlope's nz
+        us_g = math.sqrt(max(1.0 - us_nz * us_nz, 0.0)) / max(us_nz, 0.2)
+        us_z = us_P[:, 2] + 12.0 * (1.0 + min(max(us_g, 0.0), 4.0)) / us_sin  # ussTerrain's z (ussTerrBias.x 1)
+        us_TN = 128
+        us_S = 1.2 * max(float(np.ptp(us_P[:, 0])), float(np.ptp(us_P[:, 1]))) + 2.0
+        us_x0 = 0.5 * (us_P[:, 0].min() + us_P[:, 0].max()) - 0.5 * us_S
+        us_y0 = 0.5 * (us_P[:, 1].min() + us_P[:, 1].max()) - 0.5 * us_S
+        us_tex = us_S / us_TN
+        us_amp = 0.5 * float(np.ptp(us_z)) + 1.0
+        us_band = 0.1 * us_amp
+        us_gy, us_gx = (np.mgrid[0:us_TN, 0:us_TN] + 0.5) / us_TN
+        us_h = float(np.median(us_z)) + us_amp * np.sin(6.2831853 * (1.5 * us_gx + 0.7 * us_gy))
+        us_lo, us_hi = us_h + 0.5 * us_band, us_h - 0.5 * us_band
+        us_zmin = float(us_hi.min()) - 1.0
+        us_span = float(us_lo.max()) - us_zmin + 1.0
+        us_map = np.zeros((us_TN, us_TN, 2), np.uint16)
+        us_map[..., 0] = np.round((us_lo - us_zmin) / us_span * 65535.0)
+        us_map[..., 1] = np.round((us_hi - us_zmin) / us_span * 65535.0)
+        us_map.tofile(os.path.join(d, 'terr.bin'))
+        us_tu = np.clip(((us_P[:, 0] - us_x0) / us_S * us_TN).astype(int), 0, us_TN - 1)
+        us_tv = np.clip(((us_P[:, 1] - us_y0) / us_S * us_TN).astype(int), 0, us_TN - 1)
+        us_mlo = us_zmin + us_map[us_tv, us_tu, 0] / 65535.0 * us_span
+        us_terr = float(np.mean(us_z < us_mlo))  # the hard lookup (nearest texel) under the terrain: vis < 1
+        us_rad = 2.0 * float(np.linalg.norm(us_P[:, :2] - us_eye[:2], axis=1).max()) + 1.0
+        us_cl = cl[inview]
+        us_wx = (us_cl[:, 0] / us_cl[:, 3] * 0.5 + 0.5) * W
+        us_wy = (us_cl[:, 1] / us_cl[:, 3] * 0.5 + 0.5) * H
+        us_rng = np.random.default_rng(32)
+        us_pick = us_rng.choice(len(us_wx), 12, replace=False)
+        us_py, us_px = np.mgrid[0:H, 0:W] + 0.5
+        for us_sig in (12.0, 18.0, 26.0, 36.0, 50.0, 70.0):  # the blobs grow until >= 0.3 of the view is under one
+            us_m = np.zeros((H, W))
+            for us_k in us_pick:
+                us_m = np.maximum(us_m, np.exp(-((us_px - us_wx[us_k]) ** 2 + (us_py - us_wy[us_k]) ** 2) / (2.0 * us_sig * us_sig)))
+            us_c8 = np.round(np.clip(1.0 - 0.85 * us_m, 0.0, 1.0) * 255.0).astype(np.uint8)
+            us_ci = np.clip(us_wx.astype(int), 0, W - 1), np.clip(us_wy.astype(int), 0, H - 1)
+            us_con = float(np.mean(us_c8[us_ci[1], us_ci[0]] < 255))
+            if us_con >= 0.3:
+                break
+        us_c8.tofile(os.path.join(d, 'contact.bin'))
+        with open(os.path.join(d, 'uss.txt'), 'w', newline='\n') as f:
+            f.write('%d %d %d\n' % (us_TN, W, H))
+        us_Wv = np.eye(4)
+        us_Wv[:3, :3], us_Wv[:3, 3] = R.T, us_eye
+        us_r = math.radians(0.265)
+        U.update({'ussOn': [1], 'ussCsmOn': [1], 'ussCsmFilter': [1.0, 3.5, 44.0, 1.0], 'ussCsmWorld': [1.0, 2.8, 10.5, 42.0],
+                  'ussCsmPhase': [17.0], 'ussCsmCellX': [11.0, 1043.0, 2711.0], 'ussCsmCellY': [7.0, 389.0, 3001.0],
+                  'ussTerrOn': [1], 'ussTerrSize': [float(us_TN), 0.0], 'ussTerrExtra': [0.0] * 4, 'ussTerrSelf': [0.0] * 4,
+                  'ussTerrAtlas': [0.0] * 4, 'ussTerrNearXform': [0.0] * 4,
+                  'ussTerrXform': [1.0 / us_S, -us_x0 / us_S, 1.0 / us_S, -us_y0 / us_S],
+                  'ussTerrRange': [us_zmin, us_span, 0.0, -us_rad], 'ussWorldFromView': us_Wv.T.reshape(-1),
+                  'ussTerrPen': [1.0, us_tex, math.tan(us_e - us_r), math.tan(us_e + us_r)], 'ussTerrBias': [1.0, us_sin, 1.0, 0.0],
+                  'ussContactOn': [1], 'ussContactInvSize': [1.0 / W, 1.0 / H], 'ussView': [0], 'ussRed': [0]})
+        print('precipview case %s: the shadow set, slope %.2f, terrain z bias %.1f, map %.1f units (texel %.3f), heights %.1f +- %.1f; '
+              'in-view shares under the hard terrain lookup < 1 %.3f, the contact mask < 1 %.3f (sigma %.0f px) (want each 0.2 - 0.8)'
+              % (c[0], us_g, float(us_z[0] - us_P[0, 2]), us_S, us_tex, float(np.median(us_z)), us_amp, us_terr, us_con, us_sig))
     with open(os.path.join(d, 'uni.txt'), 'w', newline='\n') as f:
         for key, val in U.items():
             f.write('%s %s\n' % (key, fl(val)))
