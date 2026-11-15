@@ -96,7 +96,21 @@
  * WW_CELL_RESTIR + RTDDGI + RTDDGI_CASCADES program against objcell_effectdecal_rt_ps) reds restir, atlas, gihalf, gikey; ao (vars 32)
  * red copy. Bars: the twin's own (depth EXACT, colour within the bound, crossing counts, lit >= 0.9 of covered) and every red FAILs.
  * The pick (celltwinpick.h) takes the air-zone keys for twin 10 only if tests/vkframe/twinpick proves WW_CELL_AIRZONE inert in
- * fo4_effectdecal_ps (base and RT: the same SPIR-V bytes with and without), as for twin 8. */
+ * fo4_effectdecal_ps (base and RT: the same SPIR-V bytes with and without), as for twin 8.
+ * Decal-fade band (lane VKOBJ9 11-15, `BLVIEW <twin> fade`, vars 128; stated before its first run, never widened): bsshape.cpp's
+ * WwLook::DecalFade branch. The kept placements go to vkCellDraw as one multi-command crossing; each band draw of the alpha-scaled
+ * mode (alphaFlags & 8 and GL_BLEND on: GL's loose `alpha` set to a0 x fade before the draw) goes to vkCellDraw as one crossing.
+ * Twins 2, 3 and 4 (fo4_cell, fo4_cellcsm, pbrm_default: the twin programs with an `alpha` uniform; the effect programs 7, 8, 10
+ * have none, so their band is always the constant-alpha mode). Every draw blended (alphaFlags 8, SRC_ALPHA / ONE_MINUS_SRC_ALPHA;
+ * pbrm: pbrComposition -1), a0 = 1.0, 0.9, 0.8 by draw % 3. Each draw command split by triangles: the first 2/5 kept (drawn at a0),
+ * the rest three band pieces (the last takes the remainder) at fade 0.75, 0.5, 0.25; every crossing keeps >= 1 command (the
+ * kept crossing holds every command's kept piece, band k every command's piece k). GL draws the same pieces in the same order
+ * with the same alpha. Bars: depth EXACT, colour within the bound, lit >= 0.9 of covered; the crossing line: 24 runs, 0 failed,
+ * 24 cells, 96 twin images, blended 24 (4 crossings a draw, 6 draws). Fade probe: every fade 1.0 (bands at a0) moves GL's
+ * colour or depth on >= 20 % of the covered pixels. Red fade (Vulkan's band crossings at a0, unscaled) must FAIL and move the
+ * Vulkan colour. Refusal: a band in the constant-alpha mode (GL_CONSTANT_ALPHA / ONE_MINUS_CONSTANT_ALPHA) refuses with
+ * objBlFrameRead's reason ("blends by a constant or unknown factor"), nothing drawn, 0 runs. The bl twins are not tried for a
+ * band (the row commit wrote holds the alpha from before the band): not gated here, and the app does not call vkBlDraw there. */
 #include "../../src/features/near/cellgpucullvk.h"  // lane VKOBJ7: step B's ranges (the `stepb` rows)
 
 bool cellGate( const std::string & spirvDir, int twin, const GLuint maps[4], unsigned reds = 15u, const char * label = nullptr, unsigned vars = 0u )
