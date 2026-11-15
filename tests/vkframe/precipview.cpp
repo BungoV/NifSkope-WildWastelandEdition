@@ -1032,7 +1032,7 @@ int main( int argc, char ** argv )
 	struct RedSeen
 	{
 		const char * name;
-		int red;
+		long long red;  // past bit 30 from L8 term 7 on
 		bool seen;
 	} reds[27] = { { "cull (radius 0)", 1, false }, { "corners (the strip's last two swapped)", 2, false }, { "near fade (dropped)", 4, false },
 		{ "air (dropped)", 8, false }, { "look (dropped: the plain pipelines)", 16, false }, { "atlas (dropped: the zero texture)", 32, false },
@@ -1742,7 +1742,7 @@ int main( int argc, char ** argv )
 
 		const GLuint pJobCase = pJob;
 		GLuint vkProgOver = 0;  // L8 term 1: Vulkan's run read from another GL program (the WW_CELL_PRT variant)
-		auto runVk = [&]( int red, std::vector<std::uint16_t> & a, std::vector<std::uint16_t> & b, bool checkSeed, std::uint8_t * recOut = nullptr ) -> bool {
+		auto runVk = [&]( long long red, std::vector<std::uint16_t> & a, std::vector<std::uint16_t> & b, bool checkSeed, std::uint8_t * recOut = nullptr ) -> bool {
 			const GLuint pJob = vkProgOver ? vkProgOver : pJobCase;
 			before( fbFrame, j.zd );
 			bindJob( pJob );
