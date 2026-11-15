@@ -162,9 +162,20 @@ HLSL_SRC['objbl_samples_cs'] = 'res/shaders/hlsl/near'
 # lane VKWATER3 (G4 by draws): the script's `fxc <name> <core file> <profile> "$PS_SHIFT|$VS_SHIFT"` lines, the non-bindless
 # fallbacks on the app's base variant, the frozen FragCoord.w fixup's flag
 VKFRAME_FXCELL_ARGS = ['-HV', '2021', '-D', 'WW_CELL_FOGLEAK=1', '-D', 'WW_FRAME_UBO=1']
-VKFRAME_FXCELL = {'objcell_vs': ('fo4_default_vs', 'vs_6_0', 'VS_SHIFT'), 'objcell_cell_ps': ('fo4_cell_ps', 'ps_6_0', 'PS_SHIFT'),
-	'objcell_cellcsm_ps': ('fo4_cellcsm_ps', 'ps_6_0', 'PS_SHIFT'), 'objcell_pbrm_ps': ('pbrm_default_ps', 'ps_6_0', 'PS_SHIFT'),
-	'objcell_pbrmcell_ps': ('pbrm_cell_ps', 'ps_6_0', 'PS_SHIFT'), 'objcell_pbrmcellcsm_ps': ('pbrm_cellcsm_ps', 'ps_6_0', 'PS_SHIFT')}
+# (G4 rest: a 5th quoted field, a variant's other defines)
+VKFRAME_FXCELL = {'objcell_vs': ('fo4_default_vs', 'vs_6_0', 'VS_SHIFT', ''), 'objcell_cell_ps': ('fo4_cell_ps', 'ps_6_0', 'PS_SHIFT', ''),
+	'objcell_cellcsm_ps': ('fo4_cellcsm_ps', 'ps_6_0', 'PS_SHIFT', ''), 'objcell_pbrm_ps': ('pbrm_default_ps', 'ps_6_0', 'PS_SHIFT', ''),
+	'objcell_pbrmcell_ps': ('pbrm_cell_ps', 'ps_6_0', 'PS_SHIFT', ''), 'objcell_pbrmcellcsm_ps': ('pbrm_cellcsm_ps', 'ps_6_0', 'PS_SHIFT', ''),
+	'objcell_effectcell_ps': ('fo4_effectcell_ps', 'ps_6_0', 'PS_SHIFT', '-D WW_CELL_AIRZONE=1'),
+	'objcell_effectdecalcsm_ps': ('fo4_effectdecalcsm_ps', 'ps_6_0', 'PS_SHIFT', '')}
+# the all-on route's RT GI variant of each twin (pbrm_default's code is the same)
+VKFRAME_FXCELL_RT = '-D WW_CELL_RTDDGI=1 -D WW_CELL_RTDDGI_CASCADES=1 -D WW_CELL_RESTIR=1'
+VKFRAME_FXCELL.update({'objcell_cell_rt_ps': ('fo4_cell_ps', 'ps_6_0', 'PS_SHIFT', VKFRAME_FXCELL_RT),
+	'objcell_cellcsm_rt_ps': ('fo4_cellcsm_ps', 'ps_6_0', 'PS_SHIFT', VKFRAME_FXCELL_RT),
+	'objcell_pbrmcell_rt_ps': ('pbrm_cell_ps', 'ps_6_0', 'PS_SHIFT', VKFRAME_FXCELL_RT),
+	'objcell_pbrmcellcsm_rt_ps': ('pbrm_cellcsm_ps', 'ps_6_0', 'PS_SHIFT', VKFRAME_FXCELL_RT),
+	'objcell_effectcell_rt_ps': ('fo4_effectcell_ps', 'ps_6_0', 'PS_SHIFT', '-D WW_CELL_AIRZONE=1 ' + VKFRAME_FXCELL_RT),
+	'objcell_effectdecalcsm_rt_ps': ('fo4_effectdecalcsm_ps', 'ps_6_0', 'PS_SHIFT', VKFRAME_FXCELL_RT)})
 HLSL_SPECS += [('src/features/vkframe', k, 'vulkan1.2', 'vkframe_%s_spv' % k) for k in VKFRAME_FXCELL]
 # lane VKOBJ5 (G4 round 3): the script's `fxp` lines, particles_cell.prog's record pass, expand stage and cell-lit pixel twin
 # (res/shaders/hlsl/particles) on the app's variant
@@ -339,10 +350,11 @@ def script_ok(tree):
 	blines = dict((k, (f, p, s)) for k, f, p, s in re.findall(r'^fxb ([a-z0-9_]+) ([a-z0-9_]+) ([vp]s_6_0) "\$([A-Z_]+)"$', vf, re.M))
 	if blines != VKFRAME_FXBL:
 		bad.append('src/features/vkframe/vkframe_spirv.sh: its fxb lines (%s) are not this checker\'s bl twins' % ' '.join(sorted(blines)))
-	if '\t"$DXC" -spirv -fspv-target-env=vulkan1.2 -HV 2021 -T "$3" -E main -D WW_CELL_FOGLEAK=1 -D WW_FRAME_UBO=1 $4 -fspv-preserve-bindings ' \
+	if '\t"$DXC" -spirv -fspv-target-env=vulkan1.2 -HV 2021 -T "$3" -E main -D WW_CELL_FOGLEAK=1 -D WW_FRAME_UBO=1 $4 ${5:-} -fspv-preserve-bindings ' \
 			'-fvk-use-dx-position-w -Fo "$1.spv" ' not in vf:
 		bad.append('src/features/vkframe/vkframe_spirv.sh: its fxc() compile line changed')
-	clines = dict((k, (f, p, s)) for k, f, p, s in re.findall(r'^fxc ([a-z0-9_]+) ([a-z0-9_]+) ([vp]s_6_0) "\$([A-Z_]+)"$', vf, re.M))
+	clines = dict((k, (f, p, s, x)) for k, f, p, s, x in
+	              re.findall(r'^fxc ([a-z0-9_]+) ([a-z0-9_]+) ([vp]s_6_0) "\$([A-Z_]+)"(?: "([^"]*)")?$', vf, re.M))
 	if clines != VKFRAME_FXCELL:
 		bad.append('src/features/vkframe/vkframe_spirv.sh: its fxc lines (%s) are not this checker\'s cell fallbacks' % ' '.join(sorted(clines)))
 	if '\t"$DXC" -spirv -fspv-target-env=vulkan1.2 -HV 2021 -T "$3" -E main -D WW_CELL_AIRZONE=1 -D WW_CELL_FOGLEAK=1 -D WW_FRAME_UBO=1 $4 ' \
@@ -541,7 +553,7 @@ def main(argv):
 				m = re.match(r'(.*)', VKFRAME_FXBL[k][1])
 			if k in VKFRAME_FXCELL:
 				hdefs = VKFRAME_FXCELL_ARGS + (VKFRAME_VS_SHIFT if VKFRAME_FXCELL[k][2] == 'VS_SHIFT' else VKFRAME_PS_SHIFT) \
-					+ ['-fspv-preserve-bindings', '-fvk-use-dx-position-w']
+					+ VKFRAME_FXCELL[k][3].split() + ['-fspv-preserve-bindings', '-fvk-use-dx-position-w']
 				m = re.match(r'(.*)', VKFRAME_FXCELL[k][1])
 			if k in VKFRAME_FXP:
 				hdefs = VKFRAME_FXP_ARGS + (VKFRAME_VS_SHIFT if VKFRAME_FXP[k][2] == 'VS_SHIFT' else VKFRAME_PS_SHIFT) \

@@ -24,6 +24,8 @@
 #include "features/clouds/cloudvol.h"   // SKYLIGHT1 round 2: the deck on the miss sky
 #include "gl/celllights.h"
 #include "gl/cellunits.h"
+#include "features/vkframe/vkobjpipe.h"	// lane VKWATER3: the cascades' atlas as a store (objBlTexelStore)
+#include "features/near/cellbindless.h"	// WwBl::vkShadeOn
 #include "gl/celluniform.h"	// lane PERFFIX1: the volume's unit bound without asking the driver
 #include "features/reflections/cellssr.h"      // lane RESTIRDI1: wwCellAoTargets (the shared opaque pass ReSTIR reads)
 #include "gl/glscene.h"
@@ -533,6 +535,8 @@ struct Combined
 	GLint dims[4 * rtddgi::kMaxCascades] = {};
 	double copyMs = 0;
 	qint64 copies = 0;
+	bool stored = false;   // lane VKWATER3: buf is a store (the view on Vulkan: the cell twins' RT GI variant reads it in place)
+	bool storeRefused = false;   // the device refused the store while the view is on (asked again once it went off)
 };
 
 Combined & combined()
@@ -2651,7 +2655,9 @@ static void freeCombined( Renderer * r )
 	if ( r && K.owner == r ) {
 		if ( K.tex )
 			r->fn->glDeleteTextures( 1, &K.tex );
-		if ( K.buf )
+		if ( K.stored )
+			WwVkPresent::objBlTexelStoreDrop( K.buf );
+		else if ( K.buf )
 			r->fn->glDeleteBuffers( 1, &K.buf );
 	}
 	K = Combined();
@@ -2688,18 +2694,44 @@ static void combinedUpdate( Renderer * r, int n, const void * nif )
 		texels += size_t( nP[l] ) * kAtlasTexels;
 	}
 	const size_t bytes = texels * 16;
+	/* lane VKWATER3 G4: while the cell shapes draw on Vulkan the atlas is a store (exported Vulkan memory GL copies into),
+	 * which the cell twins' RT GI variant reads in place; a store the device dropped, or the view back on GL: GL's own again */
+	const bool shade = WwBl::vkShadeOn();
+	if ( K.stored && ( !shade || !WwVkPresent::objBlTexelStoreIs( K.buf ) ) ) {
+		WwVkPresent::objBlTexelStoreDrop( K.buf );
+		K.buf = 0;
+		K.bytes = 0;
+		K.stored = false;
+	}
 	if ( !K.buf ) {
 		fn->glGenBuffers( 1, &K.buf );
-		fn->glGenTextures( 1, &K.tex );
+		if ( !K.tex )
+			fn->glGenTextures( 1, &K.tex );
 		K.owner = r;
+		K.attach = true;
+		K.bytes = 0;
 	}
 	QElapsedTimer t;
 	t.start();
-	if ( bytes > K.bytes ) {   // grows only: a smaller layout reads the front of it
-		fn->glBindBuffer( GL_COPY_WRITE_BUFFER, K.buf );
-		fn->glBufferData( GL_COPY_WRITE_BUFFER, GLsizeiptr( bytes ), nullptr, GL_DYNAMIC_COPY );
-		fn->glBindBuffer( GL_COPY_WRITE_BUFFER, 0 );
-		K.bytes = bytes;
+	if ( !shade )
+		K.storeRefused = false;
+	const bool toStore = shade && !K.stored && !K.storeRefused && K.bytes > 0;   // the view went on: the atlas moves into a store
+	if ( bytes > K.bytes || toStore ) {   // grows only: a smaller layout reads the front of it
+		const size_t want = std::max( bytes, K.bytes );
+		const bool was = K.stored;
+		std::string storeWhy;
+		K.stored = shade && WwVkPresent::objBlTexelStore( K.buf, want, storeWhy );   // GL's own buffer goes into the store
+		K.storeRefused = shade && !K.stored;
+		if ( !K.stored ) {
+			if ( was ) {   // the old store stays the device's (its storage is immutable): GL takes a buffer of its own
+				WwVkPresent::objBlTexelStoreDrop( K.buf );
+				fn->glGenBuffers( 1, &K.buf );
+			}
+			fn->glBindBuffer( GL_COPY_WRITE_BUFFER, K.buf );
+			fn->glBufferData( GL_COPY_WRITE_BUFFER, GLsizeiptr( want ), nullptr, GL_DYNAMIC_COPY );
+			fn->glBindBuffer( GL_COPY_WRITE_BUFFER, 0 );
+		}
+		K.bytes = want;
 		K.attach = true;
 		relayout = true;
 	}

@@ -1153,6 +1153,16 @@ int main( int argc, char ** argv )
 		const bool c6s = cellGate( spvDir + "/cellset/spirv", 6, pbrmBc4, 1u << 2, "bc4" );
 		const bool v5sa = cellGate( spvDir + "/cellset/spirv", 5, pbrm, 3u << 5, "skin alpha", 6u );
 		ok = v2l && v3l && v2sa && v4sa && c5 && c6 && c5s && c6s && v5sa && ok;
+		/* G4 rest (11-14): fo4_effectcell (twin 7, + the air zones): BaseMap DXT5, GreyscaleMap DXT1, NormalMap DXT1, SpecularMap BC5;
+		 * the lights always; reds offset, half, key, light, copy (the soft fade's depth copy twin); then BC4 as GreyscaleMap for swz */
+		const GLuint fx[4] = { texs[3], texs[0], texs[1], texs[9] }, fxBc4[4] = { texs[3], texs[4], texs[1], texs[9] };
+		const bool c7 = cellGate( spvDir + "/cellset/spirv", 7, fx, 0xBu | 1u << 4 | 1u << 8 );
+		const bool c7s = cellGate( spvDir + "/cellset/spirv", 7, fxBc4, 1u << 2, "bc4" );
+		ok = c7 && c7s && ok;
+		/* the RT GI variant (11-15, vars 8): GL's WW_CELL_RESTIR + RTDDGI + RTDDGI_CASCADES program against the twin's _rt_ps, the
+		 * lights on; reds restir, atlas, gihalf, gikey (ObjCellShade.red 9 .. 12) */
+		const bool c3rt = cellGate( spvDir + "/cellset/spirv", 3, maps, 0xFu << 9, "rt", 1u | 8u );
+		ok = c3rt && ok;
 	} else
 		std::printf( "BLVIEW cell not run (the cell twins read the texture cache's twins: MODE=bc)\n" );
 	vk().vkWaitForFences( vk().dev, 1, &gv.fence, VK_TRUE, 1000000000ull );

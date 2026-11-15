@@ -204,6 +204,7 @@ struct AoGpu
 	int giKeyW = 0, giKeyH = 0;
 	int giStep = 2;			// 2 half resolution, 1 full
 	bool giReady = false;	// this frame's screen GI
+	bool giShared = false;	// lane VKWATER3: giHalf.tex and giKey are shared targets of the present device (giShare)
 	bool volOn = false;		// this frame's volumes' mask was drawn
 	AoTarget volMask;		// lane PERF1: full size, the pixel's interior volume's room + 1 (R32F; 0 none)
 	GLuint volBuf = 0, volTex = 0, volVao = 0;	// the shapes, 3 RGBA32F texels each (a buffer texture)
@@ -226,10 +227,10 @@ void aoAlloc( NifSkopeOpenGLContext::GLFunctions * fn, AoTarget & t, int w, int 
 {
 	if ( t.tex && t.w == w && t.h == h )
 		return;
-	if ( !t.tex ) {
+	if ( !t.tex )
 		fn->glGenTextures( 1, &t.tex );
+	if ( !t.fbo )	// lane VKWATER3: kept when a shared texture went (giShare)
 		fn->glGenFramebuffers( 1, &t.fbo );
-	}
 	fn->glBindTexture( GL_TEXTURE_2D, t.tex );
 	fn->glTexImage2D( GL_TEXTURE_2D, 0, GLint( ifmt ), w, h, 0, fmt, GL_FLOAT, nullptr );
 	fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, linear ? GL_LINEAR : GL_NEAREST );
@@ -386,6 +387,59 @@ bool giVolMaskPass( Scene * scene, AoGpu & g, const WwCellGi * G, int W, int H, 
  * g-buffer, in each pixel's volume (the mask above, else the room grid): the sample and its key (world position,
  * packed normal), which the opaque cell-lit draws upsample (cell_lights.glsl cellGiSample). Runs inside wwCellAoPass,
  * after the depth pyramid; the caller restores the state. */
+/* lane VKWATER3 G4: while the view is on Vulkan the screen GI and its key are shared targets of the present device, so the
+ * cell twins' RT GI variant reads them with no copy (red WW_VKVIEW_GIHALF_RED=1, or a refusal: GL's own, as before; the
+ * twins then refuse the draws: "GL textures with no twin"). Sizes them hw x hh; aoAlloc and the key's upload then keep them */
+void giShare( NifSkopeOpenGLContext::GLFunctions * fn, AoGpu & g, int hw, int hh )
+{
+	const std::uintptr_t kHalf = reinterpret_cast<std::uintptr_t>( &g.giHalf.tex ), kKey = reinterpret_cast<std::uintptr_t>( &g.giKey );
+	const bool want = WwVkPresent::shareWanted( "WW_VKVIEW_GIHALF_RED" );
+	if ( g.giShared && ( !want || !WwVkPresent::sharedTargetIs( kHalf, g.giHalf.tex ) || !WwVkPresent::sharedTargetIs( kKey, g.giKey )
+		|| g.giHalf.w != hw || g.giHalf.h != hh ) ) {
+		WwVkPresent::sharedTargetDrop( kHalf );	// the present device's names: dropped there, not deleted here
+		WwVkPresent::sharedTargetDrop( kKey );
+		g.giHalf.tex = g.giKey = 0;
+		g.giHalf.w = g.giHalf.h = g.giKeyW = g.giKeyH = 0;
+		g.giShared = false;
+	}
+	if ( !want || g.giShared )
+		return;
+	unsigned a = 0, b = 0;
+	std::string why;
+	if ( !WwVkPresent::sharedTarget( kHalf, 0, hw, hh, 1, GL_RGBA32F, a, why ) || !WwVkPresent::sharedTarget( kKey, 0, hw, hh, 1, GL_RGBA32F, b, why ) ) {
+		WwVkPresent::sharedTargetDrop( kHalf );
+		WwVkPresent::sharedTargetDrop( kKey );
+		static std::string said;
+		if ( said != why ) {
+			said = why;
+			qInfo().noquote() << "vk gihalf: the screen GI stays GL's (" << QString::fromStdString( why ) << ")";
+		}
+		return;
+	}
+	if ( g.giHalf.tex )
+		fn->glDeleteTextures( 1, &g.giHalf.tex );
+	if ( g.giKey )
+		fn->glDeleteTextures( 1, &g.giKey );
+	for ( const unsigned t : { a, b } ) {
+		fn->glBindTexture( GL_TEXTURE_2D, t );
+		fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST );
+		fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST );
+		fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE );
+		fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE );
+		fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0 );
+	}
+	fn->glBindTexture( GL_TEXTURE_2D, 0 );
+	if ( !g.giHalf.fbo )
+		fn->glGenFramebuffers( 1, &g.giHalf.fbo );
+	fn->glBindFramebuffer( GL_FRAMEBUFFER, g.giHalf.fbo );
+	fn->glFramebufferTexture2D( GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, a, 0 );
+	g.giHalf.tex = a;
+	g.giKey = b;
+	g.giHalf.w = g.giKeyW = hw;
+	g.giHalf.h = g.giKeyH = hh;
+	g.giShared = true;
+}
+
 void giHalfPass( Scene * scene, AoGpu & g, int W, int H, float p00, float p11 )
 {
 	Renderer * r = scene->renderer;
@@ -398,6 +452,7 @@ void giHalfPass( Scene * scene, AoGpu & g, int W, int H, float p00, float p11 )
 	const int rate = wwCellGiRate();
 	g.giStep = rate == 1 || ( rate == 0 && !wwCellPrtOn() ) ? 1 : 2;
 	const int hw = ( W + g.giStep - 1 ) / g.giStep, hh = ( H + g.giStep - 1 ) / g.giStep;
+	giShare( fn, g, hw, hh );
 	aoAlloc( fn, g.giHalf, hw, hh, GL_RGBA32F, GL_RGBA, false );
 	if ( !g.giKey )
 		fn->glGenTextures( 1, &g.giKey );

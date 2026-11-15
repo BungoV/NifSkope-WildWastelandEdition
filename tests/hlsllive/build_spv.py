@@ -16,6 +16,8 @@ GL_BINDLESS = 'WW_GL_BINDLESS'   # a source naming it takes its GL bindless rout
 # Red: WW_HLSL_POSW_RED=1 drops the flag (A4 with the a4fixtures.txt water rows must FAIL).
 # FO4MATCH1: the soft fades' fragW of the effect shader (fo4_effectcell / decal / decalcsm wrappers), the cell effect, the
 # particles (particles_cell) and the TAA object velocities, each with its a4fixtures.txt row.
+# G4 rest (11-14): the effect family's soft fade (cellFxFade, vpCardSlab) and the particles' / TAA object-velocity's fragW read it
+# the same way: without the flag GL's fragW was 1/w (~0.13), so every soft card faded to 0 (the effect twin's gate found it)
 POSITION_W = ('fo4_water_ps.hlsl', 'fo4_effectshader_ps.hlsl', 'fo4_effectcellfx_ps.hlsl', 'particles_ps.hlsl', 'taa_objvel_ps.hlsl')
 
 

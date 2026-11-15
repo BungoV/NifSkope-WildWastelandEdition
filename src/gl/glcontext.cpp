@@ -879,6 +879,7 @@ bool NifSkopeOpenGLContext::Program::load( const QString & filepath, NifSkopeOpe
 		std::vector< std::string >	wwBase;	// each stage's variant key (Shader::wwDefs)
 		wwGlslIds.clear();
 		wwSpvIds.clear();
+		wwDefs.clear();	// lane VKWATER3 G4: the pixel stage's variant key (the Vulkan twins match it, cellbindless.cpp vkCellDraw)
 		wwSpv = false;
 		wwSpvWhy.clear();
 
@@ -907,6 +908,8 @@ bool NifSkopeOpenGLContext::Program::load( const QString & filepath, NifSkopeOpe
 							mix( QByteArray::number( qulonglong( shader->srcHash ), 16 ) );
 							wwFiles.push_back( nameStr );
 							wwBase.push_back( shader->wwDefs );
+							if ( nameStr.ends_with( "frag" ) )
+								wwDefs = shader->wwDefs;
 							wwGlslIds.push_back( shader->id );
 						}
 						else

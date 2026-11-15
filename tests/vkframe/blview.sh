@@ -49,8 +49,8 @@ done
 	|| { tail -8 "$OUT/spvset.txt"; echo "BLVIEW GATE FAILED (build_all.py, the fo4_cellbl / fo4_cellcsmbl SPIR-V set)"; exit 1; }
 # lane VKWATER3 G4: GL's fo4_cell and fo4_cellcsm (with their variants, the base WW_CELL_FOGLEAK+WW_FRAME_UBO among them) for the cell gate
 if [ "$MODE" = bc ]; then
-	"$PY" -I -X utf8 "$ROOT/tests/hlsllive/build_all.py" "$ROOT" "$OUT/cellset" --only fo4_cell.prog,fo4_cellcsm.prog,pbrm_default.prog,pbrm_cell.prog,pbrm_cellcsm.prog --jobs 4 > "$OUT/cellset.txt" 2>&1 \
-		|| { tail -8 "$OUT/cellset.txt"; echo "BLVIEW GATE FAILED (build_all.py, the fo4_cell / fo4_cellcsm / pbrm_default / pbrm_cell / pbrm_cellcsm SPIR-V set)"; exit 1; }
+	"$PY" -I -X utf8 "$ROOT/tests/hlsllive/build_all.py" "$ROOT" "$OUT/cellset" --only fo4_cell.prog,fo4_cellcsm.prog,pbrm_default.prog,pbrm_cell.prog,pbrm_cellcsm.prog,fo4_effectcell.prog --jobs 4 > "$OUT/cellset.txt" 2>&1 \
+		|| { tail -8 "$OUT/cellset.txt"; echo "BLVIEW GATE FAILED (build_all.py, the fo4_cell / fo4_cellcsm / pbrm_default / pbrm_cell / pbrm_cellcsm / fo4_effectcell SPIR-V set)"; exit 1; }
 	# lane VKOBJ5 G4 round 3: GL's particles_cell (particles.vert + particles.geom + the base variant's frag) for the pfx gate
 	"$PY" -I -X utf8 "$ROOT/tests/hlsllive/build_all.py" "$ROOT" "$OUT/pfxset" --only particles_cell.prog --jobs 4 > "$OUT/pfxset.txt" 2>&1 \
 		|| { tail -8 "$OUT/pfxset.txt"; echo "BLVIEW GATE FAILED (build_all.py, the particles_cell SPIR-V set)"; exit 1; }
