@@ -159,7 +159,9 @@
 // no mirror run). Each ambient case must also show (else the gate fails): GL with volTerms 1 differs on >= 1000 covered
 // samples (the ambient seen); cellDalc, cellExtDalc, cellAmboCount, cellAmbo, cellAmboK, cellAmboBox, volEnvGrid and
 // volEnvHist found in GL's program; cellDalc and cellExtDalc packed non-zero. rain_near_amb also: GL with cellAmboCount 0
-// differs on >= 1000 (the volumes seen). snow_far_amb also: GL with volEnvGrid.w 0 differs on >= 1000 (the keep seen), GL
+// differs on >= 1000 (the volumes seen; VKFAR5 at the lift, stricter, bar kept: also cellAmboCount 1 vs the case, the box
+// seen alone, and cellAmboCount 0 vs 1, the sphere seen alone, each >= 1000; fixture move (bar kept): pv_A1's box held
+// 0.032 of the in-view particles, so the prep grows its half extents, percentile 40 up by 10, until >= 0.15). snow_far_amb also: GL with volEnvGrid.w 0 differs on >= 1000 (the keep seen), GL
 // with b0 all zero on >= 1000 (the projection read); volEnvGrid packed non-zero. Red 16384 the history dropped (Vulkan's
 // volEnvHist the zero texture) must FAIL in snow_far_amb; red 32768 the ambient dropped (Vulkan's packed volTerms bit 8
 // cleared) must FAIL in both; red 512 (b0 zero) must FAIL in snow_far_amb too. Lifted with it: precipLitWhy's volTerms 8
@@ -488,7 +490,7 @@ struct Job
 	float zd = 0.5f;
 	UniMap uni;
 	std::vector<TexIn> tex;
-	int atlasAt = -1, airAt[5] = { -1, -1, -1, -1, -1 }, normAt = -1;  // into tex
+	int atlasAt = -1, airAt[5] = { -1, -1, -1, -1, -1 }, normAt = -1, envAt = -1;  // into tex (envAt: L8 term 2's volEnvHist)
 	bool hasN() const { return look == 2 && hasTex; }
 	struct Buf  // L8 term 2a: a texture buffer (buf.txt: name format texels file)
 	{
@@ -528,11 +530,23 @@ struct Job
 				return lit != 0;
 		return false;
 	}
+	bool amb() const  // L8 term 2 (VKFAR5): volTerms' ambient bit (8)
+	{
+		const auto it = uni.find( "volTerms" );
+		return lit && it != uni.end() && !it->second.empty() && ( int( it->second[0] ) & 8 ) != 0;
+	}
+	bool envKeep() const  // L8 term 2: the ambient's keep on (volEnvGrid.w 1, the history bound)
+	{
+		const auto it = uni.find( "volEnvGrid" );
+		return amb() && envAt >= 0 && it != uni.end() && it->second.size() == 4 && it->second[3] > 0.5;
+	}
+	bool readsB0() const { return cluster() || envKeep(); }  // GL's geometry stage reads b0's projection
 };
 const int kNormUnit = 8;  // slice 3: the look's pcTexN
 const int kLightsUnit = 9, kClusterUnit = 10;  // L8 term 2a: the lamps' cellLights / cellCluster
 const int kTerrUnit = 11;  // L8 terrain air: airTerr
 const int kGiUnit = 12;  // L8 term 1: the WW_CELL_PRT variant's cellGiAir
+const int kEnvUnit = 13;  // L8 term 2: the ambient's volEnvHist
 const GLenum kTexBuffer = 0x8C2A;  // GL_TEXTURE_BUFFER
 // slice 2a: the air's textures, in precipRun's tex[2..6] order, their GL units and fxTexOf types
 const char * kAirTex[5] = { "atApTex", "volTex", "volTile", "volAirTerr", "volAirRainMap" };
@@ -587,11 +601,13 @@ int main( int argc, char ** argv )
 						j.atlasAt = int( k );
 					if ( j.tex[k].name == "pcTexN" )
 						j.normAt = int( k );
+					if ( j.tex[k].name == "volEnvHist" && j.tex[k].type == 1 )
+						j.envAt = int( k );
 					for ( int a = 0; a < 5; a++ )
 						if ( j.tex[k].name == kAirTex[a] && j.tex[k].type == kAirType[a] )
 							j.airAt[a] = int( k );
 				}
-				if ( j.tex.size() != size_t( ( j.hasTex ? 1 : 0 ) + ( j.fog ? 5 : 0 ) + ( j.hasN() ? 1 : 0 ) ) || ( j.hasTex && j.atlasAt < 0 )
+				if ( j.tex.size() != size_t( ( j.hasTex ? 1 : 0 ) + ( j.fog ? 5 : 0 ) + ( j.hasN() ? 1 : 0 ) + ( j.envAt >= 0 ? 1 : 0 ) ) || ( j.hasTex && j.atlasAt < 0 )
 					|| ( j.hasN() && j.normAt < 0 ) )
 					return fatal( nm + "/tex.txt" );
 				for ( int a = 0; a < 5 && j.fog; a++ )
@@ -822,6 +838,7 @@ int main( int argc, char ** argv )
 	constexpr int kCases = 19;
 	static char twinKeys[kCases], normKeys[kCases];  // one atlas twin a case (the atlases' sizes differ), one normal-map twin a case
 	static char terrKeys[kCases];  // L8 terrain air: airTerr's twin a case
+	static char envKeys[kCases];  // L8 term 2: volEnvHist's twin a case
 	static char airKeys[kCases][5], volKeys[kCases];  // the air's twins a case, its volume's shared target a case
 	if ( jobs.size() > size_t( kCases ) )
 		return fatal( "more than " + std::to_string( kCases ) + " cases" );
@@ -878,11 +895,12 @@ int main( int argc, char ** argv )
 		const char * name;
 		int red;
 		bool seen;
-	} reds[12] = { { "cull (radius 0)", 1, false }, { "corners (the strip's last two swapped)", 2, false }, { "near fade (dropped)", 4, false },
+	} reds[14] = { { "cull (radius 0)", 1, false }, { "corners (the strip's last two swapped)", 2, false }, { "near fade (dropped)", 4, false },
 		{ "air (dropped)", 8, false }, { "look (dropped: the plain pipelines)", 16, false }, { "atlas (dropped: the zero texture)", 32, false },
 		{ "light (dropped)", 128, false }, { "lamps' lights (dropped: the zero texel buffer)", 256, false },
 		{ "cluster's globals (dropped: b0 zero)", 512, false }, { "cluster lists (dropped: the zero texel buffer)", 1024, false },
-		{ "local sun (dropped: vpSun.w 0)", 2048, false }, { "terrain air (dropped: the zero airTerr)", 4096, false } };
+		{ "local sun (dropped: vpSun.w 0)", 2048, false }, { "terrain air (dropped: the zero airTerr)", 4096, false },
+		{ "ambient's history (dropped: the zero volEnvHist)", 16384, false }, { "ambient (dropped: volTerms' bit 8)", 32768, false } };
 	using TexBufferFn = void( WINAPI * )( GLenum, GLenum, GLuint );
 	const auto texBuffer = reinterpret_cast<TexBufferFn>( wglGetProcAddress( "glTexBuffer" ) );
 	if ( !texBuffer )
@@ -919,6 +937,9 @@ int main( int argc, char ** argv )
 			if ( !upload( dir + "/" + j.name, t, into ) )
 				return fatal( j.name + ": upload " + t.name );
 		}
+		if ( j.envAt >= 0 && !upload( dir + "/" + j.name, j.tex[size_t( j.envAt )], 0 ) )
+			return fatal( j.name + ": upload volEnvHist" );
+		const GLuint envTex = j.envAt >= 0 ? j.tex[size_t( j.envAt )].gl : 0;
 		const void * uboOver = nullptr;  // the globals check's other b0 (bindJob uploads it in place of the case's)
 		const void * vkGlobalOver = nullptr;  // the same bytes as Vulkan's b0 (the globals mirror)
 		auto bindJob = [&]( GLuint prog ) {
@@ -937,6 +958,8 @@ int main( int argc, char ** argv )
 			// L8 terrain air: the air's grid at airTerr too (the app binds its pass grid to both; read only with airTerrOn)
 			bindUnit( kTerrUnit, fT2DA, j.fog ? j.tex[size_t( j.airAt[3] )].gl : 0 );
 			u1i( prog, "airTerr", kTerrUnit );
+			bindUnit( kEnvUnit, fT3D, envTex );  // L8 term 2 (none: read only with volEnvGrid.w 1)
+			u1i( prog, "volEnvHist", kEnvUnit );
 			if ( !j.fog ) {  // an unfogged case: the air fully off (a program keeps the last fogged case's uniforms)
 				static const float zero4[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
 				u1i( prog, "fogOn", 0 );
@@ -1078,6 +1101,15 @@ int main( int argc, char ** argv )
 					f.uniform3fv( f.getUniformLocation( pPrt, "cellGiAirOrigin" ), 1, org );
 					f.uniform3fv( f.getUniformLocation( pPrt, "cellGiAirDims" ), 1, dims );
 					f.uniform1fv( f.getUniformLocation( pPrt, "cellGiAirVoxel" ), 1, &vox );
+				} else if ( mode == 20 ) {  // L8 term 2: the ambient's keep off (volEnvGrid.w 0)
+					GLfloat g4[4] = {};
+					f.getUniformfv( pJob, f.getUniformLocation( pJob, "volEnvGrid" ), g4 );
+					g4[3] = 0.0f;
+					f.uniform4fv( f.getUniformLocation( pJob, "volEnvGrid" ), 1, g4 );
+				} else if ( mode == 21 ) {  // L8 term 2: no Ambient Only volumes
+					u1i( pJob, "cellAmboCount", 0 );
+				} else if ( mode == 22 ) {  // L8 term 2: the sphere alone (the box dropped)
+					u1i( pJob, "cellAmboCount", 1 );
 				} else if ( mode == 9 ) {  // the case as it is (the restore check)
 				} else if ( mode == 6 ) {  // L8 term 3: the local law off (vpSun.w 0)
 					const float off[4] = { 0.5f, 0.4f, 0.3f, 0.0f };
@@ -1145,6 +1177,32 @@ int main( int argc, char ** argv )
 				std::printf( "PRECIPVIEW %s local sun checks: GL with vpSun.w 0 differs %zu of %zu covered samples (want >= 1000); vpSun %s in GL's program\n",
 					j.name.c_str(), noLaw.flips, noLaw.covered, found ? "found" : "MISSING" );
 				ok = ok && noLaw.flips >= 1000 && found;
+			}
+			if ( j.amb() ) {  // L8 term 2's seen-checks (header): the ambient seen, its names found, the volumes / the keep seen
+				const Verdict noAmb = judge( bg, drawGl( 3 ), refA, refB, refB );
+				std::string amiss;
+				for ( const char * nm : { "cellDalc", "cellExtDalc", "cellAmboCount", "cellAmbo", "cellAmboK", "cellAmboBox", "volEnvGrid", "volEnvHist" } )
+					if ( f.getUniformLocation( pJob, nm ) < 0 )
+						amiss += std::string( amiss.empty() ? "" : ", " ) + nm;
+				std::printf( "PRECIPVIEW %s ambient checks: GL with volTerms 1 differs %zu of %zu covered samples (want >= 1000); ambient names missing "
+					"from GL's program: %s\n", j.name.c_str(), noAmb.flips, noAmb.covered, amiss.empty() ? "none" : amiss.c_str() );
+				ok = ok && noAmb.flips >= 1000 && amiss.empty();
+				if ( j.envKeep() ) {
+					const Verdict noKeep = judge( bg, drawGl( 20 ), refA, refB, refB );
+					const Verdict noB0 = judge( bg, drawGl( 5 ), refA, refB, refB );
+					std::printf( "PRECIPVIEW %s ambient keep checks: GL with volEnvGrid.w 0 differs %zu of %zu covered samples, b0 all zero %zu (each want "
+						">= 1000)\n", j.name.c_str(), noKeep.flips, noKeep.covered, noB0.flips );
+					ok = ok && noKeep.flips >= 1000 && noB0.flips >= 1000;
+				} else {
+					const std::vector<std::uint16_t> none = drawGl( 21 ), sphere = drawGl( 22 );
+					const Verdict noVol = judge( bg, none, refA, refB, refB );
+					const Verdict noBox = judge( bg, sphere, refA, refB, refB );
+					const Verdict noSph = judge( bg, none, sphere, refB, refB );
+					std::printf( "PRECIPVIEW %s ambient volume checks: GL with cellAmboCount 0 differs %zu of %zu covered samples, cellAmboCount 1 (the box "
+						"dropped) %zu, cellAmboCount 0 vs 1 (the sphere alone) %zu (each want >= 1000)\n", j.name.c_str(), noVol.flips, noVol.covered,
+						noBox.flips, noSph.flips );
+					ok = ok && noVol.flips >= 1000 && noBox.flips >= 1000 && noSph.flips >= 1000;
+				}
 			}
 			if ( j.terrAir() ) {  // L8 terrain air's seen-checks (header): the grid seen, its names found
 				const Verdict flatGround = judge( bg, drawGl( 7 ), refA, refB, refB );
@@ -1448,6 +1506,13 @@ int main( int argc, char ** argv )
 				}
 				t.tex[8].twin = reinterpret_cast<std::uintptr_t>( &terrKeys[jobAt] );
 			}
+			if ( t.lit && ( t.litIn.terms & 8 ) ) {  // precipDraw's (L8 term 2): GL's volEnvHist into the lit set's t19
+				if ( !WwVkPresent::fxTexOf( &ga, pJob, "volEnvHist", 1, t.tex[9], why ) ) {
+					std::printf( "PRECIPVIEW fxTexOf refused (volEnvHist): %s\n", why.c_str() );
+					return false;
+				}
+				t.tex[9].twin = reinterpret_cast<std::uintptr_t>( &envKeys[jobAt] );
+			}
 			WwVkPresent::fxPack( &ga, pJob, WwVkPresent::kT_precipcs, int( std::size( WwVkPresent::kT_precipcs ) ), t.cs );
 			WwVkPresent::fxPack( &ga, pJob, WwVkPresent::kT_precipps, int( std::size( WwVkPresent::kT_precipps ) ), t.ps );
 			t.packs = 2;
@@ -1501,6 +1566,18 @@ int main( int argc, char ** argv )
 					}
 					if ( j.terrAir() ) {  // airTerrOn and airTerrXf packed, not zero (terrain air bar)
 						for ( const auto & tf : { std::make_pair( "airTerrOn", 4 ), std::make_pair( "airTerrXf", 16 ) } ) {
+							const int at = precipAt( WwVkPresent::kT_preciplitcs, int( std::size( WwVkPresent::kT_preciplitcs ) ), tf.first );
+							bool any = false;
+							for ( int b = 0; b < tf.second && at >= 0; b++ )
+								any = any || t.cs[at + b] != 0;
+							if ( !any )
+								zero += std::string( zero.empty() ? "" : ", " ) + tf.first;
+						}
+					}
+					if ( j.amb() ) {  // cellDalc, cellExtDalc (and the keep's volEnvGrid) packed, not zero (ambient bar)
+						for ( const auto & tf : { std::make_pair( "cellDalc", 48 ), std::make_pair( "cellExtDalc", 4 ), std::make_pair( "volEnvGrid", 16 ) } ) {
+							if ( std::strcmp( tf.first, "volEnvGrid" ) == 0 && !j.envKeep() )
+								continue;
 							const int at = precipAt( WwVkPresent::kT_preciplitcs, int( std::size( WwVkPresent::kT_preciplitcs ) ), tf.first );
 							bool any = false;
 							for ( int b = 0; b < tf.second && at >= 0; b++ )
@@ -1674,9 +1751,9 @@ int main( int argc, char ** argv )
 							gDiff += std::memcmp( &tfG[i], &tf1[i], 4 ) != 0;
 						const bool blk = f.getUniformBlockIndex( pTf, "globalUniforms" ) != 0xFFFFFFFFu;
 						std::printf( "PRECIPVIEW %s lit globals: b0 other vs the case's, %u / %u triangles, %zu floats differ (want %s; block %s in GL's program)\n",
-							j.name.c_str(), prG, pr1, gDiff, j.cluster() ? "> 0, the cluster reads b0" : "0", blk ? "active" : "not active" );
-						ok = ok && ( j.cluster() ? gDiff > 0 : gDiff == 0 ) && prG == pr1 && prG > 0;
-						if ( !j.cluster() ) {  // Vulkan's globals mirror (header): the app's b0 must not move a run without the lists
+							j.name.c_str(), prG, pr1, gDiff, j.readsB0() ? "> 0, the cluster / the ambient's keep reads b0" : "0", blk ? "active" : "not active" );
+						ok = ok && ( j.readsB0() ? gDiff > 0 : gDiff == 0 ) && prG == pr1 && prG > 0;
+						if ( !j.readsB0() ) {  // Vulkan's globals mirror (header): the app's b0 must not move a run without the lists
 							std::vector<std::uint16_t> a4, b4;
 							vkGlobalOver = g.data();
 							const bool ran = runVk( 0, a4, b4, false );
@@ -1791,7 +1868,8 @@ int main( int argc, char ** argv )
 		}
 		for ( RedSeen & r : reds ) {
 			if ( ( r.red == 16 && !j.look ) || ( r.red == 32 && !j.hasTex ) || ( r.red == 128 && !j.lit ) || ( r.red == 256 && !j.lamps() )
-				|| ( ( r.red == 512 || r.red == 1024 ) && !j.cluster() ) || ( r.red == 2048 && !j.localSun() ) || ( r.red == 4096 && !j.terrAir() ) )
+				|| ( r.red == 512 && !j.readsB0() ) || ( r.red == 1024 && !j.cluster() ) || ( r.red == 2048 && !j.localSun() ) || ( r.red == 4096 && !j.terrAir() )
+				|| ( r.red == 16384 && !j.envKeep() ) || ( r.red == 32768 && !j.amb() ) )
 				continue;  // a plain run has no look to drop, a case with no atlas no atlas, an unlit one no light, no lamps no lights
 			std::vector<std::uint16_t> a, b;
 			if ( !runVk( r.red, a, b, false ) ) {
@@ -1816,7 +1894,7 @@ int main( int argc, char ** argv )
 				std::printf( "PRECIPVIEW %s red lamps' lights PASSED: the case does not see its lights\n", j.name.c_str() );
 				ok = false;
 			}
-			if ( ( r.red == 512 || r.red == 1024 || r.red == 2048 || r.red == 4096 ) && v.ok() ) {  // the cluster case must see its b0 and its lists dropped
+			if ( ( r.red == 512 || r.red == 1024 || r.red == 2048 || r.red == 4096 || r.red == 16384 || r.red == 32768 ) && v.ok() ) {  // the cluster case must see its b0 and its lists dropped
 				std::printf( "PRECIPVIEW %s red %s PASSED: the case does not see it\n", j.name.c_str(), r.name );
 				ok = false;
 			}
@@ -1922,6 +2000,7 @@ int main( int argc, char ** argv )
 	for ( int c = 0; c < kCases; c++ ) {
 		WwVkPresent::sharedTargetDrop( reinterpret_cast<std::uintptr_t>( &volKeys[c] ) );
 		WwVkPresent::sharedTargetDrop( reinterpret_cast<std::uintptr_t>( &terrKeys[c] ) );
+		WwVkPresent::sharedTargetDrop( reinterpret_cast<std::uintptr_t>( &envKeys[c] ) );
 		for ( char & k : airKeys[c] )
 			WwVkPresent::sharedTargetDrop( reinterpret_cast<std::uintptr_t>( &k ) );
 	}

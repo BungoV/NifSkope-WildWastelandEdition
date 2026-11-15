@@ -9,7 +9,8 @@
  * slice 3 the precipitation look (cell_precip_look.prog: precip_look_view_cs / _vs / _ps, a 192-byte record, the flake's
  * normal map at t2 of the pixel stage). Slice 2b lights the particles by the sun alone (precip_lit_view_cs, its own set);
  * L8 added the lamps, the cluster lists, terrain air, the local sun and GI (volTerms 4: idle in the default program; a GL
- * program variant that reads a GI volume is refused). Ambient, shadow maps, drift, interiors and the roof map are refused
+ * program variant that reads a GI volume is refused) and the ambient (volTerms 8: the weather's cellDalc, the Ambient
+ * Only volumes, the air's keep through volEnvHist at t19). Shadow maps, drift, interiors and the roof map are refused
  * (GL draws).
  * GL's state (cellprecip.cpp): depth LEQUAL, no depth write, cull off, blend SRC_ALPHA / ONE_MINUS_SRC_ALPHA, stencil ALWAYS
  * ref 1, REPLACE on depth pass, write mask 0x03. */
@@ -630,8 +631,6 @@ int precipLitWhys( const PrecipRun::LitIn & l, const char ** out, int max )
 	}
 	if ( l.gi != 0 )  // L8 term 1: volTerms 4 is idle in the default program; a GI read in GL's program is not twinned
 		add( "GL's program reads a GI volume (the WW_CELL_PRT / RT GI variant: not twinned)" );
-	if ( l.terms > 0 && ( l.terms & 8 ) )
-		add( "the ambient term on the particles (refused in slice 2b)" );
 	if ( l.terms > 0 && ( l.terms & ~15 ) )
 		add( "an unknown volTerms bit (refused in slice 2b)" );
 	if ( l.csm > 0 )  // (the sun's only shadow read, wwSunShadow, is behind volCsm)
@@ -672,6 +671,8 @@ bool precipAdmits( const PrecipRun & t, std::string & why )
 			return refuse( w );
 		if ( ( t.litIn.terms & 2 ) && t.litIn.cluster != 0 && !t.global )
 			return refuse( "the lamps' cluster lists with no globalUniforms bytes (b0's projection)" );
+		if ( ( t.litIn.terms & 8 ) && t.litIn.envKeep >= 0.5f && !t.global )  // L8 term 2: vpAmbKeep reads b0's projection
+			return refuse( "the ambient's keep with no globalUniforms bytes (b0's projection)" );
 	}
 	if ( t.roofOn || t.tex[0].tex )
 		return refuse( "the roof map on (slice 3's)" );
@@ -748,8 +749,11 @@ bool precipRun( const PrecipRun & t, std::string & why )
 		b.cellRed = litI( "cellRed" );
 		b.phys = litF( "cellLightPhys", 0 );
 		b.gi = t.litIn.gi;  // (the program's, not a packed value)
+		b.envKeep = litF( "volEnvGrid", 3 );
 		if ( const char * w = precipLitWhy( b ) )
 			return refuse( std::string( "the packed light block: " ) + w );
+		if ( ( b.terms & 8 ) && b.envKeep >= 0.5f && !t.global )
+			return refuse( "the packed light block: the ambient's keep with no globalUniforms bytes" );
 		if ( b.terms & 2 ) {  // the lamps: GL's lights a float buffer holding every counted light (8 texels each)
 			const long long need = std::max( litI( "cellLightCount" ), 0 ) * 8LL * 16LL;
 			if ( t.lights.tex && t.lights.glFmt != 0x8814u )
@@ -793,12 +797,12 @@ bool precipRun( const PrecipRun & t, std::string & why )
 	FxNames names;
 	names.add( T.colorTex );
 	names.add( T.dsTex );
-	VkImageView views[9] = {};
-	int smp[9] = {};
-	const int slotType[9] = { 0, 0, 1, 1, 0, 2, 0, 0, 2 };  // an empty slot binds the zero texture of the shader's type
-	for ( int k = 0; k < 9; k++ ) {
+	VkImageView views[10] = {};
+	int smp[10] = {};
+	const int slotType[10] = { 0, 0, 1, 1, 0, 2, 0, 0, 2, 1 };  // an empty slot binds the zero texture of the shader's type
+	for ( int k = 0; k < 10; k++ ) {
 		FxTex x = t.tex[k];
-		if ( ( ( k == 1 || k == 7 ) && ( t.red & 32 ) ) || ( k == 8 && ( t.red & 4096 ) ) ) {  // red: the atlas / the terrain grid dropped (the zero texture)
+		if ( ( ( k == 1 || k == 7 ) && ( t.red & 32 ) ) || ( k == 8 && ( t.red & 4096 ) ) || ( k == 9 && ( t.red & 16384 ) ) ) {  // red: the atlas / the terrain grid / the ambient's history dropped (the zero texture)
 			x = FxTex();
 			x.sampler = t.tex[k].sampler;
 		}
@@ -834,7 +838,16 @@ bool precipRun( const PrecipRun & t, std::string & why )
 			if ( atSun >= 0 )
 				std::memset( l + atSun + 12, 0, 4 );
 		}
-		if ( t.global && ( t.red & 512 ) == 0 )  // term 2b: GL's b0 (the cluster's projectionMatrix)
+		if ( t.red & 32768 ) {  // gates only: the ambient dropped (volTerms' bit 8 cleared)
+			const int atTerms = precipAt( kT_preciplitcs, int( std::size( kT_preciplitcs ) ), "volTerms" );
+			int terms = 0;
+			if ( atTerms >= 0 ) {
+				std::memcpy( &terms, l + atTerms, 4 );
+				terms &= ~8;
+				std::memcpy( l + atTerms, &terms, 4 );
+			}
+		}
+		if ( t.global && ( t.red & 512 ) == 0 )  // term 2b: GL's b0 (the cluster's and the ambient keep's projectionMatrix)
 			std::memcpy( u + kPrecipGlobalAt, t.global, size_t( kPrecipGlobalBytes ) );
 		else
 			std::memset( u + kPrecipGlobalAt, 0, size_t( kPrecipGlobalBytes ) );
@@ -902,7 +915,7 @@ bool precipRun( const PrecipRun & t, std::string & why )
 		const VkDescriptorBufferInfo lb[3] = { { D.ubo, kPrecipGlobalAt, kPrecipGlobalBytes },
 			{ D.ubo, kPrecipLitCsAt, VkDeviceSize( kT_preciplitcsBytes ) }, { D.rec, 0, recBytes } };
 		VkDescriptorImageInfo li[14] = {};
-		const VkImageView liv[14] = { D.litCube, views[8], F.d3, views[2], views[3], views[4], views[5], views[6], F.d3, D.litD2a,
+		const VkImageView liv[14] = { D.litCube, views[8], views[9], views[2], views[3], views[4], views[5], views[6], F.d3, D.litD2a,
 			F.d2, F.d2, F.d2, views[1] };  // kPrecipLitImg's order
 		for ( int k = 0; k < 14; k++ ) {
 			li[k].imageView = liv[k];

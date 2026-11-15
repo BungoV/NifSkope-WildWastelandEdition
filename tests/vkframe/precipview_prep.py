@@ -71,6 +71,11 @@ CASES = [
     # L8 term 1 (VKFAR5, element 20 = volTerms 5): rain_near_lit's run with the GI bit on (idle unless WW_CELL_PRT)
     ('rain_near_gi', 0, 2.0, 4.0, 11, 37.25, (-60500.0, 70000.0, 6300.0), (120.0, -40.0), 0, 1.0, 0.0, 0.0, 1.0, 1.0, 1,
      2.0, -0.08, 40000, 0, 0, 5),
+    # L8 term 2 (VKFAR5, element 24 = the ambient: 1 the Ambient Only volumes, 2 the air's keep): volTerms 9
+    ('rain_near_amb', 0, 2.0, 4.0, 11, 37.25, (-60500.0, 70000.0, 6300.0), (120.0, -40.0), 0, 1.0, 0.0, 0.0, 1.0, 1.0, 1,
+     2.0, -0.08, 40000, 0, 0, 9, 0, 0, 0, 1),
+    ('snow_far_amb', 3, 5.5, 1.0, 97, 600.125, (12345.6, -98765.4, 7210.0), (-55.0, 210.0), 1, 3.0, 0.5, 6.0, 1.0, 0.6, 1,
+     3.3, -0.01, 40000, 1, 0, 9, 0, 0, 0, 2),
 ]
 SUN = np.array([0.4, 0.3, 0.35]) / np.linalg.norm([0.4, 0.3, 0.35])  # world, toward the sun (the air's fogSun too)
 # a lit case's own sun (cellDirTo), chosen by the GS's mix: N = the eye's axis, thick / thin = 4 vpWrap( N.to, pcTrans )
@@ -81,6 +86,7 @@ LIT_SUN['rain_near_lamps'] = LIT_SUN['rain_near_lit']
 LIT_SUN['rain_near_cluster'] = LIT_SUN['rain_near_lit']
 LIT_SUN['rain_near_sunlocal'] = LIT_SUN['rain_near_lit']
 LIT_SUN['rain_near_gi'] = LIT_SUN['rain_near_lit']
+LIT_SUN['rain_near_amb'] = LIT_SUN['rain_near_lit']
 TILE, SLICES = 64, 4  # the cluster grid (L8 term 2b): 64-pixel tiles, 4 log-depth slices
 
 
@@ -392,6 +398,75 @@ for ci, c in enumerate(CASES):
                       'anchor %.3f (want 0.2 - 0.8)' % (c[0], gref, gh.min(), gh.max(), Pw[:, 2].min(), Pw[:, 2].max(),
                                                         float(np.mean(Pw[:, 2] < zg))))
                 U.update({'airTerrOn': [1], 'airTerrXf': xc, 'airTerrFineXf': xfn, 'airTerrRef': [gref]})
+        amb = c[24] if len(c) > 24 else 0
+        if amb:
+            # L8 term 2: the weather's ambient (cellExtDalc, the exterior law), three non-grey rows, unequal normal parts
+            U.update({'cellExtDalc': [1], 'cellDalc': [0.25, 0.1, 0.35, 0.55, 0.1, 0.3, -0.15, 0.5, -0.2, 0.15, 0.4, 0.45]})
+            eye = np.array(c[6], np.float64)
+            Pw = v[inview] @ R + eye
+        if amb == 1:
+            # an Ambient Only sphere round the particles' median, a box-linked one round a far particle (the sphere first)
+            c0 = np.median(Pw, axis=0)
+            r0 = float(np.percentile(np.linalg.norm(Pw - c0, axis=1), 35))
+            c1 = Pw[int(np.argmax(Pw[:, 0]))] * 0.5 + c0 * 0.5
+            ins0 = np.linalg.norm(Pw - c0, axis=1) < r0
+            for pct in (40, 50, 60, 70, 80, 90):  # fixture move (bar kept): the box grows until it holds >= 0.15 of the view
+                h1 = np.maximum(np.percentile(np.abs(Pw - c1), pct, axis=0), 1.0)
+                ins1 = np.all(np.abs(Pw - c1) < h1, axis=1) & ~ins0
+                if ins1.mean() >= 0.15:
+                    break
+            box = np.zeros((6, 4))
+            for a in range(3):
+                box[3 + a, a] = 1.0 / h1[a]
+                box[3 + a, 3] = -c1[a] / h1[a]
+            U.update({'cellAmboCount': [2], 'cellAmbo': list(c0) + [r0] + list(c1) + [0.0],
+                      'cellAmboK': [0.4, 0.6, 1.5, 0.0, 1.8, 0.7, 0.3, 1.0], 'cellAmboBox': box.reshape(-1)})
+            print('precipview case %s: ambient volumes, sphere share %.3f, box share %.3f (want each 0.1 - 0.6)'
+                  % (c[0], float(ins0.mean()), float(ins1.mean())))
+        if amb == 2:
+            # the air's keep: volEnvGrid (16, 9, slices, 1), a 16 x 9 x 6 slices RGBA16F history (the app's strata), b0's
+            # projection (vpAmbKeep reads projectionMatrix)
+            nx, ny = 16, 9
+            vs = AU['volSlices']
+            nz = int(round(vs[2]))
+            zz, yy, xx = np.mgrid[0:6 * nz, 0:ny, 0:nx].astype(np.float64)
+            k = zz % nz
+            hist = np.zeros((6 * nz, ny, nx, 4))
+            hist[..., 0] = 0.3 + 0.2 * np.sin(xx * 0.7 + k)
+            hist[..., 1] = -0.4 + 1.3 * ((xx * 0.37 + yy * 0.61 + k * 0.23) % 1.0)
+            hist[..., 2] = np.where((xx.astype(int) + 2 * yy.astype(int) + k.astype(int)) % 4 == 0, 0.5, 1.0)
+            hist[..., 3] = 0.5 + 0.45 * np.sin(xx * 0.45 + yy * 0.8 + k * 0.6)
+            t = Tex('3d', 'rgba16f', hist.astype(np.float32), 'nearest')
+            t.data.tofile(os.path.join(d, 'tex_volEnvHist.bin'))
+            with open(os.path.join(d, 'tex.txt'), 'a', newline='\n') as f:
+                f.write('volEnvHist 3d rgba16f %d %d %d nearest clamp 0 tex_volEnvHist.bin\n' % (t.w, t.h, t.d))
+            U['volEnvGrid'] = [nx, ny, nz, 1.0]
+            gb = np.zeros(84, np.float32)
+            gb[24:40] = P.T.reshape(-1)
+            gb.tofile(os.path.join(d, 'global.bin'))
+            # the keep a particle gets (vpAmbKeep on the prep's positions)
+            pv = v[inview]
+            dd = np.linalg.norm(pv, axis=1)
+            cc = np.c_[pv, np.ones(len(pv))] @ P.T
+            ff = np.log(np.maximum(dd, 1e-9) / vs[0]) / vs[1] * nz
+            hd = t.data
+            keeps = []
+            for i in range(len(pv)):
+                if dd[i] <= vs[0] or cc[i, 3] <= 0 or abs(cc[i, 0]) > cc[i, 3] or abs(cc[i, 1]) > cc[i, 3] or ff[i] >= nz:
+                    keeps.append(1.0)
+                    continue
+                xi = min(max(int((cc[i, 0] / cc[i, 3] * 0.5 + 0.5) * nx), 0), nx - 1)
+                yi = min(max(int((cc[i, 1] / cc[i, 3] * 0.5 + 0.5) * ny), 0), ny - 1)
+                ki = min(max(int(ff[i]), 0), nz - 1)
+                h = hd[5 * nz + ki, yi, xi]
+                if h[2] <= 0.9999:
+                    keeps.append(1.0)
+                    continue
+                fade, rr = float(hd[4 * nz + ki, yi, xi, 3]), float(h[1])
+                keeps.append(1.0 - fade + fade * rr if rr >= 0.0 else 1.0 - fade)
+            keeps = np.array(keeps)
+            print('precipview case %s: the air keep, %d slices, share of in-view particles with keep < 1 %.3f (want 0.2 - 0.8), '
+                  'keep %.3f - %.3f' % (c[0], nz, float(np.mean(keeps < 0.9999)), keeps.min(), keeps.max()))
     if hasN:
         nl = bc3_levels(normals(tw, th, 31 + ci), os.path.join(d, 'tex_pcTexN.bin'))
         with open(os.path.join(d, 'tex.txt'), 'a', newline='\n') as f:
