@@ -321,6 +321,32 @@
 // them) and the lit pack takes the cascade fields from them; the block refusal stays for a block with no bytes read (no
 // buffer bound, or a short one); the closed list counts wwShadowFrame as read. Census after: route default 2 / 2, route
 // all-on 7 / 7 (the refusal and the block line gone outdoors, the block line indoors).
+// The shadow set's composition (L8 route lift 2, VKFAR9 11-15; bar set before its first run, never widened): ussOn 1 (route
+// all-on: the cascade, terrain and contact tiers ultra, shadowset.cpp 2754) makes wwSunShadowGeo return ussCompose = min(
+// lerp( 1, the Vogel cascades, their fade ), the terrain tier, the contact mask ) in place of CSM1's blend. The terrain tier
+// reads ussTerrMap (t32, RG16, linear, clamp to edge: the heights above which a point is lit / below which it is shadowed),
+// the contact tier ussContactMap (t33, R8, linear, clamp to edge: the screen mask at the particle's window position). One
+// case, appended, element 32: rain_near_uss (rain_near_csm_ubo's run, fixture, frame block and route program pRoute) with
+// ussOn 1 and the app's ultra values: ussCsmOn 1, ussCsmFilter (1, 3.5, 44, 1) (preset 4's Vogel radius and taps, the
+// receiver plane's bias), ussCsmWorld (1, 2.8, 10.5, 42), ussCsmPhase 17, ussCsmCellX / ussCsmCellY per cascade; ussTerrOn 1
+// with a 128 x 128 RG16 ussTerrMap (the far tier alone: ussTerrSize (128, 0), ussTerrExtra 0, ussTerrSelf 0) whose heights
+// straddle the in-view particles' world heights, ussTerrXform, ussTerrRange (the edge fade a circle round the eye) and
+// ussWorldFromView from the case's view, ussTerrPen (1, the texel, tan lo, tan hi), ussTerrBias (1, sin elevation, 1, 0);
+// ussContactOn 1 with a w x h R8 ussContactMap (soft blobs) and ussContactInvSize (1 / w, 1 / h); ussView 0, ussRed 0. The
+// prep prints the in-view particles' shares under the hard terrain lookup < 1 and the contact mask < 1 (each want 0.2 -
+// 0.8). The same verdict (depth EXACT, colour inside the bar), reference checks, repeat clause, sun's shadow and frame block
+// checks as rain_near_csm_ubo. The case must also show (else the gate fails): GL with ussOn 0 differs on >= 1000 covered
+// samples (the composition seen); GL with ussTerrOn 0 on >= 1000 (the terrain tier seen through the min); GL with
+// ussContactOn 0 on >= 1000 (the contact tier seen through the min); ussOn, ussTerrOn, ussTerrMap, ussTerrXform,
+// ussTerrRange, ussWorldFromView, ussContactOn, ussContactMap and ussContactInvSize found in GL's program; ussOn, ussTerrOn
+// and ussContactOn packed non-zero. Reds, each must FAIL in rain_near_uss: 68719476736 the terrain map dropped (t32 the zero
+// texture); 137438953472 the contact map dropped (t33 the zero texture); 274877906944 the composition off (the packed ussOn
+// 0: CSM1's blend); 549755813888 the contact lookup's axes swapped (the packed ussContactInvSize x / y). Lifted with it:
+// precipLitWhys' ussOn refusal and the packed block's backstop; refused by name instead: ussView or ussRed non-zero (a
+// debug view, a red), a terrain / contact tier on with no texture on GL's unit; the app's rain / snow draw twins GL's
+// ussTerrMap into binding 96 and ussContactMap into binding 97 (copied a run, GL's sampler state); the closed list counts
+// both as sampler slots. Census after: route default 0 / 0, route all-on 4 / 4 (refusal 3 and both map lines gone); the
+// closed list on pPrecip reads 0 (its clause passes).
 #define main fxview_main
 #include "fxview.cpp"
 #undef main
