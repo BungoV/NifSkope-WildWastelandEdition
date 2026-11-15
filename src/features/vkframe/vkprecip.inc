@@ -600,42 +600,55 @@ bool precipRecord( std::string & why )
 
 namespace WwVkPresent
 {
+int precipLitWhys( const PrecipRun::LitIn & l, const char ** out, int max )
+{
+	int n = 0;
+	auto add = [&]( const char * w ) {
+		if ( n < max )
+			out[n] = w;
+		n++;
+	};
+	if ( l.terms < 0 || l.interior < 0 || l.partRed < 0 || l.csm < 0 || l.airTerr < 0 )
+		add( "the lit program lacks a switch the refusals read" );
+	if ( l.interior > 0 )
+		add( "an interior's lit particles (its law is not judged)" );
+	// The gate judged the sun (volTerms 1), the lamps' flat loop (2, term 2a) and their cluster lists (term 2b); any other
+	// term refuses, idle or not.
+	if ( l.terms > 0 && ( l.terms & 2 ) ) {
+		if ( l.shadow < 0 || l.gobo < 0 || l.cluster < 0 || l.cellRed < 0 )
+			add( "the lit program lacks a lamp switch the refusals read" );
+		if ( l.shadow > 0 )
+			add( "the lamps' shadow cubes on the particles (refused in term 2a)" );
+		if ( l.gobo > 0 )
+			add( "the lamps' gobos on the particles (refused in term 2a)" );
+		if ( l.phys > 0.5f )
+			add( "the lamps' physical falloff on the particles (refused in term 2a)" );
+		if ( l.cellRed > 0 )
+			add( "a cell-light red (cellRed) in a lit run with lamps" );
+	}
+	if ( l.terms > 0 && ( l.terms & 4 ) )
+		add( "the GI term on the particles (refused in slice 2b)" );
+	if ( l.terms > 0 && ( l.terms & 8 ) )
+		add( "the ambient term on the particles (refused in slice 2b)" );
+	if ( l.terms > 0 && ( l.terms & ~15 ) )
+		add( "an unknown volTerms bit (refused in slice 2b)" );
+	if ( l.csm > 0 )  // (the sun's only shadow read, wwSunShadow, is behind volCsm)
+		add( "the sun's shadow map on the particles (refused in slice 2b)" );
+	if ( l.drift > 0.0f )
+		add( "the air's drift on the sun (refused in slice 2b)" );
+	if ( l.airTerr > 0 )
+		add( "the terrain air on the sun (refused in slice 2b)" );
+	if ( l.sunA > 0.5f )
+		add( "the local sun law (refused in slice 2b)" );
+	if ( l.partRed > 0 )
+		add( "a particle-light red (volPartRed) in a lit run" );
+	return n;
+}
+
 const char * precipLitWhy( const PrecipRun::LitIn & l )
 {
-	if ( l.terms < 0 || l.interior < 0 || l.partRed < 0 || l.csm < 0 || l.airTerr < 0 )
-		return "the lit program lacks a switch the refusals read";
-	if ( l.interior != 0 )
-		return "an interior's lit particles (its law is not judged)";
-	// The gate judged the sun (volTerms 1) and the lamps' flat loop (2, term 2a); any other term refuses, idle or not.
-	if ( l.terms & 2 ) {
-		if ( l.shadow < 0 || l.gobo < 0 || l.cluster < 0 || l.cellRed < 0 )
-			return "the lit program lacks a lamp switch the refusals read";
-		if ( l.shadow != 0 )
-			return "the lamps' shadow cubes on the particles (refused in term 2a)";
-		if ( l.gobo != 0 )
-			return "the lamps' gobos on the particles (refused in term 2a)";
-		if ( l.phys > 0.5f )
-			return "the lamps' physical falloff on the particles (refused in term 2a)";
-		if ( l.cellRed != 0 )
-			return "a cell-light red (cellRed) in a lit run with lamps";
-	}
-	if ( l.terms & 4 )
-		return "the GI term on the particles (refused in slice 2b)";
-	if ( l.terms & 8 )
-		return "the ambient term on the particles (refused in slice 2b)";
-	if ( l.terms & ~15 )
-		return "an unknown volTerms bit (refused in slice 2b)";
-	if ( l.csm != 0 )  // (the sun's only shadow read, wwSunShadow, is behind volCsm)
-		return "the sun's shadow map on the particles (refused in slice 2b)";
-	if ( l.drift > 0.0f )
-		return "the air's drift on the sun (refused in slice 2b)";
-	if ( l.airTerr != 0 )
-		return "the terrain air on the sun (refused in slice 2b)";
-	if ( l.sunA > 0.5f )
-		return "the local sun law (refused in slice 2b)";
-	if ( l.partRed != 0 )
-		return "a particle-light red (volPartRed) in a lit run";
-	return nullptr;
+	const char * w = nullptr;
+	return precipLitWhys( l, &w, 1 ) > 0 ? w : nullptr;
 }
 
 bool precipAdmits( const PrecipRun & t, std::string & why )

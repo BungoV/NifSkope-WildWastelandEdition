@@ -72,7 +72,7 @@
 // cellLightCount k vs k - 1 differs on >= 1000 for k = 1..4 (each shape seen) and on 0 for k = 5 (out of reach); every
 // name the lamp branch reads is found in GL's program; cellLightCount packed non-zero. Red 256 the lights dropped (Vulkan
 // binds the zero texel buffer); must FAIL in every lamp case. Still refused (precipLitWhy): the lamps' shadow cubes,
-// gobos and cluster lists, the physical falloff, cellRed, a light count past GL's buffer.
+// gobos, the physical falloff, cellRed, a light count past GL's buffer (the cluster lists: lifted in term 2b below).
 // Cluster lists (L8 term 2b, 11-15; bar set before its first run, never widened): case rain_near_cluster (rain_near_lamps'
 // run and five lights, unfogged), volTerms 3, cellClusterOn 1 (the app's default whenever a cell has lights:
 // cellclustergl.cpp wwCellClusterUniforms), globalUniforms (b0) zero but for projectionMatrix (the case's own projection;
@@ -90,6 +90,12 @@
 // must FAIL in the cluster case. Lifted with it: precipLitWhy's cluster refusal; precipAdmits refuses a cluster run with
 // no b0 bytes, precipRun one whose list buffer is not R32I or shorter than cellClusterBase. Not covered here: the
 // lights' radial falloff past (0, 1, 1) (every fixture light keeps it; the twin runs GL's own cellRadial).
+// Vulkan's globals mirror (11-15, bar set before its first run): precipDraw hands every lit run the app's b0, so each
+// lit case but the cluster one also runs Vulkan with the globals check's non-zero b0 as its bytes; it must be EXACT
+// against the judged run (b0 read by nothing but the cluster), else the gate fails.
+// Census (11-15, info, the L8 done line): the lit program set as the app's all-on defaults (exterior: the sun, volTerms
+// 15, volCsm 1, airTerrOn 1, the drift on, vpSun's local law, the lamps' shadow cubes, gobos and cluster lists; interior:
+// the same but no sun, no terrain air, no local law), every refusal precipLitWhys would fire printed. Done is 0 in both.
 #define main fxview_main
 #include "fxview.cpp"
 #undef main
@@ -742,6 +748,7 @@ int main( int argc, char ** argv )
 				return fatal( j.name + ": upload " + t.name );
 		}
 		const void * uboOver = nullptr;  // the globals check's other b0 (bindJob uploads it in place of the case's)
+		const void * vkGlobalOver = nullptr;  // the same bytes as Vulkan's b0 (the globals mirror)
 		auto bindJob = [&]( GLuint prog ) {
 			f.useProgram( prog );
 			setUnis( prog, j.uni );
@@ -1139,7 +1146,7 @@ int main( int argc, char ** argv )
 			t.fogged = j.fog != 0;
 			t.look = j.look != 0;
 			t.lit = j.lit != 0;
-			t.global = j.global.empty() ? nullptr : j.global.data();  // L8 term 2b: GL's b0 bytes (the app: glcontext.cpp's last upload)
+			t.global = vkGlobalOver ? vkGlobalOver : j.global.empty() ? nullptr : j.global.data();  // L8 term 2b: GL's b0 bytes (the app: glcontext.cpp's last upload)
 			if ( t.lit )  // precipDraw's order: the switches from GL, the refusals, then the packs
 				WwVkPresent::precipLitRead( &ga, pJob, t );
 			if ( !WwVkPresent::precipAdmits( t, why ) ) {
@@ -1348,7 +1355,7 @@ int main( int argc, char ** argv )
 						std::printf( "PRECIPVIEW %s lit gA: %zu distinct captured values with unequal channels (want >= 100)\n", j.name.c_str(), distinct );
 						ok = ok && distinct >= 100;
 					}
-					if ( j.lit ) {  // the globals check (header): b0 filled non-zero must not move GL's geometry stage
+					if ( j.lit ) {  // the globals check (header): b0 filled non-zero moves GL's geometry stage only in the cluster case
 						std::vector<float> g( 84 );
 						for ( size_t k = 0; k < g.size(); k++ )
 							g[k] = 0.37f + 0.11f * float( k % 13 ) - 0.05f * float( k % 7 );
@@ -1366,6 +1373,15 @@ int main( int argc, char ** argv )
 						std::printf( "PRECIPVIEW %s lit globals: b0 other vs the case's, %u / %u triangles, %zu floats differ (want %s; block %s in GL's program)\n",
 							j.name.c_str(), prG, pr1, gDiff, j.cluster() ? "> 0, the cluster reads b0" : "0", blk ? "active" : "not active" );
 						ok = ok && ( j.cluster() ? gDiff > 0 : gDiff == 0 ) && prG == pr1 && prG > 0;
+						if ( !j.cluster() ) {  // Vulkan's globals mirror (header): the app's b0 must not move a run without the lists
+							std::vector<std::uint16_t> a4, b4;
+							vkGlobalOver = g.data();
+							const bool ran = runVk( 0, a4, b4, false );
+							vkGlobalOver = nullptr;
+							const char * word = ran ? judge( bg, a4, a, b4, b ).word() : "the run failed";
+							std::printf( "PRECIPVIEW %s lit globals on Vulkan: b0 other vs none, against the judged run %s (want EXACT)\n", j.name.c_str(), word );
+							ok = ok && ran && std::strcmp( word, "EXACT" ) == 0;
+						}
 					}
 					std::vector<std::uint8_t> rec( size_t( j.n ) * 112 );
 					std::vector<std::uint16_t> a3, b3;
@@ -1470,6 +1486,40 @@ int main( int argc, char ** argv )
 			std::printf( "PRECIPVIEW red pack order FAILS as it must (%d packs counted)\n", red );
 		}
 		u1i( pPrecip, "volPartRed", 0 );
+	}
+	{  // the census (header): the app's all-on lit defaults, every refusal that would fire (info; 0 is the L8 done line)
+		const float drift[4] = { 0.5f, 0.0f, 1.0f, 0.5f }, sun[4] = { 1.0f, 0.9f, 0.8f, 1.0f }, zero4[4] = {};
+		struct { const char * name; int interior; } where[2] = { { "exterior", 0 }, { "interior", 1 } };
+		for ( const auto & w : where ) {
+			f.useProgram( pPrecip );
+			u1i( pPrecip, "cellHasDir", 1 - w.interior );          // celllights.cpp: the sun outdoors
+			u1i( pPrecip, "cellInterior", w.interior );
+			u1i( pPrecip, "volTerms", 15 );                         // cellvolair.cpp 4234: all four terms
+			u1i( pPrecip, "volCsm", 1 );                            // cellvolair.cpp 4233: the cascades drawn
+			u1i( pPrecip, "airTerrOn", 1 - w.interior );            // cellvolair.cpp 4219: the terrain air outdoors
+			f.uniform4fv( f.getUniformLocation( pPrecip, "volAirDrift" ), 1, drift );  // cellvolair.cpp 3575: drift on
+			f.uniform4fv( f.getUniformLocation( pPrecip, "vpSun" ), 1, w.interior ? zero4 : sun );  // celllights.cpp 2100
+			u1i( pPrecip, "cellShadowOn", 1 );                      // celllights.cpp 1849
+			u1i( pPrecip, "cellGoboOn", 1 );                        // celllights.cpp 1904
+			u1i( pPrecip, "cellClusterOn", 1 );                     // cellclustergl.cpp 370
+			WwVkPresent::PrecipRun t;
+			t.lit = true;
+			WwVkPresent::precipLitRead( &ga, pPrecip, t );
+			const char * whys[24] = {};
+			const int n = WwVkPresent::precipLitWhys( t.litIn, whys, 24 );
+			std::printf( "PRECIPVIEW census %s (the app's all-on lit defaults): %d refusals (0 is the L8 done line)\n", w.name, n );
+			for ( int k = 0; k < n && k < 24; k++ )
+				std::printf( "PRECIPVIEW census %s refusal %d: %s\n", w.name, k + 1, whys[k] );
+		}
+		u1i( pPrecip, "cellInterior", 0 );
+		u1i( pPrecip, "volTerms", 1 );
+		u1i( pPrecip, "volCsm", 0 );
+		u1i( pPrecip, "airTerrOn", 0 );
+		f.uniform4fv( f.getUniformLocation( pPrecip, "volAirDrift" ), 1, zero4 );
+		f.uniform4fv( f.getUniformLocation( pPrecip, "vpSun" ), 1, zero4 );
+		u1i( pPrecip, "cellShadowOn", 0 );
+		u1i( pPrecip, "cellGoboOn", 0 );
+		u1i( pPrecip, "cellClusterOn", 0 );
 	}
 	for ( char & k : twinKeys )  // a BC atlas is a farTwin, an uncompressed one a shared target
 		WwVkPresent::farTwinDrop( reinterpret_cast<std::uintptr_t>( &k ) ), WwVkPresent::sharedTargetDrop( reinterpret_cast<std::uintptr_t>( &k ) );

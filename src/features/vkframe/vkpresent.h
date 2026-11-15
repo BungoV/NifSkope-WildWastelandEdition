@@ -751,6 +751,8 @@ bool precipRun( const PrecipRun & t, std::string & why );
 /* the refusals that need no packed bytes (the device, the target, the run, a lit run's litIn): asked before the packs so
  * a refused run pays none. false: why, counted as a refusal (with t.packs) */
 bool precipAdmits( const PrecipRun & t, std::string & why );
+//! every refusal a lit run's switches would fire, in precipLitWhy's order (its count; at most max written): the census
+int precipLitWhys( const PrecipRun::LitIn & l, const char ** out, int max );
 //! a lit run's refusal from its switches (null: the light chain's admitted terms); precipAdmits and precipRun's block check
 const char * precipLitWhy( const PrecipRun::LitIn & l );
 void precipOnGl( const char * why );
