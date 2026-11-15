@@ -1576,6 +1576,35 @@ int main( int argc, char ** argv )
 									by += " " + std::string( nm[q] ) + " " + std::to_string( var[q] ) + " (max " + std::to_string( ulp[q] ) + " ulp)";
 							return d;
 						};
+						{  // (info) which loose uniforms differ between the gate's own program and a fresh one, both after the case's bindJob
+							bindJob( pTfNew );
+							bindJob( pTf );
+							std::string stale;
+							GLint n = 0;
+							f.getProgramiv( pTf, fActiveUnis, &n );
+							for ( GLint i = 0; i < n; i++ ) {
+								char nm[256] = {};
+								GLint sz = 0;
+								GLenum ty = 0;
+								f.getActiveUniform( pTf, GLuint( i ), 256, nullptr, &sz, &ty, nm );
+								std::string base( nm );
+								if ( base.size() > 3 && base.compare( base.size() - 3, 3, "[0]" ) == 0 )
+									base.resize( base.size() - 3 );
+								for ( GLint e = 0; e < std::max( sz, 1 ); e++ ) {
+									const std::string el = sz > 1 ? base + "[" + std::to_string( e ) + "]" : std::string( nm );
+									const GLint la = f.getUniformLocation( pTf, el.c_str() ), lb = f.getUniformLocation( pTfNew, el.c_str() );
+									if ( la < 0 || lb < 0 )
+										continue;
+									float va[16] = {}, vb[16] = {};
+									f.getUniformfv( pTf, la, va );
+									f.getUniformfv( pTfNew, lb, vb );
+									if ( std::memcmp( va, vb, sizeof( va ) ) != 0 )
+										stale += " " + el + " (" + std::to_string( va[0] ) + " vs fresh " + std::to_string( vb[0] ) + ")";
+								}
+							}
+							std::printf( "PRECIPVIEW %s GI checks (info): loose uniforms the gate's own program holds unlike a fresh one:%s\n", j.name.c_str(),
+								stale.empty() ? " none" : stale.c_str() );
+						}
 						std::string byT1, byRt, byNew;
 						const size_t dT1 = floatsDiff( tfT1, byT1, tf1 ), dRt = floatsDiff( tfRt, byRt, tfNew ), dNew = floatsDiff( tfNew, byNew, tf1 );
 						std::printf( "PRECIPVIEW %s GI checks by field: volTerms 5 vs 1:%s; the RT GI variant vs a fresh default program:%s; (info) the fresh "
