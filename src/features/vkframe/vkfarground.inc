@@ -20,9 +20,9 @@ const WaterImgName kFargndImg[] = { { 64, "cellLights" }, { 68, "cellIsLut" }, {
 	{ 116, "SpecularMap" }, { 117, "GreyscaleMap" }, { 118, "EnvironmentMap" }, { 119, "CubeMap" }, { 120, "RefractionSrc" },
 	{ 121, "landShoreIndex" }, { 122, "landShoreAtlas" }, { 123, "LandLodDiff" }, { 124, "LandLodOuter" }, { 125, "LandLodNoise" },
 	{ 126, "LandLodDetail" }, { 65, "cellGi" }, { 66, "cellGiSlots" }, { 67, "cellRooms" }, { 79, "cellAoDecal" },
-	{ 102, "waterFlowIndex" }, { 103, "waterFlowAtlas" }, { 115, "BacklightMap" }, { 200, "farStream" } };
+	{ 102, "waterFlowIndex" }, { 103, "waterFlowAtlas" }, { 115, "BacklightMap" }, { 111, "landShoreIndex" }, { 200, "farStream" } };
 // the integer images (usampler2D): fgGrid (RGBA32UI), the water info, flow and shore lookups
-const std::uint32_t kFargndInts[] = { 81, 99, 100, 102, 103, 121, 122 };
+const std::uint32_t kFargndInts[] = { 81, 99, 100, 102, 103, 111, 121, 122 };
 // the pixel block (kT_fargndPsBytes 7104) ends at 19904: the constants after it, as the rings'
 constexpr VkDeviceSize kFargndConstAt = 19968, kFargndHostBytes = 20224;
 static_assert( kWaterPsLooseAt + WwVkPresent::kT_fargndPsBytes <= kFargndConstAt
