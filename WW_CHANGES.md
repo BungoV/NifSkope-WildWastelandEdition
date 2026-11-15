@@ -131,8 +131,14 @@ Changed, not built, not checked live. Nothing in the app calls it yet, so no fra
 - Gate fixes on the way: every GL case now starts from its program's freshly linked uniforms (17324866; four verdicts
   moved by 1 ulp, all inside the bar), and the lamps' out-of-reach check ignores pixels where NVIDIA's own 4x blend
   merged differently between two draws (72f544a1; 8 flips there were GL's own draw-to-draw noise).
-- Still on GL (the census, exterior 5, interior 6): the lamps' shadow cubes and gobos, cascade shadows, air drift, the
-  roof map; interiors too. The app turns these on by default, so lit runs in the app still go to GL.
+- Sun shadow and clouds (VKFAR6, 8f0259a8 bar, then c05f5e8f): the sun's cascade shadow map (shared into the Vulkan
+  pass, read through a compare sampler like GL's) and the cloud shadow map light rain / snow on Vulkan. New gate case:
+  near rain under three cascades with a striped occluder map and a cloud map (151322 samples, EXACT; the cascades move
+  61991 in GL, forcing one cascade 47435, the clouds 20983). Dropping the shadow map, the shadow or the clouds' map, or
+  swapping two cascades, FAILs. A cascade map that is not shared, has another border or filter, or sits on a GPU
+  without linear D16 filtering is refused.
+- Still on GL (the census, exterior 4, interior 5): the lamps' shadow cubes and gobos, air drift, the roof map;
+  interiors too. The app turns these on by default, so lit runs in the app still go to GL.
 
 ## VKFAR2 P7 (2026-11-14): depth of field, motion blur and object blur join the tone pass on Vulkan (WW_VKVIEW=1)
 
