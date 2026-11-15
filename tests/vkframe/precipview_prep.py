@@ -126,6 +126,10 @@ CASES = [
 # own depths stamped round them: VKFAR12)
     ('rain_near_restir', 0, 2.0, 4.0, 11, 37.25, (-60500.0, 70000.0, 6300.0), (120.0, -40.0), 0, 1.0, 0.0, 0.0, 1.0, 1.0, 1,
      2.0, -0.08, 40000, 0, 0, 3, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1),
+    # L8 route lift 4 (VKFAR12 bar, element 34 = the lamps' physical falloff, cellLightPhys.x 1), appended: rain_near_restir's
+    # run, lamps, slots, cubes and ReSTIR fixture through pAllOn, with the app's Physical values (lightphys.h)
+    ('rain_near_phys', 0, 2.0, 4.0, 11, 37.25, (-60500.0, 70000.0, 6300.0), (120.0, -40.0), 0, 1.0, 0.0, 0.0, 1.0, 1.0, 1,
+     2.0, -0.08, 40000, 0, 0, 3, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 1),
 ]
 SUN = np.array([0.4, 0.3, 0.35]) / np.linalg.norm([0.4, 0.3, 0.35])  # world, toward the sun (the air's fogSun too)
 # a lit case's own sun (cellDirTo), chosen by the GS's mix: N = the eye's axis, thick / thin = 4 vpWrap( N.to, pcTrans )
@@ -145,6 +149,7 @@ LIT_SUN['rain_near_csm'] = LIT_SUN['rain_near_lit']
 LIT_SUN['rain_near_csm_ubo'] = LIT_SUN['rain_near_lit']
 LIT_SUN['rain_near_uss'] = LIT_SUN['rain_near_lit']
 LIT_SUN['rain_near_restir'] = LIT_SUN['rain_near_lit']
+LIT_SUN['rain_near_phys'] = LIT_SUN['rain_near_lit']
 TILE, SLICES = 64, 4  # the cluster grid (L8 term 2b): 64-pixel tiles, 4 log-depth slices
 
 
@@ -833,6 +838,29 @@ for ci, c in enumerate(CASES):
         U.update({'cellRestirOn': [1], 'cellRestirSize': [float(W), float(H), 0.0, 0.0]})
         print('precipview case %s: the ReSTIR ratio %.2f - %.2f, depth D0 %.3f; in-view share within its tolerance %.3f (want 0.1 - 0.8)'
               % (c[0], float(rs_r.min()), float(rs_r.max()), rs_D0, want(c[0], 'ReSTIR depth share', rs_share, 0.1, 0.8)))
+    if lit and len(c) > 34 and c[34]:
+        # L8 route lift 4: the app's Physical falloff (lightphys.h kAnchor, kSourceFraction, kAdvMinMetres; no area, no red).
+        # A lamp's curve (t3: bias, scale, exponent) takes it by GL's own test (cell_lights.glsl cellPhysFalloff)
+        ph_a, ph_s = 0.38164, 0.30
+        U.update({'cellLightPhys': [1.0, ph_a, ph_s, 0.0], 'cellLightPhysB': [0.05, 0.0, 0.0, 0.0]})
+        ph_L = lamps(v[inview], R, np.array(c[6])).astype(np.float64)
+        ph_P = v[inview].astype(np.float64) @ R + np.array(c[6], np.float64)
+
+        def ph_van(x, b):
+            return (1.0 - min(max(b[1] * (x ** b[2] if b[2] > 0 else 1.0) + b[0], 0.0), 1.0)) ** 2.2
+
+        ph_hit = np.zeros(len(ph_P), bool)
+        ph_n = 0
+        for ph_k in range(len(ph_L)):
+            ph_b = ph_L[ph_k, 3, :3]
+            ph_takes = (ph_b[2] > 0 and min(max(ph_b[1] + ph_b[0], 0.0), 1.0) > min(max(ph_b[0], 0.0), 1.0)
+                        and ph_van(1.0, ph_b) < 1.0 / 255.0 and ph_van(ph_a, ph_b) <= (1.0 - ph_a * ph_a) ** 1.1)
+            ph_in = np.linalg.norm(ph_P - ph_L[ph_k, 0, :3], axis=1) < ph_L[ph_k, 0, 3]
+            ph_n += int(ph_takes and ph_in.any())
+            if ph_takes:
+                ph_hit |= ph_in
+        print('precipview case %s: the physical falloff, %d lamps reaching the view take it; in-view share inside such a lamp\'s '
+              'reach %.3f (want >= 0.2)' % (c[0], ph_n, want(c[0], 'physical falloff reach share', float(ph_hit.mean()), 0.2)))
     with open(os.path.join(d, 'uni.txt'), 'w', newline='\n') as f:
         for key, val in U.items():
             f.write('%s %s\n' % (key, fl(val)))

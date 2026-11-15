@@ -654,8 +654,14 @@ int precipLitWhys( const PrecipRun::LitIn & l, const char ** out, int max )
 			add( "the lamps' cubes compiled into GL's ReSTIR variant (cellShadow active: WW_CELL_RESTIR_CUBES_RED)" );
 		if ( l.gobo > 0 && l.goboPin > 0 )  // L8 term 6: the gobos are judged with every pin and red at 0
 			add( "a gobo pin or red (cellGoboRot / Flat / Gam / Map) in a lit run" );
-		if ( l.phys > 0.5f )
-			add( "the lamps' physical falloff on the particles (refused in term 2a)" );
+		// L8 route lift 4 (VKFAR12): the physical falloff judged in GL's ReSTIR variant (the all-on route's twin); the plain
+		// lit twin, the advanced falloff and a falloff red are not
+		if ( l.phys > 0.5f && l.restir < 0 )
+			add( "the lamps' physical falloff without GL's ReSTIR variant (the plain lit twin: not judged)" );
+		if ( l.phys > 1.5f )
+			add( "the lamps' advanced falloff (cellLightPhys.x 2: not judged)" );
+		if ( l.phys > 0.5f && l.physRed > 0.5f )
+			add( "a falloff red (cellLightPhysB.z) in a lit run" );
 		if ( l.cellRed > 0 )
 			add( "a cell-light red (cellRed) in a lit run with lamps" );
 	}
@@ -788,6 +794,8 @@ bool precipRun( const PrecipRun & t, std::string & why )
 		b.cluster = litI( "cellClusterOn" );
 		b.cellRed = litI( "cellRed" );
 		b.phys = litF( "cellLightPhys", 0 );
+		b.physRed = litF( "cellLightPhysB", 2 );  // L8 route lift 4
+		b.restir = t.litIn.restir;  // (the program's variant, not a packed value)
 		b.gi = t.litIn.gi;  // (the program's, not a packed value)
 		b.envKeep = litF( "volEnvGrid", 3 );
 		if ( const char * w = precipLitWhy( b ) )
@@ -962,6 +970,23 @@ bool precipRun( const PrecipRun & t, std::string & why )
 				std::memset( l + atD, 0, 4 );
 			if ( ( t.red & 17179869184LL ) && atG >= 0 )
 				std::memcpy( l + atG, &two, 4 );
+		}
+		if ( t.red & ( 17592186044416LL | 35184372088832LL | 70368744177664LL ) ) {  // gates only (L8 route lift 4): the falloff off /
+			// the anchor and the source fraction swapped / the falloff's red bit 1 (k = 1); before the ReSTIR splice (plain offsets)
+			const int atP = precipAt( kT_preciplitcs, int( std::size( kT_preciplitcs ) ), "cellLightPhys" );
+			const int atB = precipAt( kT_preciplitcs, int( std::size( kT_preciplitcs ) ), "cellLightPhysB" );
+			if ( ( t.red & 17592186044416LL ) && atP >= 0 )
+				std::memset( l + atP, 0, 4 );
+			if ( ( t.red & 35184372088832LL ) && atP >= 0 ) {
+				std::uint8_t s[4];
+				std::memcpy( s, l + atP + 4, 4 );
+				std::memcpy( l + atP + 4, l + atP + 8, 4 );
+				std::memcpy( l + atP + 8, s, 4 );
+			}
+			if ( ( t.red & 70368744177664LL ) && atB >= 0 ) {
+				const float one = 1.0f;
+				std::memcpy( l + atB + 8, &one, 4 );
+			}
 		}
 		if ( t.red & 2048 ) {  // gates only: the local sun law dropped (vpSun.w 0)
 			const int atSun = precipAt( kT_preciplitcs, int( std::size( kT_preciplitcs ) ), "vpSun" );
