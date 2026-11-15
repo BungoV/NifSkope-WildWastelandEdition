@@ -106,6 +106,18 @@
 // Fixture move after the first run (11-15, the bar kept): vpSun (0.9, 1.3, 1.7) had cellDirColor's luminance (1.244 vs
 // 1.252) and the air colours the sky terms by luminance (airEnvColour), so the law moved 8 samples; vpSun is now
 // (0.5, 0.4, 0.3, 1), luminance 0.414.
+// Terrain air (L8, 11-15; bar set before its first run, never widened): case snow_far_terrair (snow_far_lit's run, fogged,
+// volTerms 1) with airTerrOn 1: the ground layer stands on the terrain grid (cell_volpart vpLight airGroundAt, on by default
+// with the air: cellvolair.cpp 4219). airTerr is the air's own volAirTerr grid (the app binds its pass grid to both
+// names), airTerrXf / airTerrFineXf its world rows, airTerrRef chosen before the run so the layer's anchor straddles the
+// run's particles (the prep prints the share under it; want 0.2 - 0.8). The same verdict, reference checks, repeat
+// clause, reds 64 / 128, the globals check and Vulkan's globals mirror as snow_far_lit. The case must also show (else the
+// gate fails): GL with airTerrOn 0 differs on >= 1000 covered samples (the grid seen); airTerr, airTerrOn, airTerrXf,
+// airTerrFineXf and airTerrRef found in GL's program; airTerrOn and airTerrXf packed non-zero. Red 4096 the grid dropped
+// (Vulkan's airTerr the zero texture) must FAIL in the case. Lifted with it: precipLitWhy's terrain-air refusal; the
+// app's rain / snow draw twins GL's airTerr (t17) into the lit set.
+// Census roof line (11-15, info): a cell with a roof map turns pcRoofOn on (cellprecip.cpp gpuRoof), refused for every
+// run, lit or not (precipAdmits, slice 3's); the census prints it beside the lit refusals and counts it.
 #define main fxview_main
 #include "fxview.cpp"
 #undef main
