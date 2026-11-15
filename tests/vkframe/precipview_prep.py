@@ -96,6 +96,12 @@ CASES = [
      2.0, -0.08, 40000, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1),
     ('snow_look_roof', 3, 5.5, 1.0, 97, 37.25, (12345.6, -98765.4, 7210.0), (-55.0, 210.0), 0, 3.0, 0.5, 6.0, 1.0, 1.0, 1,
      0.7, -0.15, 40000, 1, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1),
+    # L8 term 8 (VKFAR6, element 30 = an interior: 1 dark, 2 sunlit), appended, volTerms 11 with the Ambient Only volumes:
+    # rain_near_amb's run with the lamps, snow_far_lamps' fogged run
+    ('rain_near_int', 0, 2.0, 4.0, 11, 37.25, (-60500.0, 70000.0, 6300.0), (120.0, -40.0), 0, 1.0, 0.0, 0.0, 1.0, 1.0, 1,
+     2.0, -0.08, 40000, 0, 0, 11, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1),
+    ('snow_far_int_sun', 3, 5.5, 1.0, 97, 600.125, (12345.6, -98765.4, 7210.0), (-55.0, 210.0), 1, 3.0, 0.5, 6.0, 1.0, 0.6, 1,
+     3.3, -0.01, 40000, 1, 0, 11, 0, 0, 0, 1, 0, 0, 0, 0, 0, 2),
 ]
 SUN = np.array([0.4, 0.3, 0.35]) / np.linalg.norm([0.4, 0.3, 0.35])  # world, toward the sun (the air's fogSun too)
 # a lit case's own sun (cellDirTo), chosen by the GS's mix: N = the eye's axis, thick / thin = 4 vpWrap( N.to, pcTrans )
@@ -106,6 +112,7 @@ LIT_SUN['rain_near_lamps'] = LIT_SUN['rain_near_lit']
 LIT_SUN['rain_near_shadow'] = LIT_SUN['rain_near_lit']
 LIT_SUN['rain_near_gobo'] = LIT_SUN['rain_near_lit']
 LIT_SUN['rain_near_roof_lit'] = LIT_SUN['rain_near_lit']
+LIT_SUN['rain_near_int'] = LIT_SUN['rain_near_lit']
 LIT_SUN['rain_near_cluster'] = LIT_SUN['rain_near_lit']
 LIT_SUN['rain_near_sunlocal'] = LIT_SUN['rain_near_lit']
 LIT_SUN['rain_near_gi'] = LIT_SUN['rain_near_lit']
@@ -672,6 +679,13 @@ for ci, c in enumerate(CASES):
         nl = bc3_levels(normals(tw, th, 31 + ci), os.path.join(d, 'tex_pcTexN.bin'))
         with open(os.path.join(d, 'tex.txt'), 'a', newline='\n') as f:
             f.write('pcTexN 2d bc3 %d %d 1 linear clamp %d tex_pcTexN.bin\n' % (tw, th, nl))
+    if lit and len(c) > 30 and c[30]:
+        # L8 term 8: an interior (cellInterior 1): its ambient switch cellHasDalc on, cellGiAmb 0, cellExtDalc kept 1 (the
+        # ambient's fixture: unread inside); 1 a dark interior (cellHasDir 0: the lamps and the ambient alone)
+        U.update({'cellInterior': [1], 'cellHasDalc': [1], 'cellGiAmb': [0], 'cellExtDalc': [1]})
+        if c[30] == 1:
+            U['cellHasDir'] = [0]
+        print('precipview case %s: an interior, %s' % (c[0], 'dark (cellHasDir 0)' if c[30] == 1 else 'sunlit (cellHasDir 1)'))
     if len(c) > 29 and c[29]:
         # L8 term 7: the roof map (cellprecip.cpp's R32F, the highest occluder z a texel, -1e30 open), 24 x 16, the texel
         # L / 16, the eye at texel (6.3, 11.7): the map covers part of the box, off the map at low x and high y; a quarter

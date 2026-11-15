@@ -694,6 +694,16 @@ struct Job
 		const auto it = uni.find( "pcRoofOn" );
 		return roofNx > 0 && it != uni.end() && !it->second.empty() && it->second[0] > 0.5;
 	}
+	bool interior() const  // L8 term 8 (VKFAR6): a lit interior (cellInterior 1)
+	{
+		const auto it = uni.find( "cellInterior" );
+		return lit && it != uni.end() && !it->second.empty() && it->second[0] > 0.5;
+	}
+	bool darkInterior() const  // ... with no sun (cellHasDir 0): its lit check's cellHasDir 0 is printed, not judged
+	{
+		const auto it = uni.find( "cellHasDir" );
+		return interior() && it != uni.end() && !it->second.empty() && it->second[0] < 0.5;
+	}
 };
 const int kNormUnit = 8;  // slice 3: the look's pcTexN
 const int kLightsUnit = 9, kClusterUnit = 10;  // L8 term 2a: the lamps' cellLights / cellCluster
@@ -1022,7 +1032,7 @@ int main( int argc, char ** argv )
 	};
 	GLuint vao = 0;
 	genVertexArrays( 1, &vao );
-	constexpr int kCases = 25;
+	constexpr int kCases = 27;
 	static char twinKeys[kCases], normKeys[kCases];  // one atlas twin a case (the atlases' sizes differ), one normal-map twin a case
 	static char terrKeys[kCases];  // L8 terrain air: airTerr's twin a case
 	static char envKeys[kCases];  // L8 term 2: volEnvHist's twin a case
@@ -1086,7 +1096,7 @@ int main( int argc, char ** argv )
 		const char * name;
 		long long red;  // past bit 30 from L8 term 7 on
 		bool seen;
-	} reds[30] = { { "cull (radius 0)", 1, false }, { "corners (the strip's last two swapped)", 2, false }, { "near fade (dropped)", 4, false },
+	} reds[33] = { { "cull (radius 0)", 1, false }, { "corners (the strip's last two swapped)", 2, false }, { "near fade (dropped)", 4, false },
 		{ "air (dropped)", 8, false }, { "look (dropped: the plain pipelines)", 16, false }, { "atlas (dropped: the zero texture)", 32, false },
 		{ "light (dropped)", 128, false }, { "lamps' lights (dropped: the zero texel buffer)", 256, false },
 		{ "cluster's globals (dropped: b0 zero)", 512, false }, { "cluster lists (dropped: the zero texel buffer)", 1024, false },
@@ -1099,7 +1109,9 @@ int main( int argc, char ** argv )
 		{ "lamps' shadows (dropped: cellShadowOn 0)", 16777216, false }, { "lamps' shadow fade (dropped: cellShadowFadeOn 0)", 33554432, false },
 		{ "lamps' gobos (dropped: cellGoboOn 0)", 67108864, false }, { "lamps' gobo table (dropped: cellGoboTbl 0)", 134217728, false },
 		{ "lamps' gobo uv (flipped: cellGoboRot 3)", 268435456, false }, { "roof map (dropped: the zero pcRoof)", 536870912LL, false },
-		{ "roof (off: pcRoofOn 0)", 1073741824LL, false }, { "roof map's axes (swapped: pcRoofCam x / y)", 2147483648LL, false } };
+		{ "roof (off: pcRoofOn 0)", 1073741824LL, false }, { "roof map's axes (swapped: pcRoofCam x / y)", 2147483648LL, false },
+		{ "interior (off: cellInterior 0)", 4294967296LL, false }, { "interior's ambient (off: cellHasDalc 0)", 8589934592LL, false },
+		{ "ambient's GI rule (cellGiAmb 2)", 17179869184LL, false } };
 	using TexBufferFn = void( WINAPI * )( GLenum, GLenum, GLuint );
 	const auto texBuffer = reinterpret_cast<TexBufferFn>( wglGetProcAddress( "glTexBuffer" ) );
 	if ( !texBuffer )
@@ -1412,6 +1424,16 @@ int main( int argc, char ** argv )
 					u1i( pJob, "cellGoboRot", 1 );
 				} else if ( mode == 37 ) {  // L8 term 6: the paraboloid unmirrored (cellGoboMap 1), info
 					u1i( pJob, "cellGoboMap", 1 );
+				} else if ( mode == 38 ) {  // L8 term 8: the interior off (cellInterior 0)
+					u1i( pJob, "cellInterior", 0 );
+				} else if ( mode == 39 ) {  // L8 term 8: the interior's ambient off (cellHasDalc 0)
+					u1i( pJob, "cellHasDalc", 0 );
+				} else if ( mode == 40 ) {  // L8 term 8: the ambient under GI's rule (cellGiAmb 2)
+					u1i( pJob, "cellGiAmb", 2 );
+				} else if ( mode == 41 ) {  // L8 term 8: the exterior's ambient switch off (cellExtDalc 0), info
+					u1i( pJob, "cellExtDalc", 0 );
+				} else if ( mode == 42 ) {  // L8 term 8: the veil off (volVeil 0), info
+					u1i( pJob, "volVeil", 0 );
 				} else if ( mode == 9 ) {  // the case as it is (the restore check)
 				} else if ( mode == 6 ) {  // L8 term 3: the local law off (vpSun.w 0)
 					const float off[4] = { 0.5f, 0.4f, 0.3f, 0.0f };
@@ -1453,7 +1475,7 @@ int main( int argc, char ** argv )
 			std::printf( "PRECIPVIEW %s lit checks: GL with cellHasDir 0 differs %zu of %zu covered samples, pcTrans 1.0 vs 0.5 %zu (each want >= 1000); "
 				"NaN / Inf halves in GL's lit frame %zu (want 0); sun-branch names missing from GL's program: %s\n", j.name.c_str(), dark.flips, dark.covered,
 				thick.flips, bad, missing.empty() ? "none" : missing.c_str() );
-			ok = ok && dark.flips >= 1000 && thick.flips >= 1000 && bad == 0 && missing.empty();
+			ok = ok && ( dark.flips >= 1000 || j.darkInterior() ) && thick.flips >= 1000 && bad == 0 && missing.empty();  // (L8 term 8: a dark interior's sun is off)
 			if ( j.name == "rain_near_lit" ) {  // the restore check (header): a fogged case's uniforms left on, the restore skipped
 				const Job * fogJob = nullptr;
 				for ( const Job & o : jobs )
@@ -1561,6 +1583,21 @@ int main( int argc, char ** argv )
 						noBox.flips, noSph.flips );
 					ok = ok && noVol.flips >= 1000 && noBox.flips >= 1000 && noSph.flips >= 1000;
 				}
+			}
+			if ( j.interior() ) {  // L8 term 8's seen-checks (header): the interior's law, its ambient switch and GI rule seen, the names
+				const Verdict outside = judge( bg, drawGl( 38 ), refA, refB, refB );
+				const Verdict noDalc = judge( bg, drawGl( 39 ), refA, refB, refB );
+				const Verdict giAmb = judge( bg, drawGl( 40 ), refA, refB, refB );
+				const Verdict noExt = judge( bg, drawGl( 41 ), refA, refB, refB );
+				const std::string veil = j.fog ? std::to_string( judge( bg, drawGl( 42 ), refA, refB, refB ).flips ) : std::string( "-" );
+				std::string imiss;
+				for ( const char * nm : { "cellInterior", "cellHasDalc", "cellGiAmb", "cellExtDalc" } )
+					if ( f.getUniformLocation( pJob, nm ) < 0 )
+						imiss += std::string( imiss.empty() ? "" : ", " ) + nm;
+				std::printf( "PRECIPVIEW %s interior checks: GL with cellInterior 0 differs %zu of %zu covered samples, cellHasDalc 0 %zu, cellGiAmb 2 %zu "
+					"(each want >= 1000), cellExtDalc 0 %zu, volVeil 0 %s (info: unread inside, want 0); interior names missing from GL's program: %s\n",
+					j.name.c_str(), outside.flips, outside.covered, noDalc.flips, giAmb.flips, noExt.flips, veil.c_str(), imiss.empty() ? "none" : imiss.c_str() );
+				ok = ok && outside.flips >= 1000 && noDalc.flips >= 1000 && giAmb.flips >= 1000 && imiss.empty();
 			}
 			if ( j.terrAir() ) {  // L8 terrain air's seen-checks (header): the grid seen, its names found
 				const Verdict flatGround = judge( bg, drawGl( 7 ), refA, refB, refB );
@@ -2027,6 +2064,15 @@ int main( int argc, char ** argv )
 								zero += std::string( zero.empty() ? "" : ", " ) + tf.first;
 						}
 					}
+					if ( j.interior() )  // cellInterior and cellHasDalc packed, not zero (the interior bar)
+						for ( const char * nm : { "cellInterior", "cellHasDalc" } ) {
+							const int at = precipAt( WwVkPresent::kT_preciplitcs, int( std::size( WwVkPresent::kT_preciplitcs ) ), nm );
+							bool any = false;
+							for ( int b = 0; b < 4 && at >= 0; b++ )
+								any = any || t.cs[at + b] != 0;
+							if ( !any )
+								zero += std::string( zero.empty() ? "" : ", " ) + nm;
+						}
 					std::printf( "PRECIPVIEW %s lit packed: zero or absent in the light block: %s\n", j.name.c_str(), zero.empty() ? "none" : zero.c_str() );
 					if ( !zero.empty() )
 						return false;
@@ -2315,7 +2361,8 @@ int main( int argc, char ** argv )
 				|| ( ( r.red == 1048576 || r.red == 2097152 || r.red == 4194304 ) && !j.drift() )
 				|| ( ( r.red == 8388608 || r.red == 16777216 || r.red == 33554432 ) && !j.cube() )
 				|| ( ( r.red == 67108864 || r.red == 134217728 || r.red == 268435456 ) && !j.gobo() )
-				|| ( ( r.red == 536870912LL || r.red == 1073741824LL || r.red == 2147483648LL ) && !j.roof() ) )
+				|| ( ( r.red == 536870912LL || r.red == 1073741824LL || r.red == 2147483648LL ) && !j.roof() )
+				|| ( ( r.red == 4294967296LL || r.red == 8589934592LL || r.red == 17179869184LL ) && !j.interior() ) )
 				continue;  // a plain run has no look to drop, a case with no atlas no atlas, an unlit one no light, no lamps no lights
 			std::vector<std::uint16_t> a, b;
 			if ( !runVk( r.red, a, b, false ) ) {
@@ -2343,7 +2390,8 @@ int main( int argc, char ** argv )
 			if ( ( r.red == 512 || r.red == 1024 || r.red == 2048 || r.red == 4096 || r.red == 16384 || r.red == 32768 || r.red == 65536
 				|| r.red == 131072 || r.red == 262144 || r.red == 524288 || r.red == 1048576 || r.red == 2097152 || r.red == 4194304
 				|| r.red == 8388608 || r.red == 16777216 || r.red == 33554432 || r.red == 67108864 || r.red == 134217728
-				|| r.red == 268435456 || r.red == 536870912LL || r.red == 1073741824LL || r.red == 2147483648LL ) && v.ok() ) {  // the cluster case must see its b0 and its lists dropped
+				|| r.red == 268435456 || r.red == 536870912LL || r.red == 1073741824LL || r.red == 2147483648LL || r.red == 4294967296LL
+				|| r.red == 8589934592LL || r.red == 17179869184LL ) && v.ok() ) {  // the cluster case must see its b0 and its lists dropped
 				std::printf( "PRECIPVIEW %s red %s PASSED: the case does not see it\n", j.name.c_str(), r.name );
 				ok = false;
 			}

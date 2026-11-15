@@ -12,7 +12,8 @@
  * program variant that reads a GI volume is refused) and the ambient (volTerms 8: the weather's cellDalc, the Ambient
  * Only volumes, the air's keep through volEnvHist at t19), the sun's cascades and the clouds (t31 / t34) and the air's
  * drift (volAirNoise at t30), the lamps' shadow cubes (GL's shared D16 cube array at t6), their gobos (in cellLights).
- * The roof map (pcRoofOn: GL's pcRoof twinned, t0 / the lit pass's t47) on every variant. Interiors are refused (GL draws).
+ * The roof map (pcRoofOn: GL's pcRoof twinned, t0 / the lit pass's t47) on every variant. Interiors (cellInterior: the
+ * shared hlsli's own law, packed in the light block) from L8 term 8.
  * GL's state (cellprecip.cpp): depth LEQUAL, no depth write, cull off, blend SRC_ALPHA / ONE_MINUS_SRC_ALPHA, stencil ALWAYS
  * ref 1, REPLACE on depth pass, write mask 0x03. */
 namespace
@@ -632,8 +633,6 @@ int precipLitWhys( const PrecipRun::LitIn & l, const char ** out, int max )
 	};
 	if ( l.terms < 0 || l.interior < 0 || l.partRed < 0 || l.csm < 0 || l.airTerr < 0 )
 		add( "the lit program lacks a switch the refusals read" );
-	if ( l.interior > 0 )
-		add( "an interior's lit particles (its law is not judged)" );
 	// The gate judged the sun (volTerms 1), the lamps' flat loop (2, term 2a) and their cluster lists (term 2b); any other
 	// term refuses, idle or not.
 	if ( l.terms > 0 && ( l.terms & 2 ) ) {
@@ -893,6 +892,18 @@ bool precipRun( const PrecipRun & t, std::string & why )
 		std::memcpy( l + atCount, &count, 4 );
 		std::memcpy( l + atRed, &csRed, 4 );
 		roofRed( l );
+		if ( t.red & ( 4294967296LL | 8589934592LL | 17179869184LL ) ) {  // gates only (L8 term 8): the interior off / its ambient off / cellGiAmb 2
+			const int atI = precipAt( kT_preciplitcs, int( std::size( kT_preciplitcs ) ), "cellInterior" );
+			const int atD = precipAt( kT_preciplitcs, int( std::size( kT_preciplitcs ) ), "cellHasDalc" );
+			const int atG = precipAt( kT_preciplitcs, int( std::size( kT_preciplitcs ) ), "cellGiAmb" );
+			const std::int32_t two = 2;
+			if ( ( t.red & 4294967296LL ) && atI >= 0 )
+				std::memset( l + atI, 0, 4 );
+			if ( ( t.red & 8589934592LL ) && atD >= 0 )
+				std::memset( l + atD, 0, 4 );
+			if ( ( t.red & 17179869184LL ) && atG >= 0 )
+				std::memcpy( l + atG, &two, 4 );
+		}
 		if ( t.red & 2048 ) {  // gates only: the local sun law dropped (vpSun.w 0)
 			const int atSun = precipAt( kT_preciplitcs, int( std::size( kT_preciplitcs ) ), "vpSun" );
 			if ( atSun >= 0 )
