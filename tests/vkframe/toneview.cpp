@@ -1263,6 +1263,23 @@ int main( int argc, char ** argv )
 					for ( size_t i = 0; i < vk.size(); i++ )
 						off += std::abs( int( vk[i] ) - int( ref[i] ) ) > 1;
 					std::printf( "TONEVIEW BOTH %s: %zu byte(s) off by more than 1\n", c.name, off );
+					// lane BATCH1119: where each such byte sits (rows of W x S samples) and GL's backdrop texel there (mode 3's d)
+					std::vector<float> bd( size_t( W ) * H * 4 );
+					glBindTexture( GL_TEXTURE_2D, backTex );
+					glGetTexImage( GL_TEXTURE_2D, 0, GL_RGBA, GL_FLOAT, bd.data() );
+					glBindTexture( GL_TEXTURE_2D, 0 );
+					for ( size_t i = 0, shown = 0; i < vk.size() && shown < 4; i++ ) {
+						if ( std::abs( int( vk[i] ) - int( ref[i] ) ) <= 1 )
+							continue;
+						shown++;
+						const size_t px = i / 4, ch = i % 4, y = px / size_t( WS ), x = ( px % size_t( WS ) ) / S, s = px % S;
+						const std::uint8_t * a = &vk[px * 4], * r = &ref[px * 4];
+						const float * b = &bd[( y * size_t( W ) + x ) * 4];
+						std::printf( "TONEVIEW BOTH %s: off at x %zu y %zu sample %zu channel %zu: vk %d %d %d %d, GL %d %d %d %d; GL backdrop %.6f %.6f %.6f "
+									 "(x 255: %.3f %.3f %.3f; the jump at 0.80415 = 205.06 / 255)\n",
+							c.name, x, y, s, ch, a[0], a[1], a[2], a[3], r[0], r[1], r[2], r[3], double( b[0] ), double( b[1] ), double( b[2] ),
+							double( b[0] * 255 ), double( b[1] * 255 ), double( b[2] * 255 ) );
+					}
 				}
 				if ( &c == &cases[0] )
 					refBothSplit = ref;

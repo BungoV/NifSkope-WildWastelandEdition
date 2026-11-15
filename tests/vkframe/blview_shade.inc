@@ -1439,6 +1439,43 @@ bool blendGate()
 		c.good() ? "OK" : "FAIL", c.values, c.lit, c.off, double( c.maxUlps ), ran ? "" : ": ", ran ? "" : why.c_str() );
 	ok = ok && c.good();
 	{
+		// lane BATCH1119: the blended run draws over the run before it with EQUAL, so the plain run must repeat EXACT first
+		std::vector<float> d3;
+		std::vector<std::uint16_t> rep[2];
+		const bool rr = ran && shadeVk( 0, 0, d3, rep[0], rep[1], st, why );
+		std::size_t dd = 0, de = 0, cd = 0, cn = 0;
+		if ( rr && d3.size() == d0.size() && d1.size() == d0.size() )
+			for ( std::size_t i = 0; i < d0.size(); i++ ) {
+				dd += std::memcmp( &d3[i], &d0[i], 4 ) != 0;
+				de += std::memcmp( &d1[i], &d0[i], 4 ) != 0;
+			}
+		for ( int t = 0; rr && t < 2; t++ )
+			for ( std::size_t i = 0; i < base[t].size() && i < rep[t].size(); i++, cn++ )
+				cd += rep[t][i] != base[t][i];
+		std::printf( "BLVIEW blend base repeat %s (two plain runs: %zu of %zu depth values differ, %zu of %zu target values; blend run depth %zu differ)\n",
+			rr && dd == 0 && cd == 0 && cn > 0 ? "EXACT" : "DIFF", dd, d0.size(), cd, cn, de );
+		std::size_t off[2][4] = {}, lit[2][4] = {};
+		int shown = 0;
+		for ( int t = 0; ran && t < 2; t++ )
+			for ( std::size_t i = 0; i < base[t].size() && i < got[t].size(); i++ ) {
+				const float o = fromHalf( base[t][i] ), g = fromHalf( got[t][i] );
+				const float e = ( i % 4 ) == 3 ? std::max( k, o ) : k + o;
+				lit[t][i % 4] += base[t][i] != 0;
+				int ex = 0;
+				std::frexp( e, &ex );
+				const float ulp = std::max( std::ldexp( 1.0f, ex - 11 ), std::ldexp( 1.0f, -24 ) );
+				if ( std::fabs( g - e ) / ulp <= 1.0f )
+					continue;
+				off[t][i % 4]++;
+				if ( shown++ < 6 )
+					std::printf( "BLVIEW blend miss target %d pixel %zu channel %zu: base %.6g (0x%04x) got %.6g (0x%04x) expected %.6g\n", t, i / 4,
+						i % 4, double( o ), unsigned( base[t][i] ), double( g ), unsigned( got[t][i] ), double( e ) );
+			}
+		for ( int t = 0; t < 2; t++ )
+			std::printf( "BLVIEW blend census target %d: off r %zu g %zu b %zu a %zu; lit r %zu g %zu b %zu a %zu\n", t, off[t][0], off[t][1], off[t][2],
+				off[t][3], lit[t][0], lit[t][1], lit[t][2], lit[t][3] );
+	}
+	{
 		ObjBlBlend none = add;
 		none.on = 0;
 		const bool rr = ran && shadeVk( 0, 0, d2, red[0], red[1], st, why, &none, k );
