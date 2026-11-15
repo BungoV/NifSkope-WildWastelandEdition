@@ -1,3 +1,17 @@
+## VKFAR7 (2026-11-15): the TAA mask's reactive pass draws on Vulkan, all its draws in one hand-off
+
+Changed, not built, not checked live. Offline: tests/vkframe/taareactivedraw.sh passes.
+
+- With the view on Vulkan (WW_VKVIEW=1), the TAA mask's reactive pass (particles and effects that mark pixels for TAA)
+  queues its draws and draws them into the mask in one hand-off a frame (vktaareactive.inc). The draws keep GL's
+  blending (the larger value wins), depth test and offset. `WW_VKVIEW_TAAREACTIVE_RED=1` keeps the pass on GL.
+- A draw Vulkan cannot take goes to GL at once; if the hand-off fails, the whole pass is redrawn on GL. The
+  `vk taareactive:` line says why.
+- Gate: 48 draws in one hand-off match GL exactly, and equal the same draws one at a time. Two reds (a draw reads the
+  previous draw's data, or a draw is dropped) must FAIL, and both do.
+- The upload ring's wrap was checked against the far ground's queued tiles (notes, no code change): nothing a queued tile
+  reads is overwritten.
+
 ## VKFAR4 (2026-11-15): the far ground's ring-0 tiles go to Vulkan in one hand-off a frame
 
 Changed, not built, not checked live. Offline: tests/vkframe/fargrounddraw.sh passes, with new batch checks added.
