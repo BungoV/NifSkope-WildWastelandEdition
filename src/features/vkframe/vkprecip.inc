@@ -656,10 +656,10 @@ int precipLitWhys( const PrecipRun::LitIn & l, const char ** out, int max )
 		add( "the shadow set's composition on the particles (ussOn: a cascade / terrain / contact tier)" );
 	if ( l.csm > 0 && ( l.csmProbe > 0 || l.csmRed > 0 ) )  // (-1: not active in GL's program; csmProbe is the pixel stage's only)
 		add( "a cascade probe or red (csmProbe / csmRed) in a lit run" );
-	// the route census (VKFAR6): the app's default program reads the cascades from the frame block (WW_FRAME_UBO);
-	// fxPack reads loose uniforms only, so the packed csmMat would be zero
-	if ( l.csm > 0 && l.interior == 0 && l.csmBlock > 0 )
-		add( "GL's cascades from a block (WW_FRAME_UBO: wwShadowFrame, its csmMat not packed)" );
+	// L8 route lift 1 (VKFAR6): the default program reads the cascades from the frame block (WW_FRAME_UBO); precipLitRead
+	// reads its bound bytes (precipFrameOver packs them); a block it could not read is refused
+	if ( l.csm > 0 && l.interior == 0 && l.csmBlock < 0 )
+		add( "GL's cascades from a block with no bytes read (wwShadowFrame: no buffer bound, or a short one)" );
 	if ( l.partRed > 0 )
 		add( "a particle-light red (volPartRed) in a lit run" );
 	return n;
@@ -896,6 +896,15 @@ bool precipRun( const PrecipRun & t, std::string & why )
 		std::memcpy( l + atCount, &count, 4 );
 		std::memcpy( l + atRed, &csRed, 4 );
 		roofRed( l );
+		if ( t.red & 34359738368LL ) {  // gates only (L8 route lift 1): the block's bytes dropped (the cascade fields zero, the pack before the lift)
+			static const struct { const char * nm; int bytes; } kFrame[] = { { "csmMat", 192 }, { "csmInvRange", 12 }, { "csmForce", 4 },
+				{ "csmParams", 16 }, { "csmSplitOffset", 16 }, { "csmProbe", 4 }, { "csmRed", 4 } };
+			for ( const auto & k : kFrame ) {
+				const int at = precipAt( kT_preciplitcs, int( std::size( kT_preciplitcs ) ), k.nm );
+				if ( at >= 0 )
+					std::memset( l + at, 0, size_t( k.bytes ) );
+			}
+		}
 		if ( t.red & ( 4294967296LL | 8589934592LL | 17179869184LL ) ) {  // gates only (L8 term 8): the interior off / its ambient off / cellGiAmb 2
 			const int atI = precipAt( kT_preciplitcs, int( std::size( kT_preciplitcs ) ), "cellInterior" );
 			const int atD = precipAt( kT_preciplitcs, int( std::size( kT_preciplitcs ) ), "cellHasDalc" );

@@ -336,6 +336,13 @@ Changed, not built, not checked live. Nothing in the app calls it yet, so no fra
   on, FAILs in each case.
 - The census reads exterior 0, interior 0: every lit term GL draws on rain / snow now draws on Vulkan in the gate. Lit
   + the look together is still refused (the look is off by default).
+- Frame block (VKFAR8, d998c2bd bar, then the lift): the program the app really links holds the sun's cascades in
+  the shared frame block (wwShadowFrame), where the old pack read zeros. The Vulkan pass now reads that block's bytes
+  from GL's own binding and copies the cascades from it; no block bound, or a short one, is refused by name. New gate
+  case: near rain under three cascades drawn through the app's default program (135544 samples, EXACT); the block's
+  bytes zeroed move 123398 in GL. Dropping the copied cascades FAILs (123400 flips). The route census drops from
+  4 / 3 to 2 / 2 (default) and from 9 / 8 to 7 / 7 (all-on); the two left on the default route are the contact and
+  terrain shadow maps.
 
 ## VKWATER4 (2026-11-15): the ultra ocean builds on Vulkan compute (WW_VKVIEW=1)
 

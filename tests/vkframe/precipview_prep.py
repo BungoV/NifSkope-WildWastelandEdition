@@ -102,6 +102,10 @@ CASES = [
      2.0, -0.08, 40000, 0, 0, 11, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1),
     ('snow_far_int_sun', 3, 5.5, 1.0, 97, 600.125, (12345.6, -98765.4, 7210.0), (-55.0, 210.0), 1, 3.0, 0.5, 6.0, 1.0, 0.6, 1,
      3.3, -0.01, 40000, 1, 0, 11, 0, 0, 0, 1, 0, 0, 0, 0, 0, 2),
+    # L8 route lift 1 (VKFAR6, element 31 = the frame block), appended: rain_near_csm's run and fixture, drawn through pRoute
+    # (the route default program, WW_FRAME_UBO): the gate uploads its cascades into wwShadowFrame at binding 2
+    ('rain_near_csm_ubo', 0, 2.0, 4.0, 11, 37.25, (-60500.0, 70000.0, 6300.0), (120.0, -40.0), 0, 1.0, 0.0, 0.0, 1.0, 1.0, 1,
+     2.0, -0.08, 40000, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1),
 ]
 SUN = np.array([0.4, 0.3, 0.35]) / np.linalg.norm([0.4, 0.3, 0.35])  # world, toward the sun (the air's fogSun too)
 # a lit case's own sun (cellDirTo), chosen by the GS's mix: N = the eye's axis, thick / thin = 4 vpWrap( N.to, pcTrans )
@@ -118,6 +122,7 @@ LIT_SUN['rain_near_sunlocal'] = LIT_SUN['rain_near_lit']
 LIT_SUN['rain_near_gi'] = LIT_SUN['rain_near_lit']
 LIT_SUN['rain_near_amb'] = LIT_SUN['rain_near_lit']
 LIT_SUN['rain_near_csm'] = LIT_SUN['rain_near_lit']
+LIT_SUN['rain_near_csm_ubo'] = LIT_SUN['rain_near_lit']
 TILE, SLICES = 64, 4  # the cluster grid (L8 term 2b): 64-pixel tiles, 4 log-depth slices
 
 
@@ -712,6 +717,9 @@ for ci, c in enumerate(CASES):
         rf_under[rf_on] = ~(rf_z[rf_t[rf_on, 1], rf_t[rf_on, 0]] - np.float32(c[6][2]) < rf_p[rf_on, 2])
         print('precipview case %s: the roof map %d x %d, %d of %d in-view particles on the map, %d under a roof (dropped)'
               % (c[0], rf_nx, rf_ny, int(rf_on.sum()), len(rf_p), int(rf_under.sum())))
+    if len(c) > 31 and c[31]:
+        # L8 route lift 1: the gate draws this case through pRoute and uploads its cascade values into the frame block
+        U['wwGateFrameUbo'] = [1]
     with open(os.path.join(d, 'uni.txt'), 'w', newline='\n') as f:
         for key, val in U.items():
             f.write('%s %s\n' % (key, fl(val)))
