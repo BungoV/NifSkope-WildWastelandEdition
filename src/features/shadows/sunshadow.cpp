@@ -642,6 +642,11 @@ struct State
 	unsigned int liveTex = 0;
 	int texMap = 0;
 	bool shared = false;	// lane VKSHADOW1: tex is a shared D16 array (keyed &tex) while the live map is one
+	/* lane VKSHADOW6: the Scroll remap's source on Vulkan, a shared D16 array of kCascades layers (keyed &vkScr) while the
+	 * live map is one: layer i holds the old static layer i until the crossing remaps it (0: GL remaps, the old way) */
+	unsigned int vkScr = 0;
+	int vkScrMap = 0;
+	bool vkScrShared = false;
 	std::string vkWhy;
 	qint64 frame = 0;
 	Layer c[kCascades];
@@ -785,6 +790,9 @@ bool ensure( Renderer * r, int map, unsigned int liveTex, bool shared )
 		s.tex = s.scratch = s.fbo = s.vao = 0;
 		s.texMap = 0;
 		s.shared = false;
+		s.vkScr = 0;
+		s.vkScrMap = 0;
+		s.vkScrShared = false;
 		invalidate();
 	}
 	// lane VKSHADOW1: the static layers are shared with the live map (the queued static casters go into both on Vulkan)
@@ -794,6 +802,11 @@ bool ensure( Renderer * r, int map, unsigned int liveTex, bool shared )
 			invalidate();
 		if ( s.shared && was != map )
 			s.texMap = was;	// the scratch below follows the new size
+	}
+	// lane VKSHADOW6: the remap's shared source follows the live map's share (refused: GL remaps, the old way)
+	{
+		std::string why;
+		csmShare( fn, s.vkScr, s.vkScrShared, s.vkScrMap, map, shared, false, why );
 	}
 	if ( liveTex != s.liveTex ) {
 		s.liveTex = liveTex;	// the live map was made again: its content is gone
@@ -1696,7 +1709,7 @@ static void sunShadowPassImpl( Scene * scene )
 
 	/* lane VKSHADOW1 (plan row G6): the solid and two-sided queues go on the present device. drawJob records (job, layer)
 	 * instead of drawing them; after the cascades one crossing draws the list (depth-only LEQUAL keeps the nearest depth
-	 * in any order). GL keeps the clears, copies, remap, scratch, alpha-tested queue, per-draw casters and ground. */
+	 * in any order). GL keeps the clears, copies, the remap's scratch blit (lane VKSHADOW6: the remap moved), alpha-tested queue, per-draw casters and ground. */
 	static_assert( sizeof( GpuDriven::DrawCmd ) == 20, "VkDrawIndexedIndirectCommand" );
 	const bool vkWanted = progQ && csmShareWanted();
 	bool vkCsm = false;
@@ -1717,6 +1730,7 @@ static void sunShadowPassImpl( Scene * scene )
 	// lane VKSHADOW4: mFirst / mN = the job's mesh draws in vkMDraw, [0] back faces culled, [1] two-sided
 	struct VkRec { std::size_t jb; int target, layer; std::uint32_t mFirst[2] = { 0, 0 }, mN[2] = { 0, 0 }; };
 	std::vector<VkRec> vkRec;
+	std::vector<int> vkRemap;	// lane VKSHADOW6: the cascades whose Scroll remap the crossing draws (static and live layer)
 	int curTarget = -1, curLayer = 0;	// the attached layer: 0 the live map, 1 the static layers, -1 another
 	/* lane VKSHADOW4 (item 3 part 1): the per-draw solid casters (pass 0, not a far ring, not swaying: csm_view_vs has no
 	 * sway block) go into the same crossing as pooled meshes (CsmMesh: key = the shape, gen = the hash of the arrays GL's
@@ -1997,7 +2011,7 @@ static void sunShadowPassImpl( Scene * scene )
 		fn->glReadBuffer( GL_NONE );
 		fn->glBlitFramebuffer( 0, 0, s.map, s.map, 0, 0, s.map, s.map, GL_DEPTH_BUFFER_BIT, GL_NEAREST );
 	};
-	auto remap = [&]( int i ) {
+	auto remap = [&]( int i, GLenum func = GL_ALWAYS ) {	// lane VKSHADOW6: LEQUAL when it replays a refused crossing
 		const Cascade & c = s.c[i];
 		r->useProgram( "lookdev_csmremap.prog" );
 		progRemap->uni1i( "srcMap", kTextureUnit );
@@ -2016,7 +2030,7 @@ static void sunShadowPassImpl( Scene * scene )
 		fn->glBindVertexArray( cst.vao );
 		fn->glDisable( GL_CULL_FACE );
 		fn->glDisable( GL_POLYGON_OFFSET_FILL );
-		fn->glDepthFunc( GL_ALWAYS );
+		fn->glDepthFunc( func );
 		fn->glViewport( 0, 0, c.vw, c.vh );
 		fn->glDrawArrays( GL_TRIANGLES, 0, 3 );
 		fn->glDepthFunc( GL_LEQUAL );
@@ -2129,6 +2143,18 @@ static void sunShadowPassImpl( Scene * scene )
 			break;
 		case ShadowCache::Scroll:
 			// the old static layer to the scratch, then back remapped onto the moved window, then the new strips
+			/* lane VKSHADOW6: on Vulkan the old layer goes to the shared scratch's layer i and the crossing draws the remap
+			 * (LEQUAL) into the static and the live layer; GL clears and records as before */
+			if ( vkCsm && cst.vkScrShared ) {
+				if ( attach( cst.vkScr, i ) )
+					copyFrom( cst.tex, i );
+				if ( attach( cst.tex, i ) ) {
+					clearAll();
+					vkRemap.push_back( i );
+					runSet( i, 1 );
+				}
+				break;
+			}
 			if ( attach( cst.scratch, 0 ) )
 				copyFrom( cst.tex, i );
 			if ( attach( cst.tex, i ) ) {
@@ -2203,7 +2229,7 @@ static void sunShadowPassImpl( Scene * scene )
 	}
 	/* lane VKSHADOW1: the recorded queue draws, one crossing. A static layer's draws go into the live layer too (GL copied
 	 * that layer into it before they were drawn). Refused: GL draws the same list now (late, the same depths). */
-	if ( vkCsm && complete && !vkRec.empty() ) {
+	if ( vkCsm && complete && ( !vkRec.empty() || !vkRemap.empty() ) ) {
 		const std::size_t nRec = vkRec.size();
 		for ( std::size_t k = 0; k < nRec; k++ )
 			if ( vkRec[k].target == 1 ) {
@@ -2218,6 +2244,8 @@ static void sunShadowPassImpl( Scene * scene )
 		run.tex[1] = cacheOn ? cst.tex : 0;
 		run.key[0] = reinterpret_cast<std::uintptr_t>( &s.tex );
 		run.key[1] = cacheOn ? reinterpret_cast<std::uintptr_t>( &cst.tex ) : 0;
+		run.scratch = vkRemap.empty() ? 0 : cst.vkScr;	// lane VKSHADOW6
+		run.scratchKey = vkRemap.empty() ? 0 : reinterpret_cast<std::uintptr_t>( &cst.vkScr );
 		const bool havePool = GpuDriven::poolBuffers( run.pos, run.idx, run.posBytes, run.idxBytes );
 		// lane VKSHADOW4: the mesh draws' matrices after the queue's (one buffer); their draws renumbered to match
 		std::vector<float> vkAllMats( mats );
@@ -2234,6 +2262,25 @@ static void sunShadowPassImpl( Scene * scene )
 		run.nMDraws = vkMd.size() / 4;
 		run.cmds = reinterpret_cast<const std::uint32_t *>( cmds.data() );
 		run.nCmds = cmds.size();
+		// lane VKSHADOW6: the Scroll remaps, into the static layer and the live one (GL copied the cleared static layer there)
+		for ( int i : vkRemap ) {
+			WwVkPresent::CsmDraw d;
+			d.remap = true;
+			d.layer = i;
+			d.vw = s.c[i].vw;
+			d.vh = s.c[i].vh;
+			d.src = i;
+			d.srcX = srcOff[i][0];
+			d.srcY = srcOff[i][1];
+			d.srcW = oldSize[i][0];
+			d.srcH = oldSize[i][1];
+			d.zScale = zMap[i][0];
+			d.zBias = zMap[i][1];
+			for ( int t : { 1, 0 } ) {
+				d.target = t;
+				run.d.push_back( d );
+			}
+		}
 		const bool noBias = red( "nobias" );
 		for ( const VkRec & v : vkRec ) {
 			const Job & J = jobs[v.jb];
@@ -2270,7 +2317,7 @@ static void sunShadowPassImpl( Scene * scene )
 		}
 		bool anyQueue = false;	// lane VKSHADOW4: a run of mesh draws only needs no pool
 		for ( const WwVkPresent::CsmDraw & d : run.d )
-			anyQueue = anyQueue || !d.mesh;
+			anyQueue = anyQueue || ( !d.mesh && !d.remap );	// lane VKSHADOW6: a remap needs no pool either
 		std::string w;
 		if ( !havePool && anyQueue ) {
 			w = "no pool buffers";
@@ -2278,6 +2325,16 @@ static void sunShadowPassImpl( Scene * scene )
 		}
 		if ( ( !havePool && anyQueue ) || !WwVkPresent::csmRun( run, w ) ) {
 			vkWhy = w;
+			// lane VKSHADOW6: GL remaps from the shared scratch's layer i through its one-layer scratch, LEQUAL, into both layers
+			for ( int i : vkRemap ) {
+				if ( !attach( cst.scratch, 0 ) )
+					break;
+				copyFrom( cst.vkScr, i );
+				if ( attach( cst.tex, i ) )
+					remap( i, GL_LEQUAL );
+				if ( attach( s.tex, i ) )
+					remap( i, GL_LEQUAL );
+			}
 			for ( const VkRec & v : vkRec ) {
 				const Job & J = jobs[v.jb];
 				const Cascade & c = s.c[J.i];
