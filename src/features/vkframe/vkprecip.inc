@@ -855,7 +855,8 @@ bool precipRun( const PrecipRun & t, std::string & why )
 		return refuse( "the sun's shadow map: no D16 linear filtering on the present device" );
 	if ( t.lit && t.litIn.drift > 0.0f && !t.tex[12].tex )  // L8 term 4: GL reads the drift's noise; Vulkan has none to read
 		return refuse( "the air's drift with no volAirNoise in GL's program" );
-	const bool cubes = t.lit && ( t.litIn.terms & 2 ) && t.litIn.shadow > 0;  // L8 term 5: the lamps' shadow cubes read
+	// L8 term 5: the lamps' shadow cubes read (not in GL's ReSTIR variant, L8 route lift 3: the traced ratio replaces them)
+	const bool cubes = t.lit && ( t.litIn.terms & 2 ) && t.litIn.shadow > 0 && t.litIn.restir < 0;
 	if ( cubes && !t.tex[13].tex )
 		return refuse( "the lamps' shadows on with no cellShadow in GL's program" );
 	if ( cubes && !D.csmLinear )

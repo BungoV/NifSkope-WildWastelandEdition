@@ -753,6 +753,14 @@ struct Job
 				return lit != 0;
 		return false;
 	}
+	bool restir() const  // L8 route lift 3: GL's ReSTIR variant (cellRestirOn 1, cellRestir from buf.txt), drawn through pAllOn
+	{
+		bool buf = false;
+		for ( const Buf & b : bufs )
+			buf = buf || b.name == "cellRestir";
+		const auto it = uni.find( "cellRestirOn" );
+		return lit && buf && it != uni.end() && !it->second.empty() && it->second[0] != 0.0;
+	}
 	bool amb() const  // L8 term 2 (VKFAR5): volTerms' ambient bit (8)
 	{
 		const auto it = uni.find( "volTerms" );
@@ -777,7 +785,7 @@ struct Job
 	bool cube() const  // L8 term 5 (VKFAR6): the lamps' shadow cubes on (cellShadowOn 1, cubes from cubes.txt)
 	{
 		const auto it = uni.find( "cellShadowOn" );
-		return lamps() && cubeN > 0 && it != uni.end() && !it->second.empty() && it->second[0] > 0.5;
+		return lamps() && cubeN > 0 && it != uni.end() && !it->second.empty() && it->second[0] > 0.5 && !restir();
 	}
 	bool gobo() const  // L8 term 6 (VKFAR6): the lamps' gobos on (cellGoboOn 1, the patterns in cellLights)
 	{
@@ -810,6 +818,7 @@ const int kNoiseUnit = 19;  // L8 term 4: the drift's volAirNoise
 const int kUssTerrUnit = 70, kUssContactUnit = 71;  // L8 route lift 2: ussTerrMap, ussContactMap (past every empty unit below)
 const int kCubeUnit = 20;  // L8 term 5: the lamps' cellShadow (a D16 cube array)
 const GLenum kTexBuffer = 0x8C2A;  // GL_TEXTURE_BUFFER
+const int kRestirUnit = 72;  // L8 route lift 3: the ReSTIR ratio's cellRestir (past the shadow set's 70 / 71)
 // slice 2a: the air's textures, in precipRun's tex[2..6] order, their GL units and fxTexOf types
 const char * kAirTex[5] = { "atApTex", "volTex", "volTile", "volAirTerr", "volAirRainMap" };
 const int kAirType[5] = { 1, 1, 0, 2, 0 };
@@ -1160,7 +1169,7 @@ int main( int argc, char ** argv )
 	};
 	GLuint vao = 0;
 	genVertexArrays( 1, &vao );
-	constexpr int kCases = 29;
+	constexpr int kCases = 30;
 	static char twinKeys[kCases], normKeys[kCases];  // one atlas twin a case (the atlases' sizes differ), one normal-map twin a case
 	static char terrKeys[kCases];  // L8 terrain air: airTerr's twin a case
 	static char envKeys[kCases];  // L8 term 2: volEnvHist's twin a case
@@ -1225,7 +1234,7 @@ int main( int argc, char ** argv )
 		const char * name;
 		long long red;  // past bit 30 from L8 term 7 on
 		bool seen;
-	} reds[38] = { { "cull (radius 0)", 1, false }, { "corners (the strip's last two swapped)", 2, false }, { "near fade (dropped)", 4, false },
+	} reds[42] = { { "cull (radius 0)", 1, false }, { "corners (the strip's last two swapped)", 2, false }, { "near fade (dropped)", 4, false },
 		{ "air (dropped)", 8, false }, { "look (dropped: the plain pipelines)", 16, false }, { "atlas (dropped: the zero texture)", 32, false },
 		{ "light (dropped)", 128, false }, { "lamps' lights (dropped: the zero texel buffer)", 256, false },
 		{ "cluster's globals (dropped: b0 zero)", 512, false }, { "cluster lists (dropped: the zero texel buffer)", 1024, false },
@@ -1242,7 +1251,9 @@ int main( int argc, char ** argv )
 		{ "interior (off: cellInterior 0)", 4294967296LL, false }, { "interior's ambient (off: cellHasDalc 0)", 8589934592LL, false },
 		{ "ambient's GI rule (cellGiAmb 2)", 17179869184LL, false }, { "frame block (dropped: the cascade fields zero)", 34359738368LL, false },
 		{ "terrain map (dropped: the zero texture)", 68719476736LL, false }, { "contact map (dropped: the zero texture)", 137438953472LL, false },
-		{ "composition (off: the packed ussOn 0)", 274877906944LL, false }, { "contact lookup (axes swapped: ussContactInvSize)", 549755813888LL, false } };
+		{ "composition (off: the packed ussOn 0)", 274877906944LL, false }, { "contact lookup (axes swapped: ussContactInvSize)", 549755813888LL, false },
+		{ "ReSTIR ratio (dropped: the zero texel buffer)", 1099511627776LL, false }, { "ReSTIR ratio (off: the packed cellRestirOn 0)", 2199023255552LL, false },
+		{ "ReSTIR size (axes swapped: cellRestirSize)", 4398046511104LL, false }, { "ReSTIR block (not repacked)", 8796093022208LL, false } };
 	using TexBufferFn = void( WINAPI * )( GLenum, GLenum, GLuint );
 	const auto texBuffer = reinterpret_cast<TexBufferFn>( wglGetProcAddress( "glTexBuffer" ) );
 	if ( !texBuffer )
@@ -1252,8 +1263,8 @@ int main( int argc, char ** argv )
 		if ( j.hasTex && !uploadAtlas( dir + "/" + j.name, j.tex[size_t( j.atlasAt )] ) )
 			return fatal( j.name + ": the atlas upload" );
 		for ( Job::Buf & b : j.bufs ) {  // L8 term 2a: a texture buffer as celllights.cpp makes it (glTexBuffer on a GL buffer)
-			const GLenum ifmt = b.fmt == "rgba32f" ? fRgba32f : b.fmt == "r32i" ? GLenum( 0x8235 ) : 0;
-			const size_t bytes = size_t( b.texels ) * ( b.fmt == "r32i" ? 4 : 16 );
+			const GLenum ifmt = b.fmt == "rgba32f" ? fRgba32f : b.fmt == "r32i" ? GLenum( 0x8235 ) : b.fmt == "rg32f" ? GLenum( 0x8230 ) : 0;
+			const size_t bytes = size_t( b.texels ) * ( b.fmt == "r32i" ? 4 : b.fmt == "rg32f" ? 8 : 16 );  // (rg32f: L8 route lift 3)
 			std::vector<char> data( bytes );
 			std::ifstream bin( dir + "/" + j.name + "/" + b.file, std::ios::binary );
 			if ( !ifmt || !bin.read( data.data(), std::streamsize( bytes ) ) )
@@ -1271,7 +1282,7 @@ int main( int argc, char ** argv )
 		if ( j.hasN() && !uploadAtlas( dir + "/" + j.name, j.tex[size_t( j.normAt )] ) )
 			return fatal( j.name + ": the normal map upload" );
 		const GLuint normMap = j.hasN() ? j.tex[size_t( j.normAt )].gl : 0;
-		const GLuint pJob = j.look ? pLook : j.frameUbo() ? pRoute : pPrecip;  // (L8 route lift 1: the route default program)
+		const GLuint pJob = j.look ? pLook : j.restir() ? pAllOn : j.frameUbo() ? pRoute : pPrecip;  // (L8 route lift 1: the route default program; lift 3: the all-on one)
 		for ( int a = 0; a < 5 && j.fog; a++ ) {  // the volume in a shared target, as the app's
 			TexIn & t = j.tex[size_t( j.airAt[a] )];
 			GLuint into = 0;
@@ -1406,6 +1417,8 @@ int main( int argc, char ** argv )
 			u1i( prog, "cellLights", kLightsUnit );
 			bindUnit( kClusterUnit, kTexBuffer, j.bufTex( "cellCluster" ) );
 			u1i( prog, "cellCluster", kClusterUnit );
+			bindUnit( kRestirUnit, kTexBuffer, j.bufTex( "cellRestir" ) );  // L8 route lift 3 (none: read only with cellRestirOn 1)
+			u1i( prog, "cellRestir", kRestirUnit );
 			f.useProgram( prog );
 			f.bindBuffer( fUbo, ubo );  // L8 term 2b: the case's own b0 (zeros but the cluster case's projection)
 			f.bufferData( fUbo, std::ptrdiff_t( zeros.size() ), uboOver ? uboOver : j.global.empty() ? zeros.data() : j.global.data(), fStatic );
@@ -1614,6 +1627,8 @@ int main( int argc, char ** argv )
 					u1i( pJob, "ussTerrOn", 0 );
 				} else if ( mode == 46 ) {  // L8 route lift 2: the contact tier off (ussContactOn 0)
 					u1i( pJob, "ussContactOn", 0 );
+				} else if ( mode == 47 ) {  // L8 route lift 3: the ReSTIR ratio off (cellRestirOn 0)
+					u1i( pJob, "cellRestirOn", 0 );
 				} else if ( mode == 6 ) {  // L8 term 3: the local law off (vpSun.w 0)
 					const float off[4] = { 0.5f, 0.4f, 0.3f, 0.0f };
 					f.uniform4fv( f.getUniformLocation( pJob, "vpSun" ), 1, off );
@@ -1770,6 +1785,18 @@ int main( int argc, char ** argv )
 					"(each want >= 1000), cellShadowTexel 0 %zu (info); cube names missing from GL's program: %s\n", j.name.c_str(),
 					noShadow.flips, noShadow.covered, noFade.flips, oneTexel.flips, umiss.empty() ? "none" : umiss.c_str() );
 				ok = ok && noShadow.flips >= 1000 && noFade.flips >= 1000 && umiss.empty();
+			}
+			if ( j.restir() ) {  // L8 route lift 3's seen-checks (header): the ratio seen, its names found, the cubes compiled out
+				const Verdict noRs = judge( bg, drawGl( 47 ), refA, refB, refB );
+				std::string rmiss;
+				for ( const char * nm : { "cellRestirOn", "cellRestir", "cellRestirSize" } )
+					if ( f.getUniformLocation( pJob, nm ) < 0 )
+						rmiss += std::string( rmiss.empty() ? "" : ", " ) + nm;
+				const bool cubesIn = f.getUniformLocation( pJob, "cellShadow" ) >= 0 || f.getUniformLocation( pJob, "cellShadow[0]" ) >= 0;
+				std::printf( "PRECIPVIEW %s ReSTIR checks: GL with cellRestirOn 0 differs %zu of %zu covered samples (want >= 1000); ReSTIR names "
+					"missing from GL's program: %s; cellShadow in GL's program: %s (want no)\n", j.name.c_str(), noRs.flips, noRs.covered,
+					rmiss.empty() ? "none" : rmiss.c_str(), cubesIn ? "yes" : "no" );
+				ok = ok && noRs.flips >= 1000 && rmiss.empty() && !cubesIn;
 			}
 			if ( j.amb() ) {  // L8 term 2's seen-checks (header): the ambient seen, its names found, the volumes / the keep seen
 				const Verdict noAmb = judge( bg, drawGl( 3 ), refA, refB, refB );
@@ -2107,6 +2134,11 @@ int main( int argc, char ** argv )
 				std::printf( "PRECIPVIEW precipTexBufOf refused: %s\n", why.c_str() );
 				return false;
 			}
+			if ( t.lit && ( t.litIn.terms & 2 ) && t.litIn.restir >= 0
+				&& !WwVkPresent::precipTexBufOf( &ga, pJob, "cellRestir", t.restirBuf, why ) ) {  // precipDraw's (L8 route lift 3)
+				std::printf( "PRECIPVIEW precipTexBufOf refused (cellRestir): %s\n", why.c_str() );
+				return false;
+			}
 			for ( int a = 0; a < 5 && j.fog; a++ ) {
 				if ( !WwVkPresent::fxTexOf( &ga, pJob, kAirTex[a], kAirType[a], t.tex[2 + a], why ) ) {
 					std::printf( "PRECIPVIEW fxTexOf refused (%s): %s\n", kAirTex[a], why.c_str() );
@@ -2193,6 +2225,20 @@ int main( int argc, char ** argv )
 				WwVkPresent::fxPack( &ga, pJob, WwVkPresent::kT_preciplitcs, int( std::size( WwVkPresent::kT_preciplitcs ) ), t.cs );
 				WwVkPresent::precipFrameOver( t );  // precipDraw's (L8 route lift 1): the cascades from GL's frame block
 				t.litBlock = true;
+				if ( t.litIn.restir >= 0 ) {  // precipDraw's (L8 route lift 3): the ReSTIR variant's two inserted fields
+					WwVkPresent::fxPack( &ga, pJob, WwVkPresent::kT_preciplitrtcs, int( std::size( WwVkPresent::kT_preciplitrtcs ) ), t.rt );
+					if ( checkSeed && j.restir() ) {  // packed, not zero (the ReSTIR bar)
+						bool on = false, size = false;
+						for ( int b = 0; b < 4; b++ )
+							on = on || t.rt[b] != 0;
+						for ( int b = 16; b < 32; b++ )
+							size = size || t.rt[b] != 0;
+						std::printf( "PRECIPVIEW %s ReSTIR packed: cellRestirOn %s, cellRestirSize %s\n", j.name.c_str(), on ? "non-zero" : "zero or absent",
+							size ? "non-zero" : "zero or absent" );
+						if ( !on || !size )
+							return false;
+					}
+				}
 				if ( checkSeed ) {  // the sun's inputs packed, not zero (header)
 					std::string zero;
 					for ( const char * nm : { "cellDirColor", "cellDirTo", "cellRow", "volPhase", "volGi", "cellLightCount" } ) {
@@ -2602,7 +2648,8 @@ int main( int argc, char ** argv )
 				|| ( ( r.red == 536870912LL || r.red == 1073741824LL || r.red == 2147483648LL ) && !j.roof() )
 				|| ( ( r.red == 4294967296LL || r.red == 8589934592LL || r.red == 17179869184LL ) && !j.interior() )
 				|| ( r.red == 34359738368LL && !j.frameUbo() )
-				|| ( ( r.red == 68719476736LL || r.red == 137438953472LL || r.red == 274877906944LL || r.red == 549755813888LL ) && !j.uss() ) )
+				|| ( ( r.red == 68719476736LL || r.red == 137438953472LL || r.red == 274877906944LL || r.red == 549755813888LL ) && !j.uss() )
+				|| ( ( r.red == 1099511627776LL || r.red == 2199023255552LL || r.red == 4398046511104LL || r.red == 8796093022208LL ) && !j.restir() ) )
 				continue;  // a plain run has no look to drop, a case with no atlas no atlas, an unlit one no light, no lamps no lights
 			std::vector<std::uint16_t> a, b;
 			if ( !runVk( r.red, a, b, false ) ) {
@@ -2632,7 +2679,8 @@ int main( int argc, char ** argv )
 				|| r.red == 8388608 || r.red == 16777216 || r.red == 33554432 || r.red == 67108864 || r.red == 134217728
 				|| r.red == 268435456 || r.red == 536870912LL || r.red == 1073741824LL || r.red == 2147483648LL || r.red == 4294967296LL
 				|| r.red == 8589934592LL || r.red == 17179869184LL || r.red == 34359738368LL
-				|| r.red == 68719476736LL || r.red == 137438953472LL || r.red == 274877906944LL || r.red == 549755813888LL ) && v.ok() ) {  // the cluster case must see its b0 and its lists dropped
+				|| r.red == 68719476736LL || r.red == 137438953472LL || r.red == 274877906944LL || r.red == 549755813888LL
+				|| r.red == 1099511627776LL || r.red == 2199023255552LL || r.red == 4398046511104LL || r.red == 8796093022208LL ) && v.ok() ) {  // the cluster case must see its b0 and its lists dropped
 				std::printf( "PRECIPVIEW %s red %s PASSED: the case does not see it\n", j.name.c_str(), r.name );
 				ok = false;
 			}
@@ -2744,8 +2792,9 @@ int main( int argc, char ** argv )
 		addT( WwVkPresent::kT_preciplookcs, int( std::size( WwVkPresent::kT_preciplookcs ) ) );
 		addT( WwVkPresent::kT_preciplookps, int( std::size( WwVkPresent::kT_preciplookps ) ) );
 		addT( WwVkPresent::kT_preciplitcs, int( std::size( WwVkPresent::kT_preciplitcs ) ) );
+		addT( WwVkPresent::kT_preciplitrtcs, int( std::size( WwVkPresent::kT_preciplitrtcs ) ) );  // L8 route lift 3
 		for ( const char * nm : { "pcTex", "pcTexN", "pcRoof", "atApTex", "volTex", "volTile", "volAirTerr", "volAirRainMap", "airTerr",
-				  "volEnvHist", "csmMap", "ussCloudMap", "cellShadow", "volAirNoise", "cellLights", "cellCluster", "ussTerrMap", "ussContactMap",  // the sampler slots
+				  "volEnvHist", "csmMap", "ussCloudMap", "cellShadow", "volAirNoise", "cellLights", "cellCluster", "ussTerrMap", "ussContactMap", "cellRestir",  // the sampler slots
 				  "volTerms", "cellInterior", "volPartRed", "volCsm", "airTerrOn", "volAirDrift", "vpSun", "cellShadowOn", "cellGoboOn",
 				  "cellGoboRot", "cellGoboFlat", "cellGoboGam", "cellGoboMap", "cellClusterOn", "cellRed", "cellLightPhys", "volEnvGrid",
 				  "ussOn", "ussCloudOn", "csmProbe", "csmRed", "cellRestirOn",  // precipLitRead's switches

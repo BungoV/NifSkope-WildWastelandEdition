@@ -1,3 +1,17 @@
+## VKFAR11 (2026-11-15): rain and snow on Vulkan keep the lamps' shadows in the ReSTIR route (L8 route lift 3)
+
+Changed, not built, not checked live. Offline: tests/vkframe/precipview.sh passes (GATE OK).
+
+- With the all-on route's ReSTIR shadows (cellRestirOn), the lamps' shadows on rain and snow now come from the traced
+  ratio, the same as GL, instead of sending that run back to GL. Vulkan uses a second lit shader for this variant and
+  copies GL's ratio buffer once a run.
+- Still refused by name: a ReSTIR build that also reads the shadow cubes, and a ratio buffer that is missing or too small.
+- Gate: a new case, rain_near_restir, is EXACT against GL (0 halves differ). Turning the ratio off in GL changes 3591
+  samples, so the ratio is really seen. Four new reds (ratio dropped, ratio off, size axes swapped, block not repacked)
+  all FAIL. Every other case reads as before.
+- Left on the all-on route: the lamps' physical falloff (lift 4), then the lit look (lift 5). Census: default 0 / 0,
+  all-on 1 / 1.
+
 ## VKFAR4 (2026-11-15): the far ground's ring-0 tiles go to Vulkan in one hand-off a frame
 
 Changed, not built, not checked live. Offline: tests/vkframe/fargrounddraw.sh passes, with new batch checks added.
