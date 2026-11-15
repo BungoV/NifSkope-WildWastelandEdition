@@ -419,6 +419,28 @@ double nowMs()
 	return std::chrono::duration<double, std::milli>( C::now().time_since_epoch() ).count();
 }
 
+/* lane VKWATER4: a 1 s wait on a pass's last fence (pending: its last submit). Anything but VK_SUCCESS (a timeout, a lost
+ * device) means its commands may still run: false, why (also on stderr); the caller keeps its pending flag and leaves
+ * the frame to GL. Red WW_VKFENCE_RED=<site>[,<site>...] (gates only) fakes VK_TIMEOUT at those sites, pending or not. */
+bool fenceDone( VkFence fence, bool pending, const char * site, std::string & why )
+{
+	static const std::string red = [] {
+		const char * e = std::getenv( "WW_VKFENCE_RED" );
+		return e && *e ? "," + std::string( e ) + "," : std::string();
+	}();
+	const bool fake = !red.empty() && red.find( "," + std::string( site ) + "," ) != std::string::npos;
+	if ( !pending && !fake )
+		return true;
+	Vk & v = vk();
+	const VkResult r = fake ? VK_TIMEOUT : v.vkWaitForFences( v.dev, 1, &fence, VK_TRUE, 1000000000ull );
+	if ( r == VK_SUCCESS )
+		return true;
+	why = std::string( "the last " ) + site + " run's fence wait returned VkResult " + std::to_string( int( r ) )
+		+ ( r == VK_TIMEOUT ? " (timed out after 1 s)" : "" ) + ": its commands may still run, this frame stays on GL";
+	std::fprintf( stderr, "vk fence: %s\n", why.c_str() );
+	return false;
+}
+
 const char * modeName( VkPresentModeKHR m )
 {
 	switch ( m ) {
@@ -977,8 +999,12 @@ void dropSlots( bool glAlive )
 	Chain & c = ch();
 	Gl & g = gl();
 	for ( Slot & s : c.slot ) {
-		if ( s.pending )
-			v.vkWaitForFences( v.dev, 1, &s.fence, VK_TRUE, 1000000000ull );
+		std::string fw;
+		if ( !fenceDone( s.fence, s.pending, "slot drop", fw ) ) {
+			// its blit may still read the slot: the slot's GL and Vulkan objects are left (a leak beats freeing them in use)
+			s = Slot();
+			continue;
+		}
 		if ( glAlive ) {
 			if ( s.fbo )
 				g.deleteFramebuffers( 1, &s.fbo );
@@ -3851,11 +3877,12 @@ bool viewBegin( int w, int h, int samples, GlProc gp, std::string & why )
 		waitSlot( s.reader );
 		Vk & v = vk();
 		Slot & p = ch().slot[s.reader];
-		if ( p.pending && p.fence && v.vkGetFenceStatus( v.dev, p.fence ) == VK_NOT_READY ) {
-			V.busy++;
-			v.vkWaitForFences( v.dev, 1, &p.fence, VK_TRUE, 1000000000ull );
-		}
+		const bool busy = p.pending && p.fence && v.vkGetFenceStatus( v.dev, p.fence ) != VK_SUCCESS;
+		V.busy += busy ? 1 : 0;
+		const bool done = fenceDone( p.fence, busy, "view", why );
 		V.waitMs += nowMs() - tw;
+		if ( !done )
+			return false;  // s.reader kept: the next use of this slot waits again
 		s.reader = -1;
 	}
 	const GLenum target = V.samples > 1 ? kTexture2DMs : kTexture2D;
@@ -4301,8 +4328,9 @@ bool toneRun( const ToneRun & t, std::string & why )
 		return refuse( "the measure is on but no measure texture" );
 	// the last pass is done before its command buffer, set and staging are written again (the worker submitted it)
 	ToneBloomState & B = T.bloom;
+	if ( std::string fw; !fenceDone( T.fence, T.pending, "tone", fw ) )
+		return refuse( fw );
 	if ( T.pending ) {
-		v.vkWaitForFences( v.dev, 1, &T.fence, VK_TRUE, 1000000000ull );
 		T.pending = false;
 		if ( B.measHave )
 			B.measDone = true;  // lane VKBLOOM1: its read buffer is filled (toneMeasureTake)
@@ -4666,10 +4694,9 @@ bool taaRun( const TaaRun & t, std::string & why )
 	if ( ( inputs & 3 ) && !g.copyImageSubData )
 		return refuse( "TAAINPUTS1's velocity / mask are on but no glCopyImageSubData" );
 	// the last run is done before its command buffer and sets are written again
-	if ( A.pending ) {
-		v.vkWaitForFences( v.dev, 1, &A.fence, VK_TRUE, 1000000000ull );
-		A.pending = false;
-	}
+	if ( std::string fw; !fenceDone( A.fence, A.pending, "taa", fw ) )
+		return refuse( fw );
+	A.pending = false;
 	std::string w;
 	if ( !taaStatic( w ) || !taaSems( w ) || !taaPipes( V.samples, w ) || !taaFbs( w ) )
 		return breakOff( w );
@@ -4891,11 +4918,9 @@ bool present( void * hwnd, int w, int h, bool vsync, GlProc gp, std::string & wh
 	 * writes the slot with no GPU wait on Vulkan (the frame cap fence measures GL's own work only) */
 	const double tw = nowMs();
 	waitSlot( k );
-	bool busy = false;
-	if ( s.pending && v.vkGetFenceStatus( v.dev, s.fence ) == VK_NOT_READY ) {
-		busy = true;
-		v.vkWaitForFences( v.dev, 1, &s.fence, VK_TRUE, 1000000000ull );
-	}
+	const bool busy = s.pending && v.vkGetFenceStatus( v.dev, s.fence ) != VK_SUCCESS;
+	if ( !fenceDone( s.fence, busy, "present", why ) )
+		return false;  // GL swaps this frame; the slot's next use waits again
 	const double waited = nowMs() - tw;
 	/* GL: resolve the back buffer into the slot, signal (GENERAL both sides). Nothing is asked: with
 	 * glBlitNamedFramebuffer no binding changes, and the scissor test is switched off without asking (glIsEnabled
@@ -5433,10 +5458,9 @@ bool skyRun( const SkyRun & t, std::string & why )
 	if ( !g.copyImageSubData )
 		return refuse( "no glCopyImageSubData (the LUTs' copies into their shared twins)" );
 	// the last run is done before its command buffer, set, framebuffer and uniforms are written again
-	if ( S.pending ) {
-		v.vkWaitForFences( v.dev, 1, &S.fence, VK_TRUE, 1000000000ull );
-		S.pending = false;
-	}
+	if ( std::string fw; !fenceDone( S.fence, S.pending, "sky", fw ) )
+		return refuse( fw );
+	S.pending = false;
 	std::string w;
 	if ( !skyStatic( w ) || !skySems( w ) || !skyPipes( T.samples, w ) )
 		return breakOff( w );
@@ -6302,10 +6326,9 @@ bool fxBegin( int which, bool & broken, std::string & why )
 		return false;
 	}
 	// the last run is done before its command buffer, sets, framebuffers and uniforms are written again
-	if ( F.pending ) {
-		v.vkWaitForFences( v.dev, 1, &F.fence, VK_TRUE, 1000000000ull );
-		F.pending = false;
-	}
+	if ( !fenceDone( F.fence, F.pending, "fx", why ) )
+		return false;  // not broken: GL draws this frame
+	F.pending = false;
 	const int samples = tone().samples > 0 ? tone().samples : std::max( F.airSamples, 1 );
 	if ( !fxStatic( why ) || !fxSems( why ) || !fxPasses( samples, why ) ) {
 		broken = true;
@@ -7083,10 +7106,9 @@ bool lightRun( const LightRun & t, std::string & why )
 			return refuse( "no DDGI atlas on the present device under the key" );
 	}
 	// the last run is done before its sets, buffer, images and command buffer are touched again
-	if ( P.pending ) {
-		v.vkWaitForFences( v.dev, 1, &P.fence, VK_TRUE, 1000000000ull );
-		P.pending = false;
-	}
+	if ( std::string fw; !fenceDone( P.fence, P.pending, "light", fw ) )
+		return refuse( fw );
+	P.pending = false;
 	std::string w;
 	if ( !lightStatic( w ) || !lightPassMake( P, w ) || !lightSems( P, w ) )
 		return breakOff( w );
@@ -7617,10 +7639,9 @@ bool ssrRun( const SsrRun & t, std::string & why )
 		return refuse( "an input texture is missing" );
 	if ( t.prevOn && t.prevFmt != kRgba16f && t.prevFmt != kRgba32f )
 		return refuse( "the previous frame's format " + std::to_string( t.prevFmt ) + " has no twin" );
-	if ( S.pending ) {
-		v.vkWaitForFences( v.dev, 1, &S.fence, VK_TRUE, 1000000000ull );
-		S.pending = false;
-	}
+	if ( std::string fw; !fenceDone( S.fence, S.pending, "ssr", fw ) )
+		return refuse( fw );
+	S.pending = false;
 	std::string w;
 	if ( !ssrStatic( w ) || !ssrSems( w ) )
 		return breakOff( w );
@@ -8293,10 +8314,9 @@ bool csmRun( const CsmRun & t, std::string & why )
 		if ( t.tex[k] && !sharedTargetIs( t.key[k], t.tex[k] ) )
 			return refuse( "a cascade target is not the shared one" );
 	// the last run is done before its command buffer, buffers and framebuffers are touched again
-	if ( S.pending ) {
-		v.vkWaitForFences( v.dev, 1, &S.fence, VK_TRUE, 1000000000ull );
-		S.pending = false;
-	}
+	if ( std::string fw; !fenceDone( S.fence, S.pending, "csm", fw ) )
+		return refuse( fw );
+	S.pending = false;
 	std::string w;
 	if ( !csmStatic( w ) || !csmSems( w ) )
 		return breakOff( w );
@@ -8730,10 +8750,9 @@ bool objRun( const ObjRun & t, std::string & why )
 		|| ( sh->fmt != VK_FORMAT_X8_D24_UNORM_PACK32 && sh->fmt != VK_FORMAT_D32_SFLOAT && sh->fmt != VK_FORMAT_D16_UNORM ) )
 		return refuse( "the prepass target is not the shared depth one" );
 	// the last run is done before its command buffer, buffers and framebuffer are touched again
-	if ( S.pending ) {
-		v.vkWaitForFences( v.dev, 1, &S.fence, VK_TRUE, 1000000000ull );
-		S.pending = false;
-	}
+	if ( std::string fw; !fenceDone( S.fence, S.pending, "obj", fw ) )
+		return refuse( fw );
+	S.pending = false;
 	std::string w;
 	if ( !objStatic( w ) || !objSems( w ) )
 		return breakOff( w );
@@ -8854,8 +8873,20 @@ bool vkPart( int k, int w, int h, int vs, std::string & why, bool & rebuild, WwV
 	const ViewSlot * vw = vs >= 0 ? &view().slot[vs] : nullptr;
 	const int vSamples = view().samples;
 	const double tw = nowMs();
+	if ( !fenceDone( s.fence, s.pending, "present worker", why ) ) {
+		sp.fenceMs += nowMs() - tw;
+		// the fence still belongs to the last submit: GL's signal is carried by an empty batch with no fence
+		if ( !s.glWaited ) {
+			const VkPipelineStageFlags st = VK_PIPELINE_STAGE_TRANSFER_BIT;
+			VkSubmitInfo si { VK_STRUCTURE_TYPE_SUBMIT_INFO };
+			si.waitSemaphoreCount = 1;
+			si.pWaitSemaphores = &s.glDone;
+			si.pWaitDstStageMask = &st;
+			v.vkQueueSubmit( v.queue, 1, &si, VK_NULL_HANDLE );
+		}
+		return false;
+	}
 	if ( s.pending ) {
-		v.vkWaitForFences( v.dev, 1, &s.fence, VK_TRUE, 1000000000ull );
 		v.vkResetFences( v.dev, 1, &s.fence );
 		s.pending = false;
 	}
@@ -8991,7 +9022,13 @@ bool vkPart( int k, int w, int h, int vs, std::string & why, bool & rebuild, WwV
 	if ( pr == VK_SUBOPTIMAL_KHR || pr == VK_ERROR_OUT_OF_DATE_KHR )
 		rebuild = true;
 	if ( c.capture ) {
-		v.vkWaitForFences( v.dev, 1, &s.fence, VK_TRUE, 1000000000ull );
+		if ( std::string fw; !fenceDone( s.fence, true, "capture", fw ) ) {
+			// the copy may still run: its buffer is left (a leak beats freeing it in use), no picture this frame
+			c.capture->clear();
+			c.capture = nullptr;
+			why = fw;
+			return false;
+		}
 		void * m = nullptr;
 		c.capture->assign( size_t( bytes ), 0 );
 		if ( bufMem && v.vkMapMemory( v.dev, bufMem, 0, bytes, 0, &m ) == VK_SUCCESS ) {

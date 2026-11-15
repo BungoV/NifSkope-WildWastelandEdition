@@ -344,10 +344,9 @@ bool underRun( const UnderRun & r, std::string & why )
 	if ( r.vp[2] < 1 || r.vp[3] < 1 )
 		return refuse( "no viewport" );
 	// the last crossing (any fx pass) is done before its command buffer, sets and framebuffer are written again
-	if ( F.pending ) {
-		v.vkWaitForFences( v.dev, 1, &F.fence, VK_TRUE, 1000000000ull );
-		F.pending = false;
-	}
+	if ( std::string fw; !fenceDone( F.fence, F.pending, "under", fw ) )
+		return refuse( fw );
+	F.pending = false;
 	std::string w;
 	if ( !fxStatic( w ) || !fxSems( w ) || !underStatic( w ) || !underPass( T.samples, w ) )
 		return breakOff( w );
