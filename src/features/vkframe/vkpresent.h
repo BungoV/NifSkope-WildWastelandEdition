@@ -794,10 +794,10 @@ struct PrecipRun
 	bool lit = false, fogged = false, roofOn = false;  //!< lit: slice 2b (the sun alone; the rest refused); roofOn: pcRoofOn, tex[0] GL's pcRoof (L8 term 7); fogged: slice 2a
 	bool litBlock = false;          //!< cs holds kT_preciplitcs (a lit run without it is refused)
 	bool look = false;              //!< slice 3: cell_precip_look.prog's run (cs / ps also hold kT_preciplook*)
-	FxTex tex[14];                  //!< (13: the lit pass's t6 cellShadow, GL's shared lamp cubes; L8 term 5) (12: the lit pass's t30 volAirNoise, the air's drift; L8 term 4) (10: the lit pass's t31 csmMap, GL's shared cascades; 11: its t34 ussCloudMap; L8 term 3) t0 pcRoof (none yet), t1 pcTex (the atlas; a BC one twinned by farTwin), the air's t25 atApTex, t26 volTex, t27 volTile, t28 volAirTerr, t29 volAirRainMap, the look's pcTexN, the lit pass's t17 airTerr (L8 terrain air), the lit pass's t19 volEnvHist (L8 term 2, the ambient's keep)
+	FxTex tex[16];                  //!< (14 / 15: the lit pass's t32 ussTerrMap / t33 ussContactMap, the shadow set's terrain and contact tiers; L8 route lift 2) (13: the lit pass's t6 cellShadow, GL's shared lamp cubes; L8 term 5) (12: the lit pass's t30 volAirNoise, the air's drift; L8 term 4) (10: the lit pass's t31 csmMap, GL's shared cascades; 11: its t34 ussCloudMap; L8 term 3) t0 pcRoof (none yet), t1 pcTex (the atlas; a BC one twinned by farTwin), the air's t25 atApTex, t26 volTex, t27 volTile, t28 volAirTerr, t29 volAirRainMap, the look's pcTexN, the lit pass's t17 airTerr (L8 terrain air), the lit pass's t19 volEnvHist (L8 term 2, the ambient's keep)
 	std::uint8_t cs[kT_preciplitcsBytes] = {};  //!< fxPack( cell_precip_gpu, kT_precipcs ) (+ kT_preciplookcs for a look run, kT_preciplitcs for a lit one)
 	std::uint8_t ps[kT_preciplookpsBytes] = {};  //!< fxPack( cell_precip_gpu, kT_precipps ) (+ kT_preciplookps for a look run)
-	long long red = 0;              //!< gates only (long long: term 7's reds pass bit 30): 1 the cull radius 0, 2 the strip's last two corners swapped, 4 no near fade, 8 the air dropped, 16 the look dropped (the plain pipelines draw a look run), 32 the atlas dropped (t1 / t7 the zero texture), 128 the light dropped (lit = 1), 256 the lamps' lights dropped (the zero texel buffer), 512 b0 dropped (globalUniforms zero), 1024 the cluster's lists dropped (the zero texel buffer), 2048 the local sun law dropped (vpSun.w 0), 4096 the terrain air's grid dropped (t8 the zero texture), 16384 the ambient's history dropped (t9 the zero texture), 32768 the ambient dropped (the packed volTerms' bit 8 cleared), 65536 the sun's shadow map dropped (t31 the zero D16 array, all lit), 131072 the sun's shadow dropped (the packed volCsm cleared), 262144 the clouds' map dropped (t34 the zero texture), 524288 cascades 1 and 2 swapped (the packed csmMat[1] / csmMat[2]), 1048576 the drift's noise dropped (t30 the zero 3D texture), 2097152 the drift dropped (the packed volAirDrift.x 0), 4194304 the drift's octaves swapped (the packed volAirDriftUv rows 0-2 / 3-5), 8388608 the lamps' cubes dropped (t6 the zero D16 cube array), 16777216 the lamps' shadows off (the packed cellShadowOn 0), 33554432 their fade dropped (the packed cellShadowFadeOn 0), 67108864 the gobos off (the packed cellGoboOn 0), 134217728 their table dropped (the packed cellGoboTbl 0), 268435456 their uv flipped (the packed cellGoboRot 3), 536870912 the roof map dropped (pcRoof the zero texture), 1073741824 the roof off (the packed pcRoofOn 0), 2147483648 the map's axes swapped (the packed pcRoofCam x / y), 4294967296 the interior off (the packed cellInterior 0), 8589934592 the interior's ambient off (the packed cellHasDalc 0), 17179869184 the ambient's GI rule (the packed cellGiAmb 2)
+	long long red = 0;              //!< gates only (long long: term 7's reds pass bit 30): 1 the cull radius 0, 2 the strip's last two corners swapped, 4 no near fade, 8 the air dropped, 16 the look dropped (the plain pipelines draw a look run), 32 the atlas dropped (t1 / t7 the zero texture), 128 the light dropped (lit = 1), 256 the lamps' lights dropped (the zero texel buffer), 512 b0 dropped (globalUniforms zero), 1024 the cluster's lists dropped (the zero texel buffer), 2048 the local sun law dropped (vpSun.w 0), 4096 the terrain air's grid dropped (t8 the zero texture), 16384 the ambient's history dropped (t9 the zero texture), 32768 the ambient dropped (the packed volTerms' bit 8 cleared), 65536 the sun's shadow map dropped (t31 the zero D16 array, all lit), 131072 the sun's shadow dropped (the packed volCsm cleared), 262144 the clouds' map dropped (t34 the zero texture), 524288 cascades 1 and 2 swapped (the packed csmMat[1] / csmMat[2]), 1048576 the drift's noise dropped (t30 the zero 3D texture), 2097152 the drift dropped (the packed volAirDrift.x 0), 4194304 the drift's octaves swapped (the packed volAirDriftUv rows 0-2 / 3-5), 8388608 the lamps' cubes dropped (t6 the zero D16 cube array), 16777216 the lamps' shadows off (the packed cellShadowOn 0), 33554432 their fade dropped (the packed cellShadowFadeOn 0), 67108864 the gobos off (the packed cellGoboOn 0), 134217728 their table dropped (the packed cellGoboTbl 0), 268435456 their uv flipped (the packed cellGoboRot 3), 536870912 the roof map dropped (pcRoof the zero texture), 1073741824 the roof off (the packed pcRoofOn 0), 2147483648 the map's axes swapped (the packed pcRoofCam x / y), 4294967296 the interior off (the packed cellInterior 0), 8589934592 the interior's ambient off (the packed cellHasDalc 0), 17179869184 the ambient's GI rule (the packed cellGiAmb 2), 34359738368 the frame block's bytes dropped, 68719476736 the terrain map dropped (t32 the zero texture), 137438953472 the contact map dropped (t33 the zero texture), 274877906944 the composition off (the packed ussOn 0), 549755813888 the contact lookup's axes swapped (the packed ussContactInvSize x / y)
 	const void * global = nullptr;  //!< GL's globalUniforms (b0, 336 bytes; the cluster reads projectionMatrix); null: zeros (a cluster run refused)
 	std::uint8_t csmFrame[256] = {};  //!< L8 route lift 1: GL's wwShadowFrame bytes (std140, sunshadow.cpp CsmFrameBlock) when litIn.csmBlock is 1
 	std::uint8_t * recOut = nullptr;  //!< gates only: the run's records read back (n x 112 bytes, 192 a look run; host-visible records, a fence wait); null in the app
@@ -810,6 +810,7 @@ struct PrecipRun
 		float envKeep = 0.0f;           //!< volEnvGrid.w: the ambient's keep on (L8 term 2; it reads b0's projection)
 		int gi = 0;                     //!< GI names active in GL's program (a WW_CELL_PRT / RT GI variant reads a GI volume; L8 term 1)
 		int uss = 0, cloud = 0, csmProbe = 0, csmRed = 0;  //!< L8 term 3: ussOn (the shadow set's composition), ussCloudOn, csmProbe, csmRed
+		int ussTerr = 0, ussContact = 0, ussView = 0, ussRed = 0;  //!< L8 route lift 2: ussTerrOn, ussContactOn, ussView, ussRed (-1 absent)
 		int restir = -1;                //!< L8 term 5: cellRestirOn (-1 absent; present = GL's ReSTIR variant, its cubes not read)
 		int goboPin = 0;                //!< L8 term 6: 1 when cellGoboRot / Flat / Gam / Map is non-zero (a pin or red: not judged)
 		int csmBlock = 0;               //!< L8 route lift 1: wwShadowFrame in GL's program (WW_FRAME_UBO): 1 its bytes read into csmFrame, -1 not read
@@ -1164,6 +1165,10 @@ template <class Fn> void precipLitRead( Fn * fn, unsigned prog, PrecipRun & t )
 	t.litIn.cloud = geti( "ussCloudOn" );
 	t.litIn.csmProbe = geti( "csmProbe" );
 	t.litIn.csmRed = geti( "csmRed" );
+	t.litIn.ussTerr = geti( "ussTerrOn" );  // L8 route lift 2 (VKFAR9): the composition's tiers, its view and red
+	t.litIn.ussContact = geti( "ussContactOn" );
+	t.litIn.ussView = geti( "ussView" );
+	t.litIn.ussRed = geti( "ussRed" );
 	t.litIn.restir = geti( "cellRestirOn" );
 	// L8 route lift 1 (VKFAR6): WW_FRAME_UBO moves the cascades into wwShadowFrame; its bytes as GL's binding holds them
 	t.litIn.csmBlock = 0;
@@ -1450,6 +1455,16 @@ template <class Fn> bool precipDraw( Fn * fn, unsigned prog, int first, int coun
 				static char cloudKey;
 				ok = fxTexOf( fn, prog, "ussCloudMap", 0, t.tex[11], why );
 				t.tex[11].twin = reinterpret_cast<std::uintptr_t>( &cloudKey );
+			}
+			if ( ok && t.litIn.uss > 0 && t.litIn.ussTerr > 0 ) {  // L8 route lift 2: the composition's ussTerrMap into t32 (copied a run)
+				static char ussTerrKey;
+				ok = fxTexOf( fn, prog, "ussTerrMap", 0, t.tex[14], why );
+				t.tex[14].twin = reinterpret_cast<std::uintptr_t>( &ussTerrKey );
+			}
+			if ( ok && t.litIn.uss > 0 && t.litIn.ussContact > 0 ) {  // and its ussContactMap into t33
+				static char ussContactKey;
+				ok = fxTexOf( fn, prog, "ussContactMap", 0, t.tex[15], why );
+				t.tex[15].twin = reinterpret_cast<std::uintptr_t>( &ussContactKey );
 			}
 		}
 		if ( ok && t.lit && ( t.litIn.terms & 2 ) && t.litIn.shadow > 0 )  // L8 term 5: GL's cellShadow (shared, read in place) into t6

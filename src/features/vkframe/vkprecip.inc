@@ -651,9 +651,10 @@ int precipLitWhys( const PrecipRun::LitIn & l, const char ** out, int max )
 		add( "GL's program reads a GI volume (the WW_CELL_PRT / RT GI variant: not twinned)" );
 	if ( l.terms > 0 && ( l.terms & ~15 ) )
 		add( "an unknown volTerms bit (refused in slice 2b)" );
-	// L8 term 3: volCsm's cascades (ussOn 0) and the clouds are judged; the shadow set's composition and the probes are not
-	if ( l.csm > 0 && l.uss != 0 )
-		add( "the shadow set's composition on the particles (ussOn: a cascade / terrain / contact tier)" );
+	// L8 term 3: volCsm's cascades and the clouds are judged; L8 route lift 2 (VKFAR9): the shadow set's composition (ussOn:
+	// the Vogel cascades, the terrain map, the contact mask) too; its debug views and reds are not
+	if ( l.csm > 0 && l.uss > 0 && ( l.ussView > 0 || l.ussRed > 0 ) )
+		add( "a shadow set view or red (ussView / ussRed) in a lit run" );
 	if ( l.csm > 0 && ( l.csmProbe > 0 || l.csmRed > 0 ) )  // (-1: not active in GL's program; csmProbe is the pixel stage's only)
 		add( "a cascade probe or red (csmProbe / csmRed) in a lit run" );
 	// L8 route lift 1 (VKFAR6): the default program reads the cascades from the frame block (WW_FRAME_UBO); precipLitRead
@@ -765,6 +766,8 @@ bool precipRun( const PrecipRun & t, std::string & why )
 		b.cloud = litI( "ussCloudOn" );
 		b.csmProbe = litI( "csmProbe" );
 		b.csmRed = litI( "csmRed" );
+		b.ussView = litI( "ussView" );  // L8 route lift 2
+		b.ussRed = litI( "ussRed" );
 		b.airTerr = litI( "airTerrOn" );
 		b.drift = litF( "volAirDrift", 0 );
 		b.sunA = litF( "vpSun", 3 );
@@ -822,9 +825,9 @@ bool precipRun( const PrecipRun & t, std::string & why )
 	FxNames names;
 	names.add( T.colorTex );
 	names.add( T.dsTex );
-	VkImageView views[14] = {};
-	int smp[14] = {};
-	const int slotType[14] = { 0, 0, 1, 1, 0, 2, 0, 0, 2, 1, 2, 0, 1, 3 };  // an empty slot binds the zero texture of the shader's type (13: D.litCube)
+	VkImageView views[16] = {};
+	int smp[16] = {};
+	const int slotType[16] = { 0, 0, 1, 1, 0, 2, 0, 0, 2, 1, 2, 0, 1, 3, 0, 0 };  // an empty slot binds the zero texture of the shader's type (13: D.litCube)
 	if ( t.lit && t.tex[10].tex && !D.csmLinear )
 		return refuse( "the sun's shadow map: no D16 linear filtering on the present device" );
 	if ( t.lit && t.litIn.drift > 0.0f && !t.tex[12].tex )  // L8 term 4: GL reads the drift's noise; Vulkan has none to read
@@ -836,11 +839,18 @@ bool precipRun( const PrecipRun & t, std::string & why )
 		return refuse( "the lamps' shadow cubes: no D16 linear filtering on the present device" );
 	if ( t.roofOn && !t.tex[0].tex )  // L8 term 7: GL drops particles under its map; Vulkan has none to read
 		return refuse( "the roof map on with no pcRoof in GL's program" );
-	for ( int k = 0; k < 14; k++ ) {
+	// L8 route lift 2: the composition's terrain / contact tiers read GL's maps; a tier on with none bound has nothing to read
+	const bool uss = t.lit && t.litIn.csm > 0 && t.litIn.interior == 0 && t.litIn.uss > 0;
+	if ( uss && t.litIn.ussTerr > 0 && !t.tex[14].tex )
+		return refuse( "the shadow set's terrain tier on with no ussTerrMap on GL's unit" );
+	if ( uss && t.litIn.ussContact > 0 && !t.tex[15].tex )
+		return refuse( "the shadow set's contact tier on with no ussContactMap on GL's unit" );
+	for ( int k = 0; k < 16; k++ ) {
 		FxTex x = t.tex[k];
 		if ( ( ( k == 1 || k == 7 ) && ( t.red & 32 ) ) || ( k == 8 && ( t.red & 4096 ) ) || ( k == 9 && ( t.red & 16384 ) )
 			|| ( k == 10 && ( t.red & 65536 ) ) || ( k == 11 && ( t.red & 262144 ) ) || ( k == 12 && ( t.red & 1048576 ) )
-			|| ( k == 13 && ( t.red & 8388608 ) ) || ( k == 0 && ( t.red & 536870912LL ) ) ) {  // (0: the roof map, L8 term 7)  // red: the atlas / the terrain grid / the ambient's history / the shadow map / the clouds' map / the drift's noise dropped (the zero texture)
+			|| ( k == 13 && ( t.red & 8388608 ) ) || ( k == 0 && ( t.red & 536870912LL ) )
+			|| ( k == 14 && ( t.red & 68719476736LL ) ) || ( k == 15 && ( t.red & 137438953472LL ) ) ) {  // (14 / 15: L8 route lift 2's maps)  // (0: the roof map, L8 term 7)  // red: the atlas / the terrain grid / the ambient's history / the shadow map / the clouds' map / the drift's noise dropped (the zero texture)
 			x = FxTex();
 			x.sampler = t.tex[k].sampler;
 		}
@@ -903,6 +913,18 @@ bool precipRun( const PrecipRun & t, std::string & why )
 				const int at = precipAt( kT_preciplitcs, int( std::size( kT_preciplitcs ) ), k.nm );
 				if ( at >= 0 )
 					std::memset( l + at, 0, size_t( k.bytes ) );
+			}
+		}
+		if ( t.red & ( 274877906944LL | 549755813888LL ) ) {  // gates only (L8 route lift 2): the composition off / the contact lookup's axes swapped
+			const int atU = precipAt( kT_preciplitcs, int( std::size( kT_preciplitcs ) ), "ussOn" );
+			const int atC = precipAt( kT_preciplitcs, int( std::size( kT_preciplitcs ) ), "ussContactInvSize" );
+			if ( ( t.red & 274877906944LL ) && atU >= 0 )
+				std::memset( l + atU, 0, 4 );
+			if ( ( t.red & 549755813888LL ) && atC >= 0 ) {
+				std::uint8_t s[8];
+				std::memcpy( s, l + atC, 8 );
+				std::memcpy( l + atC, s + 4, 4 );
+				std::memcpy( l + atC + 4, s, 4 );
 			}
 		}
 		if ( t.red & ( 4294967296LL | 8589934592LL | 17179869184LL ) ) {  // gates only (L8 term 8): the interior off / its ambient off / cellGiAmb 2
@@ -1052,14 +1074,14 @@ bool precipRun( const PrecipRun & t, std::string & why )
 		// (L8 term 3: t31 csmMap GL's shared cascades, else the zero D16 array; t34 ussCloudMap; L8 term 4: t30 volAirNoise)
 		const bool cubeIn = views[13] != D.litCube;  // L8 term 5: t6 GL's shared lamp cubes, else the zero cube array
 		const VkImageView liv[15] = { views[13], views[8], views[9], views[2], views[3], views[4], views[5], views[6], views[12],
-			t.tex[10].tex && ( t.red & 65536 ) == 0 ? views[10] : D.litD2a, F.d2, F.d2, views[11], views[1], views[0] };  // kPrecipLitImg's order (L8 term 7: t47 the roof map)
+			t.tex[10].tex && ( t.red & 65536 ) == 0 ? views[10] : D.litD2a, views[14], views[15], views[11], views[1], views[0] };  // (L8 route lift 2: t32 / t33 GL's terrain / contact maps)  // kPrecipLitImg's order (L8 term 7: t47 the roof map)
 		for ( int k = 0; k < 15; k++ ) {
 			li[k].imageView = liv[k];
 			li[k].imageLayout = VK_IMAGE_LAYOUT_GENERAL;
 		}
 		VkDescriptorImageInfo ls[13] = {};
 		const VkSampler lsv[13] = { cubeIn ? D.cubeCmp : D.litCmp, F.smp[smp[8]], F.smp[smp[2]], F.smp[smp[3]], F.smp[smp[4]], F.smp[smp[5]], F.smp[smp[6]],
-			F.smp[smp[12]], D.csmCmp, F.smp[0], F.smp[0], F.smp[smp[11]], F.smp[smp[1]] };  // kPrecipLitSmp's order
+			F.smp[smp[12]], D.csmCmp, F.smp[smp[14]], F.smp[smp[15]], F.smp[smp[11]], F.smp[smp[1]] };  // kPrecipLitSmp's order
 		for ( int k = 0; k < 13; k++ )
 			ls[k].sampler = lsv[k];
 		VkWriteDescriptorSet lw[40] = {};  // 5 buffers + 15 images + 13 samplers

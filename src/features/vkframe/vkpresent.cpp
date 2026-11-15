@@ -115,7 +115,7 @@ constexpr GLenum kTexture2D = 0x0DE1, kRgba8 = 0x8058, kScissorTest = 0x0C11, kR
 	kTexBinding2DMs = 0x9104, kRgba16f = 0x881A, kRgba32f = 0x8814, kDsTexMode = 0x90EA, kStencilIndex = 0x1901;
 // lane VKSHARE1: volumes and layered targets, and the single-channel formats the cloud / TAA targets use
 constexpr GLenum kTexture3D = 0x806F, kTexBinding3D = 0x806A, kTexture2DArray = 0x8C1A, kTexBinding2DArray = 0x8C1D,
-	kGlRg32f = 0x8230, kGlRg16f = 0x822F, kGlR32f = 0x822E, kGlR8 = 0x8229, kGlRg8 = 0x822B;
+	kGlRg32f = 0x8230, kGlRg16f = 0x822F, kGlR32f = 0x822E, kGlR8 = 0x8229, kGlRg8 = 0x822B, kGlRg16 = 0x822C;
 constexpr GLenum kDepth16 = 0x81A5;  // lane VKSHADOW1: the sun cascades' D16 2D array
 constexpr GLenum kTextureCubeArray = 0x9009, kTexBindingCubeArray = 0x900A;  // lane VKFAR6 (L8 term 5): the lamps' D16 cubes
 constexpr GLenum kDepth24 = 0x81A6, kDepth32f = 0x8CAC;  // lane VKOBJ1: the objects' prepass (X8_D24 / D32F, multisample)
@@ -1527,6 +1527,7 @@ VkFormat vkFormatOf( GLenum f, bool & depth )
 	case kGlR32f: return VK_FORMAT_R32_SFLOAT;
 	case kGlR8: return VK_FORMAT_R8_UNORM;
 	case kGlRg8: return VK_FORMAT_R8G8_UNORM;
+	case kGlRg16: return VK_FORMAT_R16G16_UNORM;  // lane VKFAR9: the shadow set's ussTerrMap
 	case kDepth24Stencil8: return VK_FORMAT_D24_UNORM_S8_UINT;
 	case kDepth32fS8: return VK_FORMAT_D32_SFLOAT_S8_UINT;  // lane VKWATER2
 	case kGlR32ui: return VK_FORMAT_R32_UINT;  // lane VKWATER2: waterInfoAtlas / FlowAtlas / SkyIndex
