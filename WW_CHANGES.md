@@ -1,4 +1,4 @@
-## VKFAR2 L8 slices 1, 2a, 3 (2026-11-14): rain / snow pass for the Vulkan view, not wired in (gate red)
+## VKFAR2 L8 slices 1, 2a, 2b, 3 (2026-11-14/15): rain / snow pass for the Vulkan view (gate OK, not compiled into the app)
 
 Changed, not built, not checked live. Nothing in the app calls it yet, so no frame changes.
 
@@ -95,9 +95,12 @@ Changed, not built, not checked live. Nothing in the app calls it yet, so no fra
   to small zero stand-ins. Two new gate cases, near rain lit and far snow in fog lit, judged against the same
   per-sample reference: both EXACT. Each proves the sun is live in GL first (sun off, and a changed thin / thick mix,
   each move over 150000 / 28000 samples), and a new red that drops the light FAILs on both. The 8 unlit cases'
-  verdicts are unchanged. Still on GL (refused one by one): interiors, placed lights, GI, ambient, cascade shadows,
-  air drift, terrain air, a local sun, particle volume reds, and the look when lit; so most real lit exteriors
-  likely still go to GL. The first lit run moved the thin / thick mix on only 51 samples, because that case's sun
+  verdicts are unchanged. Still on GL (refused one by one): interiors, any light term past the sun (lamps, GI,
+  ambient: refused whenever their term is on, even idle, since the gate judged the sun term alone), cascade shadows,
+  air drift, terrain air, a local sun, particle volume reds, and the look when lit. The air's terms default to all
+  four on, so in the app today every lit run still goes to GL unless WW_CELL_AIR_TERMS=1. The view and projection
+  block is zero on the Vulkan side; a gate check fills GL's with non-zero values and its particle stage moves 0
+  floats, so the sun path does not read it. The first lit run moved the thin / thick mix on only 51 samples, because that case's sun
   sat nearly edge-on to the particles; the case got its own sun, the bar stayed.
 - No existing rain / snow shader and no cellprecip.cpp line changed.
 

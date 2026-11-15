@@ -651,12 +651,15 @@ bool precipRun( const PrecipRun & t, std::string & why )
 			return refuse( "the light block lacks a member the refusals read" );
 		if ( litI( "cellInterior" ) != 0 )
 			return refuse( "an interior's lit particles (its law is not judged)" );
-		if ( ( terms & 2 ) && litI( "cellLightCount" ) > 0 )
-			return refuse( "the lamps on the particles (refused in slice 2b)" );
-		if ( ( terms & 4 ) && litI( "cellGiOn" ) != 0 )
-			return refuse( "the GI on the particles (refused in slice 2b)" );
-		if ( ( terms & 8 ) && ( litI( "cellExtDalc" ) != 0 || local ) )
-			return refuse( "the ambient on the particles (refused in slice 2b)" );
+		// The gate judged volTerms 1 only: any other term refuses, idle or not.
+		if ( terms & 2 )
+			return refuse( "the lamps term on the particles (refused in slice 2b)" );
+		if ( terms & 4 )
+			return refuse( "the GI term on the particles (refused in slice 2b)" );
+		if ( terms & 8 )
+			return refuse( "the ambient term on the particles (refused in slice 2b)" );
+		if ( terms & ~15 )
+			return refuse( "an unknown volTerms bit (refused in slice 2b)" );
 		if ( litI( "volCsm" ) != 0 )  // (the sun's only shadow read, wwSunShadow, is behind volCsm)
 			return refuse( "the sun's shadow map on the particles (refused in slice 2b)" );
 		if ( litF( "volAirDrift", 0 ) > 0.0f )

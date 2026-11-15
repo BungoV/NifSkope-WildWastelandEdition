@@ -53,6 +53,9 @@
 // Fixture fix after the first lit run (11-15, the bar kept): rain_near_lit's sun gave N.to -0.13 on its view axis, so
 // thick / thin = 0.99 and pcTrans 1.0 vs 0.5 moved 51 samples (the case did not test the mix); it takes its own sun
 // (precipview_prep.py LIT_SUN, N.to 0.72). The sun's inputs are also checked packed and non-zero in the light block.
+// Globals check (11-15, bar set before its first run): precipRun zeroes globalUniforms (b0) and so does this harness for
+// GL, so a sun-path read of it would pass EXACT here and be wrong in the app. Each lit case captures GL's geometry stage
+// (transform feedback, bit-exact run to run) with b0 zero and with b0 filled non-zero: 0 floats may differ.
 #define main fxview_main
 #include "fxview.cpp"
 #undef main
@@ -1169,6 +1172,25 @@ int main( int argc, char ** argv )
 						const size_t distinct = size_t( std::unique( ga3.begin(), ga3.end() ) - ga3.begin() );
 						std::printf( "PRECIPVIEW %s lit gA: %zu distinct captured values with unequal channels (want >= 100)\n", j.name.c_str(), distinct );
 						ok = ok && distinct >= 100;
+					}
+					if ( j.lit ) {  // the globals check (header): b0 filled non-zero must not move GL's geometry stage
+						std::vector<float> g( 84 );
+						for ( size_t k = 0; k < g.size(); k++ )
+							g[k] = 0.37f + 0.11f * float( k % 13 ) - 0.05f * float( k % 7 );
+						f.bindBuffer( fUbo, ubo );
+						f.bufferData( fUbo, std::ptrdiff_t( g.size() * 4 ), g.data(), fStatic );
+						std::vector<float> tfG;
+						GLuint prG = 0;
+						capture( tfG, prG );
+						f.bindBuffer( fUbo, ubo );
+						f.bufferData( fUbo, std::ptrdiff_t( zeros.size() ), zeros.data(), fStatic );
+						size_t gDiff = tfG.size() == tf1.size() ? 0 : std::max( tfG.size(), tf1.size() );
+						for ( size_t i = 0; i < std::min( tfG.size(), tf1.size() ); i++ )
+							gDiff += std::memcmp( &tfG[i], &tf1[i], 4 ) != 0;
+						const bool blk = f.getUniformBlockIndex( pTf, "globalUniforms" ) != 0xFFFFFFFFu;
+						std::printf( "PRECIPVIEW %s lit globals: b0 non-zero vs zero, %u / %u triangles, %zu floats differ (want 0; block %s in GL's program)\n",
+							j.name.c_str(), prG, pr1, gDiff, blk ? "active" : "not active" );
+						ok = ok && gDiff == 0 && prG == pr1 && prG > 0;
 					}
 					std::vector<std::uint8_t> rec( size_t( j.n ) * 112 );
 					std::vector<std::uint16_t> a3, b3;
