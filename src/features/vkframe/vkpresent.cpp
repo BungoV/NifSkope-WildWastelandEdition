@@ -117,6 +117,7 @@ constexpr GLenum kTexture2D = 0x0DE1, kRgba8 = 0x8058, kScissorTest = 0x0C11, kR
 constexpr GLenum kTexture3D = 0x806F, kTexBinding3D = 0x806A, kTexture2DArray = 0x8C1A, kTexBinding2DArray = 0x8C1D,
 	kGlRg32f = 0x8230, kGlRg16f = 0x822F, kGlR32f = 0x822E, kGlR8 = 0x8229, kGlRg8 = 0x822B;
 constexpr GLenum kDepth16 = 0x81A5;  // lane VKSHADOW1: the sun cascades' D16 2D array
+constexpr GLenum kGlR11fG11fB10f = 0x8C3A;  // lane VKFAR17: the reflection probe atlas
 constexpr GLenum kTextureCubeArray = 0x9009, kTexBindingCubeArray = 0x900A;  // lane VKFAR6 (L8 term 5): the lamps' D16 cubes
 constexpr GLenum kDepth24 = 0x81A6, kDepth32f = 0x8CAC;  // lane VKOBJ1: the objects' prepass (X8_D24 / D32F, multisample)
 constexpr GLenum kGlR32ui = 0x8236, kGlRg32ui = 0x823C, kGlR8ui = 0x8232;  // lane VKWATER2: the water's index / atlas lookups
@@ -1536,6 +1537,7 @@ VkFormat vkFormatOf( GLenum f, bool & depth )
 	case kGlR8ui: return VK_FORMAT_R8_UINT;  // waterSkyAtlas
 	case kGlRgba32ui: return VK_FORMAT_R32G32B32A32_UINT;  // lane VKFAR3: fgGrid
 	case kGlRgba16ui: return VK_FORMAT_R16G16B16A16_UINT;  // lane VKFAR3: fgCells
+	case kGlR11fG11fB10f: return VK_FORMAT_B10G11R11_UFLOAT_PACK32;  // lane VKFAR17: the probe atlas (R in the low bits on both)
 	default: return VK_FORMAT_UNDEFINED;
 	}
 }

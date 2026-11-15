@@ -7,7 +7,8 @@
 // glFinish the present device copies every level and layer out and the bytes must be the same.
 // Bar (set before the first run, never widened): every compared level / layer EXACT; GL raised no error; the atlas level 0
 // and a cube layer attach as a complete framebuffer; a GL clear of the atlas to (1, 2, 0.5) reads back on the present
-// device as B10G11R11 0x381C03C0 (R bits 0-10, G 11-21, B 22-31) at level 0 AND at level 4 after glGenerateMipmap; a GL
+// device as B10G11R11 0x702003C0 (R bits 0-10, G 11-21, B 22-31; the header said 0x381C03C0 by a hand slip, the code
+// always computed the word from the exponents) at level 0 AND at level 4 after glGenerateMipmap; a GL
 // clear of cube layer 7 reads back as the clear colour on layer 7 while layers 6 and 8 keep their uploaded bytes;
 // a non-square cube array and a cube array of 7 layers are refused.
 // Reds (each must FAIL): the layer one off (layer 8 read as the cleared layer), the level one off (atlas level 1 read as
