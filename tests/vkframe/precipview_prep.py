@@ -76,6 +76,9 @@ CASES = [
      2.0, -0.08, 40000, 0, 0, 9, 0, 0, 0, 1),
     ('snow_far_amb', 3, 5.5, 1.0, 97, 600.125, (12345.6, -98765.4, 7210.0), (-55.0, 210.0), 1, 3.0, 0.5, 6.0, 1.0, 0.6, 1,
      3.3, -0.01, 40000, 1, 0, 9, 0, 0, 0, 2),
+    # L8 term 3 (VKFAR6, element 25 = the sun's cascades + the clouds): rain_near_lit's run unfogged, volTerms 1
+    ('rain_near_csm', 0, 2.0, 4.0, 11, 37.25, (-60500.0, 70000.0, 6300.0), (120.0, -40.0), 0, 1.0, 0.0, 0.0, 1.0, 1.0, 1,
+     2.0, -0.08, 40000, 0, 0, 1, 0, 0, 0, 0, 1),
 ]
 SUN = np.array([0.4, 0.3, 0.35]) / np.linalg.norm([0.4, 0.3, 0.35])  # world, toward the sun (the air's fogSun too)
 # a lit case's own sun (cellDirTo), chosen by the GS's mix: N = the eye's axis, thick / thin = 4 vpWrap( N.to, pcTrans )
@@ -87,6 +90,7 @@ LIT_SUN['rain_near_cluster'] = LIT_SUN['rain_near_lit']
 LIT_SUN['rain_near_sunlocal'] = LIT_SUN['rain_near_lit']
 LIT_SUN['rain_near_gi'] = LIT_SUN['rain_near_lit']
 LIT_SUN['rain_near_amb'] = LIT_SUN['rain_near_lit']
+LIT_SUN['rain_near_csm'] = LIT_SUN['rain_near_lit']
 TILE, SLICES = 64, 4  # the cluster grid (L8 term 2b): 64-pixel tiles, 4 log-depth slices
 
 
@@ -467,6 +471,82 @@ for ci, c in enumerate(CASES):
             keeps = np.array(keeps)
             print('precipview case %s: the air keep, %d slices, share of in-view particles with keep < 1 %.3f (want 0.2 - 0.8), '
                   'keep %.3f - %.3f' % (c[0], nz, float(np.mean(keeps < 0.9999)), keeps.min(), keeps.max()))
+    if lit and len(c) > 25 and c[25]:
+        # L8 term 3: three orthographic cascades along the case's sun in view space (each fitted to its view-depth third
+        # of the in-view particles), a 256 x 256 x 3 D16 map of stripe occluders, and a 64 x 64 clouds' map along the sun
+        pv = v[inview].astype(np.float64)
+        Lv = R @ sunL
+        Lv = Lv / np.linalg.norm(Lv)
+        ax = np.cross(Lv, [0.0, 1.0, 0.0])
+        if np.linalg.norm(ax) < 0.1:
+            ax = np.cross(Lv, [1.0, 0.0, 0.0])
+        ax = ax / np.linalg.norm(ax)
+        ay = np.cross(Lv, ax)
+        dv = -pv[:, 2]
+        s1, s2 = float(np.percentile(dv, 33.0)), float(np.percentile(dv, 67.0))
+        band = 0.05 * float(dv.max() - dv.min())
+        dist = 4.0 * float(np.linalg.norm(pv, axis=1).max())
+        dd = pv @ -Lv
+        pad = 0.1 * float(dd.max() - dd.min()) + 1.0
+        dmin, dmax = float(dd.min()) - pad, float(dd.max()) + pad
+        span = dmax - dmin
+        pa, pb = pv @ ax, pv @ ay
+        CN, mats, texel = 256, [], []
+        for lo, hi in ((-1e30, s1 + band), (s1, s2 + band), (s2, 1e30)):
+            m = (dv >= lo) & (dv <= hi)
+            ca, cb = 0.5 * (pa[m].min() + pa[m].max()), 0.5 * (pb[m].min() + pb[m].max())
+            h = 0.5 * max(float(np.ptp(pa[m])), float(np.ptp(pb[m]))) * 1.1 + 0.5
+            M = np.zeros((4, 4))
+            M[0, :3], M[0, 3] = ax / (2 * h), 0.5 - ca / (2 * h)
+            M[1, :3], M[1, 3] = ay / (2 * h), 0.5 - cb / (2 * h)
+            M[2, :3], M[2, 3] = -Lv / span, -dmin / span
+            M[3, 3] = 1.0
+            mats.append(M)
+            texel.append(2 * h / CN)
+        yy, xx = np.mgrid[0:CN, 0:CN]
+        csm = np.full((3, CN, CN), 65535, np.uint16)
+        for i, stripe in enumerate(((xx // 16) % 2, (yy // 16) % 2, ((xx + yy) // 16) % 2)):
+            occ = 0.15 + 0.3 * (0.5 + 0.5 * np.sin(xx * 0.05 + yy * 0.031 + i))
+            csm[i] = np.where(stripe == 1, np.round(occ * 65535), 65535).astype(np.uint16)
+        csm.tofile(os.path.join(d, 'csm.bin'))
+        casc = np.where(dv < s1, 0, np.where(dv < s2, 1, 2))
+        shad = []
+        for k in range(len(pv)):
+            q = mats[casc[k]] @ np.r_[pv[k], 1.0]
+            zr = q[2] - 0.25 * texel[casc[k]] / span
+            tx, ty = int(np.floor(q[0] * CN)), int(np.floor(q[1] * CN))
+            st = csm[casc[k], ty, tx] / 65535.0 if 0 <= tx < CN and 0 <= ty < CN else 1.0
+            shad.append(zr > st)
+        lz = pv @ Lv
+        Hc = 0.5 * max(float(np.ptp(pa)), float(np.ptp(pb))) * 1.15 + 0.5
+        cA, cB = 0.5 * (pa.min() + pa.max()), 0.5 * (pb.min() + pb.max())
+        Mc = np.zeros((4, 4))
+        Mc[0, :3], Mc[0, 3] = ax / (2 * Hc), 0.5 - cA / (2 * Hc)
+        Mc[1, :3], Mc[1, 3] = ay / (2 * Hc), 0.5 - cB / (2 * Hc)
+        Mc[2, :3], Mc[2, 3] = Lv / float(np.ptp(lz)), -float(lz.min()) / float(np.ptp(lz))
+        Mc[3, 3] = 1.0
+        QN = 64
+        gy, gx = np.mgrid[0:QN, 0:QN] / float(QN - 1)
+        cloud = np.zeros((QN, QN, 4), np.float32)
+        cloud[..., 0] = 0.2 + 0.8 * (0.5 + 0.5 * np.sin(gx * 7.0 + gy * 3.0))
+        cloud[..., 1] = 0.5 + 2.5 * (0.5 + 0.5 * np.sin(gy * 9.0 - gx * 2.0))
+        cloud[..., 2] = 0.2 + 1.8 * (0.5 + 0.5 * np.cos(gx * 5.0 + gy * 6.0))
+        cloud = cloud.astype(np.float16).astype(np.float32)
+        cloud.tofile(os.path.join(d, 'cloud.bin'))
+        qc = np.c_[pv, np.ones(len(pv))] @ Mc.T
+        ci_ = np.clip((qc[:, :2] * QN).astype(int), 0, QN - 1)
+        mc = cloud[ci_[:, 1], ci_[:, 0]]
+        tc = np.exp(-np.minimum(mc[:, 2], mc[:, 1] * np.maximum(mc[:, 0] - qc[:, 2], 0.0)))
+        with open(os.path.join(d, 'shadow.txt'), 'w', newline='\n') as f:
+            f.write('%d %d\n' % (CN, QN))
+        U.update({'volCsm': [1], 'ussOn': [0], 'csmForce': [-1.0], 'csmRed': [0], 'csmProbe': [0], 'ussCloudOn': [1],
+                  'csmMat': np.concatenate([M.T.reshape(-1) for M in mats]), 'csmInvRange': [1.0 / span] * 3,
+                  'csmParams': [1.0, dist, float(CN), band], 'csmSplitOffset': [s1, s2, 0.275, 1.0],
+                  'ussCsmStable': [1.0, 0.0, 0.0, 1.0], 'ussCsmTexel': texel, 'ussCsmBias': [0.25 * t_ for t_ in texel],
+                  'ussCloudFromView': Mc.T.reshape(-1), 'ussCloudFar': [0.6, 0.15, 0.0, 0.0]})
+        print('precipview case %s: the cascades, in-view shares %.3f %.3f %.3f (want each >= 0.1), one hard tap shadows %.3f '
+              '(want 0.2 - 0.8); the clouds, transmittance %.3f - %.3f, share < 0.9 %.3f' % (c[0], float(np.mean(casc == 0)),
+              float(np.mean(casc == 1)), float(np.mean(casc == 2)), float(np.mean(shad)), tc.min(), tc.max(), float(np.mean(tc < 0.9))))
     if hasN:
         nl = bc3_levels(normals(tw, th, 31 + ci), os.path.join(d, 'tex_pcTexN.bin'))
         with open(os.path.join(d, 'tex.txt'), 'a', newline='\n') as f:

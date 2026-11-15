@@ -726,10 +726,10 @@ struct PrecipRun
 	bool lit = false, fogged = false, roofOn = false;  //!< lit: slice 2b (the sun alone; the rest refused); roofOn refused (GL draws); fogged: slice 2a
 	bool litBlock = false;          //!< cs holds kT_preciplitcs (a lit run without it is refused)
 	bool look = false;              //!< slice 3: cell_precip_look.prog's run (cs / ps also hold kT_preciplook*)
-	FxTex tex[10];                  //!< t0 pcRoof (none yet), t1 pcTex (the atlas; a BC one twinned by farTwin), the air's t25 atApTex, t26 volTex, t27 volTile, t28 volAirTerr, t29 volAirRainMap, the look's pcTexN, the lit pass's t17 airTerr (L8 terrain air), the lit pass's t19 volEnvHist (L8 term 2, the ambient's keep)
+	FxTex tex[12];                  //!< (10: the lit pass's t31 csmMap, GL's shared cascades; 11: its t34 ussCloudMap; L8 term 3) t0 pcRoof (none yet), t1 pcTex (the atlas; a BC one twinned by farTwin), the air's t25 atApTex, t26 volTex, t27 volTile, t28 volAirTerr, t29 volAirRainMap, the look's pcTexN, the lit pass's t17 airTerr (L8 terrain air), the lit pass's t19 volEnvHist (L8 term 2, the ambient's keep)
 	std::uint8_t cs[kT_preciplitcsBytes] = {};  //!< fxPack( cell_precip_gpu, kT_precipcs ) (+ kT_preciplookcs for a look run, kT_preciplitcs for a lit one)
 	std::uint8_t ps[kT_preciplookpsBytes] = {};  //!< fxPack( cell_precip_gpu, kT_precipps ) (+ kT_preciplookps for a look run)
-	int red = 0;                    //!< gates only: 1 the cull radius 0, 2 the strip's last two corners swapped, 4 no near fade, 8 the air dropped, 16 the look dropped (the plain pipelines draw a look run), 32 the atlas dropped (t1 / t7 the zero texture), 128 the light dropped (lit = 1), 256 the lamps' lights dropped (the zero texel buffer), 512 b0 dropped (globalUniforms zero), 1024 the cluster's lists dropped (the zero texel buffer), 2048 the local sun law dropped (vpSun.w 0), 4096 the terrain air's grid dropped (t8 the zero texture), 16384 the ambient's history dropped (t9 the zero texture), 32768 the ambient dropped (the packed volTerms' bit 8 cleared)
+	int red = 0;                    //!< gates only: 1 the cull radius 0, 2 the strip's last two corners swapped, 4 no near fade, 8 the air dropped, 16 the look dropped (the plain pipelines draw a look run), 32 the atlas dropped (t1 / t7 the zero texture), 128 the light dropped (lit = 1), 256 the lamps' lights dropped (the zero texel buffer), 512 b0 dropped (globalUniforms zero), 1024 the cluster's lists dropped (the zero texel buffer), 2048 the local sun law dropped (vpSun.w 0), 4096 the terrain air's grid dropped (t8 the zero texture), 16384 the ambient's history dropped (t9 the zero texture), 32768 the ambient dropped (the packed volTerms' bit 8 cleared), 65536 the sun's shadow map dropped (t31 the zero D16 array, all lit), 131072 the sun's shadow dropped (the packed volCsm cleared), 262144 the clouds' map dropped (t34 the zero texture), 524288 cascades 1 and 2 swapped (the packed csmMat[1] / csmMat[2])
 	const void * global = nullptr;  //!< GL's globalUniforms (b0, 336 bytes; the cluster reads projectionMatrix); null: zeros (a cluster run refused)
 	std::uint8_t * recOut = nullptr;  //!< gates only: the run's records read back (n x 112 bytes, 192 a look run; host-visible records, a fence wait); null in the app
 	struct LitIn
@@ -740,6 +740,7 @@ struct PrecipRun
 		float phys = 0.0f;              //!< cellLightPhys.x (the physical falloff)
 		float envKeep = 0.0f;           //!< volEnvGrid.w: the ambient's keep on (L8 term 2; it reads b0's projection)
 		int gi = 0;                     //!< GI names active in GL's program (a WW_CELL_PRT / RT GI variant reads a GI volume; L8 term 1)
+		int uss = 0, cloud = 0, csmProbe = 0, csmRed = 0;  //!< L8 term 3: ussOn (the shadow set's composition), ussCloudOn, csmProbe, csmRed
 	};
 	LitIn litIn;                    //!< a lit run's switches as precipLitRead reads them from GL (before any pack; -1 absent)
 	struct TexBuf { unsigned tex = 0, buf = 0, glFmt = 0; long long off = 0, bytes = 0; };
@@ -1048,10 +1049,61 @@ template <class Fn> void precipLitRead( Fn * fn, unsigned prog, PrecipRun & t )
 	t.litIn.cellRed = geti( "cellRed" );
 	t.litIn.phys = getf( "cellLightPhys", 0 );
 	t.litIn.envKeep = getf( "volEnvGrid", 3 );
+	t.litIn.uss = geti( "ussOn" );  // L8 term 3 (VKFAR6): absent names read -1 (refused: a shadowed run needs them read)
+	t.litIn.cloud = geti( "ussCloudOn" );
+	t.litIn.csmProbe = geti( "csmProbe" );
+	t.litIn.csmRed = geti( "csmRed" );
 	// L8 term 1 (VKFAR5): the default program compiles the GI out (cellGiOn the constant false without WW_CELL_PRT)
 	t.litIn.gi = 0;
 	for ( const char * nm : { "cellGiOn", "cellGi", "cellGiSlots", "cellRooms", "cellGiAir", "cellGiAirOn", "cellDdgiOn", "cellDdgiAtlas" } )
 		t.litIn.gi += fn->glGetUniformLocation( prog, nm ) >= 0;
+}
+
+/* lane VKFAR6 (row L8 term 3): GL's csmMap as fxTexOf reads it, plus the state the lit set's compare sampler copies
+ * (sunshadow.cpp csmTexParams, the live map): a D16 array, linear, clamp to border 1, compare LEQUAL. false: why */
+template <class Fn> bool precipCsmOf( Fn * fn, unsigned prog, FxTex & t, std::string & why )
+{
+	if ( !fxTexOf( fn, prog, "csmMap", 2, t, why ) )
+		return false;
+	const int l = fn->glGetUniformLocation( prog, "csmMap" );
+	if ( !t.tex ) {
+		if ( l < 0 )
+			return true;  // not in the program: nothing reads it
+		why = "csmMap: no texture on its unit";
+		return false;
+	}
+	int unit = 0, active = 0x84C0;
+	fn->glGetUniformiv( prog, l, &unit );
+	fn->glGetIntegerv( 0x84E0, &active );  // GL_ACTIVE_TEXTURE
+	fn->glActiveTexture( unsigned( 0x84C0 + unit ) );
+	int mode = 0, func = 0, minF = 0, magF = 0, ws = 0, wt = 0;
+	float border[4] = {};
+	fn->glGetTexParameteriv( 0x8C1A, 0x884C, &mode );  // GL_TEXTURE_COMPARE_MODE
+	fn->glGetTexParameteriv( 0x8C1A, 0x884D, &func );  // GL_TEXTURE_COMPARE_FUNC
+	fn->glGetTexParameteriv( 0x8C1A, 0x2801, &minF );
+	fn->glGetTexParameteriv( 0x8C1A, 0x2800, &magF );
+	fn->glGetTexParameteriv( 0x8C1A, 0x2802, &ws );
+	fn->glGetTexParameteriv( 0x8C1A, 0x2803, &wt );
+	fn->glGetTexParameterfv( 0x8C1A, 0x1004, border );  // GL_TEXTURE_BORDER_COLOR (as floats: NVIDIA's int read of 1.0 is not 0x7FFFFFFF)
+	fn->glActiveTexture( unsigned( active ) );
+	if ( t.glFmt != 0x81A5u ) {  // GL_DEPTH_COMPONENT16
+		why = "csmMap: not a D16 array";
+		return false;
+	}
+	if ( mode != 0x884E || func != 0x0203 ) {  // COMPARE_REF_TO_TEXTURE, LEQUAL
+		why = "csmMap: a compare other than LEQUAL on the texture";
+		return false;
+	}
+	if ( minF != 0x2601 || magF != 0x2601 || ws != 0x812D || wt != 0x812D ) {  // LINEAR, CLAMP_TO_BORDER
+		why = "csmMap: a filter or wrap other than linear clamp-to-border";
+		return false;
+	}
+	for ( int k = 0; k < 4; k++ )
+		if ( border[k] != 1.0f ) {
+			why = "csmMap: a border other than 1";
+			return false;
+		}
+	return true;
 }
 
 /* lane VKFAR2 (row L8 term 2a): a texture buffer the program samples (the lamps' cellLights / cellCluster): the name on
@@ -1194,6 +1246,14 @@ template <class Fn> bool precipDraw( Fn * fn, unsigned prog, int first, int coun
 			static char envKey;
 			ok = fxTexOf( fn, prog, "volEnvHist", 1, t.tex[9], why );
 			t.tex[9].twin = reinterpret_cast<std::uintptr_t>( &envKey );
+		}
+		if ( ok && t.lit && t.litIn.csm > 0 && t.litIn.interior == 0 ) {  // L8 term 3: GL's csmMap (shared, read in place) into t31
+			ok = precipCsmOf( fn, prog, t.tex[10], why );
+			if ( ok && t.litIn.cloud > 0 ) {  // the clouds' ussCloudMap into t34
+				static char cloudKey;
+				ok = fxTexOf( fn, prog, "ussCloudMap", 0, t.tex[11], why );
+				t.tex[11].twin = reinterpret_cast<std::uintptr_t>( &cloudKey );
+			}
 		}
 		if ( ok && t.look ) {
 			ok = fxTexOf( fn, prog, "pcTexN", 0, t.tex[7], why, true );
