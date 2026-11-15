@@ -62,7 +62,20 @@
  * volTerms 2: their lamps through vpLight, where a shadow-casting light takes the ReSTIR ratio on the ratio's depth), so the
  * ratio reaches an effect; lit draws 0, 1, 3 stay plain (an air card takes no GI surface term, so the GI probes and the atlas
  * red reach GL through them; as air cards draws 1 and 3 fade out whole).
- * The RT row's bar, probes (cellRestirOn 0 among them) and its four reds, restir with them. */
+ * The RT row's bar, probes (cellRestirOn 0 among them) and its four reds, restir with them.
+ * Screen terms (lane VKWATER5 11-15, `BLVIEW <twin> ao`, vars 32; stated before its first run, never widened): the cell route's twin
+ * of blview's colour ao row (VKWATER3 8b678da1 proved the copy twin on bl only). Twins 2, 3, 5, 6 and 8, the programs that sample
+ * cellAo (twin 4's base variant has no cell lights; twin 7 takes a row only if its GL probe below reaches). Bound as ao.cpp binds
+ * it: a sampler on its own unit, cellAoOn 1, cellAoRect = (0, 0, 1 / w, 1 / h) of the frame, cellAo a GL R32F texture of half the
+ * view, a ramp in y and a 7-texel saw in x, bilinear, clamped (the bl row's texture). Twins 2, 3, 5, 6 also bind cellSsr as
+ * cellssr.cpp does: a GL RGBA32F texture of half the view (rgb a ramp in y and a 5-texel saw in x, a 0.3 .. 1 confidence saw
+ * in x), cellSsrOn 1, cellSsrMat 1, cellSsrRect, with the cube term's inputs (envReflection 1, cellCubeMat 1 1 0 0) seeded so the
+ * reflection reaches the colour (unseeded, k = 0 and the term is nothing). cellAoDecal is not bound: cellGiE reads it only under
+ * WW_CELL_PRT, which no gated variant carries, so GL's linked program has no such sampler.
+ * Bars: the twin's own (depth, colour, crossing counts); the copy line: the crossing takes exactly ONE copy of each GL-owned input
+ * a frame (cellAo kSW/2 x kSH/2 x 4 B, cellSsr x 16 B, and twin 8's soft-fade depth kSW x kSH x 4 B), copies and bytes equal.
+ * Probes: cellAoOn 0, and cellSsrOn 0 where bound, each move GL's colour on >= 20 % of the covered pixels. Red copy (reds bit 8:
+ * every copy twin copied from one texel on in x) must FAIL and move the Vulkan colour. */
 bool cellGate( const std::string & spirvDir, int twin, const GLuint maps[4], unsigned reds = 15u, const char * label = nullptr, unsigned vars = 0u )
 {
 	using namespace WwVkPresent;
