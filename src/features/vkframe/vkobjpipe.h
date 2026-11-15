@@ -345,7 +345,8 @@ struct ObjBlShade
 	std::size_t nRows = 0;
 	const void * cmds = nullptr;  //!< 5 words a command (the base instance relative to the leader)
 	std::size_t nCmds = 0;
-	int red = 0;  //!< gates only: 1 objBlPipe's strict target count (a 1-buffer frame must refuse)
+	int red = 0;  //!< gates only: 1 objBlPipe's strict target count (a 1-buffer frame must refuse); RT GI: 9 the ReSTIR ratio /
+	              //!< 10 the atlas copied a texel on, 11 / 12 the screen GI / its key dropped to the stand-in
 	const std::uint32_t * psGate = nullptr;  //!< gates only: this pixel module instead of the shipped twin (blview's plain row)
 	std::size_t psGateWords = 0;
 };

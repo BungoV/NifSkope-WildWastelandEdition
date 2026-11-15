@@ -2599,7 +2599,12 @@ bool objBlShade( GlProc gp, const ObjBlShade & s, std::string & why )
 		return fail( "no twin, program, rows or commands" );
 	ObjBlDraw d;
 	d.twin = s.twin;
-	d.pipeRed = s.red;
+	d.pipeRed = s.red == 1 ? 1 : 0;
+	if ( s.red == 9 || s.red == 10 ) {  // lane VKWATER3: the RT GI variant's texel buffers, one each (objCellShade's reds)
+		d.texelRed = 1;
+		d.texelRedName = s.red == 9 ? "cellRestir" : "cellDdgiAtlas";
+	}
+	d.dropName = s.red == 11 ? "cellGiHalf" : s.red == 12 ? "cellGiHalfKey" : nullptr;
 	d.vs = vkframe_objbl_vs_spv;
 	d.vsWords = sizeof( vkframe_objbl_vs_spv ) / 4;
 	if ( s.rt ) {
