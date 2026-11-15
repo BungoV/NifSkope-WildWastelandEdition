@@ -745,6 +745,22 @@ int main( int argc, char ** argv )
 	std::mt19937 rng( 23 );
 	std::uniform_real_distribution<float> u01( 0.0f, 1.0f );
 	bool ok = pipeGate( spvDir );  // lane VKOBJ4: the bl twins' pipelines and their reds
+	{  /* lane VKWATER3 G4: the bl variant pick (cellbindless.cpp vkShade): the base and the all-on route's RT key take their
+		* twins, an RT-only mix and RESTIRGI refuse; red 1 (any RTDDGI key taken as RT) must let the RT-only key through */
+		using WwVkPresent::objBlVariant;
+		static const char * rtOnly = "WW_CELL_FOGLEAK+WW_CELL_RTDDGI+WW_FRAME_UBO";
+		const char * w = nullptr;
+		const int vb = objBlVariant( "WW_CELL_FOGLEAK+WW_FRAME_UBO", w ), vr = objBlVariant( "WW_CELL_FOGLEAK+WW_CELL_RESTIR+WW_CELL_RTDDGI+WW_CELL_RTDDGI_CASCADES+WW_FRAME_UBO", w );
+		const int vo = objBlVariant( rtOnly, w );
+		const bool whyOk = w != nullptr;
+		const int vg = objBlVariant( "WW_CELL_FOGLEAK+WW_CELL_RESTIR+WW_CELL_RESTIRGI+WW_CELL_RTDDGI+WW_CELL_RTDDGI_CASCADES+WW_FRAME_UBO", w );
+		const int vn = objBlVariant( "WW_FRAME_UBO", w );
+		const int red = objBlVariant( rtOnly, w, 1 );
+		const bool vOk = vb == 0 && vr == 1 && vo < 0 && whyOk && vg < 0 && vn < 0 && red == 1;
+		std::printf( "BLVIEW variant %s (base %d, RT %d, RT-only %d, +RESTIRGI %d, no FOGLEAK %d; red 1 RT-only %d: %s)\n", vOk ? "OK" : "FAIL", vb, vr,
+			vo, vg, vn, red, red == 1 ? "FAIL as it must" : "PASSED (tests nothing)" );
+		ok = vOk && ok;
+	}
 	ok = uniGate( root ) && ok;    // lane VKOBJ4: the mirrored uniforms, blocks and texture units, and their reds
 	ok = locsGate( spvDir + "/spvset/spirv" ) && ok;  // lane VKOBJ4: the same mirror on GL's fo4_cellbl linked from SPIR-V
 	// lane VKOBJ3: the cache's BC twin of def t (random blocks per level, the def's sampler state, gli's swizzle on BC4 / BC5)
@@ -1149,7 +1165,13 @@ int main( int argc, char ** argv )
 		/* the RT GI variant (11-15, vars 8): GL's WW_CELL_RESTIR + RTDDGI + RTDDGI_CASCADES program against the twin's _rt_ps, the
 		 * lights on; reds restir, atlas, gihalf, gikey (ObjCellShade.red 9 .. 12) */
 		const bool c3rt = cellGate( spvDir + "/cellset/spirv", 3, maps, 0xFu << 9, "rt", 1u | 8u );
-		ok = c3rt && ok;
+		const bool c2rt = cellGate( spvDir + "/cellset/spirv", 2, maps, 0xFu << 9, "rt", 1u | 8u );
+		// twin 4: pbrm_default's RT program reads none of the inputs (its code is the base's): no reds
+		const bool c4rt = cellGate( spvDir + "/cellset/spirv", 4, pbrm, 0u, "rt", 8u );
+		const bool c5rt = cellGate( spvDir + "/cellset/spirv", 5, pbrm, 0xFu << 9, "rt", 1u | 8u );
+		const bool c6rt = cellGate( spvDir + "/cellset/spirv", 6, pbrm, 0xFu << 9, "rt", 1u | 8u );
+		const bool c7rt = cellGate( spvDir + "/cellset/spirv", 7, fx, 0xEu << 9, "rt", 1u | 8u );  // no restir red: see the fixture
+		ok = c3rt && c2rt && c4rt && c5rt && c6rt && c7rt && ok;
 	} else
 		std::printf( "BLVIEW cell not run (the cell twins read the texture cache's twins: MODE=bc)\n" );
 	vk().vkWaitForFences( vk().dev, 1, &gv.fence, VK_TRUE, 1000000000ull );

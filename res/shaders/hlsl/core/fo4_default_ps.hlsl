@@ -223,13 +223,23 @@ cbuffer LooseUniforms : register(b31, space0)
 #ifdef WW_BINDLESS
 // lane BINDLESS2: the material's maps as resident handles in the draw's row (slots of src/features/near/cellbindless.h)
 #include "../near/ww_bindless.hlsli"
-#define BaseMap (sampler2D)( wwDraws[wwDrawIdx].tex[0] )
-#define NormalMap (sampler2D)( wwDraws[wwDrawIdx].tex[1] )
-#define GlowMap (sampler2D)( wwDraws[wwDrawIdx].tex[2] )
-#define BacklightMap (sampler2D)( wwDraws[wwDrawIdx].tex[3] )
-#define SpecularMap (sampler2D)( wwDraws[wwDrawIdx].tex[4] )
-#define GreyscaleMap (sampler2D)( wwDraws[wwDrawIdx].tex[5] )
-#define EnvironmentMap (sampler2D)( wwDraws[wwDrawIdx].tex[6] )
+/* lane VKWATER3 G4: the row (src/features/near/cellbindless.h WwBl::Row, std430, 176 bytes): the draw's matrices and the
+ * material's seven 2D maps. GL (WW_GL_BINDLESS, tests/hlsllive/build_spv.py) reads tex[i] as GL_ARB_bindless_texture
+ * handles (ww_bindless_gl.hlsli); Vulkan (WW_VK_BINDLESS) as (image, sampler) indices into set 1, DXIL as heap indices
+ * (ww_bindless_vk.hlsli). The bl twins (near/fo4_cellbl_ps.hlsl, fo4_cellcsmbl_ps.hlsl) are this file. */
+struct WwDraw
+{
+	row_major float4x4 mv;
+	float4 nm[3];
+	uint2 tex[8];
+};
+StructuredBuffer<WwDraw> wwDraws : register(t56, space0);	// GL binding 12 (build_spv.py, by name); t56: land_shore.hlsli holds t48
+static uint wwBlRow;	// wwDrawIdx: the vertex stage's row, flat to the pixel stage
+#if defined(__spirv__) && defined(WW_GL_BINDLESS)
+#include "../near/ww_bindless_gl.hlsli"
+#else
+#include "../near/ww_bindless_vk.hlsli"
+#endif
 #else
 Texture2D<float4> BaseMap : register(t50, space0); SamplerState _BaseMap_sampler : register(s50, space0);
 Texture2D<float4> NormalMap : register(t51, space0); SamplerState _NormalMap_sampler : register(s51, space0);
@@ -246,7 +256,7 @@ TextureCube<float4> CubeMap : register(t57, space0); SamplerState _CubeMap_sampl
 #ifdef WW_BINDLESS
 // lane BINDLESS2FIX: the twin's normal matrix is in the draw's row (the uniform is never set for it: a zero matrix
 // turned every model-space normal into NaN)
-#define normalMatrix float3x3( wwDraws[wwDrawIdx].nm[0].xyz, wwDraws[wwDrawIdx].nm[1].xyz, wwDraws[wwDrawIdx].nm[2].xyz )
+#define normalMatrix float3x3( wwDraws[wwBlRow].nm[0].xyz, wwDraws[wwBlRow].nm[1].xyz, wwDraws[wwBlRow].nm[2].xyz )
 #else
 
 #endif
@@ -449,7 +459,15 @@ float3 tonemap(float3 x)
 #define CELL_GI_ONEREAD 1	// DDGIREADPERF1: one volume read site (cellGiFirst in main, cell_lights.glsl)
 #define CELL_RESTIR_MISS_PIXEL 1	// MODULES1 R7 item 2: a surface off the traced depth takes the pixel's shadow ratio (cellShadowF)
 #include "../lights/cell_lights.hlsli"
+#if defined(WW_BINDLESS) && defined(__spirv__) && defined(WW_GL_BINDLESS)
+#define Texture2D WwBlTexT	// the atlas parameter takes a bindless map (GreyscaleMap)
+#define SamplerState uint
+#endif
 #include "../reflections/cell_reflprobe.hlsli"
+#if defined(WW_BINDLESS) && defined(__spirv__) && defined(WW_GL_BINDLESS)
+#undef Texture2D
+#undef SamplerState
+#endif
 #include "../ao/cell_ao.hlsli"
 #include "../reflections/cell_ssr.hlsli"
 #include "cell_grass.hlsli"
@@ -1351,6 +1369,9 @@ struct SPIRV_Cross_Input
 #if defined(WW_FAR_SPLAT)
     WW_LOC(16) nointerpolation float farSplatA : TEXCOORD16;
 #endif
+#if defined(WW_BINDLESS)
+    WW_LOC(16) nointerpolation uint wwBlRow : TEXCOORD16;
+#endif
 };
 
 struct SPIRV_Cross_Output
@@ -1363,6 +1384,9 @@ struct SPIRV_Cross_Output
 
 SPIRV_Cross_Output main(SPIRV_Cross_Input stage_input)
 {
+#if defined(WW_BINDLESS)
+    wwBlRow = stage_input.wwBlRow;
+#endif
     gl_FragCoord = stage_input.gl_FragCoord;
     gl_FragCoord.w = 1.0 / gl_FragCoord.w;
     LightDir = stage_input.LightDir;

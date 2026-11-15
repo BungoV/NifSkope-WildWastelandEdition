@@ -92,8 +92,11 @@ HLSL_SPECS += [('src/features/vkframe', k, 'vulkan1.2', 'vkframe_%s_spv' % k) fo
 # binding kept); the vertex stage on its own shifts (VS_SHIFT), the pixel stages on fx()'s
 VKFRAME_PS_SHIFT = VKFRAME_SKY_ARGS
 VKFRAME_VS_SHIFT = ['-fvk-b-shift', '256', '0', '-fvk-t-shift', '320', '0', '-fvk-s-shift', '384', '0', '-fvk-u-shift', '448', '0']
-VKFRAME_FXB = {'objbl_vs': ('fo4_defaultbl_vs', 'vs_6_0', 'VS_SHIFT'), 'objbl_cell_ps': ('fo4_cellbl_ps', 'ps_6_0', 'PS_SHIFT'),
-	'objbl_cellcsm_ps': ('fo4_cellcsmbl_ps', 'ps_6_0', 'PS_SHIFT')}
+VKFRAME_FXB = {'objbl_vs': ('fo4_defaultbl_vs', 'vs_6_0', 'VS_SHIFT', ''), 'objbl_cell_ps': ('fo4_cellbl_ps', 'ps_6_0', 'PS_SHIFT', ''),
+	'objbl_cellcsm_ps': ('fo4_cellcsmbl_ps', 'ps_6_0', 'PS_SHIFT', ''),
+	# VKWATER3 G4: the RT GI variant of the bl pair (a 5th quoted field, as fxc's)
+	'objbl_cell_rt_ps': ('fo4_cellbl_ps', 'ps_6_0', 'PS_SHIFT', '-D WW_CELL_RTDDGI=1 -D WW_CELL_RTDDGI_CASCADES=1 -D WW_CELL_RESTIR=1'),
+	'objbl_cellcsm_rt_ps': ('fo4_cellcsmbl_ps', 'ps_6_0', 'PS_SHIFT', '-D WW_CELL_RTDDGI=1 -D WW_CELL_RTDDGI_CASCADES=1 -D WW_CELL_RESTIR=1')}
 HLSL_SPECS += [('src/features/vkframe', k, 'vulkan1.2', 'vkframe_%s_spv' % k) for k in VKFRAME_FXB]
 # the cell frame's per-sample readback (the script's objbl_samples_cs line: cs_6_0, no shift)
 HLSL_SPECS += [('src/features/vkframe', 'objbl_samples_cs', 'vulkan1.2', 'vkframe_objbl_samples_cs_spv')]
@@ -233,9 +236,10 @@ def script_ok(tree):
 	for n, a in (('PS_SHIFT', VKFRAME_PS_SHIFT), ('VS_SHIFT', VKFRAME_VS_SHIFT)):
 		if '\n%s="%s"\n' % (n, ' '.join(a)) not in vf:
 			bad.append('src/features/vkframe/vkframe_spirv.sh: its %s changed' % n)
-	if '\t"$DXC" -spirv -fspv-target-env=vulkan1.2 -HV 2021 -T "$3" -E main -D WW_VK_BINDLESS $4 -fspv-preserve-bindings -Fo "$1.spv" ' not in vf:
+	if '\t"$DXC" -spirv -fspv-target-env=vulkan1.2 -HV 2021 -T "$3" -E main -D WW_VK_BINDLESS $4 ${5:-} -fspv-preserve-bindings -Fo "$1.spv" ' not in vf:
 		bad.append('src/features/vkframe/vkframe_spirv.sh: its fxb() compile line changed')
-	blines = dict((k, (f, p, s)) for k, f, p, s in re.findall(r'^fxb ([a-z0-9_]+) ([a-z0-9_]+) ([vp]s_6_0) "\$([A-Z_]+)"$', vf, re.M))
+	blines = dict((k, (f, p, s, x)) for k, f, p, s, x in
+	              re.findall(r'^fxb ([a-z0-9_]+) ([a-z0-9_]+) ([vp]s_6_0) "\$([A-Z_]+)"(?: "([^"]*)")?$', vf, re.M))
 	if blines != VKFRAME_FXB:
 		bad.append('src/features/vkframe/vkframe_spirv.sh: its fxb lines (%s) are not this checker\'s bl twins' % ' '.join(sorted(blines)))
 	if '\t"$DXC" -spirv -fspv-target-env=vulkan1.2 -HV 2021 -T "$3" -E main -D WW_CELL_FOGLEAK=1 -D WW_FRAME_UBO=1 $4 ${5:-} -fspv-preserve-bindings ' \
@@ -379,7 +383,7 @@ def main(argv):
 			if k in VKFRAME_FXB:
 				src = os.path.join(tree, 'res/shaders/hlsl/near', VKFRAME_FXB[k][0] + '.hlsl')
 				hdefs = ['-HV', '2021', '-D', 'WW_VK_BINDLESS'] + (VKFRAME_VS_SHIFT if VKFRAME_FXB[k][2] == 'VS_SHIFT' else VKFRAME_PS_SHIFT) \
-					+ ['-fspv-preserve-bindings']
+					+ VKFRAME_FXB[k][3].split() + ['-fspv-preserve-bindings']
 			if k in VKFRAME_FXC:
 				src = os.path.join(tree, 'res/shaders/hlsl/core', VKFRAME_FXC[k][0] + '.hlsl')
 			m = None if k in VKFRAME_FXH or k in VKFRAME_FXD or k in VKFRAME_FXC else \

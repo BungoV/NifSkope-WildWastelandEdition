@@ -4,6 +4,8 @@
 #include "features/vkframe/objbl_vs.spv.h"  // the twins (vkframe_spirv.sh fxb: VS_SHIFT / PS_SHIFT, -D WW_VK_BINDLESS)
 #include "features/vkframe/objbl_cell_ps.spv.h"
 #include "features/vkframe/objbl_cellcsm_ps.spv.h"
+#include "features/vkframe/objbl_cell_rt_ps.spv.h"  // lane VKWATER3 G4: the all-on route's RT GI variant of the pair
+#include "features/vkframe/objbl_cellcsm_rt_ps.spv.h"
 #include "features/vkframe/objbl_samples_cs.spv.h"  // the cell frame's per-sample readback (objBlFrameSamples)
 #include "features/vkframe/objcell_vs.spv.h"  // lane VKWATER3: the non-bindless twins (vkframe_spirv.sh fxc, the base variant)
 #include "features/vkframe/objcell_cell_ps.spv.h"
@@ -2600,8 +2602,13 @@ bool objBlShade( GlProc gp, const ObjBlShade & s, std::string & why )
 	d.pipeRed = s.red;
 	d.vs = vkframe_objbl_vs_spv;
 	d.vsWords = sizeof( vkframe_objbl_vs_spv ) / 4;
-	d.ps = s.twin ? vkframe_objbl_cellcsm_ps_spv : vkframe_objbl_cell_ps_spv;
-	d.psWords = s.twin ? sizeof( vkframe_objbl_cellcsm_ps_spv ) / 4 : sizeof( vkframe_objbl_cell_ps_spv ) / 4;
+	if ( s.rt ) {
+		d.ps = s.twin ? vkframe_objbl_cellcsm_rt_ps_spv : vkframe_objbl_cell_rt_ps_spv;
+		d.psWords = s.twin ? sizeof( vkframe_objbl_cellcsm_rt_ps_spv ) / 4 : sizeof( vkframe_objbl_cell_rt_ps_spv ) / 4;
+	} else {
+		d.ps = s.twin ? vkframe_objbl_cellcsm_ps_spv : vkframe_objbl_cell_ps_spv;
+		d.psWords = s.twin ? sizeof( vkframe_objbl_cellcsm_ps_spv ) / 4 : sizeof( vkframe_objbl_cell_ps_spv ) / 4;
+	}
 	std::string w2;
 	if ( !objBlFrameRead( gp, d, w2 ) )
 		return fail( w2 );
@@ -2649,6 +2656,19 @@ bool objBlShade( GlProc gp, const ObjBlShade & s, std::string & why )
 	if ( !objBlRun( names, 0, w2 ) )
 		return fail( "the crossing: " + w2 );
 	return true;
+}
+
+int objBlVariant( const std::string & defs, const char *& why, int red )
+{
+	why = nullptr;
+	if ( defs == "WW_CELL_FOGLEAK+WW_FRAME_UBO" )
+		return 0;
+	if ( defs == "WW_CELL_FOGLEAK+WW_CELL_RESTIR+WW_CELL_RTDDGI+WW_CELL_RTDDGI_CASCADES+WW_FRAME_UBO"
+		|| ( red == 1 && defs.find( "WW_CELL_RTDDGI" ) != std::string::npos ) )
+		return 1;
+	why = defs.find( "WW_CELL_RTDDGI" ) != std::string::npos ? "an RT GI mix in GL's program other than the all-on route's: no Vulkan bl twin"
+		: "GL's program is another variant (its pixel stage's loader defines): no Vulkan bl twin";
+	return -1;
 }
 
 int objCellRed( const char * name )

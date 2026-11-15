@@ -67,7 +67,9 @@ bool cellGate( const std::string & spirvDir, int twin, const GLuint maps[4], uns
 		return false;
 	}
 	// twin 7: fo4_effectcell (the game's effect shader, cell-lit): one target, its own maps and state, the soft fade's depth
-	const bool fxT = twin == 7, pbrmT = twin >= 4 && !fxT, csmT = twin == 3 || twin == 6, lightsV = ( vars & 9u ) != 0 || twin >= 5;
+	const bool fxT = twin == 7, pbrmT = twin >= 4 && !fxT, csmT = twin == 3 || twin == 6;
+	// lights: vars 1, every twin from 5, and the RT variant but on twin 4 (pbrm_default's RT program has no lights)
+	const bool lightsV = ( vars & 1u ) != 0 || twin >= 5 || ( ( vars & 8u ) != 0 && twin != 4 );
 	const bool oneT = twin == 4 || fxT;  // writes target 0 only
 	const bool skinV = ( vars & 2u ) != 0, alphaV = ( vars & 4u ) != 0, rtV = ( vars & 8u ) != 0;
 	const std::string tagS = std::string( twinTag[twin] ) + ( label ? std::string( " " ) + label : std::string() );
@@ -449,7 +451,12 @@ bool cellGate( const std::string & spirvDir, int twin, const GLuint maps[4], uns
 		glBindTexture( GL_TEXTURE_2D, 0 );
 		const GLint l = locOf( "fxDepth" );
 		fxDepthUnit = unitAt.count( l ) ? unitAt[l] : -1;
-		set( "cellInterior", { 1 } );
+		/* RT GI: outdoors under a sun (fxLocalOn), so the lit cards take the GI as a surface (fxLocalSky: the atlas and the
+		 * screen GI at normal +z). The ReSTIR ratio reaches an effect only through a volumetric card's lamps (vpLight), which
+		 * this fixture does not draw (nor the base one): no restir red here */
+		set( "cellInterior", { ( vars & 8u ) != 0 ? 0 : 1 } );
+		if ( ( vars & 8u ) != 0 )
+			set( "vpSun", { 0.7f, 0.6f, 0.5f, 1.0f } );
 		set( "hasSourceTexture", { 1 } );
 		set( "hasNormalMap", { 1 } );
 		set( "hasCubeMap", { 0 } );
@@ -471,7 +478,7 @@ bool cellGate( const std::string & spirvDir, int twin, const GLuint maps[4], uns
 	const std::uintptr_t giHalfKey = reinterpret_cast<std::uintptr_t>( &giHalfAt ), giKeyKey = reinterpret_cast<std::uintptr_t>( &giKeyAt );
 	GLuint restirTex = 0, restirBuf = 0, atlasTex = 0, giHalfTex = 0, giKeyTex = 0;
 	unsigned atlasBuf = 0;
-	int restirUnit = -1, atlasUnit = -1, giHalfUnit = -1, giKeyUnit = -1;
+	int restirUnit = -1, atlasUnit = -1, giHalfUnit = -1, giKeyUnit = -1, rtUnits = 0;  // rtUnits: 0 on twin 4 (pbrm_default's RT code is the base's)
 	const int hw = kSW / 2, hh = kSH / 2;
 	if ( rtV ) {
 		std::vector<float> rs( std::size_t( kSW ) * std::size_t( kSH ) * 2 );
@@ -537,10 +544,11 @@ bool cellGate( const std::string & spirvDir, int twin, const GLuint maps[4], uns
 		for ( int k = 0; k < 4; k++ ) {
 			const GLint l = locOf( nm[k] );
 			*un[k] = unitAt.count( l ) ? unitAt[l] : -1;
-			if ( *un[k] < 0 ) {
-				std::printf( "BLVIEW %s FAIL (%s has no unit: location %d)\n", tag, nm[k], int( l ) );
-				return false;
-			}
+			rtUnits += *un[k] >= 0 ? 1 : 0;
+		}
+		if ( rtUnits != ( twin == 4 ? 0 : 4 ) ) {
+			std::printf( "BLVIEW %s FAIL (%d of the 4 RT inputs have a unit, want %d)\n", tag, rtUnits, twin == 4 ? 0 : 4 );
+			return false;
 		}
 		set( "cellShadowOn", { 1 } );
 		set( "cellRestirOn", { 1 } );
@@ -825,7 +833,7 @@ bool cellGate( const std::string & spirvDir, int twin, const GLuint maps[4], uns
 			u.bindTextures( GLuint( lightUnit ), 1, &lightTex );
 		if ( fxDepthTex )
 			u.bindTextures( GLuint( fxDepthUnit ), 1, &fxDepthTex );
-		if ( rtV ) {
+		if ( rtV && rtUnits ) {
 			u.bindTextures( GLuint( restirUnit ), 1, &restirTex );
 			u.bindTextures( GLuint( atlasUnit ), 1, &atlasTex );
 			u.bindTextures( GLuint( giHalfUnit ), 1, &giHalfTex );
@@ -922,8 +930,29 @@ bool cellGate( const std::string & spirvDir, int twin, const GLuint maps[4], uns
 		glTexSubImage2D( GL_TEXTURE_2D, 0, 0, 0, hw, hh, GL_RGBA, GL_FLOAT, gk.data() );
 		glBindTexture( GL_TEXTURE_2D, 0 );
 		set( "cellGiHalfOn", { 1 } );
-		std::printf( "BLVIEW %s RT inputs: ratio %d x %d, atlas %u B (a store), screen GI %d x %d, %zu key texels on GL's surfaces\n", tag, kSW, kSH,
-			unsigned( 193 * 13 * 7 * 9 * 16 ), hw, hh, keyed );
+		/* the ratio's depth: GL's surfaces' linear depth (on the traced surface), with 1 in 8 a g-buffer miss (1e6) and 1 in 8 off
+		 * the surface (1.5 x + 10, past the 2 % + 2 tolerance): a surface twin takes the ratio or 1.0, an effect twin 1.0 */
+		std::vector<float> rs( std::size_t( kSW ) * std::size_t( kSH ) * 2 );
+		std::size_t onD = 0, offD = 0, missD = 0;
+		for ( int y = 0; y < kSH; y++ )
+			for ( int x = 0; x < kSW; x++ ) {
+				const std::size_t p = std::size_t( y ) * std::size_t( kSW ) + std::size_t( x );
+				const float d = g0.depth[p];
+				rs[p * 2] = 0.1f + 0.09f * float( ( x * 7 + y * 3 ) % 11 );
+				if ( !( d < 1.0f ) ) {
+					rs[p * 2 + 1] = 1.0e6f;
+					continue;
+				}
+				const float wv = sx.proj[14] / ( 2.0f * d - 1.0f + sx.proj[10] );
+				const int h = ( x * 5 + y * 3 ) % 8;
+				rs[p * 2 + 1] = h == 0 ? 1.0e6f : h == 1 ? 1.5f * wv + 10.0f : wv;
+				( h == 0 ? missD : h == 1 ? offD : onD )++;
+			}
+		f.bindBuffer( 0x8C2A, restirBuf );
+		f.bufferData( 0x8C2A, std::ptrdiff_t( rs.size() * 4 ), rs.data(), 0x88E4 );
+		f.bindBuffer( 0x8C2A, 0 );
+		std::printf( "BLVIEW %s RT inputs: ratio %d x %d (on GL's depth %zu, off %zu, missed %zu), atlas %u B (a store), screen GI %d x %d, %zu key "
+			"texels on GL's surfaces, %d of 4 inputs read\n", tag, kSW, kSH, onD, offD, missD, unsigned( 193 * 13 * 7 * 9 * 16 ), hw, hh, keyed, rtUnits );
 	}
 	CellOut gl;
 	if ( const GLenum e = glSweep( gl ); e != GL_NO_ERROR ) {
@@ -970,9 +999,11 @@ bool cellGate( const std::string & spirvDir, int twin, const GLuint maps[4], uns
 		std::printf( "BLVIEW %s GL map probe %s: csmForce 1 moves GL's colour on %zu of %zu covered pixels (bar >= 20 %%)\n", tag,
 			csmReach ? "OK" : "FAIL", moved, cov );
 	}
-	if ( rtV ) {  // RT GI: each input reaches GL's colour (else its red could test nothing)
+	if ( rtV && rtUnits ) {  // RT GI: each input reaches GL's colour (else its red could test nothing)
 		static const char * rtOff[3] = { "cellRestirOn", "cellDdgiOn", "cellGiHalfOn" };
 		for ( const char * nm : rtOff ) {
+			if ( nm == rtOff[0] && ( reds & ( 1u << 9 ) ) == 0 )
+				continue;  // no restir red (twin 7: the ratio reaches a volumetric card only)
 			CellOut g2;
 			set( nm, { 0 } );
 			glSweep( g2 );
@@ -1076,12 +1107,14 @@ bool cellGate( const std::string & spirvDir, int twin, const GLuint maps[4], uns
 		const bool copyOk = fxT ? rs.copies == 1 && rs.copyBytes == std::uint64_t( kSW ) * std::uint64_t( kSH ) * 4u : rs.copies == 0;
 		/* RT GI: the ratio copied once for the sweep (the frame's memo), the lights at each crossing (as before), the atlas read in
 		 * place once a draw */
-		const std::uint64_t texelBytes = std::uint64_t( kSW ) * std::uint64_t( kSH ) * 8u + std::uint64_t( nDraws ) * 3u * 8u * 16u;
-		const bool texelOk = !rtV || ( ts.copied == std::uint64_t( 1 + nDraws ) && ts.copiedBytes == texelBytes && ts.imported == std::uint64_t( nDraws ) );
+		const int rtIn = rtUnits ? 1 : 0, litIn = lightsV ? nDraws : 0;  // the lights' texels only where the program reads them
+		const std::uint64_t texelBytes = std::uint64_t( rtIn ) * std::uint64_t( kSW ) * std::uint64_t( kSH ) * 8u + std::uint64_t( litIn ) * 3u * 8u * 16u;
+		const bool texelOk = !rtV || ( ts.copied == std::uint64_t( rtIn + litIn ) && ts.copiedBytes == texelBytes
+			&& ts.imported == std::uint64_t( rtIn * nDraws ) );
 		if ( rtV )
 			std::printf( "BLVIEW %s texel buffers %s (copied %d, %.1f KB, %.3f ms; imported %d; want copied %d, %.1f KB, imported %d)\n", tag,
-				texelOk ? "OK" : "FAIL", int( ts.copied ), double( ts.copiedBytes ) / 1024.0, ts.copiedMs, int( ts.imported ), 1 + nDraws,
-				double( texelBytes ) / 1024.0, nDraws );
+				texelOk ? "OK" : "FAIL", int( ts.copied ), double( ts.copiedBytes ) / 1024.0, ts.copiedMs, int( ts.imported ), rtIn + litIn,
+				double( texelBytes ) / 1024.0, rtIn * nDraws );
 		const bool crossOk = rs.runs == nDraws && rs.fails == 0 && rs.cells == nDraws && rs.twins == 4 * nDraws && varOk && copyOk && texelOk;
 		std::printf( "BLVIEW %s crossing %s (%d runs, %d failed, %d cells, %d twin images, %d shared, %d GL-only; lit %d skinned %d blended %d; "
 			"copies %d, %.1f KB, %.3f ms)\n", tag, crossOk ? "OK" : "FAIL", rs.runs, rs.fails, rs.cells, rs.twins, rs.shared, rs.glOwn, rs.cellLit,

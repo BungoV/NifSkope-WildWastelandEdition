@@ -337,6 +337,7 @@ void objCellCopiesStale();
 struct ObjBlShade
 {
 	int twin = 0;           //!< 0 fo4_cellbl, 1 fo4_cellcsmbl
+	bool rt = false;        //!< the all-on route's RT GI variant (objBlVariant 1): objbl_cell(csm)_rt_ps
 	unsigned prog = 0;      //!< GL's current program
 	std::uintptr_t poolKey = 0;
 	ObjBlPool pool;
@@ -347,6 +348,10 @@ struct ObjBlShade
 	int red = 0;  //!< gates only: 1 objBlPipe's strict target count (a 1-buffer frame must refuse)
 };
 bool objBlShade( GlProc gp, const ObjBlShade & s, std::string & why );
+/* lane VKWATER3 G4: the bl twin of GL's program by its pixel stage's loader key (Program::wwDefs): 0 the base
+ * (WW_CELL_FOGLEAK+WW_FRAME_UBO), 1 the all-on route's RT GI variant (+ WW_CELL_RESTIR, _RTDDGI, _RTDDGI_CASCADES), -1 another
+ * variant (why: GL draws it). red 1 (gates only): any key naming WW_CELL_RTDDGI is taken as the RT twin (an RT-only key must refuse) */
+int objBlVariant( const std::string & defs, const char *& why, int red = 0 );
 /* lane VKWATER3 (plan row G4 by draws): one shape's draw (bsshape.cpp, WW_VKOBJ_SHADE=1) through the non-bindless twins
  * of fo4_cell / fo4_cellcsm / pbrm_default / pbrm_cell / pbrm_cellcsm on the app's base variant (WW_CELL_FOGLEAK + WW_FRAME_UBO; the caller refuses any other). Read
  * from GL here: the frame and fixed state (objBlFrameRead), the uniforms (objBlMirror), the units (objBlBindUnits: every
