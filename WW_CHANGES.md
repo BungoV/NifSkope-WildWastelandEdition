@@ -103,6 +103,15 @@ Changed, not built, not checked live. Nothing in the app calls it yet, so no fra
   floats, so the sun path does not read it. The first lit run moved the thin / thick mix on only 51 samples, because that case's sun
   sat nearly edge-on to the particles; the case got its own sun, the bar stayed.
 - No existing rain / snow shader and no cellprecip.cpp line changed.
+- Round 3 (11-15; not compiled into the app, not run there). post7_copy_ps.hlsl now names its profile, so the HLSL
+  check reads OK on all 308 files (7ba2197b). A refused rain / snow run no longer packs the light block first: the
+  refusals run ahead of the pack, and a gate probe counts 0 packs on a refused run (its red, packing first, counts 3)
+  (ad9060a7). The lamps, first part (d89e97ce bar, cc0deb3a): the lit pass reads GL's cell light list and walks
+  every lamp the way GL's flat loop does (point, spot, hemisphere and box lamps). Two new gate cases with five lamps
+  each: near rain within the bar, far snow exact; each lamp shape moves over 13000 samples in GL and a lamp out of
+  reach moves none; a red that drops the lamps FAILs on both; the 84 older verdicts are unchanged. Still on GL: the
+  lamps' cluster lists, shadow cubes and gobos, GI, ambient, cascade shadows, air drift, terrain air, the local sun,
+  interiors and the look when lit. The app turns most of these on by default, so lit runs in the app still go to GL.
 
 ## VKFAR2 P7 (2026-11-14): depth of field, motion blur and object blur join the tone pass on Vulkan (WW_VKVIEW=1)
 
