@@ -1061,11 +1061,17 @@ static void lampShadowPass( Scene * scene, Gpu & g, const WwCellLighting & L, st
 		g.lsStore.clear();
 		std::fill( g.lsBlockUsed.begin(), g.lsBlockUsed.end(), char( 0 ) );
 	}
+	if ( g.lsTex && g.lsAsked != shadowShareWanted() ) {
+		lsDrop( r, g );	// lane VKLAMP4: the view joined / left Vulkan (as the cubes' shAsked): remade, every map stored again
+		g.lsStore.clear();
+		std::fill( g.lsBlockUsed.begin(), g.lsBlockUsed.end(), char( 0 ) );
+	}
 	if ( !g.lsTex ) {
 		// lane VKLAMP4: shared (type 2) while the cubes are wanted shared: the present device draws the stores
 		unsigned shared = 0;
 		std::string why;
-		g.lsShared = shadowShareWanted() && WwVkPresent::sharedTarget( lsShareKey( r ), 2, S, S, 3 * g.lsBlocks, GL_DEPTH_COMPONENT16,
+		g.lsAsked = shadowShareWanted();
+		g.lsShared = g.lsAsked && WwVkPresent::sharedTarget( lsShareKey( r ), 2, S, S, 3 * g.lsBlocks, GL_DEPTH_COMPONENT16,
 			shared, why ) && shared;
 		if ( g.lsShared )
 			g.lsTex = shared;
