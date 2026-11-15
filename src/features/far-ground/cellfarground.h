@@ -11,7 +11,8 @@
  *                              sides 256/128, 512/256, 1024/512 px a cell, near split k = 2, 1, 0.5 screen pixels a texel.
  * Pins WW_CELL_FARGROUND=baked|lookup|cached, WW_CELL_FARGROUND_QUALITY=low|medium|high (ultra reads as high); red
  * WW_CELL_FARGROUND_RED=nodecals (no decals) | baked (the twins never chosen) | oldpages (FARDRAW1's decal-only pages
- * over the live splat, fo4_cellfgc) | nocompress (RGBA8 pools) | nostream (a streamed open prepares nothing). All live.
+ * over the live splat, fo4_cellfgc) | nocompress (RGBA8 pools), all live; nostream (a streamed open prepares
+ * nothing) is read at the far append (a cell open or a far rebuild).
  * Not covered: normals stay the sheet's, no .loda AO, the PBR route keeps the sheet. Streamed opens (VKFAR14): uncut,
  * every ring-0 cell, crossings only hide and show the shapes (cellfgcut.h). */
 
