@@ -174,7 +174,8 @@ cbuffer LooseUniforms : register(b31, space0)
 	bool lookdevDalcFlip;		// debug "dalcflip": the other axis-sign convention
 	float studioSun;			// WW_STUDIO_SUN: the Studio/Lookdev sun scale (0 = the white furnace)
 	int r3Term;					// WW_R3_TERM: 0 all, 1 diffuse only, 2 specular only
-	int r3Red;					// WW_R3_RED: 1 noms, 2 nosplit, 4 fo4csweight, 8 notint, 16 f90scaled, 32 lambert, 64 oldbrdf
+	int r3Red;					// WW_R3_RED: 1 noms, 2 nosplit, 4 fo4csweight, 8 notint, 16 f90scaled, 32 lambert
+								// + 64 oldbrdf (the BRDF before the OpenPBR switch, HLSL only)
 	int r4Red;					// WW_R4_RED: 1 nodiv, 2 emitmul, 4 notintmask, 8 emitraw, 16 nocomp
 	float alpha;
 	int alphaFlags;
@@ -680,7 +681,9 @@ void frag_main()
 	if ( ( r3Red & 8 ) != 0 )
 		s.tint = (float3)( 1.0 );
 	s.f0d = s.tint * f0ior;
-	const float roughMin = oldBrdf() ? 0.035 : OPENPBR_MIN_PERCEPTUAL_ROUGHNESS;	// OpenPBR's floor 0.045 (the old design's 0.035 under red oldbrdf)
+	// the design's floor (FO4CS uses 0.045)
+	// OpenPBR's floor is 0.045 too; the old design's 0.035 stays under red oldbrdf
+	const float roughMin = oldBrdf() ? 0.035 : OPENPBR_MIN_PERCEPTUAL_ROUGHNESS;
 	s.rough = clamp( s.rough, roughMin, 1.0 );
 	s.metal = clamp( s.metal, 0.0, 1.0 );
 	s.weight = clamp( s.weight, 0.0, 1.0 );
