@@ -193,6 +193,7 @@ int main( int argc, char ** argv )
 	if ( !pUnpack || !pDepth || !pSlab || !pFg || !pLegacy )
 		return fatal( "GL programs" );
 	std::map<std::string, GLenum> legacyType;
+	std::vector<std::string> legacyOrder;	// BATCH1118: the textures are filled in this order (the legacy run's rng stream)
 	{
 		GLint n = 0;
 		f.getProgramiv( pLegacy, fActiveUnis, &n );
@@ -202,6 +203,7 @@ int main( int argc, char ** argv )
 			GLenum ty = 0;
 			f.getActiveUniform( pLegacy, GLuint( i ), 256, nullptr, &sz, &ty, nm );
 			legacyType[nm] = ty;
+			legacyOrder.push_back( nm );
 		}
 	}
 	std::string why;
@@ -669,7 +671,39 @@ int main( int argc, char ** argv )
 	for ( int seed = 1; seed <= 2; seed++ ) {
 		std::mt19937 rng( 20261114u + std::uint32_t( seed ) * 7919u
 			+ std::uint32_t( getenv( "FLD_SEED" ) ? std::atoi( getenv( "FLD_SEED" ) ) : 0 ) );
-		for ( Smp & s : smp ) {
+		/* BATCH1118: fill in the LEGACY program's sampler order from this rng, the HLSL-only samplers (farSkyMap) after
+		 * from a side rng: seedUnis and blocks then draw exactly the legacy run's values. Walking GL's (HLSL) sampler order
+		 * here shifted every later draw: seed 1 got cellIsAdapted 0.58 / contrast 0.24 (a flat grade, 552 distinct) */
+		std::vector<int> fillOrder;
+		std::vector<char> inOrder( smp.size(), 0 );
+		for ( const std::string & nm : legacyOrder ) {
+			int at = -1;
+			for ( size_t k = 0; k < smp.size(); k++ )
+				if ( smp[k].name == nm )
+					at = int( k );
+			if ( at >= 0 ) {
+				fillOrder.push_back( at );
+				inOrder[size_t( at )] = 1;
+				continue;
+			}
+			Smp probe;
+			probe.name = nm;
+			probe.glType = legacyType[nm];
+			if ( smpOf( probe, W, H ) )
+				return fatal( "legacy sampler " + nm + " is not in GL's program: its fill would shift every later value" );
+		}
+		std::mt19937 rngSide( 9001u + std::uint32_t( seed ) );
+		int sideFills = 0;
+		for ( size_t k = 0; k < smp.size(); k++ )
+			if ( !inOrder[k] ) {
+				fillOrder.push_back( -1 - int( k ) );
+				sideFills++;
+			}
+		if ( seed == 1 )
+			std::printf( "FARGROUNDDRAW textures filled in the legacy program's order: %zu, from a side rng (GL's program only): %d\n",
+				fillOrder.size() - size_t( sideFills ), sideFills );
+		for ( const int fo : fillOrder ) {
+			Smp & s = smp[size_t( fo >= 0 ? fo : -1 - fo )];
 			if ( int( &s - smp.data() ) == iGrid ) {
 				if ( !s.tex ) {
 					glGenTextures( 1, &s.tex );
@@ -683,7 +717,7 @@ int main( int argc, char ** argv )
 				}
 				continue;
 			}
-			if ( !fill( s, rng ) )
+			if ( !fill( s, fo >= 0 ? rng : rngSide ) )
 				return fatal( "texture " + s.name );
 		}
 		glBindTexture( 0x8C1A, smp[size_t( iLtex )].tex );
@@ -729,6 +763,70 @@ int main( int argc, char ** argv )
 			const float v = 1.0f / 1500.0f;
 			if ( l >= 0 )
 				f.uniform1fv( l, 1, &v );
+		}
+		/* FLD_SET=name=v[:v:v:v],...: one value set on the drawn program AFTER seeding (BATCH1118: a probe on the same
+		 * world; FLD_ZERO skips a draw and shifts every later value). Ints by the uniform's GL type, else floats */
+		if ( const char * fs = getenv( "FLD_SET" ) ) {
+			std::string list( fs );
+			size_t s = 0;
+			while ( s < list.size() ) {
+				size_t e = list.find( ',', s );
+				if ( e == std::string::npos )
+					e = list.size();
+				const std::string item = list.substr( s, e - s );
+				s = e + 1;
+				const size_t eq = item.find( '=' );
+				if ( eq == std::string::npos )
+					continue;
+				const std::string nm = item.substr( 0, eq );
+				std::vector<float> v;
+				for ( size_t a = eq + 1; a <= item.size(); ) {
+					size_t b = item.find( ':', a );
+					if ( b == std::string::npos )
+						b = item.size();
+					v.push_back( std::strtof( item.substr( a, b - a ).c_str(), nullptr ) );
+					a = b + 1;
+				}
+				GLenum ty = 0;
+				GLint n = 0;
+				f.getProgramiv( pFg, fActiveUnis, &n );
+				for ( GLint i = 0; i < n; i++ ) {
+					char un[256] = {};
+					GLint sz = 0;
+					GLenum t = 0;
+					f.getActiveUniform( pFg, GLuint( i ), 256, nullptr, &sz, &t, un );
+					if ( nm == un || nm + "[0]" == un )
+						ty = t;
+				}
+				const GLint l = f.getUniformLocation( pFg, nm.c_str() );
+				const bool isInt = ty == 0x1404 || ty == 0x8B56;
+				if ( l >= 0 && isInt ) {
+					const GLint iv = GLint( v[0] );
+					f.uniform1iv( l, 1, &iv );
+				} else if ( l >= 0 )
+					( v.size() == 1 ? f.uniform1fv : v.size() == 2 ? f.uniform2fv : v.size() == 3 ? f.uniform3fv : f.uniform4fv )( l, 1, v.data() );
+				std::printf( "FARGROUNDDRAW seed %d FLD_SET %s (%zu values, type 0x%X, location %d)\n", seed, nm.c_str(), v.size(), ty, l );
+			}
+		}
+		// FLD_GET=name,...: the value GL holds for each named loose uniform after seeding (both programs: the same world?)
+		if ( const char * fg = getenv( "FLD_GET" ) ) {
+			std::string list( fg );
+			for ( size_t s = 0; s < list.size(); ) {
+				size_t e = list.find( ',', s );
+				if ( e == std::string::npos )
+					e = list.size();
+				const std::string nm = list.substr( s, e - s );
+				s = e + 1;
+				const GLint l = f.getUniformLocation( pFg, nm.c_str() );
+				GLfloat v[16] = {};
+				GLint iv[16] = {};
+				if ( l >= 0 ) {
+					gw.glGetUniformfv( pFg, l, v );
+					gw.glGetUniformiv( pFg, l, iv );
+				}
+				std::printf( "FARGROUNDDRAW seed %d FLD_GET %s location %d: f %.6g %.6g %.6g %.6g i %d %d %d %d\n", seed, nm.c_str(), l,
+					v[0], v[1], v[2], v[3], iv[0], iv[1], iv[2], iv[3] );
+			}
 		}
 		std::printf( "FARGROUNDDRAW seed %d: %d loose uniforms seeded%s, fgMode 1, decals on\n", seed, nu, scissor ? ", a scissor" : "" );
 
