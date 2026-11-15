@@ -92,11 +92,11 @@ HLSL_SPECS += [('src/features/vkframe', k, 'vulkan1.2', 'vkframe_%s_spv' % k) fo
 # binding kept); the vertex stage on its own shifts (VS_SHIFT), the pixel stages on fx()'s
 VKFRAME_PS_SHIFT = VKFRAME_SKY_ARGS
 VKFRAME_VS_SHIFT = ['-fvk-b-shift', '256', '0', '-fvk-t-shift', '320', '0', '-fvk-s-shift', '384', '0', '-fvk-u-shift', '448', '0']
-VKFRAME_FXB = {'objbl_vs': ('fo4_defaultbl_vs', 'vs_6_0', 'VS_SHIFT', ''), 'objbl_cell_ps': ('fo4_cellbl_ps', 'ps_6_0', 'PS_SHIFT', ''),
-	'objbl_cellcsm_ps': ('fo4_cellcsmbl_ps', 'ps_6_0', 'PS_SHIFT', ''),
-	# VKWATER3 G4: the RT GI variant of the bl pair (a 5th quoted field, as fxc's)
-	'objbl_cell_rt_ps': ('fo4_cellbl_ps', 'ps_6_0', 'PS_SHIFT', '-D WW_CELL_RTDDGI=1 -D WW_CELL_RTDDGI_CASCADES=1 -D WW_CELL_RESTIR=1'),
-	'objbl_cellcsm_rt_ps': ('fo4_cellcsmbl_ps', 'ps_6_0', 'PS_SHIFT', '-D WW_CELL_RTDDGI=1 -D WW_CELL_RTDDGI_CASCADES=1 -D WW_CELL_RESTIR=1')}
+VKFRAME_FXB = {'objbl_vs': ('fo4_defaultbl_vs', 'vs_6_0', 'VS_SHIFT', ''), 'objbl_cell_ps': ('fo4_cellbl_ps', 'ps_6_0', 'PS_SHIFT', '-D WW_CELL_FOGLEAK=1 -D WW_FRAME_UBO=1'),
+	'objbl_cellcsm_ps': ('fo4_cellcsmbl_ps', 'ps_6_0', 'PS_SHIFT', '-D WW_CELL_FOGLEAK=1 -D WW_FRAME_UBO=1'),
+	# VKWATER3 G4: the bl pair on the app's key; its RT GI variant (a 5th quoted field, as fxc's)
+	'objbl_cell_rt_ps': ('fo4_cellbl_ps', 'ps_6_0', 'PS_SHIFT', '-D WW_CELL_FOGLEAK=1 -D WW_FRAME_UBO=1 -D WW_CELL_RTDDGI=1 -D WW_CELL_RTDDGI_CASCADES=1 -D WW_CELL_RESTIR=1'),
+	'objbl_cellcsm_rt_ps': ('fo4_cellcsmbl_ps', 'ps_6_0', 'PS_SHIFT', '-D WW_CELL_FOGLEAK=1 -D WW_FRAME_UBO=1 -D WW_CELL_RTDDGI=1 -D WW_CELL_RTDDGI_CASCADES=1 -D WW_CELL_RESTIR=1')}
 HLSL_SPECS += [('src/features/vkframe', k, 'vulkan1.2', 'vkframe_%s_spv' % k) for k in VKFRAME_FXB]
 # the cell frame's per-sample readback (the script's objbl_samples_cs line: cs_6_0, no shift)
 HLSL_SPECS += [('src/features/vkframe', 'objbl_samples_cs', 'vulkan1.2', 'vkframe_objbl_samples_cs_spv')]

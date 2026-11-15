@@ -147,11 +147,12 @@ fxb() {
 	rm -f "$1.spv"
 }
 fxb objbl_vs fo4_defaultbl_vs vs_6_0 "$VS_SHIFT"
-fxb objbl_cell_ps fo4_cellbl_ps ps_6_0 "$PS_SHIFT"
-fxb objbl_cellcsm_ps fo4_cellcsmbl_ps ps_6_0 "$PS_SHIFT"
+# the bl pair on the app's key (WW_CELL_FOGLEAK + WW_FRAME_UBO, as the loader defines it for GL; no define: the plain variant)
+fxb objbl_cell_ps fo4_cellbl_ps ps_6_0 "$PS_SHIFT" "-D WW_CELL_FOGLEAK=1 -D WW_FRAME_UBO=1"
+fxb objbl_cellcsm_ps fo4_cellcsmbl_ps ps_6_0 "$PS_SHIFT" "-D WW_CELL_FOGLEAK=1 -D WW_FRAME_UBO=1"
 # the all-on route's RT GI variant of the bl pair
-fxb objbl_cell_rt_ps fo4_cellbl_ps ps_6_0 "$PS_SHIFT" "-D WW_CELL_RTDDGI=1 -D WW_CELL_RTDDGI_CASCADES=1 -D WW_CELL_RESTIR=1"
-fxb objbl_cellcsm_rt_ps fo4_cellcsmbl_ps ps_6_0 "$PS_SHIFT" "-D WW_CELL_RTDDGI=1 -D WW_CELL_RTDDGI_CASCADES=1 -D WW_CELL_RESTIR=1"
+fxb objbl_cell_rt_ps fo4_cellbl_ps ps_6_0 "$PS_SHIFT" "-D WW_CELL_FOGLEAK=1 -D WW_FRAME_UBO=1 -D WW_CELL_RTDDGI=1 -D WW_CELL_RTDDGI_CASCADES=1 -D WW_CELL_RESTIR=1"
+fxb objbl_cellcsm_rt_ps fo4_cellcsmbl_ps ps_6_0 "$PS_SHIFT" "-D WW_CELL_FOGLEAK=1 -D WW_FRAME_UBO=1 -D WW_CELL_RTDDGI=1 -D WW_CELL_RTDDGI_CASCADES=1 -D WW_CELL_RESTIR=1"
 # lane VKWATER3 (G4 by draws): the non-bindless fallbacks fo4_cell / fo4_cellcsm / pbrm_default (res/shaders/hlsl/core) on
 # the app's base variant (WW_CELL_FOGLEAK + WW_FRAME_UBO; the app site refuses any other), every binding kept for
 # objBlPipe; the frozen pixel stages invert FragCoord.w themselves (-fvk-use-dx-position-w). The alpha tests discard after

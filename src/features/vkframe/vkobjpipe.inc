@@ -2609,6 +2609,10 @@ bool objBlShade( GlProc gp, const ObjBlShade & s, std::string & why )
 		d.ps = s.twin ? vkframe_objbl_cellcsm_ps_spv : vkframe_objbl_cell_ps_spv;
 		d.psWords = s.twin ? sizeof( vkframe_objbl_cellcsm_ps_spv ) / 4 : sizeof( vkframe_objbl_cell_ps_spv ) / 4;
 	}
+	if ( s.psGate ) {
+		d.ps = s.psGate;
+		d.psWords = s.psGateWords;
+	}
 	std::string w2;
 	if ( !objBlFrameRead( gp, d, w2 ) )
 		return fail( w2 );

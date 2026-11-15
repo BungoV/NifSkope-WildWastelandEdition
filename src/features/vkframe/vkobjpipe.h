@@ -346,6 +346,8 @@ struct ObjBlShade
 	const void * cmds = nullptr;  //!< 5 words a command (the base instance relative to the leader)
 	std::size_t nCmds = 0;
 	int red = 0;  //!< gates only: 1 objBlPipe's strict target count (a 1-buffer frame must refuse)
+	const std::uint32_t * psGate = nullptr;  //!< gates only: this pixel module instead of the shipped twin (blview's plain row)
+	std::size_t psGateWords = 0;
 };
 bool objBlShade( GlProc gp, const ObjBlShade & s, std::string & why );
 /* lane VKWATER3 G4: the bl twin of GL's program by its pixel stage's loader key (Program::wwDefs): 0 the base
