@@ -1,3 +1,13 @@
+## VKWATER4 (2026-11-15): the water's SSR ray pass no longer draws nothing after its depth format changes
+
+Changed, not built, not checked live. Offline: tests/vkframe/waterdraw.sh's D32F_S8 ray arm (fo4_waterlookm, RT build),
+150 runs (120 of them 6 processes at once) with 0 empty draws; the red (the old key) drew nothing in 2 of 30, each time on the
+trigger the harness now reports (`WATERDRAW ray handle reused: N runs`).
+
+- When the water ray pass's depth target was remade in another format (D24S8 to D32F_S8), Vulkan could keep a view of
+  the freed target and test depth against garbage, so the water drew nothing that frame on. The view is now remade
+  whenever a shared target was made, not only when the image handle differs.
+
 ## VKWATER4 (2026-11-15): the water on the all-on route keeps its twins; an unknown input keeps it on GL by name
 
 Changed, not built, not checked live. Offline: GL's water programs built with the all-on RT set (WW_CELL_RESTIR,

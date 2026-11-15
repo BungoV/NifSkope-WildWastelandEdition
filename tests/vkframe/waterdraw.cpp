@@ -35,6 +35,7 @@
 #include "fxview.cpp"
 #undef main
 
+#include <chrono>
 #include <random>
 
 namespace wdr
@@ -1467,6 +1468,10 @@ int main( int argc, char ** argv )
 		};
 		const long long idxOff = 12;
 		const int count = triIdx;
+		// WW_WATERDRAW_RAYVIEW_RED=1: every ray run with red 64 (the depth twin's view keyed on its VkImage handle only, the
+		// old key): a remade twin at the freed handle value keeps a view of the freed image, and the d32fs8 arm draws nothing
+		const char * rvEnv = std::getenv( "WW_WATERDRAW_RAYVIEW_RED" );
+		const int rayViewRed = rvEnv && std::atoi( rvEnv ) == 1 ? 64 : 0;
 		// the D24S8 arm, then the D32F_S8 one (the app's other pre-pass format): both renderbuffers respecified at the same
 		// names and size, so waterRayDepth remakes its twin at the same key
 		for ( const GLenum dsFmt : { GLenum( fD24s8 ), GLenum( 0x8CAD ) } ) {
@@ -1501,7 +1506,8 @@ int main( int argc, char ** argv )
 					glBindTexture( GL_TEXTURE_2D, dTwin );
 					gw.glGetTexLevelParameteriv( GL_TEXTURE_2D, 0, 0x1003, &twFmt );
 					glBindTexture( GL_TEXTURE_2D, 0 );
-					std::printf( "WATERDRAW %s formats: renderbuffer 0x%X, depth twin 0x%X\n", lab, unsigned( rbFmt ), unsigned( twFmt ) );
+					std::printf( "WATERDRAW %s formats: renderbuffer 0x%X, depth twin 0x%X%s\n", lab, unsigned( rbFmt ), unsigned( twFmt ),
+						rayViewRed ? " (red 64 on: the view keyed on its handle only)" : "" );
 				}
 				rayState( fbRayVk );
 				WwVkPresent::WaterRun r;
@@ -1514,8 +1520,10 @@ int main( int argc, char ** argv )
 				r.idxOff = idxOff;
 				r.count = count;
 				r.key = reinterpret_cast<std::uintptr_t>( twinKeys );
-				r.red = red;
+				r.red = red | rayViewRed;
+				const auto rt0 = std::chrono::steady_clock::now();
 				const bool ran = WwVkPresent::waterRun( r, why );
+				const double runMs = std::chrono::duration<double, std::milli>( std::chrono::steady_clock::now() - rt0 ).count();
 				stateEnd();
 				runs++;
 				if ( !ran ) {
@@ -1557,8 +1565,8 @@ int main( int argc, char ** argv )
 				const char * word = covered < 1000 ? "FAIL" : ( diff == 0 && onlyOne == 0 ) ? "EXACT" : ok ? "BOUND" : "FAIL";
 				const bool fail = !ok;
 				std::printf( "WATERDRAW %s red %d: %s covered %zu (both %zu, one side only %zu), colour %zu pixels differ, %zu past 1e-2 "
-					"(max rel %.3g)%s\n", lab, red, word, covered, both, onlyOne, diff, colPast, maxRel,
-					red ? ( fail ? " -> red FAILS as it must" : " -> red PASSES: the gate is blind" ) : "" );
+					"(max rel %.3g)%s; run %.1f ms\n", lab, red, word, covered, both, onlyOne, diff, colPast, maxRel,
+					red ? ( fail ? " -> red FAILS as it must" : " -> red PASSES: the gate is blind" ) : "", runMs );
 				if ( red ? !fail : fail )
 					gateOk = false;
 			}
@@ -1572,6 +1580,8 @@ int main( int argc, char ** argv )
 	const WwVkPresent::FxStat st = WwVkPresent::takeWaterDrawStat();
 	std::printf( "WATERDRAW %d runs: %d on Vulkan, %.2f ms CPU each (max %.2f; the harness's hand-off wait included), %d fails\n", runs,
 		st.runs, st.runs ? st.cpuMs / st.runs : 0.0, st.maxMs, st.fails );
+	// lane VKWATER4: ray runs whose depth twin was remade at its old VkImage handle value (the d32fs8 flake's trigger)
+	std::printf( "WATERDRAW ray handle reused: %d runs; fence waits not VK_SUCCESS: %d\n", st.reusedHandles, st.fenceMisses );
 	gateOk = gateOk && unslottedOk;
 	std::printf( gateOk ? "WATERDRAW GATE OK\n" : "WATERDRAW GATE FAILED\n" );
 	return gateOk ? 0 : 1;

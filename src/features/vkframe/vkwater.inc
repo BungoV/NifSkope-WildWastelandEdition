@@ -130,6 +130,7 @@ struct WaterDraw
 	// depth twin's depth-stencil view, its framebuffer; the record's pass, framebuffer and size (tone frame or ray target)
 	std::map<int, VkRenderPass> rayPass;
 	VkImage rayDsImg = VK_NULL_HANDLE;
+	std::uint64_t rayDsGen = 0;  // sharedGen() when the view was made: a remade twin can return the old handle value
 	VkImageView rayDsView = VK_NULL_HANDLE;
 	VkFramebuffer rayFb = VK_NULL_HANDLE;
 	VkRenderPass recPass = VK_NULL_HANDLE;
@@ -815,7 +816,7 @@ bool waterRun( const WaterRun & r, std::string & why )
 		return refuse( "no glCopyImageSubData" );
 	// the last crossing (any fx pass) is done before its command buffer, set, framebuffer and buffers are written again
 	if ( F.pending ) {
-		v.vkWaitForFences( v.dev, 1, &F.fence, VK_TRUE, 1000000000ull );
+		S.fenceMisses += v.vkWaitForFences( v.dev, 1, &F.fence, VK_TRUE, 1000000000ull ) != VK_SUCCESS;
 		F.pending = false;
 	}
 	std::string w;
@@ -1022,7 +1023,13 @@ bool waterRun( const WaterRun & r, std::string & why )
 		ws.push_back( x );
 	}
 	if ( ray ) {
-		if ( rd->img != D.rayDsImg ) {  // the depth twin's depth-stencil view (sharedTarget's is depth only); the last run waited
+		// the depth twin's depth-stencil view (sharedTarget's is depth only); the last run waited. Keyed on the handle AND
+		// sharedGen(): a twin remade at its key (D24S8 -> D32F_S8) can come back at the freed image's handle value, and a
+		// view of the freed image tests depth against garbage (the ray d32fs8 arm drew nothing). Red 64: the handle only.
+		const bool reused = rd->img == D.rayDsImg && D.rayDsGen != sharedGen();
+		S.reusedHandles += reused;
+		if ( rd->img != D.rayDsImg || ( reused && !( r.red & 64 ) ) ) {
+			D.rayDsGen = sharedGen();
 			if ( D.rayDsView )
 				v.vkDestroyImageView( v.dev, D.rayDsView, nullptr );
 			D.rayDsView = imageView( rd->img, VK_IMAGE_VIEW_TYPE_2D, rd->fmt, VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT );

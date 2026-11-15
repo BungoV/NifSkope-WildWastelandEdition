@@ -557,6 +557,8 @@ struct FxStat
 	int pipelines = 0;
 	double buildMs = 0.0;
 	int copies = 0;                 //!< texture copies into twins since the last take
+	int reusedHandles = 0;          //!< lane VKWATER4: water ray runs whose depth twin kept its VkImage handle over a sharedGen() move
+	int fenceMisses = 0;            //!< lane VKWATER4: waterRun's wait on the last crossing's fence that did not return VK_SUCCESS
 };
 FxStat takeVolSkyStat();
 struct CloudRun
