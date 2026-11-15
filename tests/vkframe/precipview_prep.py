@@ -59,6 +59,9 @@ CASES = [
      2.0, -0.08, 40000, 0, 0, 3),
     ('snow_far_lamps', 3, 5.5, 1.0, 97, 600.125, (12345.6, -98765.4, 7210.0), (-55.0, 210.0), 1, 3.0, 0.5, 6.0, 1.0, 0.6, 1,
      3.3, -0.01, 40000, 1, 0, 3),
+    # L8 term 2b (element 21 = the cluster lists on): the lamp run with b0's projection, volRect and a list buffer
+    ('rain_near_cluster', 0, 2.0, 4.0, 11, 37.25, (-60500.0, 70000.0, 6300.0), (120.0, -40.0), 0, 1.0, 0.0, 0.0, 1.0, 1.0, 1,
+     2.0, -0.08, 40000, 0, 0, 3, 1),
 ]
 SUN = np.array([0.4, 0.3, 0.35]) / np.linalg.norm([0.4, 0.3, 0.35])  # world, toward the sun (the air's fogSun too)
 # a lit case's own sun (cellDirTo), chosen by the GS's mix: N = the eye's axis, thick / thin = 4 vpWrap( N.to, pcTrans )
@@ -66,6 +69,17 @@ SUN = np.array([0.4, 0.3, 0.35]) / np.linalg.norm([0.4, 0.3, 0.35])  # world, to
 # first lit run 11-15); this sun gives N.to 0.72, ratio 3.3, 44 degrees off the axis. SUN stays (the fogged cases' fogSun).
 LIT_SUN = {'rain_near_lit': np.array([0.3, -0.6, 0.75]) / np.linalg.norm([0.3, -0.6, 0.75])}
 LIT_SUN['rain_near_lamps'] = LIT_SUN['rain_near_lit']
+LIT_SUN['rain_near_cluster'] = LIT_SUN['rain_near_lit']
+TILE, SLICES = 64, 4  # the cluster grid (L8 term 2b): 64-pixel tiles, 4 log-depth slices
+
+
+def cluster_lists(nc):
+    """R32I, cellclustergl.cpp's layout: (offset, count) a cluster, then the indices from 2 nc. A third walk every light
+    (count -1), a third list all five (offset 0), a third list 0, 2, 4 (offset 5: the spot and the box left out)"""
+    head = []
+    for c in range(nc):
+        head += [[0, -1], [0, 5], [5, 3]][c % 3]
+    return np.array(head + [0, 1, 2, 3, 4] + [0, 2, 4], dtype=np.int32)
 
 
 def lamps(v, R, eye):
@@ -305,6 +319,26 @@ for ci, c in enumerate(CASES):
             lamps(v[inview], R, np.array(c[6])).tofile(os.path.join(d, 'buf_cellLights.bin'))
             with open(os.path.join(d, 'buf.txt'), 'w', newline='\n') as f:
                 f.write('cellLights rgba32f 40 buf_cellLights.bin\n')
+        if len(c) > 21 and c[21]:
+            # L8 term 2b: the cluster lists. Depth = -(R[2] . (P - eye)) over the run's particles in the view, log slices
+            tx, ty = -(-W // TILE), -(-H // TILE)
+            nc = tx * ty * SLICES
+            dep = -v[inview, 2]
+            ln0, ln1 = math.log(float(dep.min())), math.log(float(dep.max()))
+            eye = np.array(c[6], np.float64)
+            U.update({'cellClusterOn': [1], 'cellClusterDims': [tx, ty, SLICES, TILE], 'cellClusterOrigin': [0, 0],
+                      'cellClusterDepth': list(-R[2]) + [float(R[2] @ eye)], 'cellClusterLog': [ln0, SLICES / (ln1 - ln0)],
+                      'cellClusterBase': [2 * nc], 'volRect': [0, 0, 1.0 / W, 1.0 / H]})
+            lists = cluster_lists(nc)
+            lists.tofile(os.path.join(d, 'buf_cellCluster.bin'))
+            with open(os.path.join(d, 'buf.txt'), 'a', newline='\n') as f:
+                f.write('cellCluster r32i %d buf_cellCluster.bin\n' % len(lists))
+            # globalUniforms (std140, 336 bytes): zero but projectionMatrix at 96 (column-major, as pcProj)
+            gb = np.zeros(84, np.float32)
+            gb[24:40] = P.T.reshape(-1)
+            gb.tofile(os.path.join(d, 'global.bin'))
+            print('precipview case %s: cluster grid %d x %d x %d, depth %.1f - %.1f, %d list texels'
+                  % (c[0], tx, ty, SLICES, math.exp(ln0), math.exp(ln1), len(lists)))
         if fog:  # the veil on, the air's column on the sun: the light chain's own names for the air's medium
             U.update({'volVeil': [1], 'airMed': AU['volAirMed'], 'airLayer': AU['volAirLayer'],
                       'airGround': AU['volAirGround'], 'airSunLayer': [0]})

@@ -614,8 +614,6 @@ const char * precipLitWhy( const PrecipRun::LitIn & l )
 			return "the lamps' shadow cubes on the particles (refused in term 2a)";
 		if ( l.gobo != 0 )
 			return "the lamps' gobos on the particles (refused in term 2a)";
-		if ( l.cluster != 0 )
-			return "the lamps' cluster lists on the particles (b0 unread; refused in term 2a)";
 		if ( l.phys > 0.5f )
 			return "the lamps' physical falloff on the particles (refused in term 2a)";
 		if ( l.cellRed != 0 )
@@ -661,6 +659,8 @@ bool precipAdmits( const PrecipRun & t, std::string & why )
 			return refuse( "a lit cell with the precipitation look (a later slice)" );
 		if ( const char * w = precipLitWhy( t.litIn ) )
 			return refuse( w );
+		if ( ( t.litIn.terms & 2 ) && t.litIn.cluster != 0 && !t.global )
+			return refuse( "the lamps' cluster lists with no globalUniforms bytes (b0's projection)" );
 	}
 	if ( t.roofOn || t.tex[0].tex )
 		return refuse( "the roof map on (slice 3's)" );
@@ -744,6 +744,13 @@ bool precipRun( const PrecipRun & t, std::string & why )
 				return refuse( "the lamps' cellLights is not RGBA32F" );
 			if ( t.lights.tex && need > t.lights.bytes )
 				return refuse( "cellLightCount is past GL's cellLights buffer" );
+			if ( b.cluster != 0 ) {  // term 2b: the lists an R32I buffer past their heads (2 ints a cluster)
+				const long long base = std::max( litI( "cellClusterBase" ), 0 );
+				if ( !t.cluster.tex || t.cluster.glFmt != 0x8235u )
+					return refuse( "the lamps' cellCluster is not R32I" );
+				if ( base * 4LL > t.cluster.bytes )
+					return refuse( "cellClusterBase is past GL's cellCluster buffer" );
+			}
 		}
 	}
 	const int atFirst = precipAt( kT_precipcs, int( std::size( kT_precipcs ) ), "pcFirst" );
@@ -810,7 +817,10 @@ bool precipRun( const PrecipRun & t, std::string & why )
 		std::memcpy( l + atFirst, &first, 4 );
 		std::memcpy( l + atCount, &count, 4 );
 		std::memcpy( l + atRed, &csRed, 4 );
-		std::memset( u + kPrecipGlobalAt, 0, size_t( kPrecipGlobalBytes ) );
+		if ( t.global && ( t.red & 512 ) == 0 )  // term 2b: GL's b0 (the cluster's projectionMatrix)
+			std::memcpy( u + kPrecipGlobalAt, t.global, size_t( kPrecipGlobalBytes ) );
+		else
+			std::memset( u + kPrecipGlobalAt, 0, size_t( kPrecipGlobalBytes ) );
 	}
 	std::memset( u, 0, size_t( kPrecipViewBytes ) );
 	std::memcpy( u, t.cs + atProj, 64 );
@@ -909,7 +919,7 @@ bool precipRun( const PrecipRun & t, std::string & why )
 		static char litBufKeys[2];
 		for ( int k = 0; k < 2 && ( t.red & 256 ) == 0; k++ ) {
 			const PrecipRun::TexBuf & b = k ? t.cluster : t.lights;
-			if ( !b.tex || ( k == 1 && t.litIn.cluster == 0 ) )
+			if ( !b.tex || ( k == 1 && ( t.litIn.cluster == 0 || ( t.red & 1024 ) ) ) )
 				continue;
 			if ( !g.copyNamedBufferSubData )
 				return refuse( "no glCopyNamedBufferSubData (the lamps' texel buffers)" );

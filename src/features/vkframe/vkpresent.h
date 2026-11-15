@@ -729,7 +729,8 @@ struct PrecipRun
 	FxTex tex[8];                   //!< t0 pcRoof (none yet), t1 pcTex (the atlas; a BC one twinned by farTwin), the air's t25 atApTex, t26 volTex, t27 volTile, t28 volAirTerr, t29 volAirRainMap, the look's pcTexN
 	std::uint8_t cs[kT_preciplitcsBytes] = {};  //!< fxPack( cell_precip_gpu, kT_precipcs ) (+ kT_preciplookcs for a look run, kT_preciplitcs for a lit one)
 	std::uint8_t ps[kT_preciplookpsBytes] = {};  //!< fxPack( cell_precip_gpu, kT_precipps ) (+ kT_preciplookps for a look run)
-	int red = 0;                    //!< gates only: 1 the cull radius 0, 2 the strip's last two corners swapped, 4 no near fade, 8 the air dropped, 16 the look dropped (the plain pipelines draw a look run), 32 the atlas dropped (t1 / t7 the zero texture), 128 the light dropped (lit = 1), 256 the lamps' lights dropped (the zero texel buffer)
+	int red = 0;                    //!< gates only: 1 the cull radius 0, 2 the strip's last two corners swapped, 4 no near fade, 8 the air dropped, 16 the look dropped (the plain pipelines draw a look run), 32 the atlas dropped (t1 / t7 the zero texture), 128 the light dropped (lit = 1), 256 the lamps' lights dropped (the zero texel buffer), 512 b0 dropped (globalUniforms zero), 1024 the cluster's lists dropped (the zero texel buffer)
+	const void * global = nullptr;  //!< GL's globalUniforms (b0, 336 bytes; the cluster reads projectionMatrix); null: zeros (a cluster run refused)
 	std::uint8_t * recOut = nullptr;  //!< gates only: the run's records read back (n x 112 bytes, 192 a look run; host-visible records, a fence wait); null in the app
 	struct LitIn
 	{
@@ -1114,7 +1115,7 @@ void precipSay( bool wanted, const char * glWhy );
  * present device's tone frame with the view on Vulkan: the run through precipRun. false: GL draws its points (the reason
  * in the "vk precip:" line); a target other than the tone frame returns false with no line. Red WW_VKVIEW_PRECIP_RED=1:
  * GL's. GL enums as numbers (this header carries no GL header). */
-template <class Fn> bool precipDraw( Fn * fn, unsigned prog, int first, int count )
+template <class Fn> bool precipDraw( Fn * fn, unsigned prog, int first, int count, const void * global = nullptr )
 {
 	int fbo = 0, color = 0;
 	fn->glGetIntegerv( 0x8CA6, &fbo );  // GL_DRAW_FRAMEBUFFER_BINDING
@@ -1150,6 +1151,7 @@ template <class Fn> bool precipDraw( Fn * fn, unsigned prog, int first, int coun
 		t.color = unsigned( color );
 		t.first = first;
 		t.n = count;
+		t.global = global;
 		t.lit = geti( "cellInterior" ) != 0 || geti( "cellHasDir" ) != 0;  // the geometry stage's vpLight condition
 		t.roofOn = geti( "pcRoofOn" ) != 0;
 		t.look = fn->glGetUniformLocation( prog, "pcLook" ) >= 0;

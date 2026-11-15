@@ -39,6 +39,8 @@
 #include <cstdio>
 #include <vector>
 
+const void * wwGlobalUboBytes( const NifSkopeOpenGLContext * ctx );	// glcontext.cpp: b0's bytes (lane VKFAR2 L8: the cluster's projection)
+
 #ifndef GL_COMPRESSED_RGBA_BPTC_UNORM
 #define GL_COMPRESSED_RGBA_BPTC_UNORM 0x8E8C
 #endif
@@ -1055,7 +1057,7 @@ int wwCellPrecipDraw( Scene * scene )
 			prog->uni1i( "pcCells", std::max( 1, L.spec.cols * L.spec.rows ) );
 			prog->uni2f( "pcCellUv", 1.0f / float( cols ), 1.0f / float( rows ) );
 		}
-		if ( !WwVkPresent::precipDraw( fn, prog->id, GLint( run.first ), GLsizei( run.count ) ) )	// lane VKFAR2 (row L8)
+		if ( !WwVkPresent::precipDraw( fn, prog->id, GLint( run.first ), GLsizei( run.count ), wwGlobalUboBytes( r ) ) )	// lane VKFAR2 (row L8)
 			fn->glDrawArrays( GL_POINTS, GLint( run.first ), GLsizei( run.count ) );
 		drawn += run.count;
 	}
