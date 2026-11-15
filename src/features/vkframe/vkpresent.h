@@ -743,6 +743,7 @@ struct PrecipRun
 		int gi = 0;                     //!< GI names active in GL's program (a WW_CELL_PRT / RT GI variant reads a GI volume; L8 term 1)
 		int uss = 0, cloud = 0, csmProbe = 0, csmRed = 0;  //!< L8 term 3: ussOn (the shadow set's composition), ussCloudOn, csmProbe, csmRed
 		int restir = -1;                //!< L8 term 5: cellRestirOn (-1 absent; present = GL's ReSTIR variant, its cubes not read)
+		int goboPin = 0;                //!< L8 term 6: 1 when cellGoboRot / Flat / Gam / Map is non-zero (a pin or red: not judged)
 	};
 	LitIn litIn;                    //!< a lit run's switches as precipLitRead reads them from GL (before any pack; -1 absent)
 	struct TexBuf { unsigned tex = 0, buf = 0, glFmt = 0; long long off = 0, bytes = 0; };
@@ -1047,6 +1048,8 @@ template <class Fn> void precipLitRead( Fn * fn, unsigned prog, PrecipRun & t )
 	t.litIn.sunA = getf( "vpSun", 3 );
 	t.litIn.shadow = geti( "cellShadowOn" );
 	t.litIn.gobo = geti( "cellGoboOn" );
+	for ( const char * nm : { "cellGoboRot", "cellGoboFlat", "cellGoboGam", "cellGoboMap" } )
+		t.litIn.goboPin |= geti( nm ) > 0 ? 1 : 0;
 	t.litIn.cluster = geti( "cellClusterOn" );
 	t.litIn.cellRed = geti( "cellRed" );
 	t.litIn.phys = getf( "cellLightPhys", 0 );

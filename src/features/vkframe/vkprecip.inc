@@ -641,6 +641,8 @@ int precipLitWhys( const PrecipRun::LitIn & l, const char ** out, int max )
 			add( "the lit program lacks a lamp switch the refusals read" );
 		if ( l.shadow > 0 && l.restir >= 0 )  // L8 term 5: the cubes are judged; GL's ReSTIR variant does not read them
 			add( "the lamps' shadows in GL's ReSTIR variant (cellRestirOn: its cubes are not read)" );
+		if ( l.gobo > 0 && l.goboPin > 0 )  // L8 term 6: the gobos are judged with every pin and red at 0
+			add( "a gobo pin or red (cellGoboRot / Flat / Gam / Map) in a lit run" );
 		if ( l.phys > 0.5f )
 			add( "the lamps' physical falloff on the particles (refused in term 2a)" );
 		if ( l.cellRed > 0 )
