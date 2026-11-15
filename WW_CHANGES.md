@@ -1,3 +1,9 @@
+## VKFAR15 (2026-11-15): the far ground and far LOD rings stay on GL while RT GI or ReSTIR is on
+
+Changed, not built, not checked live.
+- Their Vulkan twins carry only the base program, so with RT GI / ReSTIR on the far terrain drew on Vulkan without its
+  GI. They now draw on GL then, and the `vk farground:` line names why. Their RT twins come next.
+
 ## VKFAR14 (2026-11-15): the live far ground on streamed flights; the far ground's Vulkan draw no longer refused
 
 Changed, not built, not checked live.
