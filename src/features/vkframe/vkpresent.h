@@ -343,12 +343,13 @@ SkyStat takeSkyStat();
  * (the *A kernels) write the water's shared arrays in place (LightImage::share), so nothing is copied. Red
  * WW_VKVIEW_OCEAN_RED=1 (or WW_VKVIEW off): GL's draws; =prev: the water reads the arrays the frame before wrote. */
 // LightGi (lane VKFAR3 A1 b): the screen GI's own run (after the volume mask, which stays GL); red WW_VKVIEW_GIHALF_RED=1
-enum LightPass { LightAo = 0, LightContact = 1, LightSsgi = 2, LightOcean = 3, LightGi = 4, LightPasses = 5 };
+// LightContactFar (lane VKSHADOW3): shadowset.cpp contactFarPass's three stages, contactfar_vk.hlsl; red WW_VKVIEW_CONTACTFAR_RED=1
+enum LightPass { LightAo = 0, LightContact = 1, LightSsgi = 2, LightOcean = 3, LightGi = 4, LightContactFar = 5, LightPasses = 6 };
 // LightAoxZ / Xe / R8 (lane VKFAR3): the ported AO methods' depth mips, XeGTAO's term + edges, the r8 stages (aox_vk.hlsl)
 enum LightKernel { LightAoGbuf = 0, LightAoMip, LightAoRaw, LightAoBlur, LightAoBlurF, LightContactK, LightSsgiK, LightAoxZ, LightAoxXe,
 	LightAoxR8, LightOceanSpecK, LightOceanFftK, LightOceanFinBcK, LightOceanFinDK, LightOceanMipBcK, LightOceanMipDK,
 	LightOceanFinBcAK, LightOceanFinDAK, LightOceanMipBcAK, LightOceanMipDAK,
-	LightGiHalf, LightKernels };	// LightGiHalf (VKFAR3 A1 b): the screen GI's DDGI read (gihalf_vk.hlsl)
+	LightGiHalf, LightCfarMin, LightCfarMarch, LightCfarComp, LightKernels };	// LightGiHalf (VKFAR3 A1 b): the screen GI's DDGI read (gihalf_vk.hlsl)
 struct LightImage
 {
 	unsigned tex = 0;              //!< GL's texture (GL_TEXTURE_2D; 0 for a twin only the dispatches use)

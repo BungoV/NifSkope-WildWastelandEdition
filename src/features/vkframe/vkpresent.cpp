@@ -52,6 +52,9 @@
 #include "features/vkframe/light_ocean_mipbca.spv.h"
 #include "features/vkframe/light_ocean_mipda.spv.h"
 #include "features/vkframe/light_gihalf.spv.h"  // lane VKFAR3 (A1 b): the screen GI's DDGI read
+#include "features/vkframe/light_cfar_min.spv.h"  // lane VKSHADOW3: the far contact tier (contactfar_vk.hlsl stages 1-3)
+#include "features/vkframe/light_cfar_march.spv.h"
+#include "features/vkframe/light_cfar_comp.spv.h"
 // lane VKLIGHT2: the reflections' stages (ssr_vk.hlsl SSR_LIVE; w = the water look)
 #include "features/vkframe/ssr_view_s1.spv.h"
 #include "features/vkframe/ssr_view_s1w.spv.h"
@@ -6847,7 +6850,9 @@ bool lightStatic( std::string & why )
 		{ vkframe_light_ocean_mipbc_spv, sizeof( vkframe_light_ocean_mipbc_spv ) }, { vkframe_light_ocean_mipd_spv, sizeof( vkframe_light_ocean_mipd_spv ) },
 		{ vkframe_light_ocean_finbca_spv, sizeof( vkframe_light_ocean_finbca_spv ) }, { vkframe_light_ocean_finda_spv, sizeof( vkframe_light_ocean_finda_spv ) },
 		{ vkframe_light_ocean_mipbca_spv, sizeof( vkframe_light_ocean_mipbca_spv ) }, { vkframe_light_ocean_mipda_spv, sizeof( vkframe_light_ocean_mipda_spv ) },
-		{ vkframe_light_gihalf_spv, sizeof( vkframe_light_gihalf_spv ) } };
+		{ vkframe_light_gihalf_spv, sizeof( vkframe_light_gihalf_spv ) },
+		{ vkframe_light_cfar_min_spv, sizeof( vkframe_light_cfar_min_spv ) }, { vkframe_light_cfar_march_spv, sizeof( vkframe_light_cfar_march_spv ) },
+		{ vkframe_light_cfar_comp_spv, sizeof( vkframe_light_cfar_comp_spv ) } };
 	for ( int k = 0; k < WwVkPresent::LightKernels; k++ ) {
 		if ( k == WwVkPresent::LightAoRaw && !v.float64 )
 			continue;  // AO refuses with the reason
@@ -9229,11 +9234,12 @@ void lightSay( int pass, bool wanted, const char * glWhy )
 {
 	if ( pass < 0 || pass >= LightPasses )
 		return;
-	static const char * const kName[LightPasses] = { "ao", "contact", "ssgi", "ocean", "gihalf" };
+	static const char * const kName[LightPasses] = { "ao", "contact", "ssgi", "ocean", "gihalf", "contactfar" };
 	static const char * const kWhat[LightPasses] = { "ao_vk: 4 mips, raw, across, fin, or aox_vk: a ported method's stages; gbuf on GL",
 		"contact_vk: the shadow lines",
 		"ssgi_vk: the cast", "ocean_vk: spectrum, 14 FFT stages, layers, 7 mips",
-		"gihalf_vk: the DDGI cascades' read in place; the volume mask on GL" };
+		"gihalf_vk: the DDGI cascades' read in place; the volume mask on GL",
+		"contactfar_vk: the min by 4, the march, the resolve by min into the near mask" };
 	static QString said[LightPasses];
 	static double at[LightPasses] = {};
 	const QString head = QStringLiteral( "vk %1: " ).arg( QLatin1String( kName[pass] ) );
