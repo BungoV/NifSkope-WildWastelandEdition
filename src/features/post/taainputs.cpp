@@ -6,6 +6,7 @@
 #include "gl/alphabgsm.h"	// lane ALPHABGSM1: the side passes' alpha-test census
 #include "features/post/gametaa.h"
 #include "features/vkframe/vkpresent.h"	// lane VKOBJ11: the targets shared with the present device while the view is on
+#include "features/vkframe/vkobjvel.h"	// lane VKOBJ12: step 3 on the present device
 #include "features/particles/glparticles.h"
 #include "gl/glproperty.h"
 #include "gl/glscene.h"
@@ -738,6 +739,24 @@ void wwTaaInputsPass( Scene * scene )
 			const float viewSc = scene->view.scale != 0.0f ? scene->view.scale : 1.0f;
 			std::vector<Vector3> skinN, skinT, skinB;
 			int nCov = 0, nFall = 0, nSoft = 0, nVp = 0;
+			/* lane VKOBJ12: while the targets are shared (g.vk), arm 0 runs the same per-mover code but collects each mover's
+			 * draws (GL's arrays and uniform values) instead of drawing, then tries the WHOLE list on Vulkan (one crossing, GL
+			 * waits it). Any refusal draws nothing there and arm 1 is GL's loop, unchanged (the counters start again). The
+			 * mover loop below keeps its indent inside the arms. */
+			WwVkPresent::ObjVelRun vkRun;
+			std::string vkWhy;
+			if ( g.vk && ( vp[0] != 0 || vp[1] != 0 ) )
+				vkWhy = "a viewport origin other than 0, 0";
+			else if ( g.vk )
+				vkWhy = WwVkPresent::objVelRefusal();
+			const bool vkArm = g.vk && vkWhy.empty();
+			if ( g.vk && !vkArm )
+				WwVkPresent::objVelOnGl( vkWhy.c_str() );
+			bool vkDrew = false;
+			for ( int arm = vkArm ? 0 : 1; arm < 2 && !vkDrew; arm++ ) {
+			atTally = AlphaBgsmTally();
+			nCov = nFall = nSoft = nVp = 0;
+			drawnObj = 0;
 			for ( const Mover & m : movers ) {
 				const Shape * sh = m.sh;
 				const Matrix4 mv = sh->viewTrans().toMatrix4();
@@ -753,6 +772,11 @@ void wwTaaInputsPass( Scene * scene )
 				AlphaBgsmTally::note( atTally, sh->wwAlphaTested(), da.test );
 				const bool blended = !blendRed && sh->wwBlendedAsDrawn();
 				const bool based = ( da.test || blended ) && bindBase( prog, sh );
+				GLint vkBase = 0;	// lane VKOBJ12: the texture bindBase bound on BaseMap's unit (arm 0)
+				if ( arm == 0 && based ) {
+					fn->glActiveTexture( GL_TEXTURE0 );
+					fn->glGetIntegerv( GL_TEXTURE_BINDING_2D, &vkBase );
+				}
 				const bool at = da.test && based;
 				prog->uni1i( "alphaTest", at ? 1 : 0 );
 				/* lane TREELEAF3: an effect shape tests its colour pass's composed alpha (src/gl/wwfxcov.h: baseColor.a^2,
@@ -801,6 +825,63 @@ void wwTaaInputsPass( Scene * scene )
 					wwCellGrassUniforms( scene, sh->id() );	// the fade and the wind's previous + current phase
 				else
 					prog->uni3f( "wwGrassFade", 0.0f, 0.0f, 0.0f );
+				if ( arm == 0 ) {
+					// lane VKOBJ12: this mover's draws for the Vulkan route (the arrays and values GL's draws below take)
+					WwVkPresent::ObjVelDraw d;
+					const qsizetype nvA = sh->verts.size();
+					if ( m.mode == 1 ) {
+						const std::vector<Vector3> & cur = m.rec->curSkin;
+						const std::vector<Vector3> & prv = m.rec->prevSkin.size() == cur.size() ? m.rec->prevSkin : cur;
+						d.pos = qsizetype( cur.size() ) >= nvA && nvA > 0 ? &( cur.front()[0] ) : nullptr;
+						d.prev = d.pos ? &( prv.front()[0] ) : nullptr;
+						d.color = vtxA && sh->colors.size() >= nvA ? &( sh->colors.constFirst()[0] ) : nullptr;
+						d.uv = ( at || cov ) ? &( sh->coords.constFirst().constFirst()[0] ) : nullptr;
+					} else {
+						const float * attrs[16] = {};
+						const std::uint64_t amask = sh->wwVertexAttrs( attrs );
+						if ( !amask ) {	// GL's bindShape draws nothing either
+							nCov += cov ? 1 : 0;
+							drawnObj++;
+							continue;
+						}
+						d.pos = attrs[0];
+						d.color = ( amask & 0xF0ULL ) ? attrs[1] : nullptr;
+						d.uv = ( ( amask >> 28 ) & 15ULL ) ? attrs[7] : nullptr;
+					}
+					d.nv = int( nvA );
+					d.idx = reinterpret_cast<const std::uint16_t *>( sh->triangles.constData() );
+					d.nIdx = int( sh->triangles.size() * 3 );
+					const Matrix4 cj = Pjit * mv;
+					std::memcpy( d.clipJit, cj.data(), sizeof( d.clipJit ) );
+					std::memcpy( d.clipCur, m.rec->curClip.data(), sizeof( d.clipCur ) );
+					std::memcpy( d.clipPrev, m.rec->prevClip.data(), sizeof( d.clipPrev ) );
+					std::memcpy( d.modelView, mv.data(), sizeof( d.modelView ) );
+					std::memcpy( d.normalMatrix, sh->viewTrans().rotation.data(), sizeof( d.normalMatrix ) );
+					d.velMode = m.mode;
+					d.alphaTest = at ? 1 : 0;
+					d.fxMode = fx.mode;
+					d.covMode = cov ? 1 : 0;
+					d.alpha = fx.mult;
+					d.alphaThreshold = fx.threshold;
+					d.covThreshold = kCovThreshold;
+					if ( based ) {
+						const auto * bsp = sh->wwShaderLighting();
+						d.uvScale[0] = bsp->uvScale.x;
+						d.uvScale[1] = bsp->uvScale.y;
+						d.uvOffset[0] = bsp->uvOffset.x;
+						d.uvOffset[1] = bsp->uvOffset.y;
+					}
+					d.baseTex = unsigned( vkBase );
+					vkRun.draws.push_back( d );
+					if ( cov ) {	// pass 1: the reactive mark on the rest of its triangles
+						d.pass = 1;
+						d.covMode = 2;
+						vkRun.draws.push_back( d );
+					}
+					nCov += cov ? 1 : 0;
+					drawnObj++;
+					continue;
+				}
 				const qsizetype nv = sh->verts.size();
 				const bool tbnOk = tbn && sh->norms.size() >= nv && sh->tangents.size() >= nv && sh->bitangents.size() >= nv;
 				if ( m.mode == 1 && tbnOk ) {
@@ -847,6 +928,28 @@ void wwTaaInputsPass( Scene * scene )
 				}
 				nCov += cov ? 1 : 0;
 				drawnObj++;
+			}
+			if ( arm == 0 ) {
+				vkRun.velKey = g.vkKey;
+				vkRun.maskKey = g.vkKey + 1;
+				vkRun.depthKey = g.vkKey + 2;
+				vkRun.w = W;
+				vkRun.h = H;
+				vkDrew = WwVkPresent::objVelRun( vkRun, vkWhy );
+				if ( !vkDrew )
+					WwVkPresent::objVelOnGl( vkWhy.c_str() );
+			}
+			}	// the arms
+			if ( g.vk ) {	// lane VKOBJ12: the route's line (changes only, as the pass's own lines)
+				static_cast<void>( WwVkPresent::takeObjVelStat() );
+				static QString saidVk;
+				const QString c = QStringLiteral( "vk objvel: movers=%1 drawn=%2 gl=%3%4" ).arg( qint64( movers.size() ) )
+					.arg( vkDrew ? drawnObj : 0 ).arg( vkDrew ? 0 : drawnObj )
+					.arg( vkDrew ? QString() : QStringLiteral( " glWhy=" ) + QString::fromStdString( vkWhy ) );
+				if ( c != saidVk ) {
+					saidVk = c;
+					qInfo().noquote() << c;
+				}
 			}
 			AlphaBgsmTally::report( atTally, "taa velocity", qint64( movers.size() ) );
 			// lane TREELEAF4: the census (changes only, as the pass's own line)

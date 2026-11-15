@@ -737,6 +737,7 @@ bool waterRecord( std::string & why );  // lane VKWATER3 (vkwater.inc): fxWork's
 bool underRecord( std::string & why );  // lane VKWATER4 (vkunder.inc): fxWork's kind 4, the underwater fog
 void waterDrop();
 void underDrop();  // lane VKWATER4 (vkunder.inc)
+void objVelDrop();  // lane VKOBJ12 (vkobjvel.inc)
 void objDrop();  // lane VKOBJ1
 void blFree();  // lane VKOBJ2
 
@@ -3757,6 +3758,7 @@ void shutdown()
 	fxDrop();   // lane VKAIR1: the air's and the clouds' crossing semaphores and framebuffers
 	waterDrop();  // lane VKWATER3: the water draw's buffers (GL's names); pipelines and samplers stay with the device
 	underDrop();  // lane VKWATER4 (L7): the underwater draw's framebuffer, depth view and host buffer
+	objVelDrop();  // lane VKOBJ12: the TAA inputs' step 3 framebuffer and host buffers
 }
 
 bool viewBegin( int w, int h, int samples, GlProc gp, std::string & why )
@@ -9178,3 +9180,4 @@ bool frame( QOpenGLWindow * w, const std::function<void()> & paint )
 
 #include "features/vkframe/vkwater.inc"  // lane VKWATER1: the water's route and census (row G5)
 #include "features/vkframe/vkunder.inc"  // lane VKWATER4 (L7): the underwater fog on the view
+#include "features/vkframe/vkobjvel.inc"  // lane VKOBJ12: the TAA inputs' step 3 (taa_objvel) on the view
