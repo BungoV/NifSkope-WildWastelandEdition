@@ -386,6 +386,8 @@ struct ObjBlShade
 	 * of `pool` only verts is read */
 	bool ownVao = false;
 	int ownRed = 0;  //!< gates only: 1 `offset` (the attributes read from offset 0), 2 `half` (the halves read as 16-bit unorm)
+	const std::uint32_t * psGate = nullptr;  //!< gates only: this pixel module instead of the shipped twin (blview's plain row)
+	std::size_t psGateWords = 0;
 };
 bool objBlShade( GlProc gp, const ObjBlShade & s, std::string & why );
 /* lane VKWATER3 G4: the bl twin of GL's program by its pixel stage's loader key (Program::wwDefs): 0 the base

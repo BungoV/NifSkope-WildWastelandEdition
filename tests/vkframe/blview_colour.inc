@@ -64,27 +64,44 @@
 static int gColTwin = 0;  // colPrintf: 1 prints `BLVIEW colourcsm` for `BLVIEW colour`
 static int gColKind = 0;  // lane VKOBJ5: 1 ` skin`, 2 ` alpha`, 3 ` single`, 4 ` own` after it
 static const char * kColKindName[5] = { "", " skin", " alpha", " single", " own" };
+static const char * gColTag = "";  // the plain row: `BLVIEW colour plain`
 void colPrintf( const char * fmt, ... )
 {
 	std::string f2( fmt );
 	const std::size_t at = f2.find( "colour" );
 	if ( gColKind && at != std::string::npos )
 		f2.insert( at + 6, kColKindName[gColKind] );
-	if ( gColTwin && at != std::string::npos )
-		f2.insert( at + 6, "csm" );
+	if ( at != std::string::npos )
+		f2.insert( at + 6, std::string( gColTwin ? "csm" : "" ) + gColTag );
 	va_list ap;
 	va_start( ap, fmt );
 	std::vprintf( f2.c_str(), ap );
 	va_end( ap );
 }
 bool colourGate( const std::string & spirvDir, const std::vector<GLuint64> & fixture, int anisoAt, GLuint64 aniso1, int twin = 0,
-	int kind = 0 )
+	int kind = 0, const std::string & plainSpv = std::string() )
 {
 	using namespace WwVkPresent;
 	gColTwin = twin;
 	gColKind = kind;
+	gColTag = plainSpv.empty() ? "" : " plain";
 	const std::uint32_t * psWords = twin ? vkframe_objbl_cellcsm_ps_spv : vkframe_objbl_cell_ps_spv;
-	const std::size_t psCount = twin ? sizeof( vkframe_objbl_cellcsm_ps_spv ) / 4 : sizeof( vkframe_objbl_cell_ps_spv ) / 4;
+	std::size_t psCount = twin ? sizeof( vkframe_objbl_cellcsm_ps_spv ) / 4 : sizeof( vkframe_objbl_cell_ps_spv ) / 4;
+	// the plain row (ruling 11-15): the twin with no loader define (blview.sh's pipe form) against GL's plain set
+	std::vector<std::uint32_t> plainWords;
+	if ( !plainSpv.empty() ) {
+		const std::string b = readFile( plainSpv );
+		plainWords.resize( b.size() / 4 );
+		if ( !plainWords.empty() )
+			std::memcpy( plainWords.data(), b.data(), plainWords.size() * 4 );
+		if ( plainWords.size() < 5 || plainWords[0] != 0x07230203u ) {
+			colPrintf( "BLVIEW colour FAIL (no plain module at %s)\n", plainSpv.c_str() );
+			gColTag = "";
+			return false;
+		}
+		psWords = plainWords.data();
+		psCount = plainWords.size();
+	}
 	std::vector<GLuint64> handles = fixture;  // the fixture's handles, texture anisoAt as its anisotropy-1 twin
 	handles[std::size_t( anisoAt )] = aniso1;
 	struct ColGl
@@ -214,10 +231,33 @@ bool colourGate( const std::string & spirvDir, const std::vector<GLuint64> & fix
 		colPrintf( "BLVIEW colour FAIL (GL error 0x%x placing %d samplers on units)\n", unsigned( e ), units );
 		return false;
 	}
+	// the twin's blocks: globalUniforms (binding 0); on the app's key (WW_FRAME_UBO) the csm twin's cascade values sit in
+	// wwShadowFrame (GL's binding 2, build_spv.py BLOCKS): put() writes those members there and frameState uploads them
+	SpvModule psM;
+	const SpvBind * gb = nullptr, * sfB = nullptr;
+	if ( spvReflect( psWords, psCount, psM, why ) ) {
+		gb = uniBlock( psM, "globalUniforms" );
+		sfB = uniBlock( psM, "wwShadowFrame" );
+	}
+	std::vector<std::uint8_t> sfBytes( sfB ? std::max<std::size_t>( sfB->bytes, 16 ) : 0, 0 );
+	int sfPuts = 0;
 	auto put = [&]( const char * name, std::initializer_list<float> vals, int elem = 0 ) {
 		const auto it = reg.find( name );
 		const int at = it == reg.end() ? -1 : it->second + elem;
 		if ( at < 0 || !glType.count( at ) ) {
+			if ( sfB )
+				for ( const SpvMember & m : sfB->members ) {
+					if ( m.name != name )
+						continue;
+					SpvMember me = m;
+					me.offset += std::uint32_t( elem ) * m.arrayStride;
+					if ( vals.size() == 16 && m.cols == 4 )
+						shadePutMat( sfBytes, me, vals.begin() );
+					else if ( me.offset + vals.size() * 4 <= sfBytes.size() )
+						std::memcpy( sfBytes.data() + me.offset, vals.begin(), std::min<std::size_t>( vals.size(), m.comps ) * 4 );
+					sfPuts++;
+					return;
+				}
 			inactive++;
 			return;
 		}
@@ -309,10 +349,6 @@ bool colourGate( const std::string & spirvDir, const std::vector<GLuint64> & fix
 		}
 	}
 	// globalUniforms (binding 0) at the twin's layout, skinningUniforms (binding 1) zero
-	SpvModule psM;
-	const SpvBind * gb = nullptr;
-	if ( spvReflect( psWords, psCount, psM, why ) )
-		gb = uniBlock( psM, "globalUniforms" );
 	if ( !gb ) {
 		colPrintf( "BLVIEW colour FAIL (the twin's globalUniforms: %s)\n", why.c_str() );
 		return false;
@@ -356,8 +392,8 @@ bool colourGate( const std::string & spirvDir, const std::vector<GLuint64> & fix
 			const float bone[12] = { c, -s, 0, 0.03f * float( j ) - 0.1f, s, c, 0, 0.02f * float( j % 3 ) - 0.02f, 0, 0, 1, 0.01f * float( j % 4 ) };
 			std::memcpy( sBytes.data() + std::size_t( j ) * 48, bone, 48 );
 		}
-	GLuint ubo[2] = {}, rowsBuf = 0, vao = 0;
-	f.genBuffers( 2, ubo );
+	GLuint ubo[3] = {}, rowsBuf = 0, vao = 0;
+	f.genBuffers( 3, ubo );
 	f.bindBuffer( 0x8A11, ubo[0] );
 	f.bufferData( 0x8A11, std::ptrdiff_t( gBytes.size() ), gBytes.data(), 0x88E4 );
 	f.bindBuffer( 0x8A11, ubo[1] );
@@ -491,6 +527,12 @@ bool colourGate( const std::string & spirvDir, const std::vector<GLuint64> & fix
 			u.bindTextures( GLuint( csmUnit ), 1, &csmTex );
 		f.bindBufferBase( 0x8A11, 0, ubo[0] );
 		f.bindBufferBase( 0x8A11, 1, ubo[1] );
+		if ( sfB ) {  // the cascade values as put() left them (a red or probe set after GL drew reaches both sides)
+			f.bindBuffer( 0x8A11, ubo[2] );
+			f.bufferData( 0x8A11, std::ptrdiff_t( sfBytes.size() ), sfBytes.data(), 0x88E8 );
+			f.bindBuffer( 0x8A11, 0 );
+			f.bindBufferBase( 0x8A11, 2, ubo[2] );
+		}
 		f.bindBufferBase( kSsbo, 12, rowsBuf );
 	};
 	auto frameOff = [&]() {
@@ -659,6 +701,8 @@ bool colourGate( const std::string & spirvDir, const std::vector<GLuint64> & fix
 		s.cmds = sx.cmds.data();
 		s.nCmds = sx.cmds.size() / 5;
 		s.red = red == 10 ? 1 : 0;
+		s.psGate = plainWords.empty() ? nullptr : plainWords.data();
+		s.psGateWords = plainWords.size();
 		s.skinRed = red == 11 ? 1 : 0;   // lane VKOBJ5 red bone
 		s.alphaRed = red == 12 ? 1 : 0;  // lane VKOBJ5 red flags
 		s.ownVao = kind == 4;            // lane VKOBJ5 round 2: the VAO bound below
@@ -1084,6 +1128,8 @@ bool colourGate( const std::string & spirvDir, const std::vector<GLuint64> & fix
 			s.nRows = nRows;
 			s.cmds = sx.cmds.data();
 			s.nCmds = sx.cmds.size() / 5;
+			s.psGate = plainWords.empty() ? nullptr : plainWords.data();
+			s.psGateWords = plainWords.size();
 			const bool vRan = objBlShade( glProc, s, vw );
 			frameOff();
 			const ObjBlRunStat rs = takeObjBlRunStat();
@@ -1210,7 +1256,9 @@ bool colourGate( const std::string & spirvDir, const std::vector<GLuint64> & fix
 		u.bindTextures( 0, 64, nullptr );
 		sharedTargetDrop( csmKey );
 	}
+	colPrintf( "BLVIEW colour blocks: wwShadowFrame %zu B (%d values put there)\n", sfBytes.size(), sfPuts );
 	gColTwin = 0;
+	gColTag = "";
 	objBlLocsLoad( spirvDir + "/no_locs.txt", why );  // the GLSL gates never see it
 	f.useProgram( 0 );
 	u.deleteProgram( prog );

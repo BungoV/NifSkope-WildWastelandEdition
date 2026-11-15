@@ -4,6 +4,8 @@
 // The maps come through near/ww_bindless.hlsli: the GL build (WW_GL_BINDLESS, tests/hlsllive/build_spv.py) reads the row's
 // tex[i] as GL bindless handles (ww_bindless_gl.hlsli); Vulkan (WW_VK_BINDLESS) and Fusion Shaders (DXIL descriptor heaps,
 // SM 6.6) read them as (image, sampler) indices (ww_bindless_vk.hlsli).
+// The app's key comes from the build's defines (WW_CELL_FOGLEAK + WW_FRAME_UBO: GL's loader, vkframe_spirv.sh fxb); the RT GI
+// twin adds WW_CELL_RTDDGI, _CASCADES and WW_CELL_RESTIR. With no define it is the plain variant (blview's regression row).
 // profile: ps_6_6
 #include "NearBindingsVk.hlsli"
 #define WW_HLSL_SRC 1	// the shared .hlsli files give their readable half

@@ -47,6 +47,18 @@ done
 # app links them
 "$PY" -I -X utf8 "$ROOT/tests/hlsllive/build_all.py" "$ROOT" "$OUT/spvset" --only fo4_cellbl,fo4_cellcsmbl --jobs 4 > "$OUT/spvset.txt" 2>&1 \
 	|| { tail -8 "$OUT/spvset.txt"; echo "BLVIEW GATE FAILED (build_all.py, the fo4_cellbl / fo4_cellcsmbl SPIR-V set)"; exit 1; }
+# lane VKWATER3 (ruling 11-15): the same pair on the app's key (the shipped twins' defines); spvset above stays the plain row's
+"$PY" -I -X utf8 "$ROOT/tests/hlsllive/build_all.py" "$ROOT" "$OUT/spvapp" --only fo4_cellbl,fo4_cellcsmbl --defines WW_CELL_FOGLEAK=1,WW_FRAME_UBO=1 \
+	--jobs 4 > "$OUT/spvapp.txt" 2>&1 \
+	|| { tail -8 "$OUT/spvapp.txt"; echo "BLVIEW GATE FAILED (build_all.py, the app-key fo4_cellbl / fo4_cellcsmbl SPIR-V set)"; exit 1; }
+# set-wide --defines also reach the vertex stage (variants.txt gives it none): its DXC output must not move (the two sets'
+# uniform locations differ by their own registries, so the source compile is compared, not the patched sets)
+for d in "" "-D WW_CELL_FOGLEAK=1 -D WW_FRAME_UBO=1"; do
+	"$DXC" "${SPV[@]}" -T vs_6_0 -E main $d "$ROOT/res/shaders/hlsl/near/fo4_defaultbl_vs.hlsl" -Fo "$OUT/fo4_defaultbl_vs.k${#d}.spv" \
+		> /dev/null 2>&1 || { echo "BLVIEW GATE FAILED (dxc, fo4_defaultbl_vs [$d])"; exit 1; }
+done
+cmp -s "$OUT/fo4_defaultbl_vs.k0.spv" "$OUT/fo4_defaultbl_vs.k38.spv" \
+	|| { echo "BLVIEW GATE FAILED (the app key's defines moved GL's fo4_defaultbl vertex stage: variants.txt gives it none)"; exit 1; }
 # lane VKWATER3 G4: GL's fo4_cell and fo4_cellcsm (with their variants, the base WW_CELL_FOGLEAK+WW_FRAME_UBO among them) for the cell gate
 if [ "$MODE" = bc ]; then
 	"$PY" -I -X utf8 "$ROOT/tests/hlsllive/build_all.py" "$ROOT" "$OUT/cellset" --only fo4_cell.prog,fo4_cellcsm.prog,pbrm_default.prog,pbrm_cell.prog,pbrm_cellcsm.prog,fo4_effectcell.prog --jobs 4 > "$OUT/cellset.txt" 2>&1 \
