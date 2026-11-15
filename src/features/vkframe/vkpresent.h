@@ -10,6 +10,7 @@
  * unticked: GL's SwapBuffers. Log line `vk present:`. */
 
 #include <cstdint>
+#include <cstring>
 #include <string>
 #include <vector>
 
@@ -798,6 +799,7 @@ struct PrecipRun
 	std::uint8_t ps[kT_preciplookpsBytes] = {};  //!< fxPack( cell_precip_gpu, kT_precipps ) (+ kT_preciplookps for a look run)
 	long long red = 0;              //!< gates only (long long: term 7's reds pass bit 30): 1 the cull radius 0, 2 the strip's last two corners swapped, 4 no near fade, 8 the air dropped, 16 the look dropped (the plain pipelines draw a look run), 32 the atlas dropped (t1 / t7 the zero texture), 128 the light dropped (lit = 1), 256 the lamps' lights dropped (the zero texel buffer), 512 b0 dropped (globalUniforms zero), 1024 the cluster's lists dropped (the zero texel buffer), 2048 the local sun law dropped (vpSun.w 0), 4096 the terrain air's grid dropped (t8 the zero texture), 16384 the ambient's history dropped (t9 the zero texture), 32768 the ambient dropped (the packed volTerms' bit 8 cleared), 65536 the sun's shadow map dropped (t31 the zero D16 array, all lit), 131072 the sun's shadow dropped (the packed volCsm cleared), 262144 the clouds' map dropped (t34 the zero texture), 524288 cascades 1 and 2 swapped (the packed csmMat[1] / csmMat[2]), 1048576 the drift's noise dropped (t30 the zero 3D texture), 2097152 the drift dropped (the packed volAirDrift.x 0), 4194304 the drift's octaves swapped (the packed volAirDriftUv rows 0-2 / 3-5), 8388608 the lamps' cubes dropped (t6 the zero D16 cube array), 16777216 the lamps' shadows off (the packed cellShadowOn 0), 33554432 their fade dropped (the packed cellShadowFadeOn 0), 67108864 the gobos off (the packed cellGoboOn 0), 134217728 their table dropped (the packed cellGoboTbl 0), 268435456 their uv flipped (the packed cellGoboRot 3), 536870912 the roof map dropped (pcRoof the zero texture), 1073741824 the roof off (the packed pcRoofOn 0), 2147483648 the map's axes swapped (the packed pcRoofCam x / y), 4294967296 the interior off (the packed cellInterior 0), 8589934592 the interior's ambient off (the packed cellHasDalc 0), 17179869184 the ambient's GI rule (the packed cellGiAmb 2)
 	const void * global = nullptr;  //!< GL's globalUniforms (b0, 336 bytes; the cluster reads projectionMatrix); null: zeros (a cluster run refused)
+	std::uint8_t csmFrame[256] = {};  //!< L8 route lift 1: GL's wwShadowFrame bytes (std140, sunshadow.cpp CsmFrameBlock) when litIn.csmBlock is 1
 	std::uint8_t * recOut = nullptr;  //!< gates only: the run's records read back (n x 112 bytes, 192 a look run; host-visible records, a fence wait); null in the app
 	struct LitIn
 	{
@@ -810,7 +812,7 @@ struct PrecipRun
 		int uss = 0, cloud = 0, csmProbe = 0, csmRed = 0;  //!< L8 term 3: ussOn (the shadow set's composition), ussCloudOn, csmProbe, csmRed
 		int restir = -1;                //!< L8 term 5: cellRestirOn (-1 absent; present = GL's ReSTIR variant, its cubes not read)
 		int goboPin = 0;                //!< L8 term 6: 1 when cellGoboRot / Flat / Gam / Map is non-zero (a pin or red: not judged)
-		int csmBlock = 0;               //!< L8 route census: 1 when GL's program reads the cascades from wwShadowFrame (WW_FRAME_UBO)
+		int csmBlock = 0;               //!< L8 route lift 1: wwShadowFrame in GL's program (WW_FRAME_UBO): 1 its bytes read into csmFrame, -1 not read
 	};
 	LitIn litIn;                    //!< a lit run's switches as precipLitRead reads them from GL (before any pack; -1 absent)
 	struct TexBuf { unsigned tex = 0, buf = 0, glFmt = 0; long long off = 0, bytes = 0; };
@@ -1163,11 +1165,47 @@ template <class Fn> void precipLitRead( Fn * fn, unsigned prog, PrecipRun & t )
 	t.litIn.csmProbe = geti( "csmProbe" );
 	t.litIn.csmRed = geti( "csmRed" );
 	t.litIn.restir = geti( "cellRestirOn" );
-	t.litIn.csmBlock = fn->glGetUniformBlockIndex( prog, "wwShadowFrame" ) != 0xFFFFFFFFu ? 1 : 0;  // GL_INVALID_INDEX: none
+	// L8 route lift 1 (VKFAR6): WW_FRAME_UBO moves the cascades into wwShadowFrame; its bytes as GL's binding holds them
+	t.litIn.csmBlock = 0;
+	const unsigned bi = fn->glGetUniformBlockIndex( prog, "wwShadowFrame" );
+	if ( bi != 0xFFFFFFFFu && t.litIn.csm > 0 ) {  // GL_INVALID_INDEX: none
+		t.litIn.csmBlock = -1;
+		int bp = 0, need = 0, buf = 0, was = 0, size = 0;
+		long long st = 0, sz = 0;
+		fn->glGetActiveUniformBlockiv( prog, bi, 0x8A3F, &bp );    // GL_UNIFORM_BLOCK_BINDING
+		fn->glGetActiveUniformBlockiv( prog, bi, 0x8A40, &need );  // GL_UNIFORM_BLOCK_DATA_SIZE
+		fn->glGetIntegeri_v( 0x8A28, unsigned( bp ), &buf );       // GL_UNIFORM_BUFFER_BINDING
+		fn->glGetInteger64i_v( 0x8A29, unsigned( bp ), &st );      // GL_UNIFORM_BUFFER_START / SIZE (0: the whole buffer)
+		fn->glGetInteger64i_v( 0x8A2A, unsigned( bp ), &sz );
+		if ( buf && need >= 248 && need <= int( sizeof( t.csmFrame ) ) ) {
+			fn->glGetIntegerv( 0x8F36, &was );  // GL_COPY_READ_BUFFER (its binding)
+			fn->glBindBuffer( 0x8F36, unsigned( buf ) );
+			fn->glGetBufferParameteriv( 0x8F36, 0x8764, &size );  // GL_BUFFER_SIZE
+			if ( st >= 0 && st + need <= size && ( sz == 0 || sz >= need ) ) {
+				fn->glGetBufferSubData( 0x8F36, st, need, t.csmFrame );
+				t.litIn.csmBlock = 1;
+			}
+			fn->glBindBuffer( 0x8F36, unsigned( was ) );
+		}
+	}
 	// L8 term 1 (VKFAR5): the default program compiles the GI out (cellGiOn the constant false without WW_CELL_PRT)
 	t.litIn.gi = 0;
 	for ( const char * nm : { "cellGiOn", "cellGi", "cellGiSlots", "cellRooms", "cellGiAir", "cellGiAirOn", "cellDdgiOn", "cellDdgiAtlas" } )
 		t.litIn.gi += fn->glGetUniformLocation( prog, nm ) >= 0;
+}
+
+/* L8 route lift 1 (VKFAR6): the block's cascade fields over the lit block's (fxPack left them zero: a block member has no
+ * location). std140 offsets: ww_sunshadow.glsl's wwShadowFrame, sunshadow.cpp CsmFrameBlock */
+inline void precipFrameOver( PrecipRun & t )
+{
+	if ( t.litIn.csmBlock <= 0 )
+		return;
+	static const struct { const char * nm; int from, bytes; } kFrame[] = { { "csmMat", 0, 192 }, { "csmInvRange", 192, 12 },
+		{ "csmForce", 204, 4 }, { "csmParams", 208, 16 }, { "csmSplitOffset", 224, 16 }, { "csmProbe", 240, 4 }, { "csmRed", 244, 4 } };
+	for ( const auto & k : kFrame )
+		for ( const FxField & x : kT_preciplitcs )
+			if ( std::strcmp( x.name, k.nm ) == 0 )
+				std::memcpy( t.cs + x.offset, t.csmFrame + k.from, size_t( k.bytes ) );
 }
 
 /* lane VKFAR6 (row L8 term 3): GL's csmMap as fxTexOf reads it, plus the state the lit set's compare sampler copies
@@ -1443,6 +1481,7 @@ template <class Fn> bool precipDraw( Fn * fn, unsigned prog, int first, int coun
 			}
 			if ( t.lit ) {  // slice 2b: the light chain's block (its head is kT_precipcs's, packed again the same)
 				fxPack( fn, prog, kT_preciplitcs, int( std::size( kT_preciplitcs ) ), t.cs );
+				precipFrameOver( t );  // L8 route lift 1: the cascades from GL's frame block
 				t.litBlock = true;
 				t.packs++;
 			}

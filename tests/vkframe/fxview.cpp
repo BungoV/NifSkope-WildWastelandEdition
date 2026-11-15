@@ -130,6 +130,13 @@ struct GlA
 	void( WINAPI * glGetTexParameteriv )( GLenum, GLenum, GLint * ) = nullptr;
 	void( WINAPI * glGetTexParameterfv )( GLenum, GLenum, GLfloat * ) = nullptr;  // L8 term 3: csmMap's border
 	GLuint( WINAPI * glGetUniformBlockIndex )( GLuint, const char * ) = nullptr;  // L8 route census: wwShadowFrame
+	// L8 route lift 1: the bound frame block's bytes
+	void( WINAPI * glGetActiveUniformBlockiv )( GLuint, GLuint, GLenum, GLint * ) = nullptr;
+	void( WINAPI * glGetIntegeri_v )( GLenum, GLuint, GLint * ) = nullptr;
+	void( WINAPI * glGetInteger64i_v )( GLenum, GLuint, long long * ) = nullptr;
+	void( WINAPI * glBindBuffer )( GLenum, GLuint ) = nullptr;
+	void( WINAPI * glGetBufferParameteriv )( GLenum, GLenum, GLint * ) = nullptr;
+	void( WINAPI * glGetBufferSubData )( GLenum, std::ptrdiff_t, std::ptrdiff_t, void * ) = nullptr;
 };
 GlA ga;
 
@@ -173,6 +180,10 @@ bool loadAll()
 	ga.glGetTexParameteriv = &::glGetTexParameteriv;
 	ga.glGetTexParameterfv = &::glGetTexParameterfv;
 	ga.glGetUniformBlockIndex = f.getUniformBlockIndex;
+	ga.glGetActiveUniformBlockiv = f.getActiveUniformBlockiv;
+	ga.glBindBuffer = f.bindBuffer;
+	ok = ok && load( ga.glGetIntegeri_v, "glGetIntegeri_v" ) && load( ga.glGetInteger64i_v, "glGetInteger64i_v" )
+		&& load( ga.glGetBufferParameteriv, "glGetBufferParameteriv" ) && load( ga.glGetBufferSubData, "glGetBufferSubData" );
 	return ok;
 }
 

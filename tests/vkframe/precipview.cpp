@@ -653,6 +653,7 @@ struct Job
 	int roofNx = 0, roofNy = 0;  // L8 term 7: roof.txt's map size (R32F; roof.bin nx x ny floats, row-major from y 0)
 	std::vector<float> roofData;
 	bool hasN() const { return look == 2 && hasTex; }
+	bool frameUbo() const { return uni.count( "wwGateFrameUbo" ) != 0; }  // L8 route lift 1: drawn through pRoute, the cascades in wwShadowFrame
 	struct Buf  // L8 term 2a: a texture buffer (buf.txt: name format texels file)
 	{
 		std::string name, fmt, file;
@@ -938,7 +939,7 @@ int main( int argc, char ** argv )
 	if ( !pUnpack || !pSlab || !pReveal || !pCapBlend || !pProbe || !pPrecip || !pLook || !pTf || !pNoFl || !pLookNoFl || !pPrt || !pRt || !pTfRt || !pTfNew
 		|| !pRoute || !pAllOn || !pRgi )
 		return fatal( "GL programs" );
-	for ( const GLuint prog : { pPrecip, pLook, pTf, pNoFl, pLookNoFl, pPrt, pRt, pTfRt, pTfNew } ) {  // every sampler its own empty unit from 20 (unit 0's default mixes sampler
+	for ( const GLuint prog : { pPrecip, pLook, pTf, pNoFl, pLookNoFl, pPrt, pRt, pTfRt, pTfNew, pRoute, pAllOn, pRgi } ) {  // every sampler its own empty unit from 20 (unit 0's default mixes sampler
 		// types: GL_INVALID_OPERATION at the draw once the air's textures are bound); bindJob then sets the read ones (farcards.cpp's rule)
 		f.useProgram( prog );
 		GLint n = 0, next = 20;
@@ -993,11 +994,22 @@ int main( int argc, char ** argv )
 	f.genBuffers( 1, &ubo );
 	f.bindBuffer( fUbo, ubo );
 	f.bufferData( fUbo, std::ptrdiff_t( zeros.size() ), zeros.data(), fStatic );
-	for ( const GLuint prog : { pPrecip, pLook, pTf, pNoFl, pLookNoFl, pPrt, pRt, pTfRt, pTfNew } ) {
+	for ( const GLuint prog : { pPrecip, pLook, pTf, pNoFl, pLookNoFl, pPrt, pRt, pTfRt, pTfNew, pRoute, pAllOn, pRgi } ) {
 		const GLuint bi = f.getUniformBlockIndex( prog, "globalUniforms" );
 		if ( bi != 0xFFFFFFFFu )
 			f.uniformBlockBinding( prog, bi, 0 );
+		const GLuint sb = f.getUniformBlockIndex( prog, "wwShadowFrame" );  // L8 route lift 1: sunshadow.cpp binds it at 2
+		if ( sb != 0xFFFFFFFFu )
+			f.uniformBlockBinding( prog, sb, 2 );
 	}
+	// L8 route lift 1: the frame block (256 bytes, sunshadow.cpp CsmFrameBlock) at binding 2 as the app keeps it (before the
+	// census); zeros until a frame-block case uploads its cascades
+	std::vector<char> zeros256( 256, 0 );
+	GLuint frameUboBuf = 0;
+	f.genBuffers( 1, &frameUboBuf );
+	f.bindBuffer( fUbo, frameUboBuf );
+	f.bufferData( fUbo, std::ptrdiff_t( zeros256.size() ), zeros256.data(), fStatic );
+	f.bindBufferBase( fUbo, 2, frameUboBuf );
 	// known start state (header): every program's loose uniforms as linked, written back at the top of every bindJob
 	struct UniSnap
 	{
@@ -1009,7 +1021,7 @@ int main( int argc, char ** argv )
 	};
 	std::map<GLuint, std::vector<UniSnap>> linked;
 	bool restoreOn = true;  // false only in the restore check (header)
-	for ( const GLuint prog : { pPrecip, pLook, pTf, pNoFl, pLookNoFl, pPrt, pRt, pTfRt, pTfNew } ) {
+	for ( const GLuint prog : { pPrecip, pLook, pTf, pNoFl, pLookNoFl, pPrt, pRt, pTfRt, pTfNew, pRoute, pAllOn, pRgi } ) {
 		std::vector<UniSnap> & out = linked[prog];
 		GLint n = 0;
 		f.getProgramiv( prog, fActiveUnis, &n );
@@ -1073,7 +1085,7 @@ int main( int argc, char ** argv )
 	};
 	GLuint vao = 0;
 	genVertexArrays( 1, &vao );
-	constexpr int kCases = 27;
+	constexpr int kCases = 28;
 	static char twinKeys[kCases], normKeys[kCases];  // one atlas twin a case (the atlases' sizes differ), one normal-map twin a case
 	static char terrKeys[kCases];  // L8 terrain air: airTerr's twin a case
 	static char envKeys[kCases];  // L8 term 2: volEnvHist's twin a case
@@ -1137,7 +1149,7 @@ int main( int argc, char ** argv )
 		const char * name;
 		long long red;  // past bit 30 from L8 term 7 on
 		bool seen;
-	} reds[33] = { { "cull (radius 0)", 1, false }, { "corners (the strip's last two swapped)", 2, false }, { "near fade (dropped)", 4, false },
+	} reds[34] = { { "cull (radius 0)", 1, false }, { "corners (the strip's last two swapped)", 2, false }, { "near fade (dropped)", 4, false },
 		{ "air (dropped)", 8, false }, { "look (dropped: the plain pipelines)", 16, false }, { "atlas (dropped: the zero texture)", 32, false },
 		{ "light (dropped)", 128, false }, { "lamps' lights (dropped: the zero texel buffer)", 256, false },
 		{ "cluster's globals (dropped: b0 zero)", 512, false }, { "cluster lists (dropped: the zero texel buffer)", 1024, false },
@@ -1152,7 +1164,7 @@ int main( int argc, char ** argv )
 		{ "lamps' gobo uv (flipped: cellGoboRot 3)", 268435456, false }, { "roof map (dropped: the zero pcRoof)", 536870912LL, false },
 		{ "roof (off: pcRoofOn 0)", 1073741824LL, false }, { "roof map's axes (swapped: pcRoofCam x / y)", 2147483648LL, false },
 		{ "interior (off: cellInterior 0)", 4294967296LL, false }, { "interior's ambient (off: cellHasDalc 0)", 8589934592LL, false },
-		{ "ambient's GI rule (cellGiAmb 2)", 17179869184LL, false } };
+		{ "ambient's GI rule (cellGiAmb 2)", 17179869184LL, false }, { "frame block (dropped: the cascade fields zero)", 34359738368LL, false } };
 	using TexBufferFn = void( WINAPI * )( GLenum, GLenum, GLuint );
 	const auto texBuffer = reinterpret_cast<TexBufferFn>( wglGetProcAddress( "glTexBuffer" ) );
 	if ( !texBuffer )
@@ -1181,7 +1193,7 @@ int main( int argc, char ** argv )
 		if ( j.hasN() && !uploadAtlas( dir + "/" + j.name, j.tex[size_t( j.normAt )] ) )
 			return fatal( j.name + ": the normal map upload" );
 		const GLuint normMap = j.hasN() ? j.tex[size_t( j.normAt )].gl : 0;
-		const GLuint pJob = j.look ? pLook : pPrecip;
+		const GLuint pJob = j.look ? pLook : j.frameUbo() ? pRoute : pPrecip;  // (L8 route lift 1: the route default program)
 		for ( int a = 0; a < 5 && j.fog; a++ ) {  // the volume in a shared target, as the app's
 			TexIn & t = j.tex[size_t( j.airAt[a] )];
 			GLuint into = 0;
@@ -1236,6 +1248,33 @@ int main( int argc, char ** argv )
 			roofTex = tex2d( j.roofNx, j.roofNy, 0x822E, fRed, GL_FLOAT, j.roofData.data(), false );
 		const void * uboOver = nullptr;  // the globals check's other b0 (bindJob uploads it in place of the case's)
 		const void * vkGlobalOver = nullptr;  // the same bytes as Vulkan's b0 (the globals mirror)
+		auto frameUpload = [&]( int how ) {  // L8 route lift 1: the block's bytes (std140, CsmFrameBlock): 0 the case's, 1 csmForce 1, 2 zero
+			std::uint8_t blk[256] = {};
+			if ( how != 2 ) {
+				auto put = [&]( const char * nm, int at, int n, bool isInt ) {
+					const auto it = j.uni.find( nm );
+					for ( int k = 0; it != j.uni.end() && k < n && k < int( it->second.size() ); k++ ) {
+						const std::int32_t vi = std::int32_t( it->second[size_t( k )] );
+						const float vf = float( it->second[size_t( k )] );
+						std::memcpy( blk + at + 4 * k, isInt ? static_cast<const void *>( &vi ) : static_cast<const void *>( &vf ), 4 );
+					}
+				};
+				put( "csmMat", 0, 48, false );
+				put( "csmInvRange", 192, 3, false );
+				put( "csmForce", 204, 1, false );
+				put( "csmParams", 208, 4, false );
+				put( "csmSplitOffset", 224, 4, false );
+				put( "csmProbe", 240, 1, true );
+				put( "csmRed", 244, 1, true );
+				if ( how == 1 ) {
+					const float one = 1.0f;
+					std::memcpy( blk + 204, &one, 4 );
+				}
+			}
+			f.bindBuffer( fUbo, frameUboBuf );
+			f.bufferData( fUbo, std::ptrdiff_t( sizeof( blk ) ), blk, fStatic );
+			f.bindBufferBase( fUbo, 2, frameUboBuf );
+		};
 		auto bindJob = [&]( GLuint prog ) {
 			f.useProgram( prog );
 			if ( restoreOn )  // known start state (header)
@@ -1284,6 +1323,8 @@ int main( int argc, char ** argv )
 			f.bindBuffer( fUbo, ubo );  // L8 term 2b: the case's own b0 (zeros but the cluster case's projection)
 			f.bufferData( fUbo, std::ptrdiff_t( zeros.size() ), uboOver ? uboOver : j.global.empty() ? zeros.data() : j.global.data(), fStatic );
 			f.bindBufferBase( fUbo, 0, ubo );
+			if ( j.frameUbo() )  // L8 route lift 1: the case's cascades into the frame block
+				frameUpload( 0 );
 		};
 		// GL: cellprecip.cpp's state, its points
 		std::vector<std::uint16_t> bg, refA, refB, refAn[4], refBn[4];
@@ -1433,6 +1474,8 @@ int main( int argc, char ** argv )
 				} else if ( mode == 24 ) {  // L8 term 3: the cascades forced lit (csmForce 1)
 					const float one = 1.0f;
 					f.uniform1fv( f.getUniformLocation( pJob, "csmForce" ), 1, &one );
+					if ( j.frameUbo() )  // L8 route lift 1: a block member (glUniform is a no-op): the block's csmForce
+						frameUpload( 1 );
 				} else if ( mode == 25 ) {  // L8 term 3: the clouds off (ussCloudOn 0)
 					u1i( pJob, "ussCloudOn", 0 );
 				} else if ( mode == 26 ) {  // L8 term 3: the stable bias off (ussCsmStable.w 0, info)
@@ -1476,6 +1519,8 @@ int main( int argc, char ** argv )
 				} else if ( mode == 42 ) {  // L8 term 8: the veil off (volVeil 0), info
 					u1i( pJob, "volVeil", 0 );
 				} else if ( mode == 9 ) {  // the case as it is (the restore check)
+				} else if ( mode == 43 ) {  // L8 route lift 1: the frame block's bytes zero (the block seen)
+					frameUpload( 2 );
 				} else if ( mode == 6 ) {  // L8 term 3: the local law off (vpSun.w 0)
 					const float off[4] = { 0.5f, 0.4f, 0.3f, 0.0f };
 					f.uniform4fv( f.getUniformLocation( pJob, "vpSun" ), 1, off );
@@ -1548,15 +1593,35 @@ int main( int argc, char ** argv )
 				const Verdict forced = judge( bg, drawGl( 24 ), refA, refB, refB );
 				const Verdict noCloud = judge( bg, drawGl( 25 ), refA, refB, refB );
 				const Verdict noStable = judge( bg, drawGl( 26 ), refA, refB, refB );
+				const bool sfIn = f.getUniformBlockIndex( pJob, "wwShadowFrame" ) != 0xFFFFFFFFu;  // L8 route lift 1
+				auto inBlock = []( const char * nm ) {
+					for ( const char * b : { "csmMat", "csmInvRange", "csmForce", "csmParams", "csmSplitOffset", "csmProbe", "csmRed" } )
+						if ( std::strcmp( nm, b ) == 0 )
+							return true;
+					return false;
+				};
 				std::string cmiss;
 				for ( const char * nm : { "csmMap", "csmMat", "csmInvRange", "csmParams", "csmSplitOffset", "csmForce", "ussCsmStable", "ussCsmTexel",
 						 "ussCsmBias", "ussCloudOn", "ussCloudMap", "ussCloudFromView", "ussCloudFar" } )
-					if ( f.getUniformLocation( pJob, nm ) < 0 && f.getUniformLocation( pJob, ( std::string( nm ) + "[0]" ).c_str() ) < 0 )
+					if ( f.getUniformLocation( pJob, nm ) < 0 && f.getUniformLocation( pJob, ( std::string( nm ) + "[0]" ).c_str() ) < 0
+						&& !( sfIn && inBlock( nm ) ) )  // (a block member counts as found when the program holds wwShadowFrame)
 						cmiss += std::string( cmiss.empty() ? "" : ", " ) + nm;
 				std::printf( "PRECIPVIEW %s sun's shadow checks: GL with volCsm 0 differs %zu of %zu covered samples, csmForce 1 %zu, ussCloudOn 0 %zu "
 					"(each want >= 1000), ussCsmStable.w 0 %zu (info); shadow names missing from GL's program: %s\n", j.name.c_str(), noCsm.flips,
 					noCsm.covered, forced.flips, noCloud.flips, noStable.flips, cmiss.empty() ? "none" : cmiss.c_str() );
 				ok = ok && noCsm.flips >= 1000 && forced.flips >= 1000 && noCloud.flips >= 1000 && cmiss.empty();
+				if ( j.frameUbo() ) {  // L8 route lift 1's seen-checks (header): the block seen, found, csmMat not loose, its bytes read
+					const Verdict noBlk = judge( bg, drawGl( 43 ), refA, refB, refB );
+					const bool loose = f.getUniformLocation( pJob, "csmMat" ) >= 0 || f.getUniformLocation( pJob, "csmMat[0]" ) >= 0;
+					bindJob( pJob );
+					WwVkPresent::PrecipRun tb;
+					tb.lit = true;
+					WwVkPresent::precipLitRead( &ga, pJob, tb );
+					std::printf( "PRECIPVIEW %s frame block checks: GL with the block's bytes zero differs %zu of %zu covered samples (want >= 1000); "
+						"wwShadowFrame %s in GL's program, csmMat %s; precipLitRead csmBlock %d (want 1)\n", j.name.c_str(), noBlk.flips,
+						noBlk.covered, sfIn ? "found" : "MISSING", loose ? "LOOSE (a uniform)" : "not loose", tb.litIn.csmBlock );
+					ok = ok && noBlk.flips >= 1000 && sfIn && !loose && tb.litIn.csmBlock == 1;
+				}
 			}
 			if ( j.drift() ) {  // L8 term 4's seen-checks (header): the drift and its noise seen, their names found
 				const Verdict noDrift = judge( bg, drawGl( 27 ), refA, refB, refB );
@@ -2005,6 +2070,7 @@ int main( int argc, char ** argv )
 			}
 			if ( j.lit ) {  // slice 2b: the light chain's block, as precipDraw packs it
 				WwVkPresent::fxPack( &ga, pJob, WwVkPresent::kT_preciplitcs, int( std::size( WwVkPresent::kT_preciplitcs ) ), t.cs );
+				WwVkPresent::precipFrameOver( t );  // precipDraw's (L8 route lift 1): the cascades from GL's frame block
 				t.litBlock = true;
 				if ( checkSeed ) {  // the sun's inputs packed, not zero (header)
 					std::string zero;
@@ -2403,7 +2469,8 @@ int main( int argc, char ** argv )
 				|| ( ( r.red == 8388608 || r.red == 16777216 || r.red == 33554432 ) && !j.cube() )
 				|| ( ( r.red == 67108864 || r.red == 134217728 || r.red == 268435456 ) && !j.gobo() )
 				|| ( ( r.red == 536870912LL || r.red == 1073741824LL || r.red == 2147483648LL ) && !j.roof() )
-				|| ( ( r.red == 4294967296LL || r.red == 8589934592LL || r.red == 17179869184LL ) && !j.interior() ) )
+				|| ( ( r.red == 4294967296LL || r.red == 8589934592LL || r.red == 17179869184LL ) && !j.interior() )
+				|| ( r.red == 34359738368LL && !j.frameUbo() ) )
 				continue;  // a plain run has no look to drop, a case with no atlas no atlas, an unlit one no light, no lamps no lights
 			std::vector<std::uint16_t> a, b;
 			if ( !runVk( r.red, a, b, false ) ) {
@@ -2432,7 +2499,7 @@ int main( int argc, char ** argv )
 				|| r.red == 131072 || r.red == 262144 || r.red == 524288 || r.red == 1048576 || r.red == 2097152 || r.red == 4194304
 				|| r.red == 8388608 || r.red == 16777216 || r.red == 33554432 || r.red == 67108864 || r.red == 134217728
 				|| r.red == 268435456 || r.red == 536870912LL || r.red == 1073741824LL || r.red == 2147483648LL || r.red == 4294967296LL
-				|| r.red == 8589934592LL || r.red == 17179869184LL ) && v.ok() ) {  // the cluster case must see its b0 and its lists dropped
+				|| r.red == 8589934592LL || r.red == 17179869184LL || r.red == 34359738368LL ) && v.ok() ) {  // the cluster case must see its b0 and its lists dropped
 				std::printf( "PRECIPVIEW %s red %s PASSED: the case does not see it\n", j.name.c_str(), r.name );
 				ok = false;
 			}
@@ -2570,7 +2637,7 @@ int main( int argc, char ** argv )
 				if ( s.find( '[' ) != std::string::npos )
 					s.resize( s.find( '[' ) );
 				if ( blk >= 0 ) {
-					if ( GLuint( blk ) == gu || blocks[blk]++ )
+					if ( GLuint( blk ) == gu || GLuint( blk ) == sf || blocks[blk]++ )  // (L8 route lift 1: wwShadowFrame read by precipLitRead)
 						continue;
 					n++;
 					if ( say )
