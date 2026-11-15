@@ -274,8 +274,8 @@ int lampFb( std::uintptr_t key, int layer, std::string & why )
 		if ( S.fbs[k].key == key && S.fbs[k].layer == layer )
 			return int( k );
 	const Shared * sh = sharedFind( key );
-	if ( !sh || !sh->img || sh->fmt != VK_FORMAT_D16_UNORM || sh->type != 3 ) {
-		why = "the lamp cubes are not a shared D16 cube array";
+	if ( !sh || !sh->img || sh->fmt != VK_FORMAT_D16_UNORM || ( sh->type != 3 && sh->type != 2 ) ) {
+		why = "the lamp target is not a shared D16 cube array or 2D array";
 		return -1;
 	}
 	LampFb f;
@@ -328,16 +328,19 @@ bool lampWork( std::string & why )
 		const LampFb & F = S.fbs[std::size_t( S.opFb[o] )];
 		VkClearValue cv {};
 		cv.depthStencil.depth = 1.0f;
+		// lane VKLAMP4: the cut is the render area (a CLEAR load op clears only it, as GL's scissored glClear) and the scissor;
+		// the viewport keeps the face's size at its (shifted) origin
+		const VkRect2D sc = op.cut.w > 0 ? VkRect2D { { op.cut.x, op.cut.y }, { std::uint32_t( op.cut.w ), std::uint32_t( op.cut.h ) } }
+										: VkRect2D { { 0, 0 }, { std::uint32_t( F.w ), std::uint32_t( F.h ) } };
 		VkRenderPassBeginInfo rbi { VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO };
 		rbi.renderPass = S.pass[op.clear ? 0 : 1];
 		rbi.framebuffer = F.fb;
-		rbi.renderArea = { { 0, 0 }, { std::uint32_t( F.w ), std::uint32_t( F.h ) } };
+		rbi.renderArea = sc;
 		rbi.clearValueCount = 1;
 		rbi.pClearValues = &cv;
 		v.vkCmdBeginRenderPass( S.cmd, &rbi, VK_SUBPASS_CONTENTS_INLINE );
 		if ( op.n ) {
-			const VkViewport vp { 0.0f, 0.0f, float( F.w ), float( F.h ), 0.0f, 1.0f };
-			const VkRect2D sc { { 0, 0 }, { std::uint32_t( F.w ), std::uint32_t( F.h ) } };
+			const VkViewport vp { float( op.vx ), float( op.vy ), float( F.w ), float( F.h ), 0.0f, 1.0f };
 			v.vkCmdSetViewport( S.cmd, 0, 1, &vp );
 			v.vkCmdSetScissor( S.cmd, 0, 1, &sc );
 			const std::uint32_t off = std::uint32_t( VkDeviceSize( o ) * kLampFaceBytes );
@@ -522,14 +525,19 @@ bool lampRun( const LampRun & t, std::string & why )
 	if ( t.ops.empty() )
 		return true;
 	if ( !t.tex || !t.key || !sharedTargetIs( t.key, t.tex ) )
-		return refuse( "the lamp cubes are not the shared cube array" );
+		return refuse( "the lamp target is not a live shared target" );
 	const Shared * sh = sharedFind( t.key );
 	if ( !sh || sh->w != t.face || sh->h != t.face || sh->d != t.layers )
-		return refuse( "the lamp cubes' size is not the shared array's" );
+		return refuse( "the lamp target's size is not the shared array's" );
 	std::size_t draws = 0;
 	for ( const LampOp & op : t.ops ) {
 		if ( op.layer < 0 || op.layer >= t.layers )
-			return refuse( "an op names no layer of the cube array" );
+			return refuse( "an op names no layer of the lamp target" );
+		if ( op.cut.w < 0 || op.cut.h < 0 || ( op.cut.w > 0 && ( op.cut.h == 0 || op.cut.x < 0 || op.cut.y < 0 || op.cut.x + op.cut.w > t.face
+				|| op.cut.y + op.cut.h > t.face ) ) )
+			return refuse( "a lamp op's cut is outside its layer" );
+		if ( op.vx <= -2 * t.face || op.vy <= -2 * t.face || op.vx >= t.face || op.vy >= t.face )
+			return refuse( "a lamp op's viewport origin is out of reach" );
 		if ( std::size_t( op.first ) + op.n > t.nDraws )
 			return refuse( "a lamp op's draws are out of range" );
 		draws += op.n;

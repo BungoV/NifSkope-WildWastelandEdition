@@ -14,11 +14,21 @@
 
 namespace WwVkPresent
 {
-//! one render pass: a layer of the cube array (6 * slot + face), cleared or kept, its face block and its commands
+//! a texel rect of a layer (GL's window coordinates = the image's rows: no y flip on either side)
+struct LampRect
+{
+	int x = 0, y = 0, w = 0, h = 0;
+};
+
+/*! one render pass: a layer of the run's target (the cube array: 6 * slot + face; lane VKLAMP4: the lamp tier's store, a
+ * D16 2D array), cleared or kept, its face block and its commands. Lane VKLAMP4: the viewport's origin (a packed half
+ * shifts it, it may be negative) and the cut (GL's scissor: the clear and the draws stay inside it; w 0 = the whole layer) */
 struct LampOp
 {
 	int layer = 0;
 	bool clear = true;
+	int vx = 0, vy = 0;
+	LampRect cut;
 	float rel[16] = {};      //!< shRelFromView as GL uploads it (column-major)
 	float clip[16] = {};     //!< shClipFromRel (lampFaceClip)
 	float rn[2] = {};        //!< shRadiusNear: radius, near clip
@@ -40,7 +50,7 @@ struct LampMesh
 //! the pass: the shared cube array, the casters' meshes, their matrices, the draws and the ordered ops
 struct LampRun
 {
-	unsigned tex = 0;               //!< GL's name of the shared cube array
+	unsigned tex = 0;               //!< GL's name of the shared target (the cube array, type 3; lane VKLAMP4: or the store, type 2)
 	std::uintptr_t key = 0;         //!< its sharedTarget key
 	int face = 0, layers = 0;
 	const LampMesh * meshes = nullptr;
@@ -80,6 +90,64 @@ inline void lampRelFromView( const float rot[9], float sc, const float cam[3], c
 	}
 	rel[3] = rel[7] = rel[11] = 0.0f;
 	rel[15] = 1.0f;
+}
+
+/* lane VKLAMP4: the stored maps' layout (lane LAMPSHADOW1's, moved here from celllamps.cpp so lampview tests the app's
+ * numbers). A wall lamp's back face looks into its wall; the 4 side faces keep only their room half, packed 2 to a layer */
+//! side face f of a lamp whose back is face back: its room half and its wall half (face size S)
+inline void lampSideHalves( int f, int back, int S, LampRect & room, LampRect & wall )
+{
+	static const float M[6][3] = { { 1, 0, 0 }, { -1, 0, 0 }, { 0, 1, 0 }, { 0, -1, 0 }, { 0, 0, 1 }, { 0, 0, -1 } };
+	static const float U[6][3] = { { 0, 0, -1 }, { 0, 0, 1 }, { 1, 0, 0 }, { 1, 0, 0 }, { 1, 0, 0 }, { -1, 0, 0 } };
+	static const float V[6][3] = { { 0, -1, 0 }, { 0, -1, 0 }, { 0, 0, 1 }, { 0, 0, -1 }, { 0, -1, 0 }, { 0, -1, 0 } };
+	const float * fr = M[back ^ 1];
+	const float cu = U[f][0] * fr[0] + U[f][1] * fr[1] + U[f][2] * fr[2];
+	const float cv = V[f][0] * fr[0] + V[f][1] * fr[1] + V[f][2] * fr[2];
+	const int h = S / 2;
+	if ( cu != 0.0f ) {
+		room = { cu > 0.0f ? h : 0, 0, h, S };
+		wall = { cu > 0.0f ? 0 : h, 0, h, S };
+	} else {
+		room = { 0, cv > 0.0f ? h : 0, S, h };
+		wall = { 0, cv > 0.0f ? 0 : h, S, h };
+	}
+}
+
+//! a wall lamp's side faces (the four off its back axis) with their packed place: layer 1 + pair, member 0 / 1
+inline void lampSides( int back, int sides[4], int layer[4], int member[4] )
+{
+	int n = 0, pair = 0;
+	for ( int ax = 0; ax < 3; ax++ ) {
+		if ( ax == back / 2 )
+			continue;
+		for ( int j = 0; j < 2; j++ ) {
+			sides[n] = 2 * ax + j;
+			layer[n] = 1 + pair;
+			member[n] = j;
+			n++;
+		}
+		pair++;
+	}
+}
+
+//! a room half's packed rect in its store layer
+inline LampRect lampPacked( const LampRect & room, int member, int S )
+{
+	const int h = S / 2;
+	return room.w == h ? LampRect { member * h, 0, h, S } : LampRect { 0, member * h, S, h };
+}
+
+//! the wall's plane as a quad (4 world points, 12 floats), out past the light's reach: back face, wall distance
+inline void lampWallQuad( const float lpos[3], float radius, int back, float dist, float quad[12] )
+{
+	const int ax = back / 2, a1 = ( ax + 1 ) % 3, a2 = ( ax + 2 ) % 3;
+	const float sg = ( back & 1 ) ? -1.0f : 1.0f, ext = radius * 2.0f + 64.0f;
+	for ( int v = 0; v < 4; v++ ) {
+		float * q = quad + 3 * v;
+		q[ax] = lpos[ax] + sg * dist;
+		q[a1] = lpos[a1] + ( v == 0 || v == 3 ? -ext : ext );
+		q[a2] = lpos[a2] + ( v < 2 ? -ext : ext );
+	}
 }
 
 std::string lampRefusal();  //!< why lampRun would refuse on this device (empty: it can run)

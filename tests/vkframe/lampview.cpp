@@ -84,6 +84,7 @@ struct Fns
 	void( WINAPI * framebufferTextureLayer )( GLenum, GLenum, GLuint, GLint, GLint ) = nullptr;
 	GLenum( WINAPI * checkFramebufferStatus )( GLenum ) = nullptr;
 	void( WINAPI * texImage3D )( GLenum, GLint, GLint, GLsizei, GLsizei, GLsizei, GLint, GLenum, GLenum, const void * ) = nullptr;
+	void( WINAPI * blitFramebuffer )( GLint, GLint, GLint, GLint, GLint, GLint, GLint, GLint, GLbitfield, GLenum ) = nullptr;  // VKLAMP4
 };
 Fns f;
 
@@ -107,7 +108,8 @@ bool loadAll()
 		&& load( f.enableVertexAttribArray, "glEnableVertexAttribArray" ) && load( f.vertexAttribPointer, "glVertexAttribPointer" )
 		&& load( f.drawElementsBaseVertex, "glDrawElementsBaseVertex" ) && load( f.genFramebuffers, "glGenFramebuffers" )
 		&& load( f.bindFramebuffer, "glBindFramebuffer" ) && load( f.framebufferTextureLayer, "glFramebufferTextureLayer" )
-		&& load( f.checkFramebufferStatus, "glCheckFramebufferStatus" ) && load( f.texImage3D, "glTexImage3D" );
+		&& load( f.checkFramebufferStatus, "glCheckFramebufferStatus" ) && load( f.texImage3D, "glTexImage3D" )
+		&& load( f.blitFramebuffer, "glBlitFramebuffer" );
 }
 
 std::string readFile( const std::string & p )
@@ -968,6 +970,362 @@ int main( int argc, char ** argv )
 		ok = poolFrame( 4 ) && ok;
 		ok = poolTake( "frame4", 5, -1, -1, 1 ) && ok;
 	}
+
+	// ---- lane VKLAMP4: the lamp tier's stored maps (celllamps.cpp lampShadowPass) on frame 4's fixture. Slot 0 = a full lamp
+	// (store blocks 0 and 1), slot 3 = a wall lamp (back face 4, block 2); slot 3's mover (frame 4's plate) over the restored map
+	const int kStoreLayers = 9, kBack = 4, kBase3 = 6 * 3;
+	static unsigned storeHome;
+	const std::uintptr_t storeKey = reinterpret_cast<std::uintptr_t>( &storeHome );
+	GLuint refStore = 0, shStore = 0, fboR = 0, qVao = 0, qPos = 0, qIdx = 0;
+	glGenTextures( 1, &refStore );
+	glBindTexture( kTex2DArray, refStore );
+	f.texImage3D( kTex2DArray, 0, GLint( kD16 ), F, F, kStoreLayers, 0, GL_DEPTH_COMPONENT, GL_UNSIGNED_SHORT, nullptr );
+	glTexParameteri( kTex2DArray, GL_TEXTURE_MIN_FILTER, GL_NEAREST );
+	glTexParameteri( kTex2DArray, GL_TEXTURE_MAG_FILTER, GL_NEAREST );
+	glTexParameteri( kTex2DArray, 0x813D, 0 );  // GL_TEXTURE_MAX_LEVEL
+	glBindTexture( kTex2DArray, 0 );
+	const bool sOk = WwVkPresent::sharedTarget( storeKey, 2, F, F, kStoreLayers, kD16, shStore, why );
+	if ( !sOk ) {
+		std::printf( "LAMPVIEW stored FAIL (sharedTarget, the store: %s)\n", why.c_str() );
+		ok = false;
+	}
+	f.genFramebuffers( 1, &fboR );
+	// the wall quad (lampWallQuad, 0.6 radius out on the back's axis) and the world -> view matrix GL's quad draw takes
+	float quad[12], viewM[16] = {};
+	WwVkPresent::lampWallQuad( lights[3].pos, lights[3].radius, kBack, 0.6f * lights[3].radius, quad );
+	for ( int j = 0; j < 3; j++ ) {
+		double t = 0.0;
+		for ( int row = 0; row < 3; row++ ) {
+			viewM[row * 4 + j] = sc * rotA[j * 3 + row];
+			t += double( sc * rotA[j * 3 + row] ) * cam[row];
+		}
+		viewM[12 + j] = float( -t );
+	}
+	viewM[15] = 1.0f;
+	{
+		const std::uint16_t qi[6] = { 0, 1, 2, 0, 2, 3 };
+		f.genBuffers( 1, &qPos );
+		f.genBuffers( 1, &qIdx );
+		f.genVertexArrays( 1, &qVao );
+		f.bindVertexArray( qVao );
+		f.bindBuffer( kArrayBuf, qPos );
+		f.bufferData( kArrayBuf, std::ptrdiff_t( sizeof quad ), quad, kStatic );
+		f.enableVertexAttribArray( 0 );
+		f.vertexAttribPointer( 0, 3, GL_FLOAT, GL_FALSE, 12, nullptr );
+		f.bindBuffer( kElemBuf, qIdx );
+		f.bufferData( kElemBuf, std::ptrdiff_t( sizeof qi ), qi, kStatic );
+		f.bindVertexArray( 0 );
+		f.bindBuffer( kArrayBuf, 0 );
+	}
+	// celllamps' steps in its order: kind 0 a face draw (into the store or a cube face), 1 a blit store -> cube, 2 the wall quad
+	struct SStep
+	{
+		int kind;
+		bool store;
+		int slot, face, layer, vx, vy;
+		WwVkPresent::LampRect cut;  // w 0: the whole layer; a blit: its destination rect
+		bool clear;
+		std::uint32_t first, n;
+		int src;                    // a blit's store layer
+		WwVkPresent::LampRect a;    // a blit's source rect
+	};
+	const int blk0[2] = { 0, 1 }, blk3 = 2;
+	auto steps = [&]( bool store ) {
+		std::vector<SStep> v;
+		const WwVkPresent::LampRect full { 0, 0, F, F };
+		int sides[4], layer[4], member[4];
+		WwVkPresent::lampSides( kBack, sides, layer, member );
+		WwVkPresent::LampRect room[4], wall[4];
+		for ( int i = 0; i < 4; i++ )
+			WwVkPresent::lampSideHalves( sides[i], kBack, F, room[i], wall[i] );
+		const std::uint32_t n0 = std::uint32_t( slotCount[0] ), n3 = std::uint32_t( slotCount[3] );
+		if ( store ) {
+			for ( int fc = 0; fc < 6; fc++ )
+				v.push_back( { 0, true, 0, fc, 3 * blk0[fc / 3] + fc % 3, 0, 0, {}, true, slotCmd[0], n0, 0, {} } );
+			v.push_back( { 0, true, 3, kBack ^ 1, 3 * blk3, 0, 0, {}, true, slotCmd[3], n3, 0, {} } );
+			for ( int i = 0; i < 4; i++ ) {
+				const WwVkPresent::LampRect dst = WwVkPresent::lampPacked( room[i], member[i], F );
+				v.push_back( { 0, true, 3, sides[i], 3 * blk3 + layer[i], dst.x - room[i].x, dst.y - room[i].y, dst, true, slotCmd[3], n3, 0, {} } );
+			}
+		}
+		for ( int fc = 0; fc < 6; fc++ )
+			v.push_back( { 1, false, 0, fc, fc, 0, 0, full, false, 0, 0, 3 * blk0[fc / 3] + fc % 3, full } );
+		v.push_back( { 1, false, 3, kBack ^ 1, kBase3 + ( kBack ^ 1 ), 0, 0, full, false, 0, 0, 3 * blk3, full } );
+		for ( int i = 0; i < 4; i++ )
+			v.push_back( { 1, false, 3, sides[i], kBase3 + sides[i], 0, 0, room[i], false, 0, 0, 3 * blk3 + layer[i],
+				WwVkPresent::lampPacked( room[i], member[i], F ) } );
+		v.push_back( { 2, false, 3, kBack, kBase3 + kBack, 0, 0, {}, true, 0, 0, 0, {} } );
+		for ( int i = 0; i < 4; i++ )
+			v.push_back( { 2, false, 3, sides[i], kBase3 + sides[i], 0, 0, wall[i], true, 0, 0, 0, {} } );
+		for ( int fc = 0; fc < 6; fc++ )  // the mover over the restored map (LOAD)
+			v.push_back( { 0, false, 3, fc, kBase3 + fc, 0, 0, {}, false, moverCmd, 1u, 0, {} } );
+		return v;
+	};
+	auto glState = [&]() {
+		f.useProgram( prog );
+		f.uniform1i( lAt, 0 );
+		f.bindVertexArray( vao );
+		glDisable( GL_BLEND );
+		glDisable( GL_CULL_FACE );
+		glDisable( 0x8037 );  // GL_POLYGON_OFFSET_FILL
+		glEnable( GL_DEPTH_TEST );
+		glDepthFunc( GL_LEQUAL );
+		glDepthMask( GL_TRUE );
+		glPolygonMode( GL_FRONT_AND_BACK, GL_FILL );
+	};
+	// one step as celllamps' GL code does it (drawFace: attach, viewport at the origin, scissor = cut, clear, draws; blit)
+	auto glRun = [&]( const SStep & s, GLuint cube, GLuint store, const std::vector<float> & mv ) {
+		const WwVkPresent::LampRect c = s.cut.w > 0 ? s.cut : WwVkPresent::LampRect { 0, 0, F, F };
+		if ( s.kind == 1 ) {
+			f.bindFramebuffer( 0x8CA8, fboR );  // GL_READ_FRAMEBUFFER
+			f.framebufferTextureLayer( 0x8CA8, kDepthAtt, store, 0, s.src );
+			glReadBuffer( GL_NONE );
+			f.bindFramebuffer( 0x8CA9, fbo );  // GL_DRAW_FRAMEBUFFER
+			f.framebufferTextureLayer( 0x8CA9, kDepthAtt, cube, 0, s.layer );
+			glDrawBuffer( GL_NONE );
+			if ( f.checkFramebufferStatus( 0x8CA8 ) != kComplete || f.checkFramebufferStatus( 0x8CA9 ) != kComplete )
+				return false;
+			glDisable( GL_SCISSOR_TEST );
+			f.blitFramebuffer( s.a.x, s.a.y, s.a.x + s.a.w, s.a.y + s.a.h, c.x, c.y, c.x + c.w, c.y + c.h, GL_DEPTH_BUFFER_BIT, GL_NEAREST );
+			f.bindFramebuffer( kFb, fbo );
+			return true;
+		}
+		if ( !attach( s.store ? store : cube, s.layer ) )
+			return false;
+		glViewport( s.vx, s.vy, F, F );
+		glEnable( GL_SCISSOR_TEST );
+		glScissor( c.x, c.y, c.w, c.h );
+		float rel[16], clip[16];
+		relOf( s.slot, rel );
+		WwVkPresent::lampFaceClip( s.face, lights[s.slot].radius, clip );
+		f.uniformMatrix4fv( lRel, 1, GL_FALSE, rel );
+		f.uniform2f( lRn, lights[s.slot].radius, lights[s.slot].nearClip );
+		f.uniformMatrix4fv( lClip, 1, GL_FALSE, clip );
+		if ( s.clear ) {
+			glClearDepth( 1.0 );
+			glClear( GL_DEPTH_BUFFER_BIT );
+		}
+		if ( s.kind == 2 ) {
+			f.uniformMatrix4fv( lMv, 1, GL_FALSE, viewM );
+			f.bindVertexArray( qVao );
+			glDrawElements( GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, nullptr );
+			f.bindVertexArray( vao );
+		} else {
+			for ( std::uint32_t k = s.first; k < s.first + s.n; k++ ) {
+				const std::uint32_t * cm = &cmds[std::size_t( k ) * 5];
+				f.uniformMatrix4fv( lMv, 1, GL_FALSE, &mv[std::size_t( cm[4] ) * 16] );
+				f.drawElementsBaseVertex( GL_TRIANGLES, GLsizei( cm[0] ), GL_UNSIGNED_SHORT,
+					reinterpret_cast<const void *>( std::size_t( cm[2] ) * 2 ), GLint( cm[3] ) );
+			}
+		}
+		glDisable( GL_SCISSOR_TEST );
+		return true;
+	};
+	auto junkS = [&]( GLuint tex ) {
+		glDisable( GL_SCISSOR_TEST );
+		glDepthMask( GL_TRUE );
+		glClearDepth( 0.37 );
+		bool r = true;
+		for ( int l = 0; l < kStoreLayers; l++ ) {
+			r = attach( tex, l ) && r;
+			glViewport( 0, 0, F, F );
+			glClear( GL_DEPTH_BUFFER_BIT );
+		}
+		glClearDepth( 1.0 );
+		return r;
+	};
+	auto readStore = [&]( GLuint tex, std::vector<std::uint16_t> & out ) {
+		glPixelStorei( GL_PACK_ALIGNMENT, 1 );
+		out.assign( std::size_t( F ) * F * kStoreLayers, 0 );
+		for ( int l = 0; l < kStoreLayers; l++ ) {
+			attach( tex, l );
+			glReadPixels( 0, 0, F, F, GL_DEPTH_COMPONENT, GL_UNSIGNED_SHORT, out.data() + std::size_t( l ) * F * F );
+		}
+	};
+	// the reference: GL does every step (movers false: the stored-only picture)
+	auto refArm = [&]( bool store, bool movers, const std::vector<float> & mv ) {
+		bool r = junk( refT, -1 ) && ( !store || junkS( refStore ) );
+		glState();
+		for ( const SStep & s : steps( store ) )
+			if ( movers || s.kind != 0 || s.store )
+				r = glRun( s, refT, refStore, mv ) && r;
+		f.bindVertexArray( 0 );
+		return r && glGetError() == GL_NO_ERROR;
+	};
+	enum SRed { kSNone, kSOrigin, kSWhole, kSMoverClear };
+	auto lampGo = [&]( GLuint tex, std::uintptr_t k, int layers, const std::vector<WwVkPresent::LampOp> & ops, const std::vector<float> & mv ) {
+		WwVkPresent::LampRun run;
+		run.tex = tex;
+		run.key = k;
+		run.face = F;
+		run.layers = layers;
+		std::vector<WwVkPresent::LampMesh> lm( meshes.size() );
+		for ( std::size_t m = 0; m < meshes.size(); m++ ) {
+			lm[m].key = m + 1;
+			lm[m].gen = meshGen[m];
+			lm[m].pos = pos.data() + std::size_t( meshes[m].baseVertex ) * 3;
+			lm[m].verts = meshVerts[m];
+			lm[m].idx = idx.data() + meshes[m].firstIndex;
+			lm[m].indices = meshes[m].count;
+		}
+		std::vector<std::uint32_t> dr;
+		for ( std::size_t c = 0; c < cmds.size() / 5; c++ ) {
+			std::uint32_t me = 0;
+			while ( me < meshes.size() && meshes[me].firstIndex != cmds[c * 5 + 2] )
+				me++;
+			dr.push_back( me );
+			dr.push_back( cmds[c * 5 + 4] );
+		}
+		run.meshes = lm.data();
+		run.nMeshes = lm.size();
+		run.mats = mv.data();
+		run.nMats = std::size_t( kCasters );
+		run.draws = dr.data();
+		run.nDraws = dr.size() / 2;
+		run.ops = ops;
+		std::string w;
+		if ( !WwVkPresent::lampRun( run, w ) ) {
+			std::printf( "LAMPVIEW stored lampRun refused: %s\n", w.c_str() );
+			return false;
+		}
+		return true;
+	};
+	// the app's route: run A (the store's still casters), GL's blits and wall quads, run B (the movers): no read between
+	auto vkArm = [&]( bool store, SRed red, const std::vector<float> & mv ) {
+		bool r = junk( shT, -1 ) && ( !store || junkS( shStore ) );
+		const std::vector<SStep> v = steps( store );
+		std::vector<WwVkPresent::LampOp> opsA, opsB;
+		for ( const SStep & s : v ) {
+			if ( s.kind != 0 )
+				continue;
+			WwVkPresent::LampOp op;
+			op.layer = s.layer;
+			op.clear = s.clear || ( red == kSMoverClear && !s.store );
+			op.vx = red == kSOrigin ? 0 : s.vx;
+			op.vy = red == kSOrigin ? 0 : s.vy;
+			op.cut = s.cut;
+			if ( red == kSWhole && s.store && s.cut.w > 0 && ( s.cut.x > 0 || s.cut.y > 0 ) )
+				op.cut = WwVkPresent::LampRect {};  // the second member cleared (and drawn) over the whole layer
+			relOf( s.slot, op.rel );
+			WwVkPresent::lampFaceClip( s.face, lights[s.slot].radius, op.clip );
+			op.rn[0] = lights[s.slot].radius;
+			op.rn[1] = lights[s.slot].nearClip;
+			op.first = s.first;
+			op.n = s.n;
+			( s.store ? opsA : opsB ).push_back( op );
+		}
+		if ( store )
+			r = lampGo( shStore, storeKey, kStoreLayers, opsA, mv ) && r;
+		glState();
+		for ( const SStep & s : v )
+			if ( s.kind != 0 )
+				r = glRun( s, shT, shStore, mv ) && r;
+		f.bindVertexArray( 0 );
+		r = lampGo( shT, key, kLayers, opsB, mv ) && r;
+		return r && glGetError() == GL_NO_ERROR;
+	};
+	// verdicts: slots 0 and 3's cube faces and every store layer (S2: each side's store EXACT against its own S1 bytes)
+	auto judgeS = [&]( int fr, const std::vector<std::uint16_t> & vc, const std::vector<std::uint16_t> & rc, const std::vector<std::uint16_t> & vs,
+						 const std::vector<std::uint16_t> & rs, const std::vector<std::uint16_t> * pvs, const std::vector<std::uint16_t> * prs,
+						 bool print, Diff * sum ) {
+		bool good = true;
+		const std::size_t n = std::size_t( F ) * F;
+		for ( int k : { 0, 3 } )
+			for ( int fc = 0; fc < 6; fc++ ) {
+				const std::size_t l = std::size_t( 6 * k + fc );
+				const Diff v = compare( vc.data() + l * n, rc.data() + l * n, n );
+				if ( sum )
+					sum->add( v );
+				const bool lok = v.ok();
+				good = good && lok;
+				if ( print )
+					std::printf( "LAMPVIEW stored S%d slot%d/face%d %s (%zu of %zu covered texels differ, %zu past 1 unit, max %d; set vk %zu gl %zu)\n", fr,
+						k, fc, !lok ? "FAIL" : v.diff ? "BOUND" : "EXACT", v.diff, v.covered, v.past1, v.maxu, v.vkSet, v.refSet );
+			}
+		for ( int l = 0; l < kStoreLayers; l++ ) {
+			Diff v = compare( vs.data() + std::size_t( l ) * n, rs.data() + std::size_t( l ) * n, n );
+			if ( sum )
+				sum->add( v );
+			bool lok = v.ok();
+			if ( pvs && prs ) {
+				const Diff va = compare( vs.data() + std::size_t( l ) * n, pvs->data() + std::size_t( l ) * n, n );
+				const Diff vb = compare( rs.data() + std::size_t( l ) * n, prs->data() + std::size_t( l ) * n, n );
+				lok = va.diff == 0 && va.covered > 0 && vb.diff == 0 && vb.covered > 0;
+				v = va;
+			}
+			good = good && lok;
+			if ( print )
+				std::printf( "LAMPVIEW stored S%d store%d %s%s (%zu of %zu covered texels differ, %zu past 1 unit, max %d; set vk %zu gl %zu)\n", fr, l,
+					!lok ? "FAIL" : v.diff ? "BOUND" : "EXACT", pvs ? " held" : "", v.diff, v.covered, v.past1, v.maxu, v.vkSet, v.refSet );
+		}
+		// each packed half covers texels on both sides
+		int sides[4], layer[4], member[4];
+		WwVkPresent::lampSides( kBack, sides, layer, member );
+		for ( int i = 0; i < 4; i++ ) {
+			WwVkPresent::LampRect room, wall;
+			WwVkPresent::lampSideHalves( sides[i], kBack, F, room, wall );
+			const WwVkPresent::LampRect p = WwVkPresent::lampPacked( room, member[i], F );
+			const std::size_t base = std::size_t( 3 * blk3 + layer[i] ) * n;
+			std::size_t cv = 0, cr = 0;
+			for ( int y = p.y; y < p.y + p.h; y++ )
+				for ( int x = p.x; x < p.x + p.w; x++ ) {
+					cv += vs[base + std::size_t( y ) * F + x] != 0xFFFF;
+					cr += rs[base + std::size_t( y ) * F + x] != 0xFFFF;
+				}
+			good = good && cv > 0 && cr > 0;
+			if ( print )
+				std::printf( "LAMPVIEW stored S%d half face%d (store%d member %d, %d,%d %dx%d) covers vk %zu gl %zu %s\n", fr, sides[i], 3 * blk3 + layer[i],
+					member[i], p.x, p.y, p.w, p.h, cv, cr, cv && cr ? "ok" : "FAIL: proves nothing" );
+		}
+		return good;
+	};
+	if ( sOk ) {
+		std::vector<float> matsS2 = mats[0];  // S2: only the mover moves
+		std::memcpy( &matsS2[std::size_t( kMover ) * 16], &mats[1][std::size_t( kMover ) * 16], 64 );
+		const std::vector<float> * smv[2] = { &mats[0], &matsS2 };
+		std::vector<std::uint16_t> rc[2], rs[2], vc[2], vs[2], noMov;
+		for ( int fr = 0; fr < 2; fr++ ) {
+			const bool store = fr == 0;
+			bool r = refArm( store, false, *smv[fr] );
+			readAll( refT, noMov );
+			r = r && refArm( store, true, *smv[fr] );
+			readAll( refT, rc[fr] );
+			readStore( refStore, rs[fr] );
+			r = r && vkArm( store, kSNone, *smv[fr] );
+			readAll( shT, vc[fr] );
+			readStore( shStore, vs[fr] );
+			if ( !r ) {
+				std::printf( "LAMPVIEW stored S%d FAIL (a run failed)\n", fr + 1 );
+				ok = false;
+				continue;
+			}
+			ok = judgeS( fr + 1, vc[fr], rc[fr], vs[fr], rs[fr], fr ? &vs[0] : nullptr, fr ? &rs[0] : nullptr, true, nullptr ) && ok;
+			std::size_t won = 0;
+			for ( std::size_t i = std::size_t( kBase3 ) * F * F; i < std::size_t( kBase3 + 6 ) * F * F; i++ )
+				won += noMov[i] != rc[fr][i];
+			std::printf( "LAMPVIEW stored S%d mover wins %zu texels over the stored-only picture (%s)\n", fr + 1, won, won ? "ok" : "FAIL: proves nothing" );
+			ok = ok && won > 0;
+		}
+		const struct
+		{
+			const char * name;
+			SRed red;
+		} sReds[3] = { { "store origin (the shifted viewport origin dropped)", kSOrigin },
+			{ "whole-layer clear (the second member cleared over the whole layer)", kSWhole }, { "stored mover cleared (run B's LOAD ops clear)", kSMoverClear } };
+		for ( const auto & rd : sReds ) {
+			Diff all;
+			std::vector<std::uint16_t> c, s;
+			const bool ran = vkArm( true, rd.red, mats[0] );
+			readAll( shT, c );
+			readStore( shStore, s );
+			const bool passes = ran && !rc[0].empty() && judgeS( 1, c, rc[0], s, rs[0], nullptr, nullptr, false, &all );
+			std::printf( "LAMPVIEW RED %s %s (%zu of %zu covered texels differ, %zu past 1 unit, max %d; must FAIL)\n", passes ? "PASSES" : "FAIL", rd.name,
+				all.diff, all.covered, all.past1, all.maxu );
+			ok = ok && !passes;
+		}
+		poolTake( "stored", -1, -1, -1, -1 );
+	}
+	WwVkPresent::sharedTargetDrop( storeKey );
 	const WwVkPresent::LampStat & st = tot;
 	std::printf( "LAMPVIEW stat: %d runs on Vulkan, %d failed (%s), %d ops, %d draws, %.3f ms a run (max %.3f), %d pipelines built in %.1f ms; "
 				 "pool %d copies (%.1f KiB), %d hits, %d regen, %d repacks, %d red skips\n",
