@@ -1539,8 +1539,12 @@ int main( int argc, char ** argv )
 				stateEnd();
 				runs++;
 				if ( !ran ) {
-					std::printf( "WATERDRAW %s red %d: REFUSED (%s)%s\n", lab, red, why.c_str(), forced.c_str() );
-					gateOk = false;
+					// red 128 (a faked fence timeout) must refuse with the wait named, and the run after it must draw
+					const bool timeoutOk = ( red & 128 ) && why.find( "fence wait returned VkResult 2 " ) != std::string::npos;
+					std::printf( "WATERDRAW %s red %d: REFUSED (%s)%s%s\n", lab, red, why.c_str(), forced.c_str(),
+						timeoutOk ? " -> red refuses as it must" : "" );
+					if ( !timeoutOk )
+						gateOk = false;
 					return;
 				}
 				const std::vector<float> vkR = rayRead( fbRayVk );
@@ -1592,6 +1596,10 @@ int main( int argc, char ** argv )
 				const std::vector<float> glR = rayRef();
 				for ( int red : { 0, 1, 2, 4, 8 } )
 					rayOne( dsFmt == kDsFmt[0] ? "ray" : "ray d32fs8", red, dsFmt, glR );
+				if ( dsFmt != kDsFmt[0] ) {  // lane VKWATER4: the fence-timeout red, then a clean run (the wait it left must be taken)
+					rayOne( "ray d32fs8", 128, dsFmt, glR );
+					rayOne( "ray d32fs8 after the timeout", 0, dsFmt, glR );
+				}
 			}
 		} else {
 			std::vector<float> glR[2];

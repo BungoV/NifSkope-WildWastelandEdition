@@ -432,7 +432,8 @@ struct WaterRun
 	std::uintptr_t key = 0;         //!< the twins' keys: key + slot index
 	int red = 0;                    //!< gates only: 1 the ps loose block a vec4 off, 2 plain samplers, 4 cull flipped, 8 depth ALWAYS,
 	                                //!< 16 the tessellation domain's origin upper-left (Vulkan's default, not GL's), 32 the ds loose
-	                                //!< block a vec4 off
+	                                //!< block a vec4 off, 64 the ray depth view keyed on its VkImage handle only (lane VKWATER4),
+	                                //!< 128 the last crossing's fence wait reads VK_TIMEOUT (must refuse)
 };
 
 /* GL current, prog in use, its uniforms set, the shape's vertex array bound: GL's side of the draw into r (the census
