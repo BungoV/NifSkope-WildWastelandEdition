@@ -142,7 +142,12 @@ Changed, not built, not checked live. Nothing in the app calls it yet, so no fra
   fog with two noise octaves (28114 samples, EXACT; the drift moves 21759 in GL, zero octaves 25534). Dropping the
   noise or the drift, or swapping the octaves, FAILs. The case's air is 150x the captured density: the captured air
   moved the sun by less than one half-float step.
-- Still on GL (the census, exterior 3, interior 4): the lamps' shadow cubes and gobos, the roof map;
+- Lamp shadows (VKFAR6, 414e82f8 bar, then a952f301 and 4be20dd1): the lamps' shadow cubes are shared with the
+  Vulkan view and read in place, so lamp-lit rain / snow is shadowed on Vulkan as on GL. New gate case: near rain with
+  an omni, a spot and a hemisphere casting into striped cubes (151310 samples, 2 halves 1 ulp apart, 0 flips); shadows
+  off moves 84194 in GL, the fade off 44644. Dropping the cubes, the shadows or the fade FAILs. Red
+  WW_VKVIEW_LAMPSHADOW_RED=1 keeps the cubes GL's own. The app half is not built by the offline gate.
+- Still on GL (the census, exterior 2, interior 3): the lamps' gobos, the roof map;
   interiors too. The app turns these on by default, so lit runs in the app still go to GL.
 
 ## VKFAR2 P7 (2026-11-14): depth of field, motion blur and object blur join the tone pass on Vulkan (WW_VKVIEW=1)
