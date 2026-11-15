@@ -13,4 +13,20 @@ mkdir -p "$OUT"
 g++ -O2 -std=c++17 -pthread -I"$ROOT/src" "$ROOT/tests/vkframe/shadowview.cpp" -o "$OUT/shadowview.exe" -lopengl32 -lgdi32 -luser32 \
 	|| { echo "SHADOWVIEW GATE FAILED (g++)"; exit 1; }
 "$OUT/shadowview.exe" "$ROOT" "${2:-1024}" 2>&1 | tee "$OUT/shadowview.txt"
-tail -1 "$OUT/shadowview.txt" | grep -q "SHADOWVIEW GATE OK"
+tail -1 "$OUT/shadowview.txt" | grep -q "SHADOWVIEW GATE OK" || exit 1
+# Lane VKSHADOW4: the mesh pool's reds, each its own process (the pool lives as long as the process). Red 1 (key only) must
+# fail a frame1 layer past 1 unit with redSkips >= 1, red 2 (grow without copying again) a frame2 layer with repacks >= 1.
+for R in 1 2; do
+	WW_VKCSM_POOL_RED=$R "$OUT/shadowview.exe" "$ROOT" "${2:-1024}" > "$OUT/shadowview_pool$R.txt" 2>&1
+	fails=$(grep -cE "^SHADOWVIEW mesh frame$R [a-z]+/[0-9] FAIL \([0-9]+ of [0-9]+ covered texels differ, [1-9][0-9]* past 1 unit" "$OUT/shadowview_pool$R.txt")
+	if [ "$R" = 1 ]; then trig=$(grep -cE "^SHADOWVIEW mesh pool frame1 .*redSkips=[1-9]" "$OUT/shadowview_pool$R.txt")
+	else trig=$(grep -cE "^SHADOWVIEW mesh pool frame2 .*repacks=[1-9]" "$OUT/shadowview_pool$R.txt"); fi
+	if [ "$fails" -gt 0 ] && [ "$trig" -gt 0 ]; then
+		echo "SHADOWVIEW RED FAIL pool$R ($fails frame$R layers past 1 unit, trigger lines $trig; must FAIL)"
+	else
+		echo "SHADOWVIEW RED TESTS NOTHING pool$R ($fails frame$R layers past 1 unit, trigger lines $trig)"
+		echo "SHADOWVIEW GATE FAILED"
+		exit 1
+	fi
+done
+echo "SHADOWVIEW GATE OK"

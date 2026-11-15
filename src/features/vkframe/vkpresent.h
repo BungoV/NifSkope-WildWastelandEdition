@@ -450,6 +450,19 @@ struct CsmDraw
 	float unit = 0.0f, slope = 0.0f, clamp = 0.0f;  //!< glPolygonOffset( slope, unit ), its clamp (0: none)
 	bool cull = true;               //!< back faces culled (GL CCW front); false: two-sided
 	std::uint32_t first = 0, n = 0; //!< commands [first, first + n)
+	bool mesh = false;              //!< lane VKSHADOW4: first / n index the run's mesh draws (CsmRun::mdraws), not the pool's commands
+};
+/* Lane VKSHADOW4 (item 3 part 1): a per-draw caster (sunshadow.cpp drawShape, the whole shape or its cullIdx ranges) as a
+ * mesh csmRun keeps on the device while (key, gen) and its sizes match (vklamp.inc lampPool's law): key = the shape,
+ * gen = the hash of the arrays GL's draw takes (CPU-skinned positions included) */
+struct CsmMesh
+{
+	std::uintptr_t key = 0;
+	std::uint64_t gen = 0;
+	const float * pos = nullptr;          //!< vec3 positions
+	std::uint32_t verts = 0;
+	const std::uint16_t * idx = nullptr;  //!< triangle list, mesh-local
+	std::uint32_t indices = 0;
 };
 struct CsmRun
 {
@@ -463,6 +476,10 @@ struct CsmRun
 	const std::uint32_t * cmds = nullptr;  //!< 5 words per command (VkDrawIndexedIndirectCommand)
 	std::size_t nCmds = 0;
 	std::vector<CsmDraw> d;
+	const CsmMesh * meshes = nullptr;      //!< lane VKSHADOW4: the per-draw casters' meshes
+	std::size_t nMeshes = 0;
+	const std::uint32_t * mdraws = nullptr;  //!< 4 words a draw: mesh, matrix (in mats), first index, index count (mesh-local)
+	std::size_t nMDraws = 0;
 };
 //! GL current, its own cascade draws issued: the queued draws run on Vulkan into the shared targets. false: why (GL draws them)
 bool csmRun( const CsmRun & t, std::string & why );
@@ -474,6 +491,10 @@ struct CsmStat
 	std::string glWhy, failWhy;
 	int pipelines = 0, draws = 0, cmds = 0;
 	double buildMs = 0.0;
+	//! lane VKSHADOW4, the mesh pool: meshes copied / served kept, copies for a new generation, repacks, gates-only red skips
+	//! (WW_VKCSM_POOL_RED: 1 the key alone, 2 grow without copying the kept meshes again)
+	int copies = 0, hits = 0, regen = 0, repacks = 0, redSkips = 0, mdraws = 0;
+	double copyKb = 0.0;
 };
 CsmStat takeCsmStat();
 //! what csmRun cannot take on this device (empty: none); asked before GL skips its queued draws

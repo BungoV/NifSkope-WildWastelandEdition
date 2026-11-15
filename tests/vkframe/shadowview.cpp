@@ -11,10 +11,22 @@
 // `SHADOWVIEW GATE OK|FAILED`.
 // BOUND (stated before the first run, never widened): EXACT expected (same vertex products in the same order, the same
 // D16 bias law on the same rasterizer); else max 1 D16 unit and <= 0.05 % of covered texels differ.
+// Lane VKSHADOW4 (2026-11-15, item 3 part 1), lines `SHADOWVIEW mesh ...` after the old ones (those stay byte-equal): the
+// per-draw casters (sunshadow.cpp drawShape 1872 whole, 1866 cullIdx ranges) as CsmMesh draws against GL's own per-draw
+// program lookdev_csmdepth.vert (uniforms.glsl spliced in, farInst / lodTreeAnim 0, farSwayAmp 0: the solid non-sway
+// casters part 1 moves) + lookdev_csmdepth.frag, the same BOUND. Frame 0: mesh draws only (no queue pool: nCmds 0); frame 1:
+// the queue too, one mesh re-specified (same sizes, new positions and gen: a CPU-skinned caster), must count regen >= 1;
+// frame 2: a 6561-vertex mesh (77 KiB, past the pool's 64 KiB floor) joins, must count repacks >= 1. Frame 1 must show the
+// mesh casters winning > 0 texels against GL without them. Reds after frame 2 (each must FAIL past 1 unit): whole (the
+// ranges drawn as the whole mesh; the fixture's excluded triangles are in view), split, nobias, cull on the mesh draws.
+// Pool reds, each its own process (shadowview.sh): WW_VKCSM_POOL_RED=1 (key only) a frame1 layer FAILs with redSkips >= 1,
+// =2 (grow without copying again) a frame2 layer FAILs with repacks >= 1. The 3-frame shape is what lets both reach their
+// branch: the re-specify (frame 1) and the growth (frame 2) are in different frames, else the repack hides red 1.
 #define WW_VKPRESENT_NO_QT
 #include "../../src/features/vkframe/vkpresent.cpp"
 
 #include <GL/gl.h>
+#include <array>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -85,6 +97,12 @@ struct Fns
 	GLenum( WINAPI * checkFramebufferStatus )( GLenum ) = nullptr;
 	void( WINAPI * texImage3D )( GLenum, GLint, GLint, GLsizei, GLsizei, GLsizei, GLint, GLenum, GLenum, const void * ) = nullptr;
 	void( WINAPI * polygonOffsetClamp )( GLfloat, GLfloat, GLfloat ) = nullptr;
+	// lane VKSHADOW4: the per-draw program's uniforms and its globalUniforms block
+	void( WINAPI * uniform1i )( GLint, GLint ) = nullptr;
+	void( WINAPI * uniform1f )( GLint, GLfloat ) = nullptr;
+	GLuint( WINAPI * getUniformBlockIndex )( GLuint, const char * ) = nullptr;
+	void( WINAPI * uniformBlockBinding )( GLuint, GLuint, GLuint ) = nullptr;
+	void( WINAPI * bindBufferBase )( GLenum, GLuint, GLuint ) = nullptr;
 };
 Fns f;
 
@@ -112,6 +130,11 @@ bool loadAll()
 		&& load( f.checkFramebufferStatus, "glCheckFramebufferStatus" ) && load( f.texImage3D, "glTexImage3D" );
 	if ( !load( f.polygonOffsetClamp, "glPolygonOffsetClamp" ) )
 		load( f.polygonOffsetClamp, "glPolygonOffsetClampEXT" );
+	load( f.uniform1i, "glUniform1i" );
+	load( f.uniform1f, "glUniform1f" );
+	load( f.getUniformBlockIndex, "glGetUniformBlockIndex" );
+	load( f.uniformBlockBinding, "glUniformBlockBinding" );
+	load( f.bindBufferBase, "glBindBufferBase" );
 	return ok;
 }
 
@@ -666,6 +689,349 @@ int main( int argc, char ** argv )
 	std::printf( "SHADOWVIEW stat: %d runs on Vulkan, %d failed (%s), %d draws, %d commands, %.3f ms a run (max %.3f), %d pipelines "
 		"built in %.1f ms\n", st.runs, st.fails, st.failWhy.c_str(), st.draws, st.cmds, st.runs ? st.cpuMs / st.runs : 0.0, st.maxMs,
 		st.pipelines, st.buildMs );
+
+	// ---- lane VKSHADOW4 (item 3 part 1): the per-draw casters as pooled meshes (CsmMesh), see the header
+	bool meshOk = true;
+	{
+		std::string vsM = readFile( root + "/res/shaders/features/shadows/lookdev_csmdepth.vert" );
+		const std::string inc = "#include \"uniforms.glsl\"";
+		const std::size_t incAt = vsM.find( inc );
+		if ( incAt != std::string::npos )
+			vsM.replace( incAt, inc.size(), readFile( root + "/res/shaders/uniforms.glsl" ) );
+		const GLuint progM = incAt == std::string::npos ? 0
+			: program( vsM, readFile( root + "/res/shaders/features/shadows/lookdev_csmdepth.frag" ) );
+		if ( !progM || !f.uniform1i || !f.uniform1f || !f.getUniformBlockIndex || !f.uniformBlockBinding || !f.bindBufferBase ) {
+			std::printf( "SHADOWVIEW mesh FAIL (the per-draw program or its entry points)\n" );
+			meshOk = false;
+		}
+		constexpr GLenum kUbo = 0x8A11;
+		const GLint mClip = meshOk ? f.getUniformLocation( progM, "csmClipFromView" ) : -1;
+		const GLint mMv = meshOk ? f.getUniformLocation( progM, "modelViewMatrix" ) : -1;
+		GLuint ubo = 0, vaoM = 0;
+		if ( meshOk ) {
+			f.useProgram( progM );
+			f.uniform1i( f.getUniformLocation( progM, "farInst" ), 0 );
+			f.uniform1i( f.getUniformLocation( progM, "lodTreeAnim" ), 0 );
+			f.uniform1f( f.getUniformLocation( progM, "farSwayAmp" ), 0.0f );
+			const std::vector<char> zeros( 4096, 0 );
+			f.genBuffers( 1, &ubo );
+			f.bindBuffer( kUbo, ubo );
+			f.bufferData( kUbo, 4096, zeros.data(), kDynamic );
+			const GLuint blk = f.getUniformBlockIndex( progM, "globalUniforms" );
+			if ( blk != 0xFFFFFFFFu )
+				f.uniformBlockBinding( progM, blk, 0 );
+			f.bindBufferBase( kUbo, 0, ubo );
+			f.genVertexArrays( 1, &vaoM );
+		}
+
+		// the meshes: a soup, plates CCW / CW, a plate re-specified in frame 1, a big plate first drawn in frame 2
+		struct HMesh
+		{
+			std::vector<float> p;
+			std::vector<std::uint16_t> i;
+			std::uint64_t gen = 0;
+			GLuint vb = 0, ib = 0;
+		};
+		std::vector<HMesh> hm( 5 );
+		auto plate = [&]( HMesh & m, int n, bool cw, float amp, float ph ) {
+			m.p.clear();
+			m.i.clear();
+			for ( int y = 0; y <= n; y++ )
+				for ( int x = 0; x <= n; x++ ) {
+					const float px = -1.0f + 2.0f * float( x ) / n, py = -1.0f + 2.0f * float( y ) / n;
+					m.p.push_back( px );
+					m.p.push_back( py );
+					m.p.push_back( amp * std::sin( 3.0f * px + ph ) * std::cos( 2.0f * py ) );
+				}
+			for ( int y = 0; y < n; y++ )
+				for ( int x = 0; x < n; x++ ) {
+					const std::uint16_t a = std::uint16_t( y * ( n + 1 ) + x ), b = std::uint16_t( a + 1 ), c = std::uint16_t( a + n + 1 ),
+						d = std::uint16_t( c + 1 );
+					const std::uint16_t q[6] = { a, b, d, a, d, c };
+					for ( int k = 0; k < 6; k++ )
+						m.i.push_back( cw ? q[5 - k] : q[k] );
+				}
+		};
+		for ( int t = 0; t < 70; t++ ) {
+			const float qx = u( rng ), qy = u( rng ), qz = u( rng );
+			for ( int k = 0; k < 3; k++ ) {
+				hm[0].p.push_back( qx + 0.45f * u( rng ) );
+				hm[0].p.push_back( qy + 0.45f * u( rng ) );
+				hm[0].p.push_back( qz + 0.45f * u( rng ) );
+				hm[0].i.push_back( std::uint16_t( t * 3 + k ) );
+			}
+		}
+		plate( hm[1], 12, false, 0.25f, 0.0f );
+		plate( hm[2], 12, true, 0.25f, 0.0f );
+		plate( hm[3], 16, false, 0.2f, 0.0f );
+		plate( hm[4], 80, false, 0.15f, 0.0f );
+		auto upMesh = [&]( HMesh & m ) {
+			if ( !m.vb ) {
+				f.genBuffers( 1, &m.vb );
+				f.genBuffers( 1, &m.ib );
+			}
+			f.bindBuffer( kArrayBuf, m.vb );
+			f.bufferData( kArrayBuf, std::ptrdiff_t( m.p.size() * 4 ), m.p.data(), kDynamic );
+			f.bindBuffer( kElemBuf, m.ib );
+			f.bufferData( kElemBuf, std::ptrdiff_t( m.i.size() * 2 ), m.i.data(), kDynamic );
+		};
+		for ( std::size_t m = 0; m < hm.size() && meshOk; m++ ) {
+			hm[m].gen = 1000 * ( m + 1 );
+			f.bindVertexArray( vaoM );
+			upMesh( hm[m] );
+		}
+
+		// the casters: 14 on meshes 0-3, 2 on the big mesh
+		const int kMC = 16;
+		std::vector<Caster> mc( kMC );
+		std::vector<int> meshOfC( kMC );
+		for ( int i = 0; i < kMC; i++ ) {
+			meshOfC[i] = i < 14 ? i % 4 : 4;
+			mc[i] = { u( rng ), u( rng ), u( rng ) + 1.5, 3.14159 * u( rng ), 90.0 * u( rng ), 90.0 * u( rng ), -150.0 + 80.0 * u( rng ),
+				i < 14 ? 8.0 + 22.0 * ( 0.5 + 0.5 * u( rng ) ) : 40.0 };
+		}
+		std::vector<float> mm( std::size_t( kMC ) * 16 );
+		auto setMM = [&]( double move ) {
+			for ( int i = 0; i < kMC; i++ ) {
+				const Caster & c = mc[i];
+				double M[16];
+				rotT( c.ax, c.ay, c.az, c.ang + 0.2 * move, c.tx - 4.0 * move, c.ty + 6.0 * move, c.tz + 2.0 * move, c.s, M );
+				for ( int k = 0; k < 16; k++ )
+					mm[std::size_t( i ) * 16 + k] = float( M[k] );
+			}
+		};
+
+		// the draw list (sunshadow.cpp's per-draw loop per job): target, layer, cascade, scissor, cull, casters, ranges, from frame
+		struct MRec
+		{
+			int target, layer, cascade;
+			int sc[4];
+			bool cull;
+			std::vector<int> cs;
+			bool ranges;
+			int from;
+		};
+		const std::vector<MRec> mrecs = {
+			{ 0, 0, 0, { 0, 0, 0, 0 }, true, { 0, 1, 2, 3, 4, 5 }, false, 0 },
+			{ 0, 0, 0, { 0, 0, 0, 0 }, false, { 6, 7 }, false, 0 },  // two-sided
+			{ 0, 1, 1, { 0, 700, map - 24, map - 11 }, true, { 0, 1, 2, 3, 8, 9 }, false, 0 },  // a scissor strip
+			{ 0, 1, 1, { 0, 0, 0, 0 }, true, { 8, 9 }, true, 0 },  // cullIdx ranges (1866)
+			{ 1, 2, 2, { 0, 0, 0, 0 }, true, { 10, 11, 12, 13 }, true, 0 },  // the static target, ranges
+			{ 0, 2, 2, { 0, 0, 0, 0 }, true, { 10, 11, 12, 13 }, true, 0 },  // ... duplicated into the live one
+			{ 0, 0, 0, { 0, 0, 0, 0 }, true, { 14, 15 }, false, 2 },  // the big mesh: the pool grows
+			{ 1, 1, 1, { 0, 0, 0, 0 }, false, { 14 }, false, 2 },
+		};
+		// a rec's draws {caster, first index, index count}: the whole mesh, or two ranges (the first third, a fifth from the middle)
+		auto drawsOf = [&]( const MRec & R, bool whole, int fr ) {
+			std::vector<std::array<std::uint32_t, 3>> out;
+			if ( fr < R.from )
+				return out;
+			for ( int c : R.cs ) {
+				const std::uint32_t n = std::uint32_t( hm[std::size_t( meshOfC[c] )].i.size() ), tris = n / 3;
+				if ( R.ranges && !whole ) {
+					out.push_back( { std::uint32_t( c ), 0u, ( tris / 3 ) * 3 } );
+					out.push_back( { std::uint32_t( c ), ( tris / 2 ) * 3, ( tris / 5 ) * 3 } );
+				} else {
+					out.push_back( { std::uint32_t( c ), 0u, n } );
+				}
+			}
+			return out;
+		};
+		auto glMesh = [&]( const GLuint * tex, const MRec & R, int fr ) {
+			if ( !attach( tex[R.target], R.layer ) )
+				return false;
+			const Casc & c = casc[R.cascade];
+			glViewport( 0, 0, c.vw, c.vh );
+			const bool sc = R.sc[2] > R.sc[0];
+			if ( sc ) {
+				glEnable( GL_SCISSOR_TEST );
+				glScissor( R.sc[0], R.sc[1], R.sc[2] - R.sc[0], R.sc[3] - R.sc[1] );
+			}
+			if ( f.polygonOffsetClamp )
+				f.polygonOffsetClamp( slopeBias, unitBias, c.clamp );
+			f.uniformMatrix4fv( mClip, 1, GL_FALSE, c.clip );
+			R.cull ? glEnable( GL_CULL_FACE ) : glDisable( GL_CULL_FACE );
+			for ( const auto & d : drawsOf( R, false, fr ) ) {
+				const HMesh & m = hm[std::size_t( meshOfC[d[0]] )];
+				f.uniformMatrix4fv( mMv, 1, GL_FALSE, &mm[std::size_t( d[0] ) * 16] );
+				f.bindBuffer( kArrayBuf, m.vb );
+				f.enableVertexAttribArray( 0 );
+				f.vertexAttribPointer( 0, 3, GL_FLOAT, GL_FALSE, 12, nullptr );
+				f.bindBuffer( kElemBuf, m.ib );
+				glDrawElements( GL_TRIANGLES, GLsizei( d[2] ), GL_UNSIGNED_SHORT, reinterpret_cast<const void *>( std::size_t( d[1] ) * 2 ) );
+			}
+			if ( sc )
+				glDisable( GL_SCISSOR_TEST );
+			return true;
+		};
+		auto runGlM = [&]( int fr, bool queue, bool meshes, std::vector<std::uint16_t> out[2][3] ) {
+			bool ok2 = clearAll( refT );
+			glState();
+			ok2 = ok2 && ground( refT );
+			for ( const Rec & R : recs )
+				ok2 = ok2 && ( !queue || glDraw( refT, R ) );
+			if ( meshes ) {
+				f.useProgram( progM );
+				f.bindVertexArray( vaoM );
+				for ( const MRec & R : mrecs )
+					ok2 = ok2 && glMesh( refT, R, fr );
+			}
+			readAll( refT, out );
+			return ok2 && glGetError() == GL_NO_ERROR;
+		};
+		enum MRed { kMNone, kMWhole, kMSplit, kMNoBias, kMNoCull };
+		auto runVkM = [&]( int fr, bool queue, MRed red, std::vector<std::uint16_t> out[2][3] ) {
+			bool ok2 = clearAll( shT );
+			glState();
+			ok2 = ok2 && ground( shT );
+			WwVkPresent::CsmRun run;
+			run.map = map;
+			run.layers = 3;
+			for ( int t = 0; t < 2; t++ ) {
+				run.tex[t] = shT[t];
+				run.key[t] = reinterpret_cast<std::uintptr_t>( &keyHome[t] );
+			}
+			// the matrices: the queue's casters, then the mesh casters (one buffer, as sunshadow.cpp appends them)
+			std::vector<float> allM( mats );
+			allM.insert( allM.end(), mm.begin(), mm.end() );
+			run.mats = allM.data();
+			run.nMats = allM.size() / 16;
+			auto put = [&]( const Casc & c, int ci, int target, int layer, const int * scr, bool cull, std::uint32_t first,
+						   std::uint32_t n, bool mesh ) {
+				WwVkPresent::CsmDraw d;
+				d.target = target;
+				d.layer = layer;
+				d.vw = c.vw;
+				d.vh = c.vh;
+				std::memcpy( d.sc, scr, sizeof( d.sc ) );
+				std::memcpy( d.clip, casc[ci].clip, sizeof( d.clip ) );
+				const bool nb = mesh && red == kMNoBias;
+				d.unit = nb ? 0.0f : unitBias;
+				d.slope = nb ? 0.0f : slopeBias;
+				d.clamp = nb ? 0.0f : c.clamp;
+				d.cull = mesh && red == kMNoCull ? false : cull;
+				d.first = first;
+				d.n = n;
+				d.mesh = mesh;
+				run.d.push_back( d );
+			};
+			if ( queue ) {
+				run.pos = bPos;
+				run.idx = bIdx;
+				run.posBytes = pos.size() * 4;
+				run.idxBytes = idx.size() * 2;
+				run.cmds = reinterpret_cast<const std::uint32_t *>( cmds.data() );
+				run.nCmds = cmds.size();
+				for ( const Rec & R : recs )
+					put( casc[R.cascade], R.cascade, R.target, R.layer, R.sc, R.cull, R.first, R.n, false );
+			}
+			std::vector<WwVkPresent::CsmMesh> cm( hm.size() );
+			for ( std::size_t m = 0; m < hm.size(); m++ ) {
+				cm[m].key = reinterpret_cast<std::uintptr_t>( &hm[m] );
+				cm[m].gen = hm[m].gen;
+				cm[m].pos = hm[m].p.data();
+				cm[m].verts = std::uint32_t( hm[m].p.size() / 3 );
+				cm[m].idx = hm[m].i.data();
+				cm[m].indices = std::uint32_t( hm[m].i.size() );
+			}
+			std::vector<std::uint32_t> md;
+			for ( const MRec & R : mrecs ) {
+				const std::uint32_t first = std::uint32_t( md.size() / 4 );
+				for ( const auto & d : drawsOf( R, red == kMWhole, fr ) ) {
+					md.push_back( std::uint32_t( meshOfC[d[0]] ) );
+					md.push_back( std::uint32_t( kCasters ) + d[0] );
+					md.push_back( d[1] );
+					md.push_back( d[2] );
+				}
+				const std::uint32_t n = std::uint32_t( md.size() / 4 ) - first;
+				if ( n )
+					put( casc[R.cascade], red == kMSplit ? ( R.cascade + 1 ) % 3 : R.cascade, R.target, R.layer, R.sc, R.cull, first, n,
+						true );
+			}
+			run.meshes = cm.data();
+			run.nMeshes = cm.size();
+			run.mdraws = md.data();
+			run.nMDraws = md.size() / 4;
+			std::string w;
+			if ( !WwVkPresent::csmRun( run, w ) ) {
+				std::printf( "SHADOWVIEW mesh csmRun refused: %s\n", w.c_str() );
+				return false;
+			}
+			readAll( shT, out );
+			return ok2 && glGetError() == GL_NO_ERROR;
+		};
+
+		std::vector<std::uint16_t> refM[3][2][3], vkM[2][3], bare[2][3];
+		int regen1 = 0, repacks2 = 0, copies0 = 0;
+		for ( int fr = 0; fr < 3 && meshOk; fr++ ) {
+			const bool queue = fr > 0;
+			if ( fr == 1 ) {  // a CPU-skinned caster: the same sizes, new positions, a new generation
+				plate( hm[3], 16, false, 0.6f, 1.3f );
+				hm[3].gen++;
+				f.bindVertexArray( vaoM );
+				upMesh( hm[3] );
+			}
+			upload( moves[fr > 0 ? 1 : 0] );
+			setMM( double( fr ) * 0.5 );
+			if ( !runGlM( fr, queue, true, refM[fr] ) || !runVkM( fr, queue, kMNone, vkM ) ) {
+				std::printf( "SHADOWVIEW mesh frame%d FAIL (a run failed)\n", fr );
+				meshOk = false;
+				continue;
+			}
+			const WwVkPresent::CsmStat ps = WwVkPresent::takeCsmStat();
+			std::printf( "SHADOWVIEW mesh pool frame%d copies=%d hits=%d regen=%d repacks=%d redSkips=%d mdraws=%d (%.1f KiB copied)\n", fr,
+				ps.copies, ps.hits, ps.regen, ps.repacks, ps.redSkips, ps.mdraws, ps.copyKb );
+			copies0 += fr == 0 ? ps.copies : 0;
+			regen1 += fr == 1 ? ps.regen : 0;
+			repacks2 += fr == 2 ? ps.repacks : 0;
+			for ( int t = 0; t < 2; t++ )
+				for ( int l = 0; l < 3; l++ ) {
+					const Diff v = compare( vkM[t][l], refM[fr][t][l] );
+					std::printf( "SHADOWVIEW mesh frame%d %s/%d %s (%zu of %zu covered texels differ, %zu past 1 unit, max %d)\n", fr,
+						t ? "static" : "live", l, v.word(), v.diff, v.covered, v.past1, v.maxu );
+					meshOk = meshOk && v.ok();
+				}
+			if ( fr == 1 ) {  // the mesh casters must win texels, or the case proves nothing
+				std::size_t won = 0;
+				if ( runGlM( fr, queue, false, bare ) )
+					for ( int t = 0; t < 2; t++ )
+						for ( int l = 0; l < 3; l++ )
+							for ( std::size_t i = 0; i < bare[t][l].size(); i++ )
+								won += bare[t][l][i] != refM[1][t][l][i];
+				std::printf( "SHADOWVIEW mesh won %zu texels against GL without the mesh casters (must be > 0)\n", won );
+				meshOk = meshOk && won > 0;
+			}
+		}
+		std::printf( "SHADOWVIEW mesh triggers: frame0 copies=%d (>= 4), frame1 regen=%d (>= 1), frame2 repacks=%d (>= 1)\n", copies0,
+			regen1, repacks2 );
+		meshOk = meshOk && copies0 >= 4 && regen1 >= 1 && repacks2 >= 1;
+		// the reds on frame 2's content: each must FAIL past 1 unit (over all six layers)
+		const struct
+		{
+			const char * name;
+			MRed red;
+		} mreds[4] = { { "whole (the cullIdx ranges drawn as the whole mesh)", kMWhole },
+			{ "split (the mesh draws with the next cascade's clipFromView)", kMSplit }, { "nobias (the mesh draws' unit and slope 0)", kMNoBias },
+			{ "cull (back faces drawn on the one-sided mesh draws)", kMNoCull } };
+		for ( const auto & r : mreds ) {
+			if ( !meshOk )
+				break;
+			const bool ran = runVkM( 2, true, r.red, vkM );
+			Diff all;
+			for ( int t = 0; t < 2; t++ )
+				for ( int l = 0; l < 3; l++ )
+					all.add( compare( vkM[t][l], refM[2][t][l] ) );
+			const bool redFails = !ran || all.past1 > 0;
+			std::printf( "SHADOWVIEW mesh RED %s %s (%zu of %zu covered texels differ, %zu past 1 unit, max %d; must FAIL)\n",
+				redFails ? "FAIL" : "TESTS NOTHING", r.name, all.diff, all.covered, all.past1, all.maxu );
+			meshOk = meshOk && redFails;
+		}
+		const WwVkPresent::CsmStat ms = WwVkPresent::takeCsmStat();
+		std::printf( "SHADOWVIEW mesh stat: %d runs on Vulkan, %d failed (%s), %d draws, %d mesh draws\n", ms.runs, ms.fails,
+			ms.failWhy.c_str(), ms.draws, ms.mdraws );
+	}
+	std::printf( "SHADOWVIEW mesh %s\n", meshOk ? "OK" : "FAILED" );
+	ok = ok && meshOk;
 	f.bindFramebuffer( kFb, 0 );
 	for ( int t = 0; t < 2; t++ )
 		WwVkPresent::sharedTargetDrop( reinterpret_cast<std::uintptr_t>( &keyHome[t] ) );
