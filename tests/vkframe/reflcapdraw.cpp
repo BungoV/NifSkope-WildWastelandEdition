@@ -32,14 +32,19 @@
 //   1 layer: Vulkan draws job 0 into layer + 1; 2 clip: rpClipFromRel's B term (row 3 z) zero on Vulkan's b287 slice;
 //   4 uv: uvOffset zero on Vulkan's slice (the fixture's is not); 8 alpha: rpAlphaTest false on Vulkan's PS slice;
 //   16 vc: location 1 fed (1, 1, 1, 1) on Vulkan; 32 depth: Vulkan's depth compare ALWAYS.
+// Bar addendum (VKFAR23, 2026-11-16, set before the route change; the coordinator's in-place BaseMap ruling): C's BaseMap is
+// a BC4 texture of the texture cache (objTexMake 0x8DBB, 16 x 16, 5 levels of seeded blocks, trilinear, repeat) with GL's
+// swizzle R, R, R, 1 (as gli loads BC4), so Vulkan must read it through the twin's own swizzled view. The main run's stat:
+//   copies == 1 (A's RGBA8 checker, not a cache texture) and inPlace == 1 (C's cache twin read in place, never copied).
+//   Red 64 swz: Vulkan reads C's BaseMap without the swizzle (R, 0, 0, 1); must FAIL.
 // Last line `REFLCAPDRAW GATE OK` or `REFLCAPDRAW GATE FAILED`.
 //
 // Harness (VKFAR23; the bar above unchanged). The route keeps ONE depth target for a run, so a run's depth holds its last
 // job only: the main run (all 3 jobs) is judged on every term with the depth of its last job, and one single-job run per job
 // (the same draws) gives each job's depth for the depth term. Reds run the 3-job run and are judged the same way. Each job
 // sees the casters through its own rpRelFromView: a rotation taking face 0's axes (M, U, V of cellreflprobe.cpp) to the job
-// face's, and the probe 22 / 20 / 24 units behind the casters (30 / 26 / 34 covered 424 / 527 / 349: under the bar's 500) (shifted 0 / 3 / -2 along U), so every face draws all four in
-// the order B, A, C, D (B in front of A but drawn first: red 32 lets A cover it). "relative" in the nd term is
+// face's, and the probe 22 / 20 / 24 units behind the casters (30 / 26 / 34 covered 424 / 527 / 349: under the bar's 500;
+// shifted 0 / 3 / -2 along U), so every face draws all four in the order B, A, C, D (B in front of A but drawn first: red 32 lets A cover it). "relative" in the nd term is
 // |vk - gl| / max(1, |gl|) per channel (the colour bar's form: normal components near 0 are judged absolutely).
 #define FLD_NO_MAIN
 #include "farloddraw.cpp"
@@ -74,6 +79,8 @@ struct Xf
 	void( WINAPI * framebufferRenderbuffer )( GLenum, GLenum, GLenum, GLuint ) = nullptr;
 	void( WINAPI * framebufferTextureLayer )( GLenum, GLenum, GLuint, GLint, GLint ) = nullptr;
 	void( WINAPI * clearBufferfv )( GLenum, GLint, const GLfloat * ) = nullptr;
+	void( WINAPI * compressedTextureSubImage2D )( GLuint, GLint, GLint, GLint, GLsizei, GLsizei, GLenum, GLsizei, const void * ) = nullptr;
+	void( WINAPI * textureParameteri )( GLuint, GLenum, GLint ) = nullptr;
 };
 Xf xf;
 
@@ -84,7 +91,8 @@ bool loadXf()
 		&& load( xf.texStorage3D, "glTexStorage3D" ) && load( xf.clearTexImage, "glClearTexImage" )
 		&& load( xf.genRenderbuffers, "glGenRenderbuffers" ) && load( xf.bindRenderbuffer, "glBindRenderbuffer" )
 		&& load( xf.renderbufferStorage, "glRenderbufferStorage" ) && load( xf.framebufferRenderbuffer, "glFramebufferRenderbuffer" )
-		&& load( xf.framebufferTextureLayer, "glFramebufferTextureLayer" ) && load( xf.clearBufferfv, "glClearBufferfv" );
+		&& load( xf.framebufferTextureLayer, "glFramebufferTextureLayer" ) && load( xf.clearBufferfv, "glClearBufferfv" )
+		&& load( xf.compressedTextureSubImage2D, "glCompressedTextureSubImage2D" ) && load( xf.textureParameteri, "glTextureParameteri" );
 }
 
 float h2f( std::uint16_t h )
@@ -111,6 +119,7 @@ struct Caster
 	std::vector<std::uint16_t> idx;
 	float mv[16] = {};
 	bool base = false, vc = false, at = false;
+	bool bc4 = false;  //!< VKFAR23: BaseMap is the BC4 cache twin (R, R, R, 1), else the RGBA8 checker
 	float uvScale[2] = { 1, 1 }, uvOffset[2] = { 0, 0 };
 };
 
@@ -168,7 +177,7 @@ std::vector<Caster> casters()
 		c.name = "C";
 		const float n[3] = { 1, 0, 0 };
 		quad( c, 4.0f, 6.0f, n, true );
-		c.base = true;
+		c.base = c.bc4 = true;
 		translate( c.mv, 5.0f, -9.0f, -7.0f, 0.0f );
 	}
 	{	// D: normals, no uv, no base map (grey 0.5), no colour
@@ -403,6 +412,30 @@ int main( int argc, char ** argv )
 		glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT );
 		glBindTexture( GL_TEXTURE_2D, 0 );
 	}
+	// ---- C's BaseMap (bar addendum): a BC4 texture cache twin, seeded blocks per level, gli's swizzle R, R, R, 1
+	unsigned bcTex = 0;
+	{
+		if ( !WwVkPresent::objTexMake( 0x8DBB, 16, 16, 5, bcTex, why ) )
+			return fatal( "objTexMake BC4: " + why );
+		std::mt19937 rng( 9 );
+		for ( int l = 0; l < 5; l++ ) {
+			const int lw = std::max( 16 >> l, 1 ), lh = std::max( 16 >> l, 1 );
+			std::vector<std::uint8_t> blocks( size_t( ( lw + 3 ) / 4 ) * size_t( ( lh + 3 ) / 4 ) * 8 );
+			for ( std::uint8_t & b : blocks )
+				b = std::uint8_t( rng() & 0xFF );
+			xf.compressedTextureSubImage2D( bcTex, l, 0, 0, lw, lh, 0x8DBB, GLsizei( blocks.size() ), blocks.data() );
+		}
+		xf.textureParameteri( bcTex, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR );
+		xf.textureParameteri( bcTex, GL_TEXTURE_MAG_FILTER, GL_LINEAR );
+		xf.textureParameteri( bcTex, GL_TEXTURE_WRAP_S, GL_REPEAT );
+		xf.textureParameteri( bcTex, GL_TEXTURE_WRAP_T, GL_REPEAT );
+		xf.textureParameteri( bcTex, 0x8E42, GL_RED );	// GL_TEXTURE_SWIZZLE_R .. A
+		xf.textureParameteri( bcTex, 0x8E43, GL_RED );
+		xf.textureParameteri( bcTex, 0x8E44, GL_RED );
+		xf.textureParameteri( bcTex, 0x8E45, GL_ONE );
+		if ( const GLenum e = glGetError() )
+			return fatal( "GL error " + std::to_string( e ) + " making the BC4 BaseMap" );
+	}
 
 	// ---- GL's program (cell_reflcap.vert / .frag as the app links them: no include, no loader define)
 	const GLuint prog = program( readFile( dir + "/cell_reflcap.vert" ), readFile( dir + "/cell_reflcap.frag" ), "cell_reflcap" );
@@ -427,7 +460,7 @@ int main( int argc, char ** argv )
 		f.uniform1fv( loc( "alphaThreshold" ), 1, &half );
 		f.uniform1i( loc( "rpHasVc" ), c.vc );
 		f.uniformMatrix4fv( loc( "modelViewMatrix" ), 1, GL_FALSE, c.mv );
-		bindUnit( 0, GL_TEXTURE_2D, c.base ? baseTex : 0 );
+		bindUnit( 0, GL_TEXTURE_2D, !c.base ? 0 : c.bc4 ? GLuint( bcTex ) : baseTex );
 		f.bindBuffer( 0x8892, 0 );
 		f.bindBuffer( 0x8893, 0 );
 		const std::vector<float> * arr[4] = { &c.pos, &c.col, &c.nrm, &c.uv };
@@ -580,6 +613,10 @@ int main( int argc, char ** argv )
 		const WwVkPresent::ReflCaptureStat st = WwVkPresent::takeReflCaptureStat();
 		std::printf( "REFLCAPDRAW main stat: runs %d faces %d draws %d crossings %d copies %d inPlace %d pipelines %d fails %d\n", st.runs, st.faces,
 			st.draws, st.crossings, st.copies, st.inPlace, st.pipelines, st.fails );
+		// bar addendum: the checker copied, the BC4 cache twin read in place
+		const bool place = st.copies == 1 && st.inPlace == 1;
+		std::printf( "REFLCAPDRAW main BaseMap route: %s (copies %d want 1, inPlace %d want 1)\n", place ? "OK" : "FAIL", st.copies, st.inPlace );
+		fails += !place;
 	}
 	for ( int j = 0; j < 3; j++ ) {	// each job's depth: a single-job run
 		std::string sw;
@@ -594,7 +631,7 @@ int main( int argc, char ** argv )
 	}
 	// ---- reds
 	int redsRun = 0, redsFired = 0;
-	for ( int red : { 1, 2, 4, 8, 16, 32 } ) {
+	for ( int red : { 1, 2, 4, 8, 16, 32, 64 } ) {
 		redsRun++;
 		std::string rw;
 		const bool ran = vkRun( red, jobs, rw );
