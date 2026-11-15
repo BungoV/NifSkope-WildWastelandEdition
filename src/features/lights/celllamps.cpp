@@ -587,6 +587,12 @@ static bool shadowShareWanted()
 	return WwVkPresent::shareWanted( "WW_VKVIEW_LAMPSHADOW_RED" );
 }
 
+//! the shared cubes' key: the renderer's (gpus() is a QHash, whose values move when it grows; an odd address no object has)
+static std::uintptr_t shadowShareKey( Renderer * r )
+{
+	return reinterpret_cast<std::uintptr_t>( r ) + 1;
+}
+
 //! the depth cube array (kShadowSlots cubes of face x face) and its framebuffer, once
 static void shadowAlloc( Renderer * r, Gpu & g, int face )
 {
@@ -597,7 +603,8 @@ static void shadowAlloc( Renderer * r, Gpu & g, int face )
 	fn->glGetIntegerv( GL_ACTIVE_TEXTURE, &prevActive );
 	unsigned shared = 0;
 	std::string why;
-	g.shShared = shadowShareWanted() && WwVkPresent::sharedTarget( reinterpret_cast<std::uintptr_t>( &g.shTex ), 3, face, face,
+	g.shAsked = shadowShareWanted();  // what the remake test compares (a refused share falls back to GL's own, kept)
+	g.shShared = g.shAsked && WwVkPresent::sharedTarget( shadowShareKey( r ), 3, face, face,
 		kShadowSlots, GL_DEPTH_COMPONENT16, shared, why ) && shared;
 	if ( g.shShared )
 		g.shTex = shared;
@@ -1414,7 +1421,7 @@ void wwCellShadowPass( Scene * scene )
 	}
 	// lane LAMPSHADOW1: the tier's face edge; a change remakes the cube array and empties the slots
 	const int face = wwCellLampShadowFace();
-	const std::uintptr_t shKey = reinterpret_cast<std::uintptr_t>( &g.shTex );
+	const std::uintptr_t shKey = shadowShareKey( r );
 	if ( g.shTex && g.shShared && !WwVkPresent::sharedTargetIs( shKey, g.shTex ) ) {
 		g.shTex = 0;	// lane VKFAR6: the present device let the shared cubes go (the name is gone with them)
 		g.shShared = false;
@@ -1423,7 +1430,7 @@ void wwCellShadowPass( Scene * scene )
 		std::fill( g.shSlot, g.shSlot + kShadowSlots, -1 );
 		g.shStamp++;
 	}
-	if ( g.shTex && ( g.shFace != face || g.shShared != shadowShareWanted() ) ) {	// lane VKFAR6: or the view left / joined Vulkan
+	if ( g.shTex && ( g.shFace != face || g.shAsked != shadowShareWanted() ) ) {	// lane VKFAR6: or the view left / joined Vulkan
 		if ( g.shShared )
 			WwVkPresent::sharedTargetDrop( shKey );
 		else

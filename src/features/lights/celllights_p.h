@@ -152,6 +152,7 @@ struct Gpu
 	int shPend[kShadowSlots];	// lane PERFFIX2 b: the light a slot holds whose first store waits for a later frame (-1 none)
 	int shFace = 0;	// lane LAMPSHADOW1: the face edge shTex was made at (the tier's)
 	bool shShared = false;	// lane VKFAR6 (L8 term 5): shTex is the present device's shared D16 cube array
+	bool shAsked = false;	// lane VKFAR6: the share was wanted when shTex was made (shared or refused)
 	float shFade[kShadowSlots];	// lane GAPLOOK1: each slot's shadow strength under the budget (1 without it)
 	int shBudget = 0;
 	float shCut = 0.0f;
