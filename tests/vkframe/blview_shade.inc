@@ -309,7 +309,9 @@ bool shadeBuild( const std::string & spvDir, std::string & why )
 	sx.proj[10] = ( fa + n ) / ( n - fa );
 	sx.proj[11] = -1.0f;
 	sx.proj[14] = 2.0f * fa * n / ( n - fa );
-	// the state: every uniform block zero but globalUniforms.projectionMatrix and LooseUniforms.wwDrawBase
+	// the state: every uniform block zero but globalUniforms.projectionMatrix, globalUniforms.toneMapScale 1 and LooseUniforms.wwDrawBase
+	// (lane BATCH1120: the core PS's tonemap() divides by A.a = toneMapScale, so 0 made every lit RGB +Inf; seeding the
+	// colour arm's globalUniforms one member at a time, toneMapScale alone brought the blend run to 15800 lit, 0 off)
 	const std::vector<std::uint32_t> * mods[2] = { &sx.vs, &sx.ps };
 	for ( const std::vector<std::uint32_t> * w : mods ) {
 		SpvModule m;
@@ -322,6 +324,10 @@ bool shadeBuild( const std::string & spvDir, std::string & why )
 			for ( const SpvMember & mm : b.members ) {
 				if ( b.name.find( "globalUniforms" ) != std::string::npos && mm.name == "projectionMatrix" )
 					shadePutMat( bytes, mm, sx.proj );
+				if ( b.name.find( "globalUniforms" ) != std::string::npos && mm.name == "toneMapScale" ) {
+					const float one = 1.0f;
+					std::memcpy( bytes.data() + mm.offset, &one, 4 );
+				}
 				if ( b.name.find( "LooseUniforms" ) != std::string::npos && mm.name == "wwDrawBase" ) {
 					std::memcpy( bytes.data() + mm.offset, &sx.base, 4 );
 					sx.baseAt.emplace_back( sx.ubos.size(), mm.offset );
@@ -1379,9 +1385,9 @@ bool blendStateGood( const WwVkPresent::ObjBlTarget & t )
 
 struct BlendCmp
 {
-	std::size_t values = 0, lit = 0, off = 0;
+	std::size_t values = 0, lit = 0, off = 0, inf = 0;  // lane BATCH1120: lit counts finite base values only; inf = non-finite base values
 	float maxUlps = 0.0f;
-	bool good() const { return values > 0 && lit >= 2000 && off == 0; }
+	bool good() const { return values > 0 && lit >= 2000 && off == 0 && inf == 0; }
 };
 
 BlendCmp blendCmp( const std::vector<std::uint16_t> * base, const std::vector<std::uint16_t> * got, float k )
@@ -1392,7 +1398,9 @@ BlendCmp blendCmp( const std::vector<std::uint16_t> * base, const std::vector<st
 			return BlendCmp();
 		for ( std::size_t i = 0; i < base[t].size(); i++ ) {
 			const float o = fromHalf( base[t][i] ), g = fromHalf( got[t][i] );
-			c.lit += base[t][i] != 0;
+			const bool fin = ( base[t][i] & 0x7c00u ) != 0x7c00u;  // exponent 31: +-Inf or NaN (an Inf base against a clamped blend tests nothing)
+			c.lit += fin && base[t][i] != 0;
+			c.inf += !fin;
 			const float e = ( i % 4 ) == 3 ? std::max( k, o ) : k + o;
 			int ex = 0;
 			std::frexp( e, &ex );
@@ -1435,8 +1443,9 @@ bool blendGate()
 	ObjBlDrawStat st;
 	const bool ran = shadeVk( 0, 0, d0, base[0], base[1], st, why ) && shadeVk( 0, 0, d1, got[0], got[1], st, why, &add, k );
 	const BlendCmp c = ran ? blendCmp( base, got, k ) : BlendCmp();
-	std::printf( "BLVIEW blend run %s (%zu values, %zu lit without blend, %zu off by more than one half ulp, max %.3g ulp)%s%s\n",
-		c.good() ? "OK" : "FAIL", c.values, c.lit, c.off, double( c.maxUlps ), ran ? "" : ": ", ran ? "" : why.c_str() );
+	std::printf( "BLVIEW blend run %s (%zu values, %zu lit without blend, %zu off by more than one half ulp, max %.3g ulp, %zu non-finite base%s)%s%s\n",
+		c.good() ? "OK" : "FAIL", c.values, c.lit, c.off, double( c.maxUlps ), c.inf, c.inf ? ": TESTS NOTHING" : "", ran ? "" : ": ",
+		ran ? "" : why.c_str() );
 	ok = ok && c.good();
 	{
 		// lane BATCH1119: the blended run draws over the run before it with EQUAL, so the plain run must repeat EXACT first
