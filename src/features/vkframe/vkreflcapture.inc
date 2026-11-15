@@ -513,6 +513,8 @@ bool reflCaptureRun( const ReflCaptureRun & r, std::string & why )
 		if ( !rcFb( r.albKey, r.ndKey, j.layer, fb, w ) )
 			return breakOff( w );
 	}
+	if ( S.baseSlot.size() + nd > std::size_t( kBaseSlots ) )
+		S.baseSlot.clear();  // the slots are reused (every twin is copied again each run): never a refusal for good
 	S.recs.assign( nd, Rec() );
 	std::uint8_t * ring = static_cast<std::uint8_t *>( S.ring.ptr );
 	std::uint8_t * host = static_cast<std::uint8_t *>( S.host.ptr );
