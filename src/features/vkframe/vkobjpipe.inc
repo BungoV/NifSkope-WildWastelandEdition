@@ -4,6 +4,8 @@
 #include "features/vkframe/objbl_vs.spv.h"  // the twins (vkframe_spirv.sh fxb: VS_SHIFT / PS_SHIFT, -D WW_VK_BINDLESS)
 #include "features/vkframe/objbl_cell_ps.spv.h"
 #include "features/vkframe/objbl_cellcsm_ps.spv.h"
+#include "features/vkframe/objbl_cell_rt_ps.spv.h"  // lane VKWATER3 G4: the all-on route's RT GI variant of the pair
+#include "features/vkframe/objbl_cellcsm_rt_ps.spv.h"
 #include "features/vkframe/objbl_samples_cs.spv.h"  // the cell frame's per-sample readback (objBlFrameSamples)
 #include "features/vkframe/objcell_vs.spv.h"  // lane VKWATER3: the non-bindless twins (vkframe_spirv.sh fxc, the base variant)
 #include "features/vkframe/objcell_cell_ps.spv.h"
@@ -1507,9 +1509,16 @@ std::uintptr_t objCellCopyTwin( GlProc gp, const ObjBlTexUnit & u, int red, std:
 	}
 	const std::uintptr_t key = ( std::uintptr_t( 0xC07 ) << 40 ) | std::uintptr_t( u.glTex );
 	unsigned twin = 0;
+	const std::uint64_t gen0 = sharedGen();
 	if ( !sharedTarget( key, type, w, h, type ? d : 1, unsigned( fmt ), twin, why, levels ) || !twin )
 		return 0;
 	const std::uint64_t gen = sharedGen();
+	/* lane VKWATER5: a twin made here moves sharedGen(), which made every copy taken earlier this frame read as stale and copied
+	 * again (r1: cellAo twice on the first frame of cellSsr's twin). Those copies are still good: carry them to the new generation. */
+	if ( gen != gen0 )
+		for ( auto & m : opS().copyMemo )
+			if ( m.second == gen0 && m.first != u.glTex )  // never this texture's own: its twin may be the remade one
+				m.second = gen;
 	auto it = opS().copyMemo.find( u.glTex );
 	if ( it != opS().copyMemo.end() && it->second == gen )
 		return key;  // copied this frame
@@ -1536,6 +1545,15 @@ std::uintptr_t objCellCopyTwin( GlProc gp, const ObjBlTexUnit & u, int red, std:
 	rs.copyBytes += bytes;
 	rs.copyMs += nowMs() - t0;
 	return key;
+}
+
+/* lane VKWATER3: the GL-owned frame inputs read through a copy twin: the screen terms every cell twin reads (bl's and the cell
+ * route's: the obscurance, the AO decal target, the SSR result; ruling 11-15) and the effect twins' own (7 and up) */
+static bool objCopyTwinName( const std::string & n, int twin )
+{
+	if ( n == "cellAo" || n == "cellAoDecal" || n == "cellSsr" )
+		return true;
+	return twin >= 7 && ( n == "fxDepth" || n == "airTerr" || n == "cellGiAir" || n == "volEnvHist" );
 }
 
 /* lane VKOBJ5 round 5: a plain GL_TEXTURE_CUBE_MAP (the particles' CubeMap with hasCubeMap 1: the .bgem's env cube, BC or
@@ -1680,8 +1698,8 @@ bool objBlBindUnits(GlProc gp, unsigned prog, ObjBlDraw & d, ObjBlBindStat & st,
 				continue;
 			}
 			std::string w;
-			// lane VKWATER3: the effect twins read GL's own frame inputs (only these: a material map stays a refusal) through copy twins
-			if ( !key && d.twin >= 7 && ( u.name == "fxDepth" || u.name == "airTerr" || u.name == "cellGiAir" || u.name == "volEnvHist" ) ) {
+			// lane VKWATER3: GL's own frame inputs (only the name table's: a material map stays a refusal) through copy twins
+			if ( !key && d.copyRed != 2 && objCopyTwinName( u.name, d.twin ) ) {
 				key = objCellCopyTwin( gp, u, d.copyRed, w );
 				if ( !key ) {
 					st.misfit++;
@@ -2919,11 +2937,26 @@ bool objBlShade( GlProc gp, const ObjBlShade & s, std::string & why )
 		return fail( "no twin, program, rows or commands" );
 	ObjBlDraw d;
 	d.twin = s.twin;
-	d.pipeRed = s.red;
+	d.pipeRed = s.red == 1 ? 1 : 0;
+	if ( s.red == 9 || s.red == 10 ) {  // lane VKWATER3: the RT GI variant's texel buffers, one each (objCellShade's reds)
+		d.texelRed = 1;
+		d.texelRedName = s.red == 9 ? "cellRestir" : "cellDdgiAtlas";
+	}
+	d.dropName = s.red == 11 ? "cellGiHalf" : s.red == 12 ? "cellGiHalfKey" : nullptr;
+	d.copyRed = s.standInRed ? 2 : s.red == 8 ? 1 : 0;  // red copy; standin: no copy twin (the stand-in)
 	d.vs = vkframe_objbl_vs_spv;
 	d.vsWords = sizeof( vkframe_objbl_vs_spv ) / 4;
-	d.ps = s.twin ? vkframe_objbl_cellcsm_ps_spv : vkframe_objbl_cell_ps_spv;
-	d.psWords = s.twin ? sizeof( vkframe_objbl_cellcsm_ps_spv ) / 4 : sizeof( vkframe_objbl_cell_ps_spv ) / 4;
+	if ( s.rt ) {
+		d.ps = s.twin ? vkframe_objbl_cellcsm_rt_ps_spv : vkframe_objbl_cell_rt_ps_spv;
+		d.psWords = s.twin ? sizeof( vkframe_objbl_cellcsm_rt_ps_spv ) / 4 : sizeof( vkframe_objbl_cell_rt_ps_spv ) / 4;
+	} else {
+		d.ps = s.twin ? vkframe_objbl_cellcsm_ps_spv : vkframe_objbl_cell_ps_spv;
+		d.psWords = s.twin ? sizeof( vkframe_objbl_cellcsm_ps_spv ) / 4 : sizeof( vkframe_objbl_cell_ps_spv ) / 4;
+	}
+	if ( s.psGate ) {
+		d.ps = s.psGate;
+		d.psWords = s.psGateWords;
+	}
 	std::string w2;
 	if ( !objBlFrameRead( gp, d, w2 ) )
 		return fail( w2 );
@@ -2991,6 +3024,14 @@ bool objBlShade( GlProc gp, const ObjBlShade & s, std::string & why )
 	ObjBlBindStat bst;
 	if ( !objBlBindUnits( gp, s.prog, d, bst, w2 ) )
 		return fail( "the texture units: " + w2 );
+	// lane VKWATER3 (ruling 11-15): a GL-owned texture with no twin goes to GL, never a stand-in (a silent wrong picture);
+	// red standInRed restores the stand-in
+	if ( !s.standInRed && bst.misfit )
+		return fail( "a texture: " + bst.misfitWhy );
+	if ( !s.standInRed && bst.glOwn )
+		return fail( std::to_string( bst.glOwn ) + " GL textures with no twin: " + bst.glOwnNames );
+	if ( !s.standInRed && bst.texelRefused )
+		return fail( "a texel buffer: " + bst.texelWhy );
 	{
 		ObjBlRunStat & rs = opS().st;
 		rs.shared += bst.shared;
@@ -3019,6 +3060,19 @@ bool objBlShade( GlProc gp, const ObjBlShade & s, std::string & why )
 	if ( !objBlRun( names, 0, w2 ) )
 		return fail( "the crossing: " + w2 );
 	return true;
+}
+
+int objBlVariant( const std::string & defs, const char *& why, int red )
+{
+	why = nullptr;
+	if ( defs == "WW_CELL_FOGLEAK+WW_FRAME_UBO" )
+		return 0;
+	if ( defs == "WW_CELL_FOGLEAK+WW_CELL_RESTIR+WW_CELL_RTDDGI+WW_CELL_RTDDGI_CASCADES+WW_FRAME_UBO"
+		|| ( red == 1 && defs.find( "WW_CELL_RTDDGI" ) != std::string::npos ) )
+		return 1;
+	why = defs.find( "WW_CELL_RTDDGI" ) != std::string::npos ? "an RT GI mix in GL's program other than the all-on route's: no Vulkan bl twin"
+		: "GL's program is another variant (its pixel stage's loader defines): no Vulkan bl twin";
+	return -1;
 }
 
 int objCellRed( const char * name )

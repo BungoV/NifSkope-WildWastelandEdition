@@ -567,9 +567,19 @@ bool vkShade( const NifSkopeOpenGLContext::Program * prog, GLsizei n )
 		WwVkPresent::objBlOnGl( "the program has no Vulkan twin" );
 		return false;
 	}
+	/* lane VKWATER3 G4: the bl twins are the base variant (fo4_cellbl.frag@WW_CELL_FOGLEAK+WW_FRAME_UBO) and the all-on route's
+	 * RT GI variant (objBlVariant 1: objbl_cell(csm)_rt_ps, gated by blview `colour rt` / `colourcsm rt`); the loader's other
+	 * defines make another program, which GL draws */
+	const char * no = nullptr;
+	const int variant = WwVkPresent::objBlVariant( prog->wwDefs, no );
+	if ( variant < 0 ) {
+		WwVkPresent::objBlOnGl( no );
+		return false;
+	}
 	const Class & k = *c.boundCls;
 	WwVkPresent::ObjBlShade s;
 	s.twin = twin;
+	s.rt = variant == 1;
 	s.prog = prog->id;
 	s.poolKey = reinterpret_cast<std::uintptr_t>( &k );
 	s.pool.attrMask = k.attrMask;

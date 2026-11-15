@@ -220,7 +220,7 @@ struct ObjBlDraw
 	std::vector<std::uint32_t> imageSwz;  //!< lane VKWATER3: per image, a twin's swizzle (blSwizzleCode; 0 none)
 	int texRed = 0;                       //!< lane VKWATER3, gates only: 1 the twin made before (objTexKey), 2 the swizzle dropped
 	int texelRed = 0;                     //!< lane VKWATER3, gates only: objBlTexelCopy's red (1: copied from 16 bytes past the start)
-	int copyRed = 0;                      //!< lane VKWATER3, gates only: objCellCopyTwin's red (1: copied from one texel on in x)
+	int copyRed = 0;                      //!< lane VKWATER3, gates only: objCellCopyTwin's red (1: copied from one texel on in x, 2: no copy)
 	const char * texelRedName = nullptr;  //!< lane VKWATER3, gates only: texelRed for this one texel binding's name only
 	const char * dropName = nullptr;      //!< lane VKWATER3, gates only: this image binding left to the stand-in
 	std::vector<std::pair<std::uint32_t, ObjBlSampler>> samplers;         //!< binding -> GL's state, else the default
@@ -258,7 +258,7 @@ struct ObjBlBindStat
 	int shared = 0;    //!< images from a shared target
 	int twins = 0;     //!< images from a texture cache twin (lane VKWATER3: twin 2 and up only)
 	int glOwn = 0;     //!< a GL texture that is no shared target (a stand-in)
-	int copied = 0;    //!< lane VKWATER3: GL textures read through a copy twin (twin 7 and up; objCellCopyTwin)
+	int copied = 0;    //!< lane VKWATER3: GL textures read through a copy twin (objCopyTwinName's; objCellCopyTwin)
 	int misfit = 0;   //!< a shared target the binding cannot take (shape or samples; a stand-in)
 	int unbound = 0;   //!< no unit or no texture
 	int texelGl = 0;   //!< a texel buffer GL binds
@@ -367,6 +367,7 @@ void objCellCopiesStale();
 struct ObjBlShade
 {
 	int twin = 0;           //!< 0 fo4_cellbl, 1 fo4_cellcsmbl
+	bool rt = false;        //!< the all-on route's RT GI variant (objBlVariant 1): objbl_cell(csm)_rt_ps
 	unsigned prog = 0;      //!< GL's current program
 	std::uintptr_t poolKey = 0;
 	ObjBlPool pool;
@@ -374,7 +375,11 @@ struct ObjBlShade
 	std::size_t nRows = 0;
 	const void * cmds = nullptr;  //!< 5 words a command (the base instance relative to the leader)
 	std::size_t nCmds = 0;
-	int red = 0;  //!< gates only: 1 objBlPipe's strict target count (a 1-buffer frame must refuse)
+	int red = 0;  //!< gates only: 1 objBlPipe's strict target count (a 1-buffer frame must refuse); RT GI: 9 the ReSTIR ratio /
+	              //!< 10 the atlas copied a texel on, 11 / 12 the screen GI / its key dropped to the stand-in; 8 the copy twins
+	              //!< (cellAo, cellAoDecal, cellSsr) copied a texel on
+	const std::uint32_t * psGate = nullptr;  //!< gates only: this pixel module instead of the shipped twin (blview's plain row)
+	std::size_t psGateWords = 0;
 	int skinRed = 0;   //!< lane VKOBJ5 red `bone`: the mirrored skinningUniforms one bone on (bone i reads i + 1's transform)
 	int alphaRed = 0;  //!< lane VKOBJ5 red `flags`: the mirrored alphaFlags 0 (no alpha test, no blend bit)
 	/*! lane VKOBJ5: `rows` starts at the row GL's wwDrawBase names (a run's leader, a single draw's own row), so the
@@ -385,8 +390,15 @@ struct ObjBlShade
 	 * of `pool` only verts is read */
 	bool ownVao = false;
 	int ownRed = 0;  //!< gates only: 1 `offset` (the attributes read from offset 0), 2 `half` (the halves read as 16-bit unorm)
+	/*! lane VKWATER3 (ruling 11-15): a GL-owned texture with no twin, a twin that does not fit or a refused texel buffer refuses
+	 * the draw to GL; gates only: true restores the old stand-in (the red `standin`: a silent wrong picture) */
+	bool standInRed = false;
 };
 bool objBlShade( GlProc gp, const ObjBlShade & s, std::string & why );
+/* lane VKWATER3 G4: the bl twin of GL's program by its pixel stage's loader key (Program::wwDefs): 0 the base
+ * (WW_CELL_FOGLEAK+WW_FRAME_UBO), 1 the all-on route's RT GI variant (+ WW_CELL_RESTIR, _RTDDGI, _RTDDGI_CASCADES), -1 another
+ * variant (why: GL draws it). red 1 (gates only): any key naming WW_CELL_RTDDGI is taken as the RT twin (an RT-only key must refuse) */
+int objBlVariant( const std::string & defs, const char *& why, int red = 0 );
 /* lane VKWATER3 (plan row G4 by draws): one shape's draw (bsshape.cpp, WW_VKOBJ_SHADE=1) through the non-bindless twins
  * of fo4_cell / fo4_cellcsm / pbrm_default / pbrm_cell / pbrm_cellcsm on the app's base variant (WW_CELL_FOGLEAK + WW_FRAME_UBO; the caller refuses any other). Read
  * from GL here: the frame and fixed state (objBlFrameRead), the uniforms (objBlMirror), the units (objBlBindUnits: every

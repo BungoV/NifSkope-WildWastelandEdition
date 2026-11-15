@@ -30,6 +30,7 @@ struct BlImg
 struct BlSwzView
 {
 	VkImage img = VK_NULL_HANDLE;
+	std::uint64_t gen = 0;  // lane VKWATER3: sharedGen() when made (a remade twin can come back at the freed handle value)
 	VkImageView view = VK_NULL_HANDLE;
 };
 using BlViewKey = std::pair<std::uintptr_t, std::uint32_t>;
@@ -58,6 +59,8 @@ struct Bl
 	std::map<BlViewKey, BlSwzView> swzViews;
 	std::unordered_map<std::uint64_t, BlEntry> handles;
 	std::vector<std::pair<std::uint32_t, std::uint64_t>> graves;  // (index, the translate it was freed at)
+	// lane VKWATER3: swizzled views left when sharedGen() moved on a live image (draws in flight may read them), freed as graves
+	std::vector<std::pair<VkImageView, std::uint64_t>> swzGraves;
 	std::uint64_t serial = 0, gen = 0;
 	WwVkPresent::BlStat st;
 };
@@ -249,9 +252,11 @@ VkImageView blView( std::uintptr_t key, VkFormat & fmt, std::uint32_t swz = 0 )
 		return s->view;
 	Vk & v = vk();
 	BlSwzView & sv = blS().swzViews[{ key, swz }];
-	if ( sv.view && sv.img == s->img )
+	if ( sv.view && sv.img == s->img && sv.gen == sharedGen() )
 		return sv.view;
-	if ( sv.view )  // the key's image was remade (its old one is gone, so is any work on it)
+	if ( sv.view && sv.img == s->img )  // the same handle, sharedGen() moved: maybe still read in flight, held kBlGraveTranslates
+		blS().swzGraves.push_back( { sv.view, blS().serial } );
+	else if ( sv.view )  // the key's image was remade (its old one is gone, so is any work on it)
 		v.vkDestroyImageView( v.dev, sv.view, nullptr );
 	sv = BlSwzView();
 	VkImageViewCreateInfo ci { VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO };
@@ -266,6 +271,7 @@ VkImageView blView( std::uintptr_t key, VkFormat & fmt, std::uint32_t swz = 0 )
 		return VK_NULL_HANDLE;
 	}
 	sv.img = s->img;
+	sv.gen = sharedGen();
 	return sv.view;
 }
 
@@ -456,6 +462,8 @@ void blFree()
 	for ( auto & sv : B.swzViews )  // VKOBJ4
 		if ( sv.second.view )
 			v.vkDestroyImageView( v.dev, sv.second.view, nullptr );
+	for ( auto & g : B.swzGraves )
+		v.vkDestroyImageView( v.dev, g.first, nullptr );
 	if ( B.zeroView )
 		v.vkDestroyImageView( v.dev, B.zeroView, nullptr );
 	if ( B.zeroImg )
@@ -624,6 +632,12 @@ std::size_t blTranslate( const void * glRows, void * vkRows, std::size_t n, int 
 {
 	Bl & B = blS();
 	B.serial++;
+	for ( auto g = B.swzGraves.begin(); g != B.swzGraves.end(); )  // lane VKWATER3: past the ring, no draw reads them
+		if ( B.serial >= g->second + kBlGraveTranslates ) {
+			vk().vkDestroyImageView( vk().dev, g->first, nullptr );
+			g = B.swzGraves.erase( g );
+		} else
+			++g;
 	if ( B.set && B.gen != sharedGen() )
 		blRewrite();
 	std::uint32_t redSmp = 0;

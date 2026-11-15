@@ -746,8 +746,24 @@ int main( int argc, char ** argv )
 	std::mt19937 rng( 23 );
 	std::uniform_real_distribution<float> u01( 0.0f, 1.0f );
 	bool ok = pipeGate( spvDir );  // lane VKOBJ4: the bl twins' pipelines and their reds
+	{  /* lane VKWATER3 G4: the bl variant pick (cellbindless.cpp vkShade): the base and the all-on route's RT key take their
+		* twins, an RT-only mix and RESTIRGI refuse; red 1 (any RTDDGI key taken as RT) must let the RT-only key through */
+		using WwVkPresent::objBlVariant;
+		static const char * rtOnly = "WW_CELL_FOGLEAK+WW_CELL_RTDDGI+WW_FRAME_UBO";
+		const char * w = nullptr;
+		const int vb = objBlVariant( "WW_CELL_FOGLEAK+WW_FRAME_UBO", w ), vr = objBlVariant( "WW_CELL_FOGLEAK+WW_CELL_RESTIR+WW_CELL_RTDDGI+WW_CELL_RTDDGI_CASCADES+WW_FRAME_UBO", w );
+		const int vo = objBlVariant( rtOnly, w );
+		const bool whyOk = w != nullptr;
+		const int vg = objBlVariant( "WW_CELL_FOGLEAK+WW_CELL_RESTIR+WW_CELL_RESTIRGI+WW_CELL_RTDDGI+WW_CELL_RTDDGI_CASCADES+WW_FRAME_UBO", w );
+		const int vn = objBlVariant( "WW_FRAME_UBO", w );
+		const int red = objBlVariant( rtOnly, w, 1 );
+		const bool vOk = vb == 0 && vr == 1 && vo < 0 && whyOk && vg < 0 && vn < 0 && red == 1;
+		std::printf( "BLVIEW variant %s (base %d, RT %d, RT-only %d, +RESTIRGI %d, no FOGLEAK %d; red 1 RT-only %d: %s)\n", vOk ? "OK" : "FAIL", vb, vr,
+			vo, vg, vn, red, red == 1 ? "FAIL as it must" : "PASSED (tests nothing)" );
+		ok = vOk && ok;
+	}
 	ok = uniGate( root ) && ok;    // lane VKOBJ4: the mirrored uniforms, blocks and texture units, and their reds
-	ok = locsGate( spvDir + "/spvset/spirv" ) && ok;  // lane VKOBJ4: the same mirror on GL's fo4_cellbl linked from SPIR-V
+	ok = locsGate( spvDir + "/spvapp/spirv" ) && ok;  // lane VKOBJ4: the same mirror on GL's fo4_cellbl linked from SPIR-V
 	// lane VKOBJ3: the cache's BC twin of def t (random blocks per level, the def's sampler state, gli's swizzle on BC4 / BC5)
 	const GLenum bcFmt[kTex] = { 0x83F0, 0x83F1, 0x83F2, 0x83F3, 0x8DBB, 0x8DBD, 0x8E8C, 0x8C4C, 0x8C4F, 0x8DBE, 0x8E8D, 0x8C4D };
 	double makeMs = 0.0;
@@ -1117,15 +1133,23 @@ int main( int argc, char ** argv )
 		ok = pfxGate( spvDir + "/pfxset/spirv", texs[3], texs[1], texs[0], 0xF00u, true ) && ok;
 	else
 		std::printf( "BLVIEW pfx not run (the sprite is the texture cache's twin: MODE=bc)\n" );
-	const bool colOk = twinOk && ( pfxOnly || colourGate( spvDir + "/spvset/spirv", handles, anisoAt, aniso1H, 0 ) );
-	const bool colCsmOk = twinOk && pfxOnly ? true : twinOk && colourGate( spvDir + "/spvset/spirv", handles, anisoAt, aniso1H, 1 );  // gap 4: fo4_cellcsmbl
-	// lane VKOBJ5 (G4): skinned (kind 1), alpha-tested (kind 2), single rigid (kind 3), own VAO (kind 4) through both bl twins
+	// lane VKWATER3 (ruling 11-15): the shipped twins on the app's key (WW_CELL_FOGLEAK + WW_FRAME_UBO) against GL built with the
+	// same defines (blview.sh's spvapp); the plain variant (no define, both sides) stays as a regression row
+	const bool colOk = twinOk && ( pfxOnly || colourGate( spvDir + "/spvapp/spirv", handles, anisoAt, aniso1H, 0 ) );
+	const bool colCsmOk = twinOk && ( pfxOnly || colourGate( spvDir + "/spvapp/spirv", handles, anisoAt, aniso1H, 1 ) );  // gap 4: fo4_cellcsmbl
+	const bool colPlain = twinOk && ( pfxOnly || colourGate( spvDir + "/spvset/spirv", handles, anisoAt, aniso1H, 0, 0, spvDir + "/fo4_cellbl_ps.pipe.spv" ) );
+	const bool colCsmPlain = twinOk && ( pfxOnly || colourGate( spvDir + "/spvset/spirv", handles, anisoAt, aniso1H, 1, 0, spvDir + "/fo4_cellcsmbl_ps.pipe.spv" ) );
+	// lane VKWATER3 ruling 3: the RT GI variant on the app's all-on key (blview.sh's spvrt) against the shipped rt twins
+	const bool colRt = twinOk && ( pfxOnly || colourGate( spvDir + "/spvrt/spirv", handles, anisoAt, aniso1H, 0, 0, std::string(), true ) );
+	const bool colCsmRt = twinOk && ( pfxOnly || colourGate( spvDir + "/spvrt/spirv", handles, anisoAt, aniso1H, 1, 0, std::string(), true ) );
+	// lane VKOBJ5 (G4): skinned (kind 1), alpha-tested (kind 2), single rigid (kind 3), own VAO (kind 4) through both bl twins,
+	// GL on the app's key as the shipped twins (VKWATER3 ruling 1); lane VKWATER3 kind 5 `ao`: GL's own cellAo must refuse
 	bool kindOk = true;
 	for ( int tw = 0; tw < 2 && !pfxOnly; tw++ )
-		for ( int kd = 1; kd <= 4; kd++ )
-			kindOk = ( twinOk && colourGate( spvDir + "/spvset/spirv", handles, anisoAt, aniso1H, tw, kd ) ) && kindOk;
+		for ( int kd = 1; kd <= 5; kd++ )
+			kindOk = ( twinOk && colourGate( spvDir + "/spvapp/spirv", handles, anisoAt, aniso1H, tw, kd ) ) && kindOk;
 	ok = kindOk && ok;
-	ok = colOk && colCsmOk && ok;
+	ok = colOk && colCsmOk && colPlain && colCsmPlain && colRt && colCsmRt && ok;
 	if ( bc && !pfxOnly ) {  // lane VKWATER3 G4: GL's fo4_cell / fo4_cellcsm against the non-bindless twins through objCellShade
 		/* BaseMap DXT5, NormalMap DXT1, SpecularMap BC5 signed (R,G,0,1: .g the gloss), GlowMap DXT1. Not texture 4: the twin made
 		 * before it is texture 3's first, gone when frame 1 replaced it, so the red `key` had no image to read */
@@ -1164,7 +1188,29 @@ int main( int argc, char ** argv )
 		/* the RT GI variant (11-15, vars 8): GL's WW_CELL_RESTIR + RTDDGI + RTDDGI_CASCADES program against the twin's _rt_ps, the
 		 * lights on; reds restir, atlas, gihalf, gikey (ObjCellShade.red 9 .. 12) */
 		const bool c3rt = cellGate( spvDir + "/cellset/spirv", 3, maps, 0xFu << 9, "rt", 1u | 8u );
-		ok = c3rt && ok;
+		const bool c2rt = cellGate( spvDir + "/cellset/spirv", 2, maps, 0xFu << 9, "rt", 1u | 8u );
+		// twin 4: pbrm_default's RT program reads none of the inputs (its code is the base's): no reds
+		const bool c4rt = cellGate( spvDir + "/cellset/spirv", 4, pbrm, 0u, "rt", 8u );
+		const bool c5rt = cellGate( spvDir + "/cellset/spirv", 5, pbrm, 0xFu << 9, "rt", 1u | 8u );
+		const bool c6rt = cellGate( spvDir + "/cellset/spirv", 6, pbrm, 0xFu << 9, "rt", 1u | 8u );
+		const bool c7rt = cellGate( spvDir + "/cellset/spirv", 7, fx, 0xEu << 9, "rt", 1u | 8u );  // plain lit cards: no restir red
+		// ruling 3: the lit cards volumetric (vars 16), where the ReSTIR ratio reaches an effect: the restir red with the other three
+		const bool c7vol = cellGate( spvDir + "/cellset/spirv", 7, fx, 0xFu << 9, "rtvol", 1u | 8u | 16u );
+		ok = c3rt && c2rt && c4rt && c5rt && c6rt && c7rt && c7vol && ok;
+		/* ruling 3, twin 8 (fo4_effectdecalcsm: an effect decal or an exterior's room-lit effect, lit as its surface, the cascades):
+		 * the effect's maps; reds offset, half, key, light, copy; BC4 as GreyscaleMap for swz; the RT variant with its four reds */
+		const bool c8 = cellGate( spvDir + "/cellset/spirv", 8, fx, 0xBu | 1u << 4 | 1u << 8 );
+		const bool c8s = cellGate( spvDir + "/cellset/spirv", 8, fxBc4, 1u << 2, "bc4" );
+		const bool c8rt = cellGate( spvDir + "/cellset/spirv", 8, fx, 0xFu << 9, "rt", 1u | 8u );
+		ok = c8 && c8s && c8rt && ok;
+		/* lane VKWATER5: the cell route's screen terms (vars 32): GL-owned cellAo (and cellSsr on twins 2, 3, 5, 6) bound as the app binds
+		 * them; the copy red (reds bit 8) must FAIL on each. Twin 4's base variant has no cell lights (no cellAo read) */
+		const bool a2 = cellGate( spvDir + "/cellset/spirv", 2, maps, 1u << 8, "ao", 32u );
+		const bool a3 = cellGate( spvDir + "/cellset/spirv", 3, maps, 1u << 8, "ao", 32u );
+		const bool a5 = cellGate( spvDir + "/cellset/spirv", 5, pbrm, 1u << 8, "ao", 32u );
+		const bool a6 = cellGate( spvDir + "/cellset/spirv", 6, pbrm, 1u << 8, "ao", 32u );
+		const bool a8 = cellGate( spvDir + "/cellset/spirv", 8, fx, 1u << 8, "ao", 32u );
+		ok = a2 && a3 && a5 && a6 && a8 && ok;
 	} else
 		std::printf( "BLVIEW cell not run (the cell twins read the texture cache's twins: MODE=bc)\n" );
 	vk().vkWaitForFences( vk().dev, 1, &gv.fence, VK_TRUE, 1000000000ull );

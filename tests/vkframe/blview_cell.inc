@@ -56,20 +56,53 @@
  * Probes: cellRestirOn 0, cellDdgiOn 0, cellGiHalfOn 0 each move GL's colour on >= 20 % of the covered pixels. The texel
  * line: the ratio copied once for the sweep, the lights once a draw (copied 7, their bytes), the atlas imported once a draw. Reds
  * (ObjCellShade.red 9 .. 12): restir (the ratio copied from two texels on), atlas (read one texel on), gihalf, gikey (each image
- * dropped to the stand-in). */
+ * dropped to the stand-in).
+ * Volumetric cards (lane VKWATER3 ruling 3, vars 16 with 8 on twin 7, `BLVIEW effectcell rtvol`; stated before its first run,
+ * never widened): lit draw 4 as a volumetric mesh card (volPart 1, fxAirCard 1 as renderer.cpp sets it,
+ * volTerms 2: their lamps through vpLight, where a shadow-casting light takes the ReSTIR ratio on the ratio's depth), so the
+ * ratio reaches an effect; lit draws 0, 1, 3 stay plain (an air card takes no GI surface term, so the GI probes and the atlas
+ * red reach GL through them; as air cards draws 1 and 3 fade out whole).
+ * The RT row's bar, probes (cellRestirOn 0 among them) and its four reds, restir with them.
+ * Screen terms (lane VKWATER5 11-15, `BLVIEW <twin> ao`, vars 32; stated before its first run, never widened): the cell route's twin
+ * of blview's colour ao row (VKWATER3 8b678da1 proved the copy twin on bl only). Twins 2, 3, 5, 6 and 8, the programs that sample
+ * cellAo (twin 4's base variant has no cell lights; twin 7 takes a row only if its GL probe below reaches). Bound as ao.cpp binds
+ * it: a sampler on its own unit, cellAoOn 1, cellAoRect = (0, 0, 1 / w, 1 / h) of the frame, cellAo a GL R32F texture of half the
+ * view, a ramp in y and a 7-texel saw in x, bilinear, clamped (the bl row's texture). Twins 2, 3, 5, 6 also bind cellSsr as
+ * cellssr.cpp does: a GL RGBA32F texture of half the view (rgb a ramp in y and a 5-texel saw in x, a 0.3 .. 1 confidence saw
+ * in x), cellSsrOn 1, cellSsrMat 1, cellSsrRect, with the cube term's inputs (envReflection 1, cellCubeMat 1 1 0 0) seeded so the
+ * reflection reaches the colour (unseeded, k = 0 and the term is nothing). cellAoDecal: GL's read is dead without WW_CELL_PRT (no gated
+ * variant carries it), r2 printed `cellAoDecal -1` on every twin (GL's program has no such sampler), so it is never bound; the code
+ * binds it as a copy-only input if a variant ever has the unit. Amended 11-15 after r1: cellSsr is bound wherever GL has the sampler,
+ * but its reach probe is a bar on twins 2 and 3 only; on pbrm (5, 6) cellSsrOn 0 moved 0 of 11571 pixels with these seeds, printed
+ * as info and not claimed. r1 also found the copy memo re-copying cellAo on the first frame of cellSsr's new twin (objCellCopyTwin).
+ * Bars: the twin's own (depth, colour, crossing counts); the copy line: the crossing takes exactly ONE copy of each GL-owned input
+ * a frame (cellAo kSW/2 x kSH/2 x 4 B, cellSsr x 16 B, and twin 8's soft-fade depth kSW x kSH x 4 B), copies and bytes equal.
+ * Probes: cellAoOn 0 (every twin), and cellSsrOn 0 (twins 2, 3), each move GL's colour on >= 20 % of the covered pixels. Red copy (reds bit 8:
+ * every copy twin copied from one texel on in x) must FAIL and move the Vulkan colour. */
 bool cellGate( const std::string & spirvDir, int twin, const GLuint maps[4], unsigned reds = 15u, const char * label = nullptr, unsigned vars = 0u )
 {
 	using namespace WwVkPresent;
-	static const char * twinTag[8] = { "", "", "cell", "cellcsm", "pbrm", "pbrmcell", "pbrmcellcsm", "effectcell" };
-	static const char * twinFrag[8] = { "", "", "fo4_cell", "fo4_cellcsm", "pbrm_default", "pbrm_cell", "pbrm_cellcsm", "fo4_effectcell" };
-	if ( twin < 2 || twin > 7 ) {
+	static const char * twinTag[9] = { "", "", "cell", "cellcsm", "pbrm", "pbrmcell", "pbrmcellcsm", "effectcell", "effectdecalcsm" };
+	static const char * twinFrag[9] = { "", "", "fo4_cell", "fo4_cellcsm", "pbrm_default", "pbrm_cell", "pbrm_cellcsm", "fo4_effectcell",
+		"fo4_effectdecalcsm" };
+	if ( twin < 2 || twin > 8 ) {
 		std::printf( "BLVIEW cell FAIL (no twin %d)\n", twin );
 		return false;
 	}
 	// twin 7: fo4_effectcell (the game's effect shader, cell-lit): one target, its own maps and state, the soft fade's depth
-	const bool fxT = twin == 7, pbrmT = twin >= 4 && !fxT, csmT = twin == 3 || twin == 6, lightsV = ( vars & 9u ) != 0 || twin >= 5;
+	/* twin 8: fo4_effectdecalcsm (lane VKWATER3 G4: an effect decal, or an exterior's room-lit effect, lit as the surface it
+	 * lies on, with the cascades): the effect's maps and state, outdoors (cellInterior 0, the sun and its shadow), draws 1, 4
+	 * room-lit (fxRoomLit: cellFxBase x the spot's open-air share), the rest the decal's surface light (fxDecalLin) */
+	const bool decT = twin == 8;
+	const bool fxT = twin == 7 || decT, pbrmT = twin >= 4 && !fxT, csmT = twin == 3 || twin == 6 || decT;
+	// lights: vars 1, every twin from 5, and the RT variant but on twin 4 (pbrm_default's RT program has no lights)
+	const bool lightsV = ( vars & 1u ) != 0 || twin >= 5 || ( ( vars & 8u ) != 0 && twin != 4 );
 	const bool oneT = twin == 4 || fxT;  // writes target 0 only
 	const bool skinV = ( vars & 2u ) != 0, alphaV = ( vars & 4u ) != 0, rtV = ( vars & 8u ) != 0;
+	const bool volV = twin == 7 && ( vars & 16u ) != 0;  // twin 7: the lit cards volumetric (the ReSTIR ratio's way into an effect)
+	const bool aoV = ( vars & 32u ) != 0;  // lane VKWATER5: cellAo (and cellSsr on twins 2, 3, 5, 6) bound as the app binds them
+	const bool ssrV = aoV;  // cellSsr and cellAoDecal are bound wherever GL's program has the sampler (a unit with none holds a stale texture)
+	const bool ssrJudged = twin == 2 || twin == 3;  // the SSR probe is a bar there only: pbrm's cube term never moved (r1: 0 of 11571)
 	const std::string tagS = std::string( twinTag[twin] ) + ( label ? std::string( " " ) + label : std::string() );
 	const char * tag = tagS.c_str();
 	struct CellGl
@@ -130,7 +163,7 @@ bool cellGate( const std::string & spirvDir, int twin, const GLuint maps[4], uns
 	}
 	// GL's program from the set, the app's base variant, the binaries as they are
 	const GLuint prog = f.createProgram();
-	const std::string stage[2] = { "fo4_default.vert", std::string( twinFrag[twin] ) + ( fxT ? ".frag@WW_CELL_AIRZONE+WW_CELL_FOGLEAK+" : ".frag@WW_CELL_FOGLEAK+" )
+	const std::string stage[2] = { "fo4_default.vert", std::string( twinFrag[twin] ) + ( fxT && !decT ? ".frag@WW_CELL_AIRZONE+WW_CELL_FOGLEAK+" : ".frag@WW_CELL_FOGLEAK+" )
 		+ ( rtV ? "WW_CELL_RESTIR+WW_CELL_RTDDGI+WW_CELL_RTDDGI_CASCADES+WW_FRAME_UBO" : "WW_FRAME_UBO" ) };
 	for ( int s = 0; s < 2; s++ ) {
 		const std::string bin = index.count( stage[s] ) ? readFile( spirvDir + "/" + index[stage[s]] ) : std::string();
@@ -449,7 +482,12 @@ bool cellGate( const std::string & spirvDir, int twin, const GLuint maps[4], uns
 		glBindTexture( GL_TEXTURE_2D, 0 );
 		const GLint l = locOf( "fxDepth" );
 		fxDepthUnit = unitAt.count( l ) ? unitAt[l] : -1;
-		set( "cellInterior", { 1 } );
+		/* RT GI: outdoors under a sun (fxLocalOn), so the lit cards take the GI as a surface (fxLocalSky: the atlas and the
+		 * screen GI at normal +z). The ReSTIR ratio reaches an effect only through a volumetric card's lamps (vpLight): the
+		 * rtvol row (vars 16) draws the lit cards volumetric, with the restir red; the rt row draws them plain */
+		set( "cellInterior", { ( vars & 8u ) != 0 || decT ? 0.0f : 1.0f } );
+		if ( ( vars & 8u ) != 0 )
+			set( "vpSun", { 0.7f, 0.6f, 0.5f, 1.0f } );
 		set( "hasSourceTexture", { 1 } );
 		set( "hasNormalMap", { 1 } );
 		set( "hasCubeMap", { 0 } );
@@ -465,13 +503,78 @@ bool cellGate( const std::string & spirvDir, int twin, const GLuint maps[4], uns
 			return false;
 		}
 	}
+	/* lane VKWATER5: the screen terms as ao.cpp / cellssr.cpp bind them, GL-owned textures of half the view: cellAo R32F (a ramp in
+	 * y, a 7-texel saw in x, bilinear, clamped), cellSsr RGBA32F (rgb a ramp and a 5-texel saw, confidence a 7-texel saw 0.3 .. 1) */
+	GLuint aoTex = 0, ssrTex = 0, decalTex = 0;
+	int aoUnit = -1, ssrUnit = -1, decalUnit = -1;
+	if ( aoV ) {
+		const int aw = kSW / 2, ah = kSH / 2;
+		std::vector<float> av( std::size_t( aw ) * std::size_t( ah ) ), sv( std::size_t( aw ) * std::size_t( ah ) * 4 );
+		for ( int y = 0; y < ah; y++ )
+			for ( int x = 0; x < aw; x++ ) {
+				const std::size_t p = std::size_t( y ) * std::size_t( aw ) + std::size_t( x );
+				const float ry = float( y ) / float( ah - 1 );
+				av[p] = 0.15f + 0.5f * ry + 0.3f * float( x % 7 ) / 6.0f;
+				sv[p * 4] = 0.1f + 0.6f * ry;
+				sv[p * 4 + 1] = 0.1f + 0.5f * float( x % 5 ) / 4.0f;
+				sv[p * 4 + 2] = 0.4f;
+				sv[p * 4 + 3] = 0.3f + 0.7f * float( x % 7 ) / 6.0f;
+			}
+		auto make = [&]( GLuint & t, GLint ifmt, GLenum fmt, const float * px ) {
+			glGenTextures( 1, &t );
+			glBindTexture( GL_TEXTURE_2D, t );
+			glTexImage2D( GL_TEXTURE_2D, 0, ifmt, aw, ah, 0, fmt, GL_FLOAT, px );
+			glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR );
+			glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR );
+			glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, 0x812F );  // CLAMP_TO_EDGE
+			glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, 0x812F );
+			glTexParameteri( GL_TEXTURE_2D, 0x813D, 0 );  // MAX_LEVEL
+			glBindTexture( GL_TEXTURE_2D, 0 );
+		};
+		make( aoTex, 0x822E, 0x1903, av.data() );  // R32F from RED
+		const GLint la = locOf( "cellAo" );
+		aoUnit = unitAt.count( la ) ? unitAt[la] : -1;
+		/* cellAoDecal (r1: twins 2, 5 and 8 took one copy beyond cellAo / cellSsr): the app binds the AO decal target on its own unit
+		 * (ao.cpp), the same size as cellAo; a copy-only input here, its read needs WW_CELL_PRT which no gated variant carries */
+		const GLint ld = locOf( "cellAoDecal" );
+		decalUnit = unitAt.count( ld ) ? unitAt[ld] : -1;
+		if ( decalUnit >= 0 ) {
+			for ( float & v : av )
+				v = 1.0f - v;
+			make( decalTex, 0x822E, 0x1903, av.data() );
+			set( "cellAoDecalOn", { 1 } );
+			set( "cellAoDecalRect", { 0.0f, 0.0f, 0.0f, 0.0f } );
+		}
+		set( "cellAoOn", { 1 } );
+		set( "cellAoRect", { 0.0f, 0.0f, 1.0f / float( kSW ), 1.0f / float( kSH ) } );
+		if ( ssrV ) {
+			make( ssrTex, 0x8814, GL_RGBA, sv.data() );  // RGBA32F
+			const GLint ls = locOf( "cellSsr" );
+			ssrUnit = unitAt.count( ls ) ? unitAt[ls] : -1;
+			if ( ssrUnit < 0 ) {  // no such sampler in GL's program: nothing to bind
+				glDeleteTextures( 1, &ssrTex );
+				ssrTex = 0;
+			}
+			set( "cellSsrOn", { 1 } );
+			set( "cellSsrMat", { 1 } );
+			set( "cellSsrRect", { 0.0f, 0.0f, 1.0f / float( kSW ), 1.0f / float( kSH ) } );
+			set( "envReflection", { 1.0f } );  // unseeded the cube term's k is 0 and the reflection is nothing
+			set( "cellCubeMat", { 1.0f, 1.0f, 0.0f, 0.0f } );
+		}
+		if ( aoUnit < 0 || glGetError() != GL_NO_ERROR ) {
+			std::printf( "BLVIEW %s FAIL (no unit for cellAo (%d), or a GL error making the screen textures)\n", tag, aoUnit );
+			return false;
+		}
+		std::printf( "BLVIEW %s screen units: cellAo %d, cellAoDecal %d, cellSsr %d (-1: GL's program has no such sampler)\n", tag, aoUnit, decalUnit,
+			ssrUnit );
+	}
 	/* RT GI (vars 8): the ReSTIR ratio (GL's buffer texture), the atlas (a store), the screen GI and its key (shared targets);
 	 * the key's surface positions come from GL's sweep below */
 	static int giHalfAt = 0, giKeyAt = 0;
 	const std::uintptr_t giHalfKey = reinterpret_cast<std::uintptr_t>( &giHalfAt ), giKeyKey = reinterpret_cast<std::uintptr_t>( &giKeyAt );
 	GLuint restirTex = 0, restirBuf = 0, atlasTex = 0, giHalfTex = 0, giKeyTex = 0;
 	unsigned atlasBuf = 0;
-	int restirUnit = -1, atlasUnit = -1, giHalfUnit = -1, giKeyUnit = -1;
+	int restirUnit = -1, atlasUnit = -1, giHalfUnit = -1, giKeyUnit = -1, rtUnits = 0;  // rtUnits: 0 on twin 4 (pbrm_default's RT code is the base's)
 	const int hw = kSW / 2, hh = kSH / 2;
 	if ( rtV ) {
 		std::vector<float> rs( std::size_t( kSW ) * std::size_t( kSH ) * 2 );
@@ -537,10 +640,11 @@ bool cellGate( const std::string & spirvDir, int twin, const GLuint maps[4], uns
 		for ( int k = 0; k < 4; k++ ) {
 			const GLint l = locOf( nm[k] );
 			*un[k] = unitAt.count( l ) ? unitAt[l] : -1;
-			if ( *un[k] < 0 ) {
-				std::printf( "BLVIEW %s FAIL (%s has no unit: location %d)\n", tag, nm[k], int( l ) );
-				return false;
-			}
+			rtUnits += *un[k] >= 0 ? 1 : 0;
+		}
+		if ( rtUnits != ( twin == 4 ? 0 : 4 ) ) {
+			std::printf( "BLVIEW %s FAIL (%d of the 4 RT inputs have a unit, want %d)\n", tag, rtUnits, twin == 4 ? 0 : 4 );
+			return false;
 		}
 		set( "cellShadowOn", { 1 } );
 		set( "cellRestirOn", { 1 } );
@@ -716,7 +820,23 @@ bool cellGate( const std::string & spirvDir, int twin, const GLuint maps[4], uns
 			set( "hasEnvMask", { i % 2 == 0 ? 1.0f : 0.0f } );
 			set( "lightingInfluence", { 0.4f + 0.6f * q( r ) } );
 			set( "fxLitMode", { i % 3 != 2 ? 3.0f : 0.0f } );  // lit by every light (cellLightCount), or unlit
+			if ( volV ) {  // the lit cards volumetric, lit by their lamps alone (volTerms 2: placed)
+				const float volCard = i == 4 ? 1.0f : 0.0f;
+				set( "volPart", { volCard } );
+				set( "fxAirCard", { volCard } );  // a volumetric mesh card is a slab of air (renderer.cpp)
+				set( "volTerms", { 2 } );
+				// the air's phase (the app's weather feeds it; left 0 the lamps scatter nothing): Rayleigh, forward, back
+				set( "volPhase", { 0.5f, 0.45f, 0.4f, 0.0f }, 0 );
+				set( "volPhase", { 0.3f, 0.3f, 0.3f, 0.6f }, 1 );
+				set( "volPhase", { 0.2f, 0.25f, 0.3f, -0.3f }, 2 );
+				set( "volGi", { 1.0f, 1.0f, 1.0f, 0.12f } );
+			}
 			set( "fxEmit", { 0.8f, 0.6f, 0.4f, i == 4 ? 1.0f : 0.0f } );
+			if ( decT ) {
+				set( "fxRoomLit", { i % 3 == 1 ? 1.0f : 0.0f } );
+				set( "fxDecalProbe", { 0.0f } );
+				set( "cellFxBase", { 1.1f + 0.4f * q( r ), 1.0f + 0.3f * q( r ), 0.9f + 0.2f * q( r ) } );
+			}
 		}
 		if ( lightsV )
 			set( "cellLightCount", { float( probe == 1 ? 0 : 3 - i % 3 ) } );
@@ -825,7 +945,13 @@ bool cellGate( const std::string & spirvDir, int twin, const GLuint maps[4], uns
 			u.bindTextures( GLuint( lightUnit ), 1, &lightTex );
 		if ( fxDepthTex )
 			u.bindTextures( GLuint( fxDepthUnit ), 1, &fxDepthTex );
-		if ( rtV ) {
+		if ( aoTex )
+			u.bindTextures( GLuint( aoUnit ), 1, &aoTex );
+		if ( ssrTex )
+			u.bindTextures( GLuint( ssrUnit ), 1, &ssrTex );
+		if ( decalTex )
+			u.bindTextures( GLuint( decalUnit ), 1, &decalTex );
+		if ( rtV && rtUnits ) {
 			u.bindTextures( GLuint( restirUnit ), 1, &restirTex );
 			u.bindTextures( GLuint( atlasUnit ), 1, &atlasTex );
 			u.bindTextures( GLuint( giHalfUnit ), 1, &giHalfTex );
@@ -922,8 +1048,29 @@ bool cellGate( const std::string & spirvDir, int twin, const GLuint maps[4], uns
 		glTexSubImage2D( GL_TEXTURE_2D, 0, 0, 0, hw, hh, GL_RGBA, GL_FLOAT, gk.data() );
 		glBindTexture( GL_TEXTURE_2D, 0 );
 		set( "cellGiHalfOn", { 1 } );
-		std::printf( "BLVIEW %s RT inputs: ratio %d x %d, atlas %u B (a store), screen GI %d x %d, %zu key texels on GL's surfaces\n", tag, kSW, kSH,
-			unsigned( 193 * 13 * 7 * 9 * 16 ), hw, hh, keyed );
+		/* the ratio's depth: GL's surfaces' linear depth (on the traced surface), with 1 in 8 a g-buffer miss (1e6) and 1 in 8 off
+		 * the surface (1.5 x + 10, past the 2 % + 2 tolerance): a surface twin takes the ratio or 1.0, an effect twin 1.0 */
+		std::vector<float> rs( std::size_t( kSW ) * std::size_t( kSH ) * 2 );
+		std::size_t onD = 0, offD = 0, missD = 0;
+		for ( int y = 0; y < kSH; y++ )
+			for ( int x = 0; x < kSW; x++ ) {
+				const std::size_t p = std::size_t( y ) * std::size_t( kSW ) + std::size_t( x );
+				const float d = g0.depth[p];
+				rs[p * 2] = 0.1f + 0.09f * float( ( x * 7 + y * 3 ) % 11 );
+				if ( !( d < 1.0f ) ) {
+					rs[p * 2 + 1] = 1.0e6f;
+					continue;
+				}
+				const float wv = sx.proj[14] / ( 2.0f * d - 1.0f + sx.proj[10] );
+				const int h = ( x * 5 + y * 3 ) % 8;
+				rs[p * 2 + 1] = h == 0 ? 1.0e6f : h == 1 ? 1.5f * wv + 10.0f : wv;
+				( h == 0 ? missD : h == 1 ? offD : onD )++;
+			}
+		f.bindBuffer( 0x8C2A, restirBuf );
+		f.bufferData( 0x8C2A, std::ptrdiff_t( rs.size() * 4 ), rs.data(), 0x88E4 );
+		f.bindBuffer( 0x8C2A, 0 );
+		std::printf( "BLVIEW %s RT inputs: ratio %d x %d (on GL's depth %zu, off %zu, missed %zu), atlas %u B (a store), screen GI %d x %d, %zu key "
+			"texels on GL's surfaces, %d of 4 inputs read\n", tag, kSW, kSH, onD, offD, missD, unsigned( 193 * 13 * 7 * 9 * 16 ), hw, hh, keyed, rtUnits );
 	}
 	CellOut gl;
 	if ( const GLenum e = glSweep( gl ); e != GL_NO_ERROR ) {
@@ -970,9 +1117,35 @@ bool cellGate( const std::string & spirvDir, int twin, const GLuint maps[4], uns
 		std::printf( "BLVIEW %s GL map probe %s: csmForce 1 moves GL's colour on %zu of %zu covered pixels (bar >= 20 %%)\n", tag,
 			csmReach ? "OK" : "FAIL", moved, cov );
 	}
-	if ( rtV ) {  // RT GI: each input reaches GL's colour (else its red could test nothing)
+	if ( aoV ) {  // lane VKWATER5: each screen term reaches GL's colour (else the copy red could test nothing)
+		static const char * scr[2] = { "cellAoOn", "cellSsrOn" };
+		for ( int k = 0; k < ( ssrTex ? 2 : 1 ); k++ ) {
+			CellOut g2;
+			set( scr[k], { 0 } );
+			glSweep( g2 );
+			set( scr[k], { 1 } );  // back to its launch value
+			std::size_t cov = 0, moved = 0;
+			for ( std::size_t i = 0; i < gl.depth.size(); i++ ) {
+				if ( !( gl.depth[i] < 1.0f ) )
+					continue;
+				cov++;
+				bool mv = false;
+				for ( int ch = 0; ch < 4; ch++ )
+					mv = mv || gl.c0[i * 4 + ch] != g2.c0[i * 4 + ch];
+				moved += mv;
+			}
+			const bool reach = cov > 0 && double( moved ) >= 0.2 * double( cov );
+			std::printf( "BLVIEW %s GL screen probe %s: %s 0 moves GL's colour on %zu of %zu covered pixels (bar >= 20 %%)\n", tag,
+				reach ? "OK" : ( k == 0 || ssrJudged ? "FAIL" : "info (not claimed)" ), scr[k], moved, cov );
+			if ( k == 0 || ssrJudged )
+				csmReach = csmReach && reach;
+		}
+	}
+	if ( rtV && rtUnits ) {  // RT GI: each input reaches GL's colour (else its red could test nothing)
 		static const char * rtOff[3] = { "cellRestirOn", "cellDdgiOn", "cellGiHalfOn" };
 		for ( const char * nm : rtOff ) {
+			if ( nm == rtOff[0] && ( reds & ( 1u << 9 ) ) == 0 )
+				continue;  // no restir red (twin 7: the ratio reaches a volumetric card only)
 			CellOut g2;
 			set( nm, { 0 } );
 			glSweep( g2 );
@@ -1073,15 +1246,25 @@ bool cellGate( const std::string & spirvDir, int twin, const GLuint maps[4], uns
 			blendDraws += ( alphaV && ( alphaMode[i] & 8 ) != 0 ) || ( fxT && ( fxAlpha[i] & 8 ) != 0 ) ? 1 : 0;
 		const bool varOk = rs.cellLit == ( lightsV ? nDraws : 0 ) && rs.cellSkinned == ( skinV ? nDraws : 0 ) && rs.cellBlended == blendDraws;
 		// twin 7: the depth copied once for the sweep (one frame), and its cost counted
-		const bool copyOk = fxT ? rs.copies == 1 && rs.copyBytes == std::uint64_t( kSW ) * std::uint64_t( kSH ) * 4u : rs.copies == 0;
+		/* lane VKWATER5: and the screen terms, one copy each a frame (cellAo R32F, cellSsr RGBA32F, half the view) */
+		const int wantCopies = ( fxT ? 1 : 0 ) + ( aoTex ? 1 : 0 ) + ( ssrTex ? 1 : 0 ) + ( decalTex ? 1 : 0 );
+		const std::uint64_t halfTexels = std::uint64_t( kSW / 2 ) * std::uint64_t( kSH / 2 );
+		const std::uint64_t wantBytes = ( fxT ? std::uint64_t( kSW ) * std::uint64_t( kSH ) * 4u : 0u ) + ( aoTex ? halfTexels * 4u : 0u )
+			+ ( ssrTex ? halfTexels * 16u : 0u ) + ( decalTex ? halfTexels * 4u : 0u );
+		const bool copyOk = rs.copies == wantCopies && rs.copyBytes == wantBytes;
+		if ( aoV )
+			std::printf( "BLVIEW %s copy twins %s (%d copies, %llu bytes; want %d of %llu)\n", tag, copyOk ? "OK" : "FAIL", rs.copies,
+				static_cast<unsigned long long>( rs.copyBytes ), wantCopies, static_cast<unsigned long long>( wantBytes ) );
 		/* RT GI: the ratio copied once for the sweep (the frame's memo), the lights at each crossing (as before), the atlas read in
 		 * place once a draw */
-		const std::uint64_t texelBytes = std::uint64_t( kSW ) * std::uint64_t( kSH ) * 8u + std::uint64_t( nDraws ) * 3u * 8u * 16u;
-		const bool texelOk = !rtV || ( ts.copied == std::uint64_t( 1 + nDraws ) && ts.copiedBytes == texelBytes && ts.imported == std::uint64_t( nDraws ) );
+		const int rtIn = rtUnits ? 1 : 0, litIn = lightsV ? nDraws : 0;  // the lights' texels only where the program reads them
+		const std::uint64_t texelBytes = std::uint64_t( rtIn ) * std::uint64_t( kSW ) * std::uint64_t( kSH ) * 8u + std::uint64_t( litIn ) * 3u * 8u * 16u;
+		const bool texelOk = !rtV || ( ts.copied == std::uint64_t( rtIn + litIn ) && ts.copiedBytes == texelBytes
+			&& ts.imported == std::uint64_t( rtIn * nDraws ) );
 		if ( rtV )
 			std::printf( "BLVIEW %s texel buffers %s (copied %d, %.1f KB, %.3f ms; imported %d; want copied %d, %.1f KB, imported %d)\n", tag,
-				texelOk ? "OK" : "FAIL", int( ts.copied ), double( ts.copiedBytes ) / 1024.0, ts.copiedMs, int( ts.imported ), 1 + nDraws,
-				double( texelBytes ) / 1024.0, nDraws );
+				texelOk ? "OK" : "FAIL", int( ts.copied ), double( ts.copiedBytes ) / 1024.0, ts.copiedMs, int( ts.imported ), rtIn + litIn,
+				double( texelBytes ) / 1024.0, rtIn * nDraws );
 		const bool crossOk = rs.runs == nDraws && rs.fails == 0 && rs.cells == nDraws && rs.twins == 4 * nDraws && varOk && copyOk && texelOk;
 		std::printf( "BLVIEW %s crossing %s (%d runs, %d failed, %d cells, %d twin images, %d shared, %d GL-only; lit %d skinned %d blended %d; "
 			"copies %d, %.1f KB, %.3f ms)\n", tag, crossOk ? "OK" : "FAIL", rs.runs, rs.fails, rs.cells, rs.twins, rs.shared, rs.glOwn, rs.cellLit,
@@ -1182,6 +1365,12 @@ bool cellGate( const std::string & spirvDir, int twin, const GLuint maps[4], uns
 		glDeleteTextures( 1, &lightTex );  // its buffer stays with the gate's other buffers
 	if ( fxDepthTex )
 		glDeleteTextures( 1, &fxDepthTex );  // its copy twin stays shared until the present's shutdown (as the app's would)
+	if ( aoTex )
+		glDeleteTextures( 1, &aoTex );
+	if ( ssrTex )
+		glDeleteTextures( 1, &ssrTex );
+	if ( decalTex )
+		glDeleteTextures( 1, &decalTex );
 	if ( rtV ) {
 		glDeleteTextures( 1, &restirTex );
 		glDeleteTextures( 1, &atlasTex );
