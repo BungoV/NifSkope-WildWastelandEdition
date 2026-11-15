@@ -212,6 +212,30 @@
 // volAirDriftUv rows 0-2 with 3-5). Lifted with it: precipLitWhy's drift refusal; precipRun refuses a lit run with the
 // drift on and no volAirNoise; the app's rain / snow draw twins GL's volAirNoise into the lit set's binding 94 with its
 // own sampler (binding 158). Census after: exterior 3, interior 4 (the drift line gone from both).
+// The lamps' shadow cubes (L8 term 5, VKFAR6 11-15; bar set before its first run, never widened): cellShadowOn 1 makes
+// each casting lamp (t4.y > 0.5) dim the particles by cellShadowF: a hemisphere (t4.y 2) is 0 behind its plane; a slot
+// (t4.x >= 0) takes 9 compare taps a texel apart (cellShadowTexel) into cellShadow (t6, GL's D16 cube array, linear,
+// clamp to edge, compare LEQUAL, seamless), its ref (|P - pos + slope bias| - 1) / radius; cellShadowFadeOn blends each
+// slot toward 1 by cellShadowFade[slot]; a casting lamp past the slots (t4.x -1) is unshadowed. One case,
+// rain_near_shadow (rain_near_lamps' run, volTerms 3): cellShadowOn 1, cellShadowTexel 1 / 64, cellShadowFadeOn 1 with
+// cellShadowFade 0.7 / 0.4 / 1.0 on slots 0 / 1 / 2; the omni in slot 0, the spot in slot 1, the hemisphere in slot 2
+// (t4.y 2), the box casting past the slots (t4.x -1), the far omni not casting; a shared 64 x 64 x 16-cube D16 array
+// (the app's slot count) made by sharedTarget as the app's (cube type), each used slot holding stripes of near
+// occluders (depth 0.05) across the directions (else 1), so taps fall on stripe and face edges; GL with
+// GL_TEXTURE_CUBE_MAP_SEAMLESS on, as the app. The prep prints each slot's share of in-view particles its stripes
+// shadow (predicted before the run). The same verdict, reference checks, repeat clause, reds 64 / 128 as the lit cases;
+// the globals check and Vulkan's globals mirror as rain_near_lamps. The case must also show (else the gate fails): GL
+// with cellShadowOn 0 differs on >= 1000 covered samples (the cubes seen); GL with cellShadowFadeOn 0 on >= 1000 (the
+// fade seen); cellShadow, cellShadowOn, cellShadowTexel, cellShadowFadeOn and cellShadowFade found in GL's program;
+// cellShadowOn, cellShadowTexel and cellShadowFade packed non-zero. GL with cellShadowTexel 0 is printed (info). Reds,
+// each must FAIL in rain_near_shadow: 8388608 the cubes dropped (Vulkan's cellShadow the zero D16 cube array);
+// 16777216 the shadows off (the packed cellShadowOn 0); 33554432 the fade dropped (the packed cellShadowFadeOn 0).
+// Lifted with it: precipLitWhy's shadow-cube refusal; makeShared / sharedTarget gain a D16 cube array (type 3), the
+// app's lamp cubes (celllamps.cpp) become one while the view is on Vulkan; precipRun refuses a lit run with shadows on
+// and cubes not shared with the present device (no per-run copy), a D16 cube array without linear filtering, and GL's
+// ReSTIR variant (cellRestirOn in the program: its cubes are not read); the app's rain / snow draw twins GL's
+// cellShadow (refused unless D16, linear, clamp to edge, compare LEQUAL) into the lit set's binding 70 with a compare
+// sampler of that state (binding 134). Census after: exterior 2, interior 3 (the shadow-cube line gone from both).
 #define main fxview_main
 #include "fxview.cpp"
 #undef main
