@@ -744,6 +744,7 @@ struct PrecipRun
 		int uss = 0, cloud = 0, csmProbe = 0, csmRed = 0;  //!< L8 term 3: ussOn (the shadow set's composition), ussCloudOn, csmProbe, csmRed
 		int restir = -1;                //!< L8 term 5: cellRestirOn (-1 absent; present = GL's ReSTIR variant, its cubes not read)
 		int goboPin = 0;                //!< L8 term 6: 1 when cellGoboRot / Flat / Gam / Map is non-zero (a pin or red: not judged)
+		int csmBlock = 0;               //!< L8 route census: 1 when GL's program reads the cascades from wwShadowFrame (WW_FRAME_UBO)
 	};
 	LitIn litIn;                    //!< a lit run's switches as precipLitRead reads them from GL (before any pack; -1 absent)
 	struct TexBuf { unsigned tex = 0, buf = 0, glFmt = 0; long long off = 0, bytes = 0; };
@@ -1059,6 +1060,7 @@ template <class Fn> void precipLitRead( Fn * fn, unsigned prog, PrecipRun & t )
 	t.litIn.csmProbe = geti( "csmProbe" );
 	t.litIn.csmRed = geti( "csmRed" );
 	t.litIn.restir = geti( "cellRestirOn" );
+	t.litIn.csmBlock = fn->glGetUniformBlockIndex( prog, "wwShadowFrame" ) != 0xFFFFFFFFu ? 1 : 0;  // GL_INVALID_INDEX: none
 	// L8 term 1 (VKFAR5): the default program compiles the GI out (cellGiOn the constant false without WW_CELL_PRT)
 	t.litIn.gi = 0;
 	for ( const char * nm : { "cellGiOn", "cellGi", "cellGiSlots", "cellRooms", "cellGiAir", "cellGiAirOn", "cellDdgiOn", "cellDdgiAtlas" } )

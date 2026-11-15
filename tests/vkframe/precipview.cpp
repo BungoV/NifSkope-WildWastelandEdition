@@ -913,7 +913,15 @@ int main( int argc, char ** argv )
 	// (the RT GI variant's twin of the default: a program as fresh as it, so no earlier case's uniforms ride on one side only)
 	const GLuint pTfNew = program3( readFile( dir + "/prog.vert.glsl" ), readFile( dir + "/prog.geom.glsl" ),
 		readFile( dir + "/prog.frag.glsl" ), "cell_precip_gpu (captured, fresh)", true );
-	if ( !pUnpack || !pSlab || !pReveal || !pCapBlend || !pProbe || !pPrecip || !pLook || !pTf || !pNoFl || !pLookNoFl || !pPrt || !pRt || !pTfRt || !pTfNew )
+	// the route census (header): the loader's own programs (default; all-on; all-on + WW_CELL_RESTIRGI, info)
+	const GLuint pRoute = program3( readFile( dir + "/prog_route.vert.glsl" ), readFile( dir + "/prog_route.geom.glsl" ),
+		readFile( dir + "/prog_route.frag.glsl" ), "cell_precip_gpu (route default)" );
+	const GLuint pAllOn = program3( readFile( dir + "/prog_allon.vert.glsl" ), readFile( dir + "/prog_allon.geom.glsl" ),
+		readFile( dir + "/prog_allon.frag.glsl" ), "cell_precip_gpu (route all-on)" );
+	const GLuint pRgi = program3( readFile( dir + "/prog_rgi.vert.glsl" ), readFile( dir + "/prog_rgi.geom.glsl" ),
+		readFile( dir + "/prog_rgi.frag.glsl" ), "cell_precip_gpu (route all-on + WW_CELL_RESTIRGI)" );
+	if ( !pUnpack || !pSlab || !pReveal || !pCapBlend || !pProbe || !pPrecip || !pLook || !pTf || !pNoFl || !pLookNoFl || !pPrt || !pRt || !pTfRt || !pTfNew
+		|| !pRoute || !pAllOn || !pRgi )
 		return fatal( "GL programs" );
 	for ( const GLuint prog : { pPrecip, pLook, pTf, pNoFl, pLookNoFl, pPrt, pRt, pTfRt, pTfNew } ) {  // every sampler its own empty unit from 20 (unit 0's default mixes sampler
 		// types: GL_INVALID_OPERATION at the draw once the air's textures are bound); bindJob then sets the read ones (farcards.cpp's rule)
@@ -2507,6 +2515,131 @@ int main( int argc, char ** argv )
 		u1i( pPrecip, "cellGoboOn", 0 );
 		u1i( pPrecip, "cellClusterOn", 0 );
 		u1i( pPrecip, "ussCloudOn", 0 );
+	}
+	{  // the route census (header): the loader's programs, the census' switches (+ all-on's own), the refusals + the closed list
+		const float drift[4] = { 0.5f, 0.0f, 1.0f, 0.5f }, sun[4] = { 1.0f, 0.9f, 0.8f, 1.0f }, zero4[4] = {};
+		const float phys[4] = { 1.0f, 0.0f, 0.0f, 0.0f };  // lightphys.h Physical (WW_CELL_LIGHT_PHYS 1)
+		std::map<std::string, int> known = { { "globalUniforms", 1 } };
+		auto addT = [&]( const WwVkPresent::FxField * t, int n ) {
+			for ( int i = 0; i < n; i++ )
+				known[t[i].name] = 1;
+		};
+		addT( WwVkPresent::kT_precipcs, int( std::size( WwVkPresent::kT_precipcs ) ) );
+		addT( WwVkPresent::kT_precipps, int( std::size( WwVkPresent::kT_precipps ) ) );
+		addT( WwVkPresent::kT_preciplookcs, int( std::size( WwVkPresent::kT_preciplookcs ) ) );
+		addT( WwVkPresent::kT_preciplookps, int( std::size( WwVkPresent::kT_preciplookps ) ) );
+		addT( WwVkPresent::kT_preciplitcs, int( std::size( WwVkPresent::kT_preciplitcs ) ) );
+		for ( const char * nm : { "pcTex", "pcTexN", "pcRoof", "atApTex", "volTex", "volTile", "volAirTerr", "volAirRainMap", "airTerr",
+				  "volEnvHist", "csmMap", "ussCloudMap", "cellShadow", "volAirNoise", "cellLights", "cellCluster",  // the sampler slots
+				  "volTerms", "cellInterior", "volPartRed", "volCsm", "airTerrOn", "volAirDrift", "vpSun", "cellShadowOn", "cellGoboOn",
+				  "cellGoboRot", "cellGoboFlat", "cellGoboGam", "cellGoboMap", "cellClusterOn", "cellRed", "cellLightPhys", "volEnvGrid",
+				  "ussOn", "ussCloudOn", "csmProbe", "csmRed", "cellRestirOn",  // precipLitRead's switches
+				  "cellGiOn", "cellGi", "cellGiSlots", "cellRooms", "cellGiAir", "cellGiAirOn", "cellDdgiOn", "cellDdgiAtlas" } )  // its GI names
+			known[nm] = 1;
+		// the closed list: every active loose uniform and every active block of prog that nothing above reads (one line each)
+		auto closed = [&]( GLuint prog, const char * label, bool say ) {
+			int n = 0;
+			GLint nu = 0;
+			f.getProgramiv( prog, fActiveUnis, &nu );
+			const GLuint gu = f.getUniformBlockIndex( prog, "globalUniforms" ), sf = f.getUniformBlockIndex( prog, "wwShadowFrame" );
+			std::map<GLint, int> blocks;
+			for ( GLint i = 0; i < nu; i++ ) {
+				char nm[256] = {};
+				GLint sz = 0;
+				GLenum ty = 0;
+				f.getActiveUniform( prog, GLuint( i ), 256, nullptr, &sz, &ty, nm );
+				const GLuint idx = GLuint( i );
+				GLint blk = -1;
+				f.getActiveUniformsiv( prog, 1, &idx, fBlockIndex, &blk );
+				std::string s( nm );
+				if ( s.find( '[' ) != std::string::npos )
+					s.resize( s.find( '[' ) );
+				if ( blk >= 0 ) {
+					if ( GLuint( blk ) == gu || blocks[blk]++ )
+						continue;
+					n++;
+					if ( say )
+						std::printf( "PRECIPVIEW census %s GL input the twin does not read: the block %s (member %s)\n", label,
+							GLuint( blk ) == sf ? "wwShadowFrame" : "(unnamed)", s.c_str() );
+					continue;
+				}
+				if ( known.count( s ) )
+					continue;
+				n++;
+				if ( say )
+					std::printf( "PRECIPVIEW census %s GL input the twin does not read: %s\n", label, s.c_str() );
+			}
+			return n;
+		};
+		// one program, one place: the census' switches (allOn: + its own values); its refusals (+ the closed list)
+		auto census = [&]( GLuint prog, int interior, bool allOn, const char * label, bool say, bool withClosed ) {
+			f.useProgram( prog );
+			u1i( prog, "cellHasDir", 1 - interior );
+			u1i( prog, "cellInterior", interior );
+			u1i( prog, "volTerms", 15 );
+			u1i( prog, "volCsm", 1 );
+			u1i( prog, "airTerrOn", 1 - interior );
+			f.uniform4fv( f.getUniformLocation( prog, "volAirDrift" ), 1, drift );
+			f.uniform4fv( f.getUniformLocation( prog, "vpSun" ), 1, interior ? zero4 : sun );
+			u1i( prog, "cellShadowOn", 1 );
+			u1i( prog, "cellGoboOn", 1 );
+			u1i( prog, "cellClusterOn", 1 );
+			u1i( prog, "ussOn", allOn ? 1 : 0 );  // all-on: the tiers ultra (shadowset.cpp 2754)
+			u1i( prog, "ussCloudOn", 1 );
+			if ( allOn ) {
+				f.uniform4fv( f.getUniformLocation( prog, "cellLightPhys" ), 1, phys );
+				u1i( prog, "cellRestirOn", 1 );  // rtddgicell.cpp restirUniforms: the ratio ready
+			}
+			WwVkPresent::PrecipRun t;
+			t.lit = true;
+			WwVkPresent::precipLitRead( &ga, prog, t );
+			const char * whys[24] = {};
+			const int n = WwVkPresent::precipLitWhys( t.litIn, whys, 24 );
+			const int c = withClosed ? closed( prog, label, false ) : 0;
+			if ( say ) {
+				std::printf( "PRECIPVIEW census %s (the loader's program): %d refusals + %d GL inputs not read = %d (0 is the done line)\n",
+					label, n, c, n + c );
+				for ( int k = 0; k < n && k < 24; k++ )
+					std::printf( "PRECIPVIEW census %s refusal %d: %s\n", label, k + 1, whys[k] );
+				if ( c )
+					closed( prog, label, true );
+			}
+			return n + c;
+		};
+		const int pClosed = closed( pPrecip, "pPrecip (the judged program)", true );
+		std::printf( "PRECIPVIEW census closed list on pPrecip: %d (must read 0)\n", pClosed );
+		if ( pClosed != 0 ) {
+			std::printf( "PRECIPVIEW census closed list FAILED: pPrecip reads a GL input the allow list does not hold\n" );
+			ok = false;
+		}
+		int route[2] = {}, allOnN[2] = {};
+		const char * whereName[2] = { "exterior", "interior" };
+		for ( int w = 0; w < 2; w++ ) {
+			char lb[96];
+			std::snprintf( lb, sizeof( lb ), "route default %s", whereName[w] );
+			route[w] = census( pRoute, w, false, lb, true, true );
+			std::snprintf( lb, sizeof( lb ), "route all-on %s", whereName[w] );
+			allOnN[w] = census( pAllOn, w, true, lb, true, true );
+			std::snprintf( lb, sizeof( lb ), "route all-on + WW_CELL_RESTIRGI %s (info, a ruling)", whereName[w] );
+			census( pRgi, w, true, lb, true, true );
+		}
+		std::printf( "PRECIPVIEW census routes: default %d / %d, all-on %d / %d (exterior / interior; 0 / 0 on both is the done line)\n",
+			route[0], route[1], allOnN[0], allOnN[1] );
+		const int old = census( pPrecip, 0, false, "old", false, false ) + census( pPrecip, 1, false, "old", false, false );
+		if ( old >= route[0] + route[1] ) {
+			std::printf( "PRECIPVIEW red old census PASSED: the old reading (%d) is not below route default's (%d)\n", old, route[0] + route[1] );
+			ok = false;
+		} else {
+			std::printf( "PRECIPVIEW red old census FAILS as it must (the old reading %d, route default %d)\n", old, route[0] + route[1] );
+		}
+		for ( const GLuint prog : { pPrecip, pRoute, pAllOn, pRgi } ) {  // pPrecip back to the census' reset
+			f.useProgram( prog );
+			for ( const char * nm : { "cellInterior", "volCsm", "airTerrOn", "cellShadowOn", "cellGoboOn", "cellClusterOn", "ussOn", "ussCloudOn", "cellRestirOn" } )
+				u1i( prog, nm, 0 );
+			u1i( prog, "volTerms", 1 );
+			for ( const char * nm : { "volAirDrift", "vpSun", "cellLightPhys" } )
+				f.uniform4fv( f.getUniformLocation( prog, nm ), 1, zero4 );
+		}
 	}
 	for ( char & k : twinKeys )  // a BC atlas is a farTwin, an uncompressed one a shared target
 		WwVkPresent::farTwinDrop( reinterpret_cast<std::uintptr_t>( &k ) ), WwVkPresent::sharedTargetDrop( reinterpret_cast<std::uintptr_t>( &k ) );
