@@ -1179,6 +1179,9 @@ VkResult & oneShotResult()
 	return r;
 }
 
+/* lane VKOBJ5: a missed wait (red WW_VKFENCE_RED=oneshot, faked after the real wait) prints fenceMiss's `vk fence:` line
+ * and returns false: the caller refuses, the frame stays on GL. Its callers free the command buffer and the fence (or
+ * record into them again) right after, so a real miss waits the device idle first: neither is freed or reused in flight */
 bool oneShot( VkCommandBuffer cmd, VkFence fence )
 {
 	Vk & v = vk();
@@ -1186,8 +1189,20 @@ bool oneShot( VkCommandBuffer cmd, VkFence fence )
 	si.commandBufferCount = 1;
 	si.pCommandBuffers = &cmd;
 	VkResult r = v.vkQueueSubmit( v.queue, 1, &si, fence );
-	if ( r == VK_SUCCESS )
+	if ( r == VK_SUCCESS ) {
 		r = v.vkWaitForFences( v.dev, 1, &fence, VK_TRUE, 1000000000ull );
+		const bool real = r != VK_SUCCESS;
+		if ( WwVkPresent::fenceRed( "oneshot" ) )
+			r = VK_TIMEOUT;
+		if ( r != VK_SUCCESS ) {
+			WwVkPresent::fenceMiss( "oneshot", int( r ) );
+			if ( real )
+				v.vkDeviceWaitIdle( v.dev );
+			v.vkResetFences( v.dev, 1, &fence );
+			oneShotResult() = r;
+			return false;
+		}
+	}
 	if ( r == VK_SUCCESS )
 		r = v.vkResetFences( v.dev, 1, &fence );
 	oneShotResult() = r;

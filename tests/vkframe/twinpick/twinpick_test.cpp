@@ -3,12 +3,14 @@
  * For every twin id 2-9, its GL program and its loader keys (base on the base route, RT on the all-on route):
  *   pick:  the key picks exactly its own twin and variant, nothing refused;
  *   near:  the RT key with one RT define missing (RESTIR, RTDDGI, RTDDGI_CASCADES), and the base key, on the all-on route: refused;
+ *   extra: the base or RT key with one loader define more (WW_DEBUG_VIEWS, WW_CELL_VIEWS, WW_WATER_INFO_PROBE): refused;
  *   other: a program no twin draws: twin 0, refused;
  *   module: the picked (twin, variant) is drawn by the module objCellPs / objPfxShade names (read from vkobjpipe.inc), whose
  *          vkframe_spirv.sh line compiles the program's own pixel source with exactly the key's defines, less the defines
  *          run.sh proved inert for that source (dxc builds it with and without them to the same bytes; `--inert src:D1,D2`):
  *          pbrm_default's RT defines (twin 4's RT key drawn by its base module), fo4_effectdecalcsm's air zones.
  * Red (-DTWINPICK_RED_SWAP, must print "FAIL module:" and exit 1): the RT modules of twins 2 and 3 swapped.
+ * Red (-DCELLTWINPICK_RED_ANYBASE, must print "FAIL extra:" and exit 1): the old pick, twins 2-6 take any key.
  * Prints "TWINPICK PASS <n>" and exits 0 when every check holds. */
 #include "features/near/celltwinpick.h"
 
@@ -199,6 +201,13 @@ int main( int argc, char ** argv )
 				}
 				check( si->second.source == stem && want == got, "module",
 					at + ": " + mi->second + " compiles " + si->second.source + " @" + keyOf( si->second.defs ) );
+				// round 7: the key with one loader define more (a debug view, a probe build) is another program: refused
+				for ( const char * more : { "WW_DEBUG_VIEWS", "WW_CELL_VIEWS", "WW_WATER_INFO_PROBE" } ) {
+					std::set<std::string> d = defsOf( key );
+					d.insert( more );
+					const CellTwinPick x = cellTwinPick( prog, keyOf( d ), rt ? allOn : base );
+					check( x.no != nullptr && !x.rt, "extra", prog + " @" + keyOf( d ) + " (one define more) was not refused" );
+				}
 				if ( !rt )
 					continue;
 				// the near misses: one RT define short, on the all-on route
