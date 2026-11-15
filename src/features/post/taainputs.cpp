@@ -5,6 +5,8 @@
 #include "gl/cellunits.h"	// lane WATERFIX7: the passes' named units
 #include "gl/alphabgsm.h"	// lane ALPHABGSM1: the side passes' alpha-test census
 #include "features/post/gametaa.h"
+#include "features/vkframe/vkpresent.h"	// lane VKFAR7: pass 4 on the Vulkan view
+#include "features/vkframe/vktaareactive.h"
 #include "features/particles/glparticles.h"
 #include "gl/glproperty.h"
 #include "gl/glscene.h"
@@ -833,46 +835,133 @@ void wwTaaInputsPass( Scene * scene )
 			QVector<Vector2> uvs;
 			QVector<Color4> cols;
 			std::vector<std::uint32_t> pidx;
-			for ( Node * node : blended ) {
-				if ( Particles * p = dynamic_cast<Particles *>( node ) ) {
-					if ( !p->bakeSprites( fwd, tris, uvs, cols ) || tris.isEmpty() )
+			/* lane VKFAR7: on the Vulkan view every draw is queued (the same uniforms set on GL, read into the draw) and the
+			 * queue drawn into the mask in one crossing a batch; a draw the route refuses is drawn on GL at once (MAX with no
+			 * depth writes: the order is free), and a failed flush draws the whole pass again on GL */
+			const bool vkTa = WwVkPresent::shareWanted( "WW_VKVIEW_TAAREACTIVE_RED" );
+			std::string vkWhy;
+			int vkGl = 0;
+			auto queued = [&]( WwVkPresent::TaReactiveDraw && d ) {
+				if ( WwVkPresent::taReactiveAdd( std::move( d ), vkWhy ) )
+					return true;
+				vkGl++;
+				return false;
+			};
+			auto pass4 = [&]( bool vk ) {
+				for ( Node * node : blended ) {
+					if ( Particles * p = dynamic_cast<Particles *>( node ) ) {
+						if ( !p->bakeSprites( fwd, tris, uvs, cols ) || tris.isEmpty() )
+							continue;
+						pidx.resize( size_t( tris.size() ) );
+						for ( size_t i = 0; i < pidx.size(); i++ )
+							pidx[i] = std::uint32_t( i );
+						const Matrix4 clip = Pjit * view;
+						prog->uni4m( "clipJit", clip );
+						prog->uni1i( "useTex", 0 );
+						prog->uni1i( "hasColor", 1 );
+						prog->uni1f( "matAlpha", 1.0f );
+						prog->uni2f( "outRG", 1.0f, 0.0f );
+						bool drawn = false;
+						if ( vk ) {
+							WwVkPresent::TaReactiveDraw d;
+							std::memcpy( d.clipJit, clip.data(), sizeof( d.clipJit ) );
+							d.hasColor = 1;
+							d.outRG[0] = 1.0f;
+							d.pos.assign( &( tris.constFirst()[0] ), &( tris.constFirst()[0] ) + size_t( tris.size() ) * 3 );
+							d.col.assign( &( cols.constFirst()[0] ), &( cols.constFirst()[0] ) + size_t( tris.size() ) * 4 );
+							d.idx = pidx;
+							drawn = queued( std::move( d ) );
+						}
+						if ( !drawn ) {
+							const float * attrv[2] = { &( tris.constFirst()[0] ), &( cols.constFirst()[0] ) };
+							r->drawShape( (unsigned int) tris.size(), 0x43ULL, (unsigned int) pidx.size(), GL_TRIANGLES,
+								GL_UNSIGNED_INT, attrv, pidx.data() );
+						}
+						nPart++;
 						continue;
-					pidx.resize( size_t( tris.size() ) );
-					for ( size_t i = 0; i < pidx.size(); i++ )
-						pidx[i] = std::uint32_t( i );
-					prog->uni4m( "clipJit", Pjit * view );
-					prog->uni1i( "useTex", 0 );
-					prog->uni1i( "hasColor", 1 );
-					prog->uni1f( "matAlpha", 1.0f );
-					prog->uni2f( "outRG", 1.0f, 0.0f );
-					const float * attrv[2] = { &( tris.constFirst()[0] ), &( cols.constFirst()[0] ) };
-					r->drawShape( (unsigned int) tris.size(), 0x43ULL, (unsigned int) pidx.size(), GL_TRIANGLES, GL_UNSIGNED_INT,
-						attrv, pidx.data() );
-					nPart++;
-					continue;
+					}
+					const Shape * sh = dynamic_cast<const Shape *>( node );
+					if ( !sh || sh->verts.isEmpty() || sh->triangles.isEmpty() || sh->wwDecalDrawsFirst() )
+						continue;
+					const Matrix4 clip = Pjit * sh->viewTrans().toMatrix4();
+					prog->uni4m( "clipJit", clip );
+					const bool water = sh->wwWaterDraws();
+					const int hasColor = !water && sh->colors.size() >= sh->verts.size() ? 1 : 0;
+					prog->uni1i( "hasColor", hasColor );
+					int useTex = 0;
+					float matAlpha = 1.0f, outRG[2] = { 0.0f, 1.0f };
+					if ( water ) {
+						prog->uni1i( "useTex", 0 );
+						prog->uni1f( "matAlpha", 1.0f );
+						prog->uni2f( "outRG", 0.0f, 1.0f );
+					} else {
+						const BSLightingShaderProperty * lsp = sh->wwLightingShader();
+						const auto * esp = dynamic_cast<const BSEffectShaderProperty *>( sh->wwShaderLighting() );
+						useTex = bindBase( prog, sh ) ? 1 : 0;
+						matAlpha = lsp ? lsp->alpha : esp ? esp->getAlpha() : 1.0f;
+						outRG[0] = 1.0f;
+						outRG[1] = lsp ? 1.0f : 0.0f;
+						prog->uni1i( "useTex", useTex );
+						prog->uni1f( "matAlpha", matAlpha );
+						prog->uni2f( "outRG", outRG[0], outRG[1] );	// lit see-through (glass): composition too
+					}
+					if ( !sh->bindShape() )
+						continue;
+					bool drawn = false;
+					if ( vk ) {
+						WwVkPresent::TaReactiveDraw d;
+						std::memcpy( d.clipJit, clip.data(), sizeof( d.clipJit ) );
+						d.useTex = useTex;
+						d.hasColor = hasColor;
+						d.matAlpha = matAlpha;
+						d.outRG[0] = outRG[0];
+						d.outRG[1] = outRG[1];
+						const size_t nv = size_t( sh->verts.size() );
+						d.pos.assign( &( sh->verts.constFirst()[0] ), &( sh->verts.constFirst()[0] ) + nv * 3 );
+						if ( size_t( sh->colors.size() ) >= nv )	// bindShape's arrays: GL's disabled ones read (0, 0, 0, 1)
+							d.col.assign( &( sh->colors.constFirst()[0] ), &( sh->colors.constFirst()[0] ) + nv * 4 );
+						if ( !sh->coords.isEmpty() && size_t( sh->coords.constFirst().size() ) >= nv )
+							d.uv.assign( &( sh->coords.constFirst().constFirst()[0] ), &( sh->coords.constFirst().constFirst()[0] ) + nv * 2 );
+						const auto * ti = reinterpret_cast<const std::uint16_t *>( sh->triangles.constData() );
+						d.idx.assign( ti, ti + size_t( sh->triangles.size() ) * 3 );
+						if ( useTex ) {
+							const BSShaderLightingProperty * bsp = sh->wwShaderLighting();
+							d.uvScale[0] = bsp->uvScale.x;
+							d.uvScale[1] = bsp->uvScale.y;
+							d.uvOffset[0] = bsp->uvOffset.x;
+							d.uvOffset[1] = bsp->uvOffset.y;
+							WwVkPresent::WaterCensus c;	// BaseMap's texture and sampling state, as bindBase left unit 0
+							WwVkPresent::waterCensusOf( fn, prog->id, c );
+							for ( const WwVkPresent::WaterSlot & s : c.inputs )
+								if ( s.name == "BaseMap" )
+									d.base = s;
+						}
+						drawn = queued( std::move( d ) );
+					}
+					if ( !drawn )
+						fn->glDrawElements( GL_TRIANGLES, GLsizei( sh->triangles.size() * 3 ), GL_UNSIGNED_SHORT, nullptr );
+					nBlend++;
 				}
-				const Shape * sh = dynamic_cast<const Shape *>( node );
-				if ( !sh || sh->verts.isEmpty() || sh->triangles.isEmpty() || sh->wwDecalDrawsFirst() )
-					continue;
-				prog->uni4m( "clipJit", Pjit * sh->viewTrans().toMatrix4() );
-				const bool water = sh->wwWaterDraws();
-				prog->uni1i( "hasColor", !water && sh->colors.size() >= sh->verts.size() ? 1 : 0 );
-				if ( water ) {
-					prog->uni1i( "useTex", 0 );
-					prog->uni1f( "matAlpha", 1.0f );
-					prog->uni2f( "outRG", 0.0f, 1.0f );
-				} else {
-					const BSLightingShaderProperty * lsp = sh->wwLightingShader();
-					const auto * esp = dynamic_cast<const BSEffectShaderProperty *>( sh->wwShaderLighting() );
-					prog->uni1i( "useTex", bindBase( prog, sh ) ? 1 : 0 );
-					prog->uni1f( "matAlpha", lsp ? lsp->alpha : esp ? esp->getAlpha() : 1.0f );
-					prog->uni2f( "outRG", 1.0f, lsp ? 1.0f : 0.0f );	// lit see-through (glass): composition too
+			};
+			pass4( vkTa );
+			if ( vkTa ) {
+				if ( vkGl )
+					WwVkPresent::taReactiveOnGl( vkGl, vkWhy.c_str() );
+				const int n = WwVkPresent::taReactiveQueued();
+				WwVkPresent::TaReactiveRun run;
+				run.mask = g.mask;
+				run.depth = g.depth;
+				run.dsFormat = g.dsFormat;
+				run.w = W;
+				run.h = H;
+				std::string why;
+				if ( n && !WwVkPresent::taReactiveFlush( run, why ) ) {
+					WwVkPresent::taReactiveOnGl( n, why.c_str() );
+					nBlend = nPart = 0;
+					pass4( false );
 				}
-				if ( !sh->bindShape() )
-					continue;
-				fn->glDrawElements( GL_TRIANGLES, GLsizei( sh->triangles.size() * 3 ), GL_UNSIGNED_SHORT, nullptr );
-				nBlend++;
 			}
+			WwVkPresent::taReactiveSay( vkTa, vkTa ? nullptr : "red WW_VKVIEW_TAAREACTIVE_RED=1 or the view not on Vulkan" );
 			r->stopProgram();
 		} else {
 			ok = false;

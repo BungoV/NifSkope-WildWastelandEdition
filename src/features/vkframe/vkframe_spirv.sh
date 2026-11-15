@@ -218,4 +218,9 @@ fxt() {
 }
 fxt fargnd_view_vs core/water_view_vs
 ls -la fargnd_view_ps.spv.h fargnd_view_vs.spv.h
+# lane VKFAR7: the TAA mask's reactive pass (taainputs.cpp pass 4, vktaareactive.inc): pixel stage on fx()'s shifts (b31 at 31,
+# BaseMap at 64 / 128), vertex stage on fxb()'s (its b31 at 32)
+fx taareactive_view_ps post/taa_reactive_ps
+fxb taareactive_view_vs post/taa_reactive_vs
+ls -la taareactive_view_ps.spv.h taareactive_view_vs.spv.h
 ls -la csm_view_vs.spv.h obj_depth_vs.spv.h sky_view_ps.spv.h bloom_down.spv.h bloom_hold.spv.h bloom_up.spv.h bloom_src.spv.h bloom_comb.spv.h bloom_back.spv.h tonemap.spv.h measure_q.spv.h tone_view_vs.spv.h tone_view_ps.spv.h taa_view_mv_cs.spv.h taa_view_resolve_cs.spv.h taa_view_rcas_ps.spv.h
