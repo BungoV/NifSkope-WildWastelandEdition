@@ -1221,6 +1221,11 @@ int main( int argc, char ** argv )
 		const bool sb2 = cellGate( spvDir + "/cellset/spirv", 2, maps, 0u, "stepb", 64u );
 		const bool sb3 = cellGate( spvDir + "/cellset/spirv", 3, maps, 0u, "stepb", 64u );
 		ok = sb2 && sb3 && ok;
+		// lane VKOBJ9: the decal-fade band (vars 128): kept pieces at a0, band pieces at a0 x fade; red fade must FAIL
+		const bool fd2 = cellGate( spvDir + "/cellset/spirv", 2, maps, 0u, "fade", 128u );
+		const bool fd3 = cellGate( spvDir + "/cellset/spirv", 3, maps, 0u, "fade", 128u );
+		const bool fd4 = cellGate( spvDir + "/cellset/spirv", 4, pbrm, 0u, "fade", 128u );
+		ok = fd2 && fd3 && fd4 && ok;
 	} else
 		std::printf( "BLVIEW cell not run (the cell twins read the texture cache's twins: MODE=bc)\n" );
 	vk().vkWaitForFences( vk().dev, 1, &gv.fence, VK_TRUE, 1000000000ull );

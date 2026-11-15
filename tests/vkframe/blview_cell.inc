@@ -138,6 +138,7 @@ bool cellGate( const std::string & spirvDir, int twin, const GLuint maps[4], uns
 	const bool volV = twin == 7 && ( vars & 16u ) != 0;  // twin 7: the lit cards volumetric (the ReSTIR ratio's way into an effect)
 	const bool aoV = ( vars & 32u ) != 0;  // lane VKWATER5: cellAo (and cellSsr on twins 2, 3, 5, 6) bound as the app binds them
 	const bool sbV = ( vars & 64u ) != 0;  // lane VKOBJ7: step B's kept ranges on Vulkan against GL's cluster commands
+	const bool fadeV = ( vars & 128u ) != 0;  // lane VKOBJ9: the decal-fade band (kept pieces at a0, band pieces at a0 x fade)
 	const bool ssrV = aoV;  // cellSsr and cellAoDecal are bound wherever GL's program has the sampler (a unit with none holds a stale texture)
 	const bool ssrJudged = twin == 2 || twin == 3;  // the SSR probe is a bar there only: pbrm's cube term never moved (r1: 0 of 11571)
 	const std::string tagS = std::string( twinTag[twin] ) + ( label ? std::string( " " ) + label : std::string() );
@@ -856,7 +857,24 @@ bool cellGate( const std::string & spirvDir, int twin, const GLuint maps[4], uns
 		}
 	}
 	const std::vector<std::uint32_t> * sbUse = sbVk;
-	int probe = 0;  // the GL-only variant probes: 1 the lights off, 2 the skinning off, 3 the alpha test and blend off
+	/* lane VKOBJ9 (`fade`): each draw command split by triangles, the first 2/5 kept, the rest three band pieces (the last takes the
+	 * remainder); fdKeep[i] every command's kept piece, fdBand[i][k] every command's piece k */
+	static const float kFade[3] = { 0.75f, 0.5f, 0.25f };
+	auto fadeA0 = []( int i ) { return 1.0f - 0.1f * float( i % 3 ); };
+	std::vector<std::uint32_t> fdKeep[6], fdBand[6][3];
+	int fadeRed = 0;  // 1: Vulkan's band crossings at a0 (red fade); 2: one band in the constant-alpha mode (the refusal)
+	if ( fadeV )
+		for ( int i = 0; i < nDraws; i++ )
+			for ( std::size_t c = 0; c + 4 < draws[i].cmds.size(); c += 5 ) {
+				const std::uint32_t tris = draws[i].cmds[c] / 3, first = draws[i].cmds[c + 2], bv = draws[i].cmds[c + 3];
+				const std::uint32_t keep = tris * 2 / 5, part = ( tris - keep ) / 3;
+				fdKeep[i].insert( fdKeep[i].end(), { keep * 3, 1u, first, bv, 0u } );
+				for ( std::uint32_t k = 0; k < 3; k++ ) {
+					const std::uint32_t t0 = keep + k * part, n = k == 2 ? tris - t0 : part;
+					fdBand[i][k].insert( fdBand[i][k].end(), { n * 3, 1u, first + t0 * 3, bv, 0u } );
+				}
+			}
+	int probe = 0;  // the GL-only variant probes: 1 the lights off, 2 the skinning off, 3 the alpha test and blend off, 4 every fade 1
 	bool oldBrdf = false;  // pbrm_default's red 8: r3Red 64, the BRDF before OpenPBR (GL's reference always draws without it)
 	static const int alphaMode[6] = { 4, 4 | 8, 8, 6, 0, 1 | 8 };  // '>', '>' + blend, blend, '>=', none, '<' + blend
 	static const int fxAlpha[6] = { 8, 4 | 8, 8, 6, 0, 8 };  // twin 7: blended (soft) draws 0, 1, 2, 5 (5 additive); a test on 1 and 3
@@ -918,6 +936,14 @@ bool cellGate( const std::string & spirvDir, int twin, const GLuint maps[4], uns
 				glEnable( GL_BLEND );
 				glBlendFunc( GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA );
 			}
+		}
+		if ( fadeV ) {  // lane VKOBJ9: every draw blended by its own alpha (the band scales it), the NIF alpha property on pbrm
+			set( "alphaFlags", { 8.0f } );
+			set( "alpha", { fadeA0( i ) } );
+			if ( pbrmT )
+				set( "pbrComposition", { -1.0f } );
+			glEnable( GL_BLEND );
+			glBlendFunc( GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA );
 		}
 		std::mt19937 r( std::uint32_t( 101 + i ) );
 		std::uniform_real_distribution<float> q( 0.0f, 1.0f );
@@ -1043,9 +1069,19 @@ bool cellGate( const std::string & spirvDir, int twin, const GLuint maps[4], uns
 			drawState( i );
 			f.bindVertexArray( vao[draws[i].lay] );
 			const std::vector<std::uint32_t> & cm = sbV ? sbGl[i] : draws[i].cmds;  // lane VKOBJ7: stepb, the cluster commands
-			for ( std::size_t c = 0; c < cm.size(); c += 5 )
-				u.drawBv( GL_TRIANGLES, GLsizei( cm[c] ), GL_UNSIGNED_SHORT, reinterpret_cast<const void *>( std::size_t( cm[c + 2] ) * 2 ),
-					GLint( cm[c + 3] ) );
+			auto drawCm = [&]( const std::vector<std::uint32_t> & dc ) {
+				for ( std::size_t c = 0; c < dc.size(); c += 5 )
+					u.drawBv( GL_TRIANGLES, GLsizei( dc[c] ), GL_UNSIGNED_SHORT, reinterpret_cast<const void *>( std::size_t( dc[c + 2] ) * 2 ),
+						GLint( dc[c + 3] ) );
+			};
+			if ( fadeV ) {  // lane VKOBJ9: the kept pieces at a0, then each band piece at a0 x fade (probe 4: every fade 1)
+				drawCm( fdKeep[i] );
+				for ( int k = 0; k < 3; k++ ) {
+					set( "alpha", { fadeA0( i ) * ( probe == 4 ? 1.0f : kFade[k] ) } );
+					drawCm( fdBand[i][k] );
+				}
+			} else
+				drawCm( cm );
 			frameOff();
 		}
 		shadeRead( out.depth, &out.c0, &out.c1 );
@@ -1058,21 +1094,33 @@ bool cellGate( const std::string & spirvDir, int twin, const GLuint maps[4], uns
 	auto vkSweep = [&]( int red, CellOut & out, std::string & w, int onlyLay = -1, bool glOnlyBase = false ) {
 		shadeClear();
 		bool ran = true;
-		for ( int i = 0; i < ( onlyLay >= 0 ? 1 : nDraws ) && ran; i++ ) {
+		for ( int i = 0; i < ( onlyLay >= 0 || fadeRed == 2 ? 1 : nDraws ) && ran; i++ ) {
 			frameState( glOnlyBase );
 			drawState( i );
 			f.bindVertexArray( vao[onlyLay >= 0 ? onlyLay : draws[i].lay] );
-			ObjCellShade s;
-			s.twin = twin;
-			s.prog = prog;
-			s.poolKey = poolKey;
-			s.verts = std::size_t( 2 * nv );
-			const std::vector<std::uint32_t> & vc = sbV && onlyLay < 0 ? sbUse[i] : draws[i].cmds;  // lane VKOBJ7: stepb, the ranges
-			s.cmds = vc.data();
-			s.nCmds = vc.size() / 5;
-			s.red = red;
-			s.rt = rtV;
-			ran = objCellShade( glProc, s, w );
+			auto cross = [&]( const std::vector<std::uint32_t> & vc ) {
+				ObjCellShade s;
+				s.twin = twin;
+				s.prog = prog;
+				s.poolKey = poolKey;
+				s.verts = std::size_t( 2 * nv );
+				s.cmds = vc.data();
+				s.nCmds = vc.size() / 5;
+				s.red = red;
+				s.rt = rtV;
+				return objCellShade( glProc, s, w );
+			};
+			if ( fadeV && onlyLay < 0 && fadeRed == 2 ) {  // lane VKOBJ9: a band in the constant-alpha mode (must refuse)
+				glBlendFunc( 0x8003, 0x8004 );  // GL_CONSTANT_ALPHA, GL_ONE_MINUS_CONSTANT_ALPHA
+				ran = cross( fdBand[i][0] );
+			} else if ( fadeV && onlyLay < 0 ) {  // lane VKOBJ9: the kept crossing, then one crossing a band piece (red fade: at a0)
+				ran = cross( fdKeep[i] );
+				for ( int k = 0; k < 3 && ran; k++ ) {
+					set( "alpha", { fadeA0( i ) * ( fadeRed == 1 ? 1.0f : kFade[k] ) } );
+					ran = cross( fdBand[i][k] );
+				}
+			} else
+				ran = cross( sbV && onlyLay < 0 ? sbUse[i] : draws[i].cmds );  // lane VKOBJ7: stepb, the ranges
 			frameOff();
 		}
 		if ( ran )
@@ -1230,9 +1278,10 @@ bool cellGate( const std::string & spirvDir, int twin, const GLuint maps[4], uns
 		}
 	}
 	// the variant probes: each variant's input reaches GL's picture (else its red could test nothing)
-	static const char * probeName[4] = { "", "lights (cellLightCount 0)", "skin (doSkinning 0)", "alpha (alphaFlags 0, no blend)" };
-	for ( int pr = 1; pr <= 3; pr++ ) {
-		if ( !( pr == 1 ? lightsV : pr == 2 ? skinV : alphaV ) )
+	static const char * probeName[5] = { "", "lights (cellLightCount 0)", "skin (doSkinning 0)", "alpha (alphaFlags 0, no blend)",
+		"fade (every fade 1: the bands at a0)" };
+	for ( int pr = 1; pr <= 4; pr++ ) {
+		if ( !( pr == 1 ? lightsV : pr == 2 ? skinV : pr == 3 ? alphaV : fadeV ) )
 			continue;
 		CellOut g2;
 		probe = pr;
@@ -1304,10 +1353,13 @@ bool cellGate( const std::string & spirvDir, int twin, const GLuint maps[4], uns
 		const DepthCmp dc = depthCmp( vk0.depth, gl.depth );
 		const CellCmp cc = colCmp( vk0 );
 		const bool litOk = cc.both >= 2000 && double( cc.lit ) >= 0.9 * double( cc.both ) && ( oneT || cc.glow >= 200 );
+		const int crossN = fadeV ? 4 * nDraws : nDraws;  // lane VKOBJ9: fade, the kept crossing + 3 band crossings a draw
 		int blendDraws = 0;
 		for ( int i = 0; i < nDraws; i++ )
 			blendDraws += ( alphaV && ( alphaMode[i] & 8 ) != 0 ) || ( fxT && ( fxAlpha[i] & 8 ) != 0 ) ? 1 : 0;
-		const bool varOk = rs.cellLit == ( lightsV ? nDraws : 0 ) && rs.cellSkinned == ( skinV ? nDraws : 0 ) && rs.cellBlended == blendDraws;
+		if ( fadeV )
+			blendDraws = crossN;
+		const bool varOk = rs.cellLit == ( lightsV ? crossN : 0 ) && rs.cellSkinned == ( skinV ? crossN : 0 ) && rs.cellBlended == blendDraws;
 		// twin 7: the depth copied once for the sweep (one frame), and its cost counted
 		/* lane VKWATER5: and the screen terms, one copy each a frame (cellAo R32F, cellSsr RGBA32F, half the view) */
 		const int wantCopies = ( fxT ? 1 : 0 ) + ( aoTex ? 1 : 0 ) + ( ssrTex ? 1 : 0 ) + ( decalTex ? 1 : 0 );
@@ -1328,7 +1380,7 @@ bool cellGate( const std::string & spirvDir, int twin, const GLuint maps[4], uns
 			std::printf( "BLVIEW %s texel buffers %s (copied %d, %.1f KB, %.3f ms; imported %d; want copied %d, %.1f KB, imported %d)\n", tag,
 				texelOk ? "OK" : "FAIL", int( ts.copied ), double( ts.copiedBytes ) / 1024.0, ts.copiedMs, int( ts.imported ), rtIn + litIn,
 				double( texelBytes ) / 1024.0, rtIn * nDraws );
-		const bool crossOk = rs.runs == nDraws && rs.fails == 0 && rs.cells == nDraws && rs.twins == 4 * nDraws && varOk && copyOk && texelOk;
+		const bool crossOk = rs.runs == crossN && rs.fails == 0 && rs.cells == crossN && rs.twins == 4 * crossN && varOk && copyOk && texelOk;
 		std::printf( "BLVIEW %s crossing %s (%d runs, %d failed, %d cells, %d twin images, %d shared, %d GL-only; lit %d skinned %d blended %d; "
 			"copies %d, %.1f KB, %.3f ms)\n", tag, crossOk ? "OK" : "FAIL", rs.runs, rs.fails, rs.cells, rs.twins, rs.shared, rs.glOwn, rs.cellLit,
 			rs.cellSkinned, rs.cellBlended, rs.copies, rs.copyBytes / 1024.0, rs.copyMs );
@@ -1425,6 +1477,42 @@ bool cellGate( const std::string & spirvDir, int twin, const GLuint maps[4], uns
 		std::printf( "BLVIEW RED %s droprange (last kept range of each multi-range draw dropped) %s (%zu Vulkan depth values moved off the Vulkan base%s%s)\n",
 			tag, passes ? "PASSED" : vch ? "FAIL" : "TESTS NOTHING", vch, rr ? "" : "; refused: ", rr ? "" : rw.c_str() );
 		ok = ok && !passes && vch > 0;
+	}
+	if ( fadeV ) {  // lane VKOBJ9: red fade (Vulkan's band crossings at a0, unscaled), then the constant-alpha band's refusal
+		std::size_t nKeep = 0, nBand = 0;
+		for ( int i = 0; i < nDraws; i++ ) {
+			nKeep += fdKeep[i].size() / 5;
+			for ( int k = 0; k < 3; k++ )
+				nBand += fdBand[i][k].size() / 5;
+		}
+		std::printf( "BLVIEW %s fade pieces: kept %zu commands, band %zu commands, fades 0.75 0.5 0.25\n", tag, nKeep, nBand );
+		CellOut o;
+		std::string rw;
+		fadeRed = 1;
+		takeObjBlRunStat();
+		const bool rr = vkSweep( 0, o, rw );
+		fadeRed = 0;
+		bool passes = false;
+		std::size_t vch = 0;
+		if ( rr ) {
+			const DepthCmp dc = depthCmp( o.depth, gl.depth );
+			passes = ( dc.exact() || dc.bound() ) && colCmp( o ).over == 0;
+			for ( std::size_t i = 0; ran && i < o.c0.size() && i < vk0.c0.size(); i++ )
+				vch += o.c0[i] != vk0.c0[i];
+		}
+		std::printf( "BLVIEW RED %s fade (the band crossings at a0, unscaled) %s (%zu Vulkan colour values moved off the Vulkan base%s%s)\n",
+			tag, passes ? "PASSED" : vch ? "FAIL" : "TESTS NOTHING", vch, rr ? "" : "; refused: ", rr ? "" : rw.c_str() );
+		ok = ok && !passes && vch > 0;
+		CellOut o2;
+		std::string cw;
+		fadeRed = 2;
+		takeObjBlRunStat();
+		const bool cr = vkSweep( 0, o2, cw );
+		const ObjBlRunStat s2 = takeObjBlRunStat();
+		fadeRed = 0;
+		const bool good = !cr && cw.find( "blends by a constant or unknown factor" ) != std::string::npos && s2.runs == 0 && s2.cells == 0;
+		std::printf( "BLVIEW %s refusal a constant-alpha band: %s (%s; %d runs)\n", tag, good ? "OK" : "FAIL", cr ? "drawn" : cw.c_str(), s2.runs );
+		ok = ok && good;
 	}
 	if ( !label ) {  // the refusals: nothing drawn, the reason given
 		const struct
