@@ -1,3 +1,13 @@
+## VKFAR14 (2026-11-15): the live far ground on streamed flights; the far ground's Vulkan draw no longer refused
+
+Changed, not built, not checked live.
+- A streamed cell open (and a live far rebuild) now prepares the far ring 0's live ground (the Far ground row) too,
+  every ring-0 cell, so crossings keep it (the shapes are shown and hidden per cell). Before, streamed flights drew the
+  baked sheet. Red `WW_CELL_FARGROUND_RED=nostream` keeps the old rule. Offline: tests/features/far-ground/fgstream.
+- The far ground's Vulkan twin: its image list and uniform table follow the regenerated shader header, so its draws
+  are no longer refused on every frame. tests/vkframe/fargrounddraw still fails on seed 1 (colour within 2 %): the
+  twin's readable source has the newer sun-pass terms the gate's GL reference lacks. Needs a ruling.
+
 ## VKFAR7 (2026-11-15): the TAA mask's reactive pass draws on Vulkan, all its draws in one hand-off
 
 Changed, not built, not checked live. Offline: tests/vkframe/taareactivedraw.sh passes.
