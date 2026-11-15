@@ -1,6 +1,6 @@
 #!/bin/bash
 # Lane VKFAR7 (2026-11-15): the TAA mask's reactive pass (taainputs.cpp pass 4) on the present device (vktaareactive.inc,
-# fxWork's kind 10, N draws a crossing) against GL's own taa_reactive program in pass 4's state, per pixel; bar and reds
+# fxWork's kind 11, N draws a crossing) against GL's own taa_reactive program in pass 4's state, per pixel; bar and reds
 # in taareactivedraw.cpp's header. bash tests/vkframe/taareactivedraw.sh <out dir>. Needs MSYS2 UCRT64 g++.
 # Not while NifSkope or the game runs (a window of ours): the script refuses then.
 # Last line: `TAAREACTIVEDRAW GATE OK` or `TAAREACTIVEDRAW GATE FAILED`.

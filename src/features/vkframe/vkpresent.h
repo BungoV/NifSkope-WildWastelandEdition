@@ -57,6 +57,11 @@ struct Split
 Split takeSplit();
 //! the child window, the swapchain and the ring go (GL current: its textures and semaphores go too); the device stays
 void shutdown();
+/* lane VKWATER4: the fence waits' red and refusal, shared with vkframe.cpp. fenceRed: WW_VKFENCE_RED=<site>[,<site>...]
+ * (gates only) names this site (a faked VK_TIMEOUT, pending or not). fenceMiss: a wait that returned vkResult (not
+ * VK_SUCCESS): the why, also on stderr (`vk fence:`) */
+bool fenceRed( const char * site );
+std::string fenceMiss( const char * site, int vkResult );
 
 /* Round 10 (VKFRAME1, the view on Vulkan, WW_VKVIEW=1; red WW_VKVIEW_RED=1 = the old route): before the paint, GL binds
  * (GL_FRAMEBUFFER) a view the present device made, w x h at the back buffer's samples (RGBA8 + D24S8), and draws the
@@ -100,6 +105,8 @@ static_assert( sizeof( ToneJob ) == 112, "ToneJob is the shader's push constant 
 bool toneFrame( int w, int h, int samples, unsigned & color, unsigned & ds, std::string & why );
 //! color is the live shared frame's colour name (a shutdown or a remake drops it)
 bool toneFrameIs( unsigned color );
+//! lane VKFAR2 (row L8): the live shared frame's size (false: none in this context)
+bool toneFrameSize( int & w, int & h );
 //! the shared frame goes (GL current)
 void toneFrameDrop();
 /* Lane VKBLOOM1: the Fusion Shaders bloom (cellbloom.cpp, mode 3) on the present device, in the tone pass's command
@@ -181,11 +188,14 @@ void toneCachePath( const std::string & path );
 
 /* Lane VKSHARE1: single-sample targets another pass owns (the clouds' march and history, TAA's), made on the present
  * device and imported into GL, keyed by the owner. type 0 = 2D, 1 = 3D (d deep), 2 = 2D array (d layers); glFmt one of
- * GL_RGBA16F / RGBA32F / RGBA8 / RG32F / RG16F / R32F / R8 / DEPTH24_STENCIL8. GL current. Same key and shape: the same
+ * GL_RGBA16F / RGBA32F / RGBA8 / RG32F / RG16F / R32F / R8 / DEPTH24_STENCIL8 (type 3, lane VKFAR6: a D16 cube array,
+ * w = h, d layer-faces, 6 a cube; GL_DEPTH_COMPONENT16 only). GL current. Same key and shape: the same
  * name; another shape: the old one goes first (a full drain). false: why; tex 0 (the owner makes GL's own). The GL
  * texture has NEAREST filters; the owner sets its own. levels (lane VKAIR1): a mip chain (colour formats; the clouds'
  * noise volumes), the owner fills each level. samples (lane VKOBJ1): a multisample 2D (type 0, one level; the objects'
- * depth prepass in GL_DEPTH_COMPONENT24 / 32F), GL_TEXTURE_2D_MULTISAMPLE with fixed sample locations. */
+ * depth prepass in GL_DEPTH_COMPONENT24 / 32F), GL_TEXTURE_2D_MULTISAMPLE with fixed sample locations. type 3 (lane
+ * VKOBJ4): a cube array of w x w, d layers (6 a cube, as farTwin counts) as GL_TEXTURE_CUBE_MAP_ARRAY (the lamps' D16 shadow
+ * cubes, cellShadow). */
 bool sharedTarget( std::uintptr_t key, int type, int w, int h, int d, unsigned glFmt, unsigned & tex, std::string & why,
 	int levels = 1, int samples = 1 );
 //! tex is key's live shared name in the current GL context (a shutdown drops every one: the owner makes GL's own again)
@@ -200,6 +210,29 @@ struct SharedStat
 	std::string failWhy;
 };
 SharedStat takeSharedStat();
+
+/* Lane VKOBJ4 item 2: the bloom chain (vkframe.cpp) on the present device. shareDevice (GL current): the present device,
+ * made on GL's GPU if it is not yet (the view off too), and its handles for wwVkFrameSetDevice. onWorker: fn( arg ) runs
+ * on the present worker (the queue is the worker's alone), the caller waits for it; false: fn's false (why). borrowTarget:
+ * another owner's image on the present device joins the shared targets as a borrowed entry (objBlFrameRead finds GL's
+ * framebuffer over it), never freed here; an image of another device is refused. GL current. */
+struct Device
+{
+	void * instance = nullptr, * physical = nullptr, * device = nullptr, * queue = nullptr, * getDeviceProcAddr = nullptr;
+	unsigned family = 0;
+	unsigned char uuid[16] = {};
+};
+bool shareDevice( GlProc gl, Device & out, std::string & why );
+bool onWorker( bool ( *fn )( void * arg, std::string & why ), void * arg, std::string & why );
+struct Borrow
+{
+	void * device = nullptr, * image = nullptr, * view = nullptr;
+	void * attView = nullptr;  //!< a depth / stencil format's depth and stencil view (the render pass attachment)
+	unsigned tex = 0, glFmt = 0;  //!< the GL name in the current context; GL_RGBA16F / GL_DEPTH24_STENCIL8 / GL_DEPTH32F_STENCIL8
+	int w = 0, h = 0, samples = 1;
+};
+bool borrowTarget( std::uintptr_t key, const Borrow & b, std::string & why );
+void borrowDrop( std::uintptr_t key );
 
 /* Lane VKSHARE1: the Modern temporal AA (gametaa.cpp, tier High) on the present device. GL blits the frame's colour and
  * depth into shared targets (sharedTarget) as before; taaRun: GL signals, the worker submits the camera vectors, the
@@ -306,17 +339,26 @@ SkyStat takeSkyStat();
  * the worker records the dispatches (LightBindingsVk.hlsli's set, a 128-byte push block each), GL waits and copies the
  * `out` twins back into GL's textures, so every consumer reads what it read before. false: why; nothing changed (GL draws
  * its stages). Reds WW_VKVIEW_AO_RED / _CONTACT_RED / _SSGI_RED = 1 (or WW_VKVIEW off): GL. */
+/* Lane VKWATER4 (row G5): the ultra ocean (cellocean.cpp) is pass LightOcean, kernels ocean_vk.hlsl stages 1-6; 7-10
+ * (the *A kernels) write the water's shared arrays in place (LightImage::share), so nothing is copied. Red
+ * WW_VKVIEW_OCEAN_RED=1 (or WW_VKVIEW off): GL's draws; =prev: the water reads the arrays the frame before wrote. */
 // LightGi (lane VKFAR3 A1 b): the screen GI's own run (after the volume mask, which stays GL); red WW_VKVIEW_GIHALF_RED=1
-enum LightPass { LightAo = 0, LightContact = 1, LightSsgi = 2, LightGi = 3, LightPasses = 4 };
+enum LightPass { LightAo = 0, LightContact = 1, LightSsgi = 2, LightOcean = 3, LightGi = 4, LightPasses = 5 };
 // LightAoxZ / Xe / R8 (lane VKFAR3): the ported AO methods' depth mips, XeGTAO's term + edges, the r8 stages (aox_vk.hlsl)
 enum LightKernel { LightAoGbuf = 0, LightAoMip, LightAoRaw, LightAoBlur, LightAoBlurF, LightContactK, LightSsgiK, LightAoxZ, LightAoxXe,
-	LightAoxR8, LightGiHalf, LightKernels };	// LightGiHalf (VKFAR3 A1 b): the screen GI's DDGI read (gihalf_vk.hlsl)
+	LightAoxR8, LightOceanSpecK, LightOceanFftK, LightOceanFinBcK, LightOceanFinDK, LightOceanMipBcK, LightOceanMipDK,
+	LightOceanFinBcAK, LightOceanFinDAK, LightOceanMipBcAK, LightOceanMipDAK,
+	LightGiHalf, LightKernels };	// LightGiHalf (VKFAR3 A1 b): the screen GI's DDGI read (gihalf_vk.hlsl)
 struct LightImage
 {
-	unsigned tex = 0;              //!< GL's texture (GL_TEXTURE_2D)
+	unsigned tex = 0;              //!< GL's texture (GL_TEXTURE_2D; 0 for a twin only the dispatches use)
 	unsigned glFmt = 0;            //!< its internal format: RGBA32F / RGBA16F / RG32F / R32F / R8 / RG8
 	int w = 0, h = 0, levels = 1;  //!< levels > 1: every level is copied in (an input only)
 	bool in = false, out = false;  //!< copied into the twin before / back into GL's texture after
+	int tiles = 0, outLevel = 0;   //!< tiles > 0 (an output): tex is a GL_TEXTURE_2D_ARRAY; the twin's `tiles` side-by-side
+	                               //!< w / tiles wide tiles go back into its layers 0.. at level outLevel
+	std::uintptr_t share = 0;      //!< lane VKWATER4: a sharedTarget key (2D or 2D array): the dispatches use that image's
+	                               //!< level outLevel itself (every layer; w = its width x layers, h its height), no twin, no copy
 };
 struct LightDispatch
 {
@@ -350,8 +392,15 @@ struct LightStat
 	std::string glWhy, failWhy;
 	int pipelines = 0;
 	double buildMs = 0.0;
+	int copies = 0, shared = 0;        //!< lane VKWATER4: glCopyImageSubData calls / shared-target entries, since the last take
 };
 LightStat takeLightStat( int pass );
+//! lane VKWATER4: the water draws' ocean inputs (waterOcean*) since the last take: copied into a twin / sampled in place
+struct OceanWaterStat
+{
+	int copies = 0, shared = 0;
+};
+OceanWaterStat takeOceanWaterStat();
 
 /* Lane VKLIGHT2 (row L4): the reflections' full-screen stages (cell_ssr.frag 5, 1-4) as Vulkan compute,
  * res/shaders/hlsl/vklight/ssr_vk.hlsl (SSR_LIVE). GL keeps stage 0, the scene pass and the water's rays; the pass's own
@@ -536,12 +585,13 @@ inline constexpr FxField kT_resolve_a[] = {
 };
 inline constexpr int kT_resolve_aBytes = 240;
 // lane VKWATER2: kFxMipRepeatAniso = the mip repeat at GL's aniso 16 (the water's moments / noise), plain without the feature
-enum FxSampler { kFxLinearClamp, kFxNearestClamp, kFxLinearRepeat, kFxMipRepeat, kFxNearestRepeat, kFxMipRepeatAniso, kFxSamplers };
+// lane VKFAR2 (row L8): kFxMipClamp = trilinear CLAMP_TO_EDGE (the precipitation atlases, cellprecip.cpp loadDds)
+enum FxSampler { kFxLinearClamp, kFxNearestClamp, kFxLinearRepeat, kFxMipRepeat, kFxNearestRepeat, kFxMipRepeatAniso, kFxMipClamp, kFxSamplers };
 //! one texture slot of a pass (HLSL t<i>): a GL texture copied into its twin, or a shared target read as is
 struct FxTex
 {
 	unsigned tex = 0;               //!< GL's name (0 and no shared: a zero texture, as GL's unbound unit reads)
-	int type = 0;                   //!< 0 2D, 1 3D, 2 2D array (sharedTarget's)
+	int type = 0;                   //!< 0 2D, 1 3D, 2 2D array, 3 cube array (sharedTarget's)
 	int w = 0, h = 0, d = 1, levels = 1;
 	unsigned glFmt = 0;
 	std::uintptr_t twin = 0;        //!< the twin's sharedTarget key
@@ -572,6 +622,7 @@ struct FxStat
 	int pipelines = 0;
 	double buildMs = 0.0;
 	int copies = 0;                 //!< texture copies into twins since the last take
+	int refusedPacks = 0;           //!< rain / snow: fxPack calls made for runs then refused (asked before the packs: 0)
 	int reusedHandles = 0;          //!< lane VKWATER4: water ray runs whose depth twin kept its VkImage handle over a sharedGen() move
 	int fenceMisses = 0;            //!< lane VKWATER4: waterRun's wait on the last crossing's fence that did not return VK_SUCCESS
 };
@@ -642,29 +693,140 @@ inline constexpr FxField kT_precipcs[] = {
 	{ "pcFocal", 1248, 1, 1, 0, 0 }, { "pcMinPx", 1252, 1, 1, 0, 0 }, { "pcShutter", 1256, 1, 1, 0, 0 },
 	{ "pcThin", 1260, 1, 1, 0, 0 }, { "pcAtlas", 1264, 4, 1, 0, 0 }, { "pcInset", 1280, 2, 1, 0, 0 },
 	{ "pcFar", 1288, 1, 1, 1, 0 }, { "pcHasTex", 1292, 1, 1, 1, 0 }, { "pcFirst", 1296, 1, 1, 1, 0 },
-	{ "pcCount", 1300, 1, 1, 1, 0 }, { "pcRed", 1304, 1, 1, 1, 0 },
+	{ "pcCount", 1300, 1, 1, 1, 0 }, { "pcRed", 1304, 1, 1, 1, 0 }, { "pcViewport", 1312, 4, 1, 0, 0 },
+	{ "fogOn", 1328, 1, 1, 1, 0 }, { "fogK", 1344, 4, 6, 0, 0 }, { "fogView", 1440, 4, 1, 0, 0 },
+	{ "fogDistScale", 1456, 1, 1, 0, 0 }, { "fogSun", 1472, 4, 1, 0, 0 }, { "fogSunColour", 1488, 4, 1, 0, 0 },
+	{ "fogUnit", 1504, 1, 1, 0, 0 }, { "fogProbe", 1520, 4, 1, 0, 0 }, { "fogRed", 1536, 1, 1, 1, 0 },
+	{ "fogNight", 1552, 4, 1, 0, 0 }, { "fogNightHue", 1568, 1, 1, 0, 0 }, { "atAp", 1584, 4, 1, 0, 0 },
+	{ "atApProj", 1600, 4, 1, 0, 0 }, { "atApDouble", 1616, 1, 1, 0, 0 }, { "volOn", 1620, 1, 1, 1, 0 },
+	{ "volRect", 1632, 4, 1, 0, 0 }, { "volFarClamp", 1648, 1, 1, 1, 0 }, { "volSlices", 1664, 4, 1, 0, 0 },
+	{ "volProbe", 1680, 1, 1, 1, 0 }, { "volFogBlend", 1684, 1, 1, 1, 0 }, { "volFar", 1696, 4, 1, 0, 0 },
+	{ "volPack", 1712, 4, 1, 0, 0 }, { "volPackDims", 1728, 4, 1, 0, 0 }, { "volAirMed", 1744, 4, 1, 0, 0 },
+	{ "volAirLayer", 1760, 4, 1, 0, 0 }, { "volAirGround", 1776, 4, 1, 0, 0 }, { "volAirFlags", 1792, 1, 1, 1, 0 },
+	{ "volAirTerrU", 1808, 4, 1, 0, 0 }, { "volAirTerrV", 1824, 4, 1, 0, 0 }, { "volAirTerrFU", 1840, 4, 1, 0, 0 },
+	{ "volAirTerrFV", 1856, 4, 1, 0, 0 }, { "volAirTerrRef", 1872, 1, 1, 0, 0 }, { "volAirRain", 1888, 4, 1, 0, 0 },
+	{ "volAirRainFar", 1904, 4, 1, 0, 0 }, { "volAirRainXf", 1920, 4, 1, 0, 4 }, { "volAirDrift", 1984, 4, 1, 0, 0 },
+	{ "volAirDriftUv", 2000, 4, 6, 0, 0 }, { "volAirDriftRed", 2096, 1, 1, 1, 0 },
 };
-inline constexpr int kT_precipcsBytes = 1312;
+inline constexpr int kT_precipcsBytes = 2112;
 inline constexpr FxField kT_precipps[] = {
 	{ "pcHasTex", 0, 1, 1, 1, 0 }, { "pcFar", 4, 1, 1, 1, 0 }, { "pcAtlas", 16, 4, 1, 0, 0 },
 	{ "pcNear", 32, 2, 1, 0, 0 },
 };
 inline constexpr int kT_precippsBytes = 48;
+// slice 3: the look's members past those (precip_look_view_cs / _ps, cell_precip_look.prog), packed into the same bytes
+inline constexpr FxField kT_preciplookcs[] = {
+	{ "pcLook", 2100, 1, 1, 1, 0 }, { "pcMmPerView", 2104, 1, 1, 0, 0 },
+};
+inline constexpr FxField kT_preciplookps[] = {
+	{ "pcLook", 40, 1, 1, 1, 0 }, { "pcHasN", 44, 1, 1, 1, 0 }, { "pcClump", 48, 2, 1, 0, 0 }, { "pcAlbedo", 56, 1, 1, 0, 0 },
+	{ "pcTrans", 60, 1, 1, 0, 0 },
+};
+inline constexpr int kT_preciplookpsBytes = 64;
+/* slice 2b: precip_lit_view_cs's b31 = kT_precipcs's 72 fields at the same offsets (checked against the reflect) and these
+ * past them: cell_precip_gpu_gs's light chain (cell_lights, cell_cluster, cell_volpart, ww_sunshadow, cell_airmed) and
+ * the GS's own lightingInfluence / fxLitMode / pcTrans (spirv-cross --reflect of the shipped SPIR-V; reflect_table.py) */
+inline constexpr FxField kT_preciplitcs[] = {
+	{ "cellOn", 2100, 1, 1, 1, 0 }, { "cellLightCount", 2104, 1, 1, 1, 0 }, { "cellRow", 2112, 4, 3, 0, 0 },
+	{ "cellHasDalc", 2160, 1, 1, 1, 0 }, { "cellGiAmb", 2164, 1, 1, 1, 0 }, { "cellGiFill", 2168, 1, 1, 1, 0 },
+	{ "cellDalc", 2176, 4, 3, 0, 0 }, { "cellHasDir", 2224, 1, 1, 1, 0 }, { "cellExtDalc", 2228, 1, 1, 1, 0 },
+	{ "cellSunScale", 2232, 1, 1, 0, 0 }, { "cellDirColor", 2240, 3, 1, 0, 0 }, { "cellDirTo", 2256, 3, 1, 0, 0 },
+	{ "cellInterior", 2268, 1, 1, 1, 0 }, { "cellCenter", 2272, 3, 1, 0, 0 }, { "cellProbe", 2284, 1, 1, 1, 0 },
+	{ "cellProbeGain", 2288, 1, 1, 0, 0 }, { "cellAmboCount", 2292, 1, 1, 1, 0 }, { "cellAmbo", 2304, 4, 16, 0, 0 },
+	{ "cellAmboK", 2560, 4, 16, 0, 0 }, { "cellAmboBox", 2816, 4, 48, 0, 0 }, { "cellLightPhys", 3584, 4, 1, 0, 0 },
+	{ "cellLightPhysB", 3600, 4, 1, 0, 0 }, { "cellRed", 3616, 1, 1, 1, 0 }, { "cellGiOn", 3620, 1, 1, 1, 0 },
+	{ "cellGiOrigin", 3632, 3, 1, 0, 0 }, { "cellGiVoxel", 3644, 1, 1, 0, 0 }, { "cellGiDims", 3648, 3, 1, 0, 0 },
+	{ "cellGiPad", 3660, 1, 1, 0, 0 }, { "cellGiRooms", 3664, 1, 1, 1, 0 }, { "cellRoomsOrigin", 3668, 3, 1, 0, 0 },
+	{ "cellRoomsCell", 3680, 1, 1, 0, 0 }, { "cellRoomsDims", 3684, 3, 1, 0, 0 }, { "cellGiSky", 3696, 1, 1, 1, 0 },
+	{ "cellGiFineOn", 3700, 1, 1, 1, 0 }, { "cellGiFineN", 3704, 1, 1, 1, 0 }, { "cellGiFineRed", 3708, 1, 1, 1, 0 },
+	{ "cellGiFineBox", 3712, 4, 8, 0, 0 }, { "cellGiFineDim", 3840, 4, 8, 0, 0 }, { "cellPass", 3968, 1, 1, 1, 0 },
+	{ "cellPassRed", 3972, 1, 1, 1, 0 }, { "cellIsOn", 3976, 1, 1, 1, 0 }, { "cellIsLinear", 3980, 1, 1, 1, 0 },
+	{ "cellIsExposure", 3984, 1, 1, 0, 0 }, { "cellIsE", 3988, 1, 1, 0, 0 }, { "cellIsAdapted", 3992, 1, 1, 0, 0 },
+	{ "cellIsCine", 4000, 3, 1, 0, 0 }, { "cellIsTint", 4016, 4, 1, 0, 0 }, { "cellIsWbD", 4032, 3, 1, 0, 0 },
+	{ "cellIsLutOn", 4044, 1, 1, 1, 0 }, { "cellIsRed", 4048, 1, 1, 1, 0 }, { "cellIsVanCurve", 4052, 1, 1, 1, 0 },
+	{ "cellIsBloomOn", 4056, 1, 1, 1, 0 }, { "cellIsBloomRect", 4064, 4, 1, 0, 0 }, { "cellShadowOn", 4080, 1, 1, 1, 0 },
+	{ "cellShadowTexel", 4084, 1, 1, 0, 0 }, { "cellShadowFadeOn", 4088, 1, 1, 1, 0 },
+	{ "cellShadowFade", 4096, 1, 16, 0, 0 }, { "cellFarOn", 4352, 1, 1, 1, 0 }, { "cellFarBits", 4356, 1, 1, 1, 0 },
+	{ "cellFarProbe", 4360, 1, 1, 1, 0 }, { "cellFarCell", 4364, 1, 1, 0, 0 }, { "cellFarBand", 4368, 2, 1, 0, 0 },
+	{ "cellFarRed", 4376, 1, 1, 1, 0 }, { "cellFarPlacedOn", 4380, 1, 1, 1, 0 },
+	{ "cellFarPlacedOrigin", 4384, 3, 1, 0, 0 }, { "cellFarPlacedVoxel", 4396, 1, 1, 0, 0 },
+	{ "cellFarPlacedDims", 4400, 3, 1, 0, 0 }, { "cellCtOn", 4412, 1, 1, 1, 0 }, { "cellCtProj", 4416, 4, 1, 0, 0 },
+	{ "cellCtRect", 4432, 4, 1, 0, 0 }, { "cellCtRed", 4448, 1, 1, 1, 0 }, { "cellGiLoop8", 4452, 1, 1, 1, 0 },
+	{ "cellAoDecalOn", 4456, 1, 1, 1, 0 }, { "cellAoDecalRect", 4464, 4, 1, 0, 0 }, { "cellSkyVis", 4480, 1, 1, 0, 0 },
+	{ "cellSpecOcc", 4484, 1, 1, 1, 0 }, { "cellSpecSkyBase", 4488, 1, 1, 0, 0 }, { "cellGoboOn", 4492, 1, 1, 1, 0 },
+	{ "cellGoboRot", 4496, 1, 1, 1, 0 }, { "cellGoboFlat", 4500, 1, 1, 1, 0 }, { "cellGoboGam", 4504, 1, 1, 1, 0 },
+	{ "cellGoboTbl", 4508, 1, 1, 1, 0 }, { "cellGoboMap", 4512, 1, 1, 1, 0 }, { "cellCubeMat", 4528, 4, 1, 0, 0 },
+	{ "cellSsgiOn", 4544, 1, 1, 1, 0 }, { "cellSsgiRect", 4560, 4, 1, 0, 0 }, { "cellSsgiK", 4576, 2, 1, 0, 0 },
+	{ "cellSsgiRed", 4584, 1, 1, 1, 0 }, { "cellClusterOn", 4588, 1, 1, 1, 0 }, { "cellClusterDims", 4592, 4, 1, 0, 0 },
+	{ "cellClusterOrigin", 4608, 2, 1, 0, 0 }, { "cellClusterDepth", 4624, 4, 1, 0, 0 },
+	{ "cellClusterLog", 4640, 2, 1, 0, 0 }, { "cellClusterBase", 4648, 1, 1, 1, 0 }, { "volPart", 4652, 1, 1, 1, 0 },
+	{ "volPartRed", 4656, 1, 1, 1, 0 }, { "volPartDump", 4660, 1, 1, 1, 0 }, { "vpTiled", 4664, 1, 1, 1, 0 },
+	{ "volCsm", 4668, 1, 1, 1, 0 }, { "volTerms", 4672, 1, 1, 1, 0 }, { "volVeil", 4676, 1, 1, 1, 0 },
+	{ "volEnvGrid", 4688, 4, 1, 0, 0 }, { "fxLaw", 4704, 2, 1, 0, 0 }, { "cellFxEmitK", 4712, 1, 1, 0, 0 },
+	{ "cellFxUnlitK", 4716, 1, 1, 0, 0 }, { "vpSun", 4720, 4, 1, 0, 0 }, { "csmMat", 4736, 4, 3, 0, 4 },
+	{ "csmInvRange", 4928, 3, 1, 0, 0 }, { "csmParams", 4944, 4, 1, 0, 0 }, { "csmSplitOffset", 4960, 4, 1, 0, 0 },
+	{ "csmProbe", 4976, 1, 1, 1, 0 }, { "csmRed", 4980, 1, 1, 1, 0 }, { "csmForce", 4984, 1, 1, 0, 0 },
+	{ "ussOn", 4988, 1, 1, 1, 0 }, { "ussCsmOn", 4992, 1, 1, 1, 0 }, { "ussCsmFilter", 5008, 4, 1, 0, 0 },
+	{ "ussCsmBias", 5024, 3, 1, 0, 0 }, { "ussTerrOn", 5036, 1, 1, 1, 0 }, { "ussWorldFromView", 5040, 4, 1, 0, 4 },
+	{ "ussTerrXform", 5104, 4, 1, 0, 0 }, { "ussTerrRange", 5120, 4, 1, 0, 0 }, { "ussContactOn", 5136, 1, 1, 1, 0 },
+	{ "ussContactInvSize", 5140, 2, 1, 0, 0 }, { "ussView", 5148, 1, 1, 1, 0 }, { "ussRed", 5152, 1, 1, 1, 0 },
+	{ "ussCsmWorld", 5168, 4, 1, 0, 0 }, { "ussCsmTexel", 5184, 3, 1, 0, 0 }, { "ussCsmPhase", 5196, 1, 1, 0, 0 },
+	{ "ussCsmStable", 5200, 4, 1, 0, 0 }, { "ussCsmCellX", 5216, 3, 1, 0, 0 }, { "ussCsmCellY", 5232, 3, 1, 0, 0 },
+	{ "ussTail", 5248, 2, 1, 0, 0 }, { "ussTerrAtlas", 5264, 4, 1, 0, 0 }, { "ussTerrSize", 5280, 2, 1, 0, 0 },
+	{ "ussTerrNearXform", 5296, 4, 1, 0, 0 }, { "ussTerrPen", 5312, 4, 1, 0, 0 }, { "ussTerrBias", 5328, 4, 1, 0, 0 },
+	{ "ussTerrExtra", 5344, 4, 1, 0, 0 }, { "ussTerrSelf", 5360, 4, 1, 0, 0 }, { "ussDim", 5376, 2, 1, 0, 0 },
+	{ "ussPbrDim", 5384, 1, 1, 1, 0 }, { "ussCloudOn", 5388, 1, 1, 1, 0 }, { "ussCloudFromView", 5392, 4, 1, 0, 4 },
+	{ "ussCloudFar", 5456, 4, 1, 0, 0 }, { "airMed", 5472, 4, 1, 0, 0 }, { "airLayer", 5488, 4, 1, 0, 0 },
+	{ "airGround", 5504, 4, 1, 0, 0 }, { "airTerrOn", 5520, 1, 1, 1, 0 }, { "airTerrXf", 5536, 4, 1, 0, 0 },
+	{ "airTerrFineXf", 5552, 4, 1, 0, 0 }, { "airTerrRef", 5568, 1, 1, 0, 0 }, { "volRed", 5572, 1, 1, 1, 0 },
+	{ "volPhase", 5584, 4, 3, 0, 0 }, { "volGi", 5632, 4, 1, 0, 0 }, { "airSunLayer", 5648, 1, 1, 1, 0 },
+	{ "volShell", 5652, 1, 1, 0, 0 }, { "cellGiAirOn", 5656, 1, 1, 1, 0 }, { "cellGiAirOrigin", 5664, 3, 1, 0, 0 },
+	{ "cellGiAirVoxel", 5676, 1, 1, 0, 0 }, { "cellGiAirDims", 5680, 3, 1, 0, 0 }, { "airEnvFogHue", 5692, 1, 1, 1, 0 },
+	{ "lightingInfluence", 5696, 1, 1, 0, 0 }, { "fxLitMode", 5700, 1, 1, 1, 0 }, { "pcTrans", 5704, 1, 1, 0, 0 },
+};
+inline constexpr int kT_preciplitcsBytes = 5712;
 struct PrecipRun
 {
 	int w = 0, h = 0, vp[4] = {};    //!< the tone frame's size, GL's viewport
 	unsigned color = 0;             //!< the tone frame's colour (toneFrameIs)
 	int first = 0, n = 0;           //!< the run: glDrawArrays( GL_POINTS, first, n )
-	bool lit = false, fogged = false, roofOn = false;  //!< slice 1 refuses each (GL draws)
-	FxTex tex[2];                   //!< t0 pcRoof (slice 1: none), t1 pcTex (the atlas)
-	std::uint8_t cs[kT_precipcsBytes] = {};  //!< fxPack( cell_precip_gpu, kT_precipcs )
-	std::uint8_t ps[kT_precippsBytes] = {};  //!< fxPack( cell_precip_gpu, kT_precipps )
-	int red = 0;                    //!< gates only: 1 the cull radius 0, 2 the strip's last two corners swapped, 4 no near fade
+	bool lit = false, fogged = false, roofOn = false;  //!< lit: slice 2b (the sun alone; the rest refused); roofOn: pcRoofOn, tex[0] GL's pcRoof (L8 term 7); fogged: slice 2a
+	bool litBlock = false;          //!< cs holds kT_preciplitcs (a lit run without it is refused)
+	bool look = false;              //!< slice 3: cell_precip_look.prog's run (cs / ps also hold kT_preciplook*)
+	FxTex tex[14];                  //!< (13: the lit pass's t6 cellShadow, GL's shared lamp cubes; L8 term 5) (12: the lit pass's t30 volAirNoise, the air's drift; L8 term 4) (10: the lit pass's t31 csmMap, GL's shared cascades; 11: its t34 ussCloudMap; L8 term 3) t0 pcRoof (none yet), t1 pcTex (the atlas; a BC one twinned by farTwin), the air's t25 atApTex, t26 volTex, t27 volTile, t28 volAirTerr, t29 volAirRainMap, the look's pcTexN, the lit pass's t17 airTerr (L8 terrain air), the lit pass's t19 volEnvHist (L8 term 2, the ambient's keep)
+	std::uint8_t cs[kT_preciplitcsBytes] = {};  //!< fxPack( cell_precip_gpu, kT_precipcs ) (+ kT_preciplookcs for a look run, kT_preciplitcs for a lit one)
+	std::uint8_t ps[kT_preciplookpsBytes] = {};  //!< fxPack( cell_precip_gpu, kT_precipps ) (+ kT_preciplookps for a look run)
+	long long red = 0;              //!< gates only (long long: term 7's reds pass bit 30): 1 the cull radius 0, 2 the strip's last two corners swapped, 4 no near fade, 8 the air dropped, 16 the look dropped (the plain pipelines draw a look run), 32 the atlas dropped (t1 / t7 the zero texture), 128 the light dropped (lit = 1), 256 the lamps' lights dropped (the zero texel buffer), 512 b0 dropped (globalUniforms zero), 1024 the cluster's lists dropped (the zero texel buffer), 2048 the local sun law dropped (vpSun.w 0), 4096 the terrain air's grid dropped (t8 the zero texture), 16384 the ambient's history dropped (t9 the zero texture), 32768 the ambient dropped (the packed volTerms' bit 8 cleared), 65536 the sun's shadow map dropped (t31 the zero D16 array, all lit), 131072 the sun's shadow dropped (the packed volCsm cleared), 262144 the clouds' map dropped (t34 the zero texture), 524288 cascades 1 and 2 swapped (the packed csmMat[1] / csmMat[2]), 1048576 the drift's noise dropped (t30 the zero 3D texture), 2097152 the drift dropped (the packed volAirDrift.x 0), 4194304 the drift's octaves swapped (the packed volAirDriftUv rows 0-2 / 3-5), 8388608 the lamps' cubes dropped (t6 the zero D16 cube array), 16777216 the lamps' shadows off (the packed cellShadowOn 0), 33554432 their fade dropped (the packed cellShadowFadeOn 0), 67108864 the gobos off (the packed cellGoboOn 0), 134217728 their table dropped (the packed cellGoboTbl 0), 268435456 their uv flipped (the packed cellGoboRot 3), 536870912 the roof map dropped (pcRoof the zero texture), 1073741824 the roof off (the packed pcRoofOn 0), 2147483648 the map's axes swapped (the packed pcRoofCam x / y), 4294967296 the interior off (the packed cellInterior 0), 8589934592 the interior's ambient off (the packed cellHasDalc 0), 17179869184 the ambient's GI rule (the packed cellGiAmb 2)
+	const void * global = nullptr;  //!< GL's globalUniforms (b0, 336 bytes; the cluster reads projectionMatrix); null: zeros (a cluster run refused)
+	std::uint8_t * recOut = nullptr;  //!< gates only: the run's records read back (n x 112 bytes, 192 a look run; host-visible records, a fence wait); null in the app
+	struct LitIn
+	{
+		int terms = -1, interior = -1, partRed = -1, csm = 0, airTerr = 0;
+		float drift = 0.0f, sunA = 0.0f;
+		int shadow = -1, gobo = -1, cluster = -1, cellRed = -1;  //!< the lamps' switches (L8 term 2a): cellShadowOn, cellGoboOn, cellClusterOn, cellRed
+		float phys = 0.0f;              //!< cellLightPhys.x (the physical falloff)
+		float envKeep = 0.0f;           //!< volEnvGrid.w: the ambient's keep on (L8 term 2; it reads b0's projection)
+		int gi = 0;                     //!< GI names active in GL's program (a WW_CELL_PRT / RT GI variant reads a GI volume; L8 term 1)
+		int uss = 0, cloud = 0, csmProbe = 0, csmRed = 0;  //!< L8 term 3: ussOn (the shadow set's composition), ussCloudOn, csmProbe, csmRed
+		int restir = -1;                //!< L8 term 5: cellRestirOn (-1 absent; present = GL's ReSTIR variant, its cubes not read)
+		int goboPin = 0;                //!< L8 term 6: 1 when cellGoboRot / Flat / Gam / Map is non-zero (a pin or red: not judged)
+	};
+	LitIn litIn;                    //!< a lit run's switches as precipLitRead reads them from GL (before any pack; -1 absent)
+	struct TexBuf { unsigned tex = 0, buf = 0, glFmt = 0; long long off = 0, bytes = 0; };
+	TexBuf lights, cluster;         //!< the lamps' t0 cellLights / t45 cellCluster as GL samples them (precipTexBufOf; tex 0: the zero buffer)
+	int packs = 0;                  //!< fxPack calls made for this run (a refusal adds them to FxStat::refusedPacks)
 };
 /* GL current, the tone frame bound, cell_precip_gpu's uniforms set: one run of particles on Vulkan, a record pass then
  * instanced quads (depth LEQUAL no write, blend SRC_ALPHA / ONE_MINUS_SRC_ALPHA, stencil ALWAYS ref 1 REPLACE mask 0x03,
- * as GL's). false: why; nothing drawn (GL draws its points) */
+ * as GL's). false: why; nothing drawn (GL draws its points). It asks precipAdmits first. */
 bool precipRun( const PrecipRun & t, std::string & why );
+/* the refusals that need no packed bytes (the device, the target, the run, a lit run's litIn): asked before the packs so
+ * a refused run pays none. false: why, counted as a refusal (with t.packs) */
+bool precipAdmits( const PrecipRun & t, std::string & why );
+//! every refusal a lit run's switches would fire, in precipLitWhy's order (its count; at most max written): the census
+int precipLitWhys( const PrecipRun::LitIn & l, const char ** out, int max );
+//! a lit run's refusal from its switches (null: the light chain's admitted terms); precipAdmits and precipRun's block check
+const char * precipLitWhy( const PrecipRun::LitIn & l );
 void precipOnGl( const char * why );
 FxStat takePrecipStat();
 
@@ -863,8 +1025,9 @@ template <class Fn> void fxPack( Fn * fn, unsigned prog, const FxField * f, int 
 
 /* lane VKAIR1: a texture slot from what the program samples now: the sampler's unit, the name bound there (type 0 2D,
  * 1 3D, 2 2D array), its size, format, levels and sampling. false: why (a state the Vulkan samplers do not hold). The
- * caller sets twin / shared / still. GL enums as numbers: this header carries no GL header */
-template <class Fn> bool fxTexOf( Fn * fn, unsigned prog, const char * sampler, int type, FxTex & t, std::string & why )
+ * caller sets twin / shared / still. GL enums as numbers: this header carries no GL header. mipClamp (lane VKFAR2, L8): a
+ * trilinear CLAMP_TO_EDGE texture (S and T) is taken as kFxMipClamp; the other callers keep refusing it */
+template <class Fn> bool fxTexOf( Fn * fn, unsigned prog, const char * sampler, int type, FxTex & t, std::string & why, bool mipClamp = false )
 {
 	t.type = type;
 	t.tex = 0;
@@ -875,13 +1038,13 @@ template <class Fn> bool fxTexOf( Fn * fn, unsigned prog, const char * sampler, 
 	fn->glGetUniformiv( prog, l, &unit );
 	fn->glGetIntegerv( 0x84E0, &active );  // GL_ACTIVE_TEXTURE
 	fn->glActiveTexture( unsigned( 0x84C0 + unit ) );
-	const unsigned target = type == 1 ? 0x806Fu : type == 2 ? 0x8C1Au : 0x0DE1u;
+	const unsigned target = type == 1 ? 0x806Fu : type == 2 ? 0x8C1Au : type == 3 ? 0x9009u : 0x0DE1u;
 	int name = 0, sobj = 0;
-	fn->glGetIntegerv( type == 1 ? 0x806A : type == 2 ? 0x8C1D : 0x8069, &name );  // GL_TEXTURE_BINDING_3D / 2D_ARRAY / 2D
+	fn->glGetIntegerv( type == 1 ? 0x806A : type == 2 ? 0x8C1D : type == 3 ? 0x900A : 0x8069, &name );  // GL_TEXTURE_BINDING_3D / 2D_ARRAY / CUBE_MAP_ARRAY / 2D
 	fn->glGetIntegerv( 0x8919, &sobj );  // GL_SAMPLER_BINDING
 	bool ok = true;
 	if ( name ) {
-		int w = 0, h = 0, d = 1, fmt = 0, minF = 0, wrap = 0, maxL = 0;
+		int w = 0, h = 0, d = 1, fmt = 0, minF = 0, wrap = 0, wrapT = 0, maxL = 0;
 		fn->glGetTexLevelParameteriv( target, 0, 0x1000, &w );  // GL_TEXTURE_WIDTH
 		fn->glGetTexLevelParameteriv( target, 0, 0x1001, &h );
 		if ( type )
@@ -889,8 +1052,10 @@ template <class Fn> bool fxTexOf( Fn * fn, unsigned prog, const char * sampler, 
 		fn->glGetTexLevelParameteriv( target, 0, 0x1003, &fmt );  // GL_TEXTURE_INTERNAL_FORMAT
 		fn->glGetTexParameteriv( target, 0x2801, &minF );  // GL_TEXTURE_MIN_FILTER
 		fn->glGetTexParameteriv( target, 0x2802, &wrap );  // GL_TEXTURE_WRAP_S
+		fn->glGetTexParameteriv( target, 0x2803, &wrapT );  // GL_TEXTURE_WRAP_T
 		fn->glGetTexParameteriv( target, 0x813D, &maxL );  // GL_TEXTURE_MAX_LEVEL
 		const bool mip = minF >= 0x2700 && minF <= 0x2703, repeat = wrap == 0x2901, nearest = minF == 0x2600;
+		const bool mipClampOk = mipClamp && mip && minF == 0x2703 && type == 0 && wrap == 0x812F && wrapT == 0x812F;  // CLAMP_TO_EDGE
 		int levels = 1;
 		while ( mip && levels <= maxL && levels < 16 ) {
 			int lw = 0;
@@ -905,13 +1070,14 @@ template <class Fn> bool fxTexOf( Fn * fn, unsigned prog, const char * sampler, 
 		t.d = type ? d : 1;
 		t.glFmt = unsigned( fmt );
 		t.levels = levels;
-		t.sampler = mip ? kFxMipRepeat : nearest ? ( repeat ? kFxNearestRepeat : kFxNearestClamp ) : repeat ? kFxLinearRepeat : kFxLinearClamp;
+		t.sampler = mipClampOk ? kFxMipClamp : mip ? kFxMipRepeat : nearest ? ( repeat ? kFxNearestRepeat : kFxNearestClamp ) : repeat ? kFxLinearRepeat : kFxLinearClamp;
 		if ( sobj ) {
 			ok = false;
 			why = std::string( sampler ) + ": a sampler object on its unit";
-		} else if ( mip && ( !repeat || minF != 0x2703 ) ) {
+		} else if ( mip && !mipClampOk && ( !repeat || minF != 0x2703 ) ) {
 			ok = false;
-			why = std::string( sampler ) + ": a mipmapped sampling other than trilinear repeat";
+			why = std::string( sampler ) + ( mipClamp ? ": a mipmapped sampling other than trilinear repeat or clamp-to-edge"
+				: ": a mipmapped sampling other than trilinear repeat" );
 		} else if ( w < 1 || h < 1 ) {
 			ok = false;
 			why = std::string( sampler ) + ": no level 0";
@@ -958,6 +1124,170 @@ double ddgiAtlasDrop( const void * key );
  * red 1: a view one texel late (offset minTexelBufferOffsetAlignment rounded to a texel), red 2: a view over the first
  * half of the atlas (fetches past it read 0). false: why */
 bool ddgiAtlasRead( const void * key, std::uint32_t first, std::uint32_t count, std::vector<float> & out, int red, std::string & why );
+/* lane VKFAR2 (row L8): a lit run's switches straight from the program, no pack (precipDraw and the gate, then
+ * precipAdmits); an int absent from the program reads -1 (the refusals then refuse) */
+template <class Fn> void precipLitRead( Fn * fn, unsigned prog, PrecipRun & t )
+{
+	auto geti = [&]( const char * nm ) {
+		const int l = fn->glGetUniformLocation( prog, nm );
+		int v[4] = { -1, 0, 0, 0 };
+		if ( l >= 0 )
+			fn->glGetUniformiv( prog, l, v );
+		return v[0];
+	};
+	auto getf = [&]( const char * nm, int k ) {  // a vec4 writes four floats
+		const int l = fn->glGetUniformLocation( prog, nm );
+		float v[4] = {};
+		if ( l >= 0 )
+			fn->glGetUniformfv( prog, l, v );
+		return v[k];
+	};
+	t.litIn.terms = geti( "volTerms" );
+	t.litIn.interior = geti( "cellInterior" );
+	t.litIn.partRed = geti( "volPartRed" );
+	t.litIn.csm = geti( "volCsm" );
+	t.litIn.airTerr = geti( "airTerrOn" );
+	t.litIn.drift = getf( "volAirDrift", 0 );
+	t.litIn.sunA = getf( "vpSun", 3 );
+	t.litIn.shadow = geti( "cellShadowOn" );
+	t.litIn.gobo = geti( "cellGoboOn" );
+	for ( const char * nm : { "cellGoboRot", "cellGoboFlat", "cellGoboGam", "cellGoboMap" } )
+		t.litIn.goboPin |= geti( nm ) > 0 ? 1 : 0;
+	t.litIn.cluster = geti( "cellClusterOn" );
+	t.litIn.cellRed = geti( "cellRed" );
+	t.litIn.phys = getf( "cellLightPhys", 0 );
+	t.litIn.envKeep = getf( "volEnvGrid", 3 );
+	t.litIn.uss = geti( "ussOn" );  // L8 term 3 (VKFAR6): absent names read -1 (refused: a shadowed run needs them read)
+	t.litIn.cloud = geti( "ussCloudOn" );
+	t.litIn.csmProbe = geti( "csmProbe" );
+	t.litIn.csmRed = geti( "csmRed" );
+	t.litIn.restir = geti( "cellRestirOn" );
+	// L8 term 1 (VKFAR5): the default program compiles the GI out (cellGiOn the constant false without WW_CELL_PRT)
+	t.litIn.gi = 0;
+	for ( const char * nm : { "cellGiOn", "cellGi", "cellGiSlots", "cellRooms", "cellGiAir", "cellGiAirOn", "cellDdgiOn", "cellDdgiAtlas" } )
+		t.litIn.gi += fn->glGetUniformLocation( prog, nm ) >= 0;
+}
+
+/* lane VKFAR6 (row L8 term 3): GL's csmMap as fxTexOf reads it, plus the state the lit set's compare sampler copies
+ * (sunshadow.cpp csmTexParams, the live map): a D16 array, linear, clamp to border 1, compare LEQUAL. false: why */
+template <class Fn> bool precipCsmOf( Fn * fn, unsigned prog, FxTex & t, std::string & why )
+{
+	if ( !fxTexOf( fn, prog, "csmMap", 2, t, why ) )
+		return false;
+	const int l = fn->glGetUniformLocation( prog, "csmMap" );
+	if ( !t.tex ) {
+		if ( l < 0 )
+			return true;  // not in the program: nothing reads it
+		why = "csmMap: no texture on its unit";
+		return false;
+	}
+	int unit = 0, active = 0x84C0;
+	fn->glGetUniformiv( prog, l, &unit );
+	fn->glGetIntegerv( 0x84E0, &active );  // GL_ACTIVE_TEXTURE
+	fn->glActiveTexture( unsigned( 0x84C0 + unit ) );
+	int mode = 0, func = 0, minF = 0, magF = 0, ws = 0, wt = 0;
+	float border[4] = {};
+	fn->glGetTexParameteriv( 0x8C1A, 0x884C, &mode );  // GL_TEXTURE_COMPARE_MODE
+	fn->glGetTexParameteriv( 0x8C1A, 0x884D, &func );  // GL_TEXTURE_COMPARE_FUNC
+	fn->glGetTexParameteriv( 0x8C1A, 0x2801, &minF );
+	fn->glGetTexParameteriv( 0x8C1A, 0x2800, &magF );
+	fn->glGetTexParameteriv( 0x8C1A, 0x2802, &ws );
+	fn->glGetTexParameteriv( 0x8C1A, 0x2803, &wt );
+	fn->glGetTexParameterfv( 0x8C1A, 0x1004, border );  // GL_TEXTURE_BORDER_COLOR (as floats: NVIDIA's int read of 1.0 is not 0x7FFFFFFF)
+	fn->glActiveTexture( unsigned( active ) );
+	if ( t.glFmt != 0x81A5u ) {  // GL_DEPTH_COMPONENT16
+		why = "csmMap: not a D16 array";
+		return false;
+	}
+	if ( mode != 0x884E || func != 0x0203 ) {  // COMPARE_REF_TO_TEXTURE, LEQUAL
+		why = "csmMap: a compare other than LEQUAL on the texture";
+		return false;
+	}
+	if ( minF != 0x2601 || magF != 0x2601 || ws != 0x812D || wt != 0x812D ) {  // LINEAR, CLAMP_TO_BORDER
+		why = "csmMap: a filter or wrap other than linear clamp-to-border";
+		return false;
+	}
+	for ( int k = 0; k < 4; k++ )
+		if ( border[k] != 1.0f ) {
+			why = "csmMap: a border other than 1";
+			return false;
+		}
+	return true;
+}
+
+/* lane VKFAR6 (row L8 term 5): GL's cellShadow (the lamps' cubes, celllamps.cpp shadowAlloc) as fxTexOf reads it, plus
+ * the state the lit set's compare sampler copies: a D16 cube array, linear, clamp to edge, compare LEQUAL. false: why */
+template <class Fn> bool precipCubeOf( Fn * fn, unsigned prog, FxTex & t, std::string & why )
+{
+	if ( !fxTexOf( fn, prog, "cellShadow", 3, t, why ) )
+		return false;
+	const int l = fn->glGetUniformLocation( prog, "cellShadow" );
+	if ( !t.tex ) {
+		if ( l < 0 )
+			return true;  // not in the program: nothing reads it
+		why = "cellShadow: no texture on its unit";
+		return false;
+	}
+	int unit = 0, active = 0x84C0;
+	fn->glGetUniformiv( prog, l, &unit );
+	fn->glGetIntegerv( 0x84E0, &active );  // GL_ACTIVE_TEXTURE
+	fn->glActiveTexture( unsigned( 0x84C0 + unit ) );
+	int mode = 0, func = 0, minF = 0, magF = 0, ws = 0, wt = 0, wr = 0;
+	fn->glGetTexParameteriv( 0x9009, 0x884C, &mode );  // GL_TEXTURE_COMPARE_MODE
+	fn->glGetTexParameteriv( 0x9009, 0x884D, &func );  // GL_TEXTURE_COMPARE_FUNC
+	fn->glGetTexParameteriv( 0x9009, 0x2801, &minF );
+	fn->glGetTexParameteriv( 0x9009, 0x2800, &magF );
+	fn->glGetTexParameteriv( 0x9009, 0x2802, &ws );
+	fn->glGetTexParameteriv( 0x9009, 0x2803, &wt );
+	fn->glGetTexParameteriv( 0x9009, 0x8072, &wr );  // GL_TEXTURE_WRAP_R
+	fn->glActiveTexture( unsigned( active ) );
+	if ( t.glFmt != 0x81A5u ) {  // GL_DEPTH_COMPONENT16
+		why = "cellShadow: not a D16 cube array";
+		return false;
+	}
+	if ( mode != 0x884E || func != 0x0203 ) {  // COMPARE_REF_TO_TEXTURE, LEQUAL
+		why = "cellShadow: a compare other than LEQUAL on the texture";
+		return false;
+	}
+	if ( minF != 0x2601 || magF != 0x2601 || ws != 0x812F || wt != 0x812F || wr != 0x812F ) {  // LINEAR, CLAMP_TO_EDGE
+		why = "cellShadow: a filter or wrap other than linear clamp-to-edge";
+		return false;
+	}
+	return true;
+}
+
+/* lane VKFAR2 (row L8 term 2a): a texture buffer the program samples (the lamps' cellLights / cellCluster): the name on
+ * the sampler's unit, its data store, range and format. false: why (bound with no data store) */
+template <class Fn> bool precipTexBufOf( Fn * fn, unsigned prog, const char * sampler, PrecipRun::TexBuf & b, std::string & why )
+{
+	b = PrecipRun::TexBuf();
+	const int l = fn->glGetUniformLocation( prog, sampler );
+	if ( l < 0 )
+		return true;  // not in the program: the zero buffer
+	int unit = 0, active = 0x84C0, name = 0;
+	fn->glGetUniformiv( prog, l, &unit );
+	fn->glGetIntegerv( 0x84E0, &active );  // GL_ACTIVE_TEXTURE
+	fn->glActiveTexture( unsigned( 0x84C0 + unit ) );
+	fn->glGetIntegerv( 0x8C2C, &name );  // GL_TEXTURE_BINDING_BUFFER
+	if ( name ) {
+		int buf = 0, off = 0, size = 0, fmt = 0;
+		fn->glGetTexLevelParameteriv( 0x8C2Au, 0, 0x8C2D, &buf );   // GL_TEXTURE_BUFFER_DATA_STORE_BINDING
+		fn->glGetTexLevelParameteriv( 0x8C2Au, 0, 0x919D, &off );   // GL_TEXTURE_BUFFER_OFFSET
+		fn->glGetTexLevelParameteriv( 0x8C2Au, 0, 0x919E, &size );  // GL_TEXTURE_BUFFER_SIZE
+		fn->glGetTexLevelParameteriv( 0x8C2Au, 0, 0x1003, &fmt );   // GL_TEXTURE_INTERNAL_FORMAT
+		b.tex = unsigned( name );
+		b.buf = unsigned( buf );
+		b.off = off;
+		b.bytes = size;
+		b.glFmt = unsigned( fmt );
+	}
+	fn->glActiveTexture( unsigned( active ) );
+	if ( b.tex && ( !b.buf || b.bytes <= 0 ) ) {
+		why = std::string( sampler ) + ": a texture buffer with no data store";
+		return false;
+	}
+	return true;
+}
 
 }
 
@@ -965,6 +1295,9 @@ bool ddgiAtlasRead( const void * key, std::uint32_t first, std::uint32_t count, 
 class QOpenGLWindow;
 class QPaintDevice;
 #include <functional>
+#include <iterator>
+#include <map>
+bool wwFogLeakShaderDefine();  // src/features/air/cellvolair.cpp: WW_CELL_FOGLEAK in the cell programs (precipDraw)
 namespace WwVkPresent
 {
 /* round 10: what the view's QPainter draws through: the window (its back buffer) or, while the view is on Vulkan, a
@@ -987,5 +1320,135 @@ void lightSay( int pass, bool wanted, const char * glWhy );
 void csmSay( bool wanted, const char * glWhy );
 //! lane VKOBJ1: the objects' prepass route line ("vk obj:"), one a 5 s window while on Vulkan
 void objSay( bool wanted, const char * glWhy );
+//! lane VKFAR2 (row L8): rain / snow's route line ("vk precip:"), one a 5 s window while on Vulkan
+void precipSay( bool wanted, const char * glWhy );
+
+/* lane VKFAR2 (row L8, the app hook): cellprecip.cpp's run, GL current, prog (cell_precip_gpu / cell_precip_look) in use
+ * with the run's uniforms set, the atlas on pcTex's unit (pcTexN's for a look run), the draw framebuffer bound. On the
+ * present device's tone frame with the view on Vulkan: the run through precipRun. false: GL draws its points (the reason
+ * in the "vk precip:" line); a target other than the tone frame returns false with no line. Red WW_VKVIEW_PRECIP_RED=1:
+ * GL's. GL enums as numbers (this header carries no GL header). */
+template <class Fn> bool precipDraw( Fn * fn, unsigned prog, int first, int count, const void * global = nullptr )
+{
+	int fbo = 0, color = 0;
+	fn->glGetIntegerv( 0x8CA6, &fbo );  // GL_DRAW_FRAMEBUFFER_BINDING
+	if ( fbo )
+		fn->glGetFramebufferAttachmentParameteriv( 0x8CA9, 0x8CE0, 0x8CD1, &color );  // DRAW_FRAMEBUFFER, COLOR_ATTACHMENT0, OBJECT_NAME
+	if ( !fbo || !toneFrameIs( unsigned( color ) ) )
+		return false;  // not the present device's tone frame: GL's, as before
+	if ( !shareWanted( "WW_VKVIEW_PRECIP_RED" ) ) {
+		precipSay( false, "red WW_VKVIEW_PRECIP_RED=1 or the view not on Vulkan" );
+		return false;
+	}
+	auto geti = [&]( const char * nm ) {
+		int v = 0;
+		const int l = fn->glGetUniformLocation( prog, nm );
+		if ( l >= 0 )
+			fn->glGetUniformiv( prog, l, &v );
+		return v;
+	};
+	static PrecipRun t;
+	t = PrecipRun();
+	std::string why;
+	bool drew = false;
+	const bool vol = geti( "volOn" ) != 0;
+	if ( fn->glGetUniformLocation( prog, "pcSeedS" ) < 0 ) {
+		precipOnGl( "the CPU field (cell_precip.prog): no Vulkan twin" );
+	} else if ( vol && !wwFogLeakShaderDefine() ) {
+		// the loader injects WW_CELL_FOGLEAK into GL's program by default (glcontext.cpp); the record pass is compiled with
+		// it (precip_view_cs.hlsl), so WW_CELL_FOGLEAK=0 is the shape it does not match
+		precipOnGl( "WW_CELL_FOGLEAK=0: the record pass is the FOGLEAK twin" );
+	} else {
+		toneFrameSize( t.w, t.h );
+		fn->glGetIntegerv( 0x0BA2, t.vp );  // GL_VIEWPORT
+		t.color = unsigned( color );
+		t.first = first;
+		t.n = count;
+		t.global = global;
+		t.lit = geti( "cellInterior" ) != 0 || geti( "cellHasDir" ) != 0;  // the geometry stage's vpLight condition
+		t.roofOn = geti( "pcRoofOn" ) != 0;
+		t.look = fn->glGetUniformLocation( prog, "pcLook" ) >= 0;
+		t.fogged = vol || geti( "fogOn" ) != 0;
+		if ( t.lit )
+			precipLitRead( fn, prog, t );
+		if ( !precipAdmits( t, why ) ) {  // a refused run reads no textures and packs nothing (counted there)
+			precipSay( true, nullptr );
+			return false;
+		}
+		// twins: one a GL atlas (sizes differ by layer; the DDS never changes once loaded), one a slot for the air
+		static std::map<unsigned, char> atlasKeys;
+		static char airKeys[5];
+		static const char * const kAir[5] = { "atApTex", "volTex", "volTile", "volAirTerr", "volAirRainMap" };
+		static const int kAirType[5] = { 1, 1, 0, 2, 0 };
+		bool ok = fxTexOf( fn, prog, "pcTex", 0, t.tex[1], why, true );  // the DDS atlas: BC, trilinear clamp (precipRun twins it)
+		if ( ok && t.tex[1].tex ) {
+			t.tex[1].twin = reinterpret_cast<std::uintptr_t>( &atlasKeys[t.tex[1].tex] );
+			t.tex[1].still = true;
+		}
+		if ( ok && t.roofOn ) {  // L8 term 7: GL's pcRoof (cellprecip.cpp's R32F map) into t0 / t47; copied every run (not still: the map follows the cell)
+			static char roofKey;
+			ok = fxTexOf( fn, prog, "pcRoof", 0, t.tex[0], why );
+			t.tex[0].twin = reinterpret_cast<std::uintptr_t>( &roofKey );
+		}
+		for ( int k = 0; k < 5 && ok; k++ ) {
+			ok = fxTexOf( fn, prog, kAir[k], kAirType[k], t.tex[2 + k], why );
+			t.tex[2 + k].twin = reinterpret_cast<std::uintptr_t>( &airKeys[k] );
+		}
+		if ( ok && t.lit && t.litIn.airTerr > 0 ) {  // L8 terrain air: GL's airTerr (cellvolair.cpp's pass grid) into the lit set's t17
+			static char terrKey;
+			ok = fxTexOf( fn, prog, "airTerr", 2, t.tex[8], why );
+			t.tex[8].twin = reinterpret_cast<std::uintptr_t>( &terrKey );
+		}
+		if ( ok && t.lit && ( t.litIn.terms & 8 ) ) {  // L8 term 2: GL's volEnvHist (the air's env history) into the lit set's t19
+			static char envKey;
+			ok = fxTexOf( fn, prog, "volEnvHist", 1, t.tex[9], why );
+			t.tex[9].twin = reinterpret_cast<std::uintptr_t>( &envKey );
+		}
+		if ( ok && t.lit && t.litIn.csm > 0 && t.litIn.interior == 0 ) {  // L8 term 3: GL's csmMap (shared, read in place) into t31
+			ok = precipCsmOf( fn, prog, t.tex[10], why );
+			if ( ok && t.litIn.cloud > 0 ) {  // the clouds' ussCloudMap into t34
+				static char cloudKey;
+				ok = fxTexOf( fn, prog, "ussCloudMap", 0, t.tex[11], why );
+				t.tex[11].twin = reinterpret_cast<std::uintptr_t>( &cloudKey );
+			}
+		}
+		if ( ok && t.lit && ( t.litIn.terms & 2 ) && t.litIn.shadow > 0 )  // L8 term 5: GL's cellShadow (shared, read in place) into t6
+			ok = precipCubeOf( fn, prog, t.tex[13], why );
+		if ( ok && t.lit && t.litIn.drift > 0.0f ) {  // L8 term 4: GL's volAirNoise (the air's drift) into the lit set's t30
+			static char noiseKey;
+			ok = fxTexOf( fn, prog, "volAirNoise", 1, t.tex[12], why );
+			t.tex[12].twin = reinterpret_cast<std::uintptr_t>( &noiseKey );
+		}
+		if ( ok && t.look ) {
+			ok = fxTexOf( fn, prog, "pcTexN", 0, t.tex[7], why, true );
+			if ( ok && t.tex[7].tex ) {
+				t.tex[7].twin = reinterpret_cast<std::uintptr_t>( &atlasKeys[t.tex[7].tex] );
+				t.tex[7].still = true;
+			}
+		}
+		if ( ok && t.lit && ( t.litIn.terms & 2 ) )  // L8 term 2a: the lamps' lights (and the cluster's lists)
+			ok = precipTexBufOf( fn, prog, "cellLights", t.lights, why ) && precipTexBufOf( fn, prog, "cellCluster", t.cluster, why );
+		if ( !ok ) {
+			precipOnGl( why.c_str() );
+		} else {
+			fxPack( fn, prog, kT_precipcs, int( std::size( kT_precipcs ) ), t.cs );
+			fxPack( fn, prog, kT_precipps, int( std::size( kT_precipps ) ), t.ps );
+			t.packs = 2;
+			if ( t.look ) {
+				fxPack( fn, prog, kT_preciplookcs, int( std::size( kT_preciplookcs ) ), t.cs );
+				fxPack( fn, prog, kT_preciplookps, int( std::size( kT_preciplookps ) ), t.ps );
+				t.packs += 2;
+			}
+			if ( t.lit ) {  // slice 2b: the light chain's block (its head is kT_precipcs's, packed again the same)
+				fxPack( fn, prog, kT_preciplitcs, int( std::size( kT_preciplitcs ) ), t.cs );
+				t.litBlock = true;
+				t.packs++;
+			}
+			drew = precipRun( t, why );  // a refusal is counted there (with t.packs)
+		}
+	}
+	precipSay( true, nullptr );
+	return drew;
+}
 }
 #endif

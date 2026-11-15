@@ -21,8 +21,12 @@ bool objTexMake( unsigned glFmt, int w, int h, int levels, unsigned & tex, std::
 //! tex is a twin objTexMake made (and not yet gone)
 bool objTexIs( unsigned tex );
 /*! GL made `handle` resident for tex: a twin's handle joins the table with tex's sampler state (read once here). red 1
- * (WW_VKOBJ_TEX_RED=key): the handle is added with the twin made before tex's (the wrong image) */
+ * (WW_VKOBJ_TEX_RED=key): the handle is added with the twin made before tex's (the wrong image); red 2
+ * (WW_VKOBJ_TEX_RED=swz): with no swizzle (BC4's R,R,R,1 view dropped) */
 void objTexHandle( unsigned tex, std::uint64_t handle, GlProc gp, int red = 0 );
+/*! lane VKWATER3: tex's twin as a set-0 image key (farTwinFind), 0 when tex has none. red 1: the twin made before tex's
+ * (gates only: the wrong image) */
+std::uintptr_t objTexKey( unsigned tex, int red = 0 );
 //! the cache deletes tex next: a twin's handles leave the table, its Vulkan half goes at objTexFrame (GL's name is the cache's)
 void objTexGone( unsigned tex );
 //! the rows of a frame GL drew with handles (n x 176 bytes): translated as the Vulkan draw would, counted for the line
@@ -36,9 +40,20 @@ struct ObjTexStat
 	int images = 0, samplers = 0, misses = 0;  //!< the table's live images / samplers, unknown handles in the rows
 	double mb = 0.0, makeMs = 0.0, freeMs = 0.0;
 	std::string why, addWhy;  //!< the last refusal (make / add)
+	//! VKOBJ4: twins made for the batch's hand-over, the flushes (each one GL signal + one submit), their twins and time
+	int batched = 0, flushes = 0, flushed = 0, flushFails = 0;
+	int swizzled = 0;  //!< adds through a swizzle's own view (BC4's R,R,R,1)
+	double flushMs = 0.0;
+	//! VKOBJ4: the cell's load so far (made + flush time; it ends 30 frames after the last make)
+	int loadTwins = 0, loadFlushes = 0;
+	double loadMs = 0.0;
 };
-/*! once a frame: the twins gone since the last call are freed (drain + one idle wait), then the counters since the last
- * call (twins / handles / mb: live) */
+/*! VKOBJ4: the twins made since the last flush go to the present device as GENERAL in one hand-over (GL signals once with
+ * all of them, one submit waits it). objTexFrame calls it; a Vulkan draw that samples them calls it first. lane VKOBJ5:
+ * false (why) when the hand-over's fence wait missed (red WW_VKFENCE_RED=objtex): the frame stays on GL */
+bool objTexFlush( std::string & why );
+/*! once a frame: the batch flushed, the twins gone since the last call freed (drain + one idle wait), then the counters
+ * since the last call (twins / handles / mb: live; load: the cell's) */
 ObjTexStat objTexFrame();
 //! shutdown(): the twins the cache still holds keep their GL names (on GL's imported memory); returns how many
 int objTexFree();

@@ -50,6 +50,8 @@ BSD License - see nifskope.h
 #include "features/sky/atmosphere.h"	// lane FIX1101A (atmo): wwAtmoWbGain, the test white balance
 #include "features/sky/cellsunlit.h"	// lane INTSKY1: the sunlit interior rule
 #include "features/lights/cellflickclock.h"	// lane PERFFIX2 a: the flicker's phase on the world clock
+#include "features/far-lod/cellfarlod.h"	// lane FARSKYMAP1: the far field's sky map
+#include "features/far-lod/farskymap.h"	// lane FARSKYMAP1: its texels and rect
 
 #include <QDateTime>
 #include <QDir>	// lane INTSKY1: the Cells file in the census
@@ -77,6 +79,8 @@ BSD License - see nifskope.h
 #include "gl/dalcfit.h"	// lane SKYLIGHT1: the up / down poles read exactly
 #include "features/overlays/debugview.h"	// lane DEBUGVIEW1: a debug view is a probe pass
 #include "features/vkframe/vkpresent.h"	// lane VKFAR1 (row G3): the far dots on the Vulkan view
+#include "features/vkframe/vkobjpipe.h"	// lane VKOBJ4: the light buffers as stores (objBlTexelFill)
+#include "features/near/cellbindless.h"	// lane VKOBJ4: WwBl::vkShadeOn
 
 bool wwFogLeakShaderDefine();	// glcontext.cpp: WW_CELL_FOGLEAK in the cell programs (the Vulkan twin's define)
 
@@ -1363,19 +1367,27 @@ void wwCellLightsUniforms( Scene * scene )
 			g.spheres.insert( g.spheres.end(), t.begin() + std::ptrdiff_t( o ), t.begin() + std::ptrdiff_t( o + 4 ) );
 		if ( t.empty() )
 			t.assign( kTexelsPerLight * 4, 0.0f );	// a buffer texture must have a store
-		if ( !g.buf ) {
-			fn->glGenBuffers( 1, &g.buf );
+		if ( !g.tex )
 			fn->glGenTextures( 1, &g.tex );
+		// lane VKOBJ4: under WW_VKOBJ_SHADE a store (exported Vulkan memory GL writes; the Vulkan runs read it in place)
+		bool moved = false;
+		const bool stored = WwVkPresent::objBlTexelFill( g.buf, g.bufStored, WwBl::vkShadeOn(),
+			{ { t.data(), t.size() * sizeof( float ) }, { x.data(), x.size() * sizeof( float ) } }, moved );
+		if ( moved )
+			g.texAttached = false;
+		if ( !stored ) {
+			if ( !g.buf )
+				fn->glGenBuffers( 1, &g.buf );
+			fn->glBindBuffer( GL_TEXTURE_BUFFER, g.buf );
+			if ( x.empty() ) {
+				fn->glBufferData( GL_TEXTURE_BUFFER, GLsizeiptr( t.size() * sizeof( float ) ), t.data(), GL_STATIC_DRAW );
+			} else {	// lane LIGHTS5: the lights, then the patterns and fog scales
+				fn->glBufferData( GL_TEXTURE_BUFFER, GLsizeiptr( ( t.size() + x.size() ) * sizeof( float ) ), nullptr, GL_STATIC_DRAW );
+				fn->glBufferSubData( GL_TEXTURE_BUFFER, 0, GLsizeiptr( t.size() * sizeof( float ) ), t.data() );
+				fn->glBufferSubData( GL_TEXTURE_BUFFER, GLintptr( t.size() * sizeof( float ) ), GLsizeiptr( x.size() * sizeof( float ) ), x.data() );
+			}
+			fn->glBindBuffer( GL_TEXTURE_BUFFER, 0 );
 		}
-		fn->glBindBuffer( GL_TEXTURE_BUFFER, g.buf );
-		if ( x.empty() ) {
-			fn->glBufferData( GL_TEXTURE_BUFFER, GLsizeiptr( t.size() * sizeof( float ) ), t.data(), GL_STATIC_DRAW );
-		} else {	// lane LIGHTS5: the lights, then the patterns and fog scales
-			fn->glBufferData( GL_TEXTURE_BUFFER, GLsizeiptr( ( t.size() + x.size() ) * sizeof( float ) ), nullptr, GL_STATIC_DRAW );
-			fn->glBufferSubData( GL_TEXTURE_BUFFER, 0, GLsizeiptr( t.size() * sizeof( float ) ), t.data() );
-			fn->glBufferSubData( GL_TEXTURE_BUFFER, GLintptr( t.size() * sizeof( float ) ), GLsizeiptr( x.size() * sizeof( float ) ), x.data() );
-		}
-		fn->glBindBuffer( GL_TEXTURE_BUFFER, 0 );
 		g.doc = scene->nifModel;
 		g.version = s.version.value( scene->nifModel );
 		g.count = int( t.size() / ( kTexelsPerLight * 4 ) ) - ( L->lights.isEmpty() ? 1 : 0 );
@@ -1446,7 +1458,11 @@ void wwCellLightsUniforms( Scene * scene )
 					patch( size_t( g.bulbBase ) + ( size_t( i ) - n ), v, false );
 				}
 			}
-			if ( lo <= hi && g.buf ) {
+			std::string storeWhy;	// lane VKOBJ4: a store takes the patch as GL's write into it
+			if ( lo <= hi && g.buf && g.bufStored ) {
+				WwVkPresent::objBlTexelStoreWrite( g.buf, std::size_t( lo * per * sizeof( float ) ), std::size_t( ( hi - lo + 1 ) * per * sizeof( float ) ),
+					g.flickLive.data() + lo * per, storeWhy );
+			} else if ( lo <= hi && g.buf ) {
 				fn->glBindBuffer( GL_TEXTURE_BUFFER, g.buf );
 				fn->glBufferSubData( GL_TEXTURE_BUFFER, GLintptr( lo * per * sizeof( float ) ), GLsizeiptr( ( hi - lo + 1 ) * per * sizeof( float ) ),
 					g.flickLive.data() + lo * per );
@@ -1642,17 +1658,23 @@ void wwCellLightsUniforms( Scene * scene )
 	 * this draw uses them; a GPU with fewer than 23 units never draws far light */
 	const WwCellFar * Fr = on && s.farOn && pass == 0 && g.units > kFarPlacedUnit ? wwCellFarFor( scene->nifModel ) : nullptr;
 	if ( Fr && !Fr->slotTab.empty() && ( g.farDoc != scene->nifModel || g.farVersion != s.farVersion.value( scene->nifModel ) ) ) {
-		auto upBuf = [&]( GLuint & buf, GLuint & tex, const void * data, size_t bytes ) {
-			if ( !buf ) {
-				fn->glGenBuffers( 1, &buf );
+		auto upBuf = [&]( GLuint & buf, GLuint & tex, GLuint & att, bool & stored, const void * data, size_t bytes ) {
+			if ( !tex )
 				fn->glGenTextures( 1, &tex );
-			}
+			bool moved = false;	// lane VKOBJ4: under WW_VKOBJ_SHADE a store (the Vulkan runs read it in place)
+			const bool inStore = WwVkPresent::objBlTexelFill( buf, stored, WwBl::vkShadeOn(), { { data, bytes } }, moved );
+			if ( moved )
+				att = 0;	// re-attached below (a reused name is another buffer)
+			if ( inStore )
+				return;
+			if ( !buf )
+				fn->glGenBuffers( 1, &buf );
 			fn->glBindBuffer( GL_TEXTURE_BUFFER, buf );
 			fn->glBufferData( GL_TEXTURE_BUFFER, GLsizeiptr( bytes ), data, GL_STATIC_DRAW );
 			fn->glBindBuffer( GL_TEXTURE_BUFFER, 0 );
 		};
-		upBuf( g.farSlotBuf, g.farSlotTex, Fr->slotTab.data(), Fr->slotTab.size() * sizeof( float ) );
-		upBuf( g.farRecBuf, g.farRecTex, Fr->recs.data(), Fr->recs.size() * sizeof( float ) );
+		upBuf( g.farSlotBuf, g.farSlotTex, g.farSlotAtt, g.farSlotStored, Fr->slotTab.data(), Fr->slotTab.size() * sizeof( float ) );
+		upBuf( g.farRecBuf, g.farRecTex, g.farRecAtt, g.farRecStored, Fr->recs.data(), Fr->recs.size() * sizeof( float ) );
 		if ( !Fr->placed.empty() ) {
 			if ( !g.farPlacedTex )
 				fn->glGenTextures( 1, &g.farPlacedTex );
@@ -1706,6 +1728,70 @@ void wwCellLightsUniforms( Scene * scene )
 		rec.f3( prog, "cellFarPlacedOrigin", Fr->placedOrigin[0], Fr->placedOrigin[1], Fr->placedOrigin[2] );
 		rec.f( prog, "cellFarPlacedVoxel", Fr->placedVoxel );
 		rec.f3( prog, "cellFarPlacedDims", float( Fr->placedDims[0] ), float( Fr->placedDims[1] ), float( Fr->placedDims[2] ) );
+	}
+	{	/* lane FARSKYMAP1 (deck D6 s57-58): the far sky-visibility map, read by the readable HLSL past the last cascade
+		 * (res/shaders/hlsl/far-lod/far_skymap.hlsli). On the probe GI row: drawn only while probe GI draws on an
+		 * exterior; else farSkyOn false and the per-vertex byte as before. Unit 111 is past GL_MAX_TEXTURE_IMAGE_UNITS
+		 * on some GPUs (g.units), so the combined limit decides, as the cloud shadow's units. */
+		if ( g.maxUnits < 0 ) {
+			GLint units = 0;
+			fn->glGetIntegerv( GL_MAX_COMBINED_TEXTURE_IMAGE_UNITS, &units );
+			g.maxUnits = units;
+		}
+		const bool skyFits = g.maxUnits > WwCellUnit::FarSkyMap;
+		const std::shared_ptr<const FarSkyMap::Map> skyDoc = on && pass == 0 ? wwCellFarSkyMap( scene ) : nullptr;
+		const FarSkyMap::Map * fsm = skyDoc && giDraw && skyFits && L && wwCellAsOutdoor( L ) ? skyDoc.get() : nullptr;
+		if ( fsm && g.farSkyFor.get() != fsm ) {
+			if ( !g.farSkyTex )
+				fn->glGenTextures( 1, &g.farSkyTex );
+			u.raw( WwCellUnit::FarSkyMap );
+			fn->glBindTexture( GL_TEXTURE_2D_ARRAY, g.farSkyTex );
+			const int levels = int( fsm->mips.size() );
+			fn->glTexParameteri( GL_TEXTURE_2D_ARRAY, GL_TEXTURE_BASE_LEVEL, 0 );
+			fn->glTexParameteri( GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAX_LEVEL, levels - 1 );
+			fn->glTexParameteri( GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR );
+			fn->glTexParameteri( GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAG_FILTER, GL_LINEAR );
+			fn->glTexParameteri( GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE );
+			fn->glTexParameteri( GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE );
+			fn->glPixelStorei( GL_UNPACK_ALIGNMENT, 4 );
+			std::vector<float> two;	// a level's 8 floats a texel split into its 2 layers
+			for ( int l = 0; l < levels; l++ ) {
+				const size_t n = size_t( fsm->mipW( l ) ) * size_t( fsm->mipH( l ) );
+				const std::vector<float> & src = fsm->mips[size_t( l )];
+				two.assign( n * 8, 0.0f );
+				for ( size_t t = 0; t < n; t++ )
+					for ( size_t c = 0; c < 4; c++ ) {
+						two[t * 4 + c] = src[t * 8 + c];
+						two[( n + t ) * 4 + c] = src[t * 8 + 4 + c];
+					}
+				fn->glTexImage3D( GL_TEXTURE_2D_ARRAY, l, GL_RGBA16F, fsm->mipW( l ), fsm->mipH( l ), 2, 0, GL_RGBA, GL_FLOAT,
+					two.data() );
+			}
+			g.farSkyFor = skyDoc;
+		}
+		const bool skyMapDraw = fsm && g.farSkyTex && g.farSkyFor.get() == fsm;
+		if ( skyFits )
+			rec.bind( u, WwCellUnit::FarSkyMap, GL_TEXTURE_2D_ARRAY, skyMapDraw ? g.farSkyTex : 0 );
+		// never read while off: a GPU without unit 111 points it at a unit of its own type
+		rec.i( prog, "farSkyMap", skyFits ? WwCellUnit::FarSkyMap : WwCellUnit::LandLodDiff );
+		rec.b( prog, "farSkyOn", skyMapDraw );
+		if ( skyMapDraw ) {
+			float r[4];
+			FarSkyMap::rect( *fsm, 0.0f, 0.0f, r );	// no shift: the cell scene is in world units, as the probes (cellfarlod.cpp)
+			rec.f4( prog, "farSkyRect", FloatVector4( r[0], r[1], r[2], r[3] ) );
+		}
+		if ( on && pass == 0 ) {	// telemetry: one line a change
+			static QString said;
+			const QString line = skyMapDraw
+				? QStringLiteral( "far sky map: drawn past the last cascade (%1)" ).arg( QString::fromStdString( FarSkyMap::census( *fsm ) ) )
+				: !skyDoc ? QStringLiteral( "far sky map: none for this scene: the per-vertex byte" )
+				: !skyFits ? QStringLiteral( "far sky map: unit %1 past the GPU's %2: the per-vertex byte" ).arg( WwCellUnit::FarSkyMap ).arg( g.maxUnits )
+				: QStringLiteral( "far sky map: probe GI not drawn here: the per-vertex byte" );
+			if ( line != said ) {
+				said = line;
+				qInfo().noquote() << line;
+			}
+		}
 	}
 	u.done();
 	prof.at( 8, "far" );

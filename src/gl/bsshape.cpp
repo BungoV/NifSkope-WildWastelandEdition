@@ -633,14 +633,24 @@ void BSShape::drawShapes( NodeList * secondPass )
 			cullCounts.push_back( GLsizei( cullRanges[k + 1] * 3 ) );
 			cullOffsets.push_back( (const void *) ( size_t( cullRanges[k] ) * 6 ) );
 		}
-		if ( !cullCounts.empty() && !wwMdiDraw( mdiHint, &cullRanges, numTriangles ) ) {
+		// lane VKWATER3 G4: a fo4_cell / fo4_cellcsm shape on Vulkan (WW_VKOBJ_SHADE, the base variant; `vk objcell:`)
+		if ( !cullCounts.empty() && !wwMdiDraw( mdiHint, &cullRanges, numTriangles )
+			&& !WwBl::vkCellDraw( context->getCurrentProgram(), cullCounts.data(), cullOffsets.data(), GLsizei( cullCounts.size() ),
+				size_t( verts.size() ) )
+			&& !WwBl::vkBlDraw( context->getCurrentProgram(), cullCounts.data(), cullOffsets.data(), GLsizei( cullCounts.size() ),
+				size_t( verts.size() ) ) ) {
+			// lane VKOBJ5: a fo4_cellbl shape outside a run on Vulkan (`vk objskin:` / `vk objalpha:` / `vk objrigid:`; unpooled `vk objown:`)
 			WwBl::multiDrawElements( context->fn, cullCounts.data(), cullOffsets.data(), GLsizei( cullCounts.size() ),
 				GLenum( context->triMode() ) );
 			PassTime::countDraw( qint64( cullCounts.size() ) );	// lane PERF1
 		}
 	} else if ( numTriangles > 0 && !hiddenT ) {
 		// lane WATERLOOK1 step 2: GL_PATCHES under a program with a tessellation stage (the displaced water)
-		if ( !wwMdiDraw( mdiHint, nullptr, numTriangles ) ) {
+		const GLsizei vkCount = GLsizei( numTriangles * 3 );	// lane VKWATER3 G4: the shape's one command
+		const void * vkOff = nullptr;
+		if ( !wwMdiDraw( mdiHint, nullptr, numTriangles )
+			&& ( selectionFlags || ( !WwBl::vkCellDraw( context->getCurrentProgram(), &vkCount, &vkOff, 1, size_t( verts.size() ) )
+				&& !WwBl::vkBlDraw( context->getCurrentProgram(), &vkCount, &vkOff, 1, size_t( verts.size() ) ) ) ) ) {	// lane VKOBJ5: + the bl twins
 			WwBl::drawElements( context->fn, GLsizei( numTriangles * 3 ), 0, GLenum( context->triMode() ) );
 			PassTime::countDraw( 1 );	// lane PERF1
 		}
@@ -780,7 +790,7 @@ bool BSShape::wwMdiDraw( const void * hint, const std::vector<std::uint32_t> * r
 		joined.push_back( f );
 		wwCellAnimObjNoteDraw( static_cast<const Node *>( f ) );	// lane FIREFX1: a follower draws in its leader's multi-draw
 	}
-	if ( !WwBl::runIssue( context->fn ) )
+	if ( !WwBl::runIssue( context->fn, prog ) )
 		return false;
 	PassTime::countDraw( 1 );
 	// the geometry cache's use stamps, as each follower's own bind would leave them (no vertex array bind)

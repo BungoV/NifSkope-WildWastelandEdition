@@ -12,6 +12,7 @@
 
 #include "features/vkframe/vkpresent.h"
 #include "features/vkframe/vkobjtex.h"  // lane VKOBJ3: shutdown() lets the cache's BC twins go
+#include "features/vkframe/vkobjpipe.h"  // lane VKOBJ4: shutdown() frees the bl twins' pipelines
 
 #define VK_NO_PROTOTYPES
 #define VK_USE_PLATFORM_WIN32_KHR
@@ -40,6 +41,16 @@
 #include "features/vkframe/light_aox_z.spv.h"  // lane VKFAR3: the ported AO methods (XeGTAO, GTAO)
 #include "features/vkframe/light_aox_xe.spv.h"
 #include "features/vkframe/light_aox_r8.spv.h"
+#include "features/vkframe/light_ocean_spec.spv.h"  // lane VKWATER4 (row G5): the ultra ocean (ocean_vk.hlsl stages 1-6)
+#include "features/vkframe/light_ocean_fft.spv.h"
+#include "features/vkframe/light_ocean_finbc.spv.h"
+#include "features/vkframe/light_ocean_find.spv.h"
+#include "features/vkframe/light_ocean_mipbc.spv.h"
+#include "features/vkframe/light_ocean_mipd.spv.h"
+#include "features/vkframe/light_ocean_finbca.spv.h"  // stages 7-10: the same into the shared arrays in place
+#include "features/vkframe/light_ocean_finda.spv.h"
+#include "features/vkframe/light_ocean_mipbca.spv.h"
+#include "features/vkframe/light_ocean_mipda.spv.h"
 #include "features/vkframe/light_gihalf.spv.h"  // lane VKFAR3 (A1 b): the screen GI's DDGI read
 // lane VKLIGHT2: the reflections' stages (ssr_vk.hlsl SSR_LIVE; w = the water look)
 #include "features/vkframe/ssr_view_s1.spv.h"
@@ -65,6 +76,10 @@
 #include "features/vkframe/precip_view_cs.spv.h"
 #include "features/vkframe/precip_view_vs.spv.h"
 #include "features/vkframe/precip_view_ps.spv.h"
+#include "features/vkframe/precip_look_view_cs.spv.h"  // slice 3: the precipitation look
+#include "features/vkframe/precip_look_view_vs.spv.h"
+#include "features/vkframe/precip_look_view_ps.spv.h"
+#include "features/vkframe/precip_lit_view_cs.spv.h"  // slice 2b: the sun on the particles
 #include "features/vkframe/ddgi_atlas_fetch_cs.spv.h"  // lane VKFAR3: the DDGI atlas read through its texel view (gates)
 #include "features/vkframe/vkfarcards.h"  // lane VKFAR1 round 2: the far cards' inputs (vkfarcards.inc)
 #include "features/vkframe/obj_depth_vs.spv.h"  // lane VKOBJ1
@@ -102,6 +117,7 @@ constexpr GLenum kTexture2D = 0x0DE1, kRgba8 = 0x8058, kScissorTest = 0x0C11, kR
 constexpr GLenum kTexture3D = 0x806F, kTexBinding3D = 0x806A, kTexture2DArray = 0x8C1A, kTexBinding2DArray = 0x8C1D,
 	kGlRg32f = 0x8230, kGlRg16f = 0x822F, kGlR32f = 0x822E, kGlR8 = 0x8229, kGlRg8 = 0x822B;
 constexpr GLenum kDepth16 = 0x81A5;  // lane VKSHADOW1: the sun cascades' D16 2D array
+constexpr GLenum kTextureCubeArray = 0x9009, kTexBindingCubeArray = 0x900A;  // lane VKFAR6 (L8 term 5): the lamps' D16 cubes
 constexpr GLenum kDepth24 = 0x81A6, kDepth32f = 0x8CAC;  // lane VKOBJ1: the objects' prepass (X8_D24 / D32F, multisample)
 constexpr GLenum kGlR32ui = 0x8236, kGlRg32ui = 0x823C, kGlR8ui = 0x8232;  // lane VKWATER2: the water's index / atlas lookups
 constexpr GLenum kGlRgba32ui = 0x8D70, kGlRgba16ui = 0x8D76;  // lane VKFAR3: the far ground's grid / cached-page cell table
@@ -156,6 +172,9 @@ struct Gl
 	void( WINAPI * deleteBuffers )( GLsizei, const GLuint * ) = nullptr;
 	void( WINAPI * namedBufferStorageMem )( GLuint, std::intptr_t, GLuint, GLuint64 ) = nullptr;
 	void( WINAPI * copyNamedBufferSubData )( GLuint, GLuint, std::intptr_t, std::intptr_t, std::intptr_t ) = nullptr;
+	// lane VKOBJ4 (optional, GL 4.5): the light stores' writes (objBlTexelStoreWrite; the staging buffer if a store refuses SubData)
+	void( WINAPI * namedBufferSubData )( GLuint, std::intptr_t, std::intptr_t, const void * ) = nullptr;
+	void( WINAPI * namedBufferData )( GLuint, std::intptr_t, const void *, GLenum ) = nullptr;
 };
 
 template <class F> void load( F & f, WwVkPresent::GlProc gp, const char * name )
@@ -202,6 +221,8 @@ bool loadGl( Gl & g, WwVkPresent::GlProc gp, std::string & why )
 	load( g.deleteBuffers, gp, "glDeleteBuffers" );
 	load( g.namedBufferStorageMem, gp, "glNamedBufferStorageMemEXT" );
 	load( g.copyNamedBufferSubData, gp, "glCopyNamedBufferSubData" );
+	load( g.namedBufferSubData, gp, "glNamedBufferSubData" );
+	load( g.namedBufferData, gp, "glNamedBufferData" );
 	g.ok = g.getIntegerv && g.getError && g.enable && g.disable && g.isEnabled && g.flush && g.genTextures && g.deleteTextures
 		&& g.bindTexture && g.texParameteri && g.genFramebuffers && g.deleteFramebuffers && g.bindFramebuffer
 		&& g.framebufferTexture2D && g.checkFramebufferStatus && g.blitFramebuffer && g.createMemoryObjects
@@ -247,6 +268,7 @@ struct Vk
 	VKP( vkMapMemory ); VKP( vkUnmapMemory ); VKP( vkCmdCopyImageToBuffer ); VKP( vkCmdResolveImage ); VKP( vkCmdCopyImage );
 	// round 11: the tone pass on the view (a render pass of the present device)
 	bool sampleShading = false;  // the device feature SV_SampleIndex needs (enabled when offered)
+	bool dualSrcBlend = false;   // lane VKWATER4 (L7): the underwater pass's SRC1_COLOR blend (enabled when offered)
 	VKP( vkGetPhysicalDeviceFeatures );
 	VKP( vkCreateImageView ); VKP( vkDestroyImageView ); VKP( vkCreateSampler ); VKP( vkDestroySampler );
 	VKP( vkCreateDescriptorSetLayout ); VKP( vkDestroyDescriptorSetLayout ); VKP( vkCreateDescriptorPool );
@@ -403,20 +425,14 @@ double nowMs()
  * the frame to GL. Red WW_VKFENCE_RED=<site>[,<site>...] (gates only) fakes VK_TIMEOUT at those sites, pending or not. */
 bool fenceDone( VkFence fence, bool pending, const char * site, std::string & why )
 {
-	static const std::string red = [] {
-		const char * e = std::getenv( "WW_VKFENCE_RED" );
-		return e && *e ? "," + std::string( e ) + "," : std::string();
-	}();
-	const bool fake = !red.empty() && red.find( "," + std::string( site ) + "," ) != std::string::npos;
+	const bool fake = WwVkPresent::fenceRed( site );
 	if ( !pending && !fake )
 		return true;
 	Vk & v = vk();
 	const VkResult r = fake ? VK_TIMEOUT : v.vkWaitForFences( v.dev, 1, &fence, VK_TRUE, 1000000000ull );
 	if ( r == VK_SUCCESS )
 		return true;
-	why = std::string( "the last " ) + site + " run's fence wait returned VkResult " + std::to_string( int( r ) )
-		+ ( r == VK_TIMEOUT ? " (timed out after 1 s)" : "" ) + ": its commands may still run, this frame stays on GL";
-	std::fprintf( stderr, "vk fence: %s\n", why.c_str() );
+	why = WwVkPresent::fenceMiss( site, int( r ) );
 	return false;
 }
 
@@ -527,9 +543,8 @@ bool makeDevice( std::string & why )
 	qi.queueFamilyIndex = v.family;
 	qi.queueCount = 1;
 	qi.pQueuePriorities = &prio;
-	const char * dext[] = { VK_KHR_SWAPCHAIN_EXTENSION_NAME, VK_KHR_EXTERNAL_MEMORY_WIN32_EXTENSION_NAME,
-		VK_KHR_EXTERNAL_SEMAPHORE_WIN32_EXTENSION_NAME, VK_EXT_DEPTH_CLIP_CONTROL_EXTENSION_NAME, nullptr };
-	std::uint32_t nDext = 3;
+	std::vector<const char *> dext = { VK_KHR_SWAPCHAIN_EXTENSION_NAME, VK_KHR_EXTERNAL_MEMORY_WIN32_EXTENSION_NAME,
+		VK_KHR_EXTERNAL_SEMAPHORE_WIN32_EXTENSION_NAME };
 	bool hasSampleLoc = false;
 	// lane VKOBJ1: depth clip control when offered (the objects' prepass refuses without it)
 	VkPhysicalDeviceDepthClipControlFeaturesEXT clipFeat { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DEPTH_CLIP_CONTROL_FEATURES_EXT };
@@ -538,11 +553,14 @@ bool makeDevice( std::string & why )
 		v.vkEnumerateDeviceExtensionProperties( v.phys, nullptr, &ne, nullptr );
 		std::vector<VkExtensionProperties> ep( ne );
 		v.vkEnumerateDeviceExtensionProperties( v.phys, nullptr, &ne, ep.data() );
-		bool has = false;
+		bool has = false, budget = false;
 		for ( const VkExtensionProperties & e : ep ) {
 			has = has || std::strcmp( e.extensionName, VK_EXT_DEPTH_CLIP_CONTROL_EXTENSION_NAME ) == 0;
 			hasSampleLoc = hasSampleLoc || std::strcmp( e.extensionName, VK_EXT_SAMPLE_LOCATIONS_EXTENSION_NAME ) == 0;
+			budget = budget || std::strcmp( e.extensionName, VK_EXT_MEMORY_BUDGET_EXTENSION_NAME ) == 0;
 		}
+		if ( budget )  // lane VKOBJ4 item 2: the bloom chain's frame checks the heap's budget (vkframe.cpp makeFrame)
+			dext.push_back( VK_EXT_MEMORY_BUDGET_EXTENSION_NAME );
 		if ( has ) {
 			VkPhysicalDeviceFeatures2 f2 { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2 };
 			f2.pNext = &clipFeat;
@@ -551,7 +569,7 @@ bool makeDevice( std::string & why )
 		}
 	}
 	if ( v.clipControl )
-		nDext = 4;
+		dext.push_back( VK_EXT_DEPTH_CLIP_CONTROL_EXTENSION_NAME );
 	clipFeat.pNext = nullptr;
 	if ( hasSampleLoc ) {  // lane VKFAR2 G2: the sample counts that take custom positions (the sky bodies' pipelines)
 		VkPhysicalDeviceSampleLocationsPropertiesEXT slp { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SAMPLE_LOCATIONS_PROPERTIES_EXT };
@@ -559,7 +577,7 @@ bool makeDevice( std::string & why )
 		pp.pNext = &slp;
 		v.vkGetPhysicalDeviceProperties2( v.phys, &pp );
 		v.centreSamples = slp.sampleLocationSampleCounts;
-		dext[nDext++] = VK_EXT_SAMPLE_LOCATIONS_EXTENSION_NAME;
+		dext.push_back( VK_EXT_SAMPLE_LOCATIONS_EXTENSION_NAME );
 	}
 	// round 11: the tone pass's fragment shader reads SV_SampleIndex (the SampleRateShading capability)
 	VkPhysicalDeviceFeatures offered {}, en {};
@@ -567,6 +585,8 @@ bool makeDevice( std::string & why )
 		v.vkGetPhysicalDeviceFeatures( v.phys, &offered );
 	en.sampleRateShading = offered.sampleRateShading;
 	v.sampleShading = offered.sampleRateShading == VK_TRUE;
+	en.dualSrcBlend = offered.dualSrcBlend;
+	v.dualSrcBlend = offered.dualSrcBlend == VK_TRUE;
 	en.shaderStorageImageExtendedFormats = offered.shaderStorageImageExtendedFormats;
 	v.storageExt = offered.shaderStorageImageExtendedFormats == VK_TRUE;
 	en.shaderFloat64 = offered.shaderFloat64;
@@ -624,8 +644,8 @@ bool makeDevice( std::string & why )
 	di.pEnabledFeatures = &en;
 	di.queueCreateInfoCount = 1;
 	di.pQueueCreateInfos = &qi;
-	di.enabledExtensionCount = nDext;
-	di.ppEnabledExtensionNames = dext;
+	di.enabledExtensionCount = std::uint32_t( dext.size() );
+	di.ppEnabledExtensionNames = dext.data();
 	di.pNext = v.clipControl ? &clipFeat : nullptr;
 	if ( v.descIndexing || v.drawParams ) {  // lane VKOBJ2: ahead of the clip control chain
 		dpEn.pNext = const_cast<void *>( di.pNext );
@@ -727,6 +747,8 @@ struct Work
 	int light = -1;     // lane VKLIGHT1 (k = -1): this LightPass's dispatches (lightWork); shares tone's counters
 	bool ssr = false;   // lane VKLIGHT2 (k = -1): the reflections' stages (ssrWork); shares tone's counters
 	bool ( *fn )( std::string & ) = nullptr;  // lane VKSHADOW1 (k = -1): a pass's own record + submit; shares tone's counters
+	bool ( *fnArg )( void *, std::string & ) = nullptr;  // lane VKOBJ4 item 2 (k = -1): onWorker's job, fn's counters
+	void * arg = nullptr;
 	bool fx = false;    // lane VKAIR1 (k = -1): the air's sky pass or the clouds' march + resolve (fxWork); tone's counters
 };
 
@@ -749,8 +771,10 @@ bool waterRecord( std::string & why );  // lane VKWATER3 (vkwater.inc): fxWork's
 bool fbRecord( std::string & why );  // lane VKFAR2 (vkfogbloom.inc): fxWork's kind 6, the fog bloom
 bool cfRecord( std::string & why );  // lane VKFAR2 (vkcloudfront.inc): fxWork's kind 7, the clouds in front
 bool precipRecord( std::string & why );  // lane VKFAR2 (vkprecip.inc): fxWork's kind 8, rain / snow
-bool taRecord( std::string & why );  // lane VKFAR7 (vktaareactive.inc): fxWork's kind 10, the TAA mask's reactive pass
+bool underRecord( std::string & why );  // lane VKWATER4 (vkunder.inc): fxWork's kind 10, the underwater fog
+bool taRecord( std::string & why );  // lane VKFAR7 (vktaareactive.inc): fxWork's kind 11, the TAA mask's reactive pass
 void waterDrop();
+void underDrop();  // lane VKWATER4 (vkunder.inc)
 void objDrop();  // lane VKOBJ1
 void blFree();  // lane VKOBJ2
 void fogDrop();  // lane VKFAR2 (vkfog.inc): the air's integrate
@@ -820,9 +844,9 @@ void workerLoop()
 			W.q.pop_front();
 			W.busy = true;
 		}
-		if ( j.fn ) {  // lane VKSHADOW1: a pass that brings its own work function (the sun cascades)
+		if ( j.fn || j.fnArg ) {  // lane VKSHADOW1: a pass that brings its own work function (the sun cascades)
 			std::string why;
-			const bool ok = j.fn( why );
+			const bool ok = j.fnArg ? j.fnArg( j.arg, why ) : j.fn( why );
 			{
 				std::lock_guard<std::mutex> lk( W.m );
 				W.toneDone++;
@@ -971,8 +995,12 @@ void dropSlots( bool glAlive )
 	Chain & c = ch();
 	Gl & g = gl();
 	for ( Slot & s : c.slot ) {
-		if ( s.pending )
-			v.vkWaitForFences( v.dev, 1, &s.fence, VK_TRUE, 1000000000ull );
+		std::string fw;
+		if ( !fenceDone( s.fence, s.pending, "slot drop", fw ) ) {
+			// its blit may still read the slot: the slot's GL and Vulkan objects are left (a leak beats freeing them in use)
+			s = Slot();
+			continue;
+		}
 		if ( glAlive ) {
 			if ( s.fbo )
 				g.deleteFramebuffers( 1, &s.fbo );
@@ -1146,15 +1174,41 @@ bool exportSem( VkSemaphore & s, GLuint & gs, std::string & why )
 	return true;
 }
 
+// lane VKWATER4: the last oneShot's result (submit, wait, reset: the first that failed), for the failure lines
+VkResult & oneShotResult()
+{
+	static VkResult r = VK_SUCCESS;
+	return r;
+}
+
+/* lane VKOBJ5: a missed wait (red WW_VKFENCE_RED=oneshot, faked after the real wait) prints fenceMiss's `vk fence:` line
+ * and returns false: the caller refuses, the frame stays on GL. Its callers free the command buffer and the fence (or
+ * record into them again) right after, so a real miss waits the device idle first: neither is freed or reused in flight */
 bool oneShot( VkCommandBuffer cmd, VkFence fence )
 {
 	Vk & v = vk();
 	VkSubmitInfo si { VK_STRUCTURE_TYPE_SUBMIT_INFO };
 	si.commandBufferCount = 1;
 	si.pCommandBuffers = &cmd;
-	if ( v.vkQueueSubmit( v.queue, 1, &si, fence ) != VK_SUCCESS )
-		return false;
-	return v.vkWaitForFences( v.dev, 1, &fence, VK_TRUE, 1000000000ull ) == VK_SUCCESS && v.vkResetFences( v.dev, 1, &fence ) == VK_SUCCESS;
+	VkResult r = v.vkQueueSubmit( v.queue, 1, &si, fence );
+	if ( r == VK_SUCCESS ) {
+		r = v.vkWaitForFences( v.dev, 1, &fence, VK_TRUE, 1000000000ull );
+		const bool real = r != VK_SUCCESS;
+		if ( WwVkPresent::fenceRed( "oneshot" ) )
+			r = VK_TIMEOUT;
+		if ( r != VK_SUCCESS ) {
+			WwVkPresent::fenceMiss( "oneshot", int( r ) );
+			if ( real )
+				v.vkDeviceWaitIdle( v.dev );
+			v.vkResetFences( v.dev, 1, &fence );
+			oneShotResult() = r;
+			return false;
+		}
+	}
+	if ( r == VK_SUCCESS )
+		r = v.vkResetFences( v.dev, 1, &fence );
+	oneShotResult() = r;
+	return r == VK_SUCCESS;
 }
 
 // a ring slot: an RGBA8 image GL imported (its frame lands there), its two semaphores, its fence and command buffer
@@ -1273,7 +1327,8 @@ bool makeSlot( Slot & s, int w, int h, std::string & why )
  * overlay) take the same steps: this is the one place they are written. Lane VKSHARE1: type 3D (d deep) or a 2D array
  * (layers), single-sample, GL_TEXTURE_3D / GL_TEXTURE_2D_ARRAY through glTexStorageMem3DEXT; one mip level always. */
 bool makeShared( VkImage & img, VkDeviceMemory & mem, GLuint & tex, GLuint & obj, VkFormat fmt, GLenum glFmt, int samples, int w,
-	int h, bool depth, double & mb, std::string & why, VkImageType type = VK_IMAGE_TYPE_2D, int d = 1, int layers = 1, int levels = 1 )
+	int h, bool depth, double & mb, std::string & why, VkImageType type = VK_IMAGE_TYPE_2D, int d = 1, int layers = 1, int levels = 1,
+	bool cube = false )  // lane VKOBJ4: a cube array (layers = 6 per cube; GL_TEXTURE_CUBE_MAP_ARRAY), the lamps' shadow cubes
 {
 	levels = ( samples == 1 && !depth ) ? std::max( levels, 1 ) : 1;  // lanes VKLIGHT1 / VKAIR1: a mipped 2D, 2D array or 3D input
 	Vk & v = vk();
@@ -1294,9 +1349,14 @@ bool makeShared( VkImage & img, VkDeviceMemory & mem, GLuint & tex, GLuint & obj
 		| ( depth ? VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT : VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT );
 	if ( samples == 1 && !depth )
 		usage |= VK_IMAGE_USAGE_STORAGE_BIT;
+	if ( cube && ( is3d || w != h || layers % 6 ) ) {
+		why = "a cube array is square, 2D and six layers a cube";
+		return false;
+	}
+	const VkImageCreateFlags flags = cube ? VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT : 0;
 	VkImageFormatProperties ip {};
 	auto offered = [&]() {
-		return v.vkGetPhysicalDeviceImageFormatProperties( v.phys, fmt, type, VK_IMAGE_TILING_OPTIMAL, usage, 0, &ip ) == VK_SUCCESS
+		return v.vkGetPhysicalDeviceImageFormatProperties( v.phys, fmt, type, VK_IMAGE_TILING_OPTIMAL, usage, flags, &ip ) == VK_SUCCESS
 			&& ( ip.sampleCounts & sc ) && ip.maxExtent.width >= std::uint32_t( w ) && ip.maxExtent.height >= std::uint32_t( h )
 			&& ip.maxExtent.depth >= std::uint32_t( d ) && ip.maxArrayLayers >= std::uint32_t( layers ) && ip.maxMipLevels >= std::uint32_t( levels );
 	};
@@ -1307,13 +1367,14 @@ bool makeShared( VkImage & img, VkDeviceMemory & mem, GLuint & tex, GLuint & obj
 	}
 	if ( !ok ) {
 		why = std::string( depth ? "depth / stencil" : "colour" ) + " format " + std::to_string( int( fmt ) ) + " at " + std::to_string( samples )
-			+ " samples (" + ( is3d ? "3D" : layered ? "2D array" : "2D" ) + ") is not offered by the device";
+			+ " samples (" + ( is3d ? "3D" : cube ? "cube array" : layered ? "2D array" : "2D" ) + ") is not offered by the device";
 		return false;
 	}
 	VkExternalMemoryImageCreateInfo ext { VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_IMAGE_CREATE_INFO };
 	ext.handleTypes = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_WIN32_BIT;
 	VkImageCreateInfo ci { VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO };
 	ci.pNext = &ext;
+	ci.flags = flags;
 	ci.imageType = type;
 	ci.format = fmt;
 	ci.extent = { std::uint32_t( w ), std::uint32_t( h ), std::uint32_t( d ) };
@@ -1373,7 +1434,7 @@ bool makeShared( VkImage & img, VkDeviceMemory & mem, GLuint & tex, GLuint & obj
 	if ( fence )
 		v.vkDestroyFence( v.dev, fence, nullptr );
 	if ( !laid ) {
-		why = "a view image's first layout change failed";
+		why = "a view image's first layout change failed (VkResult " + std::to_string( int( oneShotResult() ) ) + ")";
 		return false;
 	}
 	VkMemoryGetWin32HandleInfoKHR mi { VK_STRUCTURE_TYPE_MEMORY_GET_WIN32_HANDLE_INFO_KHR };
@@ -1384,10 +1445,11 @@ bool makeShared( VkImage & img, VkDeviceMemory & mem, GLuint & tex, GLuint & obj
 		why = "vkGetMemoryWin32HandleKHR (a view image) failed";
 		return false;
 	}
-	const GLenum target = is3d ? kTexture3D : layered ? kTexture2DArray : samples > 1 ? kTexture2DMs : kTexture2D;
+	const GLenum target = is3d ? kTexture3D : cube ? kTextureCubeArray : layered ? kTexture2DArray : samples > 1 ? kTexture2DMs : kTexture2D;
 	while ( g.getError() != 0 ) {}
 	GLint was = 0;
-	g.getIntegerv( is3d ? kTexBinding3D : layered ? kTexBinding2DArray : samples > 1 ? kTexBinding2DMs : kTexBinding2D, &was );
+	g.getIntegerv( is3d ? kTexBinding3D : cube ? kTexBindingCubeArray : layered ? kTexBinding2DArray : samples > 1 ? kTexBinding2DMs : kTexBinding2D,
+		&was );
 	g.createMemoryObjects( 1, &obj );
 	const GLint one = 1;
 	g.memoryObjectParameteriv( obj, kDedicated, &one );
@@ -1428,6 +1490,7 @@ struct Shared
 	VkImage img = VK_NULL_HANDLE;
 	VkDeviceMemory mem = VK_NULL_HANDLE;
 	VkImageView view = VK_NULL_HANDLE;
+	VkImageView attView = VK_NULL_HANDLE;  // lane VKOBJ4 open item 3: a stencil format's depth and stencil view (a render pass attachment)
 	GLuint tex = 0, obj = 0;
 	void * glCtx = nullptr;
 	int type = 0, w = 0, h = 0, d = 0, levels = 1;
@@ -1435,6 +1498,7 @@ struct Shared
 	GLenum glFmt = 0;
 	VkFormat fmt = VK_FORMAT_UNDEFINED;
 	double mb = 0.0;
+	bool borrowed = false;  // lane VKOBJ4 open item 3: another owner's images (the tone frame), found by key, never freed here
 };
 
 std::map<std::uintptr_t, Shared> & shareds()
@@ -1479,6 +1543,10 @@ VkFormat vkFormatOf( GLenum f, bool & depth )
 void sharedFree( Shared & s, bool glAlive )
 {
 	Vk & v = vk();
+	if ( s.borrowed ) {  // the owner frees them
+		s = Shared();
+		return;
+	}
 	if ( glAlive ) {
 		if ( s.tex )
 			gl().deleteTextures( 1, &s.tex );
@@ -1487,6 +1555,8 @@ void sharedFree( Shared & s, bool glAlive )
 	}
 	if ( s.view )
 		v.vkDestroyImageView( v.dev, s.view, nullptr );
+	if ( s.attView )
+		v.vkDestroyImageView( v.dev, s.attView, nullptr );
 	if ( s.img )
 		v.vkDestroyImage( v.dev, s.img, nullptr );
 	if ( s.mem )
@@ -2343,12 +2413,48 @@ bool toneBloomBack( int samples, std::string & why )
 	return true;
 }
 
+std::uint64_t & sharedGen();
+char kToneShareColor, kToneShareDs;  // lane VKOBJ4 open item 3: the tone frame's keys among the shared targets (their addresses)
+
+/* lane VKOBJ4 open item 3: the tone frame (where the tone and the bloom read the cell frame) joins the shared targets as
+ * borrowed entries, so objBlFrameRead finds GL's draw framebuffer over it and objBlShade draws into it: one frame for GL,
+ * the cell runs on Vulkan, the tone and the bloom. Off: the entries go (the images stay the tone's). */
+void toneShare( bool on )
+{
+	Tone & T = tone();
+	const std::uintptr_t keys[2] = { reinterpret_cast<std::uintptr_t>( &kToneShareColor ), reinterpret_cast<std::uintptr_t>( &kToneShareDs ) };
+	bool moved = false;
+	for ( std::uintptr_t k : keys )
+		moved = shareds().erase( k ) > 0 || moved;
+	if ( on && T.color && T.ds && T.colorView && T.dsView ) {
+		for ( int i = 0; i < 2; i++ ) {
+			Shared s;
+			s.borrowed = true;
+			s.img = i ? T.ds : T.color;
+			s.view = i ? T.dsView : T.colorView;
+			s.attView = i ? T.dsView : VK_NULL_HANDLE;
+			s.tex = i ? T.dsTex : T.colorTex;
+			s.glCtx = T.glCtx;
+			s.w = T.w;
+			s.h = T.h;
+			s.samples = T.samples;
+			s.glFmt = i ? kDepth24Stencil8 : kRgba16f;
+			s.fmt = i ? VK_FORMAT_D24_UNORM_S8_UINT : VK_FORMAT_R16G16B16A16_SFLOAT;
+			shareds()[keys[i]] = s;
+		}
+		moved = true;
+	}
+	if ( moved )
+		sharedGen()++;
+}
+
 // the shared frame goes (GL alive: its textures and memory objects too); the caller waited the device
 void toneFrameFree( bool glAlive )
 {
 	Vk & v = vk();
 	Gl & g = gl();
 	Tone & T = tone();
+	toneShare( false );  // lane VKOBJ4 open item 3: the borrowed entries go before the images
 	if ( glAlive ) {
 		for ( GLuint * t : { &T.colorTex, &T.dsTex } )
 			if ( *t )
@@ -3682,6 +3788,24 @@ bool glCurrent( WwVkPresent::GlProc gp, std::string & why )
 namespace WwVkPresent
 {
 
+bool fenceRed( const char * site )
+{
+	static const std::string red = [] {
+		const char * e = std::getenv( "WW_VKFENCE_RED" );
+		return e && *e ? "," + std::string( e ) + "," : std::string();
+	}();
+	return !red.empty() && red.find( "," + std::string( site ) + "," ) != std::string::npos;
+}
+
+std::string fenceMiss( const char * site, int vkResult )
+{
+	const std::string why = std::string( "the last " ) + site + " run's fence wait returned VkResult "
+		+ std::to_string( vkResult ) + ( vkResult == int( VK_TIMEOUT ) ? " (timed out after 1 s)" : "" )
+		+ ": its commands may still run, this frame stays on GL";
+	std::fprintf( stderr, "vk fence: %s\n", why.c_str() );
+	return why;
+}
+
 const Stat & last()
 {
 	return stat();
@@ -3715,6 +3839,7 @@ void shutdown()
 	csmDrop();  // lane VKSHADOW1: the cascades' layer views go before the shared arrays they view
 	objDrop();  // lane VKOBJ1: the prepass framebuffer goes before the shared depth it holds
 	fogDrop();  // lane VKFAR2: the integrate's set goes before the shared volumes it views
+	objBlPipeFree();  // lane VKOBJ4: the bl twins' pipelines (their layouts name the table's)
 	ddgiFreeAll();  // lane VKFAR3: the DDGI atlas imports (bakert keeps its own buffer)
 	blFree();  // lane VKOBJ2: the bindless table's set and samplers (it holds the shared targets' views)
 	// lane VKSHARE1: the keyed shared targets (their owners see sharedTargetIs false and make GL's own again)
@@ -3744,6 +3869,7 @@ void shutdown()
 	ssrDrop();  // lane VKLIGHT2: the reflections' crossing semaphores
 	fxDrop();   // lane VKAIR1: the air's and the clouds' crossing semaphores and framebuffers
 	waterDrop();  // lane VKWATER3: the water draw's buffers (GL's names); pipelines and samplers stay with the device
+	underDrop();  // lane VKWATER4 (L7): the underwater draw's framebuffer, depth view and host buffer
 }
 
 bool viewBegin( int w, int h, int samples, GlProc gp, std::string & why )
@@ -3780,11 +3906,12 @@ bool viewBegin( int w, int h, int samples, GlProc gp, std::string & why )
 		waitSlot( s.reader );
 		Vk & v = vk();
 		Slot & p = ch().slot[s.reader];
-		if ( p.pending && p.fence && v.vkGetFenceStatus( v.dev, p.fence ) == VK_NOT_READY ) {
-			V.busy++;
-			v.vkWaitForFences( v.dev, 1, &p.fence, VK_TRUE, 1000000000ull );
-		}
+		const bool busy = p.pending && p.fence && v.vkGetFenceStatus( v.dev, p.fence ) != VK_SUCCESS;
+		V.busy += busy ? 1 : 0;
+		const bool done = fenceDone( p.fence, busy, "view", why );
 		V.waitMs += nowMs() - tw;
+		if ( !done )
+			return false;  // s.reader kept: the next use of this slot waits again
 		s.reader = -1;
 	}
 	const GLenum target = V.samples > 1 ? kTexture2DMs : kTexture2D;
@@ -3900,6 +4027,8 @@ bool toneFrame( int w, int h, int samples, unsigned & color, unsigned & ds, std:
 	T.h = h;
 	T.samples = samples;
 	T.descDirty = true;
+	toneShare( true );  // lane VKOBJ4 open item 3: the cell runs on Vulkan draw into this frame
+	sharedGen()++;  // lane VKWATER4: a view kept of the frame (vkunder's msView) is keyed on it, the image handle can come back
 	color = T.colorTex;
 	ds = T.dsTex;
 	return true;
@@ -3908,6 +4037,15 @@ bool toneFrame( int w, int h, int samples, unsigned & color, unsigned & ds, std:
 bool toneFrameIs( unsigned color )
 {
 	return color && tone().colorTex == color && tone().glCtx == gl().ctx;
+}
+
+bool toneFrameSize( int & w, int & h )
+{
+	const Tone & T = tone();
+	const bool live = T.colorTex && T.glCtx == gl().ctx;
+	w = live ? T.w : 0;
+	h = live ? T.h : 0;
+	return live;
 }
 
 void toneFrameDrop()
@@ -3937,7 +4075,7 @@ bool sharedTarget( std::uintptr_t key, int type, int w, int h, int d, unsigned g
 	};
 	if ( !v.ok || !g.ok || g.ctx != reinterpret_cast<void *>( wglGetCurrentContext() ) )
 		return fail( "the present device or GL's entry points are not ready in this context" );
-	if ( w < 1 || h < 1 || type < 0 || type > 2 )
+	if ( w < 1 || h < 1 || type < 0 || type > 3 || ( type == 3 && w != h ) )
 		return fail( "a shared target of size " + std::to_string( w ) + "x" + std::to_string( h ) + " type " + std::to_string( type ) );
 	bool depth = false;
 	const VkFormat fmt = vkFormatOf( GLenum( glFmt ), depth );
@@ -3947,6 +4085,8 @@ bool sharedTarget( std::uintptr_t key, int type, int w, int h, int d, unsigned g
 	samples = std::max( samples, 1 );
 	if ( samples > 1 && type != 0 )
 		return fail( "a multisample shared target is 2D only" );
+	if ( type == 3 && !depth )
+		return fail( "a shared cube array is depth only" );  // L8 term 5: the lamps' D16 cubes
 	levels = depth || samples > 1 ? 1 : std::max( levels, 1 );
 	auto it = shareds().find( key );
 	if ( it != shareds().end() ) {
@@ -3967,16 +4107,26 @@ bool sharedTarget( std::uintptr_t key, int type, int w, int h, int d, unsigned g
 	}
 	Shared s;
 	const VkImageType vt = type == 1 ? VK_IMAGE_TYPE_3D : VK_IMAGE_TYPE_2D;
-	if ( !makeShared( s.img, s.mem, s.tex, s.obj, fmt, GLenum( glFmt ), samples, w, h, depth, s.mb, why, vt, type == 1 ? d : 1, type == 2 ? d : 1, levels ) ) {
+	const int layers = type >= 2 ? d : 1;  // lane VKOBJ4: type 3 = a cube array of d layers, 6 a cube (farTwin's count)
+	if ( !makeShared( s.img, s.mem, s.tex, s.obj, fmt, GLenum( glFmt ), samples, w, h, depth, s.mb, why, vt, type == 1 ? d : 1, layers, levels,
+			type == 3 ) ) {
 		sharedFree( s, true );
 		return fail( why );
 	}
-	const VkImageViewType viewType = type == 1 ? VK_IMAGE_VIEW_TYPE_3D : type == 2 ? VK_IMAGE_VIEW_TYPE_2D_ARRAY : VK_IMAGE_VIEW_TYPE_2D;
+	const VkImageViewType viewType = type == 1 ? VK_IMAGE_VIEW_TYPE_3D : type == 2 ? VK_IMAGE_VIEW_TYPE_2D_ARRAY
+		: type == 3 ? VK_IMAGE_VIEW_TYPE_CUBE_ARRAY : VK_IMAGE_VIEW_TYPE_2D;
 	s.view = imageView( s.img, viewType, fmt, depth ? VK_IMAGE_ASPECT_DEPTH_BIT : VK_IMAGE_ASPECT_COLOR_BIT, std::uint32_t( levels ),
-		std::uint32_t( type == 2 ? d : 1 ) );
+		std::uint32_t( layers ) );
 	if ( !s.view ) {
 		sharedFree( s, true );
 		return fail( "a shared target's image view failed" );
+	}
+	if ( fmt == VK_FORMAT_D24_UNORM_S8_UINT || fmt == VK_FORMAT_D32_SFLOAT_S8_UINT ) {
+		s.attView = imageView( s.img, viewType, fmt, VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT, 1, std::uint32_t( layers ) );
+		if ( !s.attView ) {
+			sharedFree( s, true );
+			return fail( "a shared target's depth / stencil view failed" );
+		}
 	}
 	s.glCtx = g.ctx;
 	s.type = type;
@@ -4021,6 +4171,81 @@ SharedStat takeSharedStat()
 	s.live = int( shareds().size() );
 	sharedStat().made = sharedStat().dropped = sharedStat().fails = 0;
 	return s;
+}
+
+bool shareDevice( GlProc gp, Device & out, std::string & why )
+{
+	if ( !glCurrent( gp, why ) || !makeDevice( why ) )
+		return false;
+	const Vk & v = vk();
+	out.instance = v.inst;
+	out.physical = v.phys;
+	out.device = v.dev;
+	out.queue = v.queue;
+	out.getDeviceProcAddr = reinterpret_cast<void *>( v.vkGetDeviceProcAddr );
+	out.family = v.family;
+	std::memcpy( out.uuid, v.uuid, 16 );
+	return true;
+}
+
+bool onWorker( bool ( *fn )( void * arg, std::string & why ), void * arg, std::string & why )
+{
+	Worker & W = wk();
+	std::uint64_t want = 0;
+	{
+		std::lock_guard<std::mutex> lk( W.m );
+		want = W.toneDone + 1;
+	}
+	Work j;
+	j.k = -1;
+	j.fnArg = fn;
+	j.arg = arg;
+	hand( j );
+	std::unique_lock<std::mutex> lk( W.m );
+	W.idle.wait( lk, [&W, want]() { return W.toneDone >= want; } );
+	why = W.toneWhy;
+	return W.toneOk;
+}
+
+bool borrowTarget( std::uintptr_t key, const Borrow & b, std::string & why )
+{
+	const Vk & v = vk();
+	if ( !v.ok || static_cast<VkDevice>( b.device ) != v.dev )
+		return why = "the image is another device's, not the present device's", false;
+	bool depth = false;
+	const VkFormat fmt = vkFormatOf( GLenum( b.glFmt ), depth );
+	if ( fmt == VK_FORMAT_UNDEFINED || !b.image || !b.view || !b.tex || ( depth && !b.attView ) )
+		return why = "no image, view, GL name or known format", false;
+	const auto it = shareds().find( key );
+	if ( it != shareds().end() && !it->second.borrowed )
+		return why = "the key holds a target of its own", false;
+	Shared s;
+	s.borrowed = true;
+	s.img = static_cast<VkImage>( b.image );
+	s.view = static_cast<VkImageView>( b.view );
+	s.attView = depth ? static_cast<VkImageView>( b.attView ) : VK_NULL_HANDLE;
+	s.tex = b.tex;
+	s.glCtx = reinterpret_cast<void *>( wglGetCurrentContext() );
+	s.w = b.w;
+	s.h = b.h;
+	s.samples = std::max( 1, b.samples );
+	s.glFmt = GLenum( b.glFmt );
+	s.fmt = fmt;
+	shareds()[key] = s;
+	sharedGen()++;
+	return true;
+}
+
+void borrowDrop( std::uintptr_t key )
+{
+	const auto it = shareds().find( key );
+	if ( it == shareds().end() || !it->second.borrowed )
+		return;
+	drain();  // the owner frees the image next: nothing queued or in flight may still use it
+	if ( vk().ok )
+		vk().vkDeviceWaitIdle( vk().dev );
+	shareds().erase( it );
+	sharedGen()++;
 }
 
 /* the tone pass's crossing alone (GL current): GL signals A with the deferred names, the worker submits, GL waits B.
@@ -4134,8 +4359,9 @@ bool toneRun( const ToneRun & t, std::string & why )
 		return refuse( "the measure is on but no measure texture" );
 	// the last pass is done before its command buffer, set and staging are written again (the worker submitted it)
 	ToneBloomState & B = T.bloom;
+	if ( std::string fw; !fenceDone( T.fence, T.pending, "tone", fw ) )
+		return refuse( fw );
 	if ( T.pending ) {
-		v.vkWaitForFences( v.dev, 1, &T.fence, VK_TRUE, 1000000000ull );
 		T.pending = false;
 		if ( B.measHave )
 			B.measDone = true;  // lane VKBLOOM1: its read buffer is filled (toneMeasureTake)
@@ -4499,10 +4725,9 @@ bool taaRun( const TaaRun & t, std::string & why )
 	if ( ( inputs & 3 ) && !g.copyImageSubData )
 		return refuse( "TAAINPUTS1's velocity / mask are on but no glCopyImageSubData" );
 	// the last run is done before its command buffer and sets are written again
-	if ( A.pending ) {
-		v.vkWaitForFences( v.dev, 1, &A.fence, VK_TRUE, 1000000000ull );
-		A.pending = false;
-	}
+	if ( std::string fw; !fenceDone( A.fence, A.pending, "taa", fw ) )
+		return refuse( fw );
+	A.pending = false;
 	std::string w;
 	if ( !taaStatic( w ) || !taaSems( w ) || !taaPipes( V.samples, w ) || !taaFbs( w ) )
 		return breakOff( w );
@@ -4724,11 +4949,9 @@ bool present( void * hwnd, int w, int h, bool vsync, GlProc gp, std::string & wh
 	 * writes the slot with no GPU wait on Vulkan (the frame cap fence measures GL's own work only) */
 	const double tw = nowMs();
 	waitSlot( k );
-	bool busy = false;
-	if ( s.pending && v.vkGetFenceStatus( v.dev, s.fence ) == VK_NOT_READY ) {
-		busy = true;
-		v.vkWaitForFences( v.dev, 1, &s.fence, VK_TRUE, 1000000000ull );
-	}
+	const bool busy = s.pending && v.vkGetFenceStatus( v.dev, s.fence ) != VK_SUCCESS;
+	if ( !fenceDone( s.fence, busy, "present", why ) )
+		return false;  // GL swaps this frame; the slot's next use waits again
 	const double waited = nowMs() - tw;
 	/* GL: resolve the back buffer into the slot, signal (GENERAL both sides). Nothing is asked: with
 	 * glBlitNamedFramebuffer no binding changes, and the scissor test is switched off without asking (glIsEnabled
@@ -5266,10 +5489,9 @@ bool skyRun( const SkyRun & t, std::string & why )
 	if ( !g.copyImageSubData )
 		return refuse( "no glCopyImageSubData (the LUTs' copies into their shared twins)" );
 	// the last run is done before its command buffer, set, framebuffer and uniforms are written again
-	if ( S.pending ) {
-		v.vkWaitForFences( v.dev, 1, &S.fence, VK_TRUE, 1000000000ull );
-		S.pending = false;
-	}
+	if ( std::string fw; !fenceDone( S.fence, S.pending, "sky", fw ) )
+		return refuse( fw );
+	S.pending = false;
 	std::string w;
 	if ( !skyStatic( w ) || !skySems( w ) || !skyPipes( T.samples, w ) )
 		return breakOff( w );
@@ -5414,7 +5636,7 @@ struct Fx
 	VkFence fence = VK_NULL_HANDLE;
 	bool pending = false;
 	// this run's job, written by the drawing thread before the hand
-	int kind = 0;  // 0 the air, 1 the clouds, 2 the far dots (lane VKFAR1), 3 the far cards (lane VKFAR2), 4 the water draw (lane VKWATER3), 6 the fog bloom (lane VKFAR2), 8 rain / snow (lane VKFAR2), 9 the far ground (lane VKFAR3), 10 the TAA mask's reactive pass (lane VKFAR7)
+	int kind = 0;  // 0 the air, 1 the clouds, 2 the far dots (lane VKFAR1), 3 the far cards (lane VKFAR2), 4 the water draw (lane VKWATER3), 6 the fog bloom (lane VKFAR2), 8 rain / snow (lane VKFAR2), 9 the far ground (lane VKFAR3), 10 the underwater fog (lane VKWATER4), 11 the TAA mask's reactive pass (lane VKFAR7)
 	VkFramebuffer fbAir = VK_NULL_HANDLE, fbM = VK_NULL_HANDLE, fbR = VK_NULL_HANDLE;
 	int w = 0, h = 0, vp[4] = {}, stencilRef = 1, march = kFxMarch, resolve = kFxResolve, mw = 0, mh = 0, hw = 0, hh = 0;
 	bool blend = false, skipMarch = false;
@@ -5450,8 +5672,8 @@ bool fxStatic( std::string & why )
 	// GL's sampling states of the inputs: LUTs / volumes LINEAR CLAMP, the tile NEAREST, the noise trilinear REPEAT
 	for ( int k = 0; k < WwVkPresent::kFxSamplers; k++ ) {
 		const bool nearest = k == WwVkPresent::kFxNearestClamp || k == WwVkPresent::kFxNearestRepeat;
-		const bool mipped = k == WwVkPresent::kFxMipRepeat || k == WwVkPresent::kFxMipRepeatAniso;
-		const bool repeat = k == WwVkPresent::kFxLinearRepeat || mipped || k == WwVkPresent::kFxNearestRepeat;
+		const bool mipped = k == WwVkPresent::kFxMipRepeat || k == WwVkPresent::kFxMipRepeatAniso || k == WwVkPresent::kFxMipClamp;
+		const bool repeat = k == WwVkPresent::kFxLinearRepeat || ( mipped && k != WwVkPresent::kFxMipClamp ) || k == WwVkPresent::kFxNearestRepeat;
 		VkSamplerCreateInfo sci { VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO };
 		sci.magFilter = sci.minFilter = nearest ? VK_FILTER_NEAREST : VK_FILTER_LINEAR;
 		sci.mipmapMode = mipped ? VK_SAMPLER_MIPMAP_MODE_LINEAR : VK_SAMPLER_MIPMAP_MODE_NEAREST;
@@ -5872,7 +6094,12 @@ bool fxWork( std::string & why )
 			v.vkEndCommandBuffer( F.cmd );
 			return false;
 		}
-	} else if ( F.kind == 10 ) {  // lane VKFAR7: the TAA mask's reactive pass
+	} else if ( F.kind == 10 ) {  // lane VKWATER4 (L7): the underwater fog, its per-pixel and per-sample draws
+		if ( !underRecord( why ) ) {
+			v.vkEndCommandBuffer( F.cmd );
+			return false;
+		}
+	} else if ( F.kind == 11 ) {  // lane VKFAR7: the TAA mask's reactive pass
 		if ( !taRecord( why ) ) {
 			v.vkEndCommandBuffer( F.cmd );
 			return false;
@@ -6135,10 +6362,9 @@ bool fxBegin( int which, bool & broken, std::string & why )
 		return false;
 	}
 	// the last run is done before its command buffer, sets, framebuffers and uniforms are written again
-	if ( F.pending ) {
-		v.vkWaitForFences( v.dev, 1, &F.fence, VK_TRUE, 1000000000ull );
-		F.pending = false;
-	}
+	if ( !fenceDone( F.fence, F.pending, "fx", why ) )
+		return false;  // not broken: GL draws this frame
+	F.pending = false;
 	const int samples = tone().samples > 0 ? tone().samples : std::max( F.airSamples, 1 );
 	if ( !fxStatic( why ) || !fxSems( why ) || !fxPasses( samples, why ) ) {
 		broken = true;
@@ -6342,7 +6568,7 @@ FxStat takeCloudStat()
 // lane VKLIGHT1: AO, the contact shadow lines and the SSGI cast as compute on the present device (vkpresent.h LightRun)
 namespace
 {
-constexpr int kLightSets = 16;  // dispatches one pass may record (AO: gbuf + 4 mips + raw + across + fin = 8)
+constexpr int kLightSets = 32;  // dispatches one pass may record (AO 8; the ocean 1 + 14 + 2 + 14 = 31)
 
 struct LightImg
 {
@@ -6352,11 +6578,26 @@ struct LightImg
 	GLuint tex = 0, obj = 0;
 	int w = 0, h = 0, levels = 0;
 	unsigned glFmt = 0;
+	bool borrowed = false;  // lane VKWATER4: a shared target's level (img / tex are the owner's; only the view is ours)
+	int level = 0;
+	std::uint64_t gen = 0;  // sharedGen() when the view was made
 };
+
+// lane VKWATER4: the water draws' ocean inputs, for the `vk ocean:` line (say) and the harness (take)
+struct OceanWaterTally
+{
+	WwVkPresent::OceanWaterStat say, take;
+};
+OceanWaterTally & oceanWater()
+{
+	static OceanWaterTally t;
+	return t;
+}
 
 struct LightPassState
 {
 	bool broken = false;
+	bool shares = false;  // lane VKWATER4: this run binds shared targets (a closing compute -> any-stage read barrier)
 	std::string brokenWhy;
 	VkDescriptorPool dpool = VK_NULL_HANDLE;
 	VkDescriptorSet set[kLightSets] = {};
@@ -6426,6 +6667,12 @@ VkFormat lightVkFormat( unsigned glFmt )
 void lightImgDrop( LightImg & x, bool glAlive )
 {
 	Vk & v = vk();
+	if ( x.borrowed ) {  // the image is the shared target's owner's
+		if ( x.view )
+			v.vkDestroyImageView( v.dev, x.view, nullptr );
+		x = LightImg();
+		return;
+	}
 	if ( glAlive ) {
 		if ( x.tex )
 			gl().deleteTextures( 1, &x.tex );
@@ -6592,7 +6839,13 @@ bool lightStatic( std::string & why )
 		{ vkframe_light_ao_blur_spv, sizeof( vkframe_light_ao_blur_spv ) }, { vkframe_light_ao_blurf_spv, sizeof( vkframe_light_ao_blurf_spv ) },
 		{ vkframe_light_contact_spv, sizeof( vkframe_light_contact_spv ) }, { vkframe_light_ssgi_spv, sizeof( vkframe_light_ssgi_spv ) },
 		{ vkframe_light_aox_z_spv, sizeof( vkframe_light_aox_z_spv ) }, { vkframe_light_aox_xe_spv, sizeof( vkframe_light_aox_xe_spv ) },
-		{ vkframe_light_aox_r8_spv, sizeof( vkframe_light_aox_r8_spv ) }, { vkframe_light_gihalf_spv, sizeof( vkframe_light_gihalf_spv ) } };
+		{ vkframe_light_aox_r8_spv, sizeof( vkframe_light_aox_r8_spv ) },
+		{ vkframe_light_ocean_spec_spv, sizeof( vkframe_light_ocean_spec_spv ) }, { vkframe_light_ocean_fft_spv, sizeof( vkframe_light_ocean_fft_spv ) },
+		{ vkframe_light_ocean_finbc_spv, sizeof( vkframe_light_ocean_finbc_spv ) }, { vkframe_light_ocean_find_spv, sizeof( vkframe_light_ocean_find_spv ) },
+		{ vkframe_light_ocean_mipbc_spv, sizeof( vkframe_light_ocean_mipbc_spv ) }, { vkframe_light_ocean_mipd_spv, sizeof( vkframe_light_ocean_mipd_spv ) },
+		{ vkframe_light_ocean_finbca_spv, sizeof( vkframe_light_ocean_finbca_spv ) }, { vkframe_light_ocean_finda_spv, sizeof( vkframe_light_ocean_finda_spv ) },
+		{ vkframe_light_ocean_mipbca_spv, sizeof( vkframe_light_ocean_mipbca_spv ) }, { vkframe_light_ocean_mipda_spv, sizeof( vkframe_light_ocean_mipda_spv ) },
+		{ vkframe_light_gihalf_spv, sizeof( vkframe_light_gihalf_spv ) } };
 	for ( int k = 0; k < WwVkPresent::LightKernels; k++ ) {
 		if ( k == WwVkPresent::LightAoRaw && !v.float64 )
 			continue;  // AO refuses with the reason
@@ -6729,6 +6982,12 @@ bool lightWork( int pass, std::string & why )
 		v.vkCmdPipelineBarrier( P.cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_TRANSFER_BIT,
 			0, 1, &mb, 0, nullptr, 0, nullptr );
 	}
+	if ( P.shares ) {  // lane VKWATER4: shared targets are read in place by later work on this queue (the water's draws)
+		VkMemoryBarrier mb { VK_STRUCTURE_TYPE_MEMORY_BARRIER };
+		mb.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+		mb.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_TRANSFER_READ_BIT;
+		v.vkCmdPipelineBarrier( P.cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 1, &mb, 0, nullptr, 0, nullptr );
+	}
 	if ( v.vkEndCommandBuffer( P.cmd ) != VK_SUCCESS ) {
 		why = "vkEndCommandBuffer (a light pass) failed";
 		return false;
@@ -6849,6 +7108,18 @@ bool lightRun( const LightRun & t, std::string & why )
 			return refuse( "an image entry (size, levels, format " + std::to_string( x.glFmt ) + " or texture)" );
 		if ( x.out && x.levels > 1 )
 			return refuse( "a mipped output" );
+		if ( x.tiles < 0 || ( x.tiles > 0 && ( !x.out || x.in || x.w % x.tiles || x.outLevel < 0 ) ) )
+			return refuse( "a tiled output (an output only, its width a multiple of its tiles)" );
+		if ( x.share ) {  // lane VKWATER4: a shared target's level in place
+			const Shared * s = sharedFind( x.share );
+			if ( x.in || x.out || x.tiles || x.levels != 1 )
+				return refuse( "a shared-target entry is never copied (no in / out / tiles; one level)" );
+			if ( !s || s->glCtx != g.ctx || s->type == 1 || s->samples != 1 || s->glFmt != x.glFmt || x.outLevel < 0 || x.outLevel >= s->levels )
+				return refuse( "a shared-target entry (missing, another context, 3D, multisample, its format or level)" );
+			const int n = s->type == 2 ? s->d : 1;
+			if ( x.w != std::max( s->w >> x.outLevel, 1 ) * n || x.h != std::max( s->h >> x.outLevel, 1 ) )
+				return refuse( "a shared-target entry's size (its level's width x layers, height)" );
+		}
 	}
 	for ( const LightDispatch & d : t.d ) {
 		if ( d.kernel < 0 || d.kernel >= LightKernels || d.out0 < 0 || d.out0 >= ni || d.out1 >= ni )
@@ -6871,10 +7142,9 @@ bool lightRun( const LightRun & t, std::string & why )
 			return refuse( "no DDGI atlas on the present device under the key" );
 	}
 	// the last run is done before its sets, buffer, images and command buffer are touched again
-	if ( P.pending ) {
-		v.vkWaitForFences( v.dev, 1, &P.fence, VK_TRUE, 1000000000ull );
-		P.pending = false;
-	}
+	if ( std::string fw; !fenceDone( P.fence, P.pending, "light", fw ) )
+		return refuse( fw );
+	P.pending = false;
 	std::string w;
 	if ( !lightStatic( w ) || !lightPassMake( P, w ) || !lightSems( P, w ) )
 		return breakOff( w );
@@ -6897,15 +7167,53 @@ bool lightRun( const LightRun & t, std::string & why )
 	for ( size_t i = size_t( ni ); i < P.img.size(); i++ )
 		lightImgDrop( P.img[i], true );
 	P.img.resize( size_t( ni ) );
+	P.shares = false;
 	for ( int i = 0; i < ni; i++ ) {
 		const LightImage & x = t.img[size_t( i )];
 		LightImg & y = P.img[size_t( i )];
-		if ( y.img && y.w == x.w && y.h == x.h && y.levels == x.levels && y.glFmt == x.glFmt )
-			continue;
-		lightImgDrop( y, true );
 		bool target = false;
 		for ( const LightDispatch & d : t.d )
 			target = target || d.out0 == i || d.out1 == i;
+		if ( x.share ) {  // lane VKWATER4: a view of the shared target's level (every layer), remade when any target moved
+			const Shared & s = *sharedFind( x.share );
+			P.shares = true;
+			P.st.shared++;
+			if ( y.borrowed && y.img == s.img && y.gen == sharedGen() && y.level == x.outLevel && y.glFmt == x.glFmt )
+				continue;
+			lightImgDrop( y, true );
+			const std::uint32_t n = std::uint32_t( s.type == 2 ? s.d : 1 );
+			if ( target ) {  // makeShared keeps storage use only when the device offers it with every other use
+				VkImageFormatProperties ip {};
+				const VkImageUsageFlags use = VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT
+					| VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_STORAGE_BIT;
+				if ( v.vkGetPhysicalDeviceImageFormatProperties( v.phys, s.fmt, VK_IMAGE_TYPE_2D, VK_IMAGE_TILING_OPTIMAL, use, 0, &ip ) != VK_SUCCESS
+					|| ip.maxArrayLayers < n || ip.maxMipLevels < std::uint32_t( s.levels ) )
+					return refuse( "shared target format " + std::to_string( x.glFmt ) + " takes no storage use on the device" );
+			}
+			VkImageViewCreateInfo ci { VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO };
+			ci.image = s.img;
+			ci.viewType = s.type == 2 ? VK_IMAGE_VIEW_TYPE_2D_ARRAY : VK_IMAGE_VIEW_TYPE_2D;
+			ci.format = s.fmt;
+			ci.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, std::uint32_t( x.outLevel ), 1, 0, n };
+			if ( v.vkCreateImageView( v.dev, &ci, nullptr, &y.view ) != VK_SUCCESS ) {
+				y = LightImg();
+				return refuse( "a shared target's level view failed" );
+			}
+			y.borrowed = true;
+			y.img = s.img;
+			y.view0 = y.view;
+			y.tex = s.tex;
+			y.w = x.w;
+			y.h = x.h;
+			y.levels = 1;
+			y.glFmt = x.glFmt;
+			y.level = x.outLevel;
+			y.gen = sharedGen();
+			continue;
+		}
+		if ( !y.borrowed && y.img && y.w == x.w && y.h == x.h && y.levels == x.levels && y.glFmt == x.glFmt )
+			continue;
+		lightImgDrop( y, true );
 		if ( target ) {  // a storage target: the format must take storage use (makeShared drops it quietly)
 			VkImageFormatProperties ip {};
 			if ( v.vkGetPhysicalDeviceImageFormatProperties( v.phys, lightVkFormat( x.glFmt ), VK_IMAGE_TYPE_2D, VK_IMAGE_TILING_OPTIMAL,
@@ -6920,9 +7228,11 @@ bool lightRun( const LightRun & t, std::string & why )
 		const LightImage & x = t.img[size_t( i )];
 		if ( !x.in )
 			continue;
-		for ( int m = 0; m < x.levels; m++ )
+		for ( int m = 0; m < x.levels; m++ ) {
 			g.copyImageSubData( x.tex, kTexture2D, m, 0, 0, 0, P.img[size_t( i )].tex, kTexture2D, m, 0, 0, 0, std::max( x.w >> m, 1 ),
 				std::max( x.h >> m, 1 ), 1 );
+			P.st.copies++;
+		}
 	}
 	// binding 9 (256 zero bytes when the pass has no table)
 	const VkDeviceSize bytes = std::max<VkDeviceSize>( 256, VkDeviceSize( t.buf.size() ) );
@@ -6984,13 +7294,16 @@ bool lightRun( const LightRun & t, std::string & why )
 	}
 	P.d = t.d;
 	// GL's inputs copied -> the worker's dispatches -> GL copies the targets back into its own textures
-	std::vector<GLuint> tex( static_cast<size_t>( ni ) );
-	std::vector<GLenum> lay( static_cast<size_t>( ni ), kLayoutGeneral );
+	// (each GL name once: a shared target's levels are one texture)
+	std::vector<GLuint> tex;
 	for ( int i = 0; i < ni; i++ )
-		tex[size_t( i )] = P.img[size_t( i )].tex;
+		if ( std::find( tex.begin(), tex.end(), P.img[size_t( i )].tex ) == tex.end() )
+			tex.push_back( P.img[size_t( i )].tex );
+	const GLuint nt = GLuint( tex.size() );
+	std::vector<GLenum> lay( tex.size(), kLayoutGeneral );
 	const GLuint glBuf = atlas ? GLuint( t.ddgiGlBuf ) : 0u;  // the DDGI atlas GL wrote, ordered by the same semaphores
 	const GLuint nb = glBuf ? 1u : 0u;
-	g.signalSemaphore( P.glDoneGl, nb, nb ? &glBuf : nullptr, GLuint( ni ), tex.data(), lay.data() );
+	g.signalSemaphore( P.glDoneGl, nb, nb ? &glBuf : nullptr, nt, tex.data(), lay.data() );
 	g.flush();
 	Worker & W = wk();
 	std::uint64_t want = 0;
@@ -7011,11 +7324,19 @@ bool lightRun( const LightRun & t, std::string & why )
 	}
 	if ( !ok )
 		return breakOff( w );  // nothing signals vkDone: GL does not wait it; GL draws its stages this frame
-	g.waitSemaphore( P.vkDoneGl, nb, nb ? &glBuf : nullptr, GLuint( ni ), tex.data(), lay.data() );
+	g.waitSemaphore( P.vkDoneGl, nb, nb ? &glBuf : nullptr, nt, tex.data(), lay.data() );
 	for ( int i = 0; i < ni; i++ ) {
 		const LightImage & x = t.img[size_t( i )];
-		if ( x.out )
+		if ( x.out && x.tiles > 0 ) {  // lane VKWATER4: a strip of tiles into the layers of GL's 2D array
+			const int tw = x.w / x.tiles;
+			for ( int l = 0; l < x.tiles; l++ ) {
+				g.copyImageSubData( P.img[size_t( i )].tex, kTexture2D, 0, l * tw, 0, 0, x.tex, kTexture2DArray, x.outLevel, 0, 0, l, tw, x.h, 1 );
+				P.st.copies++;
+			}
+		} else if ( x.out ) {
 			g.copyImageSubData( P.img[size_t( i )].tex, kTexture2D, 0, 0, 0, 0, x.tex, kTexture2D, 0, 0, 0, 0, x.w, x.h, 1 );
+			P.st.copies++;
+		}
 	}
 	P.pending = true;
 	const double ms = nowMs() - t0;
@@ -7032,6 +7353,13 @@ void lightOnGl( int pass, const char * why )
 	LightStat & s = light().p[pass].st;
 	s.gl++;
 	s.glWhy = why ? why : "";
+}
+
+OceanWaterStat takeOceanWaterStat()
+{
+	const OceanWaterStat s = oceanWater().take;
+	oceanWater().take = OceanWaterStat();
+	return s;
 }
 
 LightStat takeLightStat( int pass )
@@ -7347,10 +7675,9 @@ bool ssrRun( const SsrRun & t, std::string & why )
 		return refuse( "an input texture is missing" );
 	if ( t.prevOn && t.prevFmt != kRgba16f && t.prevFmt != kRgba32f )
 		return refuse( "the previous frame's format " + std::to_string( t.prevFmt ) + " has no twin" );
-	if ( S.pending ) {
-		v.vkWaitForFences( v.dev, 1, &S.fence, VK_TRUE, 1000000000ull );
-		S.pending = false;
-	}
+	if ( std::string fw; !fenceDone( S.fence, S.pending, "ssr", fw ) )
+		return refuse( fw );
+	S.pending = false;
 	std::string w;
 	if ( !ssrStatic( w ) || !ssrSems( w ) )
 		return breakOff( w );
@@ -8023,10 +8350,9 @@ bool csmRun( const CsmRun & t, std::string & why )
 		if ( t.tex[k] && !sharedTargetIs( t.key[k], t.tex[k] ) )
 			return refuse( "a cascade target is not the shared one" );
 	// the last run is done before its command buffer, buffers and framebuffers are touched again
-	if ( S.pending ) {
-		v.vkWaitForFences( v.dev, 1, &S.fence, VK_TRUE, 1000000000ull );
-		S.pending = false;
-	}
+	if ( std::string fw; !fenceDone( S.fence, S.pending, "csm", fw ) )
+		return refuse( fw );
+	S.pending = false;
 	std::string w;
 	if ( !csmStatic( w ) || !csmSems( w ) )
 		return breakOff( w );
@@ -8460,10 +8786,9 @@ bool objRun( const ObjRun & t, std::string & why )
 		|| ( sh->fmt != VK_FORMAT_X8_D24_UNORM_PACK32 && sh->fmt != VK_FORMAT_D32_SFLOAT && sh->fmt != VK_FORMAT_D16_UNORM ) )
 		return refuse( "the prepass target is not the shared depth one" );
 	// the last run is done before its command buffer, buffers and framebuffer are touched again
-	if ( S.pending ) {
-		v.vkWaitForFences( v.dev, 1, &S.fence, VK_TRUE, 1000000000ull );
-		S.pending = false;
-	}
+	if ( std::string fw; !fenceDone( S.fence, S.pending, "obj", fw ) )
+		return refuse( fw );
+	S.pending = false;
 	std::string w;
 	if ( !objStatic( w ) || !objSems( w ) )
 		return breakOff( w );
@@ -8569,6 +8894,7 @@ ObjStat takeObjStat()
 #include "features/vkframe/vkfog.inc"  // lane VKFAR2: the air's integrate (the froxel volume) on the view
 #include "features/vkframe/vkflare.inc"  // lane VKFAR2 P9: the lens-flare sprites in the deferred tone pass
 #include "features/vkframe/vkpost7.inc"  // lane VKFAR2 P7: DoF, motion blur and object blur in the deferred tone pass
+#include "features/vkframe/vkobjpipe.inc"  // lane VKOBJ4: the bl twins' shaded pipelines (row G4 slice 4)
 #include "features/vkframe/vkddgi.inc"  // lane VKFAR3: the DDGI probe atlas imported from bakert's device
 
 namespace
@@ -8583,8 +8909,20 @@ bool vkPart( int k, int w, int h, int vs, std::string & why, bool & rebuild, WwV
 	const ViewSlot * vw = vs >= 0 ? &view().slot[vs] : nullptr;
 	const int vSamples = view().samples;
 	const double tw = nowMs();
+	if ( !fenceDone( s.fence, s.pending, "present worker", why ) ) {
+		sp.fenceMs += nowMs() - tw;
+		// the fence still belongs to the last submit: GL's signal is carried by an empty batch with no fence
+		if ( !s.glWaited ) {
+			const VkPipelineStageFlags st = VK_PIPELINE_STAGE_TRANSFER_BIT;
+			VkSubmitInfo si { VK_STRUCTURE_TYPE_SUBMIT_INFO };
+			si.waitSemaphoreCount = 1;
+			si.pWaitSemaphores = &s.glDone;
+			si.pWaitDstStageMask = &st;
+			v.vkQueueSubmit( v.queue, 1, &si, VK_NULL_HANDLE );
+		}
+		return false;
+	}
 	if ( s.pending ) {
-		v.vkWaitForFences( v.dev, 1, &s.fence, VK_TRUE, 1000000000ull );
 		v.vkResetFences( v.dev, 1, &s.fence );
 		s.pending = false;
 	}
@@ -8720,7 +9058,13 @@ bool vkPart( int k, int w, int h, int vs, std::string & why, bool & rebuild, WwV
 	if ( pr == VK_SUBOPTIMAL_KHR || pr == VK_ERROR_OUT_OF_DATE_KHR )
 		rebuild = true;
 	if ( c.capture ) {
-		v.vkWaitForFences( v.dev, 1, &s.fence, VK_TRUE, 1000000000ull );
+		if ( std::string fw; !fenceDone( s.fence, true, "capture", fw ) ) {
+			// the copy may still run: its buffer is left (a leak beats freeing it in use), no picture this frame
+			c.capture->clear();
+			c.capture = nullptr;
+			why = fw;
+			return false;
+		}
 		void * m = nullptr;
 		c.capture->assign( size_t( bytes ), 0 );
 		if ( bufMem && v.vkMapMemory( v.dev, bufMem, 0, bytes, 0, &m ) == VK_SUCCESS ) {
@@ -8881,10 +9225,10 @@ void lightSay( int pass, bool wanted, const char * glWhy )
 {
 	if ( pass < 0 || pass >= LightPasses )
 		return;
-	static const char * const kName[LightPasses] = { "ao", "contact", "ssgi", "gihalf" };
+	static const char * const kName[LightPasses] = { "ao", "contact", "ssgi", "ocean", "gihalf" };
 	static const char * const kWhat[LightPasses] = { "ao_vk: 4 mips, raw, across, fin, or aox_vk: a ported method's stages; gbuf on GL",
 		"contact_vk: the shadow lines",
-		"ssgi_vk: the cast",
+		"ssgi_vk: the cast", "ocean_vk: spectrum, 14 FFT stages, layers, 7 mips",
 		"gihalf_vk: the DDGI cascades' read in place; the volume mask on GL" };
 	static QString said[LightPasses];
 	static double at[LightPasses] = {};
@@ -8913,6 +9257,14 @@ void lightSay( int pass, bool wanted, const char * glWhy )
 		line += QStringLiteral( ", on GL %1 frames (last: %2)" ).arg( st.gl ).arg( QString::fromStdString( st.glWhy ) );
 	if ( st.fails > 0 )
 		line += QStringLiteral( ", %1 refused to GL (last: %2)" ).arg( st.fails ).arg( QString::fromStdString( st.failWhy ) );
+	if ( pass == LightOcean ) {  // lane VKWATER4: texture copies per frame, the pass's own plus the water twins' ocean inputs
+		const OceanWaterStat ws = oceanWater().say;
+		oceanWater().say = OceanWaterStat();
+		const int n = std::max( st.runs, 1 );
+		line += QStringLiteral( "; copies per frame %1 (pass %2, water twins %3), shared %4 in place" )
+			.arg( double( st.copies + ws.copies ) / n, 0, 'f', 1 ).arg( double( st.copies ) / n, 0, 'f', 1 )
+			.arg( double( ws.copies ) / n, 0, 'f', 1 ).arg( double( st.shared + ws.shared ) / n, 0, 'f', 1 );
+	}
 	said[pass] = line;
 	qInfo().noquote() << line;
 }
@@ -9017,6 +9369,42 @@ void fogSay( bool wanted, const char * glWhy )
 		line += QStringLiteral( ", on GL %1 frames (last: %2)" ).arg( st.gl ).arg( QString::fromStdString( st.glWhy ) );
 	if ( st.fails > 0 )
 		line += QStringLiteral( ", %1 refused to GL (last: %2)" ).arg( st.fails ).arg( QString::fromStdString( st.failWhy ) );
+	said = line;
+	qInfo().noquote() << line;
+}
+
+// lane VKFAR2 (row L8): rain / snow's route line, one a 5 s window while it is wanted on Vulkan
+void precipSay( bool wanted, const char * glWhy )
+{
+	static QString said;
+	static double at = 0.0;
+	const QString head = QStringLiteral( "vk precip: " );
+	if ( !wanted ) {
+		const QString line = head + QStringLiteral( "runs on GL (%1)" ).arg( QString::fromUtf8( glWhy ? glWhy : "" ) );
+		if ( line != said ) {
+			said = line;
+			qInfo().noquote() << line;
+		}
+		return;
+	}
+	const double now = nowMs();
+	if ( now - at < 5000.0 && said.startsWith( head + QStringLiteral( "runs on V" ) ) )
+		return;
+	at = now;
+	const FxStat st = takePrecipStat();
+	QString line;
+	if ( st.runs > 0 )
+		line = head + QStringLiteral( "runs on Vulkan %1 (a record pass + instanced quads into the tone frame + stencil, one crossing "
+			"a run; %2 pipelines built in %3 ms; %4 input copies; drawing thread %5 ms, max %6)" )
+			.arg( st.runs ).arg( st.pipelines ).arg( st.buildMs, 0, 'f', 1 ).arg( st.copies )
+			.arg( st.cpuMs / st.runs, 0, 'f', 3 ).arg( st.maxMs, 0, 'f', 3 );
+	else
+		line = head + QStringLiteral( "runs on Vulkan wanted, 0 run" );
+	if ( st.gl > 0 )
+		line += QStringLiteral( ", on GL %1 runs (last: %2)" ).arg( st.gl ).arg( QString::fromStdString( st.glWhy ) );
+	if ( st.fails > 0 )
+		line += QStringLiteral( ", %1 refused to GL (last: %2; %3 packs on refused runs, 0 when the refusals come first)" )
+			.arg( st.fails ).arg( QString::fromStdString( st.failWhy ) ).arg( st.refusedPacks );
 	said = line;
 	qInfo().noquote() << line;
 }
@@ -9234,4 +9622,5 @@ bool frame( QOpenGLWindow * w, const std::function<void()> & paint )
 
 #include "features/vkframe/vkwater.inc"  // lane VKWATER1: the water's route and census (row G5)
 #include "features/vkframe/vkfarground.inc"  // lane VKFAR3: the far ground's ring-0 terrain (row G3)
+#include "features/vkframe/vkunder.inc"  // lane VKWATER4 (L7): the underwater fog on the view
 #include "features/vkframe/vktaareactive.inc"  // lane VKFAR7: the TAA mask's reactive pass (taainputs.cpp pass 4)

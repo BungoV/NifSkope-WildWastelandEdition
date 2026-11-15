@@ -7,7 +7,9 @@ BSD License - see nifskope.h
 /* lane MODULES1 (lights): the lamp half of the cell light law, split out of gl/celllights.cpp: flicker, XEMI
  * lights, gobo patterns, fog scale, .nifx fixture lights, the lamp cube shadows and the light spheres. */
 #include "gl/celllights.h"
+#include "features/vkframe/vkpresent.h"	// lane VKOBJ4: the shadow cubes as a shared cube array (WW_VKOBJ_SHADE)
 #include "wwswitch.h"	// lane TESTDRIVER1: the WW_* switch store
+#include "features/vkframe/vkpresent.h"	// lane VKFAR6 (L8 term 5): the lamp cubes shared with the Vulkan view
 
 #include "cellclustergl.h"
 #include "gl/alphabgsm.h"	// the side passes' alpha-test census
@@ -579,19 +581,48 @@ static void shadowDump( Scene * scene )
 		f.write( ( wwCellShadowEcho( scene ) + QLatin1Char( '\n' ) ).toUtf8() );
 }
 
+/* lane VKFAR6 (L8 term 5): the lamp cubes are a shared D16 cube array on the present device while the view is on Vulkan
+ * (the lit rain and snow read them in place); red WW_VKVIEW_LAMPSHADOW_RED=1 keeps GL's own */
+static bool shadowShareWanted()
+{
+	return WwVkPresent::shareWanted( "WW_VKVIEW_LAMPSHADOW_RED" ) || wwEnv( "WW_VKOBJ_SHADE" ).trimmed() == "1";  // BATCH1114: or VKOBJ4's runs
+}
+
+//! the shared cubes' key: the renderer's (gpus() is a QHash, whose values move when it grows; an odd address no object has)
+static std::uintptr_t shadowShareKey( Renderer * r )
+{
+	return reinterpret_cast<std::uintptr_t>( r ) + 1;
+}
+
 //! the depth cube array (kShadowSlots cubes of face x face) and its framebuffer, once
 static void shadowAlloc( Renderer * r, Gpu & g, int face )
 {
+	const std::uintptr_t key = shadowShareKey( r );  // BATCH1114: VKFAR6's key (gpus() moves &g.shTex)
+	if ( g.shTex && g.shShared && !WwVkPresent::sharedTargetIs( key, g.shTex ) ) {
+		g.shTex = 0;	// lane VKOBJ4: the present device dropped it (its GL name went with it); the slots are empty
+		g.shShared = false;
+		std::fill( g.shSlot, g.shSlot + kShadowSlots, -1 );
+		g.shStamp++;
+	}
 	if ( g.shTex )
 		return;
 	auto fn = r->fn;
 	GLint prevActive = 0;
 	fn->glGetIntegerv( GL_ACTIVE_TEXTURE, &prevActive );
-	fn->glGenTextures( 1, &g.shTex );
+	unsigned shared = 0;
+	std::string why;
+	g.shAsked = shadowShareWanted();  // what the remake test compares (a refused share falls back to GL's own, kept)
+	g.shShared = g.shAsked && WwVkPresent::sharedTarget( shadowShareKey( r ), 3, face, face,
+		6 * kShadowSlots, GL_DEPTH_COMPONENT16, shared, why ) && shared;
+	if ( g.shShared )
+		g.shTex = shared;
+	else
+		fn->glGenTextures( 1, &g.shTex );
 	fn->glActiveTexture( GLenum( GL_TEXTURE0 + kShadowUnit ) );
 	fn->glBindTexture( GL_TEXTURE_CUBE_MAP_ARRAY, g.shTex );
-	fn->glTexImage3D( GL_TEXTURE_CUBE_MAP_ARRAY, 0, GL_DEPTH_COMPONENT16, face, face, 6 * kShadowSlots, 0,
-		GL_DEPTH_COMPONENT, GL_UNSIGNED_SHORT, nullptr );
+	if ( !g.shShared )
+		fn->glTexImage3D( GL_TEXTURE_CUBE_MAP_ARRAY, 0, GL_DEPTH_COMPONENT16, face, face, 6 * kShadowSlots, 0,
+			GL_DEPTH_COMPONENT, GL_UNSIGNED_SHORT, nullptr );
 	fn->glTexParameteri( GL_TEXTURE_CUBE_MAP_ARRAY, GL_TEXTURE_MIN_FILTER, GL_LINEAR );
 	fn->glTexParameteri( GL_TEXTURE_CUBE_MAP_ARRAY, GL_TEXTURE_MAG_FILTER, GL_LINEAR );
 	fn->glTexParameteri( GL_TEXTURE_CUBE_MAP_ARRAY, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE );
@@ -601,7 +632,8 @@ static void shadowAlloc( Renderer * r, Gpu & g, int face )
 	fn->glTexParameteri( GL_TEXTURE_CUBE_MAP_ARRAY, GL_TEXTURE_COMPARE_FUNC, GL_LEQUAL );
 	fn->glBindTexture( GL_TEXTURE_CUBE_MAP_ARRAY, 0 );
 	fn->glActiveTexture( GLenum( prevActive ) );
-	fn->glGenFramebuffers( 1, &g.shFbo );
+	if ( !g.shFbo )
+		fn->glGenFramebuffers( 1, &g.shFbo );
 	g.shFace = face;
 }
 
@@ -1398,10 +1430,24 @@ void wwCellShadowPass( Scene * scene )
 	}
 	// lane LAMPSHADOW1: the tier's face edge; a change remakes the cube array and empties the slots
 	const int face = wwCellLampShadowFace();
-	if ( g.shTex && g.shFace != face ) {
-		r->fn->glDeleteTextures( 1, &g.shTex );
+	const std::uintptr_t shKey = shadowShareKey( r );
+	if ( g.shTex && g.shShared && !WwVkPresent::sharedTargetIs( shKey, g.shTex ) ) {
+		g.shTex = 0;	// lane VKFAR6: the present device let the shared cubes go (the name is gone with them)
+		g.shShared = false;
+		r->fn->glDeleteFramebuffers( 1, &g.shFbo );
+		g.shFbo = 0;
+		std::fill( g.shSlot, g.shSlot + kShadowSlots, -1 );
+		g.shStamp++;
+	}
+	if ( g.shTex && ( g.shFace != face || g.shAsked != shadowShareWanted() ) ) {	// lane VKFAR6: or the view left / joined Vulkan
+		if ( g.shShared )
+			WwVkPresent::sharedTargetDrop( shKey );
+		else
+			r->fn->glDeleteTextures( 1, &g.shTex );
+		g.shShared = false;
 		r->fn->glDeleteFramebuffers( 1, &g.shFbo );
 		g.shTex = g.shFbo = 0;
+		g.shShared = false;
 		std::fill( g.shSlot, g.shSlot + kShadowSlots, -1 );
 		g.shStamp++;
 	}

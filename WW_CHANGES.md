@@ -38,57 +38,75 @@ differently after a remade sheet came back at the same image handle.
 - A far card sheet's Vulkan copy remembered which image it had filled by the image handle alone. A copy remade at the
   same handle was left empty and the cards read garbage. The same for the empty shadow cube's clear.
 
-## VKFAR3 G3 (2026-11-14): the near far ground (ring 0's live terrain) draws on Vulkan (WW_VKVIEW=1)
+## VKOBJ5 round 7 (2026-11-15): object fence waits refuse the frame; twins take only their own keys
 
-Changed, not built, not checked live.
+Changed, not built, not checked live. Offline: regress gates OK, every green run prints no `vk fence:` line; the reds
+below FAIL their gate (blview; objview reaches oneshot only).
 
-- With Show > Far ground at "Live, shader decals" (the default) and sun shadows on, ring 0's terrain shapes
-  (fo4_cellcsmfgl) draw on the Vulkan view, one draw a shape.
-- While the view is on, the ground grid, the layer textures (~180 MB) and the decal atlas are made on the present
-  device and shared with GL, so no draw copies them. The view off keeps GL's own textures as before. If one cannot be
-  shared, GL draws the shape and the line says why.
-- Red WW_VKVIEW_FARGROUND_RED=1 keeps GL's draw. A `vk farground:` line counts shapes drawn on Vulkan and on GL and
-  names why GL kept a shape: Baked sheet, no sun shadows (fo4_cellfgl), "Live, cached pages", the oldpages red,
-  the textures not shared.
-- Offline gate tests/vkframe/fargrounddraw.sh against GL's own program: 2 seeds, depth EXACT, colour inside the bar
-  (max rel 0.0098, mipped atlas), GL on the shared textures vs GL on plain ones EXACT, three copies fewer a draw, every
-  red FAILS (offset, plain samplers, cull, depth test, polygon offset, first index, grid and decals rewritten after
-  GL's draw).
-- Round 2: a frame with no Vulkan view (a resize, a grab) no longer hands the shared textures back to GL and makes
-  them again the next frame (each round trip was ~60-115 ms of remake and refill for the layers alone). They go back
-  to GL only when the view is turned off or the red is set.
-- Offline gate tests/vkframe/fargroundoff.sh (CPU only): with the view off, the far ground's GL uploads and frees match
-  c7e7d1a2 (the tree before the lane) call for call, cut from both versions of cellfarground.cpp: 535 of 535 calls the
-  same, no call to the present device. Reds: a flipped argument and a removed call are caught, sharing on differs. It
-  also walks the shared textures through view on / no view / off / a shutdown / a refusal / no key slot; the old rule
-  as red churns twice.
-- Crossing cells costs nothing here: the far ground is only prepared when a cell opens without streaming; streamed
-  roaming never makes it, so nothing is dropped or made on a crossing. The same gate checks the rest of pass() is the
-  tree's text before the lane (95 of 95 lines, a changed line caught).
+- The bindless object run's wait (opRunWait), the object texture flush (otFlush) and the one-shot submit (oneShot) go
+  through WwVkPresent::fenceRed / fenceMiss. A missed wait prints `vk fence:` and the frame stays on GL: no slot is
+  touched, no unsignalled fence is reused, resources freed while in flight are held until a later wait passes, and
+  oneShot waits the device idle and resets its fence.
+- Reds: WW_VKFENCE_RED=objbl, objtex, oneshot.
+- Twins 2-6 now take only their base or RT GI key, like twins 7-9: a key with an extra loader define (a debug view, a
+  probe build) is another program and stays on GL. tests/vkframe/twinpick: red anybase (the old rule) FAILs.
 
-## VKFAR3 A1 SSGI (2026-11-14): the SSGI cast stays on Vulkan when the traced volume carries the emission
+## VKWATER4 (2026-11-15): the bloom chain's Vulkan frames also hand a stuck frame to GL
 
-Changed, not built, not checked live.
+Changed, not built, not checked live; no offline harness reaches these waits (reds: WW_VKFENCE_RED=frame cap,
+frame layout, chain layout).
 
-- With RT GI on (WW_CELL_RTDDGI=1, the all-on route), SSGI takes the emission off what it gathers (the traced volume
-  counts it). The Vulkan cast (WW_VKVIEW=1) refused that case and the cast went back to GL; it now subtracts the same
-  emission on Vulkan. Only the emissive cast's own chain (red emitchain) still stays on GL, named on the `vk ssgi:` line.
-- Gate tests/vklight/light.sh job sg_E (the ultra tier, half size, 4 x 12, the emission over the bright texels): BOUND
-  against GL (107 of 1969920 values 1 ulp apart), red ssgie (the emission read as zero) FAILS (274244 differ);
-  lightview.sh runs it through the app's lightRun: BOUND, red FAILS. sg_A / sg_B / sg_S unchanged (27 / 106 / 231).
+- The bloom / combine / exposure frames in flight, and the one-time layout step when their shared frame or chain is
+  made, went on when the wait for earlier Vulkan work timed out. That frame now stays on GL with a `vk fence:` line;
+  a frame or chain that is still in use when it is remade is left, not freed.
 
-## VKFAR3 A1 AO methods (2026-11-14): XeGTAO and GTAO on Vulkan (WW_VKVIEW=1), gate red
+## VKWATER4 (2026-11-15): a stuck Vulkan pass hands its frame to GL instead of writing over it
 
-Changed, not built, not checked live. With the view off nothing changes.
+Changed, not built, not checked live. Offline: each pass's harness passes as before with no new line, and with its
+red (WW_VKFENCE_RED=<pass>, a faked 1 s timeout) it is refused with its reason.
 
-- With the view on Vulkan, the XeGTAO and GTAO methods (WW_CELL_AO_METHOD) run in the same Vulkan pass as the
-  obscurance: depth mips, the AO term and its edges, the two blur stages. Red WW_VKVIEW_AOX_RED=1 keeps them on GL.
-  Log line `vk aox:` says which route ran and why.
-- HBAO stays on GL: its first step can land on the pixel itself, where two equal positions give a random direction
-  (3.6 % of pixels differ by up to 239 codes between GL and Vulkan; neither is right). Fixing that changes GL's shader.
-- Offline gate tests/vklight/light.sh on the mem_main dump: all three jobs within their bars, 3 reds FAIL. On mem_base
-  (lightview.sh) the first depth mip of the synthetic job has 1 value at 5 ulp against its 4 ulp bar (the AO result
-  itself is within its bar): LIGHTVIEW is red until that bar is decided.
+- The tone, TAA, sky, volumetric / cloud, light (AO, contact, SSGI, ocean), SSR, cascade shadow, object depth and
+  underwater passes, the view and the present went on when the wait for their last Vulkan work timed out (or the
+  device was lost), rewriting commands the GPU might still be running. That frame now stays on GL, with a
+  `vk fence:` line naming the pass and the wait's result. At shutdown a slot still in use is left, not freed.
+
+## VKWATER4 (2026-11-15): the underwater fog's depth view is remade with a remade frame
+
+Changed, not built, not checked live. Offline: tests/vkframe/underdraw.sh GATE OK.
+
+- The underwater fog kept its view of the frame's depth while the image handle stayed the same, so a frame remade at the
+  same handle (a resize) could leave it reading the freed depth. Making the frame now counts as a new shared target and
+  the view is made again.
+
+## VKWATER4 (2026-11-15): a stuck Vulkan water draw hands the frame to GL instead of writing over it
+
+Changed, not built, not checked live. Offline: tests/vkframe/waterdraw.sh's new red (a faked 1 s timeout) is refused
+with its reason and the next draw passes.
+
+- When the wait for the last Vulkan crossing timed out (or the device was lost), the water draw went on and rewrote
+  commands the GPU might still be running. That frame now stays on GL, with a `vk water:` line naming the wait's result.
+
+## VKWATER4 (2026-11-15): the water's SSR ray pass no longer draws nothing after its depth format changes
+
+Changed, not built, not checked live. Offline: tests/vkframe/waterdraw.sh's D32F_S8 ray arm (fo4_waterlookm, RT build),
+150 runs (120 of them 6 processes at once) with 0 empty draws; the red (the old key) drew nothing in 2 of 30, each time on the
+trigger the harness now reports (`WATERDRAW ray handle reused: N runs`). With the trigger forced on every ray run
+(WW_WATERDRAW_RAYREUSE=1: the depth format flips each run and the target comes back at its freed handle), 30 of 30
+harness runs passed with the view remade 19 times each; the old key drew nothing on 29 of 30 cross-format runs that
+still had a device.
+
+- When the water ray pass's depth target was remade in another format (D24S8 to D32F_S8), Vulkan could keep a view of
+  the freed target and test depth against garbage, so the water drew nothing that frame on. The view is now remade
+  whenever a shared target was made, not only when the image handle differs.
+
+## VKWATER4 (2026-11-15): the water on the all-on route keeps its twins; an unknown input keeps it on GL by name
+
+Changed, not built, not checked live. Offline: GL's water programs built with the all-on RT set (WW_CELL_RESTIR,
+WW_CELL_RTDDGI, WW_CELL_RTDDGI_CASCADES) compile to the same driver code as without it (the water calls none of the RT
+GI / ReSTIR code), and tests/vkframe/waterdraw.sh passes against that build for the d and m twins.
+
+- The water's Vulkan route now checks that every input GL's water program reads has a slot in its twin; one that does
+  not keeps the water on GL with the names in the `vk water:` line.
 
 ## VKFAR3 A1 HBAO (2026-11-14): HBAO's centre-pixel step fixed, HBAO on Vulkan too (WW_VKVIEW=1)
 
@@ -142,16 +160,323 @@ Changed, not built, not checked live.
   read's stages turned off one by one: the Chebyshev test makes the big E misses, the bias makes the 66 fade misses,
   about 200 texels stay with every stage off. The read's text equals GL's; the rest is compiler lowering.
 
-## VKFAR2 L8 slice 1 (2026-11-14): rain / snow pass for the Vulkan view, not wired in (gate red)
+## VKWATER4 (2026-11-15): the ocean's arrays are shared in place, no copies per frame (WW_VKVIEW=1)
+
+Changed, not built, not checked live. Offline: oceanview arm 6, B / C / D at all 8 levels EXACT against the copy route
+(2 winds x 2 phases), lightRun copies 0 (copy route 146); waterdraw seed 3 EXACT against the copy route, ocean copies 0.
+
+- features/water/cellocean.cpp makes h0, q and the three arrays shared targets; ocean_vk.hlsl stages 7-10 write the
+  array levels in place, so the pass and the water draw copy nothing. The `vk ocean:` line counts copies per frame.
+- Red WW_VKVIEW_OCEAN_RED=prev: the water reads the other set (the frame before's) and must differ.
+
+## VKFAR2 L8 slices 1, 2a, 2b, 3 (2026-11-14/15): rain / snow pass for the Vulkan view (gate OK, not compiled into the app)
 
 Changed, not built, not checked live. Nothing in the app calls it yet, so no frame changes.
 
 - A Vulkan twin of the rain / snow draw without a geometry stage: a compute pass writes one record a particle in GL's
-  order, then each particle is four strip vertices, shaded by a frozen copy of the pixel stage. Unlit and unfogged only;
-  a lit cell, the fog or the roof map are refused.
+  order, then each particle is four strip vertices, shaded by a frozen copy of the pixel stage. Slice 1 was unlit and
+  unfogged; slice 2a below adds the fog and slice 3 the precipitation look. A lit cell and the roof map are still
+  refused.
 - Offline gate tests/vkframe/precipview.sh against GL's own program: rain near and snow far within the bar, every red
   seen, snow near FAILS (1.45 % of samples past 2 ulp, bar 0.05 %). Under review before any app hookup.
+- The particle maths of the compute pass and the corners now follow NV GL's own order of operations (read from the
+  driver's program binary), in a twin-local copy of the field function: snow far is now exact, rain near unchanged
+  (within the bar), snow near still fails (1.40 %, nearly all of it in whole pixels, so in the shading; GL's own
+  repeat of that case is not exact either). A
+  change to the shared field function must be copied into the twin. The gate also prints GL's own run-to-run noise
+  over 5 draws as a reference line (not the bar).
+- The earlier work-in-progress commit (ece0d2a3) says "kept local"; it was pushed like every lane commit.
+- Slice 2a, the air: the compute pass now runs the cell view's fog per particle (the air's five textures bound the
+  GL way), so a fogged cell is drawn instead of refused. Two new gate cases, rain near and snow far in fog: rain within
+  the bar (48 flips), snow exact, and a red that drops the air fails on both. A lit cell and the roof map are still
+  refused. Existing files touched: vkpresent.h (the pass's fields and textures), vkprecip.inc (its bindings) and the
+  precipview harness; no cell_precip_* file.
+- Slice 2b, the light, is not built: no offline fixture has a lit cell (sun + cascades, cell lights and their
+  cluster, cube shadows, the sky-visibility maps, the air medium) to gate it against GL. A lit cell stays on GL.
+  (Then. Now: the sun alone is built and gated, see slice 2b at the end of this section.)
+- Slice 3, the precipitation look (GL's cell_precip_look program: the raindrop's swept disc and flicker, the snow's
+  clump threshold, albedo and normal map): three new look shaders built from the same Vulkan files with the look
+  switched on, picked per run. Gate: the drop is within the bar (24 flips, drops sized 1-4 mm so its size ramp and
+  flicker are both live); the near snow look FAILS like the open snow near row (16503 flips, 1.1 %; GL's own 5 draws
+  differ by up to 193). Unlit, the snow's normal map cannot change a
+  sample, so it is bound but not yet checked; it needs the lit fixture. A red that draws a look run with the plain
+  pipelines fails on both cases.
+- The snow near row is not only the clock: at a small clock (37 s instead of 600 s) the textured near snow still fails
+  the same way (mostly whole pixels), and near snow with no texture fails too, with fewer flips (5869, 0.39 %). GL does
+  not repeat itself exactly on any near snow case either. Cause still open.
+- Existing files touched in slice 3: vkpresent.h (the look's fields, a 192-byte record, the red), vkpresent.cpp (three
+  includes), vkprecip.inc (the look pipelines and the normal map's binding), precip_view_cs / vs / ps.hlsl (the look
+  under PC_LOOK; the pixel stage's normal map moved from t1 to t2, which the record buffer holds), vkframe_spirv.sh and
+  tests/spvsync/check_spv.py (the three look kernels), the precipview harness. The plain kernels' SPIR-V is unchanged.
+- When the app hooks this up, src/features/weather/cellprecip.cpp must hand the run to Vulkan where it draws GL's
+  points (the rule for this lane keeps that file closed: a note, not a change).
+- Localising the snow near red (harness only, a9957342). GL's particle stage was captured twice and came out
+  identical, so GL's near snow has no seed or clock that changes between runs. Its run-to-run noise comes from drawing
+  the pixels. Per particle, the Vulkan records match GL's capture: colour, texture box and light are exact for every
+  particle, and only a few corner positions differ (17 of 3146 by more than 4 ulp). Most flipped pixels (5883 of 6030)
+  are under no differing particle, so the red sits in the pixel stage.
+- The app hookup (5e889438, not compiled, not run): cellprecip.cpp now offers each rain / snow run to the Vulkan view
+  first and draws GL's points when it is refused (two lines: the call plus the header include). New `vk precip:` log
+  line, red WW_VKVIEW_PRECIP_RED=1 = GL's. Expected in the app today: most runs stay on GL. Lit cells (sun or
+  interior) are refused until slice 2b, and the app's atlases are compressed and clamp-to-edge, a sampling the pass
+  does not take. A volume-fogged run is refused while WW_CELL_FOGLEAK is compiled in (the default), because the gate
+  judged the program without it. The gate's own atlas is RGBA8 with repeat, which the app never uses.
+- The app's real path (not compiled into the app, not run there; gate run offline): the pass now takes the app's
+  compressed, clamp-to-edge, mipmapped atlases, and the gate draws with the same kind (BC3, and sRGB BC3 on one case;
+  the rain atlas's real format was not found on disk). The rain cases read an atlas now too. The fog-leak define the
+  loader compiles into GL's program by default is compiled into the Vulkan pass as well, so fogged runs are no longer
+  refused; only a run with the define switched off goes back to GL. New red: the atlas dropped (fails in every case
+  that reads one). Gate (precipviewB1): far snow EXACT, the drop BOUND, but near rain with its atlas now FAILS
+  (335 flips of 151255, 0.22 %; it was BOUND with no atlas). Pinning the atlas to its top level does not clear it
+  (232 flips), and GL differs from its own repeat draw there (36 flips), so it sits with the near snow's open
+  pixel-stage rows. Lit cells stay on GL.
+- (Closed by the ruling below; kept as the record.) Was an open red: textured near rain (rain_near_disc 335 flips, rain_near_fog 342) failed, and the hookup stays as
+  it is behind WW_VKVIEW=1 for the flight to judge. Localised (harness diagnostics only, reverted; nothing committed
+  from them): with blending off, GL and Vulkan write bit-identical colours, so the pixel stage itself matches. Every
+  flipped pixel is one where a streak covers only part of the pixel: Vulkan keeps its four samples apart, while GL
+  stores one value in all four, equal to the mean of Vulkan's four (within 2 half-float steps): rain_near_disc 85 of 85,
+  rain_near_fog 86 of 86, snow_near_tex 4207 of 4345, snow_near_disc 1609 of 1617. This is NOT what GL does in
+  general: in the other partly covered pixels GL keeps the samples apart and matches Vulkan sample for sample
+  (rain_near_disc 21702 of them; far snow all 6149). What makes GL merge the samples in these few pixels is not found
+  yet (not the slab half: both halves show it). GL's state at the draw is ordinary 4x multisampling (no
+  alpha-to-coverage, no sample shading, no sample mask); by reading glview.cpp the app draws with the same state, but
+  that was not run. (Then: the cause open, lit waiting. Now: the NV GL blend quirk, see the next item.)
+- Ruling 11-14 (coordinator): NVIDIA GL's 4x blend sometimes writing a pixel's mean to all its samples is a driver
+  quirk; Vulkan's per-sample blend is the right one. tests/vkframe/precipview.cpp now judges Vulkan against a
+  per-sample reference built from GL's own programs: each particle drawn on its own, in draw order, with blending off
+  into a 4x float target, then blended sample by sample by GL's own blend unit at 1x. Its checks all read 0 in every
+  case (one constant blend at 1x vs 4x; the same loop with blending off vs one GL 4x draw with blending off; the
+  reference vs GL's 4x frame, and GL's four repeat draws, on every pixel no particle ever split). Gate precipviewE2 OK:
+  rain_near_disc, rain_near_fog, snow_far_mean, snow_far_fog, rain_drop_look EXACT; snow_near_tex BOUND (8 flips of
+  1649185), snow_look_near BOUND (0 flips), snow_near_disc BOUND (0 flips). Every red FAILs, and a new harness red
+  (Vulkan's four samples averaged per pixel) FAILs in every case. Kept as info lines: the verdict against GL's 4x
+  frame (as before) and a count of GL's merged pixels (snow_near_tex 4469, of them 4457 hold the reference's mean;
+  rain_near_disc 103 of 103). The repeat clause now asks the reference built twice and GL's stencil drawn twice to be
+  EXACT; GL's 4x colour drawn twice is info, since it varies only on merged pixels (all differing pixels hold one value
+  in one of the two draws). Under the old clause (GL 4x drawn twice EXACT) the first run (E1) failed on snow_near_tex,
+  rain_near_disc, snow_look_near and snow_near_disc (80, 24, 84 and 12 flips): the move awaits the coordinator's word.
+- Same-name atlas reload: cannot happen today. cellprecip.cpp loads each atlas once per texture path into its
+  lifelong cache and never deletes or re-uploads it (a failed load deletes its name before anyone sees it), so a GL
+  name never gets new pixels and the copy kept per name and Vulkan image stays right. A change there that reloads an
+  atlas in place must also make vkprecip.inc copy it again.
+- Slice 2b, the sun (11-15; e7e88261, 3fcae7fe, 0ff69cdd; not compiled into the app, not run there): a lit twin of
+  the record pass (precip_lit_view_cs.hlsl, the plain file with PC_LIT on) lights each particle once by the sun the GL
+  way (sun colour, phase, wrap, the thin / thick mix), picked per run with its own bindings; the inputs the sun path
+  never reads at run time (cell lights, cluster, cube and cascade shadows, sky-visibility maps, terrain air) are bound
+  to small zero stand-ins. Two new gate cases, near rain lit and far snow in fog lit, judged against the same
+  per-sample reference: both EXACT. Each proves the sun is live in GL first (sun off, and a changed thin / thick mix,
+  each move over 150000 / 28000 samples), and a new red that drops the light FAILs on both. The 8 unlit cases'
+  verdicts are unchanged. Still on GL (refused one by one): interiors, any light term past the sun (lamps, GI,
+  ambient: refused whenever their term is on, even idle, since the gate judged the sun term alone), cascade shadows,
+  air drift, terrain air, a local sun, particle volume reds, and the look when lit. The air's terms default to all
+  four on, so in the app today every lit run still goes to GL unless WW_CELL_AIR_TERMS=1. The view and projection
+  block is zero on the Vulkan side; a gate check fills GL's with non-zero values and its particle stage moves 0
+  floats, so the sun path does not read it. The first lit run moved the thin / thick mix on only 51 samples, because that case's sun
+  sat nearly edge-on to the particles; the case got its own sun, the bar stayed.
 - No existing rain / snow shader and no cellprecip.cpp line changed.
+- Round 3 (11-15; not compiled into the app, not run there). post7_copy_ps.hlsl now names its profile, so the HLSL
+  check reads OK on all 308 files (7ba2197b). A refused rain / snow run no longer packs the light block first: the
+  refusals run ahead of the pack, and a gate probe counts 0 packs on a refused run (its red, packing first, counts 3)
+  (ad9060a7). The lamps, first part (d89e97ce bar, cc0deb3a): the lit pass reads GL's cell light list and walks
+  every lamp the way GL's flat loop does (point, spot, hemisphere and box lamps). Two new gate cases with five lamps
+  each: near rain within the bar, far snow exact; each lamp shape moves over 13000 samples in GL and a lamp out of
+  reach moves none; a red that drops the lamps FAILs on both; the 84 older verdicts are unchanged.
+- The lamps' cluster lists (3105a0a4 bar, 2aef0b87): the app's rain / snow draw hands the Vulkan pass the frame's global
+  uniforms (the lists need the camera's projection) and the list buffer is shared; a new gate case lights its lamps
+  through the lists within the bar, and dropping the projection or the lists FAILs. A census line in the gate lists every
+  light term the app's default turns on that Vulkan still refuses (2dce06fc).
+- The local sun law outdoors (d7233ec4 bar, a42d217b): exact on a new gate case; dropping it FAILs.
+- Terrain air outdoors (ebc028aa bar, aca755f0): the ground layer of the air on the grid. A new far-snow gate case is
+  exact (28114 samples); in GL, turning the grid off moves 24487 samples; a red that drops it FAILs (23472 flips).
+- GI (VKFAR5, e34a55d7 bar, e4335102): GL's default rain / snow program has no GI read at all (the GI switch is
+  compiled as off unless the old baked probe GI's red is on), so the GI term no longer sends a run to GL. A new near
+  rain case with the GI term on is exact (151278 samples). Turning the GI term on or off changes nothing in GL's particle
+  stage, and the ray-traced GI variant of GL's program reads no GI there either. A GL program that does read a GI
+  volume (the baked probe GI's red) is refused by name. Its GI moves 151219 samples in GL, and a red that skips the
+  refusal FAILs on it (150898 flips).
+- Ambient (VKFAR5, 4f51998b bar, then the lift): the weather's ambient, the Ambient Only volumes and the air's keep (the
+  air's env history, now shared into the Vulkan pass) light rain / snow on Vulkan. Two new gate cases within the bar:
+  near rain with a sphere and a box volume (151290 samples; the volumes move 63000 in GL, the box alone 30248, the
+  sphere alone 32843) and far fogged snow with the keep (28114; the keep moves 21014). Dropping the ambient, its history
+  or the frame's projection FAILs. A run with the keep on and no frame uniforms is refused.
+- Gate fixes on the way: every GL case now starts from its program's freshly linked uniforms (17324866; four verdicts
+  moved by 1 ulp, all inside the bar), and the lamps' out-of-reach check ignores pixels where NVIDIA's own 4x blend
+  merged differently between two draws (72f544a1; 8 flips there were GL's own draw-to-draw noise).
+- Sun shadow and clouds (VKFAR6, 8f0259a8 bar, then c05f5e8f): the sun's cascade shadow map (shared into the Vulkan
+  pass, read through a compare sampler like GL's) and the cloud shadow map light rain / snow on Vulkan. New gate case:
+  near rain under three cascades with a striped occluder map and a cloud map (151322 samples, EXACT; the cascades move
+  61991 in GL, forcing one cascade 47435, the clouds 20983). Dropping the shadow map, the shadow or the clouds' map, or
+  swapping two cascades, FAILs. A cascade map that is not shared, has another border or filter, or sits on a GPU
+  without linear D16 filtering is refused.
+- Air drift (VKFAR6, d837b3b6 bar, then 32fc79eb): the drifting air's 3D noise is shared into the Vulkan pass, so the
+  sun's column and the lamps' paths through the drift light rain / snow on Vulkan. New gate case: far snow with lamps in
+  fog with two noise octaves (28114 samples, EXACT; the drift moves 21759 in GL, zero octaves 25534). Dropping the
+  noise or the drift, or swapping the octaves, FAILs. The case's air is 150x the captured density: the captured air
+  moved the sun by less than one half-float step.
+- Lamp shadows (VKFAR6, 414e82f8 bar, then a952f301 and 4be20dd1): the lamps' shadow cubes are shared with the
+  Vulkan view and read in place, so lamp-lit rain / snow is shadowed on Vulkan as on GL. New gate case: near rain with
+  an omni, a spot and a hemisphere casting into striped cubes (151310 samples, 2 halves 1 ulp apart, 0 flips); shadows
+  off moves 84194 in GL, the fade off 44644. Dropping the cubes, the shadows or the fade FAILs. Red
+  WW_VKVIEW_LAMPSHADOW_RED=1 keeps the cubes GL's own. The app half is not built by the offline gate.
+- Lamp gobos (VKFAR6, 35ec4cab bar, then the lift): the lamps' patterns travel in the light buffer the Vulkan pass
+  already copies whole, so the refusal is gone and patterned lamps tint rain / snow on Vulkan as on GL. New gate case:
+  near rain with a patterned spot, omni and hemisphere (151330 samples, 2 halves 1 ulp apart, 0 flips); gobos off moves
+  99481 in GL, each pattern's mean alone 93558, u flipped 93946. Dropping the gobos or their table, or flipping their
+  uv, FAILs. (Lift f9504965.)
+- Roof map (VKFAR6, 89032039 bar, then 080ca32d): GL's map of the highest roof over each spot is shared with the
+  Vulkan pass, so rain / snow under a roof is dropped on Vulkan as on GL, plain, look and lit alike. New gate cases:
+  near rain plain (EXACT), near rain lit (151274 samples, 2 halves 1 ulp apart, 0 flips) and near snow with the look
+  (52 halves, max 2 ulp, 0 flips); the roof off moves 32408 / 42415 / 734579 samples in GL. Dropping the map, turning
+  it off or swapping its axes FAILs in each case.
+- Interiors (VKFAR6, 3aaa59eb bar, then 33e277fd): an interior's own particle law (no sun shadow, no veil, its own
+  ambient switch, the ambient's GI rule, a dark interior still lit) was already in the shared shader; the refusal is
+  gone, so lit rain / snow in an interior draws on Vulkan. New gate cases: a dark interior with lamps and ambient
+  volumes (151282 samples, EXACT) and a sunlit fogged interior (28114 samples, EXACT); the interior off moves 151269 /
+  14601 in GL, its ambient switch off 150971 / 28114. Turning the interior or its ambient off, or the ambient's GI rule
+  on, FAILs in each case.
+- The census reads exterior 0, interior 0: every lit term GL draws on rain / snow now draws on Vulkan in the gate. Lit
+  + the look together is still refused (the look is off by default).
+
+## VKWATER4 (2026-11-15): the ultra ocean builds on Vulkan compute (WW_VKVIEW=1)
+
+Changed, not built, not checked live. Offline: tests/vkframe/oceanview.sh, 96 greens EXACT against GL (spectrum, 14 FFT
+stages, fields, mips 1-7, end to end), 20 reds FAIL.
+
+- features/water/cellocean.cpp records the spectrum, the inverse FFT, the fields and the mips as 31 dispatches
+  (res/shaders/hlsl/vklight/ocean_vk.hlsl) and writes them back into the three arrays. Red WW_VKVIEW_OCEAN_RED=1: GL's draws.
+- The spectrum keeps GL's float order with an opaque no-op: NVIDIA's Vulkan compiler reorders multiply chains even
+  under precise.
+
+## VKWATER4 (2026-11-15): the camera-underwater meniscus takes its derivative before the discard (HLSL)
+
+Changed, not built, not checked live. Offline: tests/vkframe/underdraw.sh arms A, B, C BOUND, red "old order" FAILS.
+
+- res/shaders/hlsl/water/cell_underwater_ps.hlsl (and its per-sample twin cell_underwater_ms_ps.hlsl) takes
+  fwidth( Pn.z ) before the per-sample draw's discard. After a discard the derivative is undefined; on NVIDIA GL it moved
+  the waterline's meniscus by up to 1168 half-float steps on edge samples.
+- GL's GLSL (features/water/cell_underwater.frag) keeps the old order until the HLSL switch.
+- The Vulkan twin's near-the-farthest-sample test now spells NVIDIA GL's own float form; in the gate's plain fog arm both
+  pick the same draw for a sample on the threshold. The light row still splits 13 samples (cause open).
+
+## VKFAR3 A1 SSGI (2026-11-14): the SSGI cast stays on Vulkan when the traced volume carries the emission
+
+Changed, not built, not checked live.
+
+- With RT GI on (WW_CELL_RTDDGI=1, the all-on route), SSGI takes the emission off what it gathers (the traced volume
+  counts it). The Vulkan cast (WW_VKVIEW=1) refused that case and the cast went back to GL; it now subtracts the same
+  emission on Vulkan. Only the emissive cast's own chain (red emitchain) still stays on GL, named on the `vk ssgi:` line.
+- Gate tests/vklight/light.sh job sg_E (the ultra tier, half size, 4 x 12, the emission over the bright texels): BOUND
+  against GL (107 of 1969920 values 1 ulp apart), red ssgie (the emission read as zero) FAILS (274244 differ);
+  lightview.sh runs it through the app's lightRun: BOUND, red FAILS. sg_A / sg_B / sg_S unchanged (27 / 106 / 231).
+
+## VKFAR3 A1 AO methods (2026-11-14): XeGTAO and GTAO on Vulkan (WW_VKVIEW=1), gate red
+
+Changed, not built, not checked live. With the view off nothing changes.
+
+- With the view on Vulkan, the XeGTAO and GTAO methods (WW_CELL_AO_METHOD) run in the same Vulkan pass as the
+  obscurance: depth mips, the AO term and its edges, the two blur stages. Red WW_VKVIEW_AOX_RED=1 keeps them on GL.
+  Log line `vk aox:` says which route ran and why.
+- HBAO stays on GL: its first step can land on the pixel itself, where two equal positions give a random direction
+  (3.6 % of pixels differ by up to 239 codes between GL and Vulkan; neither is right). Fixing that changes GL's shader.
+- Offline gate tests/vklight/light.sh on the mem_main dump: all three jobs within their bars, 3 reds FAIL. On mem_base
+  (lightview.sh) the first depth mip of the synthetic job has 1 value at 5 ulp against its 4 ulp bar (the AO result
+  itself is within its bar): LIGHTVIEW is red until that bar is decided.
+
+## VKFAR3 G3 (2026-11-14): the near far ground (ring 0's live terrain) draws on Vulkan (WW_VKVIEW=1)
+
+Changed, not built, not checked live.
+
+- With Show > Far ground at "Live, shader decals" (the default) and sun shadows on, ring 0's terrain shapes
+  (fo4_cellcsmfgl) draw on the Vulkan view, one draw a shape.
+- While the view is on, the ground grid, the layer textures (~180 MB) and the decal atlas are made on the present
+  device and shared with GL, so no draw copies them. The view off keeps GL's own textures as before. If one cannot be
+  shared, GL draws the shape and the line says why.
+- Red WW_VKVIEW_FARGROUND_RED=1 keeps GL's draw. A `vk farground:` line counts shapes drawn on Vulkan and on GL and
+  names why GL kept a shape: Baked sheet, no sun shadows (fo4_cellfgl), "Live, cached pages", the oldpages red,
+  the textures not shared.
+- Offline gate tests/vkframe/fargrounddraw.sh against GL's own program: 2 seeds, depth EXACT, colour inside the bar
+  (max rel 0.0098, mipped atlas), GL on the shared textures vs GL on plain ones EXACT, three copies fewer a draw, every
+  red FAILS (offset, plain samplers, cull, depth test, polygon offset, first index, grid and decals rewritten after
+  GL's draw).
+- Round 2: a frame with no Vulkan view (a resize, a grab) no longer hands the shared textures back to GL and makes
+  them again the next frame (each round trip was ~60-115 ms of remake and refill for the layers alone). They go back
+  to GL only when the view is turned off or the red is set.
+- Offline gate tests/vkframe/fargroundoff.sh (CPU only): with the view off, the far ground's GL uploads and frees match
+  c7e7d1a2 (the tree before the lane) call for call, cut from both versions of cellfarground.cpp: 535 of 535 calls the
+  same, no call to the present device. Reds: a flipped argument and a removed call are caught, sharing on differs. It
+  also walks the shared textures through view on / no view / off / a shutdown / a refusal / no key slot; the old rule
+  as red churns twice.
+- Crossing cells costs nothing here: the far ground is only prepared when a cell opens without streaming; streamed
+  roaming never makes it, so nothing is dropped or made on a crossing. The same gate checks the rest of pass() is the
+  tree's text before the lane (95 of 95 lines, a changed line caught).
+
+## VKOBJ5 (2026-11-14): skinned, alpha-tested, single rigid and unpooled bindless object draws on Vulkan (WW_VKOBJ_SHADE=1)
+
+Changed, not built, not checked live. Offline: tests/vkframe/blview.sh colourGate gained a skinned and an alpha-tested
+pass for both bindless twins (fo4_cellbl, fo4_cellcsmbl): depth EXACT, colour inside the existing bar, reds FAIL.
+
+- A pooled fo4_cellbl / fo4_cellcsmbl shape outside a multi-draw run that is skinned or alpha-tested now draws on Vulkan
+  through the bindless twins (one row: the one the draw wrote). Before, only rigid opaque runs reached Vulkan.
+- Frame lines `vk objskin:` and `vk objalpha:` (shapes, drawn, left on GL and why).
+- With ray-traced GI on (WW_CELL_RTDDGI, RESTIR or RESTIRGI in GL's program) these shapes stay on GL: that variant's twin
+  is not made yet, and the line says so.
+- Reds: WW_VKVIEW_OBJSKIN_RED=bone (each bone reads the next bone's transform), WW_VKVIEW_OBJALPHA_RED=flags (alpha
+  test off).
+- Round 2: a rigid opaque bindless shape drawn on its own (not in a run) and a bindless shape with no pool entry (its own
+  vertex array) also draw on Vulkan. Lines `vk objrigid:` and `vk objown:`. A blended rigid shape stays on GL.
+- Fix: Vulkan read the draw's row twice offset (GL's wwDrawBase was mirrored on top of rows that already start at that
+  row), so run draws and single draws on Vulkan read past their rows. Now the mirrored value is 0 for those draws.
+- Red: WW_VKVIEW_OBJOWN_RED=offset (the vertex array read from its start) / half (half floats read as 16-bit unorm).
+  Offline: blview colourGate kinds single and own, both twins: depth EXACT, colour EXACT / BOUND, reds base / offset / half
+  FAIL.
+- The bindless twins' alpha test discards after the last texture sample (as VKWATER3 did for fo4_default /
+  pbrm_default). A discard in the middle ended the pixel on Vulkan and broke its neighbours' texture filtering
+  (colour max 0.88 off before, BOUND after).
+- Round 3: the cell-lit particle systems (particles_cell) can draw on Vulkan under WW_VKOBJ_SHADE: a record pass and a
+  4-vertex strip per particle through the particles' pixel twin, which reads the soft fade's depth (fxDepth) from a
+  shared target. Offline: blview pfx cases leq / always / hard / write / nocol, depth and colour EXACT, reds FAIL.
+  In the app every system was still refused (GL drew it) until round 4: see the units bullet below.
+- **Soft particles on the GL HLSL route changed.** Their pixel program was compiled without -fvk-use-dx-position-w,
+  so the soft fade read 1/w for the pixel's w and faded nearly to nothing. tests/hlsllive/build_spv.py now passes that
+  flag for the frozen pixel files that invert gl_FragCoord.w: soft particles there fade by depth as on the GLSL route.
+- Round 4: when the present device refuses the fxDepth shared target, GL's own texture is used as before, and the shared
+  target is asked for again on a size change or every 120 second passes (at most 4 asks per size; a grant frees GL's
+  texture). Lines: `lane VKOBJ5: fxDepth shared target refused, ...` (once) and `... granted after N refusals`.
+  Offline: tests/vkframe/fxdepthshare.sh (forced first refusal recovers; the old rule as the red fails).
+- Round 4, the particles' units as the app binds them: glparticles.cpp always puts a grey cube on CubeMap's unit, which
+  has no Vulkan twin, so objPfxShade refused every particles_cell system (`1 GL textures with no twin: CubeMap`). It now
+  reads hasNormalMap / hasGreyscaleMap / hasCubeMap: a map whose flag is 0 is never sampled and stays a stand-in; a map
+  whose flag is 1 must resolve (a .bgem's normal or greyscale map: its texture twin; an environment cube: still
+  refused by name, GL draws that system). All 10 textureUnits[i] resolve element by element. The gate binds as the
+  app (all textureUnits and the maps' samplers on the sprite's unit, the grey cube, cull on): grey and elem EXACT,
+  normal BOUND (12 values, max 1.2e-4), the 5 earlier cases EXACT; reds nmap / grey / elem0 FAIL; case cube refused by name, red cubeoff (drawn anyway) FAILs.
+  Stencil is off at the particles' draw (StencilProperty::glProperty( nullptr ) after the write setup).
+- Round 5: a particle system with an environment map (a .bgem's hasCubeMap 1) draws on Vulkan through a plain-cube
+  copy twin (GL's six faces copied once a frame); a swizzled GL cube is refused by name. Offline: blview pfx `cube` plus
+  one case per cube face, each reaching its own face, colour EXACT, "cube faces covered: 6 of 6"; reds cubeoff and
+  cubegrey FAIL.
+- Round 5: particles_cell drawn with ray-traced GI on (WW_CELL_RESTIR + WW_CELL_RTDDGI + cascades in GL's program) now
+  draws on Vulkan through its RT twin (objpfx_cell_rt_ps), reading the traced shadow ratio, the DDGI atlas and the
+  screen GI's half target and key. Offline: blview `pfx rt` (case leq): depth EXACT, colour BOUND (1 value, 1.2e-7),
+  each RT input moves GL's picture (>= 11517 px), reds restir / atlas / gihalf / gikey FAIL. The bindless object twins
+  (fo4_cellbl, fo4_cellcsmbl) still stay on GL with ray-traced GI on: their HLSL has no RT variant (compiled with the RT
+  defines it is byte-identical), so a readable bindless source with the RT #ifs is needed first.
+- Fix (gates): a buffer texture's Vulkan twin is kept under GL's texture name, and GL gives a deleted name to the next
+  texture. A smaller twin left under a reused name refused the cell gate's ReSTIR ratio (`cellcsm rt FAIL ... the texel
+  twin would move under prepared draws`, already failing at 9772bc98). objBlTexelForget drops the twin; the pfx and cell
+  gates call it before deleting their buffer textures. The app does not call it yet: a buffer texture recreated at a
+  larger size under a reused name can be refused (GL draws it) until the next frame's first draw.
+- Round 6: texel twins are keyed on (GL name, generation). The generation moves when GL's view of the buffer texture
+  changed (its buffer, format, offset or size); the old twin is held for the prepared draws (freed by objBlDrawsReset)
+  or freed at once, and a fresh twin is made. A buffer recreated larger under the same name no longer refuses or reads a
+  stale twin. Offline: blview `texel reuse` (128 KiB re-specify under a live draw: 1 new generation, 1 held, 0 of 131072
+  bytes differ, 0 held after the reset); red texelreuse (the name-only key) FAILs.
+- Round 6: a bl twin draw's framebuffer is remade when sharedGen() moved, not only when its view handles changed (a
+  target remade can hand back the same VkImageView handle).
+- Round 6: the RT-twin pick (vkCellDraw, vkPfxDraw) moved into src/features/near/celltwinpick.h, unchanged in behaviour.
+  Offline table gate tests/vkframe/twinpick/run.sh: every twin 2-9, base and RT key, picks exactly its own twin and the
+  module that compiles its own pixel source with the key's defines; each key one RT define short refuses; red swap
+  (twins 2 and 3's RT modules swapped) and red noinert FAIL.
 
 ## VKFAR2 P7 (2026-11-14): depth of field, motion blur and object blur join the tone pass on Vulkan (WW_VKVIEW=1)
 

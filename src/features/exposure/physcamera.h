@@ -40,6 +40,7 @@ struct CameraIn
 	float incEv = 0.0f, dayW = 0.0f;
 	float hiSpread = 0.0f;	//!< log2( 97th percentile / mean ) of the meter; 0 = no guard
 	bool red = false;
+	float floor = kAdaptFloorCdm2;	//!< lane WEATHERRECX4: the adaptation floor, cd/m2 (the file's night.adaptFloor)
 };
 
 struct CameraOut
@@ -59,7 +60,7 @@ inline CameraOut cameraTarget( const CameraIn & in )
 	o.ev = std::log2( la * 100.0f / 12.5f );
 	// daylight and brighter (La >= 4000 cd/m2) keeps the key it had, so no day view is darker than before G1
 	const float k = std::clamp( std::log2( std::max( krawczykKey( la ), 1e-3f ) / krawczykKey( 4000.0f ) ), -3.0f, 0.5f );
-	o.ecEye = in.red || la >= kKeyDaylightCdm2 ? k : std::log2( la / std::max( la, kAdaptFloorCdm2 ) );
+	o.ecEye = in.red || la >= kKeyDaylightCdm2 ? k : std::log2( la / std::max( la, in.floor ) );
 	// the imagespace's middle grey: the camera maps the mean to 1 / (1.2 x 8); HNAM's key as compensation
 	o.ecKey = in.hasKey ? std::clamp( std::log2( std::max( in.key, 1e-3f ) * 1.2f * 8.0f ), -4.0f, 4.0f ) : 0.0f;
 	float base = o.ev - o.ecEye - o.ecKey;

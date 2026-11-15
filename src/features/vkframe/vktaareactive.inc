@@ -1,5 +1,5 @@
 /* Lane VKFAR7 (2026-11-15): the TAA mask's reactive pass (taainputs.cpp pass 4) on the present device, one crossing a batch
- * (fxWork's kind 10, its own runner beside vkfogbloom.inc: taaRun can refuse after pass 4 ran, twinRunN's pool holds 32 sets,
+ * (fxWork's kind 11, its own runner beside vkfogbloom.inc: taaRun can refuse after pass 4 ran, twinRunN's pool holds 32 sets,
  * waterRun takes u16 indices into the tone frame, twinRun refuses blending). Included once by vkpresent.cpp after
  * vkfarground.inc (waterSampler, waterTwin, farTwinFind, csmBuf, fenceDone and the fx parts of the anonymous namespace).
  * GL: drawBuffers { NONE, ATT1 }, colour mask R G on ATT1, blend MAX ONE / ONE, depth LEQUAL no writes, polygon offset
@@ -304,7 +304,7 @@ bool taFb( const Shared & mask, const Shared & depth, std::string & why )
 	return true;
 }
 
-// fxWork's kind 10 (the worker): the queued draws of this crossing into the mask twin
+// fxWork's kind 11 (the worker): the queued draws of this crossing into the mask twin
 bool taRecord( std::string & why )
 {
 	Vk & v = vk();
@@ -416,7 +416,7 @@ bool taReactiveFlush( const TaReactiveRun & r, std::string & why )
 	if ( !isDepth || dsFmt == VK_FORMAT_D16_UNORM )
 		return refuse( "the frame's depth format " + std::to_string( r.dsFormat ) + " has no twin here" );
 	std::string w;
-	// fence: route via fenceRed/fenceMiss at merge
+	// fence waits go through fenceDone -> fenceRed / fenceMiss (red WW_VKFENCE_RED=taareactive)
 	if ( !fenceDone( F.fence, F.pending, "taareactive", w ) )
 		return refuse( w );
 	F.pending = false;
@@ -440,7 +440,6 @@ bool taReactiveFlush( const TaReactiveRun & r, std::string & why )
 	int i0 = 0, crossings = 0;
 	while ( i0 < n ) {
 		if ( crossings ) {
-			// fence: route via fenceRed/fenceMiss at merge
 			if ( !fenceDone( F.fence, F.pending, "taareactive", w ) )
 				return refuse( w );
 			F.pending = false;
@@ -580,7 +579,7 @@ bool taReactiveFlush( const TaReactiveRun & r, std::string & why )
 			D.recs.erase( D.recs.begin() + 1 );
 		D.w = r.w;
 		D.h = r.h;
-		F.kind = 10;
+		F.kind = 11;
 		F.w = r.w;
 		F.h = r.h;
 		if ( !fxCross( names, w ) )

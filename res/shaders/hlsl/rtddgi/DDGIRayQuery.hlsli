@@ -7,8 +7,15 @@
 
 #include "DDGIResources.hlsli"
 
-// BLAS (instance custom index c, geometry g, primitive i) -> its row in DDGIRemap / DDGIVerts (geometry 1 follows the
-// counts.w opaque rows). MIRROR rttracesetrule.h blasRow
+// trace_body.glsl ddgiPrim (remap[] / verts[] = DDGIRemap / DDGIVerts here):
+// BLAS (geometry g, primitive i) -> its row in remap[] / verts[] (geometry 1 follows the P.counts.w opaque rows).
+// AIRPERF1 r6: c = the instance's custom index, the first row of a BLAS part (0: the single soup's one instance).
+// MIRROR rttracesetrule.h blasRow
+// restir.comp rsPrim:
+// BLAS (geometry g, primitive i) -> its row in remap[] / verts[] (trace.comp ddgiPrim)
+// AIRPERF1 r6: c = the instance's custom index, a BLAS part's first row (MIRROR rttracesetrule.h blasRow)
+// airrays.comp arPrim / arTriTest / arBlocked:
+// MIRROR restir.comp rsPrim / rsTriTest / rsBlocked (the TRUE triangle; the BLAS is grown; skill ww-bake-gpu-rays)
 uint DDGI_Prim( uint c, uint g, uint i ) { return c + i + ( g == 1u ? uint( DDGI_P.counts.w ) : 0u ); }
 
 uint DDGI_CandidatePrim( RayQuery<RAY_FLAG_NONE> q )
@@ -16,7 +23,10 @@ uint DDGI_CandidatePrim( RayQuery<RAY_FLAG_NONE> q )
 	return DDGI_Prim( q.CandidateInstanceID(), q.CandidateGeometryIndex(), q.CandidatePrimitiveIndex() );
 }
 
-// MIRROR probebvh.h Bvh::tri (in float): the ray against BLAS row pr's TRUE triangle; u weighs vertex 1, v vertex 2
+// MIRROR probebvh.h Bvh::tri (in float): the ray against BLAS row pr's TRUE triangle (binding 8, not the grown copy
+// the BLAS was built from); u weighs vertex 1, v vertex 2 (the barycentrics ddgiHole and AlphaMask::hole take)
+// restir.comp rsTriTest:
+// MIRROR trace.comp ddgiTriTest (the TRUE triangle; the BLAS is grown)
 bool DDGI_TriTest( uint pr, float3 o, float3 d, out float t, out float u, out float v )
 {
 	t = 0.0;
@@ -55,6 +65,8 @@ bool DDGI_BackFace( uint pr, float3 d )
 }
 
 // MIRROR probebvh.h Bvh::anyHitIn (tLo 1e-4, every face picked): is anything hit in (1e-4, tmax]?
+// restir.comp rsBlocked:
+// MIRROR trace.comp ddgiShadow / probebvh.h Bvh::anyHitIn: anything in (1e-4, tmax]? (red NOHOLE: holes block)
 // hw: the trace's red DDGI_RED_HWHIT (the hardware's hit, its barycentrics); noHole: holes block (ReSTIR / air red)
 bool DDGI_AnyHit( float3 o, float3 d, float tmax, bool hw, bool noHole )
 {

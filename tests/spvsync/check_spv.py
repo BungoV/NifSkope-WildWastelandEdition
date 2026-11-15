@@ -45,7 +45,12 @@ HLSL_SPECS += [('src/features/vkframe', k, 'vulkan1.2', 'vkframe_%s_spv' % k) fo
 # lane VKLIGHT1: AO / contact / SSGI, the script's sixth loop: res/shaders/hlsl/vklight/<src>.hlsl -D <def>, built -O0
 VKFRAME_LIGHT = {'ao_gbuf': ('ao_vk', 'AO_STAGE=5'), 'ao_mip': ('ao_vk', 'AO_STAGE=1'), 'ao_raw': ('ao_vk', 'AO_STAGE=2'),
 	'ao_blur': ('ao_vk', 'AO_STAGE=3'), 'ao_blurf': ('ao_vk', 'AO_STAGE=4'), 'contact': ('contact_vk', ''), 'ssgi': ('ssgi_vk', ''),
-	'aox_z': ('aox_vk', 'AOX_KERNEL=1'), 'aox_xe': ('aox_vk', 'AOX_KERNEL=2'), 'aox_r8': ('aox_vk', 'AOX_KERNEL=3')}	# lane VKFAR3
+	'aox_z': ('aox_vk', 'AOX_KERNEL=1'), 'aox_xe': ('aox_vk', 'AOX_KERNEL=2'), 'aox_r8': ('aox_vk', 'AOX_KERNEL=3'),	# lane VKFAR3
+	# lane VKWATER4 (row G5): the ultra ocean, ocean_vk.hlsl stages 1-6, and 7-10 (3-6 into the shared arrays in place)
+	'ocean_spec': ('ocean_vk', 'OCEAN_STAGE=1'), 'ocean_fft': ('ocean_vk', 'OCEAN_STAGE=2'), 'ocean_finbc': ('ocean_vk', 'OCEAN_STAGE=3'),
+	'ocean_find': ('ocean_vk', 'OCEAN_STAGE=4'), 'ocean_mipbc': ('ocean_vk', 'OCEAN_STAGE=5'), 'ocean_mipd': ('ocean_vk', 'OCEAN_STAGE=6'),
+	'ocean_finbca': ('ocean_vk', 'OCEAN_STAGE=7'), 'ocean_finda': ('ocean_vk', 'OCEAN_STAGE=8'),
+	'ocean_mipbca': ('ocean_vk', 'OCEAN_STAGE=9'), 'ocean_mipda': ('ocean_vk', 'OCEAN_STAGE=10')}
 HLSL_SPECS += [('src/features/vkframe', 'light_' + k, 'vulkan1.2', 'vkframe_light_%s_spv' % k) for k in VKFRAME_LIGHT]
 # lane VKFAR3 (A1 b): the screen GI's DDGI read, its own line after the light loop (four defines, -O0)
 VKFRAME_GIHALF_ARGS = ['-O0', '-D', 'WW_CELL_FOGLEAK=1', '-D', 'WW_CELL_RTDDGI=1', '-D', 'WW_CELL_RTDDGI_CASCADES=1', '-D', 'WW_FRAME_UBO=1']
@@ -69,22 +74,33 @@ VKFRAME_FX = {'volsky_view_ps': 'air/volsky_view_ps', 'cloud_march_view_ps': 'cl
 	'fogbloom_view_ps': 'post/fogbloom_view_ps',	# lane VKFAR2: hand-kept readable twin (P4b)
 	'cloud_composite_view_ps': 'clouds/cloud_composite_view_ps',	# lane VKFAR2: P8, frozen copy
 	'precip_view_ps': 'weather/precip_view_ps',	# lane VKFAR2: L8 slice 1, frozen copy of cell_precip_gpu_ps
+	'precip_look_view_ps': 'weather/precip_look_view_ps',	# lane VKFAR2: L8 slice 3, the look over that copy
 	'taareactive_view_ps': 'post/taa_reactive_ps'}	# lane VKFAR7: the TAA mask's reactive pass
 HLSL_SPECS += [('src/features/vkframe', k, 'vulkan1.2', 'vkframe_%s_spv' % k) for k in VKFRAME_FX]
 # lane VKFAR1: the far dots' vertex stage, the script's `fxv <name> <dir/file>` lines (fx()'s shifts, vs_6_0)
 VKFRAME_FXV = {'fardots_view_vs': 'far-lod/cell_fardots_view_vs',
-	'precip_view_vs': 'weather/precip_view_vs'}	# lane VKFAR2: L8 slice 1, rain / snow's instanced corners
+	'precip_view_vs': 'weather/precip_view_vs',	# lane VKFAR2: L8 slice 1, rain / snow's instanced corners
+	'precip_look_view_vs': 'weather/precip_look_view_vs'}	# lane VKFAR2: L8 slice 3, with the look's interpolants
 HLSL_SPECS += [('src/features/vkframe', k, 'vulkan1.2', 'vkframe_%s_spv' % k) for k in VKFRAME_FXV]
 # lane VKFAR2 L8 slice 1: rain / snow's record pass, the script's `fxs <name> <dir/file>` lines (fx()'s shifts, cs_6_0)
-VKFRAME_FXS = {'precip_view_cs': 'weather/precip_view_cs',
+VKFRAME_FXS = {'precip_view_cs': 'weather/precip_view_cs', 'precip_look_view_cs': 'weather/precip_look_view_cs',
+	'precip_lit_view_cs': 'weather/precip_lit_view_cs',	# lane VKFAR2: L8 slice 2b, lit at the centre
 	'ddgi_atlas_fetch_cs': 'rtddgi/ddgi_atlas_fetch_cs'}	# lane VKFAR3: the DDGI atlas through the present device's view
 HLSL_SPECS += [('src/features/vkframe', k, 'vulkan1.2', 'vkframe_%s_spv' % k) for k in VKFRAME_FXS]
 # lane VKFAR1 round 2: the far cards' pixel stage, the script's `fxk <name> <dir/file>` lines (fx() + every declared binding kept)
 VKFRAME_FXK = {'farcards_view_ps': 'far-lod/farcards_view_ps',
-	'water_view_ps': 'water/water_view_ps',	# lane VKWATER3 (frozen twins, as HLSLSRC2's)
 	'farlod_view_ps': 'core/farlod_view_ps',	# lane VKFAR2: the far LOD rings
 	'skystars_view_ps': 'clouds/lookdev_clouds_ps', 'skymoon_view_ps': 'sky/sky_moon_ps'}	# lane VKFAR2 G2: the sky bodies
 HLSL_SPECS += [('src/features/vkframe', k, 'vulkan1.2', 'vkframe_%s_spv' % k) for k in VKFRAME_FXK]
+# lane VKWATER3: the water's pixel twins (frozen, as HLSLSRC2's), the script's `fxkw` lines: fxk() + -fvk-use-dx-position-w
+# (their spirv-cross fixup gl_FragCoord.w = 1.0 / gl_FragCoord.w wants D3D's clip w in SV_Position.w)
+VKFRAME_FXKW = {'water_view_ps': 'water/water_view_ps',
+	'water_view_d_ps': 'water/water_view_d_ps', 'water_view_m_ps': 'water/water_view_m_ps',
+	'water_view_p_ps': 'water/water_view_p_ps', 'water_view_dp_ps': 'water/water_view_dp_ps',
+	'water_view_off_ps': 'water/water_view_off_ps',	# lane VKWATER4: fo4_water.prog (the water look off)
+	'underwater_view_ps': 'water/underwater_view_ps',	# lane VKWATER4 (L7): cell_underwater.prog
+	'underwater_view_ms_ps': 'water/underwater_view_ms_ps'}	# and its per-sample cell_underwater_ms.prog
+HLSL_SPECS += [('src/features/vkframe', k, 'vulkan1.2', 'vkframe_%s_spv' % k) for k in VKFRAME_FXKW]
 # lane VKFAR2: the far cards' vertex stage, the script's `fxc <name> <dir/file>` lines (its own bindings in the cards' set)
 VKFRAME_FXC = {'farcards_view_vs': 'far-lod/farcards_view_vs'}	# frozen twin, as HLSLSRC2's
 VKFRAME_FXC_ARGS = ['-fvk-bind-register', 'b0', '0', '0', '0', '-fvk-bind-register', 'b31', '0', '32', '0', '-fvk-bind-register',
@@ -95,6 +111,14 @@ VKFRAME_FXW_ARGS = ['-fvk-b-shift', '256', '0', '-fvk-t-shift', '110', '0', '-fv
 	'-fspv-preserve-bindings']
 VKFRAME_FXW = {'water_view_vs': 'core/water_view_vs'}
 HLSL_SPECS += [('src/features/vkframe', k, 'vulkan1.2', 'vkframe_%s_spv' % k) for k in VKFRAME_FXW]
+# lane VKWATER3 item 4: the tessellated water's hull / domain stages, the script's `fxh` / `fxd <name> <dir/file>` lines
+VKFRAME_FXH_ARGS = ['-fvk-b-shift', '512', '0', '-fvk-t-shift', '576', '0', '-fvk-s-shift', '640', '0', '-fvk-u-shift', '704', '0',
+	'-fspv-preserve-bindings']
+VKFRAME_FXH = {'water_view_hs': 'water/fo4_waterdisp_hs'}
+VKFRAME_FXD_ARGS = ['-fvk-b-shift', '768', '0', '-fvk-t-shift', '832', '0', '-fvk-s-shift', '896', '0', '-fvk-u-shift', '960', '0',
+	'-fspv-preserve-bindings', '-Gis']
+VKFRAME_FXD = {'water_view_ds': 'water/fo4_waterdisp_ds'}
+HLSL_SPECS += [('src/features/vkframe', k, 'vulkan1.2', 'vkframe_%s_spv' % k) for k in list(VKFRAME_FXH) + list(VKFRAME_FXD)]
 # lane VKFAR2: the far LOD rings' vertex stage, the script's `fxl <name> <dir/file>` lines (fxw's shifts, t at 120)
 VKFRAME_FXL_ARGS = ['-fvk-b-shift', '256', '0', '-fvk-t-shift', '120', '0', '-fvk-s-shift', '180', '0', '-fvk-u-shift', '220', '0',
 	'-fspv-preserve-bindings']
@@ -134,6 +158,45 @@ VKFRAME_PFX = {
 	'p7_ob_vec': ('post/objblur_vec', 'cs_6_0', ''), 'p7_ob_tile': ('post/objblur_tile', 'cs_6_0', ''),
 	'p7_ob': ('post/objblur', 'cs_6_0', '')}
 HLSL_SPECS += [('src/features/vkframe', k, 'vulkan1.2', 'vkframe_%s_spv' % k) for k in VKFRAME_PFX]
+# lane VKOBJ4: the bl twins, the script's `fxb <name> <near file> <profile> "$PS_SHIFT|$VS_SHIFT"` lines (-D WW_VK_BINDLESS, every
+# binding kept); the vertex stage on its own shifts (VS_SHIFT), the pixel stages on fx()'s
+VKFRAME_PS_SHIFT = VKFRAME_SKY_ARGS
+VKFRAME_VS_SHIFT = ['-fvk-b-shift', '256', '0', '-fvk-t-shift', '320', '0', '-fvk-s-shift', '384', '0', '-fvk-u-shift', '448', '0']
+VKFRAME_FXBL = {'objbl_vs': ('fo4_defaultbl_vs', 'vs_6_0', 'VS_SHIFT', ''), 'objbl_cell_ps': ('fo4_cellbl_ps', 'ps_6_0', 'PS_SHIFT', '-D WW_CELL_FOGLEAK=1 -D WW_FRAME_UBO=1'),
+	'objbl_cellcsm_ps': ('fo4_cellcsmbl_ps', 'ps_6_0', 'PS_SHIFT', '-D WW_CELL_FOGLEAK=1 -D WW_FRAME_UBO=1'),
+	# VKWATER3 G4: the bl pair on the app's key; its RT GI variant (a 5th quoted field, as fxc's)
+	'objbl_cell_rt_ps': ('fo4_cellbl_ps', 'ps_6_0', 'PS_SHIFT', '-D WW_CELL_FOGLEAK=1 -D WW_FRAME_UBO=1 -D WW_CELL_RTDDGI=1 -D WW_CELL_RTDDGI_CASCADES=1 -D WW_CELL_RESTIR=1'),
+	'objbl_cellcsm_rt_ps': ('fo4_cellcsmbl_ps', 'ps_6_0', 'PS_SHIFT', '-D WW_CELL_FOGLEAK=1 -D WW_FRAME_UBO=1 -D WW_CELL_RTDDGI=1 -D WW_CELL_RTDDGI_CASCADES=1 -D WW_CELL_RESTIR=1')}
+HLSL_SPECS += [('src/features/vkframe', k, 'vulkan1.2', 'vkframe_%s_spv' % k) for k in VKFRAME_FXBL]
+# the cell frame's per-sample readback (the script's objbl_samples_cs line: cs_6_0, no shift)
+HLSL_SPECS += [('src/features/vkframe', 'objbl_samples_cs', 'vulkan1.2', 'vkframe_objbl_samples_cs_spv')]
+HLSL_SRC['objbl_samples_cs'] = 'res/shaders/hlsl/near'
+# lane VKWATER3 (G4 by draws): the script's `fxc <name> <core file> <profile> "$PS_SHIFT|$VS_SHIFT"` lines, the non-bindless
+# fallbacks on the app's base variant, the frozen FragCoord.w fixup's flag
+VKFRAME_FXCELL_ARGS = ['-HV', '2021', '-D', 'WW_CELL_FOGLEAK=1', '-D', 'WW_FRAME_UBO=1']
+# (G4 rest: a 5th quoted field, a variant's other defines)
+VKFRAME_FXCELL = {'objcell_vs': ('fo4_default_vs', 'vs_6_0', 'VS_SHIFT', ''), 'objcell_cell_ps': ('fo4_cell_ps', 'ps_6_0', 'PS_SHIFT', ''),
+	'objcell_cellcsm_ps': ('fo4_cellcsm_ps', 'ps_6_0', 'PS_SHIFT', ''), 'objcell_pbrm_ps': ('pbrm_default_ps', 'ps_6_0', 'PS_SHIFT', ''),
+	'objcell_pbrmcell_ps': ('pbrm_cell_ps', 'ps_6_0', 'PS_SHIFT', ''), 'objcell_pbrmcellcsm_ps': ('pbrm_cellcsm_ps', 'ps_6_0', 'PS_SHIFT', ''),
+	'objcell_effectcell_ps': ('fo4_effectcell_ps', 'ps_6_0', 'PS_SHIFT', '-D WW_CELL_AIRZONE=1'),
+	'objcell_effectdecalcsm_ps': ('fo4_effectdecalcsm_ps', 'ps_6_0', 'PS_SHIFT', '')}
+# the all-on route's RT GI variant of each twin (pbrm_default's code is the same)
+VKFRAME_FXCELL_RT = '-D WW_CELL_RTDDGI=1 -D WW_CELL_RTDDGI_CASCADES=1 -D WW_CELL_RESTIR=1'
+VKFRAME_FXCELL.update({'objcell_cell_rt_ps': ('fo4_cell_ps', 'ps_6_0', 'PS_SHIFT', VKFRAME_FXCELL_RT),
+	'objcell_cellcsm_rt_ps': ('fo4_cellcsm_ps', 'ps_6_0', 'PS_SHIFT', VKFRAME_FXCELL_RT),
+	'objcell_pbrmcell_rt_ps': ('pbrm_cell_ps', 'ps_6_0', 'PS_SHIFT', VKFRAME_FXCELL_RT),
+	'objcell_pbrmcellcsm_rt_ps': ('pbrm_cellcsm_ps', 'ps_6_0', 'PS_SHIFT', VKFRAME_FXCELL_RT),
+	'objcell_effectcell_rt_ps': ('fo4_effectcell_ps', 'ps_6_0', 'PS_SHIFT', '-D WW_CELL_AIRZONE=1 ' + VKFRAME_FXCELL_RT),
+	'objcell_effectdecalcsm_rt_ps': ('fo4_effectdecalcsm_ps', 'ps_6_0', 'PS_SHIFT', VKFRAME_FXCELL_RT)})
+HLSL_SPECS += [('src/features/vkframe', k, 'vulkan1.2', 'vkframe_%s_spv' % k) for k in VKFRAME_FXCELL]
+# lane VKOBJ5 (G4 round 3): the script's `fxp` lines, particles_cell.prog's record pass, expand stage and cell-lit pixel twin
+# (res/shaders/hlsl/particles) on the app's variant
+VKFRAME_FXP_ARGS = ['-HV', '2021', '-D', 'WW_CELL_AIRZONE=1', '-D', 'WW_CELL_FOGLEAK=1', '-D', 'WW_FRAME_UBO=1']
+# (round 5: a 4th field, a variant's other defines: the RT GI pixel twin, as VKFRAME_FXCELL_RT)
+VKFRAME_FXP = {'objpfx_cs': ('pfx_view_cs', 'cs_6_0', 'VS_SHIFT', ''), 'objpfx_vs': ('pfx_view_vs', 'vs_6_0', 'VS_SHIFT', ''),
+	'objpfx_cell_ps': ('particles_cell_ps', 'ps_6_0', 'PS_SHIFT', ''),
+	'objpfx_cell_rt_ps': ('particles_cell_ps', 'ps_6_0', 'PS_SHIFT', VKFRAME_FXCELL_RT)}
+HLSL_SPECS += [('src/features/vkframe', k, 'vulkan1.2', 'vkframe_%s_spv' % k) for k in VKFRAME_FXP]
 DEFAULT_G = 'E:/Tools/RenderDoc/RenderDoc_1.45_64/plugins/spirv/glslangValidator.exe'
 DEFAULT_DXC = 'E:/Tools/dxc/bin/x64/dxc.exe'
 
@@ -233,6 +296,11 @@ def script_ok(tree):
 	klines = dict(re.findall(r'^fxk ([a-z0-9_]+) ([A-Za-z0-9_/+-]+)$', vf, re.M))
 	if klines != VKFRAME_FXK:
 		bad.append('src/features/vkframe/vkframe_spirv.sh: its fxk lines (%s) are not this checker\'s far cards' % ' '.join(sorted(klines)))
+	if '\t"$DXC" -spirv -fspv-target-env=vulkan1.2 -T ps_6_0 -E main ' + ' '.join(VKFRAME_SKY_ARGS + ['-fspv-preserve-bindings', '-fvk-use-dx-position-w']) + ' -Fo "$1.spv" ' not in vf:
+		bad.append('src/features/vkframe/vkframe_spirv.sh: its fxkw() compile line changed')
+	kwlines = dict(re.findall(r'^fxkw ([a-z0-9_]+) ([A-Za-z0-9_/+-]+)$', vf, re.M))
+	if kwlines != VKFRAME_FXKW:
+		bad.append('src/features/vkframe/vkframe_spirv.sh: its fxkw lines (%s) are not this checker\'s water pixel twins' % ' '.join(sorted(kwlines)))
 	if '\t"$DXC" -spirv -fspv-target-env=vulkan1.2 -T vs_6_0 -E main ' + ' '.join(VKFRAME_FXC_ARGS) + ' -Fo "$1.spv" ' not in vf:
 		bad.append('src/features/vkframe/vkframe_spirv.sh: its fxc() compile line changed')
 	clines = dict(re.findall(r'^fxc ([a-z0-9_]+) ([A-Za-z0-9_/+-]+)$', vf, re.M))
@@ -243,6 +311,13 @@ def script_ok(tree):
 	wlines = dict(re.findall(r'^fxw ([a-z0-9_]+) ([A-Za-z0-9_/+-]+)$', vf, re.M))
 	if wlines != VKFRAME_FXW:
 		bad.append('src/features/vkframe/vkframe_spirv.sh: its fxw lines (%s) are not this checker\'s water vertex stages' % ' '.join(sorted(wlines)))
+	for fn, prof, args, want in (('fxh', 'hs_6_0', VKFRAME_FXH_ARGS, VKFRAME_FXH), ('fxd', 'ds_6_0', VKFRAME_FXD_ARGS, VKFRAME_FXD)):
+		if '\t"$DXC" -spirv -fspv-target-env=vulkan1.2 -T %s -E main ' % prof + ' '.join(args) + ' -Fo "$1.spv" ' not in vf:
+			bad.append('src/features/vkframe/vkframe_spirv.sh: its %s() compile line changed' % fn)
+		got = dict(re.findall(r'^%s ([a-z0-9_]+) ([A-Za-z0-9_/+-]+)$' % fn, vf, re.M))
+		if got != want:
+			bad.append('src/features/vkframe/vkframe_spirv.sh: its %s lines (%s) are not this checker\'s water tessellation stages'
+			           % (fn, ' '.join(sorted(got))))
 	if '\t"$DXC" -spirv -fspv-target-env=vulkan1.2 -T vs_6_0 -E main ' + ' '.join(VKFRAME_FXL_ARGS) + ' -Fo "$1.spv" ' not in vf:
 		bad.append('src/features/vkframe/vkframe_spirv.sh: its fxl() compile line changed')
 	llines = dict(re.findall(r'^fxl ([a-z0-9_]+) ([A-Za-z0-9_/+-]+)$', vf, re.M))
@@ -283,6 +358,29 @@ def script_ok(tree):
 	slines = dict(re.findall(r'^fxs ([a-z0-9_]+) ([A-Za-z0-9_/+-]+)$', vf, re.M))
 	if slines != VKFRAME_FXS:
 		bad.append('src/features/vkframe/vkframe_spirv.sh: its fxs lines (%s) are not this checker\'s record passes' % ' '.join(sorted(slines)))
+	for n, a in (('PS_SHIFT', VKFRAME_PS_SHIFT), ('VS_SHIFT', VKFRAME_VS_SHIFT)):
+		if '\n%s="%s"\n' % (n, ' '.join(a)) not in vf:
+			bad.append('src/features/vkframe/vkframe_spirv.sh: its %s changed' % n)
+	if '\t"$DXC" -spirv -fspv-target-env=vulkan1.2 -HV 2021 -T "$3" -E main -D WW_VK_BINDLESS $4 ${5:-} -fspv-preserve-bindings -Fo "$1.spv" ' not in vf:
+		bad.append('src/features/vkframe/vkframe_spirv.sh: its fxb() compile line changed')
+	blines = dict((k, (f, p, s, x)) for k, f, p, s, x in
+	              re.findall(r'^fxb ([a-z0-9_]+) ([a-z0-9_]+) ([vp]s_6_0) "\$([A-Z_]+)"(?: "([^"]*)")?$', vf, re.M))
+	if blines != VKFRAME_FXBL:
+		bad.append('src/features/vkframe/vkframe_spirv.sh: its fxb lines (%s) are not this checker\'s bl twins' % ' '.join(sorted(blines)))
+	if '\t"$DXC" -spirv -fspv-target-env=vulkan1.2 -HV 2021 -T "$3" -E main -D WW_CELL_FOGLEAK=1 -D WW_FRAME_UBO=1 $4 ${5:-} -fspv-preserve-bindings ' \
+			'-fvk-use-dx-position-w -Fo "$1.spv" ' not in vf:
+		bad.append('src/features/vkframe/vkframe_spirv.sh: its fxc() compile line changed')
+	clines = dict((k, (f, p, s, x)) for k, f, p, s, x in
+	              re.findall(r'^fxc ([a-z0-9_]+) ([a-z0-9_]+) ([vp]s_6_0) "\$([A-Z_]+)"(?: "([^"]*)")?$', vf, re.M))
+	if clines != VKFRAME_FXCELL:
+		bad.append('src/features/vkframe/vkframe_spirv.sh: its fxc lines (%s) are not this checker\'s cell fallbacks' % ' '.join(sorted(clines)))
+	if '\t"$DXC" -spirv -fspv-target-env=vulkan1.2 -HV 2021 -T "$3" -E main -D WW_CELL_AIRZONE=1 -D WW_CELL_FOGLEAK=1 -D WW_FRAME_UBO=1 $4 ${5:-} ' \
+			'-fspv-preserve-bindings -fvk-use-dx-position-w -Fo "$1.spv" "$(cygpath -m "$ROOT/res/shaders/hlsl/particles/$2.hlsl" ' not in vf:
+		bad.append('src/features/vkframe/vkframe_spirv.sh: its fxp() compile line changed')
+	plines = dict((k, (f, p, s, x)) for k, f, p, s, x in
+	              re.findall(r'^fxp ([a-z0-9_]+) ([a-z0-9_]+) ([cvp]s_6_0) "\$([A-Z_]+)"(?: "([^"]*)")?$', vf, re.M))
+	if plines != VKFRAME_FXP:
+		bad.append('src/features/vkframe/vkframe_spirv.sh: its fxp lines (%s) are not this checker\'s particle twins' % ' '.join(sorted(plines)))
 	return bad
 
 
@@ -414,6 +512,9 @@ def main(argv):
 			if k in VKFRAME_FXK:
 				src = os.path.join(tree, 'res/shaders/hlsl', VKFRAME_FXK[k] + '.hlsl')
 				hdefs = VKFRAME_SKY_ARGS + ['-fspv-preserve-bindings']
+			if k in VKFRAME_FXKW:
+				src = os.path.join(tree, 'res/shaders/hlsl', VKFRAME_FXKW[k] + '.hlsl')
+				hdefs = VKFRAME_SKY_ARGS + ['-fspv-preserve-bindings', '-fvk-use-dx-position-w']
 			if k in VKFRAME_FXC:
 				src = os.path.join(tree, 'res/shaders/hlsl', VKFRAME_FXC[k] + '.hlsl')
 				hdefs = VKFRAME_FXC_ARGS
@@ -429,6 +530,14 @@ def main(argv):
 			if k in VKFRAME_FXB:
 				src = os.path.join(tree, 'res/shaders/hlsl', VKFRAME_FXB[k] + '.hlsl')
 				hdefs = VKFRAME_FXB_ARGS
+			if k in VKFRAME_FXBL:
+				src = os.path.join(tree, 'res/shaders/hlsl/near', VKFRAME_FXBL[k][0] + '.hlsl')
+				hdefs = ['-HV', '2021', '-D', 'WW_VK_BINDLESS'] + (VKFRAME_VS_SHIFT if VKFRAME_FXBL[k][2] == 'VS_SHIFT' else VKFRAME_PS_SHIFT) \
+					+ VKFRAME_FXBL[k][3].split() + ['-fspv-preserve-bindings']
+			if k in VKFRAME_FXCELL:
+				src = os.path.join(tree, 'res/shaders/hlsl/core', VKFRAME_FXCELL[k][0] + '.hlsl')
+			if k in VKFRAME_FXP:  # lane VKOBJ5 (G4 round 3): particles_cell's twins
+				src = os.path.join(tree, 'res/shaders/hlsl/particles', VKFRAME_FXP[k][0] + '.hlsl')
 			if k in VKFRAME_FXG:
 				src = os.path.join(tree, 'res/shaders/hlsl', VKFRAME_FXG[k] + '.hlsl')
 				hdefs = VKFRAME_FXG_ARGS
@@ -443,16 +552,36 @@ def main(argv):
 				src = os.path.join(tree, 'res/shaders/hlsl', VKFRAME_PFX[k][0] + '.hlsl')
 				hdefs = VKFRAME_PFX[k][2].split()
 				m = re.match(r'([cvp]s_6_0)', VKFRAME_PFX[k][1])
+			elif k in VKFRAME_FXH or k in VKFRAME_FXD or k in VKFRAME_FXCELL or k in VKFRAME_FXP:
+				m = None
 			else:
 				m = re.search(r'hlsl profile: ([cvp]s_6_[0-9])', open(src, encoding='utf-8', errors='replace').read())
 			if k in VKFRAME_FXV or k in VKFRAME_FXC or k in VKFRAME_FXW or k in VKFRAME_FXL or k in VKFRAME_FXB or k in VKFRAME_FXT:
 				m = re.match(r'(vs_6_0)', 'vs_6_0')
+			if k in VKFRAME_FXH:
+				src = os.path.join(tree, 'res/shaders/hlsl', VKFRAME_FXH[k] + '.hlsl')
+				hdefs = VKFRAME_FXH_ARGS
+				m = re.match(r'(hs_6_0)', 'hs_6_0')
+			if k in VKFRAME_FXD:
+				src = os.path.join(tree, 'res/shaders/hlsl', VKFRAME_FXD[k] + '.hlsl')
+				hdefs = VKFRAME_FXD_ARGS
+				m = re.match(r'(ds_6_0)', 'ds_6_0')
 			if k in VKFRAME_FXG:
 				m = re.match(r'(ps_6_0)', 'ps_6_0')
 			if k in VKFRAME_FXS:
 				m = re.match(r'(cs_6_0)', 'cs_6_0')
-			opt =[] if d == 'src/features/vkframe' else ['-O0']   # vkframe_spirv.sh builds optimised
-			r = subprocess.run([dxc, '-spirv', '-fspv-target-env=' + env, '-T', m.group(1) if m else 'ps_6_0' if k in VKFRAME_SKY or k in VKFRAME_FX or k in VKFRAME_FXK else 'cs_6_0', '-E', 'main']
+			if k in VKFRAME_FXBL:
+				m = re.match(r'(.*)', VKFRAME_FXBL[k][1])
+			if k in VKFRAME_FXCELL:
+				hdefs = VKFRAME_FXCELL_ARGS + (VKFRAME_VS_SHIFT if VKFRAME_FXCELL[k][2] == 'VS_SHIFT' else VKFRAME_PS_SHIFT) \
+					+ VKFRAME_FXCELL[k][3].split() + ['-fspv-preserve-bindings', '-fvk-use-dx-position-w']
+				m = re.match(r'(.*)', VKFRAME_FXCELL[k][1])
+			if k in VKFRAME_FXP:
+				hdefs = VKFRAME_FXP_ARGS + (VKFRAME_VS_SHIFT if VKFRAME_FXP[k][2] == 'VS_SHIFT' else VKFRAME_PS_SHIFT) \
+					+ VKFRAME_FXP[k][3].split() + ['-fspv-preserve-bindings', '-fvk-use-dx-position-w']
+				m = re.match(r'(.*)', VKFRAME_FXP[k][1])
+			opt = [] if d == 'src/features/vkframe' else ['-O0']   # vkframe_spirv.sh builds optimised
+			r = subprocess.run([dxc, '-spirv', '-fspv-target-env=' + env, '-T', m.group(1) if m else 'ps_6_0' if k in VKFRAME_SKY or k in VKFRAME_FX or k in VKFRAME_FXK or k in VKFRAME_FXKW else 'cs_6_0', '-E', 'main']
 			                   + opt + hdefs + ['-Fo', spv, src], capture_output=True, text=True, timeout=300)
 			if r.returncode == 0:
 				r = subprocess.run([sys.executable, '-I', os.path.join(tree, 'tools/spv_header.py'), spv, vn, out],

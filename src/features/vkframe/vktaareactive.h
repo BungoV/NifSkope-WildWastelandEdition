@@ -4,7 +4,7 @@
 /* Lane VKFAR7 (2026-11-15): the TAA mask's reactive pass (taainputs.cpp pass 4: the see-through shapes and particle sprites
  * into the mask's R (reactive) and G (composition) by MAX, depth LEQUAL against the frame, no depth writes, GL's polygon
  * offset (-1, -4)) on the present device. The pass queues its draws (taReactiveAdd) and draws them in one crossing a
- * batch (taReactiveFlush: per-draw host slices and sets, fxWork's kind 10). Twins: taareactive_view_vs / _ps
+ * batch (taReactiveFlush: per-draw host slices and sets, fxWork's kind 11). Twins: taareactive_view_vs / _ps
  * (res/shaders/hlsl/post/taa_reactive_*.hlsl). Gate: tests/vkframe/taareactivedraw.sh. */
 
 #include "features/vkframe/vkwater.h"  // WaterSlot, waterCensusOf

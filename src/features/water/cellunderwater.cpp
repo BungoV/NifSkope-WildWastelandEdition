@@ -12,6 +12,8 @@
 #include "gl/lookdevstage.h"
 #include "gl/renderer.h"
 #include "features/water/esmwater.h"
+#include "features/vkframe/vkpresent.h"	// lane VKWATER4 (L7): the fog on the Vulkan view
+#include "features/vkframe/vkunder.h"
 
 #include <QDebug>
 
@@ -373,9 +375,7 @@ void wwCellUnderwaterPass( Scene * scene )
 	static const float quad[12] = { -1, -1, 0, 1, -1, 0, -1, 1, 0, 1, 1, 0 };
 	static const std::uint16_t idx[6] = { 0, 1, 2, 2, 1, 3 };
 	const float * attrs = quad;
-	r->drawShape( 4, 3, 6, GL_TRIANGLES, GL_UNSIGNED_SHORT, &attrs, idx );
-	if ( samples > 0 ) {
-		auto prog2 = r->useProgram( "cell_underwater_ms.prog" );
+	auto msUniforms = [&]( auto * prog2 ) {	// the per-sample twin: the per-pixel draw's uniforms
 		prog2->uni1i( "uwDepth", WwCellUnit::CardDepth );
 		prog2->uni1i( "uwDepthMs", WwCellUnit::UnderDepthMs );
 		prog2->uni1i( "uwSamples", samples );
@@ -393,7 +393,53 @@ void wwCellUnderwaterPass( Scene * scene )
 		prog2->uni3f( "uwSky", 0.5f * ( skyH[0] + skyU[0] ), 0.5f * ( skyH[1] + skyU[1] ), 0.5f * ( skyH[2] + skyU[2] ) );
 		prog2->uni1i( "uwClass", cls );
 		prog2->uni2f( "uwMenK", 1.5f, 0.6f );
+	};
+	/* lane VKWATER4 (L7): WW_VKVIEW=1 draws both on Vulkan, one crossing into the shared tone frame at its samples; red
+	 * WW_VKVIEW_UNDERWATER_RED=1, one sample per pixel, or a refusal: GL's draws */
+	bool onVk = false;
+	if ( !WwVkPresent::shareWanted( "WW_VKVIEW_UNDERWATER_RED" ) ) {
+		WwVkPresent::underSay( false, "red WW_VKVIEW_UNDERWATER_RED=1 or the view not on Vulkan" );
+	} else {
+		std::string why;
+		if ( samples < 2 ) {
+			why = "GL draws one fog per pixel (" + msWhy.toStdString() + ")";
+		} else {
+			WwVkPresent::UnderRun ur;
+			wwCellHdrFrameSize( ur.w, ur.h );
+			GLint v = 0;
+			fn->glGetFramebufferAttachmentParameteriv( GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
+				GL_FRAMEBUFFER_ATTACHMENT_OBJECT_NAME, &v );
+			ur.color = unsigned( v );
+			ur.depth = depthTex;	// bound at CardDepth, the active unit
+			fn->glGetTexLevelParameteriv( GL_TEXTURE_2D, 0, GL_TEXTURE_WIDTH, &ur.depthW );
+			fn->glGetTexLevelParameteriv( GL_TEXTURE_2D, 0, GL_TEXTURE_HEIGHT, &ur.depthH );
+			fn->glGetTexLevelParameteriv( GL_TEXTURE_2D, 0, GL_TEXTURE_INTERNAL_FORMAT, &v );
+			ur.depthFmt = unsigned( v );
+			fn->glActiveTexture( GLenum( GL_TEXTURE0 + WwCellUnit::UnderDepthMs ) );
+			fn->glGetIntegerv( GL_TEXTURE_BINDING_2D_MULTISAMPLE, &v );
+			ur.depthMs = unsigned( v );
+			fn->glActiveTexture( GLenum( GL_TEXTURE0 + WwCellUnit::CardDepth ) );
+			ur.samples = samples;
+			for ( int k = 0; k < 4; k++ )
+				ur.vp[k] = vp[k];
+			WwVkPresent::underPack( fn, prog->id, ur.loose[0] );
+			auto prog2 = r->useProgram( "cell_underwater_ms.prog" );
+			msUniforms( prog2 );
+			WwVkPresent::underPack( fn, prog2->id, ur.loose[1] );
+			onVk = WwVkPresent::underRun( ur, why );
+			if ( !onVk )
+				prog = r->useProgram( "cell_underwater.prog" );
+		}
+		if ( !onVk )
+			WwVkPresent::underOnGl( why.c_str() );
+		WwVkPresent::underSay( true, nullptr );
+	}
+	if ( !onVk ) {
 		r->drawShape( 4, 3, 6, GL_TRIANGLES, GL_UNSIGNED_SHORT, &attrs, idx );
+		if ( samples > 0 ) {
+			msUniforms( r->useProgram( "cell_underwater_ms.prog" ) );
+			r->drawShape( 4, 3, 6, GL_TRIANGLES, GL_UNSIGNED_SHORT, &attrs, idx );
+		}
 	}
 	r->stopProgram();
 	if ( samples > 0 )

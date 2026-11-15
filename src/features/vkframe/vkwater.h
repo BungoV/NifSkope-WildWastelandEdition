@@ -7,9 +7,11 @@
  * water whenever one input or stage is refused; the reasons are named in the `vk water:` line, slot by slot.
  * The census is GL queries only (Qt's functions or a harness's, Fn), so tests/vkframe/waterview.cpp runs the shipped code. */
 
+#include <algorithm>
 #include <cstdint>
 #include <cstdio>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "features/vkframe/vkwater_tables.h"
@@ -62,6 +64,7 @@ struct WaterCensus
 	std::vector<WaterSlot> inputs;
 	bool tess = false;     //!< a tessellation stage (fo4_waterlookd / dp)
 	int loose = 0;         //!< active non-sampler uniforms outside blocks
+	std::vector<std::string> looseNames;  //!< their names (waterUnslotted)
 	int samplersSeen = 0;  //!< sampler uniforms the program reports (the gate: every one has a slot)
 };
 
@@ -198,8 +201,10 @@ template <class Fn> void waterCensusOf( Fn * fn, unsigned prog, WaterCensus & c 
 		int block = -1;
 		fn->glGetActiveUniformsiv( prog, 1, &idx, 0x8A3A, &block );  // GL_UNIFORM_BLOCK_INDEX
 		if ( !waterIsSampler( type ) ) {
-			if ( block < 0 )
+			if ( block < 0 ) {
 				c.loose++;
+				c.looseNames.push_back( nm );
+			}
 			continue;
 		}
 		c.samplersSeen++;
@@ -316,6 +321,96 @@ struct WaterUbo
 	long long off = 0, size = 0, bufBytes = 0;
 	int need = 0;  //!< the block's size in the program (GL_UNIFORM_BLOCK_DATA_SIZE)
 };
+/* lane VKWATER3 item 4: the water programs with Vulkan twins (cellwater.cpp wwCellWaterProgram's names), their pixel
+ * stage's tables. Every one takes water_view_vs; a tessellated one adds water_view_hs + water_view_ds (fo4_waterdisp).
+ * Piece 2: the Medium / ray-pass look (m) and the probes' looks (p, tessellated dp). Lane VKWATER4: the water look off
+ * (fo4_water, "off"). */
+enum WaterVariant { kWaterLook = 0, kWaterLookD, kWaterLookM, kWaterLookP, kWaterLookDp, kWaterOff, kWaterVariants };
+struct WaterTables
+{
+	const char * prog;  //!< GL's program file
+	bool tess;
+	const FxField * ps;
+	int psN, psBytes;
+	const WaterBindName * psNames;
+	int psNamesN;
+};
+template <class T, int N> constexpr int waterN( const T ( & )[N] )
+{
+	return N;
+}
+inline const WaterTables & waterTables( int v )
+{
+	static const WaterTables k[kWaterVariants] = {
+		{ "fo4_waterlook.prog", false, kT_waterPs, waterN( kT_waterPs ), kT_waterPsBytes, kN_waterPs, waterN( kN_waterPs ) },
+		{ "fo4_waterlookd.prog", true, kT_waterPsD, waterN( kT_waterPsD ), kT_waterPsDBytes, kN_waterPsD, waterN( kN_waterPsD ) },
+		{ "fo4_waterlookm.prog", false, kT_waterPsM, waterN( kT_waterPsM ), kT_waterPsMBytes, kN_waterPsM, waterN( kN_waterPsM ) },
+		{ "fo4_waterlookp.prog", false, kT_waterPsP, waterN( kT_waterPsP ), kT_waterPsPBytes, kN_waterPsP, waterN( kN_waterPsP ) },
+		{ "fo4_waterlookdp.prog", true, kT_waterPsDp, waterN( kT_waterPsDp ), kT_waterPsDpBytes, kN_waterPsDp, waterN( kN_waterPsDp ) },
+		{ "fo4_water.prog", false, kT_waterPsOff, waterN( kT_waterPsOff ), kT_waterPsOffBytes, kN_waterPsOff, waterN( kN_waterPsOff ) } };
+	return k[v >= 0 && v < kWaterVariants ? v : 0];
+}
+//! the variant of GL's program file (-1: no twin)
+inline int waterVariantOf( std::string_view prog )
+{
+	for ( int v = 0; v < kWaterVariants; v++ )
+		if ( prog == waterTables( v ).prog )
+			return v;
+	return -1;
+}
+//! the variant's pixel twin declares this block or input (e.g. wwShadowFrame: GL's program must be the WW_FRAME_UBO one)
+inline bool waterPsReads( int v, std::string_view name )
+{
+	const WaterTables & t = waterTables( v );
+	for ( int k = 0; k < t.psNamesN; k++ )
+		if ( name == t.psNames[k].name )
+			return true;
+	return false;
+}
+/* lane VKWATER4 (all-on census): GL's active inputs (samplers and loose uniforms) the variant's twins never declare, e.g.
+ * cellDdgiAtlas / cellRestir of a WW_CELL_RTDDGI / WW_CELL_RESTIR build; empty when every one has a slot */
+inline std::string waterUnslotted( int v, const WaterCensus & c )
+{
+	const WaterTables & t = waterTables( v );
+	auto has = [&]( std::string_view n ) {
+		auto inN = [&]( const WaterBindName * k, int nk ) {
+			for ( int i = 0; i < nk; i++ )
+				if ( n == k[i].name )
+					return true;
+			return false;
+		};
+		auto inT = [&]( const FxField * k, int nk ) {
+			for ( int i = 0; i < nk; i++ )
+				if ( n == k[i].name )
+					return true;
+			return false;
+		};
+		if ( inN( t.psNames, t.psNamesN ) || inT( t.ps, t.psN ) || inN( kN_waterVs, waterN( kN_waterVs ) )
+			|| inT( kT_waterVs, waterN( kT_waterVs ) ) )
+			return true;
+		return t.tess && ( inN( kN_waterHs, waterN( kN_waterHs ) ) || inT( kT_waterHs, waterN( kT_waterHs ) )
+			|| inN( kN_waterDs, waterN( kN_waterDs ) ) || inT( kT_waterDs, waterN( kT_waterDs ) ) );
+	};
+	std::string names;
+	int n = 0;
+	auto check = [&]( const std::string & full ) {
+		const std::string_view b = std::string_view( full ).substr( 0, full.find( '[' ) );
+		if ( b.substr( 0, 3 ) == "gl_" || has( b ) )
+			return;
+		if ( ++n <= 12 )
+			names += " " + std::string( b );
+	};
+	for ( const WaterSlot & s : c.inputs )
+		check( s.name );
+	for ( const std::string & s : c.looseNames )
+		check( s );
+	if ( !n )
+		return {};
+	return std::string( t.prog ) + ": GL's program reads " + std::to_string( n ) + " inputs its Vulkan twin has no slot for:" + names
+		+ ( n > 12 ? " ..." : "" );
+}
+inline constexpr int kWaterPsLooseMax = std::max( { kT_waterPsBytes, kT_waterPsDBytes, kT_waterPsMBytes, kT_waterPsPBytes, kT_waterPsDpBytes,
+	kT_waterPsOffBytes } );
 //! lane VKFAR2: one instanced command (CellMeshInst::Cmd's layout; GL's DrawElementsIndirectCommand)
 struct WaterCmd
 {
@@ -324,14 +419,17 @@ struct WaterCmd
 	std::uint32_t baseInstance = 0;
 };
 //! the largest pixel-stage loose block of the shaded twins (water, the far LOD rings, lane VKFAR3: the far ground)
-constexpr int kTwinPsMax2 = kT_farlodPsBytes > kT_waterPsBytes ? kT_farlodPsBytes : kT_waterPsBytes;
+constexpr int kTwinPsMax2 = kT_farlodPsBytes > kWaterPsLooseMax ? kT_farlodPsBytes : kWaterPsLooseMax;
 constexpr int kTwinPsMax = kT_fargndPsBytes > kTwinPsMax2 ? kT_fargndPsBytes : kTwinPsMax2;
+
 /* everything the shaded draw reads: the census, GL's vertex array, element range, blocks, loose uniforms, raster state.
- * Indices GL_UNSIGNED_SHORT triangles (bsshape's drawElements). */
+ * Indices GL_UNSIGNED_SHORT triangles, or 3-vertex patches for a tessellated variant (bsshape's drawElements). */
 struct WaterRun
 {
-	int w = 0, h = 0;               //!< the tone frame's size
-	unsigned color = 0;             //!< the tone frame's colour (toneFrameIs)
+	int w = 0, h = 0;               //!< the target's size
+	unsigned color = 0;             //!< the tone frame's colour (toneFrameIs), or the ray target's (rayDepth set)
+	unsigned rayDepth = 0;          //!< lane VKWATER4: the water ray pass's depth twin (waterRayDepth); 0: the tone frame
+	int variant = kWaterLook;       //!< the caller's (waterVariantOf GL's program), before waterStateOf
 	WaterCensus census;
 	WaterAttrib attr[kWaterAttribs];
 	unsigned ebo = 0;
@@ -339,8 +437,10 @@ struct WaterRun
 	long long idxOff = 0;           //!< bytes into the element buffer
 	int count = 0, baseVertex = 0;
 	WaterUbo global, shadow, skin;  //!< globalUniforms (vs b41 + ps b1), wwShadowFrame (ps b0), skinningUniforms (vs b40)
-	std::uint8_t vsLoose[kT_waterVsBytes] = {}, psLoose[kTwinPsMax] = {};
+	std::uint8_t vsLoose[kT_waterVsBytes] = {}, hsLoose[kT_waterHsBytes] = {}, dsLoose[kT_waterDsBytes] = {};
+	std::uint8_t psLoose[kTwinPsMax] = {};  //!< the variant's pixel table (waterTables) or the rings' (lane VKFAR2)
 	int psBytes = kT_waterPsBytes;  //!< lane VKFAR2: the pixel twin's block (twinStateOf's table)
+	int patchVerts = 3;             //!< GL_PATCH_VERTICES (a tessellated variant)
 	int vp[4] = {}, scissor[4] = {};
 	bool scissorOn = false, cullOn = false, depthTest = true, depthMask = true, blend = false, stencil = false;
 	bool colorMask[4] = { true, true, true, true };
@@ -353,7 +453,10 @@ struct WaterRun
 	std::vector<WaterCmd> cmds;     //!< far rings: instanced commands (empty: one draw of count from idxOff / baseVertex)
 	std::uintptr_t key = 0;         //!< the twins' keys: key + slot index
 	int red = 0;                    //!< gates only: 1 the ps loose block a vec4 off, 2 plain samplers, 4 cull flipped, 8 depth ALWAYS,
-	                                //!< 16 (rings) the polygon offset dropped
+	                                //!< 16 water: the tessellation domain's origin upper-left (Vulkan's default, not GL's),
+	                                //!< rings (lane VKFAR2): the polygon offset dropped; 32 water: the ds loose block a vec4 off,
+	                                //!< 64 the ray depth view keyed on its VkImage handle only (lane VKWATER4), 128 the last
+	                                //!< crossing's fence wait reads VK_TIMEOUT (must refuse)
 };
 
 /* GL current, prog in use, its uniforms set, the shape's vertex array bound: GL's side of the draw into r (the census
@@ -461,7 +564,13 @@ template <class Fn> void twinStateOf( Fn * fn, unsigned prog, WaterRun & r, cons
 
 template <class Fn> void waterStateOf( Fn * fn, unsigned prog, WaterRun & r )
 {
-	twinStateOf( fn, prog, r, kT_waterPs, int( sizeof( kT_waterPs ) / sizeof( kT_waterPs[0] ) ), kT_waterPsBytes );
+	const WaterTables & t = waterTables( r.variant );
+	twinStateOf( fn, prog, r, t.ps, t.psN, t.psBytes );
+	if ( t.tess ) {  // lane VKWATER3 item 4
+		fxPack( fn, prog, kT_waterHs, waterN( kT_waterHs ), r.hsLoose );
+		fxPack( fn, prog, kT_waterDs, waterN( kT_waterDs ), r.dsLoose );
+		fn->glGetIntegerv( 0x8E72, &r.patchVerts );  // GL_PATCH_VERTICES
+	}
 }
 
 //! lane VKFAR2: the far LOD rings' side (fo4_cellcsm's twin), the rings' vertex array bound
@@ -482,19 +591,29 @@ WaterCaps waterCaps();
  * 3D / array), VKFAR1's farTwin (BC 2D / array, cube-map arrays) or farTexelBuffer (texel buffers). false: why */
 bool waterTwin( std::uintptr_t key, const WaterSlot & s, unsigned & tex, std::string & why );
 void waterTwinDrop( std::uintptr_t key, const WaterSlot & s );
-//! one water draw stayed on GL (why: the verdict or the route's reason)
-void waterOnGl( const char * why );
+//! one water draw stayed on GL (why: the verdict or the route's reason; variant: its twin, -1 none)
+void waterOnGl( const char * why, int variant = -1 );
 struct WaterStat
 {
 	int gl = 0, census = 0;
 	std::string glWhy;
 	double censusMs = 0.0;
+	int vk[kWaterVariants] = {}, glV[kWaterVariants] = {};	// lane VKWATER4: per twin (look / d / m / p / dp / off)
 };
 WaterStat takeWaterStat();
 void waterCensusTook( double ms );
-/*! lane VKWATER3: the non-tessellated shaded water draw (fo4_default vs + fo4_waterlook ps twins) into the tone frame on
- * Vulkan, one crossing. false: why; nothing drawn (GL draws the shape) */
+/*! lane VKWATER3: the shaded water draw (r.variant's twins: fo4_default vs [+ fo4_waterdisp hs + ds] + the pixel twin)
+ * into the tone frame on Vulkan, one crossing. false: why; nothing drawn (GL draws the shape) */
 bool waterRun( const WaterRun & r, std::string & why );
+/*! lane VKWATER4: the water ray pass's depth on the present device: a shared twin (key, w x h, GL's renderbuffer format,
+ * D24S8 or D32F_S8, 1 sample) GL copies the renderbuffer rb into, once a pass (the pass writes no depth). false: why */
+bool waterRayDepth( std::uintptr_t key, unsigned rb, unsigned glFmt, int w, int h, unsigned & tex, std::string & why );
+#ifdef WW_VKPRESENT_NO_QT
+/*! harness only (waterdraw, WW_WATERDRAW_RAYREUSE): frees the ray depth twin at key and remakes it at glFmt (same size)
+ * up to 8 times until the new VkImage has the freed one's handle value. Tries on a hit, 0: 8 misses, -1: no twin at key,
+ * -2: the remake failed (why) */
+int waterRayForceReuse( std::uintptr_t key, unsigned glFmt, std::string & why );
+#endif
 //! what waterRun cannot take on this device (empty: none)
 std::string waterDrawRefusal();
 FxStat takeWaterDrawStat();

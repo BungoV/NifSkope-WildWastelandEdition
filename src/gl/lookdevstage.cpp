@@ -46,6 +46,7 @@ BSD License - see nifskope.h
 #include "cellstream.h"	// lane WEATHERBLEND6: the streamed camera's cell, for the region walk
 #include "features/exposure/physunits.h"	// lane PHYSUNITS1: real units
 #include "features/exposure/physcamera.h"	// MODULES1 R6-12: the camera's adaptation floor (the gameplay moon)
+#include "features/weather/weatherrecxwire.h"	// lane WEATHERRECX4: the wired .recx keys
 #include "features/weather/wxoverride.h"	// lane MODULES1 item 12: live weather overrides
 #include "features/vkframe/vkskybody.h"	// lane VKFAR2 G2: the stars and the moon globe in the sky's Vulkan pass
 
@@ -993,6 +994,19 @@ void sunBodyDir( const LdState & s, float out[3] )
 		out[c] = l > 1e-9f ? out[c] / l : ( c == 2 ? 1.0f : 0.0f );
 }
 
+//! lane WEATHERRECX4: the sun's source with atmosphere.sunIlluminance (ground lux, zenith sun, clear-day air)
+float sunToaLux()
+{
+	return wwphys::kSunToaLux * WwRecxWire::sunFactor( wwWeatherRecx().sunIlluminance, wwphys::kSunToaLux,
+		wwAtmoClearZenithTransmittance() );
+}
+
+//! lane WEATHERRECX4: the camera's adaptation floor with night.adaptFloor, cd/m2 (physunits.cpp takes the same)
+float adaptFloorCdm2()
+{
+	return WwRecxWire::adaptFloor( wwphys::kAdaptFloorCdm2, wwWeatherRecx().adaptFloor );
+}
+
 //! the phase angle the moonlight follows (the drawn globe's), memoised: the light asks once per shape
 float moonAlphaNow( const LdState & s )
 {
@@ -1177,7 +1191,7 @@ void physFinish( LdLight & L, float rKey, bool airKey )
 			}
 			for ( int a = 0; a < 5; a++ )
 				for ( int c = 0; c < 3; c++ )
-					out[a][c] += sAxes[a][c] * wwphys::kSunToaLux / wwphys::kPi * twi;
+					out[a][c] += sAxes[a][c] * sunToaLux() / wwphys::kPi * twi;
 		}
 	}
 	if ( sky ) {
@@ -1423,17 +1437,19 @@ LdLight computeLight()
 	if ( phys && !wwMoonRed( "physical" ) ) {
 		const float vd = weatherKeyOf( WwTodDay ), vn = weatherKeyOf( WwTodNight );
 		if ( vd > 1e-9f && vn > 0.0f )
-			moonGame = ( vn / vd ) * ( wwphys::kSunToaLux / wwphys::kMoonToaLux ) * ( wwphys::kAdaptFloorCdm2 / wwphys::kKeyDaylightCdm2 );
+			moonGame = ( vn / vd ) * ( wwphys::kSunToaLux / wwphys::kMoonToaLux ) * ( adaptFloorCdm2() / wwphys::kKeyDaylightCdm2 );
 		bool ok = false;
 		const float pin = wwEnvStr( "WW_MOON_GAME" ).trimmed().toFloat( &ok );
 		if ( ok && pin > 0.0f )
 			moonGame = pin;
+		moonGame = WwRecxWire::moonGame( moonGame, wwWeatherRecx().moonGameFactor, ok && pin > 0.0f );	// lane WEATHERRECX4
 		moonGame = std::clamp( moonGame, 1.0f, 64.0f );	// never under the real moon
 		static QString saidGame;
 		const QString line = QStringLiteral( "moon light game: factor x%1%2 (record night/day key %3, sun/moon %4, camera floor/daylight %5); full moon above the air %6 lux, x phase and weather %7 = %8 lux applied (red WW_MOON_RED=physical: x1; the land's luminance and the EV: the phys camera line)" )
-			.arg( double( moonGame ), 0, 'f', 2 ).arg( ok && pin > 0.0f ? QStringLiteral( " (PINNED WW_MOON_GAME)" ) : QString() )
+			.arg( double( moonGame ), 0, 'f', 2 ).arg( ok && pin > 0.0f ? QStringLiteral( " (PINNED WW_MOON_GAME)" )
+				: wwWeatherRecx().moonGameFactor >= 1.0f ? QStringLiteral( " (FILE night.moonGameFactor)" ) : QString() )
 			.arg( vd > 1e-9f ? double( vn / vd ) : 0.0, 0, 'f', 4 ).arg( double( wwphys::kSunToaLux / wwphys::kMoonToaLux ), 0, 'f', 0 )
-			.arg( double( wwphys::kAdaptFloorCdm2 / wwphys::kKeyDaylightCdm2 ), 0, 'g', 3 )
+			.arg( double( adaptFloorCdm2() / wwphys::kKeyDaylightCdm2 ), 0, 'g', 3 )
 			.arg( double( wwphys::kMoonToaLux * moonGame ), 0, 'f', 2 ).arg( double( moonK ), 0, 'f', 3 )
 			.arg( double( wwphys::kMoonToaLux * moonGame * moonK ), 0, 'f', 3 );
 		if ( line != saidGame ) {
@@ -1450,7 +1466,7 @@ LdLight computeLight()
 	auto keyLumOf = [&]( int tod ) {
 		if ( !phys )
 			return weatherKeyOf( tod );
-		return ( tod == WwTodNight ? wwphys::kMoonToaLux * moonGame : wwphys::kSunToaLux ) / wwphys::kPi;
+		return ( tod == WwTodNight ? wwphys::kMoonToaLux * moonGame : sunToaLux() ) / wwphys::kPi;
 	};
 	float rKey = 1.0f;
 	if ( phys ) {
@@ -1483,7 +1499,7 @@ LdLight computeLight()
 		ns.stops = ok ? std::clamp( st, 0.0f, 8.0f ) : 2.0f;
 		const float vd = weatherKeyOf( WwTodDay ), vn = weatherKeyOf( WwTodNight );
 		// the night key over the day key as the screen shows them (master On: through the moon's gameplay factor)
-		const float onScreen = phys ? ( wwphys::kMoonToaLux * moonGame / wwphys::kSunToaLux ) * ( wwphys::kKeyDaylightCdm2 / wwphys::kAdaptFloorCdm2 )
+		const float onScreen = phys ? ( wwphys::kMoonToaLux * moonGame / wwphys::kSunToaLux ) * ( wwphys::kKeyDaylightCdm2 / adaptFloorCdm2() )
 			: ( vd > 1e-9f ? vn / vd : 0.0f );
 		const float full = onScreen > 1e-9f ? std::clamp( std::exp2( -ns.stops ) / onScreen, 1.0f, 4096.0f ) : 1.0f;
 		ns.phase = !wwAtmoNightOn() ? 1.0f : std::clamp( wwAtmoDiscs() ? wwAtmoMoonFactorDeg( moonAlphaNow( s ) )
@@ -1645,8 +1661,10 @@ WwFog currentFog()
 	static double hour = -1.0;
 	static WwFog memo;
 	static unsigned long long wxOv = 0;	// lane MODULES1 item 12: a live fog override moves the fog next frame
-	if ( gen != s.gen || hour != s.hour || wxOv != wwWxOvStamp() ) {
+	static unsigned long long wxRecx = 0;	// lane WEATHERRECX4: the weather .recx's fog keys
+	if ( gen != s.gen || hour != s.hour || wxOv != wwWxOvStamp() || wxRecx != wwWeatherRecx().stamp ) {
 		wxOv = wwWxOvStamp();
+		wxRecx = wwWeatherRecx().stamp;
 		// the record's per-time-of-day fog colours (sRGB bytes), each pinnable
 		static const WwWx tod[2][4] = { { WwWx::FogNearSunrise, WwWx::FogNearDay, WwWx::FogNearSunset, WwWx::FogNearNight },
 			{ WwWx::FogFarSunrise, WwWx::FogFarDay, WwWx::FogFarSunset, WwWx::FogFarNight } };
@@ -1666,6 +1684,11 @@ WwFog currentFog()
 						w.color[t][rows[r]][c] = (unsigned char)std::lround( std::min( std::max( v[c], 0.0f ), 255.0f ) );
 			}
 		memo = wwFogAt( patch ? w : s.w, s.hour, s.tnam, s.gmst );
+		// lane WEATHERRECX4: atmosphere.fogStart / fogCutoff (m) / fogMaxOpacity from the .recx; the live overrides win
+		const WwWeatherRecx & wr = wwWeatherRecx();
+		memo.fogNear = WwRecxWire::fogNear( memo.fogNear, wr.fogStartM );
+		memo.fogFar = WwRecxWire::fogFar( memo.fogFar, wr.fogCutoffM );
+		memo.maxv = WwRecxWire::fogMax( memo.maxv, wr.fogMaxOpacity );
 		memo.fogNear = wwWxOv( WwWx::FogNear, memo.fogNear );
 		memo.fogFar = wwWxOv( WwWx::FogFar, memo.fogFar );
 		memo.power = wwWxOv( WwWx::FogPower, memo.power );
@@ -2299,6 +2322,14 @@ bool wwLookdevShadows()
 void wwLookdevSetShadows( bool on )
 {
 	setPart( st().shadows, on, st().pinShadows, kShadowsKey );
+}
+
+float wwLookdevSunSinHeight()
+{
+	resolve();
+	float d[3];
+	sunBodyDir( st(), d );
+	return d[2];
 }
 
 void wwLookdevShadowLight( float sunDir[3], float disc[3] )
@@ -3984,7 +4015,7 @@ bool drawAtmo( Scene * scene, QStringList & drew, bool capture = false )
 	};
 	const float scale = wwLookdevSunlightScale();
 	const bool phys = wwPhysSkyOn();	// lane PHYSUNITS1: the top-of-atmosphere sun and moon over pi (atmosphere.cpp)
-	in.sunLum = phys ? wwphys::kSunToaLux / wwphys::kPi : keyLum( WwTodDay ) * scale;
+	in.sunLum = phys ? sunToaLux() / wwphys::kPi : keyLum( WwTodDay ) * scale;
 	in.moonLum = ( phys ? wwphys::kMoonToaLux / wwphys::kPi : keyLum( WwTodNight ) * scale ) * moonLightFactor( s );
 	if ( wwWeatherRecx().on && wwWeatherRecx().moonlight >= 0.0f )
 		in.moonLum *= wwWeatherRecx().moonlight;	// lane WX1: night.moonlight, the glow round the moon

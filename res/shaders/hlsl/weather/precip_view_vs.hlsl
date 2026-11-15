@@ -21,6 +21,13 @@ struct PrecipRec
 	float4 box;
 	float4 a;
 	float4 b;
+#ifdef PC_LOOK
+	float4 drop;
+	float4 thin;	// w gOsc
+	float4 thick;
+	float4 domL;
+	float4 domE;
+#endif
 };
 StructuredBuffer<PrecipRec> pcRec : register(t1, space0);
 
@@ -33,6 +40,16 @@ struct VsOut
 	nointerpolation float4 gBox : TEXCOORD4;
 	nointerpolation float3 gA : TEXCOORD5;
 	nointerpolation float3 gB : TEXCOORD6;
+#ifdef PC_LOOK
+	// slice 3 (precip_look_view_vs.hlsl): cell_precip_look's interpolants, the geometry stage's order
+	nointerpolation float4 gDrop : TEXCOORD7;
+	nointerpolation float gOsc : TEXCOORD8;
+	nointerpolation float3 gThin : TEXCOORD9;
+	nointerpolation float3 gThick : TEXCOORD10;
+	nointerpolation float4 gDomL : TEXCOORD11;
+	nointerpolation float3 gDomE : TEXCOORD12;
+	nointerpolation float2 gAx : TEXCOORD13;
+#endif
 	float4 pos : SV_Position;
 };
 
@@ -46,16 +63,32 @@ VsOut main( uint corner : SV_VertexID, uint inst : SV_InstanceID )
 	float3 c = r.c.xyz;
 	float2 ax = r.axes.xy, ay = r.axes.zw;
 	float hx = r.ext.x, hy = r.ext.y;
-	float3 p = c + float3( ax * ( q.x * hx ) + ay * ( q.y * hy ), 0.0 );
+	// NV GL's geometry-stage order: off = fma( ax, q.x hx, ay (q.y hy) ), clip = ((y M1 + x M0) + z M2) + M3
+	precise float2 offY = ay * ( q.y * hy );
+	precise float2 off = mad( ax, q.x * hx, offY );
+	precise float3 p = c + float3( off, 0.0 );
 	VsOut o;
 	o.gQ = q;
-	o.gUv = r.ext.zw + pcAtlas.xy * ( q * 0.5 + 0.5 );
+	precise float2 uq = mad( q, 0.5, 0.5 );
+	o.gUv = mad( uq, pcAtlas.xy, r.ext.zw );
 	o.gView = p;
 	o.gCol = r.col;
 	o.gBox = r.box;
 	o.gA = r.a.xyz;
 	o.gB = r.b.xyz;
-	float4 cp = mul(float4( p, 1.0 ), pcProj);
+#ifdef PC_LOOK
+	o.gDrop = r.drop;
+	o.gOsc = r.thin.w;
+	o.gThin = r.thin.xyz;
+	o.gThick = r.thick.xyz;
+	o.gDomL = r.domL;
+	o.gDomE = r.domE.xyz;
+	o.gAx = ax;
+#endif
+	precise float4 cp0 = p.y * pcProj[1];
+	precise float4 cp1 = mad( p.x, pcProj[0], cp0 );
+	precise float4 cp2 = mad( p.z, pcProj[2], cp1 );
+	precise float4 cp = cp2 + pcProj[3];
 	o.pos = r.c.w != 0.0 ? float4( cp.xy, ( cp.z + cp.w ) * 0.5, cp.w ) : float4( 0.0, 0.0, -1.0, 1.0 );
 	return o;
 }

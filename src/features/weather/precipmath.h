@@ -34,6 +34,7 @@
  * the shipped atlases moved to Textures/FO4CS/Precip (the reader still finds the old WW/Precip, cellprecip.cpp). */
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -54,11 +55,14 @@ constexpr double kFarMax = 6144.0;
 constexpr int kNearCap = 32768, kFarCap = 24576;
 constexpr double kRedDensity = 100.0;	// per m^3: the red's constant
 
+//! the six shipped types keep their indices; type files (Weathers/Precip, precipspec.h) may add up to kMaxTypes
 enum Type : int { Rain = 0, Hail, SnowFine, SnowFarDot, SnowWetClump, SnowBigClump, TypeCount };
+constexpr int kMaxTypes = 16;
 
 /* the reds, one per rule (WW_CELL_PRECIP_RED, tests/features/weather/precip): 1 constdensity (a constant density, the weight ignored),
- * 2 nowrap (positions never wrap into the box), 4 onespeed (every particle falls at 1 m/s), 8 nowind (no wind) */
-enum Red : int { RedConstDensity = 1, RedNoWrap = 2, RedOneSpeed = 4, RedNoWind = 8 };
+ * 2 nowrap (positions never wrap into the box), 4 onespeed (every particle falls at 1 m/s), 8 nowind (no wind),
+ * 32 switchlaw (WEATHERRECX2: the per-type fall-speed / mass switch instead of the one law; 16 is the test's look red) */
+enum Red : int { RedConstDensity = 1, RedNoWrap = 2, RedOneSpeed = 4, RedNoWind = 8, RedSwitchLaw = 32 };
 inline int & redBits()
 {
 	static int bits = 0;
@@ -70,6 +74,57 @@ struct Variant
 	double sizeMm;	// the particle's size (airpart_textures/<type>/<type>_meta.json size_mm)
 	double cellMm;	// the atlas cell's width in mm (the quad's true size)
 };
+
+/* WEATHERRECX2 part 4: ONE terminal-velocity law for every type (Mitchell & Heymsfield 2005 Best number):
+ *   m = massCoef D^massExp (mg, D mm); A = areaCoef D^areaExp x pi/4 D^2 (projected area, m^2)
+ *   X = 2 m g rho_air D^2 / (A eta^2); Re = d0^2/4 (sqrt(1 + 4 sqrt(X) / (d0^2 sqrt(C0))) - 1)^2; v = eta Re / (rho_air D)
+ *   capped at vmax when vmax > 0. g 9.81, rho_air 1.2, eta 1.81e-5, d0 5.83.
+ * The shipped presets were fitted to the old per-type switch (notes/weatherrecx2/tools/fitlaw.py, fit2.py): worst fall-speed
+ * error over each type's sizes (atlas + a dense grid, fit3.py) and airpart_data.md's rows: drop 6.67 %, pellet 1.27 %,
+ * flake 3.69 %, clump 1.23 %; mass is the old law exactly. Stated tolerance 7 % (tests/features/weather/precip rule 1, gate notes/weatherrecx2/unit). */
+struct Law
+{
+	double massCoef = 0.5236, massExp = 3.0;	// mg at D mm
+	double areaCoef = 1.0, areaExp = 0.0;	// projected area / (pi/4 D^2) = areaCoef D^areaExp
+	double c0 = 0.6;	// the shape's drag constant (Abraham)
+	double vmax = 0.0;	// m/s, 0 = no cap
+};
+constexpr double kEtaAir = 1.81e-5, kDelta0 = 5.83;
+
+inline double lawSpeedMps( const Law & L, double D )
+{
+	const double Dm = D / 1000.0;
+	const double m = L.massCoef * std::pow( D, L.massExp ) * 1e-6;
+	const double A = L.areaCoef * std::pow( D, L.areaExp ) * 0.25 * 3.14159265358979 * Dm * Dm;
+	if ( !( A > 0.0 ) || !( m > 0.0 ) || !( L.c0 > 0.0 ) )
+		return 0.0;
+	const double X = 2.0 * m * kG * kRhoAir * Dm * Dm / ( A * kEtaAir * kEtaAir );
+	const double s = std::sqrt( 1.0 + 4.0 * std::sqrt( X ) / ( kDelta0 * kDelta0 * std::sqrt( L.c0 ) ) ) - 1.0;
+	const double v = kEtaAir * ( kDelta0 * kDelta0 * 0.25 * s * s ) / ( kRhoAir * Dm );
+	return L.vmax > 0.0 ? std::min( v, L.vmax ) : v;
+}
+
+inline double lawMassMg( const Law & L, double D )
+{
+	return L.massCoef * std::pow( D, L.massExp );
+}
+
+//! the shape presets a type file names ("shape": "drop" | "pellet" | "flake" | "clump"); mass comes from the material
+inline bool lawShape( const char * word, Law & L )
+{
+	struct P { const char * n; double a, b, c0, vmax; };
+	static const P kShapes[] = { { "drop", 0.35075, -0.04, 1.15, 9.17 }, { "pellet", 0.66681, 0.08, 0.65, 0.0 },
+		{ "flake", 2.28955, -0.70, 0.40, 0.0 }, { "clump", 0.47261, -0.46, 1.20, 0.0 } };
+	for ( const P & p : kShapes )
+		if ( word && std::strcmp( word, p.n ) == 0 ) {
+			L.areaCoef = p.a;
+			L.areaExp = p.b;
+			L.c0 = p.c0;
+			L.vmax = p.vmax;
+			return true;
+		}
+	return false;
+}
 
 struct TypeInfo
 {
@@ -89,51 +144,106 @@ struct TypeInfo
 	 * the 1-texel-a-cell mip's centre (the cell's mean) instead, where no neighbour mixes in */
 	int maxMip;
 	int seedTag;	// the type's index before sleet went (PRECIPLOOK1): every layer's field seed stays as it was
+	Law law;	// WEATHERRECX2: fall speed and mass (the one law)
+	bool melts = false;	// turns to rain above 0 C (precipitation type file "melts"; stored)
+	double wets = 1.0, settles = 0.0;	// the share that wets a surface / settles as cover (stored for later)
 };
 
-/* the atlases as phase A made them (meta.json, notes/weatherlook1/airpart_textures). snow_fine is the 1k 4 x 4 atlas
+/* the shipped six (camelCase since WEATHERRECX2; the old snake_case words are aliases in typeOf). These are the
+ * defaults that Weathers/Precip/<name>.recx files hold too (the files win; precipspec.h wwPrecipTypeFile). The atlases
+ * as phase A made them (meta.json, notes/weatherlook1/airpart_textures). snowFine is the 1k 4 x 4 atlas
  * (A6: the round after the rejected A5; PERFFIX3 D measured the shipped DDS = the A6 build); its cells are scaled per shape */
-inline const TypeInfo & typeInfo( int t )
+inline TypeInfo * typeTable()
 {
-	static const TypeInfo kTypes[TypeCount] = {
+	static const Law kDrop = { 0.5236, 3.0, 0.35075, -0.04, 1.15, 9.17 }, kPellet = { 0.47124, 3.0, 0.66681, 0.08, 0.65, 0.0 },
+		kFlake = { 0.073, 1.4, 2.28955, -0.70, 0.40, 0.0 }, kClump = { 0.037, 1.9, 0.47261, -0.46, 1.20, 0.0 };
+	static TypeInfo kTypes[kMaxTypes] = {
 		{ "rain", "FO4CS/Precip/rain_d.dds", 4, 2, 8,
 			{ { 0.5, 8 }, { 1, 8 }, { 1.5, 8 }, { 2, 8 }, { 3, 8 }, { 4, 8 }, { 5, 8 }, { 6, 8 } },
-			2.0, 4.0, 1.0, 0.9, 0.0, 0.0, 4, 0 },
+			2.0, 4.0, 1.0, 0.9, 0.0, 0.0, 4, 0, kDrop, false, 1.0, 0.0 },
 		{ "hail", "FO4CS/Precip/hail_d.dds", 4, 2, 8,
 			{ { 5, 50 }, { 8, 50 }, { 12, 50 }, { 16, 50 }, { 20, 50 }, { 26, 50 }, { 34, 50 }, { 44, 50 } },
-			10.0, 10.0, 1.0, 0.5, 2.0, 0.0, 2, 2 },
-		{ "snow_fine", "FO4CS/Precip/snow_fine_d.dds", 4, 4, 16,
+			10.0, 10.0, 1.0, 0.5, 2.0, 0.0, 2, 2, kPellet, true, 0.2, 0.3 },
+		{ "snowFine", "FO4CS/Precip/snow_fine_d.dds", 4, 4, 16,
 			{ { 3.0, 3.5572 }, { 3.0, 3.5698 }, { 3.0, 3.5572 }, { 3.0, 3.6575 }, { 3.93, 4.5971 }, { 4.1, 4.7982 },
 				{ 4.59, 5.3648 }, { 4.55, 5.3144 }, { 5.5, 3.9031 }, { 5.5, 4.4517 }, { 5.5, 4.7008 }, { 5.5, 4.2866 },
 				{ 10.0, 6.1308 }, { 10.0, 5.6934 }, { 10.0, 5.8648 }, { 10.0, 5.7326 } },
-			5.5, 1.0, 3.0, 0.6, 0.5, 6.0, 4, 3 },
-		{ "snow_far_dot", "FO4CS/Precip/snow_far_dot_d.dds", 4, 2, 8,
+			5.5, 1.0, 3.0, 0.6, 0.5, 6.0, 4, 3, kFlake, true, 0.1, 1.0 },
+		{ "snowFarDot", "FO4CS/Precip/snow_far_dot_d.dds", 4, 2, 8,
 			{ { 4, 14 }, { 5, 14 }, { 6, 14 }, { 7, 14 }, { 8, 14 }, { 9, 14 }, { 10, 14 }, { 11, 14 } },
-			6.0, 1.0, 3.0, 0.6, 0.0, 6.0, 4, 4 },
-		{ "snow_wet_clump", "FO4CS/Precip/snow_wet_clump_d.dds", 4, 2, 8,
+			6.0, 1.0, 3.0, 0.6, 0.0, 6.0, 4, 4, kFlake, true, 0.1, 1.0 },
+		{ "snowWetClump", "FO4CS/Precip/snow_wet_clump_d.dds", 4, 2, 8,
 			{ { 5, 27 }, { 7, 27 }, { 9, 27 }, { 11, 27 }, { 14, 27 }, { 17, 27 }, { 21, 27 }, { 25, 27 } },
-			10.0, 2.0, 2.0, 0.3, 0.3, 3.0, 4, 5 },
-		{ "snow_big_clump", "FO4CS/Precip/snow_big_clump_d.dds", 4, 2, 8,
+			10.0, 2.0, 2.0, 0.3, 0.3, 3.0, 4, 5, kClump, true, 0.6, 0.6 },
+		{ "snowBigClump", "FO4CS/Precip/snow_big_clump_d.dds", 4, 2, 8,
 			{ { 15, 54 }, { 20, 54 }, { 25, 54 }, { 30, 54 }, { 35, 54 }, { 40, 54 }, { 45, 54 }, { 50, 54 } },
-			20.0, 1.0, 1.5, 0.6, 0.4, 8.0, 4, 6 },
+			20.0, 1.0, 1.5, 0.6, 0.4, 8.0, 4, 6, kFlake, true, 0.1, 1.0 },
 	};
-	return kTypes[std::clamp( t, 0, int( TypeCount ) - 1 )];
+	return kTypes;
 }
 
-//! the type by its .recx word; -1 when none
+//! how many types are registered (the six shipped + those added by type files)
+inline int & typeCount()
+{
+	static int n = TypeCount;
+	return n;
+}
+
+inline const TypeInfo & typeInfo( int t )
+{
+	return typeTable()[std::clamp( t, 0, typeCount() - 1 )];
+}
+
+//! a type file's values (precipspec.h): replaces a registered type of that name or adds one; -1 when the table is full
+inline int setType( const TypeInfo & ti )
+{
+	for ( int t = 0; t < typeCount(); t++ )
+		if ( std::strcmp( typeTable()[t].name, ti.name ) == 0 ) {
+			const int tag = typeTable()[t].seedTag;
+			typeTable()[t] = ti;
+			typeTable()[t].seedTag = tag;
+			return t;
+		}
+	if ( typeCount() >= kMaxTypes )
+		return -1;
+	typeTable()[typeCount()] = ti;
+	typeTable()[typeCount()].seedTag = typeCount() + 1;	// past every shipped tag (6)
+	return typeCount()++;
+}
+
+//! the old words (snake_case, before WEATHERRECX2) and "snow", each with the name it stands for
+inline const char * typeAlias( const char * word )
+{
+	static const char * const kAlias[][2] = { { "snow", "snowFine" }, { "snow_fine", "snowFine" },
+		{ "snow_far_dot", "snowFarDot" }, { "snow_wet_clump", "snowWetClump" }, { "snow_big_clump", "snowBigClump" } };
+	for ( const auto & a : kAlias )
+		if ( word && std::strcmp( word, a[0] ) == 0 )
+			return a[1];
+	return nullptr;
+}
+
+//! the type by its .recx word, case-free; an alias resolves to its name; -1 when none
 inline int typeOf( const char * word )
 {
-	for ( int t = 0; t < TypeCount; t++ )
-		if ( word && std::strcmp( word, typeInfo( t ).name ) == 0 )
+	if ( !word )
+		return -1;
+	auto same = []( const char * a, const char * b ) {
+		for ( ; *a && *b; a++, b++ )
+			if ( std::tolower( (unsigned char)*a ) != std::tolower( (unsigned char)*b ) )
+				return false;
+		return *a == *b;
+	};
+	for ( int t = 0; t < typeCount(); t++ )
+		if ( same( word, typeInfo( t ).name ) )
 			return t;
+	if ( const char * a = typeAlias( word ) )
+		return typeOf( a );
 	return -1;
 }
 
-//! terminal fall speed in m/s of a particle of size D mm
-inline double fallSpeedMps( int type, double D )
+//! the old per-type switch (before WEATHERRECX2): the red RedSwitchLaw and the gate's reference
+inline double switchFallSpeedMps( int type, double D )
 {
-	if ( redBits() & RedOneSpeed )
-		return 1.0;
 	D = std::max( D, 0.05 );
 	switch ( type ) {
 	case Rain:
@@ -147,8 +257,7 @@ inline double fallSpeedMps( int type, double D )
 	}
 }
 
-//! mass in mg of a particle of size D mm
-inline double massMg( int type, double D )
+inline double switchMassMg( int type, double D )
 {
 	switch ( type ) {
 	case Rain:
@@ -160,6 +269,24 @@ inline double massMg( int type, double D )
 	default:
 		return 0.073 * std::pow( D, 1.4 );
 	}
+}
+
+//! terminal fall speed in m/s of a particle of size D mm: the type's law (red: the old switch)
+inline double fallSpeedMps( int type, double D )
+{
+	if ( redBits() & RedOneSpeed )
+		return 1.0;
+	if ( ( redBits() & RedSwitchLaw ) && type < TypeCount )
+		return switchFallSpeedMps( type, D );
+	return lawSpeedMps( typeInfo( type ).law, std::max( D, 0.05 ) );
+}
+
+//! mass in mg of a particle of size D mm
+inline double massMg( int type, double D )
+{
+	if ( ( redBits() & RedSwitchLaw ) && type < TypeCount )
+		return switchMassMg( type, D );
+	return lawMassMg( typeInfo( type ).law, D );
 }
 
 //! particles per m^3 that carry `rateMmH` of water at size D (red: the constant)

@@ -77,6 +77,29 @@ void forgetAll();
  * handle joins with the twin made before its texture's (must FAIL the gate) */
 bool vkTexOn();
 int vkTexRed();
+/* lane VKOBJ4: WW_VKOBJ_SHADE=1 (with vkTexOn): a cell run draws on Vulkan through its program's twin; the cell frame's
+ * colour and depth / stencil are then shared targets (cellhdr: objBlFrame) */
+bool vkShadeOn();
+/* lane VKWATER3 (plan row G4 by draws): a non-bindless fo4_cell / fo4_cellcsm / pbrm_default shape (its own vertex array) on
+ * Vulkan through the base variant's twins (objCellShade, under vkShadeOn); false: GL draws it, the reason in `vk objcell:`
+ * (`vk objpbrm:`). counts / offs as glMultiDrawElements (16-bit indices), verts the shape's vertex count.
+ * Reds WW_VKVIEW_OBJCELL_RED / WW_VKVIEW_OBJPBRM_RED=offset|half|swz|key */
+bool vkCellDraw( const NifSkopeOpenGLContext::Program * prog, const GLsizei * counts, const void * const * offs, GLsizei n, std::size_t verts );
+/* lane VKOBJ5 (plan row G4 round 3): a particles_cell.prog system's glDrawArrays( GL_POINTS, 0, n ) on Vulkan (objPfxShade:
+ * record pass, strip expand, the pixel twin; under vkShadeOn, the base variant as vkCellDraw's). The arrays as bindShape's
+ * (pos 3, col 4, uv 2, angle 1, size 1 floats a point; null: GL's current value). false: GL draws it, the reason in
+ * `vk objpfx:`. Red WW_VKVIEW_OBJPFX_RED=offset|light|depth */
+bool vkPfxDraw( const NifSkopeOpenGLContext::Program * prog, const float * pos, const float * col, const float * uv, const float * angle,
+	const float * size, std::size_t n );
+/* lane VKOBJ5 (plan row G4): a fo4_cellbl / fo4_cellcsmbl shape outside a run on Vulkan through the bl twins (objBlShade, one
+ * row: the one commit wrote, wwDrawBase 0 on Vulkan; under vkShadeOn): skinned (bone codes at location 5), alpha-tested
+ * (alphaFlags & 7), or rigid and opaque (no blend; a blended rigid shape stays on GL); pooled (its class's arena) or unpooled
+ * (the shape's own VAO, `verts` its vertex count, indices from 0). false: GL draws it, the reason in `vk objskin:` /
+ * `vk objalpha:` / `vk objrigid:` (unpooled ones also in `vk objown:`). Reds WW_VKVIEW_OBJSKIN_RED=bone (the bone transforms
+ * one bone on), WW_VKVIEW_OBJALPHA_RED=flags (alphaFlags 0), WW_VKVIEW_OBJOWN_RED=offset|half (the VAO read from offset 0 /
+ * halves as 16-bit unorm) */
+bool vkBlDraw( const NifSkopeOpenGLContext::Program * prog, const GLsizei * counts, const void * const * offs, GLsizei n,
+	std::size_t verts = 0 );
 //! the cache deletes tex next (its handles were dropped): a twin leaves the table, its Vulkan half at the next frame
 void texGone( GLuint tex );
 
@@ -112,8 +135,10 @@ bool runPoolPeek( const Shape * sh, std::uintptr_t & idxOff, std::int32_t & base
 //! writes the staged row (a follower's) and returns its base instance
 std::uint32_t runRow();
 void runCmd( GLsizei count, std::uintptr_t offBytes, std::uintptr_t idxOff, std::int32_t baseVertex, std::uint32_t rel );
-//! one multi-draw for the run; false = no follower joined (the caller draws the leader as before)
-bool runIssue( NifSkopeOpenGLContext::GLFunctions * f );
+/*! one multi-draw for the run; false = no follower joined (the caller draws the leader as before). lane VKOBJ4:
+ * WW_VKOBJ_SHADE=1 (with WW_VKOBJ_TEX=1) draws it on Vulkan through `prog`'s twin when the frame's targets are shared
+ * (WwVkPresent::objBlShade), else GL draws it; the `vk objshade:` line says which and why */
+bool runIssue( NifSkopeOpenGLContext::GLFunctions * f, const NifSkopeOpenGLContext::Program * prog = nullptr );
 }
 
 #endif

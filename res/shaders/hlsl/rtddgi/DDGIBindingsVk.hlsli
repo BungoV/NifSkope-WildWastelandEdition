@@ -16,7 +16,7 @@
 #endif
 
 DDGI_BIND( 0 ) RWStructuredBuffer<float4> DDGIRays : register( u0 );          // per probe x ray: radiance rgb, signed distance
-DDGI_BIND( 1 ) RWStructuredBuffer<float4> DDGIIrradiance : register( u1 );    // per probe: 8x8 encoded rgb, a = sky visibility
+DDGI_BIND( 1 ) RWStructuredBuffer<float4> DDGIIrradiance : register( u1 );    // per probe: 8x8 encoded rgb, a = sky visibility (M1FIX)
 DDGI_BIND( 2 ) RWStructuredBuffer<float2> DDGIDistance : register( u2 );      // per probe: 16x16 mean, mean^2
 DDGI_BIND( 3 ) RWStructuredBuffer<float4> DDGIProbes : register( u3 );        // offset xyz, state
 DDGI_BIND( 4 ) RWStructuredBuffer<uint> DDGIAge : register( u4 );             // per probe: updates blended
@@ -30,7 +30,7 @@ DDGI_BIND( 9 ) StructuredBuffer<int> DDGITriOf : register( t9 );              //
 DDGI_BIND( 10 ) StructuredBuffer<uint> DDGIMaskTris : register( t10 );
 DDGI_BIND( 11 ) StructuredBuffer<uint4> DDGIMaps : register( t11 );
 DDGI_BIND( 12 ) StructuredBuffer<uint> DDGIAlpha : register( t12 );
-DDGI_BIND( 13 ) StructuredBuffer<float4> DDGILights : register( t13 );        // 8 float4 a light (src/features/gi/rtddgi.cpp packLights)
+DDGI_BIND( 13 ) StructuredBuffer<float4> DDGILights : register( t13 );        // 8 vec4 a light (src/features/gi/rtddgi.cpp packLights)
 DDGI_BIND( 14 ) StructuredBuffer<DDGIParams> DDGIParamBuf : register( t14 );
 [[vk::push_constant]] ConstantBuffer<DDGIJob> DDGIJobPc : register( b0 );
 #define DDGI_P DDGIParamBuf[0]

@@ -44,7 +44,8 @@ static float3 gA;
 static float3 gB;
 #ifdef PC_LOOK
 
-Texture2D<float4> pcTexN : register(t1, space0); SamplerState _pcTexN_sampler : register(s1, space0);
+// not GL's t1: the twin's vertex stage holds t1 (the records) in the same set, so the flake's normal map is t2 / s2
+Texture2D<float4> pcTexN : register(t2, space0); SamplerState _pcTexN_sampler : register(s2, space0);
 static float4 gDrop;
 static float gOsc;
 static float3 gThin;

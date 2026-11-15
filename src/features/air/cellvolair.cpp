@@ -24,6 +24,7 @@ BSD License - see nifskope.h
 #include "features/air/cellairzone.h"	// lane AIRZONE1: the hand-placed volumes' fog and particle blocks
 #include "features/clouds/cloudmap.h"	// lane CLOUD6e: the rain fog follows the Low band's coverage
 #include "features/weather/rainfogmath.h"	// lane CLOUD6e: the rain fog's law
+#include "features/weather/weatherrecxwire.h"	// lane WEATHERRECX4: the wired weather keys
 #include "gl/cellgrass.h"	// lane FOGWIND1: the game's wind angle, shared with the grass
 #include "cellworldanim.h"	// MODULES1: the cell world clock (live in test windows too)
 #include "features/exposure/cellhdr.h"
@@ -1771,8 +1772,9 @@ static QString vaRainFog( Scene * scene, NifSkopeOpenGLContext::Program * prog, 
 	// scale 1: CLOUD6e's number exactly (defaultSigmaPerKm() x share)
 	// FIX1031B: the rain at Marshall-Palmer's law unless the red mono
 	const double rainKm = mono ? RF::defaultSigmaPerKm() : RF::defaultMpSigmaPerKm();
-	const double sigmaKm = snowShare > 0.0 ? rainKm * rainShare + RF::defaultSnowSigmaPerKm() * snowShare
-										   : rainKm * share;
+	// lane WEATHERRECX4: x precipitation.fogExtinctionScale (unset: the rate law alone)
+	const double sigmaKm = WwRecxWire::precipFog( snowShare > 0.0 ? rainKm * rainShare + RF::defaultSnowSigmaPerKm() * snowShare
+											: rainKm * share, wwWeatherRecx().precipFogExtinction );
 	prog->uni4f( "rfLaw", FloatVector4( float( sigmaKm * ku ), float( RF::kBaseExcess ), float( 1.0 / RF::kFalloffKm ),
 		float( 1.0 / RF::kAboveKm ) ) );
 	prog->uni2f( "rfFar", std::clamp( low.coverage, 0.0f, 1.0f ), float( RF::kEdgeFade ) );
@@ -2003,6 +2005,12 @@ static void vaPassInner( Scene * scene, bool run )
 			if ( vaDensPinEarly() && vaDensPin() > 0.0f )
 				M.sigma0 *= vaDensPin();
 		}
+	}
+	{	// lane WEATHERRECX4: atmosphere.volumetric.extinctionScale / viewDistance (unset: today's numbers; the live
+		// overrides below still win)
+		const WwWeatherRecx & wr = wwWeatherRecx();
+		M.sigma0 = WwRecxWire::volExtinction( M.sigma0, wr.volExtinctionScale );
+		M.farD = WwRecxWire::volViewDistance( M.farD, wr.volViewDistanceM, kUnitsPerKm / 1000.0f );
 	}
 	{	// lane MODULES1 item 12: the live air overrides (per km and metres, as the Scene window shows them)
 		const float unitsPerM = kUnitsPerKm / 1000.0f;

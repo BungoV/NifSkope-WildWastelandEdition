@@ -3,14 +3,67 @@
 // then cell_precip_gpu_gs.hlsl's per-particle part (the least drawn size, the motion stretch, the axes, the colour, the
 // far tier's cell mean, the uv box), into one record a particle in GL's order. A culled particle keeps its slot (c.w 0):
 // alpha blending needs GL's order, so nothing is compacted. precip_view_vs.hlsl builds the four corners from the record.
-// Slice 1 is unlit and unfogged (lit 1, the fog off: A = 1, B = 0); vkprecip.inc refuses a lit cell or the fog.
-// The source files are read as they stand (cell_precip_field.hlsli unchanged); the expressions below are theirs.
+// Slice 1 is unlit and unfogged (lit 1: A = 1, B = 0 with the air off); slice 2a adds the air (wwFogFx, the shared
+// lookdev_fog.hlsli as it stands); vkprecip.inc refuses a lit cell until slice 2b. Slice 3: PC_LOOK
+// (precip_look_view_cs.hlsl, cell_precip_look.prog) adds the drop / flake terms to the record (unlit: thin = thick = 1).
+// cell_precip_field.hlsli is included unchanged (its hashes, roof test); pcParticleVk below is a twin-local copy of its
+// pcParticle spelled in NV GL's order of operations. A change to pcParticle there must be mirrored here.
 // profile: cs_6_0
+// the loader injects WW_CELL_FOGLEAK into GL's program by default (glcontext.cpp): the air's one-tail far shape. It adds
+// no binding (reflect json identical with and without); vkprecip refuses WW_CELL_FOGLEAK=0 instead.
+#define WW_CELL_FOGLEAK 1
 #include "WeatherBindingsVk.hlsli"
 #define WW_HLSL_SRC 1	// the shared .hlsli files give their readable half
+// slice 2a: the air at the particle's centre, as cell_precip_gpu_gs.hlsl reads it outside a fragment stage
+#define Sample( s, uv ) SampleLevel( s, uv, 0 )	// GLSL: texture() outside a fragment shader reads level 0
+#define SampleCmp SampleCmpLevelZero
+static float4 pcFragCoord;
+static float3 pcDPx, pcDPy;
+#define gl_FragCoord pcFragCoord
+#define ddx( p ) pcDPx
+#define ddy( p ) pcDPy
+#ifdef PC_LIT
+#ifdef PC_LOOK
+#error "slice 2b lights the plain particles only; the lit look is a later increment"
+#endif
+// slice 2b (precip_lit_view_cs.hlsl): cell_precip_gpu_gs.hlsl's light at the centre, its include chain in its order
+#define WW_CELLLIGHTS 1
+cbuffer globalUniforms : register(b0, space0)
+{
+	row_major float3x3	viewMatrix : packoffset(c0);
+	row_major float3x3	envMapRotation : packoffset(c3);
+	row_major float4x4	projectionMatrix : packoffset(c6);
+	float4	lightSourcePosition[3] : packoffset(c10);
+	float4	lightSourceDiffuse[3] : packoffset(c13);
+	float4	lightSourceAmbient : packoffset(c16);
+	float	toneMapScale : packoffset(c17);
+	float	brightnessScale : packoffset(c17.y);
+	float	glowScale : packoffset(c17.z);
+	float	glowScaleSRGB : packoffset(c17.w);
+	int4	viewportDimensions : packoffset(c18);
+	uint	doSkinning : packoffset(c19);
+	int	sceneOptions : packoffset(c19.y);
+	int	cubeBgndMipLevel : packoffset(c19.z);
+	int	sfParallaxMaxSteps : packoffset(c19.w);
+	float	sfParallaxScale : packoffset(c20);
+	float	sfParallaxOffset : packoffset(c20.y);
+	float	unusedUniform1 : packoffset(c20.z);
+	float	unusedUniform2 : packoffset(c20.w);
+};
+#endif
 
 #define WW_LOOSE_TYPES 1
 #include "cell_precip_field.hlsli"
+#include "../air/lookdev_fog.hlsli"
+#ifdef PC_LIT
+#include "../lights/cell_lights.hlsli"
+#include "../lights/cell_cluster.hlsli"
+#include "../air/cell_volpart.hlsli"
+#include "../lights/cell_fxlaw.hlsli"
+#include "../shadows/ww_sunshadow.hlsli"
+#define WW_AIR_GIVOL 1
+#include "../air/cell_airmed.hlsli"
+#endif
 #undef WW_LOOSE_TYPES
 cbuffer LooseUniforms : register(b31, space0)
 {
@@ -29,11 +82,117 @@ cbuffer LooseUniforms : register(b31, space0)
 	bool pcHasTex;
 	uint pcFirst;		// not GL's: the run's first vertex
 	uint pcCount;		// not GL's: the run's particles
-	int pcRed;			// not GL's: gates only, 1 the cull radius 0 (cell_precip_gpu_vs.hlsl's PC_CULL_RED)
+	int pcRed;			// not GL's: gates only, 1 the cull radius 0 (cell_precip_gpu_vs.hlsl's PC_CULL_RED), 2 the air dropped, 4 the light dropped (PC_LIT)
+	float4 pcViewport;	// the frame's viewport (x, y, w, h): the centre's window position
+#define WW_LOOSE_UNIFORMS 1
+#include "../air/lookdev_fog.hlsli"
+#ifdef PC_LIT
+#include "../lights/cell_lights.hlsli"
+#include "../lights/cell_cluster.hlsli"
+#include "../air/cell_volpart.hlsli"
+#include "../lights/cell_fxlaw.hlsli"
+#include "../shadows/ww_sunshadow.hlsli"
+#include "../air/cell_airmed.hlsli"
+#endif
+#undef WW_LOOSE_UNIFORMS
+#ifdef PC_LIT
+	float lightingInfluence;	// cell_volpart's vpLit reads them (not used here)
+	int fxLitMode;
+	float pcTrans;		// the thin (scattering) share
+#endif
+#ifdef PC_LOOK
+	int pcLook;			// slice 3 (precip_look_view_cs.hlsl, cell_precip_look.prog): 1 a raindrop, 2 a snow flake
+	float pcMmPerView;	// mm of the particle's true size per view unit
+#endif
 };
 #include "cell_precip_field.hlsli"
+#include "../air/lookdev_fog.hlsli"
+#ifdef PC_LIT
+#include "../lights/cell_lights.hlsli"
+#include "../air/cell_volpart.hlsli"
+#endif
 
+// pcWrap in NV GL's order: the remainder fused, r = fma( -floor( x / L ), L, x )
+float pcWrapVk( float x, float L )
+{
+	precise float f = floor( x / L );
+	precise float r = mad( -f, L, x );
+	return r >= L ? r - L : max( r, 0.0 );
+}
+
+#ifdef PC_LIT
+// L8 term 7: t0 is cellLights here, so the roof map sits at t47 (vkprecip.inc's lit set, binding 111); pcRoofOpen's
+// rule as cell_precip_field.hlsli writes it, op for op
+Texture2D<float4> pcRoofLit : register(t47, space0);
+bool pcRoofOpenLit( float3 rel )
+{
+	int2 t = int2( floor( pcRoofCam.xy + rel.xy * pcRoofInv ) );
+	int2 n = textureSize( pcRoofLit, 0 );
+	if ( or( any( (t < (int2)( 0 )) ), any( (t >= n) ) ) )
+		return true;
+	return pcRoofLit.Load( int3(t, 0) ).r - pcRoofCam.z < rel.z;
+}
+#endif
+
+// cell_precip_field.hlsli pcParticle in NV GL's order of operations (its vertex-stage NV_gpu_program5 assembly, driver
+// 610.74): mad() where GL fuses, separate precise ops where it keeps a multiply and an add apart, and its reassociations
+// ((om pcT) 0.7, (om sway sin) 0.7, the spin's 2^-23). sin / cos take the raw phase, as GL's SIN / COS do.
+bool pcParticleVk( uint i, out float3 rel, out float3 vel, out float hs, out float angle, out float2 cellUv )
+{
+	uint h = pcHash( i ^ pcSeedS );
+	float u0 = pcU01( h );
+	h = pcHash( h + 0x1B873593u );
+	float u1 = pcU01( h );
+	h = pcHash( h + 0x1B873593u );
+	float u2 = pcU01( h );
+	h = pcHash( h + 0x1B873593u );
+	int var = pcNCand > 0 ? pcCand[int( h % uint( pcNCand ) )] : pcBest;
+	h = pcHash( h + 0x1B873593u );
+	float a0 = pcU01( h ) * 6.283185307179586;
+	h = pcHash( h + 0x1B873593u );
+	precise float spU = float( h >> 8 ) * pcSpin;
+	precise float spin = mad( spU, 1.0 / 8388608.0, -pcSpin );
+	h = pcHash( h + 0x1B873593u );
+	precise float ph = pcU01( h ) * 6.283185307179586;
+	precise float om = mad( float( pcHash( h ^ 0x85EBCA6Bu ) >> 8 ), 0.8 / 16777216.0, 0.8 );
+	float fall = pcFallU[var];
+	precise float ph1 = mad( om, pcT, ph );
+	precise float omT = om * pcT;
+	precise float ph13 = ph * 1.3;
+	precise float ph2 = mad( omT, 0.7, ph13 );
+	float s1 = sin( ph1 ), c1 = cos( ph1 ), s2 = sin( ph2 ), c2 = cos( ph2 );
+	precise float omS = om * pcSway;
+	precise float vx = mad( omS, c1, pcWind.x );
+	precise float vyS = omS * s2;
+	precise float vy = mad( -vyS, 0.7, pcWind.y );
+	vel = float3( vx, vy, -fall );
+	float L = pcL;
+	precise float bx = mad( u0, L, pcOffXY.x );
+	precise float px = mad( s1, pcSway, bx );
+	precise float by = mad( u1, L, pcOffXY.y );
+	precise float sy = c2 * pcSway;
+	precise float py = by + sy;
+	precise float pz = mad( u2, L, pcOffZ[var] );
+	rel = float3( pcWrapVk( px, L ), pcWrapVk( py, L ), pcWrapVk( pz, L ) ) - 0.5 * L;
+	hs = pcHalfU[var];
+	precise float an = mad( spin, pcT, a0 );
+	angle = an;
+	int cell = var % max( pcCells, 1 );
+	cellUv = float2( float( cell % max( pcCols, 1 ) ), float( cell / max( pcCols, 1 ) ) ) * pcCellUv;
+	if ( pcInner > 0.0 && all( (abs( rel ) < (float3)( 0.5 * pcInner )) ) )
+		return false;
+#ifdef PC_LIT
+	return or( !pcRoofOn, pcRoofOpenLit( rel ) );	// L8 term 7: the map at t47
+#else
+	return or( !pcRoofOn, pcRoofOpen( rel ) );
+#endif
+}
+
+#ifdef PC_LIT
+Texture2D<float4> pcTex : register(t46, space0); SamplerState _pcTex_sampler : register(s46, space0);	// the GS's (t1 is cellGi)
+#else
 Texture2D<float4> pcTex : register(t1, space0); SamplerState _pcTex_sampler : register(s1, space0);
+#endif
 
 struct PrecipRec
 {
@@ -44,6 +203,13 @@ struct PrecipRec
 	float4 box;
 	float4 a;		// the fogged light per unit albedo (slice 1: 1)
 	float4 b;		// the fog's own light (slice 1: 0)
+#ifdef PC_LOOK
+	float4 drop;	// gDrop
+	float4 thin;	// gThin, w gOsc
+	float4 thick;	// gThick
+	float4 domL;	// gDomL
+	float4 domE;	// gDomE
+#endif
 };
 RWStructuredBuffer<PrecipRec> pcOut : register(u0, space0);
 
@@ -57,10 +223,10 @@ void main( uint3 id : SV_DispatchThreadID )
 	float3 rel, vel;
 	float hs, angle;
 	float2 cellUv;
-	bool keep = pcParticle( pcFirst + id.x, rel, vel, hs, angle, cellUv );
+	bool keep = pcParticleVk( pcFirst + id.x, rel, vel, hs, angle, cellUv );
 	float3 vsView = float3( dot( pcRow[0].xyz, rel ), dot( pcRow[1].xyz, rel ), dot( pcRow[2].xyz, rel ) );
 	float3 vsVel = float3( dot( pcRow[0].xyz, vel ), dot( pcRow[1].xyz, vel ), dot( pcRow[2].xyz, vel ) );
-	float vsHalf = hs * length( pcRow[0].xyz );
+	precise float vsHalf = hs / rsqrt( dot( pcRow[0].xyz, pcRow[0].xyz ) );	// GL: DIV by RSQ
 	float4 vsColor = float4( 1.0, 1.0, 1.0, pcThin );
 	float depth = -vsView.z;
 	bool cull = or( !keep, depth < 1.0 );
@@ -83,25 +249,50 @@ void main( uint3 id : SV_DispatchThreadID )
 		pcOut[id.x] = r;
 		return;
 	}
+	// in NV GL's geometry-stage order (its NV_gpu_program5 assembly): tl = 1 / RSQ, the alpha's factors regrouped
 	float h = vsHalf;
 	float k = pcFocal / depth;	// pixels per view unit here
 	float2 tr = vsVel.xy * pcShutter;
-	float tl = length( tr );
+	precise float tl = rcp( rsqrt( dot( tr, tr ) ) );
 	float hd = max( h, pcMinPx / k );
 	float4 col = vsColor;
-	col.a *= 4.0 * h * h / ( ( 2.0 * hd + tl ) * 2.0 * hd );
+	precise float aDen = hd * mad( hd, 2.0, tl );
+	precise float aNum = h * ( h * 4.0 );
+	precise float aF = ( aNum / aDen ) * col.a;
+	col.a = aF * 0.5;
 	float2 ax, ay;
 	float hx = hd, hy = hd;
+#ifdef PC_LOOK
+	float4 pDrop = (float4)( 0.0 );
+	float pOsc = 0.0;
+	if ( pcLook == 1 ) {
+		// the coverage is the fragment's (swept disc): here only the least-size spread (h^2 / hd^2)
+		col = float4( vsColor.rgb, vsColor.a * h * h / ( hd * hd ) );
+		float D = 2.0 * h * pcMmPerView;	// mm
+		float r0 = 0.0005 * D;	// m
+		float w2 = sqrt( 8.0 * 0.0728 / ( 1000.0 * r0 * r0 * r0 ) );	// rad/s, n = 2
+		float kf = 0.51 * clamp( ( D - 0.5 ) / 1.5, 0.0, 1.0 ) * lerp( 1.0, 0.53, clamp( ( D - 2.0 ) / 2.0, 0.0, 1.0 ) );
+		pDrop = float4( hd, tl, kf, w2 * pcShutter / 6.2831853 );
+		pOsc = angle * 7.0;
+	}
+	if ( tl > ( pcLook == 1 ? 1e-4 * hd : 0.2 * hd ) ) {
+#else
 	if ( tl > 0.2 * hd ) {
+#endif
 		ax = tr / tl;
-		hx = hd + 0.5 * tl;
+		precise float hxS = mad( tl, 0.5, hd );
+		hx = hxS;
 	} else {
 		ax = float2( cos( angle ), sin( angle ) );
 	}
 	ay = float2( -ax.y, ax.x );
 	float2 cell = pcAtlas.xy;
 	r.box = float4( cellUv + pcInset, cellUv + cell - pcInset );
+#ifdef PC_LOOK
+	if ( pcFar != 0 && pcLook != 1 ) {
+#else
 	if ( pcFar != 0 ) {
+#endif
 		// the cell's mean: 16 taps at the one-texel-a-cell mip
 		float4 m = (float4)( 0.0 );
 		if ( pcHasTex ) {
@@ -118,6 +309,47 @@ void main( uint3 id : SV_DispatchThreadID )
 	r.axes = float4( ax, ay );
 	r.ext = float4( hx, hy, cellUv );
 	r.col = col;
-	r.a = float4( 1.0, 1.0, 1.0, 0.0 );
+	// slice 2a: the air, once, at the centre (cell_precip_gpu_gs.hlsl: B = wwFogFx( 0 ), A = wwFogFx( lit ) - B); the
+	// window position in NV GL's order (clip y-row first, then x, z, w; the viewport by fma)
+	precise float4 cc0 = c.y * pcProj[1];
+	precise float4 cc1 = mad( c.x, pcProj[0], cc0 );
+	precise float4 cc2 = mad( c.z, pcProj[2], cc1 );
+	precise float4 cc = cc2 + pcProj[3];
+	precise float2 ndc = mad( cc.xy / cc.w, 0.5, 0.5 );
+	precise float2 win = mad( ndc, pcViewport.zw, pcViewport.xy );
+	pcFragCoord = float4( win, cc.z / cc.w * 0.5 + 0.5, 1.0 / cc.w );
+	float pk = rcp( k );
+	pcDPx = float3( pk, 0.0, 0.0 );
+	pcDPy = float3( 0.0, pk, 0.0 );
+	float3 lit = (float3)( 1.0 );	// unlit: vkprecip.inc refuses a lit cell to precip_view_cs
+#ifdef PC_LIT
+	// slice 2b: cell_precip_gpu_gs.hlsl's call, its arguments as written there
+	if ( or( cellInterior, cellHasDir ) ) {
+		float3 thin, thick;
+		vpLight( c, cellWorldPos( c ), cellWorldDir( c ), dot( fogView.xyz, c ) + fogView.w,
+			cellWorldDir( float3( 0.0, 0.0, 1.0 ) ), pcTrans, thin, thick );
+		lit = pcTrans * thin + ( 1.0 - pcTrans ) * thick;
+	}
+	if ( ( pcRed & 4 ) != 0 )	// red: the light dropped (lit = 1, as unlit)
+		lit = (float3)( 1.0 );
+#endif
+	float3 fogB = wwFogFx( (float3)( 0.0 ), c, false );
+	float3 fogA = wwFogFx( lit, c, false ) - fogB;
+	if ( ( pcRed & 2 ) != 0 ) {	// red: the air dropped (A = lit, B = 0)
+		fogA = lit;
+		fogB = (float3)( 0.0 );
+	}
+	r.a = float4( fogA, 0.0 );
+	r.b = float4( fogB, 0.0 );
+#ifdef PC_LOOK
+	// unlit (slice 2b refuses a lit cell): GL's thin = thick = lit = 1 and its key light 0 (cell_precip_gpu_gs.hlsl's
+	// defaults), so its wwFogFx( thin ) - B = wwFogFx( thick ) - B = A and wwFogFx( 0 ) - B = 0, the same calls on the same
+	// arguments. Slice 2b must spell the three calls out once thin, thick and the key light differ.
+	r.drop = pDrop;
+	r.thin = float4( pcLook == 2 ? fogA : (float3)( 0.0 ), pOsc );
+	r.thick = float4( pcLook == 2 ? fogA : (float3)( 0.0 ), 0.0 );
+	r.domL = float4( 0.0, 0.0, 1.0, 0.0 );
+	r.domE = (float4)( 0.0 );
+#endif
 	pcOut[id.x] = r;
 }

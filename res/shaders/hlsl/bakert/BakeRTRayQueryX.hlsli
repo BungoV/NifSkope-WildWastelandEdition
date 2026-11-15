@@ -1,9 +1,17 @@
 // Bake tracer: the whole-ray RT tracer (lane VKCOMPUTE1, 2026-11-12; from src/features/gi/bakert/rqx.comp, lanes RTGI1 +
-// ROOMFIT10). One thread a ray answers what the CPU's probebvh walk answers (the nearest accepted triangle, or for an
-// occlusion ray whether any is accepted) and says whether it is SURE. Every hardware candidate is re-tested in double
-// (probebvh::Bvh::tri's arithmetic, AlphaMask::hole in double); the reason bits say why a ray is unsure:
-//   1 an edge band, 2 a texel / threshold border, 4 the determinant cut, 8 the ray's start or end, 16 two hits within the
-//   near pad, 32 phase 2 found no accepted hit. Phase 1 finds the nearest hit; phase 2 re-walks up to it + the float error.
+// ROOMFIT10). rqx.comp's header:
+// Lane RTGI1: the whole-ray RT tracer. One invocation a ray answers what the CPU's probebvh walk answers -- the
+// nearest accepted triangle (or, for an occlusion ray, whether any is accepted) -- and says whether it is SURE.
+// Every candidate the hardware reports is re-tested in double with probebvh::Bvh::tri's own arithmetic and the
+// alpha hole in double (AlphaMask::hole). Unsure (the CPU then casts the ray itself):
+//   - a candidate passing within the float trace's error of a triangle edge (an unreported neighbour may hit there;
+//     on a grown BLAS only within the double rounding, see testD),
+//   - a hole decision on a texel border or at the threshold, a determinant at probebvh's 1e-12 cut,
+//   - a hit at the ray's 1e-4 start or its tmax, two accepted hits within bakertwalk.h's near pad of each other.
+// Phase 1 finds the nearest hit; phase 2 re-walks (start, that hit + the float error] with every triangle reported,
+// so ties just past the float hit are seen too.
+// The reason bits (why) say why a ray is unsure: 1 an edge band, 2 a texel / threshold border, 4 the determinant cut,
+// 8 the ray's start or end, 16 two hits within the near pad, 32 phase 2 found no accepted hit.
 // Shared, no bindings: BakeRTXRays, BakeRTHits, BakeRTTLAS, BakeRTRemap, BakeRTVerts. Hits: soup triangle, reason bits.
 // Doubles: SPIR-V needs shaderFloat64 (bakert.cpp's device asks for it); DXIL needs the double ops (see BakeRTCommon).
 #ifndef BAKERT_RAY_QUERY_X_HLSLI
@@ -13,7 +21,9 @@
 
 static const double kBakeRTNearPad = 1e-6L;   // bakertwalk.h
 static const double kBakeRTErr = 4e-6L;       // the float trace's error, relative to the coordinates' size (~30 float ulps)
-// ROOMFIT10: a grazing ray's hardware t is off by the float origin's rounding over cos: phase 2 reaches this much further
+/* ROOMFIT10: on a grazing ray (|cos| ~2e-3..3e-2 to the plane) the hardware t of a triangle is off by the float
+ * origin's rounding over cos (0.05-0.4 u at Concord), so a nearer true hit could sit past phase 1's committed t plus
+ * kErr: phase 2 reaches this much further (relative to the coordinates' size). Red: flags bit 2 (kErr only). */
 static const double kBakeRTGraze = 1e-4L;
 
 // AlphaMask::hole in double; why |= 2 when the texel or threshold decision sat on its edge
@@ -77,8 +87,11 @@ bool BakeRT_TestD( uint p, double3 o, double3 d, double tmax, double eDist, out 
 	const double h0 = a2 / max( BakeRT_LengthD( p2 - p1 ), 1e-30L ), h1 = a2 / max( BakeRT_LengthD( e2 ), 1e-30L ),
 		h2 = a2 / max( BakeRT_LengthD( e1 ), 1e-30L );
 	const double w = 1.0L - u - v;
-	/* ROOMFIT10: on a grown BLAS the edge band only has to cover the GPU's double rounding against the CPU's; kept at the
-	 * float band when the growth does not cover the float error, for a grazing ray (|cos| < 4e-3) and for a sliver */
+	/* lane ROOMFIT10: on a grown BLAS a triangle the double test accepts is reported by the float hardware however
+	 * near its edge the ray passes (GIBAKE2), so the edge band only has to cover the GPU's double rounding against the
+	 * CPU's: 1e-9 x (|o| + t + 1). Kept at the float band when the growth does not cover the float error (eDist past
+	 * it), for a grazing ray (|cos| < 4e-3: the float ray crosses the plane ulp / cos away) and for a sliver (a corner
+	 * with sin(half angle) < 2e-3: growTri caps its corner shift, so the grown rim is thinner there). */
 	double eEdge = eDist;
 	if ( BAKERT_PC.grow > 0.0 && eDist <= 0.9L * double( BAKERT_PC.grow ) && abs( BakeRT_DotD( nn, d ) ) >= 4e-3L * a2 * BakeRT_LengthD( d ) ) {
 		const double l0 = BakeRT_LengthD( p2 - p1 ), l1 = BakeRT_LengthD( e2 ), l2 = BakeRT_LengthD( e1 );
@@ -90,6 +103,7 @@ bool BakeRT_TestD( uint p, double3 o, double3 d, double tmax, double eDist, out 
 	}
 	if ( abs( w ) * h0 <= eEdge || abs( u ) * h1 <= eEdge || abs( v ) * h2 <= eEdge )
 		why |= 1u;
+	// a grazing ray: the float trace's t error grows as 1 / cos
 	if ( u < 0.0L || u > 1.0L || v < 0.0L || u + v > 1.0L )
 		return false;
 	if ( abs( tt - 1e-4L ) <= 1e-9L || abs( tt - tmax ) <= kBakeRTNearPad * ( 1.0L + tmax ) )
@@ -101,7 +115,8 @@ bool BakeRT_TestD( uint p, double3 o, double3 d, double tmax, double eDist, out 
 	return true;
 }
 
-// the BLAS primitive (opaque ones first, then the alpha-tested) of a query's candidate or commit
+// the BLAS primitive (opaque ones first, then the alpha-tested) of a query's candidate (C = false) or commit (true)
+// (HLSL: the candidate's and the commit's are two macros)
 #define BAKERT_PRIM_CAND( Q ) ( Q.CandidatePrimitiveIndex() + ( Q.CandidateGeometryIndex() == 1u ? BAKERT_PC.nOpaque : 0u ) )
 #define BAKERT_PRIM_COMMIT( Q ) ( Q.CommittedPrimitiveIndex() + ( Q.CommittedGeometryIndex() == 1u ? BAKERT_PC.nOpaque : 0u ) )
 
@@ -114,15 +129,19 @@ void BakeRT_RayQueryXCS( uint k )
 	const double tmax = r.tmax;
 	const bool any = ( BAKERT_PC.flags & 1u ) != 0u;
 	const double oMag = max( abs( o.x ), max( abs( o.y ), abs( o.z ) ) );
-	// ROOMFIT10: the float ray starts `back` behind the true origin (a point on a surface meets a triangle inside the float
-	// origin's rounding); the double test uses the true origin
+	/* lane ROOMFIT10: the float ray starts `back` behind the true origin. A point on a surface (the volume fit's lattice)
+	 * meets a triangle at t ~1e-4..2e-3, inside the float origin's rounding: from the rounded origin the hardware saw
+	 * it behind the ray and never reported it (check: 190 unlike answers on Concord). The hardware t is then back
+	 * longer than the true t; the double test uses the true origin. */
 	const double back = kBakeRTErr * ( oMag + 1.0L );
 	const float3 of = float3( o - d * back ), df = float3( d );
 	const float tmaxF = float( tmax * ( 1.0L + kBakeRTErr ) + kBakeRTErr * ( oMag + 1.0L ) + back );
-	uint why = 0u;   // the unsure reasons (0 = sure)
+	uint why = 0u;   // ROOMFIT10: the unsure reasons (0 = sure), each counted in the census
 	int tri = -1;
 
-	// phase 1: the nearest hit; every triangle goes through the double test (no opaque commits in hardware)
+	/* phase 1: the nearest hit. ROOMFIT10: every triangle goes through the double test (no opaque commits in hardware):
+	 * on the grown BLAS a ray passing a silhouette within the growth (2 u at Concord) committed the rim, phase 2 then
+	 * found no true hit and the ray went to the CPU (7.5% of Concord's fit rays) */
 	RayDesc rd;
 	rd.Origin = of;
 	rd.TMin = 0.0;

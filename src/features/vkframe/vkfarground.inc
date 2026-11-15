@@ -1,11 +1,14 @@
 /* Lane VKFAR3 (2026-11-14, plan row G3): the far ground's ring-0 terrain on the present device. fo4_cellcsmfgl (Show > Far
  * ground: Live, shader decals, the default) through VKFAR2's twinRun: fargnd_view_vs (fo4_default's twin) + fargnd_view_ps
  * (fo4_cellcsmfgl's readable source, FOGLEAK + FRAME_UBO), one command a shape. Included after vkwater.inc (its TwinSpec,
- * WaterDraw, twinRun). Gate: tests/vkframe/fargrounddraw.sh. */
+ * WaterDraw, twinRun). Gate: tests/vkframe/fargrounddraw.sh. BATCH1114: on the far LOD rings' copy of them (namespaces
+ * farlod, farlodrun), as the water has its own (lanes VKWATER3, VKWATER4). */
 #include "features/vkframe/fargnd_view_vs.spv.h"  // vkframe_spirv.sh's fxt / fxg lines
 #include "features/vkframe/fargnd_view_ps.spv.h"
 
 namespace
+{
+namespace farlod
 {
 // the pixel stage's images (t n -> 64 + n, samplers at + 64) and the vertex stage's farStream (t 0 -> 200), reflected names
 const WaterImgName kFargndImg[] = { { 64, "cellLights" }, { 68, "cellIsLut" }, { 69, "cellIsBloom" }, { 70, "cellShadow" },
@@ -35,6 +38,7 @@ WaterDraw & farGroundD()
 	static WaterDraw D;
 	return D;
 }
+}  // namespace farlod
 }  // namespace
 
 namespace WwVkPresent
@@ -61,12 +65,12 @@ WaterStat takeFarGroundGlStat()
 
 std::string farGroundDrawRefusal()
 {
-	return farGroundD().broken ? farGroundD().brokenWhy : twinDrawRefusal();
+	return farlod::farGroundD().broken ? farlod::farGroundD().brokenWhy : farlodrun::twinDrawRefusal();
 }
 
 bool farGroundRun( const WaterRun & r, std::string & why )
 {
-	return twinRun( farGroundD(), kFargndSpec, r, why );
+	return farlodrun::twinRun( farlod::farGroundD(), farlod::kFargndSpec, r, why );
 }
 
 // lane VKFAR4 (batching): the frame's queued ring-0 tiles (GL's order) until the flush; off: a batch failed (sticky)
@@ -85,12 +89,12 @@ static FgQueue & fgQ()
 
 bool farGroundRunN( const WaterRun * const * rs, int n, std::string & why )
 {
-	WaterDraw & D = farGroundD();
+	farlod::WaterDraw & D = farlod::farGroundD();  // BATCH1114: the rings' copy (namespaces farlod, farlodrun)
 	for ( int at = 0; at < n; ) {
 		int k = 1;
-		while ( at + k < n && k < kTwinBatchMax && twinSameInputs( *rs[at], *rs[at + k] ) )
+		while ( at + k < n && k < farlod::kTwinBatchMax && farlodrun::twinSameInputs( *rs[at], *rs[at + k] ) )
 			k++;
-		if ( !twinRunN( D, kFargndSpec, rs + at, k, why ) )
+		if ( !farlodrun::twinRunN( D, farlod::kFargndSpec, rs + at, k, why ) )
 			return false;
 		at += k;
 	}
@@ -120,9 +124,9 @@ bool farGroundQueue( const WaterRun & r, std::string & why )
 	FgQueue & q = fgQ();
 	if ( q.off )
 		return farGroundRun( r, why );
-	if ( q.n && ( q.n >= kTwinBatchMax || !twinSameInputs( q.runs[0], r ) ) && !farGroundFlush( why ) )
+	if ( q.n && ( q.n >= farlod::kTwinBatchMax || !farlodrun::twinSameInputs( q.runs[0], r ) ) && !farGroundFlush( why ) )
 		return false;
-	if ( const std::string no = twinReadyN( farGroundD(), kFargndSpec, r, q.n == 0 ); !no.empty() ) {
+	if ( const std::string no = farlodrun::twinReadyN( farlod::farGroundD(), farlod::kFargndSpec, r, q.n == 0 ); !no.empty() ) {
 		why = no;
 		return false;
 	}
@@ -140,7 +144,7 @@ int farGroundQueued()
 
 TwinBatchStat takeFarGroundBatchStat()
 {
-	WaterDraw & D = farGroundD();
+	farlod::WaterDraw & D = farlod::farGroundD();
 	FgQueue & q = fgQ();
 	TwinBatchStat s;
 	s.crossings = D.crossN;
@@ -156,7 +160,7 @@ TwinBatchStat takeFarGroundBatchStat()
 
 FxStat takeFarGroundDrawStat()
 {
-	return takeTwinStat( farGroundD() );
+	return farlodrun::takeTwinStat( farlod::farGroundD() );
 }
 }  // namespace WwVkPresent
 

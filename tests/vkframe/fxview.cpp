@@ -128,6 +128,7 @@ struct GlA
 	void( WINAPI * glActiveTexture )( GLenum ) = nullptr;
 	void( WINAPI * glGetTexLevelParameteriv )( GLenum, GLint, GLenum, GLint * ) = nullptr;
 	void( WINAPI * glGetTexParameteriv )( GLenum, GLenum, GLint * ) = nullptr;
+	void( WINAPI * glGetTexParameterfv )( GLenum, GLenum, GLfloat * ) = nullptr;  // L8 term 3: csmMap's border
 };
 GlA ga;
 
@@ -169,6 +170,7 @@ bool loadAll()
 	ga.glActiveTexture = f.activeTexture;
 	ga.glGetTexLevelParameteriv = &::glGetTexLevelParameteriv;
 	ga.glGetTexParameteriv = &::glGetTexParameteriv;
+	ga.glGetTexParameterfv = &::glGetTexParameterfv;
 	return ok;
 }
 

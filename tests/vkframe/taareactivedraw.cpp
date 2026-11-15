@@ -1,5 +1,5 @@
 // Lane VKFAR7 (2026-11-15): the TAA mask's reactive pass (taainputs.cpp pass 4) on the present device (vktaareactive.inc
-// taReactiveAdd / taReactiveFlush: the taareactive_view twins, fxWork's kind 10, N draws a crossing with per-draw host
+// taReactiveAdd / taReactiveFlush: the taareactive_view twins, fxWork's kind 11, N draws a crossing with per-draw host
 // slices and sets) against GL's own taa_reactive.vert / .frag (read from the tree) in pass 4's state (drawBuffers NONE /
 // ATT1, colour mask R G on ATT1, blend MAX ONE ONE, depth LEQUAL no writes, polygon offset (-1, -4), no cull), per pixel,
 // on the same RGBA8 mask and D24S8 depth. fxview.cpp's helpers are reused (its main renamed). Each draw's BaseMap slot is
