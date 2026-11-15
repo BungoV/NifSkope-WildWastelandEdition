@@ -1,3 +1,12 @@
+## VKFAR4 (2026-11-15): the screen GI's Vulkan twin rounds closer to GL's (still refused)
+
+Changed, not built, not checked live. Offline: tests/vkframe/gihalfview.sh still FAILS (13 of 15 checks), so the view
+keeps the screen GI on GL as before.
+
+- The Vulkan copy of the screen GI read now does its arithmetic in the same order as the NVIDIA GL compiler in three
+  places (the view direction, the probe bias step, the probe tile position). Texels that differ from GL dropped from
+  1174 to 104 of 57,377. Only this pass changes; every other shader that reads the GI volume is byte-identical.
+
 ## VKFAR4 (2026-11-15): a stuck Vulkan far dots or far cards run hands the frame to GL
 
 Changed, not built, not checked live. Offline: tests/vkframe/farview.sh and farcards.sh GATE OK with no `vk fence:` line;
