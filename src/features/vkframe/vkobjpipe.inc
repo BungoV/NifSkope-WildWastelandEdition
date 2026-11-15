@@ -1509,9 +1509,16 @@ std::uintptr_t objCellCopyTwin( GlProc gp, const ObjBlTexUnit & u, int red, std:
 	}
 	const std::uintptr_t key = ( std::uintptr_t( 0xC07 ) << 40 ) | std::uintptr_t( u.glTex );
 	unsigned twin = 0;
+	const std::uint64_t gen0 = sharedGen();
 	if ( !sharedTarget( key, type, w, h, type ? d : 1, unsigned( fmt ), twin, why, levels ) || !twin )
 		return 0;
 	const std::uint64_t gen = sharedGen();
+	/* lane VKWATER5: a twin made here moves sharedGen(), which made every copy taken earlier this frame read as stale and copied
+	 * again (r1: cellAo twice on the first frame of cellSsr's twin). Those copies are still good: carry them to the new generation. */
+	if ( gen != gen0 )
+		for ( auto & m : opS().copyMemo )
+			if ( m.second == gen0 && m.first != u.glTex )  // never this texture's own: its twin may be the remade one
+				m.second = gen;
 	auto it = opS().copyMemo.find( u.glTex );
 	if ( it != opS().copyMemo.end() && it->second == gen )
 		return key;  // copied this frame
