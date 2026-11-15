@@ -1721,7 +1721,7 @@ static void sunShadowPassImpl( Scene * scene )
 	/* lane VKSHADOW4 (item 3 part 1): the per-draw solid casters (pass 0, not a far ring, not swaying: csm_view_vs has no
 	 * sway block) go into the same crossing as pooled meshes (CsmMesh: key = the shape, gen = the hash of the arrays GL's
 	 * draw takes, CPU-skinned positions included). The whole shape, or one draw per cullIdx range. GL keeps the alpha-tested
-	 * and swaying casters, the far rings, the ground and the scratch layers */
+	 * and swaying casters, the far rings and the scratch layers (lane VKSHADOW5: the ground quad moved too) */
 	std::vector<WwVkPresent::CsmMesh> vkMesh;
 	std::vector<std::int32_t> vkMeshOf( casters.size(), -1 );	// caster -> its mesh in vkMesh
 	std::vector<Matrix4> vkMeshMv;	// one model-view a recorded caster
@@ -1745,6 +1745,32 @@ static void sunShadowPassImpl( Scene * scene )
 		vkMeshOf[kn] = std::int32_t( vkMesh.size() );
 		vkMesh.push_back( m );
 		return std::uint32_t( vkMeshOf[kn] );
+	};
+	/* lane VKSHADOW5 (item 3 part 2): the ground quad as one pooled mesh a pass (key: the static index list's address; gen: an
+	 * FNV-1a hash of its 12 floats, which move with gxy / ghalf / gz). Its draws join each job's culled mesh draws */
+	static const std::uint16_t kGroundIdx[6] = { 0, 1, 2, 2, 1, 3 };
+	float vkGroundPos[12] = {};
+	std::int32_t vkGroundOf = -1;
+	auto vkGroundMesh = [&]() {
+		if ( vkGroundOf >= 0 )
+			return std::uint32_t( vkGroundOf );
+		const float x0 = gxy[0] - ghalf, x1 = gxy[0] + ghalf, y0 = gxy[1] - ghalf, y1 = gxy[1] + ghalf;
+		const float quad[12] = { x0, y0, gz, x1, y0, gz, x0, y1, gz, x1, y1, gz };
+		std::memcpy( vkGroundPos, quad, sizeof( quad ) );
+		std::uint64_t h = 1469598103934665603ULL;
+		const unsigned char * b = reinterpret_cast<const unsigned char *>( vkGroundPos );
+		for ( std::size_t i = 0; i < sizeof( vkGroundPos ); i++ )
+			h = ( h ^ b[i] ) * 1099511628211ULL;
+		WwVkPresent::CsmMesh m;
+		m.key = reinterpret_cast<std::uintptr_t>( &kGroundIdx );
+		m.gen = h;
+		m.pos = vkGroundPos;
+		m.verts = 4;
+		m.idx = kGroundIdx;
+		m.indices = 6;
+		vkGroundOf = std::int32_t( vkMesh.size() );
+		vkMesh.push_back( m );
+		return std::uint32_t( vkGroundOf );
 	};
 
 	// one job into whatever layer is attached
@@ -1917,6 +1943,12 @@ static void sunShadowPassImpl( Scene * scene )
 			PassTime::countDraw( 1 );
 		}
 		}
+		if ( vkThis && s.groundCast && J.set != 2 ) {
+			// lane VKSHADOW5: the ground quad (below), recorded with the job's culled mesh draws; model-view vt, lodTreeAnim 0
+			const std::uint32_t mi = vkGroundMesh(), mx = std::uint32_t( vkMeshMv.size() );
+			vkMeshMv.push_back( vt.toMatrix4() );
+			vkJob[0].insert( vkJob[0].end(), { mi, mx, 0u, 6u } );
+		}
 		if ( vkThis ) {
 			// lane VKSHADOW1 / VKSHADOW4: the job's queue spans and mesh draws, one record for the crossing
 			VkRec v { jb, curTarget, curLayer };
@@ -1930,8 +1962,9 @@ static void sunShadowPassImpl( Scene * scene )
 		}
 		if ( progAt )
 			r->useProgram( "lookdev_csmdepth.prog" );
-		if ( s.groundCast && J.set != 2 ) {
-			// the ground quad, exactly as wwLookdevDrawGround places it (world space, Z up); static
+		if ( s.groundCast && J.set != 2 && !vkThis ) {
+			// the ground quad, exactly as wwLookdevDrawGround places it (world space, Z up); static (lane VKSHADOW5: GL's when not
+			// recorded for the crossing above)
 			fn->glEnable( GL_CULL_FACE );
 			prog->uni4m( "modelViewMatrix", vt.toMatrix4() );
 			prog->uni1i( "lodTreeAnim", 0 );	// lane SHADOWSHIMMER2: the ground never sways
