@@ -17,6 +17,19 @@
 // Reds (each must FAIL, never pass): red 1 rpTile one pixel off (the Vulkan side's b31), red 2 cellRestir rewritten from
 // texel 1 on after GL's draw (RT key; a twin that does not read it passes), red 4 cellDdgiAtlas shifted one texel after
 // GL's draw (RT key), red 8 the base twin asked for the RT program (wwDefs key): must REFUSE, named "key".
+// Seeding (VKFAR20, coordinator ruling 11-15; thresholds, red definitions and red count unchanged): VKFAR19's run had reds 2
+// and 4 dead (Vulkan moved 0 words) because neither input was reached on either side: seedUnis left cellRestirSize at
+// floats 0.05..1 (W, H in {0, 1}: only texel 0), cellLights all zero (no light, so no shadow factor was asked), and every
+// unlisted int 0 (cellDdgiCount 0: no cascade read; cellGiLoop8 0: no probe corner). Now: cellRestir and cellDdgiAtlas
+// are 4 MB (the ratio covers the 512 x 320 atlas), cellRestirSize = (512, 320, 0, 0), light 0 is a shadow-casting omni
+// (t4 = (-1, 1): no cube slot, so the base key is unshadowed and the RT key takes the ReSTIR ratio) at (460, -340, 96)
+// of radius 5000, cellRow has a zero z column (camera (460, -340, 1200)) so every fragment's linear depth is 0 and meets
+// the seeded ratio depths (0.05..1, tolerance 2), and one DDGI cascade (origin (-1200, -1600, -1300), step 400, 9 x 7 x 8
+// probes, distance means 2000 so Chebyshev passes) covers the probes' hits (rpPos +- 500), with cellGiLoop8 = 8. The relight
+// has no irradiance term (cellGiOn is #defined false without WW_CELL_PRT): the volume reaches it only through the sky share
+// (cellGiSkyK: fade x cover, outdoors with cellGiSky 1, now set), so the probe states alternate 2 (usable) / 1 (missing)
+// by probe index and red 4's one-texel shift flips which corners cover each texel. That share scales the ambient, which
+// was 0 (the block's flat lightSourceAmbient is 0): cellExtDalc 1 takes the seeded DALC rows (both keys).
 // Last line `REFLRELIGHTDRAW GATE OK` or `REFLRELIGHTDRAW GATE FAILED`.
 #define FLD_NO_MAIN
 #include "farloddraw.cpp"
@@ -29,6 +42,7 @@ using namespace fld;
 
 const int kFace = 64, kCols = 8, kAtW = 512, kAtH = 320, kLevels = 5, kLayers = 6 * 33;
 const int kTodo[4] = { 0, 3, 9, 17 }, kHeld = 5;
+const int kDdgiDims[4] = { 9, 7, 8, 9 * 7 * 8 };
 
 struct Xf
 {
@@ -153,7 +167,9 @@ int main( int argc, char ** argv )
 	glBindTexture( GL_TEXTURE_2D, glAtlas );
 	xf.texStorage2D( GL_TEXTURE_2D, kLevels, 0x8C3A, kAtW, kAtH );
 	glBindTexture( GL_TEXTURE_2D, 0 );
-	{	// the G-buffer: albedo alpha 0 on a strip of every face (the miss branch), distance 50..500
+	{	// the G-buffer: albedo alpha 0 on a strip of every face (the miss branch) and on its border ring (a direction with
+		// |x| == |y| > |z| ties two cube faces at their edge texels and the drivers break the tie apart: with a lit hit
+		// branch the two faces' random texels differed on the tile diagonals), distance 50..500
 		std::mt19937 rng( 7 );
 		std::uniform_real_distribution<float> u01( 0.0f, 1.0f );
 		std::vector<std::uint8_t> a( size_t( kFace ) * kFace * 4 );
@@ -171,7 +187,7 @@ int main( int argc, char ** argv )
 					const size_t i = ( size_t( y ) * kFace + size_t( x ) ) * 4;
 					for ( int c = 0; c < 3; c++ )
 						a[i + size_t( c )] = std::uint8_t( 32 + int( u01( rng ) * 200.0f ) );
-					a[i + 3] = x < 6 ? 0 : 255;
+					a[i + 3] = x < 6 || x == kFace - 1 || y == 0 || y == kFace - 1 ? 0 : 255;
 					float nx = u01( rng ) * 2.0f - 1.0f, ny = u01( rng ) * 2.0f - 1.0f, nz = u01( rng ) * 2.0f - 1.0f;
 					const float l = std::max( 1e-3f, std::sqrt( nx * nx + ny * ny + nz * nz ) );
 					n[i] = f2h( nx / l );
@@ -218,7 +234,7 @@ int main( int argc, char ** argv )
 			}
 			if ( s.name == "cellRestir" || s.name == "cellDdgiAtlas" ) {
 				s.fmt = 0x8814;
-				s.bufBytes = 1 << 20;
+				s.bufBytes = 1 << 22;
 				( s.name == "cellRestir" ? iRestir : iDdgi ) = int( smp.size() );
 			}
 			s.unit = int( smp.size() ) + 1;
@@ -244,8 +260,27 @@ int main( int argc, char ** argv )
 				std::uniform_real_distribution<float> u( 0.05f, 1.0f );
 				for ( float & x : v )
 					x = u( rng );
+				if ( at == iDdgi ) {	// the cascade's distance pairs far (Chebyshev 1), probes usable / missing in turn
+					const size_t nP = size_t( kDdgiDims[3] );
+					for ( size_t t = 64 * nP; t < 192 * nP; t++ ) {
+						v[4 * t] = v[4 * t + 2] = 2000.0f;
+						v[4 * t + 1] = v[4 * t + 3] = 4.0e6f;
+					}
+					for ( size_t t = 192 * nP; t < 193 * nP; t++ ) {
+						v[4 * t] = v[4 * t + 1] = v[4 * t + 2] = 0.0f;
+						v[4 * t + 3] = ( t - 192 * nP ) % 2 ? 1.0f : 2.0f;
+					}
+				}
 				f.bindBuffer( 0x8C2A, smp[size_t( at )].buf );
 				f.bufferData( 0x8C2A, std::ptrdiff_t( v.size() * 4 ), v.data(), fStatic );
+				f.bindBuffer( 0x8C2A, 0 );
+			}
+		for ( const Smp & s : smp )	// light 0: a shadow-casting omni (t4 = (-1, 1): no cube slot), radius 5000, no cone, flat radial
+			if ( s.name == "cellLights" ) {
+				const float L[32] = { 460.0f, -340.0f, 96.0f, 5000.0f, 1.0f, 0.8f, 0.6f, -2.0f, 0.0f, 0.0f, -1.0f, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f,
+					-1.0f, 1.0f, 0.0f, 0.0f };
+				f.bindBuffer( 0x8C2A, s.buf );
+				ex.bufferSubData( 0x8C2A, 0, sizeof( L ), L );
 				f.bindBuffer( 0x8C2A, 0 );
 			}
 		// ---- blocks: every one bound to its index, zero, globalUniforms with an identity view and a sun (fargrounddraw's layout)
@@ -279,6 +314,31 @@ int main( int argc, char ** argv )
 		f.useProgram( prog );
 		const float I[16] = { 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1 };
 		f.uniformMatrix4fv( f.getUniformLocation( prog, "rpViewFromWorld" ), 1, GL_FALSE, I );
+		{	// the RT GI inputs reached (header: Seeding); the base program has none of these but cellRow
+			const float rsz[4] = { float( kAtW ), float( kAtH ), 0.0f, 0.0f };
+			const float row[12] = { 1, 0, 0, 460, 0, 1, 0, -340, 0, 0, 0, 1200 };
+			const float org[4] = { -1200.0f, -1600.0f, -1300.0f, 0.0f }, stp[4] = { 400.0f, 400.0f, 400.0f, 0.0f };
+			const GLint one = 1, eight = 8, base0 = 0;
+			auto loc = [&]( const char * n ) { return f.getUniformLocation( prog, n ); };
+			if ( loc( "cellRestirSize" ) >= 0 )
+				f.uniform4fv( loc( "cellRestirSize" ), 1, rsz );
+			f.uniform4fv( loc( "cellRow" ), 3, row );
+			if ( loc( "cellDdgiCount" ) >= 0 ) {
+				f.uniform1iv( loc( "cellDdgiCount" ), 1, &one );
+				f.uniform4fv( loc( "cellDdgiCOrigin" ), 1, org );
+				f.uniform4fv( loc( "cellDdgiCStep" ), 1, stp );
+				f.uniform4iv( loc( "cellDdgiCDims" ), 1, kDdgiDims );
+				f.uniform1iv( loc( "cellDdgiCBase" ), 1, &base0 );
+			}
+			if ( loc( "cellGiLoop8" ) >= 0 )
+				f.uniform1iv( loc( "cellGiLoop8" ), 1, &eight );
+			if ( loc( "cellGiSky" ) >= 0 )
+				f.uniform1iv( loc( "cellGiSky" ), 1, &one );
+			if ( loc( "cellExtDalc" ) >= 0 )
+				f.uniform1iv( loc( "cellExtDalc" ), 1, &one );
+			std::printf( "REFLRELIGHTDRAW %s: seeded cellRestirSize %d cellRow %d cellDdgiCount %d cellGiLoop8 %d\n", keyName[key],
+				loc( "cellRestirSize" ) >= 0, loc( "cellRow" ) >= 0, loc( "cellDdgiCount" ) >= 0, loc( "cellGiLoop8" ) >= 0 );
+		}
 		for ( const Smp & s : smp )
 			f.uniform1i( f.getUniformLocation( prog, s.name.c_str() ), s.unit );
 		std::printf( "REFLRELIGHTDRAW %s: %d loose uniforms seeded\n", keyName[key], seeded );
