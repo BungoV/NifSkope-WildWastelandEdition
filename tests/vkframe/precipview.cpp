@@ -96,6 +96,13 @@
 // Census (11-15, info, the L8 done line): the lit program set as the app's all-on defaults (exterior: the sun, volTerms
 // 15, volCsm 1, airTerrOn 1, the drift on, vpSun's local law, the lamps' shadow cubes, gobos and cluster lists; interior:
 // the same but no sun, no terrain air, no local law), every refusal precipLitWhys would fire printed. Done is 0 in both.
+// Local sun (L8 term 3, 11-15; bar set before its first run, never widened): case rain_near_sunlocal (rain_near_lit's run,
+// unfogged, volTerms 1) with vpSun (0.9, 1.3, 1.7, 1): the local law outdoors (celllights.cpp fxSunLocal, on by default),
+// the sun's colour from vpSun, not cellDirColor (1.6, 1.2, 0.75). Every other lit case sets vpSun 0 (GL keeps a
+// program's uniforms). The same verdict, reference checks, repeat clause, reds 64 / 128, the globals check and Vulkan's
+// globals mirror as rain_near_lit. The case must also show (else the gate fails): GL with vpSun.w 0 differs on >= 1000
+// covered samples (the law seen); vpSun found in GL's program; vpSun packed non-zero. Red 2048 the law dropped (Vulkan's
+// packed vpSun.w 0, so cellDirColor lights it) must FAIL in the case. Lifted with it: precipLitWhy's local-sun refusal.
 #define main fxview_main
 #include "fxview.cpp"
 #undef main
