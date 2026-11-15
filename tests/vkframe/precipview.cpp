@@ -236,6 +236,23 @@
 // ReSTIR variant (cellRestirOn in the program: its cubes are not read); the app's rain / snow draw twins GL's
 // cellShadow (refused unless D16, linear, clamp to edge, compare LEQUAL) into the lit set's binding 70 with a compare
 // sampler of that state (binding 134). Census after: exterior 2, interior 3 (the shadow-cube line gone from both).
+// The lamps' gobos (L8 term 6, VKFAR6 11-15; bar set before its first run, never widened): cellGoboOn 1 tints each lamp
+// by cellGobo: a spot by its pattern through t5 / t6 (local y, 1 + header; local z, tan( FOV / 2 )), any other shape by
+// a dual paraboloid through the table at cellGoboTbl (1 + the light's record: local x + 1 + header, y, z), each pattern
+// a header (w, h), its mean, then rows, bilinear by hand, all in cellLights (no texture: the whole store is copied, so
+// the table and patterns travel with the lights). One case, rain_near_gobo (rain_near_lamps' run, volTerms 3):
+// cellGoboOn 1, Rot 0, Flat 0, Gam 0, Map 0; the spot an 8 x 8 pattern, the omni and the hemisphere an 8 x 16 pattern
+// (two stacked halves) each in its own frame, the box and the far omni none (table entry 0); cellLights grown to hold
+// the table at texel 40, the records, the patterns (random unequal-channel texels 0.2 - 1.5). The prep prints each
+// gobo light's in-reach particle count (predicted before the run). The same verdict, reference checks, repeat clause,
+// reds 64 / 128 as the lit cases; the globals check and Vulkan's globals mirror as rain_near_lamps. The case must also
+// show (else the gate fails): GL with cellGoboOn 0 differs on >= 1000 covered samples (the gobos seen); GL with
+// cellGoboFlat 1 on >= 1000 (the patterns' texels seen, not just their means); GL with cellGoboRot 1 on >= 1000 (the
+// uv seen); cellGoboOn, cellGoboRot, cellGoboFlat, cellGoboGam, cellGoboTbl and cellGoboMap found in GL's program;
+// cellGoboOn and cellGoboTbl packed non-zero. GL with cellGoboMap 1 is printed (info). Reds, each must FAIL in
+// rain_near_gobo: 67108864 the gobos off (the packed cellGoboOn 0); 134217728 the table dropped (the packed cellGoboTbl
+// 0: the omni's and the hemisphere's patterns gone); 268435456 the uv flipped (the packed cellGoboRot 3). Lifted with
+// it: precipLitWhy's gobo refusal. Census after: exterior 1, interior 2 (the gobo line gone from both).
 #define main fxview_main
 #include "fxview.cpp"
 #undef main
