@@ -638,8 +638,6 @@ int precipLitWhys( const PrecipRun::LitIn & l, const char ** out, int max )
 		add( "the air's drift on the sun (refused in slice 2b)" );
 	if ( l.airTerr > 0 )
 		add( "the terrain air on the sun (refused in slice 2b)" );
-	if ( l.sunA > 0.5f )
-		add( "the local sun law (refused in slice 2b)" );
 	if ( l.partRed > 0 )
 		add( "a particle-light red (volPartRed) in a lit run" );
 	return n;
@@ -830,6 +828,11 @@ bool precipRun( const PrecipRun & t, std::string & why )
 		std::memcpy( l + atFirst, &first, 4 );
 		std::memcpy( l + atCount, &count, 4 );
 		std::memcpy( l + atRed, &csRed, 4 );
+		if ( t.red & 2048 ) {  // gates only: the local sun law dropped (vpSun.w 0)
+			const int atSun = precipAt( kT_preciplitcs, int( std::size( kT_preciplitcs ) ), "vpSun" );
+			if ( atSun >= 0 )
+				std::memset( l + atSun + 12, 0, 4 );
+		}
 		if ( t.global && ( t.red & 512 ) == 0 )  // term 2b: GL's b0 (the cluster's projectionMatrix)
 			std::memcpy( u + kPrecipGlobalAt, t.global, size_t( kPrecipGlobalBytes ) );
 		else

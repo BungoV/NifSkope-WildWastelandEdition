@@ -103,6 +103,9 @@
 // globals mirror as rain_near_lit. The case must also show (else the gate fails): GL with vpSun.w 0 differs on >= 1000
 // covered samples (the law seen); vpSun found in GL's program; vpSun packed non-zero. Red 2048 the law dropped (Vulkan's
 // packed vpSun.w 0, so cellDirColor lights it) must FAIL in the case. Lifted with it: precipLitWhy's local-sun refusal.
+// Fixture move after the first run (11-15, the bar kept): vpSun (0.9, 1.3, 1.7) had cellDirColor's luminance (1.244 vs
+// 1.252) and the air colours the sky terms by luminance (airEnvColour), so the law moved 8 samples; vpSun is now
+// (0.5, 0.4, 0.3, 1), luminance 0.414.
 #define main fxview_main
 #include "fxview.cpp"
 #undef main
@@ -442,6 +445,11 @@ struct Job
 		return 0;
 	}
 	bool lamps() const { return lit && !bufs.empty(); }
+	bool localSun() const  // L8 term 3: vpSun.w on (the local law)
+	{
+		const auto it = uni.find( "vpSun" );
+		return lit && it != uni.end() && it->second.size() == 4 && it->second[3] > 0.5;
+	}
 	std::vector<char> global;  // L8 term 2b: globalUniforms' bytes (global.bin; empty: zeros)
 	bool cluster() const
 	{
@@ -656,7 +664,7 @@ int main( int argc, char ** argv )
 	}
 	GLuint vao = 0;
 	genVertexArrays( 1, &vao );
-	constexpr int kCases = 17;
+	constexpr int kCases = 18;
 	static char twinKeys[kCases], normKeys[kCases];  // one atlas twin a case (the atlases' sizes differ), one normal-map twin a case
 	static char airKeys[kCases][5], volKeys[kCases];  // the air's twins a case, its volume's shared target a case
 	if ( jobs.size() > size_t( kCases ) )
@@ -714,10 +722,11 @@ int main( int argc, char ** argv )
 		const char * name;
 		int red;
 		bool seen;
-	} reds[10] = { { "cull (radius 0)", 1, false }, { "corners (the strip's last two swapped)", 2, false }, { "near fade (dropped)", 4, false },
+	} reds[11] = { { "cull (radius 0)", 1, false }, { "corners (the strip's last two swapped)", 2, false }, { "near fade (dropped)", 4, false },
 		{ "air (dropped)", 8, false }, { "look (dropped: the plain pipelines)", 16, false }, { "atlas (dropped: the zero texture)", 32, false },
 		{ "light (dropped)", 128, false }, { "lamps' lights (dropped: the zero texel buffer)", 256, false },
-		{ "cluster's globals (dropped: b0 zero)", 512, false }, { "cluster lists (dropped: the zero texel buffer)", 1024, false } };
+		{ "cluster's globals (dropped: b0 zero)", 512, false }, { "cluster lists (dropped: the zero texel buffer)", 1024, false },
+		{ "local sun (dropped: vpSun.w 0)", 2048, false } };
 	using TexBufferFn = void( WINAPI * )( GLenum, GLenum, GLuint );
 	const auto texBuffer = reinterpret_cast<TexBufferFn>( wglGetProcAddress( "glTexBuffer" ) );
 	if ( !texBuffer )
@@ -881,6 +890,9 @@ int main( int argc, char ** argv )
 				else if ( mode == 5 ) {  // L8 term 2b: b0 all zero (no projection: vpLightsBegin walks every light)
 					f.bindBuffer( fUbo, ubo );
 					f.bufferData( fUbo, std::ptrdiff_t( zeros.size() ), zeros.data(), fStatic );
+				} else if ( mode == 6 ) {  // L8 term 3: the local law off (vpSun.w 0)
+					const float off[4] = { 0.5f, 0.4f, 0.3f, 0.0f };
+					f.uniform4fv( f.getUniformLocation( pJob, "vpSun" ), 1, off );
 				} else
 					u1i( pJob, "cellLightCount", mode - 10 );
 				f.bindFramebuffer( fFb, fbRef );
@@ -919,6 +931,13 @@ int main( int argc, char ** argv )
 				"NaN / Inf halves in GL's lit frame %zu (want 0); sun-branch names missing from GL's program: %s\n", j.name.c_str(), dark.flips, dark.covered,
 				thick.flips, bad, missing.empty() ? "none" : missing.c_str() );
 			ok = ok && dark.flips >= 1000 && thick.flips >= 1000 && bad == 0 && missing.empty();
+			if ( j.localSun() ) {  // L8 term 3's seen-checks (header): the law seen, vpSun found
+				const Verdict noLaw = judge( bg, drawGl( 6 ), refA, refB, refB );
+				const bool found = f.getUniformLocation( pJob, "vpSun" ) >= 0;
+				std::printf( "PRECIPVIEW %s local sun checks: GL with vpSun.w 0 differs %zu of %zu covered samples (want >= 1000); vpSun %s in GL's program\n",
+					j.name.c_str(), noLaw.flips, noLaw.covered, found ? "found" : "MISSING" );
+				ok = ok && noLaw.flips >= 1000 && found;
+			}
 			if ( j.cluster() ) {  // L8 term 2b's seen-checks (header): the lists seen, b0's projection read, the names, volTerms 3 vs 1
 				const Verdict noLamps = judge( bg, drawGl( 3 ), refA, refB, refB );
 				const Verdict flat = judge( bg, drawGl( 4 ), refA, refB, refB );
@@ -1215,6 +1234,14 @@ int main( int argc, char ** argv )
 								zero += std::string( zero.empty() ? "" : ", " ) + f.nm;
 						}
 					}
+					if ( j.localSun() ) {  // vpSun packed, not zero (local sun bar)
+						const int at = precipAt( WwVkPresent::kT_preciplitcs, int( std::size( WwVkPresent::kT_preciplitcs ) ), "vpSun" );
+						bool any = false;
+						for ( int b = 0; b < 16 && at >= 0; b++ )
+							any = any || t.cs[at + b] != 0;
+						if ( !any )
+							zero += std::string( zero.empty() ? "" : ", " ) + "vpSun";
+					}
 					std::printf( "PRECIPVIEW %s lit packed: zero or absent in the light block: %s\n", j.name.c_str(), zero.empty() ? "none" : zero.c_str() );
 					if ( !zero.empty() )
 						return false;
@@ -1407,7 +1434,7 @@ int main( int argc, char ** argv )
 		}
 		for ( RedSeen & r : reds ) {
 			if ( ( r.red == 16 && !j.look ) || ( r.red == 32 && !j.hasTex ) || ( r.red == 128 && !j.lit ) || ( r.red == 256 && !j.lamps() )
-				|| ( ( r.red == 512 || r.red == 1024 ) && !j.cluster() ) )
+				|| ( ( r.red == 512 || r.red == 1024 ) && !j.cluster() ) || ( r.red == 2048 && !j.localSun() ) )
 				continue;  // a plain run has no look to drop, a case with no atlas no atlas, an unlit one no light, no lamps no lights
 			std::vector<std::uint16_t> a, b;
 			if ( !runVk( r.red, a, b, false ) ) {
@@ -1432,7 +1459,7 @@ int main( int argc, char ** argv )
 				std::printf( "PRECIPVIEW %s red lamps' lights PASSED: the case does not see its lights\n", j.name.c_str() );
 				ok = false;
 			}
-			if ( ( r.red == 512 || r.red == 1024 ) && v.ok() ) {  // the cluster case must see its b0 and its lists dropped
+			if ( ( r.red == 512 || r.red == 1024 || r.red == 2048 ) && v.ok() ) {  // the cluster case must see its b0 and its lists dropped
 				std::printf( "PRECIPVIEW %s red %s PASSED: the case does not see it\n", j.name.c_str(), r.name );
 				ok = false;
 			}

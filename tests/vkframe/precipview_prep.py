@@ -62,6 +62,9 @@ CASES = [
     # L8 term 2b (element 21 = the cluster lists on): the lamp run with b0's projection, volRect and a list buffer
     ('rain_near_cluster', 0, 2.0, 4.0, 11, 37.25, (-60500.0, 70000.0, 6300.0), (120.0, -40.0), 0, 1.0, 0.0, 0.0, 1.0, 1.0, 1,
      2.0, -0.08, 40000, 0, 0, 3, 1),
+    # L8 term 3 (element 22 = the local sun law): rain_near_lit's run, the sun's colour from vpSun
+    ('rain_near_sunlocal', 0, 2.0, 4.0, 11, 37.25, (-60500.0, 70000.0, 6300.0), (120.0, -40.0), 0, 1.0, 0.0, 0.0, 1.0, 1.0, 1,
+     2.0, -0.08, 40000, 0, 0, 1, 0, 1),
 ]
 SUN = np.array([0.4, 0.3, 0.35]) / np.linalg.norm([0.4, 0.3, 0.35])  # world, toward the sun (the air's fogSun too)
 # a lit case's own sun (cellDirTo), chosen by the GS's mix: N = the eye's axis, thick / thin = 4 vpWrap( N.to, pcTrans )
@@ -70,6 +73,7 @@ SUN = np.array([0.4, 0.3, 0.35]) / np.linalg.norm([0.4, 0.3, 0.35])  # world, to
 LIT_SUN = {'rain_near_lit': np.array([0.3, -0.6, 0.75]) / np.linalg.norm([0.3, -0.6, 0.75])}
 LIT_SUN['rain_near_lamps'] = LIT_SUN['rain_near_lit']
 LIT_SUN['rain_near_cluster'] = LIT_SUN['rain_near_lit']
+LIT_SUN['rain_near_sunlocal'] = LIT_SUN['rain_near_lit']
 TILE, SLICES = 64, 4  # the cluster grid (L8 term 2b): 64-pixel tiles, 4 log-depth slices
 
 
@@ -312,6 +316,10 @@ for ci, c in enumerate(CASES):
                   'cellDirTo': list(sunL),'cellRow': np.c_[R.T, np.array(c[6])].reshape(-1), 'volTerms': [lit],
                   'volPhase': [0.2, 0.25, 0.3, 0.0, 0.5, 0.45, 0.4, 0.6, 0.3, 0.3, 0.3, -0.3], 'volGi': [1.0, 1.0, 1.0, 0.0],
                   'pcTrans': [0.5]})
+        # L8 term 3: the local sun law (vpSun.w 1) in its case, off in every other lit case (GL keeps the uniform)
+        # (fixture move 11-15, the bar kept: (0.9, 1.3, 1.7) had cellDirColor's luminance, 1.244 vs 1.252, and the air colours
+        # the sky terms by luminance (airEnvColour): 8 samples moved. This sun's is 0.414.)
+        U['vpSun'] = [0.5, 0.4, 0.3, 1.0] if len(c) > 22 and c[22] else [0.0] * 4
         # the lamps' switches in every lit case (GL keeps a program's uniforms: the order cannot carry them)
         U.update({'cellLightCount': [5 if lit & 2 else 0], 'cellShadowOn': [0], 'cellGoboOn': [0], 'cellClusterOn': [0],
                   'cellLightPhys': [0.0] * 4, 'cellLightPhysB': [0.0] * 4, 'cellRed': [0]})
