@@ -288,6 +288,24 @@
 // must FAIL in each interior case: 4294967296 the interior off (the packed cellInterior 0); 8589934592 the interior's
 // ambient off (the packed cellHasDalc 0); 17179869184 the ambient's GI rule (the packed cellGiAmb 2). Lifted with it:
 // precipLitWhys' interior refusal. Census after: exterior 0, interior 0 (the L8 done line).
+// The route census (L8, VKFAR6 11-15, manager ruling: Vulkan covers both routes; bar set before its first run, never
+// widened): the census above reads pPrecip (WW_CELL_FOGLEAK alone), a program the app never links. It also reads the
+// loader's own programs (glcontext.cpp Shader::load, each define only where the expanded source names it): route default
+// = WW_CELL_FOGLEAK + WW_FRAME_UBO + WW_CELL_AIRZONE (the shipped rows: WW/CellAirZones2 on, the frame block on);
+// route all-on = default + WW_CELL_RTDDGI + WW_CELL_RTDDGI_CASCADES + WW_CELL_RESTIR (WW_ALL_ON: RTDDGI 1, preset ultra,
+// 4 cascades). Each route, exterior and interior, sets the census' switches; all-on also its own values: ussOn 1 (the
+// cascade / contact / terrain tiers ultra, shadowset.cpp 2754), cellLightPhys.x 1 (WW_CELL_LIGHT_PHYS 1, lightphys.h
+// Physical), cellRestirOn 1 (rtddgicell.cpp restirUniforms), cellShadowOn 1 (WW_CELL_LAMPSHADOW ultra). Each prints its
+// precipLitWhys refusals and a closed list: every active uniform outside a block and every active uniform block of GL's
+// program that no kT_ table, sampler slot, precipLitRead name or the read block globalUniforms covers, one line each
+// ("GL input the twin does not read"); each line counts in the route's total. The closed list on pPrecip must read 0
+// (else the gate fails: the allow list is checked on the program every earlier term judged). Info, outside the done
+// count: route all-on + WW_CELL_RESTIRGI (a row off by default, not in WW_ALL_ON; a ruling is asked). Red, must FAIL:
+// the old census (pPrecip, refusals only, exterior + interior) against route default's total; it PASSES (the gate
+// fails) when the old reading is not below it. Lifted with it (the product): precipLitWhys refuses a lit run whose
+// cascades GL reads from a block (volCsm on outdoors, wwShadowFrame in GL's program: fxPack would pack zero cascades),
+// so the app draws those runs on GL until the block is read. The old census lines stay byte-identical (verdict keys).
+// Done when both routes read 0 / 0.
 #define main fxview_main
 #include "fxview.cpp"
 #undef main
