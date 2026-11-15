@@ -147,7 +147,12 @@ Changed, not built, not checked live. Nothing in the app calls it yet, so no fra
   an omni, a spot and a hemisphere casting into striped cubes (151310 samples, 2 halves 1 ulp apart, 0 flips); shadows
   off moves 84194 in GL, the fade off 44644. Dropping the cubes, the shadows or the fade FAILs. Red
   WW_VKVIEW_LAMPSHADOW_RED=1 keeps the cubes GL's own. The app half is not built by the offline gate.
-- Still on GL (the census, exterior 2, interior 3): the lamps' gobos, the roof map;
+- Lamp gobos (VKFAR6, 35ec4cab bar, then the lift): the lamps' patterns travel in the light buffer the Vulkan pass
+  already copies whole, so the refusal is gone and patterned lamps tint rain / snow on Vulkan as on GL. New gate case:
+  near rain with a patterned spot, omni and hemisphere (151330 samples, 2 halves 1 ulp apart, 0 flips); gobos off moves
+  99481 in GL, each pattern's mean alone 93558, u flipped 93946. Dropping the gobos or their table, or flipping their
+  uv, FAILs.
+- Still on GL (the census, exterior 1, interior 2): the roof map;
   interiors too. The app turns these on by default, so lit runs in the app still go to GL.
 
 ## VKFAR2 P7 (2026-11-14): depth of field, motion blur and object blur join the tone pass on Vulkan (WW_VKVIEW=1)
