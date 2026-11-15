@@ -37,6 +37,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "glproperty.h"
 #include "gltools.h"
 #include "gltex.h"
+#include "features/vkframe/fxdepthshare.h"	// lane VKOBJ5: the fxDepth shared target's retry
 
 #include <QFlags>
 #include <QObject>
@@ -439,6 +440,7 @@ public:
 	unsigned int fxDepthFbo = 0;
 	int fxDepthTexW = 0, fxDepthTexH = 0;
 	bool fxDepthShared = false;	//!< lane VKOBJ5: fxDepthTexId is a shared target (WW_VKOBJ_SHADE: the particles' pixel twin reads it)
+	WwFxDepthShare::Retry fxDepthRetry;	//!< lane VKOBJ5: asks again after a refusal (bounded)
 	int fxDepthState = 0;   //!< 0 not grabbed this second pass, 1 grabbed, -1 the blit failed (no soft fade)
 	int fxDepthPass = -1;   //!< the second pass fxDepthState belongs to
 	static inline int fxDepthPassNow = 0;	//!< bumped by drawDeferredShapes (static: it draws every scene's pass)
