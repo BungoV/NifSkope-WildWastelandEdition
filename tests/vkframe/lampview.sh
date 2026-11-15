@@ -52,4 +52,13 @@ g++ -O2 -std=c++17 -pthread -I"$ROOT/src" "$ROOT/tests/vkframe/lampview.cpp" -o 
 WW_VKFENCE_RED=lamp "$OUT/lampview.exe" "$ROOT" "${2:-256}" > "$OUT/lampview_fencered.txt" 2>&1
 if tail -1 "$OUT/lampview_fencered.txt" | grep -q "LAMPVIEW GATE FAILED"; then echo "LAMPVIEW RED fence FAIL (as it must)"
 else echo "LAMPVIEW RED fence TESTS NOTHING"; echo "LAMPVIEW GATE FAILED"; exit 1; fi
+for R in 1 2; do
+	F=$(( R + 2 )); T=$([ "$R" = 1 ] && echo redSkips || echo repacks)
+	WW_VKLAMP_POOL_RED=$R "$OUT/lampview.exe" "$ROOT" "${2:-256}" > "$OUT/lampview_poolred$R.txt" 2>&1
+	# only faces FAILing past 1 unit count (a 1-unit BOUND breach would show in the good run too)
+	nf=$(grep -cE "^LAMPVIEW frame$F slot[0-9]+/face[0-9] FAIL .* [1-9][0-9]* past 1 unit" "$OUT/lampview_poolred$R.txt")
+	tr=$(grep -E "^LAMPVIEW pool frame$F " "$OUT/lampview_poolred$R.txt" | grep -oE "$T=[0-9]+" | cut -d= -f2)
+	if [ "$nf" -gt 0 ] && [ "${tr:-0}" -ge 1 ]; then echo "LAMPVIEW RED pool$R FAIL (as it must: $nf frame$F faces FAIL past 1 unit, $T=$tr)"
+	else echo "LAMPVIEW RED pool$R TESTS NOTHING ($nf frame$F faces FAIL, $T=${tr:-none})"; echo "LAMPVIEW GATE FAILED"; exit 1; fi
+done
 if tail -1 "$OUT/lampview.txt" | grep -q "LAMPVIEW GATE OK"; then echo "LAMPVIEW GATE OK"; else echo "LAMPVIEW GATE FAILED"; exit 1; fi

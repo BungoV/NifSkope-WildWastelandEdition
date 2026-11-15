@@ -22,24 +22,34 @@ struct LampOp
 	float rel[16] = {};      //!< shRelFromView as GL uploads it (column-major)
 	float clip[16] = {};     //!< shClipFromRel (lampFaceClip)
 	float rn[2] = {};        //!< shRadiusNear: radius, near clip
-	std::uint32_t first = 0, n = 0;  //!< commands [first, first + n)
+	std::uint32_t first = 0, n = 0;  //!< draws [first, first + n)
 };
 
-//! the pass: the shared cube array, the casters' pool (CPU arrays, copied each run) and the ordered ops
+/*! one caster mesh (lane VKLAMP2): lampRun keeps it on the device while (key, gen) match and copies it only on a miss.
+ * key = who (the app's shape), gen = its content (the app: the hash GL's own draw takes of the same arrays) */
+struct LampMesh
+{
+	std::uintptr_t key = 0;
+	std::uint64_t gen = 0;
+	const float * pos = nullptr;          //!< vec3 positions
+	std::uint32_t verts = 0;
+	const std::uint16_t * idx = nullptr;  //!< triangle list, mesh-local
+	std::uint32_t indices = 0;
+};
+
+//! the pass: the shared cube array, the casters' meshes, their matrices, the draws and the ordered ops
 struct LampRun
 {
 	unsigned tex = 0;               //!< GL's name of the shared cube array
 	std::uintptr_t key = 0;         //!< its sharedTarget key
 	int face = 0, layers = 0;
-	const float * pos = nullptr;    //!< vec3 positions
-	std::size_t posBytes = 0;
-	const std::uint16_t * idx = nullptr;
-	std::size_t idxBytes = 0;
+	const LampMesh * meshes = nullptr;
+	std::size_t nMeshes = 0;
 	const float * mats = nullptr;   //!< one model-view matrix (GL column-major) a caster, by firstInstance
 	std::size_t nMats = 0;
-	const std::uint32_t * cmds = nullptr;  //!< VkDrawIndexedIndirectCommand, 5 words each
-	std::size_t nCmds = 0;
-	std::vector<LampOp> ops;
+	const std::uint32_t * draws = nullptr;  //!< {mesh, matrix} pairs, 2 words each
+	std::size_t nDraws = 0;
+	std::vector<LampOp> ops;        //!< first / n index the draws
 };
 
 //! GL's cube faces (the spec's sc / tc table): face's projection for a light of this radius (celllamps.cpp's numbers)
@@ -81,6 +91,9 @@ void lampOnGl( const char * why );
 struct LampStat
 {
 	int runs = 0, gl = 0, fails = 0, ops = 0, draws = 0, pipelines = 0;
+	//! the pool (VKLAMP2): meshes copied / served kept, copies for a new generation, repacks, gates-only red skips
+	int copies = 0, hits = 0, regen = 0, repacks = 0, redSkips = 0;
+	double copyKb = 0.0;
 	double cpuMs = 0.0, maxMs = 0.0, buildMs = 0.0;
 	std::string glWhy, failWhy;
 };

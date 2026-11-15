@@ -323,6 +323,11 @@ int main( int argc, char ** argv )
 		endMesh();
 	}
 	const int kMeshes = int( meshes.size() );
+	// lane VKLAMP2: each mesh's vertex count and content generation (the pool's key data)
+	std::vector<std::uint32_t> meshVerts;
+	for ( int m = 0; m < kMeshes; m++ )
+		meshVerts.push_back( std::uint32_t( ( m + 1 < kMeshes ? meshes[m + 1].baseVertex : std::int32_t( pos.size() / 3 ) ) - meshes[m].baseVertex ) );
+	std::vector<std::uint64_t> meshGen( std::size_t( kMeshes ), 1 );
 	// lane VKLAMP2: location 7 UVs from the positions (no rng draw: the cases before keep their fixture)
 	std::vector<float> uvs;
 	for ( std::size_t v = 0; v + 2 < pos.size(); v += 3 ) {
@@ -606,14 +611,30 @@ int main( int argc, char ** argv )
 		run.key = key;
 		run.face = F;
 		run.layers = kLayers;
-		run.pos = pos.data();
-		run.posBytes = pos.size() * 4;
-		run.idx = idx.data();
-		run.idxBytes = idx.size() * 2;
+		// lane VKLAMP2: the pool's API: one LampMesh a mesh (key = its index + 1, gen = meshGen), draws {mesh, matrix}
+		std::vector<WwVkPresent::LampMesh> lm( meshes.size() );
+		for ( std::size_t m = 0; m < meshes.size(); m++ ) {
+			lm[m].key = m + 1;
+			lm[m].gen = meshGen[m];
+			lm[m].pos = pos.data() + std::size_t( meshes[m].baseVertex ) * 3;
+			lm[m].verts = meshVerts[m];
+			lm[m].idx = idx.data() + meshes[m].firstIndex;
+			lm[m].indices = meshes[m].count;
+		}
+		std::vector<std::uint32_t> dr;
+		for ( std::size_t c = 0; c < cmds.size() / 5; c++ ) {
+			std::uint32_t me = 0;
+			while ( me < meshes.size() && meshes[me].firstIndex != cmds[c * 5 + 2] )
+				me++;
+			dr.push_back( me );
+			dr.push_back( cmds[c * 5 + 4] );
+		}
+		run.meshes = lm.data();
+		run.nMeshes = lm.size();
 		run.mats = mv.data();
 		run.nMats = std::size_t( kCasters );
-		run.cmds = cmds.data();
-		run.nCmds = cmds.size() / 5;
+		run.draws = dr.data();
+		run.nDraws = dr.size() / 2;
 		for ( const OpDef & o : d ) {
 			WwVkPresent::LampOp op;
 			op.layer = 6 * o.slot + o.face;
@@ -681,6 +702,32 @@ int main( int argc, char ** argv )
 	};
 
 	bool ok = true;
+	// lane VKLAMP2: the pool's counts since the last take, against the bar (-1: not stated); the stat line sums them
+	WwVkPresent::LampStat tot;
+	auto poolTake = [&]( const char * what, int copies, int hits, int regen, int repacks ) {
+		const WwVkPresent::LampStat s = WwVkPresent::takeLampStat();
+		tot.runs += s.runs;
+		tot.fails += s.fails;
+		tot.ops += s.ops;
+		tot.draws += s.draws;
+		tot.cpuMs += s.cpuMs;
+		tot.maxMs = std::max( tot.maxMs, s.maxMs );
+		tot.pipelines = std::max( tot.pipelines, s.pipelines );
+		tot.buildMs = std::max( tot.buildMs, s.buildMs );
+		if ( tot.failWhy.empty() )
+			tot.failWhy = s.failWhy;
+		tot.copies += s.copies;
+		tot.hits += s.hits;
+		tot.regen += s.regen;
+		tot.repacks += s.repacks;
+		tot.redSkips += s.redSkips;
+		tot.copyKb += s.copyKb;
+		const bool good = ( copies < 0 || s.copies == copies ) && ( hits < 0 || s.hits == hits ) && ( regen < 0 || s.regen == regen )
+			&& ( repacks < 0 || s.repacks == repacks );
+		std::printf( "LAMPVIEW pool %s copies=%d hits=%d regen=%d repacks=%d redSkips=%d (%.1f KiB copied) %s\n", what, s.copies, s.hits, s.regen,
+			s.repacks, s.redSkips, s.copyKb, good ? "OK" : "FAIL" );
+		return good;
+	};
 	std::vector<std::uint16_t> ref[2], vkO, vk1;
 	const int helds[2] = { -1, 1 };
 	for ( int fr = 0; fr < 2; fr++ ) {
@@ -698,11 +745,12 @@ int main( int argc, char ** argv )
 		if ( !runGl( d, mats[fr], helds[fr], ref[fr] ) || !runVk( kNone, d, mats[fr], helds[fr], vkO ) ) {
 			std::printf( "LAMPVIEW frame%d FAIL (a run failed)\n", fr + 1 );
 			ok = false;
-			continue;
+		} else {
+			ok = judge( d, vkO, ref[fr], fr + 1, true, nullptr, fr ? &vk1 : nullptr, fr ? &ref[0] : nullptr ) && ok;
+			if ( fr == 0 )
+				vk1 = vkO;
 		}
-		ok = judge( d, vkO, ref[fr], fr + 1, true, nullptr, fr ? &vk1 : nullptr, fr ? &ref[0] : nullptr ) && ok;
-		if ( fr == 0 )
-			vk1 = vkO;
+		ok = poolTake( fr ? "frame2" : "frame1", fr ? 0 : 4, fr ? 4 : 0, -1, -1 ) && ok;
 	}
 	// the reds against frame 1's ops and references: each must FAIL
 	const struct
@@ -721,6 +769,7 @@ int main( int argc, char ** argv )
 			r.name, all.diff, all.covered, all.past1, all.maxu );
 		ok = ok && !passes;
 	}
+	ok = poolTake( "reds", 0, -1, -1, -1 ) && ok;
 
 	// ---- lane VKLAMP2: GL's alpha-tested casters on a Vulkan-written layer (the app's route) against GL doing every face.
 	// 4 of each slot's 8 random casters alpha-tested; a 64 x 64 checker BaseMap (8 px cells, alpha 0 / 1), threshold 0.5.
@@ -854,9 +903,76 @@ int main( int argc, char ** argv )
 		}
 		ok = ok && !passes;
 	}
-	const WwVkPresent::LampStat st = WwVkPresent::takeLampStat();
-	std::printf( "LAMPVIEW stat: %d runs on Vulkan, %d failed (%s), %d ops, %d draws, %.3f ms a run (max %.3f), %d pipelines built in %.1f ms\n",
-		st.runs, st.fails, st.failWhy.c_str(), st.ops, st.draws, st.runs ? st.cpuMs / st.runs : 0.0, st.maxMs, st.pipelines, st.buildMs );
+	ok = poolTake( "alpha", 0, -1, -1, -1 ) && ok;
+
+	// ---- lane VKLAMP2: the pool's new generation (frame 3) and its growth (frame 4), all slots, frame 2's matrices
+	const std::vector<OpDef> dAll = opsFor( -1 );
+	auto poolFrame = [&]( int fr ) {
+		std::vector<std::uint16_t> refP;
+		if ( !runGl( dAll, mats[1], -1, refP ) || !runVk( kNone, dAll, mats[1], -1, vkO ) ) {
+			std::printf( "LAMPVIEW frame%d FAIL (a run failed)\n", fr );
+			return false;
+		}
+		return judge( dAll, vkO, refP, fr, true, nullptr );
+	};
+	auto upload = [&]() {
+		f.bindVertexArray( vao );
+		f.bindBuffer( kArrayBuf, bPos );
+		f.bufferData( kArrayBuf, std::ptrdiff_t( pos.size() * 4 ), pos.data(), kStatic );
+		f.bindBuffer( kArrayBuf, bUv );
+		f.bufferData( kArrayBuf, std::ptrdiff_t( uvs.size() * 4 ), uvs.data(), kStatic );
+		f.bindBuffer( kElemBuf, bIdx );
+		f.bufferData( kElemBuf, std::ptrdiff_t( idx.size() * 2 ), idx.data(), kStatic );
+		f.bindVertexArray( 0 );
+		f.bindBuffer( kArrayBuf, 0 );
+	};
+	{  // frame 3: the plate (mesh 3) re-specified in place: same sizes, a new amplitude, a new generation
+		for ( std::uint32_t v = 0; v < meshVerts[3]; v++ ) {
+			float * p = &pos[( std::size_t( meshes[3].baseVertex ) + v ) * 3];
+			p[2] = 0.4f * std::sin( 2.0f * p[0] + 0.5f ) * std::cos( 3.0f * p[1] );
+		}
+		upload();
+		meshGen[3]++;
+		ok = poolFrame( 3 ) && ok;
+		ok = poolTake( "frame3", 1, -1, 1, -1 ) && ok;
+	}
+	{  // frame 4: the mover takes a new 81 x 81 plate (6561 vertices: the positions pass the pool's 64 KiB floor)
+		beginMesh();
+		const int n = 80;
+		for ( int y = 0; y <= n; y++ )
+			for ( int x = 0; x <= n; x++ ) {
+				const float px = -1.0f + 2.0f * float( x ) / n, py = -1.0f + 2.0f * float( y ) / n, pz = 0.2f * std::sin( 4.0f * px ) * std::cos( 3.0f * py );
+				pos.push_back( px );
+				pos.push_back( py );
+				pos.push_back( pz );
+				uvs.push_back( 2.3f * px + 0.7f * pz );
+				uvs.push_back( 1.9f * py - 0.4f * pz );
+			}
+		for ( int y = 0; y < n; y++ )
+			for ( int x = 0; x < n; x++ ) {
+				const std::uint16_t a = std::uint16_t( y * ( n + 1 ) + x ), b = std::uint16_t( a + 1 ), c = std::uint16_t( a + n + 1 ),
+					d = std::uint16_t( c + 1 );
+				const std::uint16_t q[6] = { a, b, d, a, d, c };
+				idx.insert( idx.end(), q, q + 6 );
+			}
+		endMesh();
+		meshVerts.push_back( std::uint32_t( ( n + 1 ) * ( n + 1 ) ) );
+		meshGen.push_back( 1 );
+		upload();
+		cast[std::size_t( kMover )].mesh = int( meshes.size() ) - 1;
+		cmds.clear();
+		for ( int k = 0; k < kSlots; k++ )
+			for ( int i = 0; i < slotCount[k]; i++ )
+				cmdOf( slotFirst[k] + i );
+		cmdOf( kMover );
+		ok = poolFrame( 4 ) && ok;
+		ok = poolTake( "frame4", 5, -1, -1, 1 ) && ok;
+	}
+	const WwVkPresent::LampStat & st = tot;
+	std::printf( "LAMPVIEW stat: %d runs on Vulkan, %d failed (%s), %d ops, %d draws, %.3f ms a run (max %.3f), %d pipelines built in %.1f ms; "
+				 "pool %d copies (%.1f KiB), %d hits, %d regen, %d repacks, %d red skips\n",
+		st.runs, st.fails, st.failWhy.c_str(), st.ops, st.draws, st.runs ? st.cpuMs / st.runs : 0.0, st.maxMs, st.pipelines, st.buildMs, st.copies,
+		st.copyKb, st.hits, st.regen, st.repacks, st.redSkips );
 	f.bindFramebuffer( kFb, 0 );
 	WwVkPresent::sharedTargetDrop( key );
 	WwVkPresent::sharedTargetDrop( reinterpret_cast<std::uintptr_t>( &otherHome ) );

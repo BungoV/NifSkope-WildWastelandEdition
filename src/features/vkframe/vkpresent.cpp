@@ -8069,8 +8069,10 @@ void csmBufFree( CsmBuf & b, bool glAlive )
 }
 
 /* a buffer of at least need bytes (grown by doubling): exported = device-local memory GL imports as a buffer of its own
- * (the pool's copy target), else host-visible and mapped (the matrices and commands) */
-bool csmBuf( CsmBuf & b, VkDeviceSize need, bool exported, VkBufferUsageFlags usage, std::string & why )
+ * (the pool's copy target), else host-visible and mapped (the matrices and commands). what names the owner in a failure
+ * (lane VKLAMP2: the lamp cubes say their own) */
+bool csmBuf( CsmBuf & b, VkDeviceSize need, bool exported, VkBufferUsageFlags usage, std::string & why,
+	const char * what = "the cascades" )
 {
 	Vk & v = vk();
 	Gl & g = gl();
@@ -8087,7 +8089,7 @@ bool csmBuf( CsmBuf & b, VkDeviceSize need, bool exported, VkBufferUsageFlags us
 	bci.size = cap;
 	bci.usage = usage | ( exported ? VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT : 0 );
 	if ( v.vkCreateBuffer( v.dev, &bci, nullptr, &b.buf ) != VK_SUCCESS ) {
-		why = "vkCreateBuffer (the cascades) failed";
+		why = std::string( "vkCreateBuffer (" ) + what + ") failed";
 		return false;
 	}
 	VkMemoryRequirements r {};
@@ -8104,13 +8106,13 @@ bool csmBuf( CsmBuf & b, VkDeviceSize need, bool exported, VkBufferUsageFlags us
 		: VkMemoryPropertyFlags( VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT ) );
 	if ( ai.memoryTypeIndex == UINT32_MAX || v.vkAllocateMemory( v.dev, &ai, nullptr, &b.mem ) != VK_SUCCESS
 		|| v.vkBindBufferMemory( v.dev, b.buf, b.mem, 0 ) != VK_SUCCESS ) {
-		why = "no memory for a cascades buffer";
+		why = std::string( "no memory for a buffer of " ) + what;
 		return false;
 	}
 	b.cap = cap;
 	if ( !exported ) {
 		if ( v.vkMapMemory( v.dev, b.mem, 0, VK_WHOLE_SIZE, 0, &b.ptr ) != VK_SUCCESS || !b.ptr ) {
-			why = "vkMapMemory (a cascades buffer) failed";
+			why = std::string( "vkMapMemory (a buffer of " ) + what + ") failed";
 			return false;
 		}
 		return true;
@@ -8120,7 +8122,7 @@ bool csmBuf( CsmBuf & b, VkDeviceSize need, bool exported, VkBufferUsageFlags us
 	mi.handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_WIN32_BIT;
 	HANDLE mh = nullptr;
 	if ( v.vkGetMemoryWin32HandleKHR( v.dev, &mi, &mh ) != VK_SUCCESS || !mh ) {
-		why = "vkGetMemoryWin32HandleKHR (a cascades buffer) failed";
+		why = std::string( "vkGetMemoryWin32HandleKHR (a buffer of " ) + what + ") failed";
 		return false;
 	}
 	while ( g.getError() != 0 ) {}
@@ -8135,7 +8137,7 @@ bool csmBuf( CsmBuf & b, VkDeviceSize need, bool exported, VkBufferUsageFlags us
 	const GLenum errStorage = g.getError();
 	b.glCtx = g.ctx;
 	if ( errImport || errStorage || !b.gl ) {
-		why = "the GL import of a cascades buffer failed (GL error at the import " + std::to_string( errImport ) + ", the storage "
+		why = std::string( "the GL import of a buffer of " ) + what + " failed (GL error at the import " + std::to_string( errImport ) + ", the storage "
 			+ std::to_string( errStorage ) + ")";
 		return false;
 	}
