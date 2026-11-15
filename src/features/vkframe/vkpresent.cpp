@@ -117,6 +117,7 @@ constexpr GLenum kTexture2D = 0x0DE1, kRgba8 = 0x8058, kScissorTest = 0x0C11, kR
 constexpr GLenum kTexture3D = 0x806F, kTexBinding3D = 0x806A, kTexture2DArray = 0x8C1A, kTexBinding2DArray = 0x8C1D,
 	kGlRg32f = 0x8230, kGlRg16f = 0x822F, kGlR32f = 0x822E, kGlR8 = 0x8229, kGlRg8 = 0x822B;
 constexpr GLenum kDepth16 = 0x81A5;  // lane VKSHADOW1: the sun cascades' D16 2D array
+constexpr GLenum kTextureCubeArray = 0x9009, kTexBindingCubeArray = 0x900A;  // lane VKFAR6 (L8 term 5): the lamps' D16 cubes
 constexpr GLenum kDepth24 = 0x81A6, kDepth32f = 0x8CAC;  // lane VKOBJ1: the objects' prepass (X8_D24 / D32F, multisample)
 constexpr GLenum kGlR32ui = 0x8236, kGlRg32ui = 0x823C, kGlR8ui = 0x8232;  // lane VKWATER2: the water's index / atlas lookups
 constexpr GLenum kGlRgba32ui = 0x8D70, kGlRgba16ui = 0x8D76;  // lane VKFAR3: the far ground's grid / cached-page cell table
@@ -1365,7 +1366,7 @@ bool makeShared( VkImage & img, VkDeviceMemory & mem, GLuint & tex, GLuint & obj
 	}
 	if ( !ok ) {
 		why = std::string( depth ? "depth / stencil" : "colour" ) + " format " + std::to_string( int( fmt ) ) + " at " + std::to_string( samples )
-			+ " samples (" + ( is3d ? "3D" : layered ? "2D array" : "2D" ) + ") is not offered by the device";
+			+ " samples (" + ( is3d ? "3D" : cube ? "cube array" : layered ? "2D array" : "2D" ) + ") is not offered by the device";
 		return false;
 	}
 	VkExternalMemoryImageCreateInfo ext { VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_IMAGE_CREATE_INFO };
@@ -1443,11 +1444,11 @@ bool makeShared( VkImage & img, VkDeviceMemory & mem, GLuint & tex, GLuint & obj
 		why = "vkGetMemoryWin32HandleKHR (a view image) failed";
 		return false;
 	}
-	const GLenum target = cube ? 0x9009u : is3d ? kTexture3D : layered ? kTexture2DArray : samples > 1 ? kTexture2DMs : kTexture2D;
+	const GLenum target = is3d ? kTexture3D : cube ? kTextureCubeArray : layered ? kTexture2DArray : samples > 1 ? kTexture2DMs : kTexture2D;
 	while ( g.getError() != 0 ) {}
 	GLint was = 0;
-	g.getIntegerv( cube ? 0x900Au : is3d ? kTexBinding3D : layered ? kTexBinding2DArray : samples > 1 ? kTexBinding2DMs : kTexBinding2D,
-		&was );  // GL_TEXTURE_CUBE_MAP_ARRAY / its binding
+	g.getIntegerv( is3d ? kTexBinding3D : cube ? kTexBindingCubeArray : layered ? kTexBinding2DArray : samples > 1 ? kTexBinding2DMs : kTexBinding2D,
+		&was );
 	g.createMemoryObjects( 1, &obj );
 	const GLint one = 1;
 	g.memoryObjectParameteriv( obj, kDedicated, &one );
@@ -4073,7 +4074,7 @@ bool sharedTarget( std::uintptr_t key, int type, int w, int h, int d, unsigned g
 	};
 	if ( !v.ok || !g.ok || g.ctx != reinterpret_cast<void *>( wglGetCurrentContext() ) )
 		return fail( "the present device or GL's entry points are not ready in this context" );
-	if ( w < 1 || h < 1 || type < 0 || type > 3 )
+	if ( w < 1 || h < 1 || type < 0 || type > 3 || ( type == 3 && w != h ) )
 		return fail( "a shared target of size " + std::to_string( w ) + "x" + std::to_string( h ) + " type " + std::to_string( type ) );
 	bool depth = false;
 	const VkFormat fmt = vkFormatOf( GLenum( glFmt ), depth );
@@ -4083,6 +4084,8 @@ bool sharedTarget( std::uintptr_t key, int type, int w, int h, int d, unsigned g
 	samples = std::max( samples, 1 );
 	if ( samples > 1 && type != 0 )
 		return fail( "a multisample shared target is 2D only" );
+	if ( type == 3 && !depth )
+		return fail( "a shared cube array is depth only" );  // L8 term 5: the lamps' D16 cubes
 	levels = depth || samples > 1 ? 1 : std::max( levels, 1 );
 	auto it = shareds().find( key );
 	if ( it != shareds().end() ) {

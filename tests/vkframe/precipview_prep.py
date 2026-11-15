@@ -76,6 +76,32 @@ CASES = [
      2.0, -0.08, 40000, 0, 0, 9, 0, 0, 0, 1),
     ('snow_far_amb', 3, 5.5, 1.0, 97, 600.125, (12345.6, -98765.4, 7210.0), (-55.0, 210.0), 1, 3.0, 0.5, 6.0, 1.0, 0.6, 1,
      3.3, -0.01, 40000, 1, 0, 9, 0, 0, 0, 2),
+    # L8 term 3 (VKFAR6, element 25 = the sun's cascades + the clouds): rain_near_lit's run unfogged, volTerms 1
+    ('rain_near_csm', 0, 2.0, 4.0, 11, 37.25, (-60500.0, 70000.0, 6300.0), (120.0, -40.0), 0, 1.0, 0.0, 0.0, 1.0, 1.0, 1,
+     2.0, -0.08, 40000, 0, 0, 1, 0, 0, 0, 0, 1),
+    # L8 term 4 (VKFAR6, element 26 = the air's drift): snow_far_lamps' run, fogged, volTerms 3
+    ('snow_far_drift', 3, 5.5, 1.0, 97, 600.125, (12345.6, -98765.4, 7210.0), (-55.0, 210.0), 1, 3.0, 0.5, 6.0, 1.0, 0.6, 1,
+     3.3, -0.01, 40000, 1, 0, 3, 0, 0, 0, 0, 0, 1),
+    # L8 term 5 (VKFAR6, element 27 = the lamps' shadow cubes): rain_near_lamps' run, volTerms 3
+    ('rain_near_shadow', 0, 2.0, 4.0, 11, 37.25, (-60500.0, 70000.0, 6300.0), (120.0, -40.0), 0, 1.0, 0.0, 0.0, 1.0, 1.0, 1,
+     2.0, -0.08, 40000, 0, 0, 3, 0, 0, 0, 0, 0, 0, 1),
+    # L8 term 6 (VKFAR6, element 28 = the lamps' gobos): rain_near_lamps' run, volTerms 3
+    ('rain_near_gobo', 0, 2.0, 4.0, 11, 37.25, (-60500.0, 70000.0, 6300.0), (120.0, -40.0), 0, 1.0, 0.0, 0.0, 1.0, 1.0, 1,
+     2.0, -0.08, 40000, 0, 0, 3, 0, 0, 0, 0, 0, 0, 0, 1),
+    # L8 term 7 (VKFAR6, element 29 = the roof map), appended (the earlier cases' atlas seeds kept; bindJob resets an
+    # unlit case's light chain): rain_near_lit's run lit, rain_near_disc's plain, snow_look_near's look
+    ('rain_near_roof_lit', 0, 2.0, 4.0, 11, 37.25, (-60500.0, 70000.0, 6300.0), (120.0, -40.0), 0, 1.0, 0.0, 0.0, 1.0, 1.0, 1,
+     2.0, -0.08, 40000, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1),
+    ('rain_near_roof', 0, 2.0, 4.0, 11, 37.25, (-60500.0, 70000.0, 6300.0), (120.0, -40.0), 0, 1.0, 0.0, 0.0, 1.0, 1.0, 1,
+     2.0, -0.08, 40000, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1),
+    ('snow_look_roof', 3, 5.5, 1.0, 97, 37.25, (12345.6, -98765.4, 7210.0), (-55.0, 210.0), 0, 3.0, 0.5, 6.0, 1.0, 1.0, 1,
+     0.7, -0.15, 40000, 1, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1),
+    # L8 term 8 (VKFAR6, element 30 = an interior: 1 dark, 2 sunlit), appended, volTerms 11 with the Ambient Only volumes:
+    # rain_near_amb's run with the lamps, snow_far_lamps' fogged run
+    ('rain_near_int', 0, 2.0, 4.0, 11, 37.25, (-60500.0, 70000.0, 6300.0), (120.0, -40.0), 0, 1.0, 0.0, 0.0, 1.0, 1.0, 1,
+     2.0, -0.08, 40000, 0, 0, 11, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1),
+    ('snow_far_int_sun', 3, 5.5, 1.0, 97, 600.125, (12345.6, -98765.4, 7210.0), (-55.0, 210.0), 1, 3.0, 0.5, 6.0, 1.0, 0.6, 1,
+     3.3, -0.01, 40000, 1, 0, 11, 0, 0, 0, 1, 0, 0, 0, 0, 0, 2),
 ]
 SUN = np.array([0.4, 0.3, 0.35]) / np.linalg.norm([0.4, 0.3, 0.35])  # world, toward the sun (the air's fogSun too)
 # a lit case's own sun (cellDirTo), chosen by the GS's mix: N = the eye's axis, thick / thin = 4 vpWrap( N.to, pcTrans )
@@ -83,10 +109,15 @@ SUN = np.array([0.4, 0.3, 0.35]) / np.linalg.norm([0.4, 0.3, 0.35])  # world, to
 # first lit run 11-15); this sun gives N.to 0.72, ratio 3.3, 44 degrees off the axis. SUN stays (the fogged cases' fogSun).
 LIT_SUN = {'rain_near_lit': np.array([0.3, -0.6, 0.75]) / np.linalg.norm([0.3, -0.6, 0.75])}
 LIT_SUN['rain_near_lamps'] = LIT_SUN['rain_near_lit']
+LIT_SUN['rain_near_shadow'] = LIT_SUN['rain_near_lit']
+LIT_SUN['rain_near_gobo'] = LIT_SUN['rain_near_lit']
+LIT_SUN['rain_near_roof_lit'] = LIT_SUN['rain_near_lit']
+LIT_SUN['rain_near_int'] = LIT_SUN['rain_near_lit']
 LIT_SUN['rain_near_cluster'] = LIT_SUN['rain_near_lit']
 LIT_SUN['rain_near_sunlocal'] = LIT_SUN['rain_near_lit']
 LIT_SUN['rain_near_gi'] = LIT_SUN['rain_near_lit']
 LIT_SUN['rain_near_amb'] = LIT_SUN['rain_near_lit']
+LIT_SUN['rain_near_csm'] = LIT_SUN['rain_near_lit']
 TILE, SLICES = 64, 4  # the cluster grid (L8 term 2b): 64-pixel tiles, 4 log-depth slices
 
 
@@ -347,6 +378,75 @@ for ci, c in enumerate(CASES):
             lamps(v[inview], R, np.array(c[6])).tofile(os.path.join(d, 'buf_cellLights.bin'))
             with open(os.path.join(d, 'buf.txt'), 'w', newline='\n') as f:
                 f.write('cellLights rgba32f 40 buf_cellLights.bin\n')
+            if len(c) > 27 and c[27]:
+                # L8 term 5: the lamps' shadow cubes. Slots: the omni 0, the spot 1, the hemisphere 2 (t4.y 2), the box
+                # casting past the slots (t4.x -1), the far omni not casting; 16 cubes of 64 x 64 D16, the used slots
+                # holding stripes of near occluders (0.05) across the directions, else 1 (names kept off the module's)
+                sh_L = lamps(v[inview], R, np.array(c[6]))
+                sh_L[:, 4] = [[0.0, 1.0, 0.0, 0.0], [1.0, 1.0, 0.0, 0.0], [2.0, 2.0, 0.0, 0.0], [-1.0, 1.0, 0.0, 0.0], [-1.0, 0.0, 0.0, 0.0]]
+                sh_L.astype(np.float32).tofile(os.path.join(d, 'buf_cellLights.bin'))
+                sh_n = 64
+                sh_s = (np.arange(sh_n) + 0.5) * 2.0 / sh_n - 1.0
+                sh_sc, sh_tc = np.meshgrid(sh_s, sh_s)  # [row j = t, column i = s]
+                sh_one = np.ones_like(sh_sc)
+                sh_faces = [(sh_one, -sh_tc, -sh_sc), (-sh_one, -sh_tc, sh_sc), (sh_sc, sh_one, sh_tc), (sh_sc, -sh_one, -sh_tc),
+                            (sh_sc, -sh_tc, sh_one), (-sh_sc, -sh_tc, -sh_one)]  # GL's cube face table, +X -X +Y -Y +Z -Z
+                sh_F = [np.random.RandomState(270 + k).randn(3) for k in range(3)]
+                sh_F = [9.0 * x / np.linalg.norm(x) for x in sh_F]
+                sh_cube = np.full((96, sh_n, sh_n), 65535, np.uint16)
+                for k in range(3):
+                    for fc in range(6):
+                        sh_dir = np.stack(sh_faces[fc], -1)
+                        sh_dir = sh_dir / np.linalg.norm(sh_dir, axis=-1, keepdims=True)
+                        sh_cube[6 * k + fc][np.sin(sh_dir @ sh_F[k]) > 0.0] = int(round(0.05 * 65535))
+                sh_cube.tofile(os.path.join(d, 'cubes.bin'))
+                with open(os.path.join(d, 'cubes.txt'), 'w', newline='\n') as f:
+                    f.write('%d\n' % sh_n)
+                U.update({'cellShadowOn': [1], 'cellShadowTexel': [1.0 / sh_n], 'cellShadowFadeOn': [1],
+                          'cellShadowFade': [0.7, 0.4, 1.0] + [1.0] * 13})
+                sh_P = (R.T @ v[inview].astype(np.float64).T).T + np.array(c[6])  # the in-view particles in the world
+                sh_line = []
+                for k in range(3):
+                    sh_r = sh_P - sh_L[k, 0, :3]
+                    sh_d = np.linalg.norm(sh_r, axis=1)
+                    sh_in = sh_d < sh_L[k, 0, 3]
+                    sh_occ = (np.sin((sh_r / sh_d[:, None]) @ sh_F[k]) > 0.0) & ((sh_d - 1.0) / sh_L[k, 0, 3] > 0.05)
+                    sh_line.append('slot %d %.3f of %d in reach' % (k, float(np.mean(sh_occ[sh_in])) if sh_in.any() else 0.0, int(sh_in.sum())))
+                print('precipview case %s: the shadow cubes, %d x %d, stripes shadow %s' % (c[0], sh_n, sh_n, ', '.join(sh_line)))
+            if len(c) > 28 and c[28]:
+                # L8 term 6: the lamps' gobos, all in cellLights past the 40 light texels: the table at 40 (2 texels: 1 +
+                # each light's record, the omni's at 42, the hemisphere's at 45), pattern A (8 x 8, the spot's) at 48,
+                # pattern B (8 x 16, two halves, the omni's and the hemisphere's) at 114 (names kept off the module's)
+                gb_L = lamps(v[inview], R, np.array(c[6])).reshape(40, 4).astype(np.float64)
+                gb_X = np.zeros((204, 4))
+                gb_X[0] = [43.0, 0.0, 46.0, 0.0]
+                for gb_at, gb_seed in ((2, 280), (5, 281)):
+                    gb_q = np.linalg.qr(np.random.RandomState(gb_seed).randn(3, 3))[0]
+                    gb_X[gb_at] = list(gb_q[0]) + [115.0]
+                    gb_X[gb_at + 1] = list(gb_q[1]) + [0.0]
+                    gb_X[gb_at + 2] = list(gb_q[2]) + [0.0]
+                gb_rs = np.random.RandomState(290)
+                for gb_h, gb_w, gb_hh in ((8, 8, 8), (74, 8, 16)):
+                    gb_p = gb_rs.uniform(0.2, 1.5, (gb_w * gb_hh, 3))
+                    gb_X[gb_h] = [gb_w, gb_hh, 0.0, 0.0]
+                    gb_X[gb_h + 1, :3] = gb_p.mean(axis=0)
+                    gb_X[gb_h + 2:gb_h + 2 + gb_w * gb_hh, :3] = gb_p
+                gb_ax = gb_L[1 * 8 + 2, :3]
+                gb_y = np.cross(gb_ax, [0.0, 0.0, 1.0])
+                gb_y /= np.linalg.norm(gb_y)
+                gb_L[1 * 8 + 5] = list(gb_y) + [49.0]  # the spot's t5: local y, 1 + pattern A's header
+                gb_L[1 * 8 + 6] = list(np.cross(gb_ax, gb_y)) + [0.75]  # t6: local z, tan( FOV / 2 ) (outer cosine 0.8)
+                np.concatenate([gb_L, gb_X]).astype(np.float32).tofile(os.path.join(d, 'buf_cellLights.bin'))
+                with open(os.path.join(d, 'buf.txt'), 'w', newline='\n') as f:
+                    f.write('cellLights rgba32f 244 buf_cellLights.bin\n')
+                U.update({'cellGoboOn': [1], 'cellGoboRot': [0], 'cellGoboFlat': [0], 'cellGoboGam': [0], 'cellGoboTbl': [40],
+                          'cellGoboMap': [0]})
+                gb_P = (R.T @ v[inview].astype(np.float64).T).T + np.array(c[6])
+                gb_line = []
+                for gb_k, gb_nm in ((0, 'omni'), (1, 'spot'), (2, 'hemisphere')):
+                    gb_n = int((np.linalg.norm(gb_P - gb_L[gb_k * 8, :3], axis=1) < gb_L[gb_k * 8, 3]).sum())
+                    gb_line.append('%s %d' % (gb_nm, gb_n))
+                print('precipview case %s: gobos, in reach of %s of %d in view' % (c[0], ', '.join(gb_line), len(gb_P)))
         if len(c) > 21 and c[21]:
             # L8 term 2b: the cluster lists. Depth = -(R[2] . (P - eye)) over the run's particles in the view, log slices
             tx, ty = -(-W // TILE), -(-H // TILE)
@@ -467,10 +567,145 @@ for ci, c in enumerate(CASES):
             keeps = np.array(keeps)
             print('precipview case %s: the air keep, %d slices, share of in-view particles with keep < 1 %.3f (want 0.2 - 0.8), '
                   'keep %.3f - %.3f' % (c[0], nz, float(np.mean(keeps < 0.9999)), keeps.min(), keeps.max()))
+    if lit and len(c) > 25 and c[25]:
+        # L8 term 3: three orthographic cascades along the case's sun in view space (each fitted to its view-depth third
+        # of the in-view particles), a 256 x 256 x 3 D16 map of stripe occluders, and a 64 x 64 clouds' map along the sun
+        pv = v[inview].astype(np.float64)
+        Lv = R @ sunL
+        Lv = Lv / np.linalg.norm(Lv)
+        ax = np.cross(Lv, [0.0, 1.0, 0.0])
+        if np.linalg.norm(ax) < 0.1:
+            ax = np.cross(Lv, [1.0, 0.0, 0.0])
+        ax = ax / np.linalg.norm(ax)
+        ay = np.cross(Lv, ax)
+        dv = -pv[:, 2]
+        s1, s2 = float(np.percentile(dv, 33.0)), float(np.percentile(dv, 67.0))
+        band = 0.05 * float(dv.max() - dv.min())
+        dist = 4.0 * float(np.linalg.norm(pv, axis=1).max())
+        dd = pv @ -Lv
+        pad = 0.1 * float(dd.max() - dd.min()) + 1.0
+        dmin, dmax = float(dd.min()) - pad, float(dd.max()) + pad
+        span = dmax - dmin
+        pa, pb = pv @ ax, pv @ ay
+        CN, mats, texel = 256, [], []
+        for lo, hi in ((-1e30, s1 + band), (s1, s2 + band), (s2, 1e30)):
+            m = (dv >= lo) & (dv <= hi)
+            ca, cb = 0.5 * (pa[m].min() + pa[m].max()), 0.5 * (pb[m].min() + pb[m].max())
+            h = 0.5 * max(float(np.ptp(pa[m])), float(np.ptp(pb[m]))) * 1.1 + 0.5
+            M = np.zeros((4, 4))
+            M[0, :3], M[0, 3] = ax / (2 * h), 0.5 - ca / (2 * h)
+            M[1, :3], M[1, 3] = ay / (2 * h), 0.5 - cb / (2 * h)
+            M[2, :3], M[2, 3] = -Lv / span, -dmin / span
+            M[3, 3] = 1.0
+            mats.append(M)
+            texel.append(2 * h / CN)
+        yy, xx = np.mgrid[0:CN, 0:CN]
+        csm = np.full((3, CN, CN), 65535, np.uint16)
+        for i, stripe in enumerate(((xx // 16) % 2, (yy // 16) % 2, ((xx + yy) // 16) % 2)):
+            occ = 0.15 + 0.3 * (0.5 + 0.5 * np.sin(xx * 0.05 + yy * 0.031 + i))
+            csm[i] = np.where(stripe == 1, np.round(occ * 65535), 65535).astype(np.uint16)
+        csm.tofile(os.path.join(d, 'csm.bin'))
+        casc = np.where(dv < s1, 0, np.where(dv < s2, 1, 2))
+        shad = []
+        for k in range(len(pv)):
+            q = mats[casc[k]] @ np.r_[pv[k], 1.0]
+            zr = q[2] - 0.25 * texel[casc[k]] / span
+            tx, ty = int(np.floor(q[0] * CN)), int(np.floor(q[1] * CN))
+            st = csm[casc[k], ty, tx] / 65535.0 if 0 <= tx < CN and 0 <= ty < CN else 1.0
+            shad.append(zr > st)
+        lz = pv @ Lv
+        Hc = 0.5 * max(float(np.ptp(pa)), float(np.ptp(pb))) * 1.15 + 0.5
+        cA, cB = 0.5 * (pa.min() + pa.max()), 0.5 * (pb.min() + pb.max())
+        Mc = np.zeros((4, 4))
+        Mc[0, :3], Mc[0, 3] = ax / (2 * Hc), 0.5 - cA / (2 * Hc)
+        Mc[1, :3], Mc[1, 3] = ay / (2 * Hc), 0.5 - cB / (2 * Hc)
+        Mc[2, :3], Mc[2, 3] = Lv / float(np.ptp(lz)), -float(lz.min()) / float(np.ptp(lz))
+        Mc[3, 3] = 1.0
+        QN = 64
+        gy, gx = np.mgrid[0:QN, 0:QN] / float(QN - 1)
+        cloud = np.zeros((QN, QN, 4), np.float32)
+        cloud[..., 0] = 0.2 + 0.8 * (0.5 + 0.5 * np.sin(gx * 7.0 + gy * 3.0))
+        cloud[..., 1] = 0.5 + 2.5 * (0.5 + 0.5 * np.sin(gy * 9.0 - gx * 2.0))
+        cloud[..., 2] = 0.2 + 1.8 * (0.5 + 0.5 * np.cos(gx * 5.0 + gy * 6.0))
+        cloud = cloud.astype(np.float16).astype(np.float32)
+        cloud.tofile(os.path.join(d, 'cloud.bin'))
+        qc = np.c_[pv, np.ones(len(pv))] @ Mc.T
+        ci_ = np.clip((qc[:, :2] * QN).astype(int), 0, QN - 1)
+        mc = cloud[ci_[:, 1], ci_[:, 0]]
+        tc = np.exp(-np.minimum(mc[:, 2], mc[:, 1] * np.maximum(mc[:, 0] - qc[:, 2], 0.0)))
+        with open(os.path.join(d, 'shadow.txt'), 'w', newline='\n') as f:
+            f.write('%d %d\n' % (CN, QN))
+        U.update({'volCsm': [1], 'ussOn': [0], 'csmForce': [-1.0], 'csmRed': [0], 'csmProbe': [0], 'ussCloudOn': [1],
+                  'csmMat': np.concatenate([M.T.reshape(-1) for M in mats]), 'csmInvRange': [1.0 / span] * 3,
+                  'csmParams': [1.0, dist, float(CN), band], 'csmSplitOffset': [s1, s2, 0.275, 1.0],
+                  'ussCsmStable': [1.0, 0.0, 0.0, 1.0], 'ussCsmTexel': texel, 'ussCsmBias': [0.25 * t_ for t_ in texel],
+                  'ussCloudFromView': Mc.T.reshape(-1), 'ussCloudFar': [0.6, 0.15, 0.0, 0.0]})
+        print('precipview case %s: the cascades, in-view shares %.3f %.3f %.3f (want each >= 0.1), one hard tap shadows %.3f '
+              '(want 0.2 - 0.8); the clouds, transmittance %.3f - %.3f, share < 0.9 %.3f' % (c[0], float(np.mean(casc == 0)),
+              float(np.mean(casc == 1)), float(np.mean(casc == 2)), float(np.mean(shad)), tc.min(), tc.max(), float(np.mean(tc < 0.9))))
+    if lit and fog and len(c) > 26 and c[26]:
+        # L8 term 4: the drift (cellvolair.cpp volDrift): amp 0.5, the fade from the in-view particles' median distance over
+        # their distance span, two skewed octaves (about 2 and 5 noise tiles across the run), a 32^3 R8 noise (linear,
+        # repeat; as vaNoiseLoad's) centred on its mean
+        # (names kept off the module's: rows / seed / t are the atlas', the run's and the textures', used below)
+        dr_p = v[inview].astype(np.float64)
+        dr_dist = np.linalg.norm(dr_p, axis=1) * AU['fogDistScale']
+        dr_ext = float(max(np.ptp(dr_p[:, 0]), np.ptp(dr_p[:, 1]), np.ptp(dr_p[:, 2])))
+        dr_a = np.random.RandomState(26).rand(32, 32, 32)
+        for dr_ax in range(3):
+            dr_a = (dr_a + np.roll(dr_a, 1, dr_ax) + np.roll(dr_a, -1, dr_ax)) / 3.0
+        dr_noise = ((dr_a - dr_a.min()) / (dr_a.max() - dr_a.min()) * 255).astype(np.uint8)
+        dr_t = Tex('3d', 'r8', dr_noise, 'linear', 'repeat')
+        dr_t.data.tofile(os.path.join(d, 'tex_volAirNoise.bin'))
+        with open(os.path.join(d, 'tex.txt'), 'a', newline='\n') as f:
+            f.write('volAirNoise 3d r8 %d %d %d linear repeat 0 tex_volAirNoise.bin\n' % (dr_t.w, dr_t.h, dr_t.d))
+        dr_rows = []
+        for dr_tiles, dr_seed in ((2.0, 3), (5.0, 4)):
+            dr_q, _ = np.linalg.qr(np.random.RandomState(dr_seed).randn(3, 3))
+            dr_m = dr_q * (dr_tiles / dr_ext)
+            dr_o = np.random.RandomState(dr_seed + 10).rand(3)
+            dr_rows += [list(dr_m[i]) + [float(dr_o[i])] for i in range(3)]
+        dr_mean = float(dr_noise.mean()) / 255.0
+        dr_y0, dr_span = float(np.median(dr_dist)), float(np.ptp(dr_dist))
+        U.update({'volAirDrift': [0.5, dr_y0, 1.0 / dr_span, dr_mean], 'volAirDriftUv': np.array(dr_rows).reshape(-1),
+                  'volAirDriftRed': [0]})
+        # the captured air (2.2e-5 / unit, density 0.06 at the particles) moves the sun column by under a half's ulp: the
+        # case's air 150x denser (sun tau about 0.5 at the median particle), so the drift's factor is seen
+        U['airMed'] = [float(AU['volAirMed'][0]) * 150.0] + [float(x) for x in AU['volAirMed'][1:]]
+        dr_fade = 1.0 - np.clip((dr_dist - dr_y0) / dr_span, 0.0, 1.0)
+        print('precipview case %s: the drift, noise mean %.4f, fade %.3f - %.3f (share 1: %.3f), %.2f / %.2f tiles across, air %.3g / unit'
+              % (c[0], dr_mean, dr_fade.min(), dr_fade.max(), float(np.mean(dr_fade >= 1.0)), 2.0, 5.0, U['airMed'][0]))
     if hasN:
         nl = bc3_levels(normals(tw, th, 31 + ci), os.path.join(d, 'tex_pcTexN.bin'))
         with open(os.path.join(d, 'tex.txt'), 'a', newline='\n') as f:
             f.write('pcTexN 2d bc3 %d %d 1 linear clamp %d tex_pcTexN.bin\n' % (tw, th, nl))
+    if lit and len(c) > 30 and c[30]:
+        # L8 term 8: an interior (cellInterior 1): its ambient switch cellHasDalc on, cellGiAmb 0, cellExtDalc kept 1 (the
+        # ambient's fixture: unread inside); 1 a dark interior (cellHasDir 0: the lamps and the ambient alone)
+        U.update({'cellInterior': [1], 'cellHasDalc': [1], 'cellGiAmb': [0], 'cellExtDalc': [1]})
+        if c[30] == 1:
+            U['cellHasDir'] = [0]
+        print('precipview case %s: an interior, %s' % (c[0], 'dark (cellHasDir 0)' if c[30] == 1 else 'sunlit (cellHasDir 1)'))
+    if len(c) > 29 and c[29]:
+        # L8 term 7: the roof map (cellprecip.cpp's R32F, the highest occluder z a texel, -1e30 open), 24 x 16, the texel
+        # L / 16, the eye at texel (6.3, 11.7): the map covers part of the box, off the map at low x and high y; a quarter
+        # open, the rest a roof at the eye's z + uniform( -L / 2, L / 2 )
+        rf_nx, rf_ny, rf_inv = 24, 16, 16.0 / g['L']
+        rf_rs = np.random.RandomState(290 + ci)
+        rf_z = (c[6][2] + rf_rs.uniform(-0.5, 0.5, (rf_ny, rf_nx)) * g['L']).astype(np.float32)
+        rf_z[rf_rs.rand(rf_ny, rf_nx) < 0.25] = np.float32(-1e30)
+        rf_z.tofile(os.path.join(d, 'roof.bin'))  # row y = 0 first, as glTexImage2D takes it
+        with open(os.path.join(d, 'roof.txt'), 'w', newline='\n') as f:
+            f.write('%d %d\n' % (rf_nx, rf_ny))
+        U.update({'pcRoofOn': [1], 'pcRoofCam': [6.3, 11.7, c[6][2]], 'pcRoofInv': [rf_inv]})
+        # the prediction (the CPU particles in float32, pcRoofOpen's rule): how many in-view particles sit under a roof
+        rf_p = rel[inview].astype(np.float32)
+        rf_t = np.floor(np.array([6.3, 11.7], np.float32) + rf_p[:, :2] * np.float32(rf_inv)).astype(np.int64)
+        rf_on = (rf_t >= 0).all(1) & (rf_t[:, 0] < rf_nx) & (rf_t[:, 1] < rf_ny)
+        rf_under = np.zeros(len(rf_p), bool)
+        rf_under[rf_on] = ~(rf_z[rf_t[rf_on, 1], rf_t[rf_on, 0]] - np.float32(c[6][2]) < rf_p[rf_on, 2])
+        print('precipview case %s: the roof map %d x %d, %d of %d in-view particles on the map, %d under a roof (dropped)'
+              % (c[0], rf_nx, rf_ny, int(rf_on.sum()), len(rf_p), int(rf_under.sum())))
     with open(os.path.join(d, 'uni.txt'), 'w', newline='\n') as f:
         for key, val in U.items():
             f.write('%s %s\n' % (key, fl(val)))

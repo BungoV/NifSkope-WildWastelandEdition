@@ -154,7 +154,7 @@ struct Gpu
 	int bloomVersion = 0;
 	// the depth cube array, the light each slot holds (-1 free), and a stamp the light buffer re-uploads on
 	GLuint shTex = 0, shFbo = 0;
-	bool shShared = false;	// lane VKOBJ4: shTex is a shared cube array on the present device (WW_VKOBJ_SHADE, keyed &shTex)
+	bool shShared = false;	// lanes VKOBJ4 / VKFAR6: shTex is the present device's shared D16 cube array (WW_VKOBJ_SHADE or the view on Vulkan; celllamps.cpp shadowShareKey)
 	const void * shDoc = nullptr;
 	int shVersion = 0;
 	int shSlot[kShadowSlots];
@@ -162,6 +162,7 @@ struct Gpu
 	int shKick = 0;	// lane DOORLIVE1: a moving caster (a live door) re-renders every held slot
 	int shPend[kShadowSlots];	// lane PERFFIX2 b: the light a slot holds whose first store waits for a later frame (-1 none)
 	int shFace = 0;	// lane LAMPSHADOW1: the face edge shTex was made at (the tier's)
+	bool shAsked = false;	// lane VKFAR6: the share was wanted when shTex was made (shared or refused)
 	float shFade[kShadowSlots];	// lane GAPLOOK1: each slot's shadow strength under the budget (1 without it)
 	int shBudget = 0;
 	float shCut = 0.0f;

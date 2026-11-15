@@ -302,8 +302,40 @@ Changed, not built, not checked live. Nothing in the app calls it yet, so no fra
 - Gate fixes on the way: every GL case now starts from its program's freshly linked uniforms (17324866; four verdicts
   moved by 1 ulp, all inside the bar), and the lamps' out-of-reach check ignores pixels where NVIDIA's own 4x blend
   merged differently between two draws (72f544a1; 8 flips there were GL's own draw-to-draw noise).
-- Still on GL (the census, exterior 5, interior 6): the lamps' shadow cubes and gobos, cascade shadows, air drift, the
-  roof map; interiors too. The app turns these on by default, so lit runs in the app still go to GL.
+- Sun shadow and clouds (VKFAR6, 8f0259a8 bar, then c05f5e8f): the sun's cascade shadow map (shared into the Vulkan
+  pass, read through a compare sampler like GL's) and the cloud shadow map light rain / snow on Vulkan. New gate case:
+  near rain under three cascades with a striped occluder map and a cloud map (151322 samples, EXACT; the cascades move
+  61991 in GL, forcing one cascade 47435, the clouds 20983). Dropping the shadow map, the shadow or the clouds' map, or
+  swapping two cascades, FAILs. A cascade map that is not shared, has another border or filter, or sits on a GPU
+  without linear D16 filtering is refused.
+- Air drift (VKFAR6, d837b3b6 bar, then 32fc79eb): the drifting air's 3D noise is shared into the Vulkan pass, so the
+  sun's column and the lamps' paths through the drift light rain / snow on Vulkan. New gate case: far snow with lamps in
+  fog with two noise octaves (28114 samples, EXACT; the drift moves 21759 in GL, zero octaves 25534). Dropping the
+  noise or the drift, or swapping the octaves, FAILs. The case's air is 150x the captured density: the captured air
+  moved the sun by less than one half-float step.
+- Lamp shadows (VKFAR6, 414e82f8 bar, then a952f301 and 4be20dd1): the lamps' shadow cubes are shared with the
+  Vulkan view and read in place, so lamp-lit rain / snow is shadowed on Vulkan as on GL. New gate case: near rain with
+  an omni, a spot and a hemisphere casting into striped cubes (151310 samples, 2 halves 1 ulp apart, 0 flips); shadows
+  off moves 84194 in GL, the fade off 44644. Dropping the cubes, the shadows or the fade FAILs. Red
+  WW_VKVIEW_LAMPSHADOW_RED=1 keeps the cubes GL's own. The app half is not built by the offline gate.
+- Lamp gobos (VKFAR6, 35ec4cab bar, then the lift): the lamps' patterns travel in the light buffer the Vulkan pass
+  already copies whole, so the refusal is gone and patterned lamps tint rain / snow on Vulkan as on GL. New gate case:
+  near rain with a patterned spot, omni and hemisphere (151330 samples, 2 halves 1 ulp apart, 0 flips); gobos off moves
+  99481 in GL, each pattern's mean alone 93558, u flipped 93946. Dropping the gobos or their table, or flipping their
+  uv, FAILs. (Lift f9504965.)
+- Roof map (VKFAR6, 89032039 bar, then 080ca32d): GL's map of the highest roof over each spot is shared with the
+  Vulkan pass, so rain / snow under a roof is dropped on Vulkan as on GL, plain, look and lit alike. New gate cases:
+  near rain plain (EXACT), near rain lit (151274 samples, 2 halves 1 ulp apart, 0 flips) and near snow with the look
+  (52 halves, max 2 ulp, 0 flips); the roof off moves 32408 / 42415 / 734579 samples in GL. Dropping the map, turning
+  it off or swapping its axes FAILs in each case.
+- Interiors (VKFAR6, 3aaa59eb bar, then 33e277fd): an interior's own particle law (no sun shadow, no veil, its own
+  ambient switch, the ambient's GI rule, a dark interior still lit) was already in the shared shader; the refusal is
+  gone, so lit rain / snow in an interior draws on Vulkan. New gate cases: a dark interior with lamps and ambient
+  volumes (151282 samples, EXACT) and a sunlit fogged interior (28114 samples, EXACT); the interior off moves 151269 /
+  14601 in GL, its ambient switch off 150971 / 28114. Turning the interior or its ambient off, or the ambient's GI rule
+  on, FAILs in each case.
+- The census reads exterior 0, interior 0: every lit term GL draws on rain / snow now draws on Vulkan in the gate. Lit
+  + the look together is still refused (the look is off by default).
 
 ## VKWATER4 (2026-11-15): the ultra ocean builds on Vulkan compute (WW_VKVIEW=1)
 

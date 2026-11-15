@@ -168,6 +168,126 @@
 // refusal; precipAdmits (and precipRun's backstop) refuse an ambient run with the keep on (volEnvGrid.w >= 0.5) and no
 // b0 bytes; the app's rain / snow draw twins GL's volEnvHist into the lit set's binding 83. Census after: exterior 5,
 // interior 6 (the ambient line gone from both).
+// The sun's shadow (L8 term 3, VKFAR6 11-15; bar set before its first run, never widened): volCsm 1 multiplies the sun by
+// wwSunShadow = the cascades (csmMap t31, a D16 array read by compare taps) x the clouds' transmittance (ussCloudT,
+// ussCloudMap t34), outdoors only. The app's defaults on this program: ussOn 0 (shadowset.cpp 2757: the tiers 0 and the
+// cascades valid), ussCsmStable.w 1 (sunshadow.cpp 2363: the Off tier's stable bias, the normal offset from the geometry
+// stage's pcDPx; the program has no volStage), ussCloudOn 1 (cloudshadow.cpp 108: the cloud shadow follows the clouds, at
+// least Low). One case, rain_near_csm (rain_near_lit's run, unfogged, volTerms 1): volCsm 1, ussOn 0, csmForce -1, csmRed
+// 0, csmProbe 0, ussCsmStable (1, 0, 0, 1) with ussCsmTexel and ussCsmBias (0.25 texel) per cascade, csmParams (1, a
+// distance past the run, 256, a blend band), csmSplitOffset at the run's view-depth thirds, csmMat[3] orthographic along
+// the case's sun (each cascade fitted to its share of the particles), csmInvRange 1 / each depth span; a 256 x 256 x 3 D16
+// csmMap made by sharedTarget (type 2) as the app's, with csmTexParams' live state (linear, clamp to border 1, compare
+// LEQUAL), each layer a different stripe pattern of occluder depths; ussCloudOn 1 with ussCloudFromView along the sun,
+// ussCloudFar (0.6, 0.15, 0, 0) and a 64 x 64 RGBA16F ussCloudMap (linear, clamp to edge) whose start height, extinction and
+// depth vary. The prep prints the in-view particles' shares in cascades 0, 1 and 2 (want each >= 0.1) and the share one
+// hard tap shadows (want 0.2 - 0.8). The same verdict, reference checks, repeat clause, reds 64 / 128 as the lit cases; the
+// globals check and Vulkan's globals mirror as rain_near_lit. The case must also show (else the gate fails): GL with
+// volCsm 0 differs on >= 1000 covered samples (the sun's shadow seen); GL with csmForce 1 on >= 1000 (the map seen); GL
+// with ussCloudOn 0 on >= 1000 (the clouds seen); csmMap, csmMat, csmInvRange, csmParams, csmSplitOffset, csmForce,
+// ussCsmStable, ussCsmTexel, ussCsmBias, ussCloudOn, ussCloudMap, ussCloudFromView and ussCloudFar found in GL's program;
+// csmMat, csmParams, csmSplitOffset, ussCsmBias, ussCloudFromView and ussCloudFar packed non-zero. GL with ussCsmStable.w
+// 0 is printed (info). Reds, each must FAIL in rain_near_csm: 65536 the shadow map dropped (Vulkan's csmMap the zero D16
+// array, all lit); 131072 the shadow dropped (the packed volCsm cleared); 262144 the clouds' map dropped (the zero
+// texture); 524288 cascades 1 and 2 swapped (the packed csmMat[1] and csmMat[2]). Lifted with it: precipLitWhy's volCsm
+// refusal; refused by name instead: ussOn (the shadow set's composition: a cascade / terrain / contact tier), csmProbe or
+// csmRed non-zero; precipRun refuses a csmMap not shared with the present device (no per-run copy of the map); the app's
+// rain / snow draw twins GL's csmMap (refused unless linear, clamp to border 1, compare LEQUAL) into the lit set's binding
+// 95 with a compare sampler of that state and ussCloudMap into binding 98. The census sets ussOn 0 and ussCloudOn 1 (the
+// lines above). Census after: exterior 4, interior 5 (the sun's shadow map line gone from both).
+// The air's drift (L8 term 4, VKFAR6 11-15; bar set before its first run, never widened): volAirDrift.x > 0 makes the air
+// lumpy where the particles are lit: the sun's column takes airTupSun to the power wwAirDriftSunK (the drift's mean along
+// the sun) and each lamp's path exp( -airOd x dL ) (the drift at the puff and along the path), both reading volAirNoise
+// (t30, a 3D R8 noise, linear, repeat; cellvolair.cpp vaNoiseLoad) at volAirDriftUv's two octaves, faded by volAirDrift.y
+// / .z, centred on its mean .w. One case, snow_far_drift (snow_far_lamps' run, fogged, volTerms 3): volAirDrift (0.5,
+// the in-view particles' median distance, 1 / their distance span, the noise's mean), volAirDriftUv two skewed octaves
+// (about 2 and 5 noise tiles across the run), volAirDriftRed 0, a 32^3 R8 volAirNoise (linear, repeat) bound in every case
+// (unread with the drift off). The same verdict, reference checks, repeat clause, reds 64 / 128 as the lit cases; the
+// globals check and Vulkan's globals mirror as snow_far_lamps. The case must also show (else the gate fails): GL with
+// volAirDrift.x 0 differs on >= 1000 covered samples (the drift seen); GL with volAirDriftUv all zero on >= 1000 (the
+// noise's variation seen); volAirDrift, volAirDriftUv, volAirDriftRed and volAirNoise found in GL's program; volAirDrift
+// and volAirDriftUv packed non-zero. GL with volAirDriftRed 1 (one sun tap) and 2 (the lamps' drift at the puff only) is
+// printed (info). Reds, each must FAIL in snow_far_drift: 1048576 the noise dropped (Vulkan's volAirNoise the zero 3D
+// texture); 2097152 the drift dropped (the packed volAirDrift.x 0); 4194304 the octaves swapped (the packed
+// volAirDriftUv rows 0-2 with 3-5). Lifted with it: precipLitWhy's drift refusal; precipRun refuses a lit run with the
+// drift on and no volAirNoise; the app's rain / snow draw twins GL's volAirNoise into the lit set's binding 94 with its
+// own sampler (binding 158). Census after: exterior 3, interior 4 (the drift line gone from both).
+// The lamps' shadow cubes (L8 term 5, VKFAR6 11-15; bar set before its first run, never widened): cellShadowOn 1 makes
+// each casting lamp (t4.y > 0.5) dim the particles by cellShadowF: a hemisphere (t4.y 2) is 0 behind its plane; a slot
+// (t4.x >= 0) takes 9 compare taps a texel apart (cellShadowTexel) into cellShadow (t6, GL's D16 cube array, linear,
+// clamp to edge, compare LEQUAL, seamless), its ref (|P - pos + slope bias| - 1) / radius; cellShadowFadeOn blends each
+// slot toward 1 by cellShadowFade[slot]; a casting lamp past the slots (t4.x -1) is unshadowed. One case,
+// rain_near_shadow (rain_near_lamps' run, volTerms 3): cellShadowOn 1, cellShadowTexel 1 / 64, cellShadowFadeOn 1 with
+// cellShadowFade 0.7 / 0.4 / 1.0 on slots 0 / 1 / 2; the omni in slot 0, the spot in slot 1, the hemisphere in slot 2
+// (t4.y 2), the box casting past the slots (t4.x -1), the far omni not casting; a shared 64 x 64 x 16-cube D16 array
+// (the app's slot count) made by sharedTarget as the app's (cube type), each used slot holding stripes of near
+// occluders (depth 0.05) across the directions (else 1), so taps fall on stripe and face edges; GL with
+// GL_TEXTURE_CUBE_MAP_SEAMLESS on, as the app. The prep prints each slot's share of in-view particles its stripes
+// shadow (predicted before the run). The same verdict, reference checks, repeat clause, reds 64 / 128 as the lit cases;
+// the globals check and Vulkan's globals mirror as rain_near_lamps. The case must also show (else the gate fails): GL
+// with cellShadowOn 0 differs on >= 1000 covered samples (the cubes seen); GL with cellShadowFadeOn 0 on >= 1000 (the
+// fade seen); cellShadow, cellShadowOn, cellShadowTexel, cellShadowFadeOn and cellShadowFade found in GL's program;
+// cellShadowOn, cellShadowTexel and cellShadowFade packed non-zero. GL with cellShadowTexel 0 is printed (info). Reds,
+// each must FAIL in rain_near_shadow: 8388608 the cubes dropped (Vulkan's cellShadow the zero D16 cube array);
+// 16777216 the shadows off (the packed cellShadowOn 0); 33554432 the fade dropped (the packed cellShadowFadeOn 0).
+// Lifted with it: precipLitWhy's shadow-cube refusal; makeShared / sharedTarget gain a D16 cube array (type 3), the
+// app's lamp cubes (celllamps.cpp) become one while the view is on Vulkan; precipRun refuses a lit run with shadows on
+// and cubes not shared with the present device (no per-run copy), a D16 cube array without linear filtering, and GL's
+// ReSTIR variant (cellRestirOn in the program: its cubes are not read); the app's rain / snow draw twins GL's
+// cellShadow (refused unless D16, linear, clamp to edge, compare LEQUAL) into the lit set's binding 70 with a compare
+// sampler of that state (binding 134). Census after: exterior 2, interior 3 (the shadow-cube line gone from both).
+// The lamps' gobos (L8 term 6, VKFAR6 11-15; bar set before its first run, never widened): cellGoboOn 1 tints each lamp
+// by cellGobo: a spot by its pattern through t5 / t6 (local y, 1 + header; local z, tan( FOV / 2 )), any other shape by
+// a dual paraboloid through the table at cellGoboTbl (1 + the light's record: local x + 1 + header, y, z), each pattern
+// a header (w, h), its mean, then rows, bilinear by hand, all in cellLights (no texture: the whole store is copied, so
+// the table and patterns travel with the lights). One case, rain_near_gobo (rain_near_lamps' run, volTerms 3):
+// cellGoboOn 1, Rot 0, Flat 0, Gam 0, Map 0; the spot an 8 x 8 pattern, the omni and the hemisphere an 8 x 16 pattern
+// (two stacked halves) each in its own frame, the box and the far omni none (table entry 0); cellLights grown to hold
+// the table at texel 40, the records, the patterns (random unequal-channel texels 0.2 - 1.5). The prep prints each
+// gobo light's in-reach particle count (predicted before the run). The same verdict, reference checks, repeat clause,
+// reds 64 / 128 as the lit cases; the globals check and Vulkan's globals mirror as rain_near_lamps. The case must also
+// show (else the gate fails): GL with cellGoboOn 0 differs on >= 1000 covered samples (the gobos seen); GL with
+// cellGoboFlat 1 on >= 1000 (the patterns' texels seen, not just their means); GL with cellGoboRot 1 on >= 1000 (the
+// uv seen); cellGoboOn, cellGoboRot, cellGoboFlat, cellGoboGam, cellGoboTbl and cellGoboMap found in GL's program;
+// cellGoboOn and cellGoboTbl packed non-zero. GL with cellGoboMap 1 is printed (info). Reds, each must FAIL in
+// rain_near_gobo: 67108864 the gobos off (the packed cellGoboOn 0); 134217728 the table dropped (the packed cellGoboTbl
+// 0: the omni's and the hemisphere's patterns gone); 268435456 the uv flipped (the packed cellGoboRot 3). Lifted with
+// it: precipLitWhy's gobo refusal. Census after: exterior 1, interior 2 (the gobo line gone from both).
+// The roof map (L8 term 7, VKFAR6 11-15; bar set before its first run, never widened): pcRoofOn 1 drops a particle under
+// the map's roof (cell_precip_field's pcRoofOpen: the texel floor( pcRoofCam.xy + rel.xy pcRoofInv ), off the map open,
+// else open when the texel's z - pcRoofCam.z < rel.z), a cull: the particle set changes, no colour term. Three cases, one
+// a record pass: rain_near_roof (plain, rain_near_disc's run), snow_look_roof (the look, snow_look_near's run; the drop
+// look runs the same record pass, precip_look_view_cs), rain_near_roof_lit (lit, rain_near_lit's run, volTerms 1). Each
+// pcRoofOn 1 with one fixture, R32F 24 x 16 (nx != ny), NEAREST, clamp to edge (cellprecip.cpp's state), the texel a
+// sixteenth of the box side, the eye at texel (6.3, 11.7) so the map covers part of the box and the off-map branch is
+// read (low x, high y); a quarter of the texels open (-1e30), the rest a roof at the eye's z + uniform( -L / 2, L / 2 ) (roofs above and
+// below particles). The prep prints each case's in-view particles and how many its CPU particles put under a roof
+// (predicted before the run). The same verdict (depth EXACT, colour inside the bar), reference checks and repeat clause
+// as each case's run. The case must also show (else the gate fails): GL with pcRoofOn 0 differs on >= 1000 covered
+// samples (the roof seen); pcRoof, pcRoofOn, pcRoofCam and pcRoofInv found in GL's program; pcRoofOn packed non-zero.
+// Reds, each must FAIL in each roof case: 536870912 the map dropped (Vulkan's pcRoof the zero texture); 1073741824 the
+// roof off (the packed pcRoofOn 0); 2147483648 the map's axes swapped (the packed pcRoofCam x and y swapped). A mismatch
+// on a texel edge is a ruling or a Vulkan twin in GL's order, never a wider bar. Lifted with it: precipAdmits' roof
+// refusal (every run); the lit record pass reads pcRoof at its own register (t47: t0 is cellLights there); a run with
+// pcRoofOn and no pcRoof in GL's program is refused by name; the app's rain / snow draw twins GL's pcRoof (copied every
+// run: the map changes with the cell). Census after: exterior 0, interior 1 (the roof line gone from both).
+// Interiors (L8 term 8, VKFAR6 11-15; bar set before its first run, never widened): cellInterior 1 changes the particle
+// law in cell_volpart (vpLight / vpLit): the local sun law off (vpLocal), the sun unshadowed (no volCsm read), the veil
+// off, the ambient's switch cellHasDalc (not cellExtDalc), the ambient dropped under cellGiAmb 2, GI's replace by
+// cellGiAmb 1, and a dark interior (cellHasDir 0) still lit (not cellFxLit's self-lit). Two cases, element 30, appended:
+// rain_near_int (1: a dark interior, rain_near_amb's run with the lamps, volTerms 11: cellHasDir 0, the lamps' flat loop,
+// the Ambient Only volumes; GI's bit is rain_near_gi's) and snow_far_int_sun (2: a sunlit interior, snow_far_lamps' fogged
+// run, volTerms 11, the sun, the lamps, the volumes, the veil's switches on). Each: cellInterior 1, cellHasDalc 1, cellGiAmb 0 and
+// cellExtDalc 1 (the ambient's fixture; unread inside). The same verdict (depth EXACT, colour inside the bar), reference
+// checks, repeat clause and lamp / ambient checks as each case's run; rain_near_int's lit check "GL with cellHasDir 0" is
+// printed, not judged (its sun is already off: the dark interior is the cellInterior check below). The case must also
+// show (else the gate fails): GL with cellInterior 0 differs on >= 1000 covered samples (the interior's law seen); GL
+// with cellHasDalc 0 on >= 1000 (the interior's ambient switch seen); GL with cellGiAmb 2 on >= 1000 (the ambient's GI
+// rule seen); cellInterior, cellHasDalc, cellGiAmb and cellExtDalc found in GL's program; cellInterior and cellHasDalc
+// packed non-zero. GL with cellExtDalc 0 and, fogged, volVeil 0 are printed (info: unread inside, want 0). Reds, each
+// must FAIL in each interior case: 4294967296 the interior off (the packed cellInterior 0); 8589934592 the interior's
+// ambient off (the packed cellHasDalc 0); 17179869184 the ambient's GI rule (the packed cellGiAmb 2). Lifted with it:
+// precipLitWhys' interior refusal. Census after: exterior 0, interior 0 (the L8 done line).
 #define main fxview_main
 #include "fxview.cpp"
 #undef main
@@ -491,6 +611,14 @@ struct Job
 	UniMap uni;
 	std::vector<TexIn> tex;
 	int atlasAt = -1, airAt[5] = { -1, -1, -1, -1, -1 }, normAt = -1, envAt = -1;  // into tex (envAt: L8 term 2's volEnvHist)
+	int noiseAt = -1;  // into tex: L8 term 4's volAirNoise (3D R8)
+	int csmN = 0, cloudN = 0;  // L8 term 3: shadow.txt's csmMap size (256 x 256 x 3, D16) and ussCloudMap size (RGBA16F)
+	std::vector<std::uint16_t> csmData;
+	std::vector<float> cloudData;
+	int cubeN = 0;  // L8 term 5: cubes.txt's face edge (16 cubes, D16; cubes.bin N x N x 96 layer-faces)
+	std::vector<std::uint16_t> cubeData;
+	int roofNx = 0, roofNy = 0;  // L8 term 7: roof.txt's map size (R32F; roof.bin nx x ny floats, row-major from y 0)
+	std::vector<float> roofData;
 	bool hasN() const { return look == 2 && hasTex; }
 	struct Buf  // L8 term 2a: a texture buffer (buf.txt: name format texels file)
 	{
@@ -541,12 +669,50 @@ struct Job
 		return amb() && envAt >= 0 && it != uni.end() && it->second.size() == 4 && it->second[3] > 0.5;
 	}
 	bool readsB0() const { return cluster() || envKeep(); }  // GL's geometry stage reads b0's projection
+	bool csm() const  // L8 term 3 (VKFAR6): the sun's cascades on (volCsm 1, a map from shadow.txt)
+	{
+		const auto it = uni.find( "volCsm" );
+		return lit && csmN > 0 && it != uni.end() && !it->second.empty() && it->second[0] > 0.5;
+	}
+	bool drift() const  // L8 term 4 (VKFAR6): the air's drift on (volAirDrift.x > 0, the noise from tex.txt)
+	{
+		const auto it = uni.find( "volAirDrift" );
+		return lit && fog && noiseAt >= 0 && it != uni.end() && it->second.size() == 4 && it->second[0] > 0.0f;
+	}
+	bool cube() const  // L8 term 5 (VKFAR6): the lamps' shadow cubes on (cellShadowOn 1, cubes from cubes.txt)
+	{
+		const auto it = uni.find( "cellShadowOn" );
+		return lamps() && cubeN > 0 && it != uni.end() && !it->second.empty() && it->second[0] > 0.5;
+	}
+	bool gobo() const  // L8 term 6 (VKFAR6): the lamps' gobos on (cellGoboOn 1, the patterns in cellLights)
+	{
+		const auto it = uni.find( "cellGoboOn" );
+		return lamps() && it != uni.end() && !it->second.empty() && it->second[0] > 0.5;
+	}
+	bool roof() const  // L8 term 7 (VKFAR6): the roof map on (pcRoofOn 1, the map from roof.txt), any variant
+	{
+		const auto it = uni.find( "pcRoofOn" );
+		return roofNx > 0 && it != uni.end() && !it->second.empty() && it->second[0] > 0.5;
+	}
+	bool interior() const  // L8 term 8 (VKFAR6): a lit interior (cellInterior 1)
+	{
+		const auto it = uni.find( "cellInterior" );
+		return lit && it != uni.end() && !it->second.empty() && it->second[0] > 0.5;
+	}
+	bool darkInterior() const  // ... with no sun (cellHasDir 0): its lit check's cellHasDir 0 is printed, not judged
+	{
+		const auto it = uni.find( "cellHasDir" );
+		return interior() && it != uni.end() && !it->second.empty() && it->second[0] < 0.5;
+	}
 };
 const int kNormUnit = 8;  // slice 3: the look's pcTexN
 const int kLightsUnit = 9, kClusterUnit = 10;  // L8 term 2a: the lamps' cellLights / cellCluster
 const int kTerrUnit = 11;  // L8 terrain air: airTerr
 const int kGiUnit = 12;  // L8 term 1: the WW_CELL_PRT variant's cellGiAir
 const int kEnvUnit = 13;  // L8 term 2: the ambient's volEnvHist
+const int kCsmUnit = 17, kCloudUnit = 18;  // L8 term 3: csmMap, ussCloudMap (15 / 16 are the read-back's)
+const int kNoiseUnit = 19;  // L8 term 4: the drift's volAirNoise
+const int kCubeUnit = 20;  // L8 term 5: the lamps' cellShadow (a D16 cube array)
 const GLenum kTexBuffer = 0x8C2A;  // GL_TEXTURE_BUFFER
 // slice 2a: the air's textures, in precipRun's tex[2..6] order, their GL units and fxTexOf types
 const char * kAirTex[5] = { "atApTex", "volTex", "volTile", "volAirTerr", "volAirRainMap" };
@@ -603,16 +769,47 @@ int main( int argc, char ** argv )
 						j.normAt = int( k );
 					if ( j.tex[k].name == "volEnvHist" && j.tex[k].type == 1 )
 						j.envAt = int( k );
+					if ( j.tex[k].name == "volAirNoise" && j.tex[k].type == 1 )
+						j.noiseAt = int( k );
 					for ( int a = 0; a < 5; a++ )
 						if ( j.tex[k].name == kAirTex[a] && j.tex[k].type == kAirType[a] )
 							j.airAt[a] = int( k );
 				}
-				if ( j.tex.size() != size_t( ( j.hasTex ? 1 : 0 ) + ( j.fog ? 5 : 0 ) + ( j.hasN() ? 1 : 0 ) + ( j.envAt >= 0 ? 1 : 0 ) ) || ( j.hasTex && j.atlasAt < 0 )
+				if ( j.tex.size() != size_t( ( j.hasTex ? 1 : 0 ) + ( j.fog ? 5 : 0 ) + ( j.hasN() ? 1 : 0 ) + ( j.envAt >= 0 ? 1 : 0 ) + ( j.noiseAt >= 0 ? 1 : 0 ) ) || ( j.hasTex && j.atlasAt < 0 )
 					|| ( j.hasN() && j.normAt < 0 ) )
 					return fatal( nm + "/tex.txt" );
 				for ( int a = 0; a < 5 && j.fog; a++ )
 					if ( j.airAt[a] < 0 )
 						return fatal( nm + "/tex.txt: " + kAirTex[a] );
+			}
+			{  // L8 term 3: the sun's cascades and the clouds' map (shadow.txt: csmMap size, ussCloudMap size)
+				std::ifstream sf( dir + "/" + nm + "/shadow.txt" );
+				if ( sf >> j.csmN >> j.cloudN ) {
+					j.csmData.resize( size_t( j.csmN ) * size_t( j.csmN ) * 3 );
+					j.cloudData.resize( size_t( j.cloudN ) * size_t( j.cloudN ) * 4 );
+					std::ifstream cb( dir + "/" + nm + "/csm.bin", std::ios::binary ), lb( dir + "/" + nm + "/cloud.bin", std::ios::binary );
+					if ( !cb.read( reinterpret_cast<char *>( j.csmData.data() ), std::streamsize( j.csmData.size() * 2 ) )
+						|| !lb.read( reinterpret_cast<char *>( j.cloudData.data() ), std::streamsize( j.cloudData.size() * 4 ) ) )
+						return fatal( nm + "/shadow.txt: csm.bin / cloud.bin" );
+				}
+			}
+			{  // L8 term 5: the lamps' shadow cubes (cubes.txt: the face edge; cubes.bin 16 cubes of 6 D16 faces)
+				std::ifstream uf( dir + "/" + nm + "/cubes.txt" );
+				if ( uf >> j.cubeN ) {
+					j.cubeData.resize( size_t( j.cubeN ) * size_t( j.cubeN ) * 96 );
+					std::ifstream ub( dir + "/" + nm + "/cubes.bin", std::ios::binary );
+					if ( !ub.read( reinterpret_cast<char *>( j.cubeData.data() ), std::streamsize( j.cubeData.size() * 2 ) ) )
+						return fatal( nm + "/cubes.txt: cubes.bin" );
+				}
+			}
+			{  // L8 term 7: the roof map (roof.txt: nx ny; roof.bin R32F)
+				std::ifstream rf( dir + "/" + nm + "/roof.txt" );
+				if ( rf >> j.roofNx >> j.roofNy ) {
+					j.roofData.resize( size_t( j.roofNx ) * size_t( j.roofNy ) );
+					std::ifstream rb( dir + "/" + nm + "/roof.bin", std::ios::binary );
+					if ( !rb.read( reinterpret_cast<char *>( j.roofData.data() ), std::streamsize( j.roofData.size() * 4 ) ) )
+						return fatal( nm + "/roof.txt: roof.bin" );
+				}
 			}
 			jobs.push_back( j );
 		}
@@ -835,10 +1032,14 @@ int main( int argc, char ** argv )
 	};
 	GLuint vao = 0;
 	genVertexArrays( 1, &vao );
-	constexpr int kCases = 19;
+	constexpr int kCases = 27;
 	static char twinKeys[kCases], normKeys[kCases];  // one atlas twin a case (the atlases' sizes differ), one normal-map twin a case
 	static char terrKeys[kCases];  // L8 terrain air: airTerr's twin a case
 	static char envKeys[kCases];  // L8 term 2: volEnvHist's twin a case
+	static char csmKeys[kCases], cloudKeys[kCases];  // L8 term 3: csmMap's shared target, ussCloudMap's twin a case
+	static char noiseKeys[kCases];  // L8 term 4: volAirNoise's twin a case
+	static char cubeKeys[kCases];  // L8 term 5: cellShadow's shared target a case
+	static char roofKeys[kCases];  // L8 term 7: pcRoof's twin a case
 	static char airKeys[kCases][5], volKeys[kCases];  // the air's twins a case, its volume's shared target a case
 	if ( jobs.size() > size_t( kCases ) )
 		return fatal( "more than " + std::to_string( kCases ) + " cases" );
@@ -893,18 +1094,29 @@ int main( int argc, char ** argv )
 	struct RedSeen
 	{
 		const char * name;
-		int red;
+		long long red;  // past bit 30 from L8 term 7 on
 		bool seen;
-	} reds[14] = { { "cull (radius 0)", 1, false }, { "corners (the strip's last two swapped)", 2, false }, { "near fade (dropped)", 4, false },
+	} reds[33] = { { "cull (radius 0)", 1, false }, { "corners (the strip's last two swapped)", 2, false }, { "near fade (dropped)", 4, false },
 		{ "air (dropped)", 8, false }, { "look (dropped: the plain pipelines)", 16, false }, { "atlas (dropped: the zero texture)", 32, false },
 		{ "light (dropped)", 128, false }, { "lamps' lights (dropped: the zero texel buffer)", 256, false },
 		{ "cluster's globals (dropped: b0 zero)", 512, false }, { "cluster lists (dropped: the zero texel buffer)", 1024, false },
 		{ "local sun (dropped: vpSun.w 0)", 2048, false }, { "terrain air (dropped: the zero airTerr)", 4096, false },
-		{ "ambient's history (dropped: the zero volEnvHist)", 16384, false }, { "ambient (dropped: volTerms' bit 8)", 32768, false } };
+		{ "ambient's history (dropped: the zero volEnvHist)", 16384, false }, { "ambient (dropped: volTerms' bit 8)", 32768, false },
+		{ "sun's shadow map (dropped: the zero D16 array)", 65536, false }, { "sun's shadow (dropped: volCsm 0)", 131072, false },
+		{ "clouds' map (dropped: the zero texture)", 262144, false }, { "cascades 1 and 2 (swapped: csmMat)", 524288, false },
+		{ "drift's noise (dropped: the zero volAirNoise)", 1048576, false }, { "drift (dropped: volAirDrift.x 0)", 2097152, false },
+		{ "drift's octaves (swapped: volAirDriftUv)", 4194304, false }, { "lamps' cubes (dropped: the zero D16 cube array)", 8388608, false },
+		{ "lamps' shadows (dropped: cellShadowOn 0)", 16777216, false }, { "lamps' shadow fade (dropped: cellShadowFadeOn 0)", 33554432, false },
+		{ "lamps' gobos (dropped: cellGoboOn 0)", 67108864, false }, { "lamps' gobo table (dropped: cellGoboTbl 0)", 134217728, false },
+		{ "lamps' gobo uv (flipped: cellGoboRot 3)", 268435456, false }, { "roof map (dropped: the zero pcRoof)", 536870912LL, false },
+		{ "roof (off: pcRoofOn 0)", 1073741824LL, false }, { "roof map's axes (swapped: pcRoofCam x / y)", 2147483648LL, false },
+		{ "interior (off: cellInterior 0)", 4294967296LL, false }, { "interior's ambient (off: cellHasDalc 0)", 8589934592LL, false },
+		{ "ambient's GI rule (cellGiAmb 2)", 17179869184LL, false } };
 	using TexBufferFn = void( WINAPI * )( GLenum, GLenum, GLuint );
 	const auto texBuffer = reinterpret_cast<TexBufferFn>( wglGetProcAddress( "glTexBuffer" ) );
 	if ( !texBuffer )
 		return fatal( "no glTexBuffer" );
+	glEnable( 0x884F );  // GL_TEXTURE_CUBE_MAP_SEAMLESS, as the app (gltex.cpp; L8 term 5's cubes: Vulkan is always seamless)
 	for ( Job & j : jobs ) {
 		if ( j.hasTex && !uploadAtlas( dir + "/" + j.name, j.tex[size_t( j.atlasAt )] ) )
 			return fatal( j.name + ": the atlas upload" );
@@ -940,6 +1152,47 @@ int main( int argc, char ** argv )
 		if ( j.envAt >= 0 && !upload( dir + "/" + j.name, j.tex[size_t( j.envAt )], 0 ) )
 			return fatal( j.name + ": upload volEnvHist" );
 		const GLuint envTex = j.envAt >= 0 ? j.tex[size_t( j.envAt )].gl : 0;
+		if ( j.noiseAt >= 0 && !upload( dir + "/" + j.name, j.tex[size_t( j.noiseAt )], 0 ) )
+			return fatal( j.name + ": upload volAirNoise" );
+		const GLuint noiseTex = j.noiseAt >= 0 ? j.tex[size_t( j.noiseAt )].gl : 0;
+		GLuint csmTex = 0, cloudTex = 0;  // L8 term 3: the cascades as the app's (sharedTarget type 2, D16, csmTexParams' live state)
+		if ( j.csmN > 0 ) {
+			if ( !WwVkPresent::sharedTarget( reinterpret_cast<std::uintptr_t>( &csmKeys[jobAt] ), 2, j.csmN, j.csmN, 3, 0x81A5, csmTex, why ) )
+				return fatal( j.name + ": the shared csmMap: " + why );
+			const float one4[4] = { 1.0f, 1.0f, 1.0f, 1.0f };
+			glBindTexture( fT2DA, csmTex );
+			f.texSubImage3D( fT2DA, 0, 0, 0, 0, j.csmN, j.csmN, 3, 0x1902, 0x1403, j.csmData.data() );  // DEPTH_COMPONENT, UNSIGNED_SHORT
+			glTexParameteri( fT2DA, GL_TEXTURE_MIN_FILTER, GL_LINEAR );
+			glTexParameteri( fT2DA, GL_TEXTURE_MAG_FILTER, GL_LINEAR );
+			glTexParameteri( fT2DA, GL_TEXTURE_WRAP_S, 0x812D );  // CLAMP_TO_BORDER
+			glTexParameteri( fT2DA, GL_TEXTURE_WRAP_T, 0x812D );
+			glTexParameterfv( fT2DA, GL_TEXTURE_BORDER_COLOR, one4 );
+			glTexParameteri( fT2DA, 0x884C, 0x884E );  // COMPARE_MODE: COMPARE_REF_TO_TEXTURE
+			glTexParameteri( fT2DA, 0x884D, GL_LEQUAL );
+			glTexParameteri( fT2DA, 0x813D, 0 );  // MAX_LEVEL
+			glBindTexture( fT2DA, 0 );
+		}
+		if ( j.cloudN > 0 )
+			cloudTex = tex2d( j.cloudN, j.cloudN, fRgba16f, GL_RGBA, GL_FLOAT, j.cloudData.data(), true );
+		GLuint cubeTex = 0;  // L8 term 5: the lamps' cubes as the app's (sharedTarget type 3, D16, shadowAlloc's state)
+		if ( j.cubeN > 0 ) {
+			if ( !WwVkPresent::sharedTarget( reinterpret_cast<std::uintptr_t>( &cubeKeys[jobAt] ), 3, j.cubeN, j.cubeN, 6 * 16, 0x81A5, cubeTex, why ) )  // BATCH1114: d is layers
+				return fatal( j.name + ": the shared cellShadow: " + why );
+			glBindTexture( 0x9009, cubeTex );
+			f.texSubImage3D( 0x9009, 0, 0, 0, 0, j.cubeN, j.cubeN, 96, 0x1902, 0x1403, j.cubeData.data() );  // DEPTH_COMPONENT, UNSIGNED_SHORT
+			glTexParameteri( 0x9009, GL_TEXTURE_MIN_FILTER, GL_LINEAR );
+			glTexParameteri( 0x9009, GL_TEXTURE_MAG_FILTER, GL_LINEAR );
+			glTexParameteri( 0x9009, GL_TEXTURE_WRAP_S, 0x812F );  // CLAMP_TO_EDGE
+			glTexParameteri( 0x9009, GL_TEXTURE_WRAP_T, 0x812F );
+			glTexParameteri( 0x9009, 0x8072, 0x812F );  // WRAP_R
+			glTexParameteri( 0x9009, 0x884C, 0x884E );  // COMPARE_MODE: COMPARE_REF_TO_TEXTURE
+			glTexParameteri( 0x9009, 0x884D, GL_LEQUAL );
+			glTexParameteri( 0x9009, 0x813D, 0 );  // MAX_LEVEL
+			glBindTexture( 0x9009, 0 );
+		}
+		GLuint roofTex = 0;  // L8 term 7: the roof map as the app's (R32F, NEAREST, clamp to edge; cellprecip.cpp)
+		if ( j.roofNx > 0 )
+			roofTex = tex2d( j.roofNx, j.roofNy, 0x822E, fRed, GL_FLOAT, j.roofData.data(), false );
 		const void * uboOver = nullptr;  // the globals check's other b0 (bindJob uploads it in place of the case's)
 		const void * vkGlobalOver = nullptr;  // the same bytes as Vulkan's b0 (the globals mirror)
 		auto bindJob = [&]( GLuint prog ) {
@@ -949,7 +1202,8 @@ int main( int argc, char ** argv )
 			setUnis( prog, j.uni );
 			bindUnit( 0, GL_TEXTURE_2D, atlas );
 			u1i( prog, "pcTex", 0 );
-			u1i( prog, "pcRoof", 7 );  // nothing bound there (pcRoofOn 0)
+			bindUnit( 7, GL_TEXTURE_2D, roofTex );  // L8 term 7 (none: read only with pcRoofOn 1)
+			u1i( prog, "pcRoof", 7 );
 			for ( int a = 0; a < 5; a++ ) {  // unfogged: nothing bound (fogOn 0, atAp off)
 				const TexIn * t = j.fog ? &j.tex[size_t( j.airAt[a] )] : nullptr;
 				bindUnit( kAirUnit + a, kAirType[a] == 1 ? fT3D : kAirType[a] == 2 ? fT2DA : GLenum( GL_TEXTURE_2D ), t ? t->gl : 0 );
@@ -960,6 +1214,14 @@ int main( int argc, char ** argv )
 			u1i( prog, "airTerr", kTerrUnit );
 			bindUnit( kEnvUnit, fT3D, envTex );  // L8 term 2 (none: read only with volEnvGrid.w 1)
 			u1i( prog, "volEnvHist", kEnvUnit );
+			bindUnit( kCsmUnit, fT2DA, csmTex );  // L8 term 3 (none: read only with volCsm 1)
+			u1i( prog, "csmMap", kCsmUnit );
+			bindUnit( kCloudUnit, GL_TEXTURE_2D, cloudTex );
+			u1i( prog, "ussCloudMap", kCloudUnit );
+			bindUnit( kNoiseUnit, fT3D, noiseTex );  // L8 term 4 (none: read only with volAirDrift.x > 0)
+			u1i( prog, "volAirNoise", kNoiseUnit );
+			bindUnit( kCubeUnit, 0x9009, cubeTex );  // L8 term 5 (none: read only with cellShadowOn 1)
+			u1i( prog, "cellShadow", kCubeUnit );
 			if ( !j.fog ) {  // an unfogged case: the air fully off (a program keeps the last fogged case's uniforms)
 				static const float zero4[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
 				u1i( prog, "fogOn", 0 );
@@ -993,13 +1255,14 @@ int main( int argc, char ** argv )
 		// (a fogged case's pass 6 draws with the air off: the air must change the picture, or the case does not test it)
 		// (a look case's last pass draws cell_precip_gpu.prog instead: the look must change the picture too)
 		// (a fogged case's last pass draws the same program without WW_CELL_FOGLEAK: the fogleak check, printed only)
-		std::vector<std::uint16_t> refOff, refPlain, refNoFl;
+		std::vector<std::uint16_t> refOff, refPlain, refNoFl, refRoof;  // (refRoof: L8 term 7's pass, pcRoofOn 0)
 		std::vector<std::uint16_t> refPrt;  // L8 term 1: the WW_CELL_PRT variant's frame, its GI fed (the GI case)
 		if ( const GLenum e = glGetError() )
 			return fatal( j.name + ": a GL error before the reference draw (0x" + std::to_string( unsigned( e ) ) + ")" );
 		const int passAir = j.fog ? 6 : -1, passPlain = j.look ? 6 + ( j.fog ? 1 : 0 ) : -1;
 		const int passNoFl = j.fog ? 6 + 1 + ( j.look ? 1 : 0 ) : -1;
-		for ( int pass = 0; pass < 6 + ( j.fog ? 2 : 0 ) + ( j.look ? 1 : 0 ); pass++ ) {
+		const int passRoof = j.roof() ? 6 + ( j.fog ? 2 : 0 ) + ( j.look ? 1 : 0 ) : -1;  // L8 term 7: the roof off
+		for ( int pass = 0; pass < 6 + ( j.fog ? 2 : 0 ) + ( j.look ? 1 : 0 ) + ( j.roof() ? 1 : 0 ); pass++ ) {
 			before( fbRef, j.zd );
 			bindJob( pass == passPlain ? pPrecip : pass == passNoFl ? ( j.look ? pLookNoFl : pNoFl ) : pJob );
 			if ( pass == passAir ) {  // the air off: fogOn 0 alone leaves the volume and the aerial perspective on
@@ -1008,6 +1271,8 @@ int main( int argc, char ** argv )
 				u1i( pJob, "volOn", 0 );
 				f.uniform4fv( f.getUniformLocation( pJob, "atAp" ), 1, zero4 );
 			}
+			if ( pass == passRoof )
+				u1i( pJob, "pcRoofOn", 0 );
 			f.bindFramebuffer( fFb, fbRef );
 			glViewport( 0, 0, W, H );
 			glEnable( GL_DEPTH_TEST );
@@ -1035,6 +1300,8 @@ int main( int argc, char ** argv )
 				refPlain = readSamples( refCol );
 			else if ( pass == passNoFl )
 				refNoFl = readSamples( refCol );
+			else if ( pass == passRoof )
+				refRoof = readSamples( refCol );
 			else if ( pass ) {
 				( pass == 1 ? refA : refAn[pass - 2] ) = readSamples( refCol );
 				reveal( fbRef );
@@ -1059,6 +1326,16 @@ int main( int argc, char ** argv )
 			std::printf( "PRECIPVIEW %s look check: GL's plain program differs from its look program %zu of %zu covered samples (%s)\n", j.name.c_str(),
 				o.flips, o.covered, o.flips >= 1000 ? "the look is seen" : "TOO FEW: the case does not test the look" );
 			ok = ok && o.flips >= 1000;
+		}
+		if ( j.roof() ) {  // L8 term 7's seen-checks (header): the roof seen, its names found
+			const Verdict o = judge( bg, refRoof, refA, refB, refB );
+			std::string umiss;
+			for ( const char * nm : { "pcRoof", "pcRoofOn", "pcRoofCam", "pcRoofInv" } )
+				if ( f.getUniformLocation( pJob, nm ) < 0 )
+					umiss += std::string( umiss.empty() ? "" : ", " ) + nm;
+			std::printf( "PRECIPVIEW %s roof checks: GL with pcRoofOn 0 differs %zu of %zu covered samples (want >= 1000); roof names missing "
+				"from GL's program: %s\n", j.name.c_str(), o.flips, o.covered, umiss.empty() ? "none" : umiss.c_str() );
+			ok = ok && o.flips >= 1000 && umiss.empty();
 		}
 		if ( j.lit ) {  // slice 2b's seen-checks (header): the light seen, thin vs thick seen, no NaN / Inf, the sun's names found
 			auto drawGl = [&]( int mode ) {  // 1 cellHasDir 0, 2 pcTrans 1.0, 3 volTerms 1, 10 + k cellLightCount k; set back after
@@ -1110,6 +1387,53 @@ int main( int argc, char ** argv )
 					u1i( pJob, "cellAmboCount", 0 );
 				} else if ( mode == 22 ) {  // L8 term 2: the sphere alone (the box dropped)
 					u1i( pJob, "cellAmboCount", 1 );
+				} else if ( mode == 23 ) {  // L8 term 3: the sun's shadow off (volCsm 0)
+					u1i( pJob, "volCsm", 0 );
+				} else if ( mode == 24 ) {  // L8 term 3: the cascades forced lit (csmForce 1)
+					const float one = 1.0f;
+					f.uniform1fv( f.getUniformLocation( pJob, "csmForce" ), 1, &one );
+				} else if ( mode == 25 ) {  // L8 term 3: the clouds off (ussCloudOn 0)
+					u1i( pJob, "ussCloudOn", 0 );
+				} else if ( mode == 26 ) {  // L8 term 3: the stable bias off (ussCsmStable.w 0, info)
+					GLfloat s4[4] = {};
+					f.getUniformfv( pJob, f.getUniformLocation( pJob, "ussCsmStable" ), s4 );
+					s4[3] = 0.0f;
+					f.uniform4fv( f.getUniformLocation( pJob, "ussCsmStable" ), 1, s4 );
+				} else if ( mode == 27 ) {  // L8 term 4: the drift off (volAirDrift.x 0)
+					GLfloat d4[4] = {};
+					f.getUniformfv( pJob, f.getUniformLocation( pJob, "volAirDrift" ), d4 );
+					d4[0] = 0.0f;
+					f.uniform4fv( f.getUniformLocation( pJob, "volAirDrift" ), 1, d4 );
+				} else if ( mode == 28 ) {  // L8 term 4: the noise read at one point (volAirDriftUv all zero)
+					const GLfloat z24[24] = {};
+					f.uniform4fv( f.getUniformLocation( pJob, "volAirDriftUv" ), 6, z24 );
+				} else if ( mode == 29 || mode == 30 ) {  // L8 term 4: the drift's reds 1 (one sun tap) / 2 (the puff only), info
+					u1i( pJob, "volAirDriftRed", mode - 28 );
+				} else if ( mode == 31 ) {  // L8 term 5: the lamps' shadows off (cellShadowOn 0)
+					u1i( pJob, "cellShadowOn", 0 );
+				} else if ( mode == 32 ) {  // L8 term 5: the slots' fade off (cellShadowFadeOn 0)
+					u1i( pJob, "cellShadowFadeOn", 0 );
+				} else if ( mode == 33 ) {  // L8 term 5: the taps on one texel (cellShadowTexel 0), info
+					const float zero = 0.0f;
+					f.uniform1fv( f.getUniformLocation( pJob, "cellShadowTexel" ), 1, &zero );
+				} else if ( mode == 34 ) {  // L8 term 6: the gobos off (cellGoboOn 0)
+					u1i( pJob, "cellGoboOn", 0 );
+				} else if ( mode == 35 ) {  // L8 term 6: each pattern's mean (cellGoboFlat 1)
+					u1i( pJob, "cellGoboFlat", 1 );
+				} else if ( mode == 36 ) {  // L8 term 6: u flipped (cellGoboRot 1)
+					u1i( pJob, "cellGoboRot", 1 );
+				} else if ( mode == 37 ) {  // L8 term 6: the paraboloid unmirrored (cellGoboMap 1), info
+					u1i( pJob, "cellGoboMap", 1 );
+				} else if ( mode == 38 ) {  // L8 term 8: the interior off (cellInterior 0)
+					u1i( pJob, "cellInterior", 0 );
+				} else if ( mode == 39 ) {  // L8 term 8: the interior's ambient off (cellHasDalc 0)
+					u1i( pJob, "cellHasDalc", 0 );
+				} else if ( mode == 40 ) {  // L8 term 8: the ambient under GI's rule (cellGiAmb 2)
+					u1i( pJob, "cellGiAmb", 2 );
+				} else if ( mode == 41 ) {  // L8 term 8: the exterior's ambient switch off (cellExtDalc 0), info
+					u1i( pJob, "cellExtDalc", 0 );
+				} else if ( mode == 42 ) {  // L8 term 8: the veil off (volVeil 0), info
+					u1i( pJob, "volVeil", 0 );
 				} else if ( mode == 9 ) {  // the case as it is (the restore check)
 				} else if ( mode == 6 ) {  // L8 term 3: the local law off (vpSun.w 0)
 					const float off[4] = { 0.5f, 0.4f, 0.3f, 0.0f };
@@ -1151,7 +1475,7 @@ int main( int argc, char ** argv )
 			std::printf( "PRECIPVIEW %s lit checks: GL with cellHasDir 0 differs %zu of %zu covered samples, pcTrans 1.0 vs 0.5 %zu (each want >= 1000); "
 				"NaN / Inf halves in GL's lit frame %zu (want 0); sun-branch names missing from GL's program: %s\n", j.name.c_str(), dark.flips, dark.covered,
 				thick.flips, bad, missing.empty() ? "none" : missing.c_str() );
-			ok = ok && dark.flips >= 1000 && thick.flips >= 1000 && bad == 0 && missing.empty();
+			ok = ok && ( dark.flips >= 1000 || j.darkInterior() ) && thick.flips >= 1000 && bad == 0 && missing.empty();  // (L8 term 8: a dark interior's sun is off)
 			if ( j.name == "rain_near_lit" ) {  // the restore check (header): a fogged case's uniforms left on, the restore skipped
 				const Job * fogJob = nullptr;
 				for ( const Job & o : jobs )
@@ -1178,6 +1502,62 @@ int main( int argc, char ** argv )
 					j.name.c_str(), noLaw.flips, noLaw.covered, found ? "found" : "MISSING" );
 				ok = ok && noLaw.flips >= 1000 && found;
 			}
+			if ( j.csm() ) {  // L8 term 3's seen-checks (header): the shadow, the map and the clouds seen, their names found
+				const Verdict noCsm = judge( bg, drawGl( 23 ), refA, refB, refB );
+				const Verdict forced = judge( bg, drawGl( 24 ), refA, refB, refB );
+				const Verdict noCloud = judge( bg, drawGl( 25 ), refA, refB, refB );
+				const Verdict noStable = judge( bg, drawGl( 26 ), refA, refB, refB );
+				std::string cmiss;
+				for ( const char * nm : { "csmMap", "csmMat", "csmInvRange", "csmParams", "csmSplitOffset", "csmForce", "ussCsmStable", "ussCsmTexel",
+						 "ussCsmBias", "ussCloudOn", "ussCloudMap", "ussCloudFromView", "ussCloudFar" } )
+					if ( f.getUniformLocation( pJob, nm ) < 0 && f.getUniformLocation( pJob, ( std::string( nm ) + "[0]" ).c_str() ) < 0 )
+						cmiss += std::string( cmiss.empty() ? "" : ", " ) + nm;
+				std::printf( "PRECIPVIEW %s sun's shadow checks: GL with volCsm 0 differs %zu of %zu covered samples, csmForce 1 %zu, ussCloudOn 0 %zu "
+					"(each want >= 1000), ussCsmStable.w 0 %zu (info); shadow names missing from GL's program: %s\n", j.name.c_str(), noCsm.flips,
+					noCsm.covered, forced.flips, noCloud.flips, noStable.flips, cmiss.empty() ? "none" : cmiss.c_str() );
+				ok = ok && noCsm.flips >= 1000 && forced.flips >= 1000 && noCloud.flips >= 1000 && cmiss.empty();
+			}
+			if ( j.drift() ) {  // L8 term 4's seen-checks (header): the drift and its noise seen, their names found
+				const Verdict noDrift = judge( bg, drawGl( 27 ), refA, refB, refB );
+				const Verdict flatNoise = judge( bg, drawGl( 28 ), refA, refB, refB );
+				const Verdict oneSun = judge( bg, drawGl( 29 ), refA, refB, refB );
+				const Verdict puffOnly = judge( bg, drawGl( 30 ), refA, refB, refB );
+				std::string dmiss;
+				for ( const char * nm : { "volAirDrift", "volAirDriftUv", "volAirDriftRed", "volAirNoise" } )
+					if ( f.getUniformLocation( pJob, nm ) < 0 && f.getUniformLocation( pJob, ( std::string( nm ) + "[0]" ).c_str() ) < 0 )
+						dmiss += std::string( dmiss.empty() ? "" : ", " ) + nm;
+				std::printf( "PRECIPVIEW %s drift checks: GL with volAirDrift.x 0 differs %zu of %zu covered samples, volAirDriftUv zero %zu "
+					"(each want >= 1000), volAirDriftRed 1 %zu, 2 %zu (info); drift names missing from GL's program: %s\n", j.name.c_str(),
+					noDrift.flips, noDrift.covered, flatNoise.flips, oneSun.flips, puffOnly.flips, dmiss.empty() ? "none" : dmiss.c_str() );
+				ok = ok && noDrift.flips >= 1000 && flatNoise.flips >= 1000 && dmiss.empty();
+			}
+			if ( j.gobo() ) {  // L8 term 6's seen-checks (header): the gobos, their texels and their uv seen, their names found
+				const Verdict noGobo = judge( bg, drawGl( 34 ), refA, refB, refB );
+				const Verdict flat = judge( bg, drawGl( 35 ), refA, refB, refB );
+				const Verdict rot = judge( bg, drawGl( 36 ), refA, refB, refB );
+				const Verdict map1 = judge( bg, drawGl( 37 ), refA, refB, refB );
+				std::string umiss;
+				for ( const char * nm : { "cellGoboOn", "cellGoboRot", "cellGoboFlat", "cellGoboGam", "cellGoboTbl", "cellGoboMap" } )
+					if ( f.getUniformLocation( pJob, nm ) < 0 )
+						umiss += std::string( umiss.empty() ? "" : ", " ) + nm;
+				std::printf( "PRECIPVIEW %s gobo checks: GL with cellGoboOn 0 differs %zu of %zu covered samples, cellGoboFlat 1 %zu, "
+					"cellGoboRot 1 %zu (each want >= 1000), cellGoboMap 1 %zu (info); gobo names missing from GL's program: %s\n", j.name.c_str(),
+					noGobo.flips, noGobo.covered, flat.flips, rot.flips, map1.flips, umiss.empty() ? "none" : umiss.c_str() );
+				ok = ok && noGobo.flips >= 1000 && flat.flips >= 1000 && rot.flips >= 1000 && umiss.empty();
+			}
+			if ( j.cube() ) {  // L8 term 5's seen-checks (header): the cubes and their fade seen, their names found
+				const Verdict noShadow = judge( bg, drawGl( 31 ), refA, refB, refB );
+				const Verdict noFade = judge( bg, drawGl( 32 ), refA, refB, refB );
+				const Verdict oneTexel = judge( bg, drawGl( 33 ), refA, refB, refB );
+				std::string umiss;
+				for ( const char * nm : { "cellShadow", "cellShadowOn", "cellShadowTexel", "cellShadowFadeOn", "cellShadowFade" } )
+					if ( f.getUniformLocation( pJob, nm ) < 0 && f.getUniformLocation( pJob, ( std::string( nm ) + "[0]" ).c_str() ) < 0 )
+						umiss += std::string( umiss.empty() ? "" : ", " ) + nm;
+				std::printf( "PRECIPVIEW %s cube checks: GL with cellShadowOn 0 differs %zu of %zu covered samples, cellShadowFadeOn 0 %zu "
+					"(each want >= 1000), cellShadowTexel 0 %zu (info); cube names missing from GL's program: %s\n", j.name.c_str(),
+					noShadow.flips, noShadow.covered, noFade.flips, oneTexel.flips, umiss.empty() ? "none" : umiss.c_str() );
+				ok = ok && noShadow.flips >= 1000 && noFade.flips >= 1000 && umiss.empty();
+			}
 			if ( j.amb() ) {  // L8 term 2's seen-checks (header): the ambient seen, its names found, the volumes / the keep seen
 				const Verdict noAmb = judge( bg, drawGl( 3 ), refA, refB, refB );
 				std::string amiss;
@@ -1203,6 +1583,21 @@ int main( int argc, char ** argv )
 						noBox.flips, noSph.flips );
 					ok = ok && noVol.flips >= 1000 && noBox.flips >= 1000 && noSph.flips >= 1000;
 				}
+			}
+			if ( j.interior() ) {  // L8 term 8's seen-checks (header): the interior's law, its ambient switch and GI rule seen, the names
+				const Verdict outside = judge( bg, drawGl( 38 ), refA, refB, refB );
+				const Verdict noDalc = judge( bg, drawGl( 39 ), refA, refB, refB );
+				const Verdict giAmb = judge( bg, drawGl( 40 ), refA, refB, refB );
+				const Verdict noExt = judge( bg, drawGl( 41 ), refA, refB, refB );
+				const std::string veil = j.fog ? std::to_string( judge( bg, drawGl( 42 ), refA, refB, refB ).flips ) : std::string( "-" );
+				std::string imiss;
+				for ( const char * nm : { "cellInterior", "cellHasDalc", "cellGiAmb", "cellExtDalc" } )
+					if ( f.getUniformLocation( pJob, nm ) < 0 )
+						imiss += std::string( imiss.empty() ? "" : ", " ) + nm;
+				std::printf( "PRECIPVIEW %s interior checks: GL with cellInterior 0 differs %zu of %zu covered samples, cellHasDalc 0 %zu, cellGiAmb 2 %zu "
+					"(each want >= 1000), cellExtDalc 0 %zu, volVeil 0 %s (info: unread inside, want 0); interior names missing from GL's program: %s\n",
+					j.name.c_str(), outside.flips, outside.covered, noDalc.flips, giAmb.flips, noExt.flips, veil.c_str(), imiss.empty() ? "none" : imiss.c_str() );
+				ok = ok && outside.flips >= 1000 && noDalc.flips >= 1000 && giAmb.flips >= 1000 && imiss.empty();
 			}
 			if ( j.terrAir() ) {  // L8 terrain air's seen-checks (header): the grid seen, its names found
 				const Verdict flatGround = judge( bg, drawGl( 7 ), refA, refB, refB );
@@ -1456,7 +1851,7 @@ int main( int argc, char ** argv )
 
 		const GLuint pJobCase = pJob;
 		GLuint vkProgOver = 0;  // L8 term 1: Vulkan's run read from another GL program (the WW_CELL_PRT variant)
-		auto runVk = [&]( int red, std::vector<std::uint16_t> & a, std::vector<std::uint16_t> & b, bool checkSeed, std::uint8_t * recOut = nullptr ) -> bool {
+		auto runVk = [&]( long long red, std::vector<std::uint16_t> & a, std::vector<std::uint16_t> & b, bool checkSeed, std::uint8_t * recOut = nullptr ) -> bool {
 			const GLuint pJob = vkProgOver ? vkProgOver : pJobCase;
 			before( fbFrame, j.zd );
 			bindJob( pJob );
@@ -1469,7 +1864,14 @@ int main( int argc, char ** argv )
 			t.color = fc;
 			t.first = j.first;
 			t.n = j.n;
-			// t0 pcRoof: none (pcRoofOn 0; its sampler shares unit 0's atlas in GL's state, so it is not read from there)
+			t.roofOn = j.roof();  // precipDraw's (L8 term 7): pcRoofOn, then GL's pcRoof into t0 (the lit pass's t47)
+			if ( t.roofOn ) {
+				if ( !WwVkPresent::fxTexOf( &ga, pJob, "pcRoof", 0, t.tex[0], why ) ) {
+					std::printf( "PRECIPVIEW fxTexOf refused (pcRoof): %s\n", why.c_str() );
+					return false;
+				}
+				t.tex[0].twin = reinterpret_cast<std::uintptr_t>( &roofKeys[jobAt] );
+			}
 			if ( !WwVkPresent::fxTexOf( &ga, pJob, "pcTex", 0, t.tex[1], why, true ) ) {
 				std::printf( "PRECIPVIEW fxTexOf refused: %s\n", why.c_str() );
 				return false;
@@ -1513,9 +1915,44 @@ int main( int argc, char ** argv )
 				}
 				t.tex[9].twin = reinterpret_cast<std::uintptr_t>( &envKeys[jobAt] );
 			}
+			if ( t.lit && t.litIn.csm > 0 && t.litIn.interior == 0 ) {  // precipDraw's (L8 term 3): csmMap into t31, ussCloudMap into t34
+				if ( !WwVkPresent::precipCsmOf( &ga, pJob, t.tex[10], why ) ) {
+					std::printf( "PRECIPVIEW precipCsmOf refused (csmMap): %s\n", why.c_str() );
+					return false;
+				}
+				if ( t.litIn.cloud > 0 ) {
+					if ( !WwVkPresent::fxTexOf( &ga, pJob, "ussCloudMap", 0, t.tex[11], why ) ) {
+						std::printf( "PRECIPVIEW fxTexOf refused (ussCloudMap): %s\n", why.c_str() );
+						return false;
+					}
+					t.tex[11].twin = reinterpret_cast<std::uintptr_t>( &cloudKeys[jobAt] );
+				}
+			}
+			if ( t.lit && ( t.litIn.terms & 2 ) && t.litIn.shadow > 0 ) {  // precipDraw's (L8 term 5): cellShadow into t6
+				if ( !WwVkPresent::precipCubeOf( &ga, pJob, t.tex[13], why ) ) {
+					std::printf( "PRECIPVIEW precipCubeOf refused (cellShadow): %s\n", why.c_str() );
+					return false;
+				}
+			}
+			if ( t.lit && t.litIn.drift > 0.0f ) {  // precipDraw's (L8 term 4): volAirNoise into t30
+				if ( !WwVkPresent::fxTexOf( &ga, pJob, "volAirNoise", 1, t.tex[12], why ) ) {
+					std::printf( "PRECIPVIEW fxTexOf refused (volAirNoise): %s\n", why.c_str() );
+					return false;
+				}
+				t.tex[12].twin = reinterpret_cast<std::uintptr_t>( &noiseKeys[jobAt] );
+			}
 			WwVkPresent::fxPack( &ga, pJob, WwVkPresent::kT_precipcs, int( std::size( WwVkPresent::kT_precipcs ) ), t.cs );
 			WwVkPresent::fxPack( &ga, pJob, WwVkPresent::kT_precipps, int( std::size( WwVkPresent::kT_precipps ) ), t.ps );
 			t.packs = 2;
+			if ( checkSeed && j.roof() ) {  // the roof's switch packed, not zero (the roof bar; kT_precipcs's head)
+				const int at = precipAt( WwVkPresent::kT_precipcs, int( std::size( WwVkPresent::kT_precipcs ) ), "pcRoofOn" );
+				bool any = false;
+				for ( int b = 0; b < 4 && at >= 0; b++ )
+					any = any || t.cs[at + b] != 0;
+				std::printf( "PRECIPVIEW %s roof packed: pcRoofOn %s\n", j.name.c_str(), any ? "non-zero" : "zero or absent" );
+				if ( !any )
+					return false;
+			}
 			if ( j.look ) {  // slice 3: cell_precip_look.prog's run (its fields, pcTexN at tex[7])
 				WwVkPresent::fxPack( &ga, pJob, WwVkPresent::kT_preciplookcs, int( std::size( WwVkPresent::kT_preciplookcs ) ), t.cs );
 				WwVkPresent::fxPack( &ga, pJob, WwVkPresent::kT_preciplookps, int( std::size( WwVkPresent::kT_preciplookps ) ), t.ps );
@@ -1574,6 +2011,47 @@ int main( int argc, char ** argv )
 								zero += std::string( zero.empty() ? "" : ", " ) + tf.first;
 						}
 					}
+					if ( j.csm() ) {  // the cascades' and the clouds' fields packed, not zero (the sun's shadow bar)
+						for ( const auto & tf : { std::make_pair( "csmMat", 192 ), std::make_pair( "csmParams", 16 ), std::make_pair( "csmSplitOffset", 16 ),
+								 std::make_pair( "ussCsmBias", 12 ), std::make_pair( "ussCloudFromView", 64 ), std::make_pair( "ussCloudFar", 16 ) } ) {
+							const int at = precipAt( WwVkPresent::kT_preciplitcs, int( std::size( WwVkPresent::kT_preciplitcs ) ), tf.first );
+							bool any = false;
+							for ( int b = 0; b < tf.second && at >= 0; b++ )
+								any = any || t.cs[at + b] != 0;
+							if ( !any )
+								zero += std::string( zero.empty() ? "" : ", " ) + tf.first;
+						}
+					}
+					if ( j.gobo() ) {  // the gobos' fields packed, not zero (the gobo bar)
+						for ( const char * tf : { "cellGoboOn", "cellGoboTbl" } ) {
+							const int at = precipAt( WwVkPresent::kT_preciplitcs, int( std::size( WwVkPresent::kT_preciplitcs ) ), tf );
+							bool any = false;
+							for ( int b = 0; b < 4 && at >= 0; b++ )
+								any = any || t.cs[at + b] != 0;
+							if ( !any )
+								zero += std::string( zero.empty() ? "" : ", " ) + tf;
+						}
+					}
+					if ( j.cube() ) {  // the cubes' fields packed, not zero (the shadow-cube bar)
+						for ( const auto & tf : { std::make_pair( "cellShadowOn", 4 ), std::make_pair( "cellShadowTexel", 4 ), std::make_pair( "cellShadowFade", 256 ) } ) {
+							const int at = precipAt( WwVkPresent::kT_preciplitcs, int( std::size( WwVkPresent::kT_preciplitcs ) ), tf.first );
+							bool any = false;
+							for ( int b = 0; b < tf.second && at >= 0; b++ )
+								any = any || t.cs[at + b] != 0;
+							if ( !any )
+								zero += std::string( zero.empty() ? "" : ", " ) + tf.first;
+						}
+					}
+					if ( j.drift() ) {  // the drift's fields packed, not zero (the drift bar; kT_precipcs's head)
+						for ( const auto & tf : { std::make_pair( "volAirDrift", 16 ), std::make_pair( "volAirDriftUv", 96 ) } ) {
+							const int at = precipAt( WwVkPresent::kT_precipcs, int( std::size( WwVkPresent::kT_precipcs ) ), tf.first );
+							bool any = false;
+							for ( int b = 0; b < tf.second && at >= 0; b++ )
+								any = any || t.cs[at + b] != 0;
+							if ( !any )
+								zero += std::string( zero.empty() ? "" : ", " ) + tf.first;
+						}
+					}
 					if ( j.amb() ) {  // cellDalc, cellExtDalc (and the keep's volEnvGrid) packed, not zero (ambient bar)
 						for ( const auto & tf : { std::make_pair( "cellDalc", 48 ), std::make_pair( "cellExtDalc", 4 ), std::make_pair( "volEnvGrid", 16 ) } ) {
 							if ( std::strcmp( tf.first, "volEnvGrid" ) == 0 && !j.envKeep() )
@@ -1586,6 +2064,15 @@ int main( int argc, char ** argv )
 								zero += std::string( zero.empty() ? "" : ", " ) + tf.first;
 						}
 					}
+					if ( j.interior() )  // cellInterior and cellHasDalc packed, not zero (the interior bar)
+						for ( const char * nm : { "cellInterior", "cellHasDalc" } ) {
+							const int at = precipAt( WwVkPresent::kT_preciplitcs, int( std::size( WwVkPresent::kT_preciplitcs ) ), nm );
+							bool any = false;
+							for ( int b = 0; b < 4 && at >= 0; b++ )
+								any = any || t.cs[at + b] != 0;
+							if ( !any )
+								zero += std::string( zero.empty() ? "" : ", " ) + nm;
+						}
 					std::printf( "PRECIPVIEW %s lit packed: zero or absent in the light block: %s\n", j.name.c_str(), zero.empty() ? "none" : zero.c_str() );
 					if ( !zero.empty() )
 						return false;
@@ -1869,7 +2356,13 @@ int main( int argc, char ** argv )
 		for ( RedSeen & r : reds ) {
 			if ( ( r.red == 16 && !j.look ) || ( r.red == 32 && !j.hasTex ) || ( r.red == 128 && !j.lit ) || ( r.red == 256 && !j.lamps() )
 				|| ( r.red == 512 && !j.readsB0() ) || ( r.red == 1024 && !j.cluster() ) || ( r.red == 2048 && !j.localSun() ) || ( r.red == 4096 && !j.terrAir() )
-				|| ( r.red == 16384 && !j.envKeep() ) || ( r.red == 32768 && !j.amb() ) )
+				|| ( r.red == 16384 && !j.envKeep() ) || ( r.red == 32768 && !j.amb() )
+				|| ( ( r.red == 65536 || r.red == 131072 || r.red == 262144 || r.red == 524288 ) && !j.csm() )
+				|| ( ( r.red == 1048576 || r.red == 2097152 || r.red == 4194304 ) && !j.drift() )
+				|| ( ( r.red == 8388608 || r.red == 16777216 || r.red == 33554432 ) && !j.cube() )
+				|| ( ( r.red == 67108864 || r.red == 134217728 || r.red == 268435456 ) && !j.gobo() )
+				|| ( ( r.red == 536870912LL || r.red == 1073741824LL || r.red == 2147483648LL ) && !j.roof() )
+				|| ( ( r.red == 4294967296LL || r.red == 8589934592LL || r.red == 17179869184LL ) && !j.interior() ) )
 				continue;  // a plain run has no look to drop, a case with no atlas no atlas, an unlit one no light, no lamps no lights
 			std::vector<std::uint16_t> a, b;
 			if ( !runVk( r.red, a, b, false ) ) {
@@ -1894,7 +2387,11 @@ int main( int argc, char ** argv )
 				std::printf( "PRECIPVIEW %s red lamps' lights PASSED: the case does not see its lights\n", j.name.c_str() );
 				ok = false;
 			}
-			if ( ( r.red == 512 || r.red == 1024 || r.red == 2048 || r.red == 4096 || r.red == 16384 || r.red == 32768 ) && v.ok() ) {  // the cluster case must see its b0 and its lists dropped
+			if ( ( r.red == 512 || r.red == 1024 || r.red == 2048 || r.red == 4096 || r.red == 16384 || r.red == 32768 || r.red == 65536
+				|| r.red == 131072 || r.red == 262144 || r.red == 524288 || r.red == 1048576 || r.red == 2097152 || r.red == 4194304
+				|| r.red == 8388608 || r.red == 16777216 || r.red == 33554432 || r.red == 67108864 || r.red == 134217728
+				|| r.red == 268435456 || r.red == 536870912LL || r.red == 1073741824LL || r.red == 2147483648LL || r.red == 4294967296LL
+				|| r.red == 8589934592LL || r.red == 17179869184LL ) && v.ok() ) {  // the cluster case must see its b0 and its lists dropped
 				std::printf( "PRECIPVIEW %s red %s PASSED: the case does not see it\n", j.name.c_str(), r.name );
 				ok = false;
 			}
@@ -1971,14 +2468,13 @@ int main( int argc, char ** argv )
 			u1i( pPrecip, "cellShadowOn", 1 );                      // celllights.cpp 1849
 			u1i( pPrecip, "cellGoboOn", 1 );                        // celllights.cpp 1904
 			u1i( pPrecip, "cellClusterOn", 1 );                     // cellclustergl.cpp 370
+			u1i( pPrecip, "ussOn", 0 );                             // shadowset.cpp 2757: the tiers 0, the cascades valid
+			u1i( pPrecip, "ussCloudOn", 1 );                        // cloudshadow.cpp 108: the cloud shadow follows the clouds
 			WwVkPresent::PrecipRun t;
 			t.lit = true;
 			WwVkPresent::precipLitRead( &ga, pPrecip, t );
 			const char * whys[24] = {};
 			int n = WwVkPresent::precipLitWhys( t.litIn, whys, 24 );
-			if ( n < 24 )  // the roof map (header's census roof line): precipAdmits refuses pcRoofOn for every run, lit or not
-				whys[n] = "the roof map on (pcRoofOn: a cell with a roof map; precipAdmits, every run)";
-			n++;
 			std::printf( "PRECIPVIEW census %s (the app's all-on lit defaults): %d refusals (0 is the L8 done line)\n", w.name, n );
 			for ( int k = 0; k < n && k < 24; k++ )
 				std::printf( "PRECIPVIEW census %s refusal %d: %s\n", w.name, k + 1, whys[k] );
@@ -1992,6 +2488,7 @@ int main( int argc, char ** argv )
 		u1i( pPrecip, "cellShadowOn", 0 );
 		u1i( pPrecip, "cellGoboOn", 0 );
 		u1i( pPrecip, "cellClusterOn", 0 );
+		u1i( pPrecip, "ussCloudOn", 0 );
 	}
 	for ( char & k : twinKeys )  // a BC atlas is a farTwin, an uncompressed one a shared target
 		WwVkPresent::farTwinDrop( reinterpret_cast<std::uintptr_t>( &k ) ), WwVkPresent::sharedTargetDrop( reinterpret_cast<std::uintptr_t>( &k ) );
@@ -2001,6 +2498,11 @@ int main( int argc, char ** argv )
 		WwVkPresent::sharedTargetDrop( reinterpret_cast<std::uintptr_t>( &volKeys[c] ) );
 		WwVkPresent::sharedTargetDrop( reinterpret_cast<std::uintptr_t>( &terrKeys[c] ) );
 		WwVkPresent::sharedTargetDrop( reinterpret_cast<std::uintptr_t>( &envKeys[c] ) );
+		WwVkPresent::sharedTargetDrop( reinterpret_cast<std::uintptr_t>( &csmKeys[c] ) );
+		WwVkPresent::sharedTargetDrop( reinterpret_cast<std::uintptr_t>( &noiseKeys[c] ) );
+		WwVkPresent::sharedTargetDrop( reinterpret_cast<std::uintptr_t>( &cubeKeys[c] ) );
+		WwVkPresent::sharedTargetDrop( reinterpret_cast<std::uintptr_t>( &roofKeys[c] ) );
+		WwVkPresent::farTwinDrop( reinterpret_cast<std::uintptr_t>( &cloudKeys[c] ) ), WwVkPresent::sharedTargetDrop( reinterpret_cast<std::uintptr_t>( &cloudKeys[c] ) );
 		for ( char & k : airKeys[c] )
 			WwVkPresent::sharedTargetDrop( reinterpret_cast<std::uintptr_t>( &k ) );
 	}
