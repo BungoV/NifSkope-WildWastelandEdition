@@ -78,7 +78,16 @@
  * Bars: the twin's own (depth, colour, crossing counts); the copy line: the crossing takes exactly ONE copy of each GL-owned input
  * a frame (cellAo kSW/2 x kSH/2 x 4 B, cellSsr x 16 B, and twin 8's soft-fade depth kSW x kSH x 4 B), copies and bytes equal.
  * Probes: cellAoOn 0 (every twin), and cellSsrOn 0 (twins 2, 3), each move GL's colour on >= 20 % of the covered pixels. Red copy (reds bit 8:
- * every copy twin copied from one texel on in x) must FAIL and move the Vulkan colour. */
+ * every copy twin copied from one texel on in x) must FAIL and move the Vulkan colour.
+ * GPU cull step B (lane VKOBJ7 11-15, `BLVIEW <twin> stepb`, vars 64; stated before its first run, never widened): GpuDrivenB::draw
+ * hands a twin's shape to vkCellDraw with the CPU cull's kept ranges (src/features/near/cellgpucullvk.h rangeDraws), where GL draws the
+ * GPU cull's cluster commands. Twins 2 and 3 (fo4_cell, fo4_cellcsm: step B's solid programs with a non-bindless twin). Each of the 6
+ * draws keeps its own ranges of its 50 triangles, every draw on its first command's base vertex: draw 0 whole, draw 1 one full range
+ * (0, 50), draw 2 (0, 16) (24, 26), draw 3 (0, 8) (8, 0) (16, 34) (an empty range), draw 4 (0, 40) (48, 2), draw 5 (8, 42). GL draws
+ * each range as the GPU cull's commands do: one command per 8-triangle cluster (the last one short), nothing occluded (the Hi-Z drops
+ * only hidden clusters: tests/features/near/signdrop1's matter, not this row's). Vulkan draws rangeDraws' counts and offsets in
+ * vkCellDraw's command form (count, 1, offset / 2, base vertex, 0). Bars: the twin's own (depth EXACT, colour within the bound, the
+ * crossing counts, lit). Red droprange (rangeDraws red 1: each draw's last kept range dropped) must FAIL and move the Vulkan depth. */
 bool cellGate( const std::string & spirvDir, int twin, const GLuint maps[4], unsigned reds = 15u, const char * label = nullptr, unsigned vars = 0u )
 {
 	using namespace WwVkPresent;
