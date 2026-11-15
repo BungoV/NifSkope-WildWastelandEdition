@@ -57,6 +57,11 @@ struct Split
 Split takeSplit();
 //! the child window, the swapchain and the ring go (GL current: its textures and semaphores go too); the device stays
 void shutdown();
+/* lane VKWATER4: the fence waits' red and refusal, shared with vkframe.cpp. fenceRed: WW_VKFENCE_RED=<site>[,<site>...]
+ * (gates only) names this site (a faked VK_TIMEOUT, pending or not). fenceMiss: a wait that returned vkResult (not
+ * VK_SUCCESS): the why, also on stderr (`vk fence:`) */
+bool fenceRed( const char * site );
+std::string fenceMiss( const char * site, int vkResult );
 
 /* Round 10 (VKFRAME1, the view on Vulkan, WW_VKVIEW=1; red WW_VKVIEW_RED=1 = the old route): before the paint, GL binds
  * (GL_FRAMEBUFFER) a view the present device made, w x h at the back buffer's samples (RGBA8 + D24S8), and draws the
@@ -318,14 +323,23 @@ SkyStat takeSkyStat();
  * the worker records the dispatches (LightBindingsVk.hlsli's set, a 128-byte push block each), GL waits and copies the
  * `out` twins back into GL's textures, so every consumer reads what it read before. false: why; nothing changed (GL draws
  * its stages). Reds WW_VKVIEW_AO_RED / _CONTACT_RED / _SSGI_RED = 1 (or WW_VKVIEW off): GL. */
-enum LightPass { LightAo = 0, LightContact = 1, LightSsgi = 2, LightPasses = 3 };
-enum LightKernel { LightAoGbuf = 0, LightAoMip, LightAoRaw, LightAoBlur, LightAoBlurF, LightContactK, LightSsgiK, LightKernels };
+/* Lane VKWATER4 (row G5): the ultra ocean (cellocean.cpp) is pass LightOcean, kernels ocean_vk.hlsl stages 1-6; 7-10
+ * (the *A kernels) write the water's shared arrays in place (LightImage::share), so nothing is copied. Red
+ * WW_VKVIEW_OCEAN_RED=1 (or WW_VKVIEW off): GL's draws; =prev: the water reads the arrays the frame before wrote. */
+enum LightPass { LightAo = 0, LightContact = 1, LightSsgi = 2, LightOcean = 3, LightPasses = 4 };
+enum LightKernel { LightAoGbuf = 0, LightAoMip, LightAoRaw, LightAoBlur, LightAoBlurF, LightContactK, LightSsgiK,
+	LightOceanSpecK, LightOceanFftK, LightOceanFinBcK, LightOceanFinDK, LightOceanMipBcK, LightOceanMipDK,
+	LightOceanFinBcAK, LightOceanFinDAK, LightOceanMipBcAK, LightOceanMipDAK, LightKernels };
 struct LightImage
 {
-	unsigned tex = 0;              //!< GL's texture (GL_TEXTURE_2D)
+	unsigned tex = 0;              //!< GL's texture (GL_TEXTURE_2D; 0 for a twin only the dispatches use)
 	unsigned glFmt = 0;            //!< its internal format: RGBA32F / RGBA16F / RG32F / R32F / R8 / RG8
 	int w = 0, h = 0, levels = 1;  //!< levels > 1: every level is copied in (an input only)
 	bool in = false, out = false;  //!< copied into the twin before / back into GL's texture after
+	int tiles = 0, outLevel = 0;   //!< tiles > 0 (an output): tex is a GL_TEXTURE_2D_ARRAY; the twin's `tiles` side-by-side
+	                               //!< w / tiles wide tiles go back into its layers 0.. at level outLevel
+	std::uintptr_t share = 0;      //!< lane VKWATER4: a sharedTarget key (2D or 2D array): the dispatches use that image's
+	                               //!< level outLevel itself (every layer; w = its width x layers, h its height), no twin, no copy
 };
 struct LightDispatch
 {
@@ -353,8 +367,15 @@ struct LightStat
 	std::string glWhy, failWhy;
 	int pipelines = 0;
 	double buildMs = 0.0;
+	int copies = 0, shared = 0;        //!< lane VKWATER4: glCopyImageSubData calls / shared-target entries, since the last take
 };
 LightStat takeLightStat( int pass );
+//! lane VKWATER4: the water draws' ocean inputs (waterOcean*) since the last take: copied into a twin / sampled in place
+struct OceanWaterStat
+{
+	int copies = 0, shared = 0;
+};
+OceanWaterStat takeOceanWaterStat();
 
 /* Lane VKLIGHT2 (row L4): the reflections' full-screen stages (cell_ssr.frag 5, 1-4) as Vulkan compute,
  * res/shaders/hlsl/vklight/ssr_vk.hlsl (SSR_LIVE). GL keeps stage 0, the scene pass and the water's rays; the pass's own
@@ -566,6 +587,8 @@ struct FxStat
 	int pipelines = 0;
 	double buildMs = 0.0;
 	int copies = 0;                 //!< texture copies into twins since the last take
+	int reusedHandles = 0;          //!< lane VKWATER4: water ray runs whose depth twin kept its VkImage handle over a sharedGen() move
+	int fenceMisses = 0;            //!< lane VKWATER4: waterRun's wait on the last crossing's fence that did not return VK_SUCCESS
 };
 FxStat takeVolSkyStat();
 struct CloudRun

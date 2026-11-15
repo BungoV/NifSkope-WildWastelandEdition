@@ -20,7 +20,8 @@
 
 #include "features/vkframe/vkframe.h"
 #include "features/vkframe/vkframegraph.h"
-#include "features/vkframe/vkpresent.h"	// VKOBJ4 item 2: the present device, its worker, the borrowed frame
+#include "features/vkframe/vkpresent.h"	// VKOBJ4 item 2: the present device, its worker, the borrowed frame; VKWATER4: fenceRed, fenceMiss
+#include "features/gi/bakert.h"	// round 5: the route asks for bakert's device when nothing else has
 #include "features/shared/cellpasstime.h"
 #include "harnesswindow.h"   // wwHarnessSettingsSuffix
 #include "version.h"
@@ -184,6 +185,7 @@ struct Dev
 	VkQueryPool qpool = VK_NULL_HANDLE;
 	std::uint64_t frameOf[kSlots] = {};
 	bool pending[kSlots] = {};
+	bool noTs[kSlots] = {};	// lane VKWATER4: a held layout submit (no timestamps written): its wait reads none back
 	std::uint64_t frame = 0;
 };
 
@@ -702,17 +704,23 @@ bool makeSemaphore( VkSemaphore & s, GLuint & gs, QString & why )
 	return true;
 }
 
-// every slot whose frame the cap says to wait for (and the slot this frame reuses); their timestamps read back
-void waitSlots( std::uint64_t upTo, int reuse )
+/* every slot whose frame the cap says to wait for (and the slot this frame reuses); their timestamps read back.
+ * lane VKWATER4: a wait that is not VK_SUCCESS (red WW_VKFENCE_RED=frame cap) keeps that slot pending: false, why */
+bool waitSlots( std::uint64_t upTo, int reuse, QString & why )
 {
 	Dev & d = dv();
 	const double t0 = nowMs();
-	for ( int s = 0; s < Dev::kSlots; s++ ) {
+	VkResult r = WwVkPresent::fenceRed( "frame cap" ) ? VK_TIMEOUT : VK_SUCCESS;
+	for ( int s = 0; r == VK_SUCCESS && s < Dev::kSlots; s++ ) {
 		if ( !d.pending[s] || ( d.frameOf[s] > upTo && s != reuse ) )
 			continue;
-		d.vkWaitForFences( d.dev, 1, &d.fence[s], VK_TRUE, 1000000000ull );
+		r = d.vkWaitForFences( d.dev, 1, &d.fence[s], VK_TRUE, 1000000000ull );
+		if ( r != VK_SUCCESS )
+			break;
 		d.pending[s] = false;
-		if ( d.tsBits > 0 ) {
+		if ( d.noTs[s] ) {
+			d.noTs[s] = false;
+		} else if ( d.tsBits > 0 ) {
 			std::uint64_t ts[2] = {};
 			if ( d.vkGetQueryPoolResults( d.dev, d.qpool, uint32_t( s * 2 ), 2, sizeof( ts ), ts, sizeof( std::uint64_t ),
 					VK_QUERY_RESULT_64_BIT ) == VK_SUCCESS ) {
@@ -725,12 +733,28 @@ void waitSlots( std::uint64_t upTo, int reuse )
 	}
 	win().blockedMs += nowMs() - t0;
 	WwSync::add( WwSync::CapFence, ( nowMs() - t0 ) * 1.0e6 );	// the Vulkan frames-in-flight cap is the same wait
+	if ( r != VK_SUCCESS )
+		why = QString::fromStdString( WwVkPresent::fenceMiss( "frame cap", int( r ) ) );
+	return r == VK_SUCCESS;
+}
+
+// lane VKWATER4: a layout submit whose wait was not VK_SUCCESS: its slot stays pending (any later wait takes it)
+void holdSlot( int slot )
+{
+	Dev & d = dv();
+	d.frameOf[slot] = 0;
+	d.pending[slot] = true;
+	d.noTs[slot] = true;
 }
 
 void dropChain( Chain & c )
 {
 	Dev & d = dv();
-	waitSlots( ~std::uint64_t( 0 ), -1 );	// nothing in flight reads these
+	QString held;
+	if ( !waitSlots( ~std::uint64_t( 0 ), -1, held ) ) {	// lane VKWATER4: a held fence: its objects stay, forgotten
+		c = Chain();
+		return;
+	}
 	GlShare & g = glShare();
 	if ( QOpenGLContext::currentContext() && g.deleteSem ) {
 		if ( c.glGlDone )
@@ -791,7 +815,7 @@ void writeImage( VkDescriptorSet set, uint32_t binding, VkImageView v, VkDescrip
 }
 
 // round 3: new images to GENERAL once (they stay there), waited on: a frame is made once per size
-bool toGeneralNow( std::initializer_list<const Img *> imgs, QString & why )
+bool toGeneralNow( std::initializer_list<const Img *> imgs, QString & why, bool & held )
 {
 	Dev & d = dv();
 	std::vector<VkImageMemoryBarrier> bars;
@@ -808,7 +832,8 @@ bool toGeneralNow( std::initializer_list<const Img *> imgs, QString & why )
 	}
 	const std::uint64_t f = ++d.frame;
 	const int slot = int( f % Dev::kSlots );
-	waitSlots( 0, slot );
+	if ( !waitSlots( 0, slot, why ) )
+		return false;
 	VkCommandBuffer cb = d.cb[slot];
 	d.vkResetCommandBuffer( cb, 0 );
 	VkCommandBufferBeginInfo bi { VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
@@ -822,11 +847,20 @@ bool toGeneralNow( std::initializer_list<const Img *> imgs, QString & why )
 	sub.commandBufferCount = 1;
 	sub.pCommandBuffers = &cb;
 	const bool ok = submitOnWorker( sub, d.fence[slot] );
-	if ( ok )
-		d.vkWaitForFences( d.dev, 1, &d.fence[slot], VK_TRUE, 1000000000ull );
-	else
+	if ( !ok ) {
 		why = QStringLiteral( "the layout submit failed" );
-	return ok;
+		return false;
+	}
+	// lane VKWATER4 (red WW_VKFENCE_RED=frame layout): not VK_SUCCESS: the slot stays pending, held: the images stay
+	const VkResult r = WwVkPresent::fenceRed( "frame layout" ) ? VK_TIMEOUT
+		: d.vkWaitForFences( d.dev, 1, &d.fence[slot], VK_TRUE, 1000000000ull );
+	if ( r != VK_SUCCESS ) {
+		holdSlot( slot );
+		held = true;
+		why = QString::fromStdString( WwVkPresent::fenceMiss( "frame layout", int( r ) ) );
+		return false;
+	}
+	return true;
 }
 
 void computeBarrier( VkCommandBuffer cb )
@@ -1224,7 +1258,11 @@ bool makeChain( const void * key, int W, int H, int mipCount, const int dims[][2
 		}
 		const std::uint64_t f = ++d.frame;
 		const int slot = int( f % Dev::kSlots );
-		waitSlots( 0, slot );
+		if ( !waitSlots( 0, slot, why ) ) {
+			dropChain( c );
+			chains().remove( key );
+			return false;
+		}
 		VkCommandBuffer cb = d.cb[slot];
 		d.vkResetCommandBuffer( cb, 0 );
 		VkCommandBufferBeginInfo bi { VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
@@ -1239,7 +1277,14 @@ bool makeChain( const void * key, int W, int H, int mipCount, const int dims[][2
 		sub.pCommandBuffers = &cb;
 		ok = submitOnWorker( sub, d.fence[slot] );
 		if ( ok ) {
-			d.vkWaitForFences( d.dev, 1, &d.fence[slot], VK_TRUE, 1000000000ull );
+			// lane VKWATER4 (red WW_VKFENCE_RED=chain layout): not VK_SUCCESS: the slot stays pending, the chain is left
+			const VkResult r = WwVkPresent::fenceRed( "chain layout" ) ? VK_TIMEOUT
+				: d.vkWaitForFences( d.dev, 1, &d.fence[slot], VK_TRUE, 1000000000ull );
+			if ( r != VK_SUCCESS ) {
+				holdSlot( slot );
+				why = QString::fromStdString( WwVkPresent::fenceMiss( "chain layout", int( r ) ) );
+				ok = false;
+			}
 		} else {
 			why = QStringLiteral( "the layout submit failed" );
 		}
@@ -1314,16 +1359,19 @@ bool makeFrame( const void * key, int W, int H, int samples, unsigned dsFormat, 
 	}
 	Frame & fr = frames()[key];
 	fr.ctx = QOpenGLContext::currentContext();
+	bool held = false;
 	const bool ok = makeImg( fr.color, W, H, 1, 1, why, VK_FORMAT_R16G16B16A16_SFLOAT, samples )
-		&& makeImg( fr.ds, W, H, 1, 1, why, dsf, samples ) && toGeneralNow( { &fr.color, &fr.ds }, why );
+		&& makeImg( fr.ds, W, H, 1, 1, why, dsf, samples ) && toGeneralNow( { &fr.color, &fr.ds }, why, held );
 	double afterMb = 0.0, afterBudgetMb = 0.0;
 	const bool placed = !budget || ( localHeap( afterMb, afterBudgetMb ) && afterMb - usedMb >= 0.75 * needMb );
 	if ( ok && !placed )
 		why = QStringLiteral( "the frame landed outside video memory (the device heap grew %1 MB for %2 MB)" )
 			.arg( afterMb - usedMb, 0, 'f', 1 ).arg( needMb, 0, 'f', 1 );
 	if ( !ok || !placed ) {
-		dropImg( fr.color );
-		dropImg( fr.ds );
+		if ( !held ) {	// lane VKWATER4: held: the layout submit may still use them, they stay, forgotten
+			dropImg( fr.color );
+			dropImg( fr.ds );
+		}
 		frames().remove( key );
 		return false;
 	}
@@ -1368,15 +1416,18 @@ void freeFrame( const void * key )
 	auto it = frames().find( key );
 	if ( it == frames().end() )
 		return;
-	waitSlots( ~std::uint64_t( 0 ), -1 );	// nothing in flight reads them
+	QString held;
+	const bool done = waitSlots( ~std::uint64_t( 0 ), -1, held );	// nothing in flight reads them
 	for ( Chain & c : chains() ) {
 		c.srcFrame = VK_NULL_HANDLE;	// a new frame can reuse the handle: its set is written again
 		c.measFrame = VK_NULL_HANDLE;
 	}
 	WwVkPresent::borrowDrop( reinterpret_cast<std::uintptr_t>( key ) + 1 );	// VKOBJ4 item 2: no longer lent
 	WwVkPresent::borrowDrop( reinterpret_cast<std::uintptr_t>( key ) + 2 );
-	dropImg( it->color );
-	dropImg( it->ds );
+	if ( done ) {	// lane VKWATER4: a held fence: the frame's images stay, forgotten
+		dropImg( it->color );
+		dropImg( it->ds );
+	}
 	frames().erase( it );
 }
 
@@ -1472,7 +1523,12 @@ bool runBloom( const void * key, const BloomJob & job, QString & why )
 		}
 		fr = &*ft;
 		if ( c.srcFrame != fr->color.i ) {
-			waitSlots( ~std::uint64_t( 0 ), -1 );	// no frame in flight reads the set
+			if ( !waitSlots( ~std::uint64_t( 0 ), -1, why ) ) {	// no frame in flight reads the set (lane VKWATER4: else GL)
+				win().glFrames++;
+				win().glWhy = why;
+				sayRoute( QStringLiteral( "gl (%1)" ).arg( why ) );
+				return false;
+			}
 			writeImage( c.srcSet, 5, fr->color.v, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE );
 			writeImage( c.srcSet, 6, fr->ds.v, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE );
 			c.srcFrame = fr->color.i;
@@ -1514,9 +1570,28 @@ bool runBloom( const void * key, const BloomJob & job, QString & why )
 			std::fprintf( stderr, "vk post: the exposure measure's target was refused (%s): GL measures\n", qPrintable( mw ) );
 		}
 	}
+	/* lane VKWATER4: a held fence (not VK_SUCCESS) leaves the frame to GL; this frame's fresh targets go (nothing used them)
+	 * and are made again the next frame, which also moves them to GENERAL */
+	auto refuseHeld = [&]() {
+		if ( measFresh ) {
+			c.texs.pop_back();
+			c.layouts.pop_back();
+			dropImg( c.meas );
+		}
+		if ( combFresh ) {
+			c.texs.pop_back();
+			c.layouts.pop_back();
+			dropImg( c.comb );
+		}
+		win().glFrames++;
+		win().glWhy = why;
+		sayRoute( QStringLiteral( "gl (%1)" ).arg( why ) );
+		return false;
+	};
 	const bool meas = measWant && c.meas.i && c.meas.w == measW && c.meas.h == measH;
 	if ( meas && c.measFrame != fr->color.i ) {
-		waitSlots( ~std::uint64_t( 0 ), -1 );	// no frame in flight reads the set
+		if ( !waitSlots( ~std::uint64_t( 0 ), -1, why ) )	// no frame in flight reads the set
+			return refuseHeld();
 		writeImage( c.measSet, 5, fr->color.v, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE );
 		writeImage( c.measSet, 6, fr->ds.v, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE );
 		c.measFrame = fr->color.i;
@@ -1526,7 +1601,8 @@ bool runBloom( const void * key, const BloomJob & job, QString & why )
 	const std::uint64_t f = ++d.frame;
 	const int slot = int( f % Dev::kSlots );
 	const int cap = wwEnvInt( "WW_FRAMEQUEUE_RED" ) == 1 ? 0 : 2;
-	waitSlots( WwVkFrame::inFlightWait( f, cap ), slot );
+	if ( !waitSlots( WwVkFrame::inFlightWait( f, cap ), slot, why ) )
+		return refuseHeld();
 	const double ph3 = nowMs();
 
 	VkCommandBuffer cb = d.cb[slot];
@@ -1670,6 +1746,7 @@ bool runBloom( const void * key, const BloomJob & job, QString & why )
 	}
 	d.frameOf[slot] = f;
 	d.pending[slot] = true;
+	d.noTs[slot] = false;
 	// Vulkan -> GL: GL's next reads (the top's mips, the combine, the tone map, the dump) wait on the GPU, not the CPU
 	g.waitSem( c.glVkDone, 0, nullptr, nt, texs.data(), lays.data() );
 	texs.resize( own );

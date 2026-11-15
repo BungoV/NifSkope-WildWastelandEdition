@@ -609,6 +609,7 @@ bool pipeGate( const std::string & spvDir )
 #include "blview_shade.inc" // lane VKOBJ4 slice 7: the multi-draw through the cellbl twin (`BLVIEW shade` lines)
 #include "blview_colour.inc" // lane VKOBJ4 step 7: GL's own fo4_cellbl against the twin through objBlShade (`BLVIEW colour` lines)
 #include "blview_cell.inc"   // lane VKWATER3 G4: GL's own fo4_cell / fo4_cellcsm against objCellShade (`BLVIEW cell` lines)
+#include "blview_pfx.inc"    // lane VKOBJ5 G4 round 3: GL's own particles_cell against objPfxShade (`BLVIEW pfx` lines)
 }  // namespace blv
 
 int main( int argc, char ** argv )
@@ -1124,17 +1125,32 @@ int main( int argc, char ** argv )
 		std::printf( "BLVIEW colour twin: texture %d at anisotropy 1 (test-local; the fixture's def %.0f), handle %llx: %s%s (GL error 0x%x)\n", anisoAt,
 			double( d.aniso ), static_cast<unsigned long long>( aniso1H ), twinOk ? "made" : "FAIL ", twinOk ? "" : why.c_str(), unsigned( e ) );
 	}
+	// lane VKOBJ5 (G4 round 3): particles_cell (GL_POINTS + geometry stage) against objPfxShade; BaseMap's DXT5 twin as its sprite
+	const bool pfxOnly = std::getenv( "BLVIEW_PFX_ONLY" ) != nullptr;  // gates only: the particle gate alone while it is localised
+	if ( bc )
+		ok = pfxGate( spvDir + "/pfxset/spirv", texs[3], texs[1], texs[0] ) && ok;
+	if ( bc )  // round 5 item 3: the RT GI variant (`pfx rt` lines), reds 9-12
+		ok = pfxGate( spvDir + "/pfxset/spirv", texs[3], texs[1], texs[0], 0xF00u, true ) && ok;
+	else
+		std::printf( "BLVIEW pfx not run (the sprite is the texture cache's twin: MODE=bc)\n" );
 	// lane VKWATER3 (ruling 11-15): the shipped twins on the app's key (WW_CELL_FOGLEAK + WW_FRAME_UBO) against GL built with the
 	// same defines (blview.sh's spvapp); the plain variant (no define, both sides) stays as a regression row
-	const bool colOk = twinOk && colourGate( spvDir + "/spvapp/spirv", handles, anisoAt, aniso1H, 0 );
-	const bool colCsmOk = twinOk && colourGate( spvDir + "/spvapp/spirv", handles, anisoAt, aniso1H, 1 );  // gap 4: fo4_cellcsmbl
-	const bool colPlain = twinOk && colourGate( spvDir + "/spvset/spirv", handles, anisoAt, aniso1H, 0, spvDir + "/fo4_cellbl_ps.pipe.spv" );
-	const bool colCsmPlain = twinOk && colourGate( spvDir + "/spvset/spirv", handles, anisoAt, aniso1H, 1, spvDir + "/fo4_cellcsmbl_ps.pipe.spv" );
+	const bool colOk = twinOk && ( pfxOnly || colourGate( spvDir + "/spvapp/spirv", handles, anisoAt, aniso1H, 0 ) );
+	const bool colCsmOk = twinOk && ( pfxOnly || colourGate( spvDir + "/spvapp/spirv", handles, anisoAt, aniso1H, 1 ) );  // gap 4: fo4_cellcsmbl
+	const bool colPlain = twinOk && ( pfxOnly || colourGate( spvDir + "/spvset/spirv", handles, anisoAt, aniso1H, 0, 0, spvDir + "/fo4_cellbl_ps.pipe.spv" ) );
+	const bool colCsmPlain = twinOk && ( pfxOnly || colourGate( spvDir + "/spvset/spirv", handles, anisoAt, aniso1H, 1, 0, spvDir + "/fo4_cellcsmbl_ps.pipe.spv" ) );
 	// lane VKWATER3 ruling 3: the RT GI variant on the app's all-on key (blview.sh's spvrt) against the shipped rt twins
-	const bool colRt = twinOk && colourGate( spvDir + "/spvrt/spirv", handles, anisoAt, aniso1H, 0, std::string(), true );
-	const bool colCsmRt = twinOk && colourGate( spvDir + "/spvrt/spirv", handles, anisoAt, aniso1H, 1, std::string(), true );
+	const bool colRt = twinOk && ( pfxOnly || colourGate( spvDir + "/spvrt/spirv", handles, anisoAt, aniso1H, 0, 0, std::string(), true ) );
+	const bool colCsmRt = twinOk && ( pfxOnly || colourGate( spvDir + "/spvrt/spirv", handles, anisoAt, aniso1H, 1, 0, std::string(), true ) );
+	// lane VKOBJ5 (G4): skinned (kind 1), alpha-tested (kind 2), single rigid (kind 3), own VAO (kind 4) through both bl twins,
+	// GL on the app's key as the shipped twins (VKWATER3 ruling 1)
+	bool kindOk = true;
+	for ( int tw = 0; tw < 2 && !pfxOnly; tw++ )
+		for ( int kd = 1; kd <= 4; kd++ )
+			kindOk = ( twinOk && colourGate( spvDir + "/spvapp/spirv", handles, anisoAt, aniso1H, tw, kd ) ) && kindOk;
+	ok = kindOk && ok;
 	ok = colOk && colCsmOk && colPlain && colCsmPlain && colRt && colCsmRt && ok;
-	if ( bc ) {  // lane VKWATER3 G4: GL's fo4_cell / fo4_cellcsm against the non-bindless twins through objCellShade
+	if ( bc && !pfxOnly ) {  // lane VKWATER3 G4: GL's fo4_cell / fo4_cellcsm against the non-bindless twins through objCellShade
 		/* BaseMap DXT5, NormalMap DXT1, SpecularMap BC5 signed (R,G,0,1: .g the gloss), GlowMap DXT1. Not texture 4: the twin made
 		 * before it is texture 3's first, gone when frame 1 replaced it, so the red `key` had no image to read */
 		const GLuint maps[4] = { texs[3], texs[1], texs[9], texs[0] };

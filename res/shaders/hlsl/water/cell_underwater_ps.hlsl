@@ -83,6 +83,8 @@ void frag_main()
 {
 	float d = uwDepth.Load( int3(int2( gl_FragCoord.xy ), 0) ).r;
 	float2 ndc = ( gl_FragCoord.xy - uwVp.xy ) / uwVp.zw * 2.0 - 1.0;
+	float3 Pn = uwWorld( ndc, -1.0 );
+	float PnW = fwidth( Pn.z );	// before the discard: a helper lane's Pn after it is undefined
 #ifdef WW_UW_SAMPLE
 	float dS = uwDepthMs.Load( int2( gl_FragCoord.xy ), gl_SampleID ).r;
 	if ( uwNearMax( ndc, d, dS, uwEdgeTol() ) )
@@ -99,7 +101,6 @@ void frag_main()
 	}
 	gl_SampleMask[0] = mask;
 #endif
-	float3 Pn = uwWorld( ndc, -1.0 );
 	float3 Pw = uwWorld( ndc, d * 2.0 - 1.0 );
 	float3 add, mul;
 	if ( uwLight != 0 && ( uwLightRed & 4 ) == 0 )
@@ -107,7 +108,7 @@ void frag_main()
 	else
 		wwUnderwater( uwEye, Pn, Pw, d >= 1.0, uwFog, uwColor, uwTint, uwRed,
 			( uwRed & 4 ) != 0 ? (float3)( 0.0 ) : -normalize( float3( uwRow[0].z, uwRow[1].z, uwRow[2].z ) ), add, mul );
-	float men = wwUnderMeniscus( Pn.z - uwFog.w, fwidth( Pn.z ) * uwMenK.x );	// 0 with the row off
+	float men = wwUnderMeniscus( Pn.z - uwFog.w, PnW * uwMenK.x );	// 0 with the row off
 	fragAdd = float4( add * ( 1.0 - men ), 0.0 );
 	fragMul = float4( mul * ( 1.0 - men ), 1.0 );
 }

@@ -31,6 +31,7 @@ struct Ot
 	GLuint glSem = 0;
 	void * semCtx = nullptr;
 	VkFence fence = VK_NULL_HANDLE;
+	bool fenceHeld = false;  // lane VKOBJ5: a flush whose wait missed: never reset or submitted again until it signals
 	bool semTried = false;
 	std::string semWhy;
 	std::vector<GLuint> pending;
@@ -96,12 +97,20 @@ bool otSemReady()
 }
 
 /* VKOBJ4: the batch's flush: GL signals once with every twin made since (GL's uploads before it in its stream), one
- * submit waits it (the twins are GENERAL on the present device from there), one fence wait */
-void otFlush()
+ * submit waits it (the twins are GENERAL on the present device from there), one fence wait. lane VKOBJ5: the wait is
+ * fenceDone's (red WW_VKFENCE_RED=objtex); a miss holds the fence (the next flush waits it first, never resets or
+ * submits it unsignalled) and returns false with why: the frame stays on GL */
+bool otFlush( std::string & why )
 {
 	Ot & O = ot();
+	if ( O.fenceHeld ) {
+		if ( !fenceDone( O.fence, true, "objtex", why ) )
+			return false;
+		vk().vkResetFences( vk().dev, 1, &O.fence );
+		O.fenceHeld = false;
+	}
 	if ( O.pending.empty() )
-		return;
+		return true;
 	const auto t0 = std::chrono::steady_clock::now();
 	Vk & v = vk();
 	Gl & g = gl();
@@ -116,20 +125,24 @@ void otFlush()
 		si.waitSemaphoreCount = 1;
 		si.pWaitSemaphores = &O.sem;
 		si.pWaitDstStageMask = &stage;
-		ok = v.vkQueueSubmit( v.queue, 1, &si, O.fence ) == VK_SUCCESS
-			&& v.vkWaitForFences( v.dev, 1, &O.fence, VK_TRUE, 1000000000ull ) == VK_SUCCESS && v.vkResetFences( v.dev, 1, &O.fence ) == VK_SUCCESS;
+		ok = v.vkQueueSubmit( v.queue, 1, &si, O.fence ) == VK_SUCCESS;
+		if ( ok && !fenceDone( O.fence, true, "objtex", why ) )
+			ok = false, O.fenceHeld = true;
+		else if ( ok )
+			ok = v.vkResetFences( v.dev, 1, &O.fence ) == VK_SUCCESS;
 	}
 	O.st.flushes++;
 	O.st.flushed += int( O.pending.size() );
 	if ( !ok ) {
 		O.st.flushFails++;
-		O.st.why = "the batch's hand-over (GL signal, one submit waiting it) failed";
+		O.st.why = O.fenceHeld ? why : "the batch's hand-over (GL signal, one submit waiting it) failed";
 	}
 	O.pending.clear();
 	const double ms = std::chrono::duration<double, std::milli>( std::chrono::steady_clock::now() - t0 ).count();
 	O.st.flushMs += ms;
 	O.loadMs += ms;
 	O.loadFlushes++;
+	return !O.fenceHeld;
 }
 
 // VKOBJ4: a twin's GL name leaves the batch (the cache deletes it before the flush)
@@ -256,15 +269,16 @@ void objTexRows( const void * glRows, std::size_t n )
 	O.st.rows += n;
 }
 
-void objTexFlush()
+bool objTexFlush( std::string & why )
 {
-	otFlush();
+	return otFlush( why );
 }
 
 ObjTexStat objTexFrame()
 {
 	Ot & O = ot();
-	otFlush();
+	std::string fw;
+	otFlush( fw );  // a miss is counted (flushFails, why); the next flush waits the held fence first
 	otSweep();
 	// VKOBJ4: a cell's load = the frames that make twins until kOtLoadQuiet frames make none (then the next one starts)
 	constexpr int kOtLoadQuiet = 30;
@@ -314,6 +328,7 @@ int objTexFree()
 		gl().deleteSemaphores( 1, &O.glSem );
 	O.sem = VK_NULL_HANDLE;
 	O.fence = VK_NULL_HANDLE;
+	O.fenceHeld = false;
 	O.glSem = 0;
 	O.semCtx = nullptr;
 	O.semTried = false;

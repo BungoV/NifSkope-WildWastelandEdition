@@ -61,6 +61,8 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "features/near/cellqueue.h"	// lane GPUDRIVEN1
 #include "features/near/cellgpucull.h"	// lane GPUDRIVEN1 step B
 #include "features/post/taainputs.h"	// lane TAAINPUTS1
+#include "features/near/cellbindless.h"	// lane VKOBJ5: WwBl::vkShadeOn (fxDepth shared)
+#include "features/vkframe/vkpresent.h"	// lane VKOBJ5: WwVkPresent::sharedTarget
 
 #include <QOpenGLFunctions>
 #include <QCoreApplication>
@@ -703,12 +705,37 @@ bool Scene::grabEffectDepth()
 	}
 
 	while ( glGetError() != GL_NO_ERROR ) {}
-	if ( !fxDepthTexId || fxDepthTexW != w || fxDepthTexH != h ) {
+	const bool vkOn = WwBl::vkShadeOn();
+	if ( fxDepthRetry.due( w, h, fxDepthPassNow, fxDepthShared, fxDepthTexId != 0, fxDepthTexW, fxDepthTexH, vkOn ) ) {
+		/* lane VKOBJ5: under WW_VKOBJ_SHADE a shared target (keyed &fxDepthTexId; GL blits into it as before): the
+		 * particles' pixel twin on the present device samples it as fxDepth. Refused: GL's own texture, as before, and
+		 * fxDepthRetry asks again on a size change or a few second passes later (the device may not be up yet). */
+		const std::uintptr_t key = reinterpret_cast<std::uintptr_t>( &fxDepthTexId );
+		unsigned shared = 0;
+		std::string why;
+		const bool asked = vkOn && fxDepthRetry.ask( w, h, fxDepthPassNow, fxDepthShared, fxDepthTexId != 0 );
+		if ( asked && WwVkPresent::sharedTarget( key, 0, w, h, 1, unsigned( fmt ), shared, why ) && shared ) {
+			if ( fxDepthTexId && !fxDepthShared )
+				fn->glDeleteTextures( 1, &fxDepthTexId );
+			fxDepthTexId = shared;
+			fxDepthShared = true;
+			if ( const int n = fxDepthRetry.granted() )
+				qInfo() << "lane VKOBJ5: fxDepth shared target granted after" << n << "refusals";
+		} else {
+			if ( asked && fxDepthRetry.refused( w, h, fxDepthPassNow ) )
+				qWarning() << "lane VKOBJ5: fxDepth shared target refused, GL's own texture until a retry:" << why.c_str();
+			if ( fxDepthShared ) {
+				WwVkPresent::sharedTargetDrop( key );
+				fxDepthTexId = 0;
+				fxDepthShared = false;
+			}
+		}
 		if ( !fxDepthTexId )
 			fn->glGenTextures( 1, &fxDepthTexId );
 		fn->glGetIntegerv( GL_TEXTURE_BINDING_2D, &prevTex );
 		fn->glBindTexture( GL_TEXTURE_2D, fxDepthTexId );
-		fn->glTexImage2D( GL_TEXTURE_2D, 0, GLint( fmt ), w, h, 0, pixFmt, pixType, nullptr );
+		if ( !fxDepthShared )
+			fn->glTexImage2D( GL_TEXTURE_2D, 0, GLint( fmt ), w, h, 0, pixFmt, pixType, nullptr );
 		fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST );
 		fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST );
 		fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE );

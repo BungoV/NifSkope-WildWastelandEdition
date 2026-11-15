@@ -86,6 +86,7 @@ struct ObjBlTarget
 	std::uint32_t colors[4] = {}, colorCount = 0, depth = 0, samples = 1;
 	std::uint32_t depthOp = 3;  //!< a VkCompareOp (3 = LESS_OR_EQUAL)
 	bool depthWrite = false, twoSided = false;
+	bool strip = false;  //!< lane VKOBJ5: TRIANGLE_STRIP (objPfxShade's expand stage), else TRIANGLE_LIST
 	ObjBlBlend blend;
 	ObjBlStencil stencil;  //!< lane VKOBJ4 open item 3 (off: the defaults)
 };
@@ -146,9 +147,11 @@ struct ObjBlTexUnit
 	std::string name;   //!< GL's sampler uniform
 	int unit = -1;      //!< -1: GL has no such uniform (the GLSL never reads it)
 	unsigned glTex = 0, glTarget = 0;
+	std::uint32_t elem = 0;  //!< lane VKOBJ5: the array element (objBlTextures elems; binding is the binding + elem)
 };
-//! the module's set-0 images, texel buffers and samplers with GL's units and textures (the active unit restored)
-bool objBlTextures( GlProc gp, unsigned prog, const SpvModule & m, std::vector<ObjBlTexUnit> & out, std::string & why );
+/*! the module's set-0 images, texel buffers and samplers with GL's units and textures (the active unit restored).
+ * elems (lane VKOBJ5): an array binding gives one unit per element (GL's location of element e), else element 0 alone */
+bool objBlTextures( GlProc gp, unsigned prog, const SpvModule & m, std::vector<ObjBlTexUnit> & out, std::string & why, bool elems = false );
 
 /* Slice 6 (the pools as vertex buffers): a class pool of cellbindless.cpp (setupVao: attribute i = nibble i of attrMask
  * floats, its own buffer, tightly packed GL_FLOATs; GL_UNSIGNED_SHORT indices) */
@@ -195,6 +198,9 @@ struct ObjBlSampler
 };
 //! GL's texture state reads (glGetTextureParameter*, GL 4.5)
 bool objBlSamplerRead( GlProc gp, unsigned tex, ObjBlSampler & s, std::string & why );
+/* twin ids: 0-1 ObjBlShade, 2-6 ObjCellShade (VKWATER3 7 fo4_effectcell, 8 fo4_effectdecalcsm). One id per twin across
+ * every lane branch: tests/vkframe/twin_ids.py fails on a duplicate */
+constexpr int kObjTwinPfx = 9;  //!< twin 9 particles_cell (objPfxShade)
 struct ObjBlDraw
 {
 	int twin = 0;
@@ -224,6 +230,19 @@ struct ObjBlDraw
 	const void * cmds = nullptr;    //!< GL's indirect commands
 	std::size_t cmdCount = 0;
 	int pipeRed = 0;                //!< gates only: objBlPipe's red
+	/*! lane VKOBJ5 (objPfxShade): a record pass before the draw. `cs` writes one record a primitive from `pfxN` inputs of
+	 * 48 bytes at `pfxIn`; the expand stage reads them (no vertex buffers, no commands: 4 vertices, pfxN instances).
+	 * pfxRed 1 (gates only) binds the expand stage's records 16 bytes on */
+	const std::uint32_t * cs = nullptr;
+	std::size_t csWords = 0;
+	const void * pfxIn = nullptr;
+	std::size_t pfxN = 0;
+	int pfxRed = 0;
+	/*! lane VKOBJ5 round 4 (objPfxShade): unitElems resolves each element of an image / sampler array on its own unit;
+	 * unitsOff names images the pixel stage never samples (their flag 0): they and their samplers stay stand-ins, counted in
+	 * ObjBlBindStat::gatedOff, never refused */
+	bool unitElems = false;
+	std::vector<std::string> unitsOff;
 };
 struct ObjBlDrawStat
 {
@@ -248,6 +267,8 @@ struct ObjBlBindStat
 	int samplers = 0;  //!< samplers given GL's state
 	int compare = 0;   //!< of those, depth compare
 	std::string misfitWhy, texelWhy;
+	std::string glOwnNames;  //!< lane VKOBJ5: the glOwn bindings' names, comma-separated
+	int gatedOff = 0;        //!< lane VKOBJ5: units named in ObjBlDraw::unitsOff (stand-ins by their flag)
 	std::vector<unsigned> glBufs;  //!< the texel twins GL wrote (the crossing's signal takes them)
 };
 /*! GL's texture units of `prog` for both of d's modules: a set-0 image GL binds a shared target to joins d.images
@@ -257,6 +278,9 @@ bool objBlBindUnits( GlProc gp, unsigned prog, ObjBlDraw & d, ObjBlBindStat & st
 /*! GL's buffer texture `tex` (its range: glTexBufferRange's, else the whole buffer) copied into its twin on the present device,
  * a buffer GL imports (glCopyNamedBufferSubData, ordered before the crossing's signal; glNames gets the twin's GL name).
  * Formats: R / RG / RGBA 32F, 32I, 32UI, RGBA16F, RGBA8; others are refused. red 1 copies from 16 bytes past the start.
+ * The twin is keyed on (name, generation) (lane VKOBJ5): the generation moves when GL's view of `tex` changed (another
+ * buffer, format, range or buffer size: a deleted name handed on, or the storage re-specified); the old twin is held for the
+ * prepared draws until objBlDrawsReset. red 2, gates only: the name-only key (the old twin grown in place).
  * once (lane VKWATER3): copied once a frame (takeObjBlRunStat starts the next), for buffers the owner writes before the frame's
  * first read (the RT GI variant's cellRestir and cellDdgiAtlas); otherwise copied at each call. */
 bool objBlTexelCopy( GlProc gp, unsigned tex, std::vector<unsigned> & glNames, std::string & why, int red = 0, bool once = false );
@@ -270,6 +294,8 @@ struct ObjBlStoreStat
 	std::uint64_t copied = 0, copiedBytes = 0;  //!< texel buffers copied into a twin at a crossing (GL's own buffers; once a frame each)
 	double copiedMs = 0.0;          //!< lane VKWATER3: those copies' CPU time
 	std::uint64_t writes = 0, staged = 0, writeBytes = 0;  //!< the owners' updates (staged: through GL's staging copy)
+	std::uint64_t regen = 0;        //!< lane VKOBJ5: texel twins made anew (GL's view of the name changed)
+	int retired = 0;                //!< lane VKOBJ5: old twins held for the prepared draws (freed at objBlDrawsReset)
 };
 /*! `buf` made (or kept) a store of at least `bytes`: a store already big enough stays; else a new one replaces it (the old
  * store, or the owner's own GL buffer, is deleted) and `buf` takes its name, so the owner re-attaches its texture */
@@ -288,6 +314,9 @@ bool objBlTexelFill( unsigned & buf, bool & stored, bool shade, std::initializer
 ObjBlStoreStat objBlTexelStoreStat( bool reset = false );
 //! GL's buffer texture `tex` is read in place from a store (its last objBlTexelCopy)
 bool objBlTexelImported( unsigned tex );
+/*! GL's buffer texture `tex` is going: its texel twin goes with it (twins are keyed by GL's name, and GL hands a deleted
+ * name to the next texture: a smaller stale twin under it refused that texture while draws were prepared) */
+void objBlTexelForget( unsigned tex );
 //! the Vulkan side's bytes of `tex`'s view (its buffer, offset and range) copied back after one crossing (the gates)
 bool objBlTexelRead( unsigned tex, std::vector<std::uint8_t> & out, std::string & why );
 //! the shared target `key` fits a set-0 image of SPIR-V Dim `dim` / Arrayed (2D, 3D, 2D array, cube array; one sample)
@@ -333,7 +362,8 @@ void objCellCopiesStale();
  * of GL's glMultiDrawElementsIndirect. Read from GL here: the draw framebuffer (every colour draw buffer and the depth must
  * be shared targets), the depth / cull / blend state (objBlTargetState; refused: a viewport that is not the frame),
  * program `prog`'s uniforms (objBlMirror). The rows are the run's own from its leader: Vulkan's wwDrawBase is 0 (GL's
- * wwDrawIdx is not a module member: the mirror leaves it 0). false: why (nothing drawn; GL draws the run) */
+ * wwDrawIdx is not a module member: the mirror leaves it 0). false: why (nothing drawn; GL draws the run)
+ * Lane VKOBJ5: the mirror does carry GL's wwDrawBase uniform (the leader's row, commit's); rowsAtBase sets it 0. */
 struct ObjBlShade
 {
 	int twin = 0;           //!< 0 fo4_cellbl, 1 fo4_cellcsmbl
@@ -349,6 +379,16 @@ struct ObjBlShade
 	              //!< 10 the atlas copied a texel on, 11 / 12 the screen GI / its key dropped to the stand-in
 	const std::uint32_t * psGate = nullptr;  //!< gates only: this pixel module instead of the shipped twin (blview's plain row)
 	std::size_t psGateWords = 0;
+	int skinRed = 0;   //!< lane VKOBJ5 red `bone`: the mirrored skinningUniforms one bone on (bone i reads i + 1's transform)
+	int alphaRed = 0;  //!< lane VKOBJ5 red `flags`: the mirrored alphaFlags 0 (no alpha test, no blend bit)
+	/*! lane VKOBJ5: `rows` starts at the row GL's wwDrawBase names (a run's leader, a single draw's own row), so the
+	 * mirrored wwDrawBase is set 0 (false: GL's wwDrawBase as mirrored, the rows from GL's row 0) */
+	bool rowsAtBase = false;
+	/*! lane VKOBJ5 (an unpooled bl shape): the vertices from the bound VAO, read as objCellShade reads it (per location the
+	 * stage reads: float or half, its buffer / offset / stride; a disabled one must hold (0,0,0,1); the VAO's index buffer);
+	 * of `pool` only verts is read */
+	bool ownVao = false;
+	int ownRed = 0;  //!< gates only: 1 `offset` (the attributes read from offset 0), 2 `half` (the halves read as 16-bit unorm)
 };
 bool objBlShade( GlProc gp, const ObjBlShade & s, std::string & why );
 /* lane VKWATER3 G4: the bl twin of GL's program by its pixel stage's loader key (Program::wwDefs): 0 the base
@@ -385,6 +425,32 @@ bool objCellShade( GlProc gp, const ObjCellShade & s, std::string & why );
 void objCellPs( int twin, bool rt, const std::uint32_t *& words, std::size_t & count );
 //! the red's name (WW_VKVIEW_OBJCELL_RED / _OBJPBRM_RED / _OBJFX_RED: offset | half | swz | key | light | bone | blend | copy | restir | atlas | gihalf | gikey) as ObjCellShade.red, 0 else
 int objCellRed( const char * name );
+/* lane VKOBJ5 (plan row G4 round 3): particles_cell.prog's draw (glparticles.cpp, glDrawArrays( GL_POINTS ), WW_VKOBJ_SHADE=1)
+ * in VKFAR2's precip shape: the record pass objpfx_cs (particles.vert + the geom's per-primitive part, one record a point in
+ * GL's order), the expand stage objpfx_vs (the geom's 4-vertex strip, one instance a record), the pixel twin objpfx_cell_ps
+ * (particles_cell_ps.hlsl, WW_CELLLIGHTS on the app's variant). Read from GL here as objCellShade reads it: the frame and
+ * fixed state (objBlFrameRead: GL's depth function as it is, ALWAYS included), the uniforms (objBlMirror: one mirrored
+ * copy of the vertex-side blocks serves the record pass too), the units (objBlBindUnits: fxDepth a shared target). The
+ * particles come as the caller's arrays (GL's attribute locations 0 position 3, 1 colour 4, 2 uv 2, 3 angle 1, 4 size 1);
+ * an array not given reads GL's current value of that location. Round 4: textureUnits[10] element by element, and the
+ * maps by their flags (hasNormalMap / hasGreyscaleMap / hasCubeMap 0: a stand-in, never sampled; 1: the map must resolve;
+ * round 5: the cube through its plain-cube copy twin, objCubeCopyTwin). false: why (nothing drawn; GL draws the points) */
+struct ObjPfxShade
+{
+	unsigned prog = 0;  //!< GL's current program (particles_cell)
+	const float * pos = nullptr, * col = nullptr, * uv = nullptr, * angle = nullptr, * size = nullptr;
+	std::size_t n = 0;  //!< the points (glDrawArrays( GL_POINTS, 0, n ))
+	/*! gates only, each must FAIL: 1 `offset` (the expand stage reads its records 16 bytes on), 2 `light` (the light texel buffer copied
+	 * from one texel on), 3 `depth` (GL's ALWAYS read as LEQUAL); round 4: 4 `nmap`, 5 `grey`, 6 `cubeoff` (that map a stand-in
+	 * with its flag 1), 7 `elem0` (an array's element 0 alone); round 5 (rt), as ObjCellShade's: 9 `restir`, 10 `atlas` (that
+	 * texel buffer copied from one texel on), 11 `gihalf`, 12 `gikey` (that image dropped) */
+	int red = 0;
+	bool rt = false;  //!< round 5: GL's program is the RT GI variant (WW_CELL_RTDDGI + RTDDGI_CASCADES + RESTIR): its pixel twin
+};
+bool objPfxShade( GlProc gp, const ObjPfxShade & s, std::string & why );
+//! the red's name (WW_VKVIEW_OBJPFX_RED: offset | light | depth | nmap | grey | cubeoff | elem0 | restir | atlas | gihalf | gikey)
+//! as ObjPfxShade.red, 0 else
+int objPfxRed( const char * name );
 /*! objBlShade's frame read on its own: GL's draw framebuffer as d's targets (every colour draw buffer and the depth / stencil
  * a shared target: keys, formats, size, samples; the tone frame's too, as borrowed shared targets), the viewport the whole
  * frame, the fixed state (objBlTargetState with `red`), GL's scissor box clamped to the frame (d.scissor; the frame when the

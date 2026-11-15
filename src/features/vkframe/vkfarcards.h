@@ -13,7 +13,8 @@ struct FarTwinStat
 	double mb = 0.0;
 	std::string failWhy;
 };
-/*! a twin sharedTarget does not make: type 0 2D, 2 2D array (layers), 3 cube-map array (layers = 6 x cubes);
+/*! a twin sharedTarget does not make: type 0 2D, 2 2D array (layers), 3 cube-map array (layers = 6 x cubes), 4 a plain cube
+ * (layers 6, square; GL_TEXTURE_CUBE_MAP, lane VKOBJ5: the particles' CubeMap);
  * glFmt a BC name (S3TC / RGTC / BPTC, sRGB too), GL_DEPTH_COMPONENT16, or one of sharedTarget's colour formats.
  * GL draws / copies into tex as into its own texture (GL_TEXTURE_2D, _2D_ARRAY, _CUBE_MAP_ARRAY); the present device
  * samples the same memory. Keyed like sharedTarget (its own map); refused without textureCompressionBC / imageCubeArray. */

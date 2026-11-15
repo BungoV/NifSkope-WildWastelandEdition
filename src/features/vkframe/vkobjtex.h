@@ -49,8 +49,9 @@ struct ObjTexStat
 	double loadMs = 0.0;
 };
 /*! VKOBJ4: the twins made since the last flush go to the present device as GENERAL in one hand-over (GL signals once with
- * all of them, one submit waits it). objTexFrame calls it; a Vulkan draw that samples them calls it first */
-void objTexFlush();
+ * all of them, one submit waits it). objTexFrame calls it; a Vulkan draw that samples them calls it first. lane VKOBJ5:
+ * false (why) when the hand-over's fence wait missed (red WW_VKFENCE_RED=objtex): the frame stays on GL */
+bool objTexFlush( std::string & why );
 /*! once a frame: the batch flushed, the twins gone since the last call freed (drain + one idle wait), then the counters
  * since the last call (twins / handles / mb: live; load: the cell's) */
 ObjTexStat objTexFrame();

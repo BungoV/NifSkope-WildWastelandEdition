@@ -13,6 +13,10 @@
 #include "features/vkframe/objcell_pbrm_ps.spv.h"  // pbrm_default.prog's pixel twin (its vertex stage is objcell_vs)
 #include "features/vkframe/objcell_pbrmcell_ps.spv.h"     // pbrm_cell.prog's (the cell-lit pbrm_default)
 #include "features/vkframe/objcell_pbrmcellcsm_ps.spv.h"  // pbrm_cellcsm.prog's (and the sun cascades)
+#include "features/vkframe/objpfx_cs.spv.h"       // lane VKOBJ5: particles_cell.prog's record pass, expand stage, pixel twin
+#include "features/vkframe/objpfx_vs.spv.h"       // (vkframe_spirv.sh fxp)
+#include "features/vkframe/objpfx_cell_ps.spv.h"
+#include "features/vkframe/objpfx_cell_rt_ps.spv.h"  // round 5: its RT GI variant
 #include "features/vkframe/objcell_effectcell_ps.spv.h"   // fo4_effectcell.prog's (+ WW_CELL_AIRZONE, ships on)
 #include "features/vkframe/objcell_effectdecalcsm_ps.spv.h"  // fo4_effectdecalcsm.prog's
 // the all-on route's RT GI variant (WW_CELL_RTDDGI + RTDDGI_CASCADES + RESTIR) of each (pbrm_default's code is the same)
@@ -99,9 +103,16 @@ struct OpDraw
 	std::uintptr_t poolKey = 0;
 	VkFramebuffer fb = VK_NULL_HANDLE;
 	std::vector<VkImageView> fbViews;
+	std::uint64_t fbGen = 0;  // lane VKOBJ5: sharedGen() when made (a target remade can hand back the same view handle)
 	int w = 0, h = 0;
 	VkRect2D scissor {};  // lane VKOBJ4 open item 3: GL's scissor box (objBlFrameRead), the whole frame when GL's test is off
 	std::vector<std::uintptr_t> keys;  // the shared targets it draws into or reads (the crossing hands them over)
+	// lane VKOBJ5 (objPfxShade): the record pass's set (its own pool), the inputs (host) and the records it writes
+	bool pfx = false;
+	VkDescriptorPool cpool = VK_NULL_HANDLE;
+	VkDescriptorSet cset = VK_NULL_HANDLE;
+	CsmBuf pfxIn, pfxRec;
+	std::uint32_t pfxN = 0;
 };
 
 // a set-0 image no one gives: a 1x1 (0,0,0,1) of its shape and element type (GL's incomplete texture)
@@ -133,6 +144,8 @@ struct OpTexel
 	VkBuffer viewBuf = VK_NULL_HANDLE;
 	VkFormat viewFmt = VK_FORMAT_UNDEFINED;
 	VkDeviceSize viewRange = 0, viewOff = 0;
+	std::uint64_t sig = 0;   // lane VKOBJ5: GL's view of the name when made (buffer, format, range, buffer size)
+	std::uint32_t gen = 0;   // lane VKOBJ5: one more each time the name's twin is made anew
 };
 
 // a light buffer GL writes straight into exported Vulkan memory (objBlTexelStore; the crossing reads it in place)
@@ -156,8 +169,10 @@ struct Op
 	std::map<std::uint32_t, OpStandIn> stand;  // key: view type * 4 + element type
 	CsmBuf zeroTexel;
 	VkBufferView texelView[3] = {};             // float / int / uint
-	std::map<unsigned, OpTexel> texTwins;       // GL's buffer texture -> its twin
+	std::map<unsigned, OpTexel> texTwins;       // GL's buffer texture -> its twin (the name's current generation)
+	std::vector<OpTexel> texRetired;            // lane VKOBJ5: older generations the prepared draws still read (objBlDrawsReset frees them)
 	std::map<unsigned, OpStore> stores;         // GL's buffer name -> the store under it
+	std::vector<OpStore> storeRetired;          // lane VKOBJ5: stores dropped while a crossing's wait missed (freed at objBlDrawsReset)
 	std::map<unsigned, std::uint64_t> copyMemo; // lane VKWATER3: GL's texture -> sharedGen() when copied this frame (objCellCopyTwin)
 	std::map<unsigned, std::uint64_t> texelMemo; // lane VKWATER3: GL's buffer texture -> its copy's key, copied this frame (objBlTexelCopy)
 	GLuint storeStage = 0;                      // GL's staging buffer, only if a store refuses glNamedBufferSubData
@@ -188,6 +203,12 @@ struct Op
 	VkImageView smpStencil = VK_NULL_HANDLE;  // the depth target's stencil aspect, made per readback
 	CsmBuf smpOut;                            // host-visible: one uint4 per sample
 	std::uint32_t smpJob[4] = {};             // w, h, samples, red (objbl_samples_cs.hlsl's ReadJob)
+	// lane VKOBJ5: the record pass's pipeline (objPfxShade), made from its module's own bindings
+	const std::uint32_t * pfxCs = nullptr;
+	std::vector<WwVkPresent::SpvBind> pfxBinds;
+	VkDescriptorSetLayout pfxDsl = VK_NULL_HANDLE;
+	VkPipelineLayout pfxLayout = VK_NULL_HANDLE;
+	VkPipeline pfxPipe = VK_NULL_HANDLE;
 };
 
 Op & opS()
@@ -203,7 +224,7 @@ bool opSame( const OpEntry & e, int twin, const std::uint32_t * vs, std::size_t 
 		return false;
 	const WwVkPresent::ObjBlTarget & u = e.target;
 	if ( std::memcmp( t.colors, u.colors, sizeof( t.colors ) ) || t.colorCount != u.colorCount || t.depth != u.depth || t.samples != u.samples
-		|| t.depthOp != u.depthOp || t.depthWrite != u.depthWrite || t.twoSided != u.twoSided
+		|| t.depthOp != u.depthOp || t.depthWrite != u.depthWrite || t.twoSided != u.twoSided || t.strip != u.strip
 		|| std::memcmp( &t.blend, &u.blend, sizeof( t.blend ) ) || std::memcmp( &t.stencil, &u.stencil, sizeof( t.stencil ) ) )
 		return false;
 	for ( std::size_t i = 0; i < b.size(); i++ )
@@ -240,9 +261,13 @@ void opDrawFree( OpDraw & d )
 		v.vkDestroyFramebuffer( v.dev, d.fb, nullptr );
 	if ( d.dpool )
 		v.vkDestroyDescriptorPool( v.dev, d.dpool, nullptr );
+	if ( d.cpool )
+		v.vkDestroyDescriptorPool( v.dev, d.cpool, nullptr );
 	for ( auto & u : d.ubo )
 		csmBufFree( u.second, false );
 	csmBufFree( d.cmds, false );
+	csmBufFree( d.pfxIn, false );
+	csmBufFree( d.pfxRec, false );
 	d = OpDraw();
 }
 
@@ -452,35 +477,49 @@ bool spvReflect( const std::uint32_t * w, std::size_t n, SpvModule & out, std::s
 			b.type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
 		else if ( x.op == 30 && v.storage == 2 && block.count( t ) ) {
 			b.type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-			// the members: scalar / vector / matrix, or an array of one (a nested struct is base 3: the mirror refuses it)
-			const std::vector<std::uint32_t> & mt = structMembers[t];
-			for ( std::uint32_t k = 0; k < mt.size(); k++ ) {
-				SpvMember m;
-				m.name = memberNames[t].count( k ) ? memberNames[t][k] : "%" + std::to_string( k );
-				m.offset = memberOffset[t].count( k ) ? memberOffset[t][k] : 0;
-				m.colStride = memberStride[t].count( k ) ? memberStride[t][k] : 0;
-				m.rowMajor = memberRowMajor[t].count( k ) != 0;
-				Ty e = ty( mt[k] );
-				if ( e.op == 28 ) {
-					m.count = constants.count( e.b ) ? constants[e.b] : 1;
-					m.arrayStride = arrayStride.count( mt[k] ) ? arrayStride[mt[k]] : 0;
-					e = ty( e.a );
+			// the members: scalar / vector / matrix, or an array of one. A nested struct (or an array of them, particles'
+			// Texture textures[10]) is walked into one member a field and element, named as GL names them
+			// ("textures[3].uvScale"); deeper than 4 levels stays base 3 and the mirror refuses it
+			auto walk = [&]( auto & self, std::uint32_t st, const std::string & pre, std::uint32_t at, int depth ) -> void {
+				const std::vector<std::uint32_t> mt = structMembers[st];
+				for ( std::uint32_t k = 0; k < mt.size(); k++ ) {
+					SpvMember m;
+					m.name = pre + ( memberNames[st].count( k ) ? memberNames[st][k] : "%" + std::to_string( k ) );
+					m.offset = at + ( memberOffset[st].count( k ) ? memberOffset[st][k] : 0 );
+					m.colStride = memberStride[st].count( k ) ? memberStride[st][k] : 0;
+					m.rowMajor = memberRowMajor[st].count( k ) != 0;
+					std::uint32_t tid = mt[k];
+					Ty e = ty( tid );
+					const bool arr = e.op == 28;
+					if ( arr ) {
+						m.count = constants.count( e.b ) ? constants[e.b] : 1;
+						m.arrayStride = arrayStride.count( tid ) ? arrayStride[tid] : 0;
+						tid = e.a;
+						e = ty( tid );
+					}
+					if ( e.op == 30 && depth < 4 ) {
+						for ( std::uint32_t el = 0; el < m.count; el++ )
+							self( self, tid, m.name + ( arr ? "[" + std::to_string( el ) + "]" : "" ) + ".", m.offset + el * m.arrayStride,
+								depth + 1 );
+						continue;
+					}
+					if ( e.op == 24 ) {
+						m.cols = e.b;
+						e = ty( e.a );
+					}
+					if ( e.op == 23 ) {
+						m.comps = e.b;
+						e = ty( e.a );
+					}
+					m.base = e.op == 22 ? 0 : e.op == 21 ? ( e.b ? 1 : 2 ) : 3;
+					// the member's extent: the last element's last component
+					const std::uint32_t one = m.cols > 1 ? ( m.rowMajor ? ( m.comps - 1 ) * m.colStride + m.cols * 4 : ( m.cols - 1 ) * m.colStride + m.comps * 4 )
+						: m.comps * 4;
+					b.bytes = std::max( b.bytes, m.offset + ( m.count - 1 ) * m.arrayStride + one );
+					b.members.push_back( m );
 				}
-				if ( e.op == 24 ) {
-					m.cols = e.b;
-					e = ty( e.a );
-				}
-				if ( e.op == 23 ) {
-					m.comps = e.b;
-					e = ty( e.a );
-				}
-				m.base = e.op == 22 ? 0 : e.op == 21 ? ( e.b ? 1 : 2 ) : 3;
-				// the member's extent: the last element's last component
-				const std::uint32_t one = m.cols > 1 ? ( m.rowMajor ? ( m.comps - 1 ) * m.colStride + m.cols * 4 : ( m.cols - 1 ) * m.colStride + m.comps * 4 )
-					: m.comps * 4;
-				b.bytes = std::max( b.bytes, m.offset + ( m.count - 1 ) * m.arrayStride + one );
-				b.members.push_back( m );
-			}
+			};
+			walk( walk, t, "", 0u, 0 );
 			b.bytes = ( b.bytes + 15u ) & ~15u;
 		} else {
 			why = nm + ": a descriptor type the reader does not take";
@@ -716,7 +755,7 @@ bool objBlPipe( int twin, const std::uint32_t * vs, std::size_t vsN, const std::
 	vi.vertexAttributeDescriptionCount = std::uint32_t( va.size() );
 	vi.pVertexAttributeDescriptions = va.data();
 	VkPipelineInputAssemblyStateCreateInfo ia { VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO };
-	ia.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+	ia.topology = target.strip ? VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP : VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
 	// GL's clip z as the prepass takes it (objPipe), GL's CCW front = Vulkan's CW with no y flip
 	VkPipelineViewportDepthClipControlCreateInfoEXT cc { VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_DEPTH_CLIP_CONTROL_CREATE_INFO_EXT };
 	cc.negativeOneToOne = VK_TRUE;
@@ -928,7 +967,7 @@ void objBlPipeFree()
 {
 	Op & O = opS();
 	if ( ( !O.made.empty() || !O.pools.empty() || !O.draws.empty() || !O.stand.empty() || O.zeroTexel.buf || O.fence || O.runFence || O.glDone
-		|| !O.smps.empty() || !O.texTwins.empty() || O.smpDsl || !O.stores.empty() ) && vk().ok ) {
+		|| !O.smps.empty() || !O.texTwins.empty() || !O.texRetired.empty() || O.smpDsl || !O.stores.empty() || O.pfxDsl ) && vk().ok ) {
 		Vk & v = vk();
 		drain();
 		v.vkDeviceWaitIdle( v.dev );
@@ -952,6 +991,17 @@ void objBlPipeFree()
 		O.smpDsl = VK_NULL_HANDLE;
 		O.smpSet = VK_NULL_HANDLE;
 		csmBufFree( O.smpOut, false );
+		if ( O.pfxPipe )
+			v.vkDestroyPipeline( v.dev, O.pfxPipe, nullptr );
+		if ( O.pfxLayout )
+			v.vkDestroyPipelineLayout( v.dev, O.pfxLayout, nullptr );
+		if ( O.pfxDsl )
+			v.vkDestroyDescriptorSetLayout( v.dev, O.pfxDsl, nullptr );
+		O.pfxPipe = VK_NULL_HANDLE;
+		O.pfxLayout = VK_NULL_HANDLE;
+		O.pfxDsl = VK_NULL_HANDLE;
+		O.pfxCs = nullptr;
+		O.pfxBinds.clear();
 		for ( OpDraw & d : O.draws )
 			opDrawFree( d );
 		O.draws.clear();
@@ -980,10 +1030,19 @@ void objBlPipeFree()
 			csmBufFree( t.second.buf, gl().ok && t.second.buf.glCtx == gl().ctx );
 		}
 		O.texTwins.clear();
+		for ( OpTexel & t : O.texRetired ) {
+			if ( t.view && destroyView )
+				destroyView( v.dev, t.view, nullptr );
+			csmBufFree( t.buf, gl().ok && t.buf.glCtx == gl().ctx );
+		}
+		O.texRetired.clear();
 		// the stores (their owners see objBlTexelStoreIs false and fill a GL buffer of their own again)
 		for ( auto & s : O.stores )
 			csmBufFree( s.second.buf, gl().ok && s.second.buf.glCtx == gl().ctx );
 		O.stores.clear();
+		for ( OpStore & s : O.storeRetired )
+			csmBufFree( s.buf, gl().ok && s.buf.glCtx == gl().ctx );
+		O.storeRetired.clear();
 		if ( O.storeStage && gl().ok && gl().ctx == reinterpret_cast<void *>( wglGetCurrentContext() ) )
 			gl().deleteBuffers( 1, &O.storeStage );
 		O.storeStage = 0;
@@ -1317,7 +1376,7 @@ bool objBlBlock( GlProc gp, unsigned prog, const SpvBind & block, std::vector<st
 	return true;
 }
 
-bool objBlTextures( GlProc gp, unsigned prog, const SpvModule & m, std::vector<ObjBlTexUnit> & out, std::string & why )
+bool objBlTextures( GlProc gp, unsigned prog, const SpvModule & m, std::vector<ObjBlTexUnit> & out, std::string & why, bool elems )
 {
 	out.clear();
 	OuGl g;
@@ -1333,39 +1392,45 @@ bool objBlTextures( GlProc gp, unsigned prog, const SpvModule & m, std::vector<O
 	for ( const SpvBind & b : m.binds ) {
 		if ( b.set != 0 || b.type == VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER || b.type == VK_DESCRIPTOR_TYPE_STORAGE_BUFFER )
 			continue;
-		ObjBlTexUnit u;
-		u.binding = b.binding;
-		u.type = b.type;
-		u.name = b.name;
-		const SpvBind * img = &b;
-		if ( b.type == VK_DESCRIPTOR_TYPE_SAMPLER ) {
-			// spirv-cross names a texture's sampler _<texture>_sampler
-			const std::size_t n = b.name.size();
-			if ( n > 9 && b.name[0] == '_' && b.name.compare( n - 8, 8, "_sampler" ) == 0 )
-				u.name = b.name.substr( 1, n - 9 );
-			auto it = images.find( u.name );
-			img = it == images.end() ? nullptr : it->second;
-		}
-		if ( img ) {
-			u.dim = img->dim;
-			u.arrayed = img->arrayed;
-		}
-		int loc = g.getUniformLocation( prog, u.name.c_str() );
-		if ( loc < 0 )
-			loc = al.at( u.name, 0 );  // linked from SPIR-V: the registry's location
-		if ( loc >= 0 && img ) {
-			g.getUniformiv( prog, loc, &u.unit );
-			unsigned query = 0;
-			ouTarget( u.dim, u.arrayed, u.glTarget, query );
-			if ( query && u.unit >= 0 ) {
-				int tex = 0;
-				g.activeTexture( 0x84C0u + unsigned( u.unit ) );  // TEXTURE0 + unit
-				g.getIntegerv( query, &tex );
-				u.glTex = unsigned( tex );
+		// lane VKOBJ5 (elems): each element of an array on its own unit, keyed binding + element as the set writer reads it
+		const std::uint32_t nEl = elems && b.count > 1 ? b.count : 1;
+		for ( std::uint32_t e = 0; e < nEl; e++ ) {
+			ObjBlTexUnit u;
+			u.binding = b.binding + e;
+			u.elem = e;
+			u.type = b.type;
+			u.name = b.name;
+			const SpvBind * img = &b;
+			if ( b.type == VK_DESCRIPTOR_TYPE_SAMPLER ) {
+				// spirv-cross names a texture's sampler _<texture>_sampler
+				const std::size_t n = b.name.size();
+				if ( n > 9 && b.name[0] == '_' && b.name.compare( n - 8, 8, "_sampler" ) == 0 )
+					u.name = b.name.substr( 1, n - 9 );
+				auto it = images.find( u.name );
+				img = it == images.end() ? nullptr : it->second;
 			}
-		} else
-			u.unit = -1;
-		out.push_back( u );
+			if ( img ) {
+				u.dim = img->dim;
+				u.arrayed = img->arrayed;
+			}
+			const std::string glName = nEl > 1 ? u.name + "[" + std::to_string( e ) + "]" : u.name;
+			int loc = g.getUniformLocation( prog, glName.c_str() );
+			if ( loc < 0 )
+				loc = al.at( u.name, e );  // linked from SPIR-V: the registry's location
+			if ( loc >= 0 && img ) {
+				g.getUniformiv( prog, loc, &u.unit );
+				unsigned query = 0;
+				ouTarget( u.dim, u.arrayed, u.glTarget, query );
+				if ( query && u.unit >= 0 ) {
+					int tex = 0;
+					g.activeTexture( 0x84C0u + unsigned( u.unit ) );  // TEXTURE0 + unit
+					g.getIntegerv( query, &tex );
+					u.glTex = unsigned( tex );
+				}
+			} else
+				u.unit = -1;
+			out.push_back( u );
+		}
 	}
 	g.activeTexture( unsigned( active ) );
 	return true;
@@ -1475,6 +1540,68 @@ std::uintptr_t objCellCopyTwin( GlProc gp, const ObjBlTexUnit & u, int red, std:
 	return key;
 }
 
+/* lane VKOBJ5 round 5: a plain GL_TEXTURE_CUBE_MAP (the particles' CubeMap with hasCubeMap 1: the .bgem's env cube, BC or
+ * RGBA) as a plain-cube twin (farTwin type 4: a CUBE view of 6 layers, GL's own format and levels), GL's 6 faces of every
+ * level copied in (glCopyImageSubData) once a frame like objCellCopyTwin; GL's sampler state is read for it as for any unit */
+std::uintptr_t objCubeCopyTwin( GlProc gp, const ObjBlTexUnit & u, std::string & why )
+{
+	Gl & g = gl();
+	using LevelIv = void( WINAPI * )( unsigned, int, unsigned, int * );
+	using TexIv = void( WINAPI * )( unsigned, unsigned, int * );
+	const auto lv = gp ? reinterpret_cast<LevelIv>( gp( "glGetTextureLevelParameteriv" ) ) : nullptr;
+	const auto tv = gp ? reinterpret_cast<TexIv>( gp( "glGetTextureParameteriv" ) ) : nullptr;
+	if ( !lv || !tv || !g.copyImageSubData )
+		return why = "no glGetTextureLevelParameteriv / glCopyImageSubData", 0;
+	if ( u.glTarget != kFcCube )
+		return why = "GL target " + std::to_string( u.glTarget ) + " is no plain cube", 0;
+	int w = 0, h = 0, fmt = 0, minF = 0, immLevels = 0, decode = 0;
+	lv( u.glTex, 0, 0x1000, &w );       // TEXTURE_WIDTH
+	lv( u.glTex, 0, 0x1001, &h );       // TEXTURE_HEIGHT
+	lv( u.glTex, 0, 0x1003, &fmt );     // TEXTURE_INTERNAL_FORMAT
+	tv( u.glTex, 0x2801, &minF );       // TEXTURE_MIN_FILTER
+	tv( u.glTex, 0x82DF, &immLevels );  // TEXTURE_IMMUTABLE_LEVELS
+	tv( u.glTex, 0x8A48, &decode );     // TEXTURE_SRGB_DECODE_EXT
+	if ( w < 1 || w != h )
+		return why = "an empty or non-square GL cube", 0;
+	int levels = 1;
+	if ( minF != 0x2600 && minF != 0x2601 ) {  // a mip filter: every level GL holds
+		levels = immLevels > 0 ? immLevels : 0;
+		for ( int l = 0, lw = 0; !immLevels && l < 16 && ( lv( u.glTex, l, 0x1000, &lw ), lw > 0 ); l++ )
+			levels = l + 1;
+	}
+	const FcFormat f = fcFormat( GLenum( fmt ) );
+	if ( f.fmt == VK_FORMAT_UNDEFINED || f.depth )
+		return why = "GL format " + std::to_string( fmt ) + " has no cube twin", 0;
+	if ( blIsSrgb( f.fmt ) && decode == 0x8A4A )
+		return why = "an sRGB cube with its decode skipped", 0;
+	int swz[4] = { 0x1903, 0x1904, 0x1905, 0x1906 };
+	tv( u.glTex, 0x8E46, swz );  // TEXTURE_SWIZZLE_RGBA (the DDS loader sets one on BC4 / BC5 / luminance): the cube view has none
+	if ( swz[0] != 0x1903 || swz[1] != 0x1904 || swz[2] != 0x1905 || swz[3] != 0x1906 )
+		return why = "a swizzled GL cube (the cube twin's view is the identity)", 0;
+	const std::uintptr_t key = ( std::uintptr_t( 0xC0B ) << 40 ) | std::uintptr_t( u.glTex );
+	unsigned twin = 0;
+	if ( !farTwin( key, 4, w, w, 6, unsigned( fmt ), twin, why, levels ) || !twin )
+		return 0;
+	const std::uint64_t gen = sharedGen();
+	auto it = opS().copyMemo.find( u.glTex );
+	if ( it != opS().copyMemo.end() && it->second == gen )
+		return key;  // copied this frame
+	const double t0 = nowMs();
+	std::uint64_t bytes = 0;
+	for ( int l = 0; l < levels; l++ ) {
+		const int lw = std::max( w >> l, 1 );
+		g.copyImageSubData( u.glTex, kFcCube, l, 0, 0, 0, twin, kFcCube, l, 0, 0, 0, lw, lw, 6 );
+		bytes += 6ull * ( f.block ? std::uint64_t( ( lw + 3 ) / 4 ) * std::uint64_t( ( lw + 3 ) / 4 ) * std::uint64_t( f.block )
+			: std::uint64_t( lw ) * std::uint64_t( lw ) * std::uint64_t( f.texel ) );
+	}
+	opS().copyMemo[u.glTex] = gen;
+	ObjBlRunStat & rs = opS().st;
+	rs.copies++;
+	rs.copyBytes += bytes;
+	rs.copyMs += nowMs() - t0;
+	return key;
+}
+
 bool objBlBindUnits(GlProc gp, unsigned prog, ObjBlDraw & d, ObjBlBindStat & st, std::string & why )
 {
 	const std::uint32_t * words[2] = { d.vs, d.ps };
@@ -1484,9 +1611,13 @@ bool objBlBindUnits(GlProc gp, unsigned prog, ObjBlDraw & d, ObjBlBindStat & st,
 		if ( !spvReflect( words[m], counts[m], mod, why ) )
 			return false;
 		std::vector<ObjBlTexUnit> units;
-		if ( !objBlTextures( gp, prog, mod, units, why ) )
+		if ( !objBlTextures( gp, prog, mod, units, why, d.unitElems ) )
 			return false;
 		for ( const ObjBlTexUnit & u : units ) {
+			if ( std::find( d.unitsOff.begin(), d.unitsOff.end(), u.name ) != d.unitsOff.end() ) {
+				st.gatedOff++;  // lane VKOBJ5: the stage never samples it (its flag 0): a stand-in, not resolved
+				continue;
+			}
 			if ( u.type == VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER ) {
 				if ( !u.glTex ) {
 					st.unbound++;
@@ -1562,8 +1693,23 @@ bool objBlBindUnits(GlProc gp, unsigned prog, ObjBlDraw & d, ObjBlBindStat & st,
 				}
 				st.copied++;
 			}
+			// lane VKOBJ5 round 5: the particles' CubeMap (a plain cube) through its plain-cube copy twin
+			if ( !key && d.twin == kObjTwinPfx && u.dim == 3 && !u.arrayed ) {
+				key = objCubeCopyTwin( gp, u, w );
+				if ( !key ) {
+					st.misfit++;
+					if ( st.misfitWhy.empty() )
+						st.misfitWhy = u.name + ": " + w;
+					continue;
+				}
+				st.copied++;
+				d.images.emplace_back( u.binding, key );
+				st.shared++;
+				continue;
+			}
 			if ( !key ) {
 				st.glOwn++;
+				st.glOwnNames += ( st.glOwnNames.empty() ? "" : "," ) + u.name + ( u.elem ? "[" + std::to_string( u.elem ) + "]" : "" );  // lane VKOBJ5: named in the refusal
 				continue;
 			}
 			if ( !objBlSharedFits( key, u.dim, u.arrayed, w ) ) {
@@ -1839,8 +1985,7 @@ void opStoreUnview( VkBuffer b )
 {
 	Vk & v = vk();
 	const auto destroy = reinterpret_cast<PFN_vkDestroyBufferView>( v.vkGetDeviceProcAddr( v.dev, "vkDestroyBufferView" ) );
-	for ( auto & e : opS().texTwins ) {
-		OpTexel & t = e.second;
+	const auto unview = [&]( OpTexel & t ) {
 		if ( t.ext == b ) {
 			t.ext = VK_NULL_HANDLE;
 			t.range = 0;
@@ -1851,7 +1996,24 @@ void opStoreUnview( VkBuffer b )
 			t.view = VK_NULL_HANDLE;
 			t.viewBuf = VK_NULL_HANDLE;
 		}
+	};
+	for ( auto & e : opS().texTwins )
+		unview( e.second );
+	for ( OpTexel & t : opS().texRetired )
+		unview( t );
+}
+
+// a texel twin's view and buffer freed (Vulkan's last read of them done)
+void opTexelFree( OpTexel & t )
+{
+	Vk & v = vk();
+	if ( t.view && v.ok ) {
+		const auto destroy = reinterpret_cast<PFN_vkDestroyBufferView>( v.vkGetDeviceProcAddr( v.dev, "vkDestroyBufferView" ) );
+		if ( destroy )
+			destroy( v.dev, t.view, nullptr );
 	}
+	t.view = VK_NULL_HANDLE;
+	csmBufFree( t.buf, gl().ok && t.buf.glCtx == gl().ctx );
 }
 
 // the worker's half of objBlTexelRead: the view's bytes copied to the host, submitted after GL's signal, ours signalled back
@@ -1920,8 +2082,20 @@ bool objBlDrawRecord( VkCommandBuffer cmd, int mode, std::string & why )
 			return why = "a draw's pipeline went", false;
 		const OpEntry & e = O.made[d.entry];
 		VkBuffer vb[17] = {}, ib = VK_NULL_HANDLE;
-		if ( !WwVkPresent::objBlPoolBinds( d.poolKey, vb, ib ) )
+		if ( !d.pfx && !WwVkPresent::objBlPoolBinds( d.poolKey, vb, ib ) )
 			return why = "a draw's class has no twins", false;
+		if ( d.pfx ) {  // lane VKOBJ5: the record pass, its records before the expand stage reads them
+			if ( !O.pfxPipe || !v.vkCmdDispatch || !v.vkCmdDraw )
+				return why = "a particle draw has no record pass", false;
+			v.vkCmdBindPipeline( cmd, VK_PIPELINE_BIND_POINT_COMPUTE, O.pfxPipe );
+			v.vkCmdBindDescriptorSets( cmd, VK_PIPELINE_BIND_POINT_COMPUTE, O.pfxLayout, 0, 1, &d.cset, 0, nullptr );
+			v.vkCmdDispatch( cmd, ( d.pfxN + 63 ) / 64, 1, 1 );
+			VkMemoryBarrier rb { VK_STRUCTURE_TYPE_MEMORY_BARRIER };
+			rb.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+			rb.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+			v.vkCmdPipelineBarrier( cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_VERTEX_SHADER_BIT, 0, 1, &rb, 0, nullptr, 0,
+				nullptr );
+		}
 		// the draw before wrote the same targets: its writes before this pass's tests and writes
 		VkMemoryBarrier mb { VK_STRUCTURE_TYPE_MEMORY_BARRIER };
 		mb.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
@@ -1943,6 +2117,11 @@ bool objBlDrawRecord( VkCommandBuffer cmd, int mode, std::string & why )
 		v.vkCmdBindPipeline( cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, e.pipe );
 		const VkDescriptorSet sets[2] = { d.dset, table };
 		v.vkCmdBindDescriptorSets( cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, e.layout, 0, 2, sets, 0, nullptr );
+		if ( d.pfx ) {  // the geom's strip: 4 vertices, one instance a record
+			v.vkCmdDraw( cmd, 4, d.pfxN, 0, 0 );
+			v.vkCmdEndRenderPass( cmd );
+			continue;
+		}
 		for ( const WwVkPresent::ObjBlBuffer & b : e.buffers ) {
 			const VkDeviceSize zero = 0;
 			v.vkCmdBindVertexBuffers( cmd, b.binding, 1, &vb[std::min<std::uint32_t>( b.binding, 16 )], &zero );
@@ -1972,14 +2151,16 @@ bool objBlDrawRecord( VkCommandBuffer cmd, int mode, std::string & why )
 	return true;
 }
 
-// the crossing's last submit done (its command buffer, the slots' host buffers and the rows are free again)
-void opRunWait()
+/* the crossing's last submit done (its command buffer, the slots' host buffers and the rows are free again). lane VKOBJ5:
+ * fenceDone's 1 s wait (red WW_VKFENCE_RED=objbl); a miss keeps pending and returns false with why: the caller stops
+ * before it touches the slot and leaves the frame to GL */
+bool opRunWait( std::string & why )
 {
 	Op & O = opS();
-	if ( !O.pending )
-		return;
-	vk().vkWaitForFences( vk().dev, 1, &O.runFence, VK_TRUE, 5000000000ull );
+	if ( !fenceDone( O.runFence, O.pending, "objbl", why ) )
+		return false;
 	O.pending = false;
+	return true;
 }
 
 // the worker's half of objBlRun: the prepared draws recorded, submitted after GL's signal, ours signalled back
@@ -2098,6 +2279,67 @@ bool opSmpMake( std::string & why )
 	return true;
 }
 
+/* lane VKOBJ5: the record pass's pipeline (objpfx_cs): its set from the module's own bindings (uniform and storage buffers,
+ * nothing else; no push constants), made once per module */
+bool opPfxMake( const std::uint32_t * cs, std::size_t csN, std::string & why )
+{
+	Vk & v = vk();
+	Op & O = opS();
+	if ( O.pfxPipe && O.pfxCs == cs )
+		return true;
+	if ( O.pfxPipe )
+		return why = "another record pass is made", false;
+	if ( O.pfxLayout )  // a half-made one before
+		v.vkDestroyPipelineLayout( v.dev, O.pfxLayout, nullptr );
+	if ( O.pfxDsl )
+		v.vkDestroyDescriptorSetLayout( v.dev, O.pfxDsl, nullptr );
+	O.pfxLayout = VK_NULL_HANDLE;
+	O.pfxDsl = VK_NULL_HANDLE;
+	if ( !v.vkCmdDispatch || !v.vkCreateComputePipelines )
+		return why = "no vkCmdDispatch / vkCreateComputePipelines", false;
+	WwVkPresent::SpvModule m;
+	if ( !WwVkPresent::spvReflect( cs, csN, m, why ) )
+		return why = "the record pass: " + why, false;
+	if ( m.stage != VK_SHADER_STAGE_COMPUTE_BIT )
+		return why = "the record pass is not a compute stage", false;
+	std::vector<VkDescriptorSetLayoutBinding> lb;
+	for ( const WwVkPresent::SpvBind & b : m.binds ) {
+		if ( b.set != 0 || b.count != 1
+			|| ( b.type != VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER && b.type != VK_DESCRIPTOR_TYPE_STORAGE_BUFFER ) )
+			return why = "the record pass's " + b.name + " is not a set-0 uniform or storage buffer", false;
+		lb.push_back( { b.binding, VkDescriptorType( b.type ), 1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr } );
+	}
+	VkDescriptorSetLayoutCreateInfo lci { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
+	lci.bindingCount = std::uint32_t( lb.size() );
+	lci.pBindings = lb.data();
+	if ( v.vkCreateDescriptorSetLayout( v.dev, &lci, nullptr, &O.pfxDsl ) != VK_SUCCESS )
+		return why = "the record pass's set layout failed", false;
+	VkPipelineLayoutCreateInfo plci { VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO };
+	plci.setLayoutCount = 1;
+	plci.pSetLayouts = &O.pfxDsl;
+	if ( v.vkCreatePipelineLayout( v.dev, &plci, nullptr, &O.pfxLayout ) != VK_SUCCESS )
+		return why = "the record pass's pipeline layout failed", false;
+	VkShaderModuleCreateInfo mci { VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO };
+	mci.codeSize = csN * 4;
+	mci.pCode = cs;
+	VkShaderModule md = VK_NULL_HANDLE;
+	if ( v.vkCreateShaderModule( v.dev, &mci, nullptr, &md ) != VK_SUCCESS )
+		return why = "the record pass's shader module failed", false;
+	VkComputePipelineCreateInfo cp { VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO };
+	cp.stage = { VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO };
+	cp.stage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+	cp.stage.module = md;
+	cp.stage.pName = "main";
+	cp.layout = O.pfxLayout;
+	const bool ok = v.vkCreateComputePipelines( v.dev, VK_NULL_HANDLE, 1, &cp, nullptr, &O.pfxPipe ) == VK_SUCCESS;
+	v.vkDestroyShaderModule( v.dev, md, nullptr );
+	if ( !ok )
+		return why = "vkCreateComputePipelines (the record pass) failed", false;
+	O.pfxCs = cs;
+	O.pfxBinds = m.binds;
+	return true;
+}
+
 // the worker's half of objBlFrameSamples: the readback recorded, submitted after GL's signal, ours signalled back
 bool opSmpWork( std::string & why )
 {
@@ -2193,9 +2435,22 @@ bool objBlMirror( GlProc gp, unsigned prog, const std::uint32_t * vs, std::size_
 
 void objBlDrawsReset()
 {
-	opRunWait();
+	/* lane VKOBJ5: a missed wait keeps the held twins and stores (the frees wait for a reset whose wait is done); the
+	 * counters go, every path that touches the slots waits again first and refuses */
+	std::string fw;
+	const bool done = opRunWait( fw );
 	opS().live = 0;
 	opS().rowCount = 0;
+	if ( !done )
+		return;
+	for ( OpTexel & t : opS().texRetired )  // no prepared draw reads an older twin now
+		opTexelFree( t );
+	opS().texRetired.clear();
+	for ( OpStore & s : opS().storeRetired ) {
+		opStoreUnview( s.buf.buf );
+		csmBufFree( s.buf, gl().ok && s.buf.glCtx == gl().ctx );
+	}
+	opS().storeRetired.clear();
 }
 
 bool objBlRun( const std::vector<unsigned> & glBufs, int mode, std::string & why )
@@ -2217,8 +2472,9 @@ bool objBlRun( const std::vector<unsigned> & glBufs, int mode, std::string & why
 		return true;  // nothing prepared: nothing crosses
 	if ( mode < 0 || mode > 2 )
 		return refuse( "mode " + std::to_string( mode ) );
-	opRunWait();
 	std::string w;
+	if ( !opRunWait( w ) )
+		return refuse( w );
 	if ( !opRunMake( w ) )
 		return refuse( w );
 	// the textures: every shared target a draw writes or reads, once
@@ -2541,8 +2797,7 @@ bool objBlFrameSamples( unsigned colorTex, unsigned dsTex, std::vector<std::uint
 		return why = "the depth target has no stencil (the readback reads a depth-stencil frame)", false;
 	if ( col->samples < 2 || !col->view || !ds->img )
 		return why = "the readback reads a multisampled frame", false;
-	opRunWait();
-	if ( !opRunMake( why ) || !opSmpMake( why ) )
+	if ( !opRunWait( why ) || !opRunMake( why ) || !opSmpMake( why ) )
 		return false;
 	const std::size_t n = std::size_t( col->w ) * std::size_t( col->h ) * std::size_t( col->samples );
 	if ( !opHostBuf( O.smpOut, n * 16, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, why ) )
@@ -2583,9 +2838,76 @@ bool objBlFrameSamples( unsigned colorTex, unsigned dsTex, std::vector<std::uint
 		return false;  // nothing signals vkDone: GL does not wait it
 	g.waitSemaphore( O.vkDoneGl, 0, nullptr, 2, texs, lay );
 	O.pending = true;
-	opRunWait();
+	if ( !opRunWait( why ) )
+		return false;  // the readback may still run: its host copy is not read
 	out.resize( n * 4 );
 	std::memcpy( out.data(), O.smpOut.ptr, n * 16 );
+	return true;
+}
+
+/* lane VKOBJ5 (an unpooled bl shape, objBlShade's ownVao): the bound VAO as a pool, read as objCellShade reads it (lane
+ * VKWATER3's reader, kept as it is there): per location in `need` (comps: the stage's components) enabled, 1 to 4 floats or
+ * halves, not normalised or integer, divisor 0, its buffer / offset / stride; a disabled one must hold (0,0,0,1). The
+ * index buffer: the VAO's (GL_UNSIGNED_SHORT, BUFFER_SIZE / 2 indices). red 1 reads every attribute from offset 0 */
+static bool objOwnVao( GlProc gp, std::uint32_t need, const std::uint32_t * comps, int red, ObjBlPool & pool, std::string & why )
+{
+	using GetIv = void( WINAPI * )( unsigned, int * );
+	using GetIiv = void( WINAPI * )( unsigned, unsigned, int * );
+	using GetAfv = void( WINAPI * )( unsigned, unsigned, float * );
+	const auto getIv = gp ? reinterpret_cast<GetIv>( gp( "glGetIntegerv" ) ) : nullptr;
+	const auto getIiv = gp ? reinterpret_cast<GetIiv>( gp( "glGetIntegeri_v" ) ) : nullptr;
+	const auto getAiv = gp ? reinterpret_cast<GetIiv>( gp( "glGetVertexAttribiv" ) ) : nullptr;
+	const auto getAfv = gp ? reinterpret_cast<GetAfv>( gp( "glGetVertexAttribfv" ) ) : nullptr;
+	const auto getBiv = gp ? reinterpret_cast<GetIiv>( gp( "glGetNamedBufferParameteriv" ) ) : nullptr;
+	if ( !getIv || !getIiv || !getAiv || !getAfv || !getBiv )
+		return why = "GL has no glGetIntegeri_v / glGetVertexAttribiv / glGetVertexAttribfv / glGetNamedBufferParameteriv", false;
+	const std::size_t verts = pool.verts;
+	pool = ObjBlPool();
+	pool.verts = verts;
+	for ( unsigned l = 0; l < 16; l++ ) {
+		if ( !( need >> l & 1u ) )
+			continue;
+		const std::string at = "GL location " + std::to_string( l ) + ": ";
+		int on = 0, size = 0, type = 0, norm = 0, integer = 0, bind = 0, rel = 0, buf = 0, off = 0, stride = 0, div = 0;
+		getAiv( l, 0x8622u, &on );  // VERTEX_ATTRIB_ARRAY_ENABLED
+		if ( !on ) {
+			float c[4] = {};
+			getAfv( l, 0x8626u, c );  // CURRENT_VERTEX_ATTRIB
+			if ( c[0] != 0.0f || c[1] != 0.0f || c[2] != 0.0f || c[3] != 1.0f )
+				return why = at + "disabled with a current value other than (0,0,0,1)", false;
+			continue;  // the constant binding
+		}
+		getAiv( l, 0x8623u, &size );     // SIZE
+		getAiv( l, 0x8625u, &type );     // TYPE
+		getAiv( l, 0x886Au, &norm );     // NORMALIZED
+		getAiv( l, 0x88FDu, &integer );  // INTEGER
+		getAiv( l, 0x82D4u, &bind );     // VERTEX_ATTRIB_BINDING
+		getAiv( l, 0x82D5u, &rel );      // VERTEX_ATTRIB_RELATIVE_OFFSET
+		getIiv( 0x8F4Fu, unsigned( bind ), &buf );     // VERTEX_BINDING_BUFFER
+		getIiv( 0x82D7u, unsigned( bind ), &off );     // VERTEX_BINDING_OFFSET
+		getIiv( 0x82D8u, unsigned( bind ), &stride );  // VERTEX_BINDING_STRIDE
+		getIiv( 0x82D6u, unsigned( bind ), &div );     // VERTEX_BINDING_DIVISOR
+		if ( size < 1 || size > 4 || ( type != 0x1406 && type != 0x140B ) || norm || integer )
+			return why = at + "not 1 to 4 floats or halves (size " + std::to_string( size ) + ", type " + std::to_string( type ) + ")", false;
+		if ( div || !buf || off < 0 || rel < 0 || stride < 0 )
+			return why = at + "instanced, or no buffer", false;
+		const bool half = type == 0x140B;
+		if ( half && size == 3 && comps[l] > 3 )
+			return why = at + "3 halves the stage reads as 4", false;
+		pool.attrMask |= std::uint64_t( size ) << ( 4 * l );
+		pool.vbo[l] = unsigned( buf );
+		pool.offset[l] = red == 1 ? 0 : std::size_t( off ) + std::size_t( rel );
+		pool.stride[l] = std::uint32_t( stride );
+		pool.halfMask |= half ? 1u << l : 0u;
+	}
+	int ebo = 0, ebytes = 0;
+	getIv( 0x8895u, &ebo );  // ELEMENT_ARRAY_BUFFER_BINDING (the VAO's)
+	if ( ebo )
+		getBiv( unsigned( ebo ), 0x8764u, &ebytes );  // BUFFER_SIZE
+	if ( !ebo || ebytes < 2 )
+		return why = "the shape has no index buffer", false;
+	pool.ebo = unsigned( ebo );
+	pool.indices = std::size_t( ebytes ) / 2;
 	return true;
 }
 
@@ -2625,19 +2947,63 @@ bool objBlShade( GlProc gp, const ObjBlShade & s, std::string & why )
 	SpvModule vm;
 	if ( !spvReflect( d.vs, d.vsWords, vm, w2 ) )
 		return fail( "the vertex twin: " + w2 );
+	std::uint32_t comps[32] = {};  // lane VKOBJ5: the stage's components a location (objOwnVao)
 	for ( const SpvIo & in : vm.inputs ) {
 		const std::size_t at = in.name.find( "TEXCOORD" );
 		if ( at != std::string::npos )
-			for ( std::uint32_t j = 0; j < in.locs; j++ )
-				d.need |= 1u << ( ( std::atoi( in.name.c_str() + at + 8 ) + int( j ) ) & 31 );
+			for ( std::uint32_t j = 0; j < in.locs; j++ ) {
+				const int l = ( std::atoi( in.name.c_str() + at + 8 ) + int( j ) ) & 31;
+				d.need |= 1u << l;
+				comps[l] = in.comps;
+			}
 	}
 	d.poolKey = s.poolKey;
 	d.attrMask = s.pool.attrMask;
+	ObjBlPool own;  // lane VKOBJ5: an unpooled shape's VAO as its pool
+	if ( s.ownVao ) {
+		own.verts = s.pool.verts;
+		if ( !own.verts )
+			return fail( "the shape's VAO: no vertex count" );
+		if ( !objOwnVao( gp, d.need, comps, s.ownRed == 1 ? 1 : 0, own, w2 ) )
+			return fail( "the shape's VAO: " + w2 );
+		d.attrMask = own.attrMask;
+		d.halfMask = own.halfMask;
+		d.halfRed = s.ownRed == 2;
+		for ( int i = 0; i < 16; i++ )
+			d.attrStride[i] = own.stride[i];
+	}
 	ObjBlUniStat ust;
 	if ( !objBlMirror( gp, s.prog, d.vs, d.vsWords, d.ps, d.psWords, d.ubos, ust, w2 ) )
 		return fail( "the uniforms: " + w2 );
 	if ( !ust.mirrored )
 		return fail( "GL names none of the loose uniforms (a program linked from SPIR-V)" );
+	if ( s.rowsAtBase ) {  // lane VKOBJ5: the rows start at GL's wwDrawBase row, so Vulkan's wwDrawBase is 0
+		SpvModule pm;
+		const bool psOk = spvReflect( d.ps, d.psWords, pm, w2 );
+		for ( const SpvModule * mm : { &vm, psOk ? &pm : &vm } )
+			for ( const SpvBind & b : mm->binds )
+				for ( const SpvMember & m : b.members )
+					if ( m.name == "wwDrawBase" )
+						for ( auto & u : d.ubos )
+							if ( u.first == b.binding && m.offset + 4 <= u.second.size() )
+								std::memset( u.second.data() + m.offset, 0, 4 );
+	}
+	if ( s.skinRed )  // lane VKOBJ5 red `bone`: bone i reads bone i + 1's transform (48 bytes a bone)
+		for ( const SpvBind & b : vm.binds )
+			if ( b.name.find( "skinningUniforms" ) != std::string::npos )
+				for ( auto & u : d.ubos )
+					if ( u.first == b.binding && u.second.size() > 48 )
+						std::rotate( u.second.begin(), u.second.begin() + 48, u.second.end() );
+	if ( s.alphaRed ) {  // lane VKOBJ5 red `flags`: the mirrored alphaFlags 0
+		SpvModule pm;
+		if ( spvReflect( d.ps, d.psWords, pm, w2 ) )
+			for ( const SpvBind & b : pm.binds )
+				for ( const SpvMember & m : b.members )
+					if ( m.name == "alphaFlags" )
+						for ( auto & u : d.ubos )
+							if ( u.first == b.binding && m.offset + 4 <= u.second.size() )
+								std::memset( u.second.data() + m.offset, 0, 4 );
+	}
 	ObjBlBindStat bst;
 	if ( !objBlBindUnits( gp, s.prog, d, bst, w2 ) )
 		return fail( "the texture units: " + w2 );
@@ -2651,7 +3017,11 @@ bool objBlShade( GlProc gp, const ObjBlShade & s, std::string & why )
 		rs.compare += bst.compare;
 	}
 	std::vector<unsigned> names;
-	if ( !objBlPoolCopy( s.poolKey, s.pool, names, w2 ) )
+	if ( s.ownVao ) {  // lane VKOBJ5: one key serves every unpooled shape (objCellShade's order)
+		if ( !objTexFlush( w2 ) || !opRunWait( w2 ) )
+			return fail( w2 );
+	}
+	if ( !objBlPoolCopy( s.poolKey, s.ownVao ? own : s.pool, names, w2 ) )
 		return fail( "the pool: " + w2 );
 	names.insert( names.end(), bst.glBufs.begin(), bst.glBufs.end() );  // the texel twins GL wrote
 	d.glRows = s.rows;
@@ -2844,8 +3214,10 @@ bool objCellShade( GlProc gp, const ObjCellShade & s, std::string & why )
 		rs.texelImported += bst.texelImported;
 		rs.compare += bst.compare;
 	}
-	objTexFlush();  // the twins made since the last flush: on the device before the run samples them
-	opRunWait();    // one pool key serves every shape: the last crossing done with it before its buffers are refilled (or regrown)
+	if ( !objTexFlush( w2 ) )  // the twins made since the last flush: on the device before the run samples them
+		return fail( w2 );
+	if ( !opRunWait( w2 ) )    // one pool key serves every shape: the last crossing done with it before its buffers are refilled (or regrown)
+		return fail( w2 );
 	std::vector<unsigned> names;
 	if ( !objBlPoolCopy( s.poolKey, pool, names, w2 ) )
 		return fail( "the shape: " + w2 );
@@ -2869,6 +3241,129 @@ bool objCellShade( GlProc gp, const ObjCellShade & s, std::string & why )
 		s.variants[2] += d.target.blend.on ? 1 : 0;
 		s.variants[3] += s.rt ? 1 : 0;
 	}
+	return true;
+}
+
+int objPfxRed( const char * name )
+{
+	// 8 is the gate's own `cubegrey` (a binding, nothing here); 9-12 the RT GI inputs, as objCellRed's
+	static const char * names[12] = { "offset", "light", "depth", "nmap", "grey", "cubeoff", "elem0", "", "restir", "atlas", "gihalf", "gikey" };
+	for ( int i = 0; name && *name && i < 12; i++ )
+		if ( std::strcmp( name, names[i] ) == 0 )
+			return i + 1;
+	return 0;
+}
+
+bool objPfxShade( GlProc gp, const ObjPfxShade & s, std::string & why )
+{
+	auto fail = [&]( const std::string & w ) {
+		objBlOnGl( w.c_str() );
+		return why = w, false;
+	};
+	if ( !s.prog || !s.n || !s.pos )
+		return fail( "no program, points or positions" );
+	if ( !gp )
+		return fail( "no GL entry points" );
+	using GetAfv = void( WINAPI * )( unsigned, unsigned, float * );
+	const auto getAfv = reinterpret_cast<GetAfv>( gp( "glGetVertexAttribfv" ) );
+	if ( !getAfv )
+		return fail( "GL has no glGetVertexAttribfv" );
+	ObjBlDraw d;
+	d.twin = kObjTwinPfx;
+	d.cs = vkframe_objpfx_cs_spv;
+	d.csWords = sizeof( vkframe_objpfx_cs_spv ) / 4;
+	d.vs = vkframe_objpfx_vs_spv;
+	d.vsWords = sizeof( vkframe_objpfx_vs_spv ) / 4;
+	d.ps = s.rt ? vkframe_objpfx_cell_rt_ps_spv : vkframe_objpfx_cell_ps_spv;
+	d.psWords = s.rt ? sizeof( vkframe_objpfx_cell_rt_ps_spv ) / 4 : sizeof( vkframe_objpfx_cell_ps_spv ) / 4;
+	d.texelRed = s.red == 2 || s.red == 9 || s.red == 10 ? 1 : 0;
+	if ( s.red == 9 || s.red == 10 )  // round 5: the RT GI variant's texel buffers, one each (objCellShade's reds)
+		d.texelRedName = s.red == 9 ? "cellRestir" : "cellDdgiAtlas";
+	d.dropName = s.red == 11 ? "cellGiHalf" : s.red == 12 ? "cellGiHalfKey" : nullptr;
+	std::string w2;
+	if ( !objBlFrameRead( gp, d, w2 ) )
+		return fail( w2 );
+	d.target.strip = true;
+	if ( s.red == 3 && d.target.depthOp == 7 )  // red `depth`: GL's ALWAYS read as LESS_OR_EQUAL
+		d.target.depthOp = 3;
+	// the points as the record pass's inputs (PfxIn: posAngle, color, uvSize); an array not given: GL's current value
+	float cur[5][4] = {};
+	const float * arr[5] = { s.pos, s.col, s.uv, s.angle, s.size };
+	for ( unsigned l = 0; l < 5; l++ )
+		if ( !arr[l] )
+			getAfv( l, 0x8626u, cur[l] );  // CURRENT_VERTEX_ATTRIB
+	std::vector<float> in( s.n * 12 );
+	for ( std::size_t i = 0; i < s.n; i++ ) {
+		float * p = &in[i * 12];
+		for ( int c = 0; c < 3; c++ )
+			p[c] = s.pos[i * 3 + c];
+		p[3] = s.angle ? s.angle[i] : cur[3][0];
+		for ( int c = 0; c < 4; c++ )
+			p[4 + c] = s.col ? s.col[i * 4 + c] : cur[1][c];
+		for ( int c = 0; c < 2; c++ )
+			p[8 + c] = s.uv ? s.uv[i * 2 + c] : cur[2][c];
+		p[10] = s.size ? s.size[i] : cur[4][0];
+	}
+	d.pfxIn = in.data();
+	d.pfxN = s.n;
+	d.pfxRed = s.red == 1 ? 1 : 0;
+	ObjBlUniStat ust;
+	if ( !objBlMirror( gp, s.prog, d.vs, d.vsWords, d.ps, d.psWords, d.ubos, ust, w2 ) )
+		return fail( "the uniforms: " + w2 );
+	if ( !ust.mirrored )
+		return fail( "GL names none of the loose uniforms" );
+	// round 4: textureUnits[10] element by element; the maps by their flags (glparticles.cpp binds a .bgem's map with its
+	// flag, CubeMap always holds a grey cube): a map whose flag is 0 is never sampled and stays a stand-in, a map whose flag
+	// is 1 must resolve (round 5: the cube through its plain-cube copy twin, objCubeCopyTwin)
+	d.unitElems = s.red != 7;  // red `elem0`: element 0 alone, round 3's rule
+	{
+		SpvModule pm;
+		if ( !spvReflect( d.ps, d.psWords, pm, w2 ) )
+			return fail( "the pixel module: " + w2 );
+		static const char * maps[3][2] = { { "hasNormalMap", "NormalMap" }, { "hasGreyscaleMap", "GreyscaleMap" }, { "hasCubeMap", "CubeMap" } };
+		for ( int k = 0; k < 3; k++ ) {
+			std::uint32_t flag = 0;
+			bool found = false;
+			for ( const SpvBind & b : pm.binds )
+				for ( const SpvMember & m : b.members )
+					if ( m.name == maps[k][0] )
+						for ( const auto & u : d.ubos )
+							if ( u.first == b.binding && m.offset + 4 <= u.second.size() ) {
+								std::memcpy( &flag, u.second.data() + m.offset, 4 );
+								found = true;
+							}
+			if ( !found )
+				return fail( std::string( "no mirrored " ) + maps[k][0] );
+			if ( !flag || s.red == 4 + k )  // reds nmap / grey / cubeoff: the map a stand-in with its flag 1
+				d.unitsOff.push_back( maps[k][1] );
+		}
+	}
+	ObjBlBindStat bst;
+	if ( !objBlBindUnits( gp, s.prog, d, bst, w2 ) )
+		return fail( "the texture units: " + w2 );
+	if ( bst.misfit )
+		return fail( "a texture: " + bst.misfitWhy );
+	if ( bst.glOwn )
+		return fail( std::to_string( bst.glOwn ) + " GL textures with no twin: " + bst.glOwnNames );
+	if ( bst.texelRefused )
+		return fail( "a texel buffer: " + bst.texelWhy );
+	{
+		ObjBlRunStat & rs = opS().st;
+		rs.shared += bst.shared;
+		rs.twins += bst.twins;
+		rs.texelGl += bst.texelGl;
+		rs.texelShared += bst.texelShared;
+		rs.texelImported += bst.texelImported;
+		rs.compare += bst.compare;
+	}
+	if ( !objTexFlush( w2 ) || !opRunWait( w2 ) )
+		return fail( w2 );
+	objBlDrawsReset();
+	ObjBlDrawStat dst;
+	if ( !objBlDrawPrep( d, dst, w2 ) )
+		return fail( "the draw: " + w2 );
+	if ( !objBlRun( bst.glBufs, 0, w2 ) )
+		return fail( "the crossing: " + w2 );
 	return true;
 }
 
@@ -2915,6 +3410,27 @@ bool objBlTexelCopy( GlProc gp, unsigned tex, std::vector<unsigned> & glNames, s
 	if ( off < 0 || bytes < int( f->bytes ) )
 		return why = "the buffer texture's range holds no texel", false;
 	OpTexel & t = opS().texTwins[tex];
+	/* lane VKOBJ5: the twin is keyed on (name, generation). GL's view of the name changed (a deleted name handed to a new
+	 * texture, or its buffer re-specified): a new generation, never the old twin grown or read; the old one stays for the
+	 * prepared draws that read it. red 2: the name-only key */
+	std::uint64_t sig = 1469598103934665603ull;
+	for ( const int p : { buf, fmt, off, size, whole } )
+		sig = ( sig ^ std::uint64_t( unsigned( p ) ) ) * 1099511628211ull;
+	if ( red != 2 && t.sig != sig && ( t.buf.buf || t.view || t.ext ) ) {
+		if ( opS().live ) {
+			opS().texRetired.push_back( t );
+		} else {
+			if ( !opRunWait( why ) )
+				return false;  // the old twin may still be read: left as it is
+			opTexelFree( t );
+		}
+		const std::uint32_t gen = t.gen + 1;
+		t = OpTexel();
+		t.gen = gen;
+		opS().texelMemo.erase( tex );
+		opS().storeSt.regen++;
+	}
+	t.sig = sig;
 	const VkDeviceSize need = VkDeviceSize( bytes );
 	// GL's buffer is a store: Vulkan reads its memory in place (GL's writes are ordered before the crossing's signal)
 	const auto st = opS().stores.find( unsigned( buf ) );
@@ -2946,7 +3462,8 @@ bool objBlTexelCopy( GlProc gp, unsigned tex, std::vector<unsigned> & glNames, s
 	if ( t.buf.buf && ( t.buf.cap < need || t.buf.glCtx != g.ctx ) ) {
 		if ( opS().live )
 			return why = "the texel twin would move under prepared draws", false;
-		opRunWait();
+		if ( !opRunWait( why ) )
+			return false;
 	}
 	if ( !csmBuf( t.buf, need, true, VK_BUFFER_USAGE_UNIFORM_TEXEL_BUFFER_BIT, why ) )
 		return false;
@@ -2986,7 +3503,10 @@ bool objBlTexelStore( unsigned & buf, std::size_t bytes, std::string & why )
 	}
 	s.bytes = bytes;
 	if ( it != O.stores.end() ) {  // the old store: Vulkan's last read of it done, its views gone
-		opRunWait();
+		if ( !opRunWait( why ) ) {
+			csmBufFree( s.buf, s.buf.glCtx == g.ctx );
+			return false;
+		}
 		opStoreUnview( it->second.buf.buf );
 		csmBufFree( it->second.buf, it->second.buf.glCtx == g.ctx );
 		O.stores.erase( it );
@@ -3046,9 +3566,12 @@ void objBlTexelStoreDrop( unsigned & buf )
 	const auto it = O.stores.find( buf );
 	if ( it == O.stores.end() )
 		return;
-	opRunWait();
-	opStoreUnview( it->second.buf.buf );
-	csmBufFree( it->second.buf, gl().ok && it->second.buf.glCtx == gl().ctx );
+	if ( std::string fw; opRunWait( fw ) ) {
+		opStoreUnview( it->second.buf.buf );
+		csmBufFree( it->second.buf, gl().ok && it->second.buf.glCtx == gl().ctx );
+	} else {
+		O.storeRetired.push_back( it->second );  // lane VKOBJ5: Vulkan may still read it (freed at objBlDrawsReset)
+	}
 	O.stores.erase( it );
 	buf = 0;
 }
@@ -3098,6 +3621,7 @@ ObjBlStoreStat objBlTexelStoreStat( bool reset )
 	ObjBlStoreStat s = O.storeSt;
 	s.stores = int( O.stores.size() );
 	s.subData = O.storeSubData;
+	s.retired = int( O.texRetired.size() );
 	if ( reset )
 		O.storeSt = ObjBlStoreStat();
 	return s;
@@ -3107,6 +3631,23 @@ bool objBlTexelImported( unsigned tex )
 {
 	const auto it = opS().texTwins.find( tex );
 	return it != opS().texTwins.end() && it->second.ext;
+}
+
+void objBlTexelForget( unsigned tex )
+{
+	Op & O = opS();
+	const auto it = O.texTwins.find( tex );
+	if ( it == O.texTwins.end() )
+		return;
+	if ( O.live ) {
+		O.texRetired.push_back( it->second );  // the prepared draws still read it
+	} else if ( std::string fw; opRunWait( fw ) ) {
+		opTexelFree( it->second );
+	} else {
+		O.texRetired.push_back( it->second );  // lane VKOBJ5: Vulkan may still read it (freed at objBlDrawsReset)
+	}
+	O.texTwins.erase( it );
+	O.texelMemo.erase( tex );
 }
 
 bool objBlTexelRead( unsigned tex, std::vector<std::uint8_t> & out, std::string & why )
@@ -3126,8 +3667,7 @@ bool objBlTexelRead( unsigned tex, std::vector<std::uint8_t> & out, std::string 
 		for ( const auto & s : O.stores )
 			if ( s.second.buf.buf == t.ext )
 				name = s.second.buf.gl;
-	opRunWait();
-	if ( !opRunMake( why ) || !opHostBuf( O.texRead, std::size_t( t.range ), VK_BUFFER_USAGE_TRANSFER_DST_BIT, why ) )
+	if ( !opRunWait( why ) || !opRunMake( why ) || !opHostBuf( O.texRead, std::size_t( t.range ), VK_BUFFER_USAGE_TRANSFER_DST_BIT, why ) )
 		return false;
 	O.readSrc = t.ext ? t.ext : t.buf.buf;
 	O.readOff = t.ext ? t.extOff : 0;
@@ -3138,7 +3678,8 @@ bool objBlTexelRead( unsigned tex, std::vector<std::uint8_t> & out, std::string 
 		return false;  // nothing signals vkDone: GL does not wait it
 	g.waitSemaphore( O.vkDoneGl, 1, &name, 0, nullptr, nullptr );
 	O.pending = true;
-	opRunWait();
+	if ( !opRunWait( why ) )
+		return false;  // the copy may still run: its host copy is not read
 	out.resize( std::size_t( t.range ) );
 	std::memcpy( out.data(), O.texRead.ptr, out.size() );
 	return true;
@@ -3151,9 +3692,13 @@ bool objBlDrawPrep( const ObjBlDraw & d, ObjBlDrawStat & st, std::string & why )
 	st = ObjBlDrawStat();
 	if ( !v.ok )
 		return why = "no present device", false;
-	opRunWait();  // the slots' host buffers and the rows are rewritten below
-	if ( !d.cmds || !d.cmdCount || d.w < 1 || d.h < 1 )
+	if ( !opRunWait( why ) )  // the slots' host buffers and the rows are rewritten below
+		return false;
+	const bool pfx = d.cs && d.csWords && d.pfxIn && d.pfxN;  // lane VKOBJ5: a record pass and its strip (no commands)
+	if ( ( !pfx && ( !d.cmds || !d.cmdCount ) ) || d.w < 1 || d.h < 1 )
 		return why = "no commands or no frame", false;
+	if ( pfx && ( d.pfxN > 0xFFFFFFu || !opPfxMake( d.cs, d.csWords, why ) ) )
+		return why = "the record pass: " + ( why.empty() ? std::string( "too many particles" ) : why ), false;
 	// the pipeline of the class's layout
 	std::vector<ObjBlBuffer> bufs;
 	std::vector<ObjBlAttr> attrs;
@@ -3170,7 +3715,7 @@ bool objBlDrawPrep( const ObjBlDraw & d, ObjBlDrawStat & st, std::string & why )
 		return why = "the pipeline was made but is not found", false;
 	const OpEntry & e = O.made[entry];
 	VkBuffer vb[17] = {}, ib = VK_NULL_HANDLE;
-	if ( !objBlPoolBinds( d.poolKey, vb, ib ) )
+	if ( !pfx && !objBlPoolBinds( d.poolKey, vb, ib ) )
 		return why = "the class has no twins (objBlPoolCopy first)", false;
 	// the rows: this draw's, else the frame's so far
 	if ( d.glRows && d.rows ) {
@@ -3181,7 +3726,7 @@ bool objBlDrawPrep( const ObjBlDraw & d, ObjBlDrawStat & st, std::string & why )
 	}
 	bool rowsRead = false;  // lane VKWATER3: the non-bindless twins read no rows
 	for ( const SpvBind & b : e.set0 )
-		rowsRead = rowsRead || b.type == VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+		rowsRead = rowsRead || ( b.type == VK_DESCRIPTOR_TYPE_STORAGE_BUFFER && !pfx );  // the expand stage's are its records
 	if ( rowsRead && !O.rowCount )
 		return why = "no rows (wwDraws) this frame", false;
 	// the slot: a set 0 of this pipeline's layout
@@ -3212,6 +3757,45 @@ bool objBlDrawPrep( const ObjBlDraw & d, ObjBlDrawStat & st, std::string & why )
 			return why = "the draw's set 0 failed", false;
 		s.entry = entry;
 	}
+	// lane VKOBJ5: the record pass's set, its inputs and its records (n + 1: red `offset` reads 16 bytes on)
+	VkDeviceSize recOff = 0;
+	if ( pfx ) {
+		if ( !s.cpool ) {
+			std::map<VkDescriptorType, std::uint32_t> count;
+			for ( const SpvBind & b : O.pfxBinds )
+				count[VkDescriptorType( b.type )] += 1;
+			std::vector<VkDescriptorPoolSize> sizes;
+			for ( const auto & c : count )
+				sizes.push_back( { c.first, c.second } );
+			VkDescriptorPoolCreateInfo pci { VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO };
+			pci.maxSets = 1;
+			pci.poolSizeCount = std::uint32_t( sizes.size() );
+			pci.pPoolSizes = sizes.data();
+			VkDescriptorSetAllocateInfo ai { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO };
+			ai.descriptorSetCount = 1;
+			ai.pSetLayouts = &O.pfxDsl;
+			if ( v.vkCreateDescriptorPool( v.dev, &pci, nullptr, &s.cpool ) != VK_SUCCESS
+				|| ( ai.descriptorPool = s.cpool, v.vkAllocateDescriptorSets( v.dev, &ai, &s.cset ) != VK_SUCCESS ) )
+				return why = "the record pass's set failed", false;
+		}
+		if ( !opHostBuf( s.pfxIn, d.pfxN * 48, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, why )
+			|| !opHostBuf( s.pfxRec, ( d.pfxN + 1 ) * 80, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, why ) )
+			return false;
+		std::memcpy( s.pfxIn.ptr, d.pfxIn, d.pfxN * 48 );
+		std::memset( static_cast<std::uint8_t *>( s.pfxRec.ptr ) + d.pfxN * 80, 0, 80 );  // the record past the last (red `offset`)
+		if ( d.pfxRed == 1 ) {
+			VkPhysicalDeviceProperties2 pp { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2 };
+			v.vkGetPhysicalDeviceProperties2( v.phys, &pp );
+			// one vec4 on, not one record on: a whole record on draws the same quads in the same order bar the first (the
+			// first gate run: 0 pixels moved in three of five cases)
+			const VkDeviceSize al = std::max<VkDeviceSize>( pp.properties.limits.minStorageBufferOffsetAlignment, 1 );
+			if ( 16 % al )
+				return why = "red offset: 16 bytes is no storage offset step (" + std::to_string( al ) + ")", false;
+			recOff = 16;
+		}
+	}
+	s.pfx = pfx;
+	s.pfxN = pfx ? std::uint32_t( d.pfxN ) : 0;
 	// set 0, binding by binding (the frame's previous submit of this slot is done: the caller's fence)
 	std::string w;
 	BlSmpKey k0;
@@ -3226,6 +3810,7 @@ bool objBlDrawPrep( const ObjBlDraw & d, ObjBlDrawStat & st, std::string & why )
 	std::size_t total = 0;  // the arrays are reserved whole: the writes point into them
 	for ( const SpvBind & b : e.set0 )
 		total += b.count;
+	total += pfx ? O.pfxBinds.size() : 0;
 	bis.reserve( total );
 	iis.reserve( total );
 	tvs.reserve( total );
@@ -3252,6 +3837,11 @@ bool objBlDrawPrep( const ObjBlDraw & d, ObjBlDrawStat & st, std::string & why )
 			bis.push_back( { u.buf, 0, b.bytes } );
 			wr.pBufferInfo = &bis.back();
 			st.ubos++;
+		} else if ( b.type == VK_DESCRIPTOR_TYPE_STORAGE_BUFFER && pfx ) {
+			if ( b.name != "pfxRec" && b.name != "type.StructuredBuffer.PfxRec" )
+				return why = where + ": a storage buffer the particle draw does not know", false;
+			bis.push_back( { s.pfxRec.buf, recOff, VkDeviceSize( d.pfxN * 80 ) } );
+			wr.pBufferInfo = &bis.back();
 		} else if ( b.type == VK_DESCRIPTOR_TYPE_STORAGE_BUFFER ) {
 			if ( b.name != "wwDraws" && b.name != "type.StructuredBuffer.WwDraw" )
 				return why = where + ": a storage buffer the draw does not know", false;
@@ -3265,7 +3855,12 @@ bool objBlDrawPrep( const ObjBlDraw & d, ObjBlDrawStat & st, std::string & why )
 				for ( std::size_t i = 0; i < d.images.size(); i++ )
 					if ( d.images[i].first == b.binding + a ) {
 						const std::uintptr_t key = d.images[i].second;
-						if ( !sharedFind( key ) && farTwinFind( key ) ) {  // lane VKWATER3: a texture cache twin (2D, its swizzle)
+						const Shared * ft = sharedFind( key ) ? nullptr : farTwinFind( key );
+						if ( ft && ft->type == 4 ) {  // lane VKOBJ5: a plain-cube copy twin (objCubeCopyTwin)
+							if ( b.dim != 3 || b.arrayed || !( view = ft->view ) )
+								return why = where + ": the cube twin is no cube view of this binding", false;
+							st.twins++;
+						} else if ( ft ) {  // lane VKWATER3: a texture cache twin (2D, its swizzle)
 							VkFormat fmt = VK_FORMAT_UNDEFINED;
 							const std::uint32_t swz = i < d.imageSwz.size() ? d.imageSwz[i] : 0;
 							if ( b.dim != 1 || b.arrayed || !( view = blView( key, fmt, swz ) ) )
@@ -3320,12 +3915,37 @@ bool objBlDrawPrep( const ObjBlDraw & d, ObjBlDrawStat & st, std::string & why )
 			return why = where + ": a descriptor type the draw does not write", false;
 		writes.push_back( wr );
 	}
+	// lane VKOBJ5: the record pass's set: the vertex side's mirrored blocks (the same bindings: both on VS_SHIFT), the
+	// inputs, the records
+	for ( const SpvBind & b : pfx ? O.pfxBinds : std::vector<SpvBind>() ) {
+		VkWriteDescriptorSet wr { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
+		wr.dstSet = s.cset;
+		wr.dstBinding = b.binding;
+		wr.descriptorCount = 1;
+		wr.descriptorType = VkDescriptorType( b.type );
+		const std::string where = "the record pass's binding " + std::to_string( b.binding ) + " (" + b.name + ")";
+		if ( b.type == VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER ) {
+			const auto u = s.ubo.find( b.binding );
+			if ( u == s.ubo.end() || !u->second.buf || u->second.cap < b.bytes )
+				return why = where + ": the expand stage holds no block of its size at that binding", false;
+			bis.push_back( { u->second.buf, 0, b.bytes } );
+		} else if ( b.name == "pfxIn" || b.name == "type.StructuredBuffer.PfxIn" )
+			bis.push_back( { s.pfxIn.buf, 0, VkDeviceSize( d.pfxN * 48 ) } );
+		else if ( b.name == "pfxOut" || b.name == "type.RWStructuredBuffer.PfxRec" )
+			bis.push_back( { s.pfxRec.buf, 0, VkDeviceSize( d.pfxN * 80 ) } );
+		else
+			return why = where + ": a storage buffer the record pass does not know", false;
+		wr.pBufferInfo = &bis.back();
+		writes.push_back( wr );
+	}
 	// the commands
-	if ( !opHostBuf( s.cmds, d.cmdCount * 20, VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT, why ) )
-		return false;
-	std::memcpy( s.cmds.ptr, d.cmds, d.cmdCount * 20 );
-	s.host.assign( static_cast<const std::uint8_t *>( d.cmds ), static_cast<const std::uint8_t *>( d.cmds ) + d.cmdCount * 20 );
-	s.cmdCount = d.cmdCount;
+	if ( !pfx ) {
+		if ( !opHostBuf( s.cmds, d.cmdCount * 20, VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT, why ) )
+			return false;
+		std::memcpy( s.cmds.ptr, d.cmds, d.cmdCount * 20 );
+		s.host.assign( static_cast<const std::uint8_t *>( d.cmds ), static_cast<const std::uint8_t *>( d.cmds ) + d.cmdCount * 20 );
+	}
+	s.cmdCount = pfx ? 0 : d.cmdCount;
 	s.poolKey = d.poolKey;
 	// the framebuffer of the targets (made again when a view or the size changed)
 	std::vector<VkImageView> views;
@@ -3341,7 +3961,7 @@ bool objBlDrawPrep( const ObjBlDraw & d, ObjBlDrawStat & st, std::string & why )
 			return why = std::string( "the depth target " ) + ( sh ? "is smaller than the frame" : "is not a shared target" ), false;
 		views.push_back( sh->attView ? sh->attView : sh->view );  // a stencil format: the depth and stencil aspects
 	}
-	if ( s.fb && ( s.fbViews != views || s.w != d.w || s.h != d.h ) ) {
+	if ( s.fb && ( s.fbGen != sharedGen() || s.fbViews != views || s.w != d.w || s.h != d.h ) ) {
 		drain();
 		v.vkDeviceWaitIdle( v.dev );
 		v.vkDestroyFramebuffer( v.dev, s.fb, nullptr );
@@ -3358,6 +3978,7 @@ bool objBlDrawPrep( const ObjBlDraw & d, ObjBlDrawStat & st, std::string & why )
 		if ( v.vkCreateFramebuffer( v.dev, &fci, nullptr, &s.fb ) != VK_SUCCESS )
 			return why = "the draw's framebuffer failed", false;
 		s.fbViews = views;
+		s.fbGen = sharedGen();
 	}
 	s.w = d.w;
 	s.h = d.h;
