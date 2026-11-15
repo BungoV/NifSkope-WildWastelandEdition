@@ -376,6 +376,25 @@
 // cubes compiled in (cellShadow active: WW_CELL_RESTIR_CUBES_RED), cellRestirOn 1 with no RG32F buffer on GL's unit. The
 // closed list counts cellRestir as a sampler slot and cellRestirSize as read. Census after: route default 0 / 0, route
 // all-on 1 / 1 (refusal 1 and both input lines gone, the physical falloff left).
+// The lamps' physical falloff (L8 route lift 4, VKFAR12 11-15; bar set before its first run, never widened): cellLightPhys.x 1
+// (WW_CELL_LIGHT_PHYS 1, lightphys.h Physical; the all-on route) makes cellRadial return cellPhysFalloff( the game's value,
+// x = d / r, r, the curve ) = k saturate( 1 - x^4 )^2 / ( x^2 + s^2 ), k fitting the game's curve at x = the anchor
+// (cellLightPhys.y), s the source fraction (cellLightPhys.z); a curve that is no falloff keeps the game's. One case, appended,
+// element 34: rain_near_phys (rain_near_restir's run, lamps, slots, cubes and ReSTIR fixture, volTerms 3, drawn through pAllOn:
+// the program the all-on route links) with the app's Physical values: cellLightPhys (1, 0.38164, 0.3, 0) (kAnchor,
+// kSourceFraction, no advanced numerator) and cellLightPhysB (0.05, 0, 0, 0) (kAdvMinMetres, no area, no red). The prep prints
+// the share of in-view particles inside a lamp's reach whose curve takes the physical falloff (GL's own test: a falloff, and
+// not brighter at the anchor than 1 - a^2 to the 1.1; want >= 0.2, checked by the prep). The same verdict (depth EXACT, colour
+// inside the bar), reference checks, repeat clause and lift 3's ReSTIR checks as rain_near_restir. The case must also show
+// (else the gate fails): GL with cellLightPhys (0, 0, 0, 0) differs on >= 1000 covered samples (the falloff seen, drawGl mode
+// 48); cellLightPhys and cellLightPhysB found in GL's program; cellLightPhys.x and .y packed non-zero. Reds, each must FAIL in
+// rain_near_phys: 17592186044416 the falloff off (the packed cellLightPhys.x 0); 35184372088832 the anchor and the source
+// fraction swapped (the packed cellLightPhys .y / .z); 70368744177664 the falloff's red bit 1 packed (cellLightPhysB.z 1: k = 1).
+// Lifted with it: precipLitWhys' falloff refusal for a ReSTIR run (the judged twin); refused by name instead: the physical
+// falloff in a run without GL's ReSTIR variant (the plain lit twin, not judged here), the advanced falloff (cellLightPhys.x >
+// 1.5), a falloff red (cellLightPhysB.z non-zero). Census after: route default 0 / 0, route all-on 0 / 0 (the falloff refusal
+// gone; the census' own all-on values (1, 0, 0, 0) only switch the row). The all-on totals are printed, not judged: at 0 / 0
+// no red reads them, the old census red stays the closed-list red of lift 2.
 #define main fxview_main
 #include "fxview.cpp"
 #undef main
