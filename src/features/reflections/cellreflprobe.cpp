@@ -32,6 +32,7 @@ BSD License - see nifskope.h
 #include "features/shadows/sunshadow.h"
 #include "features/vkframe/vkpresent.h"	// lane VKFAR20: the atlas and G-buffer cubes shared with the Vulkan view
 #include "features/vkframe/vkreflrelight.h"	// lane VKFAR20: the relight on the present device
+#include "features/vkframe/vkreflcapture.h"	// lane VKFAR22: the G-buffer capture on the present device
 
 #include <QElapsedTimer>
 #include <QFile>
@@ -775,20 +776,46 @@ void wwCellReflProbePass( Scene * scene, bool run )
 		fn->glDepthMask( GL_TRUE );
 		fn->glViewport( 0, 0, kFace, kFace );
 		const int lRel = prog->uniLocation( "rpRelFromView" ), lClip = prog->uniLocation( "rpClipFromRel" );
+		/* lane VKFAR22: on Vulkan (WW_VKVIEW_REFLCAPTURE_RED unset, the cubes shared) pass 0 sets GL's uniforms per caster as
+		 * GL would draw and hands every face to the twin (vkreflcapture.h); a refusal (named in the vk line) draws the faces on
+		 * GL in pass 1. The bookkeeping runs once, after the passes */
+		const bool capWant = WwVkPresent::shareWanted( "WW_VKVIEW_REFLCAPTURE_RED" );
+		std::string capWhy;
+		if ( capWant && !g.shShared )
+			capWhy = "the G-buffer cubes are not shared";
+		else if ( capWant )
+			capWhy = WwVkPresent::reflCaptureRefusal();
+		const bool capVk = capWant && capWhy.empty();
+		bool capDrawn = false;
+		WwVkPresent::ReflCaptureRun vrun;
+		vrun.prog = prog->id;
+		vrun.wwDefs = prog->wwDefs;
+		vrun.albKey = rpShareKey( r, 1 );
+		vrun.ndKey = rpShareKey( r, 2 );
+		for ( int pass = 0; pass < ( capVk ? 2 : 1 ) && complete && !capDrawn; pass++ ) {
+		const bool collect = capVk && pass == 0;
+		draws = 0;
 		for ( const auto & job : jobs ) {
 			Probe & p = g.slot[job.first];
 			const int face = job.second;
-			fn->glFramebufferTextureLayer( GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, g.alb, 0, 6 * job.first + face );
-			fn->glFramebufferTextureLayer( GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT1, g.nd, 0, 6 * job.first + face );
-			if ( fn->glCheckFramebufferStatus( GL_DRAW_FRAMEBUFFER ) != GL_FRAMEBUFFER_COMPLETE ) {
-				complete = false;
-				break;
+			if ( collect ) {
+				WwVkPresent::ReflCaptureJob vj;
+				vj.layer = 6 * job.first + face;
+				vj.first = int( vrun.draws.size() );
+				vrun.jobs.push_back( vj );
+			} else {
+				fn->glFramebufferTextureLayer( GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, g.alb, 0, 6 * job.first + face );
+				fn->glFramebufferTextureLayer( GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT1, g.nd, 0, 6 * job.first + face );
+				if ( fn->glCheckFramebufferStatus( GL_DRAW_FRAMEBUFFER ) != GL_FRAMEBUFFER_COMPLETE ) {
+					complete = false;
+					break;
+				}
+				const float zero[4] = { 0, 0, 0, 0 };
+				fn->glClearBufferfv( GL_COLOR, 0, zero );
+				fn->glClearBufferfv( GL_COLOR, 1, zero );
+				fn->glClearDepth( 1.0 );
+				fn->glClear( GL_DEPTH_BUFFER_BIT );
 			}
-			const float zero[4] = { 0, 0, 0, 0 };
-			fn->glClearBufferfv( GL_COLOR, 0, zero );
-			fn->glClearBufferfv( GL_COLOR, 1, zero );
-			fn->glClearDepth( 1.0 );
-			fn->glClear( GL_DEPTH_BUFFER_BIT );
 			float rel[16];
 			for ( int row = 0; row < 3; row++ ) {
 				for ( int j = 0; j < 3; j++ )
@@ -859,10 +886,50 @@ void wwCellReflProbePass( Scene * scene, bool run )
 					attrv[7] = &( c.sh->coords.constFirst().constFirst()[0] );
 					mask |= 0x20000000ULL;
 				}
-				r->drawShape( (unsigned int) ( c.sh->verts.size() ), mask, (unsigned int) ( c.sh->triangles.size() * 3 ),
-					GL_TRIANGLES, GL_UNSIGNED_SHORT, attrv, c.sh->triangles.constData() );
+				if ( collect ) {	// lane VKFAR22: the caster as GL's program holds it now, drawn by the twin
+					WwVkPresent::ReflCaptureDraw vd;
+					vd.pos = attrv[0];
+					vd.col = attrv[1];
+					vd.nrm = attrv[2];
+					vd.uv = attrv[7];
+					vd.verts = int( c.sh->verts.size() );
+					vd.idx = reinterpret_cast<const std::uint16_t *>( c.sh->triangles.constData() );
+					vd.indices = int( c.sh->triangles.size() * 3 );
+					WwVkPresent::reflCaptureDrawOf( *fn, unsigned( prog->id ), vd );
+					if ( !base )
+						vd.base = WwVkPresent::WaterSlot();	// rpHasBase false: the twin never samples it
+					vrun.draws.push_back( vd );
+				} else {
+					r->drawShape( (unsigned int) ( c.sh->verts.size() ), mask, (unsigned int) ( c.sh->triangles.size() * 3 ),
+						GL_TRIANGLES, GL_UNSIGNED_SHORT, attrv, c.sh->triangles.constData() );
+				}
 				draws++;
 			}
+			if ( collect )
+				vrun.jobs.back().count = int( vrun.draws.size() ) - vrun.jobs.back().first;
+		}
+		if ( collect ) {
+			capDrawn = WwVkPresent::reflCaptureRun( vrun, capWhy );
+			if ( !capDrawn )
+				WwVkPresent::reflCaptureOnGl( capWhy.c_str() );
+		}
+		}	// the passes
+		if ( capWant ) {
+			if ( !capVk )
+				WwVkPresent::reflCaptureOnGl( capWhy.c_str() );
+			const WwVkPresent::ReflCaptureStat st = WwVkPresent::takeReflCaptureStat();
+			static QElapsedTimer said;	// one line a 5 s window
+			if ( !said.isValid() || said.elapsed() >= 5000 ) {
+				said.start();
+				std::fprintf( stderr, "vk reflcapture: faces=%d casters=%d drawn=%d gl=%d%s%s\n", int( jobs.size() ), int( draws ),
+					capDrawn ? st.draws : 0, st.gl, st.glWhy.empty() ? "" : " glWhy=", st.glWhy.c_str() );
+			}
+		}
+		for ( const auto & job : jobs ) {	// the bookkeeping, once
+			if ( !complete )
+				break;
+			Probe & p = g.slot[job.first];
+			const int face = job.second;
 			if ( job.first == 0 )
 				g.camFaceKey[face] = camCapKey;	// lane PERFFIX2 a
 			if ( job.first == 0 && p.faces >= 6 ) {

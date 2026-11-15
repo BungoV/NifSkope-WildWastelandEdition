@@ -9632,3 +9632,4 @@ bool frame( QOpenGLWindow * w, const std::function<void()> & paint )
 #include "features/vkframe/vktaareactive.inc"  // lane VKFAR7: the TAA mask's reactive pass (taainputs.cpp pass 4)
 #include "features/vkframe/vklamp.inc"  // lane VKLAMP1: the lamps' plain shadow cubes (celllamps.cpp)
 #include "features/vkframe/vkreflrelight.inc"  // lane VKFAR19: the reflection probe relight into the shared atlas
+#include "features/vkframe/vkreflcapture.inc"  // lane VKFAR22: the reflection probes' G-buffer capture into the shared cubes
