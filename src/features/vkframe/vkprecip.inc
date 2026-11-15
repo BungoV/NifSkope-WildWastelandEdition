@@ -10,8 +10,8 @@
  * normal map at t2 of the pixel stage). Slice 2b lights the particles by the sun alone (precip_lit_view_cs, its own set);
  * L8 added the lamps, the cluster lists, terrain air, the local sun and GI (volTerms 4: idle in the default program; a GL
  * program variant that reads a GI volume is refused) and the ambient (volTerms 8: the weather's cellDalc, the Ambient
- * Only volumes, the air's keep through volEnvHist at t19). Shadow maps, drift, interiors and the roof map are refused
- * (GL draws).
+ * Only volumes, the air's keep through volEnvHist at t19), the sun's cascades and the clouds (t31 / t34) and the air's
+ * drift (volAirNoise at t30). The lamps' shadow cubes and gobos, interiors and the roof map are refused (GL draws).
  * GL's state (cellprecip.cpp): depth LEQUAL, no depth write, cull off, blend SRC_ALPHA / ONE_MINUS_SRC_ALPHA, stencil ALWAYS
  * ref 1, REPLACE on depth pass, write mask 0x03. */
 namespace
@@ -651,8 +651,6 @@ int precipLitWhys( const PrecipRun::LitIn & l, const char ** out, int max )
 		add( "the shadow set's composition on the particles (ussOn: a cascade / terrain / contact tier)" );
 	if ( l.csm > 0 && ( l.csmProbe > 0 || l.csmRed > 0 ) )  // (-1: not active in GL's program; csmProbe is the pixel stage's only)
 		add( "a cascade probe or red (csmProbe / csmRed) in a lit run" );
-	if ( l.drift > 0.0f )
-		add( "the air's drift on the sun (refused in slice 2b)" );
 	if ( l.partRed > 0 )
 		add( "a particle-light red (volPartRed) in a lit run" );
 	return n;
@@ -817,15 +815,17 @@ bool precipRun( const PrecipRun & t, std::string & why )
 	FxNames names;
 	names.add( T.colorTex );
 	names.add( T.dsTex );
-	VkImageView views[12] = {};
-	int smp[12] = {};
-	const int slotType[12] = { 0, 0, 1, 1, 0, 2, 0, 0, 2, 1, 2, 0 };  // an empty slot binds the zero texture of the shader's type
+	VkImageView views[13] = {};
+	int smp[13] = {};
+	const int slotType[13] = { 0, 0, 1, 1, 0, 2, 0, 0, 2, 1, 2, 0, 1 };  // an empty slot binds the zero texture of the shader's type
 	if ( t.lit && t.tex[10].tex && !D.csmLinear )
 		return refuse( "the sun's shadow map: no D16 linear filtering on the present device" );
-	for ( int k = 0; k < 12; k++ ) {
+	if ( t.lit && t.litIn.drift > 0.0f && !t.tex[12].tex )  // L8 term 4: GL reads the drift's noise; Vulkan has none to read
+		return refuse( "the air's drift with no volAirNoise in GL's program" );
+	for ( int k = 0; k < 13; k++ ) {
 		FxTex x = t.tex[k];
 		if ( ( ( k == 1 || k == 7 ) && ( t.red & 32 ) ) || ( k == 8 && ( t.red & 4096 ) ) || ( k == 9 && ( t.red & 16384 ) )
-			|| ( k == 10 && ( t.red & 65536 ) ) || ( k == 11 && ( t.red & 262144 ) ) ) {  // red: the atlas / the terrain grid / the ambient's history / the shadow map / the clouds' map dropped (the zero texture)
+			|| ( k == 10 && ( t.red & 65536 ) ) || ( k == 11 && ( t.red & 262144 ) ) || ( k == 12 && ( t.red & 1048576 ) ) ) {  // red: the atlas / the terrain grid / the ambient's history / the shadow map / the clouds' map / the drift's noise dropped (the zero texture)
 			x = FxTex();
 			x.sampler = t.tex[k].sampler;
 		}
@@ -867,6 +867,20 @@ bool precipRun( const PrecipRun & t, std::string & why )
 			const int atCsm = precipAt( kT_preciplitcs, int( std::size( kT_preciplitcs ) ), "volCsm" );
 			if ( atCsm >= 0 )
 				std::memset( l + atCsm, 0, 4 );
+		}
+		if ( t.red & 2097152 ) {  // gates only: the drift dropped (volAirDrift.x 0)
+			const int atDrift = precipAt( kT_precipcs, int( std::size( kT_precipcs ) ), "volAirDrift" );
+			if ( atDrift >= 0 )
+				std::memset( l + atDrift, 0, 4 );
+		}
+		if ( t.red & 4194304 ) {  // gates only: the drift's octaves swapped (volAirDriftUv rows 0-2 and 3-5, 48 bytes each)
+			const int atUv = precipAt( kT_precipcs, int( std::size( kT_precipcs ) ), "volAirDriftUv" );
+			if ( atUv >= 0 ) {
+				std::uint8_t m[48];
+				std::memcpy( m, l + atUv, 48 );
+				std::memcpy( l + atUv, l + atUv + 48, 48 );
+				std::memcpy( l + atUv + 48, m, 48 );
+			}
 		}
 		if ( t.red & 524288 ) {  // gates only: cascades 1 and 2 swapped (csmMat[1] and csmMat[2], 64 bytes each)
 			const int atMat = precipAt( kT_preciplitcs, int( std::size( kT_preciplitcs ) ), "csmMat" );
@@ -954,8 +968,8 @@ bool precipRun( const PrecipRun & t, std::string & why )
 		const VkDescriptorBufferInfo lb[3] = { { D.ubo, kPrecipGlobalAt, kPrecipGlobalBytes },
 			{ D.ubo, kPrecipLitCsAt, VkDeviceSize( kT_preciplitcsBytes ) }, { D.rec, 0, recBytes } };
 		VkDescriptorImageInfo li[14] = {};
-		// (L8 term 3: t31 csmMap GL's shared cascades, else the zero D16 array; t34 ussCloudMap)
-		const VkImageView liv[14] = { D.litCube, views[8], views[9], views[2], views[3], views[4], views[5], views[6], F.d3,
+		// (L8 term 3: t31 csmMap GL's shared cascades, else the zero D16 array; t34 ussCloudMap; L8 term 4: t30 volAirNoise)
+		const VkImageView liv[14] = { D.litCube, views[8], views[9], views[2], views[3], views[4], views[5], views[6], views[12],
 			t.tex[10].tex && ( t.red & 65536 ) == 0 ? views[10] : D.litD2a, F.d2, F.d2, views[11], views[1] };  // kPrecipLitImg's order
 		for ( int k = 0; k < 14; k++ ) {
 			li[k].imageView = liv[k];
@@ -963,7 +977,7 @@ bool precipRun( const PrecipRun & t, std::string & why )
 		}
 		VkDescriptorImageInfo ls[13] = {};
 		const VkSampler lsv[13] = { D.litCmp, F.smp[smp[8]], F.smp[smp[2]], F.smp[smp[3]], F.smp[smp[4]], F.smp[smp[5]], F.smp[smp[6]],
-			F.smp[0], D.csmCmp, F.smp[0], F.smp[0], F.smp[smp[11]], F.smp[smp[1]] };  // kPrecipLitSmp's order
+			F.smp[smp[12]], D.csmCmp, F.smp[0], F.smp[0], F.smp[smp[11]], F.smp[smp[1]] };  // kPrecipLitSmp's order
 		for ( int k = 0; k < 13; k++ )
 			ls[k].sampler = lsv[k];
 		VkWriteDescriptorSet lw[32] = {};

@@ -535,6 +535,7 @@ struct Job
 	UniMap uni;
 	std::vector<TexIn> tex;
 	int atlasAt = -1, airAt[5] = { -1, -1, -1, -1, -1 }, normAt = -1, envAt = -1;  // into tex (envAt: L8 term 2's volEnvHist)
+	int noiseAt = -1;  // into tex: L8 term 4's volAirNoise (3D R8)
 	int csmN = 0, cloudN = 0;  // L8 term 3: shadow.txt's csmMap size (256 x 256 x 3, D16) and ussCloudMap size (RGBA16F)
 	std::vector<std::uint16_t> csmData;
 	std::vector<float> cloudData;
@@ -593,6 +594,11 @@ struct Job
 		const auto it = uni.find( "volCsm" );
 		return lit && csmN > 0 && it != uni.end() && !it->second.empty() && it->second[0] > 0.5;
 	}
+	bool drift() const  // L8 term 4 (VKFAR6): the air's drift on (volAirDrift.x > 0, the noise from tex.txt)
+	{
+		const auto it = uni.find( "volAirDrift" );
+		return lit && fog && noiseAt >= 0 && it != uni.end() && it->second.size() == 4 && it->second[0] > 0.0f;
+	}
 };
 const int kNormUnit = 8;  // slice 3: the look's pcTexN
 const int kLightsUnit = 9, kClusterUnit = 10;  // L8 term 2a: the lamps' cellLights / cellCluster
@@ -600,6 +606,7 @@ const int kTerrUnit = 11;  // L8 terrain air: airTerr
 const int kGiUnit = 12;  // L8 term 1: the WW_CELL_PRT variant's cellGiAir
 const int kEnvUnit = 13;  // L8 term 2: the ambient's volEnvHist
 const int kCsmUnit = 17, kCloudUnit = 18;  // L8 term 3: csmMap, ussCloudMap (15 / 16 are the read-back's)
+const int kNoiseUnit = 19;  // L8 term 4: the drift's volAirNoise
 const GLenum kTexBuffer = 0x8C2A;  // GL_TEXTURE_BUFFER
 // slice 2a: the air's textures, in precipRun's tex[2..6] order, their GL units and fxTexOf types
 const char * kAirTex[5] = { "atApTex", "volTex", "volTile", "volAirTerr", "volAirRainMap" };
@@ -656,11 +663,13 @@ int main( int argc, char ** argv )
 						j.normAt = int( k );
 					if ( j.tex[k].name == "volEnvHist" && j.tex[k].type == 1 )
 						j.envAt = int( k );
+					if ( j.tex[k].name == "volAirNoise" && j.tex[k].type == 1 )
+						j.noiseAt = int( k );
 					for ( int a = 0; a < 5; a++ )
 						if ( j.tex[k].name == kAirTex[a] && j.tex[k].type == kAirType[a] )
 							j.airAt[a] = int( k );
 				}
-				if ( j.tex.size() != size_t( ( j.hasTex ? 1 : 0 ) + ( j.fog ? 5 : 0 ) + ( j.hasN() ? 1 : 0 ) + ( j.envAt >= 0 ? 1 : 0 ) ) || ( j.hasTex && j.atlasAt < 0 )
+				if ( j.tex.size() != size_t( ( j.hasTex ? 1 : 0 ) + ( j.fog ? 5 : 0 ) + ( j.hasN() ? 1 : 0 ) + ( j.envAt >= 0 ? 1 : 0 ) + ( j.noiseAt >= 0 ? 1 : 0 ) ) || ( j.hasTex && j.atlasAt < 0 )
 					|| ( j.hasN() && j.normAt < 0 ) )
 					return fatal( nm + "/tex.txt" );
 				for ( int a = 0; a < 5 && j.fog; a++ )
@@ -899,11 +908,12 @@ int main( int argc, char ** argv )
 	};
 	GLuint vao = 0;
 	genVertexArrays( 1, &vao );
-	constexpr int kCases = 19;
+	constexpr int kCases = 20;
 	static char twinKeys[kCases], normKeys[kCases];  // one atlas twin a case (the atlases' sizes differ), one normal-map twin a case
 	static char terrKeys[kCases];  // L8 terrain air: airTerr's twin a case
 	static char envKeys[kCases];  // L8 term 2: volEnvHist's twin a case
 	static char csmKeys[kCases], cloudKeys[kCases];  // L8 term 3: csmMap's shared target, ussCloudMap's twin a case
+	static char noiseKeys[kCases];  // L8 term 4: volAirNoise's twin a case
 	static char airKeys[kCases][5], volKeys[kCases];  // the air's twins a case, its volume's shared target a case
 	if ( jobs.size() > size_t( kCases ) )
 		return fatal( "more than " + std::to_string( kCases ) + " cases" );
@@ -960,14 +970,16 @@ int main( int argc, char ** argv )
 		const char * name;
 		int red;
 		bool seen;
-	} reds[18] = { { "cull (radius 0)", 1, false }, { "corners (the strip's last two swapped)", 2, false }, { "near fade (dropped)", 4, false },
+	} reds[21] = { { "cull (radius 0)", 1, false }, { "corners (the strip's last two swapped)", 2, false }, { "near fade (dropped)", 4, false },
 		{ "air (dropped)", 8, false }, { "look (dropped: the plain pipelines)", 16, false }, { "atlas (dropped: the zero texture)", 32, false },
 		{ "light (dropped)", 128, false }, { "lamps' lights (dropped: the zero texel buffer)", 256, false },
 		{ "cluster's globals (dropped: b0 zero)", 512, false }, { "cluster lists (dropped: the zero texel buffer)", 1024, false },
 		{ "local sun (dropped: vpSun.w 0)", 2048, false }, { "terrain air (dropped: the zero airTerr)", 4096, false },
 		{ "ambient's history (dropped: the zero volEnvHist)", 16384, false }, { "ambient (dropped: volTerms' bit 8)", 32768, false },
 		{ "sun's shadow map (dropped: the zero D16 array)", 65536, false }, { "sun's shadow (dropped: volCsm 0)", 131072, false },
-		{ "clouds' map (dropped: the zero texture)", 262144, false }, { "cascades 1 and 2 (swapped: csmMat)", 524288, false } };
+		{ "clouds' map (dropped: the zero texture)", 262144, false }, { "cascades 1 and 2 (swapped: csmMat)", 524288, false },
+		{ "drift's noise (dropped: the zero volAirNoise)", 1048576, false }, { "drift (dropped: volAirDrift.x 0)", 2097152, false },
+		{ "drift's octaves (swapped: volAirDriftUv)", 4194304, false } };
 	using TexBufferFn = void( WINAPI * )( GLenum, GLenum, GLuint );
 	const auto texBuffer = reinterpret_cast<TexBufferFn>( wglGetProcAddress( "glTexBuffer" ) );
 	if ( !texBuffer )
@@ -1007,6 +1019,9 @@ int main( int argc, char ** argv )
 		if ( j.envAt >= 0 && !upload( dir + "/" + j.name, j.tex[size_t( j.envAt )], 0 ) )
 			return fatal( j.name + ": upload volEnvHist" );
 		const GLuint envTex = j.envAt >= 0 ? j.tex[size_t( j.envAt )].gl : 0;
+		if ( j.noiseAt >= 0 && !upload( dir + "/" + j.name, j.tex[size_t( j.noiseAt )], 0 ) )
+			return fatal( j.name + ": upload volAirNoise" );
+		const GLuint noiseTex = j.noiseAt >= 0 ? j.tex[size_t( j.noiseAt )].gl : 0;
 		GLuint csmTex = 0, cloudTex = 0;  // L8 term 3: the cascades as the app's (sharedTarget type 2, D16, csmTexParams' live state)
 		if ( j.csmN > 0 ) {
 			if ( !WwVkPresent::sharedTarget( reinterpret_cast<std::uintptr_t>( &csmKeys[jobAt] ), 2, j.csmN, j.csmN, 3, 0x81A5, csmTex, why ) )
@@ -1050,6 +1065,8 @@ int main( int argc, char ** argv )
 			u1i( prog, "csmMap", kCsmUnit );
 			bindUnit( kCloudUnit, GL_TEXTURE_2D, cloudTex );
 			u1i( prog, "ussCloudMap", kCloudUnit );
+			bindUnit( kNoiseUnit, fT3D, noiseTex );  // L8 term 4 (none: read only with volAirDrift.x > 0)
+			u1i( prog, "volAirNoise", kNoiseUnit );
 			if ( !j.fog ) {  // an unfogged case: the air fully off (a program keeps the last fogged case's uniforms)
 				static const float zero4[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
 				u1i( prog, "fogOn", 0 );
@@ -1212,6 +1229,16 @@ int main( int argc, char ** argv )
 					f.getUniformfv( pJob, f.getUniformLocation( pJob, "ussCsmStable" ), s4 );
 					s4[3] = 0.0f;
 					f.uniform4fv( f.getUniformLocation( pJob, "ussCsmStable" ), 1, s4 );
+				} else if ( mode == 27 ) {  // L8 term 4: the drift off (volAirDrift.x 0)
+					GLfloat d4[4] = {};
+					f.getUniformfv( pJob, f.getUniformLocation( pJob, "volAirDrift" ), d4 );
+					d4[0] = 0.0f;
+					f.uniform4fv( f.getUniformLocation( pJob, "volAirDrift" ), 1, d4 );
+				} else if ( mode == 28 ) {  // L8 term 4: the noise read at one point (volAirDriftUv all zero)
+					const GLfloat z24[24] = {};
+					f.uniform4fv( f.getUniformLocation( pJob, "volAirDriftUv" ), 6, z24 );
+				} else if ( mode == 29 || mode == 30 ) {  // L8 term 4: the drift's reds 1 (one sun tap) / 2 (the puff only), info
+					u1i( pJob, "volAirDriftRed", mode - 28 );
 				} else if ( mode == 9 ) {  // the case as it is (the restore check)
 				} else if ( mode == 6 ) {  // L8 term 3: the local law off (vpSun.w 0)
 					const float off[4] = { 0.5f, 0.4f, 0.3f, 0.0f };
@@ -1294,6 +1321,20 @@ int main( int argc, char ** argv )
 					"(each want >= 1000), ussCsmStable.w 0 %zu (info); shadow names missing from GL's program: %s\n", j.name.c_str(), noCsm.flips,
 					noCsm.covered, forced.flips, noCloud.flips, noStable.flips, cmiss.empty() ? "none" : cmiss.c_str() );
 				ok = ok && noCsm.flips >= 1000 && forced.flips >= 1000 && noCloud.flips >= 1000 && cmiss.empty();
+			}
+			if ( j.drift() ) {  // L8 term 4's seen-checks (header): the drift and its noise seen, their names found
+				const Verdict noDrift = judge( bg, drawGl( 27 ), refA, refB, refB );
+				const Verdict flatNoise = judge( bg, drawGl( 28 ), refA, refB, refB );
+				const Verdict oneSun = judge( bg, drawGl( 29 ), refA, refB, refB );
+				const Verdict puffOnly = judge( bg, drawGl( 30 ), refA, refB, refB );
+				std::string dmiss;
+				for ( const char * nm : { "volAirDrift", "volAirDriftUv", "volAirDriftRed", "volAirNoise" } )
+					if ( f.getUniformLocation( pJob, nm ) < 0 && f.getUniformLocation( pJob, ( std::string( nm ) + "[0]" ).c_str() ) < 0 )
+						dmiss += std::string( dmiss.empty() ? "" : ", " ) + nm;
+				std::printf( "PRECIPVIEW %s drift checks: GL with volAirDrift.x 0 differs %zu of %zu covered samples, volAirDriftUv zero %zu "
+					"(each want >= 1000), volAirDriftRed 1 %zu, 2 %zu (info); drift names missing from GL's program: %s\n", j.name.c_str(),
+					noDrift.flips, noDrift.covered, flatNoise.flips, oneSun.flips, puffOnly.flips, dmiss.empty() ? "none" : dmiss.c_str() );
+				ok = ok && noDrift.flips >= 1000 && flatNoise.flips >= 1000 && dmiss.empty();
 			}
 			if ( j.amb() ) {  // L8 term 2's seen-checks (header): the ambient seen, its names found, the volumes / the keep seen
 				const Verdict noAmb = judge( bg, drawGl( 3 ), refA, refB, refB );
@@ -1643,6 +1684,13 @@ int main( int argc, char ** argv )
 					t.tex[11].twin = reinterpret_cast<std::uintptr_t>( &cloudKeys[jobAt] );
 				}
 			}
+			if ( t.lit && t.litIn.drift > 0.0f ) {  // precipDraw's (L8 term 4): volAirNoise into t30
+				if ( !WwVkPresent::fxTexOf( &ga, pJob, "volAirNoise", 1, t.tex[12], why ) ) {
+					std::printf( "PRECIPVIEW fxTexOf refused (volAirNoise): %s\n", why.c_str() );
+					return false;
+				}
+				t.tex[12].twin = reinterpret_cast<std::uintptr_t>( &noiseKeys[jobAt] );
+			}
 			WwVkPresent::fxPack( &ga, pJob, WwVkPresent::kT_precipcs, int( std::size( WwVkPresent::kT_precipcs ) ), t.cs );
 			WwVkPresent::fxPack( &ga, pJob, WwVkPresent::kT_precipps, int( std::size( WwVkPresent::kT_precipps ) ), t.ps );
 			t.packs = 2;
@@ -1708,6 +1756,16 @@ int main( int argc, char ** argv )
 						for ( const auto & tf : { std::make_pair( "csmMat", 192 ), std::make_pair( "csmParams", 16 ), std::make_pair( "csmSplitOffset", 16 ),
 								 std::make_pair( "ussCsmBias", 12 ), std::make_pair( "ussCloudFromView", 64 ), std::make_pair( "ussCloudFar", 16 ) } ) {
 							const int at = precipAt( WwVkPresent::kT_preciplitcs, int( std::size( WwVkPresent::kT_preciplitcs ) ), tf.first );
+							bool any = false;
+							for ( int b = 0; b < tf.second && at >= 0; b++ )
+								any = any || t.cs[at + b] != 0;
+							if ( !any )
+								zero += std::string( zero.empty() ? "" : ", " ) + tf.first;
+						}
+					}
+					if ( j.drift() ) {  // the drift's fields packed, not zero (the drift bar; kT_precipcs's head)
+						for ( const auto & tf : { std::make_pair( "volAirDrift", 16 ), std::make_pair( "volAirDriftUv", 96 ) } ) {
+							const int at = precipAt( WwVkPresent::kT_precipcs, int( std::size( WwVkPresent::kT_precipcs ) ), tf.first );
 							bool any = false;
 							for ( int b = 0; b < tf.second && at >= 0; b++ )
 								any = any || t.cs[at + b] != 0;
@@ -2011,7 +2069,8 @@ int main( int argc, char ** argv )
 			if ( ( r.red == 16 && !j.look ) || ( r.red == 32 && !j.hasTex ) || ( r.red == 128 && !j.lit ) || ( r.red == 256 && !j.lamps() )
 				|| ( r.red == 512 && !j.readsB0() ) || ( r.red == 1024 && !j.cluster() ) || ( r.red == 2048 && !j.localSun() ) || ( r.red == 4096 && !j.terrAir() )
 				|| ( r.red == 16384 && !j.envKeep() ) || ( r.red == 32768 && !j.amb() )
-				|| ( ( r.red == 65536 || r.red == 131072 || r.red == 262144 || r.red == 524288 ) && !j.csm() ) )
+				|| ( ( r.red == 65536 || r.red == 131072 || r.red == 262144 || r.red == 524288 ) && !j.csm() )
+				|| ( ( r.red == 1048576 || r.red == 2097152 || r.red == 4194304 ) && !j.drift() ) )
 				continue;  // a plain run has no look to drop, a case with no atlas no atlas, an unlit one no light, no lamps no lights
 			std::vector<std::uint16_t> a, b;
 			if ( !runVk( r.red, a, b, false ) ) {
@@ -2037,7 +2096,7 @@ int main( int argc, char ** argv )
 				ok = false;
 			}
 			if ( ( r.red == 512 || r.red == 1024 || r.red == 2048 || r.red == 4096 || r.red == 16384 || r.red == 32768 || r.red == 65536
-				|| r.red == 131072 || r.red == 262144 || r.red == 524288 ) && v.ok() ) {  // the cluster case must see its b0 and its lists dropped
+				|| r.red == 131072 || r.red == 262144 || r.red == 524288 || r.red == 1048576 || r.red == 2097152 || r.red == 4194304 ) && v.ok() ) {  // the cluster case must see its b0 and its lists dropped
 				std::printf( "PRECIPVIEW %s red %s PASSED: the case does not see it\n", j.name.c_str(), r.name );
 				ok = false;
 			}
@@ -2148,6 +2207,7 @@ int main( int argc, char ** argv )
 		WwVkPresent::sharedTargetDrop( reinterpret_cast<std::uintptr_t>( &terrKeys[c] ) );
 		WwVkPresent::sharedTargetDrop( reinterpret_cast<std::uintptr_t>( &envKeys[c] ) );
 		WwVkPresent::sharedTargetDrop( reinterpret_cast<std::uintptr_t>( &csmKeys[c] ) );
+		WwVkPresent::sharedTargetDrop( reinterpret_cast<std::uintptr_t>( &noiseKeys[c] ) );
 		WwVkPresent::farTwinDrop( reinterpret_cast<std::uintptr_t>( &cloudKeys[c] ) ), WwVkPresent::sharedTargetDrop( reinterpret_cast<std::uintptr_t>( &cloudKeys[c] ) );
 		for ( char & k : airKeys[c] )
 			WwVkPresent::sharedTargetDrop( reinterpret_cast<std::uintptr_t>( &k ) );

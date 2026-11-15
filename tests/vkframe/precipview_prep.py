@@ -79,6 +79,9 @@ CASES = [
     # L8 term 3 (VKFAR6, element 25 = the sun's cascades + the clouds): rain_near_lit's run unfogged, volTerms 1
     ('rain_near_csm', 0, 2.0, 4.0, 11, 37.25, (-60500.0, 70000.0, 6300.0), (120.0, -40.0), 0, 1.0, 0.0, 0.0, 1.0, 1.0, 1,
      2.0, -0.08, 40000, 0, 0, 1, 0, 0, 0, 0, 1),
+    # L8 term 4 (VKFAR6, element 26 = the air's drift): snow_far_lamps' run, fogged, volTerms 3
+    ('snow_far_drift', 3, 5.5, 1.0, 97, 600.125, (12345.6, -98765.4, 7210.0), (-55.0, 210.0), 1, 3.0, 0.5, 6.0, 1.0, 0.6, 1,
+     3.3, -0.01, 40000, 1, 0, 3, 0, 0, 0, 0, 0, 1),
 ]
 SUN = np.array([0.4, 0.3, 0.35]) / np.linalg.norm([0.4, 0.3, 0.35])  # world, toward the sun (the air's fogSun too)
 # a lit case's own sun (cellDirTo), chosen by the GS's mix: N = the eye's axis, thick / thin = 4 vpWrap( N.to, pcTrans )
@@ -547,6 +550,38 @@ for ci, c in enumerate(CASES):
         print('precipview case %s: the cascades, in-view shares %.3f %.3f %.3f (want each >= 0.1), one hard tap shadows %.3f '
               '(want 0.2 - 0.8); the clouds, transmittance %.3f - %.3f, share < 0.9 %.3f' % (c[0], float(np.mean(casc == 0)),
               float(np.mean(casc == 1)), float(np.mean(casc == 2)), float(np.mean(shad)), tc.min(), tc.max(), float(np.mean(tc < 0.9))))
+    if lit and fog and len(c) > 26 and c[26]:
+        # L8 term 4: the drift (cellvolair.cpp volDrift): amp 0.5, the fade from the in-view particles' median distance over
+        # their distance span, two skewed octaves (about 2 and 5 noise tiles across the run), a 32^3 R8 noise (linear,
+        # repeat; as vaNoiseLoad's) centred on its mean
+        # (names kept off the module's: rows / seed / t are the atlas', the run's and the textures', used below)
+        dr_p = v[inview].astype(np.float64)
+        dr_dist = np.linalg.norm(dr_p, axis=1) * AU['fogDistScale']
+        dr_ext = float(max(np.ptp(dr_p[:, 0]), np.ptp(dr_p[:, 1]), np.ptp(dr_p[:, 2])))
+        dr_a = np.random.RandomState(26).rand(32, 32, 32)
+        for dr_ax in range(3):
+            dr_a = (dr_a + np.roll(dr_a, 1, dr_ax) + np.roll(dr_a, -1, dr_ax)) / 3.0
+        dr_noise = ((dr_a - dr_a.min()) / (dr_a.max() - dr_a.min()) * 255).astype(np.uint8)
+        dr_t = Tex('3d', 'r8', dr_noise, 'linear', 'repeat')
+        dr_t.data.tofile(os.path.join(d, 'tex_volAirNoise.bin'))
+        with open(os.path.join(d, 'tex.txt'), 'a', newline='\n') as f:
+            f.write('volAirNoise 3d r8 %d %d %d linear repeat 0 tex_volAirNoise.bin\n' % (dr_t.w, dr_t.h, dr_t.d))
+        dr_rows = []
+        for dr_tiles, dr_seed in ((2.0, 3), (5.0, 4)):
+            dr_q, _ = np.linalg.qr(np.random.RandomState(dr_seed).randn(3, 3))
+            dr_m = dr_q * (dr_tiles / dr_ext)
+            dr_o = np.random.RandomState(dr_seed + 10).rand(3)
+            dr_rows += [list(dr_m[i]) + [float(dr_o[i])] for i in range(3)]
+        dr_mean = float(dr_noise.mean()) / 255.0
+        dr_y0, dr_span = float(np.median(dr_dist)), float(np.ptp(dr_dist))
+        U.update({'volAirDrift': [0.5, dr_y0, 1.0 / dr_span, dr_mean], 'volAirDriftUv': np.array(dr_rows).reshape(-1),
+                  'volAirDriftRed': [0]})
+        # the captured air (2.2e-5 / unit, density 0.06 at the particles) moves the sun column by under a half's ulp: the
+        # case's air 150x denser (sun tau about 0.5 at the median particle), so the drift's factor is seen
+        U['airMed'] = [float(AU['volAirMed'][0]) * 150.0] + [float(x) for x in AU['volAirMed'][1:]]
+        dr_fade = 1.0 - np.clip((dr_dist - dr_y0) / dr_span, 0.0, 1.0)
+        print('precipview case %s: the drift, noise mean %.4f, fade %.3f - %.3f (share 1: %.3f), %.2f / %.2f tiles across, air %.3g / unit'
+              % (c[0], dr_mean, dr_fade.min(), dr_fade.max(), float(np.mean(dr_fade >= 1.0)), 2.0, 5.0, U['airMed'][0]))
     if hasN:
         nl = bc3_levels(normals(tw, th, 31 + ci), os.path.join(d, 'tex_pcTexN.bin'))
         with open(os.path.join(d, 'tex.txt'), 'a', newline='\n') as f:
