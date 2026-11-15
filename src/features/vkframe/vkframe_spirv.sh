@@ -248,7 +248,11 @@ PS_SHIFT="-fvk-b-shift 0 0 -fvk-t-shift 64 0 -fvk-s-shift 128 0 -fvk-u-shift 192
 VS_SHIFT="-fvk-b-shift 256 0 -fvk-t-shift 320 0 -fvk-s-shift 384 0 -fvk-u-shift 448 0"
 # the bl twins (res/shaders/hlsl/near, -D WW_VK_BINDLESS), every binding kept: objBlPipe reflects them (vkobjpipe.inc);
 # $5: a variant's other loader defines (the pixel twins are readable wrappers of core/fo4_default_ps.hlsl, VKWATER3 G4)
+# This redefines fxb(): a two-argument call (VKFAR7's taareactive_view_vs below) still means the sky-body fxb() above, kept as
+# fxbsky() (BATCH1117: before, that call died `$3: unbound variable` and every header after it went unbuilt).
+eval "fxbsky()$(declare -f fxb | tail -n +2)"
 fxb() {
+	[ $# -ge 3 ] || { fxbsky "$@"; return; }
 	"$DXC" -spirv -fspv-target-env=vulkan1.2 -HV 2021 -T "$3" -E main -D WW_VK_BINDLESS $4 ${5:-} -fspv-preserve-bindings -Fo "$1.spv" "$(cygpath -m "$ROOT/res/shaders/hlsl/near/$2.hlsl" 2>/dev/null || echo "$ROOT/res/shaders/hlsl/near/$2.hlsl")"
 	python -I "$ROOT/tools/spv_header.py" "$1.spv" "vkframe_$1_spv" "$1.spv.h" < /dev/null
 	rm -f "$1.spv"
