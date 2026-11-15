@@ -36,6 +36,7 @@ BSD License - see nifskope.h
 #include "features/far-lod/lodpreview.h"	// lane PERFLOAD1 P8: the LOD preview's forced slot
 #include "features/far-lod/farskymap.h"	// lane FARSKYMAP1: the far sky-visibility map
 #include "features/far-ground/cellfarground.h"	// lane FARDRAW1: the far ring 0's live ground
+#include "features/far-ground/cellfgcut.h"	// lane VKFAR14: streamed opens prepare it too
 #include "gl/glscene.h"
 #include "gl/glshape.h"
 #include "gl/renderer.h"
@@ -709,11 +710,12 @@ QString cellFarLodAppend( NifModel * nif, const QModelIndex & iRoot, const EsmWo
 				say( QStringLiteral( "far lod: terrain REFUSED -- %1" ).arg( terr ) );
 			} else {
 				r = one[0];
-				if ( i == 0 && !stream && r.built && !noTerrainRed ) {	// lane FARDRAW1: ring 0's live ground (the Far ground row)
+				// lane FARDRAW1: ring 0's live ground (the Far ground row); lane VKFAR14: streamed opens too, uncut (cellfgcut.h)
+				if ( i == 0 && CellFarGround::streamPrepares( stream != nullptr, r.built, noTerrainRed, wwEnv( "WW_CELL_FARGROUND_RED" ).constData() ) ) {
 					QStringList fg;
 					CellFarGround::prepare( nif, world, lodlPath, blocksBefore, nif->getBlockCount(),
 						std::max( r.x0, r.ox0 ), std::max( r.y0, r.oy0 ), std::min( r.x1, r.ox1 ), std::min( r.y1, r.oy1 ),
-						r.cx0, r.cy0, r.cx1, r.cy1, &fg );
+						r.cx0, r.cy0, r.cx1, r.cy1, stream != nullptr, &fg );
 					for ( const QString & l : fg )
 						say( l );
 				}
