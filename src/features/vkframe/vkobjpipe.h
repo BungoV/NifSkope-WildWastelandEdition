@@ -198,6 +198,9 @@ struct ObjBlSampler
 };
 //! GL's texture state reads (glGetTextureParameter*, GL 4.5)
 bool objBlSamplerRead( GlProc gp, unsigned tex, ObjBlSampler & s, std::string & why );
+/* twin ids: 0-1 ObjBlShade, 2-6 ObjCellShade (VKWATER3 7 fo4_effectcell, 8 fo4_effectdecalcsm). One id per twin across
+ * every lane branch: tests/vkframe/twin_ids.py fails on a duplicate */
+constexpr int kObjTwinPfx = 9;  //!< twin 9 particles_cell (objPfxShade)
 struct ObjBlDraw
 {
 	int twin = 0;

@@ -2999,7 +2999,7 @@ bool objPfxShade( GlProc gp, const ObjPfxShade & s, std::string & why )
 	if ( !getAfv )
 		return fail( "GL has no glGetVertexAttribfv" );
 	ObjBlDraw d;
-	d.twin = 7;
+	d.twin = kObjTwinPfx;
 	d.cs = vkframe_objpfx_cs_spv;
 	d.csWords = sizeof( vkframe_objpfx_cs_spv ) / 4;
 	d.vs = vkframe_objpfx_vs_spv;
