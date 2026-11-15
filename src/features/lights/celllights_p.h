@@ -181,6 +181,7 @@ struct Gpu
 		float rad = 0.0f;
 	};
 	GLuint lsTex = 0, lsReadFbo = 0;
+	bool lsShared = false;	// lane VKLAMP4: lsTex is the present device's shared D16 2D array (celllamps.cpp lsShareKey)
 	int lsFace = 0, lsBlocks = 0;
 	std::vector<char> lsBlockUsed;
 	QHash<int, LsEntry> lsStore;
