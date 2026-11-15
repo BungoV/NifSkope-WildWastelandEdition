@@ -36,7 +36,7 @@ for p in $PASSES; do
 		JOBS="$JOBS ct_A ct_B ct_C ct_S"; NRED=$((NRED + 1)) ;;
 	# lane VKSHADOW3: the far tier (shadowset.cpp contactFarPass) on compute, contactfar_vk.hlsl stages 1-3. Bar, stated before
 	# the first run: every job's farDepth ulp0 (EXACT: a min over texels), farMask and the composed mask ulp1 (one R8 level, as
-	# the near tier's ct_ jobs). Jobs cf_A (dump, light in front, the cascades' reach D 3000 given), cf_B (dump, light behind,
+	# the near tier's ct_ jobs). Jobs cf_A (dump, light in front, the cascades' reach D 40000 given: the dump's geometry is 31000-42000 out), cf_B (dump, light behind,
 	# SHADOWPAR1 + early exit, no reach), cf_S (synthetic 641x361, D 1500 given). Reds on cf_A, each must FAIL:
 	# cfar_min (the block's first texel, not its min), cfar_march (the light's w sign flipped), cfar_comp (halo: tolerance
 	# 1e6), cfar_compi (inside: farFade off, the tier at every distance)

@@ -67,6 +67,7 @@ bufData = _fn('glBufferData', None, E, ctypes.c_ssize_t, VP, E); bindBufBase = _
 bindImage = _fn('glBindImageTexture', None, U, U, I, ctypes.c_ubyte, I, E, E)
 dispatch = _fn('glDispatchCompute', None, U, U, U); memBarrier = _fn('glMemoryBarrier', None, U)
 texSub = _fn('glTexSubImage2D', None, E, I, I, I, I, I, E, E, VP)
+enable = _fn('glEnable', None, E); disable = _fn('glDisable', None, E); blendEq = _fn('glBlendEquation', None, E)
 
 T2D, FBO, HALF, FLOAT, RGBA, RG, RED = 0x0DE1, 0x8D40, 0x140B, 0x1406, 0x1908, 0x8227, 0x1903
 NEAREST, LINEAR = 0x2600, 0x2601
@@ -176,6 +177,7 @@ class Pass:
     def __init__(self, label, kernel, frag, outs, units, vk, uni, c=(), i=()):
         self.label, self.kernel, self.frag, self.outs, self.units, self.vk, self.uni = label, kernel, frag, outs, units, vk, uni
         self.pc = pc_bytes(c, i)
+        self.blend = None   # lane VKSHADOW3: 'min' = glBlendEquation(GL_MIN) over the target (the far contact resolve)
 
 
 def draw(p, imgs):
@@ -217,7 +219,15 @@ def draw(p, imgs):
         else:
             m = np.ascontiguousarray(v, np.float32)
             uM4(loc, 1, 0, m.ctypes.data)
+    if p.blend == 'min':
+        enable(0x0BE2); blendEq(0x8007)
     drawArrays(4, 0, 3)
+    if p.blend == 'min':
+        blendEq(0x8006); disable(0x0BE2)
+
+
+# lane VKSHADOW3: a red that swaps another kernel's pipeline (an alias built from the same source with its own red define)
+RED_OF = {'cfar_compi': 'cfar_comp'}
 
 
 def job(name, imgs, passes, cmps, reds, time_it):
@@ -240,7 +250,7 @@ def job(name, imgs, passes, cmps, reds, time_it):
                 lv = getattr(x, 'lv', 1)
                 f.write('img %s %s %d %d %s%s\n' % (x.name, x.fmt, x.w, x.h, x.src or '-', ' %d' % lv if lv > 1 else ''))
             for k, p in enumerate(passes):
-                spv = p.kernel + ('_red' if p.kernel == red else '') + '.spv'
+                spv = (red + '_red' if red and RED_OF.get(red, red) == p.kernel else p.kernel) + '.spv'
                 outs = list(p.outs) + ['-'] * (2 - len(p.outs))
                 vk = list(p.vk) + ['-'] * (5 - len(p.vk))
                 f.write('pass %s %s pc_%d.bin %s %s\n' % (p.label, spv, k, ' '.join(outs), ' '.join(vk)))
@@ -511,6 +521,79 @@ def contact_main():
     os.makedirs(sdir, exist_ok=True)
     sg = gl_gbuf(sdir, sw, sh, sdp, proj)
     contact_job('ct_S', sdir, sg, sw, sh, proj, (-0.2, 0.3, -0.93), 1, 96, 3000.0, False, [])
+
+
+# ------------------------------------------------------------------------------------------------- far contact tier
+def cfar_job(name, srcd, gb, W, H, proj, lv, scale, par, early, reach_d, reds):
+    # src/features/shadows/shadowset.cpp contactFarPass: the min reduction by 4, the march over it (96 samples, a 250-unit
+    # floor, no reach), the depth-aware resolve into the near mask by GL_MIN. lv: the light (view space) projected as the
+    # app does; reach_d > 0: the cascades seen (farFade gives way inside D)
+    div = 4
+    mw, mh = (W + scale - 1) // scale, (H + scale - 1) // scale
+    fw, fh = (W + div - 1) // div, (H + div - 1) // div
+    pm = proj.astype(np.float64)
+    lv = np.asarray(lv, np.float64); lv /= np.linalg.norm(lv)
+    cx, cy, cz, cw = (sum(pm[k][r] * lv[k] for k in range(3)) for r in range(4))
+    if abs(cw) < 1e-6:
+        cw = -1e-6 if cw < 0 else 1e-6
+    light = np.array([(cx / cw * 0.5 + 0.5) * fw, (cy / cw * 0.5 + 0.5) * fh, cz / cw * 0.5 + 0.5, 1.0 if cw > 0 else -1.0], np.float32)
+    params = np.array([0.005 if par else 0.02, 0.02, 4.0, 96.0], np.float32)
+    tx = 1.0 / proj[0][0] if proj[0][0] != 0 else 1.0
+    ty = 1.0 / proj[1][1] if proj[1][1] != 0 else 1.0
+    fade = np.array([reach_d if reach_d > 0 else 0.0, 1.0 if reach_d > 0 else 0.0, tx, ty], np.float32)
+    lvf = lv.astype(np.float32)
+    # the near mask the tier blends into: 70 % lit, the rest any level (the min must keep both sides)
+    rng = np.random.default_rng(57 + mw)
+    near = np.where(rng.random((mh, mw)) < 0.7, 255, rng.integers(0, 256, (mh, mw))).astype(np.uint8)
+    sd = os.path.basename(srcd)
+    put(os.path.join(srcd, 'near_%s.bin' % name), near, mw, mh)
+    imgs = [Img('gbuf', 'rgba32f', W, H, NEAREST, gb, sd + '/gbuf.bin'),
+            Img('farDepth', 'rgba32f', fw, fh, NEAREST),
+            Img('farMask', 'r8', fw, fh, NEAREST),
+            Img('mask', 'r8', mw, mh, NEAREST, near, '%s/near_%s.bin' % (sd, name))]
+    p1 = Pass('farmin', 'cfar_min', 'shadows/ww_contact_farmin.frag', ['farDepth'], [('gbuf', 'gbuf')], ['gbuf'],
+              [('fullSize', '2i', (W, H)), ('divisor', 'i', div)], c=[None, None, None, None, (W, H, fw, fh)], i=[div])
+    p2 = Pass('march', 'cfar_march', 'shadows/ww_contact.frag', ['farMask'], [('gbuf', 'farDepth')], ['farDepth'],
+              [('fullSize', '2i', (fw, fh)), ('maskScale', 'f', 1.0), ('lightCoord', '4fv', light), ('sssParams', '4fv', params),
+               ('sssFloor', 'f', 250.0), ('sssPar', 'i', 1 if par else 0), ('sssExit', 'i', 1 if early else 0),
+               ('sssLightView', '3f', lvf), ('sssReach', '4fv', np.zeros(4, np.float32)), ('sssTan', '2f', (tx, ty))],
+              c=[light, params, None, (1.0, 250.0, 0.0, 0.0), (fw, fh, 0, 0), (lvf[0], lvf[1], lvf[2], 0.0)],
+              i=[1 if par else 0, 1 if early else 0])
+    p3 = Pass('farcomp', 'cfar_comp', 'shadows/ww_contact_farcomp.frag', ['mask'],
+              [('gbuf', 'gbuf'), ('farDepth', 'farDepth'), ('farMask', 'farMask')], ['gbuf', 'farDepth', 'farMask'],
+              [('fullSize', '2i', (W, H)), ('coarseSize', '2i', (fw, fh)), ('maskScale', 'f', float(scale)), ('divisor', 'i', div),
+               ('tolerance', 'f', 0.02), ('farFade', '4fv', fade)],
+              c=[(W, H, fw, fh), (float(scale), 0.02, float(div), 0.0), fade])
+    p3.blend = 'min'
+    job(name, imgs, [p1, p2, p3], [('farDepth', 'ulp0'), ('farMask', 'ulp1'), ('mask', 'ulp1')], reds, False)
+
+
+def cfar_main():
+    W, H, px, proj, depth = load_dump()
+    srcd = os.path.join(OUT, 'in_real_cf')
+    os.makedirs(srcd, exist_ok=True)
+    gb = gl_gbuf(srcd, W, H, depth, proj)
+    # a sun up-right in front of the camera, full mask, the cascades seen: every red runs here. D 40000, not the
+    # app's ~3000: the dump's geometry sits 31000-42000 units out (notes/vkshadow3/tools/cf_probe.py), so at 3000 the
+    # fade never reached a darkened texel and the inside red read EXACT (first run lf1); at 40000 r / D spans 0.79-1.04
+    cfar_job('cf_A', srcd, gb, W, H, proj, (0.35, 0.55, -0.75), 1, False, False, 40000.0,
+             ['cfar_min', 'cfar_march', 'cfar_comp', 'cfar_compi'])
+    # a light behind the camera, half mask, SHADOWPAR1 and the early exit, no cascades
+    cfar_job('cf_B', srcd, gb, W, H, proj, (-0.3, 0.4, 0.85), 2, True, True, 0.0, [])
+    # synthetic odd size (contact_main's steps and sky), SHADOWPAR1, D 1500
+    sw, sh = 641, 361
+    rng = np.random.default_rng(31)
+    sy, sx = np.mgrid[0:sh, 0:sw].astype(np.float32)
+    sdp = (0.9990 + 0.0008 * np.sin(sx / 29.0) * np.cos(sy / 17.0)).astype(np.float32)
+    for _ in range(40):
+        x0, y0 = rng.integers(0, sw - 40), rng.integers(0, sh - 40)
+        sdp[y0:y0 + rng.integers(5, 60), x0:x0 + rng.integers(5, 80)] -= np.float32(rng.uniform(0.0002, 0.0008))
+    sdp[: sh // 7] = 1.0
+    sdp[:, : 3] = 1.0
+    sdir = os.path.join(OUT, 'in_syn_cf')
+    os.makedirs(sdir, exist_ok=True)
+    sg = gl_gbuf(sdir, sw, sh, sdp, proj)
+    cfar_job('cf_S', sdir, sg, sw, sh, proj, (-0.2, 0.3, -0.93), 1, True, False, 1500.0, [])
 
 
 # -------------------------------------------------------------------------------------------------------------- SSGI
@@ -827,6 +910,8 @@ def main():
         contact_main()
     if 'ssgi' in WANT:
         ssgi_main()
+    if 'contactfar' in WANT:
+        cfar_main()
     print('LIGHT-GL-REF OK')
 
 
