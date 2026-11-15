@@ -51,6 +51,23 @@
 #   arms, and the mover wins > 0 texels over the stored-only picture, in S1 and S2. Any of them at 0 FAILs.
 # Stored reds (each must FAIL): store origin (the shifted viewport origin dropped), whole-layer clear (the second member's
 # CLEAR over the whole layer: it wipes the first member), mover cleared (run B's LOAD ops set to clear).
+# Mixed case (lane VKSHADOW2, bar stated before its first run; S1's store steps, every line above unchanged): run B also
+# carries slot 1 drawn direct, in the plan's order in the same crossing: 6 clear ops with its first 10 casters, then 6 LOAD
+# ops with its next 4 (its movers). Slot 1's face 5 is off the cone (celllamps drawFace: an empty list): its clear op and
+# its LOAD op have no draws. Slot 3's face 4 (the wall face) is off the cone for the mover: a LOAD op with no draws, the
+# layer held (the wall quad GL drew before run B). Verdicts `LAMPVIEW mixed S1 ...`: the per-layer bar above on slots 0, 1
+# and 3 and the store (covered > 0), slot 1 face 5 CLEAR (all 0xFFFF on both arms), each packed half covers > 0, and slot
+# 1's movers win > 0 texels over the still-only picture. Mixed reds (each must FAIL): direct mover cleared (slot 1's LOAD
+# ops clear), run B order (its LOAD ops before its clears), cone face drawn (slot 1 face 5 gets its casters and movers),
+# cone LOAD cleared (slot 3 face 4's empty LOAD op clears).
+# Stored alpha case (lane VKSHADOW2, bar stated before its first run; S1's steps, the alpha case's casters alpha-tested):
+# test arm = the app's route: run A draws only the solid casters into the store, then GL draws the alpha-tested ones on each
+# store step with no clear, at the step's shifted viewport origin, scissor = cut; run B and GL the same on the cube steps.
+# Reference = GL every step with the alpha test. Verdicts `LAMPVIEW alpha S1 ...`: the per-layer bar above (EXACT, else
+# BOUND, covered > 0), each packed half covers > 0, and the alpha casters win > 0 texels inside slot 3's packed halves
+# against GL's solid-only store. Alpha reds (each must FAIL): stored alpha clear (GL clears the cut before its alpha draw),
+# stored alpha origin (GL's alpha draw at the unshifted viewport origin).
+# Every `LAMPVIEW stored` line equals the last good run's (X:/ClaudeOverflow/vklamp4/lampview.txt).
 # Every verdict line before the stored case equals the last good run's (X:/ClaudeOverflow/vklamp3/lampview.log).
 # Fence red: the exe re-run with WW_VKFENCE_RED=lamp must end `LAMPVIEW GATE FAILED`.
 # Last line: `LAMPVIEW GATE OK` or `LAMPVIEW GATE FAILED`.
