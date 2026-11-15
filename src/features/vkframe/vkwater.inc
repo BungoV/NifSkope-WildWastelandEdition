@@ -730,6 +730,27 @@ bool waterRayDepth( std::uintptr_t key, unsigned rb, unsigned glFmt, int w, int 
 	return true;
 }
 
+#ifdef WW_VKPRESENT_NO_QT  // the harnesses' build only
+int waterRayForceReuse( std::uintptr_t key, unsigned glFmt, std::string & why )
+{
+	const Shared * s = sharedFind( key );
+	if ( !s )
+		return -1;
+	const VkImage was = s->img;
+	const int w = s->w, h = s->h;
+	for ( int i = 1; i <= 8; i++ ) {
+		sharedTargetDrop( key );
+		unsigned t = 0;
+		if ( !sharedTarget( key, 0, w, h, 1, glFmt, t, why ) )
+			return -2;
+		const Shared * n = sharedFind( key );
+		if ( n && n->img == was )
+			return i;
+	}
+	return 0;
+}
+#endif
+
 bool waterRun( const WaterRun & r, std::string & why )
 {
 	Fx & F = fx();
