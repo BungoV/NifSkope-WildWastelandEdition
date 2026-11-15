@@ -939,6 +939,7 @@ int main( int argc, char ** argv )
 	};
 	bool gateOk = true;
 	int runs = 0;
+	int forcedHits = 0, forcedMisses = 0, forcedFails = 0;  // WW_WATERDRAW_RAYREUSE: twin back at its old handle / not / remake failed
 	for ( int seed = 1; seed <= ( tab.tess ? 3 : 2 ); seed++ ) {
 		std::mt19937 rng( 20261113u + std::uint32_t( seed ) * 7919u );
 		for ( Smp & s : smp )
@@ -1473,33 +1474,44 @@ int main( int argc, char ** argv )
 		// old key): a remade twin at the freed handle value keeps a view of the freed image, and the d32fs8 arm draws nothing
 		const char * rvEnv = std::getenv( "WW_WATERDRAW_RAYVIEW_RED" );
 		const int rayViewRed = rvEnv && std::atoi( rvEnv ) == 1 ? 64 : 0;
-		// the D24S8 arm, then the D32F_S8 one (the app's other pre-pass format): both renderbuffers respecified at the same
-		// names and size, so waterRayDepth remakes its twin at the same key
-		for ( const GLenum dsFmt : { GLenum( fD24s8 ), GLenum( 0x8CAD ) } ) {
-			const char * lab = dsFmt == GLenum( fD24s8 ) ? "ray" : "ray d32fs8";
-			if ( dsFmt != GLenum( fD24s8 ) ) {
-				raySpec( rbRef, dsFmt );
-				raySpec( rbVk, dsFmt );
-				for ( const GLuint fb : { fbRayRef, fbRayVk } ) {
-					f.bindFramebuffer( fFb, fb );
-					if ( f.checkFramebufferStatus( fFb ) != fComplete )
-						return fatal( "the D32F_S8 ray targets: a framebuffer incomplete" );
-				}
-			}
+		// WW_WATERDRAW_RAYREUSE=1 (the flake's trigger on every ray run): the renderbuffer flips D24S8 <-> D32F_S8 every
+		// run, and before each run waterRayForceReuse remakes the depth twin at the new format until it comes back at the
+		// freed handle value. 20 runs (reds 0/1/2/4/8 four times, red 0 twice per format), the twin primed so run 1 is forced
+		const char * reEnv = std::getenv( "WW_WATERDRAW_RAYREUSE" );
+		const bool forceReuse = reEnv && std::atoi( reEnv ) == 1;
+		const GLenum kDsFmt[2] = { GLenum( fD24s8 ), GLenum( 0x8CAD ) };
+		auto rayTargets = [&]( GLuint rb, GLuint fb, GLenum dsFmt ) {
+			raySpec( rb, dsFmt );
+			f.bindFramebuffer( fFb, fb );
+			return f.checkFramebufferStatus( fFb ) == fComplete;
+		};
+		auto rayRef = [&]() {
 			rayBefore( fbRayRef );
 			rayState( fbRayRef );
 			glDrawElements( drawMode, count, GL_UNSIGNED_SHORT, reinterpret_cast<const void *>( std::uintptr_t( idxOff ) ) );
 			stateEnd();
-			const std::vector<float> glR = rayRead( fbRayRef );
-			for ( int red : { 0, 1, 2, 4, 8 } ) {
+			return rayRead( fbRayRef );
+		};
+		// one ray run: false = the harness cannot go on (its fatal is printed by the caller)
+		auto rayOne = [&]( const char * lab, int red, GLenum dsFmt, const std::vector<float> & glR ) {
+			{
 				rayBefore( fbRayVk );
+				std::string forced;
+				if ( forceReuse ) {
+					const int tries = WwVkPresent::waterRayForceReuse( reinterpret_cast<std::uintptr_t>( &rayKeys[1] ), dsFmt, why );
+					forced = tries > 0 ? "; forced reuse: hit after " + std::to_string( tries ) : tries == 0 ? "; forced reuse: miss"
+						: tries == -1 ? "; forced reuse: no twin" : "; forced reuse: remake failed (" + why + ")";
+					forcedHits += tries > 0;
+					forcedMisses += tries == 0;
+					forcedFails += tries < 0;
+				}
 				unsigned dTwin = 0;
 				if ( !WwVkPresent::waterRayDepth( reinterpret_cast<std::uintptr_t>( &rayKeys[1] ), rbVk, dsFmt, WR, HR, dTwin, why ) ) {
-					std::printf( "WATERDRAW %s red %d: REFUSED (the depth twin: %s)\n", lab, red, why.c_str() );
+					std::printf( "WATERDRAW %s red %d: REFUSED (the depth twin: %s)%s\n", lab, red, why.c_str(), forced.c_str() );
 					gateOk = false;
-					continue;
+					return;
 				}
-				if ( red == 0 ) {  // which format ran: the renderbuffer's and its twin's (GL_RENDERBUFFER / TEXTURE_INTERNAL_FORMAT)
+				if ( red == 0 && !forceReuse ) {  // which format ran: the renderbuffer's and its twin's (GL_RENDERBUFFER / TEXTURE_INTERNAL_FORMAT)
 					GLint rbFmt = 0, twFmt = 0;
 					ex.bindRenderbuffer( 0x8D41, rbVk );
 					ex.getRenderbufferParameteriv( 0x8D41, 0x8D44, &rbFmt );
@@ -1528,9 +1540,13 @@ int main( int argc, char ** argv )
 				stateEnd();
 				runs++;
 				if ( !ran ) {
-					std::printf( "WATERDRAW %s red %d: REFUSED (%s)\n", lab, red, why.c_str() );
-					gateOk = false;
-					continue;
+					// red 128 (a faked fence timeout) must refuse with the wait named, and the run after it must draw
+					const bool timeoutOk = ( red & 128 ) && why.find( "fence wait returned VkResult 2 " ) != std::string::npos;
+					std::printf( "WATERDRAW %s red %d: REFUSED (%s)%s%s\n", lab, red, why.c_str(), forced.c_str(),
+						timeoutOk ? " -> red refuses as it must" : "" );
+					if ( !timeoutOk )
+						gateOk = false;
+					return;
 				}
 				const std::vector<float> vkR = rayRead( fbRayVk );
 				size_t covered = 0, both = 0, onlyOne = 0, colPast = 0, diff = 0;
@@ -1566,11 +1582,45 @@ int main( int argc, char ** argv )
 				const char * word = covered < 1000 ? "FAIL" : ( diff == 0 && onlyOne == 0 ) ? "EXACT" : ok ? "BOUND" : "FAIL";
 				const bool fail = !ok;
 				std::printf( "WATERDRAW %s red %d: %s covered %zu (both %zu, one side only %zu), colour %zu pixels differ, %zu past 1e-2 "
-					"(max rel %.3g)%s; run %.1f ms\n", lab, red, word, covered, both, onlyOne, diff, colPast, maxRel,
-					red ? ( fail ? " -> red FAILS as it must" : " -> red PASSES: the gate is blind" ) : "", runMs );
+					"(max rel %.3g)%s; run %.1f ms%s\n", lab, red, word, covered, both, onlyOne, diff, colPast, maxRel,
+					red ? ( fail ? " -> red FAILS as it must" : " -> red PASSES: the gate is blind" ) : "", runMs, forced.c_str() );
 				if ( red ? !fail : fail )
 					gateOk = false;
 			}
+		};
+		if ( !forceReuse ) {
+			// the D24S8 arm, then the D32F_S8 one (the app's other pre-pass format): both renderbuffers respecified at the
+			// same names and size, so waterRayDepth remakes its twin at the same key
+			for ( const GLenum dsFmt : kDsFmt ) {
+				if ( dsFmt != kDsFmt[0] && ( !rayTargets( rbRef, fbRayRef, dsFmt ) || !rayTargets( rbVk, fbRayVk, dsFmt ) ) )
+					return fatal( "the D32F_S8 ray targets: a framebuffer incomplete" );
+				const std::vector<float> glR = rayRef();
+				for ( int red : { 0, 1, 2, 4, 8 } )
+					rayOne( dsFmt == kDsFmt[0] ? "ray" : "ray d32fs8", red, dsFmt, glR );
+				if ( dsFmt != kDsFmt[0] ) {  // lane VKWATER4: the fence-timeout red, then a clean run (the wait it left must be taken)
+					rayOne( "ray d32fs8", 128, dsFmt, glR );
+					rayOne( "ray d32fs8 after the timeout", 0, dsFmt, glR );
+				}
+			}
+		} else {
+			std::vector<float> glR[2];
+			for ( int k = 0; k < 2; k++ ) {
+				if ( !rayTargets( rbRef, fbRayRef, kDsFmt[k] ) )
+					return fatal( "the ray reference target: a framebuffer incomplete" );
+				glR[k] = rayRef();
+			}
+			unsigned primed = 0;
+			if ( !rayTargets( rbVk, fbRayVk, kDsFmt[1] )
+				|| !WwVkPresent::waterRayDepth( reinterpret_cast<std::uintptr_t>( &rayKeys[1] ), rbVk, kDsFmt[1], WR, HR, primed, why ) )
+				return fatal( "the forced reuse's primed depth twin: " + why );
+			int n = 0;
+			for ( int rep = 0; rep < 4; rep++ )
+				for ( int red : { 0, 1, 2, 4, 8 } ) {
+					const int k = n++ % 2;
+					if ( !rayTargets( rbVk, fbRayVk, kDsFmt[k] ) )
+						return fatal( "the ray target: a framebuffer incomplete" );
+					rayOne( k ? "ray d32fs8" : "ray", red, kDsFmt[k], glR[k] );
+				}
 		}
 		const GLint zero = 0;
 		f.useProgram( pWater );
@@ -1582,7 +1632,8 @@ int main( int argc, char ** argv )
 	std::printf( "WATERDRAW %d runs: %d on Vulkan, %.2f ms CPU each (max %.2f; the harness's hand-off wait included), %d fails\n", runs,
 		st.runs, st.runs ? st.cpuMs / st.runs : 0.0, st.maxMs, st.fails );
 	// lane VKWATER4: ray runs whose depth twin was remade at its old VkImage handle value (the d32fs8 flake's trigger)
-	std::printf( "WATERDRAW ray handle reused: %d runs; fence waits not VK_SUCCESS: %d\n", st.reusedHandles, st.fenceMisses );
+	std::printf( "WATERDRAW ray handle reused: %d runs; fence waits not VK_SUCCESS: %d; forced reuse hits %d, misses %d, remake fails %d\n",
+		st.reusedHandles, st.fenceMisses, forcedHits, forcedMisses, forcedFails );
 	gateOk = gateOk && unslottedOk;
 	std::printf( gateOk ? "WATERDRAW GATE OK\n" : "WATERDRAW GATE FAILED\n" );
 	return gateOk ? 0 : 1;

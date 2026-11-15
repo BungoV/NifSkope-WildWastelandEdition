@@ -454,7 +454,9 @@ struct WaterRun
 	std::uintptr_t key = 0;         //!< the twins' keys: key + slot index
 	int red = 0;                    //!< gates only: 1 the ps loose block a vec4 off, 2 plain samplers, 4 cull flipped, 8 depth ALWAYS,
 	                                //!< 16 water: the tessellation domain's origin upper-left (Vulkan's default, not GL's),
-	                                //!< rings (lane VKFAR2): the polygon offset dropped; 32 water: the ds loose block a vec4 off
+	                                //!< rings (lane VKFAR2): the polygon offset dropped; 32 water: the ds loose block a vec4 off,
+	                                //!< 64 the ray depth view keyed on its VkImage handle only (lane VKWATER4), 128 the last
+	                                //!< crossing's fence wait reads VK_TIMEOUT (must refuse)
 };
 
 /* GL current, prog in use, its uniforms set, the shape's vertex array bound: GL's side of the draw into r (the census
@@ -606,6 +608,12 @@ bool waterRun( const WaterRun & r, std::string & why );
 /*! lane VKWATER4: the water ray pass's depth on the present device: a shared twin (key, w x h, GL's renderbuffer format,
  * D24S8 or D32F_S8, 1 sample) GL copies the renderbuffer rb into, once a pass (the pass writes no depth). false: why */
 bool waterRayDepth( std::uintptr_t key, unsigned rb, unsigned glFmt, int w, int h, unsigned & tex, std::string & why );
+#ifdef WW_VKPRESENT_NO_QT
+/*! harness only (waterdraw, WW_WATERDRAW_RAYREUSE): frees the ray depth twin at key and remakes it at glFmt (same size)
+ * up to 8 times until the new VkImage has the freed one's handle value. Tries on a hit, 0: 8 misses, -1: no twin at key,
+ * -2: the remake failed (why) */
+int waterRayForceReuse( std::uintptr_t key, unsigned glFmt, std::string & why );
+#endif
 //! what waterRun cannot take on this device (empty: none)
 std::string waterDrawRefusal();
 FxStat takeWaterDrawStat();

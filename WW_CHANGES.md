@@ -1,8 +1,27 @@
+## VKWATER4 (2026-11-15): the underwater fog's depth view is remade with a remade frame
+
+Changed, not built, not checked live. Offline: tests/vkframe/underdraw.sh GATE OK.
+
+- The underwater fog kept its view of the frame's depth while the image handle stayed the same, so a frame remade at the
+  same handle (a resize) could leave it reading the freed depth. Making the frame now counts as a new shared target and
+  the view is made again.
+
+## VKWATER4 (2026-11-15): a stuck Vulkan water draw hands the frame to GL instead of writing over it
+
+Changed, not built, not checked live. Offline: tests/vkframe/waterdraw.sh's new red (a faked 1 s timeout) is refused
+with its reason and the next draw passes.
+
+- When the wait for the last Vulkan crossing timed out (or the device was lost), the water draw went on and rewrote
+  commands the GPU might still be running. That frame now stays on GL, with a `vk water:` line naming the wait's result.
+
 ## VKWATER4 (2026-11-15): the water's SSR ray pass no longer draws nothing after its depth format changes
 
 Changed, not built, not checked live. Offline: tests/vkframe/waterdraw.sh's D32F_S8 ray arm (fo4_waterlookm, RT build),
 150 runs (120 of them 6 processes at once) with 0 empty draws; the red (the old key) drew nothing in 2 of 30, each time on the
-trigger the harness now reports (`WATERDRAW ray handle reused: N runs`).
+trigger the harness now reports (`WATERDRAW ray handle reused: N runs`). With the trigger forced on every ray run
+(WW_WATERDRAW_RAYREUSE=1: the depth format flips each run and the target comes back at its freed handle), 30 of 30
+harness runs passed with the view remade 19 times each; the old key drew nothing on 29 of 30 cross-format runs that
+still had a device.
 
 - When the water ray pass's depth target was remade in another format (D24S8 to D32F_S8), Vulkan could keep a view of
   the freed target and test depth against garbage, so the water drew nothing that frame on. The view is now remade

@@ -1152,15 +1152,26 @@ bool exportSem( VkSemaphore & s, GLuint & gs, std::string & why )
 	return true;
 }
 
+// lane VKWATER4: the last oneShot's result (submit, wait, reset: the first that failed), for the failure lines
+VkResult & oneShotResult()
+{
+	static VkResult r = VK_SUCCESS;
+	return r;
+}
+
 bool oneShot( VkCommandBuffer cmd, VkFence fence )
 {
 	Vk & v = vk();
 	VkSubmitInfo si { VK_STRUCTURE_TYPE_SUBMIT_INFO };
 	si.commandBufferCount = 1;
 	si.pCommandBuffers = &cmd;
-	if ( v.vkQueueSubmit( v.queue, 1, &si, fence ) != VK_SUCCESS )
-		return false;
-	return v.vkWaitForFences( v.dev, 1, &fence, VK_TRUE, 1000000000ull ) == VK_SUCCESS && v.vkResetFences( v.dev, 1, &fence ) == VK_SUCCESS;
+	VkResult r = v.vkQueueSubmit( v.queue, 1, &si, fence );
+	if ( r == VK_SUCCESS )
+		r = v.vkWaitForFences( v.dev, 1, &fence, VK_TRUE, 1000000000ull );
+	if ( r == VK_SUCCESS )
+		r = v.vkResetFences( v.dev, 1, &fence );
+	oneShotResult() = r;
+	return r == VK_SUCCESS;
 }
 
 // a ring slot: an RGBA8 image GL imported (its frame lands there), its two semaphores, its fence and command buffer
@@ -1386,7 +1397,7 @@ bool makeShared( VkImage & img, VkDeviceMemory & mem, GLuint & tex, GLuint & obj
 	if ( fence )
 		v.vkDestroyFence( v.dev, fence, nullptr );
 	if ( !laid ) {
-		why = "a view image's first layout change failed";
+		why = "a view image's first layout change failed (VkResult " + std::to_string( int( oneShotResult() ) ) + ")";
 		return false;
 	}
 	VkMemoryGetWin32HandleInfoKHR mi { VK_STRUCTURE_TYPE_MEMORY_GET_WIN32_HANDLE_INFO_KHR };
@@ -3961,6 +3972,7 @@ bool toneFrame( int w, int h, int samples, unsigned & color, unsigned & ds, std:
 	T.samples = samples;
 	T.descDirty = true;
 	toneShare( true );  // lane VKOBJ4 open item 3: the cell runs on Vulkan draw into this frame
+	sharedGen()++;  // lane VKWATER4: a view kept of the frame (vkunder's msView) is keyed on it, the image handle can come back
 	color = T.colorTex;
 	ds = T.dsTex;
 	return true;
