@@ -25,14 +25,22 @@
  * Round 4, the maps (a .bgem's, glparticles.cpp binds each with its flag): 5 `normal` (hasNormalMap 1, useFalloff 1,
  * NormalMap = a DXT1 twin on its own unit), 6 `grey` (greyscaleColor 1, hasGreyscaleMap 1, GreyscaleMap = a DXT1 twin),
  * 7 `cube` (hasCubeMap 1, envReflection 1; round 5: CubeMap = the .bgem's env cube, 8x8 DXT1 with 4 levels, drawn on Vulkan
- * through its plain-cube copy twin under the same bar, 0 refused, >= 1 copy twin),
+ * through its plain-cube copy twin under the same bar, 0 refused, >= 1 copy twin; envMapRotation a half turn to the
+ * (1,1,1) corner, GL_TEXTURE_CUBE_MAP_SEAMLESS on as bindCube leaves it; a printed per-face probe counts the faces reached),
  * 8 `elem` (textures[0].textureUnit 3: textureUnits[2] a DXT1 twin on its own unit). Seen-check 4: the case's map off
  * (its flag 0, textureUnit 1). Reds 4 `nmap`, 5 `grey` (the map a stand-in with its flag 1), 6 `cubeoff` (CubeMap a
  * stand-in with hasCubeMap 1), 7 `elem0` (only element 0 of an array resolved, round 3's rule), each on its own case;
  * round 5: 8 `cubegrey` on `cube` (the gate binds the grey stand-in cube where GL drew the env cube: must FAIL).
+ * Round 5 item 3, the RT arm (rt true; `pfx rt` lines): particles_cell.frag@...+WW_CELL_RESTIR+WW_CELL_RTDDGI+
+ * WW_CELL_RTDDGI_CASCADES+... against objpfx_cell_rt_ps, case leq only. The system outdoors on the volume law (cellInterior 0,
+ * vpSun (0, 0, 0, 1): the local law with no sun; volPart 1, volTerms 2: the placed lights through cellLightE, each shadowed
+ * (texel 4 .y 1, cellShadowOn 1); the air's phase isotropic (volPhase[0] and volGi 1: at 0 every lamp is 0); cellRow the identity) with the cell gate's RT inputs (blview_cell.inc): cellRestir RG32F
+ * (ratio, depth 9), one DDGI cascade in a texel store, the screen GI's half target and its key from GL's own `write` depth.
+ * Seen-checks: cellRestirOn 0, cellDdgiOn 0, cellGiHalfOn 0 each move >= 1000 GL pixels. Reds 9 restir, 10 atlas (each
+ * its texel buffer read one texel on), 11 gihalf, 12 gikey (each binding dropped).
  * Not judged here: stencil (off at the app's draw: StencilProperty::glProperty( nullptr ) runs after glparticles.cpp's
  * write setup, and FO4 particles carry no NiStencilProperty), the air's textures (off by uniform), the probe passes. */
-bool pfxGate( const std::string & spirvDir, GLuint baseTex, GLuint nrmTex, GLuint greyTex, unsigned reds = 0xFFu )
+bool pfxGate( const std::string & spirvDir, GLuint baseTex, GLuint nrmTex, GLuint greyTex, unsigned reds = 0xFFu, bool rt = false )
 {
 	using namespace WwVkPresent;
 	struct PfxGl
@@ -91,7 +99,9 @@ bool pfxGate( const std::string & spirvDir, GLuint baseTex, GLuint nrmTex, GLuin
 	}
 	// GL's program: the three stages from the set as the app links them
 	const GLuint prog = f.createProgram();
-	const std::string stage[3] = { "particles.vert", "particles.geom", "particles_cell.frag@WW_CELL_AIRZONE+WW_CELL_FOGLEAK+WW_FRAME_UBO" };
+	const std::string stage[3] = { "particles.vert", "particles.geom",
+		rt ? "particles_cell.frag@WW_CELL_AIRZONE+WW_CELL_FOGLEAK+WW_CELL_RESTIR+WW_CELL_RTDDGI+WW_CELL_RTDDGI_CASCADES+WW_FRAME_UBO"
+		   : "particles_cell.frag@WW_CELL_AIRZONE+WW_CELL_FOGLEAK+WW_FRAME_UBO" };
 	const GLenum kind[3] = { kVert, 0x8DD9u, kFrag };  // GEOMETRY_SHADER
 	for ( int s = 0; s < 3; s++ ) {
 		const std::string bin = index.count( stage[s] ) ? readFile( spirvDir + "/" + index[stage[s]] ) : std::string();
@@ -173,30 +183,39 @@ bool pfxGate( const std::string & spirvDir, GLuint baseTex, GLuint nrmTex, GLuin
 	glTexParameteri( 0x8513, GL_TEXTURE_MAG_FILTER, GL_LINEAR );
 	// round 5: the .bgem's env cube (glparticles.cpp's bindCube( cubeName ) with hasCubeMap 1): 8x8 DXT1, 4 levels, mipmapped,
 	// each face its own two end colours, the indices seeded mt19937( 37 ) (every level and texel its own value)
-	GLuint envCube = 0;
-	glGenTextures( 1, &envCube );
-	glBindTexture( 0x8513, envCube );
-	{
+	// (TexCache::bindCube's state: clamp to edge, linear mipmapped, GL_TEXTURE_CUBE_MAP_SEAMLESS on). whiteFace >= 0: that
+	// face solid white on every level (the per-face probe: which faces the system's lookups reach)
+	auto makeEnv = [&]( int whiteFace ) {
+		GLuint t = 0;
+		glGenTextures( 1, &t );
+		glBindTexture( 0x8513, t );
 		std::mt19937 cr( 37 );
 		static const std::uint16_t ends[6][2] = { { 0xF800, 0x2104 }, { 0x07E0, 0x0841 }, { 0x001F, 0x4208 }, { 0xFFE0, 0x18C3 }, { 0xF81F, 0x0000 },
 			{ 0x07FF, 0x3186 } };
 		for ( int l = 0; l < 4; l++ ) {
 			const int lw = 8 >> l, nb = ( ( lw + 3 ) / 4 ) * ( ( lw + 3 ) / 4 );
-			for ( GLenum fc = 0; fc < 6; fc++ ) {
+			for ( int fc = 0; fc < 6; fc++ ) {
 				std::vector<std::uint8_t> blk( std::size_t( nb ) * 8 );
 				for ( int b = 0; b < nb; b++ ) {
-					const std::uint32_t idx = std::uint32_t( cr() );
-					std::memcpy( &blk[std::size_t( b ) * 8], &ends[fc][0], 2 );
-					std::memcpy( &blk[std::size_t( b ) * 8 + 2], &ends[fc][1], 2 );
+					std::uint32_t idx = std::uint32_t( cr() );
+					std::uint16_t e0 = ends[fc][0], e1 = ends[fc][1];
+					if ( fc == whiteFace )
+						e0 = e1 = 0xFFFF, idx = 0;
+					std::memcpy( &blk[std::size_t( b ) * 8], &e0, 2 );
+					std::memcpy( &blk[std::size_t( b ) * 8 + 2], &e1, 2 );
 					std::memcpy( &blk[std::size_t( b ) * 8 + 4], &idx, 4 );
 				}
-				u.compressed2D( 0x8515 + fc, l, 0x83F0, lw, lw, 0, GLsizei( blk.size() ), blk.data() );
+				u.compressed2D( GLenum( 0x8515 + fc ), l, 0x83F0, lw, lw, 0, GLsizei( blk.size() ), blk.data() );
 			}
 		}
-	}
-	glTexParameteri( 0x8513, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR );
-	glTexParameteri( 0x8513, GL_TEXTURE_MAG_FILTER, GL_LINEAR );
-	glBindTexture( 0x8513, 0 );
+		for ( GLenum wr : { GLenum( GL_TEXTURE_WRAP_S ), GLenum( GL_TEXTURE_WRAP_T ), GLenum( 0x8072 ) } )  // WRAP_R
+			glTexParameteri( 0x8513, wr, 0x812F );                                                                   // CLAMP_TO_EDGE
+		glTexParameteri( 0x8513, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR );
+		glTexParameteri( 0x8513, GL_TEXTURE_MAG_FILTER, GL_LINEAR );
+		glBindTexture( 0x8513, 0 );
+		return t;
+	};
+	GLuint envCube = makeEnv( -1 );
 	if ( const GLenum e = glGetError(); e != GL_NO_ERROR ) {
 		std::printf( "BLVIEW pfx FAIL (GL error 0x%x making the env cube)\n", unsigned( e ) );
 		return false;
@@ -211,8 +230,9 @@ bool pfxGate( const std::string & spirvDir, GLuint baseTex, GLuint nrmTex, GLuin
 		std::vector<std::uint8_t> bytes;
 	};
 	SpvModule mods[3];
-	const std::uint32_t * words[3] = { vkframe_objpfx_cs_spv, vkframe_objpfx_vs_spv, vkframe_objpfx_cell_ps_spv };
-	const std::size_t counts[3] = { sizeof( vkframe_objpfx_cs_spv ) / 4, sizeof( vkframe_objpfx_vs_spv ) / 4, sizeof( vkframe_objpfx_cell_ps_spv ) / 4 };
+	const std::uint32_t * words[3] = { vkframe_objpfx_cs_spv, vkframe_objpfx_vs_spv, rt ? vkframe_objpfx_cell_rt_ps_spv : vkframe_objpfx_cell_ps_spv };
+	const std::size_t counts[3] = { sizeof( vkframe_objpfx_cs_spv ) / 4, sizeof( vkframe_objpfx_vs_spv ) / 4,
+		rt ? sizeof( vkframe_objpfx_cell_rt_ps_spv ) / 4 : sizeof( vkframe_objpfx_cell_ps_spv ) / 4 };
 	std::vector<Blk> blks;
 	for ( int m = 0; m < 3; m++ ) {
 		if ( !spvReflect( words[m], counts[m], mods[m], why ) ) {
@@ -296,14 +316,29 @@ bool pfxGate( const std::string & spirvDir, GLuint baseTex, GLuint nrmTex, GLuin
 		inactive++;
 	};
 	const float ident[16] = { 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1 };
+	// round 5: envMapRotation a half turn that takes +z to the cube's (1,1,1) corner (symmetric: either storage order), so the
+	// sprites' reflections (about +z) spread over three faces and their seams; only case `cube` samples it
+	// round 5b: the six axis cases' half turns taking +z to face 0..5 (+x -x +y -y +z -z; symmetric too), 6 the corner
+	static const float kEnvRot[7][16] = { { 0, 0, 1, 0, 0, -1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1 }, { 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, 0, 0, 0, 0, 0, 1 },
+		{ -1, 0, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 0, 1 }, { -1, 0, 0, 0, 0, 0, -1, 0, 0, -1, 0, 0, 0, 0, 0, 1 },
+		{ 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1 }, { 1, 0, 0, 0, 0, -1, 0, 0, 0, 0, -1, 0, 0, 0, 0, 1 },
+		{ -0.78867513f, 0.21132487f, 0.57735027f, 0, 0.21132487f, -0.78867513f, 0.57735027f, 0, 0.57735027f, 0.57735027f, 0.57735027f, 0, 0, 0,
+			0, 1 } };
+	Blk * envBlk = nullptr;
+	const SpvMember * envMem = nullptr;
 	for ( Blk & x : blks ) {
 		if ( x.name != "globalUniforms" )
 			continue;
 		for ( const SpvMember & m : x.b->members ) {
 			if ( m.name == "projectionMatrix" )
 				shadePutMat( x.bytes, m, sx.proj );
-			else if ( m.name == "viewMatrix" || m.name == "envMapRotation" )
+			else if ( m.name == "viewMatrix" )
 				shadePutMat( x.bytes, m, ident );
+			else if ( m.name == "envMapRotation" ) {
+				shadePutMat( x.bytes, m, kEnvRot[6] );
+				envBlk = &x;
+				envMem = &m;
+			}
 			else if ( m.name == "toneMapScale" || m.name == "brightnessScale" || m.name == "glowScale" || m.name == "glowScaleSRGB" ) {
 				const float one = 1.0f;
 				std::memcpy( x.bytes.data() + m.offset, &one, 4 );
@@ -351,6 +386,115 @@ bool pfxGate( const std::string & spirvDir, GLuint baseTex, GLuint nrmTex, GLuin
 	glBindTexture( 0x8C2A, lightTex );
 	u.texBuffer( 0x8C2A, kRgba32fi, lightBuf );
 	glBindTexture( 0x8C2A, 0 );
+	// round 5 item 3 (rt): the RT inputs as the cell gate makes them (blview_cell.inc), the system on the volume law outdoors
+	static int pfxGiHalfAt = 0, pfxGiKeyAt = 0;
+	const std::uintptr_t giHalfKey = reinterpret_cast<std::uintptr_t>( &pfxGiHalfAt ), giKeyKey = reinterpret_cast<std::uintptr_t>( &pfxGiKeyAt );
+	GLuint restirTex = 0, restirBuf = 0, atlasTex = 0, giHalfTex = 0, giKeyTex = 0;
+	unsigned atlasBuf = 0;
+	int restirUnit = -1, atlasUnit = -1, giHalfUnit = -1, giKeyUnit = -1;
+	const int hw = kSW / 2, hh = kSH / 2;
+	if ( rt ) {
+		float ls[3][8][4];
+		std::memcpy( ls, lt, sizeof( lt ) );
+		for ( auto & l : ls )
+			l[4][1] = 1.0f;  // shadowed: cellShadowF takes the pixel's traced ratio (cellRestir)
+		f.bindBuffer( 0x8C2A, lightBuf );
+		f.bufferData( 0x8C2A, std::ptrdiff_t( sizeof( ls ) ), ls, 0x88E4 );
+		f.bindBuffer( 0x8C2A, 0 );
+		std::vector<float> rs( std::size_t( kSW ) * std::size_t( kSH ) * 2 );
+		for ( int y = 0; y < kSH; y++ )
+			for ( int x = 0; x < kSW; x++ ) {
+				const std::size_t p = ( std::size_t( y ) * std::size_t( kSW ) + std::size_t( x ) ) * 2;
+				rs[p] = 0.1f + 0.09f * float( ( x * 7 + y * 3 ) % 11 );
+				rs[p + 1] = 9.0f;
+			}
+		f.genBuffers( 1, &restirBuf );
+		f.bindBuffer( 0x8C2A, restirBuf );
+		f.bufferData( 0x8C2A, std::ptrdiff_t( rs.size() * 4 ), rs.data(), 0x88E4 );
+		f.bindBuffer( 0x8C2A, 0 );
+		glGenTextures( 1, &restirTex );
+		glBindTexture( 0x8C2A, restirTex );
+		u.texBuffer( 0x8C2A, 0x8230, restirBuf );  // RG32F
+		glBindTexture( 0x8C2A, 0 );
+		const int nP = 13 * 7 * 9;
+		std::vector<float> at( std::size_t( 193 * nP ) * 4, 0.0f );
+		std::mt19937 ar( 31 );
+		std::uniform_real_distribution<float> a01( 0.0f, 1.0f );
+		for ( std::size_t t = 0; t < std::size_t( 64 * nP ); t++ )
+			for ( int c = 0; c < 4; c++ )
+				at[t * 4 + std::size_t( c )] = c < 3 ? 0.3f + 0.6f * a01( ar ) : 0.4f + 0.6f * a01( ar );
+		for ( std::size_t t = std::size_t( 64 * nP ); t < std::size_t( 192 * nP ); t++ ) {
+			at[t * 4] = at[t * 4 + 2] = 1000.0f;
+			at[t * 4 + 1] = at[t * 4 + 3] = 1.0e6f;
+		}
+		for ( std::size_t t = std::size_t( 192 * nP ); t < std::size_t( 193 * nP ); t++ )
+			at[t * 4 + 3] = 2.0f;
+		const std::size_t aBytes = at.size() * 4;
+		if ( !objBlTexelStore( atlasBuf, aBytes, why ) || !objBlTexelStoreWrite( atlasBuf, 0, aBytes, at.data(), why ) ) {
+			std::printf( "BLVIEW pfx rt FAIL (the atlas store: %s)\n", why.c_str() );
+			return false;
+		}
+		glGenTextures( 1, &atlasTex );
+		glBindTexture( 0x8C2A, atlasTex );
+		u.texBuffer( 0x8C2A, kRgba32fi, GLuint( atlasBuf ) );
+		glBindTexture( 0x8C2A, 0 );
+		if ( !sharedTarget( giHalfKey, 0, hw, hh, 1, kRgba32fi, giHalfTex, why ) || !sharedTarget( giKeyKey, 0, hw, hh, 1, kRgba32fi, giKeyTex, why ) ) {
+			std::printf( "BLVIEW pfx rt FAIL (the screen GI's shared targets: %s)\n", why.c_str() );
+			return false;
+		}
+		std::vector<float> gh( std::size_t( hw ) * std::size_t( hh ) * 4 ), gk( gh.size(), -1.0f );
+		for ( int y = 0; y < hh; y++ )
+			for ( int x = 0; x < hw; x++ ) {
+				float * p = gh.data() + ( std::size_t( y ) * std::size_t( hw ) + std::size_t( x ) ) * 4;
+				p[0] = 0.2f + 0.075f * float( ( x + 2 * y ) % 9 );
+				p[1] = 0.2f + 0.1f * float( ( 3 * x + y ) % 7 );
+				p[2] = 0.3f + 0.125f * float( ( x * y ) % 5 );
+				p[3] = 0.5f + 0.25f * float( ( x + y ) % 3 );
+			}
+		for ( int k = 0; k < 2; k++ ) {
+			glBindTexture( GL_TEXTURE_2D, k ? giKeyTex : giHalfTex );
+			glTexSubImage2D( GL_TEXTURE_2D, 0, 0, 0, hw, hh, GL_RGBA, GL_FLOAT, k ? gk.data() : gh.data() );
+			glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST );
+			glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST );
+		}
+		glBindTexture( GL_TEXTURE_2D, 0 );
+		const char * nm[4] = { "cellRestir", "cellDdgiAtlas", "cellGiHalf", "cellGiHalfKey" };
+		int * un[4] = { &restirUnit, &atlasUnit, &giHalfUnit, &giKeyUnit };
+		for ( int k = 0; k < 4; k++ ) {
+			*un[k] = unitOf( nm[k] );
+			if ( *un[k] < 0 ) {
+				std::printf( "BLVIEW pfx rt FAIL (%s has no unit: location %d)\n", nm[k], int( locOf( nm[k] ) ) );
+				return false;
+			}
+		}
+		set( "cellInterior", { 0 } );
+		set( "vpSun", { 0.0f, 0.0f, 0.0f, 1.0f } );  // the local law (fxLocalOn), no sun
+		set( "volPart", { 1 } );
+		set( "volTerms", { 2 } );  // the placed lights
+		set( "volPhase", { 1.0f, 1.0f, 1.0f, 0.0f }, 0 );  // the air's phase (isotropic weights): 0 leaves vpPhase, so every lamp, at 0
+		set( "volGi", { 1.0f, 1.0f, 1.0f, 0.0f } );
+		set( "cellRow", { 1, 0, 0, 0 }, 0 );  // view = world
+		set( "cellRow", { 0, 1, 0, 0 }, 1 );
+		set( "cellRow", { 0, 0, 1, 0 }, 2 );
+		set( "cellShadowOn", { 1 } );
+		set( "cellRestirOn", { 1 } );
+		set( "cellRestirSize", { float( kSW ), float( kSH ), 0.0f, 0.0f } );
+		set( "cellDdgiOn", { 1 } );
+		set( "cellDdgiCount", { 1 } );
+		set( "cellDdgiCOrigin", { -12.0f, -6.0f, -18.0f, 2.0f }, 0 );
+		set( "cellDdgiCStep", { 2.0f, 2.0f, 2.0f, 0.1f }, 0 );
+		set( "cellDdgiCDims", { 13, 7, 9, float( nP ) }, 0 );
+		set( "cellDdgiCBase", { 0 }, 0 );
+		set( "cellDdgiRed", { 0 } );
+		set( "cellGiLoop8", { 8 } );
+		set( "cellGiHalfOn", { 0 } );  // on once the key holds GL's surfaces
+		set( "cellGiHalfRect", { 0.0f, 0.0f, float( hw ), float( hh ) } );
+		set( "cellGiHalfScale", { 0.5f } );
+		if ( glGetError() != GL_NO_ERROR ) {
+			std::printf( "BLVIEW pfx rt FAIL (a GL error making the RT inputs)\n" );
+			return false;
+		}
+	}
 	// fxDepth: a shared D32F target, a 32-texel checker of view z -8 / -12 as window depth
 	static int depthKeyAt = 0;
 	GLuint depthTex = 0;
@@ -418,14 +562,17 @@ bool pfxGate( const std::string & spirvDir, GLuint baseTex, GLuint nrmTex, GLuin
 		const char * name;
 		GLenum func;
 		bool soft, write, noCol;
-		int map;  //!< round 4: 1 normal, 2 grey, 3 cube, 4 elem (0 none)
+		int map;       //!< round 4: 1 normal, 2 grey, 3 cube, 4 elem (0 none)
+		int face = 6;  //!< round 5b: envMapRotation kEnvRot[face] (0..5 the axis cases, 6 the corner)
 	};
 	// `always` is the app's soft case: the soft fade already zeroes every fragment behind fxDepth, so the depth func moves
 	// nothing there (first run: 0 pixels). `hard` (ALWAYS, soft off) is where the func, and its red, can be seen.
-	const PfxCase cases[9] = { { "leq", GL_LEQUAL, false, false, false, 0 }, { "always", GL_ALWAYS, true, false, false, 0 },
+	const PfxCase cases[15] = { { "leq", GL_LEQUAL, false, false, false, 0 }, { "always", GL_ALWAYS, true, false, false, 0 },
 		{ "hard", GL_ALWAYS, false, false, false, 0 }, { "write", GL_LEQUAL, false, true, false, 0 }, { "nocol", GL_LEQUAL, false, false, true, 0 },
 		{ "normal", GL_LEQUAL, false, false, false, 1 }, { "grey", GL_LEQUAL, false, false, false, 2 }, { "cube", GL_LEQUAL, false, false, false, 3 },
-		{ "elem", GL_LEQUAL, false, false, false, 4 } };
+		{ "elem", GL_LEQUAL, false, false, false, 4 }, { "cube+x", GL_LEQUAL, false, false, false, 3, 0 }, { "cube-x", GL_LEQUAL, false, false, false, 3, 1 },
+		{ "cube+y", GL_LEQUAL, false, false, false, 3, 2 }, { "cube-y", GL_LEQUAL, false, false, false, 3, 3 },
+		{ "cube+z", GL_LEQUAL, false, false, false, 3, 4 }, { "cube-z", GL_LEQUAL, false, false, false, 3, 5 } };
 	int probe = 0;  // 1 lights off, 2 soft off, 3 the depth func flipped (LEQUAL <-> ALWAYS), 4 the case's map off
 	auto frameState = [&]( const PfxCase & c ) {
 		f.bindFramebuffer( kFb, sx.fbo );
@@ -439,6 +586,7 @@ bool pfxGate( const std::string & spirvDir, GLuint baseTex, GLuint nrmTex, GLuin
 		glEnable( GL_BLEND );
 		glBlendFunc( GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA );
 		glEnable( GL_DEPTH_TEST );
+		glEnable( 0x884F );  // TEXTURE_CUBE_MAP_SEAMLESS: on from glparticles.cpp's first bindCube (Vulkan's cubes always are)
 		const GLenum func = probe == 3 ? ( c.func == GL_ALWAYS ? GL_LEQUAL : GL_ALWAYS ) : c.func;
 		glDepthFunc( func );
 		glDepthMask( c.write ? GL_TRUE : GL_FALSE );
@@ -465,6 +613,8 @@ bool pfxGate( const std::string & spirvDir, GLuint baseTex, GLuint nrmTex, GLuin
 		set( "CubeMap", { float( cubeUnit ) } );
 		for ( int e = 0; e < 10; e++ )
 			set( tuName, { float( c.map == 4 && e == 2 ? elemUnit : baseUnit ) }, e );
+		if ( envBlk )
+			shadePutMat( envBlk->bytes, *envMem, kEnvRot[c.face] );
 		for ( Blk & x : blks ) {
 			u.bufSub( x.buf, 0, std::ptrdiff_t( x.bytes.size() ), x.bytes.data() );
 			f.bindBufferBase( 0x8A11, x.glBind, x.buf );
@@ -481,6 +631,12 @@ bool pfxGate( const std::string & spirvDir, GLuint baseTex, GLuint nrmTex, GLuin
 			u.bindTextures( GLuint( greyUnit ), 1, &greyTex );
 		if ( c.map == 4 )
 			u.bindTextures( GLuint( elemUnit ), 1, &greyTex );
+		if ( rt ) {
+			u.bindTextures( GLuint( restirUnit ), 1, &restirTex );
+			u.bindTextures( GLuint( atlasUnit ), 1, &atlasTex );
+			u.bindTextures( GLuint( giHalfUnit ), 1, &giHalfTex );
+			u.bindTextures( GLuint( giKeyUnit ), 1, &giKeyTex );
+		}
 		f.bindVertexArray( vao );
 		if ( c.noCol ) {
 			u.disableAttr( 1 );
@@ -493,6 +649,7 @@ bool pfxGate( const std::string & spirvDir, GLuint baseTex, GLuint nrmTex, GLuin
 		glDisable( GL_BLEND );
 		glDisable( GL_DEPTH_TEST );
 		glDisable( GL_CULL_FACE );
+		glDisable( 0x884F );
 		glDepthMask( GL_TRUE );
 		f.useProgram( 0 );
 		f.bindFramebuffer( kFb, 0 );
@@ -535,6 +692,7 @@ bool pfxGate( const std::string & spirvDir, GLuint baseTex, GLuint nrmTex, GLuin
 		s.size = arr[4].data();
 		s.n = std::size_t( np );
 		s.red = red == 8 ? 0 : red;  // red 8 is the gate's own (the binding), objPfxShade runs as shipped
+		s.rt = rt;
 		bool ran = objPfxShade( glProc, s, w );
 		frameOff();
 		if ( ran )
@@ -595,17 +753,48 @@ bool pfxGate( const std::string & spirvDir, GLuint baseTex, GLuint nrmTex, GLuin
 		PfxOut warm;
 		glDraw( cases[0], warm );
 	}
-	std::printf( "BLVIEW pfx state: %d samplers on their own units, %d values with no active location or member (%s), blocks:", units, inactive,
+	if ( rt ) {  // the screen GI's key: GL's surfaces (case `write`'s depth, the screen GI off; cellRow the identity), normal +z
+		const PfxCase wr = { "write", GL_LEQUAL, false, true, false, 0 };
+		PfxOut g0;
+		glDraw( wr, g0 );
+		std::vector<float> gk( std::size_t( hw ) * std::size_t( hh ) * 4, -1.0f );
+		std::size_t keyed = 0;
+		for ( int y = 0; y < hh; y++ )
+			for ( int x = 0; x < hw; x++ ) {
+				const int px = 2 * x, py = 2 * y;
+				const float d = g0.depth[std::size_t( py ) * std::size_t( kSW ) + std::size_t( px )];
+				if ( !( d < 1.0f ) )
+					continue;
+				const float wv = sx.proj[14] / ( 2.0f * d - 1.0f + sx.proj[10] );
+				const float nx = 2.0f * ( float( px ) + 0.5f ) / float( kSW ) - 1.0f, ny = 2.0f * ( float( py ) + 0.5f ) / float( kSH ) - 1.0f;
+				float * p = gk.data() + ( std::size_t( y ) * std::size_t( hw ) + std::size_t( x ) ) * 4;
+				p[0] = nx * wv / sx.proj[0];
+				p[1] = ny * wv / sx.proj[5];
+				p[2] = -wv;
+				p[3] = 1024.0f * 2048.0f + 1024.0f;  // cellGiKeyNormal: (0, 0, 1)
+				keyed++;
+			}
+		glBindTexture( GL_TEXTURE_2D, giKeyTex );
+		glTexSubImage2D( GL_TEXTURE_2D, 0, 0, 0, hw, hh, GL_RGBA, GL_FLOAT, gk.data() );
+		glBindTexture( GL_TEXTURE_2D, 0 );
+		set( "cellGiHalfOn", { 1 } );
+		std::printf( "BLVIEW pfx rt RT inputs: ratio %d x %d, atlas %u B (a store), screen GI %d x %d, %zu key texels on GL's surfaces\n", kSW, kSH,
+			unsigned( 193 * 13 * 7 * 9 * 16 ), hw, hh, keyed );
+	}
+	std::printf( "BLVIEW %s state: %d samplers on their own units, %d values with no active location or member (%s), blocks:", rt ? "pfx rt" : "pfx", units, inactive,
 		offNames.c_str() );
 	for ( const Blk & x : blks )
 		std::printf( " %s@%u (%zu B)", x.name.c_str(), x.glBind, x.bytes.size() );
 	std::printf( "\n" );
 	const char * caseOnly = std::getenv( "BLVIEW_PFX_CASES" );  // gates only: a case list while a first run is localised
-	bool ok = true;
+	bool ok = true, cubeRan = false;
+	bool faceCov[6] = {};  // round 5b: the faces any cube case moves >= 1000 pixels on
 	for ( const PfxCase & c : cases ) {
 		if ( caseOnly && std::string( caseOnly ).find( c.name ) == std::string::npos )
 			continue;
-		const std::string tag = std::string( "pfx " ) + c.name;
+		if ( rt && c.name != std::string( "leq" ) )
+			continue;  // the RT arm: case leq only
+		const std::string tag = std::string( rt ? "pfx rt " : "pfx " ) + c.name;
 		PfxOut gl, gl2;
 		if ( const GLenum e = glDraw( c, gl ); e != GL_NO_ERROR ) {
 			std::printf( "BLVIEW %s FAIL (GL error 0x%x in GL's draw)\n", tag.c_str(), unsigned( e ) );
@@ -616,7 +805,7 @@ bool pfxGate( const std::string & spirvDir, GLuint baseTex, GLuint nrmTex, GLuin
 		const std::size_t glRep = moved( gl, gl2 );
 		// the seen-checks: each input reaches GL's picture
 		bool seen = true;
-		for ( int pr = 1; pr <= 4; pr++ ) {
+		for ( int pr = 1; pr <= 4 && !rt; pr++ ) {
 			if ( ( pr == 2 && !c.soft ) || ( pr == 4 && !c.map ) )
 				continue;
 			if ( pr == 3 && c.name != std::string( "leq" ) && c.name != std::string( "hard" ) )
@@ -631,12 +820,43 @@ bool pfxGate( const std::string & spirvDir, GLuint baseTex, GLuint nrmTex, GLuin
 			std::printf( "BLVIEW %s GL %s probe %s: moves %zu pixels (bar >= 1000)\n", tag.c_str(), pn[pr], mv >= 1000 ? "OK" : "FAIL", mv );
 			seen = seen && mv >= 1000;
 		}
+		if ( rt )  // round 5 item 3: each RT input reaches GL's picture (else its red could test nothing)
+			for ( const char * nm : { "cellRestirOn", "cellDdgiOn", "cellGiHalfOn" } ) {
+				PfxOut g2;
+				set( nm, { 0 } );
+				glDraw( c, g2 );
+				set( nm, { 1 } );
+				const std::size_t mv = moved( gl, g2 );
+				std::printf( "BLVIEW %s GL RT probe %s: %s 0 moves %zu pixels (bar >= 1000)\n", tag.c_str(), mv >= 1000 ? "OK" : "FAIL", nm, mv );
+				seen = seen && mv >= 1000;
+			}
+		bool faceOk = true;
+		if ( c.map == 3 ) {  // round 5: which env cube faces GL's picture reads (one face white at a time); 5b: an axis case needs its own
+			const GLuint keep = envCube;
+			int reached = 0;
+			std::string per;
+			for ( int fc = 0; fc < 6; fc++ ) {
+				envCube = makeEnv( fc );
+				PfxOut g2;
+				glDraw( c, g2 );
+				glDeleteTextures( 1, &envCube );
+				const std::size_t mv = moved( gl, g2 );
+				reached += mv > 0;
+				faceCov[fc] = faceCov[fc] || mv >= 1000;
+				per += ( fc ? " " : "" ) + std::to_string( mv );
+				if ( fc == c.face )
+					faceOk = mv >= 1000;
+			}
+			envCube = keep;
+			std::printf( "BLVIEW %s GL faces reached: %d of 6 (pixels moved with face 0..5 white: %s)%s\n", tag.c_str(), reached, per.c_str(),
+				c.face < 6 ? faceOk ? "; its own face OK (bar >= 1000)" : "; its own face FAIL (bar >= 1000)" : "" );
+		}
 		takeObjBlRunStat();
 		PfxOut vk0, vk1;
 		std::string w;
 		const bool ran = vkDraw( c, 0, vk0, w );
 		const ObjBlRunStat rs = takeObjBlRunStat();
-		bool caseOk = seen && glRep == 0;
+		bool caseOk = seen && glRep == 0 && faceOk;
 		if ( c.map == 3 ) {
 			// round 5: the env cube through its plain-cube copy twin; the app's `vk pfx:` refusal count for this system must be 0
 			std::printf( "BLVIEW %s vk pfx: 1 system, %d drawn, %d refused (%s); %d copy twins, %llu bytes\n", tag.c_str(), ran ? 1 : 0, ran ? 0 : 1,
@@ -668,15 +888,16 @@ bool pfxGate( const std::string & spirvDir, GLuint baseTex, GLuint nrmTex, GLuin
 					double( fromHalf( gl.c0[p * 4 + 3] ) ), double( fromHalf( vk0.c0[p * 4] ) ), double( fromHalf( vk0.c0[p * 4 + 1] ) ),
 					double( fromHalf( vk0.c0[p * 4 + 2] ) ), double( fromHalf( vk0.c0[p * 4 + 3] ) ) );
 			}
-			caseOk = caseOk && crossOk && covOk && dc.exact() && cc.over == 0 && vkRep == 0;
+			caseOk = caseOk && crossOk && covOk && dc.exact() && cc.over == 0 && vkRep == 0 && ( c.map != 3 || cc.differ == 0 );  // 5b: cube EXACT
 			// the reds: offset and light on every case, depth on `hard`
-			static const char * redName[9] = { "", "offset (the strip stage reads its records 16 bytes on)", "light (the light buffer copied from one texel on)",
+			static const char * redName[13] = { "", "offset (the strip stage reads its records 16 bytes on)", "light (the light buffer copied from one texel on)",
 				"depth (ALWAYS read as LEQUAL)", "nmap (NormalMap a stand-in with hasNormalMap 1)", "grey (GreyscaleMap a stand-in with hasGreyscaleMap 1)",
 				"cubeoff (CubeMap a stand-in with hasCubeMap 1)", "elem0 (only element 0 of textureUnits resolved)",
-				"cubegrey (the grey stand-in cube bound in place of the env cube)" };
-			for ( int rd = 1; rd <= 8; rd++ ) {
+				"cubegrey (the grey stand-in cube bound in place of the env cube)", "restir (cellRestir read one texel on)",
+				"atlas (cellDdgiAtlas read one texel on)", "gihalf (cellGiHalf unbound)", "gikey (cellGiHalfKey unbound)" };
+			for ( int rd = rt ? 9 : 1; rd <= ( rt ? 12 : 8 ); rd++ ) {
 				if ( !( reds >> ( rd - 1 ) & 1u ) || ( rd == 3 && ( c.func != GL_ALWAYS || c.soft ) ) || ( c.noCol && rd != 1 )
-					|| ( c.map ? rd != 3 + c.map && !( c.map == 3 && rd == 8 ) : rd > 3 ) )
+					|| ( !rt && ( c.map ? rd != 3 + c.map && !( c.map == 3 && rd == 8 ) : rd > 3 ) ) )
 					continue;
 				PfxOut o;
 				std::string rw;
@@ -696,13 +917,31 @@ bool pfxGate( const std::string & spirvDir, GLuint baseTex, GLuint nrmTex, GLuin
 		}
 		std::printf( "BLVIEW %s %s\n", tag.c_str(), caseOk ? "OK" : "FAILED" );
 		ok = ok && caseOk;
+		cubeRan = cubeRan || c.map == 3;
+	}
+	if ( cubeRan ) {  // round 5b: the union over the cube cases
+		int nCov = 0;
+		for ( bool b : faceCov )
+			nCov += b;
+		std::printf( "BLVIEW pfx cube faces covered: %d of 6 %s\n", nCov, nCov == 6 ? "OK" : "FAIL" );
+		ok = ok && ( nCov == 6 || caseOnly );
 	}
 	f.bindVertexArray( 0 );
+	objBlTexelForget( lightTex );  // GL reuses the names: a stale twin under one refused the next gate's buffer texture
+	objBlTexelForget( restirTex );
+	objBlTexelForget( atlasTex );
 	glDeleteTextures( 1, &lightTex );
 	glDeleteTextures( 1, &cubeTex );
 	glDeleteTextures( 1, &envCube );
 	sharedTargetDrop( reinterpret_cast<std::uintptr_t>( &depthKeyAt ) );
+	if ( rt ) {
+		glDeleteTextures( 1, &restirTex );
+		glDeleteTextures( 1, &atlasTex );
+		objBlTexelStoreDrop( atlasBuf );
+		sharedTargetDrop( giHalfKey );
+		sharedTargetDrop( giKeyKey );
+	}
 	objBlLocsLoad( spirvDir + "/no_locs.txt", why );
-	std::printf( "BLVIEW pfx %s\n", ok ? "OK" : "FAILED" );
+	std::printf( "BLVIEW %s %s\n", rt ? "pfx rt" : "pfx", ok ? "OK" : "FAILED" );
 	return ok;
 }

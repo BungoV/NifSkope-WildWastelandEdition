@@ -1208,6 +1208,9 @@ bool cellGate( const std::string & spirvDir, int twin, const GLuint maps[4], uns
 	}
 	f.bindVertexArray( 0 );
 	glDeleteTextures( 1, &glOnly );
+	objBlTexelForget( lightTex );  // GL reuses the names: a stale twin under one refused the next gate's buffer texture
+	objBlTexelForget( restirTex );
+	objBlTexelForget( atlasTex );
 	if ( lightTex )
 		glDeleteTextures( 1, &lightTex );  // its buffer stays with the gate's other buffers
 	if ( fxDepthTex )

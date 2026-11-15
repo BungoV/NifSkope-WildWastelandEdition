@@ -818,14 +818,17 @@ bool vkPfxDraw( const NifSkopeOpenGLContext::Program * prog, const float * pos, 
 	pfxTried++;
 	GLboolean mask[4] = {};
 	qc->functions()->glGetBooleanv( GL_COLOR_WRITEMASK, mask );
-	// the twin is particles_cell.frag@WW_CELL_AIRZONE+WW_CELL_FOGLEAK+WW_FRAME_UBO (vkframe_spirv.sh fxp)
+	// the twin is particles_cell.frag@WW_CELL_AIRZONE+WW_CELL_FOGLEAK+WW_FRAME_UBO (vkframe_spirv.sh fxp); round 5: the all-on
+	// route's RT GI variant (+ WW_CELL_RESTIR + RTDDGI + RTDDGI_CASCADES, the cell twins' rtKeyAir) is the rt twin
+	static const std::string rtKeyAir = "WW_CELL_AIRZONE+WW_CELL_FOGLEAK+WW_CELL_RESTIR+WW_CELL_RTDDGI+WW_CELL_RTDDGI_CASCADES+WW_FRAME_UBO";
+	const bool rt = prog->wwDefs == rtKeyAir;
 	const char * no = !wwFogLeakShaderDefine() ? "WW_CELL_FOGLEAK=0: GL's program is not the Vulkan twin"
 		: !wwAirZoneShaderDefine() ? "WW_CELL_AIRZONE off: GL's program is not the Vulkan twin"
 		: !prog->wwShadowFrame ? "WW_FRAME_UBO off: GL's program is not the Vulkan twin"
 		: wwCellGiVis() == 1 ? "WW_CELL_GI_MARCH in GL's program: no Vulkan twin"
 		: wwCellPrtOn() ? "WW_CELL_PRT in GL's program: no Vulkan twin"
-		: rtddgiCellShaderDefine() ? "WW_CELL_RTDDGI in GL's program: no Vulkan twin"
-		: rtddgiRestirShaderDefine() ? "WW_CELL_RESTIR in GL's program: no Vulkan twin"
+		: !rt && rtddgiCellShaderDefine() ? "WW_CELL_RTDDGI in GL's program without WW_CELL_RTDDGI_CASCADES + WW_CELL_RESTIR: no Vulkan twin"
+		: !rt && rtddgiRestirShaderDefine() ? "WW_CELL_RESTIR in GL's program without WW_CELL_RTDDGI: no Vulkan twin"
 		: rtddgiRestirGiShaderDefine() ? "WW_CELL_RESTIRGI in GL's program: no Vulkan twin"
 		: !( mask[0] && mask[1] && mask[2] && mask[3] ) ? "a colour write mask (the imagespace's measure pass)" : nullptr;
 	if ( no ) {
@@ -843,6 +846,7 @@ bool vkPfxDraw( const NifSkopeOpenGLContext::Program * prog, const float * pos, 
 	s.size = size;
 	s.n = n;
 	s.red = red;
+	s.rt = rt;
 	std::string why;
 	const bool drew = WwVkPresent::objPfxShade( []( const char * name ) -> void * {
 		return reinterpret_cast<void *>( QOpenGLContext::currentContext()->getProcAddress( name ) );

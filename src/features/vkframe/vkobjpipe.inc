@@ -16,6 +16,7 @@
 #include "features/vkframe/objpfx_cs.spv.h"       // lane VKOBJ5: particles_cell.prog's record pass, expand stage, pixel twin
 #include "features/vkframe/objpfx_vs.spv.h"       // (vkframe_spirv.sh fxp)
 #include "features/vkframe/objpfx_cell_ps.spv.h"
+#include "features/vkframe/objpfx_cell_rt_ps.spv.h"  // round 5: its RT GI variant
 #include "features/vkframe/objcell_effectcell_ps.spv.h"   // fo4_effectcell.prog's (+ WW_CELL_AIRZONE, ships on)
 #include "features/vkframe/objcell_effectdecalcsm_ps.spv.h"  // fo4_effectdecalcsm.prog's
 // the all-on route's RT GI variant (WW_CELL_RTDDGI + RTDDGI_CASCADES + RESTIR) of each (pbrm_default's code is the same)
@@ -1559,6 +1560,10 @@ std::uintptr_t objCubeCopyTwin( GlProc gp, const ObjBlTexUnit & u, std::string &
 		return why = "GL format " + std::to_string( fmt ) + " has no cube twin", 0;
 	if ( blIsSrgb( f.fmt ) && decode == 0x8A4A )
 		return why = "an sRGB cube with its decode skipped", 0;
+	int swz[4] = { 0x1903, 0x1904, 0x1905, 0x1906 };
+	tv( u.glTex, 0x8E46, swz );  // TEXTURE_SWIZZLE_RGBA (the DDS loader sets one on BC4 / BC5 / luminance): the cube view has none
+	if ( swz[0] != 0x1903 || swz[1] != 0x1904 || swz[2] != 0x1905 || swz[3] != 0x1906 )
+		return why = "a swizzled GL cube (the cube twin's view is the identity)", 0;
 	const std::uintptr_t key = ( std::uintptr_t( 0xC0B ) << 40 ) | std::uintptr_t( u.glTex );
 	unsigned twin = 0;
 	if ( !farTwin( key, 4, w, w, 6, unsigned( fmt ), twin, why, levels ) || !twin )
@@ -3184,8 +3189,9 @@ bool objCellShade( GlProc gp, const ObjCellShade & s, std::string & why )
 
 int objPfxRed( const char * name )
 {
-	static const char * names[7] = { "offset", "light", "depth", "nmap", "grey", "cubeoff", "elem0" };
-	for ( int i = 0; name && i < 7; i++ )
+	// 8 is the gate's own `cubegrey` (a binding, nothing here); 9-12 the RT GI inputs, as objCellRed's
+	static const char * names[12] = { "offset", "light", "depth", "nmap", "grey", "cubeoff", "elem0", "", "restir", "atlas", "gihalf", "gikey" };
+	for ( int i = 0; name && *name && i < 12; i++ )
 		if ( std::strcmp( name, names[i] ) == 0 )
 			return i + 1;
 	return 0;
@@ -3211,9 +3217,12 @@ bool objPfxShade( GlProc gp, const ObjPfxShade & s, std::string & why )
 	d.csWords = sizeof( vkframe_objpfx_cs_spv ) / 4;
 	d.vs = vkframe_objpfx_vs_spv;
 	d.vsWords = sizeof( vkframe_objpfx_vs_spv ) / 4;
-	d.ps = vkframe_objpfx_cell_ps_spv;
-	d.psWords = sizeof( vkframe_objpfx_cell_ps_spv ) / 4;
-	d.texelRed = s.red == 2 ? 1 : 0;
+	d.ps = s.rt ? vkframe_objpfx_cell_rt_ps_spv : vkframe_objpfx_cell_ps_spv;
+	d.psWords = s.rt ? sizeof( vkframe_objpfx_cell_rt_ps_spv ) / 4 : sizeof( vkframe_objpfx_cell_ps_spv ) / 4;
+	d.texelRed = s.red == 2 || s.red == 9 || s.red == 10 ? 1 : 0;
+	if ( s.red == 9 || s.red == 10 )  // round 5: the RT GI variant's texel buffers, one each (objCellShade's reds)
+		d.texelRedName = s.red == 9 ? "cellRestir" : "cellDdgiAtlas";
+	d.dropName = s.red == 11 ? "cellGiHalf" : s.red == 12 ? "cellGiHalfKey" : nullptr;
 	std::string w2;
 	if ( !objBlFrameRead( gp, d, w2 ) )
 		return fail( w2 );
@@ -3536,6 +3545,24 @@ bool objBlTexelImported( unsigned tex )
 {
 	const auto it = opS().texTwins.find( tex );
 	return it != opS().texTwins.end() && it->second.ext;
+}
+
+void objBlTexelForget( unsigned tex )
+{
+	Op & O = opS();
+	const auto it = O.texTwins.find( tex );
+	if ( it == O.texTwins.end() )
+		return;
+	opRunWait();
+	Vk & v = vk();
+	if ( it->second.view && v.ok ) {
+		const auto destroy = reinterpret_cast<PFN_vkDestroyBufferView>( v.vkGetDeviceProcAddr( v.dev, "vkDestroyBufferView" ) );
+		if ( destroy )
+			destroy( v.dev, it->second.view, nullptr );
+	}
+	csmBufFree( it->second.buf, gl().ok && it->second.buf.glCtx == gl().ctx );
+	O.texTwins.erase( it );
+	O.texelMemo.erase( tex );
 }
 
 bool objBlTexelRead( unsigned tex, std::vector<std::uint8_t> & out, std::string & why )
