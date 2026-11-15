@@ -498,11 +498,15 @@ void giHalfPass( Scene * scene, AoGpu & g, int W, int H, float p00, float p11 )
 	fn->glUniform2i( prog->uniLocation( "giFull" ), W, H );
 	prog->uni2f( "giProj", p00, p11 );
 	/* lane VKFAR3 (A1 b): the ray-traced cascades' read on the present device (gihalf_vk.hlsl), the atlas read in place
-	 * (WwVkPresent::ddgiAtlasView), the uniforms this program was just given (kT_gihalf). Red WW_VKVIEW_GIHALF_RED=1: GL */
+	 * (WwVkPresent::ddgiAtlasView), the uniforms this program was just given (kT_gihalf). Red WW_VKVIEW_GIHALF_RED=1: GL.
+	 * VKFAR4: refused while its gate (tests/vkframe/gihalfview.sh) is red; true only with that gate green */
+	static constexpr bool kGiHalfGateGreen = false;
 	bool vkDrew = false;
 	const char * vkGlWhy = nullptr;
 	if ( !WwVkPresent::shareWanted( "WW_VKVIEW_GIHALF_RED" ) )
 		vkGlWhy = "red WW_VKVIEW_GIHALF_RED=1 or the view not on Vulkan";
+	else if ( !kGiHalfGateGreen )
+		vkGlWhy = "its gate is red (gihalfview: NV GL's float order on the key, 82 E texels), GL draws it";
 	else if ( wwCellPrtOn() )
 		vkGlWhy = "the PRT read (the kernel holds the ray-traced branch only)";
 	else if ( prog->uniLocation( "cellDdgiCount" ) < 0 )

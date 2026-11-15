@@ -102,8 +102,11 @@ void frag_main()
 	}
 #if defined( WW_CELL_PRT ) || defined( WW_CELL_RTDDGI )	// lane PRTOFF1: the PRT's screen pass; PERFFIX2: the volume's
 	float z = -g.w / length( cellRow[0].xyz );	// back to view units
-	float2 ndc = ( float2( f ) + 0.5 ) / float2( giFull ) * 2.0 - 1.0;
-	float3 posView = float3( -z * ndc / giProj, z );
+	/* -z * ndc / giProj with ndc = 2u - 1, in NV GL's order (VKFAR4, gihalf_ndcfit2: 100 % of GL's keys): u = c * ( 1 / F ),
+	 * ( z - 2u z ) * ( 1 / p ) unfused */
+	float2 u = ( float2( f ) + 0.5 ) * ( 1.0 / float2( giFull ) );
+	precise float2 pxy = ( z - ( 2.0 * u ) * z ) * ( 1.0 / giProj );
+	float3 posView = float3( pxy, z );
 	float3 P = cellWorldPos( posView );
 	float3 N = cellWorldDir( g.xyz );
 #if !defined( WW_CELL_PRT )
