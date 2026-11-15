@@ -195,6 +195,23 @@
 // rain / snow draw twins GL's csmMap (refused unless linear, clamp to border 1, compare LEQUAL) into the lit set's binding
 // 95 with a compare sampler of that state and ussCloudMap into binding 98. The census sets ussOn 0 and ussCloudOn 1 (the
 // lines above). Census after: exterior 4, interior 5 (the sun's shadow map line gone from both).
+// The air's drift (L8 term 4, VKFAR6 11-15; bar set before its first run, never widened): volAirDrift.x > 0 makes the air
+// lumpy where the particles are lit: the sun's column takes airTupSun to the power wwAirDriftSunK (the drift's mean along
+// the sun) and each lamp's path exp( -airOd x dL ) (the drift at the puff and along the path), both reading volAirNoise
+// (t30, a 3D R8 noise, linear, repeat; cellvolair.cpp vaNoiseLoad) at volAirDriftUv's two octaves, faded by volAirDrift.y
+// / .z, centred on its mean .w. One case, snow_far_drift (snow_far_lamps' run, fogged, volTerms 3): volAirDrift (0.5,
+// the in-view particles' median distance, 1 / their distance span, the noise's mean), volAirDriftUv two skewed octaves
+// (about 2 and 5 noise tiles across the run), volAirDriftRed 0, a 32^3 R8 volAirNoise (linear, repeat) bound in every case
+// (unread with the drift off). The same verdict, reference checks, repeat clause, reds 64 / 128 as the lit cases; the
+// globals check and Vulkan's globals mirror as snow_far_lamps. The case must also show (else the gate fails): GL with
+// volAirDrift.x 0 differs on >= 1000 covered samples (the drift seen); GL with volAirDriftUv all zero on >= 1000 (the
+// noise's variation seen); volAirDrift, volAirDriftUv, volAirDriftRed and volAirNoise found in GL's program; volAirDrift
+// and volAirDriftUv packed non-zero. GL with volAirDriftRed 1 (one sun tap) and 2 (the lamps' drift at the puff only) is
+// printed (info). Reds, each must FAIL in snow_far_drift: 1048576 the noise dropped (Vulkan's volAirNoise the zero 3D
+// texture); 2097152 the drift dropped (the packed volAirDrift.x 0); 4194304 the octaves swapped (the packed
+// volAirDriftUv rows 0-2 with 3-5). Lifted with it: precipLitWhy's drift refusal; precipRun refuses a lit run with the
+// drift on and no volAirNoise; the app's rain / snow draw twins GL's volAirNoise into the lit set's binding 94 with its
+// own sampler (binding 158). Census after: exterior 3, interior 4 (the drift line gone from both).
 #define main fxview_main
 #include "fxview.cpp"
 #undef main
