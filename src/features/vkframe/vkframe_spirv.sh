@@ -318,6 +318,11 @@ fxg reflrelight_view_ps reflections/cell_reflrelight_ps
 fxr reflrelight_view_rt_ps reflections/cell_reflrelight_ps
 fxt reflrelight_view_vs reflections/cell_reflrelight_vs
 ls -la reflrelight_view_ps.spv.h reflrelight_view_rt_ps.spv.h reflrelight_view_vs.spv.h
+# lane VKFAR21: the probe G-buffer capture (cell_reflcap.prog, cellreflprobe.cpp) on fxg / fxt's shifts; the loader builds it
+# with no define and fxg's two defines are inert there (ReflectionsBindingsVk.hlsli has no #if)
+fxg reflcap_view_ps reflections/cell_reflcap_ps
+fxt reflcap_view_vs reflections/cell_reflcap_vs
+ls -la reflcap_view_ps.spv.h reflcap_view_vs.spv.h
 # lane VKFAR7: the TAA mask's reactive pass (taainputs.cpp pass 4, vktaareactive.inc): pixel stage on fx()'s shifts (b31 at 31,
 # BaseMap at 64 / 128), vertex stage on fxb()'s (its b31 at 32)
 fx taareactive_view_ps post/taa_reactive_ps
