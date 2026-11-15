@@ -647,6 +647,11 @@ struct Job
 		const auto it = uni.find( "cellShadowOn" );
 		return lamps() && cubeN > 0 && it != uni.end() && !it->second.empty() && it->second[0] > 0.5;
 	}
+	bool gobo() const  // L8 term 6 (VKFAR6): the lamps' gobos on (cellGoboOn 1, the patterns in cellLights)
+	{
+		const auto it = uni.find( "cellGoboOn" );
+		return lamps() && it != uni.end() && !it->second.empty() && it->second[0] > 0.5;
+	}
 };
 const int kNormUnit = 8;  // slice 3: the look's pcTexN
 const int kLightsUnit = 9, kClusterUnit = 10;  // L8 term 2a: the lamps' cellLights / cellCluster
@@ -966,7 +971,7 @@ int main( int argc, char ** argv )
 	};
 	GLuint vao = 0;
 	genVertexArrays( 1, &vao );
-	constexpr int kCases = 21;
+	constexpr int kCases = 22;
 	static char twinKeys[kCases], normKeys[kCases];  // one atlas twin a case (the atlases' sizes differ), one normal-map twin a case
 	static char terrKeys[kCases];  // L8 terrain air: airTerr's twin a case
 	static char envKeys[kCases];  // L8 term 2: volEnvHist's twin a case
@@ -1029,7 +1034,7 @@ int main( int argc, char ** argv )
 		const char * name;
 		int red;
 		bool seen;
-	} reds[24] = { { "cull (radius 0)", 1, false }, { "corners (the strip's last two swapped)", 2, false }, { "near fade (dropped)", 4, false },
+	} reds[27] = { { "cull (radius 0)", 1, false }, { "corners (the strip's last two swapped)", 2, false }, { "near fade (dropped)", 4, false },
 		{ "air (dropped)", 8, false }, { "look (dropped: the plain pipelines)", 16, false }, { "atlas (dropped: the zero texture)", 32, false },
 		{ "light (dropped)", 128, false }, { "lamps' lights (dropped: the zero texel buffer)", 256, false },
 		{ "cluster's globals (dropped: b0 zero)", 512, false }, { "cluster lists (dropped: the zero texel buffer)", 1024, false },
@@ -1039,7 +1044,9 @@ int main( int argc, char ** argv )
 		{ "clouds' map (dropped: the zero texture)", 262144, false }, { "cascades 1 and 2 (swapped: csmMat)", 524288, false },
 		{ "drift's noise (dropped: the zero volAirNoise)", 1048576, false }, { "drift (dropped: volAirDrift.x 0)", 2097152, false },
 		{ "drift's octaves (swapped: volAirDriftUv)", 4194304, false }, { "lamps' cubes (dropped: the zero D16 cube array)", 8388608, false },
-		{ "lamps' shadows (dropped: cellShadowOn 0)", 16777216, false }, { "lamps' shadow fade (dropped: cellShadowFadeOn 0)", 33554432, false } };
+		{ "lamps' shadows (dropped: cellShadowOn 0)", 16777216, false }, { "lamps' shadow fade (dropped: cellShadowFadeOn 0)", 33554432, false },
+		{ "lamps' gobos (dropped: cellGoboOn 0)", 67108864, false }, { "lamps' gobo table (dropped: cellGoboTbl 0)", 134217728, false },
+		{ "lamps' gobo uv (flipped: cellGoboRot 3)", 268435456, false } };
 	using TexBufferFn = void( WINAPI * )( GLenum, GLenum, GLuint );
 	const auto texBuffer = reinterpret_cast<TexBufferFn>( wglGetProcAddress( "glTexBuffer" ) );
 	if ( !texBuffer )
@@ -1325,6 +1332,14 @@ int main( int argc, char ** argv )
 				} else if ( mode == 33 ) {  // L8 term 5: the taps on one texel (cellShadowTexel 0), info
 					const float zero = 0.0f;
 					f.uniform1fv( f.getUniformLocation( pJob, "cellShadowTexel" ), 1, &zero );
+				} else if ( mode == 34 ) {  // L8 term 6: the gobos off (cellGoboOn 0)
+					u1i( pJob, "cellGoboOn", 0 );
+				} else if ( mode == 35 ) {  // L8 term 6: each pattern's mean (cellGoboFlat 1)
+					u1i( pJob, "cellGoboFlat", 1 );
+				} else if ( mode == 36 ) {  // L8 term 6: u flipped (cellGoboRot 1)
+					u1i( pJob, "cellGoboRot", 1 );
+				} else if ( mode == 37 ) {  // L8 term 6: the paraboloid unmirrored (cellGoboMap 1), info
+					u1i( pJob, "cellGoboMap", 1 );
 				} else if ( mode == 9 ) {  // the case as it is (the restore check)
 				} else if ( mode == 6 ) {  // L8 term 3: the local law off (vpSun.w 0)
 					const float off[4] = { 0.5f, 0.4f, 0.3f, 0.0f };
@@ -1421,6 +1436,20 @@ int main( int argc, char ** argv )
 					"(each want >= 1000), volAirDriftRed 1 %zu, 2 %zu (info); drift names missing from GL's program: %s\n", j.name.c_str(),
 					noDrift.flips, noDrift.covered, flatNoise.flips, oneSun.flips, puffOnly.flips, dmiss.empty() ? "none" : dmiss.c_str() );
 				ok = ok && noDrift.flips >= 1000 && flatNoise.flips >= 1000 && dmiss.empty();
+			}
+			if ( j.gobo() ) {  // L8 term 6's seen-checks (header): the gobos, their texels and their uv seen, their names found
+				const Verdict noGobo = judge( bg, drawGl( 34 ), refA, refB, refB );
+				const Verdict flat = judge( bg, drawGl( 35 ), refA, refB, refB );
+				const Verdict rot = judge( bg, drawGl( 36 ), refA, refB, refB );
+				const Verdict map1 = judge( bg, drawGl( 37 ), refA, refB, refB );
+				std::string umiss;
+				for ( const char * nm : { "cellGoboOn", "cellGoboRot", "cellGoboFlat", "cellGoboGam", "cellGoboTbl", "cellGoboMap" } )
+					if ( f.getUniformLocation( pJob, nm ) < 0 )
+						umiss += std::string( umiss.empty() ? "" : ", " ) + nm;
+				std::printf( "PRECIPVIEW %s gobo checks: GL with cellGoboOn 0 differs %zu of %zu covered samples, cellGoboFlat 1 %zu, "
+					"cellGoboRot 1 %zu (each want >= 1000), cellGoboMap 1 %zu (info); gobo names missing from GL's program: %s\n", j.name.c_str(),
+					noGobo.flips, noGobo.covered, flat.flips, rot.flips, map1.flips, umiss.empty() ? "none" : umiss.c_str() );
+				ok = ok && noGobo.flips >= 1000 && flat.flips >= 1000 && rot.flips >= 1000 && umiss.empty();
 			}
 			if ( j.cube() ) {  // L8 term 5's seen-checks (header): the cubes and their fade seen, their names found
 				const Verdict noShadow = judge( bg, drawGl( 31 ), refA, refB, refB );
@@ -1868,6 +1897,16 @@ int main( int argc, char ** argv )
 								zero += std::string( zero.empty() ? "" : ", " ) + tf.first;
 						}
 					}
+					if ( j.gobo() ) {  // the gobos' fields packed, not zero (the gobo bar)
+						for ( const char * tf : { "cellGoboOn", "cellGoboTbl" } ) {
+							const int at = precipAt( WwVkPresent::kT_preciplitcs, int( std::size( WwVkPresent::kT_preciplitcs ) ), tf );
+							bool any = false;
+							for ( int b = 0; b < 4 && at >= 0; b++ )
+								any = any || t.cs[at + b] != 0;
+							if ( !any )
+								zero += std::string( zero.empty() ? "" : ", " ) + tf;
+						}
+					}
 					if ( j.cube() ) {  // the cubes' fields packed, not zero (the shadow-cube bar)
 						for ( const auto & tf : { std::make_pair( "cellShadowOn", 4 ), std::make_pair( "cellShadowTexel", 4 ), std::make_pair( "cellShadowFade", 256 ) } ) {
 							const int at = precipAt( WwVkPresent::kT_preciplitcs, int( std::size( WwVkPresent::kT_preciplitcs ) ), tf.first );
@@ -2186,7 +2225,8 @@ int main( int argc, char ** argv )
 				|| ( r.red == 16384 && !j.envKeep() ) || ( r.red == 32768 && !j.amb() )
 				|| ( ( r.red == 65536 || r.red == 131072 || r.red == 262144 || r.red == 524288 ) && !j.csm() )
 				|| ( ( r.red == 1048576 || r.red == 2097152 || r.red == 4194304 ) && !j.drift() )
-				|| ( ( r.red == 8388608 || r.red == 16777216 || r.red == 33554432 ) && !j.cube() ) )
+				|| ( ( r.red == 8388608 || r.red == 16777216 || r.red == 33554432 ) && !j.cube() )
+				|| ( ( r.red == 67108864 || r.red == 134217728 || r.red == 268435456 ) && !j.gobo() ) )
 				continue;  // a plain run has no look to drop, a case with no atlas no atlas, an unlit one no light, no lamps no lights
 			std::vector<std::uint16_t> a, b;
 			if ( !runVk( r.red, a, b, false ) ) {
@@ -2213,7 +2253,8 @@ int main( int argc, char ** argv )
 			}
 			if ( ( r.red == 512 || r.red == 1024 || r.red == 2048 || r.red == 4096 || r.red == 16384 || r.red == 32768 || r.red == 65536
 				|| r.red == 131072 || r.red == 262144 || r.red == 524288 || r.red == 1048576 || r.red == 2097152 || r.red == 4194304
-				|| r.red == 8388608 || r.red == 16777216 || r.red == 33554432 ) && v.ok() ) {  // the cluster case must see its b0 and its lists dropped
+				|| r.red == 8388608 || r.red == 16777216 || r.red == 33554432 || r.red == 67108864 || r.red == 134217728
+				|| r.red == 268435456 ) && v.ok() ) {  // the cluster case must see its b0 and its lists dropped
 				std::printf( "PRECIPVIEW %s red %s PASSED: the case does not see it\n", j.name.c_str(), r.name );
 				ok = false;
 			}

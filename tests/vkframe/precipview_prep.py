@@ -85,6 +85,9 @@ CASES = [
     # L8 term 5 (VKFAR6, element 27 = the lamps' shadow cubes): rain_near_lamps' run, volTerms 3
     ('rain_near_shadow', 0, 2.0, 4.0, 11, 37.25, (-60500.0, 70000.0, 6300.0), (120.0, -40.0), 0, 1.0, 0.0, 0.0, 1.0, 1.0, 1,
      2.0, -0.08, 40000, 0, 0, 3, 0, 0, 0, 0, 0, 0, 1),
+    # L8 term 6 (VKFAR6, element 28 = the lamps' gobos): rain_near_lamps' run, volTerms 3
+    ('rain_near_gobo', 0, 2.0, 4.0, 11, 37.25, (-60500.0, 70000.0, 6300.0), (120.0, -40.0), 0, 1.0, 0.0, 0.0, 1.0, 1.0, 1,
+     2.0, -0.08, 40000, 0, 0, 3, 0, 0, 0, 0, 0, 0, 0, 1),
 ]
 SUN = np.array([0.4, 0.3, 0.35]) / np.linalg.norm([0.4, 0.3, 0.35])  # world, toward the sun (the air's fogSun too)
 # a lit case's own sun (cellDirTo), chosen by the GS's mix: N = the eye's axis, thick / thin = 4 vpWrap( N.to, pcTrans )
@@ -93,6 +96,7 @@ SUN = np.array([0.4, 0.3, 0.35]) / np.linalg.norm([0.4, 0.3, 0.35])  # world, to
 LIT_SUN = {'rain_near_lit': np.array([0.3, -0.6, 0.75]) / np.linalg.norm([0.3, -0.6, 0.75])}
 LIT_SUN['rain_near_lamps'] = LIT_SUN['rain_near_lit']
 LIT_SUN['rain_near_shadow'] = LIT_SUN['rain_near_lit']
+LIT_SUN['rain_near_gobo'] = LIT_SUN['rain_near_lit']
 LIT_SUN['rain_near_cluster'] = LIT_SUN['rain_near_lit']
 LIT_SUN['rain_near_sunlocal'] = LIT_SUN['rain_near_lit']
 LIT_SUN['rain_near_gi'] = LIT_SUN['rain_near_lit']
@@ -393,6 +397,40 @@ for ci, c in enumerate(CASES):
                     sh_occ = (np.sin((sh_r / sh_d[:, None]) @ sh_F[k]) > 0.0) & ((sh_d - 1.0) / sh_L[k, 0, 3] > 0.05)
                     sh_line.append('slot %d %.3f of %d in reach' % (k, float(np.mean(sh_occ[sh_in])) if sh_in.any() else 0.0, int(sh_in.sum())))
                 print('precipview case %s: the shadow cubes, %d x %d, stripes shadow %s' % (c[0], sh_n, sh_n, ', '.join(sh_line)))
+            if len(c) > 28 and c[28]:
+                # L8 term 6: the lamps' gobos, all in cellLights past the 40 light texels: the table at 40 (2 texels: 1 +
+                # each light's record, the omni's at 42, the hemisphere's at 45), pattern A (8 x 8, the spot's) at 48,
+                # pattern B (8 x 16, two halves, the omni's and the hemisphere's) at 114 (names kept off the module's)
+                gb_L = lamps(v[inview], R, np.array(c[6])).reshape(40, 4).astype(np.float64)
+                gb_X = np.zeros((204, 4))
+                gb_X[0] = [43.0, 0.0, 46.0, 0.0]
+                for gb_at, gb_seed in ((2, 280), (5, 281)):
+                    gb_q = np.linalg.qr(np.random.RandomState(gb_seed).randn(3, 3))[0]
+                    gb_X[gb_at] = list(gb_q[0]) + [115.0]
+                    gb_X[gb_at + 1] = list(gb_q[1]) + [0.0]
+                    gb_X[gb_at + 2] = list(gb_q[2]) + [0.0]
+                gb_rs = np.random.RandomState(290)
+                for gb_h, gb_w, gb_hh in ((8, 8, 8), (74, 8, 16)):
+                    gb_p = gb_rs.uniform(0.2, 1.5, (gb_w * gb_hh, 3))
+                    gb_X[gb_h] = [gb_w, gb_hh, 0.0, 0.0]
+                    gb_X[gb_h + 1, :3] = gb_p.mean(axis=0)
+                    gb_X[gb_h + 2:gb_h + 2 + gb_w * gb_hh, :3] = gb_p
+                gb_ax = gb_L[1 * 8 + 2, :3]
+                gb_y = np.cross(gb_ax, [0.0, 0.0, 1.0])
+                gb_y /= np.linalg.norm(gb_y)
+                gb_L[1 * 8 + 5] = list(gb_y) + [49.0]  # the spot's t5: local y, 1 + pattern A's header
+                gb_L[1 * 8 + 6] = list(np.cross(gb_ax, gb_y)) + [0.75]  # t6: local z, tan( FOV / 2 ) (outer cosine 0.8)
+                np.concatenate([gb_L, gb_X]).astype(np.float32).tofile(os.path.join(d, 'buf_cellLights.bin'))
+                with open(os.path.join(d, 'buf.txt'), 'w', newline='\n') as f:
+                    f.write('cellLights rgba32f 244 buf_cellLights.bin\n')
+                U.update({'cellGoboOn': [1], 'cellGoboRot': [0], 'cellGoboFlat': [0], 'cellGoboGam': [0], 'cellGoboTbl': [40],
+                          'cellGoboMap': [0]})
+                gb_P = (R.T @ v[inview].astype(np.float64).T).T + np.array(c[6])
+                gb_line = []
+                for gb_k, gb_nm in ((0, 'omni'), (1, 'spot'), (2, 'hemisphere')):
+                    gb_n = int((np.linalg.norm(gb_P - gb_L[gb_k * 8, :3], axis=1) < gb_L[gb_k * 8, 3]).sum())
+                    gb_line.append('%s %d' % (gb_nm, gb_n))
+                print('precipview case %s: gobos, in reach of %s of %d in view' % (c[0], ', '.join(gb_line), len(gb_P)))
         if len(c) > 21 and c[21]:
             # L8 term 2b: the cluster lists. Depth = -(R[2] . (P - eye)) over the run's particles in the view, log slices
             tx, ty = -(-W // TILE), -(-H // TILE)

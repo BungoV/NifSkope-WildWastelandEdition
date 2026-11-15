@@ -11,8 +11,8 @@
  * L8 added the lamps, the cluster lists, terrain air, the local sun and GI (volTerms 4: idle in the default program; a GL
  * program variant that reads a GI volume is refused) and the ambient (volTerms 8: the weather's cellDalc, the Ambient
  * Only volumes, the air's keep through volEnvHist at t19), the sun's cascades and the clouds (t31 / t34) and the air's
- * drift (volAirNoise at t30), the lamps' shadow cubes (GL's shared D16 cube array at t6). The lamps' gobos, interiors
- * and the roof map are refused (GL draws).
+ * drift (volAirNoise at t30), the lamps' shadow cubes (GL's shared D16 cube array at t6), their gobos (in cellLights).
+ * Interiors and the roof map are refused (GL draws).
  * GL's state (cellprecip.cpp): depth LEQUAL, no depth write, cull off, blend SRC_ALPHA / ONE_MINUS_SRC_ALPHA, stencil ALWAYS
  * ref 1, REPLACE on depth pass, write mask 0x03. */
 namespace
@@ -641,8 +641,6 @@ int precipLitWhys( const PrecipRun::LitIn & l, const char ** out, int max )
 			add( "the lit program lacks a lamp switch the refusals read" );
 		if ( l.shadow > 0 && l.restir >= 0 )  // L8 term 5: the cubes are judged; GL's ReSTIR variant does not read them
 			add( "the lamps' shadows in GL's ReSTIR variant (cellRestirOn: its cubes are not read)" );
-		if ( l.gobo > 0 )
-			add( "the lamps' gobos on the particles (refused in term 2a)" );
 		if ( l.phys > 0.5f )
 			add( "the lamps' physical falloff on the particles (refused in term 2a)" );
 		if ( l.cellRed > 0 )
@@ -888,6 +886,18 @@ bool precipRun( const PrecipRun & t, std::string & why )
 			const int atCsm = precipAt( kT_preciplitcs, int( std::size( kT_preciplitcs ) ), "volCsm" );
 			if ( atCsm >= 0 )
 				std::memset( l + atCsm, 0, 4 );
+		}
+		for ( const auto & gr : { std::make_pair( 67108864, "cellGoboOn" ), std::make_pair( 134217728, "cellGoboTbl" ) } )
+			if ( t.red & gr.first ) {  // gates only: the gobos off (cellGoboOn 0) / their table dropped (cellGoboTbl 0)
+				const int atG = precipAt( kT_preciplitcs, int( std::size( kT_preciplitcs ) ), gr.second );
+				if ( atG >= 0 )
+					std::memset( l + atG, 0, 4 );
+			}
+		if ( t.red & 268435456 ) {  // gates only: the gobos' uv flipped (cellGoboRot 3)
+			const int atRot = precipAt( kT_preciplitcs, int( std::size( kT_preciplitcs ) ), "cellGoboRot" );
+			const std::int32_t three = 3;
+			if ( atRot >= 0 )
+				std::memcpy( l + atRot, &three, 4 );
 		}
 		if ( t.red & 16777216 ) {  // gates only: the lamps' shadows off (cellShadowOn 0)
 			const int atSh = precipAt( kT_preciplitcs, int( std::size( kT_preciplitcs ) ), "cellShadowOn" );
