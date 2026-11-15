@@ -183,7 +183,8 @@ void toneCachePath( const std::string & path );
 
 /* Lane VKSHARE1: single-sample targets another pass owns (the clouds' march and history, TAA's), made on the present
  * device and imported into GL, keyed by the owner. type 0 = 2D, 1 = 3D (d deep), 2 = 2D array (d layers); glFmt one of
- * GL_RGBA16F / RGBA32F / RGBA8 / RG32F / RG16F / R32F / R8 / DEPTH24_STENCIL8. GL current. Same key and shape: the same
+ * GL_RGBA16F / RGBA32F / RGBA8 / RG32F / RG16F / R32F / R8 / DEPTH24_STENCIL8 (type 3, lane VKFAR6: a D16 cube array of d cubes,
+ * w = h, GL_TEXTURE_CUBE_MAP_ARRAY of 6 d layer-faces; GL_DEPTH_COMPONENT16 only). GL current. Same key and shape: the same
  * name; another shape: the old one goes first (a full drain). false: why; tex 0 (the owner makes GL's own). The GL
  * texture has NEAREST filters; the owner sets its own. levels (lane VKAIR1): a mip chain (colour formats; the clouds'
  * noise volumes), the owner fills each level. samples (lane VKOBJ1): a multisample 2D (type 0, one level; the objects'
@@ -526,7 +527,7 @@ enum FxSampler { kFxLinearClamp, kFxNearestClamp, kFxLinearRepeat, kFxMipRepeat,
 struct FxTex
 {
 	unsigned tex = 0;               //!< GL's name (0 and no shared: a zero texture, as GL's unbound unit reads)
-	int type = 0;                   //!< 0 2D, 1 3D, 2 2D array (sharedTarget's)
+	int type = 0;                   //!< 0 2D, 1 3D, 2 2D array, 3 cube array (sharedTarget's)
 	int w = 0, h = 0, d = 1, levels = 1;
 	unsigned glFmt = 0;
 	std::uintptr_t twin = 0;        //!< the twin's sharedTarget key
@@ -726,10 +727,10 @@ struct PrecipRun
 	bool lit = false, fogged = false, roofOn = false;  //!< lit: slice 2b (the sun alone; the rest refused); roofOn refused (GL draws); fogged: slice 2a
 	bool litBlock = false;          //!< cs holds kT_preciplitcs (a lit run without it is refused)
 	bool look = false;              //!< slice 3: cell_precip_look.prog's run (cs / ps also hold kT_preciplook*)
-	FxTex tex[13];                  //!< (12: the lit pass's t30 volAirNoise, the air's drift; L8 term 4) (10: the lit pass's t31 csmMap, GL's shared cascades; 11: its t34 ussCloudMap; L8 term 3) t0 pcRoof (none yet), t1 pcTex (the atlas; a BC one twinned by farTwin), the air's t25 atApTex, t26 volTex, t27 volTile, t28 volAirTerr, t29 volAirRainMap, the look's pcTexN, the lit pass's t17 airTerr (L8 terrain air), the lit pass's t19 volEnvHist (L8 term 2, the ambient's keep)
+	FxTex tex[14];                  //!< (13: the lit pass's t6 cellShadow, GL's shared lamp cubes; L8 term 5) (12: the lit pass's t30 volAirNoise, the air's drift; L8 term 4) (10: the lit pass's t31 csmMap, GL's shared cascades; 11: its t34 ussCloudMap; L8 term 3) t0 pcRoof (none yet), t1 pcTex (the atlas; a BC one twinned by farTwin), the air's t25 atApTex, t26 volTex, t27 volTile, t28 volAirTerr, t29 volAirRainMap, the look's pcTexN, the lit pass's t17 airTerr (L8 terrain air), the lit pass's t19 volEnvHist (L8 term 2, the ambient's keep)
 	std::uint8_t cs[kT_preciplitcsBytes] = {};  //!< fxPack( cell_precip_gpu, kT_precipcs ) (+ kT_preciplookcs for a look run, kT_preciplitcs for a lit one)
 	std::uint8_t ps[kT_preciplookpsBytes] = {};  //!< fxPack( cell_precip_gpu, kT_precipps ) (+ kT_preciplookps for a look run)
-	int red = 0;                    //!< gates only: 1 the cull radius 0, 2 the strip's last two corners swapped, 4 no near fade, 8 the air dropped, 16 the look dropped (the plain pipelines draw a look run), 32 the atlas dropped (t1 / t7 the zero texture), 128 the light dropped (lit = 1), 256 the lamps' lights dropped (the zero texel buffer), 512 b0 dropped (globalUniforms zero), 1024 the cluster's lists dropped (the zero texel buffer), 2048 the local sun law dropped (vpSun.w 0), 4096 the terrain air's grid dropped (t8 the zero texture), 16384 the ambient's history dropped (t9 the zero texture), 32768 the ambient dropped (the packed volTerms' bit 8 cleared), 65536 the sun's shadow map dropped (t31 the zero D16 array, all lit), 131072 the sun's shadow dropped (the packed volCsm cleared), 262144 the clouds' map dropped (t34 the zero texture), 524288 cascades 1 and 2 swapped (the packed csmMat[1] / csmMat[2]), 1048576 the drift's noise dropped (t30 the zero 3D texture), 2097152 the drift dropped (the packed volAirDrift.x 0), 4194304 the drift's octaves swapped (the packed volAirDriftUv rows 0-2 / 3-5)
+	int red = 0;                    //!< gates only: 1 the cull radius 0, 2 the strip's last two corners swapped, 4 no near fade, 8 the air dropped, 16 the look dropped (the plain pipelines draw a look run), 32 the atlas dropped (t1 / t7 the zero texture), 128 the light dropped (lit = 1), 256 the lamps' lights dropped (the zero texel buffer), 512 b0 dropped (globalUniforms zero), 1024 the cluster's lists dropped (the zero texel buffer), 2048 the local sun law dropped (vpSun.w 0), 4096 the terrain air's grid dropped (t8 the zero texture), 16384 the ambient's history dropped (t9 the zero texture), 32768 the ambient dropped (the packed volTerms' bit 8 cleared), 65536 the sun's shadow map dropped (t31 the zero D16 array, all lit), 131072 the sun's shadow dropped (the packed volCsm cleared), 262144 the clouds' map dropped (t34 the zero texture), 524288 cascades 1 and 2 swapped (the packed csmMat[1] / csmMat[2]), 1048576 the drift's noise dropped (t30 the zero 3D texture), 2097152 the drift dropped (the packed volAirDrift.x 0), 4194304 the drift's octaves swapped (the packed volAirDriftUv rows 0-2 / 3-5), 8388608 the lamps' cubes dropped (t6 the zero D16 cube array), 16777216 the lamps' shadows off (the packed cellShadowOn 0), 33554432 their fade dropped (the packed cellShadowFadeOn 0)
 	const void * global = nullptr;  //!< GL's globalUniforms (b0, 336 bytes; the cluster reads projectionMatrix); null: zeros (a cluster run refused)
 	std::uint8_t * recOut = nullptr;  //!< gates only: the run's records read back (n x 112 bytes, 192 a look run; host-visible records, a fence wait); null in the app
 	struct LitIn
@@ -741,6 +742,7 @@ struct PrecipRun
 		float envKeep = 0.0f;           //!< volEnvGrid.w: the ambient's keep on (L8 term 2; it reads b0's projection)
 		int gi = 0;                     //!< GI names active in GL's program (a WW_CELL_PRT / RT GI variant reads a GI volume; L8 term 1)
 		int uss = 0, cloud = 0, csmProbe = 0, csmRed = 0;  //!< L8 term 3: ussOn (the shadow set's composition), ussCloudOn, csmProbe, csmRed
+		int restir = -1;                //!< L8 term 5: cellRestirOn (-1 absent; present = GL's ReSTIR variant, its cubes not read)
 	};
 	LitIn litIn;                    //!< a lit run's switches as precipLitRead reads them from GL (before any pack; -1 absent)
 	struct TexBuf { unsigned tex = 0, buf = 0, glFmt = 0; long long off = 0, bytes = 0; };
@@ -969,9 +971,9 @@ template <class Fn> bool fxTexOf( Fn * fn, unsigned prog, const char * sampler, 
 	fn->glGetUniformiv( prog, l, &unit );
 	fn->glGetIntegerv( 0x84E0, &active );  // GL_ACTIVE_TEXTURE
 	fn->glActiveTexture( unsigned( 0x84C0 + unit ) );
-	const unsigned target = type == 1 ? 0x806Fu : type == 2 ? 0x8C1Au : 0x0DE1u;
+	const unsigned target = type == 1 ? 0x806Fu : type == 2 ? 0x8C1Au : type == 3 ? 0x9009u : 0x0DE1u;
 	int name = 0, sobj = 0;
-	fn->glGetIntegerv( type == 1 ? 0x806A : type == 2 ? 0x8C1D : 0x8069, &name );  // GL_TEXTURE_BINDING_3D / 2D_ARRAY / 2D
+	fn->glGetIntegerv( type == 1 ? 0x806A : type == 2 ? 0x8C1D : type == 3 ? 0x900A : 0x8069, &name );  // GL_TEXTURE_BINDING_3D / 2D_ARRAY / CUBE_MAP_ARRAY / 2D
 	fn->glGetIntegerv( 0x8919, &sobj );  // GL_SAMPLER_BINDING
 	bool ok = true;
 	if ( name ) {
@@ -1053,6 +1055,7 @@ template <class Fn> void precipLitRead( Fn * fn, unsigned prog, PrecipRun & t )
 	t.litIn.cloud = geti( "ussCloudOn" );
 	t.litIn.csmProbe = geti( "csmProbe" );
 	t.litIn.csmRed = geti( "csmRed" );
+	t.litIn.restir = geti( "cellRestirOn" );
 	// L8 term 1 (VKFAR5): the default program compiles the GI out (cellGiOn the constant false without WW_CELL_PRT)
 	t.litIn.gi = 0;
 	for ( const char * nm : { "cellGiOn", "cellGi", "cellGiSlots", "cellRooms", "cellGiAir", "cellGiAirOn", "cellDdgiOn", "cellDdgiAtlas" } )
@@ -1103,6 +1106,47 @@ template <class Fn> bool precipCsmOf( Fn * fn, unsigned prog, FxTex & t, std::st
 			why = "csmMap: a border other than 1";
 			return false;
 		}
+	return true;
+}
+
+/* lane VKFAR6 (row L8 term 5): GL's cellShadow (the lamps' cubes, celllamps.cpp shadowAlloc) as fxTexOf reads it, plus
+ * the state the lit set's compare sampler copies: a D16 cube array, linear, clamp to edge, compare LEQUAL. false: why */
+template <class Fn> bool precipCubeOf( Fn * fn, unsigned prog, FxTex & t, std::string & why )
+{
+	if ( !fxTexOf( fn, prog, "cellShadow", 3, t, why ) )
+		return false;
+	const int l = fn->glGetUniformLocation( prog, "cellShadow" );
+	if ( !t.tex ) {
+		if ( l < 0 )
+			return true;  // not in the program: nothing reads it
+		why = "cellShadow: no texture on its unit";
+		return false;
+	}
+	int unit = 0, active = 0x84C0;
+	fn->glGetUniformiv( prog, l, &unit );
+	fn->glGetIntegerv( 0x84E0, &active );  // GL_ACTIVE_TEXTURE
+	fn->glActiveTexture( unsigned( 0x84C0 + unit ) );
+	int mode = 0, func = 0, minF = 0, magF = 0, ws = 0, wt = 0, wr = 0;
+	fn->glGetTexParameteriv( 0x9009, 0x884C, &mode );  // GL_TEXTURE_COMPARE_MODE
+	fn->glGetTexParameteriv( 0x9009, 0x884D, &func );  // GL_TEXTURE_COMPARE_FUNC
+	fn->glGetTexParameteriv( 0x9009, 0x2801, &minF );
+	fn->glGetTexParameteriv( 0x9009, 0x2800, &magF );
+	fn->glGetTexParameteriv( 0x9009, 0x2802, &ws );
+	fn->glGetTexParameteriv( 0x9009, 0x2803, &wt );
+	fn->glGetTexParameteriv( 0x9009, 0x8072, &wr );  // GL_TEXTURE_WRAP_R
+	fn->glActiveTexture( unsigned( active ) );
+	if ( t.glFmt != 0x81A5u ) {  // GL_DEPTH_COMPONENT16
+		why = "cellShadow: not a D16 cube array";
+		return false;
+	}
+	if ( mode != 0x884E || func != 0x0203 ) {  // COMPARE_REF_TO_TEXTURE, LEQUAL
+		why = "cellShadow: a compare other than LEQUAL on the texture";
+		return false;
+	}
+	if ( minF != 0x2601 || magF != 0x2601 || ws != 0x812F || wt != 0x812F || wr != 0x812F ) {  // LINEAR, CLAMP_TO_EDGE
+		why = "cellShadow: a filter or wrap other than linear clamp-to-edge";
+		return false;
+	}
 	return true;
 }
 
@@ -1255,6 +1299,8 @@ template <class Fn> bool precipDraw( Fn * fn, unsigned prog, int first, int coun
 				t.tex[11].twin = reinterpret_cast<std::uintptr_t>( &cloudKey );
 			}
 		}
+		if ( ok && t.lit && ( t.litIn.terms & 2 ) && t.litIn.shadow > 0 )  // L8 term 5: GL's cellShadow (shared, read in place) into t6
+			ok = precipCubeOf( fn, prog, t.tex[13], why );
 		if ( ok && t.lit && t.litIn.drift > 0.0f ) {  // L8 term 4: GL's volAirNoise (the air's drift) into the lit set's t30
 			static char noiseKey;
 			ok = fxTexOf( fn, prog, "volAirNoise", 1, t.tex[12], why );

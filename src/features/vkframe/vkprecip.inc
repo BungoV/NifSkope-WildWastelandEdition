@@ -11,7 +11,8 @@
  * L8 added the lamps, the cluster lists, terrain air, the local sun and GI (volTerms 4: idle in the default program; a GL
  * program variant that reads a GI volume is refused) and the ambient (volTerms 8: the weather's cellDalc, the Ambient
  * Only volumes, the air's keep through volEnvHist at t19), the sun's cascades and the clouds (t31 / t34) and the air's
- * drift (volAirNoise at t30). The lamps' shadow cubes and gobos, interiors and the roof map are refused (GL draws).
+ * drift (volAirNoise at t30), the lamps' shadow cubes (GL's shared D16 cube array at t6). The lamps' gobos, interiors
+ * and the roof map are refused (GL draws).
  * GL's state (cellprecip.cpp): depth LEQUAL, no depth write, cull off, blend SRC_ALPHA / ONE_MINUS_SRC_ALPHA, stencil ALWAYS
  * ref 1, REPLACE on depth pass, write mask 0x03. */
 namespace
@@ -70,6 +71,7 @@ struct Precip
 	VkSampler litCmp = VK_NULL_HANDLE;
 	VkSampler csmCmp = VK_NULL_HANDLE;  // L8 term 3: GL's live csmMap state (linear, clamp to border 1, compare LEQUAL)
 	bool csmLinear = false;             // D16 linear filtering on the present device (else a shadowed run refuses)
+	VkSampler cubeCmp = VK_NULL_HANDLE; // L8 term 5: GL's lamp cubes' state (linear, clamp to edge, compare LEQUAL)
 	VkBuffer litTb = VK_NULL_HANDLE;
 	VkDeviceMemory litTbMem = VK_NULL_HANDLE;
 	VkBufferView litTbF = VK_NULL_HANDLE, litTbI = VK_NULL_HANDLE;
@@ -373,6 +375,10 @@ bool precipLitStatic( std::string & why )
 		cci.borderColor = VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE;
 		if ( v.vkCreateSampler( v.dev, &cci, nullptr, &D.csmCmp ) != VK_SUCCESS )
 			return fail( "the cascades' compare sampler failed" );
+		VkSamplerCreateInfo uci = sci;  // L8 term 5: the lamps' cubes as celllamps.cpp's shadowAlloc samples them
+		uci.magFilter = uci.minFilter = VK_FILTER_LINEAR;
+		if ( v.vkCreateSampler( v.dev, &uci, nullptr, &D.cubeCmp ) != VK_SUCCESS )
+			return fail( "the lamp cubes' compare sampler failed" );
 	}
 	// the lamps' zero texel buffer (float4 cellLights, int4 cellCluster): 64 zero bytes, host-visible
 	for ( VkFormat tf : { VK_FORMAT_R32G32B32A32_SFLOAT, VK_FORMAT_R32G32B32A32_SINT } ) {
@@ -633,8 +639,8 @@ int precipLitWhys( const PrecipRun::LitIn & l, const char ** out, int max )
 	if ( l.terms > 0 && ( l.terms & 2 ) ) {
 		if ( l.shadow < 0 || l.gobo < 0 || l.cluster < 0 || l.cellRed < 0 )
 			add( "the lit program lacks a lamp switch the refusals read" );
-		if ( l.shadow > 0 )
-			add( "the lamps' shadow cubes on the particles (refused in term 2a)" );
+		if ( l.shadow > 0 && l.restir >= 0 )  // L8 term 5: the cubes are judged; GL's ReSTIR variant does not read them
+			add( "the lamps' shadows in GL's ReSTIR variant (cellRestirOn: its cubes are not read)" );
 		if ( l.gobo > 0 )
 			add( "the lamps' gobos on the particles (refused in term 2a)" );
 		if ( l.phys > 0.5f )
@@ -815,17 +821,23 @@ bool precipRun( const PrecipRun & t, std::string & why )
 	FxNames names;
 	names.add( T.colorTex );
 	names.add( T.dsTex );
-	VkImageView views[13] = {};
-	int smp[13] = {};
-	const int slotType[13] = { 0, 0, 1, 1, 0, 2, 0, 0, 2, 1, 2, 0, 1 };  // an empty slot binds the zero texture of the shader's type
+	VkImageView views[14] = {};
+	int smp[14] = {};
+	const int slotType[14] = { 0, 0, 1, 1, 0, 2, 0, 0, 2, 1, 2, 0, 1, 3 };  // an empty slot binds the zero texture of the shader's type (13: D.litCube)
 	if ( t.lit && t.tex[10].tex && !D.csmLinear )
 		return refuse( "the sun's shadow map: no D16 linear filtering on the present device" );
 	if ( t.lit && t.litIn.drift > 0.0f && !t.tex[12].tex )  // L8 term 4: GL reads the drift's noise; Vulkan has none to read
 		return refuse( "the air's drift with no volAirNoise in GL's program" );
-	for ( int k = 0; k < 13; k++ ) {
+	const bool cubes = t.lit && ( t.litIn.terms & 2 ) && t.litIn.shadow > 0;  // L8 term 5: the lamps' shadow cubes read
+	if ( cubes && !t.tex[13].tex )
+		return refuse( "the lamps' shadows on with no cellShadow in GL's program" );
+	if ( cubes && !D.csmLinear )
+		return refuse( "the lamps' shadow cubes: no D16 linear filtering on the present device" );
+	for ( int k = 0; k < 14; k++ ) {
 		FxTex x = t.tex[k];
 		if ( ( ( k == 1 || k == 7 ) && ( t.red & 32 ) ) || ( k == 8 && ( t.red & 4096 ) ) || ( k == 9 && ( t.red & 16384 ) )
-			|| ( k == 10 && ( t.red & 65536 ) ) || ( k == 11 && ( t.red & 262144 ) ) || ( k == 12 && ( t.red & 1048576 ) ) ) {  // red: the atlas / the terrain grid / the ambient's history / the shadow map / the clouds' map / the drift's noise dropped (the zero texture)
+			|| ( k == 10 && ( t.red & 65536 ) ) || ( k == 11 && ( t.red & 262144 ) ) || ( k == 12 && ( t.red & 1048576 ) )
+			|| ( k == 13 && ( t.red & 8388608 ) ) ) {  // red: the atlas / the terrain grid / the ambient's history / the shadow map / the clouds' map / the drift's noise dropped (the zero texture)
 			x = FxTex();
 			x.sampler = t.tex[k].sampler;
 		}
@@ -835,6 +847,15 @@ bool precipRun( const PrecipRun & t, std::string & why )
 			x.shared = farSharedOf( x.tex );
 		if ( k == 10 && x.tex && !x.shared )  // L8 term 3: the cascades are read where they are, never copied a run
 			return refuse( "the sun's shadow map is GL's own (not shared with the present device)" );
+		if ( k == 13 ) {  // L8 term 5: the lamps' cubes, read where they are (never copied a run); none: the zero cube array
+			if ( x.tex && !x.shared )
+				return refuse( "the lamps' shadow cubes are GL's own (not shared with the present device)" );
+			if ( !x.tex ) {
+				views[k] = D.litCube;
+				smp[k] = 0;
+				continue;
+			}
+		}
 		const bool bc = ( k == 1 || k == 7 ) && x.tex && !x.shared && x.type == 0 && fcFormat( GLenum( x.glFmt ) ).block != 0;
 		if ( bc ? !precipAtlas( x, views[k], names, S.copies, w ) : !fxSlot( x, views[k], names, S.copies, w ) )
 			return refuse( "rain / snow's input t" + std::to_string( k ) + ": " + w );
@@ -867,6 +888,16 @@ bool precipRun( const PrecipRun & t, std::string & why )
 			const int atCsm = precipAt( kT_preciplitcs, int( std::size( kT_preciplitcs ) ), "volCsm" );
 			if ( atCsm >= 0 )
 				std::memset( l + atCsm, 0, 4 );
+		}
+		if ( t.red & 16777216 ) {  // gates only: the lamps' shadows off (cellShadowOn 0)
+			const int atSh = precipAt( kT_preciplitcs, int( std::size( kT_preciplitcs ) ), "cellShadowOn" );
+			if ( atSh >= 0 )
+				std::memset( l + atSh, 0, 4 );
+		}
+		if ( t.red & 33554432 ) {  // gates only: the lamps' shadow fade dropped (cellShadowFadeOn 0)
+			const int atFade = precipAt( kT_preciplitcs, int( std::size( kT_preciplitcs ) ), "cellShadowFadeOn" );
+			if ( atFade >= 0 )
+				std::memset( l + atFade, 0, 4 );
 		}
 		if ( t.red & 2097152 ) {  // gates only: the drift dropped (volAirDrift.x 0)
 			const int atDrift = precipAt( kT_precipcs, int( std::size( kT_precipcs ) ), "volAirDrift" );
@@ -969,14 +1000,15 @@ bool precipRun( const PrecipRun & t, std::string & why )
 			{ D.ubo, kPrecipLitCsAt, VkDeviceSize( kT_preciplitcsBytes ) }, { D.rec, 0, recBytes } };
 		VkDescriptorImageInfo li[14] = {};
 		// (L8 term 3: t31 csmMap GL's shared cascades, else the zero D16 array; t34 ussCloudMap; L8 term 4: t30 volAirNoise)
-		const VkImageView liv[14] = { D.litCube, views[8], views[9], views[2], views[3], views[4], views[5], views[6], views[12],
+		const bool cubeIn = views[13] != D.litCube;  // L8 term 5: t6 GL's shared lamp cubes, else the zero cube array
+		const VkImageView liv[14] = { views[13], views[8], views[9], views[2], views[3], views[4], views[5], views[6], views[12],
 			t.tex[10].tex && ( t.red & 65536 ) == 0 ? views[10] : D.litD2a, F.d2, F.d2, views[11], views[1] };  // kPrecipLitImg's order
 		for ( int k = 0; k < 14; k++ ) {
 			li[k].imageView = liv[k];
 			li[k].imageLayout = VK_IMAGE_LAYOUT_GENERAL;
 		}
 		VkDescriptorImageInfo ls[13] = {};
-		const VkSampler lsv[13] = { D.litCmp, F.smp[smp[8]], F.smp[smp[2]], F.smp[smp[3]], F.smp[smp[4]], F.smp[smp[5]], F.smp[smp[6]],
+		const VkSampler lsv[13] = { cubeIn ? D.cubeCmp : D.litCmp, F.smp[smp[8]], F.smp[smp[2]], F.smp[smp[3]], F.smp[smp[4]], F.smp[smp[5]], F.smp[smp[6]],
 			F.smp[smp[12]], D.csmCmp, F.smp[0], F.smp[0], F.smp[smp[11]], F.smp[smp[1]] };  // kPrecipLitSmp's order
 		for ( int k = 0; k < 13; k++ )
 			ls[k].sampler = lsv[k];

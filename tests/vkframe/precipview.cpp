@@ -563,6 +563,8 @@ struct Job
 	int csmN = 0, cloudN = 0;  // L8 term 3: shadow.txt's csmMap size (256 x 256 x 3, D16) and ussCloudMap size (RGBA16F)
 	std::vector<std::uint16_t> csmData;
 	std::vector<float> cloudData;
+	int cubeN = 0;  // L8 term 5: cubes.txt's face edge (16 cubes, D16; cubes.bin N x N x 96 layer-faces)
+	std::vector<std::uint16_t> cubeData;
 	bool hasN() const { return look == 2 && hasTex; }
 	struct Buf  // L8 term 2a: a texture buffer (buf.txt: name format texels file)
 	{
@@ -623,6 +625,11 @@ struct Job
 		const auto it = uni.find( "volAirDrift" );
 		return lit && fog && noiseAt >= 0 && it != uni.end() && it->second.size() == 4 && it->second[0] > 0.0f;
 	}
+	bool cube() const  // L8 term 5 (VKFAR6): the lamps' shadow cubes on (cellShadowOn 1, cubes from cubes.txt)
+	{
+		const auto it = uni.find( "cellShadowOn" );
+		return lamps() && cubeN > 0 && it != uni.end() && !it->second.empty() && it->second[0] > 0.5;
+	}
 };
 const int kNormUnit = 8;  // slice 3: the look's pcTexN
 const int kLightsUnit = 9, kClusterUnit = 10;  // L8 term 2a: the lamps' cellLights / cellCluster
@@ -631,6 +638,7 @@ const int kGiUnit = 12;  // L8 term 1: the WW_CELL_PRT variant's cellGiAir
 const int kEnvUnit = 13;  // L8 term 2: the ambient's volEnvHist
 const int kCsmUnit = 17, kCloudUnit = 18;  // L8 term 3: csmMap, ussCloudMap (15 / 16 are the read-back's)
 const int kNoiseUnit = 19;  // L8 term 4: the drift's volAirNoise
+const int kCubeUnit = 20;  // L8 term 5: the lamps' cellShadow (a D16 cube array)
 const GLenum kTexBuffer = 0x8C2A;  // GL_TEXTURE_BUFFER
 // slice 2a: the air's textures, in precipRun's tex[2..6] order, their GL units and fxTexOf types
 const char * kAirTex[5] = { "atApTex", "volTex", "volTile", "volAirTerr", "volAirRainMap" };
@@ -709,6 +717,15 @@ int main( int argc, char ** argv )
 					if ( !cb.read( reinterpret_cast<char *>( j.csmData.data() ), std::streamsize( j.csmData.size() * 2 ) )
 						|| !lb.read( reinterpret_cast<char *>( j.cloudData.data() ), std::streamsize( j.cloudData.size() * 4 ) ) )
 						return fatal( nm + "/shadow.txt: csm.bin / cloud.bin" );
+				}
+			}
+			{  // L8 term 5: the lamps' shadow cubes (cubes.txt: the face edge; cubes.bin 16 cubes of 6 D16 faces)
+				std::ifstream uf( dir + "/" + nm + "/cubes.txt" );
+				if ( uf >> j.cubeN ) {
+					j.cubeData.resize( size_t( j.cubeN ) * size_t( j.cubeN ) * 96 );
+					std::ifstream ub( dir + "/" + nm + "/cubes.bin", std::ios::binary );
+					if ( !ub.read( reinterpret_cast<char *>( j.cubeData.data() ), std::streamsize( j.cubeData.size() * 2 ) ) )
+						return fatal( nm + "/cubes.txt: cubes.bin" );
 				}
 			}
 			jobs.push_back( j );
@@ -932,12 +949,13 @@ int main( int argc, char ** argv )
 	};
 	GLuint vao = 0;
 	genVertexArrays( 1, &vao );
-	constexpr int kCases = 20;
+	constexpr int kCases = 21;
 	static char twinKeys[kCases], normKeys[kCases];  // one atlas twin a case (the atlases' sizes differ), one normal-map twin a case
 	static char terrKeys[kCases];  // L8 terrain air: airTerr's twin a case
 	static char envKeys[kCases];  // L8 term 2: volEnvHist's twin a case
 	static char csmKeys[kCases], cloudKeys[kCases];  // L8 term 3: csmMap's shared target, ussCloudMap's twin a case
 	static char noiseKeys[kCases];  // L8 term 4: volAirNoise's twin a case
+	static char cubeKeys[kCases];  // L8 term 5: cellShadow's shared target a case
 	static char airKeys[kCases][5], volKeys[kCases];  // the air's twins a case, its volume's shared target a case
 	if ( jobs.size() > size_t( kCases ) )
 		return fatal( "more than " + std::to_string( kCases ) + " cases" );
@@ -994,7 +1012,7 @@ int main( int argc, char ** argv )
 		const char * name;
 		int red;
 		bool seen;
-	} reds[21] = { { "cull (radius 0)", 1, false }, { "corners (the strip's last two swapped)", 2, false }, { "near fade (dropped)", 4, false },
+	} reds[24] = { { "cull (radius 0)", 1, false }, { "corners (the strip's last two swapped)", 2, false }, { "near fade (dropped)", 4, false },
 		{ "air (dropped)", 8, false }, { "look (dropped: the plain pipelines)", 16, false }, { "atlas (dropped: the zero texture)", 32, false },
 		{ "light (dropped)", 128, false }, { "lamps' lights (dropped: the zero texel buffer)", 256, false },
 		{ "cluster's globals (dropped: b0 zero)", 512, false }, { "cluster lists (dropped: the zero texel buffer)", 1024, false },
@@ -1003,11 +1021,13 @@ int main( int argc, char ** argv )
 		{ "sun's shadow map (dropped: the zero D16 array)", 65536, false }, { "sun's shadow (dropped: volCsm 0)", 131072, false },
 		{ "clouds' map (dropped: the zero texture)", 262144, false }, { "cascades 1 and 2 (swapped: csmMat)", 524288, false },
 		{ "drift's noise (dropped: the zero volAirNoise)", 1048576, false }, { "drift (dropped: volAirDrift.x 0)", 2097152, false },
-		{ "drift's octaves (swapped: volAirDriftUv)", 4194304, false } };
+		{ "drift's octaves (swapped: volAirDriftUv)", 4194304, false }, { "lamps' cubes (dropped: the zero D16 cube array)", 8388608, false },
+		{ "lamps' shadows (dropped: cellShadowOn 0)", 16777216, false }, { "lamps' shadow fade (dropped: cellShadowFadeOn 0)", 33554432, false } };
 	using TexBufferFn = void( WINAPI * )( GLenum, GLenum, GLuint );
 	const auto texBuffer = reinterpret_cast<TexBufferFn>( wglGetProcAddress( "glTexBuffer" ) );
 	if ( !texBuffer )
 		return fatal( "no glTexBuffer" );
+	glEnable( 0x884F );  // GL_TEXTURE_CUBE_MAP_SEAMLESS, as the app (gltex.cpp; L8 term 5's cubes: Vulkan is always seamless)
 	for ( Job & j : jobs ) {
 		if ( j.hasTex && !uploadAtlas( dir + "/" + j.name, j.tex[size_t( j.atlasAt )] ) )
 			return fatal( j.name + ": the atlas upload" );
@@ -1065,6 +1085,22 @@ int main( int argc, char ** argv )
 		}
 		if ( j.cloudN > 0 )
 			cloudTex = tex2d( j.cloudN, j.cloudN, fRgba16f, GL_RGBA, GL_FLOAT, j.cloudData.data(), true );
+		GLuint cubeTex = 0;  // L8 term 5: the lamps' cubes as the app's (sharedTarget type 3, D16, shadowAlloc's state)
+		if ( j.cubeN > 0 ) {
+			if ( !WwVkPresent::sharedTarget( reinterpret_cast<std::uintptr_t>( &cubeKeys[jobAt] ), 3, j.cubeN, j.cubeN, 16, 0x81A5, cubeTex, why ) )
+				return fatal( j.name + ": the shared cellShadow: " + why );
+			glBindTexture( 0x9009, cubeTex );
+			f.texSubImage3D( 0x9009, 0, 0, 0, 0, j.cubeN, j.cubeN, 96, 0x1902, 0x1403, j.cubeData.data() );  // DEPTH_COMPONENT, UNSIGNED_SHORT
+			glTexParameteri( 0x9009, GL_TEXTURE_MIN_FILTER, GL_LINEAR );
+			glTexParameteri( 0x9009, GL_TEXTURE_MAG_FILTER, GL_LINEAR );
+			glTexParameteri( 0x9009, GL_TEXTURE_WRAP_S, 0x812F );  // CLAMP_TO_EDGE
+			glTexParameteri( 0x9009, GL_TEXTURE_WRAP_T, 0x812F );
+			glTexParameteri( 0x9009, 0x8072, 0x812F );  // WRAP_R
+			glTexParameteri( 0x9009, 0x884C, 0x884E );  // COMPARE_MODE: COMPARE_REF_TO_TEXTURE
+			glTexParameteri( 0x9009, 0x884D, GL_LEQUAL );
+			glTexParameteri( 0x9009, 0x813D, 0 );  // MAX_LEVEL
+			glBindTexture( 0x9009, 0 );
+		}
 		const void * uboOver = nullptr;  // the globals check's other b0 (bindJob uploads it in place of the case's)
 		const void * vkGlobalOver = nullptr;  // the same bytes as Vulkan's b0 (the globals mirror)
 		auto bindJob = [&]( GLuint prog ) {
@@ -1091,6 +1127,8 @@ int main( int argc, char ** argv )
 			u1i( prog, "ussCloudMap", kCloudUnit );
 			bindUnit( kNoiseUnit, fT3D, noiseTex );  // L8 term 4 (none: read only with volAirDrift.x > 0)
 			u1i( prog, "volAirNoise", kNoiseUnit );
+			bindUnit( kCubeUnit, 0x9009, cubeTex );  // L8 term 5 (none: read only with cellShadowOn 1)
+			u1i( prog, "cellShadow", kCubeUnit );
 			if ( !j.fog ) {  // an unfogged case: the air fully off (a program keeps the last fogged case's uniforms)
 				static const float zero4[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
 				u1i( prog, "fogOn", 0 );
@@ -1263,6 +1301,13 @@ int main( int argc, char ** argv )
 					f.uniform4fv( f.getUniformLocation( pJob, "volAirDriftUv" ), 6, z24 );
 				} else if ( mode == 29 || mode == 30 ) {  // L8 term 4: the drift's reds 1 (one sun tap) / 2 (the puff only), info
 					u1i( pJob, "volAirDriftRed", mode - 28 );
+				} else if ( mode == 31 ) {  // L8 term 5: the lamps' shadows off (cellShadowOn 0)
+					u1i( pJob, "cellShadowOn", 0 );
+				} else if ( mode == 32 ) {  // L8 term 5: the slots' fade off (cellShadowFadeOn 0)
+					u1i( pJob, "cellShadowFadeOn", 0 );
+				} else if ( mode == 33 ) {  // L8 term 5: the taps on one texel (cellShadowTexel 0), info
+					const float zero = 0.0f;
+					f.uniform1fv( f.getUniformLocation( pJob, "cellShadowTexel" ), 1, &zero );
 				} else if ( mode == 9 ) {  // the case as it is (the restore check)
 				} else if ( mode == 6 ) {  // L8 term 3: the local law off (vpSun.w 0)
 					const float off[4] = { 0.5f, 0.4f, 0.3f, 0.0f };
@@ -1359,6 +1404,19 @@ int main( int argc, char ** argv )
 					"(each want >= 1000), volAirDriftRed 1 %zu, 2 %zu (info); drift names missing from GL's program: %s\n", j.name.c_str(),
 					noDrift.flips, noDrift.covered, flatNoise.flips, oneSun.flips, puffOnly.flips, dmiss.empty() ? "none" : dmiss.c_str() );
 				ok = ok && noDrift.flips >= 1000 && flatNoise.flips >= 1000 && dmiss.empty();
+			}
+			if ( j.cube() ) {  // L8 term 5's seen-checks (header): the cubes and their fade seen, their names found
+				const Verdict noShadow = judge( bg, drawGl( 31 ), refA, refB, refB );
+				const Verdict noFade = judge( bg, drawGl( 32 ), refA, refB, refB );
+				const Verdict oneTexel = judge( bg, drawGl( 33 ), refA, refB, refB );
+				std::string umiss;
+				for ( const char * nm : { "cellShadow", "cellShadowOn", "cellShadowTexel", "cellShadowFadeOn", "cellShadowFade" } )
+					if ( f.getUniformLocation( pJob, nm ) < 0 && f.getUniformLocation( pJob, ( std::string( nm ) + "[0]" ).c_str() ) < 0 )
+						umiss += std::string( umiss.empty() ? "" : ", " ) + nm;
+				std::printf( "PRECIPVIEW %s cube checks: GL with cellShadowOn 0 differs %zu of %zu covered samples, cellShadowFadeOn 0 %zu "
+					"(each want >= 1000), cellShadowTexel 0 %zu (info); cube names missing from GL's program: %s\n", j.name.c_str(),
+					noShadow.flips, noShadow.covered, noFade.flips, oneTexel.flips, umiss.empty() ? "none" : umiss.c_str() );
+				ok = ok && noShadow.flips >= 1000 && noFade.flips >= 1000 && umiss.empty();
 			}
 			if ( j.amb() ) {  // L8 term 2's seen-checks (header): the ambient seen, its names found, the volumes / the keep seen
 				const Verdict noAmb = judge( bg, drawGl( 3 ), refA, refB, refB );
@@ -1708,6 +1766,12 @@ int main( int argc, char ** argv )
 					t.tex[11].twin = reinterpret_cast<std::uintptr_t>( &cloudKeys[jobAt] );
 				}
 			}
+			if ( t.lit && ( t.litIn.terms & 2 ) && t.litIn.shadow > 0 ) {  // precipDraw's (L8 term 5): cellShadow into t6
+				if ( !WwVkPresent::precipCubeOf( &ga, pJob, t.tex[13], why ) ) {
+					std::printf( "PRECIPVIEW precipCubeOf refused (cellShadow): %s\n", why.c_str() );
+					return false;
+				}
+			}
 			if ( t.lit && t.litIn.drift > 0.0f ) {  // precipDraw's (L8 term 4): volAirNoise into t30
 				if ( !WwVkPresent::fxTexOf( &ga, pJob, "volAirNoise", 1, t.tex[12], why ) ) {
 					std::printf( "PRECIPVIEW fxTexOf refused (volAirNoise): %s\n", why.c_str() );
@@ -1779,6 +1843,16 @@ int main( int argc, char ** argv )
 					if ( j.csm() ) {  // the cascades' and the clouds' fields packed, not zero (the sun's shadow bar)
 						for ( const auto & tf : { std::make_pair( "csmMat", 192 ), std::make_pair( "csmParams", 16 ), std::make_pair( "csmSplitOffset", 16 ),
 								 std::make_pair( "ussCsmBias", 12 ), std::make_pair( "ussCloudFromView", 64 ), std::make_pair( "ussCloudFar", 16 ) } ) {
+							const int at = precipAt( WwVkPresent::kT_preciplitcs, int( std::size( WwVkPresent::kT_preciplitcs ) ), tf.first );
+							bool any = false;
+							for ( int b = 0; b < tf.second && at >= 0; b++ )
+								any = any || t.cs[at + b] != 0;
+							if ( !any )
+								zero += std::string( zero.empty() ? "" : ", " ) + tf.first;
+						}
+					}
+					if ( j.cube() ) {  // the cubes' fields packed, not zero (the shadow-cube bar)
+						for ( const auto & tf : { std::make_pair( "cellShadowOn", 4 ), std::make_pair( "cellShadowTexel", 4 ), std::make_pair( "cellShadowFade", 256 ) } ) {
 							const int at = precipAt( WwVkPresent::kT_preciplitcs, int( std::size( WwVkPresent::kT_preciplitcs ) ), tf.first );
 							bool any = false;
 							for ( int b = 0; b < tf.second && at >= 0; b++ )
@@ -2094,7 +2168,8 @@ int main( int argc, char ** argv )
 				|| ( r.red == 512 && !j.readsB0() ) || ( r.red == 1024 && !j.cluster() ) || ( r.red == 2048 && !j.localSun() ) || ( r.red == 4096 && !j.terrAir() )
 				|| ( r.red == 16384 && !j.envKeep() ) || ( r.red == 32768 && !j.amb() )
 				|| ( ( r.red == 65536 || r.red == 131072 || r.red == 262144 || r.red == 524288 ) && !j.csm() )
-				|| ( ( r.red == 1048576 || r.red == 2097152 || r.red == 4194304 ) && !j.drift() ) )
+				|| ( ( r.red == 1048576 || r.red == 2097152 || r.red == 4194304 ) && !j.drift() )
+				|| ( ( r.red == 8388608 || r.red == 16777216 || r.red == 33554432 ) && !j.cube() ) )
 				continue;  // a plain run has no look to drop, a case with no atlas no atlas, an unlit one no light, no lamps no lights
 			std::vector<std::uint16_t> a, b;
 			if ( !runVk( r.red, a, b, false ) ) {
@@ -2120,7 +2195,8 @@ int main( int argc, char ** argv )
 				ok = false;
 			}
 			if ( ( r.red == 512 || r.red == 1024 || r.red == 2048 || r.red == 4096 || r.red == 16384 || r.red == 32768 || r.red == 65536
-				|| r.red == 131072 || r.red == 262144 || r.red == 524288 || r.red == 1048576 || r.red == 2097152 || r.red == 4194304 ) && v.ok() ) {  // the cluster case must see its b0 and its lists dropped
+				|| r.red == 131072 || r.red == 262144 || r.red == 524288 || r.red == 1048576 || r.red == 2097152 || r.red == 4194304
+				|| r.red == 8388608 || r.red == 16777216 || r.red == 33554432 ) && v.ok() ) {  // the cluster case must see its b0 and its lists dropped
 				std::printf( "PRECIPVIEW %s red %s PASSED: the case does not see it\n", j.name.c_str(), r.name );
 				ok = false;
 			}
@@ -2232,6 +2308,7 @@ int main( int argc, char ** argv )
 		WwVkPresent::sharedTargetDrop( reinterpret_cast<std::uintptr_t>( &envKeys[c] ) );
 		WwVkPresent::sharedTargetDrop( reinterpret_cast<std::uintptr_t>( &csmKeys[c] ) );
 		WwVkPresent::sharedTargetDrop( reinterpret_cast<std::uintptr_t>( &noiseKeys[c] ) );
+		WwVkPresent::sharedTargetDrop( reinterpret_cast<std::uintptr_t>( &cubeKeys[c] ) );
 		WwVkPresent::farTwinDrop( reinterpret_cast<std::uintptr_t>( &cloudKeys[c] ) ), WwVkPresent::sharedTargetDrop( reinterpret_cast<std::uintptr_t>( &cloudKeys[c] ) );
 		for ( char & k : airKeys[c] )
 			WwVkPresent::sharedTargetDrop( reinterpret_cast<std::uintptr_t>( &k ) );

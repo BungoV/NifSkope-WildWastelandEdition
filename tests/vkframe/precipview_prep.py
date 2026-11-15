@@ -82,6 +82,9 @@ CASES = [
     # L8 term 4 (VKFAR6, element 26 = the air's drift): snow_far_lamps' run, fogged, volTerms 3
     ('snow_far_drift', 3, 5.5, 1.0, 97, 600.125, (12345.6, -98765.4, 7210.0), (-55.0, 210.0), 1, 3.0, 0.5, 6.0, 1.0, 0.6, 1,
      3.3, -0.01, 40000, 1, 0, 3, 0, 0, 0, 0, 0, 1),
+    # L8 term 5 (VKFAR6, element 27 = the lamps' shadow cubes): rain_near_lamps' run, volTerms 3
+    ('rain_near_shadow', 0, 2.0, 4.0, 11, 37.25, (-60500.0, 70000.0, 6300.0), (120.0, -40.0), 0, 1.0, 0.0, 0.0, 1.0, 1.0, 1,
+     2.0, -0.08, 40000, 0, 0, 3, 0, 0, 0, 0, 0, 0, 1),
 ]
 SUN = np.array([0.4, 0.3, 0.35]) / np.linalg.norm([0.4, 0.3, 0.35])  # world, toward the sun (the air's fogSun too)
 # a lit case's own sun (cellDirTo), chosen by the GS's mix: N = the eye's axis, thick / thin = 4 vpWrap( N.to, pcTrans )
@@ -89,6 +92,7 @@ SUN = np.array([0.4, 0.3, 0.35]) / np.linalg.norm([0.4, 0.3, 0.35])  # world, to
 # first lit run 11-15); this sun gives N.to 0.72, ratio 3.3, 44 degrees off the axis. SUN stays (the fogged cases' fogSun).
 LIT_SUN = {'rain_near_lit': np.array([0.3, -0.6, 0.75]) / np.linalg.norm([0.3, -0.6, 0.75])}
 LIT_SUN['rain_near_lamps'] = LIT_SUN['rain_near_lit']
+LIT_SUN['rain_near_shadow'] = LIT_SUN['rain_near_lit']
 LIT_SUN['rain_near_cluster'] = LIT_SUN['rain_near_lit']
 LIT_SUN['rain_near_sunlocal'] = LIT_SUN['rain_near_lit']
 LIT_SUN['rain_near_gi'] = LIT_SUN['rain_near_lit']
@@ -354,6 +358,41 @@ for ci, c in enumerate(CASES):
             lamps(v[inview], R, np.array(c[6])).tofile(os.path.join(d, 'buf_cellLights.bin'))
             with open(os.path.join(d, 'buf.txt'), 'w', newline='\n') as f:
                 f.write('cellLights rgba32f 40 buf_cellLights.bin\n')
+            if len(c) > 27 and c[27]:
+                # L8 term 5: the lamps' shadow cubes. Slots: the omni 0, the spot 1, the hemisphere 2 (t4.y 2), the box
+                # casting past the slots (t4.x -1), the far omni not casting; 16 cubes of 64 x 64 D16, the used slots
+                # holding stripes of near occluders (0.05) across the directions, else 1 (names kept off the module's)
+                sh_L = lamps(v[inview], R, np.array(c[6]))
+                sh_L[:, 4] = [[0.0, 1.0, 0.0, 0.0], [1.0, 1.0, 0.0, 0.0], [2.0, 2.0, 0.0, 0.0], [-1.0, 1.0, 0.0, 0.0], [-1.0, 0.0, 0.0, 0.0]]
+                sh_L.astype(np.float32).tofile(os.path.join(d, 'buf_cellLights.bin'))
+                sh_n = 64
+                sh_s = (np.arange(sh_n) + 0.5) * 2.0 / sh_n - 1.0
+                sh_sc, sh_tc = np.meshgrid(sh_s, sh_s)  # [row j = t, column i = s]
+                sh_one = np.ones_like(sh_sc)
+                sh_faces = [(sh_one, -sh_tc, -sh_sc), (-sh_one, -sh_tc, sh_sc), (sh_sc, sh_one, sh_tc), (sh_sc, -sh_one, -sh_tc),
+                            (sh_sc, -sh_tc, sh_one), (-sh_sc, -sh_tc, -sh_one)]  # GL's cube face table, +X -X +Y -Y +Z -Z
+                sh_F = [np.random.RandomState(270 + k).randn(3) for k in range(3)]
+                sh_F = [9.0 * x / np.linalg.norm(x) for x in sh_F]
+                sh_cube = np.full((96, sh_n, sh_n), 65535, np.uint16)
+                for k in range(3):
+                    for fc in range(6):
+                        sh_dir = np.stack(sh_faces[fc], -1)
+                        sh_dir = sh_dir / np.linalg.norm(sh_dir, axis=-1, keepdims=True)
+                        sh_cube[6 * k + fc][np.sin(sh_dir @ sh_F[k]) > 0.0] = int(round(0.05 * 65535))
+                sh_cube.tofile(os.path.join(d, 'cubes.bin'))
+                with open(os.path.join(d, 'cubes.txt'), 'w', newline='\n') as f:
+                    f.write('%d\n' % sh_n)
+                U.update({'cellShadowOn': [1], 'cellShadowTexel': [1.0 / sh_n], 'cellShadowFadeOn': [1],
+                          'cellShadowFade': [0.7, 0.4, 1.0] + [1.0] * 13})
+                sh_P = (R.T @ v[inview].astype(np.float64).T).T + np.array(c[6])  # the in-view particles in the world
+                sh_line = []
+                for k in range(3):
+                    sh_r = sh_P - sh_L[k, 0, :3]
+                    sh_d = np.linalg.norm(sh_r, axis=1)
+                    sh_in = sh_d < sh_L[k, 0, 3]
+                    sh_occ = (np.sin((sh_r / sh_d[:, None]) @ sh_F[k]) > 0.0) & ((sh_d - 1.0) / sh_L[k, 0, 3] > 0.05)
+                    sh_line.append('slot %d %.3f of %d in reach' % (k, float(np.mean(sh_occ[sh_in])) if sh_in.any() else 0.0, int(sh_in.sum())))
+                print('precipview case %s: the shadow cubes, %d x %d, stripes shadow %s' % (c[0], sh_n, sh_n, ', '.join(sh_line)))
         if len(c) > 21 and c[21]:
             # L8 term 2b: the cluster lists. Depth = -(R[2] . (P - eye)) over the run's particles in the view, log slices
             tx, ty = -(-W // TILE), -(-H // TILE)

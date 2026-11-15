@@ -101,6 +101,7 @@ constexpr GLenum kTexture2D = 0x0DE1, kRgba8 = 0x8058, kScissorTest = 0x0C11, kR
 constexpr GLenum kTexture3D = 0x806F, kTexBinding3D = 0x806A, kTexture2DArray = 0x8C1A, kTexBinding2DArray = 0x8C1D,
 	kGlRg32f = 0x8230, kGlRg16f = 0x822F, kGlR32f = 0x822E, kGlR8 = 0x8229, kGlRg8 = 0x822B;
 constexpr GLenum kDepth16 = 0x81A5;  // lane VKSHADOW1: the sun cascades' D16 2D array
+constexpr GLenum kTextureCubeArray = 0x9009, kTexBindingCubeArray = 0x900A;  // lane VKFAR6 (L8 term 5): the lamps' D16 cubes
 constexpr GLenum kDepth24 = 0x81A6, kDepth32f = 0x8CAC;  // lane VKOBJ1: the objects' prepass (X8_D24 / D32F, multisample)
 constexpr GLenum kGlR32ui = 0x8236, kGlRg32ui = 0x823C, kGlR8ui = 0x8232;  // lane VKWATER2: the water's index / atlas lookups
 constexpr GLenum kDepth32fS8 = 0x8CAD;  // lane VKWATER2: waterDepth's copy on a float depth frame (D32F_S8)
@@ -1245,7 +1246,8 @@ bool makeSlot( Slot & s, int w, int h, std::string & why )
  * overlay) take the same steps: this is the one place they are written. Lane VKSHARE1: type 3D (d deep) or a 2D array
  * (layers), single-sample, GL_TEXTURE_3D / GL_TEXTURE_2D_ARRAY through glTexStorageMem3DEXT; one mip level always. */
 bool makeShared( VkImage & img, VkDeviceMemory & mem, GLuint & tex, GLuint & obj, VkFormat fmt, GLenum glFmt, int samples, int w,
-	int h, bool depth, double & mb, std::string & why, VkImageType type = VK_IMAGE_TYPE_2D, int d = 1, int layers = 1, int levels = 1 )
+	int h, bool depth, double & mb, std::string & why, VkImageType type = VK_IMAGE_TYPE_2D, int d = 1, int layers = 1, int levels = 1,
+	bool cube = false )
 {
 	levels = ( samples == 1 && !depth ) ? std::max( levels, 1 ) : 1;  // lanes VKLIGHT1 / VKAIR1: a mipped 2D, 2D array or 3D input
 	Vk & v = vk();
@@ -1268,7 +1270,8 @@ bool makeShared( VkImage & img, VkDeviceMemory & mem, GLuint & tex, GLuint & obj
 		usage |= VK_IMAGE_USAGE_STORAGE_BIT;
 	VkImageFormatProperties ip {};
 	auto offered = [&]() {
-		return v.vkGetPhysicalDeviceImageFormatProperties( v.phys, fmt, type, VK_IMAGE_TILING_OPTIMAL, usage, 0, &ip ) == VK_SUCCESS
+		return v.vkGetPhysicalDeviceImageFormatProperties( v.phys, fmt, type, VK_IMAGE_TILING_OPTIMAL, usage,
+				   cube ? VkImageCreateFlags( VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT ) : 0, &ip ) == VK_SUCCESS
 			&& ( ip.sampleCounts & sc ) && ip.maxExtent.width >= std::uint32_t( w ) && ip.maxExtent.height >= std::uint32_t( h )
 			&& ip.maxExtent.depth >= std::uint32_t( d ) && ip.maxArrayLayers >= std::uint32_t( layers ) && ip.maxMipLevels >= std::uint32_t( levels );
 	};
@@ -1279,13 +1282,14 @@ bool makeShared( VkImage & img, VkDeviceMemory & mem, GLuint & tex, GLuint & obj
 	}
 	if ( !ok ) {
 		why = std::string( depth ? "depth / stencil" : "colour" ) + " format " + std::to_string( int( fmt ) ) + " at " + std::to_string( samples )
-			+ " samples (" + ( is3d ? "3D" : layered ? "2D array" : "2D" ) + ") is not offered by the device";
+			+ " samples (" + ( is3d ? "3D" : cube ? "cube array" : layered ? "2D array" : "2D" ) + ") is not offered by the device";
 		return false;
 	}
 	VkExternalMemoryImageCreateInfo ext { VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_IMAGE_CREATE_INFO };
 	ext.handleTypes = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_WIN32_BIT;
 	VkImageCreateInfo ci { VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO };
 	ci.pNext = &ext;
+	ci.flags = cube ? VkImageCreateFlags( VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT ) : 0;  // L8 term 5: 6 layers a cube
 	ci.imageType = type;
 	ci.format = fmt;
 	ci.extent = { std::uint32_t( w ), std::uint32_t( h ), std::uint32_t( d ) };
@@ -1356,10 +1360,11 @@ bool makeShared( VkImage & img, VkDeviceMemory & mem, GLuint & tex, GLuint & obj
 		why = "vkGetMemoryWin32HandleKHR (a view image) failed";
 		return false;
 	}
-	const GLenum target = is3d ? kTexture3D : layered ? kTexture2DArray : samples > 1 ? kTexture2DMs : kTexture2D;
+	const GLenum target = is3d ? kTexture3D : cube ? kTextureCubeArray : layered ? kTexture2DArray : samples > 1 ? kTexture2DMs : kTexture2D;
 	while ( g.getError() != 0 ) {}
 	GLint was = 0;
-	g.getIntegerv( is3d ? kTexBinding3D : layered ? kTexBinding2DArray : samples > 1 ? kTexBinding2DMs : kTexBinding2D, &was );
+	g.getIntegerv( is3d ? kTexBinding3D : cube ? kTexBindingCubeArray : layered ? kTexBinding2DArray : samples > 1 ? kTexBinding2DMs : kTexBinding2D,
+		&was );
 	g.createMemoryObjects( 1, &obj );
 	const GLint one = 1;
 	g.memoryObjectParameteriv( obj, kDedicated, &one );
@@ -3915,7 +3920,7 @@ bool sharedTarget( std::uintptr_t key, int type, int w, int h, int d, unsigned g
 	};
 	if ( !v.ok || !g.ok || g.ctx != reinterpret_cast<void *>( wglGetCurrentContext() ) )
 		return fail( "the present device or GL's entry points are not ready in this context" );
-	if ( w < 1 || h < 1 || type < 0 || type > 2 )
+	if ( w < 1 || h < 1 || type < 0 || type > 3 || ( type == 3 && w != h ) )
 		return fail( "a shared target of size " + std::to_string( w ) + "x" + std::to_string( h ) + " type " + std::to_string( type ) );
 	bool depth = false;
 	const VkFormat fmt = vkFormatOf( GLenum( glFmt ), depth );
@@ -3925,6 +3930,8 @@ bool sharedTarget( std::uintptr_t key, int type, int w, int h, int d, unsigned g
 	samples = std::max( samples, 1 );
 	if ( samples > 1 && type != 0 )
 		return fail( "a multisample shared target is 2D only" );
+	if ( type == 3 && !depth )
+		return fail( "a shared cube array is depth only" );  // L8 term 5: the lamps' D16 cubes
 	levels = depth || samples > 1 ? 1 : std::max( levels, 1 );
 	auto it = shareds().find( key );
 	if ( it != shareds().end() ) {
@@ -3945,13 +3952,16 @@ bool sharedTarget( std::uintptr_t key, int type, int w, int h, int d, unsigned g
 	}
 	Shared s;
 	const VkImageType vt = type == 1 ? VK_IMAGE_TYPE_3D : VK_IMAGE_TYPE_2D;
-	if ( !makeShared( s.img, s.mem, s.tex, s.obj, fmt, GLenum( glFmt ), samples, w, h, depth, s.mb, why, vt, type == 1 ? d : 1, type == 2 ? d : 1, levels ) ) {
+	const int layers = type == 2 ? d : type == 3 ? 6 * d : 1;  // type 3: d cubes of 6 faces
+	if ( !makeShared( s.img, s.mem, s.tex, s.obj, fmt, GLenum( glFmt ), samples, w, h, depth, s.mb, why, vt, type == 1 ? d : 1, layers, levels,
+			 type == 3 ) ) {
 		sharedFree( s, true );
 		return fail( why );
 	}
-	const VkImageViewType viewType = type == 1 ? VK_IMAGE_VIEW_TYPE_3D : type == 2 ? VK_IMAGE_VIEW_TYPE_2D_ARRAY : VK_IMAGE_VIEW_TYPE_2D;
+	const VkImageViewType viewType = type == 1 ? VK_IMAGE_VIEW_TYPE_3D : type == 2 ? VK_IMAGE_VIEW_TYPE_2D_ARRAY
+		: type == 3 ? VK_IMAGE_VIEW_TYPE_CUBE_ARRAY : VK_IMAGE_VIEW_TYPE_2D;
 	s.view = imageView( s.img, viewType, fmt, depth ? VK_IMAGE_ASPECT_DEPTH_BIT : VK_IMAGE_ASPECT_COLOR_BIT, std::uint32_t( levels ),
-		std::uint32_t( type == 2 ? d : 1 ) );
+		std::uint32_t( layers ) );
 	if ( !s.view ) {
 		sharedFree( s, true );
 		return fail( "a shared target's image view failed" );
