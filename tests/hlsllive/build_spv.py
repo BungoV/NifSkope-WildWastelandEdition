@@ -14,6 +14,8 @@ GL_BINDLESS = 'WW_GL_BINDLESS'   # a source naming it takes its GL bindless rout
 # then reads 1/gl_FragCoord.w. DXC's default SV_Position.w on SPIR-V is already 1/w, so w was inverted twice (fragW = 1/w);
 # -fvk-use-dx-position-w gives D3D's w. A pixel file is listed when it is, or #includes (any depth), one of these.
 # Red: WW_HLSL_POSW_RED=1 drops the flag (A4 with the a4fixtures.txt water rows must FAIL).
+# G4 rest (11-14): the effect family's soft fade (cellFxFade, vpCardSlab) and the particles' / TAA object-velocity's fragW read it
+# the same way: without the flag GL's fragW was 1/w (~0.13), so every soft card faded to 0 (the effect twin's gate found it)
 POSITION_W = ('fo4_water_ps.hlsl', 'fo4_effectshader_ps.hlsl', 'fo4_effectcellfx_ps.hlsl', 'particles_ps.hlsl', 'taa_objvel_ps.hlsl')
 
 
