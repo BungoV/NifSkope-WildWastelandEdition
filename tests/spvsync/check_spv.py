@@ -65,7 +65,9 @@ VKFRAME_SSR = {'ssr_view_s1': '-DSSR_STAGE=1', 'ssr_view_s1w': '-DSSR_STAGE=1 -D
 HLSL_SPECS += [('src/features/vkframe', k, 'vulkan1.2', 'vkframe_%s_spv' % k) for k in VKFRAME_SSR]
 # lane VKSHADOW1: the sun cascades' queued casters, the script's csm loop (res/shaders/hlsl/near/<k>.hlsl, vs_6_0)
 VKFRAME_CSM = {'csm_view_vs': ('res/shaders/hlsl/near', 'csm_view_vs'),
-	'obj_depth_vs': ('res/shaders/hlsl/near', 'obj_depth_vs')}  # lane VKOBJ1: the objects' prepass
+	'obj_depth_vs': ('res/shaders/hlsl/near', 'obj_depth_vs'),  # lane VKOBJ1: the objects' prepass
+	'csm_remap_view_vs': ('res/shaders/hlsl/near', 'csm_remap_view_vs'),  # lane VKSHADOW6: the Scroll remap (the loop's
+	'csm_remap_view_ps': ('res/shaders/hlsl/near', 'csm_remap_view_ps')}  # profile is the name's suffix)
 HLSL_SPECS += [('src/features/vkframe', k, 'vulkan1.2', 'vkframe_%s_spv' % k) for k in VKFRAME_CSM]
 # lane VKAIR1: the air's sky pass and the clouds, the script's `fx <name> <dir/file>` lines (sky's register shifts, ps_6_0)
 # lane HLSLSRC2: the views' frozen spirv-cross twins under the view's name (the readable sources took the programs' names;
@@ -282,7 +284,7 @@ def script_ok(tree):
 	rlines = dict(re.findall(r'^ssr ([a-z0-9_]+) "([^"]*)"$', vf, re.M))
 	if rlines != VKFRAME_SSR:
 		bad.append('src/features/vkframe/vkframe_spirv.sh: its ssr lines (%s) are not this checker\'s reflections' % ' '.join(sorted(rlines)))
-	m = re.search(r'^for c in ([a-z_ ]+); do\n\t"\$DXC" -spirv -fspv-target-env=vulkan1\.2 -T vs_6_0 -E main -Fo "\$\{c\}\.spv" "\$\(cygpath -m "\$ROOT/res/shaders/hlsl/near/', vf, re.M)
+	m = re.search(r'^for c in ([a-z_ ]+); do\n\t"\$DXC" -spirv -fspv-target-env=vulkan1\.2 -T \$\{c##\*_\}_6_0 -E main -Fo "\$\{c\}\.spv" "\$\(cygpath -m "\$ROOT/res/shaders/hlsl/near/', vf, re.M)
 	cloop = m.group(1).split() if m else []
 	if sorted(cloop) != sorted(VKFRAME_CSM):
 		bad.append('src/features/vkframe/vkframe_spirv.sh: its csm loop (%s) is not this checker\'s cascade shaders' % ' '.join(cloop))

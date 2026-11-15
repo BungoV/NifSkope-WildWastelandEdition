@@ -43,6 +43,9 @@
 // windows' content is frame 0's live layers of the base case (each arm its own: the inputs must be byte-equal on both
 // arms, printed); frame 1's matrices draw the new windows. Offsets and old sizes put the new viewport outside the old
 // window on all four sides; zScale / zBias away from 1 and powers of two. The same BOUND as above (EXACT expected).
+// Seeding change (VKSHADOW6 run g1, before any frame-1 verdict): fixed zScale / zBias (1.31, -0.27 and 1.13, -0.04) left
+// "clamped to 0" and "clamped to 1" at 0 texels (the old depths sit in a narrow band), so cascades 0 and 2 now map their own
+// old layer's 25th / 75th depth percentile to 0 / 1 (a quarter clamps each way); cascade 1 keeps 0.77, 0.29 (in range).
 // Must hold: every layer EXACT or BOUND; remap branch counts each > 0 (outside, o == 1, clamped to 0, to 1, in range);
 // the remap wins > 0 texels against GL without it; GL's casters beat the remap on > 0 texels (else the ALWAYS red
 // proves nothing); the late GL fallback (refusal: GL remaps LEQUAL into static and live after its casters, then the
@@ -54,6 +57,7 @@
 #include "../../src/features/vkframe/vkpresent.cpp"
 
 #include <GL/gl.h>
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstdio>
@@ -1317,7 +1321,7 @@ int main( int argc, char ** argv )
 		const int rOff[3][2] = { { 37, -23 }, { -51, 19 }, { 12, 44 } };
 		const int rSize[3][2] = { { casc[0].vw - 30, casc[0].vh - 17 }, { casc[1].vw + 9, casc[1].vh - 40 },
 			{ casc[2].vw - 21, casc[2].vh + 6 } };
-		const float rZ[3][2] = { { 1.31f, -0.27f }, { 0.77f, 0.29f }, { 1.13f, -0.04f } };
+		float rZ[3][2] = { { 1.31f, -0.27f }, { 0.77f, 0.29f }, { 1.13f, -0.04f } };	// 0 and 2 reseeded below
 		GLuint oldT = 0, scr1 = 0, fbo2 = 0, vaoR = 0, shS = 0;
 		static unsigned keyScr;
 		auto mkArr = [&]( GLuint & t, int layers ) {
@@ -1507,6 +1511,24 @@ int main( int argc, char ** argv )
 		std::printf( "SHADOWVIEW remap inputs: the old layers on both arms %s (%zu of %zu covered texels differ)\n",
 			inDiff == 0 && inCov > 0 ? "byte-equal" : "DIFFER", inDiff, inCov );
 		rmOk = rmOk && inDiff == 0 && inCov > 0;
+		// seeding: cascades 0 and 2 map their old layer's 25th / 75th covered depth percentile to 0 / 1
+		for ( int l : { 0, 2 } ) {
+			if ( !rmOk )
+				break;
+			std::vector<std::uint16_t> cov;
+			for ( std::uint16_t o : oldR[l] )
+				if ( o != 0xFFFF )
+					cov.push_back( o );
+			std::sort( cov.begin(), cov.end() );
+			const double p25 = cov.empty() ? 0.0 : cov[cov.size() / 4] / 65535.0;
+			const double p75 = cov.empty() ? 1.0 : cov[cov.size() * 3 / 4] / 65535.0;
+			if ( p75 > p25 ) {
+				rZ[l][0] = float( 1.0 / ( p75 - p25 ) );
+				rZ[l][1] = float( -p25 / ( p75 - p25 ) );
+			}
+			std::printf( "SHADOWVIEW remap seed %d: zScale %.6g zBias %.6g (old depth p25 %.6f p75 %.6f)\n", l, rZ[l][0], rZ[l][1],
+				p25, p75 );
+		}
 		// the remap's branches over the three new viewports (CPU, from GL's old layers): outside the old window (each side), o == 1,
 		// o * zScale + zBias below 0, above 1, in range
 		std::size_t bOut = 0, bOne = 0, bLo = 0, bHi = 0, bMid = 0, side[4] = {};

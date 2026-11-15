@@ -66,8 +66,9 @@ ssr ssr_view_s4 "-DSSR_STAGE=4"
 ssr ssr_view_s5 "-DSSR_STAGE=5"
 # lane VKSHADOW1: the sun cascades' queued casters (res/shaders/hlsl/near/csm_view_vs.hlsl), depth only
 # lane VKOBJ1: the objects' opaque depth prepass (obj_depth_vs.hlsl)
-for c in csm_view_vs obj_depth_vs; do
-	"$DXC" -spirv -fspv-target-env=vulkan1.2 -T vs_6_0 -E main -Fo "${c}.spv" "$(cygpath -m "$ROOT/res/shaders/hlsl/near/${c}.hlsl" 2>/dev/null || echo "$ROOT/res/shaders/hlsl/near/${c}.hlsl")"
+# lane VKSHADOW6: the cascade cache's Scroll remap (csm_remap_view_vs / _ps.hlsl); the profile is the name's suffix
+for c in csm_view_vs obj_depth_vs csm_remap_view_vs csm_remap_view_ps; do
+	"$DXC" -spirv -fspv-target-env=vulkan1.2 -T ${c##*_}_6_0 -E main -Fo "${c}.spv" "$(cygpath -m "$ROOT/res/shaders/hlsl/near/${c}.hlsl" 2>/dev/null || echo "$ROOT/res/shaders/hlsl/near/${c}.hlsl")"
 	python -I "$ROOT/tools/spv_header.py" "${c}.spv" "vkframe_${c}_spv" "${c}.spv.h" < /dev/null
 	rm -f "${c}.spv"
 done
